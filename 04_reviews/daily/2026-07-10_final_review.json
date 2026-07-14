@@ -1,0 +1,1974 @@
+{
+  "date": "2026-07-10",
+  "amv": {
+    "amv_change_pct": -1.17,
+    "amv_zone": "中性",
+    "note": "用户盘后补充0AMV；这是市场活跃市值指标，不是交易或账户盈亏",
+    "quality": "confirmed",
+    "confirmed": true,
+    "as_of": "2026-07-10",
+    "source": "user_manual_input",
+    "daily_zone": "阈值内",
+    "prior_effective_state": "空头",
+    "effective_state": "空头",
+    "state_transition_reason": "空头锁定；未达到>4%，继续空头"
+  },
+  "indices": [
+    {
+      "name": "上证指数",
+      "close": 3996.16,
+      "change_pct": -1.0016,
+      "above_ma20": false,
+      "above_ma60": false
+    },
+    {
+      "name": "创业板指",
+      "close": 3842.73,
+      "change_pct": -4.3662,
+      "above_ma20": false,
+      "above_ma60": true
+    },
+    {
+      "name": "科创50",
+      "close": 2064.98,
+      "change_pct": -5.5288,
+      "above_ma20": true,
+      "above_ma60": true
+    },
+    {
+      "name": "北证50",
+      "close": 1209.15,
+      "change_pct": -0.0182,
+      "above_ma20": false,
+      "above_ma60": false
+    }
+  ],
+  "sectors": [
+    {
+      "theme_id": "semiconductor_chip_memory_packaging",
+      "theme_name": "半导体/芯片/存储/封测",
+      "priority": "high",
+      "primary_code": "881319.SH",
+      "candidate_codes": [
+        "880635.SH",
+        "880818.SH",
+        "880533.SH",
+        "880551.SH",
+        "880758.SH",
+        "880789.SH",
+        "880878.SH",
+        "880930.SH"
+      ],
+      "representative_stocks": [
+        "603986.SH",
+        "002185.SZ",
+        "600584.SH",
+        "002409.SZ",
+        "600206.SH"
+      ],
+      "holding_related": [],
+      "semantic_tags": [
+        "芯片",
+        "半导体",
+        "存储芯片",
+        "DRAM",
+        "先进封装",
+        "封测",
+        "长鑫科技映射"
+      ],
+      "confidence": "high",
+      "available": true,
+      "latest_date": "2026-07-10",
+      "trend_state": "上涨",
+      "close": 2174.02,
+      "box20_position": "箱体上半区",
+      "box20_upper": 2331.471,
+      "box20_lower": 1793.87,
+      "daily_j": 27.2243,
+      "daily_kdj_state": "中性",
+      "daily_macd_hist": -22.8592,
+      "daily_macd_direction": "收缩",
+      "weekly_macd_hist": 129.9665,
+      "stage": "修复/上行",
+      "stage_reason": "趋势上涨，但需观察量能和是否有效突破。",
+      "score": 78.0,
+      "action_bias": "观察核心低吸，不追高",
+      "analysis": {
+        "available": true,
+        "latest_date": "2026-07-10",
+        "trend": {
+          "state": "上涨",
+          "close": 2174.02,
+          "ma20": 2103.7945,
+          "ma60": 1768.7177,
+          "ma20_slope_5d_pct": 6.3404,
+          "ma60_slope_10d_pct": 10.5831,
+          "higher_high_20d": true,
+          "higher_low_20d": true,
+          "lower_high_20d": false,
+          "lower_low_20d": false
+        },
+        "box_20d": {
+          "available": true,
+          "period": 20,
+          "upper": 2331.471,
+          "lower": 1793.87,
+          "mid": 2062.6705,
+          "width_pct": 29.9688,
+          "position": "箱体上半区"
+        },
+        "box_60d": {
+          "available": true,
+          "period": 60,
+          "upper": 2209.5115,
+          "lower": 1371.1755,
+          "mid": 1790.3435,
+          "width_pct": 61.1399,
+          "position": "箱体上半区"
+        },
+        "daily": {
+          "kdj": {
+            "available": true,
+            "k": 39.3046,
+            "d": 45.3448,
+            "j": 27.2243,
+            "j_prev": 36.1632,
+            "state": "中性"
+          },
+          "macd": {
+            "available": true,
+            "dif": 117.9041,
+            "dea": 129.3337,
+            "hist": -22.8592,
+            "hist_prev": -11.2189,
+            "hist_direction": "收缩",
+            "golden_cross": false,
+            "death_cross": false
+          }
+        },
+        "weekly": {
+          "kdj": {
+            "available": true,
+            "k": 74.5709,
+            "d": 78.5622,
+            "j": 66.5882,
+            "j_prev": 75.1144,
+            "state": "中性"
+          },
+          "macd": {
+            "available": true,
+            "dif": 236.4693,
+            "dea": 171.4861,
+            "hist": 129.9665,
+            "hist_prev": 131.4088,
+            "hist_direction": "收缩",
+            "golden_cross": false,
+            "death_cross": false
+          }
+        },
+        "monthly": {
+          "kdj": {
+            "available": true,
+            "k": 85.025,
+            "d": 83.7412,
+            "j": 87.5924,
+            "j_prev": 97.7473,
+            "state": "中性"
+          },
+          "macd": {
+            "available": true,
+            "dif": 317.1699,
+            "dea": 198.1998,
+            "hist": 237.9402,
+            "hist_prev": 219.6589,
+            "hist_direction": "扩张",
+            "golden_cross": false,
+            "death_cross": false
+          }
+        }
+      }
+    },
+    {
+      "theme_id": "shipbuilding_military",
+      "theme_name": "船舶/军工/高端装备",
+      "priority": "holding_related",
+      "primary_code": "881290.SH",
+      "candidate_codes": [
+        "880576.SH",
+        "880582.SH",
+        "880594.SH",
+        "880763.SH",
+        "880765.SH",
+        "880853.SH",
+        "880950.SH",
+        "880978.SH"
+      ],
+      "representative_stocks": [
+        "600150.SH",
+        "601989.SH"
+      ],
+      "holding_related": [
+        "600150.SH"
+      ],
+      "semantic_tags": [
+        "航海装备",
+        "船舶",
+        "军工",
+        "高端装备",
+        "中特估",
+        "海洋经济"
+      ],
+      "confidence": "medium",
+      "available": true,
+      "latest_date": "2026-07-10",
+      "trend_state": "横盘震荡",
+      "close": 1411.86,
+      "box20_position": "箱体上半区",
+      "box20_upper": 1420.7025,
+      "box20_lower": 1296.6555,
+      "daily_j": 80.9974,
+      "daily_kdj_state": "中性",
+      "daily_macd_hist": 23.8351,
+      "daily_macd_direction": "扩张",
+      "weekly_macd_hist": -28.6212,
+      "stage": "修复",
+      "stage_reason": "横盘震荡中向箱体上半区修复，日线MACD扩张。",
+      "score": 62.0,
+      "action_bias": "观察",
+      "analysis": {
+        "available": true,
+        "latest_date": "2026-07-10",
+        "trend": {
+          "state": "横盘震荡",
+          "close": 1411.86,
+          "ma20": 1356.2985,
+          "ma60": 1428.979,
+          "ma20_slope_5d_pct": 0.9738,
+          "ma60_slope_10d_pct": 0.8326,
+          "higher_high_20d": false,
+          "higher_low_20d": false,
+          "lower_high_20d": true,
+          "lower_low_20d": true
+        },
+        "box_20d": {
+          "available": true,
+          "period": 20,
+          "upper": 1420.7025,
+          "lower": 1296.6555,
+          "mid": 1358.679,
+          "width_pct": 9.5667,
+          "position": "箱体上半区"
+        },
+        "box_60d": {
+          "available": true,
+          "period": 60,
+          "upper": 1585.882,
+          "lower": 1325.095,
+          "mid": 1455.4885,
+          "width_pct": 19.6806,
+          "position": "箱体下半区"
+        },
+        "daily": {
+          "kdj": {
+            "available": true,
+            "k": 70.477,
+            "d": 65.2167,
+            "j": 80.9974,
+            "j_prev": 72.8761,
+            "state": "中性"
+          },
+          "macd": {
+            "available": true,
+            "dif": -2.6389,
+            "dea": -14.5565,
+            "hist": 23.8351,
+            "hist_prev": 21.3439,
+            "hist_direction": "扩张",
+            "golden_cross": false,
+            "death_cross": false
+          }
+        },
+        "weekly": {
+          "kdj": {
+            "available": true,
+            "k": 33.3022,
+            "d": 33.7461,
+            "j": 32.4142,
+            "j_prev": 15.1857,
+            "state": "中性"
+          },
+          "macd": {
+            "available": true,
+            "dif": 15.0059,
+            "dea": 29.3165,
+            "hist": -28.6212,
+            "hist_prev": -37.0922,
+            "hist_direction": "扩张",
+            "golden_cross": false,
+            "death_cross": false
+          }
+        },
+        "monthly": {
+          "kdj": {
+            "available": true,
+            "k": 49.6797,
+            "d": 54.1132,
+            "j": 40.8128,
+            "j_prev": 34.966,
+            "state": "中性"
+          },
+          "macd": {
+            "available": true,
+            "dif": 71.9167,
+            "dea": 63.7619,
+            "hist": 16.3095,
+            "hist_prev": 17.5528,
+            "hist_direction": "收缩",
+            "golden_cross": false,
+            "death_cross": false
+          }
+        }
+      }
+    },
+    {
+      "theme_id": "medical_equipment_ai_healthcare",
+      "theme_name": "医疗设备/基因测序/AI医疗",
+      "priority": "holding_related",
+      "primary_code": "881241.SH",
+      "candidate_codes": [
+        "880218.SH",
+        "880904.SH",
+        "880530.SH",
+        "880707.SH",
+        "880732.SH",
+        "880733.SH",
+        "880747.SH"
+      ],
+      "representative_stocks": [
+        "688114.SH",
+        "300760.SZ"
+      ],
+      "holding_related": [
+        "688114.SH"
+      ],
+      "semantic_tags": [
+        "医疗设备",
+        "基因概念",
+        "基因测序",
+        "AI智能体",
+        "合成生物",
+        "人脑工程"
+      ],
+      "confidence": "medium",
+      "available": true,
+      "latest_date": "2026-07-10",
+      "trend_state": "下跌",
+      "close": 637.75,
+      "box20_position": "箱体上半区",
+      "box20_upper": 654.006,
+      "box20_lower": 618.818,
+      "daily_j": 49.8384,
+      "daily_kdj_state": "中性",
+      "daily_macd_hist": 4.6733,
+      "daily_macd_direction": "扩张",
+      "weekly_macd_hist": -13.8356,
+      "stage": "退潮/下跌",
+      "stage_reason": "趋势下跌，板块不支持加仓。",
+      "score": 40.0,
+      "action_bias": "回避/禁止加仓",
+      "analysis": {
+        "available": true,
+        "latest_date": "2026-07-10",
+        "trend": {
+          "state": "下跌",
+          "close": 637.75,
+          "ma20": 638.497,
+          "ma60": 679.289,
+          "ma20_slope_5d_pct": -0.4053,
+          "ma60_slope_10d_pct": -1.8219,
+          "higher_high_20d": false,
+          "higher_low_20d": false,
+          "lower_high_20d": true,
+          "lower_low_20d": true
+        },
+        "box_20d": {
+          "available": true,
+          "period": 20,
+          "upper": 654.006,
+          "lower": 618.818,
+          "mid": 636.412,
+          "width_pct": 5.6863,
+          "position": "箱体上半区"
+        },
+        "box_60d": {
+          "available": true,
+          "period": 60,
+          "upper": 721.9345,
+          "lower": 629.284,
+          "mid": 675.6092,
+          "width_pct": 14.7232,
+          "position": "箱体下半区"
+        },
+        "daily": {
+          "kdj": {
+            "available": true,
+            "k": 58.8602,
+            "d": 63.3711,
+            "j": 49.8384,
+            "j_prev": 57.7445,
+            "state": "中性"
+          },
+          "macd": {
+            "available": true,
+            "dif": -9.3071,
+            "dea": -11.6437,
+            "hist": 4.6733,
+            "hist_prev": 4.2931,
+            "hist_direction": "扩张",
+            "golden_cross": false,
+            "death_cross": false
+          }
+        },
+        "weekly": {
+          "kdj": {
+            "available": true,
+            "k": 24.3833,
+            "d": 23.3831,
+            "j": 26.3837,
+            "j_prev": 20.1564,
+            "state": "低位拐头"
+          },
+          "macd": {
+            "available": true,
+            "dif": -28.5488,
+            "dea": -21.631,
+            "hist": -13.8356,
+            "hist_prev": -15.8446,
+            "hist_direction": "扩张",
+            "golden_cross": false,
+            "death_cross": false
+          }
+        },
+        "monthly": {
+          "kdj": {
+            "available": true,
+            "k": 20.0657,
+            "d": 29.0251,
+            "j": 2.1469,
+            "j_prev": -2.2508,
+            "state": "低位调整到位观察"
+          },
+          "macd": {
+            "available": true,
+            "dif": -26.7398,
+            "dea": -18.5902,
+            "hist": -16.2991,
+            "hist_prev": -11.5463,
+            "hist_direction": "收缩",
+            "golden_cross": false,
+            "death_cross": false
+          }
+        }
+      }
+    },
+    {
+      "theme_id": "gas_energy_hydrogen",
+      "theme_name": "燃气/能源/氢能源",
+      "priority": "holding_related",
+      "primary_code": "880705.SH",
+      "candidate_codes": [
+        "880211.SH",
+        "880222.SH",
+        "880526.SH",
+        "880540.SH",
+        "880678.SH",
+        "880782.SH",
+        "880978.SH"
+      ],
+      "representative_stocks": [
+        "605090.SH",
+        "600803.SH"
+      ],
+      "holding_related": [
+        "605090.SH"
+      ],
+      "semantic_tags": [
+        "燃气",
+        "天然气",
+        "能源",
+        "氢能源",
+        "工业气体",
+        "航运概念"
+      ],
+      "confidence": "medium_high",
+      "available": true,
+      "latest_date": "2026-07-10",
+      "trend_state": "下跌",
+      "close": 1715.17,
+      "box20_position": "箱体下半区",
+      "box20_upper": 1842.651,
+      "box20_lower": 1711.661,
+      "daily_j": 23.5392,
+      "daily_kdj_state": "低位拐头",
+      "daily_macd_hist": -11.004,
+      "daily_macd_direction": "扩张",
+      "weekly_macd_hist": -61.9459,
+      "stage": "退潮/下跌",
+      "stage_reason": "趋势下跌，板块不支持加仓。",
+      "score": 39.0,
+      "action_bias": "回避/禁止加仓",
+      "analysis": {
+        "available": true,
+        "latest_date": "2026-07-10",
+        "trend": {
+          "state": "下跌",
+          "close": 1715.17,
+          "ma20": 1784.478,
+          "ma60": 1867.2813,
+          "ma20_slope_5d_pct": -0.944,
+          "ma60_slope_10d_pct": -0.64,
+          "higher_high_20d": false,
+          "higher_low_20d": false,
+          "lower_high_20d": true,
+          "lower_low_20d": true
+        },
+        "box_20d": {
+          "available": true,
+          "period": 20,
+          "upper": 1842.651,
+          "lower": 1711.661,
+          "mid": 1777.156,
+          "width_pct": 7.6528,
+          "position": "箱体下半区"
+        },
+        "box_60d": {
+          "available": true,
+          "period": 60,
+          "upper": 1976.604,
+          "lower": 1765.615,
+          "mid": 1871.1095,
+          "width_pct": 11.9499,
+          "position": "下沿/破位区"
+        },
+        "daily": {
+          "kdj": {
+            "available": true,
+            "k": 31.2165,
+            "d": 35.0552,
+            "j": 23.5392,
+            "j_prev": 13.858,
+            "state": "低位拐头"
+          },
+          "macd": {
+            "available": true,
+            "dif": -35.4573,
+            "dea": -29.9553,
+            "hist": -11.004,
+            "hist_prev": -11.2846,
+            "hist_direction": "扩张",
+            "golden_cross": false,
+            "death_cross": false
+          }
+        },
+        "weekly": {
+          "kdj": {
+            "available": true,
+            "k": 22.1826,
+            "d": 29.78,
+            "j": 6.9879,
+            "j_prev": 8.4976,
+            "state": "低位调整到位观察"
+          },
+          "macd": {
+            "available": true,
+            "dif": 4.7633,
+            "dea": 35.7362,
+            "hist": -61.9459,
+            "hist_prev": -54.6493,
+            "hist_direction": "收缩",
+            "golden_cross": false,
+            "death_cross": false
+          }
+        },
+        "monthly": {
+          "kdj": {
+            "available": true,
+            "k": 53.7763,
+            "d": 70.8014,
+            "j": 19.7261,
+            "j_prev": 41.2498,
+            "state": "中性"
+          },
+          "macd": {
+            "available": true,
+            "dif": 171.0093,
+            "dea": 163.7955,
+            "hist": 14.4277,
+            "hist_prev": 46.6146,
+            "hist_direction": "收缩",
+            "golden_cross": false,
+            "death_cross": false
+          }
+        }
+      }
+    },
+    {
+      "theme_id": "ai_compute_server_liquid_cooling",
+      "theme_name": "AI算力/服务器/液冷",
+      "priority": "high",
+      "primary_code": "880545.SH",
+      "candidate_codes": [
+        "880607.SH",
+        "880680.SH",
+        "880685.SH",
+        "880699.SH",
+        "880720.SH",
+        "880799.SH",
+        "880818.SH",
+        "880956.SH",
+        "881352.SH"
+      ],
+      "representative_stocks": [
+        "000977.SZ",
+        "002281.SZ",
+        "920808.BJ",
+        "000021.SZ"
+      ],
+      "holding_related": [
+        "920808.BJ"
+      ],
+      "semantic_tags": [
+        "人工智能",
+        "AI服务器",
+        "算力租赁",
+        "数据中心",
+        "液冷服务器",
+        "云计算",
+        "光模块/CPO"
+      ],
+      "confidence": "medium_high",
+      "available": true,
+      "latest_date": "2026-07-10",
+      "trend_state": "下跌",
+      "close": 2935.93,
+      "box20_position": "箱体下半区",
+      "box20_upper": 3089.087,
+      "box20_lower": 2811.1,
+      "daily_j": 62.2536,
+      "daily_kdj_state": "中性",
+      "daily_macd_hist": 14.6093,
+      "daily_macd_direction": "扩张",
+      "weekly_macd_hist": -114.0887,
+      "stage": "退潮/下跌",
+      "stage_reason": "趋势下跌，板块不支持加仓。",
+      "score": 37.0,
+      "action_bias": "回避/禁止加仓",
+      "analysis": {
+        "available": true,
+        "latest_date": "2026-07-10",
+        "trend": {
+          "state": "下跌",
+          "close": 2935.93,
+          "ma20": 2968.062,
+          "ma60": 3221.8412,
+          "ma20_slope_5d_pct": -1.4932,
+          "ma60_slope_10d_pct": -1.6577,
+          "higher_high_20d": false,
+          "higher_low_20d": false,
+          "lower_high_20d": true,
+          "lower_low_20d": true
+        },
+        "box_20d": {
+          "available": true,
+          "period": 20,
+          "upper": 3089.087,
+          "lower": 2811.1,
+          "mid": 2950.0935,
+          "width_pct": 9.8889,
+          "position": "箱体下半区"
+        },
+        "box_60d": {
+          "available": true,
+          "period": 60,
+          "upper": 3529.083,
+          "lower": 2903.4235,
+          "mid": 3216.2532,
+          "width_pct": 21.549,
+          "position": "箱体下半区"
+        },
+        "daily": {
+          "kdj": {
+            "available": true,
+            "k": 43.2629,
+            "d": 33.7675,
+            "j": 62.2536,
+            "j_prev": 39.1024,
+            "state": "中性"
+          },
+          "macd": {
+            "available": true,
+            "dif": -82.4458,
+            "dea": -89.7505,
+            "hist": 14.6093,
+            "hist_prev": 2.3262,
+            "hist_direction": "扩张",
+            "golden_cross": false,
+            "death_cross": false
+          }
+        },
+        "weekly": {
+          "kdj": {
+            "available": true,
+            "k": 15.575,
+            "d": 20.5201,
+            "j": 5.6848,
+            "j_prev": -1.0289,
+            "state": "低位调整到位观察"
+          },
+          "macd": {
+            "available": true,
+            "dif": -96.7945,
+            "dea": -39.7501,
+            "hist": -114.0887,
+            "hist_prev": -121.6797,
+            "hist_direction": "扩张",
+            "golden_cross": false,
+            "death_cross": false
+          }
+        },
+        "monthly": {
+          "kdj": {
+            "available": true,
+            "k": 26.104,
+            "d": 41.969,
+            "j": -5.6258,
+            "j_prev": -3.4678,
+            "state": "低位调整到位观察"
+          },
+          "macd": {
+            "available": true,
+            "dif": 195.7099,
+            "dea": 258.4429,
+            "hist": -125.4661,
+            "hist_prev": -85.6978,
+            "hist_direction": "收缩",
+            "golden_cross": false,
+            "death_cross": false
+          }
+        }
+      }
+    },
+    {
+      "theme_id": "robotics_embodied_ai",
+      "theme_name": "机器人/具身智能",
+      "priority": "high",
+      "primary_code": "880552.SH",
+      "candidate_codes": [
+        "880212.SH",
+        "880219.SH",
+        "880520.SH",
+        "880566.SH",
+        "880589.SH",
+        "880645.SH",
+        "880863.SH"
+      ],
+      "representative_stocks": [
+        "002841.SZ",
+        "002414.SZ"
+      ],
+      "holding_related": [],
+      "semantic_tags": [
+        "人形机器人",
+        "具身智能",
+        "智能机器",
+        "消费电子",
+        "人工智能"
+      ],
+      "confidence": "medium",
+      "available": true,
+      "latest_date": "2026-07-10",
+      "trend_state": "下跌",
+      "close": 1454.01,
+      "box20_position": "箱体下半区",
+      "box20_upper": 1524.86,
+      "box20_lower": 1410.783,
+      "daily_j": 50.1318,
+      "daily_kdj_state": "中性",
+      "daily_macd_hist": 2.9914,
+      "daily_macd_direction": "扩张",
+      "weekly_macd_hist": -43.9056,
+      "stage": "退潮/下跌",
+      "stage_reason": "趋势下跌，板块不支持加仓。",
+      "score": 37.0,
+      "action_bias": "回避/禁止加仓",
+      "analysis": {
+        "available": true,
+        "latest_date": "2026-07-10",
+        "trend": {
+          "state": "下跌",
+          "close": 1454.01,
+          "ma20": 1472.8375,
+          "ma60": 1568.7663,
+          "ma20_slope_5d_pct": -1.1027,
+          "ma60_slope_10d_pct": -1.0466,
+          "higher_high_20d": false,
+          "higher_low_20d": false,
+          "lower_high_20d": true,
+          "lower_low_20d": true
+        },
+        "box_20d": {
+          "available": true,
+          "period": 20,
+          "upper": 1524.86,
+          "lower": 1410.783,
+          "mid": 1467.8215,
+          "width_pct": 8.0861,
+          "position": "箱体下半区"
+        },
+        "box_60d": {
+          "available": true,
+          "period": 60,
+          "upper": 1685.9235,
+          "lower": 1453.56,
+          "mid": 1569.7417,
+          "width_pct": 15.9858,
+          "position": "箱体下半区"
+        },
+        "daily": {
+          "kdj": {
+            "available": true,
+            "k": 43.257,
+            "d": 39.8196,
+            "j": 50.1318,
+            "j_prev": 29.7889,
+            "state": "中性"
+          },
+          "macd": {
+            "available": true,
+            "dif": -31.3487,
+            "dea": -32.8444,
+            "hist": 2.9914,
+            "hist_prev": -1.0848,
+            "hist_direction": "扩张",
+            "golden_cross": true,
+            "death_cross": false
+          }
+        },
+        "weekly": {
+          "kdj": {
+            "available": true,
+            "k": 19.9084,
+            "d": 24.9446,
+            "j": 9.8358,
+            "j_prev": 6.3174,
+            "state": "低位调整到位观察"
+          },
+          "macd": {
+            "available": true,
+            "dif": -36.7673,
+            "dea": -14.8145,
+            "hist": -43.9056,
+            "hist_prev": -45.1561,
+            "hist_direction": "扩张",
+            "golden_cross": false,
+            "death_cross": false
+          }
+        },
+        "monthly": {
+          "kdj": {
+            "available": true,
+            "k": 27.3218,
+            "d": 43.8592,
+            "j": -5.7531,
+            "j_prev": -3.2838,
+            "state": "低位调整到位观察"
+          },
+          "macd": {
+            "available": false
+          }
+        }
+      }
+    },
+    {
+      "theme_id": "securities_brokerage",
+      "theme_name": "证券/券商/金融风险偏好",
+      "priority": "holding_related",
+      "primary_code": "880679.SH",
+      "candidate_codes": [
+        "880216.SH",
+        "880515.SH",
+        "880721.SH",
+        "880801.SH",
+        "880818.SH",
+        "880821.SH",
+        "880883.SH"
+      ],
+      "representative_stocks": [
+        "601696.SH",
+        "600030.SH",
+        "300059.SZ"
+      ],
+      "holding_related": [
+        "601696.SH"
+      ],
+      "semantic_tags": [
+        "证券",
+        "券商",
+        "金融",
+        "风险偏好",
+        "成交额敏感"
+      ],
+      "confidence": "high",
+      "available": true,
+      "latest_date": "2026-07-10",
+      "trend_state": "横盘震荡",
+      "close": 1202.14,
+      "box20_position": "下沿/破位区",
+      "box20_upper": 1305.6945,
+      "box20_lower": 1223.1435,
+      "daily_j": 19.6026,
+      "daily_kdj_state": "低位拐头",
+      "daily_macd_hist": -13.7811,
+      "daily_macd_direction": "收缩",
+      "weekly_macd_hist": -27.1009,
+      "stage": "分歧/弱震荡",
+      "stage_reason": "横盘震荡但位于箱体下沿，若跌破需转入风控。",
+      "score": 36.0,
+      "action_bias": "谨慎观察",
+      "analysis": {
+        "available": true,
+        "latest_date": "2026-07-10",
+        "trend": {
+          "state": "横盘震荡",
+          "close": 1202.14,
+          "ma20": 1263.7035,
+          "ma60": 1284.8585,
+          "ma20_slope_5d_pct": -0.2918,
+          "ma60_slope_10d_pct": -0.3352,
+          "higher_high_20d": true,
+          "higher_low_20d": false,
+          "lower_high_20d": false,
+          "lower_low_20d": true
+        },
+        "box_20d": {
+          "available": true,
+          "period": 20,
+          "upper": 1305.6945,
+          "lower": 1223.1435,
+          "mid": 1264.419,
+          "width_pct": 6.7491,
+          "position": "下沿/破位区"
+        },
+        "box_60d": {
+          "available": true,
+          "period": 60,
+          "upper": 1325.465,
+          "lower": 1239.5465,
+          "mid": 1282.5057,
+          "width_pct": 6.9314,
+          "position": "下沿/破位区"
+        },
+        "daily": {
+          "kdj": {
+            "available": true,
+            "k": 20.7223,
+            "d": 21.2822,
+            "j": 19.6026,
+            "j_prev": 14.2908,
+            "state": "低位拐头"
+          },
+          "macd": {
+            "available": true,
+            "dif": -17.4426,
+            "dea": -10.552,
+            "hist": -13.7811,
+            "hist_prev": -12.6544,
+            "hist_direction": "收缩",
+            "golden_cross": false,
+            "death_cross": false
+          }
+        },
+        "weekly": {
+          "kdj": {
+            "available": true,
+            "k": 27.5593,
+            "d": 34.845,
+            "j": 12.9877,
+            "j_prev": 28.6661,
+            "state": "中性"
+          },
+          "macd": {
+            "available": true,
+            "dif": -0.8675,
+            "dea": 12.6829,
+            "hist": -27.1009,
+            "hist_prev": -21.2154,
+            "hist_direction": "收缩",
+            "golden_cross": false,
+            "death_cross": false
+          }
+        },
+        "monthly": {
+          "kdj": {
+            "available": true,
+            "k": 40.7016,
+            "d": 60.1658,
+            "j": 1.7733,
+            "j_prev": 26.5898,
+            "state": "低位调整到位观察"
+          },
+          "macd": {
+            "available": true,
+            "dif": 80.981,
+            "dea": 82.1954,
+            "hist": -2.4287,
+            "hist_prev": 14.8868,
+            "hist_direction": "收缩",
+            "golden_cross": false,
+            "death_cross": true
+          }
+        }
+      }
+    },
+    {
+      "theme_id": "rare_earth",
+      "theme_name": "稀土",
+      "priority": "watch_removed_holding",
+      "primary_code": "881082.SH",
+      "candidate_codes": [
+        "880535.SH",
+        "880679.SH"
+      ],
+      "representative_stocks": [
+        "600111.SH",
+        "000831.SZ"
+      ],
+      "holding_related": [],
+      "semantic_tags": [
+        "稀土",
+        "小金属",
+        "资源品",
+        "周期"
+      ],
+      "confidence": "medium_high",
+      "available": true,
+      "latest_date": "2026-07-10",
+      "trend_state": "横盘震荡",
+      "close": 1762.41,
+      "box20_position": "下沿/破位区",
+      "box20_upper": 2135.7675,
+      "box20_lower": 1824.9295,
+      "daily_j": 16.1064,
+      "daily_kdj_state": "低位拐头",
+      "daily_macd_hist": -86.6553,
+      "daily_macd_direction": "收缩",
+      "weekly_macd_hist": -26.0309,
+      "stage": "分歧/弱震荡",
+      "stage_reason": "横盘震荡但位于箱体下沿，若跌破需转入风控。",
+      "score": 36.0,
+      "action_bias": "谨慎观察",
+      "analysis": {
+        "available": true,
+        "latest_date": "2026-07-10",
+        "trend": {
+          "state": "横盘震荡",
+          "close": 1762.41,
+          "ma20": 2002.2855,
+          "ma60": 1880.5787,
+          "ma20_slope_5d_pct": 0.3359,
+          "ma60_slope_10d_pct": 2.2834,
+          "higher_high_20d": true,
+          "higher_low_20d": false,
+          "lower_high_20d": false,
+          "lower_low_20d": true
+        },
+        "box_20d": {
+          "available": true,
+          "period": 20,
+          "upper": 2135.7675,
+          "lower": 1824.9295,
+          "mid": 1980.3485,
+          "width_pct": 17.0329,
+          "position": "下沿/破位区"
+        },
+        "box_60d": {
+          "available": true,
+          "period": 60,
+          "upper": 2082.5445,
+          "lower": 1727.5535,
+          "mid": 1905.049,
+          "width_pct": 20.5488,
+          "position": "箱体下半区"
+        },
+        "daily": {
+          "kdj": {
+            "available": true,
+            "k": 15.1632,
+            "d": 14.6916,
+            "j": 16.1064,
+            "j_prev": 7.9474,
+            "state": "低位拐头"
+          },
+          "macd": {
+            "available": true,
+            "dif": -25.6105,
+            "dea": 17.7171,
+            "hist": -86.6553,
+            "hist_prev": -84.1703,
+            "hist_direction": "收缩",
+            "golden_cross": false,
+            "death_cross": false
+          }
+        },
+        "weekly": {
+          "kdj": {
+            "available": true,
+            "k": 44.8218,
+            "d": 56.6404,
+            "j": 21.1845,
+            "j_prev": 55.3206,
+            "state": "中性"
+          },
+          "macd": {
+            "available": true,
+            "dif": 100.9632,
+            "dea": 113.9787,
+            "hist": -26.0309,
+            "hist_prev": 6.8782,
+            "hist_direction": "收缩",
+            "golden_cross": false,
+            "death_cross": true
+          }
+        },
+        "monthly": {
+          "kdj": {
+            "available": true,
+            "k": 64.7037,
+            "d": 72.3654,
+            "j": 49.3802,
+            "j_prev": 65.2896,
+            "state": "中性"
+          },
+          "macd": {
+            "available": true,
+            "dif": 295.1383,
+            "dea": 239.7639,
+            "hist": 110.7488,
+            "hist_prev": 158.0631,
+            "hist_direction": "收缩",
+            "golden_cross": false,
+            "death_cross": false
+          }
+        }
+      }
+    },
+    {
+      "theme_id": "lithium_battery",
+      "theme_name": "锂电/新能源材料",
+      "priority": "watch_removed_holding",
+      "available": false,
+      "reason": "no primary sector code",
+      "representative_stocks": [
+        "002756.SZ",
+        "300750.SZ"
+      ],
+      "semantic_tags": [
+        "锂电",
+        "新能源材料",
+        "锂矿",
+        "电池"
+      ]
+    }
+  ],
+  "revalued_positions": [
+    {
+      "code": "688114",
+      "name": "华大智造",
+      "quantity": 6525.0,
+      "cost": 48.767,
+      "close": 56.5,
+      "latest_date": "2026-07-10",
+      "market_value": 368662.5,
+      "pnl": 50457.82499999995,
+      "pnl_pct": 0.1585703447003095,
+      "position_pct": 0.21804166367441574,
+      "trend": "上涨",
+      "box": "箱体上半区",
+      "sector": {
+        "theme_id": "medical_equipment_ai_healthcare",
+        "theme_name": "医疗设备/基因测序/AI医疗",
+        "priority": "holding_related",
+        "primary_code": "881241.SH",
+        "candidate_codes": [
+          "880218.SH",
+          "880904.SH",
+          "880530.SH",
+          "880707.SH",
+          "880732.SH",
+          "880733.SH",
+          "880747.SH"
+        ],
+        "representative_stocks": [
+          "688114.SH",
+          "300760.SZ"
+        ],
+        "holding_related": [
+          "688114.SH"
+        ],
+        "semantic_tags": [
+          "医疗设备",
+          "基因概念",
+          "基因测序",
+          "AI智能体",
+          "合成生物",
+          "人脑工程"
+        ],
+        "confidence": "medium",
+        "available": true,
+        "latest_date": "2026-07-10",
+        "trend_state": "下跌",
+        "close": 637.75,
+        "box20_position": "箱体上半区",
+        "box20_upper": 654.006,
+        "box20_lower": 618.818,
+        "daily_j": 49.8384,
+        "daily_kdj_state": "中性",
+        "daily_macd_hist": 4.6733,
+        "daily_macd_direction": "扩张",
+        "weekly_macd_hist": -13.8356,
+        "stage": "退潮/下跌",
+        "stage_reason": "趋势下跌，板块不支持加仓。",
+        "score": 40.0,
+        "action_bias": "回避/禁止加仓",
+        "analysis": {
+          "available": true,
+          "latest_date": "2026-07-10",
+          "trend": {
+            "state": "下跌",
+            "close": 637.75,
+            "ma20": 638.497,
+            "ma60": 679.289,
+            "ma20_slope_5d_pct": -0.4053,
+            "ma60_slope_10d_pct": -1.8219,
+            "higher_high_20d": false,
+            "higher_low_20d": false,
+            "lower_high_20d": true,
+            "lower_low_20d": true
+          },
+          "box_20d": {
+            "available": true,
+            "period": 20,
+            "upper": 654.006,
+            "lower": 618.818,
+            "mid": 636.412,
+            "width_pct": 5.6863,
+            "position": "箱体上半区"
+          },
+          "box_60d": {
+            "available": true,
+            "period": 60,
+            "upper": 721.9345,
+            "lower": 629.284,
+            "mid": 675.6092,
+            "width_pct": 14.7232,
+            "position": "箱体下半区"
+          },
+          "daily": {
+            "kdj": {
+              "available": true,
+              "k": 58.8602,
+              "d": 63.3711,
+              "j": 49.8384,
+              "j_prev": 57.7445,
+              "state": "中性"
+            },
+            "macd": {
+              "available": true,
+              "dif": -9.3071,
+              "dea": -11.6437,
+              "hist": 4.6733,
+              "hist_prev": 4.2931,
+              "hist_direction": "扩张",
+              "golden_cross": false,
+              "death_cross": false
+            }
+          },
+          "weekly": {
+            "kdj": {
+              "available": true,
+              "k": 24.3833,
+              "d": 23.3831,
+              "j": 26.3837,
+              "j_prev": 20.1564,
+              "state": "低位拐头"
+            },
+            "macd": {
+              "available": true,
+              "dif": -28.5488,
+              "dea": -21.631,
+              "hist": -13.8356,
+              "hist_prev": -15.8446,
+              "hist_direction": "扩张",
+              "golden_cross": false,
+              "death_cross": false
+            }
+          },
+          "monthly": {
+            "kdj": {
+              "available": true,
+              "k": 20.0657,
+              "d": 29.0251,
+              "j": 2.1469,
+              "j_prev": -2.2508,
+              "state": "低位调整到位观察"
+            },
+            "macd": {
+              "available": true,
+              "dif": -26.7398,
+              "dea": -18.5902,
+              "hist": -16.2991,
+              "hist_prev": -11.5463,
+              "hist_direction": "收缩",
+              "golden_cross": false,
+              "death_cross": false
+            }
+          }
+        }
+      },
+      "index": "科创50（市场风格代理）"
+    },
+    {
+      "code": "601696",
+      "name": "中银证券",
+      "quantity": 16300.0,
+      "cost": 10.362,
+      "close": 11.8,
+      "latest_date": "2026-07-10",
+      "market_value": 192340.0,
+      "pnl": 23439.399999999994,
+      "pnl_pct": 0.1387762980119669,
+      "position_pct": 0.11375752508361205,
+      "trend": "横盘震荡",
+      "box": "箱体下半区",
+      "sector": {
+        "theme_id": "securities_brokerage",
+        "theme_name": "证券/券商/金融风险偏好",
+        "priority": "holding_related",
+        "primary_code": "880679.SH",
+        "candidate_codes": [
+          "880216.SH",
+          "880515.SH",
+          "880721.SH",
+          "880801.SH",
+          "880818.SH",
+          "880821.SH",
+          "880883.SH"
+        ],
+        "representative_stocks": [
+          "601696.SH",
+          "600030.SH",
+          "300059.SZ"
+        ],
+        "holding_related": [
+          "601696.SH"
+        ],
+        "semantic_tags": [
+          "证券",
+          "券商",
+          "金融",
+          "风险偏好",
+          "成交额敏感"
+        ],
+        "confidence": "high",
+        "available": true,
+        "latest_date": "2026-07-10",
+        "trend_state": "横盘震荡",
+        "close": 1202.14,
+        "box20_position": "下沿/破位区",
+        "box20_upper": 1305.6945,
+        "box20_lower": 1223.1435,
+        "daily_j": 19.6026,
+        "daily_kdj_state": "低位拐头",
+        "daily_macd_hist": -13.7811,
+        "daily_macd_direction": "收缩",
+        "weekly_macd_hist": -27.1009,
+        "stage": "分歧/弱震荡",
+        "stage_reason": "横盘震荡但位于箱体下沿，若跌破需转入风控。",
+        "score": 36.0,
+        "action_bias": "谨慎观察",
+        "analysis": {
+          "available": true,
+          "latest_date": "2026-07-10",
+          "trend": {
+            "state": "横盘震荡",
+            "close": 1202.14,
+            "ma20": 1263.7035,
+            "ma60": 1284.8585,
+            "ma20_slope_5d_pct": -0.2918,
+            "ma60_slope_10d_pct": -0.3352,
+            "higher_high_20d": true,
+            "higher_low_20d": false,
+            "lower_high_20d": false,
+            "lower_low_20d": true
+          },
+          "box_20d": {
+            "available": true,
+            "period": 20,
+            "upper": 1305.6945,
+            "lower": 1223.1435,
+            "mid": 1264.419,
+            "width_pct": 6.7491,
+            "position": "下沿/破位区"
+          },
+          "box_60d": {
+            "available": true,
+            "period": 60,
+            "upper": 1325.465,
+            "lower": 1239.5465,
+            "mid": 1282.5057,
+            "width_pct": 6.9314,
+            "position": "下沿/破位区"
+          },
+          "daily": {
+            "kdj": {
+              "available": true,
+              "k": 20.7223,
+              "d": 21.2822,
+              "j": 19.6026,
+              "j_prev": 14.2908,
+              "state": "低位拐头"
+            },
+            "macd": {
+              "available": true,
+              "dif": -17.4426,
+              "dea": -10.552,
+              "hist": -13.7811,
+              "hist_prev": -12.6544,
+              "hist_direction": "收缩",
+              "golden_cross": false,
+              "death_cross": false
+            }
+          },
+          "weekly": {
+            "kdj": {
+              "available": true,
+              "k": 27.5593,
+              "d": 34.845,
+              "j": 12.9877,
+              "j_prev": 28.6661,
+              "state": "中性"
+            },
+            "macd": {
+              "available": true,
+              "dif": -0.8675,
+              "dea": 12.6829,
+              "hist": -27.1009,
+              "hist_prev": -21.2154,
+              "hist_direction": "收缩",
+              "golden_cross": false,
+              "death_cross": false
+            }
+          },
+          "monthly": {
+            "kdj": {
+              "available": true,
+              "k": 40.7016,
+              "d": 60.1658,
+              "j": 1.7733,
+              "j_prev": 26.5898,
+              "state": "低位调整到位观察"
+            },
+            "macd": {
+              "available": true,
+              "dif": 80.981,
+              "dea": 82.1954,
+              "hist": -2.4287,
+              "hist_prev": 14.8868,
+              "hist_direction": "收缩",
+              "golden_cross": false,
+              "death_cross": true
+            }
+          }
+        }
+      },
+      "index": "上证指数（市场风格代理）"
+    },
+    {
+      "code": "920808",
+      "name": "曙光数创",
+      "quantity": 5063.0,
+      "cost": 78.667,
+      "close": 80.72,
+      "latest_date": "2026-07-10",
+      "market_value": 408685.36,
+      "pnl": 10394.338999999978,
+      "pnl_pct": 0.02609734704513955,
+      "position_pct": 0.2417127747296715,
+      "trend": "横盘震荡",
+      "box": "箱体下半区",
+      "sector": {
+        "theme_id": "ai_compute_server_liquid_cooling",
+        "theme_name": "AI算力/服务器/液冷",
+        "priority": "high",
+        "primary_code": "880545.SH",
+        "candidate_codes": [
+          "880607.SH",
+          "880680.SH",
+          "880685.SH",
+          "880699.SH",
+          "880720.SH",
+          "880799.SH",
+          "880818.SH",
+          "880956.SH",
+          "881352.SH"
+        ],
+        "representative_stocks": [
+          "000977.SZ",
+          "002281.SZ",
+          "920808.BJ",
+          "000021.SZ"
+        ],
+        "holding_related": [
+          "920808.BJ"
+        ],
+        "semantic_tags": [
+          "人工智能",
+          "AI服务器",
+          "算力租赁",
+          "数据中心",
+          "液冷服务器",
+          "云计算",
+          "光模块/CPO"
+        ],
+        "confidence": "medium_high",
+        "available": true,
+        "latest_date": "2026-07-10",
+        "trend_state": "下跌",
+        "close": 2935.93,
+        "box20_position": "箱体下半区",
+        "box20_upper": 3089.087,
+        "box20_lower": 2811.1,
+        "daily_j": 62.2536,
+        "daily_kdj_state": "中性",
+        "daily_macd_hist": 14.6093,
+        "daily_macd_direction": "扩张",
+        "weekly_macd_hist": -114.0887,
+        "stage": "退潮/下跌",
+        "stage_reason": "趋势下跌，板块不支持加仓。",
+        "score": 37.0,
+        "action_bias": "回避/禁止加仓",
+        "analysis": {
+          "available": true,
+          "latest_date": "2026-07-10",
+          "trend": {
+            "state": "下跌",
+            "close": 2935.93,
+            "ma20": 2968.062,
+            "ma60": 3221.8412,
+            "ma20_slope_5d_pct": -1.4932,
+            "ma60_slope_10d_pct": -1.6577,
+            "higher_high_20d": false,
+            "higher_low_20d": false,
+            "lower_high_20d": true,
+            "lower_low_20d": true
+          },
+          "box_20d": {
+            "available": true,
+            "period": 20,
+            "upper": 3089.087,
+            "lower": 2811.1,
+            "mid": 2950.0935,
+            "width_pct": 9.8889,
+            "position": "箱体下半区"
+          },
+          "box_60d": {
+            "available": true,
+            "period": 60,
+            "upper": 3529.083,
+            "lower": 2903.4235,
+            "mid": 3216.2532,
+            "width_pct": 21.549,
+            "position": "箱体下半区"
+          },
+          "daily": {
+            "kdj": {
+              "available": true,
+              "k": 43.2629,
+              "d": 33.7675,
+              "j": 62.2536,
+              "j_prev": 39.1024,
+              "state": "中性"
+            },
+            "macd": {
+              "available": true,
+              "dif": -82.4458,
+              "dea": -89.7505,
+              "hist": 14.6093,
+              "hist_prev": 2.3262,
+              "hist_direction": "扩张",
+              "golden_cross": false,
+              "death_cross": false
+            }
+          },
+          "weekly": {
+            "kdj": {
+              "available": true,
+              "k": 15.575,
+              "d": 20.5201,
+              "j": 5.6848,
+              "j_prev": -1.0289,
+              "state": "低位调整到位观察"
+            },
+            "macd": {
+              "available": true,
+              "dif": -96.7945,
+              "dea": -39.7501,
+              "hist": -114.0887,
+              "hist_prev": -121.6797,
+              "hist_direction": "扩张",
+              "golden_cross": false,
+              "death_cross": false
+            }
+          },
+          "monthly": {
+            "kdj": {
+              "available": true,
+              "k": 26.104,
+              "d": 41.969,
+              "j": -5.6258,
+              "j_prev": -3.4678,
+              "state": "低位调整到位观察"
+            },
+            "macd": {
+              "available": true,
+              "dif": 195.7099,
+              "dea": 258.4429,
+              "hist": -125.4661,
+              "hist_prev": -85.6978,
+              "hist_direction": "收缩",
+              "golden_cross": false,
+              "death_cross": false
+            }
+          }
+        }
+      },
+      "index": "北证50（市场风格代理）"
+    },
+    {
+      "code": "600150",
+      "name": "中国船舶",
+      "quantity": 7100.0,
+      "cost": 36.062,
+      "close": 37.04,
+      "latest_date": "2026-07-10",
+      "market_value": 262984.0,
+      "pnl": 6943.8000000000175,
+      "pnl_pct": 0.0271199600687706,
+      "position_pct": 0.1555391960933172,
+      "trend": "横盘震荡",
+      "box": "箱体上半区",
+      "sector": {
+        "theme_id": "shipbuilding_military",
+        "theme_name": "船舶/军工/高端装备",
+        "priority": "holding_related",
+        "primary_code": "881290.SH",
+        "candidate_codes": [
+          "880576.SH",
+          "880582.SH",
+          "880594.SH",
+          "880763.SH",
+          "880765.SH",
+          "880853.SH",
+          "880950.SH",
+          "880978.SH"
+        ],
+        "representative_stocks": [
+          "600150.SH",
+          "601989.SH"
+        ],
+        "holding_related": [
+          "600150.SH"
+        ],
+        "semantic_tags": [
+          "航海装备",
+          "船舶",
+          "军工",
+          "高端装备",
+          "中特估",
+          "海洋经济"
+        ],
+        "confidence": "medium",
+        "available": true,
+        "latest_date": "2026-07-10",
+        "trend_state": "横盘震荡",
+        "close": 1411.86,
+        "box20_position": "箱体上半区",
+        "box20_upper": 1420.7025,
+        "box20_lower": 1296.6555,
+        "daily_j": 80.9974,
+        "daily_kdj_state": "中性",
+        "daily_macd_hist": 23.8351,
+        "daily_macd_direction": "扩张",
+        "weekly_macd_hist": -28.6212,
+        "stage": "修复",
+        "stage_reason": "横盘震荡中向箱体上半区修复，日线MACD扩张。",
+        "score": 62.0,
+        "action_bias": "观察",
+        "analysis": {
+          "available": true,
+          "latest_date": "2026-07-10",
+          "trend": {
+            "state": "横盘震荡",
+            "close": 1411.86,
+            "ma20": 1356.2985,
+            "ma60": 1428.979,
+            "ma20_slope_5d_pct": 0.9738,
+            "ma60_slope_10d_pct": 0.8326,
+            "higher_high_20d": false,
+            "higher_low_20d": false,
+            "lower_high_20d": true,
+            "lower_low_20d": true
+          },
+          "box_20d": {
+            "available": true,
+            "period": 20,
+            "upper": 1420.7025,
+            "lower": 1296.6555,
+            "mid": 1358.679,
+            "width_pct": 9.5667,
+            "position": "箱体上半区"
+          },
+          "box_60d": {
+            "available": true,
+            "period": 60,
+            "upper": 1585.882,
+            "lower": 1325.095,
+            "mid": 1455.4885,
+            "width_pct": 19.6806,
+            "position": "箱体下半区"
+          },
+          "daily": {
+            "kdj": {
+              "available": true,
+              "k": 70.477,
+              "d": 65.2167,
+              "j": 80.9974,
+              "j_prev": 72.8761,
+              "state": "中性"
+            },
+            "macd": {
+              "available": true,
+              "dif": -2.6389,
+              "dea": -14.5565,
+              "hist": 23.8351,
+              "hist_prev": 21.3439,
+              "hist_direction": "扩张",
+              "golden_cross": false,
+              "death_cross": false
+            }
+          },
+          "weekly": {
+            "kdj": {
+              "available": true,
+              "k": 33.3022,
+              "d": 33.7461,
+              "j": 32.4142,
+              "j_prev": 15.1857,
+              "state": "中性"
+            },
+            "macd": {
+              "available": true,
+              "dif": 15.0059,
+              "dea": 29.3165,
+              "hist": -28.6212,
+              "hist_prev": -37.0922,
+              "hist_direction": "扩张",
+              "golden_cross": false,
+              "death_cross": false
+            }
+          },
+          "monthly": {
+            "kdj": {
+              "available": true,
+              "k": 49.6797,
+              "d": 54.1132,
+              "j": 40.8128,
+              "j_prev": 34.966,
+              "state": "中性"
+            },
+            "macd": {
+              "available": true,
+              "dif": 71.9167,
+              "dea": 63.7619,
+              "hist": 16.3095,
+              "hist_prev": 17.5528,
+              "hist_direction": "收缩",
+              "golden_cross": false,
+              "death_cross": false
+            }
+          }
+        }
+      },
+      "index": "上证指数（市场风格代理）"
+    },
+    {
+      "code": "605090",
+      "name": "九丰能源",
+      "quantity": 5400.0,
+      "cost": 36.394,
+      "close": 37.98,
+      "latest_date": "2026-07-10",
+      "market_value": 205091.99999999997,
+      "pnl": 8564.399999999994,
+      "pnl_pct": 0.043578611859097505,
+      "position_pct": 0.12129956501220837,
+      "trend": "横盘震荡",
+      "box": "上沿/突破区",
+      "sector": {
+        "theme_id": "gas_energy_hydrogen",
+        "theme_name": "燃气/能源/氢能源",
+        "priority": "holding_related",
+        "primary_code": "880705.SH",
+        "candidate_codes": [
+          "880211.SH",
+          "880222.SH",
+          "880526.SH",
+          "880540.SH",
+          "880678.SH",
+          "880782.SH",
+          "880978.SH"
+        ],
+        "representative_stocks": [
+          "605090.SH",
+          "600803.SH"
+        ],
+        "holding_related": [
+          "605090.SH"
+        ],
+        "semantic_tags": [
+          "燃气",
+          "天然气",
+          "能源",
+          "氢能源",
+          "工业气体",
+          "航运概念"
+        ],
+        "confidence": "medium_high",
+        "available": true,
+        "latest_date": "2026-07-10",
+        "trend_state": "下跌",
+        "close": 1715.17,
+        "box20_position": "箱体下半区",
+        "box20_upper": 1842.651,
+        "box20_lower": 1711.661,
+        "daily_j": 23.5392,
+        "daily_kdj_state": "低位拐头",
+        "daily_macd_hist": -11.004,
+        "daily_macd_direction": "扩张",
+        "weekly_macd_hist": -61.9459,
+        "stage": "退潮/下跌",
+        "stage_reason": "趋势下跌，板块不支持加仓。",
+        "score": 39.0,
+        "action_bias": "回避/禁止加仓",
+        "analysis": {
+          "available": true,
+          "latest_date": "2026-07-10",
+          "trend": {
+            "state": "下跌",
+            "close": 1715.17,
+            "ma20": 1784.478,
+            "ma60": 1867.2813,
+            "ma20_slope_5d_pct": -0.944,
+            "ma60_slope_10d_pct": -0.64,
+            "higher_high_20d": false,
+            "higher_low_20d": false,
+            "lower_high_20d": true,
+            "lower_low_20d": true
+          },
+          "box_20d": {
+            "available": true,
+            "period": 20,
+            "upper": 1842.651,
+            "lower": 1711.661,
+            "mid": 1777.156,
+            "width_pct": 7.6528,
+            "position": "箱体下半区"
+          },
+          "box_60d": {
+            "available": true,
+            "period": 60,
+            "upper": 1976.604,
+            "lower": 1765.615,
+            "mid": 1871.1095,
+            "width_pct": 11.9499,
+            "position": "下沿/破位区"
+          },
+          "daily": {
+            "kdj": {
+              "available": true,
+              "k": 31.2165,
+              "d": 35.0552,
+              "j": 23.5392,
+              "j_prev": 13.858,
+              "state": "低位拐头"
+            },
+            "macd": {
+              "available": true,
+              "dif": -35.4573,
+              "dea": -29.9553,
+              "hist": -11.004,
+              "hist_prev": -11.2846,
+              "hist_direction": "扩张",
+              "golden_cross": false,
+              "death_cross": false
+            }
+          },
+          "weekly": {
+            "kdj": {
+              "available": true,
+              "k": 22.1826,
+              "d": 29.78,
+              "j": 6.9879,
+              "j_prev": 8.4976,
+              "state": "低位调整到位观察"
+            },
+            "macd": {
+              "available": true,
+              "dif": 4.7633,
+              "dea": 35.7362,
+              "hist": -61.9459,
+              "hist_prev": -54.6493,
+              "hist_direction": "收缩",
+              "golden_cross": false,
+              "death_cross": false
+            }
+          },
+          "monthly": {
+            "kdj": {
+              "available": true,
+              "k": 53.7763,
+              "d": 70.8014,
+              "j": 19.7261,
+              "j_prev": 41.2498,
+              "state": "中性"
+            },
+            "macd": {
+              "available": true,
+              "dif": 171.0093,
+              "dea": 163.7955,
+              "hist": 14.4277,
+              "hist_prev": 46.6146,
+              "hist_direction": "收缩",
+              "golden_cross": false,
+              "death_cross": false
+            }
+          }
+        }
+      },
+      "index": "上证指数（市场风格代理）"
+    }
+  ],
+  "recorded_trade_count": 0,
+  "actual_position_pct": 0.8503507245932249,
+  "output": "C:\\Users\\gh\\.openclaw-tdxclaw\\workspace\\strategy_team\\04_reviews\\daily\\2026-07-10_final_review.md"
+}

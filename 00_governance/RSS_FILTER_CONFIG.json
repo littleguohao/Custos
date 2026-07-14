@@ -1,0 +1,66 @@
+{
+  "version": "1.0",
+  "timezone": "Asia/Shanghai",
+  "session_windows_hours": {
+    "premarket": 66,
+    "intraday_1445": 10,
+    "postclose": 18,
+    "weekly": 192,
+    "monthly": 840,
+    "ad_hoc": 72
+  },
+  "limits": {
+    "premarket": 30,
+    "intraday_1445": 20,
+    "postclose": 30,
+    "weekly": 150,
+    "monthly": 250,
+    "ad_hoc": 100
+  },
+  "per_source_limits": {
+    "premarket": 5,
+    "intraday_1445": 4,
+    "postclose": 5,
+    "weekly": 12,
+    "monthly": 20,
+    "ad_hoc": 10
+  },
+  "agent_summary_max_chars": 400,
+  "tier_weight": {"S": 50, "A": 35, "B": 18, "C": 3},
+  "category_weight": {
+    "policy_official": 30,
+    "policy_consultation": 15,
+    "macro_official": 30,
+    "a_share_official": 30,
+    "company_official": 25,
+    "ai_lab_official": 22,
+    "academic_official": 15,
+    "academic_preprint": 5,
+    "cn_financial_media": 15,
+    "cn_global_media": 12,
+    "hk_financial_media": 12,
+    "hk_technology_media": 12,
+    "global_media": 10,
+    "technology_media": 10,
+    "research_media": 8,
+    "analysis_media": 5
+  },
+  "theme_keywords": {
+    "AI算力": ["人工智能", "AI", "大模型", "算力", "数据中心", "服务器", "液冷", "GPU", "推理", "训练"],
+    "半导体": ["半导体", "芯片", "存储", "DRAM", "HBM", "晶圆", "光刻", "封装", "先进封装", "EDA"],
+    "机器人": ["机器人", "具身智能", "自动驾驶", "智能制造"],
+    "船舶军工": ["船舶", "军工", "国防", "航母", "海洋装备", "商业航天", "卫星"],
+    "能源": ["天然气", "燃气", "原油", "油价", "氢能源", "储能", "电力"],
+    "券商金融": ["券商", "证券", "资本市场", "IPO", "并购重组", "金融监管"],
+    "医疗设备": ["医疗设备", "基因测序", "生命科学", "生物科技", "医疗器械"],
+    "宏观政策": ["央行", "货币政策", "财政政策", "利率", "通胀", "关税", "出口管制", "制裁", "监管", "工信部"]
+  },
+  "market_keywords": ["A股", "港股", "美股", "纳斯达克", "标普", "道琼斯", "恒生", "人民币", "美元", "美债", "黄金", "原油", "风险偏好"],
+  "negative_spam_keywords": ["how to invest", "strong buy", "top stocks to buy", "dividend stocks", "retirement portfolio"],
+  "rules": [
+    "published_at缺失时不得标为confirmed，只能作为低优先级候选",
+    "意见征集属于consultation_not_effective，不得提升为已实施政策",
+    "C级来源必须命中持仓、主线或高优先主题，否则不进入盘前候选",
+    "筛选结果只影响信息分析优先级，不能直接提高交易权限"
+  ]
+}

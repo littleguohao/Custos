@@ -1,0 +1,22 @@
+{
+  "version": "1.0",
+  "status": "unverified_not_enabled",
+  "updated_at": "2026-07-12T22:45:00+08:00",
+  "policy": [
+    "路由字符串不是RSSHub官方存在性证明，必须在拟部署版本的路由文档或本地实例逐条验证",
+    "不得用RSSHub绕过登录、付费墙、验证码、访问控制或站点条款",
+    "Wind终端/API和付费内容未经授权不得抓取",
+    "所有中转内容默认tier=C、confirmed=false，需官方原文或独立来源确认"
+  ],
+  "route_candidates": [
+    {"source":"Wind","routes":["/rsshub/wind/news","/rsshub/wind/research"],"legal_review_required":true},
+    {"source":"东方财富","routes":["/rsshub/eastmoney/news","/rsshub/eastmoney/stock/{code}","/rsshub/eastmoney/report"]},
+    {"source":"华尔街见闻","routes":["/rsshub/wallstreetcn/live","/rsshub/wallstreetcn/article"]},
+    {"source":"格隆汇","routes":["/rsshub/gelonghui/live","/rsshub/gelonghui/home"]},
+    {"source":"雪球","routes":["/rsshub/xueqiu/stock/{code}","/rsshub/xueqiu/hots"],"community_content":true},
+    {"source":"同花顺","routes":["/rsshub/10jqka/news"]},
+    {"source":"证券时报e公司","routes":["/rsshub/stcn/company"]},
+    {"source":"财新","routes":["/rsshub/caixin/latest"],"paywall_review_required":true},
+    {"source":"第一财经","routes":["/rsshub/yicai/news"]}
+  ]
+}

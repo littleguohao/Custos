@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "market": "China A-share",
+  "timezone": "Asia/Shanghai",
+  "note": "周末自动休市；工作日若未命中 overrides 则状态未知，自动任务不得假定开市。法定节假日、临时休市和已确认交易日由交易所日历源或人工同步维护。",
+  "overrides": {
+    "2026-07-09": {"is_trading_day": true, "reason": "已有当日收盘市场数据，确认交易日"},
+    "2026-07-10": {"is_trading_day": true, "reason": "已有当日交易任务与市场数据，确认交易日"},
+    "2026-07-13": {"is_trading_day": true, "reason": "用户于2026-07-13盘前明确确认当日为交易日"},
+    "2026-07-14": {"is_trading_day": true, "reason": "用户于2026-07-14盘前任务中明确确认当日为交易日"}
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "candidate_discovery": {
+    "mode": "existing_workflow_only",
+    "sources": [
+      "theme_tracker",
+      "stock_pool",
+      "formula_screen"
+    ],
+    "disabled_skills": [
+      "tdx-wxd-a",
+      "tdx-wxd-bk"
+    ]
+  },
+  "phase_1_enabled_skills": [
+    "tdx-agzxsb",
+    "tdx-tczqcxx",
+    "tdx-board-cpbd",
+    "tdx-hot-topic",
+    "tdx-company-info",
+    "tdx-financials",
+    "tdx-earnings-warning",
+    "tdx-trade-plan",
+    "tdx-czzdxfxjs"
+  ],
+  "adapters": {
+    "theme_stage": "ThemeStageAdapter",
+    "candidate": "CandidateAdapter",
+    "buy_plan": "BuyPlanAdapter",
+    "risk_flag": "RiskFlagAdapter"
+  },
+  "permissions": {
+    "skills_may_discover_candidates": false,
+    "skills_may_override_market_timing": false,
+    "skills_may_override_risk_control": false,
+    "skills_may_emit_final_actions": false,
+    "chief_decision_is_final": true,
+    "tdx_quant_write_operations": false
+  },
+  "deep_skill_scope": {
+    "holdings": true,
+    "A_pool": true,
+    "B_pool": "lightweight_or_trade_plan_observation_only",
+    "C_pool": false,
+    "D_pool": false
+  }
+}
