@@ -1,9 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Build a dynamic 14:45 review skeleton from the latest position snapshot.
-
-The agent layer enriches this skeleton with live quotes. No stock, price or
-trigger is hard-coded here.
-"""
+"""Build a data-backed 14:45 review from positions, quotes and market state."""
 from __future__ import annotations
 
 import argparse
@@ -20,6 +16,8 @@ BASE = Path("C:/Users/gh/.openclaw-tdxclaw/workspace/strategy_team")
 TRADES = BASE / "01_data" / "trades"
 HOLDINGS = BASE / "01_data" / "holdings"
 RISK = BASE / "01_data" / "risk"
+MARKET = BASE / "01_data" / "market"
+QUALITY = BASE / "01_data" / "quality"
 PLANS = BASE / "03_daily_plans"
 LOGS = BASE / "06_logs"
 PLANS.mkdir(parents=True, exist_ok=True)
@@ -44,21 +42,18 @@ def finite(value, default=0.0):
 
 
 def snapshot_state(target_date: str) -> dict:
-    meta = load(TRADES / "_import_meta.json", {})
-    imported = meta.get("imported_at")
-    source_mtime = meta.get("source_mtime")
-    stale = True
-    if imported:
-        try:
-            stale = datetime.fromisoformat(imported).date().isoformat() != target_date
-        except ValueError:
-            pass
+    gate = load(QUALITY / f"{target_date}_runtime_gate.json", {})
+    state = gate.get("position_freshness", {})
     return {
-        "imported_at": imported or "未知",
-        "source_mtime": source_mtime or "未知",
-        "stale_for_trade_date": stale,
-        "warning": "持仓为最近一次Excel导入快照，盘中交易若未补录则不会反映" if stale else "持仓快照当日已导入；仍需确认导入后是否发生盘中交易",
+        "status": state.get("status", "未知"),
+        "reason": state.get("reason", "缺少运行门控"),
+        "inherited_from": state.get("inherited_from"),
     }
+
+
+def quote_map(target_date: str) -> tuple[dict[str, dict], dict]:
+    snapshot = load(MARKET / f"{target_date}_holding_quotes.json", {})
+    return {str(x.get("code")): x for x in snapshot.get("quotes", [])}, snapshot
 
 
 def technical_map(target_date: str) -> dict[str, dict]:
@@ -82,14 +77,19 @@ def risk_map(target_date: str) -> dict[str, list[dict]]:
     return out
 
 
-def classify(position: dict, tech: dict, risks: list[dict]) -> tuple[str, str, str]:
-    pnl = finite(position.get("持有盈亏率"), 0)
+def classify(position: dict, tech: dict, risks: list[dict], quote: dict, bearish_regime: bool) -> tuple[str, str, str]:
+    price = finite(quote.get("price"), finite(position.get("最新价")))
+    cost = finite(position.get("单位成本"))
+    pnl = price / cost - 1 if cost else finite(position.get("持有盈亏率"), 0)
     trend = str(tech.get("trend_state") or "待确认")
     box = str(tech.get("box20_position") or "待确认")
     high_risk = any(x.get("priority") == "高" for x in risks)
     if high_risk or "破位" in box or pnl <= -0.07:
         reasons = [str(x.get("reason") or x.get("risk_type")) for x in risks if x.get("priority") == "高"]
         return "P1", "减仓/止损评估", "；".join(reasons) or f"趋势{trend}、位置{box}、盈亏{pnl:+.1%}"
+    if bearish_regime and finite(quote.get("change_pct")) > 0:
+        priority = "P1" if finite(quote.get("change_pct")) >= 5 else "P2"
+        return priority, "反弹减仓评估", f"0AMV空头区间，当日反弹{finite(quote.get('change_pct')):+.2f}%优先用于降低仓位"
     if trend == "下跌" or pnl < 0:
         return "P2", "观察、不加仓", f"趋势{trend}、位置{box}、盈亏{pnl:+.1%}"
     return "P3", "持有观察", f"趋势{trend}、位置{box}、盈亏{pnl:+.1%}"
@@ -107,41 +107,72 @@ def main() -> None:
     snap = snapshot_state(target_date)
     tech = technical_map(target_date)
     risks = risk_map(target_date)
-    total_position = sum(finite(x.get("仓位占比")) for x in positions)
+    quotes, quote_snapshot = quote_map(target_date)
+    gate = load(QUALITY / f"{target_date}_runtime_gate.json", {})
+    market = load(MARKET / f"{target_date}_market_timing_input.json", {})
+    regime = market.get("amv_0", {}).get("effective_state") or "未知"
+    amv_value = market.get("amv_0", {}).get("amv_change_pct")
+    asset_samples = [finite(x.get("持有金额")) / finite(x.get("仓位占比")) for x in positions if finite(x.get("仓位占比")) > 0]
+    total_assets = sorted(asset_samples)[len(asset_samples) // 2] if asset_samples else 0
+    revalued = []
     actions = []
     for p in positions:
         code = str(p.get("代码", "")).split(".")[0]
-        priority, action, reason = classify(p, tech.get(code, {}), risks.get(code, []))
+        quote = quotes.get(code, {})
+        price = finite(quote.get("price"), finite(p.get("最新价")))
+        qty = finite(p.get("持有数量"))
+        cost = finite(p.get("单位成本"))
+        market_value = price * qty
+        pnl_pct = price / cost - 1 if cost else 0
+        position_pct = market_value / total_assets if total_assets else finite(p.get("仓位占比"))
+        revalued.append({"code": code, "price": price, "pnl_pct": pnl_pct, "position_pct": position_pct, "market_value": market_value})
+        priority, action, reason = classify(p, tech.get(code, {}), risks.get(code, []), quote, regime == "空头")
         actions.append({"priority": priority, "code": code, "name": p.get("名称", ""), "action": action, "reason": reason})
     actions.sort(key=lambda x: (x["priority"], x["code"]))
+    revalued_map = {x["code"]: x for x in revalued}
+    total_position = sum(x["position_pct"] for x in revalued)
+    market_quality = gate.get("market_quality", {})
 
     lines = [
         f"# 14:45 收盘前操作建议 — {target_date}", "",
         f"> 生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        f"> 持仓快照导入：{snap['imported_at']}｜源文件更新：{snap['source_mtime']}",
-        f"> ⚠️ {snap['warning']}", "",
-        "## 1. 当前持仓快照", "",
-        "| 代码 | 名称 | 数量 | 成本 | 快照价格 | 快照盈亏 | 仓位 |",
-        "|---|---|---:|---:|---:|---:|---:|",
+        f"> 持仓状态：**{snap['status']}**｜{snap['reason']}",
+        f"> 行情来源：{quote_snapshot.get('source', '缺失')}｜行情日期：{quote_snapshot.get('as_of_date', '缺失')}｜采集时间：{quote_snapshot.get('captured_at', '缺失')}",
+        "> 口径说明：本次为14:45报告的盘后校正版，使用收盘附近补采行情，不代表14:45瞬时价格。",
+        f"> 0AMV当日变动：**{finite(amv_value):+.2f}%**｜有效状态：**{regime}**；盘后市场质量：**{market_quality.get('status', '未知')}**（{market_quality.get('quality_score', 'NA')}）", "",
+        "## 1. 当日行情重估持仓", "",
+        "| 代码 | 名称 | 数量 | 成本 | 当日价格 | 持有盈亏 | 重估仓位 | 当日涨跌 |",
+        "|---|---|---:|---:|---:|---:|---:|---:|",
     ]
     for p in positions:
-        lines.append(f"| {p.get('代码')} | {p.get('名称')} | {finite(p.get('持有数量')):.0f} | {finite(p.get('单位成本')):.3f} | {finite(p.get('最新价')):.2f} | {finite(p.get('持有盈亏率')):+.2%} | {finite(p.get('仓位占比')):.1%} |")
-    lines += ["", f"- 快照总仓位：**{total_position:.1%}**", "- 14:45 实时价格与实时盈亏：待 agent 使用 `tdx_quotes` 更新。", "",
+        code = str(p.get("代码", "")).split(".")[0]
+        value = revalued_map[code]
+        quote = quotes.get(code, {})
+        lines.append(f"| {code} | {p.get('名称')} | {finite(p.get('持有数量')):.0f} | {finite(p.get('单位成本')):.3f} | {value['price']:.2f} | {value['pnl_pct']:+.2%} | {value['position_pct']:.1%} | {finite(quote.get('change_pct')):+.2f}% |")
+    lines += ["", f"- 当日行情重估总仓位：**{total_position:.1%}**", "",
               "## 2. 动态持仓优先级", "", "| 优先级 | 代码 | 名称 | 操作倾向 | 依据 |", "|---|---|---|---|---|"]
     for x in actions:
         lines.append(f"| {x['priority']} | {x['code']} | {x['name']} | {x['action']} | {x['reason']} |")
-    lines += ["", "## 3. 14:45 市场与板块状态", "",
-              "- 指数实时行情：待更新。", "- 持仓所属板块及主线状态：待更新。", "- 0AMV 盘中状态：若无可靠数据，不作推测。", "",
+    lines += ["", "## 3. 市场状态与数据日期", "",
+              f"- 0AMV：当日 **{finite(amv_value):+.2f}%**，未严格超过 +4% 做多切换阈值，当前有效状态仍为 **{regime}**。",
+              f"- 盘后市场质量：{market_quality.get('status', '未知')}；盘中缺失项按最近有效交易日继承并在门控中逐项标注。",
+              f"- 个股技术数据日：{', '.join(sorted({str(x.get('latest_date')) for x in tech.values() if x.get('latest_date')})) or '缺失'}；仅作技术参考，不冒充当日行情。", "",
               "## 4. 操作建议", "",
-              "- P1：实时验证关键价位，触发风险规则时优先执行。", "- P2：不加仓，弱于板块或跌破关键位时降低风险。", "- P3：持有观察，不追高；冲高回落时保护利润。",
-              "- 新开仓：由实时 market_timing、板块许可、A池计划及 risk_control 共同决定。", "",
-              "## 5. 数据质量与待确认", "", f"- 持仓快照是否过期：{'是' if snap['stale_for_trade_date'] else '否/当日已导入'}",
-              "- 盘中发生但未补录的交易：需要用户确认。", "- 实时行情：由 14:45 任务补充。", ""]
+              "- 0AMV处于实质空头区间，所有反弹优先按减仓机会处理，不作为加仓、摊低成本或趋势反转依据。",
+              "- 精确减仓数量：持仓确认且当日全持仓行情齐全时允许评估。",
+              "- 加仓/新开仓：继续禁止；需0AMV退出空头且大盘、板块、个股结构修复，并通过完整市场质量门。", "",
+              "## 5. 运行权限", "",
+              f"- 精确数量权限：{'允许' if gate.get('position_gate', {}).get('allow_precise_quantity') else '禁止'}。",
+              f"- 减仓权限：{'允许' if gate.get('position_gate', {}).get('allow_position_reduction') else '禁止'}。",
+              f"- 提高仓位权限：{'允许' if gate.get('position_gate', {}).get('allow_position_increase') else '禁止'}。", "",
+              "> 风险提示：本报告用于收盘前风险决策，不构成收益承诺；继承的盘后指标不得用于放宽加仓权限。", ""]
 
     out = PLANS / f"{target_date}_1445_review.md"
     out.write_text("\n".join(lines), encoding="utf-8")
     log = {"date": target_date, "generated_at": datetime.now().isoformat(timespec="seconds"), "position_snapshot": snap,
-           "total_position": total_position, "positions": positions, "actions": actions, "live_quotes_pending": True}
+           "total_position": total_position, "positions": positions, "revalued_positions": revalued,
+           "actions": actions, "quote_snapshot": quote_snapshot, "live_quotes_pending": False,
+           "position_gate": gate.get("position_gate", {})}
     (LOGS / f"{target_date}_1445_review.json").write_text(json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
     print(out)
     print(json.dumps({"position_snapshot": snap, "total_position": total_position, "actions": actions}, ensure_ascii=False, indent=2))

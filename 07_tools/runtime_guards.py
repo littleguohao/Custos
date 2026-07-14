@@ -88,6 +88,22 @@ def position_freshness_with_confirmation(day: str) -> dict[str, Any]:
     confirmations = load_json(DATA / "trades" / "position_confirmations.json", {})
     if day in confirmations:
         result.update({"status": "confirmed", "confirmed": True, "reason": "用户已确认当日持仓快照", "confirmation": confirmations[day]})
+        return result
+
+    eligible = [d for d in confirmations if d <= day]
+    if eligible:
+        confirmed_day = max(eligible)
+        confirmation = confirmations[confirmed_day]
+        no_trades = confirmation.get("no_trades") is True or "无交易" in str(confirmation.get("note", ""))
+        if no_trades:
+            result.update({
+                "status": "confirmed",
+                "confirmed": True,
+                "inherited": True,
+                "inherited_from": confirmed_day,
+                "reason": f"沿用 {confirmed_day} 用户确认的无交易持仓；未发现更新的持仓导入",
+                "confirmation": confirmation,
+            })
     return result
 
 
@@ -98,16 +114,45 @@ def _quality(value: Any, section: dict[str, Any], default: str = "candidate") ->
     return q if q in {"confirmed", "auto", "candidate", "partial", "raw_only", "stale", "missing"} else default
 
 
+def _latest_market_section(day: str, section_name: str, value_key: str) -> tuple[dict[str, Any], str | None]:
+    for path in sorted((DATA / "market").glob("*_market_timing_input.json"), reverse=True):
+        source_day = path.name[:10]
+        if source_day >= day:
+            continue
+        section = load_json(path, {}).get(section_name, {})
+        if isinstance(section, dict) and section.get(value_key) not in {None, ""}:
+            return section, source_day
+    return {}, None
+
+
 def market_quality_gate(market: dict[str, Any], day: str) -> dict[str, Any]:
     checks = []
-    amv = market.get("amv_0", {})
-    checks.append({"field": "0AMV", "quality": _quality(amv.get("amv_change_pct"), amv, "confirmed" if "user" in str(amv.get("note", "")).lower() else "candidate"), "as_of": amv.get("as_of") or day})
-    breadth = market.get("market_breadth", {})
-    checks.append({"field": "market_breadth", "quality": _quality(breadth.get("up_count"), breadth), "as_of": breadth.get("as_of") or day})
-    sentiment = market.get("sentiment", {})
-    checks.append({"field": "sentiment", "quality": _quality(sentiment.get("limit_up_count"), sentiment), "as_of": sentiment.get("as_of") or day})
-    turnover = market.get("turnover", {})
-    checks.append({"field": "turnover", "quality": _quality(turnover.get("turnover_change_pct"), turnover), "as_of": turnover.get("as_of") or day})
+    specs = [
+        ("0AMV", "amv_0", "amv_change_pct"),
+        ("market_breadth", "market_breadth", "up_count"),
+        ("sentiment", "sentiment", "limit_up_count"),
+        ("turnover", "turnover", "turnover_change_pct"),
+    ]
+    inherited: dict[str, Any] = {}
+    for field, section_name, value_key in specs:
+        section = market.get(section_name, {})
+        source_day = day
+        if not isinstance(section, dict) or section.get(value_key) in {None, ""}:
+            prior, prior_day = _latest_market_section(day, section_name, value_key)
+            if prior_day:
+                section = prior
+                source_day = prior_day
+                inherited[section_name] = {"as_of": prior_day, "data": prior}
+        default_quality = "confirmed" if field == "0AMV" else "candidate"
+        quality = _quality(section.get(value_key), section, default_quality)
+        if source_day != day and quality in {"confirmed", "auto"}:
+            quality = "stale"
+        checks.append({
+            "field": field,
+            "quality": quality,
+            "as_of": section.get("as_of") or source_day,
+            "inherited": source_day != day,
+        })
     overseas = market.get("overseas_market", {})
     overseas_values = [overseas.get(k) for k in ("nasdaq_change_pct", "sp500_change_pct", "sox_change_pct", "nikkei_change_pct", "kospi_change_pct", "hstech_change_pct")]
     checks.append({"field": "overseas", "quality": "confirmed" if any(v is not None for v in overseas_values) and overseas.get("as_of") else ("candidate" if any(v is not None for v in overseas_values) else "missing"), "as_of": overseas.get("as_of")})
@@ -115,8 +160,8 @@ def market_quality_gate(market: dict[str, Any], day: str) -> dict[str, Any]:
     score = sum(rank[x["quality"]] for x in checks) / len(checks)
     return {
         "date": day, "status": "pass" if score >= 0.8 else ("degraded" if score >= 0.4 else "blocked"),
-        "quality_score": round(score, 3), "checks": checks,
-        "rule": "confirmed/auto=满权，candidate/partial=降权，raw_only/stale/missing=不得上调权限",
+        "quality_score": round(score, 3), "checks": checks, "inherited_sections": inherited,
+        "rule": "盘中缺少盘后指标时沿用最近有效交易日并标明日期；继承值仅供状态判断，不单独授予加仓权限",
     }
 
 
@@ -126,6 +171,12 @@ def write_runtime_gate(day: str) -> dict[str, Any]:
     positions = load_json(DATA / "trades" / "current_positions.json", [])
     freshness = position_freshness_with_confirmation(day)
     market_quality = market_quality_gate(market, day)
+    quote_path = DATA / "market" / f"{day}_holding_quotes.json"
+    quote_snapshot = load_json(quote_path, {})
+    quotes = quote_snapshot.get("quotes", []) if isinstance(quote_snapshot, dict) else []
+    position_codes = {str(x.get("代码", "")).split(".")[0] for x in positions}
+    quote_codes = {str(x.get("code", "")).split(".")[0] for x in quotes if x.get("date") == day and x.get("price") is not None}
+    quotes_current = bool(position_codes) and position_codes.issubset(quote_codes)
     technical = load_json(DATA / "holdings" / f"{day}_holding_technical_summary.json", [])
     technical_dates = sorted({str(x.get("latest_date")) for x in technical if x.get("latest_date")})
     technical_current = bool(technical_dates) and technical_dates == [day]
@@ -133,15 +184,22 @@ def write_runtime_gate(day: str) -> dict[str, Any]:
         "status": "confirmed" if technical_current else ("stale" if technical_dates else "missing"),
         "latest_dates": technical_dates,
         "expected_date": day,
-        "reason": "持仓技术行情已更新至目标日" if technical_current else "持仓技术行情未更新至目标日，不得据此输出精确调仓数量或提高仓位",
+        "reason": "持仓技术行情已更新至目标日" if technical_current else "持仓技术指标未更新至目标日，不得据此提高仓位；精确减仓数量另由当日行情快照授权",
     }
-    execution_ready = freshness.get("status") == "confirmed" and technical_current and market_quality.get("status") == "pass"
+    reduction_ready = freshness.get("status") == "confirmed" and quotes_current
+    market_regime = str(market.get("amv_0", {}).get("effective_state") or "")
+    increase_ready = reduction_ready and technical_current and market_quality.get("status") == "pass" and market_regime != "空头"
     position_gate = {
-        "status": "pass" if execution_ready else ("degraded" if freshness.get("status") in {"confirmed", "uncertain"} else "blocked"),
-        "allow_precise_quantity": execution_ready,
-        "allow_position_increase": execution_ready,
+        "status": "pass" if increase_ready else ("degraded" if reduction_ready else "blocked"),
+        "allow_precise_quantity": reduction_ready,
+        "allow_position_reduction": reduction_ready,
+        "allow_position_increase": increase_ready,
         "position_count": len(positions),
-        "rule": "持仓快照、目标日行情和市场质量必须同时通过，才允许精确交易数量或提高仓位",
+        "quote_snapshot": str(quote_path),
+        "quote_date": quote_snapshot.get("as_of_date") if isinstance(quote_snapshot, dict) else None,
+        "quotes_current": quotes_current,
+        "market_regime": market_regime or "未知",
+        "rule": "持仓确认+当日全持仓行情可授予精确减仓数量权限；加仓另需当日技术、完整市场质量通过且0AMV非空头",
     }
     result = {
         "date": day,
