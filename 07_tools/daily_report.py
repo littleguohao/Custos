@@ -151,7 +151,7 @@ def main():
         item=details.get(key) or {}
         lines.append(f"| {market_name} | {clean(item.get('name'))} | {num(item.get('price'))} | {pct_point(item.get('change_pct'))} | {clean(item.get('data_kind'),'待确认')} | {clean(item.get('last_time_local_hint'))} |")
     lines += ['',f"- 外围综合判断：**{clean(overseas.get('overall_signal'))}**。{clean(overseas.get('overseas_summary'))}",'- 美国已收盘数据与日韩开盘后最新数据必须分开标注；缺值不得用历史数据替代。']
-    lines += ['', f'## 4. 持仓状态与上次计划调整（上次复盘：{prior_day}）','', '| 代码/名称 | 最新技术状态 | 四均线/J值 | BBI与N型前低 | 上次复盘计划 | 隔夜新证据 | 是否调整 |','|---|---|---|---|---|---|---|']
+    lines += ['', f'## 4. 持仓状态与上次计划调整（上次复盘：{prior_day}）','', '| 代码/名称 | 最新技术状态 | 四均线/J值 | BBI与N型前低 | B1/总控动作 | 上次复盘计划 | 隔夜新证据 |','|---|---|---|---|---|---|---|']
     for x in chief.get('holding_actions',[]):
         c=code(x.get('code')); t=tech.get(c,{}); p=prior_actions.get(c,{}); event=holding_event_map.get(c)
         prior_action=ACTION_LABELS.get(p.get('action'),clean(p.get('action'),'无可用计划'))
@@ -160,8 +160,9 @@ def main():
         bbi_state,bbi_reminder=bbi_holding_reminder(t)
         structure=n_structure_basis(t,t.get('close'))
         new_evidence=f"{direction_label(event.get('direction'))}：{clean(event.get('title'))}" if event else '无新增持仓事件'
-        lines.append(f"| {c} {x.get('name')} | {tech_state} | {ma_j} | {bbi_state}；{bbi_reminder}；{structure['state']}；{structure['reminder']} | {prior_action} | {new_evidence} | {adjustment_with_bbi(t,event)} |")
-    if not chief.get('holding_actions'): lines.append('| - | 持仓数据缺失 | - | BBI/N型前低待确认 | - | - | 不提高交易权限 |')
+        current_action=f"{x.get('priority','P3')} {clean(x.get('action'),'观察')}；{'；'.join(x.get('reasons') or [])}"
+        lines.append(f"| {c} {x.get('name')} | {tech_state} | {ma_j} | {bbi_state}；{bbi_reminder}；{structure['state']}；{structure['reminder']} | {current_action} | {prior_action} | {new_evidence} |")
+    if not chief.get('holding_actions'): lines.append('| - | 持仓数据缺失 | - | BBI/N型前低待确认 | 不提高交易权限 | - | - |')
     lines += ['', '## 5. 主线、机会与风险','', '| 方向 | 阶段 | 交易许可 | 理由 |','|---|---|---|---|']
     supported=[] if specialist.get('status')!='pass' else [x for x in sectors if x.get('trade_permission')=='支持']
     for x in supported[:5]: lines.append(f"| {clean(x.get('sector'))} | {clean(x.get('stage'))} | 支持 | {clean(x.get('reason'))} |")

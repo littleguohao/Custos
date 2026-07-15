@@ -123,6 +123,8 @@ def kdj(df: pd.DataFrame, n=9, m1=3, m2=3) -> dict[str, Any]:
         "d": round(float(d.iloc[-1]), 4),
         "j": round(jv, 4),
         "j_prev": round(float(j.iloc[-2]), 4),
+        "golden_cross": bool(k.iloc[-2] <= d.iloc[-2] and k.iloc[-1] > d.iloc[-1]),
+        "death_cross": bool(k.iloc[-2] >= d.iloc[-2] and k.iloc[-1] < d.iloc[-1]),
         "state": state,
     }
 
@@ -207,6 +209,78 @@ def bbi_state(df: pd.DataFrame) -> dict[str, Any]:
         "distance_pct": round(distance_pct, 4) if distance_pct is not None else None,
         "consecutive_closes_below": consecutive_below,
         "previous_close_above": bool(close.iloc[-2] >= bbi.iloc[-2]) if len(df) >= 25 else None,
+    }
+
+
+def price_volume_state(df: pd.DataFrame) -> dict[str, Any]:
+    """Compute deterministic B1 holding signals from completed daily bars."""
+    if len(df) < 20:
+        return {"available": False, "reason": "少于20根K线"}
+    x = df.reset_index(drop=True)
+    current = x.iloc[-1]
+    previous = x.iloc[-2]
+    close = float(current["close"])
+    previous_close = float(previous["close"])
+    open_ = float(current["open"])
+    high = float(current["high"])
+    low = float(current["low"])
+    volume = float(current["volume"])
+    volume_ma5 = float(x["volume"].iloc[-6:-1].mean())
+    volume_ma20 = float(x["volume"].iloc[-21:-1].mean()) if len(x) >= 21 else float(x["volume"].iloc[:-1].tail(20).mean())
+    change_pct = (close / previous_close - 1) * 100 if previous_close else None
+    amplitude_pct = (high / low - 1) * 100 if low else None
+    body_pct = abs(close / open_ - 1) * 100 if open_ else None
+    volume_ratio_5 = volume / volume_ma5 if volume_ma5 else None
+    volume_ratio_20 = volume / volume_ma20 if volume_ma20 else None
+    volume_rank20 = float((x["volume"].tail(20) <= volume).sum()) / 20
+
+    def bull_metrics(i: int) -> dict[str, Any]:
+        row = x.iloc[i]
+        prev_close = float(x.iloc[i - 1]["close"])
+        day_change = (float(row["close"]) / prev_close - 1) * 100 if prev_close else 0
+        body = (float(row["close"]) / float(row["open"]) - 1) * 100 if float(row["open"]) else 0
+        return {"bull": float(row["close"]) > float(row["open"]), "change_pct": round(day_change, 4), "body_pct": round(body, 4)}
+
+    latest_bulls = [bull_metrics(-2), bull_metrics(-1)]
+    small_bear = close < open_ and change_pct is not None and -2 <= change_pct < 0 and body_pct is not None and body_pct <= 2
+    shrink_small_bear = bool(small_bear and volume_ratio_5 is not None and volume_ratio_5 <= 0.8)
+    large_bear = bool(change_pct is not None and change_pct <= -4 and close < open_)
+    heavy_large_bear = bool(large_bear and volume_ratio_5 is not None and volume_ratio_5 >= 1.5)
+    extreme_shrink = bool(
+        volume_ratio_5 is not None and volume_ratio_5 <= 0.5 and volume_rank20 <= 0.10
+    )
+    reversal_k_candidate = bool(
+        extreme_shrink and change_pct is not None and -2 <= change_pct <= 2
+        and amplitude_pct is not None and amplitude_pct <= 7
+    )
+    return {
+        "available": True,
+        "date": current["date"].strftime("%Y-%m-%d"),
+        "change_pct": round(change_pct, 4) if change_pct is not None else None,
+        "amplitude_pct": round(amplitude_pct, 4) if amplitude_pct is not None else None,
+        "body_pct": round(body_pct, 4) if body_pct is not None else None,
+        "volume_ratio_5": round(volume_ratio_5, 4) if volume_ratio_5 is not None else None,
+        "volume_ratio_20": round(volume_ratio_20, 4) if volume_ratio_20 is not None else None,
+        "volume_rank20_pct": round(volume_rank20 * 100, 4),
+        "close_raised": bool(close > previous_close),
+        "shrink_small_bear": shrink_small_bear,
+        "large_bear": large_bear,
+        "heavy_large_bear": heavy_large_bear,
+        "last_two_bull_metrics": latest_bulls,
+        "two_medium_large_bull": None,
+        "two_medium_large_bull_reason": "缺少证券当日实际涨跌幅限制，不能按代码静态猜测中大阳门槛",
+        "extreme_shrink": extreme_shrink,
+        "reversal_k_candidate_without_j": reversal_k_candidate,
+        "thresholds": {
+            "medium_large_bull_rule": "单日涨幅或阳线实体幅度达到当日涨跌幅限制的一半",
+            "small_bear_change_pct": [-2.0, 0.0],
+            "shrink_volume_ratio_5_max": 0.8,
+            "heavy_volume_ratio_5_min": 1.5,
+            "reversal_volume_ratio_5_max": 0.5,
+            "reversal_volume_rank20_pct_max": 10.0,
+            "reversal_close_change_pct": [-2.0, 2.0],
+            "reversal_amplitude_pct_max": 7.0,
+        },
     }
 
 
@@ -338,6 +412,7 @@ def analyze(df: pd.DataFrame) -> dict[str, Any]:
         "trend": daily_trend,
         "bbi": bbi_state(df),
         "n_structure": n_structure_state(df),
+        "price_volume": price_volume_state(df),
         "box_20d": box(df, 20),
         "box_60d": box(df, 60),
         "daily": {"kdj": kdj(df), "macd": macd(df)},

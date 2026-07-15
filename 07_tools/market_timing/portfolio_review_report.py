@@ -27,15 +27,20 @@ def classify(r):
 def main():
     ap=argparse.ArgumentParser(); ap.add_argument('--date',required=True); a=ap.parse_args()
     tech=load(DATA/'holdings'/f'{a.date}_holding_technical_summary.json',[])
+    b1_rows=load(DATA/'holdings'/f'{a.date}_b1_holding_state.json',[]); b1={str(x.get('code')):x for x in b1_rows}
     mt=(PLANS/f'{a.date}_market_timing_score.md').read_text(encoding='utf-8') if (PLANS/f'{a.date}_market_timing_score.md').exists() else ''
     state=extract(r'状态：\*\*(.*?)\*\*',mt,'未知'); position=extract(r'建议总仓位：\*\*(.*?)\*\*',mt,'待确认')
     reviews=[]
     for r in tech:
-        priority,action,reasons=classify(r)
+        state=b1.get(str(r.get('code')),{}); priority=state.get('final_priority'); action=state.get('final_action'); reasons=[]
+        if not priority or not action:
+            priority,action,reasons=classify(r)
+        else:
+            reasons=[state.get('final_reason')]+[x.get('reason') for x in state.get('signals',[])[1:3]]
         reviews.append({'code':str(r.get('code')),'name':r.get('name',''),'position_pct':r.get('position_pct'),'pnl_pct':r.get('holding_pnl_pct'),
           'holding_days':r.get('holding_days'),'sector':r.get('industry') or '、'.join(r.get('primary_themes') or []),'trend_state':r.get('trend_state'),
           'box_position':r.get('box20_position'),'daily_j':r.get('daily_j'),'macd_state':r.get('daily_macd_hist_direction'),
-          'action':action,'priority':priority,'reason':reasons})
+          'action':action,'priority':priority,'reason':[x for x in reasons if x], 'b1_holding_state':state})
     out_json=DATA/'holdings'/f'{a.date}_holding_review.json'; out_json.write_text(json.dumps(reviews,ensure_ascii=False,indent=2),encoding='utf-8')
     lines=['# portfolio_review 每日持仓研判','',f'日期：{a.date}','', '## 1. 总体持仓风险','',f'- market_timing：**{state}**',f'- 建议总仓位：**{position}**','- 原则：低位指标不能覆盖趋势、板块与风险规则。','', '## 2. 持仓逐只研判','', '| 优先级 | 代码 | 名称 | 仓位 | 盈亏 | 趋势/位置 | 动作 | 理由 |','|---|---|---|---:|---:|---|---|---|']
     for x in sorted(reviews,key=lambda y:(y['priority'],y['code'])):

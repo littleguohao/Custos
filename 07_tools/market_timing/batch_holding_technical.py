@@ -60,6 +60,8 @@ def main():
                  'box60_upper':(an.get('box_60d') or {}).get('upper'),'box60_lower':(an.get('box_60d') or {}).get('lower'),
                  'box60_mid':(an.get('box_60d') or {}).get('mid'),'box60_position':(an.get('box_60d') or {}).get('position'),
                  'daily_j':(((an.get('daily') or {}).get('kdj') or {}).get('j')),
+                 'daily_kdj_golden_cross':(((an.get('daily') or {}).get('kdj') or {}).get('golden_cross')),
+                 'daily_kdj_death_cross':(((an.get('daily') or {}).get('kdj') or {}).get('death_cross')),
                  'daily_kdj_state':(((an.get('daily') or {}).get('kdj') or {}).get('state')),
                  'daily_macd_hist':(((an.get('daily') or {}).get('macd') or {}).get('hist')),
                  'daily_macd_hist_direction':(((an.get('daily') or {}).get('macd') or {}).get('hist_direction')),
@@ -72,7 +74,8 @@ def main():
                  'monthly_j':(((an.get('monthly') or {}).get('kdj') or {}).get('j')),
                  'monthly_kdj_state':(((an.get('monthly') or {}).get('kdj') or {}).get('state')),
                  'monthly_macd_hist':(((an.get('monthly') or {}).get('macd') or {}).get('hist')),
-                 'monthly_macd_hist_direction':(((an.get('monthly') or {}).get('macd') or {}).get('hist_direction'))}
+                 'monthly_macd_hist_direction':(((an.get('monthly') or {}).get('macd') or {}).get('hist_direction')),
+                 'price_volume':an.get('price_volume') or {'available':False}}
         summary.append(row)
     dest=HOLD/f'{a.date}_holding_technical_summary.json'; dest.write_text(json.dumps(summary,ensure_ascii=False,indent=2),encoding='utf-8')
     print(dest)

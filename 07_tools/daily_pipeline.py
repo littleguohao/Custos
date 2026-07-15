@@ -212,6 +212,7 @@ def main():
     # trade date must never skip the entire holding/risk/chief chain.
     stages.append(apply_manual_position_updates(args.date))
     stages.append(run([str(PY), str(TOOLS / "batch_holding_technical.py"), "--date", args.date], "batch_holding_technical"))
+    stages.append(run([str(PY), str(TOOLS / "b1_holding_state.py"), "--date", args.date], "b1_holding_state"))
     stages.append(run([str(PY), str(TOOLS / "portfolio_review_report.py"), "--date", args.date], "portfolio_review_report"))
     stages.append(run([str(PY), str(TOOLS / "theme_tracker_report.py"), "--date", args.date], "theme_tracker_report"))
     # Normalize skill evidence before chief_decision so risk evidence exists

@@ -72,13 +72,17 @@ def main() -> None:
     holding_risks = []
     for h in holding_reviews:
         action = h.get("action")
-        if action in {"减仓", "止损", "清仓"}:
+        b1 = h.get("b1_holding_state") or {}
+        b1_priority = b1.get("final_priority")
+        if action in {"减仓", "止损", "清仓"} or b1_priority in {"P0", "P1"}:
+            normalized_action = action if action in {"减仓", "止损", "清仓"} else ("清仓" if b1_priority == "P0" else "减仓")
             holding_risks.append({
                 "code": h.get("code"), "name": h.get("name", ""),
-                "risk_type": "破位" if "破位" in str(h.get("box_position")) else "亏损扩大",
-                "action": action, "priority": "高" if action in {"止损", "清仓"} else "中",
+                "risk_type": "B1持仓结构" if b1_priority else ("破位" if "破位" in str(h.get("box_position")) else "亏损扩大"),
+                "action": normalized_action, "priority": "高" if b1_priority == "P0" or normalized_action in {"止损", "清仓"} else "中",
                 "reason": "；".join(h.get("reason") or ["portfolio_review触发风控"]),
                 "evidence_ref": str(DATA / "holdings" / f"{date}_holding_review.json"),
+                "b1_signal_refs": [x.get("signal") for x in b1.get("signals", [])],
             })
     risk = RiskFlagAdapter.adapt(date, evidences=evidences, candidates=candidates, buy_plans=plans, existing=holding_risks)
     dump(DATA / "risk" / f"{date}_risk_decision.json", risk)

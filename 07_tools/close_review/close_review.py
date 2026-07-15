@@ -9,6 +9,9 @@ import sys
 from datetime import date, datetime
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from market_timing.b1_holding_state import evaluate as evaluate_b1_holding
+
 try:
     from .holding_bbi import bbi_basis, intraday_bbi_basis
     from .holding_structure import n_structure_basis
@@ -225,7 +228,7 @@ def risk_map(target_date: str) -> dict[str, list[dict]]:
     return out
 
 
-def classify(position: dict, tech: dict, risks: list[dict], quote: dict, bearish_regime: bool) -> tuple[str, str, str]:
+def classify(position: dict, tech: dict, risks: list[dict], quote: dict, bearish_regime: bool, b1_state: dict | None = None) -> tuple[str, str, str]:
     price = optional_finite(quote.get("price"))
     if price is None:
         return "P1", "等待当日行情/仅风险收缩", "当日实时行情缺失；禁止使用持仓快照旧价生成尾盘动作"
@@ -238,6 +241,8 @@ def classify(position: dict, tech: dict, risks: list[dict], quote: dict, bearish
     structure = n_structure_basis(tech, price)
     structure_reason = f"{structure['state']}；{structure['reminder']}"
     high_risk = any(x.get("priority") == "高" for x in risks)
+    if b1_state and b1_state.get("final_priority") in {"P0", "P1", "P2"}:
+        return b1_state["final_priority"], b1_state["final_action"], b1_state["final_reason"]
     if structure.get("signal") == "structural_clear":
         return "P0", "N型前低清仓评估", structure_reason
     if structure.get("signal") == "pullback_failure":
@@ -295,9 +300,11 @@ def main() -> None:
         market_value = price * qty if price is not None else None
         pnl_pct = price / cost - 1 if price is not None and cost else None
         position_pct = market_value / total_assets if market_value is not None and total_assets else None
-        revalued.append({"code": code, "price": price, "pnl_pct": pnl_pct, "position_pct": position_pct, "market_value": market_value, "bbi": intraday_bbi_basis(tech.get(code, {}), price, str(tech.get(code, {}).get("latest_date") or "") or None), "n_structure": n_structure_basis(tech.get(code, {}), price)})
-        priority, action, reason = classify(p, tech.get(code, {}), risks.get(code, []), quote, regime == "空头")
-        actions.append({"priority": priority, "code": code, "name": p.get("名称", ""), "action": action, "reason": reason})
+        b1_input = {**tech.get(code, {}), "holding_pnl_pct": pnl_pct}
+        b1_state = evaluate_b1_holding(b1_input, regime, price, str(quote.get("date") or target_date))
+        revalued.append({"code": code, "price": price, "pnl_pct": pnl_pct, "position_pct": position_pct, "market_value": market_value, "bbi": intraday_bbi_basis(tech.get(code, {}), price, str(tech.get(code, {}).get("latest_date") or "") or None), "n_structure": n_structure_basis(tech.get(code, {}), price), "b1_holding_state": b1_state})
+        priority, action, reason = classify(p, tech.get(code, {}), risks.get(code, []), quote, regime == "空头", b1_state)
+        actions.append({"priority": priority, "code": code, "name": p.get("名称", ""), "action": action, "reason": reason, "b1_holding_state": b1_state})
     actions.sort(key=lambda x: (x["priority"], x["code"]))
     revalued_map = {x["code"]: x for x in revalued}
     total_position = sum(x["position_pct"] for x in revalued if x["position_pct"] is not None) if all(x["position_pct"] is not None for x in revalued) else None
@@ -344,7 +351,8 @@ def main() -> None:
               "## 4. 操作建议", "",
               "- 0AMV处于实质空头区间，所有反弹优先按减仓机会处理，不作为加仓、摊低成本或趋势反转依据。",
               "- BBI持仓依据：BBI上方仅代表技术持有结构有效；首日跌破观察次日收回；连续两日收盘跌破进入清仓评估。0AMV、硬止损、重大风险和单票超限优先。",
-              "- N型前低：已完成上升N型的第二个低点是结构清仓位；跌破表示结构失效，优先级高于BBI。未识别到完整N型时明确标为待确认。",
+              "- N型结构：L1是主结构硬清仓位，L2是更高回踩结构位；L2失守表示N型尝试失败，不等同于L1硬位失守。",
+              "- B1统一持仓状态：动作由硬止损、N型L1/L2、BBI、趋势箱体、量价、利润保护依次裁决；空头0AMV不得被个股信号放宽。",
               "- 精确减仓数量：B1默认盘中不交易，持仓基线确认且当日全持仓行情齐全时允许评估；若用户告知或成交台账出现目标日成交，立即改用最新持仓。",
               "- 加仓/新开仓：继续禁止；需0AMV退出空头且大盘、板块、个股结构修复，并通过完整市场质量门。", "",
               "## 5. 运行权限", "",

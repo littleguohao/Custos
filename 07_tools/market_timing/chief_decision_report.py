@@ -21,6 +21,7 @@ def main():
     if not risk_path.exists(): raise SystemExit(f'mandatory RiskDecision missing: {risk_path}')
     mt=mt_path.read_text(encoding='utf-8') if mt_path.exists() else ''
     risk=load(risk_path,{}); holdings=load(DATA/'holdings'/f'{a.date}_holding_review.json',[]); plans=load(DATA/'buy_strategy'/f'{a.date}_buy_plan_normalized.json',[]); sectors=load(DATA/'sectors'/f'{a.date}_sector_state.json',[]); gate=load(DATA/'quality'/f'{a.date}_runtime_gate.json',{})
+    b1_rows=load(DATA/'holdings'/f'{a.date}_b1_holding_state.json',[]); b1_by_code={bare(x.get('code')):x for x in b1_rows}
     handoff_gate=load(DATA/'agent_handoffs'/a.date/'handoff_gate.json',{})
     specialist_evidence={}
     expected_request_id=handoff_gate.get('request_id')
@@ -34,7 +35,7 @@ def main():
     technical_status=gate.get('technical_freshness',{}).get('status','missing')
     for h in holdings:
         code=bare(h.get('code')); rlist=risk_by_code.get(code,[]); high=[x for x in rlist if x.get('priority')=='高']
-        action=h.get('action','观察'); priority=h.get('priority','P3'); reasons=list(h.get('reason') or [])
+        b1=b1_by_code.get(code,{}); action=b1.get('final_action') or h.get('action','观察'); priority=b1.get('final_priority') or h.get('priority','P3'); reasons=[b1.get('final_reason')] if b1.get('final_reason') else list(h.get('reason') or [])
         if high:
             priority='P1'; actions=[x.get('action') for x in high]
             if '清仓' in actions: action='清仓'
@@ -45,7 +46,7 @@ def main():
         elif technical_status!='confirmed':
             action='等待行情更新'
             reasons=['目标日持仓技术行情未确认，不沿用旧技术动作']
-        holding_actions.append({'priority':priority,'code':code,'name':h.get('name',''),'action':action,'reasons':dedupe(reasons),'risk_refs':rlist})
+        holding_actions.append({'priority':priority,'code':code,'name':h.get('name',''),'action':action,'reasons':dedupe(reasons),'risk_refs':rlist,'b1_holding_state':b1,'b1_reference_action':b1.get('final_action'),'b1_reference_priority':b1.get('final_priority'),'execution_status':'current' if technical_status=='confirmed' else 'waiting_for_current_technical'})
     holding_actions.sort(key=lambda x:(x['priority'],x['code']))
     buy_actions=[]
     for p in plans:
@@ -104,7 +105,7 @@ def main():
       'event_evidence':event_evidence,
       'allowed_actions':allowed,'forbidden_actions':forbidden,'holding_actions':holding_actions,'buy_actions':buy_actions,
       'watchlist':main_sectors,'tomorrow_validation':['市场数据质量是否改善','主线是否形成并保持支持状态','风险持仓是否修复关键结构'], 
-      'risk_notice':'RiskDecision为强制输入；专业Agent证据只可追加，任何风险否决均不得被覆盖。','sources':{'risk_decision':str(risk_path),'runtime_gate':str(DATA/'quality'/f'{a.date}_runtime_gate.json'),'specialist_handoff_gate':str(DATA/'agent_handoffs'/a.date/'handoff_gate.json')}}
+      'risk_notice':'RiskDecision为强制输入；B1持仓状态只可在硬风险优先级下裁决；专业Agent证据只可追加，任何风险否决均不得被覆盖。','sources':{'risk_decision':str(risk_path),'b1_holding_state':str(DATA/'holdings'/f'{a.date}_b1_holding_state.json'),'runtime_gate':str(DATA/'quality'/f'{a.date}_runtime_gate.json'),'specialist_handoff_gate':str(DATA/'agent_handoffs'/a.date/'handoff_gate.json')}}
     out_json=DATA/'decisions'/f'{a.date}_chief_decision.json'; out_json.parent.mkdir(parents=True,exist_ok=True); out_json.write_text(json.dumps(decision,ensure_ascii=False,indent=2),encoding='utf-8')
     lines=['# chief_decision 每日总控交易计划','',f'日期：{a.date}','', '## 1. 总控结论','',f'- 市场状态：**{state}**（{score}）',f'- 总仓位建议：**{position}**',f'- 新开仓权限：**{permission}**',f"- 风控等级：**{decision['risk_level']}**",f"- 持仓时效：**{decision['position_freshness'].get('status','未知')}** — {decision['position_freshness'].get('reason','')}",'', '## 2. 持仓处理优先级','', '| 优先级 | 代码 | 名称 | 动作 | 理由 |','|---|---|---|---|---|']
     for x in holding_actions: lines.append(f"| {x['priority']} | {x['code']} | {x['name']} | {x['action']} | {'；'.join(x['reasons'])} |")
