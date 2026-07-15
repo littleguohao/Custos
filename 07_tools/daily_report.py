@@ -88,6 +88,8 @@ def adjustment_with_bbi(row:dict[str,Any],event:dict[str,Any]|None)->str:
     structure=n_structure_basis(row,row.get('close'))
     if structure.get('signal')=='structural_clear':
         return '结构风控：收盘失守N型前低，结构失效，进入清仓/退出评估；优先级高于BBI'
+    if structure.get('signal')=='pullback_failure':
+        return '结构收紧：更高回踩低点失守，N型尝试失败；主结构前低未破，进入减仓/清仓评估'
     above=row.get('above_bbi'); below_days=row.get('consecutive_closes_below_bbi')
     try: days=int(below_days or 0)
     except (TypeError,ValueError): days=0

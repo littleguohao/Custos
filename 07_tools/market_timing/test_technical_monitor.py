@@ -27,8 +27,9 @@ class NStructureTests(unittest.TestCase):
         closes = [11.5,10.5,9.5,8.5,7.5,8.5,9.5,10.5,12.5,11.5,10.5,8.8,10,11,13.5,14.5,15.5,16.5]
         result = n_structure_state(frame(lows, highs, closes), left=2, right=2)
         self.assertTrue(result["available"])
-        self.assertEqual(result["prior_low"], 8.0)
-        self.assertEqual(result["breakout_level"], 13.0)
+        self.assertEqual(result["prior_low"], 7.5)
+        self.assertEqual(result["pullback_low"], 8.8)
+        self.assertEqual(result["breakout_level"], 12.5)
         self.assertEqual(result["confirmed_date"], "2026-01-15")
 
     def test_lower_second_low_is_not_rising_n(self):

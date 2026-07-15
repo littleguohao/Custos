@@ -35,6 +35,11 @@ def n_structure_basis(row: dict[str, Any], price: Any) -> dict[str, Any]:
         }
     distance = (current / level - 1) * 100 if level else None
     breached = current < level
+    pullback_low = structure.get("pullback_low")
+    try:
+        pullback_breached = not breached and pullback_low is not None and current < float(pullback_low)
+    except (TypeError, ValueError):
+        pullback_breached = False
     state = (
         f"N型前低 {prior_low_date or '日期待确认'} {_number(level)}；"
         f"当前价{'上方' if not breached else '下方'}（距离{_number(distance)}%）"
@@ -44,11 +49,19 @@ def n_structure_basis(row: dict[str, Any], price: Any) -> dict[str, Any]:
         "prior_low": level,
         "prior_low_date": prior_low_date,
         "breakout_level": structure.get("breakout_level"),
+        "pullback_low": pullback_low,
+        "pullback_low_date": structure.get("pullback_low_date"),
         "confirmed_date": structure.get("confirmed_date"),
         "current_price": current,
         "distance_pct": distance,
         "breached": breached,
         "state": state,
-        "reminder": "N型前低已失守，结构失效，触发清仓/退出评估" if breached else "结构未失效；该位置是硬清仓位，不构成加仓理由",
-        "signal": "structural_clear" if breached else "structure_hold",
+        "reminder": (
+            "N型主结构前低已失守，触发硬清仓/退出评估"
+            if breached else
+            f"更高回踩低点{_number(pullback_low)}已失守，N型尝试失败，进入收紧/清仓评估；主结构前低尚未失守"
+            if pullback_breached else
+            "主结构与更高回踩低点均未失守；该位置不构成加仓理由"
+        ),
+        "signal": "structural_clear" if breached else "pullback_failure" if pullback_breached else "structure_hold",
     }

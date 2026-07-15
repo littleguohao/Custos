@@ -83,7 +83,7 @@ class CloseReviewValidationTests(unittest.TestCase):
             {"单位成本": 8, "持有盈亏率": 0.2}, tech, [], {"price": 9.4, "change_pct": -1}, False
         )
         self.assertEqual((priority, action), ("P0", "N型前低清仓评估"))
-        self.assertIn("结构失效", reason)
+        self.assertIn("主结构前低已失守", reason)
 
 
 if __name__ == "__main__":

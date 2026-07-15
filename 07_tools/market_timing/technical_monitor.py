@@ -211,10 +211,11 @@ def bbi_state(df: pd.DataFrame) -> dict[str, Any]:
 
 
 def n_structure_state(df: pd.DataFrame, left: int = 3, right: int = 3) -> dict[str, Any]:
-    """Find the latest confirmed rising N structure without look-ahead pivots.
+    """Find the latest rising-N structure using confirmed closing-price pivots.
 
-    A completed structure is L1 -> H1 -> higher L2 -> close breakout above H1.
-    L2 is the structural prior low and the B1 hard invalidation level.
+    L1 is the major closing low, H1 the rebound closing high, and L2 the
+    higher pullback closing low. L1 is the hard structural floor; L2 is the
+    nearer tactical structure level. A later close above H1 confirms the N.
     """
     if len(df) < left + right + 8:
         return {"available": False, "reason": "K线数量不足以确认N型结构"}
@@ -222,13 +223,11 @@ def n_structure_state(df: pd.DataFrame, left: int = 3, right: int = 3) -> dict[s
     pivot_lows: list[int] = []
     pivot_highs: list[int] = []
     for i in range(left, len(x) - right):
-        low_window = x["low"].iloc[i-left:i+right+1]
-        high_window = x["high"].iloc[i-left:i+right+1]
-        low = float(x.at[i, "low"])
-        high = float(x.at[i, "high"])
-        if low == float(low_window.min()) and int((low_window == low).sum()) == 1:
+        close_window = x["close"].iloc[i-left:i+right+1]
+        close = float(x.at[i, "close"])
+        if close == float(close_window.min()) and int((close_window == close).sum()) == 1:
             pivot_lows.append(i)
-        if high == float(high_window.max()) and int((high_window == high).sum()) == 1:
+        if close == float(close_window.max()) and int((close_window == close).sum()) == 1:
             pivot_highs.append(i)
 
     latest = None
@@ -240,36 +239,40 @@ def n_structure_state(df: pd.DataFrame, left: int = 3, right: int = 3) -> dict[s
         highs = [i for i in pivot_highs if l1 < i < l2]
         if not highs:
             continue
-        h1 = max(highs, key=lambda i: float(x.at[i, "high"]))
-        if float(x.at[l2, "low"]) <= float(x.at[l1, "low"]):
+        h1 = max(highs, key=lambda i: float(x.at[i, "close"]))
+        if float(x.at[l2, "close"]) <= float(x.at[l1, "close"]):
             continue
-        breakout_rows = x.index[(x.index > l2) & (x["close"] > float(x.at[h1, "high"]))]
-        if len(breakout_rows) == 0:
-            continue
-        breakout = int(breakout_rows[0])
+        breakout_rows = x.index[(x.index > l2) & (x["close"] > float(x.at[h1, "close"]))]
+        breakout = int(breakout_rows[0]) if len(breakout_rows) else None
         latest = (l1, h1, l2, breakout)
         break
 
     if latest is None:
-        return {"available": False, "reason": "未发现已完成的上升N型结构"}
+        return {"available": False, "reason": "未发现已确认分型的上升N型结构"}
     l1, h1, l2, breakout = latest
     current_close = float(x["close"].iloc[-1])
-    prior_low = float(x.at[l2, "low"])
-    distance_pct = (current_close / prior_low - 1) * 100 if prior_low else None
+    origin_low = float(x.at[l1, "close"])
+    pullback_low = float(x.at[l2, "close"])
+    swing_high = float(x.at[h1, "close"])
+    origin_extreme_low = float(x["low"].iloc[max(0,l1-left):min(len(x),l1+right+1)].min())
+    distance_pct = (current_close / origin_low - 1) * 100 if origin_low else None
     return {
         "available": True,
-        "pattern": "L1-H1-higher_L2-breakout",
-        "first_low": round(float(x.at[l1, "low"]), 4),
-        "first_low_date": x.at[l1, "date"].strftime("%Y-%m-%d"),
-        "breakout_level": round(float(x.at[h1, "high"]), 4),
+        "pattern": "L1-H1-higher_L2" + ("-breakout" if breakout is not None else "-candidate"),
+        "status": "confirmed" if breakout is not None else "candidate",
+        "prior_low": round(origin_low, 4),
+        "prior_low_date": x.at[l1, "date"].strftime("%Y-%m-%d"),
+        "origin_extreme_low": round(origin_extreme_low, 4),
+        "breakout_level": round(swing_high, 4),
         "breakout_level_date": x.at[h1, "date"].strftime("%Y-%m-%d"),
-        "prior_low": round(prior_low, 4),
-        "prior_low_date": x.at[l2, "date"].strftime("%Y-%m-%d"),
-        "confirmed_date": x.at[breakout, "date"].strftime("%Y-%m-%d"),
+        "pullback_low": round(pullback_low, 4),
+        "pullback_low_date": x.at[l2, "date"].strftime("%Y-%m-%d"),
+        "confirmed_date": x.at[breakout, "date"].strftime("%Y-%m-%d") if breakout is not None else None,
         "current_close": round(current_close, 4),
         "distance_pct": round(distance_pct, 4) if distance_pct is not None else None,
-        "close_above": bool(current_close >= prior_low),
-        "breached_on_close": bool(current_close < prior_low),
+        "close_above": bool(current_close >= origin_low),
+        "breached_on_close": bool(current_close < origin_low),
+        "pullback_breached_on_close": bool(current_close < pullback_low),
         "pivot_window": {"left": left, "right": right},
     }
 

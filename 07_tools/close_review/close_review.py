@@ -240,6 +240,8 @@ def classify(position: dict, tech: dict, risks: list[dict], quote: dict, bearish
     high_risk = any(x.get("priority") == "高" for x in risks)
     if structure.get("signal") == "structural_clear":
         return "P0", "N型前低清仓评估", structure_reason
+    if structure.get("signal") == "pullback_failure":
+        return "P1", "N型回踩低点失守评估", structure_reason
     if high_risk or "破位" in box or pnl <= -0.07:
         reasons = [str(x.get("reason") or x.get("risk_type")) for x in risks if x.get("priority") == "高"]
         return "P1", "减仓/止损评估", ("；".join(reasons) or f"趋势{trend}、位置{box}、盈亏{pnl:+.1%}") + f"；{bbi_reason}"
