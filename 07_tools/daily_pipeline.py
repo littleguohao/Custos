@@ -25,6 +25,7 @@ import json
 import os
 import subprocess
 import sys
+import shutil
 from pathlib import Path
 
 BASE = Path(r"C:\Users\gh\.openclaw-tdxclaw\workspace\strategy_team")
@@ -162,7 +163,13 @@ def main():
 
     # 3. Overseas market and RSS discovery collectors. The 09:05 production
     # run reuses the 08:50 collection so network waits stay outside rendering.
-    if args.reuse_discovery:
+    if args.session_type == "intraday_1445":
+        stages.extend([
+            {"stage": "overseas_market_collector", "ok": True, "skipped": True, "reason": "intraday reports do not consume news discovery"},
+            {"stage": "rss_collector", "ok": True, "skipped": True, "reason": "intraday reports do not consume news discovery"},
+            {"stage": "rss_filter", "ok": True, "skipped": True, "reason": "intraday reports do not consume news discovery"},
+        ])
+    elif args.reuse_discovery:
         stages.extend([
             {"stage": "overseas_market_collector", "ok": True, "skipped": True, "reason": "08:50 discovery reused"},
             {"stage": "rss_collector", "ok": True, "skipped": True, "reason": "08:50 discovery reused"},
@@ -213,6 +220,18 @@ def main():
     stages.append(specialist_validation)
 
     stages.append(run([str(PY), str(TOOLS / "chief_decision_report.py"), "--date", args.date], "chief_decision_report"))
+    if args.session_type == "premarket":
+        chief_source = DATA_DIR / "decisions" / f"{args.date}_chief_decision.json"
+        chief_snapshot = DATA_DIR / "decisions" / f"{args.date}_premarket_chief_decision.json"
+        if chief_source.exists():
+            shutil.copy2(chief_source, chief_snapshot)
+            stages.append({"stage": "snapshot_premarket_chief_decision", "ok": True, "path": str(chief_snapshot)})
+        else:
+            stages.append({"stage": "snapshot_premarket_chief_decision", "ok": False, "reason": "chief decision missing"})
+    if args.session_type == "postclose":
+        stages.append(run([str(PY), str(BASE / "07_tools" / "news" / "postclose_news_digest.py"), "--date", args.date], "postclose_news_digest", required=False))
+        stages.append(run([str(PY), str(BASE / "07_tools" / "close_review" / "execution_review.py"), "--date", args.date], "execution_review"))
+        stages.append(run([str(PY), str(BASE / "07_tools" / "close_review" / "review_enrichment.py"), "--date", args.date], "review_enrichment"))
     stages.append(run([str(PY), str(BASE / "07_tools" / "daily_report.py"), "--date", args.date], "daily_report"))
     stages.append(run([str(PY), str(TOOLS / "wechat_summary.py"), "--date", args.date], "wechat_summary", required=False))
 

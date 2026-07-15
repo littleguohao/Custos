@@ -58,7 +58,7 @@
   "market_keywords": ["A股", "港股", "美股", "纳斯达克", "标普", "道琼斯", "恒生", "人民币", "美元", "美债", "黄金", "原油", "风险偏好"],
   "negative_spam_keywords": ["how to invest", "strong buy", "top stocks to buy", "dividend stocks", "retirement portfolio"],
   "rules": [
-    "published_at缺失时不得标为confirmed，只能作为低优先级候选",
+    "published_at缺失时直接排除，不得进入盘前或盘后正式报告候选",
     "意见征集属于consultation_not_effective，不得提升为已实施政策",
     "C级来源必须命中持仓、主线或高优先主题，否则不进入盘前候选",
     "筛选结果只影响信息分析优先级，不能直接提高交易权限"

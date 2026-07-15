@@ -165,9 +165,12 @@ def main():
     if not chief.get('holding_actions'): lines.append('| - | 持仓数据缺失 | - | BBI/N型前低待确认 | 不提高交易权限 | - | - |')
     lines += ['', '## 5. 主线、机会与风险','', '| 方向 | 阶段 | 交易许可 | 理由 |','|---|---|---|---|']
     supported=[x for x in sectors if x.get('trade_permission')=='支持']
-    for x in supported[:5]: lines.append(f"| {clean(x.get('sector'))} | {clean(x.get('stage'))} | 支持 | {clean(x.get('reason'))} |")
+    for x in supported[:5]:
+        evidence_count=sum(1 for e in market_events if clean(x.get('sector')).split('/')[0] in (e.get('matched_themes') or []))
+        evidence=f"技术阶段：{clean(x.get('stage'))}；隔夜事件候选{evidence_count}条；资金流/龙头结构缺失时持续性为unavailable"
+        lines.append(f"| {clean(x.get('sector'))} | {clean(x.get('stage'))} | 支持 | {evidence}；次日验证价格、成交与核心锚点，失效条件为板块转弱或催化未获价格确认 |")
     if not supported: lines.append('| 暂无 | 待确认 | 仅观察 | 没有获得结构化交易许可的板块 |')
-    lines += ['', '### 风险提示','']
+    lines += ['', '- 主线识别规则：事件热度不能替代价格、成交、涨停梯队和核心锚点；证据不全时只列观察方向，不认定为强主线。', '', '### 风险提示','']
     for x in chief.get('forbidden_actions',[]): lines.append(f'- **禁止**：{x}')
     if not chief.get('forbidden_actions'): lines.append('- 无新增禁止项；仍须遵守基础风控。')
     snapshot_date=freshness.get('snapshot_date') or '未知'

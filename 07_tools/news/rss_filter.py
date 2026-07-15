@@ -73,6 +73,8 @@ def main():
  names,codes=entities(a.date); scored=[]; excluded={}
  for x in raw:
   pub=parse_dt(x.get('published_at')); text=(str(x.get('title') or '')+' '+str(x.get('summary') or '')).lower(); tier=x.get('source_tier','C'); cat=x.get('category','')
+  if pub is None:
+   excluded['published_at_missing']=excluded.get('published_at_missing',0)+1; continue
   if pub and (pub>asof+timedelta(minutes=10) or pub<cutoff): excluded['outside_window']=excluded.get('outside_window',0)+1; continue
   hits_names=sorted(n for n in names if n and n.lower() in text); hits_codes=sorted(c for c in codes if c in text)
   themes=[]
@@ -80,7 +82,7 @@ def main():
    if any(w.lower() in text for w in words): themes.append(theme)
   market_hits=[w for w in cfg.get('market_keywords',[]) if w.lower() in text]
   spam=[w for w in cfg.get('negative_spam_keywords',[]) if w.lower() in text]
-  score=cfg['tier_weight'].get(tier,0)+cfg['category_weight'].get(cat,0)+(45 if hits_names or hits_codes else 0)+min(36,len(themes)*12)+min(18,len(market_hits)*6)-(18 if spam else 0)-(10 if pub is None else 0)
+  score=cfg['tier_weight'].get(tier,0)+cfg['category_weight'].get(cat,0)+(45 if hits_names or hits_codes else 0)+min(36,len(themes)*12)+min(18,len(market_hits)*6)-(18 if spam else 0)
   if tier=='C' and not (hits_names or hits_codes or themes or market_hits): excluded['c_tier_irrelevant']=excluded.get('c_tier_irrelevant',0)+1; continue
   y=dict(x); y.update({'relevance_score':score,'matched_holdings_or_pool':{'names':hits_names,'codes':hits_codes},'matched_themes':themes,'matched_market_keywords':market_hits,'filter_session':a.session_type,'filter_cutoff':cutoff.isoformat()})
   src=reg.get(x.get('source_id'),{}); y['policy_stage']=src.get('policy_stage');
