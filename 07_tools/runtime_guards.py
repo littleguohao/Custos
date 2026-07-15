@@ -17,6 +17,20 @@ def load_json(path: Path, default: Any):
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
 
 
+def official_year_status(d: date, cfg: dict[str, Any]) -> dict[str, Any] | None:
+    year = (cfg.get("official_years") or {}).get(str(d.year))
+    if not year:
+        return None
+    source = year.get("source_url") or str(CALENDAR_CONFIG)
+    if d.weekday() >= 5:
+        return {"is_trading_day": False, "reason": "周末休市", "quality": "confirmed", "source": source}
+    day = d.isoformat()
+    for item in year.get("closed_ranges") or []:
+        if item.get("start") <= day <= item.get("end"):
+            return {"is_trading_day": False, "reason": f"交易所官方{item.get('name', '节假日')}休市安排", "quality": "confirmed", "source": source}
+    return {"is_trading_day": True, "reason": "交易所官方年度安排：周一至周五且不在休市区间", "quality": "confirmed", "source": source}
+
+
 def trading_day_status(day: str) -> dict[str, Any]:
     d = date.fromisoformat(day)
     cfg = load_json(CALENDAR_CONFIG, {})
@@ -25,6 +39,9 @@ def trading_day_status(day: str) -> dict[str, Any]:
     if day in overrides:
         item = overrides[day]
         return {"date": day, "is_trading_day": bool(item["is_trading_day"]), "reason": item.get("reason", "配置覆盖"), "quality": "confirmed", "source": str(CALENDAR_CONFIG)}
+    official = official_year_status(d, cfg)
+    if official is not None:
+        return {"date": day, **official}
     if day in set(cache.get("trading_days", [])):
         return {"date": day, "is_trading_day": True, "reason": "本地通达信交易日历缓存", "quality": "confirmed", "source": str(CALENDAR_CACHE)}
     if day in set(cache.get("non_trading_days", [])):

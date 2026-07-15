@@ -1,8 +1,25 @@
 {
-  "version": 2,
+  "version": 3,
   "market": "China A-share",
   "timezone": "Asia/Shanghai",
-  "note": "人工 overrides 优先；其后使用本地通达信 get_trading_dates 缓存。周末自动休市，缓存覆盖范围外的工作日保持未知。刷新失败时保留旧缓存。",
+  "note": "人工 overrides 优先；已登记年度按交易所官方休市区间执行周一至周五开市规则；其他年份再使用本地通达信缓存，未覆盖工作日保持未知。",
+  "official_years": {
+    "2026": {
+      "rule": "Monday-Friday excluding official closed ranges",
+      "source_name": "上海证券交易所休市安排",
+      "source_url": "https://www.sse.com.cn/disclosure/dealinstruc/closed/",
+      "verified_at": "2026-07-15",
+      "closed_ranges": [
+        {"name": "元旦", "start": "2026-01-01", "end": "2026-01-03"},
+        {"name": "春节", "start": "2026-02-15", "end": "2026-02-23"},
+        {"name": "清明节", "start": "2026-04-04", "end": "2026-04-06"},
+        {"name": "劳动节", "start": "2026-05-01", "end": "2026-05-05"},
+        {"name": "端午节", "start": "2026-06-19", "end": "2026-06-21"},
+        {"name": "中秋节", "start": "2026-09-25", "end": "2026-09-27"},
+        {"name": "国庆节", "start": "2026-10-01", "end": "2026-10-07"}
+      ]
+    }
+  },
   "source": {
     "provider": "local_tdx_http",
     "method": "get_trading_dates",

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Filter normalized RSS evidence into a bounded, relevant, auditable candidate set."""
 from __future__ import annotations
-import argparse, hashlib, json, math, re
+import argparse, hashlib, json, math, re, sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
@@ -9,7 +9,9 @@ from zoneinfo import ZoneInfo
 
 BASE=Path(__file__).resolve().parents[2]; DATA=BASE/'01_data'; GOV=BASE/'00_governance'; LOG=BASE/'06_logs'/'rss'
 CFG=GOV/'RSS_FILTER_CONFIG.json'; REG=GOV/'RSS_SOURCE_REGISTRY.json'
-CAL=GOV/'CN_TRADING_CALENDAR.json'; CAL_CACHE=DATA/'market'/'CN_TRADING_CALENDAR_CACHE.json'; SH=ZoneInfo('Asia/Shanghai')
+SH=ZoneInfo('Asia/Shanghai')
+sys.path.insert(0,str(BASE/'07_tools'))
+from runtime_guards import previous_confirmed_trading_day
 
 def load(p,default):
  try:return json.loads(p.read_text(encoding='utf-8-sig')) if p.exists() else default
@@ -28,12 +30,7 @@ def parse_dt(s):
 def bare(code): return str(code or '').split('.')[0]
 
 def premarket_window(day, asof, fallback_hours):
- cal=load(CAL,{})
- cache=load(CAL_CACHE,{})
- confirmed=cache.get('trading_days') or []
- confirmed += [d for d,v in cal.get('overrides',{}).items() if v.get('is_trading_day') is True]
- confirmed=sorted(set(confirmed))
- previous=max((x for x in confirmed if x<day),default=None)
+ previous=previous_confirmed_trading_day(day)
  if not previous:return asof-timedelta(hours=fallback_hours),None
  start=datetime.fromisoformat(previous+'T15:00:00').replace(tzinfo=SH).astimezone(timezone.utc)
  return start,previous

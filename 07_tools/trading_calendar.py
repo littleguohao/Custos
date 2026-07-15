@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any
 from urllib import request
 
+from runtime_guards import trading_day_status
+
 BASE = Path(__file__).resolve().parents[1]
 CONFIG = BASE / "00_governance" / "CN_TRADING_CALENDAR.json"
 CACHE = BASE / "01_data" / "market" / "CN_TRADING_CALENDAR_CACHE.json"
@@ -122,6 +124,7 @@ def refresh(start: date, end: date, endpoint: str, market: str, timeout: int) ->
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--check-date", help="return the deterministic trading-day status without refreshing TDX")
     parser.add_argument("--start")
     parser.add_argument("--end")
     parser.add_argument("--endpoint", default=DEFAULT_ENDPOINT)
@@ -129,6 +132,12 @@ def main() -> None:
     parser.add_argument("--timeout", type=int, default=10)
     parser.add_argument("--require-refresh", action="store_true")
     args = parser.parse_args()
+    if args.check_date:
+        result = trading_day_status(date.fromisoformat(args.check_date).isoformat())
+        print(json.dumps(result, ensure_ascii=True, indent=2))
+        if result["is_trading_day"] is None:
+            raise SystemExit(2)
+        return
     default_start, default_end = default_range(date.today())
     start = date.fromisoformat(args.start) if args.start else default_start
     end = date.fromisoformat(args.end) if args.end else default_end
