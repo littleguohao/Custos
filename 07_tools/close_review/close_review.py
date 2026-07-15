@@ -41,7 +41,7 @@ def latest(pattern: str, folder: Path) -> Path | None:
 def finite(value, default=0.0):
     try:
         v = float(value)
-        return default if math.isnan(v) else v
+        return default if not math.isfinite(v) else v
     except (TypeError, ValueError):
         return default
 
@@ -49,7 +49,7 @@ def finite(value, default=0.0):
 def optional_finite(value):
     try:
         v = float(value)
-        return None if math.isnan(v) else v
+        return None if not math.isfinite(v) else v
     except (TypeError, ValueError):
         return None
 
@@ -60,6 +60,82 @@ def price_text(value, digits=2):
 
 def pct_text(value, digits=2):
     return "缺失" if value is None else f"{value:+.{digits}f}%"
+
+
+def normalized_code(value) -> str:
+    return str(value or "").split(".")[0]
+
+
+def json_safe(value):
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {key: json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [json_safe(item) for item in value]
+    return value
+
+
+def validate_quote_snapshot(target_date: str, positions: list[dict], snapshot: dict) -> list[str]:
+    errors: list[str] = []
+    if snapshot.get("as_of_date") != target_date:
+        errors.append(f"snapshot_date={snapshot.get('as_of_date')!r}, expected={target_date}")
+    captured_at = str(snapshot.get("captured_at") or "")
+    if not captured_at.startswith(target_date):
+        errors.append("captured_at missing or not on target date")
+    if str(snapshot.get("source") or "").lower() in {"", "missing", "缺失"}:
+        errors.append("quote source missing")
+
+    quotes = {normalized_code(x.get("code")): x for x in snapshot.get("quotes", [])}
+    for position in positions:
+        code = normalized_code(position.get("代码"))
+        quote = quotes.get(code)
+        if not quote:
+            errors.append(f"holding quote missing: {code}")
+            continue
+        if quote.get("date") != target_date:
+            errors.append(f"holding quote date invalid: {code}")
+        if not str(quote.get("time") or ""):
+            errors.append(f"holding quote time missing: {code}")
+        for field in ("price", "previous_close", "change_pct"):
+            if optional_finite(quote.get(field)) is None:
+                errors.append(f"holding quote {field} missing: {code}")
+
+    indices = {normalized_code(x.get("code")): x for x in snapshot.get("indices", [])}
+    for code in ("000001", "399001", "399006"):
+        quote = indices.get(code)
+        if not quote:
+            errors.append(f"index quote missing: {code}")
+            continue
+        if quote.get("date") != target_date:
+            errors.append(f"index quote date invalid: {code}")
+        if not str(quote.get("time") or ""):
+            errors.append(f"index quote time missing: {code}")
+        for field in ("price", "change_pct"):
+            if optional_finite(quote.get(field)) is None:
+                errors.append(f"index quote {field} missing: {code}")
+    return errors
+
+
+def validate_report(target_date: str, positions: list[dict], report: str, gate: dict) -> list[str]:
+    errors: list[str] = []
+    required_text = [
+        f"# 14:45 收盘前操作建议 — {target_date}",
+        "## 0. 主要指数快照",
+        "## 1. 当日行情重估持仓",
+        "## 2. 动态持仓优先级",
+        "## 5. 运行权限",
+    ]
+    for text in required_text:
+        if text not in report:
+            errors.append(f"report section missing: {text}")
+    for position in positions:
+        code = normalized_code(position.get("代码"))
+        if f"| {code} |" not in report:
+            errors.append(f"holding missing from report: {code}")
+    if gate.get("position_gate", {}).get("quotes_current") is not True:
+        errors.append("runtime gate does not confirm current holding quotes")
+    return errors
 
 
 def snapshot_state(target_date: str) -> dict:
@@ -129,6 +205,8 @@ def classify(position: dict, tech: dict, risks: list[dict], quote: dict, bearish
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", default=date.today().strftime("%Y-%m-%d"))
+    ap.add_argument("--strict", action="store_true", help="fail instead of publishing when required quote/report fields are invalid")
+    ap.add_argument("--emit-report", action="store_true", help="print the validated report body for cron delivery")
     args = ap.parse_args()
     target_date = args.date
     positions = load(TRADES / "current_positions.json", [])
@@ -140,6 +218,9 @@ def main() -> None:
     risks = risk_map(target_date)
     quotes, quote_snapshot = quote_map(target_date)
     gate = load(QUALITY / f"{target_date}_runtime_gate.json", {})
+    input_errors = validate_quote_snapshot(target_date, positions, quote_snapshot)
+    if args.strict and input_errors:
+        raise SystemExit("[close_review] strict input validation failed:\n- " + "\n- ".join(input_errors))
     market = load(MARKET / f"{target_date}_market_timing_input.json", {})
     regime = market.get("amv_0", {}).get("effective_state") or "未知"
     amv_value = market.get("amv_0", {}).get("amv_change_pct")
@@ -212,15 +293,23 @@ def main() -> None:
               f"- 提高仓位权限：{'允许' if gate.get('position_gate', {}).get('allow_position_increase') else '禁止'}。", "",
               "> 风险提示：本报告用于收盘前风险决策，不构成收益承诺；继承的盘后指标不得用于放宽加仓权限。", ""]
 
+    report = "\n".join(lines)
+    report_errors = validate_report(target_date, positions, report, gate)
+    if args.strict and report_errors:
+        raise SystemExit("[close_review] strict report validation failed:\n- " + "\n- ".join(report_errors))
     out = PLANS / f"{target_date}_1445_review.md"
-    out.write_text("\n".join(lines), encoding="utf-8")
+    out.write_text(report, encoding="utf-8")
     log = {"date": target_date, "generated_at": datetime.now().isoformat(timespec="seconds"), "position_snapshot": snap,
            "total_position": total_position, "positions": positions, "revalued_positions": revalued,
            "actions": actions, "quote_snapshot": quote_snapshot, "live_quotes_pending": not all(x["price"] is not None for x in revalued),
            "position_gate": gate.get("position_gate", {})}
-    (LOGS / f"{target_date}_1445_review.json").write_text(json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
+    (LOGS / f"{target_date}_1445_review.json").write_text(json.dumps(json_safe(log), ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
     print(out)
-    print(json.dumps({"position_snapshot": snap, "total_position": total_position, "actions": actions}, ensure_ascii=False, indent=2))
+    if args.emit_report:
+        print(f"\n【14:45尾盘操作建议｜{target_date}】\n")
+        print(report)
+    else:
+        print(json.dumps({"position_snapshot": snap, "total_position": total_position, "actions": actions}, ensure_ascii=False, indent=2, allow_nan=False))
 
 
 if __name__ == "__main__":
