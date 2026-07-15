@@ -179,6 +179,37 @@ def slope(vals: pd.Series, n: int) -> float | None:
     return (now / prev - 1) * 100
 
 
+def bbi_state(df: pd.DataFrame) -> dict[str, Any]:
+    """Return the standard TDX BBI state used by the B1 holding rules."""
+    if len(df) < 24:
+        return {"available": False, "reason": "少于24根K线"}
+    close = df["close"]
+    bbi = sum(close.rolling(n).mean() for n in (3, 6, 12, 24)) / 4
+    valid = bbi.notna()
+    if not valid.any():
+        return {"available": False, "reason": "BBI无法计算"}
+
+    c = float(close.iloc[-1])
+    value = float(bbi.iloc[-1])
+    below = close < bbi
+    consecutive_below = 0
+    for is_below in reversed(below.tolist()):
+        if not is_below:
+            break
+        consecutive_below += 1
+
+    distance_pct = (c / value - 1) * 100 if value else None
+    return {
+        "available": True,
+        "formula": "(MA3+MA6+MA12+MA24)/4",
+        "value": round(value, 4),
+        "close_above": bool(c >= value),
+        "distance_pct": round(distance_pct, 4) if distance_pct is not None else None,
+        "consecutive_closes_below": consecutive_below,
+        "previous_close_above": bool(close.iloc[-2] >= bbi.iloc[-2]) if len(df) >= 25 else None,
+    }
+
+
 def trend_state(df: pd.DataFrame) -> dict[str, Any]:
     if len(df) < 60:
         return {"state": "数据不足", "reason": "少于60根K线"}
@@ -238,6 +269,7 @@ def analyze(df: pd.DataFrame) -> dict[str, Any]:
         "available": True,
         "latest_date": df["date"].iloc[-1].strftime("%Y-%m-%d"),
         "trend": daily_trend,
+        "bbi": bbi_state(df),
         "box_20d": box(df, 20),
         "box_60d": box(df, 60),
         "daily": {"kdj": kdj(df), "macd": macd(df)},
