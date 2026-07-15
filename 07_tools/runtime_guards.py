@@ -103,11 +103,11 @@ def position_freshness_with_confirmation(day: str) -> dict[str, Any]:
         no_trades = confirmation.get("no_trades") is True or "无交易" in str(confirmation.get("note", ""))
         if no_trades:
             result.update({
-                "status": "confirmed",
-                "confirmed": True,
+                "status": "uncertain",
+                "confirmed": False,
                 "inherited": True,
                 "inherited_from": confirmed_day,
-                "reason": f"沿用 {confirmed_day} 用户确认的无交易持仓；未发现更新的持仓导入",
+                "reason": f"{confirmed_day} 无交易确认仅作为下一交易日基线；无法确认 {day} 盘中是否发生交易",
                 "confirmation": confirmation,
             })
     return result

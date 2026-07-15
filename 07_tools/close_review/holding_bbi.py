@@ -55,3 +55,42 @@ def bbi_basis(row: dict[str, Any]) -> dict[str, Any]:
         "reminder": reminder,
         "signal": signal,
     }
+
+
+def intraday_bbi_basis(row: dict[str, Any], price: Any, technical_date: str | None) -> dict[str, Any]:
+    """Compare a current quote with the latest confirmed BBI without rewriting history."""
+    base = bbi_basis(row)
+    if not base.get("available"):
+        return base
+    try:
+        current = float(price)
+        value = float(base["value"])
+    except (TypeError, ValueError):
+        return {
+            "available": False,
+            "state": "BBI待确认",
+            "reminder": "缺少当日实时价，不据此调整持仓",
+            "signal": "unavailable",
+        }
+    distance = (current / value - 1) * 100 if value else None
+    above = current >= value
+    as_of = technical_date or "日期待确认"
+    state = f"当前价相对{as_of} BBI {_number(value)}：{'上方' if above else '下方'}（偏离{_signed_number(distance)}%）"
+    signal = base["signal"]
+    reminder = base["reminder"]
+    if base.get("above") is True and not above:
+        signal = "intraday_break_watch"
+        reminder = "上一确认日收盘在BBI上方，当前价跌至BBI下方；等待收盘确认，未确认前不视为连续两日破位"
+    elif base.get("signal") == "clear_review" and above:
+        signal = "reclaim_in_progress"
+        reminder = "历史连续跌破BBI，但当前价已回到BBI上方；等待收盘确认修复，不自动恢复加仓权限"
+    return {
+        **base,
+        "current_price": current,
+        "current_above": above,
+        "current_distance_pct": distance,
+        "technical_date": technical_date,
+        "state": state,
+        "reminder": reminder,
+        "signal": signal,
+    }
