@@ -181,7 +181,7 @@ def build_delivery_digest(
         f"减仓执行{'允许' if position_gate.get('allow_position_reduction') else '禁止'}；"
         f"提高仓位{'允许' if position_gate.get('allow_position_increase') else '禁止'}。",
         "禁止动作：旧持仓价代替实时价、用历史技术或缺失0AMV放宽权限、空头区间补仓/追高、绕过风险否决。",
-        f"持仓说明：{snap.get('reason', '缺失')}。完整报告：strategy_team/03_daily_plans/{target_date}_1445_review.md",
+        f"持仓说明：{snap.get('reason', '缺失')}；{snap.get('assumption', '14:45按当前行情评估持仓操作建议')}。完整报告：strategy_team/03_daily_plans/{target_date}_1445_review.md",
     ]
     return "\n".join(lines)
 
@@ -192,6 +192,7 @@ def snapshot_state(target_date: str) -> dict:
     return {
         "status": state.get("status", "未知"),
         "reason": state.get("reason", "缺少运行门控"),
+        "assumption": state.get("assumption"),
         "inherited_from": state.get("inherited_from"),
     }
 
@@ -305,6 +306,7 @@ def main() -> None:
         f"# 14:45 收盘前操作建议 — {target_date}", "",
         f"> 生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         f"> 持仓状态：**{snap['status']}**｜{snap['reason']}",
+        f"> 持仓基线：{snap.get('assumption') or '按当前已确认持仓基线评估14:45操作建议'}",
         f"> 行情来源：{quote_snapshot.get('source', '缺失')}｜行情日期：{quote_snapshot.get('as_of_date', '缺失')}｜采集时间：{quote_snapshot.get('captured_at', '缺失')}",
         "> 口径说明：持仓价格使用上述行情快照；BBI与其他技术指标单独标注最近确认数据日，不把历史技术状态冒充当日收盘事实。",
         f"> 0AMV当日变动：**{amv_display}**｜有效状态：**{regime}**；盘中市场质量：**{market_quality.get('status', '未知')}**（{market_quality.get('quality_score', 'NA')}）", "",
@@ -334,7 +336,7 @@ def main() -> None:
               "## 4. 操作建议", "",
               "- 0AMV处于实质空头区间，所有反弹优先按减仓机会处理，不作为加仓、摊低成本或趋势反转依据。",
               "- BBI持仓依据：BBI上方仅代表技术持有结构有效；首日跌破观察次日收回；连续两日收盘跌破进入清仓评估。0AMV、硬止损、重大风险和单票超限优先。",
-              "- 精确减仓数量：持仓确认且当日全持仓行情齐全时允许评估。",
+              "- 精确减仓数量：B1默认盘中不交易，持仓基线确认且当日全持仓行情齐全时允许评估；若用户告知或成交台账出现目标日成交，立即改用最新持仓。",
               "- 加仓/新开仓：继续禁止；需0AMV退出空头且大盘、板块、个股结构修复，并通过完整市场质量门。", "",
               "## 5. 运行权限", "",
               f"- 精确数量权限：{'允许' if gate.get('position_gate', {}).get('allow_precise_quantity') else '禁止'}。",

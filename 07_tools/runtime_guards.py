@@ -103,11 +103,12 @@ def position_freshness_with_confirmation(day: str) -> dict[str, Any]:
         no_trades = confirmation.get("no_trades") is True or "无交易" in str(confirmation.get("note", ""))
         if no_trades:
             result.update({
-                "status": "uncertain",
-                "confirmed": False,
+                "status": "confirmed",
+                "confirmed": True,
                 "inherited": True,
                 "inherited_from": confirmed_day,
-                "reason": f"{confirmed_day} 无交易确认仅作为下一交易日基线；无法确认 {day} 盘中是否发生交易",
+                "assumption": "B1盘中默认不交易；若用户告知或成交台账出现目标日成交，则立即覆盖此基线",
+                "reason": f"默认 {day} 盘中无交易，沿用 {confirmed_day} 已确认无交易后的收盘持仓作为14:45尾盘建议基线",
                 "confirmation": confirmation,
             })
     return result
@@ -205,7 +206,7 @@ def write_runtime_gate(day: str) -> dict[str, Any]:
         "quote_date": quote_snapshot.get("as_of_date") if isinstance(quote_snapshot, dict) else None,
         "quotes_current": quotes_current,
         "market_regime": market_regime or "未知",
-        "rule": "持仓确认+当日全持仓行情可授予精确减仓数量权限；加仓另需当日技术、完整市场质量通过且0AMV非空头",
+        "rule": "B1默认盘中不交易；最近确认无交易后的收盘持仓可作为14:45尾盘建议基线。持仓基线+当日全持仓行情可授予精确减仓数量权限；加仓另需当日技术、完整市场质量通过且0AMV非空头",
     }
     result = {
         "date": day,
