@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 BASE=Path(__file__).resolve().parents[2]; DATA=BASE/'01_data'; GOV=BASE/'00_governance'; LOG=BASE/'06_logs'/'rss'
 CFG=GOV/'RSS_FILTER_CONFIG.json'; REG=GOV/'RSS_SOURCE_REGISTRY.json'
-CAL=GOV/'CN_TRADING_CALENDAR.json'; SH=ZoneInfo('Asia/Shanghai')
+CAL=GOV/'CN_TRADING_CALENDAR.json'; CAL_CACHE=DATA/'market'/'CN_TRADING_CALENDAR_CACHE.json'; SH=ZoneInfo('Asia/Shanghai')
 
 def load(p,default):
  try:return json.loads(p.read_text(encoding='utf-8-sig')) if p.exists() else default
@@ -29,7 +29,8 @@ def bare(code): return str(code or '').split('.')[0]
 
 def premarket_window(day, asof, fallback_hours):
  cal=load(CAL,{})
- confirmed=cal.get('confirmed_trading_days') or cal.get('trading_days') or []
+ cache=load(CAL_CACHE,{})
+ confirmed=cache.get('trading_days') or []
  confirmed += [d for d,v in cal.get('overrides',{}).items() if v.get('is_trading_day') is True]
  confirmed=sorted(set(confirmed))
  previous=max((x for x in confirmed if x<day),default=None)

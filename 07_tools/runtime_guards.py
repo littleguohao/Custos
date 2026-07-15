@@ -10,6 +10,7 @@ from typing import Any
 BASE = Path(__file__).resolve().parents[1]
 DATA = BASE / "01_data"
 CALENDAR_CONFIG = BASE / "00_governance" / "CN_TRADING_CALENDAR.json"
+CALENDAR_CACHE = DATA / "market" / "CN_TRADING_CALENDAR_CACHE.json"
 
 
 def load_json(path: Path, default: Any):
@@ -19,13 +20,18 @@ def load_json(path: Path, default: Any):
 def trading_day_status(day: str) -> dict[str, Any]:
     d = date.fromisoformat(day)
     cfg = load_json(CALENDAR_CONFIG, {})
+    cache = load_json(CALENDAR_CACHE, {})
     overrides = cfg.get("overrides", {})
     if day in overrides:
         item = overrides[day]
         return {"date": day, "is_trading_day": bool(item["is_trading_day"]), "reason": item.get("reason", "配置覆盖"), "quality": "confirmed", "source": str(CALENDAR_CONFIG)}
+    if day in set(cache.get("trading_days", [])):
+        return {"date": day, "is_trading_day": True, "reason": "本地通达信交易日历缓存", "quality": "confirmed", "source": str(CALENDAR_CACHE)}
+    if day in set(cache.get("non_trading_days", [])):
+        return {"date": day, "is_trading_day": False, "reason": "本地通达信日历覆盖范围内非交易日", "quality": "confirmed", "source": str(CALENDAR_CACHE)}
     if d.weekday() >= 5:
         return {"date": day, "is_trading_day": False, "reason": "周末", "quality": "confirmed", "source": "weekday_rule"}
-    return {"date": day, "is_trading_day": None, "reason": "工作日但未命中已确认交易日/休市日；禁止自动假定开市", "quality": "unknown", "source": str(CALENDAR_CONFIG)}
+    return {"date": day, "is_trading_day": None, "reason": "工作日但不在通达信缓存覆盖范围；禁止自动假定开市", "quality": "unknown", "source": str(CALENDAR_CONFIG)}
 
 
 def previous_confirmed_trading_day(day: str) -> str | None:
