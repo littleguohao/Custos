@@ -1353,6 +1353,19 @@
         "current_distance_pct": -0.6817355585621687,
         "technical_date": "2026-07-14"
       },
+      "n_structure": {
+        "available": true,
+        "prior_low": 47.0,
+        "prior_low_date": "2026-06-29",
+        "breakout_level": 52.52,
+        "confirmed_date": "2026-07-03",
+        "current_price": 53.0,
+        "distance_pct": 12.765957446808507,
+        "breached": false,
+        "state": "N型前低 2026-06-29 47.00；当前价上方（距离12.77%）",
+        "reminder": "结构未失效；该位置是硬清仓位，不构成加仓理由",
+        "signal": "structure_hold"
+      },
       "sector": {
         "theme_id": "medical_equipment_ai_healthcare",
         "theme_name": "医疗设备/基因测序/AI医疗",
@@ -1542,6 +1555,19 @@
         "current_distance_pct": -0.6356641017062459,
         "technical_date": "2026-07-14"
       },
+      "n_structure": {
+        "available": true,
+        "prior_low": 12.08,
+        "prior_low_date": "2026-04-24",
+        "breakout_level": 12.93,
+        "confirmed_date": "2026-06-16",
+        "current_price": 11.88,
+        "distance_pct": -1.655629139072845,
+        "breached": true,
+        "state": "N型前低 2026-04-24 12.08；当前价下方（距离-1.66%）",
+        "reminder": "N型前低已失守，结构失效，触发清仓/退出评估",
+        "signal": "structural_clear"
+      },
       "sector": {
         "theme_id": "securities_brokerage",
         "theme_name": "证券/券商/金融风险偏好",
@@ -1730,6 +1756,19 @@
         "current_above": false,
         "current_distance_pct": -1.9298754995408007,
         "technical_date": "2026-07-14"
+      },
+      "n_structure": {
+        "available": true,
+        "prior_low": 73.45,
+        "prior_low_date": "2026-06-17",
+        "breakout_level": 82.12,
+        "confirmed_date": "2026-06-24",
+        "current_price": 78.7,
+        "distance_pct": 7.147719537100072,
+        "breached": false,
+        "state": "N型前低 2026-06-17 73.45；当前价上方（距离7.15%）",
+        "reminder": "结构未失效；该位置是硬清仓位，不构成加仓理由",
+        "signal": "structure_hold"
       },
       "sector": {
         "theme_id": "ai_compute_server_liquid_cooling",
@@ -1925,6 +1964,19 @@
         "current_distance_pct": -3.206240390447568,
         "technical_date": "2026-07-14"
       },
+      "n_structure": {
+        "available": true,
+        "prior_low": 32.24,
+        "prior_low_date": "2026-04-17",
+        "breakout_level": 33.4,
+        "confirmed_date": "2026-04-20",
+        "current_price": 34.31,
+        "distance_pct": 6.420595533498763,
+        "breached": false,
+        "state": "N型前低 2026-04-17 32.24；当前价上方（距离6.42%）",
+        "reminder": "结构未失效；该位置是硬清仓位，不构成加仓理由",
+        "signal": "structure_hold"
+      },
       "sector": {
         "theme_id": "shipbuilding_military",
         "theme_name": "船舶/军工/高端装备",
@@ -2114,6 +2166,19 @@
         "current_above": true,
         "current_distance_pct": 11.522469364831277,
         "technical_date": "2026-07-14"
+      },
+      "n_structure": {
+        "available": true,
+        "prior_low": 37.6,
+        "prior_low_date": "2026-04-03",
+        "breakout_level": 41.0,
+        "confirmed_date": "2026-04-16",
+        "current_price": 41.6,
+        "distance_pct": 10.63829787234043,
+        "breached": false,
+        "state": "N型前低 2026-04-03 37.60；当前价上方（距离10.64%）",
+        "reminder": "结构未失效；该位置是硬清仓位，不构成加仓理由",
+        "signal": "structure_hold"
       },
       "sector": {
         "theme_id": "gas_energy_hydrogen",
