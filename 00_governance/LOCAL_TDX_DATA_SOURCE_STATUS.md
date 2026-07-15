@@ -26,15 +26,6 @@
 - TQ 初始化成功
 - 已下载历史 CSV 库存在：`E:\O_DATA`
 
-探针脚本：
-
-- `07_tools/tdx_local_probe.py`
-
-结果文件：
-
-- `06_logs/tdx_local_probe_result.json`
-- `06_logs/tdx_local_probe2_result.json`
-
 ## 关键运行约束
 
 TQ 本地接口不适合多进程并发初始化。
