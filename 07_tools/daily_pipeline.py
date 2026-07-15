@@ -139,6 +139,7 @@ def main():
     ap.add_argument("--amv-zone", choices=["做多", "中性", "空头"], default=None)
     ap.add_argument("--amv-pct", type=float, default=None)
     ap.add_argument("--prepare-specialists", action="store_true", help="write date-scoped requests for the three specialist Agents")
+    ap.add_argument("--reuse-discovery", action="store_true", help="reuse overseas/RSS files prepared before the formal report window")
     ap.add_argument("--session-type", choices=["premarket", "intraday_1445", "postclose"], default="premarket")
     args = ap.parse_args()
 
@@ -159,12 +160,19 @@ def main():
     if args.macro or args.amv_zone or args.amv_pct is not None:
         stages.append(apply_manual_market(args.date, args.macro, args.amv_zone, args.amv_pct))
 
-    # 3. Overseas market and RSS discovery collectors. RSS is discovery-only;
-    # failed feeds or candidate-tier items cannot increase trading permissions.
-    stages.append(run([str(PY), str(TOOLS / "overseas_market_collector.py"), "--date", args.date], "overseas_market_collector", required=False))
-    stages.append(run([str(PY), str(BASE / "07_tools" / "news" / "rss_collector.py"), "--date", args.date], "rss_collector", required=False))
-    stages.append(run([str(PY), str(BASE / "07_tools" / "news" / "rss_filter.py"), "--date", args.date,
-                       "--session-type", args.session_type], "rss_filter", required=False))
+    # 3. Overseas market and RSS discovery collectors. The 09:05 production
+    # run reuses the 08:50 collection so network waits stay outside rendering.
+    if args.reuse_discovery:
+        stages.extend([
+            {"stage": "overseas_market_collector", "ok": True, "skipped": True, "reason": "08:50 discovery reused"},
+            {"stage": "rss_collector", "ok": True, "skipped": True, "reason": "08:50 discovery reused"},
+            {"stage": "rss_filter", "ok": True, "skipped": True, "reason": "08:50 discovery reused"},
+        ])
+    else:
+        stages.append(run([str(PY), str(TOOLS / "overseas_market_collector.py"), "--date", args.date], "overseas_market_collector", required=False))
+        stages.append(run([str(PY), str(BASE / "07_tools" / "news" / "rss_collector.py"), "--date", args.date], "rss_collector", required=False))
+        stages.append(run([str(PY), str(BASE / "07_tools" / "news" / "rss_filter.py"), "--date", args.date,
+                           "--session-type", args.session_type], "rss_filter", required=False))
 
     # 4. Resolve persistent 0AMV regime before scoring. A locked bearish
     # regime remains bearish until a confirmed daily change is > +4%.
