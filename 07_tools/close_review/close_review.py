@@ -9,6 +9,11 @@ import sys
 from datetime import date, datetime
 from pathlib import Path
 
+try:
+    from .holding_bbi import bbi_basis
+except ImportError:
+    from holding_bbi import bbi_basis
+
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
@@ -83,16 +88,20 @@ def classify(position: dict, tech: dict, risks: list[dict], quote: dict, bearish
     pnl = price / cost - 1 if cost else finite(position.get("持有盈亏率"), 0)
     trend = str(tech.get("trend_state") or "待确认")
     box = str(tech.get("box20_position") or "待确认")
+    bbi = bbi_basis(tech)
+    bbi_reason = f"{bbi['state']}；{bbi['reminder']}"
     high_risk = any(x.get("priority") == "高" for x in risks)
     if high_risk or "破位" in box or pnl <= -0.07:
         reasons = [str(x.get("reason") or x.get("risk_type")) for x in risks if x.get("priority") == "高"]
-        return "P1", "减仓/止损评估", "；".join(reasons) or f"趋势{trend}、位置{box}、盈亏{pnl:+.1%}"
+        return "P1", "减仓/止损评估", ("；".join(reasons) or f"趋势{trend}、位置{box}、盈亏{pnl:+.1%}") + f"；{bbi_reason}"
+    if bbi.get("signal") == "clear_review":
+        return "P1", "BBI清仓评估", bbi_reason
     if bearish_regime and finite(quote.get("change_pct")) > 0:
         priority = "P1" if finite(quote.get("change_pct")) >= 5 else "P2"
-        return priority, "反弹减仓评估", f"0AMV空头区间，当日反弹{finite(quote.get('change_pct')):+.2f}%优先用于降低仓位"
+        return priority, "反弹减仓评估", f"0AMV空头区间，当日反弹{finite(quote.get('change_pct')):+.2f}%优先用于降低仓位；{bbi_reason}"
     if trend == "下跌" or pnl < 0:
-        return "P2", "观察、不加仓", f"趋势{trend}、位置{box}、盈亏{pnl:+.1%}"
-    return "P3", "持有观察", f"趋势{trend}、位置{box}、盈亏{pnl:+.1%}"
+        return "P2", "观察、不加仓", f"趋势{trend}、位置{box}、盈亏{pnl:+.1%}；{bbi_reason}"
+    return "P3", "持有观察", f"趋势{trend}、位置{box}、盈亏{pnl:+.1%}；{bbi_reason}"
 
 
 def main() -> None:
@@ -125,7 +134,7 @@ def main() -> None:
         market_value = price * qty
         pnl_pct = price / cost - 1 if cost else 0
         position_pct = market_value / total_assets if total_assets else finite(p.get("仓位占比"))
-        revalued.append({"code": code, "price": price, "pnl_pct": pnl_pct, "position_pct": position_pct, "market_value": market_value})
+        revalued.append({"code": code, "price": price, "pnl_pct": pnl_pct, "position_pct": position_pct, "market_value": market_value, "bbi": bbi_basis(tech.get(code, {}))})
         priority, action, reason = classify(p, tech.get(code, {}), risks.get(code, []), quote, regime == "空头")
         actions.append({"priority": priority, "code": code, "name": p.get("名称", ""), "action": action, "reason": reason})
     actions.sort(key=lambda x: (x["priority"], x["code"]))
@@ -141,14 +150,14 @@ def main() -> None:
         "> 口径说明：本次为14:45报告的盘后校正版，使用收盘附近补采行情，不代表14:45瞬时价格。",
         f"> 0AMV当日变动：**{finite(amv_value):+.2f}%**｜有效状态：**{regime}**；盘后市场质量：**{market_quality.get('status', '未知')}**（{market_quality.get('quality_score', 'NA')}）", "",
         "## 1. 当日行情重估持仓", "",
-        "| 代码 | 名称 | 数量 | 成本 | 当日价格 | 持有盈亏 | 重估仓位 | 当日涨跌 |",
-        "|---|---|---:|---:|---:|---:|---:|---:|",
+        "| 代码 | 名称 | 数量 | 成本 | 当日价格 | 持有盈亏 | 重估仓位 | 当日涨跌 | BBI状态 |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---|",
     ]
     for p in positions:
         code = str(p.get("代码", "")).split(".")[0]
         value = revalued_map[code]
         quote = quotes.get(code, {})
-        lines.append(f"| {code} | {p.get('名称')} | {finite(p.get('持有数量')):.0f} | {finite(p.get('单位成本')):.3f} | {value['price']:.2f} | {value['pnl_pct']:+.2%} | {value['position_pct']:.1%} | {finite(quote.get('change_pct')):+.2f}% |")
+        lines.append(f"| {code} | {p.get('名称')} | {finite(p.get('持有数量')):.0f} | {finite(p.get('单位成本')):.3f} | {value['price']:.2f} | {value['pnl_pct']:+.2%} | {value['position_pct']:.1%} | {finite(quote.get('change_pct')):+.2f}% | {value['bbi']['state']} |")
     lines += ["", f"- 当日行情重估总仓位：**{total_position:.1%}**", "",
               "## 2. 动态持仓优先级", "", "| 优先级 | 代码 | 名称 | 操作倾向 | 依据 |", "|---|---|---|---|---|"]
     for x in actions:
@@ -159,6 +168,7 @@ def main() -> None:
               f"- 个股技术数据日：{', '.join(sorted({str(x.get('latest_date')) for x in tech.values() if x.get('latest_date')})) or '缺失'}；仅作技术参考，不冒充当日行情。", "",
               "## 4. 操作建议", "",
               "- 0AMV处于实质空头区间，所有反弹优先按减仓机会处理，不作为加仓、摊低成本或趋势反转依据。",
+              "- BBI持仓依据：BBI上方仅代表技术持有结构有效；首日跌破观察次日收回；连续两日收盘跌破进入清仓评估。0AMV、硬止损、重大风险和单票超限优先。",
               "- 精确减仓数量：持仓确认且当日全持仓行情齐全时允许评估。",
               "- 加仓/新开仓：继续禁止；需0AMV退出空头且大盘、板块、个股结构修复，并通过完整市场质量门。", "",
               "## 5. 运行权限", "",
