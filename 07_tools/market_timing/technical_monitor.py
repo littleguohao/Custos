@@ -210,6 +210,70 @@ def bbi_state(df: pd.DataFrame) -> dict[str, Any]:
     }
 
 
+def n_structure_state(df: pd.DataFrame, left: int = 3, right: int = 3) -> dict[str, Any]:
+    """Find the latest confirmed rising N structure without look-ahead pivots.
+
+    A completed structure is L1 -> H1 -> higher L2 -> close breakout above H1.
+    L2 is the structural prior low and the B1 hard invalidation level.
+    """
+    if len(df) < left + right + 8:
+        return {"available": False, "reason": "K线数量不足以确认N型结构"}
+    x = df.reset_index(drop=True)
+    pivot_lows: list[int] = []
+    pivot_highs: list[int] = []
+    for i in range(left, len(x) - right):
+        low_window = x["low"].iloc[i-left:i+right+1]
+        high_window = x["high"].iloc[i-left:i+right+1]
+        low = float(x.at[i, "low"])
+        high = float(x.at[i, "high"])
+        if low == float(low_window.min()) and int((low_window == low).sum()) == 1:
+            pivot_lows.append(i)
+        if high == float(high_window.max()) and int((high_window == high).sum()) == 1:
+            pivot_highs.append(i)
+
+    latest = None
+    for l2 in reversed(pivot_lows):
+        prior_lows = [i for i in pivot_lows if i < l2]
+        if not prior_lows:
+            continue
+        l1 = prior_lows[-1]
+        highs = [i for i in pivot_highs if l1 < i < l2]
+        if not highs:
+            continue
+        h1 = max(highs, key=lambda i: float(x.at[i, "high"]))
+        if float(x.at[l2, "low"]) <= float(x.at[l1, "low"]):
+            continue
+        breakout_rows = x.index[(x.index > l2) & (x["close"] > float(x.at[h1, "high"]))]
+        if len(breakout_rows) == 0:
+            continue
+        breakout = int(breakout_rows[0])
+        latest = (l1, h1, l2, breakout)
+        break
+
+    if latest is None:
+        return {"available": False, "reason": "未发现已完成的上升N型结构"}
+    l1, h1, l2, breakout = latest
+    current_close = float(x["close"].iloc[-1])
+    prior_low = float(x.at[l2, "low"])
+    distance_pct = (current_close / prior_low - 1) * 100 if prior_low else None
+    return {
+        "available": True,
+        "pattern": "L1-H1-higher_L2-breakout",
+        "first_low": round(float(x.at[l1, "low"]), 4),
+        "first_low_date": x.at[l1, "date"].strftime("%Y-%m-%d"),
+        "breakout_level": round(float(x.at[h1, "high"]), 4),
+        "breakout_level_date": x.at[h1, "date"].strftime("%Y-%m-%d"),
+        "prior_low": round(prior_low, 4),
+        "prior_low_date": x.at[l2, "date"].strftime("%Y-%m-%d"),
+        "confirmed_date": x.at[breakout, "date"].strftime("%Y-%m-%d"),
+        "current_close": round(current_close, 4),
+        "distance_pct": round(distance_pct, 4) if distance_pct is not None else None,
+        "close_above": bool(current_close >= prior_low),
+        "breached_on_close": bool(current_close < prior_low),
+        "pivot_window": {"left": left, "right": right},
+    }
+
+
 def trend_state(df: pd.DataFrame) -> dict[str, Any]:
     if len(df) < 60:
         return {"state": "数据不足", "reason": "少于60根K线"}
@@ -270,6 +334,7 @@ def analyze(df: pd.DataFrame) -> dict[str, Any]:
         "latest_date": df["date"].iloc[-1].strftime("%Y-%m-%d"),
         "trend": daily_trend,
         "bbi": bbi_state(df),
+        "n_structure": n_structure_state(df),
         "box_20d": box(df, 20),
         "box_60d": box(df, 60),
         "daily": {"kdj": kdj(df), "macd": macd(df)},

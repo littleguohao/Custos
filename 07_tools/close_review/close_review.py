@@ -11,8 +11,10 @@ from pathlib import Path
 
 try:
     from .holding_bbi import bbi_basis, intraday_bbi_basis
+    from .holding_structure import n_structure_basis
 except ImportError:
     from holding_bbi import bbi_basis, intraday_bbi_basis
+    from holding_structure import n_structure_basis
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -172,7 +174,7 @@ def build_delivery_digest(
         action = action_map[code]
         lines.append(
             f"- {position.get('名称')}({code}) {price_text(value['price'])} {pct_text(optional_finite(quote.get('change_pct')))}；"
-            f"{value['bbi']['state']}；{action['priority']} {action['action']}"
+            f"{value['bbi']['state']}；{value['n_structure']['state']}；{action['priority']} {action['action']}"
         )
     position_gate = gate.get("position_gate", {})
     lines += [
@@ -233,7 +235,11 @@ def classify(position: dict, tech: dict, risks: list[dict], quote: dict, bearish
     box = str(tech.get("box20_position") or "待确认")
     bbi = intraday_bbi_basis(tech, price, str(tech.get("latest_date") or "") or None)
     bbi_reason = f"{bbi['state']}；{bbi['reminder']}"
+    structure = n_structure_basis(tech, price)
+    structure_reason = f"{structure['state']}；{structure['reminder']}"
     high_risk = any(x.get("priority") == "高" for x in risks)
+    if structure.get("signal") == "structural_clear":
+        return "P0", "N型前低清仓评估", structure_reason
     if high_risk or "破位" in box or pnl <= -0.07:
         reasons = [str(x.get("reason") or x.get("risk_type")) for x in risks if x.get("priority") == "高"]
         return "P1", "减仓/止损评估", ("；".join(reasons) or f"趋势{trend}、位置{box}、盈亏{pnl:+.1%}") + f"；{bbi_reason}"
@@ -287,7 +293,7 @@ def main() -> None:
         market_value = price * qty if price is not None else None
         pnl_pct = price / cost - 1 if price is not None and cost else None
         position_pct = market_value / total_assets if market_value is not None and total_assets else None
-        revalued.append({"code": code, "price": price, "pnl_pct": pnl_pct, "position_pct": position_pct, "market_value": market_value, "bbi": intraday_bbi_basis(tech.get(code, {}), price, str(tech.get(code, {}).get("latest_date") or "") or None)})
+        revalued.append({"code": code, "price": price, "pnl_pct": pnl_pct, "position_pct": position_pct, "market_value": market_value, "bbi": intraday_bbi_basis(tech.get(code, {}), price, str(tech.get(code, {}).get("latest_date") or "") or None), "n_structure": n_structure_basis(tech.get(code, {}), price)})
         priority, action, reason = classify(p, tech.get(code, {}), risks.get(code, []), quote, regime == "空头")
         actions.append({"priority": priority, "code": code, "name": p.get("名称", ""), "action": action, "reason": reason})
     actions.sort(key=lambda x: (x["priority"], x["code"]))
@@ -314,8 +320,8 @@ def main() -> None:
         "| 指数 | 点位 | 涨跌幅 | 行情时间 |", "|---|---:|---:|---|",
         *index_lines, "",
         "## 1. 当日行情重估持仓", "",
-        "| 代码 | 名称 | 数量 | 成本 | 当日价格 | 持有盈亏 | 重估仓位 | 当日涨跌 | BBI状态 |",
-        "|---|---|---:|---:|---:|---:|---:|---:|---|",
+        "| 代码 | 名称 | 数量 | 成本 | 当日价格 | 持有盈亏 | 重估仓位 | 当日涨跌 | BBI状态 | N型前低清仓点 |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---|---|",
     ]
     for p in positions:
         code = str(p.get("代码", "")).split(".")[0]
@@ -323,7 +329,7 @@ def main() -> None:
         quote = quotes.get(code, {})
         pnl_display = "缺失" if value["pnl_pct"] is None else f"{value['pnl_pct']:+.2%}"
         position_display = "缺失" if value["position_pct"] is None else f"{value['position_pct']:.1%}"
-        lines.append(f"| {code} | {p.get('名称')} | {finite(p.get('持有数量')):.0f} | {finite(p.get('单位成本')):.3f} | {price_text(value['price'])} | {pnl_display} | {position_display} | {pct_text(optional_finite(quote.get('change_pct')))} | {value['bbi']['state']} |")
+        lines.append(f"| {code} | {p.get('名称')} | {finite(p.get('持有数量')):.0f} | {finite(p.get('单位成本')):.3f} | {price_text(value['price'])} | {pnl_display} | {position_display} | {pct_text(optional_finite(quote.get('change_pct')))} | {value['bbi']['state']} | {value['n_structure']['state']} |")
     total_position_display = "缺失（当日全持仓行情不完整）" if total_position is None else f"{total_position:.1%}"
     lines += ["", f"- 当日行情重估总仓位：**{total_position_display}**", "",
               "## 2. 动态持仓优先级", "", "| 优先级 | 代码 | 名称 | 操作倾向 | 依据 |", "|---|---|---|---|---|"]
@@ -336,6 +342,7 @@ def main() -> None:
               "## 4. 操作建议", "",
               "- 0AMV处于实质空头区间，所有反弹优先按减仓机会处理，不作为加仓、摊低成本或趋势反转依据。",
               "- BBI持仓依据：BBI上方仅代表技术持有结构有效；首日跌破观察次日收回；连续两日收盘跌破进入清仓评估。0AMV、硬止损、重大风险和单票超限优先。",
+              "- N型前低：已完成上升N型的第二个低点是结构清仓位；跌破表示结构失效，优先级高于BBI。未识别到完整N型时明确标为待确认。",
               "- 精确减仓数量：B1默认盘中不交易，持仓基线确认且当日全持仓行情齐全时允许评估；若用户告知或成交台账出现目标日成交，立即改用最新持仓。",
               "- 加仓/新开仓：继续禁止；需0AMV退出空头且大盘、板块、个股结构修复，并通过完整市场质量门。", "",
               "## 5. 运行权限", "",

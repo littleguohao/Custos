@@ -10,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from close_review.holding_structure import n_structure_basis
+
 BASE=Path(__file__).resolve().parents[1]; DATA=BASE/'01_data'; PLAN=BASE/'03_daily_plans'; WEEKDAY='一二三四五六日'
 def load(p:Path,d:Any): return json.loads(p.read_text(encoding='utf-8')) if p.exists() else d
 def clean(v:Any,d='待确认'):
@@ -83,6 +85,9 @@ def bbi_holding_reminder(row:dict[str,Any])->tuple[str,str]:
 
 def adjustment_with_bbi(row:dict[str,Any],event:dict[str,Any]|None)->str:
     base=plan_adjustment('',event)
+    structure=n_structure_basis(row,row.get('close'))
+    if structure.get('signal')=='structural_clear':
+        return '结构风控：收盘失守N型前低，结构失效，进入清仓/退出评估；优先级高于BBI'
     above=row.get('above_bbi'); below_days=row.get('consecutive_closes_below_bbi')
     try: days=int(below_days or 0)
     except (TypeError,ValueError): days=0
@@ -144,16 +149,17 @@ def main():
         item=details.get(key) or {}
         lines.append(f"| {market_name} | {clean(item.get('name'))} | {num(item.get('price'))} | {pct_point(item.get('change_pct'))} | {clean(item.get('data_kind'),'待确认')} | {clean(item.get('last_time_local_hint'))} |")
     lines += ['',f"- 外围综合判断：**{clean(overseas.get('overall_signal'))}**。{clean(overseas.get('overseas_summary'))}",'- 美国已收盘数据与日韩开盘后最新数据必须分开标注；缺值不得用历史数据替代。']
-    lines += ['', f'## 4. 持仓状态与上次计划调整（上次复盘：{prior_day}）','', '| 代码/名称 | 最新技术状态 | 四均线/J值 | BBI状态/持股提醒 | 上次复盘计划 | 隔夜新证据 | 是否调整 |','|---|---|---|---|---|---|---|']
+    lines += ['', f'## 4. 持仓状态与上次计划调整（上次复盘：{prior_day}）','', '| 代码/名称 | 最新技术状态 | 四均线/J值 | BBI与N型前低 | 上次复盘计划 | 隔夜新证据 | 是否调整 |','|---|---|---|---|---|---|---|']
     for x in chief.get('holding_actions',[]):
         c=code(x.get('code')); t=tech.get(c,{}); p=prior_actions.get(c,{}); event=holding_event_map.get(c)
         prior_action=ACTION_LABELS.get(p.get('action'),clean(p.get('action'),'无可用计划'))
         tech_state=f"{clean(t.get('latest_date'))} 收{num(t.get('close'))}；{clean(t.get('trend_state'))}；仓位{ratio(t.get('position_pct'))}"
         ma_j=f"{technical_relation(t)}；日J={num(t.get('daily_j'),1)}"
         bbi_state,bbi_reminder=bbi_holding_reminder(t)
+        structure=n_structure_basis(t,t.get('close'))
         new_evidence=f"{direction_label(event.get('direction'))}：{clean(event.get('title'))}" if event else '无新增持仓事件'
-        lines.append(f"| {c} {x.get('name')} | {tech_state} | {ma_j} | {bbi_state}；{bbi_reminder} | {prior_action} | {new_evidence} | {adjustment_with_bbi(t,event)} |")
-    if not chief.get('holding_actions'): lines.append('| - | 持仓数据缺失 | - | BBI待确认 | - | - | 不提高交易权限 |')
+        lines.append(f"| {c} {x.get('name')} | {tech_state} | {ma_j} | {bbi_state}；{bbi_reminder}；{structure['state']}；{structure['reminder']} | {prior_action} | {new_evidence} | {adjustment_with_bbi(t,event)} |")
+    if not chief.get('holding_actions'): lines.append('| - | 持仓数据缺失 | - | BBI/N型前低待确认 | - | - | 不提高交易权限 |')
     lines += ['', '## 5. 主线、机会与风险','', '| 方向 | 阶段 | 交易许可 | 理由 |','|---|---|---|---|']
     supported=[] if specialist.get('status')!='pass' else [x for x in sectors if x.get('trade_permission')=='支持']
     for x in supported[:5]: lines.append(f"| {clean(x.get('sector'))} | {clean(x.get('stage'))} | 支持 | {clean(x.get('reason'))} |")

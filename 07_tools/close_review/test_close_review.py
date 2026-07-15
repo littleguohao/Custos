@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 import unittest
 
-from close_review import build_delivery_digest, json_safe, validate_quote_snapshot, validate_report
+from close_review import build_delivery_digest, classify, json_safe, validate_quote_snapshot, validate_report
 
 
 POSITIONS = [{"代码": "600000.SH", "名称": "测试股票"}]
@@ -58,7 +58,7 @@ class CloseReviewValidationTests(unittest.TestCase):
             valid_snapshot(),
             valid_snapshot()["indices"],
             POSITIONS,
-            {"600000": {"price": 10.0, "bbi": {"state": "当前价在2026-07-14 BBI上方"}}},
+            {"600000": {"price": 10.0, "bbi": {"state": "当前价在2026-07-14 BBI上方"}, "n_structure": {"state": "N型前低 9.00"}}},
             {"600000": valid_snapshot()["quotes"][0]},
             [{"code": "600000", "priority": "P2", "action": "持有观察"}],
             0.2,
@@ -70,6 +70,20 @@ class CloseReviewValidationTests(unittest.TestCase):
         self.assertLessEqual(len(digest), 3500)
         for text in ("600000", "上证指数", "P2 持有观察", "精确数量允许", "提高仓位禁止", "禁止动作"):
             self.assertIn(text, digest)
+
+    def test_n_structure_breach_precedes_bbi_and_other_rules(self):
+        tech = {
+            "trend_state": "上涨",
+            "box20_position": "箱体上半区",
+            "bbi": 10,
+            "above_bbi": True,
+            "n_structure": {"available": True, "prior_low": 9.5, "prior_low_date": "2026-06-01"},
+        }
+        priority, action, reason = classify(
+            {"单位成本": 8, "持有盈亏率": 0.2}, tech, [], {"price": 9.4, "change_pct": -1}, False
+        )
+        self.assertEqual((priority, action), ("P0", "N型前低清仓评估"))
+        self.assertIn("结构失效", reason)
 
 
 if __name__ == "__main__":
