@@ -138,6 +138,54 @@ def validate_report(target_date: str, positions: list[dict], report: str, gate: 
     return errors
 
 
+def build_delivery_digest(
+    target_date: str,
+    quote_snapshot: dict,
+    indices: list[dict],
+    positions: list[dict],
+    revalued_map: dict[str, dict],
+    quotes: dict[str, dict],
+    actions: list[dict],
+    total_position: float | None,
+    snap: dict,
+    gate: dict,
+    amv_display: str,
+    regime: str,
+) -> str:
+    action_map = {item["code"]: item for item in actions}
+    index_names = {"000001": "上证指数", "399001": "深证成指", "399006": "创业板指"}
+    index_text = "；".join(
+        f"{item.get('name') or index_names.get(normalized_code(item.get('code')), item.get('code', '未知'))}{price_text(optional_finite(item.get('price')))}({pct_text(optional_finite(item.get('change_pct')))})"
+        for item in indices
+    ) or "缺失"
+    lines = [
+        f"【14:45尾盘操作建议｜{target_date}】",
+        f"数据：{quote_snapshot.get('source', '缺失')}｜行情日{quote_snapshot.get('as_of_date', '缺失')}｜采集{quote_snapshot.get('captured_at', '缺失')}",
+        f"指数：{index_text}",
+        f"组合：重估仓位{'缺失' if total_position is None else f'{total_position:.1%}'}｜持仓{snap.get('status', '未知')}｜0AMV {amv_display}，有效状态{regime}",
+        "逐股：",
+    ]
+    for position in positions:
+        code = normalized_code(position.get("代码"))
+        value = revalued_map[code]
+        quote = quotes.get(code, {})
+        action = action_map[code]
+        lines.append(
+            f"- {position.get('名称')}({code}) {price_text(value['price'])} {pct_text(optional_finite(quote.get('change_pct')))}；"
+            f"{value['bbi']['state']}；{action['priority']} {action['action']}"
+        )
+    position_gate = gate.get("position_gate", {})
+    lines += [
+        "权限："
+        f"精确数量{'允许' if position_gate.get('allow_precise_quantity') else '禁止'}；"
+        f"减仓执行{'允许' if position_gate.get('allow_position_reduction') else '禁止'}；"
+        f"提高仓位{'允许' if position_gate.get('allow_position_increase') else '禁止'}。",
+        "禁止动作：旧持仓价代替实时价、用历史技术或缺失0AMV放宽权限、空头区间补仓/追高、绕过风险否决。",
+        f"持仓说明：{snap.get('reason', '缺失')}。完整报告：strategy_team/03_daily_plans/{target_date}_1445_review.md",
+    ]
+    return "\n".join(lines)
+
+
 def snapshot_state(target_date: str) -> dict:
     gate = load(QUALITY / f"{target_date}_runtime_gate.json", {})
     state = gate.get("position_freshness", {})
@@ -207,6 +255,7 @@ def main() -> None:
     ap.add_argument("--date", default=date.today().strftime("%Y-%m-%d"))
     ap.add_argument("--strict", action="store_true", help="fail instead of publishing when required quote/report fields are invalid")
     ap.add_argument("--emit-report", action="store_true", help="print the validated report body for cron delivery")
+    ap.add_argument("--emit-digest", action="store_true", help="print a bounded delivery digest containing all execution-critical fields")
     args = ap.parse_args()
     target_date = args.date
     positions = load(TRADES / "current_positions.json", [])
@@ -305,7 +354,12 @@ def main() -> None:
            "position_gate": gate.get("position_gate", {})}
     (LOGS / f"{target_date}_1445_review.json").write_text(json.dumps(json_safe(log), ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
     print(out)
-    if args.emit_report:
+    if args.emit_digest:
+        digest = build_delivery_digest(target_date, quote_snapshot, indices, positions, revalued_map, quotes, actions, total_position, snap, gate, amv_display, regime)
+        if args.strict and len(digest) > 3500:
+            raise SystemExit(f"[close_review] delivery digest too long: {len(digest)} chars")
+        print(digest)
+    elif args.emit_report:
         print(f"\n【14:45尾盘操作建议｜{target_date}】\n")
         print(report)
     else:

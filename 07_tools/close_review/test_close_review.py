@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 import unittest
 
-from close_review import json_safe, validate_quote_snapshot, validate_report
+from close_review import build_delivery_digest, json_safe, validate_quote_snapshot, validate_report
 
 
 POSITIONS = [{"代码": "600000.SH", "名称": "测试股票"}]
@@ -51,6 +51,25 @@ class CloseReviewValidationTests(unittest.TestCase):
     def test_non_finite_numbers_become_null_values(self):
         value = {"nan": math.nan, "nested": [math.inf, -math.inf, 1.0]}
         self.assertEqual(json_safe(value), {"nan": None, "nested": [None, None, 1.0]})
+
+    def test_delivery_digest_is_bounded_and_complete(self):
+        digest = build_delivery_digest(
+            "2026-07-15",
+            valid_snapshot(),
+            valid_snapshot()["indices"],
+            POSITIONS,
+            {"600000": {"price": 10.0, "bbi": {"state": "当前价在2026-07-14 BBI上方"}}},
+            {"600000": valid_snapshot()["quotes"][0]},
+            [{"code": "600000", "priority": "P2", "action": "持有观察"}],
+            0.2,
+            {"status": "confirmed", "reason": "当日已确认"},
+            {"position_gate": {"allow_precise_quantity": True, "allow_position_reduction": True, "allow_position_increase": False}},
+            "缺失",
+            "空头",
+        )
+        self.assertLessEqual(len(digest), 3500)
+        for text in ("600000", "上证指数", "P2 持有观察", "精确数量允许", "提高仓位禁止", "禁止动作"):
+            self.assertIn(text, digest)
 
 
 if __name__ == "__main__":
