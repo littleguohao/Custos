@@ -13,6 +13,8 @@ __pycache__/
 
 # Pipeline logs and transient output
 06_logs/
+03_daily_plans/_supporting/
+04_reviews/daily/*_review_draft.md
 *.log
 *.tmp
 ~$*

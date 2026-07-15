@@ -29,7 +29,6 @@
 探针脚本：
 
 - `07_tools/tdx_local_probe.py`
-- `07_tools/tdx_local_probe2.py`
 
 结果文件：
 

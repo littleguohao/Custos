@@ -35,7 +35,6 @@ MARKET_DIR = DATA_DIR / "market"
 HOLD_DIR = BASE / "01_data" / "holdings"
 PLAN_DIR = BASE / "03_daily_plans"
 SUPPORT_DIR = PLAN_DIR / "_supporting"
-REVIEW_DIR = BASE / "04_reviews" / "daily"
 LOG_DIR = BASE / "06_logs"
 
 
@@ -109,29 +108,6 @@ def apply_manual_position_updates(date: str):
     return {"stage": "apply_manual_position_updates", "ok": True, "changed": changed}
 
 
-def ensure_review_draft(date: str):
-    out = REVIEW_DIR / f"{date}_review_draft.md"
-    chief = PLAN_DIR / f"{date}_chief_decision.md"
-    chief_archive = SUPPORT_DIR / date / f"{date}_chief_decision.md"
-    if out.exists():
-        return {"stage": "ensure_review_draft", "ok": True, "path": str(out), "message": "exists"}
-    content = [
-        f"# {date} 日内复盘草稿\n",
-        "## 1. 今日计划执行\n",
-        "- 是否遵守 chief_decision：\n- 计划外交易：\n- 风控执行：\n",
-        "## 2. 今日有效规则\n- \n",
-        "## 3. 今日失效/待验证规则\n- \n",
-        "## 4. 个股复盘\n\n| 代码 | 名称 | 计划动作 | 实际动作 | 收盘表现 | 评价 |\n|---|---|---|---|---|---|\n",
-        "## 5. 明日修正\n- \n",
-    ]
-    if chief.exists() or chief_archive.exists():
-        content.append("\n## 附：今日总控计划路径\n")
-        content.append(f"- {chief_archive}\n")
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text("\n".join(content), encoding="utf-8")
-    return {"stage": "ensure_review_draft", "ok": True, "path": str(out)}
-
-
 def archive_supporting_reports(date: str) -> dict:
     """Keep one formal daily report in the plan root; archive stage reports."""
     target = SUPPORT_DIR / date
@@ -163,7 +139,6 @@ def main():
     ap.add_argument("--amv-zone", choices=["做多", "中性", "空头"], default=None)
     ap.add_argument("--amv-pct", type=float, default=None)
     ap.add_argument("--prepare-specialists", action="store_true", help="write date-scoped requests for the three specialist Agents")
-    ap.add_argument("--require-specialists", action="store_true", help="apply fail-closed permissions when required specialist responses do not validate; still render a conservative report")
     ap.add_argument("--session-type", choices=["premarket", "intraday_1445", "postclose"], default="premarket")
     args = ap.parse_args()
 
@@ -219,25 +194,20 @@ def main():
     # before the final decision layer. Candidate discovery remains disabled.
     stages.append(run([str(PY), str(BASE / "07_tools" / "build_skill_contracts.py"), "--date", args.date], "build_skill_contracts"))
 
-    # Specialist Agents are orchestrated by `main`, not by this deterministic script.
-    # This stage only creates date-scoped requests and validates externally returned
-    # responses. It never reuses another date's response. In required mode, missing
-    # or invalid evidence blocks ChiefDecision generation.
+    # Specialist Agents are optional asynchronous enrichment. Their absence never
+    # blocks the deterministic report chain or increases trading permissions.
     handoff = BASE / "07_tools" / "specialist_handoff.py"
     if args.prepare_specialists:
         stages.append(run([str(PY), str(handoff), "prepare", "--date", args.date,
                            "--session-type", args.session_type], "prepare_specialist_handoffs"))
-    validate_cmd = [str(PY), str(handoff), "validate", "--date", args.date]
+    validate_cmd = [str(PY), str(handoff), "validate", "--date", args.date, "--optional"]
     specialist_validation = run(validate_cmd, "validate_specialist_handoffs", required=False)
-    specialist_validation["fail_closed_required"] = args.require_specialists
     stages.append(specialist_validation)
 
     stages.append(run([str(PY), str(TOOLS / "chief_decision_report.py"), "--date", args.date], "chief_decision_report"))
     stages.append(run([str(PY), str(BASE / "07_tools" / "daily_report.py"), "--date", args.date], "daily_report"))
     stages.append(run([str(PY), str(TOOLS / "wechat_summary.py"), "--date", args.date], "wechat_summary", required=False))
 
-    # 8. Review draft
-    stages.append(ensure_review_draft(args.date))
     stages.append(archive_supporting_reports(args.date))
 
     # De-duplicate repeated data_quality notes/sources produced by repeated daily runs.
@@ -274,7 +244,6 @@ def main():
         DATA_DIR / "risk" / f"{args.date}_risk_decision.json",
         DATA_DIR / "agent_handoffs" / args.date / "handoff_gate.json",
         SUPPORT_DIR / args.date / f"{args.date}_wechat_summary.txt",
-        REVIEW_DIR / f"{args.date}_review_draft.md",
     ]:
         print(f"- {p} {'OK' if p.exists() else 'MISSING'}")
 

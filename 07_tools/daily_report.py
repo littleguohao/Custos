@@ -137,7 +137,7 @@ def main():
     holding_event_map={code(x.get('code')):x for x in holding_events}
     pos={code(x.get('代码')):x for x in positions}; quality=chief.get('market_quality',{}); freshness=chief.get('position_freshness',{}); pgate=chief.get('position_gate',{}); specialist=chief.get('specialist_handoff',{})
     window=intel.get('window') or {}; window_start=window.get('start') or f'{prior_day} 15:00'; window_end=window.get('end') or f'{a.date} 09:00'
-    lines=[f'# 每日投研简报｜{dt.year}年{dt.month}月{dt.day}日（星期{WEEKDAY[dt.weekday()]}）'+(f'｜{a.session}' if a.session else ''),'',f'> 信息窗口：{window_start} 至 {window_end}（Asia/Shanghai）  ',f'> 生成时间：{datetime.now().strftime("%Y-%m-%d %H:%M:%S")} Asia/Shanghai','', '## 1. 今日核心结论','',f"**{chief.get('market_state','未知')}，总仓位建议 {chief.get('total_position_range','待确认')}；新开仓权限：{chief.get('new_position_permission','禁止')}。**",'',f"- 择时评分：{chief.get('market_score','待确认')}",f"- 风控等级：{chief.get('risk_level','提高')}",f"- 市场数据质量：{quality.get('status','未知')}（{quality.get('quality_score','NA')}）",f"- 持仓快照：{freshness.get('status','未知')}——{freshness.get('reason','')}",f"- 专业 Agent 证据门：{specialist.get('status','not_run')}",f"- 精确数量权限：{'允许' if pgate.get('allow_precise_quantity') else '禁止'}",'', '## 2. 隔夜重大消息与持仓公告','', '### 2.1 市场重大消息','']
+    lines=[f'# 每日投研简报｜{dt.year}年{dt.month}月{dt.day}日（星期{WEEKDAY[dt.weekday()]}）'+(f'｜{a.session}' if a.session else ''),'',f'> 信息窗口：{window_start} 至 {window_end}（Asia/Shanghai）  ',f'> 生成时间：{datetime.now().strftime("%Y-%m-%d %H:%M:%S")} Asia/Shanghai','', '## 1. 今日核心结论','',f"**{chief.get('market_state','未知')}，总仓位建议 {chief.get('total_position_range','待确认')}；新开仓权限：{chief.get('new_position_permission','禁止')}。**",'',f"- 择时评分：{chief.get('market_score','待确认')}",f"- 风控等级：{chief.get('risk_level','提高')}",f"- 市场数据质量：{quality.get('status','未知')}（{quality.get('quality_score','NA')}）",f"- 持仓快照：{freshness.get('status','未知')}——{freshness.get('reason','')}",f"- 异步专业研究增强：{specialist.get('status','not_run')}（不阻断正式报告，不提高交易权限）",f"- 精确数量权限：{'允许' if pgate.get('allow_precise_quantity') else '禁止'}",'', '## 2. 隔夜重大消息与持仓公告','', '### 2.1 市场重大消息','']
     overseas=market.get('overseas_market',{}); amv=market.get('amv_0',{})
     lines += ['| 时间 | 事件 | 方向 | 对A股/持仓的影响 | 来源/质量 |','|---|---|---|---|---|']
     for e in market_events: lines.append(f"| {clean(e.get('published_at'))} | {clean(e.get('title'))} | {direction_label(e.get('direction'))} | {clean(e.get('impact'))} | {clean(e.get('source'))}/{clean(e.get('quality'),'candidate')} |")
@@ -164,7 +164,7 @@ def main():
         lines.append(f"| {c} {x.get('name')} | {tech_state} | {ma_j} | {bbi_state}；{bbi_reminder}；{structure['state']}；{structure['reminder']} | {current_action} | {prior_action} | {new_evidence} |")
     if not chief.get('holding_actions'): lines.append('| - | 持仓数据缺失 | - | BBI/N型前低待确认 | 不提高交易权限 | - | - |')
     lines += ['', '## 5. 主线、机会与风险','', '| 方向 | 阶段 | 交易许可 | 理由 |','|---|---|---|---|']
-    supported=[] if specialist.get('status')!='pass' else [x for x in sectors if x.get('trade_permission')=='支持']
+    supported=[x for x in sectors if x.get('trade_permission')=='支持']
     for x in supported[:5]: lines.append(f"| {clean(x.get('sector'))} | {clean(x.get('stage'))} | 支持 | {clean(x.get('reason'))} |")
     if not supported: lines.append('| 暂无 | 待确认 | 仅观察 | 没有获得结构化交易许可的板块 |')
     lines += ['', '### 风险提示','']

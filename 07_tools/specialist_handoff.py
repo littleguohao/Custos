@@ -262,12 +262,12 @@ def simple_validate(agent: str, raw: object, date: str, request_id: str) -> list
     return list(dict.fromkeys(errors))
 
 
-def validate(date: str, required: list[str] | None) -> dict:
+def validate(date: str, required: list[str] | None, optional: bool = False) -> dict:
     root = day_dir(date); responses = root / "responses"; valid_dir = root / "validated"
     manifest = load(root / "request_manifest.json", {})
     request_id = manifest.get("request_id", "")
     session_type = manifest.get("session_type", "ad_hoc")
-    required = required if required else DEFAULT_REQUIRED.get(session_type, list(AGENTS))
+    required = [] if optional else (DEFAULT_REQUIRED.get(session_type, list(AGENTS)) if required is None else required)
     invalid_required = [agent for agent in required if agent not in AGENTS]
     if invalid_required:
         raise ValueError(f"unknown required agents: {invalid_required}")
@@ -288,11 +288,16 @@ def validate(date: str, required: list[str] | None) -> dict:
         if agent in required:
             if not accepted: all_accepted = False
             if not usable_for_permission_increase: all_complete = False
-    gate_status = "pass" if all_accepted and all_complete else ("degraded" if all_accepted else "blocked")
+    if optional:
+        accepted_optional = [x for x in results.values() if x["accepted"]]
+        gate_status = "available" if accepted_optional else "unavailable"
+    else:
+        gate_status = "pass" if all_accepted and all_complete else ("degraded" if all_accepted else "blocked")
     gate = {"date": date, "request_id": request_id, "required_agents": required,
-            "status": gate_status, "permission_increase_allowed": all_accepted and all_complete,
+            "status": gate_status, "optional_enrichment": optional,
+            "permission_increase_allowed": False if optional else all_accepted and all_complete,
             "agents": results,
-            "rule": "missing/invalid/partial specialist evidence cannot increase permissions"}
+            "rule": "specialist evidence is asynchronous enrichment; missing/invalid/partial evidence never blocks reports or increases permissions"}
     dump(root / "handoff_gate.json", gate)
     return gate
 
@@ -302,11 +307,11 @@ def main():
     p = sub.add_parser("prepare"); p.add_argument("--date", required=True); p.add_argument("--session-type", required=True,
         choices=["premarket", "intraday_1445", "postclose", "weekly", "monthly", "ad_hoc"]); p.add_argument("--as-of")
     p.add_argument("--agent", action="append", choices=AGENTS, dest="agents")
-    v = sub.add_parser("validate"); v.add_argument("--date", required=True); v.add_argument("--require", nargs="*", default=None)
+    v = sub.add_parser("validate"); v.add_argument("--date", required=True); v.add_argument("--require", nargs="*", default=None); v.add_argument("--optional", action="store_true")
     a = ap.parse_args()
     if a.cmd == "prepare": result = prepare(a.date, a.session_type, a.as_of or datetime.now().astimezone().isoformat(timespec="seconds"), a.agents)
-    else: result = validate(a.date, a.require)
+    else: result = validate(a.date, a.require, a.optional)
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    if a.cmd == "validate" and result["status"] != "pass": raise SystemExit(2)
+    if a.cmd == "validate" and not a.optional and result["status"] != "pass": raise SystemExit(2)
 
 if __name__ == "__main__": main()

@@ -190,7 +190,7 @@
 }
 ```
 
-## 专业 Agent 交接层（2026-07-12）
+## 异步专业研究交接层（2026-07-15修订）
 
 生产链新增日期隔离目录：
 
@@ -203,15 +203,16 @@
   handoff_gate.json
 ```
 
-`main` 负责调用 `market-intelligence`、`theme-sector`、`portfolio-execution`，并将原始 JSON 响应写入当日 `responses/`。确定性脚本 `07_tools/specialist_handoff.py` 只负责准备输入、校验日期/请求ID/必填字段/权限边界和失败关闭，不负责调用 Agent。
+专业研究由主会话在非报告关键窗口按需调用，也可使用隔离Subagent完成独立专题。原始JSON响应写入当日`responses/`。确定性脚本`07_tools/specialist_handoff.py`只负责准备输入并校验日期、请求ID、必填字段和权限边界，不负责调用Agent。
 
-旧的 `theme_tracker_report.py`、`portfolio_review_report.py` 暂保留为标准化技术输入和安全兜底，不再被视为独立最终分析权威。经校验的专业 Agent 证据优先用于主线观察和持仓执行证据；`RiskDecision`、0AMV、运行门禁和 `ChiefDecision` 仍由确定性主链控制。
+`theme_tracker_report.py`、`portfolio_review_report.py`是确定性标准化模块，不是独立Agent。经校验的专业研究仅作为可选证据；`RiskDecision`、0AMV、B1状态、运行门禁和`ChiefDecision`由确定性主链控制。
 
 迁移期规则：
 
 - 响应必须与当日 `request_id` 和 `target_date` 一致，禁止复用昨日 Agent 结果。
 - 缺失、无效、`partial` 或 `blocked` 响应不能增加交易权限。
-- `--require-specialists` 模式下，必要 Agent 缺失会阻止 `ChiefDecision` 生成。
+- 生产流水线统一使用可选校验；专业研究缺失、超时或无效不得阻止`ChiefDecision`和正式报告生成。
+- 专业研究无论是否存在，都不得直接提高仓位、新开仓或精确数量权限。
 - `theme-sector` 不得出现最终买卖、数量或仓位字段。
 - `portfolio-execution` 的 `quantity` 必须为 `null`，且所有建议必须要求 `main` 审批。
 - B池最多仅观察；C/D池只能禁止。

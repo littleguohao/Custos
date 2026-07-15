@@ -4,7 +4,7 @@
 
 > 2026-07-12 更新：面向用户的正式产出已收口为五类——盘前报告、14:45尾盘操作建议、最终盘后复盘、周日复盘、月度复盘。详细时点、输入输出和边界以 `REPORT_BLUEPRINT_V2.md` 为最新基线；本文保留内部 Agent 决策链。
 >
-> 专业 Agent 迁移状态：`market-intelligence`、`theme-sector`、`portfolio-execution` 已注册并连通。旧的 `theme_tracker_report.py` 与 `portfolio_review_report.py` 在迁移期仅作为标准化技术输入/失败关闭兜底；它们不拥有最终动作权限。专业响应经 `specialist_handoff.py` 验证后交给 `main`，再进入确定性的 `RiskDecision → ChiefDecision`。
+> 2026-07-15生产架构调整：正式报告采用“确定性脚本主链 + 轻量单Agent调用/投递”。`market-intelligence`、`theme-sector`、`portfolio-execution`及临时Subagent只作异步研究增强，不进入09:05、14:45、15:15、20:30关键路径。缺失研究结果不阻断报告，也不得提高交易权限。
 
 ## 目标
 
@@ -24,32 +24,23 @@
 
 > 大盘决定仓位，板块决定方向，个股决定执行，风控决定边界，总控决定最终动作。
 
-## 总流程
+## 生产总流程
 
 ```mermaid
 flowchart TD
-    A[market_timing 市场择时] --> B[theme_tracker 主线/板块]
-    A --> C[portfolio_review 持仓研判]
-    A --> D[stock_pool 选股池]
-    E[industry_research 产业研究] --> B
-    E --> D
-    B --> D
-    D --> F[buy_strategy 买入策略]
-    C --> G[risk_control 卖出风控]
-    F --> G
-    B --> G
-    G --> H[chief_decision 总控决策]
-    F --> H
-    C --> H
-    D --> H
-    H --> I[daily_plan 每日交易计划]
-    I --> J[strategy_evolution 复盘进化]
-    J --> A
-    J --> B
-    J --> D
-    J --> F
-    J --> G
+    A[确定性采集] --> B[标准化事实]
+    B --> C[市场/持仓质量门]
+    C --> D[B1持仓状态]
+    C --> E[RiskDecision]
+    D --> F[ChiefDecision]
+    E --> F
+    F --> G[正式报告]
+    G --> H[结构校验与投递]
+    I[异步专业研究] -. 可选证据 .-> F
+    J[按需Subagent] -. 非关键路径研究 .-> I
 ```
+
+原有角色定义继续作为逻辑职责和研究模板保留，但生产执行以脚本模块为准，不要求为每个角色启动独立Agent。
 
 ## 角色顺序
 

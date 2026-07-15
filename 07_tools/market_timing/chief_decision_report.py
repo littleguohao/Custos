@@ -66,19 +66,17 @@ def main():
     # Missing/invalid/partial Agent output must never increase permissions.
     specialist_status=handoff_gate.get('status','not_run')
     specialist_agents=handoff_gate.get('agents',{})
-    if specialist_status!='pass':
-        permission='禁止' if permission=='禁止' else '仅观察，不得加仓'
-        effective_risk='提高' if effective_risk=='普通' else effective_risk
     allowed=['处理P1/P2风险持仓','观察支持交易的主线和A/B池条件']
     forbidden=dedupe(risk.get('forbidden_actions',[])+['无计划追高','因J值低直接补仓','绕过risk_control开仓'])
     if market_quality_status=='blocked': forbidden.append('市场数据质量blocked时新开仓')
     if position_gate.get('allow_position_increase') is False: forbidden.append('持仓快照、目标日技术行情或市场质量未全部通过时加仓或输出精确交易数量')
-    if specialist_status!='pass': forbidden.append('专业Agent证据不完整或校验失败时扩大交易权限')
+    forbidden.append('异步专业研究证据直接扩大交易权限')
     # Prefer validated theme-sector evidence for watchlist; retain deterministic
     # sector_state only as a dated fallback, never as permission escalation.
     ts=specialist_evidence.get('theme-sector') or {}
     agent_sectors=[x.get('sector_name') for x in ts.get('sector_states',[]) if x.get('quality')=='confirmed' and x.get('confirmed')]
-    main_sectors=dedupe(agent_sectors)[:3] if specialist_status=='pass' else []
+    deterministic_sectors=[x.get('sector') for x in sectors if x.get('trade_permission')=='支持']
+    main_sectors=dedupe(agent_sectors+deterministic_sectors)[:3]
     mi=specialist_evidence.get('market-intelligence') or {}
     event_evidence=[]
     for event_type in ('notice_evidence','news_evidence'):
@@ -105,7 +103,7 @@ def main():
       'event_evidence':event_evidence,
       'allowed_actions':allowed,'forbidden_actions':forbidden,'holding_actions':holding_actions,'buy_actions':buy_actions,
       'watchlist':main_sectors,'tomorrow_validation':['市场数据质量是否改善','主线是否形成并保持支持状态','风险持仓是否修复关键结构'], 
-      'risk_notice':'RiskDecision为强制输入；B1持仓状态只可在硬风险优先级下裁决；专业Agent证据只可追加，任何风险否决均不得被覆盖。','sources':{'risk_decision':str(risk_path),'b1_holding_state':str(DATA/'holdings'/f'{a.date}_b1_holding_state.json'),'runtime_gate':str(DATA/'quality'/f'{a.date}_runtime_gate.json'),'specialist_handoff_gate':str(DATA/'agent_handoffs'/a.date/'handoff_gate.json')}}
+      'risk_notice':'RiskDecision为强制输入；B1持仓状态只可在硬风险优先级下裁决；专业Agent仅作异步研究增强，缺失不阻断报告，且不得提高交易权限或覆盖风险否决。','sources':{'risk_decision':str(risk_path),'b1_holding_state':str(DATA/'holdings'/f'{a.date}_b1_holding_state.json'),'runtime_gate':str(DATA/'quality'/f'{a.date}_runtime_gate.json'),'specialist_handoff_gate':str(DATA/'agent_handoffs'/a.date/'handoff_gate.json')}}
     out_json=DATA/'decisions'/f'{a.date}_chief_decision.json'; out_json.parent.mkdir(parents=True,exist_ok=True); out_json.write_text(json.dumps(decision,ensure_ascii=False,indent=2),encoding='utf-8')
     lines=['# chief_decision 每日总控交易计划','',f'日期：{a.date}','', '## 1. 总控结论','',f'- 市场状态：**{state}**（{score}）',f'- 总仓位建议：**{position}**',f'- 新开仓权限：**{permission}**',f"- 风控等级：**{decision['risk_level']}**",f"- 持仓时效：**{decision['position_freshness'].get('status','未知')}** — {decision['position_freshness'].get('reason','')}",'', '## 2. 持仓处理优先级','', '| 优先级 | 代码 | 名称 | 动作 | 理由 |','|---|---|---|---|---|']
     for x in holding_actions: lines.append(f"| {x['priority']} | {x['code']} | {x['name']} | {x['action']} | {'；'.join(x['reasons'])} |")
