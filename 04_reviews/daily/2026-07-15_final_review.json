@@ -1368,6 +1368,122 @@
         "reminder": "主结构与更高回踩低点均未失守；该位置不构成加仓理由",
         "signal": "structure_hold"
       },
+      "b1_holding_state": {
+        "version": "B1-holding-v1",
+        "code": "688114",
+        "as_of": "2026-07-14",
+        "price_date": "2026-07-15",
+        "price_volume_current": false,
+        "market_regime": "空头",
+        "final_priority": "P1",
+        "final_action": "BBI清仓评估",
+        "final_reason": "连续2日收盘跌破BBI",
+        "action_plan": {
+          "suggested_reduction_pct_of_holding": [
+            10,
+            25
+          ],
+          "exact_quantity": null,
+          "exact_quantity_reason": "精确数量必须由目标日完整行情、确认持仓基线和运行门控另行授权"
+        },
+        "signals": [
+          {
+            "signal": "bbi_two_close_breach",
+            "priority": "P1",
+            "action": "BBI清仓评估",
+            "reason": "连续2日收盘跌破BBI"
+          }
+        ],
+        "facts": {
+          "trend_state": "上涨",
+          "box20_position": "箱体下半区",
+          "above_bbi": false,
+          "consecutive_closes_below_bbi": 2,
+          "n_structure": {
+            "available": true,
+            "pattern": "L1-H1-higher_L2-breakout",
+            "status": "confirmed",
+            "prior_low": 45.89,
+            "prior_low_date": "2026-06-11",
+            "origin_extreme_low": 44.88,
+            "breakout_level": 51.9,
+            "breakout_level_date": "2026-06-12",
+            "pullback_low": 48.27,
+            "pullback_low_date": "2026-06-26",
+            "confirmed_date": "2026-07-01",
+            "current_close": 52.04,
+            "distance_pct": 13.4016,
+            "close_above": true,
+            "breached_on_close": false,
+            "pullback_breached_on_close": false,
+            "pivot_window": {
+              "left": 3,
+              "right": 3
+            }
+          },
+          "price_volume": {
+            "available": true,
+            "date": "2026-07-14",
+            "change_pct": -1.0646,
+            "amplitude_pct": 4.1561,
+            "body_pct": 0.687,
+            "volume_ratio_5": 0.81,
+            "volume_ratio_20": 0.832,
+            "volume_rank20_pct": 55.0,
+            "close_raised": false,
+            "shrink_small_bear": false,
+            "large_bear": false,
+            "heavy_large_bear": false,
+            "last_two_bull_metrics": [
+              {
+                "bull": false,
+                "change_pct": -6.9027,
+                "body_pct": -5.701
+              },
+              {
+                "bull": false,
+                "change_pct": -1.0646,
+                "body_pct": -0.687
+              }
+            ],
+            "two_medium_large_bull": null,
+            "two_medium_large_bull_reason": "缺少证券当日实际涨跌幅限制，不能按代码静态猜测中大阳门槛",
+            "extreme_shrink": false,
+            "reversal_k_candidate_without_j": false,
+            "thresholds": {
+              "medium_large_bull_rule": "单日涨幅或阳线实体幅度达到当日涨跌幅限制的一半",
+              "small_bear_change_pct": [
+                -2.0,
+                0.0
+              ],
+              "shrink_volume_ratio_5_max": 0.8,
+              "heavy_volume_ratio_5_min": 1.5,
+              "reversal_volume_ratio_5_max": 0.5,
+              "reversal_volume_rank20_pct_max": 10.0,
+              "reversal_close_change_pct": [
+                -2.0,
+                2.0
+              ],
+              "reversal_amplitude_pct_max": 7.0
+            }
+          },
+          "daily_j": 7.716,
+          "holding_pnl_pct": 0.08680050033834341
+        },
+        "permissions": {
+          "allow_add": false,
+          "allow_reduce": true,
+          "allow_signal_override_hard_risk": false
+        },
+        "unavailable": [
+          "current_price_volume",
+          "max_favorable_excursion",
+          "opening_volume_ratio",
+          "price_limit_for_medium_large_bull",
+          "trade_execution_feedback",
+          "wave_stage"
+        ]
+      },
       "sector": {
         "theme_id": "medical_equipment_ai_healthcare",
         "theme_name": "医疗设备/基因测序/AI医疗",
@@ -1572,6 +1688,128 @@
         "reminder": "更高回踩低点12.38已失守，N型尝试失败，进入收紧/清仓评估；主结构前低尚未失守",
         "signal": "pullback_failure"
       },
+      "b1_holding_state": {
+        "version": "B1-holding-v1",
+        "code": "601696",
+        "as_of": "2026-07-14",
+        "price_date": "2026-07-15",
+        "price_volume_current": false,
+        "market_regime": "空头",
+        "final_priority": "P1",
+        "final_action": "N型回踩失守评估",
+        "final_reason": "价格11.88跌破L2更高回踩低点12.38，但L1尚未失守",
+        "action_plan": {
+          "suggested_reduction_pct_of_holding": [
+            10,
+            25
+          ],
+          "exact_quantity": null,
+          "exact_quantity_reason": "精确数量必须由目标日完整行情、确认持仓基线和运行门控另行授权"
+        },
+        "signals": [
+          {
+            "signal": "n_l2_breach",
+            "priority": "P1",
+            "action": "N型回踩失守评估",
+            "reason": "价格11.88跌破L2更高回踩低点12.38，但L1尚未失守"
+          },
+          {
+            "signal": "bbi_two_close_breach",
+            "priority": "P1",
+            "action": "BBI清仓评估",
+            "reason": "连续7日收盘跌破BBI"
+          }
+        ],
+        "facts": {
+          "trend_state": "横盘震荡",
+          "box20_position": "箱体下半区",
+          "above_bbi": false,
+          "consecutive_closes_below_bbi": 7,
+          "n_structure": {
+            "available": true,
+            "pattern": "L1-H1-higher_L2-candidate",
+            "status": "candidate",
+            "prior_low": 10.49,
+            "prior_low_date": "2026-06-11",
+            "origin_extreme_low": 10.38,
+            "breakout_level": 13.48,
+            "breakout_level_date": "2026-06-22",
+            "pullback_low": 12.38,
+            "pullback_low_date": "2026-06-26",
+            "confirmed_date": null,
+            "current_close": 11.62,
+            "distance_pct": 10.7722,
+            "close_above": true,
+            "breached_on_close": false,
+            "pullback_breached_on_close": true,
+            "pivot_window": {
+              "left": 3,
+              "right": 3
+            }
+          },
+          "price_volume": {
+            "available": true,
+            "date": "2026-07-14",
+            "change_pct": 1.6623,
+            "amplitude_pct": 2.5573,
+            "body_pct": 1.6623,
+            "volume_ratio_5": 0.7862,
+            "volume_ratio_20": 0.402,
+            "volume_rank20_pct": 5.0,
+            "close_raised": true,
+            "shrink_small_bear": false,
+            "large_bear": false,
+            "heavy_large_bear": false,
+            "last_two_bull_metrics": [
+              {
+                "bull": false,
+                "change_pct": -3.1356,
+                "body_pct": -2.8061
+              },
+              {
+                "bull": true,
+                "change_pct": 1.6623,
+                "body_pct": 1.6623
+              }
+            ],
+            "two_medium_large_bull": null,
+            "two_medium_large_bull_reason": "缺少证券当日实际涨跌幅限制，不能按代码静态猜测中大阳门槛",
+            "extreme_shrink": false,
+            "reversal_k_candidate_without_j": false,
+            "thresholds": {
+              "medium_large_bull_rule": "单日涨幅或阳线实体幅度达到当日涨跌幅限制的一半",
+              "small_bear_change_pct": [
+                -2.0,
+                0.0
+              ],
+              "shrink_volume_ratio_5_max": 0.8,
+              "heavy_volume_ratio_5_min": 1.5,
+              "reversal_volume_ratio_5_max": 0.5,
+              "reversal_volume_rank20_pct_max": 10.0,
+              "reversal_close_change_pct": [
+                -2.0,
+                2.0
+              ],
+              "reversal_amplitude_pct_max": 7.0
+            }
+          },
+          "daily_j": 4.8457,
+          "holding_pnl_pct": 0.14649681528662417
+        },
+        "permissions": {
+          "allow_add": false,
+          "allow_reduce": true,
+          "allow_signal_override_hard_risk": false
+        },
+        "unavailable": [
+          "current_price_volume",
+          "max_favorable_excursion",
+          "opening_volume_ratio",
+          "price_limit_for_medium_large_bull",
+          "trade_execution_feedback",
+          "wave_stage"
+        ]
+      },
       "sector": {
         "theme_id": "securities_brokerage",
         "theme_name": "证券/券商/金融风险偏好",
@@ -1775,6 +2013,115 @@
         "state": "N型前低 2026-06-12 74.07；当前价上方（距离6.25%）",
         "reminder": "主结构与更高回踩低点均未失守；该位置不构成加仓理由",
         "signal": "structure_hold"
+      },
+      "b1_holding_state": {
+        "version": "B1-holding-v1",
+        "code": "920808",
+        "as_of": "2026-07-14",
+        "price_date": "2026-07-15",
+        "price_volume_current": false,
+        "market_regime": "空头",
+        "final_priority": "P3",
+        "final_action": "条件持有",
+        "final_reason": "未触发B1减仓、止损或止盈信号",
+        "action_plan": {
+          "suggested_reduction_pct_of_holding": [
+            0,
+            0
+          ],
+          "exact_quantity": null,
+          "exact_quantity_reason": "精确数量必须由目标日完整行情、确认持仓基线和运行门控另行授权"
+        },
+        "signals": [],
+        "facts": {
+          "trend_state": "横盘震荡",
+          "box20_position": "箱体上半区",
+          "above_bbi": true,
+          "consecutive_closes_below_bbi": 0,
+          "n_structure": {
+            "available": true,
+            "pattern": "L1-H1-higher_L2-candidate",
+            "status": "candidate",
+            "prior_low": 74.07,
+            "prior_low_date": "2026-06-12",
+            "origin_extreme_low": 73.38,
+            "breakout_level": 86.96,
+            "breakout_level_date": "2026-06-25",
+            "pullback_low": 76.3,
+            "pullback_low_date": "2026-07-07",
+            "confirmed_date": null,
+            "current_close": 83.52,
+            "distance_pct": 12.7582,
+            "close_above": true,
+            "breached_on_close": false,
+            "pullback_breached_on_close": false,
+            "pivot_window": {
+              "left": 3,
+              "right": 3
+            }
+          },
+          "price_volume": {
+            "available": true,
+            "date": "2026-07-14",
+            "change_pct": 5.4679,
+            "amplitude_pct": 6.8922,
+            "body_pct": 2.0777,
+            "volume_ratio_5": 1.1644,
+            "volume_ratio_20": 1.0721,
+            "volume_rank20_pct": 70.0,
+            "close_raised": true,
+            "shrink_small_bear": false,
+            "large_bear": false,
+            "heavy_large_bear": false,
+            "last_two_bull_metrics": [
+              {
+                "bull": false,
+                "change_pct": -1.8954,
+                "body_pct": -0.59
+              },
+              {
+                "bull": true,
+                "change_pct": 5.4679,
+                "body_pct": 2.0777
+              }
+            ],
+            "two_medium_large_bull": null,
+            "two_medium_large_bull_reason": "缺少证券当日实际涨跌幅限制，不能按代码静态猜测中大阳门槛",
+            "extreme_shrink": false,
+            "reversal_k_candidate_without_j": false,
+            "thresholds": {
+              "medium_large_bull_rule": "单日涨幅或阳线实体幅度达到当日涨跌幅限制的一半",
+              "small_bear_change_pct": [
+                -2.0,
+                0.0
+              ],
+              "shrink_volume_ratio_5_max": 0.8,
+              "heavy_volume_ratio_5_min": 1.5,
+              "reversal_volume_ratio_5_max": 0.5,
+              "reversal_volume_rank20_pct_max": 10.0,
+              "reversal_close_change_pct": [
+                -2.0,
+                2.0
+              ],
+              "reversal_amplitude_pct_max": 7.0
+            }
+          },
+          "daily_j": 75.4621,
+          "holding_pnl_pct": 0.0004194897479248283
+        },
+        "permissions": {
+          "allow_add": false,
+          "allow_reduce": true,
+          "allow_signal_override_hard_risk": false
+        },
+        "unavailable": [
+          "current_price_volume",
+          "max_favorable_excursion",
+          "opening_volume_ratio",
+          "price_limit_for_medium_large_bull",
+          "trade_execution_feedback",
+          "wave_stage"
+        ]
       },
       "sector": {
         "theme_id": "ai_compute_server_liquid_cooling",
@@ -1985,6 +2332,134 @@
         "reminder": "更高回踩低点37.49已失守，N型尝试失败，进入收紧/清仓评估；主结构前低尚未失守",
         "signal": "pullback_failure"
       },
+      "b1_holding_state": {
+        "version": "B1-holding-v1",
+        "code": "600150",
+        "as_of": "2026-07-14",
+        "price_date": "2026-07-15",
+        "price_volume_current": false,
+        "market_regime": "空头",
+        "final_priority": "P1",
+        "final_action": "N型回踩失守评估",
+        "final_reason": "价格34.31跌破L2更高回踩低点37.49，但L1尚未失守",
+        "action_plan": {
+          "suggested_reduction_pct_of_holding": [
+            10,
+            25
+          ],
+          "exact_quantity": null,
+          "exact_quantity_reason": "精确数量必须由目标日完整行情、确认持仓基线和运行门控另行授权"
+        },
+        "signals": [
+          {
+            "signal": "n_l2_breach",
+            "priority": "P1",
+            "action": "N型回踩失守评估",
+            "reason": "价格34.31跌破L2更高回踩低点37.49，但L1尚未失守"
+          },
+          {
+            "signal": "bbi_two_close_breach",
+            "priority": "P1",
+            "action": "BBI清仓评估",
+            "reason": "连续2日收盘跌破BBI"
+          },
+          {
+            "signal": "downtrend",
+            "priority": "P1",
+            "action": "反弹减仓",
+            "reason": "日线处于下跌趋势"
+          }
+        ],
+        "facts": {
+          "trend_state": "下跌",
+          "box20_position": "箱体下半区",
+          "above_bbi": false,
+          "consecutive_closes_below_bbi": 2,
+          "n_structure": {
+            "available": true,
+            "pattern": "L1-H1-higher_L2-candidate",
+            "status": "candidate",
+            "prior_low": 30.51,
+            "prior_low_date": "2026-04-03",
+            "origin_extreme_low": 30.4,
+            "breakout_level": 41.77,
+            "breakout_level_date": "2026-05-13",
+            "pullback_low": 37.49,
+            "pullback_low_date": "2026-05-19",
+            "confirmed_date": null,
+            "current_close": 33.77,
+            "distance_pct": 10.685,
+            "close_above": true,
+            "breached_on_close": false,
+            "pullback_breached_on_close": true,
+            "pivot_window": {
+              "left": 3,
+              "right": 3
+            }
+          },
+          "price_volume": {
+            "available": true,
+            "date": "2026-07-14",
+            "change_pct": -1.2862,
+            "amplitude_pct": 4.8368,
+            "body_pct": 1.1417,
+            "volume_ratio_5": 0.9903,
+            "volume_ratio_20": 1.2016,
+            "volume_rank20_pct": 80.0,
+            "close_raised": false,
+            "shrink_small_bear": false,
+            "large_bear": false,
+            "heavy_large_bear": false,
+            "last_two_bull_metrics": [
+              {
+                "bull": false,
+                "change_pct": -7.6404,
+                "body_pct": -7.3904
+              },
+              {
+                "bull": false,
+                "change_pct": -1.2862,
+                "body_pct": -1.1417
+              }
+            ],
+            "two_medium_large_bull": null,
+            "two_medium_large_bull_reason": "缺少证券当日实际涨跌幅限制，不能按代码静态猜测中大阳门槛",
+            "extreme_shrink": false,
+            "reversal_k_candidate_without_j": false,
+            "thresholds": {
+              "medium_large_bull_rule": "单日涨幅或阳线实体幅度达到当日涨跌幅限制的一半",
+              "small_bear_change_pct": [
+                -2.0,
+                0.0
+              ],
+              "shrink_volume_ratio_5_max": 0.8,
+              "heavy_volume_ratio_5_min": 1.5,
+              "reversal_volume_ratio_5_max": 0.5,
+              "reversal_volume_rank20_pct_max": 10.0,
+              "reversal_close_change_pct": [
+                -2.0,
+                2.0
+              ],
+              "reversal_amplitude_pct_max": 7.0
+            }
+          },
+          "daily_j": 9.8247,
+          "holding_pnl_pct": -0.04858299595141691
+        },
+        "permissions": {
+          "allow_add": false,
+          "allow_reduce": true,
+          "allow_signal_override_hard_risk": false
+        },
+        "unavailable": [
+          "current_price_volume",
+          "max_favorable_excursion",
+          "opening_volume_ratio",
+          "price_limit_for_medium_large_bull",
+          "trade_execution_feedback",
+          "wave_stage"
+        ]
+      },
       "sector": {
         "theme_id": "shipbuilding_military",
         "theme_name": "船舶/军工/高端装备",
@@ -2189,6 +2664,122 @@
         "state": "N型前低 2026-04-03 38.13；当前价上方（距离9.10%）",
         "reminder": "更高回踩低点43.27已失守，N型尝试失败，进入收紧/清仓评估；主结构前低尚未失守",
         "signal": "pullback_failure"
+      },
+      "b1_holding_state": {
+        "version": "B1-holding-v1",
+        "code": "605090",
+        "as_of": "2026-07-14",
+        "price_date": "2026-07-15",
+        "price_volume_current": false,
+        "market_regime": "空头",
+        "final_priority": "P1",
+        "final_action": "N型回踩失守评估",
+        "final_reason": "价格41.60跌破L2更高回踩低点43.27，但L1尚未失守",
+        "action_plan": {
+          "suggested_reduction_pct_of_holding": [
+            10,
+            25
+          ],
+          "exact_quantity": null,
+          "exact_quantity_reason": "精确数量必须由目标日完整行情、确认持仓基线和运行门控另行授权"
+        },
+        "signals": [
+          {
+            "signal": "n_l2_breach",
+            "priority": "P1",
+            "action": "N型回踩失守评估",
+            "reason": "价格41.60跌破L2更高回踩低点43.27，但L1尚未失守"
+          }
+        ],
+        "facts": {
+          "trend_state": "横盘震荡",
+          "box20_position": "上沿/突破区",
+          "above_bbi": true,
+          "consecutive_closes_below_bbi": 0,
+          "n_structure": {
+            "available": true,
+            "pattern": "L1-H1-higher_L2-candidate",
+            "status": "candidate",
+            "prior_low": 38.13,
+            "prior_low_date": "2026-04-03",
+            "origin_extreme_low": 37.6,
+            "breakout_level": 48.71,
+            "breakout_level_date": "2026-04-28",
+            "pullback_low": 43.27,
+            "pullback_low_date": "2026-05-08",
+            "confirmed_date": null,
+            "current_close": 39.4,
+            "distance_pct": 3.3307,
+            "close_above": true,
+            "breached_on_close": false,
+            "pullback_breached_on_close": true,
+            "pivot_window": {
+              "left": 3,
+              "right": 3
+            }
+          },
+          "price_volume": {
+            "available": true,
+            "date": "2026-07-14",
+            "change_pct": -5.6965,
+            "amplitude_pct": 7.0496,
+            "body_pct": 3.9024,
+            "volume_ratio_5": 2.7177,
+            "volume_ratio_20": 3.4439,
+            "volume_rank20_pct": 100.0,
+            "close_raised": false,
+            "shrink_small_bear": false,
+            "large_bear": true,
+            "heavy_large_bear": true,
+            "last_two_bull_metrics": [
+              {
+                "bull": false,
+                "change_pct": 10.0053,
+                "body_pct": 0.0
+              },
+              {
+                "bull": false,
+                "change_pct": -5.6965,
+                "body_pct": -3.9024
+              }
+            ],
+            "two_medium_large_bull": null,
+            "two_medium_large_bull_reason": "缺少证券当日实际涨跌幅限制，不能按代码静态猜测中大阳门槛",
+            "extreme_shrink": false,
+            "reversal_k_candidate_without_j": false,
+            "thresholds": {
+              "medium_large_bull_rule": "单日涨幅或阳线实体幅度达到当日涨跌幅限制的一半",
+              "small_bear_change_pct": [
+                -2.0,
+                0.0
+              ],
+              "shrink_volume_ratio_5_max": 0.8,
+              "heavy_volume_ratio_5_min": 1.5,
+              "reversal_volume_ratio_5_max": 0.5,
+              "reversal_volume_rank20_pct_max": 10.0,
+              "reversal_close_change_pct": [
+                -2.0,
+                2.0
+              ],
+              "reversal_amplitude_pct_max": 7.0
+            }
+          },
+          "daily_j": 94.1983,
+          "holding_pnl_pct": 0.14304555695993848
+        },
+        "permissions": {
+          "allow_add": false,
+          "allow_reduce": true,
+          "allow_signal_override_hard_risk": false
+        },
+        "unavailable": [
+          "current_price_volume",
+          "max_favorable_excursion",
+          "opening_volume_ratio",
+          "price_limit_for_medium_large_bull",
+          "trade_execution_feedback",
+          "wave_stage"
+        ]
       },
       "sector": {
         "theme_id": "gas_energy_hydrogen",
