@@ -531,7 +531,7 @@ def analyze(df: pd.DataFrame) -> dict[str, Any]:
         "bbi": bbi_state(df),
         "n_structure": n_structure_state(df),
         "descending_n_structure": descending_n_structure_state(df),
-        "price_volume": price_volume_state(df, code=tcode),
+        "price_volume": price_volume_state(df),
         "box_20d": box(df, 20),
         "box_60d": box(df, 60),
         "daily": {"kdj": kdj(df), "macd": macd(df)},
