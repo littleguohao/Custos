@@ -1,44 +1,53 @@
 # -*- coding: utf-8 -*-
 """Unified local TDX data access layer for strategy_team.
 
-This module wraps the local TongDaXin/TQ client and provides stable helpers for:
-- stock/index K-line data
-- market snapshots
-- stock lists
-- sector lists and sector members
+This module wraps mootdx (online + offline) and provides stable helpers for:
+- stock/index/880-series K-line data (via mootdx Reader + online bars)
+- real-time quotes (via mootdx quotes)
+- financial data (via mootdx Affair)
+- adjusted prices (via mootdx get_adjust_year)
+- sector lists (via mootdx Reader.block)
 
-It intentionally does not modify files under C:\\new_tdx64\\PYPlugins\\user.
+Replaces the previous tqcenter/vipdoc binary parsing with community-maintained mootdx.
 """
 from __future__ import annotations
 
-import argparse
 import json
 import os
-import struct
 import sys
+import warnings
 from pathlib import Path
 from typing import Any, Iterable
 
 import pandas as pd
 
+warnings.filterwarnings("ignore")
+
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-if hasattr(sys.stderr, "reconfigure"):
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 BASE = Path(r"C:\Users\gh\.openclaw-tdxclaw\workspace\strategy_team")
 TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"C:\new_tdx64"))
-TQ_USER = TDX_ROOT / "PYPlugins" / "user"
-VIPDOC = TDX_ROOT / "vipdoc"
-E_ODATA = Path(os.environ.get("TDX_E_ODATA", r"E:\O_DATA"))
 
-if str(TQ_USER) not in sys.path:
-    sys.path.insert(0, str(TQ_USER))
+# --- mootdx lazy initialization ---
+_reader = None
+_client = None
 
-try:
-    from tqcenter import tq  # type: ignore
-except Exception:  # pragma: no cover
-    tq = None  # type: ignore
+
+def _get_reader():
+    global _reader
+    if _reader is None:
+        from mootdx.reader import Reader
+        _reader = Reader.factory(market="std", tdxdir=str(TDX_ROOT))
+    return _reader
+
+
+def _get_client():
+    global _client
+    if _client is None:
+        from mootdx.quotes import Quotes
+        _client = Quotes.factory(market="std", quiet=True)
+    return _client
 
 
 class LocalTdxError(RuntimeError):
@@ -61,37 +70,56 @@ def normalize_code(code: str) -> str:
     return s
 
 
-def code_to_vipdoc_path(code: str) -> Path:
-    tcode = normalize_code(code)
-    raw, suffix = tcode.split(".")
-    prefix = {"SH": "sh", "SZ": "sz", "BJ": "bj"}.get(suffix)
-    if not prefix:
-        raise LocalTdxError(f"unsupported suffix: {tcode}")
-    return VIPDOC / prefix / "lday" / f"{prefix}{raw}.day"
+def _strip_suffix(code: str) -> str:
+    """Return pure 6-digit code without suffix."""
+    s = str(code).strip().upper()
+    if "." in s:
+        s = s.split(".")[0]
+    return s.zfill(6)
+
+
+def _get_market_code(code: str) -> int:
+    """Return mootdx market int: 0=SZ, 1=SH."""
+    s = _strip_suffix(code)
+    if s.startswith(("6", "9", "5")):
+        return 1  # SH
+    return 0  # SZ
+
+
+# ========== K-line data ==========
+
+def read_vipdoc_daily(code: str) -> pd.DataFrame:
+    """Read local vipdoc daily K-line via mootdx Reader.
+
+    Returns columns: date, open, high, low, close, amount, volume.
+    """
+    reader = _get_reader()
+    raw = _strip_suffix(code)
+    try:
+        df = reader.daily(symbol=raw)
+    except Exception as e:
+        raise LocalTdxError(f"Reader.daily({raw}) failed: {e}")
+    if df is None or df.empty:
+        return pd.DataFrame()
+    df = df.copy()
+    df["code"] = normalize_code(code)
+    df["source"] = "mootdx_reader"
+    df.index.name = "date"
+    df = df.reset_index()
+    return df[["date", "code", "open", "high", "low", "close", "amount", "volume", "source"]]
 
 
 def read_e_odata_daily(code: str) -> pd.DataFrame:
-    """Read downloaded CSV cache from E:\\O_DATA.
-
-    Returns normalized lowercase OHLCV columns sorted ascending by date.
-    """
+    """Read downloaded CSV cache from E:\\O_DATA (kept for backward compat)."""
     tcode = normalize_code(code)
-    path = E_ODATA / f"{tcode}-all-latest.csv"
+    path = Path(os.environ.get("TDX_E_ODATA", r"E:\O_DATA")) / f"{tcode}-all-latest.csv"
     if not path.exists():
         return pd.DataFrame()
     df = pd.read_csv(path)
     if df.empty:
         return pd.DataFrame()
-    rename = {
-        "Date": "date",
-        "Code": "code",
-        "Open": "open",
-        "High": "high",
-        "Low": "low",
-        "Close": "close",
-        "Volume": "volume",
-        "Amount": "amount",
-    }
+    rename = {"Date": "date", "Code": "code", "Open": "open", "High": "high",
+              "Low": "low", "Close": "close", "Volume": "volume", "Amount": "amount"}
     df = df.rename(columns=rename)
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df["code"] = tcode
@@ -100,190 +128,200 @@ def read_e_odata_daily(code: str) -> pd.DataFrame:
     return df[[c for c in cols if c in df.columns]].dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
 
 
-def read_vipdoc_daily(code: str) -> pd.DataFrame:
-    """Read local vipdoc daily .day file.
+def get_online_bars(code: str, frequency: int = 9, offset: int = 120, adjust: str = "") -> pd.DataFrame:
+    """Fetch K-line from mootdx online server.
 
-    Returns columns: date, open, high, low, close, amount, volume.
-    Prices are in yuan.
+    frequency: 0=5m, 1=15m, 2=30m, 3=1h, 9=day, 5=week, 6=month
+    adjust: "" = no adjust, "qfq" = front, "hfq" = back
     """
-    path = code_to_vipdoc_path(code)
-    if not path.exists():
-        return pd.DataFrame()
-    rows: list[dict[str, Any]] = []
-    raw = path.read_bytes()
-    for i in range(0, len(raw), 32):
-        chunk = raw[i : i + 32]
-        if len(chunk) < 32:
-            continue
-        date, open_, high, low, close, amount, vol, _ = struct.unpack("IIIIIfII", chunk)
-        rows.append(
-            {
-                "date": pd.to_datetime(str(date), format="%Y%m%d", errors="coerce"),
-                "code": normalize_code(code),
-                "open": open_ / 100,
-                "high": high / 100,
-                "low": low / 100,
-                "close": close / 100,
-                "amount": amount,
-                "volume": vol,
-                "source": "vipdoc",
-            }
-        )
-    if not rows:
-        return pd.DataFrame()
-    return pd.DataFrame(rows).dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
-
-
-def require_tq() -> Any:
-    if tq is None:
-        raise LocalTdxError(f"cannot import tqcenter from {TQ_USER}")
-    return tq
-
-
-class TqSession:
-    """Context manager for TQ lifecycle."""
-
-    def __init__(self, strategy_path: str | None = None):
-        # tqcenter uses the path as strategy identity. Add PID to avoid
-        # "same strategy is already running" conflicts across short-lived tools.
-        self.strategy_path = strategy_path or f"{__file__}#{os.getpid()}"
-        self.tq = require_tq()
-
-    def __enter__(self):
-        self.tq.initialize(self.strategy_path)
-        return self.tq
-
-    def __exit__(self, exc_type, exc, tb):
-        try:
-            self.tq.close()
-        except Exception:
-            pass
-        return False
-
-
-def _price_df(data: dict[str, Any], field: str, columns: list[str]) -> pd.DataFrame:
-    q = require_tq()
+    client = _get_client()
+    raw = _strip_suffix(code)
     try:
-        return q.price_df(data, field, column_names=columns)
-    except Exception:
-        df = data.get(field)
-        return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
-
-
-def get_market_data(
-    codes: Iterable[str],
-    period: str = "1d",
-    count: int = 120,
-    start_time: str = "",
-    end_time: str = "",
-    dividend_type: str = "front",
-    fields: list[str] | None = None,
-    fill_data: bool = True,
-) -> dict[str, pd.DataFrame]:
-    """Fetch K-line data through TQ and return field -> DataFrame."""
-    code_list = [normalize_code(c) for c in codes]
-    fields = fields or ["Open", "High", "Low", "Close", "Volume", "Amount"]
-    with TqSession() as q:
-        data = q.get_market_data(
-            field_list=fields,
-            stock_list=code_list,
-            period=period,
-            start_time=start_time,
-            end_time=end_time,
-            count=count,
-            dividend_type=dividend_type,
-            fill_data=fill_data,
-        )
-        return {field: _price_df(data, field, code_list) for field in fields}
-
-
-def get_ohlcv_table(
-    code: str,
-    start_time: str = "",
-    end_time: str = "",
-    count: int = 120,
-    dividend_type: str = "front",
-    prefer: str = "tq",
-) -> pd.DataFrame:
-    """Return one-code OHLCV table.
-
-    prefer='vipdoc' reads local .day first; prefer='tq' uses TQ first.
-    """
-    tcode = normalize_code(code)
-    if prefer in ("vipdoc", "e_odata"):
-        df = read_vipdoc_daily(tcode) if prefer == "vipdoc" else read_e_odata_daily(tcode)
-        if not df.empty:
-            if start_time:
-                df = df[df["date"] >= pd.to_datetime(start_time, format="%Y%m%d", errors="coerce")]
-            if end_time:
-                df = df[df["date"] <= pd.to_datetime(end_time, format="%Y%m%d", errors="coerce")]
-            if count and count > 0:
-                df = df.tail(count)
-            return df
-    data = get_market_data([tcode], count=count, start_time=start_time, end_time=end_time, dividend_type=dividend_type)
-    frames = []
-    field_map = {
-        "Open": "open",
-        "High": "high",
-        "Low": "low",
-        "Close": "close",
-        "Volume": "volume",
-        "Amount": "amount",
-    }
-    for src, dst in field_map.items():
-        df_field = data.get(src)
-        if df_field is None or df_field.empty or tcode not in df_field.columns:
-            continue
-        frames.append(df_field[tcode].rename(dst))
-    if not frames:
+        kwargs = {"symbol": raw, "frequency": frequency, "offset": offset}
+        if adjust:
+            kwargs["adjust"] = adjust
+        df = client.bars(**kwargs)
+    except Exception as e:
+        raise LocalTdxError(f"online bars({raw}) failed: {e}")
+    if df is None or df.empty:
         return pd.DataFrame()
-    out = pd.concat(frames, axis=1)
-    out.index = pd.to_datetime(out.index)
-    out.index.name = "date"
-    out = out.reset_index()
-    out.insert(1, "code", tcode)
-    out["source"] = "tq"
-    return out
+    df = df.copy()
+    df["code"] = normalize_code(code)
+    df["source"] = f"mootdx_online{'_'+adjust if adjust else ''}"
+    df.index.name = "date"
+    df = df.reset_index()
+    return df
 
+
+def get_online_index(code: str, market: int = 1, frequency: int = 9, offset: int = 120) -> pd.DataFrame:
+    """Fetch index K-line (including 880 series) from mootdx online server.
+
+    market: 0=SZ, 1=SH (880 series use SH)
+    """
+    client = _get_client()
+    raw = _strip_suffix(code)
+    try:
+        df = client.index(frequency=frequency, market=market, symbol=raw, start=0, offset=offset)
+    except Exception as e:
+        raise LocalTdxError(f"online index({raw}) failed: {e}")
+    if df is None or df.empty:
+        return pd.DataFrame()
+    df = df.copy()
+    df["code"] = raw
+    df["source"] = "mootdx_index"
+    df.index.name = "date"
+    df = df.reset_index()
+    return df
+
+
+def get_adjusted_daily(code: str, year: str = "", factor: str = "01") -> pd.DataFrame:
+    """Get adjusted (qfq/hfq) daily data via mootdx contrib.
+
+    factor: "00"=不复权, "01"=前复权, "02"=后复权
+    """
+    from mootdx.contrib.adjust import get_adjust_year
+    raw = _strip_suffix(code)
+    if not year:
+        from datetime import date
+        year = str(date.today().year)
+    try:
+        df = get_adjust_year(symbol=raw, year=year, factor=factor)
+    except Exception as e:
+        raise LocalTdxError(f"get_adjust_year({raw}) failed: {e}")
+    if df is None or df.empty:
+        return pd.DataFrame()
+    df = df.copy()
+    df["code"] = normalize_code(code)
+    df["source"] = f"mootdx_adjust_{factor}"
+    df.index.name = "date"
+    df = df.reset_index()
+    return df
+
+
+# ========== Real-time quotes ==========
 
 def get_snapshot(code: str) -> dict[str, Any]:
-    """Get single stock/index snapshot via TQ."""
-    tcode = normalize_code(code)
-    with TqSession() as q:
-        return q.get_market_snapshot(tcode)
+    """Get real-time quote for a single stock."""
+    client = _get_client()
+    raw = _strip_suffix(code)
+    try:
+        df = client.quotes(symbol=[raw])
+    except Exception as e:
+        raise LocalTdxError(f"quotes({raw}) failed: {e}")
+    if df is None or df.empty:
+        return {}
+    row = df.iloc[0]
+    return {
+        "code": raw, "price": float(row.get("price", 0)),
+        "last_close": float(row.get("last_close", 0)),
+        "open": float(row.get("open", 0)), "high": float(row.get("high", 0)),
+        "low": float(row.get("low", 0)),
+    }
 
 
 def get_snapshots(codes: Iterable[str]) -> dict[str, dict[str, Any]]:
-    result: dict[str, dict[str, Any]] = {}
-    with TqSession() as q:
-        for code in codes:
-            tcode = normalize_code(code)
-            try:
-                result[tcode] = q.get_market_snapshot(tcode)
-            except Exception as e:
-                result[tcode] = {"ErrorId": "local_error", "Error": repr(e)}
+    """Get real-time quotes for multiple stocks."""
+    client = _get_client()
+    raw_codes = [_strip_suffix(c) for c in codes]
+    try:
+        df = client.quotes(symbol=raw_codes)
+    except Exception as e:
+        raise LocalTdxError(f"quotes batch failed: {e}")
+    if df is None or df.empty:
+        return {}
+    result = {}
+    for _, row in df.iterrows():
+        code = str(row.get("code", ""))
+        result[code] = {
+            "price": float(row.get("price", 0)),
+            "last_close": float(row.get("last_close", 0)),
+            "open": float(row.get("open", 0)),
+            "high": float(row.get("high", 0)),
+            "low": float(row.get("low", 0)),
+        }
     return result
 
 
-def get_stock_list(pool_type: str = "5") -> list[str]:
-    """Get stock list. pool_type='5' means all A shares in TQ examples."""
-    with TqSession() as q:
-        return list(q.get_stock_list(pool_type) or [])
+# ========== Financial data ==========
 
+_financial_cache: dict[str, pd.DataFrame] = {}
+
+
+def get_financial_data(report_period: str = "") -> pd.DataFrame:
+    """Download and parse TDX financial data (gpcwYYYYMMDD).
+
+    Returns DataFrame with 585 columns for ~5500 stocks.
+    """
+    from mootdx.affair import Affair
+    if not report_period:
+        files = Affair.files()
+        gpcw = sorted([f for f in files if f["filename"].startswith("gpcw")],
+                       key=lambda x: x["filename"], reverse=True)
+        # Skip empty future reports
+        for f in gpcw:
+            if f.get("filesize", 0) > 100000:
+                report_period = f["filename"].replace("gpcw", "").replace(".zip", "")
+                break
+    cache_key = report_period
+    if cache_key in _financial_cache:
+        return _financial_cache[cache_key]
+    fname = f"gpcw{report_period}.zip"
+    download_dir = str(BASE / ".." / "tdx_affair_cache")
+    Affair.fetch(downdir=download_dir, filename=fname)
+    df = Affair.parse(downdir=download_dir, filename=fname)
+    if df is not None:
+        _financial_cache[cache_key] = df
+    return df if df is not None else pd.DataFrame()
+
+
+# ========== Sector data ==========
 
 def get_sector_list() -> list[str]:
-    with TqSession() as q:
-        return list(q.get_sector_list() or [])
+    """Get sector names from local TDX block files."""
+    reader = _get_reader()
+    try:
+        blocks = reader.block(symbol="block_zs", group=False)
+        if blocks is not None and not blocks.empty:
+            return blocks["name"].tolist() if "name" in blocks.columns else []
+    except Exception:
+        pass
+    return []
 
 
 def get_stock_list_in_sector(sector: str, block_type: int = 0) -> list[str]:
-    with TqSession() as q:
-        return list(q.get_stock_list_in_sector(sector, block_type=block_type) or [])
+    """Get stock codes in a sector."""
+    reader = _get_reader()
+    try:
+        blocks = reader.block(symbol="block_zs", group=False)
+        if blocks is not None and not blocks.empty:
+            mask = blocks["name"] == sector if "name" in blocks.columns else pd.Series([False] * len(blocks))
+            subset = blocks[mask]
+            return subset["code"].tolist() if "code" in subset.columns else []
+    except Exception:
+        pass
+    return []
 
+
+def get_stock_list(pool_type: str = "5") -> list[str]:
+    """Get stock list via mootdx online."""
+    client = _get_client()
+    from mootdx.consts import MARKET_SH, MARKET_SZ
+    result = []
+    for mkt in [MARKET_SH, MARKET_SZ]:
+        try:
+            stocks = client.stocks(market=mkt)
+            if stocks is not None and not stocks.empty:
+                result.extend(stocks["code"].tolist() if "code" in stocks.columns else [])
+        except Exception:
+            pass
+    return result
+
+
+# ========== JSON/CSV helpers ==========
 
 def save_json(path: Path, obj: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(obj, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    path.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def save_csv(path: Path, df: pd.DataFrame) -> None:
@@ -291,62 +329,39 @@ def save_csv(path: Path, df: pd.DataFrame) -> None:
     df.to_csv(path, index=False, encoding="utf-8-sig")
 
 
+# ========== TQ compat stubs (deprecated, kept for backward compat) ==========
+
+def require_tq() -> Any:
+    raise LocalTdxError("tqcenter is deprecated, use mootdx interfaces directly")
+
+
+class TqSession:
+    def __init__(self, *args, **kwargs):
+        raise LocalTdxError("tqcenter is deprecated, use mootdx interfaces directly")
+
+
+def get_market_data(*args, **kwargs):
+    raise LocalTdxError("get_market_data is deprecated, use read_vipdoc_daily or get_online_bars")
+
+
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Local TDX data utility")
-    sub = ap.add_subparsers(dest="cmd", required=True)
-
-    p_k = sub.add_parser("kline")
-    p_k.add_argument("--code", required=True)
-    p_k.add_argument("--count", type=int, default=120)
-    p_k.add_argument("--start", default="")
-    p_k.add_argument("--end", default="")
-    p_k.add_argument("--prefer", default="tq", choices=["tq", "vipdoc", "e_odata"])
-    p_k.add_argument("--out", default="")
-
-    p_s = sub.add_parser("snapshot")
-    p_s.add_argument("--codes", required=True, help="comma-separated codes")
-    p_s.add_argument("--out", default="")
-
-    p_l = sub.add_parser("stock-list")
-    p_l.add_argument("--pool-type", default="5")
-    p_l.add_argument("--out", default="")
-
-    p_b = sub.add_parser("sector-list")
-    p_b.add_argument("--out", default="")
-
-    p_m = sub.add_parser("sector-members")
-    p_m.add_argument("--sector", required=True)
-    p_m.add_argument("--block-type", type=int, default=0)
-    p_m.add_argument("--out", default="")
-
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--code", default="600150")
+    ap.add_argument("--mode", choices=["daily", "online", "index", "adjust", "finance"], default="daily")
+    ap.add_argument("--offset", type=int, default=10)
     args = ap.parse_args()
-
-    if args.cmd == "kline":
-        df = get_ohlcv_table(args.code, start_time=args.start, end_time=args.end, count=args.count, prefer=args.prefer)
-        if args.out:
-            save_csv(Path(args.out), df)
-        print(df.tail(10).to_string(index=False))
-    elif args.cmd == "snapshot":
-        codes = [c.strip() for c in args.codes.split(",") if c.strip()]
-        obj = get_snapshots(codes)
-        if args.out:
-            save_json(Path(args.out), obj)
-        print(json.dumps(obj, ensure_ascii=False, indent=2, default=str)[:5000])
-    elif args.cmd == "stock-list":
-        obj = get_stock_list(args.pool_type)
-        if args.out:
-            save_json(Path(args.out), obj)
-        print(json.dumps({"count": len(obj), "preview": obj[:20]}, ensure_ascii=False, indent=2))
-    elif args.cmd == "sector-list":
-        obj = get_sector_list()
-        if args.out:
-            save_json(Path(args.out), obj)
-        print(json.dumps({"count": len(obj), "preview": obj[:20]}, ensure_ascii=False, indent=2))
-    elif args.cmd == "sector-members":
-        obj = get_stock_list_in_sector(args.sector, block_type=args.block_type)
-        if args.out:
-            save_json(Path(args.out), obj)
-        print(json.dumps({"count": len(obj), "preview": obj[:50]}, ensure_ascii=False, indent=2))
+    if args.mode == "daily":
+        df = read_vipdoc_daily(args.code)
+    elif args.mode == "online":
+        df = get_online_bars(args.code, offset=args.offset)
+    elif args.mode == "index":
+        df = get_online_index(args.code, offset=args.offset)
+    elif args.mode == "adjust":
+        df = get_adjusted_daily(args.code)
+    elif args.mode == "finance":
+        df = get_financial_data()
+    print(df.tail(args.offset).to_string() if not df.empty else "No data")
 
 
 if __name__ == "__main__":

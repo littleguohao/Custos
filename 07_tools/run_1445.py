@@ -33,13 +33,19 @@ if not cal.get("is_trading_day", False):
     print(f"今日确认休市，14:45报告不生成（{target}）")
     sys.exit(0)
 
-# 2. Runtime gate
+# 2. Collect holding quotes via mootdx (replaces LLM tdx_quotes calls)
+rc, out = run(["uv", "run", "python", str(TOOLS / "collect_holding_quotes.py")])
+if rc != 0:
+    print(f"【14:45尾盘报告失败｜{target}】行情采集失败：{out[:300]}")
+    sys.exit(1)
+
+# 3. Runtime gate
 rc, out = run(["uv", "run", "python", str(TOOLS / "runtime_gate.py"), "--date", target, "--require-trading-day"])
 if rc != 0:
     print(f"【14:45尾盘报告失败｜{target}】运行门控失败：{out[:300]}")
     sys.exit(1)
 
-# 3. Close review (strict + digest)
+# 4. Close review (strict + digest)
 rc, out = run(["uv", "run", "python", str(TOOLS / "close_review" / "close_review.py"), "--date", target, "--strict", "--emit-digest"])
 if rc != 0:
     print(f"【14:45尾盘报告失败｜{target}】close_review校验失败：{out[:500]}")
