@@ -1,0 +1,48 @@
+﻿{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MarketIntelligenceEvidence",
+  "type": "object",
+  "required": ["contract_version", "request_id", "agent_id", "status", "target_date", "as_of", "market_state", "news_evidence", "notice_evidence", "overseas_evidence", "risk_flags", "validation_points", "data_quality", "handoff_to_main"],
+  "properties": {
+    "contract_version": {"const": "1.0"},
+    "request_id": {"type": "string"},
+    "agent_id": {"const": "market-intelligence"},
+    "status": {"enum": ["complete", "partial", "blocked", "failed"]},
+    "target_date": {"type": "string"},
+    "as_of": {"type": "string"},
+    "window": {"type": "object"},
+    "market_state": {"type": "object"},
+    "news_evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}},
+    "notice_evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}},
+    "overseas_evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}},
+    "risk_flags": {"type": "array"},
+    "validation_points": {"type": "array"},
+    "missing_inputs": {"type": "array"},
+    "conflicts": {"type": "array"},
+    "data_quality": {"type": "object"},
+    "handoff_to_main": {"type": "object"}
+  },
+  "$defs": {
+    "evidence": {
+      "type": "object",
+      "required": ["evidence_id", "title", "published_at", "source_name", "fact_summary", "affected_entities", "impact_direction", "confidence", "quality", "confirmed"],
+      "properties": {
+        "evidence_id": {"type": "string"},
+        "title": {"type": "string"},
+        "published_at": {"type": "string"},
+        "source_name": {"type": "string"},
+        "source_ref": {"type": ["string", "null"]},
+        "fact_summary": {"type": "string"},
+        "inference": {"type": ["string", "null"]},
+        "affected_entities": {"type": "array"},
+        "impact_direction": {"enum": ["positive", "negative", "mixed", "neutral", "unknown"]},
+        "impact_horizon": {"type": ["string", "null"]},
+        "validation_condition": {"type": ["string", "null"]},
+        "confidence": {"enum": ["high", "medium", "low"]},
+        "quality": {"enum": ["confirmed", "candidate", "partial", "stale", "missing"]},
+        "confirmed": {"type": "boolean"}
+      }
+    }
+  },
+  "additionalProperties": true
+}
