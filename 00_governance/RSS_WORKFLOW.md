@@ -5,7 +5,7 @@
 RSS是信息发现和时间线补充渠道，不是交易信号，也不能直接扩大交易权限。
 
 ```text
-原始Feed → rss_collector → normalized全量证据 → rss_filter → 有界候选集 → market-intelligence → main → RiskDecision → ChiefDecision
+原始Feed → rss_collector → normalized全量证据 → rss_filter → 有界候选集 → premarket_intelligence → RiskDecision → ChiefDecision
 ```
 
 ## 数据保留

@@ -139,7 +139,6 @@ def main():
     ap.add_argument("--macro", choices=["double_wide", "none"], default=None)
     ap.add_argument("--amv-zone", choices=["做多", "中性", "空头"], default=None)
     ap.add_argument("--amv-pct", type=float, default=None)
-    ap.add_argument("--prepare-specialists", action="store_true", help="write date-scoped requests for the three specialist Agents")
     ap.add_argument("--reuse-discovery", action="store_true", help="reuse overseas/RSS files prepared before the formal report window")
     ap.add_argument("--session-type", choices=["premarket", "intraday_1445", "postclose"], default="premarket")
     args = ap.parse_args()
@@ -209,16 +208,6 @@ def main():
     # before the final decision layer. Candidate discovery remains disabled.
     stages.append(run([str(PY), str(BASE / "07_tools" / "build_skill_contracts.py"), "--date", args.date], "build_skill_contracts"))
 
-    # Specialist Agents are optional asynchronous enrichment. Their absence never
-    # blocks the deterministic report chain or increases trading permissions.
-    handoff = BASE / "07_tools" / "specialist_handoff.py"
-    if args.prepare_specialists:
-        stages.append(run([str(PY), str(handoff), "prepare", "--date", args.date,
-                           "--session-type", args.session_type], "prepare_specialist_handoffs"))
-    validate_cmd = [str(PY), str(handoff), "validate", "--date", args.date, "--optional"]
-    specialist_validation = run(validate_cmd, "validate_specialist_handoffs", required=False)
-    stages.append(specialist_validation)
-
     stages.append(run([str(PY), str(TOOLS / "chief_decision_report.py"), "--date", args.date], "chief_decision_report"))
     if args.session_type == "premarket":
         chief_source = DATA_DIR / "decisions" / f"{args.date}_chief_decision.json"
@@ -269,7 +258,6 @@ def main():
         DATA_DIR / "stock_pool" / f"{args.date}_stock_pool_normalized.json",
         DATA_DIR / "buy_strategy" / f"{args.date}_buy_plan_normalized.json",
         DATA_DIR / "risk" / f"{args.date}_risk_decision.json",
-        DATA_DIR / "agent_handoffs" / args.date / "handoff_gate.json",
         SUPPORT_DIR / args.date / f"{args.date}_wechat_summary.txt",
     ]:
         print(f"- {p} {'OK' if p.exists() else 'MISSING'}")

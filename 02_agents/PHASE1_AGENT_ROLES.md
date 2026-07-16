@@ -13,11 +13,11 @@
 - stock_pool：已独立创建，用于结合主线、产业、板块、技术和风险过滤生成 A/B/C/D 候选池。
 - buy_strategy：已独立创建，用于基于 stock_pool 输出生成条件化买入计划；但必须受 market_timing、theme_tracker、risk_control、chief_decision 约束。
 
-## 异步研究与Subagent边界
+## 生产执行边界
 
-- 专业Agent和Subagent仅用于非分钟级的独立研究任务。
+- 定时生产链不调用Subagent；所有角色职责由确定性脚本执行。
 - 09:05、14:45、15:15、20:30任务不得创建、调用或等待子Agent。
-- 异步结果有则追加，缺失则标记`unavailable`，不阻断正式报告。
+- 输入缺失时标记`unavailable`，不阻断正式报告，也不得提高交易权限。
 
 ## 原则
 
