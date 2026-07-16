@@ -42,6 +42,20 @@ if rc != 0:
 else:
     print(f"[OK] {out.strip().splitlines()[-1] if out.strip() else 'incremental market collected'}")
 
+# 3b. Calculate MFE/MAE for holdings
+rc, out = run(["uv", "run", "python", str(TOOLS / "calc_mfe_mae.py")])
+if rc != 0:
+    print(f"[WARN] calc_mfe_mae failed: {out[:200]}")
+else:
+    print(f"[OK] MFE/MAE calculated")
+
+# 3c. Collect fund flow rank (eastmoney direct API)
+rc, out = run(["uv", "run", "python", str(TOOLS / "collect_fund_flow.py")])
+if rc != 0:
+    print(f"[WARN] collect_fund_flow failed: {out[:200]}")
+else:
+    print(f"[OK] fund flow rank collected")
+
 # 4. Merge incremental data into market_timing_input.json
 incremental_path = BASE / "01_data" / "market" / f"{target}_incremental_market.json"
 market_path = BASE / "01_data" / "market" / f"{target}_market_timing_input.json"

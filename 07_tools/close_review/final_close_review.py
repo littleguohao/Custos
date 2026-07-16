@@ -126,6 +126,18 @@ def main():
     tmap = {bare(x.get("code")): x for x in tech}
     pmap = {bare(x.get("代码")): x for x in positions}
     qmap = {bare(x.get("code")): x for x in quote_snapshot.get("quotes", []) if x.get("available")}
+    # Load MFE/MAE data
+    mfe_path = DATA / "holdings" / f"{day}_mfe_mae.json"
+    mfe_map = {}
+    if mfe_path.exists():
+        mfe_data = json.loads(mfe_path.read_text(encoding="utf-8"))
+        mfe_map = {x["code"]: x for x in mfe_data.get("holdings", []) if "code" in x}
+    # Load fund flow rank
+    ff_path = DATA / "market" / f"{day}_fund_flow_rank.json"
+    ff_map = {}
+    if ff_path.exists():
+        ff_data = json.loads(ff_path.read_text(encoding="utf-8"))
+        ff_map = {x["code"]: x for x in ff_data.get("stock_rank", []) if "code" in x}
     freshness = gate.get("position_freshness", {})
     technical_dates = sorted({str(x.get("latest_date")) for x in tech if x.get("latest_date")})
     technical_current = technical_dates == [day]
@@ -161,6 +173,10 @@ def main():
             "b1_holding_state": b1,
             "sector": sector,
             "index": index_name(code),
+            "mfe_pct": mfe_map.get(code, {}).get("mfe_pct"),
+            "mae_pct": mfe_map.get(code, {}).get("mae_pct"),
+            "main_net_inflow": ff_map.get(code, {}).get("main_net_inflow"),
+            "main_net_pct": ff_map.get(code, {}).get("main_net_pct"),
         })
     quotes_current = bool(revalued) and all(x["close"] is not None and x["price_date"] == day for x in revalued)
     actual_position = sum(x["position_pct"] for x in revalued if x["position_pct"] is not None) if quotes_current else None
@@ -213,7 +229,7 @@ def main():
     for row in enrichment.get("theme_lifecycles") or []:
         lines.append(f"| {row.get('theme_name')} | {row.get('phase')} | {row.get('technical_stage')} | {row.get('score')} | {row.get('event_evidence_count')} | {row.get('fund_flow_evidence')}/{row.get('leader_structure')} | {row.get('continuity')} | {row.get('validation')} |")
 
-    lines += ["", "## 5. 持仓逐只诊断与仓位审计", "", "| 代码 | 名称 | 收盘/成本 | 盈亏 | 仓位 | 走势 | BBI/N型 | B1动作 | 原始逻辑/相对板块 |", "|---|---|---|---:|---:|---|---|---|---|"]
+    lines += ["", "## 5. 持仓逐只诊断与仓位审计", "", "| 代码 | 名称 | 收盘/成本 | 盈亏 | 仓位 | MFE/MAE | 主力净流入 | 走势 | BBI/N型 | B1动作 | 原始逻辑/相对板块 |", "|---|---|---|---:|---:|---|---:|---|---|---|---|"]
     diagnoses = {bare(x.get("code")): x for x in enrichment.get("holding_diagnoses") or []}
     for row in revalued:
         diagnosis = diagnoses.get(row["code"], {})
@@ -221,7 +237,9 @@ def main():
         pnl_text = "缺失" if row["pnl_pct"] is None else f"{row['pnl_pct']:+.2%}"
         pos_text = "缺失" if row["position_pct"] is None else f"{row['position_pct']:.1%}"
         b1 = row["b1_holding_state"]
-        lines.append(f"| {row['code']} | {row['name']} | {close_text} | {pnl_text} | {pos_text} | {row['trend']}/{row['box']} | {row['bbi']['signal']}/{row['n_structure']['signal']} | {b1['final_priority']} {b1['final_action']}：{b1['final_reason']} | {diagnosis.get('original_holding_logic', 'unavailable')}/{diagnosis.get('relative_to_sector', 'unavailable')} |")
+        mfe_text = f"{row.get('mfe_pct','N/A')}%/{row.get('mae_pct','N/A')}%" if row.get('mfe_pct') is not None else "缺失"
+        ff_text = f"{row.get('main_net_inflow','N/A')}" if row.get('main_net_inflow') is not None else "缺失"
+        lines.append(f"| {row['code']} | {row['name']} | {close_text} | {pnl_text} | {pos_text} | {mfe_text} | {ff_text} | {row['trend']}/{row['box']} | {row['bbi']['signal']}/{row['n_structure']['signal']} | {b1['final_priority']} {b1['final_action']}：{b1['final_reason']} | {diagnosis.get('original_holding_logic', 'B1策略')}/{diagnosis.get('relative_to_sector', 'unavailable')} |")
     lines.append("\n- 单票20%审计：" + "；".join(f"{x['name']} {x['position_pct']:.1%}{'，超限' if x['position_pct'] > .2 else ''}" for x in revalued if x["position_pct"] is not None))
 
     next_plan = enrichment.get("next_day_plan") or {}

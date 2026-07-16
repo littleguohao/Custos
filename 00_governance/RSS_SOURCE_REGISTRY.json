@@ -20,6 +20,39 @@
   },
   "sources": [
     {
+      "id": "gov_cn",
+      "name": "国务院中国政府网",
+      "category": "policy_official",
+      "url": "https://www.gov.cn/pushinfo/v150203/rss.xml",
+      "tier": "S",
+      "enabled": true,
+      "audit": "pending",
+      "policy_stage": "confirmed_1",
+      "note": "国务院/国办发文、万亿财政刺激、全国性产业顶层规划"
+    },
+    {
+      "id": "pbc_rsshub",
+      "name": "中国人民银行(RSSHub)",
+      "category": "macro_official",
+      "url": "https://rsshub.app/pbc.gov.cn/xwfb",
+      "tier": "S",
+      "enabled": true,
+      "audit": "pending",
+      "policy_stage": "confirmed_1",
+      "note": "央行新闻发布、货币政策、降准/LPR、公开市场操作"
+    },
+    {
+      "id": "csrc_rsshub",
+      "name": "中国证监会(RSSHub)",
+      "category": "policy_official",
+      "url": "https://rsshub.app/csrc.gov.cn/zjhpublic/zjh",
+      "tier": "S",
+      "enabled": true,
+      "audit": "pending",
+      "policy_stage": "confirmed_1",
+      "note": "注册制、印花税、减持、交易规则、资本市场监管新政"
+    },
+    {
       "id": "cninfo",
       "name": "巨潮资讯",
       "category": "a_share_official",

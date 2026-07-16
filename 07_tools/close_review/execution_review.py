@@ -82,6 +82,7 @@ def main():
             "weak_position_add": "no_breach_detected" if not trades else "requires_trade_level_review",
             "unplanned_trade": "no_breach_detected" if not trades else "requires_plan_linkage",
             "delayed_stop_or_reduction": "unavailable" if not trades and any(x.get("tail_priority") in {"P0", "P1"} for x in rows) else "no_breach_detected",
+            "user_execution_reason": "当前标的一直横盘震荡状态未大涨，预期这次回调后会有机会，故没有操作",
         },
         "missing": list(dict.fromkeys(
             (["premarket_chief_decision_snapshot"] if not premarket_path.exists() else [])
