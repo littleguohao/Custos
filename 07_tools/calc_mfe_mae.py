@@ -27,25 +27,43 @@ def main():
         qty = float(pos.get("持有数量", 0))
 
         # Determine market
+        is_bj = code.startswith("920") or code.startswith("8") or code.startswith("4")
         if code.startswith("6"):
             symbol = f"sh{code}"
-        elif code.startswith("920") or code.startswith("8"):
+        elif is_bj:
             symbol = f"bj{code}"
         else:
             symbol = f"sz{code}"
 
         try:
-            df = reader.daily(symbol=symbol)
-            if df is None or len(df) == 0:
-                # Try online bars for BJ stocks
+            df = None
+            # BJ stocks: use online bars directly (Reader doesn't support)
+            if is_bj:
                 from mootdx.quotes import Quotes
                 client = Quotes.factory(market="std", quiet=True)
-                df = client.bars(symbol=code, frequency=9, offset=hold_days + 5)
+                df = client.bars(symbol=code, frequency=9, count=hold_days + 10)
+                if df is not None and len(df) > 0:
+                    df = df.reset_index()
+            else:
+                df = reader.daily(symbol=symbol)
                 if df is not None and len(df) > 0:
                     df = df.reset_index()
                 else:
-                    results.append({"code": code, "name": name, "mfe": None, "mae": None, "error": "no data"})
-                    continue
+                    # Fallback to online bars for any stock
+                    from mootdx.quotes import Quotes
+                    client = Quotes.factory(market="std", quiet=True)
+                    df = client.bars(symbol=code, frequency=9, count=hold_days + 10)
+                    if df is not None and len(df) > 0:
+                        df = df.reset_index()
+
+            if df is None or len(df) == 0:
+                results.append({"code": code, "name": name, "mfe": None, "mae": None, "error": "no data"})
+                print(f"[WARN] {code} {name}: no data")
+                continue
+
+            # Normalize date column name
+            if "datetime" in df.columns:
+                df = df.rename(columns={"datetime": "date"})
 
             # Take last hold_days rows
             df = df.tail(hold_days) if hold_days > 0 else df.tail(30)
@@ -55,8 +73,11 @@ def main():
 
             mfe_pct = (highs.max() / cost - 1) * 100 if cost > 0 else None
             mae_pct = (lows.min() / cost - 1) * 100 if cost > 0 else None
-            mfe_date = str(df.loc[highs.idxmax(), "date"] if "date" in df.columns else highs.index[-1])[:10]
-            mae_date = str(df.loc[lows.idxmin(), "date"] if "date" in df.columns else lows.index[-1])[:10]
+            mfe_idx = highs.idxmax()
+            mae_idx = lows.idxmin()
+            date_col = "date" if "date" in df.columns else df.index.name or "index"
+            mfe_date = str(df.loc[mfe_idx, date_col] if date_col in df.columns else mfe_idx)[:10]
+            mae_date = str(df.loc[mae_idx, date_col] if date_col in df.columns else mae_idx)[:10]
 
             results.append({
                 "code": code,
