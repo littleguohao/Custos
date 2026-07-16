@@ -11,7 +11,13 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 BASE = Path(__file__).resolve().parent.parent
-target = date.today().strftime("%Y-%m-%d")
+
+import argparse
+ap = argparse.ArgumentParser()
+ap.add_argument("--date", default=date.today().strftime("%Y-%m-%d"))
+ap.add_argument("--session", choices=["intraday", "postclose"], default="intraday")
+args = ap.parse_args()
+target = args.date
 
 # Load positions
 raw = json.loads((BASE / "01_data/trades/current_positions.json").read_text(encoding="utf-8"))
@@ -73,10 +79,34 @@ for h in holdings:
             prev_close = float(prev["close"])
             close = float(last["close"])
             change_pct = round((close / prev_close - 1) * 100, 2) if prev_close else None
+            last_date = last.name if hasattr(last.name, 'strftime') else ''
+            # If postclose and local data is stale, try online bars for today's close
+            if args.session == "postclose" and str(last_date)[:10] != target:
+                try:
+                    df2 = client.bars(symbol=code, frequency=9, offset=2)
+                    if df2 is not None and len(df2) >= 1:
+                        last2 = df2.iloc[-1]
+                        prev2 = df2.iloc[-2] if len(df2) > 1 else None
+                        prev_close2 = float(prev2["close"]) if prev2 is not None else prev_close
+                        close2 = float(last2["close"])
+                        chg2 = round((close2 / prev_close2 - 1) * 100, 2) if prev_close2 else None
+                        holding_quotes.append({
+                            "code": code, "name": name, "market": "SH" if mkt == 1 else "SZ",
+                            "available": True,
+                            "date": str(last2.get("datetime", ""))[:10],
+                            "open": float(last2["open"]), "high": float(last2["high"]),
+                            "low": float(last2["low"]), "close": close2,
+                            "previous_close": prev_close2, "change_pct": chg2,
+                            "volume": float(last2["volume"]), "amount": float(last2.get("amount", 0)),
+                            "source": "mootdx_online_bars_postclose",
+                        })
+                        continue
+                except Exception:
+                    pass
             holding_quotes.append({
                 "code": code, "name": name, "market": "SH" if mkt == 1 else "SZ",
                 "available": True,
-                "date": str(last.name if hasattr(last.name, 'strftime') else last.get('datetime', '')),
+                "date": str(last_date)[:10] if last_date else "",
                 "open": float(last["open"]), "high": float(last["high"]),
                 "low": float(last["low"]), "close": close,
                 "previous_close": prev_close, "change_pct": change_pct,

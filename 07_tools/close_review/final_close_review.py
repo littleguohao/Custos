@@ -125,7 +125,7 @@ def main():
 
     tmap = {bare(x.get("code")): x for x in tech}
     pmap = {bare(x.get("代码")): x for x in positions}
-    qmap = {bare(x.get("code")): x for x in quote_snapshot.get("quotes", []) if x.get("date") == day}
+    qmap = {bare(x.get("code")): x for x in quote_snapshot.get("quotes", []) if x.get("available")}
     freshness = gate.get("position_freshness", {})
     technical_dates = sorted({str(x.get("latest_date")) for x in tech if x.get("latest_date")})
     technical_current = technical_dates == [day]
@@ -135,7 +135,7 @@ def main():
     for code, position in pmap.items():
         technical = tmap.get(code, {})
         quote = qmap.get(code, {})
-        close = optional_finite(quote.get("price"))
+        close = optional_finite(quote.get("close", quote.get("price")))
         quantity = finite(position.get("持有数量"))
         cost = finite(position.get("单位成本"))
         market_value = close * quantity if close is not None else None

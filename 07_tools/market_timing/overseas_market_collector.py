@@ -28,7 +28,7 @@ SYMBOLS = {
     "sox": {"symbol": "^SOX", "name": "费城半导体指数", "group": "index", "region": "us"},
     "nikkei": {"symbol": "^N225", "name": "日经225", "group": "index", "region": "jp"},
     "kospi": {"symbol": "^KS11", "name": "韩国KOSPI", "group": "index", "region": "kr"},
-    "hstech": {"symbol": "^HSTECH", "name": "恒生科技指数", "group": "index"},
+    "hstech": {"symbol": "^HSCI", "name": "恒生综合指数", "group": "index"},
     "nvda": {"symbol": "NVDA", "name": "英伟达", "group": "ai_leader"},
     "amd": {"symbol": "AMD", "name": "AMD", "group": "ai_leader"},
     "tsm": {"symbol": "TSM", "name": "台积电ADR", "group": "semiconductor"},
