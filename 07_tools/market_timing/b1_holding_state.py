@@ -25,7 +25,7 @@ def action_rank(priority: str) -> int:
 
 
 SIGNAL_ORDER = {
-    "hard_loss": 0, "n_l1_breach": 1, "trend_box_break": 2,
+    "hard_loss": 0, "n_l1_breach": 1, "trend_box_break": 2, "desc_n_confirmed": 3,
     "n_l2_breach": 10, "bbi_two_close_breach": 11, "heavy_large_bear": 12,
     "downtrend": 13, "bear_rebound_reduce": 14, "loss_reduction": 15,
     "bbi_first_breach": 20, "two_bull_profit_take": 21, "kdj_death_cross": 22,
@@ -44,6 +44,7 @@ def evaluate(row: dict[str, Any], market_regime: str = "未知", price: Any = No
     technical_date = str(row.get("latest_date") or "") or None
     price_volume_current = not price_date or not technical_date or price_date == technical_date
     structure = row.get("n_structure") or {}
+    desc_structure = row.get("descending_n_structure") or {}
     signals: list[dict[str, Any]] = []
     unavailable: list[str] = []
 
@@ -64,6 +65,14 @@ def evaluate(row: dict[str, Any], market_regime: str = "未知", price: Any = No
             add("n_l2_breach", "P1", "N型回踩失守评估", f"价格{current:.2f}跌破L2更高回踩低点{l2:.2f}，但L1尚未失守")
     else:
         unavailable.append("n_structure")
+
+    # Descending N-structure: H1 -> L1 -> lower H2 -> close below L1
+    if desc_structure.get("available") and current is not None:
+        structural_low = finite(desc_structure.get("structural_low"))
+        if structural_low is not None and current < structural_low:
+            add("desc_n_confirmed", "P0", "下降N型结构清仓评估", f"价格{current:.2f}跌破下降N型结构低点{structural_low:.2f}")
+    elif not desc_structure.get("available"):
+        unavailable.append("descending_n_structure")
 
     below_days = int(finite(row.get("consecutive_closes_below_bbi")) or 0)
     if row.get("above_bbi") is False:

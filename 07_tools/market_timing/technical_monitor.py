@@ -212,7 +212,29 @@ def bbi_state(df: pd.DataFrame) -> dict[str, Any]:
     }
 
 
-def price_volume_state(df: pd.DataFrame) -> dict[str, Any]:
+def _infer_price_limit(code: str, df: pd.DataFrame) -> int:
+    """Infer the daily price-limit percentage for a stock.
+
+    Uses code prefix as the base (688/920/300/301 => 20%, else 10%), then
+    validates against observed historical daily changes: if any completed
+    bar shows |change_pct| > 9.9 for a 10%-prefix stock, upgrade to 20%.
+    This catches edge cases without relying solely on static prefix rules.
+    ST/special-treatment stocks typically have 5% limits; we detect those
+    by checking if observed max |change_pct| is consistently <= 5.2.
+    """
+    raw = str(code).strip().upper().split(".")[0]
+    base = 20 if raw.startswith(("688", "920", "300", "301")) else 10
+    if len(df) >= 20:
+        changes = (df["close"] / df["close"].shift(1) - 1).abs() * 100
+        max_change = float(changes.dropna().max())
+        if base == 10 and max_change > 9.9:
+            base = 20
+        if max_change <= 5.2:
+            base = 5
+    return base
+
+
+def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
     """Compute deterministic B1 holding signals from completed daily bars."""
     if len(df) < 20:
         return {"available": False, "reason": "少于20根K线"}
@@ -253,6 +275,32 @@ def price_volume_state(df: pd.DataFrame) -> dict[str, Any]:
         extreme_shrink and change_pct is not None and -2 <= change_pct <= 2
         and amplitude_pct is not None and amplitude_pct <= 7
     )
+
+    # BBI上方连续两根中大阳线判断 (B1第五层止盈)
+    price_limit = _infer_price_limit(code, df)
+    medium_large_threshold = price_limit / 2  # 半个涨停幅度
+    bbi_val = sum(df["close"].rolling(n).mean() for n in (3, 6, 12, 24)) / 4
+    bbi_latest = float(bbi_val.iloc[-1]) if bbi_val.notna().any() else None
+    bbi_prev = float(bbi_val.iloc[-2]) if len(bbi_val) >= 2 and bbi_val.notna().iloc[-2] else None
+    close_prev = float(x["close"].iloc[-2])
+    above_bbi_now = bbi_latest is not None and close >= bbi_latest
+    above_bbi_prev = bbi_prev is not None and close_prev >= bbi_prev
+    two_medium_large_bull = None
+    two_medium_large_bull_reason = None
+    if bbi_latest is not None and bbi_prev is not None:
+        bull_today = latest_bulls[-1]
+        bull_prev = latest_bulls[-2]
+        today_qualifies = bull_today["bull"] and (bull_today["change_pct"] >= medium_large_threshold or bull_today["body_pct"] >= medium_large_threshold)
+        prev_qualifies = bull_prev["bull"] and (bull_prev["change_pct"] >= medium_large_threshold or bull_prev["body_pct"] >= medium_large_threshold)
+        two_medium_large_bull = bool(above_bbi_now and above_bbi_prev and today_qualifies and prev_qualifies)
+        two_medium_large_bull_reason = (
+            f"涨跌幅限制={price_limit}%，中大阳门槛={medium_large_threshold}%；"
+            f"T-1阳={bull_prev['bull']}/涨幅{bull_prev['change_pct']}%/实体{bull_prev['body_pct']}%，"
+            f"T阳={bull_today['bull']}/涨幅{bull_today['change_pct']}%/实体{bull_today['body_pct']}%；"
+            f"BBI上方T-1={above_bbi_prev},T={above_bbi_now}"
+        )
+    else:
+        two_medium_large_bull_reason = "BBI数据不足，无法判断连续中大阳"
     return {
         "available": True,
         "date": current["date"].strftime("%Y-%m-%d"),
@@ -267,8 +315,10 @@ def price_volume_state(df: pd.DataFrame) -> dict[str, Any]:
         "large_bear": large_bear,
         "heavy_large_bear": heavy_large_bear,
         "last_two_bull_metrics": latest_bulls,
-        "two_medium_large_bull": None,
-        "two_medium_large_bull_reason": "缺少证券当日实际涨跌幅限制，不能按代码静态猜测中大阳门槛",
+        "two_medium_large_bull": two_medium_large_bull,
+        "two_medium_large_bull_reason": two_medium_large_bull_reason or "未计算",
+        "price_limit": price_limit,
+        "medium_large_bull_threshold": round(medium_large_threshold, 2),
         "extreme_shrink": extreme_shrink,
         "reversal_k_candidate_without_j": reversal_k_candidate,
         "thresholds": {
@@ -351,6 +401,74 @@ def n_structure_state(df: pd.DataFrame, left: int = 3, right: int = 3) -> dict[s
     }
 
 
+def descending_n_structure_state(df: pd.DataFrame, left: int = 3, right: int = 3) -> dict[str, Any]:
+    """Find the latest descending-N structure using confirmed closing-price pivots.
+
+    Descending N: H1 -> L1 -> lower H2 -> close below L1.
+    - H1 is the major closing high (structural ceiling).
+    - L1 is the pullback closing low after H1.
+    - H2 is a lower rebound closing high (lower than H1).
+    - When price closes below L1, the descending N is confirmed.
+    - L1 is the hard structural failure level for short/downside risk.
+    """
+    if len(df) < left + right + 8:
+        return {"available": False, "reason": "K线数量不足以确认下降N型结构"}
+    x = df.reset_index(drop=True)
+    pivot_lows: list[int] = []
+    pivot_highs: list[int] = []
+    for i in range(left, len(x) - right):
+        close_window = x["close"].iloc[i-left:i+right+1]
+        close = float(x.at[i, "close"])
+        if close == float(close_window.min()) and int((close_window == close).sum()) == 1:
+            pivot_lows.append(i)
+        if close == float(close_window.max()) and int((close_window == close).sum()) == 1:
+            pivot_highs.append(i)
+
+    latest = None
+    for h2 in reversed(pivot_highs):
+        prior_highs = [i for i in pivot_highs if i < h2]
+        if not prior_highs:
+            continue
+        h1 = prior_highs[-1]
+        if float(x.at[h2, "close"]) >= float(x.at[h1, "close"]):
+            continue  # H2 must be lower than H1
+        lows_between = [i for i in pivot_lows if h1 < i < h2]
+        if not lows_between:
+            continue
+        l1 = min(lows_between, key=lambda i: float(x.at[i, "close"]))
+        # Check if current close is below L1 (confirmation)
+        current_close = float(x["close"].iloc[-1])
+        confirmed = current_close < float(x.at[l1, "close"])
+        latest = (h1, l1, h2, confirmed)
+        break
+
+    if latest is None:
+        return {"available": False, "reason": "未发现已确认分型的下降N型结构"}
+    h1, l1, h2, confirmed = latest
+    current_close = float(x["close"].iloc[-1])
+    origin_high = float(x.at[h1, "close"])
+    pullback_low = float(x.at[l1, "close"])
+    lower_high = float(x.at[h2, "close"])
+    origin_extreme_high = float(x["high"].iloc[max(0, h1-left):min(len(x), h1+right+1)].max())
+    distance_pct = (current_close / pullback_low - 1) * 100 if pullback_low else None
+    return {
+        "available": True,
+        "pattern": "H1-L1-lower_H2" + ("-confirmed" if confirmed else "-candidate"),
+        "status": "confirmed" if confirmed else "candidate",
+        "prior_high": round(origin_high, 4),
+        "prior_high_date": x.at[h1, "date"].strftime("%Y-%m-%d"),
+        "origin_extreme_high": round(origin_extreme_high, 4),
+        "structural_low": round(pullback_low, 4),
+        "structural_low_date": x.at[l1, "date"].strftime("%Y-%m-%d"),
+        "lower_high": round(lower_high, 4),
+        "lower_high_date": x.at[h2, "date"].strftime("%Y-%m-%d"),
+        "current_close": round(current_close, 4),
+        "distance_to_structural_low_pct": round(distance_pct, 4) if distance_pct is not None else None,
+        "below_structural_low": bool(current_close < pullback_low),
+        "pivot_window": {"left": left, "right": right},
+    }
+
+
 def trend_state(df: pd.DataFrame) -> dict[str, Any]:
     if len(df) < 60:
         return {"state": "数据不足", "reason": "少于60根K线"}
@@ -412,7 +530,8 @@ def analyze(df: pd.DataFrame) -> dict[str, Any]:
         "trend": daily_trend,
         "bbi": bbi_state(df),
         "n_structure": n_structure_state(df),
-        "price_volume": price_volume_state(df),
+        "descending_n_structure": descending_n_structure_state(df),
+        "price_volume": price_volume_state(df, code=tcode),
         "box_20d": box(df, 20),
         "box_60d": box(df, 60),
         "daily": {"kdj": kdj(df), "macd": macd(df)},
