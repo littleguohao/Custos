@@ -43,7 +43,11 @@ steps.append(f"overseas={'ok' if rc == 0 else 'fail'}")
 rc, out = run(["uv", "run", "python", str(TOOLS / "news" / "rss_collector.py"), "--date", target])
 steps.append(f"rss_collect={'ok' if rc == 0 else 'fail'}")
 
-# 5. RSS filter (premarket)
+# 5. Incremental market data (A50, CNH, breadth, northbound)
+rc, out = run(["uv", "run", "python", str(TOOLS / "collect_incremental_market.py")])
+steps.append(f"incremental={'ok' if rc == 0 else 'fail'}")
+
+# 6. RSS filter (premarket)
 rc, out = run(["uv", "run", "python", str(TOOLS / "news" / "rss_filter.py"), "--date", target, "--session-type", "premarket"])
 steps.append(f"rss_filter={'ok' if rc == 0 else 'fail'}")
 
