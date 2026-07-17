@@ -10,12 +10,12 @@ Phase 1 collector:
 Usage:
 python market_timing_collector.py --date 2026-07-09 --amv 1.2
 """
-import os
 from __future__ import annotations
 
 import argparse
 import json
 import math
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -28,8 +28,7 @@ if str(LOCAL_TDX_DIR) not in sys.path:
 
 import local_tdx_data as ltd  # type: ignore
 
-TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"C:
-ew_tdx64"))
+TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"C:\new_tdx64"))
 OUT_DIR = BASE / "01_data" / "market"
 
 INDICES = {

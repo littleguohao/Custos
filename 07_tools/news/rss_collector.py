@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """Deterministic RSS/Atom collector with strict JSON and source-quality metadata."""
 from __future__ import annotations
 import argparse, hashlib, html, json, re, ssl, urllib.request

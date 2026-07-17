@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """market_timing scorer v1.
 
 Reads strategy_team/01_data/market/YYYY-MM-DD_market_timing_input.json
