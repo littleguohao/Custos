@@ -9,12 +9,11 @@ Computes:
 
 Input can be TDX local vipdoc daily file by code, or future TQ Kline.
 """
-import os
 from __future__ import annotations
 
+import os
 import argparse
 import json
-import struct
 import sys
 from pathlib import Path
 from typing import Any
@@ -26,9 +25,26 @@ if hasattr(sys.stderr, "reconfigure"):
 
 import pandas as pd
 
-TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"C:
-ew_tdx64"))
+TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"C:\new_tdx64"))
 OUT_DIR = Path(__file__).resolve().parent.parent / "01_data" / "market"
+
+
+def _read_vipdoc_mootdx(tdx_code: str) -> pd.DataFrame:
+    """Read K-line via mootdx Reader (unified data layer)."""
+    prefix, code = split_code(tdx_code)
+    raw = f"{prefix}{code}"
+    try:
+        from mootdx.reader import Reader
+        reader = Reader.factory(market="std", tdxdir=str(TDX_ROOT))
+        df = reader.daily(symbol=raw)
+        if df is None or len(df) == 0:
+            return pd.DataFrame()
+        df = df.reset_index()
+        if "datetime" in df.columns:
+            df = df.rename(columns={"datetime": "date"})
+        return df
+    except Exception:
+        return pd.DataFrame()
 
 
 def norm_code(code: str) -> str:
@@ -53,28 +69,8 @@ def split_code(tdx_code: str):
 
 
 def read_vipdoc(tdx_code: str) -> pd.DataFrame:
-    prefix, code = split_code(tdx_code)
-    path = TDX_ROOT / "vipdoc" / prefix / "lday" / f"{prefix}{code}.day"
-    if not path.exists():
-        return pd.DataFrame()
-    rows = []
-    raw = path.read_bytes()
-    for i in range(0, len(raw), 32):
-        chunk = raw[i:i+32]
-        if len(chunk) < 32:
-            continue
-        date, open_, high, low, close, amount, vol, _ = struct.unpack("IIIIIfII", chunk)
-        rows.append({
-            "date": pd.to_datetime(str(date), format="%Y%m%d", errors="coerce"),
-            "open": open_ / 100,
-            "high": high / 100,
-            "low": low / 100,
-            "close": close / 100,
-            "amount": amount,
-            "volume": vol,
-        })
-    df = pd.DataFrame(rows).dropna(subset=["date"]).sort_values("date")
-    return df.reset_index(drop=True)
+    """Read K-line via unified mootdx data layer (replaces struct.unpack binary parsing)."""
+    return _read_vipdoc_mootdx(tdx_code)
 
 
 def ema(s: pd.Series, span: int) -> pd.Series:

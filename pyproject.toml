@@ -1,0 +1,19 @@
+[project]
+name = "strategy-team"
+version = "0.1.0"
+description = "确定性脚本驱动的 A 股交易策略系统"
+requires-python = ">=3.11"
+dependencies = [
+    "mootdx>=0.11.7",
+    "pandas>=2.2",
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.uv]
+# mootdx 需要 Windows 上的通达信客户端提供本地数据
+# Linux/Mac 仅可使用 online 模式
