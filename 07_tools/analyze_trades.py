@@ -22,7 +22,7 @@ import pandas as pd
 # ── 路径 ──────────────────────────────────────────────
 BASE = Path(__file__).resolve().parent.parent
 TRADES_DIR = BASE / "01_data" / "trades"
-REVIEWS_DIR = BASE / "04_reviews" / "trade_review_output"
+REVIEWS_DIR = BASE / "04_reviews" / "trade_review"
 
 LEDGER_CSV = TRADES_DIR / "master_trade_ledger.csv"
 CLOSED_JSON = TRADES_DIR / "closed_positions.json"
@@ -296,7 +296,7 @@ def main():
     flow = build_flow(trades)
 
     # 输出
-    out_path = Path(args.output) if args.output else REVIEWS_DIR / "交易记录复盘分析.xlsx"
+    out_path = Path(args.output) if args.output else REVIEWS_DIR / "trade_review.xlsx"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     with pd.ExcelWriter(out_path, engine="openpyxl") as w:
