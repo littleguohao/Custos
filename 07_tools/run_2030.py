@@ -56,6 +56,13 @@ if rc != 0:
 else:
     print(f"[OK] fund flow rank collected")
 
+# 3d. Refresh market indices from vipdoc (ensure a_share_indices + turnover are populated)
+rc, out = run(["uv", "run", "python", str(TOOLS / "market_timing" / "refresh_market_indices.py"), "--date", target])
+if rc != 0:
+    print(f"[WARN] refresh_market_indices failed: {out[:200]}")
+else:
+    print(f"[OK] {out.strip().splitlines()[-1] if out.strip() else 'market indices refreshed'}")
+
 # 4. Merge incremental data into market_timing_input.json
 incremental_path = BASE / "01_data" / "market" / f"{target}_incremental_market.json"
 market_path = BASE / "01_data" / "market" / f"{target}_market_timing_input.json"

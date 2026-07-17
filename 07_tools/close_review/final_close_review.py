@@ -186,10 +186,14 @@ def main():
         if not isinstance(row, dict) or not row.get("available", True):
             continue
         intraday = row.get("intraday") or {}
+        # Prefer intraday change; fallback to daily_change_pct from vipdoc K-line
+        change_pct = intraday.get("intraday_change_pct")
+        if change_pct is None:
+            change_pct = row.get("daily_change_pct")
         indices.append({
             "name": name,
             "close": intraday.get("now", row.get("latest_close")),
-            "change_pct": intraday.get("intraday_change_pct"),
+            "change_pct": change_pct,
             "above_ma25": row.get("above_ma25"),
             "above_ma60": row.get("above_ma60"),
             "above_ma144": row.get("above_ma144"),
