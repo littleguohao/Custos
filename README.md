@@ -6,7 +6,7 @@
 
 辅助完成市场择时、产业研究、主线/板块判断、选股池、买入计划、持仓研判、卖出风控、总控决策、交易复盘与策略进化。
 
-**核心原则：数据采集用脚本，分析判断用 LLM。** 所有数据收集由 Python 脚本完成，LLM 仅负责格式化和输出摘要。
+**核心原则：数据采集与分析判断用确定性脚本，LLM 仅负责格式化和输出摘要。** 所有数据收集和指标计算由 Python 脚本完成，LLM 不参与策略判断。
 
 ## 快速开始
 
@@ -32,7 +32,7 @@ uv sync
 
 ### 配置
 
-1. **通达信路径**：修改 `07_tools/collect_holding_quotes.py` 和 `07_tools/local_tdx/local_tdx_data.py` 中的 `TDXDIR` 为你的通达信安装路径（默认 `C:/new_tdx64`）
+1. **通达信路径**：设置环境变量 `TDX_ROOT` 指向通达信安装目录（默认 `C:\new_tdx64`），脚本通过 `os.environ.get("TDX_ROOT", ...)` 读取
 
 2. **持仓数据**：在 `01_data/trades/` 下维护：
    - `master_trade_ledger.csv` — 全量交易主台账
@@ -48,10 +48,9 @@ uv sync
 ```
 strategy_team/
 ├── 00_governance/          # 策略规则、工作流、日历、RSS 配置
-│   ├── B1_SWING_STRATEGY.md        # B1 波段策略主文件
+│   ├── b1_swing_strategy.md        # B1 波段策略主文件
 │   ├── BUY_STRATEGY_INTEGRATION_RULES.md
 │   ├── CN_TRADING_CALENDAR.json     # 交易日历
-│   ├── DAILY_THREE_SESSION_WORKFLOW.md
 │   ├── DECISION_PRIORITY_RULES.md
 │   ├── RSS_SOURCE_REGISTRY.json
 │   └── ...
@@ -62,10 +61,8 @@ strategy_team/
 │   ├── quality/                     # 运行门控
 │   ├── trades/                      # 交易台账、持仓快照
 │   └── ...
-├── 02_agents/              # [已废弃] 纯脚本驱动不再需要多角色 Agent 规格（编号不复用）
-│   ├── contracts/                   # 输出 schema
-│   └── */ROLE_SPEC.md
-├── 03_daily_plans/         # 盘前日报、14:45 报告
+├── 02_agents/              # [已废弃] 纯脚本驱动不再需要多角色 Agent 规格（编号不复用，目录已删）
+├── 03_daily_plans/         # 盘前日报、14:45 报告（gitignore，运行时生成）
 ├── 04_reviews/             # 盘后复盘
 ├── 05_strategy_versions/   # 策略版本记录
 ├── 06_logs/                # 运行日志（gitignore，运行时创建）
@@ -88,22 +85,17 @@ strategy_team/
 │   ├── trades/                      # 交易台账维护
 │   └── local_tdx/                   # mootdx 封装
 └── tests/                  # 独立测试目录（pytest）
-    ├── run_0850.py                  # 08:50 盘前预采集
-    ├── run_0905.py                  # 09:05 盘前日报
-    ├── run_1445.py                  # 14:45 尾盘操作建议
-    ├── run_2030.py                  # 20:30 盘后复盘
-    ├── daily_pipeline.py            # 通用管线
-    ├── collect_holding_quotes.py    # 持仓行情采集（mootdx）
-    ├── collect_incremental_market.py # 增量市场数据
-    ├── collect_fund_flow.py         # 资金流向（东方财富）
-    ├── calc_mfe_mae.py              # MFE/MAE 计算
-    ├── trading_calendar.py          # 交易日历查询
-    ├── runtime_gate.py              # 运行门控
-    ├── close_review/                # 尾盘+盘后复盘
-    ├── market_timing/               # 市场择时、B1 状态
-    ├── news/                        # RSS 采集与过滤
-    ├── trades/                      # 交易台账维护
-    └── local_tdx/                   # mootdx 封装
+    ├── conftest.py                  # sys.path + 导入设置
+    ├── test_base_path_depth.py      # BASE 路径深度防回归
+    ├── test_b1_holding_state.py     # B1 持仓状态
+    ├── test_close_review.py         # 尾盘复盘
+    ├── test_final_review_validator.py # 复盘校验器
+    ├── test_holding_structure.py    # 持仓结构
+    ├── test_review_enrichment.py    # 复盘增补
+    ├── test_rss_filter.py           # RSS 过滤
+    ├── test_runtime_guards.py       # 运行门控
+    ├── test_technical_monitor.py    # 技术监控
+    └── test_trading_calendar.py     # 交易日历
 ```
 
 ## 日常运行
@@ -165,7 +157,7 @@ uv run python 07_tools/run_2030.py
 
 1. 个股服从板块，板块服从大盘
 2. 风控优先于买入
-3. 候选池由 theme_tracker_report 确定，买入计划由 chief_decision 统一裁决
+3. 候选池待重建（原 theme_tracker_report + stock_pool 流程已移除，TQ 公式初筛 + LLM 因子评分重建中），买入计划由 chief_decision 统一裁决
 4. risk_control 拥有否决权
 5. chief_decision 是最终交易计划输出层
 6. 所有计划必须可复盘
