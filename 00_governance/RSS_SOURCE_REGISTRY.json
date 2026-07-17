@@ -51,6 +51,30 @@
       "audit": "200_rss",
       "policy_stage": "confirmed_1",
       "note": "注册制、印花税、减持、交易规则、资本市场监管新政"
+    },
+    {
+      "id": "stats_sjjd",
+      "name": "国家统计局-统计数据发布",
+      "category": "macro_official",
+      "url": "https://www.stats.gov.cn/sj/sjjd/rss.xml",
+      "tier": "S",
+      "enabled": true,
+      "audit": "200_rss",
+      "ssl_verify": false,
+      "policy_stage": "confirmed_1",
+      "note": "GDP、CPI、PPI、PMI等核心宏观数据发布"
+    },
+    {
+      "id": "stats_zxfb",
+      "name": "国家统计局-最新发布",
+      "category": "macro_official",
+      "url": "https://www.stats.gov.cn/sj/zxfb/rss.xml",
+      "tier": "S",
+      "enabled": true,
+      "audit": "200_rss",
+      "ssl_verify": false,
+      "policy_stage": "confirmed_1",
+      "note": "统计公报、数据解读、新闻发布会"
     }
   ]
 }

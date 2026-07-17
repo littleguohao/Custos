@@ -66,7 +66,9 @@ def main():
         row={'source_id':src['id'],'url':src['url'],'fetched_at':fetched}
         try:
             req=urllib.request.Request(src['url'],headers={'User-Agent':'Mozilla/5.0 TdxClawRSS/1.0','Accept':'application/rss+xml,application/atom+xml,application/xml,text/xml'})
-            with urllib.request.urlopen(req,timeout=a.timeout,context=ssl.create_default_context()) as r: raw=r.read(3_000_000); row.update(http_status=r.status,final_url=r.geturl(),content_type=r.headers.get('content-type',''))
+            ctx=ssl.create_default_context()
+            if src.get('ssl_verify',True) is False: ctx.check_hostname=False; ctx.verify_mode=ssl.CERT_NONE
+            with urllib.request.urlopen(req,timeout=a.timeout,context=ctx) as r: raw=r.read(3_000_000); row.update(http_status=r.status,final_url=r.geturl(),content_type=r.headers.get('content-type',''))
             (day/f"{src['id']}.xml").write_bytes(raw); items=parse_feed(raw,src,fetched)[:a.limit_per_feed]; normalized.extend(items); row.update(status='ok',items=len(items))
         except Exception as e: row.update(status='failed',error=repr(e),items=0)
         log.append(row)
