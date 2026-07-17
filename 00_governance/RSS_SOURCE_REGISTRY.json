@@ -75,6 +75,28 @@
       "ssl_verify": false,
       "policy_stage": "confirmed_1",
       "note": "统计公报、数据解读、新闻发布会"
+    },
+    {
+      "id": "chinanews_finance",
+      "name": "中国新闻网-财经",
+      "category": "cn_financial_media",
+      "url": "https://www.chinanews.com.cn/rss/finance.xml",
+      "tier": "S",
+      "enabled": true,
+      "audit": "200_rss",
+      "policy_stage": "confirmed_1",
+      "note": "国内财经新闻、市场动态、政策解读"
+    },
+    {
+      "id": "chinanews_china",
+      "name": "中国新闻网-时政",
+      "category": "policy_official",
+      "url": "https://www.chinanews.com.cn/rss/china.xml",
+      "tier": "S",
+      "enabled": true,
+      "audit": "200_rss",
+      "policy_stage": "confirmed_1",
+      "note": "国内时政新闻、重大政策、部委动态"
     }
   ]
 }
