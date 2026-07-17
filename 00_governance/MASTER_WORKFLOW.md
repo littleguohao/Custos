@@ -1,4 +1,4 @@
-# 策略系统报告蓝图 V2
+# 策略系统总工作流
 
 ## 一、产品边界
 
@@ -84,7 +84,7 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 
 ### 正式产物
 
-`03_daily_plans/YYYY-MM-DD_premarket_report.md`
+`03_daily_plans/YYYY-MM-DD_daily_report.md`
 
 ---
 
@@ -129,7 +129,7 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 
 ### 正式产物
 
-`03_daily_plans/YYYY-MM-DD_1445_action_report.md`
+`03_daily_plans/YYYY-MM-DD_1445_review.md`
 
 ---
 
@@ -175,7 +175,7 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 7. 次日总仓位、逐股买卖方向、比例/数量、触发条件和无效条件
 8. 有效规则、失效规则、数据问题和风险提示
 
-单票交易后仓位不得超过账户总权益的20%；若其他规则上限更低，执行更低值。精确买卖数量仍受数据时效门约束。详细流程见 `AFTER_CLOSE_REVIEW_WORKFLOW.md`。
+单票交易后仓位不得超过账户总权益的 20%；若其他规则上限更低，执行更低值。精确买卖数量仍受数据时效门约束。
 
 ### 正式产物
 

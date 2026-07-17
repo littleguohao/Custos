@@ -1,5 +1,7 @@
 # 数据流契约
 
+> ⚠️ **设计参考 / 待重建**：本文档描述 Agent+skill 时代的数据流设计（skill_adapters、StockCandidate、BuyPlan 等），相关代码已移除。选股流程重建时以此为设计蓝图对齐。
+
 日期：2026-07-09
 
 ## 目标
