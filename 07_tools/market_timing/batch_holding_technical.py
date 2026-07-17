@@ -49,6 +49,7 @@ def main():
                  'bbi_distance_pct':(an.get('bbi') or {}).get('distance_pct'),
                  'consecutive_closes_below_bbi':(an.get('bbi') or {}).get('consecutive_closes_below'),
                  'n_structure':an.get('n_structure') or {'available':False},
+                'descending_n_structure':an.get('descending_n_structure') or {'available':False},
                  'n_structure_prior_low':(an.get('n_structure') or {}).get('prior_low'),
                  'n_structure_prior_low_date':(an.get('n_structure') or {}).get('prior_low_date'),
                  'n_structure_origin_extreme_low':(an.get('n_structure') or {}).get('origin_extreme_low'),
