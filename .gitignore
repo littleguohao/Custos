@@ -15,6 +15,7 @@ __pycache__/
 06_logs/
 03_daily_plans/_supporting/
 04_reviews/daily/*_review_draft.md
+07_tools/_debug/
 *.log
 *.tmp
 ~$*

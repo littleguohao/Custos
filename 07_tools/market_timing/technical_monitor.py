@@ -107,7 +107,7 @@ def kdj(df: pd.DataFrame, n=9, m1=3, m2=3) -> dict[str, Any]:
     d = k.ewm(com=m2-1, adjust=False).mean()
     j = 3 * k - 2 * d
     jv = float(j.iloc[-1])
-    if jv < 12:
+    if jv < 13:
         state = "低位调整到位观察"
     elif jv > 90:
         state = "高位过热"

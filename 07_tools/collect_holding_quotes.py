@@ -2,7 +2,7 @@
 """Collect holding quotes + index quotes via mootdx, with tdx_quotes fallback for BJ stocks."""
 import os
 from __future__ import annotations
-import json, sys, warnings, time, os
+import json, sys, warnings, time, os, traceback
 from datetime import date, datetime
 from pathlib import Path
 
@@ -107,23 +107,27 @@ for h in holdings:
     if args.session == "intraday":
         try:
             q = _online_bars_quote(code, name, mkt)
-        except Exception:
+        except Exception as e:
+            import sys as _s; print(f"[WARN] quote failed for {code}: {e}", file=_s.stderr)
             q = None
         # fallback to reader if online failed
         if q is None:
             try:
                 q = _reader_quote(code, name, mkt)
-            except Exception:
+            except Exception as e:
+                import sys as _s; print(f"[WARN] quote failed for {code}: {e}", file=_s.stderr)
                 q = None
     else:  # postclose: try reader first, then online
         try:
             q = _reader_quote(code, name, mkt)
-        except Exception:
+        except Exception as e:
+            import sys as _s; print(f"[WARN] quote failed for {code}: {e}", file=_s.stderr)
             q = None
         if q is None or q.get("date", "") != target:
             try:
                 q = _online_bars_quote(code, name, mkt)
-            except Exception:
+            except Exception as e:
+                import sys as _s; print(f"[WARN] quote failed for {code}: {e}", file=_s.stderr)
                 q = None
     
     # BJ stocks: mootdx doesn't support, try East Money push2 API
@@ -152,7 +156,8 @@ for h in holdings:
                     "volume": float(_d.get("f47", 0)), "amount": float(_d.get("f48", 0)),
                     "source": "eastmoney_push2_bj",
                 }
-        except Exception:
+        except Exception as e:
+            import sys as _s; print(f"[WARN] quote failed for {code}: {e}", file=_s.stderr)
             q = None
     
     if q is not None:
@@ -181,8 +186,8 @@ for code, name, mkt in [("000001", "上证指数", MARKET_SH), ("399001", "深�
                     "close": close, "price": close, "previous_close": prev_close,
                     "change_pct": chg, "volume": float(last["volume"]),
                     "source": "mootdx_online_index"}
-        except Exception:
-            pass
+        except Exception as e:
+            import sys as _s; print(f"[WARN] {e}", file=_s.stderr)
     # fallback or postclose: local reader
     if idx is None:
         try:
@@ -199,8 +204,8 @@ for code, name, mkt in [("000001", "上证指数", MARKET_SH), ("399001", "深�
                     "close": close, "price": close, "previous_close": prev_close,
                     "change_pct": chg, "volume": float(last["volume"]),
                     "source": "mootdx_reader"}
-        except Exception:
-            pass
+        except Exception as e:
+            import sys as _s; print(f"[WARN] {e}", file=_s.stderr)
     if idx is None:
         indices.append({"code": code, "name": name, "available": False, "reason": "no data"})
     else:
@@ -221,8 +226,8 @@ for code, name in [("880001", "平均股价"), ("880005", "涨跌家数"), ("880
                 "change_pct": round((close / prev_close - 1) * 100, 2) if prev_close else None,
                 "date": str(last.name if hasattr(last.name, 'strftime') else ''), "source": "mootdx_reader"}
             continue
-    except Exception:
-        pass
+    except Exception as e:
+        import sys as _s; print(f"[WARN] {e}", file=_s.stderr)
     # Online fallback
     try:
         df = client.index(frequency=9, market=MARKET_SH, symbol=code, start=0, offset=2)
@@ -246,8 +251,8 @@ if out_path.exists():
         for q in holding_quotes:
             if not q.get("available") and q["code"] in prev_map:
                 q.update(prev_map[q["code"]])
-    except Exception:
-        pass
+    except Exception as e:
+        import sys as _s; print(f"[WARN] {e}", file=_s.stderr)
 output = {
     "as_of_date": target,
     "captured_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00"),
