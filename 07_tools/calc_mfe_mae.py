@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Calculate MFE/MAE for current holdings using mootdx Reader daily bars."""
 from __future__ import annotations
-import json, sys
+import json, os, sys
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -15,7 +15,7 @@ OUT = BASE / "01_data" / "holdings" / f"{date.today().strftime('%Y-%m-%d')}_mfe_
 def main():
     from mootdx.reader import Reader
 
-    reader = Reader.factory(market="std", tdxdir="C:/new_tdx64")
+    reader = Reader.factory(market="std", tdxdir=os.environ.get("TDX_ROOT", r"C:\new_tdx64"))
     positions = json.loads(POSITIONS.read_text(encoding="utf-8"))
 
     results = []

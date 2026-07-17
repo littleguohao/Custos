@@ -20,7 +20,7 @@ def main():
     risk_path=DATA/'risk'/f'{a.date}_risk_decision.json'
     if not risk_path.exists(): raise SystemExit(f'mandatory RiskDecision missing: {risk_path}')
     mt=mt_path.read_text(encoding='utf-8') if mt_path.exists() else ''
-    risk=load(risk_path,{}); holdings=load(DATA/'holdings'/f'{a.date}_holding_review.json',[]); plans=load(DATA/'buy_strategy'/f'{a.date}_buy_plan_normalized.json',[]); sectors=load(DATA/'sectors'/f'{a.date}_sector_state.json',[]); gate=load(DATA/'quality'/f'{a.date}_runtime_gate.json',{})
+    risk=load(risk_path,{}); holdings=load(DATA/'holdings'/f'{a.date}_holding_review.json',[]); sectors=load(DATA/'sectors'/f'{a.date}_sector_state.json',[]); gate=load(DATA/'quality'/f'{a.date}_runtime_gate.json',{})
     b1_rows=load(DATA/'holdings'/f'{a.date}_b1_holding_state.json',[]); b1_by_code={bare(x.get('code')):x for x in b1_rows}
     state=extract(r'状态：\*\*(.*?)\*\*',mt,'未知'); score=extract(r'择时评分：\*\*(.*?)\*\*',mt,'待确认'); position=extract(r'建议总仓位：\*\*(.*?)\*\*',mt,'待确认'); permission=extract(r'今日是否允许开新仓：\*\*(.*?)\*\*',mt,'原则不允许')
     risk_by_code={}
@@ -43,10 +43,7 @@ def main():
         holding_actions.append({'priority':priority,'code':code,'name':h.get('name',''),'action':action,'reasons':dedupe(reasons),'risk_refs':rlist,'b1_holding_state':b1,'b1_reference_action':b1.get('final_action'),'b1_reference_priority':b1.get('final_priority'),'execution_status':'current' if technical_status=='confirmed' else 'waiting_for_current_technical'})
     holding_actions.sort(key=lambda x:(x['priority'],x['code']))
     buy_actions=[]
-    for p in plans:
-        code=bare(p.get('code')); blocked=bool(risk_by_code.get(code)) or p.get('conclusion') in {'禁止','仅观察'}
-        conclusion='禁止' if risk_by_code.get(code) else p.get('conclusion','仅观察')
-        buy_actions.append({'code':code,'name':p.get('name',''),'conclusion':conclusion,'blocked_by_risk':bool(risk_by_code.get(code)),'source_conclusion':p.get('conclusion')})
+    # Candidate discovery disabled in pure-script mode; buy_actions always empty
     market_quality_status=gate.get('market_quality',{}).get('status')
     position_gate=gate.get('position_gate',{})
     effective_risk=risk.get('risk_level','提高')

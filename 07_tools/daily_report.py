@@ -130,7 +130,7 @@ def main():
     day=a.data_date or a.date; dt=datetime.strptime(a.date,'%Y-%m-%d')
     chief_path=DATA/'decisions'/f'{day}_chief_decision.json'
     if not chief_path.exists(): raise SystemExit(f'mandatory ChiefDecision missing: {chief_path}')
-    chief=load(chief_path,{}); market=load(DATA/'market'/f'{day}_market_timing_input.json',{}); positions=load(DATA/'trades'/'current_positions.json',[]); sectors=load(DATA/'sectors'/f'{day}_sector_state.json',[]); pool=load(DATA/'stock_pool'/f'{day}_stock_pool_normalized.json',[])
+    chief=load(chief_path,{}); market=load(DATA/'market'/f'{day}_market_timing_input.json',{}); positions=load(DATA/'trades'/'current_positions.json',[]); sectors=load(DATA/'sectors'/f'{day}_sector_state.json',[])
     technical=load(DATA/'holdings'/f'{day}_holding_technical_summary.json',[]); tech={code(x.get('code')):x for x in technical}
     prior=previous_review(day); prior_day=prior.get('date','待确认'); prior_actions=previous_holding_actions(prior)
     intel=load(DATA/'news'/'premarket'/f'{day}_premarket_intelligence.json',{}); market_events=intel.get('market_events') or fallback_rss_events(day); holding_events=intel.get('holding_events') or []
@@ -175,8 +175,7 @@ def main():
     if not chief.get('forbidden_actions'): lines.append('- 无新增禁止项；仍须遵守基础风控。')
     snapshot_date=freshness.get('snapshot_date') or '未知'
     lines += ['', '### 候选审核','', '| 分层 | 代码 | 名称 | 总控结论 | 风控否决 |','|---|---|---|---|---|']
-    pool_bucket={code(x.get('code')):x.get('bucket') for x in pool}
-    for x in chief.get('buy_actions',[]): lines.append(f"| {clean(pool_bucket.get(code(x.get('code'))),'-')} | {code(x.get('code'))} | {x.get('name')} | {x.get('conclusion')} | {'是' if x.get('blocked_by_risk') else '否'} |")
+    for x in chief.get('buy_actions',[]): lines.append(f"| {'-'),'-')} | {code(x.get('code'))} | {x.get('name')} | {x.get('conclusion')} | {'是' if x.get('blocked_by_risk') else '否'} |")
     if not chief.get('buy_actions'): lines.append('| - | - | 暂无可审核计划 | 禁止临时开仓 | - |')
     lines += ['', '## 6. 当日行动建议','', '| 决策项 | 执行规则 |','|---|---|',f"| 风控优先 | {'；'.join(chief.get('allowed_actions') or ['仅观察'])} |",f"| 新开仓 | {chief.get('new_position_permission','禁止')} |",f"| 仓位管理 | 建议 {chief.get('total_position_range','待确认')}；持仓快照、目标日行情或市场质量未全部通过时只给方向，不给精确数量 |",f"| 开盘验证 | 先验证隔夜利好/利空是否被价格与成交确认，再决定是否收紧计划；利好不得自动放宽权限 |",f"| 下一验证点 | {'；'.join(chief.get('tomorrow_validation') or [])} |",'', '## 7. 数据时效与声明','',f'- ChiefDecision：`{chief_path}`',f"- 持仓新鲜度：{freshness.get('status','未知')}；快照日期 {snapshot_date}；导入时间 {freshness.get('imported_at','未知')}；源文件时间 {freshness.get('source_mtime','未知')}",f"- 市场质量门：{quality.get('status','未知')}；candidate/partial/stale/missing 数据不得上调交易权限。",f"- 盘前情报：{DATA/'news'/'premarket'/f'{day}_premarket_intelligence.json'}；缺失时仅使用RSS候选降级展示。",'- 本报告仅渲染 ChiefDecision 的最终动作，不以消息、技术指标或上游技能覆盖风险否决。','- 本简报用于策略辅助，不构成收益承诺或无条件交易指令。']
     out=Path(a.output) if a.output else PLAN/f'{a.date}_daily_report.md'; out.parent.mkdir(parents=True,exist_ok=True); out.write_text('\n'.join(lines)+'\n',encoding='utf-8'); print(out)

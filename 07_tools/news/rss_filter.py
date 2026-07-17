@@ -36,9 +36,9 @@ def premarket_window(day, asof, fallback_hours):
  return start,previous
 
 def entities(date):
- positions=load(DATA/'trades'/'current_positions.json',[]); pool=load(DATA/'stock_pool'/f'{date}_stock_pool_normalized.json',[])
+ positions=load(DATA/'trades'/'current_positions.json',[])
  names=set(); codes=set()
- for x in positions+pool:
+ for x in positions:
   code=x.get('代码') or x.get('code'); name=x.get('名称') or x.get('name')
   if code: codes.add(bare(code))
   if name: names.add(str(name))
