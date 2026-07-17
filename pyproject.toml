@@ -17,3 +17,7 @@ dev = [
 [tool.uv]
 # mootdx 需要 Windows 上的通达信客户端提供本地数据
 # Linux/Mac 仅可使用 online 模式
+
+[tool.pytest.ini_options]
+pythonpath = ["07_tools", "07_tools/market_timing", "07_tools/close_review", "07_tools/news", "07_tools/local_tdx", "07_tools/trades"]
+testpaths = ["07_tools"]
