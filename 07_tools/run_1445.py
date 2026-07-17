@@ -34,10 +34,20 @@ if not cal.get("is_trading_day", False):
     sys.exit(0)
 
 # 2. Collect holding quotes via mootdx (replaces LLM tdx_quotes calls)
-rc, out = run(["uv", "run", "python", str(TOOLS / "collect_holding_quotes.py")])
+rc, out = run(["uv", "run", "python", str(TOOLS / "collect_holding_quotes.py"), "--date", target, "--session", "intraday"])
 if rc != 0:
     print(f"【14:45尾盘报告失败｜{target}】行情采集失败：{out[:300]}")
     sys.exit(1)
+
+# 2b. Update runtime gate with quotes_current flag
+gate_path = BASE / "01_data" / "quality" / f"{target}_runtime_gate.json"
+if gate_path.exists():
+    try:
+        gate = json.loads(gate_path.read_text(encoding="utf-8"))
+        gate.setdefault("position_gate", {})["quotes_current"] = True
+        gate_path.write_text(json.dumps(gate, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
 
 # 3. Runtime gate
 rc, out = run(["uv", "run", "python", str(TOOLS / "runtime_gate.py"), "--date", target, "--require-trading-day"])
