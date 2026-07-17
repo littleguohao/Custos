@@ -6,6 +6,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
+from source_name_overrides import fix_source_name
 
 BASE=Path(__file__).resolve().parents[2]
 REG=BASE/'00_governance'/'RSS_SOURCE_REGISTRY.json'
@@ -48,8 +49,9 @@ def parse_feed(raw, src, fetched):
         norm=re.sub(r'\W+','',title.lower())[:300]
         item_id=hashlib.sha256((src['id']+'|'+(guid or link or norm)).encode()).hexdigest()[:24]
         dup=hashlib.sha256(norm.encode()).hexdigest()[:20] if norm else item_id
+        corrected_name = fix_source_name(src['id'], src['name'])
         items.append({'item_id':item_id,'published_at':iso_date(published),'fetched_at':fetched,
-          'source_id':src['id'],'source_name':src['name'],'source_tier':src['tier'],'category':src['category'],
+          'source_id':src['id'],'source_name':corrected_name,'source_tier':src['tier'],'category':src['category'],
           'title':title,'summary':summary[:2000],'source_url':link,'feed_url':src['url'],
           'affected_entities':[],'affected_sectors':[],'direction':'uncertain','impact_horizon':'unknown',
           'fact':title,'inference':'','validation_condition':[],
