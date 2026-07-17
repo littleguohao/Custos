@@ -54,8 +54,13 @@ def previous_review(day:str)->dict[str,Any]:
     return load(max(candidates)[1],{}) if candidates else {}
 
 def previous_holding_actions(review:dict[str,Any])->dict[str,dict[str,Any]]:
-    rows=review.get('position_audit')
+    # Current schema (v3+): next_day_plan.holding_plans
+    rows=review.get('next_day_plan',{}).get('holding_plans')
     if not isinstance(rows,list):
+        # Legacy v3: position_audit
+        rows=review.get('position_audit')
+    if not isinstance(rows,list):
+        # Legacy v2: step_4_holdings.holdings
         rows=((review.get('step_4_holdings') or {}).get('holdings') or [])
     return {code(x.get('code')):x for x in rows if isinstance(x,dict)}
 
@@ -154,7 +159,7 @@ def main():
     lines += ['', f'## 4. 持仓状态与上次计划调整（上次复盘：{prior_day}）','', '| 代码/名称 | 最新技术状态 | 四均线/J值 | BBI与N型前低 | B1/总控动作 | 上次复盘计划 | 隔夜新证据 |','|---|---|---|---|---|---|---|']
     for x in chief.get('holding_actions',[]):
         c=code(x.get('code')); t=tech.get(c,{}); p=prior_actions.get(c,{}); event=holding_event_map.get(c)
-        prior_action=ACTION_LABELS.get(p.get('action'),clean(p.get('action'),'无可用计划'))
+        prior_action=ACTION_LABELS.get(p.get('action'),clean(p.get('action') or p.get('direction'),'无可用计划'))
         tech_state=f"{clean(t.get('latest_date'))} 收{num(t.get('close'))}；{clean(t.get('trend_state'))}；仓位{ratio(t.get('position_pct'))}"
         ma_j=f"{technical_relation(t)}；日J={num(t.get('daily_j'),1)}"
         bbi_state,bbi_reminder=bbi_holding_reminder(t)
@@ -175,7 +180,7 @@ def main():
     if not chief.get('forbidden_actions'): lines.append('- 无新增禁止项；仍须遵守基础风控。')
     snapshot_date=freshness.get('snapshot_date') or '未知'
     lines += ['', '### 候选审核','', '| 分层 | 代码 | 名称 | 总控结论 | 风控否决 |','|---|---|---|---|---|']
-    for x in chief.get('buy_actions',[]): lines.append(f"| {'-'),'-')} | {code(x.get('code'))} | {x.get('name')} | {x.get('conclusion')} | {'是' if x.get('blocked_by_risk') else '否'} |")
+    for x in chief.get('buy_actions',[]): lines.append(f"| - | {code(x.get('code'))} | {x.get('name')} | {x.get('conclusion')} | {'是' if x.get('blocked_by_risk') else '否'} |")
     if not chief.get('buy_actions'): lines.append('| - | - | 暂无可审核计划 | 禁止临时开仓 | - |')
     lines += ['', '## 6. 当日行动建议','', '| 决策项 | 执行规则 |','|---|---|',f"| 风控优先 | {'；'.join(chief.get('allowed_actions') or ['仅观察'])} |",f"| 新开仓 | {chief.get('new_position_permission','禁止')} |",f"| 仓位管理 | 建议 {chief.get('total_position_range','待确认')}；持仓快照、目标日行情或市场质量未全部通过时只给方向，不给精确数量 |",f"| 开盘验证 | 先验证隔夜利好/利空是否被价格与成交确认，再决定是否收紧计划；利好不得自动放宽权限 |",f"| 下一验证点 | {'；'.join(chief.get('tomorrow_validation') or [])} |",'', '## 7. 数据时效与声明','',f'- ChiefDecision：`{chief_path}`',f"- 持仓新鲜度：{freshness.get('status','未知')}；快照日期 {snapshot_date}；导入时间 {freshness.get('imported_at','未知')}；源文件时间 {freshness.get('source_mtime','未知')}",f"- 市场质量门：{quality.get('status','未知')}；candidate/partial/stale/missing 数据不得上调交易权限。",f"- 盘前情报：{DATA/'news'/'premarket'/f'{day}_premarket_intelligence.json'}；缺失时仅使用RSS候选降级展示。",'- 本报告仅渲染 ChiefDecision 的最终动作，不以消息、技术指标或上游技能覆盖风险否决。','- 本简报用于策略辅助，不构成收益承诺或无条件交易指令。']
     out=Path(a.output) if a.output else PLAN/f'{a.date}_daily_report.md'; out.parent.mkdir(parents=True,exist_ok=True); out.write_text('\n'.join(lines)+'\n',encoding='utf-8'); print(out)

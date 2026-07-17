@@ -14,7 +14,8 @@ __pycache__/
 # Pipeline logs and transient output
 06_logs/
 03_daily_plans/_supporting/
-04_reviews/daily/*_review_draft.md
+04_reviews/daily/*_final_review.json
+04_reviews/daily/*_final_review.md
 07_tools/_debug/
 *.log
 *.tmp
