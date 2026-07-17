@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """Collect holding quotes + index quotes via mootdx, with tdx_quotes fallback for BJ stocks."""
-import os
 from __future__ import annotations
-import json, sys, warnings, time, os, traceback
+import os, json, sys, warnings, time, traceback
 from datetime import date, datetime
 from pathlib import Path
 

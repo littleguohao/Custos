@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import os
 from __future__ import annotations
 import argparse, json, os, subprocess, sys
 from pathlib import Path
