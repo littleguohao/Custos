@@ -28,7 +28,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
-BASE = Path(__file__).resolve().parent.parent
+BASE = Path(__file__).resolve().parents[2]
 OUT_DIR = BASE / "01_data" / "trades"
 DEFAULT_SRC_DIR = Path("C:/Users/gh/Downloads")
 

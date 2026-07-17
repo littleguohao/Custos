@@ -21,7 +21,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-BASE = Path(__file__).resolve().parent.parent
+BASE = Path(__file__).resolve().parents[2]
 LOCAL_TDX_DIR = BASE / "07_tools" / "local_tdx"
 if str(LOCAL_TDX_DIR) not in sys.path:
     sys.path.insert(0, str(LOCAL_TDX_DIR))

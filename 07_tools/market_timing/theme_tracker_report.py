@@ -25,7 +25,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-BASE = Path(__file__).resolve().parent.parent
+BASE = Path(__file__).resolve().parents[2]
 SECTOR_MAP = BASE / "01_data" / "sectors" / "sector_code_map.json"
 SECTOR_DIR = BASE / "01_data" / "sectors"
 HOLDINGS_DIR = BASE / "01_data" / "holdings"

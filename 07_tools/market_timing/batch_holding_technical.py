@@ -5,7 +5,7 @@ import argparse, json, os, subprocess, sys
 from pathlib import Path
 
 if hasattr(sys.stdout, "reconfigure"): sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-BASE = Path(__file__).resolve().parent.parent
+BASE = Path(__file__).resolve().parents[2]
 PY=Path(sys.executable)
 TECH=BASE/'07_tools'/'market_timing'/'technical_monitor.py'
 HOLD=BASE/'01_data'/'holdings'

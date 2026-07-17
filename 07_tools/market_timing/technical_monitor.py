@@ -26,7 +26,7 @@ if hasattr(sys.stderr, "reconfigure"):
 import pandas as pd
 
 TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"C:\new_tdx64"))
-OUT_DIR = Path(__file__).resolve().parent.parent / "01_data" / "market"
+OUT_DIR = Path(__file__).resolve().parents[2] / "01_data" / "market"
 
 
 def _read_vipdoc_mootdx(tdx_code: str) -> pd.DataFrame:

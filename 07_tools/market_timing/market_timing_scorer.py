@@ -22,7 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-BASE = Path(__file__).resolve().parent.parent
+BASE = Path(__file__).resolve().parents[2]
 IN_DIR = BASE / "01_data" / "market"
 OUT_DIR = BASE / "03_daily_plans"
 QUALITY_DIR = BASE / "01_data" / "quality"

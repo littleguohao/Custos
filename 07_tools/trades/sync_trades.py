@@ -20,7 +20,7 @@ if hasattr(sys.stdout, "reconfigure"):
 warnings.filterwarnings("ignore")
 
 SELF = Path(__file__).resolve()
-OUT = SELF.parent.parent.parent / "01_data" / "trades"
+OUT = SELF.parent.parents[2] / "01_data" / "trades"
 CONFIG = OUT / "trades_config.json"
 ARCHIVE = OUT / "_archive"
 ARCHIVE.mkdir(parents=True, exist_ok=True)

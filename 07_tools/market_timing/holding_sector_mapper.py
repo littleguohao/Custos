@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 
-BASE = Path(__file__).resolve().parent.parent
+BASE = Path(__file__).resolve().parents[2]
 OUT_DIR = BASE / "01_data" / "holdings"
 TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"C:
 ew_tdx64"))
