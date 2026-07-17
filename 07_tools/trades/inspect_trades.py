@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Inspect trade history xlsx and dump headers + sample rows."""
+import os
 from __future__ import annotations
 import sys
 import json
@@ -9,8 +10,8 @@ import pandas as pd
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-SRC = Path(r"C:\Users\gh\Downloads\交易记录.xlsx")
-OUT_DIR = Path(r"C:\Users\gh\.openclaw-tdxclaw\workspace\strategy_team\01_data\trades")
+SRC = Path(os.environ.get("TRADE_SOURCE", "trades.xlsx"))
+OUT_DIR = Path(__file__).resolve().parent.parent / "01_data" / "trades"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 sheets = pd.read_excel(SRC, sheet_name=None)

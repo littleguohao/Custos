@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """Collect holding quotes + index quotes via mootdx, with tdx_quotes fallback for BJ stocks."""
+import os
 from __future__ import annotations
-import json, sys, warnings, time
+import json, sys, warnings, time, os
 from datetime import date, datetime
 from pathlib import Path
 
@@ -38,7 +39,7 @@ from mootdx.reader import Reader
 from mootdx.quotes import Quotes
 from mootdx.consts import MARKET_SH, MARKET_SZ
 
-TDXDIR = r"C:\new_tdx64"
+TDXDIR = os.environ.get("TDX_ROOT", r"C:\new_tdx64")
 reader = Reader.factory(market="std", tdxdir=TDXDIR)
 client = Quotes.factory(market="std", quiet=True)
 

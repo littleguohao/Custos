@@ -19,7 +19,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-BASE = Path(r"C:\Users\gh\.openclaw-tdxclaw\workspace\strategy_team")
+BASE = Path(__file__).resolve().parent.parent
 STOCK_POOL_DIR = BASE / "01_data" / "stock_pool"
 SECTOR_DIR = BASE / "01_data" / "sectors"
 PLAN_DIR = BASE / "03_daily_plans"

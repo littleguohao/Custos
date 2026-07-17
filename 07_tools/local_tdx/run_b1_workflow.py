@@ -16,10 +16,12 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-BASE = Path(r"C:\Users\gh\.openclaw-tdxclaw\workspace\strategy_team")
-TDX_SCRIPT = Path(r"C:\new_tdx64\PYPlugins\user\workflow_B1.py")
+BASE = Path(__file__).resolve().parent.parent
+TDX_SCRIPT = Path(os.environ.get("TDX_ROOT", r"C:
+ew_tdx64")) / "PYPlugins" / "user" / "workflow_B1.py"
 DEFAULT_OUT = BASE / "01_data" / "stock_pool" / "b1_candidates"
-DEFAULT_REF = Path(r"C:\new_tdx64\PYPlugins\user\B1_DATA")
+DEFAULT_REF = Path(os.environ.get("TDX_ROOT", r"C:
+ew_tdx64")) / "PYPlugins" / "user" / "B1_DATA"
 
 
 def main() -> None:

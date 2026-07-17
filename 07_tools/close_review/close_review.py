@@ -22,7 +22,7 @@ except ImportError:
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-BASE = Path("C:/Users/gh/.openclaw-tdxclaw/workspace/strategy_team")
+BASE = Path(__file__).resolve().parent.parent
 TRADES = BASE / "01_data" / "trades"
 HOLDINGS = BASE / "01_data" / "holdings"
 RISK = BASE / "01_data" / "risk"

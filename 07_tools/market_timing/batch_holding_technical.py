@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
+import os
 from __future__ import annotations
 import argparse, json, os, subprocess, sys
 from pathlib import Path
 
 if hasattr(sys.stdout, "reconfigure"): sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-BASE=Path(r'C:\Users\gh\.openclaw-tdxclaw\workspace\strategy_team')
+BASE = Path(__file__).resolve().parent.parent
 PY=Path(sys.executable)
 TECH=BASE/'07_tools'/'market_timing'/'technical_monitor.py'
 HOLD=BASE/'01_data'/'holdings'

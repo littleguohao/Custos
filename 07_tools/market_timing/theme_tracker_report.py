@@ -25,7 +25,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-BASE = Path(r"C:\Users\gh\.openclaw-tdxclaw\workspace\strategy_team")
+BASE = Path(__file__).resolve().parent.parent
 SECTOR_MAP = BASE / "01_data" / "sectors" / "sector_code_map.json"
 SECTOR_DIR = BASE / "01_data" / "sectors"
 HOLDINGS_DIR = BASE / "01_data" / "holdings"

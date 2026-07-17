@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """Collect incremental market data: A50 futures, CNH exchange rate, limit-up/down ladder, northbound."""
+import os
 from __future__ import annotations
-import json, sys, warnings, time
+import json, os, sys, warnings, time
 from datetime import date, datetime
 from pathlib import Path
 
@@ -50,7 +51,7 @@ except Exception as e:
 
 # ========== 2. Market breadth via mootdx Reader (local) ==========
 from mootdx.reader import Reader
-TDXDIR = r"C:\new_tdx64"
+TDXDIR = os.environ.get("TDX_ROOT", r"C:\new_tdx64")
 reader = Reader.factory(market="std", tdxdir=TDXDIR)
 
 breadth_data = {}

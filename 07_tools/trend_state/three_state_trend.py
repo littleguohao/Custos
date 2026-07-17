@@ -9,6 +9,7 @@ Classifies daily stock movement into:
 The classifier is intentionally transparent: it records every score component,
 then applies a confirmation rule to reduce noisy state switching.
 """
+import os
 from __future__ import annotations
 
 import argparse
@@ -29,8 +30,9 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-BASE = Path(r"C:\Users\gh\.openclaw-tdxclaw\workspace\strategy_team")
-TDX_ROOT = Path(r"C:\new_tdx64")
+BASE = Path(__file__).resolve().parent.parent
+TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"C:
+ew_tdx64"))
 OUT_DIR = BASE / "01_data" / "trend_state"
 
 

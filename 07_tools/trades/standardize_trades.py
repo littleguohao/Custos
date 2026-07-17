@@ -28,7 +28,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
-BASE = Path("C:/Users/gh/.openclaw-tdxclaw/workspace/strategy_team")
+BASE = Path(__file__).resolve().parent.parent
 OUT_DIR = BASE / "01_data" / "trades"
 DEFAULT_SRC_DIR = Path("C:/Users/gh/Downloads")
 

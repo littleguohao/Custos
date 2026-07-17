@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Map current holdings to TDX sectors using TQ get_relation."""
+import os
 from __future__ import annotations
 
 import argparse
@@ -9,9 +10,10 @@ from pathlib import Path
 
 import pandas as pd
 
-BASE = Path(r"C:\Users\gh\.openclaw-tdxclaw\workspace\strategy_team")
+BASE = Path(__file__).resolve().parent.parent
 OUT_DIR = BASE / "01_data" / "holdings"
-TDX_ROOT = Path(r"C:\new_tdx64")
+TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"C:
+ew_tdx64"))
 DEFAULT_POSITIONS = BASE / "01_data" / "trades" / "current_positions.json"
 
 

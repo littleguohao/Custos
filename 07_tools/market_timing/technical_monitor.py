@@ -9,6 +9,7 @@ Computes:
 
 Input can be TDX local vipdoc daily file by code, or future TQ Kline.
 """
+import os
 from __future__ import annotations
 
 import argparse
@@ -25,8 +26,9 @@ if hasattr(sys.stderr, "reconfigure"):
 
 import pandas as pd
 
-TDX_ROOT = Path(r"C:\new_tdx64")
-OUT_DIR = Path(r"C:\Users\gh\.openclaw-tdxclaw\workspace\strategy_team\01_data\market")
+TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"C:
+ew_tdx64"))
+OUT_DIR = Path(__file__).resolve().parent.parent / "01_data" / "market"
 
 
 def norm_code(code: str) -> str:

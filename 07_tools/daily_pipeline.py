@@ -28,8 +28,8 @@ import sys
 import shutil
 from pathlib import Path
 
-BASE = Path(r"C:\Users\gh\.openclaw-tdxclaw\workspace\strategy_team")
-PY = Path(r"C:\Users\gh\.openclaw-tdxclaw\workspace\.venv\Scripts\python.exe")
+BASE = Path(__file__).resolve().parent.parent
+PY = sys.executable
 TOOLS = BASE / "07_tools" / "market_timing"
 DATA_DIR = BASE / "01_data"
 MARKET_DIR = DATA_DIR / "market"

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-BASE = Path(r"C:\Users\gh\.openclaw-tdxclaw\workspace\strategy_team")
+BASE = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(r"E:\O_DATA")
 OUT_JSON = BASE / "01_data" / "local_tdx" / "e_odata_index.json"
 OUT_CSV = BASE / "01_data" / "local_tdx" / "e_odata_index.csv"
