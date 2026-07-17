@@ -340,6 +340,24 @@ class TqSession:
         raise LocalTdxError("tqcenter is deprecated, use mootdx interfaces directly")
 
 
+def get_ohlcv_table(code: str, count: int = 260, prefer: str = "vipdoc") -> pd.DataFrame:
+    """Unified OHLCV reader: try local vipdoc first, fallback to online bars."""
+    df = pd.DataFrame()
+    if prefer == "vipdoc":
+        try:
+            df = read_vipdoc_daily(code)
+        except Exception:
+            df = pd.DataFrame()
+    if df.empty:
+        try:
+            df = get_online_bars(code, offset=count)
+        except Exception:
+            df = pd.DataFrame()
+    if not df.empty and len(df) > count:
+        df = df.tail(count).reset_index(drop=True)
+    return df
+
+
 def get_market_data(*args, **kwargs):
     raise LocalTdxError("get_market_data is deprecated, use read_vipdoc_daily or get_online_bars")
 
