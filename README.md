@@ -61,7 +61,7 @@ strategy_team/
 │   ├── quality/                     # 运行门控
 │   ├── trades/                      # 交易台账、持仓快照
 │   └── ...
-├── 02_agents/              # 角色规格（逻辑职责，非独立 Agent）
+├── 02_agents/              # [已移除] 纯脚本驱动不再需要多角色 Agent 规格
 │   ├── contracts/                   # 输出 schema
 │   └── */ROLE_SPEC.md
 ├── 03_daily_plans/         # 盘前日报、14:45 报告
@@ -146,7 +146,7 @@ uv run python 07_tools/run_2030.py
 
 1. 个股服从板块，板块服从大盘
 2. 风控优先于买入
-3. stock_pool 负责选股，buy_strategy 负责买入计划
+3. 候选池由 theme_tracker_report 确定，买入计划由 chief_decision 统一裁决
 4. risk_control 拥有否决权
 5. chief_decision 是最终交易计划输出层
 6. 所有计划必须可复盘

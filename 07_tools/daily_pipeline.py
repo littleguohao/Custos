@@ -204,9 +204,8 @@ def main():
     stages.append(run([str(PY), str(TOOLS / "b1_holding_state.py"), "--date", args.date], "b1_holding_state"))
     stages.append(run([str(PY), str(TOOLS / "portfolio_review_report.py"), "--date", args.date], "portfolio_review_report"))
     stages.append(run([str(PY), str(TOOLS / "theme_tracker_report.py"), "--date", args.date], "theme_tracker_report"))
-    # Normalize skill evidence before chief_decision so risk evidence exists
-    # before the final decision layer. Candidate discovery remains disabled.
-    stages.append(run([str(PY), str(BASE / "07_tools" / "build_skill_contracts.py"), "--date", args.date], "build_skill_contracts"))
+    # Generate risk_decision + sector_state from deterministic pipeline outputs
+    stages.append(run([str(PY), str(TOOLS / "generate_risk_and_sectors.py"), "--date", args.date], "generate_risk_and_sectors"))
 
     stages.append(run([str(PY), str(TOOLS / "chief_decision_report.py"), "--date", args.date], "chief_decision_report"))
     if args.session_type == "premarket":
@@ -256,9 +255,8 @@ def main():
         SUPPORT_DIR / args.date / f"{args.date}_chief_decision.md",
         PLAN_DIR / f"{args.date}_daily_report.md",
         DATA_DIR / "sectors" / f"{args.date}_sector_state.json",
-        DATA_DIR / "stock_pool" / f"{args.date}_stock_pool_normalized.json",  # [contracts] via build_skill_contracts
-        DATA_DIR / "buy_strategy" / f"{args.date}_buy_plan_normalized.json",  # [contracts] via build_skill_contracts
-        DATA_DIR / "risk" / f"{args.date}_risk_decision.json",  # [contracts] via build_skill_contracts
+        DATA_DIR / "risk" / f"{args.date}_risk_decision.json",
+        DATA_DIR / "buy_strategy" / f"{args.date}_buy_plan_normalized.json",  # deprecated, not generated in pure-script mode
         SUPPORT_DIR / args.date / f"{args.date}_wechat_summary.txt",
     ]:
         print(f"- {p} {'OK' if p.exists() else 'MISSING'}")
