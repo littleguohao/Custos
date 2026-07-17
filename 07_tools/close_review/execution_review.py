@@ -90,7 +90,7 @@ def main():
         )),
         "sources": [str(chief_path), str(tail_path), str(trades_path)],
     }
-    out = DATA / "reviews" / f"{day}_execution_review.json"
+    out = DATA / "review_steps" / f"{day}_execution_review.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
     print(out)

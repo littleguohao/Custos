@@ -97,8 +97,8 @@ def main():
         "sectors": DATA / "sectors" / f"{day}_sector_technical_summary.json",
         "quotes": DATA / "market" / f"{day}_holding_quotes.json",
         "news": DATA / "news" / "postclose" / f"{day}_postclose_news_digest.json",
-        "execution": DATA / "reviews" / f"{day}_execution_review.json",
-        "enrichment": DATA / "reviews" / f"{day}_review_enrichment.json",
+        "execution": DATA / "review_steps" / f"{day}_execution_review.json",
+        "enrichment": DATA / "review_steps" / f"{day}_review_enrichment.json",
     }
     for key in ("chief", "market", "gate", "tech", "sectors", "quotes", "execution", "enrichment"):
         if not paths[key].exists():

@@ -55,7 +55,7 @@ def main():
     chief = load(DATA / "decisions" / f"{day}_chief_decision.json", {})
     sectors = load(DATA / "sectors" / f"{day}_sector_state.json", [])
     tech = load(DATA / "holdings" / f"{day}_holding_technical_summary.json", [])
-    execution = load(DATA / "reviews" / f"{day}_execution_review.json", {})
+    execution = load(DATA / "review_steps" / f"{day}_execution_review.json", {})
     news = load(DATA / "news" / "postclose" / f"{day}_postclose_news_digest.json", {})
     event_counts = {}
     for values in (news.get("sections") or {}).values():
@@ -127,7 +127,7 @@ def main():
         "unavailable": list(dict.fromkeys(unavailable + ["market_turnover", "current_market_sentiment", "fund_flow_rank", "original_holding_logic", "max_favorable_excursion"])),
         "permission_rule": "enrichment cannot override RiskDecision or ChiefDecision",
     }
-    out = DATA / "reviews" / f"{day}_review_enrichment.json"
+    out = DATA / "review_steps" / f"{day}_review_enrichment.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
     print(out)
