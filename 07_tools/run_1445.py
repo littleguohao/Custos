@@ -56,7 +56,7 @@ if rc != 0:
     sys.exit(1)
 
 # 4. Close review (strict + digest)
-rc, out = run(["uv", "run", "python", str(TOOLS / "close_review" / "close_review.py"), "--date", target, "--strict", "--emit-digest"])
+rc, out = run(["uv", "run", "python", str(TOOLS / "close_review" / "review_core.py"), "--date", target, "--strict", "--emit-digest"])
 if rc != 0:
     print(f"【14:45尾盘报告失败｜{target}】close_review校验失败：{out[:500]}")
     sys.exit(1)

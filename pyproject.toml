@@ -20,4 +20,4 @@ dev = [
 
 [tool.pytest.ini_options]
 pythonpath = ["07_tools", "07_tools/market_timing", "07_tools/close_review", "07_tools/news", "07_tools/local_tdx", "07_tools/trades"]
-testpaths = ["07_tools"]
+testpaths = ["tests"]

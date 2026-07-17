@@ -23,7 +23,8 @@ git clone <repo-url> strategy_team
 cd strategy_team
 
 # 安装依赖
-uv pip install mootdx requests
+uv sync
+# 或手动: uv pip install mootdx pandas requests
 
 # 如果使用 OpenClaw 作为运行时
 # 确保 openclaw.json 中 agents.defaults.workspace 指向本项目目录
@@ -61,14 +62,32 @@ strategy_team/
 │   ├── quality/                     # 运行门控
 │   ├── trades/                      # 交易台账、持仓快照
 │   └── ...
-├── 02_agents/              # [已移除] 纯脚本驱动不再需要多角色 Agent 规格
+├── 02_agents/              # [已废弃] 纯脚本驱动不再需要多角色 Agent 规格（编号不复用）
 │   ├── contracts/                   # 输出 schema
 │   └── */ROLE_SPEC.md
 ├── 03_daily_plans/         # 盘前日报、14:45 报告
 ├── 04_reviews/             # 盘后复盘
 ├── 05_strategy_versions/   # 策略版本记录
-├── 06_logs/                # 运行日志
-└── 07_tools/               # 全部脚本
+├── 06_logs/                # 运行日志（gitignore，运行时创建）
+├── 07_tools/               # 全部脚本
+│   ├── run_0850.py                  # 08:50 盘前预采集
+│   ├── run_0905.py                  # 09:05 盘前日报
+│   ├── run_1445.py                  # 14:45 尾盘操作建议
+│   ├── run_2030.py                  # 20:30 盘后复盘
+│   ├── daily_pipeline.py            # 通用管线
+│   ├── generate_risk_and_sectors.py # risk_decision + sector_state 生成
+│   ├── collect_holding_quotes.py    # 持仓行情采集（mootdx）
+│   ├── collect_incremental_market.py # 增量市场数据
+│   ├── collect_fund_flow.py         # 资金流向（东方财富）
+│   ├── calc_mfe_mae.py              # MFE/MAE 计算
+│   ├── trading_calendar.py          # 交易日历查询
+│   ├── runtime_gate.py              # 运行门控
+│   ├── close_review/                # 尾盘+盘后复盘
+│   ├── market_timing/               # 市场择时、B1 状态
+│   ├── news/                        # RSS 采集与过滤
+│   ├── trades/                      # 交易台账维护
+│   └── local_tdx/                   # mootdx 封装
+└── tests/                  # 独立测试目录（pytest）
     ├── run_0850.py                  # 08:50 盘前预采集
     ├── run_0905.py                  # 09:05 盘前日报
     ├── run_1445.py                  # 14:45 尾盘操作建议

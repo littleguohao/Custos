@@ -5,7 +5,7 @@ import unittest
 
 import pandas as pd
 
-from technical_monitor import n_structure_state, price_volume_state
+from market_timing.technical_monitor import n_structure_state, price_volume_state
 
 
 def frame(lows, highs, closes):

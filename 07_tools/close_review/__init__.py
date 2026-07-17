@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""close_review package — re-export public API from close_review.py."""
-from close_review.close_review import (
+"""close_review package — re-export public API from review_core.py."""
+from close_review.review_core import (
     build_delivery_digest,
     classify,
     json_safe,
