@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """Map current holdings to TDX sectors using TQ get_relation."""
-import os
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 

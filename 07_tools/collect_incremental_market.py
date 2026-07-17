@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 """Collect incremental market data: A50 futures, CNH exchange rate, limit-up/down ladder, northbound."""
-import os
 from __future__ import annotations
 import json, os, sys, warnings, time
 from datetime import date, datetime
