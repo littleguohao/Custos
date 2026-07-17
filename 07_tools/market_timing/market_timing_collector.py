@@ -32,7 +32,7 @@ TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"C:\new_tdx64"))
 OUT_DIR = BASE / "01_data" / "market"
 
 INDICES = {
-    "上证指数": {"prefix": "sh", "code": "000001", "tq": "000001.SH"},
+    "上证指数": {"prefix": "sh", "code": "999999", "tq": "999999.SH"},
     "创业板指": {"prefix": "sz", "code": "399006", "tq": "399006.SZ"},
     "科创50": {"prefix": "sh", "code": "000688", "tq": "000688.SH"},
     "北证50": {"prefix": "bj", "code": "899050", "tq": "899050.BJ"},

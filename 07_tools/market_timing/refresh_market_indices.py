@@ -22,7 +22,7 @@ if str(LOCAL_TDX_DIR) not in sys.path:
 import local_tdx_data as ltd  # type: ignore
 
 INDICES = {
-    "上证指数": "000001.SH",
+    "上证指数": "999999.SH",
     "创业板指": "399006.SZ",
     "科创50": "000688.SH",
     "北证50": "899050.BJ",
