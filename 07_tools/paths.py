@@ -31,7 +31,7 @@ RISK_DIR = DATA / "risk"
 STOCK_POOL_DIR = DATA / "stock_pool"
 
 # TongDaXin installation root (overridable via env)
-TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"C:\new_tdx64"))
+TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"E:\new_tdx64"))
 
 # TDX sub-paths
 TDX_VIPDOC = TDX_ROOT / "vipdoc"

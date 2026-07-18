@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """market_timing daily input collector v2.
 
 Phase 1 collector:
@@ -28,7 +28,7 @@ if str(LOCAL_TDX_DIR) not in sys.path:
 
 import local_tdx_data as ltd  # type: ignore
 
-TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"C:\new_tdx64"))
+TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"E:\new_tdx64"))
 OUT_DIR = BASE / "01_data" / "market"
 
 INDICES = {

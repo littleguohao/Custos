@@ -332,8 +332,8 @@ def get_sector_list() -> list[str]:
         blocks = reader.block(symbol="block_zs", group=False)
         if blocks is not None and not blocks.empty:
             return blocks["name"].tolist() if "name" in blocks.columns else []
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[WARN] get_sector_list failed: {e}", file=sys.stderr)
     return []
 
 
@@ -346,8 +346,8 @@ def get_stock_list_in_sector(sector: str, block_type: int = 0) -> list[str]:
             mask = blocks["name"] == sector if "name" in blocks.columns else pd.Series([False] * len(blocks))
             subset = blocks[mask]
             return subset["code"].tolist() if "code" in subset.columns else []
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[WARN] get_stock_list_in_sector({sector}) failed: {e}", file=sys.stderr)
     return []
 
 
@@ -361,8 +361,8 @@ def get_stock_list(pool_type: str = "5") -> list[str]:
             stocks = client.stocks(market=mkt)
             if stocks is not None and not stocks.empty:
                 result.extend(stocks["code"].tolist() if "code" in stocks.columns else [])
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[WARN] get_stock_list market={mkt} failed: {e}", file=sys.stderr)
     return result
 
 
@@ -395,12 +395,14 @@ def get_ohlcv_table(code: str, count: int = 260, prefer: str = "vipdoc") -> pd.D
     if prefer == "vipdoc":
         try:
             df = read_vipdoc_daily(code)
-        except Exception:
+        except Exception as e:
+            print(f"[WARN] read_vipdoc_daily({code}) failed, fallback to online: {e}", file=sys.stderr)
             df = pd.DataFrame()
     if df.empty:
         try:
             df = get_online_bars(code, offset=count)
-        except Exception:
+        except Exception as e:
+            print(f"[WARN] get_online_bars({code}) failed: {e}", file=sys.stderr)
             df = pd.DataFrame()
     if not df.empty and len(df) > count:
         df = df.tail(count).reset_index(drop=True)

@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """Collect incremental market data: A50 futures, CNH exchange rate, limit-up/down ladder, northbound."""
 from __future__ import annotations
 import json, os, sys, warnings, time
@@ -17,11 +17,13 @@ result = {"date": target, "collected_at": datetime.now().strftime("%Y-%m-%dT%H:%
 # ========== 1. A50 futures + CNH via web search (Yahoo Finance) ==========
 import urllib.request, urllib.parse
 
+from net_retry import retry_call
+
 def fetch_yahoo(symbol: str) -> dict:
     encoded = urllib.parse.quote(symbol, safe="")
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{encoded}?range=5d&interval=1d"
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    with retry_call(lambda: urllib.request.urlopen(req, timeout=15)) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     r = (data.get("chart") or {}).get("result", [{}])[0]
     meta = r.get("meta") or {}
@@ -50,7 +52,7 @@ except Exception as e:
 
 # ========== 2. Market breadth via mootdx Reader (local) ==========
 from mootdx.reader import Reader
-TDXDIR = os.environ.get("TDX_ROOT", r"C:\new_tdx64")
+TDXDIR = os.environ.get("TDX_ROOT", r"E:\new_tdx64")
 reader = Reader.factory(market="std", tdxdir=TDXDIR)
 
 breadth_data = {}

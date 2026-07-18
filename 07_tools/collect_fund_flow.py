@@ -6,6 +6,8 @@ from datetime import date, datetime
 from pathlib import Path
 import requests
 
+from net_retry import fetch_with_retry
+
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
@@ -42,7 +44,8 @@ SECTOR_URLS = {
 def fetch_json(url: str) -> dict:
     s = requests.Session()
     s.trust_env = False  # ignore system proxy
-    r = s.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"}, proxies={"http": None, "https": None})
+    r = fetch_with_retry(url, timeout=15, session=s,
+                         headers={"User-Agent": "Mozilla/5.0"}, proxies={"http": None, "https": None})
     r.raise_for_status()
     return r.json()
 
@@ -51,7 +54,11 @@ def main():
     today = date.today().strftime("%Y-%m-%d")
 
     # Individual stock fund flow rank (top 200)
-    data = fetch_json(EM_URL)
+    try:
+        data = fetch_json(EM_URL)
+    except Exception as e:
+        print(f"[WARN] stock fund flow fetch failed: {e}", file=sys.stderr)
+        sys.exit(1)
     stocks = []
     for item in data.get("data", {}).get("diff", []):
         stocks.append({

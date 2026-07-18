@@ -11,6 +11,11 @@ __pycache__/
 !01_data/**/
 !01_data/**/*.md
 
+# Generated trade review workbook. Keep Markdown templates.
+04_reviews/trade_review/**
+!04_reviews/trade_review/**/
+!04_reviews/trade_review/**/*.md
+
 # Pipeline logs and transient output
 06_logs/
 03_daily_plans/_supporting/

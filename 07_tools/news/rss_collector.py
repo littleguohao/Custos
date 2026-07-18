@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Deterministic RSS/Atom collector with strict JSON and source-quality metadata."""
 from __future__ import annotations
-import argparse, hashlib, html, json, re, ssl, urllib.request
+import argparse, hashlib, html, json, re, ssl, sys, urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -11,6 +11,8 @@ from source_name_overrides import fix_source_name
 BASE=Path(__file__).resolve().parents[2]
 REG=BASE/'00_governance'/'RSS_SOURCE_REGISTRY.json'
 DATA=BASE/'01_data'/'news'/'rss'; LOG=BASE/'06_logs'/'rss'
+sys.path.insert(0,str(BASE/'07_tools'))
+from net_retry import retry_call
 
 def text(node, names):
     for child in node.iter():
@@ -70,7 +72,7 @@ def main():
             req=urllib.request.Request(src['url'],headers={'User-Agent':'Mozilla/5.0 TdxClawRSS/1.0','Accept':'application/rss+xml,application/atom+xml,application/xml,text/xml'})
             ctx=ssl.create_default_context()
             if src.get('ssl_verify',True) is False: ctx.check_hostname=False; ctx.verify_mode=ssl.CERT_NONE
-            with urllib.request.urlopen(req,timeout=a.timeout,context=ctx) as r: raw=r.read(3_000_000); row.update(http_status=r.status,final_url=r.geturl(),content_type=r.headers.get('content-type',''))
+            with retry_call(lambda: urllib.request.urlopen(req,timeout=a.timeout,context=ctx)) as r: raw=r.read(3_000_000); row.update(http_status=r.status,final_url=r.geturl(),content_type=r.headers.get('content-type',''))
             (day/f"{src['id']}.xml").write_bytes(raw); items=parse_feed(raw,src,fetched)[:a.limit_per_feed]; normalized.extend(items); row.update(status='ok',items=len(items))
         except Exception as e: row.update(status='failed',error=repr(e),items=0)
         log.append(row)

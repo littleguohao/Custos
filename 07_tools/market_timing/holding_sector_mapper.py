@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """Map current holdings to TDX sectors using TQ get_relation."""
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import pandas as pd
 
 BASE = Path(__file__).resolve().parents[2]
 OUT_DIR = BASE / "01_data" / "holdings"
-TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"C:\new_tdx64"))
+TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"E:\new_tdx64"))
 DEFAULT_POSITIONS = BASE / "01_data" / "trades" / "current_positions.json"
 
 
@@ -89,7 +89,7 @@ def main():
             })
     finally:
         try: tq.close()
-        except Exception: pass
+        except Exception as e: print(f"[WARN] tq.close() failed: {e}", file=sys.stderr)
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     date = args.date or pd.Timestamp.now().strftime("%Y-%m-%d")

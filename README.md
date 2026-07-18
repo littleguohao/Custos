@@ -32,7 +32,7 @@ uv sync
 
 ### 配置
 
-1. **通达信路径**：设置环境变量 `TDX_ROOT` 指向通达信安装目录（默认 `C:\new_tdx64`），脚本通过 `os.environ.get("TDX_ROOT", ...)` 读取
+1. **通达信路径**：设置环境变量 `TDX_ROOT` 指向通达信安装目录（默认 `E:\new_tdx64`），脚本通过 `os.environ.get("TDX_ROOT", ...)` 读取
 
 2. **持仓数据**：在 `01_data/trades/` 下维护：
    - `master_trade_ledger.csv` — 全量交易主台账

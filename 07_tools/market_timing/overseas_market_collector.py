@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
 import urllib.parse
 import urllib.request
@@ -20,6 +21,11 @@ from zoneinfo import ZoneInfo
 
 BASE = Path(__file__).resolve().parents[2]
 MARKET_DIR = BASE / "01_data" / "market"
+TOOLS_DIR = BASE / "07_tools"
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
+
+from net_retry import retry_call  # noqa: E402
 
 SYMBOLS = {
     "dow": {"symbol": "^DJI", "name": "道琼斯工业指数", "group": "index", "region": "us"},
@@ -57,7 +63,7 @@ def fetch_chart(symbol: str, region: str = "") -> dict[str, Any]:
             "Accept": "application/json",
         },
     )
-    with urllib.request.urlopen(req, timeout=20) as resp:
+    with retry_call(lambda: urllib.request.urlopen(req, timeout=20)) as resp:
         raw = resp.read().decode("utf-8")
     data = json.loads(raw)
     result = (data.get("chart") or {}).get("result") or []

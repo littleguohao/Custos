@@ -46,8 +46,8 @@ if gate_path.exists():
         gate = json.loads(gate_path.read_text(encoding="utf-8"))
         gate.setdefault("position_gate", {})["quotes_current"] = True
         gate_path.write_text(json.dumps(gate, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[WARN] runtime_gate quotes_current 更新失败：{e}", file=sys.stderr)
 
 # 3. Runtime gate
 rc, out = run(["uv", "run", "python", str(TOOLS / "runtime_gate.py"), "--date", target, "--require-trading-day"])

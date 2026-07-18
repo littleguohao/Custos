@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """Universal technical monitor for sectors/stocks.
 
 Computes:
@@ -25,7 +25,7 @@ if hasattr(sys.stderr, "reconfigure"):
 
 import pandas as pd
 
-TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"C:\new_tdx64"))
+TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"E:\new_tdx64"))
 OUT_DIR = Path(__file__).resolve().parents[2] / "01_data" / "market"
 
 
