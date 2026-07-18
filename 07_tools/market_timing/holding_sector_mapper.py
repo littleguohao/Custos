@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """Map current holdings to TDX sectors using TQ get_relation."""
 from __future__ import annotations
 

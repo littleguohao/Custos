@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """market_timing daily input collector v2.
 
 Phase 1 collector:

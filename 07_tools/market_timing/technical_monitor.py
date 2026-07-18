@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """Universal technical monitor for sectors/stocks.
 
 Computes:

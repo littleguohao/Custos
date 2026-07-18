@@ -38,9 +38,15 @@ from mootdx.reader import Reader
 from mootdx.quotes import Quotes
 from mootdx.consts import MARKET_SH, MARKET_SZ
 
-TDXDIR = os.environ.get("TDX_ROOT", r"C:\new_tdx64")
+TDXDIR = os.environ.get("TDX_ROOT", r"E:\new_tdx64")
 reader = Reader.factory(market="std", tdxdir=TDXDIR)
-client = Quotes.factory(market="std", quiet=True)
+_client = None  # lazy init: only connect when online access is actually needed
+
+def _get_client():
+    global _client
+    if _client is None:
+        _client = Quotes.factory(market="std", quiet=True)
+    return _client
 
 def _fmt_dt(dt) -> str:
     """Format datetime to 'YYYY-MM-DD HH:MM:SS' or 'YYYY-MM-DD'."""
@@ -51,7 +57,7 @@ def _fmt_dt(dt) -> str:
 
 def _online_bars_quote(code, name, mkt):
     """Fetch latest bar from online API."""
-    df = client.bars(symbol=code, frequency=9, offset=2)
+    df = _get_client().bars(symbol=code, frequency=9, offset=2)
     if df is None or len(df) == 0:
         return None
     last = df.iloc[-1]
@@ -172,7 +178,7 @@ for code, name, mkt in [("000001", "上证指数", MARKET_SH), ("399001", "深�
     # intraday: online first
     if args.session == "intraday":
         try:
-            df = client.index(frequency=9, market=mkt, symbol=code, start=0, offset=2)
+            df = _get_client().index(frequency=9, market=mkt, symbol=code, start=0, offset=2)
             if df is not None and len(df) >= 1:
                 last = df.iloc[-1]
                 prev = df.iloc[-2] if len(df) > 1 else None
@@ -229,7 +235,7 @@ for code, name in [("880001", "平均股价"), ("880005", "涨跌家数"), ("880
         import sys as _s; print(f"[WARN] {e}", file=_s.stderr)
     # Online fallback
     try:
-        df = client.index(frequency=9, market=MARKET_SH, symbol=code, start=0, offset=2)
+        df = _get_client().index(frequency=9, market=MARKET_SH, symbol=code, start=0, offset=2)
         if df is not None and len(df) >= 1:
             last = df.iloc[-1]
             prev = df.iloc[-2] if len(df) > 1 else None

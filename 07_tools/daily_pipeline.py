@@ -205,7 +205,7 @@ def main():
     stages.append(run([str(PY), str(TOOLS / "portfolio_review_report.py"), "--date", args.date], "portfolio_review_report"))
     stages.append(run([str(PY), str(TOOLS / "theme_tracker_report.py"), "--date", args.date], "theme_tracker_report"))
     # Generate risk_decision + sector_state from deterministic pipeline outputs
-    stages.append(run([str(PY), str(TOOLS / "generate_risk_and_sectors.py"), "--date", args.date], "generate_risk_and_sectors"))
+    stages.append(run([str(PY), str(BASE / "07_tools" / "generate_risk_and_sectors.py"), "--date", args.date], "generate_risk_and_sectors"))
 
     stages.append(run([str(PY), str(TOOLS / "chief_decision_report.py"), "--date", args.date], "chief_decision_report"))
     if args.session_type == "premarket":
