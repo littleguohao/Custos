@@ -11,7 +11,11 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from paths import BASE, TDX_ROOT
 
-target = date.today().strftime("%Y-%m-%d")
+import argparse
+ap = argparse.ArgumentParser()
+ap.add_argument("--date", default=date.today().strftime("%Y-%m-%d"))
+args = ap.parse_args()
+target = args.date
 
 result = {"date": target, "collected_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")}
 

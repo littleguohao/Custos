@@ -13,8 +13,6 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from paths import BASE
 
-OUT = BASE / "01_data" / "market" / f"{date.today().strftime('%Y-%m-%d')}_fund_flow_rank.json"
-
 EM_URL = (
     "https://push2.eastmoney.com/api/qt/clist/get"
     "?fid=f62&po=1&pz=200&pn=1&np=1&fltt=2&invt=2"
@@ -52,7 +50,12 @@ def fetch_json(url: str) -> dict:
 
 
 def main():
-    today = date.today().strftime("%Y-%m-%d")
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--date", default=date.today().strftime("%Y-%m-%d"))
+    args = ap.parse_args()
+    today = args.date
+    OUT = BASE / "01_data" / "market" / f"{today}_fund_flow_rank.json"
 
     # Individual stock fund flow rank (top 200)
     try:

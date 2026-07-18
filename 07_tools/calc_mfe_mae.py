@@ -11,9 +11,15 @@ if hasattr(sys.stdout, "reconfigure"):
 from paths import BASE, TDX_ROOT  # noqa: E402
 
 POSITIONS = BASE / "01_data" / "trades" / "current_positions.json"
-OUT = BASE / "01_data" / "holdings" / f"{date.today().strftime('%Y-%m-%d')}_mfe_mae.json"
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--date", default=date.today().strftime("%Y-%m-%d"))
+    args = ap.parse_args()
+    target = args.date
+    OUT = BASE / "01_data" / "holdings" / f"{target}_mfe_mae.json"
+
     from mootdx.reader import Reader
 
     reader = Reader.factory(market="std", tdxdir=str(TDX_ROOT))
@@ -106,7 +112,7 @@ def main():
             print(f"[WARN] {code} {name}: {e}")
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps({"date": date.today().strftime("%Y-%m-%d"), "holdings": results}, ensure_ascii=False, indent=2), encoding="utf-8")
+    OUT.write_text(json.dumps({"date": target, "holdings": results}, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\n[OK] MFE/MAE -> {OUT.name}")
 
 
