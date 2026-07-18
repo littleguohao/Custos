@@ -145,7 +145,7 @@ uv run python 07_tools/run_2030.py
 
 ### B1 波段策略
 
-详见 `00_governance/B1_SWING_STRATEGY.md`。关键机制：
+详见 `00_governance/b1_swing_strategy.md`。关键机制：
 
 - **BBI**：`(MA3 + MA6 + MA12 + MA24) / 4`，预警而非最终权威
 - **N 结构**：上升 N（L1→H1→更高 L2）/ 下降 N（H1→L1→更低 H2→收盘低于 L1）
@@ -157,7 +157,7 @@ uv run python 07_tools/run_2030.py
 
 1. 个股服从板块，板块服从大盘
 2. 风控优先于买入
-3. 候选池待重建（原 theme_tracker_report + stock_pool 流程已移除，TQ 公式初筛 + LLM 因子评分重建中），买入计划由 chief_decision 统一裁决
+3. 候选池待重建（原 stock_pool/buy_strategy 流程已移除，theme_tracker 仍由 daily_pipeline 每日运行作为证据层；TQ 公式初筛 + LLM 因子评分重建中），买入计划由 chief_decision 统一裁决
 4. risk_control 拥有否决权
 5. chief_decision 是最终交易计划输出层
 6. 所有计划必须可复盘

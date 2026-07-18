@@ -30,7 +30,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
 BASE = Path(__file__).resolve().parents[2]
 OUT_DIR = BASE / "01_data" / "trades"
-DEFAULT_SRC_DIR = Path("C:/Users/gh/Downloads")
+DEFAULT_SRC_DIR = Path.home() / "Downloads"
 
 
 def find_latest_xlsx(src_dir: Path) -> Path | None:

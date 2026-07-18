@@ -1,4 +1,4 @@
-﻿# 投资策略系统蓝图
+# 投资策略系统蓝图
 
 > ⚠️ 本文档已从原 8-Agent 架构演进为确定性脚本主链。保留风控硬规则和用户画像作为策略资产。
 
@@ -20,7 +20,7 @@
 | 卖出风控 | `generate_risk_and_sectors.py` | risk_decision 生成，拥有否决权 |
 | 总控决策 | `market_timing/chief_decision_report.py` | ChiefDecision：三份报告的内部决策对象 |
 | 复盘进化 | `close_review/` 系列 | execution_review → review_enrichment → final_close_review |
-| 选股池 | **待重建** | 原 stock_pool/buy_strategy 已移除，TQ 公式初筛 + LLM 因子评分重建中 |
+| 选股池 | **待重建** | 原 stock_pool/buy_strategy 已移除（theme_tracker 仍每日运行作为证据层），TQ 公式初筛 + LLM 因子评分重建中 |
 
 不创建、不调用、不等待专业 Agent 或 Subagent。所有数据采集和指标计算由 Python 脚本完成。
 
