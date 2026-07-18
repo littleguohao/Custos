@@ -1,55 +1,63 @@
 # -*- coding: utf-8 -*-
 """08:50 one-shot premarket data collection (except wenda_notice_query which needs LLM tool)."""
 from __future__ import annotations
-import json, subprocess, sys
-from datetime import date, datetime
-from pathlib import Path
+
+import contextlib
+import io
+import os
+import sys
+import argparse
+from datetime import date
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from paths import BASE
+from pipeline_kit import check_trading_day, run_stage
 
 TOOLS = BASE / "07_tools"
-target = date.today().strftime("%Y-%m-%d")
+ap = argparse.ArgumentParser()
+ap.add_argument("--date", default=date.today().strftime("%Y-%m-%d"))
+args = ap.parse_args()
+target = args.date
 
-def run(cmd: list[str]) -> tuple[int, str]:
-    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=str(BASE))
-    return r.returncode, (r.stdout + r.stderr).strip()
+# Subprocesses rely on project discovery (uv run) from the repo root.
+os.chdir(BASE)
 
-steps = []
+
+def _stage(cmd: list[str], name: str) -> dict:
+    """Run a stage quietly: runner stdout is a machine-consumed protocol, so
+    the stage echo ([RUN] header, subprocess output) is suppressed; only the
+    summary lines below are printed."""
+    with contextlib.redirect_stdout(io.StringIO()):
+        r = run_stage(cmd, name, required=False)
+    r["out"] = (r["stdout"] + r["stderr"]).strip()
+    return r
+
 
 # 1. Trading calendar
-rc, out = run(["uv", "run", "python", str(TOOLS / "trading_calendar.py"), "--check-date", target])
-if rc != 0:
-    print(f"【08:50预采集失败｜{target}】日历检查失败：{out[:200]}")
+try:
+    with contextlib.redirect_stdout(io.StringIO()):
+        cal = check_trading_day(target)
+except RuntimeError as e:
+    print(f"【08:50预采集失败｜{target}】日历检查失败：{str(e)[:200]}")
     sys.exit(1)
-import re
-m = re.search(r'\{.*\}', out, re.DOTALL)
-cal = json.loads(m.group()) if m else {}
 if not cal.get("is_trading_day", False):
     print(f"今日休市，08:50预采集跳过（{target}）")
     sys.exit(0)
-steps.append("calendar=ok")
 
-# 2. Market timing collector
-rc, out = run(["uv", "run", "python", str(TOOLS / "market_timing" / "market_timing_collector.py"), "--date", target])
-steps.append(f"market_timing={'ok' if rc == 0 else 'fail'}")
+steps = ["calendar=ok"]
 
-# 3. Overseas market collector
-rc, out = run(["uv", "run", "python", str(TOOLS / "market_timing" / "overseas_market_collector.py"), "--date", target])
-steps.append(f"overseas={'ok' if rc == 0 else 'fail'}")
-
-# 4. RSS collector
-rc, out = run(["uv", "run", "python", str(TOOLS / "news" / "rss_collector.py"), "--date", target])
-steps.append(f"rss_collect={'ok' if rc == 0 else 'fail'}")
-
-# 5. Incremental market data (A50, CNH, breadth, northbound)
-rc, out = run(["uv", "run", "python", str(TOOLS / "collect_incremental_market.py")])
-steps.append(f"incremental={'ok' if rc == 0 else 'fail'}")
-
-# 6. RSS filter (premarket)
-rc, out = run(["uv", "run", "python", str(TOOLS / "news" / "rss_filter.py"), "--date", target, "--session-type", "premarket"])
-steps.append(f"rss_filter={'ok' if rc == 0 else 'fail'}")
+# 2-6. Data collectors (best-effort: rc recorded into steps, never fatal)
+STAGES = [
+    (["uv", "run", "python", str(TOOLS / "market_timing" / "market_timing_collector.py"), "--date", target], "market_timing"),
+    (["uv", "run", "python", str(TOOLS / "market_timing" / "overseas_market_collector.py"), "--date", target], "overseas"),
+    (["uv", "run", "python", str(TOOLS / "news" / "rss_collector.py"), "--date", target], "rss_collect"),
+    (["uv", "run", "python", str(TOOLS / "collect_incremental_market.py"), "--date", target], "incremental"),
+    (["uv", "run", "python", str(TOOLS / "news" / "rss_filter.py"), "--date", target, "--session-type", "premarket"], "rss_filter"),
+]
+for cmd, name in STAGES:
+    r = _stage(cmd, name)
+    steps.append(f"{name}={'ok' if r['ok'] else 'fail'}")
 
 print(f"【08:50预采集完成｜{target}】{'；'.join(steps)}")
