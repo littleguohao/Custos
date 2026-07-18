@@ -12,11 +12,12 @@ BASE = Path(__file__).resolve().parent.parent
 POSITIONS = BASE / "01_data" / "trades" / "current_positions.json"
 OUT = BASE / "01_data" / "holdings" / f"{date.today().strftime('%Y-%m-%d')}_mfe_mae.json"
 
+from paths import TDX_ROOT  # noqa: E402
+
 def main():
     from mootdx.reader import Reader
 
-    TDX_ROOT = os.environ.get("TDX_ROOT", r"E:\new_tdx64")
-    reader = Reader.factory(market="std", tdxdir=TDX_ROOT)
+    reader = Reader.factory(market="std", tdxdir=str(TDX_ROOT))
     positions = json.loads(POSITIONS.read_text(encoding="utf-8"))
 
     results = []

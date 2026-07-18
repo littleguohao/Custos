@@ -25,10 +25,13 @@ BASE = Path(__file__).resolve().parents[2]
 LOCAL_TDX_DIR = BASE / "07_tools" / "local_tdx"
 if str(LOCAL_TDX_DIR) not in sys.path:
     sys.path.insert(0, str(LOCAL_TDX_DIR))
+TOOLS_DIR = BASE / "07_tools"
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
 
 import local_tdx_data as ltd  # type: ignore
+from paths import TDX_ROOT  # noqa: E402
 
-TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"E:\new_tdx64"))
 OUT_DIR = BASE / "01_data" / "market"
 
 INDICES = {

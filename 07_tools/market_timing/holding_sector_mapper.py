@@ -12,7 +12,12 @@ import pandas as pd
 
 BASE = Path(__file__).resolve().parents[2]
 OUT_DIR = BASE / "01_data" / "holdings"
-TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"E:\new_tdx64"))
+TOOLS_DIR = BASE / "07_tools"
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
+
+from paths import TDX_ROOT  # noqa: E402
+
 DEFAULT_POSITIONS = BASE / "01_data" / "trades" / "current_positions.json"
 
 

@@ -25,7 +25,12 @@ if hasattr(sys.stderr, "reconfigure"):
 
 import pandas as pd
 
-TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"E:\new_tdx64"))
+TOOLS_DIR = Path(__file__).resolve().parents[1]
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
+
+from paths import TDX_ROOT  # noqa: E402
+
 OUT_DIR = Path(__file__).resolve().parents[2] / "01_data" / "market"
 
 

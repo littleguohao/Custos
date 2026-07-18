@@ -12,6 +12,8 @@ if hasattr(sys.stdout, "reconfigure"):
 
 BASE = Path(__file__).resolve().parent.parent
 
+from paths import TDX_ROOT  # noqa: E402
+
 import argparse
 ap = argparse.ArgumentParser()
 ap.add_argument("--date", default=date.today().strftime("%Y-%m-%d"))
@@ -38,7 +40,7 @@ from mootdx.reader import Reader
 from mootdx.quotes import Quotes
 from mootdx.consts import MARKET_SH, MARKET_SZ
 
-TDXDIR = os.environ.get("TDX_ROOT", r"E:\new_tdx64")
+TDXDIR = str(TDX_ROOT)
 reader = Reader.factory(market="std", tdxdir=TDXDIR)
 _client = None  # lazy init: only connect when online access is actually needed
 

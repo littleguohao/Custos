@@ -18,6 +18,7 @@ result = {"date": target, "collected_at": datetime.now().strftime("%Y-%m-%dT%H:%
 import urllib.request, urllib.parse
 
 from net_retry import retry_call
+from paths import TDX_ROOT
 
 def fetch_yahoo(symbol: str) -> dict:
     encoded = urllib.parse.quote(symbol, safe="")
@@ -52,7 +53,7 @@ except Exception as e:
 
 # ========== 2. Market breadth via mootdx Reader (local) ==========
 from mootdx.reader import Reader
-TDXDIR = os.environ.get("TDX_ROOT", r"E:\new_tdx64")
+TDXDIR = str(TDX_ROOT)
 reader = Reader.factory(market="std", tdxdir=TDXDIR)
 
 breadth_data = {}
