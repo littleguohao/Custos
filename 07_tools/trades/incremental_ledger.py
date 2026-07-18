@@ -7,7 +7,7 @@ current position quantity and unit cost; market value/P&L remain pending until
 the next close revaluation.
 """
 from __future__ import annotations
-import argparse,hashlib,json,math,sys
+import argparse,hashlib,json,sys
 from datetime import datetime
 from pathlib import Path
 import pandas as pd
@@ -17,17 +17,12 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from paths import BASE  # noqa: E402
+from code_utils import clean_code, finite  # noqa: E402
 
 TD=BASE/'01_data'/'trades'
 LEDGER=TD/'master_trade_ledger.csv'; AUDIT=TD/'ledger_append_audit.jsonl'; POS=TD/'current_positions.json'; CONFIRM=TD/'position_confirmations.json'
 FIELDS=['成交日期','成交时间','代码','名称','交易类别','成交数量','成交价格','成交金额','发生金额','费用','备注']
 KEY=['成交日期','成交时间','代码','名称','交易类别','成交数量','成交价格','成交金额','发生金额','费用']
-def clean_code(v):
- s=str(v or '').strip().replace('.0',''); return s.split('.')[0].zfill(6) if s.split('.')[0].isdigit() else s.split('.')[0]
-def finite(v,d=0.0):
- try:
-  x=float(v); return d if math.isnan(x) else x
- except: return d
 def norm(df):
  df=df.copy()
  for f in FIELDS:

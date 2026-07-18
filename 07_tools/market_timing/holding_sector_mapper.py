@@ -15,23 +15,20 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from paths import BASE, TDX_ROOT  # noqa: E402
+from code_utils import suffix  # noqa: E402
 
 OUT_DIR = BASE / "01_data" / "holdings"
 DEFAULT_POSITIONS = BASE / "01_data" / "trades" / "current_positions.json"
 
 
 def norm_code(x) -> str:
+    # Local semantics: 6-digit zero-padding only, no exchange suffix.
+    # Deliberately different from code_utils.norm_code (which appends
+    # .SH/.SZ/.BJ); see code_utils.norm_code docstring. Do not merge.
     if pd.isna(x): return ""
     s = str(x).strip()
     if s.endswith(".0"): s = s[:-2]
     return s.zfill(6) if s.isdigit() and len(s) <= 6 else s
-
-
-def suffix(code: str) -> str:
-    if code.startswith(("92", "8", "4")): return ".BJ"
-    if code.startswith(("6", "5")): return ".SH"
-    if code.startswith(("0", "1", "2", "3")): return ".SZ"
-    return ""
 
 
 def init_tq():

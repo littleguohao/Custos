@@ -30,6 +30,7 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from paths import BASE, TDX_ROOT  # noqa: E402
+from code_utils import norm_code, split_code  # noqa: E402
 
 OUT_DIR = BASE / "01_data" / "market"
 
@@ -50,27 +51,6 @@ def _read_vipdoc_mootdx(tdx_code: str) -> pd.DataFrame:
         return df
     except Exception:
         return pd.DataFrame()
-
-
-def norm_code(code: str) -> str:
-    s = str(code).strip().upper()
-    if s.endswith((".SH", ".SZ", ".BJ")):
-        return s
-    # 北交所常见代码含 4/8 开头，也包含 920xxx。
-    if s.startswith(("920", "8", "4")):
-        return s + ".BJ"
-    if s.startswith(("6", "5", "9")):
-        return s + ".SH"
-    if s.startswith(("0", "1", "2", "3")):
-        return s + ".SZ"
-    return s
-
-
-def split_code(tdx_code: str):
-    s = norm_code(tdx_code)
-    code, suf = s.split(".")
-    prefix = {"SH": "sh", "SZ": "sz", "BJ": "bj"}.get(suf, "")
-    return prefix, code
 
 
 def read_vipdoc(tdx_code: str) -> pd.DataFrame:

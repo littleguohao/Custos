@@ -33,6 +33,7 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from paths import BASE  # noqa: E402
+from code_utils import clean_code  # noqa: E402
 
 OUT_DIR = BASE / "01_data" / "trades"
 DEFAULT_SRC_DIR = Path.home() / "Downloads"
@@ -48,12 +49,6 @@ def find_latest_xlsx(src_dir: Path) -> Path | None:
         return None
     candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return candidates[0]
-
-
-def clean_code(s: str) -> str:
-    s = str(s).strip()
-    s = s.replace(".0", "", 1) if s.endswith(".0") else s
-    return s.zfill(6) if s.isdigit() and len(s) < 6 else s
 
 
 def main() -> None:

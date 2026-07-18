@@ -22,13 +22,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import subprocess
 import sys
 import shutil
 from pathlib import Path
 
 from paths import BASE
+from pipeline_kit import run_stage
 
 PY = sys.executable
 TOOLS = BASE / "07_tools" / "market_timing"
@@ -38,22 +37,6 @@ HOLD_DIR = BASE / "01_data" / "holdings"
 PLAN_DIR = BASE / "03_daily_plans"
 SUPPORT_DIR = PLAN_DIR / "_supporting"
 LOG_DIR = BASE / "06_logs"
-
-
-def run(cmd: list[str], name: str, required: bool = True) -> dict:
-    print(f"\n[RUN] {name}")
-    print(" ".join(cmd))
-    env = os.environ.copy()
-    env["PYTHONIOENCODING"] = "utf-8"
-    p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
-    if p.stdout:
-        print(p.stdout.encode('utf-8', errors='replace').decode('utf-8', errors='replace'))
-    if p.stderr:
-        print("[stderr]", p.stderr.encode('utf-8', errors='replace').decode('utf-8', errors='replace'))
-    ok = p.returncode == 0
-    if required and not ok:
-        raise RuntimeError(f"stage failed: {name}, code={p.returncode}")
-    return {"stage": name, "ok": ok, "returncode": p.returncode, "stdout": p.stdout[-4000:], "stderr": p.stderr[-4000:]}
 
 
 def apply_manual_market(date: str, macro: str | None, amv_zone: str | None, amv_pct: float | None):
@@ -141,7 +124,7 @@ def main():
     ap.add_argument("--amv-zone", choices=["做多", "中性", "空头"], default=None)
     ap.add_argument("--amv-pct", type=float, default=None)
     ap.add_argument("--reuse-discovery", action="store_true", help="reuse overseas/RSS files prepared before the formal report window")
-    ap.add_argument("--session-type", choices=["premarket", "intraday_1445", "postclose"], default="premarket")
+    ap.add_argument("--session-type", choices=["premarket", "postclose"], default="premarket")
     args = ap.parse_args()
 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -153,7 +136,7 @@ def main():
         cmd = [str(PY), str(TOOLS / "market_timing_collector.py"), "--date", args.date]
         if args.amv_pct is not None:
             cmd += ["--amv", str(args.amv_pct)]
-        stages.append(run(cmd, "market_timing_collector"))
+        stages.append(run_stage(cmd, "market_timing_collector"))
     else:
         stages.append({"stage": "market_timing_collector", "ok": True, "skipped": True, "reason": "existing input reused"})
 
@@ -163,36 +146,30 @@ def main():
 
     # 3. Overseas market and RSS discovery collectors. The 09:05 production
     # run reuses the 08:50 collection so network waits stay outside rendering.
-    if args.session_type == "intraday_1445":
-        stages.extend([
-            {"stage": "overseas_market_collector", "ok": True, "skipped": True, "reason": "intraday reports do not consume news discovery"},
-            {"stage": "rss_collector", "ok": True, "skipped": True, "reason": "intraday reports do not consume news discovery"},
-            {"stage": "rss_filter", "ok": True, "skipped": True, "reason": "intraday reports do not consume news discovery"},
-        ])
-    elif args.reuse_discovery:
+    if args.reuse_discovery:
         stages.extend([
             {"stage": "overseas_market_collector", "ok": True, "skipped": True, "reason": "08:50 discovery reused"},
             {"stage": "rss_collector", "ok": True, "skipped": True, "reason": "08:50 discovery reused"},
             {"stage": "rss_filter", "ok": True, "skipped": True, "reason": "08:50 discovery reused"},
         ])
     else:
-        stages.append(run([str(PY), str(TOOLS / "overseas_market_collector.py"), "--date", args.date], "overseas_market_collector", required=False))
-        stages.append(run([str(PY), str(BASE / "07_tools" / "news" / "rss_collector.py"), "--date", args.date], "rss_collector", required=False))
-        stages.append(run([str(PY), str(BASE / "07_tools" / "news" / "rss_filter.py"), "--date", args.date,
+        stages.append(run_stage([str(PY), str(TOOLS / "overseas_market_collector.py"), "--date", args.date], "overseas_market_collector", required=False))
+        stages.append(run_stage([str(PY), str(BASE / "07_tools" / "news" / "rss_collector.py"), "--date", args.date], "rss_collector", required=False))
+        stages.append(run_stage([str(PY), str(BASE / "07_tools" / "news" / "rss_filter.py"), "--date", args.date,
                            "--session-type", args.session_type], "rss_filter", required=False))
 
     # 4. Resolve persistent 0AMV regime before scoring. A locked bearish
     # regime remains bearish until a confirmed daily change is > +4%.
-    stages.append(run([str(PY), str(TOOLS / "amv_state.py"), "--date", args.date], "amv_state"))
+    stages.append(run_stage([str(PY), str(TOOLS / "amv_state.py"), "--date", args.date], "amv_state"))
     # Runtime guards and market scorer consume the effective regime.
-    stages.append(run([str(PY), str(BASE / "07_tools" / "runtime_gate.py"), "--date", args.date, "--require-trading-day"], "runtime_gate"))
-    stages.append(run([str(PY), str(TOOLS / "market_timing_scorer.py"), "--date", args.date], "market_timing_scorer"))
+    stages.append(run_stage([str(PY), str(BASE / "07_tools" / "runtime_gate.py"), "--date", args.date, "--require-trading-day"], "runtime_gate"))
+    stages.append(run_stage([str(PY), str(TOOLS / "market_timing_scorer.py"), "--date", args.date], "market_timing_scorer"))
 
     # 5. Holdings mapping refresh optional
     enriched = HOLD_DIR / f"{args.date}_holding_sector_mapping_enriched.json"
     if args.refresh_holdings or not enriched.exists():
         # First try local mapper. It may return empty sectors but still creates base mapping.
-        stages.append(run([str(PY), str(TOOLS / "holding_sector_mapper.py"), "--date", args.date], "holding_sector_mapper", required=False))
+        stages.append(run_stage([str(PY), str(TOOLS / "holding_sector_mapper.py"), "--date", args.date], "holding_sector_mapper", required=False))
         stages.append({"stage": "holding_enrichment", "ok": True, "skipped": True, "reason": "enriched mapping optional; standardized current positions remain authoritative"})
     else:
         stages.append({"stage": "holding_sector_mapper", "ok": True, "skipped": True, "reason": "existing enriched mapping reused"})
@@ -201,14 +178,14 @@ def main():
     # current_positions.json when an enriched mapping is unavailable, so a new
     # trade date must never skip the entire holding/risk/chief chain.
     stages.append(apply_manual_position_updates(args.date))
-    stages.append(run([str(PY), str(TOOLS / "batch_holding_technical.py"), "--date", args.date], "batch_holding_technical"))
-    stages.append(run([str(PY), str(TOOLS / "b1_holding_state.py"), "--date", args.date], "b1_holding_state"))
-    stages.append(run([str(PY), str(TOOLS / "portfolio_review_report.py"), "--date", args.date], "portfolio_review_report"))
-    stages.append(run([str(PY), str(TOOLS / "theme_tracker_report.py"), "--date", args.date], "theme_tracker_report"))
+    stages.append(run_stage([str(PY), str(TOOLS / "batch_holding_technical.py"), "--date", args.date], "batch_holding_technical"))
+    stages.append(run_stage([str(PY), str(TOOLS / "b1_holding_state.py"), "--date", args.date], "b1_holding_state"))
+    stages.append(run_stage([str(PY), str(TOOLS / "portfolio_review_report.py"), "--date", args.date], "portfolio_review_report"))
+    stages.append(run_stage([str(PY), str(TOOLS / "theme_tracker_report.py"), "--date", args.date], "theme_tracker_report"))
     # Generate risk_decision + sector_state from deterministic pipeline outputs
-    stages.append(run([str(PY), str(BASE / "07_tools" / "generate_risk_and_sectors.py"), "--date", args.date], "generate_risk_and_sectors"))
+    stages.append(run_stage([str(PY), str(BASE / "07_tools" / "generate_risk_and_sectors.py"), "--date", args.date], "generate_risk_and_sectors"))
 
-    stages.append(run([str(PY), str(TOOLS / "chief_decision_report.py"), "--date", args.date], "chief_decision_report"))
+    stages.append(run_stage([str(PY), str(TOOLS / "chief_decision_report.py"), "--date", args.date], "chief_decision_report"))
     if args.session_type == "premarket":
         chief_source = DATA_DIR / "decisions" / f"{args.date}_chief_decision.json"
         chief_snapshot = DATA_DIR / "decisions" / f"{args.date}_premarket_chief_decision.json"
@@ -218,11 +195,11 @@ def main():
         else:
             stages.append({"stage": "snapshot_premarket_chief_decision", "ok": False, "reason": "chief decision missing"})
     if args.session_type == "postclose":
-        stages.append(run([str(PY), str(BASE / "07_tools" / "news" / "postclose_news_digest.py"), "--date", args.date], "postclose_news_digest", required=False))
-        stages.append(run([str(PY), str(BASE / "07_tools" / "close_review" / "execution_review.py"), "--date", args.date], "execution_review"))
-        stages.append(run([str(PY), str(BASE / "07_tools" / "close_review" / "review_enrichment.py"), "--date", args.date], "review_enrichment"))
-    stages.append(run([str(PY), str(BASE / "07_tools" / "daily_report.py"), "--date", args.date], "daily_report"))
-    stages.append(run([str(PY), str(TOOLS / "wechat_summary.py"), "--date", args.date], "wechat_summary", required=False))
+        stages.append(run_stage([str(PY), str(BASE / "07_tools" / "news" / "postclose_news_digest.py"), "--date", args.date], "postclose_news_digest", required=False))
+        stages.append(run_stage([str(PY), str(BASE / "07_tools" / "close_review" / "execution_review.py"), "--date", args.date], "execution_review"))
+        stages.append(run_stage([str(PY), str(BASE / "07_tools" / "close_review" / "review_enrichment.py"), "--date", args.date], "review_enrichment"))
+    stages.append(run_stage([str(PY), str(BASE / "07_tools" / "daily_report.py"), "--date", args.date], "daily_report"))
+    stages.append(run_stage([str(PY), str(TOOLS / "wechat_summary.py"), "--date", args.date], "wechat_summary", required=False))
 
     stages.append(archive_supporting_reports(args.date))
 
@@ -257,7 +234,6 @@ def main():
         PLAN_DIR / f"{args.date}_daily_report.md",
         DATA_DIR / "sectors" / f"{args.date}_sector_state.json",
         DATA_DIR / "risk" / f"{args.date}_risk_decision.json",
-        DATA_DIR / "buy_strategy" / f"{args.date}_buy_plan_normalized.json",  # deprecated, not generated in pure-script mode
         SUPPORT_DIR / args.date / f"{args.date}_wechat_summary.txt",
     ]:
         print(f"- {p} {'OK' if p.exists() else 'MISSING'}")
