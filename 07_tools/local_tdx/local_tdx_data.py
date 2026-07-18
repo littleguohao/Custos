@@ -86,6 +86,46 @@ def _get_market_code(code: str) -> int:
     return 0  # SZ
 
 
+def _is_bj_code(code: str) -> bool:
+    """Check if code is a Beijing Stock Exchange stock."""
+    s = _strip_suffix(code)
+    # BJ: 4xx, 8xx, 920xxx (North Exchange)
+    return s.startswith("4") or s.startswith("8") or s.startswith("920")
+
+
+def _read_bj_vipdoc_daily(code: str) -> "pd.DataFrame":
+    """Read BJ vipdoc .day file directly (mootdx Reader misroutes 920xxx to SH)."""
+    import struct
+    raw = _strip_suffix(code)
+    path = TDX_ROOT / "vipdoc" / "bj" / "lday" / f"bj{raw}.day"
+    if not path.exists():
+        return pd.DataFrame()
+    # TDX .day format: 32 bytes per record
+    # int date, int open, int high, int low, int close, float amount, int volume, int reserved
+    records = []
+    with open(path, "rb") as f:
+        while True:
+            buf = f.read(32)
+            if len(buf) < 32:
+                break
+            date_int, o, h, l, c, amt, vol, _ = struct.unpack("<IIIIIfII", buf[:32])
+            if date_int == 0:
+                continue
+            dt = pd.Timestamp(year=date_int // 10000, month=(date_int // 100) % 100, day=date_int % 100)
+            records.append({
+                "date": dt,
+                "open": o / 100.0,
+                "high": h / 100.0,
+                "low": l / 100.0,
+                "close": c / 100.0,
+                "amount": amt,
+                "volume": vol,
+            })
+    if not records:
+        return pd.DataFrame()
+    return pd.DataFrame(records)
+
+
 # ========== K-line data ==========
 
 def read_vipdoc_daily(code: str) -> pd.DataFrame:
@@ -93,6 +133,15 @@ def read_vipdoc_daily(code: str) -> pd.DataFrame:
 
     Returns columns: date, open, high, low, close, amount, volume.
     """
+    # BJ stocks: mootdx Reader misroutes 920xxx to SH, parse .day directly
+    if _is_bj_code(code):
+        df = _read_bj_vipdoc_daily(code)
+        if df.empty:
+            return pd.DataFrame()
+        df["code"] = normalize_code(code)
+        df["source"] = "vipdoc_bj_direct"
+        return df[["date", "code", "open", "high", "low", "close", "amount", "volume", "source"]]
+
     reader = _get_reader()
     raw = _strip_suffix(code)
     try:

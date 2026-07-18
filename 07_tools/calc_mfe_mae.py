@@ -15,7 +15,8 @@ OUT = BASE / "01_data" / "holdings" / f"{date.today().strftime('%Y-%m-%d')}_mfe_
 def main():
     from mootdx.reader import Reader
 
-    reader = Reader.factory(market="std", tdxdir=os.environ.get("TDX_ROOT", r"C:\new_tdx64"))
+    TDX_ROOT = os.environ.get("TDX_ROOT", r"E:\new_tdx64")
+    reader = Reader.factory(market="std", tdxdir=TDX_ROOT)
     positions = json.loads(POSITIONS.read_text(encoding="utf-8"))
 
     results = []
@@ -37,13 +38,21 @@ def main():
 
         try:
             df = None
-            # BJ stocks: use online bars directly (Reader doesn't support)
+            # All stocks: try local_tdx vipdoc first (supports BJ)
             if is_bj:
-                from mootdx.quotes import Quotes
-                client = Quotes.factory(market="std", quiet=True)
-                df = client.bars(symbol=code, frequency=9, count=hold_days + 10)
+                # BJ stocks: use local_tdx direct parser (mootdx Reader misroutes 920xxx)
+                sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "07_tools" / "local_tdx"))
+                import local_tdx_data as ltd
+                df = ltd.read_vipdoc_daily(code)
                 if df is not None and len(df) > 0:
-                    df = df.reset_index()
+                    df = df.reset_index(drop=True)
+                else:
+                    # Fallback to online bars
+                    from mootdx.quotes import Quotes
+                    client = Quotes.factory(market="std", quiet=True)
+                    df = client.bars(symbol=code, frequency=9, count=hold_days + 10)
+                    if df is not None and len(df) > 0:
+                        df = df.reset_index()
             else:
                 df = reader.daily(symbol=symbol)
                 if df is not None and len(df) > 0:
