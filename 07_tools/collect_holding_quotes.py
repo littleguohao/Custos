@@ -10,9 +10,7 @@ warnings.filterwarnings("ignore")
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-BASE = Path(__file__).resolve().parent.parent
-
-from paths import TDX_ROOT  # noqa: E402
+from paths import BASE, TDX_ROOT  # noqa: E402
 
 import argparse
 ap = argparse.ArgumentParser()

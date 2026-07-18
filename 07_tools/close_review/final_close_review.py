@@ -19,7 +19,8 @@ except ImportError:
     from holding_bbi import intraday_bbi_basis
     from holding_structure import n_structure_basis
 
-BASE = Path(__file__).resolve().parents[2]
+from paths import BASE  # noqa: E402
+
 DATA = BASE / "01_data"
 REV = BASE / "04_reviews" / "daily"
 

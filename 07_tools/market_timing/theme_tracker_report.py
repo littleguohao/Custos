@@ -25,7 +25,12 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-BASE = Path(__file__).resolve().parents[2]
+_TOOLS_ROOT = Path(__file__).resolve().parents[1]
+if str(_TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_ROOT))
+
+from paths import BASE  # noqa: E402
+
 SECTOR_MAP = BASE / "01_data" / "sectors" / "sector_code_map.json"
 SECTOR_DIR = BASE / "01_data" / "sectors"
 HOLDINGS_DIR = BASE / "01_data" / "holdings"

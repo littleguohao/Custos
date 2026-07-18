@@ -18,11 +18,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-BASE = Path(__file__).resolve().parents[2]
+TOOLS_DIR = Path(__file__).resolve().parents[1]
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
+
+from paths import BASE  # noqa: E402
+
 IN_DIR = BASE / "01_data" / "market"
 OUT_DIR = BASE / "03_daily_plans"
 QUALITY_DIR = BASE / "01_data" / "quality"

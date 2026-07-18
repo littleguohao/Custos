@@ -14,7 +14,12 @@ import os
 import sys
 from pathlib import Path
 
-BASE = Path(__file__).resolve().parents[2]
+TOOLS_DIR = Path(__file__).resolve().parents[1]
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
+
+from paths import BASE  # noqa: E402
+
 LOCAL_TDX_DIR = BASE / "07_tools" / "local_tdx"
 if str(LOCAL_TDX_DIR) not in sys.path:
     sys.path.insert(0, str(LOCAL_TDX_DIR))

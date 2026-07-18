@@ -20,7 +20,8 @@ import numpy as np
 import pandas as pd
 
 # ── 路径 ──────────────────────────────────────────────
-BASE = Path(__file__).resolve().parent.parent
+from paths import BASE
+
 TRADES_DIR = BASE / "01_data" / "trades"
 REVIEWS_DIR = BASE / "04_reviews" / "trade_review"
 

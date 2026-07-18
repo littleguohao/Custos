@@ -7,11 +7,18 @@ current position quantity and unit cost; market value/P&L remain pending until
 the next close revaluation.
 """
 from __future__ import annotations
-import argparse,hashlib,json,math
+import argparse,hashlib,json,math,sys
 from datetime import datetime
 from pathlib import Path
 import pandas as pd
-BASE=Path(__file__).resolve().parents[2]; TD=BASE/'01_data'/'trades'
+
+TOOLS_DIR = Path(__file__).resolve().parents[1]
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
+
+from paths import BASE  # noqa: E402
+
+TD=BASE/'01_data'/'trades'
 LEDGER=TD/'master_trade_ledger.csv'; AUDIT=TD/'ledger_append_audit.jsonl'; POS=TD/'current_positions.json'; CONFIRM=TD/'position_confirmations.json'
 FIELDS=['成交日期','成交时间','代码','名称','交易类别','成交数量','成交价格','成交金额','发生金额','费用','备注']
 KEY=['成交日期','成交时间','代码','名称','交易类别','成交数量','成交价格','成交金额','发生金额','费用']

@@ -21,16 +21,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-BASE = Path(__file__).resolve().parents[2]
-LOCAL_TDX_DIR = BASE / "07_tools" / "local_tdx"
-if str(LOCAL_TDX_DIR) not in sys.path:
-    sys.path.insert(0, str(LOCAL_TDX_DIR))
-TOOLS_DIR = BASE / "07_tools"
+TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
+LOCAL_TDX_DIR = TOOLS_DIR / "local_tdx"
+if str(LOCAL_TDX_DIR) not in sys.path:
+    sys.path.insert(0, str(LOCAL_TDX_DIR))
 
 import local_tdx_data as ltd  # type: ignore
-from paths import TDX_ROOT  # noqa: E402
+from paths import BASE, TDX_ROOT  # noqa: E402
 
 OUT_DIR = BASE / "01_data" / "market"
 

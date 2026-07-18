@@ -26,12 +26,11 @@ warnings.filterwarnings("ignore")
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-BASE = Path(__file__).resolve().parents[2]
 TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import TDX_ROOT  # noqa: E402
+from paths import BASE, TDX_ROOT  # noqa: E402
 
 # --- mootdx lazy initialization ---
 _reader = None

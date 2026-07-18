@@ -7,11 +7,16 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from zoneinfo import ZoneInfo
 
-BASE=Path(__file__).resolve().parents[2]; DATA=BASE/'01_data'; GOV=BASE/'00_governance'; LOG=BASE/'06_logs'/'rss'
+TOOLS_DIR = Path(__file__).resolve().parents[1]
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
+
+from paths import BASE  # noqa: E402
+from runtime_guards import previous_confirmed_trading_day  # noqa: E402
+
+DATA=BASE/'01_data'; GOV=BASE/'00_governance'; LOG=BASE/'06_logs'/'rss'
 CFG=GOV/'RSS_FILTER_CONFIG.json'; REG=GOV/'RSS_SOURCE_REGISTRY.json'
 SH=ZoneInfo('Asia/Shanghai')
-sys.path.insert(0,str(BASE/'07_tools'))
-from runtime_guards import previous_confirmed_trading_day
 
 def load(p,default):
  try:return json.loads(p.read_text(encoding='utf-8-sig')) if p.exists() else default

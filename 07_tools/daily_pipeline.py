@@ -28,7 +28,8 @@ import sys
 import shutil
 from pathlib import Path
 
-BASE = Path(__file__).resolve().parent.parent
+from paths import BASE
+
 PY = sys.executable
 TOOLS = BASE / "07_tools" / "market_timing"
 DATA_DIR = BASE / "01_data"

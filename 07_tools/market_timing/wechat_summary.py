@@ -1,9 +1,16 @@
 # -*- coding: utf-8 -*-
 """Render concise summary exclusively from structured ChiefDecision."""
 from __future__ import annotations
-import argparse,json
+import argparse,json,sys
 from pathlib import Path
-BASE=Path(__file__).resolve().parents[2]; DATA=BASE/'01_data'; OUT=BASE/'03_daily_plans'
+
+TOOLS_DIR = Path(__file__).resolve().parents[1]
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
+
+from paths import BASE  # noqa: E402
+
+DATA=BASE/'01_data'; OUT=BASE/'03_daily_plans'
 def load(p,d): return json.loads(p.read_text(encoding='utf-8')) if p.exists() else d
 
 def main():

@@ -22,7 +22,8 @@ except ImportError:
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-BASE = Path(__file__).resolve().parents[2]
+from paths import BASE  # noqa: E402
+
 TRADES = BASE / "01_data" / "trades"
 HOLDINGS = BASE / "01_data" / "holdings"
 RISK = BASE / "01_data" / "risk"

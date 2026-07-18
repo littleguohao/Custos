@@ -9,7 +9,12 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from source_name_overrides import fix_source_name
 
-BASE = Path(__file__).resolve().parents[2]
+TOOLS_DIR = Path(__file__).resolve().parents[1]
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
+
+from paths import BASE  # noqa: E402
+
 DATA = BASE / '01_data' / 'news' / 'rss'
 
 def patch_file(path: Path) -> int:

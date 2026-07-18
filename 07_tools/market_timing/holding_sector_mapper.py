@@ -10,14 +10,13 @@ from pathlib import Path
 
 import pandas as pd
 
-BASE = Path(__file__).resolve().parents[2]
-OUT_DIR = BASE / "01_data" / "holdings"
-TOOLS_DIR = BASE / "07_tools"
+TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import TDX_ROOT  # noqa: E402
+from paths import BASE, TDX_ROOT  # noqa: E402
 
+OUT_DIR = BASE / "01_data" / "holdings"
 DEFAULT_POSITIONS = BASE / "01_data" / "trades" / "current_positions.json"
 
 

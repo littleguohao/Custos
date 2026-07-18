@@ -9,7 +9,8 @@ warnings.filterwarnings("ignore")
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-BASE = Path(__file__).resolve().parent.parent
+from paths import BASE, TDX_ROOT
+
 target = date.today().strftime("%Y-%m-%d")
 
 result = {"date": target, "collected_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")}
@@ -18,7 +19,6 @@ result = {"date": target, "collected_at": datetime.now().strftime("%Y-%m-%dT%H:%
 import urllib.request, urllib.parse
 
 from net_retry import retry_call
-from paths import TDX_ROOT
 
 def fetch_yahoo(symbol: str) -> dict:
     encoded = urllib.parse.quote(symbol, safe="")

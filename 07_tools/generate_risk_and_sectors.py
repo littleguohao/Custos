@@ -12,7 +12,8 @@ import json
 import re
 from pathlib import Path
 
-BASE = Path(__file__).resolve().parent.parent
+from paths import BASE
+
 DATA = BASE / "01_data"
 
 

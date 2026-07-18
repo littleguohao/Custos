@@ -6,10 +6,17 @@ Once the regime enters 空头 it remains 空头 until a later confirmed daily
 must not reset the regime to neutral.
 """
 from __future__ import annotations
-import argparse,json
+import argparse,json,sys
 from datetime import datetime
 from pathlib import Path
-BASE=Path(__file__).resolve().parents[2]; MARKET=BASE/'01_data'/'market'; STATE=MARKET/'0amv_regime_history.json'; LEDGER=MARKET/'0amv_observations.jsonl'
+
+TOOLS_DIR = Path(__file__).resolve().parents[1]
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
+
+from paths import BASE  # noqa: E402
+
+MARKET=BASE/'01_data'/'market'; STATE=MARKET/'0amv_regime_history.json'; LEDGER=MARKET/'0amv_observations.jsonl'
 def load(p,d): return json.loads(p.read_text(encoding='utf-8')) if p.exists() else d
 
 def append_observation(day:str, amv:dict):

@@ -8,11 +8,15 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from source_name_overrides import fix_source_name
 
-BASE=Path(__file__).resolve().parents[2]
+TOOLS_DIR = Path(__file__).resolve().parents[1]
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
+
+from paths import BASE  # noqa: E402
+from net_retry import retry_call  # noqa: E402
+
 REG=BASE/'00_governance'/'RSS_SOURCE_REGISTRY.json'
 DATA=BASE/'01_data'/'news'/'rss'; LOG=BASE/'06_logs'/'rss'
-sys.path.insert(0,str(BASE/'07_tools'))
-from net_retry import retry_call
 
 def text(node, names):
     for child in node.iter():

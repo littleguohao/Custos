@@ -11,7 +11,8 @@ from net_retry import fetch_with_retry
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-BASE = Path(__file__).resolve().parent.parent
+from paths import BASE
+
 OUT = BASE / "01_data" / "market" / f"{date.today().strftime('%Y-%m-%d')}_fund_flow_rank.json"
 
 EM_URL = (

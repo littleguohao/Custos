@@ -29,9 +29,9 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import TDX_ROOT  # noqa: E402
+from paths import BASE, TDX_ROOT  # noqa: E402
 
-OUT_DIR = Path(__file__).resolve().parents[2] / "01_data" / "market"
+OUT_DIR = BASE / "01_data" / "market"
 
 
 def _read_vipdoc_mootdx(tdx_code: str) -> pd.DataFrame:

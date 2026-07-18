@@ -28,7 +28,12 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
-BASE = Path(__file__).resolve().parents[2]
+TOOLS_DIR = Path(__file__).resolve().parents[1]
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
+
+from paths import BASE  # noqa: E402
+
 OUT_DIR = BASE / "01_data" / "trades"
 DEFAULT_SRC_DIR = Path.home() / "Downloads"
 

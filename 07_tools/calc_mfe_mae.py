@@ -8,11 +8,10 @@ from pathlib import Path
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-BASE = Path(__file__).resolve().parent.parent
+from paths import BASE, TDX_ROOT  # noqa: E402
+
 POSITIONS = BASE / "01_data" / "trades" / "current_positions.json"
 OUT = BASE / "01_data" / "holdings" / f"{date.today().strftime('%Y-%m-%d')}_mfe_mae.json"
-
-from paths import TDX_ROOT  # noqa: E402
 
 def main():
     from mootdx.reader import Reader

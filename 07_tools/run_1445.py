@@ -8,7 +8,8 @@ from pathlib import Path
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-BASE = Path(__file__).resolve().parent.parent  # strategy_team/
+from paths import BASE  # strategy_team/
+
 TOOLS = BASE / "07_tools"
 PLANS = BASE / "03_daily_plans"
 target = date.today().strftime("%Y-%m-%d")

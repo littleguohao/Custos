@@ -19,11 +19,13 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-BASE = Path(__file__).resolve().parents[2]
-MARKET_DIR = BASE / "01_data" / "market"
-TOOLS_DIR = BASE / "07_tools"
+TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
+
+from paths import BASE  # noqa: E402
+
+MARKET_DIR = BASE / "01_data" / "market"
 
 from net_retry import retry_call  # noqa: E402
 

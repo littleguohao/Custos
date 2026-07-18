@@ -7,7 +7,8 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-BASE = Path(__file__).resolve().parents[1]
+from paths import BASE
+
 DATA = BASE / "01_data"
 CALENDAR_CONFIG = BASE / "00_governance" / "CN_TRADING_CALENDAR.json"
 CALENDAR_CACHE = DATA / "market" / "CN_TRADING_CALENDAR_CACHE.json"

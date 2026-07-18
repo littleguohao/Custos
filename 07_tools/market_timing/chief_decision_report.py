@@ -5,7 +5,14 @@ import argparse,json,re,sys
 from pathlib import Path
 
 if hasattr(sys.stdout,'reconfigure'): sys.stdout.reconfigure(encoding='utf-8',errors='replace')
-BASE = Path(__file__).resolve().parents[2]; DATA=BASE/'01_data'; PLANS=BASE/'03_daily_plans'
+
+TOOLS_DIR = Path(__file__).resolve().parents[1]
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
+
+from paths import BASE  # noqa: E402
+
+DATA=BASE/'01_data'; PLANS=BASE/'03_daily_plans'
 
 def load(p,d): return json.loads(p.read_text(encoding='utf-8')) if p.exists() else d
 def extract(pattern,text,default):
