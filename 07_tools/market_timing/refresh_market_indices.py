@@ -28,6 +28,11 @@ INDICES = {
     "北证50": "899050.BJ",
 }
 
+# Market breadth/sentiment codes
+BREADTH_CODE = "880005.SH"   # close=涨家数, open=涨家数(开盘)
+SENTIMENT_CODE = "880006.SH" # close=涨停数(收盘), high=涨停数(最高), low=跌停数(最低)
+TOTAL_STOCKS_APPROX = 5530   # A股总数近似值（用于计算跌家数）
+
 
 def to_float(x):
     try:
@@ -193,6 +198,59 @@ def main():
                     print(f"[OK] turnover: {amt} (from 880001), change_pct={chg_pct}")
         except Exception as e:
             print(f"[WARN] 880001 fetch failed: {e}")
+
+    # Refresh market breadth (涨跌家数) from 880005.SH
+    breadth = mkt.get("market_breadth", {})
+    if not breadth or breadth.get("quality") in (None, "missing", "") or breadth.get("up_count") is None:
+        try:
+            df_bd = ltd.get_ohlcv_table(BREADTH_CODE, count=3, prefer="vipdoc")
+            if not df_bd.empty:
+                last_bd = df_bd.iloc[-1]
+                up_count = to_float(last_bd.get("close"))
+                down_count = TOTAL_STOCKS_APPROX - up_count if up_count is not None else None
+                bd_date = str(last_bd.get("date", ""))
+                mkt["market_breadth"] = {
+                    "up_count": int(up_count) if up_count else None,
+                    "down_count": int(down_count) if down_count else None,
+                    "up_down_ratio": round(up_count / down_count, 4) if up_count and down_count else None,
+                    "total_stocks": TOTAL_STOCKS_APPROX,
+                    "source": "vipdoc_880005",
+                    "quality": "auto",
+                    "as_of": bd_date[:10] if bd_date else "",
+                }
+                updated = True
+                print(f"[OK] market_breadth: up={int(up_count) if up_count else 'N/A'}, down={int(down_count) if down_count else 'N/A'} (from 880005)")
+        except Exception as e:
+            print(f"[WARN] 880005 breadth fetch failed: {e}")
+
+    # Refresh sentiment (涨跌停) from 880006.SH
+    sentiment = mkt.get("sentiment", {})
+    if not sentiment or sentiment.get("quality") in (None, "missing", "") or sentiment.get("limit_up_count") is None:
+        try:
+            df_st = ltd.get_ohlcv_table(SENTIMENT_CODE, count=3, prefer="vipdoc")
+            if not df_st.empty:
+                last_st = df_st.iloc[-1]
+                limit_up_close = to_float(last_st.get("close"))
+                limit_up_max = to_float(last_st.get("high"))
+                limit_down_max = to_float(last_st.get("low"))
+                once_up = limit_up_max if limit_up_max else None
+                blowup = round((once_up - limit_up_close) / once_up, 4) if once_up and limit_up_close is not None and once_up else None
+                st_date = str(last_st.get("date", ""))
+                mkt["sentiment"] = {
+                    "limit_up_count": int(limit_up_close) if limit_up_close else None,
+                    "once_limit_up_count": int(once_up) if once_up else None,
+                    "limit_down_count": int(limit_down_max) if limit_down_max else None,
+                    "blowup_rate": blowup,
+                    "market_height": None,
+                    "above_2_board_count": None,
+                    "source": "vipdoc_880006",
+                    "quality": "auto",
+                    "as_of": st_date[:10] if st_date else "",
+                }
+                updated = True
+                print(f"[OK] sentiment: limit_up={int(limit_up_close) if limit_up_close else 'N/A'}, once_up={int(once_up) if once_up else 'N/A'}, limit_down={int(limit_down_max) if limit_down_max else 'N/A'} (from 880006)")
+        except Exception as e:
+            print(f"[WARN] 880006 sentiment fetch failed: {e}")
 
     if updated:
         market_path.write_text(json.dumps(mkt, ensure_ascii=False, indent=2), encoding="utf-8")

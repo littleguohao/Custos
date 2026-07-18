@@ -27,7 +27,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 BASE = Path(__file__).resolve().parents[2]
-TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"C:\new_tdx64"))
+TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"E:\new_tdx64"))
 
 # --- mootdx lazy initialization ---
 _reader = None
