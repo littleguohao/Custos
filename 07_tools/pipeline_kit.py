@@ -7,6 +7,8 @@ runners. Behavior must match the sources exactly:
 
 - run_stage: subprocess wrapper with [RUN] header, PYTHONIOENCODING=utf-8,
   stdout/stderr echo, RuntimeError on required failure, truncated dict result.
+  Stages are bounded by a timeout (default 600s); a timeout is treated as a
+  failure (ok=False, timeout=True in the result, RuntimeError when required).
 - check_trading_day: unified trading-calendar check replacing the three
   divergent parsing styles in the four runners.
 - md_to_digest: markdown-to-plaintext digest conversion.
@@ -22,20 +24,42 @@ import sys
 from paths import BASE
 
 
-def run_stage(cmd: list[str], name: str, required: bool = True) -> dict:
+def _as_text(data) -> str:
+    """Normalize subprocess output that may be str, bytes, or None to str."""
+    if data is None:
+        return ""
+    if isinstance(data, bytes):
+        return data.decode("utf-8", errors="replace")
+    return data
+
+
+def run_stage(cmd: list[str], name: str, required: bool = True, timeout: int = 600) -> dict:
     print(f"\n[RUN] {name}")
     print(" ".join(cmd))
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
-    p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
-    if p.stdout:
-        print(p.stdout.encode('utf-8', errors='replace').decode('utf-8', errors='replace'))
-    if p.stderr:
-        print("[stderr]", p.stderr.encode('utf-8', errors='replace').decode('utf-8', errors='replace'))
-    ok = p.returncode == 0
+    timed_out = False
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           env=env, timeout=timeout)
+        stdout, stderr, returncode = p.stdout, p.stderr, p.returncode
+    except subprocess.TimeoutExpired as e:
+        timed_out = True
+        stdout = _as_text(e.stdout)
+        stderr = _as_text(e.stderr)
+        returncode = None
+        print(f"[TIMEOUT] {name} exceeded {timeout}s, process killed")
+    if stdout:
+        print(stdout.encode('utf-8', errors='replace').decode('utf-8', errors='replace'))
+    if stderr:
+        print("[stderr]", stderr.encode('utf-8', errors='replace').decode('utf-8', errors='replace'))
+    ok = not timed_out and returncode == 0
     if required and not ok:
-        raise RuntimeError(f"stage failed: {name}, code={p.returncode}")
-    return {"stage": name, "ok": ok, "returncode": p.returncode, "stdout": p.stdout[-4000:], "stderr": p.stderr[-4000:]}
+        if timed_out:
+            raise RuntimeError(f"stage timed out: {name}, timeout={timeout}s")
+        raise RuntimeError(f"stage failed: {name}, code={returncode}")
+    return {"stage": name, "ok": ok, "returncode": returncode, "timeout": timed_out,
+            "stdout": stdout[-4000:], "stderr": stderr[-4000:]}
 
 
 def _extract_json(text: str) -> dict:

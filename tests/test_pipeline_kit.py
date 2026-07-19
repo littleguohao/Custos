@@ -214,3 +214,48 @@ class TestExtractJson:
     def test_pretty_json_with_noise_around(self):
         text = '[RUN] trading_calendar\n{\n  "is_trading_day": true\n}\n[DONE]\n'
         assert pipeline_kit._extract_json(text) == {"is_trading_day": True}
+
+
+# ---------------------------------------------------------------------------
+# pipeline_kit.run_stage — subprocess timeout behavior
+# ---------------------------------------------------------------------------
+
+import subprocess  # noqa: E402
+import sys  # noqa: E402
+
+
+class TestRunStageTimeout:
+    SLEEP_5 = [sys.executable, "-c", "import time; time.sleep(5)"]
+
+    def test_timeout_returns_not_ok(self, capsys):
+        r = pipeline_kit.run_stage(self.SLEEP_5, "sleeper", required=False, timeout=1)
+        assert r["ok"] is False
+        assert r["timeout"] is True
+        assert r["returncode"] is None
+        assert "[TIMEOUT]" in capsys.readouterr().out
+
+    def test_timeout_required_raises(self):
+        with pytest.raises(RuntimeError, match="timed out.*timeout=1"):
+            pipeline_kit.run_stage(self.SLEEP_5, "sleeper", required=True, timeout=1)
+
+    def test_timeout_keeps_partial_stdout(self):
+        cmd = [sys.executable, "-c",
+               "import sys, time; print('early'); sys.stdout.flush(); time.sleep(5)"]
+        r = pipeline_kit.run_stage(cmd, "partial", required=False, timeout=1)
+        assert r["timeout"] is True
+        assert "early" in r["stdout"]
+
+    def test_success_not_flagged_as_timeout(self):
+        r = pipeline_kit.run_stage([sys.executable, "-c", "print('hi')"], "echo",
+                                   required=True, timeout=30)
+        assert r["ok"] is True
+        assert r["timeout"] is False
+        assert r["returncode"] == 0
+        assert "hi" in r["stdout"]
+
+    def test_nonzero_exit_not_flagged_as_timeout(self):
+        r = pipeline_kit.run_stage([sys.executable, "-c", "import sys; sys.exit(3)"], "fail3",
+                                   required=False, timeout=30)
+        assert r["ok"] is False
+        assert r["timeout"] is False
+        assert r["returncode"] == 3
