@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import io
-import json
 import os
 import sys
 import argparse
@@ -59,16 +58,6 @@ r = _stage(["uv", "run", "python", str(TOOLS / "market_timing" / "collect_intrad
             "--date", target], "collect_intraday_snapshot")
 if not r["ok"]:
     print(f"[WARN] 盘中快照采集失败（忽略，不中断）：{r['out'][:200]}", file=sys.stderr)
-
-# 2b. Update runtime gate with quotes_current flag
-gate_path = BASE / "01_data" / "quality" / f"{target}_runtime_gate.json"
-if gate_path.exists():
-    try:
-        gate = json.loads(gate_path.read_text(encoding="utf-8"))
-        gate.setdefault("position_gate", {})["quotes_current"] = True
-        gate_path.write_text(json.dumps(gate, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception as e:
-        print(f"[WARN] runtime_gate quotes_current 更新失败：{e}", file=sys.stderr)
 
 # 3. Runtime gate
 r = _stage(["uv", "run", "python", str(TOOLS / "runtime_gate.py"), "--date", target,
