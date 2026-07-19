@@ -95,6 +95,8 @@ else:
                 breadth_data[code] = {
                     "name": name, "close": close, "previous_close": prev_close,
                     "change_pct": round((close / prev_close - 1) * 100, 2) if prev_close else None,
+                    "amount": (float(last["amount"]) if "amount" in df.columns and last["amount"] == last["amount"] else None),
+                    "previous_amount": (float(prev["amount"]) if "amount" in df.columns and prev["amount"] == prev["amount"] else None),
                     "date": str(last.name if hasattr(last.name, 'strftime') else ''),
                     "up_count": int(last.get("up_count", 0)) if "up_count" in df.columns else None,
                     "down_count": int(last.get("down_count", 0)) if "down_count" in df.columns else None,

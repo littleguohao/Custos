@@ -58,26 +58,35 @@ def main() -> int:
                     "limit_up": b6.get("close"),
                     "source": "mootdx_reader_880006",
                 })
-            # Turnover from 880001 amount
+            # Turnover from 880001 amount (全市场成交额; close 是平均股价指数点位,不是成交额)
             if "880001" in breadth:
                 b1 = breadth["880001"]
-                mkt.setdefault("turnover", {
-                    "quality": "auto",
-                    "as_of": b1.get("date", ""),
-                    "value": b1.get("close"),
-                    "source": "mootdx_reader_880001",
-                })
-                mkt.setdefault("market_turnover", {
-                    "quality": "auto",
-                    "as_of": b1.get("date", ""),
-                    "value": b1.get("close"),
-                    "source": "mootdx_reader_880001",
-                })
-            # Overseas from incremental
+                amt = b1.get("amount")
+                prev_amt = b1.get("previous_amount")
+                chg_pct = round((amt / prev_amt - 1) * 100, 3) if amt and prev_amt else None
+                if amt:
+                    mkt.setdefault("turnover", {
+                        "total_turnover": amt,
+                        "turnover_change_pct": chg_pct,
+                        "quality": "auto",
+                        "as_of": b1.get("date", ""),
+                        "source": "vipdoc_880001_amount",
+                    })
+                    mkt.setdefault("market_turnover", {
+                        "quality": "auto",
+                        "as_of": b1.get("date", ""),
+                        "value": amt,
+                        "source": "vipdoc_880001_amount",
+                    })
+            # Overseas from incremental (只增不毁: 不覆盖已有非空值,也不写入 None)
             if "a50_futures" in inc:
-                mkt.setdefault("overseas_market", {})["a50_change_pct"] = inc["a50_futures"].get("change_pct")
+                v = inc["a50_futures"].get("change_pct")
+                if v is not None:
+                    mkt.setdefault("overseas_market", {}).setdefault("a50_change_pct", v)
             if "cnh_usd" in inc:
-                mkt.setdefault("overseas_market", {})["cnh_change_pct"] = inc["cnh_usd"].get("change_pct")
+                v = inc["cnh_usd"].get("change_pct")
+                if v is not None:
+                    mkt.setdefault("overseas_market", {}).setdefault("cnh_change_pct", v)
             # Northbound
             if "northbound" in inc:
                 mkt["northbound"] = inc["northbound"]
