@@ -1,11 +1,16 @@
 # -*- coding: utf-8 -*-
-"""market_timing daily input collector v2.
+"""market_timing daily input collector v4.
 
-Phase 1 collector:
+Phase 1 collector (08:50, pre-open):
 - auto: local TongDaXin vipdoc daily files for key index trends
-- auto/best-effort: TDX TQ market snapshots for intraday index moves, turnover, breadth-like fields
-- auto/best-effort: TQ SC market fields when available
+- auto: local vipdoc 880-series for market breadth / sentiment / turnover
+  (previous trading day's EOD — no intraday data exists at 08:50)
 - manual placeholders: macro policy, 0AMV, overseas, theme
+
+The old TDX TQ snapshot path was removed: tqcenter is deprecated and the
+TqSession stub raised unconditionally, leaving breadth/sentiment/turnover
+permanently missing. Intraday index snapshots are no longer collected here;
+the intraday field is annotated as pending intraday/post-close flows.
 
 Usage:
 python market_timing_collector.py --date 2026-07-09 --amv 1.2
@@ -30,26 +35,22 @@ if str(LOCAL_TDX_DIR) not in sys.path:
 
 import local_tdx_data as ltd  # type: ignore
 from paths import BASE, TDX_ROOT  # noqa: E402
+from runtime_guards import previous_confirmed_trading_day  # noqa: E402
 
 OUT_DIR = BASE / "01_data" / "market"
 
 INDICES = {
-    "上证指数": {"prefix": "sh", "code": "999999", "tq": "999999.SH"},
-    "创业板指": {"prefix": "sz", "code": "399006", "tq": "399006.SZ"},
-    "科创50": {"prefix": "sh", "code": "000688", "tq": "000688.SH"},
-    "北证50": {"prefix": "bj", "code": "899050", "tq": "899050.BJ"},
+    "上证指数": {"prefix": "sh", "code": "999999"},
+    "创业板指": {"prefix": "sz", "code": "399006"},
+    "科创50": {"prefix": "sh", "code": "000688"},
+    "北证50": {"prefix": "bj", "code": "899050"},
 }
 
-# TDX all-market style indices observed in the local client. Meanings can vary by installation;
-# keep raw snapshots and only use conservative fields.
-MARKET_SNAPSHOT_CODES = {
-    "通达信全A_候选1": "880003.SH",
-    "通达信全A_候选2": "880002.SH",
-    "通达信全A_候选3": "880001.SH",
-    "涨跌停统计候选": "880006.SH",
-}
-
-SC_FIELDS = ["SC03", "SC04", "SC23", "SC24", "SC30", "SC31", "SC35", "SC36", "SC39"]
+# vipdoc 880-series market-wide statistics (same codes as refresh_market_indices.py)
+BREADTH_CODE = "880005.SH"    # close=上涨家数
+SENTIMENT_CODE = "880006.SH"  # close=涨停数, high=盘中曾涨停数, low=跌停数
+TURNOVER_CODE = "880001.SH"   # amount=全市场成交额(元)
+TOTAL_STOCKS_APPROX = 5530    # A股总数近似值（用于由涨家数推算跌家数）
 
 
 def to_float(x: Any):
@@ -141,164 +142,135 @@ def amv_zone(v):
     return "中性"
 
 
-def init_tq():
-    """Backward-compatible TQ initializer via local_tdx_data."""
-    try:
-        session = ltd.TqSession(f"{__file__}#market_timing#{Path(__file__).stat().st_mtime_ns}")
-        tq = session.__enter__()
-        return (tq, session), None
-    except Exception as e:
-        return None, repr(e)
+_mkt_reader = None
 
 
-def snapshot_to_metrics(snapshot: dict) -> dict:
-    now = to_float(snapshot.get("Now"))
-    last = to_float(snapshot.get("LastClose"))
-    amount = to_float(snapshot.get("Amount"))
-    uphome = to_float(snapshot.get("UpHome"))
-    downhome = to_float(snapshot.get("DownHome"))
-    # In some TDX snapshots for market indices: Inside/Outside can represent down/up counts.
-    inside = to_float(snapshot.get("Inside"))
-    outside = to_float(snapshot.get("Outside"))
-    return {
-        "now": now,
-        "last_close": last,
-        "intraday_change_pct": pct(now, last),
-        "amount_raw": amount,
-        "uphome": uphome,
-        "downhome": downhome,
-        "inside_raw": inside,
-        "outside_raw": outside,
-        "raw": snapshot,
-    }
+def _get_mkt_reader():
+    """mootdx Reader for vipdoc 880-series.
+
+    Note: ltd.read_vipdoc_daily also works for suffix-carrying 880xxx.SH
+    codes (_is_bj_code respects explicit suffixes), but this module keeps
+    its own direct mootdx Reader — the same pattern as
+    collect_incremental_market.py.
+    """
+    global _mkt_reader
+    if _mkt_reader is None:
+        from mootdx.reader import Reader
+        _mkt_reader = Reader.factory(market="std", tdxdir=str(TDX_ROOT))
+    return _mkt_reader
 
 
-def fetch_tq_data() -> dict:
-    result = {"available": False, "error": None, "index_snapshots": {}, "market_snapshots": {}, "sc_fields": {}}
-    handle, err = init_tq()
-    if handle is None:
-        result["error"] = err
-        return result
-    tq, session = handle
-    result["available"] = True
-    try:
-        for name, meta in INDICES.items():
-            try:
-                result["index_snapshots"][name] = snapshot_to_metrics(tq.get_market_snapshot(meta["tq"]))
-            except Exception as e:
-                result["index_snapshots"][name] = {"error": repr(e)}
-        for name, code in MARKET_SNAPSHOT_CODES.items():
-            try:
-                result["market_snapshots"][name] = snapshot_to_metrics(tq.get_market_snapshot(code))
-            except Exception as e:
-                result["market_snapshots"][name] = {"error": repr(e)}
-        try:
-            result["sc_fields"] = tq.get_scjy_value(field_list=SC_FIELDS)
-        except Exception as e:
-            result["sc_fields"] = {"error": repr(e)}
-    finally:
-        try:
-            session.__exit__(None, None, None)
-        except Exception:
-            pass
-    return result
-
-
-def parse_sc_pair(sc: dict, field: str):
-    v = sc.get(field)
-    if not v or isinstance(v, dict):
-        return None
-    # get_scjy_value often returns [[a,b]], by_date returns [a,b]
-    if isinstance(v, list) and v and isinstance(v[0], list):
-        v = v[0]
-    if isinstance(v, list):
-        vals = [to_float(x) for x in v]
-        return vals
-    return None
-
-
-def derive_market_fields(tq_data: dict) -> tuple[dict, dict, dict, dict]:
-    """Return breadth, sentiment, turnover, quality."""
-    quality = {"notes": [], "sources": []}
-    breadth = {"up_count": None, "down_count": None, "up_down_ratio": None, "source": None, "quality": "missing"}
-    sentiment = {
-        "limit_up_count": None,
-        "limit_down_count": None,
-        "once_limit_up_count": None,
-        "once_limit_down_count": None,
-        "blowup_rate": None,
-        "market_height": None,
-        "above_2_board_count": None,
-        "source": None,
-        "quality": "missing",
-    }
-    turnover = {"total_turnover": None, "turnover_change_pct": None, "volume_summary": "", "source": None, "quality": "missing"}
-
-    sc = tq_data.get("sc_fields") or {}
-    sc31 = parse_sc_pair(sc, "SC31")
-    if sc31 and all(v is not None for v in sc31[:2]):
-        up, down = sc31[:2]
-        breadth.update({"up_count": up, "down_count": down, "up_down_ratio": round(up / down, 4) if down else None, "source": "TQ_SC31", "quality": "auto"})
-    else:
-        # Fallback: local observed TDX market snapshot 880005 has candidate up/down counts in Outside/Inside;
-        # keep as low-confidence unless manually confirmed.
-        snap = (tq_data.get("market_snapshots") or {}).get("涨跌停统计候选") or {}
-        up = snap.get("outside_raw")
-        down = snap.get("inside_raw")
-        if up is not None and down is not None:
-            breadth.update({"up_count": up, "down_count": down, "up_down_ratio": round(up / down, 4) if down else None, "source": "TQ_snapshot_880006_OutsideInside_candidate", "quality": "candidate"})
-            quality["notes"].append("涨跌家数使用 880006.SH 快照 Inside/Outside 候选字段，需人工确认口径。")
-
-    sc03 = parse_sc_pair(sc, "SC03")  # current limit-up, once limit-up
-    sc04 = parse_sc_pair(sc, "SC04")  # current limit-down, once limit-down
-    sc30 = parse_sc_pair(sc, "SC30")  # market height, >2 board count
-    sc24 = parse_sc_pair(sc, "SC24")  # non-ST limit up/down
-    if sc03 or sc04 or sc30 or sc24:
-        limit_up = sc24[0] if sc24 and sc24[0] is not None else (sc03[0] if sc03 else None)
-        limit_down = sc24[1] if sc24 and len(sc24) > 1 and sc24[1] is not None else (sc04[0] if sc04 else None)
-        once_up = sc03[1] if sc03 and len(sc03) > 1 else None
-        once_down = sc04[1] if sc04 and len(sc04) > 1 else None
-        blow = round((once_up - limit_up) / once_up, 4) if once_up and limit_up is not None and once_up else None
-        sentiment.update({
-            "limit_up_count": limit_up,
-            "limit_down_count": limit_down,
-            "once_limit_up_count": once_up,
-            "once_limit_down_count": once_down,
-            "blowup_rate": blow,
-            "market_height": sc30[0] if sc30 else None,
-            "above_2_board_count": sc30[1] if sc30 and len(sc30) > 1 else None,
-            "source": "TQ_SC",
-            "quality": "auto",
+def _vipdoc_rows(code: str, count: int = 5) -> list[dict]:
+    raw = code.split(".")[0]
+    df = _get_mkt_reader().daily(symbol=raw)
+    if df is None or df.empty:
+        return []
+    rows = []
+    for idx, r in df.tail(count).iterrows():
+        rows.append({
+            "date": idx.strftime("%Y-%m-%d") if hasattr(idx, "strftime") else str(idx)[:10],
+            "high": to_float(r.get("high")),
+            "low": to_float(r.get("low")),
+            "close": to_float(r.get("close")),
+            "amount": to_float(r.get("amount")),
         })
-    else:
-        snap = (tq_data.get("market_snapshots") or {}).get("涨跌停统计候选") or {}
-        # Observed candidate: LastClose may resemble previous limit-up count; Now may resemble current limit-up count;
-        # Inside/Outside may resemble down/up counts. Too uncertain for final scoring.
-        if snap:
-            sentiment.update({"source": "TQ_snapshot_880006_candidate", "quality": "raw_only"})
-            quality["notes"].append("涨跌停/连板高度 TQ SC 字段未稳定返回，已保留 880006.SH 原始快照但不自动用于评分。")
+    return sorted(rows, key=lambda r: r["date"])
 
-    # Conservative turnover: use major index snapshots' Amount raw fields as references, plus all-market candidates.
-    idx_amounts = {}
-    for name, snap in (tq_data.get("index_snapshots") or {}).items():
-        if isinstance(snap, dict) and snap.get("amount_raw") is not None:
-            idx_amounts[name] = snap.get("amount_raw")
-    market_amounts = {}
-    for name, snap in (tq_data.get("market_snapshots") or {}).items():
-        if isinstance(snap, dict) and snap.get("amount_raw") is not None:
-            market_amounts[name] = snap.get("amount_raw")
-    turnover.update({
-        "index_amount_raw": idx_amounts,
-        "market_amount_raw_candidates": market_amounts,
-        "source": "TQ_snapshot_Amount_raw",
-        "quality": "candidate",
-        "volume_summary": "TQ快照Amount字段已采集；单位/全市场口径需确认后再用于评分。",
-    })
 
-    if tq_data.get("available"):
-        quality["sources"].append("TQ")
-    if tq_data.get("sc_fields"):
-        quality["sc_fields_raw"] = tq_data.get("sc_fields")
+def _freshness(as_of: str, expected: str | None, label: str, quality: dict) -> str:
+    """quality=auto when data date matches the expected previous trading day."""
+    if expected is not None and as_of == expected:
+        return "auto"
+    quality["notes"].append(f"{label} 最新数据日期 {as_of or '无'} 与预期前一交易日 {expected or '无法确认'} 不一致（周末/假日/vipdoc 未更新或已含更新数据），标记 degraded。")
+    return "degraded"
+
+
+def derive_market_fields(target_date: str) -> tuple[dict, dict, dict, dict]:
+    """Fill breadth/sentiment/turnover from local vipdoc 880-series EOD data.
+
+    Honest labeling: at 08:50 the latest available bar is the previous trading
+    day's close, so each section carries as_of (actual data date) and is marked
+    "auto" when fresh vs the trading calendar, "degraded" when vipdoc lags.
+    """
+    expected = previous_confirmed_trading_day(target_date)
+    quality = {
+        "notes": [
+            "market_breadth/sentiment/turnover 来自本地 vipdoc 880 系列前一交易日 EOD 数据；08:50 盘前无当日盘中数据。",
+            "TQ 快照路径已移除（tqcenter 废弃）；指数盘中快照待盘中/盘后流程填充。",
+        ],
+        "sources": ["vipdoc_880_series"],
+        "expected_data_date": expected,
+    }
+
+    breadth = {"up_count": None, "down_count": None, "up_down_ratio": None,
+               "source": None, "quality": "missing", "as_of": None}
+    try:
+        rows = _vipdoc_rows(BREADTH_CODE)
+        if rows:
+            last = rows[-1]
+            up = last["close"]
+            as_of = last["date"]
+            if up is not None:
+                down = TOTAL_STOCKS_APPROX - up
+                breadth.update({
+                    "up_count": int(up),
+                    "down_count": int(down),
+                    "up_down_ratio": round(up / down, 4) if down else None,
+                    "total_stocks_approx": TOTAL_STOCKS_APPROX,
+                    "source": "vipdoc_880005",
+                    "as_of": as_of,
+                    "quality": _freshness(as_of, expected, "880005 涨跌家数", quality),
+                })
+    except Exception as e:
+        quality["notes"].append(f"880005 涨跌家数读取失败: {e!r}")
+
+    sentiment = {"limit_up_count": None, "limit_down_count": None,
+                 "once_limit_up_count": None, "once_limit_down_count": None,
+                 "blowup_rate": None, "market_height": None, "above_2_board_count": None,
+                 "source": None, "quality": "missing", "as_of": None}
+    try:
+        rows = _vipdoc_rows(SENTIMENT_CODE)
+        if rows:
+            last = rows[-1]
+            limit_up = last["close"]
+            once_up = last["high"]
+            limit_down = last["low"]
+            as_of = last["date"]
+            if limit_up is not None:
+                sentiment.update({
+                    "limit_up_count": int(limit_up),
+                    "once_limit_up_count": int(once_up) if once_up is not None else None,
+                    "limit_down_count": int(limit_down) if limit_down is not None else None,
+                    "blowup_rate": round((once_up - limit_up) / once_up, 4) if once_up else None,
+                    "source": "vipdoc_880006",
+                    "as_of": as_of,
+                    "quality": _freshness(as_of, expected, "880006 涨跌停", quality),
+                })
+                quality["notes"].append("连板高度/2板以上家数无法从 880006 获取，market_height/above_2_board_count 留空待人工或盘后填充。")
+    except Exception as e:
+        quality["notes"].append(f"880006 涨跌停读取失败: {e!r}")
+
+    turnover = {"total_turnover": None, "turnover_change_pct": None, "volume_summary": "",
+                "source": None, "quality": "missing", "as_of": None}
+    try:
+        rows = _vipdoc_rows(TURNOVER_CODE)
+        if rows:
+            last = rows[-1]
+            amt = last["amount"]
+            as_of = last["date"]
+            prev_amt = rows[-2]["amount"] if len(rows) >= 2 else None
+            if amt is not None:
+                turnover.update({
+                    "total_turnover": amt,
+                    "turnover_change_pct": pct(amt, prev_amt),
+                    "source": "vipdoc_880001",
+                    "as_of": as_of,
+                    "quality": _freshness(as_of, expected, "880001 成交额", quality),
+                    "volume_summary": f"全市场成交额(元)来自 880001.SH vipdoc，数据日期 {as_of}（前一交易日 EOD）。",
+                })
+    except Exception as e:
+        quality["notes"].append(f"880001 成交额读取失败: {e!r}")
+
     return breadth, sentiment, turnover, quality
 
 
@@ -309,12 +281,11 @@ def main():
     ap.add_argument("--out", default="", help="可选输出路径；为空则写入正式 market_timing_input.json")
     args = ap.parse_args()
 
-    tq_data = fetch_tq_data()
-    breadth, sentiment, turnover, quality = derive_market_fields(tq_data)
+    breadth, sentiment, turnover, quality = derive_market_fields(args.date)
 
     data = {
         "date": args.date,
-        "collector_version": "market_timing_collector_v3_local_tdx",
+        "collector_version": "market_timing_collector_v4_vipdoc_880",
         "macro_policy": {
             "monetary_policy": "",
             "fiscal_policy": "",
@@ -342,14 +313,14 @@ def main():
         "turnover": turnover,
         "theme": {"main_themes": [], "theme_clarity": "", "theme_summary": ""},
         "data_quality": quality,
-        "raw_tq": tq_data,
     }
 
     for name, meta in INDICES.items():
         item = trend(read_day(meta["prefix"], meta["code"]))
-        snap = (tq_data.get("index_snapshots") or {}).get(name)
-        if isinstance(snap, dict) and "error" not in snap:
-            item["intraday"] = {k: snap.get(k) for k in ["now", "last_close", "intraday_change_pct", "amount_raw"]}
+        item["intraday"] = {
+            "available": False,
+            "note": "08:50 盘前采集无当日盘中快照；TQ 快照路径已移除，盘中字段待盘中/盘后流程填充。",
+        }
         data["a_share_indices"][name] = item
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)

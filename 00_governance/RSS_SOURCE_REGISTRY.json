@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "updated_at": "2026-07-17T22:35:00+08:00",
+  "updated_at": "2026-07-19T01:55:00+08:00",
   "policy": {
     "purpose": "RSS用于事件发现；官方原文/独立来源用于确认；不得直接扩大交易权限。",
     "tiers": {
@@ -27,30 +27,9 @@
       "tier": "S",
       "enabled": true,
       "audit": "200_rss",
+      "ssl_verify": false,
       "policy_stage": "confirmed_1",
       "note": "国务院/国办发文、万亿财政刺激、全国性产业顶层规划"
-    },
-    {
-      "id": "pbc_rsshub",
-      "name": "中国人民银行(RSSHub)",
-      "category": "macro_official",
-      "url": "https://rsshub.app/pbc.gov.cn/xwfb",
-      "tier": "S",
-      "enabled": true,
-      "audit": "200_rss",
-      "policy_stage": "confirmed_1",
-      "note": "央行新闻发布、货币政策、降准/LPR、公开市场操作"
-    },
-    {
-      "id": "csrc_rsshub",
-      "name": "中国证监会(RSSHub)",
-      "category": "policy_official",
-      "url": "https://rsshub.app/csrc.gov.cn/zjhpublic/zjh",
-      "tier": "S",
-      "enabled": true,
-      "audit": "200_rss",
-      "policy_stage": "confirmed_1",
-      "note": "注册制、印花税、减持、交易规则、资本市场监管新政"
     },
     {
       "id": "stats_sjjd",

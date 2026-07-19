@@ -76,7 +76,7 @@ def main():
             req=urllib.request.Request(src['url'],headers={'User-Agent':'Mozilla/5.0 TdxClawRSS/1.0','Accept':'application/rss+xml,application/atom+xml,application/xml,text/xml'})
             ctx=ssl.create_default_context()
             if src.get('ssl_verify',True) is False: ctx.check_hostname=False; ctx.verify_mode=ssl.CERT_NONE
-            with retry_call(lambda: urllib.request.urlopen(req,timeout=a.timeout,context=ctx)) as r: raw=r.read(3_000_000); row.update(http_status=r.status,final_url=r.geturl(),content_type=r.headers.get('content-type',''))
+            with retry_call(lambda: urllib.request.urlopen(req,timeout=a.timeout,context=ctx)) as r: raw=r.read(); row.update(http_status=r.status,final_url=r.geturl(),content_type=r.headers.get('content-type',''))
             (day/f"{src['id']}.xml").write_bytes(raw); items=parse_feed(raw,src,fetched)[:a.limit_per_feed]; normalized.extend(items); row.update(status='ok',items=len(items))
         except Exception as e: row.update(status='failed',error=repr(e),items=0)
         log.append(row)

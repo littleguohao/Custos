@@ -36,7 +36,7 @@ SYMBOLS = {
     "sox": {"symbol": "^SOX", "name": "费城半导体指数", "group": "index", "region": "us"},
     "nikkei": {"symbol": "^N225", "name": "日经225", "group": "index", "region": "jp"},
     "kospi": {"symbol": "^KS11", "name": "韩国KOSPI", "group": "index", "region": "kr"},
-    "hstech": {"symbol": "^HSCI", "name": "恒生综合指数", "group": "index"},
+    "hstech": {"symbol": "3067.HK", "name": "恒生科技指数(iShares 3067.HK ETF代理,^HSTECH已被Yahoo下架404,^HSCI无数据)", "group": "index"},
     "nvda": {"symbol": "NVDA", "name": "英伟达", "group": "ai_leader"},
     "amd": {"symbol": "AMD", "name": "AMD", "group": "ai_leader"},
     "tsm": {"symbol": "TSM", "name": "台积电ADR", "group": "semiconductor"},
@@ -77,11 +77,17 @@ def fetch_chart(symbol: str, region: str = "") -> dict[str, Any]:
     price = meta.get("regularMarketPrice")
     prev = meta.get("previousClose") or meta.get("chartPreviousClose")
     change_pct = meta.get("regularMarketChangePercent")
-    if change_pct is None and price is not None and prev:
-        change_pct = (price / prev - 1) * 100
     timestamps = r.get("timestamp") or []
     quote = ((r.get("indicators") or {}).get("quote") or [{}])[0]
     closes = quote.get("close") or []
+    if change_pct is None and price is not None:
+        # chartPreviousClose is the close before the 5d range start, not the
+        # previous session; prefer the last two real closes when available.
+        close_vals = [float(c) for c in closes if c is not None]
+        if len(close_vals) >= 2 and close_vals[-2]:
+            change_pct = (close_vals[-1] / close_vals[-2] - 1) * 100
+        elif prev:
+            change_pct = (price / prev - 1) * 100
     last_ts = meta.get("regularMarketTime") or (timestamps[-1] if timestamps else None)
     local_now = datetime.now(ZoneInfo("Asia/Shanghai"))
     asia_live = region in {"jp", "kr"} and 8 <= local_now.hour < 15
@@ -174,7 +180,16 @@ def main():
     overseas["details"] = details
     overseas["errors"] = errors
     overseas["source"] = "Yahoo Finance chart API"
-    overseas["quality"] = "auto" if len(errors) < len(SYMBOLS) else "missing"
+    # as_of: latest last_timestamp across all symbols (epoch -> Asia/Shanghai ISO);
+    # falls back to collection time when no symbol returned a timestamp.
+    ts_vals = [d.get("last_timestamp") for d in details.values() if isinstance(d, dict) and isinstance(d.get("last_timestamp"), (int, float))]
+    if ts_vals:
+        overseas["as_of"] = datetime.fromtimestamp(max(ts_vals), ZoneInfo("Asia/Shanghai")).isoformat(timespec="seconds")
+        overseas["as_of_basis"] = "max(last_timestamp) across symbols"
+    else:
+        overseas["as_of"] = datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(timespec="seconds")
+        overseas["as_of_basis"] = "collection_time_fallback"
+    overseas["quality"] = "auto" if not errors else "degraded"
 
     dq = data.setdefault("data_quality", {})
     dq.setdefault("sources", []).append("overseas_market_collector:yahoo_finance")
