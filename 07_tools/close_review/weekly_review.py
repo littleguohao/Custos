@@ -23,6 +23,15 @@
 - 持有期分布：平仓单按持有天数 <= SHORT_HOLD_DAYS 分组，统计短持有组的亏损贡献。
 - 市场背景：0AMV > 4% = 多头，< -2.3% = 空头（与 final_review 口径一致），
   其余为震荡。统计空头天数占比，及卖出日处于空头状态的平仓单亏损占比。
+- 持仓周度表现：价格取 final_review.revalued_positions（含权重）优先、
+  holding_quotes 收盘价兜底；贡献估算 = 周初权重 × 周涨跌幅（pp）；
+  B1 轨迹取本周各日 b1_holding_state 的 final_priority/final_action。
+- 组合轨迹：revalued_positions 合计的每日总仓位/持仓市值；组合周收益 =
+  首尾可得日市值比（不含现金/费用）；最大回撤按日市值序列；基准为上证每日涨跌复利。
+- 每日建议事后检验：chief_decision 的市场状态/开仓权限分类为偏防守/偏进攻/中性；
+  防守+次日跌 = 正确，防守+次日涨 = 失误（进攻对称）；中性不判定；次日行情缺失 = 待验证。
+- 归因补充：组合周收益为负且存在建议失误 → [策略] wrong_advice_direction；
+  组合周收益为负但有方向的建议全部正确 → [策略环境] adverse_market_environment。
 
 盈亏口径：全台账 FIFO 配对（买入可早于本周），平仓单按 (代码, 卖出日) 聚合；
 毛盈亏 = Σ(卖价 - 买入成本) * 数量；净盈亏 = 毛盈亏合计 - 本周全部成交费用。
@@ -259,6 +268,243 @@ def load_mfe_after(base: Path, sell_date: str) -> dict[str, dict] | None:
     return None
 
 
+def load_holding_quote_closes(base: Path, day: str) -> dict[str, float] | None:
+    """holding_quotes.json -> {code: close}；文件缺失返回 None。"""
+    data = load_json(base / "01_data" / "market" / f"{day}_holding_quotes.json", None)
+    if not isinstance(data, dict):
+        return None
+    out = {}
+    for q in data.get("quotes") or []:
+        close = q.get("close") if q.get("close") is not None else q.get("price")
+        if q.get("code") and close is not None:
+            out[str(q["code"])] = float(close)
+    return out
+
+
+def sse_daily_map(base: Path, start: str, end: str) -> dict[str, dict]:
+    """扫描 [start, end] 内 market_timing_input，按 latest_date 重建上证收盘价序列。
+
+    采集盘前运行，文件日期 != 数据日期，故以 latest_date(YYYYMMDD) 为键；
+    daily_change_pct 多为 None，调用方需用相邻收盘价比值兜底。
+    """
+    out: dict[str, dict] = {}
+    cursor = date.fromisoformat(start)
+    last = date.fromisoformat(end)
+    while cursor <= last:
+        data = load_json(base / "01_data" / "market" / f"{cursor.isoformat()}_market_timing_input.json", None)
+        if isinstance(data, dict):
+            sse = (data.get("a_share_indices") or {}).get("上证指数") or {}
+            latest = str(sse.get("latest_date") or "")
+            close = sse.get("latest_close")
+            if len(latest) == 8 and close is not None:
+                iso = f"{latest[:4]}-{latest[4:6]}-{latest[6:]}"
+                prev = out.get(iso) or {}
+                out[iso] = {
+                    "close": float(close),
+                    "chg": sse.get("daily_change_pct") if sse.get("daily_change_pct") is not None else prev.get("chg"),
+                }
+        cursor += timedelta(days=1)
+    return out
+
+
+def sse_change(sse_map: dict[str, dict], day: str) -> float | None:
+    """day 当日上证涨跌幅：优先文件记录值，否则用前一可得收盘价比值。"""
+    entry = sse_map.get(day)
+    if not entry:
+        return None
+    if entry.get("chg") is not None:
+        return round(float(entry["chg"]), 2)
+    prior = [d for d in sorted(sse_map) if d < day]
+    if not prior:
+        return None
+    prev_close = sse_map[prior[-1]]["close"]
+    if not prev_close:
+        return None
+    return round((entry["close"] / prev_close - 1) * 100, 2)
+
+
+def holding_week_performance(base: Path, days: list[str], daily_reviews: dict,
+                             unavailable: list[str]) -> dict:
+    """板块1：每只持仓的周度表现。
+
+    价格来源优先级：final_review.revalued_positions(含权重) > holding_quotes(仅收盘价)。
+    权重/浮动盈亏字段在 revalued 中为小数(0.185=18.5%)，输出统一转百分数。
+    贡献估算 = 周初权重 × 周涨跌幅（组合百分点，pp）。
+    """
+    per_day: dict[str, dict[str, dict]] = {}
+    for d in days:
+        entry: dict[str, dict] = {}
+        review = daily_reviews.get(d) or {}
+        for p in review.get("revalued_positions") or []:
+            if p.get("code") and p.get("close") is not None:
+                entry[str(p["code"])] = {
+                    "close": float(p["close"]), "weight": p.get("position_pct"),
+                    "pnl_pct": p.get("pnl_pct"), "cost": p.get("cost"), "name": p.get("name"),
+                }
+        quotes = load_holding_quote_closes(base, d)
+        for code, close in (quotes or {}).items():
+            entry.setdefault(code, {"close": close, "weight": None, "pnl_pct": None, "cost": None, "name": None})
+        if entry:
+            per_day[d] = entry
+    codes = sorted({c for e in per_day.values() for c in e})
+    if not codes:
+        unavailable.append("持仓周度表现：本周无 revalued_positions 与 holding_quotes 数据")
+        if not any((base / "01_data" / "holdings" / f"{d}_b1_holding_state.json").exists() for d in days):
+            unavailable.append("B1 持仓状态：本周无 b1_holding_state 数据")
+        return {"rows": [], "days_with_data": [], "b1_trajectory": {}}
+    # 名称兜底：current_positions.json
+    names = {}
+    for p in load_json(base / "01_data" / "trades" / "current_positions.json", []) or []:
+        if p.get("代码"):
+            names[str(p["代码"])] = p.get("名称")
+    rows = []
+    for code in codes:
+        series = [(d, per_day[d][code]) for d in days if code in per_day.get(d, {})]
+        first_d, first = series[0]
+        last_d, last = series[-1]
+        change = round((last["close"] / first["close"] - 1) * 100, 2) if first["close"] else None
+        # 权重取各自首个/末个有权重值的日期（价格日期与权重日期可能不同，如周初仅有 quotes）
+        weights = [(d, e["weight"]) for d, e in series if e.get("weight") is not None]
+        w0 = round(weights[0][1] * 100, 2) if weights else None
+        w1 = round(weights[-1][1] * 100, 2) if weights else None
+        contribution = round(weights[0][1] * change, 2) if (weights and change is not None) else None
+        float_pnl = round(last["pnl_pct"] * 100, 2) if last.get("pnl_pct") is not None else None
+        name = last.get("name") or first.get("name") or names.get(code)
+        rows.append({
+            "code": code, "name": name,
+            "first_date": first_d, "first_close": first["close"],
+            "last_date": last_d, "last_close": last["close"],
+            "week_change_pct": change,
+            "first_weight_pct": w0, "last_weight_pct": w1,
+            "first_weight_date": weights[0][0] if weights else None,
+            "last_weight_date": weights[-1][0] if weights else None,
+            "float_pnl_pct": float_pnl, "contribution_pp": contribution,
+        })
+    rows.sort(key=lambda r: (r["contribution_pp"] if r["contribution_pp"] is not None else 0))
+    # B1 状态轨迹
+    b1_files = {d: load_json(base / "01_data" / "holdings" / f"{d}_b1_holding_state.json", None) for d in days}
+    if not any(isinstance(v, list) for v in b1_files.values()):
+        unavailable.append("B1 持仓状态：本周无 b1_holding_state 数据")
+    trajectory = {}
+    for code in codes:
+        steps = []
+        for d in days:
+            data = b1_files[d]
+            if not isinstance(data, list):
+                continue
+            for item in data:
+                if str(item.get("code")) == code:
+                    steps.append({"date": d, "priority": item.get("final_priority"),
+                                  "action": item.get("final_action")})
+        trajectory[code] = steps
+    return {"rows": rows, "days_with_data": sorted(per_day), "b1_trajectory": trajectory}
+
+
+def portfolio_trajectory(days: list[str], trading_days: list[str], daily_reviews: dict,
+                         sse_map: dict[str, dict], unavailable: list[str]) -> dict:
+    """板块2：组合与账户轨迹。
+
+    口径：总仓位/持仓市值 = 当日 revalued_positions 合计（权重分母为当日估算总权益）；
+    当日有持仓缺报价（market_value 为空）时标记 partial，周收益与回撤只用完整日计算，
+    避免缺报价造成的虚假跳水；基准为上证指数每日涨跌幅复利累计。
+    """
+    daily = []
+    partial_notes = []
+    for d in days:
+        rp = (daily_reviews.get(d) or {}).get("revalued_positions") or []
+        if not rp:
+            continue
+        priced = [p for p in rp if p.get("market_value") is not None]
+        unpriced = sorted(str(p.get("code")) for p in rp if p.get("market_value") is None)
+        mv = sum(p["market_value"] for p in priced)
+        wt = sum(p.get("position_pct") or 0 for p in priced)
+        if unpriced:
+            partial_notes.append(f"{d} 缺 {','.join(unpriced)} 报价，当日市值/仓位为部分合计，不参与周收益与回撤")
+        daily.append({"date": d, "market_value": round(mv, 2), "total_position_pct": round(wt * 100, 2),
+                      "partial": bool(unpriced), "unpriced_codes": unpriced})
+    complete = [pt for pt in daily if not pt["partial"]]
+    if len(complete) < 2:
+        unavailable.append("组合轨迹：本周完整 revalued_positions 不足两日，周收益与回撤 unavailable")
+    week_return = None
+    max_drawdown = None
+    if len(complete) >= 2 and complete[0]["market_value"]:
+        week_return = round((complete[-1]["market_value"] / complete[0]["market_value"] - 1) * 100, 2)
+        peak = complete[0]["market_value"]
+        dd = 0.0
+        for pt in complete:
+            peak = max(peak, pt["market_value"])
+            dd = min(dd, pt["market_value"] / peak - 1)
+        max_drawdown = round(dd * 100, 2)
+    bench_changes = {d: sse_change(sse_map, d) for d in trading_days}
+    known = [c for c in bench_changes.values() if c is not None]
+    bench_week = None
+    if known:
+        acc = 1.0
+        for c in known:
+            acc *= 1 + c / 100
+        bench_week = round((acc - 1) * 100, 2)
+    bench_missing = [d for d, c in bench_changes.items() if c is None]
+    if trading_days and not known:
+        unavailable.append("基准对照：本周上证指数数据缺失")
+    return {
+        "daily": daily,
+        "week_return_pct": week_return,
+        "max_drawdown_pct": max_drawdown,
+        "benchmark_daily_chg": bench_changes,
+        "benchmark_week_pct": bench_week,
+        "benchmark_missing_days": bench_missing,
+        "partial_notes": partial_notes,
+    }
+
+
+def classify_advice(market_state: str | None, permission: str | None) -> str:
+    """建议方向分类：bearish / bullish / neutral（确定性关键词规则）。"""
+    text = f"{market_state or ''} {permission or ''}"
+    if any(w in text for w in ("进攻", "积极", "偏多")):
+        return "bullish"
+    if any(w in text for w in ("防守", "谨慎", "偏弱", "禁止")):
+        return "bearish"
+    return "neutral"
+
+
+def advice_review(base: Path, trading_days: list[str], sse_map: dict[str, dict],
+                  next_trading_day, unavailable: list[str]) -> dict:
+    """板块3：每日建议事后检验。
+
+    判定规则：bearish 建议 + 次日下跌 = 正确；bearish + 次日上涨 = 失误；
+    bullish 对称；neutral = 不判定；次日行情缺失 = 待验证。
+    """
+    rows = []
+    for d in trading_days:
+        chief = load_json(base / "01_data" / "decisions" / f"{d}_chief_decision.json", None)
+        if not isinstance(chief, dict):
+            rows.append({"date": d, "available": False, "verdict": "unavailable"})
+            continue
+        direction = classify_advice(chief.get("market_state"), chief.get("new_position_permission"))
+        nxt = next_trading_day(d)
+        chg = sse_change(sse_map, nxt) if nxt else None
+        if direction == "neutral":
+            verdict = "中性不判定"
+        elif chg is None:
+            verdict = "待验证"
+        elif (direction == "bearish" and chg < 0) or (direction == "bullish" and chg > 0):
+            verdict = "正确"
+        else:
+            verdict = "失误"
+        rows.append({
+            "date": d, "available": True,
+            "market_state": chief.get("market_state"),
+            "market_score": chief.get("market_score"),
+            "total_position_range": chief.get("total_position_range"),
+            "new_position_permission": chief.get("new_position_permission"),
+            "direction": direction, "next_day": nxt, "next_day_sse_chg_pct": chg,
+            "verdict": verdict,
+        })
+    if trading_days and not any(r["available"] for r in rows):
+        unavailable.append("每日建议检验：本周无 chief_decision 数据")
+    return {"rows": rows}
+
+
 # ---------------------------------------------------------------- 归因
 
 def build_weekly_review(base: Path, day: str) -> dict:
@@ -436,6 +682,56 @@ def build_weekly_review(base: Path, day: str) -> dict:
     for d in risk_days:
         risk_levels[d] = load_json(base / "01_data" / "risk" / f"{d}_risk_decision.json", {}).get("risk_level")
 
+    # --- 板块1：持仓周度表现 ---
+    holdings_section = holding_week_performance(base, days, daily_reviews, unavailable)
+
+    # --- 板块2/3 的公共输入：上证收盘价序列（向前多扫 7 天取周初前收盘，向后多扫 7 天取周五次日） ---
+    sse_start = (date.fromisoformat(week["start"]) - timedelta(days=7)).isoformat()
+    sse_end = (date.fromisoformat(week["end"]) + timedelta(days=7)).isoformat()
+    sse_map = sse_daily_map(base, sse_start, sse_end)
+    td_extended = trading_days_of_week(
+        base, days + [(date.fromisoformat(week["end"]) + timedelta(days=i)).isoformat() for i in range(1, 8)]
+    )
+
+    def next_trading_day(day: str) -> str | None:
+        cursor = date.fromisoformat(day) + timedelta(days=1)
+        for _ in range(7):
+            if td_extended.get(cursor.isoformat()):
+                return cursor.isoformat()
+            cursor += timedelta(days=1)
+        return None
+
+    # --- 板块2：组合与账户轨迹 ---
+    portfolio = portfolio_trajectory(days, trading_days, daily_reviews, sse_map, unavailable)
+
+    # --- 板块3：每日建议事后检验 ---
+    advice = advice_review(base, trading_days, sse_map, next_trading_day, unavailable)
+
+    # --- 归因：建议检验 vs 组合结果 ---
+    environment_issues: list[dict] = []
+    advice_wrong = [r for r in advice["rows"] if r.get("verdict") == "失误"]
+    advice_correct = [r for r in advice["rows"] if r.get("verdict") == "正确"]
+    week_ret = portfolio["week_return_pct"]
+    if week_ret is not None and week_ret < 0:
+        if advice_wrong:
+            strategy_issues.append({
+                "rule": "wrong_advice_direction",
+                "summary": (f"组合周收益 {week_ret}% 为负，且 {len(advice_wrong)} 天操作建议方向失误"
+                            f"（{', '.join(r['date'] for r in advice_wrong)}），亏损含可避免部分"),
+                "evidence": [{"date": r["date"], "market_state": r["market_state"],
+                              "next_day": r["next_day"], "next_day_sse_chg_pct": r["next_day_sse_chg_pct"]}
+                             for r in advice_wrong],
+            })
+        elif advice_correct:
+            environment_issues.append({
+                "rule": "adverse_market_environment",
+                "summary": (f"组合周收益 {week_ret}% 为负，但 {len(advice_correct)} 天有方向的建议全部正确，"
+                            "亏损归因于市场环境而非执行/建议失误"),
+                "evidence": {"week_return_pct": week_ret,
+                             "benchmark_week_pct": portfolio["benchmark_week_pct"],
+                             "correct_days": [r["date"] for r in advice_correct]},
+            })
+
     facts = {
         "trade_count": len(week_trades),
         "buy_count": len(buys),
@@ -461,6 +757,9 @@ def build_weekly_review(base: Path, day: str) -> dict:
         "bear_loss_share_pct": bear_loss_share,
         "risk_levels": risk_levels,
         "daily_review_days": sorted(daily_reviews),
+        "portfolio_week_return_pct": portfolio["week_return_pct"],
+        "advice_correct_count": len(advice_correct),
+        "advice_wrong_count": len(advice_wrong),
     }
 
     return {
@@ -472,7 +771,11 @@ def build_weekly_review(base: Path, day: str) -> dict:
         "facts": facts,
         "execution_issues": execution_issues,
         "strategy_issues": strategy_issues,
+        "environment_issues": environment_issues,
         "unavailable": unavailable,
+        "holding_performance": holdings_section,
+        "portfolio": portfolio,
+        "advice_review": advice,
         "details": {
             "trades": week_trades,
             "closings": closings,
@@ -520,9 +823,55 @@ def render_markdown(review: dict) -> str:
         f"- 每日复盘覆盖：{', '.join(f['daily_review_days']) or '无'}",
         f"- 风控等级：{json.dumps(f['risk_levels'], ensure_ascii=False) if f['risk_levels'] else 'unavailable'}",
         "",
-        "## 2. 交易明细",
+        "## 2. 持仓周度表现",
         "",
     ]
+    hp = review["holding_performance"]
+    if hp["rows"]:
+        lines += [
+            "| 代码 | 名称 | 周初价(日) | 周末价(日) | 周涨跌幅 | 周初权重 | 周末权重 | 浮动盈亏 | 贡献估算 |",
+            "|---|---|---|---|---:|---:|---:|---:|---:|",
+        ]
+        for row in hp["rows"]:
+            lines.append(
+                f"| {row['code']} | {row['name'] or ''} | {row['first_close']:g}({row['first_date'][5:]}) | "
+                f"{row['last_close']:g}({row['last_date'][5:]}) | {or_na(row['week_change_pct'], '%')} | "
+                f"{or_na(row['first_weight_pct'], '%')} | {or_na(row['last_weight_pct'], '%')} | "
+                f"{or_na(row['float_pnl_pct'], '%')} | {or_na(row['contribution_pp'], 'pp')} |")
+        traj = hp["b1_trajectory"]
+        if any(traj.values()):
+            lines += ["", "### B1 状态/风控标志周轨迹", ""]
+            for row in hp["rows"]:
+                steps = traj.get(row["code"]) or []
+                if steps:
+                    text = " → ".join(f"{s['date'][5:]}:{s['priority']} {s['action']}" for s in steps)
+                    lines.append(f"- {row['code']} {row['name'] or ''}：{text}")
+                else:
+                    lines.append(f"- {row['code']} {row['name'] or ''}：`unavailable`（本周无 B1 状态记录）")
+    else:
+        lines.append("- `unavailable`：本周无持仓价格数据。")
+    pf = review["portfolio"]
+    lines += ["", "## 3. 组合与账户轨迹", ""]
+    if pf["daily"]:
+        lines += [
+            "| 日期 | 总仓位 | 持仓市值 | 上证当日涨跌 |",
+            "|---|---:|---:|---:|",
+        ]
+        for pt in pf["daily"]:
+            chg = pf["benchmark_daily_chg"].get(pt["date"])
+            mark = "（部分）" if pt.get("partial") else ""
+            lines.append(f"| {pt['date']} | {pt['total_position_pct']}%{mark} | "
+                         f"{pt['market_value']:,.2f}{mark} | {or_na(chg, '%')} |")
+        lines.append("")
+    else:
+        lines.append("- `unavailable`：本周无每日组合重估数据。")
+    for note in pf.get("partial_notes", []):
+        lines.append(f"- 数据注意：{note}")
+    lines.append(f"- 组合周收益率估算（完整日持仓市值口径，不含现金/费用）：**{or_na(pf['week_return_pct'], '%')}**")
+    lines.append(f"- 周内最大回撤（按日市值序列）：{or_na(pf['max_drawdown_pct'], '%')}")
+    bench_note = f"（缺 {', '.join(pf['benchmark_missing_days'])} 的数据）" if pf["benchmark_missing_days"] else ""
+    lines.append(f"- 基准对照：上证指数本周 {or_na(pf['benchmark_week_pct'], '%')}{bench_note}")
+    lines += ["", "## 4. 交易明细", ""]
     trades = review["details"]["trades"]
     if trades:
         lines += [
@@ -545,7 +894,7 @@ def render_markdown(review: dict) -> str:
                     f"{c['gross_pnl']:,.2f} | {c['pnl_pct']}% |")
     else:
         lines.append("- 本周无成交记录。")
-    lines += ["", "## 3. 执行纪律审计", ""]
+    lines += ["", "## 5. 执行纪律审计", ""]
     lines.append(f"- 计划外交易占比："
                  f"{f['unplanned_ratio_pct'] if f['unplanned_ratio_pct'] is not None else 'unavailable'}"
                  f"（判定口径见 plan_checks）")
@@ -558,21 +907,39 @@ def render_markdown(review: dict) -> str:
             status = {"planned": "计划内", "unplanned": "**计划外**", "unknown": "无法判定"}[p["status"]]
             lines.append(f"| {p['date']} | {p['code']} | {p['name']} | {p['side']} | {status} | "
                          f"{p['plan_source'] or 'unavailable'} |")
-    lines += ["", "## 4. 策略有效性", ""]
+    lines += ["", "## 6. 每日建议事后检验", ""]
+    advice_rows = [r for r in review["advice_review"]["rows"] if r["available"]]
+    if advice_rows:
+        lines += [
+            "| 日期 | 市场状态 | 评分 | 仓位建议 | 方向 | 次日上证 | 检验结论 |",
+            "|---|---|---|---|---|---:|---|",
+        ]
+        direction_text = {"bearish": "偏防守", "bullish": "偏进攻", "neutral": "中性"}
+        for r in advice_rows:
+            lines.append(
+                f"| {r['date']} | {r['market_state']} | {r['market_score']} | "
+                f"{r['total_position_range']} | {direction_text[r['direction']]} | "
+                f"{r['next_day'] or 'unavailable'} {or_na(r['next_day_sse_chg_pct'], '%')} | {r['verdict']} |")
+    else:
+        lines.append("- `unavailable`：本周无每日总控决策数据。")
+    lines += ["", "## 7. 策略有效性", ""]
     lines.append(f"- 卖飞候选（后续 MFE 超卖出价 {SELL_FLY_PCT * 100:.0f}%）：{f['sell_fly_count']} 单；"
                  f"无法评估 {len(f['sell_fly_unevaluated'])} 单")
     lines.append(f"- {SHORT_HOLD_DAYS} 天以内持有单亏损贡献：{or_na(f['short_hold_loss_share_pct'], '%')}")
     lines.append(f"- 0AMV 空头天数：{', '.join(f['bear_days']) or '无'}"
                  f"（占比 {or_na(f['bear_day_ratio_pct'], '%')}）；"
                  f"空头期间亏损占比：{or_na(f['bear_loss_share_pct'], '%')}")
-    lines += ["", "## 5. 归因汇总（规则命中清单）", ""]
-    if not review["execution_issues"] and not review["strategy_issues"]:
+    lines += ["", "## 8. 归因汇总（规则命中清单）", ""]
+    all_issues = review["execution_issues"] + review["strategy_issues"] + review.get("environment_issues", [])
+    if not all_issues:
         lines.append("- 本周无规则命中。")
     for issue in review["execution_issues"]:
         lines.append(f"- [执行] `{issue['rule']}`：{issue['summary']}")
     for issue in review["strategy_issues"]:
         lines.append(f"- [策略] `{issue['rule']}`：{issue['summary']}")
-    lines += ["", "## 6. 数据缺口声明", ""]
+    for issue in review.get("environment_issues", []):
+        lines.append(f"- [策略环境] `{issue['rule']}`：{issue['summary']}")
+    lines += ["", "## 9. 数据缺口声明", ""]
     if review["unavailable"]:
         for u in review["unavailable"]:
             lines.append(f"- `unavailable`：{u}")

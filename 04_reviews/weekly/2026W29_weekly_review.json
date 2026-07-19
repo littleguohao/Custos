@@ -5,7 +5,7 @@
     "start": "2026-07-13",
     "end": "2026-07-17"
   },
-  "generated_at": "2026-07-19 21:03:16",
+  "generated_at": "2026-07-19 21:45:40",
   "trading_days": [
     "2026-07-13",
     "2026-07-14",
@@ -64,7 +64,10 @@
       "2026-07-15",
       "2026-07-16",
       "2026-07-17"
-    ]
+    ],
+    "portfolio_week_return_pct": -8.62,
+    "advice_correct_count": 2,
+    "advice_wrong_count": 1
   },
   "execution_issues": [
     {
@@ -85,8 +88,301 @@
       }
     }
   ],
-  "strategy_issues": [],
+  "strategy_issues": [
+    {
+      "rule": "wrong_advice_direction",
+      "summary": "组合周收益 -8.62% 为负，且 1 天操作建议方向失误（2026-07-13），亏损含可避免部分",
+      "evidence": [
+        {
+          "date": "2026-07-13",
+          "market_state": "防守",
+          "next_day": "2026-07-14",
+          "next_day_sse_chg_pct": 1.36
+        }
+      ]
+    }
+  ],
+  "environment_issues": [],
   "unavailable": [],
+  "holding_performance": {
+    "rows": [
+      {
+        "code": "920808",
+        "name": "曙光数创",
+        "first_date": "2026-07-14",
+        "first_close": 83.52,
+        "last_date": "2026-07-17",
+        "last_close": 69.1,
+        "week_change_pct": -17.27,
+        "first_weight_pct": 23.57,
+        "last_weight_pct": 20.69,
+        "first_weight_date": "2026-07-15",
+        "last_weight_date": "2026-07-17",
+        "float_pnl_pct": -12.16,
+        "contribution_pp": -4.07
+      },
+      {
+        "code": "688114",
+        "name": "华大智造",
+        "first_date": "2026-07-14",
+        "first_close": 52.04,
+        "last_date": "2026-07-17",
+        "last_close": 48.07,
+        "week_change_pct": -7.63,
+        "first_weight_pct": 20.45,
+        "last_weight_pct": 18.55,
+        "first_weight_date": "2026-07-15",
+        "last_weight_date": "2026-07-17",
+        "float_pnl_pct": -1.43,
+        "contribution_pp": -1.56
+      },
+      {
+        "code": "600150",
+        "name": "中国船舶",
+        "first_date": "2026-07-14",
+        "first_close": 33.77,
+        "last_date": "2026-07-17",
+        "last_close": 32.34,
+        "week_change_pct": -4.23,
+        "first_weight_pct": 14.41,
+        "last_weight_pct": 13.58,
+        "first_weight_date": "2026-07-15",
+        "last_weight_date": "2026-07-17",
+        "float_pnl_pct": -10.32,
+        "contribution_pp": -0.61
+      },
+      {
+        "code": "605090",
+        "name": "九丰能源",
+        "first_date": "2026-07-14",
+        "first_close": 39.4,
+        "last_date": "2026-07-17",
+        "last_close": 38.2,
+        "week_change_pct": -3.05,
+        "first_weight_pct": 13.29,
+        "last_weight_pct": 12.2,
+        "first_weight_date": "2026-07-15",
+        "last_weight_date": "2026-07-17",
+        "float_pnl_pct": 4.96,
+        "contribution_pp": -0.41
+      },
+      {
+        "code": "601696",
+        "name": "中银证券",
+        "first_date": "2026-07-14",
+        "first_close": 11.62,
+        "last_date": "2026-07-17",
+        "last_close": 11.38,
+        "week_change_pct": -2.07,
+        "first_weight_pct": 11.45,
+        "last_weight_pct": 10.97,
+        "first_weight_date": "2026-07-15",
+        "last_weight_date": "2026-07-17",
+        "float_pnl_pct": 9.82,
+        "contribution_pp": -0.24
+      }
+    ],
+    "days_with_data": [
+      "2026-07-14",
+      "2026-07-15",
+      "2026-07-16",
+      "2026-07-17"
+    ],
+    "b1_trajectory": {
+      "600150": [
+        {
+          "date": "2026-07-15",
+          "priority": "P1",
+          "action": "N型回踩失守评估"
+        },
+        {
+          "date": "2026-07-16",
+          "priority": "P0",
+          "action": "趋势破位退出评估"
+        },
+        {
+          "date": "2026-07-17",
+          "priority": "P0",
+          "action": "趋势破位退出评估"
+        }
+      ],
+      "601696": [
+        {
+          "date": "2026-07-15",
+          "priority": "P1",
+          "action": "N型回踩失守评估"
+        },
+        {
+          "date": "2026-07-16",
+          "priority": "P1",
+          "action": "N型回踩失守评估"
+        },
+        {
+          "date": "2026-07-17",
+          "priority": "P0",
+          "action": "下降N型结构清仓评估"
+        }
+      ],
+      "605090": [
+        {
+          "date": "2026-07-15",
+          "priority": "P1",
+          "action": "N型回踩失守评估"
+        },
+        {
+          "date": "2026-07-16",
+          "priority": "P0",
+          "action": "N型主结构清仓评估"
+        },
+        {
+          "date": "2026-07-17",
+          "priority": "P1",
+          "action": "N型回踩失守评估"
+        }
+      ],
+      "688114": [
+        {
+          "date": "2026-07-15",
+          "priority": "P1",
+          "action": "BBI清仓评估"
+        },
+        {
+          "date": "2026-07-16",
+          "priority": "P1",
+          "action": "BBI清仓评估"
+        },
+        {
+          "date": "2026-07-17",
+          "priority": "P0",
+          "action": "下降N型结构清仓评估"
+        }
+      ],
+      "920808": [
+        {
+          "date": "2026-07-15",
+          "priority": "P3",
+          "action": "条件持有"
+        },
+        {
+          "date": "2026-07-16",
+          "priority": "P1",
+          "action": "N型回踩失守评估"
+        },
+        {
+          "date": "2026-07-17",
+          "priority": "P3",
+          "action": "条件持有"
+        }
+      ]
+    }
+  },
+  "portfolio": {
+    "daily": [
+      {
+        "date": "2026-07-15",
+        "market_value": 1406168.1,
+        "total_position_pct": 83.17,
+        "partial": false,
+        "unpriced_codes": []
+      },
+      {
+        "date": "2026-07-16",
+        "market_value": 970856.0,
+        "total_position_pct": 57.42,
+        "partial": true,
+        "unpriced_codes": [
+          "920808"
+        ]
+      },
+      {
+        "date": "2026-07-17",
+        "market_value": 1284898.05,
+        "total_position_pct": 75.99,
+        "partial": false,
+        "unpriced_codes": []
+      }
+    ],
+    "week_return_pct": -8.62,
+    "max_drawdown_pct": -8.62,
+    "benchmark_daily_chg": {
+      "2026-07-13": -3.04,
+      "2026-07-14": 1.36,
+      "2026-07-15": -0.29,
+      "2026-07-16": null,
+      "2026-07-17": -3.05
+    },
+    "benchmark_week_pct": -5.0,
+    "benchmark_missing_days": [
+      "2026-07-16"
+    ],
+    "partial_notes": [
+      "2026-07-16 缺 920808 报价，当日市值/仓位为部分合计，不参与周收益与回撤"
+    ]
+  },
+  "advice_review": {
+    "rows": [
+      {
+        "date": "2026-07-13",
+        "available": true,
+        "market_state": "防守",
+        "market_score": "31.92/100",
+        "total_position_range": "20%-40%",
+        "new_position_permission": "仅观察，不得加仓",
+        "direction": "bearish",
+        "next_day": "2026-07-14",
+        "next_day_sse_chg_pct": 1.36,
+        "verdict": "失误"
+      },
+      {
+        "date": "2026-07-14",
+        "available": true,
+        "market_state": "防守",
+        "market_score": "37.38/100",
+        "total_position_range": "20%-40%",
+        "new_position_permission": "仅观察，不得加仓",
+        "direction": "bearish",
+        "next_day": "2026-07-15",
+        "next_day_sse_chg_pct": -0.29,
+        "verdict": "正确"
+      },
+      {
+        "date": "2026-07-15",
+        "available": true,
+        "market_state": "震荡偏弱",
+        "market_score": "51.75/100",
+        "total_position_range": "30%-50%",
+        "new_position_permission": "仅观察，不得加仓",
+        "direction": "bearish",
+        "next_day": "2026-07-16",
+        "next_day_sse_chg_pct": null,
+        "verdict": "待验证"
+      },
+      {
+        "date": "2026-07-16",
+        "available": true,
+        "market_state": "防守",
+        "market_score": "36.5/100",
+        "total_position_range": "20%-40%",
+        "new_position_permission": "禁止",
+        "direction": "bearish",
+        "next_day": "2026-07-17",
+        "next_day_sse_chg_pct": -3.05,
+        "verdict": "正确"
+      },
+      {
+        "date": "2026-07-17",
+        "available": true,
+        "market_state": "防守",
+        "market_score": "28.97/100",
+        "total_position_range": "20%-40%",
+        "new_position_permission": "禁止",
+        "direction": "bearish",
+        "next_day": "2026-07-20",
+        "next_day_sse_chg_pct": null,
+        "verdict": "待验证"
+      }
+    ]
+  },
   "details": {
     "trades": [],
     "closings": [],
