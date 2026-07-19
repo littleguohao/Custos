@@ -1,0 +1,95 @@
+{
+  "iso_year": 2026,
+  "iso_week": 29,
+  "range": {
+    "start": "2026-07-13",
+    "end": "2026-07-17"
+  },
+  "generated_at": "2026-07-19 21:03:16",
+  "trading_days": [
+    "2026-07-13",
+    "2026-07-14",
+    "2026-07-15",
+    "2026-07-16",
+    "2026-07-17"
+  ],
+  "facts": {
+    "trade_count": 0,
+    "buy_count": 0,
+    "sell_count": 0,
+    "codes": [],
+    "amount_total": 0,
+    "fee_total": 0,
+    "closing_count": 0,
+    "gross_pnl": 0,
+    "net_pnl": 0,
+    "win_rate_pct": null,
+    "profit_loss_ratio": null,
+    "avg_hold_days": null,
+    "unplanned_ratio_pct": null,
+    "slow_stop_count": 0,
+    "no_trade_days": [
+      "2026-07-13",
+      "2026-07-14",
+      "2026-07-15",
+      "2026-07-16",
+      "2026-07-17"
+    ],
+    "no_trade_unconfirmed": [
+      "2026-07-13",
+      "2026-07-14",
+      "2026-07-15"
+    ],
+    "sell_fly_count": 0,
+    "sell_fly_unevaluated": [],
+    "short_hold_loss_share_pct": null,
+    "bear_days": [
+      "2026-07-13",
+      "2026-07-15",
+      "2026-07-16",
+      "2026-07-17"
+    ],
+    "bear_day_ratio_pct": 80.0,
+    "bear_loss_share_pct": null,
+    "risk_levels": {
+      "2026-07-13": "普通",
+      "2026-07-14": "提高",
+      "2026-07-15": "提高",
+      "2026-07-16": "强风控",
+      "2026-07-17": "强风控"
+    },
+    "daily_review_days": [
+      "2026-07-13",
+      "2026-07-14",
+      "2026-07-15",
+      "2026-07-16",
+      "2026-07-17"
+    ]
+  },
+  "execution_issues": [
+    {
+      "rule": "no_trade_confirmation_missing",
+      "summary": "无交易确认缺失 3 天：2026-07-13, 2026-07-14, 2026-07-15",
+      "evidence": {
+        "no_trade_days": [
+          "2026-07-13",
+          "2026-07-14",
+          "2026-07-15",
+          "2026-07-16",
+          "2026-07-17"
+        ],
+        "confirmed": [
+          "2026-07-16",
+          "2026-07-17"
+        ]
+      }
+    }
+  ],
+  "strategy_issues": [],
+  "unavailable": [],
+  "details": {
+    "trades": [],
+    "closings": [],
+    "plan_checks": []
+  }
+}
