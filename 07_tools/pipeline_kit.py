@@ -12,6 +12,10 @@ runners. Behavior must match the sources exactly:
 - check_trading_day: unified trading-calendar check replacing the three
   divergent parsing styles in the four runners.
 - md_to_digest: markdown-to-plaintext digest conversion.
+- now_iso / log_stage / write_run_log: run-log observability shared by the
+  one-shot runners (run_0850, run_0905); each run leaves
+  06_logs/{date}_{tag}_run_log.json with per-stage ok/returncode/timeout/
+  timings/stdout/stderr tails and an overall status.
 - warn: unified [WARN] output to stderr.
 """
 from __future__ import annotations
@@ -20,6 +24,9 @@ import json
 import os
 import subprocess
 import sys
+import time
+from datetime import datetime
+from pathlib import Path
 
 from paths import BASE
 
@@ -138,6 +145,48 @@ def md_to_digest(md_text: str, limit: int = 3500, truncate_note: str = "...(å®Œæ
     if len(digest) > limit:
         digest = digest[:limit - 50] + "\n" + truncate_note
     return digest
+
+
+def now_iso() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def log_stage(name: str, r: dict, started_at: str, finished_at: str, duration_sec: float,
+              note: str = "") -> dict:
+    """Build one run-log stage entry from a run_stage-style result dict."""
+    entry = {
+        "name": name,
+        "ok": bool(r.get("ok", False)),
+        "returncode": r.get("returncode"),
+        "timeout": bool(r.get("timeout", False)),
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "duration_sec": round(duration_sec, 2),
+        "stdout_tail": (r.get("stdout") or "")[-1000:],
+        "stderr_tail": (r.get("stderr") or "")[-1000:],
+    }
+    if note:
+        entry["note"] = note
+    return entry
+
+
+def write_run_log(log_dir: Path, tag: str, target: str, status: str, started_at: str,
+                  t0: float, stages: list[dict]) -> Path:
+    """Write 06_logs/{date}_{tag}_run_log.json; tag is the runner suffix
+    ("0850", "0905"), which also determines the script field (run_{tag})."""
+    log = {
+        "date": target,
+        "script": f"run_{tag}",
+        "status": status,
+        "started_at": started_at,
+        "finished_at": now_iso(),
+        "duration_sec": round(time.time() - t0, 2),
+        "stages": stages,
+    }
+    log_dir.mkdir(parents=True, exist_ok=True)
+    path = log_dir / f"{target}_{tag}_run_log.json"
+    path.write_text(json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
 
 
 def warn(msg: str) -> None:

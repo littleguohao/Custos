@@ -10,21 +10,24 @@ from __future__ import annotations
 import argparse
 import contextlib
 import io
-import json
 import os
 import sys
 import time
-from datetime import date, datetime
+from datetime import date
 
 from paths import BASE
-from pipeline_kit import _extract_json, check_trading_day, run_stage
+from pipeline_kit import _extract_json, check_trading_day, log_stage, now_iso, run_stage, write_run_log
 
 TOOLS = BASE / "07_tools"
 LOG_DIR = BASE / "06_logs"
 
+# Module-level aliases kept for tests and readability; implementation lives in pipeline_kit.
+_now_iso = now_iso
+_log_stage = log_stage
 
-def _now_iso() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+
+def _write_run_log(target: str, status: str, started_at: str, t0: float, stages: list[dict]):
+    return write_run_log(LOG_DIR, "0850", target, status, started_at, t0, stages)
 
 
 def _stage(cmd: list[str], name: str) -> dict:
@@ -35,40 +38,6 @@ def _stage(cmd: list[str], name: str) -> dict:
         r = run_stage(cmd, name, required=False)
     r["out"] = (r["stdout"] + r["stderr"]).strip()
     return r
-
-
-def _log_stage(name: str, r: dict, started_at: str, finished_at: str, duration_sec: float,
-               note: str = "") -> dict:
-    entry = {
-        "name": name,
-        "ok": bool(r.get("ok", False)),
-        "returncode": r.get("returncode"),
-        "timeout": bool(r.get("timeout", False)),
-        "started_at": started_at,
-        "finished_at": finished_at,
-        "duration_sec": round(duration_sec, 2),
-        "stdout_tail": (r.get("stdout") or "")[-1000:],
-        "stderr_tail": (r.get("stderr") or "")[-1000:],
-    }
-    if note:
-        entry["note"] = note
-    return entry
-
-
-def _write_run_log(target: str, status: str, started_at: str, t0: float, stages: list[dict]):
-    log = {
-        "date": target,
-        "script": "run_0850",
-        "status": status,
-        "started_at": started_at,
-        "finished_at": _now_iso(),
-        "duration_sec": round(time.time() - t0, 2),
-        "stages": stages,
-    }
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    path = LOG_DIR / f"{target}_0850_run_log.json"
-    path.write_text(json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
-    return path
 
 
 def _rss_summary_fragments(results: dict) -> list[str]:
