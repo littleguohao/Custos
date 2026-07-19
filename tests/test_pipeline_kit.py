@@ -177,6 +177,54 @@ class TestMdToDigest:
         digest = pipeline_kit.md_to_digest(md, limit=1000)
         assert digest.endswith("...(完整报告见文件)")
 
+    def _section_md(self, head, chars):
+        return f"## {head}\n" + "字" * chars + "\n"
+
+    def test_truncation_keeps_key_sections(self):
+        md = ("# 每日投研简报\n"
+              + self._section_md("1. 今日核心结论", 200)
+              + self._section_md("2. 隔夜重大消息", 2000)
+              + self._section_md("6. 当日行动建议", 200)
+              + self._section_md("7. 数据时效与声明", 2000))
+        digest = pipeline_kit.md_to_digest(md, limit=1000)
+        assert digest.endswith("...(完整报告见文件)")
+        assert "1. 今日核心结论" in digest
+        assert "6. 当日行动建议" in digest
+        assert "2. 隔夜重大消息" not in digest
+        assert "7. 数据时效与声明" not in digest
+        assert len(digest) <= 1000
+
+    def test_truncation_fills_remaining_sections_in_original_order(self):
+        md = ("# 标题\n"
+              + self._section_md("1. 今日核心结论", 100)
+              + self._section_md("2. 次要内容", 100)
+              + self._section_md("6. 当日行动建议", 100)
+              + self._section_md("9. 填充物", 5000))
+        digest = pipeline_kit.md_to_digest(md, limit=1000)
+        assert "1. 今日核心结论" in digest
+        assert "6. 当日行动建议" in digest
+        assert "2. 次要内容" in digest
+        assert "9. 填充物" not in digest
+        # emitted in original document order
+        assert digest.index("1. 今日核心结论") < digest.index("2. 次要内容") < digest.index("6. 当日行动建议")
+        assert len(digest) <= 1000
+
+    def test_truncation_falls_back_to_plain_cut_when_no_section_fits(self):
+        md = "# 超长标题\n" + "字" * 5000 + "\n"
+        digest = pipeline_kit.md_to_digest(md, limit=1000)
+        assert len(digest) <= 1000
+        assert digest.endswith("...(完整报告见文件)")
+
+    def test_short_digest_byte_identical_to_legacy_output(self):
+        md = "# 标题\n\n## 1. 今日核心结论\n- 要点\n\n## 6. 当日行动建议\n| a | b |\n|---|---|\n| x | y |\n"
+        digest = pipeline_kit.md_to_digest(md)
+        u1 = "─" * min(len("标题") * 2, 40)
+        u2 = "─" * min(len("1. 今日核心结论") * 2, 40)
+        u3 = "─" * min(len("6. 当日行动建议") * 2, 40)
+        lines = ["标题", u1, "", "1. 今日核心结论", u2, "- 要点",
+                 "", "6. 当日行动建议", u3, "a | b", "x | y"]
+        assert digest == "\n".join(lines)
+
 
 # ---------------------------------------------------------------------------
 # pipeline_kit._extract_json — pure JSON-line extraction

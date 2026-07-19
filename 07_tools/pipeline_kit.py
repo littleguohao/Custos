@@ -107,15 +107,67 @@ def check_trading_day(date_str: str) -> dict:
     return _extract_json(r["stdout"])
 
 
+def _split_digest_sections(digest: str) -> list[str]:
+    """Split a digest into sections; a new section starts at each converted
+    header (a text line followed by a ─ underline line)."""
+    lines = digest.split("\n")
+    sections: list[str] = []
+    current: list[str] = []
+    for i, line in enumerate(lines):
+        nxt = lines[i + 1].strip() if i + 1 < len(lines) else ""
+        starts_header = bool(line.strip()) and bool(nxt) and set(nxt) == {"─"}
+        if starts_header and current:
+            sections.append("\n".join(current).strip("\n"))
+            current = []
+        current.append(line)
+    if current:
+        sections.append("\n".join(current).strip("\n"))
+    return [s for s in sections if s]
+
+
+def _truncate_digest(digest: str, limit: int, truncate_note: str) -> str:
+    """Truncate an over-limit digest, keeping key sections whole when possible.
+
+    Sections are selected by priority — first section (report title), sections
+    headed "1." (今日核心结论) / "6." (当日行动建议), then the rest in original
+    order — and emitted in original document order within a limit - 50 char
+    budget, with truncate_note appended (same contract as the plain cut). When
+    no section fits the budget, fall back to the plain prefix cut.
+    """
+    budget = limit - 50
+    sections = _split_digest_sections(digest)
+
+    def is_key(section: str) -> bool:
+        head = section.split("\n", 1)[0].strip()
+        return head.startswith("1.") or head.startswith("6.")
+
+    priority = ([0] + [i for i in range(1, len(sections)) if is_key(sections[i])]
+                + [i for i in range(1, len(sections)) if not is_key(sections[i])])
+    picked: list[int] = []
+    total = 0
+    for i in priority:
+        cost = len(sections[i]) + (2 if picked else 0)  # "\n\n" separator
+        if total + cost > budget:
+            continue
+        picked.append(i)
+        total += cost
+    if not picked:
+        return digest[:budget] + "\n" + truncate_note
+    body = "\n\n".join(sections[i] for i in sorted(picked))
+    return body + "\n" + truncate_note
+
+
 def md_to_digest(md_text: str, limit: int = 3500, truncate_note: str = "...(完整报告见文件)") -> str:
     """Convert a markdown report to a plaintext digest.
 
     Headers become text followed by a ─ underline, table rows become
     pipe-joined cell text (separator rows skipped), bullet lines are kept,
     other non-empty lines are kept only after the first header (in_section).
-    Leading empty lines are skipped. When the digest exceeds limit chars it
-    is truncated to limit - 50 chars and truncate_note is appended on a new
-    line (run_0905 uses "...(完整报告见文件)", run_2030 uses "...(完整复盘见文件)").
+    Leading empty lines are skipped. When the digest exceeds limit chars it is
+    truncated to a limit - 50 char budget and truncate_note is appended on a
+    new line (run_0905 uses "...(完整报告见文件)", run_2030 uses
+    "...(完整复盘见文件)"); truncation prefers keeping the title section and
+    the "1."/"6." sections whole (see _truncate_digest).
     """
     lines = md_text.split("\n")
     digest_lines = []
@@ -143,7 +195,7 @@ def md_to_digest(md_text: str, limit: int = 3500, truncate_note: str = "...(完�
 
     digest = "\n".join(digest_lines).strip()
     if len(digest) > limit:
-        digest = digest[:limit - 50] + "\n" + truncate_note
+        digest = _truncate_digest(digest, limit, truncate_note)
     return digest
 
 

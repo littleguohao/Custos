@@ -13,6 +13,7 @@ if str(TOOLS_DIR) not in sys.path:
 
 from paths import BASE  # noqa: E402
 from premarket_intel_schema import validate_premarket_intelligence  # noqa: E402
+from daily_report import load_premarket_intelligence, premarket_intelligence_path  # noqa: E402
 
 DATA = BASE / "01_data"
 
@@ -44,9 +45,10 @@ def main():
     args = ap.parse_args()
     day = args.date
     rss_path = DATA / "news" / "rss" / "filtered" / f"{day}_postclose_rss_candidates.json"
-    intel_path = DATA / "news" / "premarket" / f"{day}_premarket_intelligence.json"
+    # 命名兼容与 daily_report 对齐:带连字符优先、无连字符回退
+    intel_path = premarket_intelligence_path(day)
     rss = load(rss_path, [])
-    intel = load(intel_path, {})
+    intel = load_premarket_intelligence(day)
     events = []
     for item in rss:
         published = item.get("published_at")
@@ -78,7 +80,7 @@ def main():
     missing = []
     if not rss_path.exists():
         missing.append("postclose_rss_candidates")
-    if not intel_path.exists():
+    if intel_path is None:
         missing.append("premarket_intelligence")
     elif not validate_premarket_intelligence(intel)["valid"]:
         missing.append("premarket_intelligence(schema_invalid)")
@@ -92,7 +94,7 @@ def main():
         "premarket_market_event_count": len(intel.get("market_events") or []),
         "missing": missing,
         "permission_rule": "news may add validation or tighten risk; it cannot directly increase trading permissions",
-        "sources": [str(rss_path), str(intel_path)],
+        "sources": [str(rss_path), str(intel_path or (DATA / "news" / "premarket" / f"{day}_premarket_intelligence.json"))],
     }
     dump(DATA / "news" / "postclose" / f"{day}_postclose_news_digest.json", result)
     print(json.dumps(result, ensure_ascii=True))
