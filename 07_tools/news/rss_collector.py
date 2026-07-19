@@ -65,6 +65,34 @@ def parse_feed(raw, src, fetched):
           'confirmed':src['tier'] in {'S','A'},'duplicate_group_id':dup})
     return items
 
+def parse_wscn_lives(raw, src, fetched):
+    # WallstreetCN lives JSON API: {"code":20000,"data":{"items":[{id,content,display_time,uri,...}]}}
+    data=json.loads(raw.decode('utf-8',errors='replace'))
+    if not isinstance(data,dict) or data.get('code')!=20000:
+        raise ValueError('wscn_lives bad response code: '+repr(data.get('code') if isinstance(data,dict) else type(data).__name__))
+    entries=data.get('data',{}).get('items')
+    if not isinstance(entries,list): raise ValueError('wscn_lives malformed payload: data.items missing')
+    items=[]
+    for e in entries:
+        if not isinstance(e,dict): continue
+        content=clean(e.get('content'))
+        if not content: continue
+        try: published=datetime.fromtimestamp(int(e.get('display_time')),timezone.utc).isoformat()
+        except (TypeError,ValueError,OverflowError): published=None
+        norm=re.sub(r'\W+','',content.lower())[:300]
+        item_id=hashlib.sha256((src['id']+'|'+str(e.get('id'))).encode()).hexdigest()[:24]
+        dup=hashlib.sha256(norm.encode()).hexdigest()[:20] if norm else item_id
+        corrected_name = fix_source_name(src['id'], src['name'])
+        title=content[:50]
+        items.append({'item_id':item_id,'published_at':published,'fetched_at':fetched,
+          'source_id':src['id'],'source_name':corrected_name,'source_tier':src['tier'],'category':src['category'],
+          'title':title,'summary':content[:2000],'source_url':e.get('uri') or (f"https://wallstreetcn.com/livenews/{e.get('id')}" if e.get('id') is not None else ''),'feed_url':src['url'],
+          'affected_entities':[],'affected_sectors':[],'direction':'uncertain','impact_horizon':'unknown',
+          'fact':title,'inference':'','validation_condition':[],
+          'quality':'candidate' if src['tier'] in {'B','C'} else 'confirmed',
+          'confirmed':src['tier'] in {'S','A'},'duplicate_group_id':dup})
+    return items
+
 def main():
     ap=argparse.ArgumentParser(); ap.add_argument('--date',required=True); ap.add_argument('--timeout',type=int,default=15); ap.add_argument('--limit-per-feed',type=int,default=100); a=ap.parse_args()
     cfg=json.loads(REG.read_text(encoding='utf-8-sig')); fetched=datetime.now().astimezone().isoformat(timespec='seconds')
@@ -77,7 +105,11 @@ def main():
             ctx=ssl.create_default_context()
             if src.get('ssl_verify',True) is False: ctx.check_hostname=False; ctx.verify_mode=ssl.CERT_NONE
             with retry_call(lambda: urllib.request.urlopen(req,timeout=a.timeout,context=ctx)) as r: raw=r.read(); row.update(http_status=r.status,final_url=r.geturl(),content_type=r.headers.get('content-type',''))
-            (day/f"{src['id']}.xml").write_bytes(raw); items=parse_feed(raw,src,fetched)[:a.limit_per_feed]; normalized.extend(items); row.update(status='ok',items=len(items))
+            if src.get('type')=='wscn_lives':
+                (day/f"{src['id']}.json").write_bytes(raw); items=parse_wscn_lives(raw,src,fetched)[:a.limit_per_feed]
+            else:
+                (day/f"{src['id']}.xml").write_bytes(raw); items=parse_feed(raw,src,fetched)[:a.limit_per_feed]
+            normalized.extend(items); row.update(status='ok',items=len(items))
         except Exception as e: row.update(status='failed',error=repr(e),items=0)
         log.append(row)
     # exact item IDs and normalized-title duplicate groups are deterministic.

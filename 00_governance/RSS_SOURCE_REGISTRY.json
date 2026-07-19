@@ -1,6 +1,6 @@
 {
-  "version": "2.0",
-  "updated_at": "2026-07-19T01:55:00+08:00",
+  "version": "2.1",
+  "updated_at": "2026-07-19T10:30:00+08:00",
   "policy": {
     "purpose": "RSS用于事件发现；官方原文/独立来源用于确认；不得直接扩大交易权限。",
     "tiers": {
@@ -76,6 +76,18 @@
       "audit": "200_rss",
       "policy_stage": "confirmed_1",
       "note": "国内时政新闻、重大政策、部委动态"
+    },
+    {
+      "id": "wscn_lives",
+      "name": "华尔街见闻-A股快讯",
+      "category": "cn_financial_media",
+      "url": "https://api.wallstreetcn.com/apiv1/content/lives?channel=a-stock-channel&limit=100",
+      "tier": "B",
+      "enabled": true,
+      "type": "wscn_lives",
+      "audit": "200_json",
+      "policy_stage": "confirmed_2",
+      "note": "华尔街见闻7x24快讯A股频道,免key公开JSON API;B级专业财经媒体,需2个独立来源确认"
     }
   ]
 }
