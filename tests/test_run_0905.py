@@ -37,3 +37,56 @@ class TestWriteRunLog:
         assert log["stages"][0]["returncode"] == 1
         assert log["stages"][0]["stdout_tail"] == "boom"
         assert log["stages"][0]["stderr_tail"] == "err"
+
+
+class TestCheck0850Status:
+    def _write_0850_log(self, log_dir, target, status):
+        (log_dir / f"{target}_0850_run_log.json").write_text(
+            json.dumps({"date": target, "script": "run_0850", "status": status}),
+            encoding="utf-8")
+
+    def test_completed_allows_reuse(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(run_0905, "LOG_DIR", tmp_path)
+        self._write_0850_log(tmp_path, "2026-07-18", "completed")
+        reuse, note = run_0905._check_0850_status("2026-07-18")
+        assert reuse is True
+        assert note == ""
+
+    def test_missing_log_falls_back(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(run_0905, "LOG_DIR", tmp_path)
+        reuse, note = run_0905._check_0850_status("2026-07-18")
+        assert reuse is False
+        assert "0850_log_missing" in note
+
+    def test_failed_status_falls_back(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(run_0905, "LOG_DIR", tmp_path)
+        self._write_0850_log(tmp_path, "2026-07-18", "failed")
+        reuse, note = run_0905._check_0850_status("2026-07-18")
+        assert reuse is False
+        assert "0850_status=failed" in note
+
+    def test_calendar_failed_status_falls_back(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(run_0905, "LOG_DIR", tmp_path)
+        self._write_0850_log(tmp_path, "2026-07-18", "calendar_failed")
+        reuse, note = run_0905._check_0850_status("2026-07-18")
+        assert reuse is False
+        assert "0850_status=calendar_failed" in note
+
+    def test_unreadable_log_falls_back(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(run_0905, "LOG_DIR", tmp_path)
+        (tmp_path / "2026-07-18_0850_run_log.json").write_text("not json", encoding="utf-8")
+        reuse, note = run_0905._check_0850_status("2026-07-18")
+        assert reuse is False
+        assert "0850_log_unreadable" in note
+
+
+class TestDailyPipelineCmd:
+    def test_reuse_discovery_appended(self):
+        cmd = run_0905._daily_pipeline_cmd("2026-07-18", reuse_discovery=True)
+        assert "--reuse-discovery" in cmd
+        assert "--session-type" in cmd and "premarket" in cmd
+
+    def test_full_collection_omits_reuse(self):
+        cmd = run_0905._daily_pipeline_cmd("2026-07-18", reuse_discovery=False)
+        assert "--reuse-discovery" not in cmd
+        assert "--session-type" in cmd and "premarket" in cmd

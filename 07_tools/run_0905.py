@@ -11,13 +11,14 @@ from __future__ import annotations
 import argparse
 import contextlib
 import io
+import json
 import os
 import sys
 import time
 from datetime import date
 
 from paths import BASE
-from pipeline_kit import check_trading_day, log_stage, md_to_digest, now_iso, run_stage, write_run_log
+from pipeline_kit import check_trading_day, log_stage, md_to_digest, now_iso, run_stage, warn, write_run_log
 
 TOOLS = BASE / "07_tools"
 PLANS = BASE / "03_daily_plans"
@@ -40,6 +41,34 @@ def _stage(cmd: list[str], name: str) -> dict:
         r = run_stage(cmd, name, required=False)
     r["out"] = (r["stdout"] + r["stderr"]).strip()
     return r
+
+
+def _check_0850_status(target: str) -> tuple[bool, str]:
+    """Decide whether the 09:05 pipeline may reuse 08:50 discovery artifacts.
+
+    Returns (reuse_discovery, note): reuse only when 06_logs/{date}_0850_run_log.json
+    exists with status == "completed". Otherwise fall back to full collection;
+    the note explains why (recorded in the run log, warned on stderr — stdout
+    protocol unchanged).
+    """
+    path = LOG_DIR / f"{target}_0850_run_log.json"
+    if not path.exists():
+        return False, "0850_log_missing, fallback to full collection"
+    try:
+        status = json.loads(path.read_text(encoding="utf-8")).get("status")
+    except (OSError, ValueError):
+        return False, "0850_log_unreadable, fallback to full collection"
+    if status == "completed":
+        return True, ""
+    return False, f"0850_status={status}, fallback to full collection"
+
+
+def _daily_pipeline_cmd(target: str, reuse_discovery: bool) -> list[str]:
+    cmd = ["uv", "run", "python", str(TOOLS / "daily_pipeline.py"), "--date", target,
+           "--session-type", "premarket"]
+    if reuse_discovery:
+        cmd.append("--reuse-discovery")
+    return cmd
 
 
 def main(argv=None) -> int:
@@ -81,12 +110,15 @@ def main(argv=None) -> int:
         print(f"今日休市，盘前日报不生成（{target}）")
         return 0
 
-    # 2. Daily pipeline (premarket, reuse discovery)
+    # 2. Daily pipeline (premarket; reuse 08:50 discovery only when it completed)
     s_started = _now_iso()
     s_t0 = time.time()
-    r = _stage(["uv", "run", "python", str(TOOLS / "daily_pipeline.py"), "--date", target,
-                "--session-type", "premarket", "--reuse-discovery"], "daily_pipeline premarket")
-    stages_log.append(_log_stage("daily_pipeline premarket", r, s_started, _now_iso(), time.time() - s_t0))
+    reuse_discovery, fallback_note = _check_0850_status(target)
+    if fallback_note:
+        warn(fallback_note)
+    r = _stage(_daily_pipeline_cmd(target, reuse_discovery), "daily_pipeline premarket")
+    stages_log.append(_log_stage("daily_pipeline premarket", r, s_started, _now_iso(), time.time() - s_t0,
+                                 note=fallback_note))
     if not r["ok"]:
         _write_run_log(target, "failed", run_started, t0, stages_log)
         print(f"【盘前日报失败｜{target}】daily_pipeline失败：{r['out'][:500]}")
