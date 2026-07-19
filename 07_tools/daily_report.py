@@ -140,11 +140,14 @@ def direction_label(v:Any)->str:
     return '待确认'
 
 def fallback_rss_events(day:str)->list[dict[str,Any]]:
+    # 新源体系(S/A tier 官方源)相关性分普遍偏高且多数不命中市场关键词,
+    # 旧规则(matched_market_keywords 且 >=80)基本恒空;改为 relevance_score>=60 排序取 top3
     path=DATA/'news'/'rss'/'filtered'/f'{day}_premarket_rss_candidates.json'
     items=load(path,[])
+    ranked=sorted(items,key=lambda x:int(x.get('relevance_score') or 0),reverse=True)
     selected=[]
-    for item in items:
-        if item.get('matched_market_keywords') and int(item.get('relevance_score') or 0)>=80:
+    for item in ranked:
+        if int(item.get('relevance_score') or 0)>=60:
             selected.append({
                 'published_at':item.get('published_at'), 'title':item.get('title'),
                 'direction':item.get('direction'), 'impact':'仅作候选风险证据',
