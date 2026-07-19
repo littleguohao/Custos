@@ -90,10 +90,18 @@ def _get_market_code(code: str) -> int:
 
 
 def _is_bj_code(code: str) -> bool:
-    """Check if code is a Beijing Stock Exchange stock."""
-    s = _strip_suffix(code)
+    """Check if code is a Beijing Stock Exchange stock.
+
+    Explicit suffix wins: .BJ -> True; .SH/.SZ -> False (e.g. 880xxx.SH is an
+    SH statistics index, not a BJ stock). Only suffix-less codes use the
+    4xx/8xx/920xxx prefix heuristic.
+    """
+    s = str(code).strip().upper()
+    if "." in s:
+        return s.split(".")[1] == "BJ"
+    s = s.zfill(6)
     # BJ: 4xx, 8xx, 920xxx (North Exchange)
-    return s.startswith("4") or s.startswith("8") or s.startswith("920")
+    return s.startswith(("4", "8", "920"))
 
 
 def _read_bj_vipdoc_daily(code: str) -> "pd.DataFrame":
@@ -379,17 +387,6 @@ def save_json(path: Path, obj: Any) -> None:
 def save_csv(path: Path, df: pd.DataFrame) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(path, index=False, encoding="utf-8-sig")
-
-
-# ========== TQ compat stubs (deprecated, kept for backward compat) ==========
-
-def require_tq() -> Any:
-    raise LocalTdxError("tqcenter is deprecated, use mootdx interfaces directly")
-
-
-class TqSession:
-    def __init__(self, *args, **kwargs):
-        raise LocalTdxError("tqcenter is deprecated, use mootdx interfaces directly")
 
 
 def get_ohlcv_table(code: str, count: int = 260, prefer: str = "vipdoc") -> pd.DataFrame:
