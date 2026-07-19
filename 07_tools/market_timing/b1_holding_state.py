@@ -6,16 +6,24 @@ import argparse
 import json
 import math
 import sys
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
 TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
+LOCAL_TDX_DIR = TOOLS_DIR / "local_tdx"
+if str(LOCAL_TDX_DIR) not in sys.path:
+    sys.path.insert(0, str(LOCAL_TDX_DIR))
 
 from paths import BASE  # noqa: E402
+from code_utils import norm_code  # noqa: E402
 
 DATA = BASE / "01_data"
+
+# 次新股前置排除阈值：上市日历天数 < 20 标记
+NEW_LISTING_DAYS = 20
 
 
 def finite(value: Any) -> float | None:
@@ -157,6 +165,51 @@ def evaluate(row: dict[str, Any], market_regime: str = "未知", price: Any = No
     }
 
 
+def _parse_listing_date(value: Any) -> date | None:
+    s = str(value or "").strip()
+    for fmt in ("%Y%m%d", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def build_pre_checks(code: Any, as_of: date | None = None, tq: Any = None) -> dict[str, Any]:
+    """B1 前置排除预检（只做加法，不影响既有信号计算）。
+
+    通过 TQ-Local HTTP 补充：listing_date（get_stock_info.J_start）、
+    is_suspended（get_more_info.TPFlag）、limit_up/limit_down_price（ZTPrice/DTPrice）。
+    TQ 不可用时返回 {"available": False, ...}，调用方主流程不受影响。
+    """
+    if tq is None:
+        import tq_http as tq  # noqa: PLC0415 —— 惰性导入，TQ 缺失不影响模块加载
+    tq_code = norm_code(str(code or ""))
+    info = tq.stock_info(tq_code)
+    more = tq.more_info(tq_code, fields=["TPFlag", "ZTPrice", "DTPrice", "HqDate"])
+    if not info["ok"] and not more["ok"]:
+        return {"available": False, "error": (info["error"] or more["error"])}
+    info_v = info["value"] if isinstance(info.get("value"), dict) else {}
+    more_v = more["value"] if isinstance(more.get("value"), dict) else {}
+
+    listing_date = str(info_v.get("J_start") or "").strip() or None
+    listed = _parse_listing_date(listing_date)
+    listing_days = (as_of - listed).days if (listed and as_of) else None
+    tp_flag = str(more_v.get("TPFlag") or "").strip()
+    return {
+        "available": True,
+        "source": "tq_http",
+        "partial": not (info["ok"] and more["ok"]),
+        "listing_date": listing_date,
+        "listing_days": listing_days,  # 日历天数（上市日至 --date）
+        "new_listing_lt20": (listing_days < NEW_LISTING_DAYS) if listing_days is not None else None,
+        "is_suspended": (tp_flag not in ("", "0")) if more["ok"] else None,
+        "limit_up_price": finite(more_v.get("ZTPrice")),
+        "limit_down_price": finite(more_v.get("DTPrice")),
+        "hq_date": str(more_v.get("HqDate") or "").strip() or None,
+    }
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", required=True)
@@ -166,7 +219,15 @@ def main() -> None:
     rows = json.loads(technical_path.read_text(encoding="utf-8"))
     market = json.loads((DATA / "market" / f"{args.date}_market_timing_input.json").read_text(encoding="utf-8"))
     regime = args.market_regime or str((market.get("amv_0") or {}).get("effective_state") or (market.get("amv_0") or {}).get("amv_zone") or "未知")
-    result = [evaluate(row, regime, price_date=args.date) for row in rows]
+    as_of = datetime.strptime(args.date, "%Y-%m-%d").date()
+    result = []
+    for row in rows:
+        state = evaluate(row, regime, price_date=args.date)
+        try:
+            state["pre_checks"] = build_pre_checks(row.get("code"), as_of=as_of)
+        except Exception as exc:  # noqa: BLE001 —— 预检失败不影响 B1 主流程
+            state["pre_checks"] = {"available": False, "error": {"code": "pre_checks_failed", "detail": str(exc)}}
+        result.append(state)
     out = DATA / "holdings" / f"{args.date}_b1_holding_state.json"
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(out)
