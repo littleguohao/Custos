@@ -115,7 +115,18 @@ def build_risk_decision(date: str) -> dict:
     level = "强风控" if any(x.get("priority") == "高" for x in ordered) else ("提高" if ordered else "普通")
     forbidden = list(dict.fromkeys(x.get("action") for x in ordered if x.get("action") in {"禁止加仓", "止损", "清仓"}))
 
-    return {"date": date, "risk_level": level, "forbidden_actions": forbidden, "stock_risks": ordered}
+    market = load(DATA / "market" / f"{date}_market_timing_input.json", {})
+    market_regime = str((market.get("amv_0") or {}).get("effective_state") or "未知")
+    if market_regime == "空头":
+        regime_directive = {
+            "reduce_top_priority": True,
+            "allow_add": False,
+            "note": "0AMV空头区间:降低仓位为最高优先级,任何反弹都是卖出机会",
+        }
+    else:
+        regime_directive = {"reduce_top_priority": False}
+
+    return {"date": date, "market_regime": market_regime, "regime_directive": regime_directive, "risk_level": level, "forbidden_actions": forbidden, "stock_risks": ordered}
 
 
 def main():

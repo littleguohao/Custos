@@ -40,6 +40,7 @@ def action_rank(priority: str) -> int:
 
 SIGNAL_ORDER = {
     "hard_loss": 0, "n_l1_breach": 1, "trend_box_break": 2, "desc_n_confirmed": 3,
+    "bear_regime_reduce_top_priority": 9,
     "n_l2_breach": 10, "bbi_two_close_breach": 11, "heavy_large_bear": 12,
     "downtrend": 13, "bear_rebound_reduce": 14, "loss_reduction": 15,
     "bbi_first_breach": 20, "two_bull_profit_take": 21, "kdj_death_cross": 22,
@@ -113,6 +114,10 @@ def evaluate(row: dict[str, Any], market_regime: str = "未知", price: Any = No
     reversal = bool(price_volume_current and pv.get("reversal_k_candidate_without_j") and j is not None and j < 13)
     if reversal:
         add("reversal_k_candidate", "P3", "反转K候选观察", "J<13、极致缩量、收盘±2%且振幅<=7%；仍需后续修复确认")
+
+    if market_regime == "空头":
+        add("bear_regime_reduce_top_priority", "P1", "空头区间反弹减仓(最高优先级)",
+            "0AMV空头区间:降低仓位为最高优先级,任何反弹都是卖出机会;禁止加仓补仓")
 
     if price_volume_current and market_regime == "空头" and finite(pv.get("change_pct")) is not None and finite(pv.get("change_pct")) > 0:
         add("bear_rebound_reduce", "P1", "空头反弹减仓", "0AMV空头区间出现反弹，优先降低风险敞口")
