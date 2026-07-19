@@ -12,6 +12,7 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from paths import BASE  # noqa: E402
+from premarket_intel_schema import validate_premarket_intelligence  # noqa: E402
 
 DATA = BASE / "01_data"
 
@@ -79,6 +80,8 @@ def main():
         missing.append("postclose_rss_candidates")
     if not intel_path.exists():
         missing.append("premarket_intelligence")
+    elif not validate_premarket_intelligence(intel)["valid"]:
+        missing.append("premarket_intelligence(schema_invalid)")
     if not sections["政策"]:
         missing.append("confirmed_high_priority_macro_policy")
     result = {

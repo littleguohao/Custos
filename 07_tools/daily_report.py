@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from close_review.holding_structure import n_structure_basis
+from news.premarket_intel_schema import validate_premarket_intelligence
 
 from paths import BASE
 
@@ -57,6 +58,19 @@ def premarket_intelligence_path(day:str)->Path|None:
 def load_premarket_intelligence(day:str)->dict[str,Any]:
     path=premarket_intelligence_path(day)
     return load(path,{}) if path else {}
+
+def premarket_schema_note(check:dict[str,Any])->str:
+    # schema 不合规时的降级标注,插在 2.1 节首行,让情报失效在报告中显式可见
+    if check.get('valid'): return ''
+    return f"> ⚠️ 盘前情报 schema 不合规（{'；'.join(check.get('errors') or ['未知'])}），已降级为 RSS 候选展示"
+
+def premarket_schema_marker(check:dict[str,Any])->str:
+    # 第 7 节"盘前情报"行的 schema 状态标记;valid 且无 warnings 时为空串,输出逐字不变
+    if not check.get('valid'):
+        return f"（schema invalid: {'；'.join(check.get('errors') or ['未知'])}）"
+    if check.get('warnings'):
+        return f"（schema warnings: {len(check['warnings'])}）"
+    return ''
 
 def previous_review(day:str)->dict[str,Any]:
     review_dir=BASE/'04_reviews'/'daily'
@@ -152,11 +166,16 @@ def main():
     chief=load(chief_path,{}); market=load(DATA/'market'/f'{day}_market_timing_input.json',{}); positions=load(DATA/'trades'/'current_positions.json',[]); sectors=load(DATA/'sectors'/f'{day}_sector_state.json',[])
     technical=load(DATA/'holdings'/f'{day}_holding_technical_summary.json',[]); tech={code(x.get('code')):x for x in technical}
     prior=previous_review(day); prior_day=prior.get('date','待确认'); prior_actions=previous_holding_actions(prior)
-    intel_path=premarket_intelligence_path(day); intel=load_premarket_intelligence(day); market_events=intel.get('market_events') or fallback_rss_events(day); holding_events=intel.get('holding_events') or []
+    intel_path=premarket_intelligence_path(day); intel=load_premarket_intelligence(day)
+    intel_check=validate_premarket_intelligence(intel) if intel_path else {'valid':True,'errors':[],'warnings':[]}
+    if not intel_check['valid']: intel={}
+    market_events=intel.get('market_events') or fallback_rss_events(day); holding_events=intel.get('holding_events') or []
     holding_event_map={code(x.get('code')):x for x in holding_events}
     pos={code(x.get('代码')):x for x in positions}; quality=chief.get('market_quality',{}); freshness=chief.get('position_freshness',{}); pgate=chief.get('position_gate',{})
     window=intel.get('window') or {}; window_start=window.get('start') or f'{prior_day} 15:00'; window_end=window.get('end') or f'{a.date} 09:00'
     lines=[f'# 每日投研简报｜{dt.year}年{dt.month}月{dt.day}日（星期{WEEKDAY[dt.weekday()]}）'+(f'｜{a.session}' if a.session else ''),'',f'> 信息窗口：{window_start} 至 {window_end}（Asia/Shanghai）  ',f'> 生成时间：{datetime.now().strftime("%Y-%m-%d %H:%M:%S")} Asia/Shanghai','', '## 1. 今日核心结论','',f"**{chief.get('market_state','未知')}，总仓位建议 {chief.get('total_position_range','待确认')}；新开仓权限：{chief.get('new_position_permission','禁止')}。**",'',f"- 择时评分：{chief.get('market_score','待确认')}",f"- 风控等级：{chief.get('risk_level','提高')}",f"- 市场数据质量：{quality.get('status','未知')}（{quality.get('quality_score','NA')}）",f"- 持仓快照：{freshness.get('status','未知')}——{freshness.get('reason','')}",f"- 精确数量权限：{'允许' if pgate.get('allow_precise_quantity') else '禁止'}",'', '## 2. 隔夜重大消息与持仓公告','', '### 2.1 市场重大消息','']
+    schema_note=premarket_schema_note(intel_check)
+    if schema_note: lines += [schema_note,'']
     overseas=market.get('overseas_market',{}); amv=market.get('amv_0',{})
     lines += ['| 时间 | 事件 | 方向 | 对A股/持仓的影响 | 来源/质量 |','|---|---|---|---|---|']
     for e in market_events: lines.append(f"| {clean(e.get('published_at'))} | {clean(e.get('title'))} | {direction_label(e.get('direction'))} | {clean(e.get('impact'))} | {clean(e.get('source'))}/{clean(e.get('quality'),'candidate')} |")
@@ -196,6 +215,6 @@ def main():
     lines += ['', '### 候选审核','', '| 分层 | 代码 | 名称 | 总控结论 | 风控否决 |','|---|---|---|---|---|']
     for x in chief.get('buy_actions',[]): lines.append(f"| - | {code(x.get('code'))} | {x.get('name')} | {x.get('conclusion')} | {'是' if x.get('blocked_by_risk') else '否'} |")
     if not chief.get('buy_actions'): lines.append('| - | - | 暂无可审核计划 | 禁止临时开仓 | - |')
-    lines += ['', '## 6. 当日行动建议','', '| 决策项 | 执行规则 |','|---|---|',f"| 风控优先 | {'；'.join(chief.get('allowed_actions') or ['仅观察'])} |",f"| 新开仓 | {chief.get('new_position_permission','禁止')} |",f"| 仓位管理 | 建议 {chief.get('total_position_range','待确认')}；持仓快照、目标日行情或市场质量未全部通过时只给方向，不给精确数量 |",f"| 开盘验证 | 先验证隔夜利好/利空是否被价格与成交确认，再决定是否收紧计划；利好不得自动放宽权限 |",f"| 下一验证点 | {'；'.join(chief.get('tomorrow_validation') or [])} |",'', '## 7. 数据时效与声明','',f'- ChiefDecision：`{chief_path}`',f"- 持仓新鲜度：{freshness.get('status','未知')}；快照日期 {snapshot_date}；导入时间 {freshness.get('imported_at','未知')}；源文件时间 {freshness.get('source_mtime','未知')}",f"- 市场质量门：{quality.get('status','未知')}；candidate/partial/stale/missing 数据不得上调交易权限。",f"- 盘前情报：{intel_path or (DATA/'news'/'premarket'/f'{day}_premarket_intelligence.json')}；缺失时仅使用RSS候选降级展示。",'- 本报告仅渲染 ChiefDecision 的最终动作，不以消息、技术指标或上游技能覆盖风险否决。','- 本简报用于策略辅助，不构成收益承诺或无条件交易指令。']
+    lines += ['', '## 6. 当日行动建议','', '| 决策项 | 执行规则 |','|---|---|',f"| 风控优先 | {'；'.join(chief.get('allowed_actions') or ['仅观察'])} |",f"| 新开仓 | {chief.get('new_position_permission','禁止')} |",f"| 仓位管理 | 建议 {chief.get('total_position_range','待确认')}；持仓快照、目标日行情或市场质量未全部通过时只给方向，不给精确数量 |",f"| 开盘验证 | 先验证隔夜利好/利空是否被价格与成交确认，再决定是否收紧计划；利好不得自动放宽权限 |",f"| 下一验证点 | {'；'.join(chief.get('tomorrow_validation') or [])} |",'', '## 7. 数据时效与声明','',f'- ChiefDecision：`{chief_path}`',f"- 持仓新鲜度：{freshness.get('status','未知')}；快照日期 {snapshot_date}；导入时间 {freshness.get('imported_at','未知')}；源文件时间 {freshness.get('source_mtime','未知')}",f"- 市场质量门：{quality.get('status','未知')}；candidate/partial/stale/missing 数据不得上调交易权限。",f"- 盘前情报：{intel_path or (DATA/'news'/'premarket'/f'{day}_premarket_intelligence.json')}；缺失时仅使用RSS候选降级展示。{premarket_schema_marker(intel_check)}",'- 本报告仅渲染 ChiefDecision 的最终动作，不以消息、技术指标或上游技能覆盖风险否决。','- 本简报用于策略辅助，不构成收益承诺或无条件交易指令。']
     out=Path(a.output) if a.output else PLAN/f'{a.date}_daily_report.md'; out.parent.mkdir(parents=True,exist_ok=True); out.write_text('\n'.join(lines)+'\n',encoding='utf-8'); print(out)
 if __name__=='__main__': main()
