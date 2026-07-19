@@ -54,6 +54,12 @@ if not r["ok"]:
     print(f"【14:45尾盘报告失败｜{target}】行情采集失败：{r['out'][:300]}")
     sys.exit(1)
 
+# 2a. Intraday market snapshot via TQ-Local HTTP (best-effort, WARN on failure)
+r = _stage(["uv", "run", "python", str(TOOLS / "market_timing" / "collect_intraday_snapshot.py"),
+            "--date", target], "collect_intraday_snapshot")
+if not r["ok"]:
+    print(f"[WARN] 盘中快照采集失败（忽略，不中断）：{r['out'][:200]}", file=sys.stderr)
+
 # 2b. Update runtime gate with quotes_current flag
 gate_path = BASE / "01_data" / "quality" / f"{target}_runtime_gate.json"
 if gate_path.exists():
