@@ -173,15 +173,17 @@ uv run python 07_tools/run_2030.py
 
 ## OpenClaw Cron 配置
 
-如果使用 OpenClaw 作为运行时，cron job 配置如下（模型用 `glm-5.2`）：
+如果使用 OpenClaw 作为运行时，cron job 配置如下（以 `state/openclaw.sqlite` 的 `cron_jobs` 表为准）：
 
-| job ID 前缀 | 时间 | 脚本 | toolsAllow |
+| job ID 前缀 | 时间 | 任务 | toolsAllow |
 |---|---|---|---|
-| `580631b2` | 08:50 | `run_0850.py` | exec, wenda_notice_query |
+| `580631b2` | 08:50 | `run_0850.py` + wenda 公告检索 + 写 premarket_intelligence（含 RSS 候选风控研判） | exec, read, write, wenda_notice_query |
 | `26a0f75e` | 09:05 | `run_0905.py` | exec, read |
 | `708356c6` | 14:45 | `run_1445.py` | exec |
-| `e4a91dc9` | 15:15 | 盘后补数提醒 | exec |
+| `e4a91dc9` | 15:15 | 盘后补数提醒（0AMV/交易确认） | exec |
 | `6280f5fc` | 20:30 | `run_2030.py` | exec, read |
+| `73a4ff49` | 周五 14:35 | `trading_calendar.py --require-refresh` 刷新交易日历 | exec |
+| `77bf788f` | 15:00 | 14:45 报告投递验收（主会话 systemEvent） | — |
 
 ## 注意事项
 
