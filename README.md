@@ -182,6 +182,7 @@ uv run python 07_tools/run_2030.py
 | `708356c6` | 14:45 | `run_1445.py` | exec |
 | `e4a91dc9` | 15:15 | 盘后补数提醒（0AMV/交易确认） | exec |
 | `6280f5fc` | 20:30 | `run_2030.py` | exec, read |
+| `f15c0d06` | 周六 10:07 | `weekly_review.py` 周度复盘 + LLM 归因总结 | exec, read |
 | `73a4ff49` | 周五 14:35 | `trading_calendar.py --require-refresh` 刷新交易日历 | exec |
 | `77bf788f` | 15:00 | 14:45 报告投递验收（主会话 systemEvent） | — |
 

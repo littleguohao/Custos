@@ -223,6 +223,10 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 
 `04_reviews/weekly/YYYY-Www_weekly_review.md/json`
 
+### 实现状态（2026-07-19 起）
+
+由 `07_tools/close_review/weekly_review.py` 确定性生成，cron `f15c0d06`（每周六 10:07）触发，LLM 仅基于脚本事实写归因总结。已覆盖：交易明细与 FIFO 平仓盈亏、计划内/外交易、止损合规（-7% 线）、无交易确认完备性、卖飞分析（MFE）、持有期画像、0AMV 背景、执行/策略归因规则命中。未覆盖（待后续）：A/B/C/D 池迁移（候选池重建后）、组合回撤曲线、报告准时率、下周情景与风险预算（由 LLM 总结部分承担）。
+
 ---
 
 ## 七、正式报告五：月度复盘
