@@ -94,9 +94,46 @@ class FallbackOrderTest(unittest.TestCase):
     def test_intraday_all_online_fail_falls_to_reader(self) -> None:
         with mock.patch.object(chq, "_tq_snapshot_quote", return_value=None), \
              mock.patch.object(chq, "_online_bars_quote", side_effect=RuntimeError("conn")), \
+             mock.patch.object(chq, "_online_daily_quote", return_value=None), \
              mock.patch.object(chq, "_reader_quote", return_value=_quote("mootdx_reader")):
             q = chq._holding_quote("600000", "浦发银行", 1, "intraday", TARGET)
         self.assertEqual(q["source"], "mootdx_reader")
+
+    def test_intraday_online_bars_fail_falls_to_domain_b(self) -> None:
+        with mock.patch.object(chq, "_tq_snapshot_quote", return_value=None), \
+             mock.patch.object(chq, "_online_bars_quote", return_value=None), \
+             mock.patch.object(chq, "_online_daily_quote", return_value=_quote("tencent_daily")) as ob, \
+             mock.patch.object(chq, "_reader_quote") as rd:
+            q = chq._holding_quote("600000", "浦发银行", 1, "intraday", TARGET)
+        self.assertEqual(q["source"], "tencent_daily")
+        ob.assert_called_once()
+        rd.assert_not_called()
+
+    def test_postclose_reader_stale_tq_fail_falls_to_domain_b(self) -> None:
+        stale = _quote("mootdx_reader", d="2026-07-17")
+        with mock.patch.object(chq, "_reader_quote", return_value=stale), \
+             mock.patch.object(chq, "_tq_snapshot_quote", return_value=None), \
+             mock.patch.object(chq, "_online_daily_quote", return_value=_quote("sina_daily")) as ob:
+            q = chq._holding_quote("600000", "浦发银行", 1, "postclose", TARGET)
+        self.assertEqual(q["source"], "sina_daily")
+        ob.assert_called_once()
+
+    def test_postclose_bj_skips_domain_b(self) -> None:
+        with mock.patch.object(chq, "_reader_quote", return_value=None), \
+             mock.patch.object(chq, "_tq_snapshot_quote", return_value=None), \
+             mock.patch.object(chq, "_online_daily_quote") as ob, \
+             mock.patch.object(chq, "_eastmoney_bj_quote", return_value=_quote("eastmoney_push2_bj")):
+            q = chq._holding_quote("920808", "北证股", 2, "postclose", TARGET)
+        self.assertEqual(q["source"], "eastmoney_push2_bj")
+        ob.assert_not_called()
+
+    def test_intraday_bj_skips_domain_b(self) -> None:
+        with mock.patch.object(chq, "_tq_snapshot_quote", return_value=None), \
+             mock.patch.object(chq, "_online_daily_quote") as ob, \
+             mock.patch.object(chq, "_reader_quote", return_value=_quote("mootdx_reader")):
+            q = chq._holding_quote("920808", "北证股", 2, "intraday", TARGET)
+        self.assertEqual(q["source"], "mootdx_reader")
+        ob.assert_not_called()
 
     def test_intraday_bj_order_tq_reader_eastmoney(self) -> None:
         # tq 失败 → reader（不走 online bars）
@@ -192,6 +229,33 @@ class TqSnapshotIndexQuoteTest(unittest.TestCase):
             self.assertIsNone(chq._tq_snapshot_index_quote("000001", "x"))
 
 
+class OnlineDailyQuoteTest(unittest.TestCase):
+    BARS = [{"date": "2026-07-17", "open": 10.0, "high": 10.2, "low": 9.9, "close": 10.1, "volume": 100.0},
+            {"date": "2026-07-20", "open": 10.2, "high": 10.5, "low": 10.1, "close": 10.4, "volume": 200.0}]
+
+    def test_schema_and_change_pct(self) -> None:
+        with mock.patch.object(chq.online_quotes, "fetch_online_daily",
+                               return_value=(self.BARS, "tencent_daily")) as m:
+            q = chq._online_daily_quote("600000", "浦发银行", 1, TARGET)
+        m.assert_called_once_with("600000", count=3)
+        self.assertEqual(q["source"], "tencent_daily")
+        self.assertEqual(q["market"], "SH")
+        self.assertTrue(q["available"])
+        self.assertEqual(q["date"], "2026-07-20")
+        self.assertEqual(q["close"], 10.4)
+        self.assertEqual(q["previous_close"], 10.1)
+        self.assertAlmostEqual(q["change_pct"], round((10.4 / 10.1 - 1) * 100, 2))
+        self.assertEqual(q["open"], 10.2)
+        self.assertEqual(q["high"], 10.5)
+        self.assertEqual(q["low"], 10.1)
+        self.assertEqual(q["volume"], 200.0)
+        self.assertEqual(q["amount"], 0.0)
+
+    def test_failure_returns_none(self) -> None:
+        with mock.patch.object(chq.online_quotes, "fetch_online_daily", return_value=(None, None)):
+            self.assertIsNone(chq._online_daily_quote("600000", "x", 1, TARGET))
+
+
 class CollectIndicesFallbackTest(unittest.TestCase):
     def test_tq_success_short_circuits(self) -> None:
         snap = {"code": "000001", "name": "上证指数", "source": "tq_http_snapshot",
@@ -238,6 +302,33 @@ class CollectIndicesFallbackTest(unittest.TestCase):
         self.assertEqual(indices[0]["source"], "mootdx_reader")
         self.assertEqual(indices[0]["code"], "000001")
         self.assertEqual(indices[0]["close"], 3700.0)
+
+    def test_all_tdx_fail_falls_to_domain_b(self) -> None:
+        bars = [{"date": "2026-07-17", "open": 1.0, "high": 1.0, "low": 1.0,
+                 "close": 3680.0, "volume": 1.0},
+                {"date": "2026-07-20", "open": 1.0, "high": 1.0, "low": 1.0,
+                 "close": 3700.0, "volume": 2.0}]
+        with mock.patch.object(chq, "_tq_snapshot_index_quote", return_value=None), \
+             mock.patch.object(chq, "_get_client", side_effect=RuntimeError("conn")), \
+             mock.patch.object(chq, "_get_reader", side_effect=RuntimeError("no local")), \
+             mock.patch.object(chq.online_quotes, "fetch_online_daily",
+                               return_value=(bars, "tencent_daily")) as m:
+            indices = chq._collect_indices("postclose")
+        called = [c.args[0] for c in m.call_args_list]
+        self.assertEqual(called, ["sh000001", "sz399001", "sz399006"])
+        self.assertEqual(indices[0]["source"], "tencent_daily")
+        self.assertEqual(indices[0]["code"], "000001")
+        self.assertEqual(indices[0]["close"], 3700.0)
+        self.assertEqual(indices[0]["price"], 3700.0)
+        self.assertEqual(indices[0]["previous_close"], 3680.0)
+
+    def test_domain_b_also_fail_marks_unavailable(self) -> None:
+        with mock.patch.object(chq, "_tq_snapshot_index_quote", return_value=None), \
+             mock.patch.object(chq, "_get_client", side_effect=RuntimeError("conn")), \
+             mock.patch.object(chq, "_get_reader", side_effect=RuntimeError("no local")), \
+             mock.patch.object(chq.online_quotes, "fetch_online_daily", return_value=(None, None)):
+            indices = chq._collect_indices("postclose")
+        self.assertFalse(indices[0]["available"])
 
 
 if __name__ == "__main__":

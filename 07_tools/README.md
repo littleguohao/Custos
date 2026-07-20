@@ -41,7 +41,7 @@
 | `daily_pipeline.py` | 入口 runner | 日终完整管线(被 0905/2030 阶段复用) |
 | `daily_report.py` | 报告 | 从 ChiefDecision 渲染统一日报 |
 | `runtime_gate.py` | 门禁 | 写 runtime_gate.json(daily_pipeline / run_1445 调用) |
-| `collect_holding_quotes.py` | 采集 | 持仓+指数报价(tq_http / mootdx / 东财) |
+| `collect_holding_quotes.py` | 采集 | 持仓+指数报价(tq_http / mootdx / 域B在线 / 东财) |
 | `collect_incremental_market.py` | 采集 | A50、CNH、涨跌停梯队、北向等增量行情 |
 | `collect_fund_flow.py` | 采集 | 东财资金流排名 |
 | `calc_mfe_mae.py` | 分析 | 持仓 MFE/MAE 计算 |
@@ -50,6 +50,7 @@
 | `pipeline_kit.py` | 共享基建 | runner 共享件:run_stage、交易日历、md 摘要 |
 | `code_utils.py` | 共享基建 | 股票代码归一化 |
 | `net_retry.py` | 共享基建 | 网络请求指数退避重试 |
+| `online_quotes.py` | 共享基建 | 域B独立在线行情(腾讯/新浪日K,不依赖TDX) |
 | `runtime_guards.py` | 共享基建 | 交易日历/新鲜度/数据质量守卫 |
 | `trading_calendar.py` | 共享基建 | 交易日历维护(经 TDX JSON-RPC 刷新) |
 

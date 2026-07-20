@@ -2,14 +2,18 @@
 """Collect holding quotes + index quotes via mootdx / tq_http / eastmoney.
 
 持仓报价数据源优先级：
-- intraday 非BJ: tq_http 快照 → mootdx 在线 bars → mootdx Reader 本地
-- intraday BJ:   tq_http 快照 → mootdx Reader 本地 → 东财 push2
-- postclose 非BJ: mootdx Reader 本地 → mootdx 在线 bars（保持现状）
+- intraday 非BJ: tq_http 快照 → mootdx 在线 bars → 域B在线日K(腾讯/新浪) → mootdx Reader 本地
+- intraday BJ:   tq_http 快照 → mootdx Reader 本地 → 东财 push2（域B不支持BJ，不接）
+- postclose 非BJ: mootdx Reader 本地 → tq_http 快照 → 域B在线日K(腾讯/新浪)
 - postclose BJ:   mootdx Reader 本地 → tq_http 快照 → 东财 push2
+
+域B = online_quotes 模块（腾讯/新浪日 K），不依赖 TdxW / mootdx / key，
+作为 TDX 链路整体不可用时的独立在线兜底源。
 
 指数报价数据源优先级（intraday/postclose 统一）：
 tq_http 快照（999999.SH/399001.SZ/399006.SZ）→ mootdx 在线 index() →
-mootdx Reader 本地（999999/399001/399006；注意 reader 里 000001 是平安银行）。
+mootdx Reader 本地（999999/399001/399006；注意 reader 里 000001 是平安银行）→
+域B在线日K（sh000001/sz399001/sz399006；北证50 两源不支持，不接）。
 
 tq_http 快照走 TdxW 本地 HTTP 服务（127.0.0.1:17709）；TdxW 未运行时
 tq_http 干净返回 error，自然 fall through 到下一数据源。
@@ -40,6 +44,7 @@ if str(LOCAL_TDX_DIR) not in sys.path:
 from paths import BASE, TDX_ROOT  # noqa: E402
 from code_utils import norm_code  # noqa: E402
 import tq_http  # noqa: E402
+import online_quotes  # noqa: E402
 
 from mootdx.reader import Reader  # noqa: E402
 from mootdx.quotes import Quotes  # noqa: E402
@@ -155,6 +160,28 @@ def _online_bars_quote(code, name, mkt):
     }
 
 
+def _online_daily_quote(code, name, mkt, target):
+    """域 B 兜底：腾讯/新浪日 K 最后一根构造 quote（与 mootdx_online_bars 同构）。"""
+    bars, source = online_quotes.fetch_online_daily(code, count=3)
+    if not bars:
+        return None
+    last = bars[-1]
+    prev_close = float(bars[-2]["close"]) if len(bars) > 1 else 0.0
+    close = float(last["close"])
+    chg = round((close / prev_close - 1) * 100, 2) if prev_close else None
+    return {
+        "code": code, "name": name, "market": _market_name(mkt),
+        "available": True,
+        "date": str(last["date"])[:10],
+        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "open": float(last["open"]), "high": float(last["high"]),
+        "low": float(last["low"]), "close": close,
+        "previous_close": prev_close, "change_pct": chg,
+        "volume": float(last["volume"]), "amount": 0.0,
+        "source": source,
+    }
+
+
 def _reader_quote(code, name, mkt):
     """Fetch latest bar from local .day file."""
     df = _get_reader().daily(symbol=code)
@@ -229,14 +256,17 @@ def _holding_quote(code, name, mkt, session, target):
             if q is None:
                 q = _try_quote(_online_bars_quote, code, name, mkt)
             if q is None:
+                # 域 B 兜底（腾讯/新浪日 K，不依赖 TDX 链路）
+                q = _try_quote(_online_daily_quote, code, name, mkt, target)
+            if q is None:
                 q = _try_quote(_reader_quote, code, name, mkt)
     else:  # postclose: reader 本地优先
         q = _try_quote(_reader_quote, code, name, mkt)
         if q is None or q.get("date", "") != target:
-            if mkt == 2:
-                q = _tq_snapshot_quote(code, name, mkt, target)
-            else:
-                q = _try_quote(_online_bars_quote, code, name, mkt)
+            q = _tq_snapshot_quote(code, name, mkt, target)
+            if q is None and mkt != 2:
+                # 域 B 兜底（腾讯/新浪日 K；BJ 不支持，走东财）
+                q = _try_quote(_online_daily_quote, code, name, mkt, target)
     # BJ 最后兜底：东财 push2
     if q is None and mkt == 2:
         q = _try_quote(_eastmoney_bj_quote, code, name, target)
@@ -248,6 +278,8 @@ def _holding_quote(code, name, mkt, session, target):
 # 平安银行股票；reader/tq_http 必须用 999999（上证指数）才不会取错标的。
 INDEX_SNAPSHOT_CODES = {"000001": "999999.SH", "399001": "399001.SZ", "399006": "399006.SZ"}
 INDEX_READER_SYMBOLS = {"000001": "999999", "399001": "399001", "399006": "399006"}
+# 域 B（腾讯/新浪）指数代码：上证指数 sh000001；北证50(899050) 两源不支持，不接。
+INDEX_ONLINE_SYMBOLS = {"000001": "sh000001", "399001": "sz399001", "399006": "sz399006"}
 
 
 def _tq_snapshot_index_quote(code, name):
@@ -316,6 +348,22 @@ def _collect_indices(session):
                         "close": close, "price": close, "previous_close": prev_close,
                         "change_pct": chg, "volume": float(last["volume"]),
                         "source": "mootdx_reader"}
+            except Exception as e:
+                print(f"[WARN] {e}", file=sys.stderr)
+        # 域 B 最后兜底：腾讯/新浪日 K（独立在线源，不依赖 TDX 链路）
+        if idx is None:
+            try:
+                bars, source = online_quotes.fetch_online_daily(INDEX_ONLINE_SYMBOLS[code], count=3)
+                if bars:
+                    last = bars[-1]
+                    prev_close = float(bars[-2]["close"]) if len(bars) > 1 else 0.0
+                    close = float(last["close"])
+                    chg = round((close / prev_close - 1) * 100, 2) if prev_close else None
+                    idx = {"code": code, "name": name,
+                        "date": str(last["date"])[:10], "time": str(last["date"])[:10],
+                        "close": close, "price": close, "previous_close": prev_close,
+                        "change_pct": chg, "volume": float(last["volume"]),
+                        "source": source}
             except Exception as e:
                 print(f"[WARN] {e}", file=sys.stderr)
         if idx is None:
