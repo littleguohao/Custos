@@ -125,6 +125,15 @@ def main(argv=None) -> int:
     else:
         print(f"[OK] fund flow rank collected")
 
+    # 3c2. Refresh EOD daily K-lines into vipdoc via TQ-Local (needs TdxW running;
+    #      best-effort so the pipeline still works when TdxW is off)
+    r = _run_stage(["uv", "run", "python", str(TOOLS / "market_timing" / "refresh_eod_klines.py"),
+                    "--date", target], "refresh_eod_klines", note="best-effort，失败不中断")
+    if not r["ok"]:
+        print(f"[WARN] refresh_eod_klines failed: {r['out'][:200]}")
+    else:
+        print(f"[OK] {r['out'].splitlines()[0] if r['out'] else 'EOD klines refreshed'}")
+
     # 3d. Refresh market indices from vipdoc (ensure a_share_indices + turnover are populated)
     r = _run_stage(["uv", "run", "python", str(TOOLS / "market_timing" / "refresh_market_indices.py"),
                     "--date", target], "refresh_market_indices", note="best-effort，失败不中断")

@@ -58,6 +58,12 @@ def pct(a, b):
     return round((a / b - 1) * 100, 4)
 
 
+def _is_stale(as_of, target_date) -> bool:
+    """as_of（2026-07-17 或 20260717 形态）早于 --date 即视为过期，需要刷新。"""
+    s = str(as_of or "").replace("-", "").replace("/", "")[:8]
+    return s < target_date.replace("-", "")
+
+
 def compute_index(code: str) -> dict:
     """Compute index trend from vipdoc K-line data."""
     df = ltd.get_ohlcv_table(code, count=260, prefer="vipdoc")
@@ -137,8 +143,9 @@ def main():
     # Refresh each index
     for name, code in INDICES.items():
         cur = existing.get(name, {})
-        # Only refresh if not available or missing daily_change_pct
-        if cur.get("available") and cur.get("daily_change_pct") is not None:
+        # Only refresh if not available, missing daily_change_pct, or stale (latest_date < --date)
+        if (cur.get("available") and cur.get("daily_change_pct") is not None
+                and not _is_stale(cur.get("latest_date"), args.date)):
             continue
         fresh = compute_index(code)
         if fresh.get("available"):
@@ -171,7 +178,9 @@ def main():
             print(f"[OK] turnover: {daily_amount} (from 上证指数)")
 
     # Also try 880001 for full-market turnover and turnover_change_pct
-    turnover_needs_fix = not mkt.get("turnover") or mkt.get("turnover", {}).get("turnover_change_pct") is None
+    turnover_needs_fix = (not mkt.get("turnover")
+                          or mkt.get("turnover", {}).get("turnover_change_pct") is None
+                          or _is_stale(mkt.get("turnover", {}).get("as_of"), args.date))
     if turnover_needs_fix:
         try:
             df_880001 = ltd.get_ohlcv_table("880001.SH", count=5, prefer="vipdoc")
@@ -206,7 +215,8 @@ def main():
 
     # Refresh market breadth (涨跌家数) from 880005.SH
     breadth = mkt.get("market_breadth", {})
-    if not breadth or breadth.get("quality") in (None, "missing", "") or breadth.get("up_count") is None:
+    if (not breadth or breadth.get("quality") in (None, "missing", "")
+            or breadth.get("up_count") is None or _is_stale(breadth.get("as_of"), args.date)):
         try:
             df_bd = ltd.get_ohlcv_table(BREADTH_CODE, count=3, prefer="vipdoc")
             if not df_bd.empty:
@@ -230,7 +240,8 @@ def main():
 
     # Refresh sentiment (涨跌停) from 880006.SH
     sentiment = mkt.get("sentiment", {})
-    if not sentiment or sentiment.get("quality") in (None, "missing", "") or sentiment.get("limit_up_count") is None:
+    if (not sentiment or sentiment.get("quality") in (None, "missing", "")
+            or sentiment.get("limit_up_count") is None or _is_stale(sentiment.get("as_of"), args.date)):
         try:
             df_st = ltd.get_ohlcv_table(SENTIMENT_CODE, count=3, prefer="vipdoc")
             if not df_st.empty:
