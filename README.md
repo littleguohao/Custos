@@ -175,6 +175,8 @@ uv run python 07_tools/run_2030.py
 
 如果使用 OpenClaw 作为运行时，cron job 配置如下（以 `state/openclaw.sqlite` 的 `cron_jobs` 表为准）：
 
+> 报告投递：三个报告 job（0905/1445/2030）统一由 `07_tools/feishu_report_publisher.py` 完成——聊天发执行摘要（≤800 字）+ 完整报告 md 文件附件，不再经 LLM message 工具。凭据从环境变量或 `OPENCLAW_CONFIG` 读取。
+
 | job ID 前缀 | 时间 | 任务 | toolsAllow |
 |---|---|---|---|
 | `580631b2` | 08:50 | `run_0850.py` + wenda 公告检索 + 写 premarket_intelligence（含 RSS 候选风控研判） | exec, read, write, wenda_notice_query |
