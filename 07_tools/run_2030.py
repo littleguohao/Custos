@@ -133,15 +133,6 @@ def main(argv=None) -> int:
     else:
         print(f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'market indices refreshed'}")
 
-    # 3e. Sync Compass 0AMV into ledger + amv_0day (best-effort: 解析失败/锁文件仅 WARN,
-    #     人工 15:15 输入路径不受影响; merge 阶段的 amv_0day 自动确认随之生效)
-    r = _run_stage(["uv", "run", "python", str(TOOLS / "market_timing" / "sync_compass_amv.py"),
-                    "--date", target], "sync_compass_amv", note="best-effort，失败不中断")
-    if not r["ok"]:
-        print(f"[WARN] sync_compass_amv failed: {r['out'][:200]}")
-    elif r["stdout"]:
-        sys.stdout.write(r["stdout"])
-
     # 4. Merge incremental data into market_timing_input.json + auto-confirm 0AMV quality
     #    (best-effort: the script prints the [OK]/[WARN] lines, echoed here verbatim;
     #    a hard failure of the script itself only warns and never aborts the pipeline)
