@@ -156,5 +156,89 @@ class FallbackOrderTest(unittest.TestCase):
         self.assertEqual(q["source"], "eastmoney_push2_bj")
 
 
+class TqSnapshotIndexQuoteTest(unittest.TestCase):
+    def test_code_mapping_and_canonical_output(self) -> None:
+        # 内部用正确 TDX 代码（000001→999999.SH），输出 code 保持 canonical
+        value = {"Now": "3700.50", "LastClose": "3680.00", "Volume": "12345"}
+        with mock.patch.object(chq.tq_http, "snapshot", return_value=_ok(value)) as m:
+            q = chq._tq_snapshot_index_quote("000001", "上证指数")
+        m.assert_called_once_with("999999.SH")
+        self.assertEqual(q["code"], "000001")
+        self.assertEqual(q["name"], "上证指数")
+        self.assertEqual(q["source"], "tq_http_snapshot")
+        self.assertEqual(q["close"], 3700.5)
+        self.assertEqual(q["price"], 3700.5)
+        self.assertEqual(q["previous_close"], 3680.0)
+        self.assertAlmostEqual(q["change_pct"], round((3700.5 / 3680.0 - 1) * 100, 2))
+        self.assertEqual(q["volume"], 12345.0)
+        self.assertTrue(q["date"])
+        self.assertTrue(q["time"])
+
+    def test_sz_index_codes(self) -> None:
+        value = {"Now": "13700.0", "LastClose": "13700.0"}
+        for code, expect in [("399001", "399001.SZ"), ("399006", "399006.SZ")]:
+            with self.subTest(code=code), \
+                 mock.patch.object(chq.tq_http, "snapshot", return_value=_ok(value)) as m:
+                q = chq._tq_snapshot_index_quote(code, "x")
+            m.assert_called_once_with(expect)
+            self.assertEqual(q["code"], code)
+
+    def test_tq_failure_returns_none(self) -> None:
+        with mock.patch.object(chq.tq_http, "snapshot", return_value=_bad()):
+            self.assertIsNone(chq._tq_snapshot_index_quote("000001", "x"))
+        with mock.patch.object(chq.tq_http, "snapshot", side_effect=RuntimeError("boom")):
+            self.assertIsNone(chq._tq_snapshot_index_quote("000001", "x"))
+        with mock.patch.object(chq.tq_http, "snapshot", return_value=_ok({"Now": "0"})):
+            self.assertIsNone(chq._tq_snapshot_index_quote("000001", "x"))
+
+
+class CollectIndicesFallbackTest(unittest.TestCase):
+    def test_tq_success_short_circuits(self) -> None:
+        snap = {"code": "000001", "name": "上证指数", "source": "tq_http_snapshot",
+                "close": 3700.0, "price": 3700.0}
+        with mock.patch.object(chq, "_tq_snapshot_index_quote", return_value=snap) as tq, \
+             mock.patch.object(chq, "_get_client") as cli, \
+             mock.patch.object(chq, "_get_reader") as rd:
+            indices = chq._collect_indices("intraday")
+        self.assertEqual(indices[0]["source"], "tq_http_snapshot")
+        tq.assert_called()
+        cli.assert_not_called()
+        rd.assert_not_called()
+
+    def test_tq_fail_falls_to_online_index(self) -> None:
+        import pandas as pd
+        df = pd.DataFrame(
+            {"close": [3680.0, 3700.0], "volume": [1.0, 2.0],
+             "datetime": ["2026-07-17 15:00:00", "2026-07-20 15:00:00"]})
+        client = mock.Mock()
+        client.index.return_value = df
+        with mock.patch.object(chq, "_tq_snapshot_index_quote", return_value=None), \
+             mock.patch.object(chq, "_get_client", return_value=client), \
+             mock.patch.object(chq, "_get_reader") as rd:
+            indices = chq._collect_indices("intraday")
+        self.assertEqual(indices[0]["source"], "mootdx_online_index")
+        self.assertEqual(indices[0]["close"], 3700.0)
+        rd.assert_not_called()
+
+    def test_reader_fallback_uses_correct_tdx_symbol(self) -> None:
+        # 999999 才是上证指数日线；000001 在 reader 里是平安银行
+        import pandas as pd
+        df = pd.DataFrame(
+            {"open": [1.0, 1.0], "high": [1.0, 1.0], "low": [1.0, 1.0],
+             "close": [3680.0, 3700.0], "volume": [1.0, 2.0]},
+            index=pd.to_datetime(["2026-07-17", "2026-07-20"]))
+        reader = mock.Mock()
+        reader.daily.return_value = df
+        with mock.patch.object(chq, "_tq_snapshot_index_quote", return_value=None), \
+             mock.patch.object(chq, "_get_client", side_effect=RuntimeError("conn")), \
+             mock.patch.object(chq, "_get_reader", return_value=reader):
+            indices = chq._collect_indices("postclose")
+        called_symbols = [c.kwargs.get("symbol") for c in reader.daily.call_args_list]
+        self.assertEqual(called_symbols, ["999999", "399001", "399006"])
+        self.assertEqual(indices[0]["source"], "mootdx_reader")
+        self.assertEqual(indices[0]["code"], "000001")
+        self.assertEqual(indices[0]["close"], 3700.0)
+
+
 if __name__ == "__main__":
     unittest.main()

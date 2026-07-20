@@ -7,6 +7,10 @@
 - postclose 非BJ: mootdx Reader 本地 → mootdx 在线 bars（保持现状）
 - postclose BJ:   mootdx Reader 本地 → tq_http 快照 → 东财 push2
 
+指数报价数据源优先级（intraday/postclose 统一）：
+tq_http 快照（999999.SH/399001.SZ/399006.SZ）→ mootdx 在线 index() →
+mootdx Reader 本地（999999/399001/399006；注意 reader 里 000001 是平安银行）。
+
 tq_http 快照走 TdxW 本地 HTTP 服务（127.0.0.1:17709）；TdxW 未运行时
 tq_http 干净返回 error，自然 fall through 到下一数据源。
 
@@ -239,13 +243,47 @@ def _holding_quote(code, name, mkt, session, target):
     return q
 
 
+# 指数 canonical 代码 → 正确 TDX 代码。
+# 注意：mootdx index() 里 000001 是上证指数，但 reader.daily() 里 000001 是
+# 平安银行股票；reader/tq_http 必须用 999999（上证指数）才不会取错标的。
+INDEX_SNAPSHOT_CODES = {"000001": "999999.SH", "399001": "399001.SZ", "399006": "399006.SZ"}
+INDEX_READER_SYMBOLS = {"000001": "999999", "399001": "399001", "399006": "399006"}
+
+
+def _tq_snapshot_index_quote(code, name):
+    """TQ-Local HTTP 指数快照（TdxW 本地服务）。失败返回 None，绝不 raise。
+
+    内部映射到正确 TDX 代码（000001→999999.SH），输出 code 保持 canonical。
+    """
+    try:
+        resp = tq_http.snapshot(INDEX_SNAPSHOT_CODES[code])
+    except Exception:
+        return None
+    if not resp.get("ok"):
+        return None
+    v = resp.get("value")
+    if not isinstance(v, dict):
+        return None
+    now = _fnum(v.get("Now"))
+    if now is None or now <= 0:
+        return None
+    prev_close = _fnum(v.get("LastClose")) or 0.0
+    chg = round((now / prev_close - 1) * 100, 2) if prev_close else None
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return {"code": code, "name": name,
+            "date": now_str[:10], "time": now_str,
+            "close": now, "price": now, "previous_close": prev_close,
+            "change_pct": chg, "volume": _fnum(v.get("Volume")) or 0.0,
+            "source": "tq_http_snapshot"}
+
+
 def _collect_indices(session):
-    """Collect indices (online first for intraday, local Reader for postclose)."""
+    """Collect indices: tq_http 快照 → mootdx 在线 index() → reader 本地（三种 session 统一）。"""
     indices = []
     for code, name, mkt in [("000001", "上证指数", MARKET_SH), ("399001", "深证成指", MARKET_SZ), ("399006", "创业板指", MARKET_SZ)]:
-        idx = None
-        # intraday: online first
-        if session == "intraday":
+        idx = _tq_snapshot_index_quote(code, name)
+        # mootdx 在线 index()
+        if idx is None:
             try:
                 df = _get_client().index(frequency=9, market=mkt, symbol=code, start=0, offset=2)
                 if df is not None and len(df) >= 1:
@@ -262,10 +300,10 @@ def _collect_indices(session):
                         "source": "mootdx_online_index"}
             except Exception as e:
                 print(f"[WARN] {e}", file=sys.stderr)
-        # fallback or postclose: local reader
+        # fallback: local reader（用正确 TDX 代码，避免 000001 取到平安银行）
         if idx is None:
             try:
-                df = _get_reader().daily(symbol=code)
+                df = _get_reader().daily(symbol=INDEX_READER_SYMBOLS[code])
                 if df is not None and len(df) >= 2:
                     last = df.iloc[-1]
                     prev = df.iloc[-2]
