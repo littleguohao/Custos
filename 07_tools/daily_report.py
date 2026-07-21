@@ -218,6 +218,24 @@ def main():
     lines += ['', '### 候选审核','', '| 分层 | 代码 | 名称 | 总控结论 | 风控否决 |','|---|---|---|---|---|']
     for x in chief.get('buy_actions',[]): lines.append(f"| - | {code(x.get('code'))} | {x.get('name')} | {x.get('conclusion')} | {'是' if x.get('blocked_by_risk') else '否'} |")
     if not chief.get('buy_actions'): lines.append('| - | - | 暂无可审核计划 | 禁止临时开仓 | - |')
+    lines += ['', '### 公式选股备选池','']
+    pool=load(DATA/'stock_pool'/f'{day}_stock_pool.json',None)
+    pool_day=day
+    if not pool:  # 选股链 18:00 独立运行，盘前/盘后报告回退到最近一期备选池
+        prev=sorted((DATA/'stock_pool').glob('*_stock_pool.json'),reverse=True)
+        for p in prev:
+            if p.name[:10]<=day:
+                pool=load(p,None); pool_day=p.name[:10]; break
+    if not pool:
+        lines.append('未找到任何选股链产出。')
+    else:
+        counts=pool.get('bucket_counts') or {}
+        date_note='' if pool_day==day else f'（最近一期：{pool_day}）'
+        lines.append(f"- 选股链状态：{pool.get('status','未知')}{date_note}；分层 A {counts.get('A',0)} / B {counts.get('B',0)} / C {counts.get('C',0)} / D {counts.get('D',0)}；仅作证据层候选，不生成买入计划、不改变新开仓权限。")
+        pool_rows=[x for x in pool.get('candidates',[]) if x.get('bucket') in ('A','B')][:10]
+        if pool_rows:
+            lines += ['', '| 分层 | 代码 | 名称 | 板块 | 共振 | 评分 | 下一步 |','|---|---|---|---|---|---:|---|']
+            for x in pool_rows: lines.append(f"| {x.get('bucket')} | {code(x.get('code'))} | {x.get('name')} | {clean(x.get('sector'))} | {clean((x.get('resonance') or {}).get('resonance_level'))} | {x.get('score','-')} | {x.get('next_step','-')} |")
     lines += ['', '## 6. 当日行动建议','', '| 决策项 | 执行规则 |','|---|---|',f"| 风控优先 | {'；'.join(chief.get('allowed_actions') or ['仅观察'])} |",f"| 新开仓 | {chief.get('new_position_permission','禁止')} |",f"| 仓位管理 | 建议 {chief.get('total_position_range','待确认')}；持仓快照、目标日行情或市场质量未全部通过时只给方向，不给精确数量 |",f"| 开盘验证 | 先验证隔夜利好/利空是否被价格与成交确认，再决定是否收紧计划；利好不得自动放宽权限 |",f"| 下一验证点 | {'；'.join(chief.get('tomorrow_validation') or [])} |",'', '## 7. 数据时效与声明','',f'- ChiefDecision：`{chief_path}`',f"- 持仓新鲜度：{freshness.get('status','未知')}；快照日期 {snapshot_date}；导入时间 {freshness.get('imported_at','未知')}；源文件时间 {freshness.get('source_mtime','未知')}",f"- 市场质量门：{quality.get('status','未知')}；candidate/partial/stale/missing 数据不得上调交易权限。",f"- 盘前情报：{intel_path or (DATA/'news'/'premarket'/f'{day}_premarket_intelligence.json')}；缺失时仅使用RSS候选降级展示。{premarket_schema_marker(intel_check)}",'- 本报告仅渲染 ChiefDecision 的最终动作，不以消息、技术指标或上游技能覆盖风险否决。','- 本简报用于策略辅助，不构成收益承诺或无条件交易指令。']
     out=Path(a.output) if a.output else PLAN/f'{a.date}_daily_report.md'; out.parent.mkdir(parents=True,exist_ok=True); out.write_text('\n'.join(lines)+'\n',encoding='utf-8'); print(out)
 if __name__=='__main__': main()

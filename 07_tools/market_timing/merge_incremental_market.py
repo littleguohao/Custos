@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Merge incremental market data into market_timing_input.json and auto-confirm 0AMV quality.
 
-Extracted from run_2030.py (former steps 4-5) so the post-close
+Extracted from the post-close runner (former steps 4-5) so the post-close
 "market_timing_input finalization" logic becomes a reusable pipeline stage.
 Prints the same [OK]/[WARN] lines the in-process code used to print.
 Missing input files are a silent no-op (exit 0), matching the original

@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""20:30 one-shot post-close review pipeline.
+"""17:00 one-shot post-close review pipeline.
 
 stdout is a machine-consumed protocol (see the summary lines below) and is
-kept byte-compatible; observability goes to 06_logs/{date}_2030_run_log.json
+kept byte-compatible; observability goes to 06_logs/{date}_1700_run_log.json
 instead — every run (completed / closed / calendar_failed / failed) leaves
 one behind. Intermediate collection stages are best-effort (WARN, never
 abort): their failures are recorded as ok=false stage entries but do not set
@@ -33,7 +33,7 @@ _log_stage = log_stage
 
 
 def _write_run_log(target: str, status: str, started_at: str, t0: float, stages: list[dict]):
-    return write_run_log(LOG_DIR, "2030", target, status, started_at, t0, stages)
+    return write_run_log(LOG_DIR, "1700", target, status, started_at, t0, stages)
 
 
 def _stage(cmd: list[str], name: str) -> dict:

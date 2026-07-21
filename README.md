@@ -59,6 +59,8 @@ strategy_team/
 │   ├── market/                      # 行情、市场择时输入
 │   ├── news/                        # RSS 新闻
 │   ├── quality/                     # 运行门控
+│   ├── screening/                   # 选股链中间产物（公式命中、充实候选）
+│   ├── stock_pool/                  # 选股链分层输出（StockPool 契约）
 │   ├── trades/                      # 交易台账、持仓快照
 │   └── ...
 ├── 02_agents/              # [已废弃] 纯脚本驱动不再需要多角色 Agent 规格（编号不复用，目录已删）
@@ -70,7 +72,8 @@ strategy_team/
 │   ├── run_0850.py                  # 08:50 盘前预采集
 │   ├── run_0905.py                  # 09:05 盘前日报
 │   ├── run_1445.py                  # 14:45 尾盘操作建议
-│   ├── run_2030.py                  # 20:30 盘后复盘
+│   ├── run_1700.py                  # 17:00 盘后复盘
+│   ├── run_1800.py                  # 18:00 每日选股（独立链）
 │   ├── daily_pipeline.py            # 通用管线
 │   ├── generate_risk_and_sectors.py # risk_decision + sector_state 生成
 │   ├── collect_holding_quotes.py    # 持仓行情采集（mootdx）
@@ -82,6 +85,7 @@ strategy_team/
 │   ├── close_review/                # 尾盘+盘后复盘
 │   ├── market_timing/               # 市场择时、B1 状态
 │   ├── news/                        # RSS 采集与过滤
+│   ├── screening/                   # 每日选股链（公式初筛→充实→打分→表格）
 │   ├── trades/                      # 交易台账维护
 │   └── local_tdx/                   # mootdx 封装
 └── tests/                  # 独立测试目录（pytest）
@@ -100,14 +104,15 @@ strategy_team/
 
 ## 日常运行
 
-交易日三个时点自动触发（通过 OpenClaw cron 或手动执行）：
+交易日四个时点自动触发（通过 OpenClaw cron 或手动执行）：
 
 | 时间 | 脚本 | 说明 |
 |---|---|---|
 | 08:50 | `run_0850.py` | 交易日历检查 → 公告/海外行情/RSS 采集 → 增量市场数据 |
 | 09:05 | `run_0905.py` | 交易日历检查 → daily_pipeline(premarket) → 日报摘要 |
 | 14:45 | `run_1445.py` | 交易日历检查 → 持仓行情采集 → 运行门控 → close_review → 尾盘建议 |
-| 20:30 | `run_2030.py` | 交易日历检查 → 持仓收盘行情 → 增量市场数据 → MFE/MAE → 资金流向 → daily_pipeline(postclose) → final_close_review → 验证 |
+| 17:00 | `run_1700.py` | 交易日历检查 → 持仓收盘行情 → 增量市场数据 → MFE/MAE → 资金流向 → daily_pipeline(postclose) → final_close_review → 验证 |
+| 18:00 | `run_1800.py` | 每日选股独立链（与三份报告分离）：公式初筛 → 模式识别 → 共振打分 → 备选表格；消费 17:00 链产出的当日 sector_state/risk_decision |
 
 ### 手动执行
 
@@ -121,8 +126,11 @@ uv run python 07_tools/run_0905.py
 # 14:45 尾盘建议
 uv run python 07_tools/run_1445.py
 
-# 20:30 盘后复盘
-uv run python 07_tools/run_2030.py
+# 17:00 盘后复盘
+uv run python 07_tools/run_1700.py
+
+# 18:00 每日选股
+uv run python 07_tools/run_1800.py
 ```
 
 ## 数据源
@@ -140,6 +148,7 @@ uv run python 07_tools/run_2030.py
 | 北交所行情 | 东方财富 push2 API（mootdx 不支持 BJ） | `collect_holding_quotes.py` |
 | 公告 | wenda_notice_query | cron LLM 调用 |
 | 新闻 | RSS | `rss_collector.py` |
+| TQ 选股公式批量筛选 | TQ-Local（formula_process_mul_xg，需 TdxW 运行） | `screening/formula_screen.py` |
 
 ## 策略核心
 
@@ -157,7 +166,7 @@ uv run python 07_tools/run_2030.py
 
 1. 个股服从板块，板块服从大盘
 2. 风控优先于买入
-3. 候选池待重建（原 stock_pool/buy_strategy 流程已移除，theme_tracker 仍由 daily_pipeline 每日运行作为证据层；TQ 公式初筛 + LLM 因子评分重建中），买入计划由 chief_decision 统一裁决
+3. 候选池由每日选股 screening 链产出（18:00 独立运行，与三份报告分离：`screening/formula_screen.py` 公式初筛 → `enrich_candidates.py` 模式识别 → `score_candidates.py` 板块共振打分分层 A/B/C/D → `candidate_table.py` 备选表格，输出 `01_data/stock_pool/`，详见 `00_governance/SCREENING_WORKFLOW.md`）；StockPool 仅为证据层候选，买入计划由 chief_decision 统一裁决
 4. risk_control 拥有否决权
 5. chief_decision 是最终交易计划输出层
 6. 所有计划必须可复盘
@@ -175,7 +184,7 @@ uv run python 07_tools/run_2030.py
 
 如果使用 OpenClaw 作为运行时，cron job 配置如下（以 `state/openclaw.sqlite` 的 `cron_jobs` 表为准）：
 
-> 报告投递：三个报告 job（0905/1445/2030）统一由 `07_tools/feishu_report_publisher.py` 完成——聊天发执行摘要（≤800 字）+ 完整报告 md 文件附件，不再经 LLM message 工具。凭据从环境变量或 `OPENCLAW_CONFIG` 读取。
+> 报告投递：三个报告 job（0905/1445/1700）统一由 `07_tools/feishu_report_publisher.py` 完成——聊天发执行摘要（≤800 字）+ 完整报告 md 文件附件，不再经 LLM message 工具。凭据从环境变量或 `OPENCLAW_CONFIG` 读取。
 
 | job ID 前缀 | 时间 | 任务 | toolsAllow |
 |---|---|---|---|
@@ -183,7 +192,8 @@ uv run python 07_tools/run_2030.py
 | `26a0f75e` | 09:05 | `run_0905.py` | exec, read |
 | `708356c6` | 14:45 | `run_1445.py` | exec |
 | `e4a91dc9` | 15:15 | 盘后补数提醒（0AMV/交易确认） | exec |
-| `6280f5fc` | 20:30 | `run_2030.py` | exec, read |
+| `6280f5fc` | 17:00 | `run_1700.py` | exec, read |
+| （待建） | 18:00 | `run_1800.py` 每日选股独立链 | exec, read |
 | `f15c0d06` | 周六 10:07 | `weekly_review.py` 周度复盘 + LLM 归因总结 | exec, read |
 | `73a4ff49` | 周五 14:35 | `trading_calendar.py --require-refresh` 刷新交易日历 | exec |
 | `77bf788f` | 15:00 | 14:45 报告投递验收（主会话 systemEvent） | — |
@@ -192,7 +202,7 @@ uv run python 07_tools/run_2030.py
 
 - **BJ 股票（920xxx）**：mootdx Reader/Quotes 不支持北交所，通过东方财富 push2 API fallback
 - **mootdx Reader**：`daily()` 返回 DatetimeIndex 而非列，传入分析脚本前需 `reset_index()`
-- **0AMV**：需用户在 15:15 后手动确认数值，`run_2030.py` 会自动回写 `quality: confirmed`
+- **0AMV**：需用户在 15:15 后手动确认数值，`run_1700.py` 会自动回写 `quality: confirmed`（17:00 复盘前须完成确认）
 - **无交易默认**：B1 策略默认盘中不交易，除非用户确认或成交台账更新
 - **数据不入库**：`01_data/` 下的运行时数据通过 .gitignore 排除，只保留 `.md` 模板
 

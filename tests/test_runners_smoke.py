@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Smoke tests for the four daily runners on non-trading days.
+"""Smoke tests for the five daily runners on non-trading days.
 
 Runners exit right after the trading-calendar gate when the market is
 closed, so these tests are side-effect free. On trading days they are
@@ -21,7 +21,8 @@ RUNNERS = {
     "run_0850.py": "休市",
     "run_0905.py": "休市",
     "run_1445.py": "休市",
-    "run_2030.py": "休市",
+    "run_1700.py": "休市",
+    "run_1800.py": "休市",
 }
 
 

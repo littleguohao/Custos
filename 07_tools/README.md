@@ -12,7 +12,7 @@
 
 ```
 07_tools/
-├── run_0850.py ~ run_2030.py   # 时点入口 runner(由调度器调用)
+├── run_0850.py ~ run_1800.py   # 时点入口 runner(由调度器调用)
 ├── daily_pipeline.py           # 日终完整管线(0905/2030 的部分阶段复用)
 ├── daily_report.py             # 从 ChiefDecision 渲染统一日报
 ├── runtime_gate.py             # 运行门禁入口(写 quality/{date}_runtime_gate.json)
@@ -24,6 +24,7 @@
 ├── runtime_guards.py           # P0 运行时守卫:交易日历、新鲜度、数据质量
 ├── trading_calendar.py         # A 股交易日历刷新与查询
 ├── market_timing/              # 市场择时与持仓技术分析
+├── screening/                  # 每日选股链(公式初筛→充实→打分→表格,见 00_governance/SCREENING_WORKFLOW.md)
 ├── close_review/               # 收盘复盘(14:45 链核心)
 ├── news/                       # RSS 新闻采集与过滤
 ├── trades/                     # 交易台账同步、标准化、回测
@@ -37,7 +38,8 @@
 | `run_0850.py` | 入口 runner | 08:50 盘前数据采集 |
 | `run_0905.py` | 入口 runner | 09:05 盘前报告管线 |
 | `run_1445.py` | 入口 runner | 14:45 收盘复盘链 |
-| `run_2030.py` | 入口 runner | 20:30 盘后复盘链 |
+| `run_1700.py` | 入口 runner | 17:00 盘后复盘链 |
+| `run_1800.py` | 入口 runner | 18:00 每日选股独立链 |
 | `daily_pipeline.py` | 入口 runner | 日终完整管线(被 0905/2030 阶段复用) |
 | `daily_report.py` | 报告 | 从 ChiefDecision 渲染统一日报 |
 | `runtime_gate.py` | 门禁 | 写 runtime_gate.json(daily_pipeline / run_1445 调用) |
@@ -57,6 +59,7 @@
 ## 子包职责
 
 - `market_timing/` — 市场择时评分、持仓技术分析、AMV/0AMV 状态、EOD K 线刷新、板块映射、微信摘要等。
+- `screening/` — 每日选股链:`formula_screen`(TQ 公式初筛)、`enrich_candidates`(模式识别)、`score_candidates`(共振打分分层)、`candidate_table`(备选表格);18:00 独立链(run_1800.py)运行,与三份报告分离,TdxW 未运行时干净降级。
 - `close_review/` — 14:45 收盘复盘:执行复盘、终审、周复盘、持仓 BBI/结构分析。
 - `news/` — RSS 新闻采集(`rss_collector`)、过滤(`rss_filter`)、盘前情报 schema、盘后新闻摘要。
 - `trades/` — 交易台账同步与标准化、增量台账、0AMV 熊市回测。

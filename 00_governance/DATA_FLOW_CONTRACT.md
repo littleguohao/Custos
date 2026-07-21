@@ -1,6 +1,6 @@
 # 数据流契约
 
-> ⚠️ **设计参考 / 待重建**：本文档描述 Agent+skill 时代的数据流设计（skill_adapters、StockCandidate、BuyPlan 等），相关代码已移除。选股流程重建时以此为设计蓝图对齐。
+> ⚠️ **设计参考 / 部分重建**：本文档描述 Agent+skill 时代的数据流设计（skill_adapters、StockCandidate、BuyPlan 等），相关代码已移除。StockPool（StockCandidate）已由每日选股 screening 链重建（2026-07-21，见 `00_governance/SCREENING_WORKFLOW.md`）；其余实体重建时以此为设计蓝图对齐。
 
 日期：2026-07-09
 
@@ -200,7 +200,7 @@
 4. 缺少 stop_loss 时，buy_strategy 不得输出允许买入。
 5. risk_control 的禁止动作必须进入 chief_decision。
 6. chief_decision 输出后，才形成最终交易计划。
-7. 当前候选发现继续使用 `theme_tracker + stock_pool + formula_screen`；`tdx-wxd-a`、`tdx-wxd-bk` 暂不接入。
+7. 候选发现由每日选股 screening 链产出（`07_tools/screening/`：公式初筛 → 充实/模式识别 → 板块共振打分 → 备选表格，18:00 独立链 `run_1800.py` 运行，输出 `01_data/stock_pool/YYYY-MM-DD_stock_pool.json`）；`theme_tracker` 的 sector_state 是其板块输入；`tdx-wxd-a`、`tdx-wxd-bk` 暂不接入。
 8. 技能风险只允许追加，不能删除现有 risk flags。
 9. B 池交易计划最高只能输出“仅观察”；C/D 池不调用交易计划技能。
 10. SkillEvidence 为 `partial/stale/failed` 时，不得据此上调仓位或放宽交易权限。

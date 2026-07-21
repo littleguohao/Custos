@@ -2,7 +2,7 @@
 r"""Shared pipeline infrastructure for strategy_team runners.
 
 Extracted verbatim from existing code (daily_pipeline.py run(), run_0905.py /
-run_2030.py md-to-digest block) to eliminate duplication across the four
+run_1700.py md-to-digest block) to eliminate duplication across the five
 runners. Behavior must match the sources exactly:
 
 - run_stage: subprocess wrapper with [RUN] header, PYTHONIOENCODING=utf-8,
@@ -165,7 +165,7 @@ def md_to_digest(md_text: str, limit: int = 3500, truncate_note: str = "...(完�
     other non-empty lines are kept only after the first header (in_section).
     Leading empty lines are skipped. When the digest exceeds limit chars it is
     truncated to a limit - 50 char budget and truncate_note is appended on a
-    new line (run_0905 uses "...(完整报告见文件)", run_2030 uses
+    new line (run_0905 uses "...(完整报告见文件)", run_1700 uses
     "...(完整复盘见文件)"); truncation prefers keeping the title section and
     the "1."/"6." sections whole (see _truncate_digest).
     """
