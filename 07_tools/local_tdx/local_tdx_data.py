@@ -377,6 +377,25 @@ def get_stock_list(pool_type: str = "5") -> list[str]:
     return result
 
 
+def get_stock_name_map(pool_type: str = "5") -> dict[str, str]:
+    """Get {code6: name} for SH+SZ A-shares via mootdx online (best-effort)."""
+    client = _get_client()
+    from mootdx.consts import MARKET_SH, MARKET_SZ
+    result: dict[str, str] = {}
+    for mkt in [MARKET_SH, MARKET_SZ]:
+        try:
+            stocks = client.stocks(market=mkt)
+            if stocks is not None and not stocks.empty and "code" in stocks.columns:
+                for _, row in stocks.iterrows():
+                    code6 = _strip_suffix(str(row["code"]))
+                    name = str(row.get("name", "") or "").strip()
+                    if code6 and name:
+                        result[code6] = name
+        except Exception as e:
+            print(f"[WARN] get_stock_name_map market={mkt} failed: {e}", file=sys.stderr)
+    return result
+
+
 # ========== JSON/CSV helpers ==========
 
 def save_json(path: Path, obj: Any) -> None:

@@ -1,0 +1,48 @@
+{
+  "version": "v1",
+  "date": "2026-07-21",
+  "purpose": "每日选股 screening 链第 1 段（公式初筛）使用的 TQ 选股公式注册表。只能引用客户端已存在的公式名（系统公式或用户预建公式），不能跑任意表达式。改公式/改参数前必须先回测，见 00_governance/SCREENING_WORKFLOW.md。",
+  "universe": {
+    "exclude_st": true,
+    "exclude_bj": true,
+    "min_list_days": 60
+  },
+  "formulas": [
+    {
+      "id": "UPN_3",
+      "tq_name": "UPN",
+      "args": "3",
+      "stock_period": "1d",
+      "enabled": true,
+      "category": "momentum",
+      "note": "系统公式：连涨3天。2026-07-20 接口摸底实测可用（formula_process_mul_xg, arg=3, stock_period=1d, count=60）。"
+    },
+    {
+      "id": "MA_BUY",
+      "tq_name": "MA买入",
+      "args": "",
+      "stock_period": "1d",
+      "enabled": true,
+      "category": "trend",
+      "note": "系统公式：均线买入信号（2026-07-20 formula_get_all(type=1) 列出，共107个系统公式之一）。"
+    },
+    {
+      "id": "MACD_GOLD",
+      "tq_name": "MACD金叉",
+      "args": "",
+      "stock_period": "1d",
+      "enabled": true,
+      "category": "trend",
+      "note": "系统公式：MACD 金叉（同 107 个系统公式清单）。"
+    },
+    {
+      "id": "B1_REVERSAL_K",
+      "tq_name": "TODO_CLIENT_FORMULA",
+      "args": "",
+      "stock_period": "1d",
+      "enabled": false,
+      "category": "reversal",
+      "note": "B1 反转K候选公式。需在通达信客户端手工预建同名选股公式（低位J+极致缩量+小实体反转K）后，把 tq_name 改为客户端公式名并置 enabled=true。预建与运维流程见 00_governance/SCREENING_WORKFLOW.md。"
+    }
+  ]
+}
