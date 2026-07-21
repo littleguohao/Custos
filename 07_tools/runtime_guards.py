@@ -107,9 +107,38 @@ def confirm_position_snapshot(day: str, note: str = "user_confirmed") -> dict[st
     return records[day]
 
 
+def ledger_trades_on(day: str) -> list[dict[str, str]]:
+    """Buy/sell rows recorded in the master ledger for day (empty if none)."""
+    import csv
+
+    ledger = DATA / "trades" / "master_trade_ledger.csv"
+    if not ledger.exists():
+        return []
+    rows: list[dict[str, str]] = []
+    with ledger.open(encoding="utf-8-sig", newline="") as f:
+        for row in csv.DictReader(f):
+            if row.get("成交日期") == day and row.get("交易类别") in {"买入", "卖出"}:
+                rows.append(row)
+    return rows
+
+
 def position_freshness_with_confirmation(day: str) -> dict[str, Any]:
     result = position_freshness(day)
     confirmations = load_json(DATA / "trades" / "position_confirmations.json", {})
+
+    # 成交台账出现目标日成交时，立即覆盖"沿用无交易"基线
+    day_trades = ledger_trades_on(day)
+    if day_trades:
+        summary = "；".join(f"{r.get('交易类别')}{r.get('名称')}({r.get('代码')}) {r.get('成交数量')}股@{r.get('成交价格')}" for r in day_trades)
+        result.update({
+            "status": "confirmed", "confirmed": True,
+            "inherited": False, "ledger_trades": len(day_trades),
+            "reason": f"成交台账记录 {day} 当日交易 {len(day_trades)} 笔，持仓已按增量成交更新：{summary}",
+            "source": str(DATA / "trades" / "master_trade_ledger.csv"),
+        })
+        result.pop("assumption", None)
+        return result
+
     if day in confirmations:
         result.update({"status": "confirmed", "confirmed": True, "reason": "用户已确认当日持仓快照", "confirmation": confirmations[day]})
         return result
