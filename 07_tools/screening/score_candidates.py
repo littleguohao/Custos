@@ -84,6 +84,7 @@ DEFAULT_CAP_RULES = {
     "volume_retreat": True,        # 量能持续性=主力撤退 → 封顶 C（CZ §14.6，部分阈值待回测）
     "non_one_wave_revoked": True,  # 非一波流撤销 → 封顶 C（待回测）
     "cz_avoid_sector": True,       # CZ 回避方向板块 → D（治理名单驱动）
+    "distribution_cap": True,      # 主力出货五方式命中 → high 封 D / watch 封 C（B1 §七.3，待回测）
 }
 
 # sector_state.score 的量纲：generate_risk_and_sectors 用 float(score)>=60 门控
@@ -183,6 +184,20 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
     if (cand.get("non_one_wave") or {}).get("status") == "confirmed":
         score += 5
         contrib["non_one_wave_confirmed"] = 5
+    # 知行量价（good_b1）：多头趋势线 + 点火 + 缩量企稳 + 复合确认
+    zx = cand.get("zhixing") or {}
+    if zx.get("available") and zx.get("qsx_gt_dks"):
+        score += 6
+        contrib["zhixing_bull"] = 6
+    if (cand.get("ignition") or {}).get("hit"):
+        score += 4
+        contrib["ignition"] = 4
+    if (cand.get("pullback_shrink") or {}).get("hit"):
+        score += 3
+        contrib["pullback_shrink"] = 3
+    if (cand.get("b1_ignition") or {}).get("hit"):
+        score += 8
+        contrib["b1_ignition"] = 8
     score = min(score, 100)
     level = "强" if score >= 60 else ("中" if score >= 30 else "弱")
     return score, level, contrib
@@ -284,6 +299,18 @@ def score_candidate(
             bucket = "D"
         else:
             risk_flags.append("cz_avoid_sector_cap_disabled")
+    dist = cand.get("distribution") or {}
+    if dist.get("available") and dist.get("hits"):
+        # B1 §七.3：主力出货五方式命中 → 顶部派发规避
+        if rules["distribution_cap"]:
+            if dist.get("risk_level") == "high":
+                risk_flags.append("distribution_high")
+                bucket = "D"
+            else:
+                risk_flags.append("distribution_watch")
+                bucket = cap_bucket(bucket, "C")
+        else:
+            risk_flags.append("distribution_detected_cap_disabled")
 
     # 总分：技术 60% + 板块 40% + 共振调整，0-100
     resonance_adj = {"强共振": 5, "弱共振": 0, "无共振": 0, "反向": -5}[res_level]
@@ -315,6 +342,12 @@ def score_candidate(
         entry_reason.append("非一波流确认")
     if wave_type and wave_type != "unknown":
         entry_reason.append(f"波浪:{ {'buildup': '建仓波', 'rally': '拉升波', 'sprint': '冲刺波'}[wave_type] }")
+    if (cand.get("b1_ignition") or {}).get("hit"):
+        entry_reason.append("知行B1点火确认")
+    elif (cand.get("zhixing") or {}).get("available") and (cand.get("zhixing") or {}).get("qsx_gt_dks"):
+        entry_reason.append("知行多头(QSX>DKS)")
+    for _dk in dist.get("hits") or []:
+        entry_reason.append(f"出货信号:{_dk}")
 
     next_step = NEXT_STEP[bucket]
     if amv_state == "空头":
@@ -378,6 +411,13 @@ def score_candidate(
         "leader_volume": cand.get("leader_volume") or {},
         "three_lows": cand.get("three_lows") or {},
         "bottom_volume": cand.get("bottom_volume") or {},
+        # 知行量价 + 出货识别（good_b1 / 出货五方式）
+        "zhixing": cand.get("zhixing") or {},
+        "ignition": cand.get("ignition") or {},
+        "pullback_shrink": cand.get("pullback_shrink") or {},
+        "ride_above_fast": bool(cand.get("ride_above_fast")),
+        "b1_ignition": cand.get("b1_ignition") or {},
+        "distribution": cand.get("distribution") or {},
     }
 
 

@@ -195,6 +195,47 @@ def bbi_state(df: pd.DataFrame) -> dict[str, Any]:
     }
 
 
+def zhixing_state(df: pd.DataFrame, m1: int = 14, m2: int = 28, m3: int = 57, m4: int = 114) -> dict[str, Any]:
+    """知行趋势线（通达信 ZSDKX）：快线 QSX 上穿慢线 DKS 为多头/金叉。
+
+    - QSX = EMA(EMA(CLOSE,10),10)（短期趋势线，图上白线）。
+    - DKS = (MA(CLOSE,m1)+MA(CLOSE,m2)+MA(CLOSE,m3)+MA(CLOSE,m4))/4（多空线，图上黄线）。
+    - 多头状态 QSX>DKS；金叉=QSX 由下向上穿越 DKS 当日。
+    - 辅助：MA1=MA(CLOSE,60)、MA2=EMA(CLOSE,13)。
+    需 >= m4 根 K 线才能计算 DKS，否则 available=False。
+    """
+    if len(df) < m4:
+        return {"available": False, "reason": f"少于{m4}根K线，DKS(MA{m4})无法计算"}
+    close = df["close"].astype(float).reset_index(drop=True)
+    qsx = ema(ema(close, 10), 10)
+    dks = sum(close.rolling(n).mean() for n in (m1, m2, m3, m4)) / 4
+    valid = qsx.notna() & dks.notna()
+    if not valid.any():
+        return {"available": False, "reason": "QSX/DKS 无有效值"}
+    gt = (qsx > dks) & valid
+    prev_gt = gt.shift(1, fill_value=False)
+    cross_up = gt & (~prev_gt) & valid.shift(1, fill_value=False)
+    idxs = [i for i, v in enumerate(cross_up.tolist()) if v]
+    days_since = (len(close) - 1 - idxs[-1]) if idxs else None
+    qsx_last = float(qsx.iloc[-1])
+    dks_last = float(dks.iloc[-1])
+    c = float(close.iloc[-1])
+    ma1 = float(close.rolling(60).mean().iloc[-1]) if len(close) >= 60 else None
+    ma2 = float(ema(close, 13).iloc[-1])
+    return {
+        "available": True,
+        "qsx": round(qsx_last, 4),
+        "dks": round(dks_last, 4),
+        "qsx_gt_dks": bool(qsx_last > dks_last),
+        "golden_cross_today": bool(cross_up.iloc[-1]),
+        "days_since_golden_cross": days_since,
+        "close_above_qsx": bool(c >= qsx_last),
+        "ma1_ma60": round(ma1, 4) if ma1 is not None else None,
+        "ma2_ema13": round(ma2, 4),
+        "params": {"m1": m1, "m2": m2, "m3": m3, "m4": m4},
+    }
+
+
 def _infer_price_limit(code: str, df: pd.DataFrame) -> int:
     """Infer the daily price-limit percentage for a stock.
 
@@ -516,6 +557,7 @@ def analyze(df: pd.DataFrame) -> dict[str, Any]:
         "latest_date": df["date"].iloc[-1].strftime("%Y-%m-%d"),
         "trend": daily_trend,
         "bbi": bbi_state(df),
+        "zhixing": zhixing_state(df),
         "n_structure": n_structure_state(df),
         "descending_n_structure": descending_n_structure_state(df),
         "price_volume": price_volume_state(df),

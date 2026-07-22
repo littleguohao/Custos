@@ -13,9 +13,10 @@
       "sprint_wave": true,
       "volume_retreat": true,
       "non_one_wave_revoked": true,
-      "cz_avoid_sector": true
+      "cz_avoid_sector": true,
+      "distribution_cap": true
     },
-    "_note": "cap_rules 为待回测启发式驱动的封顶开关，默认全开＝历史行为；样本回测校准前如需只观察不降档，可逐条置 false（关闭后仍在候选 risk_flags 记录检出）。sector_score_max 为 sector_state.score 量纲上界，用于归一化到 0-100。"
+    "_note": "cap_rules 为待回测启发式驱动的封顶开关，默认全开＝历史行为；样本回测校准前如需只观察不降档，可逐条置 false（关闭后仍在候选 risk_flags 记录检出）。distribution_cap 控制主力出货五方式（顶部派发，B1 §七.3）：命中 high→封 D、watch→封 C。sector_score_max 为 sector_state.score 量纲上界，用于归一化到 0-100。知行量价/出货因子阈值见 enrich_candidates.py 顶部'待回测参数'常量。"
   },
   "theme_mapping": {
     "min_match": 1,

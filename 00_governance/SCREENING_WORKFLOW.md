@@ -142,6 +142,16 @@ stock_pool.json 的 `cz_sector_status`/`degraded_reason` 注明。
   - non_one_wave=revoked → 最高 C（B1 §四：撤销条件）。
 - 0AMV 空头最高 B、无止损位禁 A、共振矩阵等既有规则不变。
 
+### 知行量价 + 出货识别（B1 §四.5 / §七.3）
+
+来源：优质 B1 图集 + 主力出货五方式图集，落地为确定性因子（阈值待回测、实际值随候选落盘）。知行趋势线严格对齐通达信 ZSDKX。
+
+- **知行指标**（`technical_monitor.zhixing_state`）：`QSX=EMA(EMA(C,10),10)`（白线/快）、`DKS=(MA14+MA28+MA57+MA114)/4`（黄线/慢）；多头 `QSX>DKS`，金叉=上穿当日；需 ≥114 根，否则 available=false。
+- **正向因子**（`enrich`，进 `technical_score` 加分）：知行多头 `qsx_gt_dks`(+6)、放量点火 `ignition`(+4)、回调缩量企稳 `pullback_shrink`(+3)、复合 `b1_ignition`(+8，=（J<13 或 反转K）+ 缩量企稳 +（近N日金叉 或 点火））、沿短线上行 `ride_above_fast`。
+- **负向因子**（`enrich.detect_distribution`，出货五方式）：① 顶部天量大阴、② 次高点巨量长阴、③ 阶梯放量跌破 QSX（白线用 QSX）、④ 双头双巨阴、⑤ 顶部绿肥红瘦；命中 ①/② 或 ≥2 项 → `risk_level=high`，否则 `watch`。
+- **打分接入**：`score_candidates` 新增 `distribution_cap`（registry `scoring.cap_rules`，默认开）——high→封 D、watch→封 C；关闭则仅记 `distribution_detected_cap_disabled`、不降档。
+- **落盘**：候选带 `zhixing/ignition/pullback_shrink/ride_above_fast/b1_ignition/distribution`，`entry_reason` 追加"知行B1点火确认/知行多头/出货信号:*"。
+
 ### 边界声明
 
 - **财务类规则暂缓**：CZ 的 PEG/FCF/营收增速/"真科技8条"等基本面口径因
