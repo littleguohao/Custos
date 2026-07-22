@@ -249,3 +249,40 @@ def test_compute_metrics_contains_b1cz_fields():
                 "three_lows", "bottom_volume"]:
         assert key in m, f"compute_metrics 缺字段 {key}"
     assert m["bottom_volume"]["hit"] is True
+
+
+# ---------- P2: 数据源当日一致性（formula_hits 日期交叉校验 + signal_date） ----------
+
+def test_enrich_flags_formula_hits_date_mismatch(monkeypatch):
+    # 命中清单是昨日产出、本段目标是今日 → partial + formula_hits_date_mismatch
+    hits = {"date": "2026-07-20", "status": "ok",
+            "formulas": [{"id": "F1", "hits": [{"code": "600000", "name": "浦发"}]}]}
+    dates = pd.date_range(end="2026-07-21", periods=80, freq="B")
+    df = pd.DataFrame({
+        "date": dates, "open": 10.0, "high": 10.05, "low": 9.95,
+        "close": 10.0, "volume": 1000.0, "amount": 0.0,
+    })
+    # 隔离板块映射，聚焦一致性断言
+    monkeypatch.setattr(ec, "build_stock_theme_map", lambda **k: ({}, True))
+    result = ec.enrich("2026-07-21", hits_data=hits,
+                       ohlcv_loader=lambda c: df.copy(), index_loader=lambda: None)
+    assert result["status"] == "partial"
+    assert "formula_hits_date_mismatch:2026-07-20" in result["degraded_reason"]
+    assert "signal_date_contract" in result
+    assert result["candidates"]
+    assert result["candidates"][0]["signal_date"] == "2026-07-21"
+
+
+def test_enrich_same_day_hits_no_mismatch(monkeypatch):
+    hits = {"date": "2026-07-21", "status": "ok",
+            "formulas": [{"id": "F1", "hits": [{"code": "600000", "name": "浦发"}]}]}
+    dates = pd.date_range(end="2026-07-21", periods=80, freq="B")
+    df = pd.DataFrame({
+        "date": dates, "open": 10.0, "high": 10.05, "low": 9.95,
+        "close": 10.0, "volume": 1000.0, "amount": 0.0,
+    })
+    monkeypatch.setattr(ec, "build_stock_theme_map", lambda **k: ({}, True))
+    result = ec.enrich("2026-07-21", hits_data=hits,
+                       ohlcv_loader=lambda c: df.copy(), index_loader=lambda: None)
+    assert "formula_hits_date_mismatch" not in result["degraded_reason"]
+    assert result["candidates"][0]["signal_date"] == "2026-07-21"

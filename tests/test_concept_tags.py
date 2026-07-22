@@ -91,3 +91,30 @@ def test_build_stock_theme_map_falls_back_to_880(monkeypatch):
     assert ok
     assert stock_theme["000977"]["theme_id"] == "ai"
     assert stock_theme["000977"]["sector_source"] == "tq_880_fallback"
+
+
+def test_build_stock_theme_map_min_match_requires_stronger_evidence(monkeypatch):
+    # 603986 命中2标签(芯片/半导体)，600111 仅命中1标签(稀土)
+    monkeypatch.setattr(concept_tags, "load_tags",
+                        lambda: {"603986": ["存储芯片", "半导体"], "600111": ["稀土永磁"]})
+    monkeypatch.setattr(ec, "_load_json", lambda p, d: {
+        "themes": [
+            {"theme_id": "semi", "theme_name": "半导体/芯片/存储/封测",
+             "semantic_tags": ["芯片", "半导体"], "primary_sector_codes": [], "candidate_sector_codes": []},
+            {"theme_id": "rare", "theme_name": "稀土永磁",
+             "semantic_tags": ["稀土"], "primary_sector_codes": [], "candidate_sector_codes": []},
+        ]} if p == ec.SECTOR_CODE_MAP else d)
+
+    # min_match=1（默认）：两只都归类，match_count 落盘
+    m1, ok1 = ec.build_stock_theme_map(min_match=1)
+    assert ok1
+    assert m1["603986"]["theme_id"] == "semi" and m1["603986"]["match_count"] == 2
+    assert m1["600111"]["theme_id"] == "rare" and m1["600111"]["match_count"] == 1
+
+    # min_match=2：仅证据≥2的保留，单标签命中被剔除（宁缺毋滥）
+    m2, ok2 = ec.build_stock_theme_map(min_match=2)
+    assert "603986" in m2 and "600111" not in m2
+
+    # 非法 min_match 回退默认（≥1），不抛错
+    m3, _ = ec.build_stock_theme_map(min_match=0)
+    assert "603986" in m3 and "600111" in m3

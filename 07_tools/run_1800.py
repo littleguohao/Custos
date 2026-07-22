@@ -112,7 +112,7 @@ def main(argv=None) -> int:
         else:
             print(f"[OK] {r['out'].splitlines()[-1] if r['out'] else name}")
 
-    # 3. Digest of the candidate table (may be absent when the chain degraded early)
+    # 4. Digest of the candidate table (may be absent when the chain degraded early)
     table_path = TABLE_DIR / target / f"{target}_candidate_table.md"
     if table_path.exists():
         stages_log.append(_log_stage("candidate_digest", {"ok": True, "returncode": 0, "timeout": False},

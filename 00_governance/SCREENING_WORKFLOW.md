@@ -149,6 +149,30 @@ stock_pool.json 的 `cz_sector_status`/`degraded_reason` 注明。
 - **拉升波分类/非一波流是首个 B1 候选的辅助判断，不构成独立买点**；
   B1 买入仍需 J 低位、修复确认、止损位与市场许可同时成立（B1 §四.2）。
 
+## 可配置项与数据一致性
+
+所有开关集中在 `00_governance/SCREEN_FORMULA_REGISTRY.json`，默认值＝历史行为，
+改动前同样遵循「先回测」原则。
+
+- **`scoring.cap_rules`（封顶规则开关，默认全开）**：`sprint_wave` / `volume_retreat`
+  / `non_one_wave_revoked` / `cz_avoid_sector` 四条**待回测启发式**驱动的降档规则。
+  样本回测校准前若只想「观察不降档」，可逐条置 `false`；关闭后不再降档，但仍在候选
+  `risk_flags` 记录 `<rule>_detected_cap_disabled`，并把生效开关写入
+  `score_detail.cap_rules`，便于前后对比。
+- **`scoring.sector_score_max`（默认 100）**：`sector_state.score` 的量纲上界。
+  打分用 `0.6*技术分 + 0.4*板块分` 混合，板块分经 `normalize_sector_score` 归一化到
+  0–100 并 clamp（越界/缺失/负值都被兜底），`score_detail` 同时落盘归一化值与
+  `sector_score_raw`。若上游 generator 改量纲，只需改此值一处。
+- **`theme_mapping.min_match`（默认 1）**：概念标签命中主题所需的最小语义标签数。
+  提高到 2+ 要求更强证据、降低子串过度匹配；候选落盘 `match_count` 可复盘。
+
+**数据源当日一致性**：第 1 段公式初筛用 TQ 在线公式评估（`return_date=False`，命中
+日期由盘后调用时点决定），第 2 段充实用本地 vipdoc 日线。二者为独立来源，故：
+① 若 `formula_hits.json` 的 `date` 与目标日不符，enrich 标注 `partial` +
+`formula_hits_date_mismatch`；② 每只候选一律用本地日线 `last_date==date` 二次校验，
+不满足者计入 `excluded(no_today_bar)`，并落盘 `signal_date`，确保命中信号与所算指标
+同为当日（契约见 enrich 输出的 `signal_date_contract`）。
+
 ## 客户端预建公式运维流程
 
 1. 在通达信客户端"公式管理器"新建**条件选股公式**（名称即注册表 tq_name）。

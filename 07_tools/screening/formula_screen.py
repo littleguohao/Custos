@@ -42,7 +42,7 @@ REGISTRY_PATH = GOVERNANCE / "SCREEN_FORMULA_REGISTRY.json"
 
 FORMULA_TIMEOUT = 15          # 单公式调用超时（秒）
 CIRCUIT_BREAK_AFTER = 2       # 连续失败熔断阈值
-FORMULA_COUNT = 60            # 公式返回的逐日序列长度
+FORMULA_COUNT = 60            # 每股回溯 K 线根数（供公式内部指标计算，非返回序列长度）
 
 # 沪深 A 股代码前缀（mootdx stocks 返回全品类证券，含指数/基金/债券，必须过滤）
 _A_SHARE_RE = re.compile(r"^(60[0-5]|688|00[0-3]|30[0-3])\d{3}$")
@@ -185,6 +185,11 @@ def screen_formulas(
             entry["error"] = "circuit_open_skipped"
             continue
         attempted += 1
+        # TQ formula_process_mul_xg 参数语义（2026-07-20 接口摸底实测：UPN arg=3 / 1d / count=60）：
+        #   count        —— 每股回溯 K 线根数，供公式内部指标计算，非返回长度；
+        #   return_count —— 每股返回的最新结果个数（取 1＝仅最新交易日那一列）；
+        #   return_date=False —— 结果不带日期轴，故命中日期由调用时点（盘后即当日）决定，
+        #                        下游 enrich 再用本地日线 last_date==date 二次校验一致性。
         params = {
             "formula_name": f.get("tq_name", ""),
             "formula_arg": str(f.get("args", "") or ""),

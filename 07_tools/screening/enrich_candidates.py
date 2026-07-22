@@ -58,6 +58,10 @@ REVERSAL_CHANGE_PCT = 2.0
 REVERSAL_AMPLITUDE_PCT = 7.0
 STOP_LOOKBACK = 10           # 建议止损位：近10日最低价
 
+# 概念标签命中主题所需的最小标签数。默认 1＝历史行为（命中1个语义标签即归入该主题）；
+# 提高到 2+ 可要求更强证据、降低子串过度匹配，可经 registry.theme_mapping.min_match 覆盖。
+THEME_MIN_MATCH = 1
+
 # --- B1/CZ 策略对齐参数 -------------------------------------------------
 # 以下阈值全部标注"待回测参数"：策略原文（B1 §四、CZ §九/§14.6/§十六）
 # 要求阈值可配置、实际值随候选落盘，不得静默使用；完成样本回测前不得
@@ -107,6 +111,11 @@ def _load_json(path: Path, default: Any) -> Any:
         return default
 
 
+def _append_reason(existing: str, new: str) -> str:
+    """把多条降级原因用 ';' 累积拼接，避免后写覆盖先写。"""
+    return f"{existing};{new}" if existing else new
+
+
 def load_hits(date: str) -> dict:
     return _load_json(SCREENING_DIR / f"{date}_formula_hits.json", {})
 
@@ -149,14 +158,19 @@ def _match_theme_tags(stock_tags: list[str], semantic_tags: list[str]) -> list[s
     return matched
 
 
-def build_stock_theme_map() -> tuple[dict[str, dict], bool]:
+def build_stock_theme_map(min_match: int = THEME_MIN_MATCH) -> tuple[dict[str, dict], bool]:
     """股 → 主题方向（theme_id/sector 名）。
 
     优先用 miscinfo 概念标签（concept_tags，每股官方概念）匹配
     sector_code_map.json 各主题的 semantic_tags——准确度远高于 880 反查；
     标签文件缺失时回退 tq_sector_map 成分股反查（v1，已知存在错配）。
+    min_match：概念路径下命中主题所需的最小语义标签数（默认 1；提高可降低过度匹配）。
     返回 ({code6: {"theme_id","sector",...}}, map_available)。
     """
+    try:
+        min_match = max(1, int(min_match))
+    except (TypeError, ValueError):
+        min_match = THEME_MIN_MATCH
     code_map = _load_json(SECTOR_CODE_MAP, {})
     themes = code_map.get("themes") or []
     if not themes:
@@ -172,11 +186,12 @@ def build_stock_theme_map() -> tuple[dict[str, dict], bool]:
                 matched = _match_theme_tags(stock_tags, t.get("semantic_tags") or [])
                 if len(matched) > len(best_matched):
                     best_matched, best_theme = matched, t
-            if best_theme:
+            if best_theme and len(best_matched) >= min_match:
                 stock_theme[code6] = {
                     "theme_id": best_theme.get("theme_id", ""),
                     "sector": best_theme.get("theme_name", ""),
                     "matched_tags": best_matched,
+                    "match_count": len(best_matched),
                     "sector_source": "concept_tags",
                 }
         if stock_theme:
@@ -630,6 +645,7 @@ def enrich(
     ohlcv_loader=None,
     index_loader=None,
     universe_cfg: Optional[dict] = None,
+    theme_min_match: Optional[int] = None,
 ) -> dict:
     """充实命中股。loader 可注入以便测试；所有失败结构化落盘，绝不 raise。"""
     hits_data = hits_data if hits_data is not None else load_hits(date)
@@ -651,6 +667,19 @@ def enrich(
         )
         return result
 
+    # 数据源当日一致性：formula_hits（TQ 在线公式评估）与本段（本地 vipdoc 日线）是两个
+    # 独立来源。若命中清单不是当日产出（喂了旧文件/TQ 落后），标注 partial；无论如何，
+    # 下游都用逐票 last_date==date 二次校验（见循环内 no_today_bar 剔除）兜底。
+    hits_date = hits_data.get("date")
+    if hits_date and hits_date != date:
+        result["status"] = "partial"
+        result["degraded_reason"] = _append_reason(
+            result["degraded_reason"], f"formula_hits_date_mismatch:{hits_date}")
+    result["signal_date_contract"] = (
+        "公式命中(TQ在线)按最新交易日报出；本段以本地日线 last_date==date 逐票二次校验，"
+        "不满足者计入 excluded(no_today_bar)，确保命中信号与所算指标同为当日。"
+    )
+
     # 去重合并：code → {name, formula_ids}
     merged: dict[str, dict] = {}
     for f in hits_data.get("formulas", []):
@@ -666,10 +695,12 @@ def enrich(
 
     risk_high = load_risk_high_codes(date)
     holding = load_holding_codes()
-    stock_theme, theme_map_available = build_stock_theme_map()
+    stock_theme, theme_map_available = build_stock_theme_map(
+        min_match=theme_min_match if theme_min_match is not None else THEME_MIN_MATCH)
     if not theme_map_available:
         result["status"] = "partial"
-        result["degraded_reason"] = "sector_map_unavailable"
+        result["degraded_reason"] = _append_reason(
+            result["degraded_reason"], "sector_map_unavailable")
 
     load_ohlcv = ohlcv_loader or (lambda c: local_tdx_data.get_ohlcv_table(c, count=260))
     load_index = index_loader or (lambda: local_tdx_data.get_ohlcv_table(INDEX_CODE, count=260))
@@ -717,6 +748,7 @@ def enrich(
             "formula_hits": item["formula_hits"],
             "is_holding": code6 in holding,
             "list_days": len(df),
+            "signal_date": last_date,
             **compute_metrics(df, index_df),
         }
         theme = stock_theme.get(code6)
@@ -741,7 +773,8 @@ def main(argv: Optional[list] = None) -> int:
     registry = _load_json(
         Path(__file__).resolve().parents[2] / "00_governance" / "SCREEN_FORMULA_REGISTRY.json", {}
     )
-    result = enrich(args.date, universe_cfg=registry.get("universe") or {})
+    result = enrich(args.date, universe_cfg=registry.get("universe") or {},
+                    theme_min_match=(registry.get("theme_mapping") or {}).get("min_match"))
 
     SCREENING_DIR.mkdir(parents=True, exist_ok=True)
     out_path = SCREENING_DIR / f"{args.date}_candidates_enriched.json"

@@ -44,3 +44,14 @@ def test_b1_reversal_k_placeholder_disabled():
     assert b1["enabled"] is False
     assert b1["tq_name"] == "TODO_CLIENT_FORMULA"
     assert "客户端" in b1.get("note", "")
+
+
+def test_scoring_and_theme_mapping_sections():
+    data = _load()
+    scoring = data["scoring"]
+    assert isinstance(scoring, dict)
+    assert int(scoring["sector_score_max"]) > 0
+    caps = scoring["cap_rules"]
+    for key in ("sprint_wave", "volume_retreat", "non_one_wave_revoked", "cz_avoid_sector"):
+        assert isinstance(caps[key], bool)
+    assert int(data["theme_mapping"]["min_match"]) >= 1

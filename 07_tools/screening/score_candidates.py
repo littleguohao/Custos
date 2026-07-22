@@ -48,6 +48,7 @@ from paths import DATA, GOVERNANCE, MARKET_DIR, SECTORS_DIR, STOCK_POOL_DIR  # n
 
 SCREENING_DIR = DATA / "screening"
 CZ_SECTOR_PREF_PATH = GOVERNANCE / "CZ_SECTOR_PREFERENCE.json"
+REGISTRY_PATH = GOVERNANCE / "SCREEN_FORMULA_REGISTRY.json"
 
 BUCKET_ORDER = ["A", "B", "C", "D"]
 
@@ -73,6 +74,52 @@ NEXT_STEP = {
     "C": "long_term_track",
     "D": "avoid",
 }
+
+# 待回测启发式驱动的封顶规则开关。默认全开＝保持历史行为；关闭某项后不再据此
+# 降档，改在 risk_flags 记录 "<rule>_detected_cap_disabled"（仍随候选落盘，便于
+# 回测校准前后对比）。可经 SCREEN_FORMULA_REGISTRY.json 的 "scoring".cap_rules
+# 覆盖，见 00_governance/SCREENING_WORKFLOW.md「可配置项」。
+DEFAULT_CAP_RULES = {
+    "sprint_wave": True,           # 冲刺波后首个 B1 禁买 → 封顶 B（检测阈值待回测）
+    "volume_retreat": True,        # 量能持续性=主力撤退 → 封顶 C（CZ §14.6，部分阈值待回测）
+    "non_one_wave_revoked": True,  # 非一波流撤销 → 封顶 C（待回测）
+    "cz_avoid_sector": True,       # CZ 回避方向板块 → D（治理名单驱动）
+}
+
+# sector_state.score 的量纲：generate_risk_and_sectors 用 float(score)>=60 门控
+# 主升/修复，即 0-100。此常量供 normalize_sector_score 归一化/兜底，若未来 generator
+# 改量纲，只需改 registry "scoring".sector_score_max 一处即可。
+SECTOR_SCORE_MAX = 100.0
+
+
+def resolve_cap_rules(cap_rules: Optional[dict]) -> dict:
+    """把外部（registry/调用方）传入的 cap 开关并入默认表；未知键忽略。"""
+    rules = dict(DEFAULT_CAP_RULES)
+    if isinstance(cap_rules, dict):
+        for key, val in cap_rules.items():
+            if key in rules:
+                rules[key] = bool(val)
+    return rules
+
+
+def normalize_sector_score(raw: Any, score_max: float = SECTOR_SCORE_MAX) -> float:
+    """把 sector_state.score 归一化到 0-100 并 clamp，量纲异常/缺失时鲁棒兜底。
+
+    - raw 为 None/非数值 → 0.0（板块无评分，等价最弱）。
+    - score_max<=0 或非法 → 回退 SECTOR_SCORE_MAX（避免除零/放大）。
+    - 结果一律 clamp 到 [0, 100]，确保 0.4*sector_score 的量纲不被脏数据放大。
+    """
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+    try:
+        smax = float(score_max)
+    except (TypeError, ValueError):
+        smax = SECTOR_SCORE_MAX
+    if smax <= 0:
+        smax = SECTOR_SCORE_MAX
+    return max(0.0, min(100.0, val / smax * 100.0))
 
 
 def _load_json(path: Path, default: Any) -> Any:
@@ -176,11 +223,20 @@ def score_candidate(
     sector_entry: Optional[dict],
     amv_state: str,
     cz_sector: str = "neutral",
+    cap_rules: Optional[dict] = None,
+    sector_score_max: float = SECTOR_SCORE_MAX,
 ) -> dict:
-    """对单只充实候选打分分层，输出 StockPool 契约条目（含打分明细）。"""
+    """对单只充实候选打分分层，输出 StockPool 契约条目（含打分明细）。
+
+    cap_rules 传 None 时用 DEFAULT_CAP_RULES（全开＝历史行为）；显式传部分键可
+    单独关闭某条待回测封顶规则（关闭后仅在 risk_flags 记录检出、不降档）。
+    sector_score_max 指定 sector_state.score 的量纲上界，用于归一化到 0-100。
+    """
+    rules = resolve_cap_rules(cap_rules)
     tech_score, tech_level, factor_contrib = technical_score(cand)
     heat, pass_level, sector_cap, reason = sector_heat(sector_entry)
-    sector_score = float(sector_entry.get("score", 0) or 0) if sector_entry else 0.0
+    sector_score_raw = (sector_entry or {}).get("score") if sector_entry else None
+    sector_score = normalize_sector_score(sector_score_raw, sector_score_max)
 
     base_bucket = RESONANCE_MATRIX[(tech_level, heat)]
     res_level = resonance_level(tech_level, heat)
@@ -201,21 +257,33 @@ def score_candidate(
     wave_type = (cand.get("wave") or {}).get("wave_type")
     if wave_type == "sprint":
         # B1 §四.0：冲刺波后首个 B1 禁止买入 → 最高 B
-        if BUCKET_ORDER.index(bucket) < BUCKET_ORDER.index("B"):
-            risk_flags.append("sprint_wave_first_b1_forbidden")
-        bucket = cap_bucket(bucket, "B")
+        if rules["sprint_wave"]:
+            if BUCKET_ORDER.index(bucket) < BUCKET_ORDER.index("B"):
+                risk_flags.append("sprint_wave_first_b1_forbidden")
+            bucket = cap_bucket(bucket, "B")
+        else:
+            risk_flags.append("sprint_wave_detected_cap_disabled")
     if (cand.get("volume_sustain") or {}).get("status") == "retreat":
         # CZ §14.6：连续3日量<峰值55%，主力撤退 → 最高 C
-        risk_flags.append("main_force_retreat")
-        bucket = cap_bucket(bucket, "C")
+        if rules["volume_retreat"]:
+            risk_flags.append("main_force_retreat")
+            bucket = cap_bucket(bucket, "C")
+        else:
+            risk_flags.append("main_force_retreat_cap_disabled")
     if (cand.get("non_one_wave") or {}).get("status") == "revoked":
         # B1 §四：非一波流撤销（顶部放量大阴/回调放量破位）→ 最高 C
-        risk_flags.append("non_one_wave_revoked")
-        bucket = cap_bucket(bucket, "C")
+        if rules["non_one_wave_revoked"]:
+            risk_flags.append("non_one_wave_revoked")
+            bucket = cap_bucket(bucket, "C")
+        else:
+            risk_flags.append("non_one_wave_revoked_cap_disabled")
     if cz_sector == "avoid":
         # CZ §七：回避方向板块 → D
-        risk_flags.append("cz_avoid_sector")
-        bucket = "D"
+        if rules["cz_avoid_sector"]:
+            risk_flags.append("cz_avoid_sector")
+            bucket = "D"
+        else:
+            risk_flags.append("cz_avoid_sector_cap_disabled")
 
     # 总分：技术 60% + 板块 40% + 共振调整，0-100
     resonance_adj = {"强共振": 5, "弱共振": 0, "无共振": 0, "反向": -5}[res_level]
@@ -251,7 +319,7 @@ def score_candidate(
     next_step = NEXT_STEP[bucket]
     if amv_state == "空头":
         next_step = "observe_price"
-    if wave_type == "sprint" and next_step == "generate_buy_plan":
+    if wave_type == "sprint" and rules["sprint_wave"] and next_step == "generate_buy_plan":
         # 双保险：冲刺波后首个 B1 禁买，不得生成买入计划
         next_step = "observe_price"
 
@@ -266,6 +334,7 @@ def score_candidate(
             "sector_state": (sector_entry or {}).get("state")
                             or (sector_entry or {}).get("sector_state") or "未知",
             "sector_score": sector_score,
+            "sector_score_raw": sector_score_raw,
             "heat_level": heat,
             "pass_level": pass_level,
             "reason": reason,
@@ -282,8 +351,10 @@ def score_candidate(
         "score_detail": {
             "technical_score": tech_score,
             "sector_score": sector_score,
+            "sector_score_raw": sector_score_raw,
             "base_bucket": base_bucket,
             "resonance_adj": resonance_adj,
+            "cap_rules": rules,
             "factor_contrib": factor_contrib,
             "total": total,
         },
@@ -334,17 +405,30 @@ def cz_sector_of(sector_name: str, preference: Optional[dict]) -> str:
     return "neutral"
 
 
+def _load_scoring_config(path: Optional[Path] = None) -> dict:
+    """读 SCREEN_FORMULA_REGISTRY.json 的 "scoring" 段（cap_rules / sector_score_max）；
+    缺失/损坏返回 {}（调用方回退默认，行为不变）。"""
+    p = Path(path) if path else REGISTRY_PATH
+    data = _load_json(p, {})
+    scoring = data.get("scoring") if isinstance(data, dict) else None
+    return scoring if isinstance(scoring, dict) else {}
+
+
 def score_all(
     date: str,
     enriched: Optional[dict] = None,
     sector_states: Optional[list] = None,
     amv_state: Optional[str] = None,
     cz_preference: Optional[dict] = None,
+    cap_rules: Optional[dict] = None,
+    sector_score_max: Optional[float] = None,
 ) -> dict:
     """整池打分。输入缺失时干净降级，绝不 raise。
 
     cz_preference 传 None 时从 00_governance/CZ_SECTOR_PREFERENCE.json 加载；
     显式传 {} 表示"已加载但不可用"（测试降级路径用）。
+    cap_rules / sector_score_max 传 None 时从 registry "scoring" 段加载，缺失回退
+    默认（全开 + 0-100），行为与历史一致。
     """
     if enriched is None:
         enriched = _load_json(SCREENING_DIR / f"{date}_candidates_enriched.json", {})
@@ -357,6 +441,14 @@ def score_all(
         cz_preference = load_cz_sector_preference() or {}
     cz_status = "ok" if cz_preference else "missing"
 
+    if cap_rules is None or sector_score_max is None:
+        scoring_cfg = _load_scoring_config()
+        if cap_rules is None:
+            cap_rules = scoring_cfg.get("cap_rules")
+        if sector_score_max is None:
+            sector_score_max = scoring_cfg.get("sector_score_max", SECTOR_SCORE_MAX)
+    effective_caps = resolve_cap_rules(cap_rules)
+
     result: dict[str, Any] = {
         "date": date,
         "status": "ok",
@@ -365,6 +457,8 @@ def score_all(
         "amv_state": amv_state or "未知",
         "market_permission": market_permission(amv_state),
         "cz_sector_status": cz_status,
+        "cap_rules": effective_caps,
+        "sector_score_max": float(sector_score_max),
         "bucket_counts": {"A": 0, "B": 0, "C": 0, "D": 0},
         "candidates": [],
     }
@@ -399,7 +493,8 @@ def score_all(
     for cand in enriched.get("candidates", []):
         entry = by_theme.get(cand.get("theme_id", "")) or by_name.get(cand.get("sector", ""))
         cz_sector = cz_sector_of(cand.get("sector", ""), cz_preference)
-        scored = score_candidate(cand, entry, amv_state, cz_sector=cz_sector)
+        scored = score_candidate(cand, entry, amv_state, cz_sector=cz_sector,
+                                 cap_rules=cap_rules, sector_score_max=sector_score_max)
         result["candidates"].append(scored)
         result["bucket_counts"][scored["bucket"]] += 1
 

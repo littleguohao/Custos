@@ -7,6 +7,20 @@
     "exclude_bj": true,
     "min_list_days": 60
   },
+  "scoring": {
+    "sector_score_max": 100,
+    "cap_rules": {
+      "sprint_wave": true,
+      "volume_retreat": true,
+      "non_one_wave_revoked": true,
+      "cz_avoid_sector": true
+    },
+    "_note": "cap_rules 为待回测启发式驱动的封顶开关，默认全开＝历史行为；样本回测校准前如需只观察不降档，可逐条置 false（关闭后仍在候选 risk_flags 记录检出）。sector_score_max 为 sector_state.score 量纲上界，用于归一化到 0-100。"
+  },
+  "theme_mapping": {
+    "min_match": 1,
+    "_note": "概念标签命中主题所需的最小语义标签数。默认 1＝命中1个即归类；提高到 2+ 可要求更强证据、降低子串过度匹配。"
+  },
   "formulas": [
     {
       "id": "UPN_3",
