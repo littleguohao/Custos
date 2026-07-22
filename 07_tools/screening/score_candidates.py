@@ -44,9 +44,10 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import DATA, MARKET_DIR, SECTORS_DIR, STOCK_POOL_DIR  # noqa: E402
+from paths import DATA, GOVERNANCE, MARKET_DIR, SECTORS_DIR, STOCK_POOL_DIR  # noqa: E402
 
 SCREENING_DIR = DATA / "screening"
+CZ_SECTOR_PREF_PATH = GOVERNANCE / "CZ_SECTOR_PREFERENCE.json"
 
 BUCKET_ORDER = ["A", "B", "C", "D"]
 
@@ -86,26 +87,58 @@ def cap_bucket(bucket: str, cap: str) -> str:
     return bucket if BUCKET_ORDER.index(bucket) >= BUCKET_ORDER.index(cap) else cap
 
 
-def technical_score(cand: dict) -> tuple[int, str]:
-    """技术分（0-100）与技术面层级（强>=60 / 中30-59 / 弱<30）。确定性加分。"""
+def technical_score(cand: dict) -> tuple[int, str, dict]:
+    """技术分（0-100）与技术面层级（强>=60 / 中30-59 / 弱<30）。确定性加分。
+
+    B1/CZ 对齐加分（阈值见 enrich_candidates 顶部"待回测参数"）：
+    five_day_entry +8、leader_volume +6、bottom_volume +6、
+    repair_signals 每项 +3（上限 +6）、non_one_wave=confirmed +5。
+    返回 (score, level, factor_contrib)（factor_contrib 落盘可复盘）。
+    """
     patterns = cand.get("patterns") or {}
+    contrib: dict[str, int] = {}
     score = 0
     if patterns.get("bbi_above"):
         score += 25
+        contrib["bbi_above"] = 25
     daily_j = cand.get("daily_j")
     if patterns.get("j_low"):
         score += 20
+        contrib["j_low"] = 20
     elif daily_j is not None and 13 <= daily_j < 50:
         score += 10
+        contrib["j_mid"] = 10
     if patterns.get("volume_contraction"):
         score += 15
+        contrib["volume_contraction"] = 15
     if patterns.get("reversal_k_candidate"):
         score += 25
+        contrib["reversal_k_candidate"] = 25
     if patterns.get("relative_strength_strong"):
         score += 15
+        contrib["relative_strength_strong"] = 15
+    if (cand.get("five_day_entry") or {}).get("hit"):
+        score += 8
+        contrib["five_day_entry"] = 8
+    leader = cand.get("leader_volume") or {}
+    if leader.get("available") and leader.get("hit"):
+        score += 6
+        contrib["leader_volume"] = 6
+    bottom = cand.get("bottom_volume") or {}
+    if bottom.get("available") and bottom.get("hit"):
+        score += 6
+        contrib["bottom_volume"] = 6
+    repair_hits = (cand.get("repair_signals") or {}).get("signals") or []
+    if repair_hits:
+        pts = min(len(repair_hits) * 3, 6)
+        score += pts
+        contrib["repair_signals"] = pts
+    if (cand.get("non_one_wave") or {}).get("status") == "confirmed":
+        score += 5
+        contrib["non_one_wave_confirmed"] = 5
     score = min(score, 100)
     level = "强" if score >= 60 else ("中" if score >= 30 else "弱")
-    return score, level
+    return score, level, contrib
 
 
 def sector_heat(sector_entry: Optional[dict]) -> tuple[str, str, str, str]:
@@ -142,9 +175,10 @@ def score_candidate(
     cand: dict,
     sector_entry: Optional[dict],
     amv_state: str,
+    cz_sector: str = "neutral",
 ) -> dict:
     """对单只充实候选打分分层，输出 StockPool 契约条目（含打分明细）。"""
-    tech_score, tech_level = technical_score(cand)
+    tech_score, tech_level, factor_contrib = technical_score(cand)
     heat, pass_level, sector_cap, reason = sector_heat(sector_entry)
     sector_score = float(sector_entry.get("score", 0) or 0) if sector_entry else 0.0
 
@@ -156,7 +190,7 @@ def score_candidate(
     if cand.get("is_holding"):
         risk_flags.append("is_holding")
 
-    # 封顶规则
+    # 封顶规则（cap 只降不升）
     bucket = cap_bucket(base_bucket, sector_cap)
     if not (cand.get("stop_loss_ref") or {}).get("price"):
         if BUCKET_ORDER.index(bucket) < BUCKET_ORDER.index("B"):
@@ -164,6 +198,24 @@ def score_candidate(
         bucket = cap_bucket(bucket, "B")
     if amv_state == "空头":
         bucket = cap_bucket(bucket, "B")
+    wave_type = (cand.get("wave") or {}).get("wave_type")
+    if wave_type == "sprint":
+        # B1 §四.0：冲刺波后首个 B1 禁止买入 → 最高 B
+        if BUCKET_ORDER.index(bucket) < BUCKET_ORDER.index("B"):
+            risk_flags.append("sprint_wave_first_b1_forbidden")
+        bucket = cap_bucket(bucket, "B")
+    if (cand.get("volume_sustain") or {}).get("status") == "retreat":
+        # CZ §14.6：连续3日量<峰值55%，主力撤退 → 最高 C
+        risk_flags.append("main_force_retreat")
+        bucket = cap_bucket(bucket, "C")
+    if (cand.get("non_one_wave") or {}).get("status") == "revoked":
+        # B1 §四：非一波流撤销（顶部放量大阴/回调放量破位）→ 最高 C
+        risk_flags.append("non_one_wave_revoked")
+        bucket = cap_bucket(bucket, "C")
+    if cz_sector == "avoid":
+        # CZ §七：回避方向板块 → D
+        risk_flags.append("cz_avoid_sector")
+        bucket = "D"
 
     # 总分：技术 60% + 板块 40% + 共振调整，0-100
     resonance_adj = {"强共振": 5, "弱共振": 0, "无共振": 0, "反向": -5}[res_level]
@@ -183,9 +235,24 @@ def score_candidate(
     for tag, hit in (cand.get("patterns") or {}).items():
         if hit:
             entry_reason.append(label.get(tag, tag))
+    if (cand.get("five_day_entry") or {}).get("hit"):
+        entry_reason.append("五日战法入场")
+    if (cand.get("leader_volume") or {}).get("hit"):
+        entry_reason.append("龙头量能")
+    if (cand.get("bottom_volume") or {}).get("hit"):
+        entry_reason.append("底部巨量")
+    for sig in (cand.get("repair_signals") or {}).get("signals") or []:
+        entry_reason.append(f"修复信号:{sig}")
+    if (cand.get("non_one_wave") or {}).get("status") == "confirmed":
+        entry_reason.append("非一波流确认")
+    if wave_type and wave_type != "unknown":
+        entry_reason.append(f"波浪:{ {'buildup': '建仓波', 'rally': '拉升波', 'sprint': '冲刺波'}[wave_type] }")
 
     next_step = NEXT_STEP[bucket]
     if amv_state == "空头":
+        next_step = "observe_price"
+    if wave_type == "sprint" and next_step == "generate_buy_plan":
+        # 双保险：冲刺波后首个 B1 禁买，不得生成买入计划
         next_step = "observe_price"
 
     return {
@@ -216,6 +283,7 @@ def score_candidate(
             "sector_score": sector_score,
             "base_bucket": base_bucket,
             "resonance_adj": resonance_adj,
+            "factor_contrib": factor_contrib,
             "total": total,
         },
         "bucket": bucket,
@@ -226,7 +294,43 @@ def score_candidate(
         "daily_j": cand.get("daily_j"),
         "stop_loss_ref": cand.get("stop_loss_ref"),
         "is_holding": bool(cand.get("is_holding")),
+        # B1/CZ 策略对齐落盘字段
+        "cz_sector": cz_sector,
+        "wave": cand.get("wave") or {},
+        "weekly_j": cand.get("weekly_j"),
+        "weekly_j_low": bool(cand.get("weekly_j_low")),
+        "non_one_wave": cand.get("non_one_wave") or {},
+        "repair_signals": cand.get("repair_signals") or {},
+        "five_day_entry": cand.get("five_day_entry") or {},
+        "volume_sustain": cand.get("volume_sustain") or {},
+        "leader_volume": cand.get("leader_volume") or {},
+        "three_lows": cand.get("three_lows") or {},
+        "bottom_volume": cand.get("bottom_volume") or {},
     }
+
+
+def load_cz_sector_preference(path: Optional[Path] = None) -> Optional[dict]:
+    """加载 CZ 板块白/黑名单；文件缺失/损坏返回 None（调用方降级为 neutral）。"""
+    p = Path(path) if path else CZ_SECTOR_PREF_PATH
+    data = _load_json(p, None)
+    if not isinstance(data, dict):
+        return None
+    if not isinstance(data.get("favored"), list) or not isinstance(data.get("avoid"), list):
+        return None
+    return data
+
+
+def cz_sector_of(sector_name: str, preference: Optional[dict]) -> str:
+    """主题名子串匹配白/黑名单（avoid 优先，保守）；无匹配或名单缺失 → neutral。"""
+    if not preference or not sector_name or sector_name == "未知":
+        return "neutral"
+    for kw in preference.get("avoid") or []:
+        if kw and kw in sector_name:
+            return "avoid"
+    for kw in preference.get("favored") or []:
+        if kw and kw in sector_name:
+            return "favored"
+    return "neutral"
 
 
 def score_all(
@@ -234,8 +338,13 @@ def score_all(
     enriched: Optional[dict] = None,
     sector_states: Optional[list] = None,
     amv_state: Optional[str] = None,
+    cz_preference: Optional[dict] = None,
 ) -> dict:
-    """整池打分。输入缺失时干净降级，绝不 raise。"""
+    """整池打分。输入缺失时干净降级，绝不 raise。
+
+    cz_preference 传 None 时从 00_governance/CZ_SECTOR_PREFERENCE.json 加载；
+    显式传 {} 表示"已加载但不可用"（测试降级路径用）。
+    """
     if enriched is None:
         enriched = _load_json(SCREENING_DIR / f"{date}_candidates_enriched.json", {})
     if sector_states is None:
@@ -243,6 +352,9 @@ def score_all(
     if amv_state is None:
         market = _load_json(MARKET_DIR / f"{date}_market_timing_input.json", {})
         amv_state = str((market.get("amv_0") or {}).get("effective_state") or "")
+    if cz_preference is None:
+        cz_preference = load_cz_sector_preference() or {}
+    cz_status = "ok" if cz_preference else "missing"
 
     result: dict[str, Any] = {
         "date": date,
@@ -251,6 +363,7 @@ def score_all(
         "source": "screening_chain_v1",
         "amv_state": amv_state or "未知",
         "market_permission": market_permission(amv_state),
+        "cz_sector_status": cz_status,
         "bucket_counts": {"A": 0, "B": 0, "C": 0, "D": 0},
         "candidates": [],
     }
@@ -264,6 +377,14 @@ def score_all(
     if not sector_states:
         result["status"] = "partial"
         result["degraded_reason"] = "sector_state_missing"
+    if cz_status == "missing":
+        # 名单缺失：cz_sector 一律 neutral（不起作用），在 status/degraded_reason 注明
+        if result["status"] == "ok":
+            result["status"] = "partial"
+        note = "cz_sector_preference_missing"
+        result["degraded_reason"] = (
+            f"{result['degraded_reason']};{note}" if result["degraded_reason"] else note
+        )
 
     # theme_id / sector 名 → sector_state 条目
     by_theme: dict[str, dict] = {}
@@ -276,7 +397,8 @@ def score_all(
 
     for cand in enriched.get("candidates", []):
         entry = by_theme.get(cand.get("theme_id", "")) or by_name.get(cand.get("sector", ""))
-        scored = score_candidate(cand, entry, amv_state)
+        cz_sector = cz_sector_of(cand.get("sector", ""), cz_preference)
+        scored = score_candidate(cand, entry, amv_state, cz_sector=cz_sector)
         result["candidates"].append(scored)
         result["bucket_counts"][scored["bucket"]] += 1
 

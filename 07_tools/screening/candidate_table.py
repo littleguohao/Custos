@@ -35,6 +35,22 @@ PATTERN_LABELS = {
     "relative_strength_strong": "强RS",
 }
 
+WAVE_LABELS = {"buildup": "建仓", "rally": "拉升", "sprint": "冲刺"}
+
+
+def _cz_tags(c: dict) -> str:
+    """CZ 标签紧凑拼接：五日/龙头量/底部巨量/撤退。"""
+    tags = []
+    if (c.get("five_day_entry") or {}).get("hit"):
+        tags.append("五日")
+    if (c.get("leader_volume") or {}).get("hit"):
+        tags.append("龙头量")
+    if (c.get("bottom_volume") or {}).get("hit"):
+        tags.append("底部巨量")
+    if (c.get("volume_sustain") or {}).get("status") == "retreat":
+        tags.append("撤退")
+    return "、".join(tags) or "-"
+
 
 def _fmt(v: Any, suffix: str = "") -> str:
     if v is None:
@@ -63,13 +79,14 @@ def render_table(pool: dict, date: str) -> str:
             lines.append("")
             continue
         lines.append(
-            "| 代码 | 名称 | 公式命中 | 模式标签 | 技术分 | 板块 | 板块状态 | 共振 | 分层 | 建议止损位 | next_step |"
+            "| 代码 | 名称 | 公式命中 | 模式标签 | 波浪 | CZ标签 | 技术分 | 板块 | 板块状态 | 共振 | 分层 | 建议止损位 | next_step |"
         )
-        lines.append("|---|---|---|---|---:|---|---|---|---|---|---|")
+        lines.append("|---|---|---|---|---|---|---:|---|---|---|---|---|---|")
         for c in rows:
             tags = "、".join(
                 PATTERN_LABELS[t] for t, hit in (c.get("patterns") or {}).items() if hit
             ) or "-"
+            wave = WAVE_LABELS.get((c.get("wave") or {}).get("wave_type"), "-")
             shf = c.get("sector_heat_filter") or {}
             res = c.get("resonance") or {}
             detail = c.get("score_detail") or {}
@@ -78,6 +95,8 @@ def render_table(pool: dict, date: str) -> str:
                 f"| {c.get('code')} | {c.get('name')}"
                 f" | {'、'.join(c.get('formula_hits') or []) or '-'}"
                 f" | {tags}"
+                f" | {wave}"
+                f" | {_cz_tags(c)}"
                 f" | {_fmt(detail.get('technical_score'))}"
                 f" | {c.get('sector', '未知')}"
                 f" | {shf.get('sector_state', '未知')}"
