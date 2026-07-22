@@ -3,7 +3,9 @@
 
 Once the regime enters 空头 it remains 空头 until a later confirmed daily
 0AMV change is strictly greater than +4%. A daily reading between thresholds
-must not reset the regime to neutral.
+must not reset the regime to neutral. Only readings with
+quality == "confirmed" drive regime transitions; candidate/unconfirmed
+readings crossing a threshold are recorded but keep the prior locked state.
 """
 from __future__ import annotations
 import argparse,json,sys
@@ -41,13 +43,22 @@ def compute(day:str, initial:str|None=None):
     append_observation(day,amv)
     prior_dates=sorted(k for k in hist if k<day)
     prior=hist[prior_dates[-1]]['effective_state'] if prior_dates else (initial or amv.get('prior_effective_state') or '未知')
+    quality=amv.get('quality') or 'candidate'; confirmed=quality=='confirmed'
     if value is None: state=prior; transition='缺值，延续前态'
-    elif float(value)>4: state='做多'; transition='单日涨幅>4%，切换/维持做多'
-    elif float(value)<-2.3: state='空头'; transition='单日跌幅<-2.3%，切换/维持空头'
+    elif float(value)>4:
+        if confirmed: state='做多'; transition='单日涨幅>4%（confirmed），切换/维持做多'
+        else:
+            state=prior if prior in ('空头','做多') else '中性'
+            transition=f'单日涨幅>4%但读数未确认（quality={quality}），不驱动状态转移'
+    elif float(value)<-2.3:
+        if confirmed: state='空头'; transition='单日跌幅<-2.3%（confirmed），切换/维持空头'
+        else:
+            state=prior if prior in ('空头','做多') else '中性'
+            transition=f'单日跌幅<-2.3%但读数未确认（quality={quality}），不驱动状态转移'
     elif prior=='空头': state='空头'; transition='空头锁定；未达到>4%，继续空头'
     elif prior=='做多': state='做多'; transition='做多延续；未触发空头阈值'
     else: state='中性'; transition='无已知锁定前态，处于阈值之间'
-    rec={'date':day,'daily_change_pct':value,'prior_state':prior,'effective_state':state,'transition_reason':transition,'confirmed':amv.get('quality')=='confirmed'}
+    rec={'date':day,'daily_change_pct':value,'prior_state':prior,'effective_state':state,'transition_reason':transition,'confirmed':confirmed}
     hist[day]=rec; STATE.write_text(json.dumps(hist,ensure_ascii=False,indent=2),encoding='utf-8')
     amv.update({'daily_zone':'做多触发' if value is not None and float(value)>4 else ('空头触发' if value is not None and float(value)<-2.3 else '阈值内'),'prior_effective_state':prior,'effective_state':state,'state_transition_reason':transition})
     market_path.write_text(json.dumps(d,ensure_ascii=False,indent=2),encoding='utf-8'); return rec
