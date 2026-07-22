@@ -11,7 +11,7 @@ def _cand(**extra):
         "theme_id": "semiconductor_chip_memory_packaging",
         "formula_hits": ["UPN_3"],
         "patterns": {"bbi_above": True, "j_low": True, "volume_contraction": True,
-                     "reversal_k_candidate": True, "relative_strength_strong": False},
+                     "reversal_k_candidate": True, "relative_strength_strong": True},
         "daily_j": 10.0,
         "stop_loss_ref": {"price": 10.0, "basis": "近10日最低价"},
         "is_holding": False,
@@ -72,13 +72,17 @@ def test_bonus_factor_contrib_recorded():
     )
     scored = sc.score_candidate(cand, SECTOR_STRONG, "做多")
     contrib = scored["score_detail"]["factor_contrib"]
+    # 反转K复合分取代子项：j_low / volume_contraction 不再单独计分
+    assert "j_low" not in contrib and "volume_contraction" not in contrib
+    assert contrib["reversal_k_candidate"] == 25
+    assert contrib["reversal_k_replaces"] == "j_low+volume_contraction"
     assert contrib["five_day_entry"] == 8
     assert contrib["leader_volume"] == 6
     assert contrib["bottom_volume"] == 6
     assert contrib["repair_signals"] == 6  # 每项+3，上限+6
     assert contrib["non_one_wave_confirmed"] == 5
-    # 基础85 + 8+6+6+6+5 = 116 → 封顶100
-    assert scored["score_detail"]["technical_score"] == 100
+    # 基础 bbi25 + 反转K25 + 强RS15 + 8+6+6+6+5 = 96
+    assert scored["score_detail"]["technical_score"] == 96
 
 
 def test_cz_sector_of_matching():

@@ -149,19 +149,23 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
     if patterns.get("bbi_above"):
         score += 25
         contrib["bbi_above"] = 25
-    daily_j = cand.get("daily_j")
-    if patterns.get("j_low"):
-        score += 20
-        contrib["j_low"] = 20
-    elif daily_j is not None and 13 <= daily_j < 50:
-        score += 10
-        contrib["j_mid"] = 10
-    if patterns.get("volume_contraction"):
-        score += 15
-        contrib["volume_contraction"] = 15
     if patterns.get("reversal_k_candidate"):
+        # 反转K为复合信号：命中时其子项（j_low、volume_contraction）不再单独加分，
+        # 由 composite 分取代（未命中时子项照常计分）。
         score += 25
         contrib["reversal_k_candidate"] = 25
+        contrib["reversal_k_replaces"] = "j_low+volume_contraction"
+    else:
+        daily_j = cand.get("daily_j")
+        if patterns.get("j_low"):
+            score += 20
+            contrib["j_low"] = 20
+        elif daily_j is not None and 13 <= daily_j < 50:
+            score += 10
+            contrib["j_mid"] = 10
+        if patterns.get("volume_contraction"):
+            score += 15
+            contrib["volume_contraction"] = 15
     if patterns.get("relative_strength_strong"):
         score += 15
         contrib["relative_strength_strong"] = 15
@@ -184,7 +188,10 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
     if (cand.get("non_one_wave") or {}).get("status") == "confirmed":
         score += 5
         contrib["non_one_wave_confirmed"] = 5
-    # 知行量价（good_b1）：多头趋势线 + 点火 + 缩量企稳 + 复合确认
+    # 知行量价（good_b1）：多头趋势线 + 点火 + 缩量企稳 + 复合确认。
+    # 注意：b1_ignition 是复合信号（含 ignition/pullback_shrink 条件），此处
+    # 子项与复合项有意叠加计分，待回测校准（与 reversal_k 的"复合取代子项"
+    # 口径不同，属已知不一致，回测后统一）。
     zx = cand.get("zhixing") or {}
     if zx.get("available") and zx.get("qsx_gt_dks"):
         score += 6
@@ -261,11 +268,10 @@ def score_candidate(
     if cand.get("is_holding"):
         risk_flags.append("is_holding")
 
-    # 封顶规则（cap 只降不升）
+    # 封顶规则（cap 只降不升；条件 flag 无条件记录，cap 是否实际触发另算）
     bucket = cap_bucket(base_bucket, sector_cap)
     if not (cand.get("stop_loss_ref") or {}).get("price"):
-        if BUCKET_ORDER.index(bucket) < BUCKET_ORDER.index("B"):
-            risk_flags.append("no_stop_loss_ref")
+        risk_flags.append("no_stop_loss_ref")
         bucket = cap_bucket(bucket, "B")
     if amv_state == "空头":
         bucket = cap_bucket(bucket, "B")
@@ -273,8 +279,7 @@ def score_candidate(
     if wave_type == "sprint":
         # B1 §四.0：冲刺波后首个 B1 禁止买入 → 最高 B
         if rules["sprint_wave"]:
-            if BUCKET_ORDER.index(bucket) < BUCKET_ORDER.index("B"):
-                risk_flags.append("sprint_wave_first_b1_forbidden")
+            risk_flags.append("sprint_wave_first_b1_forbidden")
             bucket = cap_bucket(bucket, "B")
         else:
             risk_flags.append("sprint_wave_detected_cap_disabled")
@@ -520,6 +525,15 @@ def score_all(
         result["degraded_reason"] = (
             f"{result['degraded_reason']};{note}" if result["degraded_reason"] else note
         )
+    if not amv_state:
+        # market_timing 缺失：按保守处理（不放宽任何 cap，视同仅低吸），
+        # 但必须显式标注，不得静默。
+        if result["status"] == "ok":
+            result["status"] = "partial"
+        note = "market_timing_missing"
+        result["degraded_reason"] = (
+            f"{result['degraded_reason']};{note}" if result["degraded_reason"] else note
+        )
 
     # theme_id / sector 名 → sector_state 条目
     by_theme: dict[str, dict] = {}
@@ -538,7 +552,7 @@ def score_all(
         result["candidates"].append(scored)
         result["bucket_counts"][scored["bucket"]] += 1
 
-    result["candidates"].sort(key=lambda x: (-x["score"], x["code"]))
+    result["candidates"].sort(key=lambda x: (BUCKET_ORDER.index(x["bucket"]), -x["score"], x["code"]))
     return result
 
 

@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import io
+import json
 import os
 import sys
 import time
@@ -41,6 +42,24 @@ def _stage(cmd: list[str], name: str) -> dict:
         r = run_stage(cmd, name, required=False)
     r["out"] = (r["stdout"] + r["stderr"]).strip()
     return r
+
+
+def stage_json_status(stdout: str) -> str:
+    """从 stage stdout 提取摘要 JSON 的 status 字段。
+
+    stdout 混有 tqdm 进度条等非 JSON 行——只取最后一行尝试 json.loads，
+    解析失败返回 ""（不计入 degraded 判定）。
+    """
+    lines = (stdout or "").strip().splitlines()
+    if not lines:
+        return ""
+    try:
+        obj = json.loads(lines[-1])
+    except ValueError:
+        return ""
+    if not isinstance(obj, dict):
+        return ""
+    return str(obj.get("status", "") or "")
 
 
 def main(argv=None) -> int:
@@ -106,10 +125,13 @@ def main(argv=None) -> int:
     ]:
         r = _run_stage(["uv", "run", "python", str(SCREEN_DIR / script), "--date", target],
                        name, note="best-effort，失败不中断")
+        stage_status = stage_json_status(r.get("stdout") or "")
         if not r["ok"]:
             degraded.append(name)
             print(f"[WARN] {name} failed: {r['out'][:200]}")
         else:
+            if stage_status in ("unavailable", "partial"):
+                degraded.append(name)
             print(f"[OK] {r['out'].splitlines()[-1] if r['out'] else name}")
 
     # 4. Digest of the candidate table (may be absent when the chain degraded early)

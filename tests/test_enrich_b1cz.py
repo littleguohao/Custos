@@ -286,3 +286,68 @@ def test_enrich_same_day_hits_no_mismatch(monkeypatch):
                        ohlcv_loader=lambda c: df.copy(), index_loader=lambda: None)
     assert "formula_hits_date_mismatch" not in result["degraded_reason"]
     assert result["candidates"][0]["signal_date"] == "2026-07-21"
+
+
+# ---------- code review 修复回归 ----------
+
+def test_bottom_volume_miss_when_today_makes_new_20d_low():
+    # #1：当日刚创 20 日新低（剔除当日的前20日最低被跌破）→ no_new_low=False 不命中
+    df = _cz250_df(2500.0)
+    df.loc[249, "low"] = df["low"].iloc[-21:-1].min() - 0.5
+    r = ec.check_bottom_volume(df)
+    assert r["available"] and r["hit"] is False
+    assert r["conditions"]["no_new_low"]["hit"] is False
+
+
+def test_wave_sprint_survives_pullback_after_top():
+    # #2：冲刺到顶后回调约 8%（B1 回调时点），段内加速口径仍判 sprint
+    closes = [10.0] * 40 + [11.0, 11.0, 12.1, 12.5, 13.5, 14.5, 15.5]
+    closes += [15.0, 14.5, 14.26]  # 顶部后回调 ~8%
+    vols = [1000.0] * 46 + [3000.0, 800.0, 700.0, 600.0]
+    r = ec.detect_wave_type(make_df(closes, vols=vols))
+    assert r["wave_type"] == "sprint"
+    assert r["detail"]["accel_10d_gain_pct"] >= 25
+
+
+def test_volume_sustain_daily_breach_not_confirmed():
+    # #6：均值达标（约67%>55%）但有单日 40%<55% → 逐日口径不 confirmed
+    vols = [100.0] * 7 + [1000.0] + [700.0] * 5 + [400.0] + [700.0] * 6
+    r = ec.check_volume_sustain(make_df([10.0] * 20, vols=vols))
+    assert r["status"] != "mainline_confirmed"
+    assert r["post_mean_ratio"] >= 0.55  # 均值口径本会误判
+    assert r["post_min_ratio"] < 0.55
+
+
+def test_limit_up_mask_ignores_zero_close_bars():
+    # #11a：close=0 脏数据 bar 不产生假性涨停（11/0=inf 不得计入）
+    closes = [10.0] * 40 + [0.0, 11.0, 11.0, 12.1, 12.5, 13.5, 14.5, 15.5]
+    r = ec.detect_wave_type(make_df(closes))
+    assert r["detail"]["limit_up_count_20d"] == 1  # 仅 12.1/11.0=+10% 一次
+
+
+def test_distribution_unavailable_when_vol_ma20_near_zero():
+    # #11b：全零成交量 → vol_ma20 近零 → 派发检测器 available=False
+    r = ec.detect_distribution(make_df([10.0] * 40, vols=[0.0] * 40), code="600000")
+    assert r["available"] is False
+    assert r["hits"] == []
+
+
+def test_enrich_metrics_error_excluded_not_abort():
+    # #5：单股 compute_metrics 抛错计入 excluded，不中断批次
+    date = "2026-07-21"
+    dates = pd.date_range(end="2026-07-21", periods=60, freq="B")
+    good = pd.DataFrame({
+        "date": dates, "open": [10.0] * 60, "high": [10.1] * 60, "low": [9.9] * 60,
+        "close": [10.0] * 60, "volume": [1000.0] * 60, "amount": [0.0] * 60,
+    })
+    bad = pd.DataFrame({"date": dates, "open": [10.0] * 60})  # 缺 close/high/low/volume
+    hits = {"date": date, "status": "ok", "formulas": [{"id": "F", "hits": [
+        {"code": "900001", "name": "好股票"}, {"code": "900002", "name": "坏数据"},
+    ]}]}
+    loader = lambda c: good if c == "900001" else bad
+    r = ec.enrich(date, hits_data=hits, ohlcv_loader=loader, index_loader=lambda: None,
+                  universe_cfg={"exclude_bj": True, "exclude_st": True, "min_list_days": 60})
+    assert [c["code"] for c in r["candidates"]] == ["900001"]
+    assert len(r["excluded"]) == 1
+    assert r["excluded"][0]["code"] == "900002"
+    assert r["excluded"][0]["reason"].startswith("metrics_error:")

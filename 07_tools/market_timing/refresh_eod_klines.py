@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Best-effort refresh of EOD daily K-lines into local vipdoc via TQ-Local.
 
-Runs before refresh_market_indices in the 20:30 post-close pipeline so that
+Runs before refresh_market_indices in the 17:00 post-close pipeline so that
 vipdoc .day files contain today's EOD bar (refresh_kline writes it directly
 into the TdxW local cache). Requires TdxW.exe running; any failure degrades
 to WARN + exit 0 (never aborts the pipeline).

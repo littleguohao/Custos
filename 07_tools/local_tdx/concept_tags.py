@@ -45,6 +45,8 @@ def parse_miscinfo(path: Path) -> dict[str, list[str]]:
     raw = json.loads(path.read_text(encoding="utf-8"))
     tags: dict[str, list[str]] = {}
     for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict):  # 脏行（str/null/数字）跳过，不炸解析
+            continue
         if str(item.get("id")) != CONCEPT_ID:
             continue
         code = str(item.get("code") or "").strip()
@@ -83,6 +85,7 @@ def refresh(date: str, call_fn=None) -> dict[str, Any]:
         "stock_count": len(tags),
         "tags": tags,
     }
+    OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUT_PATH.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     result["stock_count"] = len(tags)
     return result

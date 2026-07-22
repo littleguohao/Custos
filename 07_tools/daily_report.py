@@ -219,13 +219,18 @@ def main():
     for x in chief.get('buy_actions',[]): lines.append(f"| - | {code(x.get('code'))} | {x.get('name')} | {x.get('conclusion')} | {'是' if x.get('blocked_by_risk') else '否'} |")
     if not chief.get('buy_actions'): lines.append('| - | - | 暂无可审核计划 | 禁止临时开仓 | - |')
     lines += ['', '### 公式选股备选池','']
-    pool=load(DATA/'stock_pool'/f'{day}_stock_pool.json',None)
-    pool_day=day
-    if not pool:  # 选股链 18:00 独立运行，盘前/盘后报告回退到最近一期备选池
-        prev=sorted((DATA/'stock_pool').glob('*_stock_pool.json'),reverse=True)
-        for p in prev:
-            if p.name[:10]<=day:
-                pool=load(p,None); pool_day=p.name[:10]; break
+    # 选股链 18:00 独立运行，盘前/盘后报告回退到最近一期备选池。
+    # 坏 JSON 跳过（不炸报告）；falsy（如 {}）继续找更老文件；全部失败才显示未找到。
+    pool=None; pool_day=''
+    pool_dir=DATA/'stock_pool'
+    pool_candidates=[pool_dir/f'{day}_stock_pool.json']+[p for p in sorted(pool_dir.glob('*_stock_pool.json'),reverse=True) if p.name[:10]<day]
+    for p in pool_candidates:
+        try:
+            v=json.loads(p.read_text(encoding='utf-8')) if p.exists() else None
+        except (OSError,ValueError):
+            v=None
+        if v:
+            pool=v; pool_day=p.name[:10]; break
     if not pool:
         lines.append('未找到任何选股链产出。')
     else:

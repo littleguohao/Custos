@@ -19,9 +19,10 @@ def _cand(patterns, stop_price=10.0, code="600000"):
     }
 
 
-# 技术面层级构造：强=bbi+j_low+缩量+反转K(85分)；中=bbi+j_low(45分)；弱=无标签(0分)
+# 技术面层级构造（反转K为复合信号，取代 j_low+volume_contraction 子项分）：
+# 强=bbi+反转K+强RS(65分)；中=bbi+j_low(45分)；弱=无标签(0分)
 TECH_STRONG = {"bbi_above": True, "j_low": True, "volume_contraction": True,
-               "reversal_k_candidate": True, "relative_strength_strong": False}
+               "reversal_k_candidate": True, "relative_strength_strong": True}
 TECH_MID = {"bbi_above": True, "j_low": True, "volume_contraction": False,
             "reversal_k_candidate": False, "relative_strength_strong": False}
 TECH_WEAK = {"bbi_above": False, "j_low": False, "volume_contraction": False,

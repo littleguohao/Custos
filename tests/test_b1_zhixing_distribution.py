@@ -127,7 +127,7 @@ def _scand(**extra):
     base = dict(
         code="600000", name="示例", sector="半导体", theme_id="t", formula_hits=[],
         patterns={"bbi_above": True, "j_low": True, "volume_contraction": True,
-                  "reversal_k_candidate": True, "relative_strength_strong": False},
+                  "reversal_k_candidate": True, "relative_strength_strong": True},
         daily_j=10.0, stop_loss_ref={"price": 10.0, "basis": "x"}, is_holding=False,
     )
     base.update(extra)

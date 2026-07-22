@@ -225,7 +225,7 @@ def log_stage(name: str, r: dict, started_at: str, finished_at: str, duration_se
 def write_run_log(log_dir: Path, tag: str, target: str, status: str, started_at: str,
                   t0: float, stages: list[dict]) -> Path:
     """Write 06_logs/{date}_{tag}_run_log.json; tag is the runner suffix
-    ("0850", "0905"), which also determines the script field (run_{tag})."""
+    ("0850", "0905", "1700", "1800"), which also determines the script field (run_{tag})."""
     log = {
         "date": target,
         "script": f"run_{tag}",
