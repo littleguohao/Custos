@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Deterministically reconcile premarket, 14:45 actions and actual trades."""
+"""Deterministically reconcile premarket, 14:45 actions and actual trades.
+
+用户当日未执行原因补录位置：01_data/trades/position_confirmations.json 中
+对应日期的 "execution_reason" 字段；未补录时字段留空并计入 missing。
+"""
 from __future__ import annotations
 
 import argparse
@@ -75,6 +79,9 @@ def main():
             "discipline_status": "unavailable" if "reason_unavailable" in status or "requires_review" in status else "no_breach_detected",
         })
     confirmation = (chief.get("position_freshness") or {}).get("confirmation") or {}
+    confirmations = load(DATA / "trades" / "position_confirmations.json", {})
+    user_reason = str((confirmations.get(day) or {}).get("execution_reason") or "").strip()
+    needs_reason = any(x["discipline_status"] == "unavailable" for x in rows)
     result = {
         "date": day,
         "status": "complete" if trades or confirmation.get("no_trades") is True else "degraded",
@@ -88,11 +95,11 @@ def main():
             "weak_position_add": "no_breach_detected" if not trades else "requires_trade_level_review",
             "unplanned_trade": "no_breach_detected" if not trades else "requires_plan_linkage",
             "delayed_stop_or_reduction": "unavailable" if not trades and any(x.get("tail_priority") in {"P0", "P1"} for x in rows) else "no_breach_detected",
-            "user_execution_reason": "当前标的一直横盘震荡状态未大涨，预期这次回调后会有机会，故没有操作",
+            "user_execution_reason": user_reason,
         },
         "missing": list(dict.fromkeys(
             (["premarket_chief_decision_snapshot"] if not premarket_path.exists() else [])
-            + (["user_execution_reason"] if any(x["discipline_status"] == "unavailable" for x in rows) else [])
+            + (["user_execution_reason"] if needs_reason and not user_reason else [])
         )),
         "sources": [str(chief_path), str(tail_path), str(trades_path)],
     }
