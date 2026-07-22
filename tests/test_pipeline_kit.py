@@ -107,8 +107,17 @@ class TestSuffix:
         assert code_utils.suffix("000001") == ".SZ"
         assert code_utils.suffix("300750") == ".SZ"
 
+    def test_sh_9_prefix(self):
+        # 统一 market_of 后 "9" 前缀归为 SH（900 B股、999999 上证指数）
+        assert code_utils.suffix("999999") == ".SH"
+        assert code_utils.suffix("900901") == ".SH"
+
+    def test_sh_880_index(self):
+        # 880 系列是沪市统计指数，不再误判为 BJ
+        assert code_utils.suffix("880005") == ".SH"
+
     def test_unknown(self):
-        assert code_utils.suffix("999999") == ""
+        assert code_utils.suffix("700000") == ""
 
 
 class TestFinite:

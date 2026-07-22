@@ -43,6 +43,7 @@ if str(LOCAL_TDX_DIR) not in sys.path:
 
 from paths import BASE, TDX_ROOT  # noqa: E402
 from code_utils import norm_code  # noqa: E402
+from code_utils import market_of  # noqa: E402
 import tq_http  # noqa: E402
 import online_quotes  # noqa: E402
 
@@ -69,14 +70,7 @@ def _get_client():
 
 
 def get_market(code: str) -> int:
-    code = str(code).zfill(6)
-    if code.startswith(("920", "83", "87", "4")):
-        return 2  # BJ
-    elif code.startswith(("6", "9")):
-        return 1  # SH
-    elif code.startswith(("0", "3")):
-        return 0  # SZ
-    return 0
+    return {"BJ": 2, "SH": 1}.get(market_of(code), 0)
 
 
 def _market_name(mkt: int) -> str:

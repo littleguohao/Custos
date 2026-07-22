@@ -31,6 +31,7 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from paths import BASE, TDX_ROOT  # noqa: E402
+from code_utils import market_of, norm_code as _cu_norm_code  # noqa: E402
 
 # --- mootdx lazy initialization ---
 _reader = None
@@ -58,19 +59,11 @@ class LocalTdxError(RuntimeError):
 
 
 def normalize_code(code: str) -> str:
-    """Normalize code to TQ suffix format."""
+    """Normalize code to TQ suffix format (delegates to code_utils.norm_code)."""
     s = str(code).strip().upper()
     if not s:
         return s
-    if "." in s:
-        return s
-    if s.startswith(("920", "8", "4")):
-        return f"{s}.BJ"
-    if s.startswith(("6", "5", "9")):
-        return f"{s}.SH"
-    if s.startswith(("0", "1", "2", "3")):
-        return f"{s}.SZ"
-    return s
+    return _cu_norm_code(s)
 
 
 def _strip_suffix(code: str) -> str:
@@ -82,26 +75,19 @@ def _strip_suffix(code: str) -> str:
 
 
 def _get_market_code(code: str) -> int:
-    """Return mootdx market int: 0=SZ, 1=SH."""
-    s = _strip_suffix(code)
-    if s.startswith(("6", "9", "5")):
-        return 1  # SH
-    return 0  # SZ
+    """Return mootdx market int: 0=SZ, 1=SH (BJ handled separately via _is_bj_code)."""
+    return 1 if market_of(code) == "SH" else 0
 
 
 def _is_bj_code(code: str) -> bool:
     """Check if code is a Beijing Stock Exchange stock.
 
-    Explicit suffix wins: .BJ -> True; .SH/.SZ -> False (e.g. 880xxx.SH is an
-    SH statistics index, not a BJ stock). Only suffix-less codes use the
-    4xx/8xx/920xxx prefix heuristic.
+    Delegates to code_utils.market_of: explicit suffix wins (.BJ -> True;
+    .SH/.SZ -> False, e.g. 880xxx.SH is an SH statistics index, not a BJ
+    stock). Only suffix-less codes use the prefix heuristic, which excludes
+    the 880 index series.
     """
-    s = str(code).strip().upper()
-    if "." in s:
-        return s.split(".")[1] == "BJ"
-    s = s.zfill(6)
-    # BJ: 4xx, 8xx, 920xxx (North Exchange)
-    return s.startswith(("4", "8", "920"))
+    return market_of(code) == "BJ"
 
 
 def _read_bj_vipdoc_daily(code: str) -> "pd.DataFrame":

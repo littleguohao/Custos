@@ -33,6 +33,39 @@ def clean_code(v):
     return s.split('.')[0].zfill(6) if s.split('.')[0].isdigit() else s.split('.')[0]
 
 
+def market_of(code: str) -> str:
+    """Single source of truth for exchange classification: "SH" | "SZ" | "BJ" | "".
+
+    Rules (applied in order):
+
+    - Explicit suffix wins: "xxx.BJ" -> "BJ", "xxx.SH"/"xxx.SZ" likewise, even
+      when the bare code's prefix heuristic would disagree (e.g. 880005.SH is an
+      SH statistics index, not a BJ stock).
+    - Suffix-less digit codes are zero-padded to 6 digits, then:
+      - "880" -> "SH" (通达信沪市统计指数系列，必须排在 "8" 前缀之前)
+      - "920" / "8" / "4" -> "BJ" (北交所)
+      - "6" / "5" / "9" -> "SH"
+      - "0" / "1" / "2" / "3" -> "SZ"
+    - Anything else -> "".
+    """
+    s = str(code).strip().upper()
+    if "." in s:
+        suf = s.rsplit(".", 1)[1]
+        return suf if suf in {"SH", "SZ", "BJ"} else ""
+    if not s.isdigit():
+        return ""
+    s = s.zfill(6)
+    if s.startswith("880"):
+        return "SH"
+    if s.startswith(("920", "8", "4")):
+        return "BJ"
+    if s.startswith(("6", "5", "9")):
+        return "SH"
+    if s.startswith(("0", "1", "2", "3")):
+        return "SZ"
+    return ""
+
+
 def norm_code(code: str) -> str:
     """Market-data semantics: ensure a .SH/.SZ/.BJ suffix (technical_monitor version).
 
@@ -43,14 +76,8 @@ def norm_code(code: str) -> str:
     s = str(code).strip().upper()
     if s.endswith((".SH", ".SZ", ".BJ")):
         return s
-    # 北交所常见代码含 4/8 开头，也包含 920xxx。
-    if s.startswith(("920", "8", "4")):
-        return s + ".BJ"
-    if s.startswith(("6", "5", "9")):
-        return s + ".SH"
-    if s.startswith(("0", "1", "2", "3")):
-        return s + ".SZ"
-    return s
+    market = market_of(s)
+    return f"{s}.{market}" if market else s
 
 
 def split_code(tdx_code: str):
@@ -65,11 +92,9 @@ def split_code(tdx_code: str):
 
 
 def suffix(code: str) -> str:
-    """Exchange suffix for a bare 6-digit code (holding_sector_mapper version, verbatim)."""
-    if code.startswith(("92", "8", "4")): return ".BJ"
-    if code.startswith(("6", "5")): return ".SH"
-    if code.startswith(("0", "1", "2", "3")): return ".SZ"
-    return ""
+    """Exchange suffix for a bare 6-digit code; delegates to market_of."""
+    market = market_of(code)
+    return f".{market}" if market else ""
 
 
 def finite(v, d=0.0):

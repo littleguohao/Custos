@@ -20,6 +20,7 @@ except ImportError:
     from holding_structure import n_structure_basis
 
 from paths import BASE  # noqa: E402
+from code_utils import market_of  # noqa: E402
 
 DATA = BASE / "01_data"
 REV = BASE / "04_reviews" / "daily"
@@ -52,11 +53,14 @@ def bare(value):
 def index_name(code):
     if code.startswith("688"):
         return "科创50（市场风格代理）"
-    if code.startswith(("92", "8", "4")):
-        return "北证50（市场风格代理）"
     if code.startswith(("300", "301")):
         return "创业板指（市场风格代理）"
-    return "上证指数（市场风格代理）" if code.startswith(("6", "5")) else "深证成指（市场风格代理）"
+    market = market_of(code)
+    if market == "BJ":
+        return "北证50（市场风格代理）"
+    if market == "SH":
+        return "上证指数（市场风格代理）"
+    return "深证成指（市场风格代理）"
 
 
 def sector_for(code, sectors):
