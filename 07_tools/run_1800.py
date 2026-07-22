@@ -88,7 +88,15 @@ def main(argv=None) -> int:
         print(f"今日休市，每日选股不运行（{target}）")
         return 0
 
-    # 2. Screening chain (each stage propagates degradation downstream)
+    # 2. Refresh concept tags (miscinfo) so sector mapping uses the accurate source
+    r = _run_stage(["uv", "run", "python", str(TOOLS / "local_tdx" / "concept_tags.py"),
+                    "--date", target], "refresh_concept_tags", note="best-effort，失败不中断")
+    if not r["ok"]:
+        print(f"[WARN] refresh_concept_tags failed: {r['out'][:200]}")
+    else:
+        print(f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'concept tags refreshed'}")
+
+    # 3. Screening chain (each stage propagates degradation downstream)
     degraded = []
     for script, name in [
         ("formula_screen.py", "screening_formula_screen"),

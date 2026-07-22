@@ -147,6 +147,7 @@ uv run python 07_tools/run_1800.py
 | 资金流向 | 东方财富 push2 API | `collect_fund_flow.py` |
 | 北交所行情 | 东方财富 push2 API（mootdx 不支持 BJ） | `collect_holding_quotes.py` |
 | 公告 | wenda_notice_query | cron LLM 调用 |
+| 概念/主题标签 | TQ download_file down_type=4（miscinfo） | `local_tdx/concept_tags.py` |
 | 新闻 | RSS | `rss_collector.py` |
 | TQ 选股公式批量筛选 | TQ-Local（formula_process_mul_xg，需 TdxW 运行） | `screening/formula_screen.py` |
 

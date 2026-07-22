@@ -259,6 +259,7 @@ def score_candidate(
         "code": cand.get("code", ""),
         "name": cand.get("name", ""),
         "sector": cand.get("sector", "未知"),
+        "sector_source": cand.get("sector_source", ""),
         "theme_id": cand.get("theme_id", ""),
         "formula_hits": cand.get("formula_hits") or [],
         "sector_heat_filter": {

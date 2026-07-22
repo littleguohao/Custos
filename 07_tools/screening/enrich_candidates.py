@@ -42,6 +42,7 @@ for p in (TOOLS_DIR, TOOLS_DIR / "local_tdx", TOOLS_DIR / "market_timing"):
         sys.path.insert(0, str(p))
 
 from paths import DATA, RISK_DIR, SECTORS_DIR, TRADES_DIR  # noqa: E402
+import concept_tags  # noqa: E402
 import local_tdx_data  # noqa: E402
 from technical_monitor import bbi_state, kdj, resample  # noqa: E402
 
@@ -137,17 +138,52 @@ def latest_tq_sector_map() -> dict:
     return _load_json(Path(files[-1]), {})
 
 
+def _match_theme_tags(stock_tags: list[str], semantic_tags: list[str]) -> list[str]:
+    """个股概念标签与主题语义标签的命中列表（双向子串，长的单向≥3字）。"""
+    matched = []
+    for st in semantic_tags:
+        for c in stock_tags:
+            if st == c or st in c or (len(c) >= 3 and c in st):
+                matched.append(st)
+                break
+    return matched
+
+
 def build_stock_theme_map() -> tuple[dict[str, dict], bool]:
     """股 → 主题方向（theme_id/sector 名）。
 
-    用最新 tq_sector_map 的成分股关系反查 880 板块代码，再对照
-    sector_code_map.json 的 primary/candidate_sector_codes 归并到主题。
-    返回 ({code6: {"theme_id","sector","matched_code"}}, map_available)。
+    优先用 miscinfo 概念标签（concept_tags，每股官方概念）匹配
+    sector_code_map.json 各主题的 semantic_tags——准确度远高于 880 反查；
+    标签文件缺失时回退 tq_sector_map 成分股反查（v1，已知存在错配）。
+    返回 ({code6: {"theme_id","sector",...}}, map_available)。
     """
-    sector_map = latest_tq_sector_map()
     code_map = _load_json(SECTOR_CODE_MAP, {})
     themes = code_map.get("themes") or []
-    if not sector_map.get("sectors") or not themes:
+    if not themes:
+        return {}, False
+
+    tags_map = concept_tags.load_tags()
+    if tags_map:
+        stock_theme: dict[str, dict] = {}
+        for code6, stock_tags in tags_map.items():
+            best_matched: list[str] = []
+            best_theme: dict | None = None
+            for t in themes:
+                matched = _match_theme_tags(stock_tags, t.get("semantic_tags") or [])
+                if len(matched) > len(best_matched):
+                    best_matched, best_theme = matched, t
+            if best_theme:
+                stock_theme[code6] = {
+                    "theme_id": best_theme.get("theme_id", ""),
+                    "sector": best_theme.get("theme_name", ""),
+                    "matched_tags": best_matched,
+                    "sector_source": "concept_tags",
+                }
+        if stock_theme:
+            return stock_theme, True
+
+    sector_map = latest_tq_sector_map()
+    if not sector_map.get("sectors"):
         return {}, False
 
     # 880 板块代码 → 主题（primary 优先于 candidate，按注册顺序取先命中者）
@@ -161,14 +197,15 @@ def build_stock_theme_map() -> tuple[dict[str, dict], bool]:
         for c in t.get("primary_sector_codes") or []:
             code_to_theme[str(c).upper()] = theme
 
-    stock_theme: dict[str, dict] = {}
+    stock_theme = {}
     for s in sector_map["sectors"]:
         theme = code_to_theme.get(str(s.get("code", "")).upper())
         if not theme:
             continue
         for raw in s.get("stocks") or []:
             code6 = str(raw).split(".")[0].zfill(6)
-            stock_theme.setdefault(code6, {**theme, "matched_code": s.get("code", "")})
+            stock_theme.setdefault(code6, {**theme, "matched_code": s.get("code", ""),
+                                           "sector_source": "tq_880_fallback"})
     return stock_theme, True
 
 
@@ -686,9 +723,11 @@ def enrich(
         if theme:
             cand["theme_id"] = theme["theme_id"]
             cand["sector"] = theme["sector"]
+            cand["sector_source"] = theme.get("sector_source", "")
         else:
             cand["theme_id"] = ""
             cand["sector"] = "未知"
+            cand["sector_source"] = ""
         result["candidates"].append(cand)
 
     return result

@@ -63,7 +63,7 @@
 - `close_review/` — 14:45 收盘复盘:执行复盘、终审、周复盘、持仓 BBI/结构分析。
 - `news/` — RSS 新闻采集(`rss_collector`)、过滤(`rss_filter`)、盘前情报 schema、盘后新闻摘要。
 - `trades/` — 交易台账同步与标准化、增量台账、0AMV 熊市回测。
-- `local_tdx/` — 本地通达信数据封装(tq_http 快照、指南针 AMV、板块),详见 `local_tdx/README.md`。
+- `local_tdx/` — 本地通达信数据封装(tq_http 快照、指南针 AMV、板块、miscinfo 概念标签),详见 `local_tdx/README.md`。
 
 ## 新脚本放哪
 

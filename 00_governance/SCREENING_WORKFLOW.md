@@ -53,8 +53,13 @@ TdxW 未运行或任一阶段失败时整链干净降级（status=unavailable / 
 硬排除：名称含 ST、停牌（无当日 K 线）、上市不足 60 天、risk_decision
 高优先级股、北交所。已持仓股打 `is_holding` 标记但不剔除。
 
-板块映射：最新 `01_data/sectors/*_tq_sector_map.json` 成分股关系 →
-`sector_code_map.json` 主题（primary 优先于 candidate）；无映射则 sector=未知。
+板块映射：**优先 miscinfo 概念标签**（`07_tools/local_tdx/concept_tags.py`，
+TQ `download_file down_type=4`，run_1800 第 2 步每日刷新，落盘
+`01_data/sectors/stock_concept_tags.json`）——个股官方概念标签与各主题
+`semantic_tags` 双向子串匹配，命中数最多的主题中标，无命中则 sector=未知
+（宁缺毋滥）。标签缺失时回退 v1 的 880 成分股反查（`*_tq_sector_map.json`
+→ `sector_code_map.json`，primary 优先于 candidate，已知存在错配，仅作
+兜底）。候选落盘 `sector_source`（concept_tags / tq_880_fallback）标明来源。
 
 ### [3] 板块过滤 + 共振打分
 
