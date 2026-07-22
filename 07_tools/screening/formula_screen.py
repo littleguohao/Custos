@@ -36,6 +36,7 @@ from paths import DATA, GOVERNANCE  # noqa: E402
 import tq_http  # noqa: E402
 from tq_sector import is_tdxw_running  # noqa: E402
 import local_tdx_data  # noqa: E402
+import manual_pools  # noqa: E402
 
 SCREENING_DIR = DATA / "screening"
 REGISTRY_PATH = GOVERNANCE / "SCREEN_FORMULA_REGISTRY.json"
@@ -124,6 +125,30 @@ def _extract_hits(value: Any, date: str, name_map: dict[str, str]) -> list[dict]
     return hits
 
 
+def _load_manual_pools(registry: dict, date: str, name_map: dict[str, str]) -> tuple[list[dict], int]:
+    """自选池（manual_pools）→ 与公式条目同构的伪公式列表。本地文件，不依赖 TQ。"""
+    entries: list[dict] = []
+    hit_total = 0
+    for p in registry.get("manual_pools", []):
+        entry: dict[str, Any] = {
+            "id": p.get("id", ""),
+            "tq_name": f"自选池:{p.get('block_name', '')}",
+            "enabled": bool(p.get("enabled", True)),
+            "category": "manual_pool",
+            "hits": [],
+            "error": None,
+        }
+        entries.append(entry)
+        if not entry["enabled"]:
+            continue
+        pool = manual_pools.load_pool(p.get("block_name", ""), date, name_map=name_map)
+        entry["hits"] = pool["hits"]
+        if pool.get("error"):
+            entry["error"] = pool["error"]
+        hit_total += len(pool["hits"])
+    return entries, hit_total
+
+
 def screen_formulas(
     date: str,
     registry: Optional[dict] = None,
@@ -146,8 +171,18 @@ def screen_formulas(
         "formulas": [],
     }
 
+    # 先建 universe/名称表（本地 vipdoc，不依赖 TQ），再加载自选池（本地文件），
+    # 最后才做 TQ 门控：TdxW 关闭时池内候选仍可进入充实段，且池内股票有名。
+    if stock_list is None:
+        stock_list, name_map = build_universe(registry.get("universe"))
+    name_map = name_map or {}
+    result["universe_size"] = len(stock_list)
+
+    pool_entries, pool_hits = _load_manual_pools(registry, date, name_map)
+    result["formulas"].extend(pool_entries)
+
     if not is_running():
-        result["status"] = "unavailable"
+        result["status"] = "partial" if pool_hits else "unavailable"
         result["degraded_reason"] = "tdxw_not_running"
         for f in registry.get("formulas", []):
             result["formulas"].append({
@@ -157,12 +192,8 @@ def screen_formulas(
             })
         return result
 
-    if stock_list is None:
-        stock_list, name_map = build_universe(registry.get("universe"))
-    name_map = name_map or {}
-    result["universe_size"] = len(stock_list)
     if not stock_list:
-        result["status"] = "unavailable"
+        result["status"] = "partial" if pool_hits else "unavailable"
         result["degraded_reason"] = "universe_unavailable"
         return result
 
@@ -213,13 +244,13 @@ def screen_formulas(
                 entry["error_detail"] = str(err["detail"])[:200]
 
     if attempted == 0:
-        result["status"] = "unavailable"
-        result["degraded_reason"] = "no_enabled_formula"
+        result["status"] = "partial" if pool_hits else "unavailable"
+        result["degraded_reason"] = "no_enabled_formula" + (";manual_pool_only" if pool_hits else "")
     elif succeeded == 0:
-        result["status"] = "unavailable"
-        result["degraded_reason"] = "all_formulas_failed"
+        result["status"] = "partial" if pool_hits else "unavailable"
+        result["degraded_reason"] = "all_formulas_failed" + (";manual_pool_only" if pool_hits else "")
     elif succeeded < attempted or any(
-        e.get("error") for e in result["formulas"] if e.get("enabled")
+        e.get("error") for e in result["formulas"] if e.get("enabled") and e.get("category") != "manual_pool"
     ):
         result["status"] = "partial"
         result["degraded_reason"] = "some_formulas_failed"

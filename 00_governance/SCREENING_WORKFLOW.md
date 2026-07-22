@@ -29,10 +29,20 @@ TdxW 未运行或任一阶段失败时整链干净降级（status=unavailable / 
 
 - 公式注册表：`00_governance/SCREEN_FORMULA_REGISTRY.json`。**只能引用客户端
   已存在的公式名**（系统公式或用户预建公式），不能跑任意表达式（实测
-  ErrorId=9）。
+  ErrorId=9）。当前启用：UPN_3（连涨3天）、MA_BUY、KDJ_J_LOW（用户自建
+  `J小于13`，B1 回调型初筛，2026-07-22 接入）。
+- **自选池通道**（`manual_pools`）：用户在通达信客户端手工维护的备选池
+  （如"震荡"），经 `07_tools/screening/manual_pools.py` 读取
+  `T0002/blocknew/*.blk`（本地文件，TdxW 离线也可用），以
+  `category=manual_pool` 伪公式条目与公式命中并集进入 [2]。池子增删股票
+  只需在客户端操作，次日自动生效；新增池子在注册表 `manual_pools` 加一条
+  （block_name 为客户端板块中文名）。
 - 股票池：全 A（exclude_bj 在此过滤；ST、上市天数在 [2] 过滤）。
 - 单公式超时 15s；连续 2 个公式失败熔断，剩余标记 `circuit_open_skipped`。
 - 命中判定：返回的按股按日 0/1 序列，最后一个元素（最新交易日）为 '1'。
+- **注意**：`formula_get_all` 已两次打挂 TQ 服务（2026-07-20 / 07-22），
+  禁止使用；核对公式名用 `formula_process_mul_xg` 小参数试跑（ErrorId=9
+  为安全报错）。
 
 ### [2] 充实 + 模式识别
 

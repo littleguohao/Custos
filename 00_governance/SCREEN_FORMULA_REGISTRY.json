@@ -22,6 +22,14 @@
     "min_match": 1,
     "_note": "概念标签命中主题所需的最小语义标签数。默认 1＝命中1个即归类；提高到 2+ 可要求更强证据、降低子串过度匹配。"
   },
+  "manual_pools": [
+    {
+      "id": "POOL_ZHENDANG",
+      "block_name": "震荡",
+      "enabled": true,
+      "note": "用户自维护备选池（T0002/blocknew/ZD.blk，2026-07-22 接入）。每日随公式命中一并进入充实/打分；本地文件读取，TdxW 离线时仍可用。"
+    }
+  ],
   "formulas": [
     {
       "id": "UPN_3",
@@ -42,13 +50,22 @@
       "note": "系统公式：均线买入信号（2026-07-20 formula_get_all(type=1) 列出，共107个系统公式之一）。"
     },
     {
+      "id": "KDJ_J_LOW",
+      "tq_name": "J小于13",
+      "args": "",
+      "stock_period": "1d",
+      "enabled": true,
+      "category": "reversal",
+      "note": "用户自建公式（2026-07-22 客户端预建，技术指标库 PriGS.dat，选股接口实测可调）：KDJ 的 J<13，B1 回调型初筛，与策略'回调买入'对齐。"
+    },
+    {
       "id": "MACD_GOLD",
       "tq_name": "MACD金叉",
       "args": "",
       "stock_period": "1d",
-      "enabled": true,
+      "enabled": false,
       "category": "trend",
-      "note": "系统公式：MACD 金叉（同 107 个系统公式清单）。"
+      "note": "系统公式：MACD 金叉（同 107 个系统公式清单）。2026-07-21 实跑 tq_error（客户端无此确切名称），待核对真实公式名后再启用。"
     },
     {
       "id": "B1_REVERSAL_K",
