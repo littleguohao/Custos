@@ -203,7 +203,9 @@ def _infer_price_limit(code: str, df: pd.DataFrame) -> int:
     bar shows |change_pct| > 9.9 for a 10%-prefix stock, upgrade to 20%.
     This catches edge cases without relying solely on static prefix rules.
     ST/special-treatment stocks typically have 5% limits; we detect those
-    by checking if observed max |change_pct| is consistently <= 5.2.
+    by checking if observed max |change_pct| is consistently <= 5.2. The ST
+    downgrade only applies to 10%-prefix stocks — a quiet 20-day window must
+    never demote a 300/301/688/920 stock to 5%.
     """
     raw = str(code).strip().upper().split(".")[0]
     base = 20 if raw.startswith(("688", "920", "300", "301")) else 10
@@ -212,7 +214,9 @@ def _infer_price_limit(code: str, df: pd.DataFrame) -> int:
         max_change = float(changes.dropna().max())
         if base == 10 and max_change > 9.9:
             base = 20
-        if max_change <= 5.2:
+        if base == 10 and max_change <= 5.2:
+            # ST 降级仅适用于 10% 前缀品种；20% 前缀（300/301/688/920）
+            # 即使近 20 日波动很小也不得降级为 5%。
             base = 5
     return base
 
