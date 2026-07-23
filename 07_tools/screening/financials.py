@@ -122,17 +122,27 @@ def financial_factor(code: str, fin_df, colmap: dict, price: Optional[float] = N
     shares = _cell(row, colmap, "total_shares")
     mkt_cap = (shares * price) if (shares is not None and price) else None
 
-    perf_surge = bool(np_yoy is not None and np_yoy >= DIXI_NET_PROFIT_YOY)        # ① 业绩预增≥100% 代理
-    real_support = bool(net_profit is not None and net_profit > 0
-                        and op_cf is not None and op_cf > 0)                        # ② 真实盈利+经营现金流
+    perf_surge = bool(np_yoy is not None and np_yoy >= DIXI_NET_PROFIT_YOY)   # ① 扣非同比≥100% 代理
+    np_pos = bool(net_profit is not None and net_profit > 0)                   # ②a 净利为正
+    ocf_available = op_cf is not None
+    ocf_pos = bool(ocf_available and op_cf > 0)                                # ②b 经营现金流为正(缺失→未确认)
     roe_positive = bool(roe is not None and roe > 0)
-    proxy = {"perf_surge_ge_100": perf_surge, "real_earnings_cashflow": real_support, "roe_positive": roe_positive}
+    # ②综合(CZ 真实盈利+现金流)：净利与现金流同为正才成立；现金流缺失(季报常见)时不冒充成立，
+    # 但 net_profit_positive 仍独立可用 —— 优雅降级而非整项作废。
+    real_support = bool(np_pos and ocf_pos)
+    proxy = {
+        "perf_surge_ge_100": perf_surge,
+        "net_profit_positive": np_pos,
+        "op_cashflow_positive": (ocf_pos if ocf_available else None),
+        "real_earnings_cashflow": real_support,
+        "roe_positive": roe_positive,
+    }
     return {
-        "available": True,
+        "available": True, "cashflow_available": ocf_available,
         "net_profit": net_profit, "op_cashflow": op_cf, "revenue": revenue,
         "net_profit_yoy": np_yoy, "revenue_yoy": rev_yoy, "roe": roe, "market_cap": mkt_cap,
         "dixi_proxy": proxy,
-        "hits": [k for k, v in proxy.items() if v],
+        "hits": [k for k, v in proxy.items() if v is True],
     }
 
 

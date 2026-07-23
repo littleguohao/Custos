@@ -75,17 +75,36 @@ _COLMAP = {"code": "c_code", "net_profit": "c_np", "op_cashflow": "c_ocf",
 
 def test_financial_factor_dixi_hit():
     r = fin.financial_factor("600000", _FIN_DF, _COLMAP, price=10.0)
-    assert r["available"]
-    assert r["dixi_proxy"]["perf_surge_ge_100"] is True     # 净利同比150%≥100
+    assert r["available"] and r["cashflow_available"] is True
+    assert r["dixi_proxy"]["perf_surge_ge_100"] is True      # 净利同比150%≥100
+    assert r["dixi_proxy"]["net_profit_positive"] is True
+    assert r["dixi_proxy"]["op_cashflow_positive"] is True
     assert r["dixi_proxy"]["real_earnings_cashflow"] is True  # 净利>0 且 现金流>0
     assert r["dixi_proxy"]["roe_positive"] is True
     assert abs(r["market_cap"] - 1e10) < 1                   # 10亿股 × 10元
-    assert set(r["hits"]) == {"perf_surge_ge_100", "real_earnings_cashflow", "roe_positive"}
+    assert set(r["hits"]) == {"perf_surge_ge_100", "net_profit_positive",
+                              "op_cashflow_positive", "real_earnings_cashflow", "roe_positive"}
 
 
 def test_financial_factor_weak_stock():
     r = fin.financial_factor("000002", _FIN_DF, _COLMAP, price=10.0)
     assert r["available"] and r["hits"] == []               # 亏损+现金流负+ROE负 → 全不命中
+
+
+def test_financial_factor_cashflow_missing_degrades():
+    # 复现 2026Q1：现金流量表未入(op_cashflow=null)，净利/同比/ROE 有值 → 优雅降级
+    df = pd.DataFrame([{"c_code": "600000", "c_np": 1.8e10, "c_ocf": None,
+                        "c_npyoy": 120.0, "c_roe": 8.0}])
+    cm = {"code": "c_code", "net_profit": "c_np", "op_cashflow": "c_ocf",
+          "net_profit_yoy": "c_npyoy", "roe": "c_roe"}
+    r = fin.financial_factor("600000", df, cm)
+    assert r["available"] and r["cashflow_available"] is False
+    assert r["dixi_proxy"]["net_profit_positive"] is True
+    assert r["dixi_proxy"]["op_cashflow_positive"] is None       # 现金流缺失→未确认(非 False)
+    assert r["dixi_proxy"]["real_earnings_cashflow"] is False     # 不冒充成立
+    assert r["dixi_proxy"]["perf_surge_ge_100"] is True and r["dixi_proxy"]["roe_positive"] is True
+    assert "net_profit_positive" in r["hits"] and "real_earnings_cashflow" not in r["hits"]
+    assert "op_cashflow_positive" not in r["hits"]               # None 不计入命中
 
 
 def test_financial_factor_degrades():
