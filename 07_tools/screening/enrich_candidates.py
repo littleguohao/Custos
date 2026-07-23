@@ -147,6 +147,12 @@ MACD_DIV_LOOKBACK = 60           # 背离观察窗口（日）
 MACD_OVEREXT_PCTL = 0.9          # 开口/空间拐离：|DIF| 近 120 日分位上限
 MACD_OVEREXT_WIN = 120           # 拐离分位窗口（日）
 
+# --- 正交因子（非量价形态）待回测参数 ---
+# 方向A(2026-07-23)：全市场回测证实突破式打分非短周期 alpha，转接正交维度。
+LIQUIDITY_WIN = 20               # 待回测：近N日均成交额窗口
+LIQUIDITY_FLOOR_YI = 0.5         # 待回测：均成交额底线(亿元)，低于→low_liquidity(默认仅flag)
+FUND_FLOW_SECTOR_MIN_KW = 2      # 板块名匹配最小关键词长度
+
 
 def _load_json(path: Path, default: Any) -> Any:
     try:
@@ -966,6 +972,55 @@ def detect_distribution(df, code: str = "") -> dict[str, Any]:
             "severe": bool(severe), "risk_level": risk, "price_limit": limit}
 
 
+def check_liquidity(df, win: int = LIQUIDITY_WIN) -> dict[str, Any]:
+    """流动性：近 win 日均成交额（亿元）。仅计算值，底线判定在 score 层（可配）。"""
+    if "amount" not in df.columns or len(df) < 5:
+        return {"available": False}
+    amt = df["amount"].astype(float).to_numpy()
+    avg = float(amt[-win:].mean())
+    return {"available": bool(avg > 0), "avg_amount_yi": round(avg / 1e8, 4),
+            "avg_amount": round(avg, 0), "window": win}
+
+
+def load_fund_flow(date: str) -> dict[str, Any]:
+    """读 collect_fund_flow 落盘的 {date}_fund_flow_rank.json（东财资金流）；缺失→unavailable。"""
+    data = _load_json(DATA / "market" / f"{date}_fund_flow_rank.json", {})
+    stock_rank = data.get("stock_rank") or []
+    by_code = {str(s.get("code", "")).split(".")[0].zfill(6): s for s in stock_rank if s.get("code")}
+    sectors = data.get("sector_rank") or {}
+    sec_list = (sectors.get("concept") or []) + (sectors.get("industry") or [])
+    return {"available": bool(by_code or sec_list), "by_code": by_code, "sectors": sec_list}
+
+
+def fund_flow_of(code6: str, sector_name: str, ff: dict) -> dict[str, Any]:
+    """个股 + 板块资金流（正交于量价）：个股是否在主力净流入榜且为净流入、
+    所属主题板块是否净流入。榜/文件缺失时干净降级。"""
+    if not ff or not ff.get("available"):
+        return {"available": False}
+    entry = (ff.get("by_code") or {}).get(code6)
+    main_inflow = entry.get("main_net_inflow") if entry else None
+    in_rank_positive = bool(entry is not None and isinstance(main_inflow, (int, float)) and main_inflow > 0)
+    sec_match = None
+    if sector_name and sector_name != "未知":
+        for s in ff.get("sectors") or []:
+            nm = str(s.get("name") or "")
+            if nm and (nm in sector_name or (len(nm) >= FUND_FLOW_SECTOR_MIN_KW and nm[:FUND_FLOW_SECTOR_MIN_KW] in sector_name)):
+                if sec_match is None or (s.get("main_net_inflow") or 0) > (sec_match.get("main_net_inflow") or 0):
+                    sec_match = s
+    sector_inflow = (sec_match or {}).get("main_net_inflow")
+    sector_inflow_positive = bool(isinstance(sector_inflow, (int, float)) and sector_inflow > 0)
+    return {
+        "available": True,
+        "in_rank": entry is not None,
+        "main_net_inflow": main_inflow,
+        "main_net_pct": (entry or {}).get("main_net_pct") if entry else None,
+        "in_rank_positive": in_rank_positive,
+        "sector_matched": (sec_match or {}).get("name"),
+        "sector_main_net_inflow": sector_inflow,
+        "sector_inflow_positive": sector_inflow_positive,
+    }
+
+
 def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
     """对单股日线 DataFrame 计算全部指标与模式标签（确定性）。"""
     close = df["close"]
@@ -1065,6 +1120,7 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
         "macd_technics": check_macd_technics(df),
         "perfect_b1_fit": compute_perfect_b1_fit(df, daily_j, zx, pullback_shrink),
         "s_shape": s_shape_mod.compute_s_shape(df, code),
+        "liquidity": check_liquidity(df),
     }
 
 
@@ -1124,6 +1180,7 @@ def enrich(
 
     risk_high = load_risk_high_codes(date)
     holding = load_holding_codes()
+    fund_flow = load_fund_flow(date)
     stock_theme, theme_map_available = build_stock_theme_map(
         min_match=theme_min_match if theme_min_match is not None else THEME_MIN_MATCH)
     if not theme_map_available:
@@ -1201,6 +1258,7 @@ def enrich(
             cand["theme_id"] = ""
             cand["sector"] = "未知"
             cand["sector_source"] = ""
+        cand["fund_flow"] = fund_flow_of(code6, cand["sector"], fund_flow)
         result["candidates"].append(cand)
 
     return result

@@ -97,7 +97,11 @@ DEFAULT_CAP_RULES = {
     "cz_avoid_sector": True,       # CZ 回避方向板块 → D（治理名单驱动）
     "distribution_cap": True,      # 主力出货五方式命中 → high 封 D / watch 封 C（B1 §七.3，待回测）
     "macd_divergence": True,       # MACD 顶背离/三打白骨精 → 封顶 C（macd十大技术，待回测）
+    "liquidity_floor": False,      # 流动性(近20日均成交额)低于底线 → 封顶 C（默认关，仅flag；待回测后开）
 }
+
+# 流动性底线（亿元，待回测）：低于此值的候选打 low_liquidity；是否降档由 cap_rules.liquidity_floor 控制
+LIQUIDITY_FLOOR_YI = 0.5
 
 # sector_state.score 的量纲：generate_risk_and_sectors 用 float(score)>=60 门控
 # 主升/修复，即 0-100。此常量供 normalize_sector_score 归一化/兜底，若未来 generator
@@ -314,6 +318,9 @@ def capital_intent_strength(cand: dict) -> tuple[str, int, dict]:
     add("volume_sustain_mainline", (cand.get("volume_sustain") or {}).get("status") == "mainline_confirmed", 2)
     add("ignition", (cand.get("ignition") or {}).get("hit"), 1)
     add("reversal_k", (cand.get("patterns") or {}).get("reversal_k_candidate"), 1)
+    # 资金流向（正交于量价）：个股在主力净流入榜且净流入，或所属板块净流入
+    ff = cand.get("fund_flow") or {}
+    add("fund_flow_inflow", ff.get("available") and (ff.get("in_rank_positive") or ff.get("sector_inflow_positive")), 2)
 
     level = "强" if score >= CAP_STRONG else ("中" if score >= CAP_MID else "弱")
     return level, score, detail
@@ -426,6 +433,12 @@ def score_candidate(
             risk_flags.append("macd_divergence_detected_cap_disabled")
     if mt_cap.get("available") and (mt_cap.get("overextended") or {}).get("hit"):
         risk_flags.append("macd_overextended")  # 开口/空间拐离：仅记录，不降档
+    liq = cand.get("liquidity") or {}
+    if liq.get("available") and liq.get("avg_amount_yi") is not None and liq["avg_amount_yi"] < LIQUIDITY_FLOOR_YI:
+        # 流动性底线（近20日均成交额），默认仅 flag；registry cap_rules.liquidity_floor=true 才封顶 C
+        risk_flags.append("low_liquidity")
+        if rules.get("liquidity_floor"):
+            bucket = cap_bucket(bucket, "C")
 
     # 总分：技术 60% + 板块 40% + 共振调整，0-100
     resonance_adj = {"强共振": 5, "弱共振": 0, "无共振": 0, "反向": -5}[res_level]
@@ -548,6 +561,9 @@ def score_candidate(
         "s_shape": cand.get("s_shape") or {},
         "s_star": (cand.get("s_shape") or {}).get("s_star"),
         "suggestion": (cand.get("s_shape") or {}).get("suggestion"),
+        # 正交因子（方向A）：流动性 + 资金流向
+        "liquidity": cand.get("liquidity") or {},
+        "fund_flow": cand.get("fund_flow") or {},
     }
 
 

@@ -105,6 +105,18 @@ base bucket ＝ 技术结构 × 资金意图（均为个股维度）：
   **校准工具**：`07_tools/screening/backtest_factors.py`（纯分析、只读本地日线、as-of 切片无未来函数）
   走查历史 S** → 前向 MFE/MAE/胜率，按 S** 档/建议/分项分组，验证"可买(≥70)"是否显著优于"不买(<60)"、
   各分项 hit 是否有正向 lift，据此重估 s_shape.py 顶部的待回测阈值与权重。
+
+  > **2026-07-23 全市场回测结论**：`--universe-local` 全市场样本(覆盖率~100%)下，突破式 S_shape 及其
+  > 反转(invert)在 J<13 短周期**均无稳定 alpha**(门槛扫描平坦、胜率~47%)；小样本的"60-70甜点区/invert胜出"
+  > 主要是幸存者偏差。故 **S_shape 定性为描述性排序辅助，不作买入 alpha**；`s_reversal` 仅回测对照、不上线。
+  > 真正的边际在**纪律正确性**(N型/0AMV/止损/修复确认/仓位) 与**正交数据维度**，而非继续磨量价打分。
+
+- **正交因子（方向A，非量价形态）**：
+  - **流动性**（`enrich.check_liquidity`）：近 20 日均成交额(亿元)。低于 `LIQUIDITY_FLOOR_YI` 打
+    `low_liquidity`；是否封顶 C 由 `scoring.cap_rules.liquidity_floor` 控制(默认关，仅 flag)。
+  - **资金流向**（`enrich.load_fund_flow`/`fund_flow_of`，读 `collect_fund_flow` 的
+    `{date}_fund_flow_rank.json`）：个股在主力净流入榜且净流入、或所属主题板块净流入 → 计入
+    `capital_intent`(资金意图轴，正交于量价)。文件缺失干净降级。
 - 资金意图 = `capital_intent_strength`（放量点火 +3、知行多头且沿短线上行 +2、
   20日相对强度强 +2、龙头量能 +2、底部巨量 +2、量能持续=主线确认 +2、点火 +1、
   反转K +1；≥5 强 / ≥2 中 / 否则 弱）。仅正向计"资金在进"，派发/顶背离由风控 cap 否决。
