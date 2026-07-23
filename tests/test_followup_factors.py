@@ -125,3 +125,12 @@ def test_financial_factor_index_lookup():
     assert r["available"] and r["dixi_proxy"]["real_earnings_cashflow"] is True
     r2 = fin.financial_factor("000002", df, cm)
     assert r2["available"] and r2["dixi_proxy"]["real_earnings_cashflow"] is False
+
+
+def test_auto_colmap_revenue_skips_ratio_column():
+    # 复现 --inspect 反馈：revenue 不应匹配到 "EBITDA/营业总收入(%)" 比率列
+    cols = ["EBITDA/营业总收入(%)", "营业总收入(万元)", "营业收入增长率(%)", "扣非净利润同比(%)"]
+    cm = fin.auto_colmap(cols)
+    assert cm["revenue"] == "营业总收入(万元)"        # 金额列，非比率
+    assert cm["revenue_yoy"] == "营业收入增长率(%)"
+    assert cm["net_profit_yoy"] == "扣非净利润同比(%)"  # 扣非同比(用户确认可用)

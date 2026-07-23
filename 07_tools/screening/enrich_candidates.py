@@ -1229,9 +1229,11 @@ def enrich(
     fin_cfg = financials_cfg or {}
     fin_enabled = bool(fin_cfg.get("enabled"))
     fin_df = financials_mod.load_financials(fin_cfg.get("report_period", "")) if fin_enabled else None
-    fin_colmap = fin_cfg.get("columns") or {}
-    if fin_enabled and not fin_colmap and fin_cfg.get("auto_map", True) and fin_df is not None:
-        fin_colmap = financials_mod.auto_colmap(getattr(fin_df, "columns", []))
+    fin_colmap = dict(fin_cfg.get("columns") or {})
+    if fin_enabled and fin_df is not None and fin_cfg.get("auto_map", True):
+        merged = financials_mod.auto_colmap(getattr(fin_df, "columns", []))
+        merged.update(fin_colmap)   # 显式 registry.columns 按字段覆盖自动识别
+        fin_colmap = merged
     stock_theme, theme_map_available = build_stock_theme_map(
         min_match=theme_min_match if theme_min_match is not None else THEME_MIN_MATCH)
     if not theme_map_available:
