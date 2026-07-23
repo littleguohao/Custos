@@ -269,6 +269,23 @@ def horizon_band_matrix(records: list[dict[str, Any]], horizons: tuple[int, ...]
     return {"win_rate": win, "avg_return": avg, "text": "\n".join(lines)}
 
 
+def sweep_threshold(records: list[dict[str, Any]], horizon: int = 10,
+                    cutoffs: tuple[int, ...] = (50, 55, 60, 65, 70, 75, 80)) -> dict[str, Any]:
+    """扫描"分数 >= cutoff"分组的胜率/均收益，用于校准"可买"门槛（务必在全量数据上做，
+    小样本上调门槛=过拟合）。返回每个 cutoff 的 n/胜率/均收益/中位MFE-MAE。"""
+    rows = []
+    for cut in cutoffs:
+        sub = [r for r in records if r.get("s_star") is not None and r["s_star"] >= cut]
+        rows.append({"cutoff": cut, **_stats(sub, horizon)})
+    lines = [f"score>=cutoff \\ horizon={horizon}:"]
+    for r in rows:
+        if r.get("n"):
+            lines.append(f"  >= {r['cutoff']:<3} n={r['n']:<5} 胜率 {r['win_rate'] * 100:5.1f}%  均收 {r['avg_return'] * 100:+.2f}%")
+        else:
+            lines.append(f"  >= {r['cutoff']:<3} n=0")
+    return {"horizon": horizon, "cutoffs": rows, "text": "\n".join(lines)}
+
+
 def _load_bars_local(codes: list[str], count: int) -> dict[str, pd.DataFrame]:
     """CLI 用：经 local_tdx 读取本地日线（需通达信数据；单测走注入不经此）。"""
     import local_tdx_data  # noqa: PLC0415
@@ -298,6 +315,8 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     ap.add_argument("--scorer", choices=list(SCORERS.keys()), default="s_shape",
                     help="打分器：s_shape(突破式)/s_reversal(买弱式)/invert_s_shape(反转突破分)")
     ap.add_argument("--summary-horizon", type=int, default=10)
+    ap.add_argument("--threshold-sweep", action="store_true",
+                    help="扫描 score>=cutoff 的胜率/均收益(校准可买门槛；仅在全量数据上有意义)")
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
 
@@ -321,6 +340,8 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     payload = {"codes": codes, "count": args.count, "horizons": list(horizons),
                "entry_filter": args.entry_filter, "scorer": args.scorer,
                "summary": summary, "horizon_band_matrix": matrix, "records": records}
+    if args.threshold_sweep:
+        payload["threshold_sweep"] = sweep_threshold(records, horizon=args.summary_horizon)
     if args.out:
         out = Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -328,6 +349,9 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
         print(f"[OK] 写出 {out}（{len(records)} 条信号，scorer={args.scorer}, entry_filter={args.entry_filter}）")
     print(f"\n=== 分档 × horizon 网格（scorer={args.scorer}, entry_filter={args.entry_filter}, 信号 {len(records)} 条）===")
     print(matrix["text"])
+    if args.threshold_sweep:
+        print(f"\n=== 门槛扫描（scorer={args.scorer}, horizon={args.summary_horizon}）===")
+        print(payload["threshold_sweep"]["text"])
     print("\n=== summary(horizon=%d) ===" % args.summary_horizon)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0

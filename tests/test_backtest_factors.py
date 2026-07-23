@@ -177,3 +177,14 @@ def test_invert_scorer_is_complement_of_s_shape():
     assert common
     for d in common:
         assert abs(m_inv[d] - (100.0 - m_ss[d])) < 0.05
+
+
+def test_sweep_threshold_cutoffs():
+    recs = [_mrec(80, "可买", 0.10, 0.10, 0.10),
+            _mrec(66, "观望", 0.02, 0.02, 0.02),
+            _mrec(30, "不买", -0.05, -0.05, -0.05)]
+    s = bt.sweep_threshold(recs, horizon=10, cutoffs=(60, 70))
+    by = {row["cutoff"]: row for row in s["cutoffs"]}
+    assert by[70]["n"] == 1 and by[70]["win_rate"] == 1.0   # 仅 s_star=80
+    assert by[60]["n"] == 2                                  # 80 与 66
+    assert "text" in s
