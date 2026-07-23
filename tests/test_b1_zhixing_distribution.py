@@ -129,6 +129,8 @@ def _scand(**extra):
         patterns={"bbi_above": True, "j_low": True, "volume_contraction": True,
                   "reversal_k_candidate": True, "relative_strength_strong": True},
         daily_j=10.0, stop_loss_ref={"price": 10.0, "basis": "x"}, is_holding=False,
+        # 技术强(bbi+反转K+RS=65) + 资金意图强(b1点火+量能主线) → base 强×强 = A
+        b1_ignition={"hit": True}, volume_sustain={"status": "mainline_confirmed"},
     )
     base.update(extra)
     return base

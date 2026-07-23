@@ -15,6 +15,8 @@ def _cand(**extra):
         "daily_j": 10.0,
         "stop_loss_ref": {"price": 10.0, "basis": "近10日最低价"},
         "is_holding": False,
+        # 资金意图默认强（量能持续主线只加资金意图分、不加技术分）→ base bucket = 强×强 = A
+        "volume_sustain": {"status": "mainline_confirmed"},
     }
     cand.update(extra)
     return cand
@@ -140,11 +142,12 @@ def test_cap_rule_disabled_sprint_keeps_a():
 def test_cap_rules_disabled_retreat_revoked_avoid_keep_a():
     scored = sc.score_candidate(
         _cand(volume_sustain={"status": "retreat", "available": True},
-              non_one_wave={"status": "revoked", "available": True}),
+              non_one_wave={"status": "revoked", "available": True},
+              zhixing={"available": True, "qsx_gt_dks": True, "close_above_qsx": True}),
         SECTOR_STRONG, "做多", cz_sector="avoid",
         cap_rules={"volume_retreat": False, "non_one_wave_revoked": False,
                    "cz_avoid_sector": False})
-    assert scored["bucket"] == "A"  # 三条降档全关 → 保持基础 强×强＝A
+    assert scored["bucket"] == "A"  # 三条降档全关 + 资金意图强 → 保持基础 强×强＝A
     assert "main_force_retreat_cap_disabled" in scored["risk_flags"]
     assert "non_one_wave_revoked_cap_disabled" in scored["risk_flags"]
     assert "cz_avoid_sector_cap_disabled" in scored["risk_flags"]

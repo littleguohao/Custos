@@ -79,7 +79,11 @@ def test_no_divergence_on_monotone():
 def _cand_macd(**mt):
     return {
         "code": "600000", "name": "示例", "sector": "半导体", "theme_id": "t",
-        "formula_hits": [], "patterns": {}, "daily_j": 5.0,
+        "formula_hits": [], "daily_j": 5.0,
+        # 技术强(bbi+j低+缩量=60) + 资金意图中(量能主线) → base 强×中 = B，
+        # 便于观察 MACD 顶背离/三打白骨精 封顶 C 是真实降档。
+        "patterns": {"bbi_above": True, "j_low": True, "volume_contraction": True},
+        "volume_sustain": {"status": "mainline_confirmed"},
         "stop_loss_ref": {"price": 9.0, "basis": "x"}, "is_holding": False,
         "macd_technics": {"available": True, **mt},
     }

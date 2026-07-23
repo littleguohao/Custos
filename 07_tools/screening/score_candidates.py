@@ -1,26 +1,31 @@
 # -*- coding: utf-8 -*-
-"""Screening 链第 3 段：板块过滤 + 共振打分分层（score_candidates）。
+"""Screening 链第 3 段：个股量价分层 + 板块提示（score_candidates）。
 
-规则来源（历史设计，已批准照此实现）：
-00_governance/FORMULA_SCREEN_SECTOR_FILTER_WORKFLOW.md（git d674335）。
+2026-07-23 重构（用户决策）：分层（A/B/C/D）由**个股自身**定夺，不再被板块弱势
+封顶——很多强势个股不跟原板块走，仅因板块弱把走势好的个股打到 D 得不偿失。
 
-技术面 x 板块热度共振矩阵（base bucket）：
+个股共振矩阵（base bucket）＝ 技术结构 × 资金意图（均为个股维度）：
 
-| 技术面\\板块 | 强 | 中 | 弱 | 未知 |
-|---|---|---|---|---|
-| 强 | A | B | C | C |
-| 中 | B | C | D | D |
-| 弱 | C | D | D | D |
+| 技术结构\\资金意图 | 强 | 中 | 弱 |
+|---|---|---|---|
+| 强 | A | B | C |
+| 中 | B | C | D |
+| 弱 | C | D | D |
 
-板块过滤（pass_level 封顶）：
-- 主升/修复 → allow_A（可 A/B）
-- 震荡/分歧 → allow_B（最多 B）
-- 退潮 → observe_only（原则 D 或 C 观察，封顶 C）
-- 未知/缺 sector_state → reject_A（不进 A）
+- 技术结构 = technical_score 分级（强>=60 / 中30-59 / 弱<30）。
+- 资金意图 = capital_intent_strength（放量点火/龙头量/底部巨量/相对强度/知行多头/
+  量能持续；命中派发或 MACD 顶背离则判资金流出=弱）。
 
-附加调整：
-- 0AMV 空头 → 全池最高 B 且 next_step=observe_price。
-- 无可定义止损位（近10日最低价缺失）→ 不得入 A（封顶 B，打 risk_flags）。
+板块信息**降为提示**，不封顶，只体现在：
+- score：0.6×技术 + 0.4×板块分 + 共振调整（板块进 40% 权重与 ±5 共振）。
+- trade_style：主升/修复→波段；震荡/分歧→波段(谨慎)；退潮/未知→短线(交易性机会)。
+
+仍保留的**风控/回避硬否决**（与"板块弱"无关）：
+- 0AMV 空头 → 封顶 B 且 next_step=observe_price。
+- 无可定义止损位 → 封顶 B。
+- 冲刺波首个B1 → 封顶 B；非一波流撤销 → 封顶 C；量能撤退 → 封顶 C。
+- 主力出货五方式 high→D/watch→C；MACD 顶背离/三打白骨精 → 封顶 C。
+- CZ 回避方向名单 → D（主动黑名单，非"弱"）。
 
 CLI::
 
@@ -52,7 +57,8 @@ REGISTRY_PATH = GOVERNANCE / "SCREEN_FORMULA_REGISTRY.json"
 
 BUCKET_ORDER = ["A", "B", "C", "D"]
 
-# 共振矩阵：(technical_level, sector_heat_level) → base bucket
+# 个股共振矩阵：(technical_level, capital_intent_level) → base bucket。
+# 两轴均为个股维度（技术结构 × 资金意图）；板块不参与分层，只进 score/共振/trade_style。
 RESONANCE_MATRIX = {
     ("强", "强"): "A", ("强", "中"): "B", ("强", "弱"): "C", ("强", "未知"): "C",
     ("中", "强"): "B", ("中", "中"): "C", ("中", "弱"): "D", ("中", "未知"): "D",
@@ -255,6 +261,55 @@ def resonance_level(tech_level: str, heat_level: str) -> str:
     return "无共振"
 
 
+# 资金意图强度阈值（待回测）：>=CAP_STRONG 强 / >=CAP_MID 中 / 否则 弱
+CAP_STRONG = 5
+CAP_MID = 2
+
+
+def capital_intent_strength(cand: dict) -> tuple[str, int, dict]:
+    """资金意图强度（量价证明资金在进）→ 分层第二轴。确定性加分，落盘明细。
+
+    证据（待回测权重）：b1_ignition +3、知行多头且沿短线上行 +2、20日相对强度强 +2、
+    龙头量能 +2、底部巨量 +2、量能持续=主线确认 +2、放量点火 +1、反转K +1。
+    仅正向计"资金在进"证据；资金流出/派发风险（出货五方式、MACD 顶背离/三打白骨精）
+    由 score_candidate 的风控 cap 层单独否决，不在此重复扣减，避免双计。
+    返回 (level, score, detail)。
+    """
+    detail: dict[str, Any] = {}
+    score = 0
+
+    def add(key: str, cond: Any, pts: int) -> None:
+        nonlocal score
+        hit = bool(cond)
+        detail[key] = {"hit": hit, "points": pts if hit else 0}
+        if hit:
+            score += pts
+
+    zx = cand.get("zhixing") or {}
+    leader = cand.get("leader_volume") or {}
+    bottom = cand.get("bottom_volume") or {}
+    add("b1_ignition", (cand.get("b1_ignition") or {}).get("hit"), 3)
+    add("zhixing_ride", zx.get("available") and zx.get("qsx_gt_dks") and zx.get("close_above_qsx"), 2)
+    add("relative_strength_strong", (cand.get("patterns") or {}).get("relative_strength_strong"), 2)
+    add("leader_volume", leader.get("available") and leader.get("hit"), 2)
+    add("bottom_volume", bottom.get("available") and bottom.get("hit"), 2)
+    add("volume_sustain_mainline", (cand.get("volume_sustain") or {}).get("status") == "mainline_confirmed", 2)
+    add("ignition", (cand.get("ignition") or {}).get("hit"), 1)
+    add("reversal_k", (cand.get("patterns") or {}).get("reversal_k_candidate"), 1)
+
+    level = "强" if score >= CAP_STRONG else ("中" if score >= CAP_MID else "弱")
+    return level, score, detail
+
+
+def trade_style_of(heat_level: str) -> str:
+    """板块热度 → 交易属性提示（不影响分层，只提示持有周期）。"""
+    if heat_level == "强":
+        return "波段"          # 主升/修复：主线持续性强，适合波段
+    if heat_level == "中":
+        return "波段(谨慎)"     # 震荡/分歧
+    return "短线(交易性)"       # 退潮/未知/缺失：板块不行，仅交易性机会
+
+
 def market_permission(amv_state: str) -> str:
     return {"做多": "允许", "空头": "观察"}.get(amv_state, "仅低吸")
 
@@ -275,11 +330,14 @@ def score_candidate(
     """
     rules = resolve_cap_rules(cap_rules)
     tech_score, tech_level, factor_contrib = technical_score(cand)
+    capital_level, capital_score, capital_detail = capital_intent_strength(cand)
     heat, pass_level, sector_cap, reason = sector_heat(sector_entry)
+    trade_style = trade_style_of(heat)
     sector_score_raw = (sector_entry or {}).get("score") if sector_entry else None
     sector_score = normalize_sector_score(sector_score_raw, sector_score_max)
 
-    base_bucket = RESONANCE_MATRIX[(tech_level, heat)]
+    # 分层由个股（技术结构 × 资金意图）定夺；板块不封顶（降为提示，只进 score/共振/trade_style）
+    base_bucket = RESONANCE_MATRIX[(tech_level, capital_level)]
     res_level = resonance_level(tech_level, heat)
     permission = market_permission(amv_state)
 
@@ -287,8 +345,8 @@ def score_candidate(
     if cand.get("is_holding"):
         risk_flags.append("is_holding")
 
-    # 封顶规则（cap 只降不升；条件 flag 无条件记录，cap 是否实际触发另算）
-    bucket = cap_bucket(base_bucket, sector_cap)
+    # 风控/回避硬否决（cap 只降不升；与"板块弱"无关，故板块不在此列）
+    bucket = base_bucket
     if not (cand.get("stop_loss_ref") or {}).get("price"):
         risk_flags.append("no_stop_loss_ref")
         bucket = cap_bucket(bucket, "B")
@@ -419,15 +477,20 @@ def score_candidate(
         },
         "resonance": {
             "technical_level": tech_level,
+            "capital_intent_level": capital_level,
             "sector_heat_level": heat,
             "market_permission": permission,
             "resonance_level": res_level,
         },
+        "trade_style": trade_style,
+        "capital_intent": {"level": capital_level, "score": capital_score, "detail": capital_detail},
         "stock_role": "未定",
-        "relative_strength": "未定",
+        "relative_strength": "强" if (cand.get("patterns") or {}).get("relative_strength_strong") else "未定",
         "score": total,
         "score_detail": {
             "technical_score": tech_score,
+            "capital_intent_level": capital_level,
+            "capital_intent_score": capital_score,
             "sector_score": sector_score,
             "sector_score_raw": sector_score_raw,
             "base_bucket": base_bucket,

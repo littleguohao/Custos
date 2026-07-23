@@ -77,28 +77,39 @@ TQ `download_file down_type=4`，run_1800 第 2 步每日刷新，落盘
 → `sector_code_map.json`，primary 优先于 candidate，已知存在错配，仅作
 兜底）。候选落盘 `sector_source`（concept_tags / tq_880_fallback）标明来源。
 
-### [3] 板块过滤 + 共振打分
+### [3] 个股量价分层 + 板块提示
 
-共振矩阵（技术面 × 板块热度 → base bucket）：
+**2026-07-23 重构（用户决策）**：分层 A/B/C/D 由**个股自身**定夺，**板块不再封顶**
+——很多强势个股不跟原板块走，仅因板块弱把走势好的个股打到 D 得不偿失。
 
-| 技术面\板块 | 强 | 中 | 弱 | 未知 |
-|---|---|---|---|---|
-| 强 | A | B | C | C |
-| 中 | B | C | D | D |
-| 弱 | C | D | D | D |
+base bucket ＝ 技术结构 × 资金意图（均为个股维度）：
 
-板块过滤封顶：主升/修复→可 A；震荡/分歧→最多 B；退潮→最多 C；未知→不进 A。
+| 技术结构\资金意图 | 强 | 中 | 弱 |
+|---|---|---|---|
+| 强 | A | B | C |
+| 中 | B | C | D |
+| 弱 | C | D | D |
 
-附加调整：
+- 技术结构 = `technical_score` 分级（强>=60 / 中30-59 / 弱<30）。
+- 资金意图 = `capital_intent_strength`（放量点火 +3、知行多头且沿短线上行 +2、
+  20日相对强度强 +2、龙头量能 +2、底部巨量 +2、量能持续=主线确认 +2、点火 +1、
+  反转K +1；≥5 强 / ≥2 中 / 否则 弱）。仅正向计"资金在进"，派发/顶背离由风控 cap 否决。
 
-- 0AMV 空头 → 全池最高 B 且 next_step=observe_price。
-- 无可定义止损位（近10日最低价缺失）→ 不得入 A（封顶 B，打 no_stop_loss_ref）。
+**板块降为提示**（不封顶）：
 
-总分 = 0.6×技术分 + 0.4×板块分 + 共振调整（强共振+5/反向−5），
-打分明细（score_detail）随 StockPool 落盘可复盘。
+- 进 score：总分 = 0.6×技术 + 0.4×板块分 + 共振调整（强共振+5/反向−5）。
+- 定 trade_style：主升/修复→`波段`；震荡/分歧→`波段(谨慎)`；退潮/未知→`短线(交易性)`。
+
+**仍保留的风控/回避硬否决**（与"板块弱"无关）：
+
+- 0AMV 空头 → 封顶 B 且 next_step=observe_price；无止损位 → 封顶 B。
+- 冲刺波首个B1 → 封顶 B；非一波流撤销/量能撤退 → 封顶 C。
+- 主力出货五方式 high→D/watch→C；MACD 顶背离/三打白骨精 → 封顶 C；CZ 回避名单 → D。
+- 以上封顶开关见 `scoring.cap_rules`（默认全开）。
 
 next_step：A→generate_buy_plan，B→observe_price，C→long_term_track，D→avoid
-（0AMV 空头一律 observe_price）。
+（0AMV 空头一律 observe_price）。打分明细（score_detail，含 capital_intent_level）
+与 trade_style 随 StockPool 落盘可复盘。
 
 ### [4] 备选表格 + 日报
 
