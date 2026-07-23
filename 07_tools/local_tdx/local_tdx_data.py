@@ -384,6 +384,48 @@ def get_stock_name_map(pool_type: str = "5") -> dict[str, str]:
 
 # ========== JSON/CSV helpers ==========
 
+def _is_ashare_stock_file(market: str, code6: str) -> bool:
+    """按 vipdoc 文件的市场目录 + 6位代码判定是否 A 股个股（排除指数/ETF/债券）。
+
+    - sh: 600/601/603/605/688（排除 000/880 指数、5xx ETF/基金）
+    - sz: 000/001/002/003/300/301（排除 15/16/18 ETF、399 指数）
+    - bj: 43/83/87/88/920
+    """
+    if market == "sh":
+        return code6.startswith(("600", "601", "603", "605", "688"))
+    if market == "sz":
+        return code6.startswith(("000", "001", "002", "003", "300", "301"))
+    if market == "bj":
+        return code6.startswith(("43", "83", "87", "88", "920"))
+    return False
+
+
+def list_local_vipdoc_codes(tdx_root: Optional["Path"] = None, ashare_only: bool = True) -> list[str]:
+    """枚举本地 vipdoc 实有的日线文件 → 6 位代码列表（回测 universe 首选）。
+
+    直接读磁盘上有什么（TDX_ROOT/vipdoc/{sh,sz,bj}/lday/{prefix}######.day），
+    保证代码与 read_vipdoc_daily 能读到的完全一致，避免在线全代码表对不上本地文件。
+    ashare_only=True 时仅保留 A 股个股（滤掉指数/ETF/债券）。
+    """
+    root = Path(tdx_root) if tdx_root else TDX_ROOT
+    out: set[str] = set()
+    for mkt in ("sh", "sz", "bj"):
+        d = root / "vipdoc" / mkt / "lday"
+        if not d.exists():
+            continue
+        for p in d.glob(f"{mkt}*.day"):
+            name = p.stem
+            if not name.startswith(mkt):
+                continue
+            code6 = name[len(mkt):]
+            if len(code6) != 6 or not code6.isdigit():
+                continue
+            if ashare_only and not _is_ashare_stock_file(mkt, code6):
+                continue
+            out.add(code6)
+    return sorted(out)
+
+
 def save_json(path: Path, obj: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")

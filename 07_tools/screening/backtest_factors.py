@@ -305,7 +305,9 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     ap = argparse.ArgumentParser(description="S_shape 因子走查回测校准（纯分析，只读本地日线）")
     ap.add_argument("--codes", default="", help="逗号分隔的 6 位代码（与 --universe-sample 二选一）")
     ap.add_argument("--universe-sample", type=int, default=0,
-                    help="从本地全 A 随机抽 N 只（代表性样本；0=不抽，用 --codes）")
+                    help="从 universe 随机抽 N 只（代表性样本；0=不抽，用 --codes 或全量 universe）")
+    ap.add_argument("--universe-local", action="store_true",
+                    help="universe 用本地 vipdoc 实有文件（推荐：覆盖率~100%%、不依赖在线代码表；否则用在线 get_stock_list）")
     ap.add_argument("--seed", type=int, default=0, help="随机抽样种子（可复现）")
     ap.add_argument("--count", type=int, default=500, help="每股回溯 K 线根数")
     ap.add_argument("--horizons", default="5,10,20", help="前向窗口(日)，逗号分隔")
@@ -320,14 +322,20 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
 
-    if args.universe_sample > 0:
+    if args.universe_local or args.universe_sample > 0:
         import local_tdx_data  # noqa: PLC0415
-        codes = sample_codes(local_tdx_data.get_stock_list(), args.universe_sample, args.seed)
-        print(f"[INFO] 全 A 随机抽样 {len(codes)} 只（seed={args.seed}）", file=sys.stderr)
+        if args.universe_local:
+            base = local_tdx_data.list_local_vipdoc_codes()
+            src = "local_vipdoc"
+        else:
+            base = local_tdx_data.get_stock_list()
+            src = "online_get_stock_list"
+        codes = sample_codes(base, args.universe_sample, args.seed) if args.universe_sample > 0 else list(base)
+        print(f"[INFO] universe={src} 共 {len(base)} 只，取 {len(codes)} 只（seed={args.seed}）", file=sys.stderr)
     else:
         codes = [c.strip() for c in args.codes.split(",") if c.strip()]
     if not codes:
-        ap.error("需提供 --codes 或 --universe-sample N")
+        ap.error("需提供 --codes / --universe-sample N / --universe-local")
     horizons = tuple(int(h) for h in args.horizons.split(",") if h.strip())
     load = loader or _load_bars_local
     bars = load(codes, args.count)
