@@ -31,9 +31,10 @@
   },
   "financials": {
     "enabled": false,
+    "auto_map": true,
     "report_period": "",
     "columns": {},
-    "_note": "财务维度(CZ §四 抄底三条件代理，见 07_tools/screening/financials.py)。默认关(enabled=false)。启用需先确认列映射：columns 把逻辑字段(code/net_profit/op_cashflow[必需]、revenue/net_profit_yoy/revenue_yoy/roe/total_shares)映射到 Affair 财务表(get_financial_data,~585列)的实际列名/序号——列含义随TDX版本而变，本机无法预知，须用户确认。映射不全→available=false，只证据层落盘、不驱动分层。"
+    "_note": "财务维度(CZ §四 抄底三条件代理，见 07_tools/screening/financials.py)。默认关(enabled=false)。Affair 财务表列为中文命名(基本EPS/ROE/净利润/经营现金流…)，auto_map=true 时按关键词自动识别列映射；启用前先跑 `uv run python 07_tools/screening/financials.py --inspect` 确认映射，不准再在 columns 显式覆盖(逻辑字段:code/net_profit/op_cashflow[必需]、revenue/net_profit_yoy/revenue_yoy/roe/total_shares；无代码列时用行索引'__index__'定位)。映射不全/代码不匹配→available=false，只证据层落盘、不驱动分层。"
   },
   "manual_pools": [
     {

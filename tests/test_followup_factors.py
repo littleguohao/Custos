@@ -92,3 +92,36 @@ def test_financial_factor_degrades():
     assert fin.financial_factor("600000", _FIN_DF, {}, price=10.0)["available"] is False           # 无colmap
     assert fin.financial_factor("600000", _FIN_DF, {"code": "c_code"}, price=10.0)["available"] is False  # 必需列缺
     assert fin.financial_factor("999999", _FIN_DF, _COLMAP)["available"] is False                  # 代码不在表
+
+
+# ---------- ③ 财务自动列映射 + 行索引定位 ----------
+
+def test_auto_colmap_matches_chinese_columns():
+    cols = ["证券代码", "report_date", "归属于母公司股东的净利润", "净利润同比增长率",
+            "营业总收入", "营业收入同比增长率", "经营活动产生的现金流量净额",
+            "净资产收益率(加权)", "总股本", "流通股本", "基本每股收益"]
+    cm = fin.auto_colmap(cols)
+    assert cm["code"] == "证券代码"
+    assert cm["net_profit"] == "归属于母公司股东的净利润"
+    assert cm["net_profit_yoy"] == "净利润同比增长率"
+    assert cm["revenue"] == "营业总收入"
+    assert cm["revenue_yoy"] == "营业收入同比增长率"
+    assert cm["op_cashflow"] == "经营活动产生的现金流量净额"
+    assert cm["roe"] == "净资产收益率(加权)"
+    assert cm["total_shares"] == "总股本"   # 不是流通股本
+
+
+def test_auto_colmap_index_fallback():
+    cm = fin.auto_colmap(["净利润", "经营活动产生的现金流量净额"])
+    assert cm["code"] == "__index__"   # 无代码列 → 用行索引
+
+
+def test_financial_factor_index_lookup():
+    df = pd.DataFrame({"净利润": [5e8, -1e8],
+                       "经营活动产生的现金流量净额": [3e8, -2e8]},
+                      index=["600000", "000002"])
+    cm = {"code": "__index__", "net_profit": "净利润", "op_cashflow": "经营活动产生的现金流量净额"}
+    r = fin.financial_factor("600000", df, cm)
+    assert r["available"] and r["dixi_proxy"]["real_earnings_cashflow"] is True
+    r2 = fin.financial_factor("000002", df, cm)
+    assert r2["available"] and r2["dixi_proxy"]["real_earnings_cashflow"] is False
