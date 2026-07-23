@@ -121,3 +121,37 @@ def test_sample_codes_deterministic_and_bounded():
     assert bt.sample_codes(allc, 999, seed=1) == sorted(allc)   # n>=总数 → 全部
     # 去空去重
     assert bt.sample_codes(["600000", "600000", "", "000001"], 0) == ["000001", "600000"]
+
+
+# ---------- 入场过滤 (entry_gate) ----------
+
+def test_evaluate_entry_gate_filters():
+    df = make_df([10.0 + i * 0.1 for i in range(70)])
+    all_recs = bt.evaluate({"600000": df}, horizons=(5,), min_bars=60)
+    none_recs = bt.evaluate({"600000": df}, horizons=(5,), min_bars=60, entry_gate=lambda s: False)
+    some_recs = bt.evaluate({"600000": df}, horizons=(5,), min_bars=60,
+                            entry_gate=lambda s: float(s["close"].iloc[-1]) > 16.0)
+    assert len(none_recs) == 0
+    assert 0 < len(some_recs) < len(all_recs)
+
+
+# ---------- 多 horizon 网格 ----------
+
+def _mrec(s_star, suggestion, r5, r10, r20):
+    d = {"s_star": s_star, "suggestion": suggestion}
+    for h, r in ((5, r5), (10, r10), (20, r20)):
+        d[f"ret{h}"] = r
+        d[f"mfe{h}"] = abs(r) + 0.01
+        d[f"mae{h}"] = -abs(r) - 0.01
+    return d
+
+
+def test_summarize_multi_and_matrix():
+    recs = [_mrec(80, "可买", 0.02, 0.05, 0.10), _mrec(30, "不买", -0.01, -0.02, 0.03)]
+    multi = bt.summarize_multi(recs, (5, 10, 20))
+    assert set(multi.keys()) == {5, 10, 20}
+    assert multi[10]["total_signals"] == 2
+    m = bt.horizon_band_matrix(recs, (5, 10, 20))
+    assert "win_rate" in m and "avg_return" in m and "text" in m
+    assert m["win_rate"]["A_可买(>=70)"][20] == 1.0   # 可买记录 H20 为正 → 胜率 1.0
+    assert m["win_rate"]["D_弱(<40)"][5] == 0.0        # 不买记录 H5 为负 → 胜率 0

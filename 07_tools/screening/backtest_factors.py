@@ -34,6 +34,27 @@ for _p in (str(_TOOLS), str(_SCREEN_DIR), str(_TOOLS / "local_tdx")):
 
 from s_shape import compute_s_shape, SSHAPE_MIN_BARS, SSTAR_STRONG, SSTAR_MID  # noqa: E402
 
+try:
+    from technical_monitor import kdj as _kdj  # noqa: E402
+except Exception:  # noqa: BLE001
+    _kdj = None
+
+J_LOW_THRESHOLD = 13.0
+
+
+def j_low_gate(df_slice: pd.DataFrame) -> bool:
+    """as-of 切片当日 KDJ 的 J<13（B1 买点区）。kdj 不可用时视为不通过。"""
+    if _kdj is None:
+        return False
+    r = _kdj(df_slice)
+    return bool(r.get("available") and r.get("j") is not None and r["j"] < J_LOW_THRESHOLD)
+
+
+ENTRY_GATES: dict[str, Optional[Callable[[pd.DataFrame], bool]]] = {
+    "none": None,        # 每根 K 线都当信号（全市场基线）
+    "j_low": j_low_gate,  # 只在 J<13 入场区评估（B1 真买点）
+}
+
 HORIZONS_DEFAULT = (5, 10, 20)
 
 
@@ -81,8 +102,13 @@ def evaluate(
     min_bars: int = SSHAPE_MIN_BARS,
     step: int = 1,
     max_signals_per_code: Optional[int] = None,
+    entry_gate: Optional[Callable[[pd.DataFrame], bool]] = None,
 ) -> list[dict[str, Any]]:
-    """逐股逐日走查：as-of 切片算 S_shape，配前向指标。返回逐条记录（可复盘）。"""
+    """逐股逐日走查：as-of 切片算 S_shape，配前向指标。返回逐条记录（可复盘）。
+
+    entry_gate(df_slice)->bool 若提供，只在返回 True 的 as-of 日评估（如 J<13 买点区），
+    用于测"真策略入场"而非全市场每根K线。
+    """
     records: list[dict[str, Any]] = []
     for code, raw in bars_by_code.items():
         if raw is None or len(raw) == 0:
@@ -91,7 +117,10 @@ def evaluate(
         n = len(df)
         emitted = 0
         for i in range(min_bars, n - 1, max(1, step)):
-            ss = compute_s_shape(df.iloc[:i + 1], code)  # 只用到 i（含当日）
+            slice_df = df.iloc[:i + 1]  # 只含 0..i（含当日），无未来
+            if entry_gate is not None and not entry_gate(slice_df):
+                continue
+            ss = compute_s_shape(slice_df, code)
             if not ss.get("available"):
                 continue
             rec: dict[str, Any] = {
@@ -178,6 +207,32 @@ def summarize(records: list[dict[str, Any]], horizon: int = 10) -> dict[str, Any
     }
 
 
+def summarize_multi(records: list[dict[str, Any]], horizons: tuple[int, ...]) -> dict[int, dict]:
+    """多 horizon 汇总：{h: summarize(records, h)}，用于看反转是否随周期翻转。"""
+    return {h: summarize(records, h) for h in horizons}
+
+
+def horizon_band_matrix(records: list[dict[str, Any]], horizons: tuple[int, ...]) -> dict[str, Any]:
+    """S** 档 × horizon 的胜率/均收益矩阵（诊断：高分档是否在长周期翻正）。"""
+    bands = ["A_可买(>=70)", "B_观望(60-70)", "C_中(40-60)", "D_弱(<40)"]
+    multi = summarize_multi(records, horizons)
+    win: dict[str, dict] = {b: {} for b in bands}
+    avg: dict[str, dict] = {b: {} for b in bands}
+    for h in horizons:
+        by = {x["band"]: x for x in multi[h]["by_sstar_band"]}
+        for b in bands:
+            cell = by.get(b, {})
+            win[b][h] = cell.get("win_rate")
+            avg[b][h] = cell.get("avg_return")
+    lines = ["S**档 \\ horizon(日): " + "  ".join(f"H{h}" for h in horizons)]
+    for b in bands:
+        wr = "  ".join(f"{win[b][h] * 100:.1f}%" if win[b][h] is not None else "  -  " for h in horizons)
+        ar = "  ".join(f"{avg[b][h] * 100:+.2f}%" if avg[b][h] is not None else "  -  " for h in horizons)
+        lines.append(f"  {b:<14} 胜率 {wr}")
+        lines.append(f"  {'':<14} 均收 {ar}")
+    return {"win_rate": win, "avg_return": avg, "text": "\n".join(lines)}
+
+
 def _load_bars_local(codes: list[str], count: int) -> dict[str, pd.DataFrame]:
     """CLI 用：经 local_tdx 读取本地日线（需通达信数据；单测走注入不经此）。"""
     import local_tdx_data  # noqa: PLC0415
@@ -202,6 +257,8 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     ap.add_argument("--count", type=int, default=500, help="每股回溯 K 线根数")
     ap.add_argument("--horizons", default="5,10,20", help="前向窗口(日)，逗号分隔")
     ap.add_argument("--step", type=int, default=1, help="as-of 采样步长")
+    ap.add_argument("--entry-filter", choices=list(ENTRY_GATES.keys()), default="none",
+                    help="只在满足入场条件的 as-of 日评估：none=每根K线；j_low=仅 J<13 买点区")
     ap.add_argument("--summary-horizon", type=int, default=10)
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
@@ -217,16 +274,22 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     horizons = tuple(int(h) for h in args.horizons.split(",") if h.strip())
     load = loader or _load_bars_local
     bars = load(codes, args.count)
-    records = evaluate(bars, horizons=horizons, step=args.step)
+    records = evaluate(bars, horizons=horizons, step=args.step,
+                       entry_gate=ENTRY_GATES[args.entry_filter])
     summary = summarize(records, horizon=args.summary_horizon)
+    matrix = horizon_band_matrix(records, horizons)
 
     payload = {"codes": codes, "count": args.count, "horizons": list(horizons),
-               "summary": summary, "records": records}
+               "entry_filter": args.entry_filter,
+               "summary": summary, "horizon_band_matrix": matrix, "records": records}
     if args.out:
         out = Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"[OK] 写出 {out}（{len(records)} 条信号）")
+        print(f"[OK] 写出 {out}（{len(records)} 条信号，entry_filter={args.entry_filter}）")
+    print(f"\n=== S**档 × horizon 网格（entry_filter={args.entry_filter}, 信号 {len(records)} 条）===")
+    print(matrix["text"])
+    print("\n=== summary(horizon=%d) ===" % args.summary_horizon)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
 
