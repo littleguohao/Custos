@@ -25,6 +25,16 @@
     "min_match": 1,
     "_note": "概念标签命中主题所需的最小语义标签数。默认 1＝命中1个即归类；提高到 2+ 可要求更强证据、降低子串过度匹配。"
   },
+  "fund_flow": {
+    "cumulative_days": 1,
+    "_note": "资金流向(东财 collect_fund_flow)累计天数。1=仅当日快照(现状)；>1=累加最近N个每日 fund_flow_rank 快照的主力净流入(按 code/板块名聚合)，多日更稳。资金流无历史存档，只能就已落盘的每日文件累积。"
+  },
+  "financials": {
+    "enabled": false,
+    "report_period": "",
+    "columns": {},
+    "_note": "财务维度(CZ §四 抄底三条件代理，见 07_tools/screening/financials.py)。默认关(enabled=false)。启用需先确认列映射：columns 把逻辑字段(code/net_profit/op_cashflow[必需]、revenue/net_profit_yoy/revenue_yoy/roe/total_shares)映射到 Affair 财务表(get_financial_data,~585列)的实际列名/序号——列含义随TDX版本而变，本机无法预知，须用户确认。映射不全→available=false，只证据层落盘、不驱动分层。"
+  },
   "manual_pools": [
     {
       "id": "POOL_ZHENDANG",

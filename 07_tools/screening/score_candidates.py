@@ -564,6 +564,7 @@ def score_candidate(
         # 正交因子（方向A）：流动性 + 资金流向
         "liquidity": cand.get("liquidity") or {},
         "fund_flow": cand.get("fund_flow") or {},
+        "financials": cand.get("financials") or {},
     }
 
 

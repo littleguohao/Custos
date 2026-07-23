@@ -1,0 +1,94 @@
+# -*- coding: utf-8 -*-
+"""三项后续测试：② 资金流多日累计 ① 因子分位 lift/流动性 ③ 财务代理逻辑。"""
+import json
+
+import pandas as pd
+
+from screening import enrich_candidates as ec
+from screening import backtest_factors as bt
+from screening import financials as fin
+
+
+# ---------- ② 资金流多日累计 ----------
+
+def _write_ff(mdir, date, stocks, sectors=None):
+    payload = {"date": date, "stock_rank": stocks, "sector_rank": {"concept": sectors or [], "industry": []}}
+    (mdir / f"{date}_fund_flow_rank.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+def test_fund_flow_cumulative_sums(tmp_path):
+    for d, inflow in [("2026-07-20", 1e8), ("2026-07-21", 2e8), ("2026-07-22", -0.5e8)]:
+        _write_ff(tmp_path, d, [{"code": "600000", "name": "浦发", "main_net_inflow": inflow, "main_net_pct": 1.0}],
+                  sectors=[{"name": "银行", "main_net_inflow": inflow}])
+    r = ec.load_fund_flow("2026-07-22", cumulative_days=3, market_dir=tmp_path)
+    assert r["available"] and r["cumulative_days"] == 3
+    e = r["by_code"]["600000"]
+    assert abs(e["main_net_inflow"] - 2.5e8) < 1 and e["days"] == 3   # 1+2-0.5 亿
+    assert len(r["files_used"]) == 3
+    # 板块累计
+    sec = {s["name"]: s for s in r["sectors"]}
+    assert abs(sec["银行"]["main_net_inflow"] - 2.5e8) < 1
+
+
+def test_fund_flow_single_day_unchanged(tmp_path):
+    _write_ff(tmp_path, "2026-07-22", [{"code": "600000", "main_net_inflow": 3e8, "main_net_pct": 2.0}])
+    r = ec.load_fund_flow("2026-07-22", cumulative_days=1, market_dir=tmp_path)
+    assert r["by_code"]["600000"]["main_net_inflow"] == 3e8 and r["files_used"] == ["2026-07-22"]
+
+
+# ---------- ① 因子分位 lift + 流动性 ----------
+
+def test_liquidity_yi_helper():
+    df = pd.DataFrame({"date": pd.date_range("2024-01-01", periods=25, freq="B"),
+                       "open": [10.0] * 25, "high": [10.1] * 25, "low": [9.9] * 25,
+                       "close": [10.0] * 25, "volume": [1000.0] * 25, "amount": [1.5e8] * 25})
+    assert abs(bt._liquidity_yi(df) - 1.5) < 1e-6
+
+
+def test_factor_lift_quantiles():
+    # 构造：高字段值 → 高前向收益（正向 lift），验证分位分组
+    recs = []
+    for i in range(40):
+        recs.append({"c_liquidity": float(i), "ret10": (i - 20) * 0.001,
+                     "mfe10": 0.05, "mae10": -0.05})
+    r = bt.factor_lift(recs, "c_liquidity", horizon=10, quantiles=4)
+    q = r["quantiles"]
+    assert len(q) == 4
+    assert q[-1]["avg_return"] > q[0]["avg_return"]   # 高分位收益更高
+    assert "text" in r
+
+
+def test_factor_lift_insufficient():
+    r = bt.factor_lift([{"c_liquidity": 1.0, "ret10": 0.01}], "c_liquidity", horizon=10)
+    assert "样本不足" in r.get("note", "") or r.get("n", 0) < 20
+
+
+# ---------- ③ 财务代理逻辑（注入数据） ----------
+
+_FIN_DF = pd.DataFrame([
+    {"c_code": "600000", "c_np": 5e8, "c_npyoy": 150.0, "c_ocf": 3e8, "c_roe": 12.0, "c_rev": 2e9, "c_shares": 1e9},
+    {"c_code": "000002", "c_np": -1e8, "c_npyoy": -30.0, "c_ocf": -2e8, "c_roe": -5.0, "c_rev": 1e9, "c_shares": 5e8},
+])
+_COLMAP = {"code": "c_code", "net_profit": "c_np", "op_cashflow": "c_ocf",
+           "net_profit_yoy": "c_npyoy", "roe": "c_roe", "revenue": "c_rev", "total_shares": "c_shares"}
+
+
+def test_financial_factor_dixi_hit():
+    r = fin.financial_factor("600000", _FIN_DF, _COLMAP, price=10.0)
+    assert r["available"]
+    assert r["dixi_proxy"]["perf_surge_ge_100"] is True     # 净利同比150%≥100
+    assert r["dixi_proxy"]["real_earnings_cashflow"] is True  # 净利>0 且 现金流>0
+    assert r["dixi_proxy"]["roe_positive"] is True
+    assert abs(r["market_cap"] - 1e10) < 1                   # 10亿股 × 10元
+    assert set(r["hits"]) == {"perf_surge_ge_100", "real_earnings_cashflow", "roe_positive"}
+
+
+def test_financial_factor_weak_stock():
+    r = fin.financial_factor("000002", _FIN_DF, _COLMAP, price=10.0)
+    assert r["available"] and r["hits"] == []               # 亏损+现金流负+ROE负 → 全不命中
+
+
+def test_financial_factor_degrades():
+    assert fin.financial_factor("600000", _FIN_DF, {}, price=10.0)["available"] is False           # 无colmap
+    assert fin.financial_factor("600000", _FIN_DF, {"code": "c_code"}, price=10.0)["available"] is False  # 必需列缺
+    assert fin.financial_factor("999999", _FIN_DF, _COLMAP)["available"] is False                  # 代码不在表

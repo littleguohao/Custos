@@ -117,6 +117,13 @@ base bucket ＝ 技术结构 × 资金意图（均为个股维度）：
   - **资金流向**（`enrich.load_fund_flow`/`fund_flow_of`，读 `collect_fund_flow` 的
     `{date}_fund_flow_rank.json`）：个股在主力净流入榜且净流入、或所属主题板块净流入 → 计入
     `capital_intent`(资金意图轴，正交于量价)。文件缺失干净降级。
+    **多日累计**：`fund_flow.cumulative_days`(默认1)>1 时累加最近N个每日快照的主力净流入(单日噪声大、多日更稳)。
+  - **财务维度（脚手架，默认关）**：`07_tools/screening/financials.py` 用 mootdx Affair 财务表做
+    CZ §四抄底三条件代理(net_profit_yoy≥100%、净利+经营现金流为正、ROE>0、市值)。**列含义随TDX版本变，
+    须用户在 `financials.columns` 确认列映射**；`financials.enabled=false` 默认关，映射不全→available=false，
+    只证据层落盘、不驱动分层。
+- **因子 lift 验证**（`backtest_factors.py --factor-field <名>`）：把任意数值字段(如 `c_liquidity`)按分位
+  分组看前向胜率/收益，验证是否有 lift。**流动性可历史回测**；**资金流无历史存档(只有每日快照)，只能前向验证**。
 - 资金意图 = `capital_intent_strength`（放量点火 +3、知行多头且沿短线上行 +2、
   20日相对强度强 +2、龙头量能 +2、底部巨量 +2、量能持续=主线确认 +2、点火 +1、
   反转K +1；≥5 强 / ≥2 中 / 否则 弱）。仅正向计"资金在进"，派发/顶背离由风控 cap 否决。

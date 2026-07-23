@@ -47,6 +47,7 @@ from paths import DATA, RISK_DIR, SECTORS_DIR, TRADES_DIR  # noqa: E402
 import concept_tags  # noqa: E402
 import local_tdx_data  # noqa: E402
 import s_shape as s_shape_mod  # noqa: E402
+import financials as financials_mod  # noqa: E402
 from technical_monitor import bbi_state, ema, kdj, macd, resample, zhixing_state, _infer_price_limit  # noqa: E402
 
 SCREENING_DIR = DATA / "screening"
@@ -982,14 +983,56 @@ def check_liquidity(df, win: int = LIQUIDITY_WIN) -> dict[str, Any]:
             "avg_amount": round(avg, 0), "window": win}
 
 
-def load_fund_flow(date: str) -> dict[str, Any]:
-    """读 collect_fund_flow 落盘的 {date}_fund_flow_rank.json（东财资金流）；缺失→unavailable。"""
-    data = _load_json(DATA / "market" / f"{date}_fund_flow_rank.json", {})
-    stock_rank = data.get("stock_rank") or []
-    by_code = {str(s.get("code", "")).split(".")[0].zfill(6): s for s in stock_rank if s.get("code")}
-    sectors = data.get("sector_rank") or {}
-    sec_list = (sectors.get("concept") or []) + (sectors.get("industry") or [])
-    return {"available": bool(by_code or sec_list), "by_code": by_code, "sectors": sec_list}
+def load_fund_flow(date: str, cumulative_days: int = 1, market_dir=None) -> dict[str, Any]:
+    """读 collect_fund_flow 落盘的每日资金流快照（东财）。
+
+    cumulative_days<=1：仅读 {date}_fund_flow_rank.json（现状）。
+    cumulative_days>1：累加 <=date 的最近 N 个每日快照的主力净流入（按 code/板块名聚合）——
+    单日快照噪声大，多日累计更稳（资金流本身无历史存档，只能就已落盘的每日文件累积）。
+    market_dir 可注入以便测试。缺失干净降级。
+    """
+    mdir = Path(market_dir) if market_dir else (DATA / "market")
+    if cumulative_days <= 1:
+        data = _load_json(mdir / f"{date}_fund_flow_rank.json", {})
+        stock_ranks = [data.get("stock_rank") or []]
+        sector_maps = [data.get("sector_rank") or {}]
+        files_used = [date] if data else []
+    else:
+        allf = sorted(p for p in mdir.glob("*_fund_flow_rank.json") if p.name[:10] <= date)
+        use = allf[-cumulative_days:]
+        files_used = [p.name[:10] for p in use]
+        stock_ranks, sector_maps = [], []
+        for p in use:
+            d = _load_json(p, {})
+            stock_ranks.append(d.get("stock_rank") or [])
+            sector_maps.append(d.get("sector_rank") or {})
+
+    by_code: dict[str, dict] = {}
+    for sr in stock_ranks:
+        for s in sr:
+            c = str(s.get("code", "")).split(".")[0].zfill(6)
+            if not (c.isdigit() and len(c) == 6):
+                continue
+            e = by_code.setdefault(c, {"code": c, "name": s.get("name", ""),
+                                       "main_net_inflow": 0.0, "days": 0,
+                                       "main_net_pct": s.get("main_net_pct")})
+            v = s.get("main_net_inflow")
+            if isinstance(v, (int, float)):
+                e["main_net_inflow"] += v
+            e["days"] += 1
+    sec_agg: dict[str, dict] = {}
+    for sm in sector_maps:
+        for item in (sm.get("concept") or []) + (sm.get("industry") or []):
+            nm = str(item.get("name") or "")
+            if not nm:
+                continue
+            e = sec_agg.setdefault(nm, {"name": nm, "main_net_inflow": 0.0})
+            v = item.get("main_net_inflow")
+            if isinstance(v, (int, float)):
+                e["main_net_inflow"] += v
+    return {"available": bool(by_code or sec_agg), "by_code": by_code,
+            "sectors": list(sec_agg.values()), "cumulative_days": cumulative_days,
+            "files_used": files_used}
 
 
 def fund_flow_of(code6: str, sector_name: str, ff: dict) -> dict[str, Any]:
@@ -1131,6 +1174,8 @@ def enrich(
     index_loader=None,
     universe_cfg: Optional[dict] = None,
     theme_min_match: Optional[int] = None,
+    fund_flow_days: int = 1,
+    financials_cfg: Optional[dict] = None,
 ) -> dict:
     """充实命中股。loader 可注入以便测试；所有失败结构化落盘，绝不 raise。"""
     hits_data = hits_data if hits_data is not None else load_hits(date)
@@ -1180,7 +1225,11 @@ def enrich(
 
     risk_high = load_risk_high_codes(date)
     holding = load_holding_codes()
-    fund_flow = load_fund_flow(date)
+    fund_flow = load_fund_flow(date, cumulative_days=fund_flow_days)
+    fin_cfg = financials_cfg or {}
+    fin_enabled = bool(fin_cfg.get("enabled"))
+    fin_colmap = fin_cfg.get("columns") or {}
+    fin_df = financials_mod.load_financials(fin_cfg.get("report_period", "")) if (fin_enabled and fin_colmap) else None
     stock_theme, theme_map_available = build_stock_theme_map(
         min_match=theme_min_match if theme_min_match is not None else THEME_MIN_MATCH)
     if not theme_map_available:
@@ -1259,6 +1308,10 @@ def enrich(
             cand["sector"] = "未知"
             cand["sector_source"] = ""
         cand["fund_flow"] = fund_flow_of(code6, cand["sector"], fund_flow)
+        if fin_enabled and fin_colmap:
+            # 财务维度(CZ抄底代理)：最佳努力落盘证据层，不驱动分层
+            cand["financials"] = financials_mod.financial_factor(
+                code6, fin_df, fin_colmap, price=cand.get("close"))
         result["candidates"].append(cand)
 
     return result
@@ -1273,7 +1326,9 @@ def main(argv: Optional[list] = None) -> int:
         Path(__file__).resolve().parents[2] / "00_governance" / "SCREEN_FORMULA_REGISTRY.json", {}
     )
     result = enrich(args.date, universe_cfg=registry.get("universe") or {},
-                    theme_min_match=(registry.get("theme_mapping") or {}).get("min_match"))
+                    theme_min_match=(registry.get("theme_mapping") or {}).get("min_match"),
+                    fund_flow_days=int((registry.get("fund_flow") or {}).get("cumulative_days", 1)),
+                    financials_cfg=registry.get("financials") or {})
 
     SCREENING_DIR.mkdir(parents=True, exist_ok=True)
     out_path = SCREENING_DIR / f"{args.date}_candidates_enriched.json"

@@ -131,6 +131,14 @@ def forward_metrics(df: pd.DataFrame, i: int, horizon: int) -> dict[str, Any]:
     }
 
 
+def _liquidity_yi(df: pd.DataFrame, win: int = 20) -> Optional[float]:
+    """近 win 日均成交额(亿元)；无 amount 列返回 None。用于回测里评估流动性因子 lift。"""
+    if "amount" not in df.columns or len(df) == 0:
+        return None
+    amt = df["amount"].astype(float).to_numpy()
+    return round(float(amt[-win:].mean()) / 1e8, 4)
+
+
 def evaluate(
     bars_by_code: dict[str, pd.DataFrame],
     horizons: tuple[int, ...] = HORIZONS_DEFAULT,
@@ -170,6 +178,7 @@ def evaluate(
             rec.update(res.get("aux") or {})
             for k, v in (res.get("components") or {}).items():
                 rec[f"c_{k}"] = v
+            rec["c_liquidity"] = _liquidity_yi(slice_df)  # 流动性(亿元)：可历史回测的正交因子
             for h in horizons:
                 fm = forward_metrics(df, i, h)  # 只用到 i+1..i+H
                 rec[f"ret{h}"] = fm.get("fwd_return")
@@ -286,6 +295,35 @@ def sweep_threshold(records: list[dict[str, Any]], horizon: int = 10,
     return {"horizon": horizon, "cutoffs": rows, "text": "\n".join(lines)}
 
 
+def factor_lift(records: list[dict[str, Any]], field: str, horizon: int = 10,
+                quantiles: int = 4) -> dict[str, Any]:
+    """把任意数值字段按分位分组，报前向胜率/均收益，验证该因子是否有 lift。
+
+    用于流动性(c_liquidity)、S_shape 分项(c_*) 等**历史可计算**因子。
+    注：资金流(fund_flow)无历史存档(只有每日快照)，无法走 as-of 回测，只能前向验证。
+    """
+    vals = [(r[field], r) for r in records
+            if isinstance(r.get(field), (int, float)) and r.get(f"ret{horizon}") is not None]
+    if len(vals) < quantiles * 5:
+        return {"field": field, "horizon": horizon, "n": len(vals), "note": "样本不足",
+                "text": f"{field}: 样本不足({len(vals)})"}
+    vals.sort(key=lambda x: x[0])
+    n = len(vals)
+    buckets = []
+    for q in range(quantiles):
+        lo, hi = q * n // quantiles, (q + 1) * n // quantiles
+        chunk = [r for _, r in vals[lo:hi]]
+        buckets.append({"quantile": q + 1,
+                        "value_range": [round(vals[lo][0], 4), round(vals[hi - 1][0], 4)],
+                        **_stats(chunk, horizon)})
+    lines = [f"{field} 分位(升序) \\ horizon={horizon}:"]
+    for b in buckets:
+        lines.append(f"  Q{b['quantile']} [{b['value_range'][0]}~{b['value_range'][1]}] "
+                     f"n={b.get('n', 0)} 胜率 {(b.get('win_rate') or 0) * 100:.1f}% "
+                     f"均收 {(b.get('avg_return') or 0) * 100:+.2f}%")
+    return {"field": field, "horizon": horizon, "quantiles": buckets, "text": "\n".join(lines)}
+
+
 def _load_bars_local(codes: list[str], count: int) -> dict[str, pd.DataFrame]:
     """CLI 用：经 local_tdx 读取本地日线（需通达信数据；单测走注入不经此）。"""
     import local_tdx_data  # noqa: PLC0415
@@ -319,6 +357,8 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     ap.add_argument("--summary-horizon", type=int, default=10)
     ap.add_argument("--threshold-sweep", action="store_true",
                     help="扫描 score>=cutoff 的胜率/均收益(校准可买门槛；仅在全量数据上有意义)")
+    ap.add_argument("--factor-field", default="",
+                    help="按该数值字段分位评估前向 lift(如 c_liquidity / c_compression / s_star)")
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
 
@@ -350,6 +390,8 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                "summary": summary, "horizon_band_matrix": matrix, "records": records}
     if args.threshold_sweep:
         payload["threshold_sweep"] = sweep_threshold(records, horizon=args.summary_horizon)
+    if args.factor_field:
+        payload["factor_lift"] = factor_lift(records, args.factor_field, horizon=args.summary_horizon)
     if args.out:
         out = Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -360,6 +402,9 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     if args.threshold_sweep:
         print(f"\n=== 门槛扫描（scorer={args.scorer}, horizon={args.summary_horizon}）===")
         print(payload["threshold_sweep"]["text"])
+    if args.factor_field:
+        print(f"\n=== 因子 lift（field={args.factor_field}, horizon={args.summary_horizon}）===")
+        print(payload["factor_lift"]["text"])
     print("\n=== summary(horizon=%d) ===" % args.summary_horizon)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
