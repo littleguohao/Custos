@@ -108,3 +108,16 @@ def test_summarize_component_lift():
     comp = s["by_component_hit"]["c_pivot"]
     assert comp["hit"]["n"] == 1 and comp["miss"]["n"] == 1
     assert comp["hit"]["avg_return"] > comp["miss"]["avg_return"]
+
+
+# ---------- 全 A 随机抽样 ----------
+
+def test_sample_codes_deterministic_and_bounded():
+    allc = [f"{i:06d}" for i in range(100)]
+    a = bt.sample_codes(allc, 10, seed=42)
+    b = bt.sample_codes(allc, 10, seed=42)
+    assert a == b and len(a) == 10 and a == sorted(a) and len(set(a)) == 10
+    assert bt.sample_codes(allc, 0, seed=1) == sorted(allc)     # n<=0 → 全部
+    assert bt.sample_codes(allc, 999, seed=1) == sorted(allc)   # n>=总数 → 全部
+    # 去空去重
+    assert bt.sample_codes(["600000", "600000", "", "000001"], 0) == ["000001", "600000"]

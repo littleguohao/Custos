@@ -278,8 +278,9 @@ def compute_s_shape(df, code: str = "") -> dict[str, Any]:
             "pocket_pivot": check_pocket_pivot(df),  # 0-15
             "overhead_supply": compute_overhead_supply(df),  # 0-10
             "ma_structure": compute_ma_structure(df),  # 0-10
-            "event_risk": {"points": EVENT_NEUTRAL, "available": False,
-                           "note": "个股事件/新闻未接入 enrich，取中性占位（待接入）"},  # 0-10
+            "event_risk": {"points": 0.0, "available": False,
+                           "note": "个股事件/新闻未接入 enrich，暂不计分（接入前不白送分，"
+                                   "回测证实恒中性无区分度；接入后改为 0-10 实分）"},  # 0-10
         }
         s_shape = round(min(100.0, sum(c["points"] for c in components.values())), 1)
         delta = compute_delta_catalyst(df)

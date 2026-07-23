@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import statistics
 import sys
 from pathlib import Path
@@ -34,6 +35,17 @@ for _p in (str(_TOOLS), str(_SCREEN_DIR), str(_TOOLS / "local_tdx")):
 from s_shape import compute_s_shape, SSHAPE_MIN_BARS, SSTAR_STRONG, SSTAR_MID  # noqa: E402
 
 HORIZONS_DEFAULT = (5, 10, 20)
+
+
+def sample_codes(all_codes: list[str], n: int, seed: int = 0) -> list[str]:
+    """从全 A 代码列表随机抽 N 只（带 seed 可复现），用于代表性样本校准。
+
+    n<=0 或 n>=总数 → 返回全部（去空、去重、排序）。
+    """
+    codes = sorted({str(c).strip() for c in all_codes if str(c).strip()})
+    if n <= 0 or n >= len(codes):
+        return codes
+    return sorted(random.Random(seed).sample(codes, n))
 
 
 def forward_metrics(df: pd.DataFrame, i: int, horizon: int) -> dict[str, Any]:
@@ -183,7 +195,10 @@ def _load_bars_local(codes: list[str], count: int) -> dict[str, pd.DataFrame]:
 
 def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int], dict]] = None) -> int:
     ap = argparse.ArgumentParser(description="S_shape 因子走查回测校准（纯分析，只读本地日线）")
-    ap.add_argument("--codes", required=True, help="逗号分隔的 6 位代码")
+    ap.add_argument("--codes", default="", help="逗号分隔的 6 位代码（与 --universe-sample 二选一）")
+    ap.add_argument("--universe-sample", type=int, default=0,
+                    help="从本地全 A 随机抽 N 只（代表性样本；0=不抽，用 --codes）")
+    ap.add_argument("--seed", type=int, default=0, help="随机抽样种子（可复现）")
     ap.add_argument("--count", type=int, default=500, help="每股回溯 K 线根数")
     ap.add_argument("--horizons", default="5,10,20", help="前向窗口(日)，逗号分隔")
     ap.add_argument("--step", type=int, default=1, help="as-of 采样步长")
@@ -191,7 +206,14 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
 
-    codes = [c.strip() for c in args.codes.split(",") if c.strip()]
+    if args.universe_sample > 0:
+        import local_tdx_data  # noqa: PLC0415
+        codes = sample_codes(local_tdx_data.get_stock_list(), args.universe_sample, args.seed)
+        print(f"[INFO] 全 A 随机抽样 {len(codes)} 只（seed={args.seed}）", file=sys.stderr)
+    else:
+        codes = [c.strip() for c in args.codes.split(",") if c.strip()]
+    if not codes:
+        ap.error("需提供 --codes 或 --universe-sample N")
     horizons = tuple(int(h) for h in args.horizons.split(",") if h.strip())
     load = loader or _load_bars_local
     bars = load(codes, args.count)
