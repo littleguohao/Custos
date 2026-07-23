@@ -730,13 +730,15 @@ def check_macd_technics(df) -> dict[str, Any]:
         zone = 0                         # 零轴下方，不做多区间分级
     zone1_restart = bool(dif_last > 0 and h0 > 0 and h0 > h1 and h1 <= 0)
 
-    # 摆动高/低点（左右各 MACD_SWING_FRACTAL 根分型，右确认避免未来函数）
+    # 摆动高/低点（左右各 MACD_SWING_FRACTAL 根分型，右确认避免未来函数）。
+    # 唯一或近唯一峰/谷：窗口内其余 2f 根中至少 2f-1 根严格更低/更高
+    #（允许至多 1 根等值，兼容双顶平台；>=2f-1 而非 <=，写反会导致唯一峰永不被检出）。
     f = MACD_SWING_FRACTAL
     w0 = max(f, n - MACD_DIV_LOOKBACK)
     swing_hi = [i for i in range(w0, n - f)
-                if close[i] == close[i - f:i + f + 1].max() and (close[i - f:i + f + 1] < close[i]).sum() <= 2 * f - 1]
+                if close[i] == close[i - f:i + f + 1].max() and (close[i - f:i + f + 1] < close[i]).sum() >= 2 * f - 1]
     swing_lo = [i for i in range(w0, n - f)
-                if close[i] == close[i - f:i + f + 1].min() and (close[i - f:i + f + 1] > close[i]).sum() <= 2 * f - 1]
+                if close[i] == close[i - f:i + f + 1].min() and (close[i - f:i + f + 1] > close[i]).sum() >= 2 * f - 1]
 
     top_div = {"hit": False}
     if len(swing_hi) >= 2:
@@ -764,7 +766,8 @@ def check_macd_technics(df) -> dict[str, Any]:
     win = min(MACD_OVEREXT_WIN, n)
     abs_dif = [abs(float(x)) for x in d[-win:]]
     pctl = float(sum(1 for x in abs_dif if x <= abs_dif[-1]) / len(abs_dif)) if win >= 20 else None
-    overextended = {"hit": bool(pctl is not None and pctl >= MACD_OVEREXT_PCTL and h0 != 0),
+    overextended = {"hit": bool(pctl is not None and pctl >= MACD_OVEREXT_PCTL
+                                and h0 * dif_last > 0),  # “下面还有柱体”＝柱体与 DIF 同号
                     "dif_abs_percentile": round(pctl, 3) if pctl is not None else None}
 
     return {
@@ -1232,7 +1235,7 @@ def enrich(
     fin_colmap = dict(fin_cfg.get("columns") or {})
     if fin_enabled and fin_df is not None and fin_cfg.get("auto_map", True):
         _cm = financials_mod.auto_colmap(getattr(fin_df, "columns", []))
-        _cm.update(fin_colmap)   # 显式 registry.columns 按字段覆盖自动识别（勿用 merged：那是候选合并字典）
+        _cm.update(fin_colmap)   # 显式 registry.columns 按字段覆盖自动识别
         fin_colmap = _cm
     stock_theme, theme_map_available = build_stock_theme_map(
         min_match=theme_min_match if theme_min_match is not None else THEME_MIN_MATCH)

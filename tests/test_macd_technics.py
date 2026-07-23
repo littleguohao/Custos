@@ -26,13 +26,12 @@ def test_zone1_expansion_and_zone2_shrink():
 
 
 def test_zone1_restart():
-    # 上行 → 小幅回调（hist 转负）→ 重新拉升（hist 转正扩张）
-    closes = _ramp_up(90) + [15.3, 15.1, 14.9] + [15.4, 15.9, 16.5]
-    df = make_df(closes)
-    r = ec.check_macd_technics(df)
+    # 上行100根 → 浅回调（hist 转负）→ 强阳重启：hist 当日转正且扩张
+    closes = _seg(10, 0.08, 100) + _seg(18.0, -0.15, 4) + _seg(17.4, 0.35, 4)
+    r = ec.check_macd_technics(make_df(closes))
     assert r["available"]
-    assert r["zone1_restart"] in (True, False)  # 形态依赖精确 EMA，不断言强结果
-    assert r["zone"] in (0, 1, 2, 3)
+    assert r["zone"] == 1 and r["zone1_restart"] is True
+    assert r["dif"] > 0 and r["hist"] > 0
 
 
 def test_zone_unavailable_short_df():
@@ -41,30 +40,49 @@ def test_zone_unavailable_short_df():
 
 # ---------- 背离 ----------
 
+def _seg(start, step, n):
+    return [start + step * i for i in range(1, n + 1)]
+
+
 def _divergence_df(top: bool):
-    # 两个摆高/摆低，DIF 反向
     if top:
-        closes = ([10.0] * 30 + [10 + i * 0.3 for i in range(1, 8)]          # 第一峰 A 陡
-                  + [11.5] * 6 + [11.5 + i * 0.02 for i in range(1, 8)]       # 第二峰 B 缓但更高
-                  + [12.2] * 8)
+        # 急涨峰A(13.0) → 回落 → 缓涨更高峰B(13.2) → 回落确认（DIF_B<DIF_A）
+        closes = ([10.0] * 30 + _seg(10, 0.3, 10) + _seg(13.0, -0.2, 5)
+                  + _seg(12.0, 0.08, 15) + _seg(13.2, -0.1, 4))
     else:
-        closes = ([30.0] * 30 + [30 - i * 0.4 for i in range(1, 8)]           # 第一谷 A 陡
-                  + [26.5] * 6 + [26.5 - i * 0.02 for i in range(1, 8)]       # 第二谷 B 缓且更低
-                  + [26.0] * 8)
+        # 急跌谷A(24.0) → 反弹 → 缓跌更低谷B(23.8) → 反弹确认（DIF 低点抬高）
+        closes = ([30.0] * 30 + _seg(30, -0.6, 10) + _seg(24.0, 0.2, 5)
+                  + _seg(25.0, -0.08, 15) + _seg(23.8, 0.1, 4))
     return make_df(closes)
 
 
 def test_top_divergence_detected():
     r = ec.check_macd_technics(_divergence_df(top=True))
     assert r["available"]
-    # 合成形态下应检出顶背离或至少不产生底背离误报
+    assert r["top_divergence"]["hit"] is True
+    assert r["top_divergence"]["close_b"] > r["top_divergence"]["close_a"]
+    assert r["top_divergence"]["dif_b"] < r["top_divergence"]["dif_a"]
     assert r["bottom_divergence"]["hit"] is False
 
 
 def test_bottom_divergence_detected():
     r = ec.check_macd_technics(_divergence_df(top=False))
     assert r["available"]
+    assert r["bottom_divergence"]["hit"] is True
+    assert r["bottom_divergence"]["close_b"] < r["bottom_divergence"]["close_a"]
+    assert r["bottom_divergence"]["dif_b"] > r["bottom_divergence"]["dif_a"]
     assert r["top_divergence"]["hit"] is False
+
+
+def test_three_peaks_detected():
+    # 三打白骨精：三峰价格递增（13.0/13.3/13.5）、斜率递减（0.3/0.1/0.03）
+    closes = ([10.0] * 30 + _seg(10, 0.3, 10) + _seg(13.0, -0.2, 4)
+              + _seg(12.2, 0.1, 11) + _seg(13.3, -0.15, 4)
+              + _seg(12.7, 0.03, 27) + _seg(13.5, -0.1, 4))
+    r = ec.check_macd_technics(make_df(closes))
+    assert r["three_peaks"]["hit"] is True
+    d = r["three_peaks"]["dif_peaks"]
+    assert d[0] > d[1] > d[2]
 
 
 def test_no_divergence_on_monotone():
