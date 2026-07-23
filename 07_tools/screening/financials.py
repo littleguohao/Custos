@@ -150,10 +150,23 @@ def main(argv=None) -> int:
         print(json.dumps({"available": False, "reason": "no_financials"}, ensure_ascii=False))
         return 0
     cm = auto_colmap(getattr(df, "columns", []))
-    print("[自动列映射] 确认无误后写入 registry.financials.columns（不对就手动改）：")
+    override = {}
+    try:
+        from paths import GOVERNANCE  # noqa: PLC0415
+        reg = json.loads((GOVERNANCE / "SCREEN_FORMULA_REGISTRY.json").read_text(encoding="utf-8"))
+        override = (reg.get("financials") or {}).get("columns") or {}
+    except Exception:  # noqa: BLE001
+        override = {}
+    final = dict(cm)
+    final.update(override)
+    print("[自动识别 auto_colmap]:")
     print(json.dumps(cm, ensure_ascii=False, indent=2))
-    print(f"shape={df.shape}  code定位={'行索引' if cm.get('code') == '__index__' else cm.get('code')}")
-    print(f"[抽样 {args.code}] {json.dumps(financial_factor(args.code, df, cm), ensure_ascii=False)}")
+    if override:
+        print("[registry.financials.columns 覆盖]:", json.dumps(override, ensure_ascii=False))
+    print("[最终映射(enrich 实际使用)]:")
+    print(json.dumps(final, ensure_ascii=False, indent=2))
+    print(f"shape={df.shape}  code定位={'行索引' if final.get('code') == '__index__' else final.get('code')}")
+    print(f"[抽样 {args.code}] {json.dumps(financial_factor(args.code, df, final), ensure_ascii=False)}")
     return 0
 
 
