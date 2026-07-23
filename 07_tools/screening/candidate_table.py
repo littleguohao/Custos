@@ -77,14 +77,16 @@ def render_table(pool: dict, date: str) -> str:
     if top5:
         lines.append("## 得分 Top 5")
         lines.append("")
-        lines.append("| 排名 | 代码 | 名称 | 总分 | 技术分 | 分层 | 公式命中 | 风险标记 |")
-        lines.append("|---:|---|---|---:|---:|---|---|---|")
+        lines.append("| 排名 | 代码 | 名称 | 总分 | 技术分 | S** | 建议 | 分层 | 公式命中 | 风险标记 |")
+        lines.append("|---:|---|---|---:|---:|---:|---|---|---|---|")
         for i, c in enumerate(top5, 1):
             detail = c.get("score_detail") or {}
             lines.append(
                 f"| {i} | {c.get('code')} | {c.get('name')}"
                 f" | {_fmt(detail.get('total'))}"
                 f" | {_fmt(detail.get('technical_score'))}"
+                f" | {_fmt(c.get('s_star'))}"
+                f" | {c.get('suggestion') or '-'}"
                 f" | {c.get('bucket', '-')}"
                 f" | {'、'.join(c.get('formula_hits') or []) or '-'}"
                 f" | {'、'.join(c.get('risk_flags') or []) or '-'} |"

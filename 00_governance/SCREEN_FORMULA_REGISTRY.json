@@ -18,7 +18,7 @@
       "distribution_cap": true,
       "macd_divergence": true
     },
-    "_note": "cap_rules 为待回测启发式驱动的封顶开关，默认全开＝历史行为；样本回测校准前如需只观察不降档，可逐条置 false（关闭后仍在候选 risk_flags 记录检出）。distribution_cap 控制主力出货五方式（顶部派发，B1 §七.3）：命中 high→封 D、watch→封 C。sector_score_max 为 sector_state.score 量纲上界，用于归一化到 0-100。知行量价/出货因子阈值见 enrich_candidates.py 顶部'待回测参数'常量。"
+    "_note": "cap_rules 为待回测启发式驱动的封顶开关，默认全开＝历史行为；样本回测校准前如需只观察不降档，可逐条置 false（关闭后仍在候选 risk_flags 记录检出）。distribution_cap 控制主力出货五方式（顶部派发，B1 §七.3）：命中 high→封 D、watch→封 C。sector_score_max 为 sector_state.score 量纲上界，用于归一化到 0-100。知行量价/出货因子阈值见 enrich_candidates.py 顶部'待回测参数'常量。technical_score 优先用 S_shape v3.0 有界加权评分（借鉴 workflow 沙漏模型：压缩/枢轴/量/口袋妖怪/上方套牢/均线/事件 + Δ催化 − P惩罚，S**≥70可买/60-69观望/<60不买；分项权重与阈值见 07_tools/screening/s_shape.py 顶部'待回测参数'，部分源值被遮挡取合理猜测），无 s_shape 数据时回退旧 patterns 加权。"
   },
   "theme_mapping": {
     "min_match": 1,

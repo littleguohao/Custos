@@ -39,13 +39,14 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 TOOLS_DIR = Path(__file__).resolve().parents[1]
-for p in (TOOLS_DIR, TOOLS_DIR / "local_tdx", TOOLS_DIR / "market_timing"):
+for p in (TOOLS_DIR, TOOLS_DIR / "local_tdx", TOOLS_DIR / "market_timing", TOOLS_DIR / "screening"):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
 from paths import DATA, RISK_DIR, SECTORS_DIR, TRADES_DIR  # noqa: E402
 import concept_tags  # noqa: E402
 import local_tdx_data  # noqa: E402
+import s_shape as s_shape_mod  # noqa: E402
 from technical_monitor import bbi_state, ema, kdj, macd, resample, zhixing_state, _infer_price_limit  # noqa: E402
 
 SCREENING_DIR = DATA / "screening"
@@ -1063,6 +1064,7 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
         "distribution": distribution,
         "macd_technics": check_macd_technics(df),
         "perfect_b1_fit": compute_perfect_b1_fit(df, daily_j, zx, pullback_shrink),
+        "s_shape": s_shape_mod.compute_s_shape(df, code),
     }
 
 

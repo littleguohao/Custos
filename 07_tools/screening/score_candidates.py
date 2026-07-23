@@ -51,6 +51,11 @@ if str(TOOLS_DIR) not in sys.path:
 
 from paths import DATA, GOVERNANCE, MARKET_DIR, SECTORS_DIR, STOCK_POOL_DIR  # noqa: E402
 
+_SCREEN_DIR = Path(__file__).resolve().parent
+if str(_SCREEN_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCREEN_DIR))
+from s_shape import sstar_level  # noqa: E402
+
 SCREENING_DIR = DATA / "screening"
 CZ_SECTOR_PREF_PATH = GOVERNANCE / "CZ_SECTOR_PREFERENCE.json"
 REGISTRY_PATH = GOVERNANCE / "SCREEN_FORMULA_REGISTRY.json"
@@ -153,6 +158,19 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
     patterns = cand.get("patterns") or {}
     contrib: dict[str, int] = {}
     score = 0
+    # 优先用 S_shape v3.0 有界加权评分（借鉴 workflow v3.0 沙漏模型；阈值待回测）。
+    # 无 s_shape 数据（单测/降级）时回退到下方旧的 patterns 加权累加。
+    ss = cand.get("s_shape") or {}
+    if ss.get("available") and ss.get("s_star") is not None:
+        s_star = float(ss["s_star"])
+        detail: dict[str, Any] = {
+            "s_star": s_star, "s_shape": ss.get("s_shape"),
+            "delta": ss.get("delta"), "penalty": ss.get("penalty"),
+            "suggestion": ss.get("suggestion"), "scorer": "s_shape_v3",
+        }
+        for _k, _v in (ss.get("components") or {}).items():
+            detail[f"sshape_{_k}"] = (_v or {}).get("points")
+        return int(round(s_star)), sstar_level(s_star), detail
     if patterns.get("bbi_above"):
         score += 25
         contrib["bbi_above"] = 25
@@ -526,6 +544,10 @@ def score_candidate(
         "ride_above_fast": bool(cand.get("ride_above_fast")),
         "b1_ignition": cand.get("b1_ignition") or {},
         "distribution": cand.get("distribution") or {},
+        # S_shape v3.0 有界评分（借鉴 workflow 沙漏模型）
+        "s_shape": cand.get("s_shape") or {},
+        "s_star": (cand.get("s_shape") or {}).get("s_star"),
+        "suggestion": (cand.get("s_shape") or {}).get("suggestion"),
     }
 
 
