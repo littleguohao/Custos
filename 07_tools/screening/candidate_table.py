@@ -70,6 +70,26 @@ def render_table(pool: dict, date: str) -> str:
     ]
     counts = pool.get("bucket_counts") or {}
     candidates = pool.get("candidates") or []
+    # 得分 Top5：按总分降序（跨分层），供快速浏览当日最强候选
+    top5 = sorted(candidates,
+                  key=lambda c: ((c.get("score_detail") or {}).get("total") or 0),
+                  reverse=True)[:5]
+    if top5:
+        lines.append("## 得分 Top 5")
+        lines.append("")
+        lines.append("| 排名 | 代码 | 名称 | 总分 | 技术分 | 分层 | 公式命中 | 风险标记 |")
+        lines.append("|---:|---|---|---:|---:|---|---|---|")
+        for i, c in enumerate(top5, 1):
+            detail = c.get("score_detail") or {}
+            lines.append(
+                f"| {i} | {c.get('code')} | {c.get('name')}"
+                f" | {_fmt(detail.get('total'))}"
+                f" | {_fmt(detail.get('technical_score'))}"
+                f" | {c.get('bucket', '-')}"
+                f" | {'、'.join(c.get('formula_hits') or []) or '-'}"
+                f" | {'、'.join(c.get('risk_flags') or []) or '-'} |"
+            )
+        lines.append("")
     for bucket in ("A", "B", "C", "D"):
         rows = [c for c in candidates if c.get("bucket") == bucket]
         lines.append(f"## {bucket} 池（{counts.get(bucket, 0)} 只）")
@@ -79,9 +99,9 @@ def render_table(pool: dict, date: str) -> str:
             lines.append("")
             continue
         lines.append(
-            "| 代码 | 名称 | 公式命中 | 模式标签 | 波浪 | CZ标签 | 技术分 | 板块 | 板块状态 | 共振 | 分层 | 建议止损位 | next_step |"
+            "| 代码 | 名称 | 公式命中 | 模式标签 | 波浪 | CZ标签 | 技术分 | 贴合 | 板块 | 板块状态 | 共振 | 分层 | 建议止损位 | next_step |"
         )
-        lines.append("|---|---|---|---|---|---|---:|---|---|---|---|---|---|")
+        lines.append("|---|---|---|---|---|---|---:|---:|---|---|---|---|---|---|")
         for c in rows:
             tags = "、".join(
                 PATTERN_LABELS[t] for t, hit in (c.get("patterns") or {}).items() if hit
@@ -91,6 +111,7 @@ def render_table(pool: dict, date: str) -> str:
             res = c.get("resonance") or {}
             detail = c.get("score_detail") or {}
             stop = (c.get("stop_loss_ref") or {}).get("price")
+            fit = (c.get("score_detail") or {}).get("factor_contrib", {}).get("perfect_b1_fit")
             lines.append(
                 f"| {c.get('code')} | {c.get('name')}"
                 f" | {'、'.join(c.get('formula_hits') or []) or '-'}"
@@ -98,6 +119,7 @@ def render_table(pool: dict, date: str) -> str:
                 f" | {wave}"
                 f" | {_cz_tags(c)}"
                 f" | {_fmt(detail.get('technical_score'))}"
+                f" | {_fmt(fit)}"
                 f" | {c.get('sector', '未知')}"
                 f" | {shf.get('sector_state', '未知')}"
                 f" | {res.get('resonance_level', '-')}"

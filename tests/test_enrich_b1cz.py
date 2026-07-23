@@ -265,7 +265,8 @@ def test_enrich_flags_formula_hits_date_mismatch(monkeypatch):
     # 隔离板块映射，聚焦一致性断言
     monkeypatch.setattr(ec, "build_stock_theme_map", lambda **k: ({}, True))
     result = ec.enrich("2026-07-21", hits_data=hits,
-                       ohlcv_loader=lambda c: df.copy(), index_loader=lambda: None)
+                       ohlcv_loader=lambda c: df.copy(), index_loader=lambda: None,
+                       universe_cfg={"j_low_required": False})
     assert result["status"] == "partial"
     assert "formula_hits_date_mismatch:2026-07-20" in result["degraded_reason"]
     assert "signal_date_contract" in result
@@ -283,7 +284,8 @@ def test_enrich_same_day_hits_no_mismatch(monkeypatch):
     })
     monkeypatch.setattr(ec, "build_stock_theme_map", lambda **k: ({}, True))
     result = ec.enrich("2026-07-21", hits_data=hits,
-                       ohlcv_loader=lambda c: df.copy(), index_loader=lambda: None)
+                       ohlcv_loader=lambda c: df.copy(), index_loader=lambda: None,
+                       universe_cfg={"j_low_required": False})
     assert "formula_hits_date_mismatch" not in result["degraded_reason"]
     assert result["candidates"][0]["signal_date"] == "2026-07-21"
 
@@ -346,7 +348,8 @@ def test_enrich_metrics_error_excluded_not_abort():
     ]}]}
     loader = lambda c: good if c == "900001" else bad
     r = ec.enrich(date, hits_data=hits, ohlcv_loader=loader, index_loader=lambda: None,
-                  universe_cfg={"exclude_bj": True, "exclude_st": True, "min_list_days": 60})
+                  universe_cfg={"exclude_bj": True, "exclude_st": True, "min_list_days": 60,
+                            "j_low_required": False})
     assert [c["code"] for c in r["candidates"]] == ["900001"]
     assert len(r["excluded"]) == 1
     assert r["excluded"][0]["code"] == "900002"

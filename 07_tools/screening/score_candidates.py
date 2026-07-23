@@ -85,6 +85,7 @@ DEFAULT_CAP_RULES = {
     "non_one_wave_revoked": True,  # 非一波流撤销 → 封顶 C（待回测）
     "cz_avoid_sector": True,       # CZ 回避方向板块 → D（治理名单驱动）
     "distribution_cap": True,      # 主力出货五方式命中 → high 封 D / watch 封 C（B1 §七.3，待回测）
+    "macd_divergence": True,       # MACD 顶背离/三打白骨精 → 封顶 C（macd十大技术，待回测）
 }
 
 # sector_state.score 的量纲：generate_risk_and_sectors 用 float(score)>=60 门控
@@ -188,6 +189,24 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
     if (cand.get("non_one_wave") or {}).get("status") == "confirmed":
         score += 5
         contrib["non_one_wave_confirmed"] = 5
+    # 完美 B1 图形贴合度（0-8 梯度：J深度/回踩贴线/缩量程度/MACD零轴/DKS上行）
+    fit = (cand.get("perfect_b1_fit") or {}).get("score")
+    if fit:
+        score += fit
+        contrib["perfect_b1_fit"] = fit
+    # MACD 十大技术（正向）：第一区间强势扩张 +3；第一区间再启动（3/5浪买点）+5；
+    # 底背离 +5（B1 修复确认）。负向顶背离/三打白骨精走封顶，不在此减分。
+    mt = cand.get("macd_technics") or {}
+    if mt.get("available"):
+        if mt.get("zone") == 1:
+            score += 3
+            contrib["macd_zone1"] = 3
+        if mt.get("zone1_restart"):
+            score += 5
+            contrib["macd_zone1_restart"] = 5
+        if (mt.get("bottom_divergence") or {}).get("hit"):
+            score += 5
+            contrib["macd_bottom_divergence"] = 5
     # 知行量价（good_b1）：多头趋势线 + 点火 + 缩量企稳 + 复合确认。
     # 注意：b1_ignition 是复合信号（含 ignition/pullback_shrink 条件），此处
     # 子项与复合项有意叠加计分，待回测校准（与 reversal_k 的"复合取代子项"
@@ -316,6 +335,21 @@ def score_candidate(
                 bucket = cap_bucket(bucket, "C")
         else:
             risk_flags.append("distribution_detected_cap_disabled")
+    mt_cap = cand.get("macd_technics") or {}
+    top_div_hit = (mt_cap.get("top_divergence") or {}).get("hit")
+    three_peaks_hit = (mt_cap.get("three_peaks") or {}).get("hit")
+    if mt_cap.get("available") and (top_div_hit or three_peaks_hit):
+        # MACD 十大技术：顶背离 / 三打白骨精（K线三高+MACD三低）→ 封顶 C
+        if rules["macd_divergence"]:
+            if top_div_hit:
+                risk_flags.append("macd_top_divergence")
+            if three_peaks_hit:
+                risk_flags.append("macd_three_peaks")
+            bucket = cap_bucket(bucket, "C")
+        else:
+            risk_flags.append("macd_divergence_detected_cap_disabled")
+    if mt_cap.get("available") and (mt_cap.get("overextended") or {}).get("hit"):
+        risk_flags.append("macd_overextended")  # 开口/空间拐离：仅记录，不降档
 
     # 总分：技术 60% + 板块 40% + 共振调整，0-100
     resonance_adj = {"强共振": 5, "弱共振": 0, "无共振": 0, "反向": -5}[res_level]
@@ -353,6 +387,12 @@ def score_candidate(
         entry_reason.append("知行多头(QSX>DKS)")
     for _dk in dist.get("hits") or []:
         entry_reason.append(f"出货信号:{_dk}")
+    _mt = cand.get("macd_technics") or {}
+    if _mt.get("available"):
+        if _mt.get("zone1_restart"):
+            entry_reason.append("MACD第一区间再启动")
+        if (_mt.get("bottom_divergence") or {}).get("hit"):
+            entry_reason.append("MACD底背离")
 
     next_step = NEXT_STEP[bucket]
     if amv_state == "空头":

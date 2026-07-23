@@ -5,7 +5,8 @@
   "universe": {
     "exclude_st": true,
     "exclude_bj": true,
-    "min_list_days": 60
+    "min_list_days": 60,
+    "j_low_required": true
   },
   "scoring": {
     "sector_score_max": 100,
@@ -14,7 +15,8 @@
       "volume_retreat": true,
       "non_one_wave_revoked": true,
       "cz_avoid_sector": true,
-      "distribution_cap": true
+      "distribution_cap": true,
+      "macd_divergence": true
     },
     "_note": "cap_rules 为待回测启发式驱动的封顶开关，默认全开＝历史行为；样本回测校准前如需只观察不降档，可逐条置 false（关闭后仍在候选 risk_flags 记录检出）。distribution_cap 控制主力出货五方式（顶部派发，B1 §七.3）：命中 high→封 D、watch→封 C。sector_score_max 为 sector_state.score 量纲上界，用于归一化到 0-100。知行量价/出货因子阈值见 enrich_candidates.py 顶部'待回测参数'常量。"
   },
@@ -36,18 +38,18 @@
       "tq_name": "UPN",
       "args": "3",
       "stock_period": "1d",
-      "enabled": true,
+      "enabled": false,
       "category": "momentum",
-      "note": "系统公式：连涨3天。2026-07-20 接口摸底实测可用（formula_process_mul_xg, arg=3, stock_period=1d, count=60）。"
+      "note": "系统公式：连涨3天。2026-07-20 接口摸底实测可用。2026-07-22 用户决策停用：动量型与 B1 回调买入不符，只保留 B1 选股。"
     },
     {
       "id": "MA_BUY",
       "tq_name": "MA买入",
       "args": "",
       "stock_period": "1d",
-      "enabled": true,
+      "enabled": false,
       "category": "trend",
-      "note": "系统公式：均线买入信号（2026-07-20 formula_get_all(type=1) 列出，共107个系统公式之一）。"
+      "note": "系统公式：均线买入信号。2026-07-22 随 UPN 一并停用（同上，非 B1 回调型）。"
     },
     {
       "id": "KDJ_J_LOW",
