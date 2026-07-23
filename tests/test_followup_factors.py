@@ -154,3 +154,50 @@ def test_auto_colmap_revenue_skips_ratio_column():
     assert cm["revenue"] == "营业总收入(万元)"        # 金额列，非比率
     assert cm["revenue_yoy"] == "营业收入增长率(%)"
     assert cm["net_profit_yoy"] == "扣非净利润同比(%)"  # 扣非同比(用户确认可用)
+
+
+# ---------- 回归：财务 auto_map 不得覆盖候选合并字典 merged（变量冲突 bug） ----------
+
+def test_enrich_financials_autotmap_does_not_clobber_candidates(monkeypatch):
+    import pandas as pd
+    from screening import enrich_candidates as ec
+
+    date = "2026-07-23"
+    # 注入 OHLCV：61 根、last_date==date（通过 no_today_bar / list_days 门槛）
+    ohlcv = pd.DataFrame({
+        "date": [f"2026-0{m}-{d:02d}" for m, d in [(5, i) for i in range(1, 29)]
+                 + [(6, i) for i in range(1, 29)] + [(7, i) for i in range(20, 25)]][:61],
+    })
+    ohlcv["date"] = list(pd.date_range("2026-04-24", periods=61, freq="B").astype(str))
+    ohlcv.loc[ohlcv.index[-1], "date"] = date  # 保证最后一根就是 date
+    for c in ("open", "high", "low", "close", "volume", "amount"):
+        ohlcv[c] = 10.0
+
+    # 注入财务：以 code 作行索引，含中文财务列（auto_colmap 应识别）
+    fin_df = pd.DataFrame(
+        {"净利润": [5e8], "经营活动产生的现金流量净额": [3e8],
+         "营业总收入(万元)": [1e9], "加权净资产收益率": [10.0]},
+        index=["600000"])
+
+    monkeypatch.setattr(ec.financials_mod, "load_financials", lambda rp="": fin_df)
+    monkeypatch.setattr(ec, "compute_metrics", lambda df, idx, code=None: {"close": 10.0, "daily_j": 5.0})
+    monkeypatch.setattr(ec, "build_stock_theme_map", lambda min_match=None: ({}, True))
+
+    hits = {"date": date, "status": "ok",
+            "formulas": [{"id": "F1", "hits": [{"code": "600000", "name": "浦发银行"}]}]}
+    res = ec.enrich(
+        date, hits_data=hits,
+        ohlcv_loader=lambda c: ohlcv.copy(), index_loader=lambda: None,
+        universe_cfg={"j_low_required": False, "min_list_days": 60},
+        financials_cfg={"enabled": True, "auto_map": True, "columns": {"net_profit": "净利润"}},
+    )
+    # merged 未被覆盖 → 候选仍产出（bug 时循环会遍历 colmap 键并 TypeError）
+    assert len(res["candidates"]) == 1
+    cand = res["candidates"][0]
+    assert cand["code"] == "600000" and "fund_flow" in cand
+    # 财务已挂载且命中
+    fin = cand.get("financials") or {}
+    assert fin.get("available") is True
+    assert fin["dixi_proxy"]["net_profit_positive"] is True
+    assert fin["dixi_proxy"]["real_earnings_cashflow"] is True   # 注入了现金流>0
+    assert "net_profit_positive" in fin["hits"]

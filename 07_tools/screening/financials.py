@@ -33,7 +33,7 @@ def auto_colmap(columns) -> dict[str, str]:
 
     仅作首选/建议，务必用 --inspect 确认；不准时在 registry.financials.columns 显式覆盖。
     """
-    cols = [str(c) for c in (columns or [])]
+    cols = [str(c) for c in (list(columns) if columns is not None else [])]
 
     def find(groups, excludes=()):
         # groups: 优先级列表，每组是"全部子串都要在列名里"的元组；返回首个命中列
