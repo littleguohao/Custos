@@ -203,7 +203,7 @@ uv run python 07_tools/run_1800.py
 
 - **BJ 股票（920xxx）**：mootdx Reader/Quotes 不支持北交所，通过东方财富 push2 API fallback
 - **mootdx Reader**：`daily()` 返回 DatetimeIndex 而非列，传入分析脚本前需 `reset_index()`
-- **0AMV**：需用户在 15:15 后手动确认数值，`run_1700.py` 会自动回写 `quality: confirmed`（17:00 复盘前须完成确认）
+- **0AMV**：`run_1700` 先跑 `sync_compass_amv.py` 从指南针自动写 confirmed 观测并回填 `amv_0day`，`merge_incremental_market` 据此自动置 `quality: confirmed`，随后 `amv_state` 据真值切换 regime（单日 >+4% 进多头 / <-2.3% 进空头）。指南针不可用时回退人工确认（15:15 后告知数值，由 LLM 写入 `0amv_observations.jsonl` 的 confirmed 观测）
 - **无交易默认**：B1 策略默认盘中不交易，除非用户确认或成交台账更新
 - **数据不入库**：`01_data/` 下的运行时数据通过 .gitignore 排除，只保留 `.md` 模板
 

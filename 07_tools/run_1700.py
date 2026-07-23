@@ -142,6 +142,18 @@ def main(argv=None) -> int:
     else:
         print(f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'market indices refreshed'}")
 
+    # 3b. 同步指南针 0AMV → 写 confirmed 观测 + 填 amv_0day（best-effort）。
+    #     必须在 merge_incremental_market 之前：merge 据 amv_0day/confirmed观测 自动把
+    #     amv_0.quality 置 confirmed，随后 daily_pipeline 的 amv_state 才能据真值切换 regime
+    #     （单日 >+4% 自动进多头 / <-2.3% 进空头，无需人工确认）。此前该脚本未接线，
+    #     导致 0AMV 长期停留 candidate、regime 被锁定。
+    r = _run_stage(["uv", "run", "python", str(TOOLS / "market_timing" / "sync_compass_amv.py"),
+                    "--date", target], "sync_compass_amv", note="best-effort，失败不中断")
+    if not r["ok"]:
+        print(f"[WARN] sync_compass_amv failed: {r['out'][:200]}")
+    elif r["stdout"]:
+        sys.stdout.write(r["stdout"])
+
     # 4. Merge incremental data into market_timing_input.json + auto-confirm 0AMV quality
     #    (best-effort: the script prints the [OK]/[WARN] lines, echoed here verbatim;
     #    a hard failure of the script itself only warns and never aborts the pipeline)
