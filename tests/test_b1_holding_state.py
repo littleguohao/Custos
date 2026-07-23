@@ -65,5 +65,20 @@ class B1HoldingStateTests(unittest.TestCase):
         self.assertIn("current_price_volume", state["unavailable"])
 
 
+    def test_stale_n_structure_suppresses_false_p0(self):
+        # 陈旧N(顶部旧结构/破位过久)不再误报 N型清仓 P0（船舶/九丰误报场景）；
+        # 下跌+破箱体仍由 trend_box_break 给 P0，持仓不会漏判。
+        row = {"code": "600150", "close": 33.02, "trend_state": "下跌", "box20_position": "下沿/破位区",
+               "n_structure": {"available": True, "prior_low": 38.13, "pullback_low": 40.0, "stale": True},
+               "descending_n_structure": {"available": True, "structural_low": 37.49, "stale": True},
+               "price_volume": {"available": True}}
+        state = evaluate(row, "中性")
+        signals = [x["signal"] for x in state["signals"]]
+        self.assertNotIn("n_l1_breach", signals)
+        self.assertNotIn("desc_n_confirmed", signals)
+        self.assertIn("trend_box_break", signals)
+        self.assertIn("n_structure_stale", state["unavailable"])
+
+
 if __name__ == "__main__":
     unittest.main()

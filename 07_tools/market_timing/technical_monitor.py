@@ -362,19 +362,25 @@ def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
     }
 
 
-def n_structure_state(df: pd.DataFrame, left: int = 3, right: int = 3) -> dict[str, Any]:
+def n_structure_state(df: pd.DataFrame, left: int = 3, right: int = 3,
+                      lookback: int = 90, stale_breach_bars: int = 10) -> dict[str, Any]:
     """Find the latest rising-N structure using confirmed closing-price pivots.
 
     L1 is the major closing low, H1 the rebound closing high, and L2 the
     higher pullback closing low. L1 is the hard structural floor; L2 is the
     nearer tactical structure level. A later close above H1 confirms the N.
+
+    仅在近端 lookback 根内搜索分型，避免把很久以前(如顶部区间)的旧N当成当前结构；
+    并标记 stale：若价格早在 stale_breach_bars 根之前就已跌破 L1（破位过久），该N已非
+    当前生效结构（下跌趋势/箱体信号覆盖），不应再当作新鲜的 P0 清仓触发。
     """
     if len(df) < left + right + 8:
         return {"available": False, "reason": "K线数量不足以确认N型结构"}
     x = df.reset_index(drop=True)
     pivot_lows: list[int] = []
     pivot_highs: list[int] = []
-    for i in range(left, len(x) - right):
+    search_start = max(left, len(x) - max(lookback, left + right + 8))
+    for i in range(search_start, len(x) - right):
         close_window = x["close"].iloc[i-left:i+right+1]
         close = float(x.at[i, "close"])
         if close == float(close_window.min()) and int((close_window == close).sum()) == 1:
@@ -408,6 +414,12 @@ def n_structure_state(df: pd.DataFrame, left: int = 3, right: int = 3) -> dict[s
     swing_high = float(x.at[h1, "close"])
     origin_extreme_low = float(x["low"].iloc[max(0,l1-left):min(len(x),l1+right+1)].min())
     distance_pct = (current_close / origin_low - 1) * 100 if origin_low else None
+    # 破位新鲜度：L2 之后首次收盘跌破 L1 的位置；破位过久(> stale_breach_bars)视为陈旧结构
+    breach_rows = x.index[(x.index > l2) & (x["close"] < origin_low)]
+    first_breach = int(breach_rows[0]) if len(breach_rows) else None
+    breach_bars_ago = (len(x) - 1 - first_breach) if first_breach is not None else None
+    currently_breached = current_close < origin_low
+    stale = bool(currently_breached and breach_bars_ago is not None and breach_bars_ago > stale_breach_bars)
     return {
         "available": True,
         "pattern": "L1-H1-higher_L2" + ("-breakout" if breakout is not None else "-candidate"),
@@ -423,13 +435,18 @@ def n_structure_state(df: pd.DataFrame, left: int = 3, right: int = 3) -> dict[s
         "current_close": round(current_close, 4),
         "distance_pct": round(distance_pct, 4) if distance_pct is not None else None,
         "close_above": bool(current_close >= origin_low),
-        "breached_on_close": bool(current_close < origin_low),
+        "breached_on_close": bool(currently_breached),
         "pullback_breached_on_close": bool(current_close < pullback_low),
-        "pivot_window": {"left": left, "right": right},
+        "breach_bars_ago": breach_bars_ago,
+        "first_breach_date": x.at[first_breach, "date"].strftime("%Y-%m-%d") if first_breach is not None else None,
+        "stale": stale,
+        "fresh_breach": bool(currently_breached and not stale),
+        "pivot_window": {"left": left, "right": right, "lookback": lookback},
     }
 
 
-def descending_n_structure_state(df: pd.DataFrame, left: int = 3, right: int = 3) -> dict[str, Any]:
+def descending_n_structure_state(df: pd.DataFrame, left: int = 3, right: int = 3,
+                                 lookback: int = 90, stale_breach_bars: int = 10) -> dict[str, Any]:
     """Find the latest descending-N structure using confirmed closing-price pivots.
 
     Descending N: H1 -> L1 -> lower H2 -> close below L1.
@@ -438,13 +455,17 @@ def descending_n_structure_state(df: pd.DataFrame, left: int = 3, right: int = 3
     - H2 is a lower rebound closing high (lower than H1).
     - When price closes below L1, the descending N is confirmed.
     - L1 is the hard structural failure level for short/downside risk.
+
+    仅在近端 lookback 根内搜索分型；破位过久(> stale_breach_bars)标记 stale，避免把
+    很久以前(顶部区间)的旧下降N当成当前生效的 P0 清仓触发。
     """
     if len(df) < left + right + 8:
         return {"available": False, "reason": "K线数量不足以确认下降N型结构"}
     x = df.reset_index(drop=True)
     pivot_lows: list[int] = []
     pivot_highs: list[int] = []
-    for i in range(left, len(x) - right):
+    search_start = max(left, len(x) - max(lookback, left + right + 8))
+    for i in range(search_start, len(x) - right):
         close_window = x["close"].iloc[i-left:i+right+1]
         close = float(x.at[i, "close"])
         if close == float(close_window.min()) and int((close_window == close).sum()) == 1:
@@ -479,6 +500,10 @@ def descending_n_structure_state(df: pd.DataFrame, left: int = 3, right: int = 3
     lower_high = float(x.at[h2, "close"])
     origin_extreme_high = float(x["high"].iloc[max(0, h1-left):min(len(x), h1+right+1)].max())
     distance_pct = (current_close / pullback_low - 1) * 100 if pullback_low else None
+    breach_rows = x.index[(x.index > h2) & (x["close"] < pullback_low)]
+    first_breach = int(breach_rows[0]) if len(breach_rows) else None
+    breach_bars_ago = (len(x) - 1 - first_breach) if first_breach is not None else None
+    stale = bool(confirmed and breach_bars_ago is not None and breach_bars_ago > stale_breach_bars)
     return {
         "available": True,
         "pattern": "H1-L1-lower_H2" + ("-confirmed" if confirmed else "-candidate"),
@@ -493,7 +518,11 @@ def descending_n_structure_state(df: pd.DataFrame, left: int = 3, right: int = 3
         "current_close": round(current_close, 4),
         "distance_to_structural_low_pct": round(distance_pct, 4) if distance_pct is not None else None,
         "below_structural_low": bool(current_close < pullback_low),
-        "pivot_window": {"left": left, "right": right},
+        "breach_bars_ago": breach_bars_ago,
+        "first_breach_date": x.at[first_breach, "date"].strftime("%Y-%m-%d") if first_breach is not None else None,
+        "stale": stale,
+        "fresh_breach": bool(confirmed and not stale),
+        "pivot_window": {"left": left, "right": right, "lookback": lookback},
     }
 
 

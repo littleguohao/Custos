@@ -74,7 +74,10 @@ def evaluate(row: dict[str, Any], market_regime: str = "未知", price: Any = No
     l1 = finite(structure.get("prior_low"))
     l2 = finite(structure.get("pullback_low"))
     if structure.get("available") and current is not None and l1 is not None:
-        if current < l1:
+        if structure.get("stale"):
+            # 结构陈旧（破位过久/顶部旧N），不作为当前 P0；由趋势/箱体/亏损信号覆盖
+            unavailable.append("n_structure_stale")
+        elif current < l1:
             add("n_l1_breach", "P0", "N型主结构清仓评估", f"价格{current:.2f}跌破L1主结构前低{l1:.2f}")
         elif l2 is not None and current < l2:
             add("n_l2_breach", "P1", "N型回踩失守评估", f"价格{current:.2f}跌破L2更高回踩低点{l2:.2f}，但L1尚未失守")
@@ -84,7 +87,9 @@ def evaluate(row: dict[str, Any], market_regime: str = "未知", price: Any = No
     # Descending N-structure: H1 -> L1 -> lower H2 -> close below L1
     if desc_structure.get("available") and current is not None:
         structural_low = finite(desc_structure.get("structural_low"))
-        if structural_low is not None and current < structural_low:
+        if desc_structure.get("stale"):
+            unavailable.append("descending_n_structure_stale")
+        elif structural_low is not None and current < structural_low:
             add("desc_n_confirmed", "P0", "下降N型结构清仓评估", f"价格{current:.2f}跌破下降N型结构低点{structural_low:.2f}")
     elif not desc_structure.get("available"):
         unavailable.append("descending_n_structure")
