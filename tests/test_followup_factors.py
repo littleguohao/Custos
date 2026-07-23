@@ -108,6 +108,7 @@ def test_financial_factor_cashflow_missing_degrades():
 
 
 def test_financial_factor_degrades():
+    assert fin.financial_factor("600000", None, _COLMAP, price=10.0)["available"] is False              # 无财务数据(本机)
     assert fin.financial_factor("600000", _FIN_DF, {}, price=10.0)["available"] is False           # 无colmap
     assert fin.financial_factor("600000", _FIN_DF, {"code": "c_code"}, price=10.0)["available"] is False  # 必需列缺
     assert fin.financial_factor("999999", _FIN_DF, _COLMAP)["available"] is False                  # 代码不在表

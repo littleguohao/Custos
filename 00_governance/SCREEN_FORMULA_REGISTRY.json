@@ -30,7 +30,7 @@
     "_note": "资金流向(东财 collect_fund_flow)累计天数。1=仅当日快照(现状)；>1=累加最近N个每日 fund_flow_rank 快照的主力净流入(按 code/板块名聚合)，多日更稳。资金流无历史存档，只能就已落盘的每日文件累积。"
   },
   "financials": {
-    "enabled": false,
+    "enabled": true,
     "auto_map": true,
     "report_period": "",
     "columns": {
