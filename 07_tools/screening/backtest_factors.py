@@ -32,7 +32,7 @@ for _p in (str(_TOOLS), str(_SCREEN_DIR), str(_TOOLS / "local_tdx")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from s_shape import compute_s_shape, SSHAPE_MIN_BARS, SSTAR_STRONG, SSTAR_MID  # noqa: E402
+from s_shape import compute_s_shape, compute_s_reversal, SSHAPE_MIN_BARS, SSTAR_STRONG, SSTAR_MID  # noqa: E402
 
 try:
     from technical_monitor import kdj as _kdj  # noqa: E402
@@ -56,6 +56,41 @@ ENTRY_GATES: dict[str, Optional[Callable[[pd.DataFrame], bool]]] = {
 }
 
 HORIZONS_DEFAULT = (5, 10, 20)
+
+
+def _components(r: dict) -> dict:
+    return {k: (v or {}).get("points") for k, v in (r.get("components") or {}).items()}
+
+
+def _sc_s_shape(df: pd.DataFrame, code: str):
+    r = compute_s_shape(df, code)
+    if not r.get("available"):
+        return None
+    return {"score": r["s_star"], "suggestion": r["suggestion"],
+            "aux": {"s_shape": r["s_shape"], "delta": r["delta"], "penalty": r["penalty"]},
+            "components": _components(r)}
+
+
+def _sc_s_reversal(df: pd.DataFrame, code: str):
+    r = compute_s_reversal(df, code)
+    if not r.get("available"):
+        return None
+    return {"score": r["s_reversal"], "suggestion": r["suggestion"], "aux": {},
+            "components": _components(r)}
+
+
+def _sc_invert_s_shape(df: pd.DataFrame, code: str):
+    r = compute_s_shape(df, code)
+    if not r.get("available"):
+        return None
+    inv = round(100.0 - float(r["s_star"]), 1)
+    sug = "可买" if inv >= 70 else ("观望" if inv >= 60 else "不买")
+    return {"score": inv, "suggestion": sug, "aux": {"s_shape_star": r["s_star"]},
+            "components": _components(r)}
+
+
+# 可选打分器：同一批信号可跑三方对比（突破式 vs 买弱式 vs 反转突破分）
+SCORERS = {"s_shape": _sc_s_shape, "s_reversal": _sc_s_reversal, "invert_s_shape": _sc_invert_s_shape}
 
 
 def sample_codes(all_codes: list[str], n: int, seed: int = 0) -> list[str]:
@@ -103,12 +138,15 @@ def evaluate(
     step: int = 1,
     max_signals_per_code: Optional[int] = None,
     entry_gate: Optional[Callable[[pd.DataFrame], bool]] = None,
+    scorer: Optional[Callable[[pd.DataFrame, str], Optional[dict]]] = None,
 ) -> list[dict[str, Any]]:
-    """逐股逐日走查：as-of 切片算 S_shape，配前向指标。返回逐条记录（可复盘）。
+    """逐股逐日走查：as-of 切片算打分，配前向指标。返回逐条记录（可复盘）。
 
-    entry_gate(df_slice)->bool 若提供，只在返回 True 的 as-of 日评估（如 J<13 买点区），
-    用于测"真策略入场"而非全市场每根K线。
+    entry_gate(df_slice)->bool 若提供，只在返回 True 的 as-of 日评估（如 J<13 买点区）。
+    scorer(df_slice, code)->{"score","suggestion","aux","components"} 或 None（默认 s_shape）。
+    记录字段 s_star 存所选打分器的分数（沿用旧字段名，summarize/矩阵零改动）。
     """
+    scorer = scorer or _sc_s_shape
     records: list[dict[str, Any]] = []
     for code, raw in bars_by_code.items():
         if raw is None or len(raw) == 0:
@@ -120,20 +158,18 @@ def evaluate(
             slice_df = df.iloc[:i + 1]  # 只含 0..i（含当日），无未来
             if entry_gate is not None and not entry_gate(slice_df):
                 continue
-            ss = compute_s_shape(slice_df, code)
-            if not ss.get("available"):
+            res = scorer(slice_df, code)
+            if res is None:
                 continue
             rec: dict[str, Any] = {
                 "code": code,
                 "date": str(df["date"].iloc[i])[:10],
-                "s_star": ss["s_star"],
-                "s_shape": ss["s_shape"],
-                "delta": ss["delta"],
-                "penalty": ss["penalty"],
-                "suggestion": ss["suggestion"],
+                "s_star": res["score"],
+                "suggestion": res.get("suggestion"),
             }
-            for k, v in (ss.get("components") or {}).items():
-                rec[f"c_{k}"] = (v or {}).get("points")
+            rec.update(res.get("aux") or {})
+            for k, v in (res.get("components") or {}).items():
+                rec[f"c_{k}"] = v
             for h in horizons:
                 fm = forward_metrics(df, i, h)  # 只用到 i+1..i+H
                 rec[f"ret{h}"] = fm.get("fwd_return")
@@ -259,6 +295,8 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     ap.add_argument("--step", type=int, default=1, help="as-of 采样步长")
     ap.add_argument("--entry-filter", choices=list(ENTRY_GATES.keys()), default="none",
                     help="只在满足入场条件的 as-of 日评估：none=每根K线；j_low=仅 J<13 买点区")
+    ap.add_argument("--scorer", choices=list(SCORERS.keys()), default="s_shape",
+                    help="打分器：s_shape(突破式)/s_reversal(买弱式)/invert_s_shape(反转突破分)")
     ap.add_argument("--summary-horizon", type=int, default=10)
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
@@ -275,19 +313,20 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     load = loader or _load_bars_local
     bars = load(codes, args.count)
     records = evaluate(bars, horizons=horizons, step=args.step,
-                       entry_gate=ENTRY_GATES[args.entry_filter])
+                       entry_gate=ENTRY_GATES[args.entry_filter],
+                       scorer=SCORERS[args.scorer])
     summary = summarize(records, horizon=args.summary_horizon)
     matrix = horizon_band_matrix(records, horizons)
 
     payload = {"codes": codes, "count": args.count, "horizons": list(horizons),
-               "entry_filter": args.entry_filter,
+               "entry_filter": args.entry_filter, "scorer": args.scorer,
                "summary": summary, "horizon_band_matrix": matrix, "records": records}
     if args.out:
         out = Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"[OK] 写出 {out}（{len(records)} 条信号，entry_filter={args.entry_filter}）")
-    print(f"\n=== S**档 × horizon 网格（entry_filter={args.entry_filter}, 信号 {len(records)} 条）===")
+        print(f"[OK] 写出 {out}（{len(records)} 条信号，scorer={args.scorer}, entry_filter={args.entry_filter}）")
+    print(f"\n=== 分档 × horizon 网格（scorer={args.scorer}, entry_filter={args.entry_filter}, 信号 {len(records)} 条）===")
     print(matrix["text"])
     print("\n=== summary(horizon=%d) ===" % args.summary_horizon)
     print(json.dumps(summary, ensure_ascii=False, indent=2))

@@ -155,3 +155,25 @@ def test_summarize_multi_and_matrix():
     assert "win_rate" in m and "avg_return" in m and "text" in m
     assert m["win_rate"]["A_可买(>=70)"][20] == 1.0   # 可买记录 H20 为正 → 胜率 1.0
     assert m["win_rate"]["D_弱(<40)"][5] == 0.0        # 不买记录 H5 为负 → 胜率 0
+
+
+# ---------- 可选打分器 --scorer ----------
+
+def test_scorers_registry_all_run():
+    df = make_df([10.0 + (i % 11) * 0.2 for i in range(90)])
+    for name, fn in bt.SCORERS.items():
+        recs = bt.evaluate({"600000": df}, horizons=(5,), min_bars=60, scorer=fn)
+        assert recs, f"{name} 应产出记录"
+        assert "s_star" in recs[0] and "suggestion" in recs[0]
+
+
+def test_invert_scorer_is_complement_of_s_shape():
+    df = make_df([10.0 + (i % 11) * 0.2 for i in range(90)])
+    ss_recs = bt.evaluate({"600000": df}, horizons=(5,), min_bars=60, scorer=bt.SCORERS["s_shape"])
+    inv_recs = bt.evaluate({"600000": df}, horizons=(5,), min_bars=60, scorer=bt.SCORERS["invert_s_shape"])
+    m_ss = {r["date"]: r["s_star"] for r in ss_recs}
+    m_inv = {r["date"]: r["s_star"] for r in inv_recs}
+    common = set(m_ss) & set(m_inv)
+    assert common
+    for d in common:
+        assert abs(m_inv[d] - (100.0 - m_ss[d])) < 0.05

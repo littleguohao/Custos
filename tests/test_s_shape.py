@@ -179,3 +179,22 @@ def test_technical_score_falls_back_without_s_shape():
     assert "scorer" not in detail          # 走旧加权路径
     assert detail.get("bbi_above") == 25   # 旧因子贡献仍在
     assert score == 60 and level == "强"
+
+
+# ---------- S_reversal 买弱/反转分 ----------
+
+def test_s_reversal_oversold_ranks_above_uptrend():
+    down = make_df([20 - i * 0.1 for i in range(80)], vols=[2000.0] * 75 + [500.0] * 5)  # 超跌+末段缩量
+    up = make_df([10 + i * 0.1 for i in range(80)])  # 强势上行
+    rd = ss.compute_s_reversal(down, "600000")
+    ru = ss.compute_s_reversal(up, "600000")
+    assert rd["available"] and ru["available"]
+    assert 0.0 <= rd["s_reversal"] <= 100.0 and 0.0 <= ru["s_reversal"] <= 100.0
+    assert rd["s_reversal"] > ru["s_reversal"]   # 超跌缩量应远高于强上行
+    caps = {"oversold": 40, "contraction_stabilize": 30, "reversal_confirm": 30}
+    for k, cap in caps.items():
+        assert 0.0 <= rd["components"][k]["points"] <= cap
+
+
+def test_s_reversal_unavailable_when_short():
+    assert ss.compute_s_reversal(make_df([10.0] * 40))["available"] is False

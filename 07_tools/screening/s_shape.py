@@ -26,11 +26,23 @@ for _p in (str(_TOOLS), str(_TOOLS / "market_timing")):
         sys.path.insert(0, _p)
 
 try:
-    from technical_monitor import _infer_price_limit  # noqa: E402
+    from technical_monitor import _infer_price_limit, kdj as _kdj_fn  # noqa: E402
 except Exception:  # noqa: BLE001 —— 导入失败时用保守默认涨跌幅
+    _kdj_fn = None
+
     def _infer_price_limit(code: str, df) -> int:  # type: ignore
         raw = str(code).strip().upper().split(".")[0]
         return 20 if raw.startswith(("688", "920", "300", "301")) else 10
+
+
+def _kdj_jvals(df) -> tuple[Optional[float], Optional[float]]:
+    """(J, J_prev)；kdj 不可用返回 (None, None)。"""
+    if _kdj_fn is None:
+        return None, None
+    r = _kdj_fn(df)
+    if not r.get("available"):
+        return None, None
+    return r.get("j"), r.get("j_prev")
 
 # ===== 待回测参数（部分源自被遮挡幻灯片，取合理猜测）=====
 SSHAPE_MIN_BARS = 60             # 计算 S_shape 所需最少 K 线（含 60 日均量/均线）
@@ -308,3 +320,78 @@ def sstar_level(s_star: Optional[float]) -> str:
     if s_star is None:
         return "弱"
     return "强" if s_star >= SSTAR_STRONG else ("中" if s_star >= SSTAR_MID else "弱")
+
+
+# ===== S_reversal（买弱/反转分）——B1 回调买入方向的评分，与突破式 S_shape 相反 =====
+# 回测显示短周期低 S_shape(超跌)组跑赢，B1 本就是回调买入。S_reversal 奖励"超跌 + 缩量
+# 企稳 + 反转确认"，避免变成接下跌的刀。阈值同样待回测（部分沿用 s_shape 常量）。
+REV_MIN_BARS = SSHAPE_MIN_BARS
+
+
+def compute_s_reversal(df, code: str = "") -> dict[str, Any]:
+    """买弱/反转评分（0-100）：超跌深度(0-40) + 缩量企稳(0-30) + 反转确认(0-30)。
+
+    全部用现有量价因子、只读本地日线、绝不 raise。阈值待回测。
+    """
+    try:
+        if df is None or len(df) < REV_MIN_BARS:
+            return {"available": False, "s_reversal": None, "reason": f"少于{REV_MIN_BARS}根K线"}
+        close, high, low, vol, open_ = _arrays(df)
+        n = len(df)
+        j, j_prev = _kdj_jvals(df)
+
+        # --- 超跌深度 0-40：J 深度 + 250日回撤 + 低于均线乖离 ---
+        j_pts = 16.0 if (j is not None and j < 0) else (10.0 if (j is not None and j < 7) else (6.0 if (j is not None and j < 13) else 0.0))
+        win = min(250, n)
+        high_w = float(high[-win:].max())
+        dd = (1 - close[-1] / high_w) * 100 if high_w else 0.0
+        dd_pts = 12.0 if dd >= 40 else (7.0 if dd >= 25 else (3.0 if dd >= 15 else 0.0))
+        ma20 = float(close[-20:].mean())
+        dev = (close[-1] / ma20 - 1) * 100 if ma20 else 0.0
+        below_pts = 12.0 if dev <= -8 else (7.0 if dev <= -4 else (3.0 if dev <= -1 else 0.0))
+        oversold = min(40.0, j_pts + dd_pts + below_pts)
+
+        # --- 缩量企稳 0-30：极致缩量 + 回调段缩量 + 守近20日低 ---
+        vol_ma5_prev = float(vol[-6:-1].mean()) if n >= 6 else None
+        vr = (vol[-1] / vol_ma5_prev) if vol_ma5_prev else None
+        vol20 = vol[-20:]
+        pctile = float((vol20 < vol[-1]).mean() * 100) if len(vol20) >= 20 else None
+        extreme = bool(vr is not None and vr <= 0.5 and pctile is not None and pctile <= 10)
+        shrink_pts = 15.0 if extreme else (8.0 if (vr is not None and vr <= 0.8) else 0.0)
+        pull_pts = 10.0 if (n >= 11 and vol[-5:].mean() < vol[-10:-5].mean()) else 0.0
+        low20 = float(low[-20:].min()) if n >= 20 else float(low.min())
+        hold_pts = 5.0 if (low20 and close[-1] > low20) else 0.0
+        contraction = min(30.0, shrink_pts + pull_pts + hold_pts)
+
+        # --- 反转确认 0-30：反转K + J拐头 + 低位反包 + 底部巨量 ---
+        chg = (close[-1] / close[-2] - 1) * 100 if n >= 2 and close[-2] else 0.0
+        amp = (high[-1] / low[-1] - 1) * 100 if low[-1] else 0.0
+        reversal_k = bool((j is not None and j < 13) and extreme and abs(chg) <= 2 and amp <= 7)
+        rk_pts = 10.0 if reversal_k else 0.0
+        jturn_pts = 6.0 if (j is not None and j_prev is not None and j > j_prev and j_prev < 20) else 0.0
+        prev_bear = bool(n >= 2 and close[-2] < open_[-2])
+        engulf = bool(close[-1] > open_[-1] and prev_bear and close[-1] >= open_[-2])
+        at_low = bool(low20 and close[-1] <= low20 * 1.15)
+        eng_pts = 7.0 if (engulf and at_low) else 0.0
+        vol_ma_w = float(vol[-win:].mean())
+        botvol_pts = 7.0 if (dd >= 40 and vol_ma_w and vol[-1] >= vol_ma_w * 2) else 0.0
+        reversal_confirm = min(30.0, rk_pts + jturn_pts + eng_pts + botvol_pts)
+
+        s_rev = round(min(100.0, oversold + contraction + reversal_confirm), 1)
+        suggestion = "强反转候选" if s_rev >= 70 else ("观察" if s_rev >= 60 else "弱")
+        return {
+            "available": True,
+            "s_reversal": s_rev,
+            "suggestion": suggestion,
+            "max_score": 100,
+            "components": {
+                "oversold": {"points": round(oversold, 1), "j": j,
+                             "drawdown_pct": round(dd, 2), "ma20_dev_pct": round(dev, 2)},
+                "contraction_stabilize": {"points": round(contraction, 1),
+                                          "vol_ratio5": round(vr, 3) if vr is not None else None},
+                "reversal_confirm": {"points": round(reversal_confirm, 1),
+                                     "reversal_k": reversal_k, "j_turn_up": bool(jturn_pts)},
+            },
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"available": False, "s_reversal": None, "error": f"{type(exc).__name__}:{str(exc)[:80]}"}
