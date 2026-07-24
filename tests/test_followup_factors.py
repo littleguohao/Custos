@@ -305,3 +305,25 @@ def test_baseline_scorer_and_cost():
     net = bt.evaluate_trades({"T": df}, scorer=stub, min_bars=30, cost_bps=30)
     # 同样交易，扣 30bps 后每笔净收更低
     assert net and gross and net[0]["ret"] == round(gross[0]["ret"] - 0.003, 4)
+
+
+def test_amv_regime_machine():
+    recs = [{"date": "2025-01-01", "change_pct": None},
+            {"date": "2025-01-02", "change_pct": 5.0},    # >4 → 做多
+            {"date": "2025-01-03", "change_pct": 1.0},    # 之间 → 维持做多
+            {"date": "2025-01-06", "change_pct": -3.0},   # <-2.3 → 空头
+            {"date": "2025-01-07", "change_pct": 2.0}]    # 之间 → 维持空头(粘滞)
+    r = bt._amv_regime_from_records(recs)
+    assert r["2025-01-01"] == "中性" and r["2025-01-02"] == "做多"
+    assert r["2025-01-03"] == "做多" and r["2025-01-06"] == "空头" and r["2025-01-07"] == "空头"
+
+
+def test_evaluate_trades_amv_long_only_gate():
+    df = _mk([10.0 + 0.1 * i for i in range(45)])
+    dates = [str(d)[:10] for d in df["date"]]
+    stub = lambda s, code: {"score": 100, "suggestion": "可买"}
+    regime = {dates[i]: ("做多" if i >= 35 else "空头") for i in range(45)}
+    gated = bt.evaluate_trades({"T": df}, scorer=stub, min_bars=30, amv_regime=regime)
+    ungated = bt.evaluate_trades({"T": df}, scorer=stub, min_bars=30)
+    assert gated and all(t["entry_date"] >= dates[35] for t in gated)   # 只在做多区间进场
+    assert any(t["entry_date"] < dates[35] for t in ungated)            # 无门槛时更早进场

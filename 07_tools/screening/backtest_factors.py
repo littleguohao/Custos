@@ -415,13 +415,24 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
                     scorer: Optional[Callable[[pd.DataFrame, str], Optional[dict]]] = None,
                     min_bars: int = 30, step: int = 1,
                     max_signals_per_code: Optional[int] = None,
-                    weekly: bool = False, cost_bps: float = 0.0) -> list[dict[str, Any]]:
+                    weekly: bool = False, cost_bps: float = 0.0,
+                    amv_regime: Optional[dict] = None) -> list[dict[str, Any]]:
     """在 scorer 判「可买」的 as-of 日进场，按 B1 规则(止损+BBI)模拟到出场；非重叠(平仓后再找)。
 
     cost_bps：单边成本合计的往返基点(A股约20~30bps含佣金/印花税/滑点)，从每笔收益中扣除，看净期望。
+    amv_regime：date→regime 映射(如 load_amv_regime)。提供时只在「做多」区间进场(as-of最近≤进场日的regime)。
     """
     scorer = scorer or _sc_b1_pullback
     cost = cost_bps / 1e4
+    import bisect
+    amv_dates = sorted(amv_regime) if amv_regime else None
+
+    def _amv_ok(date: str) -> bool:
+        if not amv_regime:
+            return True
+        idx = bisect.bisect_right(amv_dates, date) - 1     # as-of：最近 ≤ date 的regime
+        return idx >= 0 and amv_regime[amv_dates[idx]] == "做多"
+
     trades: list[dict[str, Any]] = []
     for code, raw in bars_by_code.items():
         if raw is None or len(raw) == 0:
@@ -436,10 +447,11 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
         emitted = 0
         i = min_bars
         while i < n - 1:
+            entry_date = str(df["date"].iloc[i])[:10]
             res = scorer(df.iloc[:i + 1], code)
-            if res is not None and res.get("suggestion") == "可买":
+            if res is not None and res.get("suggestion") == "可买" and _amv_ok(entry_date):
                 tr = simulate_b1_trade(df, i, bbi)
-                trades.append({"code": code, "entry_date": str(df["date"].iloc[i])[:10],
+                trades.append({"code": code, "entry_date": entry_date,
                                "exit_date": str(df["date"].iloc[tr["exit_idx"]])[:10],
                                "score": res.get("score"), "ret": round(tr["ret"] - cost, 4),
                                "holding": tr["holding"], "reason": tr["reason"]})
@@ -480,6 +492,36 @@ def summarize_trades(trades: list[dict[str, Any]]) -> dict[str, Any]:
         lines.append(f"  出场[{rs}] {s['n']} 笔  均收 {s['avg_return']*100:+.2f}%")
     d["text"] = "\n".join(lines)
     return d
+
+
+def _amv_regime_from_records(records: list[dict[str, Any]]) -> dict[str, str]:
+    """把 0AMV 日线(含 change_pct)按状态机(>4%→做多; <-2.3%→空头; 之间粘滞维持)转成 date→regime。
+
+    复刻 amv_state：空头/做多一旦进入则锁定，直到反向阈值触发；起始中性。
+    """
+    regime: dict[str, str] = {}
+    state = "中性"
+    for r in sorted(records, key=lambda x: x.get("date", "")):
+        v = r.get("change_pct")
+        if v is not None:
+            if v > 4:
+                state = "做多"
+            elif v < -2.3:
+                state = "空头"
+        regime[str(r.get("date"))[:10]] = state
+    return regime
+
+
+def load_amv_regime(since: str = "2015-01-01", root: Optional[str] = None) -> dict[str, str]:
+    """从指南针 0AMV 日线(compass_amv)构建历史 date→regime。best-effort：数据缺失返回 {}。"""
+    try:
+        import compass_amv  # noqa: PLC0415
+        parsed = compass_amv.parse_amv_daily(since=since, root=root)
+        if parsed.get("error") or not parsed.get("records"):
+            return {}
+        return _amv_regime_from_records(parsed["records"])
+    except Exception:  # noqa: BLE001
+        return {}
 
 
 def _load_bars_local(codes: list[str], count: int) -> dict[str, pd.DataFrame]:
@@ -523,6 +565,8 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                     help="日线重采样为周线后再回测(周线B1;配合 --trade-sim)")
     ap.add_argument("--cost-bps", type=float, default=0.0,
                     help="往返交易成本(基点),从每笔收益扣除(A股约20~30bps含佣金/印花/滑点);默认0=毛收益")
+    ap.add_argument("--amv-long-only", action="store_true",
+                    help="仅在0AMV『做多』区间进场(读指南针compass_amv历史→状态机>4%做多/<-2.3%空头;配合 --trade-sim)")
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
 
@@ -545,19 +589,26 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     bars = load(codes, args.count)
 
     if args.trade_sim:
+        amv_regime = None
+        if args.amv_long_only:
+            amv_regime = load_amv_regime()
+            if not amv_regime:
+                ap.error("--amv-long-only 需要指南针 0AMV 数据(compass_amv)，未读到；请在有指南针的机器运行")
+            print(f"[INFO] 0AMV regime 覆盖 {len(amv_regime)} 个交易日，仅在『做多』区间进场", file=sys.stderr)
         trades = evaluate_trades(bars, scorer=SCORERS[args.scorer], step=args.step,
-                                 weekly=args.weekly, cost_bps=args.cost_bps)
+                                 weekly=args.weekly, cost_bps=args.cost_bps, amv_regime=amv_regime)
         tsum = summarize_trades(trades)
         payload = {"mode": "trade_sim", "scorer": args.scorer, "weekly": args.weekly,
-                   "cost_bps": args.cost_bps, "codes": codes, "count": args.count,
-                   "trade_summary": tsum, "trades": trades}
+                   "cost_bps": args.cost_bps, "amv_long_only": bool(args.amv_long_only),
+                   "codes": codes, "count": args.count, "trade_summary": tsum, "trades": trades}
         if args.out:
             out = Path(args.out)
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-            print(f"[OK] 写出 {out}（{len(trades)} 笔交易，scorer={args.scorer}, {'周线' if args.weekly else '日线'}, cost={args.cost_bps}bps）")
+            print(f"[OK] 写出 {out}（{len(trades)} 笔交易，scorer={args.scorer}, {'周线' if args.weekly else '日线'}, cost={args.cost_bps}bps, amv_long_only={bool(args.amv_long_only)}）")
         print(f"\n=== B1 交易模拟（scorer={args.scorer}, {'周线' if args.weekly else '日线'}, "
-              f"cost={args.cost_bps}bps, 止损=买入K最低 / 站上BBI后连破2日卖出）===")
+              f"cost={args.cost_bps}bps, {'仅0AMV做多' if args.amv_long_only else '全regime'}, "
+              f"止损=买入K最低 / 站上BBI后连破2日卖出）===")
         print(tsum["text"])
         return 0
 
