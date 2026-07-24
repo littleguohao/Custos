@@ -294,3 +294,14 @@ def test_evaluate_and_summarize_trades():
     s = bt.summarize_trades([{"ret": 0.2, "reason": "bbi_exit", "holding": 8},
                              {"ret": -0.05, "reason": "stop", "holding": 3}])
     assert s["n"] == 2 and s["win_rate"] == 0.5 and s["payoff_ratio"] == 4.0   # 0.2 / 0.05
+
+
+def test_baseline_scorer_and_cost():
+    assert "baseline" in bt.SCORERS
+    assert bt.SCORERS["baseline"](_mk([10.0] * 5), "T")["suggestion"] == "可买"
+    df = _mk([10.0 + 0.1 * i for i in range(40)])
+    stub = lambda s, code: {"score": 100, "suggestion": "可买"}
+    gross = bt.evaluate_trades({"T": df}, scorer=stub, min_bars=30, cost_bps=0)
+    net = bt.evaluate_trades({"T": df}, scorer=stub, min_bars=30, cost_bps=30)
+    # 同样交易，扣 30bps 后每笔净收更低
+    assert net and gross and net[0]["ret"] == round(gross[0]["ret"] - 0.003, 4)

@@ -102,8 +102,16 @@ def _sc_b1_pullback(df: pd.DataFrame, code: str):
             "components": {k: (1.0 if v else 0.0) for k, v in (r.get("components") or {}).items()}}
 
 
+def _sc_baseline(df: pd.DataFrame, code: str):
+    """基线打分器：任何 as-of 日都判「可买」。用于对照——同样的止损+BBI出场规则下，
+    无差别进场能拿到多少期望/盈亏比；b1_pullback 需**显著优于**它，才证明进场信号本身有价值
+    (否则 edge 全来自出场规则而非进场指纹)。"""
+    return {"score": 0.0, "suggestion": "可买", "aux": {}, "components": {}}
+
+
 SCORERS = {"s_shape": _sc_s_shape, "s_reversal": _sc_s_reversal,
-           "invert_s_shape": _sc_invert_s_shape, "b1_pullback": _sc_b1_pullback}
+           "invert_s_shape": _sc_invert_s_shape, "b1_pullback": _sc_b1_pullback,
+           "baseline": _sc_baseline}
 
 
 def sample_codes(all_codes: list[str], n: int, seed: int = 0) -> list[str]:
@@ -407,9 +415,13 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
                     scorer: Optional[Callable[[pd.DataFrame, str], Optional[dict]]] = None,
                     min_bars: int = 30, step: int = 1,
                     max_signals_per_code: Optional[int] = None,
-                    weekly: bool = False) -> list[dict[str, Any]]:
-    """在 scorer 判「可买」的 as-of 日进场，按 B1 规则(止损+BBI)模拟到出场；非重叠(平仓后再找)。"""
+                    weekly: bool = False, cost_bps: float = 0.0) -> list[dict[str, Any]]:
+    """在 scorer 判「可买」的 as-of 日进场，按 B1 规则(止损+BBI)模拟到出场；非重叠(平仓后再找)。
+
+    cost_bps：单边成本合计的往返基点(A股约20~30bps含佣金/印花税/滑点)，从每笔收益中扣除，看净期望。
+    """
     scorer = scorer or _sc_b1_pullback
+    cost = cost_bps / 1e4
     trades: list[dict[str, Any]] = []
     for code, raw in bars_by_code.items():
         if raw is None or len(raw) == 0:
@@ -429,7 +441,7 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
                 tr = simulate_b1_trade(df, i, bbi)
                 trades.append({"code": code, "entry_date": str(df["date"].iloc[i])[:10],
                                "exit_date": str(df["date"].iloc[tr["exit_idx"]])[:10],
-                               "score": res.get("score"), "ret": round(tr["ret"], 4),
+                               "score": res.get("score"), "ret": round(tr["ret"] - cost, 4),
                                "holding": tr["holding"], "reason": tr["reason"]})
                 emitted += 1
                 if max_signals_per_code and emitted >= max_signals_per_code:
@@ -509,6 +521,8 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                     help="按B1交易规则模拟(进场=可买日收盘;止损=买入当日最低;站上BBI后连破2日收盘卖出)测真实盈亏比")
     ap.add_argument("--weekly", action="store_true",
                     help="日线重采样为周线后再回测(周线B1;配合 --trade-sim)")
+    ap.add_argument("--cost-bps", type=float, default=0.0,
+                    help="往返交易成本(基点),从每笔收益扣除(A股约20~30bps含佣金/印花/滑点);默认0=毛收益")
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
 
@@ -531,17 +545,19 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     bars = load(codes, args.count)
 
     if args.trade_sim:
-        trades = evaluate_trades(bars, scorer=SCORERS[args.scorer], step=args.step, weekly=args.weekly)
+        trades = evaluate_trades(bars, scorer=SCORERS[args.scorer], step=args.step,
+                                 weekly=args.weekly, cost_bps=args.cost_bps)
         tsum = summarize_trades(trades)
         payload = {"mode": "trade_sim", "scorer": args.scorer, "weekly": args.weekly,
-                   "codes": codes, "count": args.count, "trade_summary": tsum, "trades": trades}
+                   "cost_bps": args.cost_bps, "codes": codes, "count": args.count,
+                   "trade_summary": tsum, "trades": trades}
         if args.out:
             out = Path(args.out)
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-            print(f"[OK] 写出 {out}（{len(trades)} 笔交易，scorer={args.scorer}, {'周线' if args.weekly else '日线'}）")
+            print(f"[OK] 写出 {out}（{len(trades)} 笔交易，scorer={args.scorer}, {'周线' if args.weekly else '日线'}, cost={args.cost_bps}bps）")
         print(f"\n=== B1 交易模拟（scorer={args.scorer}, {'周线' if args.weekly else '日线'}, "
-              f"止损=买入K最低 / 站上BBI后连破2日卖出）===")
+              f"cost={args.cost_bps}bps, 止损=买入K最低 / 站上BBI后连破2日卖出）===")
         print(tsum["text"])
         return 0
 
