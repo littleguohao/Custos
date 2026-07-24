@@ -204,3 +204,52 @@ def test_enrich_financials_autotmap_does_not_clobber_candidates(monkeypatch):
     assert fin["dixi_proxy"]["net_profit_positive"] is True
     assert fin["dixi_proxy"]["real_earnings_cashflow"] is True   # 注入了现金流>0
     assert "net_profit_positive" in fin["hits"]
+
+
+# ---------- 完美B1 买弱指纹检测器 + 回测盈亏比 ----------
+
+def _synth_uptrend_pullback():
+    """合成：先涨~50%，再缩量小实体回踩~10%(收盘落到 MA5/MA10 下方、仍在 MA60 上方)。"""
+    closes = [10.0 + 5.0 * i / 61 for i in range(62)]        # 10 → 15
+    top = closes[-1]
+    closes += [top * (1 - 0.10 * i / 8) for i in range(1, 9)]  # 15 → 13.5，8日回调
+    n = len(closes)
+    dates = pd.date_range("2025-01-01", periods=n, freq="B")
+    rows = []
+    for i, cl in enumerate(closes):
+        op = closes[i - 1] if i > 0 else cl
+        rows.append({"date": dates[i], "open": op, "high": max(op, cl) * 1.005,
+                     "low": min(op, cl) * 0.995, "close": cl,
+                     "volume": 1_000_000 if i < 62 else 600_000, "amount": 1.0})
+    return pd.DataFrame(rows)
+
+
+def test_b1_pullback_fit_recognizes_fingerprint():
+    from screening import enrich_candidates as ec
+    r = ec.compute_b1_pullback_fit(_synth_uptrend_pullback())
+    assert r["available"] and r["hit"] is True and r["score"] >= 6
+    comp = r["components"]
+    assert comp["trend_intact"] and comp["pullback_below_ma10"] and comp["volume_dryup"]
+
+
+def test_b1_pullback_fit_rejects_downtrend():
+    from screening import enrich_candidates as ec
+    closes = [20.0 - 10.0 * i / 69 for i in range(70)]        # 单边下跌
+    dates = pd.date_range("2025-01-01", periods=70, freq="B")
+    df = pd.DataFrame([{"date": dates[i], "open": c, "high": c * 1.01, "low": c * 0.99,
+                        "close": c, "volume": 1e6, "amount": 1.0} for i, c in enumerate(closes)])
+    r = ec.compute_b1_pullback_fit(df)
+    assert r["available"] and r["hit"] is False        # 趋势破 + 无前涨幅 → 不命中
+
+
+def test_b1_pullback_scorer_registered():
+    assert "b1_pullback" in bt.SCORERS
+    out = bt.SCORERS["b1_pullback"](_synth_uptrend_pullback(), "TEST")
+    assert out is not None and out["suggestion"] == "可买" and out["aux"]["hit"] is True
+
+
+def test_stats_payoff_ratio():
+    rows = [{"ret10": 0.10}, {"ret10": 0.05}, {"ret10": -0.02}, {"ret10": -0.03}]
+    s = bt._stats(rows, 10)
+    assert s["payoff_ratio"] == 3.0        # 均盈0.075 / 均亏0.025
+    assert s["avg_win"] == 0.075 and s["avg_loss"] == 0.025

@@ -90,7 +90,20 @@ def _sc_invert_s_shape(df: pd.DataFrame, code: str):
 
 
 # 可选打分器：同一批信号可跑三方对比（突破式 vs 买弱式 vs 反转突破分）
-SCORERS = {"s_shape": _sc_s_shape, "s_reversal": _sc_s_reversal, "invert_s_shape": _sc_invert_s_shape}
+def _sc_b1_pullback(df: pd.DataFrame, code: str):
+    """完美B1 缩量回踩买弱指纹（0-7 → 归一 0-100）。10只赢家反标，precision 待本回测确认。"""
+    from enrich_candidates import compute_b1_pullback_fit  # noqa: PLC0415 —— 懒加载避免重导入开销
+    r = compute_b1_pullback_fit(df)
+    if not r.get("available"):
+        return None
+    return {"score": round(r["score"] / 7 * 100, 1),
+            "suggestion": "可买" if r.get("hit") else "不买",
+            "aux": {"fit_raw": r["score"], "hit": r["hit"]},
+            "components": {k: (1.0 if v else 0.0) for k, v in (r.get("components") or {}).items()}}
+
+
+SCORERS = {"s_shape": _sc_s_shape, "s_reversal": _sc_s_reversal,
+           "invert_s_shape": _sc_invert_s_shape, "b1_pullback": _sc_b1_pullback}
 
 
 def sample_codes(all_codes: list[str], n: int, seed: int = 0) -> list[str]:
@@ -200,13 +213,25 @@ def _stats(rows: list[dict[str, Any]], horizon: int) -> dict[str, Any]:
     if not rets:
         return {"n": 0}
     wins = sum(1 for x in rets if x > 0)
+    gains = [x for x in rets if x > 0]
+    losses = [-x for x in rets if x < 0]
+    avg_win = statistics.mean(gains) if gains else 0.0
+    avg_loss = statistics.mean(losses) if losses else 0.0
+    payoff = round(avg_win / avg_loss, 3) if avg_loss > 0 else None   # 盈亏比：均盈/均亏(核心目标)
+    med_mfe = statistics.median(mfes) if mfes else None
+    med_mae = statistics.median(maes) if maes else None
+    mfe_mae = (round(med_mfe / abs(med_mae), 3) if (med_mfe is not None and med_mae) else None)
     return {
         "n": len(rets),
         "win_rate": round(wins / len(rets), 4),
         "avg_return": round(statistics.mean(rets), 4),
         "median_return": round(statistics.median(rets), 4),
-        "median_mfe": round(statistics.median(mfes), 4) if mfes else None,
-        "median_mae": round(statistics.median(maes), 4) if maes else None,
+        "avg_win": round(avg_win, 4),
+        "avg_loss": round(avg_loss, 4),
+        "payoff_ratio": payoff,                 # 均盈/均亏；追求盈亏比时看这个而非胜率
+        "median_mfe": round(med_mfe, 4) if med_mfe is not None else None,
+        "median_mae": round(med_mae, 4) if med_mae is not None else None,
+        "mfe_mae_ratio": mfe_mae,               # 中位 MFE/|MAE|：潜在盈亏比
     }
 
 

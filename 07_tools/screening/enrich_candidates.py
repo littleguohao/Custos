@@ -142,6 +142,17 @@ FIT_SHRINK_DEEP = 0.5             # 回调段/上涨段均量 ≤0.5 → 2 分
 FIT_SHRINK_MID = 0.8              # ≤0.8 → 1 分
 FIT_DKS_SLOPE_DAYS = 5            # DKS 上行判断窗口（DKS[t] > DKS[t-N]）
 
+# --- 完美B1「缩量回踩超卖企稳」买弱指纹（10只确认赢家反标，见 worklog）---
+# recall 已达标(10/10)，但阈值宽松、precision(假阳性)与盈亏比须全市场回测把关；均为待回测参数。
+B1PB_TREND_MA = 60                # 趋势未破：收盘 > MA60（-1% 容差）
+B1PB_MA10_BAND = (-12.0, 1.0)     # 短线回踩：收盘距 MA10 落在此带（下方回踩，且不明显站上MA5）
+B1PB_PRIOR_GAIN = 25.0            # 前有涨幅：波段起涨 ≥25%
+B1PB_PULL_BAND = (4.0, 35.0)      # 回调温和：回调深度 4~35%
+B1PB_VOL_MA5_MAX = 1.3            # 缩量企稳：B1日量 ≤1.3×近5日均量
+B1PB_JMIN_MAX = 13.0             # J超卖重置：回调段最低 J ≤13
+B1PB_BODY_MAX = 4.5               # 小实体企稳：B1日实体 ≤4.5%
+B1PB_HIT_MIN = 6                  # 命中门槛：7项中 ≥6 项
+
 # --- MACD 十大技术（macd十大技术精讲）待回测参数 ---
 MACD_SWING_FRACTAL = 2           # 摆动高/低点分型：左右各 N 根确认
 MACD_DIV_LOOKBACK = 60           # 背离观察窗口（日）
@@ -846,6 +857,68 @@ def compute_perfect_b1_fit(df, daily_j, zx: dict, pullback: dict) -> dict[str, A
     return {"score": total, "max_score": 8, "components": comp}
 
 
+def _j_series(df, n: int = 9, m1: int = 3, m2: int = 3):
+    """KDJ 的 J 序列（与 technical_monitor.kdj 同口径：ewm com=m-1, adjust=False）。"""
+    low_n = df["low"].rolling(n).min()
+    high_n = df["high"].rolling(n).max()
+    rsv = (df["close"] - low_n) / (high_n - low_n) * 100
+    rsv = rsv.replace([np.inf, -np.inf], np.nan).fillna(50)
+    k = rsv.ewm(com=m1 - 1, adjust=False).mean()
+    d = k.ewm(com=m2 - 1, adjust=False).mean()
+    return 3 * k - 2 * d
+
+
+def compute_b1_pullback_fit(df) -> dict[str, Any]:
+    """完美B1「缩量回踩超卖企稳」买弱指纹评分（0-7）。来源：10只确认赢家(后续大涨)反标。
+
+    与 technical_score(买强) 正交——专抓「上升趋势中缩量回踩到均线、J超卖、企稳」的买弱点。
+    ⚠️ recall 已达标(10/10)，但阈值宽松、precision(假阳性率)与盈亏比**须全市场回测确认**；
+    校准前仅证据层落盘、**不驱动分层**。绝不 raise。
+    """
+    try:
+        c = df["close"].astype(float).reset_index(drop=True)
+        v = df["volume"].astype(float).reset_index(drop=True)
+        op = df["open"].astype(float).reset_index(drop=True)
+        n = len(c)
+        if n < 20:
+            return {"available": False, "score": 0, "max_score": 7, "hit": False}
+        ma5 = c.rolling(5).mean(); ma10 = c.rolling(10).mean()
+        ma60 = c.rolling(min(B1PB_TREND_MA, n)).mean()
+        look = min(45, n)
+        hi_i = int(c.iloc[-look:].values.argmax()) + (n - look)   # 波段高点
+        up_win = c.iloc[max(0, hi_i - 40):hi_i + 1]
+        lo_before = float(up_win.min()) if len(up_win) else float(c.iloc[hi_i])
+        up_gain = (float(c.iloc[hi_i]) / lo_before - 1) * 100 if lo_before else 0.0
+        pull_days = (n - 1) - hi_i
+        pull_depth = (float(c.iloc[hi_i]) - float(c.iloc[-1])) / float(c.iloc[hi_i]) * 100 if c.iloc[hi_i] else 0.0
+        jser = _j_series(df)
+        j_min = float(jser.iloc[-(pull_days + 1):].min()) if pull_days > 0 else float(jser.iloc[-1])
+        vma5 = float(v.iloc[-5:].mean())
+        vol_ratio = float(v.iloc[-1]) / vma5 if vma5 > 0 else 9.0
+        body = abs(float(c.iloc[-1]) - float(op.iloc[-1])) / float(c.iloc[-2]) * 100 if (n >= 2 and c.iloc[-2]) else 9.0
+        d_ma5 = (float(c.iloc[-1]) / float(ma5.iloc[-1]) - 1) * 100 if not np.isnan(ma5.iloc[-1]) else 99.0
+        d_ma10 = (float(c.iloc[-1]) / float(ma10.iloc[-1]) - 1) * 100 if not np.isnan(ma10.iloc[-1]) else 99.0
+        d_ma60 = (float(c.iloc[-1]) / float(ma60.iloc[-1]) - 1) * 100 if not np.isnan(ma60.iloc[-1]) else -99.0
+        comp = {
+            "trend_intact": bool(d_ma60 > -1.0),
+            "pullback_below_ma10": bool(B1PB_MA10_BAND[0] <= d_ma10 < B1PB_MA10_BAND[1] and d_ma5 < 1.5),
+            "prior_gain": bool(up_gain >= B1PB_PRIOR_GAIN),
+            "pullback_healthy": bool(B1PB_PULL_BAND[0] <= pull_depth <= B1PB_PULL_BAND[1]),
+            "volume_dryup": bool(vol_ratio <= B1PB_VOL_MA5_MAX),
+            "j_oversold_reset": bool(j_min <= B1PB_JMIN_MAX),
+            "quiet_candle": bool(body <= B1PB_BODY_MAX),
+        }
+        score = sum(1 for x in comp.values() if x)
+        return {"available": True, "score": score, "max_score": 7, "hit": bool(score >= B1PB_HIT_MIN),
+                "components": comp,
+                "detail": {"prior_gain_pct": round(up_gain, 1), "pullback_depth_pct": round(pull_depth, 1),
+                           "dist_ma10_pct": round(d_ma10, 1), "dist_ma60_pct": round(d_ma60, 1),
+                           "vol_vs_ma5": round(vol_ratio, 2), "j_min_pullback": round(j_min, 1),
+                           "body_pct": round(body, 1)}}
+    except Exception:  # noqa: BLE001 —— 坏数据不中断
+        return {"available": False, "score": 0, "max_score": 7, "hit": False}
+
+
 def detect_distribution(df, code: str = "") -> dict[str, Any]:
     """主力出货五方式（顶部派发，B1 §七.3）：负向因子，用于选股规避/降档。
 
@@ -1166,6 +1239,7 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
         "distribution": distribution,
         "macd_technics": check_macd_technics(df),
         "perfect_b1_fit": compute_perfect_b1_fit(df, daily_j, zx, pullback_shrink),
+        "b1_pullback_fit": compute_b1_pullback_fit(df),
         "s_shape": s_shape_mod.compute_s_shape(df, code),
         "liquidity": check_liquidity(df),
     }
