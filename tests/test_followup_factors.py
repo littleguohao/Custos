@@ -253,3 +253,44 @@ def test_stats_payoff_ratio():
     s = bt._stats(rows, 10)
     assert s["payoff_ratio"] == 3.0        # 均盈0.075 / 均亏0.025
     assert s["avg_win"] == 0.075 and s["avg_loss"] == 0.025
+
+
+# ---------- B1 交易模拟(止损=买入K最低 / 站上BBI后连破2日卖出) ----------
+
+def _mk(closes, lows=None, opens=None):
+    n = len(closes)
+    lows = lows or [c - 0.05 for c in closes]
+    opens = opens or list(closes)
+    dates = pd.date_range("2025-01-01", periods=n, freq="B")
+    return pd.DataFrame({"date": dates, "open": opens, "high": [c + 0.05 for c in closes],
+                         "low": lows, "close": closes, "volume": [1e6] * n})
+
+
+def test_simulate_trade_stop():
+    # 进场 idx5(收10, 止损=low[5]=9.9)，次日最低跌破 → stop 亏损
+    closes = [10.0] * 10
+    lows = [9.9] * 10; lows[6] = 9.0            # day6 破止损
+    df = _mk(closes, lows=lows, opens=[10.0] * 10)
+    bbi = pd.Series([float("nan")] * 10)
+    r = bt.simulate_b1_trade(df, 5, bbi)
+    assert r["reason"] == "stop" and r["ret"] < 0 and r["exit_idx"] == 6
+
+
+def test_simulate_trade_bbi_exit_win():
+    # 进场 idx5(收10)，涨到12(站上BBI)，随后连续2日收盘跌破BBI → 止盈(仍高于进场→盈)
+    closes = [10, 10, 10, 10, 10, 10, 12, 12, 10.9, 10.8]
+    lows = [c - 0.05 for c in closes]           # 全程不破止损 9.95
+    df = _mk(closes, lows=lows)
+    bbi = pd.Series([float("nan")] * 6 + [9.0, 9.0, 11.0, 11.0])   # idx6,7 收>BBI；idx8,9 收<BBI
+    r = bt.simulate_b1_trade(df, 5, bbi)
+    assert r["reason"] == "bbi_exit" and r["exit_idx"] == 9 and r["ret"] > 0
+
+
+def test_evaluate_and_summarize_trades():
+    df = _mk([10.0 + 0.1 * i for i in range(40)])   # 单调上行 40 根
+    stub = lambda s, code: {"score": 100, "suggestion": "可买"}
+    trades = bt.evaluate_trades({"T": df}, scorer=stub, min_bars=30)
+    assert trades and all(t["reason"] in ("stop", "bbi_exit", "open_end") for t in trades)
+    s = bt.summarize_trades([{"ret": 0.2, "reason": "bbi_exit", "holding": 8},
+                             {"ret": -0.05, "reason": "stop", "holding": 3}])
+    assert s["n"] == 2 and s["win_rate"] == 0.5 and s["payoff_ratio"] == 4.0   # 0.2 / 0.05

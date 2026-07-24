@@ -349,6 +349,127 @@ def factor_lift(records: list[dict[str, Any]], field: str, horizon: int = 10,
     return {"field": field, "horizon": horizon, "quantiles": buckets, "text": "\n".join(lines)}
 
 
+def _bbi_series(close: pd.Series) -> pd.Series:
+    """BBI = (MA3+MA6+MA12+MA24)/4。"""
+    c = close.astype(float)
+    return (c.rolling(3).mean() + c.rolling(6).mean() + c.rolling(12).mean() + c.rolling(24).mean()) / 4
+
+
+def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
+                      bbi_exit_consec: int = 2) -> dict[str, Any]:
+    """B1 交易规则模拟：买入当日收盘进场、止损=买入当日最低价；
+    站上 BBI 后若连续 bbi_exit_consec 日收盘跌破 BBI 则止盈卖出。
+    优先级：先判当日最低是否破止损(盘中)，再判收盘 BBI 退出；均未触发则持有到数据末。
+    跳空低开(open<stop)按开盘价成交。返回 {exit_idx, reason, ret, holding}。"""
+    close = df["close"].astype(float).values
+    low = df["low"].astype(float).values
+    open_ = df["open"].astype(float).values
+    n = len(close)
+    entry = float(close[entry_idx])
+    stop = float(low[entry_idx])
+    bbi_v = bbi.values
+    has_above = False
+    consec_below = 0
+    for j in range(entry_idx + 1, n):
+        if low[j] <= stop:                                    # ① 盘中破止损
+            fill = float(open_[j]) if open_[j] < stop else stop
+            return {"exit_idx": j, "reason": "stop", "ret": fill / entry - 1, "holding": j - entry_idx}
+        b = bbi_v[j]
+        if b == b:                                            # ② 收盘 BBI 退出（b==b 排除 NaN）
+            if close[j] > b:
+                has_above = True; consec_below = 0
+            elif close[j] < b:
+                if has_above:
+                    consec_below += 1
+                    if consec_below >= bbi_exit_consec:
+                        return {"exit_idx": j, "reason": "bbi_exit",
+                                "ret": float(close[j]) / entry - 1, "holding": j - entry_idx}
+            else:
+                consec_below = 0
+    return {"exit_idx": n - 1, "reason": "open_end", "ret": float(close[-1]) / entry - 1,
+            "holding": (n - 1) - entry_idx}
+
+
+def _to_weekly(df: pd.DataFrame) -> pd.DataFrame:
+    """日线重采样为周线（W-FRI）：开=首、高=max、低=min、收=末、量/额=sum。"""
+    d = df.copy()
+    d["date"] = pd.to_datetime(d["date"])
+    d = d.set_index("date")
+    agg = {"open": "first", "high": "max", "low": "min", "close": "last"}
+    if "volume" in d.columns:
+        agg["volume"] = "sum"
+    if "amount" in d.columns:
+        agg["amount"] = "sum"
+    return d.resample("W-FRI").agg(agg).dropna(subset=["close"]).reset_index()
+
+
+def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
+                    scorer: Optional[Callable[[pd.DataFrame, str], Optional[dict]]] = None,
+                    min_bars: int = 30, step: int = 1,
+                    max_signals_per_code: Optional[int] = None,
+                    weekly: bool = False) -> list[dict[str, Any]]:
+    """在 scorer 判「可买」的 as-of 日进场，按 B1 规则(止损+BBI)模拟到出场；非重叠(平仓后再找)。"""
+    scorer = scorer or _sc_b1_pullback
+    trades: list[dict[str, Any]] = []
+    for code, raw in bars_by_code.items():
+        if raw is None or len(raw) == 0:
+            continue
+        df = raw.sort_values("date").reset_index(drop=True)
+        if weekly:
+            df = _to_weekly(df)
+        n = len(df)
+        if n < min_bars + 2:
+            continue
+        bbi = _bbi_series(df["close"])
+        emitted = 0
+        i = min_bars
+        while i < n - 1:
+            res = scorer(df.iloc[:i + 1], code)
+            if res is not None and res.get("suggestion") == "可买":
+                tr = simulate_b1_trade(df, i, bbi)
+                trades.append({"code": code, "entry_date": str(df["date"].iloc[i])[:10],
+                               "exit_date": str(df["date"].iloc[tr["exit_idx"]])[:10],
+                               "score": res.get("score"), "ret": round(tr["ret"], 4),
+                               "holding": tr["holding"], "reason": tr["reason"]})
+                emitted += 1
+                if max_signals_per_code and emitted >= max_signals_per_code:
+                    break
+                i = tr["exit_idx"] + 1                        # 非重叠：跳到平仓之后
+            else:
+                i += max(1, step)
+    return trades
+
+
+def summarize_trades(trades: list[dict[str, Any]]) -> dict[str, Any]:
+    """交易级汇总：胜率、每笔期望、盈亏比、均持仓、按出场原因分解。"""
+    if not trades:
+        return {"n": 0, "text": "无交易"}
+    import collections
+    rets = [t["ret"] for t in trades]
+    wins = [r for r in rets if r > 0]
+    losses = [-r for r in rets if r < 0]
+    avg_win = statistics.mean(wins) if wins else 0.0
+    avg_loss = statistics.mean(losses) if losses else 0.0
+    payoff = round(avg_win / avg_loss, 3) if avg_loss > 0 else None
+    by_reason = {}
+    for rs in collections.Counter(t["reason"] for t in trades):
+        rr = [t["ret"] for t in trades if t["reason"] == rs]
+        by_reason[rs] = {"n": len(rr), "avg_return": round(statistics.mean(rr), 4)}
+    d = {"n": len(trades), "win_rate": round(len(wins) / len(rets), 4),
+         "expectancy": round(statistics.mean(rets), 4),
+         "avg_win": round(avg_win, 4), "avg_loss": round(avg_loss, 4),
+         "payoff_ratio": payoff,
+         "avg_holding": round(statistics.mean([t["holding"] for t in trades]), 1),
+         "exit_reasons": by_reason}
+    lines = [f"交易 {d['n']} 笔  胜率 {d['win_rate']*100:.1f}%  期望 {d['expectancy']*100:+.2f}%/笔  "
+             f"盈亏比 {d['payoff_ratio']}  均持 {d['avg_holding']} 根",
+             f"  均盈 {d['avg_win']*100:+.2f}%  均亏 -{d['avg_loss']*100:.2f}%"]
+    for rs, s in by_reason.items():
+        lines.append(f"  出场[{rs}] {s['n']} 笔  均收 {s['avg_return']*100:+.2f}%")
+    d["text"] = "\n".join(lines)
+    return d
+
+
 def _load_bars_local(codes: list[str], count: int) -> dict[str, pd.DataFrame]:
     """CLI 用：经 local_tdx 读取本地日线（需通达信数据；单测走注入不经此）。"""
     import local_tdx_data  # noqa: PLC0415
@@ -384,6 +505,10 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                     help="扫描 score>=cutoff 的胜率/均收益(校准可买门槛；仅在全量数据上有意义)")
     ap.add_argument("--factor-field", default="",
                     help="按该数值字段分位评估前向 lift(如 c_liquidity / c_compression / s_star)")
+    ap.add_argument("--trade-sim", action="store_true",
+                    help="按B1交易规则模拟(进场=可买日收盘;止损=买入当日最低;站上BBI后连破2日收盘卖出)测真实盈亏比")
+    ap.add_argument("--weekly", action="store_true",
+                    help="日线重采样为周线后再回测(周线B1;配合 --trade-sim)")
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
 
@@ -404,6 +529,22 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     horizons = tuple(int(h) for h in args.horizons.split(",") if h.strip())
     load = loader or _load_bars_local
     bars = load(codes, args.count)
+
+    if args.trade_sim:
+        trades = evaluate_trades(bars, scorer=SCORERS[args.scorer], step=args.step, weekly=args.weekly)
+        tsum = summarize_trades(trades)
+        payload = {"mode": "trade_sim", "scorer": args.scorer, "weekly": args.weekly,
+                   "codes": codes, "count": args.count, "trade_summary": tsum, "trades": trades}
+        if args.out:
+            out = Path(args.out)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            print(f"[OK] 写出 {out}（{len(trades)} 笔交易，scorer={args.scorer}, {'周线' if args.weekly else '日线'}）")
+        print(f"\n=== B1 交易模拟（scorer={args.scorer}, {'周线' if args.weekly else '日线'}, "
+              f"止损=买入K最低 / 站上BBI后连破2日卖出）===")
+        print(tsum["text"])
+        return 0
+
     records = evaluate(bars, horizons=horizons, step=args.step,
                        entry_gate=ENTRY_GATES[args.entry_filter],
                        scorer=SCORERS[args.scorer])
