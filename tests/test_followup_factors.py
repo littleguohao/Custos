@@ -327,3 +327,19 @@ def test_evaluate_trades_amv_long_only_gate():
     ungated = bt.evaluate_trades({"T": df}, scorer=stub, min_bars=30)
     assert gated and all(t["entry_date"] >= dates[35] for t in gated)   # 只在做多区间进场
     assert any(t["entry_date"] < dates[35] for t in ungated)            # 无门槛时更早进场
+
+
+def test_simulate_time_stop_and_risk_frac():
+    closes = [10.0] * 12
+    lows = [9.9] * 12; lows[5] = 9.5            # 进场 idx5 → 止损9.5,其后低点9.9不破
+    df = _mk(closes, lows=lows, opens=[10.0] * 12)
+    bbi = pd.Series([float("nan")] * 12)        # BBI 不参与 → 只可能 time_stop
+    r = bt.simulate_b1_trade(df, 5, bbi, time_stop_bars=5)
+    assert r["reason"] == "time_stop" and r["holding"] == 5 and abs(r["risk_frac"] - 0.05) < 1e-9
+
+
+def test_summarize_expectancy_R():
+    s = bt.summarize_trades([{"ret": 0.10, "reason": "bbi_exit", "holding": 8, "r_multiple": 3.0},
+                             {"ret": -0.05, "reason": "stop", "holding": 3, "r_multiple": -1.0}])
+    assert s["expectancy_R"] == 1.0 and s["total_R"] == 2.0
+    assert s["avg_win_R"] == 3.0 and s["avg_loss_R"] == 1.0

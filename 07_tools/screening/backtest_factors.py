@@ -364,24 +364,27 @@ def _bbi_series(close: pd.Series) -> pd.Series:
 
 
 def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
-                      bbi_exit_consec: int = 2) -> dict[str, Any]:
+                      bbi_exit_consec: int = 2, time_stop_bars: int = 0) -> dict[str, Any]:
     """B1 交易规则模拟：买入当日收盘进场、止损=买入当日最低价；
-    站上 BBI 后若连续 bbi_exit_consec 日收盘跌破 BBI 则止盈卖出。
-    优先级：先判当日最低是否破止损(盘中)，再判收盘 BBI 退出；均未触发则持有到数据末。
-    跳空低开(open<stop)按开盘价成交。返回 {exit_idx, reason, ret, holding}。"""
+    站上 BBI 后若连续 bbi_exit_consec 日收盘跌破 BBI 则止盈卖出；可选 time_stop_bars 根后到期平仓。
+    优先级：先判当日最低是否破止损(盘中)，再判收盘 BBI 退出，再判时间止损；均未触发则持有到数据末。
+    跳空低开(open<stop)按开盘价成交。返回 {exit_idx, reason, ret, holding, risk_frac}。
+    risk_frac=(entry-stop)/entry 为单笔风险敞口(R 的分母)，供 R 倍数/风险定额仓位计算。"""
     close = df["close"].astype(float).values
     low = df["low"].astype(float).values
     open_ = df["open"].astype(float).values
     n = len(close)
     entry = float(close[entry_idx])
     stop = float(low[entry_idx])
+    risk_frac = (entry - stop) / entry if entry else 0.0
     bbi_v = bbi.values
     has_above = False
     consec_below = 0
     for j in range(entry_idx + 1, n):
         if low[j] <= stop:                                    # ① 盘中破止损
             fill = float(open_[j]) if open_[j] < stop else stop
-            return {"exit_idx": j, "reason": "stop", "ret": fill / entry - 1, "holding": j - entry_idx}
+            return {"exit_idx": j, "reason": "stop", "ret": fill / entry - 1,
+                    "holding": j - entry_idx, "risk_frac": risk_frac}
         b = bbi_v[j]
         if b == b:                                            # ② 收盘 BBI 退出（b==b 排除 NaN）
             if close[j] > b:
@@ -390,12 +393,15 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
                 if has_above:
                     consec_below += 1
                     if consec_below >= bbi_exit_consec:
-                        return {"exit_idx": j, "reason": "bbi_exit",
-                                "ret": float(close[j]) / entry - 1, "holding": j - entry_idx}
+                        return {"exit_idx": j, "reason": "bbi_exit", "ret": float(close[j]) / entry - 1,
+                                "holding": j - entry_idx, "risk_frac": risk_frac}
             else:
                 consec_below = 0
+        if time_stop_bars and (j - entry_idx) >= time_stop_bars:   # ③ 时间止损
+            return {"exit_idx": j, "reason": "time_stop", "ret": float(close[j]) / entry - 1,
+                    "holding": j - entry_idx, "risk_frac": risk_frac}
     return {"exit_idx": n - 1, "reason": "open_end", "ret": float(close[-1]) / entry - 1,
-            "holding": (n - 1) - entry_idx}
+            "holding": (n - 1) - entry_idx, "risk_frac": risk_frac}
 
 
 def _to_weekly(df: pd.DataFrame) -> pd.DataFrame:
@@ -416,11 +422,13 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
                     min_bars: int = 30, step: int = 1,
                     max_signals_per_code: Optional[int] = None,
                     weekly: bool = False, cost_bps: float = 0.0,
-                    amv_regime: Optional[dict] = None) -> list[dict[str, Any]]:
+                    amv_regime: Optional[dict] = None,
+                    bbi_exit_consec: int = 2, time_stop_bars: int = 0) -> list[dict[str, Any]]:
     """在 scorer 判「可买」的 as-of 日进场，按 B1 规则(止损+BBI)模拟到出场；非重叠(平仓后再找)。
 
     cost_bps：单边成本合计的往返基点(A股约20~30bps含佣金/印花税/滑点)，从每笔收益中扣除，看净期望。
     amv_regime：date→regime 映射(如 load_amv_regime)。提供时只在「做多」区间进场(as-of最近≤进场日的regime)。
+    bbi_exit_consec/time_stop_bars：出场规则参数(可扫描)。每笔记录 r_multiple=净收益/风险敞口，供风险定额仓位。
     """
     scorer = scorer or _sc_b1_pullback
     cost = cost_bps / 1e4
@@ -450,10 +458,15 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
             entry_date = str(df["date"].iloc[i])[:10]
             res = scorer(df.iloc[:i + 1], code)
             if res is not None and res.get("suggestion") == "可买" and _amv_ok(entry_date):
-                tr = simulate_b1_trade(df, i, bbi)
+                tr = simulate_b1_trade(df, i, bbi, bbi_exit_consec=bbi_exit_consec,
+                                       time_stop_bars=time_stop_bars)
+                ret_net = tr["ret"] - cost
+                rf = tr.get("risk_frac") or 0.0
                 trades.append({"code": code, "entry_date": entry_date,
                                "exit_date": str(df["date"].iloc[tr["exit_idx"]])[:10],
-                               "score": res.get("score"), "ret": round(tr["ret"] - cost, 4),
+                               "score": res.get("score"), "ret": round(ret_net, 4),
+                               "risk_frac": round(rf, 4),
+                               "r_multiple": round(ret_net / rf, 3) if rf > 0 else None,
                                "holding": tr["holding"], "reason": tr["reason"]})
                 emitted += 1
                 if max_signals_per_code and emitted >= max_signals_per_code:
@@ -485,9 +498,21 @@ def summarize_trades(trades: list[dict[str, Any]]) -> dict[str, Any]:
          "payoff_ratio": payoff,
          "avg_holding": round(statistics.mean([t["holding"] for t in trades]), 1),
          "exit_reasons": by_reason}
+    # R 倍数视角（风险定额仓位）：R=净收益/单笔风险敞口；期望R×每笔风险% ≈ 每笔账户增长
+    rmults = [t["r_multiple"] for t in trades if t.get("r_multiple") is not None]
+    if rmults:
+        rwin = [r for r in rmults if r > 0]
+        rloss = [-r for r in rmults if r < 0]
+        d["expectancy_R"] = round(statistics.mean(rmults), 3)      # 每笔期望R(核心：>0才可用固定风险放大)
+        d["avg_win_R"] = round(statistics.mean(rwin), 3) if rwin else 0.0
+        d["avg_loss_R"] = round(statistics.mean(rloss), 3) if rloss else 0.0
+        d["total_R"] = round(sum(rmults), 1)                       # 累计R(样本期总盈亏,以R计)
     lines = [f"交易 {d['n']} 笔  胜率 {d['win_rate']*100:.1f}%  期望 {d['expectancy']*100:+.2f}%/笔  "
              f"盈亏比 {d['payoff_ratio']}  均持 {d['avg_holding']} 根",
              f"  均盈 {d['avg_win']*100:+.2f}%  均亏 -{d['avg_loss']*100:.2f}%"]
+    if rmults:
+        lines.append(f"  期望 {d['expectancy_R']:+.3f}R/笔  (均盈 {d['avg_win_R']:.2f}R / 均亏 "
+                     f"{d['avg_loss_R']:.2f}R)  累计 {d['total_R']:+.0f}R —— 按风险r%/笔计,每笔账户增长≈r%×{d['expectancy_R']:+.3f}")
     for rs, s in by_reason.items():
         lines.append(f"  出场[{rs}] {s['n']} 笔  均收 {s['avg_return']*100:+.2f}%")
     d["text"] = "\n".join(lines)
@@ -567,6 +592,10 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                     help="往返交易成本(基点),从每笔收益扣除(A股约20~30bps含佣金/印花/滑点);默认0=毛收益")
     ap.add_argument("--amv-long-only", action="store_true",
                     help="仅在0AMV『做多』区间进场(读指南针compass_amv历史→状态机>4%做多/<-2.3%空头;配合 --trade-sim)")
+    ap.add_argument("--bbi-consec", type=int, default=2,
+                    help="出场:站上BBI后连续N日收盘跌破BBI才卖出(默认2;可扫描出场松紧)")
+    ap.add_argument("--time-stop", type=int, default=0,
+                    help="出场:持有N根仍未触发止损/BBI则到期平仓(默认0=不启用)")
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
 
@@ -596,7 +625,8 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                 ap.error("--amv-long-only 需要指南针 0AMV 数据(compass_amv)，未读到；请在有指南针的机器运行")
             print(f"[INFO] 0AMV regime 覆盖 {len(amv_regime)} 个交易日，仅在『做多』区间进场", file=sys.stderr)
         trades = evaluate_trades(bars, scorer=SCORERS[args.scorer], step=args.step,
-                                 weekly=args.weekly, cost_bps=args.cost_bps, amv_regime=amv_regime)
+                                 weekly=args.weekly, cost_bps=args.cost_bps, amv_regime=amv_regime,
+                                 bbi_exit_consec=args.bbi_consec, time_stop_bars=args.time_stop)
         tsum = summarize_trades(trades)
         payload = {"mode": "trade_sim", "scorer": args.scorer, "weekly": args.weekly,
                    "cost_bps": args.cost_bps, "amv_long_only": bool(args.amv_long_only),
