@@ -1018,7 +1018,8 @@ def load_fund_flow(date: str, cumulative_days: int = 1, market_dir=None) -> dict
                 continue
             e = by_code.setdefault(c, {"code": c, "name": s.get("name", ""),
                                        "main_net_inflow": 0.0, "days": 0,
-                                       "main_net_pct": s.get("main_net_pct")})
+                                       # 单日快照才有意义的日内占比；多日累计无法相加 → None
+                                       "main_net_pct": (s.get("main_net_pct") if cumulative_days <= 1 else None)})
             v = s.get("main_net_inflow")
             if isinstance(v, (int, float)):
                 e["main_net_inflow"] += v

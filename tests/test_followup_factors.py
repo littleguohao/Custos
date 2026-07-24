@@ -24,6 +24,7 @@ def test_fund_flow_cumulative_sums(tmp_path):
     assert r["available"] and r["cumulative_days"] == 3
     e = r["by_code"]["600000"]
     assert abs(e["main_net_inflow"] - 2.5e8) < 1 and e["days"] == 3   # 1+2-0.5 亿
+    assert e["main_net_pct"] is None                                   # 多日累计不报日内占比
     assert len(r["files_used"]) == 3
     # 板块累计
     sec = {s["name"]: s for s in r["sectors"]}
@@ -34,6 +35,7 @@ def test_fund_flow_single_day_unchanged(tmp_path):
     _write_ff(tmp_path, "2026-07-22", [{"code": "600000", "main_net_inflow": 3e8, "main_net_pct": 2.0}])
     r = ec.load_fund_flow("2026-07-22", cumulative_days=1, market_dir=tmp_path)
     assert r["by_code"]["600000"]["main_net_inflow"] == 3e8 and r["files_used"] == ["2026-07-22"]
+    assert r["by_code"]["600000"]["main_net_pct"] == 2.0             # 单日保留占比
 
 
 # ---------- ① 因子分位 lift + 流动性 ----------
@@ -82,6 +84,7 @@ def test_financial_factor_dixi_hit():
     assert r["dixi_proxy"]["real_earnings_cashflow"] is True  # 净利>0 且 现金流>0
     assert r["dixi_proxy"]["roe_positive"] is True
     assert abs(r["market_cap"] - 1e10) < 1                   # 10亿股 × 10元
+    assert r["market_cap_yi"] == 100.0                       # 亿元便于展示
     assert set(r["hits"]) == {"perf_surge_ge_100", "net_profit_positive",
                               "op_cashflow_positive", "real_earnings_cashflow", "roe_positive"}
 

@@ -120,7 +120,10 @@ def financial_factor(code: str, fin_df, colmap: dict, price: Optional[float] = N
     rev_yoy = _cell(row, colmap, "revenue_yoy")
     roe = _cell(row, colmap, "roe")
     shares = _cell(row, colmap, "total_shares")
+    # 总股本(股) × 现价(元) = 总市值(元)。Affair 总股本口径为"股"（已由 000008/000028 等实测量级校验：
+    # 神州高铁 ~28亿股 × ~2.3元 ≈ 64亿元，与落盘一致）。若换用"万股"列需 ×1e4 修正。
     mkt_cap = (shares * price) if (shares is not None and price) else None
+    mkt_cap_yi = round(mkt_cap / 1e8, 2) if mkt_cap is not None else None
 
     perf_surge = bool(np_yoy is not None and np_yoy >= DIXI_NET_PROFIT_YOY)   # ① 扣非同比≥100% 代理
     np_pos = bool(net_profit is not None and net_profit > 0)                   # ②a 净利为正
@@ -140,7 +143,8 @@ def financial_factor(code: str, fin_df, colmap: dict, price: Optional[float] = N
     return {
         "available": True, "cashflow_available": ocf_available,
         "net_profit": net_profit, "op_cashflow": op_cf, "revenue": revenue,
-        "net_profit_yoy": np_yoy, "revenue_yoy": rev_yoy, "roe": roe, "market_cap": mkt_cap,
+        "net_profit_yoy": np_yoy, "revenue_yoy": rev_yoy, "roe": roe,
+        "market_cap": mkt_cap, "market_cap_yi": mkt_cap_yi,
         "dixi_proxy": proxy,
         "hits": [k for k, v in proxy.items() if v is True],
     }
