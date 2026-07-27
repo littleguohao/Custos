@@ -89,7 +89,33 @@ ENTRY_GATES: dict[str, Optional[Callable[[pd.DataFrame], bool]]] = {
     "none": None,        # 每根 K 线都当信号（全市场基线）
     "j_low": j_low_gate,  # 只在 J<13 入场区评估（仅J,含落刀）
     "reversal_k": reversal_k_gate,  # 完整 B1 反转K：J<13+缩量企稳(排除贴低落刀)
+    "j_macd_turn": None,  # 占位，下方 j_low_macd_turn_gate 定义后回填
 }
+
+
+def _macd_hist(close: pd.Series) -> pd.Series:
+    """MACD 柱(DIF-DEA, 12/26/9)。柱>0=红、<0=绿；柱上行=绿柱缩短或红柱变长。"""
+    c = close.astype(float)
+    dif = c.ewm(span=12, adjust=False).mean() - c.ewm(span=26, adjust=False).mean()
+    dea = dif.ewm(span=9, adjust=False).mean()
+    return dif - dea
+
+
+def j_low_macd_turn_gate(df_slice: pd.DataFrame) -> bool:
+    """B1×MACD：J<13 且 MACD 柱上行(绿柱缩短/红柱变长=动量拐头向上)。等待动量拐头,避开落刀。绝不 raise。"""
+    if _kdj is None or len(df_slice) < 35:
+        return False
+    try:
+        r = _kdj(df_slice)
+        if not (r.get("available") and r.get("j") is not None and r["j"] < J_LOW_THRESHOLD):
+            return False
+        h = _macd_hist(df_slice["close"])
+        return bool(len(h) >= 2 and h.iloc[-1] > h.iloc[-2])   # 柱上行(拐头)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+ENTRY_GATES["j_macd_turn"] = j_low_macd_turn_gate
 
 HORIZONS_DEFAULT = (5, 10, 20)
 

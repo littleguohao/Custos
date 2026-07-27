@@ -458,3 +458,14 @@ def test_low_vol_and_momentum_selectors():
     down = _mk([30.0 - 0.1 * i for i in range(130)])
     assert bt.SCORERS["momentum"](up, "T")["score"] > 0 > bt.SCORERS["momentum"](down, "T")["score"]
     assert bt.SCORERS["momentum"](up, "T")["suggestion"] == "可买"
+
+
+def test_macd_hist_and_j_macd_turn_gate():
+    # MACD 柱在底部拐头应上行
+    down_then_up = _mk([20.0 - 0.5 * i for i in range(25)] + [7.5 + 0.3 * i for i in range(8)])
+    h = bt._macd_hist(down_then_up["close"])
+    assert h.iloc[-1] > h.iloc[-2]
+    # gate 注册且返回布尔;上涨序列 J 不低 → False
+    assert "j_macd_turn" in bt.ENTRY_GATES
+    up = _mk([10.0 + 0.1 * i for i in range(40)])
+    assert bt.ENTRY_GATES["j_macd_turn"](up) is False
