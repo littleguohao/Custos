@@ -150,6 +150,40 @@ SCORERS = {"s_shape": _sc_s_shape, "s_reversal": _sc_s_reversal,
            "baseline": _sc_baseline}
 
 
+# --- 借鉴「101 Formulaic Alphas」(Kakushadze 2016) 的思想：纯**选择器**,配 --entry-filter 定义 B1 池,
+#     --top-n 做横截面择优。⚠️ 原论文 alpha 为 0.6~6.4 日超短持有的市场中性反转,与 B1(周级/单边/择时)
+#     不同源,是否加值必须回测验证；此处仅作可排序因子,suggestion 恒「可买」,靠 entry_gate 约束进场池。 ---
+def _ts_corr(x: pd.Series, y: pd.Series, n: int) -> Optional[float]:
+    if len(x) < n:
+        return None
+    c = x.iloc[-n:].reset_index(drop=True).corr(y.iloc[-n:].reset_index(drop=True))
+    return None if (c is None or c != c) else float(c)
+
+
+def _sc_alpha101(df: pd.DataFrame, code: str):
+    """Alpha#101 = (close-open)/((high-low)+.001)：进场K日内强度(收盘越靠上越强)。选强收盘的B1候选。"""
+    if len(df) < 1:
+        return None
+    o = float(df["open"].iloc[-1]); c = float(df["close"].iloc[-1])
+    h = float(df["high"].iloc[-1]); l = float(df["low"].iloc[-1])
+    return {"score": round((c - o) / ((h - l) + 0.001), 4), "suggestion": "可买",
+            "aux": {"alpha": "101_close_open_range"}, "components": {}}
+
+
+def _sc_alpha_pvcorr(df: pd.DataFrame, code: str):
+    """Alpha#6 类：-correlation(open, volume, 10)：价量背离(量价负相关高→筹码沉淀)。选价量背离的候选。"""
+    if len(df) < 10:
+        return None
+    corr = _ts_corr(df["open"].astype(float), df["volume"].astype(float), 10)
+    score = 0.0 if corr is None else -corr           # 相关无定义(如恒定量)→中性0,仍产出记录
+    return {"score": round(score, 4), "suggestion": "可买",
+            "aux": {"alpha": "6_neg_corr_open_vol"}, "components": {}}
+
+
+SCORERS["alpha101"] = _sc_alpha101
+SCORERS["alpha_pvcorr"] = _sc_alpha_pvcorr
+
+
 def sample_codes(all_codes: list[str], n: int, seed: int = 0) -> list[str]:
     """从全 A 代码列表随机抽 N 只（带 seed 可复现），用于代表性样本校准。
 

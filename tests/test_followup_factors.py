@@ -423,3 +423,24 @@ def test_reversal_k_gate_excludes_falling_knife():
                        "close": closes, "volume": [2e6] * (n - 1) + [5e6]})   # 末日放量
     assert bt.reversal_k_gate(df) is False
     assert "reversal_k" in bt.ENTRY_GATES
+
+
+def test_alpha101_prefers_strong_close():
+    strong = _mk([10.0] * 5)   # helper sets open=close, high=+.05, low=-.05
+    # 构造强收盘 vs 弱收盘的末根
+    import pandas as _pd
+    base = _mk([10.0] * 6)
+    base.loc[base.index[-1], ["open", "high", "low", "close"]] = [9.6, 10.1, 9.5, 10.0]  # 收在上沿
+    weak = _mk([10.0] * 6)
+    weak.loc[weak.index[-1], ["open", "high", "low", "close"]] = [10.4, 10.5, 9.9, 10.0]  # 收在下沿
+    s_strong = bt.SCORERS["alpha101"](base, "T")["score"]
+    s_weak = bt.SCORERS["alpha101"](weak, "T")["score"]
+    assert s_strong > s_weak and bt.SCORERS["alpha101"](base, "T")["suggestion"] == "可买"
+
+
+def test_alpha_pvcorr_registered():
+    assert "alpha101" in bt.SCORERS and "alpha_pvcorr" in bt.SCORERS
+    df = _mk([10.0 + 0.1 * i for i in range(15)])
+    df["volume"] = [1e6 + 1e4 * i for i in range(15)]   # 变动量,使相关系数有定义
+    out = bt.SCORERS["alpha_pvcorr"](df, "T")
+    assert out is not None and out["suggestion"] == "可买" and "score" in out
