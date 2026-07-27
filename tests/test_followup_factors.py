@@ -444,3 +444,17 @@ def test_alpha_pvcorr_registered():
     df["volume"] = [1e6 + 1e4 * i for i in range(15)]   # 变动量,使相关系数有定义
     out = bt.SCORERS["alpha_pvcorr"](df, "T")
     assert out is not None and out["suggestion"] == "可买" and "score" in out
+
+
+def test_low_vol_and_momentum_selectors():
+    import numpy as np
+    assert "low_vol" in bt.SCORERS and "momentum" in bt.SCORERS
+    # 低波动：平稳序列得分应高于震荡序列
+    calm = _mk([10.0 + 0.01 * i for i in range(30)])
+    choppy = _mk([10.0 + (2.0 if i % 2 else -2.0) for i in range(30)])
+    assert bt.SCORERS["low_vol"](calm, "T")["score"] > bt.SCORERS["low_vol"](choppy, "T")["score"]
+    # 动量：上涨序列得分为正、下跌为负
+    up = _mk([10.0 + 0.1 * i for i in range(130)])
+    down = _mk([30.0 - 0.1 * i for i in range(130)])
+    assert bt.SCORERS["momentum"](up, "T")["score"] > 0 > bt.SCORERS["momentum"](down, "T")["score"]
+    assert bt.SCORERS["momentum"](up, "T")["suggestion"] == "可买"

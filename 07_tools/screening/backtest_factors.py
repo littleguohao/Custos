@@ -184,6 +184,43 @@ SCORERS["alpha101"] = _sc_alpha101
 SCORERS["alpha_pvcorr"] = _sc_alpha_pvcorr
 
 
+# --- 借鉴 Fama-French 因子「特征排序」思想：把已被文献验证有溢价的特征做成横截面选择器,
+#     在 B1 池(entry_gate)里 top-N 择优。注意:FF 是风险/归因模型(月频/基本面),非交易信号;
+#     A股应以 CH-3/CH-4(Liu-Stambaugh-Yuan) 为准(壳调整size+EP价值+换手)。是否加值须回测。
+#     size/value/profitability 需股本/财务(见 financials.py),此处仅实现价格可算的 low-vol / momentum。---
+def _sc_low_vol(df: pd.DataFrame, code: str):
+    """低波动因子(low-vol anomaly)：score=-近20日收益率标准差(越稳越高分)。选波动小的B1候选。"""
+    if len(df) < 21:
+        return None
+    rets = df["close"].astype(float).pct_change().iloc[-20:]
+    vol = float(rets.std())
+    if vol != vol:
+        return None
+    return {"score": round(-vol, 6), "suggestion": "可买",
+            "aux": {"factor": "low_vol", "vol_20d": round(vol, 4)}, "components": {}}
+
+
+def _sc_momentum(df: pd.DataFrame, code: str):
+    """动量因子(12-1类)：score=[t-skip-lb, t-skip]区间收益(跳过最近20日避开短期反转)。中期强势择优。
+    历史不足时自适应缩短回看窗口(≥40根即产出)。"""
+    c = df["close"].astype(float).values
+    n = len(c)
+    if n < 40:
+        return None
+    skip = 20
+    lb = min(100, n - skip - 1)
+    base = c[-1 - skip - lb]
+    mom = c[-1 - skip] / base - 1 if base else None
+    if mom is None:
+        return None
+    return {"score": round(mom, 4), "suggestion": "可买",
+            "aux": {"factor": f"momentum_{lb}_{skip}"}, "components": {}}
+
+
+SCORERS["low_vol"] = _sc_low_vol
+SCORERS["momentum"] = _sc_momentum
+
+
 def sample_codes(all_codes: list[str], n: int, seed: int = 0) -> list[str]:
     """从全 A 代码列表随机抽 N 只（带 seed 可复现），用于代表性样本校准。
 
