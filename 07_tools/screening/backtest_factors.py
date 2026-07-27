@@ -940,6 +940,8 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     ap.add_argument("--max-pos", type=float, default=20.0, help="组合:单仓名义上限%%本金(默认20)")
     ap.add_argument("--top-n", type=int, default=0,
                     help="组合:每个进场日按score降序只取前N只(横截面择优;0=不启用,取全部可买)")
+    ap.add_argument("--max-signals-per-code", type=int, default=0,
+                    help="每只股最多保留N个候选(0=不限;--top-n 下限制单股候选爆炸、省内存/CPU)")
     ap.add_argument("--stop-mode", choices=["low", "pct"], default="low",
                     help="止损:low=买入K最低(超卖贴低几乎无空间);pct=entry×(1-stop_pct%%)(固定空间)")
     ap.add_argument("--stop-pct", type=float, default=8.0, help="--stop-mode pct 时的止损百分比(默认8)")
@@ -982,7 +984,8 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                     cost_bps=args.cost_bps, amv_regime=amv_regime, bbi_exit_consec=args.bbi_consec,
                     time_stop_bars=args.time_stop, collect_all=bool(args.top_n > 0),
                     entry_gate=ENTRY_GATES[args.entry_filter],
-                    stop_mode=args.stop_mode, stop_pct=args.stop_pct)
+                    stop_mode=args.stop_mode, stop_pct=args.stop_pct,
+                    max_signals_per_code=(args.max_signals_per_code or None))
             del d
             if (k + 1) % 500 == 0:
                 gc.collect()
