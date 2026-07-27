@@ -273,6 +273,20 @@ def _sc_reversal_quality(df: pd.DataFrame, code: str):
 SCORERS["reversal_quality"] = _sc_reversal_quality
 
 
+def _sc_reversal_quality_inv(df: pd.DataFrame, code: str):
+    """反转质量**反向**选择器：归因显示 reversal_quality 是稳健负预测(越"教科书"越差),
+    故取 4-分 反向——选"最不教科书"的丑陋 J<13 回踩。⚠️ 仅在同偏样本 train/test 一致,需真样本外验证。"""
+    r = _sc_reversal_quality(df, code)
+    if r is None:
+        return None
+    r["score"] = 4.0 - r["score"]
+    r["aux"] = {"selector": "reversal_quality_inv"}
+    return r
+
+
+SCORERS["reversal_quality_inv"] = _sc_reversal_quality_inv
+
+
 def sample_codes(all_codes: list[str], n: int, seed: int = 0) -> list[str]:
     """从全 A 代码列表随机抽 N 只（带 seed 可复现），用于代表性样本校准。
 

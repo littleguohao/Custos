@@ -499,3 +499,16 @@ def test_attribution_detects_robust_vs_noise():
     r = bt.attribution_report(trades)
     assert "good" in r["robust_features"]        # train/test 同号大 lift → 稳健
     assert "noise" not in r["robust_features"]   # 噪声特征不应入选
+
+
+def test_reversal_quality_inv():
+    assert "reversal_quality_inv" in bt.SCORERS
+    import numpy as np
+    n = 25
+    dates = pd.date_range("2025-01-01", periods=n, freq="B")
+    df = pd.DataFrame({"date": dates, "open": [10.0] * n, "high": [10.05] * n,
+                       "low": [9.95] * n, "close": [10.0] * n,
+                       "volume": [3e6] * (n - 1) + [1e5]})   # 高质量反转(缩量小实体)
+    q = bt.SCORERS["reversal_quality"](df, "T")["score"]
+    qi = bt.SCORERS["reversal_quality_inv"](df, "T")["score"]
+    assert abs((q + qi) - 4.0) < 1e-9   # 反向 = 4 - 原分
