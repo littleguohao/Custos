@@ -366,3 +366,23 @@ def test_portfolio_concurrency_cap():
     # t1 持有至 01-10，其间 t2/t3 因并发上限被跳过
     assert p["n_taken"] == 1 and p["n_skipped"] == 2
     assert abs(p["final_equity"] - 1.02) < 1e-6
+
+
+def test_portfolio_topn_picks_highest_score():
+    # 同日两只候选：高分(+10%) vs 低分(-10%)。top_n=1 应只选高分 → 权益 1.02
+    cA = {"code": "A", "entry_date": "2025-01-01", "exit_date": "2025-01-10",
+          "ret": 0.10, "risk_frac": 0.05, "score": 90}
+    cB = {"code": "B", "entry_date": "2025-01-01", "exit_date": "2025-01-10",
+          "ret": -0.10, "risk_frac": 0.05, "score": 10}
+    p1 = bt.simulate_portfolio_topn([cA, cB], top_n=1, risk_pct=0.01, max_concurrent=5, max_pos_frac=0.2)
+    assert p1["n_taken"] == 1 and abs(p1["final_equity"] - 1.02) < 1e-6   # 选了高分A
+    p2 = bt.simulate_portfolio_topn([cA, cB], top_n=2, risk_pct=0.01, max_concurrent=5, max_pos_frac=0.2)
+    assert p2["n_taken"] == 2 and abs(p2["final_equity"] - 1.0) < 1e-6    # 两只都进,净0
+
+
+def test_collect_all_yields_more_candidates():
+    df = _mk([10.0 + 0.1 * i for i in range(45)])
+    stub = lambda s, code: {"score": 100, "suggestion": "可买"}
+    nonoverlap = bt.evaluate_trades({"T": df}, scorer=stub, min_bars=30, collect_all=False)
+    allc = bt.evaluate_trades({"T": df}, scorer=stub, min_bars=30, collect_all=True)
+    assert len(allc) > len(nonoverlap) >= 1     # 收集全部候选 > 非重叠去重

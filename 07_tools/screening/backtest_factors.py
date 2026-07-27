@@ -427,12 +427,14 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
                     max_signals_per_code: Optional[int] = None,
                     weekly: bool = False, cost_bps: float = 0.0,
                     amv_regime: Optional[dict] = None,
-                    bbi_exit_consec: int = 2, time_stop_bars: int = 0) -> list[dict[str, Any]]:
+                    bbi_exit_consec: int = 2, time_stop_bars: int = 0,
+                    collect_all: bool = False) -> list[dict[str, Any]]:
     """在 scorer 判「可买」的 as-of 日进场，按 B1 规则(止损+BBI)模拟到出场；非重叠(平仓后再找)。
 
     cost_bps：单边成本合计的往返基点(A股约20~30bps含佣金/印花税/滑点)，从每笔收益中扣除，看净期望。
     amv_regime：date→regime 映射(如 load_amv_regime)。提供时只在「做多」区间进场(as-of最近≤进场日的regime)。
     bbi_exit_consec/time_stop_bars：出场规则参数(可扫描)。每笔记录 r_multiple=净收益/风险敞口，供风险定额仓位。
+    collect_all=True：不做单股非重叠去重，返回**每个**可买as-of日的候选(含 score)，供组合级 top-N 横截面择优。
     """
     scorer = scorer or _sc_b1_pullback
     cost = cost_bps / 1e4
@@ -476,7 +478,7 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
                 emitted += 1
                 if max_signals_per_code and emitted >= max_signals_per_code:
                     break
-                i = tr["exit_idx"] + 1                        # 非重叠：跳到平仓之后
+                i = (i + max(1, step)) if collect_all else (tr["exit_idx"] + 1)  # 收集全部候选 / 或非重叠
             else:
                 i += max(1, step)
     return trades
@@ -629,6 +631,94 @@ def simulate_portfolio(trades: list[dict[str, Any]], risk_pct: float = 0.01,
     return out
 
 
+def simulate_portfolio_topn(candidates: list[dict[str, Any]], top_n: int = 5,
+                            risk_pct: float = 0.01, max_concurrent: int = 5,
+                            max_pos_frac: float = 0.20, max_gross: float = 1.0) -> dict[str, Any]:
+    """组合级**横截面 top-N 择优**资金曲线：每个进场日在所有「可买」候选里按 score 降序取前 top_n
+    (排除已持有该股、受并发/敞口上限约束)，固定风险仓位入场，事件驱动出资金曲线/CAGR/最大回撤。
+
+    candidates：evaluate_trades(collect_all=True) 的全候选(含 entry_date/exit_date/ret/risk_frac/score)。
+    top_n：每个进场日最多新开仓数(横截面择优的宽度)。绝不 raise。
+    """
+    import heapq
+    import collections as _c
+    cands = [t for t in candidates if t.get("entry_date") and t.get("exit_date")
+             and (t.get("risk_frac") or 0) > 0]
+    if not cands:
+        return {"n_taken": 0, "n_skipped": 0, "text": "无可用候选"}
+    by_date: dict[str, list] = _c.defaultdict(list)
+    for t in cands:
+        by_date[t["entry_date"]].append(t)
+    dates = sorted(by_date)
+    equity = 1.0
+    peak = 1.0
+    max_dd = 0.0
+    gross = 0.0
+    open_heap: list = []                 # (exit_date, seq, alloc_cap, ret, code)
+    held: set = set()
+    curve: list[dict[str, Any]] = []
+    taken = 0
+    skipped = 0
+    seq = 0
+
+    def _close_until(date: str) -> None:
+        nonlocal equity, peak, max_dd, gross
+        while open_heap and open_heap[0][0] <= date:
+            ed, _, alloc_cap, ret, code = heapq.heappop(open_heap)
+            equity += alloc_cap * ret
+            gross -= alloc_cap
+            held.discard(code)
+            peak = max(peak, equity)
+            max_dd = max(max_dd, (peak - equity) / peak if peak > 0 else 0.0)
+            curve.append({"date": ed, "equity": round(equity, 5)})
+
+    for date in dates:
+        _close_until(date)
+        slots = max_concurrent - len(open_heap)
+        if slots <= 0:
+            skipped += sum(1 for t in by_date[date] if t["code"] not in held)
+            continue
+        ranked = sorted((t for t in by_date[date] if t["code"] not in held),
+                        key=lambda t: (t.get("score") or 0), reverse=True)
+        opened = 0
+        for t in ranked:
+            if opened >= top_n or len(open_heap) >= max_concurrent:
+                skipped += 1
+                continue
+            alloc_cap = min(risk_pct / t["risk_frac"], max_pos_frac) * equity
+            if (gross + alloc_cap) > max_gross * equity:
+                skipped += 1
+                continue
+            heapq.heappush(open_heap, (t["exit_date"], seq, alloc_cap, t["ret"], t["code"]))
+            seq += 1
+            gross += alloc_cap
+            held.add(t["code"])
+            taken += 1
+            opened += 1
+    _close_until("9999-99-99")
+
+    years = cagr = None
+    try:
+        d0 = _dt.date.fromisoformat(dates[0])
+        d1 = _dt.date.fromisoformat(curve[-1]["date"]) if curve else d0
+        years = max((d1 - d0).days / 365.25, 1e-9)
+        cagr = equity ** (1 / years) - 1 if equity > 0 else None
+    except Exception:  # noqa: BLE001
+        pass
+    ret_dd = (round((equity - 1) / max_dd, 2) if max_dd > 0 else None)
+    out = {"mode": "topn", "top_n": top_n, "n_taken": taken, "n_skipped": skipped,
+           "final_equity": round(equity, 4), "total_return": round(equity - 1, 4),
+           "max_drawdown": round(max_dd, 4), "cagr": round(cagr, 4) if cagr is not None else None,
+           "years": round(years, 2) if years else None, "return_over_maxdd": ret_dd,
+           "risk_pct": risk_pct, "max_concurrent": max_concurrent}
+    out["text"] = (
+        f"组合 top-{top_n} 横截面择优(风险{risk_pct*100:.1f}%/笔, 并发≤{max_concurrent}): "
+        f"成交 {taken}/限跳 {skipped}  总收益 {out['total_return']*100:+.1f}%  "
+        f"CAGR {out['cagr']*100:.1f}%  最大回撤 {out['max_drawdown']*100:.1f}%  收益/回撤 {ret_dd}  "
+        f"(期约 {out['years']} 年)")
+    return out
+
+
 def _load_bars_local(codes: list[str], count: int) -> dict[str, pd.DataFrame]:
     """CLI 用：经 local_tdx 读取本地日线（需通达信数据；单测走注入不经此）。"""
     import local_tdx_data  # noqa: PLC0415
@@ -681,6 +771,8 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     ap.add_argument("--risk-pct", type=float, default=1.0, help="组合:每笔风险占本金%(默认1.0)")
     ap.add_argument("--max-concurrent", type=int, default=5, help="组合:同时持仓上限(默认5)")
     ap.add_argument("--max-pos", type=float, default=20.0, help="组合:单仓名义上限%%本金(默认20)")
+    ap.add_argument("--top-n", type=int, default=0,
+                    help="组合:每个进场日按score降序只取前N只(横截面择优;0=不启用,取全部可买)")
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
 
@@ -711,12 +803,18 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
             print(f"[INFO] 0AMV regime 覆盖 {len(amv_regime)} 个交易日，仅在『做多』区间进场", file=sys.stderr)
         trades = evaluate_trades(bars, scorer=SCORERS[args.scorer], step=args.step,
                                  weekly=args.weekly, cost_bps=args.cost_bps, amv_regime=amv_regime,
-                                 bbi_exit_consec=args.bbi_consec, time_stop_bars=args.time_stop)
+                                 bbi_exit_consec=args.bbi_consec, time_stop_bars=args.time_stop,
+                                 collect_all=bool(args.top_n > 0))
         tsum = summarize_trades(trades)
         payload = {"mode": "trade_sim", "scorer": args.scorer, "weekly": args.weekly,
                    "cost_bps": args.cost_bps, "amv_long_only": bool(args.amv_long_only),
-                   "codes": codes, "count": args.count, "trade_summary": tsum, "trades": trades}
-        if args.portfolio:
+                   "top_n": args.top_n, "codes": codes, "count": args.count,
+                   "trade_summary": tsum, "trades": trades}
+        if args.top_n > 0:
+            payload["portfolio"] = simulate_portfolio_topn(
+                trades, top_n=args.top_n, risk_pct=args.risk_pct / 100.0,
+                max_concurrent=args.max_concurrent, max_pos_frac=args.max_pos / 100.0)
+        elif args.portfolio:
             payload["portfolio"] = simulate_portfolio(
                 trades, risk_pct=args.risk_pct / 100.0, max_concurrent=args.max_concurrent,
                 max_pos_frac=args.max_pos / 100.0)
@@ -729,7 +827,7 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
               f"cost={args.cost_bps}bps, {'仅0AMV做多' if args.amv_long_only else '全regime'}, "
               f"止损=买入K最低 / 站上BBI后连破2日卖出）===")
         print(tsum["text"])
-        if args.portfolio:
+        if payload.get("portfolio"):
             print("\n" + payload["portfolio"]["text"])
         return 0
 
