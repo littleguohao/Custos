@@ -51,9 +51,44 @@ def j_low_gate(df_slice: pd.DataFrame) -> bool:
     return bool(r.get("available") and r.get("j") is not None and r["j"] < J_LOW_THRESHOLD)
 
 
+# 完整 B1 反转K：J<13 + 缩量(量比≤50%) + 20日量底10% + 收盘变动±2% + 振幅≤7%（企稳，非落刀）
+REVK_VOL_RATIO = 0.5
+REVK_VOL_PCTILE = 0.10
+REVK_CHG_PCT = 2.0
+REVK_AMP_PCT = 7.0
+
+
+def reversal_k_gate(df_slice: pd.DataFrame) -> bool:
+    """B1 反转K 完整买点：J<13 且缩量企稳(小实体/小振幅)——排除收盘贴低的落刀。绝不 raise。"""
+    if _kdj is None or len(df_slice) < 21:
+        return False
+    try:
+        r = _kdj(df_slice)
+        if not (r.get("available") and r.get("j") is not None and r["j"] < J_LOW_THRESHOLD):
+            return False
+        close = df_slice["close"].astype(float).values
+        high = df_slice["high"].astype(float).values
+        low = df_slice["low"].astype(float).values
+        vol = df_slice["volume"].astype(float).values
+        vma5 = vol[-6:-1].mean() if len(vol) >= 6 else vol[:-1].mean()
+        if not (vma5 > 0 and vol[-1] / vma5 <= REVK_VOL_RATIO):        # 量比≤50%
+            return False
+        v20 = vol[-20:]
+        if (v20 <= vol[-1]).mean() > REVK_VOL_PCTILE:                  # 当日量在20日底部10%
+            return False
+        chg = (close[-1] / close[-2] - 1) * 100 if close[-2] else 99   # 收盘变动 ±2%
+        if abs(chg) > REVK_CHG_PCT:
+            return False
+        amp = (high[-1] - low[-1]) / close[-2] * 100 if close[-2] else 99  # 振幅≤7%
+        return bool(amp <= REVK_AMP_PCT)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 ENTRY_GATES: dict[str, Optional[Callable[[pd.DataFrame], bool]]] = {
     "none": None,        # 每根 K 线都当信号（全市场基线）
-    "j_low": j_low_gate,  # 只在 J<13 入场区评估（B1 真买点）
+    "j_low": j_low_gate,  # 只在 J<13 入场区评估（仅J,含落刀）
+    "reversal_k": reversal_k_gate,  # 完整 B1 反转K：J<13+缩量企稳(排除贴低落刀)
 }
 
 HORIZONS_DEFAULT = (5, 10, 20)
@@ -368,18 +403,19 @@ def _bbi_series(close: pd.Series) -> pd.Series:
 
 
 def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
-                      bbi_exit_consec: int = 2, time_stop_bars: int = 0) -> dict[str, Any]:
-    """B1 交易规则模拟：买入当日收盘进场、止损=买入当日最低价；
+                      bbi_exit_consec: int = 2, time_stop_bars: int = 0,
+                      stop_mode: str = "low", stop_pct: float = 8.0) -> dict[str, Any]:
+    """B1 交易规则模拟：买入当日收盘进场；
+    止损：stop_mode='low'=买入当日最低价(超卖贴低时几乎无空间)；'pct'=entry×(1-stop_pct%)(固定空间)。
     站上 BBI 后若连续 bbi_exit_consec 日收盘跌破 BBI 则止盈卖出；可选 time_stop_bars 根后到期平仓。
     优先级：先判当日最低是否破止损(盘中)，再判收盘 BBI 退出，再判时间止损；均未触发则持有到数据末。
-    跳空低开(open<stop)按开盘价成交。返回 {exit_idx, reason, ret, holding, risk_frac}。
-    risk_frac=(entry-stop)/entry 为单笔风险敞口(R 的分母)，供 R 倍数/风险定额仓位计算。"""
+    跳空低开(open<stop)按开盘价成交。返回 {exit_idx, reason, ret, holding, risk_frac}。"""
     close = df["close"].astype(float).values
     low = df["low"].astype(float).values
     open_ = df["open"].astype(float).values
     n = len(close)
     entry = float(close[entry_idx])
-    stop = float(low[entry_idx])
+    stop = entry * (1 - stop_pct / 100.0) if stop_mode == "pct" else float(low[entry_idx])
     risk_frac = (entry - stop) / entry if entry else 0.0
     bbi_v = bbi.values
     has_above = False
@@ -429,7 +465,8 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
                     amv_regime: Optional[dict] = None,
                     bbi_exit_consec: int = 2, time_stop_bars: int = 0,
                     collect_all: bool = False,
-                    entry_gate: Optional[Callable[[pd.DataFrame], bool]] = None) -> list[dict[str, Any]]:
+                    entry_gate: Optional[Callable[[pd.DataFrame], bool]] = None,
+                    stop_mode: str = "low", stop_pct: float = 8.0) -> list[dict[str, Any]]:
     """在 scorer 判「可买」的 as-of 日进场，按 B1 规则(止损+BBI)模拟到出场；非重叠(平仓后再找)。
 
     cost_bps：单边成本合计的往返基点(A股约20~30bps含佣金/印花税/滑点)，从每笔收益中扣除，看净期望。
@@ -471,7 +508,8 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
             res = scorer(slice_df, code)
             if res is not None and res.get("suggestion") == "可买" and _amv_ok(entry_date):
                 tr = simulate_b1_trade(df, i, bbi, bbi_exit_consec=bbi_exit_consec,
-                                       time_stop_bars=time_stop_bars)
+                                       time_stop_bars=time_stop_bars,
+                                       stop_mode=stop_mode, stop_pct=stop_pct)
                 ret_net = tr["ret"] - cost
                 rf = tr.get("risk_frac") or 0.0
                 rf_eff = max(rf, _R_RISK_FLOOR)   # 地板：周线收盘贴低时 risk_frac≈0 会把 R 炸成极端值
@@ -779,6 +817,11 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     ap.add_argument("--max-pos", type=float, default=20.0, help="组合:单仓名义上限%%本金(默认20)")
     ap.add_argument("--top-n", type=int, default=0,
                     help="组合:每个进场日按score降序只取前N只(横截面择优;0=不启用,取全部可买)")
+    ap.add_argument("--stop-mode", choices=["low", "pct"], default="low",
+                    help="止损:low=买入K最低(超卖贴低几乎无空间);pct=entry×(1-stop_pct%%)(固定空间)")
+    ap.add_argument("--stop-pct", type=float, default=8.0, help="--stop-mode pct 时的止损百分比(默认8)")
+    ap.add_argument("--summary-only", action="store_true",
+                    help="输出JSON不含逐笔trades(仅摘要;全市场日线省内存,防OOM)")
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
 
@@ -811,7 +854,8 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                                  weekly=args.weekly, cost_bps=args.cost_bps, amv_regime=amv_regime,
                                  bbi_exit_consec=args.bbi_consec, time_stop_bars=args.time_stop,
                                  collect_all=bool(args.top_n > 0),
-                                 entry_gate=ENTRY_GATES[args.entry_filter])
+                                 entry_gate=ENTRY_GATES[args.entry_filter],
+                                 stop_mode=args.stop_mode, stop_pct=args.stop_pct)
         tsum = summarize_trades(trades)
         payload = {"mode": "trade_sim", "scorer": args.scorer, "weekly": args.weekly,
                    "cost_bps": args.cost_bps, "amv_long_only": bool(args.amv_long_only),
@@ -828,6 +872,8 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
         if args.out:
             out = Path(args.out)
             out.parent.mkdir(parents=True, exist_ok=True)
+            if args.summary_only:
+                payload = {k: v for k, v in payload.items() if k != "trades"}
             out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
             print(f"[OK] 写出 {out}（{len(trades)} 笔交易，scorer={args.scorer}, {'周线' if args.weekly else '日线'}, cost={args.cost_bps}bps, amv_long_only={bool(args.amv_long_only)}）")
         print(f"\n=== B1 交易模拟（scorer={args.scorer}, {'周线' if args.weekly else '日线'}, "

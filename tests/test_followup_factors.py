@@ -398,3 +398,28 @@ def test_evaluate_trades_entry_gate():
     # 与无门槛相比,进场数应减少(门槛过滤掉一半as-of日)
     nogate = bt.evaluate_trades({"T": df}, scorer=stub, min_bars=30, collect_all=True)
     assert len(trades) < len(nogate)
+
+
+def test_stop_mode_pct_gives_fixed_room():
+    # 进场收盘贴低(close≈low)→ low止损几乎0空间;pct止损给固定8%空间
+    closes = [10.0] * 12
+    lows = [9.99] * 12          # 收盘10、最低9.99 → low止损空间仅0.1%
+    df = _mk(closes, lows=lows, opens=[10.0] * 12)
+    bbi = pd.Series([float("nan")] * 12)
+    r_low = bt.simulate_b1_trade(df, 5, bbi, stop_mode="low")
+    r_pct = bt.simulate_b1_trade(df, 5, bbi, stop_mode="pct", stop_pct=8.0)
+    assert abs(r_low["risk_frac"] - 0.001) < 1e-6      # low: 0.1% 空间
+    assert abs(r_pct["risk_frac"] - 0.08) < 1e-6       # pct: 固定 8%
+
+
+def test_reversal_k_gate_excludes_falling_knife():
+    import numpy as np
+    n = 25
+    dates = pd.date_range("2025-01-01", periods=n, freq="B")
+    # 落刀:最后一根大跌收盘贴低、放量、大振幅 → 应被 reversal_k 拒(即便 J<13)
+    closes = [20.0 - 0.4 * i for i in range(n)]         # 单边下跌
+    df = pd.DataFrame({"date": dates, "open": [c + 0.3 for c in closes],
+                       "high": [c + 0.35 for c in closes], "low": [c - 0.05 for c in closes],
+                       "close": closes, "volume": [2e6] * (n - 1) + [5e6]})   # 末日放量
+    assert bt.reversal_k_gate(df) is False
+    assert "reversal_k" in bt.ENTRY_GATES
