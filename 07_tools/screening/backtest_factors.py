@@ -247,6 +247,32 @@ SCORERS["low_vol"] = _sc_low_vol
 SCORERS["momentum"] = _sc_momentum
 
 
+def _sc_reversal_quality(df: pd.DataFrame, code: str):
+    """反转K质量分(0-4)：缩量(量比≤50%)+量底(20日底10%)+小实体(收盘±2%)+小振幅(≤7%) 各计1分。
+    用作**选择器**：在宽门槛(如 j_low)候选里按"反转成色"排序取 top-N —— 兼得 j_low 的供给 + reversal_k 的质量。"""
+    if len(df) < 21:
+        return None
+    try:
+        close = df["close"].astype(float).values
+        high = df["high"].astype(float).values
+        low = df["low"].astype(float).values
+        vol = df["volume"].astype(float).values
+        vma5 = vol[-6:-1].mean() if len(vol) >= 6 else vol[:-1].mean()
+        v20 = vol[-20:]
+        pts = 0
+        pts += int(vma5 > 0 and vol[-1] / vma5 <= REVK_VOL_RATIO)             # 缩量
+        pts += int((v20 <= vol[-1]).mean() <= REVK_VOL_PCTILE)               # 量底10%
+        pts += int(close[-2] and abs(close[-1] / close[-2] - 1) * 100 <= REVK_CHG_PCT)   # 小实体
+        pts += int(close[-2] and (high[-1] - low[-1]) / close[-2] * 100 <= REVK_AMP_PCT)  # 小振幅
+        return {"score": float(pts), "suggestion": "可买",
+                "aux": {"selector": "reversal_quality_0_4"}, "components": {}}
+    except Exception:  # noqa: BLE001
+        return None
+
+
+SCORERS["reversal_quality"] = _sc_reversal_quality
+
+
 def sample_codes(all_codes: list[str], n: int, seed: int = 0) -> list[str]:
     """从全 A 代码列表随机抽 N 只（带 seed 可复现），用于代表性样本校准。
 

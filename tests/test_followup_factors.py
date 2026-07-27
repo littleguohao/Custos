@@ -469,3 +469,17 @@ def test_macd_hist_and_j_macd_turn_gate():
     assert "j_macd_turn" in bt.ENTRY_GATES
     up = _mk([10.0 + 0.1 * i for i in range(40)])
     assert bt.ENTRY_GATES["j_macd_turn"](up) is False
+
+
+def test_reversal_quality_selector():
+    assert "reversal_quality" in bt.SCORERS
+    import numpy as np
+    n = 25
+    dates = pd.date_range("2025-01-01", periods=n, freq="B")
+    # 末根:缩量(量骤降)+小实体+小振幅 → 高质量反转分
+    vol = [3e6] * (n - 1) + [1e5]
+    closes = [10.0] * n
+    df = pd.DataFrame({"date": dates, "open": [10.0] * n, "high": [10.05] * n,
+                       "low": [9.95] * n, "close": closes, "volume": vol})
+    q = bt.SCORERS["reversal_quality"](df, "T")
+    assert q is not None and q["suggestion"] == "可买" and q["score"] >= 3   # 多数条件命中
