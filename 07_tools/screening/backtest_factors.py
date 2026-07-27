@@ -589,7 +589,8 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
                     bbi_exit_consec: int = 2, time_stop_bars: int = 0,
                     collect_all: bool = False,
                     entry_gate: Optional[Callable[[pd.DataFrame], bool]] = None,
-                    stop_mode: str = "low", stop_pct: float = 8.0) -> list[dict[str, Any]]:
+                    stop_mode: str = "low", stop_pct: float = 8.0,
+                    feature_panel: bool = False) -> list[dict[str, Any]]:
     """在 scorer 判「可买」的 as-of 日进场，按 B1 规则(止损+BBI)模拟到出场；非重叠(平仓后再找)。
 
     cost_bps：单边成本合计的往返基点(A股约20~30bps含佣金/印花税/滑点)，从每笔收益中扣除，看净期望。
@@ -636,12 +637,15 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
                 ret_net = tr["ret"] - cost
                 rf = tr.get("risk_frac") or 0.0
                 rf_eff = max(rf, _R_RISK_FLOOR)   # 地板：周线收盘贴低时 risk_frac≈0 会把 R 炸成极端值
-                trades.append({"code": code, "entry_date": entry_date,
-                               "exit_date": str(df["date"].iloc[tr["exit_idx"]])[:10],
-                               "score": res.get("score"), "ret": round(ret_net, 4),
-                               "risk_frac": round(rf, 4),
-                               "r_multiple": round(ret_net / rf_eff, 3) if rf > 0 else None,
-                               "holding": tr["holding"], "reason": tr["reason"]})
+                rec = {"code": code, "entry_date": entry_date,
+                       "exit_date": str(df["date"].iloc[tr["exit_idx"]])[:10],
+                       "score": res.get("score"), "ret": round(ret_net, 4),
+                       "risk_frac": round(rf, 4),
+                       "r_multiple": round(ret_net / rf_eff, 3) if rf > 0 else None,
+                       "holding": tr["holding"], "reason": tr["reason"]}
+                if feature_panel:
+                    rec["features"] = _feature_panel(slice_df)
+                trades.append(rec)
                 emitted += 1
                 if max_signals_per_code and emitted >= max_signals_per_code:
                     break
@@ -897,6 +901,63 @@ def simulate_portfolio_topn(candidates: list[dict[str, Any]], top_n: int = 5,
     return out
 
 
+def _feature_panel(df: pd.DataFrame) -> dict[str, Any]:
+    """进场时的特征面板(用现有选择器 + KDJ/均线),供归因分析。绝不 raise。"""
+    feats: dict[str, Any] = {}
+    for name in ("reversal_quality", "alpha101", "alpha_pvcorr", "low_vol", "momentum"):
+        try:
+            r = SCORERS[name](df, "")
+            feats[name] = r["score"] if r else None
+        except Exception:  # noqa: BLE001
+            feats[name] = None
+    try:
+        if _kdj is not None:
+            k = _kdj(df)
+            feats["j"] = k.get("j") if k.get("available") else None
+        c = df["close"].astype(float).values
+        if len(c) >= 60:
+            feats["dist_ma10"] = (c[-1] / c[-10:].mean() - 1) * 100
+            feats["prior_gain60"] = (c[-1] / c[-60:].min() - 1) * 100
+    except Exception:  # noqa: BLE001
+        pass
+    return feats
+
+
+def attribution_report(trades: list[dict[str, Any]]) -> dict[str, Any]:
+    """按日期切 train/test 两半，对每个特征按 4 分位算 (Q4均收 − Q1均收) 的前向 lift。
+    只有 train、test **同号且够大** 的特征才算稳健判别子(否则是过拟合/幸存者假象)。"""
+    ts = [t for t in trades if t.get("features") and t.get("ret") is not None]
+    if len(ts) < 80:
+        return {"n": len(ts), "text": f"归因样本不足({len(ts)}，需≥80)"}
+    ts.sort(key=lambda t: t["entry_date"])
+    mid = len(ts) // 2
+    train, test = ts[:mid], ts[mid:]
+    feats = sorted({k for t in ts for k in t["features"]})
+
+    def _lift(grp, f):
+        vals = sorted(((t["features"].get(f), t["ret"]) for t in grp
+                       if isinstance(t["features"].get(f), (int, float))), key=lambda x: x[0])
+        if len(vals) < 20:
+            return None
+        q = len(vals) // 4
+        return (statistics.mean(r for _, r in vals[-q:])
+                - statistics.mean(r for _, r in vals[:q]))
+
+    rows = []
+    lines = [f"特征归因（train {len(train)} / test {len(test)} 笔；每半按特征4分位，报 Q4均收−Q1均收）：",
+             "  →只有 train/test **同号且|lift|>0.5%** 才算稳健判别子(否则过拟合/幸存者假象)"]
+    for f in feats:
+        lt, lv = _lift(train, f), _lift(test, f)
+        robust = bool(lt is not None and lv is not None and (lt > 0) == (lv > 0)
+                      and min(abs(lt), abs(lv)) > 0.005)
+        rows.append({"feature": f, "train_lift": lt, "test_lift": lv, "robust": robust})
+        fmt = lambda x: f"{x*100:+.2f}%" if x is not None else "NA"
+        lines.append(f"  {f:<16} train {fmt(lt):>8}  test {fmt(lv):>8}  {'✓稳健判别' if robust else ''}")
+    robust_feats = [r["feature"] for r in rows if r["robust"]]
+    lines.append(f"结论：稳健判别子 = {robust_feats or '无(→无可泛化的赢家规律,选股不加值,与前述一致)'}")
+    return {"n": len(ts), "features": rows, "robust_features": robust_feats, "text": "\n".join(lines)}
+
+
 def _load_bars_local(codes: list[str], count: int) -> dict[str, pd.DataFrame]:
     """CLI 用：经 local_tdx 读取本地日线（需通达信数据；单测走注入不经此）。"""
     import local_tdx_data  # noqa: PLC0415
@@ -958,6 +1019,8 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     ap.add_argument("--stop-pct", type=float, default=8.0, help="--stop-mode pct 时的止损百分比(默认8)")
     ap.add_argument("--summary-only", action="store_true",
                     help="输出JSON不含逐笔trades(仅摘要;全市场日线省内存,防OOM)")
+    ap.add_argument("--attribution", action="store_true",
+                    help="记录每笔特征面板,按日期切train/test,报各特征前向lift——严谨检验'赢家共性'是否可泛化(防幸存者/过拟合)")
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
 
@@ -996,7 +1059,8 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                     time_stop_bars=args.time_stop, collect_all=bool(args.top_n > 0),
                     entry_gate=ENTRY_GATES[args.entry_filter],
                     stop_mode=args.stop_mode, stop_pct=args.stop_pct,
-                    max_signals_per_code=(args.max_signals_per_code or None))
+                    max_signals_per_code=(args.max_signals_per_code or None),
+                    feature_panel=bool(args.attribution))
             del d
             if (k + 1) % 500 == 0:
                 gc.collect()
@@ -1028,6 +1092,10 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
         print(tsum["text"])
         if payload.get("portfolio"):
             print("\n" + payload["portfolio"]["text"])
+        if args.attribution:
+            payload["attribution"] = attribution_report(trades)
+            print("\n=== 特征归因(train/test 前向lift,检验赢家共性可否泛化) ===")
+            print(payload["attribution"]["text"])
         return 0
 
     bars = load(codes, args.count)

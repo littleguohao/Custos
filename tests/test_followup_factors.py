@@ -484,3 +484,18 @@ def test_reversal_quality_selector():
                        "low": [9.95] * n, "close": closes, "volume": vol})
     q = bt.SCORERS["reversal_quality"](df, "T")
     assert q is not None and q["suggestion"] == "可买" and q["score"] >= 3   # 多数条件命中
+
+
+def test_attribution_detects_robust_vs_noise():
+    import random
+    random.seed(0)
+    trades = []
+    for i in range(240):
+        good = random.random()
+        trades.append({
+            "entry_date": f"2025-{1+i//40:02d}-{1+i % 27:02d}",
+            "ret": (good - 0.5) * 0.2 + random.gauss(0, 0.01),   # ret 随 good 单调
+            "features": {"good": good, "noise": random.random()}})
+    r = bt.attribution_report(trades)
+    assert "good" in r["robust_features"]        # train/test 同号大 lift → 稳健
+    assert "noise" not in r["robust_features"]   # 噪声特征不应入选
