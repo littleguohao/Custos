@@ -875,7 +875,6 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
         ap.error("需提供 --codes / --universe-sample N / --universe-local")
     horizons = tuple(int(h) for h in args.horizons.split(",") if h.strip())
     load = loader or _load_bars_local
-    bars = load(codes, args.count)
 
     if args.trade_sim:
         amv_regime = None
@@ -884,12 +883,18 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
             if not amv_regime:
                 ap.error("--amv-long-only 需要指南针 0AMV 数据(compass_amv)，未读到；请在有指南针的机器运行")
             print(f"[INFO] 0AMV regime 覆盖 {len(amv_regime)} 个交易日，仅在『做多』区间进场", file=sys.stderr)
-        trades = evaluate_trades(bars, scorer=SCORERS[args.scorer], step=args.step,
-                                 weekly=args.weekly, cost_bps=args.cost_bps, amv_regime=amv_regime,
-                                 bbi_exit_consec=args.bbi_consec, time_stop_bars=args.time_stop,
-                                 collect_all=bool(args.top_n > 0),
-                                 entry_gate=ENTRY_GATES[args.entry_filter],
-                                 stop_mode=args.stop_mode, stop_pct=args.stop_pct)
+        trades: list[dict[str, Any]] = []
+        for k, c in enumerate(codes):     # 流式：逐股加载→评估→释放，避免全量载入 OOM
+            d = load([c], args.count)
+            if d:
+                trades += evaluate_trades(
+                    d, scorer=SCORERS[args.scorer], step=args.step, weekly=args.weekly,
+                    cost_bps=args.cost_bps, amv_regime=amv_regime, bbi_exit_consec=args.bbi_consec,
+                    time_stop_bars=args.time_stop, collect_all=bool(args.top_n > 0),
+                    entry_gate=ENTRY_GATES[args.entry_filter],
+                    stop_mode=args.stop_mode, stop_pct=args.stop_pct)
+            if (k + 1) % 500 == 0:
+                print(f"[INFO] 已处理 {k + 1}/{len(codes)} 只，累计 {len(trades)} 笔候选", file=sys.stderr)
         tsum = summarize_trades(trades)
         payload = {"mode": "trade_sim", "scorer": args.scorer, "weekly": args.weekly,
                    "cost_bps": args.cost_bps, "amv_long_only": bool(args.amv_long_only),
@@ -919,6 +924,7 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
             print("\n" + payload["portfolio"]["text"])
         return 0
 
+    bars = load(codes, args.count)
     records = evaluate(bars, horizons=horizons, step=args.step,
                        entry_gate=ENTRY_GATES[args.entry_filter],
                        scorer=SCORERS[args.scorer])
