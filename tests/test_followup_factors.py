@@ -376,6 +376,7 @@ def test_portfolio_topn_picks_highest_score():
           "ret": -0.10, "risk_frac": 0.05, "score": 10}
     p1 = bt.simulate_portfolio_topn([cA, cB], top_n=1, risk_pct=0.01, max_concurrent=5, max_pos_frac=0.2)
     assert p1["n_taken"] == 1 and abs(p1["final_equity"] - 1.02) < 1e-6   # 选了高分A
+    assert p1["selected_expectancy"] == 0.10 and p1["selected_win_rate"] == 1.0  # 被选子集=A(+10%)
     p2 = bt.simulate_portfolio_topn([cA, cB], top_n=2, risk_pct=0.01, max_concurrent=5, max_pos_frac=0.2)
     assert p2["n_taken"] == 2 and abs(p2["final_equity"] - 1.0) < 1e-6    # 两只都进,净0
 

@@ -827,6 +827,7 @@ def simulate_portfolio_topn(candidates: list[dict[str, Any]], top_n: int = 5,
     taken = 0
     skipped = 0
     seq = 0
+    taken_rets: list[float] = []
 
     def _close_until(date: str) -> None:
         nonlocal equity, peak, max_dd, gross
@@ -861,8 +862,14 @@ def simulate_portfolio_topn(candidates: list[dict[str, Any]], top_n: int = 5,
             gross += alloc_cap
             held.add(t["code"])
             taken += 1
+            taken_rets.append(t["ret"])
             opened += 1
     _close_until("9999-99-99")
+
+    # 被选中(实际持有)子集的统计 —— top-N 模式下真正代表策略,而非全候选池
+    sel_n = len(taken_rets)
+    sel_win = round(sum(1 for r in taken_rets if r > 0) / sel_n, 4) if sel_n else None
+    sel_exp = round(sum(taken_rets) / sel_n, 4) if sel_n else None
 
     years = cagr = None
     try:
@@ -877,12 +884,14 @@ def simulate_portfolio_topn(candidates: list[dict[str, Any]], top_n: int = 5,
            "final_equity": round(equity, 4), "total_return": round(equity - 1, 4),
            "max_drawdown": round(max_dd, 4), "cagr": round(cagr, 4) if cagr is not None else None,
            "years": round(years, 2) if years else None, "return_over_maxdd": ret_dd,
+           "selected_win_rate": sel_win, "selected_expectancy": sel_exp,
            "risk_pct": risk_pct, "max_concurrent": max_concurrent}
     out["text"] = (
         f"组合 top-{top_n} 横截面择优(风险{risk_pct*100:.1f}%/笔, 并发≤{max_concurrent}): "
         f"成交 {taken}/限跳 {skipped}  总收益 {out['total_return']*100:+.1f}%  "
         f"CAGR {out['cagr']*100:.1f}%  最大回撤 {out['max_drawdown']*100:.1f}%  收益/回撤 {ret_dd}  "
-        f"(期约 {out['years']} 年)")
+        f"(期约 {out['years']} 年)\n  [被选中子集] 胜率 {(sel_win or 0)*100:.1f}%  "
+        f"期望 {(sel_exp or 0)*100:+.2f}%/笔 (n={sel_n}) —— top-N 模式看这个,非全候选池")
     return out
 
 
