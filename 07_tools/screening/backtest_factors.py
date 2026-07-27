@@ -750,9 +750,10 @@ def simulate_portfolio(trades: list[dict[str, Any]], risk_pct: float = 0.01,
     """组合级资金曲线：把逐笔交易按**固定风险仓位**(每笔风险 risk_pct 的本金)+ 并发持仓上限
     + 单仓/总敞口上限,事件驱动地放到一条资金曲线上,输出总收益/CAGR/最大回撤/成交与被限笔数。
 
-    仓位：alloc_frac = min(risk_pct/risk_frac, max_pos_frac)（止损打掉≈risk_pct 本金）。
+    仓位：alloc_frac = min(risk_pct/max(risk_frac, _R_RISK_FLOOR), max_pos_frac)（止损打掉≈risk_pct 本金；
+    risk_frac 与 R 倍数同口径设 2% 地板——周线收盘贴低时 risk_frac≈0，不设地板仓位会失真顶到上限）。
     约束：同时持仓数 ≤ max_concurrent；名义总敞口 ≤ max_gross×当前权益（满则跳过后续信号）。
-    回撤：按平仓时点的已实现权益序列计（不含持仓中浮亏，属保守低估，已注明）。绝不 raise。
+    回撤：按平仓时点的已实现权益序列计（**不含持仓中浮亏 → 真实回撤更大，本值为乐观下界**）。绝不 raise。
     """
     import heapq
     entries = sorted([t for t in trades if t.get("entry_date") and t.get("exit_date")
@@ -782,7 +783,7 @@ def simulate_portfolio(trades: list[dict[str, Any]], risk_pct: float = 0.01,
 
     for t in entries:
         _close_until(t["entry_date"])
-        alloc_frac = min(risk_pct / t["risk_frac"], max_pos_frac)
+        alloc_frac = min(risk_pct / max(t["risk_frac"], _R_RISK_FLOOR), max_pos_frac)
         alloc_cap = alloc_frac * equity
         if len(open_heap) >= max_concurrent or (gross + alloc_cap) > max_gross * equity:
             skipped += 1
@@ -814,7 +815,7 @@ def simulate_portfolio(trades: list[dict[str, Any]], risk_pct: float = 0.01,
         f"组合资金曲线(风险{risk_pct*100:.1f}%/笔, 并发≤{max_concurrent}, 单仓≤{max_pos_frac*100:.0f}%): "
         f"成交 {taken} 笔/限跳 {skipped}  总收益 {out['total_return']*100:+.1f}%  "
         f"CAGR {out['cagr']*100:.1f}%  最大回撤 {out['max_drawdown']*100:.1f}%  "
-        f"收益/回撤 {ret_dd}  (期约 {out['years']} 年)")
+        f"收益/回撤 {ret_dd}  (期约 {out['years']} 年; 回撤=已实现权益口径,不含浮亏,真实更大)")
     return out
 
 
@@ -825,7 +826,8 @@ def simulate_portfolio_topn(candidates: list[dict[str, Any]], top_n: int = 5,
     (排除已持有该股、受并发/敞口上限约束)，固定风险仓位入场，事件驱动出资金曲线/CAGR/最大回撤。
 
     candidates：evaluate_trades(collect_all=True) 的全候选(含 entry_date/exit_date/ret/risk_frac/score)。
-    top_n：每个进场日最多新开仓数(横截面择优的宽度)。绝不 raise。
+    top_n：每个进场日最多新开仓数(横截面择优的宽度)。
+    仓位同 simulate_portfolio(risk_frac 设 2% 地板);回撤=已实现权益口径(不含浮亏,真实回撤更大)。绝不 raise。
     """
     import heapq
     import collections as _c
@@ -873,7 +875,7 @@ def simulate_portfolio_topn(candidates: list[dict[str, Any]], top_n: int = 5,
             if opened >= top_n or len(open_heap) >= max_concurrent:
                 skipped += 1
                 continue
-            alloc_cap = min(risk_pct / t["risk_frac"], max_pos_frac) * equity
+            alloc_cap = min(risk_pct / max(t["risk_frac"], _R_RISK_FLOOR), max_pos_frac) * equity
             if (gross + alloc_cap) > max_gross * equity:
                 skipped += 1
                 continue
@@ -1083,6 +1085,8 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
         payload = {"mode": "trade_sim", "scorer": args.scorer, "weekly": args.weekly,
                    "cost_bps": args.cost_bps, "amv_long_only": bool(args.amv_long_only),
                    "entry_filter": args.entry_filter, "top_n": args.top_n,
+                   "bbi_consec": args.bbi_consec, "time_stop": args.time_stop,
+                   "stop_mode": args.stop_mode, "stop_pct": args.stop_pct,
                    "codes": codes, "count": args.count, "trade_summary": tsum, "trades": trades}
         if args.top_n > 0:
             payload["portfolio"] = simulate_portfolio_topn(
@@ -1092,6 +1096,8 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
             payload["portfolio"] = simulate_portfolio(
                 trades, risk_pct=args.risk_pct / 100.0, max_concurrent=args.max_concurrent,
                 max_pos_frac=args.max_pos / 100.0)
+        if args.attribution:      # 先算归因,保证 --out JSON 里也带 attribution
+            payload["attribution"] = attribution_report(trades)
         if args.out:
             out = Path(args.out)
             out.parent.mkdir(parents=True, exist_ok=True)
@@ -1099,15 +1105,16 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                 payload = {k: v for k, v in payload.items() if k != "trades"}
             out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
             print(f"[OK] 写出 {out}（{len(trades)} 笔交易，scorer={args.scorer}, {'周线' if args.weekly else '日线'}, cost={args.cost_bps}bps, amv_long_only={bool(args.amv_long_only)}）")
+        stop_desc = (f"买入K最低" if args.stop_mode == "low" else f"pct {args.stop_pct}%")
+        tstop_desc = f" / 时间止损{args.time_stop}根" if args.time_stop else ""
         print(f"\n=== B1 交易模拟（scorer={args.scorer}, {'周线' if args.weekly else '日线'}, "
               f"入场门槛={args.entry_filter}, cost={args.cost_bps}bps, "
               f"{'仅0AMV做多' if args.amv_long_only else '全regime'}, "
-              f"止损=买入K最低 / 站上BBI后连破2日卖出）===")
+              f"止损={stop_desc} / 站上BBI后连破{args.bbi_consec}日卖出{tstop_desc}）===")
         print(tsum["text"])
         if payload.get("portfolio"):
             print("\n" + payload["portfolio"]["text"])
         if args.attribution:
-            payload["attribution"] = attribution_report(trades)
             print("\n=== 特征归因(train/test 前向lift,检验赢家共性可否泛化) ===")
             print(payload["attribution"]["text"])
         return 0

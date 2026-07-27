@@ -46,7 +46,8 @@ class TradingCalendarTests(unittest.TestCase):
         self.assertEqual(previous_confirmed_trading_day("2026-02-24"), "2026-02-13")
 
     def test_unregistered_future_year_remains_unknown(self):
-        result = trading_day_status("2027-07-15")
+        # 用远超任何日历缓存覆盖范围的远期年份(本地通达信缓存已延伸到 2027，不能再拿 2027 测"未知")
+        result = trading_day_status("2099-07-15")  # Wednesday
         self.assertIsNone(result["is_trading_day"])
 
 

@@ -512,3 +512,27 @@ def test_reversal_quality_inv():
     q = bt.SCORERS["reversal_quality"](df, "T")["score"]
     qi = bt.SCORERS["reversal_quality_inv"](df, "T")["score"]
     assert abs((q + qi) - 4.0) < 1e-9   # 反向 = 4 - 原分
+
+
+def test_portfolio_sizing_uses_risk_floor():
+    # risk_frac=0.001(周线贴低)：无地板时 alloc=0.01/0.001=10倍 → 被 gross 上限跳单；
+    # 有 2% 地板时 alloc=0.01/0.02=0.5 → 正常成交,与 R 倍数同口径
+    t = [{"entry_date": "2025-01-01", "exit_date": "2025-01-10", "ret": 0.10, "risk_frac": 0.001}]
+    p = bt.simulate_portfolio(t, risk_pct=0.01, max_concurrent=5, max_pos_frac=1.0, max_gross=1.0)
+    assert p["n_taken"] == 1 and abs(p["final_equity"] - 1.05) < 1e-6
+
+
+def test_main_trade_sim_out_json_has_attribution_and_params(tmp_path):
+    import json
+    df = _mk([10.0 + 0.1 * i for i in range(45)])
+    loader = lambda codes, count: {c: df.copy() for c in codes}
+    out = tmp_path / "sim.json"
+    rc = bt.main(["--codes", "T", "--count", "45", "--trade-sim", "--scorer", "baseline",
+                  "--entry-filter", "none", "--attribution", "--bbi-consec", "3",
+                  "--stop-mode", "pct", "--stop-pct", "6", "--out", str(out)], loader=loader)
+    assert rc == 0
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert "attribution" in payload                     # 归因必须落盘(此前写在 out 之后,JSON 缺失)
+    assert payload["bbi_consec"] == 3                    # 出场/止损参数可追溯
+    assert payload["stop_mode"] == "pct" and payload["stop_pct"] == 6
+    assert "time_stop" in payload
