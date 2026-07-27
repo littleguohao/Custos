@@ -17,6 +17,7 @@ CLI（在有本地通达信日线的机器上跑）::
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
 import json
 import random
 import statistics
@@ -549,6 +550,80 @@ def load_amv_regime(since: str = "2015-01-01", root: Optional[str] = None) -> di
         return {}
 
 
+def simulate_portfolio(trades: list[dict[str, Any]], risk_pct: float = 0.01,
+                       max_concurrent: int = 5, max_pos_frac: float = 0.20,
+                       max_gross: float = 1.0) -> dict[str, Any]:
+    """组合级资金曲线：把逐笔交易按**固定风险仓位**(每笔风险 risk_pct 的本金)+ 并发持仓上限
+    + 单仓/总敞口上限,事件驱动地放到一条资金曲线上,输出总收益/CAGR/最大回撤/成交与被限笔数。
+
+    仓位：alloc_frac = min(risk_pct/risk_frac, max_pos_frac)（止损打掉≈risk_pct 本金）。
+    约束：同时持仓数 ≤ max_concurrent；名义总敞口 ≤ max_gross×当前权益（满则跳过后续信号）。
+    回撤：按平仓时点的已实现权益序列计（不含持仓中浮亏，属保守低估，已注明）。绝不 raise。
+    """
+    import heapq
+    entries = sorted([t for t in trades if t.get("entry_date") and t.get("exit_date")
+                      and (t.get("risk_frac") or 0) > 0], key=lambda t: t["entry_date"])
+    if not entries:
+        return {"n_taken": 0, "n_skipped": 0, "text": "无可用交易(缺 risk_frac/日期)"}
+    equity = 1.0
+    peak = 1.0
+    max_dd = 0.0
+    gross = 0.0                       # 已开仓名义敞口合计(进场时资金)
+    open_heap: list = []              # (exit_date, seq, alloc_cap, ret)
+    curve: list[dict[str, Any]] = []
+    taken = 0
+    skipped = 0
+    seq = 0
+
+    def _close_until(date: str) -> None:
+        nonlocal equity, peak, max_dd, gross
+        while open_heap and open_heap[0][0] <= date:
+            ed, _, alloc_cap, ret = heapq.heappop(open_heap)
+            equity += alloc_cap * ret
+            gross -= alloc_cap
+            peak = max(peak, equity)
+            dd = (peak - equity) / peak if peak > 0 else 0.0
+            max_dd = max(max_dd, dd)
+            curve.append({"date": ed, "equity": round(equity, 5)})
+
+    for t in entries:
+        _close_until(t["entry_date"])
+        alloc_frac = min(risk_pct / t["risk_frac"], max_pos_frac)
+        alloc_cap = alloc_frac * equity
+        if len(open_heap) >= max_concurrent or (gross + alloc_cap) > max_gross * equity:
+            skipped += 1
+            continue
+        heapq.heappush(open_heap, (t["exit_date"], seq, alloc_cap, t["ret"]))
+        seq += 1
+        gross += alloc_cap
+        taken += 1
+    _close_until("9999-99-99")
+
+    years = None
+    cagr = None
+    try:
+        d0 = _dt.date.fromisoformat(entries[0]["entry_date"])
+        d1 = _dt.date.fromisoformat(curve[-1]["date"]) if curve else d0
+        years = max((d1 - d0).days / 365.25, 1e-9)
+        cagr = equity ** (1 / years) - 1 if equity > 0 else None
+    except Exception:  # noqa: BLE001
+        pass
+    out = {"n_taken": taken, "n_skipped": skipped, "final_equity": round(equity, 4),
+           "total_return": round(equity - 1, 4), "max_drawdown": round(max_dd, 4),
+           "cagr": round(cagr, 4) if cagr is not None else None,
+           "years": round(years, 2) if years else None,
+           "risk_pct": risk_pct, "max_concurrent": max_concurrent,
+           "max_pos_frac": max_pos_frac, "max_gross": max_gross}
+    ret_dd = (round(out["total_return"] / max_dd, 2) if max_dd > 0 else None)
+    out["return_over_maxdd"] = ret_dd
+    out["text"] = (
+        f"组合资金曲线(风险{risk_pct*100:.1f}%/笔, 并发≤{max_concurrent}, 单仓≤{max_pos_frac*100:.0f}%): "
+        f"成交 {taken} 笔/限跳 {skipped}  总收益 {out['total_return']*100:+.1f}%  "
+        f"CAGR {out['cagr']*100:.1f}%  最大回撤 {out['max_drawdown']*100:.1f}%  "
+        f"收益/回撤 {ret_dd}  (期约 {out['years']} 年)")
+    return out
+
+
 def _load_bars_local(codes: list[str], count: int) -> dict[str, pd.DataFrame]:
     """CLI 用：经 local_tdx 读取本地日线（需通达信数据；单测走注入不经此）。"""
     import local_tdx_data  # noqa: PLC0415
@@ -596,6 +671,11 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                     help="出场:站上BBI后连续N日收盘跌破BBI才卖出(默认2;可扫描出场松紧)")
     ap.add_argument("--time-stop", type=int, default=0,
                     help="出场:持有N根仍未触发止损/BBI则到期平仓(默认0=不启用)")
+    ap.add_argument("--portfolio", action="store_true",
+                    help="在逐笔交易上叠加组合级资金曲线(固定风险仓位+并发上限),输出总收益/CAGR/最大回撤")
+    ap.add_argument("--risk-pct", type=float, default=1.0, help="组合:每笔风险占本金%(默认1.0)")
+    ap.add_argument("--max-concurrent", type=int, default=5, help="组合:同时持仓上限(默认5)")
+    ap.add_argument("--max-pos", type=float, default=20.0, help="组合:单仓名义上限%%本金(默认20)")
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
 
@@ -631,6 +711,10 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
         payload = {"mode": "trade_sim", "scorer": args.scorer, "weekly": args.weekly,
                    "cost_bps": args.cost_bps, "amv_long_only": bool(args.amv_long_only),
                    "codes": codes, "count": args.count, "trade_summary": tsum, "trades": trades}
+        if args.portfolio:
+            payload["portfolio"] = simulate_portfolio(
+                trades, risk_pct=args.risk_pct / 100.0, max_concurrent=args.max_concurrent,
+                max_pos_frac=args.max_pos / 100.0)
         if args.out:
             out = Path(args.out)
             out.parent.mkdir(parents=True, exist_ok=True)
@@ -640,6 +724,8 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
               f"cost={args.cost_bps}bps, {'仅0AMV做多' if args.amv_long_only else '全regime'}, "
               f"止损=买入K最低 / 站上BBI后连破2日卖出）===")
         print(tsum["text"])
+        if args.portfolio:
+            print("\n" + payload["portfolio"]["text"])
         return 0
 
     records = evaluate(bars, horizons=horizons, step=args.step,

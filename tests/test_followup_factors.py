@@ -343,3 +343,26 @@ def test_summarize_expectancy_R():
                              {"ret": -0.05, "reason": "stop", "holding": 3, "r_multiple": -1.0}])
     assert s["expectancy_R"] == 1.0 and s["total_R"] == 2.0
     assert s["avg_win_R"] == 3.0 and s["avg_loss_R"] == 1.0
+
+
+_PF_TRADES = [
+    {"entry_date": "2025-01-01", "exit_date": "2025-01-10", "ret": 0.10, "risk_frac": 0.05},
+    {"entry_date": "2025-01-02", "exit_date": "2025-01-05", "ret": -0.05, "risk_frac": 0.05},
+    {"entry_date": "2025-01-03", "exit_date": "2025-01-20", "ret": 0.20, "risk_frac": 0.10},
+]
+
+
+def test_portfolio_equity_and_drawdown():
+    p = bt.simulate_portfolio(_PF_TRADES, risk_pct=0.01, max_concurrent=5,
+                              max_pos_frac=0.2, max_gross=1.0)
+    assert p["n_taken"] == 3 and p["n_skipped"] == 0
+    assert abs(p["final_equity"] - 1.03) < 1e-6      # +0.2*(-.05)+0.2*.10+0.1*.20
+    assert abs(p["max_drawdown"] - 0.01) < 1e-6      # t2 先平,权益 1.0→0.99
+
+
+def test_portfolio_concurrency_cap():
+    p = bt.simulate_portfolio(_PF_TRADES, risk_pct=0.01, max_concurrent=1,
+                              max_pos_frac=0.2, max_gross=1.0)
+    # t1 持有至 01-10，其间 t2/t3 因并发上限被跳过
+    assert p["n_taken"] == 1 and p["n_skipped"] == 2
+    assert abs(p["final_equity"] - 1.02) < 1e-6
