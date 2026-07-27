@@ -428,13 +428,15 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
                     weekly: bool = False, cost_bps: float = 0.0,
                     amv_regime: Optional[dict] = None,
                     bbi_exit_consec: int = 2, time_stop_bars: int = 0,
-                    collect_all: bool = False) -> list[dict[str, Any]]:
+                    collect_all: bool = False,
+                    entry_gate: Optional[Callable[[pd.DataFrame], bool]] = None) -> list[dict[str, Any]]:
     """在 scorer 判「可买」的 as-of 日进场，按 B1 规则(止损+BBI)模拟到出场；非重叠(平仓后再找)。
 
     cost_bps：单边成本合计的往返基点(A股约20~30bps含佣金/印花税/滑点)，从每笔收益中扣除，看净期望。
     amv_regime：date→regime 映射(如 load_amv_regime)。提供时只在「做多」区间进场(as-of最近≤进场日的regime)。
     bbi_exit_consec/time_stop_bars：出场规则参数(可扫描)。每笔记录 r_multiple=净收益/风险敞口，供风险定额仓位。
     collect_all=True：不做单股非重叠去重，返回**每个**可买as-of日的候选(含 score)，供组合级 top-N 横截面择优。
+    entry_gate(df_slice)->bool：进场硬门槛(如 j_low_gate=当日 J<13，B1 核心买点)；不满足则不进场。
     """
     scorer = scorer or _sc_b1_pullback
     cost = cost_bps / 1e4
@@ -462,7 +464,11 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
         i = min_bars
         while i < n - 1:
             entry_date = str(df["date"].iloc[i])[:10]
-            res = scorer(df.iloc[:i + 1], code)
+            slice_df = df.iloc[:i + 1]
+            if entry_gate is not None and not entry_gate(slice_df):
+                i += max(1, step)
+                continue
+            res = scorer(slice_df, code)
             if res is not None and res.get("suggestion") == "可买" and _amv_ok(entry_date):
                 tr = simulate_b1_trade(df, i, bbi, bbi_exit_consec=bbi_exit_consec,
                                        time_stop_bars=time_stop_bars)
@@ -804,12 +810,13 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
         trades = evaluate_trades(bars, scorer=SCORERS[args.scorer], step=args.step,
                                  weekly=args.weekly, cost_bps=args.cost_bps, amv_regime=amv_regime,
                                  bbi_exit_consec=args.bbi_consec, time_stop_bars=args.time_stop,
-                                 collect_all=bool(args.top_n > 0))
+                                 collect_all=bool(args.top_n > 0),
+                                 entry_gate=ENTRY_GATES[args.entry_filter])
         tsum = summarize_trades(trades)
         payload = {"mode": "trade_sim", "scorer": args.scorer, "weekly": args.weekly,
                    "cost_bps": args.cost_bps, "amv_long_only": bool(args.amv_long_only),
-                   "top_n": args.top_n, "codes": codes, "count": args.count,
-                   "trade_summary": tsum, "trades": trades}
+                   "entry_filter": args.entry_filter, "top_n": args.top_n,
+                   "codes": codes, "count": args.count, "trade_summary": tsum, "trades": trades}
         if args.top_n > 0:
             payload["portfolio"] = simulate_portfolio_topn(
                 trades, top_n=args.top_n, risk_pct=args.risk_pct / 100.0,
@@ -824,7 +831,8 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
             out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
             print(f"[OK] 写出 {out}（{len(trades)} 笔交易，scorer={args.scorer}, {'周线' if args.weekly else '日线'}, cost={args.cost_bps}bps, amv_long_only={bool(args.amv_long_only)}）")
         print(f"\n=== B1 交易模拟（scorer={args.scorer}, {'周线' if args.weekly else '日线'}, "
-              f"cost={args.cost_bps}bps, {'仅0AMV做多' if args.amv_long_only else '全regime'}, "
+              f"入场门槛={args.entry_filter}, cost={args.cost_bps}bps, "
+              f"{'仅0AMV做多' if args.amv_long_only else '全regime'}, "
               f"止损=买入K最低 / 站上BBI后连破2日卖出）===")
         print(tsum["text"])
         if payload.get("portfolio"):

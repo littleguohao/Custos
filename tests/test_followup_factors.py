@@ -386,3 +386,15 @@ def test_collect_all_yields_more_candidates():
     nonoverlap = bt.evaluate_trades({"T": df}, scorer=stub, min_bars=30, collect_all=False)
     allc = bt.evaluate_trades({"T": df}, scorer=stub, min_bars=30, collect_all=True)
     assert len(allc) > len(nonoverlap) >= 1     # 收集全部候选 > 非重叠去重
+
+
+def test_evaluate_trades_entry_gate():
+    df = _mk([10.0 + 0.1 * i for i in range(45)])
+    stub = lambda s, code: {"score": 100, "suggestion": "可买"}
+    # 只放行切片长度为偶数的 as-of 日(模拟 J<13 之类硬门槛)
+    gate = lambda s: len(s) % 2 == 0
+    trades = bt.evaluate_trades({"T": df}, scorer=stub, min_bars=30, collect_all=True, entry_gate=gate)
+    assert trades and all(bt._dt.date.fromisoformat(t["entry_date"]) for t in trades)
+    # 与无门槛相比,进场数应减少(门槛过滤掉一半as-of日)
+    nogate = bt.evaluate_trades({"T": df}, scorer=stub, min_bars=30, collect_all=True)
+    assert len(trades) < len(nogate)
