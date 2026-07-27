@@ -358,6 +358,9 @@ def factor_lift(records: list[dict[str, Any]], field: str, horizon: int = 10,
     return {"field": field, "horizon": horizon, "quantiles": buckets, "text": "\n".join(lines)}
 
 
+_R_RISK_FLOOR = 0.02   # R 计算的 risk_frac 地板(2%)：周线收盘贴低时防 ret/≈0 炸成极端 R
+
+
 def _bbi_series(close: pd.Series) -> pd.Series:
     """BBI = (MA3+MA6+MA12+MA24)/4。"""
     c = close.astype(float)
@@ -463,11 +466,12 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
                                        time_stop_bars=time_stop_bars)
                 ret_net = tr["ret"] - cost
                 rf = tr.get("risk_frac") or 0.0
+                rf_eff = max(rf, _R_RISK_FLOOR)   # 地板：周线收盘贴低时 risk_frac≈0 会把 R 炸成极端值
                 trades.append({"code": code, "entry_date": entry_date,
                                "exit_date": str(df["date"].iloc[tr["exit_idx"]])[:10],
                                "score": res.get("score"), "ret": round(ret_net, 4),
                                "risk_frac": round(rf, 4),
-                               "r_multiple": round(ret_net / rf, 3) if rf > 0 else None,
+                               "r_multiple": round(ret_net / rf_eff, 3) if rf > 0 else None,
                                "holding": tr["holding"], "reason": tr["reason"]})
                 emitted += 1
                 if max_signals_per_code and emitted >= max_signals_per_code:
@@ -504,7 +508,8 @@ def summarize_trades(trades: list[dict[str, Any]]) -> dict[str, Any]:
     if rmults:
         rwin = [r for r in rmults if r > 0]
         rloss = [-r for r in rmults if r < 0]
-        d["expectancy_R"] = round(statistics.mean(rmults), 3)      # 每笔期望R(核心：>0才可用固定风险放大)
+        d["expectancy_R"] = round(statistics.mean(rmults), 3)      # 每笔期望R(已对 risk_frac 设地板)
+        d["median_R"] = round(statistics.median(rmults), 3)        # 中位R(抗极端值,更稳)
         d["avg_win_R"] = round(statistics.mean(rwin), 3) if rwin else 0.0
         d["avg_loss_R"] = round(statistics.mean(rloss), 3) if rloss else 0.0
         d["total_R"] = round(sum(rmults), 1)                       # 累计R(样本期总盈亏,以R计)
