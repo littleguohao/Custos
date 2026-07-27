@@ -732,14 +732,46 @@ def _amv_regime_from_records(records: list[dict[str, Any]]) -> dict[str, str]:
     return regime
 
 
+def _amv_ledger_records(since: str, after_date: Optional[str],
+                        ledger_path: Optional[Path] = None) -> list[dict[str, Any]]:
+    """从人工上报台账(0amv_observations.jsonl)取 after_date 之后的 confirmed 记录，
+    补齐指南针 day.vdat 主序列的尾部缺口(用户每日收盘上报的 0AMV 只进台账,vdat 由客户端维护)。
+    同一日期多条记录时后写入(recorded_at 晚)的覆盖先写的。best-effort：缺失/异常返回 []。"""
+    try:
+        if ledger_path is None:
+            from paths import BASE  # noqa: PLC0415
+            ledger_path = BASE / "01_data" / "market" / "0amv_observations.jsonl"
+        if not ledger_path.is_file():
+            return []
+        latest: dict[str, tuple[str, float]] = {}
+        for line in ledger_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            r = json.loads(line)
+            d = str(r.get("date") or "")
+            pct = r.get("amv_change_pct")
+            if (r.get("quality") == "confirmed" and pct is not None and len(d) == 10
+                    and d >= since and (after_date is None or d > after_date)):
+                if d not in latest or str(r.get("recorded_at", "")) >= latest[d][0]:
+                    latest[d] = (str(r.get("recorded_at", "")), float(pct))
+        return [{"date": d, "change_pct": pct} for d, (_, pct) in sorted(latest.items())]
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def load_amv_regime(since: str = "2015-01-01", root: Optional[str] = None) -> dict[str, str]:
-    """从指南针 0AMV 日线(compass_amv)构建历史 date→regime。best-effort：数据缺失返回 {}。"""
+    """从指南针 0AMV 日线(compass_amv)构建历史 date→regime。best-effort：数据缺失返回 {}。
+    day.vdat 主序列之后,拼接人工上报台账(0amv_observations.jsonl)的 confirmed 记录补齐尾部。"""
     try:
         import compass_amv  # noqa: PLC0415
         parsed = compass_amv.parse_amv_daily(since=since, root=root)
         if parsed.get("error") or not parsed.get("records"):
             return {}
-        return _amv_regime_from_records(parsed["records"])
+        records = list(parsed["records"])
+        last_date = str(records[-1].get("date"))[:10]
+        records += _amv_ledger_records(since, last_date)
+        return _amv_regime_from_records(records)
     except Exception:  # noqa: BLE001
         return {}
 

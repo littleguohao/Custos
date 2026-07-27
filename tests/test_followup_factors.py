@@ -536,3 +536,25 @@ def test_main_trade_sim_out_json_has_attribution_and_params(tmp_path):
     assert payload["bbi_consec"] == 3                    # 出场/止损参数可追溯
     assert payload["stop_mode"] == "pct" and payload["stop_pct"] == 6
     assert "time_stop" in payload
+
+
+def test_amv_ledger_records_tail_merge(tmp_path):
+    import json as _json
+    lines = [
+        {"date": "2026-07-20", "amv_change_pct": -1.35, "quality": "confirmed", "recorded_at": "2026-07-20T15:41:24+08:00"},
+        {"date": "2026-07-24", "amv_change_pct": -4.23, "quality": "confirmed", "recorded_at": "2026-07-24T15:37:15+08:00"},
+        # 同日冲突:先误报 -4.23,后更正 +1.67 → 后写入的覆盖
+        {"date": "2026-07-27", "amv_change_pct": -4.23, "quality": "confirmed", "recorded_at": "2026-07-27T10:09:13+08:00"},
+        {"date": "2026-07-27", "amv_change_pct": 1.67, "quality": "confirmed", "recorded_at": "2026-07-27T15:37:34+08:00"},
+        # candidate 不采信;脏键(无横杠)跳过;vdat 范围内日期不重复
+        {"date": "2026-07-28", "amv_change_pct": 9.9, "quality": "candidate", "recorded_at": "2026-07-28T15:00:00+08:00"},
+        {"date": "20260729", "amv_change_pct": 5.0, "quality": "confirmed", "recorded_at": "2026-07-29T15:00:00+08:00"},
+        {"date": "2026-07-17", "amv_change_pct": -5.84, "quality": "confirmed", "recorded_at": "2026-07-17T20:31:52+08:00"},
+    ]
+    lp = tmp_path / "ledger.jsonl"
+    lp.write_text("\n".join(_json.dumps(r) for r in lines), encoding="utf-8")
+    recs = bt._amv_ledger_records("2015-01-01", "2026-07-17", ledger_path=lp)
+    assert [(r["date"], r["change_pct"]) for r in recs] == [
+        ("2026-07-20", -1.35), ("2026-07-24", -4.23), ("2026-07-27", 1.67)]
+    # 缺文件 → 空,不 raise
+    assert bt._amv_ledger_records("2015-01-01", None, ledger_path=tmp_path / "nope.jsonl") == []
