@@ -668,6 +668,7 @@ def summarize_trades(trades: list[dict[str, Any]]) -> dict[str, Any]:
         by_reason[rs] = {"n": len(rr), "avg_return": round(statistics.mean(rr), 4)}
     d = {"n": len(trades), "win_rate": round(len(wins) / len(rets), 4),
          "expectancy": round(statistics.mean(rets), 4),
+         "median_return": round(statistics.median(rets), 4),
          "avg_win": round(avg_win, 4), "avg_loss": round(avg_loss, 4),
          "payoff_ratio": payoff,
          "avg_holding": round(statistics.mean([t["holding"] for t in trades]), 1),
@@ -682,9 +683,10 @@ def summarize_trades(trades: list[dict[str, Any]]) -> dict[str, Any]:
         d["avg_win_R"] = round(statistics.mean(rwin), 3) if rwin else 0.0
         d["avg_loss_R"] = round(statistics.mean(rloss), 3) if rloss else 0.0
         d["total_R"] = round(sum(rmults), 1)                       # 累计R(样本期总盈亏,以R计)
-    lines = [f"交易 {d['n']} 笔  胜率 {d['win_rate']*100:.1f}%  期望 {d['expectancy']*100:+.2f}%/笔  "
-             f"盈亏比 {d['payoff_ratio']}  均持 {d['avg_holding']} 根",
-             f"  均盈 {d['avg_win']*100:+.2f}%  均亏 -{d['avg_loss']*100:.2f}%"]
+    lines = [f"交易 {d['n']} 笔  胜率 {d['win_rate']*100:.1f}%  期望(均) {d['expectancy']*100:+.2f}%/笔  "
+             f"中位 {d['median_return']*100:+.2f}%  盈亏比 {d['payoff_ratio']}  均持 {d['avg_holding']} 根",
+             f"  均盈 {d['avg_win']*100:+.2f}%  均亏 -{d['avg_loss']*100:.2f}%  "
+             f"(均≫中位 → 少数肥尾大赢主导,警惕幸存者偏差)"]
     if rmults:
         lines.append(f"  期望 {d['expectancy_R']:+.3f}R/笔  (均盈 {d['avg_win_R']:.2f}R / 均亏 "
                      f"{d['avg_loss_R']:.2f}R)  累计 {d['total_R']:+.0f}R —— 按风险r%/笔计,每笔账户增长≈r%×{d['expectancy_R']:+.3f}")
