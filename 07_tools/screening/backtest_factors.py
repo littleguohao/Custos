@@ -1028,6 +1028,13 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                     help="从 universe 随机抽 N 只（代表性样本；0=不抽，用 --codes 或全量 universe）")
     ap.add_argument("--universe-local", action="store_true",
                     help="universe 用本地 vipdoc 实有文件（推荐：覆盖率~100%%、不依赖在线代码表；否则用在线 get_stock_list）")
+    ap.add_argument("--data-source", choices=["tdx", "qlib", "csv"], default="tdx",
+                    help="行情数据源:tdx=本地通达信(默认);qlib/csv=E:\\S_DATA(含退市股,前复权,1999~2026-02)")
+    ap.add_argument("--s-data-root", default=r"E:\S_DATA", help="s_data 根目录(含 Q_DATA/CSV_DATA)")
+    ap.add_argument("--start", default="", help="回测起点 YYYY-MM-DD(在 --count 之前应用;配合 walk-forward)")
+    ap.add_argument("--end", default="", help="回测终点 YYYY-MM-DD(默认不限)")
+    ap.add_argument("--universe-sdata", action="store_true",
+                    help="universe 用 s_data 全市场(含退市股;替代 --universe-local 的 tdx 文件列表)")
     ap.add_argument("--seed", type=int, default=0, help="随机抽样种子（可复现）")
     ap.add_argument("--count", type=int, default=500, help="每股回溯 K 线根数")
     ap.add_argument("--horizons", default="5,10,20", help="前向窗口(日)，逗号分隔")
@@ -1072,7 +1079,13 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
 
-    if args.universe_local or args.universe_sample > 0:
+    if args.universe_sdata:
+        import s_data  # noqa: PLC0415
+        src_root = Path(args.s_data_root) / ("CSV_DATA" if args.data_source == "csv" else "Q_DATA")
+        base = s_data.list_universe(src_root, source=args.data_source)
+        codes = sample_codes(base, args.universe_sample, args.seed) if args.universe_sample > 0 else list(base)
+        print(f"[INFO] universe=s_data({args.data_source}) 共 {len(base)} 只，取 {len(codes)} 只（seed={args.seed}）", file=sys.stderr)
+    elif args.universe_local or args.universe_sample > 0:
         import local_tdx_data  # noqa: PLC0415
         if args.universe_local:
             base = local_tdx_data.list_local_vipdoc_codes()
@@ -1085,14 +1098,24 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     else:
         codes = [c.strip() for c in args.codes.split(",") if c.strip()]
     if not codes:
-        ap.error("需提供 --codes / --universe-sample N / --universe-local")
+        ap.error("需提供 --codes / --universe-sample N / --universe-local / --universe-sdata")
     horizons = tuple(int(h) for h in args.horizons.split(",") if h.strip())
-    load = loader or _load_bars_local
+    if loader is not None:
+        load = loader
+    elif args.data_source == "tdx":
+        load = _load_bars_local
+    else:
+        import functools
+        import s_data  # noqa: PLC0415
+        fn = s_data.load_bars_csv if args.data_source == "csv" else s_data.load_bars_qlib
+        sub = "CSV_DATA" if args.data_source == "csv" else "Q_DATA"
+        load = functools.partial(fn, start=args.start or None, end=args.end or None,
+                                 root=str(Path(args.s_data_root) / sub))
 
     if args.trade_sim:
         amv_regime = None
         if args.amv_long_only:
-            amv_regime = load_amv_regime()
+            amv_regime = load_amv_regime(since=args.start or "2015-01-01")  # regime 起点跟随回测起点
             if not amv_regime:
                 ap.error("--amv-long-only 需要指南针 0AMV 数据(compass_amv)，未读到；请在有指南针的机器运行")
             print(f"[INFO] 0AMV regime 覆盖 {len(amv_regime)} 个交易日，仅在『做多』区间进场", file=sys.stderr)
@@ -1115,6 +1138,7 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                 print(f"[INFO] 已处理 {k + 1}/{len(codes)} 只，累计 {len(trades)} 笔候选", file=sys.stderr)
         tsum = summarize_trades(trades)
         payload = {"mode": "trade_sim", "scorer": args.scorer, "weekly": args.weekly,
+                   "data_source": args.data_source, "start": args.start or None, "end": args.end or None,
                    "cost_bps": args.cost_bps, "amv_long_only": bool(args.amv_long_only),
                    "entry_filter": args.entry_filter, "top_n": args.top_n,
                    "bbi_consec": args.bbi_consec, "time_stop": args.time_stop,
@@ -1140,6 +1164,8 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
         stop_desc = (f"买入K最低" if args.stop_mode == "low" else f"pct {args.stop_pct}%")
         tstop_desc = f" / 时间止损{args.time_stop}根" if args.time_stop else ""
         print(f"\n=== B1 交易模拟（scorer={args.scorer}, {'周线' if args.weekly else '日线'}, "
+              f"数据源={args.data_source}"
+              f"{(' ' + (args.start or '…') + '~' + (args.end or '…')) if (args.start or args.end) else ''}, "
               f"入场门槛={args.entry_filter}, cost={args.cost_bps}bps, "
               f"{'仅0AMV做多' if args.amv_long_only else '全regime'}, "
               f"止损={stop_desc} / 站上BBI后连破{args.bbi_consec}日卖出{tstop_desc}）===")
