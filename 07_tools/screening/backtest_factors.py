@@ -947,6 +947,7 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                 ap.error("--amv-long-only 需要指南针 0AMV 数据(compass_amv)，未读到；请在有指南针的机器运行")
             print(f"[INFO] 0AMV regime 覆盖 {len(amv_regime)} 个交易日，仅在『做多』区间进场", file=sys.stderr)
         trades: list[dict[str, Any]] = []
+        import gc
         for k, c in enumerate(codes):     # 流式：逐股加载→评估→释放，避免全量载入 OOM
             d = load([c], args.count)
             if d:
@@ -956,7 +957,9 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                     time_stop_bars=args.time_stop, collect_all=bool(args.top_n > 0),
                     entry_gate=ENTRY_GATES[args.entry_filter],
                     stop_mode=args.stop_mode, stop_pct=args.stop_pct)
+            del d
             if (k + 1) % 500 == 0:
+                gc.collect()
                 print(f"[INFO] 已处理 {k + 1}/{len(codes)} 只，累计 {len(trades)} 笔候选", file=sys.stderr)
         tsum = summarize_trades(trades)
         payload = {"mode": "trade_sim", "scorer": args.scorer, "weekly": args.weekly,
