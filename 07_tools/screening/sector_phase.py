@@ -142,3 +142,43 @@ def load_sector_gate(index_dir, members: dict[str, list],
         return False
 
     return gate
+
+
+def build_phase_resolver(index_dir, members: dict[str, list],
+                         lookback: int = PHASE_LOOKBACK):
+    """LIVE 用:预计算各板块**当前**相位 + code→板块映射,返回 resolve(code6)->相位字典(hint,不封顶)。
+    个股所属任一板块有利 → favorable=True;附代表相位标签。数据缺失 → available=False。绝不 raise。"""
+    from pathlib import Path as _P
+    idx = _P(index_dir)
+    phase_by_sec: dict[str, dict] = {}
+    for sec in members:
+        p = idx / f"{sec}.csv"
+        if not p.is_file():
+            continue
+        try:
+            df = pd.read_csv(p)
+            ph = compute_sector_phase(df["close"].tolist(), lookback=lookback)
+            if ph.get("available"):
+                phase_by_sec[sec] = ph
+        except Exception:  # noqa: BLE001
+            continue
+    code2sec: dict[str, list] = {}
+    for sec, codes in members.items():
+        if sec not in phase_by_sec:
+            continue
+        for cc in codes:
+            c6 = str(cc).split(".")[0][-6:].zfill(6)
+            code2sec.setdefault(c6, []).append(sec)
+
+    def resolve(code6: str) -> dict[str, Any]:
+        secs = code2sec.get(str(code6)[:6], [])
+        phases = [phase_by_sec[s] for s in secs if s in phase_by_sec]
+        if not phases:
+            return {"available": False}
+        favorable = any(p.get("favorable") for p in phases)
+        rep = next((p for p in phases if p.get("favorable")), phases[0])
+        return {"available": True, "favorable": bool(favorable),
+                "phase": rep.get("phase"), "any_exhausted": any(p.get("exhausted") for p in phases),
+                "sectors": secs[:5], "n_sectors": len(phases)}
+
+    return resolve

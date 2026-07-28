@@ -565,6 +565,7 @@ def score_candidate(
         "liquidity": cand.get("liquidity") or {},
         "fund_flow": cand.get("fund_flow") or {},
         "financials": cand.get("financials") or {},
+        "sector_phase": cand.get("sector_phase") or {},
     }
 
 

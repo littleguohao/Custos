@@ -29,6 +29,12 @@
     "cumulative_days": 1,
     "_note": "资金流向(东财 collect_fund_flow)累计天数。1=仅当日快照(现状)；>1=累加最近N个每日 fund_flow_rank 快照的主力净流入(按 code/板块名聚合)，多日更稳。资金流无历史存档，只能就已落盘的每日文件累积。"
   },
+  "sector_phase": {
+    "enabled": true,
+    "index_dir": "",
+    "members_path": "",
+    "_note": "板块相位择时(hint,不封顶)。对个股所属板块指数(880xxx,fetch_sector_index_history.py 缓存)算 MACD 相位(DIF>0且无近期顶背离/三打=有利),落 sector_phase 证据层。含退市跨年 OOS:板块相位熊市减亏~5pp、牛市降回撤(见 B1_STRATEGY_SUMMARY)。best-effort:index_dir(默 01_data/market/sector_index)或 members_path(默 01_data/market/sector_members.json)缺失则跳过。当前仅 hint 不驱动分层;实盘观察后再议是否软封顶。"
+  },
   "financials": {
     "enabled": true,
     "auto_map": true,

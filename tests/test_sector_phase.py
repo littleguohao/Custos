@@ -56,3 +56,9 @@ def test_favorable_series_causal_and_gate(tmp_path):
     assert gate("600000", last) is True     # 有利板块成员 → 放行
     assert gate("000002", last) is False    # 不利板块(DIF<0)成员 → 拦截
     assert gate("999999", last) is True     # 未分类 → 不过滤
+
+    # build_phase_resolver(LIVE hint):当前相位
+    resolve = sp.build_phase_resolver(tmp_path, members)
+    assert resolve("600000")["favorable"] is True and resolve("600000")["available"] is True
+    assert resolve("000002")["favorable"] is False
+    assert resolve("999999")["available"] is False   # 未分类 → 无相位

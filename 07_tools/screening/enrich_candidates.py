@@ -48,6 +48,7 @@ import concept_tags  # noqa: E402
 import local_tdx_data  # noqa: E402
 import s_shape as s_shape_mod  # noqa: E402
 import financials as financials_mod  # noqa: E402
+import sector_phase as sector_phase_mod  # noqa: E402
 from technical_monitor import bbi_state, ema, kdj, macd, resample, zhixing_state, _infer_price_limit  # noqa: E402
 
 SCREENING_DIR = DATA / "screening"
@@ -1258,6 +1259,7 @@ def enrich(
     theme_min_match: Optional[int] = None,
     fund_flow_days: int = 1,
     financials_cfg: Optional[dict] = None,
+    sector_phase_cfg: Optional[dict] = None,
 ) -> dict:
     """充实命中股。loader 可注入以便测试；所有失败结构化落盘，绝不 raise。"""
     hits_data = hits_data if hits_data is not None else load_hits(date)
@@ -1316,6 +1318,20 @@ def enrich(
         _cm = financials_mod.auto_colmap(getattr(fin_df, "columns", []))
         _cm.update(fin_colmap)   # 显式 registry.columns 按字段覆盖自动识别
         fin_colmap = _cm
+    # 板块相位(hint,不封顶)：best-effort 构建 resolver；数据缺失则跳过
+    sp_cfg = sector_phase_cfg or {}
+    sp_resolve = None
+    if sp_cfg.get("enabled", True):
+        try:
+            mpath = Path(sp_cfg.get("members_path")
+                         or (DATA / "market" / "sector_members.json"))
+            idir = Path(sp_cfg.get("index_dir") or (DATA / "market" / "sector_index"))
+            if mpath.is_file() and idir.is_dir():
+                members = _load_json(mpath, {})
+                if members:
+                    sp_resolve = sector_phase_mod.build_phase_resolver(idir, members)
+        except Exception:  # noqa: BLE001
+            sp_resolve = None
     stock_theme, theme_map_available = build_stock_theme_map(
         min_match=theme_min_match if theme_min_match is not None else THEME_MIN_MATCH)
     if not theme_map_available:
@@ -1394,6 +1410,8 @@ def enrich(
             cand["sector"] = "未知"
             cand["sector_source"] = ""
         cand["fund_flow"] = fund_flow_of(code6, cand["sector"], fund_flow)
+        if sp_resolve is not None:
+            cand["sector_phase"] = sp_resolve(code6)     # 板块相位 hint(不封顶,证据层)
         if fin_enabled and fin_colmap:
             # 财务维度(CZ抄底代理)：最佳努力落盘证据层，不驱动分层
             cand["financials"] = financials_mod.financial_factor(
@@ -1414,7 +1432,8 @@ def main(argv: Optional[list] = None) -> int:
     result = enrich(args.date, universe_cfg=registry.get("universe") or {},
                     theme_min_match=(registry.get("theme_mapping") or {}).get("min_match"),
                     fund_flow_days=int((registry.get("fund_flow") or {}).get("cumulative_days", 1)),
-                    financials_cfg=registry.get("financials") or {})
+                    financials_cfg=registry.get("financials") or {},
+                    sector_phase_cfg=registry.get("sector_phase") or {})
 
     SCREENING_DIR.mkdir(parents=True, exist_ok=True)
     out_path = SCREENING_DIR / f"{args.date}_candidates_enriched.json"
