@@ -112,7 +112,7 @@ strategy_team/
 | 09:05 | `run_0905.py` | 交易日历检查 → daily_pipeline(premarket) → 日报摘要 |
 | 14:45 | `run_1445.py` | 交易日历检查 → 持仓行情采集 → 运行门控 → close_review → 尾盘建议 |
 | 17:00 | `run_1700.py` | 交易日历检查 → 持仓收盘行情 → 增量市场数据 → MFE/MAE → 资金流向 → daily_pipeline(postclose) → final_close_review → 验证 |
-| 18:00 | `run_1800.py` | 每日选股独立链（与三份报告分离）：公式初筛 → 模式识别 → 共振打分 → 备选表格；消费 17:00 链产出的当日 sector_state/risk_decision |
+| 18:00 | `run_1800.py` | 每日选股独立链（与三份报告分离）：概念标签刷新 → **板块指数刷新(sector_phase hint 用)** → 公式初筛 → 模式识别 → 共振打分 → 备选表格；消费 17:00 链产出的当日 sector_state/risk_decision |
 
 ### 手动执行
 
