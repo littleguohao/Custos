@@ -1,8 +1,16 @@
 # -*- coding: utf-8 -*-
 """起涨点 vs 0AMV 研究(launch_point_study)测试。"""
 import pandas as pd
+import pytest
 
 from screening import launch_point_study as lp
+
+
+@pytest.fixture(autouse=True)
+def _no_tdx_names(monkeypatch):
+    # 本文件用虚构板块代码(880201 在真实 tdxzs.cfg 里是"黑龙江"=地区,会被板块族口径剔除);
+    # 统一屏蔽名称表,剔除语义由 test_sector_mainstream 专门覆盖
+    monkeypatch.setattr("tq_sector.load_sector_names", lambda path=None: {})
 
 
 def test_window_return():
@@ -106,3 +114,28 @@ def test_main_loads_with_buffered_start(tmp_path, monkeypatch):
                   "--buffer-days", "60", "--sector-members", str(tmp_path / "none.json")])
     assert rc == 0
     assert captured["start"] < "2024-11-01"          # 60 交易日×1.6+10 ≈ 106 日历日 ≈ 2024-09-16
+
+
+def test_sector_concentration_density_and_winner_rets(tmp_path):
+    # 板块族口径:密度=归属数/成分数(纠大板块偏差);赢家收益聚合成板块胜率/期望
+    dates = [str(d)[:10] for d in pd.date_range("2024-09-02", periods=80, freq="B")]
+    def _csv(name, ret):
+        close = [100 * (1 + ret * i / 79) for i in range(80)]
+        (tmp_path / f"{name}.csv").write_text(
+            "date,close\n" + "\n".join(f"{d},{c}" for d, c in zip(dates, close)), encoding="utf-8")
+    _csv("880201.SH", 0.40)
+    _csv("880548.SH", 0.60)
+    members = {"880201.SH": ["600000", "600001", "600002", "600003"],   # 大板块(4成分)
+               "880548.SH": ["600000"]}                                  # 小板块(1成分):同样2归属→密度更高
+    winners = ["600000", "600001"]
+    winner_rets = {"600000": 0.50, "600001": 0.30}
+    r = lp.sector_concentration(winners, members, tmp_path, dates[0], dates[-1],
+                                winner_rets=winner_rets)
+    assert r["n_classified"] == 2 and r["distinct_sectors"] == 2
+    d201 = next(x for x in r["top_sectors"] if x["sector"] == "880201.SH")
+    d548 = next(x for x in r["top_sectors"] if x["sector"] == "880548.SH")
+    assert d201["n_winners"] == 2 and d201["density"] == 0.5          # 2/4
+    assert d548["n_winners"] == 1 and d548["density"] == 1.0          # 1/1 → 密度高于大板块
+    assert r["top_by_density"][0]["sector"] == "880548.SH"
+    assert abs(d201["expectancy"] - 0.40) < 1e-3                       # 赢家收益均值(0.5+0.3)/2
+    assert d201["name"] and d201["sector_return"] is not None

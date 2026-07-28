@@ -116,7 +116,8 @@ def analyze(bars_by_code: dict, regime: dict[str, str], start: str, end: str,
     leads = [L["lead_days_to_long"] for L in launches
              if L["regime"] in ("空头", "中性") and L["lead_days_to_long"] is not None]  # "未知"不计入分布
     out = {"n_winners": len(winners), "n_launches": n, "by_regime": by_regime,
-           "winners": winners, "launches": launches}
+           "winners": winners, "winner_rets": {c: round(r, 4) for c, r in rets[:n_top]},
+           "launches": launches}
     if leads:
         leads.sort()
         out["lead_days"] = {"n": len(leads), "median": statistics.median(leads),
@@ -132,23 +133,22 @@ def analyze(bars_by_code: dict, regime: dict[str, str], start: str, end: str,
 
 
 def sector_concentration(winners: list[str], members: dict[str, list], index_dir,
-                         start: str, end: str, top_k: int = 12) -> dict[str, Any]:
-    """赢家的板块分布:集中于少数板块还是分散?并看是否与板块指数强弱(共振)相关。
-    members:{sector:[codes]};index_dir:板块指数CSV目录。返回 top板块(赢家数+板块区间收益)+集中度+相关性。"""
-    code2sec: dict[str, list] = {}
-    for sec, codes in members.items():
-        for cc in codes:
-            code2sec.setdefault(str(cc).split(".")[0][-6:].zfill(6), []).append(sec)
-    win_count: dict[str, int] = {}
-    classified = 0
-    for w in winners:
-        secs = code2sec.get(str(w)[:6])
-        if not secs:
-            continue
-        classified += 1
-        for sec in secs:
-            win_count[sec] = win_count.get(sec, 0) + 1
-    if not win_count:
+                         start: str, end: str, top_k: int = 12,
+                         winner_rets: Optional[dict] = None) -> dict[str, Any]:
+    """赢家的板块族分布(聚集效应):集中于少数主流板块还是分散?
+
+    聚合口径复用 sector_mainstream:每票带**整个板块族**(多重归属,地区/风格剔除),
+    按赢家窗口收益聚合到板块(胜率/期望),并报:
+    - **赢家密度**(归属数/板块成分数)——纠大板块偏差(大板块天然归属多,密度才是真聚集);
+    - 主流(归属数 top_k) vs 分散 的赢家收益对照;
+    - 板块指数同窗口收益 + 赢家数相关性(含零赢家板块;⚠️含机械成分,仅描述)。
+    口径:一股多板块重复计(归属次数≠赢家数)。"""
+    import sector_mainstream as sm  # noqa: PLC0415
+    code2secs = sm.invert_members(members)
+    rets_map = winner_rets or {}
+    trades = [{"code": w, "ret": float(rets_map.get(w, 0.0))} for w in winners]
+    agg = sm.aggregate(trades, code2secs, top_k=top_k)
+    if not agg["rows"]:
         return {"n_winners": len(winners), "n_classified": 0, "text": "无板块成员映射"}
     idx = Path(index_dir)
     sec_ret: dict[str, float] = {}
@@ -162,30 +162,44 @@ def sector_concentration(winners: list[str], members: dict[str, list], index_dir
                     sec_ret[sec] = r
             except Exception:  # noqa: BLE001
                 pass
-    total = sum(win_count.values())                       # 板块归属次数(一股多板块会重复计)
-    ranked = sorted(win_count.items(), key=lambda x: x[1], reverse=True)
-    top5 = sum(n for _, n in ranked[:5])
-    hhi = round(sum((n / total) ** 2 for n in win_count.values()), 4)   # 赫芬达尔:越大越集中
-    pairs = [(win_count.get(s, 0), sec_ret[s]) for s in sec_ret]        # 零赢家板块计入(不左截断)
+    n_by_sec = {r["sector"]: r["n"] for r in agg["rows"]}
+    pairs = [(n_by_sec.get(s, 0), sec_ret[s]) for s in sec_ret]          # 零赢家板块计入(不左截断)
     corr = None
     if len(pairs) >= 3:
         try:
             corr = round(statistics.correlation([a for a, _ in pairs], [b for _, b in pairs]), 3)
         except Exception:  # noqa: BLE001
             corr = None
-    top_rows = [{"sector": s, "n_winners": n, "share": round(n / total, 3),
-                 "sector_return": (round(sec_ret[s], 4) if s in sec_ret else None)}
-                for s, n in ranked[:top_k]]
-    out = {"n_winners": len(winners), "n_classified": classified, "distinct_sectors": len(win_count),
-           "top5_winner_share": round(top5 / total, 3), "herfindahl": hhi,
-           "corr_wincount_vs_sectorret": corr, "corr_n": len(pairs), "top_sectors": top_rows}
-    conc = "集中" if out["top5_winner_share"] >= 0.5 else ("偏分散" if out["top5_winner_share"] < 0.3 else "中等")
-    out["text"] = (f"赢家 {len(winners)} 只(有板块 {classified}), 覆盖 {len(win_count)} 个板块; "
-                   f"前5板块占归属次数 {out['top5_winner_share']*100:.0f}%({conc};分母=归属次数,一股多板块重复计), HHI {hhi}; "
-                   f"赢家数 vs 板块收益 相关 {corr} (n={len(pairs)},含零赢家板块;"
-                   f"⚠️赢家贡献板块收益,相关性含机械成分,仅描述)。\n  Top板块: "
-                   + "; ".join(f"{r['sector']}({r['n_winners']}只,板块{(r['sector_return'] or 0)*100:+.0f}%)"
-                              for r in top_rows[:6]))
+    top_rows = []
+    for r in agg["top_sectors"]:
+        sec = r["sector"]
+        top_rows.append({**r, "n_winners": r["n"],
+                         "density": round(r["n"] / max(len(members.get(sec) or [1]), 1), 3),
+                         "name": sm.sector_name(sec),
+                         "sector_return": (round(sec_ret[sec], 4) if sec in sec_ret else None)})
+    by_density = sorted(top_rows, key=lambda r: r["density"], reverse=True)
+    out = {"n_winners": len(winners), "n_classified": agg["n_classified"],
+           "distinct_sectors": agg["distinct_sectors"],
+           "top5_winner_share": agg["top5_share"], "herfindahl": agg["hhi"],
+           "corr_wincount_vs_sectorret": corr, "corr_n": len(pairs),
+           "top_sectors": top_rows, "top_by_density": by_density[:top_k],
+           "mainstream": {"sectors": agg["mainstream_sectors"],
+                          "in": agg["in_mainstream"], "off": agg["off_mainstream"],
+                          "lift": agg["mainstream_lift"]}}
+    conc = "集中" if (agg["top5_share"] or 0) >= 0.5 else ("偏分散" if (agg["top5_share"] or 0) < 0.3 else "中等")
+    im, om = agg["in_mainstream"], agg["off_mainstream"]
+    out["text"] = (
+        f"赢家 {len(winners)} 只(有板块归属 {agg['n_classified']}), 覆盖 {agg['distinct_sectors']} 个板块; "
+        f"前5板块占归属次数 {(agg['top5_share'] or 0)*100:.0f}%({conc};分母=归属次数,一股多板块重复计), "
+        f"HHI {agg['hhi']};\n"
+        f"  主流(top{top_k})内赢家: n={im.get('n')} 均收 {(im.get('expectancy') or 0)*100:+.1f}% vs "
+        f"分散: n={om.get('n')} 均收 {(om.get('expectancy') or 0)*100:+.1f}% "
+        f"(差 {((agg['mainstream_lift'] or 0)*100):+.1f}pp);\n"
+        f"  赢家数 vs 板块指数收益 相关 {corr} (n={len(pairs)},含零赢家板块;⚠️含机械成分,仅描述)。\n"
+        f"  归属数 Top: " + "; ".join(f"{r['name']}({r['n']},{(r['expectancy'] or 0)*100:+.0f}%)"
+                                     for r in top_rows[:6]) + "\n"
+        f"  密度 Top(纠大板块偏差): " + "; ".join(f"{r['name']}({r['density']*100:.0f}%×{r['n']})"
+                                                 for r in by_density[:6]))
     return out
 
 
@@ -246,7 +260,8 @@ def main(argv=None, loader=None) -> int:
     mpath = Path(args.sector_members)
     if mpath.is_file() and res.get("winners"):
         members = _json.loads(mpath.read_text(encoding="utf-8"))
-        conc = sector_concentration(res["winners"], members, args.sector_index_dir, args.start, args.end)
+        conc = sector_concentration(res["winners"], members, args.sector_index_dir, args.start, args.end,
+                                    winner_rets=res.get("winner_rets"))
         res["sector_concentration"] = conc
         print(f"\n=== 赢家板块集中度 / 板块共振 ===")
         print(conc["text"])
