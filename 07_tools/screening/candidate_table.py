@@ -101,9 +101,9 @@ def render_table(pool: dict, date: str) -> str:
             lines.append("")
             continue
         lines.append(
-            "| 代码 | 名称 | 公式命中 | 模式标签 | 波浪 | CZ标签 | 技术分 | 贴合 | 资金意图 | 板块 | 板块状态 | 交易属性 | 共振 | 分层 | 建议止损位 | next_step |"
+            "| 代码 | 名称 | 公式命中 | 模式标签 | 波浪 | CZ标签 | 技术分 | 贴合 | 资金意图 | 板块 | 板块状态 | 交易属性 | 共振 | 基本面 | 4面共振 | 分层 | 建议止损位 | next_step |"
         )
-        lines.append("|---|---|---|---|---|---|---:|---:|---|---|---|---|---|---|---|---|")
+        lines.append("|---|---|---|---|---|---|---:|---:|---|---|---|---|---|---|---|---|---|---|")
         for c in rows:
             tags = "、".join(
                 PATTERN_LABELS[t] for t, hit in (c.get("patterns") or {}).items() if hit
@@ -115,6 +115,10 @@ def render_table(pool: dict, date: str) -> str:
             stop = (c.get("stop_loss_ref") or {}).get("price")
             fit = (c.get("score_detail") or {}).get("factor_contrib", {}).get("perfect_b1_fit")
             cap_intent = (c.get("capital_intent") or {}).get("level", "-")
+            fq = c.get("fundamental_quality") or {}
+            fq_disp = (fq.get("tier", "-") or "-") + ("⚠三无" if fq.get("sanwu") else "")
+            r4 = c.get("resonance_4leg") or {}
+            r4_disp = (r4.get("label", "-") or "-") + ("🐂" if r4.get("bull_candidate") else "")
             lines.append(
                 f"| {c.get('code')} | {c.get('name')}"
                 f" | {'、'.join(c.get('formula_hits') or []) or '-'}"
@@ -128,6 +132,8 @@ def render_table(pool: dict, date: str) -> str:
                 f" | {shf.get('sector_state', '未知')}"
                 f" | {c.get('trade_style', '-')}"
                 f" | {res.get('resonance_level', '-')}"
+                f" | {fq_disp}"
+                f" | {r4_disp}"
                 f" | {bucket}"
                 f" | {_fmt(stop)}"
                 f" | {c.get('next_step', '-')} |"

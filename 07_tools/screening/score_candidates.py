@@ -339,6 +339,24 @@ def market_permission(amv_state: str) -> str:
     return {"做多": "允许", "空头": "观察"}.get(amv_state, "仅低吸")
 
 
+def fundamental_quality(fin: Optional[dict]) -> dict:
+    """基于 financials(CZ抄底代理)判公司品质档 + 三无标记(cz:无主业/无业绩/无现金流→回避)。
+    优=真业绩+现金流+ROE;中=净利为正(现金流缺/未确认);差=净利非正。三无需净利非正**且现金流确认为负**(保守)。
+    ⚠️ live 用(当前快照,无未来函数)干净;**历史回测不可用**(Affair=最新快照→look-ahead)。"""
+    f = fin or {}
+    if not f.get("available"):
+        return {"tier": "未知", "sanwu": False, "available": False}
+    dp = f.get("dixi_proxy") or {}
+    np_pos = bool(dp.get("net_profit_positive"))
+    ocf_pos = dp.get("op_cashflow_positive")            # True/False/None(未确认)
+    roe_pos = bool(dp.get("roe_positive"))
+    real = bool(dp.get("real_earnings_cashflow"))       # 净利+现金流双正
+    tier = "优" if (real and roe_pos) else ("中" if np_pos else "差")
+    sanwu = bool((not np_pos) and (ocf_pos is False))   # 净利非正 且 现金流确认为负 → 三无
+    return {"tier": tier, "sanwu": sanwu, "available": True,
+            "net_profit_positive": np_pos, "cashflow_positive": ocf_pos, "roe_positive": roe_pos}
+
+
 def score_candidate(
     cand: dict,
     sector_entry: Optional[dict],
@@ -490,6 +508,17 @@ def score_candidate(
         # 双保险：冲刺波后首个 B1 禁买，不得生成买入计划
         next_step = "observe_price"
 
+    # 四面共振(市场+板块+基本面+技术)——hint/优先级,不驱动分层。牛股=三/四面共振(cz理念)。
+    fq = fundamental_quality(cand.get("financials"))
+    sp_fav = bool((cand.get("sector_phase") or {}).get("favorable"))
+    legs = {"market": permission == "允许", "sector": sp_fav,
+            "fundamental": fq.get("tier") in ("优", "中"), "technical": tech_level == "强"}
+    aligned = sum(1 for v in legs.values() if v)
+    resonance_4leg = {**legs, "aligned": aligned,
+                      "label": {4: "四面共振", 3: "三面共振", 2: "两面", 1: "单面", 0: "无"}[aligned],
+                      "bull_candidate": bool(legs["market"] and sp_fav
+                                             and fq.get("tier") == "优" and legs["technical"])}
+
     return {
         "code": cand.get("code", ""),
         "name": cand.get("name", ""),
@@ -566,6 +595,8 @@ def score_candidate(
         "fund_flow": cand.get("fund_flow") or {},
         "financials": cand.get("financials") or {},
         "sector_phase": cand.get("sector_phase") or {},
+        "fundamental_quality": fq,
+        "resonance_4leg": resonance_4leg,
     }
 
 

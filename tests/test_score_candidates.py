@@ -170,3 +170,33 @@ def test_strong_stock_in_weak_sector_reaches_a_short_term():
     scored = sc.score_candidate(_mk(TECH_STRONG, capital="strong"), SECTOR_WEAK, "做多")
     assert scored["bucket"] == "A"
     assert scored["trade_style"] == "短线(交易性)"
+
+
+_FIN_YOU = {"available": True, "dixi_proxy": {"real_earnings_cashflow": True, "roe_positive": True,
+                                              "net_profit_positive": True, "op_cashflow_positive": True}}
+
+
+def test_fundamental_quality_tiers():
+    assert sc.fundamental_quality(None)["tier"] == "未知"
+    assert sc.fundamental_quality({"available": False})["available"] is False
+    assert sc.fundamental_quality(_FIN_YOU)["tier"] == "优" and sc.fundamental_quality(_FIN_YOU)["sanwu"] is False
+    zhong = {"available": True, "dixi_proxy": {"net_profit_positive": True, "op_cashflow_positive": None,
+                                               "real_earnings_cashflow": False, "roe_positive": False}}
+    assert sc.fundamental_quality(zhong)["tier"] == "中" and sc.fundamental_quality(zhong)["sanwu"] is False
+    sanwu = {"available": True, "dixi_proxy": {"net_profit_positive": False, "op_cashflow_positive": False,
+                                               "real_earnings_cashflow": False, "roe_positive": False}}
+    r = sc.fundamental_quality(sanwu)
+    assert r["tier"] == "差" and r["sanwu"] is True    # 净利非正+现金流确认负 → 三无
+
+
+def test_resonance_four_leg():
+    cand = _mk(TECH_STRONG, capital="strong",
+               financials=_FIN_YOU, sector_phase={"favorable": True, "available": True})
+    e = sc.score_candidate(cand, SECTOR_STRONG, "做多")
+    r = e["resonance_4leg"]
+    assert r["market"] and r["sector"] and r["fundamental"] and r["technical"]
+    assert r["aligned"] == 4 and r["label"] == "四面共振" and r["bull_candidate"] is True
+    assert e["fundamental_quality"]["tier"] == "优"
+    # 空头 → market 腿灭 → 非四面共振、非牛股候选(hint 不改分层由既有测试覆盖)
+    e2 = sc.score_candidate(cand, SECTOR_STRONG, "空头")
+    assert e2["resonance_4leg"]["market"] is False and e2["resonance_4leg"]["bull_candidate"] is False
