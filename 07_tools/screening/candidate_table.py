@@ -70,6 +70,38 @@ def render_table(pool: dict, date: str) -> str:
     ]
     counts = pool.get("bucket_counts") or {}
     candidates = pool.get("candidates") or []
+    # 🐂 基本面牛股候选(共振观察区)：基本面优 + 板块有利 + 技术强(市场做多时即可买🐂)。单独列出持续观察。
+    watch = [c for c in candidates
+             if (c.get("fundamental_quality") or {}).get("tier") == "优"
+             and (c.get("resonance_4leg") or {}).get("sector")
+             and (c.get("resonance_4leg") or {}).get("technical")]
+    watch.sort(key=lambda c: ((c.get("resonance_4leg") or {}).get("aligned", 0),
+                              (c.get("score_detail") or {}).get("total") or 0), reverse=True)
+    lines.append("## 🐂 基本面牛股候选（共振观察区）")
+    lines.append("")
+    lines.append("> 基本面优 + 板块相位有利 + 技术强 = 三面已共振；再叠 0AMV做多即为可买牛股候选（🐂）。单独列出供持续观察（基本面为当前快照、非回测验证，仅辅助）。")
+    lines.append("")
+    if not watch:
+        lines.append("（今日无基本面牛股候选）")
+        lines.append("")
+    else:
+        lines.append("| 代码 | 名称 | 板块 | 基本面 | 4面共振 | 技术分 | 资金意图 | 分层 | 建议止损位 | 标记 |")
+        lines.append("|---|---|---|---|---|---:|---|---|---:|---|")
+        for c in watch:
+            r4 = c.get("resonance_4leg") or {}
+            mark = "🐂可买" if r4.get("bull_candidate") else "待0AMV做多"
+            lines.append(
+                f"| {c.get('code')} | {c.get('name')}"
+                f" | {c.get('sector', '未知')}"
+                f" | {(c.get('fundamental_quality') or {}).get('tier', '-')}"
+                f" | {r4.get('label', '-')}"
+                f" | {_fmt((c.get('score_detail') or {}).get('technical_score'))}"
+                f" | {(c.get('capital_intent') or {}).get('level', '-')}"
+                f" | {c.get('bucket', '-')}"
+                f" | {_fmt((c.get('stop_loss_ref') or {}).get('price'))}"
+                f" | {mark} |"
+            )
+        lines.append("")
     # 得分 Top5：按总分降序（跨分层），供快速浏览当日最强候选
     top5 = sorted(candidates,
                   key=lambda c: ((c.get("score_detail") or {}).get("total") or 0),
