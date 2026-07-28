@@ -18,6 +18,19 @@ PHASE_LOOKBACK = 60          # 顶背离/三打回看窗口(交易日)
 PHASE_FRACTAL = 2            # 摆动高点左右确认根数
 
 
+def _norm6(code) -> str:
+    """代码归一为 6 位数字:'600000'/'SH600000'/'600000.SH' → '600000'。"""
+    s = str(code)
+    return s[:6] if s[:6].isdigit() else s.split(".")[0][-6:].zfill(6)
+
+
+def _clean_close(close) -> "tuple[pd.Series, list[int]]":
+    """收盘序列清洗:转数值、丢非数值项,返回 (Series, 保留项的原索引)。对齐安全。"""
+    s = pd.to_numeric(pd.Series(list(close)), errors="coerce")
+    keep = [i for i, v in enumerate(s) if v == v]           # 非 NaN 的原索引
+    return pd.Series([s[i] for i in keep], dtype=float).reset_index(drop=True), keep
+
+
 def _macd(close: pd.Series) -> tuple[pd.Series, pd.Series]:
     c = close.astype(float)
     dif = c.ewm(span=MACD_FAST, adjust=False).mean() - c.ewm(span=MACD_SLOW, adjust=False).mean()
@@ -39,7 +52,7 @@ def _swing_highs(x: np.ndarray, f: int, w0: int) -> list[int]:
 def compute_sector_phase(close, lookback: int = PHASE_LOOKBACK,
                          fractal: int = PHASE_FRACTAL) -> dict[str, Any]:
     """输入板块指数收盘(list/Series)→ 相位字典。favorable=可在该板块选股进场。"""
-    c = pd.Series(list(close), dtype=float).reset_index(drop=True)
+    c, _ = _clean_close(close)
     n = len(c)
     if n < MACD_SLOW + MACD_SIGNAL + fractal + 5:
         return {"available": False}
@@ -75,9 +88,10 @@ def favorable_series(dates, close, lookback: int = PHASE_LOOKBACK,
                      fractal: int = PHASE_FRACTAL) -> dict[str, bool]:
     """逐日**因果**有利标志(date→bool):每个 t 只用截至 t 的信息(摆动高点需 i+fractal 确认)。
     favorable[t] = DIF[t]>0 且 截至 t 无(顶背离/三打)。供板块相位 gate 按 as-of 查询。"""
-    c = np.asarray(list(close), dtype=float)
+    c_full, keep = _clean_close(close)
+    c = c_full.values
     n = len(c)
-    ds = [str(d)[:10] for d in dates]
+    ds = [str(dates[i])[:10] for i in keep]               # 与被保留的收盘对齐(丢非数值项不错位)
     if n < MACD_SLOW + MACD_SIGNAL + fractal + 5:
         return {d: False for d in ds}
     dif = _macd(pd.Series(c))[0].values
@@ -87,7 +101,7 @@ def favorable_series(dates, close, lookback: int = PHASE_LOOKBACK,
         if dif[t] <= 0:
             out[ds[t]] = False
             continue
-        conf = [i for i in sh if i + fractal <= t and i >= t - lookback]   # 截至 t 已确认且在回看内
+        conf = [i for i in sh if i + fractal <= t and i >= t - lookback + 1]  # 截至 t 已确认且在回看内(与 compute_sector_phase 同宽)
         exhausted = False
         if len(conf) >= 2:
             a, b = conf[-2], conf[-1]
@@ -124,8 +138,7 @@ def load_sector_gate(index_dir, members: dict[str, list],
         if sec not in fav_by_sec:
             continue
         for cc in codes:
-            c6 = str(cc).split(".")[0][-6:].zfill(6) if not str(cc)[:6].isdigit() else str(cc)[:6]
-            code2sec.setdefault(c6, []).append(sec)
+            code2sec.setdefault(_norm6(cc), []).append(sec)
 
     def _asof(sorted_dates, fav, date):
         j = bisect.bisect_right(sorted_dates, date) - 1
@@ -141,6 +154,9 @@ def load_sector_gate(index_dir, members: dict[str, list],
                 return True                                # 任一板块有利即放行
         return False
 
+    # 元数据:调用方据此防止"目录缺失→gate 静默退化为全放行"的假象,并提示 gate 有效起始日
+    gate.n_sectors = len(fav_by_sec)                       # type: ignore[attr-defined]
+    gate.effective_start = min((sd[0] for sd, _ in fav_by_sec.values() if sd), default=None)  # type: ignore[attr-defined]
     return gate
 
 
@@ -167,8 +183,7 @@ def build_phase_resolver(index_dir, members: dict[str, list],
         if sec not in phase_by_sec:
             continue
         for cc in codes:
-            c6 = str(cc).split(".")[0][-6:].zfill(6)
-            code2sec.setdefault(c6, []).append(sec)
+            code2sec.setdefault(_norm6(cc), []).append(sec)
 
     def resolve(code6: str) -> dict[str, Any]:
         secs = code2sec.get(str(code6)[:6], [])

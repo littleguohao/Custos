@@ -71,12 +71,16 @@ def render_table(pool: dict, date: str) -> str:
     counts = pool.get("bucket_counts") or {}
     candidates = pool.get("candidates") or []
     # 🐂 基本面牛股候选(共振观察区)：基本面优 + 板块有利 + 技术强(市场做多时即可买🐂)。单独列出持续观察。
-    watch = [c for c in candidates
-             if (c.get("fundamental_quality") or {}).get("tier") == "优"
-             and (c.get("resonance_4leg") or {}).get("sector")
-             and (c.get("resonance_4leg") or {}).get("technical")]
-    watch.sort(key=lambda c: ((c.get("resonance_4leg") or {}).get("aligned", 0),
-                              (c.get("score_detail") or {}).get("total") or 0), reverse=True)
+    # 分层受限(D/C等)的共振标的不是"可买",而是**重点研究观察对象**——单列 🔍 区,不被分层埋没。
+    watch_all = [c for c in candidates
+                 if (c.get("fundamental_quality") or {}).get("tier") == "优"
+                 and (c.get("resonance_4leg") or {}).get("sector")
+                 and (c.get("resonance_4leg") or {}).get("technical")]
+    _watch_key = lambda c: ((c.get("resonance_4leg") or {}).get("aligned", 0),
+                            (c.get("score_detail") or {}).get("total") or 0)
+    watch = sorted((c for c in watch_all if c.get("bucket") in ("A", "B")), key=_watch_key, reverse=True)
+    watch_capped = sorted((c for c in watch_all if c.get("bucket") not in ("A", "B")),
+                          key=_watch_key, reverse=True)
     lines.append("## 🐂 基本面牛股候选（共振观察区）")
     lines.append("")
     lines.append("> 基本面优 + 板块相位有利 + 技术强 = 三面已共振；再叠 0AMV做多即为可买牛股候选（🐂）。单独列出供持续观察（基本面为当前快照、非回测验证，仅辅助）。")
@@ -89,7 +93,12 @@ def render_table(pool: dict, date: str) -> str:
         lines.append("|---|---|---|---|---|---:|---|---|---:|---|")
         for c in watch:
             r4 = c.get("resonance_4leg") or {}
-            mark = "🐂可买" if r4.get("bull_candidate") else "待0AMV做多"
+            if not r4.get("bull_candidate"):
+                mark = "待0AMV做多"
+            elif c.get("bucket") == "A":
+                mark = "🐂可买"
+            else:
+                mark = "🐂观察价位(B)"               # 四腿命中但分层 B:next_step=观察价位,非直接可买
             lines.append(
                 f"| {c.get('code')} | {c.get('name')}"
                 f" | {c.get('sector', '未知')}"
@@ -100,6 +109,28 @@ def render_table(pool: dict, date: str) -> str:
                 f" | {c.get('bucket', '-')}"
                 f" | {_fmt((c.get('stop_loss_ref') or {}).get('price'))}"
                 f" | {mark} |"
+            )
+        lines.append("")
+    if watch_capped:
+        lines.append("## 🔍 共振成立但分层受限（重点研究观察·非可买）")
+        lines.append("")
+        lines.append("> 以下标的同样三面/四面共振成立，但被风控降档/硬封（分层 C=长期跟踪 / D=回避）——**不是可买信号，是重点研究观察对象**："
+                     "若研究确认受限因素解除或误判，是潜在的最强候选。持续跟踪，不进入买入计划。")
+        lines.append("")
+        lines.append("| 代码 | 名称 | 板块 | 基本面 | 4面共振 | 技术分 | 分层 | 受限因素 | 建议止损位 |")
+        lines.append("|---|---|---|---|---|---:|---|---|---:|")
+        for c in watch_capped:
+            r4 = c.get("resonance_4leg") or {}
+            flags = "、".join(c.get("risk_flags") or []) or "-"
+            lines.append(
+                f"| {c.get('code')} | {c.get('name')}"
+                f" | {c.get('sector', '未知')}"
+                f" | {(c.get('fundamental_quality') or {}).get('tier', '-')}"
+                f" | {r4.get('label', '-')}"
+                f" | {_fmt((c.get('score_detail') or {}).get('technical_score'))}"
+                f" | {c.get('bucket', '-')}"
+                f" | {flags}"
+                f" | {_fmt((c.get('stop_loss_ref') or {}).get('price'))} |"
             )
         lines.append("")
     # 得分 Top5：按总分降序（跨分层），供快速浏览当日最强候选

@@ -22,7 +22,8 @@ import tq_sector  # noqa: E402  复用其 TdxW 探测 + tqcenter 惰性导入
 
 
 def _to_close_frame(d, code):
-    """get_market_data 返回归一为 [date, close]。兼容 dict{code:df/series} 或直接 df。"""
+    """get_market_data 返回归一为 [date, close]。兼容 dict{code:df/series} 或直接 df。
+    严格校验:日期列必须可解析为日期(防 RangeIndex 被误当日期静默落盘),收盘列优先名为 Close 的列。"""
     import pandas as pd
     obj = d.get(code) if isinstance(d, dict) else d
     if obj is None:
@@ -31,8 +32,12 @@ def _to_close_frame(d, code):
     df = df.reset_index()
     df.columns = [str(c) for c in df.columns]
     date_col = df.columns[0]
-    close_col = next((c for c in df.columns[1:] if c), df.columns[-1])
-    out = pd.DataFrame({"date": df[date_col].astype(str).str[:10],
+    if pd.api.types.is_numeric_dtype(df[date_col]):
+        return None                     # 数值"日期"列(如 RangeIndex 0,1,...)→ 非真日期,拒绝静默落盘
+    close_col = next((c for c in df.columns if c.lower() == "close"),
+                     next((c for c in df.columns[1:] if c), df.columns[-1]))
+    dates = pd.to_datetime(df[date_col], errors="coerce")
+    out = pd.DataFrame({"date": dates.dt.strftime("%Y-%m-%d"),
                         "close": pd.to_numeric(df[close_col], errors="coerce")}).dropna()
     return out if len(out) else None
 
@@ -67,7 +72,9 @@ def main(argv=None) -> int:
                                        period=args.period, start_time=args.start, count=-1)
                 frame = _to_close_frame(d, code)
                 if frame is not None:
-                    frame.to_csv(outdir / f"{code}.csv", index=False)
+                    tmp = outdir / f"{code}.csv.tmp"
+                    frame.to_csv(tmp, index=False)
+                    tmp.replace(outdir / f"{code}.csv")   # 原子落盘:防中断留下截断 CSV(陈旧相位假象)
                     ok += 1
                 if args.members:
                     try:

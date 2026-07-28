@@ -59,3 +59,50 @@ def test_sector_concentration(tmp_path):
     assert r["top_sectors"][0]["sector"] == "880201.SH" and r["top_sectors"][0]["n_winners"] == 4
     assert r["top5_winner_share"] >= 0.5           # 集中(前5板块占大头)
     assert "板块" in r["text"]
+
+
+def test_sector_concentration_corr_and_zero_winner_sectors(tmp_path):
+    # 修 bug 兜底:corr 必须真的算出来(曾因缺 import pandas 被静默吞成 None);零赢家板块计入相关性样本
+    dates = [str(d)[:10] for d in pd.date_range("2024-09-02", periods=80, freq="B")]
+    def _csv(name, ret):
+        close = [100 * (1 + ret * i / 79) for i in range(80)]
+        (tmp_path / f"{name}.csv").write_text(
+            "date,close\n" + "\n".join(f"{d},{c}" for d, c in zip(dates, close)), encoding="utf-8")
+    _csv("880201.SH", 0.40)   # 强,有赢家
+    _csv("880900.SH", -0.10)  # 弱,有赢家
+    _csv("880300.SH", 0.05)   # 零赢家板块
+    members = {"880201.SH": ["600000", "600001"], "880900.SH": ["000002"], "880300.SH": ["600999"]}
+    winners = ["600000", "600001", "000002"]
+    r = lp.sector_concentration(winners, members, tmp_path, dates[0], dates[-1])
+    assert r["top_sectors"][0]["sector_return"] is not None       # 板块收益真的算了(缺 pd 时恒 None)
+    assert r["corr_wincount_vs_sectorret"] is not None            # 相关性真的算了
+    assert r["corr_n"] == 3                                       # 零赢家板块(880300)计入,不左截断
+    assert abs(r["top_sectors"][0]["sector_return"] - 0.40) < 0.01
+
+
+def test_analyze_unknown_regime_excluded_from_leads():
+    # 起涨点早于 regime 历史 → "未知" 不得混入 lead 分布(此前 !=做多 的口径会把未知计入)
+    launches_regime = {"2025-06-01": "做多"}
+    dates = pd.date_range("2025-01-01", periods=60, freq="B")
+    ds = [str(d)[:10] for d in dates]
+    close = [20 - 0.3 * i for i in range(20)] + [14 + 0.6 * i for i in range(40)]
+    win = pd.DataFrame({"date": dates, "open": close, "high": [c * 1.02 for c in close],
+                        "low": [c * 0.98 for c in close], "close": close, "volume": [1e6] * 60})
+    res = lp.analyze({"WIN": win}, launches_regime, ds[0], ds[-1],
+                     entry_gate=lambda s: True, top_pct=100, buffer_days=0, min_bars=40)
+    assert res["by_regime"].get("未知", 0) >= 1                    # 起涨点确实落在未知段
+    assert "lead_days" not in res                                  # 但未知不进 lead 分布
+
+
+def test_main_loads_with_buffered_start(tmp_path, monkeypatch):
+    # buffer 修复兜底:真实加载路径的数据起点必须早于 --start(此前 buffer 被加载窗口截为 0)
+    captured = {}
+    def fake_load(codes, count, start=None, end=None, root=None):
+        captured["start"] = start
+        return {}
+    monkeypatch.setattr("s_data.load_bars_qlib", fake_load)
+    monkeypatch.setattr(lp.bt, "load_amv_regime", lambda since="2015-01-01", root=None: {})
+    rc = lp.main(["--codes", "600000", "--start", "2025-01-01", "--end", "2025-06-30",
+                  "--buffer-days", "60", "--sector-members", str(tmp_path / "none.json")])
+    assert rc == 0
+    assert captured["start"] < "2024-11-01"          # 60 交易日×1.6+10 ≈ 106 日历日 ≈ 2024-09-16

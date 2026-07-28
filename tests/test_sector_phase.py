@@ -62,3 +62,55 @@ def test_favorable_series_causal_and_gate(tmp_path):
     assert resolve("600000")["favorable"] is True and resolve("600000")["available"] is True
     assert resolve("000002")["favorable"] is False
     assert resolve("999999")["available"] is False   # 未分类 → 无相位
+
+
+def test_favorable_series_no_lookahead():
+    # 因果性兜底:在序列尾部追加暴跌/尖峰,已有日期的 fav 不得改变
+    import pandas as pd
+    n = 120
+    dates = [str(d)[:10] for d in pd.date_range("2022-01-03", periods=n, freq="B")]
+    close = list(10 + 0.12 * np.arange(n))
+    fav1 = sp.favorable_series(dates, close)
+    ext_dates = dates + [str(d)[:10] for d in pd.date_range("2022-06-27", periods=15, freq="B")]
+    crash = close + [close[-1] * (0.9 ** i) for i in range(1, 16)]          # 尾部崩 15 根
+    fav2 = sp.favorable_series(ext_dates, crash)
+    assert all(fav2[d] == v for d, v in fav1.items())                       # 历史结论不被未来改写
+    spike = close + [close[-1] * (1.2 ** i) for i in range(1, 16)]          # 尾部暴拉出新摆动高点
+    fav3 = sp.favorable_series(ext_dates, spike)
+    assert all(fav3[d] == v for d, v in fav1.items())
+
+
+def test_gate_metadata_and_norm6(tmp_path):
+    import pandas as pd
+    dates = [str(d)[:10] for d in pd.date_range("2022-01-03", periods=130, freq="B")]
+    up = list(10 + 0.15 * np.arange(130))
+    (tmp_path / "880201.SH.csv").write_text(
+        "date,close\n" + "\n".join(f"{d},{c}" for d, c in zip(dates, up)), encoding="utf-8")
+    members = {"880201.SH": ["SH600000"], "880900.SH": ["000002"]}   # 880900 无 CSV
+    gate = sp.load_sector_gate(tmp_path, members)
+    assert gate.n_sectors == 1                       # 只有 1 个板块真有数据(防"看似生效"假象)
+    assert gate.effective_start == dates[0]
+    assert gate("600000", dates[-1]) is True         # "SH600000" 归一化为 600000 命中映射
+    # 数据起点之前的日期 → 已分类个股被拦(语义显式,调用方负责提示)
+    assert gate("600000", "2021-01-04") is False
+
+
+def test_phase_dirty_input_no_raise():
+    # 非数值/NaN 输入:不 raise,且 dif 不输出 NaN(否则下游 json.dumps 出非法 JSON)
+    r = sp.compute_sector_phase(["10", "x", None, 10.5] + [10 + 0.1 * i for i in range(80)])
+    assert r["available"] and r["dif"] == r["dif"]
+    r2 = sp.compute_sector_phase(["a", "b", "c"])
+    assert r2["available"] is False
+
+
+def test_fetcher_to_close_frame():
+    import pandas as pd
+    from local_tdx import fetch_sector_index_history as fsh
+    df = pd.DataFrame({"Close": [1.0, 2.0]},
+                      index=pd.to_datetime(["2022-01-03", "2022-01-04"]))
+    out = fsh._to_close_frame({"880201.SH": df}, "880201.SH")
+    assert list(out["date"]) == ["2022-01-03", "2022-01-04"] and list(out["close"]) == [1.0, 2.0]
+    # RangeIndex 垃圾输入 → 日期不可解析 → None(不得静默落盘)
+    junk = pd.DataFrame({"Close": [1.0, 2.0]})
+    assert fsh._to_close_frame(junk, "X") is None
+    assert fsh._to_close_frame({"X": None}, "X") is None

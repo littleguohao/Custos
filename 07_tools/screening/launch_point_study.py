@@ -10,6 +10,8 @@
   4. 汇总:起涨点落做多 vs 空头/中性占比;空头者的 lead-days 分布(领先 0AMV 几天)。
 
 ⚠️ 幸存者偏差(赢家=现存赢家)+ 起涨点后视 → 结论是"规律观察",不是可交易策略。
+⚠️ 右删失:起涨点靠近 end 时此后可能再无做多日,lead=None 的样本被丢弃,lead 分布偏"较快转多"。
+⚠️ 板块共振相关含机械成分:赢家本身贡献板块指数收益,corr>0 部分是恒真的,仅作描述。
 用法(用户机):uv run python 07_tools/screening/launch_point_study.py --data-source qlib --universe-sdata \
   --start 2024-09-01 --end 2025-06-30 --entry-filter reversal_k --top-pct 10 --buffer-days 60
 """
@@ -19,8 +21,11 @@ import argparse
 import bisect
 import statistics
 import sys
+from datetime import date as _date, timedelta as _td
 from pathlib import Path
 from typing import Any, Optional
+
+import pandas as pd
 
 TOOLS = Path(__file__).resolve().parents[1]
 for _p in (str(TOOLS), str(TOOLS / "screening"), str(TOOLS / "local_tdx")):
@@ -109,7 +114,7 @@ def analyze(bars_by_code: dict, regime: dict[str, str], start: str, end: str,
     for L in launches:
         by_regime[L["regime"]] = by_regime.get(L["regime"], 0) + 1
     leads = [L["lead_days_to_long"] for L in launches
-             if L["regime"] != "做多" and L["lead_days_to_long"] is not None]
+             if L["regime"] in ("空头", "中性") and L["lead_days_to_long"] is not None]  # "未知"不计入分布
     out = {"n_winners": len(winners), "n_launches": n, "by_regime": by_regime,
            "winners": winners, "launches": launches}
     if leads:
@@ -147,7 +152,7 @@ def sector_concentration(winners: list[str], members: dict[str, list], index_dir
         return {"n_winners": len(winners), "n_classified": 0, "text": "无板块成员映射"}
     idx = Path(index_dir)
     sec_ret: dict[str, float] = {}
-    for sec in win_count:
+    for sec in members:                                   # 全成员板块都算收益(含零赢家板块,供相关性用全样本)
         p = idx / f"{sec}.csv"
         if p.is_file():
             try:
@@ -157,11 +162,11 @@ def sector_concentration(winners: list[str], members: dict[str, list], index_dir
                     sec_ret[sec] = r
             except Exception:  # noqa: BLE001
                 pass
-    total = sum(win_count.values())
+    total = sum(win_count.values())                       # 板块归属次数(一股多板块会重复计)
     ranked = sorted(win_count.items(), key=lambda x: x[1], reverse=True)
     top5 = sum(n for _, n in ranked[:5])
     hhi = round(sum((n / total) ** 2 for n in win_count.values()), 4)   # 赫芬达尔:越大越集中
-    pairs = [(win_count[s], sec_ret[s]) for s in win_count if s in sec_ret]
+    pairs = [(win_count.get(s, 0), sec_ret[s]) for s in sec_ret]        # 零赢家板块计入(不左截断)
     corr = None
     if len(pairs) >= 3:
         try:
@@ -173,11 +178,12 @@ def sector_concentration(winners: list[str], members: dict[str, list], index_dir
                 for s, n in ranked[:top_k]]
     out = {"n_winners": len(winners), "n_classified": classified, "distinct_sectors": len(win_count),
            "top5_winner_share": round(top5 / total, 3), "herfindahl": hhi,
-           "corr_wincount_vs_sectorret": corr, "top_sectors": top_rows}
+           "corr_wincount_vs_sectorret": corr, "corr_n": len(pairs), "top_sectors": top_rows}
     conc = "集中" if out["top5_winner_share"] >= 0.5 else ("偏分散" if out["top5_winner_share"] < 0.3 else "中等")
     out["text"] = (f"赢家 {len(winners)} 只(有板块 {classified}), 覆盖 {len(win_count)} 个板块; "
-                   f"前5板块占赢家 {out['top5_winner_share']*100:.0f}%({conc}), HHI {hhi}; "
-                   f"赢家数 vs 板块收益 相关 {corr}(>0=集中于强势板块=板块共振)。\n  Top板块: "
+                   f"前5板块占归属次数 {out['top5_winner_share']*100:.0f}%({conc};分母=归属次数,一股多板块重复计), HHI {hhi}; "
+                   f"赢家数 vs 板块收益 相关 {corr} (n={len(pairs)},含零赢家板块;"
+                   f"⚠️赢家贡献板块收益,相关性含机械成分,仅描述)。\n  Top板块: "
                    + "; ".join(f"{r['sector']}({r['n_winners']}只,板块{(r['sector_return'] or 0)*100:+.0f}%)"
                               for r in top_rows[:6]))
     return out
@@ -216,15 +222,21 @@ def main(argv=None, loader=None) -> int:
     if not codes:
         ap.error("需 --universe-sdata 或 --codes")
 
+    # 数据/regime 起点必须比 --start 再早 buffer 段(起涨点要在 [start-buffer, end] 内回溯),
+    # 否则 buffer 被加载窗口截为 0(此前真实运行从未真正回溯,结论有偏)。
+    load_start = args.start
+    if args.buffer_days:
+        load_start = (_date.fromisoformat(args.start)
+                      - _td(days=int(args.buffer_days * 1.6) + 10)).isoformat()   # 交易日→日历日留裕量
     if loader is not None:
         bars = loader(codes, 0)
     else:
         import s_data  # noqa: PLC0415
         sub = "CSV_DATA" if args.data_source == "csv" else "Q_DATA"
         fn = s_data.load_bars_csv if args.data_source == "csv" else s_data.load_bars_qlib
-        bars = fn(codes, 0, start=args.start, end=None, root=str(Path(args.s_data_root) / sub))
+        bars = fn(codes, 0, start=load_start, end=None, root=str(Path(args.s_data_root) / sub))
 
-    regime = bt.load_amv_regime()
+    regime = bt.load_amv_regime(since=load_start)          # regime 起点跟随数据起点(早前窗口)
     res = analyze(bars, regime, args.start, args.end, bt.ENTRY_GATES[args.entry_filter],
                   top_pct=args.top_pct, buffer_days=args.buffer_days)
     print(f"\n=== 起涨点 vs 0AMV（{args.start}~{args.end}, {args.entry_filter}, top{args.top_pct}%）===")

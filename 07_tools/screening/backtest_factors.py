@@ -1139,7 +1139,16 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
             if not members:
                 ap.error("--sector-filter 需 sector_members.json(先跑 fetch_sector_index_history.py --members)")
             sector_gate = sector_phase.load_sector_gate(args.sector_index_dir, members)
-            print(f"[INFO] 板块相位 gate: {len(members)} 板块 (dir={args.sector_index_dir})", file=sys.stderr)
+            n_loaded = getattr(sector_gate, "n_sectors", 0)
+            if not n_loaded:
+                ap.error(f"--sector-filter 无任何板块指数数据(dir={args.sector_index_dir});"
+                         f"先跑 fetch_sector_index_history.py,否则 gate 会静默退化为全放行")
+            eff = getattr(sector_gate, "effective_start", None)
+            print(f"[INFO] 板块相位 gate: {n_loaded}/{len(members)} 板块有数据, 有效起始 {eff}"
+                  f" (dir={args.sector_index_dir})", file=sys.stderr)
+            if args.start and eff and args.start < eff:
+                print(f"[WARN] --start {args.start} 早于板块数据起始 {eff}:该日前已分类个股一律被 gate 拦截,"
+                      f"样本期与不带 filter 的 baseline 不可比", file=sys.stderr)
         trades: list[dict[str, Any]] = []
         import gc
         for k, c in enumerate(codes):     # 流式：逐股加载→评估→释放，避免全量载入 OOM
