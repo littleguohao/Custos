@@ -34,3 +34,25 @@ def test_phase_top_divergence_filtered():
     r = sp.compute_sector_phase(close, lookback=200)
     assert r["available"] and r["above_zero"]
     assert r["exhausted"] and not r["favorable"]   # 顶背离/三打 → 过滤
+
+
+def test_favorable_series_causal_and_gate(tmp_path):
+    import numpy as np
+    import pandas as pd
+    # 有利板块:稳步上行(DIF>0,无顶背离);不利板块:单边下行(DIF<0)
+    n = 130
+    dates = [str(d)[:10] for d in pd.date_range("2022-01-03", periods=n, freq="B")]
+    up = list(10 + 0.15 * np.arange(n))
+    down = list(30 - 0.15 * np.arange(n))
+    (tmp_path / "880201.SH.csv").write_text(
+        "date,close\n" + "\n".join(f"{d},{c}" for d, c in zip(dates, up)), encoding="utf-8")
+    (tmp_path / "880900.SH.csv").write_text(
+        "date,close\n" + "\n".join(f"{d},{c}" for d, c in zip(dates, down)), encoding="utf-8")
+    fav = sp.favorable_series(dates, up)
+    assert fav[dates[-1]] is True and all(v in (True, False) for v in fav.values())   # 因果布尔
+    members = {"880201.SH": ["600000"], "880900.SH": ["000002"]}
+    gate = sp.load_sector_gate(tmp_path, members)
+    last = dates[-1]
+    assert gate("600000", last) is True     # 有利板块成员 → 放行
+    assert gate("000002", last) is False    # 不利板块(DIF<0)成员 → 拦截
+    assert gate("999999", last) is True     # 未分类 → 不过滤

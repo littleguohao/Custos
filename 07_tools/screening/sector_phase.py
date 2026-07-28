@@ -69,3 +69,76 @@ def compute_sector_phase(close, lookback: int = PHASE_LOOKBACK,
     return {"available": True, "dif": round(dif_last, 4), "above_zero": above_zero,
             "top_divergence": top_div, "three_peaks": three_peaks,
             "exhausted": exhausted, "favorable": favorable, "phase": phase}
+
+
+def favorable_series(dates, close, lookback: int = PHASE_LOOKBACK,
+                     fractal: int = PHASE_FRACTAL) -> dict[str, bool]:
+    """逐日**因果**有利标志(date→bool):每个 t 只用截至 t 的信息(摆动高点需 i+fractal 确认)。
+    favorable[t] = DIF[t]>0 且 截至 t 无(顶背离/三打)。供板块相位 gate 按 as-of 查询。"""
+    c = np.asarray(list(close), dtype=float)
+    n = len(c)
+    ds = [str(d)[:10] for d in dates]
+    if n < MACD_SLOW + MACD_SIGNAL + fractal + 5:
+        return {d: False for d in ds}
+    dif = _macd(pd.Series(c))[0].values
+    sh = _swing_highs(c, fractal, 0)                       # 全部摆动高点(每个在 i+fractal 才确认)
+    out: dict[str, bool] = {}
+    for t in range(n):
+        if dif[t] <= 0:
+            out[ds[t]] = False
+            continue
+        conf = [i for i in sh if i + fractal <= t and i >= t - lookback]   # 截至 t 已确认且在回看内
+        exhausted = False
+        if len(conf) >= 2:
+            a, b = conf[-2], conf[-1]
+            exhausted = bool(c[b] > c[a] and dif[b] < dif[a])              # 顶背离
+        if not exhausted and len(conf) >= 3:
+            p1, p2, p3 = conf[-3], conf[-2], conf[-1]
+            exhausted = bool(c[p1] < c[p2] < c[p3] and dif[p1] > dif[p2] > dif[p3])  # 三打
+        out[ds[t]] = not exhausted
+    return out
+
+
+def load_sector_gate(index_dir, members: dict[str, list],
+                     lookback: int = PHASE_LOOKBACK):
+    """构建板块相位 gate: gate(code6, date)->bool。
+    index_dir: 板块指数 CSV 目录({sector}.csv, date/close)；members: {sector_code:[stock codes]}。
+    未分类个股 → True(不过滤);已分类 → 其任一所属板块 as-of 有利即 True。绝不 raise。
+    """
+    import bisect
+    from pathlib import Path as _P
+    idx = _P(index_dir)
+    fav_by_sec: dict[str, tuple[list, dict]] = {}
+    for sec in members:
+        p = idx / f"{sec}.csv"
+        if not p.is_file():
+            continue
+        try:
+            df = pd.read_csv(p)
+            fav = favorable_series(df["date"].tolist(), df["close"].tolist(), lookback=lookback)
+            fav_by_sec[sec] = (sorted(fav), fav)
+        except Exception:  # noqa: BLE001
+            continue
+    code2sec: dict[str, list] = {}
+    for sec, codes in members.items():
+        if sec not in fav_by_sec:
+            continue
+        for cc in codes:
+            c6 = str(cc).split(".")[0][-6:].zfill(6) if not str(cc)[:6].isdigit() else str(cc)[:6]
+            code2sec.setdefault(c6, []).append(sec)
+
+    def _asof(sorted_dates, fav, date):
+        j = bisect.bisect_right(sorted_dates, date) - 1
+        return fav.get(sorted_dates[j], False) if j >= 0 else False
+
+    def gate(code6: str, date: str) -> bool:
+        secs = code2sec.get(str(code6)[:6])
+        if not secs:
+            return True                                    # 未分类 → 不过滤
+        for sec in secs:
+            sd, fav = fav_by_sec[sec]
+            if _asof(sd, fav, date):
+                return True                                # 任一板块有利即放行
+        return False
+
+    return gate

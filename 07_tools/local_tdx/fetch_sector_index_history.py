@@ -42,6 +42,8 @@ def main(argv=None) -> int:
     ap.add_argument("--out", default=str(TOOLS.parent / "01_data" / "market" / "sector_index"))
     ap.add_argument("--start", default="20180101", help="起始日 YYYYMMDD(TQ 会给到本地实有最早)")
     ap.add_argument("--period", default="day")
+    ap.add_argument("--members", action="store_true",
+                    help="同时抓板块成员(get_stock_list_in_sector)→ sector_members.json(板块相位 gate 需要)")
     args = ap.parse_args(argv)
     outdir = Path(args.out)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -53,6 +55,7 @@ def main(argv=None) -> int:
     tq.initialize(str(Path(__file__).resolve()))
     ok = 0
     total = 0
+    members: dict = {}
     try:
         sectors = tq.get_sector_list() or []
         total = len(sectors)
@@ -66,10 +69,21 @@ def main(argv=None) -> int:
                 if frame is not None:
                     frame.to_csv(outdir / f"{code}.csv", index=False)
                     ok += 1
+                if args.members:
+                    try:
+                        mem = tq.get_stock_list_in_sector(code) or []
+                        members[code] = [str(x).split(".")[0][-6:].zfill(6) for x in mem]
+                    except Exception as mexc:  # noqa: BLE001
+                        print(f"[WARN] members {code}: {mexc}", file=sys.stderr)
             except Exception as exc:  # noqa: BLE001
                 print(f"[WARN] {code}: {exc}", file=sys.stderr)
             if (i + 1) % 50 == 0:
                 print(f"[INFO] {i + 1}/{total}  已落盘 {ok}", file=sys.stderr)
+        if args.members:
+            import json
+            mpath = outdir.parent / "sector_members.json"
+            mpath.write_text(json.dumps(members, ensure_ascii=False), encoding="utf-8")
+            print(f"[OK] 成员映射 {len(members)} 板块 → {mpath}")
         print(f"[OK] 完成: {ok}/{total} 板块指数落盘到 {outdir}")
     finally:
         tq.close()

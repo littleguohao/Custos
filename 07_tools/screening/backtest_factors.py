@@ -604,7 +604,8 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
                     collect_all: bool = False,
                     entry_gate: Optional[Callable[[pd.DataFrame], bool]] = None,
                     stop_mode: str = "low", stop_pct: float = 8.0,
-                    feature_panel: bool = False) -> list[dict[str, Any]]:
+                    feature_panel: bool = False,
+                    sector_gate: Optional[Callable[[str, str], bool]] = None) -> list[dict[str, Any]]:
     """在 scorer 判「可买」的 as-of 日进场，按 B1 规则(止损+BBI)模拟到出场；非重叠(平仓后再找)。
 
     cost_bps：单边成本合计的往返基点(A股约20~30bps含佣金/印花税/滑点)，从每笔收益中扣除，看净期望。
@@ -641,6 +642,9 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
             entry_date = str(df["date"].iloc[i])[:10]
             slice_df = df.iloc[:i + 1]
             if entry_gate is not None and not entry_gate(slice_df):
+                i += max(1, step)
+                continue
+            if sector_gate is not None and not sector_gate(code, entry_date):   # 板块相位择时
                 i += max(1, step)
                 continue
             res = scorer(slice_df, code)
@@ -1076,6 +1080,14 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                     help="输出JSON不含逐笔trades(仅摘要;全市场日线省内存,防OOM)")
     ap.add_argument("--attribution", action="store_true",
                     help="记录每笔特征面板,按日期切train/test,报各特征前向lift——严谨检验'赢家共性'是否可泛化(防幸存者/过拟合)")
+    ap.add_argument("--sector-filter", action="store_true",
+                    help="板块相位择时:只在个股所属板块处于有利相位(DIF>0且无近期顶背离/三打)时进场")
+    ap.add_argument("--sector-index-dir",
+                    default=str(Path(__file__).resolve().parents[2] / "01_data" / "market" / "sector_index"),
+                    help="板块指数CSV目录(fetch_sector_index_history.py 产出)")
+    ap.add_argument("--sector-members",
+                    default=str(Path(__file__).resolve().parents[2] / "01_data" / "market" / "sector_members.json"),
+                    help="板块成员映射 JSON({sector:[codes]}; fetcher --members 产出)")
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
 
@@ -1119,6 +1131,15 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
             if not amv_regime:
                 ap.error("--amv-long-only 需要指南针 0AMV 数据(compass_amv)，未读到；请在有指南针的机器运行")
             print(f"[INFO] 0AMV regime 覆盖 {len(amv_regime)} 个交易日，仅在『做多』区间进场", file=sys.stderr)
+        sector_gate = None
+        if args.sector_filter:
+            import sector_phase  # noqa: PLC0415
+            mpath = Path(args.sector_members)
+            members = json.loads(mpath.read_text(encoding="utf-8")) if mpath.is_file() else {}
+            if not members:
+                ap.error("--sector-filter 需 sector_members.json(先跑 fetch_sector_index_history.py --members)")
+            sector_gate = sector_phase.load_sector_gate(args.sector_index_dir, members)
+            print(f"[INFO] 板块相位 gate: {len(members)} 板块 (dir={args.sector_index_dir})", file=sys.stderr)
         trades: list[dict[str, Any]] = []
         import gc
         for k, c in enumerate(codes):     # 流式：逐股加载→评估→释放，避免全量载入 OOM
@@ -1131,7 +1152,7 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                     entry_gate=ENTRY_GATES[args.entry_filter],
                     stop_mode=args.stop_mode, stop_pct=args.stop_pct,
                     max_signals_per_code=(args.max_signals_per_code or None),
-                    feature_panel=bool(args.attribution))
+                    feature_panel=bool(args.attribution), sector_gate=sector_gate)
             del d
             if (k + 1) % 500 == 0:
                 gc.collect()
