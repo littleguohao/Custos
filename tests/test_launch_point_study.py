@@ -41,3 +41,21 @@ def test_analyze_smoke():
                      entry_gate=lambda s: True, top_pct=50, buffer_days=0, min_bars=40)
     assert res["n_winners"] >= 1 and res["n_launches"] >= 1
     assert set(res["by_regime"]) <= {"做多", "空头", "中性", "未知"}
+
+
+def test_sector_concentration(tmp_path):
+    # 赢家集中在 880201(强板块,+40%),少量在 880900(弱板块,-10%)
+    dates = [str(d)[:10] for d in pd.date_range("2024-09-02", periods=80, freq="B")]
+    def _csv(name, ret):
+        close = [100 * (1 + ret * i / 79) for i in range(80)]
+        (tmp_path / f"{name}.csv").write_text(
+            "date,close\n" + "\n".join(f"{d},{c}" for d, c in zip(dates, close)), encoding="utf-8")
+    _csv("880201.SH", 0.40)   # 强
+    _csv("880900.SH", -0.10)  # 弱
+    members = {"880201.SH": ["600000", "600001", "600002", "600003"], "880900.SH": ["000002"]}
+    winners = ["600000", "600001", "600002", "600003", "000002"]
+    r = lp.sector_concentration(winners, members, tmp_path, dates[0], dates[-1])
+    assert r["distinct_sectors"] == 2 and r["n_classified"] == 5
+    assert r["top_sectors"][0]["sector"] == "880201.SH" and r["top_sectors"][0]["n_winners"] == 4
+    assert r["top5_winner_share"] >= 0.5           # 集中(前5板块占大头)
+    assert "板块" in r["text"]

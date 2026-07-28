@@ -111,7 +111,7 @@ def analyze(bars_by_code: dict, regime: dict[str, str], start: str, end: str,
     leads = [L["lead_days_to_long"] for L in launches
              if L["regime"] != "做多" and L["lead_days_to_long"] is not None]
     out = {"n_winners": len(winners), "n_launches": n, "by_regime": by_regime,
-           "launches": launches}
+           "winners": winners, "launches": launches}
     if leads:
         leads.sort()
         out["lead_days"] = {"n": len(leads), "median": statistics.median(leads),
@@ -123,6 +123,63 @@ def analyze(bars_by_code: dict, regime: dict[str, str], start: str, end: str,
                 if leads else "无空头起涨样本")
     out["text"] = (f"赢家 {len(winners)} 只 / 起涨点 {n} 个; 落做多 {by_regime.get('做多',0)}"
                    f"({(long_share or 0)*100:.0f}%)、空头 {by_regime.get('空头',0)}、中性 {by_regime.get('中性',0)}。\n  {lead_txt}")
+    return out
+
+
+def sector_concentration(winners: list[str], members: dict[str, list], index_dir,
+                         start: str, end: str, top_k: int = 12) -> dict[str, Any]:
+    """赢家的板块分布:集中于少数板块还是分散?并看是否与板块指数强弱(共振)相关。
+    members:{sector:[codes]};index_dir:板块指数CSV目录。返回 top板块(赢家数+板块区间收益)+集中度+相关性。"""
+    code2sec: dict[str, list] = {}
+    for sec, codes in members.items():
+        for cc in codes:
+            code2sec.setdefault(str(cc).split(".")[0][-6:].zfill(6), []).append(sec)
+    win_count: dict[str, int] = {}
+    classified = 0
+    for w in winners:
+        secs = code2sec.get(str(w)[:6])
+        if not secs:
+            continue
+        classified += 1
+        for sec in secs:
+            win_count[sec] = win_count.get(sec, 0) + 1
+    if not win_count:
+        return {"n_winners": len(winners), "n_classified": 0, "text": "无板块成员映射"}
+    idx = Path(index_dir)
+    sec_ret: dict[str, float] = {}
+    for sec in win_count:
+        p = idx / f"{sec}.csv"
+        if p.is_file():
+            try:
+                df = pd.read_csv(p)
+                r = window_return(df["date"].tolist(), df["close"].astype(float).tolist(), start, end)
+                if r is not None:
+                    sec_ret[sec] = r
+            except Exception:  # noqa: BLE001
+                pass
+    total = sum(win_count.values())
+    ranked = sorted(win_count.items(), key=lambda x: x[1], reverse=True)
+    top5 = sum(n for _, n in ranked[:5])
+    hhi = round(sum((n / total) ** 2 for n in win_count.values()), 4)   # 赫芬达尔:越大越集中
+    pairs = [(win_count[s], sec_ret[s]) for s in win_count if s in sec_ret]
+    corr = None
+    if len(pairs) >= 3:
+        try:
+            corr = round(statistics.correlation([a for a, _ in pairs], [b for _, b in pairs]), 3)
+        except Exception:  # noqa: BLE001
+            corr = None
+    top_rows = [{"sector": s, "n_winners": n, "share": round(n / total, 3),
+                 "sector_return": (round(sec_ret[s], 4) if s in sec_ret else None)}
+                for s, n in ranked[:top_k]]
+    out = {"n_winners": len(winners), "n_classified": classified, "distinct_sectors": len(win_count),
+           "top5_winner_share": round(top5 / total, 3), "herfindahl": hhi,
+           "corr_wincount_vs_sectorret": corr, "top_sectors": top_rows}
+    conc = "集中" if out["top5_winner_share"] >= 0.5 else ("偏分散" if out["top5_winner_share"] < 0.3 else "中等")
+    out["text"] = (f"赢家 {len(winners)} 只(有板块 {classified}), 覆盖 {len(win_count)} 个板块; "
+                   f"前5板块占赢家 {out['top5_winner_share']*100:.0f}%({conc}), HHI {hhi}; "
+                   f"赢家数 vs 板块收益 相关 {corr}(>0=集中于强势板块=板块共振)。\n  Top板块: "
+                   + "; ".join(f"{r['sector']}({r['n_winners']}只,板块{(r['sector_return'] or 0)*100:+.0f}%)"
+                              for r in top_rows[:6]))
     return out
 
 
@@ -142,6 +199,11 @@ def main(argv=None, loader=None) -> int:
     ap.add_argument("--entry-filter", choices=["j_low", "reversal_k", "j_macd_turn"], default="reversal_k")
     ap.add_argument("--top-pct", type=float, default=10.0)
     ap.add_argument("--buffer-days", type=int, default=60)
+    ap.add_argument("--sector-members",
+                    default=str(TOOLS.parent / "01_data" / "market" / "sector_members.json"),
+                    help="板块成员 JSON(算赢家板块集中度/共振;缺失则跳过)")
+    ap.add_argument("--sector-index-dir",
+                    default=str(TOOLS.parent / "01_data" / "market" / "sector_index"))
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
 
@@ -165,11 +227,20 @@ def main(argv=None, loader=None) -> int:
     regime = bt.load_amv_regime()
     res = analyze(bars, regime, args.start, args.end, bt.ENTRY_GATES[args.entry_filter],
                   top_pct=args.top_pct, buffer_days=args.buffer_days)
+    print(f"\n=== 起涨点 vs 0AMV（{args.start}~{args.end}, {args.entry_filter}, top{args.top_pct}%）===")
+    print(res["text"])
+    # 赢家板块集中度 / 板块共振
+    import json as _json
+    mpath = Path(args.sector_members)
+    if mpath.is_file() and res.get("winners"):
+        members = _json.loads(mpath.read_text(encoding="utf-8"))
+        conc = sector_concentration(res["winners"], members, args.sector_index_dir, args.start, args.end)
+        res["sector_concentration"] = conc
+        print(f"\n=== 赢家板块集中度 / 板块共振 ===")
+        print(conc["text"])
     if args.out:
         import json
         Path(args.out).write_text(json.dumps(res, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"\n=== 起涨点 vs 0AMV（{args.start}~{args.end}, {args.entry_filter}, top{args.top_pct}%）===")
-    print(res["text"])
     return 0
 
 
