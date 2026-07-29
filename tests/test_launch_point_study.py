@@ -139,3 +139,36 @@ def test_sector_concentration_density_and_winner_rets(tmp_path):
     assert r["top_by_density"][0]["sector"] == "880548.SH"
     assert abs(d201["expectancy"] - 0.40) < 1e-3                       # 赢家收益均值(0.5+0.3)/2
     assert d201["name"] and d201["sector_return"] is not None
+
+
+def test_capture_rank_study():
+    import pandas as pd
+    dates = [str(d)[:10] for d in pd.date_range("2024-09-02", periods=60, freq="B")]
+
+    def _mk(code, ret, fire_day):
+        # 线性收益 ret;在 fire_day 那天造一个"信号"(用 volume==1 标记),其余天 volume==9
+        close = [10 * (1 + ret * i / 59) for i in range(60)]
+        vol = [9.0] * 60
+        vol[fire_day] = 1.0
+        return pd.DataFrame({"date": dates, "open": close, "high": [c * 1.01 for c in close],
+                             "low": [c * 0.99 for c in close], "close": close, "volume": vol})
+
+    # 10 只:5 只赢家(高收益) + 5 只输家(低/负收益),同日触发信号→同池
+    bars = {}
+    for k in range(5):
+        bars[f"W{k}"] = _mk(f"W{k}", 0.8 + 0.02 * k, 20 + k)     # 赢家
+    for k in range(5):
+        bars[f"L{k}"] = _mk(f"L{k}", -0.1 + 0.01 * k, 20 + k)    # 输家(同日触发→同池)
+
+    gate = lambda df: float(df["volume"].iloc[-1]) == 1.0        # 信号=当天 volume==1
+    scorer = lambda df, code: {"score": 100.0 if str(code).startswith("W") else 1.0}
+    r = lp.capture_rank_study(bars, dates[0], dates[-1], gate, scorer=scorer,
+                              top_pct=50.0, surface_top_n=3, min_bars=5)
+    assert r["n_winners"] == 5 and r["captured"] == 5 and r["recall"] == 1.0
+    assert r["surfaced"] == 5 and r["buried_selected_not_found"] == 0   # 好排序:赢家全进 top3
+    assert r["surfaced_rate_of_captured"] == 1.0
+
+    r2 = lp.capture_rank_study(bars, dates[0], dates[-1], gate, scorer=None,
+                               top_pct=50.0, surface_top_n=3, min_bars=5)
+    assert r2["recall"] == 1.0 and r2["random_surfaced_rate_of_captured"] is not None
+    assert "捕捉率" in r2["text"]
