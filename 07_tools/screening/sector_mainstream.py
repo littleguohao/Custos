@@ -39,6 +39,9 @@ def invert_members(members: dict, exclude_types: bool = True, name_map: Optional
             name_map = tq_sector.load_sector_names()
         except Exception:  # noqa: BLE001
             name_map = {}
+        if not name_map:
+            print("[WARN] sector_mainstream: 板块名称表(tdxzs.cfg)不可用,地区/风格剔除已关闭"
+                  "——板块族口径随环境漂移", file=sys.stderr)
     code2secs: dict[str, list[str]] = {}
     for sec, codes in members.items():
         if exclude_types and name_map:

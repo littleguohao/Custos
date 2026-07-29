@@ -248,14 +248,37 @@ def test_sharded_pass1_merge_equals_full():
 
 
 def test_gate_window_does_not_change_firings():
-    """尾窗口(gate_window)与整段前缀在充分预热下 firing 一致——省内存不改语义。"""
+    """尾窗口覆盖整段前缀时 firing 完全一致——即使 gate 递归/依赖全历史(预热语义相同)。
+    ⚠️ gate_window 短于数据时递归 gate(如 KDJ)预热不同、信号可能漂移,故生产建议 ≥120;
+    本测试只保证"窗口≥数据长度"这一可证明的口径。"""
     bars, dates = _synth_bars_10()
-    gate = lambda df: float(df["volume"].iloc[-1]) == 1.0
-    a = lp.extract_firings(bars, dates[0], dates[-1], gate, min_bars=5, gate_window=0)
-    b = lp.extract_firings(bars, dates[0], dates[-1], gate, min_bars=5, gate_window=30)
+    recursive_gate = lambda df: float(df["close"].iloc[-1]) > float(df["close"].mean())  # 依赖全历史均值
+    a = lp.extract_firings(bars, dates[0], dates[-1], recursive_gate, min_bars=5, gate_window=0)
+    b = lp.extract_firings(bars, dates[0], dates[-1], recursive_gate, min_bars=5, gate_window=60)
     fa = {r["code"]: [d for d, _ in r["days"]] for r in a}
     fb = {r["code"]: [d for d, _ in r["days"]] for r in b}
-    assert fa == fb
+    assert fa == fb and any(fa.values())   # 且确有 firing(不是空集恒等的水测试)
+
+
+def test_rank_from_firings_tolerates_labelled_days():
+    """带 horizons/特征的 firings(day 为 3 元素记录)——Pass2 不得解包崩溃。"""
+    recs = [{"code": "A", "ret": 0.5, "days": [["2025-01-02", 1.0, {"fwd20": 0.3}]]},
+            {"code": "B", "ret": -0.1, "days": [["2025-01-02", 0.5, {"fwd20": -0.05}]]}]
+    r = lp.rank_from_firings(recs, top_pct=50.0, surface_top_n=1)
+    assert r["n_winners"] == 1 and r["captured"] == 1
+
+
+def test_extract_firings_feature_failure_counted():
+    """恒异常的特征打分器:失败必须被计数(不得静默消失)。"""
+    bars, dates = _synth_bars_10()
+    gate = lambda df: float(df["volume"].iloc[-1]) == 1.0
+    def bad_scorer(df, code):
+        raise RuntimeError("boom")
+    stats: dict = {}
+    recs = lp.extract_firings(bars, dates[0], dates[-1], gate, min_bars=5, gate_window=0,
+                              horizons=(5,), feature_scorers={"bad": bad_scorer}, stats=stats)
+    assert stats["feature_failures"]["bad"] > 0
+    assert all("f_bad" not in (d[2] if len(d) > 2 else {}) for r in recs for d in r["days"])
 
 
 def test_oracle_ceiling_and_min_winner_ret():
