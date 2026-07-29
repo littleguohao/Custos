@@ -45,7 +45,7 @@ def window_return(dates: list, closes: list, start: str, end: str) -> Optional[f
 
 
 def find_launch(dates: list, closes: list, signal_idxs: list[int], end: str) -> Optional[dict]:
-    """在信号日集合里取"到区间峰值(<=end)前向收益最大"者 = 起涨点。返回 {date, fwd_gain}。"""
+    """在信号日集合里取"到区间峰值(<=end)前向收益最大"者 = 起涨点。返回 {date, idx, fwd_gain}。"""
     ds = [str(d)[:10] for d in dates]
     best = None
     for i in signal_idxs:
@@ -54,8 +54,20 @@ def find_launch(dates: list, closes: list, signal_idxs: list[int], end: str) -> 
             continue
         gain = max(fut) / closes[i] - 1
         if best is None or gain > best["fwd_gain"]:
-            best = {"date": ds[i], "fwd_gain": round(gain, 4)}
+            best = {"date": ds[i], "idx": i, "fwd_gain": round(gain, 4)}
     return best
+
+
+def _kdj_j_at(df, idx: int) -> Optional[float]:
+    """df 第 idx 根(as-of 切片 df.iloc[:idx+1])当日 KDJ J 值;不可用返回 None。"""
+    try:
+        kdj = getattr(bt, "_kdj", None)
+        if kdj is None:
+            return None
+        r = kdj(df.iloc[:idx + 1])
+        return round(float(r["j"]), 2) if r.get("available") and r.get("j") is not None else None
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def regime_at_and_lead(regime: dict[str, str], launch_date: str) -> dict[str, Any]:
@@ -107,7 +119,11 @@ def analyze(bars_by_code: dict, regime: dict[str, str], start: str, end: str,
         if lp is None:
             continue
         rl = regime_at_and_lead(regime, lp["date"])
-        launches.append({"code": code, **lp, **rl})
+        rec = {"code": code, **lp, **rl}
+        jv = _kdj_j_at(df, lp["idx"])                  # 起涨点当日 J 值(超卖深度)
+        if jv is not None:
+            rec["j_at_launch"] = jv
+        launches.append(rec)
 
     n = len(launches)
     by_regime = {}
@@ -127,8 +143,20 @@ def analyze(bars_by_code: dict, regime: dict[str, str], start: str, end: str,
     lead_txt = (f"空头起涨→领先做多 中位 {out['lead_days']['median']} / p25 {out['lead_days']['p25']} / "
                 f"p75 {out['lead_days']['p75']} / max {out['lead_days']['max']} 交易日 (n={out['lead_days']['n']})"
                 if leads else "无空头起涨样本")
+    js = sorted(L["j_at_launch"] for L in launches if L.get("j_at_launch") is not None)
+    j_txt = ""
+    if js:
+        out["j_at_launch_stats"] = {
+            "n": len(js), "min": js[0], "p25": js[len(js) // 4], "median": statistics.median(js),
+            "p75": js[3 * len(js) // 4], "max": js[-1],
+            "share_neg": round(sum(1 for v in js if v < 0) / len(js), 3),
+            "share_lt5": round(sum(1 for v in js if v < 5) / len(js), 3)}
+        st = out["j_at_launch_stats"]
+        j_txt = (f"\n  起涨点 J 值: 中位 {st['median']} (p25 {st['p25']} / p75 {st['p75']}), "
+                 f"范围 {st['min']}~{st['max']}; J<0 占 {st['share_neg']*100:.0f}%、J<5 占 {st['share_lt5']*100:.0f}%"
+                 f" (n={st['n']}; 门槛 J<13 已限定上界,看池内深度分布)")
     out["text"] = (f"赢家 {len(winners)} 只 / 起涨点 {n} 个; 落做多 {by_regime.get('做多',0)}"
-                   f"({(long_share or 0)*100:.0f}%)、空头 {by_regime.get('空头',0)}、中性 {by_regime.get('中性',0)}。\n  {lead_txt}")
+                   f"({(long_share or 0)*100:.0f}%)、空头 {by_regime.get('空头',0)}、中性 {by_regime.get('中性',0)}。\n  {lead_txt}{j_txt}")
     return out
 
 

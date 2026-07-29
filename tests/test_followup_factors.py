@@ -558,3 +558,12 @@ def test_amv_ledger_records_tail_merge(tmp_path):
         ("2026-07-20", -1.35), ("2026-07-24", -4.23), ("2026-07-27", 1.67)]
     # 缺文件 → 空,不 raise
     assert bt._amv_ledger_records("2015-01-01", None, ledger_path=tmp_path / "nope.jsonl") == []
+
+
+def test_kdj_j_scorer():
+    assert "kdj_j" in bt.SCORERS
+    down = _mk([20.0 - 0.3 * i for i in range(40)])
+    r = bt.SCORERS["kdj_j"](down, "T")
+    assert r is not None and r["suggestion"] == "可买" and r["score"] < 13   # 单边下跌 J 深度超卖
+    up = _mk([10.0 + 0.3 * i for i in range(40)])
+    assert bt.SCORERS["kdj_j"](up, "T")["score"] > 80                        # 单边上涨 J 高位

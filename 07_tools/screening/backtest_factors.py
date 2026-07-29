@@ -287,6 +287,21 @@ def _sc_reversal_quality_inv(df: pd.DataFrame, code: str):
 SCORERS["reversal_quality_inv"] = _sc_reversal_quality_inv
 
 
+def _sc_kdj_j(df: pd.DataFrame, code: str):
+    """当日 KDJ 的 J 值(纯特征,恒可买)——信号池内 J 的具体深度(J=2 vs J=12)可作判别子,
+    门槛(J<13)会把这条信息"吃掉",故显式记录。kdj 不可用 → None。"""
+    if _kdj is None or len(df) < 12:
+        return None
+    r = _kdj(df)
+    if not (r.get("available") and r.get("j") is not None):
+        return None
+    return {"score": round(float(r["j"]), 3), "suggestion": "可买",
+            "aux": {"k": r.get("k"), "d": r.get("d")}, "components": {}}
+
+
+SCORERS["kdj_j"] = _sc_kdj_j
+
+
 def sample_codes(all_codes: list[str], n: int, seed: int = 0) -> list[str]:
     """从全 A 代码列表随机抽 N 只（带 seed 可复现），用于代表性样本校准。
 

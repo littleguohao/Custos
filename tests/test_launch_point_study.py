@@ -437,3 +437,21 @@ def test_build_sector_features_and_firings_integration(tmp_path):
     recs = lp.extract_firings(bars, bdates[0], bdates[-1], gate, min_bars=5, gate_window=0,
                               extra_feature_fn=lambda code, date: {"f_sector_favorable": 1})
     assert recs and all(d[2]["f_sector_favorable"] == 1 for r in recs for d in r["days"])
+
+
+def test_kdj_j_at_and_launch_stats():
+    # 起涨点 J 被记录:深跌后反转的赢家,起涨点在底部,J 应深度超卖
+    if getattr(lp.bt, "_kdj", None) is None:
+        pytest.skip("kdj 不可用")
+    dates = pd.date_range("2025-01-01", periods=60, freq="B")
+    close = [20 - 0.3 * i for i in range(20)] + [14 + 0.6 * i for i in range(40)]
+    df = pd.DataFrame({"date": dates, "open": close, "high": [c * 1.01 for c in close],
+                       "low": [c * 0.99 for c in close], "close": close, "volume": [1e6] * 60})
+    ds = [str(d)[:10] for d in dates]
+    res = lp.analyze({"WIN": df}, {}, ds[0], ds[-1], entry_gate=lambda s: True,
+                     top_pct=100, buffer_days=0, min_bars=15)
+    L = res["launches"][0]
+    st = res["j_at_launch_stats"]
+    assert st["n"] == 1 and L["j_at_launch"] < 30                      # 底部起涨,J 低
+    assert L["j_at_launch"] == lp._kdj_j_at(df, L["idx"])              # 与 as-of 切片口径一致
+    assert "起涨点 J 值" in res["text"]
