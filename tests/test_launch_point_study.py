@@ -172,3 +172,47 @@ def test_capture_rank_study():
                                top_pct=50.0, surface_top_n=3, min_bars=5)
     assert r2["recall"] == 1.0 and r2["random_surfaced_rate_of_captured"] is not None
     assert "捕捉率" in r2["text"]
+
+
+def _synth_bars_10():
+    import pandas as pd
+    dates = [str(d)[:10] for d in pd.date_range("2024-09-02", periods=60, freq="B")]
+
+    def _mk(code, ret, fire_day):
+        close = [10 * (1 + ret * i / 59) for i in range(60)]
+        vol = [9.0] * 60
+        vol[fire_day] = 1.0
+        return pd.DataFrame({"date": dates, "open": close, "high": [c * 1.01 for c in close],
+                             "low": [c * 0.99 for c in close], "close": close, "volume": vol})
+    bars = {}
+    for k in range(5):
+        bars[f"W{k}"] = _mk(f"W{k}", 0.8 + 0.02 * k, 20 + k)
+    for k in range(5):
+        bars[f"L{k}"] = _mk(f"L{k}", -0.1 + 0.01 * k, 20 + k)
+    return bars, dates
+
+
+def test_capture_rank_streaming_matches_dict():
+    """流式(generator)输入与 dict 输入结果一致——证明省内存重构不改语义。"""
+    bars, dates = _synth_bars_10()
+    gate = lambda df: float(df["volume"].iloc[-1]) == 1.0
+    scorer = lambda df, code: {"score": 100.0 if str(code).startswith("W") else 1.0}
+    a = lp.capture_rank_study(bars, dates[0], dates[-1], gate, scorer=scorer,
+                              top_pct=50.0, surface_top_n=3, min_bars=5)
+    b = lp.capture_rank_study(iter(bars.items()), dates[0], dates[-1], gate, scorer=scorer,
+                              top_pct=50.0, surface_top_n=3, min_bars=5)   # 生成器/迭代器
+    assert a["recall"] == b["recall"] == 1.0
+    assert a["surfaced"] == b["surfaced"] == 5
+    assert a["captured"] == b["captured"] == 5
+
+
+def test_main_capture_only_smoke(capsys):
+    """main --capture-only 走流式路径(loader 注入合成数据),不触发全量载入。"""
+    bars, _ = _synth_bars_10()
+    rc = lp.main(["--codes", ",".join(bars), "--start", "2024-09-02", "--end", "2024-11-25",
+                  "--entry-filter", "reversal_k", "--capture-only", "--capture-top-pct", "50",
+                  "--surface-top-n", "3", "--rank-score", "none", "--buffer-days", "0"],
+                 loader=lambda codes, _n: {c: bars[c] for c in codes if c in bars})
+    out = capsys.readouterr().out
+    assert rc == 0 and "赢家捕捉率" in out
+    assert "起涨点 vs 0AMV" not in out          # capture-only 不跑起涨点分析

@@ -132,50 +132,54 @@ def analyze(bars_by_code: dict, regime: dict[str, str], start: str, end: str,
     return out
 
 
-def capture_rank_study(bars_by_code: dict, start: str, end: str, entry_gate,
+def capture_rank_study(bars, start: str, end: str, entry_gate,
                        scorer=None, top_pct: float = 50.0, surface_top_n: int = 20,
                        min_bars: int = 40) -> dict[str, Any]:
     """赢家捕捉率 + 排名质量。回答:多头区间收益前 top_pct% 赢家,
       ①被我们信号捕捉到的比例(recall);②捕捉当日在"同类信号池"里的排名/是否进 top_n(surfaced);
       ③量化"选出来但没发现"(捕捉到却排名埋没=captured 但 best_rank>N)。
-    scorer(sub_df, code)->{'score':..} 用于当日池内排序(高=靠前);None 则按 0 分(等同随机),仍给随机基线对照。"""
-    rets = []
-    for code, raw in bars_by_code.items():
+    scorer(sub_df, code)->{'score':..} 用于当日池内排序(高=靠前);None 则按 0 分(等同随机),仍给随机基线对照。
+    **内存**:bars 可为 dict{code:df} 或 **(code, df) 迭代器**(流式:逐股/逐块加载→抽取→释放,避免全量载入 OOM)。
+    单趟扫描:每股只加载一次,同时算窗口收益 + 全域逐日信号池(仅存 (code,score) 轻量元组,释放K线)。"""
+    items = bars.items() if isinstance(bars, dict) else bars
+    rets: list[tuple] = []
+    day_fire: dict[str, list] = {}          # date -> [(code, score)]  当日全域信号池(轻量)
+    stock_days: dict[str, list] = {}        # code -> [dates] 该股信号日(用于赢家过滤)
+    for code, raw in items:                 # 流式:raw 用完即随迭代释放
         if raw is None or len(raw) == 0:
             continue
         df = raw.sort_values("date").reset_index(drop=True)
         r = window_return(df["date"].tolist(), df["close"].astype(float).tolist(), start, end)
         if r is not None:
             rets.append((code, r))
-    if not rets:
-        return {"n_winners": 0, "text": "无数据"}
-    rets.sort(key=lambda x: x[1], reverse=True)
-    n_top = max(1, int(len(rets) * top_pct / 100))
-    winners = {c for c, _ in rets[:n_top]}
-
-    day_fire: dict[str, list] = {}          # date -> [(code, score)]  当日全域信号池
-    win_fire: dict[str, list] = {}          # winner -> [dates]
-    for code, raw in bars_by_code.items():
-        if raw is None or len(raw) < min_bars:
+        if len(df) < min_bars:
             continue
-        df = raw.sort_values("date").reset_index(drop=True)
         ds = [str(d)[:10] for d in df["date"]]
+        fired: list[str] = []
         for i in range(min_bars, len(df)):
             if not (start <= ds[i] <= end) or not entry_gate(df.iloc[:i + 1]):
                 continue
             sc = 0.0
             if scorer is not None:
-                r = scorer(df.iloc[:i + 1], code)
-                sc = (r or {}).get("score", 0.0) if isinstance(r, dict) else (r or 0.0)
+                sr = scorer(df.iloc[:i + 1], code)
+                sc = (sr or {}).get("score", 0.0) if isinstance(sr, dict) else (sr or 0.0)
             day_fire.setdefault(ds[i], []).append((code, sc))
-            if code in winners:
-                win_fire.setdefault(code, []).append(ds[i])
+            fired.append(ds[i])
+        if fired:
+            stock_days[code] = fired
+    if not rets:
+        return {"n_winners": 0, "text": "无数据"}
+    rets.sort(key=lambda x: x[1], reverse=True)
+    n_top = max(1, int(len(rets) * top_pct / 100))
+    winners = {c for c, _ in rets[:n_top]}
+    win_fire = {c: stock_days[c] for c in winners if c in stock_days}   # 赢家的信号日
 
     rank_of: dict[tuple, tuple] = {}        # (date,code) -> (rank, pool)
     for d, lst in day_fire.items():
         pool = len(lst)
         for rk, (code, _) in enumerate(sorted(lst, key=lambda x: x[1], reverse=True), 1):
-            rank_of[(d, code)] = (rk, pool)
+            if code in winners:                       # 只需赢家的排名,省内存
+                rank_of[(d, code)] = (rk, pool)
 
     captured = surfaced = buried = 0
     best_ranks: list[int] = []
@@ -322,6 +326,9 @@ def main(argv=None, loader=None) -> int:
                     default=str(TOOLS.parent / "01_data" / "market" / "sector_index"))
     ap.add_argument("--capture-rank", action="store_true",
                     help="额外跑赢家捕捉率+排名质量研究(recall/surfaced/埋没),量化'选出来但没发现'")
+    ap.add_argument("--capture-only", action="store_true",
+                    help="只跑捕捉率+排名研究(流式分块加载,省内存);跳过起涨点分析与全量载入")
+    ap.add_argument("--chunk-size", type=int, default=400, help="捕捉研究流式加载的每块股票数(内存/IO 权衡)")
     ap.add_argument("--capture-top-pct", type=float, default=50.0, help="捕捉研究的赢家口径(默认收益前50%%)")
     ap.add_argument("--surface-top-n", type=int, default=20, help="每日展示阈值(top-N 算 surfaced)")
     ap.add_argument("--rank-score", choices=["reversal_quality", "reversal_quality_inv", "none"],
@@ -339,35 +346,55 @@ def main(argv=None, loader=None) -> int:
         ap.error("需 --universe-sdata 或 --codes")
 
     # 数据/regime 起点必须比 --start 再早 buffer 段(起涨点要在 [start-buffer, end] 内回溯),
-    # 否则 buffer 被加载窗口截为 0(此前真实运行从未真正回溯,结论有偏)。
+    # 否则 buffer 被加载窗口截为 0(此前真实运行从未真正回溯,结论有偏)。捕捉研究也靠它提供 min_bars 回溯。
     load_start = args.start
     if args.buffer_days:
         load_start = (_date.fromisoformat(args.start)
                       - _td(days=int(args.buffer_days * 1.6) + 10)).isoformat()   # 交易日→日历日留裕量
-    if loader is not None:
-        bars = loader(codes, 0)
-    else:
-        import s_data  # noqa: PLC0415
-        sub = "CSV_DATA" if args.data_source == "csv" else "Q_DATA"
-        fn = s_data.load_bars_csv if args.data_source == "csv" else s_data.load_bars_qlib
-        bars = fn(codes, 0, start=load_start, end=None, root=str(Path(args.s_data_root) / sub))
 
-    regime = bt.load_amv_regime(since=load_start)          # regime 起点跟随数据起点(早前窗口)
-    res = analyze(bars, regime, args.start, args.end, bt.ENTRY_GATES[args.entry_filter],
-                  top_pct=args.top_pct, buffer_days=args.buffer_days)
-    print(f"\n=== 起涨点 vs 0AMV（{args.start}~{args.end}, {args.entry_filter}, top{args.top_pct}%）===")
-    print(res["text"])
-    # 赢家捕捉率 + 排名质量(recall/surfaced/'选出来但没发现')
-    if args.capture_rank:
+    def _chunked_items(chunk: int):
+        """流式产出 (code, df):逐块加载→逐股产出→释放该块,capture 研究据此避免全量载入 OOM。"""
+        if loader is not None:
+            for c, df in loader(codes, 0).items():
+                yield c, df
+            return
+        import s_data  # noqa: PLC0415
+        sub2 = "CSV_DATA" if args.data_source == "csv" else "Q_DATA"
+        fn2 = s_data.load_bars_csv if args.data_source == "csv" else s_data.load_bars_qlib
+        root2 = str(Path(args.s_data_root) / sub2)
+        for k in range(0, len(codes), chunk):
+            d = fn2(codes[k:k + chunk], 0, start=load_start, end=None, root=root2)
+            for c, df in d.items():
+                yield c, df
+            d.clear()                                    # 释放该块,内存只留一块 + 累加器
+
+    res: dict[str, Any] = {}
+    if not args.capture_only:                            # 起涨点分析:需全量在内存(与既有行为一致)
+        if loader is not None:
+            bars = loader(codes, 0)
+        else:
+            import s_data  # noqa: PLC0415
+            sub = "CSV_DATA" if args.data_source == "csv" else "Q_DATA"
+            fn = s_data.load_bars_csv if args.data_source == "csv" else s_data.load_bars_qlib
+            bars = fn(codes, 0, start=load_start, end=None, root=str(Path(args.s_data_root) / sub))
+        regime = bt.load_amv_regime(since=load_start)    # regime 起点跟随数据起点(早前窗口)
+        res = analyze(bars, regime, args.start, args.end, bt.ENTRY_GATES[args.entry_filter],
+                      top_pct=args.top_pct, buffer_days=args.buffer_days)
+        print(f"\n=== 起涨点 vs 0AMV（{args.start}~{args.end}, {args.entry_filter}, top{args.top_pct}%）===")
+        print(res["text"])
+
+    # 赢家捕捉率 + 排名质量(recall/surfaced/'选出来但没发现')。流式:capture-only 用分块加载,省内存
+    if args.capture_rank or args.capture_only:
         scorer = None if args.rank_score == "none" else bt.SCORERS.get(args.rank_score)
-        cap = capture_rank_study(bars, args.start, args.end, bt.ENTRY_GATES[args.entry_filter],
+        src = _chunked_items(args.chunk_size) if args.capture_only else bars
+        cap = capture_rank_study(src, args.start, args.end, bt.ENTRY_GATES[args.entry_filter],
                                  scorer=scorer, top_pct=args.capture_top_pct,
                                  surface_top_n=args.surface_top_n)
         res["capture_rank"] = cap
         print(f"\n=== 赢家捕捉率 + 排名质量（top{args.capture_top_pct:.0f}%赢家, 展示top{args.surface_top_n}, "
               f"排序={args.rank_score}）===")
         print(cap["text"])
-    # 赢家板块集中度 / 板块共振
+    # 赢家板块集中度 / 板块共振(仅起涨点分析产出 winners 时)
     import json as _json
     mpath = Path(args.sector_members)
     if mpath.is_file() and res.get("winners"):
