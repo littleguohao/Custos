@@ -326,6 +326,25 @@ def _auc(pos: list, neg: list) -> Optional[float]:
     return round((rsum - n1 * (n1 + 1) / 2) / (n1 * n0), 4)
 
 
+def _auc_within_day(by_day: dict, valfn, picks_key: str = "win") -> Optional[float]:
+    """**日内分层 AUC**:只在同一天的信号之间比较(去掉日期效应),按各日可比对数加权汇总。
+    这才是决策相关口径——我们每天是在**当日池内**做选择,不是跨日比较。
+    (全局池 AUC 会被日期效应污染,可能与'每日选top-k精确率'方向相反 = Simpson 悖论。)"""
+    num = den = 0.0
+    for _d, lst in by_day.items():
+        pos = [valfn(x) for x in lst if x[picks_key] and valfn(x) is not None]
+        neg = [valfn(x) for x in lst if not x[picks_key] and valfn(x) is not None]
+        if not pos or not neg:
+            continue
+        a = _auc(pos, neg)
+        if a is None:
+            continue
+        pairs = len(pos) * len(neg)
+        num += a * pairs
+        den += pairs
+    return round(num / den, 4) if den else None
+
+
 def discriminate_at_signal(records: list, horizon: int = 20, win_thresh: Optional[float] = None,
                            win_top_q: float = 0.2, use_mfe: bool = False,
                            picks_per_day: int = 3) -> dict:
@@ -360,30 +379,49 @@ def discriminate_at_signal(records: list, horizon: int = 20, win_thresh: Optiona
     feat_names = sorted({k for x in rows for k in x["feats"]}) + ["base_score"]
     out_feats = []
     for f in feat_names:
-        pos = [v for v in (_val(x, f) for x in rows if x["win"]) if v is not None]
-        neg = [v for v in (_val(x, f) for x in rows if not x["win"]) if v is not None]
+        vf = (lambda x, _f=f: _val(x, _f))
+        pos = [v for v in (vf(x) for x in rows if x["win"]) if v is not None]
+        neg = [v for v in (vf(x) for x in rows if not x["win"]) if v is not None]
+        allv = [v for v in (vf(x) for x in rows) if v is not None]
+        constant = len(set(allv)) <= 1                     # 零方差(如 reversal_k 内的 reversal_quality 恒=4)
         hit = tot = 0
-        for _d, lst in by_day.items():                     # 每日按该特征取 top-k → 精确率
-            cand = [x for x in lst if _val(x, f) is not None]
-            cand.sort(key=lambda x: _val(x, f), reverse=True)
-            for x in cand[:picks_per_day]:
+        fair_num = 0.0                                     # 每日随机选k的期望命中(公平基线)
+        for _d, lst in by_day.items():
+            cand = [x for x in lst if vf(x) is not None]
+            if not cand:
+                continue
+            k = min(picks_per_day, len(cand))
+            wr = sum(1 for x in cand if x["win"]) / len(cand)
+            fair_num += k * wr                             # 随机选k的期望命中数(与特征无关)
+            cand.sort(key=vf, reverse=True)
+            for x in cand[:k]:
                 tot += 1
                 hit += int(x["win"])
         prec = round(hit / tot, 4) if tot else None
-        out_feats.append({"feature": f, "auc": _auc(pos, neg), "n_pos": len(pos), "n_neg": len(neg),
-                          "precision_at_daily_top": prec, "picks": tot,
-                          "lift_pp": (round((prec - base) * 100, 2) if prec is not None else None)})
-    out_feats.sort(key=lambda r: (r["auc"] or 0), reverse=True)
+        fair = round(fair_num / tot, 4) if tot else None    # ← 正确的对照(非全局基准率)
+        out_feats.append({"feature": f, "auc_pooled": _auc(pos, neg),
+                          "auc": (None if constant else _auc_within_day(by_day, vf)),
+                          "constant": constant, "n_pos": len(pos), "n_neg": len(neg),
+                          "precision_at_daily_top": prec, "fair_random_precision": fair, "picks": tot,
+                          "lift_pp": (round((prec - fair) * 100, 2) if prec is not None and fair is not None else None)})
+    out_feats.sort(key=lambda r: (r["auc"] if r["auc"] is not None else 0), reverse=True)
+    usable = [r for r in out_feats if not r["constant"] and r["auc"] is not None
+              and (r["auc"] - 0.5) >= 0.03 and (r["lift_pp"] or 0) >= 2]
     best = out_feats[0] if out_feats else {}
-    flat = all(abs((r["auc"] or 0.5) - 0.5) < 0.03 for r in out_feats)
-    verdict = ("**无判别力**:所有特征 AUC≈0.5 且精确率≈基准率 ⇒ 信号当时无法把会跑的票挑出来"
-               if flat else f"最佳 {best.get('feature')} AUC {best.get('auc')}(需 >0.55 才算弱可用)")
+    verdict = ("**无判别力**:无任一特征同时满足 日内AUC≥0.53 且 相对公平随机基线 +2pp 以上 "
+               "⇒ 信号当时无法把会跑的票挑出来"
+               if not usable else
+               "弱可用候选: " + ", ".join(f"{r['feature']}(日内AUC {r['auc']}, {r['lift_pp']:+.1f}pp)"
+                                        for r in usable))
     lines = [f"信号 {len(rows)} 个 | 标签:{'MFE' if use_mfe else '前向收益'}{horizon}日 >= {thr:+.2%}"
              f" (基准率 {base:.1%}; {'绝对阈值' if win_thresh is not None else '全体前%.0f%%分位' % (win_top_q*100)})",
-             f"  各特征 AUC / 每日选top{picks_per_day}精确率(基准 {base:.1%}):"]
+             f"  全局基准率 {base:.1%}(仅参考);对照用**每日随机选top{picks_per_day}的公平期望**:",
+             f"    {'特征':<20} {'日内AUC':>8} {'全局AUC':>8} {'精确率':>8} {'公平随机':>8} {'净增益':>8}"]
     for r in out_feats:
-        lines.append(f"    {r['feature']:<22} AUC {r['auc']}   精确率 "
-                     f"{(r['precision_at_daily_top'] or 0):.1%} ({(r['lift_pp'] or 0):+.1f}pp)")
+        tag = "  ⚠️恒定(门槛内零方差,无判别信息)" if r["constant"] else ""
+        lines.append(f"    {r['feature']:<20} {str(r['auc'] or '-'):>8} {str(r['auc_pooled'] or '-'):>8} "
+                     f"{(r['precision_at_daily_top'] or 0):>7.1%} {(r['fair_random_precision'] or 0):>8.1%} "
+                     f"{(r['lift_pp'] or 0):>+7.1f}pp{tag}")
     lines.append(f"  -> {verdict}")
     return {"n": len(rows), "horizon": horizon, "use_mfe": use_mfe, "threshold": round(thr, 4),
             "base_rate": round(base, 4), "features": out_feats, "text": "\n".join(lines)}

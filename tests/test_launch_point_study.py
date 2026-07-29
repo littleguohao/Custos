@@ -335,3 +335,58 @@ def test_extract_firings_emits_horizons_and_features():
     assert got, "应带 extra 字典"
     ex = got[0][2]
     assert "fwd5" in ex and "mfe5" in ex and ex["f_const"] == 1.5
+
+
+def _dis_recs(rows):
+    """rows: [(code, date, y, feats)] → discriminate_at_signal 需要的 records。"""
+    out = []
+    for code, date, y, feats in rows:
+        ex = {"fwd20": y}
+        ex.update({f"f_{k}": v for k, v in feats.items()})
+        out.append({"code": code, "ret": y, "days": [[date, 0.0, ex]]})
+    return out
+
+
+def test_fair_baseline_removes_small_pool_bias():
+    """噪声特征在'每日随机公平基线'下净增益≈0(旧口径用全局基准率会凭空造出正增益)。"""
+    import random
+    random.seed(3)
+    rows = []
+    for d in range(60):
+        pool = 2 if d % 2 == 0 else 30           # 小池日/大池日交替
+        wr = 0.6 if pool == 2 else 0.1           # 小池日胜率高 → 制造结构偏差
+        for j in range(pool):
+            y = 1.0 if random.random() < wr else 0.0
+            rows.append((f"C{d}_{j}", f"2024-09-{d % 28 + 1:02d}", y, {"noise": random.random()}))
+    r = lp.discriminate_at_signal(_dis_recs(rows), horizon=20, win_thresh=0.5, picks_per_day=3)
+    noise = {f["feature"]: f for f in r["features"]}["noise"]
+    assert abs(noise["lift_pp"]) < 6                    # 相对公平基线≈0
+    assert noise["fair_random_precision"] > r["base_rate"]   # 公平基线本身高于全局基准(即偏差来源)
+    assert "无判别力" in r["text"]
+
+
+def test_constant_feature_flagged():
+    """门槛内零方差的特征(如 reversal_k 里的 reversal_quality 恒=4)被标记、不计入可用。"""
+    rows = [(f"C{i}", f"2024-09-{i % 10 + 1:02d}", float(i % 4 == 0), {"const": 4.0})
+            for i in range(80)]
+    r = lp.discriminate_at_signal(_dis_recs(rows), horizon=20, win_thresh=0.5, picks_per_day=3)
+    c = {f["feature"]: f for f in r["features"]}["const"]
+    assert c["constant"] is True and c["auc"] is None
+    assert "恒定" in r["text"] and "无判别力" in r["text"]
+
+
+def test_within_day_auc_beats_day_effect():
+    """日内有真判别力、但日期效应使全局AUC反向时,日内AUC 应正确识别(Simpson 悖论)。"""
+    rows = []
+    for d in range(40):
+        hi_day = d % 2 == 0                       # 偶数日:特征整体高但胜率低(日期效应)
+        for j in range(10):
+            good = j < 3                          # 日内前3名是赢家
+            base = 10.0 if hi_day else 0.0
+            feat = base + (5.0 if good else 0.0) + j * 0.01
+            y = 1.0 if (good and not hi_day) or (good and hi_day and j == 0) else 0.0
+            rows.append((f"C{d}_{j}", f"2024-09-{d % 28 + 1:02d}", y, {"mixed": feat}))
+    r = lp.discriminate_at_signal(_dis_recs(rows), horizon=20, win_thresh=0.5, picks_per_day=3)
+    m = {f["feature"]: f for f in r["features"]}["mixed"]
+    assert m["auc"] > m["auc_pooled"]             # 日内AUC 高于被日期效应污染的全局AUC
+    assert m["auc"] > 0.6
