@@ -146,13 +146,18 @@ def _rss_mb() -> float:
 
 
 def _summarize_capture(rets: list, winners: set, win_fire: dict, rank_of: dict,
-                       top_pct: float, surface_top_n: int) -> dict[str, Any]:
-    """捕捉率/排名质量的共享汇总(流式与两趟分片模式同口径)。"""
+                       top_pct: float, surface_top_n: int,
+                       day_winners: Optional[dict] = None) -> dict[str, Any]:
+    """捕捉率/排名质量的共享汇总(流式与两趟分片模式同口径)。
+    day_winners:{date: 当日池中赢家数} → 据此算 **oracle(完美排序上限)**:
+    完美排序把赢家排在最前,则当日赢家数 ≤ top_n 时该赢家必浮出。区分"排序不行"与"展示位不够"。"""
     captured = surfaced = buried = 0
+    oracle = 0
     best_ranks: list[int] = []
     best_pcts: list[float] = []
     pools: list[int] = []
     rand_p: list[float] = []
+    wpools: list[int] = []
     for code in winners:
         days = win_fire.get(code)
         if not days:
@@ -167,6 +172,12 @@ def _summarize_capture(rets: list, winners: set, win_fire: dict, rank_of: dict,
             surfaced += 1
         else:
             buried += 1
+        if day_winners:                     # oracle:完美排序下,只要某触发日"池中赢家数"≤top_n 即可浮出
+            wc = [day_winners.get(d, 0) for d in days]
+            if wc:
+                wpools.append(min(wc))
+                if min(wc) <= surface_top_n:
+                    oracle += 1
         p_miss = 1.0
         for _, pl in cand:                                       # 随机排名下"至少一天进 top_n"的概率
             p_miss *= (1 - min(1.0, surface_top_n / pl)) if pl else 1.0
@@ -180,6 +191,10 @@ def _summarize_capture(rets: list, winners: set, win_fire: dict, rank_of: dict,
         "surfaced_rate_of_captured": round(surfaced / captured, 3) if captured else None,
         "random_surfaced_rate_of_captured": round(statistics.mean(rand_p), 3) if rand_p else None,
     }
+    if day_winners and wpools:
+        out["oracle_surfaced"] = oracle
+        out["oracle_surfaced_rate_of_captured"] = round(oracle / captured, 3) if captured else None
+        out["winners_in_pool_median"] = statistics.median(sorted(wpools))
     if best_ranks:
         br_s, po_s, pc_s = sorted(best_ranks), sorted(pools), sorted(best_pcts)
         out["best_rank"] = {"median": statistics.median(br_s), "p25": br_s[len(br_s) // 4],
@@ -196,6 +211,12 @@ def _summarize_capture(rets: list, winners: set, win_fire: dict, rank_of: dict,
         f"赢家最佳排名 中位 {out.get('best_rank',{}).get('median','-')} (百分位中位 {out.get('best_rank_pct_median','-')}, 0.5≈随机)。\n  "
         f"排序增益: 我们 surfaced {(out['surfaced_rate_of_captured'] or 0)*100:.0f}% vs 随机 "
         f"{(out['random_surfaced_rate_of_captured'] or 0)*100:.0f}% → {'排序有效(+%.0fpp)' % (edge*100) if edge>0.02 else '排序≈随机(无surfacing增益)' if abs(edge)<=0.02 else '排序反而更差(%.0fpp)' % (edge*100)}。")
+    if out.get("oracle_surfaced_rate_of_captured") is not None:
+        orc = out["oracle_surfaced_rate_of_captured"]
+        out["text"] += (
+            f"\n  **完美排序上限(oracle) {orc*100:.0f}%**(池中赢家数中位 {out['winners_in_pool_median']:.0f} "
+            f"vs 展示位 top{surface_top_n})——上限低说明瓶颈是**展示位不够/赢家口径过宽**(结构),"
+            f"非排序失败;上限高才说明排序有提升空间。")
     return out
 
 
@@ -237,21 +258,25 @@ def extract_firings(bars, start: str, end: str, entry_gate, scorer=None,
 
 
 def rank_from_firings(records: list[dict], top_pct: float = 50.0,
-                      surface_top_n: int = 20) -> dict[str, Any]:
-    """**Pass2**:合并(多分片)firings → 赢家捕捉率 + 排名质量。与 capture_rank_study 同口径。"""
+                      surface_top_n: int = 20, min_winner_ret: Optional[float] = None) -> dict[str, Any]:
+    """**Pass2**:合并(多分片)firings → 赢家捕捉率 + 排名质量。与 capture_rank_study 同口径。
+    赢家 = **全域按窗口收益排序的前 top_pct%**(不看正负);min_winner_ret 另加绝对收益门槛
+    (如 0.5=至少+50%),用于把"赢家"收紧为真牛股。Pass2 极廉价 → 可在同一份 firings 上反复改口径。"""
     rets = [(r["code"], r["ret"]) for r in records if r.get("ret") is not None]
     if not rets:
         return {"n_winners": 0, "text": "无数据"}
     rets.sort(key=lambda x: x[1], reverse=True)
     n_top = max(1, int(len(rets) * top_pct / 100))
-    winners = {c for c, _ in rets[:n_top]}
+    winners = {c for c, v in rets[:n_top] if min_winner_ret is None or v >= min_winner_ret}
     day_fire: dict[str, list] = {}
     win_fire: dict[str, list] = {}
+    day_winners: dict[str, int] = {}
     for r in records:
         for d, sc in (r.get("days") or []):
             day_fire.setdefault(d, []).append((r["code"], sc))
             if r["code"] in winners:
                 win_fire.setdefault(r["code"], []).append(d)
+                day_winners[d] = day_winners.get(d, 0) + 1
     rank_of: dict[tuple, tuple] = {}
     for d, lst in day_fire.items():
         pool = len(lst)
@@ -259,12 +284,14 @@ def rank_from_firings(records: list[dict], top_pct: float = 50.0,
             if code in winners:
                 rank_of[(d, code)] = (rk, pool)
     day_fire.clear()
-    return _summarize_capture(rets, winners, win_fire, rank_of, top_pct, surface_top_n)
+    return _summarize_capture(rets, winners, win_fire, rank_of, top_pct, surface_top_n,
+                              day_winners=day_winners)
 
 
 def capture_rank_study(bars, start: str, end: str, entry_gate,
                        scorer=None, top_pct: float = 50.0, surface_top_n: int = 20,
-                       min_bars: int = 40, gate_window: int = 0, progress: int = 0) -> dict[str, Any]:
+                       min_bars: int = 40, gate_window: int = 0, progress: int = 0,
+                       min_winner_ret: Optional[float] = None) -> dict[str, Any]:
     """赢家捕捉率 + 排名质量。回答:多头区间收益前 top_pct% 赢家,
       ①被我们信号捕捉到的比例(recall);②捕捉当日在"同类信号池"里的排名/是否进 top_n(surfaced);
       ③量化"选出来但没发现"(捕捉到却排名埋没=captured 但 best_rank>N)。
@@ -315,9 +342,13 @@ def capture_rank_study(bars, start: str, end: str, entry_gate,
         return {"n_winners": 0, "text": "无数据"}
     rets.sort(key=lambda x: x[1], reverse=True)
     n_top = max(1, int(len(rets) * top_pct / 100))
-    winners = {c for c, _ in rets[:n_top]}
+    winners = {c for c, v in rets[:n_top] if min_winner_ret is None or v >= min_winner_ret}
     win_fire = {c: stock_days[c] for c in winners if c in stock_days}   # 赢家的信号日
     stock_days.clear()
+    day_winners: dict[str, int] = {}
+    for _c, _ds in win_fire.items():
+        for _d in _ds:
+            day_winners[_d] = day_winners.get(_d, 0) + 1
 
     rank_of: dict[tuple, tuple] = {}        # (date,code) -> (rank, pool)
     for d, lst in day_fire.items():
@@ -327,7 +358,8 @@ def capture_rank_study(bars, start: str, end: str, entry_gate,
                 rank_of[(d, code)] = (rk, pool)
     day_fire.clear()
 
-    return _summarize_capture(rets, winners, win_fire, rank_of, top_pct, surface_top_n)
+    return _summarize_capture(rets, winners, win_fire, rank_of, top_pct, surface_top_n,
+                              day_winners=day_winners)
 
 
 def sector_concentration(winners: list[str], members: dict[str, list], index_dir,
@@ -439,6 +471,8 @@ def main(argv=None, loader=None) -> int:
                     help="Pass2:读一个或多个(逗号分隔) Pass1 JSON,合并算捕捉率+排名(内存极小)")
     ap.add_argument("--capture-top-pct", type=float, default=50.0, help="捕捉研究的赢家口径(默认收益前50%%)")
     ap.add_argument("--surface-top-n", type=int, default=20, help="每日展示阈值(top-N 算 surfaced)")
+    ap.add_argument("--min-winner-ret", type=float, default=None,
+                    help="赢家另加绝对收益门槛(如 0.5=至少+50%%);默认仅按 top_pct 排名(不看正负)")
     ap.add_argument("--rank-score", choices=["reversal_quality", "reversal_quality_inv", "none"],
                     default="reversal_quality", help="当日信号池内排序分(none=随机)")
     ap.add_argument("--out", default="")
@@ -451,7 +485,8 @@ def main(argv=None, loader=None) -> int:
         for fp in [x.strip() for x in args.from_firings.split(",") if x.strip()]:
             d = _j.loads(Path(fp).read_text(encoding="utf-8"))
             recs.extend(d.get("records") or d if isinstance(d, list) else d.get("records", []))
-        cap = rank_from_firings(recs, top_pct=args.capture_top_pct, surface_top_n=args.surface_top_n)
+        cap = rank_from_firings(recs, top_pct=args.capture_top_pct, surface_top_n=args.surface_top_n,
+                                min_winner_ret=args.min_winner_ret)
         print(f"\n=== 赢家捕捉率 + 排名质量（合并 {len(recs)} 股记录, top{args.capture_top_pct:.0f}%赢家, "
               f"展示top{args.surface_top_n}）===")
         print(cap["text"])
@@ -542,7 +577,8 @@ def main(argv=None, loader=None) -> int:
         cap = capture_rank_study(src, args.start, args.end, bt.ENTRY_GATES[args.entry_filter],
                                  scorer=scorer, top_pct=args.capture_top_pct,
                                  surface_top_n=args.surface_top_n,
-                                 gate_window=args.gate_window, progress=args.progress)
+                                 gate_window=args.gate_window, progress=args.progress,
+                                 min_winner_ret=args.min_winner_ret)
         res["capture_rank"] = cap
         print(f"\n=== 赢家捕捉率 + 排名质量（top{args.capture_top_pct:.0f}%赢家, 展示top{args.surface_top_n}, "
               f"排序={args.rank_score}）===")

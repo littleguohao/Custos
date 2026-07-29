@@ -256,3 +256,19 @@ def test_gate_window_does_not_change_firings():
     fa = {r["code"]: [d for d, _ in r["days"]] for r in a}
     fb = {r["code"]: [d for d, _ in r["days"]] for r in b}
     assert fa == fb
+
+
+def test_oracle_ceiling_and_min_winner_ret():
+    """oracle 上限区分'展示位不够'与'排序失败';min_winner_ret 可在 Pass2 收紧赢家口径。"""
+    bars, dates = _synth_bars_10()
+    gate = lambda df: float(df["volume"].iloc[-1]) == 1.0
+    recs = lp.extract_firings(bars, dates[0], dates[-1], gate, min_bars=5, gate_window=0)
+    # 展示位 top1、每日池最多2 → 完美排序也只能浮出部分;oracle 应被报出且 ≥ 实际 surfaced 率
+    r = lp.rank_from_firings(recs, top_pct=50.0, surface_top_n=1)
+    assert r["oracle_surfaced_rate_of_captured"] is not None
+    assert r["oracle_surfaced_rate_of_captured"] >= r["surfaced_rate_of_captured"]
+    assert "完美排序上限" in r["text"]
+    # 赢家口径收紧:门槛高于所有输家收益 → 赢家只剩真高收益者
+    tight = lp.rank_from_firings(recs, top_pct=50.0, surface_top_n=3, min_winner_ret=0.5)
+    loose = lp.rank_from_firings(recs, top_pct=50.0, surface_top_n=3)
+    assert tight["n_winners"] <= loose["n_winners"]
