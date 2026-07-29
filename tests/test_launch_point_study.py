@@ -286,3 +286,52 @@ def test_winner_basis_profitable():
     assert pro["n_winners"] == 2                       # 盈利股(5)内前50% → 2 只
     assert pro["winner_ret_cutoff"] > 0                # 切点必为正收益
     assert "盈利股内前" in pro["text"]
+
+
+def test_auc_basic():
+    assert lp._auc([3, 4, 5], [0, 1, 2]) == 1.0          # 完全可分
+    assert lp._auc([0, 1, 2], [3, 4, 5]) == 0.0          # 完全反向
+    a = lp._auc([1, 1, 1], [1, 1, 1])
+    assert a == 0.5                                       # 全并列=无判别力
+    assert lp._auc([], [1]) is None
+
+
+def test_discriminate_detects_real_and_rejects_noise():
+    """判别研究:真预测特征应 AUC 高+精确率显著>基准;噪声特征应 AUC≈0.5、精确率≈基准。"""
+    import random
+    random.seed(7)
+    recs = []
+    for k in range(200):
+        will_run = random.random() < 0.2                  # 约20% 会跑(与日期解耦,同日混合)
+        day = random.randint(1, 20)
+        fwd = 0.6 + random.random() * 0.2 if will_run else random.random() * 0.1 - 0.05
+        recs.append({"code": f"C{k:03d}", "ret": fwd, "days": [[
+            f"2024-09-{day:02d}", 0.0,
+            {"fwd20": round(fwd, 4),
+             "f_real": 0.9 + random.random() * 0.1 if will_run else random.random() * 0.5,
+             "f_noise": random.random()},
+        ]]})
+    r = lp.discriminate_at_signal(recs, horizon=20, win_top_q=0.2, picks_per_day=1)
+    byf = {f["feature"]: f for f in r["features"]}
+    assert byf["real"]["auc"] > 0.9                        # 真特征被识别
+    assert byf["real"]["lift_pp"] > 20                     # 精确率显著高于基准
+    assert 0.4 < byf["noise"]["auc"] < 0.6                 # 噪声≈无判别力
+    assert abs(byf["noise"]["lift_pp"]) < 20
+    assert "信号" in r["text"]
+
+
+def test_discriminate_needs_horizon_data():
+    recs = [{"code": "C1", "ret": 0.5, "days": [["2024-09-02", 1.0]]}]   # 无 extra dict
+    r = lp.discriminate_at_signal(recs, horizon=20)
+    assert r["n"] == 0 and "Pass1" in r["text"]
+
+
+def test_extract_firings_emits_horizons_and_features():
+    bars, dates = _synth_bars_10()
+    gate = lambda df: float(df["volume"].iloc[-1]) == 1.0
+    recs = lp.extract_firings(bars, dates[0], dates[-1], gate, min_bars=5, gate_window=0,
+                              horizons=(5,), feature_scorers={"const": lambda df, c: {"score": 1.5}})
+    got = [d for r in recs for d in r["days"] if len(d) >= 3]
+    assert got, "应带 extra 字典"
+    ex = got[0][2]
+    assert "fwd5" in ex and "mfe5" in ex and ex["f_const"] == 1.5

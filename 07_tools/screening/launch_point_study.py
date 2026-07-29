@@ -246,9 +246,13 @@ def _summarize_capture(rets: list, winners: set, win_fire: dict, rank_of: dict,
 
 
 def extract_firings(bars, start: str, end: str, entry_gate, scorer=None,
-                    min_bars: int = 40, gate_window: int = 120, progress: int = 0) -> list[dict]:
+                    min_bars: int = 40, gate_window: int = 120, progress: int = 0,
+                    horizons: tuple = (), feature_scorers: Optional[dict] = None) -> list[dict]:
     """**Pass1(可分片)**:逐股抽取 {code, ret, days:[[date,score],..]}——极小的中间产物。
-    可按 --shard 拆多个独立进程跑(每片内存全新),彻底规避 loader 内存问题;Pass2 再合并算排名。"""
+    可按 --shard 拆多个独立进程跑(每片内存全新),彻底规避 loader 内存问题;Pass2 再合并算排名。
+    horizons:如 (20,60) → 每个信号日额外记 **因果前向收益**(fwd{h}=close[i+h]/close[i]-1,
+    mfe{h}=区间内最大涨幅),用于"信号当时能否判别未来会跑"的研究(不看窗口末尾,无未来函数)。
+    feature_scorers:{名称: scorer} → 每个信号日记下**当时可得**的特征值,作为判别子候选。"""
     import gc  # noqa: PLC0415
     items = bars.items() if isinstance(bars, dict) else bars
     out: list[dict] = []
@@ -258,8 +262,9 @@ def extract_firings(bars, start: str, end: str, entry_gate, scorer=None,
         if raw is not None and len(raw):
             df = raw.sort_values("date").reset_index(drop=True)
             ds = [str(d)[:10] for d in df["date"]]
-            r = window_return(ds, df["close"].astype(float).tolist(), start, end)
-            days: list[list] = []
+            closes = df["close"].astype(float).tolist()
+            r = window_return(ds, closes, start, end)
+            days: list = []
             if len(df) >= min_bars:
                 for i in range(min_bars, len(df)):
                     if not (start <= ds[i] <= end):
@@ -272,14 +277,116 @@ def extract_firings(bars, start: str, end: str, entry_gate, scorer=None,
                     if scorer is not None:
                         sr = scorer(sub, code)
                         sc = (sr or {}).get("score", 0.0) if isinstance(sr, dict) else (sr or 0.0)
-                    days.append([ds[i], float(sc)])
+                    rec: list = [ds[i], float(sc)]
+                    if horizons or feature_scorers:
+                        extra: dict = {}
+                        for h in horizons:                       # 因果前向:只用信号日之后的数据
+                            j = i + int(h)
+                            if j < len(closes) and closes[i]:
+                                extra[f"fwd{h}"] = round(closes[j] / closes[i] - 1, 4)
+                                seg = closes[i + 1:j + 1]
+                                if seg:
+                                    extra[f"mfe{h}"] = round(max(seg) / closes[i] - 1, 4)
+                        for fname, fsc in (feature_scorers or {}).items():
+                            try:
+                                fr = fsc(sub, code)
+                                v = (fr or {}).get("score") if isinstance(fr, dict) else fr
+                                if v is not None:
+                                    extra[f"f_{fname}"] = round(float(v), 6)
+                            except Exception:  # noqa: BLE001
+                                pass
+                        rec.append(extra)
+                    days.append(rec)
             if r is not None or days:
                 out.append({"code": code, "ret": r, "days": days})
-            del df, ds
+            del df, ds, closes
         if progress and n % progress == 0:
             print(f"[pass1] {n} 股 | RSS={_rss_mb():.0f}MB", file=sys.stderr, flush=True)
             gc.collect()
     return out
+
+
+def _auc(pos: list, neg: list) -> Optional[float]:
+    """Mann-Whitney AUC(0.5=无判别力,>0.5=分数越高越可能"跑出来")。并列取平均秩。"""
+    if not pos or not neg:
+        return None
+    vals = sorted([(v, 1) for v in pos] + [(v, 0) for v in neg], key=lambda x: x[0])
+    ranks = [0.0] * len(vals)
+    i = 0
+    while i < len(vals):                       # 并列取平均秩
+        j = i
+        while j + 1 < len(vals) and vals[j + 1][0] == vals[i][0]:
+            j += 1
+        avg = (i + j) / 2 + 1
+        for k in range(i, j + 1):
+            ranks[k] = avg
+        i = j + 1
+    rsum = sum(r for r, (_, lab) in zip(ranks, vals) if lab == 1)
+    n1, n0 = len(pos), len(neg)
+    return round((rsum - n1 * (n1 + 1) / 2) / (n1 * n0), 4)
+
+
+def discriminate_at_signal(records: list, horizon: int = 20, win_thresh: Optional[float] = None,
+                           win_top_q: float = 0.2, use_mfe: bool = False,
+                           picks_per_day: int = 3) -> dict:
+    """**信号当时能否明确选出会跑的票?** 对每个信号(因果、无未来函数):
+      label = 前向收益 fwd{h}(或 mfe{h}) 是否"跑出来"(绝对阈值 win_thresh 或全体前 win_top_q 分位);
+      对每个**当时可得**特征算 AUC(0.5=无判别力) + **每日按该特征选 picks_per_day 只的精确率 vs 基准率**。
+    AUC≈0.5 且 精确率≈基准率 ⇒ 信号当时无法把会跑的票挑出来(判别失败)。"""
+    rows = []
+    key = f"{'mfe' if use_mfe else 'fwd'}{horizon}"
+    for r in records:
+        for d in (r.get("days") or []):
+            if len(d) < 3 or not isinstance(d[2], dict) or key not in d[2]:
+                continue
+            ex = d[2]
+            rows.append({"date": d[0], "code": r["code"], "y": float(ex[key]),
+                         "base_score": float(d[1]),
+                         "feats": {k[2:]: v for k, v in ex.items() if k.startswith("f_")}})
+    if not rows:
+        return {"n": 0, "text": f"无前向数据(Pass1 需带 --horizons 含 {horizon})"}
+    ys = sorted((x["y"] for x in rows), reverse=True)
+    thr = win_thresh if win_thresh is not None else ys[max(0, int(len(ys) * win_top_q) - 1)]
+    for x in rows:
+        x["win"] = x["y"] >= thr
+    base = sum(1 for x in rows if x["win"]) / len(rows)
+    by_day = {}
+    for x in rows:
+        by_day.setdefault(x["date"], []).append(x)
+
+    def _val(x, f):
+        return x["base_score"] if f == "base_score" else x["feats"].get(f)
+
+    feat_names = sorted({k for x in rows for k in x["feats"]}) + ["base_score"]
+    out_feats = []
+    for f in feat_names:
+        pos = [v for v in (_val(x, f) for x in rows if x["win"]) if v is not None]
+        neg = [v for v in (_val(x, f) for x in rows if not x["win"]) if v is not None]
+        hit = tot = 0
+        for _d, lst in by_day.items():                     # 每日按该特征取 top-k → 精确率
+            cand = [x for x in lst if _val(x, f) is not None]
+            cand.sort(key=lambda x: _val(x, f), reverse=True)
+            for x in cand[:picks_per_day]:
+                tot += 1
+                hit += int(x["win"])
+        prec = round(hit / tot, 4) if tot else None
+        out_feats.append({"feature": f, "auc": _auc(pos, neg), "n_pos": len(pos), "n_neg": len(neg),
+                          "precision_at_daily_top": prec, "picks": tot,
+                          "lift_pp": (round((prec - base) * 100, 2) if prec is not None else None)})
+    out_feats.sort(key=lambda r: (r["auc"] or 0), reverse=True)
+    best = out_feats[0] if out_feats else {}
+    flat = all(abs((r["auc"] or 0.5) - 0.5) < 0.03 for r in out_feats)
+    verdict = ("**无判别力**:所有特征 AUC≈0.5 且精确率≈基准率 ⇒ 信号当时无法把会跑的票挑出来"
+               if flat else f"最佳 {best.get('feature')} AUC {best.get('auc')}(需 >0.55 才算弱可用)")
+    lines = [f"信号 {len(rows)} 个 | 标签:{'MFE' if use_mfe else '前向收益'}{horizon}日 >= {thr:+.2%}"
+             f" (基准率 {base:.1%}; {'绝对阈值' if win_thresh is not None else '全体前%.0f%%分位' % (win_top_q*100)})",
+             f"  各特征 AUC / 每日选top{picks_per_day}精确率(基准 {base:.1%}):"]
+    for r in out_feats:
+        lines.append(f"    {r['feature']:<22} AUC {r['auc']}   精确率 "
+                     f"{(r['precision_at_daily_top'] or 0):.1%} ({(r['lift_pp'] or 0):+.1f}pp)")
+    lines.append(f"  -> {verdict}")
+    return {"n": len(rows), "horizon": horizon, "use_mfe": use_mfe, "threshold": round(thr, 4),
+            "base_rate": round(base, 4), "features": out_feats, "text": "\n".join(lines)}
 
 
 def rank_from_firings(records: list[dict], top_pct: float = 50.0,
@@ -492,6 +599,18 @@ def main(argv=None, loader=None) -> int:
                     help="Pass1:只抽取信号→写 JSON(极小),可配 --shard 分多进程跑,彻底避开 loader 内存")
     ap.add_argument("--shard", default="",
                     help="Pass1 分片 i/N(如 1/6):只处理第 i 片股票")
+    ap.add_argument("--horizons", default="",
+                    help="Pass1:逗号分隔前向天数(如 20,60)→ 每信号记因果 fwd/mfe,供判别力研究")
+    ap.add_argument("--feature-scores", default="",
+                    help="Pass1:逗号分隔特征打分器(SCORERS 名,如 reversal_quality,momentum,low_vol,alpha101)")
+    ap.add_argument("--discriminate", action="store_true",
+                    help="Pass2:跑'信号当时能否选出会跑的票'判别力研究(AUC + 每日选top-k精确率)")
+    ap.add_argument("--horizon", type=int, default=20, help="判别研究用的前向天数")
+    ap.add_argument("--win-thresh", type=float, default=None,
+                    help="判别研究:'跑出来'的绝对收益阈值(如 0.3=+30%%);缺省用分位数")
+    ap.add_argument("--win-top-q", type=float, default=0.2, help="判别研究:分位口径(默认前20%%算跑出来)")
+    ap.add_argument("--use-mfe", action="store_true", help="判别研究:用区间最大涨幅(MFE)而非期末收益")
+    ap.add_argument("--picks-per-day", type=int, default=3, help="判别研究:每日选几只算精确率")
     ap.add_argument("--from-firings", default="",
                     help="Pass2:读一个或多个(逗号分隔) Pass1 JSON,合并算捕捉率+排名(内存极小)")
     ap.add_argument("--capture-top-pct", type=float, default=50.0, help="捕捉研究的赢家口径(默认收益前50%%)")
@@ -512,6 +631,17 @@ def main(argv=None, loader=None) -> int:
         for fp in [x.strip() for x in args.from_firings.split(",") if x.strip()]:
             d = _j.loads(Path(fp).read_text(encoding="utf-8"))
             recs.extend(d.get("records") or d if isinstance(d, list) else d.get("records", []))
+        if args.discriminate:
+            dis = discriminate_at_signal(recs, horizon=args.horizon, win_thresh=args.win_thresh,
+                                         win_top_q=args.win_top_q, use_mfe=args.use_mfe,
+                                         picks_per_day=args.picks_per_day)
+            print(f"\n=== 信号当时判别力:能否明确选出会跑的票 ===")
+            print(dis["text"])
+            if args.out:
+                import json as _j2
+                Path(args.out).write_text(_j2.dumps({"discriminate": dis}, ensure_ascii=False, indent=2),
+                                          encoding="utf-8")
+            return 0
         cap = rank_from_firings(recs, top_pct=args.capture_top_pct, surface_top_n=args.surface_top_n,
                                 min_winner_ret=args.min_winner_ret,
                                 winner_basis=args.winner_basis)
@@ -572,9 +702,17 @@ def main(argv=None, loader=None) -> int:
             codes = [c for k, c in enumerate(codes) if k % n == (i - 1) % n]
             print(f"[pass1] 分片 {args.shard}: {len(codes)} 只", file=sys.stderr)
         scorer = None if args.rank_score == "none" else bt.SCORERS.get(args.rank_score)
+        hz = tuple(int(x) for x in args.horizons.split(",") if x.strip()) if args.horizons else ()
+        fsc = {}
+        for nm in [x.strip() for x in args.feature_scores.split(",") if x.strip()]:
+            if nm in bt.SCORERS:
+                fsc[nm] = bt.SCORERS[nm]
+            else:
+                print(f"[WARN] 未知特征打分器 {nm}(可选: {','.join(sorted(bt.SCORERS))})", file=sys.stderr)
         recs = extract_firings(_chunked_items(args.chunk_size), args.start, args.end,
                               bt.ENTRY_GATES[args.entry_filter], scorer=scorer,
-                              gate_window=args.gate_window, progress=args.progress)
+                              gate_window=args.gate_window, progress=args.progress,
+                              horizons=hz, feature_scorers=fsc)
         import json as _j
         Path(args.emit_firings).write_text(
             _j.dumps({"start": args.start, "end": args.end, "entry_filter": args.entry_filter,
