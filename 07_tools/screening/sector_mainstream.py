@@ -28,8 +28,11 @@ for _p in (str(TOOLS), str(TOOLS / "screening"), str(TOOLS / "local_tdx")):
 EXCLUDE_TDX_TYPES = {"3", "5"}     # 地区/风格板块不进合集(江西板块、保险重仓之类无"主线"语义)
 
 
-def invert_members(members: dict, exclude_types: bool = True, name_map: Optional[dict] = None) -> dict[str, list[str]]:
-    """{sector:[codes]} → code6 → [板块代码]。exclude_types=True 时剔除地区(3)/风格(5)板块。"""
+def invert_members(members: dict, exclude_types: bool = True, name_map: Optional[dict] = None,
+                   norm: Optional[Any] = None) -> dict[str, list[str]]:
+    """{sector:[codes]} → code6 → [板块代码]。exclude_types=True 时剔除地区(3)/风格(5)板块。
+    norm:code 归一函数(默认取前6位);sector_phase 传 _norm6 以统一口径。"""
+    _n = norm or (lambda cc: str(cc)[:6])
     if exclude_types and name_map is None:
         try:
             import tq_sector  # noqa: PLC0415
@@ -43,7 +46,7 @@ def invert_members(members: dict, exclude_types: bool = True, name_map: Optional
             if t in EXCLUDE_TDX_TYPES:
                 continue
         for cc in codes:
-            code2secs.setdefault(str(cc)[:6], []).append(sec)
+            code2secs.setdefault(_n(cc), []).append(sec)
     return code2secs
 
 
@@ -124,6 +127,42 @@ def aggregate(trades: list[dict], code2secs: dict[str, list[str]], top_k: int = 
         f"{r['sector']}({r['n']}笔,{r['expectancy']*100:+.2f}%)" for r in out["top_by_expectancy"][:6]) or "无"))
     out["text"] = "\n".join(lines)
     return out
+
+
+def sector_sizes(members: dict) -> dict[str, int]:
+    """{sector:[codes]} → {sector: 成员数}(用于密度归一)。"""
+    return {s: len(v or []) for s, v in (members or {}).items()}
+
+
+def mainline_fingerprint(codes: list[str], code2secs: dict[str, list[str]],
+                         sizes: Optional[dict] = None, top_k: int = 8, min_size: int = 8,
+                         name_map: Optional[dict] = None) -> dict[str, Any]:
+    """当日候选/交易的板块族**密度榜(主线指纹)**:按密度(命中数/板块规模)排序,过滤过小板块防噪。
+    density 归一避免大板块仅因体量占榜首;show 命中数供直觉。纯统计、绝不 raise。"""
+    per_sec: dict[str, int] = {}
+    for code in codes:
+        for s in code2secs.get(str(code)[:6], []):
+            per_sec[s] = per_sec.get(s, 0) + 1
+    n_cls = sum(1 for c in codes if code2secs.get(str(c)[:6]))
+    if not per_sec:
+        return {"n": len(codes), "n_classified": 0, "top": [], "text": "无板块映射"}
+    total_attr = sum(per_sec.values())
+    rows = []
+    for s, n in per_sec.items():
+        sz = (sizes or {}).get(s, 0)
+        if sz and sz < min_size:
+            continue                                   # 过小板块(如3只)密度虚高→过滤
+        rows.append({"sector": s, "name": sector_name(s, name_map), "n": n, "size": sz,
+                     "density": (round(n / sz, 4) if sz else None), "share": round(n / total_attr, 4)})
+    rows.sort(key=lambda r: (r["density"] if r["density"] is not None else r["n"] / 1e9, r["n"]),
+              reverse=True)
+    top = rows[:top_k]
+    top5c = sorted(rows, key=lambda x: x["n"], reverse=True)[:5]
+    top5_share = round(sum(r["n"] for r in top5c) / total_attr, 3) if total_attr else None
+    txt = ("主线指纹(密度榜): " + "; ".join(
+        f"{r['name']}({r['n']}只{('/'+str(r['size'])) if r['size'] else ''})" for r in top[:6])) if top else "无"
+    return {"n": len(codes), "n_classified": n_cls, "distinct_sectors": len(rows),
+            "top5_count_share": top5_share, "top": top, "text": txt}
 
 
 def main(argv: Optional[list] = None) -> int:

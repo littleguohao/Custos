@@ -59,3 +59,20 @@ def test_bull_mark_b_bucket_is_observe_not_buyable():
     pool = {"status": "ok", "candidates": [_cand("600007", "己", "X", "B", "优", 4, True)]}
     sec = ct.render_table(pool, "2026-07-28").split("## 🐂 基本面牛股候选")[1].split("\n## ")[0]
     assert "🐂观察价位(B)" in sec and "🐂可买" not in sec
+
+
+def test_mainline_fingerprint_section(monkeypatch, tmp_path):
+    """candidate_table 渲染当日主线指纹(best-effort);构造 members 并指向临时 market 目录。"""
+    from screening import candidate_table as ct
+    import json as _json
+    market = tmp_path / "market"
+    market.mkdir()
+    members = {"880201.SH": ["600000", "600001", "600002", "600003", "600004", "600005", "600006", "600007"],
+               "880300.SH": ["000%03d" % i for i in range(120)]}
+    (market / "sector_members.json").write_text(_json.dumps(members), encoding="utf-8")
+    # 把 STOCK_POOL_DIR.parent 指到 tmp_path,使 helper 找到 market/sector_members.json
+    monkeypatch.setattr(ct, "STOCK_POOL_DIR", tmp_path / "stock_pool")
+    cands = [{"code": "600000"}, {"code": "600001"}, {"code": "600002"}, {"code": "000001"}]
+    section = ct._mainline_fingerprint_section(cands)
+    assert any("当日主线指纹" in ln for ln in section)
+    assert any("非进场过滤" in ln for ln in section)

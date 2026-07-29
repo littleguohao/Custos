@@ -133,12 +133,18 @@ def load_sector_gate(index_dir, members: dict[str, list],
             fav_by_sec[sec] = (sorted(fav), fav)
         except Exception:  # noqa: BLE001
             continue
-    code2sec: dict[str, list] = {}
-    for sec, codes in members.items():
-        if sec not in fav_by_sec:
-            continue
-        for cc in codes:
-            code2sec.setdefault(_norm6(cc), []).append(sec)
+    # code→板块:复用 sector_mainstream.invert_members(剔除地区/风格,统一 _norm6 口径),再限定到有相位的板块
+    try:
+        import sector_mainstream as _sm  # noqa: PLC0415
+        _c2s = _sm.invert_members(members, exclude_types=True, norm=_norm6)
+    except Exception:  # noqa: BLE001
+        _c2s = {}
+        for sec, codes in members.items():
+            for cc in codes:
+                _c2s.setdefault(_norm6(cc), []).append(sec)
+    code2sec: dict[str, list] = {c6: [s for s in secs if s in fav_by_sec]
+                                 for c6, secs in _c2s.items()}
+    code2sec = {c6: secs for c6, secs in code2sec.items() if secs}
 
     def _asof(sorted_dates, fav, date):
         j = bisect.bisect_right(sorted_dates, date) - 1
@@ -178,12 +184,17 @@ def build_phase_resolver(index_dir, members: dict[str, list],
                 phase_by_sec[sec] = ph
         except Exception:  # noqa: BLE001
             continue
-    code2sec: dict[str, list] = {}
-    for sec, codes in members.items():
-        if sec not in phase_by_sec:
-            continue
-        for cc in codes:
-            code2sec.setdefault(_norm6(cc), []).append(sec)
+    try:
+        import sector_mainstream as _sm  # noqa: PLC0415
+        _c2s = _sm.invert_members(members, exclude_types=True, norm=_norm6)
+    except Exception:  # noqa: BLE001
+        _c2s = {}
+        for sec, codes in members.items():
+            for cc in codes:
+                _c2s.setdefault(_norm6(cc), []).append(sec)
+    code2sec: dict[str, list] = {c6: [s for s in secs if s in phase_by_sec]
+                                 for c6, secs in _c2s.items()}
+    code2sec = {c6: secs for c6, secs in code2sec.items() if secs}
 
     def resolve(code6: str) -> dict[str, Any]:
         secs = code2sec.get(str(code6)[:6], [])

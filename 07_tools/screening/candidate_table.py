@@ -58,6 +58,35 @@ def _fmt(v: Any, suffix: str = "") -> str:
     return f"{v}{suffix}"
 
 
+def _mainline_fingerprint_section(candidates: list[dict]) -> list[str]:
+    """🧭 当日主线指纹:候选池板块族密度榜(情境感知,**不做进场过滤**)。best-effort,数据缺失则整段跳过。"""
+    codes = [str(c.get("code", "")) for c in candidates if c.get("code")]
+    if not codes:
+        return []
+    try:
+        import sector_mainstream as sm  # noqa: PLC0415,E402
+        mpath = STOCK_POOL_DIR.parent / "market" / "sector_members.json"
+        members = json.loads(mpath.read_text(encoding="utf-8"))
+        code2secs = sm.invert_members(members, exclude_types=True)
+        fp = sm.mainline_fingerprint(codes, code2secs, sizes=sm.sector_sizes(members), top_k=8)
+    except Exception:  # noqa: BLE001
+        return []
+    top = fp.get("top") or []
+    if not top:
+        return []
+    out = ["## 🧭 当日主线指纹（候选池板块族密度榜）", "",
+           f"> 当日候选 {fp['n']} 只（有板块 {fp['n_classified']}）；前5板块占归属 "
+           f"{(fp.get('top5_count_share') or 0) * 100:.0f}%。**密度榜=情境感知**（看清当前主线在哪、"
+           f"共振候选是否踩在主线上），**非进场过滤**——回测已证「跟随主流」非机械 edge，仅辅助主观研判。", "",
+           "| 板块 | 候选数 | 板块规模 | 密度(候选/规模) | 占归属 |",
+           "|---|---:|---:|---:|---:|"]
+    for r in top:
+        out.append(f"| {r['name']} | {r['n']} | {r.get('size') or '-'} "
+                   f"| {_fmt(r.get('density'))} | {_fmt(round((r.get('share') or 0) * 100, 1), '%')} |")
+    out.append("")
+    return out
+
+
 def render_table(pool: dict, date: str) -> str:
     lines: list[str] = [
         f"# 公式选股备选池｜{date}",
@@ -70,6 +99,8 @@ def render_table(pool: dict, date: str) -> str:
     ]
     counts = pool.get("bucket_counts") or {}
     candidates = pool.get("candidates") or []
+    # 🧭 当日主线指纹:候选池板块族密度榜(情境感知,非进场 gate)——置于最前,先看当前主线全貌
+    lines += _mainline_fingerprint_section(candidates)
     # 🐂 基本面牛股候选(共振观察区)：基本面优 + 板块有利 + 技术强(市场做多时即可买🐂)。单独列出持续观察。
     # 分层受限(D/C等)的共振标的不是"可买",而是**重点研究观察对象**——单列 🔍 区,不被分层埋没。
     watch_all = [c for c in candidates
