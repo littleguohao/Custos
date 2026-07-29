@@ -272,3 +272,17 @@ def test_oracle_ceiling_and_min_winner_ret():
     tight = lp.rank_from_firings(recs, top_pct=50.0, surface_top_n=3, min_winner_ret=0.5)
     loose = lp.rank_from_firings(recs, top_pct=50.0, surface_top_n=3)
     assert tight["n_winners"] <= loose["n_winners"]
+
+
+def test_winner_basis_profitable():
+    """basis=profitable:先筛盈利股(ret>0)再取前 top_pct%,赢家不含下跌股。"""
+    bars, dates = _synth_bars_10()          # W*=+80%以上, L*=负收益
+    gate = lambda df: float(df["volume"].iloc[-1]) == 1.0
+    recs = lp.extract_firings(bars, dates[0], dates[-1], gate, min_bars=5, gate_window=0)
+    uni = lp.rank_from_firings(recs, top_pct=50.0, surface_top_n=3, winner_basis="universe")
+    pro = lp.rank_from_firings(recs, top_pct=50.0, surface_top_n=3, winner_basis="profitable")
+    assert uni["n_winners"] == 5                       # 全域前50% = 10只的一半
+    assert pro["n_profitable"] == 5                    # 只有 5 只盈利
+    assert pro["n_winners"] == 2                       # 盈利股(5)内前50% → 2 只
+    assert pro["winner_ret_cutoff"] > 0                # 切点必为正收益
+    assert "盈利股内前" in pro["text"]
