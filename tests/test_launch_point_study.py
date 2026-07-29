@@ -216,3 +216,43 @@ def test_main_capture_only_smoke(capsys):
     out = capsys.readouterr().out
     assert rc == 0 and "赢家捕捉率" in out
     assert "起涨点 vs 0AMV" not in out          # capture-only 不跑起涨点分析
+
+
+def test_two_pass_equals_single_pass():
+    """Pass1(抽取)+Pass2(合并排名) 与单趟 capture_rank_study 结果一致。"""
+    bars, dates = _synth_bars_10()
+    gate = lambda df: float(df["volume"].iloc[-1]) == 1.0
+    scorer = lambda df, code: {"score": 100.0 if str(code).startswith("W") else 1.0}
+    single = lp.capture_rank_study(bars, dates[0], dates[-1], gate, scorer=scorer,
+                                   top_pct=50.0, surface_top_n=3, min_bars=5)
+    recs = lp.extract_firings(bars, dates[0], dates[-1], gate, scorer=scorer, min_bars=5, gate_window=0)
+    two = lp.rank_from_firings(recs, top_pct=50.0, surface_top_n=3)
+    for k in ("n_winners", "captured", "recall", "surfaced", "buried_selected_not_found"):
+        assert single[k] == two[k], k
+
+
+def test_sharded_pass1_merge_equals_full():
+    """分片 Pass1 合并后 = 不分片(分片只切股票集合,排名在 Pass2 全域合并)。"""
+    bars, dates = _synth_bars_10()
+    gate = lambda df: float(df["volume"].iloc[-1]) == 1.0
+    codes = sorted(bars)
+    full = lp.extract_firings(bars, dates[0], dates[-1], gate, min_bars=5, gate_window=0)
+    shards = []
+    for i in range(3):                                   # 3 片
+        sub = {c: bars[c] for k, c in enumerate(codes) if k % 3 == i}
+        shards += lp.extract_firings(sub, dates[0], dates[-1], gate, min_bars=5, gate_window=0)
+    a = lp.rank_from_firings(full, top_pct=50.0, surface_top_n=3)
+    b = lp.rank_from_firings(shards, top_pct=50.0, surface_top_n=3)
+    assert a["captured"] == b["captured"] and a["surfaced"] == b["surfaced"]
+    assert a["recall"] == b["recall"]
+
+
+def test_gate_window_does_not_change_firings():
+    """尾窗口(gate_window)与整段前缀在充分预热下 firing 一致——省内存不改语义。"""
+    bars, dates = _synth_bars_10()
+    gate = lambda df: float(df["volume"].iloc[-1]) == 1.0
+    a = lp.extract_firings(bars, dates[0], dates[-1], gate, min_bars=5, gate_window=0)
+    b = lp.extract_firings(bars, dates[0], dates[-1], gate, min_bars=5, gate_window=30)
+    fa = {r["code"]: [d for d, _ in r["days"]] for r in a}
+    fb = {r["code"]: [d for d, _ in r["days"]] for r in b}
+    assert fa == fb

@@ -132,55 +132,22 @@ def analyze(bars_by_code: dict, regime: dict[str, str], start: str, end: str,
     return out
 
 
-def capture_rank_study(bars, start: str, end: str, entry_gate,
-                       scorer=None, top_pct: float = 50.0, surface_top_n: int = 20,
-                       min_bars: int = 40) -> dict[str, Any]:
-    """赢家捕捉率 + 排名质量。回答:多头区间收益前 top_pct% 赢家,
-      ①被我们信号捕捉到的比例(recall);②捕捉当日在"同类信号池"里的排名/是否进 top_n(surfaced);
-      ③量化"选出来但没发现"(捕捉到却排名埋没=captured 但 best_rank>N)。
-    scorer(sub_df, code)->{'score':..} 用于当日池内排序(高=靠前);None 则按 0 分(等同随机),仍给随机基线对照。
-    **内存**:bars 可为 dict{code:df} 或 **(code, df) 迭代器**(流式:逐股/逐块加载→抽取→释放,避免全量载入 OOM)。
-    单趟扫描:每股只加载一次,同时算窗口收益 + 全域逐日信号池(仅存 (code,score) 轻量元组,释放K线)。"""
-    items = bars.items() if isinstance(bars, dict) else bars
-    rets: list[tuple] = []
-    day_fire: dict[str, list] = {}          # date -> [(code, score)]  当日全域信号池(轻量)
-    stock_days: dict[str, list] = {}        # code -> [dates] 该股信号日(用于赢家过滤)
-    for code, raw in items:                 # 流式:raw 用完即随迭代释放
-        if raw is None or len(raw) == 0:
-            continue
-        df = raw.sort_values("date").reset_index(drop=True)
-        r = window_return(df["date"].tolist(), df["close"].astype(float).tolist(), start, end)
-        if r is not None:
-            rets.append((code, r))
-        if len(df) < min_bars:
-            continue
-        ds = [str(d)[:10] for d in df["date"]]
-        fired: list[str] = []
-        for i in range(min_bars, len(df)):
-            if not (start <= ds[i] <= end) or not entry_gate(df.iloc[:i + 1]):
-                continue
-            sc = 0.0
-            if scorer is not None:
-                sr = scorer(df.iloc[:i + 1], code)
-                sc = (sr or {}).get("score", 0.0) if isinstance(sr, dict) else (sr or 0.0)
-            day_fire.setdefault(ds[i], []).append((code, sc))
-            fired.append(ds[i])
-        if fired:
-            stock_days[code] = fired
-    if not rets:
-        return {"n_winners": 0, "text": "无数据"}
-    rets.sort(key=lambda x: x[1], reverse=True)
-    n_top = max(1, int(len(rets) * top_pct / 100))
-    winners = {c for c, _ in rets[:n_top]}
-    win_fire = {c: stock_days[c] for c in winners if c in stock_days}   # 赢家的信号日
+def _rss_mb() -> float:
+    """当前进程 RSS(MB);拿不到返回 0。用于 OOM 诊断探针。"""
+    try:
+        with open("/proc/self/statm", encoding="utf-8") as fh:
+            return int(fh.read().split()[1]) * 4096 / 1048576
+    except Exception:  # noqa: BLE001
+        try:
+            import resource  # noqa: PLC0415
+            return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+        except Exception:  # noqa: BLE001
+            return 0.0
 
-    rank_of: dict[tuple, tuple] = {}        # (date,code) -> (rank, pool)
-    for d, lst in day_fire.items():
-        pool = len(lst)
-        for rk, (code, _) in enumerate(sorted(lst, key=lambda x: x[1], reverse=True), 1):
-            if code in winners:                       # 只需赢家的排名,省内存
-                rank_of[(d, code)] = (rk, pool)
 
+def _summarize_capture(rets: list, winners: set, win_fire: dict, rank_of: dict,
+                       top_pct: float, surface_top_n: int) -> dict[str, Any]:
+    """捕捉率/排名质量的共享汇总(流式与两趟分片模式同口径)。"""
     captured = surfaced = buried = 0
     best_ranks: list[int] = []
     best_pcts: list[float] = []
@@ -230,6 +197,137 @@ def capture_rank_study(bars, start: str, end: str, entry_gate,
         f"排序增益: 我们 surfaced {(out['surfaced_rate_of_captured'] or 0)*100:.0f}% vs 随机 "
         f"{(out['random_surfaced_rate_of_captured'] or 0)*100:.0f}% → {'排序有效(+%.0fpp)' % (edge*100) if edge>0.02 else '排序≈随机(无surfacing增益)' if abs(edge)<=0.02 else '排序反而更差(%.0fpp)' % (edge*100)}。")
     return out
+
+
+def extract_firings(bars, start: str, end: str, entry_gate, scorer=None,
+                    min_bars: int = 40, gate_window: int = 120, progress: int = 0) -> list[dict]:
+    """**Pass1(可分片)**:逐股抽取 {code, ret, days:[[date,score],..]}——极小的中间产物。
+    可按 --shard 拆多个独立进程跑(每片内存全新),彻底规避 loader 内存问题;Pass2 再合并算排名。"""
+    import gc  # noqa: PLC0415
+    items = bars.items() if isinstance(bars, dict) else bars
+    out: list[dict] = []
+    n = 0
+    for code, raw in items:
+        n += 1
+        if raw is not None and len(raw):
+            df = raw.sort_values("date").reset_index(drop=True)
+            ds = [str(d)[:10] for d in df["date"]]
+            r = window_return(ds, df["close"].astype(float).tolist(), start, end)
+            days: list[list] = []
+            if len(df) >= min_bars:
+                for i in range(min_bars, len(df)):
+                    if not (start <= ds[i] <= end):
+                        continue
+                    lo = max(0, i + 1 - gate_window) if gate_window else 0
+                    sub = df.iloc[lo:i + 1]
+                    if not entry_gate(sub):
+                        continue
+                    sc = 0.0
+                    if scorer is not None:
+                        sr = scorer(sub, code)
+                        sc = (sr or {}).get("score", 0.0) if isinstance(sr, dict) else (sr or 0.0)
+                    days.append([ds[i], float(sc)])
+            if r is not None or days:
+                out.append({"code": code, "ret": r, "days": days})
+            del df, ds
+        if progress and n % progress == 0:
+            print(f"[pass1] {n} 股 | RSS={_rss_mb():.0f}MB", file=sys.stderr, flush=True)
+            gc.collect()
+    return out
+
+
+def rank_from_firings(records: list[dict], top_pct: float = 50.0,
+                      surface_top_n: int = 20) -> dict[str, Any]:
+    """**Pass2**:合并(多分片)firings → 赢家捕捉率 + 排名质量。与 capture_rank_study 同口径。"""
+    rets = [(r["code"], r["ret"]) for r in records if r.get("ret") is not None]
+    if not rets:
+        return {"n_winners": 0, "text": "无数据"}
+    rets.sort(key=lambda x: x[1], reverse=True)
+    n_top = max(1, int(len(rets) * top_pct / 100))
+    winners = {c for c, _ in rets[:n_top]}
+    day_fire: dict[str, list] = {}
+    win_fire: dict[str, list] = {}
+    for r in records:
+        for d, sc in (r.get("days") or []):
+            day_fire.setdefault(d, []).append((r["code"], sc))
+            if r["code"] in winners:
+                win_fire.setdefault(r["code"], []).append(d)
+    rank_of: dict[tuple, tuple] = {}
+    for d, lst in day_fire.items():
+        pool = len(lst)
+        for rk, (code, _) in enumerate(sorted(lst, key=lambda x: x[1], reverse=True), 1):
+            if code in winners:
+                rank_of[(d, code)] = (rk, pool)
+    day_fire.clear()
+    return _summarize_capture(rets, winners, win_fire, rank_of, top_pct, surface_top_n)
+
+
+def capture_rank_study(bars, start: str, end: str, entry_gate,
+                       scorer=None, top_pct: float = 50.0, surface_top_n: int = 20,
+                       min_bars: int = 40, gate_window: int = 0, progress: int = 0) -> dict[str, Any]:
+    """赢家捕捉率 + 排名质量。回答:多头区间收益前 top_pct% 赢家,
+      ①被我们信号捕捉到的比例(recall);②捕捉当日在"同类信号池"里的排名/是否进 top_n(surfaced);
+      ③量化"选出来但没发现"(捕捉到却排名埋没=captured 但 best_rank>N)。
+    scorer(sub_df, code)->{'score':..} 用于当日池内排序(高=靠前);None 则按 0 分(等同随机),仍给随机基线对照。
+    **内存**:bars 可为 dict{code:df} 或 **(code, df) 迭代器**(流式:逐股加载→抽取→释放,避免全量载入 OOM)。
+    单趟扫描,每股只加载一次;累加器只存轻量元组并即时释放 K 线(del + 周期 gc)。
+    gate_window>0:只把**最近 gate_window 根**传给 gate/scorer(而非整段前缀)——避免每根K线重算全历史
+    (O(n²) 时间 + 大量临时对象,是 OOM/慢的主因)。KDJ 等递归指标需足够预热,建议 ≥120。
+    progress>0:每处理 progress 只股打印进度 + RSS(MB) 探针,便于定位内存增长。"""
+    import gc  # noqa: PLC0415
+    items = bars.items() if isinstance(bars, dict) else bars
+    rets: list[tuple] = []
+    day_fire: dict[str, list] = {}          # date -> [(code, score)]  当日全域信号池(轻量)
+    stock_days: dict[str, list] = {}        # code -> [dates] 该股信号日(用于赢家过滤)
+    n_seen = 0
+    for code, raw in items:                 # 流式:raw 用完即释放
+        n_seen += 1
+        if raw is not None and len(raw):
+            df = raw.sort_values("date").reset_index(drop=True)
+            ds = [str(d)[:10] for d in df["date"]]
+            closes = df["close"].astype(float).tolist()
+            r = window_return(ds, closes, start, end)
+            if r is not None:
+                rets.append((code, r))
+            if len(df) >= min_bars:
+                fired: list[str] = []
+                for i in range(min_bars, len(df)):
+                    if not (start <= ds[i] <= end):
+                        continue
+                    lo = max(0, i + 1 - gate_window) if gate_window else 0   # 尾窗口:省时省内存
+                    sub = df.iloc[lo:i + 1]
+                    if not entry_gate(sub):
+                        continue
+                    sc = 0.0
+                    if scorer is not None:
+                        sr = scorer(sub, code)
+                        sc = (sr or {}).get("score", 0.0) if isinstance(sr, dict) else (sr or 0.0)
+                    day_fire.setdefault(ds[i], []).append((code, float(sc)))
+                    fired.append(ds[i])
+                if fired:
+                    stock_days[code] = fired
+            del df, ds, closes
+        if progress and n_seen % progress == 0:
+            print(f"[capture] {n_seen} 股 | firings={sum(len(v) for v in day_fire.values())} "
+                  f"| RSS={_rss_mb():.0f}MB", file=sys.stderr, flush=True)
+            gc.collect()
+    if not rets:
+        return {"n_winners": 0, "text": "无数据"}
+    rets.sort(key=lambda x: x[1], reverse=True)
+    n_top = max(1, int(len(rets) * top_pct / 100))
+    winners = {c for c, _ in rets[:n_top]}
+    win_fire = {c: stock_days[c] for c in winners if c in stock_days}   # 赢家的信号日
+    stock_days.clear()
+
+    rank_of: dict[tuple, tuple] = {}        # (date,code) -> (rank, pool)
+    for d, lst in day_fire.items():
+        pool = len(lst)
+        for rk, (code, _) in enumerate(sorted(lst, key=lambda x: x[1], reverse=True), 1):
+            if code in winners:                       # 只需赢家的排名,省内存
+                rank_of[(d, code)] = (rk, pool)
+    day_fire.clear()
+
+    return _summarize_capture(rets, winners, win_fire, rank_of, top_pct, surface_top_n)
 
 
 def sector_concentration(winners: list[str], members: dict[str, list], index_dir,
@@ -329,12 +427,38 @@ def main(argv=None, loader=None) -> int:
     ap.add_argument("--capture-only", action="store_true",
                     help="只跑捕捉率+排名研究(流式分块加载,省内存);跳过起涨点分析与全量载入")
     ap.add_argument("--chunk-size", type=int, default=400, help="捕捉研究流式加载的每块股票数(内存/IO 权衡)")
+    ap.add_argument("--gate-window", type=int, default=120,
+                    help="传给 gate/scorer 的尾窗口根数(0=整段前缀)。默认120:省时省内存,KDJ 预热足够")
+    ap.add_argument("--progress", type=int, default=500,
+                    help="每 N 股打印进度+RSS(MB)探针,0=关闭(用于定位内存增长)")
+    ap.add_argument("--emit-firings", default="",
+                    help="Pass1:只抽取信号→写 JSON(极小),可配 --shard 分多进程跑,彻底避开 loader 内存")
+    ap.add_argument("--shard", default="",
+                    help="Pass1 分片 i/N(如 1/6):只处理第 i 片股票")
+    ap.add_argument("--from-firings", default="",
+                    help="Pass2:读一个或多个(逗号分隔) Pass1 JSON,合并算捕捉率+排名(内存极小)")
     ap.add_argument("--capture-top-pct", type=float, default=50.0, help="捕捉研究的赢家口径(默认收益前50%%)")
     ap.add_argument("--surface-top-n", type=int, default=20, help="每日展示阈值(top-N 算 surfaced)")
     ap.add_argument("--rank-score", choices=["reversal_quality", "reversal_quality_inv", "none"],
                     default="reversal_quality", help="当日信号池内排序分(none=随机)")
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
+
+    # Pass2:仅合并 Pass1 产物算排名(不加载任何K线,内存极小)
+    if args.from_firings:
+        import json as _j
+        recs: list[dict] = []
+        for fp in [x.strip() for x in args.from_firings.split(",") if x.strip()]:
+            d = _j.loads(Path(fp).read_text(encoding="utf-8"))
+            recs.extend(d.get("records") or d if isinstance(d, list) else d.get("records", []))
+        cap = rank_from_firings(recs, top_pct=args.capture_top_pct, surface_top_n=args.surface_top_n)
+        print(f"\n=== 赢家捕捉率 + 排名质量（合并 {len(recs)} 股记录, top{args.capture_top_pct:.0f}%赢家, "
+              f"展示top{args.surface_top_n}）===")
+        print(cap["text"])
+        if args.out:
+            Path(args.out).write_text(_j.dumps({"capture_rank": cap}, ensure_ascii=False, indent=2),
+                                      encoding="utf-8")
+        return 0
 
     if args.universe_sdata:
         import s_data  # noqa: PLC0415
@@ -353,7 +477,10 @@ def main(argv=None, loader=None) -> int:
                       - _td(days=int(args.buffer_days * 1.6) + 10)).isoformat()   # 交易日→日历日留裕量
 
     def _chunked_items(chunk: int):
-        """流式产出 (code, df):逐块加载→逐股产出→释放该块,capture 研究据此避免全量载入 OOM。"""
+        """流式产出 (code, df):逐块加载→逐股产出→释放该块,capture 研究据此避免全量载入 OOM。
+        每股裁到必需列 + 窗口范围并 copy()(切断对 loader 大对象的引用,否则 clear() 也释放不掉)。"""
+        import gc  # noqa: PLC0415
+        need = ["date", "open", "high", "low", "close", "volume"]
         if loader is not None:
             for c, df in loader(codes, 0).items():
                 yield c, df
@@ -363,12 +490,37 @@ def main(argv=None, loader=None) -> int:
         fn2 = s_data.load_bars_csv if args.data_source == "csv" else s_data.load_bars_qlib
         root2 = str(Path(args.s_data_root) / sub2)
         for k in range(0, len(codes), chunk):
-            d = fn2(codes[k:k + chunk], 0, start=load_start, end=None, root=root2)
-            for c, df in d.items():
-                yield c, df
-            d.clear()                                    # 释放该块,内存只留一块 + 累加器
+            d = fn2(codes[k:k + chunk], 0, start=load_start, end=args.end, root=root2)
+            for c in list(d):
+                df = d.pop(c)                            # 取出即从 dict 移除
+                try:
+                    cols = [x for x in need if x in df.columns]
+                    yield c, df[cols].copy()             # copy:切断父 block 引用,确保可回收
+                finally:
+                    del df
+            d.clear()
+            gc.collect()                                 # 每块显式回收,内存只留一块 + 轻量累加器
 
     res: dict[str, Any] = {}
+    # Pass1:只抽信号→小 JSON(可分片,多进程各自内存全新)
+    if args.emit_firings:
+        if args.shard:
+            i, n = (int(x) for x in args.shard.split("/"))
+            codes = [c for k, c in enumerate(codes) if k % n == (i - 1) % n]
+            print(f"[pass1] 分片 {args.shard}: {len(codes)} 只", file=sys.stderr)
+        scorer = None if args.rank_score == "none" else bt.SCORERS.get(args.rank_score)
+        recs = extract_firings(_chunked_items(args.chunk_size), args.start, args.end,
+                              bt.ENTRY_GATES[args.entry_filter], scorer=scorer,
+                              gate_window=args.gate_window, progress=args.progress)
+        import json as _j
+        Path(args.emit_firings).write_text(
+            _j.dumps({"start": args.start, "end": args.end, "entry_filter": args.entry_filter,
+                      "rank_score": args.rank_score, "shard": args.shard, "records": recs},
+                     ensure_ascii=False), encoding="utf-8")
+        print(f"[pass1] 写出 {len(recs)} 股记录 → {args.emit_firings} (RSS={_rss_mb():.0f}MB)",
+              file=sys.stderr)
+        return 0
+
     if not args.capture_only:                            # 起涨点分析:需全量在内存(与既有行为一致)
         if loader is not None:
             bars = loader(codes, 0)
@@ -389,7 +541,8 @@ def main(argv=None, loader=None) -> int:
         src = _chunked_items(args.chunk_size) if args.capture_only else bars
         cap = capture_rank_study(src, args.start, args.end, bt.ENTRY_GATES[args.entry_filter],
                                  scorer=scorer, top_pct=args.capture_top_pct,
-                                 surface_top_n=args.surface_top_n)
+                                 surface_top_n=args.surface_top_n,
+                                 gate_window=args.gate_window, progress=args.progress)
         res["capture_rank"] = cap
         print(f"\n=== 赢家捕捉率 + 排名质量（top{args.capture_top_pct:.0f}%赢家, 展示top{args.surface_top_n}, "
               f"排序={args.rank_score}）===")
