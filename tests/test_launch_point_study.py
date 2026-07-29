@@ -413,3 +413,27 @@ def test_within_day_auc_beats_day_effect():
     m = {f["feature"]: f for f in r["features"]}["mixed"]
     assert m["auc"] > m["auc_pooled"]             # 日内AUC 高于被日期效应污染的全局AUC
     assert m["auc"] > 0.6
+
+
+def test_build_sector_features_and_firings_integration(tmp_path):
+    # 有利板块(上行)+ 不利板块(下行):as-of 特征值正确;未分类返回空(不误标 0)
+    n = 130
+    dates = [str(d)[:10] for d in pd.date_range("2022-01-03", periods=n, freq="B")]
+    up = [10 + 0.15 * i for i in range(n)]
+    down = [30 - 0.15 * i for i in range(n)]
+    for name, closes in (("880201.SH", up), ("880900.SH", down)):
+        (tmp_path / f"{name}.csv").write_text(
+            "date,close\n" + "\n".join(f"{d},{c}" for d, c in zip(dates, closes)), encoding="utf-8")
+    members = {"880201.SH": ["600000"], "880900.SH": ["000002"]}
+    fn = lp.build_sector_features(tmp_path, members, mom_days=20)
+    r_up = fn("600000", dates[-1])
+    assert r_up["f_sector_favorable"] == 1 and r_up["f_sector_momentum"] > 0
+    r_dn = fn("000002", dates[-1])
+    assert r_dn["f_sector_favorable"] == 0 and r_dn["f_sector_momentum"] < 0
+    assert fn("999999", dates[-1]) == {}
+    # 接入 extract_firings:f_ 键随信号落盘(判别研究按 f_ 前缀收集)
+    bars, bdates = _synth_bars_10()
+    gate = lambda df: float(df["volume"].iloc[-1]) == 1.0
+    recs = lp.extract_firings(bars, bdates[0], bdates[-1], gate, min_bars=5, gate_window=0,
+                              extra_feature_fn=lambda code, date: {"f_sector_favorable": 1})
+    assert recs and all(d[2]["f_sector_favorable"] == 1 for r in recs for d in r["days"])

@@ -245,15 +245,70 @@ def _summarize_capture(rets: list, winners: set, win_fire: dict, rank_of: dict,
     return out
 
 
+def build_sector_features(index_dir, members, mom_days: int = 20):
+    """构建 **as-of 板块特征**查询 fn(code6, date)->dict(供 extract_firings 记录到每个信号):
+    - f_sector_favorable(0/1):所属板块任一当日处有利相位(DIF>0 且无近期顶背离/三打,
+      favorable_series 因果序列,摆动高点需 i+fractal 确认,无未来函数);
+    - f_sector_momentum(float):所属板块指数 trailing mom_days 最强收益——当期强势/主流的
+      **因果代理**(密度榜需逐日全市场横截面,流式 Pass1 算不起;板块动量是单板块可算的近似)。
+    未分类/数据缺失 → 返回 {}(特征缺省,不误标 0)。绝不 raise。"""
+    import bisect as _b
+    import sector_phase as sp  # noqa: PLC0415
+    import sector_mainstream as sm  # noqa: PLC0415
+    try:
+        code2secs = sm.invert_members(members)
+        sec_data: dict[str, tuple] = {}
+        for sec in {s for secs in code2secs.values() for s in secs}:
+            p = Path(index_dir) / f"{sec}.csv"
+            if not p.is_file():
+                continue
+            try:
+                df = pd.read_csv(p)
+                dates = [str(d)[:10] for d in df["date"]]
+                closes = df["close"].astype(float).tolist()
+                fav = sp.favorable_series(dates, closes)
+                sec_data[sec] = (dates, closes, fav)
+            except Exception:  # noqa: BLE001
+                continue
+
+        def fn(code6: str, date: str) -> dict:
+            secs = [s for s in code2secs.get(str(code6)[:6], []) if s in sec_data]
+            if not secs:
+                return {}
+            fav_any = 0
+            best_mom: Optional[float] = None
+            for s in secs:
+                dates, closes, fav = sec_data[s]
+                j = _b.bisect_right(dates, date) - 1         # as-of:最近 ≤ date 的板块收盘
+                if j < 0:
+                    continue
+                if fav.get(dates[j]):
+                    fav_any = 1
+                k = j - mom_days
+                if k >= 0 and closes[k]:
+                    m = closes[j] / closes[k] - 1
+                    best_mom = m if best_mom is None else max(best_mom, m)
+            out: dict[str, Any] = {"f_sector_favorable": fav_any}
+            if best_mom is not None:
+                out["f_sector_momentum"] = round(best_mom, 4)
+            return out
+
+        return fn
+    except Exception:  # noqa: BLE001
+        return lambda code6, date: {}
+
+
 def extract_firings(bars, start: str, end: str, entry_gate, scorer=None,
                     min_bars: int = 40, gate_window: int = 120, progress: int = 0,
                     horizons: tuple = (), feature_scorers: Optional[dict] = None,
-                    stats: Optional[dict] = None) -> list[dict]:
+                    stats: Optional[dict] = None, extra_feature_fn=None) -> list[dict]:
     """**Pass1(可分片)**:逐股抽取 {code, ret, days:[[date,score],..]}——极小的中间产物。
     可按 --shard 拆多个独立进程跑(每片内存全新),彻底规避 loader 内存问题;Pass2 再合并算排名。
     horizons:如 (20,60) → 每个信号日额外记 **因果前向收益**(fwd{h}=close[i+h]/close[i]-1,
     mfe{h}=区间内最大涨幅),用于"信号当时能否判别未来会跑"的研究(不看窗口末尾,无未来函数)。
     feature_scorers:{名称: scorer} → 每个信号日记下**当时可得**的特征值,作为判别子候选。
+    extra_feature_fn(code6, date)->dict → 每个信号日追加 as-of 特征(如 build_sector_features
+    的板块相位/板块动量);键需以 f_ 开头才会被判别研究收集。
     stats:传入 dict 时收集运行统计(feature_failures=各特征 scorer 异常次数——防异常被静默吞掉)。"""
     import gc  # noqa: PLC0415
     items = bars.items() if isinstance(bars, dict) else bars
@@ -280,7 +335,7 @@ def extract_firings(bars, start: str, end: str, entry_gate, scorer=None,
                         sr = scorer(sub, code)
                         sc = (sr or {}).get("score", 0.0) if isinstance(sr, dict) else (sr or 0.0)
                     rec: list = [ds[i], float(sc)]
-                    if horizons or feature_scorers:
+                    if horizons or feature_scorers or extra_feature_fn:
                         extra: dict = {}
                         for h in horizons:                       # 因果前向:只用信号日之后的数据
                             j = i + int(h)
@@ -299,6 +354,13 @@ def extract_firings(bars, start: str, end: str, entry_gate, scorer=None,
                                 if stats is not None:      # 计数防静默:恒失败的特征不得无声消失
                                     ff = stats.setdefault("feature_failures", {})
                                     ff[fname] = ff.get(fname, 0) + 1
+                        if extra_feature_fn is not None:         # as-of 附加特征(板块相位/动量)
+                            try:
+                                extra.update(extra_feature_fn(code, ds[i]))
+                            except Exception:  # noqa: BLE001
+                                if stats is not None:
+                                    ff = stats.setdefault("feature_failures", {})
+                                    ff["_extra"] = ff.get("_extra", 0) + 1
                         rec.append(extra)
                     days.append(rec)
             if r is not None or days:
@@ -652,6 +714,9 @@ def main(argv=None, loader=None) -> int:
                     help="Pass1:逗号分隔前向天数(如 20,60)→ 每信号记因果 fwd/mfe,供判别力研究")
     ap.add_argument("--feature-scores", default="",
                     help="Pass1:逗号分隔特征打分器(SCORERS 名,如 reversal_quality,momentum,low_vol,alpha101)")
+    ap.add_argument("--sector-features", action="store_true",
+                    help="Pass1:每个信号日记 as-of 板块特征(f_sector_favorable 相位有利 / f_sector_momentum 板块动量;"
+                    "需 sector_members.json + 板块指数CSV)")
     ap.add_argument("--discriminate", action="store_true",
                     help="Pass2:跑'信号当时能否选出会跑的票'判别力研究(AUC + 每日选top-k精确率)")
     ap.add_argument("--horizon", type=int, default=20, help="判别研究用的前向天数")
@@ -766,10 +831,20 @@ def main(argv=None, loader=None) -> int:
             else:
                 print(f"[WARN] 未知特征打分器 {nm}(可选: {','.join(sorted(bt.SCORERS))})", file=sys.stderr)
         fstats: dict = {}
+        xfn = None
+        if args.sector_features:
+            import json as _jm
+            mpath = Path(args.sector_members)
+            members = _jm.loads(mpath.read_text(encoding="utf-8")) if mpath.is_file() else {}
+            if not members:
+                ap.error("--sector-features 需 sector_members.json(先跑 fetch_sector_index_history.py --members)")
+            xfn = build_sector_features(args.sector_index_dir, members)
+            print(f"[pass1] 板块特征已启用 (dir={args.sector_index_dir})", file=sys.stderr)
         recs = extract_firings(_chunked_items(args.chunk_size), args.start, args.end,
                               bt.ENTRY_GATES[args.entry_filter], scorer=scorer,
                               gate_window=args.gate_window, progress=args.progress,
-                              horizons=hz, feature_scorers=fsc, stats=fstats)
+                              horizons=hz, feature_scorers=fsc, stats=fstats,
+                              extra_feature_fn=xfn)
         if fstats.get("feature_failures"):
             print(f"[WARN] 特征打分器异常(特征可能缺失): {fstats['feature_failures']}", file=sys.stderr)
         import json as _j
