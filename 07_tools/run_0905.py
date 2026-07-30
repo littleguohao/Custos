@@ -43,24 +43,35 @@ def _stage(cmd: list[str], name: str) -> dict:
     return r
 
 
+DISCOVERY_STAGES = ("overseas", "rss_collect", "rss_filter")
+
+
 def _check_0850_status(target: str) -> tuple[bool, str]:
     """Decide whether the 09:05 pipeline may reuse 08:50 discovery artifacts.
 
-    Returns (reuse_discovery, note): reuse only when 06_logs/{date}_0850_run_log.json
-    exists with status == "completed". Otherwise fall back to full collection;
-    the note explains why (recorded in the run log, warned on stderr — stdout
-    protocol unchanged).
+    复用条件收紧为**逐 stage 判定**:只有 08:50 的三个 discovery stage
+    (overseas / rss_collect / rss_filter) 全部 ok 才允许复用。
+    仅看 status == "completed" 是不够的——08:50 采集全失败时曾照样写 completed,
+    09:05 于是跳过重采、用空数据渲染出外观正常的报告(评分器按"中性半分"填)。
+    Returns (reuse_discovery, note); note 记入 run log 并 warn 到 stderr(stdout 协议不变)。
     """
     path = LOG_DIR / f"{target}_0850_run_log.json"
     if not path.exists():
         return False, "0850_log_missing, fallback to full collection"
     try:
-        status = json.loads(path.read_text(encoding="utf-8")).get("status")
+        log = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False, "0850_log_unreadable, fallback to full collection"
-    if status == "completed":
-        return True, ""
-    return False, f"0850_status={status}, fallback to full collection"
+    status = log.get("status")
+    stage_ok = {s.get("name"): s.get("ok") for s in (log.get("stages") or []) if isinstance(s, dict)}
+    bad = [n for n in DISCOVERY_STAGES if stage_ok.get(n) is not True]
+    if bad:
+        return False, f"0850_status={status}, discovery_failed={','.join(bad)}, fallback to full collection"
+    if status not in {"completed", "degraded"}:
+        return False, f"0850_status={status}, fallback to full collection"
+    if status == "degraded":
+        return True, "0850_status=degraded but discovery stages ok, reuse discovery"
+    return True, ""
 
 
 def _daily_pipeline_cmd(target: str, reuse_discovery: bool) -> list[str]:

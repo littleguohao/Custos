@@ -115,8 +115,18 @@ def main(argv=None) -> int:
         stages_log.append(_log_stage(name, r, s_started, _now_iso(), time.time() - s_t0))
         steps.append(f"{name}={'ok' if r['ok'] else 'fail'}")
 
-    _write_run_log(target, "completed", run_started, t0, stages_log)
-    print(f"【08:50预采集完成｜{target}】{'；'.join(steps + _rss_summary_fragments(results))}")
+    # 09:05 会**复用**本次采集(--reuse-discovery)。若这里任一 stage 失败却仍写 "completed",
+    # 09:05 就会跳过重采、用空/旧数据渲染出一份外观正常的报告(评分器给"中性半分")。
+    # 故:只要有 stage 失败就写 degraded,并把失败项列进 run log,由 09:05 决定是否重采。
+    failed = [n for n, r in results.items() if not r["ok"]]
+    status = "completed" if not failed else "degraded"
+    stages_log.append({"stage": "collection_summary", "ok": not failed,
+                       "failed_stages": failed, "status": status,
+                       "note": "任一采集失败即 degraded;09:05 据此拒绝复用并重采关键项"})
+    _write_run_log(target, status, run_started, t0, stages_log)
+    tag = "" if not failed else f"（降级：{','.join(failed)} 失败，09:05 将重采）"
+    print(f"【08:50预采集{'完成' if not failed else '降级完成'}｜{target}】{tag}"
+          f"{'；'.join(steps + _rss_summary_fragments(results))}")
     return 0
 
 

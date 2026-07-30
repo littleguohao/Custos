@@ -65,6 +65,47 @@ class TestLogStage:
         assert entry["note"] == "why"
 
 
+class TestCollectionStatus:
+    """08:50 采集失败必须写 degraded——写 completed 会让 09:05 静默复用空数据。"""
+
+    def _run(self, tmp_path, monkeypatch, failing: set[str], capsys):
+        monkeypatch.setattr(run_0850, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(run_0850, "check_trading_day",
+                            lambda target: {"is_trading_day": True, "date": target})
+        monkeypatch.setattr(run_0850, "_stage", lambda cmd, name: {
+            "ok": name not in failing, "returncode": 0 if name not in failing else 1,
+            "timeout": False, "stdout": "", "stderr": "", "out": "",
+        })
+        rc = run_0850.main(["--date", "2026-07-20"])
+        printed = capsys.readouterr().out
+        log = json.loads((tmp_path / "2026-07-20_0850_run_log.json").read_text(encoding="utf-8"))
+        return rc, log, printed
+
+    def test_all_ok_is_completed(self, tmp_path, monkeypatch, capsys):
+        rc, log, printed = self._run(tmp_path, monkeypatch, set(), capsys)
+        assert rc == 0
+        assert log["status"] == "completed"
+        summary = [s for s in log["stages"] if s.get("stage") == "collection_summary"][0]
+        assert summary["failed_stages"] == [] and summary["ok"] is True
+        assert "降级" not in printed
+
+    def test_any_failure_is_degraded_and_lists_failed_stages(self, tmp_path, monkeypatch, capsys):
+        rc, log, printed = self._run(tmp_path, monkeypatch, {"overseas", "rss_collect"}, capsys)
+        assert rc == 0                                   # 采集仍是 best-effort,不硬失败
+        assert log["status"] == "degraded"
+        summary = [s for s in log["stages"] if s.get("stage") == "collection_summary"][0]
+        assert set(summary["failed_stages"]) == {"overseas", "rss_collect"}
+        assert "降级" in printed and "overseas" in printed
+
+    def test_degraded_log_blocks_0905_reuse(self, tmp_path, monkeypatch, capsys):
+        """端到端语义:0850 的 degraded 日志 → 0905 拒绝复用 discovery。"""
+        import run_0905
+        self._run(tmp_path, monkeypatch, {"rss_filter"}, capsys)
+        monkeypatch.setattr(run_0905, "LOG_DIR", tmp_path)
+        reuse, note = run_0905._check_0850_status("2026-07-20")
+        assert reuse is False and "rss_filter" in note
+
+
 class TestWriteRunLog:
     def test_structure(self, tmp_path, monkeypatch):
         monkeypatch.setattr(run_0850, "LOG_DIR", tmp_path)
