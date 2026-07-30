@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """起涨点 vs 0AMV 研究(launch_point_study)测试。"""
+import json
 import pandas as pd
 import pytest
 
@@ -506,3 +507,196 @@ def test_usable_verdict_marks_in_sample_only():
     f = {x["feature"]: x for x in r["features"]}["real"]
     assert f["direction"] == "high" and f["split_consistent"] is True
     assert "弱可用候选" in r["text"] and "仅样本内" in r["text"]
+
+
+# --------------------------------------------------------------------------
+# 「在空头段就识别未来赢家」研究:窗口枚举 / 两窗解耦 / winner 标签 / 跨窗共同点
+# 依据结论#11(赢家起涨点 73% 落在空头)与 §3/§5(含退市宇宙 + 跨窗为准入门槛)
+# --------------------------------------------------------------------------
+
+def _regime(days: list[str], states: list[str]) -> dict:
+    return dict(zip(days, states))
+
+
+def _bdays(n: int, start: str = "2024-01-01") -> list[str]:
+    return [str(d)[:10] for d in pd.date_range(start, periods=n, freq="B")]
+
+
+def test_long_regime_windows_segments_and_min_days():
+    d = _bdays(40)
+    regime = _regime(d, ["做多"] * 10 + ["空头"] * 10 + ["做多"] * 3 + ["中性"] * 5 + ["做多"] * 12)
+    segs = lp.long_regime_windows(regime, min_days=5)
+    assert [(a, b, n) for a, b, n in segs] == [(d[0], d[9], 10), (d[28], d[39], 12)]   # 3日碎片被剔除
+    assert len(lp.long_regime_windows(regime, min_days=1)) == 3
+    assert lp.long_regime_windows(regime, min_days=5, state="空头") == [(d[10], d[19], 10)]
+
+
+def test_bear_to_long_pairs_pairs_signal_and_label_windows():
+    """空头段=信号窗,紧随做多段=赢家窗;末尾没有后继做多段的空头段被丢(右删失)。"""
+    d = _bdays(60)
+    regime = _regime(d, ["空头"] * 15 + ["做多"] * 20 + ["空头"] * 15 + ["中性"] * 10)
+    pairs = lp.bear_to_long_pairs(regime, min_bear_days=10, min_long_days=15)
+    assert len(pairs) == 1                                   # 第二段空头之后无做多段 → 不成对
+    p = pairs[0]
+    assert (p["signal_start"], p["signal_end"]) == (d[0], d[14])
+    assert (p["label_start"], p["label_end"]) == (d[15], d[34])
+    assert p["bear_days"] == 15 and p["long_days"] == 20
+
+
+def test_bear_to_long_pairs_can_include_long_head():
+    """可把做多段头部 N 日纳入信号窗——覆盖那 ~27% 起涨点落在做多的情况(结论#11)。"""
+    d = _bdays(60)
+    regime = _regime(d, ["空头"] * 15 + ["做多"] * 20 + ["中性"] * 25)
+    p = lp.bear_to_long_pairs(regime, min_bear_days=10, min_long_days=15,
+                              include_long_head_days=5)[0]
+    assert p["signal_end"] == d[19]                           # 空头末 + 做多头部5日
+    assert p["label_start"] == d[15]                          # 赢家窗仍是整个做多段
+
+
+def _two_window_bars():
+    """两段行情:空头段(前30根,普跌) + 做多段(后30根)。
+    WIN 在做多段大涨且空头段末尾特征值高;LOSE 平淡;DEAD 空头段就退市(数据在第30根断掉)。"""
+    d = _bdays(60, "2024-01-01")
+    bars = {}
+    win = [30 - 0.4 * i for i in range(30)] + [18 + 0.9 * i for i in range(30)]
+    lose = [30 - 0.3 * i for i in range(30)] + [21 + 0.02 * i for i in range(30)]
+    bars["WIN"] = pd.DataFrame({"date": d, "open": win, "high": [c * 1.01 for c in win],
+                                "low": [c * 0.99 for c in win], "close": win, "volume": [1e6] * 60})
+    bars["LOSE"] = pd.DataFrame({"date": d, "open": lose, "high": [c * 1.01 for c in lose],
+                                 "low": [c * 0.99 for c in lose], "close": lose, "volume": [1e6] * 60})
+    dead_c = [30 - 0.9 * i for i in range(30)]
+    bars["DEAD"] = pd.DataFrame({"date": d[:30], "open": dead_c, "high": [c * 1.01 for c in dead_c],
+                                 "low": [c * 0.99 for c in dead_c], "close": dead_c,
+                                 "volume": [1e6] * 30})
+    return bars, d
+
+
+def test_extract_firings_decouples_signal_and_label_windows():
+    """核心:信号在空头段采集,ret 按随后做多段算(两窗混用会把赢家定义成'空头里跌得少')。"""
+    bars, d = _two_window_bars()
+    gate = lambda df: True                                    # 每根都算信号,便于校验窗口切分
+    recs = lp.extract_firings(bars, d[0], d[29], gate, min_bars=5, gate_window=0,
+                              ret_start=d[30], ret_end=d[59])
+    by = {r["code"]: r for r in recs}
+    assert all(x[0] <= d[29] for x in by["WIN"]["days"])       # 信号只在空头段
+    assert by["WIN"]["ret"] > 1.0                              # 赢家窗(做多段)大涨
+    assert by["LOSE"]["ret"] < 0.05
+    # 同一份 bars 若不解耦(ret 用信号窗),赢家会变成"空头里跌得少"的那只 → 结论反转
+    same = {r["code"]: r for r in lp.extract_firings(bars, d[0], d[29], gate, min_bars=5,
+                                                     gate_window=0)}
+    assert same["WIN"]["ret"] < 0 and same["LOSE"]["ret"] < 0
+    assert same["LOSE"]["ret"] > same["WIN"]["ret"]            # 口径错就会选出 LOSE
+
+
+def test_delisted_kept_as_loser_removes_survivorship_bias():
+    """空头段就退市的票:默认被丢(重新引入幸存者偏差),传 --delisted-ret 后按大亏计入非赢家。"""
+    bars, d = _two_window_bars()
+    gate = lambda df: True
+    dropped = {r["code"]: r for r in lp.extract_firings(bars, d[0], d[29], gate, min_bars=5,
+                                                        gate_window=0, ret_start=d[30], ret_end=d[59])}
+    assert dropped["DEAD"]["ret"] is None                      # 无赢家窗价格 → 无标签
+    kept = {r["code"]: r for r in lp.extract_firings(bars, d[0], d[29], gate, min_bars=5,
+                                                     gate_window=0, ret_start=d[30], ret_end=d[59],
+                                                     delisted_ret=-1.0)}
+    assert kept["DEAD"]["ret"] == -1.0 and kept["DEAD"]["delisted"] is True
+    r = lp.discriminate_at_signal(list(kept.values()), label_basis="winner", winner_top_pct=50.0)
+    assert r["winner_meta"]["n_universe_all"] == 3              # 退市股进入分母,不再消失
+    assert r["winner_meta"]["n_profitable"] == 2                # WIN 大涨 / LOSE 微涨 / DEAD 清零
+    assert (r["winner_meta"]["winner_ret_cutoff"] or 0) > 0     # 赢家切点为正,DEAD 不可能入选
+
+
+def test_winner_label_basis_labels_by_window_winner():
+    """label_basis=winner:标签=该股是否为赢家窗赢家(盈利前 top%),不需要 --horizons。"""
+    recs = []
+    for i in range(40):
+        winner = i < 10
+        ret = 0.8 - i * 0.01 if winner else (0.05 - i * 0.002)
+        days = [[f"2024-09-{d:02d}", 0.0, {"f_x": (5.0 if winner else 1.0) + d * 0.01}]
+                for d in range(1, 11)]
+        recs.append({"code": f"C{i:03d}", "ret": round(ret, 4), "days": days})
+    r = lp.discriminate_at_signal(recs, label_basis="winner", winner_top_pct=50.0,
+                                  winner_basis="profitable", picks_per_day=3)
+    f = {x["feature"]: x for x in r["features"]}["x"]
+    assert r["label_basis"] == "winner" and r["n_censored"] == 0
+    assert r["winner_meta"]["winner_basis"] == "profitable"
+    assert f["auc"] > 0.9 and f["direction"] == "high"
+    assert f["median_win"] > f["median_lose"]                  # 共同点画像:赢家中位显著更高
+    assert "赢家" in r["text"] and "winner" in r["text"]
+
+
+def test_winner_label_needs_window_return():
+    r = lp.discriminate_at_signal([{"code": "C1", "days": [["2024-09-02", 0.0, {"f_x": 1.0}]]}],
+                                  label_basis="winner")
+    assert r["n"] == 0 and "窗口收益" in r["text"]
+
+
+def _win_recs(seed_high: bool, tag: str):
+    """构造一窗记录:seed_high=True 时赢家特征高(同向),False 时赢家特征低(反向)。"""
+    recs = []
+    for i in range(30):
+        winner = i < 8
+        ret = 0.6 - i * 0.01 if winner else (0.04 - i * 0.001)
+        hi = 5.0 if winner == seed_high else 1.0
+        days = [[f"{tag}-{d:02d}", 0.0, {"f_x": hi + d * 0.01}] for d in range(1, 9)]
+        recs.append({"code": f"{tag}C{i:03d}", "ret": round(ret, 4), "days": days})
+    return recs
+
+
+def test_aggregate_requires_cross_window_consistency():
+    """三窗同向 → 跨窗共同点;再加一窗反向(同号率 75%→ 仍需 median 达标)则按同号率判定。"""
+    same = {t: lp.discriminate_at_signal(_win_recs(True, t), label_basis="winner")
+            for t in ("2024-09", "2024-10", "2024-11")}
+    agg = lp.aggregate_discriminate(same)
+    row = {r["feature"]: r for r in agg["features"]}["x"]
+    assert row["cross_window_common"] is True and row["hit_ratio"] == 1.0 and row["n_windows"] == 3
+    assert "x" in agg["common"] and "跨窗共同点候选" in agg["text"] and "须 walk-forward" in agg["text"]
+
+    mixed = dict(same)
+    mixed["2024-12"] = lp.discriminate_at_signal(_win_recs(False, "2024-12"), label_basis="winner")
+    mixed["2025-01"] = lp.discriminate_at_signal(_win_recs(False, "2025-01"), label_basis="winner")
+    agg2 = lp.aggregate_discriminate(mixed)
+    row2 = {r["feature"]: r for r in agg2["features"]}["x"]
+    assert row2["hit_ratio"] < 0.75 and row2["cross_window_common"] is False
+    assert agg2["common"] == [] and "无跨窗共同点" in agg2["text"]
+
+
+def test_aggregate_skips_constant_and_unusable():
+    agg = lp.aggregate_discriminate({"w1": {"features": [
+        {"feature": "c", "constant": True, "auc": 0.9},
+        {"feature": "d", "constant": False, "auc": None}]}})
+    assert agg["features"] == [] and agg["common"] == []
+
+
+def test_main_list_window_pairs(tmp_path, monkeypatch, capsys):
+    d = _bdays(60)
+    regime = _regime(d, ["空头"] * 15 + ["做多"] * 20 + ["中性"] * 25)
+    monkeypatch.setattr(lp.bt, "load_amv_regime", lambda since=None: regime)
+    out = tmp_path / "pairs.json"
+    rc = lp.main(["--list-window-pairs", "--min-bear-days", "10", "--min-window-days", "15",
+                  "--out", str(out)])
+    assert rc == 0
+    txt = capsys.readouterr().out
+    assert "空头(信号窗) → 随后做多段(赢家窗)" in txt and "结论#11" in txt
+    p = json.loads(out.read_text(encoding="utf-8"))["window_pairs"][0]
+    assert p["signal_end"] == d[14] and p["label_start"] == d[15]
+
+
+def test_main_per_window_discriminate_labels_two_windows(tmp_path, capsys):
+    """--per-window:每个 firings 文件=一对窗口,分窗输出 + 跨窗汇总;标签体现信号窗→赢家窗。"""
+    files = []
+    for t in ("2024-09", "2024-10"):
+        p = tmp_path / f"f_{t}.json"
+        p.write_text(json.dumps({"start": f"{t}-01", "end": f"{t}-15",
+                                 "ret_start": f"{t}-16", "ret_end": f"{t}-28",
+                                 "records": _win_recs(True, t)}, ensure_ascii=False),
+                     encoding="utf-8")
+        files.append(str(p))
+    out = tmp_path / "agg.json"
+    rc = lp.main(["--from-firings", ",".join(files), "--discriminate", "--per-window",
+                  "--label-basis", "winner", "--out", str(out)])
+    assert rc == 0
+    txt = capsys.readouterr().out
+    assert "信号2024-09-01~2024-09-15→赢家2024-09-16~2024-09-28" in txt
+    assert "跨多头区间" in txt
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["aggregate"]["n_windows"] == 2 and len(data["per_window"]) == 2

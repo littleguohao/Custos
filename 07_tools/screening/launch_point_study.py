@@ -330,7 +330,9 @@ def build_sector_features(index_dir, members, mom_days: int = 20):
 def extract_firings(bars, start: str, end: str, entry_gate, scorer=None,
                     min_bars: int = 40, gate_window: int = 120, progress: int = 0,
                     horizons: tuple = (), feature_scorers: Optional[dict] = None,
-                    stats: Optional[dict] = None, extra_feature_fn=None) -> list[dict]:
+                    stats: Optional[dict] = None, extra_feature_fn=None,
+                    ret_start: Optional[str] = None, ret_end: Optional[str] = None,
+                    delisted_ret: Optional[float] = None) -> list[dict]:
     """**Pass1(可分片)**:逐股抽取 {code, ret, days:[[date,score],..]}——极小的中间产物。
     可按 --shard 拆多个独立进程跑(每片内存全新),彻底规避 loader 内存问题;Pass2 再合并算排名。
     horizons:如 (20,60) → 每个信号日额外记 **因果前向收益**(fwd{h}=close[i+h]/close[i]-1,
@@ -338,7 +340,13 @@ def extract_firings(bars, start: str, end: str, entry_gate, scorer=None,
     feature_scorers:{名称: scorer} → 每个信号日记下**当时可得**的特征值,作为判别子候选。
     extra_feature_fn(code6, date)->dict → 每个信号日追加 as-of 特征(如 build_sector_features
     的板块相位/板块动量);键需以 f_ 开头才会被判别研究收集。
-    stats:传入 dict 时收集运行统计(feature_failures=各特征 scorer 异常次数——防异常被静默吞掉)。"""
+    stats:传入 dict 时收集运行统计(feature_failures=各特征 scorer 异常次数——防异常被静默吞掉)。
+    ret_start/ret_end:**赢家口径窗口**,与信号窗口 [start,end] 解耦。默认与信号窗口相同;
+    研究"空头段就识别未来赢家"时须设成随后的**做多段**——信号在空头采集(建仓点多在空头,
+    结论#11),但"涨得好"发生在随后的多头段,两窗混用会把赢家定义成"空头里跌得少"。
+    delisted_ret:两窗解耦引入的**幸存者偏差补丁**。空头段就退市/长期停牌的票在 label 窗口
+    没有价格 → ret=None → 记录被丢 → 飞刀被自动剔除,判别力被系统性高估(§3 首条)。
+    传入如 -1.0 时:这类票按"清零/大亏"计入**非赢家**并标 delisted=True,不再消失。"""
     import gc  # noqa: PLC0415
     items = bars.items() if isinstance(bars, dict) else bars
     out: list[dict] = []
@@ -349,7 +357,7 @@ def extract_firings(bars, start: str, end: str, entry_gate, scorer=None,
             df = raw.sort_values("date").reset_index(drop=True)
             ds = [str(d)[:10] for d in df["date"]]
             closes = df["close"].astype(float).tolist()
-            r = window_return(ds, closes, start, end)
+            r = window_return(ds, closes, ret_start or start, ret_end or end)
             days: list = []
             if len(df) >= min_bars:
                 for i in range(min_bars, len(df)):
@@ -392,8 +400,15 @@ def extract_firings(bars, start: str, end: str, entry_gate, scorer=None,
                                     ff["_extra"] = ff.get("_extra", 0) + 1
                         rec.append(extra)
                     days.append(rec)
+            delisted = False
+            if r is None and days and delisted_ret is not None:
+                # 有信号但 label 窗口无价格 = 空头段内退市/长停 → 按大亏计入非赢家(去幸存者偏差)
+                r, delisted = float(delisted_ret), True
             if r is not None or days:
-                out.append({"code": code, "ret": r, "days": days})
+                rec_out: dict = {"code": code, "ret": r, "days": days}
+                if delisted:
+                    rec_out["delisted"] = True
+                out.append(rec_out)
             del df, ds, closes
         if progress and n % progress == 0:
             print(f"[pass1] {n} 股 | RSS={_rss_mb():.0f}MB", file=sys.stderr, flush=True)
@@ -461,35 +476,131 @@ def _fmt_pp(v) -> str:
     return "-" if v is None else f"{v:+.1f}pp"
 
 
+def long_regime_windows(regime: dict[str, str], min_days: int = 20,
+                        state: str = "做多") -> list[tuple[str, str, int]]:
+    """从 0AMV regime 日历里枚举**连续同态区间**(默认做多段) → [(start, end, 交易日数)]。
+
+    研究"每次多头区间涨得好的标的"必须**按区间分别做**:跨区间混池会把日期效应/风格轮动
+    混进判别力(结论#13 的 Simpson 悖论同源),且"共同点"只有在**多数区间都成立**才算共同点
+    (结论#8/#11 的教训:单窗成立的东西换窗就翻)。
+    """
+    dates = sorted(regime)
+    idx = {d: i for i, d in enumerate(dates)}
+    segs: list[tuple[str, str, int]] = []
+    start = prev = None
+    for d in dates:
+        if str(regime[d]) == state:
+            if start is None:
+                start = d
+            prev = d
+        elif start is not None:
+            segs.append((start, prev, idx[prev] - idx[start] + 1))
+            start = prev = None
+    if start is not None:
+        segs.append((start, prev, idx[prev] - idx[start] + 1))
+    return [s for s in segs if s[2] >= min_days]
+
+
+def bear_to_long_pairs(regime: dict[str, str], min_bear_days: int = 10,
+                       min_long_days: int = 20,
+                       include_long_head_days: int = 0) -> list[dict[str, Any]]:
+    """把每个**空头段**与其紧随的**做多段**配对 → 研究"在空头就识别出未来赢家"。
+
+    依据结论#11:赢家的系统可选起涨点 **73% 落在空头**(中位领先做多 12 个交易日),
+    所以"能否在买点当时认出赢家"这个问题的**信号窗口必须是空头段**,而赢家口径要用
+    **随后那段多头的收益**来定(涨得好是在多头段发生的)。两窗解耦后:
+      signal_window = 空头段(可选再纳入做多段头部 include_long_head_days 天,覆盖那 27% 落在做多的起涨点)
+      label_window  = 紧随的做多段(赢家=该段盈利前 top%)
+    返回 [{signal_start, signal_end, label_start, label_end, bear_days, long_days}]。
+    """
+    dates = sorted(regime)
+    idx = {d: i for i, d in enumerate(dates)}
+    bears = long_regime_windows(regime, min_days=min_bear_days, state="空头")
+    longs = long_regime_windows(regime, min_days=min_long_days, state="做多")
+    out: list[dict[str, Any]] = []
+    for b_start, b_end, b_days in bears:
+        nxt = next(((a, z, n) for a, z, n in longs if idx[a] > idx[b_end]), None)
+        if nxt is None:                                   # 右删失:最后一段空头之后还没出现做多段
+            continue
+        l_start, l_end, l_days = nxt
+        sig_end = b_end
+        if include_long_head_days > 0:
+            j = min(idx[l_start] + include_long_head_days - 1, idx[l_end])
+            sig_end = dates[j]
+        out.append({"signal_start": b_start, "signal_end": sig_end,
+                    "label_start": l_start, "label_end": l_end,
+                    "bear_days": b_days, "long_days": l_days})
+    return out
+
+
+def _median(vals: list) -> Optional[float]:
+    v = [x for x in vals if x is not None]
+    return round(statistics.median(v), 4) if v else None
+
+
 def discriminate_at_signal(records: list, horizon: int = 20, win_thresh: Optional[float] = None,
                            win_top_q: float = 0.2, use_mfe: bool = False,
-                           picks_per_day: int = 3) -> dict:
-    """**信号当时能否明确选出会跑的票?** 对每个信号(因果、无未来函数):
-      label = 前向收益 fwd{h}(或 mfe{h}) 是否"跑出来"(绝对阈值 win_thresh 或全体前 win_top_q 分位);
-      对每个**当时可得**特征算 日内AUC(0.5=无判别力) + **每日按该特征选 picks_per_day 只的精确率
-      vs 每日随机选同样只数的公平期望**。
-    方向:AUC<0.5 = 反向预测子(取反即可用),故两方向精确率都算,判定用 |AUC-0.5| 与有效方向净增益。
+                           picks_per_day: int = 3, label_basis: str = "forward",
+                           winner_top_pct: float = 50.0, winner_basis: str = "profitable",
+                           min_winner_ret: Optional[float] = None) -> dict:
+    """**信号当时能否明确选出会跑的票?** 对每个信号(特征全部 as-of、无未来函数)。
+
+    label_basis:
+      - "forward"(默认):label = 信号后 fwd{h}/mfe{h} 是否跑出来(绝对阈值 win_thresh 或前 win_top_q 分位)
+        —— 问"这个买点后面 h 天涨不涨";
+      - "winner":label = **该股在本区间是否属于赢家**(窗口收益口径,默认 profitable 内前 winner_top_pct%)
+        —— 问"这个买点属不属于本区间最终跑出来的那批票",即"反向分析赢家在买点当时长什么样"。
+        用 winner 口径时 Pass1 不必带 --horizons(records 里的 ret 即窗口收益)。
+    度量:每特征算 日内AUC(同日内比较,去日期效应) + 每日按该特征选 picks_per_day 只的精确率
+    vs **每日随机选同样只数的公平期望**;并给出赢家/非赢家的特征中位数对比(共同点画像)。
+    方向:AUC<0.5 = 反向预测子(取反即可用),判定用 |AUC-0.5| 与有效方向净增益。
     稳健性:另算前/后半程日内AUC,要求与全样本同号(split_consistent)才计入"弱可用",否则标为疑过拟合。
-    |AUC-0.5|≈0 且 精确率≈公平基线 ⇒ 信号当时无法把会跑的票挑出来(判别失败)。"""
+    """
     rows = []
     key = f"{'mfe' if use_mfe else 'fwd'}{horizon}"
-    n_censored = 0                                        # 信号日后数据不足 h 根 → 无标签被剔除(右删失,须报数)
+    n_censored = 0                                        # 无标签被剔除(前向不足 h 根 / 无窗口收益)
+    rets: dict[str, float] = {}
     for r in records:
+        code = r["code"]
+        if r.get("ret") is not None:
+            rets[code] = float(r["ret"])
         for d in (r.get("days") or []):
-            if len(d) < 3 or not isinstance(d[2], dict) or key not in d[2]:
-                n_censored += 1
-                continue
-            ex = d[2]
-            rows.append({"date": d[0], "code": r["code"], "y": float(ex[key]),
+            ex = d[2] if len(d) >= 3 and isinstance(d[2], dict) else {}
+            if label_basis == "winner":
+                if code not in rets:                      # 无窗口收益 → 无法判定赢家
+                    n_censored += 1
+                    continue
+                y = rets[code]
+            else:
+                if key not in ex:
+                    n_censored += 1
+                    continue
+                y = float(ex[key])
+            rows.append({"date": d[0], "code": code, "y": float(y),
                          "base_score": float(d[1]),
                          "feats": {k[2:]: v for k, v in ex.items() if k.startswith("f_")}})
     if not rows:
         return {"n": 0, "n_censored": n_censored,
-                "text": f"无前向数据(Pass1 需带 --horizons 含 {horizon})"}
-    ys = sorted((x["y"] for x in rows), reverse=True)
-    thr = win_thresh if win_thresh is not None else ys[max(0, int(len(ys) * win_top_q) - 1)]
-    for x in rows:
-        x["win"] = x["y"] >= thr
+                "text": (f"无窗口收益(Pass1 未记 ret)" if label_basis == "winner"
+                         else f"无前向数据(Pass1 需带 --horizons 含 {horizon})")}
+
+    wmeta: dict = {}
+    if label_basis == "winner":
+        pairs = sorted(rets.items(), key=lambda kv: kv[1], reverse=True)
+        winners, wmeta = _pick_winners(pairs, winner_top_pct, min_winner_ret, winner_basis)
+        for x in rows:
+            x["win"] = x["code"] in winners
+        thr = wmeta.get("winner_ret_cutoff") or 0.0
+        label_txt = (f"该股是否为本区间赢家({wmeta.get('winner_basis')}口径前{winner_top_pct:.0f}%"
+                     + (f"且≥{(min_winner_ret or 0)*100:.0f}%" if min_winner_ret else "")
+                     + f",收益切点 {thr}); 赢家 {len(winners)}/{len(pairs)} 只")
+    else:
+        ys = sorted((x["y"] for x in rows), reverse=True)
+        thr = win_thresh if win_thresh is not None else ys[max(0, int(len(ys) * win_top_q) - 1)]
+        for x in rows:
+            x["win"] = x["y"] >= thr
+        label_txt = (f"{'MFE' if use_mfe else '前向收益'}{horizon}日 >= {thr:+.2%}"
+                     f" ({'绝对阈值' if win_thresh is not None else '全体前%.0f%%分位' % (win_top_q*100)})")
     base = sum(1 for x in rows if x["win"]) / len(rows)
     by_day = {}
     for x in rows:
@@ -540,6 +651,9 @@ def discriminate_at_signal(records: list, horizon: int = 20, win_thresh: Optiona
         out_feats.append({"feature": f, "auc_pooled": _auc(pos, neg), "auc": auc,
                           "auc_edge": edge, "direction": direction,
                           "constant": constant, "n_pos": len(pos), "n_neg": len(neg),
+                          "median_win": _median(pos), "median_lose": _median(neg),
+                          "median_diff": (None if _median(pos) is None or _median(neg) is None
+                                          else round(_median(pos) - _median(neg), 4)),
                           "precision_at_daily_top": prec, "precision_at_daily_bottom": prec_lo,
                           "fair_random_precision": fair, "picks": tot,
                           "lift_pp": lift, "lift_pp_inverted": lift_lo, "lift_pp_effective": lift_eff,
@@ -563,13 +677,13 @@ def discriminate_at_signal(records: list, horizon: int = 20, win_thresh: Optiona
     if unstable:
         verdict += ("; ⚠️前后半程不同号(疑过拟合,不作结论): "
                     + ", ".join(f"{r['feature']}({r['auc_first_half']}/{r['auc_second_half']})" for r in unstable))
-    lines = [f"信号 {len(rows)} 个 | 标签:{'MFE' if use_mfe else '前向收益'}{horizon}日 >= {thr:+.2%}"
-             f" (基准率 {base:.1%}; {'绝对阈值' if win_thresh is not None else '全体前%.0f%%分位' % (win_top_q*100)})",
-             f"  右删失(信号日后不足{horizon}根被剔除) {n_censored} 个"
+    lines = [f"信号 {len(rows)} 个 | 标签口径[{label_basis}]:{label_txt}"
+             f" (信号级基准率 {base:.1%})",
+             f"  右删失(无标签被剔除) {n_censored} 个"
              + (" —— ⚠️占比高时样本偏早期信号,结论可能失真" if n_censored > len(rows) * 0.2 else ""),
              f"  全局基准率 {base:.1%}(仅参考);对照用**每日随机选top{picks_per_day}的公平期望**:",
              f"    {'特征':<20} {'日内AUC':>8} {'全局AUC':>8} {'方向':>6} {'精确率':>8} {'公平随机':>8}"
-             f" {'净增益':>8} {'半程AUC':>13}"]
+             f" {'净增益':>8} {'半程AUC':>13} {'赢家中位/非赢家':>18}"]
     for r in out_feats:
         tag = "  ⚠️恒定(门槛内零方差,无判别信息)" if r["constant"] else ""
         if not r["constant"] and r["auc_edge"] is not None and r["auc_edge"] >= 0.03 and not r["split_consistent"]:
@@ -579,11 +693,77 @@ def discriminate_at_signal(records: list, horizon: int = 20, win_thresh: Optiona
                      f"{('取反' if r['direction'] == 'low' else '同向' if r['direction'] else '-'):>6} "
                      f"{_fmt_pct(pr):>8} {_fmt_pct(r['fair_random_precision']):>8} "
                      f"{_fmt_pp(r['lift_pp_effective']):>8} "
-                     f"{_fmt_num(r['auc_first_half'])}/{_fmt_num(r['auc_second_half'])}{tag}")
+                     f"{_fmt_num(r['auc_first_half'])}/{_fmt_num(r['auc_second_half'])} "
+                     f"{_fmt_num(r['median_win'])}/{_fmt_num(r['median_lose'])}{tag}")
     lines.append(f"  -> {verdict}")
     return {"n": len(rows), "n_censored": n_censored, "horizon": horizon, "use_mfe": use_mfe,
+            "label_basis": label_basis, "winner_meta": wmeta,
             "threshold": round(thr, 4), "base_rate": round(base, 4),
-            "features": out_feats, "text": "\n".join(lines)}
+            "features": out_feats, "usable": [r["feature"] for r in usable],
+            "text": "\n".join(lines)}
+
+
+def aggregate_discriminate(results: dict[str, dict], min_edge: float = 0.03,
+                           min_lift_pp: float = 2.0, min_hit_ratio: float = 0.75) -> dict:
+    """跨**多个多头区间**汇总判别力 → 回答"赢家在买点当时的共同点是什么"。
+
+    单窗成立不算共同点(结论#8:reversal_quality_inv 单窗大胜、换窗翻转)。判定要求:
+      ①在 ≥min_hit_ratio 的窗里方向同号;②各窗 |日内AUC-0.5| 中位 ≥min_edge;
+      ③有效方向净增益中位 ≥min_lift_pp。三者齐备才算"跨窗共同点"。
+    results: {窗口标签: discriminate_at_signal 输出}
+    """
+    per: dict[str, list] = {}
+    for label, res in results.items():
+        for r in (res.get("features") or []):
+            if r.get("constant") or r.get("auc") is None:
+                continue
+            per.setdefault(r["feature"], []).append({
+                "window": label, "auc": r["auc"], "direction": r["direction"],
+                "lift_pp_effective": r.get("lift_pp_effective"),
+                "median_diff": r.get("median_diff"), "n_pos": r.get("n_pos"),
+            })
+    n_win = len(results)
+    out = []
+    for f, lst in per.items():
+        aucs = [x["auc"] for x in lst]
+        med_auc = _median(aucs)
+        dirs = [1 if x["auc"] >= 0.5 else -1 for x in lst]
+        major = 1 if sum(dirs) >= 0 else -1
+        same = sum(1 for d in dirs if d == major)
+        med_lift = _median([x["lift_pp_effective"] for x in lst])
+        med_edge = _median([abs(x["auc"] - 0.5) for x in lst])
+        hit_ratio = round(same / len(lst), 3) if lst else 0.0
+        common = bool(len(lst) >= max(2, int(n_win * min_hit_ratio))
+                      and hit_ratio >= min_hit_ratio
+                      and (med_edge or 0) >= min_edge and (med_lift or 0) >= min_lift_pp)
+        out.append({"feature": f, "n_windows": len(lst), "same_direction_windows": same,
+                    "hit_ratio": hit_ratio, "median_auc": med_auc, "median_edge": med_edge,
+                    "median_lift_pp": med_lift, "direction": "high" if major > 0 else "low",
+                    "median_of_median_diff": _median([x["median_diff"] for x in lst]),
+                    "cross_window_common": common,
+                    "per_window": sorted(lst, key=lambda x: x["window"])})
+    out.sort(key=lambda r: ((r["median_edge"] or 0) * (1 if r["cross_window_common"] else 0.5)),
+             reverse=True)
+    common = [r for r in out if r["cross_window_common"]]
+    lines = [f"跨 {n_win} 个多头区间汇总(共同点判定:≥{min_hit_ratio:.0%} 窗同号 且 中位|AUC-0.5|≥{min_edge} "
+             f"且 中位净增益≥{min_lift_pp}pp):",
+             f"    {'特征':<20} {'窗数':>4} {'同号':>4} {'同号率':>6} {'中位AUC':>8} {'中位增益':>9} {'方向':>6} {'共同点':>6}"]
+    for r in out:
+        lines.append(f"    {r['feature']:<20} {r['n_windows']:>4} {r['same_direction_windows']:>4} "
+                     f"{r['hit_ratio']:>6.0%} {_fmt_num(r['median_auc']):>8} "
+                     f"{_fmt_pp(r['median_lift_pp']):>9} "
+                     f"{('取反' if r['direction'] == 'low' else '同向'):>6} "
+                     f"{'✅' if r['cross_window_common'] else '—':>6}")
+    lines.append("  -> " + ("**无跨窗共同点**:没有任何 as-of 特征在多数多头区间里稳定把赢家分出来 "
+                            "⇒ 买点当时无法精确识别(与结论#8/#13 一致)"
+                            if not common else
+                            "跨窗共同点候选(**仍为样本内,须 walk-forward 复现才可进 live**): "
+                            + ", ".join(f"{r['feature']}[{'取反' if r['direction'] == 'low' else '同向'}]"
+                                        f"(中位AUC {r['median_auc']}, {r['median_lift_pp']:+.1f}pp, "
+                                        f"{r['same_direction_windows']}/{r['n_windows']} 窗同号)"
+                                        for r in common)))
+    return {"n_windows": n_win, "features": out, "common": [r["feature"] for r in common],
+            "text": "\n".join(lines)}
 
 
 def rank_from_firings(records: list[dict], top_pct: float = 50.0,
@@ -807,6 +987,28 @@ def main(argv=None, loader=None) -> int:
                     "需 sector_members.json + 板块指数CSV)")
     ap.add_argument("--discriminate", action="store_true",
                     help="Pass2:跑'信号当时能否选出会跑的票'判别力研究(AUC + 每日选top-k精确率)")
+    ap.add_argument("--label-basis", choices=["forward", "winner"], default="forward",
+                    help="判别研究标签口径:forward=信号后前向收益跑不跑;"
+                         "winner=**该股是否为本区间赢家**(用 --capture-top-pct/--winner-basis/--min-winner-ret)")
+    ap.add_argument("--per-window", action="store_true",
+                    help="Pass2:把 --from-firings 的每个文件当作**一个多头区间**分别跑判别力,再跨窗汇总共同点")
+    ap.add_argument("--list-long-windows", action="store_true",
+                    help="只列出 0AMV 做多区间(供按区间分别跑 Pass1),配 --min-window-days")
+    ap.add_argument("--list-window-pairs", action="store_true",
+                    help="只列出**空头段→随后做多段**配对(信号窗/赢家窗):研究'在空头就识别未来赢家'用")
+    ap.add_argument("--min-window-days", type=int, default=20,
+                    help="做多区间最短交易日数(短于此的碎片段跳过)")
+    ap.add_argument("--min-bear-days", type=int, default=10,
+                    help="空头(信号)区间最短交易日数")
+    ap.add_argument("--include-long-head-days", type=int, default=0,
+                    help="信号窗额外纳入做多段头部 N 个交易日(覆盖那~27%% 落在做多的起涨点)")
+    ap.add_argument("--ret-start", default="",
+                    help="Pass1:赢家口径窗口起点(与信号窗解耦;空头段采信号+做多段定赢家时用)")
+    ap.add_argument("--ret-end", default="",
+                    help="Pass1:赢家口径窗口终点")
+    ap.add_argument("--delisted-ret", type=float, default=None,
+                    help="Pass1:有信号但赢家窗无价格(空头内退市/长停)时按此收益计入非赢家(如 -1.0);"
+                         "缺省=丢弃该股(⚠️会重新引入幸存者偏差)")
     ap.add_argument("--horizon", type=int, default=20, help="判别研究用的前向天数")
     ap.add_argument("--win-thresh", type=float, default=None,
                     help="判别研究:'跑出来'的绝对收益阈值(如 0.3=+30%%);缺省用分位数")
@@ -826,21 +1028,84 @@ def main(argv=None, loader=None) -> int:
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
 
+    if args.list_long_windows or args.list_window_pairs:   # 只枚举区间,不加载任何 K 线
+        regime = bt.load_amv_regime(since=args.start or None)
+        if args.list_window_pairs:
+            pairs = bear_to_long_pairs(regime, min_bear_days=args.min_bear_days,
+                                       min_long_days=args.min_window_days,
+                                       include_long_head_days=args.include_long_head_days)
+            print(f"\n=== 空头(信号窗) → 随后做多段(赢家窗) 配对，共 {len(pairs)} 对 ===")
+            print("   建仓点多在空头(结论#11:73%),故信号在空头段采;'涨得好'发生在随后多头段,故赢家按多头段收益定。")
+            for p in pairs:
+                print(f"  信号 {p['signal_start']} ~ {p['signal_end']} ({p['bear_days']}日空头"
+                      + (f"+{args.include_long_head_days}日多头头部" if args.include_long_head_days else "")
+                      + f")  →  赢家窗 {p['label_start']} ~ {p['label_end']} ({p['long_days']}日)")
+            if args.out:
+                import json as _jp
+                Path(args.out).write_text(_jp.dumps({"window_pairs": pairs}, ensure_ascii=False, indent=2),
+                                          encoding="utf-8")
+            return 0
+        segs = long_regime_windows(regime, min_days=args.min_window_days)
+        print(f"\n=== 0AMV 做多区间(≥{args.min_window_days} 交易日, 共 {len(segs)} 段) ===")
+        for a, b, n in segs:
+            print(f"  {a} ~ {b}  ({n} 交易日)")
+        if args.out:
+            import json as _jw
+            Path(args.out).write_text(
+                _jw.dumps({"long_windows": [{"start": a, "end": b, "days": n} for a, b, n in segs]},
+                          ensure_ascii=False, indent=2), encoding="utf-8")
+        return 0
+
     if not args.from_firings and (not args.start or not args.end):
         ap.error("需提供 --start 和 --end(--from-firings 模式除外)")
 
     # Pass2:仅合并 Pass1 产物算排名(不加载任何K线,内存极小)
     if args.from_firings:
         import json as _j
-        recs: list[dict] = []
-        for fp in [x.strip() for x in args.from_firings.split(",") if x.strip()]:
+        files = [x.strip() for x in args.from_firings.split(",") if x.strip()]
+
+        def _load(fp: str) -> list[dict]:
             d = _j.loads(Path(fp).read_text(encoding="utf-8"))
-            recs.extend(d if isinstance(d, list) else (d.get("records") or []))
+            return d if isinstance(d, list) else (d.get("records") or [])
+
+        def _dis(recs: list[dict]) -> dict:
+            return discriminate_at_signal(
+                recs, horizon=args.horizon, win_thresh=args.win_thresh,
+                win_top_q=args.win_top_q, use_mfe=args.use_mfe,
+                picks_per_day=args.picks_per_day, label_basis=args.label_basis,
+                winner_top_pct=args.capture_top_pct, winner_basis=args.winner_basis,
+                min_winner_ret=args.min_winner_ret)
+
+        if args.discriminate and args.per_window:         # 每文件=一个多头区间,分窗跑 + 跨窗汇总
+            results: dict[str, dict] = {}
+            for fp in files:
+                raw = _j.loads(Path(fp).read_text(encoding="utf-8"))
+                if isinstance(raw, dict) and raw.get("ret_start") and raw.get("ret_start") != raw.get("start"):
+                    label = f"信号{raw['start']}~{raw['end']}→赢家{raw['ret_start']}~{raw['ret_end']}"
+                elif isinstance(raw, dict) and raw.get("start"):
+                    label = f"{raw.get('start')}~{raw.get('end')}"
+                else:
+                    label = Path(fp).stem
+                recs = raw if isinstance(raw, list) else (raw.get("records") or [])
+                res = _dis(recs)
+                results[label] = res
+                print(f"\n=== [窗口 {label}] 信号当时判别力({args.label_basis} 口径) ===")
+                print(res["text"])
+            agg = aggregate_discriminate(results)
+            print("\n=== 跨多头区间:赢家在买点当时的共同点 ===")
+            print(agg["text"])
+            if args.out:
+                Path(args.out).write_text(
+                    _j.dumps({"per_window": results, "aggregate": agg}, ensure_ascii=False, indent=2),
+                    encoding="utf-8")
+            return 0
+
+        recs: list[dict] = []
+        for fp in files:
+            recs.extend(_load(fp))
         if args.discriminate:
-            dis = discriminate_at_signal(recs, horizon=args.horizon, win_thresh=args.win_thresh,
-                                         win_top_q=args.win_top_q, use_mfe=args.use_mfe,
-                                         picks_per_day=args.picks_per_day)
-            print(f"\n=== 信号当时判别力:能否明确选出会跑的票 ===")
+            dis = _dis(recs)
+            print(f"\n=== 信号当时判别力:能否明确选出会跑的票({args.label_basis} 口径) ===")
             print(dis["text"])
             if args.out:
                 import json as _j2
@@ -892,6 +1157,8 @@ def main(argv=None, loader=None) -> int:
         hz_max = max((int(x) for x in args.horizons.split(",") if x.strip()), default=0)
         if hz_max:
             load_end = (_date.fromisoformat(args.end) + _td(days=int(hz_max * 1.6) + 5)).isoformat()
+        if args.ret_end and args.ret_end > load_end:      # 赢家窗晚于信号窗 → 必须load到赢家窗末
+            load_end = args.ret_end
         for k in range(0, len(codes), chunk):
             d = fn2(codes[k:k + chunk], 0, start=load_start, end=load_end, root=root2)
             for c in list(d):
@@ -935,16 +1202,25 @@ def main(argv=None, loader=None) -> int:
                               bt.ENTRY_GATES[args.entry_filter], scorer=scorer,
                               gate_window=args.gate_window, progress=args.progress,
                               horizons=hz, feature_scorers=fsc, stats=fstats,
-                              extra_feature_fn=xfn)
+                              extra_feature_fn=xfn,
+                              ret_start=args.ret_start or None, ret_end=args.ret_end or None,
+                              delisted_ret=args.delisted_ret)
         if fstats.get("feature_failures"):
             print(f"[WARN] 特征打分器异常(特征可能缺失): {fstats['feature_failures']}", file=sys.stderr)
+        n_delisted = sum(1 for r in recs if r.get("delisted"))
+        if args.ret_end and args.delisted_ret is None:
+            print("[WARN] 两窗解耦但未设 --delisted-ret:赢家窗无价格的票(空头内退市/长停)被丢弃,"
+                  "会重新引入幸存者偏差(§3 首条)。建议 --delisted-ret -1.0", file=sys.stderr)
         import json as _j
         Path(args.emit_firings).write_text(
-            _j.dumps({"start": args.start, "end": args.end, "entry_filter": args.entry_filter,
+            _j.dumps({"start": args.start, "end": args.end,
+                      "ret_start": args.ret_start or args.start, "ret_end": args.ret_end or args.end,
+                      "entry_filter": args.entry_filter, "delisted_ret": args.delisted_ret,
+                      "n_delisted": n_delisted,
                       "rank_score": args.rank_score, "shard": args.shard, "records": recs},
                      ensure_ascii=False), encoding="utf-8")
-        print(f"[pass1] 写出 {len(recs)} 股记录 → {args.emit_firings} (RSS={_rss_mb():.0f}MB)",
-              file=sys.stderr)
+        print(f"[pass1] 写出 {len(recs)} 股记录(其中赢家窗无价格按大亏计入 {n_delisted} 只) "
+              f"→ {args.emit_firings} (RSS={_rss_mb():.0f}MB)", file=sys.stderr)
         return 0
 
     if not args.capture_only:                            # 起涨点分析:需全量在内存(与既有行为一致)

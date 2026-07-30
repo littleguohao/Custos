@@ -104,7 +104,29 @@ edge 来自**择时 + 分散 + 交易管理**，不是选股。
     照 §3 与结论#8 的教训(reversal_quality_inv 就是样本内大胜、含退市股 walk-forward 翻转),
     **任何"弱可用候选"在跨窗口 walk-forward 复现前,不得进入 live 选股逻辑。**
 
-   - 101 Formulaic Alphas(Kakushadze)：核心可借=**横截面ranking选股**(非绝对阈值)；alpha 多为超短反转/市场中性，与 B1 不同源，仅作选择器候选(alpha101/alpha_pvcorr)。
+14. **"在空头段就识别未来赢家"(两窗解耦判别力研究,工具 2026-07-30 就绪,结果待跑)**：
+    问题定式来自结论#11——赢家的系统可选起涨点 **73% 落在空头**,所以"买点当时能不能认出赢家"这个问题
+    **信号窗必须是空头段**;而"涨得好"发生在随后的多头段,所以**赢家窗必须是那段多头**。两窗混用会把赢家
+    定义成"空头里跌得少",结论直接反转(已用 `test_extract_firings_decouples_signal_and_label_windows`
+    钉住:同一份数据下不解耦会选出 LOSE 而非 WIN)。
+    - 窗口枚举:`--list-window-pairs`(空头段→紧随做多段配对,`--min-bear-days`/`--min-window-days`;
+      `--include-long-head-days` 可把做多段头部 N 日纳入信号窗,覆盖那 ~27% 落在做多的起涨点)。
+      枚举依赖指南针 0AMV 历史(`load_amv_regime` 默认 since=2015-01-01),故窗口池起点受此限制。
+    - Pass1 两窗解耦:`--ret-start/--ret-end` 与 `--start/--end` 分离;加载终点自动延到赢家窗末。
+    - ⚠️ **两窗解耦引入的新幸存者偏差(已堵)**:空头段内退市/长停的票在赢家窗没有价格 → `ret=None` →
+      记录被丢 → **飞刀被自动剔除、判别力被系统性高估**(§3 首条)。必须带 `--delisted-ret -1.0`
+      把这类票按清零计入**非赢家**;不带时 Pass1 会 stderr 明确 WARN。
+    - 标签口径:`--label-basis winner`(= 该股是否本区间赢家,配 `--winner-basis profitable
+      --capture-top-pct 50` 即"盈利前50%")。区别于 `forward`(信号后 h 日前向收益),后者问的是
+      "这个买点后面涨不涨",前者问的是"这个买点属不属于最终跑出来的那批票"。winner 口径不需要 `--horizons`。
+    - **共同点判定 = 跨窗一致性**(`--per-window` + `aggregate_discriminate`):要求 ①≥75% 的窗方向同号、
+      ②各窗 |日内AUC-0.5| 中位 ≥0.03、③有效方向净增益中位 ≥+2pp。单窗成立不算共同点(结论#8 的教训)。
+      输出附**赢家/非赢家特征中位数对比**(共同点画像;按 §3"看 median 不看 mean")。
+    - 准入门槛(§5):必须 `--data-source qlib --universe-sdata`(含退市宇宙)+ 多窗;⚠️ qlib 有
+      2020-09-28→2021-07-30 缺口、止于 2026-02-06,跨该缺口的窗口对须剔除。
+    - 边界:**基本面腿仍进不来**(结论#11 唯一未测项)。mootdx Affair 财报无发布日期 → 任何基本面特征
+      在回测里都是 look-ahead,只能 live 验证;本研究只覆盖价量/板块/技术类 as-of 特征。
+
    - Fama-French 3/5：**风险/归因模型非信号**；A股应用 CH-3/CH-4(壳调整size+EP+换手)；可借=归因严谨性(alpha vs beta) + 特征溢价选择器(low_vol/momentum)。
 
 ## 3. ⚠️ 偏差警示（务必牢记，否则会把有偏结果当真）
