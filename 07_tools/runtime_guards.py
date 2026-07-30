@@ -199,13 +199,18 @@ def market_quality_gate(market: dict[str, Any], day: str) -> dict[str, Any]:
                 inherited[section_name] = {"as_of": prior_day, "data": prior}
         default_quality = "confirmed" if field == "0AMV" else "candidate"
         quality = _quality(section.get(value_key), section, default_quality)
-        if source_day != day and quality in {"confirmed", "auto"}:
+        # 陈旧判定必须看 as_of,不能只看"来自哪个文件":当日文件里也可能装着 T-1 的
+        # 宽度/成交额(TdxW 未刷新时 collect 取了上一根 K 线),那同样不是当日数据。
+        section_as_of = str(section.get("as_of") or "")[:10]
+        stale_as_of = bool(section_as_of) and section_as_of != day
+        if (source_day != day or stale_as_of) and quality in {"confirmed", "auto"}:
             quality = "stale"
         checks.append({
             "field": field,
             "quality": quality,
             "as_of": section.get("as_of") or source_day,
             "inherited": source_day != day,
+            "stale_as_of": stale_as_of,
         })
     overseas = market.get("overseas_market", {})
     overseas_values = [overseas.get(k) for k in ("nasdaq_change_pct", "sp500_change_pct", "sox_change_pct", "nikkei_change_pct", "kospi_change_pct", "hstech_change_pct")]

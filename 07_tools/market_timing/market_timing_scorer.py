@@ -133,12 +133,23 @@ def score_indices(d: dict) -> tuple[float, str]:
     return round(score, 2), note
 
 
+def is_stale(section: dict) -> bool:
+    """字段被门控/合并环节标记为 stale(数据日非目标日)。
+
+    陈旧数据**不得按当日满分计入**——否则 TdxW 没刷新时 T-1 的涨跌比/成交额
+    会照样给出高分，报告看起来完全正常。
+    """
+    return str((section or {}).get("quality") or "") == "stale"
+
+
 def score_breadth(d: dict) -> tuple[float, str]:
     b = d.get("market_breadth", {})
     up, down = fnum(b.get("up_count")), fnum(b.get("down_count"))
     q = b.get("quality")
     if up is None or down is None or down == 0:
         return 7.5, "涨跌家数缺失，按中性处理。"
+    if is_stale(b):
+        return 7.5, f"涨跌家数数据日 {b.get('as_of') or '未知'} 非当日（stale），按中性处理，不据陈旧宽度给分。"
     ratio = up/down
     if ratio >= 2: s = 15
     elif ratio >= 1.2: s = 11
@@ -159,6 +170,8 @@ def score_sentiment(d: dict) -> tuple[float, str]:
     height = fnum(snt.get("market_height"))
     if lu is None or ld is None:
         return 7.5, "涨跌停数据缺失，按中性处理。"
+    if is_stale(snt):
+        return 7.5, f"情绪数据日 {snt.get('as_of') or '未知'} 非当日（stale），按中性处理。"
     score = 7.5
     if lu >= 80: score += 4
     elif lu >= 50: score += 2
@@ -183,6 +196,8 @@ def score_turnover(d: dict) -> tuple[float, str]:
     chg = fnum(t.get("turnover_change_pct"))
     if chg is None:
         return 4, "成交额变化率未确认；Amount候选已采集但单位/口径待确认，按半分处理。"
+    if is_stale(t):
+        return 4, f"成交额数据日 {t.get('as_of') or '未知'} 非当日（stale），按半分处理，不据陈旧成交额给分。"
     if chg > 15: return 8, f"成交额放量 {chg:.2f}%。"
     if chg > 5: return 6, f"成交额温和放量 {chg:.2f}%。"
     if chg < -15: return 1, f"成交额明显缩量 {chg:.2f}%。"
