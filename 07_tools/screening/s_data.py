@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -21,8 +22,11 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
-DEFAULT_Q_ROOT = r"E:\S_DATA\Q_DATA"
-DEFAULT_CSV_ROOT = r"E:\S_DATA\CSV_DATA"
+# 根目录可用环境变量 S_DATA_ROOT 覆盖(默认 Windows 上的 E:\S_DATA),
+# 否则研究链只能在那台机器上跑,walk-forward 无法在 CI/Linux 自动化。
+S_DATA_ROOT = os.environ.get("S_DATA_ROOT") or r"E:\S_DATA"
+DEFAULT_Q_ROOT = str(Path(S_DATA_ROOT) / "Q_DATA")
+DEFAULT_CSV_ROOT = str(Path(S_DATA_ROOT) / "CSV_DATA")
 _FIELDS = ("open", "high", "low", "close", "volume")
 
 

@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import json
+import os
 import random
 import statistics
 import sys
@@ -1049,7 +1050,8 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                     help="universe 用本地 vipdoc 实有文件（推荐：覆盖率~100%%、不依赖在线代码表；否则用在线 get_stock_list）")
     ap.add_argument("--data-source", choices=["tdx", "qlib", "csv"], default="tdx",
                     help="行情数据源:tdx=本地通达信(默认);qlib/csv=E:\\S_DATA(含退市股,前复权,1999~2026-02)")
-    ap.add_argument("--s-data-root", default=r"E:\S_DATA", help="s_data 根目录(含 Q_DATA/CSV_DATA)")
+    ap.add_argument("--s-data-root", default=os.environ.get("S_DATA_ROOT") or r"E:\S_DATA",
+                    help=r"s_data 根目录(含 Q_DATA/CSV_DATA);可用环境变量 S_DATA_ROOT 覆盖,默认 E:\S_DATA")
     ap.add_argument("--start", default="", help="回测起点 YYYY-MM-DD(在 --count 之前应用;配合 walk-forward)")
     ap.add_argument("--end", default="", help="回测终点 YYYY-MM-DD(默认不限)")
     ap.add_argument("--universe-sdata", action="store_true",
