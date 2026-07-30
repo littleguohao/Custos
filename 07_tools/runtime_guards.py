@@ -179,7 +179,9 @@ def _latest_market_section(day: str, section_name: str, value_key: str) -> tuple
     return {}, None
 
 
-def market_quality_gate(market: dict[str, Any], day: str) -> dict[str, Any]:
+def market_quality_gate(market: dict[str, Any], day: str, expected_day: str | None = None) -> dict[str, Any]:
+    """expected_day:该 session 期望的数据日(盘前/盘中=T-1,盘后=T;缺省=day,保持既有行为)。"""
+    exp = expected_day or day
     checks = []
     specs = [
         ("0AMV", "amv_0", "amv_change_pct"),
@@ -201,8 +203,9 @@ def market_quality_gate(market: dict[str, Any], day: str) -> dict[str, Any]:
         quality = _quality(section.get(value_key), section, default_quality)
         # 陈旧判定必须看 as_of,不能只看"来自哪个文件":当日文件里也可能装着 T-1 的
         # 宽度/成交额(TdxW 未刷新时 collect 取了上一根 K 线),那同样不是当日数据。
+        # 对比基准是 session 期望数据日 exp(盘前/盘中=T-1,不应用日历日误伤正常盘前)。
         section_as_of = str(section.get("as_of") or "")[:10]
-        stale_as_of = bool(section_as_of) and section_as_of != day
+        stale_as_of = bool(section_as_of) and section_as_of != exp
         if (source_day != day or stale_as_of) and quality in {"confirmed", "auto"}:
             quality = "stale"
         checks.append({
@@ -218,18 +221,19 @@ def market_quality_gate(market: dict[str, Any], day: str) -> dict[str, Any]:
     rank = {"confirmed": 1.0, "auto": 1.0, "candidate": 0.5, "partial": 0.4, "raw_only": 0.0, "stale": 0.0, "missing": 0.0}
     score = sum(rank[x["quality"]] for x in checks) / len(checks)
     return {
-        "date": day, "status": "pass" if score >= 0.8 else ("degraded" if score >= 0.4 else "blocked"),
+        "date": day, "expected_day": exp,
+        "status": "pass" if score >= 0.8 else ("degraded" if score >= 0.4 else "blocked"),
         "quality_score": round(score, 3), "checks": checks, "inherited_sections": inherited,
         "rule": "盘中缺少盘后指标时沿用最近有效交易日并标明日期；继承值仅供状态判断，不单独授予加仓权限",
     }
 
 
-def write_runtime_gate(day: str) -> dict[str, Any]:
+def write_runtime_gate(day: str, expected_day: str | None = None) -> dict[str, Any]:
     market_path = DATA / "market" / f"{day}_market_timing_input.json"
     market = load_json(market_path, {})
     positions = load_json(DATA / "trades" / "current_positions.json", [])
     freshness = position_freshness_with_confirmation(day)
-    market_quality = market_quality_gate(market, day)
+    market_quality = market_quality_gate(market, day, expected_day=expected_day)
     quote_path = DATA / "market" / f"{day}_holding_quotes.json"
     quote_snapshot = load_json(quote_path, {})
     quotes = quote_snapshot.get("quotes", []) if isinstance(quote_snapshot, dict) else []

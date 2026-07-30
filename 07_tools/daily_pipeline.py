@@ -125,7 +125,8 @@ def build_gate_cmd(date: str, session_type: str, strict_quality: bool = False) -
     门控结论无论是否开闸都会落盘到 01_data/quality/{date}_runtime_gate.json,并记进 stage note。
     """
     cmd = [str(PY), str(BASE / "07_tools" / "runtime_gate.py"), "--date", date,
-           "--require-trading-day"]
+           "--require-trading-day",
+           "--data-session", "preclose" if session_type == "premarket" else "postclose"]
     if strict_quality and session_type == "postclose":
         cmd.append("--require-quality")
     return cmd
@@ -197,7 +198,11 @@ def main():
     # Runtime guards and market scorer consume the effective regime.
     # 门控结论一律落盘+记 note;是否**硬阻断**由 --strict-quality-gate 决定(默认不阻断,见 build_gate_cmd)。
     gate_stage = run_stage(build_gate_cmd(args.date, args.session_type, args.strict_quality_gate),
-                           "runtime_gate")
+                           "runtime_gate", required=False)
+    if not gate_stage["ok"]:
+        # 门控退出码(3 非交易日 / 4 质量 blocked / 5 持仓 blocked)穿透到 OS 供 cron 消费,
+        # 不得被包成无差别的 RuntimeError(exit 1)
+        raise SystemExit(gate_stage["returncode"] or 1)
     gate_stage["note"] = gate_status_note(args.date)
     stages.append(gate_stage)
     stages.append(run_stage([str(PY), str(TOOLS / "market_timing_scorer.py"), "--date", args.date], "market_timing_scorer"))

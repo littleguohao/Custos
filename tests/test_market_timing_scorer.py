@@ -111,3 +111,17 @@ class TestIsStale:
             assert sc.is_stale({"quality": q}) is False
         assert sc.is_stale({}) is False
         assert sc.is_stale(None) is False
+
+
+def test_stale_as_of_auto_quality_scores_neutral():
+    """生产形态回归(H1):collector 取上一根 K 线 → quality=auto + as_of=T-1。
+    仅看 quality 会漏,必须按 as_of!=date 判陈旧,否则 T-1 宽度照样拿满分。"""
+    d = {"date": "2026-07-30",
+         "market_breadth": {"up_count": 3000, "down_count": 1000, "quality": "auto",
+                            "as_of": "2026-07-29"}}
+    s, note = sc.score_breadth(d)
+    assert s == 7.5 and "stale" in note and "2026-07-29" in note
+    d2 = {"date": "2026-07-30",
+          "market_breadth": {"up_count": 3000, "down_count": 1000, "quality": "auto",
+                             "as_of": "2026-07-30"}}
+    assert sc.score_breadth(d2)[0] == 15        # as_of 当日 → 正常给分

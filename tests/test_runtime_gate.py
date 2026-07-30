@@ -51,8 +51,19 @@ def test_missing_sections_are_safe():
 
 
 def test_main_writes_gate_and_returns_code(monkeypatch, capsys):
-    monkeypatch.setattr(rg, "write_runtime_gate", lambda day: _gate(quality="blocked"))
+    monkeypatch.setattr(rg, "write_runtime_gate",
+                        lambda day, expected_day=None: _gate(quality="blocked"))
     rc = rg.main(["--date", "2026-07-20", "--require-quality"])
     out = capsys.readouterr()
     assert rc == rg.EXIT_QUALITY_BLOCKED
     assert "market_quality" in out.out and "阻断" in out.err
+
+
+def test_main_preclose_session_uses_prev_trading_day(monkeypatch):
+    calls = []
+    monkeypatch.setattr(rg, "write_runtime_gate",
+                        lambda day, expected_day=None: calls.append(expected_day) or _gate())
+    monkeypatch.setattr("runtime_guards.previous_confirmed_trading_day", lambda d: "2026-07-17")
+    rg.main(["--date", "2026-07-20", "--data-session", "preclose"])
+    rg.main(["--date", "2026-07-20"])                        # 默认 postclose
+    assert calls == ["2026-07-17", None]                     # 盘前=T-1;盘后不传(=当日)

@@ -79,3 +79,34 @@ class MarketQualityAsOfTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MarketQualitySessionAwareTests(unittest.TestCase):
+    """M3:盘前/盘中期望数据日=T-1,不得用日历日误伤正常盘前(告警疲劳/误开硬闸)。"""
+
+    DAY = "2026-07-20"
+    PREV = "2026-07-17"
+
+    def _market(self, as_of, quality="auto"):
+        return {
+            "amv_0": {"amv_change_pct": 1.0, "quality": "confirmed", "as_of": self.PREV},
+            "market_breadth": {"up_count": 3000, "down_count": 1000, "quality": quality,
+                               "as_of": as_of},
+            "sentiment": {"limit_up_count": 50, "quality": quality, "as_of": as_of},
+            "turnover": {"turnover_change_pct": 5.0, "quality": quality, "as_of": as_of},
+            "overseas_market": {"nasdaq_change_pct": 0.5, "as_of": self.PREV},
+        }
+
+    def test_preclose_expected_t_minus_1_not_stale(self):
+        r = runtime_guards.market_quality_gate(self._market(self.PREV), self.DAY,
+                                               expected_day=self.PREV)
+        chk = next(x for x in r["checks"] if x["field"] == "market_breadth")
+        self.assertEqual(chk["quality"], "auto")
+        self.assertFalse(chk["stale_as_of"])
+        self.assertEqual(r["expected_day"], self.PREV)
+
+    def test_preclose_older_than_expected_is_stale(self):
+        r = runtime_guards.market_quality_gate(self._market("2026-07-15"), self.DAY,
+                                               expected_day=self.PREV)
+        chk = next(x for x in r["checks"] if x["field"] == "market_breadth")
+        self.assertEqual(chk["quality"], "stale")

@@ -37,13 +37,19 @@ def decide_exit_code(gate: dict, *, require_trading_day: bool = False,
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="运行门控:写 runtime_gate.json 并按开关返回退出码")
     p.add_argument("--date", required=True)
+    p.add_argument("--data-session", choices=["preclose", "postclose"], default="postclose",
+                   help="数据 session:preclose(盘前/盘中,期望数据日=T-1) / postclose(盘后,期望=T,默认)")
     p.add_argument("--require-trading-day", action="store_true", help=f"非交易日 exit {EXIT_NOT_TRADING_DAY}")
     p.add_argument("--require-quality", action="store_true",
                    help=f"market_quality=blocked 时 exit {EXIT_QUALITY_BLOCKED}")
     p.add_argument("--require-position-gate", action="store_true",
                    help=f"position_gate=blocked 时 exit {EXIT_POSITION_BLOCKED}")
     a = p.parse_args(argv)
-    r = write_runtime_gate(a.date)
+    expected = None
+    if a.data_session == "preclose":                     # 盘前/盘中:当日 K 线尚不存在,期望数据日=最近确认交易日
+        from runtime_guards import previous_confirmed_trading_day
+        expected = previous_confirmed_trading_day(a.date) or a.date
+    r = write_runtime_gate(a.date, expected_day=expected)
     print(json.dumps(r, ensure_ascii=False, indent=2))
     code = decide_exit_code(r, require_trading_day=a.require_trading_day,
                             require_quality=a.require_quality,
