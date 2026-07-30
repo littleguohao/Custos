@@ -72,14 +72,66 @@ def _is_bj(code: str) -> bool:
     return _strip_suffix(s).startswith(("4", "8", "920"))
 
 
-def build_universe(universe_cfg: Optional[dict] = None) -> tuple[list[str], dict[str, str]]:
-    """全 A 股票列表（6 位代码）+ 名称表。exclude_bj 在此过滤；ST/上市天数
-    在 enrich 段按名称与本地日线过滤。失败时返回空列表（调用方降级）。"""
-    cfg = universe_cfg or {}
+NAME_MAP_CACHE = DATA / "market" / "stock_name_map.json"
+
+
+def _load_name_map(diag: Optional[dict] = None) -> dict[str, str]:
+    """名称表:在线优先,成功即落缓存;在线失败则回退缓存。
+
+    名称是**硬排除 ST 的唯一依据**(enrich_candidates 用 `"ST" in name.upper()`)。
+    在线表挂掉且无缓存时 name 为空串 → `"ST" in ""` 为假 → **ST 股会静默通过硬排除**,
+    所以这里必须落缓存,并把不可用状态显式报给调用方(而不是安静放行)。
+    """
+    src, name_map = "online", {}
     try:
-        raw = local_tdx_data.get_stock_list()
+        name_map = local_tdx_data.get_stock_name_map() or {}
+    except Exception:  # noqa: BLE001
+        name_map = {}
+    if name_map:
+        try:
+            NAME_MAP_CACHE.parent.mkdir(parents=True, exist_ok=True)
+            NAME_MAP_CACHE.write_text(json.dumps(name_map, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            pass
+    else:
+        src = "cache"
+        try:
+            name_map = json.loads(NAME_MAP_CACHE.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            name_map, src = {}, "unavailable"
+    if diag is not None:
+        diag["name_map_source"] = src
+        diag["name_map_size"] = len(name_map)
+        diag["st_filter"] = "ok" if name_map else "unavailable"
+    if not name_map:
+        print("[WARN] 名称表不可用(在线+缓存均失败):ST 硬排除失效,候选可能含 ST",
+              file=sys.stderr)
+    return name_map
+
+
+def build_universe(universe_cfg: Optional[dict] = None,
+                   diag: Optional[dict] = None) -> tuple[list[str], dict[str, str]]:
+    """全 A 股票列表（6 位代码）+ 名称表。exclude_bj 在此过滤；ST/上市天数
+    在 enrich 段按名称与本地日线过滤。失败时返回空列表（调用方降级）。
+
+    **本地 vipdoc 优先**:直接枚举磁盘上实有的日线文件(list_local_vipdoc_codes),
+    仅在本地为空时才回退 mootdx 在线全代码表。2026-07-30 事故即因只走在线:
+    mootdx online 报 `'>' not supported between 'NoneType' and 'int'` → universe 空 →
+    formula_screen 提前 return → **全市场公式初筛整段跳过**,当日只剩自选池命中,
+    报告看起来"只有 D 池",实则从未扫过市场。
+    """
+    cfg = universe_cfg or {}
+    source = "vipdoc"
+    try:
+        raw = local_tdx_data.list_local_vipdoc_codes(ashare_only=True)
     except Exception:  # noqa: BLE001 —— 绝不 raise
         raw = []
+    if not raw:
+        source = "online"
+        try:
+            raw = local_tdx_data.get_stock_list()
+        except Exception:  # noqa: BLE001
+            raw = []
     codes: list[str] = []
     seen: set[str] = set()
     for c in raw or []:
@@ -89,10 +141,10 @@ def build_universe(universe_cfg: Optional[dict] = None) -> tuple[list[str], dict
         if _A_SHARE_RE.match(code6) and code6 not in seen:
             seen.add(code6)
             codes.append(code6)
-    try:
-        name_map = local_tdx_data.get_stock_name_map()
-    except Exception:  # noqa: BLE001
-        name_map = {}
+    name_map = _load_name_map(diag)
+    if diag is not None:
+        diag["universe_source"] = source if codes else "unavailable"
+        diag["universe_size"] = len(codes)
     return codes, name_map
 
 
@@ -173,10 +225,14 @@ def screen_formulas(
 
     # 先建 universe/名称表（本地 vipdoc，不依赖 TQ），再加载自选池（本地文件），
     # 最后才做 TQ 门控：TdxW 关闭时池内候选仍可进入充实段，且池内股票有名。
+    diag: dict[str, Any] = {}
     if stock_list is None:
-        stock_list, name_map = build_universe(registry.get("universe"))
+        stock_list, name_map = build_universe(registry.get("universe"), diag=diag)
     name_map = name_map or {}
     result["universe_size"] = len(stock_list)
+    result["universe_source"] = diag.get("universe_source", "injected")
+    result["name_map_source"] = diag.get("name_map_source", "injected")
+    result["st_filter"] = diag.get("st_filter", "ok" if name_map else "unavailable")
 
     pool_entries, pool_hits = _load_manual_pools(registry, date, name_map)
     result["formulas"].extend(pool_entries)
@@ -194,7 +250,10 @@ def screen_formulas(
 
     if not stock_list:
         result["status"] = "partial" if pool_hits else "unavailable"
-        result["degraded_reason"] = "universe_unavailable"
+        result["degraded_reason"] = ("universe_unavailable(本地 vipdoc 与在线全代码表均为空 → "
+                                    "**全市场公式初筛整段跳过**,当日命中仅来自自选池,不代表市场无标的)")
+        print("[WARN] universe 为空:本次未扫全市场,只有自选池命中。检查 TDX_ROOT/vipdoc 是否可读",
+              file=sys.stderr)
         return result
 
     tq_codes = [local_tdx_data.normalize_code(c) for c in stock_list]
@@ -273,6 +332,8 @@ def main(argv: Optional[list] = None) -> int:
         "status": result["status"],
         "degraded_reason": result["degraded_reason"],
         "universe_size": result["universe_size"],
+        "universe_source": result.get("universe_source", ""),
+        "st_filter": result.get("st_filter", ""),
         "hit_total": sum(len(f.get("hits", [])) for f in result["formulas"]),
         "output": str(out_path),
     }
