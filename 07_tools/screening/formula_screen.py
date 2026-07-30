@@ -44,6 +44,8 @@ REGISTRY_PATH = GOVERNANCE / "SCREEN_FORMULA_REGISTRY.json"
 FORMULA_TIMEOUT = 15          # 单公式调用超时（秒）
 CIRCUIT_BREAK_AFTER = 2       # 连续失败熔断阈值
 FORMULA_COUNT = 60            # 每股回溯 K 线根数（供公式内部指标计算，非返回序列长度）
+FORMULA_BATCH = 1000          # 每次 formula_process_mul_xg 调用携带的最大股票数
+                              # (全市场 6k+ 只×60根单调用会让 TQ 服务端 OOM;分批逐块合并命中)
 
 # 沪深 A 股代码前缀（mootdx stocks 返回全品类证券，含指数/基金/债券，必须过滤）
 _A_SHARE_RE = re.compile(r"^(60[0-5]|688|00[0-3]|30[0-3])\d{3}$")
@@ -280,27 +282,44 @@ def screen_formulas(
         #   return_count —— 每股返回的最新结果个数（取 1＝仅最新交易日那一列）；
         #   return_date=False —— 结果不带日期轴，故命中日期由调用时点（盘后即当日）决定，
         #                        下游 enrich 再用本地日线 last_date==date 二次校验一致性。
-        params = {
-            "formula_name": f.get("tq_name", ""),
-            "formula_arg": str(f.get("args", "") or ""),
-            "return_count": 1,
-            "return_date": False,
-            "stock_list": tq_codes,
-            "stock_period": f.get("stock_period", "1d") or "1d",
-            "count": FORMULA_COUNT,
-            "dividend_type": 1,
-        }
-        resp = call_fn("formula_process_mul_xg", params, timeout=timeout)
-        if resp.get("ok"):
+        # ⚠️ stock_list 必须分批:全市场 6k+ 只×count 根单调用会让 TQ 服务端 OOM(2026-07-31 实测)。
+        hits_all: list = []
+        chunk_fail = 0
+        last_err: dict = {}
+        n_chunks = 0
+        for k in range(0, len(tq_codes), FORMULA_BATCH):
+            n_chunks += 1
+            params = {
+                "formula_name": f.get("tq_name", ""),
+                "formula_arg": str(f.get("args", "") or ""),
+                "return_count": 1,
+                "return_date": False,
+                "stock_list": tq_codes[k:k + FORMULA_BATCH],
+                "stock_period": f.get("stock_period", "1d") or "1d",
+                "count": FORMULA_COUNT,
+                "dividend_type": 1,
+            }
+            resp = call_fn("formula_process_mul_xg", params, timeout=timeout)
+            if resp.get("ok"):
+                hits_all.extend(_extract_hits(resp.get("value"), date, name_map))
+            else:
+                chunk_fail += 1
+                last_err = resp.get("error") or {}
+        if chunk_fail == 0:
             succeeded += 1
             consecutive_failures = 0
-            entry["hits"] = _extract_hits(resp.get("value"), date, name_map)
+            entry["hits"] = hits_all
+        elif chunk_fail < n_chunks:                      # 部分批次成功:命中保留,错误显式记录
+            succeeded += 1
+            consecutive_failures = 0
+            entry["hits"] = hits_all
+            entry["error"] = "partial_chunks_failed"
+            entry["error_detail"] = f"{chunk_fail}/{n_chunks} 批失败: {last_err.get('code', 'unknown')}"
         else:
             consecutive_failures += 1
-            err = resp.get("error") or {}
-            entry["error"] = err.get("code", "unknown")
-            if err.get("detail"):
-                entry["error_detail"] = str(err["detail"])[:200]
+            entry["error"] = last_err.get("code", "unknown")
+            if last_err.get("detail"):
+                entry["error_detail"] = str(last_err["detail"])[:200]
 
     if attempted == 0:
         result["status"] = "partial" if pool_hits else "unavailable"

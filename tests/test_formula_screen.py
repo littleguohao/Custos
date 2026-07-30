@@ -180,3 +180,38 @@ class TestNameMapCacheAndStFilter:
             running_check=lambda: True)
         assert result["universe_source"] == "vipdoc" and result["st_filter"] == "ok"
         assert result["name_map_source"] == "cache"
+
+
+def test_formulas_batched_to_avoid_tq_oom(monkeypatch):
+    # 全市场分批:每次调用 stock_list ≤ FORMULA_BATCH,命中跨批合并(防 TQ 服务端 OOM)
+    stocks = [f"60{i:04d}" for i in range(2500)]           # 2500 只 → 3 批(1000+1000+500)
+    seen_batches = []
+
+    def fake_call(method, params, timeout=15):
+        seen_batches.append(len(params["stock_list"]))
+        first = params["stock_list"][0]
+        return _ok({f"{first}.SH": {"UP3": ["1"]}})        # 每批命中该批第一只
+
+    monkeypatch.setattr(formula_screen.local_tdx_data, "normalize_code", lambda c: f"{c}.SH")
+    result = formula_screen.screen_formulas(
+        "2026-07-21", registry=_registry(n=1), stock_list=stocks,
+        call=fake_call, running_check=lambda: True,
+    )
+    assert result["status"] == "ok"
+    assert seen_batches == [1000, 1000, 500]               # 分批上限被遵守
+    hits = result["formulas"][0]["hits"]
+    assert len(hits) == 3 and {h["code"] for h in hits} == {"600000", "601000", "602000"}
+
+
+def test_partial_chunk_failure_keeps_hits_and_records(monkeypatch):
+    stocks = [f"60{i:04d}" for i in range(2000)]           # 2 批;第 2 批失败
+    calls = iter([_ok({"600000.SH": {"UP3": ["1"]}}), _err("timeout")])
+    monkeypatch.setattr(formula_screen.local_tdx_data, "normalize_code", lambda c: f"{c}.SH")
+    result = formula_screen.screen_formulas(
+        "2026-07-21", registry=_registry(n=1), stock_list=stocks,
+        call=lambda *a, **k: next(calls), running_check=lambda: True,
+    )
+    f0 = result["formulas"][0]
+    assert len(f0["hits"]) == 1                            # 成功批的命中保留
+    assert f0["error"] == "partial_chunks_failed"          # 失败显式记录(不静默)
+    assert result["status"] == "partial"                     # 有批次失败 → 整体降级标记(诚实)
