@@ -76,3 +76,28 @@ def test_mainline_fingerprint_section(monkeypatch, tmp_path):
     section = ct._mainline_fingerprint_section(cands)
     assert any("当日主线指纹" in ln for ln in section)
     assert any("非进场过滤" in ln for ln in section)
+
+
+def test_bear_market_outpost_section():
+    # 空头期:基本面优+技术强但板块腿未到位 → 进 📡 前哨区(非可买);已在🐂/🔍区的不重复列
+    outpost = _cand("600100", "哨", "半导体", "D", "优", 3, False)
+    outpost["resonance_4leg"]["sector"] = False          # 技术强但板块腿未到位
+    pool = {"status": "ok", "amv_state": "空头", "candidates": [
+        outpost,                                                          # →📡
+        _cand("600000", "甲", "半导体", "A", "优", 4, True),     # 已在🐂区→不进📡
+        _cand("600003", "丁", "高位股", "D", "优", 4, True,
+              risk_flags=["distribution_high"]),                # 已在🔍区→不进📡
+        _cand("300001", "丙", "X", "D", "差", 1, False),          # 基本面差→不进📡
+    ]}
+    md = ct.render_table(pool, "2026-07-30")
+    assert "📡 空头前哨" in md and "非可买" in md
+    sec = md.split("## 📡 空头前哨")[1].split("\n## ")[0]
+    assert "600100" in sec and "未到位" in sec
+    assert "600000" not in sec and "600003" not in sec and "300001" not in sec
+
+
+def test_no_outpost_section_in_bull_regime():
+    # 非空头不出前哨区
+    pool = {"status": "ok", "amv_state": "做多",
+            "candidates": [_cand("600100", "哨", "半导体", "D", "优", 1, False)]}
+    assert "📡 空头前哨" not in ct.render_table(pool, "2026-07-30")

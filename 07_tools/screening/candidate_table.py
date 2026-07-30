@@ -164,6 +164,41 @@ def render_table(pool: dict, date: str) -> str:
                 f" | {_fmt((c.get('stop_loss_ref') or {}).get('price'))} |"
             )
         lines.append("")
+    # 📡 空头前哨(0AMV 空头期启用)：回测显示大量优秀股票起涨点在空头(领先 0AMV 转多 ~12 交易日,
+    # 治理文档结论#11)——空头里板块/市场腿天然未到位(滞后),严格四面共振永远不会在空头触发,
+    # 故空头期单列"基本面优+技术强"的提前埋伏观察对象,跟踪其板块/市场腿何时补齐。
+    if "空头" in str(pool.get("amv_state") or ""):
+        _watch_codes = {c.get("code") for c in watch_all}
+        outposts = sorted((c for c in candidates
+                           if (c.get("fundamental_quality") or {}).get("tier") == "优"
+                           and (c.get("resonance_4leg") or {}).get("technical")
+                           and c.get("code") not in _watch_codes),
+                          key=_watch_key, reverse=True)
+        if outposts:
+            lines.append("## 📡 空头前哨（提前埋伏观察·非可买）")
+            lines.append("")
+            lines.append("> 0AMV 空头期：基本面优 + 技术强，但板块/市场腿未到位（空头里滞后属正常）——"
+                         "**重点研究观察对象，不是可买信号**。回测显示赢家起涨多在空头尾部；"
+                         "跟踪其板块相位何时转有利、0AMV 何时转多：两腿补齐即升级 🐂 共振区。"
+                         "参与仅限人工研究确认后的小仓试错，不进入买入计划。")
+            lines.append("")
+            lines.append("| 代码 | 名称 | 板块 | 基本面 | 技术分 | 板块腿 | 市场腿 | 分层 | 建议止损位 |")
+            lines.append("|---|---|---|---|---:|---|---|---|---:|")
+            for c in outposts:
+                r4 = c.get("resonance_4leg") or {}
+                sec_leg = "有利" if r4.get("sector") else "未到位"
+                mkt_leg = "做多" if r4.get("market") else "空头"
+                lines.append(
+                    f"| {c.get('code')} | {c.get('name')}"
+                    f" | {c.get('sector', '未知')}"
+                    f" | {(c.get('fundamental_quality') or {}).get('tier', '-')}"
+                    f" | {_fmt((c.get('score_detail') or {}).get('technical_score'))}"
+                    f" | {sec_leg}"
+                    f" | {mkt_leg}"
+                    f" | {c.get('bucket', '-')}"
+                    f" | {_fmt((c.get('stop_loss_ref') or {}).get('price'))} |"
+                )
+            lines.append("")
     # 得分 Top5：按总分降序（跨分层），供快速浏览当日最强候选
     top5 = sorted(candidates,
                   key=lambda c: ((c.get("score_detail") or {}).get("total") or 0),
