@@ -2,8 +2,10 @@
 """feishu_report_publisher 单测: 摘要生成(三种报告结构)、凭据优先级、失败路径(mock HTTP)。"""
 from __future__ import annotations
 
+import io
 import json
 import unittest
+from pathlib import Path
 from unittest import mock
 
 import feishu_report_publisher as frp
@@ -271,6 +273,124 @@ class SendFlowTest(unittest.TestCase):
                            "--date", "2026-07-20", "--dry-run"])
         self.assertEqual(rc, 0)
         post.assert_not_called()
+
+    def test_retry_uploads_full_content_not_empty(self):
+        """核心回归:上传重试时必须重新构造文件流。
+
+        原实现把已打开的 fh 传进重试函数,第二次尝试时 fh 已到 EOF → 上传 0 字节
+        (飞书仍可能返回 code=0),用户收到空报告。
+        """
+        sizes = []
+
+        def _fake_post(url, **kw):
+            files = kw.get("files")
+            if files:
+                sizes.append(len(files["file"][1].read()))
+                if len(sizes) == 1:
+                    raise TimeoutError("first attempt fails")
+                return _resp({"code": 0, "data": {"file_key": "fk"}})
+            if kw.get("json", {}).get("app_id"):
+                return _resp({"code": 0, "tenant_access_token": "t"})
+            return _resp({"code": 0, "data": {}})
+
+        with mock.patch.object(frp.requests, "post", side_effect=_fake_post):
+            rc = self._run_main(self.report)
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(sizes), 2, "应重试一次上传")
+        self.assertGreater(sizes[0], 0)
+        self.assertEqual(sizes[0], sizes[1], "重试内容必须与首次一致，不能是空文件")
+
+    def test_empty_report_refused_before_upload(self):
+        import tempfile
+        fh = tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8")
+        fh.close()
+        self.addCleanup(lambda: __import__("os").unlink(fh.name))
+        with mock.patch.object(frp.requests, "post",
+                               side_effect=[_resp({"code": 0, "tenant_access_token": "t"})]):
+            rc = self._run_main(fh.name)
+        self.assertEqual(rc, 1)
+
+    def test_half_success_is_reported_on_stdout(self):
+        """附件已发但摘要失败时,stdout 协议里必须能看出半成功。"""
+        with mock.patch.object(frp.requests, "post",
+                               side_effect=[_resp({"code": 0, "tenant_access_token": "t"}),
+                                            _resp({"code": 0, "data": {"file_key": "fk"}}),
+                                            _resp({"code": 0, "data": {}}),
+                                            _resp({"code": 9, "msg": "text rejected"})]), \
+             mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+            rc = self._run_main(self.report)
+        payload = json.loads(out.getvalue().strip().splitlines()[-1])
+        self.assertEqual(rc, 1)
+        self.assertFalse(payload["sent"])
+        self.assertTrue(payload["partial"])
+        self.assertTrue(payload["progress"]["file_sent"])
+        self.assertFalse(payload["progress"]["summary_sent"])
+
+
+class DeliveryGateTest(unittest.TestCase):
+    """--require-gate: 门控 blocked 时必须拒发(exit 4), 而不是照发。"""
+
+    def _write_gate(self, tmp, *, trading=True, quality="pass"):
+        p = tmp / "2026-07-20_runtime_gate.json"
+        p.write_text(json.dumps({"date": "2026-07-20",
+                                 "calendar": {"is_trading_day": trading},
+                                 "market_quality": {"status": quality, "quality_score": 0.3,
+                                                    "checks": [{"field": "0AMV", "quality": "stale"}]}}),
+                     encoding="utf-8")
+        return p
+
+    def setUp(self):
+        import tempfile
+        self.tmp = Path(tempfile.mkdtemp())
+        fh = tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8")
+        fh.write(FINAL_REVIEW)
+        fh.close()
+        self.report = fh.name
+        self.addCleanup(lambda: __import__("os").unlink(self.report))
+
+    def test_gate_pass_allows_delivery(self):
+        gate = self._write_gate(self.tmp)
+        chk = frp.check_delivery_gate("2026-07-20", gate)
+        self.assertTrue(chk["ok"])
+
+    def test_quality_blocked_refuses(self):
+        gate = self._write_gate(self.tmp, quality="blocked")
+        chk = frp.check_delivery_gate("2026-07-20", gate)
+        self.assertFalse(chk["ok"])
+        self.assertIn("blocked", chk["reason"])
+
+    def test_non_trading_day_refuses(self):
+        gate = self._write_gate(self.tmp, trading=False)
+        self.assertFalse(frp.check_delivery_gate("2026-07-20", gate)["ok"])
+
+    def test_missing_gate_file_refuses(self):
+        chk = frp.check_delivery_gate("2026-07-20", self.tmp / "nope.json")
+        self.assertFalse(chk["ok"])
+        self.assertIn("缺少运行门控", chk["reason"])
+
+    def test_main_exits_4_without_any_http(self):
+        gate = self._write_gate(self.tmp, quality="blocked")
+        with mock.patch.object(frp.requests, "post") as post, \
+             mock.patch.dict("os.environ", {"FEISHU_APP_ID": "id", "FEISHU_APP_SECRET": "sec"},
+                             clear=False):
+            rc = frp.main(["--report", self.report, "--title", "盘后复盘", "--date", "2026-07-20",
+                           "--require-gate", "--gate-file", str(gate)])
+        self.assertEqual(rc, frp.GATE_BLOCKED_EXIT)
+        post.assert_not_called()
+
+    def test_gate_pass_proceeds_to_send(self):
+        gate = self._write_gate(self.tmp)
+        with mock.patch.object(frp.requests, "post",
+                               side_effect=[_resp({"code": 0, "tenant_access_token": "t"}),
+                                            _resp({"code": 0, "data": {"file_key": "fk"}}),
+                                            _resp({"code": 0, "data": {}}),
+                                            _resp({"code": 0, "data": {}})]) as post, \
+             mock.patch.dict("os.environ", {"FEISHU_APP_ID": "id", "FEISHU_APP_SECRET": "sec"},
+                             clear=False):
+            rc = frp.main(["--report", self.report, "--title", "盘后复盘", "--date", "2026-07-20",
+                           "--require-gate", "--gate-file", str(gate)])
+        self.assertEqual(rc, 0)
+        self.assertEqual(post.call_count, 4)
 
 
 if __name__ == "__main__":
