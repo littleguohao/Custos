@@ -41,6 +41,21 @@ def _stage(cmd: list[str], name: str) -> dict:
     return r
 
 
+def _gate_note(target: str) -> str:
+    """把门控结论摘进 run log。14:45 盘中 0AMV/宽度本就未出,故**不阻断**报告,
+    但 blocked/degraded 必须留痕,否则"数据大面积缺失却出了报告"事后无从察觉。"""
+    path = BASE / "01_data" / "quality" / f"{target}_runtime_gate.json"
+    try:
+        import json  # noqa: PLC0415
+        g = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "gate_json_unreadable"
+    mq = g.get("market_quality") or {}
+    pg = g.get("position_gate") or {}
+    return (f"market_quality={mq.get('status')}(score={mq.get('quality_score')}), "
+            f"position_gate={pg.get('status')}, 盘中不阻断(仅降权限)")
+
+
 def main(argv=None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -106,7 +121,8 @@ def main(argv=None) -> int:
     s_t0 = time.time()
     r = _stage(["uv", "run", "python", str(TOOLS / "runtime_gate.py"), "--date", target,
                 "--require-trading-day"], "runtime_gate")
-    stages_log.append(_log_stage("runtime_gate", r, s_started, _now_iso(), time.time() - s_t0))
+    stages_log.append(_log_stage("runtime_gate", r, s_started, _now_iso(), time.time() - s_t0,
+                                 note=_gate_note(target)))
     if not r["ok"]:
         _write_run_log(target, "failed", run_started, t0, stages_log)
         print(f"【14:45尾盘报告失败｜{target}】运行门控失败：{r['out'][:300]}")

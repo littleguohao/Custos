@@ -162,7 +162,14 @@ def main():
     # regime remains bearish until a confirmed daily change is > +4%.
     stages.append(run_stage([str(PY), str(TOOLS / "amv_state.py"), "--date", args.date], "amv_state"))
     # Runtime guards and market scorer consume the effective regime.
-    stages.append(run_stage([str(PY), str(BASE / "07_tools" / "runtime_gate.py"), "--date", args.date, "--require-trading-day"], "runtime_gate"))
+    # postclose(17:00)时全部盘后指标都应到位:此时 market_quality=blocked 说明核心数据(0AMV/宽度/
+    # 情绪/成交额)大面积缺失或陈旧,继续渲染只会产出"看起来正常"的垃圾报告 → 让门控硬失败。
+    # premarket/盘中不加此开关:0AMV/宽度本就要等收盘,盘前 blocked 属正常,阻断会误杀合法报告。
+    gate_cmd = [str(PY), str(BASE / "07_tools" / "runtime_gate.py"), "--date", args.date,
+                "--require-trading-day"]
+    if args.session_type == "postclose":
+        gate_cmd.append("--require-quality")
+    stages.append(run_stage(gate_cmd, "runtime_gate"))
     stages.append(run_stage([str(PY), str(TOOLS / "market_timing_scorer.py"), "--date", args.date], "market_timing_scorer"))
 
     # 5. Holdings mapping refresh optional
