@@ -27,24 +27,52 @@ PERIOD_CANDIDATES = ("1d", "day", "1day", "1440m")
 OVERLAP_DAYS = 30                       # 增量刷新时向前重叠的日历日(容忍补数/除权修正)
 
 
+def _suffixed(code: str) -> str:
+    """refresh_kline 要求带市场后缀的代码(实测 '880001' 报 Codestr Error,'880001.SH' 成功)。
+    880/881 板块指数均为沪市。"""
+    c = str(code).strip().upper()
+    return c if "." in c else f"{c}.SH"
+
+
 def _to_close_frame(d, code):
-    """get_market_data 返回归一为 [date, close]。兼容 dict{code:df/series} 或直接 df。
-    严格校验:日期列必须可解析为日期(防 RangeIndex 被误当日期静默落盘),收盘列优先名为 Close 的列。"""
+    """get_market_data 返回归一为 [date, close]。
+
+    兼容三种实测形态:①字段键 {Close: df}(index=DatetimeIndex,列=代码)——当前 TQ 版本实际返回;
+    ②代码键 {code: df/series};③直接 df。严格校验:日期必须来自 DatetimeIndex 或可解析为日期的列,
+    RangeIndex 等数值"日期"拒绝静默落盘。"""
     import pandas as pd
-    obj = d.get(code) if isinstance(d, dict) else d
+    obj = None
+    if isinstance(d, dict):
+        obj = d.get(code)
+        if obj is None:                      # 字段键形态:{Close: df}
+            obj = d.get("Close")
+        if obj is None:
+            obj = d.get("close")
+    else:
+        obj = d
     if obj is None:
         return None
     df = obj.to_frame() if hasattr(obj, "to_frame") and not hasattr(obj, "columns") else pd.DataFrame(obj)
-    df = df.reset_index()
+    if not len(df):
+        return None
     df.columns = [str(c) for c in df.columns]
-    date_col = df.columns[0]
-    if pd.api.types.is_numeric_dtype(df[date_col]):
-        return None                     # 数值"日期"列(如 RangeIndex 0,1,...)→ 非真日期,拒绝静默落盘
-    close_col = next((c for c in df.columns if c.lower() == "close"),
-                     next((c for c in df.columns[1:] if c), df.columns[-1]))
-    dates = pd.to_datetime(df[date_col], errors="coerce")
-    out = pd.DataFrame({"date": dates.dt.strftime("%Y-%m-%d"),
-                        "close": pd.to_numeric(df[close_col], errors="coerce")}).dropna()
+    cols = list(df.columns)
+    c6 = str(code).split(".")[0]
+    close_col = next((c for c in cols if c == str(code) or c.split(".")[0] == c6),
+                     next((c for c in cols if c.lower() == "close"),
+                          cols[0] if len(cols) == 1 else None))
+    if close_col is None:
+        return None
+    if isinstance(df.index, pd.DatetimeIndex):          # 形态①②:日期在 index
+        dstr = df.index.strftime("%Y-%m-%d")
+    else:                                                # 形态③:日期在首列(数值列拒收)
+        date_col = cols[0]
+        if pd.api.types.is_numeric_dtype(df[date_col]):
+            return None
+        dates = pd.to_datetime(df[date_col], errors="coerce")
+        dstr = dates.dt.strftime("%Y-%m-%d")
+    out = pd.DataFrame({"date": dstr,
+                        "close": pd.to_numeric(df[close_col], errors="coerce").values}).dropna()
     return out if len(out) else None
 
 
@@ -109,12 +137,15 @@ def resolve_period(tq, probe_code: str, start: str, wanted: str = "") -> tuple[s
     """
     cands = ([wanted] if wanted else []) + [p for p in PERIOD_CANDIDATES if p != wanted]
     errs = []
+    probe = _suffixed(probe_code)
+    import time as _t
     for p in cands:
         try:
-            tq.refresh_kline([probe_code], period=p)
-            d = tq.get_market_data(field_list=["Close"], stock_list=[probe_code],
+            tq.refresh_kline([probe], period=p)
+            _t.sleep(1.5)                       # refresh 为异步任务(run_id),稍候再查
+            d = tq.get_market_data(field_list=["Close"], stock_list=[probe],
                                    period=p, start_time=start, count=-1)
-            if _to_close_frame(d, probe_code) is not None:
+            if _to_close_frame(d, probe) is not None:
                 return p, f"period={p}"
         except Exception as exc:  # noqa: BLE001
             errs.append(f"{p}:{exc}")
@@ -163,14 +194,21 @@ def main(argv=None) -> int:
             return 2
         print(f"[INFO] 使用周期 {period}{'(自动探测)' if not args.period else ''}"
               f"{'; 增量合并模式' if args.incremental else '; 全量重拉'}")
+        import time as _t
         for i, code in enumerate(sectors):
             try:
-                dest = outdir / f"{code}.csv"
+                code_q = _suffixed(code)          # refresh_kline 必须带市场后缀,否则 Codestr Error
+                dest = outdir / f"{_suffixed(code)}.csv"
                 start = incremental_start(dest, args.start) if args.incremental else args.start
-                tq.refresh_kline([code], period=period)
-                d = tq.get_market_data(field_list=["Close"], stock_list=[code],
+                tq.refresh_kline([code_q], period=period)
+                d = tq.get_market_data(field_list=["Close"], stock_list=[code_q],
                                        period=period, start_time=start, count=-1)
-                frame = _to_close_frame(d, code)
+                frame = _to_close_frame(d, code_q)
+                if frame is None:                 # refresh 异步(run_id),空数据时稍候重试一次
+                    _t.sleep(2.0)
+                    d = tq.get_market_data(field_list=["Close"], stock_list=[code_q],
+                                           period=period, start_time=start, count=-1)
+                    frame = _to_close_frame(d, code_q)
                 if args.incremental:
                     frame = merge_close_frame(dest, frame)
                 if frame is not None:

@@ -139,7 +139,7 @@ class TestMainWiring:
         rc = fs.main(["--out", str(tmp_path), "--start", "20180101"])
         out = capsys.readouterr().out
         assert rc == 0 and "使用周期 1d" in out
-        assert (tmp_path / "880001.csv").is_file() and (tmp_path / "880002.csv").is_file()
+        assert (tmp_path / "880001.SH.csv").is_file() and (tmp_path / "880002.SH.csv").is_file()
 
     def test_unusable_period_fails_fast_without_scanning_all_sectors(self, tmp_path, monkeypatch, capsys):
         tq = self._install(monkeypatch, _TQ(fail_all=True), sectors=[f"88{i:04d}" for i in range(50)])
@@ -150,7 +150,7 @@ class TestMainWiring:
         assert len(tq.refresh_calls) == len(fs.PERIOD_CANDIDATES)
 
     def test_incremental_merges_and_narrows_request_window(self, tmp_path, monkeypatch):
-        dest = tmp_path / "880001.csv"
+        dest = tmp_path / "880001.SH.csv"
         pd.DataFrame([("2018-01-02", 90.0), ("2026-07-29", 100.0)],
                      columns=["date", "close"]).to_csv(dest, index=False)
         tq = self._install(monkeypatch, _TQ(good_period="1d"), sectors=("880001",))
@@ -158,11 +158,11 @@ class TestMainWiring:
         assert rc == 0
         got = pd.read_csv(dest, dtype={"date": str})
         assert list(got["date"]) == ["2018-01-02", "2026-07-29", "2026-07-30"]   # 深度保留
-        starts = [c["start"] for c in tq.data_calls if c["codes"] == ("880001",)]
+        starts = [c["start"] for c in tq.data_calls if c["codes"] == ("880001.SH",)]
         assert starts[-1] == "20260629"                    # 请求窗口收窄(不再每天重拉 8 年)
 
     def test_full_mode_still_overwrites(self, tmp_path, monkeypatch):
-        dest = tmp_path / "880001.csv"
+        dest = tmp_path / "880001.SH.csv"
         pd.DataFrame([("2018-01-02", 90.0)], columns=["date", "close"]).to_csv(dest, index=False)
         self._install(monkeypatch, _TQ(good_period="1d"), sectors=("880001",))
         fs.main(["--out", str(tmp_path), "--start", "20180101"])
@@ -172,5 +172,5 @@ class TestMainWiring:
     def test_limit_restricts_sectors(self, tmp_path, monkeypatch):
         self._install(monkeypatch, _TQ(good_period="1d"), sectors=("880001", "880002", "880003"))
         fs.main(["--out", str(tmp_path), "--limit", "1"])
-        assert (tmp_path / "880001.csv").is_file()
-        assert not (tmp_path / "880002.csv").exists()
+        assert (tmp_path / "880001.SH.csv").is_file()
+        assert not (tmp_path / "880002.SH.csv").exists()
