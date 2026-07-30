@@ -179,7 +179,9 @@ def _pick_winners(rets: list, top_pct: float, min_winner_ret: Optional[float] = 
     """按口径挑赢家。rets 需已按收益降序。返回 (winners, meta)。
     basis="universe"  :全域(含下跌股)按收益排序取前 top_pct% —— top50% ≈ "中位数以上"。
     basis="profitable":**先筛盈利股(ret>0),再取其中前 top_pct%** —— 更贴近"真赢家"语义。
-    min_winner_ret:再叠绝对收益门槛(如 0.5=+50%)。"""
+    min_winner_ret:再叠绝对收益门槛(如 0.5=+50%)。
+    ⚠️ meta["n_universe_all"] 的口径局限:它只是**传入 rets 的条数**(有信号或被 delisted_ret
+    救回的票),不含无信号退市股 → 以其为分母的上涨占比偏高,普涨窗判定偏保守。"""
     pool = [(c, v) for c, v in rets if v > 0] if basis == "profitable" else list(rets)
     n_top = max(1, int(len(pool) * top_pct / 100)) if pool else 0
     sel = pool[:n_top]
@@ -346,7 +348,10 @@ def extract_firings(bars, start: str, end: str, entry_gate, scorer=None,
     结论#11),但"涨得好"发生在随后的多头段,两窗混用会把赢家定义成"空头里跌得少"。
     delisted_ret:两窗解耦引入的**幸存者偏差补丁**。空头段就退市/长期停牌的票在 label 窗口
     没有价格 → ret=None → 记录被丢 → 飞刀被自动剔除,判别力被系统性高估(§3 首条)。
-    传入如 -1.0 时:这类票按"清零/大亏"计入**非赢家**并标 delisted=True,不再消失。"""
+    传入如 -1.0 时:这类票按"清零/大亏"计入**非赢家**并标 delisted=True,不再消失。
+    ⚠️口径局限:该补丁只能救回**有信号**的退市股;无信号退市股仍完全缺失(连记录都没有),
+    下游 n_universe_all / 上涨占比的分母因此偏小 → 上涨占比偏高、普涨窗可能漏标(见
+    discriminate_at_signal 输出中的口径警示)。"""
     import gc  # noqa: PLC0415
     items = bars.items() if isinstance(bars, dict) else bars
     out: list[dict] = []
@@ -529,7 +534,6 @@ def bear_to_long_pairs(regime: dict[str, str], min_bear_days: int = 10,
     idx = {d: i for i, d in enumerate(dates)}
     bears = long_regime_windows(regime, min_days=min_bear_days, state="空头")
     longs_all = long_regime_windows(regime, min_days=1, state="做多")     # 不过滤:用于找"紧邻的下一段"
-    prev_long_end: dict[str, str] = {}
     out: dict[str, dict[str, Any]] = {}                                  # key=label 窗 → 每窗只留一对
     for b_start, b_end, b_days in bears:
         nxt = next(((a, z, n) for a, z, n in longs_all if idx[a] > idx[b_end]), None)
@@ -556,7 +560,6 @@ def bear_to_long_pairs(regime: dict[str, str], min_bear_days: int = 10,
         # 同一 label 窗多个候选 → 留**最贴近该做多段**的那个空头段(起点最晚),避免伪独立重复计票
         if old is None or idx[cand["signal_start"]] > idx[old["signal_start"]]:
             out[key] = cand
-        prev_long_end[key] = l_end
     return sorted(out.values(), key=lambda p: p["signal_start"])
 
 
@@ -717,7 +720,12 @@ def discriminate_at_signal(records: list, horizon: int = 20, win_thresh: Optiona
     lines = [f"信号 {len(rows)} 个 | 标签口径[{label_basis}]:{label_txt}"
              f" (信号级基准率 {base:.1%})",
              f"  右删失(无标签被剔除) {n_censored} 个"
-             + (" —— ⚠️占比高时样本偏早期信号,结论可能失真" if n_censored > len(rows) * 0.2 else ""),
+             + (" —— ⚠️占比高时样本偏早期信号,结论可能失真" if n_censored > len(rows) * 0.2 else "")]
+    if label_basis == "winner":
+        # 分母口径警示:普涨判定(up_ratio)的分母并不真是"全宇宙",读普涨窗结论前必须知道这一点
+        lines.append("  ⚠️口径局限:上涨占比分母 n_universe_all 只含**有信号或被 delisted_ret 救回**的票,"
+                     "无信号退市股缺失 → 上涨占比偏高、普涨窗可能漏标(判定偏保守)。")
+    lines += [
              f"  全局基准率 {base:.1%}(仅参考);对照用**每日随机选top{picks_per_day}的公平期望**:",
              f"    {'特征':<20} {'日内AUC':>8} {'全局AUC':>8} {'方向':>6} {'精确率':>8} {'公平随机':>8}"
              f" {'净增益':>8} {'半程AUC':>13} {'赢家中位/非赢家':>18}"]
@@ -747,12 +755,27 @@ def aggregate_discriminate(results: dict[str, dict], min_edge: float = 0.03,
     单窗成立不算共同点(结论#8:reversal_quality_inv 单窗大胜、换窗翻转)。判定要求:
       ①在 ≥min_hit_ratio 的窗里方向同号;②各窗 |日内AUC-0.5| 中位 ≥min_edge;
       ③有效方向净增益中位 ≥min_lift_pp。三者齐备才算"跨窗共同点"。
+    计票口径(两道剔除,防把噪声/beta 当共同点):
+      - 单窗被判**疑过拟合**(split_consistent=False,前后半程不同号)的特征在该窗不计票
+        (单窗都不作结论,跨窗汇总自然也不能收),被剔除的 (特征,窗) 在文本中列名;
+      - **普涨窗**(degenerate_label,上涨占比≥80%)不计入 hit_ratio 分子分母——其"前 top%"
+        已退化为中位数以上,增益多为 beta;普涨窗在文本中列名说明已排除。
     results: {窗口标签: discriminate_at_signal 输出}
     """
+    # 普涨窗先从计票池剔除(文本中仍列环境摘要并点名)
+    degen = sorted(label for label, res in results.items()
+                   if (res.get("winner_meta") or {}).get("degenerate_label"))
+    degen_set = set(degen)
     per: dict[str, list] = {}
+    overfit: dict[str, list] = {}                     # 特征 -> [被判疑过拟合而不计票的窗]
     for label, res in results.items():
+        if label in degen_set:
+            continue                                  # 普涨窗:分子分母都不含
         for r in (res.get("features") or []):
             if r.get("constant") or r.get("auc") is None:
+                continue
+            if r.get("split_consistent") is False:    # 该窗已判疑过拟合 → 不参与跨窗计票
+                overfit.setdefault(r["feature"], []).append(label)
                 continue
             per.setdefault(r["feature"], []).append({
                 "window": label, "auc": r["auc"], "direction": r["direction"],
@@ -760,6 +783,7 @@ def aggregate_discriminate(results: dict[str, dict], min_edge: float = 0.03,
                 "median_diff": r.get("median_diff"), "n_pos": r.get("n_pos"),
             })
     n_win = len(results)
+    n_eligible = n_win - len(degen)                   # 计票分母:剔除普涨窗
     # 各窗环境摘要:上涨股占比差异大 ⇒ 同一 top_pct 在各窗含义不同,跨窗计票的可比前提被削弱。
     wins_meta = []
     for label, res in sorted(results.items()):
@@ -769,7 +793,6 @@ def aggregate_discriminate(results: dict[str, dict], min_edge: float = 0.03,
                           "up_ratio": wm.get("up_ratio"),
                           "winner_ret_cutoff": wm.get("winner_ret_cutoff"),
                           "degenerate_label": bool(wm.get("degenerate_label"))})
-    degen = [w["window"] for w in wins_meta if w["degenerate_label"]]
     out = []
     for f, lst in per.items():
         aucs = [x["auc"] for x in lst]
@@ -780,13 +803,14 @@ def aggregate_discriminate(results: dict[str, dict], min_edge: float = 0.03,
         med_lift = _median([x["lift_pp_effective"] for x in lst])
         med_edge = _median([abs(x["auc"] - 0.5) for x in lst])
         hit_ratio = round(same / len(lst), 3) if lst else 0.0
-        common = bool(len(lst) >= max(2, int(n_win * min_hit_ratio))
+        common = bool(len(lst) >= max(2, int(n_eligible * min_hit_ratio))
                       and hit_ratio >= min_hit_ratio
                       and (med_edge or 0) >= min_edge and (med_lift or 0) >= min_lift_pp)
         out.append({"feature": f, "n_windows": len(lst), "same_direction_windows": same,
                     "hit_ratio": hit_ratio, "median_auc": med_auc, "median_edge": med_edge,
                     "median_lift_pp": med_lift, "direction": "high" if major > 0 else "low",
                     "median_of_median_diff": _median([x["median_diff"] for x in lst]),
+                    "overfit_excluded_windows": overfit.get(f, []),
                     "cross_window_common": common,
                     "per_window": sorted(lst, key=lambda x: x["window"])})
     out.sort(key=lambda r: ((r["median_edge"] or 0) * (1 if r["cross_window_common"] else 0.5)),
@@ -804,8 +828,13 @@ def aggregate_discriminate(results: dict[str, dict], min_edge: float = 0.03,
         if degen:
             lines.append(f"  ⚠️ {len(degen)}/{n_win} 个窗为普涨窗(上涨占比≥80%),其"
                          f"'前 top%'退化为中位数以上;共同点若主要靠这些窗撑起,应视为 beta 而非识别力。")
+            lines.append(f"     已排除普涨窗 beta(不计入 hit_ratio 分子分母): {', '.join(degen)}")
         lines.append("")
-    lines += [f"跨 {n_win} 个多头区间汇总(共同点判定:≥{min_hit_ratio:.0%} 窗同号 且 中位|AUC-0.5|≥{min_edge} "
+    if overfit:
+        lines.append("⚠️ 疑过拟合特征(单窗前后半程不同号)不参与跨窗计票: "
+                     + ", ".join(f"{f}({', '.join(ws)})" for f, ws in sorted(overfit.items())))
+    lines += [f"跨 {n_win} 个多头区间汇总(计票窗 {n_eligible} 个,已排除普涨窗 {len(degen)} 个;共同点判定:"
+              f"≥{min_hit_ratio:.0%} 窗同号 且 中位|AUC-0.5|≥{min_edge} "
               f"且 中位净增益≥{min_lift_pp}pp):",
               f"    {'特征':<20} {'窗数':>4} {'同号':>4} {'同号率':>6} {'中位AUC':>8} {'中位增益':>9} {'方向':>6} {'共同点':>6}"]
     for r in out:
@@ -824,6 +853,7 @@ def aggregate_discriminate(results: dict[str, dict], min_edge: float = 0.03,
                                         for r in common)))
     return {"n_windows": n_win, "features": out, "common": [r["feature"] for r in common],
             "windows": wins_meta, "degenerate_windows": degen,
+            "overfit_excluded": {f: ws for f, ws in sorted(overfit.items())},
             "text": "\n".join(lines)}
 
 
@@ -1206,9 +1236,13 @@ def main(argv=None, loader=None) -> int:
     # 数据/regime 起点必须比 --start 再早 buffer 段(起涨点要在 [start-buffer, end] 内回溯),
     # 否则 buffer 被加载窗口截为 0(此前真实运行从未真正回溯,结论有偏)。捕捉研究也靠它提供 min_bars 回溯。
     load_start = args.start
-    if args.buffer_days:
+    # 裕量必须同时盖住 buffer_days 与 gate_window:gate_window(默认120)是 gate/scorer 的尾窗长度,
+    # 只按 buffer_days(默认60)留裕量会让信号窗开头 ~gate_window-buffer 根 K 线预热不足,
+    # 且截断程度随信号在窗内位置变化(同一特征在不同位置口径不一)。
+    margin = max(args.buffer_days or 0, args.gate_window or 0)
+    if margin:
         load_start = (_date.fromisoformat(args.start)
-                      - _td(days=int(args.buffer_days * 1.6) + 10)).isoformat()   # 交易日→日历日留裕量
+                      - _td(days=int(margin * 1.6) + 10)).isoformat()   # 交易日→日历日留裕量
 
     def _chunked_items(chunk: int):
         """流式产出 (code, df):逐块加载→逐股产出→释放该块,capture 研究据此避免全量载入 OOM。
@@ -1283,13 +1317,18 @@ def main(argv=None, loader=None) -> int:
             print("[WARN] 两窗解耦但未设 --delisted-ret:赢家窗无价格的票(空头内退市/长停)被丢弃,"
                   "会重新引入幸存者偏差(§3 首条)。建议 --delisted-ret -1.0", file=sys.stderr)
         import json as _j
-        Path(args.emit_firings).write_text(
+        firings_path = Path(args.emit_firings)
+        tmp_firings = firings_path.with_name(firings_path.name + ".tmp")
+        tmp_firings.write_text(
             _j.dumps({"start": args.start, "end": args.end,
                       "ret_start": args.ret_start or args.start, "ret_end": args.ret_end or args.end,
                       "entry_filter": args.entry_filter, "delisted_ret": args.delisted_ret,
                       "n_delisted": n_delisted,
+                      "feature_scores": args.feature_scores,
+                      "universe": "sdata" if args.universe_sdata else "codes",
                       "rank_score": args.rank_score, "shard": args.shard, "records": recs},
                      ensure_ascii=False), encoding="utf-8")
+        tmp_firings.replace(firings_path)   # 原子落盘:中断不留半截 JSON(断点续跑会把半截文件当已完成)
         print(f"[pass1] 写出 {len(recs)} 股记录(其中赢家窗无价格按大亏计入 {n_delisted} 只) "
               f"→ {args.emit_firings} (RSS={_rss_mb():.0f}MB)", file=sys.stderr)
         return 0

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -96,6 +97,36 @@ def tag_of(p: dict) -> str:
     return f"{p['signal_start']}_{p['signal_end']}__L{p['label_start']}_{p['label_end']}"
 
 
+def expected_firings_header(args) -> dict:
+    """本次运行要求 firings 头部匹配的关键参数(与 pass1_cmd / launch_point_study 写盘字段一致)。"""
+    return {"entry_filter": args.entry_filter, "rank_score": "none",
+            "feature_scores": args.feature_scores, "delisted_ret": args.delisted_ret,
+            "universe": "sdata"}
+
+
+def firings_reusable(f: Path, args) -> bool:
+    """断点续跑校验:已有 firings 能否复用。两道闸,缺一即视为**未完成**,WARN 后重跑:
+      ① JSON 可完整解析且含 records 键(上次 Pass1 失败/中断留下的截断文件不得当完成);
+      ② 头部关键参数与本次一致(只认文件名会把旧参数跑出的结果当新参数复用,结论静默失真)。"""
+    try:
+        head = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print(f"[WARN] firings 损坏/截断({exc.__class__.__name__}),视为未完成重跑: {f.name}",
+              file=sys.stderr)
+        return False
+    if not isinstance(head, dict) or "records" not in head:
+        print(f"[WARN] firings 缺 records 键,视为未完成重跑: {f.name}", file=sys.stderr)
+        return False
+    diff = {k: (head.get(k), v) for k, v in expected_firings_header(args).items()
+            if head.get(k) != v}
+    if diff:
+        print(f"[WARN] firings 参数与本次不一致,重跑不复用: {f.name} "
+              + ", ".join(f"{k}: 文件={a!r} vs 本次={b!r}" for k, (a, b) in diff.items()),
+              file=sys.stderr)
+        return False
+    return True
+
+
 def main(argv=None, runner=None) -> int:
     ap = argparse.ArgumentParser(description="空头段识别未来赢家:窗口枚举 → Pass1 逐对 → Pass2 汇总")
     ap.add_argument("--out-dir", default="06_logs/bear2long")
@@ -110,7 +141,7 @@ def main(argv=None, runner=None) -> int:
     ap.add_argument("--feature-scores", default=DEFAULT_FEATURES)
     ap.add_argument("--sector-features", action="store_true")
     ap.add_argument("--data-source", choices=["qlib", "csv"], default="qlib")
-    ap.add_argument("--s-data-root", default=lp.os.environ.get("S_DATA_ROOT") or r"E:\S_DATA")
+    ap.add_argument("--s-data-root", default=os.environ.get("S_DATA_ROOT") or r"E:\S_DATA")
     ap.add_argument("--delisted-ret", type=float, default=-1.0)
     ap.add_argument("--buffer-days", type=int, default=60)
     ap.add_argument("--gate-window", type=int, default=120)
@@ -156,7 +187,8 @@ def main(argv=None, runner=None) -> int:
         print(f"[WARN] 仅 {len(keep)} 个独立窗口,跨窗一致性判定统计力很弱(结论只能当探索)",
               file=sys.stderr)
 
-    out_dir.mkdir(parents=True, exist_ok=True)
+    if not args.dry_run:
+        out_dir.mkdir(parents=True, exist_ok=True)   # dry-run 只看计划,不落任何目录/文件
     files: list[Path] = []
     rc_all = 0
     for p in keep:
@@ -164,8 +196,8 @@ def main(argv=None, runner=None) -> int:
         files.append(f)
         if args.pass2_only:
             continue
-        if f.exists() and not args.force:
-            print(f"[skip] 已存在,跳过(--force 可重跑): {f.name}")
+        if f.exists() and not args.force and firings_reusable(f, args):
+            print(f"[skip] 已存在且参数一致,跳过(--force 可重跑): {f.name}")
             continue
         cmd = pass1_cmd(p, f, args)
         print("\n[pass1] " + " ".join(cmd))

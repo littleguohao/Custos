@@ -14,6 +14,17 @@ def _pair(sig=("2022-03-01", "2022-06-01"), lab=("2022-06-02", "2022-07-22")):
             "bear_days": 60, "long_days": 35, "signal_days": 60}
 
 
+def _firings_text(**over):
+    """与 launch_point_study 写盘口径一致的 firings 头部(可用 over 制造参数漂移)。"""
+    head = {"start": "2022-03-01", "end": "2022-06-01",
+            "ret_start": "2022-06-02", "ret_end": "2022-07-22",
+            "entry_filter": "reversal_k", "rank_score": "none",
+            "feature_scores": rb.DEFAULT_FEATURES, "delisted_ret": -1.0,
+            "universe": "sdata", "records": []}
+    head.update(over)
+    return json.dumps(head, ensure_ascii=False)
+
+
 class TestGapGuards:
     def test_overlaps_gap_boundaries(self):
         assert rb.overlaps_gap("2020-09-01", "2020-09-28") is True     # 触到缺口起点
@@ -75,7 +86,7 @@ class TestResumeAndPass2:
     def test_existing_firings_skipped_unless_force(self, tmp_path, monkeypatch, capsys):
         p = _pair()
         self._setup(monkeypatch, [p])
-        (tmp_path / f"firings_{rb.tag_of(p)}.json").write_text("{}", encoding="utf-8")
+        (tmp_path / f"firings_{rb.tag_of(p)}.json").write_text(_firings_text(), encoding="utf-8")
         calls = []
         rb.main(["--out-dir", str(tmp_path)], runner=lambda cmd: calls.append(cmd) or 0)
         assert len(calls) == 1 and "--from-firings" in calls[0]        # 只跑了 Pass2
@@ -85,6 +96,74 @@ class TestResumeAndPass2:
         rb.main(["--out-dir", str(tmp_path), "--force"],
                 runner=lambda cmd: calls.append(cmd) or 0)
         assert len(calls) == 2 and "--emit-firings" in calls[0]        # 强制重跑 Pass1
+
+    def test_param_mismatch_reruns_instead_of_reuse(self, tmp_path, monkeypatch, capsys):
+        """断点续跑不能只认文件名:头部关键参数不一致 → WARN + 重跑(旧参数结果不得复用)。"""
+        p = _pair()
+        self._setup(monkeypatch, [p])
+        (tmp_path / f"firings_{rb.tag_of(p)}.json").write_text(
+            _firings_text(entry_filter="kdj_j"), encoding="utf-8")     # 上次用别的 entry_filter 跑的
+        calls = []
+        rc = rb.main(["--out-dir", str(tmp_path)], runner=lambda cmd: calls.append(cmd) or 0)
+        assert rc == 0
+        assert len(calls) == 2 and "--emit-firings" in calls[0]        # Pass1 重跑
+        err = capsys.readouterr().err
+        assert "[WARN]" in err and "entry_filter" in err and "kdj_j" in err
+        assert "[skip]" not in capsys.readouterr().out
+
+    def test_feature_scores_mismatch_reruns(self, tmp_path, monkeypatch, capsys):
+        p = _pair()
+        self._setup(monkeypatch, [p])
+        (tmp_path / f"firings_{rb.tag_of(p)}.json").write_text(
+            _firings_text(feature_scores="momentum"), encoding="utf-8")
+        calls = []
+        rb.main(["--out-dir", str(tmp_path)], runner=lambda cmd: calls.append(cmd) or 0)
+        assert "--emit-firings" in calls[0]
+        assert "feature_scores" in capsys.readouterr().err
+
+    def test_truncated_firings_reruns_not_skipped_nor_crashed(self, tmp_path, monkeypatch, capsys):
+        """失败 Pass1 留下的半截 JSON:不得当完成 skip,也不得崩溃 —— WARN 后重跑并纳入 Pass2。"""
+        p = _pair()
+        self._setup(monkeypatch, [p])
+        f = tmp_path / f"firings_{rb.tag_of(p)}.json"
+        f.write_text('{"start": "2022-03-01", "records": [{"code": "6000', encoding="utf-8")
+
+        def _runner(cmd):
+            if "--emit-firings" in cmd:
+                Path(cmd[cmd.index("--emit-firings") + 1]).write_text(_firings_text(),
+                                                                      encoding="utf-8")
+            return 0
+
+        calls = []
+        rc = rb.main(["--out-dir", str(tmp_path)],
+                     runner=lambda cmd: (calls.append(cmd), _runner(cmd))[1])
+        assert rc == 0
+        assert "--emit-firings" in calls[0]                            # 重跑 Pass1
+        err = capsys.readouterr().err
+        assert "[WARN]" in err and "截断" in err
+        pass2 = [c for c in calls if "--from-firings" in c][0]
+        assert rb.tag_of(p) in pass2[pass2.index("--from-firings") + 1]
+
+    def test_records_key_missing_treated_as_unfinished(self, tmp_path, monkeypatch, capsys):
+        """可解析但缺 records 键(如旧版/误写文件)同样视为未完成。"""
+        p = _pair()
+        self._setup(monkeypatch, [p])
+        head = json.loads(_firings_text())
+        del head["records"]
+        (tmp_path / f"firings_{rb.tag_of(p)}.json").write_text(
+            json.dumps(head, ensure_ascii=False), encoding="utf-8")
+        calls = []
+        rb.main(["--out-dir", str(tmp_path)], runner=lambda cmd: calls.append(cmd) or 0)
+        assert "--emit-firings" in calls[0]
+        assert "records" in capsys.readouterr().err
+
+    def test_dry_run_does_not_create_out_dir(self, tmp_path, monkeypatch):
+        """--dry-run 只看计划:不得落目录。"""
+        p = _pair()
+        self._setup(monkeypatch, [p])
+        target = tmp_path / "not_created"
+        rc = rb.main(["--dry-run", "--out-dir", str(target)], runner=lambda cmd: 0)
+        assert rc == 0 and not target.exists()
 
     def test_failed_pass1_excluded_from_pass2_but_others_continue(self, tmp_path, monkeypatch):
         p1, p2 = _pair(), _pair(sig=("2023-01-03", "2023-02-10"), lab=("2023-02-13", "2023-05-11"))

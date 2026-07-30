@@ -89,12 +89,19 @@ class TestMergeCloseFrame:
         assert fs.merge_close_frame(tmp_path / "none.csv",
                                     pd.DataFrame(columns=["date", "close"])) is None
 
-    def test_corrupt_existing_file_does_not_raise(self, tmp_path):
+    def test_corrupt_existing_file_warns_and_quarantines(self, tmp_path, capsys):
+        """损坏缓存不得静默丢弃:必须 WARN + 改名隔离(留现场),再只用新数据落盘并提示全量重拉。"""
         dest = tmp_path / "880001.csv"
         dest.write_text("not,a,valid\ncsv", encoding="utf-8")
         out = fs.merge_close_frame(dest, pd.DataFrame([("2026-07-30", 1.0)],
                                                       columns=["date", "close"]))
-        assert list(out["date"]) == ["2026-07-30"]
+        assert list(out["date"]) == ["2026-07-30"]                  # 不 raise,用新数据继续
+        err = capsys.readouterr().err
+        assert "[WARN]" in err and "损坏" in err and "全量重拉" in err
+        quarantined = list(tmp_path.glob("880001.csv.corrupt-*"))   # 隔离而非覆写,保留现场
+        assert len(quarantined) == 1
+        assert quarantined[0].read_text(encoding="utf-8") == "not,a,valid\ncsv"
+        assert not dest.exists()                                    # 原路径让位给新数据原子落盘
 
 
 class TestIncrementalStart:

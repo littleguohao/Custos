@@ -117,6 +117,41 @@ def test_main_loads_with_buffered_start(tmp_path, monkeypatch):
     assert captured["start"] < "2024-11-01"          # 60 交易日×1.6+10 ≈ 106 日历日 ≈ 2024-09-16
 
 
+def test_load_margin_covers_gate_window(tmp_path, monkeypatch):
+    """加载裕量必须 ≥ gate_window(默认120 > buffer 60):否则窗首 ~45 个交易日的信号
+    KDJ 预热不足,且截断程度随信号位置变化。裕量 = max(buffer, gate)×1.6+10 日历日。"""
+    captured = {}
+    def fake_load(codes, count, start=None, end=None, root=None):
+        captured["start"] = start
+        return {}
+    monkeypatch.setattr("s_data.load_bars_qlib", fake_load)
+    monkeypatch.setattr(lp.bt, "load_amv_regime", lambda since="2015-01-01", root=None: {})
+    rc = lp.main(["--codes", "600000", "--start", "2025-01-01", "--end", "2025-06-30",
+                  "--buffer-days", "60", "--gate-window", "120",
+                  "--sector-members", str(tmp_path / "none.json")])
+    assert rc == 0
+    # max(60,120)×1.6+10 = 202 日历日 → 2025-01-01 回溯至 2024-06-13 或更早
+    assert captured["start"] <= "2024-06-13"
+
+
+def test_emit_firings_atomic_write_with_param_header(tmp_path):
+    """firings 写盘:原子写(不留 .tmp)且头部带断点续跑校验所需的关键参数。"""
+    bars, dates = _synth_bars_10()
+    out = tmp_path / "f.json"
+    rc = lp.main(["--codes", ",".join(sorted(bars)), "--start", dates[0], "--end", dates[-1],
+                  "--entry-filter", "reversal_k", "--rank-score", "none", "--buffer-days", "0",
+                  "--feature-scores", "momentum", "--delisted-ret", "-1.0",
+                  "--emit-firings", str(out),
+                  "--sector-members", str(tmp_path / "none.json")],
+                 loader=lambda codes, _n: {c: bars[c] for c in codes if c in bars})
+    assert rc == 0
+    head = json.loads(out.read_text(encoding="utf-8"))       # 完整可解析(原子写,无半截)
+    assert "records" in head and head["entry_filter"] == "reversal_k"
+    assert head["rank_score"] == "none" and head["feature_scores"] == "momentum"
+    assert head["delisted_ret"] == -1.0 and head["universe"] == "codes"
+    assert not (tmp_path / "f.json.tmp").exists()            # tmp 已 replace,无残留
+
+
 def test_sector_concentration_density_and_winner_rets(tmp_path):
     # 板块族口径:密度=归属数/成分数(纠大板块偏差);赢家收益聚合成板块胜率/期望
     dates = [str(d)[:10] for d in pd.date_range("2024-09-02", periods=80, freq="B")]
@@ -619,7 +654,8 @@ def test_normal_window_not_flagged_as_degenerate():
     r = lp.discriminate_at_signal(recs, label_basis="winner", winner_top_pct=50.0,
                                   winner_basis="profitable")
     assert r["winner_meta"]["degenerate_label"] is False
-    assert "普涨窗" not in r["text"]
+    assert "退化为中位数以上" not in r["text"]                 # 非普涨窗不打退化标
+    assert "无信号退市股" in r["text"] and "上涨占比偏高" in r["text"]   # 分母口径局限必须显式注明
 
 
 def test_aggregate_reports_per_window_environment_and_degeneracy():
@@ -639,6 +675,44 @@ def test_aggregate_reports_per_window_environment_and_degeneracy():
     assert [w["window"] for w in agg["windows"]] == ["2015春", "2022夏"]
     assert agg["windows"][0]["up_ratio"] == 0.98
     assert "各窗环境" in agg["text"] and "普涨窗" in agg["text"] and "1/2" in agg["text"]
+    row = {r["feature"]: r for r in agg["features"]}["x"]
+    assert row["n_windows"] == 1                       # 普涨窗不计票(若计入则为 2)
+    assert "已排除普涨窗" in agg["text"] and "2015春" in agg["text"]   # 被排除且点名
+
+
+def _win_res(auc: float, consistent: bool = True, degenerate: bool = False):
+    """单窗 discriminate 输出的最小替身(只含 aggregate 读取的字段)。"""
+    wm = ({"up_ratio": 0.98, "degenerate_label": True, "n_universe_all": 100, "n_profitable": 98}
+          if degenerate else
+          {"up_ratio": 0.3, "degenerate_label": False, "n_universe_all": 100, "n_profitable": 30})
+    return {"winner_meta": wm, "base_rate": 0.2, "n": 100,
+            "features": [{"feature": "x", "constant": False, "auc": auc,
+                          "direction": "high" if auc >= 0.5 else "low",
+                          "lift_pp_effective": 5.0, "median_diff": 1.0, "n_pos": 10,
+                          "split_consistent": consistent}]}
+
+
+def test_aggregate_excludes_overfit_feature_from_voting():
+    """单窗被判疑过拟合(split_consistent=False)的特征在该窗不参与跨窗计票,且被点名。"""
+    res = {f"w{k}": _win_res(0.6) for k in range(4)}
+    res["w3"]["features"][0]["split_consistent"] = False     # 仅 w3 疑过拟合
+    agg = lp.aggregate_discriminate(res)
+    row = {r["feature"]: r for r in agg["features"]}["x"]
+    assert row["n_windows"] == 3 and row["hit_ratio"] == 1.0  # w3 不计票
+    assert row["overfit_excluded_windows"] == ["w3"]
+    assert agg["overfit_excluded"] == {"x": ["w3"]}
+    assert "疑过拟合" in agg["text"] and "w3" in agg["text"]
+
+
+def test_aggregate_excludes_degenerate_window_from_voting():
+    """普涨窗不计入 hit_ratio 分子分母(高分 beta 不得把中位 AUC 抬高),文本点名说明。"""
+    res = {f"w{k}": _win_res(0.55) for k in range(2)}
+    res["2015春"] = _win_res(0.9, degenerate=True)           # 普涨窗的 0.9 不得参与
+    agg = lp.aggregate_discriminate(res)
+    row = {r["feature"]: r for r in agg["features"]}["x"]
+    assert row["n_windows"] == 2 and row["median_auc"] == 0.55
+    assert agg["degenerate_windows"] == ["2015春"]
+    assert "已排除普涨窗" in agg["text"] and "2015春" in agg["text"]
 
 
 def test_bear_to_long_pairs_can_include_long_head():
@@ -729,11 +803,12 @@ def test_winner_label_needs_window_return():
 
 
 def _win_recs(seed_high: bool, tag: str):
-    """构造一窗记录:seed_high=True 时赢家特征高(同向),False 时赢家特征低(反向)。"""
+    """构造一窗记录:seed_high=True 时赢家特征高(同向),False 时赢家特征低(反向)。
+    输家收益含负值(上涨占比 ~27% < 80%),避免被 aggregate 判为普涨窗而整窗剔出计票。"""
     recs = []
     for i in range(30):
         winner = i < 8
-        ret = 0.6 - i * 0.01 if winner else (0.04 - i * 0.001)
+        ret = 0.6 - i * 0.01 if winner else (0.04 - i * 0.006)
         hi = 5.0 if winner == seed_high else 1.0
         days = [[f"{tag}-{d:02d}", 0.0, {"f_x": hi + d * 0.01}] for d in range(1, 9)]
         recs.append({"code": f"{tag}C{i:03d}", "ret": round(ret, 4), "days": days})

@@ -58,12 +58,28 @@ def merge_close_frame(existing_path: Path, new_frame):
     if new_frame is None or not len(new_frame):
         return None
     if existing_path.is_file():
+        corrupt = None
         try:
             old = pd.read_csv(existing_path, dtype={"date": str})
             if {"date", "close"}.issubset(old.columns):
                 new_frame = pd.concat([old[["date", "close"]], new_frame], ignore_index=True)
-        except (OSError, ValueError):
-            pass
+            else:
+                corrupt = f"缺 date/close 列(实际列: {list(old.columns)})"
+        except (OSError, ValueError) as exc:
+            corrupt = exc.__class__.__name__
+        if corrupt is not None:
+            # 不得静默:旧缓存读不动时若只用新窗口落盘,2018 年以来的历史深度会被无声截断。
+            # 打印 WARN + 改名隔离损坏文件(保留现场供排查),再以新数据落盘并提示全量重拉。
+            from datetime import date as _d  # noqa: PLC0415
+            quarantine = existing_path.with_name(
+                f"{existing_path.name}.corrupt-{_d.today().strftime('%Y%m%d')}")
+            print(f"[WARN] {existing_path.name} 缓存损坏无法合并({corrupt}),"
+                  f"已隔离为 {quarantine.name};本次仅用新抓数据落盘,"
+                  f"历史深度截断,需不带 --incremental 全量重拉恢复", file=sys.stderr)
+            try:
+                existing_path.replace(quarantine)
+            except OSError as rexc:
+                print(f"[WARN] 隔离失败({rexc}),损坏文件将被覆写", file=sys.stderr)
     out = (new_frame.dropna(subset=["date"])
            .drop_duplicates(subset=["date"], keep="last")
            .sort_values("date").reset_index(drop=True))
