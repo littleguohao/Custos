@@ -715,8 +715,8 @@ def main(argv=None, loader=None) -> int:
     ap.add_argument("--s-data-root", default=r"E:\S_DATA")
     ap.add_argument("--universe-sdata", action="store_true")
     ap.add_argument("--codes", default="")
-    ap.add_argument("--start", required=True)
-    ap.add_argument("--end", required=True)
+    ap.add_argument("--start", default="")
+    ap.add_argument("--end", default="")
     ap.add_argument("--entry-filter", choices=["j_low", "reversal_k", "j_macd_turn"], default="reversal_k")
     ap.add_argument("--top-pct", type=float, default=10.0)
     ap.add_argument("--buffer-days", type=int, default=60)
@@ -765,6 +765,9 @@ def main(argv=None, loader=None) -> int:
                     default="reversal_quality", help="当日信号池内排序分(none=随机)")
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
+
+    if not args.from_firings and (not args.start or not args.end):
+        ap.error("需提供 --start 和 --end(--from-firings 模式除外)")
 
     # Pass2:仅合并 Pass1 产物算排名(不加载任何K线,内存极小)
     if args.from_firings:
