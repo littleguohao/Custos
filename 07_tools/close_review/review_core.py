@@ -216,10 +216,32 @@ def technical_map(target_date: str) -> dict[str, dict]:
     return {str(x.get("code")): x for x in rows}
 
 
-def risk_map(target_date: str) -> dict[str, list[dict]]:
+def regime_advice(regime: str) -> str:
+    """按**实际 0AMV regime** 生成操作建议口径。
+
+    原先硬编码"0AMV处于实质空头区间",做多/中性时报告会与第3节的 regime 自相矛盾。
+    """
+    return {
+        "空头": "0AMV处于实质空头区间，所有反弹优先按减仓机会处理，不作为加仓、摊低成本或趋势反转依据。",
+        "做多": "0AMV处于做多区间，持仓按结构持有，加仓仍受运行权限与单票上限约束；空头级减仓规则不适用。",
+        "中性": "0AMV处于中性区间，不主动加仓，按个股结构与硬风险处理；不得把中性当作做多信号。",
+    }.get(str(regime), f"0AMV状态为「{regime}」（未确认），按保守口径处理：不加仓，硬风险优先。")
+
+
+def risk_source_date(target_date: str) -> tuple[Path | None, str]:
+    """定位 risk_decision 的实际来源文件与其日期。当日缺失时会回退到最近一份,
+    **必须把该日期标进报告**——否则读者无法分辨风控依据是今天的还是几天前的。"""
     path = RISK / f"{target_date}_risk_decision.json"
-    if not path.exists():
-        path = latest("*_risk_decision.json", RISK)
+    if path.exists():
+        return path, target_date
+    path = latest("*_risk_decision.json", RISK)
+    if not path:
+        return None, ""
+    return path, path.name[:10]
+
+
+def risk_map(target_date: str) -> dict[str, list[dict]]:
+    path, _src = risk_source_date(target_date)
     data = load(path, {}) if path else {}
     out: dict[str, list[dict]] = {}
     for x in data.get("stock_risks", []):
@@ -280,6 +302,10 @@ def main() -> None:
     snap = snapshot_state(target_date)
     tech = technical_map(target_date)
     risks = risk_map(target_date)
+    _risk_path, risk_src_date = risk_source_date(target_date)
+    risk_date_note = ("缺失（无 risk_decision，按无风控依据处理）" if not risk_src_date else
+                      f"**{risk_src_date}**（当日）" if risk_src_date == target_date else
+                      f"**{risk_src_date}**（⚠️非当日，当日 risk_decision 缺失，已回退最近一份，不得据此放宽任何权限）")
     quotes, quote_snapshot = quote_map(target_date)
     gate = load(QUALITY / f"{target_date}_runtime_gate.json", {})
     input_errors = validate_quote_snapshot(target_date, positions, quote_snapshot)
@@ -313,6 +339,7 @@ def main() -> None:
     indices = quote_snapshot.get("indices", []) if isinstance(quote_snapshot, dict) else []
     amv_numeric = optional_finite(amv_value)
     amv_display = "缺失" if amv_numeric is None else f"{amv_numeric:+.2f}%"
+    advice_line = regime_advice(regime)
     index_lines = [
         f"| {x.get('name', x.get('code', '未知'))} | {price_text(optional_finite(x.get('price')), 2)} | {pct_text(optional_finite(x.get('change_pct')))} | {x.get('date', '缺失')} {x.get('time', '缺失')} |"
         for x in indices
@@ -348,9 +375,10 @@ def main() -> None:
     lines += ["", "## 3. 市场状态与数据日期", "",
               f"- 0AMV：当日 **{amv_display}**；缺值时只延续上一确认状态，不把缺失格式化为0。当前有效状态为 **{regime}**。",
               f"- 盘中市场质量：{market_quality.get('status', '未知')}；盘中缺失项按最近有效交易日继承并在门控中逐项标注。",
-              f"- 个股技术数据日：{', '.join(sorted({str(x.get('latest_date')) for x in tech.values() if x.get('latest_date')})) or '缺失'}；仅作技术参考，不冒充当日行情。", "",
+              f"- 个股技术数据日：{', '.join(sorted({str(x.get('latest_date')) for x in tech.values() if x.get('latest_date')})) or '缺失'}；仅作技术参考，不冒充当日行情。",
+              f"- 风控依据数据日：{risk_date_note}", "",
               "## 4. 操作建议", "",
-              "- 0AMV处于实质空头区间，所有反弹优先按减仓机会处理，不作为加仓、摊低成本或趋势反转依据。",
+              f"- {advice_line}",
               "- BBI持仓依据：BBI上方仅代表技术持有结构有效；首日跌破观察次日收回；连续两日收盘跌破进入清仓评估。0AMV、硬止损、重大风险和单票超限优先。",
               "- N型结构：L1是主结构硬清仓位，L2是更高回踩结构位；L2失守表示N型尝试失败，不等同于L1硬位失守。",
               "- B1统一持仓状态：动作由硬止损、N型L1/L2、BBI、趋势箱体、量价、利润保护依次裁决；空头0AMV不得被个股信号放宽。",

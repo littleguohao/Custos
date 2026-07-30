@@ -5,6 +5,7 @@ import math
 import unittest
 
 from close_review.review_core import build_delivery_digest, classify, json_safe, validate_quote_snapshot, validate_report
+from close_review import review_core as rc
 
 
 POSITIONS = [{"代码": "600000.SH", "名称": "测试股票"}]
@@ -84,6 +85,63 @@ class CloseReviewValidationTests(unittest.TestCase):
         )
         self.assertEqual((priority, action), ("P0", "N型前低清仓评估"))
         self.assertIn("主结构前低已失守", reason)
+
+
+class RegimeAdviceTests(unittest.TestCase):
+    """操作建议口径必须跟随实际 0AMV regime(原为硬编码"实质空头",做多时报告自相矛盾)。"""
+
+    def test_bear_keeps_reduction_wording(self):
+        self.assertIn("空头", rc.regime_advice("空头"))
+        self.assertIn("减仓", rc.regime_advice("空头"))
+
+    def test_long_does_not_claim_bear(self):
+        text = rc.regime_advice("做多")
+        self.assertIn("做多", text)
+        self.assertNotIn("实质空头", text)
+
+    def test_neutral_forbids_treating_as_long(self):
+        text = rc.regime_advice("中性")
+        self.assertIn("中性", text)
+        self.assertNotIn("实质空头", text)
+
+    def test_unknown_regime_falls_back_to_conservative(self):
+        text = rc.regime_advice("未知")
+        self.assertIn("不加仓", text)
+        self.assertNotIn("实质空头", text)
+
+
+class RiskSourceDateTests(unittest.TestCase):
+    """risk_decision 回退到旧文件时,日期必须能被报告标注出来。"""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        self.tmp = Path(tempfile.mkdtemp())
+        self._orig = rc.RISK
+        rc.RISK = self.tmp
+
+    def tearDown(self):
+        rc.RISK = self._orig
+
+    def _write(self, day):
+        (self.tmp / f"{day}_risk_decision.json").write_text('{"stock_risks": []}', encoding="utf-8")
+
+    def test_same_day_file_used(self):
+        self._write("2026-07-20")
+        path, src = rc.risk_source_date("2026-07-20")
+        self.assertEqual(src, "2026-07-20")
+        self.assertTrue(path.exists())
+
+    def test_falls_back_to_latest_and_reports_its_date(self):
+        self._write("2026-07-16")
+        self._write("2026-07-17")
+        _path, src = rc.risk_source_date("2026-07-20")
+        self.assertEqual(src, "2026-07-17")      # 最近一份,且日期可被标注
+
+    def test_no_file_returns_empty(self):
+        path, src = rc.risk_source_date("2026-07-20")
+        self.assertIsNone(path)
+        self.assertEqual(src, "")
 
 
 if __name__ == "__main__":
