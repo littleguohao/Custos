@@ -115,6 +115,36 @@ def archive_supporting_reports(date: str) -> dict:
     return {"stage": "archive_supporting_reports", "ok": True, "moved": moved}
 
 
+def build_gate_cmd(date: str, session_type: str, strict_quality: bool = False) -> list[str]:
+    """运行门控命令。
+
+    ⚠️ `--require-quality`(blocked 时 exit 4 → 整条盘后链硬失败)**默认关闭**:
+    2026-07-30 曾对 postclose 默认打开,同时又收紧了 as_of 陈旧判定,两者叠加导致
+    17:00 盘后复盘直接失败。硬闸须等新的 stale 校准跑过若干交易日、确认 blocked 只在真正
+    大面积缺数时出现,再由 `--strict-quality-gate` 显式开启。
+    门控结论无论是否开闸都会落盘到 01_data/quality/{date}_runtime_gate.json,并记进 stage note。
+    """
+    cmd = [str(PY), str(BASE / "07_tools" / "runtime_gate.py"), "--date", date,
+           "--require-trading-day"]
+    if strict_quality and session_type == "postclose":
+        cmd.append("--require-quality")
+    return cmd
+
+
+def gate_status_note(date: str) -> str:
+    """把门控结论摘进 stage note——不阻断也要留痕,否则"数据大面积缺失却出了报告"事后无从察觉。"""
+    path = DATA_DIR / "quality" / f"{date}_runtime_gate.json"
+    try:
+        g = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "gate_json_unreadable"
+    mq = g.get("market_quality") or {}
+    stale = [c.get("field") for c in (mq.get("checks") or []) if c.get("quality") == "stale"]
+    return (f"market_quality={mq.get('status')}(score={mq.get('quality_score')}"
+            + (f", stale={','.join(x for x in stale if x)}" if stale else "") + ")"
+            + f", position_gate={(g.get('position_gate') or {}).get('status')}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", required=True)
@@ -125,6 +155,9 @@ def main():
     ap.add_argument("--amv-pct", type=float, default=None)
     ap.add_argument("--reuse-discovery", action="store_true", help="reuse overseas/RSS files prepared before the formal report window")
     ap.add_argument("--session-type", choices=["premarket", "postclose"], default="premarket")
+    ap.add_argument("--strict-quality-gate", action="store_true",
+                    help="postclose 时 market_quality=blocked 则整条链硬失败(exit 4)。"
+                         "默认关闭:门控只落盘+留痕,不阻断报告生成")
     args = ap.parse_args()
 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -162,14 +195,11 @@ def main():
     # regime remains bearish until a confirmed daily change is > +4%.
     stages.append(run_stage([str(PY), str(TOOLS / "amv_state.py"), "--date", args.date], "amv_state"))
     # Runtime guards and market scorer consume the effective regime.
-    # postclose(17:00)时全部盘后指标都应到位:此时 market_quality=blocked 说明核心数据(0AMV/宽度/
-    # 情绪/成交额)大面积缺失或陈旧,继续渲染只会产出"看起来正常"的垃圾报告 → 让门控硬失败。
-    # premarket/盘中不加此开关:0AMV/宽度本就要等收盘,盘前 blocked 属正常,阻断会误杀合法报告。
-    gate_cmd = [str(PY), str(BASE / "07_tools" / "runtime_gate.py"), "--date", args.date,
-                "--require-trading-day"]
-    if args.session_type == "postclose":
-        gate_cmd.append("--require-quality")
-    stages.append(run_stage(gate_cmd, "runtime_gate"))
+    # 门控结论一律落盘+记 note;是否**硬阻断**由 --strict-quality-gate 决定(默认不阻断,见 build_gate_cmd)。
+    gate_stage = run_stage(build_gate_cmd(args.date, args.session_type, args.strict_quality_gate),
+                           "runtime_gate")
+    gate_stage["note"] = gate_status_note(args.date)
+    stages.append(gate_stage)
     stages.append(run_stage([str(PY), str(TOOLS / "market_timing_scorer.py"), "--date", args.date], "market_timing_scorer"))
 
     # 5. Holdings mapping refresh optional
