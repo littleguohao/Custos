@@ -101,3 +101,30 @@ def test_no_outpost_section_in_bull_regime():
     pool = {"status": "ok", "amv_state": "做多",
             "candidates": [_cand("600100", "哨", "半导体", "D", "优", 1, False)]}
     assert "📡 空头前哨" not in ct.render_table(pool, "2026-07-30")
+
+
+def test_daily_signal_summary_section():
+    # 置顶 ⭐ 一览:三档各归其位,一眼看清今日真信号
+    pool = {"status": "ok", "amv_state": "做多", "candidates": [
+        _cand("600000", "甲", "半导体", "A", "优", 4, True),      # → 可买
+        _cand("600007", "己", "X", "B", "优", 4, True),           # → 观察价位
+        _cand("600008", "庚", "Y", "A", "优", 3, False),          # 三面非四面 → 待0AMV做多
+        _cand("300001", "丙", "Z", "D", "差", 1, False),          # 不上榜
+    ]}
+    md = ct.render_table(pool, "2026-07-30")
+    sec = md.split("## ⭐ 今日信号一览")[1].split("\n## ")[0]
+    buy_line = next(l for l in sec.splitlines() if "可买（A+四面共振）" in l)
+    obs_line = next(l for l in sec.splitlines() if "观察价位" in l)
+    wait_line = next(l for l in sec.splitlines() if "待0AMV做多" in l)
+    assert "600000" in buy_line and "600007" not in buy_line
+    assert "600007" in obs_line and "600000" not in obs_line
+    assert "600008" in wait_line and "300001" not in sec
+
+
+def test_daily_signal_summary_bear_discipline():
+    # 空头:明示纪律"空头不买",可买档恒无
+    pool = {"status": "ok", "amv_state": "空头",
+            "candidates": [_cand("600000", "甲", "半导体", "A", "优", 4, True)]}
+    md = ct.render_table(pool, "2026-07-30")
+    sec = md.split("## ⭐ 今日信号一览")[1].split("\n## ")[0]
+    assert "空头不买" in sec

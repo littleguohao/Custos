@@ -99,10 +99,7 @@ def render_table(pool: dict, date: str) -> str:
     ]
     counts = pool.get("bucket_counts") or {}
     candidates = pool.get("candidates") or []
-    # 🧭 当日主线指纹:候选池板块族密度榜(情境感知,非进场 gate)——置于最前,先看当前主线全貌
-    lines += _mainline_fingerprint_section(candidates)
-    # 🐂 基本面牛股候选(共振观察区)：基本面优 + 板块有利 + 技术强(市场做多时即可买🐂)。单独列出持续观察。
-    # 分层受限(D/C等)的共振标的不是"可买",而是**重点研究观察对象**——单列 🔍 区,不被分层埋没。
+    # 先看全景分组(供置顶信号一览 + 后续各区复用)
     watch_all = [c for c in candidates
                  if (c.get("fundamental_quality") or {}).get("tier") == "优"
                  and (c.get("resonance_4leg") or {}).get("sector")
@@ -112,6 +109,26 @@ def render_table(pool: dict, date: str) -> str:
     watch = sorted((c for c in watch_all if c.get("bucket") in ("A", "B")), key=_watch_key, reverse=True)
     watch_capped = sorted((c for c in watch_all if c.get("bucket") not in ("A", "B")),
                           key=_watch_key, reverse=True)
+    is_bear = "空头" in str(pool.get("amv_state") or "")
+    # ⭐ 置顶:今日信号一览——可买/观察价位/待0AMV做多 三档,一眼看清"今天哪些是真信号"
+    _buy = [c for c in watch if (c.get("resonance_4leg") or {}).get("bull_candidate")
+            and c.get("bucket") == "A"]
+    _obs = [c for c in watch if (c.get("resonance_4leg") or {}).get("bull_candidate")
+            and c.get("bucket") == "B"]
+    _wait = [c for c in watch if not (c.get("resonance_4leg") or {}).get("bull_candidate")]
+    _nm = lambda c: f"{c.get('code')} {c.get('name') or ''}".strip()
+    lines.append("## ⭐ 今日信号一览")
+    lines.append("")
+    if is_bear:
+        lines.append("> **0AMV 空头：今日无可买信号（纪律：空头不买）**。"
+                     "📡 前哨/🔍 受限区为研究观察对象，待 0AMV 转多后看升级。")
+        lines.append("")
+    lines.append(f"- **可买（A+四面共振）**：{('、'.join(_nm(c) for c in _buy)) or '无'}")
+    lines.append(f"- **观察价位（B+四面共振）**：{('、'.join(_nm(c) for c in _obs)) or '无'}")
+    lines.append(f"- **待0AMV做多（三面已共振）**：{('、'.join(_nm(c) for c in _wait)) or '无'}")
+    lines.append("")
+    # 🧭 当日主线指纹:候选池板块族密度榜(情境感知,非进场 gate)——置于最前,先看当前主线全貌
+    lines += _mainline_fingerprint_section(candidates)
     lines.append("## 🐂 基本面牛股候选（共振观察区）")
     lines.append("")
     lines.append("> 基本面优 + 板块相位有利 + 技术强 = 三面已共振；再叠 0AMV做多即为可买牛股候选（🐂）。单独列出供持续观察（基本面为当前快照、非回测验证，仅辅助）。")
@@ -167,7 +184,7 @@ def render_table(pool: dict, date: str) -> str:
     # 📡 空头前哨(0AMV 空头期启用)：回测显示大量优秀股票起涨点在空头(领先 0AMV 转多 ~12 交易日,
     # 治理文档结论#11)——空头里板块/市场腿天然未到位(滞后),严格四面共振永远不会在空头触发,
     # 故空头期单列"基本面优+技术强"的提前埋伏观察对象,跟踪其板块/市场腿何时补齐。
-    if "空头" in str(pool.get("amv_state") or ""):
+    if is_bear:
         _watch_codes = {c.get("code") for c in watch_all}
         outposts = sorted((c for c in candidates
                            if (c.get("fundamental_quality") or {}).get("tier") == "优"
