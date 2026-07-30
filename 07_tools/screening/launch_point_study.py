@@ -618,9 +618,19 @@ def discriminate_at_signal(records: list, horizon: int = 20, win_thresh: Optiona
         for x in rows:
             x["win"] = x["code"] in winners
         thr = wmeta.get("winner_ret_cutoff") or 0.0
+        # 赢家窗的**上涨股占比**必须显式报出:普涨窗(如 2015 春 98% 上涨)里"盈利前50%"退化成
+        # "中位数以上"(结论#12),基准率≈50%,挑中的多是 beta 而非识别力;且各窗占比差异极大 ⇒
+        # 同一个 top_pct 在不同窗含义不同,跨窗一致性判定的可比前提被破坏。
+        up_ratio = (wmeta["n_profitable"] / wmeta["n_universe_all"]
+                    if wmeta.get("n_universe_all") else None)
+        wmeta["up_ratio"] = None if up_ratio is None else round(up_ratio, 4)
+        wmeta["degenerate_label"] = bool(up_ratio is not None and up_ratio >= 0.8)
         label_txt = (f"该股是否为本区间赢家({wmeta.get('winner_basis')}口径前{winner_top_pct:.0f}%"
                      + (f"且≥{(min_winner_ret or 0)*100:.0f}%" if min_winner_ret else "")
-                     + f",收益切点 {thr}); 赢家 {len(winners)}/{len(pairs)} 只")
+                     + f",收益切点 {thr}); 赢家 {len(winners)}/{len(pairs)} 只"
+                     + (f"; 该窗上涨股占比 {up_ratio:.0%}" if up_ratio is not None else "")
+                     + (" ⚠️普涨窗:'前%.0f%%'退化为中位数以上,增益多为beta" % winner_top_pct
+                        if wmeta["degenerate_label"] else ""))
     else:
         ys = sorted((x["y"] for x in rows), reverse=True)
         thr = win_thresh if win_thresh is not None else ys[max(0, int(len(ys) * win_top_q) - 1)]
@@ -750,6 +760,16 @@ def aggregate_discriminate(results: dict[str, dict], min_edge: float = 0.03,
                 "median_diff": r.get("median_diff"), "n_pos": r.get("n_pos"),
             })
     n_win = len(results)
+    # 各窗环境摘要:上涨股占比差异大 ⇒ 同一 top_pct 在各窗含义不同,跨窗计票的可比前提被削弱。
+    wins_meta = []
+    for label, res in sorted(results.items()):
+        wm = res.get("winner_meta") or {}
+        wins_meta.append({"window": label, "n_signals": res.get("n"),
+                          "base_rate": res.get("base_rate"),
+                          "up_ratio": wm.get("up_ratio"),
+                          "winner_ret_cutoff": wm.get("winner_ret_cutoff"),
+                          "degenerate_label": bool(wm.get("degenerate_label"))})
+    degen = [w["window"] for w in wins_meta if w["degenerate_label"]]
     out = []
     for f, lst in per.items():
         aucs = [x["auc"] for x in lst]
@@ -772,9 +792,22 @@ def aggregate_discriminate(results: dict[str, dict], min_edge: float = 0.03,
     out.sort(key=lambda r: ((r["median_edge"] or 0) * (1 if r["cross_window_common"] else 0.5)),
              reverse=True)
     common = [r for r in out if r["cross_window_common"]]
-    lines = [f"跨 {n_win} 个多头区间汇总(共同点判定:≥{min_hit_ratio:.0%} 窗同号 且 中位|AUC-0.5|≥{min_edge} "
-             f"且 中位净增益≥{min_lift_pp}pp):",
-             f"    {'特征':<20} {'窗数':>4} {'同号':>4} {'同号率':>6} {'中位AUC':>8} {'中位增益':>9} {'方向':>6} {'共同点':>6}"]
+    lines = []
+    if wins_meta and any(w["up_ratio"] is not None for w in wins_meta):
+        lines.append("各窗环境(上涨股占比差异大 ⇒ 同一 top% 在各窗含义不同,读表时须一并看):")
+        lines.append(f"    {'窗口':<44} {'信号数':>6} {'上涨占比':>8} {'赢家切点':>9} {'基准率':>7}")
+        for w in wins_meta:
+            flag = "  ⚠️普涨窗(增益多为beta)" if w["degenerate_label"] else ""
+            lines.append(f"    {w['window']:<44} {str(w['n_signals'] or '-'):>6} "
+                         f"{_fmt_pct(w['up_ratio']):>8} {_fmt_num(w['winner_ret_cutoff']):>9} "
+                         f"{_fmt_pct(w['base_rate']):>7}{flag}")
+        if degen:
+            lines.append(f"  ⚠️ {len(degen)}/{n_win} 个窗为普涨窗(上涨占比≥80%),其"
+                         f"'前 top%'退化为中位数以上;共同点若主要靠这些窗撑起,应视为 beta 而非识别力。")
+        lines.append("")
+    lines += [f"跨 {n_win} 个多头区间汇总(共同点判定:≥{min_hit_ratio:.0%} 窗同号 且 中位|AUC-0.5|≥{min_edge} "
+              f"且 中位净增益≥{min_lift_pp}pp):",
+              f"    {'特征':<20} {'窗数':>4} {'同号':>4} {'同号率':>6} {'中位AUC':>8} {'中位增益':>9} {'方向':>6} {'共同点':>6}"]
     for r in out:
         lines.append(f"    {r['feature']:<20} {r['n_windows']:>4} {r['same_direction_windows']:>4} "
                      f"{r['hit_ratio']:>6.0%} {_fmt_num(r['median_auc']):>8} "
@@ -790,6 +823,7 @@ def aggregate_discriminate(results: dict[str, dict], min_edge: float = 0.03,
                                         f"{r['same_direction_windows']}/{r['n_windows']} 窗同号)"
                                         for r in common)))
     return {"n_windows": n_win, "features": out, "common": [r["feature"] for r in common],
+            "windows": wins_meta, "degenerate_windows": degen,
             "text": "\n".join(lines)}
 
 

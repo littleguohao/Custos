@@ -592,6 +592,55 @@ def test_signal_span_since_prev_long_extends_back_over_neutral():
     assert ext["label_start"] == adj["label_start"] == d[45]
 
 
+def test_degenerate_melt_up_window_is_flagged():
+    """普涨窗(如 2015 春:98% 上涨)里"盈利前50%"退化为中位数以上 → 必须显式标出。
+
+    否则读表时会把 beta 当识别力(结论#12:top50% 实际等于"中位数以上")。
+    """
+    recs = []
+    for i in range(100):
+        ret = 0.9 - i * 0.008 if i < 98 else -0.2       # 98% 上涨
+        recs.append({"code": f"C{i:03d}", "ret": round(ret, 4),
+                     "days": [[f"2015-02-{d:02d}", 0.0, {"f_x": float(i % 7)}] for d in range(2, 6)]})
+    r = lp.discriminate_at_signal(recs, label_basis="winner", winner_top_pct=50.0,
+                                  winner_basis="profitable")
+    wm = r["winner_meta"]
+    assert wm["up_ratio"] >= 0.95 and wm["degenerate_label"] is True
+    assert "普涨窗" in r["text"] and "beta" in r["text"]
+    assert 0.4 < r["base_rate"] < 0.6                   # 基准率≈50%,任务退化成"挑上半区"
+
+
+def test_normal_window_not_flagged_as_degenerate():
+    recs = []
+    for i in range(100):
+        ret = 0.5 - i * 0.02                            # ~25% 上涨
+        recs.append({"code": f"C{i:03d}", "ret": round(ret, 4),
+                     "days": [[f"2022-06-{d:02d}", 0.0, {"f_x": float(i % 7)}] for d in range(2, 6)]})
+    r = lp.discriminate_at_signal(recs, label_basis="winner", winner_top_pct=50.0,
+                                  winner_basis="profitable")
+    assert r["winner_meta"]["degenerate_label"] is False
+    assert "普涨窗" not in r["text"]
+
+
+def test_aggregate_reports_per_window_environment_and_degeneracy():
+    """跨窗汇总必须先列各窗上涨占比/切点/基准率,并点名普涨窗——共同点若靠它们撑起即为 beta。"""
+    melt = {"winner_meta": {"up_ratio": 0.98, "winner_ret_cutoff": 0.32,
+                            "degenerate_label": True, "n_universe_all": 100, "n_profitable": 98},
+            "base_rate": 0.5, "n": 400,
+            "features": [{"feature": "x", "constant": False, "auc": 0.56, "direction": "high",
+                          "lift_pp_effective": 5.0, "median_diff": 1.0, "n_pos": 10}]}
+    normal = {"winner_meta": {"up_ratio": 0.3, "winner_ret_cutoff": 0.1,
+                              "degenerate_label": False, "n_universe_all": 100, "n_profitable": 30},
+              "base_rate": 0.15, "n": 300,
+              "features": [{"feature": "x", "constant": False, "auc": 0.55, "direction": "high",
+                            "lift_pp_effective": 4.0, "median_diff": 0.8, "n_pos": 8}]}
+    agg = lp.aggregate_discriminate({"2015春": melt, "2022夏": normal})
+    assert agg["degenerate_windows"] == ["2015春"]
+    assert [w["window"] for w in agg["windows"]] == ["2015春", "2022夏"]
+    assert agg["windows"][0]["up_ratio"] == 0.98
+    assert "各窗环境" in agg["text"] and "普涨窗" in agg["text"] and "1/2" in agg["text"]
+
+
 def test_bear_to_long_pairs_can_include_long_head():
     """可把做多段头部 N 日纳入信号窗——覆盖那 ~27% 起涨点落在做多的情况(结论#11)。"""
     d = _bdays(60)
