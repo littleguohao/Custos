@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import bisect
+import os
 import statistics
 import sys
 from datetime import date as _date, timedelta as _td
@@ -439,13 +440,37 @@ def _auc_within_day(by_day: dict, valfn, picks_key: str = "win") -> Optional[flo
     return round(num / den, 4) if den else None
 
 
+def _split_days_in_half(by_day: dict) -> tuple[dict, dict]:
+    """按日期把信号池切成前/后半程,用于**分段一致性**检验(样本内挑特征极易过拟合,
+    见 B1_BACKTEST_FINDINGS §3;要求两半程 AUC 与全样本同号才敢称'弱可用')。"""
+    ds = sorted(by_day)
+    mid = len(ds) // 2
+    return ({d: by_day[d] for d in ds[:mid]}, {d: by_day[d] for d in ds[mid:]})
+
+
+def _fmt_num(v) -> str:
+    """None → '-';0.0 必须显示成 '0.0'(不能用 `v or '-'`——AUC=0.0 是完美反向预测,不是缺失)。"""
+    return "-" if v is None else f"{v}"
+
+
+def _fmt_pct(v) -> str:
+    return "-" if v is None else f"{v:.1%}"
+
+
+def _fmt_pp(v) -> str:
+    return "-" if v is None else f"{v:+.1f}pp"
+
+
 def discriminate_at_signal(records: list, horizon: int = 20, win_thresh: Optional[float] = None,
                            win_top_q: float = 0.2, use_mfe: bool = False,
                            picks_per_day: int = 3) -> dict:
     """**信号当时能否明确选出会跑的票?** 对每个信号(因果、无未来函数):
       label = 前向收益 fwd{h}(或 mfe{h}) 是否"跑出来"(绝对阈值 win_thresh 或全体前 win_top_q 分位);
-      对每个**当时可得**特征算 AUC(0.5=无判别力) + **每日按该特征选 picks_per_day 只的精确率 vs 基准率**。
-    AUC≈0.5 且 精确率≈基准率 ⇒ 信号当时无法把会跑的票挑出来(判别失败)。"""
+      对每个**当时可得**特征算 日内AUC(0.5=无判别力) + **每日按该特征选 picks_per_day 只的精确率
+      vs 每日随机选同样只数的公平期望**。
+    方向:AUC<0.5 = 反向预测子(取反即可用),故两方向精确率都算,判定用 |AUC-0.5| 与有效方向净增益。
+    稳健性:另算前/后半程日内AUC,要求与全样本同号(split_consistent)才计入"弱可用",否则标为疑过拟合。
+    |AUC-0.5|≈0 且 精确率≈公平基线 ⇒ 信号当时无法把会跑的票挑出来(判别失败)。"""
     rows = []
     key = f"{'mfe' if use_mfe else 'fwd'}{horizon}"
     n_censored = 0                                        # 信号日后数据不足 h 根 → 无标签被剔除(右删失,须报数)
@@ -473,6 +498,7 @@ def discriminate_at_signal(records: list, horizon: int = 20, win_thresh: Optiona
     def _val(x, f):
         return x["base_score"] if f == "base_score" else x["feats"].get(f)
 
+    halves = _split_days_in_half(by_day)                   # 分段一致性(前/后半程各自重算 AUC)
     feat_names = sorted({k for x in rows for k in x["feats"]}) + ["base_score"]
     out_feats = []
     for f in feat_names:
@@ -481,8 +507,11 @@ def discriminate_at_signal(records: list, horizon: int = 20, win_thresh: Optiona
         neg = [v for v in (vf(x) for x in rows if not x["win"]) if v is not None]
         allv = [v for v in (vf(x) for x in rows) if v is not None]
         constant = len(set(allv)) <= 1                     # 零方差(如 reversal_k 内的 reversal_quality 恒=4)
-        hit = tot = 0
-        fair_num = 0.0                                     # 每日随机选k的期望命中(公平基线)
+        auc = None if constant else _auc_within_day(by_day, vf)
+        # 方向:AUC<0.5 表示"特征越小越会跑"= 反向预测子(取反即可用,如 reversal_quality_inv 的由来),
+        # 故两个方向的 top-k 精确率都算,判定按 |AUC-0.5| 与**有效方向**的净增益,避免误杀反向信号。
+        hit_hi = hit_lo = tot = 0
+        fair_num = 0.0                                     # 每日随机选k的期望命中(公平基线,与特征方向无关)
         for _d, lst in by_day.items():
             cand = [x for x in lst if vf(x) is not None]
             if not cand:
@@ -491,36 +520,66 @@ def discriminate_at_signal(records: list, horizon: int = 20, win_thresh: Optiona
             wr = sum(1 for x in cand if x["win"]) / len(cand)
             fair_num += k * wr                             # 随机选k的期望命中数(与特征无关)
             cand.sort(key=vf, reverse=True)
-            for x in cand[:k]:
-                tot += 1
-                hit += int(x["win"])
-        prec = round(hit / tot, 4) if tot else None
+            tot += k
+            hit_hi += sum(int(x["win"]) for x in cand[:k])          # 取特征最大的 k 只
+            hit_lo += sum(int(x["win"]) for x in cand[-k:])         # 取特征最小的 k 只
         fair = round(fair_num / tot, 4) if tot else None    # ← 正确的对照(非全局基准率)
-        out_feats.append({"feature": f, "auc_pooled": _auc(pos, neg),
-                          "auc": (None if constant else _auc_within_day(by_day, vf)),
+        prec = prec_lo = lift = lift_lo = None
+        if tot and not constant:                           # 恒定特征的"精确率/增益"纯为并列排序假象,不出数
+            prec, prec_lo = round(hit_hi / tot, 4), round(hit_lo / tot, 4)
+            if fair is not None:
+                lift = round((prec - fair) * 100, 2)
+                lift_lo = round((prec_lo - fair) * 100, 2)
+        direction = None if auc is None else ("high" if auc >= 0.5 else "low")
+        edge = None if auc is None else round(abs(auc - 0.5), 4)
+        lift_eff = lift if direction != "low" else lift_lo
+        h1 = None if constant else _auc_within_day(halves[0], vf)
+        h2 = None if constant else _auc_within_day(halves[1], vf)
+        consistent = bool(auc is not None and h1 is not None and h2 is not None
+                          and (h1 - 0.5) * (auc - 0.5) > 0 and (h2 - 0.5) * (auc - 0.5) > 0)
+        out_feats.append({"feature": f, "auc_pooled": _auc(pos, neg), "auc": auc,
+                          "auc_edge": edge, "direction": direction,
                           "constant": constant, "n_pos": len(pos), "n_neg": len(neg),
-                          "precision_at_daily_top": prec, "fair_random_precision": fair, "picks": tot,
-                          "lift_pp": (round((prec - fair) * 100, 2) if prec is not None and fair is not None else None)})
-    out_feats.sort(key=lambda r: (r["auc"] if r["auc"] is not None else 0), reverse=True)
-    usable = [r for r in out_feats if not r["constant"] and r["auc"] is not None
-              and (r["auc"] - 0.5) >= 0.03 and (r["lift_pp"] or 0) >= 2]
-    best = out_feats[0] if out_feats else {}
-    verdict = ("**无判别力**:无任一特征同时满足 日内AUC≥0.53 且 相对公平随机基线 +2pp 以上 "
+                          "precision_at_daily_top": prec, "precision_at_daily_bottom": prec_lo,
+                          "fair_random_precision": fair, "picks": tot,
+                          "lift_pp": lift, "lift_pp_inverted": lift_lo, "lift_pp_effective": lift_eff,
+                          "auc_first_half": h1, "auc_second_half": h2, "split_consistent": consistent})
+    out_feats.sort(key=lambda r: (r["auc_edge"] if r["auc_edge"] is not None else -1), reverse=True)
+    usable = [r for r in out_feats if not r["constant"] and r["auc_edge"] is not None
+              and r["auc_edge"] >= 0.03 and (r["lift_pp_effective"] or 0) >= 2 and r["split_consistent"]]
+    # 仅通过 |AUC|/增益 但前后半程不同号 → 单独列出,避免当成结论(项目 §3 偏差警示:样本内挑特征极易过拟合)
+    unstable = [r for r in out_feats if not r["constant"] and r["auc_edge"] is not None
+                and r["auc_edge"] >= 0.03 and (r["lift_pp_effective"] or 0) >= 2 and not r["split_consistent"]]
+
+    def _dtxt(r):
+        return "取反(越小越会跑)" if r["direction"] == "low" else "同向(越大越会跑)"
+    verdict = ("**无判别力**:无任一特征同时满足 |日内AUC-0.5|≥0.03、有效方向净增益≥+2pp、前后半程同号 "
                "⇒ 信号当时无法把会跑的票挑出来"
                if not usable else
-               "弱可用候选: " + ", ".join(f"{r['feature']}(日内AUC {r['auc']}, {r['lift_pp']:+.1f}pp)"
-                                        for r in usable))
+               "弱可用候选(**仅样本内,未 OOS**): "
+               + ", ".join(f"{r['feature']}[{_dtxt(r)}](日内AUC {r['auc']}, "
+                           f"{r['lift_pp_effective']:+.1f}pp, 半程 {r['auc_first_half']}/{r['auc_second_half']})"
+                           for r in usable))
+    if unstable:
+        verdict += ("; ⚠️前后半程不同号(疑过拟合,不作结论): "
+                    + ", ".join(f"{r['feature']}({r['auc_first_half']}/{r['auc_second_half']})" for r in unstable))
     lines = [f"信号 {len(rows)} 个 | 标签:{'MFE' if use_mfe else '前向收益'}{horizon}日 >= {thr:+.2%}"
              f" (基准率 {base:.1%}; {'绝对阈值' if win_thresh is not None else '全体前%.0f%%分位' % (win_top_q*100)})",
              f"  右删失(信号日后不足{horizon}根被剔除) {n_censored} 个"
              + (" —— ⚠️占比高时样本偏早期信号,结论可能失真" if n_censored > len(rows) * 0.2 else ""),
              f"  全局基准率 {base:.1%}(仅参考);对照用**每日随机选top{picks_per_day}的公平期望**:",
-             f"    {'特征':<20} {'日内AUC':>8} {'全局AUC':>8} {'精确率':>8} {'公平随机':>8} {'净增益':>8}"]
+             f"    {'特征':<20} {'日内AUC':>8} {'全局AUC':>8} {'方向':>6} {'精确率':>8} {'公平随机':>8}"
+             f" {'净增益':>8} {'半程AUC':>13}"]
     for r in out_feats:
         tag = "  ⚠️恒定(门槛内零方差,无判别信息)" if r["constant"] else ""
-        lines.append(f"    {r['feature']:<20} {str(r['auc'] or '-'):>8} {str(r['auc_pooled'] or '-'):>8} "
-                     f"{(r['precision_at_daily_top'] or 0):>7.1%} {(r['fair_random_precision'] or 0):>8.1%} "
-                     f"{(r['lift_pp'] or 0):>+7.1f}pp{tag}")
+        if not r["constant"] and r["auc_edge"] is not None and r["auc_edge"] >= 0.03 and not r["split_consistent"]:
+            tag = "  ⚠️半程不同号"
+        pr = r["precision_at_daily_bottom"] if r["direction"] == "low" else r["precision_at_daily_top"]
+        lines.append(f"    {r['feature']:<20} {_fmt_num(r['auc']):>8} {_fmt_num(r['auc_pooled']):>8} "
+                     f"{('取反' if r['direction'] == 'low' else '同向' if r['direction'] else '-'):>6} "
+                     f"{_fmt_pct(pr):>8} {_fmt_pct(r['fair_random_precision']):>8} "
+                     f"{_fmt_pp(r['lift_pp_effective']):>8} "
+                     f"{_fmt_num(r['auc_first_half'])}/{_fmt_num(r['auc_second_half'])}{tag}")
     lines.append(f"  -> {verdict}")
     return {"n": len(rows), "n_censored": n_censored, "horizon": horizon, "use_mfe": use_mfe,
             "threshold": round(thr, 4), "base_rate": round(base, 4),
@@ -712,7 +771,8 @@ def _buffered_start(sorted_dates: list[str], start: str, buffer_days: int) -> st
 def main(argv=None, loader=None) -> int:
     ap = argparse.ArgumentParser(description="起涨点 vs 0AMV regime 研究")
     ap.add_argument("--data-source", choices=["tdx", "qlib", "csv"], default="qlib")
-    ap.add_argument("--s-data-root", default=r"E:\S_DATA")
+    ap.add_argument("--s-data-root", default=os.environ.get("S_DATA_ROOT") or r"E:\S_DATA",
+                    help=r"s_data 根目录;可用环境变量 S_DATA_ROOT 覆盖,默认 E:\S_DATA")
     ap.add_argument("--universe-sdata", action="store_true")
     ap.add_argument("--codes", default="")
     ap.add_argument("--start", default="")
@@ -761,8 +821,8 @@ def main(argv=None, loader=None) -> int:
                     help="赢家口径:universe=全域收益前top_pct%%(含下跌股);profitable=**盈利股内**前top_pct%%")
     ap.add_argument("--min-winner-ret", type=float, default=None,
                     help="赢家另加绝对收益门槛(如 0.5=至少+50%%);默认仅按 top_pct 排名(不看正负)")
-    ap.add_argument("--rank-score", choices=["reversal_quality", "reversal_quality_inv", "none"],
-                    default="reversal_quality", help="当日信号池内排序分(none=随机)")
+    ap.add_argument("--rank-score", choices=sorted(bt.SCORERS) + ["none"],
+                    default="reversal_quality", help="当日信号池内排序分(none=随机;全部 SCORERS 可选)")
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
 
@@ -923,7 +983,7 @@ def main(argv=None, loader=None) -> int:
         conc = sector_concentration(res["winners"], members, args.sector_index_dir, args.start, args.end,
                                     winner_rets=res.get("winner_rets"))
         res["sector_concentration"] = conc
-        print(f"\n=== 赢家板块集中度 / 板块共振 ===")
+        print("\n=== 赢家板块集中度 / 板块共振 ===")
         print(conc["text"])
     if args.out:
         import json

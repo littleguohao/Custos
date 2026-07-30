@@ -455,3 +455,54 @@ def test_kdj_j_at_and_launch_stats():
     assert st["n"] == 1 and L["j_at_launch"] < 30                      # 底部起涨,J 低
     assert L["j_at_launch"] == lp._kdj_j_at(df, L["idx"])              # 与 as-of 切片口径一致
     assert "起涨点 J 值" in res["text"]
+
+
+def test_inverse_predictor_not_killed():
+    """完美**反向**预测特征(越小越会跑)必须被识别为可用(取反方向),
+    且 AUC=0.0 不能因 `v or '-'` 的假零被渲染成缺失。"""
+    rows = []
+    for d in range(1, 21):
+        for j in range(10):
+            y = 1.0 if j < 3 else 0.0                    # 日内前3名会跑
+            rows.append((f"C{d}_{j}", f"2024-09-{d:02d}", y, {"inv": float(j)}))  # 特征越大越差
+    r = lp.discriminate_at_signal(_dis_recs(rows), horizon=20, win_thresh=0.5, picks_per_day=3)
+    f = {x["feature"]: x for x in r["features"]}["inv"]
+    assert f["auc"] == 0.0 and f["auc_edge"] == 0.5 and f["direction"] == "low"
+    assert f["precision_at_daily_top"] == 0.0            # 同向选=全错
+    assert f["precision_at_daily_bottom"] == 1.0         # 取反选=全对
+    assert f["lift_pp_effective"] > 20 and f["split_consistent"] is True
+    assert "无判别力" not in r["text"] and "取反" in r["text"]
+    assert " 0.0 " in r["text"].replace("\n", " ")       # AUC 0.0 真的印出来了,不是 '-'
+
+
+def test_split_inconsistent_marked_not_usable():
+    """前半程强正、后半程反向 → 即使全样本 AUC/增益达标,也只能标'疑过拟合',不进弱可用。"""
+    rows = []
+    for d in range(1, 21):                                # 前半程:特征越大越会跑(AUC=1)
+        for j in range(10):
+            rows.append((f"A{d}_{j}", f"2024-09-{d:02d}", 1.0 if j < 3 else 0.0, {"flip": -float(j)}))
+    for d in range(1, 21):                                # 后半程:反向(AUC<0.5)
+        for j in range(10):
+            win = j < 3
+            feat = 0.4 if win else (0.3 if j < 6 else 0.5)
+            rows.append((f"B{d}_{j}", f"2024-10-{d:02d}", 1.0 if win else 0.0, {"flip": feat}))
+    r = lp.discriminate_at_signal(_dis_recs(rows), horizon=20, win_thresh=0.5, picks_per_day=3)
+    f = {x["feature"]: x for x in r["features"]}["flip"]
+    assert f["auc"] > 0.53 and (f["lift_pp_effective"] or 0) >= 2   # 全样本口径达标
+    assert f["auc_first_half"] > 0.5 > f["auc_second_half"]
+    assert f["split_consistent"] is False
+    assert "疑过拟合" in r["text"] and "半程不同号" in r["text"]
+
+
+def test_usable_verdict_marks_in_sample_only():
+    """真特征进弱可用时,文案必须显式标注'仅样本内,未 OOS'(防止被当成实盘结论)。"""
+    rows = []
+    for d in range(1, 41):
+        for j in range(8):
+            y = 1.0 if j < 2 else 0.0
+            rows.append((f"C{d}_{j}", f"2024-{9 if d <= 20 else 10}-{(d - 1) % 20 + 1:02d}",
+                         y, {"real": 10.0 - j}))
+    r = lp.discriminate_at_signal(_dis_recs(rows), horizon=20, win_thresh=0.5, picks_per_day=2)
+    f = {x["feature"]: x for x in r["features"]}["real"]
+    assert f["direction"] == "high" and f["split_consistent"] is True
+    assert "弱可用候选" in r["text"] and "仅样本内" in r["text"]
