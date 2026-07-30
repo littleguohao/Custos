@@ -503,34 +503,61 @@ def long_regime_windows(regime: dict[str, str], min_days: int = 20,
 
 def bear_to_long_pairs(regime: dict[str, str], min_bear_days: int = 10,
                        min_long_days: int = 20,
-                       include_long_head_days: int = 0) -> list[dict[str, Any]]:
+                       include_long_head_days: int = 0,
+                       signal_span: str = "adjacent") -> list[dict[str, Any]]:
     """把每个**空头段**与其紧随的**做多段**配对 → 研究"在空头就识别出未来赢家"。
 
     依据结论#11:赢家的系统可选起涨点 **73% 落在空头**(中位领先做多 12 个交易日),
     所以"能否在买点当时认出赢家"这个问题的**信号窗口必须是空头段**,而赢家口径要用
     **随后那段多头的收益**来定(涨得好是在多头段发生的)。两窗解耦后:
-      signal_window = 空头段(可选再纳入做多段头部 include_long_head_days 天,覆盖那 27% 落在做多的起涨点)
-      label_window  = 紧随的做多段(赢家=该段盈利前 top%)
-    返回 [{signal_start, signal_end, label_start, label_end, bear_days, long_days}]。
+      signal_window = 空头段(可选再纳入做多段头部 include_long_head_days 天)
+      label_window  = **时间上紧邻其后的**做多段(赢家=该段盈利前 top%)
+
+    两个必须防的口径错(2026-07-30 首轮枚举实际踩到):
+    1. **跨年配对**:后继做多段必须取 regime 时间轴上**紧邻的下一段做多**;若它短于
+       min_long_days 则该空头段**直接丢弃**,绝不能跳过它去接更晚的长段——否则会出现
+       "2015-04 的 17 日空头 → 2016-06 的做多段"这种隔一年、中间夹了好几轮 regime 的无效配对。
+    2. **伪独立窗口**:多个空头段(被中性段隔开)会指向同一个做多段。跨窗一致性判定按窗计票,
+       同一段行情被计多次会虚高一致性(§3 窗口敏感)。故**每个 label 窗只保留一对**:
+       signal_span="adjacent"(默认)取紧邻该做多段的那个空头段;
+       signal_span="since-prev-long" 则把信号窗前伸到**上一个做多段结束之后**(覆盖整段下跌+筑底的
+       建仓期,含中间的中性段),更贴近"建仓期"语义但信号数更多、噪声也更多。
+    ⚠️ include_long_head_days>0 时,落在做多段头部的信号其 label(整段做多收益)**包含信号之前
+       已经发生的那几天涨幅** → 对动量类特征造成顺向污染。主结论应以 0 为准,带头部的当敏感性对照。
     """
     dates = sorted(regime)
     idx = {d: i for i, d in enumerate(dates)}
     bears = long_regime_windows(regime, min_days=min_bear_days, state="空头")
-    longs = long_regime_windows(regime, min_days=min_long_days, state="做多")
-    out: list[dict[str, Any]] = []
+    longs_all = long_regime_windows(regime, min_days=1, state="做多")     # 不过滤:用于找"紧邻的下一段"
+    prev_long_end: dict[str, str] = {}
+    out: dict[str, dict[str, Any]] = {}                                  # key=label 窗 → 每窗只留一对
     for b_start, b_end, b_days in bears:
-        nxt = next(((a, z, n) for a, z, n in longs if idx[a] > idx[b_end]), None)
-        if nxt is None:                                   # 右删失:最后一段空头之后还没出现做多段
-            continue
+        nxt = next(((a, z, n) for a, z, n in longs_all if idx[a] > idx[b_end]), None)
+        if nxt is None:
+            continue                                                     # 右删失:此后再无做多段
         l_start, l_end, l_days = nxt
+        if l_days < min_long_days:
+            continue                                                     # 紧邻做多段太短 → 丢弃,不跨接
+        sig_start = b_start
+        if signal_span == "since-prev-long":
+            prior = [z for a, z, _ in longs_all if idx[z] < idx[b_start]]
+            if prior:
+                sig_start = dates[min(idx[max(prior)] + 1, idx[b_start])]
         sig_end = b_end
         if include_long_head_days > 0:
             j = min(idx[l_start] + include_long_head_days - 1, idx[l_end])
             sig_end = dates[j]
-        out.append({"signal_start": b_start, "signal_end": sig_end,
-                    "label_start": l_start, "label_end": l_end,
-                    "bear_days": b_days, "long_days": l_days})
-    return out
+        key = f"{l_start}~{l_end}"
+        cand = {"signal_start": sig_start, "signal_end": sig_end,
+                "label_start": l_start, "label_end": l_end,
+                "bear_days": b_days, "long_days": l_days,
+                "signal_days": idx[sig_end] - idx[sig_start] + 1}
+        old = out.get(key)
+        # 同一 label 窗多个候选 → 留**最贴近该做多段**的那个空头段(起点最晚),避免伪独立重复计票
+        if old is None or idx[cand["signal_start"]] > idx[old["signal_start"]]:
+            out[key] = cand
+        prev_long_end[key] = l_end
+    return sorted(out.values(), key=lambda p: p["signal_start"])
 
 
 def _median(vals: list) -> Optional[float]:
@@ -1001,7 +1028,11 @@ def main(argv=None, loader=None) -> int:
     ap.add_argument("--min-bear-days", type=int, default=10,
                     help="空头(信号)区间最短交易日数")
     ap.add_argument("--include-long-head-days", type=int, default=0,
-                    help="信号窗额外纳入做多段头部 N 个交易日(覆盖那~27%% 落在做多的起涨点)")
+                    help="信号窗额外纳入做多段头部 N 个交易日(覆盖那~27%% 落在做多的起涨点);"
+                         "⚠️会让这些信号的 label 含信号前已发生涨幅,主结论请用 0")
+    ap.add_argument("--signal-span", choices=["adjacent", "since-prev-long"], default="adjacent",
+                    help="信号窗口径:adjacent=紧邻赢家窗的那个空头段(默认);"
+                         "since-prev-long=上一段做多结束后至空头段末(整段建仓期,含中性段)")
     ap.add_argument("--ret-start", default="",
                     help="Pass1:赢家口径窗口起点(与信号窗解耦;空头段采信号+做多段定赢家时用)")
     ap.add_argument("--ret-end", default="",
@@ -1033,13 +1064,19 @@ def main(argv=None, loader=None) -> int:
         if args.list_window_pairs:
             pairs = bear_to_long_pairs(regime, min_bear_days=args.min_bear_days,
                                        min_long_days=args.min_window_days,
-                                       include_long_head_days=args.include_long_head_days)
-            print(f"\n=== 空头(信号窗) → 随后做多段(赢家窗) 配对，共 {len(pairs)} 对 ===")
+                                       include_long_head_days=args.include_long_head_days,
+                                       signal_span=args.signal_span)
+            print(f"\n=== 空头(信号窗) → 紧邻做多段(赢家窗) 配对，共 {len(pairs)} 对（每个赢家窗只留一对）===")
             print("   建仓点多在空头(结论#11:73%),故信号在空头段采;'涨得好'发生在随后多头段,故赢家按多头段收益定。")
+            print(f"   信号窗口径 signal_span={args.signal_span}"
+                  + ("(空头段本身)" if args.signal_span == "adjacent" else "(上一段做多结束后至空头段末)"))
+            if args.include_long_head_days:
+                print(f"   ⚠️ 已纳入做多段头部 {args.include_long_head_days} 日:这些信号的 label 含信号之前"
+                      "已发生的涨幅,对动量类特征顺向污染 → 主结论请用 0,本次仅作敏感性对照")
             for p in pairs:
-                print(f"  信号 {p['signal_start']} ~ {p['signal_end']} ({p['bear_days']}日空头"
-                      + (f"+{args.include_long_head_days}日多头头部" if args.include_long_head_days else "")
-                      + f")  →  赢家窗 {p['label_start']} ~ {p['label_end']} ({p['long_days']}日)")
+                print(f"  信号 {p['signal_start']} ~ {p['signal_end']} ({p['signal_days']}日"
+                      f"; 空头段 {p['bear_days']}日)  →  赢家窗 {p['label_start']} ~ {p['label_end']}"
+                      f" ({p['long_days']}日)")
             if args.out:
                 import json as _jp
                 Path(args.out).write_text(_jp.dumps({"window_pairs": pairs}, ensure_ascii=False, indent=2),

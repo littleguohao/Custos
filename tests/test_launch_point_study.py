@@ -540,7 +540,56 @@ def test_bear_to_long_pairs_pairs_signal_and_label_windows():
     p = pairs[0]
     assert (p["signal_start"], p["signal_end"]) == (d[0], d[14])
     assert (p["label_start"], p["label_end"]) == (d[15], d[34])
-    assert p["bear_days"] == 15 and p["long_days"] == 20
+    assert p["bear_days"] == 15 and p["long_days"] == 20 and p["signal_days"] == 15
+
+
+def test_bear_to_long_pairs_never_bridges_across_a_short_long_segment():
+    """回归:紧邻的做多段若短于 min_long_days,该空头段直接丢弃,**不得**跨接到更晚的长段。
+
+    2026-07-30 首轮枚举实际踩到:2015-04 的 17 日空头被接到 2016-06 的做多段(隔一年)。
+    """
+    d = _bdays(120)
+    regime = _regime(d, ["空头"] * 20            # 0-19   信号候选
+                        + ["做多"] * 5           # 20-24  太短(<15)
+                        + ["中性"] * 30          # 25-54
+                        + ["空头"] * 20          # 55-74  这段才该配对
+                        + ["做多"] * 25          # 75-99
+                        + ["中性"] * 20)         # 100-119
+    pairs = lp.bear_to_long_pairs(regime, min_bear_days=10, min_long_days=15)
+    assert len(pairs) == 1, "紧邻做多段太短应丢弃,而非跨年接到后面的长段"
+    assert pairs[0]["signal_start"] == d[55] and pairs[0]["label_start"] == d[75]
+
+
+def test_bear_to_long_pairs_dedupes_per_label_window():
+    """回归:被中性段隔开的多个空头段会指向同一个做多段 → 每个赢家窗只保留一对(取最贴近的)。
+
+    否则同一段行情在跨窗一致性判定里被计多次,一致性虚高(§3 窗口敏感)。
+    """
+    d = _bdays(120)
+    regime = _regime(d, ["空头"] * 15            # 0-14
+                        + ["中性"] * 10          # 15-24
+                        + ["空头"] * 15          # 25-39  最贴近做多段
+                        + ["做多"] * 25          # 40-64
+                        + ["中性"] * 55)
+    pairs = lp.bear_to_long_pairs(regime, min_bear_days=10, min_long_days=15)
+    assert len(pairs) == 1
+    assert pairs[0]["signal_start"] == d[25] and pairs[0]["label_start"] == d[40]
+
+
+def test_signal_span_since_prev_long_extends_back_over_neutral():
+    """since-prev-long:信号窗前伸到上一段做多结束之后,覆盖整段下跌+筑底的建仓期。"""
+    d = _bdays(120)
+    regime = _regime(d, ["做多"] * 10            # 0-9   上一段做多
+                        + ["中性"] * 20          # 10-29
+                        + ["空头"] * 15          # 30-44
+                        + ["做多"] * 25          # 45-69
+                        + ["中性"] * 50)
+    adj = lp.bear_to_long_pairs(regime, min_bear_days=10, min_long_days=15)[0]
+    ext = lp.bear_to_long_pairs(regime, min_bear_days=10, min_long_days=15,
+                                signal_span="since-prev-long")[0]
+    assert adj["signal_start"] == d[30] and adj["signal_days"] == 15
+    assert ext["signal_start"] == d[10] and ext["signal_days"] == 35    # 含中性段
+    assert ext["label_start"] == adj["label_start"] == d[45]
 
 
 def test_bear_to_long_pairs_can_include_long_head():
@@ -676,7 +725,8 @@ def test_main_list_window_pairs(tmp_path, monkeypatch, capsys):
                   "--out", str(out)])
     assert rc == 0
     txt = capsys.readouterr().out
-    assert "空头(信号窗) → 随后做多段(赢家窗)" in txt and "结论#11" in txt
+    assert "空头(信号窗) → 紧邻做多段(赢家窗)" in txt and "结论#11" in txt
+    assert "每个赢家窗只留一对" in txt and "signal_span=adjacent" in txt
     p = json.loads(out.read_text(encoding="utf-8"))["window_pairs"][0]
     assert p["signal_end"] == d[14] and p["label_start"] == d[15]
 

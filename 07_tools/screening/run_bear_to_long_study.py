@@ -1,0 +1,196 @@
+# -*- coding: utf-8 -*-
+"""驱动"空头段识别未来赢家"研究:枚举窗口对 → 逐对跑 Pass1 → 跨窗 Pass2 汇总。
+
+为什么要驱动脚本:窗口对有十几个,手抄十几条 Pass1 命令易错;且 Pass1 耗时长,中途失败必须能
+**断点续跑**(已有 firings 文件默认跳过)。所有实际计算仍在 launch_point_study.py 里,本脚本只编排。
+
+数据可用性护栏(依据 B1_BACKTEST_FINDINGS §3 s_data 特性):
+  - qlib 两个 bundle 间缺口 2020-09-28→2021-07-30:任何与之相交的窗口对**必须剔除**;
+  - 数据止于 2026-02-06:赢家窗超出即剔除(否则赢家收益按残缺区间算)。
+
+用法(先看计划,不跑):
+  uv run python 07_tools/screening/run_bear_to_long_study.py --dry-run
+真跑:
+  uv run python 07_tools/screening/run_bear_to_long_study.py --out-dir 06_logs/bear2long
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+TOOLS = Path(__file__).resolve().parents[1]
+for _p in (str(TOOLS), str(TOOLS / "screening")):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+from paths import BASE  # noqa: E402
+
+import backtest_factors as bt  # noqa: E402
+import launch_point_study as lp  # noqa: E402
+
+STUDY = TOOLS / "screening" / "launch_point_study.py"
+QLIB_GAP = ("2020-09-28", "2021-07-30")     # 两 bundle 之间无数据
+QLIB_END = "2026-02-06"                     # qlib 数据末尾
+DEFAULT_FEATURES = ("reversal_quality,momentum,low_vol,alpha101,alpha_pvcorr,"
+                    "kdj_j,s_shape,b1_pullback,invert_s_shape,s_reversal")
+
+
+def overlaps_gap(start: str, end: str, gap: tuple[str, str] = QLIB_GAP) -> bool:
+    """窗口 [start,end] 是否与数据缺口相交(相交即整对剔除)。"""
+    return not (end < gap[0] or start > gap[1])
+
+
+def usable_pairs(pairs: list[dict], qlib_end: str = QLIB_END,
+                 gap: tuple[str, str] = QLIB_GAP) -> tuple[list[dict], list[dict]]:
+    """按数据可用性切分 (可用, 剔除并附 reason)。信号窗与赢家窗都要过护栏。"""
+    keep, drop = [], []
+    for p in pairs:
+        if overlaps_gap(p["signal_start"], p["signal_end"], gap):
+            drop.append({**p, "reason": f"信号窗跨 qlib 缺口 {gap[0]}~{gap[1]}"})
+        elif overlaps_gap(p["label_start"], p["label_end"], gap):
+            drop.append({**p, "reason": f"赢家窗跨 qlib 缺口 {gap[0]}~{gap[1]}"})
+        elif p["label_end"] > qlib_end:
+            drop.append({**p, "reason": f"赢家窗超出 qlib 数据末尾 {qlib_end}"})
+        else:
+            keep.append(p)
+    return keep, drop
+
+
+def pass1_cmd(p: dict, out_file: Path, args) -> list[str]:
+    """单对窗口的 Pass1 命令:信号窗 [signal_*] / 赢家窗 [label_*] 解耦 + 退市股按大亏计入。"""
+    cmd = [sys.executable, str(STUDY),
+           "--data-source", args.data_source, "--universe-sdata",
+           "--s-data-root", args.s_data_root,
+           "--entry-filter", args.entry_filter,
+           "--start", p["signal_start"], "--end", p["signal_end"],
+           "--ret-start", p["label_start"], "--ret-end", p["label_end"],
+           "--delisted-ret", str(args.delisted_ret),
+           "--buffer-days", str(args.buffer_days),
+           "--gate-window", str(args.gate_window),
+           "--feature-scores", args.feature_scores,
+           "--rank-score", "none",
+           "--emit-firings", str(out_file),
+           "--progress", str(args.progress)]
+    if args.sector_features:
+        cmd.append("--sector-features")
+    if args.chunk_size:
+        cmd += ["--chunk-size", str(args.chunk_size)]
+    return cmd
+
+
+def pass2_cmd(files: list[Path], out_file: Path, args) -> list[str]:
+    """跨窗 Pass2:每个 firings 文件=一对窗口,分窗判别 + 汇总共同点(极廉价,可反复换口径重算)。"""
+    return [sys.executable, str(STUDY),
+            "--from-firings", ",".join(str(f) for f in files),
+            "--discriminate", "--per-window", "--label-basis", "winner",
+            "--winner-basis", args.winner_basis,
+            "--capture-top-pct", str(args.winner_top_pct),
+            "--picks-per-day", str(args.picks_per_day),
+            "--out", str(out_file)]
+
+
+def tag_of(p: dict) -> str:
+    return f"{p['signal_start']}_{p['signal_end']}__L{p['label_start']}_{p['label_end']}"
+
+
+def main(argv=None, runner=None) -> int:
+    ap = argparse.ArgumentParser(description="空头段识别未来赢家:窗口枚举 → Pass1 逐对 → Pass2 汇总")
+    ap.add_argument("--out-dir", default="06_logs/bear2long")
+    ap.add_argument("--pairs-file", default="", help="复用已有窗口对 JSON(缺省则现算)")
+    ap.add_argument("--min-bear-days", type=int, default=10)
+    ap.add_argument("--min-long-days", type=int, default=20)
+    ap.add_argument("--include-long-head-days", type=int, default=0,
+                    help="⚠️>0 会让做多段头部信号的 label 含信号前涨幅,主结论用 0")
+    ap.add_argument("--signal-span", choices=["adjacent", "since-prev-long"], default="adjacent")
+    ap.add_argument("--regime-since", default="2015-01-01")
+    ap.add_argument("--entry-filter", default="reversal_k")
+    ap.add_argument("--feature-scores", default=DEFAULT_FEATURES)
+    ap.add_argument("--sector-features", action="store_true")
+    ap.add_argument("--data-source", choices=["qlib", "csv"], default="qlib")
+    ap.add_argument("--s-data-root", default=lp.os.environ.get("S_DATA_ROOT") or r"E:\S_DATA")
+    ap.add_argument("--delisted-ret", type=float, default=-1.0)
+    ap.add_argument("--buffer-days", type=int, default=60)
+    ap.add_argument("--gate-window", type=int, default=120)
+    ap.add_argument("--chunk-size", type=int, default=0)
+    ap.add_argument("--progress", type=int, default=200)
+    ap.add_argument("--winner-top-pct", type=float, default=50.0)
+    ap.add_argument("--winner-basis", choices=["universe", "profitable"], default="profitable")
+    ap.add_argument("--picks-per-day", type=int, default=3)
+    ap.add_argument("--qlib-end", default=QLIB_END)
+    ap.add_argument("--dry-run", action="store_true", help="只打印计划与命令,不执行")
+    ap.add_argument("--force", action="store_true", help="已有 firings 也重跑(默认跳过=断点续跑)")
+    ap.add_argument("--pass2-only", action="store_true", help="只做 Pass2 汇总(firings 已就绪)")
+    args = ap.parse_args(argv)
+    run = runner or (lambda cmd: subprocess.run(cmd, check=False).returncode)
+
+    out_dir = Path(args.out_dir)
+    if not out_dir.is_absolute():
+        out_dir = BASE / out_dir
+    if args.pairs_file:
+        pairs = json.loads(Path(args.pairs_file).read_text(encoding="utf-8"))["window_pairs"]
+    else:
+        regime = bt.load_amv_regime(since=args.regime_since)
+        if not regime:
+            print("[ERR] 0AMV regime 为空(指南针数据不可用),无法枚举窗口", file=sys.stderr)
+            return 2
+        pairs = lp.bear_to_long_pairs(regime, min_bear_days=args.min_bear_days,
+                                      min_long_days=args.min_long_days,
+                                      include_long_head_days=args.include_long_head_days,
+                                      signal_span=args.signal_span)
+    keep, drop = usable_pairs(pairs, qlib_end=args.qlib_end)
+
+    print(f"=== 窗口对:{len(pairs)} 对枚举 → {len(keep)} 对可用 / {len(drop)} 对剔除 ===")
+    for p in keep:
+        print(f"  [跑] 信号 {p['signal_start']}~{p['signal_end']} ({p.get('signal_days','?')}日)"
+              f" → 赢家 {p['label_start']}~{p['label_end']} ({p['long_days']}日)")
+    for p in drop:
+        print(f"  [剔] 信号 {p['signal_start']}~{p['signal_end']} → 赢家 "
+              f"{p['label_start']}~{p['label_end']}  ({p['reason']})")
+    if not keep:
+        print("[ERR] 无可用窗口对", file=sys.stderr)
+        return 2
+    if len(keep) < 4:
+        print(f"[WARN] 仅 {len(keep)} 个独立窗口,跨窗一致性判定统计力很弱(结论只能当探索)",
+              file=sys.stderr)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    files: list[Path] = []
+    rc_all = 0
+    for p in keep:
+        f = out_dir / f"firings_{tag_of(p)}.json"
+        files.append(f)
+        if args.pass2_only:
+            continue
+        if f.exists() and not args.force:
+            print(f"[skip] 已存在,跳过(--force 可重跑): {f.name}")
+            continue
+        cmd = pass1_cmd(p, f, args)
+        print("\n[pass1] " + " ".join(cmd))
+        if args.dry_run:
+            continue
+        rc = run(cmd)
+        if rc != 0:
+            print(f"[ERR] Pass1 失败 rc={rc}: {f.name}(其余窗口继续;修好后重跑本脚本即续)",
+                  file=sys.stderr)
+            rc_all = 1
+            files.pop()
+
+    ready = [f for f in files if f.exists() or args.dry_run]
+    if not ready:
+        print("[ERR] 无可用 firings,跳过 Pass2", file=sys.stderr)
+        return rc_all or 2
+    agg_out = out_dir / "discriminate_bear_to_long.json"
+    cmd2 = pass2_cmd(ready, agg_out, args)
+    print("\n[pass2] " + " ".join(cmd2))
+    if args.dry_run:
+        return 0
+    rc2 = run(cmd2)
+    print(f"\n汇总输出:{agg_out}")
+    return rc_all or rc2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
