@@ -20,6 +20,12 @@ if str(Path(__file__).resolve().parent) not in sys.path:
 
 import tq_sector  # noqa: E402  复用其 TdxW 探测 + tqcenter 惰性导入
 
+# TQ 的周期串是 "1d"(探针 00_governance/TQ_INTERFACE_PROBE_2026-07-20.md:67:缺省或写错报
+# ErrorId=5 periodstr error)。此前默认 "day" → 400+ 板块逐个报错、日复一日刷不到数据。
+# 保留候选串按序探测,避免不同 TQ 版本命名差异再把整条链打死。
+PERIOD_CANDIDATES = ("1d", "day", "1day", "1440m")
+OVERLAP_DAYS = 30                       # 增量刷新时向前重叠的日历日(容忍补数/除权修正)
+
 
 def _to_close_frame(d, code):
     """get_market_data 返回归一为 [date, close]。兼容 dict{code:df/series} 或直接 df。
@@ -42,11 +48,74 @@ def _to_close_frame(d, code):
     return out if len(out) else None
 
 
+def merge_close_frame(existing_path: Path, new_frame):
+    """把新抓到的 [date,close] 并入已有 CSV（按 date 去重，新值优先，升序）。
+
+    增量刷新必须**合并**而不是覆写:每天只拉最近一段就直接写盘会把回测所需的
+    2018 年以来深度截断成几十根,板块相位回测随之失真。
+    """
+    import pandas as pd
+    if new_frame is None or not len(new_frame):
+        return None
+    if existing_path.is_file():
+        try:
+            old = pd.read_csv(existing_path, dtype={"date": str})
+            if {"date", "close"}.issubset(old.columns):
+                new_frame = pd.concat([old[["date", "close"]], new_frame], ignore_index=True)
+        except (OSError, ValueError):
+            pass
+    out = (new_frame.dropna(subset=["date"])
+           .drop_duplicates(subset=["date"], keep="last")
+           .sort_values("date").reset_index(drop=True))
+    return out if len(out) else None
+
+
+def incremental_start(existing_path: Path, floor: str, overlap_days: int = OVERLAP_DAYS) -> str:
+    """增量起点 = 已有 CSV 最后日期 - overlap_days(取不早于 floor);无缓存则用 floor。"""
+    from datetime import date as _d, timedelta as _td
+    if not existing_path.is_file():
+        return floor
+    try:
+        import pandas as pd
+        old = pd.read_csv(existing_path, dtype={"date": str})
+        last = str(old["date"].dropna().iloc[-1])[:10]
+        start = (_d.fromisoformat(last) - _td(days=overlap_days)).strftime("%Y%m%d")
+    except (OSError, ValueError, KeyError, IndexError):
+        return floor
+    return max(start, floor)
+
+
+def resolve_period(tq, probe_code: str, start: str, wanted: str = "") -> tuple[str, str]:
+    """探测可用周期串 → (period, note)。全部失败返回 ("", 原因)。
+
+    只在**第一个板块**上试,避免 400+ 板块各自反复失败(此前 --period day 时就是这样,
+    整个 stage 只输出一堆 WARN 后超时)。
+    """
+    cands = ([wanted] if wanted else []) + [p for p in PERIOD_CANDIDATES if p != wanted]
+    errs = []
+    for p in cands:
+        try:
+            tq.refresh_kline([probe_code], period=p)
+            d = tq.get_market_data(field_list=["Close"], stock_list=[probe_code],
+                                   period=p, start_time=start, count=-1)
+            if _to_close_frame(d, probe_code) is not None:
+                return p, f"period={p}"
+        except Exception as exc:  # noqa: BLE001
+            errs.append(f"{p}:{exc}")
+            continue
+        errs.append(f"{p}:空数据")
+    return "", "; ".join(errs)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="抓取通达信板块指数(880xxx)收盘历史→CSV缓存")
     ap.add_argument("--out", default=str(TOOLS.parent / "01_data" / "market" / "sector_index"))
     ap.add_argument("--start", default="20180101", help="起始日 YYYYMMDD(TQ 会给到本地实有最早)")
-    ap.add_argument("--period", default="day")
+    ap.add_argument("--period", default="", help=f"周期串(缺省自动探测: {', '.join(PERIOD_CANDIDATES)})")
+    ap.add_argument("--incremental", action="store_true",
+                    help="只拉每个板块缓存末日期前 %d 天起的增量并**合并**进已有 CSV(日常刷新用;"
+                         "不加则按 --start 全量重拉)" % OVERLAP_DAYS)
+    ap.add_argument("--limit", type=int, default=0, help="只处理前 N 个板块(排障用)")
     ap.add_argument("--members", action="store_true",
                     help="同时抓板块成员(get_stock_list_in_sector)→ sector_members.json(板块相位 gate 需要)")
     args = ap.parse_args(argv)
@@ -63,18 +132,35 @@ def main(argv=None) -> int:
     members: dict = {}
     try:
         sectors = tq.get_sector_list() or []
+        if args.limit:
+            sectors = sectors[:args.limit]
         total = len(sectors)
         print(f"[INFO] 板块数: {total}")
+        if not sectors:
+            print("[ERR] TQ 未返回板块列表")
+            return 2
+        period, note = resolve_period(tq, sectors[0], args.start, args.period)
+        if not period:
+            # 快速失败:周期串不被接受时不再逐个板块重试(此前 --period day 会刷 400 条 WARN 后超时)
+            print(f"[ERR] 无可用周期串(试过 {', '.join(PERIOD_CANDIDATES)}):{note}", file=sys.stderr)
+            print("[ERR] TQ 周期串约定见 00_governance/TQ_INTERFACE_PROBE_2026-07-20.md(日线应为 1d)")
+            return 2
+        print(f"[INFO] 使用周期 {period}{'(自动探测)' if not args.period else ''}"
+              f"{'; 增量合并模式' if args.incremental else '; 全量重拉'}")
         for i, code in enumerate(sectors):
             try:
-                tq.refresh_kline([code], period=args.period)
+                dest = outdir / f"{code}.csv"
+                start = incremental_start(dest, args.start) if args.incremental else args.start
+                tq.refresh_kline([code], period=period)
                 d = tq.get_market_data(field_list=["Close"], stock_list=[code],
-                                       period=args.period, start_time=args.start, count=-1)
+                                       period=period, start_time=start, count=-1)
                 frame = _to_close_frame(d, code)
+                if args.incremental:
+                    frame = merge_close_frame(dest, frame)
                 if frame is not None:
                     tmp = outdir / f"{code}.csv.tmp"
                     frame.to_csv(tmp, index=False)
-                    tmp.replace(outdir / f"{code}.csv")   # 原子落盘:防中断留下截断 CSV(陈旧相位假象)
+                    tmp.replace(dest)   # 原子落盘:防中断留下截断 CSV(陈旧相位假象)
                     ok += 1
                 if args.members:
                     try:
