@@ -34,3 +34,13 @@ __pycache__/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# AI session exports (hundreds of MB, may contain account/holdings content)
+/chat*.json
+*.session.json
+*-session-export*.json
+
+# Coverage artifacts
+.coverage
+coverage.xml
+htmlcov/

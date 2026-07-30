@@ -34,6 +34,8 @@ uv sync
 
 1. **通达信路径**：设置环境变量 `TDX_ROOT` 指向通达信安装目录（默认 `E:\new_tdx64`），脚本通过 `os.environ.get("TDX_ROOT", ...)` 读取
 
+2. **研究数据根目录**：环境变量 `S_DATA_ROOT` 指向含 `Q_DATA/CSV_DATA` 的 qlib/CSV 数据根（默认 `E:\S_DATA`）；`s_data.py`、`backtest_factors.py --s-data-root`、`launch_point_study.py --s-data-root` 均以它为默认值，便于在非 Windows 环境跑回测/walk-forward
+
 2. **持仓数据**：在 `01_data/trades/` 下维护：
    - `master_trade_ledger.csv` — 全量交易主台账
    - `current_positions.json` — 当前持仓快照
@@ -88,18 +90,25 @@ strategy_team/
 │   ├── screening/                   # 每日选股链（公式初筛→充实→打分→表格）
 │   ├── trades/                      # 交易台账维护
 │   └── local_tdx/                   # mootdx 封装
-└── tests/                  # 独立测试目录（pytest）
+└── tests/                  # 独立测试目录（pytest，59 个测试文件，670 passed）
     ├── conftest.py                  # sys.path + 导入设置
     ├── test_base_path_depth.py      # BASE 路径深度防回归
-    ├── test_b1_holding_state.py     # B1 持仓状态
-    ├── test_close_review.py         # 尾盘复盘
-    ├── test_final_review_validator.py # 复盘校验器
-    ├── test_holding_structure.py    # 持仓结构
-    ├── test_review_enrichment.py    # 复盘增补
-    ├── test_rss_filter.py           # RSS 过滤
-    ├── test_runtime_guards.py       # 运行门控
-    ├── test_technical_monitor.py    # 技术监控
-    └── test_trading_calendar.py     # 交易日历
+    ├── test_run_0850.py / test_run_0905.py / test_run_1445.py / test_run_1700.py  # 四个时点 runner
+    ├── test_runners_smoke.py        # runner 冒烟
+    ├── test_runtime_guards.py       # 运行门控（含 as_of 陈旧判定）
+    ├── test_feishu_report_publisher.py  # 报告投递（摘要提取 / HTTP / 门控阻断 / 半成功）
+    ├── test_close_review.py / test_final_review_validator.py / test_review_enrichment.py
+    ├── test_b1_holding_state.py / test_amv_state.py / test_technical_monitor.py
+    ├── test_backtest_factors.py / test_launch_point_study.py / test_s_data.py  # 研究链
+    ├── test_score_candidates.py / test_enrich_b1cz.py / test_candidate_table.py  # 选股链
+    └── ...                          # 其余见 `ls tests/`；全量执行 `uv run pytest -q`
+```
+
+### 运行测试
+
+```bash
+uv run pytest -q                    # 全量
+uv run pytest tests/test_run_1445.py -q   # 单文件
 ```
 
 ## 日常运行
@@ -178,14 +187,28 @@ uv run python 07_tools/run_1800.py
 - 交易日历
 - 持仓新鲜度
 - 技术数据新鲜度
-- 市场质量（0AMV、宽度、成交额）
+- 市场质量（0AMV、宽度、成交额；**按 `as_of` 判定新鲜度**，当日文件里装 T-1 数据同样记 `stale`）
 - 持仓行情是否当日
+
+门控必须能**真正阻断**，而非只写 JSON。退出码：
+
+| 退出码 | 触发条件 | 启用开关 |
+|---|---|---|
+| 0 | 通过 | — |
+| 3 | 非交易日 | `--require-trading-day` |
+| 4 | `market_quality=blocked` | `--require-quality` |
+| 5 | `position_gate=blocked` | `--require-position-gate` |
+
+- **17:00 盘后链**（`daily_pipeline --session-type postclose`）启用 `--require-quality`：此时盘后指标都应到位，blocked 说明核心数据大面积缺失/陈旧，硬失败优于产出"看起来正常"的垃圾报告。
+- **09:05 / 14:45 不启用**：0AMV 与市场宽度本就要等收盘，盘中 blocked 属正常；14:45 改为把门控结论写进 `06_logs/{date}_1445_run_log.json`（`_gate_note`）留痕并降低报告内的权限文案。
+- **投递侧**：`feishu_report_publisher.py --require-gate` 在投递前复核门控，非交易日或 `market_quality=blocked` 时拒发并 `exit 4`。
+- **08:50 采集**：任一 stage 失败 → run log 写 `status="degraded"` 并列出失败项；09:05 按 **discovery stage 逐项 ok** 决定是否复用（`overseas`/`rss_collect`/`rss_filter` 任一失败即重采），不再只看 `status=="completed"`。
 
 ## OpenClaw Cron 配置
 
 如果使用 OpenClaw 作为运行时，cron job 配置如下（以 `state/openclaw.sqlite` 的 `cron_jobs` 表为准）：
 
-> 报告投递：三个报告 job（0905/1445/1700）统一由 `07_tools/feishu_report_publisher.py` 完成——聊天发执行摘要（≤800 字）+ 完整报告 md 文件附件，不再经 LLM message 工具。凭据从环境变量或 `OPENCLAW_CONFIG` 读取。
+> 报告投递：三个报告 job（0905/1445/1700）统一由 `07_tools/feishu_report_publisher.py` 完成——聊天发执行摘要（≤800 字）+ 完整报告 md 文件附件，不再经 LLM message 工具。凭据从环境变量或 `OPENCLAW_CONFIG` 读取。建议加 `--require-gate`（门控 blocked 时拒发，exit 4）；失败时 stdout 会打印 `{"sent": false, "partial": ..., "progress": {...}}`，可据此识别"附件已发、摘要未发"的半成功。
 
 | job ID 前缀 | 时间 | 任务 | toolsAllow |
 |---|---|---|---|
