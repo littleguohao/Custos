@@ -139,6 +139,17 @@ class TestMvStartGuard:
         assert got and all(d >= mc.MV_START for d in got)
         assert got[0].startswith("2018-01")
 
+    def test_first_month_sample_aligned_to_mv_start(self):
+        """月采样首点必须对齐 MV_START:否则 2018-01-02~27 护栏放行但 shares 全空。"""
+        got = mc.sample_dates(2018, freq="month", until="2018-03-01")
+        assert got == ["2018-01-02", "2018-01-28", "2018-02-28"]
+        assert got[0] == mc.MV_START
+
+    def test_first_sample_alignment_leaves_later_years_untouched(self):
+        """对齐只作用于被 MV_START 截断的起点;正常年份首点仍是 1 月 28 日。"""
+        got = mc.sample_dates(2019, freq="month", until="2019-03-01")
+        assert got == ["2019-01-28", "2019-02-28"]
+
     def test_sample_dates_month_uses_28th(self):
         got = mc.sample_dates(2024, freq="month", until="2024-04-01")
         assert got == ["2024-01-28", "2024-02-28", "2024-03-28"]
@@ -225,3 +236,66 @@ class TestCli:
         except SystemExit as exc:
             assert exc.code == 2
         assert "2018-01-02" in capsys.readouterr().err
+
+
+class TestSamplingRun:
+    """采样主循环:乱序补采拒绝、已知空日期不重打(monkeypatch 掉网络层)。"""
+
+    def _setup_ledger(self, tmp_path):
+        ledger = tmp_path / "sc.jsonl"
+        ledger.write_text(json.dumps({"code": "600000", "observed_on": "2024-06-28",
+                                      "prev_sample": None, "total_shares": 1e10,
+                                      "kind": "first_seen"}) + "\n", encoding="utf-8")
+        samples = tmp_path / "samples.json"
+        samples.write_text(json.dumps({"sampled": ["2024-06-28"], "empty": []}),
+                           encoding="utf-8")
+        return ledger, samples
+
+    def _fake_fetch(self, counter, rows):
+        def fake(d, session=None, **_):
+            counter.append(d)
+            return rows
+        return fake
+
+    def test_out_of_order_backfill_rejected(self, tmp_path, capsys, monkeypatch):
+        """早于已采样末日的补采必须拒绝:prev 会是台账最终股本,diff 基准与元数据都会错。"""
+        ledger, samples = self._setup_ledger(tmp_path)
+        calls = []
+        monkeypatch.setattr(mc, "fetch_trade_date", self._fake_fetch(calls, [_row(shares=1.2e10)]))
+        rc = mc.main(["--dates", "2024-05-28", "--out", str(ledger),
+                      "--samples-out", str(samples)])
+        err = capsys.readouterr().err
+        assert rc == 0 and calls == []                       # 根本没发请求
+        assert "拒绝乱序补采" in err and "重放" in err
+        assert len(mc.load_events(ledger)) == 1              # 台账未被污染
+        assert json.loads(samples.read_text(encoding="utf-8"))["sampled"] == ["2024-06-28"]
+
+    def test_in_order_new_sample_still_works(self, tmp_path, capsys, monkeypatch):
+        """时间序前进的补采不受影响:prev 用上一采样日的股本。"""
+        ledger, samples = self._setup_ledger(tmp_path)
+        calls = []
+        monkeypatch.setattr(mc, "fetch_trade_date", self._fake_fetch(calls, [_row(shares=1.2e10)]))
+        rc = mc.main(["--dates", "2024-07-28", "--out", str(ledger),
+                      "--samples-out", str(samples)])
+        assert rc == 0 and calls == ["2024-07-28"]
+        evs = mc.load_events(ledger)
+        assert len(evs) == 2
+        new = [e for e in evs if e["observed_on"] == "2024-07-28"][0]
+        assert new["prev_shares"] == 1e10 and new["prev_sample"] == "2024-06-28"
+        assert new["kind"] == "change"
+
+    def test_empty_date_recorded_and_not_refetched(self, tmp_path, capsys, monkeypatch):
+        """非交易日空转:无数据日期记入 empty,重跑不再重复请求。"""
+        ledger = tmp_path / "sc.jsonl"
+        samples = tmp_path / "samples.json"
+        calls = []
+        monkeypatch.setattr(mc, "fetch_trade_date", self._fake_fetch(calls, []))
+        argv = ["--dates", "2024-06-29", "--out", str(ledger),
+                "--samples-out", str(samples)]
+        assert mc.main(argv) == 0
+        assert calls == ["2024-06-29"]
+        saved = json.loads(samples.read_text(encoding="utf-8"))
+        assert saved["empty"] == ["2024-06-29"] and saved["sampled"] == []
+        assert "已知空日期" in capsys.readouterr().out
+        # 重跑:已知空日期直接跳过,不再发请求
+        assert mc.main(argv) == 0 and calls == ["2024-06-29"]

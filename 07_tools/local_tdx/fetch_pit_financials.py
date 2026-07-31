@@ -21,8 +21,10 @@
 用法:
   # 拉指定报告期(可多个)
   uv run python 07_tools/local_tdx/fetch_pit_financials.py --periods 2024-03-31 2024-06-30
-  # 批量补历史(2015 年起所有季度末)
-  uv run python 07_tools/local_tdx/fetch_pit_financials.py --since 2015 --all-quarters
+  # 批量补历史(2014 年起所有季度末)
+  # ⚠️ 需留足一年跑道:2015 年信号的同比特征要用 2014 各期**当时可见**的版本,
+  #    2015 年初的信号本身也要有已可见的 2014 财报,故起点必须比首个信号年早一年。
+  uv run python 07_tools/local_tdx/fetch_pit_financials.py --since 2014 --all-quarters
   # as-of 查询:某日可见的最新一期
   uv run python 07_tools/local_tdx/fetch_pit_financials.py --as-of 2024-05-06 --code 600000
 """
@@ -114,7 +116,7 @@ def normalize(rows: list[dict], report_date: str,
     (公告日不晚于报告期在现实中不可能,宁可不要也不能拿一条错的可见日进回测)。
     """
     out, stats = [], {"raw": len(rows), "dropped_type": 0, "dropped_no_notice": 0,
-                      "dropped_bad_lag": 0, "kept": 0, "types": {}}
+                      "dropped_bad_lag": 0, "kept": 0, "bad_value": 0, "types": {}}
     rd = date.fromisoformat(report_date)
     for x in rows:
         stype = str(x.get("SECURITY_TYPE") or "")
@@ -148,7 +150,11 @@ def normalize(rows: list[dict], report_date: str,
         }
         for src, dst in VALUE_FIELDS.items():
             v = x.get(src)
-            rec[dst] = None if v is None else float(v)
+            try:
+                rec[dst] = None if v is None else float(v)
+            except (TypeError, ValueError):        # 脏值(如 "--")按缺失处理,绝不让一行炸掉批量
+                rec[dst] = None
+                stats["bad_value"] += 1
         out.append(rec)
         stats["kept"] += 1
     return out, stats
@@ -228,13 +234,21 @@ def as_of(records: list[dict], day: str, code: str | None = None,
 
 def verify_ledger(records: list[dict], since_year: int | None = None,
                   until: str | None = None, low_ratio: float = 0.6) -> dict:
-    """台账完整性自检:应有报告期 vs 实有,列缺口 + 逐期行数异常。
+    """台账完整性自检:应有报告期 vs 实有,列缺口 + 逐期行数异常 + 一年跑道检查。
 
     为什么必须自检:`as_of()` 遇到台账**缺期不会报错** —— 它只会静默返回上一个可见期,
     回测里就变成"用了 3 个月前的财报却以为是最新的"。缺口是静默的 look-behind,
     比抛异常危险得多。同理某期行数远低于邻期(分页中断/接口限流)也会让该期样本残缺。
 
-    since_year 缺省时按台账最早报告期的年份推断。行数低于**邻期中位数** low_ratio 倍即告警。
+    口径:
+      - since_year 缺省时按台账最早报告期的年份推断,且**只从台账实际首期起对齐检查**
+        (台账从年中起步时不误报年初各期);
+      - until 缺省 = **今天**,不是台账最后一期 —— 台账停更两季也会在尾部把缺期报出来,
+        报告单列"台账末至今"的缺期;
+      - 行数低于**相邻 2~4 期中位数** low_ratio 倍即告警(全期中位会被 A 股扩容带偏,
+        早期各期天然只数少,不算残缺);
+      - 跑道检查:首个信号年的同比特征需要上一年度各期的当时可见版本,最早期上一年度
+        各期缺失时 WARN(不判失败,但报告里明示)。
     """
     by_period: dict[str, set] = {}
     for r in records:
@@ -245,36 +259,61 @@ def verify_ledger(records: list[dict], since_year: int | None = None,
     if not have:
         return {"ok": False, "error": "台账为空", "missing": [], "periods": []}
     y0 = since_year or int(have[0][:4])
-    expect = quarter_ends(y0, until=until or have[-1])
+    stop = until or date.today().isoformat()
+    expect = quarter_ends(y0, until=stop)
+    if since_year is None:                            # 按实际首期对齐:年中起步不误报
+        expect = [p for p in expect if p >= have[0]]
     missing = [p for p in expect if p not in by_period]
-    counts = [len(by_period[p]) for p in have]
-    med = int(statistics.median(counts)) if counts else 0
-    thin = [{"period": p, "n_codes": len(by_period[p])} for p in have
-            if med and len(by_period[p]) < med * low_ratio]
+    tail_missing = [p for p in missing if p > have[-1]]     # 台账末至今的缺期(停更信号)
+    counts = {p: len(by_period[p]) for p in have}
+    med_all = int(statistics.median(counts.values())) if counts else 0
+    thin = []
+    for i, p in enumerate(have):                      # 邻期中位数:相邻 2~4 期(不含自身)
+        neigh = [counts[q] for j, q in enumerate(have) if j != i and abs(j - i) <= 2]
+        if not neigh:
+            continue
+        med = int(statistics.median(neigh))
+        if med and counts[p] < med * low_ratio:
+            thin.append({"period": p, "n_codes": counts[p], "neighbor_median": med})
+    runway = [f"{y0 - 1}-{mmdd}" for mmdd in ("03-31", "06-30", "09-30", "12-31")]
+    runway_missing = [p for p in runway if p not in by_period]
     out = {
         "ok": not missing and not thin,
         "n_records": len(records),
         "n_periods_have": len(have),
         "n_periods_expect": len(expect),
-        "first": have[0], "last": have[-1],
+        "first": have[0], "last": have[-1], "checked_until": stop,
         "missing": missing,
-        "median_codes_per_period": med,
+        "tail_missing": tail_missing,
+        "runway_missing": runway_missing,
+        "median_codes_per_period": med_all,
         "thin_periods": thin,
-        "periods": [{"period": p, "n_codes": len(by_period[p])} for p in have],
+        "periods": [{"period": p, "n_codes": counts[p]} for p in have],
     }
     lines = [f"台账 {len(records)} 条;报告期 实有 {len(have)} / 应有 {len(expect)} "
-             f"({have[0]} ~ {have[-1]});每期去重代码中位 {med}"]
+             f"({have[0]} ~ {have[-1]},自检终点 {stop});每期去重代码全期中位 {med_all}"]
     if missing:
         lines.append(f"  ⚠️ **缺 {len(missing)} 期**: {', '.join(missing)}")
+        if tail_missing:
+            lines.append(f"     其中**台账末({have[-1]})至今**缺 {len(tail_missing)} 期: "
+                         f"{', '.join(tail_missing)} —— 台账疑似停更,必须补拉到最新")
         lines.append("     缺期不会让 as_of() 报错,只会静默返回上一期 ⇒ 回测会用陈旧财报,必须补拉")
     else:
         lines.append("  ✅ 报告期无缺口")
     if thin:
-        lines.append(f"  ⚠️ **{len(thin)} 期行数异常偏少**(低于中位 {low_ratio:.0%}): "
-                     + ", ".join(f"{t['period']}={t['n_codes']}" for t in thin))
+        lines.append(f"  ⚠️ **{len(thin)} 期行数异常偏少**(低于相邻 2~4 期中位的 {low_ratio:.0%}): "
+                     + ", ".join(f"{t['period']}={t['n_codes']}(邻期中位 {t['neighbor_median']})"
+                                 for t in thin))
         lines.append("     多为分页中断/接口限流导致该期样本残缺,建议 --periods 单独重拉")
     else:
         lines.append("  ✅ 各期行数无异常偏少")
+    if runway_missing:
+        lines.append(f"  ⚠️ **一年跑道缺失**: 最早期 {have[0]} 的上一年度({y0 - 1})缺 "
+                     f"{len(runway_missing)} 期: {', '.join(runway_missing)}")
+        lines.append(f"     若信号窗口从 {y0} 年起,其同比特征需要 {y0 - 1} 各期的当时可见版本"
+                     f"(补拉:--since {y0 - 1} --all-quarters)")
+    else:
+        lines.append(f"  ✅ 一年跑道充足({y0 - 1} 年各期在台账中)")
     out["text"] = "\n".join(lines)
     return out
 
@@ -347,8 +386,10 @@ def pit_features(records: list[dict], day: str, code: str,
     if cur.get("ocf_ps") is not None:
         out["f_ocf_ps"] = round(float(cur["ocf_ps"]), 4)
     eps, eps_d = cur.get("eps"), cur.get("eps_deduct")
-    if eps and eps_d is not None and float(eps) != 0:
-        out["f_deduct_ratio"] = round(float(eps_d) / float(eps), 4)   # 盈利质量:扣非/基本
+    # 盈利质量:扣非/基本。仅 eps>0 才出 —— 负 eps 的比值无经济含义
+    # (与负基数同比抑制口径一致),给 None 而不是算出个数。
+    if eps is not None and float(eps) > 0 and eps_d is not None:
+        out["f_deduct_ratio"] = round(float(eps_d) / float(eps), 4)
     prior = as_of_period(records, day, prior_year_period(cur["report_date"]),
                          code=code, visible_next_day=visible_next_day).get(code)
     if prior:
@@ -401,7 +442,9 @@ def build_pit_feature_fn(records: list[dict], visible_next_day: bool = True):
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="PIT 财务:按报告期拉取,以公告日为可见日")
     ap.add_argument("--periods", nargs="*", help="报告期,如 2024-03-31(可多个)")
-    ap.add_argument("--since", type=int, help="从该年起拉所有季度末")
+    ap.add_argument("--since", type=int,
+                    help="从该年起拉所有季度末(需留一年跑道:首个信号年为 2015 时应从 2014 起,"
+                         "同比特征需要上一年度各期的当时可见版本)")
     ap.add_argument("--all-quarters", action="store_true", help="配合 --since 使用")
     ap.add_argument("--out", default=str(LEDGER), help="输出 JSONL 路径")
     ap.add_argument("--include-non-ashare", action="store_true",
@@ -413,7 +456,9 @@ def main(argv=None) -> int:
     ap.add_argument("--verify", action="store_true",
                     help="台账完整性自检:报告期缺口 + 逐期行数异常(有问题 exit 1)")
     ap.add_argument("--verify-since", type=int,
-                    help="--verify 的应有报告期起始年(缺省按台账最早期推断)")
+                    help="--verify 的应有报告期起始年(缺省按台账最早期推断,且只从台账实际首期起对齐)")
+    ap.add_argument("--verify-until",
+                    help="--verify 的自检终点(缺省=今天:台账停更两季也会在尾部报出缺期)")
     args = ap.parse_args(argv)
     out_path = Path(args.out)
 
@@ -422,13 +467,13 @@ def main(argv=None) -> int:
         if not recs:
             print(f"[ERR] 台账为空: {out_path}", file=sys.stderr)
             return 2
-        rep = verify_ledger(recs, since_year=args.verify_since)
+        rep = verify_ledger(recs, since_year=args.verify_since, until=args.verify_until)
         print("\n=== PIT 台账完整性自检 ===")
         print(rep["text"])
         if not rep["ok"]:
             missing = rep.get("missing") or []
             if missing:
-                print(f"\n补拉命令:\n  uv run python {Path(__file__).name} "
+                print(f"\n补拉命令:\n  uv run python 07_tools/local_tdx/{Path(__file__).name} "
                       f"--periods {' '.join(missing)}", file=sys.stderr)
             return 1
         return 0
@@ -465,13 +510,19 @@ def main(argv=None) -> int:
             print(f"[WARN] {p} 拉取失败: {exc}", file=sys.stderr)
             continue
         recs, st = normalize(raw, p, a_share_only=not args.include_non_ashare)
-        res = merge_write(recs, out_path)
+        try:
+            res = merge_write(recs, out_path)
+        except Exception as exc:  # noqa: BLE001  # per-period 容错:一期失败不炸整个批量
+            print(f"[WARN] {p} 写台账失败: {exc}", file=sys.stderr)
+            continue
         total += res["added"]
         lags = sorted(r["lag_days"] for r in recs)
         med = lags[len(lags) // 2] if lags else None
         print(f"[OK] {p}: 原始 {st['raw']} → A股保留 {st['kept']} "
               f"(非A股剔 {st['dropped_type']} / 无公告日剔 {st['dropped_no_notice']} / "
-              f"公告日不晚于报告期剔 {st['dropped_bad_lag']}), 滞后中位 {med} 天, "
+              f"公告日不晚于报告期剔 {st['dropped_bad_lag']}"
+              + (f" / 脏值置空 {st['bad_value']}" if st.get("bad_value") else "")
+              + f"), 滞后中位 {med} 天, "
               f"新增 {res['added']} 条(台账 {res['after']})")
     print(f"\n[OK] 共新增 {total} 条 → {out_path}")
     print("提示:同比请用上年同期绝对值自行计算,勿用接口的 YSTZ/SJLTZ(次年同期发布时会被重算)")

@@ -69,6 +69,14 @@ class TestNormalize:
         recs, _ = fp.normalize([_row(BASIC_EPS=None)], "2024-03-31")
         assert recs[0]["eps"] is None and recs[0]["bps"] == 15.0
 
+    def test_dirty_value_becomes_none_not_raise(self):
+        """脏值(如 "--")转 None 并计数,绝不让一行脏数据炸掉整个批量(函数不 raise)。"""
+        rows = [_row(BASIC_EPS="--"), _row(code="600001")]
+        recs, st = fp.normalize(rows, "2024-03-31")
+        assert st["kept"] == 2 and st["bad_value"] == 1
+        assert recs[0]["eps"] is None and recs[0]["net_profit"] == 1.0e8
+        assert recs[1]["eps"] == 0.5                            # 好行不受影响
+
 
 class TestAsOf:
     def _recs(self):
@@ -251,6 +259,14 @@ class TestPitFeatures:
         f = fp.pit_features(recs, "2024-05-06", "600000")
         assert "f_deduct_ratio" not in f
 
+    def test_negative_eps_deduct_ratio_suppressed(self):
+        """eps<=0 时扣非/基本比值无经济含义(与负基数同比抑制口径一致),出 None 而不是个数。"""
+        recs = self._recs()
+        recs[1]["eps"] = -0.2
+        f = fp.pit_features(recs, "2024-05-06", "600000")
+        assert "f_deduct_ratio" not in f
+        assert f["f_roe"] == 2.6                                # 其余特征仍出
+
     def test_yoy_uses_prior_version_visible_then(self):
         """核心:上年同期若有更正版,取的必须是**查询日当时**可见的那一版。"""
         recs = self._recs() + [
@@ -294,30 +310,76 @@ class TestVerifyLedger:
 
     def test_complete_ledger_ok(self):
         rep = fp.verify_ledger(self._recs(["2024-03-31", "2024-06-30", "2024-09-30",
-                                           "2024-12-31"]), since_year=2024)
+                                           "2024-12-31"]), since_year=2024, until="2024-12-31")
         assert rep["ok"] is True and rep["missing"] == []
         assert "无缺口" in rep["text"]
 
     def test_missing_period_detected(self):
         """漏 2024-06-30 ⇒ as_of 在 2024-09 前会一直返回一季报,必须报出来。"""
         rep = fp.verify_ledger(self._recs(["2024-03-31", "2024-09-30", "2024-12-31"]),
-                               since_year=2024)
+                               since_year=2024, until="2024-12-31")
         assert rep["ok"] is False and rep["missing"] == ["2024-06-30"]
         assert "缺 1 期" in rep["text"] and "静默返回上一期" in rep["text"]
+
+    def test_tail_missing_detected_when_ledger_stale(self):
+        """until 缺省=今天而非台账最后一期:台账停更两季照样报缺,不许全绿。"""
+        recs = self._recs(["2024-03-31", "2024-06-30"])
+        rep = fp.verify_ledger(recs, since_year=2024, until="2024-12-31")
+        assert rep["ok"] is False
+        assert rep["missing"] == ["2024-09-30", "2024-12-31"]
+        assert rep["tail_missing"] == ["2024-09-30", "2024-12-31"]
+        assert "台账末(2024-06-30)至今" in rep["text"] and "疑似停更" in rep["text"]
+        # 传 until 之外不传时默认走到今天(台账 2024 年,今天远在之后)
+        rep2 = fp.verify_ledger(recs, since_year=2024)
+        assert rep2["ok"] is False and rep2["tail_missing"]
+        assert rep2["checked_until"] >= "2026-01-01"
+
+    def test_since_inferred_aligns_to_first_actual_period(self):
+        """台账从年中起步(2024-06-30)时,缺省推断不得误报年初各期。"""
+        recs = self._recs(["2024-06-30", "2024-09-30", "2024-12-31"])
+        rep = fp.verify_ledger(recs, until="2024-12-31")
+        assert rep["missing"] == [] and rep["ok"] is True
+        # 显式 since_year=2024 则年初缺期必须报出
+        rep2 = fp.verify_ledger(recs, since_year=2024, until="2024-12-31")
+        assert rep2["missing"] == ["2024-03-31"] and rep2["ok"] is False
+
+    def test_runway_missing_warns_but_not_fails(self):
+        """一年跑道:最早期 2015 的信号同比需要 2014 各期,缺了必须 WARN(不判失败)。"""
+        recs = self._recs(fp.quarter_ends(2015, until="2015-12-31"))
+        rep = fp.verify_ledger(recs, until="2015-12-31")
+        assert rep["ok"] is True                            # 跑道缺失是 WARN,不翻 ok
+        assert rep["runway_missing"] == fp.quarter_ends(2014, until="2014-12-31")
+        assert "跑道缺失" in rep["text"] and "2014" in rep["text"]
+
+    def test_runway_ok_when_prior_year_present(self):
+        """显式 --verify-since 2015 且台账含 2014 各期 ⇒ 跑道充足。"""
+        recs = self._recs(fp.quarter_ends(2014, until="2015-12-31"))
+        rep = fp.verify_ledger(recs, since_year=2015, until="2015-12-31")
+        assert rep["runway_missing"] == [] and "跑道充足" in rep["text"]
 
     def test_thin_period_detected(self):
         """某期行数远低于邻期 = 分页中断/限流导致样本残缺。"""
         recs = self._recs(["2024-03-31", "2024-09-30", "2024-12-31"], n=100)
         recs += [{"code": "600001", "report_date": "2024-06-30",
                   "notice_date": "2024-08-28", "eps": 0.1}]
-        rep = fp.verify_ledger(recs, since_year=2024)
+        rep = fp.verify_ledger(recs, since_year=2024, until="2024-12-31")
         assert rep["ok"] is False
         assert [t["period"] for t in rep["thin_periods"]] == ["2024-06-30"]
+        assert rep["thin_periods"][0]["neighbor_median"] == 100
         assert "行数异常偏少" in rep["text"]
+
+    def test_neighbor_median_not_fooled_by_market_expansion(self):
+        """A 股扩容:早期各期只数天然少,全期中位会误报;邻期中位(相邻 2~4 期)不应误报。"""
+        periods = fp.quarter_ends(2015, until="2019-12-31")
+        recs = []
+        for i, p in enumerate(periods):
+            recs += self._recs([p], n=100 + i * 5)          # 每期稳步扩容 100→195
+        rep = fp.verify_ledger(recs, until="2019-12-31")
+        assert rep["thin_periods"] == [] and rep["ok"] is True
 
     def test_expected_range_inferred_from_ledger(self):
         rep = fp.verify_ledger(self._recs(["2023-03-31", "2023-06-30", "2023-09-30",
-                                           "2023-12-31"]))
+                                           "2023-12-31"]), until="2023-12-31")
         assert rep["n_periods_expect"] == 4 and rep["ok"] is True
 
     def test_empty_ledger_reported(self):
@@ -329,17 +391,21 @@ class TestVerifyLedger:
         rows = [{"code": "600000", "report_date": rd, "notice_date": "2024-12-31"}
                 for rd in ("2024-03-31", "2024-12-31")]
         p.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
-        rc = fp.main(["--verify", "--out", str(p), "--verify-since", "2024"])
+        rc = fp.main(["--verify", "--out", str(p), "--verify-since", "2024",
+                      "--verify-until", "2024-12-31"])
         assert rc == 1
         err = capsys.readouterr()
         assert "2024-06-30" in err.out and "补拉命令" in err.err
+        # 补拉命令必须可直接执行:从仓库根跑,路径要含目录前缀
+        assert "07_tools/local_tdx/fetch_pit_financials.py" in err.err
 
     def test_cli_verify_exit_0_when_clean(self, tmp_path, capsys):
         p = tmp_path / "pit.jsonl"
         rows = [{"code": "600000", "report_date": rd, "notice_date": "2024-12-31"}
                 for rd in ("2024-03-31", "2024-06-30", "2024-09-30", "2024-12-31")]
         p.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
-        assert fp.main(["--verify", "--out", str(p), "--verify-since", "2024"]) == 0
+        assert fp.main(["--verify", "--out", str(p), "--verify-since", "2024",
+                        "--verify-until", "2024-12-31"]) == 0
 
 
 class TestCli:

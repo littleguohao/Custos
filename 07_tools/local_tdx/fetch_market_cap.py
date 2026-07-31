@@ -21,6 +21,11 @@ PIT 性质:总股本是**当日事实**(某天就是那么多股),不存在财�
 采样间隔带来的误差方向也是安全的 —— 变动只会被**延后**观测到(见 `shares_as_of` 说明),
 是 stale 而非 look-ahead。
 
+⚠️ 采样只允许**时间序前进**:早于已采样末日的日期会被拒绝并 WARN(乱序补采会拿台账
+最终股本当 diff 基准、还会覆盖原事件的 prev_sample/prev_shares 元数据);要补更早的日期
+只能清空台账与采样记录后按时间序重放。已知无数据的日期(非交易日)会记入采样记录的
+`empty` 列表,重跑时直接跳过、不再重复请求。
+
 ⚠️ 本模块**不采纳**接口给的 `PE_TTM`/`PB_MRQ`/`PS_TTM`:它们依赖财报,而东财用的是当时已披露
 口径还是最新重述后的,接口层面无从确认。既然已有 PIT 财务库(`fetch_pit_financials.py`),
 估值一律用"自己的 PIT 财务 + 本模块的当日市值"自算,口径可控。
@@ -59,6 +64,7 @@ LEDGER = OUT_DIR / "share_changes.jsonl"
 SAMPLES = OUT_DIR / "share_change_samples.json"
 
 # 市值/估值数据的历史起点(二分探明)。早于此日无数据,窗口护栏须据此剔除。
+# 月采样首点已对齐到本日(见 sample_dates),否则 2018-01-02~27 会"护栏放行但 shares 全空"。
 MV_START = "2018-01-02"
 
 
@@ -97,6 +103,8 @@ def sample_dates(since_year: int, freq: str = "month", until: str | None = None)
     """采样日期序列。freq=month 取每月 28 日、week 取每周一、day 逐日(慎用:调用量×20)。
 
     取 28 日而非月末是为了避开月末休市;非交易日接口返回空,由调用方跳过。
+    起点被 MV_START 截断时,月采样首点对齐到 MV_START 本身(而非等到 1 月 28 日),
+    否则 2018-01-02~27 会被窗口护栏放行却拿不到任何股本。
     """
     stop = until or date.today().isoformat()
     start = max(f"{since_year}-01-01", MV_START)
@@ -113,6 +121,8 @@ def sample_dates(since_year: int, freq: str = "month", until: str | None = None)
             m += 1
             if m > 12:
                 y, m = y + 1, 1
+        if start == MV_START and out and out[0] > MV_START:
+            out.insert(0, MV_START)          # 首采样点对齐数据起点
     elif freq == "week":
         cur = d0 + timedelta(days=(7 - d0.weekday()) % 7)     # 下一个周一
         while cur <= d1:
@@ -288,20 +298,25 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     out_path, sp_path = Path(args.out), Path(args.samples_out)
 
-    def _samples() -> list[str]:
+    def _samples() -> dict:
+        """采样台账:{"sampled": 有数据的日期, "empty": 已知无数据(非交易日)的日期}。
+        两类都跳过重复请求 —— 空日期不重打,避免每次重跑空转。"""
         if sp_path.exists():
             try:
-                return json.loads(sp_path.read_text(encoding="utf-8")).get("sampled") or []
+                data = json.loads(sp_path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return {"sampled": data.get("sampled") or [],
+                            "empty": data.get("empty") or []}
             except ValueError:
-                return []
-        return []
+                pass
+        return {"sampled": [], "empty": []}
 
     if args.verify:
         events = load_events(out_path)
         if not events:
             print(f"[ERR] 股本事件台账为空: {out_path}", file=sys.stderr)
             return 2
-        rep = verify(events, _samples())
+        rep = verify(events, _samples()["sampled"])
         print("\n=== 股本/市值台账自检 ===")
         print(rep["text"])
         return 0 if rep["ok"] else 1
@@ -336,13 +351,22 @@ def main(argv=None) -> int:
     for e in sorted(events, key=lambda r: r.get("observed_on") or ""):
         if e.get("total_shares") is not None:
             prev[e["code"]] = float(e["total_shares"])
-    sampled = _samples()
+    sp = _samples()
+    sampled = sp["sampled"]
+    known_empty = set(sp["empty"])
     last_sample = sampled[-1] if sampled else None
 
     session = requests.Session()
     total = 0
     for d in dates:
-        if d in sampled:
+        if d in sampled or d in known_empty:
+            continue
+        if last_sample is not None and d < last_sample:
+            # 乱序补采会拿台账**最终股本**当 prev:diff 基准错误、且会覆盖原事件的
+            # prev_sample/prev_shares 元数据。拒绝比写错好 —— 要补只能清空台账按时间序重放。
+            print(f"[WARN] {d} 早于已采样末日 {last_sample},拒绝乱序补采"
+                  f"(prev 基准会是台账最终股本,diff 与元数据都会错);"
+                  f"如需补采请清空台账与采样记录后按时间序重放", file=sys.stderr)
             continue
         try:
             rows = fetch_trade_date(d, session=session)
@@ -350,7 +374,8 @@ def main(argv=None) -> int:
             print(f"[WARN] {d} 拉取失败: {exc}", file=sys.stderr)
             continue
         if not rows:
-            print(f"[--] {d}: 无数据(非交易日或数据源缺失),跳过")
+            known_empty.add(d)
+            print(f"[--] {d}: 无数据(非交易日或数据源缺失),记入已知空日期并跳过")
             continue
         evs = diff_events(prev, rows, d, last_sample)
         res = merge_write(evs, out_path)
@@ -364,11 +389,12 @@ def main(argv=None) -> int:
               f"(首见 {n_new} / 变动 {len(evs) - n_new}), 台账 {res['after']} 条")
 
     sp_path.parent.mkdir(parents=True, exist_ok=True)
-    sp_path.write_text(json.dumps({"sampled": sorted(set(sampled)), "freq": args.freq,
+    sp_path.write_text(json.dumps({"sampled": sorted(set(sampled)),
+                                   "empty": sorted(known_empty), "freq": args.freq,
                                    "mv_start": MV_START}, ensure_ascii=False, indent=2),
                        encoding="utf-8")
     print(f"\n[OK] 共新增 {total} 条事件 → {out_path}")
-    print(f"     采样记录 {len(set(sampled))} 个日期 → {sp_path}")
+    print(f"     采样记录 {len(set(sampled))} 个日期(+{len(known_empty)} 个已知空日期) → {sp_path}")
     print("提示:市值请用 market_cap()(股本 × 查询日收盘价),勿直接用事件里采样日的 market_cap 字段")
     return 0
 
