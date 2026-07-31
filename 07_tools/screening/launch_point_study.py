@@ -359,7 +359,9 @@ def extract_firings(bars, start: str, end: str, entry_gate, scorer=None,
     BBI 连破止盈)算一笔实际收益 → sim_ret/sim_reason/sim_holding。与区间涨幅口径对比即可回答
     "赢家我们到底吃到了几成"(coverage_report)。⚠️ 收益受加载窗口右端截断(reason=open_end)。
     style_features:追加风格特征 f_board_code(上市板序数,免数据)与 f_amount20
-    (log10 20日均 close×volume ≈ 成交额,**市值代理**——qlib bundle 无总股本,算不出真市值)。"""
+    (log10 20日均 close×volume ≈ 成交额,**市值代理**——qlib bundle 无总股本)。
+    ⚠️ 2026-07-31 起真市值已可得:`local_tdx/fetch_market_cap.py` 提供总股本/总市值
+    (历史起点 2018-01-02),新研究应改用真市值,成交额只作流动性因子。"""
     import gc  # noqa: PLC0415
     items = bars.items() if isinstance(bars, dict) else bars
     out: list[dict] = []
@@ -1137,7 +1139,8 @@ BOARDS = (("科创板", ("688", "689")), ("创业板", ("300", "301")),
 
 
 def board_of(code6: str) -> str:
-    """6 位代码 → 上市板(免数据、无未来函数)。市值需总股本,qlib bundle 不含,故用成交额代理另算。"""
+    """6 位代码 → 上市板(免数据、无未来函数)。
+    注:真市值改由 local_tdx/fetch_market_cap.py 提供(qlib bundle 本身无总股本)。"""
     c = str(code6 or "").strip()
     if not c.isdigit():                      # 空/非数字不得 zfill 成 "000000" 误判为深主板
         return "其他"

@@ -1,0 +1,377 @@
+# -*- coding: utf-8 -*-
+"""真市值/总股本:按交易日取东方财富估值分析表,压成**股本变动事件**落盘。
+
+解决什么问题:B1_BACKTEST_FINDINGS §3 与结论#14 记着"⚠️ 市值代理不是真市值:qlib bundle
+无总股本,成交额只是流动性/规模的代理"。`RPT_VALUEANALYSIS_DET` 直接给 `TOTAL_SHARES`(总股本)
+与 `TOTAL_MARKET_CAP`(总市值),一次调用一个交易日全市场。
+
+实测(2026-07-31):
+  - 自洽:总股本 × 收盘价 = 总市值,三只样本分毫不差
+    (平安银行 194.06亿股 × 10.15 = 1970亿;浦发 293.52亿 × 8.23 = 2416亿;茅台 12.56亿 × 1467.39 = 18433亿);
+  - **历史起点 2018-01-02**(二分探明:2017-12-29 及更早返回空;2018-01-02 有 3250 条)⇒ `MV_START`;
+  - 构成干净:代码前缀只有 60/00/30/68/92,**无新三板**(不像 PIT 财务那个接口要额外过滤);
+  - 反推路子不可用:`净利润/EPS` 对茅台精确(无优先股),但平安银行偏高 8.4%、浦发偏高 3.3%
+    —— 银行有优先股,EPS 分子要扣优先股股息。故必须取真股本。
+
+为什么存**事件**而不是日频市值:日频全市场 5300 行 × 2018~2026 约 2100 个交易日 ≈ 1100 万行。
+而总股本只在增发/回购/送转/解禁时变,极稀疏 ⇒ 只在观测到变化时写一行,
+市值由 `market_cap()` 用 `股本 × 当日收盘价` 现算(价格本来就有)。
+
+PIT 性质:总股本是**当日事实**(某天就是那么多股),不存在财务数据那种"次年重算"的重述问题。
+采样间隔带来的误差方向也是安全的 —— 变动只会被**延后**观测到(见 `shares_as_of` 说明),
+是 stale 而非 look-ahead。
+
+⚠️ 本模块**不采纳**接口给的 `PE_TTM`/`PB_MRQ`/`PS_TTM`:它们依赖财报,而东财用的是当时已披露
+口径还是最新重述后的,接口层面无从确认。既然已有 PIT 财务库(`fetch_pit_financials.py`),
+估值一律用"自己的 PIT 财务 + 本模块的当日市值"自算,口径可控。
+
+用法:
+  # 按月采样建库(2018 起,约 100 次调用)
+  uv run python 07_tools/local_tdx/fetch_market_cap.py --since 2018 --freq month
+  # 指定交易日补采
+  uv run python 07_tools/local_tdx/fetch_market_cap.py --dates 2024-06-28 2024-09-30
+  # 查询某日股本/市值
+  uv run python 07_tools/local_tdx/fetch_market_cap.py --as-of 2024-07-15 --code 600000
+  # 自检
+  uv run python 07_tools/local_tdx/fetch_market_cap.py --verify
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from datetime import date, timedelta
+from pathlib import Path
+
+import requests
+
+TOOLS = Path(__file__).resolve().parents[1]
+for _p in (str(TOOLS),):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+from paths import BASE  # noqa: E402
+
+API = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+UA = {"User-Agent": "Mozilla/5.0"}
+OUT_DIR = BASE / "01_data" / "fundamentals"
+LEDGER = OUT_DIR / "share_changes.jsonl"
+SAMPLES = OUT_DIR / "share_change_samples.json"
+
+# 市值/估值数据的历史起点(二分探明)。早于此日无数据,窗口护栏须据此剔除。
+MV_START = "2018-01-02"
+
+
+def _f(v):
+    return None if v is None else float(v)
+
+
+def fetch_trade_date(trade_date: str, page_size: int = 500, max_pages: int = 40,
+                     session=None) -> list[dict]:
+    """拉一个交易日的全市场总股本/总市值。非交易日返回空。"""
+    s = session or requests.Session()
+    rows: list[dict] = []
+    for page in range(1, max_pages + 1):
+        params = {
+            "sortColumns": "SECURITY_CODE", "sortTypes": "1",
+            "pageSize": page_size, "pageNumber": page,
+            "reportName": "RPT_VALUEANALYSIS_DET",
+            "columns": ("SECURITY_CODE,SECURITY_NAME_ABBR,TRADE_DATE,CLOSE_PRICE,"
+                        "TOTAL_SHARES,FREE_SHARES_A,TOTAL_MARKET_CAP,NOTLIMITED_MARKETCAP_A"),
+            "filter": f"(TRADE_DATE='{trade_date}')",
+        }
+        r = s.get(API, params=params, headers=UA, timeout=30,
+                  proxies={"http": None, "https": None})
+        r.raise_for_status()
+        result = (r.json() or {}).get("result") or {}
+        data = result.get("data") or []
+        if not data:
+            break
+        rows.extend(data)
+        if page >= (result.get("pages") or 1):
+            break
+    return rows
+
+
+def sample_dates(since_year: int, freq: str = "month", until: str | None = None) -> list[str]:
+    """采样日期序列。freq=month 取每月 28 日、week 取每周一、day 逐日(慎用:调用量×20)。
+
+    取 28 日而非月末是为了避开月末休市;非交易日接口返回空,由调用方跳过。
+    """
+    stop = until or date.today().isoformat()
+    start = max(f"{since_year}-01-01", MV_START)
+    d0, d1 = date.fromisoformat(start), date.fromisoformat(stop)
+    out: list[str] = []
+    if freq == "month":
+        y, m = d0.year, d0.month
+        while True:
+            cand = date(y, m, 28)
+            if cand > d1:
+                break
+            if cand >= d0:
+                out.append(cand.isoformat())
+            m += 1
+            if m > 12:
+                y, m = y + 1, 1
+    elif freq == "week":
+        cur = d0 + timedelta(days=(7 - d0.weekday()) % 7)     # 下一个周一
+        while cur <= d1:
+            out.append(cur.isoformat())
+            cur += timedelta(days=7)
+    else:
+        cur = d0
+        while cur <= d1:
+            if cur.weekday() < 5:
+                out.append(cur.isoformat())
+            cur += timedelta(days=1)
+    return out
+
+
+def diff_events(prev: dict[str, float], rows: list[dict], observed_on: str,
+                prev_sample: str | None) -> list[dict]:
+    """把一次采样与上次快照比对,只对**变化的**代码产出事件行。
+
+    prev: {code: total_shares}(上次快照);返回事件列表。
+    `observed_on` 是本次采样日,`prev_sample` 是上次采样日 —— 两者共同界定
+    "真实变动发生在 (prev_sample, observed_on] 之间",消费方据此判断分辨率,不得过度声称精度。
+    """
+    out = []
+    for x in rows:
+        code = str(x.get("SECURITY_CODE") or "").strip()
+        sh = _f(x.get("TOTAL_SHARES"))
+        if not code or sh is None or sh <= 0:
+            continue
+        old = prev.get(code)
+        if old is not None and abs(old - sh) < 1e-6:
+            continue                                  # 未变化,不写
+        out.append({
+            "code": code,
+            "name": str(x.get("SECURITY_NAME_ABBR") or ""),
+            "observed_on": observed_on,
+            "prev_sample": prev_sample,
+            "total_shares": sh,
+            "prev_shares": old,
+            "free_shares": _f(x.get("FREE_SHARES_A")),
+            "close": _f(x.get("CLOSE_PRICE")),
+            "market_cap": _f(x.get("TOTAL_MARKET_CAP")),
+            "kind": "first_seen" if old is None else "change",
+        })
+    return out
+
+
+def merge_write(events: list[dict], path: str | Path = LEDGER) -> dict:
+    """按 (code, observed_on) 去重合并写 JSONL(原子写)。"""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing: dict[tuple, dict] = {}
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            existing[(r.get("code"), r.get("observed_on"))] = r
+    before = len(existing)
+    for e in events:
+        existing[(e["code"], e["observed_on"])] = e
+    rows = sorted(existing.values(), key=lambda r: (r["observed_on"], r["code"]))
+    tmp = path.with_suffix(".jsonl.tmp")
+    tmp.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n",
+                   encoding="utf-8")
+    tmp.replace(path)
+    return {"before": before, "after": len(rows), "added": len(rows) - before}
+
+
+def load_events(path: str | Path = LEDGER) -> list[dict]:
+    path = Path(path)
+    if not path.exists():
+        return []
+    out = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            try:
+                out.append(json.loads(line))
+            except ValueError:
+                continue
+    return out
+
+
+def shares_as_of(events: list[dict], day: str, code: str | None = None) -> dict[str, dict]:
+    """截至 day 的总股本,按 code 返回最后一个 `observed_on <= day` 的事件。
+
+    ⚠️ 分辨率:采样间隔内发生的变动只会被**延后**观测到,故此处返回的可能是变动前的旧股本
+    —— 方向是 **stale 而非 look-ahead**(不会拿到当时还不存在的股本),对回测是安全的一侧。
+    事件行里的 `prev_sample`/`observed_on` 界定了真实变动的时间区间。
+    """
+    best: dict[str, dict] = {}
+    for e in events:
+        if code and e.get("code") != code:
+            continue
+        obs = e.get("observed_on") or ""
+        if not obs or obs > day:
+            continue
+        cur = best.get(e["code"])
+        if cur is None or obs > (cur.get("observed_on") or ""):
+            best[e["code"]] = e
+    return best
+
+
+def market_cap(events: list[dict], day: str, closes: dict[str, float],
+               code: str | None = None) -> dict[str, dict]:
+    """市值 = 截至 day 的总股本 × 当日收盘价。closes: {code: close}(由价格链提供)。
+
+    不直接用事件里的 `market_cap` 字段:那是**采样日**的市值,不是查询日的。
+    股本才是应该跨日沿用的量,价格必须用查询日的。
+    """
+    sh = shares_as_of(events, day, code=code)
+    out = {}
+    for c, e in sh.items():
+        px = closes.get(c)
+        if px is None or e.get("total_shares") is None:
+            continue
+        out[c] = {"code": c, "shares": e["total_shares"], "close": float(px),
+                  "market_cap": e["total_shares"] * float(px),
+                  "shares_observed_on": e.get("observed_on"),
+                  "shares_prev_sample": e.get("prev_sample")}
+    return out
+
+
+def before_mv_start(day: str) -> bool:
+    """该日是否早于市值数据起点(2018-01-02)。窗口护栏用。"""
+    return str(day)[:10] < MV_START
+
+
+def verify(events: list[dict], samples: list[str]) -> dict:
+    """自检:采样覆盖、事件量级、是否有早于 MV_START 的可疑事件。"""
+    codes = {e.get("code") for e in events if e.get("code")}
+    firsts = [e for e in events if e.get("kind") == "first_seen"]
+    changes = [e for e in events if e.get("kind") == "change"]
+    early = [e for e in events if before_mv_start(e.get("observed_on") or "9999")]
+    obs = sorted({e.get("observed_on") for e in events if e.get("observed_on")})
+    out = {
+        "ok": not early,
+        "n_events": len(events), "n_codes": len(codes),
+        "n_first_seen": len(firsts), "n_changes": len(changes),
+        "n_samples_recorded": len(samples),
+        "first_obs": obs[0] if obs else None, "last_obs": obs[-1] if obs else None,
+        "n_before_mv_start": len(early),
+    }
+    lines = [f"股本事件 {len(events)} 条 / 覆盖 {len(codes)} 只;"
+             f"首见 {len(firsts)} + 变动 {len(changes)};"
+             f"观测区间 {out['first_obs']} ~ {out['last_obs']};已采样 {len(samples)} 个日期"]
+    if early:
+        lines.append(f"  ⚠️ {len(early)} 条事件早于 MV_START({MV_START}) —— 数据源在该日前无数据,可疑")
+    else:
+        lines.append(f"  ✅ 无早于 MV_START({MV_START}) 的事件")
+    if changes:
+        lines.append(f"  股本变动率:{len(changes)}/{len(codes)} = 每只平均 "
+                     f"{len(changes) / max(len(codes), 1):.2f} 次变动")
+    lines.append("  注:采样间隔内的变动只会被延后观测到(stale 而非 look-ahead);"
+                 "精度由事件行的 prev_sample~observed_on 界定")
+    out["text"] = "\n".join(lines)
+    return out
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description="真市值/总股本:按交易日取数,压成股本变动事件")
+    ap.add_argument("--dates", nargs="*", help="交易日,如 2024-06-28(可多个)")
+    ap.add_argument("--since", type=int, help="从该年起按 --freq 采样")
+    ap.add_argument("--freq", choices=["month", "week", "day"], default="month",
+                    help="采样频率(默认 month:约 100 次调用覆盖 2018~今)")
+    ap.add_argument("--out", default=str(LEDGER))
+    ap.add_argument("--samples-out", default=str(SAMPLES))
+    ap.add_argument("--as-of", help="查询该日的总股本(不拉网络)")
+    ap.add_argument("--code", help="配合 --as-of 限定单只")
+    ap.add_argument("--verify", action="store_true", help="自检(有问题 exit 1)")
+    args = ap.parse_args(argv)
+    out_path, sp_path = Path(args.out), Path(args.samples_out)
+
+    def _samples() -> list[str]:
+        if sp_path.exists():
+            try:
+                return json.loads(sp_path.read_text(encoding="utf-8")).get("sampled") or []
+            except ValueError:
+                return []
+        return []
+
+    if args.verify:
+        events = load_events(out_path)
+        if not events:
+            print(f"[ERR] 股本事件台账为空: {out_path}", file=sys.stderr)
+            return 2
+        rep = verify(events, _samples())
+        print("\n=== 股本/市值台账自检 ===")
+        print(rep["text"])
+        return 0 if rep["ok"] else 1
+
+    if args.as_of:
+        events = load_events(out_path)
+        if not events:
+            print(f"[ERR] 股本事件台账为空: {out_path}", file=sys.stderr)
+            return 2
+        if before_mv_start(args.as_of):
+            print(f"[ERR] {args.as_of} 早于市值数据起点 {MV_START},无数据", file=sys.stderr)
+            return 2
+        got = shares_as_of(events, args.as_of, code=args.code)
+        print(f"截至 {args.as_of}:{len(got)} 只有股本记录")
+        for c, e in sorted(got.items())[:20]:
+            print(f"  {c} {e.get('name', ''):<8} 总股本={e['total_shares'] / 1e8:.2f}亿股 "
+                  f"(观测于 {e['observed_on']}, 上次采样 {e.get('prev_sample')})")
+        if len(got) > 20:
+            print(f"  ...(共 {len(got)} 只)")
+        return 0
+
+    dates = list(args.dates or [])
+    if args.since:
+        dates += sample_dates(args.since, freq=args.freq)
+    dates = sorted(set(d for d in dates if not before_mv_start(d)))
+    if not dates:
+        ap.error(f"需提供 --dates 或 --since(且不早于 {MV_START}),或用 --as-of / --verify")
+
+    # 以台账里已有的最后状态为起点,避免重复写事件
+    events = load_events(out_path)
+    prev: dict[str, float] = {}
+    for e in sorted(events, key=lambda r: r.get("observed_on") or ""):
+        if e.get("total_shares") is not None:
+            prev[e["code"]] = float(e["total_shares"])
+    sampled = _samples()
+    last_sample = sampled[-1] if sampled else None
+
+    session = requests.Session()
+    total = 0
+    for d in dates:
+        if d in sampled:
+            continue
+        try:
+            rows = fetch_trade_date(d, session=session)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[WARN] {d} 拉取失败: {exc}", file=sys.stderr)
+            continue
+        if not rows:
+            print(f"[--] {d}: 无数据(非交易日或数据源缺失),跳过")
+            continue
+        evs = diff_events(prev, rows, d, last_sample)
+        res = merge_write(evs, out_path)
+        total += res["added"]
+        for e in evs:
+            prev[e["code"]] = e["total_shares"]
+        sampled.append(d)
+        last_sample = d
+        n_new = sum(1 for e in evs if e["kind"] == "first_seen")
+        print(f"[OK] {d}: 全市场 {len(rows)} 只 → 事件 {len(evs)} 条"
+              f"(首见 {n_new} / 变动 {len(evs) - n_new}), 台账 {res['after']} 条")
+
+    sp_path.parent.mkdir(parents=True, exist_ok=True)
+    sp_path.write_text(json.dumps({"sampled": sorted(set(sampled)), "freq": args.freq,
+                                   "mv_start": MV_START}, ensure_ascii=False, indent=2),
+                       encoding="utf-8")
+    print(f"\n[OK] 共新增 {total} 条事件 → {out_path}")
+    print(f"     采样记录 {len(set(sampled))} 个日期 → {sp_path}")
+    print("提示:市值请用 market_cap()(股本 × 查询日收盘价),勿直接用事件里采样日的 market_cap 字段")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

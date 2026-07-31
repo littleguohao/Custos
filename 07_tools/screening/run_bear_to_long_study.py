@@ -35,6 +35,12 @@ import launch_point_study as lp  # noqa: E402
 STUDY = TOOLS / "screening" / "launch_point_study.py"
 QLIB_GAP = ("2020-09-28", "2021-07-30")     # 两 bundle 之间无数据
 QLIB_END = "2026-02-06"                     # qlib 数据末尾
+# 真市值/总股本的历史起点(fetch_market_cap 二分探明)。用市值类特征时须据此再剔窗口。
+try:
+    sys.path.insert(0, str(TOOLS / "local_tdx"))
+    from fetch_market_cap import MV_START  # noqa: E402
+except Exception:                            # noqa: BLE001  取数模块缺失不应拖垮研究链
+    MV_START = "2018-01-02"
 DEFAULT_FEATURES = ("reversal_quality,momentum,low_vol,alpha101,alpha_pvcorr,"
                     "kdj_j,s_shape,b1_pullback,invert_s_shape,s_reversal")
 
@@ -45,8 +51,15 @@ def overlaps_gap(start: str, end: str, gap: tuple[str, str] = QLIB_GAP) -> bool:
 
 
 def usable_pairs(pairs: list[dict], qlib_end: str = QLIB_END,
-                 gap: tuple[str, str] = QLIB_GAP) -> tuple[list[dict], list[dict]]:
-    """按数据可用性切分 (可用, 剔除并附 reason)。信号窗与赢家窗都要过护栏。"""
+                 gap: tuple[str, str] = QLIB_GAP,
+                 require_market_cap: bool = False,
+                 mv_start: str = MV_START) -> tuple[list[dict], list[dict]]:
+    """按数据可用性切分 (可用, 剔除并附 reason)。信号窗与赢家窗都要过护栏。
+
+    require_market_cap=True 时额外剔除**信号窗起点早于市值数据起点**的窗口对:
+    `RPT_VALUEANALYSIS_DET` 的历史只到 2018-01-02(二分探明),用真市值/总股本做特征时
+    2015~2017 的窗口无数据。不设默认以免静默改变既有窗口池(否则 12 窗会缩水)。
+    """
     keep, drop = [], []
     for p in pairs:
         if overlaps_gap(p["signal_start"], p["signal_end"], gap):
@@ -55,6 +68,8 @@ def usable_pairs(pairs: list[dict], qlib_end: str = QLIB_END,
             drop.append({**p, "reason": f"赢家窗跨 qlib 缺口 {gap[0]}~{gap[1]}"})
         elif p["label_end"] > qlib_end:
             drop.append({**p, "reason": f"赢家窗超出 qlib 数据末尾 {qlib_end}"})
+        elif require_market_cap and p["signal_start"] < mv_start:
+            drop.append({**p, "reason": f"信号窗早于市值数据起点 {mv_start}(真市值/总股本无数据)"})
         else:
             keep.append(p)
     return keep, drop
@@ -396,6 +411,8 @@ def main(argv=None, runner=None) -> int:
     ap.add_argument("--pass2-only", action="store_true", help="只做 Pass2 汇总(firings 已就绪)")
     ap.add_argument("--survivorship-report", action="store_true",
                     help="幸存者偏差体检:统计各窗样本里'当时在、今天已摘牌'的票数(不跑 Pass1/Pass2)")
+    ap.add_argument("--require-market-cap", action="store_true",
+                    help=f"额外剔除信号窗起点早于市值数据起点({MV_START})的窗口对——用真市值/总股本做特征时 2015~2017 无数据(默认不开,以免静默缩小窗口池)")
     ap.add_argument("--zero-ret-report", action="store_true",
                     help="零收益样本成因诊断:按 volume 分全程停牌/断续停牌/K线过少/有量收平"
                          "(只重载 ret==0 的票,不跑 Pass1/Pass2)")
@@ -418,7 +435,8 @@ def main(argv=None, runner=None) -> int:
                                       min_long_days=args.min_long_days,
                                       include_long_head_days=args.include_long_head_days,
                                       signal_span=args.signal_span)
-    keep, drop = usable_pairs(pairs, qlib_end=args.qlib_end)
+    keep, drop = usable_pairs(pairs, qlib_end=args.qlib_end,
+                              require_market_cap=args.require_market_cap)
 
     print(f"=== 窗口对:{len(pairs)} 对枚举 → {len(keep)} 对可用 / {len(drop)} 对剔除 ===")
     for p in keep:

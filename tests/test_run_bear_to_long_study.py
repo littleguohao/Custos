@@ -58,6 +58,34 @@ class TestGapGuards:
         keep, drop = rb.usable_pairs([_pair()])
         assert len(keep) == 1 and drop == []
 
+    def test_market_cap_guard_off_by_default(self):
+        """默认不开:否则 2015~2017 的窗口会被静默剔掉,12 窗池凭空缩水。"""
+        early = _pair(sig=("2016-01-04", "2016-03-01"), lab=("2016-03-02", "2016-05-01"))
+        keep, drop = rb.usable_pairs([early])
+        assert len(keep) == 1 and drop == []
+
+    def test_market_cap_guard_drops_pre_2018_signal_window(self):
+        early = _pair(sig=("2016-01-04", "2016-03-01"), lab=("2016-03-02", "2016-05-01"))
+        keep, drop = rb.usable_pairs([early], require_market_cap=True)
+        assert keep == [] and len(drop) == 1
+        assert rb.MV_START in drop[0]["reason"] and "市值" in drop[0]["reason"]
+
+    def test_market_cap_guard_keeps_post_2018(self):
+        keep, drop = rb.usable_pairs([_pair()], require_market_cap=True)
+        assert len(keep) == 1 and drop == []
+
+    def test_market_cap_guard_boundary_is_inclusive(self):
+        """信号窗恰好起于 MV_START 当日应保留(该日已有数据)。"""
+        p = _pair(sig=(rb.MV_START, "2018-03-01"), lab=("2018-03-02", "2018-05-01"))
+        keep, _ = rb.usable_pairs([p], require_market_cap=True)
+        assert len(keep) == 1
+
+    def test_gap_reason_takes_precedence_over_market_cap(self):
+        """跨 qlib 缺口的窗口对应报缺口原因,不该被市值原因掩盖。"""
+        p = _pair(sig=("2020-08-01", "2020-10-01"), lab=("2020-10-02", "2020-12-01"))
+        _, drop = rb.usable_pairs([p], require_market_cap=True)
+        assert "qlib 缺口" in drop[0]["reason"]
+
 
 class TestCommands:
     def test_pass1_decouples_windows_and_keeps_delisted(self, tmp_path, monkeypatch, capsys):
