@@ -605,7 +605,8 @@ def discriminate_at_signal(records: list, horizon: int = 20, win_thresh: Optiona
                            win_top_q: float = 0.2, use_mfe: bool = False,
                            picks_per_day: int = 3, label_basis: str = "forward",
                            winner_top_pct: float = 50.0, winner_basis: str = "profitable",
-                           min_winner_ret: Optional[float] = None) -> dict:
+                           min_winner_ret: Optional[float] = None,
+                           exclude_zero_ret: bool = False) -> dict:
     """**信号当时能否明确选出会跑的票?** 对每个信号(特征全部 as-of、无未来函数)。
 
     label_basis:
@@ -621,6 +622,9 @@ def discriminate_at_signal(records: list, horizon: int = 20, win_thresh: Optiona
     """
     rows = []
     key = f"{'mfe' if use_mfe else 'fwd'}{horizon}"
+    n_zero_excluded = 0
+    if exclude_zero_ret:                                  # 僵尸样本(赢家窗收益恰好为0)不进分母/不出信号
+        records, n_zero_excluded = drop_zero_ret(records)
     n_censored = 0                                        # 无标签被剔除(前向不足 h 根 / 无窗口收益)
     rets: dict[str, float] = {}
     for r in records:
@@ -661,9 +665,11 @@ def discriminate_at_signal(records: list, horizon: int = 20, win_thresh: Optiona
                     if wmeta.get("n_universe_all") else None)
         wmeta["up_ratio"] = None if up_ratio is None else round(up_ratio, 4)
         wmeta["degenerate_label"] = bool(up_ratio is not None and up_ratio >= 0.8)
+        wmeta["n_zero_excluded"] = n_zero_excluded
         label_txt = (f"该股是否为本区间赢家({wmeta.get('winner_basis')}口径前{winner_top_pct:.0f}%"
                      + (f"且≥{(min_winner_ret or 0)*100:.0f}%" if min_winner_ret else "")
                      + f",收益切点 {thr}); 赢家 {len(winners)}/{len(pairs)} 只"
+                     + (f"; 已剔除零收益僵尸 {n_zero_excluded} 只" if n_zero_excluded else "")
                      + (f"; 该窗上涨股占比 {up_ratio:.0%}" if up_ratio is not None else "")
                      + (" ⚠️普涨窗:'前%.0f%%'退化为中位数以上,增益多为beta" % winner_top_pct
                         if wmeta["degenerate_label"] else ""))
@@ -1149,7 +1155,22 @@ def _pct(vals: list[float], q: float) -> Optional[float]:
     return round(s[min(len(s) - 1, max(0, int(len(s) * q)))], 4)
 
 
-def distribution_report(records: list[dict], bands=(0.0, 0.1, 0.2, 0.3, 0.5, 1.0)) -> dict:
+def drop_zero_ret(records: list[dict]) -> tuple[list[dict], int]:
+    """剔除**赢家窗收益恰好为 0** 的记录(僵尸样本)。返回 (保留记录, 剔除数)。
+
+    实跑 12 窗里这类样本 2,409 只(4.7%),集中在北交所——赢家窗内长期停牌/退市整理期,
+    前复权数据被 forward-fill 成一条直线。它们既不是赢家也不是飞刀,却:
+      ①进上涨率分母 → 压低 up_ratio → **普涨窗可能漏标**(80% 阈值附近的窗尤其敏感);
+      ②进赢家排序分母 → 稀释 top_pct 切点;
+      ③其信号进日内可比池 → 给判别力度量添纯噪声。
+    注:按 --delisted-ret 计入的退市股 ret=-1.0,不受本剔除影响(它们是真飞刀,必须留下)。
+    """
+    keep = [r for r in records if r.get("ret") is None or float(r["ret"]) != 0.0]
+    return keep, len(records) - len(keep)
+
+
+def distribution_report(records: list[dict], bands=(0.0, 0.1, 0.2, 0.3, 0.5, 1.0),
+                        exclude_zero_ret: bool = False) -> dict:
     """赢家窗收益的**分布画像** + 按上市板分组(纯 Pass2,不重跑 Pass1)。
 
     回答"涨幅怎么分布、赢家集中在哪个板":
@@ -1163,6 +1184,11 @@ def distribution_report(records: list[dict], bands=(0.0, 0.1, 0.2, 0.3, 0.5, 1.0
     rows = [{"code": r["code"], "ret": float(r["ret"]),
              "board": board_of(r["code"]), "has_signal": bool(r.get("days"))}
             for r in records if r.get("ret") is not None]
+    n_zero_excluded = 0
+    if exclude_zero_ret:
+        before = len(rows)
+        rows = [x for x in rows if x["ret"] != 0.0]
+        n_zero_excluded = before - len(rows)
     if not rows:
         return {"n": 0, "text": "无收益数据"}
 
@@ -1206,9 +1232,10 @@ def distribution_report(records: list[dict], bands=(0.0, 0.1, 0.2, 0.3, 0.5, 1.0
             by_board[name] = s
     out = {"n": len(rows), "all": all_stats, "with_signal": sig_stats, "by_board": by_board,
            "base_recall": (round(base_recall, 4) if base_recall else None),
-           "recall_by_band": recall_by_band}
+           "recall_by_band": recall_by_band, "n_zero_excluded": n_zero_excluded}
     lines = [f"赢家窗收益分布(口径=区间买入持有,非本策略买卖规则):全域 {all_stats['n']} 只 / "
-             f"有信号 {sig_stats['n']} 只",
+             f"有信号 {sig_stats['n']} 只"
+             + (f" ｜ 已剔除零收益僵尸样本 {n_zero_excluded} 只" if n_zero_excluded else ""),
              f"    {'子集':<10} {'只数':>6} {'上涨率':>7} {'中位':>8} {'p75':>8} {'p90':>8} {'p99':>8}"]
     for label, s in (("全域", all_stats), ("有信号", sig_stats)):
         lines.append(f"    {label:<10} {s['n']:>6} {(s['up_ratio'] or 0):>6.1%} "
@@ -1251,7 +1278,8 @@ def distribution_report(records: list[dict], bands=(0.0, 0.1, 0.2, 0.3, 0.5, 1.0
 
 def coverage_report(records: list[dict], winner_top_pct: float = 50.0,
                     winner_basis: str = "profitable",
-                    min_winner_ret: Optional[float] = None) -> dict:
+                    min_winner_ret: Optional[float] = None,
+                    exclude_zero_ret: bool = False) -> dict:
     """**双口径对比**:赢家(区间涨幅口径)在**我们的买卖规则**下实际赚到了多少。
 
     需 Pass1 带 --trade-sim(每个信号记 sim_ret/sim_reason/sim_holding,由 simulate_b1_trade 产出:
@@ -1263,6 +1291,9 @@ def coverage_report(records: list[dict], winner_top_pct: float = 50.0,
     ⚠️ sim 收益受**加载窗口右端**截断:reason=open_end 表示到数据末仍持有,收益按末根收盘计。
     """
     rets = {r["code"]: float(r["ret"]) for r in records if r.get("ret") is not None}
+    if exclude_zero_ret:
+        records, _nz = drop_zero_ret(records)
+        rets = {c: v for c, v in rets.items() if v != 0.0}
     if not rets:
         return {"n_winners": 0, "text": "无收益数据"}
     pairs = sorted(rets.items(), key=lambda kv: kv[1], reverse=True)
@@ -1403,6 +1434,9 @@ def main(argv=None, loader=None) -> int:
     ap.add_argument("--bbi-consec", type=int, default=2, help="--trade-sim 的BBI连破日数(默认2)")
     ap.add_argument("--style-features", action="store_true",
                     help="Pass1:追加风格特征 f_board_code(上市板)与 f_amount20(20日均成交额,市值代理)")
+    ap.add_argument("--exclude-zero-ret", action="store_true",
+                    help="Pass2:剔除赢家窗收益**恰好为 0** 的僵尸样本(长期停牌/退市整理期 forward-fill);"
+                         "它们会压低上涨率导致普涨窗漏标、稀释赢家切点")
     ap.add_argument("--distribution", action="store_true",
                     help="Pass2:赢家窗收益分布画像 + 按上市板分组(纯读 firings)")
     ap.add_argument("--coverage", action="store_true",
@@ -1473,7 +1507,7 @@ def main(argv=None, loader=None) -> int:
                 win_top_q=args.win_top_q, use_mfe=args.use_mfe,
                 picks_per_day=args.picks_per_day, label_basis=args.label_basis,
                 winner_top_pct=args.capture_top_pct, winner_basis=args.winner_basis,
-                min_winner_ret=args.min_winner_ret)
+                min_winner_ret=args.min_winner_ret, exclude_zero_ret=args.exclude_zero_ret)
 
         if args.discriminate and args.per_window:         # 每文件=一个多头区间,分窗跑 + 跨窗汇总
             results: dict[str, dict] = {}
@@ -1505,14 +1539,15 @@ def main(argv=None, loader=None) -> int:
         if args.distribution or args.coverage:
             res_out: dict = {}
             if args.distribution:
-                dist = distribution_report(recs)
+                dist = distribution_report(recs, exclude_zero_ret=args.exclude_zero_ret)
                 print("\n=== 赢家窗收益分布 + 上市板分组(口径=区间买入持有) ===")
                 print(dist["text"])
                 res_out["distribution"] = dist
             if args.coverage:
                 cov = coverage_report(recs, winner_top_pct=args.capture_top_pct,
                                       winner_basis=args.winner_basis,
-                                      min_winner_ret=args.min_winner_ret)
+                                      min_winner_ret=args.min_winner_ret,
+                                      exclude_zero_ret=args.exclude_zero_ret)
                 print("\n=== 双口径对比:赢家在本策略买卖规则下的覆盖度 ===")
                 print(cov["text"])
                 res_out["coverage"] = cov

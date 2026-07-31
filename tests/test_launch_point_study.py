@@ -1133,3 +1133,55 @@ def test_zero_return_below_threshold_not_flagged():
     recs = [{"code": "600000", "ret": 0.0, "days": []}]
     recs += [{"code": f"3007{i:02d}", "ret": 0.2, "days": []} for i in range(199)]
     assert "僵尸样本嫌疑" not in lp.distribution_report(recs)["text"]
+
+
+def test_drop_zero_ret_keeps_delisted_losers():
+    """剔僵尸只针对 ret 恰好=0;按 --delisted-ret 计入的 -1.0 是真飞刀,必须留下。"""
+    recs = [{"code": "A", "ret": 0.0}, {"code": "B", "ret": -1.0, "delisted": True},
+            {"code": "C", "ret": 0.2}, {"code": "D", "ret": None}]
+    keep, n = lp.drop_zero_ret(recs)
+    assert n == 1 and {r["code"] for r in keep} == {"B", "C", "D"}
+
+
+def test_exclude_zero_ret_can_flip_degenerate_window_flag():
+    """核心验证点:僵尸样本进分母会压低上涨率 → 普涨窗漏标;剔除后可能翻成普涨窗。
+
+    构造:78 只上涨 / 5 只下跌 / 17 只僵尸 → 含僵尸 up_ratio=78%(未达80%,漏标);
+    剔僵尸后 78/83=94% → 正确标为普涨窗。
+    """
+    recs = ([{"code": f"U{i:03d}", "ret": 0.3, "days": [["2024-09-02", 0.0, {"f_x": 1.0}]]}
+             for i in range(78)]
+            + [{"code": f"D{i:03d}", "ret": -0.2, "days": [["2024-09-02", 0.0, {"f_x": 2.0}]]}
+               for i in range(5)]
+            + [{"code": f"Z{i:03d}", "ret": 0.0, "days": [["2024-09-02", 0.0, {"f_x": 3.0}]]}
+               for i in range(17)])
+    keep_all = lp.discriminate_at_signal(recs, label_basis="winner", winner_top_pct=50.0)
+    assert keep_all["winner_meta"]["up_ratio"] == 0.78
+    assert keep_all["winner_meta"]["degenerate_label"] is False        # 漏标
+    cleaned = lp.discriminate_at_signal(recs, label_basis="winner", winner_top_pct=50.0,
+                                        exclude_zero_ret=True)
+    assert cleaned["winner_meta"]["n_zero_excluded"] == 17
+    assert cleaned["winner_meta"]["up_ratio"] > 0.9
+    assert cleaned["winner_meta"]["degenerate_label"] is True          # 剔除后正确识别
+    assert "已剔除零收益僵尸 17 只" in cleaned["text"] and "普涨窗" in cleaned["text"]
+
+
+def test_distribution_exclude_zero_ret_changes_up_ratio():
+    recs = ([{"code": f"Z{i:03d}", "ret": 0.0, "days": []} for i in range(20)]
+            + [{"code": f"U{i:03d}", "ret": 0.2, "days": []} for i in range(80)])
+    withz = lp.distribution_report(recs)
+    without = lp.distribution_report(recs, exclude_zero_ret=True)
+    assert withz["all"]["up_ratio"] == 0.8 and withz["n_zero_excluded"] == 0
+    assert without["all"]["up_ratio"] == 1.0 and without["n_zero_excluded"] == 20
+    assert without["n"] == 80 and "已剔除零收益僵尸样本 20 只" in without["text"]
+
+
+def test_coverage_exclude_zero_ret_drops_zombie_winners():
+    recs = [{"code": "Z1", "ret": 0.0,
+             "days": [["2024-09-02", 0.0, {"sim_ret": 0.0, "sim_reason": "open_end"}]]},
+            {"code": "W1", "ret": 0.5,
+             "days": [["2024-09-02", 0.0, {"sim_ret": 0.2, "sim_reason": "bbi_exit"}]]}]
+    withz = lp.coverage_report(recs, winner_top_pct=100.0)
+    without = lp.coverage_report(recs, winner_top_pct=100.0, exclude_zero_ret=True)
+    assert withz["n_winner_with_signal"] == 1 and without["n_winner_with_signal"] == 1
+    assert without["coverage"] == 1.0                       # 僵尸不再混进赢家池

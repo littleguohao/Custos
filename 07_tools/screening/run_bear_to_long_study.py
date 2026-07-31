@@ -90,7 +90,7 @@ def pass2_cmd(files: list[Path], out_file: Path, args) -> list[str]:
             "--winner-basis", args.winner_basis,
             "--capture-top-pct", str(args.winner_top_pct),
             "--picks-per-day", str(args.picks_per_day),
-            "--out", str(out_file)]
+            "--out", str(out_file)] + (["--exclude-zero-ret"] if args.exclude_zero_ret else [])
 
 
 def tag_of(p: dict) -> str:
@@ -219,6 +219,8 @@ def main(argv=None, runner=None) -> int:
     ap.add_argument("--winner-top-pct", type=float, default=50.0)
     ap.add_argument("--winner-basis", choices=["universe", "profitable"], default="profitable")
     ap.add_argument("--picks-per-day", type=int, default=3)
+    ap.add_argument("--exclude-zero-ret", action="store_true",
+                    help="Pass2:剔除赢家窗收益恰好为 0 的僵尸样本(停牌/退市整理期 forward-fill)")
     ap.add_argument("--qlib-end", default=QLIB_END)
     ap.add_argument("--dry-run", action="store_true", help="只打印计划与命令,不执行")
     ap.add_argument("--force", action="store_true", help="已有 firings 也重跑(默认跳过=断点续跑)")
