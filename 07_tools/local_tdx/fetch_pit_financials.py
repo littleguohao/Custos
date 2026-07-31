@@ -463,6 +463,9 @@ def main(argv=None) -> int:
     out_path = Path(args.out)
 
     if args.verify:
+        if args.periods or args.since or args.as_of:
+            print("[WARN] --verify 为纯自检模式,--periods/--since/--as-of 被忽略;"
+                  "补拉请先不带 --verify 运行", file=sys.stderr)
         recs = load_ledger(out_path)
         if not recs:
             print(f"[ERR] 台账为空: {out_path}", file=sys.stderr)
