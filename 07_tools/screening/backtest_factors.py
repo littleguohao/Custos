@@ -1076,14 +1076,14 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     ap.add_argument("--cost-bps", type=float, default=0.0,
                     help="往返交易成本(基点),从每笔收益扣除(A股约20~30bps含佣金/印花/滑点);默认0=毛收益")
     ap.add_argument("--amv-long-only", action="store_true",
-                    help="仅在0AMV『做多』区间进场(读指南针compass_amv历史→状态机>4%做多/<-2.3%空头;配合 --trade-sim)")
+                    help="仅在0AMV『做多』区间进场(读指南针compass_amv历史→状态机>4%%做多/<-2.3%%空头;配合 --trade-sim)")
     ap.add_argument("--bbi-consec", type=int, default=2,
                     help="出场:站上BBI后连续N日收盘跌破BBI才卖出(默认2;可扫描出场松紧)")
     ap.add_argument("--time-stop", type=int, default=0,
                     help="出场:持有N根仍未触发止损/BBI则到期平仓(默认0=不启用)")
     ap.add_argument("--portfolio", action="store_true",
                     help="在逐笔交易上叠加组合级资金曲线(固定风险仓位+并发上限),输出总收益/CAGR/最大回撤")
-    ap.add_argument("--risk-pct", type=float, default=1.0, help="组合:每笔风险占本金%(默认1.0)")
+    ap.add_argument("--risk-pct", type=float, default=1.0, help="组合:每笔风险占本金%%(默认1.0)")
     ap.add_argument("--max-concurrent", type=int, default=5, help="组合:同时持仓上限(默认5)")
     ap.add_argument("--max-pos", type=float, default=20.0, help="组合:单仓名义上限%%本金(默认20)")
     ap.add_argument("--top-n", type=int, default=0,

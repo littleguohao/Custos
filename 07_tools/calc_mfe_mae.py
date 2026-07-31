@@ -92,11 +92,11 @@ def load_entry_dates(ledger_path: Path = LEDGER) -> dict[str, dict]:
     return resolve_open_entry_dates(rows or [])
 
 
-def main():
+def main(argv=None):
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", default=date.today().strftime("%Y-%m-%d"))
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     target = args.date
     OUT = BASE / "01_data" / "holdings" / f"{target}_mfe_mae.json"
 
