@@ -127,6 +127,75 @@ def firings_reusable(f: Path, args) -> bool:
     return True
 
 
+def survivorship_report(firings_files: list[Path], s_data_root: str,
+                        data_source: str = "qlib",
+                        today_codes: Optional[set] = None) -> dict:
+    """幸存者偏差体检:样本里有多少只"当时在、今天已经没了"的票。
+
+    为什么不能用 n_delisted 判断:它只统计**赢家窗内彻底没价格**的票,而 A 股退市是慢流程
+    (ST→*ST→退市整理期),一只票正好死在某个 20~70 交易日窗口内本就稀有 ⇒ n_delisted=0 是
+    预期行为,**不能**推出"退市股被剔除"。
+    真正的判据是:qlib 宇宙(instruments/all.txt 并集,含退市股)减去**今天本地 vipdoc 实有**的票
+    = 已摘牌队列;再看各窗 firings 的样本里落了多少只。落 0 才说明去偏失效(§3 首条)。
+    """
+    import json as _j
+    import s_data as _sd  # noqa: PLC0415
+    sub = "CSV_DATA" if data_source == "csv" else "Q_DATA"
+    uni = set(_sd.list_universe(str(Path(s_data_root) / sub), source=data_source))
+    if today_codes is None:
+        try:
+            sys.path.insert(0, str(TOOLS / "local_tdx"))
+            import local_tdx_data as _ltd  # noqa: PLC0415
+            today_codes = set(_ltd.list_local_vipdoc_codes(ashare_only=True))
+        except Exception as exc:  # noqa: BLE001
+            return {"error": f"无法列出今日本地宇宙: {exc}"}
+    gone = uni - set(today_codes)                 # 宇宙里有、今天没有 = 已摘牌/退市
+    out: dict = {"universe": len(uni), "today": len(today_codes), "gone_pool": len(gone),
+                 "windows": []}
+    for fp in firings_files:
+        try:
+            raw = _j.loads(Path(fp).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            out["windows"].append({"file": Path(fp).name, "error": str(exc)})
+            continue
+        recs = raw if isinstance(raw, list) else (raw.get("records") or [])
+        codes = {r.get("code") for r in recs if r.get("code")}
+        with_sig = {r.get("code") for r in recs if (r.get("days") or [])}
+        hit = codes & gone
+        out["windows"].append({
+            "file": Path(fp).name,
+            "label": (f"{raw.get('start')}~{raw.get('end')}" if isinstance(raw, dict) else ""),
+            "n_codes": len(codes), "n_with_signal": len(with_sig),
+            "n_gone_in_sample": len(hit),
+            "gone_share": round(len(hit) / len(codes), 4) if codes else None,
+            "n_gone_with_signal": len(with_sig & gone),
+            "n_delisted_flag": sum(1 for r in recs if r.get("delisted")),
+        })
+    lines = [f"qlib 宇宙 {out['universe']} 只;今日本地实有 {out['today']} 只;"
+             f"**已摘牌队列 {out['gone_pool']} 只**(宇宙有、今天没有)",
+             f"    {'窗口':<28} {'样本股':>7} {'有信号':>7} {'已摘牌在样本':>12} {'占比':>7} {'摘牌且有信号':>12} {'窗内消失':>9}"]
+    for w in out["windows"]:
+        if w.get("error"):
+            lines.append(f"    {w['file']:<28} 读取失败: {w['error']}")
+            continue
+        lines.append(f"    {(w['label'] or w['file'])[:28]:<28} {w['n_codes']:>7} "
+                     f"{w['n_with_signal']:>7} {w['n_gone_in_sample']:>12} "
+                     f"{(w['gone_share'] or 0):>6.1%} {w['n_gone_with_signal']:>12} "
+                     f"{w['n_delisted_flag']:>9}")
+    zero = [w for w in out["windows"] if not w.get("error") and w["n_gone_in_sample"] == 0]
+    if out["gone_pool"] == 0:
+        lines.append("  ⚠️ 已摘牌队列为 0 ⇒ qlib 宇宙实际只含幸存者,**去偏无效**,"
+                     "所有结论只能当乐观上界(§3 首条)")
+    elif zero:
+        lines.append(f"  ⚠️ {len(zero)} 个窗的样本里一只已摘牌股都没有 ⇒ 该窗去偏无效,单独标注")
+    else:
+        lines.append("  ✅ 各窗样本均含已摘牌股 ⇒ 飞刀留在样本内,'分不出赢家与飞刀'的结论成立")
+    lines.append("  注:'窗内消失'=赢家窗完全无价格而按 --delisted-ret 计入的只数,"
+                 "短窗内本就稀有,0 不代表去偏失效")
+    out["text"] = "\n".join(lines)
+    return out
+
+
 def main(argv=None, runner=None) -> int:
     ap = argparse.ArgumentParser(description="空头段识别未来赢家:窗口枚举 → Pass1 逐对 → Pass2 汇总")
     ap.add_argument("--out-dir", default="06_logs/bear2long")
@@ -154,6 +223,8 @@ def main(argv=None, runner=None) -> int:
     ap.add_argument("--dry-run", action="store_true", help="只打印计划与命令,不执行")
     ap.add_argument("--force", action="store_true", help="已有 firings 也重跑(默认跳过=断点续跑)")
     ap.add_argument("--pass2-only", action="store_true", help="只做 Pass2 汇总(firings 已就绪)")
+    ap.add_argument("--survivorship-report", action="store_true",
+                    help="幸存者偏差体检:统计各窗样本里'当时在、今天已摘牌'的票数(不跑 Pass1/Pass2)")
     args = ap.parse_args(argv)
     run = runner or (lambda cmd: subprocess.run(cmd, check=False).returncode)
 
@@ -190,6 +261,19 @@ def main(argv=None, runner=None) -> int:
     if not args.dry_run:
         out_dir.mkdir(parents=True, exist_ok=True)   # dry-run 只看计划,不落任何目录/文件
     files: list[Path] = []
+    if args.survivorship_report:                     # 只体检,不跑 Pass1/Pass2
+        existing = [out_dir / f"firings_{tag_of(p)}.json" for p in keep]
+        existing = [f for f in existing if f.exists()]
+        if not existing:
+            print("[ERR] 没有可体检的 firings(先跑 Pass1)", file=sys.stderr)
+            return 2
+        rep = survivorship_report(existing, args.s_data_root, args.data_source)
+        if rep.get("error"):
+            print(f"[ERR] {rep['error']}", file=sys.stderr)
+            return 2
+        print("\n=== 幸存者偏差体检(样本里有多少'当时在、今天已摘牌'的票) ===")
+        print(rep["text"])
+        return 0
     rc_all = 0
     for p in keep:
         f = out_dir / f"firings_{tag_of(p)}.json"

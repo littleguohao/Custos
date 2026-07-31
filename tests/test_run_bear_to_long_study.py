@@ -78,6 +78,77 @@ class TestCommands:
         assert "统计力很弱" in capsys.readouterr().err
 
 
+class TestSurvivorshipReport:
+    """去偏体检:判据是"样本里有多少当时在、今天已摘牌的票",**不是** n_delisted。
+
+    n_delisted 只统计赢家窗内彻底没价格的票;A 股退市是慢流程,正好死在 20~70 交易日窗口内本就
+    稀有 ⇒ 2019 年后各窗 n_delisted=0 是预期行为,不能推出"退市股被剔除"。
+    """
+
+    def _firings(self, tmp_path, name, codes, with_sig=(), delisted=()):
+        recs = [{"code": c, "ret": 0.1,
+                 "days": [["2022-06-01", 0.0, {"f_x": 1.0}]] if c in with_sig else [],
+                 **({"delisted": True} if c in delisted else {})} for c in codes]
+        p = tmp_path / name
+        p.write_text(json.dumps({"start": "2022-05-06", "end": "2022-06-02",
+                                 "records": recs}, ensure_ascii=False), encoding="utf-8")
+        return p
+
+    def test_gone_cohort_counted_per_window(self, tmp_path, monkeypatch):
+        f = self._firings(tmp_path, "w1.json", ["600000", "000001", "900001"],
+                          with_sig=("600000", "900001"))
+        import s_data
+        monkeypatch.setattr(s_data, "list_universe",
+                            lambda root, source="qlib": ["600000", "000001", "900001"])
+        rep = rb.survivorship_report([f], "/tmp/sroot", today_codes={"600000", "000001"})
+        assert rep["gone_pool"] == 1                                  # 900001 今天已没有
+        w = rep["windows"][0]
+        assert w["n_codes"] == 3 and w["n_gone_in_sample"] == 1
+        assert w["n_gone_with_signal"] == 1 and w["n_delisted_flag"] == 0
+        assert "✅" in rep["text"] and "飞刀留在样本内" in rep["text"]
+
+    def test_empty_gone_pool_flags_debias_invalid(self, tmp_path, monkeypatch):
+        """宇宙里一只已摘牌股都没有 ⇒ 去偏无效,结论只能当乐观上界(§3 首条)。"""
+        f = self._firings(tmp_path, "w1.json", ["600000"], with_sig=("600000",))
+        import s_data
+        monkeypatch.setattr(s_data, "list_universe", lambda root, source="qlib": ["600000"])
+        rep = rb.survivorship_report([f], "/tmp/sroot", today_codes={"600000"})
+        assert rep["gone_pool"] == 0
+        assert "去偏无效" in rep["text"] and "乐观上界" in rep["text"]
+
+    def test_window_without_gone_stock_flagged(self, tmp_path, monkeypatch):
+        f1 = self._firings(tmp_path, "w1.json", ["600000", "900001"], with_sig=("900001",))
+        f2 = self._firings(tmp_path, "w2.json", ["600000"], with_sig=("600000",))
+        import s_data
+        monkeypatch.setattr(s_data, "list_universe",
+                            lambda root, source="qlib": ["600000", "900001"])
+        rep = rb.survivorship_report([f1, f2], "/tmp/sroot", today_codes={"600000"})
+        assert [w["n_gone_in_sample"] for w in rep["windows"]] == [1, 0]
+        assert "1 个窗的样本里一只已摘牌股都没有" in rep["text"]
+
+    def test_n_delisted_zero_is_explained_as_expected(self, tmp_path, monkeypatch):
+        f = self._firings(tmp_path, "w1.json", ["600000", "900001"], with_sig=("900001",))
+        import s_data
+        monkeypatch.setattr(s_data, "list_universe",
+                            lambda root, source="qlib": ["600000", "900001"])
+        rep = rb.survivorship_report([f], "/tmp/sroot", today_codes={"600000"})
+        assert "0 不代表去偏失效" in rep["text"]
+
+    def test_unreadable_firings_reported_not_raised(self, tmp_path, monkeypatch):
+        bad = tmp_path / "bad.json"
+        bad.write_text("{not json", encoding="utf-8")
+        import s_data
+        monkeypatch.setattr(s_data, "list_universe", lambda root, source="qlib": ["600000"])
+        rep = rb.survivorship_report([bad], "/tmp/sroot", today_codes=set())
+        assert rep["windows"][0].get("error") and "读取失败" in rep["text"]
+
+    def test_cli_requires_existing_firings(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(rb.bt, "load_amv_regime", lambda since=None: {"2022-01-03": "空头"})
+        monkeypatch.setattr(rb.lp, "bear_to_long_pairs", lambda *a, **k: [_pair()])
+        rc = rb.main(["--out-dir", str(tmp_path), "--survivorship-report"])
+        assert rc == 2 and "没有可体检的 firings" in capsys.readouterr().err
+
+
 class TestResumeAndPass2:
     def _setup(self, monkeypatch, pairs):
         monkeypatch.setattr(rb.bt, "load_amv_regime", lambda since=None: {"2022-01-03": "空头"})
