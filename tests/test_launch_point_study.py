@@ -1086,3 +1086,50 @@ def test_extract_firings_trade_sim_and_style_features():
     assert "sim_ret" in ex and "sim_reason" in ex and "sim_holding" in ex
     assert ex["f_board_code"] == 1.0                      # BOARDS 里创业板序号
     assert 6.0 < ex["f_amount20"] < 8.0                   # log10(10~18 × 1e6) ≈ 7
+
+
+def test_recall_by_band_detects_negative_selection_on_big_winners():
+    """核心:召回率随涨幅单调下降 ⇒ 入场门槛对大牛股是负选择,瓶颈在召回而非排序。
+
+    构造:小涨票大多有信号,大涨票大多没有(复刻实跑形态:≥100% 召回 15.6% vs 基准 25%)。
+    """
+    recs = []
+    for i in range(200):                                  # 小涨(5%):80% 有信号
+        recs.append({"code": f"6000{i:02d}", "ret": 0.05,
+                     "days": [["2024-09-02", 0.0, {}]] if i % 5 else []})
+    for i in range(100):                                  # 大涨(120%):10% 有信号
+        recs.append({"code": f"3007{i:02d}", "ret": 1.2,
+                     "days": [["2024-09-02", 0.0, {}]] if i % 10 == 0 else []})
+    r = lp.distribution_report(recs)
+    rb = r["recall_by_band"]
+    assert rb[">=0%"]["recall"] > rb[">=50%"]["recall"] > 0
+    assert rb[">=100%"]["recall"] == 0.1
+    assert rb[">=100%"]["vs_base_pct"] < -0.5             # 相对基准显著不足
+    assert "大涨幅段召回不足" in r["text"] and "负选择" in r["text"]
+    assert "召回" in r["text"] and "结论#2" in r["text"]
+
+
+def test_recall_high_on_big_winners_does_not_warn():
+    recs = [{"code": f"6000{i:02d}", "ret": 1.2, "days": [["2024-09-02", 0.0, {}]]}
+            for i in range(50)]
+    r = lp.distribution_report(recs)
+    assert r["recall_by_band"][">=100%"]["recall"] == 1.0
+    assert "大涨幅段召回不足" not in r["text"]
+
+
+def test_zero_return_zombies_flagged():
+    """收益恰好为 0 的样本(停牌/退市整理期 forward-fill)占比超 2% 必须告警:
+    它们进分母会压低上涨率,导致普涨窗漏标。"""
+    recs = [{"code": f"6000{i:02d}", "ret": 0.0, "days": []} for i in range(10)]
+    recs += [{"code": f"3007{i:02d}", "ret": 0.2, "days": []} for i in range(90)]
+    r = lp.distribution_report(recs)
+    assert r["all"]["n_zero"] == 10 and r["all"]["zero_ratio"] == 0.1
+    assert r["all"]["up_ratio"] == 0.9                     # ret>0 严格,零收益不计入上涨
+    assert "恰好为 0" in r["text"] and "僵尸样本嫌疑" in r["text"]
+    assert "普涨窗可能漏标" in r["text"]
+
+
+def test_zero_return_below_threshold_not_flagged():
+    recs = [{"code": "600000", "ret": 0.0, "days": []}]
+    recs += [{"code": f"3007{i:02d}", "ret": 0.2, "days": []} for i in range(199)]
+    assert "僵尸样本嫌疑" not in lp.distribution_report(recs)["text"]

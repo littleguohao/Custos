@@ -1169,15 +1169,33 @@ def distribution_report(records: list[dict], bands=(0.0, 0.1, 0.2, 0.3, 0.5, 1.0
     def _stats(sub: list[dict]) -> dict:
         rets = [x["ret"] for x in sub]
         pos = [x for x in sub if x["ret"] > 0]
-        return {"n": len(sub), "n_up": len(pos),
-                "up_ratio": round(len(pos) / len(sub), 4) if sub else None,
+        zero = [x for x in sub if x["ret"] == 0]
+        n = len(rets)
+        return {"n": len(sub), "n_up": len(pos), "n_zero": len(zero),
+                "up_ratio": round(len(pos) / n, 4) if n else None,
+                "zero_ratio": round(len(zero) / n, 4) if n else None,
                 "median": _median(rets), "p10": _pct(rets, 0.10), "p25": _pct(rets, 0.25),
                 "p75": _pct(rets, 0.75), "p90": _pct(rets, 0.90), "p99": _pct(rets, 0.99),
+                # n=0 时(如全无信号)不得除零 —— 空子集是合法输入
                 "bands": {f">={b:.0%}": {"n": sum(1 for x in rets if x >= b),
-                                         "share": round(sum(1 for x in rets if x >= b) / len(rets), 4)}
+                                         "share": (round(sum(1 for x in rets if x >= b) / n, 4)
+                                                   if n else None)}
                           for b in bands}}
 
     all_stats, sig_stats = _stats(rows), _stats([x for x in rows if x["has_signal"]])
+    # **按涨幅带的召回率**:各带里"我们曾触发过信号"的比例。这是比"信号池收益分布"更直接的问题——
+    # 若召回率随涨幅单调下降,说明入场门槛对大牛股是**负选择**(压根没进池子),
+    # 瓶颈在召回而非排序(与结论#2"买弱指纹排除做多区间突破赢家"同源)。
+    base_recall = (sig_stats["n"] / all_stats["n"]) if all_stats["n"] else None
+    recall_by_band = {}
+    for b in bands:
+        k = f">={b:.0%}"
+        tot, sig = all_stats["bands"][k]["n"], sig_stats["bands"][k]["n"]
+        recall_by_band[k] = {
+            "n_universe": tot, "n_with_signal": sig,
+            "recall": round(sig / tot, 4) if tot else None,
+            "vs_base_pct": (round((sig / tot) / base_recall - 1, 4)
+                            if tot and base_recall else None)}
     by_board = {}
     for name, _ in BOARDS + (("其他", ()),):
         sub = [x for x in rows if x["board"] == name]
@@ -1186,7 +1204,9 @@ def distribution_report(records: list[dict], bands=(0.0, 0.1, 0.2, 0.3, 0.5, 1.0
             s["share_of_universe"] = round(len(sub) / len(rows), 4)
             s["n_with_signal"] = sum(1 for x in sub if x["has_signal"])
             by_board[name] = s
-    out = {"n": len(rows), "all": all_stats, "with_signal": sig_stats, "by_board": by_board}
+    out = {"n": len(rows), "all": all_stats, "with_signal": sig_stats, "by_board": by_board,
+           "base_recall": (round(base_recall, 4) if base_recall else None),
+           "recall_by_band": recall_by_band}
     lines = [f"赢家窗收益分布(口径=区间买入持有,非本策略买卖规则):全域 {all_stats['n']} 只 / "
              f"有信号 {sig_stats['n']} 只",
              f"    {'子集':<10} {'只数':>6} {'上涨率':>7} {'中位':>8} {'p75':>8} {'p90':>8} {'p99':>8}"]
@@ -1194,17 +1214,35 @@ def distribution_report(records: list[dict], bands=(0.0, 0.1, 0.2, 0.3, 0.5, 1.0
         lines.append(f"    {label:<10} {s['n']:>6} {(s['up_ratio'] or 0):>6.1%} "
                      f"{_fmt_pct(s['median']):>8} {_fmt_pct(s['p75']):>8} "
                      f"{_fmt_pct(s['p90']):>8} {_fmt_pct(s['p99']):>8}")
-    lines.append("  涨幅带(全域 / 有信号):")
+    if (all_stats["zero_ratio"] or 0) >= 0.02:
+        lines.append(f"  ⚠️ 收益**恰好为 0** 的样本 {all_stats['n_zero']} 只"
+                     f"({all_stats['zero_ratio']:.1%}):赢家窗内长期停牌/退市整理期"
+                     "(前复权数据被 forward-fill)的僵尸样本嫌疑,它们进了分母会压低上涨率"
+                     "(→ 普涨窗可能漏标),建议单列或剔除后复核")
+    lines.append(f"  **按涨幅带的召回率**(该带里我们曾触发信号的比例;基准 {(base_recall or 0):.1%}):")
+    lines.append(f"    {'涨幅带':>8} {'全域只数':>9} {'有信号':>7} {'召回率':>7} {'相对基准':>9}")
+    for b in bands:
+        k = f">={b:.0%}"
+        rb = recall_by_band[k]
+        lines.append(f"    {k:>8} {rb['n_universe']:>9} {rb['n_with_signal']:>7} "
+                     f"{(rb['recall'] or 0):>6.1%} {((rb['vs_base_pct'] or 0) * 100):>+8.1f}%")
+    hi = recall_by_band.get(">=50%", {}).get("vs_base_pct")
+    if hi is not None and hi <= -0.10:
+        lines.append(f"  → **大涨幅段召回不足**(≥50% 带相对基准 {hi*100:+.0f}%):入场门槛对大牛股是"
+                     "**负选择**——它们压根没进候选池 ⇒ 瓶颈在**召回**而非排序"
+                     "(与结论#2『买弱指纹排除做多区间突破赢家』同源)")
+    lines.append("  涨幅带占比(全域 / 有信号):")
     for b in bands:
         k = f">={b:.0%}"
         a, g = all_stats["bands"][k], sig_stats["bands"][k]
-        lines.append(f"    {k:>7}  {a['n']:>5} 只({a['share']:.1%})  |  有信号 {g['n']:>5} 只({g['share']:.1%})")
+        lines.append(f"    {k:>7}  {a['n']:>5} 只({_fmt_pct(a['share'])})  |  "
+                     f"有信号 {g['n']:>5} 只({_fmt_pct(g['share'])})")
     lines.append("  按上市板:")
     lines.append(f"    {'板':<8} {'只数':>6} {'占宇宙':>7} {'有信号':>7} {'上涨率':>7} {'中位':>8} {'≥30%占比':>9}")
     for name, s in sorted(by_board.items(), key=lambda kv: -kv[1]["n"]):
         lines.append(f"    {name:<8} {s['n']:>6} {s['share_of_universe']:>6.1%} "
                      f"{s['n_with_signal']:>7} {(s['up_ratio'] or 0):>6.1%} "
-                     f"{_fmt_pct(s['median']):>8} {s['bands']['>=30%']['share']:>8.1%}")
+                     f"{_fmt_pct(s['median']):>8} {_fmt_pct(s['bands']['>=30%']['share']):>8}")
     lines.append("  注:板间差异要与'占宇宙比例'一起看——创业板/科创板波动天然更大,"
                  "中位更高不等于'可选出来',判别力仍看 --discriminate。")
     out["text"] = "\n".join(lines)
