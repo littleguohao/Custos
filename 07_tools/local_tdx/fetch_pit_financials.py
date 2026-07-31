@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import statistics
 import sys
 from datetime import date
 from pathlib import Path
@@ -153,12 +154,13 @@ def normalize(rows: list[dict], report_date: str,
     return out, stats
 
 
-def merge_write(records: list[dict], path: Path = LEDGER) -> dict:
+def merge_write(records: list[dict], path: str | Path = LEDGER) -> dict:
     """按 (code, report_date, notice_date) 去重合并写 JSONL(原子写)。
 
     保留同一报告期的**多个公告日版本**:同一 (code, report_date) 若出现新的 notice_date
     (更正/补披露),两条都留下,as-of 查询时按 notice_date <= T 取最新一条即可重现当时视角。
     """
+    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     existing: dict[tuple, dict] = {}
     if path.exists():
@@ -182,7 +184,8 @@ def merge_write(records: list[dict], path: Path = LEDGER) -> dict:
     return {"before": before, "after": len(rows), "added": len(rows) - before}
 
 
-def load_ledger(path: Path = LEDGER) -> list[dict]:
+def load_ledger(path: str | Path = LEDGER) -> list[dict]:
+    path = Path(path)
     if not path.exists():
         return []
     out = []
@@ -223,6 +226,59 @@ def as_of(records: list[dict], day: str, code: str | None = None,
     return best
 
 
+def verify_ledger(records: list[dict], since_year: int | None = None,
+                  until: str | None = None, low_ratio: float = 0.6) -> dict:
+    """台账完整性自检:应有报告期 vs 实有,列缺口 + 逐期行数异常。
+
+    为什么必须自检:`as_of()` 遇到台账**缺期不会报错** —— 它只会静默返回上一个可见期,
+    回测里就变成"用了 3 个月前的财报却以为是最新的"。缺口是静默的 look-behind,
+    比抛异常危险得多。同理某期行数远低于邻期(分页中断/接口限流)也会让该期样本残缺。
+
+    since_year 缺省时按台账最早报告期的年份推断。行数低于**邻期中位数** low_ratio 倍即告警。
+    """
+    by_period: dict[str, set] = {}
+    for r in records:
+        rd = r.get("report_date")
+        if rd:
+            by_period.setdefault(rd, set()).add(r.get("code"))
+    have = sorted(by_period)
+    if not have:
+        return {"ok": False, "error": "台账为空", "missing": [], "periods": []}
+    y0 = since_year or int(have[0][:4])
+    expect = quarter_ends(y0, until=until or have[-1])
+    missing = [p for p in expect if p not in by_period]
+    counts = [len(by_period[p]) for p in have]
+    med = int(statistics.median(counts)) if counts else 0
+    thin = [{"period": p, "n_codes": len(by_period[p])} for p in have
+            if med and len(by_period[p]) < med * low_ratio]
+    out = {
+        "ok": not missing and not thin,
+        "n_records": len(records),
+        "n_periods_have": len(have),
+        "n_periods_expect": len(expect),
+        "first": have[0], "last": have[-1],
+        "missing": missing,
+        "median_codes_per_period": med,
+        "thin_periods": thin,
+        "periods": [{"period": p, "n_codes": len(by_period[p])} for p in have],
+    }
+    lines = [f"台账 {len(records)} 条;报告期 实有 {len(have)} / 应有 {len(expect)} "
+             f"({have[0]} ~ {have[-1]});每期去重代码中位 {med}"]
+    if missing:
+        lines.append(f"  ⚠️ **缺 {len(missing)} 期**: {', '.join(missing)}")
+        lines.append("     缺期不会让 as_of() 报错,只会静默返回上一期 ⇒ 回测会用陈旧财报,必须补拉")
+    else:
+        lines.append("  ✅ 报告期无缺口")
+    if thin:
+        lines.append(f"  ⚠️ **{len(thin)} 期行数异常偏少**(低于中位 {low_ratio:.0%}): "
+                     + ", ".join(f"{t['period']}={t['n_codes']}" for t in thin))
+        lines.append("     多为分页中断/接口限流导致该期样本残缺,建议 --periods 单独重拉")
+    else:
+        lines.append("  ✅ 各期行数无异常偏少")
+    out["text"] = "\n".join(lines)
+    return out
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="PIT 财务:按报告期拉取,以公告日为可见日")
     ap.add_argument("--periods", nargs="*", help="报告期,如 2024-03-31(可多个)")
@@ -235,8 +291,28 @@ def main(argv=None) -> int:
     ap.add_argument("--code", help="配合 --as-of 限定单只")
     ap.add_argument("--visible-same-day", action="store_true",
                     help="--as-of 时把公告当日算作可见(默认次日,因公告多在盘后发布)")
+    ap.add_argument("--verify", action="store_true",
+                    help="台账完整性自检:报告期缺口 + 逐期行数异常(有问题 exit 1)")
+    ap.add_argument("--verify-since", type=int,
+                    help="--verify 的应有报告期起始年(缺省按台账最早期推断)")
     args = ap.parse_args(argv)
     out_path = Path(args.out)
+
+    if args.verify:
+        recs = load_ledger(out_path)
+        if not recs:
+            print(f"[ERR] 台账为空: {out_path}", file=sys.stderr)
+            return 2
+        rep = verify_ledger(recs, since_year=args.verify_since)
+        print("\n=== PIT 台账完整性自检 ===")
+        print(rep["text"])
+        if not rep["ok"]:
+            missing = rep.get("missing") or []
+            if missing:
+                print(f"\n补拉命令:\n  uv run python {Path(__file__).name} "
+                      f"--periods {' '.join(missing)}", file=sys.stderr)
+            return 1
+        return 0
 
     if args.as_of:
         recs = load_ledger(out_path)

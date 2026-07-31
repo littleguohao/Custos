@@ -164,6 +164,67 @@ class TestQuarterEnds:
         assert got == []
 
 
+class TestVerifyLedger:
+    """缺期不会让 as_of 报错,只会静默返回上一期 ⇒ 必须靠自检抓出来。"""
+
+    def _recs(self, periods, n=3):
+        out = []
+        for p in periods:
+            for i in range(n):
+                out.append({"code": f"60000{i}", "report_date": p,
+                            "notice_date": p[:4] + "-12-31", "eps": 0.1})
+        return out
+
+    def test_complete_ledger_ok(self):
+        rep = fp.verify_ledger(self._recs(["2024-03-31", "2024-06-30", "2024-09-30",
+                                           "2024-12-31"]), since_year=2024)
+        assert rep["ok"] is True and rep["missing"] == []
+        assert "无缺口" in rep["text"]
+
+    def test_missing_period_detected(self):
+        """漏 2024-06-30 ⇒ as_of 在 2024-09 前会一直返回一季报,必须报出来。"""
+        rep = fp.verify_ledger(self._recs(["2024-03-31", "2024-09-30", "2024-12-31"]),
+                               since_year=2024)
+        assert rep["ok"] is False and rep["missing"] == ["2024-06-30"]
+        assert "缺 1 期" in rep["text"] and "静默返回上一期" in rep["text"]
+
+    def test_thin_period_detected(self):
+        """某期行数远低于邻期 = 分页中断/限流导致样本残缺。"""
+        recs = self._recs(["2024-03-31", "2024-09-30", "2024-12-31"], n=100)
+        recs += [{"code": "600001", "report_date": "2024-06-30",
+                  "notice_date": "2024-08-28", "eps": 0.1}]
+        rep = fp.verify_ledger(recs, since_year=2024)
+        assert rep["ok"] is False
+        assert [t["period"] for t in rep["thin_periods"]] == ["2024-06-30"]
+        assert "行数异常偏少" in rep["text"]
+
+    def test_expected_range_inferred_from_ledger(self):
+        rep = fp.verify_ledger(self._recs(["2023-03-31", "2023-06-30", "2023-09-30",
+                                           "2023-12-31"]))
+        assert rep["n_periods_expect"] == 4 and rep["ok"] is True
+
+    def test_empty_ledger_reported(self):
+        rep = fp.verify_ledger([])
+        assert rep["ok"] is False and "台账为空" in rep["error"]
+
+    def test_cli_verify_exit_1_on_hole(self, tmp_path, capsys):
+        p = tmp_path / "pit.jsonl"
+        rows = [{"code": "600000", "report_date": rd, "notice_date": "2024-12-31"}
+                for rd in ("2024-03-31", "2024-12-31")]
+        p.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+        rc = fp.main(["--verify", "--out", str(p), "--verify-since", "2024"])
+        assert rc == 1
+        err = capsys.readouterr()
+        assert "2024-06-30" in err.out and "补拉命令" in err.err
+
+    def test_cli_verify_exit_0_when_clean(self, tmp_path, capsys):
+        p = tmp_path / "pit.jsonl"
+        rows = [{"code": "600000", "report_date": rd, "notice_date": "2024-12-31"}
+                for rd in ("2024-03-31", "2024-06-30", "2024-09-30", "2024-12-31")]
+        p.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+        assert fp.main(["--verify", "--out", str(p), "--verify-since", "2024"]) == 0
+
+
 class TestCli:
     def test_as_of_requires_ledger(self, tmp_path, capsys):
         rc = fp.main(["--as-of", "2024-05-06", "--out", str(tmp_path / "nope.jsonl")])
