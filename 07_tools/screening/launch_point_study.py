@@ -1047,6 +1047,50 @@ def sector_concentration(winners: list[str], members: dict[str, list], index_dir
     return out
 
 
+def explain_aggregate(agg: dict, feature: str = "", min_hit_ratio: float = 0.75) -> str:
+    """解读跨窗汇总:逐特征列出**各窗 AUC/增益**、被剔除的窗及原因、覆盖是否达标,
+    并给出**纯噪声下 100% 同号的概率**(0.5^(n-1))——防止把噪声里必然冒出的"完美一致"当信号。
+
+    三类窗必须分开看:计票窗(per_window)、疑过拟合被剔(overfit_excluded_windows)、
+    未出现(恒定/特征缺失)。前者是证据,第二类是反面证据,第三类只是没测到。
+    """
+    n_elig = agg.get("n_eligible_windows") or agg.get("n_windows") or 0
+    need = max(2, int(n_elig * min_hit_ratio))
+    all_w = {w["window"] for w in (agg.get("windows") or [])
+             if not w.get("degenerate_label")}
+    feats = [f for f in (agg.get("features") or []) if not feature or f["feature"] == feature]
+    lines = [f"计票窗 {n_elig} 个(普涨窗已排除 {len(agg.get('degenerate_windows') or [])} 个);"
+             f"覆盖门槛 = {need} 窗"]
+    exp_total = 0.0
+    for f in sorted(feats, key=lambda r: -(r.get("median_edge") or 0)):
+        per = {x["window"]: x for x in (f.get("per_window") or [])}
+        overfit = list(f.get("overfit_excluded_windows") or [])
+        absent = sorted(all_w - set(per) - set(overfit))
+        n = len(per)
+        p_noise = 0.5 ** (n - 1) if n >= 1 else 1.0
+        exp_total += p_noise
+        lines.append("")
+        lines.append(f"[{f['feature']}] 计票 {n} 窗 / 同号 {f.get('same_direction_windows')} "
+                     f"({(f.get('hit_ratio') or 0):.0%}) / 中位AUC {_fmt_num(f.get('median_auc'))} "
+                     f"/ 中位增益 {_fmt_pp(f.get('median_lift_pp'))} / "
+                     f"{'覆盖达标' if n >= need else f'⚠️覆盖不足({n}<{need})'} / "
+                     f"纯噪声下 100% 同号概率 {p_noise:.3f}")
+        for w in sorted(per):
+            x = per[w]
+            lines.append(f"    计票  {w:<44} AUC {_fmt_num(x.get('auc'))} "
+                         f"{_fmt_pp(x.get('lift_pp_effective'))} "
+                         f"{'取反' if x.get('direction') == 'low' else '同向'}")
+        for w in sorted(overfit):
+            lines.append(f"    剔除  {w:<44} 疑过拟合(前后半程不同号)= **反面证据**")
+        for w in absent:
+            lines.append(f"    未测  {w:<44} 恒定/特征缺失(既非支持也非反对)")
+    if len(feats) > 1:
+        lines.append("")
+        lines.append(f"→ {len(feats)} 个特征在纯噪声下期望出现 {exp_total:.2f} 个 100% 同号;"
+                     "观测数不显著高于它就不能当信号(结论#13 多重比较警示)")
+    return "\n".join(lines)
+
+
 def _buffered_start(sorted_dates: list[str], start: str, buffer_days: int) -> str:
     j = bisect.bisect_left(sorted_dates, start)
     return sorted_dates[max(0, j - buffer_days)] if sorted_dates else start
@@ -1133,8 +1177,19 @@ def main(argv=None, loader=None) -> int:
                     help="赢家另加绝对收益门槛(如 0.5=至少+50%%);默认仅按 top_pct 排名(不看正负)")
     ap.add_argument("--rank-score", choices=sorted(bt.SCORERS) + ["none"],
                     default="reversal_quality", help="当日信号池内排序分(none=随机;全部 SCORERS 可选)")
+    ap.add_argument("--explain-agg", default="",
+                    help="读 Pass2 输出的汇总 JSON,逐特征解读:各窗 AUC/增益、被剔窗及原因、"
+                         "覆盖是否达标、纯噪声下 100%% 同号概率(不跑任何计算)")
+    ap.add_argument("--explain-feature", default="", help="只解读指定特征(配 --explain-agg)")
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
+
+    if args.explain_agg:                                  # 纯读 JSON,不加载数据、不算指标
+        import json as _je
+        raw = _je.loads(Path(args.explain_agg).read_text(encoding="utf-8"))
+        agg = raw.get("aggregate") or raw
+        print(explain_aggregate(agg, feature=args.explain_feature))
+        return 0
 
     if args.list_long_windows or args.list_window_pairs:   # 只枚举区间,不加载任何 K 线
         regime = bt.load_amv_regime(since=args.start or None)

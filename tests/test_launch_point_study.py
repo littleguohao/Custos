@@ -761,6 +761,75 @@ def test_genuine_no_common_still_says_no_common():
     assert "无跨窗共同点" in agg["text"] and "未能检验" not in agg["text"]
 
 
+def test_explain_aggregate_separates_three_window_kinds():
+    """诊断输出必须把三类窗分开:计票 / 疑过拟合被剔(反面证据) / 未测(恒定或缺失,中性)。
+
+    实跑里 alpha101 只在 5/9 窗有效,而"另外 4 窗为何缺"决定结论方向完全相反。
+    """
+    agg = {
+        "n_windows": 10, "n_eligible_windows": 9, "degenerate_windows": ["W普涨"],
+        "windows": [{"window": f"W{i}", "degenerate_label": False} for i in range(1, 10)]
+                   + [{"window": "W普涨", "degenerate_label": True}],
+        "features": [{"feature": "alpha101", "median_auc": 0.5405, "median_edge": 0.0405,
+                      "median_lift_pp": 7.6, "hit_ratio": 1.0, "same_direction_windows": 5,
+                      "overfit_excluded_windows": ["W6", "W7"],
+                      "per_window": [{"window": f"W{i}", "auc": 0.54, "lift_pp_effective": 7.6,
+                                      "direction": "high"} for i in range(1, 6)]}],
+    }
+    txt = lp.explain_aggregate(agg)
+    assert "覆盖门槛 = 6 窗" in txt and "⚠️覆盖不足(5<6)" in txt
+    assert "纯噪声下 100% 同号概率 0.062" in txt          # 0.5^(5-1)
+    assert txt.count("计票  W") == 5
+    assert "剔除  W6" in txt and "反面证据" in txt
+    assert "剔除  W7" in txt
+    assert "未测  W8" in txt and "未测  W9" in txt         # 既非支持也非反对
+    assert "W普涨" not in txt                              # 普涨窗不参与,不列入
+
+
+def test_explain_aggregate_reports_noise_expectation_across_features():
+    agg = {"n_eligible_windows": 9, "degenerate_windows": [],
+           "windows": [{"window": f"W{i}", "degenerate_label": False} for i in range(1, 10)],
+           "features": [
+               {"feature": "a", "median_edge": 0.04, "hit_ratio": 1.0, "same_direction_windows": 4,
+                "per_window": [{"window": f"W{i}", "auc": 0.54, "direction": "high"}
+                               for i in range(1, 5)]},
+               {"feature": "b", "median_edge": 0.02, "hit_ratio": 0.6, "same_direction_windows": 5,
+                "per_window": [{"window": f"W{i}", "auc": 0.52, "direction": "high"}
+                               for i in range(1, 9)]}]}
+    txt = lp.explain_aggregate(agg)
+    # 0.5^3 + 0.5^7 = 0.125 + 0.0078 ≈ 0.13
+    assert "期望出现 0.13 个 100% 同号" in txt and "多重比较" in txt
+
+
+def test_explain_single_feature_filter():
+    agg = {"n_eligible_windows": 4, "degenerate_windows": [],
+           "windows": [{"window": "W1", "degenerate_label": False}],
+           "features": [{"feature": "keep", "median_edge": 0.05, "hit_ratio": 1.0,
+                         "same_direction_windows": 1,
+                         "per_window": [{"window": "W1", "auc": 0.55, "direction": "high"}]},
+                        {"feature": "drop", "median_edge": 0.01, "hit_ratio": 1.0,
+                         "same_direction_windows": 1,
+                         "per_window": [{"window": "W1", "auc": 0.51, "direction": "high"}]}]}
+    txt = lp.explain_aggregate(agg, feature="keep")
+    assert "[keep]" in txt and "[drop]" not in txt
+
+
+def test_main_explain_agg_reads_json_without_computation(tmp_path, capsys):
+    p = tmp_path / "agg.json"
+    p.write_text(json.dumps({"aggregate": {
+        "n_eligible_windows": 2, "degenerate_windows": [],
+        "windows": [{"window": "W1", "degenerate_label": False},
+                    {"window": "W2", "degenerate_label": False}],
+        "features": [{"feature": "x", "median_auc": 0.54, "median_edge": 0.04,
+                      "median_lift_pp": 5.0, "hit_ratio": 1.0, "same_direction_windows": 2,
+                      "per_window": [{"window": "W1", "auc": 0.54, "direction": "high"},
+                                     {"window": "W2", "auc": 0.55, "direction": "high"}]}]}},
+        ensure_ascii=False), encoding="utf-8")
+    rc = lp.main(["--explain-agg", str(p)])
+    out = capsys.readouterr().out
+    assert rc == 0 and "[x] 计票 2 窗" in out and "覆盖门槛 = 2 窗" in out
+
+
 def test_bear_to_long_pairs_can_include_long_head():
     """可把做多段头部 N 日纳入信号窗——覆盖那 ~27% 起涨点落在做多的情况(结论#11)。"""
     d = _bdays(60)
