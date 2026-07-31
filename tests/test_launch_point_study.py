@@ -1118,15 +1118,16 @@ def test_recall_high_on_big_winners_does_not_warn():
 
 
 def test_zero_return_zombies_flagged():
-    """收益恰好为 0 的样本(停牌/退市整理期 forward-fill)占比超 2% 必须告警:
-    它们进分母会压低上涨率,导致普涨窗漏标。"""
+    """收益恰好为 0 的样本占比超 2% 必须列出;但"僵尸样本"口径已被实测证伪
+    (--zero-ret-report 抽样 177 只 100% 是正常成交的直线回位,停牌 0 只),
+    文案必须告诫**勿剔除**、只单列观察 —— 剔除会让 up_ratio 单向上升、把窗错打成普涨窗。"""
     recs = [{"code": f"6000{i:02d}", "ret": 0.0, "days": []} for i in range(10)]
     recs += [{"code": f"3007{i:02d}", "ret": 0.2, "days": []} for i in range(90)]
     r = lp.distribution_report(recs)
     assert r["all"]["n_zero"] == 10 and r["all"]["zero_ratio"] == 0.1
     assert r["all"]["up_ratio"] == 0.9                     # ret>0 严格,零收益不计入上涨
-    assert "恰好为 0" in r["text"] and "僵尸样本嫌疑" in r["text"]
-    assert "普涨窗可能漏标" in r["text"]
+    assert "恰好为 0" in r["text"] and "勿剔除" in r["text"] and "单列观察" in r["text"]
+    assert "僵尸样本嫌疑" not in r["text"]                 # 旧口径(停牌嫌疑、建议剔除)不得复活
 
 
 def test_zero_return_below_threshold_not_flagged():

@@ -190,7 +190,8 @@ class TestFeaturePassthrough:
                     delisted_ret=-1.0, buffer_days=60, gate_window=120,
                     feature_scores="a,b", progress=200, chunk_size=0,
                     sector_features=False, style_features=False, trade_sim=False,
-                    pit_features=False, pit_ledger="", pit_visible_same_day=False)
+                    pit_features=False, pit_ledger="", pit_visible_same_day=False,
+                    stop_pct=8.0, bbi_consec=2)
         base.update(over)
         return type("A", (), base)()
 
@@ -576,3 +577,46 @@ class TestResumeAndPass2:
         rb.main(["--out-dir", str(tmp_path), "--pass2-only"],
                 runner=lambda cmd: calls.append(cmd) or 0)
         assert len(calls) == 1 and "--from-firings" in calls[0]
+
+
+class TestStopPctBbiAndLedgerFingerprint:
+    def _args(self, **over):
+        base = dict(data_source="qlib", s_data_root="/x", entry_filter="reversal_k",
+                    delisted_ret=-1.0, buffer_days=60, gate_window=120,
+                    feature_scores=rb.DEFAULT_FEATURES, progress=200, chunk_size=0,
+                    sector_features=False, style_features=False, trade_sim=False,
+                    pit_features=False, pit_ledger="", pit_visible_same_day=False,
+                    stop_pct=8.0, bbi_consec=2)
+        base.update(over)
+        return type("A", (), base)()
+
+    def test_stop_pct_bbi_passed_through_with_trade_sim(self):
+        cmd = rb.pass1_cmd(_pair(), Path("/tmp/f.json"),
+                           self._args(trade_sim=True, stop_pct=6.0, bbi_consec=3))
+        assert "--stop-pct" in cmd and "6.0" in cmd
+        assert "--bbi-consec" in cmd and "3" in cmd
+
+    def test_fingerprint_tolerates_missing_stop_defaults(self, tmp_path):
+        # 旧 firings 无 stop_pct/bbi_consec/pit_ledger 键(参数后加,旧文件必然按默认跑)→ 可复用
+        p = tmp_path / "f.json"
+        p.write_text(_firings_text(), encoding="utf-8")
+        assert rb.firings_reusable(p, self._args()) is True
+
+    def test_fingerprint_catches_stop_pct_and_ledger_change(self, tmp_path):
+        p = tmp_path / "f.json"
+        p.write_text(_firings_text(stop_pct=8.0, bbi_consec=2, pit_ledger=""), encoding="utf-8")
+        assert rb.firings_reusable(p, self._args(stop_pct=6.0)) is False      # 出场参数变了 → 重跑
+        assert rb.firings_reusable(p, self._args(pit_ledger="/o.json")) is False  # 换台账 → 重跑
+        assert rb.firings_reusable(p, self._args()) is True
+
+
+def test_zero_ret_diagnose_missing_ret_window_no_fallback(tmp_path):
+    # 缺 ret_start/ret_end 不得回退信号窗当赢家窗(整窗错位且无提示)——显式 error
+    p = tmp_path / "old.json"
+    p.write_text(json.dumps({"start": "2022-05-06", "end": "2022-06-02",
+                             "records": [{"code": "600000", "ret": 0.0,
+                                          "days": [["2022-06-01", 0.0, {"f_x": 1.0}]]}]},
+                            ensure_ascii=False), encoding="utf-8")
+    out = rb.zero_ret_diagnose([p], loader=lambda codes, s, e: {})
+    w = out["windows"][0]
+    assert "ret_start" in w["error"] and "重跑" in w["error"]

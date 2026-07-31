@@ -119,18 +119,21 @@ class MarketQualityWeightingTests(unittest.TestCase):
 
     def test_blocked_only_when_all_core_sections_bad(self):
         """blocked 会真正中断链路(--require-quality/--require-gate),口径必须是"大面积缺数"。"""
-        partial = runtime_guards.market_quality_gate(
-            {"amv_0": {}, "market_breadth": {"up_count": 1, "quality": "confirmed",
-                                             "as_of": self.DAY},
-             "sentiment": {}, "turnover": {},
-             "overseas_market": {"nasdaq_change_pct": 0.5, "as_of": self.DAY}},
-            self.DAY, expected_day=self.DAY)
-        self.assertEqual(partial["status"], "degraded")     # 还有一个核心块新鲜 → 不阻断
-        allbad = runtime_guards.market_quality_gate(
-            {"amv_0": {}, "market_breadth": {}, "sentiment": {}, "turnover": {},
-             "overseas_market": {"nasdaq_change_pct": 0.5, "as_of": self.DAY}},
-            self.DAY, expected_day=self.DAY)
-        self.assertEqual(allbad["status"], "blocked")
+        from unittest.mock import patch
+        # 密闭:空 section 不得去磁盘继承真实历史文件(否则结果随机器数据漂移)
+        with patch.object(runtime_guards, "_latest_market_section", return_value=({}, None)):
+            partial = runtime_guards.market_quality_gate(
+                {"amv_0": {}, "market_breadth": {"up_count": 1, "quality": "confirmed",
+                                                 "as_of": self.DAY},
+                 "sentiment": {}, "turnover": {},
+                 "overseas_market": {"nasdaq_change_pct": 0.5, "as_of": self.DAY}},
+                self.DAY, expected_day=self.DAY)
+            self.assertEqual(partial["status"], "degraded")     # 还有一个核心块新鲜 → 不阻断
+            allbad = runtime_guards.market_quality_gate(
+                {"amv_0": {}, "market_breadth": {}, "sentiment": {}, "turnover": {},
+                 "overseas_market": {"nasdaq_change_pct": 0.5, "as_of": self.DAY}},
+                self.DAY, expected_day=self.DAY)
+            self.assertEqual(allbad["status"], "blocked")
 
 
 class RegimeNormalizeTests(unittest.TestCase):

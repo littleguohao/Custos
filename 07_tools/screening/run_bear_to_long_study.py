@@ -96,6 +96,7 @@ def pass1_cmd(p: dict, out_file: Path, args) -> list[str]:
         cmd.append("--style-features")
     if args.trade_sim:
         cmd.append("--trade-sim")
+        cmd += ["--stop-pct", str(args.stop_pct), "--bbi-consec", str(args.bbi_consec)]
     if args.pit_features:                    # A 组基本面特征(纯财务比率,不需市值)
         cmd.append("--pit-features")
         if args.pit_ledger:
@@ -128,12 +129,18 @@ def tag_of(p: dict) -> str:
 _BOOL_FINGERPRINT_KEYS = ("sector_features", "style_features", "trade_sim",
                           "pit_features", "pit_visible_same_day")
 
+# 缺键按默认容忍(后加的参数,旧 firings 必然是用默认值/无台账跑的):
+# pit_ledger 路径(无=空串)、stop_pct/bbi_consec(trade-sim 出场参数默认 8.0/2)
+_DEFAULT_TOLERANT = {"pit_ledger": "", "stop_pct": 8.0, "bbi_consec": 2}
+
 
 def expected_firings_header(args) -> dict:
     """本次运行要求 firings 头部匹配的关键参数(与 pass1_cmd / launch_point_study 写盘字段一致)。
 
     ⚠️ 不含 `pit_ledger_n`:PIT 台账每季都会增长,进指纹会导致每次补数后全窗强制重跑;
     需要按新台账重算时显式 `--force`。台账条数仍会写进 firings 头部供追溯。
+    `pit_ledger` **路径**进指纹(换台账文件必须重跑);`stop_pct`/`bbi_consec` 缺键按默认容忍
+    (这两个参数后加,旧 firings 必然是用默认值跑的,None→默认是正确推断而非静默)。
     """
     return {"entry_filter": args.entry_filter, "rank_score": "none",
             "feature_scores": args.feature_scores, "delisted_ret": args.delisted_ret,
@@ -142,7 +149,10 @@ def expected_firings_header(args) -> dict:
             "style_features": bool(args.style_features),
             "trade_sim": bool(args.trade_sim),
             "pit_features": bool(args.pit_features),
-            "pit_visible_same_day": bool(args.pit_visible_same_day)}
+            "pit_visible_same_day": bool(args.pit_visible_same_day),
+            "pit_ledger": getattr(args, "pit_ledger", "") or "",
+            "stop_pct": getattr(args, "stop_pct", 8.0),
+            "bbi_consec": getattr(args, "bbi_consec", 2)}
 
 
 def firings_reusable(f: Path, args) -> bool:
@@ -163,6 +173,9 @@ def firings_reusable(f: Path, args) -> bool:
         got = head.get(k)
         if k in _BOOL_FINGERPRINT_KEYS:
             if bool(got) != bool(v):         # 缺失键等价 False,不误伤旧 firings
+                diff[k] = (got, v)
+        elif k in _DEFAULT_TOLERANT:
+            if (got if got is not None else _DEFAULT_TOLERANT[k]) != v:
                 diff[k] = (got, v)
         elif got != v:
             diff[k] = (got, v)
@@ -263,12 +276,17 @@ def zero_ret_diagnose(firings_files: list[Path], loader, few_bars: int = 5,
         codes = sorted(zero_ret_codes(recs))
         if max_codes:
             codes = codes[:max_codes]
-        rs = raw.get("ret_start") or raw.get("start") if isinstance(raw, dict) else None
-        re_ = raw.get("ret_end") or raw.get("end") if isinstance(raw, dict) else None
+        rs = (raw.get("ret_start") if isinstance(raw, dict) else None)
+        re_ = (raw.get("ret_end") if isinstance(raw, dict) else None)
         w: dict = {"file": Path(fp).name, "label": f"{rs}~{re_}", "n_zero_ret": len(codes),
                    "kinds": {}, "samples": {}}
-        if not codes or not rs or not re_:
-            w["error"] = "无零收益样本或缺赢家窗区间"
+        if not codes:
+            w["error"] = "无零收益样本"
+            out["windows"].append(w)
+            continue
+        if not (rs and re_):
+            # 缺 ret_start/ret_end 时**不得**回退信号窗(会把信号窗当赢家窗诊断,整窗错位且无提示)
+            w["error"] = "firings 缺 ret_start/ret_end(旧格式?),无法定位赢家窗,请重跑该窗 Pass1"
             out["windows"].append(w)
             continue
         try:
@@ -430,6 +448,10 @@ def main(argv=None, runner=None) -> int:
     ap.add_argument("--trade-sim", action="store_true",
                     help="Pass1:每个信号另算一笔**本策略买卖规则**下的收益(sim_ret/sim_reason),"
                          "供 Pass2 --coverage 做双口径对比")
+    ap.add_argument("--stop-pct", type=float, default=8.0,
+                    help="--trade-sim 的固定止损百分比(默认8;透传 Pass1 并进 firings 指纹)")
+    ap.add_argument("--bbi-consec", type=int, default=2,
+                    help="--trade-sim 的 BBI 连破日数(默认2;透传 Pass1 并进 firings 指纹)")
     ap.add_argument("--pit-features", action="store_true",
                     help="Pass1:追加 A 组基本面特征(纯财务比率,不需市值,2015 起 12 窗全可用):"
                          "f_roe/f_gross_margin/f_ocf_ps/f_deduct_ratio/f_rev_yoy/f_np_yoy/"

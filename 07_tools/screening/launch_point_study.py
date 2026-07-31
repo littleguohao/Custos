@@ -1251,9 +1251,10 @@ def distribution_report(records: list[dict], bands=(0.0, 0.1, 0.2, 0.3, 0.5, 1.0
                      f"{_fmt_pct(s['p90']):>8} {_fmt_pct(s['p99']):>8}")
     if (all_stats["zero_ratio"] or 0) >= 0.02:
         lines.append(f"  ⚠️ 收益**恰好为 0** 的样本 {all_stats['n_zero']} 只"
-                     f"({all_stats['zero_ratio']:.1%}):赢家窗内长期停牌/退市整理期"
-                     "(前复权数据被 forward-fill)的僵尸样本嫌疑,它们进了分母会压低上涨率"
-                     "(→ 普涨窗可能漏标),建议单列或剔除后复核")
+                     f"({all_stats['zero_ratio']:.1%}):已实测确认(2026-07-31 --zero-ret-report"
+                     " 抽样 177 只)100% 是正常成交的'直线回位'合法样本(停牌 0 只)——"
+                     "**勿剔除**,它们本该算作'非上涨';单列观察即可"
+                     "(误剔会让 up_ratio 单向上升、把窗错打成普涨窗并整窗剔除计票)")
     lines.append(f"  **按涨幅带的召回率**(该带里我们曾触发信号的比例;基准 {(base_recall or 0):.1%}):")
     lines.append(f"    {'涨幅带':>8} {'全域只数':>9} {'有信号':>7} {'召回率':>7} {'相对基准':>9}")
     for b in bands:
@@ -1740,6 +1741,9 @@ def main(argv=None, loader=None) -> int:
                       "trade_sim": bool(args.trade_sim),
                       "pit_features": bool(args.pit_features),
                       "pit_visible_same_day": bool(args.pit_visible_same_day),
+                      # 复用指纹字段:台账路径(换台账必须重跑)与 trade-sim 出场参数
+                      "pit_ledger": args.pit_ledger or "",
+                      "stop_pct": args.stop_pct, "bbi_consec": args.bbi_consec,
                       # 仅供追溯,**不进复用指纹**:台账每季都会增长,若进指纹会导致每次补数后
                       # 全部窗口强制重跑;需要按新台账重算时显式 --force。
                       "pit_ledger_n": pit_ledger_n,
