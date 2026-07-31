@@ -164,6 +164,123 @@ class TestQuarterEnds:
         assert got == []
 
 
+class TestPriorYearPeriod:
+    def test_same_quarter_prior_year(self):
+        assert fp.prior_year_period("2024-03-31") == "2023-03-31"
+        assert fp.prior_year_period("2024-12-31") == "2023-12-31"
+        assert fp.prior_year_period("2024-06-30") == "2023-06-30"
+
+
+class TestAsOfPeriod:
+    """同比必须取**指定报告期的当时可见版本**,不能拿今天的最终版(那是数值维度 look-ahead)。"""
+
+    def _recs(self):
+        return [
+            {"code": "600000", "report_date": "2023-03-31", "notice_date": "2023-04-28",
+             "revenue": 100.0, "net_profit": 10.0},
+            # 2023 一季报的更正版,2023-08 才公告
+            {"code": "600000", "report_date": "2023-03-31", "notice_date": "2023-08-10",
+             "revenue": 95.0, "net_profit": 8.0},
+            {"code": "600000", "report_date": "2024-03-31", "notice_date": "2024-04-29",
+             "revenue": 120.0, "net_profit": 15.0},
+        ]
+
+    def test_picks_specified_period_not_latest(self):
+        got = fp.as_of_period(self._recs(), "2024-06-01", "2023-03-31", code="600000")
+        assert got["600000"]["report_date"] == "2023-03-31"
+
+    def test_picks_version_visible_at_query_day(self):
+        """2023-05 查时只看得到原版(revenue=100),更正版 8 月才出。"""
+        early = fp.as_of_period(self._recs(), "2023-05-01", "2023-03-31", code="600000")
+        assert early["600000"]["revenue"] == 100.0
+        later = fp.as_of_period(self._recs(), "2023-09-01", "2023-03-31", code="600000")
+        assert later["600000"]["revenue"] == 95.0
+
+    def test_returns_empty_when_period_not_yet_visible(self):
+        assert fp.as_of_period(self._recs(), "2024-04-01", "2024-03-31") == {}
+
+    def test_unknown_period_returns_empty(self):
+        assert fp.as_of_period(self._recs(), "2024-06-01", "2022-03-31") == {}
+
+
+class TestPitFeatures:
+    def _recs(self):
+        return [
+            {"code": "600000", "report_date": "2023-03-31", "notice_date": "2023-04-28",
+             "revenue": 100.0, "net_profit": 10.0, "roe_waa": 2.0, "gross_margin": 30.0,
+             "eps": 0.5, "eps_deduct": 0.45, "ocf_ps": 1.0},
+            {"code": "600000", "report_date": "2024-03-31", "notice_date": "2024-04-29",
+             "revenue": 120.0, "net_profit": 15.0, "roe_waa": 2.6, "gross_margin": 32.0,
+             "eps": 0.6, "eps_deduct": 0.54, "ocf_ps": 1.2},
+        ]
+
+    def test_features_computed_from_visible_period(self):
+        f = fp.pit_features(self._recs(), "2024-05-06", "600000")
+        assert f["f_roe"] == 2.6 and f["f_gross_margin"] == 32.0
+        assert f["f_ocf_ps"] == 1.2
+        assert abs(f["f_deduct_ratio"] - 0.9) < 1e-6
+        assert abs(f["f_rev_yoy"] - 0.2) < 1e-6            # 120/100-1
+        assert abs(f["f_np_yoy"] - 0.5) < 1e-6             # 15/10-1
+        assert f["f_pit_lag_days"] == 7.0                  # 04-29 → 05-06
+
+    def test_uses_older_period_before_new_one_visible(self):
+        """2024-04-01 时一季报还没公告,应回落到 2023 一季报 —— 这正是 PIT。"""
+        f = fp.pit_features(self._recs(), "2024-04-01", "600000")
+        assert f["f_roe"] == 2.0 and "f_rev_yoy" not in f   # 2022 同期不在台账
+        assert f["f_pit_lag_days"] > 300
+
+    def test_empty_when_nothing_visible(self):
+        assert fp.pit_features(self._recs(), "2023-01-01", "600000") == {}
+
+    def test_yoy_skipped_when_prior_missing(self):
+        recs = [r for r in self._recs() if r["report_date"] == "2024-03-31"]
+        f = fp.pit_features(recs, "2024-05-06", "600000")
+        assert "f_rev_yoy" not in f and "f_np_yoy" not in f
+        assert f["f_roe"] == 2.6                            # 其余特征仍出
+
+    def test_negative_base_yoy_suppressed(self):
+        """上年同期亏损(分母<=0)时同比无经济含义,必须给 None 而不是算出个数。"""
+        recs = self._recs()
+        recs[0]["net_profit"] = -5.0
+        f = fp.pit_features(recs, "2024-05-06", "600000")
+        assert "f_np_yoy" not in f and "f_rev_yoy" in f
+
+    def test_zero_eps_does_not_divide(self):
+        recs = self._recs()
+        recs[1]["eps"] = 0.0
+        f = fp.pit_features(recs, "2024-05-06", "600000")
+        assert "f_deduct_ratio" not in f
+
+    def test_yoy_uses_prior_version_visible_then(self):
+        """核心:上年同期若有更正版,取的必须是**查询日当时**可见的那一版。"""
+        recs = self._recs() + [
+            {"code": "600000", "report_date": "2023-03-31", "notice_date": "2024-06-15",
+             "revenue": 80.0, "net_profit": 10.0}]
+        early = fp.pit_features(recs, "2024-05-06", "600000")
+        assert abs(early["f_rev_yoy"] - 0.2) < 1e-6         # 120/100-1,更正版还没出
+        later = fp.pit_features(recs, "2024-06-16", "600000")
+        assert abs(later["f_rev_yoy"] - 0.5) < 1e-6         # 120/80-1,更正版已可见
+
+
+class TestBuildPitFeatureFn:
+    def test_callback_signature_matches_extra_feature_fn(self):
+        """必须是 (code, as_of_day) -> dict,才能直接挂 launch_point_study 的钩子。"""
+        recs = [{"code": "600000", "report_date": "2024-03-31", "notice_date": "2024-04-29",
+                 "roe_waa": 2.6}]
+        fn = fp.build_pit_feature_fn(recs)
+        assert fn("600000", "2024-05-06") == {"f_roe": 2.6, "f_pit_lag_days": 7.0}
+
+    def test_unknown_code_returns_empty(self):
+        fn = fp.build_pit_feature_fn([{"code": "600000", "report_date": "2024-03-31",
+                                       "notice_date": "2024-04-29", "roe_waa": 2.6}])
+        assert fn("000001", "2024-05-06") == {}
+
+    def test_accepts_datetime_like_day(self):
+        fn = fp.build_pit_feature_fn([{"code": "600000", "report_date": "2024-03-31",
+                                       "notice_date": "2024-04-29", "roe_waa": 2.6}])
+        assert fn("600000", "2024-05-06 00:00:00")["f_roe"] == 2.6
+
+
 class TestVerifyLedger:
     """缺期不会让 as_of 报错,只会静默返回上一期 ⇒ 必须靠自检抓出来。"""
 

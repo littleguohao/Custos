@@ -279,6 +279,125 @@ def verify_ledger(records: list[dict], since_year: int | None = None,
     return out
 
 
+def prior_year_period(report_date: str) -> str:
+    """上年同期报告期。同比必须**同口径比**:报告期是累计口径(一季报=Q1、半年报=H1 累计、
+    三季报=前三季累计、年报=全年),拿一季报比半年报是错的。"""
+    y, rest = str(report_date)[:4], str(report_date)[4:10]
+    return f"{int(y) - 1}{rest}"
+
+
+def as_of_period(records: list[dict], day: str, report_date: str,
+                 code: str | None = None, visible_next_day: bool = True) -> dict[str, dict]:
+    """**取某个特定报告期**在 day 时可见的版本(同比计算必需)。
+
+    与 `as_of()` 的区别:`as_of` 给"最新可见期",本函数给"指定期的可见版本"。
+    算同比要的是后者 —— 且上年同期也必须取**当时可见的版本**,不能拿今天的最终版
+    (那是数值维度的 look-ahead)。同期多版本时取 notice_date 最大且已可见者。
+    """
+    best: dict[str, dict] = {}
+    for r in records:
+        if r.get("report_date") != report_date:
+            continue
+        if code and r.get("code") != code:
+            continue
+        nd = r.get("notice_date") or ""
+        if not nd:
+            continue
+        visible = (nd < day) if visible_next_day else (nd <= day)
+        if not visible:
+            continue
+        c = r["code"]
+        cur = best.get(c)
+        if cur is None or nd > (cur.get("notice_date") or ""):
+            best[c] = r
+    return best
+
+
+def _ratio(cur, prev):
+    """同比 = cur/prev - 1。分母 <=0 或缺失一律返回 None(负基数的同比无经济含义)。"""
+    if cur is None or prev is None:
+        return None
+    try:
+        cur, prev = float(cur), float(prev)
+    except (TypeError, ValueError):
+        return None
+    if prev <= 0:
+        return None
+    return cur / prev - 1
+
+
+def pit_features(records: list[dict], day: str, code: str,
+                 visible_next_day: bool = True) -> dict:
+    """信号日 day 时**可见**的基本面特征(A 组:纯财务比率,不需市值)。
+
+    全部 as-of:先取该 code 截至 day 可见的最新一期,再取**同口径上年同期的可见版本**算同比。
+    取不到时返回空 dict(调用方按缺失处理),绝不用今天的最终版兜底 —— 那是数值维度的 look-ahead。
+
+    f_pit_lag_days = 信号日距该期公告日的天数(财报新鲜度)。它本身是**元特征**:
+    刚出财报与财报已过期三个月,市场反应机制不同,不把它入模会把两种情形混为一谈。
+    """
+    cur = as_of_period_latest(records, day, code, visible_next_day=visible_next_day)
+    if not cur:
+        return {}
+    out: dict[str, float] = {}
+    if cur.get("roe_waa") is not None:
+        out["f_roe"] = round(float(cur["roe_waa"]), 4)
+    if cur.get("gross_margin") is not None:
+        out["f_gross_margin"] = round(float(cur["gross_margin"]), 4)
+    if cur.get("ocf_ps") is not None:
+        out["f_ocf_ps"] = round(float(cur["ocf_ps"]), 4)
+    eps, eps_d = cur.get("eps"), cur.get("eps_deduct")
+    if eps and eps_d is not None and float(eps) != 0:
+        out["f_deduct_ratio"] = round(float(eps_d) / float(eps), 4)   # 盈利质量:扣非/基本
+    prior = as_of_period(records, day, prior_year_period(cur["report_date"]),
+                         code=code, visible_next_day=visible_next_day).get(code)
+    if prior:
+        rv = _ratio(cur.get("revenue"), prior.get("revenue"))
+        np_ = _ratio(cur.get("net_profit"), prior.get("net_profit"))
+        if rv is not None:
+            out["f_rev_yoy"] = round(rv, 4)
+        if np_ is not None:
+            out["f_np_yoy"] = round(np_, 4)
+    try:
+        lag = (date.fromisoformat(str(day)[:10])
+               - date.fromisoformat(cur["notice_date"])).days
+        out["f_pit_lag_days"] = float(lag)
+    except (ValueError, KeyError, TypeError):
+        pass
+    return out
+
+
+def as_of_period_latest(records: list[dict], day: str, code: str,
+                        visible_next_day: bool = True) -> dict | None:
+    """单只:截至 day 可见的最新一期(as_of 的单 code 便捷版)。"""
+    got = as_of(records, day, code=code, visible_next_day=visible_next_day)
+    return got.get(code)
+
+
+def build_pit_feature_fn(records: list[dict], visible_next_day: bool = True):
+    """构造 `(code, as_of_day) -> dict` 回调,直接挂 launch_point_study 的 extra_feature_fn。
+
+    预先按 (code, report_date) 建索引,避免每个信号日都全表扫描(12 窗数万信号 × 21 万条台账
+    不做索引会跑到天荒地老)。
+    """
+    by_code: dict[str, list[dict]] = {}
+    for r in records:
+        c = r.get("code")
+        if c:
+            by_code.setdefault(c, []).append(r)
+    for c in by_code:
+        by_code[c].sort(key=lambda r: (r.get("report_date") or "", r.get("notice_date") or ""))
+
+    def fn(code: str, as_of_day) -> dict:
+        recs = by_code.get(str(code))
+        if not recs:
+            return {}
+        return pit_features(recs, str(as_of_day)[:10], str(code),
+                            visible_next_day=visible_next_day)
+
+    return fn
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="PIT 财务:按报告期拉取,以公告日为可见日")
     ap.add_argument("--periods", nargs="*", help="报告期,如 2024-03-31(可多个)")

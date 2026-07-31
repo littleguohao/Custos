@@ -1440,11 +1440,20 @@ def main(argv=None, loader=None) -> int:
                          "(sim_ret),供 --coverage 对比'赢家我们吃到几成'")
     ap.add_argument("--stop-pct", type=float, default=8.0, help="--trade-sim 的固定止损百分比(默认8)")
     ap.add_argument("--bbi-consec", type=int, default=2, help="--trade-sim 的BBI连破日数(默认2)")
+    ap.add_argument("--pit-features", action="store_true",
+                    help="Pass1:追加 PIT 基本面特征(A 组,纯财务比率不需市值,2015 起可用):"
+                         "f_roe/f_gross_margin/f_ocf_ps/f_deduct_ratio/f_rev_yoy/f_np_yoy/"
+                         "f_pit_lag_days。全部按信号日**可见**的财报计算,同比取同口径上年同期的"
+                         "**当时可见版本**(不是今天的最终版)")
+    ap.add_argument("--pit-ledger", default=None,
+                    help="PIT 财务台账路径(默认 01_data/fundamentals/pit_financials.jsonl)")
+    ap.add_argument("--pit-visible-same-day", action="store_true",
+                    help="把公告当日算作可见(默认次日;公告多在盘后发布)")
     ap.add_argument("--style-features", action="store_true",
                     help="Pass1:追加风格特征 f_board_code(上市板)与 f_amount20(20日均成交额,市值代理)")
     ap.add_argument("--exclude-zero-ret", action="store_true",
                     help="⚠️【前提已证伪,勿用】Pass2:剔除赢家窗收益恰好为 0 的记录。"
-                         "加它时以为是停牌 forward-fill 的僵尸样本,实测 100% 是正常成交的"
+                         "加它时以为是停牌 forward-fill 的僵尸样本,实测 100%% 是正常成交的"
                          "'直线回位'合法样本;剔除会让 up_ratio 单向上升、把窗错打成普涨窗"
                          "并整窗剔除计票。仅为复现历史稳健性检验保留")
     ap.add_argument("--distribution", action="store_true",
@@ -1662,15 +1671,41 @@ def main(argv=None, loader=None) -> int:
             else:
                 print(f"[WARN] 未知特征打分器 {nm}(可选: {','.join(sorted(bt.SCORERS))})", file=sys.stderr)
         fstats: dict = {}
-        xfn = None
+        xfns = []
         if args.sector_features:
             import json as _jm
             mpath = Path(args.sector_members)
             members = _jm.loads(mpath.read_text(encoding="utf-8")) if mpath.is_file() else {}
             if not members:
                 ap.error("--sector-features 需 sector_members.json(先跑 fetch_sector_index_history.py --members)")
-            xfn = build_sector_features(args.sector_index_dir, members)
+            xfns.append(build_sector_features(args.sector_index_dir, members))
             print(f"[pass1] 板块特征已启用 (dir={args.sector_index_dir})", file=sys.stderr)
+        if args.pit_features:
+            sys.path.insert(0, str(TOOLS / "local_tdx"))
+            import fetch_pit_financials as _pit  # noqa: PLC0415
+            pit_recs = _pit.load_ledger(args.pit_ledger) if args.pit_ledger \
+                else _pit.load_ledger()
+            if not pit_recs:
+                ap.error("--pit-features 需 PIT 财务台账(先跑 local_tdx/fetch_pit_financials.py "
+                         "--since 2015,并用 --verify 确认无缺期)")
+            xfns.append(_pit.build_pit_feature_fn(
+                pit_recs, visible_next_day=not args.pit_visible_same_day))
+            print(f"[pass1] PIT 基本面特征已启用 ({len(pit_recs)} 条台账;"
+                  f"{'公告当日即可见' if args.pit_visible_same_day else '公告次日起可见'})",
+                  file=sys.stderr)
+        if not xfns:
+            xfn = None
+        elif len(xfns) == 1:
+            xfn = xfns[0]
+        else:
+            def xfn(code, day, _fns=tuple(xfns)):       # 多组 as-of 特征合并
+                merged: dict = {}
+                for f in _fns:
+                    try:
+                        merged.update(f(code, day) or {})
+                    except Exception:                    # noqa: BLE001 单组失败不拖垮其余
+                        continue
+                return merged
         recs = extract_firings(_chunked_items(args.chunk_size), args.start, args.end,
                               bt.ENTRY_GATES[args.entry_filter], scorer=scorer,
                               gate_window=args.gate_window, progress=args.progress,
