@@ -127,6 +127,34 @@ def firings_reusable(f: Path, args) -> bool:
     return True
 
 
+def zero_ret_codes(recs: list[dict]) -> set:
+    """赢家窗收益**恰好为 0** 的代码集合(与 lp.drop_zero_ret 同口径)。
+
+    这类记录窗内确有 >=2 根有效 K 线(window_return 的前置条件),只是首末收盘一分不差,
+    故不是\"无数据被丢\",而是**长期停牌/退市整理期/极低流动性**的直线样本。
+    """
+    out = set()
+    for r in recs:
+        v = r.get("ret")
+        if v is None or not r.get("code"):
+            continue
+        try:
+            if float(v) == 0.0:
+                out.add(r["code"])
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def board_mix(codes) -> dict:
+    """按上市板计数(降序)。用来判\"零收益样本到底是不是集中在北交所\"。"""
+    mix: dict[str, int] = {}
+    for c in codes:
+        b = lp.board_of(c)
+        mix[b] = mix.get(b, 0) + 1
+    return dict(sorted(mix.items(), key=lambda kv: -kv[1]))
+
+
 def survivorship_report(firings_files: list[Path], s_data_root: str,
                         data_source: str = "qlib",
                         today_codes: Optional[set] = None) -> dict:
@@ -162,6 +190,7 @@ def survivorship_report(firings_files: list[Path], s_data_root: str,
         codes = {r.get("code") for r in recs if r.get("code")}
         with_sig = {r.get("code") for r in recs if (r.get("days") or [])}
         hit = codes & gone
+        zero = zero_ret_codes(recs)
         out["windows"].append({
             "file": Path(fp).name,
             "label": (f"{raw.get('start')}~{raw.get('end')}" if isinstance(raw, dict) else ""),
@@ -170,10 +199,14 @@ def survivorship_report(firings_files: list[Path], s_data_root: str,
             "gone_share": round(len(hit) / len(codes), 4) if codes else None,
             "n_gone_with_signal": len(with_sig & gone),
             "n_delisted_flag": sum(1 for r in recs if r.get("delisted")),
+            "n_zero_ret": len(zero),
+            "n_zero_gone": len(zero & gone),           # 已摘牌又恰好零收益 = --exclude-zero-ret 会删掉的真飞刀
+            "zero_by_board": board_mix(zero),
         })
     lines = [f"qlib 宇宙 {out['universe']} 只;今日本地实有 {out['today']} 只;"
              f"**已摘牌队列 {out['gone_pool']} 只**(宇宙有、今天没有)",
-             f"    {'窗口':<28} {'样本股':>7} {'有信号':>7} {'已摘牌在样本':>12} {'占比':>7} {'摘牌且有信号':>12} {'窗内消失':>9}"]
+             f"    {'窗口':<28} {'样本股':>7} {'有信号':>7} {'已摘牌在样本':>12} {'占比':>7} "
+             f"{'摘牌且有信号':>12} {'窗内消失':>9} {'零收益':>7} {'零收益中已摘牌':>14}"]
     for w in out["windows"]:
         if w.get("error"):
             lines.append(f"    {w['file']:<28} 读取失败: {w['error']}")
@@ -181,7 +214,7 @@ def survivorship_report(firings_files: list[Path], s_data_root: str,
         lines.append(f"    {(w['label'] or w['file'])[:28]:<28} {w['n_codes']:>7} "
                      f"{w['n_with_signal']:>7} {w['n_gone_in_sample']:>12} "
                      f"{(w['gone_share'] or 0):>6.1%} {w['n_gone_with_signal']:>12} "
-                     f"{w['n_delisted_flag']:>9}")
+                     f"{w['n_delisted_flag']:>9} {w['n_zero_ret']:>7} {w['n_zero_gone']:>14}")
     zero = [w for w in out["windows"] if not w.get("error") and w["n_gone_in_sample"] == 0]
     if out["gone_pool"] == 0:
         lines.append("  ⚠️ 已摘牌队列为 0 ⇒ qlib 宇宙实际只含幸存者,**去偏无效**,"
@@ -192,6 +225,24 @@ def survivorship_report(firings_files: list[Path], s_data_root: str,
         lines.append("  ✅ 各窗样本均含已摘牌股 ⇒ 飞刀留在样本内,'分不出赢家与飞刀'的结论成立")
     lines.append("  注:'窗内消失'=赢家窗完全无价格而按 --delisted-ret 计入的只数,"
                  "短窗内本就稀有,0 不代表去偏失效")
+    ok = [w for w in out["windows"] if not w.get("error")]
+    out["n_zero_gone_total"] = sum(w["n_zero_gone"] for w in ok)
+    mix: dict[str, int] = {}
+    for w in ok:
+        for b, n in (w.get("zero_by_board") or {}).items():
+            mix[b] = mix.get(b, 0) + n
+    out["zero_by_board_total"] = dict(sorted(mix.items(), key=lambda kv: -kv[1]))
+    if mix:
+        lines.append("  零收益样本上市板分布(全窗合计):"
+                     + "、".join(f"{b} {n} 只" for b, n in out["zero_by_board_total"].items()))
+    if out["n_zero_gone_total"]:
+        lines.append(f"  ⚠️ 其中 {out['n_zero_gone_total']} 只**既已摘牌又恰好零收益** ⇒ "
+                     "`--exclude-zero-ret` 会把这批**真飞刀**一并删掉,"
+                     "等于悄悄重新引入幸存者偏差(与 --delisted-ret 的用意相反)。"
+                     "正确处理:这类记录应按 --delisted-ret 记为大亏留在非赢家里,不得剔除")
+    elif any(w["n_zero_ret"] for w in ok):
+        lines.append("  ✅ 零收益样本与已摘牌队列无交集 ⇒ `--exclude-zero-ret` 未删到真飞刀,"
+                     "剔除仅影响停牌/低流动性直线样本")
     out["text"] = "\n".join(lines)
     return out
 

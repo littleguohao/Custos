@@ -25,6 +25,17 @@ def _firings_text(**over):
     return json.dumps(head, ensure_ascii=False)
 
 
+def _firings_file(tmp_path, name, codes, with_sig=(), delisted=(), rets=None):
+    """写一份最小 firings(默认 ret=0.1;rets 可给单只指定收益,如 0.0 造僵尸样本)。"""
+    recs = [{"code": c, "ret": (rets or {}).get(c, 0.1),
+             "days": [["2022-06-01", 0.0, {"f_x": 1.0}]] if c in with_sig else [],
+             **({"delisted": True} if c in delisted else {})} for c in codes]
+    p = tmp_path / name
+    p.write_text(json.dumps({"start": "2022-05-06", "end": "2022-06-02",
+                             "records": recs}, ensure_ascii=False), encoding="utf-8")
+    return p
+
+
 class TestGapGuards:
     def test_overlaps_gap_boundaries(self):
         assert rb.overlaps_gap("2020-09-01", "2020-09-28") is True     # 触到缺口起点
@@ -85,14 +96,8 @@ class TestSurvivorshipReport:
     稀有 ⇒ 2019 年后各窗 n_delisted=0 是预期行为,不能推出"退市股被剔除"。
     """
 
-    def _firings(self, tmp_path, name, codes, with_sig=(), delisted=()):
-        recs = [{"code": c, "ret": 0.1,
-                 "days": [["2022-06-01", 0.0, {"f_x": 1.0}]] if c in with_sig else [],
-                 **({"delisted": True} if c in delisted else {})} for c in codes]
-        p = tmp_path / name
-        p.write_text(json.dumps({"start": "2022-05-06", "end": "2022-06-02",
-                                 "records": recs}, ensure_ascii=False), encoding="utf-8")
-        return p
+    def _firings(self, tmp_path, name, codes, with_sig=(), delisted=(), rets=None):
+        return _firings_file(tmp_path, name, codes, with_sig, delisted, rets)
 
     def test_gone_cohort_counted_per_window(self, tmp_path, monkeypatch):
         f = self._firings(tmp_path, "w1.json", ["600000", "000001", "900001"],
@@ -147,6 +152,63 @@ class TestSurvivorshipReport:
         monkeypatch.setattr(rb.lp, "bear_to_long_pairs", lambda *a, **k: [_pair()])
         rc = rb.main(["--out-dir", str(tmp_path), "--survivorship-report"])
         assert rc == 2 and "没有可体检的 firings" in capsys.readouterr().err
+
+
+class TestZeroRetDiagnosis:
+    """零收益僵尸样本的成因诊断:是停牌直线,还是被误删的真飞刀。"""
+
+    def test_only_exact_zero_counted(self):
+        """-1.0(退市按大亏计入)与 None(无收益)都不是零收益样本。"""
+        recs = [{"code": "600000", "ret": 0.0}, {"code": "000001", "ret": -1.0},
+                {"code": "300001", "ret": None}, {"code": "688001", "ret": 0.0001},
+                {"code": "830001", "ret": "0"}, {"ret": 0.0}]          # 字符串"0"可解析;无 code 跳过
+        assert rb.zero_ret_codes(recs) == {"600000", "830001"}
+
+    def test_board_mix_sorted_desc(self):
+        mix = rb.board_mix(["830001", "430002", "920003", "600000"])
+        assert list(mix)[0] == "北交所" and mix["北交所"] == 3 and mix["沪主板"] == 1
+
+    def test_gone_and_zero_ret_warns_about_deleting_real_knives(self, tmp_path, monkeypatch):
+        """已摘牌又恰好零收益 ⇒ --exclude-zero-ret 会删掉真飞刀,必须告警。
+
+        这类记录 window_return 算得 0.0(窗内有价格、首末同价),走不进 `ret is None` 的
+        --delisted-ret 分支,所以不带 delisted 标记,只能靠\"已摘牌队列 ∩ 零收益\"抓出来。
+        """
+        f = _firings_file(
+            tmp_path, "w1.json", ["600000", "900001", "830001"],
+            with_sig=("600000", "900001"), rets={"900001": 0.0, "830001": 0.0})
+        import s_data
+        monkeypatch.setattr(s_data, "list_universe",
+                            lambda root, source="qlib": ["600000", "900001", "830001"])
+        rep = rb.survivorship_report([f], "/tmp/sroot", today_codes={"600000", "830001"})
+        w = rep["windows"][0]
+        assert w["n_zero_ret"] == 2 and w["n_zero_gone"] == 1          # 900001 已摘牌且零收益
+        assert rep["n_zero_gone_total"] == 1
+        assert "真飞刀" in rep["text"] and "重新引入幸存者偏差" in rep["text"]
+        assert "北交所 1 只" in rep["text"]                             # 830001 计入上市板分布
+
+    def test_zero_ret_without_gone_intersection_is_safe(self, tmp_path, monkeypatch):
+        f = _firings_file(tmp_path, "w1.json", ["600000", "830001", "900001"],
+                          with_sig=("600000",), rets={"830001": 0.0})
+        import s_data
+        monkeypatch.setattr(s_data, "list_universe",
+                            lambda root, source="qlib": ["600000", "830001", "900001"])
+        rep = rb.survivorship_report([f], "/tmp/sroot", today_codes={"600000", "830001"})
+        assert rep["n_zero_gone_total"] == 0
+        assert "未删到真飞刀" in rep["text"] and "真飞刀,一并删掉" not in rep["text"]
+
+    def test_board_distribution_aggregated_across_windows(self, tmp_path, monkeypatch):
+        """跨窗合计的上市板分布 —— 判定\"零收益是否集中在北交所\"的直接证据。"""
+        f1 = _firings_file(tmp_path, "w1.json", ["830001", "600000"], rets={"830001": 0.0})
+        f2 = _firings_file(tmp_path, "w2.json", ["830002", "300001"],
+                           rets={"830002": 0.0, "300001": 0.0})
+        import s_data
+        monkeypatch.setattr(s_data, "list_universe",
+                            lambda root, source="qlib": ["830001", "830002", "600000", "300001"])
+        rep = rb.survivorship_report([f1, f2], "/tmp/sroot",
+                                     today_codes={"830001", "830002", "600000", "300001"})
+        assert rep["zero_by_board_total"] == {"北交所": 2, "创业板": 1}
+        assert "零收益样本上市板分布" in rep["text"]
 
 
 class TestResumeAndPass2:
