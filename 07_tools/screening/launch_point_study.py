@@ -1156,14 +1156,19 @@ def _pct(vals: list[float], q: float) -> Optional[float]:
 
 
 def drop_zero_ret(records: list[dict]) -> tuple[list[dict], int]:
-    """剔除**赢家窗收益恰好为 0** 的记录(僵尸样本)。返回 (保留记录, 剔除数)。
+    """剔除**赢家窗收益恰好为 0** 的记录。⚠️ **本函数的前提已被实测证伪,不应再使用。**
 
-    实跑 12 窗里这类样本 2,409 只(4.7%),集中在北交所——赢家窗内长期停牌/退市整理期,
-    前复权数据被 forward-fill 成一条直线。它们既不是赢家也不是飞刀,却:
-      ①进上涨率分母 → 压低 up_ratio → **普涨窗可能漏标**(80% 阈值附近的窗尤其敏感);
-      ②进赢家排序分母 → 稀释 top_pct 切点;
-      ③其信号进日内可比池 → 给判别力度量添纯噪声。
-    注:按 --delisted-ret 计入的退市股 ret=-1.0,不受本剔除影响(它们是真飞刀,必须留下)。
+    加它时的假设是:这类样本系赢家窗内长期停牌/退市整理期,前复权数据被 forward-fill 成
+    一条直线,既非赢家也非飞刀。**2026-07-31 用 `--zero-ret-report` 抽样 177 只实测:
+    100% 是 `traded_flat`(窗内正常成交、只是首末收盘恰好同价),全程停牌 0 只、断续停牌 0 只。**
+    上市板分布也不集中在北交所(创业板 758 / 北交所 542 / 科创板 428 / 沪主板 398 / 深主板 279)。
+
+    ⇒ 这些是**正常成交、真实区间收益恰好 0%** 的合法样本,本来就该算作"非上涨"。
+    删它们会让 up_ratio 单向上升(实测某窗 78.2% → 约 96%),越过 80% 阈值把该窗打成**普涨窗**,
+    而普涨窗会被 `aggregate_discriminate` **整窗剔除计票**(分子分母都不含)——
+    等于凭空削掉投票窗、降低本就稀缺的统计功效。原始 up_ratio 才是正确口径。
+
+    保留本函数与 `--exclude-zero-ret` 仅为复现历史稳健性检验;新研究一律不要带该开关。
     """
     keep = [r for r in records if r.get("ret") is None or float(r["ret"]) != 0.0]
     return keep, len(records) - len(keep)
@@ -1435,8 +1440,10 @@ def main(argv=None, loader=None) -> int:
     ap.add_argument("--style-features", action="store_true",
                     help="Pass1:追加风格特征 f_board_code(上市板)与 f_amount20(20日均成交额,市值代理)")
     ap.add_argument("--exclude-zero-ret", action="store_true",
-                    help="Pass2:剔除赢家窗收益**恰好为 0** 的僵尸样本(长期停牌/退市整理期 forward-fill);"
-                         "它们会压低上涨率导致普涨窗漏标、稀释赢家切点")
+                    help="⚠️【前提已证伪,勿用】Pass2:剔除赢家窗收益恰好为 0 的记录。"
+                         "加它时以为是停牌 forward-fill 的僵尸样本,实测 100% 是正常成交的"
+                         "'直线回位'合法样本;剔除会让 up_ratio 单向上升、把窗错打成普涨窗"
+                         "并整窗剔除计票。仅为复现历史稳健性检验保留")
     ap.add_argument("--distribution", action="store_true",
                     help="Pass2:赢家窗收益分布画像 + 按上市板分组(纯读 firings)")
     ap.add_argument("--coverage", action="store_true",
@@ -1488,6 +1495,12 @@ def main(argv=None, loader=None) -> int:
                 _jw.dumps({"long_windows": [{"start": a, "end": b, "days": n} for a, b, n in segs]},
                           ensure_ascii=False, indent=2), encoding="utf-8")
         return 0
+
+    if args.exclude_zero_ret:
+        print("[WARN] --exclude-zero-ret 的前提已被实测证伪(2026-07-31,--zero-ret-report 抽样 177 只"
+              "全部为 traded_flat=正常成交的直线回位,停牌 0 只)。这些是合法的 0% 收益样本,"
+              "剔除会让 up_ratio 单向上升、把窗错打成普涨窗并整窗剔除计票。"
+              "除复现历史稳健性检验外请勿使用。", file=sys.stderr)
 
     if not args.from_firings and (not args.start or not args.end):
         ap.error("需提供 --start 和 --end(--from-firings 模式除外)")
