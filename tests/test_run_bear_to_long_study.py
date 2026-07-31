@@ -182,6 +182,102 @@ class TestSurvivorshipReport:
         assert rc == 2 and "没有可体检的 firings" in capsys.readouterr().err
 
 
+class TestFeaturePassthrough:
+    """Pass1 特征开关必须透传到子命令 —— 否则驱动跑一遍等于没开(2026-07-31 踩过)。"""
+
+    def _args(self, **over):
+        base = dict(data_source="qlib", s_data_root="/x", entry_filter="reversal_k",
+                    delisted_ret=-1.0, buffer_days=60, gate_window=120,
+                    feature_scores="a,b", progress=200, chunk_size=0,
+                    sector_features=False, style_features=False, trade_sim=False,
+                    pit_features=False, pit_ledger="", pit_visible_same_day=False)
+        base.update(over)
+        return type("A", (), base)()
+
+    def _cmd(self, **over):
+        return rb.pass1_cmd(_pair(), Path("/tmp/f.json"), self._args(**over))
+
+    def test_pit_features_passed_through(self):
+        assert "--pit-features" in self._cmd(pit_features=True)
+
+    def test_pit_features_absent_by_default(self):
+        assert "--pit-features" not in self._cmd()
+
+    def test_style_and_trade_sim_passed_through(self):
+        c = self._cmd(style_features=True, trade_sim=True)
+        assert "--style-features" in c and "--trade-sim" in c
+
+    def test_pit_ledger_and_visibility_passed_through(self):
+        c = self._cmd(pit_features=True, pit_ledger="/tmp/led.jsonl",
+                      pit_visible_same_day=True)
+        assert "--pit-ledger" in c and "/tmp/led.jsonl" in c
+        assert "--pit-visible-same-day" in c
+
+    def test_pit_ledger_omitted_when_empty(self):
+        assert "--pit-ledger" not in self._cmd(pit_features=True)
+
+    def test_ledger_flags_not_sent_without_pit_features(self):
+        """没开 --pit-features 时不该单独把 --pit-ledger 塞进命令。"""
+        c = self._cmd(pit_ledger="/tmp/led.jsonl", pit_visible_same_day=True)
+        assert "--pit-ledger" not in c and "--pit-visible-same-day" not in c
+
+
+class TestFingerprintLegacySafe:
+    """新增布尔指纹键不得让**旧 firings** 被误判为参数不一致而全窗重跑(12 窗代价极大)。"""
+
+    def _args(self, **over):
+        base = dict(entry_filter="reversal_k", feature_scores=rb.DEFAULT_FEATURES,
+                    delisted_ret=-1.0, sector_features=False, style_features=False,
+                    trade_sim=False, pit_features=False, pit_visible_same_day=False)
+        base.update(over)
+        return type("A", (), base)()
+
+    def _legacy_firings(self, tmp_path):
+        """旧格式:头部完全没有特征开关字段。"""
+        p = tmp_path / "old.json"
+        p.write_text(json.dumps({"entry_filter": "reversal_k", "rank_score": "none",
+                                 "feature_scores": rb.DEFAULT_FEATURES, "delisted_ret": -1.0,
+                                 "universe": "sdata", "records": []}, ensure_ascii=False),
+                     encoding="utf-8")
+        return p
+
+    def test_legacy_firings_still_reusable_when_flags_off(self, tmp_path, capsys):
+        f = self._legacy_firings(tmp_path)
+        assert rb.firings_reusable(f, self._args()) is True
+        assert "参数与本次不一致" not in capsys.readouterr().err
+
+    def test_legacy_firings_rejected_once_pit_enabled(self, tmp_path, capsys):
+        """开了 --pit-features 后旧 firings 没有基本面特征,必须重跑而不是静默复用。"""
+        f = self._legacy_firings(tmp_path)
+        assert rb.firings_reusable(f, self._args(pit_features=True)) is False
+        assert "pit_features" in capsys.readouterr().err
+
+    def test_pit_firings_rejected_when_flag_turned_off(self, tmp_path, capsys):
+        """反向也要成立:带 PIT 的 firings 在不开开关时也算不一致(特征集不同)。"""
+        p = tmp_path / "pit.json"
+        p.write_text(json.dumps({"entry_filter": "reversal_k", "rank_score": "none",
+                                 "feature_scores": rb.DEFAULT_FEATURES, "delisted_ret": -1.0,
+                                 "universe": "sdata", "pit_features": True, "records": []}),
+                     encoding="utf-8")
+        assert rb.firings_reusable(p, self._args()) is False
+
+    def test_visibility_switch_counted_as_mismatch(self, tmp_path):
+        p = tmp_path / "pit.json"
+        p.write_text(json.dumps({"entry_filter": "reversal_k", "rank_score": "none",
+                                 "feature_scores": rb.DEFAULT_FEATURES, "delisted_ret": -1.0,
+                                 "universe": "sdata", "pit_features": True,
+                                 "pit_visible_same_day": False, "records": []}),
+                     encoding="utf-8")
+        ok = rb.firings_reusable(p, self._args(pit_features=True))
+        bad = rb.firings_reusable(p, self._args(pit_features=True,
+                                               pit_visible_same_day=True))
+        assert ok is True and bad is False
+
+    def test_ledger_size_not_in_fingerprint(self):
+        """台账每季增长,若进指纹会导致每次补数后全窗强制重跑。"""
+        assert "pit_ledger_n" not in rb.expected_firings_header(self._args())
+
+
 class TestZeroRetVolumeDiagnosis:
     """按 volume 判零收益成因。s_data loader 只按 close 过滤,volume 加载了却没用上,
     停牌日只要 bundle 记了前收价就会留在 frame 里 ⇒ ret 恰好 0。"""

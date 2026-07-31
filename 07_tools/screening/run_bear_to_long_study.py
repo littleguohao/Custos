@@ -92,6 +92,16 @@ def pass1_cmd(p: dict, out_file: Path, args) -> list[str]:
            "--progress", str(args.progress)]
     if args.sector_features:
         cmd.append("--sector-features")
+    if args.style_features:
+        cmd.append("--style-features")
+    if args.trade_sim:
+        cmd.append("--trade-sim")
+    if args.pit_features:                    # A 组基本面特征(纯财务比率,不需市值)
+        cmd.append("--pit-features")
+        if args.pit_ledger:
+            cmd += ["--pit-ledger", args.pit_ledger]
+        if args.pit_visible_same_day:
+            cmd.append("--pit-visible-same-day")
     if args.chunk_size:
         cmd += ["--chunk-size", str(args.chunk_size)]
     return cmd
@@ -112,11 +122,27 @@ def tag_of(p: dict) -> str:
     return f"{p['signal_start']}_{p['signal_end']}__L{p['label_start']}_{p['label_end']}"
 
 
+# 布尔型特征开关:旧 firings 没有这些键,`head.get(k)` 为 None。若按严格相等比对,
+# **不开任何开关也会判"参数不一致"而把 12 窗全部重跑**(代价极大)。故这几个键按 bool() 归一,
+# 缺失等价 False —— 只有真正开启开关时才判不一致、才重跑。
+_BOOL_FINGERPRINT_KEYS = ("sector_features", "style_features", "trade_sim",
+                          "pit_features", "pit_visible_same_day")
+
+
 def expected_firings_header(args) -> dict:
-    """本次运行要求 firings 头部匹配的关键参数(与 pass1_cmd / launch_point_study 写盘字段一致)。"""
+    """本次运行要求 firings 头部匹配的关键参数(与 pass1_cmd / launch_point_study 写盘字段一致)。
+
+    ⚠️ 不含 `pit_ledger_n`:PIT 台账每季都会增长,进指纹会导致每次补数后全窗强制重跑;
+    需要按新台账重算时显式 `--force`。台账条数仍会写进 firings 头部供追溯。
+    """
     return {"entry_filter": args.entry_filter, "rank_score": "none",
             "feature_scores": args.feature_scores, "delisted_ret": args.delisted_ret,
-            "universe": "sdata"}
+            "universe": "sdata",
+            "sector_features": bool(args.sector_features),
+            "style_features": bool(args.style_features),
+            "trade_sim": bool(args.trade_sim),
+            "pit_features": bool(args.pit_features),
+            "pit_visible_same_day": bool(args.pit_visible_same_day)}
 
 
 def firings_reusable(f: Path, args) -> bool:
@@ -132,8 +158,14 @@ def firings_reusable(f: Path, args) -> bool:
     if not isinstance(head, dict) or "records" not in head:
         print(f"[WARN] firings 缺 records 键,视为未完成重跑: {f.name}", file=sys.stderr)
         return False
-    diff = {k: (head.get(k), v) for k, v in expected_firings_header(args).items()
-            if head.get(k) != v}
+    diff = {}
+    for k, v in expected_firings_header(args).items():
+        got = head.get(k)
+        if k in _BOOL_FINGERPRINT_KEYS:
+            if bool(got) != bool(v):         # 缺失键等价 False,不误伤旧 firings
+                diff[k] = (got, v)
+        elif got != v:
+            diff[k] = (got, v)
     if diff:
         print(f"[WARN] firings 参数与本次不一致,重跑不复用: {f.name} "
               + ", ".join(f"{k}: 文件={a!r} vs 本次={b!r}" for k, (a, b) in diff.items()),
@@ -393,6 +425,19 @@ def main(argv=None, runner=None) -> int:
     ap.add_argument("--entry-filter", default="reversal_k")
     ap.add_argument("--feature-scores", default=DEFAULT_FEATURES)
     ap.add_argument("--sector-features", action="store_true")
+    ap.add_argument("--style-features", action="store_true",
+                    help="Pass1:追加风格特征 f_board_code(上市板)与 f_amount20(20日均成交额)")
+    ap.add_argument("--trade-sim", action="store_true",
+                    help="Pass1:每个信号另算一笔**本策略买卖规则**下的收益(sim_ret/sim_reason),"
+                         "供 Pass2 --coverage 做双口径对比")
+    ap.add_argument("--pit-features", action="store_true",
+                    help="Pass1:追加 A 组基本面特征(纯财务比率,不需市值,2015 起 12 窗全可用):"
+                         "f_roe/f_gross_margin/f_ocf_ps/f_deduct_ratio/f_rev_yoy/f_np_yoy/"
+                         "f_pit_lag_days。需先建 PIT 台账并 --verify 确认无缺期")
+    ap.add_argument("--pit-ledger", default="",
+                    help="PIT 财务台账路径(缺省用 01_data/fundamentals/pit_financials.jsonl)")
+    ap.add_argument("--pit-visible-same-day", action="store_true",
+                    help="把公告当日算作可见(默认次日;公告多在盘后发布)")
     ap.add_argument("--data-source", choices=["qlib", "csv"], default="qlib")
     ap.add_argument("--s-data-root", default=os.environ.get("S_DATA_ROOT") or r"E:\S_DATA")
     ap.add_argument("--delisted-ret", type=float, default=-1.0)

@@ -1672,6 +1672,7 @@ def main(argv=None, loader=None) -> int:
                 print(f"[WARN] 未知特征打分器 {nm}(可选: {','.join(sorted(bt.SCORERS))})", file=sys.stderr)
         fstats: dict = {}
         xfns = []
+        pit_ledger_n = 0
         if args.sector_features:
             import json as _jm
             mpath = Path(args.sector_members)
@@ -1690,6 +1691,7 @@ def main(argv=None, loader=None) -> int:
                          "--since 2015,并用 --verify 确认无缺期)")
             xfns.append(_pit.build_pit_feature_fn(
                 pit_recs, visible_next_day=not args.pit_visible_same_day))
+            pit_ledger_n = len(pit_recs)
             print(f"[pass1] PIT 基本面特征已启用 ({len(pit_recs)} 条台账;"
                   f"{'公告当日即可见' if args.pit_visible_same_day else '公告次日起可见'})",
                   file=sys.stderr)
@@ -1731,6 +1733,16 @@ def main(argv=None, loader=None) -> int:
                       "n_delisted": n_delisted,
                       "feature_scores": args.feature_scores,
                       "universe": "sdata" if args.universe_sdata else "codes",
+                      # 特征开关必须落盘:否则驱动脚本的续跑校验看不出"这份 firings 是否带
+                      # 基本面/风格/板块特征",会把旧参数的结果当新参数复用,结论静默失真。
+                      "sector_features": bool(args.sector_features),
+                      "style_features": bool(args.style_features),
+                      "trade_sim": bool(args.trade_sim),
+                      "pit_features": bool(args.pit_features),
+                      "pit_visible_same_day": bool(args.pit_visible_same_day),
+                      # 仅供追溯,**不进复用指纹**:台账每季都会增长,若进指纹会导致每次补数后
+                      # 全部窗口强制重跑;需要按新台账重算时显式 --force。
+                      "pit_ledger_n": pit_ledger_n,
                       "rank_score": args.rank_score, "shard": args.shard, "records": recs},
                      ensure_ascii=False), encoding="utf-8")
         tmp_firings.replace(firings_path)   # 原子落盘:中断不留半截 JSON(断点续跑会把半截文件当已完成)
