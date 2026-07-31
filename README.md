@@ -188,7 +188,11 @@ uv run python 07_tools/run_1800.py
 - 持仓新鲜度
 - 技术数据新鲜度
 - 市场质量（0AMV、宽度、成交额；**按 `as_of` 判定新鲜度**，当日文件里装 T-1 数据同样记 `stale`）
+  - **评分按关键性加权**（2026-07-31）：`0AMV 35 / 宽度 20 / 成交额 20 / 情绪 15 / 海外 10`。此前是无权重算术平均（5 项各 0.2），导致「0AMV 全缺 + 其余齐全」= 4/5 = **0.8 恰好判 pass 并授予加仓权**。0AMV 决定 regime，缺它等于不知道方向，故 **0AMV 非 confirmed/auto 时一律不得 pass**（只降为 `degraded`，不新增阻断）。
+  - **`blocked` 改为显式覆盖率规则**：四个核心块（0AMV/宽度/情绪/成交额）**全部** stale/missing 才算「大面积缺数」。原先是 `score < 0.4` 这个魔数阈值——加权后它会凭空多出 24 种阻断场景（256 组合实测），而 blocked 经 `--require-quality`/`--require-gate` 真正中断链路，重演 07-30 事故。现规则下：新增 blocked = 0，6 个原 pass 收紧为 degraded，0 个放松为 pass。
+  - **`limitations` 字段**：degraded 时列出具体受限项（哪个块 stale、as_of 是哪天），报告可据此归因，不再只有一个分数。
 - 持仓行情是否当日
+- **加仓授权（`position_gate.allow_position_increase`）**：需 ①持仓基线 confirmed + 全持仓当日行情 ②当日技术指标 ③`market_quality=pass` ④0AMV 新鲜 ⑤regime 属白名单 `{做多, 中性}`。此前写作 `regime != "空头"`，0AMV 缺失时 `effective_state` 是 None → 空串 → `"" != "空头"` 为真 ⇒ **regime 未知却授予加仓权**（2026-07-31 修）。regime 文本经 `normalize_regime` 归一，覆盖三套并行词表：`effective_state`（做多/中性/空头）、`amv_zone`（做多触发/空头触发/阈值内，merge 会用它兜底填 effective_state）、README 曾用的「多头」。判定逻辑抽成纯函数 `position_increase_decision`，可单测。
 
 门控必须能**真正阻断**，而非只写 JSON。退出码：
 

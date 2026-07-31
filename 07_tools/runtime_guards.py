@@ -179,6 +179,36 @@ def _latest_market_section(day: str, section_name: str, value_key: str) -> tuple
     return {}, None
 
 
+# 各检查项的**关键性权重**。0AMV 决定 regime(做多/空头),缺它等于不知道方向;
+# 海外行情只是背景参考。此前 score 是无权重算术平均(5 项各 0.2),导致
+# 「0AMV 全缺 + 其余齐全」= 4/5 = 0.8 **恰好判 pass 并授予加仓权**(已实测复现)。
+# 改为加权后同一场景为 0.65 → degraded,且 0AMV 不新鲜时一律不得 pass。
+_CHECK_WEIGHT = {"0AMV": 35, "market_breadth": 20, "turnover": 20, "sentiment": 15, "overseas": 10}
+_DEFAULT_WEIGHT = 10
+# 允许加仓的 regime 白名单。**不能写成 `!= "空头"`**:0AMV 缺失时 effective_state 是
+# None → 空串 → 空串 != "空头" 为真 → 未知 regime 被当成可加仓(这就是修掉的漏洞)。
+_REGIME_ALLOW_INCREASE = {"做多", "中性"}
+
+
+def normalize_regime(raw: str) -> str:
+    """把 regime 文本归一到 {做多, 中性, 空头, 未知}。
+
+    存在三套并行词表:amv_state 写 `做多/中性/空头`;`amv_zone` 是 `做多触发/空头触发/阈值内`,
+    而 merge_incremental_market 会用 amv_zone 兜底填 effective_state;README 又写作"多头"。
+    归一后再判白名单,避免任何一套词表漏进"未知"分支被误当可加仓。
+    """
+    s = str(raw or "").strip()
+    if not s:
+        return "未知"
+    if "空头" in s:
+        return "空头"
+    if "做多" in s or "多头" in s:
+        return "做多"
+    if "中性" in s or "阈值内" in s:
+        return "中性"
+    return "未知"
+
+
 def market_quality_gate(market: dict[str, Any], day: str, expected_day: str | None = None) -> dict[str, Any]:
     """expected_day:该 session 期望的数据日(盘前/盘中=T-1,盘后=T;缺省=day,保持既有行为)。"""
     exp = expected_day or day
@@ -219,13 +249,68 @@ def market_quality_gate(market: dict[str, Any], day: str, expected_day: str | No
     overseas_values = [overseas.get(k) for k in ("nasdaq_change_pct", "sp500_change_pct", "sox_change_pct", "nikkei_change_pct", "kospi_change_pct", "hstech_change_pct")]
     checks.append({"field": "overseas", "quality": "confirmed" if any(v is not None for v in overseas_values) and overseas.get("as_of") else ("candidate" if any(v is not None for v in overseas_values) else "missing"), "as_of": overseas.get("as_of")})
     rank = {"confirmed": 1.0, "auto": 1.0, "candidate": 0.5, "partial": 0.4, "raw_only": 0.0, "stale": 0.0, "missing": 0.0}
-    score = sum(rank[x["quality"]] for x in checks) / len(checks)
+    weights = {x["field"]: _CHECK_WEIGHT.get(x["field"], _DEFAULT_WEIGHT) for x in checks}
+    total_w = sum(weights.values()) or 1
+    score = sum(rank[x["quality"]] * weights[x["field"]] for x in checks) / total_w
+    # blocked 用**显式覆盖率规则**而不是分数阈值:加权会让"只剩一个次要块新鲜"的场景掉到
+    # 0.4 以下,凭空多出 24 种阻断场景(实测)。而 blocked 会经 --require-quality /
+    # --require-gate 真正中断链路——README 门控节记着 2026-07-30 悄悄收紧硬闸导致 17:00
+    # 盘后复盘直接失败的教训,所以这里精确保持原语义:**四个核心块全废才算大面积缺数**。
+    core = [x for x in checks if x["field"] != "overseas"]
+    core_bad = [x for x in core if x["quality"] in {"stale", "missing", "raw_only"}]
+    if core and len(core_bad) == len(core):
+        status = "blocked"
+    else:
+        status = "pass" if score >= 0.8 else "degraded"
+    amv_chk = next((x for x in checks if x["field"] == "0AMV"), None)
+    amv_quality = amv_chk["quality"] if amv_chk else "missing"
+    amv_ok = amv_quality in {"confirmed", "auto"}
+    limitations: list[str] = []
+    if not amv_ok:
+        # regime 未知就不该给"数据齐全"的结论。只把 pass 降到 degraded,**不新增阻断场景**
+        # (blocked 会经 --require-quality / --require-gate 真正中断链路,详见 README 门控节)。
+        if status == "pass":
+            status = "degraded"
+        limitations.append(f"0AMV={amv_quality}：regime 未知，不得据此加仓")
+    for x in checks:
+        if x["quality"] in {"stale", "missing", "raw_only"} and x["field"] != "0AMV":
+            limitations.append(f"{x['field']}={x['quality']}(as_of={x.get('as_of')})")
     return {
         "date": day, "expected_day": exp,
-        "status": "pass" if score >= 0.8 else ("degraded" if score >= 0.4 else "blocked"),
+        "status": status,
         "quality_score": round(score, 3), "checks": checks, "inherited_sections": inherited,
-        "rule": "盘中缺少盘后指标时沿用最近有效交易日并标明日期；继承值仅供状态判断，不单独授予加仓权限",
+        "weights": weights, "amv_ok": amv_ok, "limitations": limitations,
+        "rule": "盘中缺少盘后指标时沿用最近有效交易日并标明日期；继承值仅供状态判断，不单独授予加仓权限；"
+                "评分按关键性加权（0AMV 权重最高），0AMV 不新鲜时一律不得 pass",
     }
+
+
+def position_increase_decision(market: dict[str, Any], *, reduction_ready: bool,
+                               technical_current: bool, quotes_current: bool,
+                               market_quality: dict[str, Any]) -> dict[str, Any]:
+    """是否授予**加仓**权限。抽成纯函数以便单测——这是钱的路径,不能只靠端到端覆盖。
+
+    历史漏洞:曾写作 `market_regime != "空头"`,而 0AMV 缺失时 effective_state 是 None →
+    空串 → `"" != "空头"` 为真 ⇒ **regime 未知却授予加仓权**。现改为白名单 + 要求 0AMV 本身
+    新鲜(market_quality.amv_ok),任一不满足都不放行(风控优先于买入,DECISION_PRIORITY_RULES)。
+    """
+    amv_section = market.get("amv_0") or {}
+    regime_raw = str(amv_section.get("effective_state") or amv_section.get("amv_zone") or "")
+    regime = normalize_regime(regime_raw)
+    regime_ok = regime in _REGIME_ALLOW_INCREASE
+    amv_ok = bool(market_quality.get("amv_ok"))
+    allow = (reduction_ready and technical_current
+             and market_quality.get("status") == "pass" and regime_ok and amv_ok)
+    limits = list(market_quality.get("limitations") or [])
+    if not regime_ok:
+        limits.append(f"regime={regime}(原始值 {regime_raw!r})不在加仓白名单 "
+                      f"{sorted(_REGIME_ALLOW_INCREASE)}")
+    if not technical_current:
+        limits.append("持仓技术指标未更新至目标日")
+    if not quotes_current:
+        limits.append("持仓行情未覆盖全部持仓")
+    return {"allow": allow, "regime": regime, "regime_raw": regime_raw,
+            "regime_ok": regime_ok, "limitations": limits}
 
 
 def write_runtime_gate(day: str, expected_day: str | None = None) -> dict[str, Any]:
@@ -250,8 +335,13 @@ def write_runtime_gate(day: str, expected_day: str | None = None) -> dict[str, A
         "reason": "持仓技术行情已更新至目标日" if technical_current else "持仓技术指标未更新至目标日，不得据此提高仓位；精确减仓数量另由当日行情快照授权",
     }
     reduction_ready = freshness.get("status") == "confirmed" and quotes_current
-    market_regime = str(market.get("amv_0", {}).get("effective_state") or "")
-    increase_ready = reduction_ready and technical_current and market_quality.get("status") == "pass" and market_regime != "空头"
+    decision = position_increase_decision(market, reduction_ready=reduction_ready,
+                                          technical_current=technical_current,
+                                          quotes_current=quotes_current,
+                                          market_quality=market_quality)
+    increase_ready = decision["allow"]
+    market_regime, regime_raw = decision["regime"], decision["regime_raw"]
+    regime_ok, gate_limits = decision["regime_ok"], decision["limitations"]
     position_gate = {
         "status": "pass" if increase_ready else ("degraded" if reduction_ready else "blocked"),
         "allow_precise_quantity": reduction_ready,
@@ -261,8 +351,11 @@ def write_runtime_gate(day: str, expected_day: str | None = None) -> dict[str, A
         "quote_snapshot": str(quote_path),
         "quote_date": quote_snapshot.get("as_of_date") if isinstance(quote_snapshot, dict) else None,
         "quotes_current": quotes_current,
-        "market_regime": market_regime or "未知",
-        "rule": "B1默认盘中不交易；最近确认无交易后的收盘持仓可作为14:45尾盘建议基线。持仓基线+当日全持仓行情可授予精确减仓数量权限；加仓另需当日技术、完整市场质量通过且0AMV非空头",
+        "market_regime": market_regime,
+        "market_regime_raw": regime_raw,
+        "regime_allows_increase": regime_ok,
+        "limitations": gate_limits,
+        "rule": "B1默认盘中不交易；最近确认无交易后的收盘持仓可作为14:45尾盘建议基线。持仓基线+当日全持仓行情可授予精确减仓数量权限；加仓另需当日技术、市场质量 pass、0AMV 新鲜且 regime 属白名单（做多/中性）——regime 未知一律不放行",
     }
     result = {
         "date": day,

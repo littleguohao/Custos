@@ -77,8 +77,85 @@ class MarketQualityAsOfTests(unittest.TestCase):
         self.assertEqual(self._check(r, "market_breadth")["quality"], "stale")
 
 
-if __name__ == "__main__":
-    unittest.main()
+class MarketQualityWeightingTests(unittest.TestCase):
+    """关键性加权:0AMV 缺失不得再靠"其余齐全"凑到 0.8 判 pass。"""
+
+    DAY = "2026-07-20"
+
+    def _market(self, amv: dict | None):
+        m = {
+            "market_breadth": {"up_count": 3000, "quality": "confirmed", "as_of": self.DAY},
+            "sentiment": {"limit_up_count": 50, "quality": "confirmed", "as_of": self.DAY},
+            "turnover": {"turnover_change_pct": 5.0, "quality": "confirmed", "as_of": self.DAY},
+            "overseas_market": {"nasdaq_change_pct": 0.5, "as_of": self.DAY},
+        }
+        m["amv_0"] = amv if amv is not None else {}
+        return m
+
+    def test_missing_amv_no_longer_passes_at_exactly_080(self):
+        """回归本体:旧口径无权重平均 = 4/5 = 0.8 恰好 pass;加权后必须降级。"""
+        r = runtime_guards.market_quality_gate(self._market(None), self.DAY,
+                                               expected_day=self.DAY)
+        self.assertLess(r["quality_score"], 0.8)
+        self.assertEqual(r["status"], "degraded")
+        self.assertFalse(r["amv_ok"])
+        self.assertTrue(any("0AMV" in x for x in r["limitations"]))
+
+    def test_amv_weight_exceeds_overseas(self):
+        """0AMV 与海外行情不能同权 —— 前者定 regime,后者只是背景。"""
+        r = runtime_guards.market_quality_gate(
+            self._market({"amv_change_pct": 5.0, "quality": "confirmed", "as_of": self.DAY}),
+            self.DAY, expected_day=self.DAY)
+        self.assertGreater(r["weights"]["0AMV"], r["weights"]["overseas"])
+        self.assertEqual(r["status"], "pass")
+        self.assertEqual(r["limitations"], [])
+
+    def test_stale_amv_also_blocks_pass(self):
+        r = runtime_guards.market_quality_gate(
+            self._market({"amv_change_pct": 5.0, "quality": "confirmed", "as_of": "2026-01-05"}),
+            self.DAY, expected_day=self.DAY)
+        self.assertEqual(r["status"], "degraded")
+        self.assertFalse(r["amv_ok"])
+
+    def test_blocked_only_when_all_core_sections_bad(self):
+        """blocked 会真正中断链路(--require-quality/--require-gate),口径必须是"大面积缺数"。"""
+        partial = runtime_guards.market_quality_gate(
+            {"amv_0": {}, "market_breadth": {"up_count": 1, "quality": "confirmed",
+                                             "as_of": self.DAY},
+             "sentiment": {}, "turnover": {},
+             "overseas_market": {"nasdaq_change_pct": 0.5, "as_of": self.DAY}},
+            self.DAY, expected_day=self.DAY)
+        self.assertEqual(partial["status"], "degraded")     # 还有一个核心块新鲜 → 不阻断
+        allbad = runtime_guards.market_quality_gate(
+            {"amv_0": {}, "market_breadth": {}, "sentiment": {}, "turnover": {},
+             "overseas_market": {"nasdaq_change_pct": 0.5, "as_of": self.DAY}},
+            self.DAY, expected_day=self.DAY)
+        self.assertEqual(allbad["status"], "blocked")
+
+
+class RegimeNormalizeTests(unittest.TestCase):
+    """三套并行词表(effective_state / amv_zone / README 用词)都要归一,否则漏进未知分支。"""
+
+    def test_canonical_values(self):
+        self.assertEqual(runtime_guards.normalize_regime("做多"), "做多")
+        self.assertEqual(runtime_guards.normalize_regime("空头"), "空头")
+        self.assertEqual(runtime_guards.normalize_regime("中性"), "中性")
+
+    def test_amv_zone_vocabulary(self):
+        """merge_incremental_market 会用 amv_zone 兜底填 effective_state。"""
+        self.assertEqual(runtime_guards.normalize_regime("做多触发"), "做多")
+        self.assertEqual(runtime_guards.normalize_regime("空头触发"), "空头")
+        self.assertEqual(runtime_guards.normalize_regime("阈值内"), "中性")
+
+    def test_readme_wording_alias(self):
+        self.assertEqual(runtime_guards.normalize_regime("多头"), "做多")
+
+    def test_empty_and_unknown_are_not_tradeable(self):
+        """核心:空串必须归成"未知"而不是落进"非空头"⇒ 可加仓。"""
+        for raw in ("", None, "  ", "乱码"):
+            self.assertEqual(runtime_guards.normalize_regime(raw), "未知")
+        self.assertNotIn("未知", runtime_guards._REGIME_ALLOW_INCREASE)
+        self.assertNotIn("空头", runtime_guards._REGIME_ALLOW_INCREASE)
 
 
 class MarketQualitySessionAwareTests(unittest.TestCase):
@@ -110,3 +187,71 @@ class MarketQualitySessionAwareTests(unittest.TestCase):
                                                expected_day=self.PREV)
         chk = next(x for x in r["checks"] if x["field"] == "market_breadth")
         self.assertEqual(chk["quality"], "stale")
+
+
+class PositionIncreaseDecisionTests(unittest.TestCase):
+    """加仓授权是钱的路径:regime 未知一律不放行。"""
+
+    OK_QUALITY = {"status": "pass", "amv_ok": True, "limitations": []}
+
+    def _decide(self, regime_field=None, quality=None, **kw):
+        market = {"amv_0": dict(regime_field or {})}
+        args = {"reduction_ready": True, "technical_current": True, "quotes_current": True,
+                "market_quality": quality or self.OK_QUALITY}
+        args.update(kw)
+        return runtime_guards.position_increase_decision(market, **args)
+
+    def test_long_regime_authorized(self):
+        d = self._decide({"effective_state": "做多"})
+        self.assertTrue(d["allow"])
+        self.assertTrue(d["regime_ok"])
+        self.assertEqual(d["limitations"], [])
+
+    def test_neutral_regime_authorized(self):
+        self.assertTrue(self._decide({"effective_state": "中性"})["allow"])
+
+    def test_bear_regime_denied(self):
+        d = self._decide({"effective_state": "空头"})
+        self.assertFalse(d["allow"])
+        self.assertTrue(any("白名单" in x for x in d["limitations"]))
+
+    def test_missing_amv_no_longer_slips_through_as_not_bear(self):
+        """漏洞本体:0AMV 整段缺失 → regime 空串 → 旧逻辑 `!= "空头"` 为真 ⇒ 误授加仓权。"""
+        d = self._decide({})                       # amv_0 = {}
+        self.assertEqual(d["regime"], "未知")
+        self.assertFalse(d["regime_ok"])
+        self.assertFalse(d["allow"])
+
+    def test_unknown_regime_string_denied(self):
+        self.assertFalse(self._decide({"effective_state": "待确认"})["allow"])
+
+    def test_amv_zone_bear_trigger_denied(self):
+        """effective_state 缺失时会用 amv_zone 兜底,空头触发同样不得放行。"""
+        d = self._decide({"amv_zone": "空头触发"})
+        self.assertEqual(d["regime"], "空头")
+        self.assertFalse(d["allow"])
+
+    def test_stale_amv_denies_even_when_regime_is_long(self):
+        """regime 写着做多但 0AMV 不新鲜(amv_ok=False) ⇒ 不放行:那是过期的方向。"""
+        d = self._decide({"effective_state": "做多"},
+                         quality={"status": "pass", "amv_ok": False,
+                                  "limitations": ["0AMV=stale"]})
+        self.assertFalse(d["allow"])
+
+    def test_quality_degraded_denies(self):
+        d = self._decide({"effective_state": "做多"},
+                         quality={"status": "degraded", "amv_ok": True, "limitations": []})
+        self.assertFalse(d["allow"])
+
+    def test_stale_technical_denies_and_is_recorded(self):
+        d = self._decide({"effective_state": "做多"}, technical_current=False)
+        self.assertFalse(d["allow"])
+        self.assertTrue(any("技术指标" in x for x in d["limitations"]))
+
+    def test_no_reduction_baseline_denies(self):
+        self.assertFalse(self._decide({"effective_state": "做多"},
+                                      reduction_ready=False)["allow"])
+
+
+if __name__ == "__main__":
+    unittest.main()
