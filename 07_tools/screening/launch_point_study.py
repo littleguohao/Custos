@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import bisect
+import math
 import os
 import statistics
 import sys
@@ -334,7 +335,9 @@ def extract_firings(bars, start: str, end: str, entry_gate, scorer=None,
                     horizons: tuple = (), feature_scorers: Optional[dict] = None,
                     stats: Optional[dict] = None, extra_feature_fn=None,
                     ret_start: Optional[str] = None, ret_end: Optional[str] = None,
-                    delisted_ret: Optional[float] = None) -> list[dict]:
+                    delisted_ret: Optional[float] = None,
+                    trade_sim: bool = False, stop_pct: float = 8.0, bbi_consec: int = 2,
+                    style_features: bool = False) -> list[dict]:
     """**Pass1(可分片)**:逐股抽取 {code, ret, days:[[date,score],..]}——极小的中间产物。
     可按 --shard 拆多个独立进程跑(每片内存全新),彻底规避 loader 内存问题;Pass2 再合并算排名。
     horizons:如 (20,60) → 每个信号日额外记 **因果前向收益**(fwd{h}=close[i+h]/close[i]-1,
@@ -351,7 +354,12 @@ def extract_firings(bars, start: str, end: str, entry_gate, scorer=None,
     传入如 -1.0 时:这类票按"清零/大亏"计入**非赢家**并标 delisted=True,不再消失。
     ⚠️口径局限:该补丁只能救回**有信号**的退市股;无信号退市股仍完全缺失(连记录都没有),
     下游 n_universe_all / 上涨占比的分母因此偏小 → 上涨占比偏高、普涨窗可能漏标(见
-    discriminate_at_signal 输出中的口径警示)。"""
+    discriminate_at_signal 输出中的口径警示)。
+    trade_sim:每个信号额外按 **本策略买卖规则**(simulate_b1_trade:信号日收盘进场、pct 止损、
+    BBI 连破止盈)算一笔实际收益 → sim_ret/sim_reason/sim_holding。与区间涨幅口径对比即可回答
+    "赢家我们到底吃到了几成"(coverage_report)。⚠️ 收益受加载窗口右端截断(reason=open_end)。
+    style_features:追加风格特征 f_board_code(上市板序数,免数据)与 f_amount20
+    (log10 20日均 close×volume ≈ 成交额,**市值代理**——qlib bundle 无总股本,算不出真市值)。"""
     import gc  # noqa: PLC0415
     items = bars.items() if isinstance(bars, dict) else bars
     out: list[dict] = []
@@ -377,7 +385,7 @@ def extract_firings(bars, start: str, end: str, entry_gate, scorer=None,
                         sr = scorer(sub, code)
                         sc = (sr or {}).get("score", 0.0) if isinstance(sr, dict) else (sr or 0.0)
                     rec: list = [ds[i], float(sc)]
-                    if horizons or feature_scorers or extra_feature_fn:
+                    if horizons or feature_scorers or extra_feature_fn or style_features or trade_sim:
                         extra: dict = {}
                         for h in horizons:                       # 因果前向:只用信号日之后的数据
                             j = i + int(h)
@@ -403,6 +411,31 @@ def extract_firings(bars, start: str, end: str, entry_gate, scorer=None,
                                 if stats is not None:
                                     ff = stats.setdefault("feature_failures", {})
                                     ff["_extra"] = ff.get("_extra", 0) + 1
+                        if style_features:                       # 风格:上市板 + 成交额(市值代理)
+                            extra["f_board_code"] = float(
+                                next((k for k, (nm, _) in enumerate(BOARDS)
+                                      if nm == board_of(code)), len(BOARDS)))
+                            lo20 = max(0, i - 19)
+                            amt = [closes[j] * float(df["volume"].iloc[j])
+                                   for j in range(lo20, i + 1)]
+                            amt = [a for a in amt if a > 0]
+                            if amt:
+                                extra["f_amount20"] = round(
+                                    math.log10(sum(amt) / len(amt)), 4)
+                        if trade_sim:                            # 本策略买卖规则下的实际一笔
+                            try:
+                                sub_full = df.iloc[:]            # 规则需向后走,故用全量 df
+                                sim = bt.simulate_b1_trade(
+                                    sub_full, i, bt._bbi_series(sub_full["close"].astype(float)),
+                                    bbi_exit_consec=bbi_consec, stop_mode="pct",
+                                    stop_pct=stop_pct)
+                                extra["sim_ret"] = round(float(sim["ret"]), 4)
+                                extra["sim_reason"] = sim["reason"]
+                                extra["sim_holding"] = sim["holding"]
+                            except Exception:  # noqa: BLE001
+                                if stats is not None:
+                                    ff = stats.setdefault("feature_failures", {})
+                                    ff["_trade_sim"] = ff.get("_trade_sim", 0) + 1
                         rec.append(extra)
                     days.append(rec)
             delisted = False
@@ -1091,6 +1124,154 @@ def explain_aggregate(agg: dict, feature: str = "", min_hit_ratio: float = 0.75)
     return "\n".join(lines)
 
 
+BOARDS = (("科创板", ("688", "689")), ("创业板", ("300", "301")),
+          ("北交所", ("43", "83", "87", "88", "920")),
+          ("沪主板", ("600", "601", "603", "605")),
+          ("深主板", ("000", "001", "002", "003")))
+
+
+def board_of(code6: str) -> str:
+    """6 位代码 → 上市板(免数据、无未来函数)。市值需总股本,qlib bundle 不含,故用成交额代理另算。"""
+    c = str(code6 or "").strip()
+    if not c.isdigit():                      # 空/非数字不得 zfill 成 "000000" 误判为深主板
+        return "其他"
+    c = c.zfill(6)
+    for name, prefixes in BOARDS:
+        if c.startswith(prefixes):
+            return name
+    return "其他"
+
+
+def _pct(vals: list[float], q: float) -> Optional[float]:
+    if not vals:
+        return None
+    s = sorted(vals)
+    return round(s[min(len(s) - 1, max(0, int(len(s) * q)))], 4)
+
+
+def distribution_report(records: list[dict], bands=(0.0, 0.1, 0.2, 0.3, 0.5, 1.0)) -> dict:
+    """赢家窗收益的**分布画像** + 按上市板分组(纯 Pass2,不重跑 Pass1)。
+
+    回答"涨幅怎么分布、赢家集中在哪个板":
+      - 全域/有信号子集各自的分位(p10..p99)与中位;
+      - 各涨幅带(>0/≥10%/≥20%/≥30%/≥50%/≥100%)的只数与占比 —— 看"真牛股"有多稀;
+      - 按上市板(主板/创业/科创/北证)分组的只数、上涨率、中位收益、≥30% 占比 ——
+        看"赢家有无板块规律";同时给**有信号子集**的同口径,以便对比"我们能看到的池子"是否有偏。
+    ⚠️ 收益口径是 window_return(赢家窗首根→末根收盘,买入持有),**不是**我们的买卖规则;
+       规则口径需 Pass1 带 --trade-sim,再看 coverage_report。
+    """
+    rows = [{"code": r["code"], "ret": float(r["ret"]),
+             "board": board_of(r["code"]), "has_signal": bool(r.get("days"))}
+            for r in records if r.get("ret") is not None]
+    if not rows:
+        return {"n": 0, "text": "无收益数据"}
+
+    def _stats(sub: list[dict]) -> dict:
+        rets = [x["ret"] for x in sub]
+        pos = [x for x in sub if x["ret"] > 0]
+        return {"n": len(sub), "n_up": len(pos),
+                "up_ratio": round(len(pos) / len(sub), 4) if sub else None,
+                "median": _median(rets), "p10": _pct(rets, 0.10), "p25": _pct(rets, 0.25),
+                "p75": _pct(rets, 0.75), "p90": _pct(rets, 0.90), "p99": _pct(rets, 0.99),
+                "bands": {f">={b:.0%}": {"n": sum(1 for x in rets if x >= b),
+                                         "share": round(sum(1 for x in rets if x >= b) / len(rets), 4)}
+                          for b in bands}}
+
+    all_stats, sig_stats = _stats(rows), _stats([x for x in rows if x["has_signal"]])
+    by_board = {}
+    for name, _ in BOARDS + (("其他", ()),):
+        sub = [x for x in rows if x["board"] == name]
+        if sub:
+            s = _stats(sub)
+            s["share_of_universe"] = round(len(sub) / len(rows), 4)
+            s["n_with_signal"] = sum(1 for x in sub if x["has_signal"])
+            by_board[name] = s
+    out = {"n": len(rows), "all": all_stats, "with_signal": sig_stats, "by_board": by_board}
+    lines = [f"赢家窗收益分布(口径=区间买入持有,非本策略买卖规则):全域 {all_stats['n']} 只 / "
+             f"有信号 {sig_stats['n']} 只",
+             f"    {'子集':<10} {'只数':>6} {'上涨率':>7} {'中位':>8} {'p75':>8} {'p90':>8} {'p99':>8}"]
+    for label, s in (("全域", all_stats), ("有信号", sig_stats)):
+        lines.append(f"    {label:<10} {s['n']:>6} {(s['up_ratio'] or 0):>6.1%} "
+                     f"{_fmt_pct(s['median']):>8} {_fmt_pct(s['p75']):>8} "
+                     f"{_fmt_pct(s['p90']):>8} {_fmt_pct(s['p99']):>8}")
+    lines.append("  涨幅带(全域 / 有信号):")
+    for b in bands:
+        k = f">={b:.0%}"
+        a, g = all_stats["bands"][k], sig_stats["bands"][k]
+        lines.append(f"    {k:>7}  {a['n']:>5} 只({a['share']:.1%})  |  有信号 {g['n']:>5} 只({g['share']:.1%})")
+    lines.append("  按上市板:")
+    lines.append(f"    {'板':<8} {'只数':>6} {'占宇宙':>7} {'有信号':>7} {'上涨率':>7} {'中位':>8} {'≥30%占比':>9}")
+    for name, s in sorted(by_board.items(), key=lambda kv: -kv[1]["n"]):
+        lines.append(f"    {name:<8} {s['n']:>6} {s['share_of_universe']:>6.1%} "
+                     f"{s['n_with_signal']:>7} {(s['up_ratio'] or 0):>6.1%} "
+                     f"{_fmt_pct(s['median']):>8} {s['bands']['>=30%']['share']:>8.1%}")
+    lines.append("  注:板间差异要与'占宇宙比例'一起看——创业板/科创板波动天然更大,"
+                 "中位更高不等于'可选出来',判别力仍看 --discriminate。")
+    out["text"] = "\n".join(lines)
+    return out
+
+
+def coverage_report(records: list[dict], winner_top_pct: float = 50.0,
+                    winner_basis: str = "profitable",
+                    min_winner_ret: Optional[float] = None) -> dict:
+    """**双口径对比**:赢家(区间涨幅口径)在**我们的买卖规则**下实际赚到了多少。
+
+    需 Pass1 带 --trade-sim(每个信号记 sim_ret/sim_reason/sim_holding,由 simulate_b1_trade 产出:
+    信号日收盘进场、pct 止损、BBI 连破止盈)。回答的是结论#3/#5 那条老问题的量化版:
+      - **覆盖度**=赢家中"我们规则下 sim_ret>0"的占比;取每只赢家的**最好一笔**(最乐观口径);
+      - 捕获率=median(sim_ret)/median(区间涨幅) —— 规则吃到了区间涨幅的几成;
+      - 退出原因分布 —— 赢家里若大量 reason=stop,说明"选对了但被止损扫出",
+        问题在**交易管理**而非选股(与结论#5"买入K最低止损 83.7% 被扫"同源)。
+    ⚠️ sim 收益受**加载窗口右端**截断:reason=open_end 表示到数据末仍持有,收益按末根收盘计。
+    """
+    rets = {r["code"]: float(r["ret"]) for r in records if r.get("ret") is not None}
+    if not rets:
+        return {"n_winners": 0, "text": "无收益数据"}
+    pairs = sorted(rets.items(), key=lambda kv: kv[1], reverse=True)
+    winners, wmeta = _pick_winners(pairs, winner_top_pct, min_winner_ret, winner_basis)
+    per_code: dict[str, list[dict]] = {}
+    for r in records:
+        for d in (r.get("days") or []):
+            ex = d[2] if len(d) >= 3 and isinstance(d[2], dict) else {}
+            if "sim_ret" in ex:
+                per_code.setdefault(r["code"], []).append(
+                    {"date": d[0], "ret": float(ex["sim_ret"]),
+                     "reason": ex.get("sim_reason", ""), "holding": ex.get("sim_holding")})
+    if not per_code:
+        return {"n_winners": len(winners),
+                "text": "无规则模拟收益(Pass1 需带 --trade-sim)"}
+    best: dict[str, dict] = {c: max(v, key=lambda x: x["ret"]) for c, v in per_code.items()}
+    w_sig = [c for c in winners if c in best]
+    w_pos = [c for c in w_sig if best[c]["ret"] > 0]
+    reasons: dict[str, int] = {}
+    for c in w_sig:
+        k = best[c]["reason"] or "unknown"
+        reasons[k] = reasons.get(k, 0) + 1
+    med_sim = _median([best[c]["ret"] for c in w_sig])
+    med_win = _median([rets[c] for c in w_sig])
+    capture = (round(med_sim / med_win, 3) if med_sim is not None and med_win else None)
+    out = {"n_winners": len(winners), "n_winner_with_signal": len(w_sig),
+           "n_winner_rule_profitable": len(w_pos),
+           "coverage": round(len(w_pos) / len(w_sig), 3) if w_sig else None,
+           "median_sim_ret": med_sim, "median_window_ret": med_win,
+           "capture_ratio": capture, "exit_reasons": reasons, "winner_meta": wmeta,
+           "all_signals_median_sim_ret": _median([b["ret"] for b in best.values()])}
+    lines = [f"赢家 {len(winners)} 只(区间涨幅口径),其中有信号 {len(w_sig)} 只;",
+             f"  **覆盖度(规则下赚钱的赢家占比) {(out['coverage'] or 0):.0%}** "
+             f"({len(w_pos)}/{len(w_sig)});每只取其最好一笔(最乐观口径)",
+             f"  中位:规则收益 {_fmt_pct(med_sim)} vs 区间涨幅 {_fmt_pct(med_win)} → "
+             f"**捕获率 {capture if capture is not None else '-'}**",
+             "  赢家的退出原因分布: " + ", ".join(f"{k}={v}" for k, v in sorted(reasons.items()))]
+    stop_share = reasons.get("stop", 0) / len(w_sig) if w_sig else 0
+    if stop_share >= 0.5:
+        lines.append(f"  → **{stop_share:.0%} 的赢家在规则下以止损离场**:选对了也拿不住 ⇒ "
+                     "瓶颈在交易管理(止损空间/退出规则),不在选股(与结论#3/#5 一致)")
+    elif (out["coverage"] or 0) >= 0.7:
+        lines.append("  → 规则能吃到大部分赢家 ⇒ 瓶颈不在交易管理,而在**事前选不出**(与判别力结论一致)")
+    out["text"] = "\n".join(lines)
+    return out
+
+
 def _buffered_start(sorted_dates: list[str], start: str, buffer_days: int) -> str:
     j = bisect.bisect_left(sorted_dates, start)
     return sorted_dates[max(0, j - buffer_days)] if sorted_dates else start
@@ -1177,6 +1358,17 @@ def main(argv=None, loader=None) -> int:
                     help="赢家另加绝对收益门槛(如 0.5=至少+50%%);默认仅按 top_pct 排名(不看正负)")
     ap.add_argument("--rank-score", choices=sorted(bt.SCORERS) + ["none"],
                     default="reversal_quality", help="当日信号池内排序分(none=随机;全部 SCORERS 可选)")
+    ap.add_argument("--trade-sim", action="store_true",
+                    help="Pass1:每个信号按**本策略买卖规则**(收盘进场/pct止损/BBI连破止盈)另算一笔实际收益"
+                         "(sim_ret),供 --coverage 对比'赢家我们吃到几成'")
+    ap.add_argument("--stop-pct", type=float, default=8.0, help="--trade-sim 的固定止损百分比(默认8)")
+    ap.add_argument("--bbi-consec", type=int, default=2, help="--trade-sim 的BBI连破日数(默认2)")
+    ap.add_argument("--style-features", action="store_true",
+                    help="Pass1:追加风格特征 f_board_code(上市板)与 f_amount20(20日均成交额,市值代理)")
+    ap.add_argument("--distribution", action="store_true",
+                    help="Pass2:赢家窗收益分布画像 + 按上市板分组(纯读 firings)")
+    ap.add_argument("--coverage", action="store_true",
+                    help="Pass2:双口径对比——赢家在本策略买卖规则下的覆盖度/捕获率/退出原因(需 --trade-sim 的 firings)")
     ap.add_argument("--explain-agg", default="",
                     help="读 Pass2 输出的汇总 JSON,逐特征解读:各窗 AUC/增益、被剔窗及原因、"
                          "覆盖是否达标、纯噪声下 100%% 同号概率(不跑任何计算)")
@@ -1272,6 +1464,25 @@ def main(argv=None, loader=None) -> int:
         recs: list[dict] = []
         for fp in files:
             recs.extend(_load(fp))
+        if args.distribution or args.coverage:
+            res_out: dict = {}
+            if args.distribution:
+                dist = distribution_report(recs)
+                print("\n=== 赢家窗收益分布 + 上市板分组(口径=区间买入持有) ===")
+                print(dist["text"])
+                res_out["distribution"] = dist
+            if args.coverage:
+                cov = coverage_report(recs, winner_top_pct=args.capture_top_pct,
+                                      winner_basis=args.winner_basis,
+                                      min_winner_ret=args.min_winner_ret)
+                print("\n=== 双口径对比:赢家在本策略买卖规则下的覆盖度 ===")
+                print(cov["text"])
+                res_out["coverage"] = cov
+            if args.out:
+                import json as _j3
+                Path(args.out).write_text(_j3.dumps(res_out, ensure_ascii=False, indent=2),
+                                          encoding="utf-8")
+            return 0
         if args.discriminate:
             dis = _dis(recs)
             print(f"\n=== 信号当时判别力:能否明确选出会跑的票({args.label_basis} 口径) ===")
@@ -1377,7 +1588,9 @@ def main(argv=None, loader=None) -> int:
                               horizons=hz, feature_scorers=fsc, stats=fstats,
                               extra_feature_fn=xfn,
                               ret_start=args.ret_start or None, ret_end=args.ret_end or None,
-                              delisted_ret=args.delisted_ret)
+                              delisted_ret=args.delisted_ret,
+                              trade_sim=args.trade_sim, stop_pct=args.stop_pct,
+                              bbi_consec=args.bbi_consec, style_features=args.style_features)
         if fstats.get("feature_failures"):
             print(f"[WARN] 特征打分器异常(特征可能缺失): {fstats['feature_failures']}", file=sys.stderr)
         n_delisted = sum(1 for r in recs if r.get("delisted"))

@@ -989,3 +989,100 @@ def test_main_per_window_discriminate_labels_two_windows(tmp_path, capsys):
     assert "跨多头区间" in txt
     data = json.loads(out.read_text(encoding="utf-8"))
     assert data["aggregate"]["n_windows"] == 2 and len(data["per_window"]) == 2
+
+
+# --------------------------------------------------------------------------
+# 风格因子(上市板/成交额代理)、收益分布画像、双口径覆盖度
+# --------------------------------------------------------------------------
+
+def test_board_of_covers_all_boards():
+    assert lp.board_of("688111") == "科创板" and lp.board_of("689009") == "科创板"
+    assert lp.board_of("300750") == "创业板" and lp.board_of("301111") == "创业板"
+    assert lp.board_of("920123") == "北交所" and lp.board_of("830799") == "北交所"
+    assert lp.board_of("600000") == "沪主板" and lp.board_of("605100") == "沪主板"
+    assert lp.board_of("000001") == "深主板" and lp.board_of("002594") == "深主板"
+    assert lp.board_of("999999") == "其他" and lp.board_of("") == "其他"
+
+
+def _dist_recs():
+    """构造:创业板整体涨得猛、沪主板平淡;部分票有信号。"""
+    recs = []
+    for i in range(50):
+        recs.append({"code": f"3007{i:02d}", "ret": 0.6 - i * 0.005,
+                     "days": [["2024-09-02", 0.0, {}]] if i % 2 == 0 else []})
+    for i in range(50):
+        recs.append({"code": f"6000{i:02d}", "ret": 0.05 - i * 0.004,
+                     "days": [["2024-09-02", 0.0, {}]] if i % 5 == 0 else []})
+    return recs
+
+
+def test_distribution_report_bands_and_boards():
+    """收益分布画像:分位/涨幅带/按上市板分组,且区分'全域'与'有信号子集'。"""
+    r = lp.distribution_report(_dist_recs())
+    assert r["n"] == 100
+    assert r["all"]["median"] is not None and r["all"]["p90"] > r["all"]["median"]
+    shares = [r["all"]["bands"][f">={b:.0%}"]["n"] for b in (0.0, 0.1, 0.2, 0.3, 0.5, 1.0)]
+    assert shares == sorted(shares, reverse=True)          # 涨幅带只数单调不增
+    boards = r["by_board"]
+    assert set(boards) == {"创业板", "沪主板"}
+    assert boards["创业板"]["median"] > boards["沪主板"]["median"]
+    assert boards["创业板"]["n_with_signal"] == 25 and boards["沪主板"]["n_with_signal"] == 10
+    assert abs(sum(b["share_of_universe"] for b in boards.values()) - 1.0) < 1e-6
+    assert "按上市板" in r["text"] and "非本策略买卖规则" in r["text"]
+
+
+def test_distribution_report_empty():
+    assert lp.distribution_report([{"code": "600000"}])["n"] == 0
+
+
+def _sim_recs(sim_rets, reasons=None, ret=0.5):
+    reasons = reasons or ["bbi_exit"] * len(sim_rets)
+    return [{"code": f"C{i:03d}", "ret": ret - i * 0.001,
+             "days": [["2024-09-02", 0.0, {"sim_ret": sr, "sim_reason": rs, "sim_holding": 5}]]}
+            for i, (sr, rs) in enumerate(zip(sim_rets, reasons))]
+
+
+def test_coverage_report_flags_stop_dominated_winners():
+    """赢家里多数在规则下被止损扫出 → 结论指向交易管理而非选股(结论#3/#5)。"""
+    recs = _sim_recs([-0.08] * 8 + [0.3, 0.4], ["stop"] * 8 + ["bbi_exit"] * 2)
+    r = lp.coverage_report(recs, winner_top_pct=100.0, winner_basis="profitable")
+    assert r["n_winner_with_signal"] == 10 and r["n_winner_rule_profitable"] == 2
+    assert r["coverage"] == 0.2 and r["exit_reasons"]["stop"] == 8
+    assert "止损离场" in r["text"] and "交易管理" in r["text"]
+
+
+def test_coverage_report_high_coverage_points_to_selection():
+    recs = _sim_recs([0.25] * 9 + [-0.08], ["bbi_exit"] * 9 + ["stop"])
+    r = lp.coverage_report(recs, winner_top_pct=100.0, winner_basis="profitable")
+    assert r["coverage"] == 0.9 and "事前选不出" in r["text"]
+
+
+def test_coverage_capture_ratio_and_best_trade_per_code():
+    """捕获率=规则收益中位/区间涨幅中位;同一只多笔信号取**最好一笔**(最乐观口径)。"""
+    recs = [{"code": "C1", "ret": 1.0,
+             "days": [["2024-09-02", 0.0, {"sim_ret": -0.08, "sim_reason": "stop"}],
+                      ["2024-09-10", 0.0, {"sim_ret": 0.5, "sim_reason": "bbi_exit"}]]}]
+    r = lp.coverage_report(recs, winner_top_pct=100.0, winner_basis="profitable")
+    assert r["median_sim_ret"] == 0.5 and r["median_window_ret"] == 1.0
+    assert r["capture_ratio"] == 0.5 and r["exit_reasons"] == {"bbi_exit": 1}
+
+
+def test_coverage_report_requires_trade_sim():
+    r = lp.coverage_report([{"code": "C1", "ret": 0.5, "days": [["2024-09-02", 0.0, {}]]}])
+    assert "需带 --trade-sim" in r["text"]
+
+
+def test_extract_firings_trade_sim_and_style_features():
+    """Pass1:--trade-sim 记 sim_ret/reason/holding;--style-features 记上市板与成交额代理。"""
+    d = _bdays(80, "2024-01-01")
+    close = [10 + 0.1 * i for i in range(80)]
+    df = pd.DataFrame({"date": d, "open": close, "high": [c * 1.02 for c in close],
+                       "low": [c * 0.98 for c in close], "close": close,
+                       "volume": [1e6] * 80})
+    recs = lp.extract_firings({"300750": df}, d[40], d[45], lambda x: True,
+                              min_bars=30, gate_window=0,
+                              trade_sim=True, style_features=True)
+    ex = recs[0]["days"][0][2]
+    assert "sim_ret" in ex and "sim_reason" in ex and "sim_holding" in ex
+    assert ex["f_board_code"] == 1.0                      # BOARDS 里创业板序号
+    assert 6.0 < ex["f_amount20"] < 8.0                   # log10(10~18 × 1e6) ≈ 7
