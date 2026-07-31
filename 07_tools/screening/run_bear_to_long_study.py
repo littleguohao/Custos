@@ -155,6 +155,124 @@ def board_mix(codes) -> dict:
     return dict(sorted(mix.items(), key=lambda kv: -kv[1]))
 
 
+def classify_zero_ret_bars(bars, start: str, end: str, few_bars: int = 5) -> dict:
+    """按 **volume** 判定单只零收益样本的成因。这是"事实"判据,`ret==0` 只是症状。
+
+    s_data 的 loader 只按 `dropna(subset=["close"])` 过滤(见 s_data.py `_load_one_qlib`),
+    **volume 已加载却从未参与过滤** —— 长期停牌/无成交的日子只要 bundle 记了前收价就会留在
+    frame 里,首末收盘一分不差 ⇒ ret 恰好 0。分四类:
+      - suspended_all  : 窗内 K 线 volume 全为 0 ⇒ 全程停牌/无成交(剔除正确)
+      - suspended_part : 有部分零量日且收盘恒定 ⇒ 断续停牌(剔除正确)
+      - few_bars       : 窗内有效 K 线 < few_bars 根 ⇒ 窗内新上市/末期退市(不该按区间收益判赢家)
+      - traded_flat    : 全程有成交但首末同价 ⇒ 真实收平,极罕见;**这类要单独查**
+    返回 {kind, n_bars, n_zero_vol, first_close, last_close};窗内无 K 线返回 kind=no_bars。
+    """
+    if bars is None or len(bars) == 0:
+        return {"kind": "no_bars", "n_bars": 0, "n_zero_vol": 0}
+    d = bars.copy()
+    col = next((c for c in ("date", "datetime") if c in d.columns), None)
+    if col is None:
+        return {"kind": "no_date_col", "n_bars": int(len(d)), "n_zero_vol": 0}
+    d["_d"] = d[col].astype(str).str[:10]
+    win = d[(d["_d"] >= start) & (d["_d"] <= end)]
+    n = int(len(win))
+    if n == 0:
+        return {"kind": "no_bars", "n_bars": 0, "n_zero_vol": 0}
+    vol = win["volume"].astype(float) if "volume" in win.columns else None
+    n_zero = int((vol == 0).sum()) if vol is not None else 0
+    closes = win["close"].astype(float)
+    out = {"n_bars": n, "n_zero_vol": n_zero,
+           "first_close": round(float(closes.iloc[0]), 4),
+           "last_close": round(float(closes.iloc[-1]), 4)}
+    if vol is None:
+        out["kind"] = "no_volume_col"
+    elif n_zero == n:
+        out["kind"] = "suspended_all"
+    elif n < few_bars:
+        out["kind"] = "few_bars"
+    elif n_zero:
+        out["kind"] = "suspended_part"
+    else:
+        out["kind"] = "traded_flat"
+    return out
+
+
+def zero_ret_diagnose(firings_files: list[Path], loader, few_bars: int = 5,
+                      max_codes: int = 0) -> dict:
+    """逐窗诊断零收益样本成因。loader(codes, start, end) → {code: DataFrame}。
+
+    只重载 ret==0 的那些票(实跑最大一窗约 800 只),不重跑 Pass1。
+    结论行按占比给判决:traded_flat 占多数说明不是停牌所致,`--exclude-zero-ret` 剔错了对象。
+    """
+    import json as _j
+    out: dict = {"windows": [], "kind_total": {}}
+    for fp in firings_files:
+        try:
+            raw = _j.loads(Path(fp).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            out["windows"].append({"file": Path(fp).name, "error": str(exc)})
+            continue
+        recs = raw if isinstance(raw, list) else (raw.get("records") or [])
+        codes = sorted(zero_ret_codes(recs))
+        if max_codes:
+            codes = codes[:max_codes]
+        rs = raw.get("ret_start") or raw.get("start") if isinstance(raw, dict) else None
+        re_ = raw.get("ret_end") or raw.get("end") if isinstance(raw, dict) else None
+        w: dict = {"file": Path(fp).name, "label": f"{rs}~{re_}", "n_zero_ret": len(codes),
+                   "kinds": {}, "samples": {}}
+        if not codes or not rs or not re_:
+            w["error"] = "无零收益样本或缺赢家窗区间"
+            out["windows"].append(w)
+            continue
+        try:
+            bars = loader(codes, rs, re_) or {}
+        except Exception as exc:  # noqa: BLE001
+            w["error"] = f"重载 K 线失败: {exc}"
+            out["windows"].append(w)
+            continue
+        for c in codes:
+            info = classify_zero_ret_bars(bars.get(c), rs, re_, few_bars=few_bars)
+            kind = info["kind"]
+            w["kinds"][kind] = w["kinds"].get(kind, 0) + 1
+            out["kind_total"][kind] = out["kind_total"].get(kind, 0) + 1
+            w["samples"].setdefault(kind, []).append({"code": c, **info})
+        for k in w["samples"]:
+            w["samples"][k] = w["samples"][k][:3]          # 每类留 3 个样例便于人工核
+        w["board_mix"] = board_mix(codes)
+        out["windows"].append(w)
+    lines = [f"    {'窗口':<28} {'零收益':>7} {'全程停牌':>9} {'断续停牌':>9} "
+             f"{'K线过少':>9} {'有量收平':>9}"]
+    for w in out["windows"]:
+        if w.get("error"):
+            lines.append(f"    {(w.get('label') or w['file'])[:28]:<28} {w['error']}")
+            continue
+        k = w["kinds"]
+        lines.append(f"    {w['label'][:28]:<28} {w['n_zero_ret']:>7} "
+                     f"{k.get('suspended_all', 0):>9} {k.get('suspended_part', 0):>9} "
+                     f"{k.get('few_bars', 0):>9} {k.get('traded_flat', 0):>9}")
+    tot = out["kind_total"]
+    n_all = sum(tot.values())
+    out["n_total"] = n_all
+    if n_all:
+        susp = tot.get("suspended_all", 0) + tot.get("suspended_part", 0)
+        flat = tot.get("traded_flat", 0)
+        lines.append("  成因合计:" + "、".join(f"{k} {v} 只({v / n_all:.0%})"
+                                                for k, v in sorted(tot.items(), key=lambda x: -x[1])))
+        if susp / n_all >= 0.8:
+            lines.append(f"  ✅ 停牌/无成交占 {susp / n_all:.0%} ⇒ 零收益样本确系僵尸,"
+                         "`--exclude-zero-ret` 剔除对象正确")
+        elif flat / n_all >= 0.5:
+            lines.append(f"  ⚠️ **有量收平占 {flat / n_all:.0%}** ⇒ 这些票窗内正常成交、"
+                         "只是首末同价,不是停牌僵尸;`--exclude-zero-ret` 剔错了对象,须改判据")
+        else:
+            lines.append(f"  ⚠️ 成因混杂(停牌 {susp / n_all:.0%} / 有量收平 {flat / n_all:.0%})"
+                         " ⇒ 不能一刀切剔除,须按 kind 分别处理")
+    else:
+        lines.append("  无零收益样本可诊断")
+    out["text"] = "\n".join(lines)
+    return out
+
+
 def survivorship_report(firings_files: list[Path], s_data_root: str,
                         data_source: str = "qlib",
                         today_codes: Optional[set] = None) -> dict:
@@ -278,6 +396,11 @@ def main(argv=None, runner=None) -> int:
     ap.add_argument("--pass2-only", action="store_true", help="只做 Pass2 汇总(firings 已就绪)")
     ap.add_argument("--survivorship-report", action="store_true",
                     help="幸存者偏差体检:统计各窗样本里'当时在、今天已摘牌'的票数(不跑 Pass1/Pass2)")
+    ap.add_argument("--zero-ret-report", action="store_true",
+                    help="零收益样本成因诊断:按 volume 分全程停牌/断续停牌/K线过少/有量收平"
+                         "(只重载 ret==0 的票,不跑 Pass1/Pass2)")
+    ap.add_argument("--zero-ret-max-codes", type=int, default=0,
+                    help="每窗最多诊断多少只零收益样本(0=全量;大窗先抽样时用)")
     args = ap.parse_args(argv)
     run = runner or (lambda cmd: subprocess.run(cmd, check=False).returncode)
 
@@ -314,6 +437,24 @@ def main(argv=None, runner=None) -> int:
     if not args.dry_run:
         out_dir.mkdir(parents=True, exist_ok=True)   # dry-run 只看计划,不落任何目录/文件
     files: list[Path] = []
+    if args.zero_ret_report:                         # 只诊断零收益成因,不跑 Pass1/Pass2
+        existing = [out_dir / f"firings_{tag_of(p)}.json" for p in keep]
+        existing = [f for f in existing if f.exists()]
+        if not existing:
+            print("[ERR] 没有可诊断的 firings(先跑 Pass1)", file=sys.stderr)
+            return 2
+        import s_data as _sd  # noqa: PLC0415
+        sub = "CSV_DATA" if args.data_source == "csv" else "Q_DATA"
+        fn = _sd.load_bars_csv if args.data_source == "csv" else _sd.load_bars_qlib
+        root = str(Path(args.s_data_root) / sub)
+
+        def _load(codes, start, end):
+            return fn(codes, 0, start=start, end=end, root=root)
+
+        rep = zero_ret_diagnose(existing, _load, max_codes=args.zero_ret_max_codes)
+        print("\n=== 零收益样本成因诊断(按 volume 判停牌,ret==0 只是症状) ===")
+        print(rep["text"])
+        return 0
     if args.survivorship_report:                     # 只体检,不跑 Pass1/Pass2
         existing = [out_dir / f"firings_{tag_of(p)}.json" for p in keep]
         existing = [f for f in existing if f.exists()]

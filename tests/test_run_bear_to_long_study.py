@@ -154,6 +154,132 @@ class TestSurvivorshipReport:
         assert rc == 2 and "没有可体检的 firings" in capsys.readouterr().err
 
 
+class TestZeroRetVolumeDiagnosis:
+    """按 volume 判零收益成因。s_data loader 只按 close 过滤,volume 加载了却没用上,
+    停牌日只要 bundle 记了前收价就会留在 frame 里 ⇒ ret 恰好 0。"""
+
+    def _bars(self, dates, closes, volumes):
+        import pandas as pd
+        return pd.DataFrame({"date": dates, "close": closes, "volume": volumes})
+
+    def test_all_zero_volume_is_suspended_all(self):
+        b = self._bars(["2026-06-01", "2026-06-02", "2026-06-03"], [10.0] * 3, [0, 0, 0])
+        got = rb.classify_zero_ret_bars(b, "2026-06-01", "2026-06-03")
+        assert got["kind"] == "suspended_all" and got["n_zero_vol"] == 3
+
+    def test_partial_zero_volume_is_suspended_part(self):
+        b = self._bars([f"2026-06-{d:02d}" for d in range(1, 8)], [10.0] * 7,
+                       [100, 0, 0, 0, 0, 0, 200])
+        got = rb.classify_zero_ret_bars(b, "2026-06-01", "2026-06-07")
+        assert got["kind"] == "suspended_part" and got["n_zero_vol"] == 5
+
+    def test_full_volume_flat_close_is_traded_flat(self):
+        """有量却首末同价 —— 这类不是停牌僵尸,剔除它就剔错了对象。"""
+        b = self._bars([f"2026-06-{d:02d}" for d in range(1, 8)],
+                       [10.0, 10.5, 11.0, 9.8, 10.2, 10.4, 10.0], [100] * 7)
+        got = rb.classify_zero_ret_bars(b, "2026-06-01", "2026-06-07")
+        assert got["kind"] == "traded_flat" and got["n_zero_vol"] == 0
+        assert got["first_close"] == got["last_close"] == 10.0
+
+    def test_few_bars_flagged_before_suspended_part(self):
+        """窗内只有 3 根(新上市/末期退市)——不该按区间收益判赢家,优先报 few_bars。"""
+        b = self._bars(["2026-06-05", "2026-06-06", "2026-06-07"], [10.0] * 3, [100, 0, 100])
+        got = rb.classify_zero_ret_bars(b, "2026-06-01", "2026-06-07")
+        assert got["kind"] == "few_bars" and got["n_bars"] == 3
+
+    def test_bars_outside_window_excluded(self):
+        b = self._bars(["2026-05-01", "2026-06-01", "2026-06-02", "2026-07-01"],
+                       [50.0, 10.0, 10.0, 99.0], [100, 0, 0, 100])
+        got = rb.classify_zero_ret_bars(b, "2026-06-01", "2026-06-02")
+        assert got["kind"] == "suspended_all" and got["n_bars"] == 2
+
+    def test_missing_volume_column_reported_not_guessed(self):
+        import pandas as pd
+        b = pd.DataFrame({"date": ["2026-06-01", "2026-06-02"], "close": [10.0, 10.0]})
+        assert rb.classify_zero_ret_bars(b, "2026-06-01", "2026-06-02")["kind"] == "no_volume_col"
+
+    def test_no_bars_in_window(self):
+        b = self._bars(["2026-05-01"], [10.0], [100])
+        assert rb.classify_zero_ret_bars(b, "2026-06-01", "2026-06-02")["kind"] == "no_bars"
+        assert rb.classify_zero_ret_bars(None, "2026-06-01", "2026-06-02")["kind"] == "no_bars"
+
+    def test_diagnose_aggregates_and_verdicts_suspended(self, tmp_path):
+        import pandas as pd
+        f = tmp_path / "w1.json"
+        f.write_text(json.dumps({
+            "start": "2022-03-01", "end": "2022-06-01",
+            "ret_start": "2022-06-02", "ret_end": "2022-07-22",
+            "records": [{"code": "830001", "ret": 0.0}, {"code": "830002", "ret": 0.0},
+                        {"code": "600000", "ret": 0.25}]}, ensure_ascii=False), encoding="utf-8")
+
+        def loader(codes, start, end):
+            dates = [f"2022-06-{d:02d}" for d in range(2, 12)]
+            return {c: pd.DataFrame({"date": dates, "close": [10.0] * 10, "volume": [0] * 10})
+                    for c in codes}
+
+        rep = rb.zero_ret_diagnose([f], loader)
+        assert rep["kind_total"] == {"suspended_all": 2}       # 只诊断 ret==0 的两只
+        assert rep["n_total"] == 2
+        assert "剔除对象正确" in rep["text"]
+        assert rep["windows"][0]["board_mix"] == {"北交所": 2}
+
+    def test_diagnose_flags_traded_flat_majority(self, tmp_path):
+        """有量收平占多数时必须给出"剔错了对象"的告警,而不是默认认定僵尸。"""
+        import pandas as pd
+        f = tmp_path / "w1.json"
+        f.write_text(json.dumps({
+            "ret_start": "2022-06-02", "ret_end": "2022-07-22",
+            "records": [{"code": "600001", "ret": 0.0}, {"code": "600002", "ret": 0.0}]},
+            ensure_ascii=False), encoding="utf-8")
+
+        def loader(codes, start, end):
+            dates = [f"2022-06-{d:02d}" for d in range(2, 12)]
+            return {c: pd.DataFrame({"date": dates, "close": [10.0] * 10,
+                                     "volume": [1000] * 10}) for c in codes}
+
+        rep = rb.zero_ret_diagnose([f], loader)
+        assert rep["kind_total"] == {"traded_flat": 2}
+        assert "剔错了对象" in rep["text"]
+
+    def test_diagnose_loader_failure_recorded_not_raised(self, tmp_path):
+        f = tmp_path / "w1.json"
+        f.write_text(json.dumps({"ret_start": "2022-06-02", "ret_end": "2022-07-22",
+                                 "records": [{"code": "600001", "ret": 0.0}]}),
+                     encoding="utf-8")
+
+        def boom(codes, start, end):
+            raise RuntimeError("bundle 不可用")
+
+        rep = rb.zero_ret_diagnose([f], boom)
+        assert "重载 K 线失败" in rep["windows"][0]["error"]
+
+    def test_diagnose_window_without_zero_ret_samples(self, tmp_path):
+        f = tmp_path / "w1.json"
+        f.write_text(json.dumps({"ret_start": "2022-06-02", "ret_end": "2022-07-22",
+                                 "records": [{"code": "600001", "ret": 0.3}]}),
+                     encoding="utf-8")
+        rep = rb.zero_ret_diagnose([f], lambda *a: {})
+        assert rep["n_total"] == 0 and "无零收益样本" in rep["text"]
+
+    def test_max_codes_caps_reload(self, tmp_path):
+        """大窗(实跑 807 只)可先抽样,避免一次重载太多。"""
+        import pandas as pd
+        f = tmp_path / "w1.json"
+        f.write_text(json.dumps({"ret_start": "2022-06-02", "ret_end": "2022-07-22",
+                                 "records": [{"code": f"83000{i}", "ret": 0.0}
+                                             for i in range(5)]}), encoding="utf-8")
+        seen = {}
+
+        def loader(codes, start, end):
+            seen["n"] = len(codes)
+            dates = [f"2022-06-{d:02d}" for d in range(2, 12)]
+            return {c: pd.DataFrame({"date": dates, "close": [10.0] * 10,
+                                     "volume": [0] * 10}) for c in codes}
+
+        rb.zero_ret_diagnose([f], loader, max_codes=2)
+        assert seen["n"] == 2
+
+
 class TestZeroRetDiagnosis:
     """零收益僵尸样本的成因诊断:是停牌直线,还是被误删的真飞刀。"""
 
