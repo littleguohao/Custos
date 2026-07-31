@@ -843,15 +843,28 @@ def aggregate_discriminate(results: dict[str, dict], min_edge: float = 0.03,
                      f"{_fmt_pp(r['median_lift_pp']):>9} "
                      f"{('取反' if r['direction'] == 'low' else '同向'):>6} "
                      f"{'✅' if r['cross_window_common'] else '—':>6}")
-    lines.append("  -> " + ("**无跨窗共同点**:没有任何 as-of 特征在多数多头区间里稳定把赢家分出来 "
-                            "⇒ 买点当时无法精确识别(与结论#8/#13 一致)"
-                            if not common else
-                            "跨窗共同点候选(**仍为样本内,须 walk-forward 复现才可进 live**): "
-                            + ", ".join(f"{r['feature']}[{'取反' if r['direction'] == 'low' else '同向'}]"
-                                        f"(中位AUC {r['median_auc']}, {r['median_lift_pp']:+.1f}pp, "
-                                        f"{r['same_direction_windows']}/{r['n_windows']} 窗同号)"
-                                        for r in common)))
+    # 三种"没有共同点"必须分开说:①一个窗都没参与计票 ②有窗但没有任何特征拿到有效计票
+    # ③真的算过了但没特征过线。①②是**未能检验**(不构成结论),只有③才是"判别不出来"。
+    if n_eligible <= 0:
+        verdict = (f"**未能检验**:{n_win} 个窗全部被剔除(普涨窗 {len(degen)} 个)⇒ 无有效计票窗,"
+                   "本次不构成任何结论;需换赢家口径(如 --min-winner-ret 收紧)或补非普涨窗后重跑")
+    elif not out:
+        verdict = (f"**未能检验**:{n_eligible} 个计票窗里没有任何特征拿到有效计票"
+                   "(全被判恒定/疑过拟合)⇒ 不构成'判别不出来'的结论")
+    elif not common:
+        verdict = ("**无跨窗共同点**:没有任何 as-of 特征在多数多头区间里稳定把赢家分出来 "
+                   "⇒ 买点当时无法精确识别(与结论#8/#13 一致)")
+    else:
+        verdict = ("跨窗共同点候选(**仍为样本内,须 walk-forward 复现才可进 live**): "
+                   + ", ".join(f"{r['feature']}[{'取反' if r['direction'] == 'low' else '同向'}]"
+                               f"(中位AUC {r['median_auc']}, {r['median_lift_pp']:+.1f}pp, "
+                               f"{r['same_direction_windows']}/{r['n_windows']} 窗同号)"
+                               for r in common))
+    lines.append(f"  -> {verdict}")
     return {"n_windows": n_win, "features": out, "common": [r["feature"] for r in common],
+            "n_eligible_windows": n_eligible,
+            "verdict_kind": ("not_tested" if (n_eligible <= 0 or not out)
+                             else ("no_common" if not common else "candidates")),
             "windows": wins_meta, "degenerate_windows": degen,
             "overfit_excluded": {f: ws for f, ws in sorted(overfit.items())},
             "text": "\n".join(lines)}

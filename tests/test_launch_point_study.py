@@ -715,6 +715,52 @@ def test_aggregate_excludes_degenerate_window_from_voting():
     assert "已排除普涨窗" in agg["text"] and "2015春" in agg["text"]
 
 
+def test_all_windows_degenerate_reports_not_tested_not_no_common():
+    """回归:所有窗都被剔除时不能打"无跨窗共同点"——那是"一个窗都没算",不是"算了但分不出来"。
+
+    两句在报告里是完全不同的结论;混淆会把"未能检验"写成"判别不出来"。
+    """
+    melt = {"winner_meta": {"up_ratio": 0.98, "degenerate_label": True,
+                            "n_universe_all": 100, "n_profitable": 98},
+            "base_rate": 0.5, "n": 400,
+            "features": [{"feature": "x", "constant": False, "auc": 0.6, "direction": "high",
+                          "lift_pp_effective": 9.0, "split_consistent": True, "n_pos": 10}]}
+    agg = lp.aggregate_discriminate({"2015春": melt, "2015夏": dict(melt)})
+    assert agg["n_eligible_windows"] == 0 and agg["verdict_kind"] == "not_tested"
+    assert "未能检验" in agg["text"] and "无有效计票窗" in agg["text"]
+    assert "无跨窗共同点" not in agg["text"]
+    assert "min-winner-ret" in agg["text"]          # 给出下一步口径建议
+
+
+def test_all_features_overfit_excluded_reports_not_tested():
+    """有计票窗但所有特征都被判疑过拟合 → 同样是"未能检验",不构成结论。"""
+    res = {"w1": {"winner_meta": {"up_ratio": 0.3, "degenerate_label": False},
+                  "base_rate": 0.2, "n": 100,
+                  "features": [{"feature": "x", "constant": False, "auc": 0.6, "direction": "high",
+                                "lift_pp_effective": 5.0, "split_consistent": False, "n_pos": 5}]},
+           "w2": {"winner_meta": {"up_ratio": 0.3, "degenerate_label": False},
+                  "base_rate": 0.2, "n": 100,
+                  "features": [{"feature": "x", "constant": False, "auc": 0.58, "direction": "high",
+                                "lift_pp_effective": 4.0, "split_consistent": False, "n_pos": 5}]}}
+    agg = lp.aggregate_discriminate(res)
+    assert agg["n_eligible_windows"] == 2 and agg["verdict_kind"] == "not_tested"
+    assert "没有任何特征拿到有效计票" in agg["text"]
+    assert "无跨窗共同点" not in agg["text"]
+
+
+def test_genuine_no_common_still_says_no_common():
+    """真的算过了但没特征过线 → 仍应给出"无跨窗共同点"的实质结论。"""
+    def _w(auc):
+        return {"winner_meta": {"up_ratio": 0.3, "degenerate_label": False},
+                "base_rate": 0.2, "n": 100,
+                "features": [{"feature": "x", "constant": False, "auc": auc,
+                              "direction": "high" if auc >= 0.5 else "low",
+                              "lift_pp_effective": 0.2, "split_consistent": True, "n_pos": 5}]}
+    agg = lp.aggregate_discriminate({"w1": _w(0.505), "w2": _w(0.502)})
+    assert agg["verdict_kind"] == "no_common"
+    assert "无跨窗共同点" in agg["text"] and "未能检验" not in agg["text"]
+
+
 def test_bear_to_long_pairs_can_include_long_head():
     """可把做多段头部 N 日纳入信号窗——覆盖那 ~27% 起涨点落在做多的情况(结论#11)。"""
     d = _bdays(60)

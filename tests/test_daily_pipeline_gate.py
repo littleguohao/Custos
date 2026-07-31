@@ -32,6 +32,30 @@ class TestBuildGateCmd:
         assert cmd[1].endswith("runtime_gate.py")
 
 
+class TestPipelineLogOnEarlyExit:
+    """门控阻断(退出码 3/4/5 穿透)时也必须留下 pipeline log。
+
+    回归:日志只在 main 末尾写,门控失败处直接 raise SystemExit 会让这次阻断连记录都不留,
+    "门控留痕"的初衷就没了(事后只能翻 stdout)。
+    """
+
+    def test_write_pipeline_log_creates_file_with_stages(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(dp, "LOG_DIR", tmp_path)
+        stages = [{"stage": "runtime_gate", "ok": False, "returncode": 4,
+                   "note": "market_quality=blocked(score=0.2)"}]
+        path = dp._write_pipeline_log("2026-07-31", stages)
+        assert path.name == "2026-07-31_daily_pipeline_log.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert data["date"] == "2026-07-31"
+        assert data["stages"][0]["returncode"] == 4
+        assert "blocked" in data["stages"][0]["note"]
+
+    def test_creates_missing_log_dir(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(dp, "LOG_DIR", tmp_path / "nested" / "logs")
+        path = dp._write_pipeline_log("2026-07-31", [])
+        assert path.is_file()
+
+
 class TestGateStatusNote:
     def _write(self, tmp_path, monkeypatch, gate: dict):
         monkeypatch.setattr(dp, "DATA_DIR", tmp_path)

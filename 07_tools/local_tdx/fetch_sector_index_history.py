@@ -129,11 +129,32 @@ def incremental_start(existing_path: Path, floor: str, overlap_days: int = OVERL
     return max(start, floor)
 
 
+def _describe(d) -> str:
+    """描述 get_market_data 实际返回的形态(类型/键/索引),用于探测失败时的诊断输出。
+
+    2026-07-30 排障教训:`1d 返回空数据` 的真因是返回形态是 {'Close': df} 字段键,
+    数据其实取到了、只是解析函数不认。失败时只打"空数据"会把人引向周期串,浪费一轮排查。
+    """
+    try:
+        if isinstance(d, dict):
+            keys = list(d)[:5]
+            inner = d.get(keys[0]) if keys else None
+            shape = getattr(inner, "shape", None)
+            idx = type(getattr(inner, "index", None)).__name__
+            cols = list(getattr(inner, "columns", []) or [])[:5]
+            return f"dict(keys={keys}, inner.shape={shape}, index={idx}, cols={cols})"
+        return (f"{type(d).__name__}(shape={getattr(d, 'shape', None)}, "
+                f"index={type(getattr(d, 'index', None)).__name__})")
+    except Exception:  # noqa: BLE001
+        return type(d).__name__
+
+
 def resolve_period(tq, probe_code: str, start: str, wanted: str = "") -> tuple[str, str]:
     """探测可用周期串 → (period, note)。全部失败返回 ("", 原因)。
 
     只在**第一个板块**上试,避免 400+ 板块各自反复失败(此前 --period day 时就是这样,
-    整个 stage 只输出一堆 WARN 后超时)。
+    整个 stage 只输出一堆 WARN 后超时)。解析不出数据时把**实际返回形态**一并带回,
+    否则"空数据"三个字会把排查引向周期串(真因可能是返回结构变了)。
     """
     cands = ([wanted] if wanted else []) + [p for p in PERIOD_CANDIDATES if p != wanted]
     errs = []
@@ -150,7 +171,7 @@ def resolve_period(tq, probe_code: str, start: str, wanted: str = "") -> tuple[s
         except Exception as exc:  # noqa: BLE001
             errs.append(f"{p}:{exc}")
             continue
-        errs.append(f"{p}:空数据")
+        errs.append(f"{p}:解析不出收盘序列(实际返回 {_describe(d)})")
     return "", "; ".join(errs)
 
 
