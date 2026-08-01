@@ -567,3 +567,19 @@ def test_kdj_j_scorer():
     assert r is not None and r["suggestion"] == "可买" and r["score"] < 13   # 单边下跌 J 深度超卖
     up = _mk([10.0 + 0.3 * i for i in range(40)])
     assert bt.SCORERS["kdj_j"](up, "T")["score"] > 80                        # 单边上涨 J 高位
+
+
+def test_mcap_scorer_prefers_small_cap(monkeypatch):
+    # 小市值得高分;未来股本事件不得用;无数据 → None(不参与排序)
+    monkeypatch.setattr(bt, "_SHARE_IDX", {
+        "600000": [("2020-01-01", 1e9)],       # 小盘
+        "600001": [("2020-01-01", 1e11)],      # 大盘
+    })
+    df = _mk([10.0] * 5)
+    s_small = bt.SCORERS["mcap"](df, "600000")["score"]
+    s_big = bt.SCORERS["mcap"](df, "600001")["score"]
+    assert s_small > s_big and bt.SCORERS["mcap"](df, "600000")["suggestion"] == "可买"
+    assert bt.SCORERS["mcap"](df, "999999") is None
+    # 事件在信号日之后 → 不可用(防 look-ahead)
+    monkeypatch.setattr(bt, "_SHARE_IDX", {"600000": [("2099-01-01", 1e9)]})
+    assert bt.SCORERS["mcap"](df, "600000") is None

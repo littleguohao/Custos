@@ -288,6 +288,56 @@ def _sc_reversal_quality_inv(df: pd.DataFrame, code: str):
 SCORERS["reversal_quality_inv"] = _sc_reversal_quality_inv
 
 
+_SHARE_IDX: Optional[dict] = None
+
+
+def _shares_idx() -> dict:
+    """股本事件索引 code → [(observed_on, total_shares)](01_data/fundamentals/share_changes.jsonl,
+    东财 F10 全史回填,2018 前亦有;as-of 取值只可能 stale 不会 look-ahead)。加载失败 → {}。"""
+    global _SHARE_IDX
+    if _SHARE_IDX is None:
+        idx: dict[str, list] = {}
+        try:
+            from paths import BASE  # noqa: PLC0415
+            p = BASE / "01_data" / "fundamentals" / "share_changes.jsonl"
+            if p.is_file():
+                for line in p.read_text(encoding="utf-8").splitlines():
+                    if not line.strip():
+                        continue
+                    e = json.loads(line)
+                    if e.get("code") and e.get("observed_on") and e.get("total_shares"):
+                        idx.setdefault(e["code"], []).append((e["observed_on"], e["total_shares"]))
+                for c in idx:
+                    idx[c].sort()
+        except Exception:  # noqa: BLE001
+            idx = {}
+        _SHARE_IDX = idx
+    return _SHARE_IDX
+
+
+def _sc_mcap(df: pd.DataFrame, code: str):
+    """小市值选择器：score=-log10(信号日总市值/亿元),越小越高分(风格终审跨窗共同点:小市值反弹更强)。
+    真市值=as-of 股本(东财 F10 全史)× 信号日收盘。无股本数据 → None(不参与排序,不误标)。"""
+    import bisect as _b
+    import math
+    if len(df) < 1:
+        return None
+    evs = _shares_idx().get(str(code)[:6])
+    if not evs:
+        return None
+    day = str(df["date"].iloc[-1])[:10]
+    k = _b.bisect_right(evs, (day, float("inf"))) - 1
+    close = float(df["close"].iloc[-1])
+    if k < 0 or not evs[k][1] or not close:
+        return None
+    mc = evs[k][1] * close / 1e8
+    return {"score": round(-math.log10(mc), 4), "suggestion": "可买",
+            "aux": {"factor": "mcap_small", "mcap_yi": round(mc, 1)}, "components": {}}
+
+
+SCORERS["mcap"] = _sc_mcap
+
+
 def _sc_kdj_j(df: pd.DataFrame, code: str):
     """当日 KDJ 的 J 值(纯特征,恒可买)——信号池内 J 的具体深度(J=2 vs J=12)可作判别子,
     门槛(J<13)会把这条信息"吃掉",故显式记录。kdj 不可用 → None。"""
