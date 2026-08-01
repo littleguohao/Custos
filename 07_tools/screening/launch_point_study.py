@@ -337,7 +337,8 @@ def extract_firings(bars, start: str, end: str, entry_gate, scorer=None,
                     ret_start: Optional[str] = None, ret_end: Optional[str] = None,
                     delisted_ret: Optional[float] = None,
                     trade_sim: bool = False, stop_pct: float = 8.0, bbi_consec: int = 2,
-                    style_features: bool = False) -> list[dict]:
+                    style_features: bool = False,
+                    shares_events: Optional[list] = None) -> list[dict]:
     """**Pass1(可分片)**:逐股抽取 {code, ret, days:[[date,score],..]}——极小的中间产物。
     可按 --shard 拆多个独立进程跑(每片内存全新),彻底规避 loader 内存问题;Pass2 再合并算排名。
     horizons:如 (20,60) → 每个信号日额外记 **因果前向收益**(fwd{h}=close[i+h]/close[i]-1,
@@ -360,9 +361,21 @@ def extract_firings(bars, start: str, end: str, entry_gate, scorer=None,
     "赢家我们到底吃到了几成"(coverage_report)。⚠️ 收益受加载窗口右端截断(reason=open_end)。
     style_features:追加风格特征 f_board_code(上市板序数,免数据)与 f_amount20
     (log10 20日均 close×volume ≈ 成交额,**市值代理**——qlib bundle 无总股本)。
+    shares_events:fetch_market_cap 的股本变动事件(load_events 产物)——提供时追加
+    f_mcap = log10(信号日总股本×信号日收盘 / 1e8)(**真市值,亿元**;股本按 observed_on≤信号日
+    取最近事件,只可能 stale 不会 look-ahead;2018-01-02 前无数据 → 特征缺省)。
     ⚠️ 2026-07-31 起真市值已可得:`local_tdx/fetch_market_cap.py` 提供总股本/总市值
     (历史起点 2018-01-02),新研究应改用真市值,成交额只作流动性因子。"""
     import gc  # noqa: PLC0415
+    # 真市值索引:code → [(observed_on, total_shares)] 升序,信号日 bisect 取 as-of 股本(O(1)/信号)
+    shares_idx: Optional[dict] = None
+    if shares_events:
+        shares_idx = {}
+        for e in shares_events:
+            if e.get("code") and e.get("observed_on") and e.get("total_shares"):
+                shares_idx.setdefault(e["code"], []).append((e["observed_on"], e["total_shares"]))
+        for c in shares_idx:
+            shares_idx[c].sort()
     items = bars.items() if isinstance(bars, dict) else bars
     out: list[dict] = []
     n = 0
@@ -387,7 +400,8 @@ def extract_firings(bars, start: str, end: str, entry_gate, scorer=None,
                         sr = scorer(sub, code)
                         sc = (sr or {}).get("score", 0.0) if isinstance(sr, dict) else (sr or 0.0)
                     rec: list = [ds[i], float(sc)]
-                    if horizons or feature_scorers or extra_feature_fn or style_features or trade_sim:
+                    if horizons or feature_scorers or extra_feature_fn or style_features or trade_sim \
+                            or shares_idx is not None:
                         extra: dict = {}
                         for h in horizons:                       # 因果前向:只用信号日之后的数据
                             j = i + int(h)
@@ -424,6 +438,13 @@ def extract_firings(bars, start: str, end: str, entry_gate, scorer=None,
                             if amt:
                                 extra["f_amount20"] = round(
                                     math.log10(sum(amt) / len(amt)), 4)
+                        if shares_idx is not None:                 # 真市值:as-of 股本×信号日收盘
+                            evs = shares_idx.get(code)
+                            if evs:
+                                k2 = bisect.bisect_right(evs, (ds[i], float("inf"))) - 1
+                                if k2 >= 0 and evs[k2][1] and closes[i]:
+                                    extra["f_mcap"] = round(
+                                        math.log10(evs[k2][1] * closes[i] / 1e8), 4)   # 亿元
                         if trade_sim:                            # 本策略买卖规则下的实际一笔
                             try:
                                 sub_full = df.iloc[:]            # 规则需向后走,故用全量 df
@@ -1709,6 +1730,16 @@ def main(argv=None, loader=None) -> int:
                     except Exception:                    # noqa: BLE001 单组失败不拖垮其余
                         continue
                 return merged
+        shares_ev = None
+        if args.style_features:                          # 真市值事件(fetch_market_cap 台账,2018-01 起)
+            try:
+                from fetch_market_cap import load_events, LEDGER  # noqa: PLC0415
+                shares_ev = load_events(LEDGER) or None
+                if not shares_ev:
+                    print("[WARN] 市值台账为空/缺失,f_mcap 特征缺省(先跑 fetch_market_cap.py)",
+                          file=sys.stderr)
+            except Exception as _exc:  # noqa: BLE001
+                print(f"[WARN] 市值台账加载失败,f_mcap 特征缺省: {_exc}", file=sys.stderr)
         recs = extract_firings(_chunked_items(args.chunk_size), args.start, args.end,
                               bt.ENTRY_GATES[args.entry_filter], scorer=scorer,
                               gate_window=args.gate_window, progress=args.progress,
@@ -1717,7 +1748,8 @@ def main(argv=None, loader=None) -> int:
                               ret_start=args.ret_start or None, ret_end=args.ret_end or None,
                               delisted_ret=args.delisted_ret,
                               trade_sim=args.trade_sim, stop_pct=args.stop_pct,
-                              bbi_consec=args.bbi_consec, style_features=args.style_features)
+                              bbi_consec=args.bbi_consec, style_features=args.style_features,
+                              shares_events=shares_ev)
         if fstats.get("feature_failures"):
             print(f"[WARN] 特征打分器异常(特征可能缺失): {fstats['feature_failures']}", file=sys.stderr)
         n_delisted = sum(1 for r in recs if r.get("delisted"))

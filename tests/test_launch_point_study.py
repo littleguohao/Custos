@@ -1186,3 +1186,27 @@ def test_coverage_exclude_zero_ret_drops_zombie_winners():
     without = lp.coverage_report(recs, winner_top_pct=100.0, exclude_zero_ret=True)
     assert withz["n_winner_with_signal"] == 1 and without["n_winner_with_signal"] == 1
     assert without["coverage"] == 1.0                       # 僵尸不再混进赢家池
+
+
+def test_f_mcap_real_market_cap_feature():
+    # 真市值:as-of 股本×信号日收盘;observed_on 之后的事件不得用(防 look-ahead)
+    bars, dates = _synth_bars_10()
+    gate = lambda df: float(df["volume"].iloc[-1]) == 1.0
+    code = next(iter(bars))
+    df = bars[code]
+    i_fire = next(i for i in range(5, len(df)) if float(df["volume"].iloc[i]) == 1.0)
+    close_fire = float(df["close"].iloc[i_fire])
+    events = [
+        {"code": code, "observed_on": "2024-09-01", "total_shares": 1e8},   # 信号日前 → 应用
+        {"code": code, "observed_on": "2099-01-01", "total_shares": 9e8},   # 未来 → 不得用
+    ]
+    recs = lp.extract_firings(bars, dates[0], dates[-1], gate, min_bars=5, gate_window=0,
+                              shares_events=events)
+    day = next(d for r in recs if r["code"] == code for d in r["days"]
+               if d[0] == str(df["date"].iloc[i_fire])[:10])
+    import math as _m
+    assert abs(day[2]["f_mcap"] - _m.log10(1e8 * close_fire / 1e8)) < 1e-4
+    # 无事件的股票 → f_mcap 缺省(不误标)
+    code2 = next(c for c in bars if c != code)
+    rec2 = next(r for r in recs if r["code"] == code2)
+    assert all("f_mcap" not in d[2] for d in rec2["days"])
