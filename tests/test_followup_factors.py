@@ -583,3 +583,16 @@ def test_mcap_scorer_prefers_small_cap(monkeypatch):
     # 事件在信号日之后 → 不可用(防 look-ahead)
     monkeypatch.setattr(bt, "_SHARE_IDX", {"600000": [("2099-01-01", 1e9)]})
     assert bt.SCORERS["mcap"](df, "600000") is None
+
+
+def test_financial_factor_duplicate_column_names():
+    # TDX Affair 有重复列名(经营现金流×2):row.get 返回 Series,必须取首个非空值,
+    # 否则 float(Series) 抛 → 现金流全场 None、tier优 结构性不可能(2026-08 实锤)
+    df = pd.DataFrame(
+        [[5e8, 3e8, 3e8]],
+        columns=["c_np", "c_ocf", "c_ocf"],   # 重复列名
+        index=pd.Index(["600000"], name="c_code"))
+    colmap = {"code": "__index__", "net_profit": "c_np", "op_cashflow": "c_ocf"}
+    r = fin.financial_factor("600000", df, colmap)
+    assert r["op_cashflow"] == 3e8
+    assert r["dixi_proxy"]["real_earnings_cashflow"] is True

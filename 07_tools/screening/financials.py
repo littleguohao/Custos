@@ -86,6 +86,10 @@ def _cell(row, colmap: dict, logical: str) -> Optional[float]:
     except Exception:  # noqa: BLE001
         return None
     try:
+        # TDX Affair 存在重复列名(如『经营活动产生的现金流量净额』×2):
+        # .get 返回 Series 而非标量,float(Series) 会抛 → 此前全场现金流 None、tier优永不成立
+        if hasattr(v, "iloc") and not isinstance(v, (int, float, str, bool)):
+            v = next((x for x in v if x is not None and x == x), None)
         return float(v) if v is not None else None
     except (TypeError, ValueError):
         return None
