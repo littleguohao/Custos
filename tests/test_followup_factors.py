@@ -596,3 +596,20 @@ def test_financial_factor_duplicate_column_names():
     r = fin.financial_factor("600000", df, colmap)
     assert r["op_cashflow"] == 3e8
     assert r["dixi_proxy"]["real_earnings_cashflow"] is True
+
+
+def test_j_low_dif_pos_and_adx25_gates():
+    assert "j_low_dif_pos" in bt.ENTRY_GATES and "j_low_adx25" in bt.ENTRY_GATES
+    # 单边上涨:J 不低 → 两个 gate 都拒
+    up = _mk([10.0 + 0.2 * i for i in range(60)])
+    assert bt.ENTRY_GATES["j_low_dif_pos"](up) is False
+    assert bt.ENTRY_GATES["j_low_adx25"](up) is False
+    # 单边下跌:J 深度超卖 + ADX 趋势强 → adx25 放行;DIF<0 → dif_pos 拒
+    down = _mk([30.0 - 0.3 * i for i in range(60)])
+    j = bt._kdj(down)
+    assert j["available"] and j["j"] < 13
+    assert bt.ENTRY_GATES["j_low_adx25"](down) is True
+    assert bt.ENTRY_GATES["j_low_dif_pos"](down) is False
+    # ADX 数值合理性:单边趋势 ADX 高、横盘 ADX 低
+    flat = _mk([10.0 + (0.05 if i % 2 else -0.05) for i in range(60)])
+    assert bt._adx_last(down) > bt._adx_last(flat)

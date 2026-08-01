@@ -26,6 +26,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+import numpy as np
 import pandas as pd
 
 _SCREEN_DIR = Path(__file__).resolve().parent
@@ -117,6 +118,74 @@ def j_low_macd_turn_gate(df_slice: pd.DataFrame) -> bool:
 
 
 ENTRY_GATES["j_macd_turn"] = j_low_macd_turn_gate
+
+
+def _macd_dif_series(close: pd.Series) -> pd.Series:
+    c = close.astype(float)
+    return c.ewm(span=12, adjust=False).mean() - c.ewm(span=26, adjust=False).mean()
+
+
+def j_low_dif_pos_gate(df_slice: pd.DataFrame) -> bool:
+    """J<13 且 DIF>0——『强势里的回踩』(赢家特征研究:mac_dif_pos 日内AUC 0.548/+3.3pp/半程一致)。
+    超卖但中期趋势未破零轴,区别于下跌途中的新低。绝不 raise。"""
+    if _kdj is None or len(df_slice) < 35:
+        return False
+    try:
+        r = _kdj(df_slice)
+        if not (r.get("available") and r.get("j") is not None and r["j"] < J_LOW_THRESHOLD):
+            return False
+        return bool(_macd_dif_series(df_slice["close"]).iloc[-1] > 0)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _adx_last(df_slice: pd.DataFrame, n: int = 14) -> float:
+    """Wilder ADX 最后一点(len 不足返回 NaN)。"""
+    h = df_slice["high"].astype(float).values
+    l = df_slice["low"].astype(float).values
+    c = df_slice["close"].astype(float).values
+    if len(c) < 2 * n + 2:
+        return float("nan")
+    tr = np.maximum(h[1:] - l[1:], np.maximum(abs(h[1:] - c[:-1]), abs(l[1:] - c[:-1])))
+    pdm = np.where((h[1:] - h[:-1]) > (l[:-1] - l[1:]), np.maximum(h[1:] - h[:-1], 0), 0.0)
+    mdm = np.where((l[:-1] - l[1:]) > (h[1:] - h[:-1]), np.maximum(l[:-1] - l[1:], 0), 0.0)
+
+    def wilder(x):
+        out = np.zeros(len(x))
+        out[n - 1] = x[:n].sum()
+        for i in range(n, len(x)):
+            out[i] = out[i - 1] - out[i - 1] / n + x[i]
+        return out / n
+
+    atr, sp, sm = wilder(tr), wilder(pdm), wilder(mdm)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        pdi = np.where(atr > 0, 100 * sp / atr, 0.0)
+        mdi = np.where(atr > 0, 100 * sm / atr, 0.0)
+        dx = np.where(pdi + mdi > 0, 100 * abs(pdi - mdi) / (pdi + mdi), 0.0)
+    adx = np.zeros(len(dx))
+    adx[2 * n - 2] = dx[n - 1:2 * n - 1].mean()
+    for i in range(2 * n - 1, len(dx)):
+        adx[i] = (adx[i - 1] * (n - 1) + dx[i]) / n
+    return float(adx[-1])
+
+
+def j_low_adx25_gate(df_slice: pd.DataFrame) -> bool:
+    """J<13 且 ADX≥25——前段趋势决绝(赢家特征研究:dmi_adx 日内AUC 0.544/+13.7pp/半程一致)。
+    超卖池里 ADX 高=跌透/趋势明确,反弹更有力。绝不 raise。"""
+    if _kdj is None or len(df_slice) < 35:
+        return False
+    try:
+        r = _kdj(df_slice)
+        if not (r.get("available") and r.get("j") is not None and r["j"] < J_LOW_THRESHOLD):
+            return False
+        a = _adx_last(df_slice)
+        return bool(a == a and a >= 25)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+ENTRY_GATES["j_low_dif_pos"] = j_low_dif_pos_gate
+ENTRY_GATES["j_low_adx25"] = j_low_adx25_gate
 
 HORIZONS_DEFAULT = (5, 10, 20)
 
@@ -1076,13 +1145,24 @@ def attribution_report(trades: list[dict[str, Any]]) -> dict[str, Any]:
     return {"n": len(ts), "features": rows, "robust_features": robust_feats, "text": "\n".join(lines)}
 
 
-def _load_bars_local(codes: list[str], count: int) -> dict[str, pd.DataFrame]:
-    """CLI 用：经 local_tdx 读取本地日线（需通达信数据；单测走注入不经此）。"""
+def _load_bars_local(codes: list[str], count: int, start: Optional[str] = None,
+                     end: Optional[str] = None) -> dict[str, pd.DataFrame]:
+    """CLI 用：经 local_tdx 读取本地日线（需通达信数据；单测走注入不经此）。
+    start/end(YYYY-MM-DD)在 count 之前应用(此前 tdx 路径静默忽略 --start/--end,
+    导致指定窗口无效、实际跑全历史)。"""
     import local_tdx_data  # noqa: PLC0415
     out: dict[str, pd.DataFrame] = {}
     for c in codes:
         try:
-            df = local_tdx_data.get_ohlcv_table(c, count=count)
+            df = local_tdx_data.get_ohlcv_table(c, count=count or 2000)
+            if df is not None and len(df) and (start or end):
+                df = df.copy()
+                df["date"] = df["date"].astype(str).str[:10]
+                if start:
+                    df = df[df["date"] >= start]
+                if end:
+                    df = df[df["date"] <= end]
+                df = df.tail(count).reset_index(drop=True) if count else df.reset_index(drop=True)
         except Exception as exc:  # noqa: BLE001
             print(f"[WARN] 加载 {c} 失败: {exc}", file=sys.stderr)
             df = None
@@ -1182,7 +1262,8 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     if loader is not None:
         load = loader
     elif args.data_source == "tdx":
-        load = _load_bars_local
+        import functools
+        load = functools.partial(_load_bars_local, start=args.start or None, end=args.end or None)
     else:
         import functools
         import s_data  # noqa: PLC0415
