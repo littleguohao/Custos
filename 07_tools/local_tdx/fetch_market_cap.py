@@ -169,6 +169,69 @@ def diff_events(prev: dict[str, float], rows: list[dict], observed_on: str,
     return out
 
 
+EM_F10_EQUITY_API = "https://datacenter.eastmoney.com/securities/api/data/v1/get"
+
+
+def fetch_equity_history(code: str, session=None, timeout: int = 15) -> list[dict]:
+    """东财 F10 股本变动全史(IPO 起,**含增发/送转/债转股**)→ [{observed_on, total_shares, kind, name}]。
+    这是补 2018 前股本缺口的权威来源(送转因子表缺定增,此表不缺)。失败返回 []。绝不 raise。"""
+    try:
+        s = session or requests.Session()
+        rows: list[dict] = []
+        page = 1
+        while True:
+            r = s.get(EM_F10_EQUITY_API, params={
+                "reportName": "RPT_F10_EH_EQUITY", "columns": "ALL",
+                "filter": f'(SECURITY_CODE="{code}")',
+                "pageNumber": page, "pageSize": 100,
+                "sortTypes": 1, "sortColumns": "END_DATE"},
+                timeout=timeout, headers={"User-Agent": "Mozilla/5.0"})
+            d = r.json().get("result") or {}
+            for x in d.get("data") or []:
+                d10 = str(x.get("END_DATE") or "")[:10]
+                ts = x.get("TOTAL_SHARES")
+                if d10 and ts:
+                    rows.append({"observed_on": d10, "total_shares": float(ts),
+                                 "kind": str(x.get("CHANGE_REASON") or ""),
+                                 "name": str(x.get("SECURITY_NAME_ABBR") or "")})
+            if page >= int(d.get("pages") or 1):
+                break
+            page += 1
+        return rows
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def backfill_equity_history(codes: list[str], before: str = MV_START,
+                            out_path: str | Path = LEDGER, limit: int = 0,
+                            progress: int = 200, session=None) -> dict:
+    """把 before 之前的股本事件回填进台账(merge_write 原子去重)。
+    返回 {added, failed, codes}。单只失败不中断。绝不 raise。"""
+    session = session or requests.Session()
+    events: list[dict] = []
+    failed = 0
+    n = 0
+    for c in codes:
+        n += 1
+        if limit and n > limit:
+            break
+        try:
+            rows = fetch_equity_history(c, session=session)
+            for r in rows:
+                if r["observed_on"] < before:
+                    events.append({"code": c, "name": r["name"], "observed_on": r["observed_on"],
+                                   "prev_sample": None, "total_shares": r["total_shares"],
+                                   "prev_shares": None, "free_shares": None,
+                                   "close": None, "market_cap": None,
+                                   "kind": r["kind"] or "backfill_f10"})
+        except Exception:  # noqa: BLE001
+            failed += 1
+        if progress and n % progress == 0:
+            print(f"[backfill] {n} 只 | 事件 {len(events)} | 失败 {failed}", file=sys.stderr, flush=True)
+    res = merge_write(events, out_path) if events else {"added": 0}
+    return {"added": res["added"], "failed": failed, "codes": min(n, limit or n)}
+
+
 def merge_write(events: list[dict], path: str | Path = LEDGER) -> dict:
     """按 (code, observed_on) 去重合并写 JSONL(原子写)。"""
     path = Path(path)
@@ -295,8 +358,20 @@ def main(argv=None) -> int:
     ap.add_argument("--as-of", help="查询该日的总股本(不拉网络)")
     ap.add_argument("--code", help="配合 --as-of 限定单只")
     ap.add_argument("--verify", action="store_true", help="自检(有问题 exit 1)")
+    ap.add_argument("--backfill-history", action="store_true",
+                    help=f"回填 {MV_START} 之前的股本变动史(东财 F10 全史含增发;补 2015-2017 市值缺口)")
+    ap.add_argument("--limit", type=int, default=0, help="只处理前 N 只(排障用)")
     args = ap.parse_args(argv)
     out_path, sp_path = Path(args.out), Path(args.samples_out)
+
+    if args.backfill_history:
+        import local_tdx_data  # noqa: PLC0415
+        codes = local_tdx_data.list_local_vipdoc_codes()
+        print(f"[INFO] 回填 {MV_START} 前股本史: universe {len(codes)} 只", file=sys.stderr)
+        res = backfill_equity_history(codes, before=MV_START, out_path=out_path,
+                                      limit=args.limit)
+        print(f"[OK] 回填完成: +{res['added']} 事件(失败 {res['failed']} 只) → {out_path}")
+        return 0 if res["added"] or res["failed"] == 0 else 2
 
     def _samples() -> dict:
         """采样台账:{"sampled": 有数据的日期, "empty": 已知无数据(非交易日)的日期}。

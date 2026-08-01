@@ -299,3 +299,49 @@ class TestSamplingRun:
         assert "已知空日期" in capsys.readouterr().out
         # 重跑:已知空日期直接跳过,不再发请求
         assert mc.main(argv) == 0 and calls == ["2024-06-29"]
+
+
+class _FakeResp:
+    def __init__(self, payload):
+        self._p = payload
+
+    def json(self):
+        return self._p
+
+
+class _FakeSession:
+    """模拟东财 F10 股本接口:2 页历史 + 分页终止。"""
+
+    def __init__(self):
+        self.calls = 0
+
+    def get(self, url, params=None, timeout=15, headers=None):
+        self.calls += 1
+        page = params["pageNumber"]
+        data = {1: [{"END_DATE": "2015-03-31 00:00:00", "TOTAL_SHARES": 1e8,
+                     "CHANGE_REASON": "转增股上市", "SECURITY_NAME_ABBR": "测试股"},
+                    {"END_DATE": "2016-11-20 00:00:00", "TOTAL_SHARES": 1.5e8,
+                     "CHANGE_REASON": "增发A股上市", "SECURITY_NAME_ABBR": "测试股"}],
+                2: [{"END_DATE": "2018-06-30 00:00:00", "TOTAL_SHARES": 2e8,
+                     "CHANGE_REASON": "转增股上市", "SECURITY_NAME_ABBR": "测试股"}]}[page]
+        return _FakeResp({"result": {"pages": 2, "data": data}})
+
+
+def test_fetch_equity_history_paginates_and_parses():
+    rows = mc.fetch_equity_history("600000", session=_FakeSession())
+    assert len(rows) == 3 and rows[1]["observed_on"] == "2016-11-20"
+    assert rows[1]["kind"] == "增发A股上市"          # 定增必须在内(送转因子表缺它)
+
+
+def test_backfill_only_before_mv_start_and_merges(tmp_path):
+    out = tmp_path / "ledger.jsonl"
+    res = mc.backfill_equity_history(["600000"], before=mc.MV_START, out_path=out,
+                                     progress=0, session=_FakeSession())
+    # 2018-06-30 事件在 MV_START 之后 → 不回填;2015/2016 两条进来
+    assert res["added"] == 2
+    events = mc.load_events(out)
+    assert [e["observed_on"] for e in events] == ["2015-03-31", "2016-11-20"]
+    sh = mc.shares_as_of(events, "2016-05-01", code="600000")["600000"]
+    assert sh["total_shares"] == 1e8                 # as-of 取 2015 事件(stale 安全侧)
+    sh2 = mc.shares_as_of(events, "2017-01-01", code="600000")["600000"]
+    assert sh2["total_shares"] == 1.5e8              # 定增后股本
