@@ -198,6 +198,21 @@ ENTRY_GATES["j_low_dif_pos"] = j_low_dif_pos_gate
 ENTRY_GATES["j_low_adx25"] = j_low_adx25_gate
 ENTRY_GATES["j_low_adx60"] = j_low_adx60_gate
 
+
+def platform_pullback_gate(df_slice: pd.DataFrame) -> bool:
+    """平台突破回踩(回踩不破前期平台高点):三段式——平台(≥2触上沿)→有效突破→
+    回落至平台高附近但未破。止损天然=平台高×0.98(--stop-mode platform)。绝不 raise。"""
+    if len(df_slice) < 65:
+        return False
+    try:
+        from platform_pullback import detect_platform_pullback  # noqa: PLC0415
+        return detect_platform_pullback(df_slice) is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
+ENTRY_GATES["platform_pullback"] = platform_pullback_gate
+
 HORIZONS_DEFAULT = (5, 10, 20)
 
 
@@ -687,9 +702,11 @@ def _bbi_series(close: pd.Series) -> pd.Series:
 
 def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
                       bbi_exit_consec: int = 2, time_stop_bars: int = 0,
-                      stop_mode: str = "low", stop_pct: float = 8.0) -> dict[str, Any]:
+                      stop_mode: str = "low", stop_pct: float = 8.0,
+                      stop_override: Optional[float] = None) -> dict[str, Any]:
     """B1 交易规则模拟：买入当日收盘进场；
-    止损：stop_mode='low'=买入当日最低价(超卖贴低时几乎无空间)；'pct'=entry×(1-stop_pct%)(固定空间)。
+    止损：stop_override 显式指定(如平台高×0.98)优先;否则 stop_mode='low'=买入当日最低价
+    (超卖贴低时几乎无空间)；'pct'=entry×(1-stop_pct%)(固定空间)。
     站上 BBI 后若连续 bbi_exit_consec 日收盘跌破 BBI 则止盈卖出；可选 time_stop_bars 根后到期平仓。
     优先级：先判当日最低是否破止损(盘中)，再判收盘 BBI 退出，再判时间止损；均未触发则持有到数据末。
     跳空低开(open<stop)按开盘价成交。返回 {exit_idx, reason, ret, holding, risk_frac}。"""
@@ -698,7 +715,10 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
     open_ = df["open"].astype(float).values
     n = len(close)
     entry = float(close[entry_idx])
-    stop = entry * (1 - stop_pct / 100.0) if stop_mode == "pct" else float(low[entry_idx])
+    if stop_override is not None and stop_override < entry:   # 显式止损位(如平台高×0.98)
+        stop = float(stop_override)
+    else:
+        stop = entry * (1 - stop_pct / 100.0) if stop_mode == "pct" else float(low[entry_idx])
     risk_frac = (entry - stop) / entry if entry else 0.0
     bbi_v = bbi.values
     has_above = False
@@ -795,9 +815,19 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
                 continue
             res = scorer(slice_df, code)
             if res is not None and res.get("suggestion") == "可买" and _amv_ok(entry_date):
+                stop_ov = None
+                if stop_mode == "platform":                  # 平台高止损:形态自带止损位
+                    try:
+                        from platform_pullback import detect_platform_pullback  # noqa: PLC0415
+                        det = detect_platform_pullback(slice_df)
+                        if det:
+                            stop_ov = det["platform_high"] * 0.98
+                    except Exception:  # noqa: BLE001
+                        stop_ov = None
                 tr = simulate_b1_trade(df, i, bbi, bbi_exit_consec=bbi_exit_consec,
                                        time_stop_bars=time_stop_bars,
-                                       stop_mode=stop_mode, stop_pct=stop_pct)
+                                       stop_mode=stop_mode, stop_pct=stop_pct,
+                                       stop_override=stop_ov)
                 ret_net = tr["ret"] - cost
                 rf = tr.get("risk_frac") or 0.0
                 rf_eff = max(rf, _R_RISK_FLOOR)   # 地板：周线收盘贴低时 risk_frac≈0 会把 R 炸成极端值
@@ -1231,8 +1261,8 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                     help="组合:每个进场日按score降序只取前N只(横截面择优;0=不启用,取全部可买)")
     ap.add_argument("--max-signals-per-code", type=int, default=0,
                     help="每只股最多保留N个候选(0=不限;--top-n 下限制单股候选爆炸、省内存/CPU)")
-    ap.add_argument("--stop-mode", choices=["low", "pct"], default="low",
-                    help="止损:low=买入K最低(超卖贴低几乎无空间);pct=entry×(1-stop_pct%%)(固定空间)")
+    ap.add_argument("--stop-mode", choices=["low", "pct", "platform"], default="low",
+                    help="止损:low=买入K最低;pct=entry×(1-stop_pct%%);platform=平台高×0.98(配 platform_pullback 入场)")
     ap.add_argument("--stop-pct", type=float, default=8.0, help="--stop-mode pct 时的止损百分比(默认8)")
     ap.add_argument("--summary-only", action="store_true",
                     help="输出JSON不含逐笔trades(仅摘要;全市场日线省内存,防OOM)")

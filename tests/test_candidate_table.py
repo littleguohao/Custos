@@ -128,3 +128,17 @@ def test_daily_signal_summary_bear_discipline():
     md = ct.render_table(pool, "2026-07-30")
     sec = md.split("## ⭐ 今日信号一览")[1].split("\n## ")[0]
     assert "空头不买" in sec
+
+
+def test_platform_pullback_column():
+    c1 = _cand("600000", "甲", "半导体", "C", "优", 3, False)
+    c1["platform_pullback"] = {"platform_high": 10.25, "breakout_date": "2026-07-20",
+                               "pullback_low": 10.1}
+    c2 = _cand("000002", "乙", "AI", "D", "差", 1, False)
+    md = ct.render_table({"status": "ok", "candidates": [c1, c2]}, "2026-08-02")
+    assert "平台回踩" in md
+    pool_sec = md.split("## C 池")[1]                      # 主池表(观察区无此列)
+    row1 = next(l for l in pool_sec.splitlines() if "600000" in l)
+    row2 = next(l for l in md.split("## D 池")[1].splitlines() if "000002" in l)
+    assert "✓@10.25" in row1           # 命中:显示平台高(自然止损位)
+    assert "✓" not in row2              # 未命中:横杠

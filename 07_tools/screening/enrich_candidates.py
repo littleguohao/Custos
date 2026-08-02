@@ -1412,6 +1412,13 @@ def enrich(
         cand["fund_flow"] = fund_flow_of(code6, cand["sector"], fund_flow)
         if sp_resolve is not None:
             cand["sector_phase"] = sp_resolve(code6)     # 板块相位 hint(不封顶,证据层)
+        try:                                             # 平台突破回踩形态(证据层,不驱动分层)
+            from platform_pullback import detect_platform_pullback  # noqa: PLC0415
+            pp = detect_platform_pullback(df)
+            if pp:
+                cand["platform_pullback"] = pp           # {platform_high, breakout_date, pullback_low, ...}
+        except Exception:  # noqa: BLE001
+            pass
         if fin_enabled and fin_colmap:
             # 财务维度(CZ抄底代理)：最佳努力落盘证据层，不驱动分层
             cand["financials"] = financials_mod.financial_factor(

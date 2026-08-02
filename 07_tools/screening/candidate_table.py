@@ -95,6 +95,7 @@ def render_table(pool: dict, date: str) -> str:
         + (f"（{pool['degraded_reason']}）" if pool.get("degraded_reason") else "")
         + f"；0AMV：{pool.get('amv_state', '未知')}；市场许可：{pool.get('market_permission', '未知')}",
         "> 本表为证据层候选，不构成买入计划；A/B 池亦须经总控与风控审批。",
+        "> 「平台回踩」列：✓@平台高 = 平台突破回踩形态命中（回踩不破前期平台高点）；平台高即自然止损位（证据层，非进场条件）。",
         "",
     ]
     counts = pool.get("bucket_counts") or {}
@@ -247,9 +248,9 @@ def render_table(pool: dict, date: str) -> str:
             lines.append("")
             continue
         lines.append(
-            "| 代码 | 名称 | 公式命中 | 模式标签 | 波浪 | CZ标签 | 技术分 | 贴合 | 资金意图 | 板块 | 板块状态 | 交易属性 | 共振 | 基本面 | 4面共振 | 分层 | 建议止损位 | next_step |"
+            "| 代码 | 名称 | 公式命中 | 模式标签 | 波浪 | CZ标签 | 技术分 | 贴合 | 资金意图 | 板块 | 板块状态 | 交易属性 | 共振 | 基本面 | 4面共振 | 平台回踩 | 分层 | 建议止损位 | next_step |"
         )
-        lines.append("|---|---|---|---|---|---|---:|---:|---|---|---|---|---|---|---|---|---|---|")
+        lines.append("|---|---|---|---|---|---|---:|---:|---|---|---|---|---|---|---|---|---|---|---|")
         for c in rows:
             tags = "、".join(
                 PATTERN_LABELS[t] for t, hit in (c.get("patterns") or {}).items() if hit
@@ -265,6 +266,8 @@ def render_table(pool: dict, date: str) -> str:
             fq_disp = (fq.get("tier", "-") or "-") + ("⚠三无" if fq.get("sanwu") else "")
             r4 = c.get("resonance_4leg") or {}
             r4_disp = (r4.get("label", "-") or "-") + ("🐂" if r4.get("bull_candidate") else "")
+            pp = c.get("platform_pullback") or {}
+            pp_disp = (f"✓@{_fmt(pp.get('platform_high'))}" if pp.get("platform_high") else "-")
             lines.append(
                 f"| {c.get('code')} | {c.get('name')}"
                 f" | {'、'.join(c.get('formula_hits') or []) or '-'}"
@@ -280,6 +283,7 @@ def render_table(pool: dict, date: str) -> str:
                 f" | {res.get('resonance_level', '-')}"
                 f" | {fq_disp}"
                 f" | {r4_disp}"
+                f" | {pp_disp}"
                 f" | {bucket}"
                 f" | {_fmt(stop)}"
                 f" | {c.get('next_step', '-')} |"

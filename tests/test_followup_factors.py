@@ -613,3 +613,29 @@ def test_j_low_dif_pos_and_adx25_gates():
     # ADX 数值合理性:单边趋势 ADX 高、横盘 ADX 低
     flat = _mk([10.0 + (0.05 if i % 2 else -0.05) for i in range(60)])
     assert bt._adx_last(down) > bt._adx_last(flat)
+
+
+def test_platform_pullback_gate_and_platform_stop():
+    import pandas as pd
+    assert "platform_pullback" in bt.ENTRY_GATES
+    # 合成形态:平台(60日 9.8~10.2 反复触上沿)→75日起突破收10.5→离开至11.5→近15日回踩至≈10.2 未破
+    dates = pd.date_range("2025-01-01", periods=100, freq="B")
+    closes = [10.0 + (0.2 if (i // 7) % 2 else -0.2) for i in range(60)]   # 平台震荡
+    closes += [10.2 + 0.04 * i for i in range(16)]                         # 缓升至 ~10.8
+    closes += [11.0, 11.2, 11.5, 11.4, 11.3]                               # 离开
+    closes += [11.0, 10.8, 10.6, 10.45, 10.4, 10.35, 10.4, 10.35, 10.42,
+               10.4, 10.38, 10.42, 10.4, 10.38, 10.42, 10.4, 10.42, 10.45, 10.42]  # 近15日回踩企稳
+    highs = [c + 0.1 for c in closes]
+    lows = [c - 0.1 for c in closes]
+    lows[92] = 10.20                                                       # 回踩低点≈平台高×0.985
+    df = pd.DataFrame({"date": dates, "open": closes, "high": highs,
+                       "low": lows, "close": closes, "volume": [1e6] * 100})
+    assert bt.ENTRY_GATES["platform_pullback"](df) is True
+    # 单边下跌(无平台无突破)→ 拒
+    down = _mk([20.0 - 0.2 * i for i in range(100)])
+    assert bt.ENTRY_GATES["platform_pullback"](down) is False
+    # stop_override 生效且优先于 pct
+    bbi = pd.Series([float("nan")] * 100)
+    tr = bt.simulate_b1_trade(df, 96, bbi, stop_mode="pct", stop_pct=8.0,
+                              stop_override=10.2 * 0.98)
+    assert abs(tr["risk_frac"] - (closes[96] - 10.2 * 0.98) / closes[96]) < 1e-6
