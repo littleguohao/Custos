@@ -1656,6 +1656,29 @@ def main(argv=None, loader=None) -> int:
         sub2 = "CSV_DATA" if args.data_source == "csv" else "Q_DATA"
         fn2 = s_data.load_bars_csv if args.data_source == "csv" else s_data.load_bars_qlib
         root2 = str(Path(args.s_data_root) / sub2)
+        if args.data_source == "tdx":                # 本地通达信 vipdoc(近端数据;qlib 止于 2026-02-06)
+            import local_tdx_data  # noqa: PLC0415
+
+            def fn2(codes, count, start=None, end=None, root=None):  # noqa: F811
+                out: dict = {}
+                for c in codes:
+                    try:
+                        df = local_tdx_data.get_ohlcv_table(c, count=2000)
+                        if df is None or not len(df):
+                            continue
+                        df = df.copy()
+                        df["date"] = df["date"].astype(str).str[:10]
+                        if start:
+                            df = df[df["date"] >= start]
+                        if end:
+                            df = df[df["date"] <= end]
+                        if count:
+                            df = df.tail(count)
+                        if len(df):
+                            out[c] = df.reset_index(drop=True)
+                    except Exception:  # noqa: BLE001
+                        continue
+                return out
         # 加载终点要比 --end 多带 max(horizons) 根,否则区间尾部的信号拿不到前向标签被静默右删失
         load_end = args.end
         hz_max = max((int(x) for x in args.horizons.split(",") if x.strip()), default=0)
