@@ -169,9 +169,7 @@ def _adx_last(df_slice: pd.DataFrame, n: int = 14) -> float:
     return float(adx[-1])
 
 
-def j_low_adx25_gate(df_slice: pd.DataFrame) -> bool:
-    """J<13 且 ADX≥25——前段趋势决绝(赢家特征研究:dmi_adx 日内AUC 0.544/+13.7pp/半程一致)。
-    超卖池里 ADX 高=跌透/趋势明确,反弹更有力。绝不 raise。"""
+def _j_low_adx_gate(df_slice: pd.DataFrame, thr: float) -> bool:
     if _kdj is None or len(df_slice) < 35:
         return False
     try:
@@ -179,13 +177,26 @@ def j_low_adx25_gate(df_slice: pd.DataFrame) -> bool:
         if not (r.get("available") and r.get("j") is not None and r["j"] < J_LOW_THRESHOLD):
             return False
         a = _adx_last(df_slice)
-        return bool(a == a and a >= 25)
+        return bool(a == a and a >= thr)
     except Exception:  # noqa: BLE001
         return False
 
 
+def j_low_adx25_gate(df_slice: pd.DataFrame) -> bool:
+    """J<13 且 ADX≥25——前段趋势决绝(赢家特征研究:dmi_adx 日内AUC 0.544/+13.7pp/半程一致)。
+    超卖池里 ADX 高=跌透/趋势明确,反弹更有力。绝不 raise。"""
+    return _j_low_adx_gate(df_slice, 25)
+
+
+def j_low_adx60_gate(df_slice: pd.DataFrame) -> bool:
+    """J<13 且 ADX≥60——极端趋势强度(分档:赢占比 18.1%→21.7%→25.4%→33.5% 单调上行,
+    但样本仅 0.2%,须净值终审)。绝不 raise。"""
+    return _j_low_adx_gate(df_slice, 60)
+
+
 ENTRY_GATES["j_low_dif_pos"] = j_low_dif_pos_gate
 ENTRY_GATES["j_low_adx25"] = j_low_adx25_gate
+ENTRY_GATES["j_low_adx60"] = j_low_adx60_gate
 
 HORIZONS_DEFAULT = (5, 10, 20)
 
