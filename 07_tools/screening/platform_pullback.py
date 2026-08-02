@@ -37,10 +37,19 @@ def detect_platform_pullback(df: pd.DataFrame,
                              lookback: int = PLATFORM_LOOKBACK,
                              breakout_within: int = BREAKOUT_WITHIN,
                              pullback_within: int = PULLBACK_WITHIN,
+                             touch_tol: float = TOUCH_TOL,
+                             touch_min: int = 2,
+                             zone_ratio: float = 1.6,
+                             near_tol: float = NEAR_TOL,
+                             break_tol: float = BREAK_TOL,
+                             top_vol_mult: float = 0.0,
                              stabilize: bool = False) -> Optional[dict[str, Any]]:
     """检测"平台突破→回踩不破"形态,命中返回形态细节,否则 None。绝不 raise。
 
     输入 df:截至当日的日线(升序,含 date/open/high/low/close/volume)。
+    参数(可扫):touch_tol 上沿触碰容差;touch_min 最少触碰次数(1=单高点也算);
+    zone_ratio 平台区振幅上限(ph/zone_min);near_tol 回踩"附近"上界;break_tol 允许刺破深度;
+    top_vol_mult>0 时启用**顶部放量出货过滤**(突破后最高收盘日量≥该倍数×20日均量→排除)。
     """
     try:
         n = len(df)
@@ -58,11 +67,11 @@ def detect_platform_pullback(df: pd.DataFrame,
             return None
         ph = float(high[p_lo:p_hi].max())                    # 平台高
         ph_idx = p_lo + int(high[p_lo:p_hi].argmax())
-        touches = int((high[p_lo:p_hi] >= ph * (1 - TOUCH_TOL)).sum())
-        if touches < 2:                                      # 至少两次触及上沿
+        touches = int((high[p_lo:p_hi] >= ph * (1 - touch_tol)).sum())
+        if touches < touch_min:                              # 上沿触碰次数(1=单高点即可)
             return None
         zone_min = float(close[p_lo:p_hi].min())
-        if zone_min <= 0 or ph / zone_min > 1.6:             # 非震荡(单边趋势区不算平台)
+        if zone_min <= 0 or ph / zone_min > zone_ratio:      # 非震荡(单边趋势区不算平台)
             return None
 
         # ② 突破:近 breakout_within 日内某日收盘站上 ph×(1+buf),且其后最高收盘 ≥ ph×(1+LEAVE_MIN)
@@ -82,10 +91,17 @@ def detect_platform_pullback(df: pd.DataFrame,
         if q_lo >= n:
             return None
         pb_low = float(low[q_lo:].min())
-        if not (ph * (1 - BREAK_TOL) <= pb_low <= ph * (1 + NEAR_TOL)):
+        if not (ph * (1 - break_tol) <= pb_low <= ph * (1 + near_tol)):
             return None
-        if close[-1] < ph * (1 - BREAK_TOL):                  # 当日收盘必须守在平台高上
+        if close[-1] < ph * (1 - break_tol):                  # 当日收盘必须守在平台高上
             return None
+        # ③b 顶部放量出货过滤(可选):突破后最高收盘日若放天量(≥top_vol_mult×20日均量)
+        # ——天量见天价=主力借突破出货的假突破,排除;永兴材料式缩量/平量上涨才保留
+        if top_vol_mult > 0:
+            top_i = brk_idx + int(close[brk_idx:].argmax())
+            vma20 = vol[max(brk_idx, top_i - 20):top_i].mean() if top_i > brk_idx else 0.0
+            if vma20 > 0 and vol[top_i] / vma20 >= top_vol_mult:
+                return None
         # 回踩须真的"回过高位附近"(当前离平台高不远,否则形态已走样)
         if close[-1] > ph * 1.5:
             return None
