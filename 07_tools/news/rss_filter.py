@@ -84,9 +84,13 @@ def main():
    if any(w.lower() in text for w in words): themes.append(theme)
   market_hits=[w for w in cfg.get('market_keywords',[]) if w.lower() in text]
   spam=[w for w in cfg.get('negative_spam_keywords',[]) if w.lower() in text]
+  # 政策负向词:政策源(gov_cn/中新社国内)会发人事任免、会见、文旅推介这类非政策内容。
+  # 在这里匹配而不是在 postclose_news_digest.classify 里读配置——text(title+summary,
+  # 已 lower)只在这里备好,且 classify 保持纯函数。仅落痕,是否剔除由消费方裁决。
+  policy_neg=[w for w in cfg.get('policy_negative_keywords',[]) if w.lower() in text]
   score=cfg['tier_weight'].get(tier,0)+cfg['category_weight'].get(cat,0)+(45 if hits_names or hits_codes else 0)+min(36,len(themes)*12)+min(18,len(market_hits)*6)-(18 if spam else 0)
   if tier=='C' and not (hits_names or hits_codes or themes or market_hits): excluded['c_tier_irrelevant']=excluded.get('c_tier_irrelevant',0)+1; continue
-  y=dict(x); y.update({'relevance_score':score,'matched_holdings_or_pool':{'names':hits_names,'codes':hits_codes},'matched_themes':themes,'matched_market_keywords':market_hits,'filter_session':a.session_type,'filter_cutoff':cutoff.isoformat()})
+  y=dict(x); y.update({'relevance_score':score,'matched_holdings_or_pool':{'names':hits_names,'codes':hits_codes},'matched_themes':themes,'matched_market_keywords':market_hits,'matched_policy_negative':policy_neg,'filter_session':a.session_type,'filter_cutoff':cutoff.isoformat()})
   src=reg.get(x.get('source_id'),{}); y['policy_stage']=src.get('policy_stage');
   if y['policy_stage']=='consultation_not_effective': y['confirmed']=False; y['quality']='candidate'; y['validation_condition']=list(dict.fromkeys((y.get('validation_condition') or [])+['核验正式文件、实施日期和配套细则']))
   scored.append(y)

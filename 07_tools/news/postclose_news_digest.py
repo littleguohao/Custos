@@ -31,20 +31,42 @@ def dump(path: Path, value):
 # `"policy" in category or "official" in category and "宏观政策" in themes`
 # 靠优先级隐式表达分组，读者极易按 `(A or B) and C` 读反。这里显式加括号并把口径写下来。
 #
-# 当前口径（保持原行为，未擅改）：
+# 口径（2026-08-03 裁定，见 RSS_FILTER_CONFIG.rules）：
 #   ① category 含 "policy"（policy_official / policy_consultation）本身就是政策源 → 政策；
 #   ② 其他官方源（macro_official / a_share_official / company_official ...）只有在
-#      命中「宏观政策」主题时才算政策。
-# ⚠️ 另一种读法是"所有政策/官方源都必须命中宏观政策主题"，会让 ① 收紧。两者的差别在于
-# 一条不带宏观政策关键词的证监会公告算不算政策 —— 属策略口径，需人工裁定后再改。
+#      命中「宏观政策」主题时才算政策；
+#   ③ 但命中 policy_negative_keywords（人事任免/会见/文旅推介…）且**未**命中「宏观政策」
+#      主题时不算政策 —— 政策源也会发非政策内容。
+#
+# 为什么不采用"所有源都必须命中宏观政策主题"的收紧读法：实测 9 条典型标题，收紧后
+# 政策节 8→3，掉出的 5 条里有 3 条是真政策（国常会部署稳增长 / 专精特新扶持意见 /
+# 证监会程序化交易征求意见），只有 2 条是真噪音（人事任免 / 文旅推介会）——误杀 3 条
+# 换掉 2 条，净效果为负。根因是原「宏观政策」词表只有 10 个词、覆盖不足，故改为
+# 扩充词表提全 + 负向词精确剔除，而不是加严 gate。
+#
+# ③ 里"未命中宏观政策主题"这个前置条件是必要的：正向证据优先，否则一条
+# 「中美经贸磋商双方会见并讨论关税」会被"会见"误杀。
 POLICY_RULE_NOTE = ('政策 = ("policy" in category) or '
-                    '("official" in category and "宏观政策" in matched_themes)')
+                    '("official" in category and "宏观政策" in matched_themes)；'
+                    '命中 matched_policy_negative 且未命中「宏观政策」主题时不计政策')
+
+
+def is_policy(item: dict) -> bool:
+    """是否计入「政策」节。纯函数，判据全部来自 rss_filter 落痕的字段。"""
+    category = str(item.get("category") or "")
+    themes = item.get("matched_themes") or []
+    is_macro = "宏观政策" in themes
+    if not (("policy" in category) or ("official" in category and is_macro)):
+        return False
+    # 负向词只在没有正向证据时生效
+    if (item.get("matched_policy_negative") or []) and not is_macro:
+        return False
+    return True
 
 
 def classify(item: dict) -> str:
-    category = str(item.get("category") or "")
     themes = item.get("matched_themes") or []
-    if ("policy" in category) or ("official" in category and "宏观政策" in themes):
+    if is_policy(item):
         return "政策"
     if item.get("matched_market_keywords"):
         return "风向"
