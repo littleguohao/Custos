@@ -20,6 +20,9 @@ if hasattr(sys.stdout, "reconfigure"):
 warnings.filterwarnings("ignore")
 
 SELF = Path(__file__).resolve()
+if str(SELF.parents[1]) not in sys.path:
+    sys.path.insert(0, str(SELF.parents[1]))
+from paths import cn_now  # noqa: E402
 OUT = SELF.parent.parents[2] / "01_data" / "trades"
 CONFIG = OUT / "trades_config.json"
 ARCHIVE = OUT / "_archive"
@@ -52,7 +55,7 @@ def normalize(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def archive_source(src: Path) -> None:
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ts = cn_now().strftime("%Y%m%d_%H%M%S")
     dst = ARCHIVE / f"{src.stem}_{ts}{src.suffix}"
     shutil.copy2(src, dst)
     print(f"archived: {dst}")

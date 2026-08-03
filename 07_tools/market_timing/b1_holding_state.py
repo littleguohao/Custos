@@ -17,6 +17,8 @@ LOCAL_TDX_DIR = TOOLS_DIR / "local_tdx"
 if str(LOCAL_TDX_DIR) not in sys.path:
     sys.path.insert(0, str(LOCAL_TDX_DIR))
 
+from runtime_guards import normalize_regime  # noqa: E402
+
 from paths import BASE  # noqa: E402
 from code_utils import norm_code  # noqa: E402
 
@@ -228,7 +230,10 @@ def main() -> None:
     technical_path = DATA / "holdings" / f"{args.date}_holding_technical_summary.json"
     rows = json.loads(technical_path.read_text(encoding="utf-8"))
     market = json.loads((DATA / "market" / f"{args.date}_market_timing_input.json").read_text(encoding="utf-8"))
-    regime = args.market_regime or str((market.get("amv_0") or {}).get("effective_state") or (market.get("amv_0") or {}).get("amv_zone") or "未知")
+    # 归一化:amv_zone 写的是"空头触发",按 == "空头" 判定会让 P1 最高优先级减仓信号不发(审计 B1)
+    regime = normalize_regime(args.market_regime
+                              or (market.get("amv_0") or {}).get("effective_state")
+                              or (market.get("amv_0") or {}).get("amv_zone") or "未知")
     as_of = datetime.strptime(args.date, "%Y-%m-%d").date()
     result = []
     for row in rows:

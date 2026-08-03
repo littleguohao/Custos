@@ -13,6 +13,7 @@ revenue_yoy、roe、total_shares(× 价格 → 市值)。
 """
 from __future__ import annotations
 
+import datetime as _dt
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -24,6 +25,13 @@ for _p in (str(_TOOLS), str(_TOOLS / "local_tdx")):
 
 REQUIRED = ("code", "net_profit", "op_cashflow")   # 缺任一 → available=False
 DIXI_NET_PROFIT_YOY = 100.0                          # 待回测：业绩预增代理阈值（净利同比%）
+
+# 财报时效上限（日）：报告期距 as-of 超过它就不再算"有效财报"。
+# 为什么必须有上限：Affair 快照只给"最新一期"，长期停牌/失去年报能力的壳公司会一直挂着
+# 三年前的报表，代理条件(净利>0 / 现金流>0 / ROE>0)照样成立 → 一只早已空壳的票被判"品质优"
+# 并进入 ⭐ 四面共振（审计 E11）。400 天 = 覆盖"年报最迟 4 月底 + 一个完整季报周期"的余量：
+# 正常公司任意时点回看 400 天内必有一期报表；超过即视为披露中断。
+REPORT_MAX_AGE_DAYS = 400
 
 _fin_cache: dict[str, Any] = {}
 
@@ -95,8 +103,59 @@ def _cell(row, colmap: dict, logical: str) -> Optional[float]:
         return None
 
 
-def financial_factor(code: str, fin_df, colmap: dict, price: Optional[float] = None) -> dict[str, Any]:
-    """CZ 抄底三条件代理（①②）。colmap 不全、数据缺失或定位不到 → available=False。绝不 raise。"""
+def _cell_text(row, colmap: dict, logical: str) -> str:
+    """取字符串型单元格（如报告期）。重复列名同样取首个非空值。绝不 raise。"""
+    col = colmap.get(logical)
+    if col is None or row is None:
+        return ""
+    try:
+        v = row.get(col)
+    except Exception:  # noqa: BLE001
+        return ""
+    if hasattr(v, "iloc") and not isinstance(v, (int, float, str, bool)):
+        try:
+            v = next((x for x in v if x is not None and x == x), None)
+        except Exception:  # noqa: BLE001
+            return ""
+    if v is None or v != v:            # None / NaN
+        return ""
+    return str(v).strip()
+
+
+def _parse_day(s) -> Optional[_dt.date]:
+    """宽松解析 YYYY-MM-DD / YYYYMMDD / 带时分秒 的日期；解析不出返回 None。"""
+    t = str(s or "").strip().replace("/", "-")[:19]
+    if not t:
+        return None
+    for fmt in ("%Y-%m-%d", "%Y%m%d", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return _dt.datetime.strptime(t[:len(_dt.datetime.now().strftime(fmt))], fmt).date()
+        except ValueError:
+            continue
+    try:
+        return _dt.date.fromisoformat(t[:10])
+    except ValueError:
+        return None
+
+
+def report_age_days(report_date, as_of=None) -> Optional[int]:
+    """报告期距 as-of 的天数；任一侧无法解析 → None（"无法判定"，不得当作"新鲜"）。"""
+    d = _parse_day(report_date)
+    if d is None:
+        return None
+    ref = _parse_day(as_of) or _dt.date.today()
+    return (ref - d).days
+
+
+def financial_factor(code: str, fin_df, colmap: dict, price: Optional[float] = None,
+                     as_of=None, max_age_days: int = REPORT_MAX_AGE_DAYS) -> dict[str, Any]:
+    """CZ 抄底三条件代理（①②）。colmap 不全、数据缺失或定位不到 → available=False。绝不 raise。
+
+    时效上限（审计 E11）：报告期距 `as_of`（缺省=今天）超过 `max_age_days` → available=False
+    且 reason="report_stale" —— 陈旧财报不得无限期视为有效。`max_age_days=0` 关闭该检查。
+    colmap 里没有 report_date 时**不假定新鲜**：report_stale=None + stale_check="no_report_date"，
+    由调用方决定是否采信（下游 fundamental_quality 对 available=False 归"未知"，非"差"）。
+    """
     if not colmap or fin_df is None or getattr(fin_df, "empty", True):
         return {"available": False, "reason": "no_financials_or_colmap"}
     if any(colmap.get(f) is None for f in REQUIRED):
@@ -118,7 +177,25 @@ def financial_factor(code: str, fin_df, colmap: dict, price: Optional[float] = N
         return {"available": False, "reason": "lookup_failed"}
 
     net_profit = _cell(row, colmap, "net_profit")
+    # 时效先判:陈旧财报直接不可用,免得下面的代理条件在三年前的数据上"成立"
+    rpt_date = _cell_text(row, colmap, "report_date")
+    age = report_age_days(rpt_date, as_of) if rpt_date else None
+    if not max_age_days:
+        stale, stale_check = None, "disabled"
+    elif not rpt_date:
+        stale, stale_check = None, "no_report_date"
+    elif age is None:
+        stale, stale_check = None, "unparsable_report_date"
+    else:
+        stale = age > max_age_days
+        stale_check = "stale" if stale else "ok"
+    if stale:
+        return {"available": False, "reason": "report_stale",
+                "report_date": rpt_date, "report_age_days": age,
+                "report_stale": True, "stale_check": stale_check,
+                "max_age_days": max_age_days}
     op_cf = _cell(row, colmap, "op_cashflow")
+
     revenue = _cell(row, colmap, "revenue")
     np_yoy = _cell(row, colmap, "net_profit_yoy")
     rev_yoy = _cell(row, colmap, "revenue_yoy")
@@ -146,6 +223,8 @@ def financial_factor(code: str, fin_df, colmap: dict, price: Optional[float] = N
     }
     return {
         "available": True, "cashflow_available": ocf_available,
+        "report_date": rpt_date or None, "report_age_days": age,
+        "report_stale": stale, "stale_check": stale_check, "max_age_days": max_age_days,
         "net_profit": net_profit, "op_cashflow": op_cf, "revenue": revenue,
         "net_profit_yoy": np_yoy, "revenue_yoy": rev_yoy, "roe": roe,
         "market_cap": mkt_cap, "market_cap_yi": mkt_cap_yi,

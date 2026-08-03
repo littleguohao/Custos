@@ -28,7 +28,9 @@ from __future__ import annotations
 
 import argparse
 import glob
+import inspect
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -55,8 +57,40 @@ SCREENING_DIR = DATA / "screening"
 SECTOR_CODE_MAP = SECTORS_DIR / "sector_code_map.json"
 INDEX_CODE = "999999"  # 上证指数 vipdoc 代码（reader.daily 里 000001 是平安银行）
 
+# 沪深 A 股代码前缀白名单（与 formula_screen/manual_pools 同一份规则）。
+# 本段是候选进 StockPool 契约前的最后一道过滤：上游只有 build_universe 走了白名单，
+# 自选池与外部注入的命中都没走，而这里此前只排 BJ 前缀 → ETF(51/15/16)、可转债(11/12/13)、
+# B股(900/2xx)、指数能进 A-D 分层并被当成"可买个股"（审计 B10）。
+_A_SHARE_RE = re.compile(r"^(60[0-5]|688|00[0-3]|30[0-3])\d{3}$")
+_BJ_PREFIX = ("4", "8", "920")
+
 J_LOW_THRESHOLD = 13.0
 VOL_RATIO_MAX = 0.5          # 量比 <= 50%
+
+# 默认日线加载根数（get_ohlcv_table(count=...)）。它同时是 list_days 的**上界**：
+# 加载器内部 `df.tail(count)`，所以 len(df)==OHLCV_LOAD_BARS 只说明"至少这么多根"，
+# 不是真实上市日数（审计：CZ 的 250 日窗口在 260 根里只剩 10 根余量）。
+OHLCV_LOAD_BARS = 260
+
+
+def j_below_threshold(j: Any, threshold: float = J_LOW_THRESHOLD) -> bool:
+    """J 是否满足 `J < threshold` 的硬门槛。**NaN/None/非数值一律不满足**。
+
+    审计：原判否写作 `dj is None or dj >= J_LOW_THRESHOLD`。IEEE 754 下
+    `float("nan") >= 13` 为 False，`nan is None` 也为 False —— 于是"J 算不出来"
+    被当成"J<13 满足买点"直接放行，坏数据成了最好的数据。KDJ 目前走
+    `rsv.fillna(50)` 不易产出 NaN，但 daily_j 也可能来自落盘 JSON / 别的口径，
+    这道门槛是全通道硬门槛，不能依赖上游恰好不脏。
+    """
+    if j is None or isinstance(j, bool):
+        return False
+    try:
+        v = float(j)
+    except (TypeError, ValueError):
+        return False
+    if not np.isfinite(v):          # NaN / ±inf 均视为不可用
+        return False
+    return v < threshold
 VOL_PCTILE_MAX = 10.0        # 20日量分位 <= 10%
 RS_STRONG_PP = 3.0           # 20日相对强度 >= +3pp
 REVERSAL_CHANGE_PCT = 2.0
@@ -142,6 +176,7 @@ FIT_NEAR_LINE_MAX_PCT = 6.0       # ≤6% → 1 分
 FIT_SHRINK_DEEP = 0.5             # 回调段/上涨段均量 ≤0.5 → 2 分
 FIT_SHRINK_MID = 0.8              # ≤0.8 → 1 分
 FIT_DKS_SLOPE_DAYS = 5            # DKS 上行判断窗口（DKS[t] > DKS[t-N]）
+DKS_MA_WINDOWS = (14, 28, 57, 114)  # DKS=(MA14+MA28+MA57+MA114)/4，与 technical_monitor.zhixing_state 同参
 
 # --- 完美B1「缩量回踩超卖企稳」买弱指纹（10只确认赢家反标，见 worklog）---
 # recall 达标(10/10)，但全市场回测证伪：周线交易模拟(止损+BBI出场)加0AMV做多+25bps成本后
@@ -166,7 +201,7 @@ MACD_OVEREXT_WIN = 120           # 拐离分位窗口（日）
 # 方向A(2026-07-23)：全市场回测证实突破式打分非短周期 alpha，转接正交维度。
 LIQUIDITY_WIN = 20               # 待回测：近N日均成交额窗口
 LIQUIDITY_FLOOR_YI = 0.5         # 待回测：均成交额底线(亿元)，低于→low_liquidity(默认仅flag)
-FUND_FLOW_SECTOR_MIN_KW = 2      # 板块名匹配最小关键词长度
+FUND_FLOW_SECTOR_MIN_NAME = 2    # 板块名整名匹配所需最小长度（短于此视为不可判，不给分）
 
 
 def _load_json(path: Path, default: Any) -> Any:
@@ -223,13 +258,17 @@ def _match_theme_tags(stock_tags: list[str], semantic_tags: list[str]) -> list[s
     return matched
 
 
-def build_stock_theme_map(min_match: int = THEME_MIN_MATCH) -> tuple[dict[str, dict], bool]:
+def build_stock_theme_map(min_match: int = THEME_MIN_MATCH,
+                          codes: Optional[set] = None) -> tuple[dict[str, dict], bool]:
     """股 → 主题方向（theme_id/sector 名）。
 
     优先用 miscinfo 概念标签（concept_tags，每股官方概念）匹配
     sector_code_map.json 各主题的 semantic_tags——准确度远高于 880 反查；
     标签文件缺失时回退 tq_sector_map 成分股反查（v1，已知存在错配）。
     min_match：概念路径下命中主题所需的最小语义标签数（默认 1；提高可降低过度匹配）。
+    codes：只为这批代码建图（通常几十只候选）。默认 None＝全市场（向后兼容）。
+      审计：调用方只用 `stock_theme.get(code6)` 查几十只票，却让「全市场 5000 股 ×
+      主题数 × 语义标签 × 个股标签」四层子串匹配跑满——把候选集传进来即可省掉两个量级。
     返回 ({code6: {"theme_id","sector",...}}, map_available)。
     """
     try:
@@ -241,10 +280,21 @@ def build_stock_theme_map(min_match: int = THEME_MIN_MATCH) -> tuple[dict[str, d
     if not themes:
         return {}, False
 
+    # 标签仍走 load_tags():它是既有的注入点,改成只调 load_tags_meta 会让所有
+    # monkeypatch(load_tags) 的测试静默走到 fallback 分支。元数据另取一次,
+    # 拿不到就当"无元数据"处理(不告警),行为与改动前一致。
     tags_map = concept_tags.load_tags()
-    if tags_map:
-        stock_theme: dict[str, dict] = {}
-        for code6, stock_tags in tags_map.items():
+    tags_meta = concept_tags.load_tags_meta()[1] if hasattr(concept_tags, "load_tags_meta") else {}
+    if tags_meta.get("stale"):
+        # 概念标签退化慢,陈旧仍可用,但必须留痕:不能让"上周的标签"以当日身份
+        # 进入主线指纹,否则板块族密度榜会指向一条已经冷掉的主线(审计 C6)。
+        print(f"[WARN] 概念标签陈旧(date={tags_meta.get('date')}, "
+              f"requested={tags_meta.get('requested_date')})：主线指纹据此生成,"
+              f"仅作情境参考", file=sys.stderr)
+
+    def _scan(items) -> dict[str, dict]:
+        out: dict[str, dict] = {}
+        for code6, stock_tags in items:
             best_matched: list[str] = []
             best_theme: dict | None = None
             for t in themes:
@@ -252,15 +302,27 @@ def build_stock_theme_map(min_match: int = THEME_MIN_MATCH) -> tuple[dict[str, d
                 if len(matched) > len(best_matched):
                     best_matched, best_theme = matched, t
             if best_theme and len(best_matched) >= min_match:
-                stock_theme[code6] = {
+                out[code6] = {
                     "theme_id": best_theme.get("theme_id", ""),
                     "sector": best_theme.get("theme_name", ""),
                     "matched_tags": best_matched,
                     "match_count": len(best_matched),
                     "sector_source": "concept_tags",
                 }
+        return out
+
+    if tags_map:
+        if codes is None:
+            stock_theme = _scan(tags_map.items())
+        else:
+            stock_theme = _scan((c, tags_map[c]) for c in codes if c in tags_map)
         if stock_theme:
             return stock_theme, True
+        if codes is not None and _scan(tags_map.items()):
+            # 这批候选一个都没匹配上，但概念路径本身是可用的（全市场能建出图）→
+            # 不得偷偷回退 880 反查（那条路只在"概念标签不可用"时才走，错配已知）。
+            # 全市场重扫只在这个退化分支发生，正常路径不付这个代价。
+            return {}, True
 
     sector_map = latest_tq_sector_map()
     if not sector_map.get("sectors"):
@@ -404,12 +466,21 @@ def detect_wave_type(df) -> dict[str, Any]:
 
 
 def weekly_j_state(df) -> dict[str, Any]:
-    """周线 J（B1 §四.1 主线口径：周线 J<13 为周线 B1 候选）。"""
+    """周线 J（B1 §四.1 主线口径：周线 J<13 为周线 B1 候选）。
+
+    ``weekly_j_available`` 与 ``available`` 同值：本 dict 会被 `**weekly_j_state(df)`
+    摊进 compute_metrics 的返回值，一个裸 ``available`` 键直接落到**候选顶层**、
+    读起来像"这个候选可用"（审计）。compute_metrics 只摊 weekly_ 前缀的键；
+    ``available`` 保留给直接调用方（既有测试/脚本）。
+    weekly_j / weekly_j_low 本来就在候选顶层，下游 score_candidates 读得到。
+    """
     weekly = resample(df, "W-FRI")
     w = kdj(weekly)
     if not w.get("available"):
-        return {"available": False, "weekly_j": None, "weekly_j_low": False}
-    return {"available": True, "weekly_j": w["j"], "weekly_j_low": bool(w["j"] < J_LOW_THRESHOLD)}
+        return {"available": False, "weekly_j_available": False,
+                "weekly_j": None, "weekly_j_low": False}
+    return {"available": True, "weekly_j_available": True, "weekly_j": w["j"],
+            "weekly_j_low": j_below_threshold(w["j"])}
 
 
 def check_non_one_wave(df) -> dict[str, Any]:
@@ -474,11 +545,15 @@ def check_non_one_wave(df) -> dict[str, Any]:
     }
 
 
-def check_repair_signals(df, index_df) -> dict[str, Any]:
-    """B1 修复信号（B1 §四.2）：输出命中数组+各信号实际值。"""
+def check_repair_signals(df, index_df, kdj_state: Optional[dict] = None) -> dict[str, Any]:
+    """B1 修复信号（B1 §四.2）：输出命中数组+各信号实际值。
+
+    kdj_state 可传调用方已算好的 kdj(df)（compute_metrics 就有一份），避免同一只票
+    把日线 KDJ 算两遍；不传则自己算，结果一致。
+    """
     close, _, _, vol = _ohlcv_arrays(df)
     n = len(df)
-    j = kdj(df)
+    j = kdj_state if kdj_state is not None else kdj(df)
     j_now = j.get("j") if j.get("available") else None
     j_prev = j.get("j_prev") if j.get("available") else None
 
@@ -795,9 +870,25 @@ def check_macd_technics(df) -> dict[str, Any]:
     }
 
 
-def compute_perfect_b1_fit(df, daily_j, zx: dict, pullback: dict) -> dict[str, Any]:
+def dks_series(close_s):
+    """DKS（知行多空线）序列＝(MA14+MA28+MA57+MA114)/4 —— **唯一实现**。
+
+    审计：此前 technical_monitor.zhixing_state 与 compute_perfect_b1_fit 各写了一份
+    同样的四均线求和，参数一旦一边改就静默漂移（一个说"多头"、另一个说"DKS 上行"）。
+    技术监控模块不在本次改动域内，故把口径收在这里并用测试钉住两者相等
+    （tests/test_audit_opt_screening.py::test_dks_single_definition_matches_zhixing_state）。
+    """
+    return sum(close_s.rolling(w).mean() for w in DKS_MA_WINDOWS) / len(DKS_MA_WINDOWS)
+
+
+def compute_perfect_b1_fit(df, daily_j, zx: dict, pullback: dict,
+                           macd_state: Optional[dict] = None) -> dict[str, Any]:
     """完美 B1 图形贴合度（0-8 梯度分）：J 深度 + 回踩贴线 + 缩量程度 +
-    MACD 零轴上 + DKS 上行。每个分量输出实际值（待回测参数见顶部常量）。"""
+    MACD 零轴上 + DKS 上行。每个分量输出实际值（待回测参数见顶部常量）。
+
+    macd_state 可传 check_macd_technics(df) 的结果复用 DIF（避免同一只票把
+    12/26/9 三条 EMA 算两遍）；不传或不可用时照旧自己算 macd(df)，结果完全一致。
+    """
     comp: dict[str, Any] = {}
 
     # J 深度：J<0 → 2；J<7 → 1.5；J<13 → 1（图集案例 J 全在 13 以下，多为负）
@@ -837,7 +928,7 @@ def compute_perfect_b1_fit(df, daily_j, zx: dict, pullback: dict) -> dict[str, A
     comp["shrink_degree"] = {"points": shrink_pts, "pullback_vol_ratio": pull_ratio}
 
     # MACD 零轴上：DIF>0 → 1（图集多数案例 DIF 在零轴上方）
-    m = macd(df)
+    m = macd_state if (macd_state or {}).get("available") else macd(df)
     macd_pts = 0.0
     dif_val = None
     if m.get("available"):
@@ -849,10 +940,10 @@ def compute_perfect_b1_fit(df, daily_j, zx: dict, pullback: dict) -> dict[str, A
     dks_pts = 0.0
     dks_now = dks_prev = None
     close_s = df["close"].astype(float).reset_index(drop=True)
-    if len(close_s) >= 114 + FIT_DKS_SLOPE_DAYS:
-        dks_series = sum(close_s.rolling(w).mean() for w in (14, 28, 57, 114)) / 4
-        dks_now = float(dks_series.iloc[-1])
-        dks_prev = float(dks_series.iloc[-1 - FIT_DKS_SLOPE_DAYS])
+    if len(close_s) >= max(DKS_MA_WINDOWS) + FIT_DKS_SLOPE_DAYS:
+        dks = dks_series(close_s)
+        dks_now = float(dks.iloc[-1])
+        dks_prev = float(dks.iloc[-1 - FIT_DKS_SLOPE_DAYS])
         dks_pts = 1.0 if dks_now > dks_prev else 0.0
     comp["dks_rising"] = {"points": dks_pts, "dks": dks_now, "dks_prev": dks_prev}
 
@@ -963,7 +1054,11 @@ def detect_distribution(df, code: str = "") -> dict[str, Any]:
         if t < DIST_ACCEL_WIN + 1:
             continue
         c = chg(t)
-        huge = vol[t] >= vol_ma20 * DIST_HUGE_VOL_RATIO or vol[t] >= vol[max(0, t - DIST_HUGE_VOL_WIN):t + 1].max()
+        # 「天量」＝ 量 ≥ 20日均量×DIST_HUGE_VOL_RATIO（与②同一口径，见顶部常量）。
+        # 审计：原先还 or 了 `vol[t] >= vol[t-20:t+1].max()`——该切片**含 t 自身**，
+        # 于是它恒等于"当日是窗口最大量"，即 20 日量新高，完全旁路了 2×MA20 阈值：
+        # 一只均量平稳的票只要今天量比昨天高一点点就算"天量"，配上大阴+加速就被判出货。
+        huge = bool(vol_ma20) and vol[t] >= vol_ma20 * DIST_HUGE_VOL_RATIO
         accel = (close[t - 1] / close[t - DIST_ACCEL_WIN] - 1) * 100 if close[t - DIST_ACCEL_WIN] else 0.0
         if close[t] < open_[t] and c <= -big_bear and huge and accel >= DIST_ACCEL_GAIN:
             hit1 = {"bars_ago": n - 1 - t, "change_pct": round(c, 2),
@@ -1117,6 +1212,22 @@ def load_fund_flow(date: str, cumulative_days: int = 1, market_dir=None) -> dict
             "files_used": files_used}
 
 
+def sector_name_matches(flow_name: str, sector_name: str,
+                        min_len: int = FUND_FLOW_SECTOR_MIN_NAME) -> bool:
+    """资金流板块名 vs 候选主题名是否算同一板块（**整名双向包含**，不截前缀）。
+
+    审计：原实现除了 `nm in sector_name` 还允许 `nm[:2] in sector_name`——2 个汉字
+    的前缀在 A 股板块命名里几乎必然撞车：「工程建设」↔「工程机械」、「医疗器械」↔
+    「医疗服务」、「通信设备」↔「通信服务」都会互相命中。而板块净流入一旦命中就是
+    资金意图 **+2 分**，直接把候选从"弱"抬到"中/强"档并改变 A/B/C/D 分层，
+    所以这里必须精确：匹配不上就不给分，宁缺勿滥。
+    """
+    nm, sn = str(flow_name or "").strip(), str(sector_name or "").strip()
+    if len(nm) < min_len or len(sn) < min_len:
+        return False
+    return nm in sn or sn in nm
+
+
 def fund_flow_of(code6: str, sector_name: str, ff: dict) -> dict[str, Any]:
     """个股 + 板块资金流（正交于量价）：个股是否在主力净流入榜且为净流入、
     所属主题板块是否净流入。榜/文件缺失时干净降级。"""
@@ -1129,9 +1240,10 @@ def fund_flow_of(code6: str, sector_name: str, ff: dict) -> dict[str, Any]:
     if sector_name and sector_name != "未知":
         for s in ff.get("sectors") or []:
             nm = str(s.get("name") or "")
-            if nm and (nm in sector_name or (len(nm) >= FUND_FLOW_SECTOR_MIN_KW and nm[:FUND_FLOW_SECTOR_MIN_KW] in sector_name)):
-                if sec_match is None or (s.get("main_net_inflow") or 0) > (sec_match.get("main_net_inflow") or 0):
-                    sec_match = s
+            if not sector_name_matches(nm, sector_name):
+                continue
+            if sec_match is None or (s.get("main_net_inflow") or 0) > (sec_match.get("main_net_inflow") or 0):
+                sec_match = s
     sector_inflow = (sec_match or {}).get("main_net_inflow")
     sector_inflow_positive = bool(isinstance(sector_inflow, (int, float)) and sector_inflow > 0)
     return {
@@ -1204,6 +1316,8 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
         and (zx_recent_gold or ignition.get("hit"))
     )
     distribution = detect_distribution(df, code)
+    # 指标去重：日线 KDJ 与 MACD 各只算一次，再喂给下游检测器（审计：kdj×4/macd×3）。
+    macd_technics = check_macd_technics(df)
 
     return {
         "close": round(float(last["close"]), 4),
@@ -1227,9 +1341,10 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
         },
         # --- B1/CZ 策略对齐（阈值均为待回测参数，实际值随候选落盘） ---
         "wave": detect_wave_type(df),
-        **weekly_j_state(df),
+        # 只摊 weekly_ 前缀键：裸 available 会落到候选顶层被误读成"候选可用"（审计）
+        **{k: v for k, v in weekly_j_state(df).items() if k.startswith("weekly_")},
         "non_one_wave": check_non_one_wave(df),
-        "repair_signals": check_repair_signals(df, index_df),
+        "repair_signals": check_repair_signals(df, index_df, kdj_state=j),
         "five_day_entry": check_five_day_entry(df),
         "volume_sustain": check_volume_sustain(df),
         "leader_volume": check_leader_volume(df),
@@ -1242,8 +1357,20 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
         "ride_above_fast": ride_above_fast,
         "b1_ignition": {"hit": b1_ignition_hit, "zhixing_recent_golden": zx_recent_gold},
         "distribution": distribution,
-        "macd_technics": check_macd_technics(df),
-        "perfect_b1_fit": compute_perfect_b1_fit(df, daily_j, zx, pullback_shrink),
+        "macd_technics": macd_technics,
+        "perfect_b1_fit": compute_perfect_b1_fit(df, daily_j, zx, pullback_shrink,
+                                                 macd_state=macd_technics),
+        # TODO(策略口径,需 owner 拍板 —— 审计【建议优化】14):这两条是**对称的两笔浪费**,
+        # 但都涉及选股行为,本批只留痕不改:
+        #   ① b1_pullback_fit 已被全市场回测**证伪**(见 compute_b1_pullback_fit docstring:
+        #      作进场过滤期望 -0.42%/笔 < baseline +0.96%/笔),仅作描述性证据落盘、不驱动
+        #      分层,却仍逐票计算(7 个分项 + 一条自建 J 序列)。若确认不再需要这份证据,
+        #      去掉即可省掉每票一次全序列 KDJ；一旦删除,落盘契约少一个字段,下游报告
+        #      与历史候选 JSON 的可比性会断,故必须由 owner 决定。
+        #   ② compute_s_reversal(买弱/反转分,s_shape.py)**根本没算**——它才是与 B1
+        #      "回调买入"同向的打分器(compute_s_shape 是突破式买强),backtest_factors 里
+        #      作为 --scorer s_reversal 已在跑,但候选落盘里没有它,分层拿不到这维证据。
+        #      要不要加进 compute_metrics(以及是否进 technical_score)同样是策略口径决定。
         "b1_pullback_fit": compute_b1_pullback_fit(df),
         "s_shape": s_shape_mod.compute_s_shape(df, code),
         "liquidity": check_liquidity(df),
@@ -1294,6 +1421,22 @@ def enrich(
         "不满足者计入 excluded(no_today_bar)，确保命中信号与所算指标同为当日。"
     )
 
+    # ST 硬排除的唯一依据是名称（`"ST" in name.upper()`）。formula_screen 早就把名称表
+    # 的可用性落盘成 st_filter，但**此前没人消费**：名称表在线+缓存双挂时 name 全空，
+    # `"ST" in ""` 为假 → 全部 ST 股静默通过硬排除，status 还是 ok（审计 B5）。
+    # 这里 fail-closed：名称表不可用 → 无名候选一律剔除（无法证明非 ST），并把降级
+    # 原因传导给下游；字段缺失（旧文件/测试注入）按 ok 处理，保持向后兼容。
+    exclude_st = bool(cfg.get("exclude_st", True))
+    st_filter = str(hits_data.get("st_filter", "ok") or "ok")
+    st_filter_broken = exclude_st and st_filter != "ok"
+    result["st_filter"] = st_filter
+    if st_filter_broken:
+        if result["status"] == "ok":
+            result["status"] = "partial"
+        result["degraded_reason"] = _append_reason(
+            result["degraded_reason"],
+            f"st_filter_unavailable:{st_filter}(名称表不可用 → 无名候选按 st_unverified 剔除)")
+
     # 去重合并：code → {name, formula_ids}
     merged: dict[str, dict] = {}
     for f in hits_data.get("formulas", []):
@@ -1332,19 +1475,59 @@ def enrich(
                     sp_resolve = sector_phase_mod.build_phase_resolver(idir, members)
         except Exception:  # noqa: BLE001
             sp_resolve = None
-    stock_theme, theme_map_available = build_stock_theme_map(
-        min_match=theme_min_match if theme_min_match is not None else THEME_MIN_MATCH)
+    # 只为本批候选建主题图（全市场四层子串匹配纯浪费，见 build_stock_theme_map）。
+    # codes 关键字用 signature 探测后再传：既有测试把 build_stock_theme_map
+    # monkeypatch 成 `lambda min_match=None: ...`，硬传会 TypeError 打挂整段。
+    _bstm_kwargs: dict[str, Any] = {
+        "min_match": theme_min_match if theme_min_match is not None else THEME_MIN_MATCH}
+    try:
+        if "codes" in inspect.signature(build_stock_theme_map).parameters:
+            _bstm_kwargs["codes"] = set(merged)
+    except (TypeError, ValueError):      # 无法取签名（C 实现/内建）→ 退回全市场
+        pass
+    stock_theme, theme_map_available = build_stock_theme_map(**_bstm_kwargs)
     if not theme_map_available:
         result["status"] = "partial"
         result["degraded_reason"] = _append_reason(
             result["degraded_reason"], "sector_map_unavailable")
 
-    load_ohlcv = ohlcv_loader or (lambda c: local_tdx_data.get_ohlcv_table(c, count=260))
-    load_index = index_loader or (lambda: local_tdx_data.get_ohlcv_table(INDEX_CODE, count=260))
+    load_ohlcv = ohlcv_loader or (lambda c: local_tdx_data.get_ohlcv_table(c, count=OHLCV_LOAD_BARS))
+    load_index = index_loader or (lambda: local_tdx_data.get_ohlcv_table(INDEX_CODE, count=OHLCV_LOAD_BARS))
+    # 指数序列与个股同等对待：**必须排序 + 必须当日**（审计 B7）。
+    # 此前指数只有一个裸 try/except：
+    #   1) 加载失败 → index_df=None，rs_20d/rs_turn 整列静默变 None/False，
+    #      relative_strength_strong 一律不命中，报告里看不出"相对强度这维今天是废的"；
+    #   2) 无 last_date==date 校验 → 指数停在 T-1（vipdoc 未更新/节前抓的旧文件）时，
+    #      拿 T-1 的指数 20 日涨幅去减当日个股 20 日涨幅＝**错窗口相减**，rs 偏差直接
+    #      喂给 rs_strong 与 capital_intent，比没有更危险；
+    #   3) 无 sort_values → mootdx Reader 不保证顺序，iloc[-1] 可能取到中间某天。
+    # 现在：坏/旧的指数一律降级为"不可用"（rs 置 None，不做错窗口相减），并把原因写进
+    # index_status + degraded_reason，让下游能归因。
+    index_status = "ok"
     try:
         index_df = load_index()
-    except Exception:  # noqa: BLE001
-        index_df = None
+    except Exception as exc:  # noqa: BLE001
+        index_df, index_status = None, f"index_load_error:{type(exc).__name__}"
+    if index_status == "ok":
+        if index_df is None or getattr(index_df, "empty", True):
+            index_df, index_status = None, "index_missing"
+        else:
+            try:
+                index_df = index_df.sort_values("date").reset_index(drop=True)
+                index_last = str(index_df["date"].iloc[-1])[:10]
+            except Exception as exc:  # noqa: BLE001
+                index_df, index_status = None, f"index_bad_frame:{type(exc).__name__}"
+            else:
+                if index_last != date:
+                    index_df, index_status = None, f"index_stale:last={index_last}"
+    result["index_status"] = index_status
+    result["index_code"] = INDEX_CODE
+    if index_status != "ok":
+        if result["status"] == "ok":
+            result["status"] = "partial"
+        result["degraded_reason"] = _append_reason(
+            result["degraded_reason"],
+            f"{index_status}(上证指数不可用/非当日 → 20日相对强度整列置空，不做错窗口相减)")
 
     for code6 in sorted(merged):
         item = merged[code6]
@@ -1353,12 +1536,22 @@ def enrich(
         def exclude(reason: str) -> None:
             result["excluded"].append({"code": code6, "name": name, "reason": reason})
 
-        if cfg.get("exclude_bj", True) and code6.startswith(("4", "8", "920")):
-            exclude("exclude_bj")
+        if code6.startswith(_BJ_PREFIX):
+            # BJ 有独立开关（可配置放开），单列一类，不与 not_a_share 混同
+            if cfg.get("exclude_bj", True):
+                exclude("exclude_bj")
+                continue
+        elif not _A_SHARE_RE.match(code6):
+            exclude("not_a_share")          # ETF/可转债/B股/指数：不是可买个股（审计 B10）
             continue
-        if cfg.get("exclude_st", True) and "ST" in name.upper():
-            exclude("st_stock")
-            continue
+        if exclude_st:
+            if "ST" in name.upper():
+                exclude("st_stock")
+                continue
+            if st_filter_broken and not name.strip():
+                # fail-closed：名称表挂了就无法证明这只票不是 ST，宁可漏也不能错放（审计 B5）
+                exclude("st_unverified:name_map_unavailable")
+                continue
         if code6 in risk_high:
             exclude("risk_high_priority")
             continue
@@ -1389,7 +1582,15 @@ def enrich(
             "name": name,
             "formula_hits": item["formula_hits"],
             "is_holding": code6 in holding,
+            # list_days 是**加载到的 K 线根数**，不是真实上市日数：默认加载器
+            # `get_ohlcv_table(count=OHLCV_LOAD_BARS)` 内部 tail(count) 截断，
+            # 所以取到上界时它只代表"≥260 个交易日"。硬排除（<min_list_days，默认60）
+            # 不受影响（60 远小于 260），但任何"上市多久/够不够 250 日窗口"的判断
+            # 都必须先看 list_days_exact，否则会把老票误当刚上市（审计）。
             "list_days": len(df),
+            "list_days_exact": len(df) < OHLCV_LOAD_BARS,
+            "list_days_basis": ("loaded_bars" if len(df) < OHLCV_LOAD_BARS
+                                else "loaded_bars_censored"),
             "signal_date": last_date,
             **metrics,
         }
@@ -1397,7 +1598,7 @@ def enrich(
         # 必须先满足日 J<13，再谈完美图形贴合度；J 不可计算视同不满足。
         if cfg.get("j_low_required", J_GATE_REQUIRED_DEFAULT):
             dj = cand.get("daily_j")
-            if dj is None or dj >= J_LOW_THRESHOLD:
+            if not j_below_threshold(dj):
                 exclude(f"j_not_low:j={dj}")
                 continue
         theme = stock_theme.get(code6)
@@ -1424,6 +1625,13 @@ def enrich(
             cand["financials"] = financials_mod.financial_factor(
                 code6, fin_df, fin_colmap, price=cand.get("close"))
         result["candidates"].append(cand)
+
+    # 名称表挂掉导致"筛完 0 只"必须报 unavailable 而不是 partial：score_candidates 只对
+    # unavailable 整池降级，partial + 空 candidates 会被读成"今天市场没有符合条件的票"。
+    if st_filter_broken and not result["candidates"] and any(
+        str(x.get("reason", "")).startswith("st_unverified") for x in result["excluded"]
+    ):
+        result["status"] = "unavailable"
 
     return result
 

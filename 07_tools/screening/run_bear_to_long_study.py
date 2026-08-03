@@ -21,6 +21,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 TOOLS = Path(__file__).resolve().parents[1]
 for _p in (str(TOOLS), str(TOOLS / "screening")):
@@ -155,10 +156,73 @@ def expected_firings_header(args) -> dict:
             "bbi_consec": getattr(args, "bbi_consec", 2)}
 
 
+_FIRINGS_HEAD_BYTES = 1 << 16      # 头部元数据探测窗口（"records" 恒为最后一个键）
+
+
+def _firings_head(f: Path) -> Optional[dict]:
+    """只读文件头部拿元数据（不解析 records 正文）。
+
+    落盘格式把 ``"records"`` 写在最后一个键，且是原子落盘（tmp→replace），所以
+    "头部可解析 + 尾部收尾正确" 已足以判定文件完整。为判定"是否为空产物"用头部
+    自带的 ``n_signal_days``（生产者写的就是 sum(len(days))，与逐条数完全同值）。
+    拿不到（老文件无 n_signal_days / 结构不符 / 找不到 records 键）→ 返回 None，
+    调用方回退全量解析，保持原有严格语义。
+    """
+    try:
+        size = f.stat().st_size
+        with f.open("rb") as fh:
+            head = fh.read(_FIRINGS_HEAD_BYTES)
+            tail_at = max(0, size - 64)
+            fh.seek(tail_at)
+            tail = fh.read(64)
+    except OSError:
+        return None
+    try:
+        head_s = head.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        return None
+    marker = head_s.rfind('"records"')
+    if marker <= 0:
+        return None
+    prefix = head_s[:marker].rstrip().rstrip(",")
+    try:
+        meta = json.loads(prefix + "}")
+    except ValueError:
+        return None
+    if not isinstance(meta, dict) or meta.get("n_signal_days") is None:
+        return None
+    if not tail.strip().endswith(b"]}"):        # 截断/半截 JSON
+        return None
+    meta["_records_key_present"] = True
+    return meta
+
+
 def firings_reusable(f: Path, args) -> bool:
-    """断点续跑校验:已有 firings 能否复用。两道闸,缺一即视为**未完成**,WARN 后重跑:
+    """断点续跑校验:已有 firings 能否复用。三道闸,缺一即视为**未完成**,WARN 后重跑:
       ① JSON 可完整解析且含 records 键(上次 Pass1 失败/中断留下的截断文件不得当完成);
-      ② 头部关键参数与本次一致(只认文件名会把旧参数跑出的结果当新参数复用,结论静默失真)。"""
+      ② **非空**:0 条记录或 0 个信号日的 firings 是"数据源没挂上"的产物,不是研究结论
+         (审计 E9:原先只要 JSON 完整+参数一致就永久跳过,一整轮 12 窗空跑无人察觉);
+      ③ 头部关键参数与本次一致(只认文件名会把旧参数跑出的结果当新参数复用,结论静默失真)。
+
+    ⚠️ 性能(审计):firings 是全市场×多窗的大 JSON,仅为"能否复用"这一个布尔量把整份
+    records 解析进内存纯属浪费。现在先走 ``_firings_head`` 只读头部 + 校验尾部收尾;
+    头部探测不成立时才回退全量解析（老文件无 n_signal_days、结构变更等），三道闸的
+    结论与全量解析一致。代价:文件**中段**被改坏而头尾完好的情形不再被发现——落盘是
+    原子的(tmp→replace),这种状态不由本流程产生。
+    """
+    head = _firings_head(f)
+    if head is None:
+        return _firings_reusable_full(f, args)
+    if not head.get("n_signal_days"):
+        print(f"[WARN] firings 为空(头部 n_signal_days={head.get('n_signal_days')}),"
+              f"视为未完成重跑: {f.name} —— 空产物多半是数据源没挂上,不得当研究结论复用",
+              file=sys.stderr)
+        return False
+    return _firings_header_matches(head, args, f)
+
+
+def _firings_reusable_full(f: Path, args) -> bool:
+    """全量解析版校验（头部探测不成立时的回退，语义与改动前完全一致）。"""
     try:
         head = json.loads(f.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -168,6 +232,17 @@ def firings_reusable(f: Path, args) -> bool:
     if not isinstance(head, dict) or "records" not in head:
         print(f"[WARN] firings 缺 records 键,视为未完成重跑: {f.name}", file=sys.stderr)
         return False
+    recs = head.get("records") or []
+    n_days = sum(len(r.get("days") or []) for r in recs if isinstance(r, dict))
+    if not recs or not n_days:
+        print(f"[WARN] firings 为空({len(recs)} 股 / {n_days} 信号日),视为未完成重跑: {f.name}"
+              " —— 空产物多半是数据源没挂上,不得当研究结论复用", file=sys.stderr)
+        return False
+    return _firings_header_matches(head, args, f)
+
+
+def _firings_header_matches(head: dict, args, f: Path) -> bool:
+    """闸③:头部关键参数与本次一致。"""
     diff = {}
     for k, v in expected_firings_header(args).items():
         got = head.get(k)

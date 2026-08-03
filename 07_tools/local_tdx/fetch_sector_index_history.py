@@ -9,7 +9,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 TOOLS = Path(__file__).resolve().parents[1]
@@ -25,6 +27,8 @@ import tq_sector  # noqa: E402  复用其 TdxW 探测 + tqcenter 惰性导入
 # 保留候选串按序探测,避免不同 TQ 版本命名差异再把整条链打死。
 PERIOD_CANDIDATES = ("1d", "day", "1day", "1440m")
 OVERLAP_DAYS = 30                       # 增量刷新时向前重叠的日历日(容忍补数/除权修正)
+DEFAULT_MIN_SUCCESS_RATE = 0.6          # 低于此成功率视为大面积失败 → 非零退出
+DEFAULT_SLEEP_MS = 0                    # 板块间限速(毫秒);默认 0 保持既有节奏,生产可调
 
 
 def _suffixed(code: str) -> str:
@@ -175,6 +179,46 @@ def resolve_period(tq, probe_code: str, start: str, wanted: str = "") -> tuple[s
     return "", "; ".join(errs)
 
 
+def atomic_write_csv(frame, dest: Path) -> None:
+    """原子落盘。tmp 名一律由 dest 派生(``dest.name + ".tmp"``)。
+
+    此前 tmp 用**未加市场后缀**的原始 code 拼名(``880001.csv.tmp``),而 dest 是
+    ``880001.SH.csv`` —— 两者不同名,中断留下的残片既不会被下次运行覆盖,也不会被按
+    dest 名做的清理发现,只能在缓存目录里越积越多。
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".tmp")
+    frame.to_csv(tmp, index=False)
+    tmp.replace(dest)      # 原子落盘:防中断留下截断 CSV(陈旧相位假象)
+
+
+def write_fetch_status(outdir: Path, total: int, ok: int, failed: list[str],
+                       min_rate: float, period: str = "", incremental: bool = False) -> dict:
+    """成功率落盘 → ``_fetch_status.json``。
+
+    只靠退出码不够:回测/选股链读的是 CSV 目录本身,必须能从目录里就看出"这批只成功
+    3/430"。status 取值 ok / degraded / empty,配合退出码使用。
+    """
+    rate = (ok / total) if total else 0.0
+    status = "ok" if (total and rate >= min_rate) else ("empty" if not ok else "degraded")
+    payload = {
+        "as_of": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "total": total,
+        "ok": ok,
+        "failed": len(failed),
+        "failed_codes": failed[:50],
+        "success_rate": round(rate, 4),
+        "min_success_rate": min_rate,
+        "status": status,
+        "period": period,
+        "incremental": incremental,
+    }
+    outdir.mkdir(parents=True, exist_ok=True)
+    (outdir / "_fetch_status.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return payload
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="抓取通达信板块指数(880xxx)收盘历史→CSV缓存")
     ap.add_argument("--out", default=str(TOOLS.parent / "01_data" / "market" / "sector_index"))
@@ -186,6 +230,12 @@ def main(argv=None) -> int:
     ap.add_argument("--limit", type=int, default=0, help="只处理前 N 个板块(排障用)")
     ap.add_argument("--members", action="store_true",
                     help="同时抓板块成员(get_stock_list_in_sector)→ sector_members.json(板块相位 gate 需要)")
+    ap.add_argument("--min-success-rate", type=float, default=DEFAULT_MIN_SUCCESS_RATE,
+                    help=f"落盘成功率低于此值则非零退出(默认 {DEFAULT_MIN_SUCCESS_RATE};"
+                         "此前只要有 1 个板块成功就 exit 0，430 个失败 427 个也看不出来)")
+    ap.add_argument("--sleep-ms", type=int, default=DEFAULT_SLEEP_MS,
+                    help=f"每个板块之间的限速(毫秒,默认 {DEFAULT_SLEEP_MS};400+ 板块串行请求，"
+                         "不限速会把 TdxW 打满)")
     args = ap.parse_args(argv)
     outdir = Path(args.out)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -198,6 +248,7 @@ def main(argv=None) -> int:
     ok = 0
     total = 0
     members: dict = {}
+    st: dict = {}
     try:
         sectors = tq.get_sector_list() or []
         if args.limit:
@@ -216,16 +267,17 @@ def main(argv=None) -> int:
         print(f"[INFO] 使用周期 {period}{'(自动探测)' if not args.period else ''}"
               f"{'; 增量合并模式' if args.incremental else '; 全量重拉'}")
         import time as _t
+        failed: list[str] = []
         for i, code in enumerate(sectors):
+            code_q = _suffixed(code)          # refresh_kline 必须带市场后缀，否则 Codestr Error
             try:
-                code_q = _suffixed(code)          # refresh_kline 必须带市场后缀,否则 Codestr Error
-                dest = outdir / f"{_suffixed(code)}.csv"
+                dest = outdir / f"{code_q}.csv"
                 start = incremental_start(dest, args.start) if args.incremental else args.start
                 tq.refresh_kline([code_q], period=period)
                 d = tq.get_market_data(field_list=["Close"], stock_list=[code_q],
                                        period=period, start_time=start, count=-1)
                 frame = _to_close_frame(d, code_q)
-                if frame is None:                 # refresh 异步(run_id),空数据时稍候重试一次
+                if frame is None:                 # refresh 异步(run_id)，空数据时稍候重试一次
                     _t.sleep(2.0)
                     d = tq.get_market_data(field_list=["Close"], stock_list=[code_q],
                                            period=period, start_time=start, count=-1)
@@ -233,10 +285,11 @@ def main(argv=None) -> int:
                 if args.incremental:
                     frame = merge_close_frame(dest, frame)
                 if frame is not None:
-                    tmp = outdir / f"{code}.csv.tmp"
-                    frame.to_csv(tmp, index=False)
-                    tmp.replace(dest)   # 原子落盘:防中断留下截断 CSV(陈旧相位假象)
+                    atomic_write_csv(frame, dest)
                     ok += 1
+                else:
+                    failed.append(code_q)
+                    print(f"[WARN] {code_q}: 解析不出收盘序列", file=sys.stderr)
                 if args.members:
                     try:
                         mem = tq.get_stock_list_in_sector(code) or []
@@ -244,18 +297,25 @@ def main(argv=None) -> int:
                     except Exception as mexc:  # noqa: BLE001
                         print(f"[WARN] members {code}: {mexc}", file=sys.stderr)
             except Exception as exc:  # noqa: BLE001
+                failed.append(code_q)
                 print(f"[WARN] {code}: {exc}", file=sys.stderr)
+            if args.sleep_ms > 0:                 # 串行不改(不引入并发复杂度)，但要限速
+                _t.sleep(args.sleep_ms / 1000.0)
             if (i + 1) % 50 == 0:
-                print(f"[INFO] {i + 1}/{total}  已落盘 {ok}", file=sys.stderr)
+                print(f"[INFO] {i + 1}/{total}  已落盘 {ok}  失败 {len(failed)}", file=sys.stderr)
         if args.members:
-            import json
             mpath = outdir.parent / "sector_members.json"
             mpath.write_text(json.dumps(members, ensure_ascii=False), encoding="utf-8")
             print(f"[OK] 成员映射 {len(members)} 板块 → {mpath}")
-        print(f"[OK] 完成: {ok}/{total} 板块指数落盘到 {outdir}")
+        st = write_fetch_status(outdir, total, ok, failed, args.min_success_rate,
+                               period=period, incremental=args.incremental)
+        # 摘要行必须自带成功率:上游 runner 只回显最后一行，"3/430" 不写出来就等于无声失败
+        tag = "[OK]" if st["status"] == "ok" else "[WARN]"
+        print(f"{tag} 板块指数落盘 {ok}/{total}（成功率 {st['success_rate']:.1%}，"
+              f"门槛 {args.min_success_rate:.0%}，status={st['status']}）→ {outdir}")
     finally:
         tq.close()
-    return 0 if ok else 2
+    return 0 if st.get("status") == "ok" else 2
 
 
 if __name__ == "__main__":

@@ -127,6 +127,11 @@ class TestMainDegradation:
         assert sync_mod.main(["--date", "2026-07-19"]) == 0
         out = capsys.readouterr().out
         summary = json.loads(out.strip().splitlines()[-1])
-        assert summary == {"added": 3, "skipped_existing": 0,
-                           "amv_0day_filled": False, "latest_date": "2026-07-17"}
+        # 只断言本用例关心的键:summary 会随传导链演进新增字段(如 quality /
+        # identification),精确 == 比较会让"上游把质量信息透出来"变成回归。
+        for k, v in {"added": 3, "skipped_existing": 0,
+                     "amv_0day_filled": False, "latest_date": "2026-07-17"}.items():
+            assert summary[k] == v, f"{k}: {summary[k]!r} != {v!r}"
+        # fake parse_amv_daily 未给 quality → 按 fail-closed 记 unverified
+        assert summary["quality"] == "unverified"
         assert len((tmp_path / "ledger.jsonl").read_text(encoding="utf-8").splitlines()) == 3

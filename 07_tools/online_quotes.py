@@ -13,6 +13,8 @@
 """
 from __future__ import annotations
 
+import sys
+
 import requests
 
 from net_retry import fetch_with_retry
@@ -26,6 +28,19 @@ SINA_DAILY_URL = (
 )
 SINA_HEADERS = {"Referer": "https://finance.sina.com.cn", "User-Agent": "Mozilla/5.0"}
 TIMEOUT = 15
+
+
+def _warn_dropped(source: str, code: str, dropped: int, kept: int) -> None:
+    """脏行必须告警计数。
+
+    为什么改成逐行容错:原来行内任一字段解析失败就 ``return None`` 丢掉**整批**——
+    腾讯/新浪偶发在最新一根返回 ``"-"``/空串(盘中未成交、停牌),于是"今天有一行脏数据"
+    等于"这只票在域 B 完全没有行情",直接把兜底源打成不可用。现在跳过坏行、保留好行,
+    并把丢弃数打到 stderr,避免静默降级。
+    """
+    if dropped:
+        print(f"[WARN] {source} {code}: dropped {dropped} malformed row(s), kept {kept}",
+              file=sys.stderr)
 
 _session = requests.Session()
 _session.trust_env = False  # 与 _eastmoney_bj_quote 一致，避免系统代理干扰直连
@@ -66,6 +81,7 @@ def fetch_tencent_daily(code: str, count: int = 3) -> list[dict] | None:
     node = data.get(symbol) or {}
     rows = node.get("day") or node.get("qfqday") or []
     bars = []
+    dropped = 0
     for row in rows:
         try:
             # 腾讯列序: date, open, close, high, low, volume
@@ -77,8 +93,9 @@ def fetch_tencent_daily(code: str, count: int = 3) -> list[dict] | None:
                 "close": float(row[2]),
                 "volume": float(row[5]),
             })
-        except (TypeError, ValueError, IndexError):
-            return None
+        except (TypeError, ValueError, IndexError, KeyError):
+            dropped += 1
+    _warn_dropped("tencent_daily", str(code), dropped, len(bars))
     return bars or None
 
 
@@ -98,6 +115,7 @@ def fetch_sina_daily(code: str, count: int = 3) -> list[dict] | None:
     if not isinstance(rows, list):
         return None
     bars = []
+    dropped = 0
     for r in rows:
         try:
             bars.append({
@@ -108,8 +126,9 @@ def fetch_sina_daily(code: str, count: int = 3) -> list[dict] | None:
                 "close": float(r["close"]),
                 "volume": float(r["volume"]),
             })
-        except (TypeError, ValueError, KeyError):
-            return None
+        except (TypeError, ValueError, KeyError, IndexError):
+            dropped += 1
+    _warn_dropped("sina_daily", str(code), dropped, len(bars))
     return bars or None
 
 

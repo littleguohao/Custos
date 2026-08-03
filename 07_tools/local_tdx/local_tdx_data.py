@@ -13,11 +13,12 @@ Replaces the previous tqcenter/vipdoc binary parsing with community-maintained m
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
 import warnings
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Optional
 
 import pandas as pd
 
@@ -30,7 +31,7 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import BASE, TDX_ROOT  # noqa: E402
+from paths import BASE, TDX_ROOT, cn_today  # noqa: E402
 from code_utils import market_of, norm_code as _cu_norm_code  # noqa: E402
 
 # --- mootdx lazy initialization ---
@@ -42,6 +43,7 @@ def _get_reader():
     global _reader
     if _reader is None:
         from mootdx.reader import Reader
+        _assert_tdx_root()
         _reader = Reader.factory(market="std", tdxdir=str(TDX_ROOT))
     return _reader
 
@@ -56,6 +58,48 @@ def _get_client():
 
 class LocalTdxError(RuntimeError):
     pass
+
+
+# 已校验通过的 TDX_ROOT（按路径字符串缓存：校验只做一次，但改了 TDX_ROOT 会重新校验）
+_tdx_root_verified: set[str] = set()
+
+
+def _assert_tdx_root(root: Optional[Path] = None) -> Path:
+    """校验 TDX_ROOT 真的指向通达信安装目录（存在且含 vipdoc），否则 raise。
+
+    为什么必须显式校验：`paths.TDX_ROOT` 的默认值是 Windows 路径 ``E:\\new_tdx64``，
+    在 Linux/容器里没设环境变量时它只是个不存在的路径。此时 mootdx Reader 与
+    vipdoc 直读**都只返回空 DataFrame**，于是「装了通达信但这只票没数据」和
+    「根本没配通达信路径」表现得一模一样：全市场初筛 universe 为空、
+    技术指标全缺，报告却照常生成（2026-07-30 事故的症状）。
+    配置错误必须当场炸出来，绝不能伪装成「市场今天没行情」。
+    """
+    root = Path(root) if root else TDX_ROOT
+    key = str(root)
+    if key in _tdx_root_verified:
+        return root
+    if not root.is_dir():
+        raise LocalTdxError(
+            f"TDX_ROOT 无效: {root} 不存在。默认值 E:\\new_tdx64 只是 Windows 占位，"
+            f"非 Windows 环境必须设置环境变量 TDX_ROOT 指向通达信安装目录")
+    if not (root / "vipdoc").is_dir():
+        raise LocalTdxError(
+            f"TDX_ROOT={root} 下没有 vipdoc 目录，不是有效的通达信安装目录"
+            f"（本地日线全部读不到，会表现为『全市场无数据』）")
+    _tdx_root_verified.add(key)
+    return root
+
+
+def _empty_with_reason(reason: str) -> pd.DataFrame:
+    """带原因的空 DataFrame。
+
+    空 DataFrame 本身有三义：文件不存在 / 解析失败 / 该票确实没有这一天的数据。
+    调用方靠 ``df.attrs["missing_reason"]`` 区分，才能决定是回退在线源、
+    还是把「本地数据缺失」这件事报给下游，而不是一律当成「没数据」。
+    """
+    df = pd.DataFrame()
+    df.attrs["missing_reason"] = reason
+    return df
 
 
 def normalize_code(code: str) -> str:
@@ -96,7 +140,7 @@ def _read_bj_vipdoc_daily(code: str) -> "pd.DataFrame":
     raw = _strip_suffix(code)
     path = TDX_ROOT / "vipdoc" / "bj" / "lday" / f"bj{raw}.day"
     if not path.exists():
-        return pd.DataFrame()
+        return _empty_with_reason(f"file_not_found: {path}")
     # TDX .day format: 32 bytes per record
     # int date, int open, int high, int low, int close, float amount, int volume, int reserved
     records = []
@@ -119,22 +163,33 @@ def _read_bj_vipdoc_daily(code: str) -> "pd.DataFrame":
                 "volume": vol,
             })
     if not records:
-        return pd.DataFrame()
+        return _empty_with_reason(f"empty_file: {path}")
     return pd.DataFrame(records)
 
 
 # ========== K-line data ==========
 
-def read_vipdoc_daily(code: str) -> pd.DataFrame:
+def read_vipdoc_daily(code: str, strict: bool = False) -> pd.DataFrame:
     """Read local vipdoc daily K-line via mootdx Reader.
 
     Returns columns: date, open, high, low, close, amount, volume.
+
+    读不到时返回**带 ``attrs["missing_reason"]`` 的空 DataFrame**（file_not_found /
+    empty_file / reader_empty），调用方可据此区分「配置/文件缺失」与「确实无数据」。
+    ``strict=True`` 时直接 raise ``LocalTdxError`` —— 给那些「拿不到本地数据就必须
+    停下来」的调用方（回测 universe、EOD 校验）用；默认 False 保持老调用方行为
+    （它们大多有在线回退，raise 会把回退路径一并跳掉）。
+    TDX_ROOT 本身配错一律 raise（与单只票缺数据不是一回事，见 ``_assert_tdx_root``）。
     """
+    _assert_tdx_root()
     # BJ stocks: mootdx Reader misroutes 920xxx to SH, parse .day directly
     if _is_bj_code(code):
         df = _read_bj_vipdoc_daily(code)
         if df.empty:
-            return pd.DataFrame()
+            if strict:
+                raise LocalTdxError(
+                    f"read_vipdoc_daily({code}) 无数据: {df.attrs.get('missing_reason')}")
+            return df
         df["code"] = normalize_code(code)
         df["source"] = "vipdoc_bj_direct"
         return df[["date", "code", "open", "high", "low", "close", "amount", "volume", "source"]]
@@ -146,7 +201,9 @@ def read_vipdoc_daily(code: str) -> pd.DataFrame:
     except Exception as e:
         raise LocalTdxError(f"Reader.daily({raw}) failed: {e}")
     if df is None or df.empty:
-        return pd.DataFrame()
+        if strict:
+            raise LocalTdxError(f"read_vipdoc_daily({code}) 无数据: reader_empty")
+        return _empty_with_reason(f"reader_empty:{raw}")
     df = df.copy()
     df["code"] = normalize_code(code)
     df["source"] = "mootdx_reader"
@@ -229,7 +286,7 @@ def get_adjusted_daily(code: str, year: str = "", factor: str = "01") -> pd.Data
     raw = _strip_suffix(code)
     if not year:
         from datetime import date
-        year = str(date.today().year)
+        year = str(cn_today().year)
     try:
         df = get_adjust_year(symbol=raw, year=year, factor=factor)
     except Exception as e:
@@ -246,8 +303,36 @@ def get_adjusted_daily(code: str, year: str = "", factor: str = "01") -> pd.Data
 
 # ========== Real-time quotes ==========
 
+def _clean_price(v: Any) -> Optional[float]:
+    """行情价字段清洗：非数 / NaN / inf / 非正价一律 → None。
+
+    为什么不能用 ``float(row.get("price", 0))``：mootdx quotes 在停牌、代码不存在、
+    或服务端字段缺失时给出的是缺字段或 NaN，回落 0.0 会把「没有报价」变成
+    「价格是 0」—— 下游拿它算涨跌幅得 -100%（直接触发风控止损条件），
+    拿 last_close=0 当分母则除零。缺价必须表现为缺，不能表现为一个能参与运算的数。
+    """
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(f) or math.isinf(f) or f <= 0:
+        return None
+    return f
+
+
+def _snapshot_fields(row: Any) -> dict[str, Any]:
+    """一行行情 → 清洗后的字段；price 无效时返回 {}（整条快照作废）。"""
+    price = _clean_price(row.get("price"))
+    if price is None:
+        return {}
+    out: dict[str, Any] = {"price": price}
+    for key in ("last_close", "open", "high", "low"):
+        out[key] = _clean_price(row.get(key))     # 无效给 None，绝不给 0.0
+    return out
+
+
 def get_snapshot(code: str) -> dict[str, Any]:
-    """Get real-time quote for a single stock."""
+    """Get real-time quote for a single stock. 无有效价时返回 {}（缺价 != 0 价）。"""
     client = _get_client()
     raw = _strip_suffix(code)
     try:
@@ -256,17 +341,20 @@ def get_snapshot(code: str) -> dict[str, Any]:
         raise LocalTdxError(f"quotes({raw}) failed: {e}")
     if df is None or df.empty:
         return {}
-    row = df.iloc[0]
-    return {
-        "code": raw, "price": float(row.get("price", 0)),
-        "last_close": float(row.get("last_close", 0)),
-        "open": float(row.get("open", 0)), "high": float(row.get("high", 0)),
-        "low": float(row.get("low", 0)),
-    }
+    fields = _snapshot_fields(df.iloc[0])
+    if not fields:
+        print(f"[WARN] quotes({raw}) 无有效价（停牌/字段缺失），返回空快照而非 0 价",
+              file=sys.stderr)
+        return {}
+    return {"code": raw, **fields}
 
 
 def get_snapshots(codes: Iterable[str]) -> dict[str, dict[str, Any]]:
-    """Get real-time quotes for multiple stocks."""
+    """Get real-time quotes for multiple stocks. 无有效价的代码**不出现在结果里**。
+
+    宁可让调用方发现「这只票没拿到行情」（缺失可检测），也不能给它一条 0 价快照
+    （0 价会被当真值参与涨跌幅/仓位计算）。
+    """
     client = _get_client()
     raw_codes = [_strip_suffix(c) for c in codes]
     try:
@@ -276,15 +364,17 @@ def get_snapshots(codes: Iterable[str]) -> dict[str, dict[str, Any]]:
     if df is None or df.empty:
         return {}
     result = {}
+    dropped = []
     for _, row in df.iterrows():
         code = str(row.get("code", ""))
-        result[code] = {
-            "price": float(row.get("price", 0)),
-            "last_close": float(row.get("last_close", 0)),
-            "open": float(row.get("open", 0)),
-            "high": float(row.get("high", 0)),
-            "low": float(row.get("low", 0)),
-        }
+        fields = _snapshot_fields(row)
+        if not fields:
+            dropped.append(code)
+            continue
+        result[code] = fields
+    if dropped:
+        print(f"[WARN] quotes batch 丢弃 {len(dropped)} 只无有效价的代码: "
+              f"{','.join(dropped[:10])}", file=sys.stderr)
     return result
 
 
@@ -292,30 +382,51 @@ def get_snapshots(codes: Iterable[str]) -> dict[str, dict[str, Any]]:
 
 _financial_cache: dict[str, pd.DataFrame] = {}
 
+# 财务 zip 缓存目录。此前是 `BASE / ".." / "tdx_affair_cache"` —— 写在**项目外**的兄弟目录:
+# 不受项目 .gitignore 管、不随项目迁移、在只读父目录下直接失败。改到项目内的运行时数据区。
+AFFAIR_CACHE_DIR = BASE / "01_data" / "cache" / "tdx_affair"
+
+
+def latest_report_period(files: list[dict]) -> str:
+    """从 Affair.files() 里挑最新**有内容**的 gpcw 期号;挑不出返回空串。"""
+    gpcw = sorted([f for f in (files or []) if str(f.get("filename", "")).startswith("gpcw")],
+                  key=lambda x: x["filename"], reverse=True)
+    for f in gpcw:
+        if f.get("filesize", 0) > 100000:      # 跳过尚未披露的空壳未来报告
+            return str(f["filename"]).replace("gpcw", "").replace(".zip", "")
+    return ""
+
 
 def get_financial_data(report_period: str = "") -> pd.DataFrame:
     """Download and parse TDX financial data (gpcwYYYYMMDD).
 
     Returns DataFrame with 585 columns for ~5500 stocks.
+    取不到期号或下载/解析失败时返回**空 DataFrame** 并打 WARN —— 调用方据 `df.empty`
+    降级。此前期号为空会去 fetch `gpcw.zip`，fetch/parse 的异常直接冒泡打断整条链。
     """
     from mootdx.affair import Affair
     if not report_period:
-        files = Affair.files()
-        gpcw = sorted([f for f in files if f["filename"].startswith("gpcw")],
-                       key=lambda x: x["filename"], reverse=True)
-        # Skip empty future reports
-        for f in gpcw:
-            if f.get("filesize", 0) > 100000:
-                report_period = f["filename"].replace("gpcw", "").replace(".zip", "")
-                break
+        try:
+            report_period = latest_report_period(Affair.files())
+        except Exception as exc:  # noqa: BLE001 —— 网络/接口变更不得打断调用方
+            print(f"[WARN] Affair.files() 失败，财务数据不可用: {exc}", file=sys.stderr)
+            return pd.DataFrame()
+    if not report_period:
+        print("[WARN] Affair 未返回任何有效 gpcw 期号，财务数据不可用", file=sys.stderr)
+        return pd.DataFrame()
     cache_key = report_period
     if cache_key in _financial_cache:
         return _financial_cache[cache_key]
     fname = f"gpcw{report_period}.zip"
-    download_dir = str(BASE / ".." / "tdx_affair_cache")
-    Affair.fetch(downdir=download_dir, filename=fname)
-    df = Affair.parse(downdir=download_dir, filename=fname)
-    if df is not None:
+    download_dir = str(AFFAIR_CACHE_DIR)
+    AFFAIR_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        Affair.fetch(downdir=download_dir, filename=fname)
+        df = Affair.parse(downdir=download_dir, filename=fname)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[WARN] 财务数据 {fname} 下载/解析失败: {exc}", file=sys.stderr)
+        return pd.DataFrame()
+    if df is not None and len(df):
         _financial_cache[cache_key] = df
     return df if df is not None else pd.DataFrame()
 
@@ -406,7 +517,13 @@ def list_local_vipdoc_codes(tdx_root: Optional["Path"] = None, ashare_only: bool
     直接读磁盘上有什么（TDX_ROOT/vipdoc/{sh,sz,bj}/lday/{prefix}######.day），
     保证代码与 read_vipdoc_daily 能读到的完全一致，避免在线全代码表对不上本地文件。
     ashare_only=True 时仅保留 A 股个股（滤掉指数/ETF/债券）。
+
+    用**默认** TDX_ROOT 时先校验安装目录（配错 → raise）：universe 返回空列表
+    与「通达信路径没配」必须区分开，否则全市场初筛会静默缩到只剩自选池。
+    显式传 ``tdx_root`` 的调用方（回测/测试指定目录）自己负责，仍返回空列表。
     """
+    if tdx_root is None:
+        _assert_tdx_root()
     root = Path(tdx_root) if tdx_root else TDX_ROOT
     out: set[str] = set()
     for mkt in ("sh", "sz", "bj"):
@@ -436,8 +553,24 @@ def save_csv(path: Path, df: pd.DataFrame) -> None:
     df.to_csv(path, index=False, encoding="utf-8-sig")
 
 
-def get_ohlcv_table(code: str, count: int = 260, prefer: str = "vipdoc") -> pd.DataFrame:
-    """Unified OHLCV reader: try local vipdoc first, fallback to online bars."""
+def get_ohlcv_table(code: str, count: int = 260, prefer: str = "vipdoc",
+                    expect_last_date: str | None = None) -> pd.DataFrame:
+    """Unified OHLCV reader: try local vipdoc first, fallback to online bars.
+
+    ``expect_last_date`` (YYYY-MM-DD) turns on freshness checking. The local
+    vipdoc fallback only triggers when the read *fails or returns nothing* —
+    a successful read of a stale file (TongDaXin not yet downloaded after the
+    close) is returned as-is, so BBI / N-structure / reversal-K all compute on
+    old bars while looking perfectly healthy. When the caller states which day
+    it expects, a stale answer is retried online and, if still stale, marked:
+
+        df.attrs["stale"]      True when last bar < expect_last_date
+        df.attrs["last_date"]  the last bar's date
+        df.attrs["expected"]   what the caller asked for
+
+    ``attrs`` is used rather than an exception so existing callers keep working
+    while gaining the ability to detect the condition.
+    """
     df = pd.DataFrame()
     if prefer == "vipdoc":
         try:
@@ -446,14 +579,45 @@ def get_ohlcv_table(code: str, count: int = 260, prefer: str = "vipdoc") -> pd.D
             print(f"[WARN] read_vipdoc_daily({code}) failed, fallback to online: {e}", file=sys.stderr)
             df = pd.DataFrame()
     if df.empty:
+        # 空 DataFrame 的具体原因（TDX_ROOT 配错已在 read_vipdoc_daily 里 raise，
+        # 这里剩下的是单只票的 file_not_found / reader_empty）留痕再回退在线源
+        reason = df.attrs.get("missing_reason") if hasattr(df, "attrs") else None
+        if reason:
+            print(f"[WARN] {code} 本地 vipdoc 无数据（{reason}），回退在线源", file=sys.stderr)
         try:
             df = get_online_bars(code, offset=count)
         except Exception as e:
             print(f"[WARN] get_online_bars({code}) failed: {e}", file=sys.stderr)
             df = pd.DataFrame()
+    elif expect_last_date and _last_bar_date(df) < expect_last_date:
+        # 本地读到了,但不是期望的那天 → 再试在线源;拿不到更新的就保留本地并标 stale
+        stale_local = df
+        try:
+            online = get_online_bars(code, offset=count)
+        except Exception as e:
+            print(f"[WARN] get_online_bars({code}) failed while refreshing stale local: {e}",
+                  file=sys.stderr)
+            online = pd.DataFrame()
+        df = online if (not online.empty
+                        and _last_bar_date(online) > _last_bar_date(stale_local)) else stale_local
     if not df.empty and len(df) > count:
         df = df.tail(count).reset_index(drop=True)
+    if expect_last_date and not df.empty:
+        last = _last_bar_date(df)
+        df.attrs["last_date"] = last
+        df.attrs["expected"] = expect_last_date
+        df.attrs["stale"] = last < expect_last_date
+        if df.attrs["stale"]:
+            print(f"[WARN] {code} 数据陈旧: 末根 K 线 {last} < 期望 {expect_last_date}",
+                  file=sys.stderr)
     return df
+
+
+def _last_bar_date(df: pd.DataFrame) -> str:
+    """Last bar's date as YYYY-MM-DD ('' when unavailable)."""
+    if df.empty or "date" not in df.columns:
+        return ""
+    return str(pd.to_datetime(df["date"]).max())[:10]
 
 
 def get_market_data(*args, **kwargs):

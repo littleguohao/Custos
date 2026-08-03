@@ -50,7 +50,13 @@ def _tier_you(idx, code, day) -> bool:
     evs = idx.get(code)
     if not evs:
         return False
-    k = bisect.bisect_right(evs, (day,)) - 1        # 公告日≤信号日的最新可见财报(公告当日即可见,偏松一档)
+    # bisect_right((day,)) 落在**同日公告之前**((day,) < (day, np, ...)),故 k 指向
+    # 公告日 **严格早于** 信号日的最新一期 ⇒ 口径是「公告次日起可见」(偏严一档,无 look-ahead),
+    # 与模块 docstring 的"信号日实际可见"和 launch_point_study 默认 --pit-visible-same-day=off 一致。
+    # (2026-08-03 修:此处原注释写的是"公告当日即可见,偏松一档",与实现正好相反。)
+    # TODO(策略确认):此处**无财报时效上限**——三年不出报表的壳公司只要最后一期数字好看仍判"优"。
+    #   财务侧已有 screening/financials.REPORT_MAX_AGE_DAYS(400天),此处是否同口径需策略拍板。
+    k = bisect.bisect_right(evs, (day,)) - 1
     if k < 0:
         return False
     _, np_, ocf, roe = evs[k]

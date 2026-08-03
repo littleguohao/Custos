@@ -29,12 +29,31 @@ import backtest_factors as bt  # noqa: E402
 import local_tdx_data  # noqa: E402
 from launch_point_study import _auc  # noqa: E402  Mann-Whitney 正确实现(本文件曾用错公式)
 
+# 历史缓存路径(无参数指纹)。保留仅为兼容,实际读写走 _cache_path()。
 ROWS_CACHE = BASE / "06_logs" / "walkforward" / "winner_feature_rows.json"
 
 FIRINGS = BASE / "06_logs" / "walkforward" / "firings_jlow_2026H1_tdx.json"
 FWD = 20
 WIN_Q = 0.2          # 全体前 20% 算"跑出来"
 PICKS = 3
+
+
+def _cache_path() -> Path:
+    """Sample cache keyed by the parameters that determine its content.
+
+    A single fixed filename silently reused the previous run's samples after
+    FIRINGS or FWD changed, so a study would report on a different signal pool
+    than the one requested — and that stale pool fed the split-consistency
+    check that gates feature adoption.
+    """
+    import hashlib
+
+    try:
+        sig = f"{FIRINGS.name}:{FIRINGS.stat().st_mtime_ns}:{FWD}"
+    except OSError:
+        sig = f"{FIRINGS.name}:missing:{FWD}"
+    digest = hashlib.sha256(sig.encode()).hexdigest()[:12]
+    return BASE / "06_logs" / "walkforward" / f"winner_feature_rows_{digest}.json"
 
 
 def _adx_features(high, low, close, n: int = 14) -> dict:
@@ -93,8 +112,10 @@ def _features(df, i: int) -> dict:
 
 
 def main() -> None:
-    if ROWS_CACHE.is_file():
-        rows = json.loads(ROWS_CACHE.read_text(encoding="utf-8"))
+    cache = _cache_path()
+    if cache.is_file():
+        rows = json.loads(cache.read_text(encoding="utf-8"))
+        print(f"复用样本缓存 {cache.name}（{len(rows)} 样本）", file=sys.stderr)
     else:
         rows = []
         payload = json.loads(FIRINGS.read_text(encoding="utf-8"))
@@ -134,7 +155,12 @@ def main() -> None:
                 rows.append({"date": d[0], "y": fwd, "feats": feats})
             if (n + 1) % 500 == 0:
                 print(f"  {n + 1}/{len(recs)} 股 | {len(rows)} 样本", file=sys.stderr, flush=True)
-        ROWS_CACHE.write_text(json.dumps(rows), encoding="utf-8")
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps(rows), encoding="utf-8")
+
+    if not rows:
+        # 空样本走下去会在 ys[...] 上 IndexError,或(有缓存时)把空结论写进研究产物
+        raise SystemExit("no usable samples: check FIRINGS pool and local bar coverage")
 
     print(f"\n有效样本 {len(rows)} 个 | 标签:前向{FWD}日收益 前{int(WIN_Q * 100)}%为赢")
     ys = sorted((x["y"] for x in rows), reverse=True)
@@ -145,8 +171,28 @@ def main() -> None:
     by_day: dict = defaultdict(list)
     for x in rows:
         by_day[x["date"]].append(x)
-    mid = len(rows) // 2
-    first_half, second_half = rows[:mid], rows[mid:]
+
+    # 半程切分**必须按日期**。rows 是外层遍历股票、内层遍历该股信号日 append 出来的,
+    # 所以 rows[:mid] / rows[mid:] 切出来的是「前一半股票的全部年份」vs「后一半股票的
+    # 全部年份」——那是两个股票集合的对比,与"样本外时间段是否复现"毫无关系,防过拟合
+    # 门槛因此恒通过。三个已上线/曾上线的 gate(j_low_dif_pos / j_low_adx25 /
+    # j_low_adx60)都把"半程一致"写进了采纳依据。
+    rows.sort(key=lambda x: x["date"])
+    dates = sorted(by_day)
+    split_date = dates[len(dates) // 2] if dates else ""
+    first_half = [x for x in rows if x["date"] < split_date]
+    second_half = [x for x in rows if x["date"] >= split_date]
+    # 每半程各自定 win 阈值:用全样本分位再切半程会把另一半的分布信息带进来(标签泄漏),
+    # 而 consistent 直接决定特征是否被采纳。
+    for half in (first_half, second_half):
+        if not half:
+            continue
+        hy = sorted((x["y"] for x in half), reverse=True)
+        hthr = hy[max(0, int(len(hy) * WIN_Q) - 1)]
+        for x in half:
+            x["win_half"] = x["y"] >= hthr
+    print(f"半程切分点 {split_date}（前段 {len(first_half)} 样本 / 后段 {len(second_half)} 样本，"
+          f"各自独立定阈值）")
 
     feat_names = sorted({k for x in rows for k in x["feats"]})
     print(f"基准率 {base:.1%} | {'特征':<18}{'日内AUC':>8}{'精确率':>8}{'公平随机':>8}{'净增益':>8}  半程一致")
@@ -177,10 +223,10 @@ def main() -> None:
         auc = num / den if den else None
         prec = hit / tot if tot else None
         fair_p = fair / tot if tot else None
-        # 前后半程同号
+        # 前后半程同号(按日期切分,各半程用自己的 win_half 标签)
         def _h(samples):
-            p = [vf(x) for x in samples if x["win"] and vf(x) is not None]
-            q = [vf(x) for x in samples if not x["win"] and vf(x) is not None]
+            p = [vf(x) for x in samples if x.get("win_half") and vf(x) is not None]
+            q = [vf(x) for x in samples if not x.get("win_half") and vf(x) is not None]
             a = _auc(p, q)
             return a - 0.5 if a is not None else None
         h1, h2 = _h(first_half), _h(second_half)

@@ -26,6 +26,11 @@ if str(LOCAL_TDX_DIR) not in sys.path:
 
 import local_tdx_data as ltd  # type: ignore
 
+_MT_DIR = Path(__file__).resolve().parent
+if str(_MT_DIR) not in sys.path:
+    sys.path.insert(0, str(_MT_DIR))
+from breadth_basis import breadth_counts, resolve_total_stocks  # noqa: E402
+
 INDICES = {
     "上证指数": "999999.SH",
     "创业板指": "399006.SZ",
@@ -36,7 +41,8 @@ INDICES = {
 # Market breadth/sentiment codes
 BREADTH_CODE = "880005.SH"   # close=涨家数, open=涨家数(开盘)
 SENTIMENT_CODE = "880006.SH" # close=涨停数(收盘), high=涨停数(最高), low=跌停数(最低)
-TOTAL_STOCKS_APPROX = 5530   # A股总数近似值（用于计算跌家数）
+# 跌家数口径见 breadth_basis：原先这里有 TOTAL_STOCKS_APPROX = 5530 硬编码近似总数推算
+# 跌家数（把平盘/停牌计入下跌 ⇒ up_down_ratio 系统性偏低，而 scorer 直接吃这个比值）。
 
 
 def to_float(x):
@@ -222,19 +228,27 @@ def main():
             if not df_bd.empty:
                 last_bd = df_bd.iloc[-1]
                 up_count = to_float(last_bd.get("close"))
-                down_count = TOTAL_STOCKS_APPROX - up_count if up_count is not None else None
                 bd_date = str(last_bd.get("date", ""))
+                # 跌家数无真实来源时标 unavailable，不用硬编码总数推算（见 breadth_basis）
+                total, total_source = resolve_total_stocks()
+                counts = breadth_counts(int(up_count) if up_count else None,
+                                        total=total, source=total_source)
                 mkt["market_breadth"] = {
                     "up_count": int(up_count) if up_count else None,
-                    "down_count": int(down_count) if down_count else None,
-                    "up_down_ratio": round(up_count / down_count, 4) if up_count and down_count else None,
-                    "total_stocks": TOTAL_STOCKS_APPROX,
+                    "down_count": counts["down_count"],
+                    "up_down_ratio": counts["up_down_ratio"],
+                    "up_down_ratio_status": counts["up_down_ratio_status"],
+                    "total_stocks": counts["total_stocks"],
+                    "total_stocks_source": counts["total_stocks_source"],
+                    "note": counts["note"],
                     "source": "vipdoc_880005",
                     "quality": "auto",
                     "as_of": bd_date[:10] if bd_date else "",
                 }
                 updated = True
-                print(f"[OK] market_breadth: up={int(up_count) if up_count else 'N/A'}, down={int(down_count) if down_count else 'N/A'} (from 880005)")
+                print(f"[OK] market_breadth: up={int(up_count) if up_count else 'N/A'}, "
+                      f"down={counts['down_count'] if counts['down_count'] is not None else 'unavailable'} "
+                      f"(from 880005, ratio={counts['up_down_ratio_status']})")
         except Exception as e:
             print(f"[WARN] 880005 breadth fetch failed: {e}")
 

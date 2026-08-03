@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -192,7 +193,22 @@ class CredentialsTest(unittest.TestCase):
 
     def test_to_open_id_env_override(self):
         self.assertEqual(frp.resolve_to_open_id({"FEISHU_TO_OPEN_ID": "ou_x"}), "ou_x")
-        self.assertEqual(frp.resolve_to_open_id({}), frp.DEFAULT_TO_OPEN_ID)
+
+    def test_to_open_id_requires_configuration(self):
+        """缺配置必须报错。此前兜底到硬编码 open_id —— 报告会静默发给写死的账号。"""
+        with tempfile.TemporaryDirectory() as d:
+            missing = str(Path(d) / "nope.json")
+            with self.assertRaises(frp.FeishuError):
+                frp.resolve_to_open_id({"OPENCLAW_CONFIG": missing})
+
+    def test_to_open_id_from_openclaw_config(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False,
+                                         encoding="utf-8") as fh:
+            json.dump({"channels": {"feishu": {"accounts": {"default": {
+                "appId": "cli_x", "appSecret": "s", "reportToOpenId": "ou_cfg"}}}}}, fh)
+            path = fh.name
+        self.addCleanup(lambda: __import__("os").unlink(path))
+        self.assertEqual(frp.resolve_to_open_id({"OPENCLAW_CONFIG": path}), "ou_cfg")
 
 
 def _resp(body: dict):
@@ -207,7 +223,9 @@ class SendFlowTest(unittest.TestCase):
 
     def _run_main(self, tmp_report):
         argv = ["--report", str(tmp_report), "--title", "盘后复盘", "--date", "2026-07-20"]
-        with mock.patch.dict("os.environ", {"FEISHU_APP_ID": "id", "FEISHU_APP_SECRET": "sec"},
+        with mock.patch.dict("os.environ", {"FEISHU_APP_ID": "id", "FEISHU_APP_SECRET": "sec",
+                                            # 收件人必须显式配置（不再有硬编码兜底）
+                                            "FEISHU_TO_OPEN_ID": "ou_test"},
                              clear=False):
             return frp.main(argv)
 
@@ -385,7 +403,8 @@ class DeliveryGateTest(unittest.TestCase):
                                             _resp({"code": 0, "data": {"file_key": "fk"}}),
                                             _resp({"code": 0, "data": {}}),
                                             _resp({"code": 0, "data": {}})]) as post, \
-             mock.patch.dict("os.environ", {"FEISHU_APP_ID": "id", "FEISHU_APP_SECRET": "sec"},
+             mock.patch.dict("os.environ", {"FEISHU_APP_ID": "id", "FEISHU_APP_SECRET": "sec",
+                                            "FEISHU_TO_OPEN_ID": "ou_test"},
                              clear=False):
             rc = frp.main(["--report", self.report, "--title", "盘后复盘", "--date", "2026-07-20",
                            "--require-gate", "--gate-file", str(gate)])

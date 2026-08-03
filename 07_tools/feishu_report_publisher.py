@@ -7,7 +7,8 @@
 
 凭据优先级: 环境变量 FEISHU_APP_ID/FEISHU_APP_SECRET; 否则读 OPENCLAW_CONFIG
 指向的 openclaw.json 的 channels.feishu.accounts.default.appId/appSecret。
-接收人 open_id 可用 FEISHU_TO_OPEN_ID 覆盖。
+接收人 open_id: 环境变量 FEISHU_TO_OPEN_ID 优先, 其次 openclaw.json 同一节点下的
+reportToOpenId/toOpenId/defaultToOpenId; 都没有则报错(不再兜底到硬编码 open_id)。
 
 stdout 是机器可消费协议: 成功打印一行 JSON {"sent": true, "file_key": ..., "summary_len": N};
 dry-run 打印摘要后打印 {"sent": false, "dry_run": true, ...}; 失败打 stderr [WARN] 并 exit 1
@@ -38,7 +39,6 @@ FILES_URL = "https://open.feishu.cn/open-apis/im/v1/files"
 MESSAGES_URL = "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id"
 
 DEFAULT_OPENCLAW_CONFIG = r"C:\Users\gh\.openclaw-tdxclaw\openclaw.json"
-DEFAULT_TO_OPEN_ID = "ou_54ca3ea3b343e4d868b66b7084ed3be1"
 
 HTTP_TIMEOUT = 15
 TRUNCATE_MARKER = "\n...(完整报告见附件)"
@@ -74,9 +74,36 @@ def load_credentials(env=None) -> dict:
     return {"app_id": app_id, "app_secret": app_secret, "source": str(cfg_path)}
 
 
+RECIPIENT_KEYS = ("reportToOpenId", "toOpenId", "defaultToOpenId")
+
+
 def resolve_to_open_id(env=None) -> str:
+    """收件人 open_id：环境变量 FEISHU_TO_OPEN_ID → openclaw.json → 报错。
+
+    此前缺配置时兜底到一个**硬编码**的 open_id：换人、换租户、跑在别人机器上，
+    报告都会静默投给那个写死的账号。缺配置属于配置错误，必须显式失败而不是乱发。
+    """
     env = os.environ if env is None else env
-    return (env.get("FEISHU_TO_OPEN_ID") or "").strip() or DEFAULT_TO_OPEN_ID
+    explicit = (env.get("FEISHU_TO_OPEN_ID") or "").strip()
+    if explicit:
+        return explicit
+    cfg_path = Path(env.get("OPENCLAW_CONFIG") or DEFAULT_OPENCLAW_CONFIG)
+    acct = {}
+    if cfg_path.exists():
+        try:
+            cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+            acct = cfg["channels"]["feishu"]["accounts"]["default"]
+        except (KeyError, TypeError, ValueError, OSError):
+            acct = {}
+    if isinstance(acct, dict):
+        for key in RECIPIENT_KEYS:
+            value = str(acct.get(key) or "").strip()
+            if value:
+                return value
+    raise FeishuError(
+        "缺少报告收件人: 请设置环境变量 FEISHU_TO_OPEN_ID，或在 "
+        f"{cfg_path} 的 channels.feishu.accounts.default 下配置 "
+        f"{'/'.join(RECIPIENT_KEYS)}")
 
 
 # ------------------------------------------------------------------- summary

@@ -34,8 +34,9 @@ if str(LOCAL_TDX_DIR) not in sys.path:
     sys.path.insert(0, str(LOCAL_TDX_DIR))
 
 import local_tdx_data as ltd  # type: ignore
-from paths import BASE, TDX_ROOT  # noqa: E402
+from paths import BASE, TDX_ROOT, cn_now  # noqa: E402
 from runtime_guards import previous_confirmed_trading_day  # noqa: E402
+from breadth_basis import breadth_counts, resolve_total_stocks  # noqa: E402
 
 OUT_DIR = BASE / "01_data" / "market"
 
@@ -50,7 +51,8 @@ INDICES = {
 BREADTH_CODE = "880005.SH"    # close=上涨家数
 SENTIMENT_CODE = "880006.SH"  # close=涨停数, high=盘中曾涨停数, low=跌停数
 TURNOVER_CODE = "880001.SH"   # amount=全市场成交额(元)
-TOTAL_STOCKS_APPROX = 5530    # A股总数近似值（用于由涨家数推算跌家数）
+# 跌家数口径见 breadth_basis：原先这里有个 TOTAL_STOCKS_APPROX = 5530 硬编码近似总数，
+# 用 `总数 - 涨家数` 推算跌家数，把平盘/停牌计入下跌，使 up_down_ratio 系统性偏低。
 
 
 def to_float(x: Any):
@@ -203,6 +205,7 @@ def derive_market_fields(target_date: str) -> tuple[dict, dict, dict, dict]:
     }
 
     breadth = {"up_count": None, "down_count": None, "up_down_ratio": None,
+               "up_down_ratio_status": "unavailable",
                "source": None, "quality": "missing", "as_of": None}
     try:
         rows = _vipdoc_rows(BREADTH_CODE)
@@ -211,16 +214,21 @@ def derive_market_fields(target_date: str) -> tuple[dict, dict, dict, dict]:
             up = last["close"]
             as_of = last["date"]
             if up is not None:
-                down = TOTAL_STOCKS_APPROX - up
+                # 880005 只给涨家数;跌家数没有真实来源时**不编造**(见 breadth_basis)
+                total, total_source = resolve_total_stocks()
+                counts = breadth_counts(int(up), total=total, source=total_source)
                 breadth.update({
                     "up_count": int(up),
-                    "down_count": int(down),
-                    "up_down_ratio": round(up / down, 4) if down else None,
-                    "total_stocks_approx": TOTAL_STOCKS_APPROX,
+                    "down_count": counts["down_count"],
+                    "up_down_ratio": counts["up_down_ratio"],
+                    "up_down_ratio_status": counts["up_down_ratio_status"],
+                    "total_stocks": counts["total_stocks"],
+                    "total_stocks_source": counts["total_stocks_source"],
                     "source": "vipdoc_880005",
                     "as_of": as_of,
                     "quality": _freshness(as_of, expected, "880005 涨跌家数", quality),
                 })
+                quality["notes"].append(f"880005 涨跌家数: {counts['note']}")
     except Exception as e:
         quality["notes"].append(f"880005 涨跌家数读取失败: {e!r}")
 
@@ -276,7 +284,7 @@ def derive_market_fields(target_date: str) -> tuple[dict, dict, dict, dict]:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--date", default=datetime.now().strftime("%Y-%m-%d"))
+    ap.add_argument("--date", default=cn_now().strftime("%Y-%m-%d"))
     ap.add_argument("--amv", type=float, default=None, help="0AMV 当日涨跌幅，百分比")
     ap.add_argument("--out", default="", help="可选输出路径；为空则写入正式 market_timing_input.json")
     args = ap.parse_args()
@@ -296,6 +304,11 @@ def main():
         "amv_0": {
             "amv_change_pct": args.amv,
             "amv_zone": amv_zone(args.amv),
+            # as_of 故意留 None：08:50 手工 --amv 的读数属哪个数据日无法自证（0AMV 是盘后
+            # 指标，盘前能看到的最新值其实是 T-1），编一个 as_of 等于给门控一个假的新鲜度。
+            # 这里也不置 quality=confirmed，门控按 candidate 处理。唯一会把 amv_0 标
+            # confirmed 的是 merge_incremental_market（数据日可证），as_of 由它写。
+            "as_of": None,
             "note": "0AMV > 4% = 做多；0AMV < -2.3% = 空头"
         },
         "overseas_market": {

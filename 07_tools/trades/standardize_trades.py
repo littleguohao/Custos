@@ -32,7 +32,7 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import BASE  # noqa: E402
+from paths import BASE, cn_now  # noqa: E402
 from code_utils import clean_code  # noqa: E402
 
 OUT_DIR = BASE / "01_data" / "trades"
@@ -112,7 +112,7 @@ def main() -> None:
 
     # ── 4. 导入元数据 ──
     meta = {
-        "imported_at": datetime.now().isoformat(timespec="seconds"),
+        "imported_at": cn_now().isoformat(timespec="seconds"),
         "source_path": str(src),
         "source_mtime": datetime.fromtimestamp(src.stat().st_mtime).isoformat(),
         "rows": {

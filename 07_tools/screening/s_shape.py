@@ -85,7 +85,10 @@ PEN_VOL_RATIO = 1.2              # 放量＝量/前5日均量 ≥1.2
 PEN_RECOVER_VOL = 0.9           # 收复但量 <0.9× → −10；≥0.9× → −5
 PEN_FRONTHIGH_PCT = 5.0          # 前高距收盘 ≤此% → 惩罚减半
 
-# S** → 技术面层级阈值（供分层矩阵用；对齐"可买≥70"，取略宽的 65/40 待回测）
+# S** → 技术面层级阈值（供分层矩阵用；对齐"可买≥70"，取略宽的 65/40 待回测）。
+# ⚠️ 与 score_candidates.TECH_STRONG_FALLBACK/TECH_MID_FALLBACK (60/30) **不是同一套**：
+# 这里管 s_shape 主路径，那里管无 s_shape 数据时的 patterns 回退路径。同一个 62 分
+# 会分别被判"中"和"强"。两套都待回测，统一成哪一套需策略 owner 拍板（会改 A/B/C/D）。
 SSTAR_STRONG = 65.0
 SSTAR_MID = 40.0
 

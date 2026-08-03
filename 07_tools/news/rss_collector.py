@@ -12,11 +12,49 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import BASE  # noqa: E402
+from paths import BASE, cn_now  # noqa: E402
 from net_retry import retry_call  # noqa: E402
 
 REG=BASE/'00_governance'/'RSS_SOURCE_REGISTRY.json'
 DATA=BASE/'01_data'/'news'/'rss'; LOG=BASE/'06_logs'/'rss'
+
+# 单个 feed 的字节上限。国家统计局的 feed 实测约 4.5MB,所以上限不能定得太小;
+# 但 r.read() 完全不设限意味着任何被劫持/故障的源都能把内存打爆,故设 16MB 硬顶。
+MAX_FEED_BYTES = 16 * 1024 * 1024
+# source_id 会直接拼进落盘文件名,必须白名单,否则 registry 里一个 "../../x" 就能写到库外。
+SAFE_ID = re.compile(r'^[A-Za-z0-9_-]{1,64}$')
+
+
+def _redact(text: str) -> str:
+    """去掉异常信息里的 query string——feed URL 可能带 token/appkey。"""
+    return re.sub(r'\?[^\s\'"]*', '?<redacted>', str(text))
+
+
+def build_ssl_context(src: dict) -> tuple[ssl.SSLContext, bool]:
+    """按源配置构造 SSL 上下文,返回 (ctx, transport_verified)。
+
+    关闭校验必须**同时**显式写 ssl_insecure_ack:tier S 的政府源一旦关掉校验,
+    中间人就能伪造"国务院发文"进入正式复盘并被标成 source_confirmed。三个政府源
+    历史上带着 ssl_verify=false,而实测证书链完全正常——这属于无必要的历史遗留,
+    已从 registry 移除。保留这条通道只为应对真实的证书故障,且必须留痕。
+    """
+    ctx = ssl.create_default_context()
+    if src.get('ssl_verify', True) is False:
+        if not src.get('ssl_insecure_ack'):
+            raise ValueError(
+                f"{src['id']}: ssl_verify=false 需同时设 ssl_insecure_ack=true 以显式承担中间人风险")
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx, False
+    return ctx, True
+
+
+def _read_limited(resp) -> bytes:
+    raw = resp.read(MAX_FEED_BYTES + 1)
+    if len(raw) > MAX_FEED_BYTES:
+        raise ValueError(f'feed exceeds {MAX_FEED_BYTES} bytes, refused')
+    return raw
+
 
 def text(node, names):
     for child in node.iter():
@@ -33,7 +71,18 @@ def iso_date(s):
         try: return datetime.fromisoformat(s.replace('Z','+00:00')).astimezone(timezone.utc).isoformat()
         except Exception: return None
 
-def parse_feed(raw, src, fetched):
+def _tier_quality(tier, transport_verified=True):
+    """来源等级 → 证据质量。传输未经校验时**不得**给 confirmed。
+
+    tier 表达的是"这个机构说的话有多权威",transport_verified 表达的是"这段字节
+    真的来自那个机构吗"。后者不成立时前者无意义,故降级为 candidate 并由
+    transport_verified 字段留痕,下游可据此拒绝把它当既成事实。
+    """
+    if not transport_verified:
+        return 'candidate'
+    return 'candidate' if tier in {'B','C'} else 'confirmed'
+
+def parse_feed(raw, src, fetched, transport_verified=True):
     # ElementTree rejects some valid legacy multibyte declarations (for
     # example GB2312). Decode explicitly and normalize the XML declaration.
     declaration=raw[:200].decode('ascii',errors='ignore')
@@ -61,11 +110,12 @@ def parse_feed(raw, src, fetched):
           'title':title,'summary':summary[:2000],'source_url':link,'feed_url':src['url'],
           'affected_entities':[],'affected_sectors':[],'direction':'uncertain','impact_horizon':'unknown',
           'fact':title,'inference':'','validation_condition':[],
-          'quality':'candidate' if src['tier'] in {'B','C'} else 'confirmed',
-          'confirmed':src['tier'] in {'S','A'},'duplicate_group_id':dup})
+          'quality':_tier_quality(src['tier'],transport_verified),
+          'confirmed':src['tier'] in {'S','A'} and transport_verified,
+          'transport_verified':transport_verified,'duplicate_group_id':dup})
     return items
 
-def parse_wscn_lives(raw, src, fetched):
+def parse_wscn_lives(raw, src, fetched, transport_verified=True):
     # WallstreetCN lives JSON API: {"code":20000,"data":{"items":[{id,content,display_time,uri,...}]}}
     data=json.loads(raw.decode('utf-8',errors='replace'))
     if not isinstance(data,dict) or data.get('code')!=20000:
@@ -89,28 +139,31 @@ def parse_wscn_lives(raw, src, fetched):
           'title':title,'summary':content[:2000],'source_url':e.get('uri') or (f"https://wallstreetcn.com/livenews/{e.get('id')}" if e.get('id') is not None else ''),'feed_url':src['url'],
           'affected_entities':[],'affected_sectors':[],'direction':'uncertain','impact_horizon':'unknown',
           'fact':title,'inference':'','validation_condition':[],
-          'quality':'candidate' if src['tier'] in {'B','C'} else 'confirmed',
-          'confirmed':src['tier'] in {'S','A'},'duplicate_group_id':dup})
+          'quality':_tier_quality(src['tier'],transport_verified),
+          'confirmed':src['tier'] in {'S','A'} and transport_verified,
+          'transport_verified':transport_verified,'duplicate_group_id':dup})
     return items
 
 def main():
     ap=argparse.ArgumentParser(); ap.add_argument('--date',required=True); ap.add_argument('--timeout',type=int,default=15); ap.add_argument('--limit-per-feed',type=int,default=100); a=ap.parse_args()
-    cfg=json.loads(REG.read_text(encoding='utf-8-sig')); fetched=datetime.now().astimezone().isoformat(timespec='seconds')
+    cfg=json.loads(REG.read_text(encoding='utf-8-sig')); fetched=cn_now().isoformat(timespec='seconds')
     day=DATA/'raw'/a.date; day.mkdir(parents=True,exist_ok=True); normalized=[]; log=[]
     for src in cfg['sources']:
         if not src.get('enabled') or not src.get('url'): continue
         row={'source_id':src['id'],'url':src['url'],'fetched_at':fetched}
         try:
+            if not SAFE_ID.match(str(src.get('id',''))):
+                raise ValueError(f"unsafe source id {src.get('id')!r}: 会拼进落盘文件名")
             req=urllib.request.Request(src['url'],headers={'User-Agent':'Mozilla/5.0 TdxClawRSS/1.0','Accept':'application/rss+xml,application/atom+xml,application/xml,text/xml'})
-            ctx=ssl.create_default_context()
-            if src.get('ssl_verify',True) is False: ctx.check_hostname=False; ctx.verify_mode=ssl.CERT_NONE
-            with retry_call(lambda: urllib.request.urlopen(req,timeout=a.timeout,context=ctx)) as r: raw=r.read(); row.update(http_status=r.status,final_url=r.geturl(),content_type=r.headers.get('content-type',''))
+            ctx,verified=build_ssl_context(src)
+            row['transport_verified']=verified
+            with retry_call(lambda: urllib.request.urlopen(req,timeout=a.timeout,context=ctx)) as r: raw=_read_limited(r); row.update(http_status=r.status,final_url=r.geturl(),content_type=r.headers.get('content-type',''),bytes=len(raw))
             if src.get('type')=='wscn_lives':
-                (day/f"{src['id']}.json").write_bytes(raw); items=parse_wscn_lives(raw,src,fetched)[:a.limit_per_feed]
+                (day/f"{src['id']}.json").write_bytes(raw); items=parse_wscn_lives(raw,src,fetched,verified)[:a.limit_per_feed]
             else:
-                (day/f"{src['id']}.xml").write_bytes(raw); items=parse_feed(raw,src,fetched)[:a.limit_per_feed]
+                (day/f"{src['id']}.xml").write_bytes(raw); items=parse_feed(raw,src,fetched,verified)[:a.limit_per_feed]
             normalized.extend(items); row.update(status='ok',items=len(items))
-        except Exception as e: row.update(status='failed',error=repr(e),items=0)
+        except Exception as e: row.update(status='failed',error=_redact(repr(e)),items=0)
         log.append(row)
     # exact item IDs and normalized-title duplicate groups are deterministic.
     seen=set(); unique=[]

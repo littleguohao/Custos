@@ -34,6 +34,7 @@ import argparse
 import json
 import statistics
 import sys
+import time
 from datetime import date
 from pathlib import Path
 
@@ -44,7 +45,7 @@ for _p in (str(TOOLS),):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from paths import BASE  # noqa: E402
+from paths import BASE, cn_today  # noqa: E402
 
 API = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 UA = {"User-Agent": "Mozilla/5.0"}
@@ -66,6 +67,39 @@ VALUE_FIELDS = {
 _REFUSED_FIELDS = ("YSTZ", "SJLTZ", "YSHZ", "SJLHZ")
 A_SHARE_TYPES = {"A股"}
 
+PAGE_SLEEP = 0.35        # 翻页间隔（秒）：东财 datacenter 无官方配额，连打会被静默限流
+
+
+class FetchIncomplete(RuntimeError):
+    """分页未拉完 / 响应残缺。残缺样本绝不能按成功落盘（宁可整期重拉）。"""
+
+
+def _as_int(v):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_empty_ok(payload: dict) -> bool:
+    """响应自称成功但 result 为空 ⇒ 该期/该日**确实**没有数据（未披露、非交易日）。
+
+    只有这一种形态才允许当成「空但正常」；限流响应通常 success=False 或带非 0 code，
+    以及翻页中途出现的空响应，都必须报残缺。
+    """
+    if payload.get("success") is False:
+        return False
+    if str(payload.get("code", 0)) not in ("0", "None"):
+        return False
+    return "result" in payload
+
+
+def _brief(payload: dict, n: int = 160) -> str:
+    try:
+        return json.dumps(payload, ensure_ascii=False)[:n]
+    except (TypeError, ValueError):
+        return str(payload)[:n]
+
 
 def _d(v) -> str:
     return str(v or "")[:10]
@@ -73,9 +107,9 @@ def _d(v) -> str:
 
 def quarter_ends(since_year: int, until: str | None = None) -> list[str]:
     """since_year 起的所有季度末(YYYY-03-31/06-30/09-30/12-31),不超过 until(默认今天)。"""
-    stop = until or date.today().isoformat()
+    stop = until or cn_today().isoformat()
     out = []
-    for y in range(since_year, date.today().year + 1):
+    for y in range(since_year, cn_today().year + 1):
         for mmdd in ("03-31", "06-30", "09-30", "12-31"):
             d = f"{y}-{mmdd}"
             if d <= stop:
@@ -84,11 +118,21 @@ def quarter_ends(since_year: int, until: str | None = None) -> list[str]:
 
 
 def fetch_period(report_date: str, page_size: int = 500, max_pages: int = 40,
-                 session=None) -> list[dict]:
-    """拉一个报告期的全市场业绩报表原始行。接口与 akshare stock_yjbb_em 同源。"""
+                 session=None, sleep: float = PAGE_SLEEP) -> list[dict]:
+    """拉一个报告期的全市场业绩报表原始行。接口与 akshare stock_yjbb_em 同源。
+
+    **分页完整性由接口自报的 pages/count 校验，残缺一律抛 FetchIncomplete。**
+    原实现是 `if not data: break` —— 东财限流时返回 200 + 空 data，这个 break
+    把限流当成「翻完了」：于是某期只拿到前 500 只也照样按 `[OK]` 落盘，
+    回测拿这期算因子时全然不知样本残缺（`verify_ledger` 只能事后看出「行数偏少」，
+    而且要等到有邻期可比）。宁可整期失败重拉，也不能落一份残缺样本。
+    """
     s = session or requests.Session()
     rows: list[dict] = []
+    pages = count = None
     for page in range(1, max_pages + 1):
+        if page > 1 and sleep:
+            time.sleep(sleep)                  # 主动限速：连打几十页必被静默限流
         params = {
             "sortColumns": "UPDATE_DATE,SECURITY_CODE", "sortTypes": "-1,-1",
             "pageSize": page_size, "pageNumber": page,
@@ -98,13 +142,38 @@ def fetch_period(report_date: str, page_size: int = 500, max_pages: int = 40,
         r = s.get(API, params=params, headers=UA, timeout=30,
                   proxies={"http": None, "https": None})
         r.raise_for_status()
-        result = (r.json() or {}).get("result") or {}
+        payload = r.json() or {}
+        result = payload.get("result")
+        if not isinstance(result, dict):
+            if page == 1 and _is_empty_ok(payload):
+                return []                      # 该报告期确实还没有数据（未到披露期）
+            raise FetchIncomplete(
+                f"{report_date} 第 {page} 页无 result 段（限流/异常响应），"
+                f"已拿 {len(rows)} 行: {_brief(payload)}")
         data = result.get("data") or []
+        pages, count = _as_int(result.get("pages")), _as_int(result.get("count"))
         if not data:
-            break
+            if page == 1 and not count:
+                return []                      # 真的没有这一期
+            raise FetchIncomplete(
+                f"{report_date} 第 {page} 页空响应，但接口声明 pages={pages} count={count}"
+                f"（已拿 {len(rows)} 行）—— 疑似限流，不是翻完了")
         rows.extend(data)
-        if page >= (result.get("pages") or 1):
-            break
+        if pages is not None:
+            if page >= pages:
+                break
+        elif count is not None and len(rows) >= count:
+            break                              # 没给 pages 但行数已够
+        else:
+            raise FetchIncomplete(
+                f"{report_date} 第 {page} 页未给 pages/count，无法判断是否翻完")
+    else:
+        raise FetchIncomplete(
+            f"{report_date} 翻到 max_pages={max_pages} 仍未结束（声明 pages={pages}），"
+            f"提高 max_pages 后重拉")
+    if count is not None and len(rows) < count:
+        raise FetchIncomplete(
+            f"{report_date} 只拿到 {len(rows)}/{count} 行，样本残缺不落盘")
     return rows
 
 
@@ -259,7 +328,7 @@ def verify_ledger(records: list[dict], since_year: int | None = None,
     if not have:
         return {"ok": False, "error": "台账为空", "missing": [], "periods": []}
     y0 = since_year or int(have[0][:4])
-    stop = until or date.today().isoformat()
+    stop = until or cn_today().isoformat()
     expect = quarter_ends(y0, until=stop)
     if since_year is None:                            # 按实际首期对齐:年中起步不误报
         expect = [p for p in expect if p >= have[0]]
@@ -509,6 +578,11 @@ def main(argv=None) -> int:
     for p in periods:
         try:
             raw = fetch_period(p, session=session)
+        except FetchIncomplete as exc:
+            # 残缺期整期丢弃：写一半样本进台账，as_of() 会把它当完整期用，
+            # 静默污染回测；缺期至少能被 verify_ledger 报出来。
+            print(f"[WARN] {p} 分页残缺，整期丢弃不落盘（请重拉该期）: {exc}", file=sys.stderr)
+            continue
         except Exception as exc:  # noqa: BLE001
             print(f"[WARN] {p} 拉取失败: {exc}", file=sys.stderr)
             continue

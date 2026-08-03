@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import warnings
 from datetime import date, datetime
@@ -41,7 +42,7 @@ LOCAL_TDX_DIR = TOOLS_DIR / "local_tdx"
 if str(LOCAL_TDX_DIR) not in sys.path:
     sys.path.insert(0, str(LOCAL_TDX_DIR))
 
-from paths import BASE, TDX_ROOT  # noqa: E402
+from paths import BASE, TDX_ROOT, cn_today, cn_now  # noqa: E402
 from code_utils import norm_code  # noqa: E402
 from code_utils import market_of  # noqa: E402
 import tq_http  # noqa: E402
@@ -53,6 +54,28 @@ from mootdx.consts import MARKET_SH, MARKET_SZ  # noqa: E402
 
 _reader = None  # lazy init: local .day access only when actually needed
 _client = None  # lazy init: only connect when online access is actually needed
+
+# 东方财富 push2 的**公开** ut 参数(网页端前端 JS 里的固定串,全网通用):不是账号
+# 凭据、不是密钥,所以留在源码里没有泄密问题;抽成常量只为不再散落魔法串。
+EM_QUOTE_UT = "bd1d9ddb04089700cf256c0c7f8fe813"
+EM_QUOTE_FIELDS = "f43,f44,f45,f46,f47,f48,f50,f57,f58,f60,f170"
+# 代码白名单:6 位纯数字。code 来自 01_data/trades/current_positions.json —— 一个
+# 由外部导出/人工编辑的文件,内容不可信。直接插进 URL 的 `secid=0.{code}` 里,
+# 一个带 `&`/路径片段的脏值就能改写查询串(甚至换掉 secid 指向别的标的),
+# 拿回来的价格却会被当成这只持仓的价格写进快照。故下标前先做字符集校验。
+_CODE_RE = re.compile(r"^\d{6}$")
+
+
+def _valid_code(code) -> bool:
+    return bool(_CODE_RE.match(str(code))) if code is not None else False
+
+
+def em_stock_url(code) -> str:
+    """构造东财 push2 个股快照 URL;code 非 6 位纯数字直接 ValueError(不发请求)。"""
+    if not _valid_code(code):
+        raise ValueError(f"非法证券代码（要求 6 位数字）: {code!r}")
+    return ("https://push2.eastmoney.com/api/qt/stock/get"
+            f"?ut={EM_QUOTE_UT}&fltt=2&invt=2&fields={EM_QUOTE_FIELDS}&secid=0.{code}")
 
 
 def _get_reader():
@@ -116,8 +139,11 @@ def _tq_snapshot_quote(code, name, mkt, target):
     return {
         "code": code, "name": name, "market": _market_name(mkt),
         "available": True,
-        "date": target,
-        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        # 快照没有日期字段,只能假定它就是目标日。**必须留痕**:postclose 时
+        # TdxW 若未刷新,Now 其实是 T-1 收盘价,而下游唯一的陈旧检测是
+        # `q["date"] != target`——硬写 target 会把这个检测消解掉(审计 C1)。
+        "date": target, "date_verified": False,
+        "time": cn_now().strftime("%Y-%m-%d %H:%M:%S"),
         "open": _fnum(v.get("Open")) or 0.0,
         "high": _fnum(v.get("Max")) or 0.0,
         "low": _fnum(v.get("Min")) or 0.0,
@@ -166,8 +192,8 @@ def _online_daily_quote(code, name, mkt, target):
     return {
         "code": code, "name": name, "market": _market_name(mkt),
         "available": True,
-        "date": str(last["date"])[:10],
-        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "date": str(last["date"])[:10], "date_verified": True,   # 日期取自 K 线本身
+        "time": cn_now().strftime("%Y-%m-%d %H:%M:%S"),
         "open": float(last["open"]), "high": float(last["high"]),
         "low": float(last["low"]), "close": close,
         "previous_close": prev_close, "change_pct": chg,
@@ -190,7 +216,7 @@ def _reader_quote(code, name, mkt):
     return {
         "code": code, "name": name, "market": _market_name(mkt),
         "available": True,
-        "date": str(last_date)[:10],
+        "date": str(last_date)[:10], "date_verified": bool(last_date),  # 日期取自 K 线索引
         "time": str(last_date)[:19] if last_date else "",
         "open": float(last["open"]), "high": float(last["high"]),
         "low": float(last["low"]), "close": close,
@@ -203,9 +229,9 @@ def _reader_quote(code, name, mkt):
 def _eastmoney_bj_quote(code, name, target):
     """东财 push2 API：BJ 股最后兜底（mootdx 不支持 BJ）。"""
     import requests as _req
+    _url = em_stock_url(code)   # 先校验代码字符集,再建 session/发请求
     _s = _req.Session()
     _s.trust_env = False
-    _url = f"https://push2.eastmoney.com/api/qt/stock/get?ut=bd1d9ddb04089700cf256c0c7f8fe813&fltt=2&invt=2&fields=f43,f44,f45,f46,f47,f48,f50,f57,f58,f60,f170&secid=0.{code}"
     _r = _s.get(_url, timeout=10, headers={"User-Agent": "Mozilla/5.0"}, proxies={"http": None, "https": None})
     _r.raise_for_status()
     _d = _r.json().get("data", {})
@@ -217,8 +243,8 @@ def _eastmoney_bj_quote(code, name, target):
     return {
         "code": code, "name": name, "market": "BJ",
         "available": True,
-        "date": target,
-        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "date": target, "date_verified": False,   # push2 快照无日期字段,同上
+        "time": cn_now().strftime("%Y-%m-%d %H:%M:%S"),
         "open": float(_d.get("f46", 0)), "high": float(_d.get("f44", 0)),
         "low": float(_d.get("f45", 0)), "close": close,
         "previous_close": prev_close, "change_pct": chg,
@@ -295,9 +321,9 @@ def _tq_snapshot_index_quote(code, name):
         return None
     prev_close = _fnum(v.get("LastClose")) or 0.0
     chg = round((now / prev_close - 1) * 100, 2) if prev_close else None
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now_str = cn_now().strftime("%Y-%m-%d %H:%M:%S")
     return {"code": code, "name": name,
-            "date": now_str[:10], "time": now_str,
+            "date": now_str[:10], "date_verified": False, "time": now_str,
             "close": now, "price": now, "previous_close": prev_close,
             "change_pct": chg, "volume": _fnum(v.get("Volume")) or 0.0,
             "source": "tq_http_snapshot"}
@@ -403,7 +429,7 @@ def _collect_breadth():
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--date", default=date.today().strftime("%Y-%m-%d"))
+    ap.add_argument("--date", default=cn_today().strftime("%Y-%m-%d"))
     ap.add_argument("--session", choices=["intraday", "postclose"], default="intraday")
     args = ap.parse_args(argv)
     target = args.date
@@ -416,6 +442,13 @@ def main(argv=None) -> int:
     for h in holdings:
         code = str(h.get("代码", h.get("code", ""))).zfill(6)
         name = h.get("名称", h.get("name", ""))
+        # 代码不合白名单一律不进任何数据源(URL/接口参数拼接前的统一拦截点),
+        # 如实标 unavailable 而不是拿一个脏 code 去问东财/腾讯。
+        if not _valid_code(code):
+            print(f"[WARN] 跳过非法持仓代码 {code!r}（要求 6 位数字）", file=sys.stderr)
+            holding_quotes.append({"code": code, "name": name, "market": None,
+                                   "available": False, "reason": "invalid code"})
+            continue
         mkt = get_market(code)
         q = _holding_quote(code, name, mkt, args.session, target)
         if q is not None:
@@ -440,7 +473,7 @@ def main(argv=None) -> int:
             print(f"[WARN] {e}", file=sys.stderr)
     output = {
         "as_of_date": target,
-        "captured_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00"),
+        "captured_at": cn_now().strftime("%Y-%m-%dT%H:%M:%S+08:00"),
         "source": "mootdx",
         "quotes": holding_quotes,
         "indices": indices,

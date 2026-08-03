@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
-from paths import BASE
+from paths import BASE, CN_TZ, cn_now
 
 DATA = BASE / "01_data"
 CALENDAR_CONFIG = BASE / "00_governance" / "CN_TRADING_CALENDAR.json"
@@ -16,6 +16,40 @@ CALENDAR_CACHE = DATA / "market" / "CN_TRADING_CALENDAR_CACHE.json"
 
 def load_json(path: Path, default: Any):
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
+
+
+# 日历 JSON 缓存。为什么需要:trading_day_status 每次调用都要读
+# CN_TRADING_CALENDAR.json + CN_TRADING_CALENDAR_CACHE.json 两个文件,而
+# previous_confirmed_trading_day 会连着调它最多 14 次 ⇒ 单次门控约 28 次磁盘读
+# (长假回溯时更多),而这两个文件在一次运行内根本不会变。
+# 缓存**必须可失效、可注入**,不能变成测试里的隐形全局状态,故:
+#   ① key 带 (mtime_ns, size) —— trading_calendar.py 刷新日历后自动失效;
+#   ② key 带当前 load_json 函数对象 —— 测试 monkeypatch load_json 时自成一档,
+#      patch 结束后那条记录自然不可达,不会污染后续测试;
+#   ③ 暴露 clear_calendar_cache() 供显式清理。
+_CALENDAR_JSON_CACHE: dict[tuple, Any] = {}
+_CALENDAR_CACHE_MAX = 32
+
+
+def clear_calendar_cache() -> None:
+    """显式失效日历 JSON 缓存（测试 / 长驻进程用）。"""
+    _CALENDAR_JSON_CACHE.clear()
+
+
+def _load_calendar_json(path: Path, default: Any):
+    loader = load_json          # late-bound: 尊重调用方对 load_json 的 monkeypatch
+    try:
+        st = path.stat()
+        key = (str(path), st.st_mtime_ns, st.st_size, loader)
+    except OSError:
+        # 文件缺失也缓存(mtime=None):日历缓存文件常常不存在,否则每次调用还要多一次
+        # exists() + 分支。文件后来出现时 stat 成功 → key 不同 → 自动重新加载。
+        key = (str(path), None, None, loader)
+    if key not in _CALENDAR_JSON_CACHE:
+        if len(_CALENDAR_JSON_CACHE) >= _CALENDAR_CACHE_MAX:
+            _CALENDAR_JSON_CACHE.clear()
+        _CALENDAR_JSON_CACHE[key] = loader(path, default)
+    return _CALENDAR_JSON_CACHE[key]
 
 
 def official_year_status(d: date, cfg: dict[str, Any]) -> dict[str, Any] | None:
@@ -34,8 +68,8 @@ def official_year_status(d: date, cfg: dict[str, Any]) -> dict[str, Any] | None:
 
 def trading_day_status(day: str) -> dict[str, Any]:
     d = date.fromisoformat(day)
-    cfg = load_json(CALENDAR_CONFIG, {})
-    cache = load_json(CALENDAR_CACHE, {})
+    cfg = _load_calendar_json(CALENDAR_CONFIG, {})
+    cache = _load_calendar_json(CALENDAR_CACHE, {})
     overrides = cfg.get("overrides", {})
     if day in overrides:
         item = overrides[day]
@@ -65,6 +99,23 @@ def previous_confirmed_trading_day(day: str) -> str | None:
     return None
 
 
+CLOSE_TIME = time(15, 0)          # 收盘时刻:导入时间晚于它才算"收盘后快照"
+
+
+def _as_cn_datetime(text: str) -> datetime:
+    """Parse an ISO timestamp and express it on the exchange clock.
+
+    Historic records were written with a naive ``datetime.now()`` on whatever
+    timezone the host happened to use, so a naive value must be *interpreted*
+    as Shanghai time (that was always the intent) rather than compared as-is —
+    otherwise the 15:00 cutoff below is off by the host's UTC offset.
+    """
+    d = datetime.fromisoformat(text)
+    if d.tzinfo is None:
+        return d.replace(tzinfo=CN_TZ)
+    return d.astimezone(CN_TZ)
+
+
 def position_freshness(day: str) -> dict[str, Any]:
     meta = load_json(DATA / "trades" / "_import_meta.json", {})
     imported_at = meta.get("imported_at")
@@ -75,12 +126,12 @@ def position_freshness(day: str) -> dict[str, Any]:
     snapshot_date = meta.get("snapshot_date")
     if imported_at:
         try:
-            imported = datetime.fromisoformat(imported_at)
+            imported = _as_cn_datetime(imported_at)
             effective_snapshot_date = snapshot_date or imported.date().isoformat()
             if effective_snapshot_date == expected_close_date:
                 status = "confirmed"
                 reason = f"使用最近已确认交易日 {expected_close_date} 的收盘持仓快照"
-            elif effective_snapshot_date == day and imported.time() >= datetime.strptime("15:00", "%H:%M").time():
+            elif effective_snapshot_date == day and imported.time() >= CLOSE_TIME:
                 status = "confirmed"
                 reason = "当日收盘后已导入持仓快照"
             elif effective_snapshot_date == day:
@@ -102,7 +153,7 @@ def position_freshness(day: str) -> dict[str, Any]:
 def confirm_position_snapshot(day: str, note: str = "user_confirmed") -> dict[str, Any]:
     path = DATA / "trades" / "position_confirmations.json"
     records = load_json(path, {})
-    records[day] = {"confirmed_at": datetime.now().isoformat(timespec="seconds"), "note": note}
+    records[day] = {"confirmed_at": cn_now().isoformat(timespec="seconds"), "note": note}
     path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
     return records[day]
 
@@ -161,11 +212,19 @@ def position_freshness_with_confirmation(day: str) -> dict[str, Any]:
     return result
 
 
+_QUALITY_LEVELS = {"confirmed", "auto", "candidate", "partial", "degraded", "raw_only", "stale", "missing"}
+
+
 def _quality(value: Any, section: dict[str, Any], default: str = "candidate") -> str:
+    """归一化 section 自报的 quality。
+
+    ``degraded`` 必须在白名单里:collector 会主动写它表示"取到了但滞后",若不认它就会
+    fallback 到 default 而被**升格**为 candidate,反而逃过 stale 判定。
+    """
     if value is None or value == "":
         return "missing"
     q = str(section.get("quality") or default)
-    return q if q in {"confirmed", "auto", "candidate", "partial", "raw_only", "stale", "missing"} else default
+    return q if q in _QUALITY_LEVELS else default
 
 
 def _latest_market_section(day: str, section_name: str, value_key: str) -> tuple[dict[str, Any], str | None]:
@@ -229,26 +288,38 @@ def market_quality_gate(market: dict[str, Any], day: str, expected_day: str | No
                 section = prior
                 source_day = prior_day
                 inherited[section_name] = {"as_of": prior_day, "data": prior}
-        default_quality = "confirmed" if field == "0AMV" else "candidate"
-        quality = _quality(section.get(value_key), section, default_quality)
+        # 缺 quality 字段一律按"未确认"处理。**不能给 0AMV 特权默认 confirmed**:
+        # collector 与 --amv 人工读数写入的 section 都没有 quality 键,一旦默认 confirmed,
+        # amv_ok=True → 加权分 ≥0.8 判 pass → 授予 allow_position_increase,与本文件
+        # 声明的「0AMV 非 confirmed/auto 时一律不得 pass」正好相反。这与 07-31 修掉的
+        # 空串 regime 是同一个不变量:"没说它是可信的" ≠ "它是可信的"。
+        quality = _quality(section.get(value_key), section, "candidate")
         # 陈旧判定必须看 as_of,不能只看"来自哪个文件":当日文件里也可能装着 T-1 的
         # 宽度/成交额(TdxW 未刷新时 collect 取了上一根 K 线),那同样不是当日数据。
         # 对比基准是 session 期望数据日 exp(盘前/盘中=T-1,不应用日历日误伤正常盘前)。
         section_as_of = str(section.get("as_of") or "")[:10]
         stale_as_of = bool(section_as_of) and section_as_of != exp
-        if (source_day != day or stale_as_of) and quality in {"confirmed", "auto"}:
+        # 继承分支同样按 exp 比,而不是按日历日 day 比。原写法 `source_day != day` 与
+        # expected_day 机制自相矛盾:盘前 session 期望 T-1,继承自 T-1 文件的 section
+        # 明明就是**期望的那份数据**,却因"不是当日文件"被标 stale —— 四个核心块全被
+        # 这么标就触发 blocked,正是 README 记的 2026-07-30 盘后链被误阻断的方向。
+        # 只在 source_day 既非 day 也非 exp 时才算陈旧(纯放宽:不新增任何 stale/blocked)。
+        stale_source = source_day != day and source_day != exp
+        if (stale_source or stale_as_of) and quality in {"confirmed", "auto"}:
             quality = "stale"
         checks.append({
             "field": field,
             "quality": quality,
             "as_of": section.get("as_of") or source_day,
             "inherited": source_day != day,
+            "stale_source": stale_source,
             "stale_as_of": stale_as_of,
         })
     overseas = market.get("overseas_market", {})
     overseas_values = [overseas.get(k) for k in ("nasdaq_change_pct", "sp500_change_pct", "sox_change_pct", "nikkei_change_pct", "kospi_change_pct", "hstech_change_pct")]
     checks.append({"field": "overseas", "quality": "confirmed" if any(v is not None for v in overseas_values) and overseas.get("as_of") else ("candidate" if any(v is not None for v in overseas_values) else "missing"), "as_of": overseas.get("as_of")})
-    rank = {"confirmed": 1.0, "auto": 1.0, "candidate": 0.5, "partial": 0.4, "raw_only": 0.0, "stale": 0.0, "missing": 0.0}
+    rank = {"confirmed": 1.0, "auto": 1.0, "candidate": 0.5, "partial": 0.4, "degraded": 0.4,
+            "raw_only": 0.0, "stale": 0.0, "missing": 0.0}
     weights = {x["field"]: _CHECK_WEIGHT.get(x["field"], _DEFAULT_WEIGHT) for x in checks}
     total_w = sum(weights.values()) or 1
     score = sum(rank[x["quality"]] * weights[x["field"]] for x in checks) / total_w
@@ -325,6 +396,12 @@ def write_runtime_gate(day: str, expected_day: str | None = None) -> dict[str, A
     position_codes = {str(x.get("代码", "")).split(".")[0] for x in positions}
     quote_codes = {str(x.get("code", "")).split(".")[0] for x in quotes if x.get("date") == day and x.get("price") is not None}
     quotes_current = bool(position_codes) and position_codes.issubset(quote_codes)
+    # 行情日期是否**经数据自证**。快照源(tq_http / 东财 push2)没有日期字段,采集侧只能
+    # 把目标日写进去,这会消解 collect 里 `q["date"] != target` 那唯一一道陈旧检测
+    # (审计 C1)。此处仅**如实报告**、不改变 quotes_current 的既有判定:门控收紧必须
+    # 先跑几个交易日校准,README 记着 2026-07-30 悄悄收紧硬闸导致盘后复盘失败的教训。
+    unverified = sorted({str(x.get("code", "")).split(".")[0] for x in quotes
+                         if x.get("date") == day and x.get("date_verified") is False})
     technical = load_json(DATA / "holdings" / f"{day}_holding_technical_summary.json", [])
     technical_dates = sorted({str(x.get("latest_date")) for x in technical if x.get("latest_date")})
     technical_current = bool(technical_dates) and technical_dates == [day]
@@ -342,6 +419,10 @@ def write_runtime_gate(day: str, expected_day: str | None = None) -> dict[str, A
     increase_ready = decision["allow"]
     market_regime, regime_raw = decision["regime"], decision["regime_raw"]
     regime_ok, gate_limits = decision["regime_ok"], decision["limitations"]
+    if unverified:
+        gate_limits = gate_limits + [
+            f"行情日期未经数据自证(快照源无日期字段)：{'、'.join(unverified)}"
+            f"——postclose 时若 TdxW 未刷新可能实为 T-1 价"]
     position_gate = {
         "status": "pass" if increase_ready else ("degraded" if reduction_ready else "blocked"),
         "allow_precise_quantity": reduction_ready,
@@ -351,6 +432,7 @@ def write_runtime_gate(day: str, expected_day: str | None = None) -> dict[str, A
         "quote_snapshot": str(quote_path),
         "quote_date": quote_snapshot.get("as_of_date") if isinstance(quote_snapshot, dict) else None,
         "quotes_current": quotes_current,
+        "quotes_date_unverified": unverified,
         "market_regime": market_regime,
         "market_regime_raw": regime_raw,
         "regime_allows_increase": regime_ok,
@@ -364,7 +446,7 @@ def write_runtime_gate(day: str, expected_day: str | None = None) -> dict[str, A
         "technical_freshness": technical_freshness,
         "position_gate": position_gate,
         "market_quality": market_quality,
-        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "generated_at": cn_now().isoformat(timespec="seconds"),
     }
     out = DATA / "quality" / f"{day}_runtime_gate.json"
     out.parent.mkdir(parents=True, exist_ok=True)

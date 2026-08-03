@@ -34,6 +34,14 @@ def _warn(msg: str) -> None:
     print(f"[WARN] s_data: {msg}", file=sys.stderr)
 
 
+def _warn_if_nothing_loaded(out: dict, codes: list, source: str, root) -> None:
+    """请求了 N 只票却一只都没读到 → 出声。调用方(回测/研究)据此区分"数据没挂上"
+    与"因子没命中";此前空 dict 静默返回,一路走成 exit 0 的空结论(审计 E9)。"""
+    if codes and not out:
+        _warn(f"{source} 加载 0/{len(codes)} 只(root={root}):一根 K 线都没读到,"
+              "请确认数据根目录与代码列表")
+
+
 def _exchange(code6: str) -> str:
     """6 位代码 → 交易所前缀(SH/SZ/BJ)。"""
     if code6[:2] in ("60", "68"):
@@ -45,13 +53,18 @@ def _exchange(code6: str) -> str:
 
 def list_bundles(root: str | Path = DEFAULT_Q_ROOT) -> list[dict[str, Any]]:
     """扫描 root 下含 calendars/day.txt 的 qlib bundle,按日历首日期升序返回。
-    每项 {dir, calendar(list[str]), start, end}。异常 bundle 跳过。"""
+    每项 {dir, calendar(list[str]), start, end}。异常 bundle 跳过。
+
+    ⚠️ 空列表必须**出声**:静默返回 [] 会一路走成"0 只票→0 条信号→exit 0",
+    最后被读成"因子无判别力"而不是"数据根本没挂上"(审计 E9)。"""
     root = Path(root)
     out: list[dict[str, Any]] = []
     if not root.is_dir():
         _warn(f"qlib root 不存在: {root}")
         return out
+    n_sub = 0
     for sub in sorted(root.iterdir()):
+        n_sub += 1
         cal_path = sub / "calendars" / "day.txt"
         if not cal_path.is_file():
             continue
@@ -61,6 +74,9 @@ def list_bundles(root: str | Path = DEFAULT_Q_ROOT) -> list[dict[str, Any]]:
                 out.append({"dir": sub, "calendar": cal, "start": cal[0], "end": cal[-1]})
         except Exception as exc:  # noqa: BLE001
             _warn(f"读取日历失败 {cal_path}: {exc}")
+    if not out:
+        _warn(f"qlib root 存在但未发现任何 bundle(子项 {n_sub} 个,均缺 calendars/day.txt): {root}"
+              " —— 后续加载必然全空,请先确认 S_DATA_ROOT / --s-data-root")
     out.sort(key=lambda b: b["start"])
     return out
 
@@ -140,6 +156,7 @@ def load_bars_qlib(codes: list[str], count: int, start: Optional[str] = None,
                 out[c] = df
         except Exception as exc:  # noqa: BLE001
             _warn(f"加载 {c} 失败(qlib): {exc}")
+    _warn_if_nothing_loaded(out, codes, "qlib", root)
     return out
 
 
@@ -168,6 +185,7 @@ def load_bars_csv(codes: list[str], count: int, start: Optional[str] = None,
                 out[c] = df
         except Exception as exc:  # noqa: BLE001
             _warn(f"加载 {c} 失败(csv): {exc}")
+    _warn_if_nothing_loaded(out, codes, "csv", root)
     return out
 
 

@@ -16,7 +16,7 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import BASE  # noqa: E402
+from paths import BASE, cn_now  # noqa: E402
 
 MARKET=BASE/'01_data'/'market'; STATE=MARKET/'0amv_regime_history.json'; LEDGER=MARKET/'0amv_observations.jsonl'
 def load(p,d): return json.loads(p.read_text(encoding='utf-8')) if p.exists() else d
@@ -26,7 +26,7 @@ def append_observation(day:str, amv:dict):
     if value is None: return None
     record={'date':day,'amv_change_pct':float(value),'as_of':amv.get('as_of') or day,
             'quality':amv.get('quality') or 'candidate','source':amv.get('source') or 'market_timing_input',
-            'recorded_at':datetime.now().astimezone().isoformat(timespec='seconds')}
+            'recorded_at':cn_now().isoformat(timespec='seconds')}
     existing=[]
     if LEDGER.exists():
         existing=[json.loads(line) for line in LEDGER.read_text(encoding='utf-8').splitlines() if line.strip()]

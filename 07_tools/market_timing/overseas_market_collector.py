@@ -23,7 +23,7 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import BASE  # noqa: E402
+from paths import BASE, cn_now  # noqa: E402
 
 MARKET_DIR = BASE / "01_data" / "market"
 
@@ -153,7 +153,7 @@ def impact_summary(details: dict[str, Any]) -> str:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--date", default=datetime.now().strftime("%Y-%m-%d"))
+    ap.add_argument("--date", default=cn_now().strftime("%Y-%m-%d"))
     ap.add_argument("--input", default="")
     args = ap.parse_args()
     inp = Path(args.input) if args.input else MARKET_DIR / f"{args.date}_market_timing_input.json"

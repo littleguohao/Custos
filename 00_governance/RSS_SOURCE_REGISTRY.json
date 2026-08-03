@@ -27,7 +27,6 @@
       "tier": "S",
       "enabled": true,
       "audit": "200_rss",
-      "ssl_verify": false,
       "policy_stage": "confirmed_1",
       "note": "国务院/国办发文、万亿财政刺激、全国性产业顶层规划"
     },
@@ -39,7 +38,6 @@
       "tier": "S",
       "enabled": true,
       "audit": "200_rss",
-      "ssl_verify": false,
       "policy_stage": "confirmed_1",
       "note": "GDP、CPI、PPI、PMI等核心宏观数据发布"
     },
@@ -51,7 +49,6 @@
       "tier": "S",
       "enabled": true,
       "audit": "200_rss",
-      "ssl_verify": false,
       "policy_stage": "confirmed_1",
       "note": "统计公报、数据解读、新闻发布会"
     },

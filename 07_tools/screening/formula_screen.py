@@ -179,10 +179,18 @@ def _extract_hits(value: Any, date: str, name_map: dict[str, str]) -> list[dict]
     return hits
 
 
-def _load_manual_pools(registry: dict, date: str, name_map: dict[str, str]) -> tuple[list[dict], int]:
-    """自选池（manual_pools）→ 与公式条目同构的伪公式列表。本地文件，不依赖 TQ。"""
+def _load_manual_pools(registry: dict, date: str,
+                       name_map: dict[str, str]) -> tuple[list[dict], int, list[str]]:
+    """自选池（manual_pools）→ 与公式条目同构的伪公式列表。本地文件，不依赖 TQ。
+
+    第三个返回值是失败池的诊断串。自选池是公式之外的**独立候选通道**：blk 文件被改名、
+    TDX_ROOT 指错、权限丢失时这条通道整条归零，而状态判定此前把 manual_pool 显式排除
+    （`category != "manual_pool"`）→ status 仍是 ok（审计 B6），报告读成"自选池今天没有
+    符合条件的票"，与"根本没读到池"无法区分。
+    """
     entries: list[dict] = []
     hit_total = 0
+    errors: list[str] = []
     for p in registry.get("manual_pools", []):
         entry: dict[str, Any] = {
             "id": p.get("id", ""),
@@ -197,10 +205,15 @@ def _load_manual_pools(registry: dict, date: str, name_map: dict[str, str]) -> t
             continue
         pool = manual_pools.load_pool(p.get("block_name", ""), date, name_map=name_map)
         entry["hits"] = pool["hits"]
+        if pool.get("excluded"):
+            # 非 A 股标的（ETF/可转债/B股）不进候选，但要留痕，
+            # 否则"池里 20 只只出来 3 只"无从解释
+            entry["excluded_non_a_share"] = pool["excluded"]
         if pool.get("error"):
             entry["error"] = pool["error"]
+            errors.append(f"{entry['id'] or p.get('block_name', '')}:{pool['error']}")
         hit_total += len(pool["hits"])
-    return entries, hit_total
+    return entries, hit_total, errors
 
 
 def screen_formulas(
@@ -236,8 +249,39 @@ def screen_formulas(
     result["name_map_source"] = diag.get("name_map_source", "injected")
     result["st_filter"] = diag.get("st_filter", "ok" if name_map else "unavailable")
 
-    pool_entries, pool_hits = _load_manual_pools(registry, date, name_map)
+    # 降级备注在**所有** return 路径上统一追加：早退分支（TdxW 关闭 / universe 空）用 `=`
+    # 覆盖 degraded_reason，若在分支之前直接写就会被冲掉。
+    pending_notes: list[str] = []
+
+    def _finalize(res: dict) -> dict:
+        for note in pending_notes:
+            if res["status"] == "ok":
+                res["status"] = "partial"
+            res["degraded_reason"] = (
+                f"{res['degraded_reason']};{note}" if res["degraded_reason"] else note)
+        return res
+
+    if result["st_filter"] != "ok":
+        # 名称表是 ST 硬排除的唯一依据；它挂了这批命中就**不能声称筛选正常**（审计 B5）。
+        # 下游 enrich 读 st_filter 走 fail-closed（无名候选按 st_unverified 剔除）。
+        pending_notes.append(
+            "st_filter_unavailable(名称表在线+缓存均不可用 → ST 硬排除失效,"
+            "下游按 st_unverified 剔除无名候选)")
+
+    pool_entries, pool_hits, pool_errors = _load_manual_pools(registry, date, name_map)
     result["formulas"].extend(pool_entries)
+    enabled_pools = [e for e in pool_entries if e.get("enabled")]
+    if not enabled_pools:
+        result["manual_pool_status"] = "none"
+    elif not pool_errors:
+        result["manual_pool_status"] = "ok"
+    else:
+        result["manual_pool_status"] = (
+            "unavailable" if len(pool_errors) == len(enabled_pools) else "partial")
+        # 自选池读不到 ≠ 池里今天没票（审计 B6）
+        pending_notes.append(
+            f"manual_pool_{result['manual_pool_status']}:{','.join(pool_errors)}"
+            "(自选池通道读取失败,候选缺口不代表池内无票)")
 
     if not is_running():
         result["status"] = "partial" if pool_hits else "unavailable"
@@ -248,7 +292,7 @@ def screen_formulas(
                 "enabled": bool(f.get("enabled")), "hits": [],
                 "error": "tdxw_not_running" if f.get("enabled") else None,
             })
-        return result
+        return _finalize(result)
 
     if not stock_list:
         result["status"] = "partial" if pool_hits else "unavailable"
@@ -256,7 +300,7 @@ def screen_formulas(
                                     "**全市场公式初筛整段跳过**,当日命中仅来自自选池,不代表市场无标的)")
         print("[WARN] universe 为空:本次未扫全市场,只有自选池命中。检查 TDX_ROOT/vipdoc 是否可读",
               file=sys.stderr)
-        return result
+        return _finalize(result)
 
     tq_codes = [local_tdx_data.normalize_code(c) for c in stock_list]
 
@@ -332,7 +376,10 @@ def screen_formulas(
     ):
         result["status"] = "partial"
         result["degraded_reason"] = "some_formulas_failed"
-    return result
+    # 注：上面这个 any() 之所以排除 manual_pool，是因为自选池失败有自己的 manual_pool_status
+    # 与专门的降级备注（见 _finalize/pending_notes），不与"公式失败"混同；但它**必须**同样
+    # 让 status 脱离 ok —— 原实现只做了排除、没做替代，于是自选池整条通道归零仍报 ok（审计 B6）。
+    return _finalize(result)
 
 
 def main(argv: Optional[list] = None) -> int:
@@ -353,6 +400,7 @@ def main(argv: Optional[list] = None) -> int:
         "universe_size": result["universe_size"],
         "universe_source": result.get("universe_source", ""),
         "st_filter": result.get("st_filter", ""),
+        "manual_pool_status": result.get("manual_pool_status", ""),
         "hit_total": sum(len(f.get("hits", [])) for f in result["formulas"]),
         "output": str(out_path),
     }

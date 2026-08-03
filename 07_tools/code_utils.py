@@ -55,7 +55,9 @@ def market_of(code: str) -> str:
     if not s.isdigit():
         return ""
     s = s.zfill(6)
-    if s.startswith("880"):
+    # 880/881 均为通达信板块指数,同属沪市。881xxx 是 tdxzs3.cfg 里的 467 个细分行业,
+    # 若漏掉会落进下面的 "8" 前缀被判成北交所,读 bj881xxx.day 得到空数据且无告警(审计 B11)。
+    if s.startswith(("880", "881")):
         return "SH"
     if s.startswith(("920", "8", "4")):
         return "BJ"

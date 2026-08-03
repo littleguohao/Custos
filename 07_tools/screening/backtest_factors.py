@@ -44,6 +44,13 @@ except Exception:  # noqa: BLE001
 
 J_LOW_THRESHOLD = 13.0
 
+# 尾窗口（evaluate/gate_window）的保守预热长度：覆盖本模块所有门槛与打分器的
+# 最长回看 —— s_shape 的 OVERHEAD_WIN=60 / MA50、CZ 的 250 日窗口、
+# _sc_momentum 的 100+20 自适应回看、以及 KDJ/MACD 递归指标的衰减预热。
+# 取 260（＝生产链默认加载根数）后与全前缀逐字段一致，见
+# tests/test_audit_opt_screening.py::test_evaluate_gate_window_matches_full_prefix。
+GATE_WINDOW_SAFE = 260
+
 
 def j_low_gate(df_slice: pd.DataFrame) -> bool:
     """as-of 切片当日 KDJ 的 J<13（B1 买点区）。kdj 不可用时视为不通过。"""
@@ -199,16 +206,81 @@ ENTRY_GATES["j_low_adx25"] = j_low_adx25_gate
 ENTRY_GATES["j_low_adx60"] = j_low_adx60_gate
 
 
+# --- 门槛统计:"没跑成"必须与"真的不命中"分开 -----------------------------------
+# 一个 gate 里 `except Exception: return False` 会把**依赖缺失/检测器异常**伪装成
+# "这根 K 线不符合形态"——于是整轮回测 0 命中,结论写成"该因子无判别力",而真相是它
+# 一次都没被真正评估过(审计 E8)。库内 --sector-filter 走的是 ap.error 硬校验,两套标准。
+GATE_STATS: dict[str, dict[str, int]] = {}
+_WARNED_ONCE: set[str] = set()
+BROKEN_GATE_KINDS = ("dep_missing", "error")
+
+
+def reset_gate_stats() -> None:
+    """清空门槛统计(单测/多轮扫描之间隔离)。"""
+    GATE_STATS.clear()
+    _WARNED_ONCE.clear()
+
+
+def gate_stats() -> dict[str, dict[str, int]]:
+    """{gate 名: {hit/miss/dep_missing/error/short_history: 次数}}。"""
+    return GATE_STATS
+
+
+def _note_gate(name: str, kind: str) -> None:
+    d = GATE_STATS.setdefault(name, {})
+    d[kind] = d.get(kind, 0) + 1
+
+
+def _warn_once(key: str, msg: str) -> None:
+    if key not in _WARNED_ONCE:
+        _WARNED_ONCE.add(key)
+        print(f"[WARN] {msg}", file=sys.stderr)
+
+
+def gate_stats_report() -> dict[str, Any]:
+    """整理门槛统计;`broken` 非空 = 有门槛因依赖缺失/异常而**从未真正评估**,
+    此时"该因子无判别力"的结论不成立,必须先修依赖再重跑。"""
+    broken: list[dict[str, Any]] = []
+    lines: list[str] = []
+    for name, st in sorted(GATE_STATS.items()):
+        n_bad = sum(st.get(k, 0) for k in BROKEN_GATE_KINDS)
+        lines.append(f"  {name}: 命中 {st.get('hit', 0)} / 不命中 {st.get('miss', 0)}"
+                     f" / 依赖缺失 {st.get('dep_missing', 0)} / 异常 {st.get('error', 0)}"
+                     f" / 历史不足 {st.get('short_history', 0)}")
+        if n_bad:
+            broken.append({"gate": name, "n_failed": n_bad, **st})
+    if broken:
+        lines.append("  ⚠️ 上列门槛存在**依赖缺失/异常**:这些 K 线根本没被评估过,"
+                     "不得据此下'该因子无判别力'的结论——先修依赖再重跑")
+    return {"broken": broken, "stats": {k: dict(v) for k, v in GATE_STATS.items()},
+            "text": "\n".join(lines)}
+
+
 def platform_pullback_gate(df_slice: pd.DataFrame) -> bool:
     """平台突破回踩(回踩不破前期平台高点):三段式——平台(≥2触上沿)→有效突破→
-    回落至平台高附近但未破。止损天然=平台高×0.98(--stop-mode platform)。绝不 raise。"""
+    回落至平台高附近但未破。止损天然=平台高×0.98(--stop-mode platform)。绝不 raise。
+    依赖缺失/检测器异常与"真的不命中"分开计数(见 gate_stats_report)。"""
     if len(df_slice) < 65:
+        _note_gate("platform_pullback", "short_history")
         return False
     try:
         from platform_pullback import detect_platform_pullback  # noqa: PLC0415
-        return detect_platform_pullback(df_slice) is not None
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        _note_gate("platform_pullback", "dep_missing")
+        _warn_once("platform_pullback:dep",
+                   f"platform_pullback 检测器不可用({exc}):该入场门槛将全程 0 命中,"
+                   "结果只能读成'没跑成'而非'无判别力'")
         return False
+    try:
+        hit = detect_platform_pullback(df_slice) is not None
+    except Exception as exc:  # noqa: BLE001
+        _note_gate("platform_pullback", "error")
+        _warn_once("platform_pullback:err",
+                   f"platform_pullback 检测器异常({exc.__class__.__name__}: {exc}):"
+                   "该 K 线未被评估,已计入 GATE_STATS.error")
+        return False
+    _note_gate("platform_pullback", "hit" if hit else "miss")
+    return hit
 
 
 ENTRY_GATES["platform_pullback"] = platform_pullback_gate
@@ -459,10 +531,17 @@ def sample_codes(all_codes: list[str], n: int, seed: int = 0) -> list[str]:
     return sorted(random.Random(seed).sample(codes, n))
 
 
-def forward_metrics(df: pd.DataFrame, i: int, horizon: int) -> dict[str, Any]:
+def forward_metrics(df: pd.DataFrame, i: int, horizon: int,
+                    require_full: bool = True) -> dict[str, Any]:
     """as-of 第 i 根后、未来 horizon 根内的前向收益/MFE/MAE（严格只看 i+1..i+H）。
 
     入场基准＝第 i 根收盘价；前向窗口＝df[i+1 : i+horizon]（不含 i，杜绝未来泄漏）。
+
+    ``require_full=True``（默认）时窗口不足 horizon 根即**删失**返回
+    ``available=False``。此前是静默截断:样本末端只剩 3 根也照样把 3 日收益写进
+    ``ret20`` 字段,于是「20 日收益」这一列混着 3~19 日的短窗收益参与统计,横截面
+    比较和分位数全部失真。launch_point_study 对同一问题做的是删失,同库两套标准。
+    传 ``require_full=False`` 可取回旧行为,此时结果带 ``truncated=True``。
     """
     n = len(df)
     if i < 0 or i >= n - 1:
@@ -470,6 +549,11 @@ def forward_metrics(df: pd.DataFrame, i: int, horizon: int) -> dict[str, Any]:
     entry = float(df["close"].iloc[i])
     if not entry:
         return {"available": False, "reason": "入场价为0"}
+    available_bars = n - 1 - i
+    if available_bars < horizon:
+        if require_full:
+            return {"available": False, "reason": "前向窗口不足",
+                    "bars": available_bars, "need": horizon, "censored": True}
     j = min(i + horizon, n - 1)
     fut = df.iloc[i + 1:j + 1]
     if fut.empty:
@@ -480,6 +564,7 @@ def forward_metrics(df: pd.DataFrame, i: int, horizon: int) -> dict[str, Any]:
     return {
         "available": True,
         "bars": len(fut),
+        "truncated": len(fut) < horizon,
         "fwd_return": last / entry - 1,
         "mfe": hi / entry - 1,   # 最大有利偏移
         "mae": lo / entry - 1,   # 最大不利偏移
@@ -502,14 +587,30 @@ def evaluate(
     max_signals_per_code: Optional[int] = None,
     entry_gate: Optional[Callable[[pd.DataFrame], bool]] = None,
     scorer: Optional[Callable[[pd.DataFrame, str], Optional[dict]]] = None,
+    gate_window: int = 0,
 ) -> list[dict[str, Any]]:
     """逐股逐日走查：as-of 切片算打分，配前向指标。返回逐条记录（可复盘）。
 
     entry_gate(df_slice)->bool 若提供，只在返回 True 的 as-of 日评估（如 J<13 买点区）。
     scorer(df_slice, code)->{"score","suggestion","aux","components"} 或 None（默认 s_shape）。
     记录字段 s_star 存所选打分器的分数（沿用旧字段名，summarize/矩阵零改动）。
+
+    gate_window>0：只把**最近 gate_window 根**传给 gate/scorer（而非整段前缀），
+    与 launch_point_study 同一做法。原实现每根 K 线都切 df[:i+1] 再让打分器
+    `.astype(float).to_numpy()` 整段——结构上是 O(n²) 时间＋线性增长的临时对象。
+    ⚠️ 预热必须足够，否则**会改变因子值**（不是"略有出入"）：KDJ/MACD 是递归指标，
+    `_sc_momentum` 的回看长度还随 len(df) 自适应（需 ≥121 根才等于全历史口径）。
+    ``GATE_WINDOW_SAFE`` 是覆盖本模块全部打分器/门槛的保守值，与整段前缀逐字段等价
+    （tests/test_audit_opt_screening.py::test_evaluate_gate_window_matches_full_prefix）。
+
+    默认 0＝整段前缀。实测（2026-08-03 审计）：compute_s_shape 的单次开销
+    100/260/1000/4000 根分别 2.58/2.60/2.61/2.65 ms —— 几乎与切片长度无关，
+    被 pandas 的固定开销主导；3000 根、每根都出信号时 peak 内存 1.8MB→1.6MB。
+    也就是说这里的 O(n²) 是**结构性的、当前不是瓶颈**，故只提供开关、不改默认，
+    保住已跑结果的可复现性；将来若加了真正随长度线性的打分器，直接开 gate_window。
     """
     scorer = scorer or _sc_s_shape
+    gate_window = max(0, int(gate_window or 0))
     records: list[dict[str, Any]] = []
     for code, raw in bars_by_code.items():
         if raw is None or len(raw) == 0:
@@ -518,7 +619,8 @@ def evaluate(
         n = len(df)
         emitted = 0
         for i in range(min_bars, n - 1, max(1, step)):
-            slice_df = df.iloc[:i + 1]  # 只含 0..i（含当日），无未来
+            lo = max(0, i + 1 - gate_window) if gate_window else 0
+            slice_df = df.iloc[lo:i + 1]  # 只含 lo..i（含当日），无未来
             if entry_gate is not None and not entry_gate(slice_df):
                 continue
             res = scorer(slice_df, code)
@@ -535,10 +637,11 @@ def evaluate(
                 rec[f"c_{k}"] = v
             rec["c_liquidity"] = _liquidity_yi(slice_df)  # 流动性(亿元)：可历史回测的正交因子
             for h in horizons:
-                fm = forward_metrics(df, i, h)  # 只用到 i+1..i+H
+                fm = forward_metrics(df, i, h)  # 只用到 i+1..i+H；窗口不足即删失
                 rec[f"ret{h}"] = fm.get("fwd_return")
                 rec[f"mfe{h}"] = fm.get("mfe")
                 rec[f"mae{h}"] = fm.get("mae")
+                rec[f"ret{h}_bars"] = fm.get("bars")   # 删失/截断可诊断
             records.append(rec)
             emitted += 1
             if max_signals_per_code and emitted >= max_signals_per_code:
@@ -599,8 +702,17 @@ def summarize(records: list[dict[str, Any]], horizon: int = 10) -> dict[str, Any
         rows = [r for r in records if r.get("suggestion") == sug]
         by_suggestion[sug] = _stats(rows, horizon)
 
-    # 分项命中 lift：分项得分 > 0 视为命中，比较命中/未命中两组
-    comp_keys = [k for k in (records[0].keys() if records else []) if k.startswith("c_")]
+    # 分项命中 lift：分项得分 > 0 视为命中，比较命中/未命中两组。
+    # 审计：键集原来只取 records[0]——第一条记录恰好缺某个 c_* 分项（打分器降级、
+    # 分项 available=False、或混跑了两个打分器）时，后面所有记录的该分项被静默丢掉，
+    # 报告里"没有这一项"和"这一项没 lift"长得一模一样。改成全量取并集。
+    comp_keys: list[str] = []
+    seen: set[str] = set()
+    for r in records:
+        for k in r:
+            if k.startswith("c_") and k not in seen:
+                seen.add(k)
+                comp_keys.append(k)     # 保持首次出现顺序，输出稳定可 diff
     by_component = {}
     for ck in comp_keys:
         hit = [r for r in records if (r.get(ck) or 0) > 0]
@@ -700,16 +812,80 @@ def _bbi_series(close: pd.Series) -> pd.Series:
     return (c.rolling(3).mean() + c.rolling(6).mean() + c.rolling(12).mean() + c.rolling(24).mean()) / 4
 
 
+def _limit_pct(code: str) -> float:
+    """Daily price-limit percentage inferred from the code prefix."""
+    raw = str(code).strip().upper().split(".")[0]
+    if raw.startswith(("688", "300", "301")):
+        return 20.0
+    if raw.startswith(("920", "83", "87", "43")):        # 北交所
+        return 30.0
+    return 10.0
+
+
+def tradable_flags(df: pd.DataFrame, code: str) -> tuple[np.ndarray, np.ndarray]:
+    """Per-bar (can_buy, can_sell) flags.
+
+    A backtest that fills every order at the closing price silently assumes an
+    always-liquid market. In A-shares that is wrong in three ways that all
+    inflate results:
+
+      * a limit-up close cannot be bought (especially a sealed 一字板 where
+        high == low), yet the old code entered at exactly that price;
+      * a limit-down close cannot be sold, yet stop losses filled there;
+      * a halted day (volume == 0) has no trading at all, yet stops filled.
+
+    Flags are conservative: any limit-up bar is treated as unbuyable rather
+    than only sealed ones, because a backtest should not assume it caught the
+    intraday dip.
+    """
+    close = df["close"].astype(float).to_numpy()
+    high = df["high"].astype(float).to_numpy()
+    low = df["low"].astype(float).to_numpy()
+    vol = (df["volume"].astype(float).to_numpy() if "volume" in df.columns
+           else np.ones(len(close)))
+    prev = np.concatenate(([np.nan], close[:-1]))
+    limit = _limit_pct(code) / 100.0
+    with np.errstate(invalid="ignore"):
+        chg = close / prev - 1.0
+    # 容差 0.3%:交易所涨停价按四舍五入取整,收盘正好封板时算得的比例会略有出入
+    tol = 0.003
+    halted = vol <= 0
+    limit_up = chg >= (limit - tol)
+    limit_down = chg <= -(limit - tol)
+    sealed = high == low                      # 一字板:全天单一价位,完全无法成交
+    can_buy = ~halted & ~limit_up & ~(sealed & limit_up)
+    can_sell = ~halted & ~limit_down & ~(sealed & limit_down)
+    can_buy[0] = False                        # 首根无前收,无法判定涨跌停
+    can_sell[0] = False
+    return can_buy, can_sell
+
+
+def _next_tradable(flags: np.ndarray, start: int, max_delay: int) -> Optional[int]:
+    """First index >= start where flags is True, within max_delay bars."""
+    end = min(len(flags) - 1, start + max_delay)
+    for k in range(start, end + 1):
+        if flags[k]:
+            return k
+    return None
+
+
 def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
                       bbi_exit_consec: int = 2, time_stop_bars: int = 0,
                       stop_mode: str = "low", stop_pct: float = 8.0,
-                      stop_override: Optional[float] = None) -> dict[str, Any]:
+                      stop_override: Optional[float] = None,
+                      can_sell: Optional[np.ndarray] = None,
+                      max_exit_delay: int = 5) -> dict[str, Any]:
     """B1 交易规则模拟：买入当日收盘进场；
     止损：stop_override 显式指定(如平台高×0.98)优先;否则 stop_mode='low'=买入当日最低价
     (超卖贴低时几乎无空间)；'pct'=entry×(1-stop_pct%)(固定空间)。
     站上 BBI 后若连续 bbi_exit_consec 日收盘跌破 BBI 则止盈卖出；可选 time_stop_bars 根后到期平仓。
     优先级：先判当日最低是否破止损(盘中)，再判收盘 BBI 退出，再判时间止损；均未触发则持有到数据末。
-    跳空低开(open<stop)按开盘价成交。返回 {exit_idx, reason, ret, holding, risk_frac}。"""
+    跳空低开(open<stop)按开盘价成交。返回 {exit_idx, reason, ret, holding, risk_frac}。
+
+    can_sell:逐根可卖标记(见 tradable_flags)。给出时,跌停/停牌当日**不成交**,顺延到
+    max_exit_delay 根内的下一个可卖日按其收盘价成交(reason 加 _delayed 后缀)。此前跌停与
+    停牌日的止损照样成交,系统性高估了策略的止损执行力(审计 E5)。
+    """
     close = df["close"].astype(float).values
     low = df["low"].astype(float).values
     open_ = df["open"].astype(float).values
@@ -723,11 +899,25 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
     bbi_v = bbi.values
     has_above = False
     consec_below = 0
+
+    def _exit(j: int, reason: str, price: float) -> dict[str, Any]:
+        """Settle an exit at bar j, deferring to the next sellable bar."""
+        if can_sell is not None and not can_sell[j]:
+            k = _next_tradable(can_sell, j, max_exit_delay)
+            if k is None:                     # 一直卖不掉:持有到数据末
+                return {"exit_idx": n - 1, "reason": reason + "_unfillable",
+                        "ret": float(close[-1]) / entry - 1,
+                        "holding": (n - 1) - entry_idx, "risk_frac": risk_frac}
+            return {"exit_idx": k, "reason": reason + "_delayed",
+                    "ret": float(close[k]) / entry - 1,
+                    "holding": k - entry_idx, "risk_frac": risk_frac}
+        return {"exit_idx": j, "reason": reason, "ret": price / entry - 1,
+                "holding": j - entry_idx, "risk_frac": risk_frac}
+
     for j in range(entry_idx + 1, n):
         if low[j] <= stop:                                    # ① 盘中破止损
             fill = float(open_[j]) if open_[j] < stop else stop
-            return {"exit_idx": j, "reason": "stop", "ret": fill / entry - 1,
-                    "holding": j - entry_idx, "risk_frac": risk_frac}
+            return _exit(j, "stop", fill)
         b = bbi_v[j]
         if b == b:                                            # ② 收盘 BBI 退出（b==b 排除 NaN）
             if close[j] > b:
@@ -736,13 +926,11 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
                 if has_above:
                     consec_below += 1
                     if consec_below >= bbi_exit_consec:
-                        return {"exit_idx": j, "reason": "bbi_exit", "ret": float(close[j]) / entry - 1,
-                                "holding": j - entry_idx, "risk_frac": risk_frac}
+                        return _exit(j, "bbi_exit", float(close[j]))
             else:
                 consec_below = 0
         if time_stop_bars and (j - entry_idx) >= time_stop_bars:   # ③ 时间止损
-            return {"exit_idx": j, "reason": "time_stop", "ret": float(close[j]) / entry - 1,
-                    "holding": j - entry_idx, "risk_frac": risk_frac}
+            return _exit(j, "time_stop", float(close[j]))
     return {"exit_idx": n - 1, "reason": "open_end", "ret": float(close[-1]) / entry - 1,
             "holding": (n - 1) - entry_idx, "risk_frac": risk_frac}
 
@@ -771,7 +959,9 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
                     entry_gate: Optional[Callable[[pd.DataFrame], bool]] = None,
                     stop_mode: str = "low", stop_pct: float = 8.0,
                     feature_panel: bool = False,
-                    sector_gate: Optional[Callable[[str, str], bool]] = None) -> list[dict[str, Any]]:
+                    sector_gate: Optional[Callable[[str, str], bool]] = None,
+                    tradability: bool = True,
+                    max_exit_delay: int = 5) -> list[dict[str, Any]]:
     """在 scorer 判「可买」的 as-of 日进场，按 B1 规则(止损+BBI)模拟到出场；非重叠(平仓后再找)。
 
     cost_bps：单边成本合计的往返基点(A股约20~30bps含佣金/印花税/滑点)，从每笔收益中扣除，看净期望。
@@ -779,6 +969,9 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
     bbi_exit_consec/time_stop_bars：出场规则参数(可扫描)。每笔记录 r_multiple=净收益/风险敞口，供风险定额仓位。
     collect_all=True：不做单股非重叠去重，返回**每个**可买as-of日的候选(含 score)，供组合级 top-N 横截面择优。
     entry_gate(df_slice)->bool：进场硬门槛(如 j_low_gate=当日 J<13，B1 核心买点)；不满足则不进场。
+    tradability=True(默认)：施加**可成交性护栏**——涨停/停牌日不得按收盘价买入，跌停/停牌日
+      不得卖出(顺延至 max_exit_delay 根内的下一个可卖日)。关掉可复现旧口径,但那会系统性
+      高估收益:一字板照买、跌停照卖、停牌日照止损(审计 E5)。
     """
     scorer = scorer or _sc_b1_pullback
     cost = cost_bps / 1e4
@@ -802,6 +995,8 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
         if n < min_bars + 2:
             continue
         bbi = _bbi_series(df["close"])
+        # 可成交性:涨停/停牌不可买,跌停/停牌不可卖(逐股算一次,循环内复用)
+        buy_ok, sell_ok = tradable_flags(df, code) if tradability else (None, None)
         emitted = 0
         i = min_bars
         while i < n - 1:
@@ -814,7 +1009,8 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
                 i += max(1, step)
                 continue
             res = scorer(slice_df, code)
-            if res is not None and res.get("suggestion") == "可买" and _amv_ok(entry_date):
+            if (res is not None and res.get("suggestion") == "可买" and _amv_ok(entry_date)
+                    and (buy_ok is None or buy_ok[i])):     # 涨停/停牌当日买不到
                 stop_ov = None
                 if stop_mode == "platform":                  # 平台高止损:形态自带止损位
                     try:
@@ -827,7 +1023,8 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
                 tr = simulate_b1_trade(df, i, bbi, bbi_exit_consec=bbi_exit_consec,
                                        time_stop_bars=time_stop_bars,
                                        stop_mode=stop_mode, stop_pct=stop_pct,
-                                       stop_override=stop_ov)
+                                       stop_override=stop_ov,
+                                       can_sell=sell_ok, max_exit_delay=max_exit_delay)
                 ret_net = tr["ret"] - cost
                 rf = tr.get("risk_frac") or 0.0
                 rf_eff = max(rf, _R_RISK_FLOOR)   # 地板：周线收盘贴低时 risk_frac≈0 会把 R 炸成极端值
@@ -1212,6 +1409,38 @@ def _load_bars_local(codes: list[str], count: int, start: Optional[str] = None,
     return out
 
 
+def _report_gates() -> None:
+    """入场门槛统计打到 stderr;依赖缺失/异常时额外顶一条告警(否则 0 命中会被读成'无判别力')。"""
+    gr = gate_stats_report()
+    if not gr["text"]:
+        return
+    print("[INFO] 入场门槛统计:\n" + gr["text"], file=sys.stderr)
+    if gr["broken"]:
+        print("[WARN] 入场门槛存在依赖缺失/异常,本轮结果**不可用于判定因子有效性**",
+              file=sys.stderr)
+
+
+def _empty_result_guard(n_loaded: int, n_out: int, unit: str, allow_empty: bool) -> int:
+    """空结果护栏:一根 K 线都没加载 / 一条结果都没产出 → **非零退出且不落盘**。
+
+    回测里"全空"与"因子无效"长得一模一样:静默 exit 0 会让"没数据"被当成"没效果"写进
+    结论,空产物还会被下游续跑校验当成"已完成"永久复用(审计 E9)。确需空结果时显式
+    --allow-empty(降级为 WARN 并照常落盘)。"""
+    msg = None
+    if n_loaded <= 0:
+        msg = "未加载到任何 K 线(数据源/代码列表/日期区间有问题?)"
+    elif n_out <= 0:
+        msg = f"加载了 {n_loaded} 只票却产出 0 {unit}(门槛过严/依赖失败?)"
+    if msg is None:
+        return 0
+    if allow_empty:
+        print(f"[WARN] {msg};--allow-empty 已开,按空结果继续", file=sys.stderr)
+        return 0
+    print(f"[ERR] {msg};拒绝落盘——空结果会被误读成'该因子无判别力'。"
+          "确需空结果请显式加 --allow-empty", file=sys.stderr)
+    return 2
+
+
 def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int], dict]] = None) -> int:
     ap = argparse.ArgumentParser(description="S_shape 因子走查回测校准（纯分析，只读本地日线）")
     ap.add_argument("--codes", default="", help="逗号分隔的 6 位代码（与 --universe-sample 二选一）")
@@ -1231,6 +1460,12 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     ap.add_argument("--count", type=int, default=500, help="每股回溯 K 线根数")
     ap.add_argument("--horizons", default="5,10,20", help="前向窗口(日)，逗号分隔")
     ap.add_argument("--step", type=int, default=1, help="as-of 采样步长")
+    ap.add_argument("--gate-window", type=int, default=0,
+                    help=f"传给 gate/scorer 的尾窗口根数（0=整段前缀，默认）。"
+                         f"{GATE_WINDOW_SAFE} 是与整段前缀逐字段等价的保守预热值；"
+                         "调得更小可能改变因子值（KDJ/MACD 递归、momentum 回看随长度自适应）。"
+                         "实测本模块打分器的单次开销几乎与切片长度无关（见 evaluate docstring），"
+                         "所以默认不开、保持已跑结果可复现")
     ap.add_argument("--entry-filter", choices=list(ENTRY_GATES.keys()), default="none",
                     help="只在满足入场条件的 as-of 日评估：none=每根K线；j_low=仅 J<13 买点区")
     ap.add_argument("--scorer", choices=list(SCORERS.keys()), default="s_shape",
@@ -1276,8 +1511,11 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     ap.add_argument("--sector-members",
                     default=str(Path(__file__).resolve().parents[2] / "01_data" / "market" / "sector_members.json"),
                     help="板块成员映射 JSON({sector:[codes]}; fetcher --members 产出)")
+    ap.add_argument("--allow-empty", action="store_true",
+                    help="允许空结果(0 K线/0 信号)仍 exit 0 并落盘;默认拒绝——空结果会被误读成'因子无效'")
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
+    reset_gate_stats()
 
     if args.universe_sdata:
         import s_data  # noqa: PLC0415
@@ -1340,9 +1578,11 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                       f"样本期与不带 filter 的 baseline 不可比", file=sys.stderr)
         trades: list[dict[str, Any]] = []
         import gc
+        n_loaded = 0
         for k, c in enumerate(codes):     # 流式：逐股加载→评估→释放，避免全量载入 OOM
             d = load([c], args.count)
             if d:
+                n_loaded += len(d)
                 trades += evaluate_trades(
                     d, scorer=SCORERS[args.scorer], step=args.step, weekly=args.weekly,
                     cost_bps=args.cost_bps, amv_regime=amv_regime, bbi_exit_consec=args.bbi_consec,
@@ -1355,6 +1595,10 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
             if (k + 1) % 500 == 0:
                 gc.collect()
                 print(f"[INFO] 已处理 {k + 1}/{len(codes)} 只，累计 {len(trades)} 笔候选", file=sys.stderr)
+        _report_gates()
+        rc_empty = _empty_result_guard(n_loaded, len(trades), "笔交易", args.allow_empty)
+        if rc_empty:
+            return rc_empty
         tsum = summarize_trades(trades)
         payload = {"mode": "trade_sim", "scorer": args.scorer, "weekly": args.weekly,
                    "data_source": args.data_source, "start": args.start or None, "end": args.end or None,
@@ -1399,7 +1643,12 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     bars = load(codes, args.count)
     records = evaluate(bars, horizons=horizons, step=args.step,
                        entry_gate=ENTRY_GATES[args.entry_filter],
-                       scorer=SCORERS[args.scorer])
+                       scorer=SCORERS[args.scorer],
+                       gate_window=args.gate_window)
+    _report_gates()
+    rc_empty = _empty_result_guard(len(bars or {}), len(records), "条信号", args.allow_empty)
+    if rc_empty:
+        return rc_empty
     summary = summarize(records, horizon=args.summary_horizon)
     matrix = horizon_band_matrix(records, horizons)
 

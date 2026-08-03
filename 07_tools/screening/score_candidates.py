@@ -12,7 +12,10 @@
 | 中 | B | C | D |
 | 弱 | C | D | D |
 
-- 技术结构 = technical_score 分级（强>=60 / 中30-59 / 弱<30）。
+- 技术结构 = technical_score 分级。**两条路径两套阈值**（均待回测，见
+  technical_score docstring）：s_shape v3.0 可用时按 S** 走 65/40
+  （s_shape.SSTAR_STRONG/SSTAR_MID）；无 s_shape 数据回退 patterns 累加时走
+  60/30（TECH_STRONG_FALLBACK/TECH_MID_FALLBACK）。统一为一套需策略 owner 拍板。
 - 资金意图 = capital_intent_strength（放量点火/龙头量/底部巨量/相对强度/知行多头/
   量能持续；命中派发或 MACD 顶背离则判资金流出=弱）。
 
@@ -38,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -55,6 +59,7 @@ _SCREEN_DIR = Path(__file__).resolve().parent
 if str(_SCREEN_DIR) not in sys.path:
     sys.path.insert(0, str(_SCREEN_DIR))
 from s_shape import sstar_level  # noqa: E402
+from runtime_guards import normalize_regime  # noqa: E402
 
 SCREENING_DIR = DATA / "screening"
 CZ_SECTOR_PREF_PATH = GOVERNANCE / "CZ_SECTOR_PREFERENCE.json"
@@ -85,6 +90,16 @@ NEXT_STEP = {
     "C": "long_term_track",
     "D": "avoid",
 }
+
+WAVE_TYPE_LABELS = {"buildup": "建仓波", "rally": "拉升波", "sprint": "冲刺波"}
+
+# 回退打分路径（无 s_shape 数据时的 patterns 累加分）的技术分层阈值 —— 单一定义处。
+# ⚠️ 主路径（s_shape v3.0，S**）用的是 s_shape.SSTAR_STRONG/SSTAR_MID = 65/40，
+# **与这里的 60/30 不是同一套**：两条路径同一个 62 分会分别落到"中"和"强"。
+# 两套阈值都还标着"待回测"，谁对需策略 owner 拍板；在拍板前不动数值，只把它们
+# 各自收成命名常量（此前是散在 docstring 与内联字面量里的三处矛盾说法）。
+TECH_STRONG_FALLBACK = 60
+TECH_MID_FALLBACK = 30
 
 # 待回测启发式驱动的封顶规则开关。默认全开＝保持历史行为；关闭某项后不再据此
 # 降档，改在 risk_flags 记录 "<rule>_detected_cap_disabled"（仍随候选落盘，便于
@@ -119,10 +134,17 @@ def resolve_cap_rules(cap_rules: Optional[dict]) -> dict:
     return rules
 
 
-def normalize_sector_score(raw: Any, score_max: float = SECTOR_SCORE_MAX) -> float:
+def normalize_sector_score(raw: Any, score_max: float = SECTOR_SCORE_MAX) -> Optional[float]:
     """把 sector_state.score 归一化到 0-100 并 clamp，量纲异常/缺失时鲁棒兜底。
 
     - raw 为 None/非数值 → 0.0（板块无评分，等价最弱）。
+    - raw 为 NaN/±inf → **None（板块分不可用）**，由调用方显式降级处理。
+      ⚠️ 2026-08-03 审计 B8：NaN 不是"非数值"——`float("nan")` 不抛异常，
+      于是它逃过 except 走到 clamp，而 `min(100.0, nan)` 按 IEEE 754（nan 与任何数
+      比较都为 False）返回 **100.0**，`max(0.0, 100.0)` 再确认。结果是：
+      sector_state.score 一旦脏成 NaN（generator 除零/空序列 mean），该板块的票
+      就白拿 40% 权重的板块满分，被推进 A 池——**坏数据表现成了最好的数据**。
+      inf 同理（inf/smax*100=inf → 100.0）。故此处必须区分"无评分"与"评分脏"。
     - score_max<=0 或非法 → 回退 SECTOR_SCORE_MAX（避免除零/放大）。
     - 结果一律 clamp 到 [0, 100]，确保 0.4*sector_score 的量纲不被脏数据放大。
     """
@@ -130,11 +152,13 @@ def normalize_sector_score(raw: Any, score_max: float = SECTOR_SCORE_MAX) -> flo
         val = float(raw)
     except (TypeError, ValueError):
         return 0.0
+    if not math.isfinite(val):
+        return None
     try:
         smax = float(score_max)
     except (TypeError, ValueError):
         smax = SECTOR_SCORE_MAX
-    if smax <= 0:
+    if not math.isfinite(smax) or smax <= 0:
         smax = SECTOR_SCORE_MAX
     return max(0.0, min(100.0, val / smax * 100.0))
 
@@ -152,7 +176,15 @@ def cap_bucket(bucket: str, cap: str) -> str:
 
 
 def technical_score(cand: dict) -> tuple[int, str, dict]:
-    """技术分（0-100）与技术面层级（强>=60 / 中30-59 / 弱<30）。确定性加分。
+    """技术分（0-100）与技术面层级（强/中/弱）。确定性加分。
+
+    ⚠️ **两条路径、两套阈值**（审计：此前 docstring 只写 60/30，与实际不符）：
+    - 主路径 s_shape v3.0 可用时 → 分数＝S**，层级＝``s_shape.sstar_level``，
+      阈值 **SSTAR_STRONG/SSTAR_MID = 65/40**；
+    - 回退路径（无 s_shape 数据，如单测/降级）→ 分数＝patterns 累加，层级阈值
+      **TECH_STRONG_FALLBACK/TECH_MID_FALLBACK = 60/30**。
+    两套都标"待回测"，同一个 62 分在两条路径上分别是"中"和"强"；统一成哪一套
+    需策略 owner 拍板（会改 A/B/C/D 分层），故此处只做单一定义、不改数值。
 
     B1/CZ 对齐加分（阈值见 enrich_candidates 顶部"待回测参数"）：
     five_day_entry +8、leader_volume +6、bottom_volume +6、
@@ -218,9 +250,13 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
         score += 5
         contrib["non_one_wave_confirmed"] = 5
     # 完美 B1 图形贴合度（0-8 梯度：J深度/回踩贴线/缩量程度/MACD零轴/DKS上行）
+    # 审计：原来写 `if fit:` —— 贴合度 **0 分**是"算过、一项没中"，与"这只票没算贴合度"
+    # 是两件事，真值判断把两者混成一件，factor_contrib 里看不到 0 分项（备选表格的
+    # "贴合"列显示 "-"，复盘时无法区分"没算"和"算了是 0"）。
     fit = (cand.get("perfect_b1_fit") or {}).get("score")
-    if fit:
-        score += fit
+    if fit is not None:
+        if fit:                       # 加 0 不改分，也不把 int 分数悄悄变成 float
+            score += fit
         contrib["perfect_b1_fit"] = fit
     # MACD 十大技术（正向）：第一区间强势扩张 +3；第一区间再启动（3/5浪买点）+5；
     # 底背离 +5（B1 修复确认）。负向顶背离/三打白骨精走封顶，不在此减分。
@@ -253,7 +289,8 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
         score += 8
         contrib["b1_ignition"] = 8
     score = min(score, 100)
-    level = "强" if score >= 60 else ("中" if score >= 30 else "弱")
+    level = ("强" if score >= TECH_STRONG_FALLBACK
+             else ("中" if score >= TECH_MID_FALLBACK else "弱"))
     return score, level, contrib
 
 
@@ -336,7 +373,8 @@ def trade_style_of(heat_level: str) -> str:
 
 
 def market_permission(amv_state: str) -> str:
-    return {"做多": "允许", "空头": "观察"}.get(amv_state, "仅低吸")
+    """0AMV regime → 市场许可文案。入口归一,不假定调用方已经归一过。"""
+    return {"做多": "允许", "空头": "观察"}.get(normalize_regime(amv_state), "仅低吸")
 
 
 def fundamental_quality(fin: Optional[dict]) -> dict:
@@ -377,7 +415,11 @@ def score_candidate(
     heat, pass_level, sector_cap, reason = sector_heat(sector_entry)
     trade_style = trade_style_of(heat)
     sector_score_raw = (sector_entry or {}).get("score") if sector_entry else None
-    sector_score = normalize_sector_score(sector_score_raw, sector_score_max)
+    # 板块分不可用（NaN/inf）与"无评分"（None）在**打分上**都按最弱 0 处理，但前者是
+    # 脏数据、必须在 risk_flags/degraded_reason 留痕，否则无从区分"板块真弱"和"数据坏"。
+    sector_score_norm = normalize_sector_score(sector_score_raw, sector_score_max)
+    sector_score_available = sector_score_norm is not None
+    sector_score = sector_score_norm if sector_score_available else 0.0
 
     # 分层由个股（技术结构 × 资金意图）定夺；板块不封顶（降为提示，只进 score/共振/trade_style）
     base_bucket = RESONANCE_MATRIX[(tech_level, capital_level)]
@@ -387,6 +429,9 @@ def score_candidate(
     risk_flags: list[str] = []
     if cand.get("is_holding"):
         risk_flags.append("is_holding")
+    if not sector_score_available:
+        # 脏板块分只降不升：按 0 计入总分并显式 flag（score_all 据此把整池标 partial）
+        risk_flags.append("sector_score_unavailable")
 
     # 风控/回避硬否决（cap 只降不升；与"板块弱"无关，故板块不在此列）
     bucket = base_bucket
@@ -487,7 +532,8 @@ def score_candidate(
     if (cand.get("non_one_wave") or {}).get("status") == "confirmed":
         entry_reason.append("非一波流确认")
     if wave_type and wave_type != "unknown":
-        entry_reason.append(f"波浪:{ {'buildup': '建仓波', 'rally': '拉升波', 'sprint': '冲刺波'}[wave_type] }")
+        # 未登记的 wave_type 不得 KeyError 打挂整只票的打分：.get 兜底并留原值（审计）
+        entry_reason.append(f"波浪:{WAVE_TYPE_LABELS.get(wave_type, wave_type)}")
     if (cand.get("b1_ignition") or {}).get("hit"):
         entry_reason.append("知行B1点火确认")
     elif (cand.get("zhixing") or {}).get("available") and (cand.get("zhixing") or {}).get("qsx_gt_dks"):
@@ -531,6 +577,7 @@ def score_candidate(
                             or (sector_entry or {}).get("sector_state") or "未知",
             "sector_score": sector_score,
             "sector_score_raw": sector_score_raw,
+            "sector_score_available": sector_score_available,
             "heat_level": heat,
             "pass_level": pass_level,
             "reason": reason,
@@ -655,7 +702,12 @@ def score_all(
         sector_states = _load_json(SECTORS_DIR / f"{date}_sector_state.json", [])
     if amv_state is None:
         market = _load_json(MARKET_DIR / f"{date}_market_timing_input.json", {})
-        amv_state = str((market.get("amv_0") or {}).get("effective_state") or "")
+        amv_0 = market.get("amv_0") or {}
+        # 归一化后再判定:amv_zone 的"空头触发"若按 == "空头" 比较会漏判,
+        # 导致空头封顶 B 与 next_step 降级双双失效(审计 B1)。
+        amv_state = normalize_regime(amv_0.get("effective_state") or amv_0.get("amv_zone") or "")
+    else:
+        amv_state = normalize_regime(amv_state)
     if cz_preference is None:
         cz_preference = load_cz_sector_preference() or {}
     cz_status = "ok" if cz_preference else "missing"
@@ -725,6 +777,18 @@ def score_all(
                                  cap_rules=cap_rules, sector_score_max=sector_score_max)
         result["candidates"].append(scored)
         result["bucket_counts"][scored["bucket"]] += 1
+
+    # 板块分脏（NaN/inf）必须整池留痕：单票 risk_flags 只有细看明细才发现，
+    # 而 status/degraded_reason 是报告与门控真正会读的字段（审计 B8）。
+    dirty_sector = [c["code"] for c in result["candidates"]
+                    if "sector_score_unavailable" in (c.get("risk_flags") or [])]
+    if dirty_sector:
+        if result["status"] == "ok":
+            result["status"] = "partial"
+        note = f"sector_score_unavailable:{len(dirty_sector)}只(板块分NaN/inf,按0计入)"
+        result["degraded_reason"] = (
+            f"{result['degraded_reason']};{note}" if result["degraded_reason"] else note
+        )
 
     result["candidates"].sort(key=lambda x: (BUCKET_ORDER.index(x["bucket"]), -x["score"], x["code"]))
     return result

@@ -56,7 +56,11 @@ def write_amv(base: Path, entries: list[tuple[str, float]]) -> None:
 
 
 def write_meta(base: Path, confirmed: dict) -> None:
-    write_json(base / "01_data" / "trades" / "_import_meta.json", {"no_trades_confirmed_dates": confirmed})
+    """写无交易确认。唯一生产者是 incremental_ledger.py --confirm-no-trades，
+    落在 position_confirmations.json：{date: {confirmed_at, no_trades, note}}。"""
+    records = {d: {"confirmed_at": f"{d}T17:30:00", "no_trades": True, "note": "测试确认"}
+               for d, ok in confirmed.items() if ok}
+    write_json(base / "01_data" / "trades" / "position_confirmations.json", records)
 
 
 class IsoWeekRangeTests(unittest.TestCase):

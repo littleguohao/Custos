@@ -19,7 +19,7 @@ except ImportError:
     from holding_bbi import intraday_bbi_basis
     from holding_structure import n_structure_basis
 
-from paths import BASE  # noqa: E402
+from paths import BASE, cn_now  # noqa: E402
 from code_utils import market_of  # noqa: E402
 
 DATA = BASE / "01_data"
@@ -44,6 +44,29 @@ def optional_finite(value):
         return number if math.isfinite(number) else None
     except (TypeError, ValueError):
         return None
+
+
+def pct_text(value) -> str:
+    """带符号百分比文本；缺失/非有限值渲染 unavailable。
+
+    此前用 finite(value)（缺失回落 0.0）直接格式化，指数涨跌缺数据会渲染成
+    +0.00%，把「不知道」伪装成「平盘」。
+    """
+    number = optional_finite(value)
+    return "unavailable" if number is None else f"{number:+.2f}%"
+
+
+def ma_flag(value) -> str:
+    return "上" if value else "下"
+
+
+def render_index_row(row: dict) -> str:
+    """3.1 指数结构表的一行。"""
+    close = row.get("close")
+    close_text = "unavailable" if close is None else f"{close}"
+    return (f"| {row['name']} | {close_text} | {pct_text(row.get('change_pct'))} | "
+            f"{ma_flag(row.get('above_ma25'))}MA25 / {ma_flag(row.get('above_ma60'))}MA60 / "
+            f"{ma_flag(row.get('above_ma144'))}MA144 / {ma_flag(row.get('above_ma240'))}MA240 |")
 
 
 def bare(value):
@@ -209,7 +232,7 @@ def main():
     checks = {x.get("field"): x for x in quality.get("checks") or []}
     lines = [
         f"# {day} 最终盘后复盘", "",
-        f"> 生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"> 生成时间：{cn_now().strftime('%Y-%m-%d %H:%M:%S')}",
         f"> 报告质量：**{'complete' if not enrichment.get('unavailable') and news.get('status') == 'complete' else 'degraded'}**",
         f"> 0AMV当日变动：**{float(value):+.2f}%**；有效状态：**{regime}**",
         f"> 今日实际交易：**{'无交易动作' if not today else str(len(today)) + '笔'}**",
@@ -227,7 +250,7 @@ def main():
 
     lines += ["", "## 3. 大盘、资金与市场许可", "", "### 3.1 指数结构", "", "| 指数 | 收盘/最新 | 当日涨跌 | MA25/60/144/240状态 |", "|---|---:|---:|---|"]
     for row in indices:
-        lines.append(f"| {row['name']} | {row['close']} | {finite(row['change_pct']):+.2f}% | {'上' if row['above_ma25'] else '下'}MA25 / {'上' if row['above_ma60'] else '下'}MA60 / {'上' if row['above_ma144'] else '下'}MA144 / {'上' if row['above_ma240'] else '下'}MA240 |")
+        lines.append(render_index_row(row))
     lines += ["", "### 3.2 宽度、成交与情绪", ""]
     for field, label in (("market_breadth", "市场宽度"), ("turnover", "全市场成交额"), ("sentiment", "涨跌停与情绪")):
         check = checks.get(field, {})

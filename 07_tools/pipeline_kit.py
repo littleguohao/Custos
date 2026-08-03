@@ -28,7 +28,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from paths import BASE
+from paths import BASE, cn_now
 
 
 def _as_text(data) -> str:
@@ -200,7 +200,7 @@ def md_to_digest(md_text: str, limit: int = 3500, truncate_note: str = "...(å®Œæ
 
 
 def now_iso() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+    return cn_now().isoformat(timespec="seconds")
 
 
 def log_stage(name: str, r: dict, started_at: str, finished_at: str, duration_sec: float,

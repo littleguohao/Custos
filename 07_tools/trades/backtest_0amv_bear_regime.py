@@ -59,7 +59,7 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import BASE  # noqa: E402
+from paths import BASE, cn_now  # noqa: E402
 
 BEAR_THRESHOLD = -2.3     # amv_change_pct <= 此值当日进入空头
 BULL_THRESHOLD = 4.0      # amv_change_pct >= 此值当日进入多头
@@ -115,6 +115,13 @@ def build_regime_map(records: list[dict]) -> dict[str, str]:
                 state = "bull"
         regime[rec["date"]] = state
     return regime
+
+
+def safe_ratio_pct(part: float, whole: float, ndigits: int = 2):
+    """占比(%)。分母为 0/None 时返回 None —— 报告层按 unavailable 显示，不得除零崩溃。"""
+    if not whole:
+        return None
+    return round(part / whole * 100, ndigits)
 
 
 def regime_segments(regime_map: dict[str, str], target: str = "bear",
@@ -490,7 +497,8 @@ def build_report(result: dict[str, Any]) -> str:
     a("")
     a(f"- 空头区间次数：**{rg['bear_count']}** 次")
     a(f"- 空头总天数：**{rg['bear_days']}** 个交易日，"
-      f"占同期 {rg['total_days']} 个交易日的 **{rg['bear_ratio_pct']}%**")
+      f"占同期 {rg['total_days']} 个交易日的 "
+      f"**{'unavailable' if rg['bear_ratio_pct'] is None else str(rg['bear_ratio_pct']) + '%'}**")
     a(f"- 多头总天数：{rg['bull_days']} 天；neutral：{rg['neutral_days']} 天")
     a("")
     a("| # | 开始(触发日) | 结束(含) | 天数 |")
@@ -640,7 +648,9 @@ def run_backtest(start: str, end: str) -> dict[str, Any]:
         "bull_days": bull_days,
         "neutral_days": len(days_since_2020) - bear_days - bull_days,
         "total_days": len(days_since_2020),
-        "bear_ratio_pct": round(bear_days / len(days_since_2020) * 100, 2),
+        # 除零防守:0AMV 台账里没有 >=2020 的观测(新环境/文件被截断)时，
+        # `bear_days / len(days_since_2020)` 直接 ZeroDivisionError 打断整份回测报告。
+        "bear_ratio_pct": safe_ratio_pct(bear_days, len(days_since_2020)),
         "bear_segments": bear_segs,
     }
 
@@ -671,7 +681,7 @@ def run_backtest(start: str, end: str) -> dict[str, Any]:
     result = {
         "start": start,
         "end": end,
-        "generated_at": __import__("datetime").datetime.now().isoformat(timespec="seconds"),
+        "generated_at": cn_now().isoformat(timespec="seconds"),
         "ledger_path": str(LEDGER_PATH),
         "trade_count": len(trades),
         "sell_fee_rate": sell_fee_rate,

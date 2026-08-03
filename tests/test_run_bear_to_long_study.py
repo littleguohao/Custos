@@ -14,13 +14,21 @@ def _pair(sig=("2022-03-01", "2022-06-01"), lab=("2022-06-02", "2022-07-22")):
             "bear_days": 60, "long_days": 35, "signal_days": 60}
 
 
+_RECS = [{"code": "600000", "ret": 0.1, "days": [["2022-06-01", 0.0, {"f_x": 1.0}]]}]
+
+
 def _firings_text(**over):
-    """与 launch_point_study 写盘口径一致的 firings 头部(可用 over 制造参数漂移)。"""
+    """与 launch_point_study 写盘口径一致的 firings 头部(可用 over 制造参数漂移)。
+
+    默认带**一条有信号日的记录**:空 firings 现在会被 firings_reusable 判为"未完成"
+    (审计 E9——0 信号的产物是数据源没挂上,不是研究结论),故指纹类测试须用非空样本。
+    """
     head = {"start": "2022-03-01", "end": "2022-06-01",
             "ret_start": "2022-06-02", "ret_end": "2022-07-22",
             "entry_filter": "reversal_k", "rank_score": "none",
             "feature_scores": rb.DEFAULT_FEATURES, "delisted_ret": -1.0,
-            "universe": "sdata", "records": []}
+            "universe": "sdata",
+            "records": list(_RECS)}
     head.update(over)
     return json.dumps(head, ensure_ascii=False)
 
@@ -234,11 +242,11 @@ class TestFingerprintLegacySafe:
         return type("A", (), base)()
 
     def _legacy_firings(self, tmp_path):
-        """旧格式:头部完全没有特征开关字段。"""
+        """旧格式:头部完全没有特征开关字段(records 必须非空——空产物另有专门的拒复用闸)。"""
         p = tmp_path / "old.json"
         p.write_text(json.dumps({"entry_filter": "reversal_k", "rank_score": "none",
                                  "feature_scores": rb.DEFAULT_FEATURES, "delisted_ret": -1.0,
-                                 "universe": "sdata", "records": []}, ensure_ascii=False),
+                                 "universe": "sdata", "records": _RECS}, ensure_ascii=False),
                      encoding="utf-8")
         return p
 
@@ -258,7 +266,7 @@ class TestFingerprintLegacySafe:
         p = tmp_path / "pit.json"
         p.write_text(json.dumps({"entry_filter": "reversal_k", "rank_score": "none",
                                  "feature_scores": rb.DEFAULT_FEATURES, "delisted_ret": -1.0,
-                                 "universe": "sdata", "pit_features": True, "records": []}),
+                                 "universe": "sdata", "pit_features": True, "records": _RECS}),
                      encoding="utf-8")
         assert rb.firings_reusable(p, self._args()) is False
 
@@ -267,7 +275,7 @@ class TestFingerprintLegacySafe:
         p.write_text(json.dumps({"entry_filter": "reversal_k", "rank_score": "none",
                                  "feature_scores": rb.DEFAULT_FEATURES, "delisted_ret": -1.0,
                                  "universe": "sdata", "pit_features": True,
-                                 "pit_visible_same_day": False, "records": []}),
+                                 "pit_visible_same_day": False, "records": _RECS}),
                      encoding="utf-8")
         ok = rb.firings_reusable(p, self._args(pit_features=True))
         bad = rb.firings_reusable(p, self._args(pit_features=True,

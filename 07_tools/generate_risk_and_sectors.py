@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 
 from paths import BASE
+from runtime_guards import normalize_regime
 
 DATA = BASE / "01_data"
 
@@ -116,7 +117,10 @@ def build_risk_decision(date: str) -> dict:
     forbidden = list(dict.fromkeys(x.get("action") for x in ordered if x.get("action") in {"禁止加仓", "止损", "清仓"}))
 
     market = load(DATA / "market" / f"{date}_market_timing_input.json", {})
-    market_regime = str((market.get("amv_0") or {}).get("effective_state") or "未知")
+    # 补 amv_zone 兜底并归一:此前只读 effective_state 且精确等值,
+    # "空头触发"会让 risk_decision 漏置 allow_add=False(审计 B1)
+    _amv = market.get("amv_0") or {}
+    market_regime = normalize_regime(_amv.get("effective_state") or _amv.get("amv_zone") or "未知")
     if market_regime == "空头":
         regime_directive = {
             "reduce_top_priority": True,

@@ -55,6 +55,9 @@ _TDX_TYPE_CATEGORY = {
 
 _CODE_RE = re.compile(r"^(88[01]\d{3})(?:\.(?:SH|SZ|BJ))?$", re.IGNORECASE)
 
+DEFAULT_MIN_SUCCESS_RATE = 0.6   # 成分股取数成功率门槛，低于此值 main 非零退出
+DEFAULT_SLEEP_MS = 0             # 板块间限速（毫秒）；默认 0 保持既有节奏，生产可调
+
 
 def _err(code: str, detail: str = "", **extra: Any) -> dict:
     """结构化错误返回。"""
@@ -235,8 +238,16 @@ class TQSectorSession:
         self,
         limit: Optional[int] = None,
         progress: bool = False,
+        sleep_ms: int = 0,
+        progress_every: int = 50,
     ) -> dict:
-        """全量板块映射。任何失败都体现在 error/errors 字段，绝不 raise。"""
+        """全量板块映射。任何失败都体现在 error/errors 字段，绝不 raise。
+
+        ``sleep_ms``：板块之间的限速。串行保留（不引入并发复杂度），但 400+ 次
+        ``get_stock_list_in_sector`` 一口气打过去会把 TdxW 打满，日常刷新给个 20~50ms。
+        ``quality.sector_success_rate``：成分股取数成功率 —— 调用方（main）据此决定退出码，
+        此前单板块失败只进 errors 列表，430 个全失败也照样"成功"。
+        """
         started = time.monotonic()
         as_of = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
@@ -271,12 +282,14 @@ class TQSectorSession:
         errors: list = []
         stock_total = 0
         named = 0
+        failed = 0
         for idx, raw_code in enumerate(codes, 1):
             code = str(raw_code).strip().upper()
             stocks = self.get_sector_stocks(code)
             if isinstance(stocks, dict):  # 单板块失败：记录并继续
                 errors.append(stocks)
                 stocks = []
+                failed += 1
             info = self._name_map.get(_strip_suffix(code), {})
             name = info.get("name", "")
             if name:
@@ -293,17 +306,23 @@ class TQSectorSession:
                 }
             )
             stock_total += len(stocks)
-            if progress and (idx % 50 == 0 or idx == len(codes)):
+            if sleep_ms > 0:
+                time.sleep(sleep_ms / 1000.0)
+            if progress and (idx % max(progress_every, 1) == 0 or idx == len(codes)):
                 print(
-                    f"[tq_sector] {idx}/{len(codes)} sectors, "
+                    f"[tq_sector] {idx}/{len(codes)} sectors, 失败 {failed}, "
                     f"{time.monotonic() - started:.1f}s",
                     flush=True,
                 )
 
+        succeeded = len(sectors) - failed
         quality = {
             "names_unavailable": not self._name_map,
             "named_sectors": named,
             "name_coverage": round(named / len(sectors), 4) if sectors else 0.0,
+            "sector_success": succeeded,
+            "sector_failed": failed,
+            "sector_success_rate": round(succeeded / len(sectors), 4) if sectors else 0.0,
         }
         return {
             "as_of": as_of,
@@ -322,15 +341,39 @@ def main(argv: Optional[list] = None) -> int:
     parser.add_argument("--date", required=True, help="采集日期 YYYY-MM-DD，用于输出文件命名")
     parser.add_argument("--limit", type=int, default=None, help="只采集前 N 个板块（调试用）")
     parser.add_argument("--progress", action="store_true", help="打印采集进度")
+    parser.add_argument("--sleep-ms", type=int, default=DEFAULT_SLEEP_MS,
+                        help=f"板块之间限速（毫秒，默认 {DEFAULT_SLEEP_MS}）；"
+                             "400+ 板块串行请求，不限速会把 TdxW 打满")
+    parser.add_argument("--min-success-rate", type=float, default=DEFAULT_MIN_SUCCESS_RATE,
+                        help=f"成分股取数成功率低于此值则非零退出（默认 {DEFAULT_MIN_SUCCESS_RATE}）；"
+                             "此前单板块失败只进 errors，430 个全失败也 exit 0")
     args = parser.parse_args(argv)
 
     started = time.monotonic()
     with TQSectorSession() as session:
-        result = session.build_sector_map(limit=args.limit, progress=args.progress)
+        result = session.build_sector_map(limit=args.limit, progress=args.progress,
+                                          sleep_ms=args.sleep_ms)
     result["date"] = args.date
 
     out_path = SECTORS_DIR / f"{args.date}_tq_sector_map.json"
     SECTORS_DIR.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    quality = result.get("quality") or {}
+    rate = quality.get("sector_success_rate")
+    # 采集结论三态：顶层 error / 成功率过低或映射为空 / ok。
+    # 空映射（stock_total=0）必须算失败：下游按空板块映射跑出来的"无板块共振"是假结论。
+    if result.get("error"):
+        status = "error"
+    elif not result.get("sector_count"):
+        status = "empty"
+    elif not result.get("stock_total"):
+        status = "empty_stocks"
+    elif rate is not None and rate < args.min_success_rate:
+        status = "degraded"
+    else:
+        status = "ok"
+    result["collection_status"] = status
     out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 
     summary = {
@@ -338,14 +381,17 @@ def main(argv: Optional[list] = None) -> int:
         "sector_count": result.get("sector_count", 0),
         "stock_total": result.get("stock_total", 0),
         "errors": len(result.get("errors", [])) + (1 if result.get("error") else 0),
-        "name_coverage": result.get("quality", {}).get("name_coverage"),
+        "name_coverage": quality.get("name_coverage"),
+        "sector_success_rate": rate,
+        "min_success_rate": args.min_success_rate,
+        "collection_status": status,
         "duration_sec": round(time.monotonic() - started, 2),
         "output": str(out_path),
     }
     if result.get("error"):
         summary["error"] = result["error"]
     print(json.dumps(summary, ensure_ascii=False))
-    return 0 if not result.get("error") else 1
+    return 0 if status == "ok" else 1
 
 
 if __name__ == "__main__":

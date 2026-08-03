@@ -26,6 +26,7 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from paths import PLANS, STOCK_POOL_DIR  # noqa: E402
+from runtime_guards import normalize_regime  # noqa: E402
 
 PATTERN_LABELS = {
     "bbi_above": "BBI上",
@@ -110,7 +111,8 @@ def render_table(pool: dict, date: str) -> str:
     watch = sorted((c for c in watch_all if c.get("bucket") in ("A", "B")), key=_watch_key, reverse=True)
     watch_capped = sorted((c for c in watch_all if c.get("bucket") not in ("A", "B")),
                           key=_watch_key, reverse=True)
-    is_bear = "空头" in str(pool.get("amv_state") or "")
+    # 与 score_candidates 共用同一套归一,避免"报告说空头不买、A池却仍生成买入计划"的自相矛盾
+    is_bear = normalize_regime(pool.get("amv_state")) == "空头"
     # ⭐ 置顶:今日信号一览——可买/观察价位/待0AMV做多 三档,一眼看清"今天哪些是真信号"
     _buy = [c for c in watch if (c.get("resonance_4leg") or {}).get("bull_candidate")
             and c.get("bucket") == "A"]
@@ -252,8 +254,10 @@ def render_table(pool: dict, date: str) -> str:
         )
         lines.append("|---|---|---|---|---|---|---:|---:|---|---|---|---|---|---|---|---|---|---|---|")
         for c in rows:
+            # 未知 patterns 键（上游新增标签/脏数据）不得 KeyError 打挂整张表：
+            # 用 .get 兜底并把原始键名留在表里，好让"多了个没登记的标签"看得见（审计）。
             tags = "、".join(
-                PATTERN_LABELS[t] for t, hit in (c.get("patterns") or {}).items() if hit
+                PATTERN_LABELS.get(t, str(t)) for t, hit in (c.get("patterns") or {}).items() if hit
             ) or "-"
             wave = WAVE_LABELS.get((c.get("wave") or {}).get("wave_type"), "-")
             shf = c.get("sector_heat_filter") or {}

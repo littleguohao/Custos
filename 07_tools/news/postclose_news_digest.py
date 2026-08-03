@@ -27,10 +27,24 @@ def dump(path: Path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
 
 
+# 政策分类口径。`A or B and C` 在 Python 里是 `A or (B and C)` —— 原写法
+# `"policy" in category or "official" in category and "宏观政策" in themes`
+# 靠优先级隐式表达分组，读者极易按 `(A or B) and C` 读反。这里显式加括号并把口径写下来。
+#
+# 当前口径（保持原行为，未擅改）：
+#   ① category 含 "policy"（policy_official / policy_consultation）本身就是政策源 → 政策；
+#   ② 其他官方源（macro_official / a_share_official / company_official ...）只有在
+#      命中「宏观政策」主题时才算政策。
+# ⚠️ 另一种读法是"所有政策/官方源都必须命中宏观政策主题"，会让 ① 收紧。两者的差别在于
+# 一条不带宏观政策关键词的证监会公告算不算政策 —— 属策略口径，需人工裁定后再改。
+POLICY_RULE_NOTE = ('政策 = ("policy" in category) or '
+                    '("official" in category and "宏观政策" in matched_themes)')
+
+
 def classify(item: dict) -> str:
     category = str(item.get("category") or "")
     themes = item.get("matched_themes") or []
-    if "policy" in category or "official" in category and "宏观政策" in themes:
+    if ("policy" in category) or ("official" in category and "宏观政策" in themes):
         return "政策"
     if item.get("matched_market_keywords"):
         return "风向"

@@ -45,6 +45,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -55,7 +56,7 @@ for _p in (str(TOOLS),):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from paths import BASE  # noqa: E402
+from paths import BASE, cn_today  # noqa: E402
 
 API = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 UA = {"User-Agent": "Mozilla/5.0"}
@@ -68,16 +69,60 @@ SAMPLES = OUT_DIR / "share_change_samples.json"
 MV_START = "2018-01-02"
 
 
+PAGE_SLEEP = 0.35        # 翻页间隔（秒）：东财 datacenter 无官方配额，连打会被静默限流
+
+
+class FetchIncomplete(RuntimeError):
+    """分页未拉完 / 响应残缺 —— 对本模块尤其危险，见 fetch_trade_date 说明。"""
+
+
+def _as_int(v):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_empty_ok(payload: dict) -> bool:
+    """响应自称成功但 result 为空 ⇒ 该日**确实**无数据（非交易日、早于 MV_START）。"""
+    if payload.get("success") is False:
+        return False
+    if str(payload.get("code", 0)) not in ("0", "None"):
+        return False
+    return "result" in payload
+
+
+def _brief(payload: dict, n: int = 160) -> str:
+    try:
+        return json.dumps(payload, ensure_ascii=False)[:n]
+    except (TypeError, ValueError):
+        return str(payload)[:n]
+
+
 def _f(v):
     return None if v is None else float(v)
 
 
 def fetch_trade_date(trade_date: str, page_size: int = 500, max_pages: int = 40,
-                     session=None) -> list[dict]:
-    """拉一个交易日的全市场总股本/总市值。非交易日返回空。"""
+                     session=None, sleep: float = PAGE_SLEEP) -> list[dict]:
+    """拉一个交易日的全市场总股本/总市值。非交易日返回空。
+
+    **分页完整性由接口自报的 pages/count 校验，残缺一律抛 FetchIncomplete。**
+    原实现是 `if not data: break`，把限流的空响应当「翻完了」。在本模块这比
+    PIT 财务更严重：残缺行会直接进 `diff_events`，而 diff 是「只对变化的代码写事件」，
+    **没返回的代码等于被判定为「股本未变」**——
+      · 本次采样丢了某票 ⇒ 它这次的真实变动被吞掉；
+      · 下次采样它再出现时，写出的 change 事件带的 prev_shares / prev_sample
+        指向错误的基准与区间，`shares_as_of` 从此给出错的股本、市值全错；
+      · `verify()` 只查 MV_START 越界与事件量级，查不出这种污染。
+    宁可整日丢弃重跑（该日不会被记为已采样），也不能写一份错的事件。
+    """
     s = session or requests.Session()
     rows: list[dict] = []
+    pages = count = None
     for page in range(1, max_pages + 1):
+        if page > 1 and sleep:
+            time.sleep(sleep)
         params = {
             "sortColumns": "SECURITY_CODE", "sortTypes": "1",
             "pageSize": page_size, "pageNumber": page,
@@ -89,13 +134,37 @@ def fetch_trade_date(trade_date: str, page_size: int = 500, max_pages: int = 40,
         r = s.get(API, params=params, headers=UA, timeout=30,
                   proxies={"http": None, "https": None})
         r.raise_for_status()
-        result = (r.json() or {}).get("result") or {}
+        payload = r.json() or {}
+        result = payload.get("result")
+        if not isinstance(result, dict):
+            if page == 1 and _is_empty_ok(payload):
+                return []                      # 非交易日
+            raise FetchIncomplete(
+                f"{trade_date} 第 {page} 页无 result 段（限流/异常响应），"
+                f"已拿 {len(rows)} 行: {_brief(payload)}")
         data = result.get("data") or []
+        pages, count = _as_int(result.get("pages")), _as_int(result.get("count"))
         if not data:
-            break
+            if page == 1 and not count:
+                return []                      # 非交易日
+            raise FetchIncomplete(
+                f"{trade_date} 第 {page} 页空响应，但接口声明 pages={pages} count={count}"
+                f"（已拿 {len(rows)} 行）—— 疑似限流，不是翻完了")
         rows.extend(data)
-        if page >= (result.get("pages") or 1):
+        if pages is not None:
+            if page >= pages:
+                break
+        elif count is not None and len(rows) >= count:
             break
+        else:
+            raise FetchIncomplete(
+                f"{trade_date} 第 {page} 页未给 pages/count，无法判断是否翻完")
+    else:
+        raise FetchIncomplete(
+            f"{trade_date} 翻到 max_pages={max_pages} 仍未结束（声明 pages={pages}）")
+    if count is not None and len(rows) < count:
+        raise FetchIncomplete(
+            f"{trade_date} 只拿到 {len(rows)}/{count} 行，样本残缺不进 diff")
     return rows
 
 
@@ -106,7 +175,7 @@ def sample_dates(since_year: int, freq: str = "month", until: str | None = None)
     起点被 MV_START 截断时,月采样首点对齐到 MV_START 本身(而非等到 1 月 28 日),
     否则 2018-01-02~27 会被窗口护栏放行却拿不到任何股本。
     """
-    stop = until or date.today().isoformat()
+    stop = until or cn_today().isoformat()
     start = max(f"{since_year}-01-01", MV_START)
     d0, d1 = date.fromisoformat(start), date.fromisoformat(stop)
     out: list[str] = []
@@ -445,6 +514,12 @@ def main(argv=None) -> int:
             continue
         try:
             rows = fetch_trade_date(d, session=session)
+        except FetchIncomplete as exc:
+            # 整日丢弃：既不写事件、也不记入 sampled/empty，下次重跑会重新采这一天。
+            # 残缺行进 diff 会把「没返回」当「股本未变」，污染台账且 verify 查不出来。
+            print(f"[WARN] {d} 分页残缺，整日丢弃不落盘（下次重跑会重采）: {exc}",
+                  file=sys.stderr)
+            continue
         except Exception as exc:  # noqa: BLE001
             print(f"[WARN] {d} 拉取失败: {exc}", file=sys.stderr)
             continue

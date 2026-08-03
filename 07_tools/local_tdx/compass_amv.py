@@ -18,6 +18,9 @@
   最近若干条 confirmed 记录（date→amv_change_pct）比对，
   匹配率 >= 90%（容差 ±0.05）的链；② 无真值可用或无链达标时，
   回退选"结束日期最新且总历史最长"的链。
+  ⚠️ 回退选链只是猜（文件里有多条指数系列），结果标 ``quality="unverified"``
+  并由 ``parse_amv_daily`` / ``latest_amv`` 一路透出：**未经真值验证的值不得
+  当 confirmed 真值写台账**，否则等于让另一条指数去驱动 regime 与加仓授权。
 
 所有接口结构化返回、绝不 raise；文件缺失或无有效序列时返回带 error 字段的结果。
 
@@ -241,11 +244,16 @@ def _change_pct_map(chain: list) -> dict:
 
 
 def _identify_amv(chains: list, truth: list) -> tuple:
-    """识别 0AMV 链，返回 (chain, identification)。
+    """识别 0AMV 链，返回 (chain, identification, quality)。
 
     ① 真值匹配：链内覆盖 >= TRUTH_MIN_PRESENT 条真值日期且匹配率
-    >= TRUTH_MATCH_RATIO（容差 ±TRUTH_TOL）者，取匹配数最多者；
-    ② 回退：结束日期最新、并列取总历史最长。
+    >= TRUTH_MATCH_RATIO（容差 ±TRUTH_TOL）者，取匹配数最多者 → quality="verified"；
+    ② 回退：结束日期最新、并列取总历史最长 → quality="unverified"。
+
+    quality 必须透出到调用方：回退选链**只是猜**（day.vdat 里有多条指数系列），
+    猜错就等于用别的指数在驱动仓位——sync_compass_amv 会把它按 confirmed 写进
+    0AMV 真值台账，amv_state 据此切 regime，runtime_gate 再据 regime 授予加仓权。
+    整条链路上没有任何一环能看出「这个数可能不是 0AMV」，除非这里说出来。
     """
     if truth:
         best = None
@@ -262,14 +270,15 @@ def _identify_amv(chains: list, truth: list) -> tuple:
             if best_key is None or key > best_key:
                 best_key = key
                 best = (chain,
-                        f"truth_match: {matched}/{len(present)} confirmed pairs within ±{TRUTH_TOL}")
+                        f"truth_match: {matched}/{len(present)} confirmed pairs within ±{TRUTH_TOL}",
+                        "verified")
         if best is not None:
             return best
     chain = max(chains, key=lambda c: (c[-1][0], len(c)))
     note = "fallback: latest end + longest history"
     if truth:
         note = "fallback: no chain matched truth; latest end + longest history"
-    return chain, note
+    return chain, note, "unverified"
 
 
 def _to_records(series: list) -> list:
@@ -320,6 +329,7 @@ def parse_amv_daily(since: str = "2024-01-01", root: Optional[str] = None,
         "latest_date": None,
         "series_start": None,
         "identification": None,
+        "quality": None,
         "records": [],
     }
     try:
@@ -334,12 +344,17 @@ def parse_amv_daily(since: str = "2024-01-01", root: Optional[str] = None,
         if not chains:
             result["error"] = "no_valid_series"
             return result
-        series, identification = _identify_amv(chains, _load_truth(truth_path))
+        series, identification, quality = _identify_amv(chains, _load_truth(truth_path))
         records = [r for r in _to_records(series) if r["date"] >= since]
         result["records"] = records
         result["count"] = len(records)
         result["series_start"] = _int_to_date(series[0][0]).isoformat()
         result["identification"] = identification
+        result["quality"] = quality
+        if quality != "verified":
+            print(f"[WARN] 0AMV 选链未经真值验证（{identification}）："
+                  f"series_start={result['series_start']}，"
+                  f"该值不得当 confirmed 真值使用", file=sys.stderr)
         if records:
             result["first_date"] = records[0]["date"]
             result["latest_date"] = records[-1]["date"]
@@ -352,7 +367,14 @@ def parse_amv_daily(since: str = "2024-01-01", root: Optional[str] = None,
 
 
 def latest_amv(root: Optional[str] = None, truth_path: Optional[str] = None) -> dict:
-    """返回最新一条记录 + 与前一交易日的 change_pct，供管线调用（绝不 raise）。"""
+    """返回最新一条记录 + 与前一交易日的 change_pct，供管线调用（绝不 raise）。
+
+    **必须带 identification / quality**：``ok: True`` 只说明「解析出了一条日线」，
+    不说明这条日线就是 0AMV。真值台账缺失或没有链匹配上时是回退选链（quality=
+    "unverified"），此时把 change_pct 当 confirmed 真值写进台账 → amv_state 切 regime
+    → 授予加仓权，整条链路都在用一个可能是别的指数的数字决定仓位。
+    调用方拿到 quality != "verified" 时应按人工确认路径处理，而不是自动 confirmed。
+    """
     parsed = parse_amv_daily(since="1900-01-01", root=root, truth_path=truth_path)
     if parsed.get("error") or not parsed["records"]:
         return {
@@ -360,6 +382,8 @@ def latest_amv(root: Optional[str] = None, truth_path: Optional[str] = None) -> 
             "error": parsed.get("error", "no_records"),
             "source": parsed["source"],
             "path": parsed["path"],
+            "quality": "unavailable",
+            "identification": parsed.get("identification"),
         }
     last = parsed["records"][-1]
     prev_close = parsed["records"][-2]["close"] if len(parsed["records"]) > 1 else None
@@ -371,6 +395,10 @@ def latest_amv(root: Optional[str] = None, truth_path: Optional[str] = None) -> 
         "close": last["close"],
         "prev_close": prev_close,
         "change_pct": last["change_pct"],
+        # 选链证据：quality="verified" 才是真值台账核对过的 0AMV
+        "quality": parsed.get("quality"),
+        "identification": parsed.get("identification"),
+        "series_start": parsed.get("series_start"),
     }
 
 
@@ -392,6 +420,7 @@ def main(argv: Optional[list] = None) -> int:
         "count": parsed["count"],
         "series_start": parsed["series_start"],
         "identification": parsed["identification"],
+        "quality": parsed["quality"],
         "first_date": parsed["first_date"],
         "latest_date": parsed["latest_date"],
         "latest_close": latest["close"] if latest else None,

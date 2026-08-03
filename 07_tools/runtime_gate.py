@@ -20,16 +20,25 @@ EXIT_NOT_TRADING_DAY = 3
 EXIT_QUALITY_BLOCKED = 4
 EXIT_POSITION_BLOCKED = 5
 
+# 放行白名单。**不能写成 `== "blocked"`**:gate 为空、字段拼错、JSON 截断时
+# `status` 是 None,`None == "blocked"` 为假 ⇒ 门控自身坏掉却返回 0 放行(fail-open)。
+# 风控组件的未知状态必须等于阻断,所以改成"只有明确 pass/degraded 才放行"。
+_QUALITY_PASS = {"pass", "degraded"}
+_POSITION_PASS = {"pass", "degraded"}
+
 
 def decide_exit_code(gate: dict, *, require_trading_day: bool = False,
                      require_quality: bool = False,
                      require_position_gate: bool = False) -> int:
-    """纯函数:据门控结果与开关算退出码(便于测试,不含 IO)。"""
+    """纯函数:据门控结果与开关算退出码(便于测试,不含 IO)。
+
+    对每一项都采用 fail-closed 白名单判定:状态缺失/未知一律视为阻断。
+    """
     if require_trading_day and (gate.get("calendar") or {}).get("is_trading_day") is not True:
         return EXIT_NOT_TRADING_DAY
-    if require_quality and (gate.get("market_quality") or {}).get("status") == "blocked":
+    if require_quality and (gate.get("market_quality") or {}).get("status") not in _QUALITY_PASS:
         return EXIT_QUALITY_BLOCKED
-    if require_position_gate and (gate.get("position_gate") or {}).get("status") == "blocked":
+    if require_position_gate and (gate.get("position_gate") or {}).get("status") not in _POSITION_PASS:
         return EXIT_POSITION_BLOCKED
     return 0
 
@@ -55,9 +64,11 @@ def main(argv=None) -> int:
                             require_quality=a.require_quality,
                             require_position_gate=a.require_position_gate)
     if code:
+        mq = (r.get("market_quality") or {}).get("status")
+        pg = (r.get("position_gate") or {}).get("status")
         reason = {EXIT_NOT_TRADING_DAY: "非交易日",
-                  EXIT_QUALITY_BLOCKED: f"market_quality=blocked(score={(r.get('market_quality') or {}).get('quality_score')})",
-                  EXIT_POSITION_BLOCKED: "position_gate=blocked"}[code]
+                  EXIT_QUALITY_BLOCKED: f"market_quality={mq!r}(score={(r.get('market_quality') or {}).get('quality_score')})",
+                  EXIT_POSITION_BLOCKED: f"position_gate={pg!r}"}[code]
         print(f"[GATE] {a.date} 阻断:{reason}", file=sys.stderr)
     return code
 

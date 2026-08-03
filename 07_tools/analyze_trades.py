@@ -47,6 +47,27 @@ POS_FIELDS = [
 ]
 
 
+def _map_fields(raw: list[dict], fields: list[str]) -> pd.DataFrame:
+    """把（可能 GBK 乱码的）JSON 记录映射到权威中文字段名。
+
+    列名已是可识别的中文字段时原样返回；否则按位置映射到 fields。
+    位置映射只在列数完全相等时安全：券商多导/少导一列会让「总盈亏」读到相邻列，
+    使全部盈亏统计静默错算，因此列数不等一律 fail-loud，绝不猜。
+    """
+    df = pd.DataFrame(raw)
+    if df.columns.empty:
+        return df
+    if str(df.columns[0]) in fields:
+        return df
+    if len(df.columns) != len(fields):
+        raise ValueError(
+            f"乱码字段映射失败：源列数 {len(df.columns)} 与权威字段数 {len(fields)} 不一致，"
+            f"按位置重命名会让盈亏读到相邻列。源列名={list(df.columns)}；"
+            f"期望字段={fields}。请先修正导出源编码或更新字段表，不做猜测映射。")
+    df.columns = fields
+    return df
+
+
 def load_closed() -> pd.DataFrame:
     """加载已清仓数据。JSON 可能乱码，用字段列表映射。"""
     if not CLOSED_JSON.exists():
@@ -54,20 +75,7 @@ def load_closed() -> pd.DataFrame:
     raw = json.loads(CLOSED_JSON.read_text(encoding="utf-8"))
     if not raw:
         return pd.DataFrame()
-    # 检测是否乱码：第一个 key 是否在已知字段中
-    first_key = next(iter(raw[0])) if raw[0] else ""
-    if first_key in CLOSED_FIELDS:
-        df = pd.DataFrame(raw)
-    else:
-        # 乱码模式：按位置映射
-        df = pd.DataFrame(raw)
-        if len(df.columns) == len(CLOSED_FIELDS):
-            df.columns = CLOSED_FIELDS
-        # 如果列数不匹配，尝试按顺序尽可能映射
-        else:
-            mapping = {old: new for old, new in zip(df.columns, CLOSED_FIELDS)}
-            df = df.rename(columns=mapping)
-    return df
+    return _map_fields(raw, CLOSED_FIELDS)
 
 
 def load_positions() -> pd.DataFrame:
@@ -77,17 +85,7 @@ def load_positions() -> pd.DataFrame:
     raw = json.loads(POSITIONS_JSON.read_text(encoding="utf-8"))
     if not raw:
         return pd.DataFrame()
-    first_key = next(iter(raw[0])) if raw[0] else ""
-    if first_key in POS_FIELDS:
-        df = pd.DataFrame(raw)
-    else:
-        df = pd.DataFrame(raw)
-        if len(df.columns) == len(POS_FIELDS):
-            df.columns = POS_FIELDS
-        else:
-            mapping = {old: new for old, new in zip(df.columns, POS_FIELDS)}
-            df = df.rename(columns=mapping)
-    return df
+    return _map_fields(raw, POS_FIELDS)
 
 
 def load_trades() -> pd.DataFrame:
@@ -169,14 +167,18 @@ def build_yearly(closed: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
     df = closed.dropna(subset=["清仓日期"]).copy()
     df["年份"] = df["清仓日期"].dt.year
-    return df.groupby("年份", dropna=True).agg(
-        笔数=("代码", "count"),
-        总盈亏=("总盈亏", "sum"),
-        胜率=("总盈亏", lambda s: (s > 0).mean()),
-        平均盈亏比=("盈亏比", "mean"),
-        平均持仓天数=("持仓天数", "mean"),
-        跑赢大盘比例=("跑赢大盘", lambda s: (s > 0).mean() if "跑赢大盘" in s else np.nan),
-    ).reset_index()
+    aggs: dict[str, tuple] = {
+        "笔数": ("代码", "count"),
+        "总盈亏": ("总盈亏", "sum"),
+        "胜率": ("总盈亏", lambda s: (s > 0).mean()),
+        "平均盈亏比": ("盈亏比", "mean"),
+        "平均持仓天数": ("持仓天数", "mean"),
+    }
+    # 旧写法 `lambda s: ... if "跑赢大盘" in s else np.nan` 检查的是 Series 的**索引**
+    # 而非列是否存在，恒为 False ⇒ 该列恒 NaN。列存在性必须在 groupby 之外判定。
+    if "跑赢大盘" in df.columns:
+        aggs["跑赢大盘比例"] = ("跑赢大盘", lambda s: (s > 0).mean())
+    return df.groupby("年份", dropna=True).agg(**aggs).reset_index()
 
 
 def build_period(closed: pd.DataFrame) -> pd.DataFrame:

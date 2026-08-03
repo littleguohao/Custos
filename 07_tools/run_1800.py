@@ -21,7 +21,7 @@ import sys
 import time
 from datetime import date
 
-from paths import BASE
+from paths import BASE, cn_today
 from pipeline_kit import check_trading_day, log_stage, md_to_digest, now_iso, run_stage, write_run_log
 
 TOOLS = BASE / "07_tools"
@@ -35,6 +35,12 @@ _log_stage = log_stage
 
 def _write_run_log(target: str, status: str, started_at: str, t0: float, stages: list[dict]):
     return write_run_log(LOG_DIR, "1800", target, status, started_at, t0, stages)
+
+
+def _last_line(text: str) -> str:
+    """取 stage 输出的最后一行非空文本(脚本摘要行)。"""
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    return lines[-1] if lines else ""
 
 
 def _stage(cmd: list[str], name: str) -> dict:
@@ -66,7 +72,7 @@ def main(argv=None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser()
-    ap.add_argument("--date", default=date.today().strftime("%Y-%m-%d"))
+    ap.add_argument("--date", default=cn_today().strftime("%Y-%m-%d"))
     args = ap.parse_args(argv)
     target = args.date
 
@@ -123,10 +129,15 @@ def main(argv=None) -> int:
                     "--out", str(BASE / "01_data" / "market" / "sector_index"),
                     "--start", "20180101", "--incremental"],
                    "refresh_sector_index", note="best-effort，失败不中断(仅影响板块相位 hint)")
+    tail = _last_line(r["out"])
     if not r["ok"]:
-        print(f"[WARN] refresh_sector_index failed: {r['out'][:200]}")
+        # 摘要行自带 "x/y 成功率"：低成功率(3/430)时脚本退 2，这里必须把该行透出，
+        # 否则 [WARN] 只打前 200 字（"[INFO] 板块数: 430"），看不出这批基本全失败。
+        print(f"[WARN] refresh_sector_index failed: {tail or r['out'][:200]}")
+    elif tail.startswith("[WARN]"):
+        print(tail)
     else:
-        print(f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'sector index refreshed'}")
+        print(f"[OK] {tail or 'sector index refreshed'}")
 
     # 3. Screening chain (each stage propagates degradation downstream)
     degraded = []

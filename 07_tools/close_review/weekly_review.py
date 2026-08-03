@@ -16,7 +16,8 @@
 - 止损合规：亏损平仓单的已实现收益率 <= STOP_LOSS_PCT（b1 短线止损线 -7%）
   记为止损偏慢。用已实现收益率近似卖出时浮亏。
 - 无交易确认完备性：本周交易日（工作日且不在官方休市区间）中无成交的日子，
-  应在 _import_meta.json 的 no_trades_confirmed_dates 中有确认记录。
+  应在 position_confirmations.json 中有 no_trades=True 的确认记录
+  （唯一生产者：incremental_ledger.py --confirm-no-trades）。
 - 卖飞：卖出单的卖出价 vs 卖出日之后最近的 mfe_mae.json 中同代码的隐含 MFE 价
   （cost * (1 + mfe_pct/100)），且 mfe_date 晚于卖出日；隐含 MFE 价超过卖出价
   (1 + SELL_FLY_PCT) 记为卖飞候选。代码不在后续 mfe_mae 中 = 无法评估，不计命中。
@@ -34,7 +35,14 @@
   组合周收益为负但有方向的建议全部正确 → [策略环境] adverse_market_environment。
 
 盈亏口径：全台账 FIFO 配对（买入可早于本周），平仓单按 (代码, 卖出日) 聚合；
-毛盈亏 = Σ(卖价 - 买入成本) * 数量；净盈亏 = 毛盈亏合计 - 本周全部成交费用。
+毛盈亏 = Σ(卖价 - 买入成本) * 数量；净盈亏 = 毛盈亏合计 - **已平仓对应费用**
+（卖单费用 + 按已配平股数摊到的买单费用）。此前净盈亏扣的是"本周全部成交费用"，
+把本周新开仓、还没卖的买单费用算进了已实现盈亏（买入尚未产生盈亏，其费用不属于
+已实现口径），同时又漏掉上周买、本周卖的那笔买单费用；两个方向都错。
+本周全部费用仍以 fee_total / buy_fee_total / sell_fee_total 如实披露。
+仅 match_status="full"（卖出数量全部找到买入来源）的平仓单进入毛/净盈亏、胜率、
+盈亏比、止损合规、持有期与空头亏损归因；部分配平（台账缺早期买入，盈亏系统性少算）
+与零配平（无成本基准）一律排除并记 unavailable + 单独报表，不得静默少算。
 """
 from __future__ import annotations
 
@@ -50,7 +58,7 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import BASE  # noqa: E402
+from paths import BASE, cn_today, cn_now  # noqa: E402
 
 # 规则阈值
 STOP_LOSS_PCT = -7.0       # b1 短线止损线：已实现亏损超过该值 = 止损偏慢
@@ -124,27 +132,42 @@ def parse_ledger(path: Path) -> list[dict] | None:
 def fifo_pair(trades: list[dict]) -> list[dict]:
     """全台账 FIFO 配对，返回平仓单列表（按 (代码, 卖出日) 聚合）。
 
-    每单字段：code/name/sell_date/sell_qty/avg_sell_price/avg_buy_cost/
-    first_buy_date/avg_buy_date/hold_days/gross_pnl/pnl_pct。
+    每单字段：code/name/sell_date/sell_qty/matched_qty/unmatched_qty/match_status/
+    avg_sell_price/avg_buy_cost/first_buy_date/hold_days/gross_pnl/pnl_pct/
+    sell_fee/matched_buy_fee/net_pnl。
     持有天数 = 卖出日 - 数量加权平均买入日（自然日）。
+
+    费用口径：买单费用按**已配平股数比例**摊到这笔平仓单（``matched_buy_fee``），
+    与卖单费用一起构成该笔往返交易的成本。未平仓那部分的买单费用不属于已实现盈亏，
+    留给下一次平仓时再摊（周报的净盈亏据此计算，见 build_weekly_review）。
+
+    match_status 三态（下游据此决定是否纳入盈亏/胜率统计）：
+    - full：卖出数量全部找到买入来源，gross_pnl 可信；
+    - partial：只有一部分找到买入来源（台账缺早期买入），gross_pnl 只覆盖已配平
+      部分，系统性少算，**不可**用于盈亏/胜率；
+    - none：完全无买入来源，gross_pnl 为 None。
     """
-    open_lots: dict[str, list[list]] = {}  # code -> [[qty, price, date], ...]
+    open_lots: dict[str, list[list]] = {}  # code -> [[qty, price, date, fee_per_share], ...]
     sells_by_key: dict[tuple, dict] = {}
     order: list[tuple] = []
     for t in trades:
         if t["side"] == BUY:
-            open_lots.setdefault(t["code"], []).append([t["qty"], t["price"], t["date"]])
+            fee_per_share = (t["fee"] / t["qty"]) if t["qty"] else 0.0
+            open_lots.setdefault(t["code"], []).append(
+                [t["qty"], t["price"], t["date"], fee_per_share])
             continue
         lots = open_lots.setdefault(t["code"], [])
         remaining = t["qty"]
         matched_cost = 0.0
         matched_qty = 0.0
+        matched_fee = 0.0
         buy_dates: list[tuple[str, float]] = []
         while remaining > 1e-9 and lots:
             lot = lots[0]
             take = min(remaining, lot[0])
             matched_cost += take * lot[1]
             matched_qty += take
+            matched_fee += take * lot[3]
             buy_dates.append((lot[2], take))
             lot[0] -= take
             remaining -= take
@@ -155,7 +178,8 @@ def fifo_pair(trades: list[dict]) -> list[dict]:
             sells_by_key[key] = {
                 "code": t["code"], "name": t["name"], "sell_date": t["date"],
                 "sell_qty": 0.0, "sell_amount": 0.0, "sell_fee": 0.0,
-                "matched_cost": 0.0, "matched_qty": 0.0, "buy_dates": [],
+                "matched_cost": 0.0, "matched_qty": 0.0, "matched_fee": 0.0,
+                "buy_dates": [],
             }
             order.append(key)
         agg = sells_by_key[key]
@@ -164,6 +188,7 @@ def fifo_pair(trades: list[dict]) -> list[dict]:
         agg["sell_fee"] += t["fee"]
         agg["matched_cost"] += matched_cost
         agg["matched_qty"] += matched_qty
+        agg["matched_fee"] += matched_fee
         agg["buy_dates"].extend(buy_dates)
     closings = []
     for key in order:
@@ -183,6 +208,13 @@ def fifo_pair(trades: list[dict]) -> list[dict]:
             first_buy = None
         gross = (avg_sell * mqty - agg["matched_cost"]) if mqty else None
         pnl_pct = (gross / agg["matched_cost"] * 100) if (gross is not None and agg["matched_cost"]) else None
+        unmatched = round(qty - mqty, 4)
+        if mqty <= 1e-9:
+            status = "none"
+        elif unmatched > 1e-9:
+            status = "partial"
+        else:
+            status = "full"
         closings.append({
             "code": agg["code"], "name": agg["name"], "sell_date": agg["sell_date"],
             "sell_qty": qty, "avg_sell_price": round(avg_sell, 4),
@@ -190,16 +222,27 @@ def fifo_pair(trades: list[dict]) -> list[dict]:
             "first_buy_date": first_buy, "hold_days": hold_days,
             "gross_pnl": round(gross, 2) if gross is not None else None,
             "pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None,
-            "unmatched_qty": round(qty - mqty, 4),
+            "matched_qty": round(mqty, 4),
+            "unmatched_qty": unmatched,
+            "match_status": status,
+            "sell_fee": round(agg["sell_fee"], 2),
+            "matched_buy_fee": round(agg["matched_fee"], 2),
+            "net_pnl": (round(gross - agg["sell_fee"] - agg["matched_fee"], 2)
+                        if gross is not None else None),
         })
     return closings
 
 
 def load_amv_regimes(path: Path) -> dict[str, dict] | None:
-    """0AMV 历史 -> {date: {amv_change_pct, regime}}，同日取最后一条记录。"""
+    """0AMV 历史 -> {date: {amv_change_pct, regime}}，同日取最后一条记录。
+
+    单条脏记录只跳过自己:`float(pct)` 此前无防守，一条 "N/A" 就抛 ValueError 打断
+    **整份**周报（本函数在 build_weekly_review 主路径上）。跳过的条数打 WARN。
+    """
     if not path.exists():
         return None
     regimes: dict[str, dict] = {}
+    skipped = 0
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
@@ -207,21 +250,48 @@ def load_amv_regimes(path: Path) -> dict[str, dict] | None:
         try:
             rec = json.loads(line)
         except json.JSONDecodeError:
+            skipped += 1
+            continue
+        if not isinstance(rec, dict):
+            skipped += 1
             continue
         day = rec.get("date")
         pct = rec.get("amv_change_pct")
         if not day or pct is None:
             continue
-        pct = float(pct)
+        try:
+            pct = float(pct)
+        except (TypeError, ValueError):
+            skipped += 1
+            continue
         regime = "多头" if pct > AMV_BULL_PCT else ("空头" if pct < AMV_BEAR_PCT else "震荡")
         regimes[day] = {"amv_change_pct": pct, "regime": regime}
+    if skipped:
+        print(f"[WARN] 0AMV 历史跳过 {skipped} 条无法解析的记录: {path}", file=sys.stderr)
     return regimes
+
+
+def _in_closed_range(day: str, ranges) -> bool:
+    """day 是否落在任一官方休市区间。缺 start/end 或非 dict 的条目跳过而不抛。
+
+    修前 `r["start"]` 直接下标:日历文件里一条缺键的区间就 KeyError 打断整份周报。
+    """
+    for r in ranges or []:
+        if not isinstance(r, dict):
+            continue
+        start, end = r.get("start"), r.get("end")
+        if not start or not end:
+            continue
+        if str(start) <= day <= str(end):
+            return True
+    return False
 
 
 def trading_days_of_week(base: Path, days: list[str]) -> dict[str, bool | None]:
     """本周各日是否交易日：工作日且不在官方休市区间 = True；年份未登记 = None。"""
     cfg = load_json(base / "00_governance" / "CN_TRADING_CALENDAR.json", {})
-    official = (cfg.get("official_years") or {})
+    official = cfg.get("official_years") if isinstance(cfg, dict) else None
+    official = official if isinstance(official, dict) else {}
     result = {}
     for day in days:
         d = date.fromisoformat(day)
@@ -229,42 +299,65 @@ def trading_days_of_week(base: Path, days: list[str]) -> dict[str, bool | None]:
             result[day] = False
             continue
         year_cfg = official.get(str(d.year))
-        if year_cfg is None:
+        if not isinstance(year_cfg, dict):     # 年份未登记 / 结构异常一律"未知"，不猜
             result[day] = None
             continue
-        closed = any(r["start"] <= day <= r["end"] for r in year_cfg.get("closed_ranges", []))
+        closed = _in_closed_range(day, year_cfg.get("closed_ranges"))
         result[day] = not closed
     return result
 
 
-def find_plan_for_day(base: Path, day: str) -> tuple[dict | None, str | None]:
+def find_plan_for_day(base: Path, day: str, cache: dict | None = None) -> tuple[dict | None, str | None]:
     """找 day 的交易计划 = 最近一份早于 day 的 final_review 的 next_day_plan。
 
     返回 (holding_plans, 来源日期)；找不到返回 (None, None)。
+
+    ``cache``：{date: review_dict|None} 复用容器。本周每笔成交都会调它，且回看 10 天
+    的窗口高度重叠 —— 不共享缓存时同一份 final_review.json 会被 exists()+json.loads
+    重复读十几次（一周几十笔成交就是几百次 IO）。
     """
+    cache = {} if cache is None else cache
     cursor = date.fromisoformat(day) - timedelta(days=1)
     for _ in range(PLAN_LOOKBACK_DAYS):
-        path = base / "04_reviews" / "daily" / f"{cursor.isoformat()}_final_review.json"
-        if path.exists():
-            review = load_json(path, {})
+        key = cursor.isoformat()
+        if key not in cache:
+            path = base / "04_reviews" / "daily" / f"{key}_final_review.json"
+            cache[key] = load_json(path, None) if path.exists() else None
+        review = cache[key]
+        if isinstance(review, dict):
             plan = (review.get("next_day_plan") or {}).get("holding_plans")
             if plan is not None:
-                return plan, cursor.isoformat()
+                return plan, key
         cursor -= timedelta(days=1)
     return None, None
 
 
-def load_mfe_after(base: Path, sell_date: str) -> dict[str, dict] | None:
-    """卖出日之后最近的 mfe_mae.json -> {code: entry}；无任何文件返回 None。"""
+def mfe_index(base: Path) -> list[tuple[str, Path]]:
+    """holdings 目录里的 mfe_mae 文件索引 [(date, path), ...] 升序，只 glob 一次。"""
     holdings_dir = base / "01_data" / "holdings"
     if not holdings_dir.exists():
+        return []
+    return sorted((p.name.split("_")[0], p) for p in holdings_dir.glob("*_mfe_mae.json"))
+
+
+def load_mfe_after(base: Path, sell_date: str, index: list | None = None,
+                   cache: dict | None = None) -> dict[str, dict] | None:
+    """卖出日之后最近的 mfe_mae.json -> {code: entry}；无任何文件返回 None。
+
+    ``index``/``cache``：调用方可传入 `mfe_index(base)` 的结果与解析缓存。卖飞审计对
+    每张平仓单都调本函数，不复用时每单都要重新 glob 整个 holdings 目录并重新解析 JSON。
+    """
+    entries = mfe_index(base) if index is None else index
+    if not entries:
         return None
-    candidates = sorted(holdings_dir.glob("*_mfe_mae.json"))
-    for path in candidates:
-        day = path.name.split("_")[0]
+    cache = {} if cache is None else cache
+    for day, path in entries:
         if day > sell_date:
-            data = load_json(path, {})
-            return {str(h.get("code")): h for h in data.get("holdings", [])}
+            key = str(path)
+            if key not in cache:
+                data = load_json(path, {})
+                cache[key] = {str(h.get("code")): h for h in data.get("holdings", [])}
+            return cache[key]
     return None
 
 
@@ -524,14 +617,45 @@ def build_weekly_review(base: Path, day: str) -> dict:
     buys = [t for t in week_trades if t["side"] == BUY]
     sells = [t for t in week_trades if t["side"] == SELL]
     fee_total = round(sum(t["fee"] for t in week_trades), 2)
+    buy_fee_total = round(sum(t["fee"] for t in buys), 2)
+    sell_fee_total = round(sum(t["fee"] for t in sells), 2)
     amount_total = round(sum(t["amount"] for t in week_trades), 2)
 
     # --- FIFO 盈亏 ---
+    # 只有 match_status == "full" 的平仓单盈亏可信：部分配平的 gross_pnl 只覆盖已找到
+    # 买入来源的那部分数量，系统性少算；零配平根本没有成本基准。二者一律排除出
+    # 盈亏/胜率/止损/持有期/空头归因，并单独 unavailable 报告，不得静默少算。
     closings_all = fifo_pair(all_trades)
     closings = [c for c in closings_all if week["start"] <= c["sell_date"] <= week["end"]]
-    valued = [c for c in closings if c["gross_pnl"] is not None]
+    valued = [c for c in closings if c["gross_pnl"] is not None and c["match_status"] == "full"]
+    unmatched_closings = [c for c in closings if c["match_status"] != "full"]
+    partial_closings = [c for c in unmatched_closings if c["match_status"] == "partial"]
+    zero_closings = [c for c in unmatched_closings if c["match_status"] == "none"]
+    for c in partial_closings:
+        unavailable.append(
+            f"{c['sell_date']} {c['code']} 平仓单部分配平：卖出 {c['sell_qty']:g} 股仅 "
+            f"{c['matched_qty']:g} 股找到买入来源（缺 {c['unmatched_qty']:g} 股），"
+            "已实现盈亏不可信，已排除出盈亏与胜率统计")
+    for c in zero_closings:
+        unavailable.append(
+            f"{c['sell_date']} {c['code']} 平仓单未配平：卖出 {c['sell_qty']:g} 股在台账中"
+            "无任何买入来源，无成本基准，已排除出盈亏与胜率统计")
+    unmatched_evidence = [
+        {"code": c["code"], "name": c["name"], "sell_date": c["sell_date"],
+         "sell_qty": c["sell_qty"], "matched_qty": c["matched_qty"],
+         "unmatched_qty": c["unmatched_qty"], "match_status": c["match_status"],
+         "excluded_gross_pnl": c["gross_pnl"]}
+        for c in unmatched_closings
+    ]
     gross_total = round(sum(c["gross_pnl"] for c in valued), 2)
-    net_total = round(gross_total - fee_total, 2)
+    # 净盈亏只扣**已平仓对应**的费用:卖单费用 + 按已配平股数摊到的买单费用。
+    # 修前是 `gross_total - fee_total`(本周所有成交的费用),于是本周新开仓、还没卖的
+    # 买单费用被扣在"已实现"盈亏上 —— 买入尚未产生盈亏,其费用不属于本周已实现口径。
+    # 反过来,上周买本周卖的那笔买单费用此前完全不扣(不在本周费用里),同样错。
+    matched_buy_fee_total = round(sum(c["matched_buy_fee"] for c in valued), 2)
+    closed_sell_fee_total = round(sum(c["sell_fee"] for c in valued), 2)
+    closed_fee_total = round(matched_buy_fee_total + closed_sell_fee_total, 2)
+    net_total = round(gross_total - closed_fee_total, 2)
     wins = [c for c in valued if c["gross_pnl"] > 0]
     losses = [c for c in valued if c["gross_pnl"] < 0]
     win_rate = round(len(wins) / len(valued) * 100, 2) if valued else None
@@ -560,8 +684,9 @@ def build_weekly_review(base: Path, day: str) -> dict:
 
     # --- 执行维度 1：计划外交易 ---
     plan_checks = []
+    plan_cache: dict = dict(daily_reviews)   # 本周的 final_review 已读过，直接复用
     for t in week_trades:
-        plan, source = find_plan_for_day(base, t["date"])
+        plan, source = find_plan_for_day(base, t["date"], cache=plan_cache)
         if plan is None:
             unavailable.append(f"{t['date']} 无前置 final_review，{t['code']} 计划归属无法判定")
             plan_checks.append({"trade": t, "status": "unknown", "plan_source": None})
@@ -591,35 +716,55 @@ def build_weekly_review(base: Path, day: str) -> dict:
         })
 
     # --- 执行维度 3：无交易确认完备性 ---
-    meta_path = base / "01_data" / "trades" / "_import_meta.json"
-    meta = load_json(meta_path, None)
-    confirmed_no_trade: dict = {}
-    if meta is None:
-        if any(d not in {t["date"] for t in week_trades} for d in trading_days):
-            unavailable.append(f"无交易确认元数据缺失：{meta_path}")
-    else:
-        confirmed_no_trade = meta.get("no_trades_confirmed_dates") or {}
+    # 唯一有生产者的数据源是 incremental_ledger.py --confirm-no-trades 写的
+    # position_confirmations.json：{date: {confirmed_at, no_trades, note}}。
+    # 只有 no_trades is True 才算「无交易确认」；runtime_guards.confirm_position_snapshot
+    # 写的持仓快照确认条目没有该键，不能顶替。
+    # 旧实现读 _import_meta.json 的 no_trades_confirmed_dates —— 该键全仓库无任何写入方，
+    # 恒为空 ⇒ 每周误报 no_trade_confirmation_missing。
+    confirm_path = base / "01_data" / "trades" / "position_confirmations.json"
+    confirmations = load_json(confirm_path, None)
     traded_dates = {t["date"] for t in week_trades}
     no_trade_days = [d for d in trading_days if d not in traded_dates]
-    unconfirmed = [d for d in no_trade_days if not confirmed_no_trade.get(d)]
-    if unconfirmed and meta is not None:
+    confirmed_no_trade: dict = {}
+    if isinstance(confirmations, dict):
+        confirmed_no_trade = {d: rec for d, rec in confirmations.items()
+                              if isinstance(rec, dict) and rec.get("no_trades") is True}
+    unconfirmed = [d for d in no_trade_days if d not in confirmed_no_trade]
+    if not isinstance(confirmations, dict):
+        if no_trade_days:
+            unavailable.append(f"无交易确认文件缺失：{confirm_path}")
+    elif unconfirmed:
         execution_issues.append({
             "rule": "no_trade_confirmation_missing",
             "summary": f"无交易确认缺失 {len(unconfirmed)} 天：{', '.join(unconfirmed)}",
-            "evidence": {"no_trade_days": no_trade_days, "confirmed": sorted(confirmed_no_trade)},
+            "evidence": {"no_trade_days": no_trade_days, "confirmed": sorted(confirmed_no_trade),
+                         "source": str(confirm_path)},
         })
 
     # --- 策略维度 1：卖飞分析 ---
+    # 覆盖率必须显式报告:MFE/MAE 只对**仍持仓**的票出数(calc_mfe_mae 按 current_positions
+    # 逐票算),因此**全清仓**的平仓单在后续 mfe_mae.json 里根本不存在 —— 永远"无法评估"。
+    # 此前只把它塞进 sell_fly_unevaluated 列表,报告正文写"卖飞候选 0 单",读者会当成
+    # "本周没卖飞",而真相是"本周根本没查"。
     sell_fly = []
     sell_fly_unevaluated = []
+    mfe_files = mfe_index(base)
+    mfe_cache: dict = {}
     for c in closings:
-        mfe_map = load_mfe_after(base, c["sell_date"])
+        mfe_map = load_mfe_after(base, c["sell_date"], index=mfe_files, cache=mfe_cache)
         if mfe_map is None:
-            sell_fly_unevaluated.append({"code": c["code"], "reason": "卖出日之后无 mfe_mae 数据"})
+            sell_fly_unevaluated.append({"code": c["code"], "name": c["name"],
+                                         "sell_date": c["sell_date"],
+                                         "reason": "卖出日之后无 mfe_mae 数据"})
             continue
         entry = mfe_map.get(c["code"])
         if not entry or entry.get("mfe_pct") is None or entry.get("cost") is None:
-            sell_fly_unevaluated.append({"code": c["code"], "reason": "后续 mfe_mae 中无该代码"})
+            reason = ("后续 mfe_mae 中无该代码（MFE/MAE 只覆盖仍持仓的票，全清仓单无法评估）"
+                      if not entry else
+                      f"后续 mfe_mae 中该代码未出数（{entry.get('unable_reason') or 'mfe_pct/cost 缺失'}）")
+            sell_fly_unevaluated.append({"code": c["code"], "name": c["name"],
+                                         "sell_date": c["sell_date"], "reason": reason})
             continue
         mfe_date = entry.get("mfe_date")
         implied_mfe_price = entry["cost"] * (1 + entry["mfe_pct"] / 100)
@@ -630,6 +775,16 @@ def build_weekly_review(base: Path, day: str) -> dict:
                 "mfe_date": mfe_date,
                 "overshoot_pct": round((implied_mfe_price / c["avg_sell_price"] - 1) * 100, 2),
             })
+    sell_fly_evaluated = len(closings) - len(sell_fly_unevaluated)
+    sell_fly_coverage = (round(sell_fly_evaluated / len(closings) * 100, 2)
+                         if closings else None)
+    if sell_fly_unevaluated:
+        unavailable.append(
+            f"卖飞审计覆盖 {sell_fly_evaluated}/{len(closings)} 单"
+            f"（{sell_fly_coverage}%）：无法评估 "
+            + "；".join(f"{u['sell_date']} {u['code']} {u['reason']}"
+                        for u in sell_fly_unevaluated[:5])
+            + ("……" if len(sell_fly_unevaluated) > 5 else ""))
     if sell_fly:
         strategy_issues.append({
             "rule": "sell_fly",
@@ -739,7 +894,17 @@ def build_weekly_review(base: Path, day: str) -> dict:
         "codes": sorted({t["code"] for t in week_trades}),
         "amount_total": amount_total,
         "fee_total": fee_total,
+        "buy_fee_total": buy_fee_total,
+        "sell_fee_total": sell_fee_total,
+        "matched_buy_fee_total": matched_buy_fee_total,
+        "closed_sell_fee_total": closed_sell_fee_total,
+        "closed_fee_total": closed_fee_total,
         "closing_count": len(closings),
+        "valued_closing_count": len(valued),
+        "unmatched_closing_count": len(unmatched_closings),
+        "partial_match_count": len(partial_closings),
+        "zero_match_count": len(zero_closings),
+        "unmatched_closings": unmatched_evidence,
         "gross_pnl": gross_total,
         "net_pnl": net_total,
         "win_rate_pct": win_rate,
@@ -750,6 +915,9 @@ def build_weekly_review(base: Path, day: str) -> dict:
         "no_trade_days": no_trade_days,
         "no_trade_unconfirmed": unconfirmed,
         "sell_fly_count": len(sell_fly),
+        "sell_fly_evaluated_count": sell_fly_evaluated,
+        "sell_fly_unevaluated_count": len(sell_fly_unevaluated),
+        "sell_fly_coverage_pct": sell_fly_coverage,
         "sell_fly_unevaluated": sell_fly_unevaluated,
         "short_hold_loss_share_pct": short_loss_share,
         "bear_days": bear_days,
@@ -766,7 +934,7 @@ def build_weekly_review(base: Path, day: str) -> dict:
         "iso_year": week["iso_year"],
         "iso_week": week["iso_week"],
         "range": {"start": week["start"], "end": week["end"]},
-        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "generated_at": cn_now().strftime("%Y-%m-%d %H:%M:%S"),
         "trading_days": trading_days,
         "facts": facts,
         "execution_issues": execution_issues,
@@ -808,9 +976,11 @@ def render_markdown(review: dict) -> str:
         f"> 生成时间：{review['generated_at']}",
         f"> 交易日：{len(review['trading_days'])} 天（{', '.join(review['trading_days']) or '无'}）",
         f"> 成交：**{f['trade_count']}** 笔（买 {f['buy_count']} / 卖 {f['sell_count']}）；"
-        f"平仓 **{f['closing_count']}** 单",
-        f"> 已实现毛盈亏：**{fmt_money(f['gross_pnl'])}**；扣本周费用 {fmt_money(f['fee_total'])} 后净盈亏 "
-        f"**{fmt_money(f['net_pnl'])}**",
+        f"平仓 **{f['closing_count']}** 单"
+        + (f"（可计盈亏 {f['valued_closing_count']} 单，配平异常 "
+           f"{f['unmatched_closing_count']} 单）" if f.get('unmatched_closing_count') else ""),
+        f"> 已实现毛盈亏：**{fmt_money(f['gross_pnl'])}**；扣已平仓对应费用 "
+        f"{fmt_money(f.get('closed_fee_total'))} 后净盈亏 **{fmt_money(f['net_pnl'])}**",
         f"> 胜率：**{or_na(f['win_rate_pct'], '%')}**；"
         f"盈亏比：{or_na(f['profit_loss_ratio'])}；"
         f"平均持有：{hold_text}",
@@ -818,7 +988,12 @@ def render_markdown(review: dict) -> str:
         "## 1. 本周概览",
         "",
         f"- 复盘区间：{r['start']} ~ {r['end']}（ISO {review['iso_year']}-W{review['iso_week']:02d}）",
-        f"- 成交金额合计：{fmt_money(f['amount_total'])}；费用合计：{fmt_money(f['fee_total'])}",
+        f"- 成交金额合计：{fmt_money(f['amount_total'])}；本周费用合计：{fmt_money(f['fee_total'])}"
+        f"（买 {fmt_money(f.get('buy_fee_total'))} / 卖 {fmt_money(f.get('sell_fee_total'))}）；"
+        f"已平仓对应费用：{fmt_money(f.get('closed_fee_total'))}"
+        f"（已配平买单摊费 {fmt_money(f.get('matched_buy_fee_total'))} + 卖单费用 "
+        f"{fmt_money(f.get('closed_sell_fee_total'))}）"
+        f"——未平仓买单的费用不计入已实现盈亏",
         f"- 涉及代码：{', '.join(f['codes']) or '无'}",
         f"- 每日复盘覆盖：{', '.join(f['daily_review_days']) or '无'}",
         f"- 风控等级：{json.dumps(f['risk_levels'], ensure_ascii=False) if f['risk_levels'] else 'unavailable'}",
@@ -881,9 +1056,10 @@ def render_markdown(review: dict) -> str:
         for t in trades:
             lines.append(f"| {t['date']} | {t['code']} | {t['name']} | {t['side']} | "
                          f"{t['qty']:g} | {t['price']:g} | {t['amount']:,.2f} | {t['fee']:,.2f} |")
-        closings = [c for c in review["details"]["closings"] if c["gross_pnl"] is not None]
+        closings = [c for c in review["details"]["closings"]
+                    if c["gross_pnl"] is not None and c.get("match_status", "full") == "full"]
         if closings:
-            lines += ["", "### 平仓盈亏（FIFO 配对）", "",
+            lines += ["", "### 平仓盈亏（FIFO 配对，仅完整配平）", "",
                       "| 卖出日 | 代码 | 名称 | 数量 | 均价(卖/买) | 持有天数 | 毛盈亏 | 收益率 |",
                       "|---|---|---|---:|---|---:|---:|---:|"]
             for c in closings:
@@ -894,6 +1070,21 @@ def render_markdown(review: dict) -> str:
                     f"{c['gross_pnl']:,.2f} | {c['pnl_pct']}% |")
     else:
         lines.append("- 本周无成交记录。")
+    unmatched = f.get("unmatched_closings") or []
+    if unmatched:
+        lines += ["", "### 配平异常平仓单（已排除出盈亏与胜率统计）", "",
+                  "| 卖出日 | 代码 | 名称 | 卖出数量 | 已配平 | 缺配平 | 状态 | 被排除的盈亏 |",
+                  "|---|---|---|---:|---:|---:|---|---:|"]
+        status_text = {"partial": "部分配平", "none": "未配平"}
+        for c in unmatched:
+            pnl = f"{c['excluded_gross_pnl']:,.2f}" if c.get("excluded_gross_pnl") is not None else "unavailable"
+            lines.append(
+                f"| {c['sell_date']} | {c['code']} | {c['name']} | {c['sell_qty']:g} | "
+                f"{c['matched_qty']:g} | {c['unmatched_qty']:g} | "
+                f"{status_text.get(c['match_status'], c['match_status'])} | {pnl} |")
+        lines.append("- 口径说明：部分配平的毛盈亏只覆盖已找到买入来源的数量，系统性少算；"
+                     "未配平单无成本基准。二者均不计入本周毛/净盈亏、胜率、盈亏比、"
+                     "止损合规、持有期与空头亏损归因。")
     lines += ["", "## 5. 执行纪律审计", ""]
     lines.append(f"- 计划外交易占比："
                  f"{f['unplanned_ratio_pct'] if f['unplanned_ratio_pct'] is not None else 'unavailable'}"
@@ -924,7 +1115,10 @@ def render_markdown(review: dict) -> str:
         lines.append("- `unavailable`：本周无每日总控决策数据。")
     lines += ["", "## 7. 策略有效性", ""]
     lines.append(f"- 卖飞候选（后续 MFE 超卖出价 {SELL_FLY_PCT * 100:.0f}%）：{f['sell_fly_count']} 单；"
-                 f"无法评估 {len(f['sell_fly_unevaluated'])} 单")
+                 f"审计覆盖 {f.get('sell_fly_evaluated_count', 0)}/{f['closing_count']} 单"
+                 f"（{or_na(f.get('sell_fly_coverage_pct'), '%')}），"
+                 f"无法评估 {len(f['sell_fly_unevaluated'])} 单"
+                 + ("；无法评估明细见「数据缺口声明」" if f['sell_fly_unevaluated'] else ""))
     lines.append(f"- {SHORT_HOLD_DAYS} 天以内持有单亏损贡献：{or_na(f['short_hold_loss_share_pct'], '%')}")
     lines.append(f"- 0AMV 空头天数：{', '.join(f['bear_days']) or '无'}"
                  f"（占比 {or_na(f['bear_day_ratio_pct'], '%')}）；"
@@ -951,7 +1145,7 @@ def render_markdown(review: dict) -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="确定性周度复盘")
-    ap.add_argument("--date", default=date.today().isoformat(), help="周内任意日期，默认今天")
+    ap.add_argument("--date", default=cn_today().isoformat(), help="周内任意日期，默认今天")
     ap.add_argument("--base", default=str(BASE), help="项目根目录（测试用）")
     args = ap.parse_args()
     base = Path(args.base)

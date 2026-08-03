@@ -142,7 +142,7 @@ def build_sector_summary(date: str) -> list[dict[str, Any]]:
             continue
         code = codes[0]
         df = tm.read_vipdoc(code)
-        analysis = tm.analyze(df)
+        analysis = tm.analyze(df, code)
         stage, reason = classify_stage(analysis)
         score = score_sector(analysis, th.get("priority", ""))
         rows.append({

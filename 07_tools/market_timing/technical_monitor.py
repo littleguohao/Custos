@@ -575,7 +575,13 @@ def trend_state(df: pd.DataFrame) -> dict[str, Any]:
     }
 
 
-def analyze(df: pd.DataFrame) -> dict[str, Any]:
+def analyze(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
+    """全套技术面分析。
+
+    ``code`` 必须传:涨跌停幅度按代码前缀推断,不传等于让 300/301/688/920 一律按
+    10% 判定,再被 ST 规则(近20日波动 ≤5.2% ⇒ 降为 5%)进一步误降,
+    使 two_medium_large_bull 误触发 B1 第五层止盈(审计 B2)。
+    """
     if df.empty:
         return {"available": False, "error": "no kline data"}
     weekly = resample(df, "W-FRI")
@@ -589,7 +595,7 @@ def analyze(df: pd.DataFrame) -> dict[str, Any]:
         "zhixing": zhixing_state(df),
         "n_structure": n_structure_state(df),
         "descending_n_structure": descending_n_structure_state(df),
-        "price_volume": price_volume_state(df),
+        "price_volume": price_volume_state(df, code),
         "box_20d": box(df, 20),
         "box_60d": box(df, 60),
         "daily": {"kdj": kdj(df), "macd": macd(df)},
@@ -606,7 +612,7 @@ def main():
     ap.add_argument("--out", default="")
     args = ap.parse_args()
     tcode = norm_code(args.code)
-    result = {"code": tcode, "name": args.name, "analysis": analyze(read_vipdoc(tcode))}
+    result = {"code": tcode, "name": args.name, "analysis": analyze(read_vipdoc(tcode), tcode)}
     out = Path(args.out) if args.out else OUT_DIR / f"{args.date}_technical_{tcode.replace('.', '_')}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

@@ -160,11 +160,28 @@ def test_summarize_multi_and_matrix():
 # ---------- 可选打分器 --scorer ----------
 
 def test_scorers_registry_all_run():
+    """每个 scorer 都能跑通且不抛异常。
+
+    产出记录数不作断言:依赖外部数据源的 scorer(mcap 需要东财全史股本)在没有那份
+    数据时**正确的行为就是返回 None → 不产出记录**——见 _sc_mcap docstring
+    「无股本数据 → None(不参与排序,不误标)」。此前断言 `assert recs` 把"缺数据也
+    必须给分"写成了期望,与「缺数据不得参与排名」的设计相冲突(审计 E3)。
+    """
     df = make_df([10.0 + (i % 11) * 0.2 for i in range(90)])
+    external_data_scorers = {"mcap"}          # 需要本地不一定存在的外部数据集
     for name, fn in bt.SCORERS.items():
         recs = bt.evaluate({"600000": df}, horizons=(5,), min_bars=60, scorer=fn)
-        assert recs, f"{name} 应产出记录"
+        if not recs:
+            assert name in external_data_scorers, f"{name} 应产出记录"
+            continue
         assert "s_star" in recs[0] and "suggestion" in recs[0]
+
+
+def test_scorer_returning_none_produces_no_record():
+    """缺数据的 scorer 不得被填 0 分混进记录集。"""
+    df = make_df([10.0 + (i % 11) * 0.2 for i in range(90)])
+    assert bt.evaluate({"600000": df}, horizons=(5,), min_bars=60,
+                       scorer=lambda d, c: None) == []
 
 
 def test_invert_scorer_is_complement_of_s_shape():

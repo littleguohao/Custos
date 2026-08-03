@@ -16,7 +16,7 @@ import sys
 import time
 from datetime import date
 
-from paths import BASE  # strategy_team/
+from paths import BASE, cn_today  # strategy_team/
 from pipeline_kit import check_trading_day, log_stage, now_iso, run_stage, write_run_log
 
 TOOLS = BASE / "07_tools"
@@ -60,7 +60,7 @@ def main(argv=None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser()
-    ap.add_argument("--date", default=date.today().strftime("%Y-%m-%d"))
+    ap.add_argument("--date", default=cn_today().strftime("%Y-%m-%d"))
     args = ap.parse_args(argv)
     target = args.date
 

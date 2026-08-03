@@ -10,7 +10,7 @@ from typing import Any
 from urllib import request
 
 from runtime_guards import trading_day_status
-from paths import BASE
+from paths import BASE, cn_today, cn_now
 
 CONFIG = BASE / "00_governance" / "CN_TRADING_CALENDAR.json"
 CACHE = BASE / "01_data" / "market" / "CN_TRADING_CALENDAR_CACHE.json"
@@ -72,14 +72,33 @@ def calendar_days(start: date, end: date) -> list[str]:
 
 
 def merge_range(cfg: dict[str, Any], start: date, end: date, trading_days: list[str]) -> dict[str, Any]:
-    range_days = set(calendar_days(start, end))
+    """Merge an RPC trading-day answer into the cache.
+
+    Only days inside the span the RPC actually answered for
+    ``[min(trading_days), max(trading_days)]`` may be inferred as non-trading.
+    The requested range is deliberately **not** used for that inference: the
+    exchange only publishes the current year's schedule, so a request that
+    reaches into next year comes back covering this year only. Treating the
+    whole requested range as authoritative marked every remaining day of the
+    following year as a confirmed market holiday, which made
+    ``runtime_gate --require-trading-day`` exit 3 on real trading days and
+    silently stalled every cron job. Days outside the answered span are left
+    untouched so ``trading_day_status`` reports ``is_trading_day: None``
+    ("don't know") instead of a confident False.
+    """
+    if not trading_days:
+        raise RuntimeError("refuse to merge an empty trading_days set into the calendar cache")
+    covered_lo, covered_hi = min(trading_days), max(trading_days)
+    range_days = {d for d in calendar_days(start, end) if covered_lo <= d <= covered_hi}
     trading = set(cfg.get("trading_days", [])) - range_days
     closed = set(cfg.get("non_trading_days", [])) - range_days
     trading.update(trading_days)
     closed.update(range_days - set(trading_days))
 
-    ranges = [x for x in cfg.get("covered_ranges", []) if x.get("start") != start.isoformat() or x.get("end") != end.isoformat()]
-    ranges.append({"start": start.isoformat(), "end": end.isoformat(), "source": "local_tdx_http"})
+    ranges = [x for x in cfg.get("covered_ranges", [])
+              if x.get("start") != covered_lo or x.get("end") != covered_hi]
+    ranges.append({"start": covered_lo, "end": covered_hi, "source": "local_tdx_http",
+                   "requested": {"start": start.isoformat(), "end": end.isoformat()}})
     cfg["trading_days"] = sorted(trading)
     cfg["non_trading_days"] = sorted(closed)
     cfg["covered_ranges"] = sorted(ranges, key=lambda x: (x["start"], x["end"]))
@@ -87,6 +106,12 @@ def merge_range(cfg: dict[str, Any], start: date, end: date, trading_days: list[
 
 
 def default_range(today: date) -> tuple[date, date]:
+    """Requested refresh window.
+
+    Reaching past the published schedule is harmless on purpose: ``merge_range``
+    clamps its inference to whatever the RPC actually answers, so asking for
+    more only helps when the exchange has already published the next year.
+    """
     start = today.replace(day=1)
     return start, today + timedelta(days=370)
 
@@ -96,7 +121,7 @@ def refresh(start: date, end: date, endpoint: str, market: str, timeout: int) ->
     cfg = load_json(CACHE, {"version": 1, "covered_ranges": [], "trading_days": [], "non_trading_days": []})
     source = cfg.setdefault("source", {})
     source.update({"provider": "local_tdx_http", "method": "get_trading_dates", "market": market, "endpoint": endpoint})
-    source["last_refresh_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+    source["last_refresh_at"] = cn_now().isoformat(timespec="seconds")
     try:
         days = rpc_trading_dates(endpoint, market, start, end, timeout)
         cfg = merge_range(cfg, start, end, days)
@@ -114,6 +139,10 @@ def refresh(start: date, end: date, endpoint: str, market: str, timeout: int) ->
         "status": status,
         "start": start.isoformat(),
         "end": end.isoformat(),
+        # Answered span may be much shorter than the requested one (the exchange
+        # only publishes the current year); surface it so a short answer is
+        # visible instead of silently narrowing the calendar.
+        "covered": ({"start": min(days), "end": max(days)} if days else None),
         "fetched_trading_days": len(days),
         "cached_trading_days": len(cfg.get("trading_days", [])),
         "cached_non_trading_days": len(cfg.get("non_trading_days", [])),
@@ -138,7 +167,7 @@ def main() -> None:
         if result["is_trading_day"] is None:
             raise SystemExit(2)
         return
-    default_start, default_end = default_range(date.today())
+    default_start, default_end = default_range(cn_today())
     start = date.fromisoformat(args.start) if args.start else default_start
     end = date.fromisoformat(args.end) if args.end else default_end
     if end < start:

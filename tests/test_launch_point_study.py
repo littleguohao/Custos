@@ -111,8 +111,10 @@ def test_main_loads_with_buffered_start(tmp_path, monkeypatch):
         return {}
     monkeypatch.setattr("s_data.load_bars_qlib", fake_load)
     monkeypatch.setattr(lp.bt, "load_amv_regime", lambda since="2015-01-01", root=None: {})
+    # 本测试只验证加载起点,数据是空的 → 需 --allow-empty 才不被空结果护栏拦下(审计 E9)
     rc = lp.main(["--codes", "600000", "--start", "2025-01-01", "--end", "2025-06-30",
-                  "--buffer-days", "60", "--sector-members", str(tmp_path / "none.json")])
+                  "--buffer-days", "60", "--allow-empty",
+                  "--sector-members", str(tmp_path / "none.json")])
     assert rc == 0
     assert captured["start"] < "2024-11-01"          # 60 交易日×1.6+10 ≈ 106 日历日 ≈ 2024-09-16
 
@@ -127,7 +129,7 @@ def test_load_margin_covers_gate_window(tmp_path, monkeypatch):
     monkeypatch.setattr("s_data.load_bars_qlib", fake_load)
     monkeypatch.setattr(lp.bt, "load_amv_regime", lambda since="2015-01-01", root=None: {})
     rc = lp.main(["--codes", "600000", "--start", "2025-01-01", "--end", "2025-06-30",
-                  "--buffer-days", "60", "--gate-window", "120",
+                  "--buffer-days", "60", "--gate-window", "120", "--allow-empty",
                   "--sector-members", str(tmp_path / "none.json")])
     assert rc == 0
     # max(60,120)×1.6+10 = 202 日历日 → 2025-01-01 回溯至 2024-06-13 或更早
@@ -135,17 +137,23 @@ def test_load_margin_covers_gate_window(tmp_path, monkeypatch):
 
 
 def test_emit_firings_atomic_write_with_param_header(tmp_path):
-    """firings 写盘:原子写(不留 .tmp)且头部带断点续跑校验所需的关键参数。"""
+    """firings 写盘:原子写(不留 .tmp)且头部带断点续跑校验所需的关键参数。
+
+    ⚠️ 合成上行数据的 KDJ-J 高企,reversal_k 一个都不命中 → 0 信号日。这本身正是审计 E9
+    描述的场景(空产物照样落盘并被永久复用),故此处显式 --allow-empty 才允许写出;
+    产物自带 empty_ok,run_bear_to_long_study.firings_reusable 不会复用它。
+    """
     bars, dates = _synth_bars_10()
     out = tmp_path / "f.json"
     rc = lp.main(["--codes", ",".join(sorted(bars)), "--start", dates[0], "--end", dates[-1],
                   "--entry-filter", "reversal_k", "--rank-score", "none", "--buffer-days", "0",
                   "--feature-scores", "momentum", "--delisted-ret", "-1.0",
-                  "--emit-firings", str(out),
+                  "--emit-firings", str(out), "--allow-empty",
                   "--sector-members", str(tmp_path / "none.json")],
                  loader=lambda codes, _n: {c: bars[c] for c in codes if c in bars})
     assert rc == 0
     head = json.loads(out.read_text(encoding="utf-8"))       # 完整可解析(原子写,无半截)
+    assert head["n_signal_days"] == 0 and head["empty_ok"] is True
     assert "records" in head and head["entry_filter"] == "reversal_k"
     assert head["rank_score"] == "none" and head["feature_scores"] == "momentum"
     assert head["delisted_ret"] == -1.0 and head["universe"] == "codes"

@@ -343,14 +343,17 @@ def test_enrich_metrics_error_excluded_not_abort():
         "close": [10.0] * 60, "volume": [1000.0] * 60, "amount": [0.0] * 60,
     })
     bad = pd.DataFrame({"date": dates, "open": [10.0] * 60})  # 缺 close/high/low/volume
+    # 代码用真 A 股段（600xxx）：原来用的 900001/900002 是**沪B**代码，enrich 自 2026-08-03
+    # 起对候选做 A 股白名单过滤（审计 B10：ETF/可转债/B股不得进 StockPool），
+    # 占位代码会先被 not_a_share 剔除，测不到本用例真正关心的 metrics_error 分支。
     hits = {"date": date, "status": "ok", "formulas": [{"id": "F", "hits": [
-        {"code": "900001", "name": "好股票"}, {"code": "900002", "name": "坏数据"},
+        {"code": "600001", "name": "好股票"}, {"code": "600002", "name": "坏数据"},
     ]}]}
-    loader = lambda c: good if c == "900001" else bad
+    loader = lambda c: good if c == "600001" else bad
     r = ec.enrich(date, hits_data=hits, ohlcv_loader=loader, index_loader=lambda: None,
                   universe_cfg={"exclude_bj": True, "exclude_st": True, "min_list_days": 60,
                             "j_low_required": False})
-    assert [c["code"] for c in r["candidates"]] == ["900001"]
+    assert [c["code"] for c in r["candidates"]] == ["600001"]
     assert len(r["excluded"]) == 1
-    assert r["excluded"][0]["code"] == "900002"
+    assert r["excluded"][0]["code"] == "600002"
     assert r["excluded"][0]["reason"].startswith("metrics_error:")

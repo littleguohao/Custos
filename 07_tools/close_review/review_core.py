@@ -22,7 +22,7 @@ except ImportError:
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from paths import BASE  # noqa: E402
+from paths import BASE, cn_today, cn_now  # noqa: E402
 
 TRADES = BASE / "01_data" / "trades"
 HOLDINGS = BASE / "01_data" / "holdings"
@@ -199,6 +199,9 @@ def snapshot_state(target_date: str) -> dict:
         "status": state.get("status", "未知"),
         "reason": state.get("reason", "缺少运行门控"),
         "assumption": state.get("assumption"),
+        # 继承标记必须整组透出:只带 inherited_from 时,"这是继承来的基线"这个**布尔事实**
+        # 在报告层就没了,下游只能靠解析 reason 文本猜。
+        "inherited": state.get("inherited"),
         "inherited_from": state.get("inherited_from"),
     }
 
@@ -289,7 +292,7 @@ def classify(position: dict, tech: dict, risks: list[dict], quote: dict, bearish
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--date", default=date.today().strftime("%Y-%m-%d"))
+    ap.add_argument("--date", default=cn_today().strftime("%Y-%m-%d"))
     ap.add_argument("--strict", action="store_true", help="fail instead of publishing when required quote/report fields are invalid")
     ap.add_argument("--emit-report", action="store_true", help="print the validated report body for cron delivery")
     ap.add_argument("--emit-digest", action="store_true", help="print a bounded delivery digest containing all execution-critical fields")
@@ -347,7 +350,7 @@ def main() -> None:
 
     lines = [
         f"# 14:45 收盘前操作建议 — {target_date}", "",
-        f"> 生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"> 生成时间：{cn_now().strftime('%Y-%m-%d %H:%M:%S')}",
         f"> 持仓状态：**{snap['status']}**｜{snap['reason']}",
         f"> 持仓基线：{snap.get('assumption') or '按当前已确认持仓基线评估14:45操作建议'}",
         f"> 行情来源：{quote_snapshot.get('source', '缺失')}｜行情日期：{quote_snapshot.get('as_of_date', '缺失')}｜采集时间：{quote_snapshot.get('captured_at', '缺失')}",
@@ -396,7 +399,7 @@ def main() -> None:
         raise SystemExit("[close_review] strict report validation failed:\n- " + "\n- ".join(report_errors))
     out = PLANS / f"{target_date}_1445_review.md"
     out.write_text(report, encoding="utf-8")
-    log = {"date": target_date, "generated_at": datetime.now().isoformat(timespec="seconds"), "position_snapshot": snap,
+    log = {"date": target_date, "generated_at": cn_now().isoformat(timespec="seconds"), "position_snapshot": snap,
            "total_position": total_position, "positions": positions, "revalued_positions": revalued,
            "actions": actions, "quote_snapshot": quote_snapshot, "live_quotes_pending": not all(x["price"] is not None for x in revalued),
            "position_gate": gate.get("position_gate", {})}

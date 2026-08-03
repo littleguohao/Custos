@@ -16,7 +16,7 @@ from pathlib import Path
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from paths import BASE, TDX_ROOT  # noqa: E402
+from paths import BASE, TDX_ROOT, cn_today  # noqa: E402
 
 POSITIONS = BASE / "01_data" / "trades" / "current_positions.json"
 LEDGER = BASE / "01_data" / "trades" / "master_trade_ledger.csv"
@@ -80,6 +80,59 @@ def normalize_date_col(df):
     return None
 
 
+def unable_row(code: str, name: str, reason: str, **extra) -> dict:
+    """统一的"不出数"记录。
+
+    键名必须与成功记录一致(`mfe_pct`/`mae_pct`),否则下游读不到:
+    `final_close_review` 取 `mfe_map[code]["mfe_pct"]`、`weekly_review.load_mfe_after`
+    判 `entry.get("mfe_pct") is None`。异常路径此前落 `{"mfe": None, "mae": None}`,
+    键名不一致 ⇒ 失败信息在传导链上直接消失,下游只能当"无该代码"。
+    """
+    row = {"code": code, "name": name, "mfe_pct": None, "mae_pct": None,
+           "unable_reason": reason}
+    row.update(extra)
+    return row
+
+
+def coverage_summary(rows: list[dict]) -> dict:
+    """出数覆盖率。退出码与 stdout 摘要都据此产生 —— 全员不出数不得报成功。"""
+    total = len(rows)
+    valued = sum(1 for r in rows if r.get("mfe_pct") is not None)
+    unable = total - valued
+    if total == 0:
+        status = "complete"
+    elif valued == 0:
+        status = "failed"
+    elif unable:
+        status = "degraded"
+    else:
+        status = "complete"
+    return {
+        "total": total,
+        "valued": valued,
+        "unable": unable,
+        "coverage_pct": round(valued / total * 100, 2) if total else None,
+        "status": status,
+        "unable_codes": [r.get("code") for r in rows if r.get("mfe_pct") is None],
+    }
+
+
+def optional_float(pos: dict, key: str):
+    """持仓字段取值:**缺失返回 None,不返回 0**。
+
+    incremental_ledger 增量新建的持仓行只有 代码/名称/持有数量/单位成本,
+    最新价/持有盈亏率/持仓天数/市值/仓位占比 都没有(等收盘重估)。用 `.get(key, 0)`
+    会把"未重估"写成 0.0,复盘里就是"现价 0 元、浮盈 -100%"。
+    """
+    v = pos.get(key)
+    if v is None or v == "":
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
 def load_entry_dates(ledger_path: Path = LEDGER) -> dict[str, dict]:
     """读台账并解析建仓日。复用 weekly_review.parse_ledger 的行规范化,避免两套解析漂移。"""
     sys.path.insert(0, str(Path(__file__).resolve().parent / "close_review"))
@@ -95,7 +148,7 @@ def load_entry_dates(ledger_path: Path = LEDGER) -> dict[str, dict]:
 def main(argv=None):
     import argparse
     ap = argparse.ArgumentParser()
-    ap.add_argument("--date", default=date.today().strftime("%Y-%m-%d"))
+    ap.add_argument("--date", default=cn_today().strftime("%Y-%m-%d"))
     args = ap.parse_args(argv)
     target = args.date
     OUT = BASE / "01_data" / "holdings" / f"{target}_mfe_mae.json"
@@ -112,17 +165,16 @@ def main(argv=None):
     for pos in positions:
         code = str(pos["代码"])
         name = pos["名称"]
-        cost = float(pos.get("单位成本", 0))
-        hold_days = int(pos.get("持仓天数", 0))
-        qty = float(pos.get("持有数量", 0))
+        cost = optional_float(pos, "单位成本") or 0.0
+        hold_days = optional_float(pos, "持仓天数")     # 增量新建持仓行没有该字段 → None
+        qty = optional_float(pos, "持有数量")
 
         # 入场日锚点:解析不出就不出数,绝不退回「持仓天数当行数」的旧口径
         entry = entries.get(code) or {}
         entry_date = entry.get("entry_date")
         if not entry_date:
-            results.append({"code": code, "name": name, "mfe_pct": None, "mae_pct": None,
-                            "hold_days": hold_days,
-                            "unable_reason": "成交台账无该股未平仓记录，无法锚定入场日"})
+            results.append(unable_row(code, name, "成交台账无该股未平仓记录，无法锚定入场日",
+                                      hold_days=hold_days))
             print(f"[WARN] {code} {name}: 台账无未平仓记录，跳过")
             continue
         # 在线兜底取多少根:按自然日跨度换算并留足缓冲(过滤靠日期,多取无害)
@@ -168,7 +220,8 @@ def main(argv=None):
                         df = df.reset_index()
 
             if df is None or len(df) == 0:
-                results.append({"code": code, "name": name, "mfe": None, "mae": None, "error": "no data"})
+                results.append(unable_row(code, name, "无 K 线数据(本地 vipdoc 与在线 bars 均为空)",
+                                          entry_date=entry_date))
                 print(f"[WARN] {code} {name}: no data")
                 continue
 
@@ -177,25 +230,30 @@ def main(argv=None):
 
             # 按**入场日**锚定窗口(不能用自然日「持仓天数」当 K 线行数)
             if df is None:
-                results.append({"code": code, "name": name, "mfe_pct": None, "mae_pct": None,
-                                "entry_date": entry_date,
-                                "unable_reason": "K线缺少日期列，无法按入场日锚定窗口"})
+                results.append(unable_row(code, name, "K线缺少日期列，无法按入场日锚定窗口",
+                                          entry_date=entry_date))
                 print(f"[WARN] {code} {name}: 无日期列，跳过")
                 continue
             df = df.assign(_d=df["date"].astype(str).str[:10])
             df = df[(df["_d"] >= entry_date) & (df["_d"] <= target)]
             if df.empty:
-                results.append({"code": code, "name": name, "mfe_pct": None, "mae_pct": None,
-                                "entry_date": entry_date,
-                                "unable_reason": f"K线未覆盖入场日 {entry_date}~{target}"})
+                results.append(unable_row(code, name, f"K线未覆盖入场日 {entry_date}~{target}",
+                                          entry_date=entry_date))
                 print(f"[WARN] {code} {name}: K线未覆盖 {entry_date}~{target}，跳过")
                 continue
 
             highs = df["high"].astype(float)
             lows = df["low"].astype(float)
 
-            mfe_pct = (highs.max() / cost - 1) * 100 if cost > 0 else None
-            mae_pct = (lows.min() / cost - 1) * 100 if cost > 0 else None
+            if cost <= 0:
+                # 单位成本缺失/为 0(增量新建持仓行、脏数据)时百分比没有分母:
+                # 不出数并说明原因,不能落 0% 让下游当"没盈没亏"。
+                results.append(unable_row(code, name, "单位成本缺失或为 0，无法计算 MFE/MAE 百分比",
+                                          entry_date=entry_date))
+                print(f"[WARN] {code} {name}: 单位成本缺失，跳过")
+                continue
+            mfe_pct = (highs.max() / cost - 1) * 100
+            mae_pct = (lows.min() / cost - 1) * 100
             mfe_idx = highs.idxmax()
             mae_idx = lows.idxmin()
             mfe_date = str(df.loc[mfe_idx, "_d"])[:10]
@@ -213,19 +271,33 @@ def main(argv=None):
                 "mfe_date": mfe_date,
                 "mae_pct": round(mae_pct, 2) if mae_pct is not None else None,
                 "mae_date": mae_date,
-                "current_price": float(pos.get("最新价", 0)),
-                "current_pnl_pct": float(pos.get("持有盈亏率", 0)) * 100,
+                "current_price": optional_float(pos, "最新价"),
+                "current_pnl_pct": (lambda v: v * 100 if v is not None else None)(
+                    optional_float(pos, "持有盈亏率")),
+                "position_qty": qty,
+                # 增量新建/待重估的持仓行透传状态,报告层才能标"市值盈亏尚未按收盘价重估"
+                "snapshot_status": pos.get("snapshot_status"),
             })
             print(f"[OK] {code} {name}: MFE={mfe_pct:.1f}% MAE={mae_pct:.1f}% "
                   f"(入场 {entry_date}, {len(df)} 根)")
         except Exception as e:
-            results.append({"code": code, "name": name, "mfe": None, "mae": None, "error": str(e)})
+            results.append(unable_row(code, name, f"计算异常: {e}", entry_date=entry_date,
+                                      error=str(e)))
             print(f"[WARN] {code} {name}: {e}")
 
+    coverage = coverage_summary(results)
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps({"date": target, "holdings": results}, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"\n[OK] MFE/MAE -> {OUT.name}")
+    OUT.write_text(json.dumps({"date": target, "coverage": coverage, "holdings": results},
+                              ensure_ascii=False, indent=2), encoding="utf-8")
+    # 摘要行是 run_1700 的判据:降级/失败必须以 [WARN] 开头,否则 runner 照报 [OK]
+    tag = "[OK]" if coverage["status"] == "complete" else "[WARN]"
+    print(f"\n{tag} MFE/MAE {coverage['valued']}/{coverage['total']} 出数"
+          f"({coverage['status']}"
+          + (f"，未出数 {','.join(str(c) for c in coverage['unable_codes'][:10])}"
+             if coverage["unable_codes"] else "")
+          + f") -> {OUT.name}")
+    return 0 if coverage["status"] != "failed" else 2
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

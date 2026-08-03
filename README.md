@@ -39,7 +39,8 @@ uv sync
 2. **持仓数据**：在 `01_data/trades/` 下维护：
    - `master_trade_ledger.csv` — 全量交易主台账
    - `current_positions.json` — 当前持仓快照
-   - `_import_meta.json` — 交易日无交易确认标记
+   - `_import_meta.json` — 导入元数据（imported_at / source_mtime / rows，供持仓新鲜度判定）
+   - `position_confirmations.json` — 交易日无交易确认标记（`{日期: {no_trades: true, ...}}`）
 
 3. **交易日历**：`00_governance/CN_TRADING_CALENDAR.json` 包含年度休市安排，可通过 `trading_calendar.py --check-date YYYYMMDD` 查询
 
@@ -217,6 +218,8 @@ uv run python 07_tools/run_1800.py
 如果使用 OpenClaw 作为运行时，cron job 配置如下（以 `state/openclaw.sqlite` 的 `cron_jobs` 表为准）：
 
 > 报告投递：三个报告 job（0905/1445/1700）统一由 `07_tools/feishu_report_publisher.py` 完成——聊天发执行摘要（≤800 字）+ 完整报告 md 文件附件，不再经 LLM message 工具。凭据从环境变量或 `OPENCLAW_CONFIG` 读取。建议加 `--require-gate`（门控 blocked 时拒发，exit 4）；失败时 stdout 会打印 `{"sent": false, "partial": ..., "progress": {...}}`，可据此识别"附件已发、摘要未发"的半成功。
+>
+> ⚠️ **收件人必须显式配置**（2026-08-03 起）：`FEISHU_TO_OPEN_ID` 环境变量，或 `openclaw.json` 的 `channels.feishu.accounts.default.reportToOpenId`（亦接受 `toOpenId` / `defaultToOpenId`）。此前缺配置会兜底到一个**硬编码 open_id**——换人/换租户/别人机器上跑都会把报告静默发给那个写死的账号。现在缺配置直接 `FeishuError` + exit 1，请在部署环境里补上这项配置。
 
 | job ID 前缀 | 时间 | 任务 | toolsAllow |
 |---|---|---|---|

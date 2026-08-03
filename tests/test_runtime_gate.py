@@ -45,9 +45,27 @@ def test_priority_trading_day_over_quality():
                               require_position_gate=True) == rg.EXIT_NOT_TRADING_DAY
 
 
-def test_missing_sections_are_safe():
-    assert rg.decide_exit_code({}, require_quality=True, require_position_gate=True) == 0
+def test_missing_sections_fail_closed():
+    """门控自身坏掉(空 JSON / 字段拼错 / 文件截断)必须阻断,不能放行。
+
+    此前这里断言 == 0 并取名 "are_safe",把 fail-open 当成了安全行为:
+    `None == "blocked"` 为假,于是门控读不到任何状态却返回 0,cron 判定通过。
+    风控组件的未知状态必须等于阻断。
+    """
+    assert rg.decide_exit_code({}, require_quality=True) == rg.EXIT_QUALITY_BLOCKED
+    assert rg.decide_exit_code({}, require_position_gate=True) == rg.EXIT_POSITION_BLOCKED
     assert rg.decide_exit_code({}, require_trading_day=True) == rg.EXIT_NOT_TRADING_DAY
+    # 开关全关时仍不阻断(向后兼容:未要求门控的链路不受影响)
+    assert rg.decide_exit_code({}) == 0
+
+
+def test_unknown_status_fails_closed():
+    """状态是拼错的/新加的未知值时按阻断处理,而不是"不等于 blocked 就放行"。"""
+    for bad in ("blockd", "unknown", "", None, "PASS"):
+        assert rg.decide_exit_code({"market_quality": {"status": bad}},
+                                   require_quality=True) == rg.EXIT_QUALITY_BLOCKED
+        assert rg.decide_exit_code({"position_gate": {"status": bad}},
+                                   require_position_gate=True) == rg.EXIT_POSITION_BLOCKED
 
 
 def test_main_writes_gate_and_returns_code(monkeypatch, capsys):

@@ -20,7 +20,7 @@ import sys
 import time
 from datetime import date
 
-from paths import BASE
+from paths import BASE, cn_today
 from pipeline_kit import check_trading_day, log_stage, md_to_digest, now_iso, run_stage, write_run_log
 
 TOOLS = BASE / "07_tools"
@@ -34,6 +34,35 @@ _log_stage = log_stage
 
 def _write_run_log(target: str, status: str, started_at: str, t0: float, stages: list[dict]):
     return write_run_log(LOG_DIR, "1700", target, status, started_at, t0, stages)
+
+
+def _no_trades_flag(target: str) -> list[str]:
+    """final_close_review 的 --no-trades-confirmed 开关。
+
+    唯一有生产者的确认源是 position_confirmations.json（incremental_ledger.py
+    --confirm-no-trades 写入），条目形如 {date: {confirmed_at, no_trades, note}}。
+    旧实现读 _import_meta.json 的 no_trades_confirmed_dates —— 无任何写入方，
+    该开关永不生效。持仓快照确认（无 no_trades 键）不算无交易确认。
+    """
+    path = BASE / "01_data" / "trades" / "position_confirmations.json"
+    if not path.exists():
+        return []
+    try:
+        records = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+    if not isinstance(records, dict):
+        return []
+    record = records.get(target)
+    if isinstance(record, dict) and record.get("no_trades") is True:
+        return ["--no-trades-confirmed"]
+    return []
+
+
+def _last_line(text: str) -> str:
+    """取 stage 输出的最后一行非空文本(脚本摘要行)。"""
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    return lines[-1] if lines else ""
 
 
 def _stage(cmd: list[str], name: str) -> dict:
@@ -50,7 +79,7 @@ def main(argv=None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser()
-    ap.add_argument("--date", default=date.today().strftime("%Y-%m-%d"))
+    ap.add_argument("--date", default=cn_today().strftime("%Y-%m-%d"))
     args = ap.parse_args(argv)
     target = args.date
 
@@ -110,12 +139,18 @@ def main(argv=None) -> int:
         print(f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'incremental market collected'}")
 
     # 3b. Calculate MFE/MAE for holdings
+    #     不能无条件报 [OK]:脚本对每只持仓 fail-closed(台账无未平仓记录/K线未覆盖入场日
+    #     都不出数),全员不出数时它退 2 并把摘要行以 [WARN] 开头。这里回显该摘要行,
+    #     否则"0/5 出数"在 runner 输出里长得和"5/5 出数"一模一样。
     r = _run_stage(["uv", "run", "python", str(TOOLS / "calc_mfe_mae.py"), "--date", target],
                    "calc_mfe_mae", note="best-effort，失败不中断")
+    tail = _last_line(r["out"])
     if not r["ok"]:
-        print(f"[WARN] calc_mfe_mae failed: {r['out'][:200]}")
+        print(f"[WARN] calc_mfe_mae failed: {tail or r['out'][:200]}")
+    elif tail.startswith("[WARN]"):
+        print(tail)                      # 降级摘要原样透出(含 x/y 出数与未出数代码)
     else:
-        print(f"[OK] MFE/MAE calculated")
+        print(f"[OK] {tail or 'MFE/MAE calculated'}")
 
     # 3c. Collect fund flow rank (eastmoney direct API)
     r = _run_stage(["uv", "run", "python", str(TOOLS / "collect_fund_flow.py"), "--date", target],
@@ -173,12 +208,7 @@ def main(argv=None) -> int:
         return 1
 
     # 6. Final close review
-    no_trades_flag = []
-    trades_meta = BASE / "01_data" / "trades" / "_import_meta.json"
-    if trades_meta.exists():
-        meta = json.loads(trades_meta.read_text(encoding="utf-8"))
-        if meta.get("no_trades_confirmed_dates", {}).get(target):
-            no_trades_flag = ["--no-trades-confirmed"]
+    no_trades_flag = _no_trades_flag(target)
 
     r = _run_stage(["uv", "run", "python", str(TOOLS / "close_review" / "final_close_review.py"),
                     "--date", target] + no_trades_flag, "final_close_review")

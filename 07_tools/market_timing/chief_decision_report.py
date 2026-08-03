@@ -25,9 +25,15 @@ def main():
     mt_path=PLANS/f'{a.date}_market_timing_score.md'
     if not mt_path.exists(): mt_path=PLANS/'_supporting'/a.date/f'{a.date}_market_timing_score.md'
     risk_path=DATA/'risk'/f'{a.date}_risk_decision.json'
+    gate_path=DATA/'quality'/f'{a.date}_runtime_gate.json'
     if not risk_path.exists(): raise SystemExit(f'mandatory RiskDecision missing: {risk_path}')
     mt=mt_path.read_text(encoding='utf-8') if mt_path.exists() else ''
-    risk=load(risk_path,{}); holdings=load(DATA/'holdings'/f'{a.date}_holding_review.json',[]); sectors=load(DATA/'sectors'/f'{a.date}_sector_state.json',[]); gate=load(DATA/'quality'/f'{a.date}_runtime_gate.json',{})
+    risk=load(risk_path,{}); holdings=load(DATA/'holdings'/f'{a.date}_holding_review.json',[]); sectors=load(DATA/'sectors'/f'{a.date}_sector_state.json',[]); gate=load(gate_path,{})
+    # 门控与 RiskDecision 同为强制输入。此前缺失时兜底成 {} ⇒ status=None、
+    # allow_position_increase=None,两个 `== 'blocked'` / `is False` 判定全部落空,
+    # 于是**没有门控的情况下照样输出"允许开新仓"的计划**(审计 A3)。
+    if not isinstance(gate,dict) or not gate:
+        raise SystemExit(f'mandatory runtime_gate missing/corrupt: {gate_path}')
     b1_rows=load(DATA/'holdings'/f'{a.date}_b1_holding_state.json',[]); b1_by_code={bare(x.get('code')):x for x in b1_rows}
     state=extract(r'状态：\*\*(.*?)\*\*',mt,'未知'); score=extract(r'择时评分：\*\*(.*?)\*\*',mt,'待确认'); position=extract(r'建议总仓位：\*\*(.*?)\*\*',mt,'待确认'); permission=extract(r'今日是否允许开新仓：\*\*(.*?)\*\*',mt,'原则不允许')
     risk_by_code={}
@@ -54,16 +60,18 @@ def main():
     market_quality_status=gate.get('market_quality',{}).get('status')
     position_gate=gate.get('position_gate',{})
     effective_risk=risk.get('risk_level','提高')
-    if risk.get('risk_level')=='强风控' or market_quality_status=='blocked':
+    # 未知状态(None/拼错)按 blocked 处理:门控读不出结论时不得给出开仓权限
+    if risk.get('risk_level')=='强风控' or market_quality_status not in {'pass','degraded'}:
         permission='禁止'; effective_risk='强风控'
     elif market_quality_status=='degraded' and effective_risk=='普通':
         effective_risk='提高'
-    if position_gate.get('allow_position_increase') is False:
+    # 真值判断:None(字段缺失/门控未算出)必须与 False 同等对待——未获授权 ≠ 已获授权
+    if not position_gate.get('allow_position_increase'):
         permission='禁止' if permission=='禁止' else '仅观察，不得加仓'
     allowed=['处理P1/P2风险持仓','观察支持交易的主线和A/B池条件']
     forbidden=dedupe(risk.get('forbidden_actions',[])+['无计划追高','因J值低直接补仓','绕过risk_control开仓'])
-    if market_quality_status=='blocked': forbidden.append('市场数据质量blocked时新开仓')
-    if position_gate.get('allow_position_increase') is False: forbidden.append('持仓快照、目标日技术行情或市场质量未全部通过时加仓或输出精确交易数量')
+    if market_quality_status not in {'pass','degraded'}: forbidden.append(f'市场数据质量={market_quality_status!r} 时新开仓')
+    if not position_gate.get('allow_position_increase'): forbidden.append('持仓快照、目标日技术行情或市场质量未全部通过时加仓或输出精确交易数量')
     deterministic_sectors=[x.get('sector') for x in sectors if x.get('trade_permission')=='支持']
     main_sectors=dedupe(deterministic_sectors)[:3]
     decision={'date':a.date,'market_state':state,'market_score':score,'total_position_range':position,'new_position_permission':permission,

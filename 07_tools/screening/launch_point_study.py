@@ -37,12 +37,24 @@ for _p in (str(TOOLS), str(TOOLS / "screening"), str(TOOLS / "local_tdx")):
 import backtest_factors as bt  # noqa: E402  复用 ENTRY_GATES / load_amv_regime
 
 
-def window_return(dates: list, closes: list, start: str, end: str) -> Optional[float]:
-    """区间收益 close(最后<=end)/close(第一>=start)-1。数据不足返回 None。"""
+def window_return(dates: list, closes: list, start: str, end: str,
+                  exclude_new_listing: bool = False) -> Optional[float]:
+    """区间收益 close(最后<=end)/close(第一>=start)-1。数据不足返回 None。
+
+    exclude_new_listing=True 时，**窗内新上市**的票返回 None：它的"区间收益"其实是
+    从上市首日/次新首个可得价起算，掺进了新股上市定价的一次性跳幅，而这类票在
+    赢家阈值（top_pct 分位）里照样参与统计，却因 len(df)<min_bars 几乎不可能出信号
+    —— 结果是抬高赢家门槛、压低 recall（审计）。判定：窗内第一根 K 线就是这只票
+    **全部数据的第一根**且晚于 start ⇒ 窗前无价格 ⇒ 视为窗内新上市（数据源历史被
+    截断时同样成立，两者都不该进区间收益统计）。
+    默认 False：这是研究口径变更，会改动赢家集合，开关交给调用方/CLI。
+    """
     idx = [i for i, d in enumerate(dates) if start <= str(d)[:10] <= end]
     if len(idx) < 2:
         return None
     a, b = idx[0], idx[-1]
+    if exclude_new_listing and a == 0 and str(dates[0])[:10] > start:
+        return None
     return (closes[b] / closes[a] - 1) if closes[a] else None
 
 
@@ -283,16 +295,31 @@ def build_sector_features(index_dir, members, mom_days: int = 20):
       favorable_series 因果序列,摆动高点需 i+fractal 确认,无未来函数);
     - f_sector_momentum(float):所属板块指数 trailing mom_days 最强收益——当期强势/主流的
       **因果代理**(密度榜需逐日全市场横截面,流式 Pass1 算不起;板块动量是单板块可算的近似)。
-    未分类/数据缺失 → 返回 {}(特征缺省,不误标 0)。绝不 raise。"""
+    未分类/数据缺失 → 返回 {}(特征缺省,不误标 0)。绝不 raise。
+
+    返回的 fn 带 **.stats**:sectors_requested/sectors_loaded/csv_missing/csv_error/
+    queries/emitted/unclassified/no_asof_close[/build_error]。
+    ⚠️ 这是审计 E8 的修法:原实现在"一个板块 CSV 都没有"时照样返回一个恒空的 fn,
+    整轮研究 f_sector_* 全缺省,结论被写成"板块相位无判别力"——而真相是特征从未生成。
+    调用方(main)据 stats 硬失败/告警,与 --sector-filter 的 ap.error 校验对齐。
+    另:板块有 CSV 但信号日早于板块数据起点(as-of 取不到收盘)时,原实现仍吐
+    f_sector_favorable=0,把"没数据"写成"不利相位";现按文档意图记 no_asof_close 并返回 {}。"""
     import bisect as _b
     import sector_phase as sp  # noqa: PLC0415
     import sector_mainstream as sm  # noqa: PLC0415
+    stats: dict[str, Any] = {"sectors_requested": 0, "sectors_loaded": 0, "csv_missing": 0,
+                             "csv_error": 0, "queries": 0, "emitted": 0,
+                             "unclassified": 0, "no_asof_close": 0}
+    code2secs: dict = {}
+    sec_data: dict[str, tuple] = {}
     try:
         code2secs = sm.invert_members(members)
-        sec_data: dict[str, tuple] = {}
-        for sec in {s for secs in code2secs.values() for s in secs}:
+        wanted = {s for secs in code2secs.values() for s in secs}
+        stats["sectors_requested"] = len(wanted)
+        for sec in sorted(wanted):
             p = Path(index_dir) / f"{sec}.csv"
             if not p.is_file():
+                stats["csv_missing"] += 1
                 continue
             try:
                 df = pd.read_csv(p)
@@ -300,34 +327,70 @@ def build_sector_features(index_dir, members, mom_days: int = 20):
                 closes = df["close"].astype(float).tolist()
                 fav = sp.favorable_series(dates, closes)
                 sec_data[sec] = (dates, closes, fav)
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
+                stats["csv_error"] += 1
+                print(f"[WARN] 板块指数 CSV 不可用 {p.name}: {exc}", file=sys.stderr)
                 continue
+        stats["sectors_loaded"] = len(sec_data)
+    except Exception as exc:  # noqa: BLE001
+        stats["build_error"] = f"{exc.__class__.__name__}: {exc}"
+        print(f"[WARN] 板块特征构建失败(特征将全程缺省): {stats['build_error']}", file=sys.stderr)
 
-        def fn(code6: str, date: str) -> dict:
-            secs = [s for s in code2secs.get(str(code6)[:6], []) if s in sec_data]
-            if not secs:
-                return {}
-            fav_any = 0
-            best_mom: Optional[float] = None
-            for s in secs:
-                dates, closes, fav = sec_data[s]
-                j = _b.bisect_right(dates, date) - 1         # as-of:最近 ≤ date 的板块收盘
-                if j < 0:
-                    continue
-                if fav.get(dates[j]):
-                    fav_any = 1
-                k = j - mom_days
-                if k >= 0 and closes[k]:
-                    m = closes[j] / closes[k] - 1
-                    best_mom = m if best_mom is None else max(best_mom, m)
-            out: dict[str, Any] = {"f_sector_favorable": fav_any}
-            if best_mom is not None:
-                out["f_sector_momentum"] = round(best_mom, 4)
-            return out
+    def fn(code6: str, date: str) -> dict:
+        stats["queries"] += 1
+        secs = [s for s in code2secs.get(str(code6)[:6], []) if s in sec_data]
+        if not secs:
+            stats["unclassified"] += 1
+            return {}
+        fav_any = 0
+        best_mom: Optional[float] = None
+        n_asof = 0
+        for s in secs:
+            dates, closes, fav = sec_data[s]
+            j = _b.bisect_right(dates, date) - 1         # as-of:最近 ≤ date 的板块收盘
+            if j < 0:
+                continue
+            n_asof += 1
+            if fav.get(dates[j]):
+                fav_any = 1
+            k = j - mom_days
+            if k >= 0 and closes[k]:
+                m = closes[j] / closes[k] - 1
+                best_mom = m if best_mom is None else max(best_mom, m)
+        if not n_asof:                                   # 信号日早于板块数据起点 → 缺省,不写 0
+            stats["no_asof_close"] += 1
+            return {}
+        out: dict[str, Any] = {"f_sector_favorable": fav_any}
+        if best_mom is not None:
+            out["f_sector_momentum"] = round(best_mom, 4)
+        stats["emitted"] += 1
+        return out
 
-        return fn
-    except Exception:  # noqa: BLE001
-        return lambda code6, date: {}
+    fn.stats = stats
+    return fn
+
+
+def _scorer_value(scorer, sub, code):
+    """Run a scorer and distinguish "no data" from "scored zero".
+
+    Returns (value, ok). ``ok=False`` means the scorer could not produce a
+    score — the caller must **skip** that firing rather than substitute 0.0.
+
+    Substituting 0.0 was actively misleading for scorers whose domain includes
+    negatives (mcap / low_vol / momentum): a stock with no market-cap data
+    scored 0.0 and therefore outranked every genuinely scored stock, so
+    surfaced/best_rank conclusions were driven by missing data.
+    """
+    if scorer is None:
+        return 0.0, True
+    sr = scorer(sub, code)
+    if isinstance(sr, dict):
+        val = sr.get("score") if sr else None
+    else:
+        val = sr
+    if val is None:
+        return None, False
+    return float(val), True
 
 
 def extract_firings(bars, start: str, end: str, entry_gate, scorer=None,
@@ -378,6 +441,7 @@ def extract_firings(bars, start: str, end: str, entry_gate, scorer=None,
             shares_idx[c].sort()
     items = bars.items() if isinstance(bars, dict) else bars
     out: list[dict] = []
+    skipped_no_score = 0        # 打分器无数据 → 跳过的信号数(不得当 0 分参与排名)
     n = 0
     for code, raw in items:
         n += 1
@@ -395,10 +459,10 @@ def extract_firings(bars, start: str, end: str, entry_gate, scorer=None,
                     sub = df.iloc[lo:i + 1]
                     if not entry_gate(sub):
                         continue
-                    sc = 0.0
-                    if scorer is not None:
-                        sr = scorer(sub, code)
-                        sc = (sr or {}).get("score", 0.0) if isinstance(sr, dict) else (sr or 0.0)
+                    sc, sc_ok = _scorer_value(scorer, sub, code)
+                    if not sc_ok:
+                        skipped_no_score += 1      # 打分不出来的信号不参与排名
+                        continue
                     rec: list = [ds[i], float(sc)]
                     if horizons or feature_scorers or extra_feature_fn or style_features or trade_sim \
                             or shares_idx is not None:
@@ -474,6 +538,11 @@ def extract_firings(bars, start: str, end: str, entry_gate, scorer=None,
         if progress and n % progress == 0:
             print(f"[pass1] {n} 股 | RSS={_rss_mb():.0f}MB", file=sys.stderr, flush=True)
             gc.collect()
+    if stats is not None and skipped_no_score:
+        stats["skipped_no_score"] = skipped_no_score
+    if skipped_no_score:
+        print(f"[extract_firings] 跳过 {skipped_no_score} 个无法打分的信号"
+              f"(缺数据不得按 0 分参与排名)", file=sys.stderr)
     return out
 
 
@@ -981,6 +1050,7 @@ def capture_rank_study(bars, start: str, end: str, entry_gate,
     import gc  # noqa: PLC0415
     items = bars.items() if isinstance(bars, dict) else bars
     rets: list[tuple] = []
+    skipped_no_score = 0                    # 打分器无数据 → 跳过的信号数(不得当 0 分参与排名)
     day_fire: dict[str, list] = {}          # date -> [(code, score)]  当日全域信号池(轻量)
     stock_days: dict[str, list] = {}        # code -> [dates] 该股信号日(用于赢家过滤)
     n_seen = 0
@@ -1002,10 +1072,10 @@ def capture_rank_study(bars, start: str, end: str, entry_gate,
                     sub = df.iloc[lo:i + 1]
                     if not entry_gate(sub):
                         continue
-                    sc = 0.0
-                    if scorer is not None:
-                        sr = scorer(sub, code)
-                        sc = (sr or {}).get("score", 0.0) if isinstance(sr, dict) else (sr or 0.0)
+                    sc, sc_ok = _scorer_value(scorer, sub, code)
+                    if not sc_ok:
+                        skipped_no_score += 1      # 打分不出来的信号不参与排名
+                        continue
                     day_fire.setdefault(ds[i], []).append((code, float(sc)))
                     fired.append(ds[i])
                 if fired:
@@ -1376,6 +1446,41 @@ def _buffered_start(sorted_dates: list[str], start: str, buffer_days: int) -> st
     return sorted_dates[max(0, j - buffer_days)] if sorted_dates else start
 
 
+def _write_json_out(path: str, obj: Any, indent: int = 2) -> Path:
+    """--out 落盘:父目录不存在时自动创建。
+
+    此前深路径直接 FileNotFoundError——Pass1/Pass2 跑几十分钟后在最后一行落盘时炸掉,
+    结果全丢(审计 O12)。"""
+    import json as _jo  # noqa: PLC0415
+    p = Path(path)
+    if p.parent and not p.parent.exists():
+        p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(_jo.dumps(obj, ensure_ascii=False, indent=indent), encoding="utf-8")
+    return p
+
+
+def _empty_firings_guard(n_records: int, n_signal_days: int, allow_empty: bool) -> int:
+    """Pass1 空产物护栏:一只票都没加载 / 一个信号都没抽到 → **非零退出且不落盘**。
+
+    审计 E9:原实现照样把空 firings 原子落盘,`run_bear_to_long_study.firings_reusable`
+    只看"JSON 完整 + 参数一致",于是这份"0 信号"的文件被当成**已完成**永久跳过——
+    数据源没挂上的一整轮 12 窗研究会静默地全是空窗,结论写成"分不出赢家"。"""
+    msg = None
+    if n_records <= 0:
+        msg = "未加载到任何 K 线(数据源/宇宙/日期区间有问题?)"
+    elif n_signal_days <= 0:
+        msg = f"加载了 {n_records} 只票却抽到 0 个信号日(门槛过严/依赖失败/窗口无数据?)"
+    if msg is None:
+        return 0
+    if allow_empty:
+        print(f"[WARN] Pass1 {msg};--allow-empty 已开,仍落盘(产物带 empty_ok 标记,"
+              "续跑校验不会复用)", file=sys.stderr)
+        return 0
+    print(f"[ERR] Pass1 {msg};不落盘 firings——空产物会被断点续跑当成'已完成'永久复用。"
+          "确需空产物请显式加 --allow-empty", file=sys.stderr)
+    return 2
+
+
 def main(argv=None, loader=None) -> int:
     ap = argparse.ArgumentParser(description="起涨点 vs 0AMV regime 研究")
     ap.add_argument("--data-source", choices=["tdx", "qlib", "csv"], default="qlib")
@@ -1486,6 +1591,9 @@ def main(argv=None, loader=None) -> int:
                     help="读 Pass2 输出的汇总 JSON,逐特征解读:各窗 AUC/增益、被剔窗及原因、"
                          "覆盖是否达标、纯噪声下 100%% 同号概率(不跑任何计算)")
     ap.add_argument("--explain-feature", default="", help="只解读指定特征(配 --explain-agg)")
+    ap.add_argument("--allow-empty", action="store_true",
+                    help="允许空结果(0 K线/0 信号/0AMV regime 全空)仍 exit 0 并落盘;"
+                         "默认拒绝——空产物会被当成'已完成'复用,并被误读为'无判别力'")
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
 
@@ -1515,19 +1623,15 @@ def main(argv=None, loader=None) -> int:
                       f"; 空头段 {p['bear_days']}日)  →  赢家窗 {p['label_start']} ~ {p['label_end']}"
                       f" ({p['long_days']}日)")
             if args.out:
-                import json as _jp
-                Path(args.out).write_text(_jp.dumps({"window_pairs": pairs}, ensure_ascii=False, indent=2),
-                                          encoding="utf-8")
+                _write_json_out(args.out, {"window_pairs": pairs})
             return 0
         segs = long_regime_windows(regime, min_days=args.min_window_days)
         print(f"\n=== 0AMV 做多区间(≥{args.min_window_days} 交易日, 共 {len(segs)} 段) ===")
         for a, b, n in segs:
             print(f"  {a} ~ {b}  ({n} 交易日)")
         if args.out:
-            import json as _jw
-            Path(args.out).write_text(
-                _jw.dumps({"long_windows": [{"start": a, "end": b, "days": n} for a, b, n in segs]},
-                          ensure_ascii=False, indent=2), encoding="utf-8")
+            _write_json_out(args.out,
+                            {"long_windows": [{"start": a, "end": b, "days": n} for a, b, n in segs]})
         return 0
 
     if args.exclude_zero_ret:
@@ -1558,6 +1662,7 @@ def main(argv=None, loader=None) -> int:
 
         if args.discriminate and args.per_window:         # 每文件=一个多头区间,分窗跑 + 跨窗汇总
             results: dict[str, dict] = {}
+            n_all_recs = 0
             for fp in files:
                 raw = _j.loads(Path(fp).read_text(encoding="utf-8"))
                 if isinstance(raw, dict) and raw.get("ret_start") and raw.get("ret_start") != raw.get("start"):
@@ -1567,22 +1672,31 @@ def main(argv=None, loader=None) -> int:
                 else:
                     label = Path(fp).stem
                 recs = raw if isinstance(raw, list) else (raw.get("records") or [])
+                n_all_recs += len(recs)
                 res = _dis(recs)
                 results[label] = res
                 print(f"\n=== [窗口 {label}] 信号当时判别力({args.label_basis} 口径) ===")
                 print(res["text"])
+            if not n_all_recs and not args.allow_empty:   # 全空 firings → 不得产出"无共同点"结论
+                print(f"[ERR] Pass2 读到 {len(files)} 份 firings 但记录总数为 0"
+                      "(Pass1 全空/文件对不上?);拒绝输出——'分不出赢家'与'根本没数据'不是一回事。"
+                      "确需空结果请显式加 --allow-empty", file=sys.stderr)
+                return 2
             agg = aggregate_discriminate(results)
             print("\n=== 跨多头区间:赢家在买点当时的共同点 ===")
             print(agg["text"])
             if args.out:
-                Path(args.out).write_text(
-                    _j.dumps({"per_window": results, "aggregate": agg}, ensure_ascii=False, indent=2),
-                    encoding="utf-8")
+                _write_json_out(args.out, {"per_window": results, "aggregate": agg})
             return 0
 
         recs: list[dict] = []
         for fp in files:
             recs.extend(_load(fp))
+        if not recs and not args.allow_empty:
+            print(f"[ERR] Pass2 读到 {len(files)} 份 firings 但记录总数为 0(Pass1 全空/文件对不上?);"
+                  "拒绝输出——空结果会被误读成'无判别力'。确需空结果请显式加 --allow-empty",
+                  file=sys.stderr)
+            return 2
         if args.distribution or args.coverage:
             res_out: dict = {}
             if args.distribution:
@@ -1599,18 +1713,14 @@ def main(argv=None, loader=None) -> int:
                 print(cov["text"])
                 res_out["coverage"] = cov
             if args.out:
-                import json as _j3
-                Path(args.out).write_text(_j3.dumps(res_out, ensure_ascii=False, indent=2),
-                                          encoding="utf-8")
+                _write_json_out(args.out, res_out)
             return 0
         if args.discriminate:
             dis = _dis(recs)
             print(f"\n=== 信号当时判别力:能否明确选出会跑的票({args.label_basis} 口径) ===")
             print(dis["text"])
             if args.out:
-                import json as _j2
-                Path(args.out).write_text(_j2.dumps({"discriminate": dis}, ensure_ascii=False, indent=2),
-                                          encoding="utf-8")
+                _write_json_out(args.out, {"discriminate": dis})
             return 0
         cap = rank_from_firings(recs, top_pct=args.capture_top_pct, surface_top_n=args.surface_top_n,
                                 min_winner_ret=args.min_winner_ret,
@@ -1619,8 +1729,7 @@ def main(argv=None, loader=None) -> int:
               f"展示top{args.surface_top_n}）===")
         print(cap["text"])
         if args.out:
-            Path(args.out).write_text(_j.dumps({"capture_rank": cap}, ensure_ascii=False, indent=2),
-                                      encoding="utf-8")
+            _write_json_out(args.out, {"capture_rank": cap})
         return 0
 
     if args.universe_sdata:
@@ -1702,10 +1811,17 @@ def main(argv=None, loader=None) -> int:
     # Pass1:只抽信号→小 JSON(可分片,多进程各自内存全新)
     if args.emit_firings:
         if args.shard:
-            i, n = (int(x) for x in args.shard.split("/"))
-            if not (1 <= i <= n):
-                ap.error(f"--shard 需满足 1<=i<=n(如 1/3..3/3),收到 {args.shard}")
+            try:                                   # 非法分片必须 ap.error(exit 2),不能崩栈
+                parts = [int(x) for x in args.shard.split("/")]
+            except ValueError:
+                parts = []
+            if len(parts) != 2 or parts[1] < 1 or not (1 <= parts[0] <= parts[1]):
+                ap.error(f"--shard 格式须为 i/n 且 1<=i<=n(如 1/3..3/3),收到 {args.shard!r}")
+            i, n = parts
             codes = [c for k, c in enumerate(codes) if k % n == (i - 1) % n]
+            if not codes:
+                ap.error(f"--shard {args.shard} 分到 0 只代码(宇宙不足 {n} 只?);"
+                         "空分片会写出空 firings 并被续跑校验当成已完成")
             print(f"[pass1] 分片 {args.shard}: {len(codes)} 只", file=sys.stderr)
         scorer = None if args.rank_score == "none" else bt.SCORERS.get(args.rank_score)
         hz = tuple(int(x) for x in args.horizons.split(",") if x.strip()) if args.horizons else ()
@@ -1724,8 +1840,21 @@ def main(argv=None, loader=None) -> int:
             members = _jm.loads(mpath.read_text(encoding="utf-8")) if mpath.is_file() else {}
             if not members:
                 ap.error("--sector-features 需 sector_members.json(先跑 fetch_sector_index_history.py --members)")
-            xfns.append(build_sector_features(args.sector_index_dir, members))
-            print(f"[pass1] 板块特征已启用 (dir={args.sector_index_dir})", file=sys.stderr)
+            _xf_sector = build_sector_features(args.sector_index_dir, members)
+            _st = getattr(_xf_sector, "stats", {})
+            if _st.get("build_error"):
+                ap.error(f"--sector-features 构建失败({_st['build_error']});板块特征会全程缺省,"
+                         "结论会被误读为'板块相位无判别力'")
+            if not _st.get("sectors_loaded"):
+                ap.error(f"--sector-features 无任何板块指数数据(dir={args.sector_index_dir};"
+                         f"需 {_st.get('sectors_requested', 0)} 个板块,缺 CSV "
+                         f"{_st.get('csv_missing', 0)},解析失败 {_st.get('csv_error', 0)});"
+                         "先跑 fetch_sector_index_history.py,否则 f_sector_* 全程缺省,"
+                         "'板块无判别力'的结论不成立")
+            xfns.append(_xf_sector)
+            print(f"[pass1] 板块特征已启用: {_st['sectors_loaded']}/{_st['sectors_requested']} "
+                  f"板块有数据(缺 CSV {_st['csv_missing']}, 解析失败 {_st['csv_error']}; "
+                  f"dir={args.sector_index_dir})", file=sys.stderr)
         if args.pit_features:
             sys.path.insert(0, str(TOOLS / "local_tdx"))
             import fetch_pit_financials as _pit  # noqa: PLC0415
@@ -1775,18 +1904,36 @@ def main(argv=None, loader=None) -> int:
                               shares_events=shares_ev)
         if fstats.get("feature_failures"):
             print(f"[WARN] 特征打分器异常(特征可能缺失): {fstats['feature_failures']}", file=sys.stderr)
+        if args.sector_features:                     # 板块特征"生成了几个"必须可见(审计 E8)
+            _st = getattr(_xf_sector, "stats", {})
+            print(f"[pass1] 板块特征产出: {_st.get('emitted', 0)}/{_st.get('queries', 0)} 个信号带值"
+                  f"(未分类 {_st.get('unclassified', 0)}, 信号日早于板块数据 "
+                  f"{_st.get('no_asof_close', 0)})", file=sys.stderr)
+            if not _st.get("emitted"):
+                print("[WARN] 一个信号都没拿到板块特征:f_sector_* 全缺省,"
+                      "**不得**据本轮结果判定板块相位无判别力(先补板块指数/成员映射)",
+                      file=sys.stderr)
+        n_signal_days = sum(len(r.get("days") or []) for r in recs)
+        rc_empty = _empty_firings_guard(len(recs), n_signal_days, args.allow_empty)
+        if rc_empty:
+            return rc_empty
         n_delisted = sum(1 for r in recs if r.get("delisted"))
         if args.ret_end and args.delisted_ret is None:
             print("[WARN] 两窗解耦但未设 --delisted-ret:赢家窗无价格的票(空头内退市/长停)被丢弃,"
                   "会重新引入幸存者偏差(§3 首条)。建议 --delisted-ret -1.0", file=sys.stderr)
         import json as _j
         firings_path = Path(args.emit_firings)
+        if firings_path.parent and not firings_path.parent.exists():
+            firings_path.parent.mkdir(parents=True, exist_ok=True)   # 深路径不再 FileNotFoundError
         tmp_firings = firings_path.with_name(firings_path.name + ".tmp")
         tmp_firings.write_text(
             _j.dumps({"start": args.start, "end": args.end,
                       "ret_start": args.ret_start or args.start, "ret_end": args.ret_end or args.end,
                       "entry_filter": args.entry_filter, "delisted_ret": args.delisted_ret,
                       "n_delisted": n_delisted,
+                      # 空产物必须自带标记:续跑校验据此拒绝复用(审计 E9)
+                      "n_signal_days": n_signal_days,
+                      **({"empty_ok": True} if not n_signal_days else {}),
                       "feature_scores": args.feature_scores,
                       "universe": "sdata" if args.universe_sdata else "codes",
                       # 特征开关必须落盘:否则驱动脚本的续跑校验看不出"这份 firings 是否带
@@ -1805,7 +1952,8 @@ def main(argv=None, loader=None) -> int:
                       "rank_score": args.rank_score, "shard": args.shard, "records": recs},
                      ensure_ascii=False), encoding="utf-8")
         tmp_firings.replace(firings_path)   # 原子落盘:中断不留半截 JSON(断点续跑会把半截文件当已完成)
-        print(f"[pass1] 写出 {len(recs)} 股记录(其中赢家窗无价格按大亏计入 {n_delisted} 只) "
+        print(f"[pass1] 写出 {len(recs)} 股记录(信号日合计 {n_signal_days} 个;"
+              f"其中赢家窗无价格按大亏计入 {n_delisted} 只) "
               f"→ {args.emit_firings} (RSS={_rss_mb():.0f}MB)", file=sys.stderr)
         return 0
 
@@ -1818,6 +1966,17 @@ def main(argv=None, loader=None) -> int:
             fn = s_data.load_bars_csv if args.data_source == "csv" else s_data.load_bars_qlib
             bars = fn(codes, 0, start=load_start, end=None, root=str(Path(args.s_data_root) / sub))
         regime = bt.load_amv_regime(since=load_start)    # regime 起点跟随数据起点(早前窗口)
+        if not args.allow_empty:                         # 审计 E9:全空输入不得产出"结论"
+            if not bars:
+                print("[ERR] 未加载到任何 K 线(数据源/宇宙/日期区间有问题?);"
+                      "拒绝输出起涨点分析——空结果会被误读成'起涨点无规律'。"
+                      "确需空结果请显式加 --allow-empty", file=sys.stderr)
+                return 2
+            if not regime:
+                print("[ERR] 0AMV regime 为空(指南针数据不可用):起涨点的 regime 归属会全是"
+                      "'未知'、lead-days 分布整段消失,本分析的**唯一自变量**就没了。"
+                      "先补 compass_amv;确需空 regime 请显式加 --allow-empty", file=sys.stderr)
+                return 2
         res = analyze(bars, regime, args.start, args.end, bt.ENTRY_GATES[args.entry_filter],
                       top_pct=args.top_pct, buffer_days=args.buffer_days)
         print(f"\n=== 起涨点 vs 0AMV（{args.start}~{args.end}, {args.entry_filter}, top{args.top_pct}%）===")
@@ -1848,8 +2007,7 @@ def main(argv=None, loader=None) -> int:
         print("\n=== 赢家板块集中度 / 板块共振 ===")
         print(conc["text"])
     if args.out:
-        import json
-        Path(args.out).write_text(json.dumps(res, ensure_ascii=False, indent=2), encoding="utf-8")
+        _write_json_out(args.out, res)
     return 0
 
 

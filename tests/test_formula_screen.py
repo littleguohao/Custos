@@ -25,11 +25,15 @@ def _err(code):
 
 
 STOCKS = ["600000", "000001"]
+# 名称表非空＝ST 硬排除可用。2026-08-03 起 st_filter=unavailable 会让 status 脱离 ok
+# 并追加降级原因（审计 B5），故聚焦其它降级路径的用例必须显式注入名称表，
+# 否则断言会被"名称表不可用"这条无关降级污染。
+NAMES = {"600000": "浦发银行", "000001": "平安银行"}
 
 
 def test_tdxw_not_running_degrades_cleanly():
     result = formula_screen.screen_formulas(
-        "2026-07-21", registry=_registry(), stock_list=STOCKS,
+        "2026-07-21", registry=_registry(), stock_list=STOCKS, name_map=NAMES,
         running_check=lambda: False,
     )
     assert result["status"] == "unavailable"
@@ -54,7 +58,7 @@ def test_circuit_breaker_after_two_consecutive_failures():
         return _err("timeout")
 
     result = formula_screen.screen_formulas(
-        "2026-07-21", registry=_registry(n=3), stock_list=STOCKS,
+        "2026-07-21", registry=_registry(n=3), stock_list=STOCKS, name_map=NAMES,
         call=always_fail, running_check=lambda: True,
     )
     errors = [f["error"] for f in result["formulas"]]
@@ -195,6 +199,7 @@ def test_formulas_batched_to_avoid_tq_oom(monkeypatch):
     monkeypatch.setattr(formula_screen.local_tdx_data, "normalize_code", lambda c: f"{c}.SH")
     result = formula_screen.screen_formulas(
         "2026-07-21", registry=_registry(n=1), stock_list=stocks,
+        name_map={c: f"股{c}" for c in stocks},
         call=fake_call, running_check=lambda: True,
     )
     assert result["status"] == "ok"

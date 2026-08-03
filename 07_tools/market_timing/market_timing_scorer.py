@@ -27,7 +27,8 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import BASE  # noqa: E402
+from paths import BASE, cn_now  # noqa: E402
+from runtime_guards import normalize_regime  # noqa: E402
 
 IN_DIR = BASE / "01_data" / "market"
 OUT_DIR = BASE / "03_daily_plans"
@@ -65,7 +66,8 @@ def score_macro(d: dict) -> tuple[float, str]:
 def score_amv(d: dict) -> tuple[float, str]:
     amv = d.get("amv_0", {})
     v = fnum(amv.get("amv_change_pct"))
-    effective = amv.get("effective_state") or amv.get("amv_zone")
+    # 归一化:"空头触发"此前按 9/15 分(中性偏多)而非 0 分计入择时总分(审计 B1)
+    effective = normalize_regime(amv.get("effective_state") or amv.get("amv_zone"))
     reason = amv.get("state_transition_reason") or ""
     if effective == "空头":
         return 0, f"0AMV有效状态为空头。{reason} 当日值={v if v is not None else '缺失'}%。"
@@ -150,6 +152,10 @@ def score_breadth(d: dict) -> tuple[float, str]:
     up, down = fnum(b.get("up_count")), fnum(b.get("down_count"))
     q = b.get("quality")
     if up is None or down is None or down == 0:
+        # 跌家数标为不可用(拒绝用硬编码总数推算,见 breadth_basis)时如实归因:
+        # 中性 7.5 是**正确**的降级,不能被误读成"这天没采到宽度数据"。
+        if b.get("up_down_ratio_status") == "unavailable" and up is not None:
+            return 7.5, f"涨家数 {int(up)}，但跌家数无真实来源、涨跌比不可用，按中性处理。"
         return 7.5, "涨跌家数缺失，按中性处理。"
     if is_stale(b, d.get("date")):
         return 7.5, f"涨跌家数数据日 {b.get('as_of') or '未知'} 非当日（stale），按中性处理，不据陈旧宽度给分。"
@@ -279,7 +285,7 @@ def make_report(d: dict, module_scores: list[tuple[str,int,float,str]], quality_
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--date", default=datetime.now().strftime("%Y-%m-%d"))
+    ap.add_argument("--date", default=cn_now().strftime("%Y-%m-%d"))
     ap.add_argument("--input", default="")
     args = ap.parse_args()
     inp = Path(args.input) if args.input else IN_DIR / f"{args.date}_market_timing_input.json"
