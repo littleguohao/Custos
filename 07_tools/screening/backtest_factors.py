@@ -641,6 +641,92 @@ if compute_b1_dual is not None:
     ENTRY_GATES["j_low_qsx_weekly"] = j_low_qsx_weekly_gate
 
 
+# ---- B2 战法 + 底部异动（来源 other/B1.pdf；见 b2_surge_factor 模块 docstring）----
+try:
+    from b2_surge_factor import detect_b2, detect_bottom_surge, detect_surge_then_b1
+except Exception:  # noqa: BLE001
+    detect_b2 = None
+
+
+def b2_gate(df_slice: pd.DataFrame) -> bool:
+    """B2:B1 之后 + 涨幅>4% + 比前一交易日放量 + J<55(原文 B1.pdf p16)。"""
+    if detect_b2 is None:
+        return False
+    try:
+        return bool(detect_b2(df_slice).get("hit"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def bottom_surge_gate(df_slice: pd.DataFrame) -> bool:
+    """底部异动(巨量点火 + 量随价升)——宽口径。"""
+    if detect_b2 is None:
+        return False
+    try:
+        return bool(detect_bottom_surge(df_slice).get("hit"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def bottom_surge_strict_gate(df_slice: pd.DataFrame) -> bool:
+    """底部异动严口径:再加 量能维持4天 + 穿越60日线 + 9个月新高 三条。"""
+    if detect_b2 is None:
+        return False
+    try:
+        return bool(detect_bottom_surge(df_slice).get("strict_hit"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def surge_then_b1_gate(df_slice: pd.DataFrame) -> bool:
+    """原文第③条「找异动之后的 B1」:回看窗内有异动 且 当日 J<13。"""
+    if detect_b2 is None:
+        return False
+    try:
+        return bool(detect_surge_then_b1(df_slice).get("hit"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def surge_strict_then_b1_gate(df_slice: pd.DataFrame) -> bool:
+    """异动严口径 + B1。"""
+    if detect_b2 is None:
+        return False
+    try:
+        return bool(detect_surge_then_b1(df_slice, strict_surge=True).get("hit"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _sc_b2(df: pd.DataFrame, code: str):
+    """B2 打分:四条硬条件命中数 ×20 + 无上影线 +20（0-100，待回测）。
+
+    分数只用于回测内排序;原文没给权重,故按"命中条件数"这个最少假设的方式合成。
+    """
+    if detect_b2 is None:
+        return None
+    r = detect_b2(df, code)
+    if not r.get("available"):
+        return None
+    hard = (int(bool(r["b1_before"])) + int(bool(r["gain_ok"]))
+            + int(bool(r["vol_up"])) + int(bool(r["j_ok"])))
+    score = hard * 20.0 + (20.0 if r.get("no_upper_shadow") else 0.0)
+    return {"score": round(score, 1), "suggestion": "可买" if r["hit"] else "不买",
+            "aux": {"b2_hit": r["hit"], "b1_bars_ago": r.get("b1_bars_ago"),
+                    "gain_pct": r.get("gain_pct"), "no_upper_shadow": r.get("no_upper_shadow")},
+            "components": {"hard_conditions": hard,
+                           "no_upper_shadow": int(bool(r.get("no_upper_shadow")))}}
+
+
+if detect_b2 is not None:
+    SCORERS["b2"] = _sc_b2
+    ENTRY_GATES["b2"] = b2_gate
+    ENTRY_GATES["bottom_surge"] = bottom_surge_gate
+    ENTRY_GATES["bottom_surge_strict"] = bottom_surge_strict_gate
+    ENTRY_GATES["surge_then_b1"] = surge_then_b1_gate
+    ENTRY_GATES["surge_strict_then_b1"] = surge_strict_then_b1_gate
+
+
 def sample_codes(all_codes: list[str], n: int, seed: int = 0) -> list[str]:
     """从全 A 代码列表随机抽 N 只（带 seed 可复现），用于代表性样本校准。
 

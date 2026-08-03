@@ -421,3 +421,132 @@ uv run python 07_tools/screening/backtest_factors.py --trade-sim --scorer b1_dua
 
 **判定标准（沿用结论#15 的教训）**：先问"是否赢过无条件基准"，且必须跨窗方向一致；
 富集类比较必须同窗口同口径。任一不过 → 记否决结论、不接线。
+
+
+---
+
+## H1 第一轮回测判读（100 只样本，2026-08-03）—— **两组都不足以下结论**
+
+### ① 共振消融：样本量不足，无统计效力
+
+| 口径 | 分档 | H5 胜率 | H20 胜率 | H60 胜率 | H5 均收 | H20 均收 | H60 均收 |
+|---|---|---|---|---|---|---|---|
+| b1_dual（有共振） | A(≥70) | 47.6% | 51.6% | 50.9% | +0.86% | +4.95% | +6.00% |
+| | B(60-70) | 53.4% | 54.1% | 53.4% | +0.70% | +4.18% | +10.55% |
+| b1_dual_no_res | A(≥70) | 42.9% | 41.2% | 33.3% | +2.33% | +2.53% | +2.29% |
+| | B(60-70) | 48.9% | 52.0% | 48.1% | +0.06% | +3.47% | +8.51% |
+
+**A 档仅 7 条 ⇒ 最小可分辨差异 = 1/7 = 14.3pp，而实测 H20 胜率差只有 10.4pp
+——连一条样本的翻转都不到，完全在噪声内。** 不能据此说共振有增益。
+
+数据一致性存疑：47.6%/51.6%/50.9% 无法由 7 条样本得出（7 条只能给 0%、14.3%、28.6%、
+42.9%…），只有无共振组 42.9%=3/7 对得上 ⇒ 各 horizon 实际分母不同（H60 因前向窗口删失
+更少，见审计 E2 的修复）。**重跑需输出每档每 horizon 的真实 n。**
+
+留意一个反向信号：有共振组 H5 均收 +0.86% < 无共振组 +2.33%，而 H20/H60 相反。小样本里
+通常是噪声；若扩样本后仍存在，说明共振买点需要更长持有期。
+
+### ② 门槛对比：**看错了档位**，但意外印证了审计 B4
+
+| 门槛 | n | D_弱档 H10 胜率 | SE | 召回 |
+|---|---|---|---|---|
+| weekly_j_low | 9,167 | 51.8% | 0.52pp | 100% |
+| j_low_weekly_resonance | 3,448 | 49.8% | 0.85pp | 38% |
+| j_low_qsx_weekly | 877 | 54.5% | 1.68pp | **10%** |
+
+最严门槛 vs 周线单条件差 +2.7pp，**z=1.53、p≈0.13，95% 水平不显著**（要显著需每组约
+2,635 条）。
+
+更根本的问题：**三行看的都是 `D_弱(<40)` 档**，而 D 是"不买"档，用它比较入场门槛没有
+意义。原因是回测用了默认 scorer（s_shape），而**s_shape 打分下 A/B 档结构性近空**
+（实测"B 档仅 1 条"）——这正是审计 B4 从代码推断的结论被数据证实。
+
+⇒ ② 必须加 `--scorer b1_dual` 重跑，否则 A/B 档永远没样本。
+
+### 唯一可信的结论：召回代价
+
+`100% → 38% → 10%` 不受统计效力影响。三条件全满足只剩 10% 召回，与结论#15 的实证呼应
+（「瓶颈在召回，不在排序」，入场门槛对大牛股是负选择）。10% 召回需要胜率有很大提升才划算。
+
+### 重跑清单
+
+```bash
+# 换 scorer（否则 A/B 档无样本）+ 扩样本 + 随机抽样（避免"前 100 个代码"的选择偏差）
+uv run python 07_tools/screening/backtest_factors.py --scorer b1_dual --entry-filter weekly_j_low            --sample-n 1000
+uv run python 07_tools/screening/backtest_factors.py --scorer b1_dual --entry-filter j_low_weekly_resonance  --sample-n 1000
+uv run python 07_tools/screening/backtest_factors.py --scorer b1_dual --entry-filter j_low_qsx_weekly        --sample-n 1000
+```
+
+---
+
+## 待验证假设 H2：B1-B2-B3 体系（来源 `other/B1.pdf`，2026-08-03）
+
+**这是假设，不是结论。** 尚未回测，不得据此改选股链。
+
+### 原文体系（B1.pdf p16-17）
+
+| | 定义 | 确认条件 |
+|---|---|---|
+| B1 | 不同**时间**周期下的多个相对低点 | 3 个交易日内有效上涨 |
+| B2 | 不同**空间**维度下的多个相对低点 | 2 个交易日内必须有效放量 |
+| B3 | 不同时间维度下持续上涨趋势的**中部**位置 | 不破坏 + 突破前高确认 |
+
+三种排序（原文）：位置 `B1>B2>B3`；上涨确定性 `B3>B2>B1`；赔率 `B2>B3>B1`。
+
+**B2 核心指标（原文原话）**：B1 之后 / 涨幅大于 4% / 比前一交易日放量 / J<55 / 无上影线最好。
+
+### B2 的主要用途是**验证信号**，不只是多一个入场点
+
+把 B1 样本按"N 日内是否出现 B2"分成两组对比，直接回答"什么样的 B1 会启动"——这比继续找
+排序因子更接近"提升 B1 成功率"这个目标（也回应结论#15 实证第 1 条：瓶颈在召回不在排序）。
+
+### 底部异动（B1.pdf p12「异动选股」+ p19「底部暴力K/击穿对手盘」）
+
+原文条件：① 突然放量、量随价升 ② 异动后上涨趋势波段内「**地量才是地价**」
+③ **找异动之后的 B1** ④ 穿越 60 日线的异动，幅度越大后续空间越大；
+底部暴力K 另加：巨量点火 / 后 4 天量不能低于巨量的一半 / 9 个月新高 /
+新闻媒介煽风点火（无法编码，跳过）。均线体系：30 日观察 / 60 日建仓 / 120 日必守。
+
+第③条正是本项目 B1 选股的天然前置——**异动确认"主力进过场"，B1 给出回调买点**。这比
+`b1_dual_factor` 里的简版"放量启动段"更完整（多了穿越 60 日线、9 个月新高、点火后量能
+维持三个维度）。四条**分开报告**，不先合成分数——原文没给相对重要性。
+
+### 实现与验证状态
+
+- 因子：`screening/b2_surge_factor.py`（`detect_b2` / `detect_bottom_surge` /
+  `detect_surge_then_b1`；`_j_series` 与 `technical_monitor.kdj` 同口径，测试逐值钉住）
+- 回测入口：`SCORERS["b2"]`（按命中硬条件数×20 + 无上影线 20 合成，最少假设）；
+  `ENTRY_GATES["b2"]`、`["bottom_surge"]`、`["bottom_surge_strict"]`、
+  `["surge_then_b1"]`、`["surge_strict_then_b1"]`
+- **未接入选股链**，由 `tests/test_b2_surge_factor.py::TestNotWiredIntoScreening` 钉住
+- 已确认返回值全为 Python 原生类型（numpy.bool_ 会让 `json.dumps(allow_nan=False)` 报错）
+
+### 待跑回测
+
+```bash
+# B2 作为验证信号:B1 后是否出现 B2 → 把 B1 分成"启动了"和"没启动"两组
+uv run python 07_tools/screening/backtest_factors.py --entry-filter j_low --scorer b2 --horizons 5,20,60 --sample-n 1000
+uv run python 07_tools/screening/backtest_factors.py --entry-filter b2                --horizons 5,20,60 --sample-n 1000
+
+# 底部异动:宽/严口径 + 异动后的 B1
+uv run python 07_tools/screening/backtest_factors.py --entry-filter bottom_surge         --sample-n 1000
+uv run python 07_tools/screening/backtest_factors.py --entry-filter bottom_surge_strict  --sample-n 1000
+uv run python 07_tools/screening/backtest_factors.py --entry-filter surge_then_b1        --sample-n 1000
+uv run python 07_tools/screening/backtest_factors.py --entry-filter surge_strict_then_b1 --sample-n 1000
+```
+
+### 已明确不做
+
+- **三线/四线归零买（含"白线下20买"）**：owner 裁定它是**跟随策略，不属于 B1**，本项目不实现。
+  原文公式留档备查（B1.pdf p04）：`短期=100*(C-LLV(L,N1))/(HHV(C,N1)-LLV(L,N1))` 等四线，
+  `白线下20买 = 短期<=20 AND 长期>=60`。
+- 新闻媒介煽风点火（底部暴力K 第 4 条）：无数据源，无法编码。
+
+### B1.pdf 其余内容（已读，暂不实现）
+
+SF 战法六步（择时/选股/等B1不追/止损/止盈/收队）；「**主题等日线 B1，主线等周 B1**」与
+「**周线选完日线买**」——这是日周共振的**分工**解读（周线定方向、日线定时点），比"两周期
+同时 J<13"更贴近原意，可解释 H1c 观察到的张力；交易节奏（呼吸/N型/J到负）；季节性（2、9、
+10、11 月最好）；持仓检查手册（特级马/一等马/低等马/草泥马）；大盘回调期换股四依据；
+仓位管理（分仓 vs 重仓）；资金规模-盈利目标表；松紧手；关键K（趋势反转六型/走势衰竭两型）。
+`补坑策略` 一页在原 PDF 中为空页（仅标题）。
