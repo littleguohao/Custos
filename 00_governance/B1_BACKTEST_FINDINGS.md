@@ -360,12 +360,35 @@ good_b1 型排倒数第二，因为那三个突破式分项奖励的正是突破
 平台高 10.465 vs 回踩收盘 10.393）。现默认 `ph_tol=0.98`，复用 platform_pullback 自身的
 "收盘守在平台高 ≥×0.98"判定；返回里同时给出 `close_ge_ph_strict` 供回测对比两种取法。
 
+### 加分项 H1c：日周线 B1 共振（owner 2026-08-03 提出）
+
+「日线 B1 的同时周线也 B1（J<13）」。周线 J<13 意味着**更大周期的回调也到位**——日线可能
+只是短暂杀跌，周线同时超卖才说明整段回调走完。
+
+现状：`weekly_j_state` 早已算出 `weekly_j` / `weekly_j_low` 并落盘到候选顶层，但
+`score_candidates:620-621` **只落盘、未参与打分**。本次把它做成加分项（`RESONANCE_BONUS_PTS=12`，
+待回测），并在返回里给 `score_without_resonance` 便于消融。
+
+⚠️ **发现一个内在张力，回测必须专门验证**：周线 J<13 需要约 **9 周**连续下跌（周线 KDJ 的
+RSV 窗口），而那么长的回调会**破坏 QSX>DKS**。合成用例实测：
+
+| 用例 | 日线 J | 周线 J | 共振 | QSX>DKS | 双轴（含加分） | 无加分 |
+|---|---|---|---|---|---|---|
+| 仅日线 B1（急跌 4 根） | -14.6 | 86.0 | 否 | **是** | 60.3 | 60.3 |
+| 日+周共振（9 周缓跌+末段加速） | 5.5 | -16.1 | **是** | **否** | 38.4 | 26.4 |
+
+共振加分 +12 **补不回轴1 的下降**（38.4 < 60.3）。所以"共振一定更好"不能假定——
+可能的解释是两者刻画的是不同阶段：日线急跌+结构完好 = 强势股的短暂回踩；日周共振 =
+深度调整末期。哪个胜率高须由真实数据回答。已由
+`tests/test_b1_dual_factor.py::TestWeeklyResonance::test_long_pullback_tension_is_real` 钉住该现象。
+
 ### 实现与验证状态
 
 - 因子：`screening/b1_dual_factor.py`（`compute_b1_dual` / `compute_long_structure` /
-  `detect_launch_segment` / `detect_breakout_pullback_b1`）
-- 回测入口：`SCORERS["b1_dual"]`、`SCORERS["long_structure"]`（消融用）；
-  `ENTRY_GATES["qsx_gt_dks"]`、`["j_low_qsx_gt_dks"]`、`["breakout_pullback_b1"]`
+  `detect_launch_segment` / `detect_breakout_pullback_b1` / `detect_weekly_b1_resonance`）
+- 回测入口：`SCORERS["b1_dual"]`、`["b1_dual_no_res"]`、`["long_structure"]`（后两个消融用）；
+  `ENTRY_GATES["qsx_gt_dks"]`、`["j_low_qsx_gt_dks"]`、`["breakout_pullback_b1"]`、
+  `["weekly_j_low"]`、`["j_low_weekly_resonance"]`、`["j_low_qsx_weekly"]`
 - **未接入选股链**（`score_candidates` 一行未动），由 `tests/test_b1_dual_factor.py::
   TestNotYetWiredIntoScreening` 钉住
 - 合成数据只验证了判别方向；**真实回测待在有行情数据的环境执行**（本机 01_data 仅 44K、
@@ -385,7 +408,14 @@ uv run python 07_tools/screening/backtest_factors.py --entry-filter j_low
 uv run python 07_tools/screening/backtest_factors.py --entry-filter j_low_qsx_gt_dks
 uv run python 07_tools/screening/backtest_factors.py --entry-filter breakout_pullback_b1
 
-# ③ 净值终审（跨窗，必须赢过无条件基准）
+# ③ 日周共振（H1c）：共振加分是否有增益 / 共振与结构完好哪个胜率高
+uv run python 07_tools/screening/backtest_factors.py --scorer b1_dual        --entry-filter j_low --horizons 5,20,60
+uv run python 07_tools/screening/backtest_factors.py --scorer b1_dual_no_res --entry-filter j_low --horizons 5,20,60
+uv run python 07_tools/screening/backtest_factors.py --entry-filter weekly_j_low
+uv run python 07_tools/screening/backtest_factors.py --entry-filter j_low_weekly_resonance
+uv run python 07_tools/screening/backtest_factors.py --entry-filter j_low_qsx_weekly   # 最严一档，看召回代价
+
+# ④ 净值终审（跨窗，必须赢过无条件基准）
 uv run python 07_tools/screening/backtest_factors.py --trade-sim --scorer b1_dual --entry-filter j_low_qsx_gt_dks --cost-bps 25
 ```
 

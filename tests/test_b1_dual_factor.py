@@ -199,15 +199,103 @@ class TestBreakoutPullbackB1:
         assert r["hit"] is False and r["reason"] == "no_platform_pullback"
 
 
+class TestWeeklyResonance:
+    """日周线 B1 共振（owner 2026-08-03 提出的加分项）。
+
+    周线 J<13 意味着更大周期的回调也到位——日线可能只是短暂杀跌，周线同时超卖才说明
+    整段回调走完。
+    """
+
+    @staticmethod
+    @pytest.fixture(scope="class")
+    def resonance_shapes():
+        # 仅日线 B1：短促急跌 4 根，周线还没跌下来
+        a = _platform(110, 10.0, 4.0e5) + _launch(10.0, 4.0e5)
+        a += _drift(a[-1][0], 20, 0.010, 7.0e5)
+        a += _drift(a[-1][0], 4, -0.030, 2.6e5)
+        # 日+周共振：45 根(9周)缓跌 + 末段加速
+        b = _platform(110, 10.0, 4.0e5) + _launch(10.0, 4.0e5)
+        b += _drift(b[-1][0], 12, 0.012, 7.0e5)
+        b += _drift(b[-1][0], 45, -0.008, 3.0e5)
+        b += _drift(b[-1][0], 5, -0.022, 2.4e5)
+        return {"daily_only": _mk(a), "resonance": _mk(b)}
+
+    def test_matches_weekly_j_state(self, resonance_shapes):
+        """口径必须与 enrich_candidates.weekly_j_state 一致（同一 resample + KDJ）。
+
+        注意 ``weekly_j_state`` **没有**字符串日期兜底（生产 df 的 date 是 datetime，
+        所以它不暴露），而 detect_weekly_b1_resonance 加了兜底。这里把 date 转成
+        datetime 再比，避免比的是"谁更能容错"而不是口径。
+        """
+        from screening.enrich_candidates import weekly_j_state
+        for df in resonance_shapes.values():
+            dt = df.copy()
+            dt["date"] = pd.to_datetime(dt["date"])
+            mine = bd.detect_weekly_b1_resonance(df)
+            theirs = weekly_j_state(dt)
+            assert mine["weekly_j"] == pytest.approx(float(theirs["weekly_j"]), abs=1e-2)
+            assert mine["weekly_j_low"] is theirs["weekly_j_low"]
+
+    def test_hits_only_when_both_periods_low(self, resonance_shapes):
+        a = bd.detect_weekly_b1_resonance(resonance_shapes["daily_only"])
+        b = bd.detect_weekly_b1_resonance(resonance_shapes["resonance"])
+        assert a["daily_j_low"] is True and a["weekly_j_low"] is False
+        assert a["hit"] is False, "只有日线低不算共振"
+        assert b["daily_j_low"] is True and b["weekly_j_low"] is True
+        assert b["hit"] is True
+
+    def test_bonus_applied_only_on_resonance(self, resonance_shapes):
+        a = bd.compute_b1_dual(resonance_shapes["daily_only"], "600000")
+        b = bd.compute_b1_dual(resonance_shapes["resonance"], "600000")
+        assert a["resonance_bonus"] == 0.0
+        assert a["score"] == a["score_without_resonance"]
+        assert b["resonance_bonus"] == bd.RESONANCE_BONUS_PTS
+        assert b["score"] == pytest.approx(
+            min(100.0, b["score_without_resonance"] + bd.RESONANCE_BONUS_PTS), abs=0.11)
+
+    def test_string_dates_are_handled(self, resonance_shapes):
+        """生产 df 的 date 是 datetime，但测试/中间产物常是字符串——resample 需要兜底。"""
+        df = resonance_shapes["resonance"].copy()
+        df["date"] = df["date"].astype(str)
+        r = bd.detect_weekly_b1_resonance(df)
+        assert r["available"] is True and r["hit"] is True
+
+    def test_does_not_mutate_input(self, resonance_shapes):
+        df = resonance_shapes["resonance"].copy()
+        df["date"] = df["date"].astype(str)
+        before = df["date"].iloc[0]
+        bd.detect_weekly_b1_resonance(df)
+        assert df["date"].iloc[0] == before, "不得就地改调用方的 df"
+
+    def test_nan_j_does_not_count_as_low(self):
+        """J 算不出时不能当"满足 B1"（与 j_below_threshold 同一不变量）。"""
+        r = bd.detect_weekly_b1_resonance(_mk(_platform(8, 10.0, 4e5)))
+        assert r["hit"] is False
+
+    def test_long_pullback_tension_is_real(self, resonance_shapes):
+        """留证:**日周共振与长期结构完好有内在张力**。
+
+        周线 J<13 需要约 9 周下跌，而那么长的回调会破坏 QSX>DKS。实测共振用例的
+        双轴总分反而低于"仅日线 B1"用例——共振加分 +12 补不回轴1 的下降。
+        回测须专门比较这两组，而不是假定共振一定更好。
+        """
+        a = bd.compute_b1_dual(resonance_shapes["daily_only"], "600000")
+        b = bd.compute_b1_dual(resonance_shapes["resonance"], "600000")
+        assert a["qsx_gt_dks"] is True
+        assert b["qsx_gt_dks"] is False, "长回调破坏了长期多头结构"
+        assert b["score"] < a["score"], "共振加分补不回轴1 的下降——这正是待回测的张力"
+
+
 class TestBacktestRegistration:
     """因子必须注册进回测入口，否则无法验证。"""
 
-    @pytest.mark.parametrize("name", ["b1_dual", "long_structure"])
+    @pytest.mark.parametrize("name", ["b1_dual", "b1_dual_no_res", "long_structure"])
     def test_scorer_registered(self, name):
         assert name in bt.SCORERS
 
     @pytest.mark.parametrize("name", ["qsx_gt_dks", "j_low_qsx_gt_dks",
-                                      "breakout_pullback_b1"])
+                                      "breakout_pullback_b1", "weekly_j_low",
+                                      "j_low_weekly_resonance", "j_low_qsx_weekly"])
     def test_gate_registered(self, name):
         assert name in bt.ENTRY_GATES
 
@@ -216,7 +304,8 @@ class TestBacktestRegistration:
         assert bt.SCORERS["b1_dual"](_mk(_platform(30, 10.0, 4e5)), "600000") is None
 
     def test_gates_never_raise(self, shapes):
-        for name in ("qsx_gt_dks", "j_low_qsx_gt_dks", "breakout_pullback_b1"):
+        for name in ("qsx_gt_dks", "j_low_qsx_gt_dks", "breakout_pullback_b1",
+                     "weekly_j_low", "j_low_weekly_resonance", "j_low_qsx_weekly"):
             for df in list(shapes.values()) + [_mk(_platform(5, 10.0, 4e5))]:
                 assert isinstance(bt.ENTRY_GATES[name](df), bool)
 

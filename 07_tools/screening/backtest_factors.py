@@ -525,7 +525,8 @@ SCORERS["kdj_j"] = _sc_kdj_j
 # b1_dual_factor 模块 docstring。**先回测验证再谈接入选股链。**
 try:
     from b1_dual_factor import (compute_b1_dual, compute_long_structure,
-                                detect_breakout_pullback_b1)
+                                detect_breakout_pullback_b1,
+                                detect_weekly_b1_resonance)
 except Exception:  # noqa: BLE001 —— 缺依赖时不阻断其它 scorer
     compute_b1_dual = None
 
@@ -540,7 +541,9 @@ def _sc_b1_dual(df: pd.DataFrame, code: str):
     return {"score": r["score"], "suggestion": r["suggestion"],
             "aux": {"long_structure": r["long_structure"],
                     "short_reversal": r["short_reversal"],
-                    "qsx_gt_dks": r["qsx_gt_dks"]},
+                    "qsx_gt_dks": r["qsx_gt_dks"],
+                    "weekly_resonance": r["weekly_resonance"],
+                    "score_without_resonance": r["score_without_resonance"]},
             "components": {"struct": r["long_structure"], "reversal": r["short_reversal"]}}
 
 
@@ -558,6 +561,49 @@ def _sc_long_structure(df: pd.DataFrame, code: str):
 if compute_b1_dual is not None:
     SCORERS["b1_dual"] = _sc_b1_dual
     SCORERS["long_structure"] = _sc_long_structure
+
+
+def _sc_b1_dual_no_resonance(df: pd.DataFrame, code: str):
+    """消融用:双轴分**不含**周线共振加分(对比共振项是否真有增益)。"""
+    if compute_b1_dual is None:
+        return None
+    r = compute_b1_dual(df, code)
+    if not r.get("available"):
+        return None
+    base = r["score_without_resonance"]
+    return {"score": base, "suggestion": "可买" if base >= 70 else "不买",
+            "aux": {"weekly_resonance": r["weekly_resonance"]},
+            "components": {"struct": r["long_structure"], "reversal": r["short_reversal"]}}
+
+
+if compute_b1_dual is not None:
+    SCORERS["b1_dual_no_res"] = _sc_b1_dual_no_resonance
+
+
+def weekly_j_low_gate(df_slice: pd.DataFrame) -> bool:
+    """周线 J<13(更大周期回调也到位)。绝不 raise。"""
+    if compute_b1_dual is None:
+        return False
+    try:
+        r = detect_weekly_b1_resonance(df_slice)
+        return bool(r.get("available") and r.get("weekly_j_low"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def j_low_weekly_resonance_gate(df_slice: pd.DataFrame) -> bool:
+    """日周线 B1 共振:日线 J<13 **且** 周线 J<13(owner 2026-08-03 提出的加分项)。"""
+    if compute_b1_dual is None:
+        return False
+    try:
+        return bool(detect_weekly_b1_resonance(df_slice).get("hit"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def j_low_qsx_weekly_gate(df_slice: pd.DataFrame) -> bool:
+    """good_b1 全条件组合:J<13 + QSX>DKS + 周线 J<13。最严一档,用于看召回代价。"""
+    return bool(j_low_weekly_resonance_gate(df_slice) and qsx_gt_dks_gate(df_slice))
 
 
 def qsx_gt_dks_gate(df_slice: pd.DataFrame) -> bool:
@@ -590,6 +636,9 @@ if compute_b1_dual is not None:
     ENTRY_GATES["qsx_gt_dks"] = qsx_gt_dks_gate
     ENTRY_GATES["j_low_qsx_gt_dks"] = j_low_qsx_gt_dks_gate
     ENTRY_GATES["breakout_pullback_b1"] = breakout_pullback_b1_gate
+    ENTRY_GATES["weekly_j_low"] = weekly_j_low_gate
+    ENTRY_GATES["j_low_weekly_resonance"] = j_low_weekly_resonance_gate
+    ENTRY_GATES["j_low_qsx_weekly"] = j_low_qsx_weekly_gate
 
 
 def sample_codes(all_codes: list[str], n: int, seed: int = 0) -> list[str]:

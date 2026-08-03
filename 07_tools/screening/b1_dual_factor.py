@@ -54,6 +54,12 @@ LAUNCH_VOL_MULT = 1.5            # 启动阳线量 / 前 20 日均量下限
 W_STRUCT = 0.40                  # 轴1 长期结构
 W_REVERSAL = 0.60                # 轴2 短期回调（B1 是回调买入，买点权重更高）
 
+# 日周线共振加分（owner 2026-08-03 提出）：日线 B1 的同时周线也 B1。
+# 周线 J<13 意味着**更大周期的回调也到位**，回调充分度比只有日线低更强。
+# 记为独立加分而非并进某个轴，便于回测消融（返回里同时给 score_without_resonance）。
+RESONANCE_BONUS_PTS = 12.0       # 待回测
+J_LOW_THRESHOLD = 13.0           # B1 区间上界（与 backtest_factors.j_low_gate 同值）
+
 DUAL_MIN_BARS = 120              # DKS 需要 MA114 → 至少 120 根
 
 
@@ -134,8 +140,50 @@ def compute_long_structure(df: pd.DataFrame) -> dict[str, Any]:
     }
 
 
+def detect_weekly_b1_resonance(df: pd.DataFrame,
+                               j_threshold: float = J_LOW_THRESHOLD) -> dict[str, Any]:
+    """日线 B1 + 周线 B1 共振：两个周期的 J 同时 < 阈值。绝不 raise。
+
+    周线 J<13 意味着更大周期的回调也到位——日线可能只是短暂杀跌，周线同时超卖才说明
+    整段回调走完。口径与 ``enrich_candidates.weekly_j_state`` 一致（``resample(df,"W-FRI")``
+    后取 KDJ(9,3,3) 的 J），由测试钉住两者相等。
+
+    ``date`` 列为字符串时先转 datetime（resample 需要 DatetimeIndex）——不改原 df。
+    """
+    try:
+        from technical_monitor import kdj, resample
+    except Exception as exc:  # noqa: BLE001
+        return {"available": False, "hit": False, "reason": f"dep_missing:{type(exc).__name__}"}
+    try:
+        dj = kdj(df)
+        if not dj.get("available") or dj.get("j") is None:
+            return {"available": False, "hit": False, "reason": "daily_kdj_unavailable"}
+        d = df
+        if not pd.api.types.is_datetime64_any_dtype(df["date"]):
+            d = df.copy()
+            d["date"] = pd.to_datetime(d["date"])
+        weekly = resample(d, "W-FRI")
+        wj = kdj(weekly)
+        if not wj.get("available") or wj.get("j") is None:
+            return {"available": False, "hit": False, "reason": "weekly_kdj_unavailable",
+                    "daily_j": round(float(dj["j"]), 2)}
+        daily_j, week_j = float(dj["j"]), float(wj["j"])
+        daily_low = daily_j == daily_j and daily_j < j_threshold      # NaN 不算满足
+        week_low = week_j == week_j and week_j < j_threshold
+        return {"available": True, "hit": bool(daily_low and week_low),
+                "daily_j": round(daily_j, 2), "weekly_j": round(week_j, 2),
+                "daily_j_low": bool(daily_low), "weekly_j_low": bool(week_low),
+                "weekly_bars": int(len(weekly))}
+    except Exception as exc:  # noqa: BLE001
+        return {"available": False, "hit": False,
+                "error": f"{type(exc).__name__}:{str(exc)[:80]}"}
+
+
 def compute_b1_dual(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
-    """B1 双轴组合分 0-100 = W_STRUCT×长期结构 + W_REVERSAL×短期回调。绝不 raise。"""
+    """B1 双轴组合分 0-100 = W_STRUCT×长期结构 + W_REVERSAL×短期回调 + 周线共振加分。
+
+    绝不 raise。返回含 ``score_without_resonance`` 便于回测消融共振项。
+    """
     try:
         struct = compute_long_structure(df)
         rev = compute_s_reversal(df, code)
@@ -144,13 +192,19 @@ def compute_b1_dual(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
                     "reason": struct.get("reason") or rev.get("reason") or "unavailable"}
         s1 = float(struct["score"])
         s2 = float(rev["s_reversal"])
-        total = round(W_STRUCT * s1 + W_REVERSAL * s2, 1)
+        base = W_STRUCT * s1 + W_REVERSAL * s2
+        res = detect_weekly_b1_resonance(df)
+        bonus = RESONANCE_BONUS_PTS if res.get("hit") else 0.0
+        total = round(min(100.0, base + bonus), 1)
         return {
             "available": True, "score": total,
+            "score_without_resonance": round(base, 1),
             "long_structure": s1, "short_reversal": s2,
             "qsx_gt_dks": struct["qsx_gt_dks"],
+            "weekly_resonance": bool(res.get("hit")),
+            "resonance_bonus": bonus,
             "suggestion": "可买" if total >= 70 else ("观望" if total >= 55 else "不买"),
-            "struct_detail": struct, "reversal_detail": rev,
+            "struct_detail": struct, "reversal_detail": rev, "resonance_detail": res,
         }
     except Exception as exc:  # noqa: BLE001 —— 坏数据不中断批次
         return {"available": False, "score": None,
