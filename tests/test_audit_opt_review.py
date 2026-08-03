@@ -431,9 +431,11 @@ class TestAffairCache:
         ltd, calls = self._stub_affair(monkeypatch, parse_ret=pd.DataFrame({"a": [1]}))
         df = ltd.get_financial_data("20260331")
         assert not df.empty
-        downdir = Path(calls["downdir"]).resolve()
-        assert downdir.is_relative_to(ltd.BASE.resolve())      # 不得写到 BASE/.. 项目外
-        assert ".." not in Path(calls["downdir"]).parts
+        downdir = Path(calls["downdir"])
+        # 不 resolve：01_data 在部分环境是指向项目外盘符的符号链接,resolve 后会"跑出"
+        # 项目,但**配置路径**本身仍在项目内——本测试钉的是配置不写到 BASE/.. 项目外。
+        assert downdir.is_relative_to(ltd.BASE)
+        assert ".." not in downdir.parts
 
     def test_empty_report_period_returns_empty_not_fetch(self, monkeypatch, capsys):
         ltd, calls = self._stub_affair(monkeypatch, files=[])

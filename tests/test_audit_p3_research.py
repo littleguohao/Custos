@@ -94,6 +94,14 @@ class TestGateDependencyFailureNotSilent:
 class TestSectorFeatureBuildFailureNotSilent:
     """E8: build_sector_features 无板块数据时必须自报,不能全程返回 {} 装作'板块无判别力'。"""
 
+    @pytest.fixture(autouse=True)
+    def _isolate_sector_name_table(self, monkeypatch):
+        """板块名称表(tdxzs.cfg)是宿主环境依赖：本机 880201=黑龙江(tdx_type=3 地区板块)
+        会被 invert_members 剔除导致 sectors_requested 少 1,无 cfg 的机器则不过滤。
+        注入空名称表把口径固定为"不过滤"(与无 cfg 环境一致),测试结果不随宿主漂移。"""
+        import tq_sector
+        monkeypatch.setattr(tq_sector, "load_sector_names", lambda *a, **kw: {})
+
     def test_no_csv_reports_zero_sectors_loaded(self, tmp_path):
         members = {"880201.SH": ["600000"], "880900.SH": ["000002"]}
         fn = lp.build_sector_features(tmp_path, members)
