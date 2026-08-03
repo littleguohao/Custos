@@ -301,7 +301,10 @@ edge 来自**择时 + 分散 + 交易管理**，不是选股。
 
 ## 待验证假设 H1：B1 双轴（长期结构 × 短期回调）—— 2026-08-03 提出
 
-**这是假设，不是结论。** 尚未跑回测，不得据此改选股链。
+**这是假设，不是结论。** 已有两轮判读：首轮（100 只，样本不足，见下）；
+第二轮（1000 只随机抽样 + 无条件基准，见文末「H1 第二轮回测判读」）——
+`j_low_qsx_weekly` 首轮通过待跨窗验证，日周共振方向不一致暂否。
+未通过终审前不得据此改选股链。
 
 ### 依据：`other/good_b1.pptx` 九例形态统计（末根读数）
 
@@ -391,8 +394,8 @@ RSV 窗口），而那么长的回调会**破坏 QSX>DKS**。合成用例实测�
   `["weekly_j_low"]`、`["j_low_weekly_resonance"]`、`["j_low_qsx_weekly"]`
 - **未接入选股链**（`score_candidates` 一行未动），由 `tests/test_b1_dual_factor.py::
   TestNotYetWiredIntoScreening` 钉住
-- 合成数据只验证了判别方向；**真实回测待在有行情数据的环境执行**（本机 01_data 仅 44K、
-  无 vipdoc/qlib，跑不了）
+- 合成数据只验证了判别方向；真实回测于 2026-08-03 在 vipdoc 环境完成
+  （见文末「H1 第二轮回测判读」）
 
 ### 待跑的验证（三重门槛 + 净值终审，同结论#15 的标准）
 
@@ -479,9 +482,74 @@ uv run python 07_tools/screening/backtest_factors.py --scorer b1_dual --entry-fi
 
 ---
 
+## H1 第二轮回测判读（1000 只随机抽样 seed=0 + b1_dual + 无条件基准，2026-08-03）
+
+**无条件基准**（`--entry-filter none`，同批 1000 只，422,097 条）：H5 49.43% / H10 50.27% /
+H20 50.08% / H60 50.14%；均收 +0.41 / +0.74 / +1.43 / +4.82%。以下所有 z 值均为对基准的
+两比例 z 检验；显著性门槛 |z|>1.96。
+
+数据：`06_logs/backtest_baseline_none_1000.json`、`backtest_h1_weekly_j_low_b1dual_1000.json`、
+`backtest_h1_resonance_b1dual_1000.json`、`backtest_h1_qsx_weekly_b1dual_1000.json`、
+`backtest_h1_resonance_nores_1000.json`（均带 `--horizons 5,10,20,60`）。
+
+### ① 门槛链条（同 scorer b1_dual，三层严格嵌套 ③⊂②⊂①，全体胜率）
+
+| gate | n（召回 vs ①） | H5 | H20 | H60 |
+|---|---:|---|---|---|
+| ① weekly_j_low | 90,546 (100%) | 51.0% (z=+8.6) | 55.0% (z=+25.5) | 50.9% (z=+3.7) |
+| ② j_low_weekly_resonance | 32,531 (36%) | 51.4% | 51.9% | 53.1% |
+| ③ j_low_qsx_weekly | 9,001 (10%) | 54.0% | 58.3% | 57.1% |
+
+两两比较（同口径嵌套子集）：
+- ①→②（加日周共振）：H20 **-3.1pp（z=9.2，显著变差）**、H60 +2.2pp（z=5.6，显著变好）、
+  H5 不变（z=-1.3）。**方向不一致——首轮 H1c 推测的"共振与长期结构的内在张力"被大样本
+  证实：共振买点需要更长持有期。**
+- ②→③（加 QSX 周线）：H5 +2.6pp（z=4.2）、H20 +6.4pp（z=10.4）、H60 +4.0pp（z=5.9），
+  **三个 horizon 一致显著变好**，但召回只剩 10%。
+- 意外发现：weekly_j_low 单条件（①）H20 即 55.0%（z=25.5）——周线 J 低位本身是强 edge，
+  首轮 100 只时完全被样本量掩盖。
+
+### ② 共振加分消融（同 gate ②，b1_dual vs b1_dual_no_res，各 32,531 条）
+
+- A 档胜率两版几乎相同（H20 55.1% vs 58.3%，z=-0.4；无加分版 A 档仅 51 条）；
+  **共振"加分"没有在 A 档之上产生额外区分度**（A 档原本就大多是共振信号）。
+- 但因加分才进 A 档的 1,482 条信号：H5 52.3% / H20 55.0% / H60 55.6%——
+  **显著赢无条件基准（H20 z≈3.5）**，即共振作为**条件**有效，作为**加分**只是把它
+  显性化，没有提成假象。
+
+### ③ b1_dual 的排序能力（③ 组内，n=9,001）
+
+C 档 H20 59.3% / B 档 58.3% / A 档 55.9%（D 档仅 72 条垫底 H60 47.1%）——顶部 C/B/A
+倒挂但全部远高于基准；**scorer 能把最差的 D 档分出来，但 A/B/C 之间的排序无效**。
+与结论#15 一致：瓶颈在召回/门槛，不在排序。
+
+### 判定（按"三重门槛"标准）
+
+- **赢无条件基准**：③ 全 horizon 一致显著（最小 z=4.2）✅；② 方向不一致 ❌（H20 显著变差）；
+  ① H20 强但 H60 仅 z=3.7、H5 z=8.6，方向一致但 H60 增益弱。
+- **跨窗方向一致**：本轮只有 seed=0 单区间，**无法判定**。
+- ⇒ **j_low_qsx_weekly（③）首轮通过，待跨窗/跨 seed 验证**；日周共振（②）暂否，
+  其增益只在 H60 成立，若用须明确"共振买点持有期 ≥60 日"。
+- 召回代价重申：③ 只剩 10% 召回，与结论#15 实证第 1 条一致——即使验证通过，
+  定位也是"高胜率低召回的精选档"，不是主力召回口径。
+
+### 下一轮验证清单
+
+```bash
+# 跨 seed + 跨区间（方向一致性终审）：③ 与 ① 对照
+uv run python 07_tools/screening/backtest_factors.py --scorer b1_dual --entry-filter j_low_qsx_weekly --universe-local --universe-sample 1000 --seed 1 --horizons 5,10,20,60
+uv run python 07_tools/screening/backtest_factors.py --scorer b1_dual --entry-filter j_low_qsx_weekly --universe-local --universe-sample 1000 --start 2022-01-01 --end 2024-12-31 --horizons 5,10,20,60
+# 净值终审（跨窗必须赢无条件基准）
+uv run python 07_tools/screening/backtest_factors.py --trade-sim --scorer b1_dual --entry-filter j_low_qsx_weekly --cost-bps 25 --universe-local --universe-sample 1000
+```
+
+---
+
 ## 待验证假设 H2：B1-B2-B3 体系（来源 `other/B1.pdf`，2026-08-03）
 
-**这是假设，不是结论。** 尚未回测，不得据此改选股链。
+**这是假设，不是结论。** 首轮判读（2026-08-03）见文末「H2 第一轮回测判读」：
+B2 两个口径与底部异动三 gate 均**否决**，仅 `surge_strict_then_b1` 疑似幸存待交叉验证。
+未通过终审前不得据此改选股链。
 
 ### 原文体系（B1.pdf p16-17）
 
@@ -533,6 +601,55 @@ uv run python 07_tools/screening/backtest_factors.py --entry-filter bottom_surge
 uv run python 07_tools/screening/backtest_factors.py --entry-filter bottom_surge_strict  --universe-local --universe-sample 1000
 uv run python 07_tools/screening/backtest_factors.py --entry-filter surge_then_b1        --universe-local --universe-sample 1000
 uv run python 07_tools/screening/backtest_factors.py --entry-filter surge_strict_then_b1 --universe-local --universe-sample 1000
+```
+
+---
+
+## H2 第一轮回测判读（1000 只随机抽样 seed=0，2026-08-03）
+
+基准同 H1 第二轮（无条件 422,097 条：H5 49.43% / H20 50.08% / H60 50.14%）；
+j_low 条件基准 94,105 条：H5 49.4% / H20 48.7% / H60 52.7%。
+数据：`06_logs/backtest_b2_scorer_jlow_1000.json`、`backtest_b2_gate_1000.json`、
+`backtest_h2_bottom_surge[_strict]_1000.json`、`backtest_h2_surge_[strict_]then_b1_1000.json`。
+
+### ① B2 作验证信号（j_low 94,105 条按"B2 是否全中"分组）—— **否决**
+
+| 组 | n | H5 | H20 | H60 |
+|---|---:|---|---|---|
+| B2 全中 | 957 | 48.6% / -0.10% | 51.0% / +2.83% | 43.0% / +4.20% |
+| 未全中 | 93,148 | 49.4% / +0.19% | 48.7% / +1.10% | 52.7% / +5.72% |
+
+H20 +2.3pp 不显著（z≈1.3）；**H60 -9.7pp 显著更差（z≈5）**。硬条件命中数 1→4 不单调，
+全中组 H5/H60 最差。解释：B2 全中 ≡ 当日涨 4%+放量 ≡ **追高入场**，短线动能尚在、
+H60 均值回归吞掉收益。"B2 确认 = 更好的 B1"在当前口径（信号日收盘入场）不成立；
+原文"B2 出现后再等回调买"的用法本实现未覆盖（那是"B2 后再等 B1"的两次入场模型）。
+
+### ② B2 作入场门槛（5,773 条）—— **否决**
+
+召回仅 6.1%（94,105→5,773），全体 H5 48.7% / H20 48.5% / H60 46.9%——
+**任何 horizon 都不赢无条件基准**，H60 显著更差。不接线。
+
+### ③ 底部异动四 gate —— 三个否决，一个疑似幸存待验证
+
+| gate | n | H5 | H20 | H60 | 判读 |
+|---|---:|---|---|---|---|
+| bottom_surge 宽 | 107,831 | 46.4% | 45.6% | 45.7% | 异动后 60 天窗口内 gate 持续为真、几乎无选择性，全 horizon 显著低于基准，**否决** |
+| bottom_surge_strict | 606 | 46.4% | 52.1% | 51.3% | H20 z≈1.0 不显著；H60 均收 -0.07% vs 基准 +4.82%，**否决** |
+| surge_then_b1 宽 | 25,004 | 48.0% | 44.5% | 46.9% | J<13 子集却全 horizon 跑输 j_low 基准，**否决** |
+| surge_strict_then_b1 | 133 | 48.9% | **60.2%** | **63.8%** | H20 z≈2.3、H60 z≈3.1（对无条件基准），**疑似幸存** |
+
+`surge_strict_then_b1`（巨量点火+量维持+穿60日线+9月新高 → 等 J<13 回调买）是唯一
+没被首轮否掉的方向，H60 z≈3.1 过了 6 组多重比较的 Bonferroni 边界（≈2.75）。但：
+n=133、召回 0.14%（全市场日均 ~0.13 个信号），单 seed 单区间，**必须跨 seed/跨区间
+交叉验证后才准采信**；即使为真，定位也是极低频精选信号，不是召回口径。
+
+### 下一轮验证清单
+
+```bash
+# surge_strict_then_b1 稳健性:换 seed、换区间
+uv run python 07_tools/screening/backtest_factors.py --entry-filter surge_strict_then_b1 --universe-local --universe-sample 1000 --seed 1 --horizons 5,10,20,60
+uv run python 07_tools/screening/backtest_factors.py --entry-filter surge_strict_then_b1 --universe-local --universe-sample 1000 --start 2022-01-01 --end 2024-12-31 --horizons 5,10,20,60
+# 宽口径 bottom_surge 的 gate 语义修正(异动后 60 天持续为真 → 只在异动当日/异动后首次 J<13 触发)后再议
 ```
 
 ### 已明确不做
