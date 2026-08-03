@@ -113,7 +113,20 @@ def main(argv=None) -> int:
         print(f"今日休市，每日选股不运行（{target}）")
         return 0
 
-    # 2. Refresh concept tags (miscinfo) so sector mapping uses the accurate source
+    # 2. Refresh stock name cache —— ST 硬排除的唯一依据，必须滚动更新。
+    #    此前只有 mootdx 一个在线源且它 2026-07 起持续失败，缓存靠手动跑脚本、无 cron、
+    #    读取时也不校验时效 ⇒ 一份永不更新的名称表长期在用，新被 ST 的票名字还是正常的，
+    #    照样通过硬排除，而 st_filter 仍报 ok（审计 B5 的延伸）。
+    #    best-effort：失败不中断，选股链内部还有"候选名称按需刷新 + 缓存时效判定"两道防线。
+    r = _run_stage(["uv", "run", "python", str(TOOLS / "local_tdx" / "stock_names.py"),
+                    "--source", "auto"], "refresh_stock_names",
+                   note="best-effort，失败不中断；ST 硬排除依赖它")
+    if not r["ok"]:
+        print(f"[WARN] refresh_stock_names failed: {r['out'][:200]}")
+    else:
+        print(f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'stock names refreshed'}")
+
+    # 3. Refresh concept tags (miscinfo) so sector mapping uses the accurate source
     r = _run_stage(["uv", "run", "python", str(TOOLS / "local_tdx" / "concept_tags.py"),
                     "--date", target], "refresh_concept_tags", note="best-effort，失败不中断")
     if not r["ok"]:

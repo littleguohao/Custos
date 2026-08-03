@@ -36,6 +36,7 @@ from paths import DATA, GOVERNANCE  # noqa: E402
 import tq_http  # noqa: E402
 from tq_sector import is_tdxw_running  # noqa: E402
 import local_tdx_data  # noqa: E402
+import stock_names  # noqa: E402
 import manual_pools  # noqa: E402
 
 SCREENING_DIR = DATA / "screening"
@@ -74,41 +75,36 @@ def _is_bj(code: str) -> bool:
     return _strip_suffix(s).startswith(("4", "8", "920"))
 
 
-NAME_MAP_CACHE = DATA / "market" / "stock_name_map.json"
+# 名称缓存路径已收敛到 local_tdx/stock_names.CACHE（单一定义）
 
 
 def _load_name_map(diag: Optional[dict] = None) -> dict[str, str]:
-    """名称表:在线优先,成功即落缓存;在线失败则回退缓存。
+    """universe 阶段的名称表：只读本地缓存并判时效，不在此拉全市场在线表。
 
-    名称是**硬排除 ST 的唯一依据**(enrich_candidates 用 `"ST" in name.upper()`)。
-    在线表挂掉且无缓存时 name 为空串 → `"ST" in ""` 为假 → **ST 股会静默通过硬排除**,
-    所以这里必须落缓存,并把不可用状态显式报给调用方(而不是安静放行)。
+    候选名称由 :func:`_refresh_candidate_names` 在拿到命中后用东财 ulist 批量刷新
+    （那才是 ST 判定真正依赖的一步）。这里只需要给 universe/自选池填个初始名字，
+    所以走缓存即可——全市场在线表拉不动（东财 clist 受限流）、mootdx 已失效
+    （2026-07 起），硬拉只会每次都白等一轮超时。
+
+    缓存陈旧时 st_filter 报 "stale" 而不是 "ok"：旧缓存里新被 ST 的票名字仍是正常的，
+    报 ok 等于声称 ST 过滤有效（审计 B5 的延伸）。
     """
-    src, name_map = "online", {}
-    try:
-        name_map = local_tdx_data.get_stock_name_map() or {}
-    except Exception:  # noqa: BLE001
-        name_map = {}
-    if name_map:
-        try:
-            NAME_MAP_CACHE.parent.mkdir(parents=True, exist_ok=True)
-            NAME_MAP_CACHE.write_text(json.dumps(name_map, ensure_ascii=False), encoding="utf-8")
-        except OSError:
-            pass
-    else:
-        src = "cache"
-        try:
-            name_map = json.loads(NAME_MAP_CACHE.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            name_map, src = {}, "unavailable"
+    names, meta = stock_names.load_cache()
     if diag is not None:
-        diag["name_map_source"] = src
-        diag["name_map_size"] = len(name_map)
-        diag["st_filter"] = "ok" if name_map else "unavailable"
-    if not name_map:
-        print("[WARN] 名称表不可用(在线+缓存均失败):ST 硬排除失效,候选可能含 ST",
+        if not names:
+            diag["name_map_source"] = "unavailable"
+            diag["name_map_size"] = 0
+            diag["st_filter"] = "unavailable"
+        else:
+            diag["name_map_source"] = meta.get("source") or "cache"
+            diag["name_map_size"] = len(names)
+            diag["name_map_generated_at"] = meta.get("generated_at")
+            diag["name_map_age_days"] = meta.get("age_days")
+            diag["st_filter"] = "stale" if meta.get("stale") else "ok"
+    if not names:
+        print("[WARN] 名称缓存不可用：universe 阶段无名，ST 判定改由候选名称刷新兜底",
               file=sys.stderr)
-    return name_map
+    return names
 
 
 def build_universe(universe_cfg: Optional[dict] = None,
@@ -221,6 +217,7 @@ def screen_formulas(
     registry: Optional[dict] = None,
     stock_list: Optional[list[str]] = None,
     name_map: Optional[dict[str, str]] = None,
+    name_resolver=None,
     call: Optional[Callable[..., dict]] = None,
     running_check: Optional[Callable[[], bool]] = None,
     timeout: int = FORMULA_TIMEOUT,
@@ -379,7 +376,72 @@ def screen_formulas(
     # 注：上面这个 any() 之所以排除 manual_pool，是因为自选池失败有自己的 manual_pool_status
     # 与专门的降级备注（见 _finalize/pending_notes），不与"公式失败"混同；但它**必须**同样
     # 让 status 脱离 ok —— 原实现只做了排除、没做替代，于是自选池整条通道归零仍报 ok（审计 B6）。
+
+    # 候选名称按需刷新（东财 ulist 批量 → TQ → 缓存）。
+    # 为什么放在这里而不是 universe 阶段：ST 判定只需要知道**候选股**是不是 ST，候选池
+    # 通常几十到几百只，一次 200 只即可，几乎不触发限流；而全市场表拉不动（东财 clist
+    # 单页≤100 且连续约 10 页即断连）且只能靠手动跑脚本、永不更新（审计 B5 的延伸）。
+    # 这里拿到的名称会**覆盖** universe 阶段来自缓存的旧名字——新被 ST 的票必须能被发现。
+    _refresh_candidate_names(result, pending_notes, name_resolver)
     return _finalize(result)
+
+
+def _candidate_codes(result: dict) -> list[str]:
+    """result 里全部候选代码（公式命中 + 自选池命中）。"""
+    codes: list[str] = []
+    for f in result.get("formulas") or []:
+        for h in f.get("hits") or []:
+            c = str(h.get("code") or "").split(".")[0]
+            if c:
+                codes.append(c)
+    return sorted(set(codes))
+
+
+def _refresh_candidate_names(result: dict, pending_notes: list[str],
+                            resolver=None) -> None:
+    """用最新名称覆盖候选的 name，并据覆盖率重判 st_filter。就地修改 result。
+
+    ``resolver(codes) -> (names, diag)`` 可注入：默认走
+    :func:`stock_names.resolve_names_for`（会发网络请求），单测必须注入替身——
+    否则测试会真的去打东财接口（慢、不稳定、还会触发限流影响后续用例）。
+    """
+    codes = _candidate_codes(result)
+    if not codes:
+        return
+    fn = resolver or stock_names.resolve_names_for
+    try:
+        names, diag = fn(codes)
+    except Exception as exc:  # noqa: BLE001 —— 名称刷新失败不得中断初筛
+        print(f"[WARN] 候选名称刷新失败: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return
+    for f in result.get("formulas") or []:
+        for h in f.get("hits") or []:
+            c = str(h.get("code") or "").split(".")[0]
+            if c in names:
+                h["name"] = names[c]
+    result["name_map_source"] = diag.get("name_map_source", result.get("name_map_source"))
+    result["candidate_name_coverage"] = {
+        "requested": diag.get("requested"), "resolved": diag.get("name_map_size"),
+        "missing_count": diag.get("missing_count"), "missing_codes": diag.get("missing_codes"),
+        "generated_at": diag.get("name_map_generated_at"),
+        "age_days": diag.get("name_map_age_days"),
+    }
+    prev, now = result.get("st_filter"), diag.get("st_filter", "unavailable")
+    # 只在变差时改写：universe 阶段若已判 unavailable，这里 ok 也不该把它洗白到 ok，
+    # 因为 universe 的名称缺失影响的是"哪些票进了初筛"，与候选名称是两件事。
+    rank = {"ok": 0, "stale": 1, "partial": 2, "unavailable": 3}
+    result["st_filter"] = now if rank.get(now, 3) > rank.get(prev, 0) else prev
+    if now == "partial":
+        pending_notes.append(
+            f"st_filter_partial({diag.get('missing_count')}/{diag.get('requested')} "
+            f"只候选取不到名称,其 ST 状态未知)")
+    elif now == "stale":
+        pending_notes.append(
+            f"st_filter_stale(候选名称全部来自陈旧缓存,age={diag.get('name_map_age_days')}天 "
+            f"> {stock_names.NAME_MAP_MAX_AGE_DAYS}天,新被 ST 的票可能不在表内)")
+    elif now == "unavailable":
+        pending_notes.append(
+            "st_filter_unavailable(候选名称全部取不到 → ST 硬排除失效)")
 
 
 def main(argv: Optional[list] = None) -> int:

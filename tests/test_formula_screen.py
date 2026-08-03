@@ -1,7 +1,13 @@
 # -*- coding: utf-8 -*-
 """Tests for screening.formula_screen degrade paths (mocked TQ, no TdxW needed)."""
 import json
+from datetime import timedelta
+
+import pytest
+
 import formula_screen
+import stock_names
+from paths import cn_today
 
 
 def _registry(n=2):
@@ -141,36 +147,58 @@ class TestBuildUniverseLocalFirst:
 
 
 class TestNameMapCacheAndStFilter:
-    """名称是 ST 硬排除的唯一依据(enrich 用 `"ST" in name.upper()`)。在线表挂掉必须回退缓存;
-    彻底不可用必须显式报出,否则 `"ST" in ""` 为假 → ST 股静默通过硬排除。"""
+    """名称是 ST 硬排除的唯一依据(enrich 用 `"ST" in name.upper()`)。
 
-    def test_online_success_writes_cache(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(formula_screen, "NAME_MAP_CACHE", tmp_path / "names.json")
-        monkeypatch.setattr(formula_screen.local_tdx_data, "get_stock_name_map",
-                            lambda *a, **k: {"600000": "浦发银行"})
-        diag: dict = {}
-        nm = formula_screen._load_name_map(diag)
-        assert nm == {"600000": "浦发银行"} and diag["name_map_source"] == "online"
-        cached = json.loads((tmp_path / "names.json").read_text(encoding="utf-8"))
-        assert cached["600000"] == "浦发银行"
+    2026-08-03 改：universe 阶段只读缓存并判时效，候选名称由 _refresh_candidate_names
+    用东财 ulist 批量刷新。原实现只有 mootdx 在线源（2026-07 起持续失败），于是长期靠
+    一份手动生成、永不更新、读取时不校验时效的缓存在跑——缓存非空就报 st_filter=ok，
+    而旧缓存里新被 ST 的票名字还是正常的，照样通过硬排除。
+    """
 
-    def test_online_failure_falls_back_to_cache(self, tmp_path, monkeypatch):
+    def _write_cache(self, path, names, generated_at=None):
+        payload = {"names": names, "source": "test", "count": len(names)}
+        if generated_at:
+            payload["generated_at"] = generated_at
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    def test_fresh_cache_is_ok(self, tmp_path, monkeypatch):
         cache = tmp_path / "names.json"
-        cache.write_text(json.dumps({"600000": "浦发银行", "000155": "*ST川化"}), encoding="utf-8")
-        monkeypatch.setattr(formula_screen, "NAME_MAP_CACHE", cache)
-        monkeypatch.setattr(formula_screen.local_tdx_data, "get_stock_name_map", lambda *a, **k: {})
+        self._write_cache(cache, {"600000": "浦发银行", "000155": "*ST川化"},
+                          generated_at=cn_today().isoformat())
+        monkeypatch.setattr(formula_screen.stock_names, "CACHE", cache)
         diag: dict = {}
         nm = formula_screen._load_name_map(diag)
         assert nm["000155"] == "*ST川化"                     # 缓存保住 ST 识别
-        assert diag["name_map_source"] == "cache" and diag["st_filter"] == "ok"
+        assert diag["st_filter"] == "ok" and diag["name_map_age_days"] == 0
+
+    def test_stale_cache_is_not_ok(self, tmp_path, monkeypatch, capsys):
+        """陈旧缓存不得报 ok —— 这正是原实现的隐蔽失效。"""
+        cache = tmp_path / "names.json"
+        old_day = (cn_today() - timedelta(days=stock_names.NAME_MAP_MAX_AGE_DAYS + 5))
+        self._write_cache(cache, {"600000": "浦发银行"}, generated_at=old_day.isoformat())
+        monkeypatch.setattr(formula_screen.stock_names, "CACHE", cache)
+        diag: dict = {}
+        nm = formula_screen._load_name_map(diag)
+        assert nm == {"600000": "浦发银行"}                   # 仍可用
+        assert diag["st_filter"] == "stale"                  # 但不可信
+        assert diag["name_map_age_days"] > stock_names.NAME_MAP_MAX_AGE_DAYS
+
+    def test_legacy_flat_cache_is_stale(self, tmp_path, monkeypatch):
+        """旧扁平格式没有 generated_at ⇒ 时效未知 ⇒ 不假定新鲜。"""
+        cache = tmp_path / "names.json"
+        cache.write_text(json.dumps({"600000": "浦发银行"}), encoding="utf-8")
+        monkeypatch.setattr(formula_screen.stock_names, "CACHE", cache)
+        diag: dict = {}
+        assert formula_screen._load_name_map(diag) == {"600000": "浦发银行"}
+        assert diag["st_filter"] == "stale"
+        assert diag["name_map_age_days"] is None
 
     def test_total_unavailability_is_reported_not_silent(self, tmp_path, monkeypatch, capsys):
-        monkeypatch.setattr(formula_screen, "NAME_MAP_CACHE", tmp_path / "missing.json")
-        monkeypatch.setattr(formula_screen.local_tdx_data, "get_stock_name_map", lambda *a, **k: {})
+        monkeypatch.setattr(formula_screen.stock_names, "CACHE", tmp_path / "missing.json")
         diag: dict = {}
         assert formula_screen._load_name_map(diag) == {}
         assert diag["st_filter"] == "unavailable"
-        assert "ST 硬排除失效" in capsys.readouterr().err
+        assert "名称缓存不可用" in capsys.readouterr().err
 
     def test_screen_result_exposes_sources(self, monkeypatch):
         monkeypatch.setattr(formula_screen, "build_universe",
@@ -183,7 +211,85 @@ class TestNameMapCacheAndStFilter:
             call=lambda *a, **k: _ok({"600000.SH": {"UP3": ["0", "1"]}}),
             running_check=lambda: True)
         assert result["universe_source"] == "vipdoc" and result["st_filter"] == "ok"
-        assert result["name_map_source"] == "cache"
+        # name_map_source 由候选名称刷新覆盖（autouse 替身报 test_stub）
+        assert result["name_map_source"] == "test_stub"
+
+
+class TestCandidateNameRefresh:
+    """候选名称按需刷新：ST 判定真正依赖的一步，其覆盖率必须传导到 st_filter。"""
+
+    def _run(self, resolver, hits="600000.SH"):
+        return formula_screen.screen_formulas(
+            "2026-07-21", registry=_registry(n=1), stock_list=["600000", "000155"],
+            name_map={"600000": "旧名A", "000155": "旧名B"},
+            call=lambda *a, **k: _ok({hits: {"UP3": ["1"]}}),
+            running_check=lambda: True, name_resolver=resolver)
+
+    def test_refreshed_name_overwrites_stale_one(self):
+        """核心场景：一只新被 ST 的票，缓存里名字还是正常的，刷新后必须变 ST。"""
+        r = self._run(lambda codes, **kw: (
+            {"600000": "*ST浦发"},
+            {"st_filter": "ok", "requested": 1, "name_map_size": 1, "missing_count": 0}))
+        assert r["formulas"][0]["hits"][0]["name"] == "*ST浦发"
+
+    def test_partial_coverage_degrades_status(self):
+        r = self._run(lambda codes, **kw: (
+            {}, {"st_filter": "partial", "requested": 1, "name_map_size": 0,
+                 "missing_count": 1, "missing_codes": ["600000"]}))
+        assert r["st_filter"] == "partial"
+        assert r["status"] == "partial"
+        assert "st_filter_partial" in r["degraded_reason"]
+        assert r["candidate_name_coverage"]["missing_count"] == 1
+
+    def test_stale_source_degrades_status(self):
+        r = self._run(lambda codes, **kw: (
+            {"600000": "浦发银行"},
+            {"st_filter": "stale", "requested": 1, "name_map_size": 1,
+             "missing_count": 0, "name_map_age_days": 99}))
+        assert r["st_filter"] == "stale" and r["status"] == "partial"
+        assert "st_filter_stale" in r["degraded_reason"]
+
+    def test_unavailable_degrades_status(self):
+        r = self._run(lambda codes, **kw: (
+            {}, {"st_filter": "unavailable", "requested": 1, "name_map_size": 0,
+                 "missing_count": 1}))
+        assert r["st_filter"] == "unavailable" and r["status"] == "partial"
+        assert "st_filter_unavailable" in r["degraded_reason"]
+
+    def test_resolver_exception_does_not_break_screening(self):
+        """名称刷新失败不得中断初筛——它是补强，不是前置条件。"""
+        def boom(codes, **kw):
+            raise RuntimeError("network down")
+        r = self._run(boom)
+        assert r["formulas"][0]["hits"][0]["name"] == "旧名A"   # 保留 universe 阶段的名字
+
+    def test_no_candidates_skips_refresh(self):
+        calls = []
+
+        def spy(codes, **kw):
+            calls.append(list(codes))
+            return {}, {"st_filter": "ok"}
+        formula_screen.screen_formulas(
+            "2026-07-21", registry=_registry(n=1), stock_list=["600000"],
+            name_map={"600000": "浦发银行"},
+            call=lambda *a, **k: _ok({}),               # 零命中
+            running_check=lambda: True, name_resolver=spy)
+        assert calls == [], "没有候选就不该发请求"
+
+    def test_only_candidate_codes_are_queried(self):
+        """只查候选，不查全 universe——这是不触发限流的关键。"""
+        seen = []
+
+        def spy(codes, **kw):
+            seen.append(sorted(codes))
+            return {}, {"st_filter": "ok", "requested": len(codes)}
+        formula_screen.screen_formulas(
+            "2026-07-21", registry=_registry(n=1),
+            stock_list=[f"60{i:04d}" for i in range(500)],
+            name_map={},
+            call=lambda *a, **k: _ok({"600000.SH": {"UP3": ["1"]}}),
+            running_check=lambda: True, name_resolver=spy)
+        assert seen == [["600000"]], f"应只查命中的 1 只，实际 {seen}"
 
 
 def test_formulas_batched_to_avoid_tq_oom(monkeypatch):

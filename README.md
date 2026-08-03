@@ -122,7 +122,7 @@ uv run pytest tests/test_run_1445.py -q   # 单文件
 | 09:05 | `run_0905.py` | 交易日历检查 → daily_pipeline(premarket) → 日报摘要 |
 | 14:45 | `run_1445.py` | 交易日历检查 → 持仓行情采集 → 运行门控 → close_review → 尾盘建议 |
 | 17:00 | `run_1700.py` | 交易日历检查 → 持仓收盘行情 → 增量市场数据 → MFE/MAE → 资金流向 → daily_pipeline(postclose) → final_close_review → 验证 |
-| 18:00 | `run_1800.py` | 每日选股独立链（与三份报告分离）：概念标签刷新 → **板块指数刷新(sector_phase hint 用)** → 公式初筛 → 模式识别 → 共振打分 → 备选表格（含 **🧭 当日主线指纹**：候选池板块族密度榜，情境感知非进场gate）；消费 17:00 链产出的当日 sector_state/risk_decision |
+| 18:00 | `run_1800.py` | 每日选股独立链（与三份报告分离）：**股票名称表刷新(ST 硬排除依据)** → 概念标签刷新 → **板块指数刷新(sector_phase hint 用)** → 公式初筛 → 模式识别 → 共振打分 → 备选表格（含 **🧭 当日主线指纹**：候选池板块族密度榜，情境感知非进场gate）；消费 17:00 链产出的当日 sector_state/risk_decision |
 
 ### 手动执行
 
@@ -160,6 +160,7 @@ uv run python 07_tools/run_1800.py
 | 北交所行情 | 东方财富 push2 API（mootdx 不支持 BJ） | `collect_holding_quotes.py` |
 | 公告 | wenda_notice_query | cron LLM 调用 |
 | 概念/主题标签 | TQ download_file down_type=4（miscinfo） | `local_tdx/concept_tags.py` |
+| **股票名称（ST 判定唯一依据）** | 东财 push2 ulist（多域名轮询，按需批量查候选）→ TQ-Local get_stock_info → 本地缓存 | `local_tdx/stock_names.py` |
 | 新闻 | RSS | `rss_collector.py` |
 | TQ 选股公式批量筛选 | TQ-Local（formula_process_mul_xg，需 TdxW 运行） | `screening/formula_screen.py` |
 

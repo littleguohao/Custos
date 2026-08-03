@@ -1,0 +1,325 @@
+# -*- coding: utf-8 -*-
+"""stock_names 回归测试：ST 判定的数据基础。
+
+名称是硬排除 ST 的唯一依据（enrich 用 `"ST" in name.upper()`），仓库里没有别的 ST
+判据（tq_sector 的板块分类不含风险警示板）。所以这张表的**可用性与新鲜度**直接决定
+ST 股会不会进候选池。
+
+原实现的隐蔽失效：只有 mootdx 一个在线源且它 2026-07 起持续失败 ⇒ 系统长期靠一份手动
+生成、永不更新、读取时不校验时效的缓存在跑 ⇒ 缓存非空就报 st_filter=ok，而旧缓存里
+新被 ST 的票名字还是正常的，照样通过硬排除。
+"""
+from __future__ import annotations
+
+import json
+from datetime import timedelta
+
+import pytest
+
+import stock_names as sn
+from paths import cn_today
+
+# conftest 有 autouse fixture 把网络层函数替换成"发请求即断言失败"的哨兵。本文件要测
+# 这些函数本身，所以在模块导入期（fixture 生效之前）先抓住真实实现。
+_REAL_FETCH_NAMES = sn.fetch_names_for
+_REAL_CLIST = sn.fetch_all_from_clist
+_REAL_RESOLVE = sn.resolve_names_for   # conftest 连这个也 stub 了(它是 formula_screen 的入口)
+
+
+class FakeResp:
+    def __init__(self, payload, status=200):
+        self._payload = payload
+        self.status_code = status
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+    def json(self):
+        return self._payload
+
+
+class FakeSession:
+    """按 host 决定行为：可指定哪些 host 抛异常，用于验证多域名轮询。"""
+
+    def __init__(self, rows_by_batch=None, dead_hosts=(), total=None):
+        self.rows_by_batch = list(rows_by_batch or [])
+        self.dead_hosts = set(dead_hosts)
+        self.total = total
+        self.calls = []
+
+    def get(self, url, params=None, timeout=None, proxies=None):
+        host = url.split("//", 1)[1].split("/", 1)[0]
+        self.calls.append((host, dict(params or {})))
+        if host in self.dead_hosts:
+            raise ConnectionError("Remote end closed connection without response")
+        rows = self.rows_by_batch.pop(0) if self.rows_by_batch else []
+        data = {"diff": rows}
+        if self.total is not None:
+            data["total"] = self.total
+        return FakeResp({"data": data})
+
+
+def _row(code, name):
+    return {"f12": code, "f14": name}
+
+
+@pytest.fixture(autouse=True)
+def _clean_host_cache():
+    sn.reset_host_cache()
+    yield
+    sn.reset_host_cache()
+
+
+@pytest.fixture(autouse=True)
+def _no_real_sleep(monkeypatch):
+    """跳过限速/退避的真实等待。
+
+    fetch_names_for 每批之间 sleep 0.6s，_em_get 每次重试退避 1.2s×n。多域名轮询用例
+    会真的等 3~4 秒，整个文件因此要跑 8.5s——那是白等，不是在验证任何行为。
+    """
+    monkeypatch.setattr(sn.time, "sleep", lambda *_a, **_k: None)
+
+
+class TestSecidMapping:
+    """secid 前缀必须复用 code_utils.market_of —— 手写"9 开头即沪市"会误判北交所。"""
+
+    @pytest.mark.parametrize("code,expect", [
+        ("600000", "1.600000"),     # 沪主板
+        ("688111", "1.688111"),     # 科创板
+        ("900001", "1.900001"),     # 沪 B
+        ("000001", "0.000001"),     # 深主板
+        ("300750", "0.300750"),     # 创业板
+        ("920819", "0.920819"),     # 北交所新代码段 —— 首字符也是 9，最易误判
+        ("830799", "0.830799"),     # 北交所旧代码段
+        ("430047", "0.430047"),     # 北交所旧代码段
+    ])
+    def test_secid(self, code, expect):
+        assert sn._secid(code) == expect
+
+    def test_bj_920_not_treated_as_shanghai(self):
+        """留证：这是实测踩到的 bug —— 1.920819 在东财查不到，表现为该票 ST 状态未知。"""
+        assert sn._secid("920819").startswith("0."), "920xxx 是北交所，不是沪 B"
+
+    def test_accepts_suffixed_code(self):
+        assert sn._secid("600000.SH") == "1.600000"
+
+
+class TestFetchNamesFor:
+    """ulist 批量：只查传入的代码，按 batch 分批。"""
+
+    def test_single_batch(self):
+        s = FakeSession([[_row("600000", "浦发银行"), _row("000005", "ST星源")]])
+        got = _REAL_FETCH_NAMES(["600000", "000005"], session=s)
+        assert got == {"600000": "浦发银行", "000005": "ST星源"}
+        assert len(s.calls) == 1
+
+    def test_splits_into_batches(self):
+        codes = [f"60{i:04d}" for i in range(450)]
+        s = FakeSession([[_row(c, f"股{c}")] for c in codes[:3]] + [[], []])
+        _REAL_FETCH_NAMES(codes, session=s, batch=200)
+        assert len(s.calls) == 3, "450 只 / batch 200 → 3 批"
+
+    def test_only_requested_codes_queried(self):
+        s = FakeSession([[_row("600000", "浦发银行")]])
+        _REAL_FETCH_NAMES(["600000"], session=s)
+        assert s.calls[0][1]["secids"] == "1.600000"
+
+    def test_dedupes_and_normalizes(self):
+        s = FakeSession([[_row("600000", "浦发银行")]])
+        _REAL_FETCH_NAMES(["600000", "600000.SH", "6000"], session=s)
+        secids = s.calls[0][1]["secids"].split(",")
+        assert sorted(secids) == ["0.006000", "1.600000"]   # 6000→006000 属深市
+
+    def test_empty_request_no_call(self):
+        s = FakeSession()
+        assert _REAL_FETCH_NAMES([], session=s) == {}
+        assert s.calls == []
+
+    def test_missing_codes_simply_absent(self):
+        """东财没有的标的不会出现在结果里——调用方据此算覆盖率，不得当成"名称为空"。"""
+        s = FakeSession([[_row("600000", "浦发银行")]])
+        got = _REAL_FETCH_NAMES(["600000", "999999"], session=s)
+        assert "999999" not in got
+
+    def test_no_data_section_raises(self):
+        class S(FakeSession):
+            def get(self, url, params=None, timeout=None, proxies=None):
+                return FakeResp({"data": None})
+        with pytest.raises(sn.NameFetchIncomplete):
+            _REAL_FETCH_NAMES(["600000"], session=S())
+
+
+class TestHostRotation:
+    """单域名故障不该让整个数据源失效（实测 push2 全挂而 push2delay 可用）。"""
+
+    def test_falls_over_to_next_host(self):
+        s = FakeSession([[_row("600000", "浦发银行")]],
+                        dead_hosts={"push2delay.eastmoney.com"})
+        got = _REAL_FETCH_NAMES(["600000"], session=s)
+        assert got == {"600000": "浦发银行"}
+        assert s.calls[0][0] == "push2delay.eastmoney.com"      # 先试默认首选
+        assert s.calls[-1][0] != "push2delay.eastmoney.com"     # 失败后换域名
+
+    def test_all_hosts_dead_raises(self):
+        s = FakeSession(dead_hosts=set(sn.EM_HOSTS))
+        with pytest.raises(sn.NameFetchIncomplete, match="全部域名不可用"):
+            _REAL_FETCH_NAMES(["600000"], session=s)
+
+    def test_working_host_is_remembered(self):
+        s = FakeSession([[_row("600000", "浦发银行")], [_row("000001", "平安银行")]],
+                        dead_hosts={"push2delay.eastmoney.com"})
+        _REAL_FETCH_NAMES(["600000"], session=s)
+        first_ok = sn._working_host
+        assert first_ok and first_ok != "push2delay.eastmoney.com"
+        s.calls.clear()
+        _REAL_FETCH_NAMES(["000001"], session=s)
+        assert s.calls[0][0] == first_ok, "应直接用上次成功的域名，不再重试已知不通的"
+
+
+class TestCache:
+    """缓存必须带 generated_at，且读取时判时效。"""
+
+    def test_save_then_load_roundtrip(self, tmp_path):
+        p = tmp_path / "names.json"
+        sn.save_cache({"600000": "浦发银行"}, "eastmoney_ulist", p)
+        names, meta = sn.load_cache(p)
+        assert names == {"600000": "浦发银行"}
+        assert meta["available"] is True and meta["stale"] is False
+        assert meta["source"] == "eastmoney_ulist" and meta["age_days"] == 0
+
+    def test_save_refuses_empty(self, tmp_path):
+        with pytest.raises(ValueError, match="empty name map"):
+            sn.save_cache({}, "x", tmp_path / "n.json")
+
+    def test_save_is_atomic(self, tmp_path):
+        p = tmp_path / "names.json"
+        sn.save_cache({"600000": "浦发银行"}, "x", p)
+        assert not list(tmp_path.glob("*.tmp"))
+
+    def test_stale_when_old(self, tmp_path):
+        p = tmp_path / "names.json"
+        old = (cn_today() - timedelta(days=sn.NAME_MAP_MAX_AGE_DAYS + 1)).isoformat()
+        p.write_text(json.dumps({"generated_at": old, "names": {"600000": "浦发银行"}}),
+                     encoding="utf-8")
+        _, meta = sn.load_cache(p)
+        assert meta["stale"] is True and meta["age_days"] > sn.NAME_MAP_MAX_AGE_DAYS
+
+    def test_boundary_not_stale(self, tmp_path):
+        p = tmp_path / "names.json"
+        at = (cn_today() - timedelta(days=sn.NAME_MAP_MAX_AGE_DAYS)).isoformat()
+        p.write_text(json.dumps({"generated_at": at, "names": {"600000": "浦发银行"}}),
+                     encoding="utf-8")
+        _, meta = sn.load_cache(p)
+        assert meta["stale"] is False, "恰好等于上限不算陈旧"
+
+    def test_legacy_flat_format_is_stale(self, tmp_path):
+        """旧扁平格式无 generated_at ⇒ 时效未知 ⇒ 不假定新鲜。"""
+        p = tmp_path / "names.json"
+        p.write_text(json.dumps({"600000": "浦发银行"}), encoding="utf-8")
+        names, meta = sn.load_cache(p)
+        assert names == {"600000": "浦发银行"}
+        assert meta["stale"] is True and meta["age_days"] is None
+        assert meta["source"] == "legacy_cache"
+
+    def test_missing_file(self, tmp_path):
+        names, meta = sn.load_cache(tmp_path / "nope.json")
+        assert names == {} and meta["available"] is False
+        assert meta["reason"].startswith("cache_unreadable")
+
+    def test_malformed_file(self, tmp_path):
+        p = tmp_path / "names.json"
+        p.write_text("not json", encoding="utf-8")
+        names, meta = sn.load_cache(p)
+        assert names == {} and meta["stale"] is True
+
+    def test_empty_names_treated_unavailable(self, tmp_path):
+        p = tmp_path / "names.json"
+        p.write_text(json.dumps({"generated_at": cn_today().isoformat(), "names": {}}),
+                     encoding="utf-8")
+        names, meta = sn.load_cache(p)
+        assert names == {} and meta["available"] is False
+
+
+class TestResolveNamesFor:
+    """st_filter 四态必须如实反映 ST 判定可信度——调用方据此决定能否声称已排除 ST。"""
+
+    def _patch_sources(self, monkeypatch, *, em=None, tq=None, cache=None,
+                       cache_meta=None):
+        monkeypatch.setattr(sn, "fetch_names_for",
+                            (lambda codes, **kw: em) if em is not None
+                            else (lambda codes, **kw: (_ for _ in ()).throw(
+                                sn.NameFetchIncomplete("down"))))
+        monkeypatch.setattr(sn, "fetch_from_tq", lambda codes=None, **kw: tq or {})
+        monkeypatch.setattr(sn, "load_cache",
+                            lambda path=None: (cache or {}, cache_meta or {}))
+
+    def test_ok_when_all_resolved(self, monkeypatch):
+        self._patch_sources(monkeypatch, em={"600000": "浦发银行", "000005": "ST星源"})
+        names, diag = _REAL_RESOLVE(["600000", "000005"])
+        assert diag["st_filter"] == "ok" and diag["missing_count"] == 0
+        assert names["000005"] == "ST星源"
+
+    def test_partial_when_some_missing(self, monkeypatch, capsys):
+        self._patch_sources(monkeypatch, em={"600000": "浦发银行"})
+        _, diag = _REAL_RESOLVE(["600000", "999999"])
+        assert diag["st_filter"] == "partial"
+        assert diag["missing_codes"] == ["999999"]
+        assert "ST 状态未知" in capsys.readouterr().err
+
+    def test_unavailable_when_nothing_resolved(self, monkeypatch, capsys):
+        self._patch_sources(monkeypatch)
+        names, diag = _REAL_RESOLVE(["600000"])
+        assert names == {} and diag["st_filter"] == "unavailable"
+        assert "ST 硬排除失效" in capsys.readouterr().err
+
+    def test_falls_back_to_tq(self, monkeypatch):
+        self._patch_sources(monkeypatch, tq={"600000": "浦发银行"})
+        names, diag = _REAL_RESOLVE(["600000"])
+        assert names == {"600000": "浦发银行"}
+        assert "tq_local" in diag["name_map_source"]
+
+    def test_stale_when_only_stale_cache(self, monkeypatch, capsys):
+        self._patch_sources(monkeypatch, cache={"600000": "浦发银行"},
+                            cache_meta={"available": True, "stale": True,
+                                        "age_days": 99, "generated_at": "2026-04-01"})
+        names, diag = _REAL_RESOLVE(["600000"])
+        assert names == {"600000": "浦发银行"}
+        assert diag["st_filter"] == "stale" and diag["name_map_age_days"] == 99
+        assert "新被 ST 的票可能不在表内" in capsys.readouterr().err
+
+    def test_fresh_cache_is_ok(self, monkeypatch):
+        self._patch_sources(monkeypatch, cache={"600000": "浦发银行"},
+                            cache_meta={"available": True, "stale": False, "age_days": 2})
+        _, diag = _REAL_RESOLVE(["600000"])
+        assert diag["st_filter"] == "ok"
+
+    def test_empty_request_is_ok(self, monkeypatch):
+        self._patch_sources(monkeypatch)
+        names, diag = _REAL_RESOLVE([])
+        assert names == {} and diag["st_filter"] == "ok"
+
+    def test_sources_are_combined(self, monkeypatch):
+        """东财缺的由 TQ 补，TQ 也缺的由缓存补。"""
+        self._patch_sources(monkeypatch, em={"600000": "浦发银行"},
+                            tq={"000005": "ST星源"},
+                            cache={"300750": "宁德时代"},
+                            cache_meta={"available": True, "stale": False, "age_days": 1})
+        names, diag = _REAL_RESOLVE(["600000", "000005", "300750"])
+        assert len(names) == 3 and diag["st_filter"] == "ok"
+        assert "eastmoney_ulist" in diag["name_map_source"]
+
+
+class TestClistBestEffort:
+    """clist 全市场受限流，取到多少算多少；一条都没取到才抛。"""
+
+    def test_partial_pages_kept(self):
+        s = FakeSession([[_row("600000", "浦发银行")], [_row("000001", "平安银行")]],
+                        total=5888)
+        got = _REAL_CLIST(session=s)
+        assert len(got) == 2, "被限流断连后保留已取部分"
+
+    def test_nothing_fetched_raises(self):
+        s = FakeSession([[]], total=5888)
+        with pytest.raises(sn.NameFetchIncomplete, match="一条未取到"):
+            _REAL_CLIST(session=s)

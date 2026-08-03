@@ -118,7 +118,10 @@ def main() -> None:
 
     # 牛股命中对比
     print("\n=== 各自 Top10(收益) ===")
-    names = json.loads((BASE / "01_data" / "market" / "stock_name_map.json").read_text(encoding="utf-8"))
+    # 走统一 loader:缓存已改为带 generated_at 的新格式,直接 json.loads 会拿到
+    # {"names": {...}} 这层壳而不是名称表本身(新旧格式兼容见 stock_names.load_cache)。
+    import stock_names
+    names, _meta = stock_names.load_cache()
     for name in SETS:
         tops = [(f"{t['code']} {names.get(t['code'], '')[:6]}({t['date']},{t['ret']*100:+.0f}%)" )
                 for t in best[name]]
