@@ -472,9 +472,9 @@ uv run python 07_tools/screening/backtest_factors.py --trade-sim --scorer b1_dua
 
 ```bash
 # 换 scorer（否则 A/B 档无样本）+ 扩样本 + 随机抽样（避免"前 100 个代码"的选择偏差）
-uv run python 07_tools/screening/backtest_factors.py --scorer b1_dual --entry-filter weekly_j_low            --sample-n 1000
-uv run python 07_tools/screening/backtest_factors.py --scorer b1_dual --entry-filter j_low_weekly_resonance  --sample-n 1000
-uv run python 07_tools/screening/backtest_factors.py --scorer b1_dual --entry-filter j_low_qsx_weekly        --sample-n 1000
+uv run python 07_tools/screening/backtest_factors.py --scorer b1_dual --entry-filter weekly_j_low            --universe-local --universe-sample 1000
+uv run python 07_tools/screening/backtest_factors.py --scorer b1_dual --entry-filter j_low_weekly_resonance  --universe-local --universe-sample 1000
+uv run python 07_tools/screening/backtest_factors.py --scorer b1_dual --entry-filter j_low_qsx_weekly        --universe-local --universe-sample 1000
 ```
 
 ---
@@ -525,14 +525,14 @@ uv run python 07_tools/screening/backtest_factors.py --scorer b1_dual --entry-fi
 
 ```bash
 # B2 作为验证信号:B1 后是否出现 B2 → 把 B1 分成"启动了"和"没启动"两组
-uv run python 07_tools/screening/backtest_factors.py --entry-filter j_low --scorer b2 --horizons 5,20,60 --sample-n 1000
-uv run python 07_tools/screening/backtest_factors.py --entry-filter b2                --horizons 5,20,60 --sample-n 1000
+uv run python 07_tools/screening/backtest_factors.py --entry-filter j_low --scorer b2 --horizons 5,20,60 --universe-local --universe-sample 1000
+uv run python 07_tools/screening/backtest_factors.py --entry-filter b2                --horizons 5,20,60 --universe-local --universe-sample 1000
 
 # 底部异动:宽/严口径 + 异动后的 B1
-uv run python 07_tools/screening/backtest_factors.py --entry-filter bottom_surge         --sample-n 1000
-uv run python 07_tools/screening/backtest_factors.py --entry-filter bottom_surge_strict  --sample-n 1000
-uv run python 07_tools/screening/backtest_factors.py --entry-filter surge_then_b1        --sample-n 1000
-uv run python 07_tools/screening/backtest_factors.py --entry-filter surge_strict_then_b1 --sample-n 1000
+uv run python 07_tools/screening/backtest_factors.py --entry-filter bottom_surge         --universe-local --universe-sample 1000
+uv run python 07_tools/screening/backtest_factors.py --entry-filter bottom_surge_strict  --universe-local --universe-sample 1000
+uv run python 07_tools/screening/backtest_factors.py --entry-filter surge_then_b1        --universe-local --universe-sample 1000
+uv run python 07_tools/screening/backtest_factors.py --entry-filter surge_strict_then_b1 --universe-local --universe-sample 1000
 ```
 
 ### 已明确不做
