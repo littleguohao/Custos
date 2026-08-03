@@ -25,7 +25,7 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import PLANS, STOCK_POOL_DIR  # noqa: E402
+from paths import PLANS, QUALITY_DIR, STOCK_POOL_DIR  # noqa: E402
 from runtime_guards import normalize_regime  # noqa: E402
 
 PATTERN_LABELS = {
@@ -88,7 +88,59 @@ def _mainline_fingerprint_section(candidates: list[dict]) -> list[str]:
     return out
 
 
-def render_table(pool: dict, date: str) -> str:
+def _load_json(path, default):
+    """读 JSON，缺失/损坏返回 default（门控提示是补强信息，不得让渲染失败）。"""
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return default
+
+
+def _gate_advisory_section(date: str, gate: Optional[dict] = None) -> list[str]:
+    """运行门控**建议**区块（独立于选股结果）。
+
+    设计边界（2026-08-03 定）：18:00 是纯粹的选股流程，门控**不得影响选股结果**——
+    不改 bucket、不改 next_step、不改分层、不筛掉任何候选，只在表里单独给出建议。
+
+    这样定的三个理由：
+      ① 选股结果保持与回测同口径。若门控改写分层，live 选出的候选就无法与回测结果
+         对照，"策略本身选出了什么"变得不可回溯。
+      ② 职责分离：选股逻辑不混入运行时数据质量判断。
+      ③ 可复现：同一天重跑，候选表不因数据新鲜度而变。
+
+    门控通过时不占版面（返回空），只在有受限项时提示。
+    """
+    if gate is None:
+        gate = _load_json(QUALITY_DIR / f"{date}_runtime_gate.json", {})
+    if not isinstance(gate, dict) or not gate:
+        return ["> ⚠️ 运行门控结论缺失（未跑 runtime_gate）：无法评估当日数据可信度，"
+                "本表候选仍为策略选股结果，请自行核实行情与 0AMV 新鲜度。", ""]
+    mq = gate.get("market_quality") or {}
+    pg = gate.get("position_gate") or {}
+    status = mq.get("status")
+    limitations = list(mq.get("limitations") or [])
+    if status in {"pass"} and not limitations:
+        return []                              # 数据齐全，不占版面
+
+    lines = ["## 🚦 数据可信度提示（门控建议·不影响上方选股结果）", ""]
+    lines.append(f"> 市场数据质量：**{status or '未知'}**"
+                 f"（score={mq.get('quality_score', 'NA')}）"
+                 f"；0AMV 新鲜：**{'是' if mq.get('amv_ok') else '否'}**")
+    if not mq.get("amv_ok"):
+        lines.append("> ⚠️ **0AMV 不新鲜 ⇒ 上方 0AMV/市场许可一栏的 regime 值可能来自过期数据**，"
+                     "据它判断的「空头不买」「待0AMV做多」分档相应不可全信。")
+    if limitations:
+        lines.append("> 受限项：" + "；".join(str(x) for x in limitations))
+    if pg and not pg.get("allow_position_increase"):
+        reason = "；".join(str(x) for x in (pg.get("limitations") or [])) or "门控未授权"
+        lines.append(f"> 加仓授权：**未授予**（{reason}）")
+    lines.append("> 本区块只作提示：候选池的分层、next_step 与信号一览均为选股链原始输出，"
+                 "未被门控改写；执行力度请结合本提示自行裁量。")
+    lines.append("")
+    return lines
+
+
+def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
     lines: list[str] = [
         f"# 公式选股备选池｜{date}",
         "",
@@ -113,6 +165,9 @@ def render_table(pool: dict, date: str) -> str:
                           key=_watch_key, reverse=True)
     # 与 score_candidates 共用同一套归一,避免"报告说空头不买、A池却仍生成买入计划"的自相矛盾
     is_bear = normalize_regime(pool.get("amv_state")) == "空头"
+    # 🚦 门控建议:独立区块,置于信号一览之前(先知道数据可不可信,再看信号)。
+    # **不改任何分层/next_step** —— 18:00 是纯粹选股流程,详见 _gate_advisory_section。
+    lines += _gate_advisory_section(date, gate)
     # ⭐ 置顶:今日信号一览——可买/观察价位/待0AMV做多 三档,一眼看清"今天哪些是真信号"
     _buy = [c for c in watch if (c.get("resonance_4leg") or {}).get("bull_candidate")
             and c.get("bucket") == "A"]

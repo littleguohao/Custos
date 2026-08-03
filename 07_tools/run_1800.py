@@ -113,7 +113,19 @@ def main(argv=None) -> int:
         print(f"今日休市，每日选股不运行（{target}）")
         return 0
 
-    # 2. Refresh stock name cache —— ST 硬排除的唯一依据，必须滚动更新。
+    # 2. Runtime gate —— **只落盘，不阻断**。
+    #    18:00 是纯粹的选股流程，门控不得影响选股结果（不改 bucket/next_step/分层），
+    #    只由 candidate_table 在备选表里单独给出「数据可信度提示」区块。这样选股结果
+    #    保持与回测同口径、可复现，"策略本身选出了什么"始终可回溯。
+    #    不传任何 --require-* 开关：非交易日已在上面的 calendar 检查里返回，
+    #    质量/持仓 blocked 不该让选股链失败（失败等于连诊断产物都没有）。
+    r = _run_stage(["uv", "run", "python", str(TOOLS / "runtime_gate.py"),
+                    "--date", target, "--data-session", "postclose"],
+                   "runtime_gate", note="只落盘供候选表引用，不阻断选股")
+    if not r["ok"]:
+        print(f"[WARN] runtime_gate failed: {r['out'][:200]}")
+
+    # 3. Refresh stock name cache —— ST 硬排除的唯一依据，必须滚动更新。
     #    此前只有 mootdx 一个在线源且它 2026-07 起持续失败，缓存靠手动跑脚本、无 cron、
     #    读取时也不校验时效 ⇒ 一份永不更新的名称表长期在用，新被 ST 的票名字还是正常的，
     #    照样通过硬排除，而 st_filter 仍报 ok（审计 B5 的延伸）。
@@ -126,7 +138,7 @@ def main(argv=None) -> int:
     else:
         print(f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'stock names refreshed'}")
 
-    # 3. Refresh concept tags (miscinfo) so sector mapping uses the accurate source
+    # 4. Refresh concept tags (miscinfo) so sector mapping uses the accurate source
     r = _run_stage(["uv", "run", "python", str(TOOLS / "local_tdx" / "concept_tags.py"),
                     "--date", target], "refresh_concept_tags", note="best-effort，失败不中断")
     if not r["ok"]:
@@ -134,7 +146,7 @@ def main(argv=None) -> int:
     else:
         print(f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'concept tags refreshed'}")
 
-    # 2b. Refresh 板块指数缓存(供 enrich 的 sector_phase hint 用当日相位;best-effort,需 TdxW)。
+    # 4b. Refresh 板块指数缓存(供 enrich 的 sector_phase hint 用当日相位;best-effort,需 TdxW)。
     #     **增量合并**:只拉各板块缓存末日期前 30 天起的新数据并 merge 进已有 CSV。
     #     此前每天全量重拉 20180101 起的 400+ 板块 → 600s stage 超时;
     #     且 --period day 是错的周期串(TQ 要 1d,见 TQ_INTERFACE_PROBE),现由脚本自动探测。
@@ -152,7 +164,7 @@ def main(argv=None) -> int:
     else:
         print(f"[OK] {tail or 'sector index refreshed'}")
 
-    # 3. Screening chain (each stage propagates degradation downstream)
+    # 5. Screening chain (each stage propagates degradation downstream)
     degraded = []
     for script, name in [
         ("formula_screen.py", "screening_formula_screen"),
@@ -171,7 +183,7 @@ def main(argv=None) -> int:
                 degraded.append(name)
             print(f"[OK] {r['out'].splitlines()[-1] if r['out'] else name}")
 
-    # 4. Digest of the candidate table (may be absent when the chain degraded early)
+    # 6. Digest of the candidate table (may be absent when the chain degraded early)
     table_path = TABLE_DIR / target / f"{target}_candidate_table.md"
     if table_path.exists():
         stages_log.append(_log_stage("candidate_digest", {"ok": True, "returncode": 0, "timeout": False},

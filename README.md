@@ -122,7 +122,7 @@ uv run pytest tests/test_run_1445.py -q   # 单文件
 | 09:05 | `run_0905.py` | 交易日历检查 → daily_pipeline(premarket) → 日报摘要 |
 | 14:45 | `run_1445.py` | 交易日历检查 → 持仓行情采集 → 运行门控 → close_review → 尾盘建议 |
 | 17:00 | `run_1700.py` | 交易日历检查 → 持仓收盘行情 → 增量市场数据 → MFE/MAE → 资金流向 → daily_pipeline(postclose) → final_close_review → 验证 |
-| 18:00 | `run_1800.py` | 每日选股独立链（与三份报告分离）：**股票名称表刷新(ST 硬排除依据)** → 概念标签刷新 → **板块指数刷新(sector_phase hint 用)** → 公式初筛 → 模式识别 → 共振打分 → 备选表格（含 **🧭 当日主线指纹**：候选池板块族密度榜，情境感知非进场gate）；消费 17:00 链产出的当日 sector_state/risk_decision |
+| 18:00 | `run_1800.py` | 每日选股独立链（与三份报告分离）：**门控落盘(只建议不阻断)** → **股票名称表刷新(ST 硬排除依据)** → 概念标签刷新 → **板块指数刷新(sector_phase hint 用)** → 公式初筛 → 模式识别 → 共振打分 → 备选表格（含 **🧭 当日主线指纹**：候选池板块族密度榜，情境感知非进场gate）；消费 17:00 链产出的当日 sector_state/risk_decision |
 
 ### 手动执行
 
@@ -210,6 +210,7 @@ uv run python 07_tools/run_1800.py
 - **17:00 盘后链**：门控结论一律落盘并记进 stage note（含 stale 明细），但**默认不阻断**。需要硬失败时给 `daily_pipeline --strict-quality-gate`（仅对 postclose 生效，blocked → exit 4）。⚠️ 2026-07-30 曾让 postclose 默认带 `--require-quality`，同时又收紧了 `as_of` 陈旧判定，两者叠加导致 17:00 盘后复盘直接失败——硬闸须等新的 stale 校准跑过若干交易日、确认 blocked 只在真正大面积缺数时出现，再显式开启。
 - **session 期望数据日**：陈旧判定按 session 比对——preclose(08:50/09:05/14:45)期望 T-1（当日 K 线尚不存在，as_of=T-1 不算陈旧），postclose(17:00/1800)期望当日。`daily_pipeline` 已按 `--session-type` 自动传 `--data-session`；评分器(market_timing_scorer)按 section `as_of` 与评分日比对，T-1 数据一律按中性处理不给满分。
 - **退出码可消费**：门控退出码会穿透 `daily_pipeline` 进程本身（非交易日 3 / 质量 blocked 4 / 持仓 blocked 5）,cron 可直接按码判定。
+- **18:00 选股链只落盘、不阻断**：18:00 是纯粹的选股流程，门控**不得影响选股结果**（不改 bucket / next_step / 分层、不筛候选），只由 `candidate_table` 在备选表里给出独立的「🚦 数据可信度提示」区块。这样选股结果与回测同口径且可复现——门控若改写分层，live 候选就无法与回测对照，「策略本身选出了什么」将不可回溯。
 - **09:05 / 14:45 不启用**：0AMV 与市场宽度本就要等收盘，盘中 blocked 属正常；14:45 把门控结论写进 `06_logs/{date}_1445_run_log.json`（`_gate_note`）留痕并降低报告内的权限文案。
 - **投递侧**：`feishu_report_publisher.py --require-gate` 在投递前复核门控，非交易日或 `market_quality=blocked` 时拒发并 `exit 4`。
 - **08:50 采集**：任一 stage 失败 → run log 写 `status="degraded"` 并列出失败项；09:05 按 **discovery stage 逐项 ok** 决定是否复用（`overseas`/`rss_collect`/`rss_filter` 任一失败即重采），不再只看 `status=="completed"`。
