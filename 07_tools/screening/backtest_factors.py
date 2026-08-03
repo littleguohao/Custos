@@ -519,6 +519,78 @@ def _sc_kdj_j(df: pd.DataFrame, code: str):
 
 SCORERS["kdj_j"] = _sc_kdj_j
 
+# ---- B1 双轴组合（长期结构 × 短期回调）+ 突破回踩型 B1 ----
+# owner 2026-08-03 裁定:B1 是单纯回调买入,故 s_shape 的突破式分项(pivot/pocket_pivot/
+# compression)不进技术轴;轴1 软加权。依据 other/good_b1.pptx 九例形态统计,详见
+# b1_dual_factor 模块 docstring。**先回测验证再谈接入选股链。**
+try:
+    from b1_dual_factor import (compute_b1_dual, compute_long_structure,
+                                detect_breakout_pullback_b1)
+except Exception:  # noqa: BLE001 —— 缺依赖时不阻断其它 scorer
+    compute_b1_dual = None
+
+
+def _sc_b1_dual(df: pd.DataFrame, code: str):
+    """双轴组合分:W_STRUCT×长期结构 + W_REVERSAL×短期回调。"""
+    if compute_b1_dual is None:
+        return None
+    r = compute_b1_dual(df, code)
+    if not r.get("available"):
+        return None
+    return {"score": r["score"], "suggestion": r["suggestion"],
+            "aux": {"long_structure": r["long_structure"],
+                    "short_reversal": r["short_reversal"],
+                    "qsx_gt_dks": r["qsx_gt_dks"]},
+            "components": {"struct": r["long_structure"], "reversal": r["short_reversal"]}}
+
+
+def _sc_long_structure(df: pd.DataFrame, code: str):
+    """消融用:只有轴1(长期结构)。"""
+    if compute_b1_dual is None:
+        return None
+    r = compute_long_structure(df)
+    if not r.get("available"):
+        return None
+    return {"score": r["score"], "suggestion": "可买" if r["score"] >= 70 else "不买",
+            "aux": {"qsx_gt_dks": r["qsx_gt_dks"]}, "components": r["components"]}
+
+
+if compute_b1_dual is not None:
+    SCORERS["b1_dual"] = _sc_b1_dual
+    SCORERS["long_structure"] = _sc_long_structure
+
+
+def qsx_gt_dks_gate(df_slice: pd.DataFrame) -> bool:
+    """长期多头结构:QSX>DKS(good_b1 8/9)。绝不 raise。"""
+    if compute_b1_dual is None:
+        return False
+    try:
+        r = compute_long_structure(df_slice)
+        return bool(r.get("available") and r.get("qsx_gt_dks"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def j_low_qsx_gt_dks_gate(df_slice: pd.DataFrame) -> bool:
+    """B1 核心组合:J<13 且 QSX>DKS —— "长期向上的票上买短期回调点"。"""
+    return bool(j_low_gate(df_slice) and qsx_gt_dks_gate(df_slice))
+
+
+def breakout_pullback_b1_gate(df_slice: pd.DataFrame) -> bool:
+    """突破回踩型 B1:平台突破回踩不破 + J<13 + 收盘不低于平台高。"""
+    if compute_b1_dual is None:
+        return False
+    try:
+        return bool(detect_breakout_pullback_b1(df_slice).get("hit"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+if compute_b1_dual is not None:
+    ENTRY_GATES["qsx_gt_dks"] = qsx_gt_dks_gate
+    ENTRY_GATES["j_low_qsx_gt_dks"] = j_low_qsx_gt_dks_gate
+    ENTRY_GATES["breakout_pullback_b1"] = breakout_pullback_b1_gate
+
 
 def sample_codes(all_codes: list[str], n: int, seed: int = 0) -> list[str]:
     """从全 A 代码列表随机抽 N 只（带 seed 可复现），用于代表性样本校准。

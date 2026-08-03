@@ -296,3 +296,98 @@ edge 来自**择时 + 分散 + 交易管理**，不是选股。
 - 以上全部为**研究/回测结论**，**未改动** `b1_swing_strategy.md`、`b1_holding_state.py`、screening 分层等**任何线上买入逻辑**。
 - `b1_pullback` 等描述性因子**不驱动分层**、不作买入依据。
 - 任何上线前需：样本外稳健 + 去偏（或明确接受偏差）+ 用户确认。
+
+---
+
+## 待验证假设 H1：B1 双轴（长期结构 × 短期回调）—— 2026-08-03 提出
+
+**这是假设，不是结论。** 尚未跑回测，不得据此改选股链。
+
+### 依据：`other/good_b1.pptx` 九例形态统计（末根读数）
+
+| 特征 | 命中 | 说明 |
+|---|---|---|
+| `QSX > DKS`（知行短期趋势线 > 多空线） | 8/9 | 图上参数 (14,28,57,114)，与 `zhixing_state` 同口径 |
+| `J ≤ 13` | 8/9 | 多个为负（-4.78 / -10.85 / -13.42），J 越负越典型 |
+| `DIF > 0` 且 `MACD 柱 < 0` | 7/9 | 中期趋势未破零轴 + 正在回调 |
+| 曾有放量启动段 | 9/9（图形） | 单日 ≥5% + 量 ≥1.5×MA20 |
+| 回调段缩量 / 回踩贴 QSX·DKS | 多数 | MA5<MA10；回调终点在趋势线附近 |
+
+唯一异类 image6（野马电池，J=100.97、QSX<DKS）经 owner 确认：**买点在图上竖线处（J<13）**，
+右上角数值是末根 K 线的，不代表买点状态。
+
+**副产品：已上线的 `j_low_dif_pos` gate 得到独立验证。** 它当初依据"半程一致性"采纳，
+而该指标被审计 E1 证明失效（按股票顺序切分而非日期）；现在 good_b1 的 7/9 给了它形态层面
+的支持，不必再标为待重验。
+
+### 假设内容
+
+技术轴从"单轴 s_shape（买强/突破）"改为**双轴软加权**：
+
+```
+轴1 长期结构 0-100（底子好）= QSX>DKS 30 + 均线多头 20 + 上方套牢少 15
+                              + 量能中枢上移 15 + 曾放量启动 20
+轴2 短期回调 0-100（买点到）= compute_s_reversal（超跌 40 + 缩量企稳 30 + 反转确认 30）
+双轴 = 0.40×轴1 + 0.60×轴2      # B1 是回调买入，买点轴权重更高
+```
+
+owner 裁定三点：① B1 是**单纯回调买入**，不吃突破 ⇒ s_shape 的 `pivot`/`pocket_pivot`/
+`compression` 三项（占 50 分）**移出**技术轴；② 轴1 **软加权**不做硬门槛（熊市里
+`QSX>DKS` 会大面积不满足，硬门槛使候选枯竭）；③ 出货五式作否决层，不混进打分。
+
+### 移出突破式分项的量化依据（合成四形态实测）
+
+| 形态 | J | 轴1 | 轴2 | 双轴 | 旧 S** |
+|---|---|---|---|---|---|
+| D 突破回踩型（买点） | -14.4 | 80.5 | 52.0 | **63.4** ① | 24.5 ③ |
+| A good_b1 型（买点） | -8.2 | 58.1 | 42.0 | **48.4** ② | 14.7 ④ |
+| C 突破未回调（好票非买点） | 93.0 | 100.0 | 5.0 | **43.0** ③ | **56.4** ① |
+| B 长期无量阴跌（差票） | 14.9 | 15.0 | 24.0 | **20.4** ④ | 12.0 ② |
+
+双轴排序 D>A>C>B 正确；**旧 S\*\* 排序 C>B>D>A 方向相反**——它把"突破未回调"排第一、
+good_b1 型排倒数第二，因为那三个突破式分项奖励的正是突破而非回调。
+
+### 突破回踩型 B1（owner 提出，与结论#15 的边界）
+
+「突破前高后回调到 B1 区间且股价不低于前高」= `platform_pullback ∩ J<13`。
+
+结论#15 否决的是平台突破回踩**作独立入场**（净值 3 窗方向随环境摆动），并明确"证据层保留"；
+它测过叠加板块/基本面优/0AMV 各腿，**没测过叠加 J<13**。故这是 #15 留下的未测组合，
+作为**标记/子集对比**而非独立入场，与该结论不冲突。
+
+⚠️ **待确认口径**：`platform_high` 由 `platform_pullback` 按**最高价**摆动高点算出，严格
+口径 `close >= platform_high` 要求收盘超过历史最高价，回踩场景下几乎不可达（合成用例：
+平台高 10.465 vs 回踩收盘 10.393）。现默认 `ph_tol=0.98`，复用 platform_pullback 自身的
+"收盘守在平台高 ≥×0.98"判定；返回里同时给出 `close_ge_ph_strict` 供回测对比两种取法。
+
+### 实现与验证状态
+
+- 因子：`screening/b1_dual_factor.py`（`compute_b1_dual` / `compute_long_structure` /
+  `detect_launch_segment` / `detect_breakout_pullback_b1`）
+- 回测入口：`SCORERS["b1_dual"]`、`SCORERS["long_structure"]`（消融用）；
+  `ENTRY_GATES["qsx_gt_dks"]`、`["j_low_qsx_gt_dks"]`、`["breakout_pullback_b1"]`
+- **未接入选股链**（`score_candidates` 一行未动），由 `tests/test_b1_dual_factor.py::
+  TestNotYetWiredIntoScreening` 钉住
+- 合成数据只验证了判别方向；**真实回测待在有行情数据的环境执行**（本机 01_data 仅 44K、
+  无 vipdoc/qlib，跑不了）
+
+### 待跑的验证（三重门槛 + 净值终审，同结论#15 的标准）
+
+```bash
+# ① 分档 × horizon 网格：双轴 vs 现状 s_shape vs 消融
+uv run python 07_tools/screening/backtest_factors.py --scorer b1_dual   --entry-filter j_low --horizons 5,20,60
+uv run python 07_tools/screening/backtest_factors.py --scorer s_shape   --entry-filter j_low --horizons 5,20,60
+uv run python 07_tools/screening/backtest_factors.py --scorer long_structure --entry-filter j_low --horizons 5,20,60
+uv run python 07_tools/screening/backtest_factors.py --scorer s_reversal --entry-filter j_low --horizons 5,20,60
+
+# ② 门槛对比：J<13 单独 vs 叠加 QSX>DKS vs 突破回踩型
+uv run python 07_tools/screening/backtest_factors.py --entry-filter j_low
+uv run python 07_tools/screening/backtest_factors.py --entry-filter j_low_qsx_gt_dks
+uv run python 07_tools/screening/backtest_factors.py --entry-filter breakout_pullback_b1
+
+# ③ 净值终审（跨窗，必须赢过无条件基准）
+uv run python 07_tools/screening/backtest_factors.py --trade-sim --scorer b1_dual --entry-filter j_low_qsx_gt_dks --cost-bps 25
+```
+
+**判定标准（沿用结论#15 的教训）**：先问"是否赢过无条件基准"，且必须跨窗方向一致；
+富集类比较必须同窗口同口径。任一不过 → 记否决结论、不接线。

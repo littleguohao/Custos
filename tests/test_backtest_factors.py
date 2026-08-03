@@ -167,7 +167,9 @@ def test_scorers_registry_all_run():
     「无股本数据 → None(不参与排序,不误标)」。此前断言 `assert recs` 把"缺数据也
     必须给分"写成了期望,与「缺数据不得参与排名」的设计相冲突(审计 E3)。
     """
-    df = make_df([10.0 + (i % 11) * 0.2 for i in range(90)])
+    # 140 根:b1_dual / long_structure 需 ≥120 根(DKS = MA114)，90 根会让它们恒返回
+    # None 而被误判成"scorer 坏了"。样本加长不影响本用例的断言(只看能否产出记录)。
+    df = make_df([10.0 + (i % 11) * 0.2 for i in range(140)])
     external_data_scorers = {"mcap"}          # 需要本地不一定存在的外部数据集
     for name, fn in bt.SCORERS.items():
         recs = bt.evaluate({"600000": df}, horizons=(5,), min_bars=60, scorer=fn)
