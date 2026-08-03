@@ -325,7 +325,12 @@ class TestTierYouVisibilitySemantics:
     """
 
     def _idx(self):
-        return {"600000": [("2026-01-10", 1.0, 0.5, 8.0), ("2026-04-20", 2.0, 0.6, 9.0)]}
+        # 元组结构 = (notice_date, report_date, net_profit, ocf_ps, roe_waa)。
+        # report_date 取信号日附近的新鲜值，把财报时效检查(REPORT_MAX_AGE_DAYS)
+        # 隔离出去——本类只测「公告日→可见日」的 as-of 语义，不测时效。
+        # 时效上限本身在 tests/test_report_staleness.py 覆盖。
+        return {"600000": [("2026-01-10", "2025-12-31", 1.0, 0.5, 8.0),
+                           ("2026-04-20", "2026-03-31", 2.0, 0.6, 9.0)]}
 
     def test_announcement_day_itself_not_yet_visible(self):
         from screening import scan_signals_ytd as scan

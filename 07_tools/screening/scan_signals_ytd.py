@@ -22,6 +22,18 @@ sys.path.insert(0, str(BASE / "07_tools"))
 sys.path.insert(0, str(BASE / "07_tools" / "screening"))
 
 import backtest_factors as bt  # noqa: E402
+# 财报时效阈值走 financials 的**单一定义**,不在此二次定义——两处口径漂移会让同一只票
+# 在 live 与回测里得到相反的基本面判定。
+from financials import REPORT_MAX_AGE_DAYS, _parse_day  # noqa: E402
+
+
+def _report_age_days(report_date, as_of) -> int | None:
+    """报告期距信号日的天数;任一侧无法解析 → None(交调用方按保守处理)。"""
+    d = _parse_day(report_date)
+    ref = _parse_day(as_of)
+    if d is None or ref is None:
+        return None
+    return (ref - d).days
 
 FIRINGS = Path(sys.argv[1]) if len(sys.argv) > 1 else (
     BASE / "06_logs" / "walkforward" / "firings_rk_2026YTD.json")
@@ -29,7 +41,12 @@ PIT = BASE / "01_data" / "fundamentals" / "pit_financials.jsonl"
 
 
 def _pit_index(path):
-    """code → [(notice_date, net_profit, ocf_ps, roe_waa)] 升序。同 code 多版本取最新公告。"""
+    """code → [(notice_date, report_date, net_profit, ocf_ps, roe_waa)] 升序。
+
+    **notice_date 必须留在元组首位**：``idx[c].sort()`` 与 ``bisect_right(evs, (day,))``
+    都依赖它作为排序/比较键，换位会静默破坏 as-of 语义。report_date 是后加的（供
+    :func:`_tier_you` 做财报时效判定），旧台账缺该字段时置 ""。
+    """
     idx: dict[str, list] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
@@ -40,26 +57,44 @@ def _pit_index(path):
             continue
         if r.get("notice_date") and r.get("net_profit") is not None:
             idx.setdefault(r["code"], []).append(
-                (r["notice_date"], r.get("net_profit"), r.get("ocf_ps"), r.get("roe_waa")))
+                (r["notice_date"], str(r.get("report_date") or ""),
+                 r.get("net_profit"), r.get("ocf_ps"), r.get("roe_waa")))
     for c in idx:
         idx[c].sort()
     return idx
 
 
-def _tier_you(idx, code, day) -> bool:
+def _tier_you(idx, code, day, max_age_days: int = REPORT_MAX_AGE_DAYS) -> bool:
+    """信号日 ``day`` 当时可见的最新一期财报是否达"基本面优"。
+
+    PIT 语义：``bisect_right((day,))`` 落在**同日公告之前**（``(day,) < (day, rpt, ...)``），
+    故 k 指向公告日 **严格早于** 信号日的最新一期 ⇒ 口径是「公告次日起可见」（偏严一档，
+    无 look-ahead），与模块 docstring 的"信号日实际可见"和 launch_point_study 默认
+    ``--pit-visible-same-day=off`` 一致。
+    （2026-08-03 修：此处原注释写的是"公告当日即可见，偏松一档"，与实现正好相反。）
+
+    财报时效（2026-08-03 加，审计 E11 的另一半）：报告期距信号日超过 ``max_age_days``
+    即不算优。此前**没有任何时效上限**——一家 2023-04 出了最后一期财报、之后再没披露的
+    公司，2026 年的任何信号日都会取到 2023 年那期，只要数字好看就判"基本面优"。这比
+    live 侧（financials）更危险：那边用当前快照，这边服务跨年历史回测，陈旧数据命中机会
+    成倍增加，且污染的是「哪天几面共振」这类会变成上线入场门槛的研究结论。
+
+    口径与 ``financials.REPORT_MAX_AGE_DAYS`` **同一份定义**（按 report_date 而非
+    notice_date）：报告期衡量"数据本身多老"，且不被补披露/更正公告掩盖——同一报告期若
+    出现新的 notice_date，按公告日算会让 age 变小，反而掩盖数据陈旧。
+    ``max_age_days=0`` 关闭该检查。报告期缺失/无法解析时返回 False（不给"优"，保守）。
+    """
     evs = idx.get(code)
     if not evs:
         return False
-    # bisect_right((day,)) 落在**同日公告之前**((day,) < (day, np, ...)),故 k 指向
-    # 公告日 **严格早于** 信号日的最新一期 ⇒ 口径是「公告次日起可见」(偏严一档,无 look-ahead),
-    # 与模块 docstring 的"信号日实际可见"和 launch_point_study 默认 --pit-visible-same-day=off 一致。
-    # (2026-08-03 修:此处原注释写的是"公告当日即可见,偏松一档",与实现正好相反。)
-    # TODO(策略确认):此处**无财报时效上限**——三年不出报表的壳公司只要最后一期数字好看仍判"优"。
-    #   财务侧已有 screening/financials.REPORT_MAX_AGE_DAYS(400天),此处是否同口径需策略拍板。
     k = bisect.bisect_right(evs, (day,)) - 1
     if k < 0:
         return False
-    _, np_, ocf, roe = evs[k]
+    _notice, rpt, np_, ocf, roe = evs[k]
+    if max_age_days:
+        age = _report_age_days(rpt, day)
+        if age is None or age > max_age_days:
+            return False
     return bool(np_ and np_ > 0 and ocf is not None and ocf > 0 and roe is not None and roe > 0)
 
 
