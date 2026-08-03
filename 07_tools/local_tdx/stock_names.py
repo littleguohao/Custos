@@ -17,6 +17,9 @@
 为什么不用东财 clist 拉全市场：实测它单页最多 100 条，且连续翻页约 10 页（1000 条）
 后即 RemoteDisconnected，拉不完 5888 只。全市场缓存构建仍保留 clist 路径但只是
 尽力而为（:func:`fetch_all_from_clist`），真正的全量构建应走 TQ-Local。
+**凡是要落盘当全量缓存的路径**（:func:`fetch_name_map` / ``--source clist``）都强制
+``CLIST_MIN_COVERAGE`` 覆盖率门槛：残缺表落盘会覆盖完整缓存并把 generated_at 刷新成
+当天（30 天时效计时被重置），比"没更新"更危险，宁可回退旧缓存。
 
 为什么原实现危险：它只有 ④，而 ④ 已经死了，于是系统长期靠一份手动跑
 build_name_cache.py 生成、**永不更新、且读取时不校验时效**的缓存在跑。这比"名称表
@@ -71,6 +74,10 @@ EM_MAX_PAGES = 60
 EM_PAGE_SLEEP = 0.6             # 翻页/分批限速
 EM_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
               "Referer": "https://quote.eastmoney.com/"}
+
+# clist 当全量表用的最低覆盖率（取到条数 / 接口报告的 total）。低于此值宁可当失败
+# 回退旧缓存：残缺表 save_cache 后会覆盖完整缓存且 generated_at 刷新为当天。
+CLIST_MIN_COVERAGE = 0.8
 
 # 本次运行内记住可用域名，避免每批都从头重试已知不通的域名
 _working_host: Optional[str] = None
@@ -167,12 +174,17 @@ def fetch_names_for(codes, session=None, batch: int = EM_BATCH) -> dict[str, str
     return out
 
 
-def fetch_all_from_clist(session=None, max_pages: int = EM_MAX_PAGES) -> dict[str, str]:
+def fetch_all_from_clist(session=None, max_pages: int = EM_MAX_PAGES,
+                         min_coverage: float = 0.0) -> dict[str, str]:
     """东财 clist 全市场分页（**尽力而为**）。
 
     实测限制：单页最多 100 条，且连续翻页约 10 页后 RemoteDisconnected。所以它
-    通常拉不完全市场，取到多少算多少并由调用方判断是否够用；一条都没取到才抛。
+    通常拉不完全市场，默认取到多少算多少并由调用方判断是否够用；一条都没取到才抛。
     真正的全量构建请走 :func:`fetch_from_tq`。
+
+    ``min_coverage`` > 0 时启用覆盖率门槛：接口报告了 total 且
+    ``len(out) / total < min_coverage`` 即抛 :class:`NameFetchIncomplete`——
+    要把结果**落盘当全量缓存**的调用方必须设它（残缺表落盘比不更新更危险）。
     """
     s = session or _new_session()
     out: dict[str, str] = {}
@@ -201,6 +213,10 @@ def fetch_all_from_clist(session=None, max_pages: int = EM_MAX_PAGES) -> dict[st
         time.sleep(EM_PAGE_SLEEP)
     if not out:
         raise NameFetchIncomplete("clist 一条未取到")
+    if total and len(out) < total * min_coverage:
+        raise NameFetchIncomplete(
+            f"clist 覆盖率不足: {len(out)}/{total} (<{min_coverage:.0%})，"
+            "拒绝当全量表落盘（全量构建请用 --source tq）")
     if total and len(out) < total:
         print(f"[WARN] clist 受限流只取到 {len(out)}/{total} 条（全量构建请用 --source tq）",
               file=sys.stderr)
@@ -273,7 +289,8 @@ def fetch_name_map(session=None) -> tuple[dict[str, str], str]:
     if m:
         return m, "tq_local"
     try:
-        m = fetch_all_from_clist(session=session)
+        # 结果会被调用方落盘当全量缓存 → 强制覆盖率门槛，残缺表宁可回退旧缓存
+        m = fetch_all_from_clist(session=session, min_coverage=CLIST_MIN_COVERAGE)
         if m:
             return m, "eastmoney_clist"
     except Exception as exc:  # noqa: BLE001
@@ -453,7 +470,9 @@ def main(argv=None) -> int:
         name_map, source = fetch_name_map()
     elif args.source == "clist":
         try:
-            name_map, source = fetch_all_from_clist(), "eastmoney_clist"
+            # 结果直接落盘当全量缓存 → 强制覆盖率门槛，残缺表不落盘
+            name_map, source = (fetch_all_from_clist(min_coverage=CLIST_MIN_COVERAGE),
+                                "eastmoney_clist")
         except Exception as exc:  # noqa: BLE001
             print(f"[ERR] 东财 clist 名称源失败: {exc}")
             return 2

@@ -311,7 +311,7 @@ class TestResolveNamesFor:
 
 
 class TestClistBestEffort:
-    """clist 全市场受限流，取到多少算多少；一条都没取到才抛。"""
+    """clist 全市场受限流，取到多少算多少；一条都没取到才抛。落盘路径另有覆盖率门槛。"""
 
     def test_partial_pages_kept(self):
         s = FakeSession([[_row("600000", "浦发银行")], [_row("000001", "平安银行")]],
@@ -323,3 +323,64 @@ class TestClistBestEffort:
         s = FakeSession([[]], total=5888)
         with pytest.raises(sn.NameFetchIncomplete, match="一条未取到"):
             _REAL_CLIST(session=s)
+
+    def test_below_coverage_threshold_raises(self):
+        """要落盘当全量表的调用方必须设 min_coverage：残缺表落盘比不更新更危险
+        （覆盖完整缓存 + generated_at 刷新 → 30 天时效计时被重置）。"""
+        s = FakeSession([[_row("600000", "浦发银行")], [_row("000001", "平安银行")]],
+                        total=5888)
+        with pytest.raises(sn.NameFetchIncomplete, match="覆盖率不足"):
+            _REAL_CLIST(session=s, min_coverage=sn.CLIST_MIN_COVERAGE)
+
+    def test_at_coverage_threshold_kept(self):
+        """恰好达到门槛（800/1000）不抛——边界口径是 len < total*coverage 才拒绝。"""
+        pages = [[_row(f"60{p:02d}{i:02d}", f"股{p}{i}") for i in range(100)]
+                 for p in range(8)]
+        s = FakeSession(pages, total=1000)
+        got = _REAL_CLIST(session=s, min_coverage=sn.CLIST_MIN_COVERAGE)
+        assert len(got) == 800
+
+    def test_unknown_total_not_rejected(self):
+        """接口没报告 total 时无法判覆盖率，保持尽力而为（不抛）。"""
+        s = FakeSession([[_row("600000", "浦发银行")], []], total=None)
+        got = _REAL_CLIST(session=s, min_coverage=sn.CLIST_MIN_COVERAGE)
+        assert len(got) == 1
+
+
+class TestClistCoverageGuard:
+    """fetch_name_map / resolve_name_map：clist 残缺表不得落盘覆盖完整缓存。"""
+
+    def _patch_sources(self, monkeypatch, clist_exc):
+        monkeypatch.setattr(sn, "fetch_from_tq", lambda *a, **kw: {})
+        def _clist(*a, **kw):
+            raise clist_exc
+        monkeypatch.setattr(sn, "fetch_all_from_clist", _clist)
+        monkeypatch.setattr(sn, "fetch_from_mootdx", lambda: {})
+
+    def test_fetch_name_map_passes_coverage_threshold(self, monkeypatch):
+        """auto 路径调 clist 必须带 min_coverage（否则残缺表会被当成功结果落盘）。"""
+        seen = {}
+        monkeypatch.setattr(sn, "fetch_from_tq", lambda *a, **kw: {})
+        monkeypatch.setattr(sn, "fetch_all_from_clist",
+                            lambda *a, **kw: seen.update(kw) or {"600000": "浦发银行"})
+        monkeypatch.setattr(sn, "fetch_from_mootdx", lambda: {})
+        m, source = sn.fetch_name_map()
+        assert source == "eastmoney_clist" and m
+        assert seen.get("min_coverage") == sn.CLIST_MIN_COVERAGE
+
+    def test_partial_clist_falls_back_to_cache_without_overwrite(self, monkeypatch):
+        """TdxW 关 + clist 覆盖率不足 → 回退旧缓存，且**绝不**调 save_cache。"""
+        self._patch_sources(monkeypatch, sn.NameFetchIncomplete(
+            "clist 覆盖率不足: 1000/5888 (<80%)，拒绝当全量表落盘"))
+        monkeypatch.setattr(sn, "load_cache",
+                            lambda *a, **kw: ({"600000": "浦发银行"},
+                                              {"available": True, "stale": False,
+                                               "age_days": 2, "generated_at": "2026-08-01",
+                                               "source": "tq_local"}))
+        monkeypatch.setattr(sn, "save_cache",
+                            lambda *a, **kw: (_ for _ in ()).throw(
+                                AssertionError("残缺/未更新时不允许落盘覆盖缓存")))
+        names, diag = sn.resolve_name_map()
+        assert names == {"600000": "浦发银行"}
+        assert diag["st_filter"] == "ok"
+        assert diag["name_map_source"] == "tq_local"
