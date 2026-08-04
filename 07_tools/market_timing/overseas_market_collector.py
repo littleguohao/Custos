@@ -164,12 +164,39 @@ def main():
 
     details: dict[str, Any] = {}
     errors: dict[str, str] = {}
+    fallback_used: dict[str, str] = {}
     for key, meta in SYMBOLS.items():
         try:
             details[key] = {**meta, **fetch_chart(meta["symbol"], meta.get("region", ""))}
         except Exception as e:
             errors[key] = repr(e)
-            details[key] = {**meta, "symbol": meta["symbol"], "change_pct": None, "error": repr(e), "source": "Yahoo Finance chart API"}
+            # Yahoo 失败 → 试 TDX 扩展市场（owner 原则：本地 TDX 优先，HTTP 不稳定）。
+            # 只是**降级**不是替代：ext 覆盖不全（无 A50、无 USDCNH、无指数本身，
+            # 指数只能用 ETF 代理），且代理有跟踪误差与交易时段差异。
+            # 拿到数据时如实标 proxy/proxy_note，不让读报告的人误当成指数本身。
+            alt = None
+            try:
+                # ⚠️ 必须与调用方走同一条导入路径,否则同一文件会被加载成两个模块
+                # (tdx_ext_quotes 与 market_timing.tdx_ext_quotes),monkeypatch/异常
+                # 捕获都会对不上。本模块既当脚本跑也被当包模块导入,故包内优先、脚本回退。
+                try:
+                    from .tdx_ext_quotes import fetch_ext_change  # noqa: PLC0415
+                except ImportError:
+                    from tdx_ext_quotes import fetch_ext_change   # noqa: PLC0415
+                alt = fetch_ext_change(meta["symbol"])
+            except Exception as e2:  # noqa: BLE001
+                print(f"[WARN] TDX ext fallback 不可用: {type(e2).__name__}: {e2}",
+                      file=sys.stderr)
+            if alt and alt.get("change_pct") is not None:
+                details[key] = {**meta, "symbol": meta["symbol"], **alt,
+                                "yahoo_error": repr(e), "degraded": True}
+                fallback_used[key] = alt.get("source", "tdx_ext")
+                print(f"[INFO] {key} 走 TDX ext 降级：{alt.get('source')}"
+                      f"{'（' + alt['proxy_note'] + '）' if alt.get('proxy_note') else ''}",
+                      file=sys.stderr)
+            else:
+                details[key] = {**meta, "symbol": meta["symbol"], "change_pct": None,
+                                "error": repr(e), "source": "Yahoo Finance chart API"}
         time.sleep(0.2)
 
     overseas = data.setdefault("overseas_market", {})
@@ -180,6 +207,10 @@ def main():
     overseas["details"] = details
     overseas["errors"] = errors
     overseas["source"] = "Yahoo Finance chart API"
+    if fallback_used:
+        # 留痕：下游据此知道这批数字里有代理值，不得当成指数本身
+        overseas["fallback_source"] = fallback_used
+        overseas["source"] = "Yahoo Finance chart API + TDX ext fallback"
     # as_of: latest last_timestamp across all symbols (epoch -> Asia/Shanghai ISO);
     # falls back to collection time when no symbol returned a timestamp.
     ts_vals = [d.get("last_timestamp") for d in details.values() if isinstance(d, dict) and isinstance(d.get("last_timestamp"), (int, float))]
