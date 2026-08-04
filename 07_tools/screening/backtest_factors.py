@@ -1196,6 +1196,24 @@ def _bbi_series_from(df: pd.DataFrame) -> np.ndarray:
 _TICK = 0.01          # A股最小价格变动单位(元);材料的「向下 3-5 个价位」以此为单位
 
 
+def _center_rising(closes: np.ndarray) -> bool:
+    """收盘价**重心**是否上升（材料持股手册「一等马：收盘价重心上升为主」）。
+
+    用前后两段均值比，而不是「末值 > 首值」：材料说的是「重心」——那是中枢概念，
+    单点比较会被最后一根的噪声左右（一根小阴线就把「重心上升」判成否）。
+    段内均值对单根波动不敏感，更贴近「收盘价重心」的原意。
+
+    少于 4 根无法谈重心，返回 False（交给其它维度判定）。
+    """
+    n = len(closes)
+    if n < 4:
+        return False
+    h = n // 2
+    front = float(np.mean(closes[:h]))
+    back = float(np.mean(closes[h:]))
+    return back > front
+
+
 def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
                       bbi_exit_consec: int = 2, time_stop_bars: int = 0,
                       stop_mode: str = "low", stop_pct: float = 8.0,
@@ -1241,13 +1259,21 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
     材料写「买入K线最低点**或向下 3-5 个价位**」——贴着最低点挂止损容易被一笔扫掉。
     默认 0 保持旧行为，建议 3。
 
-    ``cost_zone_bars``>0 启用**成本区时间止损**（材料：「B1买入后**三个交易日**还没脱离
-    成本区，又没打止损，**多等一天**」；持股手册的「低等马（买入之后横盘不破止损）⇒
-    **不涨就拍**」；仓位实例的「不温不火，没上BBI，又没到止损。**收盘前全拍**」）。
-    判定：进场后 ``cost_zone_bars + cost_zone_grace`` 根内，收盘最高涨幅始终
-    < ``cost_zone_pct``% ⇒ 平仓。与无条件的 ``time_stop_bars`` 不同——
-    它只砍「不涨」的单子，涨上去的不受影响。
-    "脱离成本区"的 3% 取自材料深V玩法「如果脱离成本线 **3%以上**，可以酌情继续持有」。
+    ``cost_zone_bars``>0 启用**「不涨就拍」**（材料持股手册四种马 + 仓位实例）。
+    进场后 ``cost_zone_bars + cost_zone_grace`` 根时检查，**三个维度都平淡才平仓**：
+
+        · 未站上 BBI        「不温不火，**没上BBI**，又没到止损。收盘前全拍！」
+        · 收盘价重心未上升   「一等马（**收盘价重心上升**为主）⇒ 拿住不动」
+                            「看每天的收盘价是否还在提高！只要还在提高就不要怕！」
+        · 未脱离成本区       「三个交易日还没**脱离成本区**，又没打止损，多等一天」
+                            阈值 ``cost_zone_pct``%（默认 3，取自深V玩法「脱离成本线3%以上」）
+
+    任一维度显示还在涨就留着。与无条件的 ``time_stop_bars`` 不同，它只砍真正「不涨」的单子。
+
+    ⚠️ 第一版只看「未脱离成本区 3%」一条，实测胜率 38.5%（全场最高）但均盈 9.76%
+    （全场最低）——典型「砍掉慢热单」：一个已站上 BBI、重心上行、只是涨幅还没到 3%
+    的票会被误杀，而这类票里有后来的大赢家。材料的「低等马不涨就拍」本来就是
+    **人工综合判断**，不是单纯计时或单看涨幅。
 
     scale_out_frac>0 启用**分批止盈**（B1 §六 第五层 / B1.pdf「止盈 BBI 之上两根中阳线，
     放飞一半」）：持仓期内首次出现"BBI 上方连续两根中大阳线"时按该比例减仓。
@@ -1377,11 +1403,26 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
                         return _exit(j, "bbi_exit", float(close[j]))
             else:
                 consec_below = 0
-        # ③ 成本区时间止损：只砍「不涨」的单子（低等马「不涨就拍」）
+        # ③ 「不涨就拍」（材料持股手册的四种马 + 仓位实例）。**三个维度都平淡才砍**：
+        #      · 未站上 BBI      —— 「不温不火，**没上BBI**，又没到止损。收盘前全拍！」
+        #      · 收盘价重心未上升 —— 「一等马（**收盘价重心上升**为主）⇒ 拿住不动」
+        #                            「看每天的收盘价是否还在提高！只要还在提高就不要怕！」
+        #      · 未脱离成本区     —— 「三个交易日还没**脱离成本区**，又没打止损，多等一天」
+        #    任一维度显示还在涨就留着。第一版只看「未脱离成本区 3%」这一条，
+        #    实测胜率 38.5%（全场最高）但均盈 9.76%（全场最低）——典型「砍掉慢热单」，
+        #    因为一个已站上 BBI、重心上行、只是涨幅还没到 3% 的票会被误杀。
         if (cost_zone_bars and entry
-                and (j - entry_idx) >= cost_zone_bars + max(0, cost_zone_grace)
-                and peak_close / entry - 1 < cost_zone_pct / 100.0):
-            return _exit(j, "cost_zone_stop", float(close[j]))
+                and (j - entry_idx) >= cost_zone_bars + max(0, cost_zone_grace)):
+            bj = bbi_v[j]
+            # 严格 `>`：贴着 BBI 横盘正是材料说的「不温不火，没上BBI」，
+            # 用 `>=` 会把横盘误判成「站上」而永不触发（实测场景①因此没被拍掉）。
+            # 也与下方 BBI 退出逻辑一致——那里对「相等」同样按中性处理
+            # （既不算站上也不算跌破）。
+            above_bbi = bool(bj == bj and close[j] > bj)
+            rising = _center_rising(close[entry_idx + 1:j + 1])
+            escaped = (peak_close / entry - 1) >= cost_zone_pct / 100.0
+            if not (above_bbi or rising or escaped):
+                return _exit(j, "cost_zone_stop", float(close[j]))
         if time_stop_bars and (j - entry_idx) >= time_stop_bars:   # ④ 无条件时间止损
             return _exit(j, "time_stop", float(close[j]))
         peak = max(peak, float(high[j]))          # 当日收盘后才把当日高点纳入 peak
