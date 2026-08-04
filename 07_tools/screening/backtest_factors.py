@@ -727,6 +727,99 @@ if detect_b2 is not None:
     ENTRY_GATES["surge_strict_then_b1"] = surge_strict_then_b1_gate
 
 
+# ---- RSI 状态 + 主升始发点(来源:微信文章公式) ----
+try:
+    from rsi_state import rsi_divergence, rsi_multi, rsi_regime, rsi_state_score
+    from main_rally_factor import detect_main_rally_start, main_rally_score
+except Exception:  # noqa: BLE001
+    rsi_state_score = None
+
+
+def _sc_rsi_state(df: pd.DataFrame, code: str):
+    """RSI 状态分:区间四态 50 + 底背离 30 + 多周期 20(权重待回测)。"""
+    if rsi_state_score is None:
+        return None
+    r = rsi_state_score(df, code)
+    if not r.get("available"):
+        return None
+    return {"score": r["score"], "suggestion": "可买" if r["score"] >= 60 else "不买",
+            "aux": {"rsi_regime": r["regime"], "rsi": r["rsi"],
+                    "bullish_divergence": r["bullish_divergence"]},
+            "components": {"regime": r["regime"]}}
+
+
+def _sc_main_rally(df: pd.DataFrame, code: str):
+    """主升始发点(源码口径 cross_mode=below)。"""
+    if rsi_state_score is None:
+        return None
+    r = main_rally_score(df, code, cross_mode="below")
+    if not r.get("available"):
+        return None
+    return {"score": r["score"], "suggestion": "可买" if r["hit"] else "不买",
+            "aux": {"hit": r["hit"]},
+            "components": {"conditions_met": r["detail"]["conditions_met"]}}
+
+
+def rsi_strong_regime_gate(df_slice: pd.DataFrame) -> bool:
+    """RSI 处于牛市区间(回调低点≥40 且曾>70)——健康回调而非下跌中继。"""
+    if rsi_state_score is None:
+        return False
+    try:
+        return bool(rsi_regime(df_slice).get("state") == "strong")
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def rsi_bullish_divergence_gate(df_slice: pd.DataFrame) -> bool:
+    """RSI 底背离:价格创新低而 RSI 不创新低(卖压衰竭)。"""
+    if rsi_state_score is None:
+        return False
+    try:
+        return bool(rsi_divergence(df_slice).get("bullish"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def j_low_rsi_strong_gate(df_slice: pd.DataFrame) -> bool:
+    """B1 核心组合的 RSI 版:J<13 且 RSI 处于牛市区间。"""
+    return bool(j_low_gate(df_slice) and rsi_strong_regime_gate(df_slice))
+
+
+def j_low_rsi_div_gate(df_slice: pd.DataFrame) -> bool:
+    """J<13 且 RSI 底背离——超卖**且**动能衰竭,比单纯 J<13 强。"""
+    return bool(j_low_gate(df_slice) and rsi_bullish_divergence_gate(df_slice))
+
+
+def _main_rally_gate(df_slice: pd.DataFrame, mode: str) -> bool:
+    if rsi_state_score is None:
+        return False
+    try:
+        return bool(detect_main_rally_start(df_slice, cross_mode=mode).get("hit"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def main_rally_below_gate(df_slice: pd.DataFrame) -> bool:
+    """主升始发点(**源码口径**:主升占比跌破 0.8)。"""
+    return _main_rally_gate(df_slice, "below")
+
+
+def main_rally_above_gate(df_slice: pd.DataFrame) -> bool:
+    """主升始发点(**文字口径**:主升占比突破 0.8)——与源码相反,两者都测。"""
+    return _main_rally_gate(df_slice, "above")
+
+
+if rsi_state_score is not None:
+    SCORERS["rsi_state"] = _sc_rsi_state
+    SCORERS["main_rally"] = _sc_main_rally
+    ENTRY_GATES["rsi_strong"] = rsi_strong_regime_gate
+    ENTRY_GATES["rsi_bull_div"] = rsi_bullish_divergence_gate
+    ENTRY_GATES["j_low_rsi_strong"] = j_low_rsi_strong_gate
+    ENTRY_GATES["j_low_rsi_div"] = j_low_rsi_div_gate
+    ENTRY_GATES["main_rally"] = main_rally_below_gate
+    ENTRY_GATES["main_rally_above"] = main_rally_above_gate
+
+
 def sample_codes(all_codes: list[str], n: int, seed: int = 0) -> list[str]:
     """从全 A 代码列表随机抽 N 只（带 seed 可复现），用于代表性样本校准。
 
@@ -1076,12 +1169,39 @@ def _next_tradable(flags: np.ndarray, start: int, max_delay: int) -> Optional[in
     return None
 
 
+def _medium_large_bull_flags(df: pd.DataFrame, code: str = "") -> np.ndarray:
+    """逐根标记"中大阳线"（B1 §六 第五层止盈的量化口径）。
+
+    口径与 technical_monitor / b1_swing_strategy.md 一致：必须是阳线（close>open），
+    且**单日涨幅或阳线实体幅度** ≥ 半个涨停幅度（10%品种→5%、20%→10%、30%→15%）。
+    """
+    close = df["close"].astype(float).to_numpy()
+    open_ = df["open"].astype(float).to_numpy()
+    n = len(close)
+    thr = _limit_pct(code) / 2.0
+    prev = np.concatenate(([np.nan], close[:-1]))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        chg = (close / prev - 1) * 100
+        body = np.where(open_ > 0, (close - open_) / open_ * 100, 0.0)
+    is_bull = close > open_
+    return is_bull & ((chg >= thr) | (body >= thr))
+
+
+def _bbi_series_from(df: pd.DataFrame) -> np.ndarray:
+    """BBI = (MA3+MA6+MA12+MA24)/4。"""
+    c = df["close"].astype(float)
+    return (sum(c.rolling(k).mean() for k in (3, 6, 12, 24)) / 4).to_numpy()
+
+
 def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
                       bbi_exit_consec: int = 2, time_stop_bars: int = 0,
                       stop_mode: str = "low", stop_pct: float = 8.0,
                       stop_override: Optional[float] = None,
                       can_sell: Optional[np.ndarray] = None,
-                      max_exit_delay: int = 5) -> dict[str, Any]:
+                      max_exit_delay: int = 5,
+                      scale_out_frac: float = 0.0,
+                      code: str = "",
+                      bull_flags: Optional[np.ndarray] = None) -> dict[str, Any]:
     """B1 交易规则模拟：买入当日收盘进场；
     止损：stop_override 显式指定(如平台高×0.98)优先;否则 stop_mode='low'=买入当日最低价
     (超卖贴低时几乎无空间)；'pct'=entry×(1-stop_pct%)(固定空间)。
@@ -1092,6 +1212,12 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
     can_sell:逐根可卖标记(见 tradable_flags)。给出时,跌停/停牌当日**不成交**,顺延到
     max_exit_delay 根内的下一个可卖日按其收盘价成交(reason 加 _delayed 后缀)。此前跌停与
     停牌日的止损照样成交,系统性高估了策略的止损执行力(审计 E5)。
+
+    scale_out_frac>0 启用**分批止盈**（B1 §六 第五层 / B1.pdf「止盈 BBI 之上两根中阳线，
+    放飞一半」）：持仓期内首次出现"BBI 上方连续两根中大阳线"时按该比例减仓，剩余仓位继续
+    按止损/BBI 跌破/时间止损离场，收益按两段加权。
+    **此前完全没有这一层**——所有盈利单都得等到 BBI 跌破才离场（已经回撤过了），
+    于是回测系统性低估了 B1 的 avg_win 与盈亏比，而盈亏比是唯一有杠杆的变量。
     """
     close = df["close"].astype(float).values
     low = df["low"].astype(float).values
@@ -1107,19 +1233,37 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
     has_above = False
     consec_below = 0
 
+    # 分批止盈准备
+    scale = max(0.0, min(1.0, float(scale_out_frac)))
+    bulls = bull_flags if bull_flags is not None else (
+        _medium_large_bull_flags(df, code) if scale > 0 else None)
+    scaled_at: Optional[int] = None
+    scaled_ret = 0.0
+
+    def _settle(exit_idx: int, reason: str, price: float) -> dict[str, Any]:
+        """按（已减仓部分 + 剩余部分）加权结算。"""
+        rest_ret = price / entry - 1
+        if scaled_at is None:
+            total = rest_ret
+        else:
+            total = scale * scaled_ret + (1 - scale) * rest_ret
+            reason = f"{reason}+scaled"
+        out = {"exit_idx": exit_idx, "reason": reason, "ret": total,
+               "holding": exit_idx - entry_idx, "risk_frac": risk_frac}
+        if scaled_at is not None:
+            out.update(scale_out_frac=scale, scale_out_idx=scaled_at,
+                       scale_out_ret=round(scaled_ret, 4),
+                       rest_ret=round(rest_ret, 4))
+        return out
+
     def _exit(j: int, reason: str, price: float) -> dict[str, Any]:
         """Settle an exit at bar j, deferring to the next sellable bar."""
         if can_sell is not None and not can_sell[j]:
             k = _next_tradable(can_sell, j, max_exit_delay)
             if k is None:                     # 一直卖不掉:持有到数据末
-                return {"exit_idx": n - 1, "reason": reason + "_unfillable",
-                        "ret": float(close[-1]) / entry - 1,
-                        "holding": (n - 1) - entry_idx, "risk_frac": risk_frac}
-            return {"exit_idx": k, "reason": reason + "_delayed",
-                    "ret": float(close[k]) / entry - 1,
-                    "holding": k - entry_idx, "risk_frac": risk_frac}
-        return {"exit_idx": j, "reason": reason, "ret": price / entry - 1,
-                "holding": j - entry_idx, "risk_frac": risk_frac}
+                return _settle(n - 1, reason + "_unfillable", float(close[-1]))
+            return _settle(k, reason + "_delayed", float(close[k]))
+        return _settle(j, reason, price)
 
     for j in range(entry_idx + 1, n):
         if low[j] <= stop:                                    # ① 盘中破止损
@@ -1127,6 +1271,14 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
             return _exit(j, "stop", fill)
         b = bbi_v[j]
         if b == b:                                            # ② 收盘 BBI 退出（b==b 排除 NaN）
+            # ②a 分批止盈:BBI 上方连续两根中大阳线（首次触发，且此前未减仓）
+            if (scale > 0 and scaled_at is None and bulls is not None and j >= 1
+                    and bulls[j] and bulls[j - 1]
+                    and close[j] >= b and bbi_v[j - 1] == bbi_v[j - 1]
+                    and close[j - 1] >= bbi_v[j - 1]
+                    and (can_sell is None or can_sell[j])):
+                scaled_at = j
+                scaled_ret = float(close[j]) / entry - 1
             if close[j] > b:
                 has_above = True; consec_below = 0
             elif close[j] < b:
@@ -1138,8 +1290,7 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
                 consec_below = 0
         if time_stop_bars and (j - entry_idx) >= time_stop_bars:   # ③ 时间止损
             return _exit(j, "time_stop", float(close[j]))
-    return {"exit_idx": n - 1, "reason": "open_end", "ret": float(close[-1]) / entry - 1,
-            "holding": (n - 1) - entry_idx, "risk_frac": risk_frac}
+    return _settle(n - 1, "open_end", float(close[-1]))
 
 
 def _to_weekly(df: pd.DataFrame) -> pd.DataFrame:
@@ -1168,7 +1319,8 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
                     feature_panel: bool = False,
                     sector_gate: Optional[Callable[[str, str], bool]] = None,
                     tradability: bool = True,
-                    max_exit_delay: int = 5) -> list[dict[str, Any]]:
+                    max_exit_delay: int = 5,
+                    scale_out_frac: float = 0.0) -> list[dict[str, Any]]:
     """在 scorer 判「可买」的 as-of 日进场，按 B1 规则(止损+BBI)模拟到出场；非重叠(平仓后再找)。
 
     cost_bps：单边成本合计的往返基点(A股约20~30bps含佣金/印花税/滑点)，从每笔收益中扣除，看净期望。
@@ -1176,6 +1328,9 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
     bbi_exit_consec/time_stop_bars：出场规则参数(可扫描)。每笔记录 r_multiple=净收益/风险敞口，供风险定额仓位。
     collect_all=True：不做单股非重叠去重，返回**每个**可买as-of日的候选(含 score)，供组合级 top-N 横截面择优。
     entry_gate(df_slice)->bool：进场硬门槛(如 j_low_gate=当日 J<13，B1 核心买点)；不满足则不进场。
+    scale_out_frac>0：启用**分批止盈**（B1 §六 第五层「BBI 上方两根中大阳线分批减仓」/
+      B1.pdf「止盈 BBI 之上两根中阳线，放飞一半」→ 取 0.5）。此前回测完全没有这一层，
+      盈利单必须等 BBI 跌破才离场（已回撤过），系统性低估 avg_win 与盈亏比。
     tradability=True(默认)：施加**可成交性护栏**——涨停/停牌日不得按收盘价买入，跌停/停牌日
       不得卖出(顺延至 max_exit_delay 根内的下一个可卖日)。关掉可复现旧口径,但那会系统性
       高估收益:一字板照买、跌停照卖、停牌日照止损(审计 E5)。
@@ -1204,6 +1359,8 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
         bbi = _bbi_series(df["close"])
         # 可成交性:涨停/停牌不可买,跌停/停牌不可卖(逐股算一次,循环内复用)
         buy_ok, sell_ok = tradable_flags(df, code) if tradability else (None, None)
+        # 中大阳线标记(分批止盈用):逐股算一次,避免每个信号重算
+        bull_flags = _medium_large_bull_flags(df, code) if scale_out_frac > 0 else None
         emitted = 0
         i = min_bars
         while i < n - 1:
@@ -1231,7 +1388,9 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
                                        time_stop_bars=time_stop_bars,
                                        stop_mode=stop_mode, stop_pct=stop_pct,
                                        stop_override=stop_ov,
-                                       can_sell=sell_ok, max_exit_delay=max_exit_delay)
+                                       can_sell=sell_ok, max_exit_delay=max_exit_delay,
+                                       scale_out_frac=scale_out_frac, code=code,
+                                       bull_flags=bull_flags)
                 ret_net = tr["ret"] - cost
                 rf = tr.get("risk_frac") or 0.0
                 rf_eff = max(rf, _R_RISK_FLOOR)   # 地板：周线收盘贴低时 risk_frac≈0 会把 R 炸成极端值
@@ -1241,6 +1400,10 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
                        "risk_frac": round(rf, 4),
                        "r_multiple": round(ret_net / rf_eff, 3) if rf > 0 else None,
                        "holding": tr["holding"], "reason": tr["reason"]}
+                if tr.get("scale_out_idx") is not None:
+                    rec["scale_out_ret"] = tr.get("scale_out_ret")
+                    rec["rest_ret"] = tr.get("rest_ret")
+                    rec["scale_out_bars"] = tr["scale_out_idx"] - i
                 if feature_panel:
                     rec["features"] = _feature_panel(slice_df)
                 trades.append(rec)
@@ -1706,6 +1869,9 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     ap.add_argument("--stop-mode", choices=["low", "pct", "platform"], default="low",
                     help="止损:low=买入K最低;pct=entry×(1-stop_pct%%);platform=平台高×0.98(配 platform_pullback 入场)")
     ap.add_argument("--stop-pct", type=float, default=8.0, help="--stop-mode pct 时的止损百分比(默认8)")
+    ap.add_argument("--scale-out", type=float, default=0.0,
+                    help="分批止盈比例:BBI 上方两根中大阳线时减仓比例(B1 原文「放飞一半」→ 0.5;"
+                         "默认 0=不启用,便于与旧结果对照)")
     ap.add_argument("--summary-only", action="store_true",
                     help="输出JSON不含逐笔trades(仅摘要;全市场日线省内存,防OOM)")
     ap.add_argument("--attribution", action="store_true",
@@ -1797,7 +1963,8 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                     entry_gate=ENTRY_GATES[args.entry_filter],
                     stop_mode=args.stop_mode, stop_pct=args.stop_pct,
                     max_signals_per_code=(args.max_signals_per_code or None),
-                    feature_panel=bool(args.attribution), sector_gate=sector_gate)
+                    feature_panel=bool(args.attribution), sector_gate=sector_gate,
+                    scale_out_frac=args.scale_out)
             del d
             if (k + 1) % 500 == 0:
                 gc.collect()

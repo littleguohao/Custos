@@ -667,3 +667,228 @@ SF 战法六步（择时/选股/等B1不追/止损/止盈/收队）；「**主�
 10、11 月最好）；持仓检查手册（特级马/一等马/低等马/草泥马）；大盘回调期换股四依据；
 仓位管理（分仓 vs 重仓）；资金规模-盈利目标表；松紧手；关键K（趋势反转六型/走势衰竭两型）。
 `补坑策略` 一页在原 PDF 中为空页（仅标题）。
+
+---
+
+## 方法论转向 M1：**胜率不是可优化的变量，盈亏比才有杠杆**（2026-08-04 owner 裁定）
+
+### 起因
+
+owner 观察：「当前市场是充分竞争的，一个信号有 50% 左右胜率已经非常优秀」「追求胜率的
+思路可能有问题，不可能有一招制胜的法宝」。
+
+### 数据支持（H1 首轮回测的两组数据，重新解读）
+
+| | 胜率差 | 均收差 |
+|---|---|---|
+| 共振 A 档 H20 | 51.6% vs 41.2%（+10.4pp） | +4.95% vs +2.53%（**1.96×**） |
+| 最严门槛 H10 | 54.5% vs 51.8%（+2.7pp，不显著） | +2.18% vs +0.93%（**2.3×**） |
+
+两组都是**均收差异远大于胜率差异**。若增益来自胜率，两者该同步；实际是胜率几乎没动而
+均收翻倍 ⇒ **差异来自盈利的幅度分布，不是赢的次数**。我们一直用胜率当判定标准，
+等于在测一个不敏感的指标。
+
+### 量化对比（单笔止损幅度 3%、成本 25bps）
+
+| 变化 | 每笔期望 |
+|---|---|
+| 胜率 45% → 55%（+10pp，盈亏比=2） | +0.75% → +1.65% |
+| **盈亏比 1 → 3（胜率 50% 不变）** | **0% → +3.00%** |
+
+盈亏平衡胜率：盈亏比 3 → 只需 **25%**（含成本 27.1%）；盈亏比 0.8 → 需 **60.2%**
+（充分竞争市场里基本不可能）。**⇒ 胜率不是该优化的变量。**
+
+再叠加结论#15 实证第 1 条（召回率随涨幅单调下降，≥100% 涨幅带召回仅 15.6%、相对基准
+−37.5%）：为 +2.7pp 胜率把召回压到 10%（`j_low_qsx_weekly`）是**负交换**——幂律分布下
+收益几乎全来自少数大涨票。
+
+### 三项落地
+
+**① 判定标准换掉。** 框架早有 `expectancy` / `median_return` / `payoff_ratio` /
+`expectancy_R` / `median_R` / `total_R`（`summarize_trades`，第 883 行注释就写着"追求盈亏比
+时看这个而非胜率"）。但**前两轮回测走的是 `evaluate`（固定持有 N 天，无止损止盈），
+只输出胜率和均收**——B1 的价值全在规则里，必须走 `--trade-sim`。
+判定改看：`expectancy_R>0` 且跨窗一致、`payoff_ratio`、`total_R`、`exit_reasons` 分解。
+胜率降为参考量。
+
+**② 门槛保持宽（只有 J<13），其他信号一律打分/标记。**
+已核实生产链现状**本就如此**：`SCREEN_FORMULA_REGISTRY` 里唯一 enabled 的公式是
+`KDJ_J_LOW`，其余四个（UPN_3/MA_BUY/MACD_GOLD/B1_REVERSAL_K）全部关闭；其他条件都是
+资格性硬排除（ST/停牌/上市<60天/非A股）。回测里的 `j_low_qsx_weekly` 等组合 gate
+**从未进入生产链**，今后只当**分组维度**使用（同一条件当门槛砍召回，当分组不损失任何东西）。
+
+**③ 信号的正确出口是仓位，不是门槛。**
+
+```
+门槛(宽)   J<13 + 资格排除                        → 保证召回，大牛股不被筛掉
+标记/打分  QSX>DKS、RSI强势区间、日周共振、异动后B1、
+          突破回踩型、B2确认、出货形态(负向)…     → 决定这一笔的"确信度"
+仓位       确信度高→重仓；仅基础 J<13→轻仓试探     → 等价于提高盈亏比
+出场       止损贴当日低点 + BBI上方两根中阳分批止盈 → 决定盈亏比
+```
+
+在 50% 胜率的世界里，期望提升几乎全部来自后两层。这也是 B1.pdf「松紧手」「仓位管理」
+讲的东西。⇒ 回测新判据：**按标记数分组后 `expectancy_R` 是否单调递增**；若是，标记就
+可以直接映射成仓位系数。
+
+---
+
+## 已实现：分批止盈（M1 的第一个落地，2026-08-04）
+
+**这是文档早已定义、实盘检测器早已实现、只有回测没模拟的一层。**
+`b1_swing_strategy.md:22/399` 写着「BBI 上方分批止盈」「BBI上方两根中大阳线：分批止盈」，
+B1.pdf 原文是「止盈 BBI 之上两根中阳线，**放飞一半**」，`technical_monitor` 也有
+`two_medium_large_bull` 检测器（含涨跌停幅度自适应门槛）。
+但 `simulate_b1_trade` 只有：止损、BBI 跌破 N 根全出、时间止损——**没有分批止盈**。
+
+后果：回测里所有盈利单都得等 BBI 跌破才离场（**已经回撤过了**），系统性低估 `avg_win`
+与 `payoff_ratio`，而盈亏比恰是唯一有杠杆的变量。
+
+### 实证（同一批 10 笔交易：6 赢 4 亏）
+
+| | n | 胜率 | 期望 | 均盈 | 均亏 | 盈亏比 |
+|---|---|---|---|---|---|---|
+| 无分批止盈 | 10 | **60.0%** | +2.86% | +7.09% | −3.50% | **2.03** |
+| 放飞一半 | 10 | **60.0%** | **+6.05%** | **+12.42%** | −3.50% | **3.55** |
+
+**胜率一模一样，期望翻倍，盈亏比 2.03 → 3.55。** 分批止盈不改变赢的次数，只改变赢的幅度
+——这正是 M1 判断的直接验证。
+
+用法：`--scale-out 0.5`（原文"放飞一半"）。**默认 0=不启用**，保证与旧结果可对照。
+中大阳线口径复用 `b1_swing_strategy.md`：阳线 且（单日涨幅 或 实体幅度）≥ 半个涨停幅度。
+
+---
+
+## 待验证假设 H3：RSI 状态因子（2026-08-04）
+
+### 为什么加 RSI 而不是替代 J 值——两者互补
+
+| | J 值 (3K−2D) | RSI |
+|---|---|---|
+| 性质 | 无界（可负、可 >100） | 有界 0–100 |
+| 特性 | 极敏感、剧烈跳动 | 平滑、有记忆 |
+| 擅长 | 捕捉**极值时点** | 判断**趋势状态** |
+| 本项目 | J<13 = 入场触发（门槛） | 区间状态 = 打分/标记 |
+
+**RSI 的价值不在 70/30 超买超卖，而在区间行为**（Cardwell）：强势股 RSI 长期停在 70 上方，
+用 70/30 会一直误判。有判别力的是"**RSI 回调的低点在哪**"——牛市区间回调低点在 40~50，
+熊市区间反弹高点在 50~60，这两个边界直接区分「健康回调」与「下跌中继」，而这是 B1 最需要
+区分的两件事。与 good_b1 的 `QSX>DKS`（8/9）讲同一件事，但 RSI 区间更细腻（连续、看历史
+行为模式），两者并存由消融决定。
+
+### 设计上踩到并修正的两个坑（都与 s_shape 的错误同源）
+
+**坑1：deep_oversold 曾被做成一种 state。** 结果「长期向上+当前深跌」（B1 最想要的形态）
+与「结构已坏的深跌」归为同类，分数还低于「纯上涨」——**又是用买强分给买弱买点打分**。
+已改为**两个维度分开**：`state`（长期结构）+ `deep_oversold`（当前位置），
+`strong + deep_oversold` = `ideal_b1`。
+
+**坑2：时间窗错配。** RSI 跌进深水区（<25）需 ≥8 根急跌，而若排除窗小于回调长度，回调段
+会溢出进历史段、把区间低点打穿 40 ⇒ `strong+deep` 组合几乎不可能出现。实测：
+
+| 回调根数 | RSI | regime | 深水 | 分数（修正前） |
+|---|---|---|---|---|
+| 3 / 5 | 34.6 / 28.3 | strong | 否 | 40 |
+| 8 / 12 | 20.3 / 11.9 | neutral | 是 | 40 |
+
+四种形态**分数全是 40**（结构好但没到买点 = 是买点但结构一般），显然不对。
+已修：`REGIME_EXCLUDE_RECENT=12`（覆盖两周回调）+ 结构分提到 50 + **交互奖励 15**
+（strong 且 deep 才给）。修正后：
+
+| 形态 | RSI | regime | 深水 | 理想B1 | 分数 |
+|---|---|---|---|---|---|
+| 长期涨+回调8/12根 | 20.3 / 11.9 | strong | ✓ | **✓** | **85** ① |
+| 长期涨+回调3根 / 纯上涨 | 34.6 / 61.2 | strong | — | — | 50 ② |
+| 结构坏+深跌 | 5.6 | neutral | ✓ | — | 30 ③ |
+| 温和下跌 | 26.4 | decline_continuation | — | — | 25 ④ |
+
+⚠️ `REGIME_EXCLUDE_RECENT` 待回测扫参——它决定"回调多长仍算上涨中的回调"。
+
+### 实现
+
+`screening/rsi_state.py`：`rsi`（与通达信 `SMA(X,N,1)` 逐值一致）、`rsi_regime`（四态+深水）、
+`rsi_divergence`（底背离——系统原有 MACD 背离但无 RSI 的，而 RSI 更敏感更早）、
+`rsi_multi`（6/14/24；`stacked_low` 是下跌**加速**标志，注意单调序列 RSI 恒 0）、
+`rsi_state_score`。
+
+---
+
+## 待验证假设 H4：「主升始发点」（来源：微信文章公式，2026-08-04）
+
+原文自称"资金占比+超卖金叉+极度偏离"，逐条识别源码后发现是**四个标准指标的组合**：
+
+| 源码 | 实为 | 我们的现状 |
+|---|---|---|
+| `D5 = SMA(MAX(C-REF(C,1),0),7,1)/SMA(ABS(...),7,1)*100` | **标准 RSI(7)** | H3 已加 |
+| `D11 = 3*SMA(RSV9,3,1)-2*SMA(SMA(RSV9,3,1),3,1)` | **就是 KDJ 的 J 值** | 已有（同口径，测试钉住） |
+| `偏差 = (TP-MA(TP,14))/(0.015*AVEDEV(TP,14))` | **标准 CCI(14)** | **新增** |
+| `主升 = D1/(D1+D2)`（15日高点抬升/低点下降累计） | 基于**高低点**的趋势强度 | **新增**（与基于收盘的 RSI 互补） |
+
+`T1` 里的 `D11>REF(D11,1) AND REF(D11,1)<REF(D11,2)` 就是 **J 值拐头向上**——
+我们 `s_reversal` 的 `j_turn_up` 已实现同一件事。
+
+### ⚠️ 原文两处矛盾，两种口径都实现由回测判定
+
+**① CROSS 方向与文字描述相反。** 源码 `D3:=CROSS(0.8, 主升)`，而通达信 `CROSS(A,B)` 是
+A 上穿 B ⇒ 这是"常数 0.8 上穿主升线"＝**主升跌破 0.8**；文字却说"上涨占比**突破** 80%…
+主力大规模流入"，那该写 `CROSS(主升, 0.8)`。
+从整体逻辑看**源码更可信**：其余三条（RSI7<20、CCI<-100、J拐头）都是极度超卖，那种状态下
+"占比刚从 80% 上方跌破"合理，而"突破 80%"（强势）与极度超卖并存几乎不可能。
+⇒ `cross_mode` 参数化，默认 `"below"`（源码口径），另提供 `"above"` / `"either"`。
+
+**② 文章称"4 大核心条件"，源码只有 3 个**（`选股:=风控 AND D3 AND D6 AND T1`）——
+第 4 条"突破前期关键压力位且成交量放大"**源码里不存在**。此处不擅自补；需要时叠加已有的
+`platform_pullback`。
+
+### 实现
+
+`screening/main_rally_factor.py`：`flow_ratio`、`cci`（AVEDEV 是平均绝对偏差、非标准差，
+与通达信同口径，测试逐值比对）、`_j_series`、`detect_main_rally_start`、`main_rally_score`。
+
+---
+
+## 本轮新增的回测入口（全部未接入选股链）
+
+```
+SCORERS      b1_dual / b1_dual_no_res / long_structure / b2 / rsi_state / main_rally
+ENTRY_GATES  qsx_gt_dks / j_low_qsx_gt_dks / breakout_pullback_b1 / weekly_j_low /
+             j_low_weekly_resonance / j_low_qsx_weekly / b2 / bottom_surge /
+             bottom_surge_strict / surge_then_b1 / surge_strict_then_b1 /
+             rsi_strong / rsi_bull_div / j_low_rsi_strong / j_low_rsi_div /
+             main_rally / main_rally_above
+CLI          --scale-out（分批止盈比例，原文"放飞一半"→0.5）
+```
+
+### 待跑回测（**判定看 expectancy_R / payoff_ratio / total_R，不看胜率**）
+
+```bash
+S=07_tools/screening/backtest_factors.py
+
+# ① 分批止盈的价值（M1 的核心验证：胜率不变、盈亏比该提升）
+uv run python $S --trade-sim --entry-filter j_low --scorer b1_dual --cost-bps 25 --sample-n 1000
+uv run python $S --trade-sim --entry-filter j_low --scorer b1_dual --cost-bps 25 --sample-n 1000 --scale-out 0.5
+# 再扫比例：0.3 / 0.5 / 0.7，看 payoff_ratio 与 total_R 的曲线
+
+# ② 止损口径扫描（另一个盈亏比杠杆）
+uv run python $S --trade-sim --entry-filter j_low --scorer b1_dual --scale-out 0.5 --stop-mode low
+uv run python $S --trade-sim --entry-filter j_low --scorer b1_dual --scale-out 0.5 --stop-mode pct --stop-pct 5
+uv run python $S --trade-sim --entry-filter j_low --scorer b1_dual --scale-out 0.5 --stop-mode pct --stop-pct 8
+
+# ③ RSI 因子（H3）
+uv run python $S --trade-sim --entry-filter j_low --scorer rsi_state --scale-out 0.5 --sample-n 1000
+uv run python $S --trade-sim --entry-filter j_low_rsi_strong --scale-out 0.5 --sample-n 1000
+uv run python $S --trade-sim --entry-filter j_low_rsi_div    --scale-out 0.5 --sample-n 1000
+
+# ④ 主升始发点（H4）——两种 CROSS 口径必须都跑
+uv run python $S --trade-sim --entry-filter main_rally       --scale-out 0.5 --sample-n 1000
+uv run python $S --trade-sim --entry-filter main_rally_above --scale-out 0.5 --sample-n 1000
+
+# ⑤ B2 与底部异动（H2）
+uv run python $S --trade-sim --entry-filter j_low --scorer b2 --scale-out 0.5 --sample-n 1000
+uv run python $S --trade-sim --entry-filter surge_then_b1     --scale-out 0.5 --sample-n 1000
+
+# ⑥ 标记数 → 仓位的可行性（M1 第③点）：按命中标记数分组，看 expectancy_R 是否单调递增
+```
+
+**样本要求**：`--sample-n 1000`（带 seed 随机抽样）。此前 100 只且疑似取前 100 个代码，
+会全是深市主板、有选择偏差；且 A 档只剩 7 条、无统计效力。
