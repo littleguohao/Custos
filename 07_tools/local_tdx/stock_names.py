@@ -5,14 +5,21 @@
 仓库里没有别的 ST 判据可用（tq_sector 的板块分类不含 ST/风险警示分类）。所以这张表
 的可用性与新鲜度直接决定 ST 股会不会进候选池。
 
-数据源优先级（2026-08-03 定）::
+数据源优先级（2026-08-04 改定，owner 原则「尽量用本地 TDX 接口，HTTP 不稳定」）::
 
-    ① 东财 push2 ulist.np —— 按代码列表**批量**查，纯 HTTP，不依赖 TdxW/Windows。
-       这是主路径：ST 判定只需要知道**候选股**是不是 ST，不需要全市场表。候选池
-       通常几十到几百只，一次 200 只、1~3 个请求即可，几乎不触发限流。
-    ② TQ-Local get_stock_info —— 需 TdxW.exe 运行，逐只取（对少量候选也够快）
-    ③ 本地缓存 —— 兜底，读取时判时效
-    ④ mootdx client.stocks —— **2026-07 起持续失败**（'>' NoneType），仅最后尝试
+    ① TDX 协议 client.stocks —— **主路径**。实测 50725 条（沪深）/ **1.6 秒**，
+       含 name 列，ST 识别正确（221 只）。一次拿全市场再本地筛，比分批 HTTP 又快又稳。
+       ⚠️ 不含北交所：TDX 服务器只给沪深（stocks() 硬校验 market in [0,1]；绕过校验
+       直接调 client.get_security_list(market=2) 实测也是空返回）。
+    ② 东财 push2 ulist.np —— **只补 TDX 拿不到的票**（北交所 92/83/87/43 段）
+    ③ TQ-Local get_stock_info —— 需 TdxW.exe 运行，逐只取
+    ④ 本地缓存 —— 兜底，读取时判时效
+
+为什么把 ① 从"已失效、仅最后尝试"提回主路径：它此前被判定
+「2026-07 起持续失败（'>' NoneType）」，真实原因是 `local_tdx_data._get_client()`
+**永不重连** —— 连接一断，`stock_count()` 返回 None，mootdx 内部 `if counts > 0`
+就抛 `'>' NoneType`。接口本身完好。给客户端加上时效与自动重建后，本地协议全面可用，
+而当时的应对（引入东财 HTTP 当主路径）反而把系统绑到了更不稳的源上。
 
 为什么不用东财 clist 拉全市场：实测它单页最多 100 条，且连续翻页约 10 页（1000 条）
 后即 RemoteDisconnected，拉不完 5888 只。全市场缓存构建仍保留 clist 路径但只是
@@ -269,22 +276,38 @@ def fetch_from_tq(codes=None, progress_every: int = 500) -> dict[str, str]:
     return out
 
 
-def fetch_from_mootdx() -> dict[str, str]:
-    """mootdx 在线名称表。2026-07 起持续失败，保留仅作最后尝试。"""
+def fetch_from_tdx_protocol() -> dict[str, str]:
+    """TDX 协议全市场名称表（沪深）。**主路径**——本地协议优于 HTTP。
+
+    实测 2026-08-04：50725 条 / **1.6 秒**，ST 识别正确（221 只）。
+    比东财分批 HTTP 更快也更稳（东财 clist 单页 100 条、翻约 10 页即
+    RemoteDisconnected；ulist 批量查要分多次请求且受限流）。
+
+    ⚠️ 不含北交所（TDX 服务器只给沪深），BJ 候选须由东财补。
+    """
     try:
         import local_tdx_data
         return local_tdx_data.get_stock_name_map() or {}
     except Exception as exc:  # noqa: BLE001
-        print(f"[WARN] mootdx 名称源失败: {exc}", file=sys.stderr)
+        print(f"[WARN] TDX 协议名称源失败: {type(exc).__name__}: {exc}", file=sys.stderr)
         return {}
+
+
+def fetch_from_mootdx() -> dict[str, str]:
+    """旧名保留（曾被判定失效，实为连接不重连所致）。等价于 fetch_from_tdx_protocol。"""
+    return fetch_from_tdx_protocol()
 
 
 def fetch_name_map(session=None) -> tuple[dict[str, str], str]:
     """取**全市场**名称表，返回 (name_map, source)。用于构建缓存，不是主路径。
 
-    顺序：TQ-Local（能取全）→ 东财 clist（受限流，尽力而为）→ mootdx（已失效）。
-    全部失败返回 ({}, "unavailable")。绝不 raise。
+    顺序（2026-08-04 改为 TDX 优先）：TDX 协议（沪深 50725 条 / 1.6s）→ TQ-Local
+    （需 TdxW）→ 东财 clist（受限流，尽力而为）。全部失败返回 ({}, "unavailable")。
+    绝不 raise。
     """
+    m = fetch_from_tdx_protocol()
+    if m:
+        return m, "tdx_protocol"
     m = fetch_from_tq()
     if m:
         return m, "tq_local"
@@ -295,17 +318,25 @@ def fetch_name_map(session=None) -> tuple[dict[str, str], str]:
             return m, "eastmoney_clist"
     except Exception as exc:  # noqa: BLE001
         print(f"[WARN] 东财 clist 名称源失败: {type(exc).__name__}: {exc}", file=sys.stderr)
-    m = fetch_from_mootdx()
-    if m:
-        return m, "mootdx"
     return {}, "unavailable"
 
 
 def resolve_names_for(codes, session=None) -> tuple[dict[str, str], dict[str, Any]]:
     """**按需**取候选股名称并如实报告 ST 判定可信度。这是选股链该用的入口。
 
-    顺序：东财 ulist 批量 → TQ-Local（仅这批代码）→ 本地缓存。返回 (names, diag)，
-    ``diag["st_filter"]``：
+    顺序（2026-08-04 改，owner 原则「尽量用本地 TDX 接口，HTTP 不稳定」）::
+
+        ① TDX 协议全市场表  50725 条 / 1.6s，沪深全覆盖，ST 识别正确
+        ② 东财 ulist 批量    **仅用于 TDX 拿不到的票**（北交所 92/83/87/43 段）
+        ③ TQ-Local          需 TdxW.exe 运行
+        ④ 本地缓存           兜底，读取时判时效
+
+    改动理由：原顺序把东财 ulist 当主路径，是因为当时认为 mootdx 名称源已失效。
+    实际是 `_get_client()` 永不重连所致（连接一断，`stock_count()` 返回 None，
+    mootdx 内部 `None > 0` 抛 `'>' NoneType`），接口本身好得很。修好重连后
+    TDX 一次全量只要 1.6s，比东财分批 HTTP 又快又稳。
+
+    返回 (names, diag)，``diag["st_filter"]``：
 
       ok           —— 全部候选都拿到了名称，ST 硬排除可信
       partial      —— 部分候选没拿到（missing_codes 列出），那些票的 ST 状态未知
@@ -323,20 +354,37 @@ def resolve_names_for(codes, session=None) -> tuple[dict[str, str], dict[str, An
 
     names: dict[str, str] = {}
     source = "unavailable"
+
+    # ① TDX 协议（主路径）：一次拿全市场再本地筛，沪深全覆盖
     try:
-        names = fetch_names_for(wanted, session=session)
-        if names:
-            source = "eastmoney_ulist"
+        full = fetch_from_tdx_protocol()
+        hit = {c: full[c] for c in wanted if c in full}
+        if hit:
+            names.update(hit)
+            source = "tdx_protocol"
     except Exception as exc:  # noqa: BLE001
-        print(f"[WARN] 东财批量名称失败（回退 TQ-Local）: {type(exc).__name__}: {exc}",
+        print(f"[WARN] TDX 协议名称源失败（回退 HTTP）: {type(exc).__name__}: {exc}",
               file=sys.stderr)
 
+    # ② 东财 ulist：只补 TDX 拿不到的（主要是北交所——TDX 服务器不提供 BJ）
     missing = [c for c in wanted if c not in names]
+    if missing:
+        try:
+            em = fetch_names_for(missing, session=session)
+            if em:
+                names.update(em)
+                source = f"{source}+eastmoney_ulist" if source != "unavailable" \
+                    else "eastmoney_ulist"
+                missing = [c for c in wanted if c not in names]
+        except Exception as exc:  # noqa: BLE001
+            print(f"[WARN] 东财批量名称失败（回退 TQ-Local）: {type(exc).__name__}: {exc}",
+                  file=sys.stderr)
+
     if missing:
         tq = fetch_from_tq(missing, progress_every=0)
         if tq:
             names.update(tq)
-            source = f"{source}+tq_local" if names else "tq_local"
+            source = f"{source}+tq_local" if source != "unavailable" else "tq_local"
             missing = [c for c in wanted if c not in names]
 
     cache_meta: dict[str, Any] = {}

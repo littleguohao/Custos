@@ -16,6 +16,7 @@ import json
 import math
 import os
 import sys
+import time
 import warnings
 from pathlib import Path
 from typing import Any, Iterable, Optional
@@ -37,6 +38,10 @@ from code_utils import market_of, norm_code as _cu_norm_code  # noqa: E402
 # --- mootdx lazy initialization ---
 _reader = None
 _client = None
+_client_created_at: Optional[float] = None
+# 连接最长复用 10 分钟：通达信服务器会踢掉空闲连接，而 18:00 链要跑几百只票，
+# 中途连接失效时旧实现会把剩下全部拖挂（且报的是看不懂的 "'>' NoneType"）。
+CLIENT_MAX_AGE_SEC = 600.0
 
 
 def _get_reader():
@@ -48,12 +53,48 @@ def _get_reader():
     return _reader
 
 
-def _get_client():
-    global _client
-    if _client is None:
+def _get_client(force_new: bool = False):
+    """TDX 协议客户端。**带连接时效与强制重建**。
+
+    原实现是「永不重连的进程级单例」：连接一旦断开（TCP 空闲超时、服务器踢连接、
+    换网络），单例仍持有死连接，之后每次调用都失败。而 mootdx 的 `stocks()` 内部是
+    `if counts > 0`，`stock_count()` 失败返回 None 时就抛 ``'>' NoneType``——
+    这正是仓库里记了很久的「mootdx 名称源 2026-07 起持续失败」的真实原因。
+    当时把它归因为「接口失效」并改走东财 HTTP 绕过，而真正的 bug 一直在。
+
+    长跑进程（18:00 选股链跑几百只票）尤其需要这个：连接可能在中途失效。
+    """
+    global _client, _client_created_at
+    now = time.time()
+    too_old = (_client_created_at is not None
+               and (now - _client_created_at) > CLIENT_MAX_AGE_SEC)
+    if force_new or _client is None or too_old:
+        if _client is not None:
+            try:
+                _client.close()
+            except Exception:  # noqa: BLE001, S110
+                pass
         from mootdx.quotes import Quotes
         _client = Quotes.factory(market="std", quiet=True)
+        _client_created_at = now
     return _client
+
+
+def _with_client_retry(fn, *, tries: int = 2, what: str = "tdx"):
+    """调用 TDX 协议，连接失效时**重建连接**再试。
+
+    第 2 次起强制新建连接——重试用同一个死连接是没意义的（原实现的问题就在这）。
+    """
+    last: Optional[Exception] = None
+    for i in range(max(1, tries)):
+        try:
+            return fn(_get_client(force_new=(i > 0)))
+        except Exception as e:  # noqa: BLE001
+            last = e
+            if i + 1 < tries:
+                print(f"[WARN] {what} 第 {i + 1} 次失败（{type(e).__name__}: {e}），"
+                      f"重建连接重试", file=sys.stderr)
+    raise LocalTdxError(f"{what} 连续 {tries} 次失败: {last}") from last
 
 
 class LocalTdxError(RuntimeError):
@@ -475,21 +516,38 @@ def get_stock_list(pool_type: str = "5") -> list[str]:
 
 
 def get_stock_name_map(pool_type: str = "5") -> dict[str, str]:
-    """Get {code6: name} for SH+SZ A-shares via mootdx online (best-effort)."""
-    client = _get_client()
+    """{code6: name} for SH+SZ via TDX protocol. **本地协议优先，不走 HTTP。**
+
+    实测（2026-08-04）：深市 23906 条、沪市 27642 条，含 `name` 列，
+    ST 识别正确（`*ST美丽` / `*ST康佳A` / `ST海王` …共 221 只）。
+
+    此前这个函数被判定为「2026-07 起持续失效」并改走东财 HTTP，实际原因是
+    `_get_client()` 永不重连（见那里的注释）。现在走 `_with_client_retry`，
+    连接失效会重建。
+
+    ⚠️ **不含北交所**：TDX 服务器只提供沪深（`stocks()` 硬校验 `market in [0,1]`，
+    绕过校验直接调 `client.get_security_list(market=2)` 实测也是空返回；
+    已取到的沪深列表里没有 92/83/87 段）。北交所名称仍须东财补充。
+
+    返回的 name 会剥掉通达信的 `\\x00` 填充字节（原始数据形如 `创业板\\x00\\x00`）。
+    """
     from mootdx.consts import MARKET_SH, MARKET_SZ
     result: dict[str, str] = {}
     for mkt in [MARKET_SH, MARKET_SZ]:
         try:
-            stocks = client.stocks(market=mkt)
-            if stocks is not None and not stocks.empty and "code" in stocks.columns:
-                for _, row in stocks.iterrows():
-                    code6 = _strip_suffix(str(row["code"]))
-                    name = str(row.get("name", "") or "").strip()
-                    if code6 and name:
-                        result[code6] = name
-        except Exception as e:
+            stocks = _with_client_retry(
+                lambda c, m=mkt: c.stocks(market=m), what=f"stocks(market={mkt})")
+        except Exception as e:  # noqa: BLE001
             print(f"[WARN] get_stock_name_map market={mkt} failed: {e}", file=sys.stderr)
+            continue
+        if stocks is None or stocks.empty or "code" not in stocks.columns:
+            continue
+        codes = stocks["code"].astype(str).str.split(".").str[0].str.zfill(6)
+        names = (stocks.get("name", pd.Series(dtype=str)).astype(str)
+                 .str.replace("\x00", "", regex=False).str.strip())
+        for code6, name in zip(codes, names):
+            if code6 and name:
+                result[code6] = name
     return result
 
 

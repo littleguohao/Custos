@@ -238,6 +238,77 @@ def diff_events(prev: dict[str, float], rows: list[dict], observed_on: str,
     return out
 
 
+def build_from_tdx(codes: list[str], *, progress_every: int = 200,
+                   refresh: bool = False) -> list[dict]:
+    """**本地 TDX 路径**：从通达信 xdxr 权息数据提取股本变动全史 → 同一事件契约。
+
+    owner 原则「尽量用本地 TDX 接口，HTTP 不稳定」（2026-08-04）。这条路比东财优越
+    在于**契约天然匹配**：本模块的设计就是「总股本只在增发/回购/送转/解禁时变，
+    极稀疏 ⇒ 只在观测到变化时写一行」，而 xdxr 的 `category=5`「股本变化」
+    **本身就是事件流**；东财那边要逐交易日拉全市场快照、再 diff 压成事件，
+    既要处理采样频率（月频采样会把变动日期界定成一个月的区间），又要应付限流。
+
+    实测（2026-08-04）与真实值对照：万科 A 总股本 119.31 亿**分毫不差**、
+    流通 97.17 亿（正确扣掉不流通的 B 股）；茅台 12.50 亿；浦发 333.06 亿。
+    PIT 也对：万科 2020 年 113.02 亿 → 2023 年 116.31 亿 → 2026 年 119.31 亿。
+
+    与东财路径的差异（如实记录，不要假装等价）：
+      · `close` / `market_cap` 字段为 None —— xdxr 只给股本，市值需自己用
+        当日收盘价乘（`total_shares_at()` + K 线）。东财那边直接给这两个值。
+      · `name` 为空 —— 权息数据不含名称，需要时从名称表取。
+      · `prev_sample` 为 None，`observed_on` 就是**精确的股本变动日**
+        （比东财的月频采样区间更准）。
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    # ⚠️ 必须与调用方走同一条导入路径，否则同一个文件会被加载成两个模块
+    # （`adjust_factors` 与 `local_tdx.adjust_factors`），`AdjustError` 就成了两个
+    # 不同的类，下面的 except 静默失效、异常直接穿透上抛。
+    # 本模块既可能被当脚本跑（python fetch_market_cap.py）也可能被当包模块导入，
+    # 故按包内优先、脚本模式回退的顺序尝试。
+    try:
+        from .adjust_factors import AdjustError, get_shares_events  # noqa: PLC0415
+    except ImportError:                                             # 脚本模式
+        from adjust_factors import AdjustError, get_shares_events   # noqa: PLC0415
+
+    events: list[dict] = []
+    failed = 0
+    for i, code in enumerate(sorted({str(c)[:6] for c in codes}), 1):
+        try:
+            evs = get_shares_events(code, refresh=refresh)
+        except AdjustError as e:
+            failed += 1
+            if failed <= 5:
+                print(f"[WARN] {code} 股本取数失败: {e}", file=sys.stderr)
+            continue
+        prev = None
+        for e in evs:
+            ts = e.get("total_shares")
+            if not ts or ts <= 0:
+                continue
+            if prev is not None and abs(prev - ts) < 1e-6:
+                continue                                        # 未变化，不写
+            events.append({
+                "code": code,
+                "name": "",                                     # xdxr 不含名称
+                "observed_on": e["date"],                       # 精确变动日
+                "prev_sample": None,
+                "total_shares": float(ts),
+                "prev_shares": prev,
+                "free_shares": e.get("float_shares"),
+                "close": None,                                  # xdxr 不含价格
+                "market_cap": None,
+                "kind": "first_seen" if prev is None else "change",
+                "source": "tdx_xdxr",
+            })
+            prev = float(ts)
+        if progress_every and i % progress_every == 0:
+            print(f"[tdx] {i} 只 | 事件 {len(events)} | 失败 {failed}",
+                  file=sys.stderr, flush=True)
+    if failed:
+        print(f"[WARN] {failed} 只股本取数失败（这些票没有股本事件）", file=sys.stderr)
+    return events
+
+
 EM_F10_EQUITY_API = "https://datacenter.eastmoney.com/securities/api/data/v1/get"
 
 
@@ -430,7 +501,37 @@ def main(argv=None) -> int:
     ap.add_argument("--backfill-history", action="store_true",
                     help=f"回填 {MV_START} 之前的股本变动史(东财 F10 全史含增发;补 2015-2017 市值缺口)")
     ap.add_argument("--limit", type=int, default=0, help="只处理前 N 只(排障用)")
+    ap.add_argument("--from-tdx", action="store_true",
+                    help="**本地 TDX 路径**(推荐):从通达信 xdxr 提取股本变动全史。"
+                         "契约天然匹配(xdxr 的 category=5 本身就是事件流),"
+                         "且 observed_on 是精确变动日而非月频采样区间。"
+                         "代价:不含 close/market_cap/name(需自己乘收盘价)")
+    ap.add_argument("--codes", default="", help="配合 --from-tdx:逗号分隔;留空=本地全市场")
     args = ap.parse_args(argv)
+
+    if args.from_tdx:
+        if args.codes:
+            codes = [c.strip()[:6] for c in args.codes.split(",") if c.strip()]
+        else:
+            try:
+                import local_tdx_data
+                codes = sorted(local_tdx_data.list_local_codes())
+            except Exception as e:                             # noqa: BLE001
+                print(f"[ERR] 读不到本地代码表: {e}", file=sys.stderr)
+                return 2
+        try:
+            from code_utils import is_index
+            codes = [c for c in codes if not is_index(c)]       # 指数没有股本
+        except Exception:                                      # noqa: BLE001, S110
+            pass
+        if args.limit:
+            codes = codes[:args.limit]
+        evs = build_from_tdx(codes)
+        res = merge_write(evs, args.out) if evs else {"added": 0}
+        print(json.dumps({"source": "tdx_xdxr", "codes": len(codes),
+                          "events": len(evs), **res}, ensure_ascii=False))
+        return 0
+
     out_path, sp_path = Path(args.out), Path(args.samples_out)
 
     if args.backfill_history:

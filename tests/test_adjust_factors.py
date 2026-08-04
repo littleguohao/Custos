@@ -271,3 +271,197 @@ class TestEntryPointDefault:
         monkeypatch.setattr(af, "get_xdxr", boom)
         with pytest.raises(af.AdjustError):
             af.qfq_table("600000", _mk([10] * 5), strict=True)
+
+
+class TestSharesEvents:
+    """股本数据来自同一份 xdxr（category=5「股本变化」），替代东财市值接口。
+
+    owner 原则「尽量用本地 TDX 接口，HTTP 不稳定」（2026-08-04）。
+    """
+
+    def _raw(self):
+        return pd.DataFrame([
+            {"year": 2020, "month": 5, "day": 20, "category": 5,
+             "houzongguben": 1130200.0, "panhouliutong": 970000.0,
+             "fenhong": None, "songzhuangu": None, "peigu": None,
+             "peigujia": None, "suogu": None},
+            {"year": 2023, "month": 6, "day": 30, "category": 5,
+             "houzongguben": 1163100.0, "panhouliutong": 971000.0,
+             "fenhong": None, "songzhuangu": None, "peigu": None,
+             "peigujia": None, "suogu": None},
+            {"year": 2025, "month": 7, "day": 16, "category": 1,
+             "fenhong": 4.2, "songzhuangu": 0, "peigu": 0, "peigujia": 0,
+             "suogu": None, "houzongguben": None, "panhouliutong": None},
+        ])
+
+    def test_extracts_shares_in_shares_not_wan(self):
+        """xdxr 单位是**万股**，必须换算成股——差 10000 倍的错误不会报错只会算错市值。"""
+        sh = af.normalize_shares(self._raw())
+        assert len(sh) == 2
+        assert sh[0]["total_shares"] == pytest.approx(1130200.0 * 10000)
+        assert sh[0]["float_shares"] == pytest.approx(970000.0 * 10000)
+
+    def test_price_events_excluded_from_shares(self):
+        sh = af.normalize_shares(self._raw())
+        assert all(e["date"] != "2025-07-16" for e in sh)
+
+    def test_shares_events_do_not_pollute_price_events(self):
+        """两类事件必须分开：股本变化不影响单股权益，混进复权会算错因子。"""
+        ev = af.normalize_xdxr(self._raw())
+        assert len(ev) == 1 and ev[0]["date"] == "2025-07-16"
+
+    def test_sorted_and_empty_safe(self):
+        assert af.normalize_shares(None) == []
+        assert af.normalize_shares(pd.DataFrame()) == []
+        sh = af.normalize_shares(self._raw())
+        assert [e["date"] for e in sh] == sorted(e["date"] for e in sh)
+
+    def test_point_in_time_lookup(self, tmp_path, monkeypatch):
+        """**PIT**：算历史市值只能用当时的股本，用今天的是未来函数。"""
+        monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
+        af.save_xdxr_cache("000002", [], fetched_at=af.cn_now().isoformat(),
+                           shares=af.normalize_shares(self._raw()))
+        assert af.total_shares_at("000002", "2019-01-01") is None, "事件之前应为 None"
+        assert af.total_shares_at("000002", "2021-01-01") == pytest.approx(1130200e4)
+        assert af.total_shares_at("000002", "2026-08-04") == pytest.approx(1163100e4)
+
+    def test_float_shares_field(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
+        af.save_xdxr_cache("000002", [], fetched_at=af.cn_now().isoformat(),
+                           shares=af.normalize_shares(self._raw()))
+        v = af.total_shares_at("000002", "2026-08-04", field="float_shares")
+        assert v == pytest.approx(971000e4)
+
+    def test_cache_holds_both_kinds(self, tmp_path, monkeypatch):
+        """一份缓存装两类——两者来自同一次 xdxr 调用，分开存会多跑一次网络。"""
+        monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
+        af.save_xdxr_cache("600000", [_ev("2025-07-16", fenhong=4.2)],
+                           fetched_at="x", shares=[{"date": "2025-01-01",
+                                                    "total_shares": 1e10,
+                                                    "float_shares": 1e10}])
+        d = json.loads((tmp_path / "600000.json").read_text(encoding="utf-8"))
+        assert len(d["events"]) == 1 and len(d["shares"]) == 1
+
+    def test_saving_events_preserves_existing_shares(self, tmp_path, monkeypatch):
+        """只更新权息时不得把已有股本数据覆盖没了。"""
+        monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
+        af.save_xdxr_cache("600000", [], fetched_at="x",
+                           shares=[{"date": "2025-01-01", "total_shares": 1e10,
+                                    "float_shares": 1e10}])
+        af.save_xdxr_cache("600000", [_ev("2026-07-16", fenhong=4.2)], fetched_at="y")
+        d = json.loads((tmp_path / "600000.json").read_text(encoding="utf-8"))
+        assert len(d["shares"]) == 1, "股本数据被覆盖丢失"
+        assert len(d["events"]) == 1
+
+
+class TestMarketCapFromTdx:
+    def test_contract_matches_eastmoney_path(self, monkeypatch):
+        """本地路径必须产出与东财路径同样的事件契约，否则下游 load_events 读不了。"""
+        from local_tdx import fetch_market_cap as fmc
+
+        monkeypatch.setattr(
+            "local_tdx.adjust_factors.get_shares_events",
+            lambda code, refresh=False: [
+                {"date": "2020-05-20", "total_shares": 1.13e10, "float_shares": 9.7e9},
+                {"date": "2023-06-30", "total_shares": 1.16e10, "float_shares": 9.71e9}])
+        evs = fmc.build_from_tdx(["000002"], progress_every=0)
+        assert len(evs) == 2
+        for e in evs:
+            assert set(e) >= {"code", "name", "observed_on", "prev_sample",
+                              "total_shares", "prev_shares", "free_shares",
+                              "close", "market_cap", "kind"}
+        assert evs[0]["kind"] == "first_seen" and evs[1]["kind"] == "change"
+        assert evs[1]["prev_shares"] == pytest.approx(1.13e10)
+        assert evs[0]["source"] == "tdx_xdxr"
+
+    def test_unchanged_shares_not_written(self, monkeypatch):
+        from local_tdx import fetch_market_cap as fmc
+        monkeypatch.setattr(
+            "local_tdx.adjust_factors.get_shares_events",
+            lambda code, refresh=False: [
+                {"date": "2020-05-20", "total_shares": 1.13e10, "float_shares": None},
+                {"date": "2021-05-20", "total_shares": 1.13e10, "float_shares": None}])
+        evs = fmc.build_from_tdx(["000002"], progress_every=0)
+        assert len(evs) == 1, "股本没变不该写事件"
+
+    def test_failure_is_skipped_not_fatal(self, monkeypatch):
+        from local_tdx import fetch_market_cap as fmc
+
+        def boom(code, refresh=False):
+            raise af.AdjustError("down")
+        monkeypatch.setattr("local_tdx.adjust_factors.get_shares_events", boom)
+        assert fmc.build_from_tdx(["000002"], progress_every=0) == []
+
+
+class TestClientReconnect:
+    """「mootdx 名称源 2026-07 起持续失败」的真实原因：客户端永不重连。
+
+    连接一断，stock_count() 返回 None，mootdx 内部 `if counts > 0` 抛 `'>' NoneType`。
+    当时把它归因成「接口失效」并改走东财 HTTP，真正的 bug 留了一个月。
+    """
+
+    def test_retry_rebuilds_connection(self, monkeypatch):
+        from local_tdx import local_tdx_data as ltd
+        built = []
+
+        class Good:
+            def stocks(self, market=0):
+                return "ok"
+
+            def close(self):
+                pass
+
+        class Dead:
+            def stocks(self, market=0):
+                raise TypeError("'>' not supported between 'NoneType' and 'int'")
+
+            def close(self):
+                pass
+
+        seq = [Dead(), Good()]
+
+        def fake_factory(**kw):
+            built.append(1)
+            return seq[min(len(built) - 1, len(seq) - 1)]
+
+        monkeypatch.setattr(ltd, "_client", None)
+        monkeypatch.setattr(ltd, "_client_created_at", None)
+        import mootdx.quotes as mq
+        monkeypatch.setattr(mq.Quotes, "factory", staticmethod(fake_factory))
+        got = ltd._with_client_retry(lambda c: c.stocks(market=1), tries=2)
+        assert got == "ok"
+        assert len(built) == 2, "第二次必须**重建**连接，用同一个死连接重试没意义"
+
+    def test_raises_after_exhausting_tries(self, monkeypatch):
+        from local_tdx import local_tdx_data as ltd
+
+        class Dead:
+            def stocks(self, market=0):
+                raise OSError("connection reset")
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(ltd, "_client", None)
+        monkeypatch.setattr(ltd, "_client_created_at", None)
+        import mootdx.quotes as mq
+        monkeypatch.setattr(mq.Quotes, "factory", staticmethod(lambda **kw: Dead()))
+        with pytest.raises(ltd.LocalTdxError):
+            ltd._with_client_retry(lambda c: c.stocks(market=1), tries=2)
+
+    def test_connection_expires_by_age(self, monkeypatch):
+        """长跑进程（18:00 跑几百只票）中途连接会被服务器踢，靠时效主动重建。"""
+        from local_tdx import local_tdx_data as ltd
+        built = []
+
+        class C:
+            def close(self):
+                pass
+
+        monkeypatch.setattr(ltd, "_client", C())
+        monkeypatch.setattr(ltd, "_client_created_at", 0.0)     # 很久以前
+        import mootdx.quotes as mq
+        monkeypatch.setattr(mq.Quotes, "factory",
+                            staticmethod(lambda **kw: built.append(1) or C()))
+        ltd._get_client()
+        assert built, "超过 CLIENT_MAX_AGE_SEC 应重建"

@@ -245,7 +245,10 @@ class TestResolveNamesFor:
     """st_filter 四态必须如实反映 ST 判定可信度——调用方据此决定能否声称已排除 ST。"""
 
     def _patch_sources(self, monkeypatch, *, em=None, tq=None, cache=None,
-                       cache_meta=None):
+                       cache_meta=None, tdx=None):
+        # TDX 协议是 2026-08-04 起的主路径；默认给空表 = 模拟 TDX 不可用，
+        # 这样既有用例（验证 HTTP/TQ/缓存回退链）的语义保持不变。
+        monkeypatch.setattr(sn, "fetch_from_tdx_protocol", lambda **kw: tdx or {})
         monkeypatch.setattr(sn, "fetch_names_for",
                             (lambda codes, **kw: em) if em is not None
                             else (lambda codes, **kw: (_ for _ in ()).throw(
@@ -347,6 +350,80 @@ class TestClistBestEffort:
         assert len(got) == 1
 
 
+class TestTdxProtocolIsPrimary:
+    """owner 原则：尽量用本地 TDX 接口，HTTP 不稳定（2026-08-04）。
+
+    背景：TDX 名称源曾被判定「2026-07 起持续失败（'>' NoneType）」并改走东财 HTTP，
+    真实原因是 local_tdx_data._get_client() 永不重连——连接一断 stock_count() 返回
+    None，mootdx 内部 `if counts > 0` 就抛 TypeError。接口本身完好。
+    """
+
+    def _patch(self, monkeypatch, *, tdx=None, em=None, tq=None, cache=None):
+        monkeypatch.setattr(sn, "fetch_from_tdx_protocol", lambda **kw: tdx or {})
+        monkeypatch.setattr(sn, "fetch_names_for", lambda codes, **kw: em or {})
+        monkeypatch.setattr(sn, "fetch_from_tq", lambda codes=None, **kw: tq or {})
+        monkeypatch.setattr(sn, "load_cache",
+                            lambda path=None: (cache or {}, {"available": bool(cache),
+                                                             "stale": False}))
+
+    def test_tdx_wins_when_available(self, monkeypatch):
+        """TDX 有数据时不该再走 HTTP。"""
+        called = []
+        monkeypatch.setattr(sn, "fetch_from_tdx_protocol",
+                            lambda **kw: {"600000": "浦发银行"})
+        monkeypatch.setattr(sn, "fetch_names_for",
+                            lambda codes, **kw: called.append(codes) or {})
+        monkeypatch.setattr(sn, "fetch_from_tq", lambda codes=None, **kw: {})
+        monkeypatch.setattr(sn, "load_cache", lambda path=None: ({}, {}))
+        names, diag = _REAL_RESOLVE(["600000"])
+        assert names == {"600000": "浦发银行"}
+        assert diag["name_map_source"] == "tdx_protocol"
+        assert called == [], "TDX 已覆盖全部候选，不该再发 HTTP 请求"
+
+    def test_http_only_fills_what_tdx_lacks(self, monkeypatch):
+        """北交所（TDX 服务器不提供）才由东财补——HTTP 请求里只该有缺的那些票。"""
+        asked = []
+
+        def _em(codes, **kw):
+            asked.extend(codes)
+            return {"920819": "颖泰生物"}
+        monkeypatch.setattr(sn, "fetch_from_tdx_protocol",
+                            lambda **kw: {"600000": "浦发银行", "300750": "宁德时代"})
+        monkeypatch.setattr(sn, "fetch_names_for", _em)
+        monkeypatch.setattr(sn, "fetch_from_tq", lambda codes=None, **kw: {})
+        monkeypatch.setattr(sn, "load_cache", lambda path=None: ({}, {}))
+        names, diag = _REAL_RESOLVE(["600000", "300750", "920819"])
+        assert len(names) == 3 and diag["st_filter"] == "ok"
+        assert asked == ["920819"], f"只该问 TDX 缺的票，实际问了 {asked}"
+        assert "tdx_protocol" in diag["name_map_source"]
+        assert "eastmoney_ulist" in diag["name_map_source"]
+
+    def test_st_recognized_from_tdx(self, monkeypatch):
+        """ST 判定靠名称，TDX 源必须能支撑它。"""
+        self._patch(monkeypatch, tdx={"000005": "*ST美丽", "600000": "浦发银行"})
+        names, diag = _REAL_RESOLVE(["000005", "600000"])
+        assert "ST" in names["000005"].upper()
+        assert diag["st_filter"] == "ok"
+
+    def test_degrades_to_http_when_tdx_down(self, monkeypatch):
+        """TDX 挂了要能回退 HTTP，不能因为改了优先级就失去冗余。"""
+        def _boom(**kw):
+            raise RuntimeError("tdx down")
+        monkeypatch.setattr(sn, "fetch_from_tdx_protocol", _boom)
+        monkeypatch.setattr(sn, "fetch_names_for", lambda codes, **kw: {"600000": "浦发银行"})
+        monkeypatch.setattr(sn, "fetch_from_tq", lambda codes=None, **kw: {})
+        monkeypatch.setattr(sn, "load_cache", lambda path=None: ({}, {}))
+        names, diag = _REAL_RESOLVE(["600000"])
+        assert names == {"600000": "浦发银行"}
+        assert diag["st_filter"] == "ok"
+
+    def test_full_map_prefers_tdx(self, monkeypatch):
+        monkeypatch.setattr(sn, "fetch_from_tdx_protocol",
+                            lambda **kw: {"600000": "浦发银行"})
+        m, src = sn.fetch_name_map()
+        assert src == "tdx_protocol" and m
+
+
 class TestClistCoverageGuard:
     """fetch_name_map / resolve_name_map：clist 残缺表不得落盘覆盖完整缓存。"""
 
@@ -358,6 +435,7 @@ class TestClistCoverageGuard:
         monkeypatch.setattr(sn, "fetch_from_mootdx", lambda: {})
 
     def test_fetch_name_map_passes_coverage_threshold(self, monkeypatch):
+        monkeypatch.setattr(sn, "fetch_from_tdx_protocol", lambda **kw: {})
         """auto 路径调 clist 必须带 min_coverage（否则残缺表会被当成功结果落盘）。"""
         seen = {}
         monkeypatch.setattr(sn, "fetch_from_tq", lambda *a, **kw: {})
@@ -369,6 +447,7 @@ class TestClistCoverageGuard:
         assert seen.get("min_coverage") == sn.CLIST_MIN_COVERAGE
 
     def test_partial_clist_falls_back_to_cache_without_overwrite(self, monkeypatch):
+        monkeypatch.setattr(sn, "fetch_from_tdx_protocol", lambda **kw: {})
         """TdxW 关 + clist 覆盖率不足 → 回退旧缓存，且**绝不**调 save_cache。"""
         self._patch_sources(monkeypatch, sn.NameFetchIncomplete(
             "clist 覆盖率不足: 1000/5888 (<80%)，拒绝当全量表落盘"))

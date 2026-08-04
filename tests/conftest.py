@@ -41,3 +41,7 @@ def _block_name_resolution_network(monkeypatch):
             "请注入 name_resolver 或 monkeypatch 替身")
     monkeypatch.setattr(stock_names, "fetch_names_for", _no_net, raising=False)
     monkeypatch.setattr(stock_names, "fetch_all_from_clist", _no_net, raising=False)
+    # TDX 协议源同样要堵：2026-08-04 起它是名称表主路径，走的是通达信 TCP 协议
+    # （不是 HTTP，但一样是真实网络，会让测试变慢且结果依赖外部服务可用性）
+    monkeypatch.setattr(stock_names, "fetch_from_tdx_protocol", _no_net, raising=False)
+    monkeypatch.setattr(stock_names, "fetch_from_mootdx", _no_net, raising=False)

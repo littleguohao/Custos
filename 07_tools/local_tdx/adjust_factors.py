@@ -76,11 +76,22 @@ def load_xdxr_cache(code: str) -> Optional[list[dict[str, Any]]]:
 
 
 def save_xdxr_cache(code: str, events: list[dict[str, Any]],
-                    fetched_at: str = "") -> None:
+                    fetched_at: str = "",
+                    shares: Optional[list[dict[str, Any]]] = None) -> None:
+    """一份缓存同时装权息事件与股本事件——两者来自同一次 xdxr 调用，分开存会多跑一次网络。"""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     p = _cache_path(code)
     payload = {"code": str(code)[:6], "events": events,
                "fetched_at": fetched_at, "n": len(events)}
+    if shares is not None:
+        payload["shares"] = shares
+    elif p.exists():                       # 别把已有的股本数据覆盖没了
+        try:
+            old = json.loads(p.read_text(encoding="utf-8")).get("shares")
+            if isinstance(old, list):
+                payload["shares"] = old
+        except Exception:                  # noqa: BLE001, S110
+            pass
     tmp = p.with_suffix(".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     tmp.replace(p)                                             # 原子替换
@@ -130,6 +141,105 @@ def normalize_xdxr(df: Any) -> list[dict[str, Any]]:
     return out[:MAX_EVENTS_SANE]
 
 
+def normalize_shares(df: Any) -> list[dict[str, Any]]:
+    """从 xdxr 提取**股本变化事件** → [{date, total_shares, float_shares}]（单位：股）。
+
+    通达信 `category=5`「股本变化」行带 `houzongguben`（后总股本）与
+    `panhouliutong`（后流通股本），单位是**万股**，这里换算成股。
+
+    实测 2026-08-04 与真实值对照：万科 A 总股本 119.31 亿（分毫不差）、
+    流通 97.17 亿（正确扣掉了不流通的 B 股）；茅台 12.50 亿；浦发 333.06 亿
+    （转债转股后）。
+
+    为什么这条路比东财 `RPT_VALUEANALYSIS_DET` 更合适：`fetch_market_cap.py` 自己的
+    设计就是「总股本只在增发/回购/送转/解禁时变，极稀疏 ⇒ 只在观测到变化时写一行」，
+    而 xdxr **天生是事件驱动**的；东财那边要逐交易日拉全市场再压成事件，
+    既慢又要处理采样频率与限流。
+
+    PIT 性质：股本是**当日事实**（某天就是那么多股），不存在财务数据那种
+    「次年重算」的重述问题，所以按日期取「不晚于该日的最后一条」即可。
+    """
+    if df is None or len(df) == 0:
+        return []
+    try:
+        rows = df.to_dict("records")
+    except Exception:                                          # noqa: BLE001
+        return []
+    out = []
+    for r in rows:
+        try:
+            y, m, d = int(r.get("year")), int(r.get("month")), int(r.get("day"))
+        except Exception:                                      # noqa: BLE001
+            continue
+
+        def _f(k: str) -> float:
+            v = r.get(k)
+            try:
+                x = float(v)
+            except (TypeError, ValueError):
+                return 0.0
+            return 0.0 if x != x else x                        # NaN → 0
+
+        total = _f("houzongguben") * 10000.0                   # 万股 → 股
+        flt = _f("panhouliutong") * 10000.0
+        if total <= 0 and flt <= 0:
+            continue
+        out.append({"date": f"{y:04d}-{m:02d}-{d:02d}",
+                    "total_shares": total or None,
+                    "float_shares": flt or None})
+    out.sort(key=lambda e: e["date"])
+    return out
+
+
+def get_shares_events(code: str, *, refresh: bool = False,
+                      timeout: int = 10) -> list[dict[str, Any]]:
+    """股本变化事件（优先缓存）。缓存与权息同一份文件，避免两次取数。"""
+    if not refresh:
+        p = _cache_path(code)
+        if p.exists():
+            try:
+                d = json.loads(p.read_text(encoding="utf-8"))
+                sh = d.get("shares")
+                if isinstance(sh, list):
+                    return sh
+            except Exception:                                  # noqa: BLE001
+                pass
+    try:
+        from mootdx.quotes import Quotes
+        q = Quotes.factory(market="std", timeout=timeout)
+        raw = q.xdxr(symbol=str(code)[:6])
+    except Exception as e:                                     # noqa: BLE001
+        raise AdjustError(f"xdxr({code}) 取数失败: {e}") from e
+    ev, sh = normalize_xdxr(raw), normalize_shares(raw)
+    save_xdxr_cache(code, ev, fetched_at=cn_now().isoformat(timespec="seconds"),
+                    shares=sh)
+    return sh
+
+
+def total_shares_at(code: str, date: str, *,
+                    field: str = "total_shares") -> Optional[float]:
+    """给定日期的总股本/流通股本（取**不晚于该日**的最后一条事件）。
+
+    ``field``: "total_shares"（总股本）| "float_shares"（流通股本）。
+    没有该日之前的事件时返回 None —— 这种情况必须让调用方知道，
+    不能悄悄拿一个更晚的股本去算历史市值（那是未来函数）。
+    """
+    try:
+        evs = get_shares_events(code)
+    except AdjustError:
+        return None
+    d = str(date)[:10]
+    val = None
+    for e in evs:
+        if e["date"] <= d:
+            v = e.get(field)
+            if v:
+                val = float(v)
+        else:
+            break
+    return val
+
+
 def fetch_xdxr(code: str, timeout: int = 10) -> list[dict[str, Any]]:
     """从通达信协议取权息数据（走 mootdx bestip）。失败 raise AdjustError。"""
     try:
@@ -165,9 +275,11 @@ def fetch_xdxr_batch(codes: list[str], *, timeout: int = 10,
     for i, code in enumerate(codes, 1):
         c6 = str(code)[:6]
         try:
-            ev = normalize_xdxr(q.xdxr(symbol=c6))
+            raw = q.xdxr(symbol=c6)
+            ev = normalize_xdxr(raw)
             out[c6] = ev
-            save_xdxr_cache(c6, ev, fetched_at=now)
+            # 同一次调用顺手把股本事件也存下(替代东财市值接口,见 normalize_shares)
+            save_xdxr_cache(c6, ev, fetched_at=now, shares=normalize_shares(raw))
         except Exception as e:                                 # noqa: BLE001
             failed += 1
             if on_error == "raise":
@@ -221,8 +333,15 @@ def get_xdxr(code: str, *, refresh: bool = False,
         ev = load_xdxr_cache(code)
         if ev is not None:
             return ev
-    ev = fetch_xdxr(code, timeout=timeout)
-    save_xdxr_cache(code, ev, fetched_at=cn_now().isoformat(timespec="seconds"))
+    try:
+        from mootdx.quotes import Quotes
+        q = Quotes.factory(market="std", timeout=timeout)
+        raw = q.xdxr(symbol=str(code)[:6])
+    except Exception as e:                                     # noqa: BLE001
+        raise AdjustError(f"xdxr({code}) 取数失败: {e}") from e
+    ev = normalize_xdxr(raw)
+    save_xdxr_cache(code, ev, fetched_at=cn_now().isoformat(timespec="seconds"),
+                    shares=normalize_shares(raw))
     return ev
 
 
@@ -350,6 +469,7 @@ def qfq_table(code: str, df: pd.DataFrame, *, refresh: bool = False,
 
 
 __all__ = ["AdjustError", "apply_qfq", "cache_age_days", "compute_qfq_factors",
+           "get_shares_events", "normalize_shares", "total_shares_at",
            "event_ratio", "fetch_xdxr", "fetch_xdxr_batch", "get_xdxr",
            "load_xdxr_cache", "normalize_xdxr", "qfq_table", "save_xdxr_cache",
            "stale_codes"]
