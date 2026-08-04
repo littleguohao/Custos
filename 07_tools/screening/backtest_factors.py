@@ -1201,7 +1201,9 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
                       max_exit_delay: int = 5,
                       scale_out_frac: float = 0.0,
                       code: str = "",
-                      bull_flags: Optional[np.ndarray] = None) -> dict[str, Any]:
+                      bull_flags: Optional[np.ndarray] = None,
+                      breakeven_trigger: float = 0.0,
+                      trail_pct: float = 0.0) -> dict[str, Any]:
     """B1 交易规则模拟：买入当日收盘进场；
     止损：stop_override 显式指定(如平台高×0.98)优先;否则 stop_mode='low'=买入当日最低价
     (超卖贴低时几乎无空间)；'pct'=entry×(1-stop_pct%)(固定空间)。
@@ -1218,9 +1220,19 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
     按止损/BBI 跌破/时间止损离场，收益按两段加权。
     **此前完全没有这一层**——所有盈利单都得等到 BBI 跌破才离场（已经回撤过了），
     于是回测系统性低估了 B1 的 avg_win 与盈亏比，而盈亏比是唯一有杠杆的变量。
+
+    ``breakeven_trigger``>0 启用**盈亏平衡保护**（b1_swing_strategy.md §六：「已形成有效
+    浮盈后，同时启用盈亏平衡保护，防止赢转亏」——**治理文档定义了但回测此前没实现**）：
+    浮盈达到该比例后把止损上移到成本价。
+    ``trail_pct``>0 启用**移动止损**：止损位跟随持仓期最高价，回撤该比例即出场。
+
+    ⚠️ 两者都只用**截至 j-1** 的最高价更新止损位，再用第 j 根的 low 判触发。日线数据无法
+    知道盘中顺序，若用当日 high 更新止损再用当日 low 判触发，等于假设"先冲高后回落"，
+    是乐观的未来函数。
     """
     close = df["close"].astype(float).values
     low = df["low"].astype(float).values
+    high = df["high"].astype(float).values
     open_ = df["open"].astype(float).values
     n = len(close)
     entry = float(close[entry_idx])
@@ -1232,6 +1244,14 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
     bbi_v = bbi.values
     has_above = False
     consec_below = 0
+
+    # 动态止损状态
+    stop_cur = stop
+    peak = entry                          # 截至 j-1 的最高价（不含当日，防未来函数）
+    be_armed = False                      # 保本止损是否已触发
+    trail_armed = False
+    be_level = 0.0                        # 各机制给出的止损位（用于归因 reason）
+    trail_level = 0.0
 
     # 分批止盈准备
     scale = max(0.0, min(1.0, float(scale_out_frac)))
@@ -1254,6 +1274,10 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
             out.update(scale_out_frac=scale, scale_out_idx=scaled_at,
                        scale_out_ret=round(scaled_ret, 4),
                        rest_ret=round(rest_ret, 4))
+        if be_armed:
+            out["breakeven_armed"] = True
+        if trail_armed:
+            out["trail_armed"] = True
         return out
 
     def _exit(j: int, reason: str, price: float) -> dict[str, Any]:
@@ -1266,9 +1290,28 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
         return _settle(j, reason, price)
 
     for j in range(entry_idx + 1, n):
-        if low[j] <= stop:                                    # ① 盘中破止损
-            fill = float(open_[j]) if open_[j] < stop else stop
-            return _exit(j, "stop", fill)
+        # ⓪ 用截至 j-1 的 peak 更新止损位（只上移，不下移）
+        if breakeven_trigger > 0 and entry and peak / entry - 1 >= breakeven_trigger:
+            be_level = entry
+            if entry > stop_cur:
+                stop_cur = entry
+                be_armed = True
+        if trail_pct > 0:
+            trail_level = peak * (1 - trail_pct)
+            if trail_level > stop_cur:
+                stop_cur = trail_level
+                trail_armed = True
+
+        if low[j] <= stop_cur:                                # ① 盘中破止损
+            fill = float(open_[j]) if open_[j] < stop_cur else stop_cur
+            # 按**实际决定当前止损位**的机制归因，而非按启用顺序
+            if trail_armed and trail_level >= max(be_level, stop) and trail_level >= stop_cur:
+                reason = "trail_stop"
+            elif be_armed and be_level >= stop_cur:
+                reason = "breakeven_stop"
+            else:
+                reason = "stop"
+            return _exit(j, reason, fill)
         b = bbi_v[j]
         if b == b:                                            # ② 收盘 BBI 退出（b==b 排除 NaN）
             # ②a 分批止盈:BBI 上方连续两根中大阳线（首次触发，且此前未减仓）
@@ -1290,6 +1333,7 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
                 consec_below = 0
         if time_stop_bars and (j - entry_idx) >= time_stop_bars:   # ③ 时间止损
             return _exit(j, "time_stop", float(close[j]))
+        peak = max(peak, float(high[j]))          # 当日收盘后才把当日高点纳入 peak
     return _settle(n - 1, "open_end", float(close[-1]))
 
 
@@ -1320,7 +1364,9 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
                     sector_gate: Optional[Callable[[str, str], bool]] = None,
                     tradability: bool = True,
                     max_exit_delay: int = 5,
-                    scale_out_frac: float = 0.0) -> list[dict[str, Any]]:
+                    scale_out_frac: float = 0.0,
+                    breakeven_trigger: float = 0.0,
+                    trail_pct: float = 0.0) -> list[dict[str, Any]]:
     """在 scorer 判「可买」的 as-of 日进场，按 B1 规则(止损+BBI)模拟到出场；非重叠(平仓后再找)。
 
     cost_bps：单边成本合计的往返基点(A股约20~30bps含佣金/印花税/滑点)，从每笔收益中扣除，看净期望。
@@ -1390,7 +1436,9 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
                                        stop_override=stop_ov,
                                        can_sell=sell_ok, max_exit_delay=max_exit_delay,
                                        scale_out_frac=scale_out_frac, code=code,
-                                       bull_flags=bull_flags)
+                                       bull_flags=bull_flags,
+                                       breakeven_trigger=breakeven_trigger,
+                                       trail_pct=trail_pct)
                 ret_net = tr["ret"] - cost
                 rf = tr.get("risk_frac") or 0.0
                 rf_eff = max(rf, _R_RISK_FLOOR)   # 地板：周线收盘贴低时 risk_frac≈0 会把 R 炸成极端值
@@ -1872,6 +1920,12 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     ap.add_argument("--scale-out", type=float, default=0.0,
                     help="分批止盈比例:BBI 上方两根中大阳线时减仓比例(B1 原文「放飞一半」→ 0.5;"
                          "默认 0=不启用,便于与旧结果对照)")
+    ap.add_argument("--breakeven", type=float, default=0.0,
+                    help="盈亏平衡保护:浮盈达该比例后止损上移到成本价(如 0.05=浮盈5%%后保本;"
+                         "b1_swing_strategy.md §六 已定义但回测此前未实现;默认 0=不启用)")
+    ap.add_argument("--trail", type=float, default=0.0,
+                    help="移动止损:止损跟随持仓期最高价,回撤该比例出场(如 0.08=回撤8%%;"
+                         "默认 0=不启用)。只用截至前一根的最高价更新,避免未来函数")
     ap.add_argument("--summary-only", action="store_true",
                     help="输出JSON不含逐笔trades(仅摘要;全市场日线省内存,防OOM)")
     ap.add_argument("--attribution", action="store_true",
@@ -1964,7 +2018,8 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                     stop_mode=args.stop_mode, stop_pct=args.stop_pct,
                     max_signals_per_code=(args.max_signals_per_code or None),
                     feature_panel=bool(args.attribution), sector_gate=sector_gate,
-                    scale_out_frac=args.scale_out)
+                    scale_out_frac=args.scale_out,
+                    breakeven_trigger=args.breakeven, trail_pct=args.trail)
             del d
             if (k + 1) % 500 == 0:
                 gc.collect()

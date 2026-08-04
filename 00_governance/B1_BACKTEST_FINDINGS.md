@@ -1039,3 +1039,91 @@ owner 裁定的三类改动风险分级：
 `tests/test_signal_labels.py::TestLabelsNeverAlterSelection`：对 4 种标注组合（全 miss /
 多项命中 / 全 unavailable / 含负向）断言剥离标注后**选股输出逐字节一致**、`bucket` 与
 `next_step` 不变；另断言 `score_candidates` **不得消费 signals**（一旦消费就成了 B 类改动）。
+
+---
+
+## 下一轮：机制类改进（M2，2026-08-04 起）
+
+### 为什么转向机制
+
+H1/H2 终审的总账是「**本轮无一通过跨窗终审，死法相同：edge 集中在 2025-2026 单一
+regime**」。而同期唯一验证成功的改动是**分批止盈**——它不预测涨跌、只改出场，所以没有
+regime 依赖的风险：胜率 18.0% 一位小数没动，期望 +16%、累计 R +10%。
+
+这两件事指向同一个结论：**排序类因子这条路暂时走到头了**（瓶颈在召回不在排序，
+且任何"更严的入场条件"都要先过跨区间），而机制类改进（出场/仓位）是可控的。
+
+机制类改进天然更稳健，原因不在于"运气好"，而在于它**不含对未来方向的预测**。移动止损
+不需要知道明天涨还是跌，它只在价格已经回撤时执行；因子必须预测，所以才会有 regime 依赖。
+
+### 本轮新实现的两个机制
+
+**① 盈亏平衡保护（`--breakeven`）** —— 又一处「文档定义了但回测没实现」：
+`b1_swing_strategy.md:328`「已形成有效浮盈后，同时启用盈亏平衡保护，防止赢转亏」。
+浮盈达阈值后止损上移到成本价。构造场景实测：同一段"涨到 +12% 后跌回"的走势，
+无保护 **−1.00%** → 保本 **0.00%** → 移动止损 **+3.96%**。
+
+**② 移动止损（`--trail`）** —— 止损跟随持仓期最高价，回撤给定比例出场。
+
+两者都**默认关闭**（0=不启用），保证历史结果可对照。
+
+⚠️ **都只用截至前一根的最高价更新止损位**，再用当日 low 判触发。日线数据不知道盘中顺序，
+若用当日 high 更新止损再用当日 low 判触发，等于假设"先冲高后回落"——这是乐观的未来函数。
+`tests/test_stop_mechanisms.py::TestNoLookAhead` 钉住：构造"当日冲高 +15% 后收跌"的 K 线，
+断言不得在当日触发（11.5×0.92=10.58 > 当日 low 9.85，有未来函数就会命中）。
+
+### ⚠️ 移动止损的主要风险：可能砍掉大赢家
+
+终审揭示的收益分布是**极端幂律**——若总 1000 笔，24 笔（2.4%）均收 +36.23%，
+其余 976 笔平均 −0.45%。移动止损保护的是回撤，但**代价可能是把趋势单提前砍断**，
+而那些趋势单是全部收益的来源。所以本轮必须**同时看 `payoff_ratio` 和大赢家数量**：
+
+> 判定标准（比前几轮更严）：`expectancy_R` 提升，且 **`avg_win` 不显著下降**，
+> 且 `ret > +20%` 的笔数不减少。只要大赢家被削掉，即使期望提升也**否决**——
+> 那是把收益来源换成了更脆弱的东西。
+
+已有测试钉住"无回撤的单边上涨不得触发"（`test_does_not_cut_trend_without_pullback`），
+但真实数据里回撤总会有，所以这条只能靠回测判。
+
+### 回测命令（`S=07_tools/screening/backtest_factors.py`，全部带 `--trade-sim`）
+
+```bash
+S=07_tools/screening/backtest_factors.py
+U="--universe-local --universe-sample 1000"          # seed 随机抽样,不是前 1000 个代码
+B="--trade-sim --entry-filter j_low --scorer b1_dual --cost-bps 25 --scale-out 0.5"
+
+# ① 基准（已跑过，作对照）：期望 +0.43%/笔、累计 +332R、盈亏比 5.661、胜率 18.0%
+uv run python $S $B $U
+
+# ② 保本止损扫描——文档定义的机制，先验证它值不值得
+uv run python $S $B $U --breakeven 0.03
+uv run python $S $B $U --breakeven 0.05
+uv run python $S $B $U --breakeven 0.08
+
+# ③ 移动止损扫描——注意看 avg_win 与大赢家笔数有没有被削
+uv run python $S $B $U --trail 0.08
+uv run python $S $B $U --trail 0.12
+uv run python $S $B $U --trail 0.18
+
+# ④ 组合（只在 ②③ 各自有效时才跑）
+uv run python $S $B $U --breakeven 0.05 --trail 0.12
+
+# ⑤ 初始止损口径扫描（--stop-mode/--stop-pct 早就有，一直没扫过）
+#    'low'=买入当日最低价(超卖贴低时空间极小,risk_frac≈0 会被 _R_RISK_FLOOR 兜底)
+#    'pct'=固定百分比(空间可控,R 口径更干净)
+uv run python $S $B $U --stop-mode pct --stop-pct 5
+uv run python $S $B $U --stop-mode pct --stop-pct 8
+uv run python $S $B $U --stop-mode pct --stop-pct 12
+
+# ⑥ 组合级资金曲线（simulate_portfolio 早已存在,一直没用过）
+#    逐笔期望为正 ≠ 组合能赚：并发上限会漏掉信号,固定风险仓位会放大回撤
+uv run python $S $B $U --portfolio --risk-pct 0.01 --max-concurrent 5
+uv run python $S $B $U --portfolio --risk-pct 0.02 --max-concurrent 3
+```
+
+### 跨窗要求同样适用
+
+即使 ②③ 在 2025-2026 有效，**仍须跑 2022-2024 复核**（`--start 2022-01-01
+--end 2024-12-31 --count 1500`，注意 `--count` 必须加大，否则窗口只覆盖尾部）。
+机制类改进理论上没有 regime 依赖，但这是**假设**，要用数据检验——上一轮就是被
+"看起来很合理"的因子骗了三次。
