@@ -1193,6 +1193,9 @@ def _bbi_series_from(df: pd.DataFrame) -> np.ndarray:
     return (sum(c.rolling(k).mean() for k in (3, 6, 12, 24)) / 4).to_numpy()
 
 
+_TICK = 0.01          # A股最小价格变动单位(元);材料的「向下 3-5 个价位」以此为单位
+
+
 def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
                       bbi_exit_consec: int = 2, time_stop_bars: int = 0,
                       stop_mode: str = "low", stop_pct: float = 8.0,
@@ -1203,32 +1206,55 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
                       code: str = "",
                       bull_flags: Optional[np.ndarray] = None,
                       breakeven_trigger: float = 0.0,
-                      trail_pct: float = 0.0) -> dict[str, Any]:
-    """B1 交易规则模拟：买入当日收盘进场；
-    止损：stop_override 显式指定(如平台高×0.98)优先;否则 stop_mode='low'=买入当日最低价
-    (超卖贴低时几乎无空间)；'pct'=entry×(1-stop_pct%)(固定空间)。
-    站上 BBI 后若连续 bbi_exit_consec 日收盘跌破 BBI 则止盈卖出；可选 time_stop_bars 根后到期平仓。
-    优先级：先判当日最低是否破止损(盘中)，再判收盘 BBI 退出，再判时间止损；均未触发则持有到数据末。
-    跳空低开(open<stop)按开盘价成交。返回 {exit_idx, reason, ret, holding, risk_frac}。
+                      trail_pct: float = 0.0,
+                      stop_trigger: str = "close",
+                      stop_tick_buffer: int = 0,
+                      cost_zone_bars: int = 0,
+                      cost_zone_pct: float = 3.0,
+                      cost_zone_grace: int = 1) -> dict[str, Any]:
+    """B1 交易规则模拟：买入当日收盘进场。
 
-    can_sell:逐根可卖标记(见 tradable_flags)。给出时,跌停/停牌当日**不成交**,顺延到
-    max_exit_delay 根内的下一个可卖日按其收盘价成交(reason 加 _delayed 后缀)。此前跌停与
-    停牌日的止损照样成交,系统性高估了策略的止损执行力(审计 E5)。
+    止损位：stop_override 显式指定(如平台高×0.98)优先;否则 stop_mode='low'=买入当日最低价
+    (B1.pdf「B1- 买入K线最低点或向下3-5个价位」,余量见 ``stop_tick_buffer``)；
+    'pct'=entry×(1-stop_pct%)(固定空间)。
+    站上 BBI 后若连续 bbi_exit_consec 日收盘跌破 BBI 则止盈卖出。
+    跳空低开按开盘价成交。返回 {exit_idx, reason, ret, holding, risk_frac}。
+
+    ``stop_trigger``（**2026-08-04 按 B1_w.pdf 修正**）：
+
+        "close"（默认）  收盘价跌破才算破位 —— 材料的明确口径：
+                         「设止损…**看上下区间，看收盘价**」
+                         「破掉止损价格，拍掉！（**收盘时**）」
+                         「**忽略盘中的冲高回落**」「**不要在下杀中卖出**」
+                         「不要在意盘中上蹿下跳，给老子他妈的拿住！」
+        "intraday"       盘中最低价触及即出（**旧行为**，保留用于口径对照）
+
+    原实现用盘中最低价判定，会把大量「盘中假破、收盘收回」记成止损，
+    系统性高估止损次数、低估策略表现。
+
+    ⚠️ **保本止损例外，始终按盘中判定**：材料对它的表述是
+    「赚钱的票**有过上涨行为后**，马上回到成本价，拍掉！（**盘中关注**）」。
+    这个区分是有道理的——常规止损位在下方较远，盘中假破常见，等收盘确认；
+    保本位就是成本价，属心理防线，立即执行。
+
+    ``stop_tick_buffer``：止损位再向下留几个**价位**（tick=0.01 元）。
+    材料写「买入K线最低点**或向下 3-5 个价位**」——贴着最低点挂止损容易被一笔扫掉。
+    默认 0 保持旧行为，建议 3。
+
+    ``cost_zone_bars``>0 启用**成本区时间止损**（材料：「B1买入后**三个交易日**还没脱离
+    成本区，又没打止损，**多等一天**」；持股手册的「低等马（买入之后横盘不破止损）⇒
+    **不涨就拍**」；仓位实例的「不温不火，没上BBI，又没到止损。**收盘前全拍**」）。
+    判定：进场后 ``cost_zone_bars + cost_zone_grace`` 根内，收盘最高涨幅始终
+    < ``cost_zone_pct``% ⇒ 平仓。与无条件的 ``time_stop_bars`` 不同——
+    它只砍「不涨」的单子，涨上去的不受影响。
+    "脱离成本区"的 3% 取自材料深V玩法「如果脱离成本线 **3%以上**，可以酌情继续持有」。
 
     scale_out_frac>0 启用**分批止盈**（B1 §六 第五层 / B1.pdf「止盈 BBI 之上两根中阳线，
-    放飞一半」）：持仓期内首次出现"BBI 上方连续两根中大阳线"时按该比例减仓，剩余仓位继续
-    按止损/BBI 跌破/时间止损离场，收益按两段加权。
-    **此前完全没有这一层**——所有盈利单都得等到 BBI 跌破才离场（已经回撤过了），
-    于是回测系统性低估了 B1 的 avg_win 与盈亏比，而盈亏比是唯一有杠杆的变量。
+    放飞一半」）：持仓期内首次出现"BBI 上方连续两根中大阳线"时按该比例减仓。
 
-    ``breakeven_trigger``>0 启用**盈亏平衡保护**（b1_swing_strategy.md §六：「已形成有效
-    浮盈后，同时启用盈亏平衡保护，防止赢转亏」——**治理文档定义了但回测此前没实现**）：
-    浮盈达到该比例后把止损上移到成本价。
     ``trail_pct``>0 启用**移动止损**：止损位跟随持仓期最高价，回撤该比例即出场。
-
-    ⚠️ 两者都只用**截至 j-1** 的最高价更新止损位，再用第 j 根的 low 判触发。日线数据无法
-    知道盘中顺序，若用当日 high 更新止损再用当日 low 判触发，等于假设"先冲高后回落"，
-    是乐观的未来函数。
+    ⚠️ 移动止损与保本止损都只用**截至 j-1** 的最高价更新止损位——日线数据无法知道
+    盘中顺序，若用当日 high 更新再用当日价判触发，等于假设"先冲高后回落"。
     """
     close = df["close"].astype(float).values
     low = df["low"].astype(float).values
@@ -1240,10 +1266,13 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
         stop = float(stop_override)
     else:
         stop = entry * (1 - stop_pct / 100.0) if stop_mode == "pct" else float(low[entry_idx])
+        if stop_mode != "pct" and stop_tick_buffer > 0:
+            stop -= stop_tick_buffer * _TICK          # 「或向下 3-5 个价位」
     risk_frac = (entry - stop) / entry if entry else 0.0
     bbi_v = bbi.values
     has_above = False
     consec_below = 0
+    by_close = str(stop_trigger).lower() != "intraday"
 
     # 动态止损状态
     stop_cur = stop
@@ -1252,6 +1281,7 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
     trail_armed = False
     be_level = 0.0                        # 各机制给出的止损位（用于归因 reason）
     trail_level = 0.0
+    peak_close = entry                    # 成本区判定用收盘价，不用盘中高点
 
     # 分批止盈准备
     scale = max(0.0, min(1.0, float(scale_out_frac)))
@@ -1302,8 +1332,24 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
                 stop_cur = trail_level
                 trail_armed = True
 
-        if low[j] <= stop_cur:                                # ① 盘中破止损
-            fill = float(open_[j]) if open_[j] < stop_cur else stop_cur
+        # ① 破止损。**两套触发口径**：
+        #    · 保本止损盘中判定（材料：「马上回到成本价，拍掉！(盘中关注)」）
+        #    · 其余按 stop_trigger，默认收盘（材料：「看收盘价」「收盘时」「忽略盘中冲高回落」）
+        # 保本必须**先判且独立判**：它盘中就成交了，之后当日跌到哪里都与它无关。
+        # 若等到收盘再一起判，会把「盘中触及成本价出场」错记成「收盘破位出场」，
+        # 成交价从成本价滑到收盘价（实测差 1.2pp）。
+        if be_armed and be_level >= stop_cur and low[j] <= be_level:
+            fill = float(open_[j]) if open_[j] < be_level else float(be_level)
+            return _exit(j, "breakeven_stop", fill)
+        # 移动止损位若已高于保本位，则由它接管（按 stop_trigger 口径；材料没有这条机制，
+        # 沿用常规止损的保守口径）
+        ref = close[j] if by_close else low[j]
+        if ref <= stop_cur:
+            if by_close:
+                # 收盘破位 ⇒ 收盘价成交（材料的执行方式就是「收盘时拍掉」）
+                fill = float(close[j])
+            else:
+                fill = float(open_[j]) if open_[j] < stop_cur else stop_cur
             # 按**实际决定当前止损位**的机制归因，而非按启用顺序
             if trail_armed and trail_level >= max(be_level, stop) and trail_level >= stop_cur:
                 reason = "trail_stop"
@@ -1331,9 +1377,15 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
                         return _exit(j, "bbi_exit", float(close[j]))
             else:
                 consec_below = 0
-        if time_stop_bars and (j - entry_idx) >= time_stop_bars:   # ③ 时间止损
+        # ③ 成本区时间止损：只砍「不涨」的单子（低等马「不涨就拍」）
+        if (cost_zone_bars and entry
+                and (j - entry_idx) >= cost_zone_bars + max(0, cost_zone_grace)
+                and peak_close / entry - 1 < cost_zone_pct / 100.0):
+            return _exit(j, "cost_zone_stop", float(close[j]))
+        if time_stop_bars and (j - entry_idx) >= time_stop_bars:   # ④ 无条件时间止损
             return _exit(j, "time_stop", float(close[j]))
         peak = max(peak, float(high[j]))          # 当日收盘后才把当日高点纳入 peak
+        peak_close = max(peak_close, float(close[j]))
     return _settle(n - 1, "open_end", float(close[-1]))
 
 
@@ -1366,7 +1418,11 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
                     max_exit_delay: int = 5,
                     scale_out_frac: float = 0.0,
                     breakeven_trigger: float = 0.0,
-                    trail_pct: float = 0.0) -> list[dict[str, Any]]:
+                    trail_pct: float = 0.0,
+                    stop_trigger: str = "close",
+                    stop_tick_buffer: int = 0,
+                    cost_zone_bars: int = 0,
+                    cost_zone_pct: float = 3.0) -> list[dict[str, Any]]:
     """在 scorer 判「可买」的 as-of 日进场，按 B1 规则(止损+BBI)模拟到出场；非重叠(平仓后再找)。
 
     cost_bps：单边成本合计的往返基点(A股约20~30bps含佣金/印花税/滑点)，从每笔收益中扣除，看净期望。
@@ -1438,7 +1494,11 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
                                        scale_out_frac=scale_out_frac, code=code,
                                        bull_flags=bull_flags,
                                        breakeven_trigger=breakeven_trigger,
-                                       trail_pct=trail_pct)
+                                       trail_pct=trail_pct,
+                                       stop_trigger=stop_trigger,
+                                       stop_tick_buffer=stop_tick_buffer,
+                                       cost_zone_bars=cost_zone_bars,
+                                       cost_zone_pct=cost_zone_pct)
                 ret_net = tr["ret"] - cost
                 rf = tr.get("risk_frac") or 0.0
                 rf_eff = max(rf, _R_RISK_FLOOR)   # 地板：周线收盘贴低时 risk_frac≈0 会把 R 炸成极端值
@@ -1928,6 +1988,20 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     ap.add_argument("--trail", type=float, default=0.0,
                     help="移动止损:止损跟随持仓期最高价,回撤该比例出场(如 0.08=回撤8%%;"
                          "默认 0=不启用)。只用截至前一根的最高价更新,避免未来函数")
+    ap.add_argument("--stop-trigger", choices=["close", "intraday"], default="close",
+                    help="止损触发口径(2026-08-04 按 B1_w.pdf 修正):close=收盘价跌破才算破位"
+                         "(材料原文「看收盘价」「收盘时」「忽略盘中冲高回落」,**默认**);"
+                         "intraday=盘中最低触及即出(旧行为,留作口径对照)。"
+                         "保本止损不受此参数影响,始终盘中判定(材料:「盘中关注」)")
+    ap.add_argument("--stop-tick-buffer", type=int, default=0,
+                    help="止损位再向下留几个价位(1 价位=0.01 元)。材料「买入K线最低点"
+                         "**或向下 3-5 个价位**」;贴着最低点容易被一笔扫掉。默认 0=旧行为")
+    ap.add_argument("--cost-zone-bars", type=int, default=0,
+                    help="成本区时间止损:进场后 N+1 根内收盘涨幅始终 <--cost-zone-pct 则平仓"
+                         "(材料「三个交易日还没脱离成本区,又没打止损,多等一天」/"
+                         "持股手册「低等马…不涨就拍」)。默认 0=不启用,建议 3")
+    ap.add_argument("--cost-zone-pct", type=float, default=3.0,
+                    help="脱离成本区的涨幅阈值%%(默认 3,取自材料深V玩法「脱离成本线3%%以上」)")
     ap.add_argument("--summary-only", action="store_true",
                     help="输出JSON不含逐笔trades(仅摘要;全市场日线省内存,防OOM)")
     ap.add_argument("--attribution", action="store_true",
@@ -2021,7 +2095,11 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                     max_signals_per_code=(args.max_signals_per_code or None),
                     feature_panel=bool(args.attribution), sector_gate=sector_gate,
                     scale_out_frac=args.scale_out,
-                    breakeven_trigger=args.breakeven, trail_pct=args.trail)
+                    breakeven_trigger=args.breakeven, trail_pct=args.trail,
+                    stop_trigger=args.stop_trigger,
+                    stop_tick_buffer=args.stop_tick_buffer,
+                    cost_zone_bars=args.cost_zone_bars,
+                    cost_zone_pct=args.cost_zone_pct)
             del d
             if (k + 1) % 500 == 0:
                 gc.collect()

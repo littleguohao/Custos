@@ -267,13 +267,32 @@ def _mk(closes, lows=None, opens=None):
 
 
 def test_simulate_trade_stop():
-    # 进场 idx5(收10, 止损=low[5]=9.9)，次日最低跌破 → stop 亏损
+    """止损触发口径（2026-08-04 按 B1_w.pdf 修正为收盘价判定）。
+
+    材料原文：「设止损…**看上下区间，看收盘价**」「破掉止损价格，拍掉！（**收盘时**）」
+    「**忽略盘中的冲高回落**」。所以「盘中跌破、收盘收回」**不算**破位——
+    旧实现按盘中最低判定，会把这类假破全记成止损。
+    """
+    # 进场 idx5(收10, 止损=low[5]=9.9)；day6 盘中最低 9.0 但收盘仍 10.0
     closes = [10.0] * 10
-    lows = [9.9] * 10; lows[6] = 9.0            # day6 破止损
+    lows = [9.9] * 10; lows[6] = 9.0
     df = _mk(closes, lows=lows, opens=[10.0] * 10)
     bbi = pd.Series([float("nan")] * 10)
+
+    # 默认(收盘口径)：盘中假破不出场
     r = bt.simulate_b1_trade(df, 5, bbi)
-    assert r["reason"] == "stop" and r["ret"] < 0 and r["exit_idx"] == 6
+    assert r["reason"] != "stop", "收盘未破位不该止损"
+
+    # 旧口径仍可复现，用于对照
+    r_intra = bt.simulate_b1_trade(df, 5, bbi, stop_trigger="intraday")
+    assert r_intra["reason"] == "stop" and r_intra["ret"] < 0 and r_intra["exit_idx"] == 6
+
+    # 收盘也跌破 → 两种口径都止损
+    closes2 = [10.0] * 10; closes2[6] = 9.5
+    lows2 = [9.9] * 10; lows2[6] = 9.4
+    df2 = _mk(closes2, lows=lows2, opens=[10.0] * 10)
+    r2 = bt.simulate_b1_trade(df2, 5, bbi)
+    assert r2["reason"] == "stop" and r2["ret"] < 0 and r2["exit_idx"] == 6
 
 
 def test_simulate_trade_bbi_exit_win():

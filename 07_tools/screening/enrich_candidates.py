@@ -94,7 +94,12 @@ def j_below_threshold(j: Any, threshold: float = J_LOW_THRESHOLD) -> bool:
     return v < threshold
 VOL_PCTILE_MAX = 10.0        # 20日量分位 <= 10%
 RS_STRONG_PP = 3.0           # 20日相对强度 >= +3pp
-REVERSAL_CHANGE_PCT = 2.0
+# 反转K的收盘涨幅区间：**不对称**（B1_w.pdf「分歧转一致的反转K」与「如何筛选最强壮的
+# B1宝宝」两处都明确写「涨幅为 -2% 到 1.8%」）。此前实现与治理文档都写成对称 ±2%，
+# 上界宽了 0.2pp。不是刻意收紧门槛，是按材料原文纠偏。
+REVERSAL_CHANGE_MIN_PCT = -2.0
+REVERSAL_CHANGE_MAX_PCT = 1.8
+REVERSAL_CHANGE_PCT = 2.0    # 旧对称阈值,保留供外部引用与口径对照,判定已不使用
 REVERSAL_AMPLITUDE_PCT = 7.0
 STOP_LOOKBACK = 10           # 建议止损位：近10日最低价
 
@@ -1296,7 +1301,8 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
     )
     reversal_k = bool(
         j_low and vol_contraction
-        and change_pct is not None and abs(change_pct) <= REVERSAL_CHANGE_PCT
+        and change_pct is not None
+        and REVERSAL_CHANGE_MIN_PCT <= change_pct <= REVERSAL_CHANGE_MAX_PCT
         and amplitude_pct is not None and amplitude_pct <= REVERSAL_AMPLITUDE_PCT
     )
     rs_strong = rs_20d is not None and rs_20d >= RS_STRONG_PP

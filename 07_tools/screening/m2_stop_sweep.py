@@ -43,8 +43,15 @@ def _groups(sample: int, cross: bool) -> list[tuple[str, list[str]]]:
     g += [("stop_pct_05", ["--stop-mode", "pct", "--stop-pct", "5"]),
           ("stop_pct_08", ["--stop-mode", "pct", "--stop-pct", "8"]),
           ("stop_pct_12", ["--stop-mode", "pct", "--stop-pct", "12"])]
-    g += [("pf_r1_c5", ["--portfolio", "--risk-pct", "1.0", "--max-concurrent", "5"]),
-          ("pf_r2_c3", ["--portfolio", "--risk-pct", "2.0", "--max-concurrent", "3"])]
+    # 止损口径对照（2026-08-04 按 B1_w.pdf 修正为收盘判定，旧盘中口径留作对照）
+    g += [("trigger_intraday", ["--stop-trigger", "intraday"]),
+          ("tick_buffer_3", ["--stop-tick-buffer", "3"]),
+          ("cost_zone_3", ["--cost-zone-bars", "3"])]
+    # 组合级：并发上限按材料「仓位管理」第 2 档（owner 高亮的那档）——
+    # 「2w做到10w，每天满仓，**2只**，忍受最大回撤30-50%，1-3年」
+    g += [("pf_r1_c2", ["--portfolio", "--risk-pct", "1.0", "--max-concurrent", "2"]),
+          ("pf_r2_c2", ["--portfolio", "--risk-pct", "2.0", "--max-concurrent", "2"]),
+          ("pf_r1_c5", ["--portfolio", "--risk-pct", "1.0", "--max-concurrent", "5"])]
     return g
 
 

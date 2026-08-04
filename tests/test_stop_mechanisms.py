@@ -180,3 +180,131 @@ class TestCliWiring:
         src = pathlib.Path("07_tools/screening/backtest_factors.py").read_text(encoding="utf-8")
         assert '"--breakeven"' in src and '"--trail"' in src
         assert "breakeven_trigger=args.breakeven" in src and "trail_pct=args.trail" in src
+
+
+class TestStopTriggerCloseVsIntraday:
+    """止损触发口径（2026-08-04 按 B1_w.pdf 修正）。
+
+    材料反复强调看收盘：
+      「设止损…**看上下区间，看收盘价**」
+      「破掉止损价格，拍掉！（**收盘时**）」
+      「**忽略盘中的冲高回落**」「**不要在下杀中卖出**」
+      「不要在意盘中上蹿下跳，给老子他妈的拿住！」
+
+    ⚠️ 但保本止损是**例外**：「赚钱的票有过上涨行为后，马上回到成本价，
+    拍掉！（**盘中关注**）」——常规止损位在下方较远、盘中假破常见，等收盘确认；
+    保本位就是成本价、属心理防线，立即执行。
+    """
+
+    # 盘中最低 9.5 跌破止损 9.9，但收盘 10.2 收回，之后继续上涨
+    FAKE_BREAK = BASE + [(9.95, 10.3, 9.5, 10.2), (10.2, 10.5, 10.15, 10.45),
+                         (10.5, 10.8, 10.45, 10.75)]
+
+    def test_default_is_close(self):
+        import inspect
+        d = inspect.signature(simulate_b1_trade).parameters["stop_trigger"].default
+        assert d == "close"
+
+    def test_fake_intraday_break_is_ignored(self):
+        r = _run(self.FAKE_BREAK)
+        assert r["reason"] != "stop", "盘中假破不该止损"
+        assert r["ret"] > 0
+
+    def test_intraday_mode_reproduces_old_behavior(self):
+        r = _run(self.FAKE_BREAK, stop_trigger="intraday")
+        assert r["reason"] == "stop" and r["holding"] == 1
+
+    def test_real_break_still_stops(self):
+        bars = BASE + [(9.9, 9.95, 9.6, 9.7), (9.7, 9.75, 9.5, 9.55)]
+        assert _run(bars)["reason"] == "stop"
+
+    def test_close_mode_fills_at_close(self):
+        """收盘破位按收盘价成交——这是材料的执行方式（收盘时拍掉）。"""
+        bars = BASE + [(9.95, 9.98, 9.60, 9.70)]
+        r = _run(bars)
+        assert r["ret"] == pytest.approx(9.70 / 10 - 1)
+
+    def test_close_mode_can_lose_more_than_intraday(self):
+        """必须承认的权衡：等收盘确认会多承受下跌，真破位时亏更多。
+
+        减少假止损与加大真止损幅度是对冲的，净效果只能靠回测判定，
+        不能只讲「减少假止损」这一面。
+        """
+        bars = BASE + [(9.95, 9.98, 9.60, 9.70)]
+        assert _run(bars)["ret"] < _run(bars, stop_trigger="intraday")["ret"]
+
+    def test_breakeven_stays_intraday_under_close_mode(self):
+        """保本止损在收盘口径下**仍按盘中**触发，且按保本位成交。"""
+        bars = BASE + [(10.4, 10.5, 10.35, 10.45), (10.9, 11.2, 10.85, 11.15),
+                       (11.0, 11.1, 9.98, 10.3), (10.3, 10.4, 10.2, 10.35)]
+        r = _run(bars, breakeven_trigger=0.05)
+        assert r["reason"] == "breakeven_stop"
+        assert r["ret"] == pytest.approx(0.0, abs=1e-9), "按成本价成交，不是收盘价"
+
+    def test_breakeven_not_downgraded_to_close_fill(self):
+        """回归：曾因 be_hit 被 other_hit 抢先，成交价从成本价滑到收盘价（差 1.2pp）。"""
+        r = _run(WIN_TO_LOSS, breakeven_trigger=0.05)
+        assert r["reason"] == "breakeven_stop"
+        assert r["ret"] == pytest.approx(0.0, abs=1e-9)
+
+
+class TestStopTickBuffer:
+    """材料：「B1- 买入K线最低点**或向下 3-5 个价位**」——贴着最低点容易被一笔扫掉。"""
+
+    def test_default_zero_keeps_old_behavior(self):
+        import inspect
+        assert inspect.signature(simulate_b1_trade).parameters[
+            "stop_tick_buffer"].default == 0
+
+    def test_buffer_widens_stop_and_avoids_marginal_break(self):
+        bars = BASE + [(9.92, 9.98, 9.88, 9.89), (9.9, 10.1, 9.89, 10.05),
+                       (10.1, 10.3, 10.05, 10.25)]
+        tight = _run(bars, stop_tick_buffer=0)
+        loose = _run(bars, stop_tick_buffer=3)
+        assert tight["reason"] == "stop"
+        assert loose["reason"] != "stop", "9.89 > 9.87，留余量后不算破位"
+        assert loose["risk_frac"] > tight["risk_frac"], "止损空间变大"
+
+    def test_buffer_not_applied_to_pct_mode(self):
+        """pct 模式的止损位是按比例算的，不该再叠加 tick 余量。"""
+        a = _run(WIN_TO_LOSS, stop_mode="pct", stop_pct=8.0, stop_tick_buffer=5)
+        b = _run(WIN_TO_LOSS, stop_mode="pct", stop_pct=8.0, stop_tick_buffer=0)
+        assert a["risk_frac"] == pytest.approx(b["risk_frac"])
+
+
+class TestCostZoneStop:
+    """材料：「B1买入后**三个交易日**还没脱离成本区，又没打止损，**多等一天**」
+    + 持股手册「低等马（买入之后横盘不破止损）⇒ **不涨就拍**」
+    + 仓位实例「不温不火，没上BBI，又没到止损。**收盘前全拍**」。
+    """
+
+    def test_default_off(self):
+        import inspect
+        assert inspect.signature(simulate_b1_trade).parameters[
+            "cost_zone_bars"].default == 0
+
+    def test_flat_position_is_cut(self):
+        flat = BASE + [(10.0, 10.1, 9.95, 10.02)] * 8
+        assert _run(flat)["reason"] == "open_end"
+        r = _run(flat, cost_zone_bars=3)
+        assert r["reason"] == "cost_zone_stop"
+        assert r["holding"] == 4, "3 个交易日 + 多等一天"
+
+    def test_riser_is_not_cut(self):
+        """**关键**：只砍「不涨」的，涨上去的不受影响（否则就成了无条件时间止损）。"""
+        rise = BASE + [(10.1, 10.3, 10.05, 10.25), (10.3, 10.6, 10.25, 10.55),
+                       (10.6, 10.9, 10.55, 10.85)] + [(10.9, 11.0, 10.85, 10.95)] * 5
+        r = _run(rise, cost_zone_bars=3)
+        assert r["reason"] != "cost_zone_stop"
+
+    def test_threshold_configurable(self):
+        """脱离成本区阈值默认 3%（材料深V玩法「脱离成本线 3% 以上」）。"""
+        mild = BASE + [(10.1, 10.2, 10.05, 10.15)] * 8      # 只涨 1.5%
+        assert _run(mild, cost_zone_bars=3)["reason"] == "cost_zone_stop"
+        assert _run(mild, cost_zone_bars=3,
+                    cost_zone_pct=1.0)["reason"] != "cost_zone_stop"
+
+    def test_uses_close_not_intraday_high(self):
+        """判定用收盘价——盘中冲高又回落不算「脱离成本区」（材料：忽略盘中冲高回落）。"""
+        spike = BASE + [(10.0, 10.9, 9.98, 10.05)] * 8      # 盘中冲 9%，收盘只 0.5%
+        assert _run(spike, cost_zone_bars=3)["reason"] == "cost_zone_stop"

@@ -357,3 +357,36 @@ def test_enrich_metrics_error_excluded_not_abort():
     assert len(r["excluded"]) == 1
     assert r["excluded"][0]["code"] == "600002"
     assert r["excluded"][0]["reason"].startswith("metrics_error:")
+
+
+class TestReversalChangeAsymmetric:
+    """反转K的收盘涨幅区间是**不对称**的：-2% 到 1.8%（2026-08-04 按 B1_w.pdf 纠偏）。
+
+    材料两处独立写明这个区间：
+      「分歧转一致的反转K：-2% ~ 1.8%」
+      「如何筛选最强壮的B1宝宝：3- 涨幅为 -2% 到 1.8%」
+    此前实现与治理文档都写成对称 ±2%，上界宽了 0.2pp。这不是刻意收紧门槛，
+    是按材料原文纠偏。
+    """
+
+    def test_bounds_are_asymmetric(self):
+        import enrich_candidates as ec
+        assert ec.REVERSAL_CHANGE_MIN_PCT == -2.0
+        assert ec.REVERSAL_CHANGE_MAX_PCT == 1.8
+
+    def test_upper_bound_excludes_1_9(self):
+        import enrich_candidates as ec
+        lo, hi = ec.REVERSAL_CHANGE_MIN_PCT, ec.REVERSAL_CHANGE_MAX_PCT
+        assert not (lo <= 1.9 <= hi), "1.9% 应被排除（旧对称阈值会放进来）"
+        assert lo <= 1.8 <= hi
+        assert lo <= -2.0 <= hi
+        assert not (lo <= -2.1 <= hi)
+
+    def test_judgment_uses_asymmetric_bounds(self):
+        """判定代码必须用新常量，不能还在用 abs(chg) <= 2.0。"""
+        import inspect
+
+        import enrich_candidates as ec
+        src = inspect.getsource(ec.compute_metrics)
+        assert "REVERSAL_CHANGE_MIN_PCT" in src and "REVERSAL_CHANGE_MAX_PCT" in src
+        assert "abs(change_pct) <= REVERSAL_CHANGE_PCT" not in src
