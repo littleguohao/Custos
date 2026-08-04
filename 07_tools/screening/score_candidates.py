@@ -571,6 +571,8 @@ def score_candidate(
         "sector": cand.get("sector", "未知"),
         "sector_source": cand.get("sector_source", ""),
         "theme_id": cand.get("theme_id", ""),
+        # TDX 官方细分行业（881xxx，展示层「板块」列；与主题族 sector 并存，只透传不消费）
+        "industry": cand.get("industry", "未知"),
         "formula_hits": cand.get("formula_hits") or [],
         "sector_heat_filter": {
             "sector_state": (sector_entry or {}).get("state")

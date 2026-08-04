@@ -518,3 +518,26 @@ def test_technical_level_thresholds_single_definition():
                               "s_shape": {"available": True, "s_star": 62.0,
                                           "components": {}, "suggestion": "观望"}})
     assert out[1] == "中"        # 62 在 s_shape 路径是"中"，在回退路径会是"强"
+
+
+def test_build_stock_industry_map_only_sub_industry(monkeypatch):
+    """每股 → TDX 细分行业：只收 sub_industry 板块,一股多行业时先到先得。"""
+    fake = {"sectors": [
+        {"code": "881386.SH", "name": "全国性银行", "category": "sub_industry",
+         "stocks": ["601939.SH", "600030.SH"]},
+        {"code": "881352.SH", "name": "IT设备", "category": "sub_industry",
+         "stocks": ["000977.SZ"]},
+        {"code": "880951.SH", "name": "央企改革", "category": "concept",
+         "stocks": ["601939.SH"]},          # 概念板块不得混入行业口径
+        {"code": "881999.SH", "name": "", "category": "sub_industry",
+         "stocks": ["999999.SZ"]},          # 无名板块跳过
+    ]}
+    monkeypatch.setattr(ec, "latest_tq_sector_map", lambda: fake)
+    m = ec.build_stock_industry_map()
+    assert m == {"601939": "全国性银行", "600030": "全国性银行", "000977": "IT设备"}
+
+
+def test_build_stock_industry_map_never_raises(monkeypatch):
+    monkeypatch.setattr(ec, "latest_tq_sector_map",
+                        lambda: (_ for _ in ()).throw(RuntimeError("disk gone")))
+    assert ec.build_stock_industry_map() == {}

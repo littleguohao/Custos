@@ -281,7 +281,7 @@ def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
                 mark = "🐂观察价位(B)"               # 四腿命中但分层 B:next_step=观察价位,非直接可买
             lines.append(
                 f"| {c.get('code')} | {c.get('name')}"
-                f" | {c.get('sector', '未知')}"
+                f" | {c.get('industry') or c.get('sector', '未知')}"
                 f" | {(c.get('fundamental_quality') or {}).get('tier', '-')}"
                 f" | {r4.get('label', '-')}"
                 f" | {_fmt((c.get('score_detail') or {}).get('technical_score'))}"
@@ -304,7 +304,7 @@ def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
             flags = "、".join(c.get("risk_flags") or []) or "-"
             lines.append(
                 f"| {c.get('code')} | {c.get('name')}"
-                f" | {c.get('sector', '未知')}"
+                f" | {c.get('industry') or c.get('sector', '未知')}"
                 f" | {(c.get('fundamental_quality') or {}).get('tier', '-')}"
                 f" | {r4.get('label', '-')}"
                 f" | {_fmt((c.get('score_detail') or {}).get('technical_score'))}"
@@ -339,7 +339,7 @@ def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
                 mkt_leg = "做多" if r4.get("market") else "空头"
                 lines.append(
                     f"| {c.get('code')} | {c.get('name')}"
-                    f" | {c.get('sector', '未知')}"
+                    f" | {c.get('industry') or c.get('sector', '未知')}"
                     f" | {(c.get('fundamental_quality') or {}).get('tier', '-')}"
                     f" | {_fmt((c.get('score_detail') or {}).get('technical_score'))}"
                     f" | {sec_leg}"
@@ -410,7 +410,7 @@ def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
                 f" | {_fmt(detail.get('technical_score'))}"
                 f" | {_fmt(fit)}"
                 f" | {cap_intent}"
-                f" | {c.get('sector', '未知')}"
+                f" | {c.get('industry') or c.get('sector', '未知')}"
                 f" | {shf.get('sector_state', '未知')}"
                 f" | {c.get('trade_style', '-')}"
                 f" | {res.get('resonance_level', '-')}"

@@ -253,6 +253,29 @@ def latest_tq_sector_map() -> dict:
     return _load_json(Path(files[-1]), {})
 
 
+def build_stock_industry_map() -> dict[str, str]:
+    """每股 → TDX 官方细分行业名（881xxx，每股恰好一个；2026-08-04 实测 5546 只零冲突）。
+
+    这是**权威的每股行业归属**（建设银行→全国性银行、牧原股份→养殖业、
+    共进股份→通信设备），与 9 大主题族（``sector``/``theme_id``，聚合层）是两个口径：
+    行业是展示层（候选表「板块」列），主题族是聚合层（主线指纹/相位/资金流）。
+    数据来自最新 ``*_tq_sector_map.json``；取不到返回 {}（调用方按"未知"降级，不 raise）。
+    """
+    out: dict[str, str] = {}
+    try:
+        for s in (latest_tq_sector_map().get("sectors") or []):
+            if s.get("category") != "sub_industry":
+                continue
+            name = str(s.get("name") or "").strip()
+            if not name:
+                continue
+            for raw in s.get("stocks") or []:
+                out.setdefault(str(raw).split(".")[0].zfill(6), name)
+    except Exception:  # noqa: BLE001
+        return {}
+    return out
+
+
 def _match_theme_tags(stock_tags: list[str], semantic_tags: list[str]) -> list[str]:
     """个股概念标签与主题语义标签的命中列表（双向子串，长的单向≥3字）。"""
     matched = []
@@ -1513,6 +1536,8 @@ def enrich(
         result["status"] = "partial"
         result["degraded_reason"] = _append_reason(
             result["degraded_reason"], "sector_map_unavailable")
+    # 每股官方细分行业（881xxx，展示层「板块」列；与主题族聚合层并存，取不到全"未知"）
+    stock_industry = build_stock_industry_map()
 
     load_ohlcv = ohlcv_loader or (lambda c: local_tdx_data.get_ohlcv_table(c, count=OHLCV_LOAD_BARS))
     load_index = index_loader or (lambda: local_tdx_data.get_ohlcv_table(INDEX_CODE, count=OHLCV_LOAD_BARS))
@@ -1633,6 +1658,7 @@ def enrich(
             cand["theme_id"] = ""
             cand["sector"] = "未知"
             cand["sector_source"] = ""
+        cand["industry"] = stock_industry.get(code6, "未知")
         cand["fund_flow"] = fund_flow_of(code6, cand["sector"], fund_flow)
         if sp_resolve is not None:
             cand["sector_phase"] = sp_resolve(code6)     # 板块相位 hint(不封顶,证据层)

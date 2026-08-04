@@ -142,3 +142,21 @@ def test_platform_pullback_column():
     row2 = next(l for l in md.split("## D 池")[1].splitlines() if "000002" in l)
     assert "✓@10.25" in row1           # 命中:显示平台高(自然止损位)
     assert "✓" not in row2              # 未命中:横杠
+
+
+def test_industry_preferred_over_theme_sector_in_table():
+    """「板块」列优先显示 TDX 官方细分行业(industry),缺行业时回退主题族(sector)。
+
+    行业是每股唯一官方归属(建设银行→全国性银行),主题族是 9 选 1 的聚合层——
+    展示层以官方行业为准(2026-08-04 owner 决策)。
+    """
+    c = _cand("601939", "建设银行", "船舶/军工/高端装备", "A", "优", 4, True)
+    c["industry"] = "全国性银行"
+    md = ct.render_table({"status": "ok", "candidates": [c]}, "2026-08-04")
+    bull = md.split("## 🐂 基本面牛股候选")[1].split("\n## ")[0]
+    assert "全国性银行" in bull and "船舶/军工" not in bull
+    # 缺 industry 字段时回退主题族(向后兼容旧 enriched 文件)
+    md2 = ct.render_table({"status": "ok", "candidates": [
+        _cand("000977", "浪潮信息", "AI算力/服务器/液冷", "A", "优", 4, True)]}, "2026-08-04")
+    bull2 = md2.split("## 🐂 基本面牛股候选")[1].split("\n## ")[0]
+    assert "AI算力/服务器/液冷" in bull2
