@@ -265,14 +265,37 @@ class TestLabelsNeverAlterSelection:
             checked += 1
         assert checked >= 1, "未找到 A 池主表行（20 列）"
 
-    def test_score_candidates_does_not_read_signals(self):
-        """打分层不得消费 signals——否则就成了 B 类改动（改分层）。"""
+    def test_score_candidates_passes_signals_through(self):
+        """必须**透传** signals——它是显式字段白名单，不加就会被丢掉。
+
+        2026-08-04 实盘踩过：157 只候选、信号标注区块全空，因为 enrich 落盘的
+        signals 没进 score_candidates 的输出白名单。传递与消费是两件事。
+        """
         import inspect
 
         from screening import score_candidates as sc
         src = inspect.getsource(sc)
-        # 注意不能直接搜 "signals"——既有的 repair_signals 会误命中。
-        for pat in ('cand.get("signals")', "cand.get('signals')",
-                    'cand["signals"]', "cand['signals']",
-                    '"signals":', "signal_labels"):
-            assert pat not in src, f"score_candidates 不得消费 signals（会改分层）: {pat}"
+        assert '"signals": cand.get("signals")' in src, "signals 必须透传，否则标注层失效"
+
+    def test_score_candidates_does_not_consume_signals(self):
+        """但**不得消费**：一旦读进打分逻辑就从 A 类（纯标注）变成 B 类（改分层）。
+
+        判据：直接从候选取 signals 的表达式（`cand.get("signals")` / `cand["signals"]`）
+        全文**只允许出现一次**，即返回字典里的那行透传。
+        注意不能按行搜 "signals" —— 既有的 `repair_signals` 字典**内部**也有个
+        `signals` 键（`(cand.get("repair_signals") or {}).get("signals")`），会误报。
+        """
+        import inspect
+
+        from screening import score_candidates as sc
+        src = inspect.getsource(sc)
+        # 只查真正的依赖形式。不能搜字符串 "signal_labels"——
+        # score_candidates 的注释里会提到 tests/test_signal_labels.py（本测试自己）。
+        for bad in ("import signal_labels", "from signal_labels"):
+            assert bad not in src, f"打分层不得依赖 signal_labels: {bad}"
+        pats = ('cand.get("signals")', "cand.get('signals')",
+                'cand["signals"]', "cand['signals']")
+        direct = sum(src.count(x) for x in pats)
+        assert direct == 1, (
+            f"直接取候选 signals 的地方应恰好 1 处（白名单透传），实际 {direct} 处——"
+            "多出来的很可能是把标注读进了打分逻辑")

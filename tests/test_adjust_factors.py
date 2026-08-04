@@ -465,3 +465,49 @@ class TestClientReconnect:
                             staticmethod(lambda **kw: built.append(1) or C()))
         ltd._get_client()
         assert built, "超过 CLIENT_MAX_AGE_SEC 应重建"
+
+
+class TestCliFullMarketPath:
+    """CLI 的「全市场」路径必须真的能跑。
+
+    2026-08-04 实盘踩过：`refresh_xdxr` stage 报
+    `module 'local_tdx_data' has no attribute 'list_local_codes'` —— 正确名字是
+    `list_local_vipdoc_codes`，我在三个文件里都写错了。
+    根因是本机无 vipdoc 数据，测试时全都传 `--codes` 绕过，这条路径**从未被执行**。
+    所以这里只断言"函数名存在"，不需要真数据也能挡住同类错误。
+    """
+
+    def test_referenced_lister_exists(self):
+        from local_tdx import local_tdx_data as ltd
+        assert hasattr(ltd, "list_local_vipdoc_codes")
+
+    @pytest.mark.parametrize("mod", [
+        "07_tools/local_tdx/adjust_factors.py",
+        "07_tools/local_tdx/fetch_market_cap.py",
+        "07_tools/screening/adjust_diagnostic.py",
+    ])
+    def test_no_stale_function_name(self, mod):
+        import pathlib
+        src = pathlib.Path(mod).read_text(encoding="utf-8")
+        assert "list_local_codes()" not in src, f"{mod} 用了不存在的 list_local_codes"
+
+    @pytest.mark.parametrize("mod", [
+        "07_tools/local_tdx/adjust_factors.py",
+        "07_tools/local_tdx/fetch_market_cap.py",
+        "07_tools/screening/adjust_diagnostic.py",
+    ])
+    def test_lister_attribute_resolvable(self, mod):
+        """更强的检查：脚本里**调用**的 local_tdx_data.X() 都必须真实存在。
+
+        只匹配调用形式（后跟左括号）——否则注释里的 `local_tdx_data.py` 会被
+        当成属性 `py` 而误报。
+        """
+        import pathlib
+        import re
+
+        from local_tdx import local_tdx_data as ltd
+        src = pathlib.Path(mod).read_text(encoding="utf-8")
+        called = set(re.findall(r"local_tdx_data\.([a-zA-Z_][a-zA-Z0-9_]*)\s*\(", src))
+        assert called, f"{mod} 没有调用 local_tdx_data 的任何函数（测试假设失效）"
+        for attr in called:
+            assert hasattr(ltd, attr), f"{mod} 调用了不存在的 local_tdx_data.{attr}()"

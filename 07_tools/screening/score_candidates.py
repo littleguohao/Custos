@@ -633,6 +633,12 @@ def score_candidate(
         "ride_above_fast": bool(cand.get("ride_above_fast")),
         "b1_ignition": cand.get("b1_ignition") or {},
         "distribution": cand.get("distribution") or {},
+        # 信号标注层（A 类改动）：**只透传，不参与打分**。
+        # 本函数是显式字段白名单，enrich 落盘的 signals 不加在这里就会被丢掉——
+        # 2026-08-04 实盘即因此出现「157 只候选、信号标注区块全空」。
+        # ⚠️ 只允许出现在这一行（纯映射）。一旦被读进打分逻辑，就从 A 类（纯标注）
+        # 变成 B 类（改分层），必须先过回测——见 tests/test_signal_labels.py。
+        "signals": cand.get("signals") or {},
         # S_shape v3.0 有界评分（借鉴 workflow 沙漏模型）
         "s_shape": cand.get("s_shape") or {},
         "s_star": (cand.get("s_shape") or {}).get("s_star"),

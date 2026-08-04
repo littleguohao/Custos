@@ -539,7 +539,7 @@ def main() -> int:
     else:
         try:
             import local_tdx_data
-            codes = sorted(local_tdx_data.list_local_codes())
+            codes = sorted(local_tdx_data.list_local_vipdoc_codes())
         except Exception as e:                                 # noqa: BLE001
             print(f"[ERR] 读不到本地代码表: {e}")
             return 2
