@@ -144,6 +144,21 @@ class TestApplyQfq:
         adj = af.apply_qfq(_mk([10] * 5), [])
         assert adj.attrs.get("adjust") == "qfq"
 
+    def test_dropped_event_marks_qfq_partial(self):
+        """样本内事件 ratio 求不出(前收盘<=0)被跳过 ⇒ 必须标 qfq_partial,不许盖章 qfq
+        ——「部分除权事件没参与复权」是静默降级,attrs 必须可观测。"""
+        d = pd.bdate_range("2025-01-01", periods=4).astype(str).tolist()
+        raw = _mk([0, 0, 10, 10], d)                      # 事件日前收盘为 0 → ratio None
+        adj = af.apply_qfq(raw, [_ev(d[2], songzhuangu=10)])
+        assert adj.attrs.get("adjust") == "qfq_partial"
+        assert adj.attrs.get("adjust_events_dropped") == 1
+
+    def test_missing_columns_marks_none_not_qfq(self):
+        """缺 date/close 列时按未复权返回,且必须留痕(此前会被 qfq_table 盖章成 qfq)。"""
+        adj = af.apply_qfq(pd.DataFrame({"x": [1, 2]}), [])
+        assert adj.attrs.get("adjust") == "none"
+        assert "adjust_error" in adj.attrs
+
     def test_ohlc_all_scaled(self):
         d = pd.bdate_range("2025-01-01", periods=4).astype(str).tolist()
         raw = _mk([20, 20, 10, 10], d)
@@ -188,6 +203,19 @@ class TestNormalizeXdxr:
              "songzhuangu": 0, "peigu": 0, "peigujia": 0, "suogu": 0}])
         ev = af.normalize_xdxr(df)
         assert [e["date"] for e in ev] == ["2023-05-01", "2025-07-01"]
+
+    def test_truncation_keeps_newest(self):
+        """超 MAX_EVENTS_SANE 截断必须保留**最新**事件（新事件才影响近期复权，
+        此前保留最旧 500 条方向反了）。"""
+        days = pd.date_range("2000-01-01", periods=600, freq="D")
+        df = pd.DataFrame([
+            {"year": d.year, "month": d.month, "day": d.day, "category": 1,
+             "fenhong": 1, "songzhuangu": 0, "peigu": 0, "peigujia": 0, "suogu": 0}
+            for d in days])
+        ev = af.normalize_xdxr(df)
+        assert len(ev) == af.MAX_EVENTS_SANE
+        assert ev[-1]["date"] == str(days[-1])[:10]
+        assert ev[0]["date"] == str(days[-af.MAX_EVENTS_SANE])[:10]
 
 
 class TestCache:

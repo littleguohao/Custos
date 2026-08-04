@@ -204,5 +204,6 @@ class TestCliWiring:
         from paths import BASE
         r = subprocess.run([sys.executable, str(BASE / "07_tools" / "screening"
                                                 / "backtest_factors.py"), "--help"],
-                           capture_output=True, text=True, timeout=120)
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=120)
         assert "--scale-out" in r.stdout

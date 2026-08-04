@@ -70,6 +70,48 @@ class TestFetch:
         assert t.fetch_ext_change("NVDA") is None
 
 
+class TestReconnect:
+    """连接管理(DATA_SOURCE_PRINCIPLE):判死重建 + 超龄重建,不允许"建一次用一辈子"。"""
+
+    def test_dead_connection_retried_with_fresh_client(self, monkeypatch):
+        """第一次调用连接异常 ⇒ 丢弃缓存重建后再试一次,而不是整个进程余生静默失效。"""
+        calls = {"n": 0}
+
+        class Q:
+            def bars(self, **kw):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise OSError("dead")
+                return pd.DataFrame({"close": [100.0, 101.0]})
+
+        monkeypatch.setattr(t, "_get_ext_client", lambda timeout=12: Q())
+        r = t.fetch_ext_change("NVDA")
+        assert r is not None and r["change_pct"] == pytest.approx(1.0)
+        assert calls["n"] == 2
+
+    def test_stale_client_rebuilt(self, monkeypatch):
+        import time as _t
+
+        built = {"n": 0}
+
+        class FakeQuotes:
+            @staticmethod
+            def factory(market=None, timeout=None):
+                built["n"] += 1
+                return object()
+
+        import mootdx.quotes as mq
+        monkeypatch.setattr(mq, "Quotes", FakeQuotes)
+        monkeypatch.setattr(t, "_client", None)
+        monkeypatch.setattr(t, "_client_created_at", 0.0)
+        t._get_ext_client()
+        t._get_ext_client()
+        assert built["n"] == 1, "未超龄必须复用缓存"
+        monkeypatch.setattr(t, "_client_created_at", _t.monotonic() - 9999)
+        t._get_ext_client()
+        assert built["n"] == 2, "超龄必须重建"
+
+
 class TestCollectorIntegration:
     def test_fallback_marks_degraded_and_source(self, monkeypatch, tmp_path):
         """Yahoo 挂了走 ext 时，必须留下 degraded 与 fallback_source 供下游归因。"""

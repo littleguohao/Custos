@@ -138,7 +138,8 @@ def normalize_xdxr(df: Any) -> list[dict[str, Any]]:
                ("fenhong", "songzhuangu", "peigu", "suogu")):
             out.append(ev)
     out.sort(key=lambda e: e["date"])
-    return out[:MAX_EVENTS_SANE]
+    # 超限截断保留**最新**的：新事件才影响近期复权（此前保留最旧 500 条,方向反了）
+    return out[-MAX_EVENTS_SANE:]
 
 
 def normalize_shares(df: Any) -> list[dict[str, Any]]:
@@ -380,18 +381,26 @@ def event_ratio(prev_close: float, ev: dict[str, Any]) -> Optional[float]:
 
 
 def compute_qfq_factors(dates: Any, closes: Any,
-                        events: list[dict[str, Any]]) -> np.ndarray:
+                        events: list[dict[str, Any]],
+                        stats: Optional[dict] = None) -> np.ndarray:
     """逐根 K 线的前复权因子（乘到未复权价上即得前复权价）。
 
     因子(t) = Π ratio_d for 除权日 d > t   ⇒ **最新一天恒为 1.0**。
 
     ``dates`` 按升序；``closes`` 是未复权收盘价。事件日不在 K 线里（停牌/数据缺失）
     时按「该日之后第一根 K 线」定位，取其前一根的收盘价作为前收盘。
+
+    ``stats``（可选）：传入 dict 时回填 ``events_in_sample`` / ``events_dropped``
+    （落在样本内但 ratio 求不出、被跳过的事件数）——跳过必须可观测，
+    否则"部分除权事件没参与复权"会变成静默降级（审计反复批判的失效模式）。
     """
     d = np.asarray([str(x)[:10] for x in dates])
     c = np.asarray(closes, dtype=float)
     n = len(d)
     factors = np.ones(n, dtype=float)
+    if stats is not None:
+        stats["events_in_sample"] = 0
+        stats["events_dropped"] = 0
     if n == 0 or not events:
         return factors
 
@@ -400,9 +409,13 @@ def compute_qfq_factors(dates: Any, closes: Any,
         idx = int(np.searchsorted(d, ed, side="left"))         # 首个 >= 除权日
         if idx <= 0 or idx >= n:
             continue                                           # 落在样本外
+        if stats is not None:
+            stats["events_in_sample"] += 1
         prev_close = c[idx - 1]
         r = event_ratio(float(prev_close), ev)
         if r is None:
+            if stats is not None:
+                stats["events_dropped"] += 1
             continue
         factors[:idx] *= r                                     # 只缩放除权日之前
     return factors
@@ -423,9 +436,13 @@ def apply_qfq(df: pd.DataFrame, events: list[dict[str, Any]],
         return df
     out = df.copy()
     if "date" not in out.columns or "close" not in out.columns:
+        # 无法复权却什么都不标,会被 qfq_table 盖章成 "qfq"——降级必须留痕
+        out.attrs["adjust"] = "none"
+        out.attrs["adjust_error"] = "missing date/close columns"
         return out
+    st: dict = {}
     f = compute_qfq_factors(out["date"].to_numpy(),
-                            out["close"].astype(float).to_numpy(), events)
+                            out["close"].astype(float).to_numpy(), events, stats=st)
     out["raw_close"] = out["close"].astype(float)
     for col in price_cols:
         if col in out.columns:
@@ -434,7 +451,13 @@ def apply_qfq(df: pd.DataFrame, events: list[dict[str, Any]],
         v = out[volume_col].astype(float).to_numpy()
         with np.errstate(divide="ignore", invalid="ignore"):
             out[volume_col] = np.where(f > 0, v / f, v)
-    out.attrs["adjust"] = "qfq"
+    dropped = st.get("events_dropped", 0)
+    # 有样本内事件被跳过 ⇒ 只复权了一部分,标 qfq_partial 而非 qfq
+    out.attrs["adjust"] = "qfq_partial" if dropped else "qfq"
+    if dropped:
+        out.attrs["adjust_events_dropped"] = dropped
+        print(f"[WARN] {dropped} 个除权事件未能参与复权（ratio 异常被跳过）,"
+              f"结果仅为部分前复权", file=sys.stderr)
     out.attrs["adjust_factor_first"] = float(f[0]) if len(f) else 1.0
     out.attrs["adjust_events"] = sum(
         1 for ev in events
@@ -464,7 +487,8 @@ def qfq_table(code: str, df: pd.DataFrame, *, refresh: bool = False,
         return out
     out = apply_qfq(df, ev)
     if out is not None and not out.empty:
-        out.attrs["adjust"] = "qfq"
+        # apply_qfq 内部已按实际情况盖章（qfq / qfq_partial / none）,不得覆盖
+        out.attrs.setdefault("adjust", "qfq")
     return out
 
 

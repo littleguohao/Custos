@@ -56,8 +56,9 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 TOOLS_DIR = Path(__file__).resolve().parents[1]
-if str(TOOLS_DIR) not in sys.path:
-    sys.path.insert(0, str(TOOLS_DIR))
+for _p in (str(TOOLS_DIR), str(TOOLS_DIR / "local_tdx")):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from paths import BASE, cn_now  # noqa: E402
 

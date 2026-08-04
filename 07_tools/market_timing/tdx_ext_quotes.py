@@ -25,6 +25,7 @@ ETF 代理与指数的口径差（报告里要如实说明）：
 from __future__ import annotations
 
 import sys
+import time
 from typing import Any, Optional
 
 # Yahoo symbol → (ext market, code, 是否为代理, 说明)
@@ -43,14 +44,30 @@ EXT_MAP: dict[str, tuple[int, str, bool, str]] = {
 }
 
 _client = None
+_client_created_at = 0.0
+CLIENT_MAX_AGE_SEC = 600.0   # 与 local_tdx_data 同口径：超时连接必须重建而非复用
 
 
 def _get_ext_client(timeout: int = 12):
-    global _client
-    if _client is None:
+    """进程级缓存 ext client，但**会重建**——超龄（600s）即新建。
+
+    第一版是"建一次用一辈子"的单例：ext 连接一死，fallback 在进程余生里静默失效
+    （返回 None 不报错，降级名存实亡）。这正是 503b77d 在 std 行情修掉、并写进
+    DATA_SOURCE_PRINCIPLE.md 连接管理规范的那个反模式。
+    """
+    global _client, _client_created_at
+    now = time.monotonic()
+    if _client is None or (now - _client_created_at) > CLIENT_MAX_AGE_SEC:
         from mootdx.quotes import Quotes
         _client = Quotes.factory(market="ext", timeout=timeout)
+        _client_created_at = now
     return _client
+
+
+def _drop_ext_client() -> None:
+    """连接判死后丢弃缓存，下次调用重建。"""
+    global _client
+    _client = None
 
 
 def fetch_ext_change(symbol: str, *, timeout: int = 12) -> Optional[dict[str, Any]]:
@@ -62,13 +79,18 @@ def fetch_ext_change(symbol: str, *, timeout: int = 12) -> Optional[dict[str, An
     if ent is None:
         return None
     market, code, is_proxy, note = ent
-    try:
-        q = _get_ext_client(timeout)
-        df = q.bars(symbol=code, market=market, frequency=9, offset=4)
-    except Exception as e:  # noqa: BLE001
-        print(f"[WARN] TDX ext {symbol}({code}) 取数失败: {type(e).__name__}: {e}",
-              file=sys.stderr)
-        return None
+    df = None
+    for attempt in range(2):
+        try:
+            q = _get_ext_client(timeout)
+            df = q.bars(symbol=code, market=market, frequency=9, offset=4)
+            break
+        except Exception as e:  # noqa: BLE001
+            _drop_ext_client()               # 连接可能已死：丢弃缓存，重建后再试一次
+            if attempt == 1:
+                print(f"[WARN] TDX ext {symbol}({code}) 取数失败: {type(e).__name__}: {e}",
+                      file=sys.stderr)
+                return None
     if df is None or len(df) < 2 or "close" not in df.columns:
         return None
     try:

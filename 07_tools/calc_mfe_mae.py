@@ -193,22 +193,22 @@ def main(argv=None):
         try:
             df = None
             # All stocks: try local_tdx vipdoc first (supports BJ)
-            if is_bj:
-                # BJ stocks: use local_tdx direct parser (mootdx Reader misroutes 920xxx)
-                sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "07_tools" / "local_tdx"))
-                import local_tdx_data as ltd
-                # 前复权:MFE/MAE 是持仓期最大浮盈/浮亏,未复权的除权跳空会造出
-                # 一个根本不存在的巨额 MAE(owner 2026-08-04 拍板全链前复权)
-                df = ltd.get_ohlcv_table(code, count=2000, adjust="qfq")
+            # 前复权:MFE/MAE 是持仓期最大浮盈/浮亏,未复权的除权跳空会造出
+            # 一个根本不存在的巨额 MAE(owner 2026-08-04 拍板全链前复权)。
+            # 沪深与 BJ 统一走 get_ohlcv_table(adjust="qfq")——此前只切了 BJ 分支,
+            # 沪深仍走 reader.daily 未复权,除权跳空造假 MAE 的问题依然存在。
+            sys.path.insert(0, str(Path(__file__).resolve().parent / "local_tdx"))
+            import local_tdx_data as ltd
+            df = ltd.get_ohlcv_table(code, count=2000, adjust="qfq")
+            if df is not None and len(df) > 0:
+                df = df.reset_index(drop=True)
+            elif is_bj:
+                # BJ fallback: online bars (mootdx Reader misroutes 920xxx)
+                from mootdx.quotes import Quotes
+                client = Quotes.factory(market="std", quiet=True)
+                df = client.bars(symbol=code, frequency=9, count=bars_needed)
                 if df is not None and len(df) > 0:
-                    df = df.reset_index(drop=True)
-                else:
-                    # Fallback to online bars
-                    from mootdx.quotes import Quotes
-                    client = Quotes.factory(market="std", quiet=True)
-                    df = client.bars(symbol=code, frequency=9, count=bars_needed)
-                    if df is not None and len(df) > 0:
-                        df = df.reset_index()
+                    df = df.reset_index()
             else:
                 df = reader.daily(symbol=symbol)
                 if df is not None and len(df) > 0:
