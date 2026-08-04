@@ -47,6 +47,7 @@ for p in (TOOLS_DIR, TOOLS_DIR / "local_tdx", TOOLS_DIR / "market_timing", TOOLS
 
 from paths import DATA, RISK_DIR, SECTORS_DIR, TRADES_DIR  # noqa: E402
 import concept_tags  # noqa: E402
+import signal_labels  # noqa: E402
 import local_tdx_data  # noqa: E402
 import s_shape as s_shape_mod  # noqa: E402
 import financials as financials_mod  # noqa: E402
@@ -1319,6 +1320,21 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
     # 指标去重：日线 KDJ 与 MACD 各只算一次，再喂给下游检测器（审计：kdj×4/macd×3）。
     macd_technics = check_macd_technics(df)
 
+    # 研究因子的**信号标注**（三态 hit/miss/unavailable）。只标注、不参与打分分层——
+    # 这些因子还没跑过真实回测，而结论#15 的教训是"识别有术、盈利无效"。
+    # 复用上面已算的 zx / distribution / daily_j / weekly_j，避免重复 resample 与 kdj。
+    _wk = weekly_j_state(df)
+    try:                                    # 平台回踩:与下方证据层同一份检测,延迟导入
+        from platform_pullback import detect_platform_pullback  # noqa: PLC0415
+        _plat = detect_platform_pullback(df)
+    except Exception:  # noqa: BLE001
+        _plat = None
+    signals = signal_labels.compute_signals(
+        df, code, daily_j=daily_j,
+        weekly_j_low=_wk.get("weekly_j_low"),
+        weekly_j_available=_wk.get("weekly_j_available"),
+        zx=zx, distribution=distribution, platform_pullback=_plat)
+
     return {
         "close": round(float(last["close"]), 4),
         "change_pct": round(change_pct, 2) if change_pct is not None else None,
@@ -1342,7 +1358,8 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
         # --- B1/CZ 策略对齐（阈值均为待回测参数，实际值随候选落盘） ---
         "wave": detect_wave_type(df),
         # 只摊 weekly_ 前缀键：裸 available 会落到候选顶层被误读成"候选可用"（审计）
-        **{k: v for k, v in weekly_j_state(df).items() if k.startswith("weekly_")},
+        **{k: v for k, v in _wk.items() if k.startswith("weekly_")},
+        "signals": signals,
         "non_one_wave": check_non_one_wave(df),
         "repair_signals": check_repair_signals(df, index_df, kdj_state=j),
         "five_day_entry": check_five_day_entry(df),

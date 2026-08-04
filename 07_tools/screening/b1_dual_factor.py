@@ -141,8 +141,14 @@ def compute_long_structure(df: pd.DataFrame) -> dict[str, Any]:
 
 
 def detect_weekly_b1_resonance(df: pd.DataFrame,
-                               j_threshold: float = J_LOW_THRESHOLD) -> dict[str, Any]:
+                               j_threshold: float = J_LOW_THRESHOLD,
+                               daily_j: Optional[float] = None,
+                               weekly_j: Optional[float] = None) -> dict[str, Any]:
     """日线 B1 + 周线 B1 共振：两个周期的 J 同时 < 阈值。绝不 raise。
+
+    ``daily_j`` / ``weekly_j`` 可注入已算好的值以跳过重算：``resample("W-FRI")`` 占本函数
+    4.3ms 中的 2.3ms，而 enrich 的 ``weekly_j_state`` 已经算过一次周线 J（同口径），
+    重复算等于白付一次 resample。
 
     周线 J<13 意味着更大周期的回调也到位——日线可能只是短暂杀跌，周线同时超卖才说明
     整段回调走完。口径与 ``enrich_candidates.weekly_j_state`` 一致（``resample(df,"W-FRI")``
@@ -155,25 +161,30 @@ def detect_weekly_b1_resonance(df: pd.DataFrame,
     except Exception as exc:  # noqa: BLE001
         return {"available": False, "hit": False, "reason": f"dep_missing:{type(exc).__name__}"}
     try:
-        dj = kdj(df)
-        if not dj.get("available") or dj.get("j") is None:
-            return {"available": False, "hit": False, "reason": "daily_kdj_unavailable"}
-        d = df
-        if not pd.api.types.is_datetime64_any_dtype(df["date"]):
-            d = df.copy()
-            d["date"] = pd.to_datetime(d["date"])
-        weekly = resample(d, "W-FRI")
-        wj = kdj(weekly)
-        if not wj.get("available") or wj.get("j") is None:
-            return {"available": False, "hit": False, "reason": "weekly_kdj_unavailable",
-                    "daily_j": round(float(dj["j"]), 2)}
-        daily_j, week_j = float(dj["j"]), float(wj["j"])
+        if daily_j is None:
+            dj = kdj(df)
+            if not dj.get("available") or dj.get("j") is None:
+                return {"available": False, "hit": False, "reason": "daily_kdj_unavailable"}
+            daily_j = float(dj["j"])
+        n_weekly = None
+        if weekly_j is None:
+            d = df
+            if not pd.api.types.is_datetime64_any_dtype(df["date"]):
+                d = df.copy()
+                d["date"] = pd.to_datetime(d["date"])
+            weekly = resample(d, "W-FRI")
+            wj = kdj(weekly)
+            if not wj.get("available") or wj.get("j") is None:
+                return {"available": False, "hit": False, "reason": "weekly_kdj_unavailable",
+                        "daily_j": round(float(daily_j), 2)}
+            weekly_j, n_weekly = float(wj["j"]), int(len(weekly))
+        daily_j, week_j = float(daily_j), float(weekly_j)
         daily_low = daily_j == daily_j and daily_j < j_threshold      # NaN 不算满足
         week_low = week_j == week_j and week_j < j_threshold
         return {"available": True, "hit": bool(daily_low and week_low),
                 "daily_j": round(daily_j, 2), "weekly_j": round(week_j, 2),
                 "daily_j_low": bool(daily_low), "weekly_j_low": bool(week_low),
-                "weekly_bars": int(len(weekly))}
+                "weekly_bars": n_weekly}
     except Exception as exc:  # noqa: BLE001
         return {"available": False, "hit": False,
                 "error": f"{type(exc).__name__}:{str(exc)[:80]}"}

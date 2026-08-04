@@ -96,6 +96,79 @@ def _load_json(path, default):
         return default
 
 
+def _signal_labels_section(candidates: list[dict]) -> list[str]:
+    """信号标注一览：**逐个标注列出命中的票**（而不是只报几只）。
+
+    设计边界：这些研究因子（QSX>DKS、RSI 区间、B2、底部异动、主升始发点…）**只标注，
+    不参与打分分层**，上方候选池的分层与 next_step 完全未被改写。
+
+    ⚠️ 它们**已在跨窗终审中被否决**（治理文档「H1/H2 终审」）：edge 只存在于 2025-2026
+    单一 regime。所以这个区块是**观察记录，不是交易依据**，尤其不得据命中数定仓位。
+
+    分母是**可评估数**（排除数据不足的票）：`min_list_days=60` 而 `qsx_gt_dks` 需 120 根、
+    `surge_then_b1` 需 200 根，大量候选算不出来。把"算不出来"混进分母会让"数据不足"
+    被误读成"不符合条件"。
+    """
+    try:
+        import signal_labels as sl
+    except Exception:  # noqa: BLE001
+        return []
+    with_sig = [c for c in candidates if isinstance(c.get("signals"), dict)]
+    if not with_sig:
+        return []
+
+    def nm(c):
+        return f"{c.get('code')} {c.get('name') or ''}".strip()
+
+    lines = ["## 🏷️ 信号标注一览（研究因子·只标注，不影响上方分层）", ""]
+    for key, (label, abbr, direction) in sl.SIGNAL_META.items():
+        hits, evaluable = [], 0
+        for c in with_sig:
+            st = (c["signals"].get(key) or {}).get("state")
+            if st in ("hit", "miss"):
+                evaluable += 1
+            if st == "hit":
+                hits.append(c)
+        if not evaluable and not hits:
+            continue
+        mark = "⚠️ " if direction < 0 else ""
+        names = "、".join(nm(c) for c in hits[:12])
+        if len(hits) > 12:
+            names += f" 等 {len(hits)} 只"
+        lines.append(f"- {mark}**{label}** `{abbr}`（{len(hits)}/{evaluable}）："
+                     f"{names or '无'}")
+    na_counts: dict[str, int] = {}
+    for c in with_sig:
+        for key in sl.SIGNAL_META:
+            if (c["signals"].get(key) or {}).get("state") == "unavailable":
+                na_counts[key] = na_counts.get(key, 0) + 1
+    if na_counts:
+        top = sorted(na_counts.items(), key=lambda x: -x[1])[:4]
+        lines.append("")
+        lines.append("> 数据不足（算不出来，**不等于不符合条件**）："
+                     + "、".join(f"{sl.SIGNAL_META[k][0]} {v} 只" for k, v in top))
+    lines.append("> 分母为**可评估数**；缩写见各行反引号。这些标注不改写分层/next_step。")
+    lines.append("> ⚠️ **这些因子已在跨窗终审中被否决**（edge 仅存在于 2025-2026 单一 regime，"
+                 "详见 00_governance/B1_BACKTEST_FINDINGS.md「H1/H2 终审」）："
+                 "本区块是**观察记录，不是交易依据**，不得据命中数决定仓位。")
+    lines.append("")
+    return lines
+
+
+def _signal_cell(cand: dict) -> str:
+    """主表「标注」单元：`4/11 QD·RS·SG` + 负向 ⚠️。"""
+    sig = cand.get("signals")
+    if not isinstance(sig, dict):
+        return "-"
+    sm = sig.get("summary") or {}
+    parts = [str(sm.get("label") or "-")]
+    if sm.get("abbrs"):
+        parts.append("·".join(sm["abbrs"]))
+    if sm.get("neg_abbrs"):
+        parts.append("⚠️" + "·".join(sm["neg_abbrs"]))
+    return " ".join(parts)
+
+
 def _gate_advisory_section(date: str, gate: Optional[dict] = None) -> list[str]:
     """运行门控**建议**区块（独立于选股结果）。
 
@@ -187,6 +260,7 @@ def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
     lines.append("")
     # 🧭 当日主线指纹:候选池板块族密度榜(情境感知,非进场 gate)——置于最前,先看当前主线全貌
     lines += _mainline_fingerprint_section(candidates)
+    lines += _signal_labels_section(candidates)
     lines.append("## 🐂 基本面牛股候选（共振观察区）")
     lines.append("")
     lines.append("> 基本面优 + 板块相位有利 + 技术强 = 三面已共振；再叠 0AMV做多即为可买牛股候选（🐂）。单独列出供持续观察（基本面为当前快照、非回测验证，仅辅助）。")
@@ -305,9 +379,9 @@ def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
             lines.append("")
             continue
         lines.append(
-            "| 代码 | 名称 | 公式命中 | 模式标签 | 波浪 | CZ标签 | 技术分 | 贴合 | 资金意图 | 板块 | 板块状态 | 交易属性 | 共振 | 基本面 | 4面共振 | 平台回踩 | 分层 | 建议止损位 | next_step |"
+            "| 代码 | 名称 | 公式命中 | 模式标签 | 波浪 | CZ标签 | 技术分 | 贴合 | 资金意图 | 板块 | 板块状态 | 交易属性 | 共振 | 基本面 | 4面共振 | 平台回踩 | 标注 | 分层 | 建议止损位 | next_step |"
         )
-        lines.append("|---|---|---|---|---|---|---:|---:|---|---|---|---|---|---|---|---|---|---|---|")
+        lines.append("|---|---|---|---|---|---|---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|")
         for c in rows:
             # 未知 patterns 键（上游新增标签/脏数据）不得 KeyError 打挂整张表：
             # 用 .get 兜底并把原始键名留在表里，好让"多了个没登记的标签"看得见（审计）。
@@ -343,6 +417,7 @@ def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
                 f" | {fq_disp}"
                 f" | {r4_disp}"
                 f" | {pp_disp}"
+                f" | {_signal_cell(c)}"
                 f" | {bucket}"
                 f" | {_fmt(stop)}"
                 f" | {c.get('next_step', '-')} |"

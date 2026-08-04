@@ -88,7 +88,8 @@ def _j_series(df: pd.DataFrame) -> Optional[np.ndarray]:
 
 
 def detect_b2(df: pd.DataFrame, code: str = "",
-              b1_within: int = B2_B1_WITHIN) -> dict[str, Any]:
+              b1_within: int = B2_B1_WITHIN,
+              j_series: Optional[np.ndarray] = None) -> dict[str, Any]:
     """B2：B1 之后 + 涨幅>4% + 比前一交易日放量 + J<55 + 无上影线（加分）。绝不 raise。
 
     "B1 之后"= 近 ``b1_within`` 根内（含当日之前）出现过 J<13。
@@ -98,7 +99,7 @@ def detect_b2(df: pd.DataFrame, code: str = "",
         if n < B2_MIN_BARS:
             return {"available": False, "hit": False, "reason": f"少于{B2_MIN_BARS}根K线"}
         close, high, low, vol, open_ = _arr(df)
-        j = _j_series(df)
+        j = j_series if j_series is not None else _j_series(df)
         if j is None:
             return {"available": False, "hit": False, "reason": "kdj_unavailable"}
         t = n - 1
