@@ -138,6 +138,21 @@ def main(argv=None) -> int:
     else:
         print(f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'stock names refreshed'}")
 
+    # 3b. Refresh ex-dividend (权息) cache —— 前复权的依据（owner 2026-08-04 拍板全链前复权）。
+    #     未复权数据会把除权跳空当成真实暴跌：假止损、假 J<13 信号、假跌停
+    #     （实测同一段真实上涨走势 −42.50% vs +25.00%，差 67.5pp）。
+    #     除权事件是历史事实不会变，所以只按 --max-age 增量刷新；分红送转有 >2 周
+    #     预案公告期，7 天上限足以在除权日前拿到新事件。
+    #     best-effort：权息拿不到时 get_ohlcv_table 按未复权返回并在 attrs 留痕，
+    #     不该让整条选股链停摆。
+    r = _run_stage(["uv", "run", "python", str(TOOLS / "local_tdx" / "adjust_factors.py"),
+                    "--warmup", "--max-age", "7"], "refresh_xdxr",
+                   note="前复权依据，best-effort；缺失时按未复权并在 attrs 留痕")
+    if not r["ok"]:
+        print(f"[WARN] refresh_xdxr failed: {r['out'][:200]}")
+    else:
+        print(f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'xdxr refreshed'}")
+
     # 4. Refresh concept tags (miscinfo) so sector mapping uses the accurate source
     r = _run_stage(["uv", "run", "python", str(TOOLS / "local_tdx" / "concept_tags.py"),
                     "--date", target], "refresh_concept_tags", note="best-effort，失败不中断")

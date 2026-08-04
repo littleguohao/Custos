@@ -147,7 +147,7 @@ def regime_segments(regime_map: dict[str, str], target: str = "bear",
 
 def load_price_data(codes: list[str]) -> tuple[dict[str, dict], list[str]]:
     """读取个股 vipdoc 日线，返回 ({code: {dates:[], close_by_date:{}}}, 缺数据代码清单)。"""
-    from local_tdx.local_tdx_data import read_vipdoc_daily
+    from local_tdx.local_tdx_data import get_ohlcv_table
 
     prices: dict[str, dict] = {}
     missing: list[str] = []
@@ -155,7 +155,9 @@ def load_price_data(codes: list[str]) -> tuple[dict[str, dict], list[str]]:
         if code in NON_SECURITY_CODES:
             continue
         try:
-            df = read_vipdoc_daily(code)
+            # 前复权(owner 2026-08-04):未复权除权跳空会被当成真实下跌,
+            # 直接污染空头区间的收益统计
+            df = get_ohlcv_table(code, count=2000, adjust="qfq")
         except Exception:  # noqa: BLE001 —— 缺数据跳过，不报错
             df = None
         if df is None or df.empty:

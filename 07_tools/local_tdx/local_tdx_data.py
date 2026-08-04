@@ -554,7 +554,8 @@ def save_csv(path: Path, df: pd.DataFrame) -> None:
 
 
 def get_ohlcv_table(code: str, count: int = 260, prefer: str = "vipdoc",
-                    expect_last_date: str | None = None) -> pd.DataFrame:
+                    expect_last_date: str | None = None,
+                    adjust: str = "qfq") -> pd.DataFrame:
     """Unified OHLCV reader: try local vipdoc first, fallback to online bars.
 
     ``expect_last_date`` (YYYY-MM-DD) turns on freshness checking. The local
@@ -570,6 +571,18 @@ def get_ohlcv_table(code: str, count: int = 260, prefer: str = "vipdoc",
 
     ``attrs`` is used rather than an exception so existing callers keep working
     while gaining the ability to detect the condition.
+
+    ``adjust``（owner 2026-08-04 拍板：全链统一前复权）：
+
+        "qfq"（**默认**）  前复权。价格连续，除权日不再有假跳空
+        ""/ "none"        未复权原样返回（展示/下单口径；也可用 qfq 结果的 raw_close 列）
+
+    默认设成 `qfq` 而不是保持原行为，是因为「统一前复权」正是要消除
+    「哪个调用方记得传参」这类不确定性——漏改的地方自动获得正确口径。
+    前复权最新一日因子恒为 1，所以**当日价格与盘面完全一致**，改默认值不会
+    让买入价/止损价偏离盘面；受影响的只有历史价格，而那本就该连续。
+
+    结果带 `attrs["adjust"]`（"qfq"/"none"）与 `raw_close` 列（未复权收盘）。
     """
     df = pd.DataFrame()
     if prefer == "vipdoc":
@@ -610,6 +623,24 @@ def get_ohlcv_table(code: str, count: int = 260, prefer: str = "vipdoc",
         if df.attrs["stale"]:
             print(f"[WARN] {code} 数据陈旧: 末根 K 线 {last} < 期望 {expect_last_date}",
                   file=sys.stderr)
+    if adjust == "qfq" and not df.empty:
+        # owner 2026-08-04 拍板：全链统一前复权。未复权数据会把除权跳空当成真实暴跌
+        # ⇒ 假止损、假 J<13 信号、假跌停（详见 B1_BACKTEST_FINDINGS「复权口径问题」）。
+        # 权息取不到时按未复权返回并在 attrs 留痕（不 raise：一只票的权息拿不到
+        # 不该让整条 18:00 选股链停摆），下游可查 attrs["adjust"] 判断。
+        from code_utils import is_index                      # noqa: PLC0415
+        if is_index(code):
+            df.attrs["adjust"] = "n/a-index"                 # 指数不除权，无需复权
+        else:
+            try:
+                from adjust_factors import qfq_table        # noqa: PLC0415
+                df = qfq_table(code, df, strict=False)
+            except Exception as e:                          # noqa: BLE001
+                print(f"[WARN] {code} 前复权失败，按未复权使用: {e}", file=sys.stderr)
+                df.attrs["adjust"] = "none"
+                df.attrs["adjust_error"] = str(e)
+    elif not df.empty:
+        df.attrs.setdefault("adjust", "none")
     return df
 
 

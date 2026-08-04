@@ -33,6 +33,43 @@ def clean_code(v):
     return s.split('.')[0].zfill(6) if s.split('.')[0].isdigit() else s.split('.')[0]
 
 
+def is_index(code: str) -> bool:
+    """代码是否为指数（而非可交易个股）。复权与 ST 判定都要靠它。
+
+    指数**没有除权除息**，对它取权息数据是白费网络请求（880/881 系列光细分行业就有
+    467 个），且拿不到数据后还要走一遍失败回退。所以复权前必须先排除指数。
+
+    识别的代码段：
+      · ``999999``          通达信上证指数
+      · ``880xxx``/``881xxx``  通达信板块/细分行业统计指数
+      · ``399xxx``          深证指数系列（399001 成指 / 399006 创业板指 …）
+      · ``000688``/``000300``/``000905``/``000852``/``000016``/``000010``
+                            沪市指数（注意与深市个股 000xxx 同形，故用白名单而非前缀）
+      · ``899xxx``          北证指数（899050）
+      · ``H`` / ``B`` 开头   通达信自定义指数
+
+    ⚠️ 沪市指数与深市个股都是 ``000xxx``（000001 既是上证指数也是平安银行），
+    无法靠前缀区分，所以这里只认常用沪指白名单 + ``.SH`` 后缀。带后缀时以后缀为准。
+    """
+    s = str(code).strip().upper()
+    if not s:
+        return False
+    bare, suf = (s.rsplit(".", 1) + [""])[:2] if "." in s else (s, "")
+    if bare[:1] in {"H", "B"} and not bare.isdigit():
+        return True
+    if not bare.isdigit():
+        return False
+    b = bare.zfill(6)
+    if b == "999999" or b.startswith(("880", "881", "399", "899")):
+        return True
+    # 沪市指数白名单：与深市 000xxx 个股同形，必须靠后缀或白名单区分
+    SH_INDEX = {"000001", "000010", "000016", "000300", "000688",
+                "000852", "000903", "000905", "000906"}
+    if b in SH_INDEX and suf == "SH":
+        return True
+    return False
+
+
 def market_of(code: str) -> str:
     """Single source of truth for exchange classification: "SH" | "SZ" | "BJ" | "".
 

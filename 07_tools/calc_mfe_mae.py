@@ -197,7 +197,9 @@ def main(argv=None):
                 # BJ stocks: use local_tdx direct parser (mootdx Reader misroutes 920xxx)
                 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "07_tools" / "local_tdx"))
                 import local_tdx_data as ltd
-                df = ltd.read_vipdoc_daily(code)
+                # 前复权:MFE/MAE 是持仓期最大浮盈/浮亏,未复权的除权跳空会造出
+                # 一个根本不存在的巨额 MAE(owner 2026-08-04 拍板全链前复权)
+                df = ltd.get_ohlcv_table(code, count=2000, adjust="qfq")
                 if df is not None and len(df) > 0:
                     df = df.reset_index(drop=True)
                 else:

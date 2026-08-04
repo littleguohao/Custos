@@ -154,7 +154,8 @@ uv run python 07_tools/run_1800.py
 | 财务数据 | mootdx Affair | `local_tdx_data.py` |
 | **PIT 财务（带公告日）** | 东方财富 datacenter（业绩报表 RPT_LICO_FN_CPD） | `local_tdx/fetch_pit_financials.py` |
 | **真市值 / 总股本** | 东方财富 datacenter（估值分析 RPT_VALUEANALYSIS_DET，2018-01-02 起） | `local_tdx/fetch_market_cap.py` |
-| 复权因子 | mootdx get_adjust_year | `local_tdx_data.py` |
+| **前复权（全链默认口径）** | 通达信协议 xdxr 权息数据（分红/送转/配股/缩股）→ 本地缓存 → 自算因子 | `local_tdx/adjust_factors.py` |
+| 复权因子（旧路径，仅 CLI） | mootdx get_adjust_year | `local_tdx_data.py --mode adjust` |
 | A50/汇率 | Yahoo Finance | `collect_incremental_market.py` |
 | 资金流向 | 东方财富 push2 API | `collect_fund_flow.py` |
 | 北交所行情 | 东方财富 push2 API（mootdx 不支持 BJ） | `collect_holding_quotes.py` |
