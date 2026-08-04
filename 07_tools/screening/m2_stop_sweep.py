@@ -158,22 +158,42 @@ def _run(group: str, name: str, extra: list[str], sample: int, cross: bool,
 
 
 def _load(p: pathlib.Path) -> dict:
+    """读一个结果 JSON。
+
+    ⚠️ 键名是 **`trade_summary`**（`backtest_factors.py:2118`），我第一版写成
+    `trade_sim`/`summary`/`trade_simulation` 全都对不上，导致 owner 跑完 25 个方案后
+    报表生成不出来、只能手工汇总。这里保留多个候选键并做兜底扫描，避免再因键名改动
+    静默失效——**读不到就明确报错，不要静默返回空**。
+    """
     try:
         d = json.loads(p.read_text(encoding="utf-8"))
     except Exception as e:                                        # noqa: BLE001
         print(f"[WARN] 读不了 {p.name}: {e}")
         return {}
-    for k in ("trade_sim", "summary", "trade_simulation"):
-        if isinstance(d.get(k), dict) and "expectancy" in d[k]:
-            s = dict(d[k])
-            s["_trades"] = d.get("trades") or d[k].get("trades") or []
-            s["_portfolio"] = d.get("portfolio") or d[k].get("portfolio")
+    pf = d.get("portfolio")
+    for k in ("trade_summary", "trade_sim", "summary", "trade_simulation"):
+        blk = d.get(k)
+        if isinstance(blk, dict) and ("expectancy" in blk or "n" in blk):
+            s = dict(blk)
+            s["_trades"] = d.get("trades") or blk.get("trades") or []
+            s["_portfolio"] = pf or blk.get("portfolio")
             return s
-    if "expectancy" in d:
+    if "expectancy" in d:                                          # 摘要直接在顶层
         s = dict(d)
         s["_trades"] = d.get("trades") or []
-        s["_portfolio"] = d.get("portfolio")
+        s["_portfolio"] = pf
         return s
+    # 兜底：扫一层子字典找带 expectancy 的块（键名再改也能活）
+    for k, v in d.items():
+        if isinstance(v, dict) and "expectancy" in v:
+            s = dict(v)
+            s["_trades"] = d.get("trades") or []
+            s["_portfolio"] = pf
+            print(f"[INFO] {p.name}: 摘要在非预期键 '{k}' 下，已兜底读取")
+            return s
+    if pf:                                                         # 纯组合级结果
+        return {"_trades": [], "_portfolio": pf}
+    print(f"[WARN] {p.name}: 找不到交易摘要（顶层键: {sorted(d)[:8]}）")
     return {}
 
 

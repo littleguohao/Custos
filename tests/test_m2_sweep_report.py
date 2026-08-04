@@ -181,3 +181,54 @@ class TestNewRunsWired:
             exposures.append(c * p / 100)
         assert min(exposures) <= 0.4, f"缺低敞口方案，实际最低 {min(exposures):.0%}"
         assert max(exposures) >= 1.0, "应保留满仓方案作对照"
+
+
+class TestLoadKeyName:
+    """键名必须对上 backtest_factors 的实际输出 `trade_summary`。
+
+    我第一版写成 trade_sim/summary/trade_simulation 全都对不上，owner 跑完 25 个方案后
+    报表生成不出来、只能手工汇总。这类"读不到就静默返回空"的失效最难发现——
+    脚本不报错，只是表格是空的。
+    """
+
+    def test_reads_trade_summary_key(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        (tmp_path / "A_stop_low__x.json").write_text(json.dumps({
+            "trade_summary": {"n": 410, "win_rate": 0.363, "expectancy": 0.006,
+                              "expectancy_R": 0.769, "total_R": 304.0,
+                              "payoff_ratio": 3.2, "avg_win": 0.1212,
+                              "avg_loss": 0.04, "avg_holding": 5.0,
+                              "exit_reasons": {}},
+            "trades": [{"ret": 0.3}] * 20}), encoding="utf-8")
+        got = m2._collect(cross=False)["A_stop_low"]
+        assert len(got) == 1
+        assert got[0]["expR"] == 0.769 and got[0]["totR"] == 304.0
+        assert got[0]["big"] == 20
+
+    def test_portfolio_at_top_level(self, tmp_path, monkeypatch):
+        """组合级结果的 portfolio 在顶层，与 trade_summary 平级。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        (tmp_path / "C_portfolio__p.json").write_text(json.dumps({
+            "trade_summary": {"n": 342, "expectancy": 0.01, "expectancy_R": 0.2},
+            "portfolio": {"total_return": 0.171, "cagr": 0.108,
+                          "max_drawdown": 0.029, "n_taken": 150,
+                          "n_skipped": 1195}}), encoding="utf-8")
+        got = m2._collect(cross=False)["C_portfolio"]
+        assert got and got[0]["pf"]["total_return"] == 0.171
+
+    def test_unknown_key_falls_back(self, tmp_path, monkeypatch, capsys):
+        """键名再改也要能活——扫一层子字典兜底。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        (tmp_path / "A_stop_low__y.json").write_text(json.dumps({
+            "some_new_name": {"n": 100, "expectancy": 0.005, "expectancy_R": 0.5,
+                              "total_R": 50.0, "avg_win": 0.1}}), encoding="utf-8")
+        got = m2._collect(cross=False)["A_stop_low"]
+        assert got and got[0]["expR"] == 0.5
+        assert "兜底" in capsys.readouterr().out
+
+    def test_missing_summary_warns_not_silent(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        (tmp_path / "A_stop_low__z.json").write_text(
+            json.dumps({"codes": ["600000"], "count": 500}), encoding="utf-8")
+        m2._collect(cross=False)
+        assert "找不到交易摘要" in capsys.readouterr().out
