@@ -533,12 +533,17 @@ C 档 H20 59.3% / B 档 58.3% / A 档 55.9%（D 档仅 72 条垫底 H60 47.1%）
 - 召回代价重申：③ 只剩 10% 召回，与结论#15 实证第 1 条一致——即使验证通过，
   定位也是"高胜率低召回的精选档"，不是主力召回口径。
 
-### 下一轮验证清单
+> **终审更新（2026-08-03 深夜）**：③ 跨 seed 通过、**跨区间失败（2024 年 H20 31.1%）**，
+> 正式否决。详见文末「H1/H2 终审（跨 seed/跨区间/净值）」。
+
+### 下一轮验证清单（已于 2026-08-03 执行，结果见文末终审）
 
 ```bash
 # 跨 seed + 跨区间（方向一致性终审）：③ 与 ① 对照
 uv run python 07_tools/screening/backtest_factors.py --scorer b1_dual --entry-filter j_low_qsx_weekly --universe-local --universe-sample 1000 --seed 1 --horizons 5,10,20,60
-uv run python 07_tools/screening/backtest_factors.py --scorer b1_dual --entry-filter j_low_qsx_weekly --universe-local --universe-sample 1000 --start 2022-01-01 --end 2024-12-31 --horizons 5,10,20,60
+# ⚠️ 跨区间必须加大 --count:count 默认 500 根从今天往前数,加 --start/--end 只覆盖
+#    窗口尾部(实测只剩 2024H2);--count 1500 才能覆盖 2021 年初的预热段
+uv run python 07_tools/screening/backtest_factors.py --scorer b1_dual --entry-filter j_low_qsx_weekly --universe-local --universe-sample 1000 --start 2022-01-01 --end 2024-12-31 --count 1500 --horizons 5,10,20,60
 # 净值终审（跨窗必须赢无条件基准）
 uv run python 07_tools/screening/backtest_factors.py --trade-sim --scorer b1_dual --entry-filter j_low_qsx_weekly --cost-bps 25 --universe-local --universe-sample 1000
 ```
@@ -547,9 +552,10 @@ uv run python 07_tools/screening/backtest_factors.py --trade-sim --scorer b1_dua
 
 ## 待验证假设 H2：B1-B2-B3 体系（来源 `other/B1.pdf`，2026-08-03）
 
-**这是假设，不是结论。** 首轮判读（2026-08-03）见文末「H2 第一轮回测判读」：
-B2 两个口径与底部异动三 gate 均**否决**，仅 `surge_strict_then_b1` 疑似幸存待交叉验证。
-未通过终审前不得据此改选股链。
+**这是假设，不是结论。** 首轮判读（2026-08-03）见「H2 第一轮回测判读」：
+B2 两个口径与底部异动三 gate 均**否决**；`surge_strict_then_b1` 首轮疑似幸存，
+终审跨 seed 方向翻转 + 跨区间零信号，**正式否决**（见文末「H1/H2 终审」）。
+H2 全部方向至此均有否决结论，不得据此改选股链。
 
 ### 原文体系（B1.pdf p16-17）
 
@@ -636,7 +642,7 @@ H60 均值回归吞掉收益。"B2 确认 = 更好的 B1"在当前口径（信�
 | bottom_surge 宽 | 107,831 | 46.4% | 45.6% | 45.7% | 异动后 60 天窗口内 gate 持续为真、几乎无选择性，全 horizon 显著低于基准，**否决** |
 | bottom_surge_strict | 606 | 46.4% | 52.1% | 51.3% | H20 z≈1.0 不显著；H60 均收 -0.07% vs 基准 +4.82%，**否决** |
 | surge_then_b1 宽 | 25,004 | 48.0% | 44.5% | 46.9% | J<13 子集却全 horizon 跑输 j_low 基准，**否决** |
-| surge_strict_then_b1 | 133 | 48.9% | **60.2%** | **63.8%** | H20 z≈2.3、H60 z≈3.1（对无条件基准），**疑似幸存** |
+| surge_strict_then_b1 | 133 | 48.9% | **60.2%** | **63.8%** | H20 z≈2.3、H60 z≈3.1（对无条件基准），首轮疑似幸存；**终审已否决**（跨 seed H20 翻转 38.8%、2022-2024 零信号、133 条全集中 2025-2026） |
 
 `surge_strict_then_b1`（巨量点火+量维持+穿60日线+9月新高 → 等 J<13 回调买）是唯一
 没被首轮否掉的方向，H60 z≈3.1 过了 6 组多重比较的 Bonferroni 边界（≈2.75）。但：
@@ -865,8 +871,8 @@ CLI          --scale-out（分批止盈比例，原文"放飞一半"→0.5）
 S=07_tools/screening/backtest_factors.py
 
 # ① 分批止盈的价值（M1 的核心验证：胜率不变、盈亏比该提升）
-uv run python $S --trade-sim --entry-filter j_low --scorer b1_dual --cost-bps 25 --sample-n 1000
-uv run python $S --trade-sim --entry-filter j_low --scorer b1_dual --cost-bps 25 --sample-n 1000 --scale-out 0.5
+uv run python $S --trade-sim --entry-filter j_low --scorer b1_dual --cost-bps 25 --universe-local --universe-sample 1000
+uv run python $S --trade-sim --entry-filter j_low --scorer b1_dual --cost-bps 25 --universe-local --universe-sample 1000 --scale-out 0.5
 # 再扫比例：0.3 / 0.5 / 0.7，看 payoff_ratio 与 total_R 的曲线
 
 # ② 止损口径扫描（另一个盈亏比杠杆）
@@ -875,20 +881,62 @@ uv run python $S --trade-sim --entry-filter j_low --scorer b1_dual --scale-out 0
 uv run python $S --trade-sim --entry-filter j_low --scorer b1_dual --scale-out 0.5 --stop-mode pct --stop-pct 8
 
 # ③ RSI 因子（H3）
-uv run python $S --trade-sim --entry-filter j_low --scorer rsi_state --scale-out 0.5 --sample-n 1000
-uv run python $S --trade-sim --entry-filter j_low_rsi_strong --scale-out 0.5 --sample-n 1000
-uv run python $S --trade-sim --entry-filter j_low_rsi_div    --scale-out 0.5 --sample-n 1000
+uv run python $S --trade-sim --entry-filter j_low --scorer rsi_state --scale-out 0.5 --universe-local --universe-sample 1000
+uv run python $S --trade-sim --entry-filter j_low_rsi_strong --scale-out 0.5 --universe-local --universe-sample 1000
+uv run python $S --trade-sim --entry-filter j_low_rsi_div    --scale-out 0.5 --universe-local --universe-sample 1000
 
 # ④ 主升始发点（H4）——两种 CROSS 口径必须都跑
-uv run python $S --trade-sim --entry-filter main_rally       --scale-out 0.5 --sample-n 1000
-uv run python $S --trade-sim --entry-filter main_rally_above --scale-out 0.5 --sample-n 1000
+uv run python $S --trade-sim --entry-filter main_rally       --scale-out 0.5 --universe-local --universe-sample 1000
+uv run python $S --trade-sim --entry-filter main_rally_above --scale-out 0.5 --universe-local --universe-sample 1000
 
-# ⑤ B2 与底部异动（H2）
-uv run python $S --trade-sim --entry-filter j_low --scorer b2 --scale-out 0.5 --sample-n 1000
-uv run python $S --trade-sim --entry-filter surge_then_b1     --scale-out 0.5 --sample-n 1000
+# ⑤ B2 与底部异动（H2）——⚠️ 已在信号级终审否决（见文末终审节）：B2 全中≡追高、
+#   surge_then_b1 跨区间不成立。若仍要跑净值口径，仅限 surge_strict_then_b1 留证用
+uv run python $S --trade-sim --entry-filter j_low --scorer b2 --scale-out 0.5 --universe-local --universe-sample 1000
+uv run python $S --trade-sim --entry-filter surge_then_b1     --scale-out 0.5 --universe-local --universe-sample 1000
 
 # ⑥ 标记数 → 仓位的可行性（M1 第③点）：按命中标记数分组，看 expectancy_R 是否单调递增
 ```
 
-**样本要求**：`--sample-n 1000`（带 seed 随机抽样）。此前 100 只且疑似取前 100 个代码，
+**样本要求**：`--universe-local --universe-sample 1000`（带 seed 随机抽样）。此前 100 只且疑似取前 100 个代码，
 会全是深市主板、有选择偏差；且 A 档只剩 7 条、无统计效力。
+
+---
+
+## H1/H2 终审（跨 seed / 跨区间 / 净值，2026-08-03 深夜）
+
+配套基准：seed=1 无条件（428,718 条：H5 49.40 / H10 50.17 / H20 49.97 / H60 50.10，
+与 seed=0 基准几乎一致，基准本身跨 seed 稳定）；2022-2024 无条件（592,882 条，
+`--count 1500` 修正窗口后：H5 46.54 / H20 46.95 / H60 45.27——熊市区间基准偏弱）。
+数据：`06_logs/backtest_*_{seed1,2022_2024,tradesim}*.json`。
+
+### ③ j_low_qsx_weekly：跨 seed 过、跨区间挂 ⇒ **否决（区间不稳定）**
+
+| 检验 | 结果 |
+|---|---|
+| 跨 seed（seed=1，9,366 条） | ✅ H5 54.4%(z=9.6) / H20 59.4%(z=17.6) / H60 56.8%(z=11.8)，与 seed=0 方向一致、召回稳定 ~10% |
+| 跨区间（2022-2024，9,762 条） | ❌ 全体 H5 43.9%(z=-5.0) / H20 43.6%(z=-6.2) / H60 43.8%(z=-2.6)，**在偏弱基准之下还显著跑输** |
+| 分年 | 2022 H20 50.2/H60 54.4（赢）；2023 47.0/42.8（混合）；**2024 H20 31.1/H60 34.8（灾难）** |
+| 净值（trade-sim，含 25bps） | ③ +0.352R/笔 vs 母门槛① +0.333R/笔——收紧只多 0.019R，代价 90% 召回 |
+
+edge 只存在于 2025-2026（与 2022），按「必须跨窗方向一致」正式否决。
+
+### surge_strict_then_b1：三项终审全挂 ⇒ **正式否决（regime 过拟合）**
+
+- 跨 seed：seed=1 仅 74 条，**H20 方向翻转**（38.8% vs seed=0 的 60.2%）；
+- 跨区间：2022-2024 **零信号**（`--allow-empty` 确认非依赖故障）；
+- 133 条信号全部集中 2025-2026（2025 年 90 条、2026 年 43 条，最密 2025-11 单月 37 条）。
+
+首轮的 H20 60.2% / H60 63.8% 是单一行情区间的产物，不可采信。
+
+### ① weekly_j_low：跨区间三 horizon 均赢基准 ⇒ **弱 edge 成立（维持现状，不加码）**
+
+2022-2024 全体：H5 46.9%(z=+2.2) / H20 48.7%(z=+11.4) / H60 52.7%(z=+48.6)。
+分年 H60：2022 56.9% / **2023 43.8%（不达标）** / 2024 60.2%——pooled 一致为正但幅度小、
+分年有晃动。结论：作为既有基础门槛维持现状；它带来的增益主要在 H20/H60 且不大，
+不支持再向上加码任何「精选层」。
+
+### 终审总账
+
+本轮（H1 双轴/共振/QSX 周线、H2 B2/底部异动全部口径）**无一通过跨窗终审**，
+死法相同：edge 集中在 2025-2026 单一 regime。再次印证结论#15：瓶颈在召回不在排序，
+且任何「更严的入场条件」都要先过跨区间这一关。**b1_dual 系与 B2/异动系全部不接入选股链。**
