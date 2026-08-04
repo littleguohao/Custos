@@ -1,58 +1,131 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""M2 机制类改进扫描驱动：一条命令跑完全部对照组并输出对照表。
+"""M2 机制类改进扫描：分组跑对照并自动判定。
 
-为什么要这个脚本：M2 有 6 组十几条命令，手动跑容易漏、跑完还要对比十几个 JSON。
-更重要的是**判定标准不止看期望**——移动止损可能砍掉大赢家（终审揭示收益极端幂律：
-若总 1000 笔，24 笔占 2.4% 贡献全部收益），所以必须同时盯 avg_win 和大赢家笔数。
-人工对比很容易只看 expectancy 就下结论。
+## 为什么要分组（2026-08-04 修正）
+
+第一轮判定犯了一个口径错误：**拿累计 R 跨 `stop_mode` 比较**。
+
+    R = ret / risk_frac
+
+基准用 `stop_mode="low"`（买入当日最低价），实测 `risk_frac` **中位仅 0.65%**；
+换成 `--stop-pct 12` 后固定 12%，**分母大了 18 倍**，R 自然崩。于是
+「胜率 18%→51.2%、期望 +0.43%→+1.42%」这组明显更好的结果，被「累计 R 从 332 掉到 135」
+判成了否决。
+
+更要紧的是：基准那 332R **本来就不可实现**——按风险定额需要 `1%/0.65% = 154%` 仓位，
+实际被 `max_pos` 削到 20%，兑现不了 87%。`_R_RISK_FLOOR`（2% 地板）就是这个问题的补丁。
+而 0.65% 的止损空间在真实盘面根本执行不了，A 股日内波动轻易打掉。
+
+所以本脚本按 **stop_mode 分组**：
+
+    组内（同一 R 口径）  比 expectancy_R / total_R / 大赢家笔数
+    跨组（不同 R 口径）  只比 expectancy / win_rate / payoff_ratio / 盈亏平衡 margin
+    组合级              只比 total_return / CAGR / max_drawdown（R 完全不适用）
+
+## 组合级为什么会「逐笔正期望、组合亏损」
+
+受控实验定位到根因是**相关亏损**：B1 是超卖买入，市场普跌时全市场 `J<13` 同时触发，
+随后市场继续跌 ⇒ 同批持仓一起亏。同一份幂律收益序列：
+
+    信号聚集、**无**相关亏损 c5×20%(敞口100%)   +55.9%   回撤 6.7%
+    信号聚集、**有**相关亏损 c5×20%(敞口100%)   −37.8%   回撤 47.0%
+    同上 c2×20%(敞口40%)                        −16.4%   回撤 21.9%
+    同上 c5×5% (敞口25%)                        −11.9%   回撤 15.2%
+    同上 c20×5%(敞口100%)                       −54.3%   回撤 56.3%
+
+**决定因素是总敞口，不是持仓数量**（c20×5% 与 c5×20% 同为 100% 敞口，同样惨）。
+分散持仓数对高相关信号无效。
+
+两个应对手段本仓库早就有、但第一轮没用：
+  · `--amv-long-only`  避开普跌期（相关亏损的来源）
+  · `--top-n`          横截面按 score 择优，替代「先到先得」
+    （执行率仅 22% 时，先到先得等于抽签命中大赢家）
 
 用法：
-    uv run python 07_tools/screening/m2_stop_sweep.py                 # 全部
-    uv run python 07_tools/screening/m2_stop_sweep.py --only breakeven # 只跑一组
-    uv run python 07_tools/screening/m2_stop_sweep.py --sample 300     # 先小样本试跑
-    uv run python 07_tools/screening/m2_stop_sweep.py --cross-window   # 2022-2024 复核
-    uv run python 07_tools/screening/m2_stop_sweep.py --report-only    # 只重出报表
-
-结果落 06_logs/m2_sweep/<name>.json，中断后重跑会跳过已完成的组（--force 强制重跑）。
+    uv run python 07_tools/screening/m2_stop_sweep.py --sample 300      # 小样本试跑
+    uv run python 07_tools/screening/m2_stop_sweep.py                   # 全部
+    uv run python 07_tools/screening/m2_stop_sweep.py --only B_stop_pct # 只跑一组
+    uv run python 07_tools/screening/m2_stop_sweep.py --report-only     # 只重出报表
+    uv run python 07_tools/screening/m2_stop_sweep.py --cross-window    # 2022-2024 复核
 """
 from __future__ import annotations
 
 import argparse
 import json
 import pathlib
+import statistics
 import subprocess
 import sys
 import time
+from typing import Any, Optional
 
 BASE = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = BASE / "07_tools" / "screening" / "backtest_factors.py"
 OUTDIR = BASE / "06_logs" / "m2_sweep"
 
-# 判定阈值（比前几轮严：不只看期望）
-MIN_EXPECTANCY_GAIN = 0.02      # expectancy_R 至少提升 2%（相对基准）
-MAX_AVG_WIN_DROP = 0.05         # avg_win 下降超过 5% 即判「削大赢家」
+MIN_EXPECTANCY_GAIN = 0.02      # 组内：expectancy_R 至少提升 2%
+MAX_AVG_WIN_DROP = 0.05         # 均盈跌幅超 5% 即判「削大赢家」
 BIG_WIN_THRESHOLD = 0.20        # ret > +20% 记为大赢家
 
-
-def _groups(sample: int, cross: bool) -> list[tuple[str, list[str]]]:
-    """(名称, 额外参数) —— 基准参数由 _base_args 统一给。"""
-    g: list[tuple[str, list[str]]] = [("00_baseline", [])]
-    g += [(f"be_{int(v*100):02d}", ["--breakeven", str(v)]) for v in (0.03, 0.05, 0.08)]
-    g += [(f"trail_{int(v*100):02d}", ["--trail", str(v)]) for v in (0.08, 0.12, 0.18)]
-    g += [("stop_pct_05", ["--stop-mode", "pct", "--stop-pct", "5"]),
-          ("stop_pct_08", ["--stop-mode", "pct", "--stop-pct", "8"]),
-          ("stop_pct_12", ["--stop-mode", "pct", "--stop-pct", "12"])]
-    # 止损口径对照（2026-08-04 按 B1_w.pdf 修正为收盘判定，旧盘中口径留作对照）
-    g += [("trigger_intraday", ["--stop-trigger", "intraday"]),
-          ("tick_buffer_3", ["--stop-tick-buffer", "3"]),
-          ("cost_zone_3", ["--cost-zone-bars", "3"])]
-    # 组合级：并发上限按材料「仓位管理」第 2 档（owner 高亮的那档）——
-    # 「2w做到10w，每天满仓，**2只**，忍受最大回撤30-50%，1-3年」
-    g += [("pf_r1_c2", ["--portfolio", "--risk-pct", "1.0", "--max-concurrent", "2"]),
-          ("pf_r2_c2", ["--portfolio", "--risk-pct", "2.0", "--max-concurrent", "2"]),
-          ("pf_r1_c5", ["--portfolio", "--risk-pct", "1.0", "--max-concurrent", "5"])]
-    return g
+# 每组共享的 stop 口径 → 组内 R 可比；跨组只比收益率
+GROUPS: dict[str, dict[str, Any]] = {
+    "A_stop_low": {
+        "desc": "stop_mode=low（买入当日最低价，risk_frac 中位 0.65%）",
+        "common": [],
+        "baseline": "00_baseline",
+        "runs": {
+            "00_baseline": [],
+            "be_03": ["--breakeven", "0.03"],
+            "be_05": ["--breakeven", "0.05"],
+            "be_08": ["--breakeven", "0.08"],
+            "trail_08": ["--trail", "0.08"],
+            "trail_12": ["--trail", "0.12"],
+            "trail_18": ["--trail", "0.18"],
+            "trigger_intraday": ["--stop-trigger", "intraday"],
+            "tick_buffer_3": ["--stop-tick-buffer", "3"],
+            "cost_zone_3": ["--cost-zone-bars", "3"],
+            "amv_long_only": ["--amv-long-only"],
+        },
+    },
+    "B_stop_pct": {
+        "desc": "stop_mode=pct（固定百分比，止损可执行；R 口径与 A 组不可比）",
+        "common": ["--stop-mode", "pct"],
+        "baseline": "pct_12",
+        "runs": {
+            "pct_05": ["--stop-pct", "5"],
+            "pct_08": ["--stop-pct", "8"],
+            "pct_12": ["--stop-pct", "12"],
+            "pct_12_amv": ["--stop-pct", "12", "--amv-long-only"],
+            "pct_12_amv_cz3": ["--stop-pct", "12", "--amv-long-only",
+                               "--cost-zone-bars", "3"],
+            "pct_08_amv": ["--stop-pct", "8", "--amv-long-only"],
+        },
+    },
+    "C_portfolio": {
+        "desc": "组合级资金曲线（只看 total_return / CAGR / max_drawdown）",
+        "common": ["--stop-mode", "pct", "--stop-pct", "12", "--portfolio"],
+        "baseline": None,
+        "runs": {
+            # 第一轮的两组（敞口 100% / 60%），留作对照
+            "pf_c5_p20": ["--max-concurrent", "5", "--max-pos", "20", "--risk-pct", "1.0"],
+            "pf_c3_p20": ["--max-concurrent", "3", "--max-pos", "20", "--risk-pct", "2.0"],
+            # 低敞口
+            "pf_c2_p20": ["--max-concurrent", "2", "--max-pos", "20", "--risk-pct", "1.0"],
+            "pf_c5_p05": ["--max-concurrent", "5", "--max-pos", "5", "--risk-pct", "1.0"],
+            # 加择时（避开相关亏损来源）
+            "pf_c2_p20_amv": ["--max-concurrent", "2", "--max-pos", "20",
+                              "--risk-pct", "1.0", "--amv-long-only"],
+            "pf_c5_p05_amv": ["--max-concurrent", "5", "--max-pos", "5",
+                              "--risk-pct", "1.0", "--amv-long-only"],
+            # 加横截面择优（替代先到先得）
+            "pf_top2_c2_amv": ["--top-n", "2", "--max-concurrent", "2", "--max-pos", "20",
+                               "--risk-pct", "1.0", "--amv-long-only"],
+            "pf_top3_c5_p05_amv": ["--top-n", "3", "--max-concurrent", "5", "--max-pos", "5",
+                                   "--risk-pct", "1.0", "--amv-long-only"],
+        },
+    },
+}
 
 
 def _base_args(sample: int, cross: bool) -> list[str]:
@@ -65,22 +138,22 @@ def _base_args(sample: int, cross: bool) -> list[str]:
     return a
 
 
-def _run(name: str, extra: list[str], sample: int, cross: bool,
-         force: bool) -> pathlib.Path | None:
+def _run(group: str, name: str, extra: list[str], sample: int, cross: bool,
+         force: bool) -> Optional[pathlib.Path]:
     OUTDIR.mkdir(parents=True, exist_ok=True)
-    out = OUTDIR / f"{'cw_' if cross else ''}{name}.json"
+    out = OUTDIR / f"{'cw_' if cross else ''}{group}__{name}.json"
     if out.exists() and not force:
-        print(f"[SKIP] {out.name} 已存在（--force 强制重跑）")
+        print(f"[SKIP] {out.name}")
         return out
-    cmd = [sys.executable, str(SCRIPT)] + _base_args(sample, cross) + extra \
-        + ["--out", str(out)]
-    print(f"\n[RUN ] {name}: {' '.join(extra) or '(基准)'}")
+    cmd = ([sys.executable, str(SCRIPT)] + _base_args(sample, cross)
+           + GROUPS[group]["common"] + extra + ["--out", str(out)])
+    print(f"\n[RUN ] {group}/{name}: {' '.join(extra) or '(组基准)'}")
     t0 = time.time()
     r = subprocess.run(cmd, cwd=str(BASE))
     if r.returncode != 0:
-        print(f"[FAIL] {name} exit={r.returncode}")
+        print(f"[FAIL] {group}/{name} exit={r.returncode}")
         return None
-    print(f"[DONE] {name} {time.time() - t0:.0f}s")
+    print(f"[DONE] {group}/{name} {time.time() - t0:.0f}s")
     return out if out.exists() else None
 
 
@@ -90,7 +163,6 @@ def _load(p: pathlib.Path) -> dict:
     except Exception as e:                                        # noqa: BLE001
         print(f"[WARN] 读不了 {p.name}: {e}")
         return {}
-    # trade_sim 摘要可能在顶层或嵌在 trade_sim/summary 下，兼容取值
     for k in ("trade_sim", "summary", "trade_simulation"):
         if isinstance(d.get(k), dict) and "expectancy" in d[k]:
             s = dict(d[k])
@@ -105,122 +177,184 @@ def _load(p: pathlib.Path) -> dict:
     return {}
 
 
-def _big_wins(trades: list, thr: float = BIG_WIN_THRESHOLD) -> int:
+def _big_wins(trades: list) -> int:
     return sum(1 for t in trades
-               if isinstance(t, dict) and (t.get("ret") or 0) > thr)
+               if isinstance(t, dict) and (t.get("ret") or 0) > BIG_WIN_THRESHOLD)
 
 
-def report(cross: bool) -> None:
-    rows = []
-    for p in sorted(OUTDIR.glob("cw_*.json" if cross else "*.json")):
+def _breakeven_wr(payoff: Optional[float]) -> Optional[float]:
+    """盈亏平衡胜率 = 1/(1+b)。它与实际胜率的差就是安全边际。"""
+    if not payoff or payoff <= 0:
+        return None
+    return 1.0 / (1.0 + payoff)
+
+
+def _collect(cross: bool) -> dict[str, list[dict]]:
+    pref = "cw_" if cross else ""
+    out: dict[str, list[dict]] = {g: [] for g in GROUPS}
+    for p in sorted(OUTDIR.glob(f"{pref}*__*.json")):
         if not cross and p.name.startswith("cw_"):
+            continue
+        stem = p.stem[3:] if cross else p.stem
+        if "__" not in stem:
+            continue
+        group, name = stem.split("__", 1)
+        if group not in out:
             continue
         s = _load(p)
         if not s:
             continue
-        name = p.stem[3:] if cross else p.stem
-        rows.append({
-            "name": name, "n": s.get("n"),
-            "win": s.get("win_rate"), "exp": s.get("expectancy"),
-            "expR": s.get("expectancy_R"), "totR": s.get("total_R"),
-            "payoff": s.get("payoff_ratio"), "avg_win": s.get("avg_win"),
-            "avg_loss": s.get("avg_loss"), "hold": s.get("avg_holding"),
-            "big": _big_wins(s.get("_trades") or []),
-            "reasons": s.get("exit_reasons") or {},
-            "pf": s.get("_portfolio"),
+        out[group].append({
+            "name": name, "n": s.get("n"), "win": s.get("win_rate"),
+            "exp": s.get("expectancy"), "expR": s.get("expectancy_R"),
+            "totR": s.get("total_R"), "payoff": s.get("payoff_ratio"),
+            "avg_win": s.get("avg_win"), "avg_loss": s.get("avg_loss"),
+            "hold": s.get("avg_holding"), "big": _big_wins(s.get("_trades") or []),
+            "reasons": s.get("exit_reasons") or {}, "pf": s.get("_portfolio"),
         })
-    if not rows:
-        print("没有结果文件，先跑扫描")
-        return
+    return out
 
-    base = next((r for r in rows if r["name"] == "00_baseline"), None)
-    hdr = (f"{'组':<14}{'笔数':>7}{'胜率':>8}{'期望%':>8}{'期望R':>8}"
-           f"{'累计R':>9}{'盈亏比':>8}{'均盈%':>8}{'均持':>7}{'大赢家':>7}")
+
+def _print_trade_group(group: str, rows: list[dict]) -> None:
+    meta = GROUPS[group]
+    hdr = (f"{'组':<20}{'笔数':>7}{'胜率':>8}{'期望%':>8}{'期望R':>8}"
+           f"{'累计R':>9}{'盈亏比':>8}{'均盈%':>8}{'大赢家':>7}")
     print("\n" + "=" * len(hdr))
-    print(f"M2 机制扫描对照表{'（2022-2024 跨窗复核）' if cross else ''}")
+    print(f"【{group}】{meta['desc']}")
     print("=" * len(hdr))
     print(hdr)
     print("-" * len(hdr))
-    for r in rows:
-        print(f"{r['name']:<14}{r['n'] or 0:>7}"
-              f"{(r['win'] or 0) * 100:>7.1f}%{(r['exp'] or 0) * 100:>+8.2f}"
-              f"{r['expR'] or 0:>8.3f}{r['totR'] or 0:>9.1f}"
-              f"{r['payoff'] or 0:>8.3f}{(r['avg_win'] or 0) * 100:>+8.2f}"
-              f"{r['hold'] or 0:>7.1f}{r['big']:>7}")
+    for r in sorted(rows, key=lambda x: x["name"]):
+        print(f"{r['name']:<20}{r['n'] or 0:>7}{(r['win'] or 0) * 100:>7.1f}%"
+              f"{(r['exp'] or 0) * 100:>+8.2f}{r['expR'] or 0:>8.3f}"
+              f"{r['totR'] or 0:>9.1f}{r['payoff'] or 0:>8.3f}"
+              f"{(r['avg_win'] or 0) * 100:>+8.2f}{r['big']:>7}")
 
+    base_name = meta.get("baseline")
+    base = next((r for r in rows if r["name"] == base_name), None)
     if not base:
-        print("\n（缺基准组 00_baseline，无法判定）")
         return
-
-    print("\n" + "=" * len(hdr))
-    print("判定（阈值：期望R 提升 >2% 且 均盈跌幅 <5% 且 大赢家笔数不减少）")
-    print("=" * len(hdr))
-    print("⚠️ 大赢家保护是硬条件：终审显示收益极端幂律，极少数交易贡献全部收益。")
-    print("   即使期望提升，只要大赢家被削掉也**否决**——那是把收益来源换成更脆弱的东西。\n")
-    b_expR, b_aw, b_big = base["expR"] or 0, base["avg_win"] or 0, base["big"]
-    for r in rows:
-        if r["name"] == "00_baseline" or r["pf"]:
+    print(f"\n组内判定（基准 = {base_name}；**R 只在本组内可比**）")
+    print("  阈值：期望R 提升 >2% 且 均盈跌幅 <5% 且 大赢家**占比**不下降")
+    print("  ⚠️ 大赢家用**占比**（big/n）而非绝对数：择时类方案（如 --amv-long-only）会")
+    print("     过滤掉部分信号，样本量下降时绝对数必然下降，用绝对数比会把它们全部误杀。")
+    b_expR, b_aw = base["expR"] or 0, base["avg_win"] or 0
+    b_big, b_n = base["big"], base["n"] or 1
+    b_rate = b_big / b_n
+    for r in sorted(rows, key=lambda x: x["name"]):
+        if r["name"] == base_name:
             continue
         expR, aw = r["expR"] or 0, r["avg_win"] or 0
+        n = r["n"] or 1
+        rate = r["big"] / n
         d_exp = (expR - b_expR) / abs(b_expR) if b_expR else 0.0
         d_aw = (aw - b_aw) / b_aw if b_aw else 0.0
-        ok_exp = d_exp > MIN_EXPECTANCY_GAIN
-        ok_aw = d_aw > -MAX_AVG_WIN_DROP
-        ok_big = r["big"] >= b_big
-        verdict = "✅ 通过" if (ok_exp and ok_aw and ok_big) else "❌ 否决"
+        d_rate = (rate - b_rate) / b_rate if b_rate else 0.0
+        ok = (d_exp > MIN_EXPECTANCY_GAIN and d_aw > -MAX_AVG_WIN_DROP
+              and d_rate > -MAX_AVG_WIN_DROP)
         why = []
-        if not ok_exp:
-            why.append(f"期望R {d_exp:+.1%} 未达 +2%")
-        if not ok_aw:
+        if d_exp <= MIN_EXPECTANCY_GAIN:
+            why.append(f"期望R {d_exp:+.1%}")
+        if d_aw <= -MAX_AVG_WIN_DROP:
             why.append(f"均盈 {d_aw:+.1%} 削大赢家")
-        if not ok_big:
-            why.append(f"大赢家 {b_big}→{r['big']}")
-        print(f"  {r['name']:<14}{verdict}  期望R {d_exp:+6.1%}  均盈 {d_aw:+6.1%}  "
-              f"大赢家 {b_big}→{r['big']:<4}{('｜' + '；'.join(why)) if why else ''}")
+        if d_rate <= -MAX_AVG_WIN_DROP:
+            why.append(f"大赢家占比 {b_rate:.2%}→{rate:.2%}")
+        print(f"  {r['name']:<20}{'✅ 通过' if ok else '❌ 否决'}  "
+              f"期望R {d_exp:+6.1%}  均盈 {d_aw:+6.1%}  "
+              f"大赢家 {b_big}/{b_n}({b_rate:.2%}) → {r['big']}/{n}({rate:.2%})"
+              f"{('  ｜' + '；'.join(why)) if why else ''}")
 
-    pf = [r for r in rows if r["pf"]]
-    if pf:
-        print("\n组合级资金曲线（逐笔期望为正 ≠ 组合能赚：并发上限漏信号、固定风险放大回撤）")
-        for r in pf:
-            d = r["pf"] or {}
-            print(f"  {r['name']:<14}总收益 {d.get('total_return')}  "
-                  f"CAGR {d.get('cagr')}  最大回撤 {d.get('max_drawdown')}  "
-                  f"成交 {d.get('filled')}  被限 {d.get('skipped')}")
 
-    print("\n出场原因分布（看新机制实际接管了多少单）")
-    for r in rows:
-        if r["pf"]:
+def _print_cross_group(groups: dict[str, list[dict]]) -> None:
+    """跨组比较：**只用收益率口径**，R 一律不出现。"""
+    rows = []
+    for g, rs in groups.items():
+        if g == "C_portfolio":
             continue
-        tot = sum(v.get("n", 0) for v in r["reasons"].values()) or 1
-        parts = [f"{k} {v['n']}({v['n'] / tot:.0%},均{v['avg_return'] * 100:+.1f}%)"
-                 for k, v in sorted(r["reasons"].items(),
-                                    key=lambda kv: -kv[1].get("n", 0))[:4]]
-        print(f"  {r['name']:<14}{'  '.join(parts)}")
+        for r in rs:
+            rows.append((g, r))
+    if not rows:
+        return
+    hdr = (f"{'组/方案':<32}{'笔数':>7}{'胜率':>8}{'期望%':>9}{'盈亏比':>8}"
+           f"{'平衡胜率':>9}{'margin':>8}")
+    print("\n" + "=" * len(hdr))
+    print("跨组比较（**不同 stop_mode 之间 R 不可比，这里只看收益率**）")
+    print("=" * len(hdr))
+    print(hdr)
+    print("-" * len(hdr))
+    for g, r in sorted(rows, key=lambda x: -(x[1]["exp"] or -9)):
+        be = _breakeven_wr(r["payoff"])
+        margin = (r["win"] - be) if (be is not None and r["win"] is not None) else None
+        print(f"{g + '/' + r['name']:<32}{r['n'] or 0:>7}"
+              f"{(r['win'] or 0) * 100:>7.1f}%{(r['exp'] or 0) * 100:>+9.2f}"
+              f"{r['payoff'] or 0:>8.3f}"
+              f"{be * 100 if be else 0:>8.1f}%"
+              f"{margin * 100 if margin is not None else 0:>+7.1f}pp")
+    print("\n  margin = 实际胜率 − 盈亏平衡胜率。越薄越脆弱：成本上升或波动率下降就可能翻负。")
 
+
+def _print_portfolio(rows: list[dict]) -> None:
+    if not rows:
+        return
+    hdr = (f"{'方案':<24}{'总收益':>9}{'CAGR':>8}{'最大回撤':>9}"
+           f"{'成交':>7}{'被限':>7}{'执行率':>8}")
+    print("\n" + "=" * len(hdr))
+    print("【C_portfolio】组合级（R 完全不适用；逐笔正期望 ≠ 组合能赚）")
+    print("=" * len(hdr))
+    print(hdr)
+    print("-" * len(hdr))
+    for r in sorted(rows, key=lambda x: -((x["pf"] or {}).get("total_return") or -9)):
+        d = r["pf"] or {}
+        taken = d.get("n_taken") or d.get("filled") or 0
+        skip = d.get("n_skipped") or d.get("skipped") or 0
+        er = taken / (taken + skip) if (taken + skip) else 0
+        print(f"{r['name']:<24}{(d.get('total_return') or 0) * 100:>8.1f}%"
+              f"{(d.get('cagr') or 0) * 100:>7.1f}%"
+              f"{(d.get('max_drawdown') or 0) * 100:>8.1f}%"
+              f"{taken:>7}{skip:>7}{er * 100:>7.1f}%")
+    print("\n  ⚠️ 受控实验结论：决定亏损幅度的是**总敞口**（max_concurrent × max_pos），")
+    print("     不是持仓数量——B1 信号高度相关（普跌时全市场同时触发），分散持仓数无效。")
+    print("     执行率低时「先到先得」等于抽签命中大赢家，用 --top-n 做横截面择优。")
+
+
+def report(cross: bool) -> None:
+    groups = _collect(cross)
+    if not any(groups.values()):
+        print("没有结果文件，先跑扫描")
+        return
+    print("\n" + "#" * 74)
+    print(f"# M2 机制扫描{'（2022-2024 跨窗复核）' if cross else ''}")
+    print("#" * 74)
+    for g in ("A_stop_low", "B_stop_pct"):
+        if groups.get(g):
+            _print_trade_group(g, groups[g])
+    _print_cross_group(groups)
+    _print_portfolio([r for r in groups.get("C_portfolio", []) if r.get("pf")])
     if not cross:
         print("\n⚠️ 通过的组仍须跨窗复核：--cross-window（2022-2024）。")
-        print("   机制类无 regime 依赖是**假设**，上一轮就是被三个「看起来很合理」的因子骗了。")
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="M2 机制类改进扫描")
-    ap.add_argument("--sample", type=int, default=1000, help="抽样只数（默认 1000）")
-    ap.add_argument("--only", default="", help="只跑含该子串的组，如 breakeven/trail/stop_pct/pf")
-    ap.add_argument("--cross-window", action="store_true", help="跑 2022-2024 跨窗复核")
-    ap.add_argument("--report-only", action="store_true", help="只重出报表")
-    ap.add_argument("--force", action="store_true", help="已有结果也重跑")
+    ap = argparse.ArgumentParser(description="M2 机制类改进扫描（分组）")
+    ap.add_argument("--sample", type=int, default=1000)
+    ap.add_argument("--only", default="",
+                    help="只跑匹配的组或方案（子串匹配组名/方案名）")
+    ap.add_argument("--cross-window", action="store_true")
+    ap.add_argument("--report-only", action="store_true")
+    ap.add_argument("--force", action="store_true")
     a = ap.parse_args()
 
     if not a.report_only:
-        sel = [(n, e) for n, e in _groups(a.sample, a.cross_window)
-               if not a.only or a.only in n or (a.only == "breakeven" and n.startswith("be_"))]
-        if not sel:
-            print(f"--only {a.only} 没匹配到任何组")
+        todo = [(g, n, e) for g, meta in GROUPS.items()
+                for n, e in meta["runs"].items()
+                if not a.only or a.only in g or a.only in n]
+        if not todo:
+            print(f"--only {a.only} 没匹配到任何组/方案")
             return 2
-        print(f"将跑 {len(sel)} 组，样本 {a.sample} 只"
+        print(f"将跑 {len(todo)} 个方案，样本 {a.sample} 只"
               f"{'，区间 2022-2024' if a.cross_window else ''}")
-        for n, e in sel:
-            _run(n, e, a.sample, a.cross_window, a.force)
+        for g, n, e in todo:
+            _run(g, n, e, a.sample, a.cross_window, a.force)
     report(a.cross_window)
     return 0
 
