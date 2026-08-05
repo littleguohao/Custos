@@ -517,24 +517,27 @@ def _big_wins(trades: list) -> int:
                if isinstance(t, dict) and (t.get("ret") or 0) > BIG_WIN_THRESHOLD)
 
 
-def _tail_r_share(trades: list) -> Optional[float]:
-    """大赢家贡献的 R 占总 R 的比例——**尾部依赖度**。
+def _tail_split(trades: list) -> Optional[tuple[float, float]]:
+    """把总 R 拆成 ``(尾部R, 非尾部R)``——大赢家（`ret>20%`）贡献 vs 其余全部。
 
-    这比「大赢家笔数占比」更本质。收益是极端幂律（实测 24 笔占 2.4% 贡献全部收益），
-    真正要防的不是「大赢家变少」，而是「收益不再来自尾部」——后者意味着策略转为
-    依赖大量中等赢家，而中等赢家更容易被成本与滑点吃掉。
+    ⚠️ **原先用比值 `尾部R/总R` 判，方向会反。** 实测基准（1000 样本）：
+    总R 250.5，其中尾部 ≈924R、非尾部 ≈**-673R** ⇒ 比值 **369%**。
+    `trail_08` 是尾部 924→846（-8%）、非尾部 -673→-488（**少亏 185R**），净 +108R；
+    比值 369%→236% 被旧文案读成「收益更依赖中等赢家」，**恰好说反**——
+    它其实是「中部失血减少」，正是这个出场机制该干的事。
 
-    返回 None 表示逐笔数据里没有 r_multiple（`--summary-only` 时会这样）。
+    比值只在「非尾部为正」时才等于占比；一旦非尾部为负，比值 >1 且**分母越小比值越大**，
+    单看它无法区分「尾部变小」和「中部变好」。所以改成两个绝对量分别判。
+
+    返回 None 表示逐笔里没有 r_multiple（`--summary-only` 时会这样）。
     """
     rs = [(t.get("ret") or 0, t.get("r_multiple")) for t in trades
           if isinstance(t, dict) and t.get("r_multiple") is not None]
     if not rs:
         return None
-    total = sum(r for _, r in rs)
-    if abs(total) < 1e-9:
-        return None
     tail = sum(r for ret, r in rs if ret > BIG_WIN_THRESHOLD)
-    return tail / total
+    nontail = sum(r for ret, r in rs if ret <= BIG_WIN_THRESHOLD)
+    return tail, nontail
 
 
 def _is_exit_side(row: dict, base: dict) -> bool:
@@ -677,7 +680,7 @@ def _collect(cross: bool, sample: Optional[int] = None,
             "avg_win": s.get("avg_win"), "avg_loss": s.get("avg_loss"),
             "hold": s.get("avg_holding"), "big": _big_wins(s.get("_trades") or []),
             "reasons": s.get("exit_reasons") or {}, "pf": s.get("_portfolio"),
-            "tail_share": _tail_r_share(s.get("_trades") or []),
+            "tail_split": _tail_split(s.get("_trades") or []),
             "sample": sample,
             # `--top-n` 走 evaluate_trades(collect_all=True)，逐笔是**重叠未去重的全候选**
             # （backtest_factors.py:2133）⇒ 它的 trade_summary 与其它方案不同口径，
@@ -727,7 +730,7 @@ def _print_trade_group(group: str, rows: list[dict]) -> None:
         return
     print(f"\n组内判定（基准 = {base_name}；**R 只在本组内可比**）")
     print("  出场类（改离场时点：trail/breakeven/stop-pct/cost-zone…）：")
-    print("    **累计R** 提升 >2% **且 期望R 不下降** 即通过；尾部R占比降 >30% 另行警示")
+    print("    **累计R** 提升 >2% **且 期望R 不下降** 即通过；尾部R 绝对量降 >30% 另行警示")
     print("  入场类（改信号集：amv 择时 / 入场过滤 / top-n）：期望R 提升 >2% 且 大赢家**占比**不降")
     print("  ⚠️ 分开判的理由：「削大赢家」是防**为提高胜率而筛掉大赢家**——那些收益会")
     print("     **永久消失**。出场机制不筛信号，只改离场时点，用「少赚一点尾部」换")
@@ -741,7 +744,16 @@ def _print_trade_group(group: str, rows: list[dict]) -> None:
     b_totR = base["totR"] or 0
     b_big, b_n = base["big"], base["n"] or 1
     b_rate = b_big / b_n
-    b_tail = base.get("tail_share")
+    b_split = base.get("tail_split")
+    if b_split:
+        tail, non = b_split
+        print(f"  基准收益结构：尾部R {tail:+.0f}（大赢家 {b_big} 笔，ret>20%）"
+              f" / 非尾部R {non:+.0f} / 合计 {tail + non:+.0f}")
+        if non < 0:
+            print(f"     ⚠️ **非尾部整体亏损**：全部收益来自 {b_big / b_n:.1%} 的大赢家，"
+                  f"其余 {1 - b_big / b_n:.1%} 交易净亏 {abs(non):.0f}R。")
+            print("        ⇒ 任何「提高胜率」的改动都要先看它有没有动到尾部；")
+            print("          也意味着漏掉几只大赢家就足以让整个策略转负。")
     for r in sorted(rows, key=lambda x: x["name"]):
         if r["name"] == base_name:
             continue
@@ -761,12 +773,16 @@ def _print_trade_group(group: str, rows: list[dict]) -> None:
                 why.append(f"累计R {d_tot:+.1%} 未达 +2%")
             if d_exp < 0:
                 why.append(f"期望R {d_exp:+.1%} 下降（累计R 靠笔数 {d_n:+.1%} 摊薄，非质量提升）")
-            tail = r.get("tail_share")
-            if tail is not None and b_tail:
-                d_tail = (tail - b_tail) / abs(b_tail)
+            split = r.get("tail_split")
+            if split and b_split:
+                d_tail = (split[0] - b_split[0]) / abs(b_split[0]) if b_split[0] else 0.0
+                d_non = split[1] - b_split[1]
                 if d_tail < -0.30:
-                    notes.append(f"尾部R占比 {b_tail:.0%}→{tail:.0%}"
-                                 f"（{d_tail:+.0%}，收益更依赖中等赢家）")
+                    # 只在**尾部R 绝对量**明显缩水时警示——那是真的「削大赢家」。
+                    # 非尾部同时改善多少一并打出来，供人判断净效果。
+                    notes.append(f"尾部R {b_split[0]:.0f}→{split[0]:.0f}"
+                                 f"（{d_tail:+.0%}，大赢家贡献显著缩水；"
+                                 f"非尾部R {b_split[1]:.0f}→{split[1]:.0f}，{d_non:+.0f}R）")
             if d_aw <= -MAX_AVG_WIN_DROP:
                 notes.append(f"均盈 {d_aw:+.1%}")
             if d_rate <= -MAX_AVG_WIN_DROP:
