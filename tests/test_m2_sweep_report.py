@@ -236,6 +236,20 @@ class TestScaleOutHasControlArm:
             assert m2._side_from_flags("A_stop_low", n, base) == "exit"
 
 
+def _write_reasons(tmp, group, name, reasons, *, expR=0.2, fp="s1000"):
+    """按 ``{reason: (笔数, ret, r_multiple)}`` 构造结果文件——出场结构矩阵用。"""
+    trades = []
+    for rs, (cnt, ret, r) in reasons.items():
+        trades += [{"reason": rs, "ret": ret, "r_multiple": r} for _ in range(cnt)]
+    n = len(trades)
+    (tmp / f"{group}__{name}__{fp}.json").write_text(json.dumps({
+        "trade_summary": {"n": n, "win_rate": 0.3, "expectancy": 0.004,
+                          "expectancy_R": expR, "total_R": round(expR * n, 1),
+                          "payoff_ratio": 2.7, "avg_win": 0.11, "avg_loss": 0.04,
+                          "avg_holding": 5.0, "exit_reasons": {}},
+        "trades": trades}), encoding="utf-8")
+
+
 class TestExitReasonBreakdown:
     """离场原因是**结果**，不是可选参数——报表必须把这点写明，否则会被读成「选它收益最高」。
 
@@ -298,6 +312,99 @@ class TestExitReasonBreakdown:
         _write(tmp_path, "A_stop_low", "00_baseline")
         m2.report(cross=False)
         assert "离场原因分布" not in capsys.readouterr().out
+
+
+class TestExitStructureMatrix:
+    """跨方案的出场结构矩阵——单方案的原因表没有判别力（见 TestExitReasonBreakdown）。
+
+    每个方案单看都是「`bbi_exit+scaled` 均收最高」，那是恒等式。
+    有判别力的是**行与行的差**：哪个机制把交易从 `stop` 桶搬走了、期望从哪补回来。
+    """
+
+    @pytest.mark.parametrize("reason,want", [
+        ("bbi_exit", ("bbi", False)),
+        ("bbi_exit+scaled", ("bbi", True)),
+        ("bbi_exit_delayed", ("bbi", False)),
+        ("stop", ("stop", False)),
+        ("stop_delayed", ("stop", False)),          # 跳空次日成交，仍是止损
+        ("trail_stop", ("trail", False)),
+        ("breakeven_stop", ("be", False)),
+        ("cost_zone_stop", ("cz", False)),
+        ("open_end", ("末持", False)),
+        ("open_end+scaled", ("末持", True)),
+        ("某个新原因", ("其它", False)),              # 词表扩了也不炸
+    ])
+    def test_family_mapping(self, reason, want):
+        assert m2._reason_family(reason) == want
+
+    def test_scaled_is_an_overlay_not_a_family(self):
+        """`+scaled` 与基础族**重叠**：一笔 bbi_exit+scaled 同时计入 bbi 和 scaled。"""
+        st = m2._family_stats([
+            {"reason": "bbi_exit+scaled", "ret": 0.36, "r_multiple": 3.0},
+            {"reason": "bbi_exit", "ret": 0.04, "r_multiple": 0.4},
+            {"reason": "stop", "ret": -0.15, "r_multiple": -1.2}])
+        assert st["bbi"]["n"] == 2          # 含 +scaled 那笔
+        assert st["scaled"]["n"] == 1
+        assert st["stop"]["n"] == 1
+        # 族的笔数合计（不含 scaled）= 总笔数
+        assert sum(d["n"] for f, d in st.items() if f != "scaled") == 3
+
+    def test_matrix_needs_two_schemes(self, tmp_path, monkeypatch, capsys):
+        """单方案没有可比性，不打矩阵。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write_reasons(tmp_path, "A_stop_low", "00_baseline",
+                       {"bbi_exit": (50, 0.05, 0.5), "stop": (50, -0.03, -1.0)})
+        m2.report(cross=False)
+        assert "出场结构对比" not in capsys.readouterr().out
+
+    def test_distribution_shift_is_visible(self, tmp_path, monkeypatch, capsys):
+        """cost_zone 把 40% 的交易从 stop 桶搬进 cz 桶——这才是要看的东西。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write_reasons(tmp_path, "A_stop_low", "00_baseline",
+                       {"bbi_exit": (60, 0.05, 0.5), "stop": (40, -0.15, -1.2)})
+        _write_reasons(tmp_path, "A_stop_low", "cost_zone_3",
+                       {"bbi_exit": (55, 0.09, 0.8), "cost_zone_stop": (40, -0.044, -0.37),
+                        "stop": (5, -0.14, -1.2)})
+        m2.report(cross=False)
+        seg = capsys.readouterr().out.split("出场结构对比")[1]
+        assert "cz" in seg
+        base_line = next(ln for ln in seg.split("\n") if "00_baseline" in ln)
+        cz_line = next(ln for ln in seg.split("\n") if "cost_zone_3" in ln)
+        assert "—" in base_line, "基准没有 cz 桶，应显示占位符"
+        assert "40.0" in base_line and "5.0" in cz_line, "stop 占比 40%→5% 的迁移要可见"
+
+    def test_r_row_sums_to_expectancy_r(self, tmp_path, monkeypatch, capsys):
+        """表② 行合计必须等于期望R——这是它比「占总R 百分比」好的地方。
+
+        占比的分母是 total_R，而 total_R 可以很小（pct_12 只有 58R，而 bbi 桶 +383R /
+        stop 桶 -335R）⇒ 占比会炸到 660% / -578%，跨方案还不可比。
+        """
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        # 80 笔 × +0.5R + 20 笔 × -1.2R = 40 - 24 = 16R / 100 笔 = +0.16R/笔
+        _write_reasons(tmp_path, "A_stop_low", "00_baseline",
+                       {"bbi_exit": (80, 0.05, 0.5), "stop": (20, -0.15, -1.2)},
+                       expR=0.16)
+        _write_reasons(tmp_path, "A_stop_low", "trail_08",
+                       {"bbi_exit": (70, 0.06, 0.6), "trail_stop": (30, -0.02, -0.3)},
+                       expR=0.33)
+        m2.report(cross=False)
+        seg = capsys.readouterr().out.split("每笔 R 贡献")[1]
+        base = next(ln for ln in seg.split("\n") if "00_baseline" in ln)
+        assert base.split()[-1] == "+0.160", f"行合计应等于期望R: {base}"
+        tr = next(ln for ln in seg.split("\n") if "trail_08" in ln)
+        assert tr.split()[-1] == "+0.330", f"行合计应等于期望R: {tr}"
+
+    def test_warns_r_only_comparable_within_denominator(self, tmp_path, monkeypatch,
+                                                        capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write_reasons(tmp_path, "B_stop_pct", "pct_08",
+                       {"bbi_exit": (80, 0.05, 0.6), "stop": (20, -0.08, -1.0)})
+        _write_reasons(tmp_path, "B_stop_pct", "pct_12",
+                       {"bbi_exit": (75, 0.05, 0.4), "stop": (25, -0.12, -1.0)})
+        m2.report(cross=False)
+        seg = capsys.readouterr().out.split("每笔 R 贡献")[1]
+        assert "risk_frac 相同的方案之间可比" in seg
+        assert "跨档位只看表①的分布迁移" in seg
 
 
 class TestStopIsTooTightHypothesis:

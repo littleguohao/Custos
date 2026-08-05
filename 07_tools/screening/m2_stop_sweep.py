@@ -780,6 +780,8 @@ def _collect(cross: bool, sample: Optional[int] = None,
             # exit_reasons 只有 {n, avg_return}，没有 R ⇒ 从逐笔自算，
             # 因为可加的是 sum_r 而非均收（见 _reason_stats）
             "reasons_calc": _reason_stats(s.get("_trades") or []),
+            # 出场结构矩阵要按族重算，留一份逐笔引用（不复制，同一个 list 对象）
+            "_trades_ref": s.get("_trades") or [],
             "tail_split": _tail_split(s.get("_trades") or []),
             "sample": sample,
             # `--top-n` 走 evaluate_trades(collect_all=True)，逐笔是**重叠未去重的全候选**
@@ -937,6 +939,114 @@ def _print_trade_group(group: str, rows: list[dict]) -> None:
         print(line)
         for nt in notes:
             print(f"      ⚠️ {nt}")
+
+
+# 离场原因归并成「族」。原始词表有 10 种（stop / stop_delayed / trail_stop /
+# breakeven_stop / cost_zone_stop / bbi_exit / bbi_exit_delayed / open_end / 各自的
+# +scaled 变体），逐个列成矩阵太宽，而决策关心的是**族**。
+#
+# 两个后缀是**正交标记**，不是独立的族：
+#   `_delayed`(backtest_factors:1345)  跳空等次日成交 ⇒ 并进基础族
+#   `+scaled` (1326)                   触发过分批止盈 ⇒ **单独一列**，与 bbi/末持 **重叠**
+#                                      （所以那一列不计入 100%）
+_REASON_FAMILY = {
+    "stop": "stop", "trail_stop": "trail", "breakeven_stop": "be",
+    "cost_zone_stop": "cz", "bbi_exit": "bbi", "open_end": "末持",
+}
+_FAMILY_ORDER = ["bbi", "stop", "trail", "be", "cz", "末持", "其它"]
+
+
+def _reason_family(reason: str) -> tuple[str, bool]:
+    """``"bbi_exit+scaled"`` → ``("bbi", True)``；``"stop_delayed"`` → ``("stop", False)``。"""
+    rs = str(reason)
+    scaled = rs.endswith("+scaled")
+    if scaled:
+        rs = rs[: -len("+scaled")]
+    if rs.endswith("_delayed"):
+        rs = rs[: -len("_delayed")]
+    return _REASON_FAMILY.get(rs, "其它"), scaled
+
+
+def _family_stats(trades: list) -> dict[str, dict[str, float]]:
+    """按族汇总 ``{family: {n, sum_r}}``，额外给一个 ``"scaled"`` 叠加项。"""
+    out: dict[str, dict[str, float]] = {}
+
+    def _bump(key: str, r: Optional[float]) -> None:
+        d = out.setdefault(key, {"n": 0.0, "sum_r": 0.0})
+        d["n"] += 1
+        if r is not None:
+            d["sum_r"] += r
+
+    for t in trades:
+        if not isinstance(t, dict) or not t.get("reason"):
+            continue
+        fam, scaled = _reason_family(t["reason"])
+        _bump(fam, t.get("r_multiple"))
+        if scaled:
+            _bump("scaled", t.get("r_multiple"))
+    return out
+
+
+def _print_exit_structure(group: str, rows: list[dict], base_name: Optional[str]) -> None:
+    """**跨方案**的出场结构对比矩阵。
+
+    为什么必须是矩阵而不是单方案的原因表：每个方案单看都是「`bbi_exit+scaled` 均收最高」
+    ——那是恒等式（见 `_reason_stats`）。有判别力的是**方案之间的差异**：
+    某个机制有没有把交易从 `stop` 桶**搬走**、R 的来源有没有换地方。
+
+    打两张表而不是一张宽表：
+      ① 笔数占比 —— 看**交易去哪了**（分布迁移）
+      ② R 贡献占比 —— 看**钱从哪来**（可加；均收不可加，不能用来加总）
+    """
+    stats = {r["name"]: _family_stats(r.get("_trades_ref") or [])
+             for r in rows if r.get("_trades_ref")}
+    stats = {k: v for k, v in stats.items() if v}
+    if len(stats) < 2:                       # 单方案没有可比性，矩阵没意义
+        return
+    fams = [f for f in _FAMILY_ORDER
+            if any(f in v for v in stats.values())]
+    cols = fams + ["scaled"]
+    order = ([base_name] if base_name in stats else []) + \
+            sorted(k for k in stats if k != base_name)
+
+    def _row_head(name: str) -> str:
+        return "    " + f"{name:<20}"
+
+    print(f"\n  【出场结构对比】{group}"
+          f"（scaled 是**叠加标记**，与 bbi/末持重叠，不计入合计）")
+    print("\n  ① 笔数占比%（看**交易去哪了**）")
+    print("    " + f"{'方案':<20}" + "".join(f"{c:>8}" for c in cols))
+    for name in order:
+        v = stats[name]
+        tot = sum(d["n"] for f, d in v.items() if f != "scaled") or 1
+        cells = [(f"{v[c]['n'] / tot * 100:>7.1f}" if c in v else f"{'—':>8}")
+                 for c in cols]
+        print(_row_head(name) + "".join(cells))
+
+    # ② 用**每笔 R 贡献**而不是「占总R 的百分比」：后者的分母是 total_R，
+    #    而 total_R 可以很小（pct_12 只有 58R，而 bbi 桶 +383R / stop 桶 -335R）
+    #    ⇒ 占比会炸到 660% / -578%，跨方案还不可比。
+    #    每笔 R 贡献的好处：**行合计恰好等于期望R**，一眼看出「期望从哪来、在哪漏掉」。
+    print("\n  ② 每笔 R 贡献（行合计 = 期望R；看**钱从哪来、在哪漏掉**）")
+    print("    " + f"{'方案':<20}" + "".join(f"{c:>8}" for c in cols)
+          + f"{'合计':>8}")
+    for name in order:
+        v = stats[name]
+        n_tot = sum(d["n"] for f, d in v.items() if f != "scaled") or 1
+        cells, total = [], 0.0
+        for c in cols:
+            if c not in v:
+                cells.append(f"{'—':>8}")
+                continue
+            x = v[c]["sum_r"] / n_tot
+            cells.append(f"{x:>+8.3f}")
+            if c != "scaled":
+                total += x
+        print(_row_head(name) + "".join(cells) + f"{total:>+8.3f}")
+    print("    ⚠️ R 仅在 risk_frac 相同的方案之间可比（本组不同 stop_pct 差着分母）；")
+    print("       跨档位只看表①的分布迁移。")
+    print("    ⇒ 单看一个方案永远是「bbi_exit+scaled 均收最高」（那是它的定义）；")
+    print("       有判别力的是**行与行的差**：哪个机制把交易从 stop 桶搬走了、期望从哪补回来。")
 
 
 def _reason_stats(trades: list) -> dict[str, dict[str, Any]]:
@@ -1114,6 +1224,7 @@ def report(cross: bool, sample: Optional[int] = None,
             _warn_if_mixed(g, groups[g])
             _print_trade_group(g, groups[g])
             _print_reasons(groups[g], GROUPS[g].get("baseline"))
+            _print_exit_structure(g, groups[g], GROUPS[g].get("baseline"))
     _print_cross_group(groups)
     _print_portfolio([r for r in groups.get("C_portfolio", []) if r.get("pf")])
     _warn_missing(groups)
