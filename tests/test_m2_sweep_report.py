@@ -332,6 +332,24 @@ def _write_tr(tmp, group, name, *, n, expR, totR, aw, big, tail=0.7, fp="s1000")
         "trades": trades}), encoding="utf-8")
 
 
+def _write_split(tmp, group, name, *, n, expR, aw, big, tail_r, nontail_r,
+                 fp="s1000"):
+    """按**尾部R / 非尾部R 绝对量**构造结果文件。
+
+    非尾部为负是实测常态（基准 -673R），比值口径在这里会 >1 并把方向读反，
+    所以测试也必须按绝对量构造。
+    """
+    trades = [{"ret": 0.35, "r_multiple": tail_r / big} for _ in range(big)]
+    trades += [{"ret": 0.01, "r_multiple": nontail_r / (n - big)}
+               for _ in range(n - big)]
+    (tmp / f"{group}__{name}__{fp}.json").write_text(json.dumps({
+        "trade_summary": {"n": n, "win_rate": 0.3, "expectancy": 0.004,
+                          "expectancy_R": expR, "total_R": tail_r + nontail_r,
+                          "payoff_ratio": 2.7, "avg_win": aw, "avg_loss": 0.04,
+                          "avg_holding": 5.0, "exit_reasons": {}},
+        "trades": trades}), encoding="utf-8")
+
+
 class TestExitVsEntrySideVerdict:
     """出场类与入场类分开判（2026-08-05 调整）。
 
@@ -384,46 +402,81 @@ class TestExitVsEntrySideVerdict:
                     if "some_filter" in ln and "期望R" in ln)
         assert "❌ 否决" in line and "[入场]" in line
 
-    def test_tail_share_warning(self, tmp_path, monkeypatch, capsys):
-        """尾部R占比崩塌要警示——收益转为依赖中等赢家，而中等赢家更易被成本吃掉。"""
+    def test_no_warning_when_only_nontail_improves(self, tmp_path, monkeypatch,
+                                                   capsys):
+        """**实测 trail_08 场景**：尾部 924→846(-8%)、非尾部 -673→-488(少亏 185R)。
+
+        旧比值口径（369%→236%）会警示「收益更依赖中等赢家」——方向反了。
+        中部失血减少正是这个出场机制该干的事，不得警示。
+        """
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write_tr(tmp_path, "A_stop_low", "00_baseline", n=1294, expR=0.202,
-                  totR=250.5, aw=0.1098, big=61, tail=0.70)
-        _write_tr(tmp_path, "A_stop_low", "trail_08", n=1298, expR=0.288,
-                  totR=358.4, aw=0.1015, big=52, tail=0.35)
+        _write_split(tmp_path, "A_stop_low", "00_baseline", n=1294, expR=0.202,
+                     aw=0.1098, big=61, tail_r=924.0, nontail_r=-673.5)
+        _write_split(tmp_path, "A_stop_low", "trail_08", n=1298, expR=0.288,
+                     aw=0.1015, big=52, tail_r=846.0, nontail_r=-487.6)
         m2.report(cross=False)
         out = capsys.readouterr().out
-        assert "尾部R占比 70%→35%" in out
-        assert "收益更依赖中等赢家" in out
+        line = next(ln for ln in out.split("\n") if "trail_08" in ln and "累计R" in ln)
+        assert "✅ 通过" in line
+        warn = [ln for ln in out.split("\n") if ln.startswith("      ⚠️") and "尾部R" in ln]
+        assert not warn, f"中部改善不该被警示成退化: {warn}"
 
-    def test_tail_share_no_warning_when_stable(self, tmp_path, monkeypatch, capsys):
+    def test_warns_when_tail_r_actually_shrinks(self, tmp_path, monkeypatch, capsys):
+        """尾部R 绝对量缩水 >30% 才警示——那才是真的「削大赢家」。"""
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write_tr(tmp_path, "A_stop_low", "00_baseline", n=1294, expR=0.202,
-                  totR=250.5, aw=0.1098, big=61, tail=0.70)
-        _write_tr(tmp_path, "A_stop_low", "trail_12", n=1295, expR=0.236,
-                  totR=293.9, aw=0.1070, big=60, tail=0.68)
+        _write_split(tmp_path, "A_stop_low", "00_baseline", n=1294, expR=0.202,
+                     aw=0.1098, big=61, tail_r=924.0, nontail_r=-673.5)
+        _write_split(tmp_path, "A_stop_low", "trail_12", n=1295, expR=0.236,
+                     aw=0.1070, big=30, tail_r=500.0, nontail_r=-200.0)
         m2.report(cross=False)
-        # 只看警示行（缩进 + ⚠️），表头的规则说明里本来就含"尾部R占比"字样
-        warn = [ln for ln in capsys.readouterr().out.split("\n")
-                if ln.startswith("      ⚠️") and "尾部R占比" in ln]
-        assert not warn, f"占比稳定不该警示: {warn}"
+        out = capsys.readouterr().out
+        assert "尾部R 924→500" in out and "大赢家贡献显著缩水" in out
+        assert "非尾部R -674→-200" in out, "同时打出非尾部变化，供判断净效果"
+
+    def test_baseline_structure_surfaces_negative_nontail(self, tmp_path, monkeypatch,
+                                                          capsys):
+        """基准收益结构要显式打出来——「非尾部整体亏损」是这套策略最关键的事实。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write_split(tmp_path, "A_stop_low", "00_baseline", n=1294, expR=0.202,
+                     aw=0.1098, big=61, tail_r=924.0, nontail_r=-673.5)
+        m2.report(cross=False)
+        out = capsys.readouterr().out
+        assert "基准收益结构" in out
+        assert "尾部R +924" in out and "非尾部R -674" in out
+        assert "非尾部整体亏损" in out
+        assert "漏掉几只大赢家" in out
 
 
-class TestTailRShare:
-    def test_computes_share_of_total_r(self):
+class TestTailSplit:
+    """尾部R 按**绝对量**拆分，不用比值。
+
+    比值 `尾部R/总R` 在「非尾部为负」时 >1，且**分母越小比值越大** ⇒ 无法区分
+    「尾部变小」与「中部变好」。实测基准：总R 250.5 = 尾部 924 + 非尾部 **-673**，
+    比值 369%；trail_08 是 846 + (-488)，比值 236%——旧文案把它读成
+    「收益更依赖中等赢家」，恰好说反：它是**中部失血减少**。
+    """
+
+    def test_splits_tail_and_nontail(self):
         trades = [{"ret": 0.3, "r_multiple": 7.0}, {"ret": 0.3, "r_multiple": 7.0},
                   {"ret": 0.01, "r_multiple": 3.0}, {"ret": -0.02, "r_multiple": -1.0}]
-        # 尾部 14 / 总 16
-        assert m2._tail_r_share(trades) == pytest.approx(14 / 16)
+        assert m2._tail_split(trades) == pytest.approx((14.0, 2.0))
+
+    def test_nontail_can_be_negative(self):
+        """非尾部为负是**实测常态**（基准 -673R），不能当异常处理掉。"""
+        trades = [{"ret": 0.35, "r_multiple": 40.0}] + \
+                 [{"ret": -0.03, "r_multiple": -1.5}] * 20
+        tail, non = m2._tail_split(trades)
+        assert tail == pytest.approx(40.0) and non == pytest.approx(-30.0)
 
     def test_none_without_r_multiple(self):
-        """--summary-only 时逐笔没有 r_multiple，要返回 None 而不是 0。"""
-        assert m2._tail_r_share([{"ret": 0.3}]) is None
-        assert m2._tail_r_share([]) is None
+        """--summary-only 时逐笔没有 r_multiple，要返回 None 而不是 (0,0)。"""
+        assert m2._tail_split([{"ret": 0.3}]) is None
+        assert m2._tail_split([]) is None
 
-    def test_none_on_zero_total(self):
-        assert m2._tail_r_share([{"ret": 0.3, "r_multiple": 5.0},
-                                 {"ret": -0.1, "r_multiple": -5.0}]) is None
+    def test_zero_total_still_splits(self):
+        """总R 为 0 也要能拆——比值口径在这里会除零，绝对量不会。"""
+        assert m2._tail_split([{"ret": 0.3, "r_multiple": 5.0},
+                               {"ret": -0.1, "r_multiple": -5.0}]) == (5.0, -5.0)
 
 
 class TestSideClassifiedByFlags:
