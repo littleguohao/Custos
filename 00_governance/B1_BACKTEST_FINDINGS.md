@@ -2353,3 +2353,42 @@ uv run python 07_tools/screening/m2_stop_sweep.py \
 `tick_buffer_3` 与基准是**上一批**跑的，`tick_buffer_5/8` 是这一批（universe 5536）
 ⇒ 跨批比较带着宇宙/窗口漂移。但 5 和 8 同批可比（都远低于基准），且 3→5 的 -44%
 远超漂移的 1~2% 量级，所以「峰值在 3」这个结论成立；精确的峰值位置要等钉死那一轮。
+
+---
+
+## 可复现批次的跑批入口（2026-08-05 夜）
+
+`07_tools/screening/run_m2_sweep.cmd` —— Windows 后台跑批。
+
+```powershell
+Start-Process -WindowStyle Hidden -FilePath "07_tools\screening\run_m2_sweep.cmd"
+Get-Content -Wait -Tail 40 06_logs\m2_sweep\sweep_run.log     # 看进度
+```
+
+四个设计点（每条都对应踩过的坑）：
+
+1. **Windows 没有 nohup**，而关掉 PowerShell 会给同控制台的子进程发 `CTRL_CLOSE_EVENT`
+   ⇒ 扫描被一起带走。`Start-Process` 起独立进程才能活下来。
+2. **stdout 与 stderr 必须合并**（`>> log 2>&1`）：`[TIME]`/`[MEM]`/`[INFO] universe=`/
+   `[WARN]` 全走 stderr，只重定向 stdout 会把判断依据全丢掉。
+3. **第一步 `-j 1` 单进程焐热 xdxr**：`--sample 3000` 里约 2000 只是上一轮（抽 1000 只）
+   没碰过的，权息缓存全冷；一上来就并行会 N 条连接同时取权息，可能被限流甚至拒连。
+4. **`&&` 串联 = 免费冒烟测试**：第一步（约 1 小时）已覆盖钉宇宙
+   (`--dump-codes` → `--codes-file`)、钉窗口、落盘、报表全链路。配置写错 1 小时内暴露，
+   而不是 6 小时后发现整夜白跑。
+
+参数：`--sample 3000 --window 2024-08-01 2026-08-05 --pin-universe -j 6`。
+窗口约 490 根 K 线，与此前 `--count 500` 的实际窗口基本等长，便于与 s1000 批次对读趋势
+（但**指纹不同、不可混着汇总**）。`-j 6` 会被自动收敛：先按 CPU 核数（评估是纯 CPU-bound，
+超订只会互相抢，还会挤掉要服务 xdxr 的 TdxW），再按可用内存 ÷ `MEM_PER_JOB_MB`。
+
+**这一轮要解决的三件事**：
+
+| 问题 | 这轮怎么解 |
+|---|---|
+| amv 方案只有 224~255 笔、组合最好的只成交 21 笔 | 样本 1000→3000，笔数约 ×3 |
+| 宇宙/窗口漂移（5535→5536、同参数笔数 1106/1092/1087） | `--window` + `--pin-universe` 双钉 |
+| 幸存者偏差 | ⚠️ **这轮解决不了**（仍是 tdx vipdoc）；要另跑 `--data-source qlib` |
+
+预计 28 次真回测（35 个方案 − 7 个走 trades 复用），3000 只约 62 分钟/次，
+`-j 6` 下总计约 6~7 小时。

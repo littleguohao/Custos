@@ -1252,10 +1252,19 @@ class TestMemoryGuards:
     被 kill 掉的方案在报表里只是少一行，比跑得慢糟得多。"""
 
     def test_cap_jobs_reduces_on_low_memory(self, monkeypatch, capsys):
+        monkeypatch.setattr(m2.os, "cpu_count", lambda: 32)
         monkeypatch.setattr(m2, "_avail_mem_mb", lambda: 3_000.0)
         monkeypatch.setattr(m2, "MEM_PER_JOB_MB", 1200)
         assert m2._cap_jobs(8, 20) == 2          # 3000*0.8/1200 = 2
         assert "降到 2" in capsys.readouterr().out
+
+    def test_cap_jobs_bounded_by_cpu_count(self, monkeypatch, capsys):
+        """99% 时间在逐 bar 评估（纯 CPU-bound）⇒ 进程数超过核数只会互相抢时间片，
+        还会挤掉 TdxW（它要服务 xdxr 权息请求）。"""
+        monkeypatch.setattr(m2.os, "cpu_count", lambda: 4)
+        monkeypatch.setattr(m2, "_avail_mem_mb", lambda: 64_000.0)
+        assert m2._cap_jobs(12, 20) == 4
+        assert "超过 CPU 核数 4" in capsys.readouterr().out
 
     def test_cap_jobs_keeps_when_memory_ample(self, monkeypatch):
         monkeypatch.setattr(m2, "_avail_mem_mb", lambda: 64_000.0)

@@ -121,6 +121,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import re
 import statistics
@@ -504,6 +505,14 @@ def _cap_jobs(jobs: int, n_tasks: int) -> int:
     jobs = max(1, min(jobs, n_tasks))
     if jobs == 1:
         return 1
+    # 先按 CPU 核数收敛：实测 99% 时间在 `evaluate_trades` 的逐 bar 评估
+    # （`[TIME] 加载 8s / 评估 1238s`）⇒ 纯 CPU-bound，进程数超过核数只会互相抢时间片，
+    # 还会挤掉 TdxW（它要服务 xdxr 权息请求）。
+    ncpu = os.cpu_count() or 1
+    if jobs > ncpu:
+        print(f"[INFO] --jobs {jobs} 超过 CPU 核数 {ncpu}，降到 {ncpu}"
+              f"（评估是纯 CPU-bound，超订不会更快）")
+        jobs = ncpu
     avail = _avail_mem_mb()
     if avail is None:
         print(f"⚠️ 读不到可用内存，按 {jobs} 路并行跑。每路约需 {MEM_PER_JOB_MB}MB，"
