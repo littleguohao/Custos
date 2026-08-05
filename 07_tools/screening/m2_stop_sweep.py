@@ -355,6 +355,8 @@ def report(cross: bool) -> None:
 
 
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")   # GBK 终端打不了 ⚠️ 等符号
     ap = argparse.ArgumentParser(description="M2 机制类改进扫描（分组）")
     ap.add_argument("--sample", type=int, default=1000)
     ap.add_argument("--only", default="",
