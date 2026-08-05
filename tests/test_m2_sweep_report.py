@@ -170,6 +170,35 @@ class TestPortfolioTable:
         assert seg.index("good") < seg.index("bad")
 
 
+class TestStopPctLowerBound:
+    """实测 5%→8%→12% 的期望% 是 0.67/0.64/0.63——单调但极平，下界没探到。"""
+
+    def test_tighter_stops_added(self):
+        runs = m2.GROUPS["B_stop_pct"]["runs"]
+        assert "pct_03" in runs and "pct_04" in runs
+
+    def test_stop_pct_ladder_spans_a_range(self):
+        pcts = sorted(float(e[e.index("--stop-pct") + 1])
+                      for n, e in m2.GROUPS["B_stop_pct"]["runs"].items()
+                      if "--stop-pct" in e and "amv" not in n)
+        assert pcts == [3.0, 4.0, 5.0, 8.0, 12.0]
+        assert min(pcts) < 5.0, "下界必须比上一轮的 5% 更紧，否则探不到拐点"
+
+    def test_new_tiers_are_exit_side_with_changed_denominator(self):
+        """新档位必须归出场类、且被标成 R 口径变——3% 档的期望R 天然是 8% 档的 2.7 倍。"""
+        base = m2.GROUPS["B_stop_pct"]["baseline"]
+        for n in ("pct_03", "pct_04"):
+            assert m2._side_from_flags("B_stop_pct", n, base) == "exit"
+            assert m2._same_r_denom("B_stop_pct", n, base) is False
+
+    def test_real_backtest_count(self):
+        """27 个方案但只有 20 次真回测——C 组 7 个走 trades 复用。"""
+        total = sum(len(v["runs"]) for v in m2.GROUPS.values())
+        real = sum(1 for g, v in m2.GROUPS.items() for n in v["runs"]
+                   if n not in (v.get("reuse") or {}))
+        assert total == 27 and real == 20
+
+
 class TestNewRunsWired:
     """第一轮遗漏的两个能力必须进扫描矩阵。"""
 
@@ -350,6 +379,26 @@ def _write_split(tmp, group, name, *, n, expR, aw, big, tail_r, nontail_r,
         "trades": trades}), encoding="utf-8")
 
 
+def _write_pct(tmp, name, *, n, exp, stop, win, payoff, big, group="B_stop_pct",
+               fp="s1000"):
+    """按「期望% + 固定 risk_frac」构造结果——期望R 由二者算出，与实盘口径一致。
+
+    pct 模式下 risk_frac 恒等于 stop_pct（backtest_factors:1294）⇒
+    期望R = 期望% ÷ stop_pct、累计R = 期望R × 笔数。测试必须这样构造，
+    否则就测不出「R 差异里混着分母」这件事。
+    """
+    expR = exp / stop
+    trades = [{"ret": 0.35, "r_multiple": 0.35 / stop} for _ in range(big)]
+    trades += [{"ret": 0.01, "r_multiple": 0.01 / stop} for _ in range(n - big)]
+    (tmp / f"{group}__{name}__{fp}.json").write_text(json.dumps({
+        "trade_summary": {"n": n, "win_rate": win, "expectancy": exp,
+                          "expectancy_R": round(expR, 3),
+                          "total_R": round(expR * n, 1), "payoff_ratio": payoff,
+                          "avg_win": 0.104, "avg_loss": 0.04, "avg_holding": 5.0,
+                          "exit_reasons": {}},
+        "trades": trades}), encoding="utf-8")
+
+
 class TestExitVsEntrySideVerdict:
     """出场类与入场类分开判（2026-08-05 调整）。
 
@@ -506,7 +555,10 @@ class TestSideClassifiedByFlags:
 
     def test_pct_05_not_misjudged_despite_trade_count_gap(self, tmp_path, monkeypatch,
                                                           capsys):
-        """笔数差 6.4%（越过旧 5% 线）也必须按出场类判。"""
+        """笔数差 6.4%（越过旧 5% 线）也必须归为出场机制，不能判成入场类。
+
+        但它同时**改了 R 分母**（stop_pct 5 vs 8）⇒ 标 [出场·R口径变]，改用期望% 判。
+        """
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
         _write_tr(tmp_path, "B_stop_pct", "pct_08", n=342, expR=0.24, totR=83.0,
                   aw=0.11, big=40)
@@ -514,9 +566,91 @@ class TestSideClassifiedByFlags:
                   aw=0.095, big=38)
         m2.report(cross=False)
         line = next(ln for ln in capsys.readouterr().out.split("\n")
-                    if "pct_05" in ln and "累计R" in ln)
-        assert "[出场]" in line, f"止损距离是出场机制: {line}"
+                    if "  pct_05  " in ln)
+        assert "[出场·R口径变]" in line, f"止损距离是出场机制但改了 R 分母: {line}"
+
+
+class TestRDenominatorGuard:
+    """改动**止损距离**就改动了 R 的分母 ⇒ R 一律不可比（2026-08-05 修）。
+
+    `backtest_factors.py:1294` 是 `stop = entry * (1 - stop_pct/100)`，所以 pct 模式下
+    `risk_frac` **恒等于 stop_pct**，期望R = 期望% ÷ stop_pct。实测：
+
+        pct_05  期望 +0.67%  期望R 0.134  累计R 157.5
+        pct_08  期望 +0.64%  期望R 0.080  累计R  90.6
+
+    「累计R +73.8%」里 **1.6 倍纯粹是分母 8%/5%**，真实期望率几乎持平。
+    这就是本模块开头声明要防的「跨 R 口径比 R」，只是发生在 B 组**内部**
+    ——分组只按 stop_mode 分，没按 stop_pct 分。
+    """
+
+    @pytest.mark.parametrize("group,name,same", [
+        # 改止损距离 ⇒ 分母变
+        ("B_stop_pct", "pct_05", False),
+        ("B_stop_pct", "pct_12", False),
+        ("A_stop_low", "tick_buffer_3", False),
+        # 只改离场时点 ⇒ risk_frac 在 1297 行按**初始**止损算完，分母不变
+        ("A_stop_low", "trail_08", True),
+        ("A_stop_low", "be_03", True),
+        ("A_stop_low", "cost_zone_3", True),
+        ("A_stop_low", "trigger_intraday", True),
+        ("A_stop_low", "amv_long_only", True),
+        # 与基准同档位的择时变体 ⇒ 分母一致，R 可比
+        ("B_stop_pct", "pct_08_amv", True),
+    ])
+    def test_denominator_identity(self, group, name, same):
+        base = m2.GROUPS[group]["baseline"]
+        assert m2._same_r_denom(group, name, base) is same
+
+    def test_unknown_scheme_assumed_same(self):
+        """查不到参数时假定同口径——误判成「口径不同」会让判定变宽松，更危险。"""
+        assert m2._same_r_denom("A_stop_low", "手工方案", "00_baseline") is True
+
+    def test_diff_denominator_judged_by_expectancy(self, tmp_path, monkeypatch, capsys):
+        """实测 pct_05 vs pct_08：期望 0.67% vs 0.64% ⇒ **+4.7%**，不是 +73.8%。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write_pct(tmp_path, "pct_08", n=1136, exp=0.0064, stop=0.08, win=0.482,
+                   payoff=1.227, big=76)
+        _write_pct(tmp_path, "pct_05", n=1177, exp=0.0067, stop=0.05, win=0.446,
+                   payoff=1.453, big=70)
+        m2.report(cross=False)
+        out = capsys.readouterr().out
+        line = next(ln for ln in out.split("\n") if "  pct_05  " in ln)
+        assert "期望% +0.64→+0.67" in line and "+4.7%" in line
+        assert "累计R" not in line, "异口径判定行不该出现 R"
+        assert "R 口径不同" in out
         assert "✅ 通过" in line
+
+    def test_diff_denominator_rejects_on_thin_margin(self, tmp_path, monkeypatch,
+                                                     capsys):
+        """异口径的出场类还要看 margin：期望% 涨一点但安全边际变薄 ⇒ 否决。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write_pct(tmp_path, "pct_08", n=1136, exp=0.0064, stop=0.08, win=0.482,
+                   payoff=1.227, big=76)
+        # 期望 +9%，但胜率掉到勉强够本 ⇒ margin 从 +3.3pp 缩到 +0.5pp
+        _write_pct(tmp_path, "pct_05", n=1177, exp=0.0070, stop=0.05, win=0.413,
+                   payoff=1.325, big=70)
+        m2.report(cross=False)
+        line = next(ln for ln in capsys.readouterr().out.split("\n")
+                    if "  pct_05  " in ln)
+        assert "❌ 否决" in line and "margin" in line and "变薄" in line
+
+    def test_tick_buffer_no_longer_judged_by_r(self, tmp_path, monkeypatch, capsys):
+        """实测 tick_buffer_3：期望 +0.52% 明显优于基准 +0.39%，却因累计R -3.0% 被否。
+
+        stop 从当日最低再往下 3 个价位，而 A 组 risk_frac 中位仅 0.65%
+        ⇒ 分母可能多出近 50%，R 被系统性压低。**那个否决是分母造成的。**
+        """
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write_pct(tmp_path, "00_baseline", n=1294, exp=0.0039, stop=0.0065,
+                   win=0.298, payoff=2.678, big=61, group="A_stop_low")
+        _write_pct(tmp_path, "tick_buffer_3", n=1283, exp=0.0052, stop=0.0095,
+                   win=0.324, payoff=2.450, big=63, group="A_stop_low")
+        m2.report(cross=False)
+        out = capsys.readouterr().out
+        line = next(ln for ln in out.split("\n") if "  tick_buffer_3  " in ln)
+        assert "[出场·R口径变]" in line
+        assert "✅ 通过" in line, f"期望% +33% 应通过: {line}"
 
     def test_unknown_scheme_falls_back_to_trade_count(self):
         """GROUPS 里查不到的方案（手工拷进来的文件）回落到笔数启发式。"""
