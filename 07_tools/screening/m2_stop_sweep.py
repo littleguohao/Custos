@@ -188,7 +188,17 @@ GROUPS: dict[str, dict[str, Any]] = {
             "trail_12": ["--trail", "0.12"],
             "trail_18": ["--trail", "0.18"],
             "trigger_intraday": ["--stop-trigger", "intraday"],
+            # 止损余量上探（2026-08-05）：tick_buffer_3 期望% **+33.3%**、margin
+            # +2.6→+3.4pp，是 A 组最有效的单项之一 ⇒ 沿这个方向再探。
+            # B1_w.pdf 说的是「或向下 3-5 个价位」，5 是它给的上界，8 用来看斜率是否续。
+            # ⚠️ 它改 risk_frac ⇒ 报表标 [出场·R口径变]，按期望%/margin 判。
             "tick_buffer_3": ["--stop-tick-buffer", "3"],
+            "tick_buffer_5": ["--stop-tick-buffer", "5"],
+            "tick_buffer_8": ["--stop-tick-buffer", "8"],
+            # 叠加：目前全是单变量扫描，而 trail_08(累计R +43.1%，最强出场) 与
+            # tick_buffer_3(期望% +33.3%，最强初始止损余量) **机制正交**——一个改移动
+            # 止盈、一个改初始止损位。正交不等于可叠加（可能互相抵消），必须实测。
+            "trail_08_tick3": ["--trail", "0.08", "--stop-tick-buffer", "3"],
             "cost_zone_3": ["--cost-zone-bars", "3"],
             "amv_long_only": ["--amv-long-only"],
         },
@@ -213,6 +223,14 @@ GROUPS: dict[str, dict[str, Any]] = {
             "pct_03": ["--stop-pct", "3"],
             "pct_04": ["--stop-pct", "4"],
             "pct_05": ["--stop-pct", "5"],
+            # ⚠️ **最优档一直缺择时变体**：跨组表前三名全是 amv 方案（期望% +2.72~+3.27、
+            # margin +11.5~+16.0pp），但它们配的是 8% / 12% 止损；而 5% 才是期望% 最高的
+            # 档位（+0.67 vs +0.64 / +0.63，且 4% 以下崖式下滑 -42%）。
+            # 「最优止损档 × 最强择时」这个组合从来没跑过 —— 很可能是全场最优。
+            "pct_05_amv": ["--stop-pct", "5", "--amv-long-only"],
+            # 「可执行的止损(5%) × 最强移动止盈(trail 8%)」：trail_08 在 A 组累计R +43.1%，
+            # 但 A 组止损(risk_frac 中位 0.65%)实盘执行不了；换到 5% 固定止损上才有意义。
+            "pct_05_trail_08": ["--stop-pct", "5", "--trail", "0.08"],
             "pct_08": ["--stop-pct", "8"],
             "pct_12": ["--stop-pct", "12"],
             "pct_12_amv": ["--stop-pct", "12", "--amv-long-only"],
