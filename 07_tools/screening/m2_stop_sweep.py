@@ -150,6 +150,29 @@ EXIT_SIDE_FLAGS = {                  # 只改**离场时点/仓位**：信号集
     "--scale-out", "--time-stop", "--bbi-consec",
 }
 
+# 改动**止损距离**的参数 ⇒ 改动 R 的分母 ⇒ **R 不再可比**（2026-08-05 修）
+#
+# `backtest_factors.py:1294` 是 `stop = entry * (1 - stop_pct/100)`，
+# 所以 pct 模式下 `risk_frac` **恒等于 stop_pct**，而 `R = ret / risk_frac`：
+#
+#     pct_05  期望 +0.67%  risk 5%   期望R 0.134   累计R 157.5
+#     pct_08  期望 +0.64%  risk 8%   期望R 0.080   累计R  90.6
+#     pct_12  期望 +0.63%  risk 12%  期望R 0.052   累计R  57.7
+#
+# 期望R 就是 `期望% ÷ stop_pct`。「pct_05 累计R +73.8%」里 **1.6 倍纯粹是分母 8%/5%**，
+# 真实期望率 0.67% vs 0.64% 几乎持平。上一轮「pct_05 累计R 是 pct_12 的 2.76 倍」
+# 同理——2.4 倍来自分母。这就是本模块开头声明要防的「跨 R 口径比 R」，
+# 只是它发生在 **B 组内部**，而分组只按 stop_mode 分，没按 stop_pct 分。
+#
+# `--stop-tick-buffer` 同样改分母：stop 从当日最低再往下 N 个价位，
+# 而 A 组 risk_frac 中位仅 0.65%，3 个价位（0.03 元）在 10 元股上就是 0.3%
+# ⇒ 分母可能多出近 50%，R 被系统性压低。实测 tick_buffer_3 期望 +0.52% 明显优于
+# 基准 +0.39%，却因累计R -3.0% 被否——**那个否决是分母造成的**。
+#
+# 相比之下 `--breakeven` / `--trail` / `--cost-zone-*` / `--stop-trigger` 只改**离场**，
+# risk_frac 在 1297 行就按**初始**止损算完了 ⇒ 分母不变，R 可比。
+R_DENOM_FLAGS = {"--stop-mode", "--stop-pct", "--stop-tick-buffer"}
+
 # 每组共享的 stop 口径 → 组内 R 可比；跨组只比收益率
 GROUPS: dict[str, dict[str, Any]] = {
     "A_stop_low": {
@@ -171,7 +194,8 @@ GROUPS: dict[str, dict[str, Any]] = {
         },
     },
     "B_stop_pct": {
-        "desc": "stop_mode=pct（固定百分比，止损可执行；R 口径与 A 组不可比）",
+        "desc": ("stop_mode=pct（固定百分比，止损可执行）⚠️ R 与 A 组不可比，"
+                 "**组内不同 stop_pct 之间也不可比**（risk_frac 恒等于 stop_pct）"),
         "common": ["--stop-mode", "pct"],
         # 基准取**中间档** pct_08：本组是参数扫描，没有「未改动的原始方案」可当基准。
         # 原先取 pct_12，而 3932190/6785724 已认定它是三档里最差的（组内累计R：
@@ -179,6 +203,15 @@ GROUPS: dict[str, dict[str, Any]] = {
         # 拿最差档当基准，✅/❌ 会退化成「比最差的好」⇒ 几乎全部通过，判定失去区分力。
         "baseline": "pct_08",
         "runs": {
+            # 补探下界（2026-08-05）：实测 5%→8%→12% 的期望% 是 0.67/0.64/0.63，
+            # **单调但极平**（相差 6%），而 margin 是 +3.8/+3.3/+3.1pp ⇒ 越紧略好。
+            # 下界没探到，加 3%/4% 两档。⚠️ 别拿累计R 读它们：risk_frac 恒等于 stop_pct，
+            # 3% 档的期望R 天然是 8% 档的 2.7 倍（见 R_DENOM_FLAGS 注释），
+            # 报表会标 [出场·R口径变] 并改用 期望%/margin 判。
+            # ⚠️ 另一处要留意：成本 25bps 固定，止损越紧则**成本占风险的比例越高**
+            # （3% 档：0.25/3 = 8.3%），到某一档收益会被成本吃掉——这正是要找的下界。
+            "pct_03": ["--stop-pct", "3"],
+            "pct_04": ["--stop-pct", "4"],
             "pct_05": ["--stop-pct", "5"],
             "pct_08": ["--stop-pct", "8"],
             "pct_12": ["--stop-pct", "12"],
@@ -619,6 +652,41 @@ def _side_of(group: str, row: dict, base: dict, base_name: Optional[str]) -> str
     return "exit" if _is_exit_side(row, base) else "entry"
 
 
+def _margin(row: dict) -> Optional[float]:
+    """安全边际 = 实际胜率 − 盈亏平衡胜率。**跨 R 口径时的主要判据之一**。"""
+    be = _breakeven_wr(row.get("payoff"))
+    wr = row.get("win")
+    if be is None or wr is None:
+        return None
+    return wr - be
+
+
+def _same_r_denom(group: str, name: str, base_name: Optional[str]) -> bool:
+    """该方案与基准是否**同一个 R 分母口径**。
+
+    `R = ret / risk_frac`，而 risk_frac 由**初始止损位**决定。凡是改动止损距离的参数
+    （见 `R_DENOM_FLAGS`）都会改分母 ⇒ 它的 R 与基准的 R 不是一个尺度，
+    比较 `期望R` / `累计R` 得到的差异里混着纯算术的分母变化。
+
+    这类方案必须改用**收益率口径**（期望% / margin）判——与跨组表同一个道理。
+
+    `GROUPS` 里查不到时返回 True（保持既有行为）：手工拷进来的文件无法推断参数，
+    而误判成「口径不同」会让判定变宽松，比保守判严更危险。
+    """
+    meta = GROUPS.get(group)
+    if not meta:
+        return True
+    runs = meta.get("runs") or {}
+    if name not in runs:
+        return True
+    mine = _flag_pairs(runs[name])
+    base = _flag_pairs(runs[base_name]) if (base_name and base_name in runs) else {}
+    for f in R_DENOM_FLAGS:
+        if mine.get(f, "\0") != base.get(f, "\0"):
+            return False
+    return True
+
+
 def _breakeven_wr(payoff: Optional[float]) -> Optional[float]:
     """盈亏平衡胜率 = 1/(1+b)。它与实际胜率的差就是安全边际。"""
     if not payoff or payoff <= 0:
@@ -728,10 +796,15 @@ def _print_trade_group(group: str, rows: list[dict]) -> None:
     base = next((r for r in rows if r["name"] == base_name), None)
     if not base:
         return
-    print(f"\n组内判定（基准 = {base_name}；**R 只在本组内可比**）")
+    print(f"\n组内判定（基准 = {base_name}；**R 仅在 risk_frac 相同的方案之间可比**）")
     print("  出场类（改离场时点：trail/breakeven/stop-pct/cost-zone…）：")
     print("    **累计R** 提升 >2% **且 期望R 不下降** 即通过；尾部R 绝对量降 >30% 另行警示")
     print("  入场类（改信号集：amv 择时 / 入场过滤 / top-n）：期望R 提升 >2% 且 大赢家**占比**不降")
+    print("  ⚠️ **改动止损距离的方案（stop-pct / stop-mode / tick-buffer）一律不用 R 判**：")
+    print("     R = ret/risk_frac，而 pct 模式下 risk_frac **恒等于 stop_pct**")
+    print("     ⇒ 期望R = 期望% ÷ stop_pct。「pct_05 累计R +73.8%」里 1.6 倍纯粹是分母")
+    print("     8%/5%，真实期望率 0.67% vs 0.64% 几乎持平。这类方案改判 期望% 与 margin，")
+    print("     判定行标 [出场·R口径变]。")
     print("  ⚠️ 分开判的理由：「削大赢家」是防**为提高胜率而筛掉大赢家**——那些收益会")
     print("     **永久消失**。出场机制不筛信号，只改离场时点，用「少赚一点尾部」换")
     print("     「多一些赢家」；对它硬套「大赢家占比不降」会否掉累计R +43% 的方案。")
@@ -739,7 +812,8 @@ def _print_trade_group(group: str, rows: list[dict]) -> None:
     print("     （更早离场 ⇒ 后续还能再进场）。只看累计R，笔数涨 5% 就能凭摊薄「通过」。")
     if group == "B_stop_pct":
         print("  ⚠️ B 组是**参数扫描**，基准取中间档，✅/❌ 只表示「相对中间档的方向」，")
-        print("     不代表绝对优劣——绝对排序看上表累计R 与跨组表的 margin。")
+        print("     不代表绝对优劣。⚠️ **别拿本组的累计R 排序**——各档 risk_frac 不同，")
+        print("     累计R 之间差着分母；绝对排序看 期望% 与跨组表的 margin。")
     b_expR, b_aw = base["expR"] or 0, base["avg_win"] or 0
     b_totR = base["totR"] or 0
     b_big, b_n = base["big"], base["n"] or 1
@@ -765,9 +839,34 @@ def _print_trade_group(group: str, rows: list[dict]) -> None:
         d_aw = (aw - b_aw) / b_aw if b_aw else 0.0
         d_rate = (rate - b_rate) / b_rate if b_rate else 0.0
         d_n = (n - b_n) / b_n if b_n else 0.0
+        exp_pct, b_exp_pct = r["exp"] or 0.0, base["exp"] or 0.0
+        d_exp_pct = (exp_pct - b_exp_pct) / abs(b_exp_pct) if b_exp_pct else 0.0
+        mg = _margin(r)
+        b_mg = _margin(base)
         exit_side = _side_of(group, r, base, base_name) == "exit"
+        same_denom = _same_r_denom(group, r["name"], base_name)
         why, notes = [], []
-        if exit_side:
+        if not same_denom:
+            # ⚠️ 止损距离变了 ⇒ risk_frac(=R 分母)变了 ⇒ **R 一律不能用**。
+            # 改用收益率口径：期望% 提升 >2%；出场类附加 margin 不降、
+            # 入场类附加 大赢家占比不降。
+            ok = d_exp_pct > MIN_EXPECTANCY_GAIN
+            if d_exp_pct <= MIN_EXPECTANCY_GAIN:
+                why.append(f"期望% {d_exp_pct:+.1%} 未达 +2%")
+            if exit_side:
+                if mg is not None and b_mg is not None:
+                    if mg < b_mg - 0.002:            # margin 掉超过 0.2pp
+                        ok = False
+                        why.append(f"margin {b_mg * 100:+.1f}→{mg * 100:+.1f}pp 变薄")
+            elif d_rate <= -MAX_AVG_WIN_DROP:
+                ok = False
+                why.append(f"大赢家占比 {b_rate:.2%}→{rate:.2%}")
+            main = (f"期望% {b_exp_pct * 100:+.2f}→{exp_pct * 100:+.2f}"
+                    f"（{d_exp_pct:+6.1%}）"
+                    f"  margin {(b_mg or 0) * 100:+.1f}→{(mg or 0) * 100:+.1f}pp")
+            notes.append(f"**R 口径不同**（止损距离变了 ⇒ risk_frac 变了）："
+                         f"期望R {b_expR:.3f}→{expR:.3f} 的差异含纯分母变化，故不用 R 判")
+        elif exit_side:
             ok = d_tot > MIN_EXPECTANCY_GAIN and d_exp >= 0
             if d_tot <= MIN_EXPECTANCY_GAIN:
                 why.append(f"累计R {d_tot:+.1%} 未达 +2%")
@@ -798,7 +897,7 @@ def _print_trade_group(group: str, rows: list[dict]) -> None:
             if d_rate <= -MAX_AVG_WIN_DROP:
                 why.append(f"大赢家占比 {b_rate:.2%}→{rate:.2%}")
             main = f"期望R {d_exp:+6.1%}  均盈 {d_aw:+6.1%}"
-        tag = "出场" if exit_side else "入场"
+        tag = ("出场" if exit_side else "入场") + ("" if same_denom else "·R口径变")
         line = (f"  {r['name']:<20}{'✅ 通过' if ok else '❌ 否决'} [{tag}]  {main}"
                 f"  大赢家 {b_rate:.2%}→{rate:.2%}")
         if why:
