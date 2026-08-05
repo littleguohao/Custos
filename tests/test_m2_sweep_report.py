@@ -193,11 +193,111 @@ class TestStopPctLowerBound:
             assert m2._same_r_denom("B_stop_pct", n, base) is False
 
     def test_real_backtest_count(self):
-        """32 个方案但只有 25 次真回测——C 组 7 个走 trades 复用。"""
+        """35 个方案但只有 28 次真回测——C 组 7 个走 trades 复用。"""
         total = sum(len(v["runs"]) for v in m2.GROUPS.values())
         real = sum(1 for g, v in m2.GROUPS.items() for n in v["runs"]
                    if n not in (v.get("reuse") or {}))
-        assert total == 32 and real == 25
+        assert total == 35 and real == 28
+
+
+class TestScaleOutHasControlArm:
+    """`--scale-out 0.5` 写在 `_base_args` 里、每个方案都开着 ⇒ 没有对照臂时，
+    这轮扫描对「分批止盈有没有用」**零信息**。
+
+    M1（2026-08-04）验过 0.5 vs 0，但那是**旧止损口径**（盘中止损，胜率 18%、
+    盈亏比 5.525）；f156a0a 改成收盘止损后胜率升到 29.8%、盈亏比降到 2.678。
+    而 ∂E/∂b = p ⇒ p 变大则盈亏比杠杆更值钱，但能触发 `+scaled` 的交易占比也变了
+    ⇒ 方向不确定，必须重验。
+    """
+
+    def test_base_args_turns_scale_out_on(self):
+        a = m2._base_args(1000, False)
+        assert "--scale-out" in a and a[a.index("--scale-out") + 1] == "0.5"
+
+    def test_control_arm_exists(self):
+        runs = m2.GROUPS["A_stop_low"]["runs"]
+        offs = [n for n, e in runs.items()
+                if "--scale-out" in e and float(e[e.index("--scale-out") + 1]) == 0.0]
+        assert offs, "缺 scale_out=0 对照臂 ⇒ 分批止盈的价值无法验证"
+
+    def test_control_arm_overrides_base_args(self):
+        """argparse 后出现的值覆盖前面的——对照臂靠这个盖掉 _base_args 的 0.5。"""
+        base = m2._base_args(1000, False)
+        extra = m2.GROUPS["A_stop_low"]["runs"]["scale_out_0"]
+        cmd = base + extra
+        assert cmd.index("--scale-out") < len(base), "基准值必须在前"
+        assert cmd[len(cmd) - cmd[::-1].index("--scale-out")] == "0", "覆盖值必须在后"
+
+    def test_scale_out_arms_keep_r_denominator(self):
+        """分批止盈不动初始止损 ⇒ risk_frac 不变 ⇒ R 可比，按累计R 判。"""
+        base = m2.GROUPS["A_stop_low"]["baseline"]
+        for n in ("scale_out_0", "scale_out_03", "scale_out_08"):
+            assert m2._same_r_denom("A_stop_low", n, base) is True
+            assert m2._side_from_flags("A_stop_low", n, base) == "exit"
+
+
+class TestExitReasonBreakdown:
+    """离场原因是**结果**，不是可选参数——报表必须把这点写明，否则会被读成「选它收益最高」。
+
+    `+scaled` 只在站上 BBI 且出两根中大阳线时才挂上（backtest_factors:1326/1390），
+    `bbi_exit` 也要求曾站上 BBI；而 stop/trail_stop 按定义就是跌下来的交易。
+    ⇒ 按均收给离场原因排序，`bbi_exit+scaled` **永远第一**，那是定义不是发现。
+    """
+
+    def test_sums_r_not_just_avg_return(self):
+        """可加的是 sum_r，不是均收——exit_reasons 里只有 {n, avg_return}，不够用。"""
+        trades = [{"reason": "bbi_exit+scaled", "ret": 0.36, "r_multiple": 40.0},
+                  {"reason": "bbi_exit+scaled", "ret": 0.36, "r_multiple": 40.0},
+                  {"reason": "stop", "ret": -0.03, "r_multiple": -1.0}] * 1
+        st = m2._reason_stats(trades)
+        assert st["bbi_exit+scaled"]["n"] == 2
+        assert st["bbi_exit+scaled"]["sum_r"] == pytest.approx(80.0)
+        assert st["bbi_exit+scaled"]["avg_ret"] == pytest.approx(0.36)
+        assert st["stop"]["sum_r"] == pytest.approx(-1.0)
+
+    def test_ignores_trades_without_reason(self):
+        assert m2._reason_stats([{"ret": 0.1}, {}, "junk"]) == {}
+
+    def test_ranked_by_r_contribution_not_avg_return(self, tmp_path, monkeypatch,
+                                                     capsys):
+        """均收最高但只 20 笔的桶，R 贡献可能不如均收平平的 900 笔 ⇒ 按 R 排序。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        trades = [{"reason": "bbi_exit+scaled", "ret": 0.36, "r_multiple": 1.0}] * 20
+        trades += [{"reason": "bbi_exit", "ret": 0.09, "r_multiple": 5.0}] * 900
+        (tmp_path / "A_stop_low__00_baseline__s1000.json").write_text(json.dumps({
+            "trade_summary": {"n": 920, "win_rate": 0.3, "expectancy": 0.004,
+                              "expectancy_R": 0.2, "total_R": 4520.0,
+                              "payoff_ratio": 2.7, "avg_win": 0.11, "avg_loss": 0.04,
+                              "avg_holding": 5.0, "exit_reasons": {}},
+            "trades": trades}), encoding="utf-8")
+        m2.report(cross=False)
+        seg = capsys.readouterr().out.split("离场原因分布")[1]
+        i_scaled = seg.index("bbi_exit+scaled")
+        i_plain = seg.index("\n    bbi_exit ")
+        assert i_plain < i_scaled, "R 贡献 4500 的桶应排在 20 的前面，即使后者均收更高"
+
+    def test_warns_that_reason_is_an_outcome(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        (tmp_path / "A_stop_low__00_baseline__s1000.json").write_text(json.dumps({
+            "trade_summary": {"n": 2, "win_rate": 0.5, "expectancy": 0.004,
+                              "expectancy_R": 0.2, "total_R": 1.0,
+                              "payoff_ratio": 2.7, "avg_win": 0.11, "avg_loss": 0.04,
+                              "avg_holding": 5.0, "exit_reasons": {}},
+            "trades": [{"reason": "bbi_exit+scaled", "ret": 0.36, "r_multiple": 2.0},
+                       {"reason": "stop", "ret": -0.03, "r_multiple": -1.0}]}),
+            encoding="utf-8")
+        m2.report(cross=False)
+        out = capsys.readouterr().out
+        assert "这是结果分组，不是可选参数" in out
+        assert "那是定义不是发现" in out
+        assert "分布迁移" in out
+
+    def test_silent_when_no_reasons(self, tmp_path, monkeypatch, capsys):
+        """逐笔没有 reason（--summary-only）时不打空表。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write(tmp_path, "A_stop_low", "00_baseline")
+        m2.report(cross=False)
+        assert "离场原因分布" not in capsys.readouterr().out
 
 
 class TestStopIsTooTightHypothesis:

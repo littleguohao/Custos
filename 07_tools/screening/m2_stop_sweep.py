@@ -200,6 +200,17 @@ GROUPS: dict[str, dict[str, Any]] = {
             # 止盈、一个改初始止损位。正交不等于可叠加（可能互相抵消），必须实测。
             "trail_08_tick3": ["--trail", "0.08", "--stop-tick-buffer", "3"],
             "cost_zone_3": ["--cost-zone-bars", "3"],
+            # 分批止盈**对照臂**（2026-08-05）：`--scale-out 0.5` 写在 `_base_args` 里，
+            # 每个方案都开着 ⇒ 这轮扫描对「分批止盈有没有用」**零信息**（没有对照）。
+            # M1（2026-08-04）验过 0.5 vs 0：期望 +16%、累计R +10%、胜率不变——
+            # 但那是**旧止损口径**（盘中止损，胜率 18%、盈亏比 5.525、基准 302R），
+            # 之后 f156a0a 改成收盘止损，现在胜率 29.8%、盈亏比 2.678、基准 250.5R。
+            # 而 ∂E/∂b = p ⇒ **p 从 18% 升到 29.8%，盈亏比杠杆变得更值钱**；
+            # 但能触发 `+scaled` 的交易占比同时也变了。两个方向不确定 ⇒ 必须重验。
+            # argparse 后出现的值覆盖前面的，所以这里给 0 能盖掉 _base_args 的 0.5。
+            "scale_out_0": ["--scale-out", "0"],
+            "scale_out_03": ["--scale-out", "0.3"],
+            "scale_out_08": ["--scale-out", "0.8"],
             "amv_long_only": ["--amv-long-only"],
         },
     },
@@ -766,6 +777,9 @@ def _collect(cross: bool, sample: Optional[int] = None,
             "avg_win": s.get("avg_win"), "avg_loss": s.get("avg_loss"),
             "hold": s.get("avg_holding"), "big": _big_wins(s.get("_trades") or []),
             "reasons": s.get("exit_reasons") or {}, "pf": s.get("_portfolio"),
+            # exit_reasons 只有 {n, avg_return}，没有 R ⇒ 从逐笔自算，
+            # 因为可加的是 sum_r 而非均收（见 _reason_stats）
+            "reasons_calc": _reason_stats(s.get("_trades") or []),
             "tail_split": _tail_split(s.get("_trades") or []),
             "sample": sample,
             # `--top-n` 走 evaluate_trades(collect_all=True)，逐笔是**重叠未去重的全候选**
@@ -925,6 +939,62 @@ def _print_trade_group(group: str, rows: list[dict]) -> None:
             print(f"      ⚠️ {nt}")
 
 
+def _reason_stats(trades: list) -> dict[str, dict[str, Any]]:
+    """按离场原因汇总 ``{reason: {n, avg_ret, sum_r}}``。
+
+    ⚠️ **这是按「结果」分组，不是按参数分组。** `+scaled` 后缀只在价格站上 BBI 并打出
+    两根中大阳线时才挂上（`backtest_factors.py:1326/1390`），`bbi_exit` 也要求曾站上 BBI；
+    而 `stop` / `trail_stop` / `breakeven_stop` 按定义就是跌下来的交易。
+    ⇒ **按均收给离场原因排序，`bbi_exit+scaled` 永远第一**——那是它的定义，不是发现。
+    「选 bbi_exit+scaled」是不可能的，离场原因由价格路径决定。
+
+    能选的是参数（`--scale-out` / `--trail` / …），要看的是**机制改动有没有把交易从
+    `stop` 桶搬到 `bbi` 桶**（分布迁移），以及每个桶**贡献的总 R**（不是均收）。
+    只有 `sum_r` 是可加的：均收高但只有 20 笔的桶，对结果的影响可能不如均收平平但有
+    900 笔的桶。
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for t in trades:
+        if not isinstance(t, dict):
+            continue
+        rs = t.get("reason")
+        if not rs:
+            continue
+        d = out.setdefault(rs, {"n": 0, "ret_sum": 0.0, "sum_r": 0.0, "has_r": False})
+        d["n"] += 1
+        d["ret_sum"] += t.get("ret") or 0.0
+        if t.get("r_multiple") is not None:
+            d["sum_r"] += t["r_multiple"]
+            d["has_r"] = True
+    for d in out.values():
+        d["avg_ret"] = d["ret_sum"] / d["n"] if d["n"] else 0.0
+    return out
+
+
+def _print_reasons(rows: list[dict], base_name: Optional[str]) -> None:
+    """打印基准的离场原因分布。**按 R 贡献排序，不按均收排序。**"""
+    base = next((r for r in rows if r["name"] == base_name), None)
+    if not base:
+        return
+    st = base.get("reasons_calc") or {}
+    if not st:
+        return
+    tot_n = sum(d["n"] for d in st.values()) or 1
+    tot_r = sum(d["sum_r"] for d in st.values())
+    print(f"\n  基准 {base_name} 的离场原因分布"
+          f"（⚠️ **这是结果分组，不是可选参数**）")
+    print(f"    {'原因':<20}{'笔数':>7}{'占比':>8}{'均收%':>9}{'R贡献':>10}{'占总R':>9}")
+    for rs, d in sorted(st.items(), key=lambda kv: -kv[1]["sum_r"]):
+        share_r = (d["sum_r"] / tot_r) if abs(tot_r) > 1e-9 else 0.0
+        print(f"    {rs:<20}{d['n']:>7}{d['n'] / tot_n * 100:>7.1f}%"
+              f"{d['avg_ret'] * 100:>+9.2f}{d['sum_r']:>+10.0f}{share_r * 100:>8.0f}%")
+    print("    ⚠️ `+scaled` 只在站上 BBI 且出两根中大阳线时才挂上，`bbi_exit` 也要求曾站上")
+    print("       BBI；而 stop/trail_stop 按定义就是跌下来的交易 ⇒ **按均收排序它必然第一，**")
+    print("       **那是定义不是发现**。离场原因由价格路径决定，选不了。")
+    print("    ⇒ 该看的是：机制改动有没有把交易从 stop 桶**搬到** bbi 桶（分布迁移），")
+    print("       以及每桶**贡献的总 R**——均收高但只 20 笔的桶，影响可能不如均收平平的 900 笔。")
+
+
 def _print_cross_group(groups: dict[str, list[dict]]) -> None:
     """跨组比较：**只用收益率口径**，R 一律不出现。"""
     rows = []
@@ -1043,6 +1113,7 @@ def report(cross: bool, sample: Optional[int] = None,
         if groups.get(g):
             _warn_if_mixed(g, groups[g])
             _print_trade_group(g, groups[g])
+            _print_reasons(groups[g], GROUPS[g].get("baseline"))
     _print_cross_group(groups)
     _print_portfolio([r for r in groups.get("C_portfolio", []) if r.get("pf")])
     _warn_missing(groups)
