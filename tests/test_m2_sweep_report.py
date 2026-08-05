@@ -193,11 +193,218 @@ class TestStopPctLowerBound:
             assert m2._same_r_denom("B_stop_pct", n, base) is False
 
     def test_real_backtest_count(self):
-        """32 个方案但只有 25 次真回测——C 组 7 个走 trades 复用。"""
+        """35 个方案但只有 28 次真回测——C 组 7 个走 trades 复用。"""
         total = sum(len(v["runs"]) for v in m2.GROUPS.values())
         real = sum(1 for g, v in m2.GROUPS.items() for n in v["runs"]
                    if n not in (v.get("reuse") or {}))
-        assert total == 32 and real == 25
+        assert total == 35 and real == 28
+
+
+class TestScaleOutHasControlArm:
+    """`--scale-out 0.5` 写在 `_base_args` 里、每个方案都开着 ⇒ 没有对照臂时，
+    这轮扫描对「分批止盈有没有用」**零信息**。
+
+    M1（2026-08-04）验过 0.5 vs 0，但那是**旧止损口径**（盘中止损，胜率 18%、
+    盈亏比 5.525）；f156a0a 改成收盘止损后胜率升到 29.8%、盈亏比降到 2.678。
+    而 ∂E/∂b = p ⇒ p 变大则盈亏比杠杆更值钱，但能触发 `+scaled` 的交易占比也变了
+    ⇒ 方向不确定，必须重验。
+    """
+
+    def test_base_args_turns_scale_out_on(self):
+        a = m2._base_args(1000, False)
+        assert "--scale-out" in a and a[a.index("--scale-out") + 1] == "0.5"
+
+    def test_control_arm_exists(self):
+        runs = m2.GROUPS["A_stop_low"]["runs"]
+        offs = [n for n, e in runs.items()
+                if "--scale-out" in e and float(e[e.index("--scale-out") + 1]) == 0.0]
+        assert offs, "缺 scale_out=0 对照臂 ⇒ 分批止盈的价值无法验证"
+
+    def test_control_arm_overrides_base_args(self):
+        """argparse 后出现的值覆盖前面的——对照臂靠这个盖掉 _base_args 的 0.5。"""
+        base = m2._base_args(1000, False)
+        extra = m2.GROUPS["A_stop_low"]["runs"]["scale_out_0"]
+        cmd = base + extra
+        assert cmd.index("--scale-out") < len(base), "基准值必须在前"
+        assert cmd[len(cmd) - cmd[::-1].index("--scale-out")] == "0", "覆盖值必须在后"
+
+    def test_scale_out_arms_keep_r_denominator(self):
+        """分批止盈不动初始止损 ⇒ risk_frac 不变 ⇒ R 可比，按累计R 判。"""
+        base = m2.GROUPS["A_stop_low"]["baseline"]
+        for n in ("scale_out_0", "scale_out_03", "scale_out_08"):
+            assert m2._same_r_denom("A_stop_low", n, base) is True
+            assert m2._side_from_flags("A_stop_low", n, base) == "exit"
+
+
+def _write_reasons(tmp, group, name, reasons, *, expR=0.2, fp="s1000"):
+    """按 ``{reason: (笔数, ret, r_multiple)}`` 构造结果文件——出场结构矩阵用。"""
+    trades = []
+    for rs, (cnt, ret, r) in reasons.items():
+        trades += [{"reason": rs, "ret": ret, "r_multiple": r} for _ in range(cnt)]
+    n = len(trades)
+    (tmp / f"{group}__{name}__{fp}.json").write_text(json.dumps({
+        "trade_summary": {"n": n, "win_rate": 0.3, "expectancy": 0.004,
+                          "expectancy_R": expR, "total_R": round(expR * n, 1),
+                          "payoff_ratio": 2.7, "avg_win": 0.11, "avg_loss": 0.04,
+                          "avg_holding": 5.0, "exit_reasons": {}},
+        "trades": trades}), encoding="utf-8")
+
+
+class TestExitReasonBreakdown:
+    """离场原因是**结果**，不是可选参数——报表必须把这点写明，否则会被读成「选它收益最高」。
+
+    `+scaled` 只在站上 BBI 且出两根中大阳线时才挂上（backtest_factors:1326/1390），
+    `bbi_exit` 也要求曾站上 BBI；而 stop/trail_stop 按定义就是跌下来的交易。
+    ⇒ 按均收给离场原因排序，`bbi_exit+scaled` **永远第一**，那是定义不是发现。
+    """
+
+    def test_sums_r_not_just_avg_return(self):
+        """可加的是 sum_r，不是均收——exit_reasons 里只有 {n, avg_return}，不够用。"""
+        trades = [{"reason": "bbi_exit+scaled", "ret": 0.36, "r_multiple": 40.0},
+                  {"reason": "bbi_exit+scaled", "ret": 0.36, "r_multiple": 40.0},
+                  {"reason": "stop", "ret": -0.03, "r_multiple": -1.0}] * 1
+        st = m2._reason_stats(trades)
+        assert st["bbi_exit+scaled"]["n"] == 2
+        assert st["bbi_exit+scaled"]["sum_r"] == pytest.approx(80.0)
+        assert st["bbi_exit+scaled"]["avg_ret"] == pytest.approx(0.36)
+        assert st["stop"]["sum_r"] == pytest.approx(-1.0)
+
+    def test_ignores_trades_without_reason(self):
+        assert m2._reason_stats([{"ret": 0.1}, {}, "junk"]) == {}
+
+    def test_ranked_by_r_contribution_not_avg_return(self, tmp_path, monkeypatch,
+                                                     capsys):
+        """均收最高但只 20 笔的桶，R 贡献可能不如均收平平的 900 笔 ⇒ 按 R 排序。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        trades = [{"reason": "bbi_exit+scaled", "ret": 0.36, "r_multiple": 1.0}] * 20
+        trades += [{"reason": "bbi_exit", "ret": 0.09, "r_multiple": 5.0}] * 900
+        (tmp_path / "A_stop_low__00_baseline__s1000.json").write_text(json.dumps({
+            "trade_summary": {"n": 920, "win_rate": 0.3, "expectancy": 0.004,
+                              "expectancy_R": 0.2, "total_R": 4520.0,
+                              "payoff_ratio": 2.7, "avg_win": 0.11, "avg_loss": 0.04,
+                              "avg_holding": 5.0, "exit_reasons": {}},
+            "trades": trades}), encoding="utf-8")
+        m2.report(cross=False)
+        seg = capsys.readouterr().out.split("离场原因分布")[1]
+        i_scaled = seg.index("bbi_exit+scaled")
+        i_plain = seg.index("\n    bbi_exit ")
+        assert i_plain < i_scaled, "R 贡献 4500 的桶应排在 20 的前面，即使后者均收更高"
+
+    def test_warns_that_reason_is_an_outcome(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        (tmp_path / "A_stop_low__00_baseline__s1000.json").write_text(json.dumps({
+            "trade_summary": {"n": 2, "win_rate": 0.5, "expectancy": 0.004,
+                              "expectancy_R": 0.2, "total_R": 1.0,
+                              "payoff_ratio": 2.7, "avg_win": 0.11, "avg_loss": 0.04,
+                              "avg_holding": 5.0, "exit_reasons": {}},
+            "trades": [{"reason": "bbi_exit+scaled", "ret": 0.36, "r_multiple": 2.0},
+                       {"reason": "stop", "ret": -0.03, "r_multiple": -1.0}]}),
+            encoding="utf-8")
+        m2.report(cross=False)
+        out = capsys.readouterr().out
+        assert "这是结果分组，不是可选参数" in out
+        assert "那是定义不是发现" in out
+        assert "分布迁移" in out
+
+    def test_silent_when_no_reasons(self, tmp_path, monkeypatch, capsys):
+        """逐笔没有 reason（--summary-only）时不打空表。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write(tmp_path, "A_stop_low", "00_baseline")
+        m2.report(cross=False)
+        assert "离场原因分布" not in capsys.readouterr().out
+
+
+class TestExitStructureMatrix:
+    """跨方案的出场结构矩阵——单方案的原因表没有判别力（见 TestExitReasonBreakdown）。
+
+    每个方案单看都是「`bbi_exit+scaled` 均收最高」，那是恒等式。
+    有判别力的是**行与行的差**：哪个机制把交易从 `stop` 桶搬走了、期望从哪补回来。
+    """
+
+    @pytest.mark.parametrize("reason,want", [
+        ("bbi_exit", ("bbi", False)),
+        ("bbi_exit+scaled", ("bbi", True)),
+        ("bbi_exit_delayed", ("bbi", False)),
+        ("stop", ("stop", False)),
+        ("stop_delayed", ("stop", False)),          # 跳空次日成交，仍是止损
+        ("trail_stop", ("trail", False)),
+        ("breakeven_stop", ("be", False)),
+        ("cost_zone_stop", ("cz", False)),
+        ("open_end", ("末持", False)),
+        ("open_end+scaled", ("末持", True)),
+        ("某个新原因", ("其它", False)),              # 词表扩了也不炸
+    ])
+    def test_family_mapping(self, reason, want):
+        assert m2._reason_family(reason) == want
+
+    def test_scaled_is_an_overlay_not_a_family(self):
+        """`+scaled` 与基础族**重叠**：一笔 bbi_exit+scaled 同时计入 bbi 和 scaled。"""
+        st = m2._family_stats([
+            {"reason": "bbi_exit+scaled", "ret": 0.36, "r_multiple": 3.0},
+            {"reason": "bbi_exit", "ret": 0.04, "r_multiple": 0.4},
+            {"reason": "stop", "ret": -0.15, "r_multiple": -1.2}])
+        assert st["bbi"]["n"] == 2          # 含 +scaled 那笔
+        assert st["scaled"]["n"] == 1
+        assert st["stop"]["n"] == 1
+        # 族的笔数合计（不含 scaled）= 总笔数
+        assert sum(d["n"] for f, d in st.items() if f != "scaled") == 3
+
+    def test_matrix_needs_two_schemes(self, tmp_path, monkeypatch, capsys):
+        """单方案没有可比性，不打矩阵。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write_reasons(tmp_path, "A_stop_low", "00_baseline",
+                       {"bbi_exit": (50, 0.05, 0.5), "stop": (50, -0.03, -1.0)})
+        m2.report(cross=False)
+        assert "出场结构对比" not in capsys.readouterr().out
+
+    def test_distribution_shift_is_visible(self, tmp_path, monkeypatch, capsys):
+        """cost_zone 把 40% 的交易从 stop 桶搬进 cz 桶——这才是要看的东西。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write_reasons(tmp_path, "A_stop_low", "00_baseline",
+                       {"bbi_exit": (60, 0.05, 0.5), "stop": (40, -0.15, -1.2)})
+        _write_reasons(tmp_path, "A_stop_low", "cost_zone_3",
+                       {"bbi_exit": (55, 0.09, 0.8), "cost_zone_stop": (40, -0.044, -0.37),
+                        "stop": (5, -0.14, -1.2)})
+        m2.report(cross=False)
+        seg = capsys.readouterr().out.split("出场结构对比")[1]
+        assert "cz" in seg
+        base_line = next(ln for ln in seg.split("\n") if "00_baseline" in ln)
+        cz_line = next(ln for ln in seg.split("\n") if "cost_zone_3" in ln)
+        assert "—" in base_line, "基准没有 cz 桶，应显示占位符"
+        assert "40.0" in base_line and "5.0" in cz_line, "stop 占比 40%→5% 的迁移要可见"
+
+    def test_r_row_sums_to_expectancy_r(self, tmp_path, monkeypatch, capsys):
+        """表② 行合计必须等于期望R——这是它比「占总R 百分比」好的地方。
+
+        占比的分母是 total_R，而 total_R 可以很小（pct_12 只有 58R，而 bbi 桶 +383R /
+        stop 桶 -335R）⇒ 占比会炸到 660% / -578%，跨方案还不可比。
+        """
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        # 80 笔 × +0.5R + 20 笔 × -1.2R = 40 - 24 = 16R / 100 笔 = +0.16R/笔
+        _write_reasons(tmp_path, "A_stop_low", "00_baseline",
+                       {"bbi_exit": (80, 0.05, 0.5), "stop": (20, -0.15, -1.2)},
+                       expR=0.16)
+        _write_reasons(tmp_path, "A_stop_low", "trail_08",
+                       {"bbi_exit": (70, 0.06, 0.6), "trail_stop": (30, -0.02, -0.3)},
+                       expR=0.33)
+        m2.report(cross=False)
+        seg = capsys.readouterr().out.split("每笔 R 贡献")[1]
+        base = next(ln for ln in seg.split("\n") if "00_baseline" in ln)
+        assert base.split()[-1] == "+0.160", f"行合计应等于期望R: {base}"
+        tr = next(ln for ln in seg.split("\n") if "trail_08" in ln)
+        assert tr.split()[-1] == "+0.330", f"行合计应等于期望R: {tr}"
+
+    def test_warns_r_only_comparable_within_denominator(self, tmp_path, monkeypatch,
+                                                        capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write_reasons(tmp_path, "B_stop_pct", "pct_08",
+                       {"bbi_exit": (80, 0.05, 0.6), "stop": (20, -0.08, -1.0)})
+        _write_reasons(tmp_path, "B_stop_pct", "pct_12",
+                       {"bbi_exit": (75, 0.05, 0.4), "stop": (25, -0.12, -1.0)})
+        m2.report(cross=False)
+        seg = capsys.readouterr().out.split("每笔 R 贡献")[1]
+        assert "risk_frac 相同的方案之间可比" in seg
+        assert "跨档位只看表①的分布迁移" in seg
 
 
 class TestStopIsTooTightHypothesis:
@@ -942,7 +1149,7 @@ class TestReuseTradesForPortfolio:
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
         order: list[str] = []
         monkeypatch.setattr(m2, "_run",
-                            lambda g, n, e, s, c, f, cap=False, ds="tdx":
+                            lambda g, n, e, s, c, f, cap=False, ds="tdx", w=None, cf=None:
                             (order.append(n), (f"{g}/{n}", tmp_path / "x", ""))[1])
         todo = [("C_portfolio", "pf_c2_p20", []),      # 派生（复用 B 组）
                 ("B_stop_pct", "pct_12", [])]          # 源（故意排在后面）
@@ -954,7 +1161,7 @@ class TestReuseTradesForPortfolio:
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
         order: list[str] = []
         monkeypatch.setattr(m2, "_run",
-                            lambda g, n, e, s, c, f, cap=False, ds="tdx":
+                            lambda g, n, e, s, c, f, cap=False, ds="tdx", w=None, cf=None:
                             (order.append(n), (f"{g}/{n}", tmp_path / "x", ""))[1])
         todo = [("C_portfolio", "pf_top2_c2_amv", []),   # 重活
                 ("A_stop_low", "be_03", [])]             # 轻活
@@ -967,7 +1174,7 @@ class TestFailureRecap:
     def test_failed_runs_listed_at_end(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
         monkeypatch.setattr(m2, "_run",
-                            lambda g, n, e, s, c, f, cap=False, ds="tdx":
+                            lambda g, n, e, s, c, f, cap=False, ds="tdx", w=None, cf=None:
                             (f"{g}/{n}", None, "[FAIL] boom"))
         m2._run_all([("A_stop_low", "be_03", [])], 1000, False, False, 1)
         out = capsys.readouterr().out
@@ -1045,10 +1252,19 @@ class TestMemoryGuards:
     被 kill 掉的方案在报表里只是少一行，比跑得慢糟得多。"""
 
     def test_cap_jobs_reduces_on_low_memory(self, monkeypatch, capsys):
+        monkeypatch.setattr(m2.os, "cpu_count", lambda: 32)
         monkeypatch.setattr(m2, "_avail_mem_mb", lambda: 3_000.0)
         monkeypatch.setattr(m2, "MEM_PER_JOB_MB", 1200)
         assert m2._cap_jobs(8, 20) == 2          # 3000*0.8/1200 = 2
         assert "降到 2" in capsys.readouterr().out
+
+    def test_cap_jobs_bounded_by_cpu_count(self, monkeypatch, capsys):
+        """99% 时间在逐 bar 评估（纯 CPU-bound）⇒ 进程数超过核数只会互相抢时间片，
+        还会挤掉 TdxW（它要服务 xdxr 权息请求）。"""
+        monkeypatch.setattr(m2.os, "cpu_count", lambda: 4)
+        monkeypatch.setattr(m2, "_avail_mem_mb", lambda: 64_000.0)
+        assert m2._cap_jobs(12, 20) == 4
+        assert "超过 CPU 核数 4" in capsys.readouterr().out
 
     def test_cap_jobs_keeps_when_memory_ample(self, monkeypatch):
         monkeypatch.setattr(m2, "_avail_mem_mb", lambda: 64_000.0)
@@ -1082,6 +1298,95 @@ class TestMemoryGuards:
         assert m2._is_heavy("C_portfolio", "pf_c5_p20") is False
         assert m2._is_heavy("A_stop_low", "trail_08") is False
         assert m2._is_heavy("不存在的组", "x") is False
+
+
+class TestPinnedWindowAndUniverse:
+    """扫描期间宇宙与 K 线窗口会漂移（实测：universe 5535→5536、同参数笔数
+    1106/1092/1087），必须能钉死。
+
+    ⚠️ **只给 `--end` 钉不住**：`get_ohlcv_table`(local_tdx_data:674) 先做
+    `df.tail(count)`，`_load_bars_local` 才在之后按 start/end 过滤 ⇒ 文件从 N 根变 N+1 根
+    时 tail(500) 取 [N-499, N+1]，end 过滤掉最新那根 ⇒ 只剩 499 根，**且最早那根往前挪了
+    一天**：窗口既缩水又滑动。两端都给 + 放大 count 才由日期决定窗口。
+    """
+
+    def test_window_sets_both_bounds_and_big_count(self):
+        a = m2._base_args(1000, False, "tdx", ("2024-08-01", "2026-08-05"))
+        assert a[a.index("--start") + 1] == "2024-08-01"
+        assert a[a.index("--end") + 1] == "2026-08-05"
+        assert int(a[a.index("--count") + 1]) == m2.WINDOW_COUNT
+        assert m2.WINDOW_COUNT > 500, "count 必须大于窗口内 K 线根数，否则 tail 又来定窗口"
+
+    def test_no_window_keeps_default_count(self):
+        a = m2._base_args(1000, False, "tdx")
+        assert "--start" not in a and a[a.index("--count") + 1] == "500"
+
+    def test_codes_file_replaces_universe_sampling(self):
+        """钉宇宙时不能再传 --universe-sample，否则又去抽一次（池子可能已变）。"""
+        a = m2._base_args(1000, False, "tdx", None, "/tmp/u.txt")
+        assert a[a.index("--codes-file") + 1] == "/tmp/u.txt"
+        assert "--universe-local" not in a and "--universe-sample" not in a
+
+    def test_fingerprint_separates_pinned_batches(self):
+        """钉过的批次与没钉的不是同一件事（前者可复现）⇒ 不能混着汇总。"""
+        plain = m2._fingerprint(1000, False)
+        win = m2._fingerprint(1000, False, "tdx", ("2024-08-01", "2026-08-05"))
+        both = m2._fingerprint(1000, False, "tdx", ("2024-08-01", "2026-08-05"), True)
+        assert plain == "s1000"
+        assert win == "s1000_w20240801-20260805"
+        assert both == "s1000_w20240801-20260805_u"
+        assert len({plain, win, both}) == 3
+
+    def test_collect_isolates_pinned_from_unpinned(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write(tmp_path, "A_stop_low", "00_baseline", fp="s1000", n=1106)
+        _write(tmp_path, "A_stop_low", "trail_08",
+               fp="s1000_w20240801-20260805_u", n=1150)
+        assert [r["name"] for r in m2._collect(cross=False)["A_stop_low"]] \
+            == ["00_baseline"]
+        got = m2._collect(cross=False, window=("2024-08-01", "2026-08-05"),
+                          pin_universe=True)["A_stop_low"]
+        assert [r["name"] for r in got] == ["trail_08"]
+
+    def test_report_warns_when_not_reproducible(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write(tmp_path, "A_stop_low", "00_baseline", fp="s1000")
+        m2.report(cross=False)
+        out = capsys.readouterr().out
+        assert "本批不可复现" in out and "5535→5536" in out
+
+    def test_report_no_warning_when_pinned(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write(tmp_path, "A_stop_low", "00_baseline", fp="s1000_w20240801-20260805_u")
+        m2.report(cross=False, window=("2024-08-01", "2026-08-05"), pin_universe=True)
+        out = capsys.readouterr().out
+        assert "本批不可复现" not in out
+        assert "已钉死" in out
+
+    def test_prepare_universe_reuses_existing(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        fp = m2._fingerprint(1000, False, "tdx", None, True)
+        (tmp_path / f"_universe__{fp}.txt").write_text("600000\n000001\n",
+                                                      encoding="utf-8")
+        monkeypatch.setattr(m2.subprocess, "run",
+                            lambda *a, **k: pytest.fail("已有代码表不该再跑一次"))
+        got = m2._prepare_universe(1000, False, "tdx", None)
+        assert got and "2 只" in capsys.readouterr().out
+
+    def test_prepare_universe_degrades_on_failure(self, tmp_path, monkeypatch, capsys):
+        """落盘失败不能中断扫描——退回各自抽样（可能漂移）并明确告警。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        monkeypatch.setattr(m2.subprocess, "run",
+                            lambda *a, **k: type("R", (), {"returncode": 1})())
+        assert m2._prepare_universe(1000, False, "tdx", None) is None
+        assert "本轮不钉宇宙" in capsys.readouterr().out
+
+    def test_window_conflicts_with_cross_window(self, monkeypatch, capsys):
+        monkeypatch.setattr(sys, "argv",
+                            ["m2", "--report-only", "--cross-window",
+                             "--window", "2024-01-01", "2025-01-01"])
+        assert m2.main() == 2
+        assert "冲突" in capsys.readouterr().out
 
 
 class TestDataSourceIsolation:
