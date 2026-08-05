@@ -178,9 +178,10 @@ class TestStopPctLowerBound:
         assert "pct_03" in runs and "pct_04" in runs
 
     def test_stop_pct_ladder_spans_a_range(self):
+        """纯档位方案（不含择时/移动止盈变体）必须覆盖到 5% 以下，才能探到拐点。"""
         pcts = sorted(float(e[e.index("--stop-pct") + 1])
                       for n, e in m2.GROUPS["B_stop_pct"]["runs"].items()
-                      if "--stop-pct" in e and "amv" not in n)
+                      if "--stop-pct" in e and len(e) == 2)   # 只有 --stop-pct 一项
         assert pcts == [3.0, 4.0, 5.0, 8.0, 12.0]
         assert min(pcts) < 5.0, "下界必须比上一轮的 5% 更紧，否则探不到拐点"
 
@@ -192,11 +193,48 @@ class TestStopPctLowerBound:
             assert m2._same_r_denom("B_stop_pct", n, base) is False
 
     def test_real_backtest_count(self):
-        """27 个方案但只有 20 次真回测——C 组 7 个走 trades 复用。"""
+        """32 个方案但只有 25 次真回测——C 组 7 个走 trades 复用。"""
         total = sum(len(v["runs"]) for v in m2.GROUPS.values())
         real = sum(1 for g, v in m2.GROUPS.items() for n in v["runs"]
                    if n not in (v.get("reuse") or {}))
-        assert total == 27 and real == 20
+        assert total == 32 and real == 25
+
+
+class TestStopIsTooTightHypothesis:
+    """本轮最强结论：**B1 的止损普遍太紧**，两条独立证据都指向放宽有效。
+
+    · A 组 `tick_buffer_3`（当日最低下方留 3 个价位）期望% **+33.3%**、margin +2.6→+3.4pp
+    · B 组 4%→5% 放宽，期望% **+81%**（0.37→0.67）；4% 以下大赢家从 70 掉到 61~62
+
+    所以矩阵必须能沿这个方向继续探，而不是停在单点。
+    """
+
+    def test_tick_buffer_ladder(self):
+        """B1_w.pdf 说「或向下 3-5 个价位」，5 是它给的上界，8 用来看斜率是否续。"""
+        buf = sorted(int(e[e.index("--stop-tick-buffer") + 1])
+                     for e in m2.GROUPS["A_stop_low"]["runs"].values()
+                     if "--stop-tick-buffer" in e and "--trail" not in e)
+        assert buf == [3, 5, 8]
+
+    def test_best_pct_tier_has_timing_variant(self):
+        """最优档必须有择时变体——跨组表前三全是 amv，却都配 8%/12% 止损。"""
+        runs = m2.GROUPS["B_stop_pct"]["runs"]
+        amv_tiers = {float(e[e.index("--stop-pct") + 1]) for e in runs.values()
+                     if "--amv-long-only" in e and "--stop-pct" in e}
+        assert 5.0 in amv_tiers, f"最优档 5% 缺 amv 变体，实有 {sorted(amv_tiers)}"
+
+    def test_orthogonal_mechanisms_are_stacked(self):
+        """单变量扫完要试叠加：trail(移动止盈) 与 tick-buffer(初始止损位) 机制正交。
+
+        正交**不等于**可叠加（可能互相抵消），所以必须有实测方案而不是靠推断。
+        """
+        runs = m2.GROUPS["A_stop_low"]["runs"]
+        stacked = [n for n, e in runs.items()
+                   if "--trail" in e and "--stop-tick-buffer" in e]
+        assert stacked, "缺 trail × tick-buffer 的叠加方案"
+        b_runs = m2.GROUPS["B_stop_pct"]["runs"]
+        assert any("--trail" in e and "--stop-pct" in e for e in b_runs.values()), \
+            "缺「可执行止损 × 移动止盈」的叠加方案"
 
 
 class TestNewRunsWired:
