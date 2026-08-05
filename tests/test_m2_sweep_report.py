@@ -77,14 +77,19 @@ class TestBigWinnerRate:
         assert "2.38%" in line and "3.11%" in line, "应显示占比而非只有绝对数"
 
     def test_真削大赢家_is_rejected(self, tmp_path, monkeypatch, capsys):
+        """「削大赢家」判据只对**入场类**生效（笔数显著变化）。
+
+        出场类改用累计R 为主判据——见 TestExitVsEntrySideVerdict 的说明。
+        所以这里构造入场类场景（笔数腰斩）才能验证这条判据。
+        """
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
         _write(tmp_path, "A_stop_low", "00_baseline", n=1345, big=32, expR=0.352, aw=0.198)
-        # trail 砍掉趋势单：占比 2.38%→0.67%，均盈 -38.9%
-        _write(tmp_path, "A_stop_low", "trail_08", n=1345, big=9, expR=0.180, aw=0.121)
+        # 入场过滤把样本砍半，且大赢家占比从 2.38% 崩到 0.67%
+        _write(tmp_path, "A_stop_low", "some_filter", n=600, big=4, expR=0.50, aw=0.121)
         m2.report(cross=False)
         out = capsys.readouterr().out
-        line = next(ln for ln in out.split("\n") if "trail_08" in ln and "期望R" in ln)
-        assert "❌ 否决" in line
+        line = next(ln for ln in out.split("\n") if "some_filter" in ln and "期望R" in ln)
+        assert "❌ 否决" in line and "[入场]" in line
         assert "削大赢家" in line or "大赢家占比" in line
 
 
@@ -309,3 +314,111 @@ class TestMixedSampleGuard:
         _write(tmp_path, "A_stop_low", "be_08", n=1296, expR=0.223)
         m2.report(cross=False)
         assert "笔数不一致" not in capsys.readouterr().out
+
+
+def _write_tr(tmp, group, name, *, n, expR, totR, aw, big, tail=0.7, fp="s1000"):
+    """带逐笔 r_multiple 的结果文件（尾部 R 占比可控）。"""
+    tail_r = totR * tail
+    trades = [{"ret": 0.35, "r_multiple": tail_r / big} for _ in range(big)]
+    trades += [{"ret": 0.01, "r_multiple": (totR - tail_r) / (n - big)}
+               for _ in range(n - big)]
+    (tmp / f"{group}__{name}__{fp}.json").write_text(json.dumps({
+        "trade_summary": {"n": n, "win_rate": 0.3, "expectancy": 0.004,
+                          "expectancy_R": expR, "total_R": totR, "payoff_ratio": 2.7,
+                          "avg_win": aw, "avg_loss": 0.04, "avg_holding": 5.0,
+                          "exit_reasons": {}},
+        "trades": trades}), encoding="utf-8")
+
+
+class TestExitVsEntrySideVerdict:
+    """出场类与入场类分开判（2026-08-05 调整）。
+
+    「削大赢家」这条判据的初衷是防止**为提高胜率而筛掉大赢家**——那些收益会
+    **永久消失**。但出场机制不筛信号（`trail_08` 笔数 1294→1298），它只改离场时点，
+    用「少赚一点尾部」换「多一些赢家」。对它硬套「大赢家占比不降」，会把
+    累计R +43.1% 的方案否掉——实测就发生了。
+    """
+
+    def test_classifies_by_trade_count(self):
+        base = {"n": 1294}
+        assert m2._is_exit_side({"n": 1298}, base) is True     # 笔数几乎不变 ⇒ 出场
+        assert m2._is_exit_side({"n": 230}, base) is False     # 择时大幅减少 ⇒ 入场
+        assert m2._is_exit_side({"n": 409}, base) is False
+
+    def test_exit_side_passes_on_total_r(self, tmp_path, monkeypatch, capsys):
+        """出场类：累计R 提升即通过，即使均盈/大赢家占比略降。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write_tr(tmp_path, "A_stop_low", "00_baseline", n=1294, expR=0.202,
+                  totR=250.5, aw=0.1098, big=61)
+        _write_tr(tmp_path, "A_stop_low", "trail_08", n=1298, expR=0.288,
+                  totR=358.4, aw=0.1015, big=52)
+        m2.report(cross=False)
+        line = next(ln for ln in capsys.readouterr().out.split("\n")
+                    if "trail_08" in ln and "累计R" in ln)
+        assert "✅ 通过" in line and "[出场]" in line
+        assert "+43" in line
+
+    def test_exit_side_rejected_when_total_r_flat(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write_tr(tmp_path, "A_stop_low", "00_baseline", n=1294, expR=0.202,
+                  totR=250.5, aw=0.1098, big=61)
+        _write_tr(tmp_path, "A_stop_low", "cost_zone_3", n=1290, expR=0.19,
+                  totR=245.0, aw=0.0976, big=45)
+        m2.report(cross=False)
+        line = next(ln for ln in capsys.readouterr().out.split("\n")
+                    if "cost_zone_3" in ln and "累计R" in ln)
+        assert "❌ 否决" in line
+
+    def test_entry_side_keeps_strict_rule(self, tmp_path, monkeypatch, capsys):
+        """入场类仍严格：筛掉大赢家的收益永久消失，不能只看总量。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write_tr(tmp_path, "A_stop_low", "00_baseline", n=1294, expR=0.202,
+                  totR=250.5, aw=0.1098, big=61)
+        # 笔数腰斩且大赢家占比下降 ⇒ 入场类应否决
+        _write_tr(tmp_path, "A_stop_low", "some_filter", n=600, expR=0.30,
+                  totR=180.0, aw=0.09, big=15)
+        m2.report(cross=False)
+        line = next(ln for ln in capsys.readouterr().out.split("\n")
+                    if "some_filter" in ln and "期望R" in ln)
+        assert "❌ 否决" in line and "[入场]" in line
+
+    def test_tail_share_warning(self, tmp_path, monkeypatch, capsys):
+        """尾部R占比崩塌要警示——收益转为依赖中等赢家，而中等赢家更易被成本吃掉。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write_tr(tmp_path, "A_stop_low", "00_baseline", n=1294, expR=0.202,
+                  totR=250.5, aw=0.1098, big=61, tail=0.70)
+        _write_tr(tmp_path, "A_stop_low", "trail_08", n=1298, expR=0.288,
+                  totR=358.4, aw=0.1015, big=52, tail=0.35)
+        m2.report(cross=False)
+        out = capsys.readouterr().out
+        assert "尾部R占比 70%→35%" in out
+        assert "收益更依赖中等赢家" in out
+
+    def test_tail_share_no_warning_when_stable(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write_tr(tmp_path, "A_stop_low", "00_baseline", n=1294, expR=0.202,
+                  totR=250.5, aw=0.1098, big=61, tail=0.70)
+        _write_tr(tmp_path, "A_stop_low", "trail_12", n=1295, expR=0.236,
+                  totR=293.9, aw=0.1070, big=60, tail=0.68)
+        m2.report(cross=False)
+        # 只看警示行（缩进 + ⚠️），表头的规则说明里本来就含"尾部R占比"字样
+        warn = [ln for ln in capsys.readouterr().out.split("\n")
+                if ln.startswith("      ⚠️") and "尾部R占比" in ln]
+        assert not warn, f"占比稳定不该警示: {warn}"
+
+
+class TestTailRShare:
+    def test_computes_share_of_total_r(self):
+        trades = [{"ret": 0.3, "r_multiple": 7.0}, {"ret": 0.3, "r_multiple": 7.0},
+                  {"ret": 0.01, "r_multiple": 3.0}, {"ret": -0.02, "r_multiple": -1.0}]
+        # 尾部 14 / 总 16
+        assert m2._tail_r_share(trades) == pytest.approx(14 / 16)
+
+    def test_none_without_r_multiple(self):
+        """--summary-only 时逐笔没有 r_multiple，要返回 None 而不是 0。"""
+        assert m2._tail_r_share([{"ret": 0.3}]) is None
+        assert m2._tail_r_share([]) is None
+
+    def test_none_on_zero_total(self):
+        assert m2._tail_r_share([{"ret": 0.3, "r_multiple": 5.0},
+                                 {"ret": -0.1, "r_multiple": -5.0}]) is None

@@ -213,6 +213,43 @@ def _big_wins(trades: list) -> int:
                if isinstance(t, dict) and (t.get("ret") or 0) > BIG_WIN_THRESHOLD)
 
 
+def _tail_r_share(trades: list) -> Optional[float]:
+    """大赢家贡献的 R 占总 R 的比例——**尾部依赖度**。
+
+    这比「大赢家笔数占比」更本质。收益是极端幂律（实测 24 笔占 2.4% 贡献全部收益），
+    真正要防的不是「大赢家变少」，而是「收益不再来自尾部」——后者意味着策略转为
+    依赖大量中等赢家，而中等赢家更容易被成本与滑点吃掉。
+
+    返回 None 表示逐笔数据里没有 r_multiple（`--summary-only` 时会这样）。
+    """
+    rs = [(t.get("ret") or 0, t.get("r_multiple")) for t in trades
+          if isinstance(t, dict) and t.get("r_multiple") is not None]
+    if not rs:
+        return None
+    total = sum(r for _, r in rs)
+    if abs(total) < 1e-9:
+        return None
+    tail = sum(r for ret, r in rs if ret > BIG_WIN_THRESHOLD)
+    return tail / total
+
+
+def _is_exit_side(row: dict, base: dict) -> bool:
+    """该方案是改**出场**还是改**入场**。
+
+    判据：笔数与基准相差 <5% ⇒ 出场类（信号集没变，只改了怎么离场）。
+    择时（`--amv-long-only`）与入场过滤会显著减少笔数 ⇒ 入场类。
+
+    为什么要分：「削大赢家」这条判据的初衷是防止**为提高胜率而筛掉大赢家**——
+    那些收益会**永久消失**。但出场机制不筛信号（`trail_08` 笔数 1294→1298），
+    它只是改变离场时点，用「少赚一点尾部」换「多一些赢家」。
+    对出场类硬套「大赢家占比不降」，会把累计 R +43% 的方案否掉。
+    """
+    n, bn = row.get("n") or 0, base.get("n") or 0
+    if not n or not bn:
+        return False
+    return abs(n - bn) / bn < 0.05
+
+
 def _breakeven_wr(payoff: Optional[float]) -> Optional[float]:
     """盈亏平衡胜率 = 1/(1+b)。它与实际胜率的差就是安全边际。"""
     if not payoff or payoff <= 0:
@@ -268,6 +305,7 @@ def _collect(cross: bool, sample: Optional[int] = None) -> dict[str, list[dict]]
             "avg_win": s.get("avg_win"), "avg_loss": s.get("avg_loss"),
             "hold": s.get("avg_holding"), "big": _big_wins(s.get("_trades") or []),
             "reasons": s.get("exit_reasons") or {}, "pf": s.get("_portfolio"),
+            "tail_share": _tail_r_share(s.get("_trades") or []),
             "sample": sample,
         })
     return out
@@ -311,34 +349,61 @@ def _print_trade_group(group: str, rows: list[dict]) -> None:
     if not base:
         return
     print(f"\n组内判定（基准 = {base_name}；**R 只在本组内可比**）")
-    print("  阈值：期望R 提升 >2% 且 均盈跌幅 <5% 且 大赢家**占比**不下降")
-    print("  ⚠️ 大赢家用**占比**（big/n）而非绝对数：择时类方案（如 --amv-long-only）会")
-    print("     过滤掉部分信号，样本量下降时绝对数必然下降，用绝对数比会把它们全部误杀。")
+    print("  出场类（笔数与基准相差 <5%）：**累计R** 提升 >2% 即通过；尾部R占比降 >30% 另行警示")
+    print("  入场类（笔数显著变化，如择时/入场过滤）：期望R 提升 >2% 且 大赢家**占比**不降")
+    print("  ⚠️ 分开判的理由：「削大赢家」是防**为提高胜率而筛掉大赢家**——那些收益会")
+    print("     **永久消失**。出场机制不筛信号，只改离场时点，用「少赚一点尾部」换")
+    print("     「多一些赢家」；对它硬套「大赢家占比不降」会否掉累计R +43% 的方案。")
     b_expR, b_aw = base["expR"] or 0, base["avg_win"] or 0
+    b_totR = base["totR"] or 0
     b_big, b_n = base["big"], base["n"] or 1
     b_rate = b_big / b_n
+    b_tail = base.get("tail_share")
     for r in sorted(rows, key=lambda x: x["name"]):
         if r["name"] == base_name:
             continue
-        expR, aw = r["expR"] or 0, r["avg_win"] or 0
+        expR, aw, totR = r["expR"] or 0, r["avg_win"] or 0, r["totR"] or 0
         n = r["n"] or 1
         rate = r["big"] / n
         d_exp = (expR - b_expR) / abs(b_expR) if b_expR else 0.0
+        d_tot = (totR - b_totR) / abs(b_totR) if b_totR else 0.0
         d_aw = (aw - b_aw) / b_aw if b_aw else 0.0
         d_rate = (rate - b_rate) / b_rate if b_rate else 0.0
-        ok = (d_exp > MIN_EXPECTANCY_GAIN and d_aw > -MAX_AVG_WIN_DROP
-              and d_rate > -MAX_AVG_WIN_DROP)
-        why = []
-        if d_exp <= MIN_EXPECTANCY_GAIN:
-            why.append(f"期望R {d_exp:+.1%}")
-        if d_aw <= -MAX_AVG_WIN_DROP:
-            why.append(f"均盈 {d_aw:+.1%} 削大赢家")
-        if d_rate <= -MAX_AVG_WIN_DROP:
-            why.append(f"大赢家占比 {b_rate:.2%}→{rate:.2%}")
-        print(f"  {r['name']:<20}{'✅ 通过' if ok else '❌ 否决'}  "
-              f"期望R {d_exp:+6.1%}  均盈 {d_aw:+6.1%}  "
-              f"大赢家 {b_big}/{b_n}({b_rate:.2%}) → {r['big']}/{n}({rate:.2%})"
-              f"{('  ｜' + '；'.join(why)) if why else ''}")
+        exit_side = _is_exit_side(r, base)
+        why, notes = [], []
+        if exit_side:
+            ok = d_tot > MIN_EXPECTANCY_GAIN
+            if not ok:
+                why.append(f"累计R {d_tot:+.1%} 未达 +2%")
+            tail = r.get("tail_share")
+            if tail is not None and b_tail:
+                d_tail = (tail - b_tail) / abs(b_tail)
+                if d_tail < -0.30:
+                    notes.append(f"尾部R占比 {b_tail:.0%}→{tail:.0%}"
+                                 f"（{d_tail:+.0%}，收益更依赖中等赢家）")
+            if d_aw <= -MAX_AVG_WIN_DROP:
+                notes.append(f"均盈 {d_aw:+.1%}")
+            if d_rate <= -MAX_AVG_WIN_DROP:
+                notes.append(f"大赢家占比 {b_rate:.2%}→{rate:.2%}")
+            main = f"累计R {d_tot:+6.1%}  期望R {d_exp:+6.1%}"
+        else:
+            ok = (d_exp > MIN_EXPECTANCY_GAIN and d_aw > -MAX_AVG_WIN_DROP
+                  and d_rate > -MAX_AVG_WIN_DROP)
+            if d_exp <= MIN_EXPECTANCY_GAIN:
+                why.append(f"期望R {d_exp:+.1%}")
+            if d_aw <= -MAX_AVG_WIN_DROP:
+                why.append(f"均盈 {d_aw:+.1%} 削大赢家")
+            if d_rate <= -MAX_AVG_WIN_DROP:
+                why.append(f"大赢家占比 {b_rate:.2%}→{rate:.2%}")
+            main = f"期望R {d_exp:+6.1%}  均盈 {d_aw:+6.1%}"
+        tag = "出场" if exit_side else "入场"
+        line = (f"  {r['name']:<20}{'✅ 通过' if ok else '❌ 否决'} [{tag}]  {main}"
+                f"  大赢家 {b_rate:.2%}→{rate:.2%}")
+        if why:
+            line += "  ｜" + "；".join(why)
+        print(line)
+        for nt in notes:
+            print(f"      ⚠️ {nt}")
 
 
 def _print_cross_group(groups: dict[str, list[dict]]) -> None:
