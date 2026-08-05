@@ -1149,7 +1149,7 @@ class TestReuseTradesForPortfolio:
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
         order: list[str] = []
         monkeypatch.setattr(m2, "_run",
-                            lambda g, n, e, s, c, f, cap=False, ds="tdx":
+                            lambda g, n, e, s, c, f, cap=False, ds="tdx", w=None, cf=None:
                             (order.append(n), (f"{g}/{n}", tmp_path / "x", ""))[1])
         todo = [("C_portfolio", "pf_c2_p20", []),      # 派生（复用 B 组）
                 ("B_stop_pct", "pct_12", [])]          # 源（故意排在后面）
@@ -1161,7 +1161,7 @@ class TestReuseTradesForPortfolio:
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
         order: list[str] = []
         monkeypatch.setattr(m2, "_run",
-                            lambda g, n, e, s, c, f, cap=False, ds="tdx":
+                            lambda g, n, e, s, c, f, cap=False, ds="tdx", w=None, cf=None:
                             (order.append(n), (f"{g}/{n}", tmp_path / "x", ""))[1])
         todo = [("C_portfolio", "pf_top2_c2_amv", []),   # 重活
                 ("A_stop_low", "be_03", [])]             # 轻活
@@ -1174,7 +1174,7 @@ class TestFailureRecap:
     def test_failed_runs_listed_at_end(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
         monkeypatch.setattr(m2, "_run",
-                            lambda g, n, e, s, c, f, cap=False, ds="tdx":
+                            lambda g, n, e, s, c, f, cap=False, ds="tdx", w=None, cf=None:
                             (f"{g}/{n}", None, "[FAIL] boom"))
         m2._run_all([("A_stop_low", "be_03", [])], 1000, False, False, 1)
         out = capsys.readouterr().out
@@ -1289,6 +1289,95 @@ class TestMemoryGuards:
         assert m2._is_heavy("C_portfolio", "pf_c5_p20") is False
         assert m2._is_heavy("A_stop_low", "trail_08") is False
         assert m2._is_heavy("不存在的组", "x") is False
+
+
+class TestPinnedWindowAndUniverse:
+    """扫描期间宇宙与 K 线窗口会漂移（实测：universe 5535→5536、同参数笔数
+    1106/1092/1087），必须能钉死。
+
+    ⚠️ **只给 `--end` 钉不住**：`get_ohlcv_table`(local_tdx_data:674) 先做
+    `df.tail(count)`，`_load_bars_local` 才在之后按 start/end 过滤 ⇒ 文件从 N 根变 N+1 根
+    时 tail(500) 取 [N-499, N+1]，end 过滤掉最新那根 ⇒ 只剩 499 根，**且最早那根往前挪了
+    一天**：窗口既缩水又滑动。两端都给 + 放大 count 才由日期决定窗口。
+    """
+
+    def test_window_sets_both_bounds_and_big_count(self):
+        a = m2._base_args(1000, False, "tdx", ("2024-08-01", "2026-08-05"))
+        assert a[a.index("--start") + 1] == "2024-08-01"
+        assert a[a.index("--end") + 1] == "2026-08-05"
+        assert int(a[a.index("--count") + 1]) == m2.WINDOW_COUNT
+        assert m2.WINDOW_COUNT > 500, "count 必须大于窗口内 K 线根数，否则 tail 又来定窗口"
+
+    def test_no_window_keeps_default_count(self):
+        a = m2._base_args(1000, False, "tdx")
+        assert "--start" not in a and a[a.index("--count") + 1] == "500"
+
+    def test_codes_file_replaces_universe_sampling(self):
+        """钉宇宙时不能再传 --universe-sample，否则又去抽一次（池子可能已变）。"""
+        a = m2._base_args(1000, False, "tdx", None, "/tmp/u.txt")
+        assert a[a.index("--codes-file") + 1] == "/tmp/u.txt"
+        assert "--universe-local" not in a and "--universe-sample" not in a
+
+    def test_fingerprint_separates_pinned_batches(self):
+        """钉过的批次与没钉的不是同一件事（前者可复现）⇒ 不能混着汇总。"""
+        plain = m2._fingerprint(1000, False)
+        win = m2._fingerprint(1000, False, "tdx", ("2024-08-01", "2026-08-05"))
+        both = m2._fingerprint(1000, False, "tdx", ("2024-08-01", "2026-08-05"), True)
+        assert plain == "s1000"
+        assert win == "s1000_w20240801-20260805"
+        assert both == "s1000_w20240801-20260805_u"
+        assert len({plain, win, both}) == 3
+
+    def test_collect_isolates_pinned_from_unpinned(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write(tmp_path, "A_stop_low", "00_baseline", fp="s1000", n=1106)
+        _write(tmp_path, "A_stop_low", "trail_08",
+               fp="s1000_w20240801-20260805_u", n=1150)
+        assert [r["name"] for r in m2._collect(cross=False)["A_stop_low"]] \
+            == ["00_baseline"]
+        got = m2._collect(cross=False, window=("2024-08-01", "2026-08-05"),
+                          pin_universe=True)["A_stop_low"]
+        assert [r["name"] for r in got] == ["trail_08"]
+
+    def test_report_warns_when_not_reproducible(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write(tmp_path, "A_stop_low", "00_baseline", fp="s1000")
+        m2.report(cross=False)
+        out = capsys.readouterr().out
+        assert "本批不可复现" in out and "5535→5536" in out
+
+    def test_report_no_warning_when_pinned(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write(tmp_path, "A_stop_low", "00_baseline", fp="s1000_w20240801-20260805_u")
+        m2.report(cross=False, window=("2024-08-01", "2026-08-05"), pin_universe=True)
+        out = capsys.readouterr().out
+        assert "本批不可复现" not in out
+        assert "已钉死" in out
+
+    def test_prepare_universe_reuses_existing(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        fp = m2._fingerprint(1000, False, "tdx", None, True)
+        (tmp_path / f"_universe__{fp}.txt").write_text("600000\n000001\n",
+                                                      encoding="utf-8")
+        monkeypatch.setattr(m2.subprocess, "run",
+                            lambda *a, **k: pytest.fail("已有代码表不该再跑一次"))
+        got = m2._prepare_universe(1000, False, "tdx", None)
+        assert got and "2 只" in capsys.readouterr().out
+
+    def test_prepare_universe_degrades_on_failure(self, tmp_path, monkeypatch, capsys):
+        """落盘失败不能中断扫描——退回各自抽样（可能漂移）并明确告警。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        monkeypatch.setattr(m2.subprocess, "run",
+                            lambda *a, **k: type("R", (), {"returncode": 1})())
+        assert m2._prepare_universe(1000, False, "tdx", None) is None
+        assert "本轮不钉宇宙" in capsys.readouterr().out
+
+    def test_window_conflicts_with_cross_window(self, monkeypatch, capsys):
+        monkeypatch.setattr(sys, "argv",
+                            ["m2", "--report-only", "--cross-window",
+                             "--window", "2024-01-01", "2025-01-01"])
+        assert m2.main() == 2
+        assert "冲突" in capsys.readouterr().out
 
 
 class TestDataSourceIsolation:

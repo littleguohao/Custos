@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """S_shape 因子走查回测校准工具测试（注入合成 bars，验证无未来函数 + 数学 + 聚合）。"""
 import pandas as pd
+import pytest
 
 from screening import backtest_factors as bt
 
@@ -352,6 +353,45 @@ class TestPortfolioFromTrades:
                                      max_pos_frac=0.20)
         assert got["total_return"] == want["total_return"]
         assert got["max_drawdown"] == want["max_drawdown"]
+
+
+class TestPinnedUniverseCLI:
+    """`--codes-file` / `--dump-codes` —— 钉死宇宙。
+
+    universe 来自 vipdoc 目录列举，会随通达信下载变动（实测一轮扫描中 5535→5536）；
+    `sample_codes(seed=0)` 的 seed 固定没用，**被抽的池子变了** ⇒ 抽到另一组票。
+    """
+
+    def test_dump_then_reuse_roundtrip(self, tmp_path):
+        codes = ["600000", "000001", "300750"]
+        p = tmp_path / "u.txt"
+        p.write_text("\n".join(codes) + "\n", encoding="utf-8")
+        got = [ln.strip() for ln in p.read_text(encoding="utf-8").splitlines()
+               if ln.strip() and not ln.strip().startswith("#")]
+        assert got == codes
+
+    def test_codes_file_dump_exits_before_backtest(self, tmp_path):
+        """--dump-codes 必须在加载任何 K 线**之前**返回，否则等于白跑一轮。"""
+        out = tmp_path / "u.txt"
+        rc = bt.main(["--trade-sim", "--codes", "600000,000001",
+                      "--dump-codes", str(out)])
+        assert rc == 0
+        assert out.read_text(encoding="utf-8").split() == ["600000", "000001"]
+
+    def test_codes_file_is_read_and_comments_skipped(self, tmp_path, capsys):
+        src = tmp_path / "u.txt"
+        src.write_text("# 这是注释\n600000\n\n000001\n", encoding="utf-8")
+        out = tmp_path / "dump.txt"
+        rc = bt.main(["--trade-sim", "--codes-file", str(src),
+                      "--dump-codes", str(out)])
+        assert rc == 0
+        assert out.read_text(encoding="utf-8").split() == ["600000", "000001"]
+        assert "已钉死" in capsys.readouterr().err
+
+    def test_missing_codes_file_errors(self, tmp_path):
+        with pytest.raises(SystemExit):
+            bt.main(["--trade-sim", "--codes-file", str(tmp_path / "nope.txt"),
+                     "--dump-codes", str(tmp_path / "o.txt")])
 
 
 class TestMemoryHygiene:

@@ -2123,6 +2123,13 @@ def _empty_result_guard(n_loaded: int, n_out: int, unit: str, allow_empty: bool)
 def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int], dict]] = None) -> int:
     ap = argparse.ArgumentParser(description="S_shape 因子走查回测校准（纯分析，只读本地日线）")
     ap.add_argument("--codes", default="", help="逗号分隔的 6 位代码（与 --universe-sample 二选一）")
+    ap.add_argument("--codes-file", default="",
+                    help="从文件读代码(每行一个,# 开头为注释)。用于**钉死宇宙**:"
+                         "vipdoc 目录会随下载变动(实测 5535→5536),"
+                         "sample_codes(seed=0) 就会抽到另一组票 ⇒ 长时间扫描里各方案宇宙不同")
+    ap.add_argument("--dump-codes", default="",
+                    help="只解析 universe 并把代码写到该文件后**立即退出**(不跑回测)。"
+                         "配合 --codes-file 让一轮扫描的所有方案共用同一份宇宙")
     ap.add_argument("--universe-sample", type=int, default=0,
                     help="从 universe 随机抽 N 只（代表性样本；0=不抽，用 --codes 或全量 universe）")
     ap.add_argument("--universe-local", action="store_true",
@@ -2224,7 +2231,20 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
     args = ap.parse_args(argv)
     reset_gate_stats()
 
-    if args.universe_sdata:
+    if args.codes_file:
+        # 钉死宇宙：优先级最高，跳过所有抽样逻辑。
+        # ⚠️ 为什么需要它：universe 来自 vipdoc 目录列举，会随通达信下载变动
+        # （实测一轮扫描中 5535→5536）；`sample_codes(seed=0)` 的 seed 固定没用，
+        # **被抽的池子变了** ⇒ 抽到的是另一组 1000 只。长时间扫描里各方案宇宙不同，
+        # 跨方案比较就混进了「换了一批票」这个噪声。
+        p = Path(args.codes_file)
+        if not p.is_file():
+            ap.error(f"--codes-file 不存在: {p}")
+        codes = [ln.strip() for ln in p.read_text(encoding="utf-8").splitlines()
+                 if ln.strip() and not ln.strip().startswith("#")]
+        print(f"[INFO] universe=codes_file({p.name}) {len(codes)} 只（**已钉死**）",
+              file=sys.stderr)
+    elif args.universe_sdata:
         import s_data  # noqa: PLC0415
         src_root = Path(args.s_data_root) / ("CSV_DATA" if args.data_source == "csv" else "Q_DATA")
         base = s_data.list_universe(src_root, source=args.data_source)
@@ -2244,6 +2264,15 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
         codes = [c.strip() for c in args.codes.split(",") if c.strip()]
     if not codes:
         ap.error("需提供 --codes / --universe-sample N / --universe-local / --universe-sdata")
+    if args.dump_codes:
+        # 只解析宇宙就退出——让一轮扫描先落一份代码表，后续所有方案用 --codes-file 读它。
+        # 放在这里(codes 已解析、任何数据加载之前)是为了快：只做一次目录列举。
+        out = Path(args.dump_codes)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text("\n".join(codes) + "\n", encoding="utf-8")
+        print(f"[OK] 宇宙已落盘 {out}（{len(codes)} 只）；"
+              f"后续用 --codes-file 复用即可钉死宇宙")
+        return 0
     horizons = tuple(int(h) for h in args.horizons.split(",") if h.strip())
     if loader is not None:
         load = loader

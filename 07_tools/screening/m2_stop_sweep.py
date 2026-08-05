@@ -292,10 +292,20 @@ GROUPS: dict[str, dict[str, Any]] = {
 }
 
 
-def _base_args(sample: int, cross: bool, data_source: str = "tdx") -> list[str]:
+WINDOW_COUNT = 1500             # 钉窗口时的 --count：必须**大于窗口内的 K 线根数**，见 _base_args
+
+
+def _base_args(sample: int, cross: bool, data_source: str = "tdx",
+               window: Optional[tuple[str, str]] = None,
+               codes_file: Optional[str] = None) -> list[str]:
     a = ["--trade-sim", "--entry-filter", "j_low", "--scorer", "b1_dual",
          "--cost-bps", "25", "--scale-out", "0.5"]
-    if data_source == "tdx":
+    if codes_file:
+        # 钉死宇宙。⚠️ 为什么必需：universe 来自 vipdoc 目录列举，会随通达信下载变动
+        # （实测一轮扫描中 5535→5536）；seed 固定没用，**被抽的池子变了**
+        # ⇒ sample_codes 抽到另一组 1000 只，各方案宇宙不同。
+        a += ["--codes-file", codes_file]
+    elif data_source == "tdx":
         # 本地通达信 vipdoc（.day 二进制）。⚠️ 只含**当前挂牌**的票 ⇒ 有幸存者偏差；
         # 且要逐票算前复权（xdxr 权息，缓存冷时还要联网）——全链最慢的一环。
         a += ["--universe-local", "--universe-sample", str(sample)]
@@ -308,11 +318,41 @@ def _base_args(sample: int, cross: bool, data_source: str = "tdx") -> list[str]:
               "--universe-sample", str(sample)]
     if cross:
         # ⚠️ --count 必须加大：默认 500 根从今天往前数，加 --start/--end 只覆盖窗口尾部
-        a += ["--start", "2022-01-01", "--end", "2024-12-31", "--count", "1500"]
+        a += ["--start", "2022-01-01", "--end", "2024-12-31", "--count", str(WINDOW_COUNT)]
+    elif window:
+        # 钉死 K 线窗口。⚠️ **必须两端都给 + 放大 --count**，只给 --end 钉不住：
+        # `get_ohlcv_table`(local_tdx_data:674) 先做 `df.tail(count)`，
+        # `_load_bars_local` 才在之后按 start/end 过滤 ⇒ 文件从 N 根变 N+1 根时，
+        # tail(500) 取的是 [N-499, N+1]，end 过滤掉最新那根 ⇒ 只剩 499 根，
+        # **且最早那根往前挪了一天**：窗口既缩水又滑动。
+        # 两端都给且 count 足够大时，tail 覆盖到 start 之前 ⇒ 窗口完全由日期决定。
+        a += ["--start", window[0], "--end", window[1], "--count", str(WINDOW_COUNT)]
+    if not (cross or window):
+        a += ["--count", "500"]
     return a
 
 
-def _fingerprint(sample: int, cross: bool, data_source: str = "tdx") -> str:
+def _fp_suffix(cross: bool, data_source: str = "tdx",
+               window: Optional[tuple[str, str]] = None,
+               pin_universe: bool = False) -> str:
+    """指纹里样本量之后的部分。**每个会改变「比的是什么」的开关都要进来。**
+
+    拼装式而不是一串正则分组，是为了以后加开关时 `_collect` 不用同步改正则
+    （改漏了就会重演混批事故）。
+    """
+    s = "" if data_source == "tdx" else f"_{data_source}"
+    if window:
+        s += "_w" + window[0].replace("-", "") + "-" + window[1].replace("-", "")
+    if pin_universe:
+        s += "_u"
+    if cross:
+        s += "_cw"
+    return s
+
+
+def _fingerprint(sample: int, cross: bool, data_source: str = "tdx",
+                 window: Optional[tuple[str, str]] = None,
+                 pin_universe: bool = False) -> str:
     """结果文件的参数指纹。
 
     ⚠️ **必须含样本量**：第一版文件名只有 `{组}__{方案}.json`，owner 先跑 300 样本、
@@ -320,16 +360,19 @@ def _fingerprint(sample: int, cross: bool, data_source: str = "tdx") -> str:
     ~1300 笔的基准混在一起比，A 组一半方案的判定全部无效。
 
     ⚠️ **也必须含数据源**：tdx（本地 vipdoc，只有当前挂牌股）与 qlib（S_DATA，含退市股、
-    已前复权）是**两个不同的宇宙**，笔数与收益都不可比。不进指纹就会重演同一个混批事故。
-    `tdx` 不加后缀，保持已有文件名不失效。
+    已前复权）是**两个不同的宇宙**，笔数与收益都不可比。
+
+    ⚠️ **窗口与宇宙钉死也要进来**：钉了窗口/宇宙的批次与没钉的不是同一件事
+    （前者可复现、后者随通达信下载漂移），混着汇总同样无效。
+    `tdx` / 未钉 不加后缀，保持已有文件名不失效。
     """
-    ds = "" if data_source == "tdx" else f"_{data_source}"
-    return f"s{sample}{ds}" + ("_cw" if cross else "")
+    return f"s{sample}" + _fp_suffix(cross, data_source, window, pin_universe)
 
 
 def _run(group: str, name: str, extra: list[str], sample: int, cross: bool,
          force: bool, capture: bool = False,
-         data_source: str = "tdx") -> tuple[str, Optional[pathlib.Path], str]:
+         data_source: str = "tdx", window: Optional[tuple[str, str]] = None,
+         codes_file: Optional[str] = None) -> tuple[str, Optional[pathlib.Path], str]:
     """跑一个方案。返回 ``(方案标识, 结果文件或 None, 待打印的日志)``。
 
     ``capture=True``（并行时）把子进程输出收进字符串，等该方案跑完整块打印——
@@ -337,7 +380,7 @@ def _run(group: str, name: str, extra: list[str], sample: int, cross: bool,
     """
     tag = f"{group}/{name}"
     OUTDIR.mkdir(parents=True, exist_ok=True)
-    fp = _fingerprint(sample, cross, data_source)
+    fp = _fingerprint(sample, cross, data_source, window, bool(codes_file))
     out = OUTDIR / f"{group}__{name}__{fp}.json"
     if out.exists() and not force:
         return tag, out, f"[SKIP] {out.name}"
@@ -365,7 +408,8 @@ def _run(group: str, name: str, extra: list[str], sample: int, cross: bool,
             print(line)
 
     def _exec(args: list[str]) -> tuple[int, float]:
-        cmd = ([sys.executable, str(SCRIPT)] + _base_args(sample, cross, data_source)
+        cmd = ([sys.executable, str(SCRIPT)]
+               + _base_args(sample, cross, data_source, window, codes_file)
                + GROUPS[group]["common"] + args + ["--out", str(out)])
         t0 = time.time()
         if capture:
@@ -465,7 +509,9 @@ def _cap_jobs(jobs: int, n_tasks: int) -> int:
 
 
 def _run_all(todo: list[tuple[str, str, list[str]]], sample: int, cross: bool,
-             force: bool, jobs: int, data_source: str = "tdx") -> None:
+             force: bool, jobs: int, data_source: str = "tdx",
+             window: Optional[tuple[str, str]] = None,
+             codes_file: Optional[str] = None) -> None:
     """跑完 todo 里的全部方案，最后汇总失败项。
 
     ## 为什么可以并行
@@ -492,7 +538,7 @@ def _run_all(todo: list[tuple[str, str, list[str]]], sample: int, cross: bool,
         if wave_jobs <= 1:
             for g, n, e in items:
                 tag, path, log = _run(g, n, e, sample, cross, force, False,
-                                      data_source)
+                                      data_source, window, codes_file)
                 if log:
                     print(log)
                 if path is None:
@@ -502,7 +548,7 @@ def _run_all(todo: list[tuple[str, str, list[str]]], sample: int, cross: bool,
         # 线程只是在等子进程，真正的并行度由子进程数决定 ⇒ 用线程池最省事
         with ThreadPoolExecutor(max_workers=wave_jobs) as ex:
             futs = {ex.submit(_run, g, n, e, sample, cross, force, True,
-                              data_source): f"{g}/{n}"
+                              data_source, window, codes_file): f"{g}/{n}"
                     for g, n, e in items}
             done = 0
             for f in as_completed(futs):
@@ -724,23 +770,20 @@ def _breakeven_wr(payoff: Optional[float]) -> Optional[float]:
 
 
 def _collect(cross: bool, sample: Optional[int] = None,
-             data_source: str = "tdx") -> dict[str, list[dict]]:
+             data_source: str = "tdx", window: Optional[tuple[str, str]] = None,
+             pin_universe: bool = False) -> dict[str, list[dict]]:
     """按指纹收集结果。``sample=None`` 时自动取**最大样本量**那一批。
 
-    只汇总同一指纹的文件——混合样本量或混合数据源比较都是无意义的
+    只汇总同一指纹的文件——混合样本量、混合数据源、混合窗口比较都是无意义的
     （见 `_fingerprint` 注释）。
     """
-    ds_sfx = "" if data_source == "tdx" else f"_{data_source}"
-    suffix = f"{ds_sfx}{'_cw' if cross else ''}"
-    pat = re.compile(r"__s(\d+)(_qlib|_csv)?(_cw)?\.json$")
+    suffix = _fp_suffix(cross, data_source, window, pin_universe)
+    # 后缀精确匹配（而非逐个正则分组）：加新开关时这里不用改，改漏就会重演混批事故
+    pat = re.compile(r"__s(\d+)" + re.escape(suffix) + r"\.json$")
     avail: dict[int, int] = {}
     for p in OUTDIR.glob("*__*__s*.json"):
         m = pat.search(p.name)
         if not m:
-            continue
-        if bool(m.group(3)) != cross:
-            continue
-        if (m.group(2) or "") != ds_sfx:          # 数据源不同 ⇒ 不同宇宙，不可混
             continue
         avail[int(m.group(1))] = avail.get(int(m.group(1)), 0) + 1
     if not avail:
@@ -1208,8 +1251,9 @@ def _warn_missing(groups: dict[str, list[dict]]) -> None:
 
 
 def report(cross: bool, sample: Optional[int] = None,
-           data_source: str = "tdx") -> None:
-    groups = _collect(cross, sample, data_source)
+           data_source: str = "tdx", window: Optional[tuple[str, str]] = None,
+           pin_universe: bool = False) -> None:
+    groups = _collect(cross, sample, data_source, window, pin_universe)
     if not any(groups.values()):
         print("没有结果文件，先跑扫描")
         return
@@ -1217,7 +1261,13 @@ def report(cross: bool, sample: Optional[int] = None,
     print("\n" + "#" * 74)
     print(f"# M2 机制扫描  样本 {n_sample} 只  数据源 {data_source}"
           f"{'（含退市股/已前复权）' if data_source != 'tdx' else '（本地 vipdoc，仅当前挂牌）'}"
-          f"{'  区间 2022-2024（跨窗复核）' if cross else ''}")
+          f"{'  区间 2022-2024（跨窗复核）' if cross else ''}"
+          f"{f'  窗口 {window[0]}~{window[1]}(已钉死)' if window else ''}"
+          f"{'  宇宙已钉死' if pin_universe else ''}")
+    if not (window and pin_universe) and not cross:
+        print("# ⚠️ 未同时钉死窗口与宇宙 ⇒ **本批不可复现**：vipdoc 目录与 .day 都会随")
+        print("#    通达信下载变动，长时间扫描里各方案的宇宙/K线窗口不同（实测 5535→5536、")
+        print("#    同参数笔数 1106/1092/1087）。可复现跑法：--window S E --pin-universe")
     print("#" * 74)
     for g in ("A_stop_low", "B_stop_pct"):
         if groups.get(g):
@@ -1230,6 +1280,39 @@ def report(cross: bool, sample: Optional[int] = None,
     _warn_missing(groups)
     if not cross:
         print("\n⚠️ 通过的组仍须跨窗复核：--cross-window（2022-2024）。")
+
+
+def _prepare_universe(sample: int, cross: bool, data_source: str,
+                      window: Optional[tuple[str, str]]) -> Optional[str]:
+    """先跑一次 `--dump-codes` 落一份代码表，供全部方案共用 ⇒ **钉死宇宙**。
+
+    为什么不在本脚本里直接抽样：universe 解析要 import `local_tdx_data`（依赖 TDX_ROOT）
+    或 `s_data`（依赖 S_DATA_ROOT），在没有这些数据的机器上会直接失败。
+    交给 `backtest_factors --dump-codes` 复用它已有的 universe 逻辑，只做一次目录列举，
+    很快（不加载任何 K 线）。
+    """
+    OUTDIR.mkdir(parents=True, exist_ok=True)
+    fp = _fingerprint(sample, cross, data_source, window, True)
+    path = OUTDIR / f"_universe__{fp}.txt"
+    if path.is_file() and path.stat().st_size > 0:
+        n = sum(1 for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip())
+        print(f"[SKIP] 宇宙已存在 {path.name}（{n} 只）")
+        return str(path)
+    # 只要 universe 选择相关的参数，不要窗口/回测参数
+    probe = ["--trade-sim"]
+    if data_source == "tdx":
+        probe += ["--universe-local", "--universe-sample", str(sample)]
+    else:
+        probe += ["--data-source", data_source, "--universe-sdata",
+                  "--universe-sample", str(sample)]
+    probe += ["--dump-codes", str(path)]
+    print(f"[PREP] 落一份宇宙到 {path.name} 供全部方案共用")
+    r = subprocess.run([sys.executable, str(SCRIPT)] + probe, cwd=str(BASE))
+    if r.returncode != 0 or not path.is_file():
+        print(f"⚠️ 宇宙落盘失败（exit={r.returncode}）⇒ **本轮不钉宇宙**，"
+              f"各方案仍会各自抽样（可能漂移）")
+        return None
+    return str(path)
 
 
 def main() -> int:
@@ -1253,8 +1336,21 @@ def main() -> int:
                          "要逐票算前复权; qlib/csv=S_DATA bundle,含退市股且已前复权"
                          "(去偏且更快,但 2020-09~2021-07 有缺口、数据到 2026-02)。"
                          "⚠️ 换数据源=换宇宙,结果与之前几轮不可比,已进文件名指纹")
+    ap.add_argument("--window", nargs=2, metavar=("START", "END"), default=None,
+                    help="钉死 K 线窗口(YYYY-MM-DD YYYY-MM-DD)。⚠️ **必须两端都给**："
+                         "只给 --end 钉不住(get_ohlcv_table 先 tail(count) 再过滤 ⇒ "
+                         "新 bar 到来时窗口缩水且滑动)。本项会自动放大 --count")
+    ap.add_argument("--pin-universe", action="store_true",
+                    help="先落一份代码表供全部方案共用 ⇒ 钉死宇宙。"
+                         "vipdoc 目录会随下载变动(实测扫描中 5535→5536)，"
+                         "seed 固定也没用——**被抽的池子变了**")
     a = ap.parse_args()
     sample = a.sample if a.sample else DEFAULT_SAMPLE
+    window = tuple(a.window) if a.window else None            # type: ignore[assignment]
+    if window and a.cross_window:
+        print("--window 与 --cross-window 冲突（后者已自带 2022-2024 窗口）")
+        return 2
+    codes_file = None
 
     if not a.report_only:
         todo = [(g, n, e) for g, meta in GROUPS.items()
@@ -1263,13 +1359,19 @@ def main() -> int:
         if not todo:
             print(f"--only {a.only} 没匹配到任何组/方案")
             return 2
+        if a.pin_universe:
+            codes_file = _prepare_universe(sample, a.cross_window, a.data_source, window)
         print(f"将跑 {len(todo)} 个方案，样本 {sample} 只，数据源 {a.data_source}"
               f"{'，区间 2022-2024' if a.cross_window else ''}"
+              f"{f'，窗口 {window[0]}~{window[1]}' if window else ''}"
+              f"{'，宇宙已钉死' if codes_file else ''}"
               f"{f'，并行 {a.jobs} 进程' if a.jobs > 1 else ''}")
-        _run_all(todo, sample, a.cross_window, a.force, max(1, a.jobs), a.data_source)
+        _run_all(todo, sample, a.cross_window, a.force, max(1, a.jobs), a.data_source,
+                 window, codes_file)
     # ⚠️ 实跑时必须传**刚跑的那批**。原先这里传 None ⇒ 汇总「最大样本量」那批：
     #    跑 --sample 300 试跑，报表却显示 s1000 的旧结果，看起来像新结果。
-    report(a.cross_window, sample if not a.report_only else a.sample, a.data_source)
+    report(a.cross_window, sample if not a.report_only else a.sample, a.data_source,
+           window, bool(codes_file) or (a.report_only and a.pin_universe))
     return 0
 
 

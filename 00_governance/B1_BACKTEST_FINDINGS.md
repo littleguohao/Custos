@@ -2243,9 +2243,48 @@ owner 那轮 log 里，本该完全相同的回测出现了不同笔数：
 **顺带验证了 `trades_signature` 的价值**：`codes_digest`/`n_codes` 会捕捉到这种漂移，
 `--from-trades` 会拒绝复用并自动退回全量回测，不会静默拿错口径的 trades 去算组合。
 
-**待定的修法**（口径改动，需 owner 拍板）：
-- `backtest_factors --codes-file <path>`：扫描开始时把抽样结果落一次盘，全部方案共用
-  ⇒ 宇宙钉死。（不能用 `--codes` 传：1000 个代码约 7000 字符，接近 Windows 8191 上限。）
-- 扫描统一传 `--end <扫描启动日>` ⇒ K 线窗口右端钉死，盘后下载不再影响进行中的扫描。
+**待定的修法**（口径改动，需 owner 拍板）→ **已实现（2026-08-05）**：
 
-两项都会让结果与之前几轮**不可比**（但之前几轮本来就不可复现），换来的是**可复现**。
+### ⚠️ 只加 `--end` 钉不住——加载顺序有坑
+
+`--start/--end` 一直是可用的（`--cross-window` 路径就在用），但**单给 `--end` 不够**：
+
+```
+get_ohlcv_table(count=500)        local_tdx_data.py:674   先 df.tail(500)
+  ↓
+_load_bars_local                 backtest_factors:1915   才按 start/end 过滤，再 tail(count)
+```
+
+文件从 N 根变 N+1 根时：`tail(500)` 取的是 `[N-499, N+1]` → `end` 过滤掉最新那根 →
+**只剩 499 根，且最早那根往前挪了一天**。窗口既缩水又滑动。
+
+⇒ 必须**两端都给 + 放大 `--count`**（`WINDOW_COUNT=1500`），让日期过滤而不是 `tail`
+决定窗口——这正是脚本里 `--cross-window` 那条注释说的。
+
+### 而 `--start/--end` 管不到宇宙那一半
+
+universe 来自 `list_local_vipdoc_codes()` 的**目录列举**，跟日期无关。
+5535→5536 会让 `sample_codes(base, 1000, seed=0)` 抽到**另一组** 1000 只——
+seed 固定没用，**被抽的池子变了**。
+
+### 两个开关（默认关，开了才可复现）
+
+| 开关 | 作用 | 实现 |
+|---|---|---|
+| `--window START END` | 钉死 K 线窗口 | 传 `--start/--end` + `--count=WINDOW_COUNT` |
+| `--pin-universe` | 钉死宇宙 | 先跑一次 `backtest_factors --dump-codes` 落代码表，全部方案改用 `--codes-file` |
+
+`--dump-codes` 在 codes 解析完、**任何 K 线加载之前**就返回，所以只花一次目录列举的时间。
+不在扫描脚本里直接抽样，是因为那要 import `local_tdx_data`（依赖 TDX_ROOT）或 `s_data`
+（依赖 S_DATA_ROOT），在没这些数据的机器上会直接失败；交给 `backtest_factors` 复用它已有的
+universe 逻辑。落盘失败时**退回各自抽样并明确告警**，不中断扫描。
+
+两项都进了文件名指纹（`s1000_w20240801-20260805_u`），钉过的批次与没钉的不会混着汇总。
+报表在**未同时钉死两者**时会打一条「本批不可复现」的警告并给出可复现跑法。
+
+可复现跑法：
+
+```bash
+uv run python 07_tools/screening/m2_stop_sweep.py \
+    --window 2024-08-01 2026-08-05 --pin-universe -j 4
+```
