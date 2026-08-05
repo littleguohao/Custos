@@ -401,6 +401,22 @@ class TestMemoryHygiene:
         v = bt.peak_rss_mb()
         assert v is None or v > 0
 
+    def test_peak_rss_records_reason_on_failure(self, monkeypatch):
+        """探测失败必须**留下原因**——owner 实测在 Windows 上打出「峰值 未知」，
+        而静默返回 None 的诊断价值为零（本仓库反复踩的「静默降级」坑）。"""
+        import builtins
+        real = builtins.__import__
+
+        def boom(name, *a, **k):
+            if name in ("resource", "ctypes"):
+                raise ImportError(f"no {name} (test)")
+            return real(name, *a, **k)
+
+        monkeypatch.setattr(builtins, "__import__", boom)
+        monkeypatch.setattr(bt, "_RSS_FAIL", "")
+        assert bt.peak_rss_mb() is None
+        assert "resource" in bt._RSS_FAIL and "test" in bt._RSS_FAIL
+
     def test_write_json_roundtrips_both_modes(self, tmp_path):
         payload = {"a": 1, "trades": [{"ret": 0.1}] * 10}
         for big in (False, True):

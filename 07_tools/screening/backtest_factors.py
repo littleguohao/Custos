@@ -1902,19 +1902,29 @@ def attribution_report(trades: list[dict[str, Any]]) -> dict[str, Any]:
     return {"n": len(ts), "features": rows, "robust_features": robust_feats, "text": "\n".join(lines)}
 
 
+_RSS_FAIL: str = ""             # 峰值内存探测失败原因（供 [MEM] 行诊断，只记最后一次）
+
+
 def peak_rss_mb() -> Optional[float]:
-    """本进程峰值 RSS（MB）。取不到返回 None。
+    """本进程峰值 RSS（MB）。取不到返回 None，失败原因写进 `_RSS_FAIL`。
 
     OOM Kill 是这套回测的老问题（见 B1_BACKTEST_FINDINGS「全市场 OOM」），
     但一直没有**每轮实测数字**，只能靠猜。有了它才能判断 `--jobs N` 并行安全到几路。
+
+    ⚠️ 第一版在 Windows 上静默返回 None（owner 实测打出「峰值 未知」）。原因是只试了
+    `ctypes.windll.psapi`，而且没设 restype/argtypes——句柄按默认 c_int 传给
+    `GetProcessMemoryInfo` 时可能被截断。这里改成多路兜底并**记下失败原因**：
+    静默返回 None 的诊断价值为零，这正是本仓库反复踩的「静默降级」坑。
     """
+    global _RSS_FAIL
+    errs = []
     try:
         import resource  # noqa: PLC0415  Unix
         v = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         # Linux 是 KB，macOS 是字节
         return v / 1024.0 if sys.platform != "darwin" else v / (1024.0 ** 2)
-    except Exception:                                             # noqa: BLE001
-        pass
+    except Exception as e:                                        # noqa: BLE001
+        errs.append(f"resource: {e}")
     try:                                                          # Windows
         import ctypes  # noqa: PLC0415
         from ctypes import wintypes  # noqa: PLC0415
@@ -1930,14 +1940,30 @@ def peak_rss_mb() -> Optional[float]:
                         ("PagefileUsage", ctypes.c_size_t),
                         ("PeakPagefileUsage", ctypes.c_size_t)]
 
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)      # type: ignore[attr-defined]
+        k32.GetCurrentProcess.restype = wintypes.HANDLE           # 不设会按 c_int 截断句柄
+        h = k32.GetCurrentProcess()
         pmc = _PMC()
         pmc.cb = ctypes.sizeof(_PMC)
-        h = ctypes.windll.kernel32.GetCurrentProcess()             # type: ignore[attr-defined]
-        if ctypes.windll.psapi.GetProcessMemoryInfo(              # type: ignore[attr-defined]
-                h, ctypes.byref(pmc), pmc.cb):
-            return pmc.PeakWorkingSetSize / (1024.0 ** 2)
-    except Exception:                                             # noqa: BLE001
-        pass
+        # Win7+ 把 psapi 的实现搬进了 kernel32（K32 前缀），psapi.dll 仍是转发壳；
+        # 两个都试，哪个在就用哪个。
+        for dll_name, fn_name in (("kernel32", "K32GetProcessMemoryInfo"),
+                                  ("psapi", "GetProcessMemoryInfo")):
+            try:
+                dll = k32 if dll_name == "kernel32" else \
+                    ctypes.WinDLL(dll_name, use_last_error=True)  # type: ignore[attr-defined]
+                fn = getattr(dll, fn_name)
+                fn.argtypes = [wintypes.HANDLE, ctypes.POINTER(_PMC), wintypes.DWORD]
+                fn.restype = wintypes.BOOL
+                if fn(h, ctypes.byref(pmc), pmc.cb):
+                    return pmc.PeakWorkingSetSize / (1024.0 ** 2)
+                errs.append(f"{dll_name}.{fn_name}: "
+                            f"err={ctypes.get_last_error()}")
+            except Exception as e:                                # noqa: BLE001
+                errs.append(f"{dll_name}.{fn_name}: {e}")
+    except Exception as e:                                        # noqa: BLE001
+        errs.append(f"ctypes: {e}")
+    _RSS_FAIL = "; ".join(errs)[:200]
     return None
 
 
@@ -2353,11 +2379,11 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
         # 峰值 RSS 同时打出来：OOM Kill 是这套回测的老问题，而 `--jobs N` 并行会把
         # 内存乘 N ⇒ 必须有实测数字才能定安全路数。
         _rss = peak_rss_mb()
+        _mem = f"{_rss:.0f}MB" if _rss else f"未知({_RSS_FAIL or '无原因'})"
         print(f"[TIME] 加载(含前复权) {t_load:.0f}s / 评估 {t_eval:.0f}s"
               f"（加载占 {t_load / max(t_load + t_eval, 1e-9):.0%}，"
               f"{len(codes)} 只票）"
-              f"  [MEM] 峰值 {f'{_rss:.0f}MB' if _rss else '未知'}"
-              f" / {len(trades)} 笔"
+              f"  [MEM] 峰值 {_mem} / {len(trades)} 笔"
               f"{'（collect_all 全候选）' if args.top_n > 0 else ''}", file=sys.stderr)
         _report_gates()
         rc_empty = _empty_result_guard(n_loaded, len(trades), "笔交易", args.allow_empty)
