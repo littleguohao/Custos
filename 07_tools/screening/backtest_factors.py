@@ -1902,6 +1902,166 @@ def attribution_report(trades: list[dict[str, Any]]) -> dict[str, Any]:
     return {"n": len(ts), "features": rows, "robust_features": robust_feats, "text": "\n".join(lines)}
 
 
+def peak_rss_mb() -> Optional[float]:
+    """本进程峰值 RSS（MB）。取不到返回 None。
+
+    OOM Kill 是这套回测的老问题（见 B1_BACKTEST_FINDINGS「全市场 OOM」），
+    但一直没有**每轮实测数字**，只能靠猜。有了它才能判断 `--jobs N` 并行安全到几路。
+    """
+    try:
+        import resource  # noqa: PLC0415  Unix
+        v = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        # Linux 是 KB，macOS 是字节
+        return v / 1024.0 if sys.platform != "darwin" else v / (1024.0 ** 2)
+    except Exception:                                             # noqa: BLE001
+        pass
+    try:                                                          # Windows
+        import ctypes  # noqa: PLC0415
+        from ctypes import wintypes  # noqa: PLC0415
+
+        class _PMC(ctypes.Structure):
+            _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD),
+                        ("PeakWorkingSetSize", ctypes.c_size_t),
+                        ("WorkingSetSize", ctypes.c_size_t),
+                        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                        ("PagefileUsage", ctypes.c_size_t),
+                        ("PeakPagefileUsage", ctypes.c_size_t)]
+
+        pmc = _PMC()
+        pmc.cb = ctypes.sizeof(_PMC)
+        h = ctypes.windll.kernel32.GetCurrentProcess()             # type: ignore[attr-defined]
+        if ctypes.windll.psapi.GetProcessMemoryInfo(              # type: ignore[attr-defined]
+                h, ctypes.byref(pmc), pmc.cb):
+            return pmc.PeakWorkingSetSize / (1024.0 ** 2)
+    except Exception:                                             # noqa: BLE001
+        pass
+    return None
+
+
+def write_json(path: Path, payload: dict[str, Any], *, big: bool = False) -> None:
+    """落盘 JSON。``big=True`` 时**流式写且不缩进**。
+
+    ⚠️ `path.write_text(json.dumps(...))` 会先在内存里拼出**整个字符串**再写，
+    等于把 payload 复制一份到内存；`indent=2` 又让这份字符串再大 1.36 倍（实测）。
+    逐笔上万条时这是白送的一次内存峰值——而这个回测本来就常被 OOM Kill。
+    `json.dump(fh)` 分块写出，峰值与 payload 大小无关。
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False, indent=None if big else 2)
+
+
+def trades_signature(args: Any, codes: list[str]) -> dict[str, Any]:
+    """影响**逐笔交易集**的全部参数指纹。
+
+    组合层参数（`risk_pct` / `max_concurrent` / `max_pos` / `top_n` 的取值）**不在内**
+    ——它们只改资金曲线，不改 trades。但 `collect_all` 在内：`--top-n > 0` 时
+    `evaluate_trades` 返回**未去重的全候选**（backtest_factors 内 collect_all=True），
+    与去重后的逐笔完全不同口径。
+
+    落进结果 JSON 有两个用途：
+      ① `--from-trades` 复用前核对口径（不一致就拒绝，不静默算）
+      ② 事后能查清一个结果文件到底是什么参数跑出来的——原先 payload **没有记录**
+         `scale_out/breakeven/trail/stop_trigger/stop_tick_buffer/cost_zone_*`，
+         而这些恰好就是 M2 扫描在扫的参数，等于结果文件不自述身份。
+    """
+    import hashlib  # noqa: PLC0415
+    digest = hashlib.sha1(",".join(codes).encode("utf-8")).hexdigest()[:12]
+    return {
+        "data_source": args.data_source, "scorer": args.scorer,
+        "weekly": bool(args.weekly), "step": args.step, "cost_bps": args.cost_bps,
+        "entry_filter": args.entry_filter, "amv_long_only": bool(args.amv_long_only),
+        "bbi_consec": args.bbi_consec, "time_stop": args.time_stop,
+        "stop_mode": args.stop_mode, "stop_pct": args.stop_pct,
+        "stop_trigger": args.stop_trigger, "stop_tick_buffer": args.stop_tick_buffer,
+        "scale_out": args.scale_out, "breakeven": args.breakeven, "trail": args.trail,
+        "cost_zone_bars": args.cost_zone_bars, "cost_zone_pct": args.cost_zone_pct,
+        "max_signals_per_code": args.max_signals_per_code,
+        "sector_filter": bool(args.sector_filter),
+        "start": args.start or None, "end": args.end or None, "count": args.count,
+        "collect_all": bool(args.top_n > 0),
+        "n_codes": len(codes), "codes_digest": digest,
+    }
+
+
+def _portfolio_from_trades(args: Any, codes: list[str]) -> int:
+    """只跑资金曲线，逐笔交易从已有结果 JSON 读入（跳过回测）。
+
+    为什么值得：M2 扫描 C 组 8 个方案的**回测参数完全相同**，只有资金曲线参数不同
+    （max_concurrent / max_pos / risk_pct / top_n）。资金曲线模拟是**毫秒级**，
+    回测是**分钟级** ⇒ 8 次回测里有 5 次纯属重算，约占整轮扫描 20% 的时间。
+
+    ⚠️ 复用前**必须**核对 `trades_signature` 完全一致。拿另一套止损参数的 trades
+    去跑组合，出来的曲线看不出任何异常——「静默用错口径」这类错误最难发现，
+    所以这里**不一致就非零退出**，不做任何猜测性兼容。
+    """
+    src = Path(args.from_trades)
+    if not src.is_file():
+        print(f"[FAIL] --from-trades 文件不存在: {src}", file=sys.stderr)
+        return 2
+    try:
+        d = json.loads(src.read_text(encoding="utf-8"))
+    except Exception as e:                                        # noqa: BLE001
+        print(f"[FAIL] --from-trades 读不了 {src.name}: {e}", file=sys.stderr)
+        return 2
+    trades = d.get("trades")
+    if not trades:
+        print(f"[FAIL] {src.name} 里没有 trades（--summary-only 落的盘不能复用）",
+              file=sys.stderr)
+        return 2
+    want = trades_signature(args, codes)
+    got = d.get("trades_signature")
+    if not isinstance(got, dict):
+        print(f"[FAIL] {src.name} 没有 trades_signature（旧版结果文件）⇒ "
+              f"无法确认口径一致，拒绝复用", file=sys.stderr)
+        return 2
+    diff = {k: (got.get(k), v) for k, v in want.items() if got.get(k) != v}
+    if diff:
+        print(f"[FAIL] trades 口径与 {src.name} 不一致，拒绝复用：", file=sys.stderr)
+        for k, (a, b) in sorted(diff.items()):
+            print(f"       {k}: 源={a!r} 本次={b!r}", file=sys.stderr)
+        return 2
+    if args.top_n <= 0 and not args.portfolio:
+        print("[FAIL] --from-trades 只用于组合模拟，需同时给 --portfolio 或 --top-n",
+              file=sys.stderr)
+        return 2
+
+    tsum = summarize_trades(trades)
+    payload = {"mode": "trade_sim", "scorer": args.scorer, "weekly": args.weekly,
+               "data_source": args.data_source, "start": args.start or None,
+               "end": args.end or None, "cost_bps": args.cost_bps,
+               "amv_long_only": bool(args.amv_long_only),
+               "entry_filter": args.entry_filter, "top_n": args.top_n,
+               "bbi_consec": args.bbi_consec, "time_stop": args.time_stop,
+               "stop_mode": args.stop_mode, "stop_pct": args.stop_pct,
+               "codes": codes, "count": args.count,
+               "trades_signature": want, "trades_reused_from": src.name,
+               "n_trades": len(trades), "trade_summary": tsum}
+    if args.top_n > 0:
+        payload["portfolio"] = simulate_portfolio_topn(
+            trades, top_n=args.top_n, risk_pct=args.risk_pct / 100.0,
+            max_concurrent=args.max_concurrent, max_pos_frac=args.max_pos / 100.0)
+    else:
+        payload["portfolio"] = simulate_portfolio(
+            trades, risk_pct=args.risk_pct / 100.0,
+            max_concurrent=args.max_concurrent, max_pos_frac=args.max_pos / 100.0)
+    _rss = peak_rss_mb()
+    print(f"[OK] 复用 {src.name} 的 {len(trades)} 笔交易（口径已核对一致），只跑资金曲线"
+          f"  [MEM] 峰值 {f'{_rss:.0f}MB' if _rss else '未知'}")
+    del d, trades                       # 组合曲线已算完，尽早还内存
+    if args.out:
+        # ⚠️ **不重写 trades**：它与源文件逐字相同，`trades_reused_from` 已指明来源。
+        # 复用路径本来就要把源文件整份读进内存，再写一遍等于同一份数据占三份
+        # （源 dict + payload 引用 + 落盘缓冲）——OOM 就是这么攒出来的。
+        write_json(Path(args.out), payload)
+        print(f"[OK] 写出 {args.out}（逐笔见 {src.name}，不重复落盘）")
+    print("\n" + payload["portfolio"]["text"])
+    return 0
+
+
 def _load_bars_local(codes: list[str], count: int, start: Optional[str] = None,
                      end: Optional[str] = None) -> dict[str, pd.DataFrame]:
     """CLI 用：经 local_tdx 读取本地日线（需通达信数据；单测走注入不经此）。
@@ -2010,6 +2170,9 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                     help="出场:持有N根仍未触发止损/BBI则到期平仓(默认0=不启用)")
     ap.add_argument("--portfolio", action="store_true",
                     help="在逐笔交易上叠加组合级资金曲线(固定风险仓位+并发上限),输出总收益/CAGR/最大回撤")
+    ap.add_argument("--from-trades", default="",
+                    help="从已有结果 JSON 读 trades、**跳过回测**只跑资金曲线(配合 --portfolio/--top-n)。"
+                         "复用前核对 trades_signature,口径不一致直接非零退出")
     ap.add_argument("--risk-pct", type=float, default=1.0, help="组合:每笔风险占本金%%(默认1.0)")
     ap.add_argument("--max-concurrent", type=int, default=5, help="组合:同时持仓上限(默认5)")
     ap.add_argument("--max-pos", type=float, default=20.0, help="组合:单仓名义上限%%本金(默认20)")
@@ -2096,6 +2259,9 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                                  root=str(Path(args.s_data_root) / sub))
 
     if args.trade_sim:
+        if args.from_trades:
+            # 放在 amv_regime 加载**之前**：复用时不需要指南针数据在本机可读
+            return _portfolio_from_trades(args, codes)
         amv_regime = None
         if args.amv_long_only:
             amv_regime = load_amv_regime(since=args.start or "2015-01-01")  # regime 起点跟随回测起点
@@ -2122,11 +2288,17 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                       f"样本期与不带 filter 的 baseline 不可比", file=sys.stderr)
         trades: list[dict[str, Any]] = []
         import gc
+        import time as _time
         n_loaded = 0
+        t_load = 0.0        # 读盘 + 前复权累计秒数
+        t_eval = 0.0        # 逐 bar 评估累计秒数
         for k, c in enumerate(codes):     # 流式：逐股加载→评估→释放，避免全量载入 OOM
+            _t0 = _time.time()
             d = load([c], args.count)
+            t_load += _time.time() - _t0
             if d:
                 n_loaded += len(d)
+                _t0 = _time.time()
                 trades += evaluate_trades(
                     d, scorer=SCORERS[args.scorer], step=args.step, weekly=args.weekly,
                     cost_bps=args.cost_bps, amv_regime=amv_regime, bbi_exit_consec=args.bbi_consec,
@@ -2141,10 +2313,23 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                     stop_tick_buffer=args.stop_tick_buffer,
                     cost_zone_bars=args.cost_zone_bars,
                     cost_zone_pct=args.cost_zone_pct)
+                t_eval += _time.time() - _t0
             del d
             if (k + 1) % 500 == 0:
                 gc.collect()
                 print(f"[INFO] 已处理 {k + 1}/{len(codes)} 只，累计 {len(trades)} 笔候选", file=sys.stderr)
+        # 加载(含前复权)与评估的耗时拆分。加载结果对**所有扫描方案都相同**，
+        # 若加载占比高，则「方案外循环」改「股票外循环」可省掉 (N-1)/N 的加载时间
+        # ——m2_stop_sweep 模块文档第 ③ 条要的就是这个数。
+        # 峰值 RSS 同时打出来：OOM Kill 是这套回测的老问题，而 `--jobs N` 并行会把
+        # 内存乘 N ⇒ 必须有实测数字才能定安全路数。
+        _rss = peak_rss_mb()
+        print(f"[TIME] 加载(含前复权) {t_load:.0f}s / 评估 {t_eval:.0f}s"
+              f"（加载占 {t_load / max(t_load + t_eval, 1e-9):.0%}，"
+              f"{len(codes)} 只票）"
+              f"  [MEM] 峰值 {f'{_rss:.0f}MB' if _rss else '未知'}"
+              f" / {len(trades)} 笔"
+              f"{'（collect_all 全候选）' if args.top_n > 0 else ''}", file=sys.stderr)
         _report_gates()
         rc_empty = _empty_result_guard(n_loaded, len(trades), "笔交易", args.allow_empty)
         if rc_empty:
@@ -2156,6 +2341,9 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                    "entry_filter": args.entry_filter, "top_n": args.top_n,
                    "bbi_consec": args.bbi_consec, "time_stop": args.time_stop,
                    "stop_mode": args.stop_mode, "stop_pct": args.stop_pct,
+                   # 被 M2 扫描的那几个参数原先**没有落盘** ⇒ 结果文件不自述身份，
+                   # 事后无法确认某个文件是哪套参数跑的。指纹见 trades_signature。
+                   "trades_signature": trades_signature(args, codes),
                    "codes": codes, "count": args.count, "trade_summary": tsum, "trades": trades}
         if args.top_n > 0:
             payload["portfolio"] = simulate_portfolio_topn(
@@ -2169,10 +2357,11 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
             payload["attribution"] = attribution_report(trades)
         if args.out:
             out = Path(args.out)
-            out.parent.mkdir(parents=True, exist_ok=True)
             if args.summary_only:
                 payload = {k: v for k, v in payload.items() if k != "trades"}
-            out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            # 流式写：`write_text(json.dumps(...))` 会先拼出整个字符串（indent=2 再放大
+            # 1.36 倍），逐笔上万条时白送一次内存峰值——这个回测本来就常被 OOM Kill。
+            write_json(out, payload, big=len(trades) > 20000)
             print(f"[OK] 写出 {out}（{len(trades)} 笔交易，scorer={args.scorer}, {'周线' if args.weekly else '日线'}, cost={args.cost_bps}bps, amv_long_only={bool(args.amv_long_only)}）")
         stop_desc = (f"买入K最低" if args.stop_mode == "low" else f"pct {args.stop_pct}%")
         tstop_desc = f" / 时间止损{args.time_stop}根" if args.time_stop else ""
@@ -2211,8 +2400,7 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
         payload["factor_lift"] = factor_lift(records, args.factor_field, horizon=args.summary_horizon)
     if args.out:
         out = Path(args.out)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        write_json(out, payload, big=len(records) > 20000)
         print(f"[OK] 写出 {out}（{len(records)} 条信号，scorer={args.scorer}, entry_filter={args.entry_filter}）")
     print(f"\n=== 分档 × horizon 网格（scorer={args.scorer}, entry_filter={args.entry_filter}, 信号 {len(records)} 条）===")
     print(matrix["text"])

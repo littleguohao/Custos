@@ -12,6 +12,8 @@
 from __future__ import annotations
 
 import json
+import pathlib
+import sys
 
 import pytest
 
@@ -422,3 +424,482 @@ class TestTailRShare:
     def test_none_on_zero_total(self):
         assert m2._tail_r_share([{"ret": 0.3, "r_multiple": 5.0},
                                  {"ret": -0.1, "r_multiple": -5.0}]) is None
+
+
+class TestSideClassifiedByFlags:
+    """出场/入场按**参数语义**分类，不按笔数（2026-08-05 修）。
+
+    笔数判据对 `--trail`（1294→1298）成立，但对**止损距离**不成立：非重叠去重下
+    止损越紧 → 离场越早 → 后续还能再进场 ⇒ 笔数系统性增加。实测 300 样本
+    pct_05=364 vs pct_12=342 差 6.4%，已越过 5% 线 ⇒ pct_05 会被误判成入场类，
+    去过「大赢家占比不降」——正是 6785724 刚修掉的那类误否。
+    """
+
+    @pytest.mark.parametrize("group,name,want", [
+        ("A_stop_low", "trail_08", "exit"),
+        ("A_stop_low", "be_05", "exit"),
+        ("A_stop_low", "cost_zone_3", "exit"),
+        ("A_stop_low", "tick_buffer_3", "exit"),
+        ("A_stop_low", "trigger_intraday", "exit"),
+        ("A_stop_low", "amv_long_only", "entry"),      # 择时筛信号
+        ("B_stop_pct", "pct_05", "exit"),              # 关键：止损距离仍是出场类
+        ("B_stop_pct", "pct_12", "exit"),
+        ("B_stop_pct", "pct_12_amv", "entry"),         # 带 amv ⇒ 按入场类严格判
+        ("B_stop_pct", "pct_08_amv", "entry"),
+    ])
+    def test_flag_semantics(self, group, name, want):
+        base = m2.GROUPS[group]["baseline"]
+        assert m2._side_from_flags(group, name, base) == want
+
+    def test_pct_05_not_misjudged_despite_trade_count_gap(self, tmp_path, monkeypatch,
+                                                          capsys):
+        """笔数差 6.4%（越过旧 5% 线）也必须按出场类判。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write_tr(tmp_path, "B_stop_pct", "pct_08", n=342, expR=0.24, totR=83.0,
+                  aw=0.11, big=40)
+        _write_tr(tmp_path, "B_stop_pct", "pct_05", n=364, expR=0.433, totR=157.7,
+                  aw=0.095, big=38)
+        m2.report(cross=False)
+        line = next(ln for ln in capsys.readouterr().out.split("\n")
+                    if "pct_05" in ln and "累计R" in ln)
+        assert "[出场]" in line, f"止损距离是出场机制: {line}"
+        assert "✅ 通过" in line
+
+    def test_unknown_scheme_falls_back_to_trade_count(self):
+        """GROUPS 里查不到的方案（手工拷进来的文件）回落到笔数启发式。"""
+        assert m2._side_from_flags("A_stop_low", "手工方案", "00_baseline") is None
+        assert m2._side_of("A_stop_low", {"name": "手工方案", "n": 1298},
+                           {"n": 1294}, "00_baseline") == "exit"
+        assert m2._side_of("A_stop_low", {"name": "手工方案", "n": 230},
+                           {"n": 1294}, "00_baseline") == "entry"
+
+    def test_baseline_flags_subtracted(self):
+        """与基准做差：B 组基准自带 --stop-pct，不能因此把所有方案都算成出场。"""
+        # pct_12_amv 相对 pct_08 的差集含 --amv-long-only ⇒ entry
+        assert m2._side_from_flags("B_stop_pct", "pct_12_amv", "pct_08") == "entry"
+
+    def test_flag_pairs_keeps_values(self):
+        """只比 flag 名会把 `--stop-pct 5` 和 `--stop-pct 8` 看成「没差异」。"""
+        assert m2._flag_pairs(["--stop-pct", "5"]) == {"--stop-pct": "5"}
+        assert m2._flag_pairs(["--amv-long-only"]) == {"--amv-long-only": None}
+        assert m2._flag_pairs(["--stop-pct", "12", "--amv-long-only",
+                               "--cost-zone-bars", "3"]) == {
+            "--stop-pct": "12", "--amv-long-only": None, "--cost-zone-bars": "3"}
+        assert m2._flag_pairs([]) == {}
+
+
+class TestExitSideNeedsExpectancyToo:
+    """出场类不能只看累计R——**止损越紧笔数越多**，纯摊薄就能凑够 +2%。"""
+
+    def test_total_r_gain_from_trade_count_is_rejected(self, tmp_path, monkeypatch,
+                                                      capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        # 期望R 略降(0.202→0.198)，但笔数 +6% ⇒ 累计R +3.9% 达标
+        _write_tr(tmp_path, "A_stop_low", "00_baseline", n=1294, expR=0.202,
+                  totR=261.4, aw=0.11, big=61)
+        _write_tr(tmp_path, "A_stop_low", "cost_zone_3", n=1372, expR=0.198,
+                  totR=271.7, aw=0.11, big=64)
+        m2.report(cross=False)
+        line = next(ln for ln in capsys.readouterr().out.split("\n")
+                    if "cost_zone_3" in ln and "累计R" in ln)
+        assert "❌ 否决" in line, f"累计R 靠笔数摊薄不算改进: {line}"
+        assert "摊薄" in line
+
+    def test_real_improvement_still_passes(self, tmp_path, monkeypatch, capsys):
+        """trail_08 实测：期望R +42.6% 且累计R +43.1% ⇒ 必须通过。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write_tr(tmp_path, "A_stop_low", "00_baseline", n=1294, expR=0.202,
+                  totR=250.5, aw=0.1098, big=61)
+        _write_tr(tmp_path, "A_stop_low", "trail_08", n=1298, expR=0.288,
+                  totR=358.4, aw=0.1015, big=52)
+        m2.report(cross=False)
+        line = next(ln for ln in capsys.readouterr().out.split("\n")
+                    if "trail_08" in ln and "累计R" in ln)
+        assert "✅ 通过" in line and "笔数" in line
+
+    def test_trade_count_delta_is_shown(self, tmp_path, monkeypatch, capsys):
+        """笔数变化必须显式打出来——它是累计R 判读的前提。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write_tr(tmp_path, "A_stop_low", "00_baseline", n=1000, expR=0.2,
+                  totR=200.0, aw=0.11, big=50)
+        _write_tr(tmp_path, "A_stop_low", "trail_12", n=1100, expR=0.25,
+                  totR=275.0, aw=0.11, big=55)
+        m2.report(cross=False)
+        line = next(ln for ln in capsys.readouterr().out.split("\n")
+                    if "trail_12" in ln and "累计R" in ln)
+        assert "+10.0%" in line
+
+
+class TestBGroupBaselineIsMiddleTier:
+    """B 组基准取中间档。拿已认定最差的 pct_12 当基准，✅/❌ 退化成「比最差的好」。"""
+
+    def test_baseline_is_pct_08(self):
+        assert m2.GROUPS["B_stop_pct"]["baseline"] == "pct_08"
+
+    def test_baseline_is_not_an_extreme(self):
+        pcts = sorted(float(e[e.index("--stop-pct") + 1])
+                      for n, e in m2.GROUPS["B_stop_pct"]["runs"].items()
+                      if "--stop-pct" in e and "amv" not in n)
+        base = m2.GROUPS["B_stop_pct"]["baseline"]
+        bp = float(m2.GROUPS["B_stop_pct"]["runs"][base][
+            m2.GROUPS["B_stop_pct"]["runs"][base].index("--stop-pct") + 1])
+        assert min(pcts) < bp < max(pcts), f"基准 {bp} 不该是极端档位（{pcts}）"
+
+    def test_report_says_relative(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write_tr(tmp_path, "B_stop_pct", "pct_08", n=342, expR=0.24, totR=83.0,
+                  aw=0.11, big=40)
+        _write_tr(tmp_path, "B_stop_pct", "pct_12", n=330, expR=0.17, totR=57.2,
+                  aw=0.12, big=38)
+        m2.report(cross=False)
+        out = capsys.readouterr().out
+        assert "参数扫描" in out and "相对中间档" in out
+
+
+class TestMissingSchemesSurfaced:
+    """缺失方案必须在报表里点名——否则 [FAIL] 滚屏之后，报表只是少一行。"""
+
+    def test_lists_absent_schemes(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write(tmp_path, "A_stop_low", "00_baseline")
+        m2.report(cross=False)
+        out = capsys.readouterr().out
+        assert "缺" in out and "个方案的结果文件" in out
+        assert "A_stop_low/trail_08" in out
+        assert "C_portfolio/pf_c5_p20" in out
+        assert "A_stop_low/00_baseline" not in out.split("缺")[-1]
+
+    def test_silent_when_complete(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        for g, meta in m2.GROUPS.items():
+            for n in meta["runs"]:
+                _write(tmp_path, g, n,
+                       pf={"total_return": 0.1, "cagr": 0.05, "max_drawdown": 0.1,
+                           "n_taken": 100, "n_skipped": 100})
+        m2.report(cross=False)
+        assert "个方案的结果文件" not in capsys.readouterr().out
+
+
+class TestPortfolioRankedByReturnOverDD:
+    """组合表按**收益/回撤**排序。按总收益排会系统性偏袒高敞口方案。"""
+
+    def test_ret_over_dd_prefers_recorded_value(self):
+        assert m2._ret_over_dd({"return_over_maxdd": 1.61}) == pytest.approx(1.61)
+
+    def test_ret_over_dd_computed_when_absent(self):
+        assert m2._ret_over_dd({"total_return": 0.2,
+                                "max_drawdown": 0.1}) == pytest.approx(2.0)
+
+    def test_ret_over_dd_none_on_zero_dd(self):
+        assert m2._ret_over_dd({"total_return": 0.2, "max_drawdown": 0}) is None
+        assert m2._ret_over_dd({}) is None
+
+    def test_high_exposure_not_ranked_first(self, tmp_path, monkeypatch, capsys):
+        """高敞口：总收益更高但回撤更大 ⇒ 不该排第一。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write(tmp_path, "C_portfolio", "pf_c5_p20",       # 满仓：收益高、回撤更高
+               pf={"total_return": 0.40, "cagr": 0.20, "max_drawdown": 0.47,
+                   "n_taken": 299, "n_skipped": 1046})
+        _write(tmp_path, "C_portfolio", "pf_c5_p05",       # 低敞口：收益低但回撤小
+               pf={"total_return": 0.18, "cagr": 0.11, "max_drawdown": 0.09,
+                   "n_taken": 150, "n_skipped": 1195})
+        m2.report(cross=False)
+        seg = capsys.readouterr().out.split("【C_portfolio】")[1]
+        assert seg.index("pf_c5_p05") < seg.index("pf_c5_p20")
+        assert "收益/回撤" in seg
+
+    def test_topn_excluded_from_cross_table(self, tmp_path, monkeypatch, capsys):
+        """--top-n 的逐笔是未去重全候选，不能与其它方案并列比收益率。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write(tmp_path, "A_stop_low", "00_baseline", exp=0.004)
+        got = m2._collect(cross=False)
+        assert got["A_stop_low"][0]["topn"] is False
+
+
+class TestReuseTradesForPortfolio:
+    """C 组 8 个方案只做 1 次真回测——回测参数与 B 组 pct_12/pct_12_amv 完全相同，
+    差异全在资金曲线层；只有 `--top-n`（collect_all，逐笔口径不同）必须自己跑。"""
+
+    def test_reuse_map_points_at_same_backtest_params(self):
+        pf_layer = {"--max-concurrent", "--max-pos", "--risk-pct", "--top-n",
+                    "--portfolio"}
+        for g, meta in m2.GROUPS.items():
+            for dst, ref in (meta.get("reuse") or {}).items():
+                sg, sn = ref.split("/", 1) if "/" in ref else (g, ref)
+                # 必须含 common：C 组的 --stop-pct 12 写在 common 里
+                a = m2._flag_pairs(list(meta["common"]) + list(meta["runs"][dst]))
+                b = m2._flag_pairs(list(m2.GROUPS[sg]["common"])
+                                   + list(m2.GROUPS[sg]["runs"][sn]))
+                changed = {f for f in set(a) | set(b) if a.get(f, "\0") != b.get(f, "\0")}
+                assert changed <= pf_layer, f"{g}/{dst} 与 {ref} 差异不止资金曲线层: {changed}"
+                # collect_all 由 --top-n 决定，两边必须一致，否则逐笔口径不同
+                assert ("--top-n" in a) == ("--top-n" in b), f"{g}/{dst} vs {ref} top-n 不一致"
+
+    def test_reuse_sources_are_not_themselves_derived(self):
+        for g, meta in m2.GROUPS.items():
+            reuse = meta.get("reuse") or {}
+            for ref in reuse.values():
+                sg, sn = ref.split("/", 1) if "/" in ref else (g, ref)
+                assert sn not in (m2.GROUPS[sg].get("reuse") or {}), \
+                    f"{ref} 既是源又是派生，会形成依赖链"
+
+    def test_only_one_real_backtest_left_in_c_group(self):
+        """C 组 8 个方案里只该剩 1 个真回测（collect_all 那条）。"""
+        meta = m2.GROUPS["C_portfolio"]
+        real = [n for n in meta["runs"] if n not in meta["reuse"]]
+        assert real == ["pf_top2_c2_amv"], real
+        assert m2._is_heavy("C_portfolio", "pf_top2_c2_amv") is True
+
+    def test_from_trades_injected_when_source_exists(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        src = tmp_path / "B_stop_pct__pct_12__s1000.json"
+        src.write_text("{}", encoding="utf-8")
+        seen = {}
+
+        def fake_run(cmd, **kw):
+            seen["cmd"] = cmd
+            (tmp_path / "C_portfolio__pf_c2_p20__s1000.json").write_text(
+                "{}", encoding="utf-8")
+            return type("R", (), {"returncode": 0, "stdout": ""})()
+
+        monkeypatch.setattr(m2.subprocess, "run", fake_run)
+        m2._run("C_portfolio", "pf_c2_p20", ["--max-concurrent", "2"], 1000,
+                False, False)
+        assert "--from-trades" in seen["cmd"]
+        assert str(src) in seen["cmd"], "跨组复用要指向 B 组的结果文件"
+
+    def test_full_backtest_when_source_missing(self, tmp_path, monkeypatch):
+        """源不存在（--only 单跑派生方案）⇒ 全量回测。全量永远正确，只是慢。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        seen = {}
+
+        def fake_run(cmd, **kw):
+            seen["cmd"] = cmd
+            (tmp_path / "C_portfolio__pf_c2_p20__s1000.json").write_text(
+                "{}", encoding="utf-8")
+            return type("R", (), {"returncode": 0, "stdout": ""})()
+
+        monkeypatch.setattr(m2.subprocess, "run", fake_run)
+        _, _, log = m2._run("C_portfolio", "pf_c2_p20", ["--max-concurrent", "2"],
+                            1000, False, False, True)   # capture=True：日志进返回值
+        assert "--from-trades" not in seen["cmd"]
+        assert "改为全量回测" in log
+
+    def test_retry_full_backtest_when_reuse_rejected(self, tmp_path, monkeypatch):
+        """复用被拒（口径核对不过）⇒ 自动退回全量回测。
+
+        全量回测永远正确，只是慢。不能让「省时间」变成「少一个方案」——
+        少一行的报表正是这套脚本一直在防的失效模式。
+        """
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        (tmp_path / "B_stop_pct__pct_12__s1000.json").write_text("{}", encoding="utf-8")
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            if "--from-trades" in cmd:                       # 第一次：复用失败
+                return type("R", (), {"returncode": 2, "stdout": "口径不一致"})()
+            (tmp_path / "C_portfolio__pf_c2_p20__s1000.json").write_text(
+                "{}", encoding="utf-8")
+            return type("R", (), {"returncode": 0, "stdout": ""})()
+
+        monkeypatch.setattr(m2.subprocess, "run", fake_run)
+        _, path, log = m2._run("C_portfolio", "pf_c2_p20",
+                               ["--max-concurrent", "2", "--max-pos", "20"],
+                               1000, False, False, True)
+        assert len(calls) == 2, "应重试一次"
+        assert "--from-trades" in calls[0] and "--from-trades" not in calls[1]
+        # 退回后 --max-concurrent 等原参数必须还在
+        assert "--max-concurrent" in calls[1] and "2" in calls[1]
+        assert path is not None and "退回全量回测" in log
+
+    def test_sources_run_before_derived(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        order: list[str] = []
+        monkeypatch.setattr(m2, "_run",
+                            lambda g, n, e, s, c, f, cap=False, ds="tdx":
+                            (order.append(n), (f"{g}/{n}", tmp_path / "x", ""))[1])
+        todo = [("C_portfolio", "pf_c2_p20", []),      # 派生（复用 B 组）
+                ("B_stop_pct", "pct_12", [])]          # 源（故意排在后面）
+        m2._run_all(todo, 1000, False, False, 1)
+        assert order.index("pct_12") < order.index("pf_c2_p20")
+
+    def test_heavy_runs_isolated_from_light(self, tmp_path, monkeypatch, capsys):
+        """collect_all 方案单独串行——它的逐笔条数高一个量级，并行会撞 OOM。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        order: list[str] = []
+        monkeypatch.setattr(m2, "_run",
+                            lambda g, n, e, s, c, f, cap=False, ds="tdx":
+                            (order.append(n), (f"{g}/{n}", tmp_path / "x", ""))[1])
+        todo = [("C_portfolio", "pf_top2_c2_amv", []),   # 重活
+                ("A_stop_low", "be_03", [])]             # 轻活
+        m2._run_all(todo, 1000, False, False, 4)
+        assert order.index("be_03") < order.index("pf_top2_c2_amv")
+        assert "单独串行" in capsys.readouterr().out
+
+
+class TestFailureRecap:
+    def test_failed_runs_listed_at_end(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        monkeypatch.setattr(m2, "_run",
+                            lambda g, n, e, s, c, f, cap=False, ds="tdx":
+                            (f"{g}/{n}", None, "[FAIL] boom"))
+        m2._run_all([("A_stop_low", "be_03", [])], 1000, False, False, 1)
+        out = capsys.readouterr().out
+        assert "1 个方案失败" in out and "A_stop_low/be_03" in out
+        assert "OOM" in out, "失败汇总要提示 OOM 的排查方向（退出码 137/-9）"
+
+    def test_serial_prints_each_line_once(self, tmp_path, monkeypatch, capsys):
+        """串行实时打印、并行整块返回——两种模式都不能重复也不能丢行。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+
+        def fake_run(cmd, **kw):
+            (tmp_path / "A_stop_low__be_03__s1000.json").write_text("{}", encoding="utf-8")
+            return type("R", (), {"returncode": 0, "stdout": ""})()
+
+        monkeypatch.setattr(m2.subprocess, "run", fake_run)
+        m2._run_all([("A_stop_low", "be_03", ["--breakeven", "0.03"])],
+                    1000, False, False, 1)
+        out = capsys.readouterr().out
+        assert out.count("[RUN ] A_stop_low/be_03") == 1
+        assert out.count("[DONE] A_stop_low/be_03") == 1
+
+    def test_parallel_prints_each_line_once(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        monkeypatch.setattr(m2, "_avail_mem_mb", lambda: 64_000.0)
+
+        def fake_run(cmd, **kw):
+            out = next(x for i, x in enumerate(cmd) if cmd[i - 1] == "--out")
+            pathlib.Path(out).write_text("{}", encoding="utf-8")
+            return type("R", (), {"returncode": 0, "stdout": "子进程输出"})()
+
+        monkeypatch.setattr(m2.subprocess, "run", fake_run)
+        m2._run_all([("A_stop_low", "be_03", ["--breakeven", "0.03"]),
+                     ("A_stop_low", "be_05", ["--breakeven", "0.05"])],
+                    1000, False, False, 2)
+        out = capsys.readouterr().out
+        assert out.count("[RUN ] A_stop_low/be_03") == 1
+        assert out.count("[DONE] A_stop_low/be_03") == 1
+        assert out.count("子进程输出") == 2, "并行时子进程输出必须收集后打印，不能丢"
+
+
+class TestReportUsesTheBatchJustRun:
+    """实跑时报表必须汇总**刚跑的那批**。
+
+    原先 `report(cross, a.sample if a.report_only else None)` ⇒ 实跑传 None ⇒
+    自动取「最大样本量」批次：跑 `--sample 300` 试跑，报表却显示 s1000 的旧结果，
+    而它看起来跟新结果一模一样。
+    """
+
+    def test_run_reports_its_own_sample(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        monkeypatch.setattr(m2, "_run_all", lambda *a, **k: None)
+        _write(tmp_path, "A_stop_low", "00_baseline", fp="s300", n=409)
+        _write(tmp_path, "A_stop_low", "00_baseline", fp="s2000", n=2600)
+        monkeypatch.setattr(sys, "argv", ["m2", "--sample", "300"])
+        m2.main()
+        out = capsys.readouterr().out
+        assert "样本 300 只" in out, "应汇总刚跑的 s300，而非最大的 s2000"
+
+    def test_report_only_without_sample_takes_largest(self, tmp_path, monkeypatch,
+                                                     capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write(tmp_path, "A_stop_low", "00_baseline", fp="s300", n=409)
+        _write(tmp_path, "A_stop_low", "00_baseline", fp="s2000", n=2600)
+        monkeypatch.setattr(sys, "argv", ["m2", "--report-only"])
+        m2.main()
+        assert "样本 2000 只" in capsys.readouterr().out
+
+    def test_default_sample_constant(self):
+        assert m2.DEFAULT_SAMPLE == 1000
+
+
+class TestMemoryGuards:
+    """OOM Kill 是这套回测的老问题（B1_BACKTEST_FINDINGS「全市场 OOM」），
+    而 `--jobs N` 会把内存**乘 N** ⇒ 并行必须有闸。
+    被 kill 掉的方案在报表里只是少一行，比跑得慢糟得多。"""
+
+    def test_cap_jobs_reduces_on_low_memory(self, monkeypatch, capsys):
+        monkeypatch.setattr(m2, "_avail_mem_mb", lambda: 3_000.0)
+        monkeypatch.setattr(m2, "MEM_PER_JOB_MB", 1200)
+        assert m2._cap_jobs(8, 20) == 2          # 3000*0.8/1200 = 2
+        assert "降到 2" in capsys.readouterr().out
+
+    def test_cap_jobs_keeps_when_memory_ample(self, monkeypatch):
+        monkeypatch.setattr(m2, "_avail_mem_mb", lambda: 64_000.0)
+        assert m2._cap_jobs(6, 20) == 6
+
+    def test_cap_jobs_never_below_one(self, monkeypatch):
+        monkeypatch.setattr(m2, "_avail_mem_mb", lambda: 100.0)
+        assert m2._cap_jobs(8, 20) == 1
+
+    def test_cap_jobs_bounded_by_task_count(self, monkeypatch):
+        monkeypatch.setattr(m2, "_avail_mem_mb", lambda: 64_000.0)
+        assert m2._cap_jobs(8, 3) == 3
+
+    def test_cap_jobs_warns_when_memory_unknown(self, monkeypatch, capsys):
+        monkeypatch.setattr(m2, "_avail_mem_mb", lambda: None)
+        assert m2._cap_jobs(4, 20) == 4
+        assert "读不到可用内存" in capsys.readouterr().out
+
+    def test_serial_skips_memory_check(self, monkeypatch):
+        monkeypatch.setattr(m2, "_avail_mem_mb",
+                            lambda: pytest.fail("串行不该去探内存"))
+        assert m2._cap_jobs(1, 20) == 1
+
+    def test_avail_mem_returns_positive_or_none(self):
+        v = m2._avail_mem_mb()
+        assert v is None or v > 0
+
+    def test_is_heavy_only_for_collect_all(self):
+        """--top-n 走 collect_all：`i += step` 而非跳到出场后 ⇒ 逐笔高一个量级。"""
+        assert m2._is_heavy("C_portfolio", "pf_top2_c2_amv") is True
+        assert m2._is_heavy("C_portfolio", "pf_c5_p20") is False
+        assert m2._is_heavy("A_stop_low", "trail_08") is False
+        assert m2._is_heavy("不存在的组", "x") is False
+
+
+class TestDataSourceIsolation:
+    """tdx（本地 vipdoc，只有当前挂牌股）与 qlib（S_DATA，含退市股、已前复权）
+    是**两个不同的宇宙**，笔数与收益都不可比 ⇒ 必须进文件名指纹，
+    否则重演「混批」事故（见 TestSampleFingerprint）。"""
+
+    def test_fingerprint_includes_data_source(self):
+        assert m2._fingerprint(1000, False) == "s1000"                 # tdx 不加后缀
+        assert m2._fingerprint(1000, False, "tdx") == "s1000"
+        assert m2._fingerprint(1000, False, "qlib") == "s1000_qlib"
+        assert m2._fingerprint(1000, True, "qlib") == "s1000_qlib_cw"
+        assert m2._fingerprint(1000, False, "csv") == "s1000_csv"
+
+    def test_collect_separates_data_sources(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write(tmp_path, "A_stop_low", "00_baseline", fp="s1000", n=1294)
+        _write(tmp_path, "A_stop_low", "trail_08", fp="s1000_qlib", n=1600)
+        assert [r["name"] for r in m2._collect(cross=False)["A_stop_low"]] == ["00_baseline"]
+        assert [r["name"] for r in m2._collect(cross=False, data_source="qlib")
+                ["A_stop_low"]] == ["trail_08"]
+
+    def test_qlib_cross_window_separate(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write(tmp_path, "A_stop_low", "00_baseline", fp="s1000_qlib", n=1600)
+        _write(tmp_path, "A_stop_low", "00_baseline", fp="s1000_qlib_cw", n=900)
+        assert len(m2._collect(cross=False, data_source="qlib")["A_stop_low"]) == 1
+        assert len(m2._collect(cross=True, data_source="qlib")["A_stop_low"]) == 1
+
+    def test_base_args_tdx_uses_local_vipdoc(self):
+        a = m2._base_args(1000, False, "tdx")
+        assert "--universe-local" in a and "--data-source" not in a
+
+    def test_base_args_qlib_uses_sdata_universe(self):
+        """qlib 必须配 --universe-sdata：那才是含退市股的 point-in-time 宇宙，
+        用 --universe-local 会退回通达信目录 ⇒ 幸存者偏差照旧。"""
+        a = m2._base_args(1000, False, "qlib")
+        assert "--universe-sdata" in a and "--universe-local" not in a
+        assert a[a.index("--data-source") + 1] == "qlib"
+
+    def test_report_header_states_data_source(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write(tmp_path, "A_stop_low", "00_baseline", fp="s1000_qlib", n=1600)
+        m2.report(cross=False, data_source="qlib")
+        out = capsys.readouterr().out
+        assert "数据源 qlib" in out and "含退市股" in out

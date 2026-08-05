@@ -207,3 +207,190 @@ def test_sweep_threshold_cutoffs():
     assert by[70]["n"] == 1 and by[70]["win_rate"] == 1.0   # 仅 s_star=80
     assert by[60]["n"] == 2                                  # 80 与 66
     assert "text" in s
+
+
+# ---------------------------------------------------------------------------
+# trades_signature / --from-trades
+#
+# 存在理由：M2 扫描 C 组 8 个方案的**回测参数完全相同**，只有资金曲线参数不同
+# （max_concurrent / max_pos / risk_pct / top_n）。资金曲线模拟毫秒级、回测分钟级 ⇒
+# 复用逐笔可省 5 次全量回测（约整轮扫描的 20%）。
+# 但「拿另一套止损参数的 trades 去跑组合」出来的曲线**看不出任何异常** ⇒
+# 复用必须先核对口径，不一致就非零退出，绝不静默算。
+# ---------------------------------------------------------------------------
+import json as _json  # noqa: E402
+import types as _types  # noqa: E402
+
+
+def _args(**kw):
+    base = dict(data_source="tdx", scorer="b1_dual", weekly=False, step=1,
+                cost_bps=25.0, entry_filter="j_low", amv_long_only=False,
+                bbi_consec=2, time_stop=0, stop_mode="pct", stop_pct=12.0,
+                stop_trigger="close", stop_tick_buffer=0, scale_out=0.5,
+                breakeven=0.0, trail=0.0, cost_zone_bars=0, cost_zone_pct=3.0,
+                max_signals_per_code=0, sector_filter=False, start="", end="",
+                count=500, top_n=0, portfolio=True, risk_pct=1.0,
+                max_concurrent=5, max_pos=20.0, from_trades="", out="",
+                summary_only=False)
+    base.update(kw)
+    return _types.SimpleNamespace(**base)
+
+
+CODES = ["600000", "000001", "300750"]
+
+
+class TestTradesSignature:
+    def test_portfolio_layer_params_excluded(self):
+        """组合层参数只改资金曲线、不改 trades ⇒ 不该进指纹，否则复用永远被拒。"""
+        a = bt.trades_signature(_args(risk_pct=1.0, max_concurrent=5, max_pos=20.0), CODES)
+        b = bt.trades_signature(_args(risk_pct=2.0, max_concurrent=2, max_pos=5.0), CODES)
+        assert a == b
+
+    def test_stop_params_change_signature(self):
+        """被扫描的止损参数必须进指纹——它们直接改逐笔结果。"""
+        base = bt.trades_signature(_args(), CODES)
+        for kw in ({"stop_pct": 8.0}, {"trail": 0.08}, {"breakeven": 0.05},
+                   {"stop_trigger": "intraday"}, {"stop_tick_buffer": 3},
+                   {"cost_zone_bars": 3}, {"scale_out": 0.0},
+                   {"amv_long_only": True}, {"entry_filter": "none"},
+                   {"count": 1500}, {"start": "2022-01-01"}):
+            assert bt.trades_signature(_args(**kw), CODES) != base, f"{kw} 未进指纹"
+
+    def test_collect_all_in_signature(self):
+        """--top-n>0 走 collect_all ⇒ 逐笔是未去重全候选，与去重后完全不同口径。"""
+        assert bt.trades_signature(_args(top_n=0), CODES)["collect_all"] is False
+        assert bt.trades_signature(_args(top_n=3), CODES)["collect_all"] is True
+        # 但 top_n 的**取值**不影响 trades（2 与 3 都是全候选）
+        assert (bt.trades_signature(_args(top_n=2), CODES)
+                == bt.trades_signature(_args(top_n=3), CODES))
+
+    def test_universe_in_signature(self):
+        a = bt.trades_signature(_args(), CODES)
+        assert a["n_codes"] == 3
+        assert a != bt.trades_signature(_args(), CODES + ["600519"])
+
+
+def _src_file(tmp_path, sig, trades, name="src.json"):
+    p = tmp_path / name
+    p.write_text(_json.dumps({"trades_signature": sig, "trades": trades}),
+                 encoding="utf-8")
+    return p
+
+
+_TRADES = [{"entry_date": "2024-01-02", "exit_date": "2024-01-10", "ret": 0.12,
+            "risk_frac": 0.05, "r_multiple": 2.4, "score": 3.0, "reason": "bbi",
+            "holding": 6, "code": "600000"},
+           {"entry_date": "2024-02-01", "exit_date": "2024-02-20", "ret": -0.05,
+            "risk_frac": 0.05, "r_multiple": -1.0, "score": 2.0, "reason": "stop",
+            "holding": 13, "code": "000001"}]
+
+
+class TestPortfolioFromTrades:
+    def test_reuses_when_signature_matches(self, tmp_path, capsys):
+        a = _args(out=str(tmp_path / "o.json"))
+        src = _src_file(tmp_path, bt.trades_signature(a, CODES), _TRADES)
+        a.from_trades = str(src)
+        assert bt._portfolio_from_trades(a, CODES) == 0
+        d = _json.loads((tmp_path / "o.json").read_text(encoding="utf-8"))
+        assert d["portfolio"]["n_taken"] == 2
+        assert d["trades_reused_from"] == "src.json"
+        assert "复用" in capsys.readouterr().out
+
+    def test_rejects_mismatched_signature(self, tmp_path, capsys):
+        """止损参数不同的 trades 绝不能复用——曲线看不出异常。"""
+        src = _src_file(tmp_path, bt.trades_signature(_args(stop_pct=8.0), CODES),
+                        _TRADES)
+        a = _args(out=str(tmp_path / "o.json"), from_trades=str(src))
+        assert bt._portfolio_from_trades(a, CODES) != 0
+        assert not (tmp_path / "o.json").exists(), "口径不一致不得落盘"
+        err = capsys.readouterr().err
+        assert "口径" in err and "stop_pct" in err
+
+    def test_rejects_legacy_file_without_signature(self, tmp_path, capsys):
+        p = tmp_path / "old.json"
+        p.write_text(_json.dumps({"trades": _TRADES}), encoding="utf-8")
+        a = _args(from_trades=str(p))
+        assert bt._portfolio_from_trades(a, CODES) != 0
+        assert "trades_signature" in capsys.readouterr().err
+
+    def test_rejects_summary_only_file(self, tmp_path, capsys):
+        """--summary-only 落的盘没有 trades，不能复用。"""
+        a = _args()
+        p = _src_file(tmp_path, bt.trades_signature(a, CODES), [])
+        a.from_trades = str(p)
+        assert bt._portfolio_from_trades(a, CODES) != 0
+        assert "没有 trades" in capsys.readouterr().err
+
+    def test_rejects_missing_file(self, tmp_path, capsys):
+        a = _args(from_trades=str(tmp_path / "nope.json"))
+        assert bt._portfolio_from_trades(a, CODES) != 0
+        assert "不存在" in capsys.readouterr().err
+
+    def test_requires_portfolio_flag(self, tmp_path, capsys):
+        a = _args(portfolio=False, top_n=0)
+        src = _src_file(tmp_path, bt.trades_signature(a, CODES), _TRADES)
+        a.from_trades = str(src)
+        assert bt._portfolio_from_trades(a, CODES) != 0
+        assert "--portfolio" in capsys.readouterr().err
+
+    def test_topn_path_uses_topn_sim(self, tmp_path):
+        a = _args(top_n=2, out=str(tmp_path / "o.json"))
+        src = _src_file(tmp_path, bt.trades_signature(a, CODES), _TRADES)
+        a.from_trades = str(src)
+        assert bt._portfolio_from_trades(a, CODES) == 0
+        d = _json.loads((tmp_path / "o.json").read_text(encoding="utf-8"))
+        assert d["portfolio"] and d["top_n"] == 2
+
+    def test_same_trades_give_same_curve_as_full_run(self, tmp_path):
+        """复用路径与直接调用 simulate_portfolio 必须给出完全相同的曲线。"""
+        a = _args(out=str(tmp_path / "o.json"))
+        src = _src_file(tmp_path, bt.trades_signature(a, CODES), _TRADES)
+        a.from_trades = str(src)
+        bt._portfolio_from_trades(a, CODES)
+        got = _json.loads((tmp_path / "o.json").read_text(encoding="utf-8"))["portfolio"]
+        want = bt.simulate_portfolio(_TRADES, risk_pct=0.01, max_concurrent=5,
+                                     max_pos_frac=0.20)
+        assert got["total_return"] == want["total_return"]
+        assert got["max_drawdown"] == want["max_drawdown"]
+
+
+class TestMemoryHygiene:
+    """OOM Kill 是这套回测的老问题（B1_BACKTEST_FINDINGS「全市场 OOM」）。"""
+
+    def test_peak_rss_available(self):
+        v = bt.peak_rss_mb()
+        assert v is None or v > 0
+
+    def test_write_json_roundtrips_both_modes(self, tmp_path):
+        payload = {"a": 1, "trades": [{"ret": 0.1}] * 10}
+        for big in (False, True):
+            p = tmp_path / f"o_{big}.json"
+            bt.write_json(p, payload, big=big)
+            assert _json.loads(p.read_text(encoding="utf-8")) == payload
+
+    def test_write_json_big_mode_has_no_indent(self, tmp_path):
+        """indent=2 让字符串再大 1.36 倍（实测）——大 payload 不加缩进。"""
+        payload = {"trades": [{"ret": 0.1, "code": "600000"}] * 200}
+        small, big = tmp_path / "s.json", tmp_path / "b.json"
+        bt.write_json(small, payload, big=False)
+        bt.write_json(big, payload, big=True)
+        assert big.stat().st_size < small.stat().st_size
+        assert "\n" not in big.read_text(encoding="utf-8")
+
+    def test_write_json_creates_parent_dir(self, tmp_path):
+        p = tmp_path / "sub" / "dir" / "o.json"
+        bt.write_json(p, {"a": 1})
+        assert p.is_file()
+
+    def test_reused_file_does_not_duplicate_trades(self, tmp_path):
+        """复用路径**不重写 trades**：与源文件逐字相同，写两份等于同一份数据占三份内存。"""
+        a = _args(out=str(tmp_path / "o.json"))
+        src = _src_file(tmp_path, bt.trades_signature(a, CODES), _TRADES)
+        a.from_trades = str(src)
+        assert bt._portfolio_from_trades(a, CODES) == 0
+        d = _json.loads((tmp_path / "o.json").read_text(encoding="utf-8"))
+        assert "trades" not in d, "逐笔不该重复落盘"
+        assert d["n_trades"] == len(_TRADES), "但要记下笔数，否则报表看不出规模"
+        assert d["trades_reused_from"] == "src.json", "必须指明逐笔在哪"
+        # 摘要仍然完整，报表不受影响
+        assert d["trade_summary"]["n"] == len(_TRADES)
