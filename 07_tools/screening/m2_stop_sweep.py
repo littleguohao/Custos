@@ -54,6 +54,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import re
 import statistics
 import subprocess
 import sys
@@ -138,10 +139,20 @@ def _base_args(sample: int, cross: bool) -> list[str]:
     return a
 
 
+def _fingerprint(sample: int, cross: bool) -> str:
+    """结果文件的参数指纹。
+
+    ⚠️ **必须含样本量**：第一版文件名只有 `{组}__{方案}.json`，owner 先跑 300 样本、
+    再跑 1000 样本时，300 的旧文件被 `[SKIP]` 直接复用 ⇒ 汇总表里 ~400 笔的方案与
+    ~1300 笔的基准混在一起比，A 组一半方案的判定全部无效。
+    """
+    return f"s{sample}" + ("_cw" if cross else "")
+
+
 def _run(group: str, name: str, extra: list[str], sample: int, cross: bool,
          force: bool) -> Optional[pathlib.Path]:
     OUTDIR.mkdir(parents=True, exist_ok=True)
-    out = OUTDIR / f"{'cw_' if cross else ''}{group}__{name}.json"
+    out = OUTDIR / f"{group}__{name}__{_fingerprint(sample, cross)}.json"
     if out.exists() and not force:
         print(f"[SKIP] {out.name}")
         return out
@@ -209,13 +220,39 @@ def _breakeven_wr(payoff: Optional[float]) -> Optional[float]:
     return 1.0 / (1.0 + payoff)
 
 
-def _collect(cross: bool) -> dict[str, list[dict]]:
-    pref = "cw_" if cross else ""
-    out: dict[str, list[dict]] = {g: [] for g in GROUPS}
-    for p in sorted(OUTDIR.glob(f"{pref}*__*.json")):
-        if not cross and p.name.startswith("cw_"):
+def _collect(cross: bool, sample: Optional[int] = None) -> dict[str, list[dict]]:
+    """按指纹收集结果。``sample=None`` 时自动取**最大样本量**那一批。
+
+    只汇总同一指纹的文件——混合样本量比较是无意义的（见 `_fingerprint` 注释）。
+    """
+    suffix = "_cw" if cross else ""
+    avail: dict[int, int] = {}
+    for p in OUTDIR.glob("*__*__s*.json"):
+        m = re.search(r"__s(\d+)(_cw)?\.json$", p.name)
+        if not m:
             continue
-        stem = p.stem[3:] if cross else p.stem
+        if bool(m.group(2)) != cross:
+            continue
+        avail[int(m.group(1))] = avail.get(int(m.group(1)), 0) + 1
+    if not avail:
+        # 兼容第一版无指纹的文件名，但明确告警
+        legacy = list(OUTDIR.glob("*__*.json"))
+        if legacy:
+            print(f"[WARN] 发现 {len(legacy)} 个**无样本量指纹**的旧结果文件"
+                  f"（第一版命名）。它们可能来自不同 --sample，混在一起比较无效。"
+                  f"建议删除 06_logs/m2_sweep 后重跑。")
+        return {g: [] for g in GROUPS}
+    if sample is None:
+        sample = max(avail)
+        if len(avail) > 1:
+            print(f"[INFO] 检测到多个样本量 {sorted(avail)}，"
+                  f"只汇总最大的 s{sample}（{avail[sample]} 个方案）。"
+                  f"用 --sample 指定其它批次。")
+    want = f"__s{sample}{suffix}.json"
+
+    out: dict[str, list[dict]] = {g: [] for g in GROUPS}
+    for p in sorted(OUTDIR.glob(f"*{want}")):
+        stem = p.name[:-len(want)]
         if "__" not in stem:
             continue
         group, name = stem.split("__", 1)
@@ -231,8 +268,27 @@ def _collect(cross: bool) -> dict[str, list[dict]]:
             "avg_win": s.get("avg_win"), "avg_loss": s.get("avg_loss"),
             "hold": s.get("avg_holding"), "big": _big_wins(s.get("_trades") or []),
             "reasons": s.get("exit_reasons") or {}, "pf": s.get("_portfolio"),
+            "sample": sample,
         })
     return out
+
+
+def _warn_if_mixed(group: str, rows: list[dict]) -> None:
+    """笔数一致性检查——**最后一道防线**。
+
+    指纹已能防止跨样本量复用，但万一还是混了（手工拷文件、改了 universe 等），
+    笔数会明显分簇。择时方案（名字含 amv）本来就会大幅减少笔数，单独排除。
+    """
+    plain = [(r["name"], r["n"]) for r in rows if r["n"] and "amv" not in r["name"]]
+    if len(plain) < 2:
+        return
+    ns = [n for _, n in plain]
+    if max(ns) / max(min(ns), 1) > 1.5:
+        lo = [f"{n}({c})" for n, c in plain if c < max(ns) / 1.5]
+        print(f"\n⚠️ **【{group}】笔数不一致，判定可能无效**：最多 {max(ns)} / 最少 {min(ns)}。")
+        print(f"   偏少的方案：{'、'.join(lo)}")
+        print("   同一 entry_filter 下信号数只由样本股票数决定，不由止损参数决定 ⇒")
+        print("   这些结果很可能来自不同 --sample。删除 06_logs/m2_sweep 后重跑。")
 
 
 def _print_trade_group(group: str, rows: list[dict]) -> None:
@@ -337,16 +393,19 @@ def _print_portfolio(rows: list[dict]) -> None:
     print("     执行率低时「先到先得」等于抽签命中大赢家，用 --top-n 做横截面择优。")
 
 
-def report(cross: bool) -> None:
-    groups = _collect(cross)
+def report(cross: bool, sample: Optional[int] = None) -> None:
+    groups = _collect(cross, sample)
     if not any(groups.values()):
         print("没有结果文件，先跑扫描")
         return
+    n_sample = next((r["sample"] for rs in groups.values() for r in rs), None)
     print("\n" + "#" * 74)
-    print(f"# M2 机制扫描{'（2022-2024 跨窗复核）' if cross else ''}")
+    print(f"# M2 机制扫描  样本 {n_sample} 只"
+          f"{'  区间 2022-2024（跨窗复核）' if cross else ''}")
     print("#" * 74)
     for g in ("A_stop_low", "B_stop_pct"):
         if groups.get(g):
+            _warn_if_mixed(g, groups[g])
             _print_trade_group(g, groups[g])
     _print_cross_group(groups)
     _print_portfolio([r for r in groups.get("C_portfolio", []) if r.get("pf")])
@@ -377,7 +436,7 @@ def main() -> int:
               f"{'，区间 2022-2024' if a.cross_window else ''}")
         for g, n, e in todo:
             _run(g, n, e, a.sample, a.cross_window, a.force)
-    report(a.cross_window)
+    report(a.cross_window, a.sample if a.report_only else None)
     return 0
 
 

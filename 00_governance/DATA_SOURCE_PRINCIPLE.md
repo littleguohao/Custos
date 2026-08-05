@@ -87,6 +87,13 @@ TDX 服务器只提供沪深：
 
 ## 连接管理要求
 
+> ⚠️ **这条规范由 `tests/test_tdx_connection_hygiene.py` 自动检查，不是靠自觉。**
+> 起因：2026-08-04 我修了 `local_tdx_data._get_client()` 的「永不重连」并把它写进本文档，
+> **同一天**创建 `tdx_ext_quotes.py` 时又写了字面上一模一样的代码；再查一遍全仓，
+> 还发现第三处 `collect_holding_quotes.py`（14:45/17:00 采集持仓行情的必经之路）。
+> 结论：**写进文档不等于内化**——文档只记录了历史问题，没变成写新代码时的检查项。
+> 所以规范必须可执行。
+
 所有走 TDX 协议的调用**必须**经 `local_tdx_data._with_client_retry()`：
 
 - 连接有时效上限（`CLIENT_MAX_AGE_SEC = 600`），过期主动重建

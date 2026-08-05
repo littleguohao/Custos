@@ -85,11 +85,40 @@ def _get_reader():
     return _reader
 
 
-def _get_client():
+def _get_client(force_new: bool = False):
+    """TDX 协议客户端。**复用 local_tdx_data 的重连实现**（单一定义）。
+
+    原实现是「永不重连的进程级单例」——连接一断（TCP 空闲超时、服务器踢连接）之后
+    每次调用都失败，而本模块是 14:45 / 17:00 采集持仓行情的必经之路，
+    连接死了整条链的行情就没了。
+
+    这是同一反模式在仓库里的**第三处**（`local_tdx_data._get_client` 与
+    `market_timing/tdx_ext_quotes` 已分别修过）。见
+    `00_governance/DATA_SOURCE_PRINCIPLE.md`「连接管理要求」，
+    以及 `tests/test_tdx_connection_hygiene.py` 的自动检查。
+    """
     global _client
-    if _client is None:
-        _client = Quotes.factory(market="std", quiet=True)
-    return _client
+    try:
+        import local_tdx_data as _ltd
+        return _ltd._get_client(force_new=force_new)
+    except Exception:  # noqa: BLE001 —— 导不到就退回本地实现，但仍带重建能力
+        if force_new or _client is None:
+            _client = Quotes.factory(market="std", quiet=True)
+        return _client
+
+
+def _client_call(fn, *, tries: int = 2, what: str = "tdx"):
+    """调用 TDX 协议，连接失效时**重建连接**再试（用同一个死连接重试没有意义）。"""
+    last = None
+    for i in range(max(1, tries)):
+        try:
+            return fn(_get_client(force_new=(i > 0)))
+        except Exception as e:  # noqa: BLE001
+            last = e
+            if i + 1 < tries:
+                print(f"[WARN] {what} 第 {i + 1} 次失败（{type(e).__name__}: {e}），"
+                      f"重建连接重试", file=sys.stderr)
+    raise RuntimeError(f"{what} 连续 {tries} 次失败: {last}")
 
 
 def get_market(code: str) -> int:
@@ -158,7 +187,8 @@ def _tq_snapshot_quote(code, name, mkt, target):
 
 def _online_bars_quote(code, name, mkt):
     """Fetch latest bar from online API."""
-    df = _get_client().bars(symbol=code, frequency=9, offset=2)
+    df = _client_call(lambda c: c.bars(symbol=code, frequency=9, offset=2),
+                      what=f"bars({code})")
     if df is None or len(df) == 0:
         return None
     last = df.iloc[-1]
@@ -337,7 +367,10 @@ def _collect_indices(session):
         # mootdx 在线 index()
         if idx is None:
             try:
-                df = _get_client().index(frequency=9, market=mkt, symbol=code, start=0, offset=2)
+                df = _client_call(
+                    lambda c: c.index(frequency=9, market=mkt, symbol=code,
+                                      start=0, offset=2),
+                    what=f"index({code})")
                 if df is not None and len(df) >= 1:
                     last = df.iloc[-1]
                     prev = df.iloc[-2] if len(df) > 1 else None
@@ -413,7 +446,10 @@ def _collect_breadth():
             print(f"[WARN] {e}", file=sys.stderr)
         # Online fallback
         try:
-            df = _get_client().index(frequency=9, market=MARKET_SH, symbol=code, start=0, offset=2)
+            df = _client_call(
+                lambda c: c.index(frequency=9, market=MARKET_SH, symbol=code,
+                                  start=0, offset=2),
+                what=f"index({code})")
             if df is not None and len(df) >= 1:
                 last = df.iloc[-1]
                 prev = df.iloc[-2] if len(df) > 1 else None

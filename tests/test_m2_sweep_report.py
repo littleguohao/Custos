@@ -18,7 +18,10 @@ import pytest
 from screening import m2_stop_sweep as m2
 
 
-def _write(tmp, group, name, **kw):
+def _write(tmp, group, name, *, fp="s1000", **kw):
+    """写一个结果文件。**文件名必须含样本量指纹**——见 m2._fingerprint 的注释：
+    第一版没有指纹，owner 先跑 300 再跑 1000 时旧文件被 SKIP 复用，
+    汇总表把 ~400 笔与 ~1300 笔混在一起比。"""
     n = kw.pop("n", 1000)
     big = kw.pop("big", 20)
     pf = kw.pop("pf", None)
@@ -29,7 +32,7 @@ def _write(tmp, group, name, **kw):
          "exit_reasons": {}, "trades": [{"ret": 0.3}] * big + [{"ret": 0.01}] * (n - big)}
     if pf:
         o["portfolio"] = pf
-    (tmp / f"{group}__{name}.json").write_text(json.dumps(o), encoding="utf-8")
+    (tmp / f"{group}__{name}__{fp}.json").write_text(json.dumps(o), encoding="utf-8")
 
 
 class TestGroupIsolation:
@@ -193,7 +196,7 @@ class TestLoadKeyName:
 
     def test_reads_trade_summary_key(self, tmp_path, monkeypatch):
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        (tmp_path / "A_stop_low__x.json").write_text(json.dumps({
+        (tmp_path / "A_stop_low__x__s1000.json").write_text(json.dumps({
             "trade_summary": {"n": 410, "win_rate": 0.363, "expectancy": 0.006,
                               "expectancy_R": 0.769, "total_R": 304.0,
                               "payoff_ratio": 3.2, "avg_win": 0.1212,
@@ -208,7 +211,7 @@ class TestLoadKeyName:
     def test_portfolio_at_top_level(self, tmp_path, monkeypatch):
         """组合级结果的 portfolio 在顶层，与 trade_summary 平级。"""
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        (tmp_path / "C_portfolio__p.json").write_text(json.dumps({
+        (tmp_path / "C_portfolio__p__s1000.json").write_text(json.dumps({
             "trade_summary": {"n": 342, "expectancy": 0.01, "expectancy_R": 0.2},
             "portfolio": {"total_return": 0.171, "cagr": 0.108,
                           "max_drawdown": 0.029, "n_taken": 150,
@@ -219,7 +222,7 @@ class TestLoadKeyName:
     def test_unknown_key_falls_back(self, tmp_path, monkeypatch, capsys):
         """键名再改也要能活——扫一层子字典兜底。"""
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        (tmp_path / "A_stop_low__y.json").write_text(json.dumps({
+        (tmp_path / "A_stop_low__y__s1000.json").write_text(json.dumps({
             "some_new_name": {"n": 100, "expectancy": 0.005, "expectancy_R": 0.5,
                               "total_R": 50.0, "avg_win": 0.1}}), encoding="utf-8")
         got = m2._collect(cross=False)["A_stop_low"]
@@ -228,7 +231,81 @@ class TestLoadKeyName:
 
     def test_missing_summary_warns_not_silent(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        (tmp_path / "A_stop_low__z.json").write_text(
+        (tmp_path / "A_stop_low__z__s1000.json").write_text(
             json.dumps({"codes": ["600000"], "count": 500}), encoding="utf-8")
         m2._collect(cross=False)
         assert "找不到交易摘要" in capsys.readouterr().out
+
+
+class TestSampleFingerprint:
+    """结果文件名必须含样本量指纹——**这是实盘踩过的坑**。
+
+    owner 先跑 `--sample 300`、再跑 `--sample 1000`，而第一版文件名只有
+    `{组}__{方案}.json`，于是 300 的旧结果被 `[SKIP]` 直接复用。汇总表里
+    ~400 笔的方案与 ~1300 笔的基准混在一起比，A 组一半方案的判定全部无效
+    （cost_zone_3 / tick_buffer_3 / trail_18 / trigger_intraday / amv_long_only）。
+    """
+
+    def test_fingerprint_includes_sample(self):
+        assert m2._fingerprint(1000, False) == "s1000"
+        assert m2._fingerprint(300, True) == "s300_cw"
+        assert m2._fingerprint(300, False) != m2._fingerprint(1000, False)
+
+    def test_only_largest_sample_collected(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write(tmp_path, "A_stop_low", "00_baseline", fp="s1000", n=1294, expR=0.202)
+        _write(tmp_path, "A_stop_low", "trail_18", fp="s300", n=409, expR=0.686)
+        got = m2._collect(cross=False)["A_stop_low"]
+        assert [r["name"] for r in got] == ["00_baseline"], "300 样本的残留必须被排除"
+        assert "检测到多个样本量" in capsys.readouterr().out
+
+    def test_explicit_sample_selects_batch(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write(tmp_path, "A_stop_low", "00_baseline", fp="s1000", n=1294)
+        _write(tmp_path, "A_stop_low", "trail_18", fp="s300", n=409)
+        got = m2._collect(cross=False, sample=300)["A_stop_low"]
+        assert [r["name"] for r in got] == ["trail_18"]
+
+    def test_cross_window_separate_from_normal(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write(tmp_path, "A_stop_low", "00_baseline", fp="s1000", n=1294)
+        _write(tmp_path, "A_stop_low", "00_baseline_cw", fp="s1000_cw", n=900)
+        assert len(m2._collect(cross=False)["A_stop_low"]) == 1
+        assert len(m2._collect(cross=True)["A_stop_low"]) == 1
+
+    def test_legacy_files_warn(self, tmp_path, monkeypatch, capsys):
+        """无指纹的旧文件要明确告警，不能静默当成有效数据。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        (tmp_path / "A_stop_low__old.json").write_text(
+            json.dumps({"trade_summary": {"n": 400, "expectancy": 0.01}}),
+            encoding="utf-8")
+        m2._collect(cross=False)
+        out = capsys.readouterr().out
+        assert "样本量指纹" in out and "旧结果文件" in out
+
+
+class TestMixedSampleGuard:
+    """笔数一致性检查——指纹之外的最后一道防线。"""
+
+    def test_warns_on_diverging_counts(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write(tmp_path, "A_stop_low", "00_baseline", n=1294, expR=0.202)
+        _write(tmp_path, "A_stop_low", "trail_18", n=409, expR=0.686)
+        m2.report(cross=False)
+        out = capsys.readouterr().out
+        assert "笔数不一致" in out and "trail_18(409)" in out
+
+    def test_amv_excluded_from_check(self, tmp_path, monkeypatch, capsys):
+        """择时方案本来就会大幅减少笔数（0AMV 做多期仅占约 18% 时间），不该告警。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write(tmp_path, "A_stop_low", "00_baseline", n=1294, expR=0.202)
+        _write(tmp_path, "A_stop_low", "amv_long_only", n=230, expR=0.9)
+        m2.report(cross=False)
+        assert "笔数不一致" not in capsys.readouterr().out
+
+    def test_no_warning_when_consistent(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write(tmp_path, "A_stop_low", "00_baseline", n=1294, expR=0.202)
+        _write(tmp_path, "A_stop_low", "be_08", n=1296, expR=0.223)
+        m2.report(cross=False)
+        assert "笔数不一致" not in capsys.readouterr().out
