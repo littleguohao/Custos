@@ -7,7 +7,7 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
-from paths import BASE, CN_TZ, CONTRACTS_DIR, cn_now
+from paths import BASE, CN_TZ, CONTRACTS_DIR, cn_now, write_json_atomic
 from paths import read_json as load_json
 
 DATA = BASE / "01_data"
@@ -143,7 +143,7 @@ def confirm_position_snapshot(day: str, note: str = "user_confirmed") -> dict[st
     path = DATA / "trades" / "position_confirmations.json"
     records = load_json(path, {})
     records[day] = {"confirmed_at": cn_now().isoformat(timespec="seconds"), "note": note}
-    path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_atomic(path, records)   # 累积状态：人工确认记录，损坏丢历史
     return records[day]
 
 

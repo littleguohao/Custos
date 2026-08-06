@@ -22,7 +22,7 @@ if str(TOOLS_DIR) not in sys.path:
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from paths import BASE, cn_today  # noqa: E402
+from paths import BASE, cn_today, write_json_atomic  # noqa: E402
 
 
 def section_quality(as_of: str, target: str) -> str:
@@ -147,7 +147,7 @@ def main(argv=None) -> int:
             inc = json.loads(incremental_path.read_text(encoding="utf-8"))
             mkt = json.loads(market_path.read_text(encoding="utf-8"))
             mkt, stale = merge_incremental(inc, mkt, target)
-            market_path.write_text(json.dumps(mkt, ensure_ascii=False, indent=2), encoding="utf-8")
+            write_json_atomic(market_path, mkt)   # 读-改-写的共享文件
             print("[OK] incremental data merged into market_timing_input.json")
             status.update({"status": "ok", "merged": True, "stale": stale})
             if stale:
@@ -190,9 +190,24 @@ def main(argv=None) -> int:
                 # 于是一个"确认过但其实是上周的"0AMV 会拿满分并授予加仓权)。
                 amv["as_of"] = amv_as_of
                 if not amv.get("effective_state"):
-                    amv["effective_state"] = amv.get("amv_zone") or ("空头" if amv_day < -2.3 else "做多" if amv_day > 4 else "中性")
+                    # ⚠️ 这是 amv_state 跑之前的**临时占位**，必须尊重状态机的锁定语义：
+                    # 「进入空头后须有 confirmed 的 >+4% 才能出来，**阈值之间的读数不得把
+                    #   regime 重置为中性**」（见 amv_state 模块 docstring）。
+                    # 原实现在阈值之间直接写「中性」，把锁定的空头重置了 ——
+                    # 而「中性」在加仓白名单 {做多, 中性} 里 ⇒ 空头期可能被授予加仓权。
+                    # 这里改为：只有跨阈值才敢给方向，否则**延续已知锁定前态**，
+                    # 前态未知就留「未知」让下游 fail-closed（风控优先于买入）。
+                    prior = str(amv.get("prior_effective_state") or "")
+                    if amv_day < -2.3:
+                        amv["effective_state"] = "空头"
+                    elif amv_day > 4:
+                        amv["effective_state"] = "做多"
+                    elif prior in ("空头", "做多"):
+                        amv["effective_state"] = prior
+                    else:
+                        amv["effective_state"] = "未知"
                 mkt["amv_0"] = amv
-                market_path.write_text(json.dumps(mkt, ensure_ascii=False, indent=2), encoding="utf-8")
+                write_json_atomic(market_path, mkt)   # 读-改-写的共享文件
                 print(f"[OK] 0AMV quality auto-set to confirmed (value={amv_day}%, as_of={amv_as_of}, "
                       f"regime={amv['effective_state']}, source={amv_source})")
                 status.update({"amv_confirmed": True, "amv_as_of": amv_as_of,

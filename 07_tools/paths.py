@@ -119,3 +119,32 @@ def read_json(path, default):
     """
     import json as _json
     return _json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else default
+
+
+def write_json_atomic(path, obj, *, indent: int = 2) -> None:
+    """原子写 JSON：先写同目录 tmp，再 `os.replace` 换名。
+
+    **只有两类写入需要它**（其余用普通 write_text 就好，别过度原子化）：
+
+        ① **累积状态** —— 损坏就丢历史，无法从当日数据重建。
+           例：`0amv_regime_history.json`（全历史 regime）、
+               `position_confirmations.json`（人工确认记录）。
+        ② **读-改-写的共享文件** —— 多个 stage 依次改写同一份。
+           例：`{date}_market_timing_input.json` 被 collector → merge → amv_state
+               依次读改写；写坏要重跑整链，而**盘中快照那种数据窗口已经过去、
+               重跑也拿不回**。
+
+    纯产物（报告、run log、门控 JSON、采集输出）不必原子化：下次跑会重写。
+
+    为什么单独抽出来：`trades/incremental_ledger` 早就有一份私有 `_write_atomic`
+    （它踩过「持仓已加、台账没记 ⇒ 下次导入重复计账、持仓静默翻倍」的真实缺陷），
+    但 `amv_state` / `merge_incremental_market` 这些同样是累积/读改写的地方还在裸写。
+    2026-08-06 收敛到一处。
+    """
+    import json as _json
+    import os as _os
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(_json.dumps(obj, ensure_ascii=False, indent=indent, default=str),
+                   encoding="utf-8")
+    _os.replace(tmp, path)

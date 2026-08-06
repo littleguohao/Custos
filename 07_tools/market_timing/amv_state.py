@@ -16,7 +16,7 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import BASE, cn_now  # noqa: E402
+from paths import BASE, cn_now, write_json_atomic  # noqa: E402
 
 MARKET=BASE/'01_data'/'market'; STATE=MARKET/'0amv_regime_history.json'; LEDGER=MARKET/'0amv_observations.jsonl'
 def load(p,d): return json.loads(p.read_text(encoding='utf-8')) if p.exists() else d
@@ -59,9 +59,13 @@ def compute(day:str, initial:str|None=None):
     elif prior=='做多': state='做多'; transition='做多延续；未触发空头阈值'
     else: state='中性'; transition='无已知锁定前态，处于阈值之间'
     rec={'date':day,'daily_change_pct':value,'prior_state':prior,'effective_state':state,'transition_reason':transition,'confirmed':confirmed}
-    hist[day]=rec; STATE.write_text(json.dumps(hist,ensure_ascii=False,indent=2),encoding='utf-8')
+    hist[day]=rec
+    # 累积状态：regime 全历史，损坏丢历史 ⇒ 原子写（见 paths.write_json_atomic）
+    write_json_atomic(STATE, hist)
     amv.update({'daily_zone':'做多触发' if value is not None and float(value)>4 else ('空头触发' if value is not None and float(value)<-2.3 else '阈值内'),'prior_effective_state':prior,'effective_state':state,'state_transition_reason':transition})
-    market_path.write_text(json.dumps(d,ensure_ascii=False,indent=2),encoding='utf-8'); return rec
+    # 读-改-写的共享文件：collector → merge → amv_state 依次改写同一份
+    write_json_atomic(market_path, d)
+    return rec
 
 def main():
     ap=argparse.ArgumentParser(); ap.add_argument('--date',required=True); ap.add_argument('--initial-state',choices=['空头','做多','中性']); a=ap.parse_args(); print(json.dumps(compute(a.date,a.initial_state),ensure_ascii=False,indent=2))
