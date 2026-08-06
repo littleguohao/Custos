@@ -105,12 +105,19 @@ class TestAutoPick:
                 json.dumps({"code": code, "events": events, "market": 1}),
                 encoding="utf-8")
 
-        _w("600001", [])                                             # 从未除权
-        _w("600002", [{"fenhong": 1.0, "songzhuangu": 0.0}])         # 只分红
-        _w("600003", [{"fenhong": 2.4, "songzhuangu": 30.75}])       # 大比例送股
-        got = R.pick_auto(3, cache_dir=tmp_path)
+        IN = "2023-06-15"                    # 窗口内
+        OUT = "2019-06-15"                   # 窗口外（qlib 有 2020-09~2021-07 缺口，
+                                             # 且我们的对账窗口从 2021-08 起）
+        _w("600001", [])                                                   # 从未除权
+        _w("600002", [{"date": IN, "fenhong": 1.0, "songzhuangu": 0.0}])   # 窗口内只分红
+        _w("600003", [{"date": IN, "fenhong": 2.4, "songzhuangu": 30.75}])  # 窗口内大送股
+        _w("600004", [{"date": OUT, "fenhong": 9.9, "songzhuangu": 99.0}])  # 事件在窗口外
+        got = R.pick_auto(4, cache_dir=tmp_path)
         assert got[0] == "600003", got
         assert "600001" not in got, "从未除权的票不该入选"
+        assert "600004" not in got, (
+            "事件全在窗口外的票不该入选——它在窗口里因子恒为 1，"
+            "判'一致'对复权公式零信息量（实测 20 只里有 7 只是这种）")
 
     def test_empty_cache_warns(self, tmp_path, capsys):
         assert R.pick_auto(5, cache_dir=tmp_path) == []
