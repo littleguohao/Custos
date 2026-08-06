@@ -70,10 +70,14 @@ def _err(code: str, detail: Any = "") -> dict:
     return out
 
 
-def _post(payload: dict, timeout: int) -> bytes:
-    """发送 JSON-RPC POST，返回原始响应体（网络/HTTP 错误向上抛，由 call 兜底）。"""
+def _post(payload: dict, timeout: int, endpoint: Optional[str] = None) -> bytes:
+    """发送 JSON-RPC POST，返回原始响应体（网络/HTTP 错误向上抛，由 call 兜底）。
+
+    ``endpoint`` 默认取 `TQ_HTTP_URL`，但**在调用时解析**而不是写成默认参数
+    ——见 `00_governance/data/DATA_SOURCE_PRINCIPLE.md`「模块级常量 + 运行时替换 = 陷阱」。
+    """
     req = urllib.request.Request(
-        TQ_HTTP_URL,
+        endpoint or TQ_HTTP_URL,
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         headers={"Content-Type": "application/json; charset=utf-8"},
         method="POST",
@@ -83,7 +87,7 @@ def _post(payload: dict, timeout: int) -> bytes:
 
 
 def call(method: str, params: Optional[dict] = None, timeout: int = DEFAULT_TIMEOUT,
-         allow_unsafe_download: bool = False) -> dict:
+         allow_unsafe_download: bool = False, endpoint: Optional[str] = None) -> dict:
     """调用 TQ-Local 接口，统一返回 {"ok", "value", "error"}，绝不 raise。
 
     ``allow_unsafe_download``：放行非白名单的 `download_file` down_type。
@@ -105,7 +109,7 @@ def call(method: str, params: Optional[dict] = None, timeout: int = DEFAULT_TIME
         return _err("tdxw_not_running", "TdxW.exe 未运行，TQ-Local 服务不可用")
     payload = {"id": 1, "method": method, "params": params or {}}
     try:
-        raw = _post(payload, timeout)
+        raw = _post(payload, timeout, endpoint)
     except urllib.error.URLError as exc:
         return _err("connection_failed", exc.reason if hasattr(exc, "reason") else exc)
     except TimeoutError as exc:

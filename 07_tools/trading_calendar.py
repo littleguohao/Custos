@@ -7,10 +7,9 @@ import json
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
-from urllib import request
 
 from runtime_guards import trading_day_status
-from paths import BASE, CONTRACTS_DIR, cn_today, cn_now
+from paths import BASE, CONTRACTS_DIR, TOOLS, cn_today, cn_now
 
 CONFIG = CONTRACTS_DIR / "CN_TRADING_CALENDAR.json"
 CACHE = BASE / "01_data" / "market" / "CN_TRADING_CALENDAR_CACHE.json"
@@ -41,27 +40,38 @@ def extract_dates(response: Any) -> list[str]:
 
 
 def rpc_trading_dates(endpoint: str, market: str, start: date, end: date, timeout: int) -> list[str]:
-    payload = {
-        "id": 1,
-        "method": "get_trading_dates",
-        "params": {
-            "market": market,
-            "start_time": start.strftime("%Y%m%d"),
-            "end_time": end.strftime("%Y%m%d"),
-            "count": 0,
-        },
-    }
-    req = request.Request(
-        endpoint,
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={"Content-Type": "application/json; charset=utf-8"},
-        method="POST",
-    )
-    with request.urlopen(req, timeout=timeout) as resp:
-        body = json.loads(resp.read().decode("utf-8"))
-    if isinstance(body, dict) and body.get("error"):
-        raise RuntimeError(str(body["error"]))
-    days = extract_dates(body)
+    """向 TQ-Local 取交易日。**传输层走 `local_tdx/tq_http.call`**（2026-08-06 收敛）。
+
+    原先这里自己拼 JSON-RPC + `urlopen`，与 `tq_http` 是同一个服务
+    （两处都硬编码 `http://127.0.0.1:17709/`）却各写一套，于是拿不到 `tq_http`
+    统一具备的东西：
+
+      · **TdxW 未运行的预检** —— 否则只能收到一个 `connection refused`，
+        看不出是「服务没起」还是「端口写错」
+      · **统一错误分类**（`tdxw_not_running` / `timeout` / `connection_failed` /
+        `request_failed`），会被 `refresh` 记进 `source.last_error` 供排查
+      · 将来加在 `tq_http.call` 里的**安全拦截**（危险 down_type、stock_code 校验）
+        自动生效，不会漏掉这一条路径
+
+    这里仍**保持 raise 契约**：`refresh` 依赖 `except Exception` 记 `last_error`
+    并保住旧缓存（`status="cache_preserved"`），改成返回 dict 会让失败被当成成功。
+    """
+    import sys as _sys
+    d = str(TOOLS / "local_tdx")
+    if d not in _sys.path:
+        _sys.path.insert(0, d)
+    import tq_http                                       # 懒导入：不扩大本模块的导入面
+    res = tq_http.call(
+        "get_trading_dates",
+        {"market": market, "start_time": start.strftime("%Y%m%d"),
+         "end_time": end.strftime("%Y%m%d"), "count": 0},
+        timeout=timeout, endpoint=endpoint)
+    if not res.get("ok"):
+        err = res.get("error") or {}
+        raise RuntimeError(
+            f"TQ get_trading_dates 失败[{err.get('code', 'unknown')}]"
+            f"{': ' + str(err['detail']) if err.get('detail') else ''}")
+    days = extract_dates(res.get("value"))
     if not days:
         raise RuntimeError("TDX get_trading_dates returned no valid dates")
     return days
