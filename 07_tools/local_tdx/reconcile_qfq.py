@@ -162,6 +162,10 @@ def pick_auto(n: int, cache_dir: Optional[pathlib.Path] = None) -> list[str]:
         except Exception:                                      # noqa: BLE001
             continue
         ev = d.get("events") or []
+        # ⚠️ **只算落在对账窗口内的事件。** 第一版按全历史打分，结果 20 只里有 7 只的
+        # 事件全在窗口之前 ⇒ `adjust_events=0`、复权因子恒为 1 ⇒ 两边比的其实是未复权价，
+        # 判"一致"对我们的公式**零信息量**。挑票必须挑窗口内真有除权的。
+        ev = [e for e in ev if WIN_START <= str(e.get("date"))[:10] <= WIN_END]
         if not ev:
             continue
         # 粗打分：送转与分红的总量（不必精确，只用于排序）
@@ -173,6 +177,102 @@ def pick_auto(n: int, cache_dir: Optional[pathlib.Path] = None) -> list[str]:
         print("[WARN] xdxr 缓存为空，无法自动挑票；请用 --codes 指定，"
               "或先跑一次带前复权的选股/回测把缓存焐热", file=sys.stderr)
     return [c for _, c in scored[:n]]
+
+
+def detail(code: str, top: int = 25) -> int:
+    """单只票的分歧明细：把数字摊开，**区分两种完全不同的分歧形态**。
+
+    ## 为什么必须区分
+
+    · **事件日阶梯**：比值分段恒定、只在除权日跳变 ⇒ 两边对**某个事件的比例公式**处理不同。
+      分歧日数应当 ≈ 事件数。
+    · **弥散噪声**：比值连续游走、分歧日散布在非事件日 ⇒ **原始价格本身有差异**
+      （数据源口径不同、精度、停牌处理…），与我们的复权公式无关。
+
+    实测（2026-08-06）两种都出现了：`600622` 1 个事件 3 天分歧（像阶梯），
+    而 `600519` 9 个事件却 134 天分歧、起始日是连续交易日（茅台除权一年一次 ⇒ 不可能是阶梯）。
+    **不分开看就会把数据源差异误判成自己的公式 bug，或反之。**
+    """
+    import pandas as pd
+    t, tnote = _load_tdx(code)
+    q, qnote = _load_qlib(code)
+    if t is None or q is None:
+        print(f"{code}: 取数失败 tdx={tnote!r} qlib={qnote!r}")
+        return 2
+    m = t.merge(q, on="date", how="inner", suffixes=("_tdx", "_qlib"))
+    m = m[(m["date"] >= WIN_START) & (m["date"] <= WIN_END)]
+    m = m[(m["close_tdx"] > 0) & (m["close_qlib"] > 0)].reset_index(drop=True)
+    m["ratio"] = m["close_tdx"] / m["close_qlib"]
+    m["ret_tdx"] = m["close_tdx"].pct_change()
+    m["ret_qlib"] = m["close_qlib"].pct_change()
+    m["ret_diff"] = (m["ret_tdx"] - m["ret_qlib"]).abs()
+
+    # 事件日期（窗口内）
+    ev_dates: set[str] = set()
+    try:
+        import adjust_factors as A
+        for e in A.get_xdxr(code):
+            d = str(e.get("date"))[:10]
+            if WIN_START <= d <= WIN_END:
+                ev_dates.add(d)
+    except Exception as exc:                                   # noqa: BLE001
+        print(f"[WARN] 取不到 {code} 的事件表: {exc}", file=sys.stderr)
+
+    dates = m["date"].tolist()
+    idx_of = {d: i for i, d in enumerate(dates)}
+
+    def _near_event(d: str, win: int = 2) -> str:
+        i = idx_of.get(d)
+        if i is None:
+            return ""
+        for ed in ev_dates:
+            j = idx_of.get(ed)
+            if j is not None and abs(i - j) <= win:
+                return f"事件 {ed} ±{abs(i - j)}根"
+        return ""
+
+    bad = m[m["ret_diff"] > RET_TOL].copy()
+    bad["near"] = bad["date"].map(_near_event)
+    n_ev_aligned = int((bad["near"] != "").sum())
+
+    print(f"\n{'=' * 104}")
+    print(f"{code} 分歧明细   窗口内事件 {len(ev_dates)} 个   重叠 {len(m)} 根   "
+          f"比值离散 {m['ratio'].max() / m['ratio'].min() - 1:.4%}")
+    print("=" * 104)
+    print(f"分歧日 {len(bad)} 天，其中**落在事件日 ±2 根内**的 {n_ev_aligned} 天、"
+          f"非事件日 {len(bad) - n_ev_aligned} 天")
+    if len(bad):
+        share = n_ev_aligned / len(bad)
+        if share >= 0.8:
+            print("  ⇒ 形态判定：**事件日阶梯** —— 分歧集中在除权日，"
+                  "指向复权比例公式（event_ratio）两边不同")
+        elif share <= 0.2:
+            print("  ⇒ 形态判定：**弥散噪声** —— 分歧散布在非事件日，"
+                  "指向**原始价格本身有差异**（数据源口径），与复权公式无关")
+        else:
+            print("  ⇒ 形态判定：**混合** —— 两类问题同时存在，先看下表逐日数字")
+    print(f"\n{'日期':<12}{'tdx收盘':>11}{'qlib收盘':>11}{'比值':>10}"
+          f"{'ret_tdx':>10}{'ret_qlib':>10}{'差':>9}  近邻事件")
+    print("-" * 104)
+    for _, r in bad.nlargest(top, "ret_diff").iterrows():
+        print(f"{r['date']:<12}{r['close_tdx']:>11.4f}{r['close_qlib']:>11.4f}"
+              f"{r['ratio']:>10.5f}{r['ret_tdx']:>+10.4%}{r['ret_qlib']:>+10.4%}"
+              f"{r['ret_diff']:>+9.4%}  {r['near']}")
+
+    # 比值的阶梯结构：把比值按 0.1% 粒度分箱，看有几个"平台"
+    lvl = (m["ratio"] / m["ratio"].iloc[0]).round(3)
+    plateaus = int(lvl.nunique())
+    print(f"\n比值平台数（按 0.1% 粒度）：{plateaus}"
+          f"   {'⇒ 分段恒定，像事件阶梯' if plateaus <= max(3, len(ev_dates) + 2) else '⇒ 连续游走，不是事件阶梯'}")
+    print("事件日当天的比值跳变：")
+    for ed in sorted(ev_dates):
+        i = idx_of.get(ed)
+        if i is None or i == 0:
+            continue
+        jump = m["ratio"].iloc[i] / m["ratio"].iloc[i - 1] - 1
+        print(f"  {ed}  比值 {m['ratio'].iloc[i - 1]:.5f} → {m['ratio'].iloc[i]:.5f}"
+              f"  ({jump:+.4%})")
+    return 0
 
 
 def report(rows: list[dict]) -> int:
@@ -192,8 +292,15 @@ def report(rows: list[dict]) -> int:
     ok = [r for r in rows if r["status"] == "ok"]
     bad = [r for r in rows if r["status"] == "mismatch"]
     skip = [r for r in rows if r["status"] in ("skip", "error")]
+    # ⚠️ adjust_events=0 的"一致"是**零信息量**：因子恒为 1，两边比的其实是未复权价
+    vacuous = [r for r in ok if "adjust_events=0" in (r.get("note") or "")]
     print(f"\n一致 {len(ok)} / 分歧 {len(bad)} / 跳过 {len(skip)}"
           f"（阈值：比值离散 ≤{RATIO_TOL:.1%}，日收益差 ≤{RET_TOL:.1%}）")
+    if vacuous:
+        print(f"⚠️ 其中 {len(vacuous)} 只是 **adjust_events=0**（窗口内无除权 ⇒ 因子恒为 1）"
+              f"——它们的\"一致\"只说明原始价一致，**对复权公式零信息量**。")
+        print(f"   有效样本 = {len(ok) - len(vacuous)} 一致 + {len(bad)} 分歧"
+              f" = {len(ok) - len(vacuous) + len(bad)} 只")
     if bad:
         print("\n⚠️ **分歧明细**（比值跳变的日子就是两边对某个事件处理不同的日子）：")
         for r in bad:
@@ -220,8 +327,14 @@ def main() -> int:
     ap.add_argument("--codes", default="", help="逗号分隔的 6 位代码")
     ap.add_argument("--auto", type=int, default=0,
                     help="自动挑除权影响最大的 N 只（从 xdxr 缓存里挑，不发网络）")
+    ap.add_argument("--detail", default="",
+                    help="单只票的分歧明细：逐日数字 + 区分「事件日阶梯」与「弥散噪声」")
+    ap.add_argument("--top", type=int, default=25, help="--detail 列出最差的 N 天")
     ap.add_argument("--out", default="")
     a = ap.parse_args()
+
+    if a.detail:
+        return detail(a.detail.strip()[:6], a.top)
 
     codes = [c.strip()[:6] for c in a.codes.split(",") if c.strip()]
     if a.auto:
