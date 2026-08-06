@@ -26,6 +26,7 @@ FACTOR: dict[str, Any] = {
     "evidence": "00_governance/research/R2_selection_price_volume.md",
     "note": "判别层过线、净值终审惨败；止损把下跌端对称兑现",
     "min_bars": 1,
+    "live_use": "none",
 }
 
 def score(df: pd.DataFrame, code: str):

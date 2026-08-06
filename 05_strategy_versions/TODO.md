@@ -101,6 +101,8 @@
 | 35 | `alpha_pvcorr` / `low_vol` / `momentum` 标 `untested` —— 实现了但没有独立的净值终审记录。按 R2 整体结论推定不可用，但**缺它们自己的证据**。要么补跑，要么明确降级为「不再研究」| 补证据或明确废弃 |
 | 36 | `enrich_candidates.py` 里还有 4 个内联因子未抽（`detect_wave_type` 72 行 / `compute_perfect_b1_fit` 68 / `compute_b1_pullback_fit` 51 / `detect_distribution` 132）。其中 `compute_b1_pullback_fit` 已被 live 与研究双方共用，最该先抽 | 下一步 |
 
+| 37 | ⚠️⚠️ **研究说没用、live 却在用**：R2 结论「S_shape 无 alpha，全市场阈值扫描无 lift」，而 `score_candidates.technical_score` 的**主路径**就是它——`sstar_level(s_star)` 直接出技术层级、参与候选表 A/B/C/D 分层。已在 `factors/s_shape.py` 元数据与 `factors.KNOWN_STATUS_USE_CONFLICTS` 显式登记（不静默放过、也不擅自改分层）。**需 owner 定**：分层要不要换掉 s_shape，还是维持（README 说 StockPool 只是证据层、买入由 chief_decision 裁决，所以维持也讲得通）| **需 owner 拍板** |
+
 ## 需要 owner 拍板
 
 | # | 事项 | 出处 |

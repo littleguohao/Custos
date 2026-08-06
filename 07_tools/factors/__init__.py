@@ -52,6 +52,20 @@ _SKIP = {"_template", "_util", "__init__"}
 STATUSES = ("active", "candidate", "needs_work", "untested")
 KINDS = ("selector", "pattern", "state", "control")
 
+#: **live 里允许怎么用** —— 与 status 是两个正交维度。
+#: `evidence_only` 是 R2 对 `b1_pullback`/`perfect_b1_fit` 的原话「仅描述性，不作买入依据」
+#: 的编码：它们确实被 live 链计算并落候选表，但**不驱动分层/gate/排序**。
+#: 只看 status 会把这种合法用法误判成违规（2026-08-06 第一版守卫就误报了）。
+LIVE_USES = ("none", "evidence_only", "gate", "scorer")
+
+#: **已知矛盾的显式白名单**：`status` 说证据不够，而 live 确实拿它驱动决策。
+#: 不静默放过、也不擅自改 live —— 改分层是策略决策。列在这里是为了
+#: ①矛盾可见 ②新出现的矛盾会被测试挡住（ratchet）。
+KNOWN_STATUS_USE_CONFLICTS = {
+    "s_shape": "R2 说无 alpha，但 score_candidates.technical_score 主路径用它出技术层级"
+               "（参与 A/B/C/D 分层）。待 owner 定，见 TODO。",
+}
+
 #: `status` 在这个集合里的因子**不得进入 live 选股链**。
 #: 拦的理由是「**未通过验证**」，不是「已被证伪」—— 两者对 live 的后果相同
 #: （都不许用），但对研究的后果完全不同：证伪意味着不必再看，
@@ -82,6 +96,13 @@ def registry() -> dict[str, dict]:
 
 
 def live_allowed() -> dict[str, dict]:
-    """只返回允许进 live 的因子（`status` 不在 `NOT_FOR_LIVE` 里）。"""
+    """可在 live 里**驱动决策**的因子：status 通过 且 live_use 是 gate/scorer。"""
     return {k: v for k, v in registry().items()
-            if v["meta"].get("status") not in NOT_FOR_LIVE}
+            if v["meta"].get("status") not in NOT_FOR_LIVE
+            and v["meta"].get("live_use") in ("gate", "scorer")}
+
+
+def live_evidence_only() -> dict[str, dict]:
+    """只能作**描述性证据**的因子 —— 可以出现在 live 链，但不得驱动决策。"""
+    return {k: v for k, v in registry().items()
+            if v["meta"].get("live_use") == "evidence_only"}

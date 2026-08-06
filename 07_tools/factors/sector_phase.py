@@ -13,6 +13,18 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
+FACTOR: dict[str, Any] = {
+    "id": "sector_phase",
+    "name": "板块相位（MACD 相位择时）",
+    "kind": "state",
+    "status": "active",
+    "evidence": "00_governance/research/R4_timing_amv_sector.md",
+    "note": "R4：0AMV 之后第二个 OOS 站得住的增强，熊市减亏 ~4-6pp",
+    "min_bars": 60,
+    "live_use": "gate",
+}
+
+
 MACD_FAST, MACD_SLOW, MACD_SIGNAL = 12, 26, 9
 PHASE_LOOKBACK = 60          # 顶背离/三打回看窗口(交易日)
 PHASE_FRACTAL = 2            # 摆动高点左右确认根数

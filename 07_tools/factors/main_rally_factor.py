@@ -44,6 +44,18 @@ from indicators import j_series as _j_series  # noqa: E402
 
 from rsi_state import rsi  # noqa: E402
 
+FACTOR: dict[str, Any] = {
+    "id": "main_rally_factor",
+    "name": "主升始发点（H4）",
+    "kind": "pattern",
+    "status": "untested",
+    "evidence": "00_governance/research/R8_hypothesis_H3_H4_pending.md",
+    "note": "R8：已实现未跑；原文两处矛盾，两种 CROSS 口径都实现由回测判定",
+    "min_bars": 60,
+    "live_use": "evidence_only",  # signal_labels 出标签落候选表；该模块头部已声明「标注不是交易依据」
+}
+
+
 # ---- 原文参数（待回测）----
 FLOW_WIN = 15                # D1/D2 的统计窗（原文 15；文章说想更灵敏可改 10）
 FLOW_THRESHOLD = 0.8         # 主升占比阈值（原文 0.8；想过滤弱势反弹可上调 0.85）

@@ -4,7 +4,16 @@ from __future__ import annotations
 
 from typing import Optional
 
+import numpy as np
 import pandas as pd
+
+
+def ohlcv_arrays(df):
+    close = df["close"].astype(float).to_numpy()
+    high = df["high"].astype(float).to_numpy()
+    low = df["low"].astype(float).to_numpy()
+    vol = df["volume"].astype(float).to_numpy()
+    return close, high, low, vol
 
 
 def ts_corr(x: pd.Series, y: pd.Series, n: int) -> Optional[float]:

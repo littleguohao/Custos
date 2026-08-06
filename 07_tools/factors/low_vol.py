@@ -19,6 +19,7 @@ FACTOR: dict[str, Any] = {
     "evidence": "00_governance/research/R2_selection_price_volume.md",
     "note": "特征溢价类，未终审",
     "min_bars": 21,
+    "live_use": "none",
 }
 
 def score(df: pd.DataFrame, code: str):

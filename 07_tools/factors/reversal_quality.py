@@ -35,6 +35,7 @@ FACTOR: dict[str, Any] = {
     "evidence": "00_governance/research/R2_selection_price_volume.md",
     "note": "稳健负预测；且口径与 live 反转K不一致（对称 vs 不对称）",
     "min_bars": 21,
+    "live_use": "none",
 }
 
 def score(df: pd.DataFrame, code: str):

@@ -47,6 +47,18 @@ for p in (TOOLS_DIR, TOOLS_DIR / "local_tdx", TOOLS_DIR / "market_timing", TOOLS
 _FACTORS_DIR = str(Path(__file__).resolve().parents[1] / "factors")
 if _FACTORS_DIR not in sys.path:
     sys.path.insert(0, _FACTORS_DIR)   # 因子层：见 factors/__init__.py
+# 因子实现已抽到 factors/ 各自成模块（2026-08-06）——**全项目唯一一份**，
+# 本模块通过调用访问。常量随因子走（`WAVE_*` 在 wave_type、`DIST_*` 在 distribution…），
+# 需要它们的地方从对应因子模块导入，不要在这里再抄一份。
+from _util import ohlcv_arrays as _ohlcv_arrays  # noqa: E402
+from wave_type import (WAVE_MIN_BARS, _find_rally_segment,  # noqa: E402
+                       detect_wave_type)
+#   ↑ `WAVE_MIN_BARS` / `_find_rally_segment` 在本模块**别处也被用到**（不只 detect_wave_type），
+#     所以一并导入。常量与助手跟着因子走、由因子模块拥有，这里只引用。
+from perfect_b1_fit import compute_perfect_b1_fit  # noqa: E402
+from b1_pullback_fit import compute_b1_pullback_fit  # noqa: E402
+from distribution import detect_distribution  # noqa: E402
+
 
 
 from indicators import j_series as _j_canonical, dks_series  # noqa: E402
@@ -136,18 +148,6 @@ THEME_MIN_MATCH = 1
 # 以下阈值全部标注"待回测参数"：策略原文（B1 §四、CZ §九/§14.6/§十六）
 # 要求阈值可配置、实际值随候选落盘，不得静默使用；完成样本回测前不得
 # 视为已校准。口径出处见 00_governance/contracts/SCREENING_WORKFLOW.md "策略对齐"章。
-WAVE_LOOKBACK = 60                  # 拉升波分析窗口（日）
-WAVE_MIN_BARS = 40                  # 拉升波分类最少K线数
-WAVE_LIMIT_UP_PCT = 9.8             # 待回测参数：涨停/接近涨停判定（单日涨幅%）
-WAVE_SPRINT_WINDOW = 20             # 待回测参数：冲刺波涨停统计窗口（日）
-WAVE_SPRINT_MIN_LIMIT_UPS = 2       # 待回测参数：冲刺波涨停次数下限
-WAVE_ACCEL_10D_GAIN = 25.0          # 待回测参数：高斜率加速（拉升段内最大10日涨幅%下限，i_low→i_high 段上计算）
-WAVE_TOP_VOL_RATIO = 1.5            # 待回测参数：顶部放量（高点日量/前5日均量）
-WAVE_BUILDUP_GAIN = (25.0, 50.0)    # 建仓波段涨幅%（B1 §四.0 口径）
-WAVE_RALLY_GAIN = (35.0, 50.0)      # 拉升波段涨幅%（B1 §四.0 口径）
-WAVE_START_CANDLE_PCT = 5.0         # 待回测参数：启动段长阳单日涨幅%
-WAVE_START_CANDLE_VOL = 1.5         # 待回测参数：启动段放量倍数
-WAVE_SECOND_START_GAIN = 15.0       # 待回测参数：二次启动（前一段摆动幅度%下限）
 
 NOW_MILD_VOL_BURST = 2.0            # 待回测参数：上涨段单日量/段均量上限（温和放量）
 NOW_BEAR_DROP_PCT = -3.0            # 待回测参数：放量大阴跌幅%
@@ -182,45 +182,17 @@ PULLBACK_LOOKBACK = 20             # 待回测：回调缩量企稳观察窗口�
 PULLBACK_MIN_DROP = 3.0           # 待回测：距窗口高点回撤%下限
 PULLBACK_VOL_RATIO = 0.8         # 待回测：回调段/上涨段均量上限
 
-DIST_RECENT = 5                    # 待回测：出货形态观察最近N根
-DIST_ACCEL_WIN = 10               # 待回测：加速涨幅窗口（日）
-DIST_ACCEL_GAIN = 25.0           # 待回测：加速涨幅%下限（阴线前）
-DIST_BIG_BEAR_FRAC = 0.5        # 待回测：大阴=跌幅≥涨跌幅制度×0.5
-DIST_LONG_BEAR_FRAC = 0.8      # 待回测：长阴/近跌停=跌幅≥涨跌幅制度×0.8
-DIST_HUGE_VOL_RATIO = 2.0      # 待回测：天量/巨量=≥20日均量×2
-DIST_HUGE_VOL_WIN = 20         # 待回测：天量对比窗口（日）
-DIST_STAIR_MIN_BARS = 3        # 待回测：阶梯放量阴线最少连续根数
-DIST_STAIR_BREAK_VR = 1.2      # 待回测：放量跌破QSX的量比下限
-DIST_TOP_WINDOW = 10           # 待回测：顶部区间（绿肥红瘦/双头）窗口
-DIST_DOUBLE_TOP_TOL = 3.0      # 待回测：双头两顶相近容差%
-DIST_SUBHIGH_SHRINK = 0.9      # 待回测：次高前一日缩量量比上限
-DIST_MIN_VOL_MA20_FRAC = 0.05  # 待回测：vol_ma20 低于全序列均量×此比例时视为近零（派发检测器 available=False）
 
 # --- 完美 B1 图形贴合度（good_b1 图集共性特征的梯度评分）待回测参数 ---
 # 2026-07-22 用户决策：J<13 为全通道硬门槛（公式与自选池一视同仁），
 # 在 J<13 基础上按贴合度梯度给分，越符合完美图形分数越高。
 J_GATE_REQUIRED_DEFAULT = True    # J<13 硬门槛默认开（registry universe.j_low_required 可覆盖）
-FIT_J_DEEP = 0.0                  # J<0 → 2 分
-FIT_J_MID = 7.0                   # J<7 → 1.5 分；J<13 → 1 分
-FIT_NEAR_LINE_PCT = 3.0           # 收盘距 QSX 或 DKS ≤3% → 2 分（回踩贴线）
-FIT_NEAR_LINE_MAX_PCT = 6.0       # ≤6% → 1 分
-FIT_SHRINK_DEEP = 0.5             # 回调段/上涨段均量 ≤0.5 → 2 分
-FIT_SHRINK_MID = 0.8              # ≤0.8 → 1 分
-FIT_DKS_SLOPE_DAYS = 5            # DKS 上行判断窗口（DKS[t] > DKS[t-N]）
 DKS_MA_WINDOWS = (14, 28, 57, 114)  # DKS=(MA14+MA28+MA57+MA114)/4，与 technical_monitor.zhixing_state 同参
 
 # --- 完美B1「缩量回踩超卖企稳」买弱指纹（10只确认赢家反标，见 worklog）---
 # recall 达标(10/10)，但全市场回测证伪：周线交易模拟(止损+BBI出场)加0AMV做多+25bps成本后
 # 期望 -0.42%/笔，劣于 baseline(无差别进场) 的 +0.96%/笔 —— 作进场过滤反而有害(专挑弱势、
 # 排除了做多区间的突破赢家)。故仅作**描述性证据**落盘、绝不作买入依据、不驱动分层。参数下方保留。
-B1PB_TREND_MA = 60                # 趋势未破：收盘 > MA60（-1% 容差）
-B1PB_MA10_BAND = (-12.0, 1.0)     # 短线回踩：收盘距 MA10 落在此带（下方回踩，且不明显站上MA5）
-B1PB_PRIOR_GAIN = 25.0            # 前有涨幅：波段起涨 ≥25%
-B1PB_PULL_BAND = (4.0, 35.0)      # 回调温和：回调深度 4~35%
-B1PB_VOL_MA5_MAX = 1.3            # 缩量企稳：B1日量 ≤1.3×近5日均量
-B1PB_JMIN_MAX = 13.0             # J超卖重置：回调段最低 J ≤13
-B1PB_BODY_MAX = 4.5               # 小实体企稳：B1日实体 ≤4.5%
-B1PB_HIT_MIN = 6                  # 命中门槛：7项中 ≥6 项
 
 # --- MACD 十大技术（macd十大技术精讲）待回测参数 ---
 MACD_SWING_FRACTAL = 2           # 摆动高/低点分型：左右各 N 根确认
@@ -417,106 +389,10 @@ def _pct_change(df, n: int) -> Optional[float]:
 
 # ========== B1/CZ 策略对齐检测器（阈值均为待回测参数，实际值随候选落盘） ==========
 
-def _ohlcv_arrays(df):
-    close = df["close"].astype(float).to_numpy()
-    high = df["high"].astype(float).to_numpy()
-    low = df["low"].astype(float).to_numpy()
-    vol = df["volume"].astype(float).to_numpy()
-    return close, high, low, vol
 
 
-def _find_rally_segment(df, lookback: int = WAVE_LOOKBACK) -> Optional[tuple[int, int, int, int]]:
-    """在近 lookback 日内定位"有效启动低点→阶段高点"拉升段。
-
-    返回 (seg_start, i_low, i_high, n)（df 内绝对位置）；找不到返回 None。
-    口径（待回测）：窗口内最低价日为启动低点，其后最高价为阶段高点。
-    """
-    n = len(df)
-    if n < 10:
-        return None
-    start = max(0, n - lookback)
-    _, high, low, _ = _ohlcv_arrays(df)
-    i_low = start + int(low[start:].argmin())
-    if i_low >= n - 2:
-        return None
-    i_high = i_low + int(high[i_low:].argmax())
-    if i_high <= i_low:
-        return None
-    return start, i_low, i_high, n
 
 
-def detect_wave_type(df) -> dict[str, Any]:
-    """拉升波三分类（B1 §四.0）：sprint > rally > buildup，冲突取保守。
-
-    detail.accel_10d_gain_pct 为拉升段（i_low→i_high）内最大 10 日涨幅，
-    不以当日为终点（回调时点后置口径会失效）。
-    """
-    close, high, low, vol = _ohlcv_arrays(df)
-    n = len(df)
-    detail: dict[str, Any] = {}
-    if n < WAVE_MIN_BARS:
-        return {"wave_type": "unknown", "available": False, "detail": {"reason": f"K线不足{WAVE_MIN_BARS}根"}}
-    seg = _find_rally_segment(df)
-    if seg is None:
-        return {"wave_type": "unknown", "available": True, "detail": {"reason": "无有效启动低点→阶段高点段"}}
-    start, i_low, i_high, _ = seg
-
-    seg_gain = (float(high[i_high]) / float(close[i_low]) - 1) * 100 if close[i_low] else 0.0
-    # 近20日涨停/接近涨停计数（全 df 口径；prev close<=0 的脏数据 bar 不计涨停）
-    with np.errstate(divide="ignore", invalid="ignore"):
-        chg = close[1:] / close[:-1] * 100 - 100
-    limit_ups = [i + 1 for i in range(max(0, n - WAVE_SPRINT_WINDOW - 1), n - 1)
-                 if close[i] > 0 and chg[i] >= WAVE_LIMIT_UP_PCT]
-    # 高斜率加速：拉升段（i_low→i_high）内最大 10 日涨幅。
-    # 以今天为终点会在 B1 回调时点必然失效，必须在段上计算（code review 修复）。
-    accel_10d = None
-    if i_high - i_low >= 10:
-        accel_10d = max(
-            (float(close[t] / close[t - 10] - 1) * 100)
-            for t in range(i_low + 10, i_high + 1)
-            if close[t - 10] > 0
-        )
-    # 顶部放量：阶段高点日量 / 其前5日均量
-    top_vol_ratio = None
-    if i_high >= 1:
-        base = vol[max(0, i_high - 5):i_high].mean() if i_high >= 1 else 0
-        top_vol_ratio = float(vol[i_high] / base) if base else None
-    # 启动段放量长阳：启动低点后5日内存在涨幅>=5%且量>=前5日均量1.5倍
-    start_bull = False
-    for t in range(i_low + 1, min(i_low + 6, n)):
-        base = vol[max(0, t - 5):t].mean()
-        if base and close[t] / close[t - 1] - 1 >= WAVE_START_CANDLE_PCT / 100 and vol[t] >= base * WAVE_START_CANDLE_VOL:
-            start_bull = True
-            break
-    # 二次启动：启动低点之前的窗口段已存在 >=15% 摆动（前一段拉升）
-    second_start = False
-    if i_low - start >= 5:
-        prior_swing = (float(high[start:i_low].max()) / float(low[start:i_low].min()) - 1) * 100
-        second_start = prior_swing >= WAVE_SECOND_START_GAIN
-    else:
-        prior_swing = None
-
-    accel_ok = accel_10d is not None and accel_10d >= WAVE_ACCEL_10D_GAIN
-    top_vol_ok = top_vol_ratio is not None and top_vol_ratio >= WAVE_TOP_VOL_RATIO
-    if len(limit_ups) >= WAVE_SPRINT_MIN_LIMIT_UPS and accel_ok and top_vol_ok:
-        wave = "sprint"
-    elif second_start and WAVE_RALLY_GAIN[0] <= seg_gain <= WAVE_RALLY_GAIN[1]:
-        wave = "rally"
-    elif WAVE_BUILDUP_GAIN[0] <= seg_gain <= WAVE_BUILDUP_GAIN[1] and start_bull:
-        wave = "buildup"
-    else:
-        wave = "unknown"
-
-    detail = {
-        "seg_gain_pct": round(seg_gain, 2),
-        "limit_up_count_20d": len(limit_ups),
-        "accel_10d_gain_pct": round(accel_10d, 2) if accel_10d is not None else None,
-        "top_vol_ratio": round(top_vol_ratio, 3) if top_vol_ratio is not None else None,
-        "start_bull_candle": start_bull,
-        "second_start": second_start,
-        "prior_swing_pct": round(prior_swing, 2) if prior_swing is not None else None,
-    }
-    return {"wave_type": wave, "available": True, "detail": detail}
 
 
 def weekly_j_state(df) -> dict[str, Any]:
@@ -926,262 +802,11 @@ def check_macd_technics(df) -> dict[str, Any]:
 
 
 
-def compute_perfect_b1_fit(df, daily_j, zx: dict, pullback: dict,
-                           macd_state: Optional[dict] = None) -> dict[str, Any]:
-    """完美 B1 图形贴合度（0-8 梯度分）：J 深度 + 回踩贴线 + 缩量程度 +
-    MACD 零轴上 + DKS 上行。每个分量输出实际值（待回测参数见顶部常量）。
-
-    macd_state 可传 check_macd_technics(df) 的结果复用 DIF（避免同一只票把
-    12/26/9 三条 EMA 算两遍）；不传或不可用时照旧自己算 macd(df)，结果完全一致。
-    """
-    comp: dict[str, Any] = {}
-
-    # J 深度：J<0 → 2；J<7 → 1.5；J<13 → 1（图集案例 J 全在 13 以下，多为负）
-    if daily_j is None:
-        j_pts = 0.0
-    elif daily_j < FIT_J_DEEP:
-        j_pts = 2.0
-    elif daily_j < FIT_J_MID:
-        j_pts = 1.5
-    elif daily_j < J_LOW_THRESHOLD:
-        j_pts = 1.0
-    else:
-        j_pts = 0.0
-    comp["j_depth"] = {"points": j_pts, "daily_j": daily_j}
-
-    # 回踩贴线：收盘距 QSX 或 DKS 的最近偏离 ≤3% → 2；≤6% → 1
-    near_pts = 0.0
-    line_dist = None
-    close_last = float(df["close"].iloc[-1])
-    if zx.get("available") and close_last:
-        dists = []
-        for key in ("qsx", "dks"):
-            v = zx.get(key)
-            if v:
-                dists.append(abs(close_last / float(v) - 1) * 100)
-        if dists:
-            line_dist = round(min(dists), 2)
-            near_pts = 2.0 if line_dist <= FIT_NEAR_LINE_PCT else (1.0 if line_dist <= FIT_NEAR_LINE_MAX_PCT else 0.0)
-    comp["near_line"] = {"points": near_pts, "min_line_distance_pct": line_dist}
-
-    # 缩量程度：回调段/上涨段均量 ≤0.5 → 2；≤0.8 → 1
-    pull_ratio = ((pullback.get("detail") or {}).get("pullback_vol_ratio")
-                  if pullback.get("available") else None)
-    shrink_pts = 0.0
-    if pull_ratio is not None:
-        shrink_pts = 2.0 if pull_ratio <= FIT_SHRINK_DEEP else (1.0 if pull_ratio <= FIT_SHRINK_MID else 0.0)
-    comp["shrink_degree"] = {"points": shrink_pts, "pullback_vol_ratio": pull_ratio}
-
-    # MACD 零轴上：DIF>0 → 1（图集多数案例 DIF 在零轴上方）
-    m = macd_state if (macd_state or {}).get("available") else macd(df)
-    macd_pts = 0.0
-    dif_val = None
-    if m.get("available"):
-        dif_val = m.get("dif")
-        macd_pts = 1.0 if (dif_val is not None and dif_val > 0) else 0.0
-    comp["macd_above_zero"] = {"points": macd_pts, "dif": dif_val}
-
-    # DKS 上行：DKS[t] > DKS[t-5] → 1（慢线本身走升）
-    dks_pts = 0.0
-    dks_now = dks_prev = None
-    close_s = df["close"].astype(float).reset_index(drop=True)
-    if len(close_s) >= max(DKS_MA_WINDOWS) + FIT_DKS_SLOPE_DAYS:
-        dks = dks_series(close_s)
-        dks_now = float(dks.iloc[-1])
-        dks_prev = float(dks.iloc[-1 - FIT_DKS_SLOPE_DAYS])
-        dks_pts = 1.0 if dks_now > dks_prev else 0.0
-    comp["dks_rising"] = {"points": dks_pts, "dks": dks_now, "dks_prev": dks_prev}
-
-    total = round(sum(c["points"] for c in comp.values()), 2)
-    return {"score": total, "max_score": 8, "components": comp}
 
 
 
-def compute_b1_pullback_fit(df) -> dict[str, Any]:
-    """完美B1「缩量回踩超卖企稳」买弱指纹评分（0-7）。来源：10只确认赢家(后续大涨)反标。
-
-    与 technical_score(买强) 正交——专抓「上升趋势中缩量回踩到均线、J超卖、企稳」的买弱点。
-    ⚠️ 全市场回测已证伪(2026-07):周线交易模拟+0AMV做多+成本下期望 -0.42%/笔，劣于无差别进场
-    baseline 的 +0.96%/笔 —— **作进场过滤有害**(排除了做多区间的突破赢家)。仅作描述性证据落盘、
-    **绝不作买入依据**、不驱动分层。真正的 edge 在「0AMV择时 + 止损/BBI移动止盈」,不在此形态。
-    绝不 raise。
-    """
-    try:
-        c = df["close"].astype(float).reset_index(drop=True)
-        v = df["volume"].astype(float).reset_index(drop=True)
-        op = df["open"].astype(float).reset_index(drop=True)
-        n = len(c)
-        if n < 20:
-            return {"available": False, "score": 0, "max_score": 7, "hit": False}
-        ma5 = c.rolling(5).mean(); ma10 = c.rolling(10).mean()
-        ma60 = c.rolling(min(B1PB_TREND_MA, n)).mean()
-        look = min(45, n)
-        hi_i = int(c.iloc[-look:].values.argmax()) + (n - look)   # 波段高点
-        up_win = c.iloc[max(0, hi_i - 40):hi_i + 1]
-        lo_before = float(up_win.min()) if len(up_win) else float(c.iloc[hi_i])
-        up_gain = (float(c.iloc[hi_i]) / lo_before - 1) * 100 if lo_before else 0.0
-        pull_days = (n - 1) - hi_i
-        pull_depth = (float(c.iloc[hi_i]) - float(c.iloc[-1])) / float(c.iloc[hi_i]) * 100 if c.iloc[hi_i] else 0.0
-        jser = _j_series(df)
-        j_min = float(jser.iloc[-(pull_days + 1):].min()) if pull_days > 0 else float(jser.iloc[-1])
-        vma5 = float(v.iloc[-5:].mean())
-        vol_ratio = float(v.iloc[-1]) / vma5 if vma5 > 0 else 9.0
-        body = abs(float(c.iloc[-1]) - float(op.iloc[-1])) / float(c.iloc[-2]) * 100 if (n >= 2 and c.iloc[-2]) else 9.0
-        d_ma5 = (float(c.iloc[-1]) / float(ma5.iloc[-1]) - 1) * 100 if not np.isnan(ma5.iloc[-1]) else 99.0
-        d_ma10 = (float(c.iloc[-1]) / float(ma10.iloc[-1]) - 1) * 100 if not np.isnan(ma10.iloc[-1]) else 99.0
-        d_ma60 = (float(c.iloc[-1]) / float(ma60.iloc[-1]) - 1) * 100 if not np.isnan(ma60.iloc[-1]) else -99.0
-        comp = {
-            "trend_intact": bool(d_ma60 > -1.0),
-            "pullback_below_ma10": bool(B1PB_MA10_BAND[0] <= d_ma10 < B1PB_MA10_BAND[1] and d_ma5 < 1.5),
-            "prior_gain": bool(up_gain >= B1PB_PRIOR_GAIN),
-            "pullback_healthy": bool(B1PB_PULL_BAND[0] <= pull_depth <= B1PB_PULL_BAND[1]),
-            "volume_dryup": bool(vol_ratio <= B1PB_VOL_MA5_MAX),
-            "j_oversold_reset": bool(j_min <= B1PB_JMIN_MAX),
-            "quiet_candle": bool(body <= B1PB_BODY_MAX),
-        }
-        score = sum(1 for x in comp.values() if x)
-        return {"available": True, "score": score, "max_score": 7, "hit": bool(score >= B1PB_HIT_MIN),
-                "components": comp,
-                "detail": {"prior_gain_pct": round(up_gain, 1), "pullback_depth_pct": round(pull_depth, 1),
-                           "dist_ma10_pct": round(d_ma10, 1), "dist_ma60_pct": round(d_ma60, 1),
-                           "vol_vs_ma5": round(vol_ratio, 2), "j_min_pullback": round(j_min, 1),
-                           "body_pct": round(body, 1)}}
-    except Exception:  # noqa: BLE001 —— 坏数据不中断
-        return {"available": False, "score": 0, "max_score": 7, "hit": False}
 
 
-def detect_distribution(df, code: str = "") -> dict[str, Any]:
-    """主力出货五方式（顶部派发，B1 §七.3）：负向因子，用于选股规避/降档。
-
-    ① 顶部天量大阴、② 次高点巨量长阴、③ 阶梯放量跌破QSX、④ 双头双巨阴、
-    ⑤ 顶部绿肥红瘦。命中≥1→watch；命中①/②或≥2→high。阈值均为待回测参数。
-    """
-    close, high, low, vol = _ohlcv_arrays(df)
-    open_ = df["open"].astype(float).to_numpy()
-    n = len(df)
-    if n < 30:
-        return {"available": False, "signals": {}, "hits": [], "hit_count": 0,
-                "severe": False, "risk_level": "none"}
-    limit = _infer_price_limit(code, df)
-    big_bear = limit * DIST_BIG_BEAR_FRAC
-    long_bear = limit * DIST_LONG_BEAR_FRAC
-    vol_ma20 = float(vol[max(0, n - DIST_HUGE_VOL_WIN - 1):n - 1].mean())
-    # vol_ma20 近零（长期停牌/零成交脏数据）时量比类判定全部失真 → 检测器不可用
-    series_vol_mean = float(vol.mean()) if n else 0.0
-    if not series_vol_mean or vol_ma20 < series_vol_mean * DIST_MIN_VOL_MA20_FRAC:
-        return {"available": False, "signals": {}, "hits": [], "hit_count": 0,
-                "severe": False, "risk_level": "none",
-                "reason": f"vol_ma20 近零（{vol_ma20:.1f} < 全序列均量 {series_vol_mean:.1f}×{DIST_MIN_VOL_MA20_FRAC}）"}
-    qsx = df["close"].astype(float).ewm(span=10, adjust=False).mean().ewm(span=10, adjust=False).mean().to_numpy()
-
-    def chg(t: int) -> float:
-        return (close[t] / close[t - 1] - 1) * 100 if t >= 1 and close[t - 1] else 0.0
-
-    def vr5(t: int):
-        base = vol[max(0, t - 5):t].mean()
-        return float(vol[t] / base) if base else None
-
-    sig: dict[str, Any] = {}
-
-    # ① 顶部天量大阴：近DIST_RECENT根内 大阴 + 天量 + 阴线前加速
-    hit1 = None
-    for t in range(n - DIST_RECENT, n):
-        if t < DIST_ACCEL_WIN + 1:
-            continue
-        c = chg(t)
-        # 「天量」＝ 量 ≥ 20日均量×DIST_HUGE_VOL_RATIO（与②同一口径，见顶部常量）。
-        # 审计：原先还 or 了 `vol[t] >= vol[t-20:t+1].max()`——该切片**含 t 自身**，
-        # 于是它恒等于"当日是窗口最大量"，即 20 日量新高，完全旁路了 2×MA20 阈值：
-        # 一只均量平稳的票只要今天量比昨天高一点点就算"天量"，配上大阴+加速就被判出货。
-        huge = bool(vol_ma20) and vol[t] >= vol_ma20 * DIST_HUGE_VOL_RATIO
-        accel = (close[t - 1] / close[t - DIST_ACCEL_WIN] - 1) * 100 if close[t - DIST_ACCEL_WIN] else 0.0
-        if close[t] < open_[t] and c <= -big_bear and huge and accel >= DIST_ACCEL_GAIN:
-            hit1 = {"bars_ago": n - 1 - t, "change_pct": round(c, 2),
-                    "vol_ratio_ma20": round(float(vol[t] / vol_ma20), 3) if vol_ma20 else None,
-                    "accel_pct": round(accel, 2)}
-            break
-    sig["top_huge_vol_bear"] = {"hit": hit1 is not None, "detail": hit1}
-
-    # ② 次高点巨量长阴：前一日缩量创新高/次高 + 当日巨量长阴
-    hit2 = None
-    for t in range(n - DIST_RECENT, n):
-        if t < 25:
-            continue
-        c = chg(t)
-        prev_new_high = high[t - 1] >= high[max(0, t - 21):t - 1].max()
-        prev_shrink = (vr5(t - 1) is not None and vr5(t - 1) <= DIST_SUBHIGH_SHRINK)
-        huge = vol_ma20 and vol[t] >= vol_ma20 * DIST_HUGE_VOL_RATIO
-        if close[t] < open_[t] and c <= -long_bear and huge and prev_new_high and prev_shrink:
-            hit2 = {"bars_ago": n - 1 - t, "change_pct": round(c, 2),
-                    "prev_vol_ratio5": round(float(vr5(t - 1)), 3),
-                    "vol_ratio_ma20": round(float(vol[t] / vol_ma20), 3)}
-            break
-    sig["subhigh_vol_bear"] = {"hit": hit2 is not None, "detail": hit2}
-
-    # ③ 阶梯放量跌破QSX：近DIST_RECENT根内收盘放量跌破QSX，且此前连续≥3根放量阴
-    hit3 = None
-    for t in range(n - DIST_RECENT, n):
-        if t < DIST_STAIR_MIN_BARS + 6:
-            continue
-        vrt = vr5(t)
-        broke = close[t] < qsx[t] and vrt is not None and vrt >= DIST_STAIR_BREAK_VR
-        cnt = 0
-        for k in range(t, max(0, t - 8), -1):
-            vrk = vr5(k)
-            if close[k] < open_[k] and vrk is not None and (vol[k] >= vol[k - 1] or vrk >= 1.0):
-                cnt += 1
-            else:
-                break
-        if broke and cnt >= DIST_STAIR_MIN_BARS:
-            hit3 = {"bars_ago": n - 1 - t, "consecutive_vol_bears": cnt,
-                    "vol_ratio5": round(vrt, 3), "below_qsx": True}
-            break
-    sig["stairstep_vol_decline"] = {"hit": hit3 is not None, "detail": hit3}
-
-    # ④ 双头双巨阴：近窗口内两个相近高点，各自其后≤2根内出现放量阴
-    hit4 = None
-    w0 = max(0, n - DIST_TOP_WINDOW * 2)
-    peaks = [i for i in range(w0 + 2, n - 2)
-             if high[i] == high[i - 2:i + 3].max() and float((high[i - 2:i + 3] == high[i]).sum()) == 1]
-    if len(peaks) >= 2:
-        p2 = peaks[-1]
-        p1 = max((p for p in peaks[:-1]), key=lambda i: high[i], default=None)
-        if p1 is not None and p2 - p1 >= 3:
-            close_tops = abs(high[p1] / high[p2] - 1) * 100 <= DIST_DOUBLE_TOP_TOL
-
-            def bear_vol_after(p: int) -> bool:
-                for t in range(p + 1, min(n, p + 3)):
-                    vrt = vr5(t)
-                    if close[t] < open_[t] and vrt is not None and vrt >= 1.5:
-                        return True
-                return False
-            if close_tops and bear_vol_after(p1) and bear_vol_after(p2):
-                hit4 = {"peak1_bars_ago": n - 1 - p1, "peak2_bars_ago": n - 1 - p2,
-                        "tops_gap_pct": round(abs(high[p1] / high[p2] - 1) * 100, 2)}
-    sig["double_top_vol_bear"] = {"hit": hit4 is not None, "detail": hit4}
-
-    # ⑤ 顶部绿肥红瘦：顶部区间阴线实体均值 > 阳线实体均值 且 阴量 > 阳量
-    seg = range(n - DIST_TOP_WINDOW, n)
-    near_top = True if n < 60 else high[-DIST_TOP_WINDOW:].max() >= high[-60:].max() * 0.98
-    bear_bodies = [abs(close[t] / open_[t] - 1) * 100 for t in seg if close[t] < open_[t] and open_[t]]
-    bull_bodies = [abs(close[t] / open_[t] - 1) * 100 for t in seg if close[t] > open_[t] and open_[t]]
-    bear_vols = [vol[t] for t in seg if close[t] < open_[t]]
-    bull_vols = [vol[t] for t in seg if close[t] > open_[t]]
-    hit5 = bool(near_top and bear_bodies and bull_bodies
-                and (sum(bear_bodies) / len(bear_bodies) > sum(bull_bodies) / len(bull_bodies))
-                and bear_vols and bull_vols
-                and (sum(bear_vols) / len(bear_vols) > sum(bull_vols) / len(bull_vols)))
-    sig["top_green_heavy_red_light"] = {
-        "hit": hit5,
-        "detail": {"bear_body_mean_pct": round(sum(bear_bodies) / len(bear_bodies), 3) if bear_bodies else None,
-                   "bull_body_mean_pct": round(sum(bull_bodies) / len(bull_bodies), 3) if bull_bodies else None} if near_top else None,
-    }
-
-    hits = [k for k, v in sig.items() if v["hit"]]
-    severe = sig["top_huge_vol_bear"]["hit"] or sig["subhigh_vol_bear"]["hit"]
-    risk = "high" if (severe or len(hits) >= 2) else ("watch" if hits else "none")
-    return {"available": True, "signals": sig, "hits": hits, "hit_count": len(hits),
-            "severe": bool(severe), "risk_level": risk, "price_limit": limit}
 
 
 def check_liquidity(df, win: int = LIQUIDITY_WIN) -> dict[str, Any]:

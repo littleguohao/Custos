@@ -46,6 +46,18 @@ for _p in (str(_TOOLS), str(_TOOLS / "screening"), str(_TOOLS / "market_timing")
 
 from indicators import j_series as _j_canonical  # noqa: E402
 
+FACTOR: dict[str, Any] = {
+    "id": "b2_surge_factor",
+    "name": "B2 异动 / 底部异动",
+    "kind": "pattern",
+    "status": "needs_work",
+    "evidence": "00_governance/research/R7_hypothesis_H2_b1b2b3.md",
+    "note": "R7：全否决；B2 全中≡追高，surge_strict_then_b1 跨区间零信号",
+    "min_bars": 12,
+    "live_use": "evidence_only",  # signal_labels 出标签落候选表；该模块头部已声明「标注不是交易依据」
+}
+
+
 def _j_series(df: pd.DataFrame):
     """委托给 `indicators.j_series`，保留本模块的 `n<12` 守卫。
 

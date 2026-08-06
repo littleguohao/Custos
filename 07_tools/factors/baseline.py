@@ -19,6 +19,7 @@ FACTOR: dict[str, Any] = {
     "evidence": "00_governance/research/R1_core_framework.md",
     "note": "所有进场信号的对照臂，必须保留",
     "min_bars": 1,
+    "live_use": "none",
 }
 
 def score(df: pd.DataFrame, code: str):

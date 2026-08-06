@@ -20,6 +20,26 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
+FACTOR: dict[str, Any] = {
+    "id": "s_shape",
+    "name": "S 形态综合分（S**）",
+    "kind": "selector",
+    "status": "needs_work",
+    "evidence": "00_governance/research/R2_selection_price_volume.md",
+    "note": "R2：全市场阈值扫描无 lift；正向择优劣于随机",
+    "min_bars": 60,
+    # ⚠️⚠️ **已知矛盾（2026-08-06 因子层清点时查出，待 owner 定）**：
+    #   R2 的结论是「S_shape 无 alpha，全市场阈值扫描无 lift」（status=needs_work），
+    #   但 live 侧 `score_candidates.technical_score` 的**主路径**就是它 ——
+    #   `return int(round(s_star)), sstar_level(s_star), detail`，
+    #   直接产出技术层级并参与候选表 A/B/C/D 分层。
+    #   ⇒ **研究说它没用，live 却用它排序。**
+    #   不擅自改（改分层是策略决策，且 README 明确 StockPool 只是证据层、
+    #   买入由 chief_decision 裁决），已登记 TODO 待拍板。
+    "live_use": "scorer",  # ⚠️ 见下「已知矛盾」
+}
+
+
 _TOOLS = Path(__file__).resolve().parents[1]
 for _p in (str(_TOOLS), str(_TOOLS / "market_timing")):
     if _p not in sys.path:

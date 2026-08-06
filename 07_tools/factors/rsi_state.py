@@ -30,6 +30,18 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
+FACTOR: dict[str, Any] = {
+    "id": "rsi_state",
+    "name": "RSI 状态因子（H3）",
+    "kind": "state",
+    "status": "untested",
+    "evidence": "00_governance/research/R8_hypothesis_H3_H4_pending.md",
+    "note": "R8：已实现未跑；与 J 互补而非替代",
+    "min_bars": 30,
+    "live_use": "evidence_only",  # signal_labels 出标签落候选表；该模块头部已声明「标注不是交易依据」
+}
+
+
 _TOOLS = Path(__file__).resolve().parents[1]
 for _p in (str(_TOOLS), str(_TOOLS / "screening"), str(_TOOLS / "market_timing")):
     if _p not in sys.path:

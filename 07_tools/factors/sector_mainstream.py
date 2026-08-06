@@ -20,6 +20,18 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
+FACTOR: dict[str, Any] = {
+    "id": "sector_mainstream",
+    "name": "主线板块族密度",
+    "kind": "state",
+    "status": "candidate",
+    "evidence": "00_governance/research/R2_selection_price_volume.md",
+    "note": "R2：板块族+密度是准确的「窗口主线指纹」（归因工具），但「跟随主流」机械规则不成立",
+    "min_bars": 1,
+    "live_use": "evidence_only",
+}
+
+
 TOOLS = Path(__file__).resolve().parents[1]
 for _p in (str(TOOLS), str(TOOLS / "screening"), str(TOOLS / "local_tdx")):
     if _p not in sys.path:

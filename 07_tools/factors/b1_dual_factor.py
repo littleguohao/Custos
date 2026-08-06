@@ -40,6 +40,18 @@ from indicators import dks_series as _dks_series  # noqa: E402
 
 from s_shape import compute_ma_structure, compute_overhead_supply, compute_s_reversal  # noqa: E402
 
+FACTOR: dict[str, Any] = {
+    "id": "b1_dual_factor",
+    "name": "B1 双轴（长期结构 × 短期回调）",
+    "kind": "selector",
+    "status": "needs_work",
+    "evidence": "00_governance/research/R6_hypothesis_H1_dual_axis.md",
+    "note": "R6：未过跨窗终审；j_low_qsx_weekly 净值只多 0.019R 却付 90% 召回",
+    "min_bars": 120,
+    "live_use": "evidence_only",  # signal_labels 出标签落候选表；该模块头部已声明「标注不是交易依据」
+}
+
+
 # ---- 轴1：长期结构 0-100（"这只票底子好不好，值不值得等它回调"）----
 STRUCT_QSX_DKS_PTS = 30.0        # QSX>DKS 多头结构（good_b1 8/9）——单项权重最高
 STRUCT_MA_PTS = 20.0             # 均线多头 + 低点抬高（复用 s_shape.compute_ma_structure 0-10 → ×2）

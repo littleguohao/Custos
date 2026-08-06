@@ -22,6 +22,7 @@ FACTOR: dict[str, Any] = {
     "evidence": "00_governance/research/R2_selection_price_volume.md",
     "note": "缺独立终审记录；按 R2 整体结论推定不可用",
     "min_bars": 10,
+    "live_use": "none",
 }
 
 def score(df: pd.DataFrame, code: str):

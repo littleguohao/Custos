@@ -26,6 +26,17 @@
     evidence    结论出处（`00_governance/research/RN_*.md`），needs_work 必填
     note        一句话说清死法或用法
     min_bars    最少需要多少根 K 线；不足时 score/detect 返回 None
+    live_use    **在 live 链里允许怎么用**（与 status 是两个维度）：
+                none           不得出现在 live 链
+                evidence_only  只能作**描述性证据字段**（落候选表供人看），
+                               **不得驱动分层 / gate / 排序**
+                gate           可作进场门槛
+                scorer         可作排序打分
+
+                ⚠️ 为什么要这一栏：R2 对 `b1_pullback`/`perfect_b1_fit` 的结论是
+                「**仅描述性，不作买入依据**」—— 它们**确实**被 live 链计算并落表，
+                但不驱动决策。只用 status 一个维度会把这种合法用法误判成违规
+                （2026-08-06 我的第一版守卫就是这么误报的）。
 
 ⚠️ **`status` 在 `NOT_FOR_LIVE` 里的因子由测试强制不得进入 live 选股链。**
 这是把 R2「价量选择器均未通过验证」这个结论**变成机器可执行的约束** ——

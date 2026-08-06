@@ -22,6 +22,7 @@ FACTOR: dict[str, Any] = {
     "evidence": "00_governance/research/R3_selection_discriminability_recall.md",
     "note": "同号率仅 50%，不稳定",
     "min_bars": 12,
+    "live_use": "none",
 }
 
 def score(df: pd.DataFrame, code: str):
