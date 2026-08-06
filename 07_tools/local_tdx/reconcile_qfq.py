@@ -351,6 +351,149 @@ def detail(code: str, top: int = 25) -> int:
     return 0
 
 
+def gap_report(sample: int = 200,
+               root: Optional[pathlib.Path] = None) -> int:
+    """量化 bundle 缺口的真实代价，并判断有没有可行的修法。
+
+    ## 缺口是什么
+
+    两个 bundle 之间不连续（实测）：
+
+        2006_2020   1999-11-10 ~ 2020-09-25
+        2021_2026   2021-08-02 ~ 2026-02-06
+        ⇒ 缺口约 10 个月（2020-09-28 ~ 2021-07-30）
+
+    ## 三个要量的事
+
+    **① vipdoc 的深度是不是「下载设置」而非硬限制。** 实测 600000 只有 1214 根
+    （约 5 年，2021-06 起）。若**全市场票的根数都差不多**，说明是通达信客户端的
+    下载范围设置 ⇒ **重新下载完整历史就能让 vipdoc 覆盖缺口及更早**，
+    这比"补 bundle"简单得多，而且顺带解决"跨年 walk-forward 只有 5 年"的限制。
+    若各票根数差异很大，则是逐票数据可得性问题，另说。
+
+    **② 缺口的真实代价 = 那段时间退市的票。** 仍在市的票，缺口期的行情可以由
+    vipdoc 补（前提是①成立）。**真正补不回来的只有在缺口期间退市的票** ——
+    而它们恰恰是"去幸存者偏差"要的样本。用「在老 bundle 的 all.txt 里、
+    但不在新 bundle 里」近似识别。
+
+    **③ 缺口对现有窗口是否构成实际约束。** `--cross-window` 用的 2022-01~2024-12
+    落在缺口之后，不受影响；只有跨 2020-09~2021-08 的窗口才会踩到。
+    """
+    import s_data as Q
+    # ⚠️ `root` 显式传参：`list_bundles(root=DEFAULT_Q_ROOT)` 的默认值在**函数定义时**
+    # 就绑定了，monkeypatch 模块常量对它无效（与 `pick_auto` 的 cache_dir 同一个坑，
+    # 也是 DATA_SOURCE_PRINCIPLE「同一文件两个模块」那类问题的近亲）。
+    bundles = Q.list_bundles(root) if root is not None else Q.list_bundles()
+    if len(bundles) < 2:
+        print(f"只发现 {len(bundles)} 个 bundle，无缺口可言")
+        return 0
+
+    print(f"\n{'=' * 92}")
+    print("bundle 缺口代价诊断")
+    print("=" * 92)
+    print(f"{'bundle':<14}{'口径':<16}{'起':<13}{'止':<13}{'交易日':>8}")
+    for b in bundles:
+        print(f"{b['dir'].name:<14}{b.get('convention', '?'):<16}"
+              f"{b['start']:<13}{b['end']:<13}{len(b['calendar']):>8}")
+    # ⚠️ 不能只判 `a.end < b.start` —— 那对任何不重叠的相邻 bundle 都成立，
+    # 连"上一份到 08-01、下一份从 08-02 开始"这种**无缝衔接**也会被报成缺口。
+    # 用日历天数阈值：超过一周才算真缺口（跨周末/长假不算）。
+    from datetime import date
+    GAP_MIN_DAYS = 7
+    gaps = []
+    for a, b in zip(bundles, bundles[1:]):
+        try:
+            d0, d1 = date.fromisoformat(a["end"]), date.fromisoformat(b["start"])
+        except ValueError:
+            continue
+        if (d1 - d0).days > GAP_MIN_DAYS:
+            gaps.append((a["end"], b["start"], a["dir"].name, b["dir"].name))
+    if not gaps:
+        print("\n✅ 无缺口")
+    for g0, g1, n0, n1 in gaps:
+        span = (date.fromisoformat(g1) - date.fromisoformat(g0)).days
+        print(f"\n⚠️ 缺口：{g0} → {g1}（{span} 个日历日，{n0} 结束 ~ {n1} 开始）")
+
+    # ① vipdoc 深度分布 —— 判断是不是下载设置
+    print(f"\n{'─' * 92}\n① vipdoc 深度分布（判断能否靠重新下载补齐）")
+    try:
+        import local_tdx_data as L
+        codes = L.list_local_vipdoc_codes()
+        import random
+        pick = random.Random(0).sample(codes, min(sample, len(codes)))
+        depths, firsts = [], []
+        for c in pick:
+            try:
+                df = L.read_vipdoc_daily(c)
+            except Exception:                                  # noqa: BLE001
+                continue
+            if df is None or df.empty or "date" not in df.columns:
+                continue
+            depths.append(len(df))
+            firsts.append(str(df["date"].iloc[0])[:10])
+        if depths:
+            depths.sort(), firsts.sort()
+            n = len(depths)
+            print(f"   抽样 {n} 只：根数 min {depths[0]} / 中位 {depths[n // 2]} / "
+                  f"max {depths[-1]}")
+            print(f"   最早日期：min {firsts[0]} / 中位 {firsts[n // 2]} / max {firsts[-1]}")
+            spread = depths[-1] / max(depths[n // 2], 1)
+            if spread < 1.5:
+                print("   ⇒ 各票根数接近 ⇒ **是通达信的下载范围设置**，"
+                      "在客户端重新下载完整历史即可覆盖缺口及更早")
+            else:
+                print("   ⇒ 各票根数差异大 ⇒ 更像逐票可得性/上市时间差异，"
+                      "重新下载能补多少要再看")
+        else:
+            print("   读不到 vipdoc（本机无通达信？）")
+    except Exception as exc:                                   # noqa: BLE001
+        print(f"   跳过：{type(exc).__name__}: {exc}")
+
+    # ② 缺口的真实代价：那段时间退市的票
+    print(f"\n{'─' * 92}\n② 缺口的真实代价 = 缺口期间退市的票（仍在市的可由 vipdoc 补）")
+    try:
+        sets = {}
+        for b in bundles:
+            inst = b["dir"] / "instruments" / "all.txt"
+            if not inst.is_file():
+                continue
+            s = set()
+            for ln in inst.read_text(encoding="utf-8").splitlines():
+                ln = ln.strip()
+                if not ln:
+                    continue
+                digits = "".join(ch for ch in ln.split()[0] if ch.isdigit())
+                if len(digits) == 6:
+                    s.add(digits)
+            sets[b["dir"].name] = s
+        names = list(sets)
+        if len(names) >= 2:
+            old, new = sets[names[0]], sets[names[-1]]
+            only_old = old - new
+            print(f"   {names[0]}: {len(old)} 只   {names[-1]}: {len(new)} 只")
+            print(f"   **只在老 bundle 里**（= 新 bundle 开始前已退市）：{len(only_old)} 只")
+            try:
+                import local_tdx_data as L
+                live = set(L.list_local_vipdoc_codes())
+                gone = only_old - live
+                print(f"   其中本地 vipdoc 也没有的：{len(gone)} 只"
+                      f" ⇒ **这些票的缺口期行情无处可补**")
+            except Exception:                                  # noqa: BLE001
+                pass
+            print("   ⇒ 这个数就是缺口对「去幸存者偏差」的实际代价上限")
+    except Exception as exc:                                   # noqa: BLE001
+        print(f"   跳过：{type(exc).__name__}: {exc}")
+
+    # ③ 现有窗口是否踩到缺口
+    print(f"\n{'─' * 92}\n③ 现有窗口是否踩缺口")
+    for label, w0, w1 in (("m2 --cross-window", "2022-01-01", "2024-12-31"),
+                          ("qfq 对账默认窗口", WIN_START, WIN_END)):
+        hit = any(not (w1 < g0 or w0 > g1) for g0, g1, _, _ in gaps)
+        print(f"   {label:<22}{w0}~{w1}   {'⚠️ 跨缺口' if hit else '✅ 不跨'}")
+    print("\n⇒ 只有跨 2020-09~2021-08 的窗口会踩到；避开即可。")
+    return 0
+
+
 def qlib_selfcheck(code: str) -> int:
     """**不依赖 tdx** 判定每个 bundle 自己的价格口径 —— 用它自带的 `factor` / `change`。
 
@@ -652,6 +795,11 @@ def main() -> int:
                     help="判定两边各用**乘法前复权**还是**加法（减分红）调整**")
     ap.add_argument("--qlib-fields", default="",
                     help="列出 qlib bundle 里该票实有的 .bin 字段（看有没有 factor）")
+    ap.add_argument("--gap-report", action="store_true",
+                    help="量化 bundle 缺口的代价：vipdoc 深度是否可扩、缺口期退市票多少、"
+                         "现有窗口是否踩坑")
+    ap.add_argument("--gap-sample", type=int, default=200,
+                    help="--gap-report 抽样多少只票测 vipdoc 深度")
     ap.add_argument("--qlib-selfcheck", default="",
                     help="**不依赖 tdx** 判各 bundle 自己的口径：用它自带的 factor/change "
                          "+ 我们的 xdxr 事件日。老 bundle 与 vipdoc 无重叠期，只能这样查")
@@ -667,6 +815,8 @@ def main() -> int:
         WIN_START, WIN_END = a.win[0], a.win[1]
         print(f"[INFO] 对账窗口覆盖为 {WIN_START} ~ {WIN_END}")
 
+    if a.gap_report:
+        return gap_report(a.gap_sample)
     if a.qlib_selfcheck:
         return qlib_selfcheck(a.qlib_selfcheck.strip()[:6])
     if a.qlib_fields:

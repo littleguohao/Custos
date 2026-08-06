@@ -191,3 +191,63 @@ class TestWhoIsWrong:
         R.detail("600519", top=3)
         out = capsys.readouterr().out
         assert "只有 qlib 越界" in out, out[-600:]
+
+
+class TestGapReport:
+    """缺口代价诊断：**先量清代价，再决定要不要修**。
+
+    两个 bundle 之间有约 10 个月缺口（2020-09-28 ~ 2021-07-30）。
+    但「补缺口」未必是最优解——仍在市的票可由 vipdoc 补（若能扩历史深度），
+    真正补不回来的只有**缺口期间退市的票**。这个数才是缺口的实际代价。
+    """
+
+    def _mk(self, root, name, days, insts, fields):
+        import numpy as np
+        d = root / name
+        (d / "instruments").mkdir(parents=True)
+        (d / "calendars").mkdir(parents=True)
+        (d / "calendars" / "day.txt").write_text("\n".join(days) + "\n", encoding="utf-8")
+        (d / "instruments" / "all.txt").write_text(
+            "\n".join(f"{i}\t{days[0]}\t{days[-1]}" for i in insts) + "\n", encoding="utf-8")
+        for i in insts:
+            f = d / "features" / i.lower()
+            f.mkdir(parents=True)
+            for fn in fields:
+                np.array([0.0] + [10.0] * len(days), dtype="<f4").tofile(f / f"{fn}.day.bin")
+        return d
+
+    def test_detects_gap_and_delisted_cost(self, tmp_path, monkeypatch, capsys):
+        root = tmp_path / "Q_DATA"
+        ohlcv = ["open", "high", "low", "close", "volume"]
+        # 老 bundle 有 3 只，新 bundle 只剩 1 只 ⇒ 2 只在缺口前后退市
+        self._mk(root, "2006_2020", ["2019-01-02", "2020-09-25"],
+                 ["SH600000", "SH600001", "SH600002"], ohlcv + ["factor"])
+        self._mk(root, "2021_2026", ["2021-08-02", "2026-02-06"],
+                 ["SH600000"], ohlcv)
+        monkeypatch.setattr(R, "WIN_START", "2021-08-02")
+        monkeypatch.setattr(R, "WIN_END", "2026-01-31")
+        R.gap_report(sample=1, root=root)
+        out = capsys.readouterr().out
+        assert "缺口：2020-09-25 → 2021-08-02" in out
+        assert "只在老 bundle 里" in out and "2 只" in out
+        assert "口径" in out and "multiplicative" in out and "unverified" in out
+
+    def test_reports_window_overlap(self, tmp_path, monkeypatch, capsys):
+        """现有窗口是否踩缺口必须直接给出，而不是让人自己比日期。"""
+        root = tmp_path / "Q_DATA"
+        ohlcv = ["open", "high", "low", "close", "volume"]
+        self._mk(root, "a", ["2019-01-02", "2020-09-25"], ["SH600000"], ohlcv + ["factor"])
+        self._mk(root, "b", ["2021-08-02", "2026-02-06"], ["SH600000"], ohlcv)
+        monkeypatch.setattr(R, "WIN_START", "2021-08-02")
+        monkeypatch.setattr(R, "WIN_END", "2026-01-31")
+        R.gap_report(sample=1, root=root)
+        out = capsys.readouterr().out
+        assert "m2 --cross-window" in out and "✅ 不跨" in out
+
+    def test_no_gap_says_so(self, tmp_path, monkeypatch, capsys):
+        root = tmp_path / "Q_DATA"
+        ohlcv = ["open", "high", "low", "close", "volume", "factor"]
+        self._mk(root, "a", ["2019-01-02", "2021-08-01"], ["SH600000"], ohlcv)
+        self._mk(root, "b", ["2021-08-02", "2026-02-06"], ["SH600000"], ohlcv)
+        R.gap_report(sample=1, root=root)
+        assert "✅ 无缺口" in capsys.readouterr().out

@@ -51,9 +51,51 @@ def _exchange(code6: str) -> str:
     return "BJ"          # 4xxxxx/8xxxxx/920xxx 北交所
 
 
+def bundle_convention(bundle_dir: Path) -> str:
+    """判定一个 bundle 的价格口径：``"multiplicative"`` / ``"unverified"`` / ``"unknown"``。
+
+    ⚠️ **实测（2026-08-06）`E:\\S_DATA\\Q_DATA` 下两个 bundle 是两种口径**：
+
+        2006_2020  字段含 factor + change
+                   · change 与 close.pct_change() 一致率 **100%**
+                   · 除权日 close 平滑 ⇒ close 已复权
+                   · factor 分段常数、**21 个取值对应 20 个事件**、事件日阶梯上升
+                   ⇒ **标准乘法复权** ✅
+
+        2021_2026  只有 OHLCV，**没有 factor**
+                   · `raw − close` 分段常数，段边界=除权日，
+                     **相邻段之差恰好等于该次每股现金分红**
+                     （600519: 194.99→173.31，差 21.68 = 2021 年报分红 21.675）
+                   ⇒ **加法调整（减去累计现金分红）** ❌
+
+    加法调整保留绝对价差但把分母减小 ⇒ **百分比收益系统性放大**（实测高分红股 13~21%），
+    涨跌幅甚至能超过涨跌停限制。B1 的止损/J 值/涨跌幅全是百分比 ⇒ **不能用**。
+
+    ⚠️ **判据只能做到「有 factor ⇒ 乘法」，反向不成立。** 缺 factor 只说明
+    **口径无法从 bundle 内部验证**，不等于一定是加法——「2021_2026 是加法」这个结论
+    来自对账（`raw − close` 分段常数、相邻段之差=每股分红），不是来自字段缺失。
+    所以缺 factor 记作 `"unverified"` 而非 `"additive"`，别把推测写成结论。
+
+    但对研究工具而言「无法验证口径」已足够危险：错的价格会静默产出错的结论。
+    所以 `load_bars_qlib` 默认**跳过 unverified**（可显式放行）。
+    完整检验用 `reconcile_qfq.py --qlib-selfcheck CODE`。
+    """
+    feat = bundle_dir / "features"
+    if not feat.is_dir():
+        return "unknown"
+    for inst in feat.iterdir():                    # 抽第一只有数据的票看字段
+        if not inst.is_dir():
+            continue
+        names = {p.name.split(".")[0] for p in inst.glob("*.bin")}
+        if not names:
+            continue
+        return "multiplicative" if "factor" in names else "unverified"
+    return "unknown"
+
+
 def list_bundles(root: str | Path = DEFAULT_Q_ROOT) -> list[dict[str, Any]]:
     """扫描 root 下含 calendars/day.txt 的 qlib bundle,按日历首日期升序返回。
-    每项 {dir, calendar(list[str]), start, end}。异常 bundle 跳过。
+    每项 {dir, calendar(list[str]), start, end, convention}。异常 bundle 跳过。
 
     ⚠️ 空列表必须**出声**:静默返回 [] 会一路走成"0 只票→0 条信号→exit 0",
     最后被读成"因子无判别力"而不是"数据根本没挂上"(审计 E9)。"""
@@ -71,7 +113,8 @@ def list_bundles(root: str | Path = DEFAULT_Q_ROOT) -> list[dict[str, Any]]:
         try:
             cal = [ln.strip() for ln in cal_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
             if cal:
-                out.append({"dir": sub, "calendar": cal, "start": cal[0], "end": cal[-1]})
+                out.append({"dir": sub, "calendar": cal, "start": cal[0], "end": cal[-1],
+                            "convention": bundle_convention(sub)})
         except Exception as exc:  # noqa: BLE001
             _warn(f"读取日历失败 {cal_path}: {exc}")
     if not out:
@@ -181,7 +224,48 @@ def load_bars_qlib(codes: list[str], count: int, start: Optional[str] = None,
     涨跌幅甚至能超过涨跌停限制。用它做百分比收益/止损的回测会失真。
     详见 `00_governance/data/QLIB_LOCAL_DATA.md`。
     """
+_UNVERIFIED_SKIP_WARNED: set[str] = set()
+
+
+def load_bars_qlib(codes: list[str], count: int, start: Optional[str] = None,
+                   end: Optional[str] = None, root: str | Path = DEFAULT_Q_ROOT,
+                   allow_unverified: bool = False) -> dict[str, pd.DataFrame]:
+    """从 qlib bundle 读日线。start/end(YYYY-MM-DD)在 count 之前应用;跨 bundle 段拼接去重。
+
+    ⚠️ **默认跳过「口径无法验证」的 bundle**（缺 `factor`，2026-08-06 起）。
+    实测 `2021_2026`（正是缺 factor 的那个）的价格是
+    「减去累计现金分红」的加法调整 ⇒ **百分比收益被系统性放大**（高分红股 13~21%），
+    涨跌幅能超过涨跌停限制。而 B1 的止损/J 值/涨跌幅全是百分比 ⇒ 用它必然失真。
+
+    好在**坏的那段（2021-08 起）恰好是本地 vipdoc 有数据的时段**，所以推荐组合是：
+
+        1999-11 ~ 2020-09   老 bundle（含退市股 + 乘法复权 + 自带 factor）
+        2020-09 ~ 2021-08   bundle 缺口，无数据
+        2021-06 ~ 今        tdx vipdoc（乘法复权，已对账通过）
+
+    ⇒ 不需要重做数据，只需要不用那一份。`allow_unverified=True` 可显式放行
+    （比如只关心绝对价差、不算百分比收益的研究）。
+    详见 `00_governance/data/QLIB_LOCAL_DATA.md`。
+    """
     bundles = list_bundles(root)
+    if not allow_unverified:
+        unver = [b for b in bundles if b.get("convention") == "unverified"]
+        if unver:
+            key = ",".join(sorted(b["dir"].name for b in unver))
+            if key not in _UNVERIFIED_SKIP_WARNED:
+                _UNVERIFIED_SKIP_WARNED.add(key)
+                _warn(f"跳过**口径无法验证**的 bundle {key}（缺 factor 字段）。"
+                      f"实测缺 factor 的 2021_2026 是**加法调整**（价格=原始价−累计现金"
+                      f"分红 ⇒ 百分比收益放大 13~21%，涨跌幅可超涨跌停）。"
+                      f"该时段改用 tdx vipdoc；确需放行传 allow_unverified=True")
+            bundles = [b for b in bundles if b.get("convention") != "unverified"]
+    if not bundles:
+        _warn("没有可用 bundle（可能全被判为口径无法验证而跳过）")
+        # ⚠️ 必须走同一条空结果护栏（审计 E9）：静默 return {} 会让"0 只票→0 条信号
+        # →exit 0"被读成"因子无判别力"。这条 early-return 第一版漏了它，
+        # 由 test_audit_p3_research::test_s_data_warns_when_nothing_loaded 抓到。
+        _warn_if_nothing_loaded({}, codes, "qlib", root)
+        return {}
     by_dir = {b["dir"]: b for b in bundles}
     out: dict[str, pd.DataFrame] = {}
     for c in codes:
