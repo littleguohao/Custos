@@ -122,3 +122,72 @@ class TestAutoPick:
     def test_empty_cache_warns(self, tmp_path, capsys):
         assert R.pick_auto(5, cache_dir=tmp_path) == []
         assert "缓存为空" in capsys.readouterr().err
+
+
+class TestWhoIsWrong:
+    """定方向的判据：**非事件日的复权收益必须等于未复权收益**（只差同一个当日因子）
+    ⇒ 谁偏离 `ret_raw` 谁错。
+
+    没有这一条时只能说「两边不一致」，说不出方向 —— 而 owner 首轮对账的 13 只全部
+    分歧、事件日跳变却都 <0.4%，正是必须定方向的场景。
+    """
+
+    def test_limit_pct_by_prefix(self):
+        assert R._limit_pct("600519") == 10.0
+        assert R._limit_pct("300750") == 20.0
+        assert R._limit_pct("688001") == 20.0
+        assert R._limit_pct("920808") == 30.0
+
+    def _frames(self, qlib_bad_day: int | None):
+        """构造：非事件日、tdx 复权收益 == 未复权收益；可选让 qlib 某天偏离。"""
+        n = len(DATES)
+        raw = [10.0 * (1.01 ** i) for i in range(n)]
+        f = 0.9                                     # 全窗口无事件 ⇒ 因子恒定
+        tdx = _series(DATES, [x * f for x in raw])
+        tdx["raw_close"] = raw
+        qraw = list(raw)
+        if qlib_bad_day is not None:
+            qraw[qlib_bad_day] *= 1.05              # qlib 在这天多涨了 5%
+        return tdx, _series(DATES, qraw)
+
+    def test_points_at_qlib_when_qlib_deviates(self, monkeypatch, capsys):
+        tdx, qlib = self._frames(qlib_bad_day=30)
+        monkeypatch.setattr(R, "_load_tdx", lambda c: (tdx, "adjust_events=0"))
+        monkeypatch.setattr(R, "_load_qlib", lambda c: (qlib, ""))
+        monkeypatch.setattr(R, "WIN_START", DATES[0])
+        monkeypatch.setattr(R, "WIN_END", DATES[-1])
+        R.detail("600519", top=5)
+        out = capsys.readouterr().out
+        assert "谁错" in out
+        assert "qlib 侧有问题" in out, out[-800:]
+
+    def test_points_at_us_when_we_deviate(self, monkeypatch, capsys):
+        """反向：把偏离放在 tdx 侧，必须指向我们自己，不能只会怪别人。"""
+        n = len(DATES)
+        raw = [10.0 * (1.01 ** i) for i in range(n)]
+        adj = [x * 0.9 for x in raw]
+        for i in (30, 40, 50, 60):
+            adj[i] *= 1.05                          # tdx 复权价在这些天异常
+        tdx = _series(DATES, adj)
+        tdx["raw_close"] = raw
+        monkeypatch.setattr(R, "_load_tdx", lambda c: (tdx, "adjust_events=0"))
+        monkeypatch.setattr(R, "_load_qlib", lambda c: (_series(DATES, raw), ""))
+        monkeypatch.setattr(R, "WIN_START", DATES[0])
+        monkeypatch.setattr(R, "WIN_END", DATES[-1])
+        R.detail("600519", top=5)
+        assert "我们的自算前复权有问题" in capsys.readouterr().out
+
+    def test_limit_breach_flags_only_offending_side(self, monkeypatch, capsys):
+        """日收益超过涨跌幅限制是物理不可能 ⇒ 直接证伪那一侧。"""
+        n = len(DATES)
+        raw = [10.0] * n
+        raw[30] = 11.5                              # +15%，600xxx 不可能
+        tdx = _series(DATES, [10.0] * n)
+        tdx["raw_close"] = [10.0] * n
+        monkeypatch.setattr(R, "_load_tdx", lambda c: (tdx, "adjust_events=0"))
+        monkeypatch.setattr(R, "_load_qlib", lambda c: (_series(DATES, raw), ""))
+        monkeypatch.setattr(R, "WIN_START", DATES[0])
+        monkeypatch.setattr(R, "WIN_END", DATES[-1])
+        R.detail("600519", top=3)
+        out = capsys.readouterr().out
+        assert "只有 qlib 越界" in out, out[-600:]

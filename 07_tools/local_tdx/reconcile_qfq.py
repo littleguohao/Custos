@@ -70,6 +70,12 @@ RET_TOL = 0.002            # 日收益差容忍：0.2 个百分点
 
 
 def _load_tdx(code: str) -> Any:
+    """取 tdx 前复权序列，**并带上 `raw_close`（未复权收盘）作第三方基准**。
+
+    ⚠️ `raw_close` 是定位「谁错」的关键：**非事件日的未复权收益必须等于复权收益**
+    （两者只差一个当日相同的因子）。所以谁的日收益偏离 `ret_raw`，就是谁错。
+    没有它只能说「两边不一致」，说不出方向。
+    """
     import local_tdx_data as L
     df = L.get_ohlcv_table(code, count=2000)      # 默认 adjust="qfq"
     if df is None or df.empty:
@@ -80,9 +86,20 @@ def _load_tdx(code: str) -> Any:
     n_ev = df.attrs.get("adjust_events")
     if adj != "qfq":
         return None, f"tdx 未复权（adjust={adj!r}）"
-    out = df[["date", "close"]].copy()
+    cols = ["date", "close"] + (["raw_close"] if "raw_close" in df.columns else [])
+    out = df[cols].copy()
     out["date"] = out["date"].astype(str).str[:10]
     return out, f"adjust_events={n_ev}"
+
+
+def _limit_pct(code: str) -> float:
+    """按代码前缀推断涨跌幅限制 —— **日收益超过它就是数据错**（物理不可能）。"""
+    c = str(code).strip()[:6]
+    if c.startswith(("688", "300", "301")):
+        return 20.0
+    if c.startswith(("920", "83", "87", "43")):
+        return 30.0
+    return 10.0
 
 
 def _load_qlib(code: str) -> Any:
@@ -207,6 +224,16 @@ def detail(code: str, top: int = 25) -> int:
     m["ret_qlib"] = m["close_qlib"].pct_change()
     m["ret_diff"] = (m["ret_tdx"] - m["ret_qlib"]).abs()
 
+    # ★ 第三方基准：未复权收益。**非事件日的未复权收益必须等于复权收益**
+    #   ⇒ 谁偏离 ret_raw 谁错。这是唯一能定方向的判据。
+    has_raw = "raw_close" in m.columns
+    if has_raw:
+        m["ret_raw"] = m["raw_close"].pct_change()
+        m["d_tdx_raw"] = (m["ret_tdx"] - m["ret_raw"]).abs()
+        m["d_qlib_raw"] = (m["ret_qlib"] - m["ret_raw"]).abs()
+
+    lim = _limit_pct(code) / 100.0
+
     # 事件日期（窗口内）
     ev_dates: set[str] = set()
     try:
@@ -251,13 +278,62 @@ def detail(code: str, top: int = 25) -> int:
                   "指向**原始价格本身有差异**（数据源口径），与复权公式无关")
         else:
             print("  ⇒ 形态判定：**混合** —— 两类问题同时存在，先看下表逐日数字")
-    print(f"\n{'日期':<12}{'tdx收盘':>11}{'qlib收盘':>11}{'比值':>10}"
-          f"{'ret_tdx':>10}{'ret_qlib':>10}{'差':>9}  近邻事件")
-    print("-" * 104)
-    for _, r in bad.nlargest(top, "ret_diff").iterrows():
-        print(f"{r['date']:<12}{r['close_tdx']:>11.4f}{r['close_qlib']:>11.4f}"
-              f"{r['ratio']:>10.5f}{r['ret_tdx']:>+10.4%}{r['ret_qlib']:>+10.4%}"
-              f"{r['ret_diff']:>+9.4%}  {r['near']}")
+
+    # ★ 定方向：非事件日谁偏离未复权收益，谁错
+    if has_raw and len(bad):
+        nb = bad[bad["near"] == ""]                    # 只看非事件日
+        if len(nb):
+            t_off = int((nb["d_tdx_raw"] > RET_TOL).sum())
+            q_off = int((nb["d_qlib_raw"] > RET_TOL).sum())
+            print(f"\n  ★ **谁错**（非事件日 {len(nb)} 天，与未复权收益比对）：")
+            print(f"      tdx  偏离未复权收益 > {RET_TOL:.1%} 的：{t_off} 天")
+            print(f"      qlib 偏离未复权收益 > {RET_TOL:.1%} 的：{q_off} 天")
+            print(f"      判据：非事件日复权只是乘同一个当日因子 ⇒ 收益必须与未复权一致。")
+            # ⚠️ 不用「≥N 天」这种机械阈值：**一边一天都不偏离**本身就足够定性。
+            if t_off == 0 and q_off > 0:
+                print(f"      ⇒ **qlib 侧有问题**：tdx 与未复权收益完全一致（0 天偏离），"
+                      f"qlib 偏离 {q_off} 天")
+            elif q_off == 0 and t_off > 0:
+                print(f"      ⇒ **我们的自算前复权有问题**：qlib 与未复权收益完全一致，"
+                      f"tdx 偏离 {t_off} 天")
+            elif q_off > t_off * 3:
+                print(f"      ⇒ 倾向 **qlib 侧有问题**（偏离 {q_off} 天 vs tdx {t_off} 天）")
+            elif t_off > q_off * 3:
+                print(f"      ⇒ 倾向 **我们有问题**（偏离 {t_off} 天 vs qlib {q_off} 天）")
+            else:
+                print(f"      ⇒ 两边都偏离，需再看逐日数字（可能是第三个原因："
+                      f"两边的交易日集合或停牌处理不同）")
+
+    # ★ 涨跌停越界：日收益超过限制是物理不可能，直接证伪那一侧
+    over_t = m[m["ret_tdx"].abs() > lim * 1.005]
+    over_q = m[m["ret_qlib"].abs() > lim * 1.005]
+    print(f"\n  ★ **涨跌停越界**（{code} 限制 ±{lim:.0%}，超过即物理不可能）：")
+    print(f"      tdx  越界 {len(over_t)} 天   qlib 越界 {len(over_q)} 天")
+    if len(over_q) and not len(over_t):
+        print(f"      ⇒ **只有 qlib 越界** ⇒ 那些天 qlib 的价格是错的")
+        for _, r in over_q.nlargest(min(5, len(over_q)), "ret_qlib").iterrows():
+            print(f"        {r['date']}  qlib {r['ret_qlib']:+.4%}  vs  tdx {r['ret_tdx']:+.4%}")
+    elif len(over_t) and not len(over_q):
+        print(f"      ⇒ **只有 tdx 越界** ⇒ 我们的复权把收益放大了")
+
+    if has_raw:
+        print(f"\n{'日期':<12}{'tdx复权':>10}{'tdx未复权':>11}{'qlib':>10}{'比值':>9}"
+              f"{'ret_tdx':>10}{'ret_raw':>10}{'ret_qlib':>10}"
+              f"{'|t-raw|':>9}{'|q-raw|':>9}  近邻事件")
+        print("-" * 122)
+        for _, r in bad.nlargest(top, "ret_diff").iterrows():
+            print(f"{r['date']:<12}{r['close_tdx']:>10.4f}{r['raw_close']:>11.4f}"
+                  f"{r['close_qlib']:>10.4f}{r['ratio']:>9.5f}"
+                  f"{r['ret_tdx']:>+10.4%}{r['ret_raw']:>+10.4%}{r['ret_qlib']:>+10.4%}"
+                  f"{r['d_tdx_raw']:>9.4%}{r['d_qlib_raw']:>9.4%}  {r['near']}")
+    else:
+        print(f"\n{'日期':<12}{'tdx收盘':>11}{'qlib收盘':>11}{'比值':>10}"
+              f"{'ret_tdx':>10}{'ret_qlib':>10}{'差':>9}  近邻事件")
+        print("-" * 104)
+        for _, r in bad.nlargest(top, "ret_diff").iterrows():
+            print(f"{r['date']:<12}{r['close_tdx']:>11.4f}{r['close_qlib']:>11.4f}"
+                  f"{r['ratio']:>10.5f}{r['ret_tdx']:>+10.4%}{r['ret_qlib']:>+10.4%}"
+                  f"{r['ret_diff']:>+9.4%}  {r['near']}")
 
     # 比值的阶梯结构：把比值按 0.1% 粒度分箱，看有几个"平台"
     lvl = (m["ratio"] / m["ratio"].iloc[0]).round(3)
