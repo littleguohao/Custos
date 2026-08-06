@@ -1258,6 +1258,44 @@ class TestFailureRecap:
         assert out.count("[RUN ] A_stop_low/be_03") == 1
         assert out.count("[DONE] A_stop_low/be_03") == 1
 
+    def test_parallel_prints_heartbeat_on_start(self, tmp_path, monkeypatch, capsys):
+        """并行波要有**立刻可见**的心跳。
+
+        ⚠️ 没有它时「在跑」与「已死」在日志上长得一模一样，而并行波要等一整个方案
+        （3000 只约 60 分钟）才有输出 —— owner 实测因此以为卡住、去 ps 找进程。
+        """
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        monkeypatch.setattr(m2, "_avail_mem_mb", lambda: 64_000.0)
+        monkeypatch.setattr(m2.os, "cpu_count", lambda: 8)
+
+        def fake_run(cmd, **kw):
+            out = next(x for i, x in enumerate(cmd) if cmd[i - 1] == "--out")
+            pathlib.Path(out).write_text("{}", encoding="utf-8")
+            return type("R", (), {"returncode": 0, "stdout": ""})()
+
+        monkeypatch.setattr(m2.subprocess, "run", fake_run)
+        m2._run_all([("A_stop_low", "be_03", ["--breakeven", "0.03"]),
+                     ("A_stop_low", "be_05", ["--breakeven", "0.05"])],
+                    1000, False, False, 2)
+        out = capsys.readouterr().out
+        assert out.count("[START] A_stop_low/be_03") == 1
+        assert out.count("[START] A_stop_low/be_05") == 1
+        # 心跳在结果块之前
+        assert out.index("[START] A_stop_low/be_03") < out.index("[DONE] A_stop_low/be_03")
+
+    def test_serial_has_no_duplicate_heartbeat(self, tmp_path, monkeypatch, capsys):
+        """串行本来就实时打印，不该再多一行心跳。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+
+        def fake_run(cmd, **kw):
+            (tmp_path / "A_stop_low__be_03__s1000.json").write_text("{}", encoding="utf-8")
+            return type("R", (), {"returncode": 0, "stdout": ""})()
+
+        monkeypatch.setattr(m2.subprocess, "run", fake_run)
+        m2._run_all([("A_stop_low", "be_03", ["--breakeven", "0.03"])],
+                    1000, False, False, 1)
+        assert "[START]" not in capsys.readouterr().out
+
     def test_parallel_prints_each_line_once(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
         monkeypatch.setattr(m2, "_avail_mem_mb", lambda: 64_000.0)

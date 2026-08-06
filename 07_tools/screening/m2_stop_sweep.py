@@ -420,6 +420,13 @@ def _run(group: str, name: str, extra: list[str], sample: int, cross: bool,
         else:
             print(line)
 
+    if capture:
+        # ⚠️ 并行波把子进程输出全收进字符串、等方案跑完才整块打印（否则 6 路进度逐行
+        # 交错没法读）。代价是**「在跑」与「已死」在日志上长得一模一样，且要等一整个
+        # 方案（3000 只约 60 分钟）才能区分** —— owner 实测因此以为卡住。
+        # 所以启动时先打一行短心跳，直接进 stdout（单行交错无妨）。
+        print(f"[START] {tag}  {time.strftime('%H:%M:%S')}", flush=True)
+
     def _exec(args: list[str]) -> tuple[int, float]:
         cmd = ([sys.executable, str(SCRIPT)]
                + _base_args(sample, cross, data_source, window, codes_file)
