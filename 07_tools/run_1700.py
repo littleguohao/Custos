@@ -66,6 +66,18 @@ def _last_line(text: str) -> str:
 
 
 
+def _reconcile_note(target: str) -> str:
+    """把对账结论摘进 run log —— 不阻断也要留痕，否则「持仓与台账脱节」事后无从察觉。"""
+    path = BASE / "01_data" / "quality" / f"{target}_ledger_reconcile.json"
+    try:
+        import json  # noqa: PLC0415
+        g = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "reconcile_json_unreadable"
+    return (f"status={g.get('status')}, 数量不一致={g.get('qty_mismatch_count')}只, "
+            f"台账成交={g.get('trade_rows')}笔, 回放ok={g.get('replay_ok')}")
+
+
 def main(argv=None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -128,6 +140,22 @@ def main(argv=None) -> int:
         print(tail)                      # 降级摘要原样透出(含 x/y 出数与未出数代码)
     else:
         print(f"[OK] {tail or 'MFE/MAE calculated'}")
+
+    # 3b2. 台账↔持仓对账（**只报告，不阻断**）。
+    #      incremental_ledger 刻意选择「ledger 先落、positions 后落」，理由是
+    #      崩在两次 os.replace 之间留下的「已记录成交但持仓未更新」**可检测、可修复**。
+    #      但 2026-08-06 review 发现没有任何常规检查在检测它 —— 唯一的对账逻辑埋在
+    #      backtest_0amv_bear_regime.py（研究脚本）里。这一 stage 就是把「可检测」变成真的每天检测。
+    #      默认不阻断：新校验先观察若干交易日（2026-07-30 的教训是别同时收紧多个闸）。
+    #      注：_run_stage 内部已 append 到 stages_log，且底层 run_stage_quiet 就是
+    #      required=False，所以「非阻断」不需要额外传参 —— 只是这里不检查 r["ok"] 中断。
+    #      ⚠️ note 必须在 stage **跑完之后**算：`note=` 作为实参会在子进程启动前求值，
+    #      那时今天的对账 JSON 还没写，读到的是上一次的结果（或读不到）。
+    r = _run_stage(["uv", "run", "python", str(TOOLS / "trades" / "reconcile_positions.py"),
+                    "--date", target], "ledger_reconcile")
+    stages_log[-1]["note"] = _reconcile_note(target)
+    if not r["ok"]:
+        print(f"[WARN] ledger_reconcile 未成功（不阻断）：{r['out'][:200]}")
 
     # 3c. Collect fund flow rank (eastmoney direct API)
     r = _run_stage(["uv", "run", "python", str(TOOLS / "collect" / "collect_fund_flow.py"), "--date", target],

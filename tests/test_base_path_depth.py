@@ -147,6 +147,16 @@ class TestNoPatchingDefaultArgConstants:
                 tree = ast.parse(p.read_text(encoding="utf-8"))
             except SyntaxError:
                 continue
+            alias = {}                       # 别名 → 真实模块名
+            for n in ast.walk(tree):
+                if isinstance(n, ast.Import):
+                    for al in n.names:
+                        if al.asname:
+                            alias[al.asname] = al.name.split(".")[-1]
+                elif isinstance(n, ast.ImportFrom):
+                    for al in n.names:
+                        if al.asname:
+                            alias[al.asname] = al.name
             for n in ast.walk(tree):
                 if not isinstance(n, ast.Call):
                     continue
@@ -164,6 +174,11 @@ class TestNoPatchingDefaultArgConstants:
                 tgt = n.args[0]
                 mod = tgt.id if isinstance(tgt, ast.Name) else (
                     tgt.attr if isinstance(tgt, ast.Attribute) else None)
+                # ⚠️ 解析导入别名：`import reconcile_positions as rp` 之后
+                # patch 的目标写作 `rp`，而 risky 是按**文件名**建索引的。
+                # 2026-08-06 实测漏报一次（reconcile_positions 的 LEDGER 默认参数），
+                # 就是因为第一版没做这一步 —— 检查器只认字面名字。
+                mod = alias.get(mod, mod)
                 if mod and const in risky.get(mod, set()):
                     offenders.append(
                         f"{p.name}:{n.lineno} patch 了 {mod}.{const}"

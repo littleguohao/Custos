@@ -37,3 +37,28 @@
 - 收盘价格、持仓市值、盈亏和仓位：必须由收盘行情重新计算。
 - 0AMV：市场指标，禁止写入交易盈亏字段。
 - 修改或撤销历史成交：当前不允许直接操作；后续应使用冲正记录保持审计链。
+
+## 台账 ↔ 持仓一致性（2026-08-06 补）
+
+`incremental_ledger._commit` 刻意选择「**ledger 先落、positions 后落**」：
+崩在两次 `os.replace` 之间会留下「已记录成交但持仓未更新」——**可检测、可修复**；
+反过来（持仓已加、台账没记）会让下次导入把同一批成交再算一遍（持仓静默翻倍，真实发生过）。
+
+⚠️ **但此前没有任何常规检查在「检测」它** —— 唯一的对账逻辑埋在
+`trades/backtest_0amv_bear_regime.py`（自称「不触碰任何管线」的研究脚本）里，
+而 `runtime_guards` 读台账只判**新鲜度**、不校验「持仓 == 台账回放」。
+
+现由 `07_tools/trades/reconcile_positions.py` 补上，并接入 17:00 链（**非阻断**）：
+
+```bash
+uv run python 07_tools/trades/reconcile_positions.py --date 2026-08-06
+# 台账非从零开始时须给期初持仓：--baseline path/to/initial_positions.json
+# 观察若干交易日后可加 --strict（数量不一致 exit 1）
+```
+
+判据分三档：`ok` / `cost_only_diff`（多为浮点尾差或期初基线缺失）/
+**`mismatch`（数量不一致 = 台账与持仓已脱节，硬信号）**，另有 `replay_failed`。
+数量是整数股、float 对 2^53 内整数精确 ⇒ **数量不设容差**，有差就是真有差。
+
+回放**复用 `incremental_ledger.compute_positions`**，不另写买卖应用逻辑 ——
+否则「对账」只是在比两个都可能错的实现。
