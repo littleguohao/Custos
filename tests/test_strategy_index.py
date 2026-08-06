@@ -60,11 +60,22 @@ class TestLayout:
                     bad.append(str(d.relative_to(STRATEGY)))
         assert not bad, f"不符合 NN_lower_snake.md 的文档：{bad}"
 
-    def test_deprecated_is_visible_in_filename(self):
-        """废弃状态写在文件名里，读目录就能看见。"""
-        names = [p.name for p in (STRATEGY / "b1").glob("*.md")]
-        assert any(n.startswith("99_deprecated_") for n in names), \
-            "已废文档应命名为 99_deprecated_*"
+    def test_deprecated_naming_convention_holds(self):
+        """废弃状态若存在，必须写在文件名里（读目录就能看见），且必须在注册表登记。
+
+        当前没有已废文档 —— `99_deprecated_buy_integration.md` 已于 2026-08-06 删除
+        （核查确认其交易规则均已被现行文档覆盖，独有的「买入计划必备项 + 缺项不得放行」
+        已抢救进 `b1/03_execution_discipline.md`）。这条测试保证**将来**再出现已废文档时
+        命名仍统一。
+        """
+        declared = set()
+        for s in reg()["strategies"]:
+            declared |= set(s["docs"])
+        for d in declared:
+            name = pathlib.Path(d).name
+            if "deprecated" in name:
+                assert name.startswith("99_deprecated_"), \
+                    f"{d} 含 deprecated 却不是 99_deprecated_* 命名"
 
     def test_configs_keep_upper_snake(self):
         """代码消费的配置保持 UPPER_SNAKE（与 contracts/ 一致，一眼看出代码在读它）。"""
@@ -262,56 +273,60 @@ class TestPathsConstants:
         assert 'CZ_SECTOR_PREFERENCE_FILE = CZ_DIR / "CZ_SECTOR_PREFERENCE.json"' in s
 
 
-class TestDeprecatedDocSafety:
-    """已废文档留着有价值，但**必须防止被当现行规则用**。
+class TestSalvagedBuyPlanChecklist:
+    """删 `99_deprecated_buy_integration.md` 时抢救的规则，不许再丢。
 
-    2026-08-06 逐条核查 `99_deprecated_buy_integration.md`：它的交易规则
-    （拉升波分类/非一波流/反转K/开盘量比六场景/条件化输出/补坑接入/否决权链）
-    **全部已被现行文档覆盖，且多数更细**。剩余独有价值只有「当初的编排设计」。
+    删除前逐条核查：它的交易规则（拉升波分类/非一波流/反转K/开盘量比六场景/
+    补坑接入/否决权链）**全部已被现行文档覆盖，且多数更细**。
+    但有一条**别处一处都没有**：
 
-    但核查同时查出两个真陷阱：
-    ① 它保留着反转K 的**对称 `-2%~+2%`**，而现行是**不对称 `-2%~+1.8%`**
-       ⇒ 照它实现会得到错的反转K；
-    ② 两处引用指向不存在的文件（`TRADING_EXECUTION_DISCIPLINE.md` /
-       `B1_SWING_STRATEGY.md` —— 大写旧名，重组时的改名脚本只处理了小写）。
+        「买入计划必备项清单 + 缺任一项，不得输出『允许买入』」
+
+    而且原清单里的 **加仓条件 / 时间止损 / 风险等级** 三项在现行 03 里也缺
+    （当时只有 6/8）。已一并补齐。
+
+    价值在于它把「买入计划」定义成一个**可检查的完整对象**：
+    少了时间止损，亏损仓位会被无限期持有；少了风险等级，总控无法排优先级。
     """
 
-    DEP = STRATEGY / "b1" / "99_deprecated_buy_integration.md"
+    DOC = STRATEGY / "b1" / "03_execution_discipline.md"
 
-    def test_has_supersede_table(self):
-        """必须给出「本文档的规则已被谁取代」的逐条对照，否则读者不知道该去哪。"""
-        s = self.DEP.read_text(encoding="utf-8")
-        assert "已被谁取代" in s
-        for target in ("01_swing_rules.md", "03_execution_discipline.md",
-                       "05_pit_recovery.md"):
-            assert target in s, f"对照表缺 {target}"
+    @pytest.mark.parametrize("item", [
+        "触发信号", "买入价格区间", "首仓比例", "加仓条件",
+        "无效条件", "止损位", "时间止损", "风险等级",
+    ])
+    def test_checklist_item_present(self, item):
+        assert item in self.DOC.read_text(encoding="utf-8"), \
+            f"买入计划必备项缺「{item}」—— 这是删已废文档时抢救来的清单，不许再丢"
 
-    def test_stale_symmetric_range_is_marked(self):
-        """对称 ±2% 是**已被修正的错口径**，必须就地标红，不能只静静躺着。"""
-        s = self.DEP.read_text(encoding="utf-8")
-        assert "-2%至+2%" in s, "原文口径应保留（历史留痕），但必须标注"
-        k = s.index("-2%至+2%", s.index("### B1 分歧转一致反转K"))
-        assert "旧对称口径" in s[k:k + 120], "反转K 那节的旧口径未就地标注"
-        assert "不对称" in s[:2500], "头部要提醒现行是不对称口径"
+    def test_hard_rule_present(self):
+        """**缺任一项不得放行**——没有这条，清单只是建议。"""
+        s = self.DOC.read_text(encoding="utf-8")
+        assert "缺任一项，不得输出" in s
 
-    def test_no_dangling_doc_references(self):
-        """已废文档里的引用也不许是死链——读者会照着去找。"""
-        import re
-        s = self.DEP.read_text(encoding="utf-8")
-        bad = []
-        for m in re.finditer(r"\]\(([^)#:]+\.md)\)", s):
-            if not (self.DEP.parent / m.group(1)).resolve().exists():
-                bad.append(m.group(1))
-        # ⚠️ 反引号里的名字若紧跟 `](`，那是 markdown 链接的**显示文字**、不是路径
-        # ——真路径在括号里，已由上一个循环检过。第一版没排除它，
-        # 把 [`strategy_version_log.md`](../../../05_.../strategy_version_log.md)
-        # 的前半段当成同目录文件去找 ⇒ 误报。这是「把散文当路径检」的同类错。
-        for m in re.finditer(r"`([A-Za-z0-9_]+\.md)`(?!\])", s):
-            if not (self.DEP.parent / m.group(1)).exists():
-                bad.append(m.group(1))
-        assert not bad, f"已废文档里的死链：{bad}"
+    def test_records_where_it_came_from(self):
+        """写清来历，否则将来有人会以为这是凭空加的规则而删掉。"""
+        s = self.DOC.read_text(encoding="utf-8")
+        assert "99_deprecated_buy_integration.md" in s and "git 历史" in s
 
-    def test_unique_value_is_stated(self):
-        """说清「为什么还留着它」——否则下次有人会直接删掉，连带丢了编排设计。"""
-        s = self.DEP.read_text(encoding="utf-8")
-        assert "本文档独有" in s and "编排设计" in s
+
+class TestDeprecationProcess:
+    """废弃流程必须写着「先核查再删」，且顺序不能反。
+
+    ⚠️ 我一开始写的规范是「判定废弃时改名，**不要删除**」，
+    而 owner 直接决定删 —— 规范与实际做法矛盾。改成三步流程后两者一致：
+    核查覆盖 → 抢救独有内容 → 才可以删。
+    **先删再想起来「那里好像有条规则」就晚了：git 里找得回文件，但没人会想起去找。**
+    """
+
+    def test_process_documented(self):
+        s = INDEX.read_text(encoding="utf-8")
+        assert "废弃流程" in s
+        for step in ("逐条核查", "抢救独有内容", "可以删除"):
+            assert step in s, f"废弃流程缺步骤：{step}"
+        assert "顺序不能反" in s
+
+    def test_warns_against_keyword_only_check(self):
+        """核查必须比对具体数值 —— 只看关键词会得出错结论（有实例）。"""
+        s = INDEX.read_text(encoding="utf-8")
+        assert "只看关键词会得出错结论" in s

@@ -23,7 +23,6 @@
 | [04_pullback_rotation.md](04_pullback_rotation.md) | 人（设计上）| 🔴 **零实现** | 大盘回调后的资金切换与四类分层 |
 | [05_pit_recovery.md](05_pit_recovery.md) | 人 | ✅ | 补坑：大坑 / 小坑 / 小洞 |
 | [90_research_summary.md](90_research_summary.md) | —（摘要）| ⚠️ 量级待重跑 | 一轮回测的执行摘要 |
-| [99_deprecated_buy_integration.md](99_deprecated_buy_integration.md) | — | 🚫 已废 | Agent 时代接入设计，仅作重建参考 |
 
 ## 代码依赖
 
