@@ -100,3 +100,22 @@ CALENDAR_FILE = CONTRACTS_DIR / "CN_TRADING_CALENDAR.json"
 # 相对项目根的路径，供**需要注入 base 的调用方**用（如 weekly_review 为便于测试
 # 接受 base 参数）。它们仍以这里为唯一来源——不要在模块里自己拼 "00_governance"。
 CALENDAR_RELPATH = Path("00_governance") / "contracts" / "CN_TRADING_CALENDAR.json"
+
+
+def read_json(path, default):
+    """读 JSON，文件不存在时返回 default。
+
+    ⚠️ **编码必须是 `utf-8-sig`。** 2026-08-06 收敛 4 份重复实现时发现它们编码不一致：
+    `trading_calendar` 用 `utf-8-sig`，而 `runtime_guards` / `daily_report` /
+    `generate_risk_and_sectors` 用 `utf-8` —— **后者遇到带 BOM 的文件会解析失败**
+    （BOM 被当成内容字符）。`utf-8-sig` 对无 BOM 文件同样正常，所以统一取它。
+
+    这就是「统一重复实现时不能只看形状相同」的实例：四份代码长得几乎一样，
+    但其中一份**修过一个别人没修的 bug**。合并时若取多数派的写法，等于把修复回退了。
+
+    ⚠️ 放在 paths.py 是**权衡**：这四个调用方都已 import paths，
+    新建模块会让它们各多一个依赖；代价是 paths 从「纯路径」变成「路径 + 基础工具」
+    （它此前已有 cn_today / cn_now）。
+    """
+    import json as _json
+    return _json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else default

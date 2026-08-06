@@ -16,7 +16,7 @@ import time
 from datetime import date
 
 from paths import BASE, cn_today
-from pipeline_kit import _extract_json, check_trading_day, log_stage, now_iso, run_stage, write_run_log
+from pipeline_kit import _extract_json, check_trading_day, log_stage, now_iso, run_stage, write_run_log, run_stage_quiet as _stage, calendar_gate
 
 TOOLS = BASE / "07_tools"
 LOG_DIR = BASE / "06_logs"
@@ -30,14 +30,6 @@ def _write_run_log(target: str, status: str, started_at: str, t0: float, stages:
     return write_run_log(LOG_DIR, "0850", target, status, started_at, t0, stages)
 
 
-def _stage(cmd: list[str], name: str) -> dict:
-    """Run a stage quietly: runner stdout is a machine-consumed protocol, so
-    the stage echo ([RUN] header, subprocess output) is suppressed; only the
-    summary lines below are printed."""
-    with contextlib.redirect_stdout(io.StringIO()):
-        r = run_stage(cmd, name, required=False)
-    r["out"] = (r["stdout"] + r["stderr"]).strip()
-    return r
 
 
 def _rss_summary_fragments(results: dict) -> list[str]:
@@ -73,28 +65,14 @@ def main(argv=None) -> int:
     stages_log: list[dict] = []
 
     # 1. Trading calendar
-    c_started = _now_iso()
-    c_t0 = time.time()
-    cal_buf = io.StringIO()
-    try:
-        with contextlib.redirect_stdout(cal_buf):
-            cal = check_trading_day(target)
-    except RuntimeError as e:
-        stages_log.append(_log_stage("calendar", {"ok": False, "returncode": None, "timeout": False,
-                                                  "stdout": cal_buf.getvalue(), "stderr": str(e)},
-                                     c_started, _now_iso(), time.time() - c_t0,
-                                     note=str(e)[:500]))
-        _write_run_log(target, "calendar_failed", run_started, t0, stages_log)
-        print(f"【08:50预采集失败｜{target}】日历检查失败：{str(e)[:200]}")
-        return 1
-    stages_log.append(_log_stage("calendar", {"ok": True, "returncode": 0, "timeout": False,
-                                              "stdout": cal_buf.getvalue()},
-                                 c_started, _now_iso(), time.time() - c_t0,
-                                 note=f"is_trading_day={cal.get('is_trading_day')}"))
-    if not cal.get("is_trading_day", False):
-        _write_run_log(target, "closed", run_started, t0, stages_log)
-        print(f"今日休市，08:50预采集跳过（{target}）")
-        return 0
+    _cg = calendar_gate(
+        target, log_dir=LOG_DIR, session="0850", run_started=run_started,
+        t0=t0, stages_log=stages_log,
+        fail_msg="【08:50预采集失败｜{target}】日历检查失败：{err}",
+        closed_msg="今日休市，08:50预采集跳过（{target}）")
+    if _cg.exit_code is not None:
+        return _cg.exit_code
+    cal = _cg.cal
 
     steps = ["calendar=ok"]
 

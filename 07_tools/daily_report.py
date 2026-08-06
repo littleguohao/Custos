@@ -14,9 +14,10 @@ from close_review.holding_structure import n_structure_basis
 from news.premarket_intel_schema import validate_premarket_intelligence
 
 from paths import BASE, cn_now
+from paths import read_json as load
 
 DATA=BASE/'01_data'; PLAN=BASE/'03_daily_plans'; WEEKDAY='一二三四五六日'
-def load(p:Path,d:Any): return json.loads(p.read_text(encoding='utf-8')) if p.exists() else d
+
 def clean(v:Any,d='待确认'):
     if v is None or (isinstance(v,float) and math.isnan(v)): return d
     s=str(v).strip(); return s if s else d

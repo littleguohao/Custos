@@ -14,6 +14,7 @@ warnings.filterwarnings("ignore")
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+from code_utils import fnum as _fnum
 from paths import BASE, TDX_ROOT, cn_today, cn_now
 
 import urllib.request, urllib.parse
@@ -25,15 +26,6 @@ BREADTH_CODES = [("880001", "平均股价"), ("880005", "涨跌家数"), ("88000
 NORTHBOUND_CODE = "880863"
 NORTHBOUND_MIN_ROWS = 5
 
-
-def _fnum(v):
-    """数值化;**必须用 is not None 判定**,不能用真值判定 —— 0.0 是合法读数。"""
-    if v is None:
-        return None
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return None
 
 
 def parse_yahoo_payload(symbol: str, data: dict) -> dict:

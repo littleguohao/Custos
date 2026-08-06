@@ -43,7 +43,7 @@ if str(LOCAL_TDX_DIR) not in sys.path:
     sys.path.insert(0, str(LOCAL_TDX_DIR))
 
 from paths import BASE, TDX_ROOT, cn_today, cn_now  # noqa: E402
-from code_utils import norm_code  # noqa: E402
+from code_utils import norm_code, fnum as _fnum  # noqa: E402
 from code_utils import market_of  # noqa: E402
 import tq_http  # noqa: E402
 import online_quotes  # noqa: E402
@@ -128,13 +128,6 @@ def get_market(code: str) -> int:
 def _market_name(mkt: int) -> str:
     return "BJ" if mkt == 2 else ("SH" if mkt == 1 else "SZ")
 
-
-def _fnum(v):
-    """快照数值多为字符串；可解析转 float，否则 None。"""
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return None
 
 
 def _fmt_dt(dt) -> str:

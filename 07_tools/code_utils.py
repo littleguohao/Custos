@@ -141,3 +141,27 @@ def finite(v, d=0.0):
     try:
         x = float(v); return d if math.isnan(x) else x
     except: return d
+
+
+def fnum(v):
+    """转 float，失败返回 **None**。
+
+    ⚠️ **与上面的 `finite()` 语义不同，两个都必须留**：
+
+        finite(v, d=0.0)  失败/NaN → 返回默认值 d   —— 用于**参与计算**的场景
+        fnum(v)           失败     → 返回 None      —— 用于**区分「缺数」与「读数是 0」**
+
+    后者的必要性来自 `collect_incremental_market` 的一条教训：
+    **`0.0` 是合法读数**（成交额为 0、涨跌幅为 0 都真实存在），
+    所以判定必须用 `is not None` 而不能用真值判定 —— 用 `finite` 的 0.0 默认值
+    会让「没取到数」和「取到 0」变得无法区分。
+
+    2026-08-06 从 `collect_holding_quotes`（10 处调用）与
+    `collect_incremental_market`（4 处）收敛而来。
+    """
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None

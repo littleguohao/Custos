@@ -13,13 +13,11 @@ import re
 from pathlib import Path
 
 from paths import BASE
+from paths import read_json as load
 from runtime_guards import normalize_regime
 
 DATA = BASE / "01_data"
 
-
-def load(path: Path, default):
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
 
 
 def dump(path: Path, value):

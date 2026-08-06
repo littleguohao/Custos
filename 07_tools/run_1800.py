@@ -22,7 +22,7 @@ import time
 from datetime import date
 
 from paths import BASE, cn_today
-from pipeline_kit import check_trading_day, log_stage, md_to_digest, now_iso, run_stage, write_run_log
+from pipeline_kit import check_trading_day, log_stage, md_to_digest, now_iso, run_stage, write_run_log, run_stage_quiet as _stage, calendar_gate
 
 TOOLS = BASE / "07_tools"
 SCREEN_DIR = TOOLS / "screening"
@@ -43,11 +43,6 @@ def _last_line(text: str) -> str:
     return lines[-1] if lines else ""
 
 
-def _stage(cmd: list[str], name: str) -> dict:
-    with contextlib.redirect_stdout(io.StringIO()):
-        r = run_stage(cmd, name, required=False)
-    r["out"] = (r["stdout"] + r["stderr"]).strip()
-    return r
 
 
 def stage_json_status(stdout: str) -> str:
@@ -90,28 +85,14 @@ def main(argv=None) -> int:
         return r
 
     # 1. Trading calendar
-    c_started = _now_iso()
-    c_t0 = time.time()
-    cal_buf = io.StringIO()
-    try:
-        with contextlib.redirect_stdout(cal_buf):
-            cal = check_trading_day(target)
-    except RuntimeError as e:
-        stages_log.append(_log_stage("calendar", {"ok": False, "returncode": None, "timeout": False,
-                                                  "stdout": cal_buf.getvalue(), "stderr": str(e)},
-                                     c_started, _now_iso(), time.time() - c_t0,
-                                     note=str(e)[:500]))
-        _write_run_log(target, "calendar_failed", run_started, t0, stages_log)
-        print(f"【每日选股失败｜{target}】日历检查失败：{str(e)[:200]}")
-        return 1
-    stages_log.append(_log_stage("calendar", {"ok": True, "returncode": 0, "timeout": False,
-                                              "stdout": cal_buf.getvalue()},
-                                 c_started, _now_iso(), time.time() - c_t0,
-                                 note=f"is_trading_day={cal.get('is_trading_day')}"))
-    if not cal.get("is_trading_day", False):
-        _write_run_log(target, "closed", run_started, t0, stages_log)
-        print(f"今日休市，每日选股不运行（{target}）")
-        return 0
+    _cg = calendar_gate(
+        target, log_dir=LOG_DIR, session="1800", run_started=run_started,
+        t0=t0, stages_log=stages_log,
+        fail_msg="【每日选股失败｜{target}】日历检查失败：{err}",
+        closed_msg="今日休市，每日选股不运行（{target}）")
+    if _cg.exit_code is not None:
+        return _cg.exit_code
+    cal = _cg.cal
 
     # 2. Runtime gate —— **只落盘，不阻断**。
     #    18:00 是纯粹的选股流程，门控不得影响选股结果（不改 bucket/next_step/分层），

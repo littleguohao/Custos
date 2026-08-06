@@ -20,6 +20,11 @@ runners. Behavior must match the sources exactly:
 """
 from __future__ import annotations
 
+import io
+
+import contextlib
+from typing import NamedTuple
+
 import json
 import os
 import subprocess
@@ -67,6 +72,78 @@ def run_stage(cmd: list[str], name: str, required: bool = True, timeout: int = 6
         raise RuntimeError(f"stage failed: {name}, code={returncode}")
     return {"stage": name, "ok": ok, "returncode": returncode, "timeout": timed_out,
             "stdout": stdout[-4000:], "stderr": stderr[-4000:]}
+
+
+class CalendarGate(NamedTuple):
+    """交易日门控结果。`exit_code` 非 None 时调用方应立即 return 它。"""
+    cal: dict
+    exit_code: int | None
+
+
+def calendar_gate(target: str, *, log_dir, session: str, run_started: str,
+                  t0: float, stages_log: list[dict],
+                  fail_msg: str, closed_msg: str) -> CalendarGate:
+    """跑交易日检查，落 stage 日志，决定是否继续。
+
+    2026-08-06 从 5 个 runner 抽出 —— 那 5 份是**结构完全相同**的 23 行块
+    （同样的 `calendar_failed` → exit 1、`closed` → exit 0、同样的 stdout 捕获与计时），
+    只有两句打印消息不同。抽出前，改门控语义要手工同步 5 遍，
+    而 2026-07-30 那次事故正是门控行为在多处叠加改动导致的。
+
+    三种结局：
+
+        日历检查抛错   → 记 stage(ok=False) + run_log("calendar_failed") + 打印 → exit 1
+        非交易日       → 记 stage(ok=True)  + run_log("closed")           + 打印 → exit 0
+        交易日         → 记 stage(ok=True)，exit_code=None（调用方继续）
+
+    ⚠️ `check_trading_day` 的 stdout 必须捕获：runner 的 stdout 是**给机器消费的协议**，
+    日历检查的回显会污染它。捕获到的内容进 stage 日志，不丢。
+
+    `fail_msg` / `closed_msg` 支持 `{target}` 与 `{err}` 占位。
+    """
+    c_started = now_iso()
+    c_t0 = time.time()
+    cal_buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(cal_buf):
+            cal = check_trading_day(target)
+    except RuntimeError as e:
+        stages_log.append(log_stage("calendar",
+                                    {"ok": False, "returncode": None, "timeout": False,
+                                     "stdout": cal_buf.getvalue(), "stderr": str(e)},
+                                    c_started, now_iso(), time.time() - c_t0,
+                                    note=str(e)[:500]))
+        write_run_log(log_dir, session, target, "calendar_failed", run_started, t0, stages_log)
+        print(fail_msg.format(target=target, err=str(e)[:200]))
+        return CalendarGate({}, 1)
+    stages_log.append(log_stage("calendar",
+                                {"ok": True, "returncode": 0, "timeout": False,
+                                 "stdout": cal_buf.getvalue()},
+                                c_started, now_iso(), time.time() - c_t0,
+                                note=f"is_trading_day={cal.get('is_trading_day')}"))
+    if not cal.get("is_trading_day", False):
+        write_run_log(log_dir, session, target, "closed", run_started, t0, stages_log)
+        print(closed_msg.format(target=target))
+        return CalendarGate(cal, 0)
+    return CalendarGate(cal, None)
+
+
+def run_stage_quiet(cmd: list[str], name: str) -> dict:
+    """静默跑一个 stage，把 stdout+stderr 合并进 `r["out"]`。
+
+    **为什么要静默**：runner 的 stdout 是**给机器消费的协议**（cron / 上游解析它），
+    stage 的回显（`[RUN]` 头、子进程输出）会污染协议，所以重定向掉，
+    只保留 runner 自己打的摘要行。
+
+    2026-08-06 从 5 个 runner 里抽出 —— 那 5 份 `_stage` 是**字节级相同**的
+    （`run_1800` 只少了 docstring）。抽出前任何一处改动都得手工同步 5 遍。
+    `required=False` 是这些 runner 的一致选择：单 stage 失败不中断整链，
+    由 runner 汇总成 `status="degraded"`。
+    """
+    with contextlib.redirect_stdout(io.StringIO()):
+        r = run_stage(cmd, name, required=False)
+    r["out"] = (r["stdout"] + r["stderr"]).strip()
+    return r
 
 
 def _extract_json(text: str) -> dict:

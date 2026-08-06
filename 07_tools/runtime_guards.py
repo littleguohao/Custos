@@ -8,25 +8,14 @@ from pathlib import Path
 from typing import Any
 
 from paths import BASE, CN_TZ, CONTRACTS_DIR, cn_now
+from paths import read_json as load_json
 
 DATA = BASE / "01_data"
 CALENDAR_CONFIG = CONTRACTS_DIR / "CN_TRADING_CALENDAR.json"
 CALENDAR_CACHE = DATA / "market" / "CN_TRADING_CALENDAR_CACHE.json"
 
 
-def load_json(path: Path, default: Any):
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
 
-
-# 日历 JSON 缓存。为什么需要:trading_day_status 每次调用都要读
-# CN_TRADING_CALENDAR.json + CN_TRADING_CALENDAR_CACHE.json 两个文件,而
-# previous_confirmed_trading_day 会连着调它最多 14 次 ⇒ 单次门控约 28 次磁盘读
-# (长假回溯时更多),而这两个文件在一次运行内根本不会变。
-# 缓存**必须可失效、可注入**,不能变成测试里的隐形全局状态,故:
-#   ① key 带 (mtime_ns, size) —— trading_calendar.py 刷新日历后自动失效;
-#   ② key 带当前 load_json 函数对象 —— 测试 monkeypatch load_json 时自成一档,
-#      patch 结束后那条记录自然不可达,不会污染后续测试;
-#   ③ 暴露 clear_calendar_cache() 供显式清理。
 _CALENDAR_JSON_CACHE: dict[tuple, Any] = {}
 _CALENDAR_CACHE_MAX = 32
 
