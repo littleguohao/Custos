@@ -35,6 +35,10 @@ _TOOLS = Path(__file__).resolve().parents[1]
 for _p in (str(_TOOLS), str(_TOOLS / "screening"), str(_TOOLS / "market_timing")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
+_FACTORS_DIR = str(Path(__file__).resolve().parents[1] / "factors")
+if _FACTORS_DIR not in sys.path:
+    sys.path.insert(0, _FACTORS_DIR)   # 因子层：见 factors/__init__.py
+
 
 HIT, MISS, NA = "hit", "miss", "unavailable"
 

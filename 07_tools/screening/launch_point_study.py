@@ -35,6 +35,10 @@ for _p in (str(TOOLS), str(TOOLS / "screening"), str(TOOLS / "local_tdx")):
         sys.path.insert(0, _p)
 
 import backtest_factors as bt  # noqa: E402  复用 ENTRY_GATES / load_amv_regime
+_FACTORS_DIR = str(Path(__file__).resolve().parents[1] / "factors")
+if _FACTORS_DIR not in sys.path:
+    sys.path.insert(0, _FACTORS_DIR)   # 因子层：见 factors/__init__.py
+
 
 
 def window_return(dates: list, closes: list, start: str, end: str,
@@ -1857,6 +1861,7 @@ def main(argv=None, loader=None) -> int:
                   f"dir={args.sector_index_dir})", file=sys.stderr)
         if args.pit_features:
             sys.path.insert(0, str(TOOLS / "local_tdx"))
+
             import fetch_pit_financials as _pit  # noqa: PLC0415
             pit_recs = _pit.load_ledger(args.pit_ledger) if args.pit_ledger \
                 else _pit.load_ledger()

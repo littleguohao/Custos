@@ -16,6 +16,10 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parents[2]
 for p in (BASE / "07_tools", BASE / "07_tools" / "screening", BASE / "07_tools" / "local_tdx"):
     sys.path.insert(0, str(p))
+_FACTORS_DIR = str(Path(__file__).resolve().parents[1] / "factors")
+if _FACTORS_DIR not in sys.path:
+    sys.path.insert(0, _FACTORS_DIR)   # 因子层：见 factors/__init__.py
+
 
 import backtest_factors as bt  # noqa: E402
 import importlib.util  # noqa: E402

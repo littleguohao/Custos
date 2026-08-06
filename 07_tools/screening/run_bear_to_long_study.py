@@ -32,6 +32,10 @@ from paths import BASE  # noqa: E402
 
 import backtest_factors as bt  # noqa: E402
 import launch_point_study as lp  # noqa: E402
+_FACTORS_DIR = str(Path(__file__).resolve().parents[1] / "factors")
+if _FACTORS_DIR not in sys.path:
+    sys.path.insert(0, _FACTORS_DIR)   # 因子层：见 factors/__init__.py
+
 
 STUDY = TOOLS / "screening" / "launch_point_study.py"
 QLIB_GAP = ("2020-09-28", "2021-07-30")     # 两 bundle 之间无数据
@@ -431,6 +435,7 @@ def survivorship_report(firings_files: list[Path], s_data_root: str,
     if today_codes is None:
         try:
             sys.path.insert(0, str(TOOLS / "local_tdx"))
+
             import local_tdx_data as _ltd  # noqa: PLC0415
             today_codes = set(_ltd.list_local_vipdoc_codes(ashare_only=True))
         except Exception as exc:  # noqa: BLE001

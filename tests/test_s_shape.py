@@ -5,7 +5,7 @@
 """
 import pandas as pd
 
-from screening import s_shape as ss
+from factors import s_shape as ss
 from screening import score_candidates as sc
 
 

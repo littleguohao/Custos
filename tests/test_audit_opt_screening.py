@@ -22,7 +22,7 @@ from screening import enrich_candidates as ec
 from screening import launch_point_study as lp
 from screening import run_bear_to_long_study as bl
 from screening import score_candidates as sc
-from screening import s_shape as ss
+from factors import s_shape as ss
 
 
 # ---------------------------------------------------------------- helpers

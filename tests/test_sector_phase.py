@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from screening import sector_phase as sp
+from factors import sector_phase as sp
 
 
 @pytest.fixture(autouse=True)

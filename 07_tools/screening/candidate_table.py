@@ -24,6 +24,10 @@ if hasattr(sys.stdout, "reconfigure"):
 TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
+_FACTORS_DIR = str(Path(__file__).resolve().parents[1] / "factors")
+if _FACTORS_DIR not in sys.path:
+    sys.path.insert(0, _FACTORS_DIR)   # 因子层：见 factors/__init__.py
+
 
 from paths import PLANS, QUALITY_DIR, STOCK_POOL_DIR  # noqa: E402
 from runtime_guards import normalize_regime  # noqa: E402

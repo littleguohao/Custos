@@ -34,6 +34,10 @@ _TOOLS = _SCREEN_DIR.parent
 for _p in (str(_TOOLS), str(_SCREEN_DIR), str(_TOOLS / "local_tdx")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
+_FACTORS_DIR = str(Path(__file__).resolve().parents[1] / "factors")
+if _FACTORS_DIR not in sys.path:
+    sys.path.insert(0, _FACTORS_DIR)   # 因子层：见 factors/__init__.py
+
 
 from indicators import bbi_series as _bbi_series  # noqa: E402
 

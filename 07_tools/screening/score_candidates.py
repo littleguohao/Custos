@@ -60,6 +60,10 @@ from paths import (CZ_SECTOR_PREFERENCE_FILE, DATA, MARKET_DIR,
 _SCREEN_DIR = Path(__file__).resolve().parent
 if str(_SCREEN_DIR) not in sys.path:
     sys.path.insert(0, str(_SCREEN_DIR))
+_FACTORS_DIR = str(Path(__file__).resolve().parents[1] / "factors")
+if _FACTORS_DIR not in sys.path:
+    sys.path.insert(0, _FACTORS_DIR)   # 因子层：见 factors/__init__.py
+
 from s_shape import sstar_level  # noqa: E402
 from runtime_guards import normalize_regime  # noqa: E402
 

@@ -20,6 +20,10 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(BASE / "07_tools"))
 sys.path.insert(0, str(BASE / "07_tools" / "screening"))
+_FACTORS_DIR = str(Path(__file__).resolve().parents[1] / "factors")
+if _FACTORS_DIR not in sys.path:
+    sys.path.insert(0, _FACTORS_DIR)   # 因子层：见 factors/__init__.py
+
 
 import backtest_factors as bt  # noqa: E402
 # 财报时效阈值走 financials 的**单一定义**,不在此二次定义——两处口径漂移会让同一只票

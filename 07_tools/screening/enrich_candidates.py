@@ -44,6 +44,10 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 for p in (TOOLS_DIR, TOOLS_DIR / "local_tdx", TOOLS_DIR / "market_timing", TOOLS_DIR / "screening"):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
+_FACTORS_DIR = str(Path(__file__).resolve().parents[1] / "factors")
+if _FACTORS_DIR not in sys.path:
+    sys.path.insert(0, _FACTORS_DIR)   # 因子层：见 factors/__init__.py
+
 
 from indicators import j_series as _j_canonical  # noqa: E402
 
