@@ -119,3 +119,99 @@ class TestNoStaleReferences:
                     bad.append(f"{p.relative_to(root)}:{i}")
         assert not bad, ("这些引用指向已拆分删除的文件，请改到具体单元：\n  "
                          + "\n  ".join(bad))
+
+
+class TestRerunMarks:
+    """结论不稳的单元必须**标出来**，且标记与索引不许脱节。
+
+    2026-08-06 数据层 review 查出三件事波及已有结论：
+    ① qlib `2021_2026` 是加法调整（收益放大 13~21%）已弃用；
+    ② 2021 年后退市的票一只都没有 ⇒ 近期窗口无法去幸存者偏差；
+    ③ 基准边际随样本量崩塌（R11）。
+    受影响的单元头部带 `**重跑**：Pn`，README 有对应清单。
+
+    为什么要用测试钉住：**结论不稳这件事最容易随时间被遗忘** ——
+    半年后有人读 R4 会看到「✅ 成立 L4」就直接用，而不知道它的 OOS 资格还没重新取得。
+    """
+
+    PRI = ("P0", "P1", "P2")
+
+    def _marked(self):
+        out = {}
+        for p in UNITS:
+            s = p.read_text(encoding="utf-8")
+            m = re.search(r"\*\*重跑\*\*：\*\*(P[0-2])\*\*", s)
+            if m:
+                out[p.name] = m.group(1)
+        return out
+
+    def test_expected_units_are_marked(self):
+        """这 6 个单元的结论依赖已失效的口径，必须带重跑标记。"""
+        want = {
+            "R1_core_framework.md", "R2_selection_price_volume.md",
+            "R3_selection_discriminability_recall.md",
+            "R4_timing_amv_sector.md", "R9_method_M1_payoff_ratio.md",
+            "R10_mechanism_M2_stops.md",
+        }
+        got = set(self._marked())
+        assert want <= got, f"缺重跑标记：{sorted(want - got)}"
+
+    def test_mark_has_reason_and_method(self):
+        """只标「要重跑」没用——必须写清**为什么不稳**与**用什么口径重跑**。"""
+        for name in self._marked():
+            s = (RESEARCH / name).read_text(encoding="utf-8")
+            assert "**重跑口径**：" in s, f"{name} 有重跑标记但没写重跑口径"
+
+    def test_readme_lists_every_marked_unit(self):
+        """标了却不在清单里 = 没人会去跑。"""
+        readme = (RESEARCH / "README.md").read_text(encoding="utf-8")
+        assert "重跑清单" in readme
+        seg = readme[readme.index("重跑清单"):]
+        for name in self._marked():
+            assert name in seg, f"{name} 未列入 README 重跑清单"
+
+    def test_p0_is_the_live_dependency(self):
+        """P0 的定义是「live 正在依赖它」。当前只有 R4（择时腿）满足。
+
+        若哪天 P0 变多，说明有更多 live 决策建立在待重跑的结论上 —— 那是要立即处理的信号。
+        """
+        p0 = [k for k, v in self._marked().items() if v == "P0"]
+        assert p0 == ["R4_timing_amv_sector.md"], f"P0 集合变了：{p0}"
+
+    def test_level_and_state_not_contradicting_mark(self):
+        """带重跑标记的单元，**不许**同时宣称干净的 L4 + ✅成立 —— 那会误导读者。"""
+        bad = []
+        for name in self._marked():
+            s = (RESEARCH / name).read_text(encoding="utf-8")
+            head = s[:s.index("## 主题")]
+            if re.search(r"\*\*证据等级\*\*：L4\s*　", head) and "**状态**：✅" in head:
+                bad.append(name)
+        assert not bad, f"这些单元的等级/状态与重跑标记自相矛盾：{bad}"
+
+
+class TestStrategyDocsFlagUnstableNumbers:
+    """策略层文档引用了研究量级数字，必须指向重跑清单。
+
+    ⚠️ 这是**跨目录**的约束：research/ 的结论被推翻时，strategy/ 里抄过去的数字
+    不会自动更新。2026-08-06 实查发现两处：
+    `B1_STRATEGY_SUMMARY.md` 写「幸存者已部分去除(含退市 qlib)」（近期窗口其实没去除）、
+    `b1_swing_strategy.md` 写「含退市跨年 OOS」（对 2021-08 后的窗口不成立）。
+    """
+
+    DOCS = ("00_governance/strategy/B1_STRATEGY_SUMMARY.md",
+            "00_governance/strategy/b1_swing_strategy.md")
+
+    @pytest.mark.parametrize("rel", DOCS)
+    def test_points_to_rerun_list(self, rel):
+        root = RESEARCH.parents[1]
+        s = (root / rel).read_text(encoding="utf-8")
+        assert "重跑清单" in s, f"{rel} 引用了研究量级但没指向重跑清单"
+
+    @pytest.mark.parametrize("rel", DOCS)
+    def test_no_stale_debias_claim(self, rel):
+        """不得再声称近期窗口「含退市/已去偏」而不加限定。"""
+        root = RESEARCH.parents[1]
+        for i, ln in enumerate((root / rel).read_text(encoding="utf-8").splitlines(), 1):
+            if "含退市" in ln and "⚠️" not in ln and "不成立" not in ln:
+                assert "1999" in ln or "老 bundle" in ln or "qlib" not in ln, \
+                    f"{rel}:{i} 无限定地声称含退市：{ln.strip()[:80]!r}"
