@@ -42,7 +42,7 @@
 |---|---|---|---|---|---|
 | 上证指数 | ✅ | **999999** | mootdx Reader 本地 vipdoc | 4.7ms | ⚠️ **不是 000001**——vipdoc 里 `sh000001` 不是上证指数（ebd9982 修） |
 | 个股日线 | ✅ | 本地 vipdoc | `read_vipdoc_daily()` | **4.7ms**/股 | 回测与 live 的主数据源 |
-| 个股日线（前复权） | ⚠️ | vipdoc + 自算 xdxr | `get_ohlcv_table(adjust="qfq")` | **8.3ms**/股 | 全链默认口径。**从未对账**；BJ 无 xdxr 却被标成已复权（见备注 A） |
+| 个股日线（前复权） | ✅ | vipdoc + 自算 xdxr | `get_ohlcv_table(adjust="qfq")` | **8.3ms**/股 | 全链默认口径。**已对账**：与未复权收益 0 天偏离（`reconcile_qfq.py`）。BJ 曾因查错 market 拿不到权息，2026-08-06 已修 |
 | 持仓实时行情 | ✅ | TQ 快照 → 在线 bars → 域B | `collect_holding_quotes.py` | TQ 约 80ms | 多源链式降级 |
 | 在线日线（兜底） | 🚫 | mootdx Quotes | `get_online_bars()` | **12949ms → 空** | 实测 13 秒返回 0 行（见备注 B） |
 | 在线指数 | 🚫 | mootdx Quotes | `get_online_index()` | **9992ms → 空** | 同上 |
@@ -125,7 +125,7 @@
 
 ## 备注：三个已知的正确性问题
 
-### A. BJ 股票的未复权数据被标成「已前复权」
+### A. BJ 股票的未复权数据被标成「已前复权」（2026-08-06 **已修**）
 
 实测（2026-08-06 探针）：
 
@@ -140,8 +140,20 @@ apply_qfq(df, []) → attrs: {'adjust': 'qfq', 'adjust_events': 0}
 它可能是「真的从未除权」，也可能是「该市场取不到事件」。
 唯一线索 `adjust_events == 0` **目前无任何调用方检查**。
 
-影响面：BJ 约占 universe 4.8%（`_is_ashare_stock_file` 放行 `43/83/87/88/920`），
-即每轮全市场回测约 5% 的样本带着除权假跳空在跑（假止损）。**修法待定。**
+**根因**：`mootdx.utils.get_stock_market` 的规则是「'5'/'6'/'9' 开头为 sh」，
+北交所**新代码段 `920xxx` 被判成沪市**（老段 43/83/87 判对了），而 `q.xdxr()` 内部用它推断
+market ⇒ 查 `SH:920808` 的权息，服务器返回空。实测：
+
+    get_xdxr_info(1, "920808") →  0 条
+    get_xdxr_info(2, "920808") → **24 条**（8 条影响价格 + 16 条股本变化）
+
+**修法**：`adjust_factors._tdx_market()` 走 `code_utils.market_of` 自己判 market，
+三处调用改为 `q.client.get_xdxr_info(market, code)`；缓存加 `market` 标记且
+**缺 market 的空事件缓存一律作废**（此前把空结果永久缓存了）。
+
+**修复后实测 920808 首根因子 0.0403** —— 未复权价是复权价的约 25 倍，
+任何除权日在样本里都长得像 -96% 暴跌。BJ 约占 universe 4.8%
+⇒ **此前所有含 BJ 的回测约 5% 样本用了错价格。** 另：BJ 的股本事件此前也全空（16 条）。
 
 ### B. 在线 TDX 协议基本不可用
 

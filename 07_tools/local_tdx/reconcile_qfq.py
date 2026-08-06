@@ -351,6 +351,141 @@ def detail(code: str, top: int = 25) -> int:
     return 0
 
 
+def qlib_fields(code: str) -> int:
+    """列出 qlib bundle 里该票**实有的 .bin 字段**。
+
+    为什么要看：`s_data._FIELDS` 只读 `open/high/low/close/volume` 五个，
+    **没读 `factor`**。而 2026-08-06 实测确认 qlib 的价格是「减去累计现金分红」的
+    **加法调整**（见 `detect_convention`）—— 要还原真实价格就需要调整量，
+    标准 qlib bundle 通常有 `factor` 字段。**有没有它决定 qlib 数据能否救回来。**
+    """
+    import s_data as Q
+    bundles = Q.list_bundles()
+    if not bundles:
+        print("没有发现 bundle（检查 S_DATA_ROOT）")
+        return 2
+    for bd, inst in Q.code_to_qlib_dir(code, bundles):
+        fdir = bd / "features" / inst
+        print(f"\n── {bd.name} / {inst}   {fdir}")
+        if not fdir.is_dir():
+            print("   目录不存在")
+            continue
+        for p in sorted(fdir.glob("*.bin")):
+            print(f"   {p.name:<28} {p.stat().st_size:>10,} B")
+        extra = [p.name for p in fdir.glob("*.bin")
+                 if p.stem.split(".")[0] not in
+                 ("open", "high", "low", "close", "volume")]
+        if extra:
+            print(f"   ⇒ **s_data 未读的字段**: {extra}"
+                  f"（若含 factor，可用来还原真实价格）")
+        else:
+            print("   ⇒ 只有 OHLCV，**没有 factor** ⇒ 无法从 bundle 内部还原真实价格")
+    return 0
+
+
+def detect_convention(code: str) -> int:
+    """判定两边各自用的是**乘法前复权**还是**加法（减去累计分红）调整**。
+
+    数学判据（在同一个"无事件段"内）：
+
+        乘法前复权   adj_t = raw_t × f      ⇒ `adj/raw` 恒定，`raw−adj` 随价格变动
+        加法调整     adj_t = raw_t − c      ⇒ `raw−adj` 恒定，`adj/raw` 随价格变动
+
+    2026-08-06 实测结论（600519/600612/600622）：
+
+        tdx  : adj/raw 恒定  ⇒ 乘法前复权 ✅（且与未复权收益 0 天偏离）
+        qlib : **raw−qlib 恒定** ⇒ **加法调整**
+               600519  194.99 → 173.31   差 21.68 元 = 2021 年报分红 21.675 元/股
+               600612  6.91 → 5.46 → 4.00  逐段差 1.45 / 1.46
+               600622  0.07 → 0（末段比值恰好 1.0）
+
+    ⚠️ **加法调整会系统性放大百分比收益**（分母被减小）⇒ qlib 的涨跌幅能超过涨停限制
+    （实测 600612 报出 +11.07%，而 600xxx 限 10%）。用它算百分比收益/止损一律偏大。
+    """
+    import pandas as pd
+    t, tnote = _load_tdx(code)
+    q, qnote = _load_qlib(code)
+    if t is None or q is None or "raw_close" not in (t.columns if t is not None else []):
+        print(f"{code}: 取数不全 tdx={tnote!r} qlib={qnote!r}（需要 raw_close）")
+        return 2
+    m = t.merge(q, on="date", how="inner", suffixes=("_tdx", "_qlib"))
+    m = m[(m["date"] >= WIN_START) & (m["date"] <= WIN_END)]
+    m = m[(m["close_tdx"] > 0) & (m["close_qlib"] > 0) & (m["raw_close"] > 0)]
+    m = m.reset_index(drop=True)
+    if len(m) < 60:
+        print(f"{code}: 重叠仅 {len(m)} 根，样本太少")
+        return 2
+
+    ev_dates: list[str] = []
+    try:
+        import adjust_factors as A
+        ev_dates = sorted({str(e.get("date"))[:10] for e in A.get_xdxr(code)
+                           if WIN_START <= str(e.get("date"))[:10] <= WIN_END})
+    except Exception:                                          # noqa: BLE001
+        pass
+
+    # 切成"无事件段"，段内分别看两种不变量的离散度
+    bounds = [0] + [i for i, d in enumerate(m["date"]) if d in ev_dates] + [len(m)]
+    print(f"\n{'=' * 96}")
+    print(f"{code} 复权约定探测   重叠 {len(m)} 根   窗口内事件 {len(ev_dates)} 个"
+          f"   分 {len(bounds) - 1} 段")
+    print("=" * 96)
+    print(f"{'段':<4}{'起':<12}{'止':<12}{'根数':>6}"
+          f"{'tdx: adj/raw 离散':>20}{'qlib: raw−adj 离散':>22}{'qlib: adj/raw 离散':>20}")
+    print("-" * 96)
+
+    def _spread(s) -> float:
+        s = s.dropna()
+        if len(s) < 2 or abs(s.median()) < 1e-12:
+            return float("nan")
+        return float(s.max() / s.min() - 1.0) if (s > 0).all() else float("nan")
+
+    tdx_mult, qlib_add, qlib_mult = [], [], []
+    for k in range(len(bounds) - 1):
+        seg = m.iloc[bounds[k]:bounds[k + 1]]
+        if len(seg) < 5:
+            continue
+        a = _spread(seg["close_tdx"] / seg["raw_close"])
+        b = _spread(seg["raw_close"] - seg["close_qlib"])
+        c = _spread(seg["close_qlib"] / seg["raw_close"])
+        tdx_mult.append(a), qlib_add.append(b), qlib_mult.append(c)
+        print(f"{k:<4}{seg['date'].iloc[0]:<12}{seg['date'].iloc[-1]:<12}{len(seg):>6}"
+              f"{a:>19.5%}{b:>21.5%}{c:>19.5%}")
+
+    def _med(v):
+        vv = [x for x in v if x == x]
+        return sum(vv) / len(vv) if vv else float("nan")
+
+    print(f"\n段内离散度中位：tdx adj/raw {_med(tdx_mult):.5%}   "
+          f"qlib raw−adj {_med(qlib_add):.5%}   qlib adj/raw {_med(qlib_mult):.5%}")
+    print("\n判定：")
+    print(f"  tdx  → {'**乘法前复权**（adj/raw 段内恒定）' if _med(tdx_mult) < 1e-4 else '不是干净的乘法复权'}")
+    if _med(qlib_add) < 1e-4 and _med(qlib_mult) > 1e-3:
+        print("  qlib → **加法调整（减去累计现金分红）**：raw−adj 段内恒定、adj/raw 不恒定")
+        print("     ⚠️ 加法调整会**系统性放大百分比收益**（分母被减小）")
+        print("     ⇒ 用 qlib 数据算百分比收益/止损一律偏大；涨跌幅可超过涨停限制")
+        print("     ⇒ 要还原真实价格需要调整量 c：raw = qlib + c。仍在市的票可用 tdx 求 c，")
+        print("        **退市股拿不到**（而「含退市股」正是用 qlib 的唯一理由）"
+              "⇒ 见 --qlib-fields")
+    elif _med(qlib_mult) < 1e-4:
+        print("  qlib → **乘法前复权**（adj/raw 段内恒定）")
+    else:
+        print("  qlib → 两种都不恒定，需逐段看上表")
+    # 每段的调整量绝对值，便于对照分红公告
+    if _med(qlib_add) < 1e-4:
+        print("\n每段的加法调整量 c = raw − qlib（相邻段之差应等于该次每股分红）：")
+        prev = None
+        for k in range(len(bounds) - 1):
+            seg = m.iloc[bounds[k]:bounds[k + 1]]
+            if len(seg) < 5:
+                continue
+            c = float((seg["raw_close"] - seg["close_qlib"]).median())
+            delta = f"   Δ={prev - c:+.4f}" if prev is not None else ""
+            print(f"  段{k} {seg['date'].iloc[0]}~{seg['date'].iloc[-1]}  c={c:.4f}{delta}")
+            prev = c
+    return 0
+
+
 def report(rows: list[dict]) -> int:
     hdr = (f"{'代码':<10}{'状态':>8}{'重叠根数':>9}{'比值离散':>10}"
            f"{'最大日收益差':>13}{'分歧日数':>9}  备注")
@@ -406,9 +541,17 @@ def main() -> int:
     ap.add_argument("--detail", default="",
                     help="单只票的分歧明细：逐日数字 + 区分「事件日阶梯」与「弥散噪声」")
     ap.add_argument("--top", type=int, default=25, help="--detail 列出最差的 N 天")
+    ap.add_argument("--convention", default="",
+                    help="判定两边各用**乘法前复权**还是**加法（减分红）调整**")
+    ap.add_argument("--qlib-fields", default="",
+                    help="列出 qlib bundle 里该票实有的 .bin 字段（看有没有 factor）")
     ap.add_argument("--out", default="")
     a = ap.parse_args()
 
+    if a.qlib_fields:
+        return qlib_fields(a.qlib_fields.strip()[:6])
+    if a.convention:
+        return detect_convention(a.convention.strip()[:6])
     if a.detail:
         return detail(a.detail.strip()[:6], a.top)
 
