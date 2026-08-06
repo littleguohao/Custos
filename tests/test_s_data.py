@@ -155,3 +155,68 @@ class TestListUniverseParsing:
         root = self._bundle(tmp_path, lines)
         s_data.list_universe(root)
         assert "宇宙不可信" not in capsys.readouterr().err
+
+
+class TestMixedConventionWarning:
+    """跨 bundle 拼接时，**各 bundle 字段集不同**必须出声。
+
+    ⚠️ 2026-08-06 实测 `E:\\S_DATA\\Q_DATA` 两个 bundle 字段集不同：
+
+        2006_2020   OHLCV + **factor** + **change**
+        2021_2026   只有 OHLCV
+
+    而对 2021_2026 的对账证明它是「减去累计现金分红」的**加法调整**（raw−adj 分段常数、
+    相邻段之差恰好等于每股分红），不是乘法前复权。有 factor 的老 bundle 很可能是标准
+    qlib dump（乘法）⇒ **两个 bundle 可能是两种价格口径**，而 `load_bars_qlib` 直接 concat。
+    那 10 个月缺口正好在两者之间，**任何长窗口都会跨过去**，接缝处收益率失真——
+    而且是静默的：拼接不报错，结果看起来就是一条完整曲线。
+    """
+
+    def _bundle(self, root, name, days, fields):
+        d = root / name
+        (d / "instruments").mkdir(parents=True)
+        (d / "calendars").mkdir(parents=True)
+        (d / "calendars" / "day.txt").write_text("\n".join(days) + "\n", encoding="utf-8")
+        (d / "instruments" / "all.txt").write_text("SH600000\n", encoding="utf-8")
+        f = d / "features" / "sh600000"
+        f.mkdir(parents=True)
+        for name_ in fields:
+            (f / f"{name_}.day.bin").write_bytes(b"\x00" * 8)
+        return d
+
+    def test_warns_when_field_sets_differ(self, tmp_path, capsys):
+        s_data._MIXED_WARNED.clear()
+        root = tmp_path / "Q_DATA"
+        self._bundle(root, "2006_2020", ["2019-01-02", "2020-09-25"],
+                     ["open", "high", "low", "close", "volume", "factor", "change"])
+        self._bundle(root, "2021_2026", ["2021-08-02", "2026-01-30"],
+                     ["open", "high", "low", "close", "volume"])
+        bundles = s_data.list_bundles(root)
+        hits = s_data.code_to_qlib_dir("600000", bundles)
+        s_data._warn_if_mixed_convention("600000", hits)
+        err = capsys.readouterr().err
+        assert "字段集不同" in err and "价格口径" in err
+        assert "factor" in err, "告警要列出差异字段，否则看不出差在哪"
+
+    def test_silent_when_field_sets_match(self, tmp_path, capsys):
+        s_data._MIXED_WARNED.clear()
+        root = tmp_path / "Q_DATA"
+        fields = ["open", "high", "low", "close", "volume"]
+        self._bundle(root, "2006_2020", ["2019-01-02"], fields)
+        self._bundle(root, "2021_2026", ["2021-08-02"], fields)
+        bundles = s_data.list_bundles(root)
+        s_data._warn_if_mixed_convention("600000", s_data.code_to_qlib_dir("600000", bundles))
+        assert "字段集不同" not in capsys.readouterr().err
+
+    def test_warns_once_per_code(self, tmp_path, capsys):
+        """全市场跑批时不能刷屏——每个代码只警告一次。"""
+        s_data._MIXED_WARNED.clear()
+        root = tmp_path / "Q_DATA"
+        self._bundle(root, "2006_2020", ["2019-01-02"],
+                     ["open", "high", "low", "close", "volume", "factor"])
+        self._bundle(root, "2021_2026", ["2021-08-02"],
+                     ["open", "high", "low", "close", "volume"])
+        hits = s_data.code_to_qlib_dir("600000", s_data.list_bundles(root))
+        for _ in range(3):
+            s_data._warn_if_mixed_convention("600000", hits)
+        assert capsys.readouterr().err.count("字段集不同") == 1
