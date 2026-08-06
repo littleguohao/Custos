@@ -164,7 +164,7 @@ def main(argv=None) -> int:
     # 4b. Refresh 板块指数缓存(供 enrich 的 sector_phase hint 用当日相位;best-effort,需 TdxW)。
     #     **增量合并**:只拉各板块缓存末日期前 30 天起的新数据并 merge 进已有 CSV。
     #     此前每天全量重拉 20180101 起的 400+ 板块 → 600s stage 超时;
-    #     且 --period day 是错的周期串(TQ 要 1d,见 TQ_INTERFACE_PROBE),现由脚本自动探测。
+    #     且 --period day 是错的周期串(TQ 要 1d,见 TDX_LOCAL_INTERFACES.md),现由脚本自动探测。
     r = _run_stage(["uv", "run", "python", str(TOOLS / "local_tdx" / "fetch_sector_index_history.py"),
                     "--out", str(BASE / "01_data" / "market" / "sector_index"),
                     "--start", "20180101", "--incremental"],

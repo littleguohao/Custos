@@ -463,3 +463,64 @@ class TestClistCoverageGuard:
         assert names == {"600000": "浦发银行"}
         assert diag["st_filter"] == "ok"
         assert diag["name_map_source"] == "tq_local"
+
+
+import local_tdx_data  # noqa: E402
+
+
+class TestGetStockListAShareFilter:
+    """`get_stock_list()` 默认只返回 A 股个股（2026-08-06 加）。
+
+    ⚠️ 原实现返回**全部** 51567 项（实测），含 `999999` 等指数、ETF、债券，
+    而沪深 A 股个股只有约 5300 只。而 `backtest_factors:2285`——不传
+    `--universe-local` 时的 universe 源——**没有任何下游过滤**，直接
+    `sample_codes(base, N, seed)` ⇒ 抽样时约 89% 的概率抽到非个股。
+
+    案底：`1d0d7de` 的提交信息就是「universe 改用本地 vipdoc 枚举，
+    **修复回测 16.7% 覆盖率**」，`eab500a` 又专门修文档里漏传 `--universe-local` 的命令。
+    """
+
+    def _fake_client(self, codes):
+        import pandas as pd
+
+        class _C:
+            def stocks(self, market):
+                # 只在 market==1(SH) 返回，避免同一批被计两次
+                if market != 1:
+                    return pd.DataFrame()
+                return pd.DataFrame({"code": codes})
+        return _C()
+
+    def test_filters_indices_etf_bonds(self, monkeypatch, capsys):
+        codes = ["600000", "601398", "688001",        # 沪 A
+                 "000001", "002415", "300750", "301001",  # 深 A
+                 "999999", "999998",                  # 指数
+                 "510300", "159915",                  # ETF
+                 "113050", "128036",                  # 可转债
+                 "880005"]                            # 板块指数
+        monkeypatch.setattr(local_tdx_data, "_get_client",
+                            lambda: self._fake_client(codes))
+        got = local_tdx_data.get_stock_list()
+        assert got == ["600000", "601398", "688001", "000001", "002415",
+                       "300750", "301001"], got
+        assert "滤掉 7 项" in capsys.readouterr().err
+
+    def test_raw_list_available_on_demand(self, monkeypatch):
+        """需要原始全表时仍可取——过滤是默认值，不是能力删除。"""
+        codes = ["600000", "999999", "510300"]
+        monkeypatch.setattr(local_tdx_data, "_get_client",
+                            lambda: self._fake_client(codes))
+        assert local_tdx_data.get_stock_list(ashare_only=False) == codes
+
+    def test_prefix_rule_matches_vipdoc_rule(self):
+        """与 `_is_ashare_stock_file` 的沪深两段规则必须一致，否则两个 universe
+        源口径不同，而它们会被拿来互相对照。"""
+        for p in ("600", "601", "603", "605", "688",
+                  "000", "001", "002", "003", "300", "301"):
+            code6 = p + "000"[:6 - len(p)] + "0" * (6 - len(p) - 3)
+            code6 = (p + "000000")[:6]
+            mkt = "sh" if p.startswith(("60", "68")) else "sz"
+            assert local_tdx_data._is_ashare_prefix(code6) is True, code6
+            assert local_tdx_data._is_ashare_stock_file(mkt, code6) is True, code6
+        for bad in ("999999", "510300", "159915", "113050", "880005"):
+            assert local_tdx_data._is_ashare_prefix(bad) is False, bad

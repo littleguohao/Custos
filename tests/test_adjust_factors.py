@@ -539,3 +539,114 @@ class TestCliFullMarketPath:
         assert called, f"{mod} 没有调用 local_tdx_data 的任何函数（测试假设失效）"
         for attr in called:
             assert hasattr(ltd, attr), f"{mod} 调用了不存在的 local_tdx_data.{attr}()"
+
+
+class TestBjMarketRouting:
+    """BJ 权息取数必须**自己判 market**，不能用 mootdx 的推断。
+
+    `mootdx.utils.get_stock_market` 的规则是「'5'/'6'/'9' 开头为 sh，其余为 sz」，
+    于是北交所新代码段 `920xxx` 被判成**沪市**（老 BJ 段 43/83/87 判对了）。
+    而 `q.xdxr(symbol=...)` 内部用的就是它 ⇒ 查 `SH:920808` 的权息，服务器返回空。
+
+    实测对照（2026-08-06，同一台服务器连测 5 次稳定）：
+
+        get_xdxr_info(1, "920808") →  0 条
+        get_xdxr_info(2, "920808") → **24 条**（8 条影响价格 + 16 条股本变化）
+
+    后果：`get_xdxr(BJ)` 返回 `[]` 而不报错 ⇒ `qfq_table` 走成功路径 ⇒
+    `apply_qfq` 盖章 `adjust="qfq"` 而价格一字未改 ⇒ **未复权数据被标成已前复权**。
+    920808 实测首根因子 **0.0403** —— 未复权价是复权价的约 25 倍，
+    任何除权日在样本里都长得像 -96% 暴跌。BJ 约占 universe 4.8%。
+    """
+
+    @pytest.mark.parametrize("code,want", [
+        ("600000", 1), ("601398", 1), ("688001", 1),      # 沪
+        ("000001", 0), ("002415", 0), ("300750", 0),      # 深
+        ("920808", 2), ("920002", 2),                     # 北（新代码段，mootdx 判错的）
+        ("830799", 2), ("870204", 2), ("430047", 2),      # 北（老代码段）
+        ("880005", 1),                                    # ⚠️ 沪市统计指数，不是北交所
+    ])
+    def test_market_mapping(self, code, want):
+        assert af._tdx_market(code) == want
+
+    def test_unknown_code_raises_instead_of_guessing(self):
+        """判不出交易所时必须报错——用错 market 查出来的空结果会被当成「没有除权」。"""
+        with pytest.raises(af.AdjustError):
+            af._tdx_market("XYZ")
+
+    def test_does_not_use_mootdx_inference(self):
+        """回归：源码里不得再出现 `q.xdxr(symbol=` 调用（它会走内部推断）。"""
+        import pathlib
+        src = pathlib.Path(af.__file__).read_text(encoding="utf-8")
+        calls = [ln for ln in src.splitlines()
+                 if "q.xdxr(symbol=" in ln and not ln.strip().startswith(("#", "`"))
+                 and "而 `q.xdxr" not in ln]
+        assert not calls, f"仍在用 mootdx 的 market 推断: {calls}"
+
+
+class TestXdxrCacheMarketStamp:
+    """缓存必须记 `market`，且**缺 market 的空事件缓存一律作废**。
+
+    2026-08-06 之前 BJ 查到 0 条并**把空结果缓存了下来**，而缓存策略是
+    「除权是历史事实，不会变」⇒ 永不过期 ⇒ 那些票会永远按未复权处理。
+    """
+
+    def test_save_stamps_market(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
+        af.save_xdxr_cache("920808", [], fetched_at="2026-08-06T12:00:00+08:00")
+        d = json.loads((tmp_path / "920808.json").read_text(encoding="utf-8"))
+        assert d["market"] == 2
+
+    def test_empty_cache_without_market_is_discarded(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
+        (tmp_path / "920808.json").write_text(json.dumps(
+            {"code": "920808", "events": [], "n": 0}), encoding="utf-8")
+        assert af.load_xdxr_cache("920808") is None
+        assert "缺 market 标记" in capsys.readouterr().err
+
+    def test_empty_cache_with_market_is_trusted(self, tmp_path, monkeypatch):
+        """带 market 的空事件是真查过的结论（该票确实没除权），不该反复重取。"""
+        monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
+        (tmp_path / "600000.json").write_text(json.dumps(
+            {"code": "600000", "events": [], "n": 0, "market": 1}), encoding="utf-8")
+        assert af.load_xdxr_cache("600000") == []
+
+    def test_nonempty_old_cache_still_usable(self, tmp_path, monkeypatch):
+        """非空的老缓存是真查到的事件，不能因为缺 market 就丢掉。"""
+        monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
+        ev = [{"date": "2020-07-09", "fenhong": 5.1, "songzhuangu": 0.0,
+               "peigu": 0.0, "peigujia": 0.0, "suogu": 0.0}]
+        (tmp_path / "600000.json").write_text(json.dumps(
+            {"code": "600000", "events": ev, "n": 1}), encoding="utf-8")
+        assert af.load_xdxr_cache("600000") == ev
+
+
+class TestNormalizeAcceptsRawList:
+    """`normalize_*` 必须兼容 list —— 直调 `get_xdxr_info` 返回 list[OrderedDict]，
+    而 `q.xdxr()` 返回 DataFrame。原实现只做 `df.to_dict("records")`，
+    喂 list 会异常并 `return []` ⇒ 又是一次静默降级。"""
+
+    def _raw(self):
+        return [
+            {"year": 2018, "month": 7, "day": 2, "category": 1, "name": "除权除息",
+             "fenhong": 2.4, "songzhuangu": 30.75, "peigu": 0.0, "peigujia": 0.0,
+             "suogu": 0.0, "houzongguben": None, "panhouliutong": None},
+            {"year": 2018, "month": 6, "day": 12, "category": 5, "name": "股本变化",
+             "fenhong": None, "songzhuangu": None, "peigu": None, "peigujia": None,
+             "suogu": None, "houzongguben": 736.196, "panhouliutong": 304.349},
+        ]
+
+    def test_xdxr_from_list(self):
+        ev = af.normalize_xdxr(self._raw())
+        assert len(ev) == 1 and ev[0]["date"] == "2018-07-02"
+        assert ev[0]["songzhuangu"] == pytest.approx(30.75)
+
+    def test_shares_from_list(self):
+        sh = af.normalize_shares(self._raw())
+        assert len(sh) == 1 and sh[0]["date"] == "2018-06-12"
+        assert sh[0]["total_shares"] == pytest.approx(736.196 * 10000)
+
+    def test_empty_and_none_safe(self):
+        for x in (None, [], [{}]):
+            assert af.normalize_xdxr(x) == []
+            assert af.normalize_shares(x) == []

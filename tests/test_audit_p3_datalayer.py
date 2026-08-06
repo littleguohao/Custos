@@ -43,6 +43,16 @@ class _FakeQuotesClient:
 
 @pytest.fixture()
 def fake_quotes(monkeypatch):
+    """注入假 quotes 客户端。
+
+    ⚠️ 同时开 `TDX_ONLINE_QUOTES` —— 在线行情自 2026-08-06 起默认标记为不可用
+    （`_online_quotes_enabled`，实测 bars/index 约 10~13s 返回空）。
+    本组测试测的是 `get_snapshot` 的**字段解析契约**（0 价→空、有效价→返回），
+    不是在线开关；不开这个环境变量的话，`get_snapshot` 会在触到假客户端之前就短路，
+    于是「0 价返回空」这类断言会**因为错误的原因通过**。
+    """
+    monkeypatch.setenv("TDX_ONLINE_QUOTES", "1")
+
     def _install(rows):
         monkeypatch.setattr(ltd, "_get_client", lambda: _FakeQuotesClient(rows))
     return _install

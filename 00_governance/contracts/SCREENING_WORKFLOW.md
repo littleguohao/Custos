@@ -285,6 +285,6 @@ stock_pool.json 的 `cz_sector_status`/`degraded_reason` 注明。
 ## TQ 服务可靠性警示
 
 `formula_process_mul_xg` 等 TQ 接口参数形态错误可能挂死 TdxW 服务端
-（单线程阻塞，需重启客户端恢复，见 00_governance/data/TQ_INTERFACE_PROBE_2026-07-20.md §四）。
+（单线程阻塞，需重启客户端恢复，见 00_governance/data/TDX_LOCAL_INTERFACES.md「TQ 服务可被打挂」）。
 因此：固定参数形态写入代码（formula_name/formula_arg/stock_list/stock_period/
 count/dividend_type），不得随意改动；所有调用带 15s 超时与熔断。

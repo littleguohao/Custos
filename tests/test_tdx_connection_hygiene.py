@@ -300,3 +300,73 @@ class TestCheckerItself:
         """语法错误必须抛出——静默返回空等于放行（第二版就栽在这里）。"""
         with pytest.raises(SyntaxError):
             _client_getters("def broken(:\n    pass")
+
+
+class TestOnlineQuotesMarkedUnavailable:
+    """在线 TDX 行情（`client.bars` / `client.quotes`）**默认关闭**（owner 2026-08-06 拍板）。
+
+    探针实测（--repeat 3）：
+
+        get_online_bars()    p50 12949ms  →  DataFrame 0行×0列
+        get_online_index()   p50  9992ms  →  DataFrame 0行×0列
+        get_snapshot()       p50    70ms  →  dict 0 键
+
+    三个都**不抛异常**，返回空值 ⇒ 调用方看不出「这只票没数据」与「在线源坏了」的区别。
+    而 `get_ohlcv_table` 在本地 stale 时会走这条兜底：13 秒换一个空 DataFrame，
+    14:45/17:00 采集 N 只持仓就是 N×13 秒纯等待。
+
+    ⚠️ 这条测试的意义在于：把「标记为不可用」变成**代码里真的生效**。
+    本仓库反复吃过「规范只写在文档里」的亏（同一个连接反模式跨两天犯了三次）。
+    """
+
+    def _fresh(self, monkeypatch):
+        monkeypatch.delenv("TDX_ONLINE_QUOTES", raising=False)
+
+    def test_disabled_by_default(self, monkeypatch):
+        import local_tdx_data as L
+        self._fresh(monkeypatch)
+        assert L._online_quotes_enabled() is False
+
+    def test_bars_short_circuits_without_client(self, monkeypatch, capsys):
+        """必须在 `_get_client()` 之前短路——建连本身就要花时间。"""
+        import local_tdx_data as L
+        self._fresh(monkeypatch)
+        monkeypatch.setattr(L, "_get_client",
+                            lambda: pytest.fail("短路失败：仍去建了连接"))
+        assert L.get_online_bars("600000").empty
+        assert "标记为不可用" in capsys.readouterr().err
+
+    def test_index_short_circuits(self, monkeypatch):
+        import local_tdx_data as L
+        self._fresh(monkeypatch)
+        monkeypatch.setattr(L, "_get_client",
+                            lambda: pytest.fail("短路失败：仍去建了连接"))
+        assert L.get_online_index("999999").empty
+
+    def test_snapshot_short_circuits(self, monkeypatch):
+        import local_tdx_data as L
+        self._fresh(monkeypatch)
+        monkeypatch.setattr(L, "_get_client",
+                            lambda: pytest.fail("短路失败：仍去建了连接"))
+        assert L.get_snapshot("600000") == {}
+
+    @pytest.mark.parametrize("val", ["1", "true", "TRUE", "yes"])
+    def test_env_override_reenables(self, val, monkeypatch):
+        """换了网络环境或服务端恢复时要能重新启用，而不是把能力删掉。"""
+        import local_tdx_data as L
+        monkeypatch.setenv("TDX_ONLINE_QUOTES", val)
+        assert L._online_quotes_enabled() is True
+
+    def test_stock_list_not_affected(self, monkeypatch):
+        """只关 bars/quotes 两族——`client.stocks()` 实测可用，不能一起关掉。"""
+        import pandas as pd
+
+        import local_tdx_data as L
+        self._fresh(monkeypatch)
+
+        class _C:
+            def stocks(self, market):
+                return pd.DataFrame({"code": ["600000"]}) if market == 1 else pd.DataFrame()
+
+        monkeypatch.setattr(L, "_get_client", lambda: _C())
+        assert L.get_stock_list() == ["600000"]

@@ -27,7 +27,7 @@ DEFAULT_TIMEOUT = 15
 
 # ⚠️ `download_file` 的危险 down_type —— **代码级拦截，不是文档约定**
 #
-# `TQ_INTERFACE_PROBE` 有一节「TQ 服务被打挂」的风险记录，`concept_tags.py` 顶部也写着
+# `TDX_LOCAL_INTERFACES.md` 有一节「TQ 服务可被打挂」的风险记录，`concept_tags.py` 顶部也写着
 # 「只调用 down_type=4（实测安全）；禁止触碰 1/5/6（可打挂 TQ 服务）」。
 # 但 `call()` 是泛型入口 —— 谁写一行 `call("download_file", {"down_type": 1})` 都不会被挡，
 # 而后果是 TdxW 服务挂掉、整条选股链和持仓行情一起没了。
@@ -36,6 +36,31 @@ DEFAULT_TIMEOUT = 15
 # 所以这条约束做成拦截：非白名单的 down_type 直接返回结构化错误，不发请求。
 # 确有需要探测时，显式传 `allow_unsafe_download=True`，让调用方为它签名。
 SAFE_DOWN_TYPES = frozenset({4})        # 4 = miscinfo（概念/主题标签），实测安全
+
+# TQ 要求 `stock_code` **带市场后缀**（`600000.SH`）。传裸 6 位会得到 `ErrorId=2
+# stock_code error` —— 这是 2026-08-06 探针实测踩到的：探针传 `"600000"`，三个
+# stock_code 类方法全挂，而 `get_match_stkinfo`/`download_file`（不吃 stock_code）正常。
+# TDX_LOCAL_INTERFACES.md「stock_code 必须带市场后缀」本来就记着「`601696`(纯代码) → ErrorId=2 stock_code error」。
+#
+# 生产代码都记得先过 `normalize_code()`，但**接口自己不设防** ⇒ 谁忘了就得到一个
+# 语义模糊的 ErrorId=2，得翻探测文档才知道原因。这里显式校验并直接说清要求。
+# 不在这里自动补后缀：补错市场比报错更糟（600000.SZ 是另一只票或不存在）。
+_CODE_SUFFIXES = ("SH", "SZ", "BJ")
+
+
+def _bad_stock_code(code: Any) -> Optional[str]:
+    """返回不合规的原因；合规返回 None。"""
+    s = str(code).strip().upper()
+    if "." not in s:
+        return (f"stock_code={code!r} 缺市场后缀。TQ 要求 `600000.SH` 形态，"
+                f"传裸 6 位会得到语义模糊的 ErrorId=2；请先过 "
+                f"local_tdx_data.normalize_code()")
+    head, _, suf = s.partition(".")
+    if not (head.isdigit() and len(head) == 6):
+        return f"stock_code={code!r} 的代码段不是 6 位数字"
+    if suf not in _CODE_SUFFIXES:
+        return f"stock_code={code!r} 的后缀 {suf!r} 不在 {_CODE_SUFFIXES}"
+    return None
 
 
 def _err(code: str, detail: Any = "") -> dict:
@@ -72,6 +97,10 @@ def call(method: str, params: Optional[dict] = None, timeout: int = DEFAULT_TIME
                         f"down_type={dt!r} 不在白名单 {sorted(SAFE_DOWN_TYPES)}；"
                         f"1/5/6 实测可打挂 TdxW 服务。确需探测请显式传 "
                         f"allow_unsafe_download=True")
+    if params and "stock_code" in params:
+        why = _bad_stock_code(params["stock_code"])
+        if why:
+            return _err("bad_stock_code", why)
     if not is_tdxw_running():
         return _err("tdxw_not_running", "TdxW.exe 未运行，TQ-Local 服务不可用")
     payload = {"id": 1, "method": method, "params": params or {}}

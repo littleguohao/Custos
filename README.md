@@ -58,8 +58,11 @@ strategy_team/
 │   │   ├── BUY_STRATEGY_INTEGRATION_RULES.md
 │   │   └── ...                          # 持仓检查手册/执行纪律/均线框架等
 │   ├── data/                        # 数据层现状与接口能力（随数据源变动）
-│   │   ├── DATA_SOURCE_PRINCIPLE.md     # 数据源原则（含 TDX 连接管理要求）
-│   │   └── ...                          # 覆盖矩阵/TDX 状态/TQ 接口探测
+│   │   ├── DATA_SOURCE_PRINCIPLE.md     # 三条原则 + 各源现状（含连接管理硬要求）
+│   │   ├── DATA_SOURCE_COVERAGE_MATRIX.md  # 九大类数据需求 × 可用性标记
+│   │   ├── TDX_LOCAL_INTERFACES.md      # 已接入用法 + 探过未接（附风险等级）
+│   │   ├── MOOTDX_INTERFACES.md         # Reader/Quotes/Affair 三入口
+│   │   └── QLIB_LOCAL_DATA.md           # S_DATA bundle（含退市股、已前复权）
 │   ├── research/                    # 回测研究：只增，结论会被推翻
 │   │   └── B1_BACKTEST_FINDINGS.md
 │   └── contracts/                   # 契约 + 运行时配置：**代码直接依赖**
