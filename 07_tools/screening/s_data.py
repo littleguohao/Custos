@@ -131,15 +131,63 @@ def _load_one_qlib(bundles_by_dir: dict[Path, dict], bundle_dir: Path, inst: str
     return df.dropna(subset=["close"])          # 丢停牌/未上市/已退市段
 
 
+def _bundle_field_set(bundle_dir: Path, inst: str) -> frozenset[str]:
+    """该 bundle 里这只票实有的字段名（去掉 `.day.bin` 后缀）。"""
+    fdir = bundle_dir / "features" / inst
+    if not fdir.is_dir():
+        return frozenset()
+    return frozenset(p.name.split(".")[0] for p in fdir.glob("*.bin"))
+
+
+_MIXED_WARNED: set[str] = set()
+
+
+def _warn_if_mixed_convention(code: str, hits: list[tuple[Path, str]]) -> None:
+    """跨 bundle 拼接前检查各 bundle 的**字段集是否一致** —— 不一致就可能是不同价格口径。
+
+    ⚠️ 2026-08-06 实测：`E:\\S_DATA\\Q_DATA` 下两个 bundle 的字段集**不同**：
+
+        2006_2020   open/high/low/close/volume + **factor** + **change**
+        2021_2026   只有 open/high/low/close/volume
+
+    而对 2021_2026 的对账证明它的价格是「减去累计现金分红」的**加法调整**
+    （`raw − qlib` 分段常数、相邻段之差恰好等于每股分红），不是乘法前复权。
+    有 `factor` 的老 bundle 很可能是标准 qlib dump（乘法）。
+
+    ⇒ **两个 bundle 可能是两种价格口径**，而 `load_bars_qlib` 会把它们直接 concat
+    ——那 10 个月缺口正好在两者之间，**任何长窗口都会跨过去**，接出来的序列在缺口两侧
+    口径不同，收益率在接缝处失真。这是静默的：拼接不报错、结果看起来像一条完整曲线。
+
+    所以这里出声。每个代码只警告一次，避免全市场跑批时刷屏。
+    """
+    if len(hits) < 2 or code in _MIXED_WARNED:
+        return
+    sets = {bd.name: _bundle_field_set(bd, inst) for bd, inst in hits}
+    uniq = {frozenset(v) for v in sets.values() if v}
+    if len(uniq) > 1:
+        _MIXED_WARNED.add(code)
+        desc = "; ".join(f"{k}={sorted(v)}" for k, v in sets.items())
+        _warn(f"{code} 跨 bundle 拼接，但各 bundle **字段集不同** ⇒ 可能是不同价格口径，"
+              f"接缝处收益率会失真：{desc}"
+              f" —— 详见 00_governance/data/QLIB_LOCAL_DATA.md「加法调整」")
+
+
 def load_bars_qlib(codes: list[str], count: int, start: Optional[str] = None,
                    end: Optional[str] = None, root: str | Path = DEFAULT_Q_ROOT) -> dict[str, pd.DataFrame]:
-    """从 qlib bundle 读日线。start/end(YYYY-MM-DD)在 count 之前应用;跨 bundle 段拼接去重。"""
+    """从 qlib bundle 读日线。start/end(YYYY-MM-DD)在 count 之前应用;跨 bundle 段拼接去重。
+
+    ⚠️ **价格口径**：2021_2026 bundle 实测为「减去累计现金分红」的**加法调整**，
+    不是乘法前复权 ⇒ **百分比收益被系统性放大**（高分红股放大 13~21%），
+    涨跌幅甚至能超过涨跌停限制。用它做百分比收益/止损的回测会失真。
+    详见 `00_governance/data/QLIB_LOCAL_DATA.md`。
+    """
     bundles = list_bundles(root)
     by_dir = {b["dir"]: b for b in bundles}
     out: dict[str, pd.DataFrame] = {}
     for c in codes:
         try:
             hits = code_to_qlib_dir(c, bundles)
+            _warn_if_mixed_convention(c, hits)
             segs = [_load_one_qlib(by_dir, bd, inst) for bd, inst in hits]
             segs = [s for s in segs if s is not None and len(s)]
             if not segs:

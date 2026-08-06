@@ -545,8 +545,17 @@ def main() -> int:
                     help="判定两边各用**乘法前复权**还是**加法（减分红）调整**")
     ap.add_argument("--qlib-fields", default="",
                     help="列出 qlib bundle 里该票实有的 .bin 字段（看有没有 factor）")
+    ap.add_argument("--win", nargs=2, metavar=("START", "END"), default=None,
+                    help="覆盖对账窗口。默认 2021-08-02~2026-01-31（落在 2021_2026 bundle "
+                         "内部）。⚠️ 两个 bundle 字段集不同、可能是两种价格口径，"
+                         "所以**必须分 bundle 分别对账**，不要跨缝比")
     ap.add_argument("--out", default="")
     a = ap.parse_args()
+
+    if a.win:
+        global WIN_START, WIN_END
+        WIN_START, WIN_END = a.win[0], a.win[1]
+        print(f"[INFO] 对账窗口覆盖为 {WIN_START} ~ {WIN_END}")
 
     if a.qlib_fields:
         return qlib_fields(a.qlib_fields.strip()[:6])
