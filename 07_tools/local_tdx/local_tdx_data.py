@@ -759,7 +759,7 @@ def get_ohlcv_table(code: str, count: int = 260, prefer: str = "vipdoc",
                   file=sys.stderr)
     if adjust == "qfq" and not df.empty:
         # owner 2026-08-04 拍板：全链统一前复权。未复权数据会把除权跳空当成真实暴跌
-        # ⇒ 假止损、假 J<13 信号、假跌停（详见 B1_BACKTEST_FINDINGS「复权口径问题」）。
+        # ⇒ 假止损、假 J<13 信号、假跌停（详见 research/R14_meta_data_foundation.md）。
         # 权息取不到时按未复权返回并在 attrs 留痕（不 raise：一只票的权息拿不到
         # 不该让整条 18:00 选股链停摆），下游可查 attrs["adjust"] 判断。
         from code_utils import is_index                      # noqa: PLC0415

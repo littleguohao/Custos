@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """真市值/总股本:按交易日取东方财富估值分析表,压成**股本变动事件**落盘。
 
-解决什么问题:B1_BACKTEST_FINDINGS §3 与结论#14 记着"⚠️ 市值代理不是真市值:qlib bundle
+解决什么问题:research/R15(偏差警示)与 R3(判别力)记着"⚠️ 市值代理不是真市值:qlib bundle
 无总股本,成交额只是流动性/规模的代理"。`RPT_VALUEANALYSIS_DET` 直接给 `TOTAL_SHARES`(总股本)
 与 `TOTAL_MARKET_CAP`(总市值),一次调用一个交易日全市场。
 

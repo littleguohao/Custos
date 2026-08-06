@@ -4,7 +4,7 @@
 为什么要驱动脚本:窗口对有十几个,手抄十几条 Pass1 命令易错;且 Pass1 耗时长,中途失败必须能
 **断点续跑**(已有 firings 文件默认跳过)。所有实际计算仍在 launch_point_study.py 里,本脚本只编排。
 
-数据可用性护栏(依据 B1_BACKTEST_FINDINGS §3 s_data 特性):
+数据可用性护栏(依据 research/R15_meta_bias_and_limits.md 的 s_data 特性):
   - qlib 两个 bundle 间缺口 2020-09-28→2021-07-30:任何与之相交的窗口对**必须剔除**;
   - 数据止于 2026-02-06:赢家窗超出即剔除(否则赢家收益按残缺区间算)。
 

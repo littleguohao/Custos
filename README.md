@@ -63,8 +63,13 @@ strategy_team/
 │   │   ├── TDX_LOCAL_INTERFACES.md      # 已接入用法 + 探过未接（附风险等级）
 │   │   ├── MOOTDX_INTERFACES.md         # Reader/Quotes/Affair 三入口
 │   │   └── QLIB_LOCAL_DATA.md           # S_DATA bundle（含退市股、已前复权）
-│   ├── research/                    # 回测研究：只增，结论会被推翻
-│   │   └── B1_BACKTEST_FINDINGS.md
+│   ├── research/                    # 回测研究：17 个研究单元，只增，结论会被推翻
+│   │   ├── README.md                    # **索引与主图**（依赖关系/证据等级/推翻关系）
+│   │   ├── R1_core_framework.md         # 核心可辩护框架
+│   │   ├── R2..R5                       # 选股(全证伪) / 择时(唯一站得住)
+│   │   ├── R6..R8                       # 假设 H1/H2(否决) H3/H4(待跑)
+│   │   ├── R9..R11                      # 交易管理：盈亏比 / 止损 / ⚠️ 基准崩塌
+│   │   └── R12..R17                     # 元层(判据/可复现/数据/偏差) + 输入 + 工程
 │   └── contracts/                   # 契约 + 运行时配置：**代码直接依赖**
 │       ├── MASTER_WORKFLOW.md / SCREENING_WORKFLOW.md / DATA_FLOW_CONTRACT.md
 │       ├── CN_TRADING_CALENDAR.json     # 交易日历（7 处代码引用）

@@ -1908,7 +1908,7 @@ _RSS_FAIL: str = ""             # 峰值内存探测失败原因（供 [MEM] 行
 def peak_rss_mb() -> Optional[float]:
     """本进程峰值 RSS（MB）。取不到返回 None，失败原因写进 `_RSS_FAIL`。
 
-    OOM Kill 是这套回测的老问题（见 B1_BACKTEST_FINDINGS「全市场 OOM」），
+    OOM Kill 是这套回测的老问题（见 00_governance/research/R17_infra_tooling.md「全市场 OOM」），
     但一直没有**每轮实测数字**，只能靠猜。有了它才能判断 `--jobs N` 并行安全到几路。
 
     ⚠️ 第一版在 Windows 上静默返回 None（owner 实测打出「峰值 未知」）。原因是只试了

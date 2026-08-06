@@ -395,7 +395,7 @@ class TestPinnedUniverseCLI:
 
 
 class TestMemoryHygiene:
-    """OOM Kill 是这套回测的老问题（B1_BACKTEST_FINDINGS「全市场 OOM」）。"""
+    """OOM Kill 是这套回测的老问题（research/R17_infra_tooling.md「全市场 OOM」）。"""
 
     def test_peak_rss_available(self):
         v = bt.peak_rss_mb()

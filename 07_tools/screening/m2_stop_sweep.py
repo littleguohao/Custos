@@ -91,7 +91,7 @@
 
 ## OOM Kill（2026-08-05）
 
-`B1_BACKTEST_FINDINGS`「全市场 OOM」早有记录，`--top-n`(collect_all) 大样本尤重：
+`research/R17_infra_tooling.md`「全市场 OOM」早有记录，`--top-n`(collect_all) 大样本尤重：
 非 collect_all 时 `i = tr["exit_idx"] + 1`（跳到出场后），collect_all 是 `i += step`
 （step=1 ⇒ **每根 K 线**都可能出一条候选）⇒ 逐笔条数高一个量级。
 **被 kill 掉的方案在报表里只是少一行**，比跑得慢糟得多。三道措施：
@@ -494,7 +494,7 @@ def _is_heavy(group: str, name: str) -> bool:
 
     非 collect_all 时 `i = tr["exit_idx"] + 1`（跳到出场后），collect_all 是
     `i += step`（step=1 ⇒ **每根 K 线**都可能产生一条候选）⇒ 逐笔条数高一个量级。
-    `B1_BACKTEST_FINDINGS` 早就记着「全市场 OOM，`--top-n`(collect_all) 大样本仍重」。
+    `research/R17_infra_tooling.md` 早就记着「全市场 OOM，`--top-n`(collect_all) 大样本仍重」。
     这类方案不与别人并行，单独串行跑。
     """
     return "--top-n" in _flag_set((GROUPS.get(group, {}).get("runs") or {}).get(name, []))
@@ -504,7 +504,7 @@ def _cap_jobs(jobs: int, n_tasks: int) -> int:
     """按可用内存收敛并行度。
 
     ⚠️ **并行会把内存乘 N**，而这套回测本来就常被 OOM Kill
-    （`B1_BACKTEST_FINDINGS`「全市场 OOM」）。被 kill 掉的方案在报表里只是少一行，
+    （`research/R17_infra_tooling.md`「全市场 OOM」）。被 kill 掉的方案在报表里只是少一行，
     比跑得慢糟得多 ⇒ 宁可少开几路。
     `MEM_PER_JOB_MB` 是保守估计；跑完看 `backtest_factors` 打的 `[MEM] 峰值 XXXMb`
     再按实测调。留 20% 余量给系统与通达信客户端本身。

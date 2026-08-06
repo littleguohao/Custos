@@ -1,7 +1,7 @@
 # B1 策略研究结论 · 一页总结（2026-07）
 
 > 一整轮系统性回测(选股证伪 → 交易管理 → 0AMV → 板块择时)的**执行摘要**。
-> 详见 `B1_BACKTEST_FINDINGS.md`(完整结论链/偏差警示/工具用法)。**全部为研究结论,未改任何线上买入逻辑。**
+> 详见 `../research/README.md`(17 个研究单元的索引与主图，含证据等级与推翻关系)。**全部为研究结论,未改任何线上买入逻辑。**
 
 ## 一、可辩护的完整框架
 > **0AMV做多(主择时) + 板块相位(辅助择时) + J<13/反转K入场 + 带空间止损(6~12%) + BBI移动止盈 + 分散多槽 + 等权/随机选股**
@@ -34,7 +34,7 @@
 ## 五、工具与数据
 - 回测器:`07_tools/screening/backtest_factors.py`(入场门槛/止损模式/0AMV/板块相位/组合/top-N/成本/流式;`--data-source qlib` 含退市;`--start/--end` walk-forward)。
 - 板块相位:`07_tools/screening/sector_phase.py` + `07_tools/local_tdx/fetch_sector_index_history.py`(TQ 板块指数 2021-08 起)。
-- 结论详档:`00_governance/research/B1_BACKTEST_FINDINGS.md`。
+- 结论详档:`00_governance/research/README.md`(索引与主图)。
 
 ## 六、落地建议(单独立项,勿顺手改线上)
 把框架参数固化进 live screening 前,须:①对齐前复权/未复权口径 ②小仓验证 ③保留 0AMV 空头空仓的风控 ④明确"收益引擎是择时+风控,不是选股"——不堆形态选择器。

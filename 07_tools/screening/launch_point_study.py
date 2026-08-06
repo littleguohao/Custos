@@ -587,7 +587,7 @@ def _auc_within_day(by_day: dict, valfn, picks_key: str = "win") -> Optional[flo
 
 def _split_days_in_half(by_day: dict) -> tuple[dict, dict]:
     """按日期把信号池切成前/后半程,用于**分段一致性**检验(样本内挑特征极易过拟合,
-    见 B1_BACKTEST_FINDINGS §3;要求两半程 AUC 与全样本同号才敢称'弱可用')。"""
+    见 research/R15_meta_bias_and_limits.md;要求两半程 AUC 与全样本同号才敢称'弱可用')。"""
     ds = sorted(by_day)
     mid = len(ds) // 2
     return ({d: by_day[d] for d in ds[:mid]}, {d: by_day[d] for d in ds[mid:]})

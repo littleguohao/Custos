@@ -162,7 +162,7 @@ vipdoc 有数据的时段。**
 3. **换去偏路径**：另找 point-in-time 的退市股名单 + 价格源。
 
 ⇒ **在解决之前，所有基于 `--data-source qlib` 的结论都要打折**，包括那些
-「跨年 walk-forward 证伪」的结论（`research/B1_BACKTEST_FINDINGS.md` 结论 #8 等）——
+「跨年 walk-forward 证伪」的结论（`research/R2_selection_price_volume.md`）——
 它们用的收益率被放大过。
 
 ---

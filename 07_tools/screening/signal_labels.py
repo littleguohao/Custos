@@ -7,7 +7,7 @@
     B. 加分/减分            改 total → 改 A/B/C/D → 改"可买"清单 → **必须先回测**
     C. 封顶/否决            同上                                 → **必须先回测**
 
-⚠️ **这些因子已在跨窗终审中被否决**（B1_BACKTEST_FINDINGS「H1/H2 终审」，2026-08-03）：
+⚠️ **这些因子已在跨窗终审中被否决**（`research/R6_hypothesis_H1_dual_axis.md` 与 `R7_hypothesis_H2_b1b2b3.md`，2026-08-03）：
 b1_dual 系、B2/异动系、`j_low_qsx_weekly` 的 edge 只存在于 2025-2026 单一 regime，
 跨区间不成立；`surge_strict_then_b1` 跨 seed 方向翻转、跨区间零信号。
 **所以标注不是交易依据，尤其不得据标注数决定仓位**——那个推论（"标注多⇒确信度高"）

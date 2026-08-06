@@ -149,7 +149,7 @@ def _signal_labels_section(candidates: list[dict]) -> list[str]:
                      + "、".join(f"{sl.SIGNAL_META[k][0]} {v} 只" for k, v in top))
     lines.append("> 分母为**可评估数**；缩写见各行反引号。这些标注不改写分层/next_step。")
     lines.append("> ⚠️ **这些因子已在跨窗终审中被否决**（edge 仅存在于 2025-2026 单一 regime，"
-                 "详见 00_governance/research/B1_BACKTEST_FINDINGS.md「H1/H2 终审」）："
+                 "详见 00_governance/research/README.md「跨窗终审总账」）："
                  "本区块是**观察记录，不是交易依据**，不得据命中数决定仓位。")
     lines.append("")
     return lines
