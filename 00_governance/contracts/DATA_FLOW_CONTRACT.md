@@ -8,9 +8,39 @@
 
 统一各 Agent 的输入输出，避免后续扩展时数据混乱。
 
+## ⚠️ 实现状态（2026-08-06 逐实体核查）
+
+**契约的第一件事是说清哪些真有产出。** 8 个实体里 **2 个没有任何生产者**：
+
+| 实体 | 生产者 | 状态 |
+|---|---|---|
+| MarketState | `generate_risk_and_sectors.py`、`market_timing/` | ✅ |
+| SectorState | `generate_risk_and_sectors.py` | ✅ |
+| StockCandidate | `screening/` 链（enrich → score → table）| ✅ |
+| HoldingReview | `market_timing/b1_holding_state.py` | ✅ |
+| RiskDecision | `generate_risk_and_sectors.py` | ⚠️ 除 `cooldown_list`（见下）|
+| ChiefDecision | `chief_decision_report.py`、`daily_report.py` | ✅ |
+| **SkillEvidence** | — | 🔴 **无生产者** |
+| **BuyPlan** | — | 🔴 **无生产者** |
+
+**🔴 SkillEvidence**：Skill 架构时代的遗留。`build_skill_contracts.py` + `skill_adapters.py`
+已在纯脚本化时被 `generate_risk_and_sectors.py` 取代（见该文件 docstring），
+`skill_id` / `entity_id` / `raw_ref` / `source_tools` 全仓零命中。
+
+**🔴 BuyPlan**：`buy_strategy` 相关代码已移除。代码里只剩 `next_step = "generate_buy_plan"`
+这个**字符串标签**（提示人去做买入计划），**不是一个被产出的 BuyPlan 对象** ——
+`buy_price_range` / `entry_conditions` / `first_position_pct` / `add_conditions` /
+`invalid_conditions` / `max_loss_pct` / `stock_pool_bucket` / `buy_mode` 全仓零命中。
+买入计划的**必备项清单**现在在 `../strategy/b1/03_execution_discipline.md`（人执行）。
+
+⇒ **读这两节时不要假设有对应产物。** 保留它们是因为重建这两层时是有用的目标形状，
+但**当前不是契约，是设计草案**。
+
 ## 核心实体
 
 ### SkillEvidence
+
+> 🔴 **无生产者（2026-08-06 核查）。** Skill 架构遗留，已被 `generate_risk_and_sectors.py` 取代。下面是**设计草案而非现行契约**。
 
 所有本地 TDX 技能必须先转换为证据对象，不能把自由文本结论直接送入总控：
 
@@ -44,7 +74,7 @@
   "position_range": "20%-40%",
   "new_position_permission": "允许|小仓试探|原则不允许|禁止",
   "risk_level": "普通|提高|强风控",
-  "zero_amv_state": "做多区间|中性|空头区间",
+  "amv_state": "做多|中性|空头",            // ⚠️ 契约原写 `zero_amv_state`，代码实际用 `amv_state`/`amv_zone`/`effective_state`
   "evidence": []
 }
 ```
@@ -74,14 +104,13 @@
   "sector": "示例板块",
   "theme_id": "semiconductor_chip_memory_packaging",
   "source": ["theme_tracker", "tdx_screener", "industry_research", "formula_screen"],
-  "technical_sources": [
-    {
-      "source_id": "B1_low_j_factor_similarity",
-      "signal": "KDJ低位+因子相似度",
-      "technical_score": 0,
-      "raw_rank": 0
-    }
-  ],
+  // ⚠️ 契约原写嵌套的 `technical_sources[{source_id, signal, technical_score, raw_rank}]`，
+  // 实际产出是**平铺**的（`technical` / `technical_level` / `technical_score` / `signals`），
+  // 且从无 `technical_sources` 与 `raw_rank` 这两个名字。已按实际形状改写：
+  "technical": {},
+  "technical_level": "强|中|弱|未知",
+  "technical_score": 0,
+  "signals": [],
   "sector_heat_filter": {
     "sector_state": "主升|修复|分歧|震荡|退潮|未知",
     "sector_score": 0,
@@ -106,6 +135,10 @@
 ```
 
 ### BuyPlan
+
+> 🔴 **无生产者（2026-08-06 核查）。** `buy_strategy` 代码已移除；代码里只有 `next_step="generate_buy_plan"` 这个标签。
+> 买入计划的**必备项清单**（含「缺任一项不得放行」）在 [`../strategy/b1/03_execution_discipline.md`](../strategy/b1/03_execution_discipline.md)。
+> 下面是**设计草案而非现行契约**。
 
 ```json
 {
@@ -161,12 +194,14 @@
   "date": "YYYY-MM-DD",
   "risk_level": "普通|提高|强风控",
   "forbidden_actions": [],
-  "cooldown_list": [],
+  // 🔴 "cooldown_list": [] —— **契约声明过但从未实现**（全仓 cooldown/冷却/blacklist 零命中）。
+  // 别把它当成「触发止损的票会自动进冷却、不会被重复买入」——那个机制不存在。
+  // 现有的近似能力只有 forbidden_actions（已实现）。要真做冷却须先立项，见 TODO。
   "stock_risks": [
     {
       "code": "600000",
       "name": "示例股票",
-      "risk_type": "破位|亏损扩大|板块退潮|冷却|无止损计划",
+      "risk_type": "破位|亏损扩大|板块退潮|无止损计划",   // 原枚举含「冷却」，与 cooldown_list 一起未实现，已移除
       "action": "禁止加仓|减仓|止损|清仓|观察",
       "priority": "高|中|低"
     }

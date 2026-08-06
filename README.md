@@ -72,6 +72,7 @@ strategy_team/
 │   │   ├── R9..R11                      # 交易管理：盈亏比 / 止损 / ⚠️ 基准崩塌
 │   │   └── R12..R17                     # 元层(判据/可复现/数据/偏差) + 输入 + 工程
 │   └── contracts/                   # 契约 + 运行时配置：**代码直接依赖**
+│       ├── README.md                    # **索引**（按「代码怎么用它」分类 + 契约失真核查结论）
 │       ├── MASTER_WORKFLOW.md / SCREENING_WORKFLOW.md / DATA_FLOW_CONTRACT.md
 │       ├── CN_TRADING_CALENDAR.json     # 交易日历（7 处代码引用）
 │       ├── SCREEN_FORMULA_REGISTRY.json # 选股公式注册表
