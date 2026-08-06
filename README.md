@@ -83,6 +83,12 @@ strategy_team/
 │   ├── market/                      # 行情、市场择时输入
 │   ├── news/                        # RSS 新闻
 │   ├── quality/                     # 运行门控
+│   ├── factors/                     # **因子实现层**（live 选股链与研究回测器共同依赖的下层）
+│   │   ├── __init__.py                  # 包文档：三套接口与两种消费方式的现状（待统一）
+│   │   ├── s_shape.py / b1_dual_factor.py / b2_surge_factor.py / main_rally_factor.py
+│   │   ├── platform_pullback.py / rsi_state.py
+│   │   └── sector_phase.py / sector_mainstream.py
+│   ├── indicators.py                # 共享技术指标：kdj_series / bbi_series（**唯一实现**）
 │   ├── screening/                   # 选股链中间产物（公式命中、充实候选）
 │   ├── stock_pool/                  # 选股链分层输出（StockPool 契约）
 │   ├── trades/                      # 交易台账、持仓快照
