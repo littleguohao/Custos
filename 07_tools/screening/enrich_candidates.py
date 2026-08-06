@@ -49,7 +49,7 @@ if _FACTORS_DIR not in sys.path:
     sys.path.insert(0, _FACTORS_DIR)   # 因子层：见 factors/__init__.py
 
 
-from indicators import j_series as _j_canonical  # noqa: E402
+from indicators import j_series as _j_canonical, dks_series  # noqa: E402
 
 def _j_series(df, n: int = 9, m1: int = 3, m2: int = 3):
     """委托给 `indicators.j_series`。
@@ -924,15 +924,6 @@ def check_macd_technics(df) -> dict[str, Any]:
     }
 
 
-def dks_series(close_s):
-    """DKS（知行多空线）序列＝(MA14+MA28+MA57+MA114)/4 —— **唯一实现**。
-
-    审计：此前 technical_monitor.zhixing_state 与 compute_perfect_b1_fit 各写了一份
-    同样的四均线求和，参数一旦一边改就静默漂移（一个说"多头"、另一个说"DKS 上行"）。
-    技术监控模块不在本次改动域内，故把口径收在这里并用测试钉住两者相等
-    （tests/test_audit_opt_screening.py::test_dks_single_definition_matches_zhixing_state）。
-    """
-    return sum(close_s.rolling(w).mean() for w in DKS_MA_WINDOWS) / len(DKS_MA_WINDOWS)
 
 
 def compute_perfect_b1_fit(df, daily_j, zx: dict, pullback: dict,

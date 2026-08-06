@@ -35,7 +35,8 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-J_N, J_M1, J_M2 = 9, 3, 3          # KDJ 标准参数；com = m - 1 ⇒ com=2
+J_N, J_M1, J_M2 = 9, 3, 3
+DKS_MA_WINDOWS = (14, 28, 57, 114)  # 知行多空线的四均线（good_b1 图上参数）          # KDJ 标准参数；com = m - 1 ⇒ com=2
 
 
 def kdj_series(df: pd.DataFrame, *, n: int = J_N, m1: int = J_M1, m2: int = J_M2,
@@ -81,3 +82,20 @@ def bbi_series(close: pd.Series) -> pd.Series:
     """
     c = close.astype(float)
     return sum(c.rolling(k).mean() for k in (3, 6, 12, 24)) / 4
+
+
+def dks_series(close: pd.Series, windows: tuple[int, ...] = DKS_MA_WINDOWS) -> pd.Series:
+    """DKS（知行多空线）= (MA14+MA28+MA57+MA114)/4。
+
+    2026-08-06 收敛第 3 份重复指标（前两个是 J 与 BBI）。此前有两处：
+    · `screening/enrich_candidates.dks_series` —— docstring 自称「**唯一实现**」，
+      并记录了它当初就是为了收敛 `technical_monitor.zhixing_state` 才建的
+    · `factors/b1_dual_factor._dks_series` —— **但这份它没收进去**
+
+⇒ 「唯一实现」的声明与事实不符，而两份实测逐点相同（尚未发散）。
+    移到这里后才真的唯一，并顺带**断开一处循环依赖**：
+    `factors/perfect_b1_fit` 需要 DKS，若从 `enrich_candidates` 取就成了
+    factors → screening → factors 的环。
+    """
+    c = close.astype(float)
+    return sum(c.rolling(w).mean() for w in windows) / len(windows)

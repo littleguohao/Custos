@@ -94,9 +94,18 @@ class TestQsxDksMatchesZhixing:
         assert round(mine, 4) == pytest.approx(float(zx["qsx"]), abs=1e-4)
 
     def test_windows_are_the_chart_ones(self):
+        """断言**常量真值**，不是源码文本。
+
+        DKS 已收敛到 `indicators`（2026-08-06，第 3 份重复指标），
+        窗口从字面量变成了 `DKS_MA_WINDOWS` 常量 ⇒ 原来的 `"(14, 28, 57, 114)" in src`
+        立刻假失败（值是对的、文本读不到）。**能读真值就别读源码。**
+        """
+        import indicators
+        assert indicators.DKS_MA_WINDOWS == (14, 28, 57, 114), \
+            "参数必须与 good_b1 图上的知行趋势线一致"
         import inspect
-        src = inspect.getsource(bd._dks_series)
-        assert "(14, 28, 57, 114)" in src, "参数必须与 good_b1 图上的知行趋势线一致"
+        sig = inspect.signature(indicators.dks_series)
+        assert sig.parameters["windows"].default == (14, 28, 57, 114)
 
 
 class TestLaunchSegment:

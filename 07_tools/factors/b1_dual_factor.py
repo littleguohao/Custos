@@ -36,6 +36,8 @@ for _p in (str(_TOOLS), str(_TOOLS / "screening"), str(_TOOLS / "market_timing")
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+from indicators import dks_series as _dks_series  # noqa: E402
+
 from s_shape import compute_ma_structure, compute_overhead_supply, compute_s_reversal  # noqa: E402
 
 # ---- 轴1：长期结构 0-100（"这只票底子好不好，值不值得等它回调"）----
@@ -68,10 +70,6 @@ def _qsx_series(close: pd.Series) -> pd.Series:
     return close.astype(float).ewm(span=10, adjust=False).mean().ewm(span=10, adjust=False).mean()
 
 
-def _dks_series(close: pd.Series) -> pd.Series:
-    """DKS 知行多空线 = (MA14+MA28+MA57+MA114)/4（good_b1 图上参数 14,28,57,114）。"""
-    c = close.astype(float)
-    return sum(c.rolling(w).mean() for w in (14, 28, 57, 114)) / 4.0
 
 
 def detect_launch_segment(df: pd.DataFrame, lookback: int = LAUNCH_LOOKBACK) -> dict[str, Any]:
