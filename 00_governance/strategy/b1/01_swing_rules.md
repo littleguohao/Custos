@@ -4,6 +4,9 @@
 > **版本**：`B1-base-v11`（2026-07-13）　｜　**代码依赖**：`screening/enrich_candidates.py`、`market_timing/b1_holding_state.py`、`screening/backtest_factors.py`
 > **索引**：[`../README.md`](../README.md)　·　改动须记 [`strategy_version_log.md`](../../../05_strategy_versions/strategy_version_log.md)
 >
+> 🔒 **止损口径（owner 2026-08-06 定案）：B1 按本文档的规则止损，自成一套。**
+> CZ 的 15%/20% 强制止损属**长期持有语境**，不约束 B1 仓位；**不存在跨策略统一止损线**。
+> ⚠️ 另见 [R10 实测](../../research/R10_mechanism_M2_stops.md)：**5% 是止损下界的「崖」不是「坡」**（5%→4% 掉 42%），**B1 的止损普遍太紧** —— 收紧到 5% 以下是明确有害的。
 > ⚠️ **本目录唯一「代码执行」的规则文档** —— 改这里的阈值必须同步改代码常量并跑测试。反转K 六项阈值已于 2026-08-06 逐项核查一致，见 [`../README.md`](../README.md)。
 
 > 2026-07-22 增补：`§四.5` 知行趋势线量价模板（优秀 B1 图集归纳，知行线严格对齐通达信 ZSDKX：QSX=EMA(EMA(C,10),10)、DKS=(MA14+MA28+MA57+MA114)/4）；`§七.3` 主力出货五方式（顶部派发形态，用于清仓与选股规避）。两节均为确定性可计算口径、阈值待回测。

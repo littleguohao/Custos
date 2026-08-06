@@ -221,12 +221,26 @@ class TestKnownIssuesStayVisible:
         doc = (STRATEGY / "b1" / "04_pullback_rotation.md").read_text(encoding="utf-8")
         assert "零实现" in doc[:1200]
 
-    def test_stop_hierarchy_flagged(self):
+    def test_stop_scope_decided_and_recorded(self):
+        """止损口径已定案（owner 2026-08-06）：**按策略上下文各行其是，无统一止损线**。
+
+        这条必须三处同时写着，因为三处都会被单独读到：
+        索引（有人查规则）／CZ 文档头部（有人读 CZ）／CZ「强制止损体系」那一节
+        （那里原文措辞是「无论谁推荐的个股都必须执行」—— 普适口气，最容易被误用）。
+        """
         s = INDEX.read_text(encoding="utf-8")
-        assert "层级" in s and "20%" in s and "8%" in s
-        assert "owner 拍板" in s
+        assert "不存在跨策略的统一止损线" in s
+        assert "已定案" in s and "20%" in s
+
         cz = (STRATEGY / "cz" / "01_cognition_framework.md").read_text(encoding="utf-8")
-        assert "层级关系" in cz[:1500], "CZ 文档头部要写清它的止损不是 B1 的执行止损"
+        assert "只适用于 CZ 语境" in cz[:2000], "CZ 头部要限定 15%/20% 的适用范围"
+        k = cz.index("### 强制止损体系")
+        assert "仅 CZ 长期持有语境" in cz[k:k + 400], \
+            "「强制止损体系」那一节必须就地限定——它的措辞是普适口气，最易被误读"
+
+        b1 = (STRATEGY / "b1" / "01_swing_rules.md").read_text(encoding="utf-8")
+        assert "B1 按本文档的规则止损" in b1[:2500]
+        assert "5%" in b1[:2500], "B1 侧的硬约束（5% 是崖）要一并写在头部"
 
     def test_unreachable_docs_now_reachable(self):
         """曾经入口不可达的两份，现在必须能从索引/注册表到达。"""
@@ -246,3 +260,58 @@ class TestPathsConstants:
     def test_cz_config_points_into_cz_dir(self):
         s = (ROOT / "07_tools" / "paths.py").read_text(encoding="utf-8")
         assert 'CZ_SECTOR_PREFERENCE_FILE = CZ_DIR / "CZ_SECTOR_PREFERENCE.json"' in s
+
+
+class TestDeprecatedDocSafety:
+    """已废文档留着有价值，但**必须防止被当现行规则用**。
+
+    2026-08-06 逐条核查 `99_deprecated_buy_integration.md`：它的交易规则
+    （拉升波分类/非一波流/反转K/开盘量比六场景/条件化输出/补坑接入/否决权链）
+    **全部已被现行文档覆盖，且多数更细**。剩余独有价值只有「当初的编排设计」。
+
+    但核查同时查出两个真陷阱：
+    ① 它保留着反转K 的**对称 `-2%~+2%`**，而现行是**不对称 `-2%~+1.8%`**
+       ⇒ 照它实现会得到错的反转K；
+    ② 两处引用指向不存在的文件（`TRADING_EXECUTION_DISCIPLINE.md` /
+       `B1_SWING_STRATEGY.md` —— 大写旧名，重组时的改名脚本只处理了小写）。
+    """
+
+    DEP = STRATEGY / "b1" / "99_deprecated_buy_integration.md"
+
+    def test_has_supersede_table(self):
+        """必须给出「本文档的规则已被谁取代」的逐条对照，否则读者不知道该去哪。"""
+        s = self.DEP.read_text(encoding="utf-8")
+        assert "已被谁取代" in s
+        for target in ("01_swing_rules.md", "03_execution_discipline.md",
+                       "05_pit_recovery.md"):
+            assert target in s, f"对照表缺 {target}"
+
+    def test_stale_symmetric_range_is_marked(self):
+        """对称 ±2% 是**已被修正的错口径**，必须就地标红，不能只静静躺着。"""
+        s = self.DEP.read_text(encoding="utf-8")
+        assert "-2%至+2%" in s, "原文口径应保留（历史留痕），但必须标注"
+        k = s.index("-2%至+2%", s.index("### B1 分歧转一致反转K"))
+        assert "旧对称口径" in s[k:k + 120], "反转K 那节的旧口径未就地标注"
+        assert "不对称" in s[:2500], "头部要提醒现行是不对称口径"
+
+    def test_no_dangling_doc_references(self):
+        """已废文档里的引用也不许是死链——读者会照着去找。"""
+        import re
+        s = self.DEP.read_text(encoding="utf-8")
+        bad = []
+        for m in re.finditer(r"\]\(([^)#:]+\.md)\)", s):
+            if not (self.DEP.parent / m.group(1)).resolve().exists():
+                bad.append(m.group(1))
+        # ⚠️ 反引号里的名字若紧跟 `](`，那是 markdown 链接的**显示文字**、不是路径
+        # ——真路径在括号里，已由上一个循环检过。第一版没排除它，
+        # 把 [`strategy_version_log.md`](../../../05_.../strategy_version_log.md)
+        # 的前半段当成同目录文件去找 ⇒ 误报。这是「把散文当路径检」的同类错。
+        for m in re.finditer(r"`([A-Za-z0-9_]+\.md)`(?!\])", s):
+            if not (self.DEP.parent / m.group(1)).exists():
+                bad.append(m.group(1))
+        assert not bad, f"已废文档里的死链：{bad}"
+
+    def test_unique_value_is_stated(self):
+        """说清「为什么还留着它」——否则下次有人会直接删掉，连带丢了编排设计。"""
+        s = self.DEP.read_text(encoding="utf-8")
+        assert "本文档独有" in s and "编排设计" in s
