@@ -251,3 +251,31 @@ class TestGapReport:
         self._mk(root, "b", ["2021-08-02", "2026-02-06"], ["SH600000"], ohlcv)
         R.gap_report(sample=1, root=root)
         assert "✅ 无缺口" in capsys.readouterr().out
+
+
+    def test_reports_debias_value_per_bundle(self, tmp_path, monkeypatch, capsys):
+        """每个 bundle 的**去偏价值** = 它有多少票是本地 vipdoc 没有的（≈ 已退市）。
+
+        去偏价值为 0 意味着 universe≈在市股 ⇒ 该 bundle 对「去幸存者偏差」毫无贡献；
+        若它同时还有价格口径问题，就是**纯负债**。
+        实测 2021_2026 正是这种情况（universe 5484 ≈ vipdoc 5536、加法调整、
+        覆盖期还短于 vipdoc）。
+        """
+        root = tmp_path / "Q_DATA"
+        ohlcv = ["open", "high", "low", "close", "volume"]
+        # 老 bundle 含 2 只已退市（600001/600002 不在 vipdoc）
+        self._mk(root, "2006_2020", ["2019-01-02", "2020-09-25"],
+                 ["SH600000", "SH600001", "SH600002"], ohlcv + ["factor"])
+        # 新 bundle 全部在 vipdoc 里 ⇒ 去偏价值 0
+        self._mk(root, "2021_2026", ["2021-08-02", "2026-02-06"],
+                 ["SH600000"], ohlcv)
+        import local_tdx_data
+        monkeypatch.setattr(local_tdx_data, "list_local_vipdoc_codes",
+                            lambda *a, **k: ["600000"])
+        monkeypatch.setattr(R, "WIN_START", "2021-08-02")
+        monkeypatch.setattr(R, "WIN_END", "2026-01-31")
+        R.gap_report(sample=1, root=root)
+        out = capsys.readouterr().out
+        assert "去偏价值" in out
+        assert "纯负债" in out, "去偏价值为 0 的 bundle 必须被点名"
+        assert "2 只退市票可用于去偏" in out
