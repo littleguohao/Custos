@@ -41,7 +41,7 @@
 | 数据项 | 状态 | 来源 | 采集入口 | 实测耗时 | 备注 |
 |---|---|---|---|---|---|
 | 上证指数 | ✅ | **999999** | mootdx Reader 本地 vipdoc | 4.7ms | ⚠️ **不是 000001**——vipdoc 里 `sh000001` 不是上证指数（ebd9982 修） |
-| 个股日线 | ✅ | 本地 vipdoc | `read_vipdoc_daily()` | **4.7ms**/股 | 回测与 live 的主数据源 |
+| 个股日线 | ✅ | 本地 vipdoc | `read_vipdoc_daily()` | **4.7ms**/股 | 回测与 live 的主数据源。⚠️ **深度只约 1214 根（5 年，2021-06 起）** ⇒ 跨年 walk-forward 的可用历史有限 |
 | 个股日线（前复权） | ✅ | vipdoc + 自算 xdxr | `get_ohlcv_table(adjust="qfq")` | **8.3ms**/股 | 全链默认口径。**已对账**：与未复权收益 0 天偏离（`reconcile_qfq.py`）。BJ 曾因查错 market 拿不到权息，2026-08-06 已修 |
 | 持仓实时行情 | ✅ | TQ 快照 → 在线 bars → 域B | `collect_holding_quotes.py` | TQ 约 80ms | 多源链式降级 |
 | 在线日线（兜底） | 🚫 | mootdx Quotes | `get_online_bars()` | **12949ms → 空** | 实测 13 秒返回 0 行（见备注 B） |
