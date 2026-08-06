@@ -8,61 +8,31 @@
 
 统一各 Agent 的输入输出，避免后续扩展时数据混乱。
 
-## ⚠️ 实现状态（2026-08-06 逐实体核查）
+## 实现状态（2026-08-06 逐实体核查）
 
-**契约的第一件事是说清哪些真有产出。** 8 个实体里 **2 个没有任何生产者**：
+**契约的第一件事是说清哪些真有产出。** 现存 6 个实体全部有生产者：
 
-| 实体 | 生产者 | 状态 |
+| 实体 | 生产者 |
+|---|---|
+| MarketState | `generate_risk_and_sectors.py`、`market_timing/` |
+| SectorState | `generate_risk_and_sectors.py` |
+| StockCandidate | `screening/` 链（enrich → score → table）|
+| HoldingReview | `market_timing/b1_holding_state.py` |
+| RiskDecision | `generate_risk_and_sectors.py` |
+| ChiefDecision | `chief_decision_report.py`、`daily_report.py` |
+
+#### 已删除的两个实体（2026-08-06）
+
+| 实体 | 为什么删 | 独有内容去哪了 |
 |---|---|---|
-| MarketState | `generate_risk_and_sectors.py`、`market_timing/` | ✅ |
-| SectorState | `generate_risk_and_sectors.py` | ✅ |
-| StockCandidate | `screening/` 链（enrich → score → table）| ✅ |
-| HoldingReview | `market_timing/b1_holding_state.py` | ✅ |
-| RiskDecision | `generate_risk_and_sectors.py` | ⚠️ 除 `cooldown_list`（见下）|
-| ChiefDecision | `chief_decision_report.py`、`daily_report.py` | ✅ |
-| **SkillEvidence** | — | 🔴 **无生产者** |
-| **BuyPlan** | — | 🔴 **无生产者** |
+| **SkillEvidence** | Skill 架构遗留（`build_skill_contracts.py` + `skill_adapters.py` 已被 `generate_risk_and_sectors.py` 取代）。而且它描述的「**统一证据信封**」实际并不存在 —— `as_of`/`facts`/`signals`/`status`/`risk_flags` 这些字段确实散落在各产出里，但**没有任何一份产出同时具备它们** | 无独有内容 |
+| **BuyPlan** | `buy_strategy` 代码已移除，代码里只剩 `next_step="generate_buy_plan"` 这个字符串标签 | **结论四档 / 买入方式五类 / 最大亏损比例**已抢救到 [`../strategy/b1/03_execution_discipline.md`](../strategy/b1/03_execution_discipline.md) |
 
-**🔴 SkillEvidence**：Skill 架构时代的遗留。`build_skill_contracts.py` + `skill_adapters.py`
-已在纯脚本化时被 `generate_risk_and_sectors.py` 取代（见该文件 docstring），
-`skill_id` / `entity_id` / `raw_ref` / `source_tools` 全仓零命中。
-
-**🔴 BuyPlan**：`buy_strategy` 相关代码已移除。代码里只剩 `next_step = "generate_buy_plan"`
-这个**字符串标签**（提示人去做买入计划），**不是一个被产出的 BuyPlan 对象** ——
-`buy_price_range` / `entry_conditions` / `first_position_pct` / `add_conditions` /
-`invalid_conditions` / `max_loss_pct` / `stock_pool_bucket` / `buy_mode` 全仓零命中。
-买入计划的**必备项清单**现在在 `../strategy/b1/03_execution_discipline.md`（人执行）。
-
-⇒ **读这两节时不要假设有对应产物。** 保留它们是因为重建这两层时是有用的目标形状，
-但**当前不是契约，是设计草案**。
+⚠️ 另删掉 `RiskDecision.cooldown_list`：**声明过但从未实现**的风控机制
+（全仓 `cooldown`/`冷却`/`blacklist` 零命中）。是否要真做冷却见 `05_strategy_versions/TODO.md` #31。
+删掉字段本身就是最好的标记 —— 契约里没有它，就不会有人以为它存在。
 
 ## 核心实体
-
-### SkillEvidence
-
-> 🔴 **无生产者（2026-08-06 核查）。** Skill 架构遗留，已被 `generate_risk_and_sectors.py` 取代。下面是**设计草案而非现行契约**。
-
-所有本地 TDX 技能必须先转换为证据对象，不能把自由文本结论直接送入总控：
-
-```json
-{
-  "skill_id": "tdx-hot-topic",
-  "entity_type": "stock|sector|market",
-  "entity_id": "600000.SH",
-  "as_of": "YYYY-MM-DDTHH:mm:ss+08:00",
-  "trade_date": "YYYY-MM-DD",
-  "report_date": null,
-  "horizon": "intraday|short|medium|long",
-  "source_tools": ["tdx_api_data"],
-  "status": "ok|partial|stale|failed",
-  "facts": {},
-  "signals": [],
-  "risk_flags": [],
-  "raw_ref": ""
-}
-```
-
-适配器实现：`07_tools/skill_adapters.py`。
 
 ### MarketState
 
@@ -134,40 +104,6 @@
 }
 ```
 
-### BuyPlan
-
-> 🔴 **无生产者（2026-08-06 核查）。** `buy_strategy` 代码已移除；代码里只有 `next_step="generate_buy_plan"` 这个标签。
-> 买入计划的**必备项清单**（含「缺任一项不得放行」）在 [`../strategy/b1/03_execution_discipline.md`](../strategy/b1/03_execution_discipline.md)。
-> 下面是**设计草案而非现行契约**。
-
-```json
-{
-  "code": "600000",
-  "name": "示例股票",
-  "stock_pool_bucket": "A|B|C|D",
-  "conclusion": "允许|小仓试探|仅观察|禁止",
-  "buy_mode": "趋势回踩|箱体低吸|放量突破|事件催化|无",
-  "buy_price_range": {
-    "lower": null,
-    "upper": null,
-    "basis": ""
-  },
-  "first_position_pct": {
-    "lower": 0.0,
-    "upper": 0.0
-  },
-  "entry_conditions": [],
-  "add_conditions": [],
-  "invalid_conditions": [],
-  "stop_loss": {
-    "price": null,
-    "basis": "",
-    "max_loss_pct": null
-  },
-  "risk_level": "低|中|高"
-}
-```
-
 ### HoldingReview
 
 ```json
@@ -194,9 +130,6 @@
   "date": "YYYY-MM-DD",
   "risk_level": "普通|提高|强风控",
   "forbidden_actions": [],
-  // 🔴 "cooldown_list": [] —— **契约声明过但从未实现**（全仓 cooldown/冷却/blacklist 零命中）。
-  // 别把它当成「触发止损的票会自动进冷却、不会被重复买入」——那个机制不存在。
-  // 现有的近似能力只有 forbidden_actions（已实现）。要真做冷却须先立项，见 TODO。
   "stock_risks": [
     {
       "code": "600000",

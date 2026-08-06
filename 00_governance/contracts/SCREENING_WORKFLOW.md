@@ -278,7 +278,7 @@ stock_pool.json 的 `cz_sector_status`/`degraded_reason` 注明。
 
 ## 明确不做
 
-- 不接 chief_decision.buy_actions、不生成 BuyPlan、不改新开仓权限逻辑。
+- 不接 chief_decision.buy_actions、不生成买入计划、不改新开仓权限逻辑。（`BuyPlan` 契约实体已于 2026-08-06 删除：无生产者；买入计划的必备项清单见 `../strategy/b1/03_execution_discipline.md`。）
 - 不做盘中实时选股；不接龙虎榜。
 - StockPool 仅为证据层候选；A/B 池亦须经总控与风控审批。
 

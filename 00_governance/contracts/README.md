@@ -40,23 +40,25 @@
 
 逐字段比对契约声明与代码实际产出，查出 **7 处**。已全部就地标注或改正。
 
-### 🔴 两个实体完全没有生产者
+### ✅ 已删除：两个无生产者的实体 + 一个未实现的机制
 
-| 实体 | 为什么没有 |
+按「**核查覆盖 → 抢救独有内容 → 才可删**」的顺序处理（同 `../strategy/README.md` 的废弃流程）：
+
+| 删除项 | 为什么可删 | 独有内容去哪了 |
+|---|---|---|
+| **SkillEvidence** 实体 | Skill 架构遗留；且它描述的「**统一证据信封**」实际不存在 —— `as_of`/`facts`/`signals`/`status`/`risk_flags` 确实散落在各产出里，但**没有任何一份产出同时具备它们**（实测 `generate_risk_and_sectors.py` 只有 signals+risk_flags，`b1_holding_state.py` 只有 as_of+facts+signals）| 无独有内容 |
+| **BuyPlan** 实体 | `buy_strategy` 代码已移除，只剩 `next_step="generate_buy_plan"` 字符串标签 | **结论四档 / 买入方式五类 / 最大亏损比例**已抢救到 [`../strategy/b1/03_execution_discipline.md`](../strategy/b1/03_execution_discipline.md) |
+| **`RiskDecision.cooldown_list`** | 声明过但**从未实现**的风控机制（全仓 `cooldown`/`冷却`/`blacklist` 零命中）| 是否要真做见 TODO #31 |
+
+⚠️ **删掉比标注更彻底**：契约里没有它，就不会有人以为它存在。
+删除记录留在 `DATA_FLOW_CONTRACT.md` 的实现状态表里 —— 否则下次有人会重新加回来。
+
+### 未删的两项及理由
+
+| 项 | 为什么不删 |
 |---|---|
-| **SkillEvidence** | Skill 架构遗留。`build_skill_contracts.py` + `skill_adapters.py` 已被 `generate_risk_and_sectors.py` 取代；`skill_id`/`entity_id`/`raw_ref`/`source_tools` 全仓零命中 |
-| **BuyPlan** | `buy_strategy` 代码已移除。代码里只剩 `next_step="generate_buy_plan"` 这个**字符串标签**，不是被产出的对象；8 个字段全仓零命中 |
-
-⇒ 两者已标为「**设计草案而非现行契约**」。买入计划的必备项清单现在在
-[`../strategy/b1/03_execution_discipline.md`](../strategy/b1/03_execution_discipline.md)（人执行）。
-
-### 🔴 一个被声明但从未实现的风控机制
-
-**`RiskDecision.cooldown_list`** —— 全仓 `cooldown` / `冷却` / `blacklist` / `banned` **零命中**。
-`risk_type` 枚举里的「冷却」同样没有实现，已一并移除。
-
-⚠️ **这一条是安全相关的**：读契约的人会以为「触发止损的票会自动进冷却清单、不会被重复买入」，
-而那个机制不存在。现有的近似能力只有 `forbidden_actions`（已实现）。
+| `MASTER_WORKFLOW §七` **月度复盘** | 它是**想要的功能**（TODO #30：要么实现要么降级），删掉会丢掉已设计好的时间范围/核心目标/固定结构/核心指标/正式产物。已标「目标设计，不是现行流程」 |
+| `INCREMENTAL_TRADE_LEDGER.md` | 核查后**有效** —— 它描述的唯一主文件与 `transaction_id` 在代码中都存在，只是没有文件名级引用 |
 
 ### ⚠️ 四处字段名/形状与实际不符（已按代码改正）
 

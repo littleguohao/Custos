@@ -23,8 +23,8 @@ DFC = CONTRACTS / "DATA_FLOW_CONTRACT.md"
 MW = CONTRACTS / "MASTER_WORKFLOW.md"
 INDEX = CONTRACTS / "README.md"
 
-# 已知无生产者的实体：允许字段不存在，但必须被标注
-NO_PRODUCER = {"SkillEvidence", "BuyPlan"}
+# 已删除的实体（2026-08-06）：无生产者，且独有内容已抢救 ⇒ 不许再出现在契约里
+DELETED_ENTITIES = {"SkillEvidence", "BuyPlan"}
 
 
 def _all_code() -> str:
@@ -51,7 +51,7 @@ class TestFieldsExistInCode:
     它让下游以为可以依赖。
     """
 
-    @pytest.mark.parametrize("ent", sorted(set(_entities()) - NO_PRODUCER))
+    @pytest.mark.parametrize("ent", sorted(_entities()))
     def test_entity_fields_are_produced(self, ent):
         code = _all_code()
         missing = sorted(f for f in _fields(_entities()[ent]) if f not in code)
@@ -59,27 +59,42 @@ class TestFieldsExistInCode:
             f"{ent} 的这些字段在 07_tools/ 里零命中 —— 要么改契约（以代码为准），"
             f"要么显式标 🔴 未实现：{missing}")
 
-    @pytest.mark.parametrize("ent", sorted(NO_PRODUCER))
-    def test_no_producer_entities_are_flagged(self, ent):
-        """无生产者的实体必须就地标 🔴 并说明它是设计草案。"""
-        b = _entities()[ent]
-        assert "🔴" in b[:400], f"{ent} 无生产者但未标 🔴"
-        assert "设计草案" in b[:600], f"{ent} 未说明它是设计草案而非现行契约"
+    @pytest.mark.parametrize("ent", sorted(DELETED_ENTITIES))
+    def test_deleted_entities_are_gone(self, ent):
+        """无生产者的实体已删除，不许悄悄回来。
+
+        `SkillEvidence`（Skill 架构遗留，且它描述的「统一证据信封」实际不存在）与
+        `BuyPlan`（`buy_strategy` 代码已移除）已于 2026-08-06 删除。
+        **删掉比标注更彻底** —— 契约里没有它，就不会有人以为它存在。
+        独有内容（结论四档 / 买入方式五类 / 最大亏损比例）已抢救到
+        `strategy/b1/03_execution_discipline.md`。
+        """
+        assert ent not in _entities(), f"{ent} 无生产者，不该作为实体存在"
+        # 但删除记录要留着，否则下次有人会重新加回来
+        assert ent in DFC.read_text(encoding="utf-8"), \
+            f"{ent} 的删除记录应保留在实现状态表里"
 
 
 class TestUnimplementedMechanismsFlagged:
     """被声明过但没实现的机制，必须显式标出来。"""
 
-    def test_cooldown_is_marked_unimplemented(self):
-        """⚠️ 安全相关：冷却机制不存在，不许让人以为它存在。"""
+    def test_cooldown_field_removed_not_just_marked(self):
+        """⚠️ 安全相关：冷却机制不存在，字段已从契约**删除**。
+
+        删掉比标注更彻底 —— 读契约的人不会再以为「触发止损的票会自动进冷却、
+        不会被重复买入」。**契约里没有它，就不会有人依赖它。**
+        是否要真做冷却见 TODO #31。
+        """
         code = _all_code()
         for kw in ("cooldown", "冷却", "blacklist", "banned"):
             assert kw not in code, (
                 f"代码里出现了 {kw} —— 冷却机制若已实现，请更新契约与本测试")
         s = DFC.read_text(encoding="utf-8")
-        assert "cooldown_list" in s and "从未实现" in s, \
-            "cooldown_list 必须标注「声明过但从未实现」"
-        assert "那个机制不存在" in s, "要写清后果，不能只说未实现"
+        # 字段本体不许出现在任何 JSON 示例里
+        for l in s.splitlines():
+            if l.strip().startswith('"cooldown_list"'):
+                raise AssertionError("cooldown_list 字段应已删除，不是保留加注释")
+        assert "从未实现" in s, "删除记录要说明原因，否则下次有人会加回来"
 
     def test_monthly_review_marked_unimplemented(self):
         code = _all_code()
@@ -150,5 +165,5 @@ class TestIndex:
     def test_records_the_audit(self):
         """核查结论要留在索引里，否则下次还要重查一遍。"""
         s = INDEX.read_text(encoding="utf-8")
-        assert "无生产者" in s and "cooldown_list" in s
+        assert "已删除的两个实体" in s or "无生产者" in s
         assert "以代码为准" in s
