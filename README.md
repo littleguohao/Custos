@@ -52,6 +52,7 @@ uv sync
 strategy_team/
 ├── 00_governance/          # 治理层，按**生命周期**分四类（2026-08-06 重构）
 │   ├── strategy/                    # 规则：改动要进 05_strategy_versions
+│   │   ├── README.md                    # **索引**（按「谁执行」分类：代码执行/人执行/认知框架/已废）
 │   │   ├── b1_swing_strategy.md         # B1 波段策略主文件
 │   │   ├── cz_strategy.md               # CZ 认知框架（18.1–18.22）
 │   │   ├── DECISION_PRIORITY_RULES.md
