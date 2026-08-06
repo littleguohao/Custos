@@ -155,7 +155,10 @@ class TestHoldingStateSharesJWithSelection:
         r = TM.kdj(df)
         assert r.get("available") is not False
         je = float(np.asarray(E._j_series(df), dtype=float)[-1])
-        assert abs(r["j"] - je) < 1e-9, "持仓状态机与选股链的 J 不一致"
+        # ⚠️ 容差要匹配 `kdj()` 的 `round(..., 4)` —— 它输出的是给人看的四位数，
+        #    不是原始精度。用 1e-9 比会假失败（我第一版就是这么写错的）。
+        assert abs(r["j"] - je) < 5e-5, f"持仓状态机 {r['j']} vs 选股链 {je}"
+        assert r["j"] == round(je, 4), "kdj 应输出四位取整值"
 
     def test_kdj_series_exposes_k_and_d(self):
         """需要 K/D 的调用方用 `kdj_series`，不必自己再算一遍 —— 那是重复的起点。"""
