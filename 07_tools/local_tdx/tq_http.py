@@ -25,6 +25,19 @@ TQ_HTTP_URL = "http://127.0.0.1:17709/"
 DEFAULT_TIMEOUT = 15
 
 
+# ⚠️ `download_file` 的危险 down_type —— **代码级拦截，不是文档约定**
+#
+# `TQ_INTERFACE_PROBE` 有一节「TQ 服务被打挂」的风险记录，`concept_tags.py` 顶部也写着
+# 「只调用 down_type=4（实测安全）；禁止触碰 1/5/6（可打挂 TQ 服务）」。
+# 但 `call()` 是泛型入口 —— 谁写一行 `call("download_file", {"down_type": 1})` 都不会被挡，
+# 而后果是 TdxW 服务挂掉、整条选股链和持仓行情一起没了。
+#
+# 本仓库反复踩的坑正是「写进文档不等于内化」（同一个连接反模式跨两天犯了三次）。
+# 所以这条约束做成拦截：非白名单的 down_type 直接返回结构化错误，不发请求。
+# 确有需要探测时，显式传 `allow_unsafe_download=True`，让调用方为它签名。
+SAFE_DOWN_TYPES = frozenset({4})        # 4 = miscinfo（概念/主题标签），实测安全
+
+
 def _err(code: str, detail: Any = "") -> dict:
     out = {"ok": False, "value": None, "error": {"code": code}}
     if detail:
@@ -44,8 +57,21 @@ def _post(payload: dict, timeout: int) -> bytes:
         return resp.read()
 
 
-def call(method: str, params: Optional[dict] = None, timeout: int = DEFAULT_TIMEOUT) -> dict:
-    """调用 TQ-Local 接口，统一返回 {"ok", "value", "error"}，绝不 raise。"""
+def call(method: str, params: Optional[dict] = None, timeout: int = DEFAULT_TIMEOUT,
+         allow_unsafe_download: bool = False) -> dict:
+    """调用 TQ-Local 接口，统一返回 {"ok", "value", "error"}，绝不 raise。
+
+    ``allow_unsafe_download``：放行非白名单的 `download_file` down_type。
+    默认拦截 —— 见 `SAFE_DOWN_TYPES` 上方注释（1/5/6 实测可打挂 TdxW 服务，
+    而它一挂，选股链与持仓行情一起没了）。
+    """
+    if method == "download_file" and not allow_unsafe_download:
+        dt = (params or {}).get("down_type")
+        if dt not in SAFE_DOWN_TYPES:
+            return _err("unsafe_down_type",
+                        f"down_type={dt!r} 不在白名单 {sorted(SAFE_DOWN_TYPES)}；"
+                        f"1/5/6 实测可打挂 TdxW 服务。确需探测请显式传 "
+                        f"allow_unsafe_download=True")
     if not is_tdxw_running():
         return _err("tdxw_not_running", "TdxW.exe 未运行，TQ-Local 服务不可用")
     payload = {"id": 1, "method": method, "params": params or {}}
