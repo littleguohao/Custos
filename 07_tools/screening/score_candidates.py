@@ -35,7 +35,7 @@ CLI::
     uv run python 07_tools/screening/score_candidates.py --date YYYY-MM-DD
 
 输出 ``01_data/stock_pool/{date}_stock_pool.json``（StockPool 契约，
-见 00_governance/DATA_FLOW_CONTRACT.md）。
+见 00_governance/contracts/DATA_FLOW_CONTRACT.md）。
 """
 from __future__ import annotations
 
@@ -53,7 +53,9 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import DATA, GOVERNANCE, MARKET_DIR, SECTORS_DIR, STOCK_POOL_DIR  # noqa: E402
+from paths import (CZ_SECTOR_PREFERENCE_FILE, DATA, MARKET_DIR,
+                   SCREEN_FORMULA_REGISTRY_FILE, SECTORS_DIR,
+                   STOCK_POOL_DIR)  # noqa: E402
 
 _SCREEN_DIR = Path(__file__).resolve().parent
 if str(_SCREEN_DIR) not in sys.path:
@@ -62,8 +64,8 @@ from s_shape import sstar_level  # noqa: E402
 from runtime_guards import normalize_regime  # noqa: E402
 
 SCREENING_DIR = DATA / "screening"
-CZ_SECTOR_PREF_PATH = GOVERNANCE / "CZ_SECTOR_PREFERENCE.json"
-REGISTRY_PATH = GOVERNANCE / "SCREEN_FORMULA_REGISTRY.json"
+CZ_SECTOR_PREF_PATH = CZ_SECTOR_PREFERENCE_FILE
+REGISTRY_PATH = SCREEN_FORMULA_REGISTRY_FILE
 
 BUCKET_ORDER = ["A", "B", "C", "D"]
 
@@ -104,7 +106,7 @@ TECH_MID_FALLBACK = 30
 # 待回测启发式驱动的封顶规则开关。默认全开＝保持历史行为；关闭某项后不再据此
 # 降档，改在 risk_flags 记录 "<rule>_detected_cap_disabled"（仍随候选落盘，便于
 # 回测校准前后对比）。可经 SCREEN_FORMULA_REGISTRY.json 的 "scoring".cap_rules
-# 覆盖，见 00_governance/SCREENING_WORKFLOW.md「可配置项」。
+# 覆盖，见 00_governance/contracts/SCREENING_WORKFLOW.md「可配置项」。
 DEFAULT_CAP_RULES = {
     "sprint_wave": True,           # 冲刺波后首个 B1 禁买 → 封顶 B（检测阈值待回测）
     "volume_retreat": True,        # 量能持续性=主力撤退 → 封顶 C（CZ §14.6，部分阈值待回测）
@@ -699,7 +701,7 @@ def score_all(
 ) -> dict:
     """整池打分。输入缺失时干净降级，绝不 raise。
 
-    cz_preference 传 None 时从 00_governance/CZ_SECTOR_PREFERENCE.json 加载；
+    cz_preference 传 None 时从 00_governance/strategy/CZ_SECTOR_PREFERENCE.json 加载；
     显式传 {} 表示"已加载但不可用"（测试降级路径用）。
     cap_rules / sector_score_max 传 None 时从 registry "scoring" 段加载，缺失回退
     默认（全开 + 0-100），行为与历史一致。

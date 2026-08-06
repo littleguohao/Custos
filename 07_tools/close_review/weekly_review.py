@@ -58,7 +58,7 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import BASE, cn_today, cn_now  # noqa: E402
+from paths import BASE, CALENDAR_RELPATH, cn_today, cn_now  # noqa: E402
 
 # 规则阈值
 STOP_LOSS_PCT = -7.0       # b1 短线止损线：已实现亏损超过该值 = 止损偏慢
@@ -289,7 +289,7 @@ def _in_closed_range(day: str, ranges) -> bool:
 
 def trading_days_of_week(base: Path, days: list[str]) -> dict[str, bool | None]:
     """本周各日是否交易日：工作日且不在官方休市区间 = True；年份未登记 = None。"""
-    cfg = load_json(base / "00_governance" / "CN_TRADING_CALENDAR.json", {})
+    cfg = load_json(base / CALENDAR_RELPATH, {})
     official = cfg.get("official_years") if isinstance(cfg, dict) else None
     official = official if isinstance(official, dict) else {}
     result = {}

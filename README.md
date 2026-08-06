@@ -42,21 +42,32 @@ uv sync
    - `_import_meta.json` — 导入元数据（imported_at / source_mtime / rows，供持仓新鲜度判定）
    - `position_confirmations.json` — 交易日无交易确认标记（`{日期: {no_trades: true, ...}}`）
 
-3. **交易日历**：`00_governance/CN_TRADING_CALENDAR.json` 包含年度休市安排，可通过 `trading_calendar.py --check-date YYYYMMDD` 查询
+3. **交易日历**：`00_governance/contracts/CN_TRADING_CALENDAR.json` 包含年度休市安排，可通过 `trading_calendar.py --check-date YYYYMMDD` 查询
 
-4. **RSS 源**：`00_governance/RSS_SOURCE_REGISTRY.json` 定义新闻源，`RSS_FILTER_CONFIG.json` 定义过滤规则
+4. **RSS 源**：`00_governance/contracts/RSS_SOURCE_REGISTRY.json` 定义新闻源，`RSS_FILTER_CONFIG.json` 定义过滤规则
 
 ## 目录结构
 
 ```
 strategy_team/
-├── 00_governance/          # 策略规则、工作流、日历、RSS 配置
-│   ├── b1_swing_strategy.md        # B1 波段策略主文件
-│   ├── BUY_STRATEGY_INTEGRATION_RULES.md
-│   ├── CN_TRADING_CALENDAR.json     # 交易日历
-│   ├── DECISION_PRIORITY_RULES.md
-│   ├── RSS_SOURCE_REGISTRY.json
-│   └── ...
+├── 00_governance/          # 治理层，按**生命周期**分四类（2026-08-06 重构）
+│   ├── strategy/                    # 规则：改动要进 05_strategy_versions
+│   │   ├── b1_swing_strategy.md         # B1 波段策略主文件
+│   │   ├── cz_strategy.md               # CZ 认知框架（18.1–18.22）
+│   │   ├── DECISION_PRIORITY_RULES.md
+│   │   ├── BUY_STRATEGY_INTEGRATION_RULES.md
+│   │   └── ...                          # 持仓检查手册/执行纪律/均线框架等
+│   ├── data/                        # 数据层现状与接口能力（随数据源变动）
+│   │   ├── DATA_SOURCE_PRINCIPLE.md     # 数据源原则（含 TDX 连接管理要求）
+│   │   └── ...                          # 覆盖矩阵/TDX 状态/TQ 接口探测
+│   ├── research/                    # 回测研究：只增，结论会被推翻
+│   │   └── B1_BACKTEST_FINDINGS.md
+│   └── contracts/                   # 契约 + 运行时配置：**代码直接依赖**
+│       ├── MASTER_WORKFLOW.md / SCREENING_WORKFLOW.md / DATA_FLOW_CONTRACT.md
+│       ├── CN_TRADING_CALENDAR.json     # 交易日历（7 处代码引用）
+│       ├── SCREEN_FORMULA_REGISTRY.json # 选股公式注册表
+│       └── RSS_SOURCE_REGISTRY.json / RSS_FILTER_CONFIG.json
+│   # ⚠️ 所有配置路径只在 07_tools/paths.py 定义一次，不要自己拼 BASE/"00_governance"/...
 ├── 01_data/                # 运行时数据（gitignore）
 │   ├── holdings/                    # 持仓技术分析
 │   ├── market/                      # 行情、市场择时输入
@@ -169,7 +180,7 @@ uv run python 07_tools/run_1800.py
 
 ### B1 波段策略
 
-详见 `00_governance/b1_swing_strategy.md`。关键机制：
+详见 `00_governance/strategy/b1_swing_strategy.md`。关键机制：
 
 - **BBI**：`(MA3 + MA6 + MA12 + MA24) / 4`，预警而非最终权威
 - **N 结构**：上升 N（L1→H1→更高 L2）/ 下降 N（H1→L1→更低 H2→收盘低于 L1）
@@ -181,7 +192,7 @@ uv run python 07_tools/run_1800.py
 
 1. 个股服从板块，板块服从大盘
 2. 风控优先于买入
-3. 候选池由每日选股 screening 链产出（18:00 独立运行，与三份报告分离：`screening/formula_screen.py` 公式初筛 → `enrich_candidates.py` 模式识别 → `score_candidates.py` 板块共振打分分层 A/B/C/D → `candidate_table.py` 备选表格，输出 `01_data/stock_pool/`，详见 `00_governance/SCREENING_WORKFLOW.md`）；StockPool 仅为证据层候选，买入计划由 chief_decision 统一裁决
+3. 候选池由每日选股 screening 链产出（18:00 独立运行，与三份报告分离：`screening/formula_screen.py` 公式初筛 → `enrich_candidates.py` 模式识别 → `score_candidates.py` 板块共振打分分层 A/B/C/D → `candidate_table.py` 备选表格，输出 `01_data/stock_pool/`，详见 `00_governance/contracts/SCREENING_WORKFLOW.md`）；StockPool 仅为证据层候选，买入计划由 chief_decision 统一裁决
 4. risk_control 拥有否决权
 5. chief_decision 是最终交易计划输出层
 6. 所有计划必须可复盘

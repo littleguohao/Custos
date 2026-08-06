@@ -45,7 +45,8 @@ for p in (TOOLS_DIR, TOOLS_DIR / "local_tdx", TOOLS_DIR / "market_timing", TOOLS
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
-from paths import DATA, RISK_DIR, SECTORS_DIR, TRADES_DIR  # noqa: E402
+from paths import (DATA, RISK_DIR, SCREEN_FORMULA_REGISTRY_FILE, SECTORS_DIR,
+                   TRADES_DIR)  # noqa: E402
 import concept_tags  # noqa: E402
 import signal_labels  # noqa: E402
 import local_tdx_data  # noqa: E402
@@ -110,7 +111,7 @@ THEME_MIN_MATCH = 1
 # --- B1/CZ 策略对齐参数 -------------------------------------------------
 # 以下阈值全部标注"待回测参数"：策略原文（B1 §四、CZ §九/§14.6/§十六）
 # 要求阈值可配置、实际值随候选落盘，不得静默使用；完成样本回测前不得
-# 视为已校准。口径出处见 00_governance/SCREENING_WORKFLOW.md "策略对齐"章。
+# 视为已校准。口径出处见 00_governance/contracts/SCREENING_WORKFLOW.md "策略对齐"章。
 WAVE_LOOKBACK = 60                  # 拉升波分析窗口（日）
 WAVE_MIN_BARS = 40                  # 拉升波分类最少K线数
 WAVE_LIMIT_UP_PCT = 9.8             # 待回测参数：涨停/接近涨停判定（单日涨幅%）
@@ -1691,7 +1692,7 @@ def main(argv: Optional[list] = None) -> int:
     args = parser.parse_args(argv)
 
     registry = _load_json(
-        Path(__file__).resolve().parents[2] / "00_governance" / "SCREEN_FORMULA_REGISTRY.json", {}
+        SCREEN_FORMULA_REGISTRY_FILE, {}
     )
     result = enrich(args.date, universe_cfg=registry.get("universe") or {},
                     theme_min_match=(registry.get("theme_mapping") or {}).get("min_match"),

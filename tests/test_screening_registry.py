@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Tests for 00_governance/SCREEN_FORMULA_REGISTRY.json shape and invariants."""
+"""Tests for 00_governance/contracts/SCREEN_FORMULA_REGISTRY.json shape and invariants."""
 import json
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent.parent
-REGISTRY = BASE / "00_governance" / "SCREEN_FORMULA_REGISTRY.json"
+REGISTRY = BASE / "00_governance" / "contracts" / "SCREEN_FORMULA_REGISTRY.json"
 
 
 def _load():

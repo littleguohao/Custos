@@ -256,8 +256,8 @@ def main(argv=None) -> int:
     cm = auto_colmap(getattr(df, "columns", []))
     override = {}
     try:
-        from paths import GOVERNANCE  # noqa: PLC0415
-        reg = json.loads((GOVERNANCE / "SCREEN_FORMULA_REGISTRY.json").read_text(encoding="utf-8"))
+        from paths import SCREEN_FORMULA_REGISTRY_FILE  # noqa: PLC0415
+        reg = json.loads(SCREEN_FORMULA_REGISTRY_FILE.read_text(encoding="utf-8"))
         override = (reg.get("financials") or {}).get("columns") or {}
     except Exception:  # noqa: BLE001
         override = {}

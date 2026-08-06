@@ -2,7 +2,7 @@
 """板块指数缓存刷新测试。
 
 回归背景(2026-07-30 18:00 选股链 degraded):
-1. `--period day` 是错的周期串 —— TQ 要 "1d"(见 00_governance/TQ_INTERFACE_PROBE_2026-07-20.md:67,
+1. `--period day` 是错的周期串 —— TQ 要 "1d"(见 00_governance/data/TQ_INTERFACE_PROBE_2026-07-20.md:67,
    缺省/写错报 ErrorId=5 periodstr error),结果 400+ 板块逐个失败;
 2. 每天**全量**重拉 20180101 起的历史 → run_stage 600s 超时。
 现在:周期串自动探测 + 探测失败快速退出 + 增量合并(不截断回测深度)。

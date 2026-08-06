@@ -516,7 +516,7 @@ def _write_ledger(base: Path, rows: list[dict]) -> None:
 
 
 def _week_base(tmp_path: Path) -> Path:
-    p = tmp_path / "00_governance" / "CN_TRADING_CALENDAR.json"
+    p = tmp_path / "00_governance" / "contracts" / "CN_TRADING_CALENDAR.json"
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(WEEK_CAL, ensure_ascii=False), encoding="utf-8")
     return tmp_path
@@ -927,7 +927,7 @@ class TestWeeklyReviewLocalDegradation:
         cfg = {"official_years": {"2026": {"closed_ranges": [
             {"name": "缺键"}, {"start": "2026-10-01"}, "字符串不是 dict",
             {"start": "2026-07-14", "end": "2026-07-14"}]}}}
-        p = tmp_path / "00_governance" / "CN_TRADING_CALENDAR.json"
+        p = tmp_path / "00_governance" / "contracts" / "CN_TRADING_CALENDAR.json"
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
         got = wr.trading_days_of_week(tmp_path, ["2026-07-13", "2026-07-14", "2026-07-18"])
