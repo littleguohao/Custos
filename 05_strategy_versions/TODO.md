@@ -93,6 +93,14 @@
 | 32 | **对账观察期**：`reconcile_positions` 已接入 17:00 链但**默认不阻断**。跑若干交易日、确认 `status=ok` 稳定后，再考虑 `--strict`（数量不一致 exit 1）。⚠️ 若台账非从零开始，须先准备 `--baseline` 期初持仓，否则会一直 `replay_failed` | 观察后决定 |
 | 33 | `backtest_0amv_bear_regime.py` 里的 `check_positions` 与新的 `reconcile_positions` 功能重叠，可让研究脚本改调用后者（当前未动，避免影响已跑过的回测口径）| 技术债 |
 
+## P7 · 因子层抽取查出的问题（2026-08-06）
+
+| # | 事项 | 性质 |
+|---|---|---|
+| 34 | 🔴 **反转K 涨跌幅口径 live 与研究不一致**：live（`enrich_candidates`）用 **−2.0% ~ +1.8%**（不对称，B1_w.pdf 纠偏后），而研究侧（`factors/reversal_quality`，原 `backtest_factors.REVK_CHG_PCT`）用 **对称 ±2%**。⇒ **`reversal_quality` 与 live 的反转K不是同一个东西**，而 [R2](../00_governance/research/R2_selection_price_volume.md) 的「稳健负预测」结论建立在它上面。抽取时保持原口径不动（改了会作废已有回测数字，而那些数字已在重跑清单里）| **需 owner 定**：研究口径该不该跟 live 对齐 |
+| 35 | `alpha_pvcorr` / `low_vol` / `momentum` 标 `untested` —— 实现了但没有独立的净值终审记录。按 R2 整体结论推定不可用，但**缺它们自己的证据**。要么补跑，要么明确降级为「不再研究」| 补证据或明确废弃 |
+| 36 | `enrich_candidates.py` 里还有 4 个内联因子未抽（`detect_wave_type` 72 行 / `compute_perfect_b1_fit` 68 / `compute_b1_pullback_fit` 51 / `detect_distribution` 132）。其中 `compute_b1_pullback_fit` 已被 live 与研究双方共用，最该先抽 | 下一步 |
+
 ## 需要 owner 拍板
 
 | # | 事项 | 出处 |

@@ -31,3 +31,49 @@
 ⇒ 同目录内保持扁平 import；被外部消费时由消费方把本目录加进 `sys.path`
 （与 `screening/`、`market_timing/`、`local_tdx/` 同一惯例）。
 """
+
+
+# ─────────────────────────── 注册表 ───────────────────────────
+# 每个因子模块声明 `FACTOR` 元数据 + `score()`/`detect()`。模板见 `_template.py`。
+
+import importlib as _il                     # noqa: E402
+import pkgutil as _pk                       # noqa: E402
+import pathlib as _pl                       # noqa: E402
+
+_SKIP = {"_template", "_util", "__init__"}
+
+STATUSES = ("active", "candidate", "falsified", "untested")
+KINDS = ("selector", "pattern", "state", "control")
+
+#: `status` 在这个集合里的因子**不得进入 live 选股链**。
+#: 把 R2「选股章节正式关闭、所有价量选择器证伪」变成机器可执行的约束 ——
+#: 否则半年后有人看到 `alpha101` 就拿去用了，而文档里那条否决没人会重读。
+NOT_FOR_LIVE = frozenset({"falsified", "untested"})
+
+
+def registry() -> dict[str, dict]:
+    """扫本包，收集所有声明了 `FACTOR` 的模块。
+
+    返回 ``{id: {"meta": FACTOR, "module": mod, "score": fn|None, "detect": fn|None}}``。
+    """
+    out: dict[str, dict] = {}
+    for m in _pk.iter_modules([str(_pl.Path(__file__).resolve().parent)]):
+        if m.name in _SKIP:
+            continue
+        try:
+            mod = _il.import_module(m.name)
+        except Exception:                    # noqa: BLE001 —— 单个因子坏了不该让注册表整体失效
+            continue
+        meta = getattr(mod, "FACTOR", None)
+        if not isinstance(meta, dict) or meta.get("id") in (None, "template"):
+            continue
+        out[meta["id"]] = {"meta": meta, "module": mod,
+                           "score": getattr(mod, "score", None),
+                           "detect": getattr(mod, "detect", None)}
+    return out
+
+
+def live_allowed() -> dict[str, dict]:
+    """只返回允许进 live 的因子（`status` 不在 `NOT_FOR_LIVE` 里）。"""
+    return {k: v for k, v in registry().items()
+            if v["meta"].get("status") not in NOT_FOR_LIVE}

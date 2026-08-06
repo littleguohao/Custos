@@ -38,6 +38,17 @@ _FACTORS_DIR = str(Path(__file__).resolve().parents[1] / "factors")
 if _FACTORS_DIR not in sys.path:
     sys.path.insert(0, _FACTORS_DIR)   # 因子层：见 factors/__init__.py
 
+# 9 个自包含 scorer 已抽到 factors/ 各自成模块（2026-08-06），此处仅保留别名。
+from alpha101 import score as _sc_alpha101  # noqa: E402
+from alpha_pvcorr import score as _sc_alpha_pvcorr  # noqa: E402
+from baseline import score as _sc_baseline  # noqa: E402
+from kdj_j import score as _sc_kdj_j  # noqa: E402
+from low_vol import score as _sc_low_vol  # noqa: E402
+from mcap import score as _sc_mcap  # noqa: E402
+from momentum import score as _sc_momentum  # noqa: E402
+from reversal_quality import score as _sc_reversal_quality  # noqa: E402
+from reversal_quality_inv import score as _sc_reversal_quality_inv  # noqa: E402
+
 
 from indicators import bbi_series as _bbi_series  # noqa: E402
 
@@ -343,11 +354,6 @@ def _sc_b1_pullback(df: pd.DataFrame, code: str):
             "components": {k: (1.0 if v else 0.0) for k, v in (r.get("components") or {}).items()}}
 
 
-def _sc_baseline(df: pd.DataFrame, code: str):
-    """基线打分器：任何 as-of 日都判「可买」。用于对照——同样的止损+BBI出场规则下，
-    无差别进场能拿到多少期望/盈亏比；b1_pullback 需**显著优于**它，才证明进场信号本身有价值
-    (否则 edge 全来自出场规则而非进场指纹)。"""
-    return {"score": 0.0, "suggestion": "可买", "aux": {}, "components": {}}
 
 
 SCORERS = {"s_shape": _sc_s_shape, "s_reversal": _sc_s_reversal,
@@ -365,24 +371,8 @@ def _ts_corr(x: pd.Series, y: pd.Series, n: int) -> Optional[float]:
     return None if (c is None or c != c) else float(c)
 
 
-def _sc_alpha101(df: pd.DataFrame, code: str):
-    """Alpha#101 = (close-open)/((high-low)+.001)：进场K日内强度(收盘越靠上越强)。选强收盘的B1候选。"""
-    if len(df) < 1:
-        return None
-    o = float(df["open"].iloc[-1]); c = float(df["close"].iloc[-1])
-    h = float(df["high"].iloc[-1]); l = float(df["low"].iloc[-1])
-    return {"score": round((c - o) / ((h - l) + 0.001), 4), "suggestion": "可买",
-            "aux": {"alpha": "101_close_open_range"}, "components": {}}
 
 
-def _sc_alpha_pvcorr(df: pd.DataFrame, code: str):
-    """Alpha#6 类：-correlation(open, volume, 10)：价量背离(量价负相关高→筹码沉淀)。选价量背离的候选。"""
-    if len(df) < 10:
-        return None
-    corr = _ts_corr(df["open"].astype(float), df["volume"].astype(float), 10)
-    score = 0.0 if corr is None else -corr           # 相关无定义(如恒定量)→中性0,仍产出记录
-    return {"score": round(score, 4), "suggestion": "可买",
-            "aux": {"alpha": "6_neg_corr_open_vol"}, "components": {}}
 
 
 SCORERS["alpha101"] = _sc_alpha101
@@ -393,139 +383,35 @@ SCORERS["alpha_pvcorr"] = _sc_alpha_pvcorr
 #     在 B1 池(entry_gate)里 top-N 择优。注意:FF 是风险/归因模型(月频/基本面),非交易信号;
 #     A股应以 CH-3/CH-4(Liu-Stambaugh-Yuan) 为准(壳调整size+EP价值+换手)。是否加值须回测。
 #     size/value/profitability 需股本/财务(见 financials.py),此处仅实现价格可算的 low-vol / momentum。---
-def _sc_low_vol(df: pd.DataFrame, code: str):
-    """低波动因子(low-vol anomaly)：score=-近20日收益率标准差(越稳越高分)。选波动小的B1候选。"""
-    if len(df) < 21:
-        return None
-    rets = df["close"].astype(float).pct_change().iloc[-20:]
-    vol = float(rets.std())
-    if vol != vol:
-        return None
-    return {"score": round(-vol, 6), "suggestion": "可买",
-            "aux": {"factor": "low_vol", "vol_20d": round(vol, 4)}, "components": {}}
 
 
-def _sc_momentum(df: pd.DataFrame, code: str):
-    """动量因子(12-1类)：score=[t-skip-lb, t-skip]区间收益(跳过最近20日避开短期反转)。中期强势择优。
-    历史不足时自适应缩短回看窗口(≥40根即产出)。"""
-    c = df["close"].astype(float).values
-    n = len(c)
-    if n < 40:
-        return None
-    skip = 20
-    lb = min(100, n - skip - 1)
-    base = c[-1 - skip - lb]
-    mom = c[-1 - skip] / base - 1 if base else None
-    if mom is None:
-        return None
-    return {"score": round(mom, 4), "suggestion": "可买",
-            "aux": {"factor": f"momentum_{lb}_{skip}"}, "components": {}}
 
 
 SCORERS["low_vol"] = _sc_low_vol
 SCORERS["momentum"] = _sc_momentum
 
 
-def _sc_reversal_quality(df: pd.DataFrame, code: str):
-    """反转K质量分(0-4)：缩量(量比≤50%)+量底(20日底10%)+小实体(收盘±2%)+小振幅(≤7%) 各计1分。
-    用作**选择器**：在宽门槛(如 j_low)候选里按"反转成色"排序取 top-N —— 兼得 j_low 的供给 + reversal_k 的质量。"""
-    if len(df) < 21:
-        return None
-    try:
-        close = df["close"].astype(float).values
-        high = df["high"].astype(float).values
-        low = df["low"].astype(float).values
-        vol = df["volume"].astype(float).values
-        vma5 = vol[-6:-1].mean() if len(vol) >= 6 else vol[:-1].mean()
-        v20 = vol[-20:]
-        pts = 0
-        pts += int(vma5 > 0 and vol[-1] / vma5 <= REVK_VOL_RATIO)             # 缩量
-        pts += int((v20 <= vol[-1]).mean() <= REVK_VOL_PCTILE)               # 量底10%
-        pts += int(close[-2] and abs(close[-1] / close[-2] - 1) * 100 <= REVK_CHG_PCT)   # 小实体
-        pts += int(close[-2] and (high[-1] - low[-1]) / close[-2] * 100 <= REVK_AMP_PCT)  # 小振幅
-        return {"score": float(pts), "suggestion": "可买",
-                "aux": {"selector": "reversal_quality_0_4"}, "components": {}}
-    except Exception:  # noqa: BLE001
-        return None
 
 
 SCORERS["reversal_quality"] = _sc_reversal_quality
 
 
-def _sc_reversal_quality_inv(df: pd.DataFrame, code: str):
-    """反转质量**反向**选择器：归因显示 reversal_quality 是稳健负预测(越"教科书"越差),
-    故取 4-分 反向——选"最不教科书"的丑陋 J<13 回踩。⚠️ 仅在同偏样本 train/test 一致,需真样本外验证。"""
-    r = _sc_reversal_quality(df, code)
-    if r is None:
-        return None
-    r["score"] = 4.0 - r["score"]
-    r["aux"] = {"selector": "reversal_quality_inv"}
-    return r
 
 
 SCORERS["reversal_quality_inv"] = _sc_reversal_quality_inv
 
 
-_SHARE_IDX: Optional[dict] = None
+# 股本索引已移到 factors/_shares.py（唯一所有者）；此处仅委托。
+from factors._shares import shares_idx as _shares_idx  # noqa: E402  ⚠️ 必须包限定
 
 
-def _shares_idx() -> dict:
-    """股本事件索引 code → [(observed_on, total_shares)](01_data/fundamentals/share_changes.jsonl,
-    东财 F10 全史回填,2018 前亦有;as-of 取值只可能 stale 不会 look-ahead)。加载失败 → {}。"""
-    global _SHARE_IDX
-    if _SHARE_IDX is None:
-        idx: dict[str, list] = {}
-        try:
-            from paths import BASE  # noqa: PLC0415
-            p = BASE / "01_data" / "fundamentals" / "share_changes.jsonl"
-            if p.is_file():
-                for line in p.read_text(encoding="utf-8").splitlines():
-                    if not line.strip():
-                        continue
-                    e = json.loads(line)
-                    if e.get("code") and e.get("observed_on") and e.get("total_shares"):
-                        idx.setdefault(e["code"], []).append((e["observed_on"], e["total_shares"]))
-                for c in idx:
-                    idx[c].sort()
-        except Exception:  # noqa: BLE001
-            idx = {}
-        _SHARE_IDX = idx
-    return _SHARE_IDX
 
 
-def _sc_mcap(df: pd.DataFrame, code: str):
-    """小市值选择器：score=-log10(信号日总市值/亿元),越小越高分(风格终审跨窗共同点:小市值反弹更强)。
-    真市值=as-of 股本(东财 F10 全史)× 信号日收盘。无股本数据 → None(不参与排序,不误标)。"""
-    import bisect as _b
-    import math
-    if len(df) < 1:
-        return None
-    evs = _shares_idx().get(str(code)[:6])
-    if not evs:
-        return None
-    day = str(df["date"].iloc[-1])[:10]
-    k = _b.bisect_right(evs, (day, float("inf"))) - 1
-    close = float(df["close"].iloc[-1])
-    if k < 0 or not evs[k][1] or not close:
-        return None
-    mc = evs[k][1] * close / 1e8
-    return {"score": round(-math.log10(mc), 4), "suggestion": "可买",
-            "aux": {"factor": "mcap_small", "mcap_yi": round(mc, 1)}, "components": {}}
 
 
 SCORERS["mcap"] = _sc_mcap
 
 
-def _sc_kdj_j(df: pd.DataFrame, code: str):
-    """当日 KDJ 的 J 值(纯特征,恒可买)——信号池内 J 的具体深度(J=2 vs J=12)可作判别子,
-    门槛(J<13)会把这条信息"吃掉",故显式记录。kdj 不可用 → None。"""
-    if _kdj is None or len(df) < 12:
-        return None
-    r = _kdj(df)
-    if not (r.get("available") and r.get("j") is not None):
-        return None
-    return {"score": round(float(r["j"]), 3), "suggestion": "可买",
-            "aux": {"k": r.get("k"), "d": r.get("d")}, "components": {}}
 
 
 SCORERS["kdj_j"] = _sc_kdj_j
