@@ -57,6 +57,8 @@ OUTDIR = BASE / "06_logs" / "data_probe"
 # 探测用样本：覆盖三个交易所 + 一个指数。故意包含 BJ ——
 # 它是 xdxr 唯一不覆盖的市场，前复权会静默降级成未复权（本仓库已知问题）。
 SAMPLE_SH = "600000"        # 浦发银行
+# TQ 要求带市场后缀（裸 6 位 → ErrorId=2 stock_code error，实测踩到）
+TQ_SH = "600000.SH"
 SAMPLE_SZ = "000001"        # 平安银行
 SAMPLE_CY = "300750"        # 宁德时代（创业板，20% 涨跌幅）
 SAMPLE_BJ = "920808"        # 北交所（xdxr 不覆盖）
@@ -75,6 +77,7 @@ class Probe:
         self.shape: Any = None
         self.error: Optional[str] = None
         self.ok_count = 0
+        self.empty_count = 0          # 没抛异常但返回空 —— 单独计，不算成功
 
     def run(self, fn: Callable[[], Any], repeat: int) -> "Probe":
         for _ in range(repeat):
@@ -86,7 +89,13 @@ class Probe:
                 self.samples.append(time.perf_counter() - t0)
                 continue
             self.samples.append(time.perf_counter() - t0)
-            self.ok_count += 1
+            if _is_empty(out):
+                # ⚠️ 探针自己也差点犯「静默降级」：`get_online_bars` 返回 0行×0列
+                # 却被记成 3/3 成功。**「没抛异常」不等于「拿到数据」** ——
+                # 而这正是本脚本要暴露的那类问题，不能自己也犯。
+                self.empty_count += 1
+            else:
+                self.ok_count += 1
             if self.shape is None:
                 self.shape = _describe(out)
         return self
@@ -97,11 +106,29 @@ class Probe:
             "group": self.group, "name": self.name, "note": self.note,
             "wired": self.wired,
             "attempts": len(self.samples), "ok": self.ok_count,
+            "empty": self.empty_count,
             "success_rate": round(self.ok_count / n, 3),
             "ms_p50": round(statistics.median(self.samples) * 1000, 1) if self.samples else None,
             "ms_max": round(max(self.samples) * 1000, 1) if self.samples else None,
             "shape": self.shape, "error": self.error,
         }
+
+
+def _is_empty(out: Any) -> bool:
+    """返回值是否「空」——空 DataFrame / 空容器 / tq_http 的 ok=False。"""
+    try:
+        import pandas as pd
+        if isinstance(out, pd.DataFrame):
+            return out.empty
+    except Exception:                                          # noqa: BLE001
+        pass
+    if isinstance(out, dict):
+        if "ok" in out and "error" in out:
+            return not out.get("ok")
+        return not out
+    if isinstance(out, (list, tuple, set, str)):
+        return len(out) == 0
+    return out is None
 
 
 def _describe(out: Any) -> Any:
@@ -250,11 +277,11 @@ def probe_tq(repeat: int) -> list[Probe]:
     out.append(Probe("tq", "ping/get_match_stkinfo", "连通性探测").run(
         lambda: T.ping(), repeat))
     out.append(Probe("tq", "get_market_snapshot", "持仓/盘中快照").run(
-        lambda: T.snapshot(SAMPLE_SH), repeat))
+        lambda: T.snapshot(TQ_SH), repeat))
     out.append(Probe("tq", "get_stock_info", "股票名称（ST 判定唯一依据）").run(
-        lambda: T.stock_info(SAMPLE_SH), repeat))
+        lambda: T.stock_info(TQ_SH), repeat))
     out.append(Probe("tq", "get_more_info", "扩展字段").run(
-        lambda: T.more_info(SAMPLE_SH), repeat))
+        lambda: T.more_info(TQ_SH), repeat))
     out.append(Probe("tq", "download_file(down_type=4)",
                      "概念标签 miscinfo。**只探 4**；1/5/6 实测可打挂服务").run(
         lambda: T.call("download_file", {"down_type": 4}, timeout=30), 1))
@@ -328,8 +355,8 @@ GROUPS: dict[str, Callable[[int], list[Probe]]] = {
 
 
 def report(probes: list[Probe]) -> None:
-    hdr = (f"{'组':<10}{'接口':<32}{'接入':>5}{'成功':>7}{'p50ms':>8}"
-           f"{'maxms':>8}  返回形状 / 错误")
+    hdr = (f"{'组':<10}{'接口':<32}{'接入':>5}{'成功':>7}{'空返回':>7}"
+           f"{'p50ms':>8}{'maxms':>8}  返回形状 / 错误")
     print("\n" + "=" * 118)
     print("数据源探针报告")
     print("=" * 118)
@@ -341,10 +368,16 @@ def report(probes: list[Probe]) -> None:
         rate = f"{d['ok']}/{d['attempts']}"
         shape = d["shape"] if d["shape"] is not None else (d["error"] or "")
         print(f"{d['group']:<10}{d['name']:<32}{wired:>5}{rate:>7}"
+              f"{d['empty'] or '':>7}"
               f"{d['ms_p50'] if d['ms_p50'] is not None else '—':>8}"
               f"{d['ms_max'] if d['ms_max'] is not None else '—':>8}  {str(shape)[:56]}")
         if d["error"] and d["ok"]:
             print(f"{'':>70}  ⚠️ 部分失败: {d['error'][:70]}")
+    empties = [p for p in probes if p.empty_count and not p.error]
+    if empties:
+        print(f"\n⚠️ **{len(empties)} 项没抛异常但返回空**（比报错更危险：调用方看不出）：")
+        for p in empties:
+            print(f"   {p.group}/{p.name}: {p.shape}")
     fails = [p for p in probes if p.ok_count == 0]
     if fails:
         print(f"\n⚠️ **{len(fails)} 项完全失败**：")

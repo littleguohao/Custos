@@ -190,9 +190,21 @@ def load_bars_csv(codes: list[str], count: int, start: Optional[str] = None,
 
 
 def list_universe(root: str | Path = DEFAULT_Q_ROOT, source: str = "qlib") -> list[str]:
-    """s_data 全市场宇宙(6 位代码)。qlib=各 bundle instruments/all.txt 并集;csv=列目录文件名。"""
+    """s_data 全市场宇宙(6 位代码)。qlib=各 bundle instruments/all.txt 并集;csv=列目录文件名。
+
+    ⚠️ **不要用 `ln[-6:]` 取代码**（2026-08-06 实测修）。qlib 的 `instruments/all.txt` 是
+    **制表符分隔**的 `SH600000\\t1999-11-10\\t2026-02-27`，末 6 字符取到的是结束日期尾巴
+    ——实测宇宙里混进了 `'-06-09'`、`'-09-25'` 两条垃圾。
+
+    改为：按空白切分取第 0 段、剥市场前缀、**校验必须是 6 位数字**。
+    并且当剔除率超过 5% 时**大声告警** —— 若哪天 bundle 换了格式，
+    `ln[-6:]` 那种写法会让整个宇宙静默变成日期碎片而函数照样"成功"返回，
+    这正是本仓库反复踩的静默失效。
+    """
     root = Path(root)
     codes: set[str] = set()
+    n_lines = 0
+    rejected: list[str] = []
     try:
         if source == "csv":
             for p in root.glob("*-all-latest.csv"):
@@ -201,11 +213,23 @@ def list_universe(root: str | Path = DEFAULT_Q_ROOT, source: str = "qlib") -> li
         else:
             for b in list_bundles(root):
                 inst = b["dir"] / "instruments" / "all.txt"
-                if inst.is_file():
-                    for ln in inst.read_text(encoding="utf-8").splitlines():
-                        ln = ln.strip()
-                        if ln:
-                            codes.add(ln[-6:])        # SZ000001 → 000001
+                if not inst.is_file():
+                    continue
+                for ln in inst.read_text(encoding="utf-8").splitlines():
+                    ln = ln.strip()
+                    if not ln:
+                        continue
+                    n_lines += 1
+                    tok = ln.split()[0]              # SH600000 / 600000.SH / 600000
+                    digits = "".join(ch for ch in tok if ch.isdigit())
+                    if len(digits) == 6:
+                        codes.add(digits)
+                    else:
+                        if len(rejected) < 5:
+                            rejected.append(ln[:40])
+            if n_lines and len(rejected) / n_lines > 0.05:
+                _warn(f"instruments/all.txt 有 {len(rejected)}/{n_lines} 行取不出 6 位代码"
+                      f"（样例 {rejected}）—— bundle 格式可能变了，宇宙不可信")
     except Exception as exc:  # noqa: BLE001
         _warn(f"列 universe 失败: {exc}")
     return sorted(codes)

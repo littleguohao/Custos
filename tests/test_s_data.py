@@ -105,3 +105,53 @@ def test_main_with_qlib_data_source(tmp_path):
     payload = json.loads(out.read_text(encoding="utf-8"))
     assert payload["data_source"] == "qlib" and payload["start"] == "2021-01-04"
     assert payload["trade_summary"]["n"] >= 1          # 真数据加载进 evaluate_trades 并产生了交易
+
+
+class TestListUniverseParsing:
+    """`instruments/all.txt` 是**制表符分隔**的 `SH600000\\t1999-11-10\\t2026-02-27`。
+
+    ⚠️ 旧实现 `codes.add(ln[-6:])` 取整行末 6 字符 ⇒ 取到的是**结束日期尾巴**。
+    2026-08-06 实测宇宙里混进了 `'-06-09'`、`'-09-25'` 两条垃圾，
+    而函数照样"成功"返回 5486 项 —— 正是本仓库反复踩的静默失效。
+    """
+
+    def _bundle(self, tmp_path, lines):
+        d = tmp_path / "Q_DATA" / "2021_2026"
+        (d / "instruments").mkdir(parents=True)
+        (d / "calendars").mkdir(parents=True)
+        (d / "calendars" / "day.txt").write_text("2021-08-02\n2026-02-27\n",
+                                                 encoding="utf-8")
+        (d / "instruments" / "all.txt").write_text("\n".join(lines) + "\n",
+                                                   encoding="utf-8")
+        return tmp_path / "Q_DATA"
+
+    def test_tab_separated_lines_yield_codes_not_dates(self, tmp_path):
+        root = self._bundle(tmp_path, [
+            "SH600000\t1999-11-10\t2026-02-27",
+            "SZ000001\t1991-04-03\t2026-02-27",
+            "SZ300750\t2018-06-11\t2024-06-09",
+        ])
+        got = s_data.list_universe(root)
+        assert got == ["000001", "300750", "600000"], got
+        assert not any(c.startswith("-") for c in got), "日期碎片混进了宇宙"
+
+    def test_code_only_lines_still_work(self, tmp_path):
+        """有的 bundle 是一行一个代码，不能因为改了解析就读不了。"""
+        root = self._bundle(tmp_path, ["SH600000", "SZ000001", "600519.SH"])
+        assert s_data.list_universe(root) == ["000001", "600000", "600519"]
+
+    def test_high_reject_rate_warns(self, tmp_path, capsys):
+        """若 bundle 换了格式导致大面积取不出代码，必须**大声告警**而不是静默返回空。"""
+        root = self._bundle(tmp_path, ["# header", "garbage line", "another bad one",
+                                       "SH600000\t1999-11-10\t2026-02-27"])
+        s_data.list_universe(root)
+        err = capsys.readouterr().err
+        assert "取不出 6 位代码" in err and "宇宙不可信" in err
+
+    def test_low_reject_rate_silent(self, tmp_path, capsys):
+        """个别坏行不告警——否则告警会变成噪音、没人看。"""
+        lines = [f"SH60{i:04d}\t1999-11-10\t2026-02-27" for i in range(30)]
+        lines.append("# 一行注释")
+        root = self._bundle(tmp_path, lines)
+        s_data.list_universe(root)
+        assert "宇宙不可信" not in capsys.readouterr().err

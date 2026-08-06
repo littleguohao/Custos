@@ -51,7 +51,7 @@ class CallTest(unittest.TestCase):
     def test_error_id_nonzero(self) -> None:
         resp = {"id": 1, "result": {"ErrorId": "1001", "Value": None}}
         with mock.patch.object(tq_http, "_post", return_value=_body(resp)):
-            out = tq_http.call("get_more_info", {"stock_code": "BAD"})
+            out = tq_http.call("get_more_info", {"stock_code": "600000.SH"})
         self.assertFalse(out["ok"])
         self.assertIsNone(out["value"])
         self.assertEqual(out["error"]["code"], "tq_error")
@@ -210,4 +210,48 @@ class TestUnsafeDownTypeGuard:
         monkeypatch.setattr(tq_http, "is_tdxw_running", lambda: True)
         monkeypatch.setattr(tq_http, "_post",
                             lambda *a, **k: b'{"result":{"ErrorId":"0","Value":{"a":1}}}')
-        assert tq_http.call("get_stock_info", {"stock_code": "600000"})["ok"] is True
+        assert tq_http.call("get_stock_info", {"stock_code": "600000.SH"})["ok"] is True
+
+
+class TestStockCodeFormatGuard:
+    """`stock_code` 必须带市场后缀 —— 传裸 6 位会得到语义模糊的 `ErrorId=2`。
+
+    2026-08-06 探针实测踩到：探针传 `"600000"`，三个 stock_code 类方法全挂
+    （ErrorId=2），而 `get_match_stkinfo`/`download_file`（不吃 stock_code）正常。
+    TQ_INTERFACE_PROBE 第 43 行本来就记着这件事，但**接口自己不设防**，
+    谁忘了归一就得翻探测文档才知道原因。
+
+    ⚠️ 刻意**不自动补后缀**：补错市场比报错更糟（`600000.SZ` 是另一只票或不存在）。
+    """
+
+    @pytest.mark.parametrize("bad", ["600000", "60000.SH", "600000.XX",
+                                     "6000000.SH", "abcdef.SH"])
+    def test_bad_code_blocked_without_request(self, bad, monkeypatch):
+        monkeypatch.setattr(tq_http, "is_tdxw_running", lambda: True)
+        monkeypatch.setattr(tq_http, "_post", lambda *a, **k: pytest.fail(
+            "校验失败：不合规的 stock_code 竟然发出了请求"))
+        r = tq_http.call("get_stock_info", {"stock_code": bad})
+        assert r["ok"] is False
+        assert r["error"]["code"] == "bad_stock_code"
+
+    @pytest.mark.parametrize("good", ["600000.SH", "000001.SZ", "920808.BJ",
+                                      "600000.sh"])
+    def test_good_code_passes(self, good, monkeypatch):
+        monkeypatch.setattr(tq_http, "is_tdxw_running", lambda: True)
+        monkeypatch.setattr(tq_http, "_post",
+                            lambda *a, **k: b'{"result":{"ErrorId":"0","Value":{"Name":"x"}}}')
+        assert tq_http.call("get_stock_info", {"stock_code": good})["ok"] is True
+
+    def test_error_message_says_how_to_fix(self, monkeypatch):
+        """报错要给出修法，而不是只说「不合规」。"""
+        monkeypatch.setattr(tq_http, "is_tdxw_running", lambda: True)
+        r = tq_http.call("get_stock_info", {"stock_code": "600000"})
+        assert "normalize_code" in r["error"]["detail"]
+        assert "ErrorId=2" in r["error"]["detail"]
+
+    def test_methods_without_stock_code_unaffected(self, monkeypatch):
+        """get_match_stkinfo / download_file 不吃 stock_code，不该被校验挡。"""
+        monkeypatch.setattr(tq_http, "is_tdxw_running", lambda: True)
+        monkeypatch.setattr(tq_http, "_post",
+                            lambda *a, **k: b'{"result":{"ErrorId":"0","Value":[1]}}')
+        assert tq_http.call("get_match_stkinfo", {"key_word": "平安"})["ok"] is True
