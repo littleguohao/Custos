@@ -267,3 +267,100 @@ class TestMovedScriptsRunAsMain:
                 ctx = s[max(0, m.start() - 60):m.end() + 60].replace("\n", " ")
                 raise AssertionError(
                     f"{rel} 仍用 `.parent`（子目录里应为 `parents[1]`）：…{ctx}…")
+
+
+class TestToolsPathSingleSource:
+    """`07_tools` 路径只从 `paths.TOOLS` 取，不许重新推导。
+
+    ⚠️ **必须区分两种 `__file__` 用法，不能一刀切**：
+
+        _TOOLS = Path(__file__).resolve().parents[1]   ✅ **sys.path 引导，合法**
+                                                       它跑在 `from paths import` 之前，
+                                                       是鸡生蛋问题，只能用 __file__
+        TOOLS = BASE / "07_tools"                      ❌ 已 import paths 之后重新推导
+
+    2026-08-06 收敛：`run_1700` / `run_1800` 各有一份 `TOOLS = BASE / "07_tools"`；
+    `daily_pipeline` 有 9 处 `BASE / "07_tools" / ...` 硬编码。
+    """
+
+    AFTER_PATHS = ["run_0850.py", "run_0905.py", "run_1445.py", "run_1700.py",
+                   "run_1800.py", "daily_pipeline.py", "runtime_gate.py",
+                   "generate_risk_and_sectors.py", "trading_calendar.py"]
+
+    @pytest.mark.parametrize("f", AFTER_PATHS)
+    def test_no_rederiving_tools_from_base(self, f):
+        s = (T / f).read_text(encoding="utf-8")
+        assert 'BASE / "07_tools"' not in s, \
+            f'{f} 用 BASE / "07_tools" 重新推导 —— 应 `from paths import TOOLS`'
+
+    def test_bootstrap_pattern_still_allowed(self):
+        """反面：子目录脚本的 `__file__` 引导必须仍然存在，不能被误删。"""
+        s = (T / "collect" / "collect_fund_flow.py").read_text(encoding="utf-8")
+        assert "_TOOLS = Path(__file__).resolve().parents[1]" in s, \
+            "sys.path 引导被误删了 —— 它跑在 import paths 之前，只能用 __file__"
+
+    def test_daily_pipeline_market_timing_not_named_tools(self):
+        """`daily_pipeline` 里指向 market_timing 的常量**不能叫 TOOLS**。
+
+        仓库其他地方 `TOOLS` 一律指 `07_tools`；同名不同义会让读者把
+        `TOOLS / "x.py"` 读成顶层脚本，而它其实是 `market_timing/x.py`。
+        """
+        s = (T / "daily_pipeline.py").read_text(encoding="utf-8")
+        assert 'TOOLS = TOOLS / "market_timing"' not in s
+        assert 'MARKET_TIMING = TOOLS / "market_timing"' in s
+        assert not re.search(r'^TOOLS *=', s, re.M), \
+            "daily_pipeline 不该自己定义 TOOLS（应从 paths 导入）"
+
+
+class TestGateCodePropagation:
+    """门控退出码必须**端到端**到 cron，不能在 runner 这层被压平。
+
+    链条：`runtime_gate` (3/4/5) → `daily_pipeline`（`SystemExit(returncode)`）
+    → **runner** → cron。
+
+    ⚠️ 2026-08-06 查出最后一跳断了：`run_0905:113` 与 `run_1700:185` 都写
+    `return 1`，把内层的 3/4/5 抹成「失败」⇒ cron 分不清「质量 blocked」与
+    「任意 stage 挂了」。
+
+    **当前无害**（两者都没传 `--strict-quality-gate`，内层不会 exit 4），
+    但 README 明确说硬闸会在 stale 校准跑通后启用 —— **那一刻正是需要区分的时刻**，
+    而那时没人会想起 runner 这层把码抹了。所以提前修。
+    """
+
+    def _kit(self):
+        sys.path.insert(0, str(T))
+        import pipeline_kit
+        return pipeline_kit
+
+    @pytest.mark.parametrize("rc,want", [(3, 3), (4, 4), (5, 5)])
+    def test_gate_codes_pass_through(self, rc, want):
+        assert self._kit().propagate_gate_code({"returncode": rc}) == want
+
+    @pytest.mark.parametrize("rc", [1, 2, 127, None, 0])
+    def test_non_gate_codes_collapse_to_one(self, rc):
+        """只放行 3/4/5。
+
+        其他非零码语义是「跑挂了」：Python 的 exit 2 是 argparse 用法错、
+        127 是命令找不到 —— 把它们当门控结论会误导 cron。
+        """
+        assert self._kit().propagate_gate_code({"returncode": rc}) == 1
+
+    def test_custom_default(self):
+        assert self._kit().propagate_gate_code({"returncode": 9}, default=7) == 7
+
+    @pytest.mark.parametrize("runner", ["run_0905.py", "run_1700.py"])
+    def test_runner_no_longer_flattens(self, runner):
+        s = (T / runner).read_text(encoding="utf-8")
+        i = s.index("daily_pipeline失败")
+        seg = s[i:i + 300]
+        assert "propagate_gate_code(r)" in seg, \
+            f"{runner} 仍把 daily_pipeline 的退出码压平"
+
+    def test_daily_pipeline_still_propagates(self):
+        """上游那一跳也要在：`daily_pipeline` 必须先落日志再抛原码。"""
+        s = (T / "daily_pipeline.py").read_text(encoding="utf-8")
+        i = s.index("raise SystemExit")
+        seg = s[max(0, i - 400):i + 80]
+        assert "_write_pipeline_log" in seg, \
+            "退出前必须先落 pipeline 日志，否则这次阻断连记录都不留"
+        assert 'gate_stage["returncode"]' in seg, "必须抛门控原码，不能包成 exit 1"

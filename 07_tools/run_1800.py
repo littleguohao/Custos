@@ -21,10 +21,9 @@ import sys
 import time
 from datetime import date
 
-from paths import BASE, cn_today
+from paths import BASE, cn_today, TOOLS
 from pipeline_kit import check_trading_day, log_stage, md_to_digest, now_iso, run_stage, write_run_log, run_stage_quiet as _stage, calendar_gate
 
-TOOLS = BASE / "07_tools"
 SCREEN_DIR = TOOLS / "screening"
 TABLE_DIR = BASE / "03_daily_plans" / "_supporting"
 LOG_DIR = BASE / "06_logs"

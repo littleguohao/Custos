@@ -17,10 +17,9 @@ import sys
 import time
 from datetime import date
 
-from paths import BASE, cn_today
-from pipeline_kit import check_trading_day, log_stage, md_to_digest, now_iso, run_stage, warn, write_run_log, run_stage_quiet as _stage, calendar_gate
+from paths import BASE, cn_today, TOOLS
+from pipeline_kit import check_trading_day, log_stage, md_to_digest, now_iso, run_stage, warn, write_run_log, run_stage_quiet as _stage, calendar_gate, propagate_gate_code
 
-TOOLS = BASE / "07_tools"
 PLANS = BASE / "03_daily_plans"
 LOG_DIR = BASE / "06_logs"
 
@@ -111,7 +110,7 @@ def main(argv=None) -> int:
     if not r["ok"]:
         _write_run_log(target, "failed", run_started, t0, stages_log)
         print(f"【盘前日报失败｜{target}】daily_pipeline失败：{r['out'][:500]}")
-        return 1
+        return propagate_gate_code(r)   # 门控码 3/4/5 原样上抛供 cron 判定
 
     # 3. Read generated report and convert to text digest
     d_started = _now_iso()

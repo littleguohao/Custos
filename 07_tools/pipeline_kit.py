@@ -128,6 +128,27 @@ def calendar_gate(target: str, *, log_dir, session: str, run_started: str,
     return CalendarGate(cal, None)
 
 
+GATE_EXIT_CODES = frozenset({3, 4, 5})   # 3 非交易日 / 4 质量 blocked / 5 持仓 blocked
+
+
+def propagate_gate_code(r: dict, default: int = 1) -> int:
+    """子进程若以**门控码**退出就原样上抛，其余压成 `default`。
+
+    为什么需要：`daily_pipeline` 已经把门控码（3/4/5）穿透到自己的进程退出码
+    （见其 `raise SystemExit(gate_stage["returncode"] or 1)`），**但 runner 曾把它压平成 1**
+    ⇒ cron 只看到「失败」，分不清「质量 blocked」和「任意 stage 挂了」。
+
+    当前无害（run_0905/run_1700 都没传 `--strict-quality-gate`，内层不会 exit 4），
+    但 README 明确说硬闸会在 stale 校准跑通后启用 —— **那一刻正是需要区分的时刻**，
+    而那时没人会想起来 runner 这一层把码抹了。所以现在就修。
+
+    只放行 3/4/5：其他非零码（子进程崩、超时、依赖缺失）语义是「跑挂了」，
+    统一成 1 更清楚，避免把 Python 的 exit 2（argparse 用法错）之类误读成门控结论。
+    """
+    rc = r.get("returncode")
+    return rc if rc in GATE_EXIT_CODES else default
+
+
 def run_stage_quiet(cmd: list[str], name: str) -> dict:
     """静默跑一个 stage，把 stdout+stderr 合并进 `r["out"]`。
 
