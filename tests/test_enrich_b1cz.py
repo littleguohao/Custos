@@ -359,7 +359,7 @@ def test_enrich_metrics_error_excluded_not_abort():
     assert r["excluded"][0]["reason"].startswith("metrics_error:")
 
 
-class TestReversalChangeAsymmetric:
+class TestReversalChangeSymmetric:
     """反转K的收盘涨幅区间是**不对称**的：-2% 到 1.8%（2026-08-04 按 B1_w.pdf 纠偏）。
 
     材料两处独立写明这个区间：
@@ -372,15 +372,18 @@ class TestReversalChangeAsymmetric:
     def test_bounds_are_asymmetric(self):
         import enrich_candidates as ec
         assert ec.REVERSAL_CHANGE_MIN_PCT == -2.0
-        assert ec.REVERSAL_CHANGE_MAX_PCT == 1.8
+        assert ec.REVERSAL_CHANGE_MAX_PCT == 2.0
 
-    def test_upper_bound_excludes_1_9(self):
-        import enrich_candidates as ec
+    def test_upper_bound_is_two_percent(self):
+        """对称口径：+1.9% 在区间内、+2.1% 在区间外。
+
+        ⚠️ 原用例名叫 `excludes_1_9` —— 那是不对称（上界 +1.8%）时代的断言。
+        owner 2026-08-06 改回对称 ±2%（见 01_swing_rules §三.3 注），故上界放宽到 2.0。
+        """
         lo, hi = ec.REVERSAL_CHANGE_MIN_PCT, ec.REVERSAL_CHANGE_MAX_PCT
-        assert not (lo <= 1.9 <= hi), "1.9% 应被排除（旧对称阈值会放进来）"
-        assert lo <= 1.8 <= hi
-        assert lo <= -2.0 <= hi
-        assert not (lo <= -2.1 <= hi)
+        assert lo <= 1.9 <= hi
+        assert not (lo <= 2.1 <= hi)
+        assert lo == -2.0 and hi == 2.0
 
     def test_judgment_uses_asymmetric_bounds(self):
         """判定代码必须用新常量，不能还在用 abs(chg) <= 2.0。"""
@@ -389,4 +392,5 @@ class TestReversalChangeAsymmetric:
         import enrich_candidates as ec
         src = inspect.getsource(ec.compute_metrics)
         assert "REVERSAL_CHANGE_MIN_PCT" in src and "REVERSAL_CHANGE_MAX_PCT" in src
-        assert "abs(change_pct) <= REVERSAL_CHANGE_PCT" not in src
+        # 对称口径下用 MIN/MAX 派生判定（而非 abs），保持与不对称期一致的写法
+        assert "REVERSAL_CHANGE_MIN_PCT <= change_pct <= REVERSAL_CHANGE_MAX_PCT" in src

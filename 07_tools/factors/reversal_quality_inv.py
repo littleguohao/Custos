@@ -3,7 +3,7 @@
 
 `4 − reversal_quality` —— 选「最不教科书」的丑陋 J<13 回踩。
 
-🔴 **已证伪，而且是全研究链最典型的一次翻转**：
+🟡 **待优化，而且是全研究链最典型的一次翻转**：
 同偏样本内大胜（+69.4% vs baseline +43%），
 含退市股跨年 walk-forward 后**同一窗口翻转为 −11.9%**（baseline +16.4%）
 ⇒ 「选丑」选到的相当部分是走向退市的烂票，**当初的 edge 本质是幸存者偏差**。
@@ -22,7 +22,7 @@ FACTOR: dict[str, Any] = {
     "id": "reversal_quality_inv",
     "name": "反转成色**反向**选择器",
     "kind": "selector",
-    "status": "falsified",
+    "status": "needs_work",
     "evidence": "00_governance/research/R2_selection_price_volume.md",
     "note": "样本内大胜、含退市跨年翻转；归因未分离",
     "min_bars": 21,

@@ -42,13 +42,21 @@ import pathlib as _pl                       # noqa: E402
 
 _SKIP = {"_template", "_util", "__init__"}
 
-STATUSES = ("active", "candidate", "falsified", "untested")
+# ⚠️ **没有 "falsified" 这一档，是刻意的。**
+# 2026-08-06 我一度把 alpha101/mcap/reversal_quality 等标成 falsified，owner 纠正：
+# **不要随便证伪。** 而且那个标注自相矛盾 —— R2 的证伪结论本身就在重跑清单里：
+#   · 决定性翻转（+69.4%→−11.9%）**同时换了宇宙与数据源**，归因未分离
+#   · 那些净值终审窗口**全落在已弃用的 qlib bundle 上**（加法调整，收益放大 13~21%）
+# ⇒ 证据强度已降级，判定却写得比证据硬。改用 `needs_work`：
+#   「按现有证据不可用，但证据本身待重跑」——这才是当前真实的知识状态。
+STATUSES = ("active", "candidate", "needs_work", "untested")
 KINDS = ("selector", "pattern", "state", "control")
 
 #: `status` 在这个集合里的因子**不得进入 live 选股链**。
-#: 把 R2「选股章节正式关闭、所有价量选择器证伪」变成机器可执行的约束 ——
-#: 否则半年后有人看到 `alpha101` 就拿去用了，而文档里那条否决没人会重读。
-NOT_FOR_LIVE = frozenset({"falsified", "untested"})
+#: 拦的理由是「**未通过验证**」，不是「已被证伪」—— 两者对 live 的后果相同
+#: （都不许用），但对研究的后果完全不同：证伪意味着不必再看，
+#: 待优化意味着**证据本身要重跑**（见 R2 重跑清单 P1）。
+NOT_FOR_LIVE = frozenset({"needs_work", "untested"})
 
 
 def registry() -> dict[str, dict]:

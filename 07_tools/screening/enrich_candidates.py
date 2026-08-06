@@ -115,9 +115,16 @@ RS_STRONG_PP = 3.0           # 20日相对强度 >= +3pp
 # 反转K的收盘涨幅区间：**不对称**（B1_w.pdf「分歧转一致的反转K」与「如何筛选最强壮的
 # B1宝宝」两处都明确写「涨幅为 -2% 到 1.8%」）。此前实现与治理文档都写成对称 ±2%，
 # 上界宽了 0.2pp。不是刻意收紧门槛，是按材料原文纠偏。
-REVERSAL_CHANGE_MIN_PCT = -2.0
-REVERSAL_CHANGE_MAX_PCT = 1.8
-REVERSAL_CHANGE_PCT = 2.0    # 旧对称阈值,保留供外部引用与口径对照,判定已不使用
+# ⚠️ **对称 ±2%（owner 2026-08-06 拍板）。**
+# 此前是不对称 -2.0 ~ +1.8（2026-08-04 按 B1_w.pdf 纠偏引入，材料两处独立写明「-2% 到 1.8%」）。
+# 改回对称的直接动因：研究侧（factors/reversal_quality，原 backtest_factors.REVK_CHG_PCT）
+# 一直用对称 ±2%，两边口径不一致 ⇒ **reversal_quality 与 live 的反转K不是同一个东西**，
+# 而 R2 的结论建立在前者上。统一到对称后两边可比。
+# 🔁 **这一改反转了 R16（材料纠偏）第 ④ 条**，若要回退：把下面三个常量恢复为
+#    MIN=-2.0 / MAX=1.8，并同步 01_swing_rules.md §三.3 注与本文件的判定式。
+REVERSAL_CHANGE_PCT = 2.0    # 对称阈值：|涨跌幅| <= 2%
+REVERSAL_CHANGE_MIN_PCT = -REVERSAL_CHANGE_PCT
+REVERSAL_CHANGE_MAX_PCT = REVERSAL_CHANGE_PCT
 REVERSAL_AMPLITUDE_PCT = 7.0
 STOP_LOOKBACK = 10           # 建议止损位：近10日最低价
 

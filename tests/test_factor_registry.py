@@ -1,4 +1,4 @@
-"""因子注册表与**「已证伪不得进 live」**约束。
+"""因子注册表与**「待优化不得进 live」**约束。
 
 2026-08-06 把 `backtest_factors` 里 9 个自包含 scorer 抽成 `factors/` 下各自的模块，
 每个模块声明 `FACTOR` 元数据（模板见 `factors/_template.py`）。
@@ -56,12 +56,12 @@ class TestRegistry:
         assert m["kind"] in factors.KINDS
 
     @pytest.mark.parametrize("fid", EXTRACTED)
-    def test_falsified_must_cite_evidence(self, fid):
-        """判「已证伪」必须给出处 —— 否则下次有人会以为是拍脑袋否掉的。"""
+    def test_needs_work_must_cite_evidence(self, fid):
+        """判「待优化」必须给出处 —— 否则下次有人会以为是拍脑袋否掉的。"""
         m = factors.registry()[fid]["meta"]
-        if m["status"] == "falsified":
+        if m["status"] == "needs_work":
             assert m["evidence"].startswith("00_governance/research/"), \
-                f"{fid} 标 falsified 但没给 research 出处"
+                f"{fid} 标 needs_work 但没给 research 出处"
             assert (ROOT / m["evidence"]).exists(), f"{fid} 的 evidence 路径不存在"
 
     @pytest.mark.parametrize("fid", EXTRACTED)
@@ -72,37 +72,37 @@ class TestRegistry:
 
 
 class TestNotForLive:
-    """**已证伪/未验证的因子不得进 live 选股链。**
+    """**待优化/未验证的因子不得进 live 选股链。**
 
     这是本次抽取最有价值的产出：把研究结论变成机器约束。
     """
 
-    def test_live_allowed_excludes_falsified(self):
+    def test_live_allowed_excludes_needs_work(self):
         allowed = factors.live_allowed()
         for fid, e in factors.registry().items():
             if e["meta"]["status"] in factors.NOT_FOR_LIVE:
                 assert fid not in allowed, f"{fid}({e['meta']['status']}) 不该在 live 白名单里"
 
-    def test_known_falsified_are_marked(self):
-        """R2/R3 明确否决过的这几个，状态必须是 falsified。"""
+    def test_known_needs_work_are_marked(self):
+        """R2/R3 明确否决过的这几个，状态必须是 needs_work。"""
         reg = factors.registry()
         for fid in ("alpha101", "reversal_quality", "reversal_quality_inv", "mcap", "kdj_j"):
-            assert reg[fid]["meta"]["status"] == "falsified", \
-                f"{fid} 在 research 里已被否决，状态却不是 falsified"
+            assert reg[fid]["meta"]["status"] == "needs_work", \
+                f"{fid} 在 research 里已被否决，状态却不是 needs_work"
 
-    def test_live_chain_does_not_import_falsified(self):
-        """live 选股链的源码里不得出现已证伪因子的模块名。"""
-        falsified = {fid for fid, e in factors.registry().items()
-                     if e["meta"]["status"] == "falsified"}
+    def test_live_chain_does_not_import_needs_work(self):
+        """live 选股链的源码里不得出现待优化因子的模块名。"""
+        needs_work = {fid for fid, e in factors.registry().items()
+                     if e["meta"]["status"] == "needs_work"}
         live = ["screening/enrich_candidates.py", "screening/score_candidates.py",
                 "screening/candidate_table.py", "screening/signal_labels.py"]
         bad = []
         for rel in live:
             s = (ROOT / "07_tools" / rel).read_text(encoding="utf-8")
-            for fid in falsified:
+            for fid in needs_work:
                 if f"import {fid}" in s or f"from {fid} import" in s:
                     bad.append(f"{rel} → {fid}")
-        assert not bad, f"live 链引用了已证伪因子：{bad}"
+        assert not bad, f"live 链引用了待优化因子：{bad}"
 
 
 class TestNumericEquivalence:

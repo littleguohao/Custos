@@ -3,7 +3,7 @@
 
 `(close-open)/((high-low)+.001)` —— 收盘越靠上越强。
 
-🔴 **已证伪**：判别层是唯一同号率 100% 的候选（5 窗，中位 AUC 0.54），
+🟡 **待优化**：判别层是唯一同号率 100% 的候选（5 窗，中位 AUC 0.54），
 但净值对照 4 窗里 **2025 最近窗明确输**（+0.31→-0.24）。
 判别增益（+7.6pp）在实现层被并发上限 + 成本吃净。
 """
@@ -17,7 +17,7 @@ FACTOR: dict[str, Any] = {
     "id": "alpha101",
     "name": "Alpha#101：进场 K 的日内实体强度",
     "kind": "selector",
-    "status": "falsified",
+    "status": "needs_work",
     "evidence": "00_governance/research/R2_selection_price_volume.md",
     "note": "判别层过线但净值终审未过；2025 窗明确输",
     "min_bars": 1,

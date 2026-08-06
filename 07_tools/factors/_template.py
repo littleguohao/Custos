@@ -20,14 +20,15 @@
     status      **这是最要紧的一栏** ——
                 active      已验证可用，允许进 live
                 candidate   有迹象未终审，只能进研究
-                falsified   **已被证伪，不得进 live**
+                needs_work  **按现有证据不可用，不得进 live**；但证据本身可能待重跑
+                            （刻意不设 "falsified" 一档：不要随便证伪）
                 untested    实现了但没跑过
-    evidence    结论出处（`00_governance/research/RN_*.md`），falsified 必填
+    evidence    结论出处（`00_governance/research/RN_*.md`），needs_work 必填
     note        一句话说清死法或用法
     min_bars    最少需要多少根 K 线；不足时 score/detect 返回 None
 
-⚠️ **`status="falsified"` 由测试强制不得进入 live 选股链。**
-这是把 R2「选股章节正式关闭、所有价量选择器证伪」这个结论**变成机器可执行的约束** ——
+⚠️ **`status` 在 `NOT_FOR_LIVE` 里的因子由测试强制不得进入 live 选股链。**
+这是把 R2「价量选择器均未通过验证」这个结论**变成机器可执行的约束** ——
 否则半年后有人看到 `alpha101` 就拿去用了，而文档里那条否决没人会重读。
 
 ## 返回约定

@@ -18,7 +18,7 @@ FACTOR: dict[str, Any] = {
     "id": "kdj_j",
     "name": "当日 KDJ 的 J 值（纯特征）",
     "kind": "selector",
-    "status": "falsified",
+    "status": "needs_work",
     "evidence": "00_governance/research/R3_selection_discriminability_recall.md",
     "note": "同号率仅 50%，不稳定",
     "min_bars": 12,

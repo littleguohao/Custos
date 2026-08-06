@@ -188,7 +188,7 @@ class TestReversalKMatchesCode:
         "VOL_RATIO_MAX": 0.5,
         "VOL_PCTILE_MAX": 10.0,
         "REVERSAL_CHANGE_MIN_PCT": -2.0,
-        "REVERSAL_CHANGE_MAX_PCT": 1.8,
+        "REVERSAL_CHANGE_MAX_PCT": 2.0,
         "REVERSAL_AMPLITUDE_PCT": 7.0,
     }
 
@@ -198,25 +198,45 @@ class TestReversalKMatchesCode:
 
     @pytest.mark.parametrize("name,want", sorted(CONSTS.items()))
     def test_constant_value(self, name, want):
-        m = re.search(rf"^{name} *= *(-?[\d.]+)", self._code(), re.M)
-        assert m, f"代码里找不到常量 {name}"
-        assert float(m.group(1)) == want, \
-            f"{name} 代码是 {m.group(1)}、索引记的是 {want} —— 两者必须一起改"
+        """断言**运行时真值**，不是源码里的字面数字。
 
-    def test_doc_states_asymmetric_range(self):
-        """涨跌幅区间是**不对称**的 −2%~+1.8%。
+        ⚠️ 第一版用正则读源码里的字面量，在常量改成**派生**
+        （`MIN = -REVERSAL_CHANGE_PCT`，owner 2026-08-06 改回对称 ±2% 时引入）
+        之后立刻假失败 —— 值是对的、正则读不到。
+        与今天反复踩的「查字符串形式而非语义」同形：**能读真值就别读源码。**
+        """
+        import sys as _s
+        _s.path.insert(0, str(ROOT / "07_tools"))
+        _s.path.insert(0, str(ROOT / "07_tools" / "screening"))
+        import enrich_candidates as ec
+        got = getattr(ec, name, None)
+        assert got is not None, f"代码里找不到常量 {name}"
+        assert float(got) == want, f"{name} 实际 {got}、索引记 {want} —— 必须一起改"
 
-        曾经写错成对称 ±2%（`REVERSAL_CHANGE_PCT = 2.0` 是旧值残留），
-        所以文档必须明确「不对称」，避免被顺手改回。
+    def test_doc_records_symmetric_decision(self):
+        """涨跌幅区间是**对称 ±2%**（owner 2026-08-06 拍板）。
+
+        ⚠️ 这一改**反转了 R16（材料纠偏）第 ④ 条** —— B1_w.pdf 两处独立写明
+        「涨幅为 −2% 到 1.8%」，而我们有意不跟材料。
+        动因：研究侧的 `reversal_quality` 一直用对称 ±2%，两边口径不一致 ⇒
+        它与 live 的反转K不是同一个东西，而 R2 的结论建立在它上面。
+
+        **与材料不一致是有意选择，必须在文档里留痕** —— 否则下一个读材料的人
+        会以为是漏改，又把它改回不对称，而研究侧又会重新对不上。
         """
         doc = (STRATEGY / "b1" / "01_swing_rules.md").read_text(encoding="utf-8")
-        assert "-2% 至 +1.8%" in doc or "−2% ~ +1.8%" in doc
-        assert "不对称" in doc
+        assert "-2% 至 +2%" in doc or "−2% ~ +2%" in doc
+        assert "反转了 R16" in doc, "反转材料纠偏必须留痕"
+        assert "有意的选择" in doc
 
-    def test_stale_symmetric_constant_not_used_in_logic(self):
+    def test_min_max_derived_from_single_constant(self):
+        """MIN/MAX 必须由 `REVERSAL_CHANGE_PCT` **派生**，不是各写一个数。
+
+        对称口径下写成两个独立字面量，就会出现「改了一个忘另一个」的半对称状态。
+        """
         code = self._code()
-        assert "REVERSAL_CHANGE_PCT = 2.0" in code, "残留常量被删了？同步更新索引说明"
-        assert "abs(change_pct) <= REVERSAL_CHANGE_PCT" not in code
+        assert "REVERSAL_CHANGE_MIN_PCT = -REVERSAL_CHANGE_PCT" in code
+        assert "REVERSAL_CHANGE_MAX_PCT = REVERSAL_CHANGE_PCT" in code
 
 
 class TestKnownIssuesStayVisible:

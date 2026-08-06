@@ -4,7 +4,7 @@
 `score = -log10(信号日总市值/亿元)` —— 越小越高分。
 真市值 = as-of 股本（东财 F10 全史）× 信号日收盘。
 
-🔴 **已证伪**：风格终审的跨窗共同点之一（小市值跑，5/6 窗，反向 AUC 0.572），
+🟡 **待优化**：风格终审的跨窗共同点之一（小市值跑，5/6 窗，反向 AUC 0.572），
 但净值终审 4 窗对照 baseline **2025 窗惨败 −9.3%、胜率仅 24.7%**。
 机理：判别层只量**上涨端**，而 B1 的 8% 止损把垃圾股高波动的**下跌端**
 对称兑现成亏损 —— 「垃圾股反弹 beta」用带止损的规则收割不到
@@ -22,7 +22,7 @@ FACTOR: dict[str, Any] = {
     "id": "mcap",
     "name": "小市值选择器",
     "kind": "selector",
-    "status": "falsified",
+    "status": "needs_work",
     "evidence": "00_governance/research/R2_selection_price_volume.md",
     "note": "判别层过线、净值终审惨败；止损把下跌端对称兑现",
     "min_bars": 1,

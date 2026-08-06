@@ -4,7 +4,7 @@
 缩量 + 量底 + 小实体 + 小振幅，各计 1 分。
 用作**选择器**：在宽门槛（如 j_low）候选里按成色排序取 top-N。
 
-🔴 **已证伪，且是稳健的负预测**：特征归因 train −3.42% / test −2.75%（Q4−Q1）
+🟡 **待优化，且是稳健的负预测**：特征归因 train −3.42% / test −2.75%（Q4−Q1）
 —— **越「教科书」越差**。正向择优劣于随机（+33% vs baseline +43%）。
 
 ⚠️⚠️ **口径与 live 不一致（2026-08-06 查出）**：本因子的「小实体」判据是
@@ -31,7 +31,7 @@ FACTOR: dict[str, Any] = {
     "id": "reversal_quality",
     "name": "反转K 成色分（0–4）",
     "kind": "selector",
-    "status": "falsified",
+    "status": "needs_work",
     "evidence": "00_governance/research/R2_selection_price_volume.md",
     "note": "稳健负预测；且口径与 live 反转K不一致（对称 vs 不对称）",
     "min_bars": 21,
