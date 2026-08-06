@@ -351,6 +351,102 @@ def detail(code: str, top: int = 25) -> int:
     return 0
 
 
+def qlib_selfcheck(code: str) -> int:
+    """**不依赖 tdx** 判定每个 bundle 自己的价格口径 —— 用它自带的 `factor` / `change`。
+
+    ## 为什么需要这条路
+
+    本地 vipdoc 只有约 **1214 根 K 线（约 5 年，2021-06 起）**，
+    与 `2006_2020` bundle **没有重叠期** ⇒ 那个 bundle 根本没法用 tdx 对账
+    （`--convention --win 2018-01-02 2020-09-25` 实测「重叠仅 0 根」）。
+
+    但老 bundle 自带两个字段可以自洽检验：
+
+        change  日收益率 ⇒ 与 `close.pct_change()` 比对，可知 close 的收益口径
+        factor  复权因子 ⇒ 若 close 是原始价，`close × factor` 应在除权日连续；
+                          若 close 已复权，`close / factor` 应还原出除权日的跳空
+
+    再配合我们自己的 xdxr 事件日，就能判断：**close 到底是原始价还是已复权价、
+    以及复权是乘法还是加法。**
+    """
+    import numpy as np
+    import pandas as pd
+    import s_data as Q
+    bundles = Q.list_bundles()
+    if not bundles:
+        print("没有发现 bundle（检查 S_DATA_ROOT）")
+        return 2
+
+    ev: list[str] = []
+    try:
+        import adjust_factors as A
+        ev = sorted({str(e.get("date"))[:10] for e in A.get_xdxr(code)})
+    except Exception as exc:                                   # noqa: BLE001
+        print(f"[WARN] 取不到 {code} 的 xdxr 事件表: {exc}", file=sys.stderr)
+
+    for bd, inst in Q.code_to_qlib_dir(code, bundles):
+        cal = next(b["calendar"] for b in bundles if b["dir"] == bd)
+        fdir = bd / "features" / inst
+        have = {p.name.split(".")[0] for p in fdir.glob("*.bin")}
+        print(f"\n{'=' * 96}")
+        print(f"{code} @ {bd.name}   日历 {cal[0]}~{cal[-1]} ({len(cal)} 日)   "
+              f"字段 {sorted(have)}")
+        print("=" * 96)
+        cols: dict[str, Any] = {}
+        for f in ("close", "factor", "change"):
+            a = Q._read_field_bin(fdir, f, len(cal))
+            if a is not None:
+                cols[f] = a
+        if "close" not in cols:
+            print("  没有 close，跳过")
+            continue
+        df = pd.DataFrame({"date": cal, **cols}).dropna(subset=["close"])
+        df = df[df["close"] > 0].reset_index(drop=True)
+        print(f"  有效 close {len(df)} 根，{df['date'].iloc[0]}~{df['date'].iloc[-1]}")
+
+        # ① close 的收益 vs change 字段
+        if "change" in df.columns:
+            r = df["close"].pct_change()
+            d = (r - df["change"]).abs().dropna()
+            hit = float((d < 1e-4).mean()) if len(d) else float("nan")
+            print(f"\n  ① close.pct_change() 与 change 字段一致率: {hit:.2%}"
+                  f"   中位差 {float(d.median()):.6%}" if len(d) else "")
+            print(f"     ⇒ {'change 就是 close 的收益（同一口径）' if hit > 0.9 else 'change 与 close 不同口径 —— change 可能是**原始**收益而 close 已被调整'}")
+
+        # ② 除权日：close 有没有跳空（原始价特征）
+        in_win_ev = [d0 for d0 in ev if df["date"].iloc[0] <= d0 <= df["date"].iloc[-1]]
+        if in_win_ev:
+            idx = {d0: i for i, d0 in enumerate(df["date"])}
+            print(f"\n  ② 除权日当天 close 的日收益（窗口内 {len(in_win_ev)} 个事件）：")
+            for d0 in in_win_ev[:12]:
+                i = idx.get(d0)
+                if not i:
+                    continue
+                r = df["close"].iloc[i] / df["close"].iloc[i - 1] - 1
+                fac = ""
+                if "factor" in df.columns:
+                    f0, f1 = df["factor"].iloc[i - 1], df["factor"].iloc[i]
+                    fac = f"  factor {f0:.6f}→{f1:.6f} ({f1 / f0 - 1:+.4%})" if f0 else ""
+                print(f"     {d0}  close {df['close'].iloc[i - 1]:.4f}→"
+                      f"{df['close'].iloc[i]:.4f}  ({r:+.4%}){fac}")
+            print("     ⇒ 除权日出现**大幅负跳空** ⇒ close 是**原始价**（未复权）；"
+                  "平滑 ⇒ close 已复权")
+        else:
+            print("\n  ② 该 bundle 区间内没有 xdxr 事件，无法用除权日判断")
+
+        # ③ factor 的形态
+        if "factor" in df.columns:
+            fs = df["factor"].dropna()
+            if len(fs):
+                nuniq = int(fs.round(6).nunique())
+                print(f"\n  ③ factor: 范围 {fs.min():.6f}~{fs.max():.6f}，"
+                      f"不同取值 {nuniq} 个（事件数 {len(in_win_ev)}）")
+                print(f"     ⇒ {'分段常数，像标准复权因子' if nuniq <= max(3, len(in_win_ev) + 2) else '取值过多，不是逐事件的复权因子'}")
+    print("\n⚠️ 本地 vipdoc 只有约 1214 根（约 5 年，2021-06 起）"
+          "⇒ 与 2006_2020 bundle **没有重叠期**，那个 bundle 只能这样自检。")
+    return 0
+
+
 def qlib_fields(code: str) -> int:
     """列出 qlib bundle 里该票**实有的 .bin 字段**。
 
@@ -413,7 +509,18 @@ def detect_convention(code: str) -> int:
     m = m[(m["close_tdx"] > 0) & (m["close_qlib"] > 0) & (m["raw_close"] > 0)]
     m = m.reset_index(drop=True)
     if len(m) < 60:
-        print(f"{code}: 重叠仅 {len(m)} 根，样本太少")
+        # ⚠️ 只说「样本太少」看不出原因。实测踩到：本地 vipdoc 只有约 1214 根
+        # （约 5 年，2021-06 起），与 2006_2020 bundle **没有重叠期** ⇒ 0 根。
+        # 报出两侧真实区间，读的人立刻知道是窗口选错还是数据不够深。
+        def _rng(d):
+            return f"{d['date'].min()}~{d['date'].max()} ({len(d)} 根)" if len(d) else "空"
+        print(f"{code}: 重叠仅 {len(m)} 根，样本太少（窗口 {WIN_START}~{WIN_END}）")
+        print(f"   tdx : {_rng(t)}")
+        print(f"   qlib: {_rng(q)}")
+        if len(t) and len(q) and (t["date"].max() < q["date"].min()
+                                 or q["date"].max() < t["date"].min()):
+            print("   ⇒ 两侧**区间不相交**，不是窗口问题。本地 vipdoc 深度约 5 年，"
+                  "老 bundle 请用 --qlib-selfcheck（用它自带的 factor/change 自洽检验）")
         return 2
 
     ev_dates: list[str] = []
@@ -545,6 +652,9 @@ def main() -> int:
                     help="判定两边各用**乘法前复权**还是**加法（减分红）调整**")
     ap.add_argument("--qlib-fields", default="",
                     help="列出 qlib bundle 里该票实有的 .bin 字段（看有没有 factor）")
+    ap.add_argument("--qlib-selfcheck", default="",
+                    help="**不依赖 tdx** 判各 bundle 自己的口径：用它自带的 factor/change "
+                         "+ 我们的 xdxr 事件日。老 bundle 与 vipdoc 无重叠期，只能这样查")
     ap.add_argument("--win", nargs=2, metavar=("START", "END"), default=None,
                     help="覆盖对账窗口。默认 2021-08-02~2026-01-31（落在 2021_2026 bundle "
                          "内部）。⚠️ 两个 bundle 字段集不同、可能是两种价格口径，"
@@ -557,6 +667,8 @@ def main() -> int:
         WIN_START, WIN_END = a.win[0], a.win[1]
         print(f"[INFO] 对账窗口覆盖为 {WIN_START} ~ {WIN_END}")
 
+    if a.qlib_selfcheck:
+        return qlib_selfcheck(a.qlib_selfcheck.strip()[:6])
     if a.qlib_fields:
         return qlib_fields(a.qlib_fields.strip()[:6])
     if a.convention:
