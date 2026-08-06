@@ -94,7 +94,7 @@ def _get_client(force_new: bool = False):
 
     这是同一反模式在仓库里的**第三处**（`local_tdx_data._get_client` 与
     `market_timing/tdx_ext_quotes` 已分别修过）。见
-    `00_governance/DATA_SOURCE_PRINCIPLE.md`「连接管理要求」，
+    `00_governance/data/DATA_SOURCE_PRINCIPLE.md`「连接管理要求」，
     以及 `tests/test_tdx_connection_hygiene.py` 的自动检查。
     """
     global _client

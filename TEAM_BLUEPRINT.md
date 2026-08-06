@@ -55,4 +55,4 @@
 5. chief_decision 是最终交易计划输出层
 6. 所有计划必须可复盘
 
-详细工作流见：`00_governance/MASTER_WORKFLOW.md`
+详细工作流见：`00_governance/contracts/MASTER_WORKFLOW.md`

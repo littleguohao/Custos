@@ -7,10 +7,10 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
-from paths import BASE, CN_TZ, cn_now
+from paths import BASE, CN_TZ, CONTRACTS_DIR, cn_now
 
 DATA = BASE / "01_data"
-CALENDAR_CONFIG = BASE / "00_governance" / "CN_TRADING_CALENDAR.json"
+CALENDAR_CONFIG = CONTRACTS_DIR / "CN_TRADING_CALENDAR.json"
 CALENDAR_CACHE = DATA / "market" / "CN_TRADING_CALENDAR_CACHE.json"
 
 

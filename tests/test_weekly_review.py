@@ -24,7 +24,7 @@ def write_json(path: Path, data) -> None:
 
 
 def make_base(tmp_path: Path) -> Path:
-    write_json(tmp_path / "00_governance" / "CN_TRADING_CALENDAR.json", CALENDAR)
+    write_json(tmp_path / "00_governance" / "contracts" / "CN_TRADING_CALENDAR.json", CALENDAR)
     return tmp_path
 
 

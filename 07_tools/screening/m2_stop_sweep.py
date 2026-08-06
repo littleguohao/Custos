@@ -420,6 +420,13 @@ def _run(group: str, name: str, extra: list[str], sample: int, cross: bool,
         else:
             print(line)
 
+    if capture:
+        # ⚠️ 并行波把子进程输出全收进字符串、等方案跑完才整块打印（否则 6 路进度逐行
+        # 交错没法读）。代价是**「在跑」与「已死」在日志上长得一模一样，且要等一整个
+        # 方案（3000 只约 60 分钟）才能区分** —— owner 实测因此以为卡住。
+        # 所以启动时先打一行短心跳，直接进 stdout（单行交错无妨）。
+        print(f"[START] {tag}  {time.strftime('%H:%M:%S')}", flush=True)
+
     def _exec(args: list[str]) -> tuple[int, float]:
         cmd = ([sys.executable, str(SCRIPT)]
                + _base_args(sample, cross, data_source, window, codes_file)
@@ -926,6 +933,18 @@ def _print_trade_group(group: str, rows: list[dict]) -> None:
                   f"其余 {1 - b_big / b_n:.1%} 交易净亏 {abs(non):.0f}R。")
             print("        ⇒ 任何「提高胜率」的改动都要先看它有没有动到尾部；")
             print("          也意味着漏掉几只大赢家就足以让整个策略转负。")
+    b_fam = _family_stats(base.get("_trades_ref") or [])
+    if b_fam:
+        n_open = b_fam.get("末持", {}).get("n", 0.0)
+        r_open = b_fam.get("末持", {}).get("sum_r", 0.0)
+        r_all = sum(d["sum_r"] for f, d in b_fam.items() if f != "scaled")
+        if n_open and r_all:
+            print(f"  基准已实现口径：累计R {r_all:+.0f} → 剔除末持(open_end) "
+                  f"{n_open:.0f} 笔的 {r_open:+.0f}R ⇒ **{r_all - r_open:+.0f}R**")
+            if r_all > 0 >= r_all - r_open:
+                print("     ⚠️ **基准的正期望完全来自未平仓浮盈**（期末仍持仓、按最后一根")
+                print("        收盘价标记）⇒ 已实现口径为负。在这个基准上比出来的「改进」")
+                print("        要格外小心：相对提升再大，绝对水平仍可能是负的。")
     for r in sorted(rows, key=lambda x: x["name"]):
         if r["name"] == base_name:
             continue
@@ -1091,13 +1110,20 @@ def _print_exit_structure(group: str, rows: list[dict], base_name: Optional[str]
     #    而 total_R 可以很小（pct_12 只有 58R，而 bbi 桶 +383R / stop 桶 -335R）
     #    ⇒ 占比会炸到 660% / -578%，跨方案还不可比。
     #    每笔 R 贡献的好处：**行合计恰好等于期望R**，一眼看出「期望从哪来、在哪漏掉」。
+    #
+    # ⚠️ 「已实现」列是**必须**的：`末持`(open_end) 是样本期末仍持仓、按最后一根收盘价
+    #    标记的**未实现**盈亏（backtest_factors:1430）。实测 3000 样本基准：
+    #    含未实现累计R +288，剔掉末持的 +320R 之后是 **-32R** ⇒ 正期望完全来自没兑现的
+    #    浮盈。只看「合计」会把一个已实现负期望的策略读成正期望。
+    #    分母也要剔掉末持笔数，否则不是「已平仓交易的期望」。
     print("\n  ② 每笔 R 贡献（行合计 = 期望R；看**钱从哪来、在哪漏掉**）")
     print("    " + f"{'方案':<20}" + "".join(f"{c:>8}" for c in cols)
-          + f"{'合计':>8}")
+          + f"{'合计':>8}" + f"{'已实现':>9}")
     for name in order:
         v = stats[name]
         n_tot = sum(d["n"] for f, d in v.items() if f != "scaled") or 1
-        cells, total = [], 0.0
+        n_open = v.get("末持", {}).get("n", 0.0)
+        cells, total, realized = [], 0.0, 0.0
         for c in cols:
             if c not in v:
                 cells.append(f"{'—':>8}")
@@ -1106,7 +1132,20 @@ def _print_exit_structure(group: str, rows: list[dict], base_name: Optional[str]
             cells.append(f"{x:>+8.3f}")
             if c != "scaled":
                 total += x
-        print(_row_head(name) + "".join(cells) + f"{total:>+8.3f}")
+                if c != "末持":
+                    realized += v[c]["sum_r"]
+        n_closed = max(n_tot - n_open, 1)
+        r_closed = realized / n_closed
+        flip = total > 0 >= r_closed          # 含未实现为正、已实现非正 ⇒ 必须点出来
+        print("    " + f"{name:<20}" + "".join(cells) + f"{total:>+8.3f}"
+              + f"{r_closed:>+9.3f}" + ("  ⚠️" if flip else ""))
+        if flip:
+            print(f"      ⚠️ **正期望全部来自未平仓浮盈**：末持 {n_open:.0f} 笔"
+                  f"（占 {n_open / n_tot:.1%}）贡献 {v.get('末持', {}).get('sum_r', 0):+.0f}R，"
+                  f"剔掉后已实现期望 {r_closed:+.3f}R/笔 ⇒ **没兑现的边际不是边际**")
+    print("    ⚠️ 「已实现」= 剔除 `末持`(open_end，期末仍持仓、按最后收盘价标记的未实现"
+          "盈亏)，")
+    print("       分母也剔掉那些笔数 ⇒ 它才是「已平仓交易」的期望R。")
     print("    ⚠️ R 仅在 risk_frac 相同的方案之间可比（本组不同 stop_pct 差着分母）；")
     print("       跨档位只看表①的分布迁移。")
     print("    ⇒ 单看一个方案永远是「bbi_exit+scaled 均收最高」（那是它的定义）；")

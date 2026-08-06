@@ -16,9 +16,9 @@ import pytest
 
 from news import postclose_news_digest as pnd
 from news import rss_filter  # noqa: F401  确保模块可导入
-from paths import GOVERNANCE
+from paths import RSS_FILTER_CONFIG_FILE
 
-CFG = json.loads((GOVERNANCE / "RSS_FILTER_CONFIG.json").read_text(encoding="utf-8-sig"))
+CFG = json.loads(RSS_FILTER_CONFIG_FILE.read_text(encoding="utf-8-sig"))
 MACRO_KW = CFG["theme_keywords"]["宏观政策"]
 NEG_KW = CFG["policy_negative_keywords"]
 

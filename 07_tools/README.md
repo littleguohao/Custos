@@ -24,7 +24,7 @@
 ├── runtime_guards.py           # P0 运行时守卫:交易日历、新鲜度、数据质量
 ├── trading_calendar.py         # A 股交易日历刷新与查询
 ├── market_timing/              # 市场择时与持仓技术分析
-├── screening/                  # 每日选股链(公式初筛→充实→打分→表格,见 00_governance/SCREENING_WORKFLOW.md)
+├── screening/                  # 每日选股链(公式初筛→充实→打分→表格,见 00_governance/contracts/SCREENING_WORKFLOW.md)
 ├── close_review/               # 收盘复盘(14:45 链核心)
 ├── news/                       # RSS 新闻采集与过滤
 ├── trades/                     # 交易台账同步、标准化、回测

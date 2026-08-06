@@ -11,11 +11,11 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import BASE  # noqa: E402
+from paths import BASE, RSS_FILTER_CONFIG_FILE, RSS_SOURCE_REGISTRY_FILE  # noqa: E402
 from runtime_guards import previous_confirmed_trading_day  # noqa: E402
 
-DATA=BASE/'01_data'; GOV=BASE/'00_governance'; LOG=BASE/'06_logs'/'rss'
-CFG=GOV/'RSS_FILTER_CONFIG.json'; REG=GOV/'RSS_SOURCE_REGISTRY.json'
+DATA=BASE/'01_data'; LOG=BASE/'06_logs'/'rss'
+CFG=RSS_FILTER_CONFIG_FILE; REG=RSS_SOURCE_REGISTRY_FILE
 SH=ZoneInfo('Asia/Shanghai')
 
 def load(p,default):

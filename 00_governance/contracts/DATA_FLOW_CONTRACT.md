@@ -1,6 +1,6 @@
 # 数据流契约
 
-> ⚠️ **设计参考 / 部分重建**：本文档描述 Agent+skill 时代的数据流设计（skill_adapters、StockCandidate、BuyPlan 等），相关代码已移除。StockPool（StockCandidate）已由每日选股 screening 链重建（2026-07-21，见 `00_governance/SCREENING_WORKFLOW.md`）；其余实体重建时以此为设计蓝图对齐。
+> ⚠️ **设计参考 / 部分重建**：本文档描述 Agent+skill 时代的数据流设计（skill_adapters、StockCandidate、BuyPlan 等），相关代码已移除。StockPool（StockCandidate）已由每日选股 screening 链重建（2026-07-21，见 `00_governance/contracts/SCREENING_WORKFLOW.md`）；其余实体重建时以此为设计蓝图对齐。
 
 日期：2026-07-09
 

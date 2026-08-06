@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Screening 链第 1 段：公式初筛（formula_screen）。
 
-对全 A 批量执行注册表（00_governance/SCREEN_FORMULA_REGISTRY.json）中 enabled
+对全 A 批量执行注册表（00_governance/contracts/SCREEN_FORMULA_REGISTRY.json）中 enabled
 的 TQ 选股公式（formula_process_mul_xg），汇总当日命中清单。
 
 降级规则（绝不 raise、绝不阻塞主链）：
@@ -32,7 +32,7 @@ for p in (TOOLS_DIR, TOOLS_DIR / "local_tdx"):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
-from paths import DATA, GOVERNANCE  # noqa: E402
+from paths import DATA, SCREEN_FORMULA_REGISTRY_FILE  # noqa: E402
 import tq_http  # noqa: E402
 from tq_sector import is_tdxw_running  # noqa: E402
 import local_tdx_data  # noqa: E402
@@ -40,7 +40,7 @@ import stock_names  # noqa: E402
 import manual_pools  # noqa: E402
 
 SCREENING_DIR = DATA / "screening"
-REGISTRY_PATH = GOVERNANCE / "SCREEN_FORMULA_REGISTRY.json"
+REGISTRY_PATH = SCREEN_FORMULA_REGISTRY_FILE
 
 FORMULA_TIMEOUT = 15          # 单公式调用超时（秒）
 CIRCUIT_BREAK_AFTER = 2       # 连续失败熔断阈值

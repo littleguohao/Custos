@@ -407,6 +407,68 @@ class TestExitStructureMatrix:
         assert "跨档位只看表①的分布迁移" in seg
 
 
+class TestRealizedVsUnrealized:
+    """`open_end` 是样本期末仍持仓、按最后一根收盘价标记的**未实现**盈亏
+    （backtest_factors:1430）。
+
+    ⚠️ **实测 3000 样本基准**：含未实现累计R **+288**，其中末持 57 笔贡献 **+320R**
+    ⇒ 剔掉后 **-32R**，已实现口径是**负期望**。只看「合计」会把一个已实现负期望的策略
+    读成正期望——所以报表必须把两个口径分开，并在翻号时明确点出来。
+    """
+
+    def test_realized_excludes_open_end_from_both_numerator_and_denominator(
+            self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        # 90 笔已平仓净 -9R，10 笔末持 +20R ⇒ 合计 +11R/100 = +0.11；已实现 -9/90 = -0.1
+        _write_reasons(tmp_path, "A_stop_low", "00_baseline",
+                       {"bbi_exit": (30, 0.05, 1.0), "stop": (60, -0.03, -0.65),
+                        "open_end": (10, 0.12, 2.0)}, expR=0.11)
+        _write_reasons(tmp_path, "A_stop_low", "trail_08",
+                       {"bbi_exit": (35, 0.06, 1.2), "stop": (55, -0.03, -0.6),
+                        "open_end": (10, 0.12, 2.0)}, expR=0.31)
+        m2.report(cross=False)
+        seg = capsys.readouterr().out.split("每笔 R 贡献")[1]
+        line = next(ln for ln in seg.split("\n") if "00_baseline" in ln)
+        assert "+0.110" in line, f"合计应含未实现: {line}"
+        assert "-0.100" in line, f"已实现应剔除末持的分子与分母: {line}"
+
+    def test_flip_is_flagged(self, tmp_path, monkeypatch, capsys):
+        """含未实现为正、已实现非正 ⇒ 必须点出「没兑现的边际不是边际」。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write_reasons(tmp_path, "A_stop_low", "00_baseline",
+                       {"bbi_exit": (30, 0.05, 1.0), "stop": (60, -0.03, -0.65),
+                        "open_end": (10, 0.12, 2.0)}, expR=0.11)
+        _write_reasons(tmp_path, "A_stop_low", "trail_08",
+                       {"bbi_exit": (35, 0.06, 1.2), "stop": (55, -0.03, -0.6),
+                        "open_end": (10, 0.12, 2.0)}, expR=0.31)
+        out = (m2.report(cross=False), capsys.readouterr().out)[1]
+        assert "正期望全部来自未平仓浮盈" in out
+        assert "没兑现的边际不是边际" in out
+
+    def test_no_flip_when_realized_positive(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write_reasons(tmp_path, "A_stop_low", "00_baseline",
+                       {"bbi_exit": (50, 0.08, 2.0), "stop": (40, -0.03, -0.6),
+                        "open_end": (10, 0.12, 2.0)}, expR=1.0)
+        _write_reasons(tmp_path, "A_stop_low", "trail_08",
+                       {"bbi_exit": (55, 0.09, 2.2), "stop": (35, -0.03, -0.6),
+                        "open_end": (10, 0.12, 2.0)}, expR=1.2)
+        m2.report(cross=False)
+        assert "没兑现的边际不是边际" not in capsys.readouterr().out
+
+    def test_baseline_block_shows_realized(self, tmp_path, monkeypatch, capsys):
+        """基准结构块也要打已实现口径——那是判读所有「改进」的绝对水平基线。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        _write_reasons(tmp_path, "A_stop_low", "00_baseline",
+                       {"bbi_exit": (30, 0.05, 1.0), "stop": (60, -0.03, -0.65),
+                        "open_end": (10, 0.12, 2.0)}, expR=0.11)
+        m2.report(cross=False)
+        out = capsys.readouterr().out
+        assert "基准已实现口径" in out
+        assert "剔除末持(open_end) 10 笔" in out
+        assert "相对提升再大，绝对水平仍可能是负的" in out
+
+
 class TestStopIsTooTightHypothesis:
     """本轮最强结论：**B1 的止损普遍太紧**，两条独立证据都指向放宽有效。
 
@@ -1195,6 +1257,44 @@ class TestFailureRecap:
         out = capsys.readouterr().out
         assert out.count("[RUN ] A_stop_low/be_03") == 1
         assert out.count("[DONE] A_stop_low/be_03") == 1
+
+    def test_parallel_prints_heartbeat_on_start(self, tmp_path, monkeypatch, capsys):
+        """并行波要有**立刻可见**的心跳。
+
+        ⚠️ 没有它时「在跑」与「已死」在日志上长得一模一样，而并行波要等一整个方案
+        （3000 只约 60 分钟）才有输出 —— owner 实测因此以为卡住、去 ps 找进程。
+        """
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+        monkeypatch.setattr(m2, "_avail_mem_mb", lambda: 64_000.0)
+        monkeypatch.setattr(m2.os, "cpu_count", lambda: 8)
+
+        def fake_run(cmd, **kw):
+            out = next(x for i, x in enumerate(cmd) if cmd[i - 1] == "--out")
+            pathlib.Path(out).write_text("{}", encoding="utf-8")
+            return type("R", (), {"returncode": 0, "stdout": ""})()
+
+        monkeypatch.setattr(m2.subprocess, "run", fake_run)
+        m2._run_all([("A_stop_low", "be_03", ["--breakeven", "0.03"]),
+                     ("A_stop_low", "be_05", ["--breakeven", "0.05"])],
+                    1000, False, False, 2)
+        out = capsys.readouterr().out
+        assert out.count("[START] A_stop_low/be_03") == 1
+        assert out.count("[START] A_stop_low/be_05") == 1
+        # 心跳在结果块之前
+        assert out.index("[START] A_stop_low/be_03") < out.index("[DONE] A_stop_low/be_03")
+
+    def test_serial_has_no_duplicate_heartbeat(self, tmp_path, monkeypatch, capsys):
+        """串行本来就实时打印，不该再多一行心跳。"""
+        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
+
+        def fake_run(cmd, **kw):
+            (tmp_path / "A_stop_low__be_03__s1000.json").write_text("{}", encoding="utf-8")
+            return type("R", (), {"returncode": 0, "stdout": ""})()
+
+        monkeypatch.setattr(m2.subprocess, "run", fake_run)
+        m2._run_all([("A_stop_low", "be_03", ["--breakeven", "0.03"])],
+                    1000, False, False, 1)
+        assert "[START]" not in capsys.readouterr().out
 
     def test_parallel_prints_each_line_once(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)

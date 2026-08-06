@@ -27,7 +27,7 @@ TdxW 未运行或任一阶段失败时整链干净降级（status=unavailable / 
 
 ### [1] 公式初筛
 
-- 公式注册表：`00_governance/SCREEN_FORMULA_REGISTRY.json`。**只能引用客户端
+- 公式注册表：`00_governance/contracts/SCREEN_FORMULA_REGISTRY.json`。**只能引用客户端
   已存在的公式名**（系统公式或用户预建公式），不能跑任意表达式（实测
   ErrorId=9）。当前启用：KDJ_J_LOW（用户自建 `J小于13`，B1 回调型初筛，
   2026-07-22 接入；同日用户决策停用 UPN_3/MA_BUY 等非 B1 动量/趋势公式）。
@@ -156,8 +156,8 @@ next_step：A→generate_buy_plan，B→observe_price，C→long_term_track，D�
 
 ## 策略对齐（B1/CZ）
 
-2026-07-21 起，enrich 段新增对齐 `00_governance/b1_swing_strategy.md`（B1）与
-`00_governance/cz_strategy.md`（CZ）的确定性检测器。全部只依赖本地 vipdoc
+2026-07-21 起，enrich 段新增对齐 `00_governance/strategy/b1_swing_strategy.md`（B1）与
+`00_governance/strategy/cz_strategy.md`（CZ）的确定性检测器。全部只依赖本地 vipdoc
 日线 OHLCV，不引入新数据源。**所有阈值集中在 `enrich_candidates.py` 顶部常量
 并标注"待回测参数"**：策略原文要求阈值可配置、实际值随候选落盘，完成样本
 回测前不得视为已校准。
@@ -201,7 +201,7 @@ next_step：A→generate_buy_plan，B→observe_price，C→long_term_track，D�
 与面积背离未确定性化，暂不实现。
 
 ### 板块白/黑名单（CZ §七）
-`00_governance/CZ_SECTOR_PREFERENCE.json`（cz-sector-v1）。作用于候选股经
+`00_governance/strategy/CZ_SECTOR_PREFERENCE.json`（cz-sector-v1）。作用于候选股经
 `sector_code_map.json` 映射后的**主题名子串匹配**：命中 favored →
 cz_sector=favored，命中 avoid → cz_sector=avoid（avoid 优先，保守），否则
 neutral。**注意：现有 sector_code_map 覆盖粗糙，匹配不上即 neutral，宁缺
@@ -240,7 +240,7 @@ stock_pool.json 的 `cz_sector_status`/`degraded_reason` 注明。
 
 ## 可配置项与数据一致性
 
-所有开关集中在 `00_governance/SCREEN_FORMULA_REGISTRY.json`，默认值＝历史行为，
+所有开关集中在 `00_governance/contracts/SCREEN_FORMULA_REGISTRY.json`，默认值＝历史行为，
 改动前同样遵循「先回测」原则。
 
 - **`scoring.cap_rules`（封顶规则开关，默认全开）**：`sprint_wave` / `volume_retreat`
@@ -285,6 +285,6 @@ stock_pool.json 的 `cz_sector_status`/`degraded_reason` 注明。
 ## TQ 服务可靠性警示
 
 `formula_process_mul_xg` 等 TQ 接口参数形态错误可能挂死 TdxW 服务端
-（单线程阻塞，需重启客户端恢复，见 00_governance/TQ_INTERFACE_PROBE_2026-07-20.md §四）。
+（单线程阻塞，需重启客户端恢复，见 00_governance/data/TQ_INTERFACE_PROBE_2026-07-20.md §四）。
 因此：固定参数形态写入代码（formula_name/formula_arg/stock_list/stock_period/
 count/dividend_type），不得随意改动；所有调用带 15s 超时与熔断。

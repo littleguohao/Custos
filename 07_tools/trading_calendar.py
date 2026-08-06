@@ -10,9 +10,9 @@ from typing import Any
 from urllib import request
 
 from runtime_guards import trading_day_status
-from paths import BASE, cn_today, cn_now
+from paths import BASE, CONTRACTS_DIR, cn_today, cn_now
 
-CONFIG = BASE / "00_governance" / "CN_TRADING_CALENDAR.json"
+CONFIG = CONTRACTS_DIR / "CN_TRADING_CALENDAR.json"
 CACHE = BASE / "01_data" / "market" / "CN_TRADING_CALENDAR_CACHE.json"
 DEFAULT_ENDPOINT = "http://127.0.0.1:17709/"
 

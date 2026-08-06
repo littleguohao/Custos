@@ -7,6 +7,8 @@ import unittest
 import urllib.error
 from unittest import mock
 
+import pytest
+
 import tq_http
 
 
@@ -148,3 +150,64 @@ class IntegrationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestUnsafeDownTypeGuard:
+    """`download_file` 的危险 down_type 必须被**代码**挡住，不能只写在注释里。
+
+    背景：`TQ_INTERFACE_PROBE` 有一节「TQ 服务被打挂」的风险记录，`concept_tags.py`
+    顶部也写着「只调用 down_type=4；禁止触碰 1/5/6」。但 `call()` 是泛型入口——
+    任何人写一行 `call("download_file", {"down_type": 1})` 都不会被挡，而 TdxW 一挂，
+    选股链与持仓行情一起没了。
+
+    本仓库反复踩的坑正是「写进文档不等于内化」（同一个连接反模式跨两天犯了三次），
+    所以这条约束做成拦截 + 测试。
+    """
+
+    def test_safe_down_type_passes_guard(self, monkeypatch):
+        """down_type=4 必须放行（它是概念标签的唯一来源）。"""
+        seen = {}
+        monkeypatch.setattr(tq_http, "is_tdxw_running", lambda: True)
+        monkeypatch.setattr(tq_http, "_post",
+                            lambda payload, timeout: (seen.update(payload),
+                                                      b'{"result":{"ErrorId":"0","Value":1}}')[1])
+        r = tq_http.call("download_file", {"down_type": 4})
+        assert r["ok"] is True
+        assert seen["params"]["down_type"] == 4
+
+    @pytest.mark.parametrize("dt", [1, 5, 6, 0, "4", None])
+    def test_unsafe_down_type_blocked_without_request(self, dt, monkeypatch):
+        """非白名单一律拦截，且**不得发出请求**——探测本身就会打挂服务。
+
+        `"4"`（字符串）也要挡：白名单是整数集合，类型不符说明调用方没按约定传参。
+        """
+        monkeypatch.setattr(tq_http, "is_tdxw_running", lambda: True)
+        monkeypatch.setattr(tq_http, "_post", lambda *a, **k: pytest.fail(
+            "拦截失败：危险 down_type 竟然发出了请求"))
+        r = tq_http.call("download_file", {"down_type": dt})
+        assert r["ok"] is False
+        assert r["error"]["code"] == "unsafe_down_type"
+        assert "白名单" in r["error"]["detail"]
+
+    def test_guard_runs_before_process_check(self, monkeypatch):
+        """拦截要在 is_tdxw_running 之前——TdxW 没开时也该报真正的原因。"""
+        monkeypatch.setattr(tq_http, "is_tdxw_running", lambda: False)
+        r = tq_http.call("download_file", {"down_type": 1})
+        assert r["error"]["code"] == "unsafe_down_type", \
+            "应先报 unsafe_down_type，而不是被 tdxw_not_running 掩盖"
+
+    def test_explicit_override_allowed(self, monkeypatch):
+        """确需探测时可显式签名放行——让调用方为它负责，而不是无法探测。"""
+        monkeypatch.setattr(tq_http, "is_tdxw_running", lambda: True)
+        monkeypatch.setattr(tq_http, "_post",
+                            lambda *a, **k: b'{"result":{"ErrorId":"0","Value":1}}')
+        r = tq_http.call("download_file", {"down_type": 1},
+                         allow_unsafe_download=True)
+        assert r["ok"] is True
+
+    def test_other_methods_unaffected(self, monkeypatch):
+        """拦截只针对 download_file，别的方法不受影响。"""
+        monkeypatch.setattr(tq_http, "is_tdxw_running", lambda: True)
+        monkeypatch.setattr(tq_http, "_post",
+                            lambda *a, **k: b'{"result":{"ErrorId":"0","Value":{"a":1}}}')
+        assert tq_http.call("get_stock_info", {"stock_code": "600000"})["ok"] is True
