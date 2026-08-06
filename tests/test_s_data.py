@@ -316,3 +316,67 @@ class TestBundleConvention:
         for _ in range(3):
             s_data.load_bars_qlib(["600000"], 100, root=root)
         assert capsys.readouterr().err.count("跳过**口径无法验证**") == 1
+
+
+class TestUniverseAndPriceSameFilter:
+    """`list_universe` 必须与 `load_bars_qlib` 用**同一套 bundle 过滤**。
+
+    ⚠️ 否则：宇宙里含被跳过 bundle 的 instrument，而价格加载时那个 bundle 不读
+    ⇒ 2020-09 之后上市的票**静默无数据**、被当成"这只票没信号"。
+    实测 `2021_2026` 有 5484 只 instrument，跳过它却仍把这些票放进宇宙，
+    就会产出一个「一半票拿不到数据」的宇宙而毫无提示 —— 与本仓库反复踩的静默失效同类。
+    """
+
+    def _mk(self, root, name, days, insts, fields):
+        import numpy as np
+        d = root / name
+        (d / "instruments").mkdir(parents=True)
+        (d / "calendars").mkdir(parents=True)
+        (d / "calendars" / "day.txt").write_text("\n".join(days) + "\n", encoding="utf-8")
+        (d / "instruments" / "all.txt").write_text(
+            "\n".join(f"{i}\t{days[0]}\t{days[-1]}" for i in insts) + "\n", encoding="utf-8")
+        for i in insts:
+            f = d / "features" / i.lower()
+            f.mkdir(parents=True)
+            for fn in fields:
+                np.array([0.0] + [10.0] * len(days), dtype="<f4").tofile(f / f"{fn}.day.bin")
+        return d
+
+    def _roots(self, tmp_path):
+        root = tmp_path / "Q_DATA"
+        ohlcv = ["open", "high", "low", "close", "volume"]
+        self._mk(root, "2006_2020", ["2019-01-02", "2020-09-25"],
+                 ["SH600000"], ohlcv + ["factor"])
+        self._mk(root, "2021_2026", ["2021-08-02", "2026-02-06"],
+                 ["SH600000", "SH688888"], ohlcv)          # 688888 只在被弃用的 bundle
+        return root
+
+    def test_universe_excludes_skipped_bundle(self, tmp_path, capsys):
+        s_data._UNVERIFIED_SKIP_WARNED.clear()
+        root = self._roots(tmp_path)
+        got = s_data.list_universe(root)
+        assert got == ["600000"], got
+        assert "688888" not in got, (
+            "被跳过 bundle 的票不该进宇宙——它拿不到价格，会被当成'没信号'")
+        assert "宇宙也跳过" in capsys.readouterr().err
+
+    def test_universe_can_include_when_allowed(self, tmp_path):
+        root = self._roots(tmp_path)
+        got = s_data.list_universe(root, allow_unverified=True)
+        assert got == ["600000", "688888"], got
+
+    def test_window_outside_coverage_warns(self, tmp_path, capsys):
+        """弃用 2021_2026 后 qlib 只覆盖 1999-2020，而 --cross-window 用 2022-2024
+        ⇒ 必然返回空。只靠"0 行"会被读成"因子无判别力"（审计 E9 的失效模式）。"""
+        s_data._UNVERIFIED_SKIP_WARNED.clear()
+        root = self._roots(tmp_path)
+        s_data.load_bars_qlib(["600000"], 0, start="2022-01-01", end="2024-12-31", root=root)
+        err = capsys.readouterr().err
+        assert "完全不相交" in err and "2019-01-02~2020-09-25" in err
+        assert "--data-source tdx" in err, "要给出可行的替代路径，不能只报错"
+
+    def test_window_inside_coverage_silent(self, tmp_path, capsys):
+        s_data._UNVERIFIED_SKIP_WARNED.clear()
+        root = self._roots(tmp_path)
+        s_data.load_bars_qlib(["600000"], 0, start="2019-01-01", end="2020-01-01", root=root)
+        assert "完全不相交" not in capsys.readouterr().err

@@ -98,8 +98,9 @@ class ConvenienceTest(unittest.TestCase):
     def _captured(self, resp_obj: dict):
         seen = {}
 
-        def fake_post(payload, timeout):
+        def fake_post(payload, timeout, endpoint=None):
             seen.update(payload)
+            seen["_endpoint"] = endpoint
             return _body(resp_obj)
 
         return seen, fake_post
@@ -169,7 +170,7 @@ class TestUnsafeDownTypeGuard:
         seen = {}
         monkeypatch.setattr(tq_http, "is_tdxw_running", lambda: True)
         monkeypatch.setattr(tq_http, "_post",
-                            lambda payload, timeout: (seen.update(payload),
+                            lambda payload, timeout, endpoint=None: (seen.update(payload),
                                                       b'{"result":{"ErrorId":"0","Value":1}}')[1])
         r = tq_http.call("download_file", {"down_type": 4})
         assert r["ok"] is True
@@ -255,3 +256,42 @@ class TestStockCodeFormatGuard:
         monkeypatch.setattr(tq_http, "_post",
                             lambda *a, **k: b'{"result":{"ErrorId":"0","Value":[1]}}')
         assert tq_http.call("get_match_stkinfo", {"key_word": "平安"})["ok"] is True
+
+
+class TestCustomEndpoint(unittest.TestCase):
+    """`call(endpoint=...)` 必须透传到 `_post`。
+
+    为什么需要：`trading_calendar` 有 `--endpoint` 参数，收敛到 `tq_http` 时若
+    endpoint 传不进去，它就会静默打到默认端口 —— 换端口调试时**看起来在工作**
+    却连的是另一个服务。
+    """
+
+    def setUp(self) -> None:
+        patcher = mock.patch.object(tq_http, "is_tdxw_running", return_value=True)
+        self.addCleanup(patcher.stop)
+        patcher.start()
+
+    def test_endpoint_passed_through(self) -> None:
+        seen = {}
+
+        def fake_post(payload, timeout, endpoint=None):
+            seen["endpoint"] = endpoint
+            return _body({"id": 1, "result": {"ErrorId": "0", "Value": []}})
+
+        with mock.patch.object(tq_http, "_post", side_effect=fake_post):
+            tq_http.call("get_trading_dates", {"market": "SH"},
+                         endpoint="http://127.0.0.1:19999/")
+        self.assertEqual(seen["endpoint"], "http://127.0.0.1:19999/")
+
+    def test_default_endpoint_resolved_at_call_time(self) -> None:
+        """默认端点在**调用时**解析，不是写成默认参数。
+
+        见 DATA_SOURCE_PRINCIPLE「模块级常量 + 运行时替换 = 陷阱」变体②：
+        写成 `endpoint=TQ_HTTP_URL` 的话，改 `TQ_HTTP_URL` 就对已定义的函数无效。
+        """
+        with mock.patch.object(tq_http, "TQ_HTTP_URL", "http://example/"), \
+             mock.patch.object(tq_http.urllib.request, "urlopen") as uo:
+            uo.side_effect = urllib.error.URLError("stop here")
+            tq_http.call("get_trading_dates", {})
+        req = uo.call_args[0][0]
+        self.assertEqual(req.full_url, "http://example/")

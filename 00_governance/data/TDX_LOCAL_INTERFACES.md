@@ -25,10 +25,22 @@
 tq_http.py                  4 个薄封装（snapshot / more_info / stock_info / ping）
 concept_tags.py             download_file(down_type=4)
 formula_screen.py           formula_process_mul_xg
-trading_calendar.py         get_trading_dates —— **自己拼 JSON-RPC，没走 tq_http**
+trading_calendar.py         get_trading_dates —— 走 tq_http.call（2026-08-06 已收敛）
 ```
 
-最后一条是待收敛项：它绕过了 `tq_http.call()` 的统一错误结构与安全拦截。
+**四条路径现已全部走 `tq_http.call`**（2026-08-06 收敛完 `trading_calendar`）。
+收敛前它自己拼 JSON-RPC + `urlopen`，与 `tq_http` 是**同一个服务**
+（两处都硬编码 `http://127.0.0.1:17709/`）却各写一套，于是拿不到：
+
+· **TdxW 未运行的预检** —— 否则只有一个 `connection refused`，
+  分不清「服务没起」还是「端口写错」。收敛后 `source.last_error` 直接写
+  `TQ get_trading_dates 失败[tdxw_not_running]: TdxW.exe 未运行`
+· **统一错误分类**（`tdxw_not_running`/`timeout`/`connection_failed`/`request_failed`）
+· 将来加在 `call` 里的**安全拦截**自动覆盖这条路径，不会漏
+
+`rpc_trading_dates` 仍**保持 raise 契约**：`refresh` 依赖 `except Exception` 记
+`last_error` 并保住旧缓存（`status="cache_preserved"`），改成返回 dict 会让失败被当成成功。
+端点一致性由 `tests/test_trading_calendar.py::TransportConvergenceTests` 守住。
 
 ---
 
@@ -116,7 +128,7 @@ A 股个股约 5300 只，且不含 BJ。
 | `get_more_info` | ✅ | `tq_http.more_info(code)` | **83ms** | 扩展字段。传 `field_list` 实际仍返回全字段 |
 | `download_file(down_type=4)` | ✅ | `concept_tags.py` | **1132ms** | miscinfo 8.1MB / 68161 条，概念主题标签 |
 | `formula_process_mul_xg` | ✅ | `formula_screen.py` | — | 公式批量选股 |
-| `get_trading_dates` | ⚠️ | `trading_calendar.py` | — | **绕过 tq_http，自己拼请求** |
+| `get_trading_dates` | ✅ | `trading_calendar.py` | 交易日历刷新（周五 14:35 cron） | 走 tq_http.call；`--endpoint` 可覆盖 |
 
 ### ⚠️ 周期串是 `"1d"`，不是 `"day"`
 

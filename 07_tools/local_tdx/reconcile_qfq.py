@@ -481,6 +481,30 @@ def gap_report(sample: int = 200,
             except Exception:                                  # noqa: BLE001
                 pass
             print("   ⇒ 这个数就是缺口对「去幸存者偏差」的实际代价上限")
+
+        # ★ 每个 bundle 的**去偏价值** = 它有多少票是本地 vipdoc 没有的（≈ 已退市）
+        #   这一步能回答两件事：
+        #   ① 某个 bundle 到底值不值得留（去偏价值为 0 就是纯负债）
+        #   ② 它是不是**从 vipdoc 生成的** —— 若 instrument 几乎全在 vipdoc 里、
+        #      且起始日与 vipdoc 一致，那它的价格口径问题就是**我们自己转换脚本的 bug**
+        try:
+            import local_tdx_data as L
+            live = set(L.list_local_vipdoc_codes())
+            print(f"\n   本地 vipdoc: {len(live)} 只")
+            print(f"   {'bundle':<14}{'票数':>7}{'不在 vipdoc':>12}{'占比':>8}  去偏价值")
+            for b in bundles:
+                nm = b["dir"].name
+                s0 = sets.get(nm)
+                if not s0:
+                    continue
+                miss = s0 - live
+                pct = len(miss) / max(len(s0), 1)
+                verdict = ("**为 0 ⇒ 纯负债**（universe≈在市股，无退市票）"
+                           if not miss else f"{len(miss)} 只退市票可用于去偏")
+                print(f"   {nm:<14}{len(s0):>7}{len(miss):>12}{pct:>7.1%}  {verdict}")
+            print("   ⇒ 去偏价值为 0 且价格口径有问题的 bundle，应当直接不用")
+        except Exception as exc:                               # noqa: BLE001
+            print(f"   （跳过 vipdoc 对比：{type(exc).__name__}）")
     except Exception as exc:                                   # noqa: BLE001
         print(f"   跳过：{type(exc).__name__}: {exc}")
 

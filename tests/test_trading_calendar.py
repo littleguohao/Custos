@@ -53,3 +53,73 @@ class TradingCalendarTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TransportConvergenceTests(unittest.TestCase):
+    """`trading_calendar` 的 RPC 必须走 `tq_http`，且两处端点不得漂移。
+
+    2026-08-06 收敛前：`trading_calendar` 自己拼 JSON-RPC + `urlopen`，
+    与 `tq_http` 是**同一个服务**（两处都硬编码 `http://127.0.0.1:17709/`）却各写一套
+    ⇒ 拿不到 TdxW 预检、统一错误分类，将来加在 `tq_http.call` 的安全拦截也漏掉这条路径。
+    """
+
+    def _tq_http(self):
+        import sys
+        from paths import TOOLS
+        d = str(TOOLS / "local_tdx")
+        if d not in sys.path:
+            sys.path.insert(0, d)
+        import tq_http
+        return tq_http
+
+    def test_endpoint_single_source(self):
+        """两处端点必须一致 —— 改了一处忘另一处，调试时会连到不存在的端口。"""
+        import trading_calendar as tc
+        self.assertEqual(tc.DEFAULT_ENDPOINT, self._tq_http().TQ_HTTP_URL)
+
+    def test_does_not_build_its_own_rpc(self):
+        """代码不得再出现自拼 JSON-RPC 的痕迹（urlopen / 手写 payload）。
+
+        ⚠️ **必须剥掉 docstring 再查**。第一版直接扫 `inspect.getsource`，
+        被函数自己那句「原先这里自己拼 JSON-RPC + urlopen」的说明**误判为违规**
+        —— 解释历史的注释和残留的实现，字符串层面长得一样。
+        """
+        import ast
+        import inspect
+        import textwrap
+        import trading_calendar as tc
+        fn = ast.parse(textwrap.dedent(inspect.getsource(tc.rpc_trading_dates))).body[0]
+        if (fn.body and isinstance(fn.body[0], ast.Expr)
+                and isinstance(fn.body[0].value, ast.Constant)):
+            fn.body = fn.body[1:]                    # 去掉 docstring
+        code = ast.unparse(fn)
+        self.assertNotIn("urlopen", code)
+        self.assertNotIn('"method"', code, "不应再自己拼 JSON-RPC payload")
+        self.assertIn("tq_http.call", code)
+
+    def test_error_carries_unified_code(self):
+        """失败时错误码要进 message —— refresh 会把它记进 source.last_error 供排查。"""
+        from unittest import mock
+        import trading_calendar as tc
+        tq = self._tq_http()
+        with mock.patch.object(tq, "call",
+                               return_value={"ok": False, "value": None,
+                                             "error": {"code": "tdxw_not_running",
+                                                       "detail": "TdxW.exe 未运行"}}):
+            with self.assertRaises(RuntimeError) as cm:
+                tc.rpc_trading_dates(tc.DEFAULT_ENDPOINT, "SH",
+                                     date(2026, 8, 1), date(2026, 8, 6), 5)
+        self.assertIn("tdxw_not_running", str(cm.exception))
+        self.assertIn("TdxW.exe 未运行", str(cm.exception))
+
+    def test_success_unwraps_value(self):
+        """`tq_http.call` 的 value 是去掉 ErrorId 的 result 本体 ⇒ extract_dates 要能吃。"""
+        from unittest import mock
+        import trading_calendar as tc
+        tq = self._tq_http()
+        with mock.patch.object(tq, "call",
+                               return_value={"ok": True, "error": None,
+                                             "value": {"Date": [20260803, "2026-08-04"]}}):
+            got = tc.rpc_trading_dates(tc.DEFAULT_ENDPOINT, "SH",
+                                       date(2026, 8, 1), date(2026, 8, 6), 5)
+        self.assertEqual(got, ["2026-08-03", "2026-08-04"])

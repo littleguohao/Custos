@@ -266,6 +266,17 @@ def load_bars_qlib(codes: list[str], count: int, start: Optional[str] = None,
         # 由 test_audit_p3_research::test_s_data_warns_when_nothing_loaded 抓到。
         _warn_if_nothing_loaded({}, codes, "qlib", root)
         return {}
+    # ⚠️ 请求窗口与可用 bundle **完全不相交**时必须出声。
+    # 弃用 2021_2026 之后 qlib 只覆盖 1999-2020，而 `--cross-window` 用的
+    # 2022-01~2024-12 落在其外 ⇒ 会返回空。若只靠"0 行"，又会被读成"因子无判别力"
+    # （审计 E9 那个失效模式）。这里直接说清「请求的窗口没有数据」。
+    if start or end:
+        cov = [(b["start"], b["end"]) for b in bundles]
+        w0, w1 = start or "0000-00-00", end or "9999-99-99"
+        if not any(not (w1 < s0 or w0 > s1) for s0, s1 in cov):
+            _warn(f"请求窗口 {w0}~{w1} 与可用 bundle 区间**完全不相交**"
+                  f"（可用：{'; '.join(f'{a}~{b}' for a, b in cov)}）⇒ 必然返回空。"
+                  f"该时段请改用 tdx vipdoc（--data-source tdx）")
     by_dir = {b["dir"]: b for b in bundles}
     out: dict[str, pd.DataFrame] = {}
     for c in codes:
@@ -321,8 +332,15 @@ def load_bars_csv(codes: list[str], count: int, start: Optional[str] = None,
     return out
 
 
-def list_universe(root: str | Path = DEFAULT_Q_ROOT, source: str = "qlib") -> list[str]:
+def list_universe(root: str | Path = DEFAULT_Q_ROOT, source: str = "qlib",
+                  allow_unverified: bool = False) -> list[str]:
     """s_data 全市场宇宙(6 位代码)。qlib=各 bundle instruments/all.txt 并集;csv=列目录文件名。
+
+    ⚠️ **必须与 `load_bars_qlib` 用同一套 bundle 过滤**（2026-08-06 加 `allow_unverified`）。
+    否则：宇宙里含被跳过 bundle 的 instrument，而价格加载时那个 bundle 不读
+    ⇒ 2020-09 之后上市的票**静默无数据**、被当成"这只票没信号"。
+    实测 `2021_2026` 有 5484 只 instrument，跳过它却仍把这些票放进宇宙，
+    就会产出一个「一半票拿不到数据」的宇宙而毫无提示。
 
     ⚠️ **不要用 `ln[-6:]` 取代码**（2026-08-06 实测修）。qlib 的 `instruments/all.txt` 是
     **制表符分隔**的 `SH600000\\t1999-11-10\\t2026-02-27`，末 6 字符取到的是结束日期尾巴
@@ -343,7 +361,16 @@ def list_universe(root: str | Path = DEFAULT_Q_ROOT, source: str = "qlib") -> li
                 head = p.name.split("-")[0]           # 000001.SZ
                 codes.add(head.split(".")[0])
         else:
-            for b in list_bundles(root):
+            bundles = list_bundles(root)
+            if not allow_unverified:
+                skipped = [b["dir"].name for b in bundles
+                           if b.get("convention") == "unverified"]
+                if skipped:
+                    _warn(f"宇宙也跳过口径无法验证的 bundle {','.join(skipped)}"
+                          f"（与 load_bars_qlib 保持同一口径；否则宇宙里会有拿不到"
+                          f"价格的票）")
+                bundles = [b for b in bundles if b.get("convention") != "unverified"]
+            for b in bundles:
                 inst = b["dir"] / "instruments" / "all.txt"
                 if not inst.is_file():
                     continue

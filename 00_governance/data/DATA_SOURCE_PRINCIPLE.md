@@ -189,8 +189,54 @@ TDX ext 有海外品种但覆盖不全、代码映射需维护。Yahoo 为主、
 
 ---
 
-## 代码规范：同一文件不得被加载成两个模块
+## 代码规范：**模块级常量 + 运行时替换 = 陷阱**（同一天踩了三次）
 
-`07_tools/` 下的模块既被 `import x` 直接引用，也被包路径引用时，会成为两个独立模块对象
-——模块级缓存/常量各存一份，monkeypatch 只影响其中一个，测试通过而生产失效。
-统一从 `paths.py` 取路径、统一用同一种导入形式。
+这一类问题的共同形态是：**某个值在"早于你以为的时刻"被固定下来了**，
+于是运行时替换它没有效果。三种变体都在 2026-08-06 实际踩到：
+
+### ① 同一文件被加载成两个模块
+
+`07_tools/` 下的模块既被 `import x` 直接引用、也被 `from pkg import x` 引用时，
+会成为**两个独立的模块对象** —— 模块级缓存/常量各存一份，
+monkeypatch 只影响其中一个 ⇒ **测试通过而生产失效**。
+
+实际案例：`reconcile_qfq.pick_auto` 内部 `import adjust_factors as A` 读 `A.CACHE_DIR`，
+而测试 patch 的是 `local_tdx.adjust_factors.CACHE_DIR` —— 两个对象，patch 无效。
+
+### ② 默认参数在**函数定义时**求值
+
+```python
+def list_bundles(root=DEFAULT_Q_ROOT):   # ← DEFAULT_Q_ROOT 在 def 执行时就被绑定
+    ...
+```
+
+之后 `monkeypatch.setattr(s_data, "DEFAULT_Q_ROOT", tmp)` **对这个默认值毫无影响**，
+因为它早已是一个具体的 Path 对象。实际案例：`gap_report` 调 `Q.list_bundles()`
+不传 root，测试怎么 patch 都读的是 `E:\S_DATA`。
+
+### ③ 从常量派生的常量
+
+`CALENDAR_FILE = GOVERNANCE / "CN_TRADING_CALENDAR.json"` 这类派生常量在导入时就算好了，
+改 `GOVERNANCE` 不会让它跟着变。
+
+### 规范
+
+1. **路径只在 `paths.py` 定义一次**，模块不要自己拼 `BASE / "00_governance" / ...`
+   —— 由 `tests/test_base_path_depth.py::test_modules_do_not_rebuild_governance_paths`
+   强制（AST/文本扫描，一加上就抓到一处漏改）。
+2. **需要在测试里替换的值，做成显式参数**，不要读模块全局：
+   `pick_auto(n, cache_dir=None)` / `gap_report(sample, root=None)`。
+   `None` 时才回落到模块默认 —— 这样默认值在**调用时**才解析。
+3. **统一导入形式**：同一个模块在全仓只用一种引用方式。
+4. 判断依据：**如果一个值需要在测试里被替换，它就不该是模块级常量的默认参数。**
+5. 由 `tests/test_base_path_depth.py::TestNoPatchingDefaultArgConstants` 强制：
+   AST 扫出「哪些常量在哪个模块里被用作默认参数」，再扫测试里有没有 patch 它们
+   —— 这个组合正是我踩的坑，patch 了也不生效、症状只是「行为不符」而非报错。
+   ⚠️ 检查**必须按模块分开算**：第一版把常量名跨模块收成一个集合，于是
+   `amv_state.LEDGER`（在函数体内读、patch 完全有效）被
+   `fetch_market_cap.LEDGER`（确实是默认参数）连坐误报 6 处。
+   同名常量在不同模块里的用法可以完全不同。
+
+⚠️ 为什么单列一节：这三种变体一天内出现三次，而它们的症状都是「测试绿、生产错」
+或「patch 没生效但没人发现」—— 属于最难查的一类。
+与「连接永不重连」（跨两天犯三次）同理：**写进文档不等于内化，要靠可执行检查兜住**。
