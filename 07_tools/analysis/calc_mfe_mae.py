@@ -16,6 +16,15 @@ from pathlib import Path
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+
+# ⚠️ 本文件在 07_tools 的**子目录**里：作为 __main__ 跑时 sys.path[0] 是本目录，
+# 必须把 07_tools 自己加进 sys.path，否则本地模块导入会失败。
+# ⚠️ 必须放在**第一个本地模块导入之前** —— 放在 `from paths import` 前是不够的，
+#    若有更早的本地导入（如 net_retry）会先失败。
+_TOOLS = Path(__file__).resolve().parents[1]
+if str(_TOOLS) not in sys.path:
+    sys.path.insert(0, str(_TOOLS))
+
 from paths import BASE, TDX_ROOT, cn_today  # noqa: E402
 
 POSITIONS = BASE / "01_data" / "trades" / "current_positions.json"
@@ -135,7 +144,7 @@ def optional_float(pos: dict, key: str):
 
 def load_entry_dates(ledger_path: Path = LEDGER) -> dict[str, dict]:
     """读台账并解析建仓日。复用 weekly_review.parse_ledger 的行规范化,避免两套解析漂移。"""
-    sys.path.insert(0, str(Path(__file__).resolve().parent / "close_review"))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "close_review"))  # parents[1]=07_tools（本文件已移入 analysis/）
     try:
         import weekly_review as wr  # noqa: PLC0415
         rows = wr.parse_ledger(ledger_path)
@@ -197,7 +206,7 @@ def main(argv=None):
             # 一个根本不存在的巨额 MAE(owner 2026-08-04 拍板全链前复权)。
             # 沪深与 BJ 统一走 get_ohlcv_table(adjust="qfq")——此前只切了 BJ 分支,
             # 沪深仍走 reader.daily 未复权,除权跳空造假 MAE 的问题依然存在。
-            sys.path.insert(0, str(Path(__file__).resolve().parent / "local_tdx"))
+            sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "local_tdx"))  # parents[1]=07_tools（本文件已移入 analysis/）
             import local_tdx_data as ltd
             df = ltd.get_ohlcv_table(code, count=2000, adjust="qfq")
             if df is not None and len(df) > 0:

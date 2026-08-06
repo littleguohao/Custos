@@ -100,7 +100,7 @@ def main(argv=None) -> int:
     cal = _cg.cal
 
     # 2. Collect postclose holding quotes via mootdx (online bars for today's close)
-    r = _run_stage(["uv", "run", "python", str(TOOLS / "collect_holding_quotes.py"), "--date", target,
+    r = _run_stage(["uv", "run", "python", str(TOOLS / "collect" / "collect_holding_quotes.py"), "--date", target,
                     "--session", "postclose"], "collect_holding_quotes",
                    note="best-effort，失败不中断")
     if not r["ok"]:
@@ -109,7 +109,7 @@ def main(argv=None) -> int:
         print(f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'holding quotes collected'}")
 
     # 3. Collect incremental market data (breadth/turnover/limit via mootdx + A50/CNH via Yahoo)
-    r = _run_stage(["uv", "run", "python", str(TOOLS / "collect_incremental_market.py"), "--date", target],
+    r = _run_stage(["uv", "run", "python", str(TOOLS / "collect" / "collect_incremental_market.py"), "--date", target],
                    "collect_incremental_market", note="best-effort，失败不中断")
     if not r["ok"]:
         print(f"[WARN] collect_incremental_market failed: {r['out'][:200]}")
@@ -120,7 +120,7 @@ def main(argv=None) -> int:
     #     不能无条件报 [OK]:脚本对每只持仓 fail-closed(台账无未平仓记录/K线未覆盖入场日
     #     都不出数),全员不出数时它退 2 并把摘要行以 [WARN] 开头。这里回显该摘要行,
     #     否则"0/5 出数"在 runner 输出里长得和"5/5 出数"一模一样。
-    r = _run_stage(["uv", "run", "python", str(TOOLS / "calc_mfe_mae.py"), "--date", target],
+    r = _run_stage(["uv", "run", "python", str(TOOLS / "analysis" / "calc_mfe_mae.py"), "--date", target],
                    "calc_mfe_mae", note="best-effort，失败不中断")
     tail = _last_line(r["out"])
     if not r["ok"]:
@@ -131,7 +131,7 @@ def main(argv=None) -> int:
         print(f"[OK] {tail or 'MFE/MAE calculated'}")
 
     # 3c. Collect fund flow rank (eastmoney direct API)
-    r = _run_stage(["uv", "run", "python", str(TOOLS / "collect_fund_flow.py"), "--date", target],
+    r = _run_stage(["uv", "run", "python", str(TOOLS / "collect" / "collect_fund_flow.py"), "--date", target],
                    "collect_fund_flow", note="best-effort，失败不中断")
     if not r["ok"]:
         print(f"[WARN] collect_fund_flow failed: {r['out'][:200]}")

@@ -81,7 +81,7 @@ def main(argv=None) -> int:
         (["uv", "run", "python", str(TOOLS / "market_timing" / "market_timing_collector.py"), "--date", target], "market_timing"),
         (["uv", "run", "python", str(TOOLS / "market_timing" / "overseas_market_collector.py"), "--date", target], "overseas"),
         (["uv", "run", "python", str(TOOLS / "news" / "rss_collector.py"), "--date", target], "rss_collect"),
-        (["uv", "run", "python", str(TOOLS / "collect_incremental_market.py"), "--date", target], "incremental"),
+        (["uv", "run", "python", str(TOOLS / "collect" / "collect_incremental_market.py"), "--date", target], "incremental"),
         (["uv", "run", "python", str(TOOLS / "news" / "rss_filter.py"), "--date", target, "--session-type", "premarket"], "rss_filter"),
     ]
     results: dict[str, dict] = {}

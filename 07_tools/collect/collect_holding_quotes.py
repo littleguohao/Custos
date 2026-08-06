@@ -37,10 +37,19 @@ warnings.filterwarnings("ignore")
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-TOOLS_DIR = Path(__file__).resolve().parent
+TOOLS_DIR = Path(__file__).resolve().parents[1]   # parents[1]=07_tools（本文件已移入 collect/）
 LOCAL_TDX_DIR = TOOLS_DIR / "local_tdx"
 if str(LOCAL_TDX_DIR) not in sys.path:
     sys.path.insert(0, str(LOCAL_TDX_DIR))
+
+
+# ⚠️ 本文件在 07_tools 的**子目录**里：作为 __main__ 跑时 sys.path[0] 是本目录，
+# 必须把 07_tools 自己加进 sys.path，否则本地模块导入会失败。
+# ⚠️ 必须放在**第一个本地模块导入之前** —— 放在 `from paths import` 前是不够的，
+#    若有更早的本地导入（如 net_retry）会先失败。
+_TOOLS = Path(__file__).resolve().parents[1]
+if str(_TOOLS) not in sys.path:
+    sys.path.insert(0, str(_TOOLS))
 
 from paths import BASE, TDX_ROOT, cn_today, cn_now  # noqa: E402
 from code_utils import norm_code, fnum as _fnum  # noqa: E402

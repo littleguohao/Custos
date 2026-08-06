@@ -92,7 +92,7 @@ strategy_team/
 ├── 04_reviews/             # 盘后复盘
 ├── 05_strategy_versions/   # 策略版本记录
 ├── 06_logs/                # 运行日志（gitignore，运行时创建）
-├── 07_tools/               # 全部脚本
+├── 07_tools/               # 全部脚本（**runner 留在根目录**：cron 按路径调用）
 │   ├── run_0850.py                  # 08:50 盘前预采集
 │   ├── run_0905.py                  # 09:05 盘前日报
 │   ├── run_1445.py                  # 14:45 尾盘操作建议
@@ -100,10 +100,14 @@ strategy_team/
 │   ├── run_1800.py                  # 18:00 每日选股（独立链）
 │   ├── daily_pipeline.py            # 通用管线
 │   ├── generate_risk_and_sectors.py # risk_decision + sector_state 生成
-│   ├── collect_holding_quotes.py    # 持仓行情采集（mootdx）
-│   ├── collect_incremental_market.py # 增量市场数据
-│   ├── collect_fund_flow.py         # 资金流向（东方财富）
-│   ├── calc_mfe_mae.py              # MFE/MAE 计算
+│   ├── collect/                     # **数据采集**（runner 以 subprocess 调用）
+│   │   ├── collect_holding_quotes.py    # 持仓行情（mootdx）
+│   │   ├── collect_incremental_market.py # 增量市场数据
+│   │   ├── collect_fund_flow.py         # 资金流向（东方财富）
+│   │   └── online_quotes.py             # 在线报价（纯库，无 __main__）
+│   ├── analysis/                    # **交易分析**
+│   │   ├── analyze_trades.py            # 台账统计
+│   │   └── calc_mfe_mae.py              # MFE/MAE 计算
 │   ├── trading_calendar.py          # 交易日历查询
 │   ├── runtime_gate.py              # 运行门控
 │   ├── close_review/                # 尾盘+盘后复盘

@@ -6,10 +6,19 @@ from datetime import date, datetime
 from pathlib import Path
 import requests
 
+# ⚠️ 本文件在 07_tools 的**子目录**里：作为 __main__ 跑时 sys.path[0] 是本目录，
+# 必须把 07_tools 自己加进 sys.path，否则本地模块导入会失败。
+# ⚠️ 必须放在**第一个本地模块导入之前** —— 放在 `from paths import` 前是不够的，
+#    若有更早的本地导入（如 net_retry）会先失败。
+_TOOLS = Path(__file__).resolve().parents[1]
+if str(_TOOLS) not in sys.path:
+    sys.path.insert(0, str(_TOOLS))
+
 from net_retry import fetch_with_retry
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 from paths import BASE, cn_today, cn_now
 

@@ -76,7 +76,7 @@ def main(argv=None) -> int:
     # 2. Collect holding quotes via mootdx (replaces LLM tdx_quotes calls)
     s_started = _now_iso()
     s_t0 = time.time()
-    r = _stage(["uv", "run", "python", str(TOOLS / "collect_holding_quotes.py"), "--date", target,
+    r = _stage(["uv", "run", "python", str(TOOLS / "collect" / "collect_holding_quotes.py"), "--date", target,
                 "--session", "intraday"], "collect_holding_quotes intraday")
     stages_log.append(_log_stage("collect_holding_quotes", r, s_started, _now_iso(), time.time() - s_t0))
     if not r["ok"]:

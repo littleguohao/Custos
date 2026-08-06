@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import pathlib
 import re
+import sys
 
 import pytest
 
@@ -44,7 +45,8 @@ class TestNoLocalRedefinition:
             f"{mod} 又定义了本地 {fn} —— 应用 paths.read_json（它才是 utf-8-sig 的那一份）"
         assert "read_json" in s
 
-    @pytest.mark.parametrize("mod", ["collect_holding_quotes.py", "collect_incremental_market.py"])
+    @pytest.mark.parametrize("mod", ["collect/collect_holding_quotes.py",
+                                     "collect/collect_incremental_market.py"])
     def test_no_local_fnum(self, mod):
         s = (T / mod).read_text(encoding="utf-8")
         assert not re.search(r"^def _fnum\(", s, re.M), \
@@ -197,3 +199,71 @@ class TestCalendarGate:
         assert capsys.readouterr().out == "", "日历回显未被捕获"
         # log_stage 把 stdout 收进 `stdout_tail`（截末 1000 字），不是 `stdout`
         assert "[CAL]" in logs[0]["stdout_tail"], "捕获的回显应留在 stage 日志里，不能丢"
+
+
+class TestMovedScriptsRunAsMain:
+    """搬进子目录的**入口脚本**必须仍能作为 `__main__` 跑起来。
+
+    ⚠️ **这是 import 型测试抓不到的一类断裂。** 2026-08-06 分包时实际发生：
+    测试全绿（conftest 把 `07_tools` 与各子目录都铺进了 `sys.path`），
+    但 `uv run python 07_tools/collect/collect_fund_flow.py --help` 直接
+    `ModuleNotFoundError: net_retry` —— 因为作为脚本跑时 `sys.path[0]` 是**本目录**，
+    不含 `07_tools`。
+
+    而且第一版引导插错了位置：放在 `from paths import` 之前是**不够的** ——
+    `collect_fund_flow` 的 `from net_retry import` 在更早的行，会先失败。
+    引导必须放在**第一个本地模块导入之前**。
+
+    ⇒ runner 用 subprocess 调这些脚本，所以「能被 import」不等于「能被执行」。
+    """
+
+    ENTRIES = [
+        "collect/collect_holding_quotes.py",
+        "collect/collect_incremental_market.py",
+        "collect/collect_fund_flow.py",
+        "analysis/analyze_trades.py",
+        "analysis/calc_mfe_mae.py",
+    ]
+    # online_quotes.py 不在列：它没有 main()/`if __name__`，是纯库模块，
+    # 由同目录的 collect_holding_quotes 导入（后者已铺 sys.path）。
+
+    @pytest.mark.parametrize("rel", ENTRIES)
+    def test_help_works(self, rel):
+        import subprocess
+        r = subprocess.run([sys.executable, str(T / rel), "--help"],
+                           capture_output=True, text=True, timeout=90)
+        assert r.returncode == 0, f"{rel} 不能作为脚本执行：\n{r.stderr[-600:]}"
+        assert r.stdout.lstrip().startswith("usage"), f"{rel} 未输出 usage"
+
+    @pytest.mark.parametrize("rel", ENTRIES + ["collect/online_quotes.py"])
+    def test_bootstrap_precedes_first_local_import(self, rel):
+        """引导必须在第一个本地模块导入**之前**。"""
+        local = {p.stem for p in T.rglob("*.py")} - {"__init__"}
+        lines = (T / rel).read_text(encoding="utf-8").split("\n")
+        boot = next((i for i, l in enumerate(lines)
+                     if "_TOOLS = Path(__file__).resolve().parents[1]" in l), None)
+        first = next((i for i, l in enumerate(lines)
+                      if (m := re.match(r"\s*(?:from|import)\s+([a-z_][a-z0-9_]*)", l))
+                      and m.group(1) in local), None)
+        if boot is None:
+            # 纯库模块允许无引导（由导入方负责），但必须没有 __main__ 入口
+            src = "\n".join(lines)
+            assert "if __name__" not in src, \
+                f"{rel} 有 __main__ 入口却没有 sys.path 引导 —— 作为脚本跑会崩"
+            return
+        assert first is None or boot < first, \
+            f"{rel} 的引导在第 {boot+1} 行，而第一个本地导入在第 {first+1} 行 —— 顺序反了"
+
+    def test_no_stale_parent_paths(self):
+        """搬进子目录后，`__file__.parent` 指向的是子目录，不再是 07_tools。
+
+        `calc_mfe_mae` 原有两处 `Path(__file__).resolve().parent / "close_review"`，
+        搬后会指向不存在的 `analysis/close_review` —— 而 `sys.path.insert`
+        **对不存在的路径不报错**，是静默失效。已改为 `parents[1]`。
+        """
+        for rel in self.ENTRIES + ["collect/online_quotes.py"]:
+            s = (T / rel).read_text(encoding="utf-8")
+            for m in re.finditer(r"Path\(__file__\)\.resolve\(\)\.parent\b(?!s)", s):
+                ctx = s[max(0, m.start() - 60):m.end() + 60].replace("\n", " ")
+                raise AssertionError(
+                    f"{rel} 仍用 `.parent`（子目录里应为 `parents[1]`）：…{ctx}…")

@@ -163,7 +163,7 @@ class TestKnownFixesStayFixed:
             "tdx_ext_quotes 的重连机制被移除了（aeb3e25 修过）"
 
     def test_collect_holding_quotes(self):
-        src = (TOOLS / "collect_holding_quotes.py").read_text(encoding="utf-8")
+        src = (TOOLS / "collect" / "collect_holding_quotes.py").read_text(encoding="utf-8")
         assert "_client_call" in src, "持仓行情采集的重连包装被移除了"
         # 三处协议调用都必须走包装，不能直连
         assert not re.search(r"_get_client\(\)\.(bars|index|quotes)\(", src), \
