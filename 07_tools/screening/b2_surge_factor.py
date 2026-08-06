@@ -44,6 +44,19 @@ for _p in (str(_TOOLS), str(_TOOLS / "screening"), str(_TOOLS / "market_timing")
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+from indicators import j_series as _j_canonical  # noqa: E402
+
+def _j_series(df: pd.DataFrame):
+    """委托给 `indicators.j_series`，保留本模块的 `n<12` 守卫。
+
+    守卫的意义：不足 12 根时 J 序列几乎全是 NaN，判据会退化成「永不命中」，
+    返回 None 让调用方显式知道「数据不足」而不是「没信号」（审计 E9：空结果不得静默）。
+    """
+    if len(df) < 12:
+        return None
+    return _j_canonical(df).to_numpy()
+
+
 # ---- B2 参数（原文给了明确数值，其余待回测）----
 B2_GAIN_PCT = 4.0            # 原文:涨幅大于 4%
 B2_J_MAX = 55.0              # 原文:J < 55
@@ -71,20 +84,6 @@ def _arr(df: pd.DataFrame):
             df["volume"].astype(float).to_numpy(),
             df["open"].astype(float).to_numpy())
 
-
-def _j_series(df: pd.DataFrame) -> Optional[np.ndarray]:
-    """KDJ(9,3,3) 的 J 序列（与 technical_monitor.kdj 同口径）。"""
-    n = len(df)
-    if n < 12:
-        return None
-    close = df["close"].astype(float)
-    low = df["low"].astype(float).rolling(9).min()
-    high = df["high"].astype(float).rolling(9).max()
-    rng = (high - low).replace(0, np.nan)
-    rsv = (close - low) / rng * 100
-    k = rsv.ewm(com=2, adjust=False).mean()
-    d = k.ewm(com=2, adjust=False).mean()
-    return (3 * k - 2 * d).to_numpy()
 
 
 def detect_b2(df: pd.DataFrame, code: str = "",

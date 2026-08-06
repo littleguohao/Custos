@@ -35,6 +35,13 @@ for _p in (str(_TOOLS), str(_SCREEN_DIR), str(_TOOLS / "local_tdx")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+from indicators import bbi_series as _bbi_series  # noqa: E402
+
+def _bbi_series_from(df: pd.DataFrame) -> np.ndarray:
+    """DataFrame 入口的 BBI（返回 ndarray）—— 逐 bar 评估里用 ndarray 更快。"""
+    return _bbi_series(df["close"]).to_numpy()
+
+
 from s_shape import compute_s_shape, compute_s_reversal, SSHAPE_MIN_BARS, SSTAR_STRONG, SSTAR_MID  # noqa: E402
 
 try:
@@ -1106,11 +1113,6 @@ def factor_lift(records: list[dict[str, Any]], field: str, horizon: int = 10,
 _R_RISK_FLOOR = 0.02   # R 计算的 risk_frac 地板(2%)：周线收盘贴低时防 ret/≈0 炸成极端 R
 
 
-def _bbi_series(close: pd.Series) -> pd.Series:
-    """BBI = (MA3+MA6+MA12+MA24)/4。"""
-    c = close.astype(float)
-    return (c.rolling(3).mean() + c.rolling(6).mean() + c.rolling(12).mean() + c.rolling(24).mean()) / 4
-
 
 def _limit_pct(code: str) -> float:
     """Daily price-limit percentage inferred from the code prefix."""
@@ -1186,11 +1188,6 @@ def _medium_large_bull_flags(df: pd.DataFrame, code: str = "") -> np.ndarray:
     is_bull = close > open_
     return is_bull & ((chg >= thr) | (body >= thr))
 
-
-def _bbi_series_from(df: pd.DataFrame) -> np.ndarray:
-    """BBI = (MA3+MA6+MA12+MA24)/4。"""
-    c = df["close"].astype(float)
-    return (sum(c.rolling(k).mean() for k in (3, 6, 12, 24)) / 4).to_numpy()
 
 
 _TICK = 0.01          # A股最小价格变动单位(元);材料的「向下 3-5 个价位」以此为单位

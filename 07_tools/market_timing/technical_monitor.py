@@ -29,6 +29,8 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
+from indicators import bbi_series, kdj_series  # noqa: E402
+
 from paths import BASE, TDX_ROOT  # noqa: E402
 from code_utils import norm_code, split_code  # noqa: E402
 
@@ -84,13 +86,11 @@ def macd(df: pd.DataFrame) -> dict[str, Any]:
 def kdj(df: pd.DataFrame, n=9, m1=3, m2=3) -> dict[str, Any]:
     if len(df) < n + 3:
         return {"available": False}
-    low_n = df["low"].rolling(n).min()
-    high_n = df["high"].rolling(n).max()
-    rsv = (df["close"] - low_n) / (high_n - low_n) * 100
-    rsv = rsv.replace([float("inf"), -float("inf")], pd.NA).fillna(50)
-    k = rsv.ewm(com=m1-1, adjust=False).mean()
-    d = k.ewm(com=m2-1, adjust=False).mean()
-    j = 3 * k - 2 * d
+    # J 用共享实现（2026-08-06 收敛第 4 份重复）。`fill_na=50` 保留本模块原行为。
+    # ⚠️ 为什么要和 live 选股链共用：同一只票可能同时被 enrich_candidates（选股）
+    # 与本模块（持仓状态机）评估 —— 两边算出不同的 J，就会出现
+    # 「选股说 J<13 可进，持仓说 J 不低」这类无法解释的矛盾。
+    k, d, j = kdj_series(df, n=n, m1=m1, m2=m2, fill_na=50.0)
     jv = float(j.iloc[-1])
     if jv < 13:
         state = "低位调整到位观察"
@@ -169,7 +169,7 @@ def bbi_state(df: pd.DataFrame) -> dict[str, Any]:
     if len(df) < 24:
         return {"available": False, "reason": "少于24根K线"}
     close = df["close"]
-    bbi = sum(close.rolling(n).mean() for n in (3, 6, 12, 24)) / 4
+    bbi = bbi_series(close)
     valid = bbi.notna()
     if not valid.any():
         return {"available": False, "reason": "BBI无法计算"}
@@ -307,7 +307,7 @@ def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
     # BBI上方连续两根中大阳线判断 (B1第五层止盈)
     price_limit = _infer_price_limit(code, df)
     medium_large_threshold = price_limit / 2  # 半个涨停幅度
-    bbi_val = sum(df["close"].rolling(n).mean() for n in (3, 6, 12, 24)) / 4
+    bbi_val = bbi_series(df["close"])
     bbi_latest = float(bbi_val.iloc[-1]) if bbi_val.notna().any() else None
     bbi_prev = float(bbi_val.iloc[-2]) if len(bbi_val) >= 2 and bbi_val.notna().iloc[-2] else None
     close_prev = float(x["close"].iloc[-2])

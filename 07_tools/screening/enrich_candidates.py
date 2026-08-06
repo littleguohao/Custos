@@ -45,6 +45,19 @@ for p in (TOOLS_DIR, TOOLS_DIR / "local_tdx", TOOLS_DIR / "market_timing", TOOLS
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
+from indicators import j_series as _j_canonical  # noqa: E402
+
+def _j_series(df, n: int = 9, m1: int = 3, m2: int = 3):
+    """委托给 `indicators.j_series`。
+
+    `fill_na=50.0` 保留本模块原有行为（数据不足按中性处理）——
+    2026-08-06 收敛 3 份重复实现时**刻意不统一 NaN 策略**：
+    指标语义的改动应单独立项、单独回测，不该搭在重构里。
+    实测本模块用法是 `min()`（跳过 NaN），填 50 只在整段 NaN 时改变结果 ⇒ 当前无影响。
+    """
+    return _j_canonical(df, n=n, m1=m1, m2=m2, fill_na=50.0)
+
+
 from paths import (DATA, RISK_DIR, SCREEN_FORMULA_REGISTRY_FILE, SECTORS_DIR,
                    TRADES_DIR)  # noqa: E402
 import concept_tags  # noqa: E402
@@ -980,16 +993,6 @@ def compute_perfect_b1_fit(df, daily_j, zx: dict, pullback: dict,
     total = round(sum(c["points"] for c in comp.values()), 2)
     return {"score": total, "max_score": 8, "components": comp}
 
-
-def _j_series(df, n: int = 9, m1: int = 3, m2: int = 3):
-    """KDJ 的 J 序列（与 technical_monitor.kdj 同口径：ewm com=m-1, adjust=False）。"""
-    low_n = df["low"].rolling(n).min()
-    high_n = df["high"].rolling(n).max()
-    rsv = (df["close"] - low_n) / (high_n - low_n) * 100
-    rsv = rsv.replace([np.inf, -np.inf], np.nan).fillna(50)
-    k = rsv.ewm(com=m1 - 1, adjust=False).mean()
-    d = k.ewm(com=m2 - 1, adjust=False).mean()
-    return 3 * k - 2 * d
 
 
 def compute_b1_pullback_fit(df) -> dict[str, Any]:

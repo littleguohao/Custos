@@ -215,15 +215,6 @@ def _warn_if_mixed_convention(code: str, hits: list[tuple[Path, str]]) -> None:
               f" —— 详见 00_governance/data/QLIB_LOCAL_DATA.md「加法调整」")
 
 
-def load_bars_qlib(codes: list[str], count: int, start: Optional[str] = None,
-                   end: Optional[str] = None, root: str | Path = DEFAULT_Q_ROOT) -> dict[str, pd.DataFrame]:
-    """从 qlib bundle 读日线。start/end(YYYY-MM-DD)在 count 之前应用;跨 bundle 段拼接去重。
-
-    ⚠️ **价格口径**：2021_2026 bundle 实测为「减去累计现金分红」的**加法调整**，
-    不是乘法前复权 ⇒ **百分比收益被系统性放大**（高分红股放大 13~21%），
-    涨跌幅甚至能超过涨跌停限制。用它做百分比收益/止损的回测会失真。
-    详见 `00_governance/data/QLIB_LOCAL_DATA.md`。
-    """
 _UNVERIFIED_SKIP_WARNED: set[str] = set()
 
 

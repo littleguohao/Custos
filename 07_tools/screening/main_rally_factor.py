@@ -40,6 +40,8 @@ for _p in (str(_TOOLS), str(_TOOLS / "screening"), str(_TOOLS / "market_timing")
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+from indicators import j_series as _j_series  # noqa: E402
+
 from rsi_state import rsi  # noqa: E402
 
 # ---- 原文参数（待回测）----
@@ -97,16 +99,6 @@ def cci(df: pd.DataFrame, n: int = CCI_N) -> pd.Series:
         out = (tp - ma) / (0.015 * ad.replace(0, np.nan))
     return out.replace([np.inf, -np.inf], np.nan)
 
-
-def _j_series(df: pd.DataFrame) -> pd.Series:
-    """J = 3*SMA(RSV9,3,1) - 2*SMA(SMA(RSV9,3,1),3,1)（原文 D10/D11，与本项目 J 同口径）。"""
-    close = df["close"].astype(float)
-    low9 = df["low"].astype(float).rolling(9).min()
-    high9 = df["high"].astype(float).rolling(9).max()
-    rsv = (close - low9) / (high9 - low9).replace(0, np.nan) * 100
-    k = rsv.ewm(com=2, adjust=False).mean()
-    d = k.ewm(com=2, adjust=False).mean()
-    return 3 * k - 2 * d
 
 
 def detect_main_rally_start(df: pd.DataFrame, code: str = "",
