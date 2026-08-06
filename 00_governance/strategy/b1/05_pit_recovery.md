@@ -1,7 +1,10 @@
 # 补坑策略：大坑、小坑与小洞
 
-日期：2026-07-14
-版本：`pit-recovery-v1`
+> **上下文**：B1 波段策略（主）　｜　**执行者**：**人**　｜　**状态**：✅ 现行
+> **版本**：`pit-recovery-v1`（2026-07-14）　｜　**代码依赖**：无
+> **索引**：[`../README.md`](../README.md)　·　改动须记 [`strategy_version_log.md`](../../../05_strategy_versions/strategy_version_log.md)
+>
+> 坑位分类（大坑/小坑/小洞）依赖长期形态判断，目前由人做。
 
 ## 一、策略定位
 

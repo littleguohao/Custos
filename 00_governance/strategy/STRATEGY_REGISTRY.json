@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "updated_at": "2026-08-06",
+  "purpose": "策略上下文注册表。新增策略/因子必须在此登记，由 tests/test_strategy_index.py 校验注册表与目录一致。",
+  "conventions": {
+    "dir": "策略上下文用无前缀目录（b1/ cz/）；非策略用 _ 前缀（_factors/ 可复用因子、_shared/ 跨策略规则）",
+    "doc_name": "NN_lower_snake.md —— NN 给阅读顺序，90+ 为附录/摘要，99 为已废",
+    "config_name": "代码消费的配置保持 UPPER_SNAKE.json（与 contracts/ 一致，便于一眼看出代码在读它）",
+    "role": "primary 主策略 / secondary 辅策略 / experimental 实验中（不得进 live）",
+    "status": "live 现行 / advisory 仅作输入 / unwired 未接线 / partially_stale 部分过时 / deprecated 已废"
+  },
+  "strategies": [
+    {
+      "id": "b1",
+      "name": "B1 波段策略",
+      "role": "primary",
+      "status": "live",
+      "dir": "b1",
+      "entry": "b1/README.md",
+      "rule_doc": "b1/01_swing_rules.md",
+      "docs": [
+        "b1/01_swing_rules.md",
+        "b1/02_holding_check.md",
+        "b1/03_execution_discipline.md",
+        "b1/04_pullback_rotation.md",
+        "b1/05_pit_recovery.md",
+        "b1/90_research_summary.md",
+        "b1/99_deprecated_buy_integration.md"
+      ],
+      "configs": [],
+      "code": [
+        "07_tools/screening/enrich_candidates.py",
+        "07_tools/market_timing/b1_holding_state.py",
+        "07_tools/screening/backtest_factors.py"
+      ],
+      "research": "00_governance/research/README.md",
+      "known_issues": [
+        "04_pullback_rotation.md 零实现，却被 02_holding_check.md §七 依赖（待办 #26）",
+        "90_research_summary.md 的收益量级数字待重跑（研究侧重跑清单）"
+      ]
+    },
+    {
+      "id": "cz",
+      "name": "CZ 长期主义投资认知框架",
+      "role": "secondary",
+      "status": "advisory",
+      "dir": "cz",
+      "entry": "cz/README.md",
+      "rule_doc": null,
+      "docs": [
+        "cz/01_cognition_framework.md"
+      ],
+      "configs": [
+        "cz/CZ_SECTOR_PREFERENCE.json"
+      ],
+      "code": [
+        "07_tools/screening/enrich_candidates.py",
+        "07_tools/screening/score_candidates.py"
+      ],
+      "research": null,
+      "known_issues": [
+        "「强制止损体系」15%/20% 与 B1 的 6~12% 的层级关系未写定，待 owner 拍板（待办 #28 拍板项）",
+        "933 行里代码只用了 §14.6 量能规则与 §七 板块偏好，其余为人读的认知输入"
+      ]
+    }
+  ],
+  "factors": [
+    {
+      "id": "technical_trend",
+      "name": "通用技术走势分析框架（板块与个股共用）",
+      "doc": "_factors/technical_trend.md",
+      "status": "unwired",
+      "used_by": [],
+      "note": "2026-08-06 建索引前无任何入口可达；留作术语与趋势分类口径的参考"
+    }
+  ],
+  "shared_rules": [
+    {
+      "id": "decision_priority",
+      "name": "决策优先级规则",
+      "doc": "_shared/decision_priority.md",
+      "status": "partially_stale",
+      "superseded_by": "00_governance/contracts/MASTER_WORKFLOW.md",
+      "note": "写于 Agent 架构时代；优先级原则仍有效，冲突时以 MASTER_WORKFLOW 与仓库 README 为准。跨策略，不属于任何单一策略"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """保本止损（盈亏平衡保护）与移动止损回归测试。
 
-保本止损**不是新发明**——`b1_swing_strategy.md:328` 早就写了「已形成有效浮盈后，同时启用
+保本止损**不是新发明**——`01_swing_rules.md:328` 早就写了「已形成有效浮盈后，同时启用
 盈亏平衡保护，防止赢转亏」，但回测里一直没有。这和分批止盈是同一类缺口：文档定义了、
 检测/规则都在，只有回测没实现，于是回测系统性低估策略、也没法验证这些机制值不值得。
 
@@ -55,7 +55,7 @@ class TestDefaultOff:
 
 
 class TestBreakevenStop:
-    """b1_swing_strategy.md:328「已形成有效浮盈后…防止赢转亏」。"""
+    """01_swing_rules.md:328「已形成有效浮盈后…防止赢转亏」。"""
 
     def test_converts_loss_to_flat(self):
         loss = _run(WIN_TO_LOSS)["ret"]

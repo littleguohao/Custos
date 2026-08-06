@@ -1172,7 +1172,7 @@ def _next_tradable(flags: np.ndarray, start: int, max_delay: int) -> Optional[in
 def _medium_large_bull_flags(df: pd.DataFrame, code: str = "") -> np.ndarray:
     """逐根标记"中大阳线"（B1 §六 第五层止盈的量化口径）。
 
-    口径与 technical_monitor / b1_swing_strategy.md 一致：必须是阳线（close>open），
+    口径与 technical_monitor / 01_swing_rules.md 一致：必须是阳线（close>open），
     且**单日涨幅或阳线实体幅度** ≥ 半个涨停幅度（10%品种→5%、20%→10%、30%→15%）。
     """
     close = df["close"].astype(float).to_numpy()
@@ -2221,7 +2221,7 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                          "默认 0=不启用,便于与旧结果对照)")
     ap.add_argument("--breakeven", type=float, default=0.0,
                     help="盈亏平衡保护:浮盈达该比例后止损上移到成本价(如 0.05=浮盈5%%后保本;"
-                         "b1_swing_strategy.md §六 已定义但回测此前未实现;默认 0=不启用)")
+                         "01_swing_rules.md §六 已定义但回测此前未实现;默认 0=不启用)")
     ap.add_argument("--trail", type=float, default=0.0,
                     help="移动止损:止损跟随持仓期最高价,回撤该比例出场(如 0.08=回撤8%%;"
                          "默认 0=不启用)。只用截至前一根的最高价更新,避免未来函数")

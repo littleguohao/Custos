@@ -667,7 +667,7 @@ def check_volume_sustain(df) -> dict[str, Any]:
     ratios_last13 = [round(float(v / peak), 3) if peak else None for v in win]
     retreat = bool(days_since >= VOLUME_SUSTAIN_RETREAT_DAYS and peak
                    and all(v < peak * VOLUME_SUSTAIN_RATIO for v in vol[-VOLUME_SUSTAIN_RETREAT_DAYS:]))
-    # 与 cz_strategy.md §14.6 一致：峰值日后窗口内"逐日"量都必须 ≥ 峰值×55%
+    # 与 01_cognition_framework.md §14.6 一致：峰值日后窗口内"逐日"量都必须 ≥ 峰值×55%
     # （均值达标但有单日跌破不算主线确认）。
     confirmed = bool(not retreat and days_since >= VOLUME_SUSTAIN_MIN_POST_DAYS
                      and len(post) and peak

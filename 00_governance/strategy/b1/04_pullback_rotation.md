@@ -1,7 +1,10 @@
 # 大盘回调后的资金切换与标的选择
 
-日期：2026-07-14
-版本：`pullback-rotation-v1`
+> **上下文**：B1 波段策略（主）　｜　**执行者**：**人**（设计上）　｜　**状态**：🔴 **零实现**
+> **版本**：`pullback-rotation-v1`（2026-07-14）　｜　**代码依赖**：无
+> **索引**：[`../README.md`](../README.md)　·　改动须记 [`strategy_version_log.md`](../../../05_strategy_versions/strategy_version_log.md)
+>
+> 🔴 **本文档要求的主题切换 / 主题内分化 / 大小票切换 / 高低位切换四项检查，在 `07_tools/` 里 grep 零命中。** 而 [`02_holding_check.md`](02_holding_check.md) §七 依赖它 ⇒ 要么这套分层没在做，要么在靠 LLM 判断（**违反项目核心原则**：分析判断须用确定性脚本）。已登记待办 #26。
 
 ## 一、总逻辑
 

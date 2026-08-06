@@ -55,7 +55,7 @@ def _sim(df, scale, code="600000"):
 
 
 class TestMediumLargeBullFlags:
-    """中大阳线口径必须与 technical_monitor / b1_swing_strategy.md 一致：
+    """中大阳线口径必须与 technical_monitor / 01_swing_rules.md 一致：
     阳线 且（单日涨幅 或 实体幅度）≥ 半个涨停幅度。"""
 
     def test_threshold_is_half_price_limit(self):

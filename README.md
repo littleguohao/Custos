@@ -51,13 +51,13 @@ uv sync
 ```
 strategy_team/
 ├── 00_governance/          # 治理层，按**生命周期**分四类（2026-08-06 重构）
-│   ├── strategy/                    # 规则：改动要进 05_strategy_versions
-│   │   ├── README.md                    # **索引**（按「谁执行」分类：代码执行/人执行/认知框架/已废）
-│   │   ├── b1_swing_strategy.md         # B1 波段策略主文件
-│   │   ├── cz_strategy.md               # CZ 认知框架（18.1–18.22）
-│   │   ├── DECISION_PRIORITY_RULES.md
-│   │   ├── BUY_STRATEGY_INTEGRATION_RULES.md
-│   │   └── ...                          # 持仓检查手册/执行纪律/均线框架等
+│   ├── strategy/                    # 规则：**一个策略 = 一个上下文目录**（改动要进 05_strategy_versions）
+│   │   ├── README.md                    # **索引**（结构/命名规则/如何新增策略或因子）
+│   │   ├── STRATEGY_REGISTRY.json       # **注册表**：新增策略必须登记，测试强制
+│   │   ├── b1/                          # B1 波段策略（**主**）01 主规则→05 补坑，90 摘要，99 已废
+│   │   ├── cz/                          # CZ 认知框架（**辅**）+ CZ_SECTOR_PREFERENCE.json
+│   │   ├── _factors/                    # 跨策略可复用因子（`_` 前缀=非策略）
+│   │   └── _shared/                     # 跨策略规则（决策优先级）
 │   ├── data/                        # 数据层现状与接口能力（随数据源变动）
 │   │   ├── DATA_SOURCE_PRINCIPLE.md     # 三条原则 + 各源现状（含连接管理硬要求）
 │   │   ├── DATA_SOURCE_COVERAGE_MATRIX.md  # 九大类数据需求 × 可用性标记
@@ -189,7 +189,7 @@ uv run python 07_tools/run_1800.py
 
 ### B1 波段策略
 
-详见 `00_governance/strategy/b1_swing_strategy.md`。关键机制：
+详见 `00_governance/strategy/b1/01_swing_rules.md`。关键机制：
 
 - **BBI**：`(MA3 + MA6 + MA12 + MA24) / 4`，预警而非最终权威
 - **N 结构**：上升 N（L1→H1→更高 L2）/ 下降 N（H1→L1→更低 H2→收盘低于 L1）

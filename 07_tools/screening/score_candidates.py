@@ -701,7 +701,7 @@ def score_all(
 ) -> dict:
     """整池打分。输入缺失时干净降级，绝不 raise。
 
-    cz_preference 传 None 时从 00_governance/strategy/CZ_SECTOR_PREFERENCE.json 加载；
+    cz_preference 传 None 时从 00_governance/strategy/cz/CZ_SECTOR_PREFERENCE.json 加载；
     显式传 {} 表示"已加载但不可用"（测试降级路径用）。
     cap_rules / sector_score_max 传 None 时从 registry "scoring" 段加载，缺失回退
     默认（全开 + 0-100），行为与历史一致。

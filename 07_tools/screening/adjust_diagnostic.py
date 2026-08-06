@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """复权口径诊断：量化未复权数据对回测与选股的实际影响。
 
-背景（B1_STRATEGY_SUMMARY.md:31/40 记录、一直未解决）：
+背景（90_research_summary.md:31/40 记录、一直未解决）：
 
     链路                              数据源          复权
     live 选股（18:00）                vipdoc .day     未复权

@@ -194,12 +194,12 @@ class TestStrategyDocsFlagUnstableNumbers:
 
     ⚠️ 这是**跨目录**的约束：research/ 的结论被推翻时，strategy/ 里抄过去的数字
     不会自动更新。2026-08-06 实查发现两处：
-    `B1_STRATEGY_SUMMARY.md` 写「幸存者已部分去除(含退市 qlib)」（近期窗口其实没去除）、
-    `b1_swing_strategy.md` 写「含退市跨年 OOS」（对 2021-08 后的窗口不成立）。
+    `90_research_summary.md` 写「幸存者已部分去除(含退市 qlib)」（近期窗口其实没去除）、
+    `01_swing_rules.md` 写「含退市跨年 OOS」（对 2021-08 后的窗口不成立）。
     """
 
-    DOCS = ("00_governance/strategy/B1_STRATEGY_SUMMARY.md",
-            "00_governance/strategy/b1_swing_strategy.md")
+    DOCS = ("00_governance/strategy/b1/90_research_summary.md",
+            "00_governance/strategy/b1/01_swing_rules.md")
 
     @pytest.mark.parametrize("rel", DOCS)
     def test_points_to_rerun_list(self, rel):

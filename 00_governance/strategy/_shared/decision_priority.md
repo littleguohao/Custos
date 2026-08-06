@@ -1,8 +1,13 @@
 # 决策优先级规则
 
+> **上下文**：**跨策略规则**（不属于任何单一策略）　｜　**执行者**：**人** / 编排层　｜　**状态**：⚠️ 部分过时
+> **版本**：—（2026-07-09）　｜　**代码依赖**：无
+> **索引**：[`../README.md`](../README.md)　·　改动须记 [`strategy_version_log.md`](../../../05_strategy_versions/strategy_version_log.md)
+>
+> ⚠️ 写于 Agent 架构时代（「不同 Agent 结论冲突」等口径已不适用）。**优先级原则本身仍有效**，但以 [`../../contracts/MASTER_WORKFLOW.md`](../../contracts/MASTER_WORKFLOW.md) 与仓库 `README.md`「决策优先级」为准。
+
 > ⚠️ **部分过时**：本文档写于 Agent 架构时代（"不同 Agent 结论冲突"等口径）。优先级规则本身仍然有效，以 `MASTER_WORKFLOW.md` 和 README"决策优先级"小节为准。
 
-日期：2026-07-09
 
 ## 总原则
 

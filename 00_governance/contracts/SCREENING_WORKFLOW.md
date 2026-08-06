@@ -156,8 +156,8 @@ next_step：A→generate_buy_plan，B→observe_price，C→long_term_track，D�
 
 ## 策略对齐（B1/CZ）
 
-2026-07-21 起，enrich 段新增对齐 `00_governance/strategy/b1_swing_strategy.md`（B1）与
-`00_governance/strategy/cz_strategy.md`（CZ）的确定性检测器。全部只依赖本地 vipdoc
+2026-07-21 起，enrich 段新增对齐 `00_governance/strategy/b1/01_swing_rules.md`（B1）与
+`00_governance/strategy/cz/01_cognition_framework.md`（CZ）的确定性检测器。全部只依赖本地 vipdoc
 日线 OHLCV，不引入新数据源。**所有阈值集中在 `enrich_candidates.py` 顶部常量
 并标注"待回测参数"**：策略原文要求阈值可配置、实际值随候选落盘，完成样本
 回测前不得视为已校准。
@@ -201,7 +201,7 @@ next_step：A→generate_buy_plan，B→observe_price，C→long_term_track，D�
 与面积背离未确定性化，暂不实现。
 
 ### 板块白/黑名单（CZ §七）
-`00_governance/strategy/CZ_SECTOR_PREFERENCE.json`（cz-sector-v1）。作用于候选股经
+`00_governance/strategy/cz/CZ_SECTOR_PREFERENCE.json`（cz-sector-v1）。作用于候选股经
 `sector_code_map.json` 映射后的**主题名子串匹配**：命中 favored →
 cz_sector=favored，命中 avoid → cz_sector=avoid（avoid 优先，保守），否则
 neutral。**注意：现有 sector_code_map 覆盖粗糙，匹配不上即 neutral，宁缺

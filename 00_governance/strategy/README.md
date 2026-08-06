@@ -1,97 +1,108 @@
-# 策略规则索引
+# 策略层索引
 
 > `00_governance/strategy/` 存放**规则**：改动要进 `05_strategy_versions/strategy_version_log.md`。
-> 与邻居的分工——`research/` 是「测出来的结论」（会被推翻），
-> 本目录是「我们决定怎么做」（改了要记版本），`contracts/` 是「代码直接依赖的契约」。
->
-> **按「谁执行它」分类**，因为这决定了改动的代价：代码执行的改动要同步改代码并跑测试，
-> 人执行的改动只需人知道。2026-08-06 首次建立。
+> 与邻居的分工——`research/` 是「测出来的结论」（会被推翻），本目录是「我们决定怎么做」
+> （改了要记版本），`contracts/` 是「代码直接依赖的契约」。
 
-## 分类
+## 结构：一个策略 = 一个上下文目录
 
-### ① 规则 · 代码执行
+```
+strategy/
+├── STRATEGY_REGISTRY.json   # 机器可读注册表（新增策略必须登记）
+├── b1/                      # B1 波段策略  —— 主
+├── cz/                      # CZ 认知框架  —— 辅
+├── _factors/                # 跨策略可复用因子（非策略，故加 _ 前缀）
+└── _shared/                 # 跨策略规则（非策略）
+```
 
-代码按它计算。**改文档必须同步改代码**，否则文档就成了谎言。
+**`_` 前缀 = 非策略上下文。** 这样 `ls` 一眼能分出「哪些是策略」和「哪些是给策略用的」。
 
-| 文档 | 行 | 代码依赖 | 一致性 |
+| 上下文 | 角色 | 状态 | 入口 |
 |---|---|---|---|
-| [b1_swing_strategy.md](b1_swing_strategy.md) | 463 | `enrich_candidates.py` / `b1_holding_state.py` / `backtest_factors.py` | ✅ 反转K 已逐项核查（见下） |
+| **B1 波段策略** | 主 | ✅ 现行 | [`b1/README.md`](b1/README.md) |
+| **CZ 认知框架** | 辅 | ⚠️ 仅作输入 | [`cz/README.md`](cz/README.md) |
+| 通用因子 | — | ⚠️ 未接线 | [`_factors/README.md`](_factors/README.md) |
+| 跨策略规则 | — | ⚠️ 部分过时 | [`_shared/README.md`](_shared/README.md) |
 
-### ② 规则 · 人执行
+## 命名规则
 
-人或 LLM 按它做判断，**无代码实现**。风险是「写了但没人做」，且无从验证。
-
-| 文档 | 行 | 状态 |
+| 对象 | 规则 | 例 |
 |---|---|---|
-| [daily_holding_check_manual.md](daily_holding_check_manual.md) | 146 | ⚠️ §七 依赖一份零实现的文档（见问题 ①）|
-| [market_pullback_rotation_selection.md](market_pullback_rotation_selection.md) | 137 | 🔴 **零实现、零代码引用**，唯一引用者是上面那份手册 |
-| [pit_recovery_strategy.md](pit_recovery_strategy.md) | 120 | 人判断（坑位分类）|
-| [trading_execution_discipline.md](trading_execution_discipline.md) | 105 | ⚠️ **入口不可达**（见问题 ③）|
+| 策略上下文目录 | 无前缀、小写短名 | `b1/` `cz/` |
+| 非策略目录 | `_` 前缀 | `_factors/` `_shared/` |
+| 规则文档 | `NN_lower_snake.md`，NN 给**阅读顺序** | `01_swing_rules.md` |
+| 附录 / 摘要 | `90+` | `90_research_summary.md` |
+| 已废 | `99_deprecated_*` —— **废弃状态写在文件名里** | `99_deprecated_buy_integration.md` |
+| 代码消费的配置 | `UPPER_SNAKE.json`（与 `contracts/` 一致）| `CZ_SECTOR_PREFERENCE.json` |
 
-### ③ 认知框架 · 输入
+⇒ 策略名不再进文件名（目录已经是上下文），所以 `b1_swing_strategy.md` → `b1/01_swing_rules.md`。
 
-提供**判断依据**，不是可直接执行的规则。数字不应被当作我们的操作参数。
+## 每份文档的头部块
 
-| 文档 | 行 | 来源 | 代码用了多少 |
-|---|---|---|---|
-| [cz_strategy.md](cz_strategy.md) | 933 | 星球社区认知提炼 | 只有 §14.6 量能规则（`enrich_candidates.py:670`）|
-| [UNIVERSAL_TECHNICAL_TREND_FRAMEWORK.md](UNIVERSAL_TECHNICAL_TREND_FRAMEWORK.md) | 183 | — | ⚠️ **入口不可达**，0 术语在代码中出现 |
+三行固定顺序，可机器解析（由测试校验）：
 
-### ④ 摘要
+```markdown
+> **上下文**：… ｜ **执行者**：… ｜ **状态**：…
+> **版本**：… ｜ **代码依赖**：…
+> **索引**：… · 改动须记 strategy_version_log.md
+```
 
-| 文档 | 行 | 状态 |
-|---|---|---|
-| [B1_STRATEGY_SUMMARY.md](B1_STRATEGY_SUMMARY.md) | 50 | ⚠️ **量级数字待重跑**，见 [`../research/README.md`「重跑清单」](../research/README.md) |
+**「执行者」是最重要的一栏**，它决定改动代价：
 
-### ⑤ 已废 / 待重建
+| 执行者 | 改动代价 |
+|---|---|
+| **代码** | 改文档必须**同步改代码常量 + 跑测试**，否则文档变成谎言 |
+| **人 / LLM** | 只需人知道；但**无从验证是否真在执行** |
+| — | 摘要 / 已废，不是规则 |
 
-**保留而不删**：它们记录了「为什么当初这样设计」，删掉会让后来者重新踩坑。
-但必须写明**以什么为准**，否则会被当作现行规则读。
+## 如何新增一个策略或因子
 
-| 文档 | 行 | 以什么为准 |
-|---|---|---|
-| [BUY_STRATEGY_INTEGRATION_RULES.md](BUY_STRATEGY_INTEGRATION_RULES.md) | 130 | 相关代码已移除。选股流程重建时作参考；现行流程见 `../contracts/SCREENING_WORKFLOW.md` |
-| [DECISION_PRIORITY_RULES.md](DECISION_PRIORITY_RULES.md) | 141 | 写于 Agent 架构时代。优先级规则本身仍有效，以 `../contracts/MASTER_WORKFLOW.md` 与仓库 `README.md`「决策优先级」为准 |
+1. **判断它是策略还是因子**：有完整进出场规则 ⇒ 策略（建 `<id>/` 目录）；
+   只是一个判别维度 ⇒ 因子（放 `_factors/`，可被多个策略引用）。
+2. 建目录 + `README.md`（照 `b1/README.md` 的固定小节：定位 / 规则文件 / 代码依赖 /
+   与其他策略的关系 / 已知问题）。
+3. **在 `STRATEGY_REGISTRY.json` 登记** —— 不登记会被测试拦住。
+   `role` 填 `experimental` 的策略**不得进 live**。
+4. 文档按 `NN_lower_snake.md` 命名；代码消费的配置进 `paths.py` 加常量。
+5. 记一条版本日志。
 
 ## ⚠️ 三处待处理的问题
 
 ### ① 持仓手册 §七 依赖一份零实现的文档
 
-`daily_holding_check_manual.md:139` 写「大盘回调后，按 `market_pullback_rotation_selection.md`
-将持仓分为四类」。而那份文档要求的**主题切换 / 主题内分化 / 大小票切换 / 高低位切换**
-四项检查，**全仓零实现**（grep `主题切换|大小切换|高低切换` 在 `07_tools/` 无命中）。
+[`b1/02_holding_check.md`](b1/02_holding_check.md) §七 写「按 `04_pullback_rotation.md`
+将持仓分为四类」，而那份文档要求的**主题切换 / 主题内分化 / 大小票切换 / 高低位切换**
+四项检查，在 `07_tools/` 里 **grep 零命中**。
 
-⇒ 两种可能，都需要处理：
+⇒ 两种可能都要处理：**没在做**（空条款，该标出来）／**靠 LLM 在做**（违反核心原则：
+分析判断须用确定性脚本）。→ 待办 #26。
 
-- **没在做** ⇒ 手册第七节是空条款，该标出来；
-- **靠 LLM 在做** ⇒ 违反项目核心原则（「数据采集与分析判断用确定性脚本，
-  LLM 仅负责格式化和输出摘要」），该改成脚本或明确降级为「参考」。
-
-### ② 止损口径的**层级关系没有写下来**
+### ② 止损口径的层级关系没有写定
 
 | 出处 | 止损 |
 |---|---|
-| `b1_swing_strategy.md` / `B1_STRATEGY_SUMMARY.md` | **6~12%，甜蜜点 ~8%** |
-| `cz_strategy.md`「强制止损体系」 | 第一道防线 **15%**、最终防线 **20%**，措辞是「**无论谁推荐的个股都必须执行**」 |
+| [`b1/01_swing_rules.md`](b1/01_swing_rules.md) / [`b1/90_research_summary.md`](b1/90_research_summary.md) | **6~12%，甜蜜点 ~8%** |
+| [`cz/01_cognition_framework.md`](cz/01_cognition_framework.md)「强制止损体系」 | 第一道 **15%**、极限 **20%**，措辞「**无论谁推荐的个股都必须执行**」 |
 | [R10 实测](../research/R10_mechanism_M2_stops.md) | **5% 是崖不是坡**；**B1 的止损普遍太紧** |
 
-数值差 2~4 倍。**它们大概率不是冲突而是层级**——B1 的 8% 总是先于 CZ 的 15% 触发，
-所以可以读成「B1 执行止损 8%，CZ 绝对上限 20%」。**但没有任何文档写出这个层级**，
+数值差 2~4 倍。**大概率是层级而非冲突** —— B1 的 8% 总是先于 CZ 的 15% 触发，
+可读成「B1 执行止损 8%，CZ 绝对上限 20%」。但**没有任何文档写出这个层级**，
 而 CZ 那句措辞是普适的，人读到会以为 B1 仓位也按 20% 执行。
 
 ⚠️ 且这个关系正在变紧：R10 说 B1 止损太紧，若放宽到 12%+ 就逼近 CZ 的 15% 第一道防线。
-**需要 owner 拍板层级关系，我不擅自定。**
+**属策略决策，待 owner 拍板，不擅自定。**
 
-### ③ 两份文档入口不可达（288 行）
+### ③ 两份文档此前入口不可达（288 行）
 
-`UNIVERSAL_TECHNICAL_TREND_FRAMEWORK.md`（183）与 `trading_execution_discipline.md`（105）
-**代码没引用、其他治理文档没引用、仓库 README 与 contracts 也没点名**。
-
-⇒ 本索引即是它们的入口。若判定不再需要，走「已废」区块而不是删除。
+[`_factors/technical_trend.md`](_factors/technical_trend.md)（183）与
+[`b1/03_execution_discipline.md`](b1/03_execution_discipline.md)（105）
+在建索引前：代码没引用、其他治理文档没引用、仓库 README 与 `contracts/` 也没点名。
+本索引与注册表现在是它们的入口。若判定不再需要，改名为 `99_deprecated_*` 而不是删除。
 
 ## ✅ 已核查一致（2026-08-06，下次不必重查）
 
-`b1_swing_strategy.md` §三.3「分歧转一致反转K」的全部阈值与 `enrich_candidates.py` **逐项一致**：
+[`b1/01_swing_rules.md`](b1/01_swing_rules.md) §三.3「分歧转一致反转K」的全部阈值
+与 `enrich_candidates.py` **逐项一致**：
 
 | 文档 | 代码常量 | 值 |
 |---|---|---|
@@ -102,14 +113,16 @@
 | 振幅 ≤7% | `REVERSAL_AMPLITUDE_PCT` | 7.0 |
 | 振幅算法 `(高−低)/前收` | `amplitude_pct` 计算式 | 一致 |
 
-⚠️ 代码里还留着 `REVERSAL_CHANGE_PCT = 2.0`（旧对称阈值），**判定已不使用**，
-仅供口径对照；由 `tests/test_enrich_b1cz.py` 断言旧对称表达式不得重现。
-留着它有被误用的风险——若哪天确认无人对照，应删除。
+⚠️ 代码里还留着 `REVERSAL_CHANGE_PCT = 2.0`（旧对称阈值），**判定已不使用**，仅供口径对照；
+由 `tests/test_enrich_b1cz.py` 断言旧对称表达式不得重现。留着有被误用的风险（待办 #28）。
 
 ## 写入规范
 
-- 改①类文档 = 改代码 + 跑 `uv run pytest -q`；改②③类只需人知道。**两者都要记版本日志。**
+- 改「执行者=代码」的文档 = 改代码 + 跑 `uv run pytest -q`；改「执行者=人」只需人知道。
+  **两者都要记版本日志。**
 - 参数值只在**一处**定义：文档写值、代码写常量，且**必须一致**；
   发现不一致时**以代码为准**改文档（代码是实际在跑的），并记为一次口径修正。
-- 判定为废弃时移到⑤区块并写明「以什么为准」，**不要删除** —— 删掉会让后来者重踩。
-- 认知框架（③类）里的数字**不得直接当操作参数用**，要经过①类文档转译并回测。
+- 判定废弃时改名 `99_deprecated_*` 并在头部写明「以什么为准」，**不要删除** ——
+  删掉会让后来者重踩。
+- 认知框架（`role=secondary`、`status=advisory`）里的数字**不得直接当操作参数**，
+  须经主策略的规则文档转译并回测。

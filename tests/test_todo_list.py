@@ -74,3 +74,26 @@ def test_priority_is_by_blocking_not_effort():
     s = TODO.read_text(encoding="utf-8")
     assert "它阻塞了什么" in s
     assert "不按工作量" in s
+
+
+def test_no_strikethrough_entries():
+    """维护约定：**完成的项直接删**，不留 `~~删除线~~`。
+
+    2026-08-06 我自己先违反了一次（把已解决的 #27 标成删除线而不是删掉）。
+    留删除线的代价：清单越读越长，而「已完成」的信息本该归到对应单元或版本日志里，
+    留在待办里等于两处记同一件事、且会不同步。
+    """
+    s = TODO.read_text(encoding="utf-8")
+    # 只查表格行——「维护约定」正文里引用 `~~删除线~~` 这个写法本身是合法的
+    bad = [ln.strip()[:70] for ln in s.splitlines()
+           if "~~" in ln and ln.lstrip().startswith("|")]
+    assert not bad, f"待办里有删除线条目，应直接删除：{bad}"
+
+
+def test_item_numbers_are_unique():
+    """编号重复会让「待办 #26」这类跨文档引用指向两处。"""
+    import collections
+    s = TODO.read_text(encoding="utf-8")
+    nums = re.findall(r"^\| (\d+) \|", s, re.M)
+    dup = [n for n, c in collections.Counter(nums).items() if c > 1]
+    assert not dup, f"重复编号：{dup}"
