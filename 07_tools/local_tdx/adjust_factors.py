@@ -42,6 +42,7 @@ TOOLS_DIR = BASE / "07_tools"
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
+from code_utils import market_of                               # noqa: E402
 from paths import cn_now                                       # noqa: E402
 
 CACHE_DIR = BASE / "01_data" / "market" / "xdxr"
@@ -63,6 +64,16 @@ def _cache_path(code: str) -> pathlib.Path:
 
 
 def load_xdxr_cache(code: str) -> Optional[list[dict[str, Any]]]:
+    """读权息缓存。返回 None 表示「没有可信缓存，请去取」。
+
+    ⚠️ **缓存里必须记 `market`，缺 `market` 的空事件缓存一律作废。**
+    2026-08-06 之前的实现用 `q.xdxr()` 的内部推断，把 `920xxx` 判成沪市 ⇒
+    查到 0 条并**把这个空结果缓存了下来**。而缓存策略是「除权是历史事实，不会变」
+    ⇒ 永不过期 ⇒ 那些票会**永远**按未复权处理，且被标成已前复权。
+
+    只作废「缺 market **且** 事件为空」的条目：非空的老缓存是真查到的事件，
+    没必要丢；真的从未除权的票会在下次取数后补上 market 字段。
+    """
     p = _cache_path(code)
     if not p.exists():
         return None
@@ -72,7 +83,13 @@ def load_xdxr_cache(code: str) -> Optional[list[dict[str, Any]]]:
         print(f"[WARN] xdxr 缓存损坏 {p.name}: {e}", file=sys.stderr)
         return None
     ev = d.get("events")
-    return ev if isinstance(ev, list) else None
+    if not isinstance(ev, list):
+        return None
+    if not ev and d.get("market") is None:
+        print(f"[WARN] {code} 的空权息缓存缺 market 标记（可能是 920xxx 判错市场时写下的），"
+              f"作废并重取", file=sys.stderr)
+        return None
+    return ev
 
 
 def save_xdxr_cache(code: str, events: list[dict[str, Any]],
@@ -81,7 +98,12 @@ def save_xdxr_cache(code: str, events: list[dict[str, Any]],
     """一份缓存同时装权息事件与股本事件——两者来自同一次 xdxr 调用，分开存会多跑一次网络。"""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     p = _cache_path(code)
-    payload = {"code": str(code)[:6], "events": events,
+    c6 = str(code)[:6]
+    try:
+        mkt = _tdx_market(c6)
+    except AdjustError:
+        mkt = None
+    payload = {"code": c6, "events": events, "market": mkt,
                "fetched_at": fetched_at, "n": len(events)}
     if shares is not None:
         payload["shares"] = shares
@@ -97,17 +119,70 @@ def save_xdxr_cache(code: str, events: list[dict[str, Any]],
     tmp.replace(p)                                             # 原子替换
 
 
+def _tdx_market(code: str) -> int:
+    """6 位代码 → 通达信协议的 market 整数：0=深、1=沪、**2=北**。
+
+    ⚠️ **必须自己判，不能用 mootdx 的推断。** `mootdx.utils.get_stock_market` 的规则是
+    「'5'/'6'/'9' 开头为 sh，其余为 sz」，于是北交所的新代码段 `920xxx` 被判成**沪市**：
+
+        920808 → market=1 (sh)   ← 错
+        830799 → market=2 (bj)   ← 老 BJ 段判对了
+
+    而 `q.xdxr(symbol=...)` 内部就是用它推断 market 的 ⇒ 查的是 `SH:920808` 的权息，
+    服务器返回空。实测对照（2026-08-06）：
+
+        get_xdxr_info(1, "920808") → 0 条
+        get_xdxr_info(2, "920808") → **24 条** ✅
+
+    后果曾经是：`get_xdxr(BJ)` 返回 `[]` 而不报错 ⇒ `qfq_table` 走成功路径 ⇒
+    `apply_qfq` 盖章 `adjust="qfq"` 而价格一字未改 ⇒ **未复权数据被标成已前复权**，
+    BJ 约占 universe 4.8%，每轮全市场回测约 5% 样本带着除权假跳空在跑。
+
+    `code_utils.market_of` 是本仓库的市场判定唯一来源（含 `880` → SH 这类例外），
+    这里只做一次映射。
+    """
+    m = market_of(code)
+    if m == "BJ":
+        return 2
+    if m == "SH":
+        return 1
+    if m == "SZ":
+        return 0
+    raise AdjustError(f"无法判定 {code} 的交易所，拒绝用错市场查权息")
+
+
+def _to_records(df: Any) -> list[dict[str, Any]]:
+    """把 mootdx 的返回规整成 list[dict]，兼容 DataFrame 与原始 list。
+
+    ⚠️ 需要兼容两种形态：`q.xdxr()` 返回 DataFrame，而**直接调
+    `q.client.get_xdxr_info(market, code)` 返回 list[OrderedDict]**。
+    我们改走后者是为了自己指定 market——mootdx 的 `get_stock_market` 把 `920xxx`
+    判成沪市（见 `_tdx_market`）。原实现只做 `df.to_dict("records")`，
+    喂 list 会异常并 `return []` ⇒ 又是一次静默降级。
+    """
+    if df is None:
+        return []
+    if isinstance(df, list):
+        return [dict(r) for r in df if hasattr(r, "keys")]
+    try:
+        if len(df) == 0:
+            return []
+    except TypeError:
+        return []
+    try:
+        return df.to_dict("records")
+    except Exception:                                          # noqa: BLE001
+        return []
+
+
 def normalize_xdxr(df: Any) -> list[dict[str, Any]]:
-    """把 mootdx xdxr DataFrame 规整成 [{date, fenhong, songzhuangu, peigu, peigujia, suogu}]。
+    """把 mootdx xdxr 返回规整成 [{date, fenhong, songzhuangu, peigu, peigujia, suogu}]。
 
     只保留影响价格的 category，并丢弃字段全空的行——通达信数据里
     「股本变化」行的价格字段都是 NaN，混进来会把 ratio 算成 1 或 NaN。
     """
-    if df is None or len(df) == 0:
-        return []
-    try:
-        rows = df.to_dict("records")
-    except Exception:                                          # noqa: BLE001
+    rows = _to_records(df)
+    if not rows:
         return []
     out = []
     for r in rows:
@@ -160,10 +235,11 @@ def normalize_shares(df: Any) -> list[dict[str, Any]]:
     PIT 性质：股本是**当日事实**（某天就是那么多股），不存在财务数据那种
     「次年重算」的重述问题，所以按日期取「不晚于该日的最后一条」即可。
     """
-    if df is None or len(df) == 0:
+    rows = _to_records(df)
+    if not rows:
         return []
     try:
-        rows = df.to_dict("records")
+        pass
     except Exception:                                          # noqa: BLE001
         return []
     out = []
@@ -207,8 +283,10 @@ def get_shares_events(code: str, *, refresh: bool = False,
                 pass
     try:
         from mootdx.quotes import Quotes
+        c6 = str(code)[:6]
         q = Quotes.factory(market="std", timeout=timeout)
-        raw = q.xdxr(symbol=str(code)[:6])
+        # 显式传 market —— 见 _tdx_market（mootdx 把 920xxx 判成沪市 ⇒ 取到空）
+        raw = q.client.get_xdxr_info(_tdx_market(c6), c6)
     except Exception as e:                                     # noqa: BLE001
         raise AdjustError(f"xdxr({code}) 取数失败: {e}") from e
     ev, sh = normalize_xdxr(raw), normalize_shares(raw)
@@ -245,8 +323,10 @@ def fetch_xdxr(code: str, timeout: int = 10) -> list[dict[str, Any]]:
     """从通达信协议取权息数据（走 mootdx bestip）。失败 raise AdjustError。"""
     try:
         from mootdx.quotes import Quotes
+        c6 = str(code)[:6]
         q = Quotes.factory(market="std", timeout=timeout)
-        df = q.xdxr(symbol=str(code)[:6])
+        # 显式传 market —— 不走 q.xdxr() 的内部推断（它把 920xxx 判成沪市）
+        df = q.client.get_xdxr_info(_tdx_market(c6), c6)
     except Exception as e:                                     # noqa: BLE001
         raise AdjustError(f"xdxr({code}) 取数失败: {e}") from e
     return normalize_xdxr(df)
@@ -276,7 +356,7 @@ def fetch_xdxr_batch(codes: list[str], *, timeout: int = 10,
     for i, code in enumerate(codes, 1):
         c6 = str(code)[:6]
         try:
-            raw = q.xdxr(symbol=c6)
+            raw = q.client.get_xdxr_info(_tdx_market(c6), c6)
             ev = normalize_xdxr(raw)
             out[c6] = ev
             # 同一次调用顺手把股本事件也存下(替代东财市值接口,见 normalize_shares)
@@ -337,7 +417,8 @@ def get_xdxr(code: str, *, refresh: bool = False,
     try:
         from mootdx.quotes import Quotes
         q = Quotes.factory(market="std", timeout=timeout)
-        raw = q.xdxr(symbol=str(code)[:6])
+        # 显式传 market —— 不走 q.xdxr() 的内部推断（它把 920xxx 判成沪市 ⇒ 取到空）
+        raw = q.client.get_xdxr_info(_tdx_market(str(code)[:6]), str(code)[:6])
     except Exception as e:                                     # noqa: BLE001
         raise AdjustError(f"xdxr({code}) 取数失败: {e}") from e
     ev = normalize_xdxr(raw)
