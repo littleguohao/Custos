@@ -500,8 +500,36 @@ def get_stock_list_in_sector(sector: str, block_type: int = 0) -> list[str]:
     return []
 
 
-def get_stock_list(pool_type: str = "5") -> list[str]:
-    """Get stock list via mootdx online."""
+def _is_ashare_prefix(code6: str) -> bool:
+    """按 6 位代码前缀判定沪深 A 股个股（排除指数/ETF/债券）。
+
+    与 `_is_ashare_stock_file` 的沪深两段规则一致 —— 后者按 vipdoc 的市场目录判定，
+    这里只有代码没有目录，所以两套前缀合并判断。BJ 段（43/83/87/88/920）不在这里，
+    因为 `client.stocks()` 只返回沪深（TDX 服务器不给北交所）。
+    """
+    return code6.startswith(("600", "601", "603", "605", "688",      # 沪 A
+                             "000", "001", "002", "003", "300", "301"))  # 深 A
+
+
+def get_stock_list(pool_type: str = "5", ashare_only: bool = True) -> list[str]:
+    """在线全代码表（mootdx Quotes → `client.stocks()`，仅沪深）。
+
+    ⚠️ **默认过滤为 A 股个股**（2026-08-06 加）。原实现返回**全部** 51567 项——
+    含 `999999` 等指数、ETF、债券，而沪深 A 股个股只有约 5300 只。
+    两个生产调用方的处境完全不同：
+
+      · `formula_screen` 有下游过滤（`_A_SHARE_RE` + `exclude_bj`）⇒ 不受影响
+      · `backtest_factors:2285`（不传 `--universe-local` 时的 universe 源）
+        **没有任何过滤**，直接 `sample_codes(base, N, seed)`
+        ⇒ 抽样时约 **89% 的概率抽到非个股**
+
+    这个坑有案底：`1d0d7de` 的提交信息就是「universe 改用本地 vipdoc 枚举，
+    **修复回测 16.7% 覆盖率**」，`eab500a` 又专门修文档里漏传 `--universe-local`
+    的命令。在线路径至今仍是不传 `--universe-local` 时的默认，所以在这里设防。
+
+    过滤后与 `list_local_vipdoc_codes()` 口径可比（都是 A 股个股），差异只剩
+    「在线代码表 vs 本地实有文件」和「含不含 BJ」。传 `ashare_only=False` 取原始全表。
+    """
     client = _get_client()
     from mootdx.consts import MARKET_SH, MARKET_SZ
     result = []
@@ -512,7 +540,13 @@ def get_stock_list(pool_type: str = "5") -> list[str]:
                 result.extend(stocks["code"].tolist() if "code" in stocks.columns else [])
         except Exception as e:
             print(f"[WARN] get_stock_list market={mkt} failed: {e}", file=sys.stderr)
-    return result
+    if not ashare_only:
+        return result
+    kept = [c for c in result if _is_ashare_prefix(_strip_suffix(str(c)))]
+    if result:
+        print(f"[INFO] get_stock_list: {len(result)} 项 → A 股个股 {len(kept)} 只"
+              f"（滤掉 {len(result) - len(kept)} 项指数/ETF/债券）", file=sys.stderr)
+    return kept
 
 
 def get_stock_name_map(pool_type: str = "5") -> dict[str, str]:

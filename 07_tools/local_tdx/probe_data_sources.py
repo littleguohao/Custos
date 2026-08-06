@@ -326,9 +326,13 @@ def probe_eastmoney(repeat: int) -> list[Probe]:
     out: list[Probe] = []
     try:
         import fetch_pit_financials as P
+        # ⚠️ 必须用**生产默认** page_size：探针第一版传 page_size=5，于是接口自报
+        # pages=11520/5=2304、max_pages=40 翻不完 ⇒ 报成「接口失败」，实际是我传错参数。
+        # 探针的参数偏离生产就会量到假故障。
         out.append(Probe("eastmoney", "PIT 财务(RPT_LICO_FN_CPD)",
-                         "以**公告日**为可见日；本地 TDX 无此能力").run(
-            lambda: P.fetch_period("2025-12-31", page_size=5), 1))
+                         "以**公告日**为可见日；本地 TDX 无此能力。单期约 1.15 万行"
+                         "（≈5400 只 × 多种报表类型），page_size=500 ⇒ 约 24 页").run(
+            lambda: P.fetch_period("2025-12-31"), 1))
     except Exception as exc:                                   # noqa: BLE001
         p = Probe("eastmoney", "PIT 财务")
         p.error = f"{type(exc).__name__}: {exc}"
@@ -337,7 +341,7 @@ def probe_eastmoney(repeat: int) -> list[Probe]:
         import fetch_market_cap as M
         out.append(Probe("eastmoney", "真市值(RPT_VALUEANALYSIS_DET)",
                          "2018-01-02 起；替掉成交额代理").run(
-            lambda: M.fetch_trade_date("2025-12-31", page_size=50, max_pages=2), 1))
+            lambda: M.fetch_trade_date("2025-12-31"), 1))
     except Exception as exc:                                   # noqa: BLE001
         p = Probe("eastmoney", "真市值")
         p.error = f"{type(exc).__name__}: {exc}"
