@@ -155,7 +155,7 @@ if __name__ == "__main__":
 class TestUnsafeDownTypeGuard:
     """`download_file` 的危险 down_type 必须被**代码**挡住，不能只写在注释里。
 
-    背景：`TQ_INTERFACE_PROBE` 有一节「TQ 服务被打挂」的风险记录，`concept_tags.py`
+    背景：`TDX_LOCAL_INTERFACES.md` 有一节「TQ 服务可被打挂」的风险记录，`concept_tags.py`
     顶部也写着「只调用 down_type=4；禁止触碰 1/5/6」。但 `call()` 是泛型入口——
     任何人写一行 `call("download_file", {"down_type": 1})` 都不会被挡，而 TdxW 一挂，
     选股链与持仓行情一起没了。
@@ -218,7 +218,7 @@ class TestStockCodeFormatGuard:
 
     2026-08-06 探针实测踩到：探针传 `"600000"`，三个 stock_code 类方法全挂
     （ErrorId=2），而 `get_match_stkinfo`/`download_file`（不吃 stock_code）正常。
-    TQ_INTERFACE_PROBE 第 43 行本来就记着这件事，但**接口自己不设防**，
+    TDX_LOCAL_INTERFACES.md「stock_code 必须带市场后缀」本来就记着这件事，但**接口自己不设防**，
     谁忘了归一就得翻探测文档才知道原因。
 
     ⚠️ 刻意**不自动补后缀**：补错市场比报错更糟（`600000.SZ` 是另一只票或不存在）。

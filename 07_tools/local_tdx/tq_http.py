@@ -27,7 +27,7 @@ DEFAULT_TIMEOUT = 15
 
 # ⚠️ `download_file` 的危险 down_type —— **代码级拦截，不是文档约定**
 #
-# `TQ_INTERFACE_PROBE` 有一节「TQ 服务被打挂」的风险记录，`concept_tags.py` 顶部也写着
+# `TDX_LOCAL_INTERFACES.md` 有一节「TQ 服务可被打挂」的风险记录，`concept_tags.py` 顶部也写着
 # 「只调用 down_type=4（实测安全）；禁止触碰 1/5/6（可打挂 TQ 服务）」。
 # 但 `call()` 是泛型入口 —— 谁写一行 `call("download_file", {"down_type": 1})` 都不会被挡，
 # 而后果是 TdxW 服务挂掉、整条选股链和持仓行情一起没了。
@@ -40,7 +40,7 @@ SAFE_DOWN_TYPES = frozenset({4})        # 4 = miscinfo（概念/主题标签）�
 # TQ 要求 `stock_code` **带市场后缀**（`600000.SH`）。传裸 6 位会得到 `ErrorId=2
 # stock_code error` —— 这是 2026-08-06 探针实测踩到的：探针传 `"600000"`，三个
 # stock_code 类方法全挂，而 `get_match_stkinfo`/`download_file`（不吃 stock_code）正常。
-# TQ_INTERFACE_PROBE 第 43 行本来就记着「`601696`(纯代码) → ErrorId=2 stock_code error」。
+# TDX_LOCAL_INTERFACES.md「stock_code 必须带市场后缀」本来就记着「`601696`(纯代码) → ErrorId=2 stock_code error」。
 #
 # 生产代码都记得先过 `normalize_code()`，但**接口自己不设防** ⇒ 谁忘了就得到一个
 # 语义模糊的 ErrorId=2，得翻探测文档才知道原因。这里显式校验并直接说清要求。

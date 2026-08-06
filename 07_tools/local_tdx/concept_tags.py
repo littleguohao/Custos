@@ -4,7 +4,7 @@
 背景：sector_code_map v1 的 880 板块成员反查映射存在明显错配（一只股属于
 多个 880 板块，首个命中主题即中标）。miscinfo.json 直接给出每只股票的
 官方概念/主题标签（id=10001），是更准确的板块归属数据源
-（TQ_INTERFACE_PROBE_2026-07-20 ★3，评级高）。
+（TDX_LOCAL_INTERFACES.md「探过但没接」down_type=3，评级高）。
 
 用法：
     uv run python 07_tools/local_tdx/concept_tags.py --date YYYY-MM-DD

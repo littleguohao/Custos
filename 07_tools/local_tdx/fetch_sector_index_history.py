@@ -22,7 +22,7 @@ if str(Path(__file__).resolve().parent) not in sys.path:
 
 import tq_sector  # noqa: E402  复用其 TdxW 探测 + tqcenter 惰性导入
 
-# TQ 的周期串是 "1d"(探针 00_governance/data/TQ_INTERFACE_PROBE_2026-07-20.md:67:缺省或写错报
+# TQ 的周期串是 "1d"(探针 00_governance/data/TDX_LOCAL_INTERFACES.md「周期串是 1d」:缺省或写错报
 # ErrorId=5 periodstr error)。此前默认 "day" → 400+ 板块逐个报错、日复一日刷不到数据。
 # 保留候选串按序探测,避免不同 TQ 版本命名差异再把整条链打死。
 PERIOD_CANDIDATES = ("1d", "day", "1day", "1440m")
@@ -262,7 +262,7 @@ def main(argv=None) -> int:
         if not period:
             # 快速失败:周期串不被接受时不再逐个板块重试(此前 --period day 会刷 400 条 WARN 后超时)
             print(f"[ERR] 无可用周期串(试过 {', '.join(PERIOD_CANDIDATES)}):{note}", file=sys.stderr)
-            print("[ERR] TQ 周期串约定见 00_governance/data/TQ_INTERFACE_PROBE_2026-07-20.md(日线应为 1d)")
+            print("[ERR] TQ 周期串约定见 00_governance/data/TDX_LOCAL_INTERFACES.md「周期串是 1d，不是 day」")
             return 2
         print(f"[INFO] 使用周期 {period}{'(自动探测)' if not args.period else ''}"
               f"{'; 增量合并模式' if args.incremental else '; 全量重拉'}")

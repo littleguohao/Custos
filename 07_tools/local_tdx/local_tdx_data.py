@@ -272,12 +272,44 @@ def read_e_odata_daily(code: str) -> pd.DataFrame:
     return df[[c for c in cols if c in df.columns]].dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
 
 
+def _online_quotes_enabled() -> bool:
+    """在线 TDX 行情（`client.bars` / `client.quotes`）是否启用。
+
+    ⚠️ **默认关闭（owner 2026-08-06 拍板标记为不可用）。** 探针实测（`--repeat 3`）：
+
+        get_online_bars()    p50 12949ms  →  DataFrame 0行×0列
+        get_online_index()   p50  9992ms  →  DataFrame 0行×0列
+        get_snapshot()       p50    70ms  →  dict 0 键
+
+    三个都**不抛异常**，返回空值 ⇒ 调用方看不出「这只票没数据」与「在线源坏了」的区别。
+    而 `get_ohlcv_table` 在本地数据 stale 时会走这条兜底：**13 秒换一个空 DataFrame**。
+    14:45/17:00 采集 N 只持仓时就是 N×13 秒的纯等待。
+
+    只关 `bars`/`quotes` 两族，**不关 `client.stocks()`** —— 后者实测可用
+    （16640ms / 51567 项），`get_stock_list` / `get_stock_name_map` 照常工作。
+
+    要重新启用（比如换了网络环境、或验证服务端恢复）：设 `TDX_ONLINE_QUOTES=1`。
+    这条标记是「文档说不可用、代码却还在花 13 秒调它」的解 —— 本仓库反复吃过
+    「规范只写在文档里」的亏。
+    """
+    return os.environ.get("TDX_ONLINE_QUOTES", "").strip() in ("1", "true", "TRUE", "yes")
+
+
+_ONLINE_DISABLED_MSG = ("在线 TDX 行情已标记为不可用（实测 bars/index 约 10~13s 返回空）；"
+                        "设 TDX_ONLINE_QUOTES=1 可重新启用")
+
+
 def get_online_bars(code: str, frequency: int = 9, offset: int = 120, adjust: str = "") -> pd.DataFrame:
     """Fetch K-line from mootdx online server.
 
     frequency: 0=5m, 1=15m, 2=30m, 3=1h, 9=day, 5=week, 6=month
     adjust: "" = no adjust, "qfq" = front, "hfq" = back
+
+    ⚠️ 默认被 `_online_quotes_enabled()` 短路（返回空 DataFrame，**不再等 13 秒**）。
     """
+    if not _online_quotes_enabled():
+        print(f"[WARN] get_online_bars({code}) 跳过：{_ONLINE_DISABLED_MSG}", file=sys.stderr)
+        return pd.DataFrame()
     client = _get_client()
     raw = _strip_suffix(code)
     try:
@@ -298,6 +330,10 @@ def get_online_bars(code: str, frequency: int = 9, offset: int = 120, adjust: st
 
 
 def get_online_index(code: str, market: int = 1, frequency: int = 9, offset: int = 120) -> pd.DataFrame:
+    """⚠️ 默认被标记为不可用（实测 9992ms 返回空），见 `_online_quotes_enabled`。"""
+    if not _online_quotes_enabled():
+        print(f"[WARN] get_online_index({code}) 跳过：{_ONLINE_DISABLED_MSG}", file=sys.stderr)
+        return pd.DataFrame()
     """Fetch index K-line (including 880 series) from mootdx online server.
 
     market: 0=SZ, 1=SH (880 series use SH)
@@ -373,7 +409,13 @@ def _snapshot_fields(row: Any) -> dict[str, Any]:
 
 
 def get_snapshot(code: str) -> dict[str, Any]:
-    """Get real-time quote for a single stock. 无有效价时返回 {}（缺价 != 0 价）。"""
+    """Get real-time quote for a single stock. 无有效价时返回 {}（缺价 != 0 价）。
+
+    ⚠️ 默认被标记为不可用（实测返回 0 键），见 `_online_quotes_enabled`。
+    持仓行情的现役路径是 TQ 快照 → 域B(腾讯/新浪)，不经这里。
+    """
+    if not _online_quotes_enabled():
+        return {}
     client = _get_client()
     raw = _strip_suffix(code)
     try:
