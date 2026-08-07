@@ -1,9 +1,19 @@
 # -*- coding: utf-8 -*-
-"""Smoke tests for the five daily runners on non-trading days.
+"""五个 runner 在**非交易日**的冒烟：走到日历门就退出，无副作用。
 
-Runners exit right after the trading-calendar gate when the market is
-closed, so these tests are side-effect free. On trading days they are
-skipped to avoid triggering the real pipelines.
+⚠️ **这一层能测到的很有限，交易日一律 skip。** 2026-08-07 亲身验证了它的盲区：
+`run_1445` 从 2026-08-06 起 `main()` 一进第一个 stage 就
+`NameError: name 'TOOLS' is not defined`（那天的提交把 `TOOLS` 加进注释却没加进导入），
+**14:45 报告整整一天产不出来**，而这个文件的两条测试当天全部 skip、
+`test_run_1445.py` 又从不调 `main()`、`--help` 冒烟在 NameError 之前就 return 了。
+
+⇒ 编排逻辑（stage 顺序 / 失败传播 / 门控码）由
+   **`tests/test_pipeline_orchestration.py`** 负责 —— 它打桩 `_stage` 后真跑
+   `main()` 主体，不受日期影响、不 spawn 子进程。
+
+保留本文件的理由：它是唯一**真的以子进程启动 runner** 的测试，
+能抓到「模块导入期就炸」（语法错、import 循环、引导顺序错）这类
+打桩测试抓不到的问题。**但不要把它当编排测试用。**
 """
 import subprocess
 import sys

@@ -40,10 +40,14 @@ sys.path.insert(0, str(TOOLS))
 class Recorder:
     """替代 `_stage` / `run_stage`：记录调用顺序，按 `fail` 指定哪些 stage 失败。"""
 
-    def __init__(self, fail: set[str] | None = None, gate_code: int = 0):
+    def __init__(self, fail: set[str] | None = None, gate_code: int = 0,
+                 stdout: dict[str, str] | None = None):
         self.calls: list[tuple[str, list[str]]] = []
         self.fail = fail or set()
         self.gate_code = gate_code
+        # 按 stage 名注入 stdout —— `run_1800` 会读它判 degraded
+        # （**退出码 0 但 JSON 报 unavailable/partial 也算降级**）
+        self.stdout = stdout or {}
 
     def __call__(self, cmd, name, *a, **kw):
         self.calls.append((name, list(cmd)))
@@ -54,7 +58,10 @@ class Recorder:
             # 第一版用了 `code` 并让 ok=True ⇒ 三条门控测试全挂，
             # 而挂的原因是**桩不真**，不是被测代码有问题。
             return self._shape(name, self.gate_code == 0, self.gate_code)
-        return self._shape(name, ok, 0 if ok else 1)
+        r = self._shape(name, ok, 0 if ok else 1)
+        if name in self.stdout:
+            r["stdout"] = self.stdout[name]
+        return r
 
     @staticmethod
     def _shape(name, ok, rc):
@@ -226,7 +233,7 @@ class TestGateCodePropagation:
 # 所有 runner 都用模块级 `run_stage_quiet as _stage` ⇒ 单一接缝
 # ══════════════════════════════════════════════════════════════════════════
 
-def _run_runner(mod, monkeypatch, rec, tmp_path, argv=()):
+def _run_runner(mod, monkeypatch, rec, tmp_path, argv=(), seed=None):
     """跑 runner 的 main()，绕过日历门、隔离所有路径、注入 stage recorder。"""
     monkeypatch.setattr(mod, "_stage", rec)
     # 绕过日历门：让它当交易日（返回 exit_code=None 表示继续）
@@ -239,20 +246,31 @@ def _run_runner(mod, monkeypatch, rec, tmp_path, argv=()):
     gate = pipeline_kit.CalendarGate(
         cal={"is_trading_day": True, "date": "2026-08-07"}, exit_code=None)
     monkeypatch.setattr(mod, "calendar_gate", lambda *a, **kw: gate, raising=False)
-    for attr in [a for a in dir(mod) if a.isupper() and "DIR" in a] + ["BASE"]:
-        if hasattr(mod, attr) and isinstance(getattr(mod, attr), pathlib.Path):
+    # ⚠️ patch **全部大写的 Path 属性**，不能只挑名字带 DIR 的 ——
+    # `run_1700` 的复盘目录叫 `REV`，第一版按 "DIR" 过滤就漏了它，
+    # 测试于是往**真实** `04_reviews/daily/` 里写。
+    # 唯一例外是 `TOOLS`：它必须指向真实 07_tools，否则拼出的 stage 命令没意义
+    # （虽然 stage 被打桩不会真跑，但断言里要查命令内容）。
+    for attr in dir(mod):
+        if not attr.isupper() or attr in {"TOOLS", "PY"}:
+            continue
+        if isinstance(getattr(mod, attr, None), pathlib.Path):
             d = tmp_path / attr.lower()
             d.mkdir(parents=True, exist_ok=True)
             monkeypatch.setattr(mod, attr, d)
     monkeypatch.setattr(mod.os, "chdir", lambda *a: None, raising=False)
+    if seed is not None:
+        seed(mod)                     # 路径已 patch 完，此时铺前提文件
     monkeypatch.setattr(sys, "argv", ["x", *argv])
     try:
-        mod.main()
+        # ⚠️ runner 的 `main()` 是**返回**退出码（`return propagate_gate_code(r)`），
+        # 不是 raise SystemExit。第一版丢掉了返回值 ⇒ 门控码测试恒得 0。
+        rc = mod.main()
+        return rc if isinstance(rc, int) else 0
     except SystemExit as e:
         return e.code if isinstance(e.code, int) else 0
     except Exception as e:                    # 编排之外的失败（缺数据）不该淹没顺序断言
         return f"raised:{type(e).__name__}"
-    return 0
 
 
 class TestRun1700Order:
@@ -413,3 +431,298 @@ class TestRunnerNamesResolve:
                          - known)
         assert not missing, (f"{name}.main() 用到未定义的名字：{missing}\n"
                              "很可能是重构时改了注释没改导入（run_1445 的 TOOLS 就是这样）")
+
+
+class TestRun0905:
+    """⚠️ `run_0905` 原本**整个 `main()` 都没测**（覆盖率 51.8%，40 行未覆盖
+    就是 main 主体）—— 写编排测试时漏了它，2026-08-07 补上。
+
+    它是盘前报告链：日历门 → daily_pipeline(premarket) → 报告摘要。
+    """
+
+    def test_runs_daily_pipeline_premarket(self, monkeypatch, tmp_path):
+        import run_0905
+
+        rec = Recorder()
+        _run_runner(run_0905, monkeypatch, rec, tmp_path)
+        assert any("daily_pipeline" in n for n in rec.names), rec.names
+        cmd = next(c for n, c in rec.calls if "daily_pipeline" in n)
+        assert "premarket" in " ".join(cmd), "0905 必须跑 premarket session"
+
+    @pytest.mark.parametrize("code", [3, 4, 5])
+    def test_gate_code_propagates_through_0905(self, monkeypatch, tmp_path, code):
+        """⚠️ 门控码要**穿透 runner** —— cron 直接按码判定
+        （`propagate_gate_code` 只放行 3/4/5）。
+
+        `daily_pipeline` 失败时 run_0905 走 `propagate_gate_code(r)`，
+        所以这里让那个 stage 带上门控码。
+        """
+        import run_0905
+
+        # ⚠️ 不能在调 `_run_runner` **之前**打桩 `_stage` —— 它会被 harness 覆盖。
+        # 用一个「所有 stage 都带指定 returncode 失败」的 Recorder 子类。
+        class GateFail(Recorder):
+            def __call__(self, cmd, name, *a, **kw):
+                self.calls.append((name, list(cmd)))
+                return self._shape(name, False, code)
+
+        rc = _run_runner(run_0905, monkeypatch, GateFail(), tmp_path)
+        assert rc == code, f"门控码 {code} 应穿透 run_0905，实际 {rc}"
+
+    def test_missing_report_is_failed_not_completed(self, monkeypatch, tmp_path):
+        """⚠️ 报告文件没生成必须记 `failed` —— 不能因为 stage 退出码 0 就报 completed。
+
+        这正是「没抛异常 ≠ 产出了东西」在 runner 层的形态。
+        """
+        import run_0905
+
+        rec = Recorder()
+        _run_runner(run_0905, monkeypatch, rec, tmp_path)   # PLANS 是空的 tmp
+        logs = list((tmp_path / "log_dir").glob("*.json")) if (tmp_path / "log_dir").exists() else []
+        logs += [p for d in tmp_path.iterdir() if d.is_dir() for p in d.glob("*run_log*.json")]
+        assert logs, "应写出 run log"
+        import json
+        data = json.loads(logs[0].read_text(encoding="utf-8"))
+        assert data.get("status") == "failed", f"报告缺失时应为 failed，实际 {data.get('status')}"
+
+
+class TestRun1800Degradation:
+    """⚠️ 18:00 选股链的**降级判定**。原先只测了顺序，没测降级 ——
+    而降级判定里有一条很容易被忽略的语义。"""
+
+    def test_stage_ok_but_json_says_unavailable_counts_as_degraded(
+            self, monkeypatch, tmp_path):
+        """⚠️ **退出码 0 但 JSON 里 `status=unavailable/partial` 也算降级。**
+
+        这是「没抛异常 ≠ 拿到数据」在选股链的形态：公式初筛可能正常退出
+        却因为宇宙残缺只筛了子集。只看 `r["ok"]` 会把它当成功。
+        """
+        import run_1800
+
+        rec = Recorder(stdout={"screening_formula_screen":
+                               '{"status": "unavailable", "reason": "universe empty"}'})
+        _run_runner(run_1800, monkeypatch, rec, tmp_path)
+        logs = [p for d in tmp_path.rglob("*") if d.is_dir()
+                for p in d.glob("*run_log*.json")]
+        assert logs, "应写出 run log"
+        import json
+        data = json.loads(logs[0].read_text(encoding="utf-8"))
+        assert data.get("status") == "degraded", \
+            f"stage 报 unavailable 时整链应 degraded，实际 {data.get('status')}"
+
+    def test_stage_failure_counts_as_degraded(self, monkeypatch, tmp_path):
+        import json
+
+        import run_1800
+
+        rec = Recorder(fail={"screening_score_candidates"})
+        _run_runner(run_1800, monkeypatch, rec, tmp_path)
+        logs = [p for d in tmp_path.rglob("*") if d.is_dir()
+                for p in d.glob("*run_log*.json")]
+        data = json.loads(logs[0].read_text(encoding="utf-8"))
+        assert data.get("status") == "degraded"
+
+    def test_missing_candidate_table_recorded_not_crashed(self, monkeypatch, tmp_path):
+        """⚠️ 备选表没生成时记一条 not-ok 的 `candidate_digest` stage
+        并**继续**（不崩、不阻断）—— 18:00 是独立链，它挂了不该影响别的。"""
+        import json
+
+        import run_1800
+
+        rec = Recorder()
+        rc = _run_runner(run_1800, monkeypatch, rec, tmp_path)
+        assert rc in (0, 1), f"不该异常退出，实际 {rc}"
+        logs = [p for d in tmp_path.rglob("*") if d.is_dir()
+                for p in d.glob("*run_log*.json")]
+        data = json.loads(logs[0].read_text(encoding="utf-8"))
+        # ⚠️ run log 里的键是 `name` 不是 `stage`（`pipeline_kit.log_stage`）——
+        # 第一版按 `stage` 查，取到全 None，断言「应有该 stage」于是失败。
+        digest = [x for x in data.get("stages", []) if x.get("name") == "candidate_digest"]
+        assert digest, "应有 candidate_digest stage 记录"
+        assert digest[0].get("ok") is False
+        assert "备选表未生成" in (digest[0].get("note") or "")
+
+
+class TestRun1700HardFailures:
+    """⚠️ `run_1700` 的三处硬失败路径（原先全未覆盖）。
+
+    这三个 stage 失败时必须记 `status="failed"` —— 与「best-effort 采集失败
+    记 degraded」区分开。混淆的代价：盘后复盘没产出却报成功，第二天没人知道。
+    """
+
+    @pytest.mark.parametrize("stage", ["daily_pipeline", "final_close_review",
+                                       "final_review_validator"])
+    def test_hard_stage_failure_writes_failed(self, monkeypatch, tmp_path, stage):
+        import json
+
+        import run_1700
+
+        rec = Recorder(fail={stage})
+        _run_runner(run_1700, monkeypatch, rec, tmp_path)
+        logs = [p for d in tmp_path.rglob("*") if d.is_dir()
+                for p in d.glob("*run_log*.json")]
+        assert logs, f"{stage} 失败也要写 run log"
+        data = json.loads(logs[0].read_text(encoding="utf-8"))
+        assert data.get("status") == "failed", \
+            f"{stage} 是硬失败 stage，应记 failed，实际 {data.get('status')}"
+
+    def test_best_effort_failures_do_not_mark_failed(self, monkeypatch, tmp_path):
+        """采集类失败是 best-effort ⇒ 不得记 failed（否则每次网络抖动都像事故）。"""
+        import json
+
+        import run_1700
+
+        rec = Recorder(fail={"collect_fund_flow", "refresh_eod_klines",
+                             "collect_incremental_market"})
+
+        # ⚠️ 必须先把复盘产物造出来。stage 被打桩后不会真的产文件，而 run_1700
+        # 会检查 `{date}_final_review.md` 是否存在、不存在就（正确地）记 failed。
+        # 第一版没造 ⇒ 测试失败，但失败原因不是 best-effort 语义错，
+        # 而是**我没把前提铺好** —— 这种失败最容易被误读成「发现了 bug」。
+        def _seed(mod):
+            # ⚠️ 常量名是 `REVIEWS`（第一版猜成 `REV` ⇒ seed 写到不存在的属性上，
+            # 测试照样失败，而失败原因看着像「best-effort 语义错了」）。
+            # 教训与今天反复出现的一样：**别猜名字，去读**。
+            rev = getattr(mod, "REVIEWS", None)
+            assert isinstance(rev, pathlib.Path), "run_1700 的复盘目录常量改名了？"
+            rev.mkdir(parents=True, exist_ok=True)
+            (rev / "2026-08-07_final_review.md").write_text("# x", encoding="utf-8")
+
+        _run_runner(run_1700, monkeypatch, rec, tmp_path,
+                    argv=("--date", "2026-08-07"), seed=_seed)
+        logs = [p for d in tmp_path.rglob("*") if d.is_dir()
+                for p in d.glob("*run_log*.json")]
+        data = json.loads(logs[0].read_text(encoding="utf-8"))
+        assert data.get("status") != "failed", \
+            f"best-effort 采集失败不应记 failed，实际 {data.get('status')}"
+
+
+class TestManualInputs:
+    """`daily_pipeline` 的两个**人工输入**通道（原先几乎全未覆盖）。
+
+    ⚠️ 它们是唯一能把人写的值注入自动链的口子，所以两件事必须成立：
+    ① 人工来源要**留痕**（否则复盘时分不清哪个数是自动采的、哪个是人填的）
+    ② 上游文件缺失时**明确失败**，不得静默建一份只有人工值的文件
+       （那会让门控以为数据齐全）。
+    """
+
+    def test_manual_market_requires_existing_input(self, pipeline, tmp_path):
+        """⚠️ `market_timing_input.json` 不存在时必须 `ok=False` ——
+        不得凭人工参数**新建**一份：那份文件只有 amv 没有宽度/成交额，
+        而门控会按「文件存在」去读它。"""
+        r = pipeline.apply_manual_market("2026-08-07", "double_wide", None, 5.0)
+        assert r["ok"] is False and "missing" in r["message"]
+
+    def _seed_market(self, pipeline, tmp_path):
+        import json
+        p = pipeline.MARKET_DIR / "2026-08-07_market_timing_input.json"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"date": "2026-08-07", "amv_0": {}}), encoding="utf-8")
+        return p
+
+    def test_manual_amv_marks_source_and_confirmed(self, pipeline, tmp_path):
+        """⚠️ 人工填的 0AMV 会被置 `quality=confirmed` —— 这是**唯一**
+        不经数据自证就 confirmed 的路径（v0.22 规定 regime 切换须 confirmed）。
+        所以它**必须**同时写 `source=user_manual_input` 与 `as_of`，
+        否则复盘时无法区分「指南针同步来的真值」与「人填的」。
+        """
+        import json
+        p = self._seed_market(pipeline, tmp_path)
+        r = pipeline.apply_manual_market("2026-08-07", None, None, 5.0)
+        assert r["ok"] is True
+        d = json.loads(p.read_text(encoding="utf-8"))
+        amv = d["amv_0"]
+        assert amv["quality"] == "confirmed"
+        assert amv["source"] == "user_manual_input", "人工来源必须留痕"
+        assert amv["as_of"] == "2026-08-07"
+
+    @pytest.mark.parametrize("pct,zone", [(5.0, "做多"), (-3.0, "空头"), (1.0, "中性")])
+    def test_manual_amv_zone_derived_from_pct(self, pipeline, tmp_path, pct, zone):
+        """未显式给 zone 时按阈值派生：>4 做多 / <-2.3 空头 / 其余中性。
+        这三个阈值与 `amv_state` 的 regime 切换线是同一套。"""
+        import json
+        p = self._seed_market(pipeline, tmp_path)
+        pipeline.apply_manual_market("2026-08-07", None, None, pct)
+        assert json.loads(p.read_text(encoding="utf-8"))["amv_0"]["amv_zone"] == zone
+
+    def test_explicit_zone_wins_over_derived(self, pipeline, tmp_path):
+        import json
+        p = self._seed_market(pipeline, tmp_path)
+        pipeline.apply_manual_market("2026-08-07", None, "空头", 5.0)
+        assert json.loads(p.read_text(encoding="utf-8"))["amv_0"]["amv_zone"] == "空头"
+
+    def test_manual_args_recorded_in_data_quality(self, pipeline, tmp_path):
+        """⚠️ 人工参数要进 `data_quality.notes` —— 报告的数据质量段据此提示读者。"""
+        import json
+        p = self._seed_market(pipeline, tmp_path)
+        pipeline.apply_manual_market("2026-08-07", "double_wide", None, 5.0)
+        dq = json.loads(p.read_text(encoding="utf-8"))["data_quality"]
+        assert "daily_pipeline_manual_args" in dq["sources"]
+        assert any("macro=double_wide" in n for n in dq["notes"])
+
+    def test_double_wide_writes_all_four_policy_fields(self, pipeline, tmp_path):
+        import json
+        p = self._seed_market(pipeline, tmp_path)
+        pipeline.apply_manual_market("2026-08-07", "double_wide", None, None)
+        mp = json.loads(p.read_text(encoding="utf-8"))["macro_policy"]
+        for k in ("monetary_policy", "fiscal_policy", "credit_environment",
+                  "regulation_environment"):
+            assert mp.get(k), k
+        assert "人工输入" in mp["policy_summary"], "必须自称人工输入"
+
+    def test_position_updates_absent_is_not_an_error(self, pipeline, tmp_path):
+        """没有人工持仓更新文件是**常态**（多数日子没有），不得记失败。"""
+        r = pipeline.apply_manual_position_updates("2026-08-07")
+        assert r.get("ok") is not False or r.get("skipped"), r
+
+    def test_manual_clearance_removes_and_archives(self, pipeline, tmp_path):
+        """⚠️ 人工标「已清仓」要从技术面表里**移除**，并把被移除的行**归档**。
+
+        为什么必须归档而不是直接删：那些行是当日复盘的证据
+        （比如它今天为什么被清）。直接删掉之后，复盘只能看到「这票不在持仓里」，
+        说不出它是清了还是从来没有过。
+        """
+        import json
+        hd = pipeline.HOLD_DIR
+        hd.mkdir(parents=True, exist_ok=True)
+        (hd / "2026-08-07_manual_position_updates.json").write_text(
+            json.dumps({"updates": [{"code": "600000", "action": "已清仓"}]}),
+            encoding="utf-8")
+        tech = hd / "2026-08-07_holding_technical_summary.json"
+        tech.write_text(json.dumps([{"code": "600000", "name": "甲"},
+                                    {"code": "600001", "name": "乙"}]), encoding="utf-8")
+
+        r = pipeline.apply_manual_position_updates("2026-08-07")
+        assert r["ok"] is True and r["changed"], r
+
+        left = json.loads(tech.read_text(encoding="utf-8"))
+        assert [x["code"] for x in left] == ["600001"], "已清仓的票要移除"
+
+        archives = list(hd.glob("*_removed_by_pipeline_*.json"))
+        assert archives, "被移除的行必须归档，否则复盘说不出它是清了还是从没有过"
+        archived = json.loads(archives[0].read_text(encoding="utf-8"))
+        assert [x["code"] for x in archived] == ["600000"]
+
+    def test_manual_clearance_without_target_files_is_noop(self, pipeline, tmp_path):
+        """有更新文件但没有技术面表时不得崩 —— 顺序上它可能先于 batch_holding_technical。"""
+        import json
+        hd = pipeline.HOLD_DIR
+        hd.mkdir(parents=True, exist_ok=True)
+        (hd / "2026-08-07_manual_position_updates.json").write_text(
+            json.dumps({"updates": [{"code": "600000", "action": "已清仓"}]}),
+            encoding="utf-8")
+        r = pipeline.apply_manual_position_updates("2026-08-07")
+        assert r["ok"] is True and r["changed"] == []
+
+    def test_non_clearance_actions_ignored(self, pipeline, tmp_path):
+        """只有 `action == "已清仓"` 触发移除 —— 「减仓」等不得让整行消失。"""
+        import json
+        hd = pipeline.HOLD_DIR
+        hd.mkdir(parents=True, exist_ok=True)
+        (hd / "2026-08-07_manual_position_updates.json").write_text(
+            json.dumps({"updates": [{"code": "600000", "action": "减仓"}]}),
+            encoding="utf-8")
+        tech = hd / "2026-08-07_holding_technical_summary.json"
+        tech.write_text(json.dumps([{"code": "600000"}]), encoding="utf-8")
+        pipeline.apply_manual_position_updates("2026-08-07")
+        assert len(json.loads(tech.read_text(encoding="utf-8"))) == 1
