@@ -57,7 +57,7 @@ uv sync
 ├── 01_data/           运行时数据（gitignore，只保留 .md 模板）
 ├── 03_daily_plans/    盘前日报、14:45 报告（gitignore）
 ├── 04_reviews/        盘后复盘
-├── 05_strategy_versions/  版本记录 + TODO.md（待办集中在这里）
+├── 05_strategy_versions/  版本记录 + TODO.md（待办）+ trade_lessons.md（实盘复盘→反思→进化）
 ├── 06_logs/           运行日志（gitignore）
 ├── 07_tools/          全部脚本（分层见下）
 └── tests/             pytest（3400+ 用例，`uv run pytest -q`）
