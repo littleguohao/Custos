@@ -1,14 +1,26 @@
 # -*- coding: utf-8 -*-
-# Standardize trade records from a user-provided xlsx into the project trades db.
-#
-# Usage:
-#   uv run python standardize_trades.py --src <path-to-xlsx>
-#   uv run python standardize_trades.py --src "C:/Users/gh/Downloads/交易记录2.xlsx"
-#
-# If --src is omitted, falls back to the latest xlsx in --src-dir (default ~/Downloads).
-# The xlsx must contain three sheets: 持仓数据, 已清仓, 交易记录.
-#
-# Outputs (project single source of truth):
+"""Excel 全量导入 —— **历史迁移 / 灾备路径**，日常不用。
+
+日常导入走 `incremental_ledger.py`（append-only + 指纹多重集去重 + 两阶段落盘）。
+本脚本是 `MASTER_WORKFLOW §十二` 第 1 条里「Excel 全量导入模式**降级为历史迁移/灾备**」
+的那条路径：整份 xlsx 覆盖式重建，用于首次导入或台账损坏后重建。
+
+⚠️ **它会覆盖 `current_positions.json` / `closed_positions.json`**，
+而 `incremental_ledger` 是增量更新同一份文件 ⇒ **两者不能混用**：
+跑完本脚本后，`master_trade_ledger.csv` 与持仓快照可能不一致，
+须用 `reconcile_positions.py` 对账（见 `contracts/INCREMENTAL_TRADE_LEDGER.md`）。
+
+用法::
+
+    uv run python 07_tools/trades/standardize_trades.py --src <path-to-xlsx>
+
+xlsx 必须含三个 sheet：`持仓数据` / `已清仓` / `交易记录`。
+
+⚠️ `--src` 是**必填**。此前头部注释写「omitted 时 fallback 到 Downloads 里最新的 xlsx」，
+但 argparse 是 `required=True` ⇒ fallback 分支**永不可达**（`find_latest_xlsx` 是死代码）。
+灾备脚本不该猜输入文件 —— 猜错会用错误的 xlsx 覆盖持仓快照。故保持必填，删掉死分支。
+"""
+# 输出（项目单一事实源）：
 #   01_data/trades/trades_all.csv         — 全量流水 (cleaned)
 #   01_data/trades/trades_stock.json      — 股票买卖明细
 #   01_data/trades/closed_positions.json  — 已清仓汇总
@@ -36,19 +48,7 @@ from paths import BASE, cn_now  # noqa: E402
 from code_utils import clean_code  # noqa: E402
 
 OUT_DIR = BASE / "01_data" / "trades"
-DEFAULT_SRC_DIR = Path.home() / "Downloads"
 
-
-def find_latest_xlsx(src_dir: Path) -> Path | None:
-    """Fallback: pick the most recent xlsx in Downloads that contains 交易."""
-    candidates = []
-    for p in src_dir.glob("*.xlsx"):
-        if not p.name.startswith("~$"):
-            candidates.append(p)
-    if not candidates:
-        return None
-    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-    return candidates[0]
 
 
 def main() -> None:

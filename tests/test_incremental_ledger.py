@@ -128,3 +128,49 @@ class TestApplyPositions:
                                           "交易类别": "银行转证券", "成交数量": 0,
                                           "成交价格": 0}]))
         assert self._read() == {}
+
+
+class TestXlsxInputPath:
+    """`.xlsx` 输入分支 —— **日常导入路径**（券商导出就是 xlsx）。
+
+    ⚠️ 2026-08-07 覆盖率清点查出：`openpyxl` **根本不在项目依赖里**，
+    而四处代码需要它（本模块的 `.xlsx` 分支、`standardize_trades` 的三处
+    `read_excel`、`holding_sector_mapper`、`analyze_trades` 写 xlsx）。
+    也就是说**给一份 xlsx 就会 ImportError** —— 而这正是券商导出的格式。
+
+    没人发现是因为这些分支覆盖率是 0%（`standardize_trades`）或只测过 csv/json 分支。
+    ⇒ 本测试同时是**依赖守卫**：openpyxl 若再被移除，这里会立刻红。
+    """
+
+    COLS = ["成交日期", "成交时间", "代码", "名称", "交易类别",
+            "成交数量", "成交价格", "成交金额", "发生金额", "费用", "备注"]
+
+    def _xlsx(self, tmp_path, rows):
+        import pandas as pd
+        p = tmp_path / "broker.xlsx"
+        pd.DataFrame(rows, columns=self.COLS).to_excel(p, index=False)
+        return p
+
+    def test_reads_xlsx(self, tmp_path):
+        import incremental_ledger as il
+        p = self._xlsx(tmp_path, [
+            ["2026-08-03", "09:31:00", "600000", "浦发", "买入", 1000, 10.0, 10000, -10005, 5.0, ""]])
+        df = il.read_input(p)
+        assert len(df) == 1 and str(df["代码"].iloc[0]) == "600000"
+
+    def test_xls_suffix_also_accepted(self, tmp_path):
+        """`.xls` 也在白名单里；至少不能因为后缀被拒（老券商导出仍有 .xls）。"""
+        import incremental_ledger as il
+        import inspect
+        src = inspect.getsource(il.read_input)
+        assert "'.xls'" in src or '".xls"' in src
+
+    def test_unknown_suffix_rejected_loudly(self, tmp_path):
+        """未知后缀必须**明确报错**，不能静默返回空表 ——
+        空表会让 select_new_rows 选出 0 行、审计写 appended_rows=0，
+        看起来像「本来就没有新成交」。"""
+        import incremental_ledger as il
+        p = tmp_path / "x.txt"
+        p.write_text("noop", encoding="utf-8")
+        with pytest.raises(ValueError):
+            il.read_input(p)

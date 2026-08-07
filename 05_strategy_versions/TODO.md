@@ -118,6 +118,24 @@
 | 38 | **1800 评分系统待完善**（owner 2026-08-06 记）：`score_candidates` 的技术分/共振分/分层阈值整体还要打磨。与 #37（s_shape 是主路径但 R2 说无 alpha）同一片区域，宜一起做 | 后续迭代 |
 | 39 | **反转K 涨跌幅区间做验证**：已做成可配置（`B1_REVK_CHG_PCT` / `B1_REVK_CHG_MIN` / `B1_REVK_CHG_MAX`，默认对称 ±2%）。待跑不同区间的效果对比（±1.5 / ±2 / ±2.5 / 不对称 −2~+1.8），用同一批样本 + 已实现口径。⚠️ 覆盖值同时影响 live 与回测（两边读同一处，有意如此）| 待跑 |
 
+## P8 · 测试覆盖率（2026-08-07 首次量化）
+
+总覆盖率 **70.3%**（19587 语句，5784 未覆盖）。按风险分层的未覆盖语句：
+
+    🔴 live/资金   ~540   🟠 live 链   ~860   ⚪ 研究  ~1297   🟡 其他  ~3087
+
+⚠️ **补测试前先问「这段代码该不该存在」** —— 首轮清点就删掉一个 0% 的死文件
+（`sync_trades.py`：零调用 + 依赖的 config 不存在 + 3 个真 bug），
+给该删的代码写测试是浪费。
+
+| # | 事项 | 当前 |
+|---|---|---|
+| 40 | `daily_pipeline.py` 23%（132 未覆盖）—— 编排核心。主要是 subprocess 串联，测试成本高；关键分支（门控码穿透、stage 失败）已由 `pipeline_kit` 覆盖，剩下的是 stage 清单本身 | 待评估 ROI |
+| 41 | `run_1800.py` 21% / `run_1445.py` 22% / `run_0905.py` 52% —— runner 主流程。同上，stage 编排为主 | 待评估 ROI |
+| 42 | `market_timing/theme_tracker_report.py` 0%（225）、`holding_sector_mapper.py` 0%（130）、`portfolio_review_report.py` 0%（48）、`wechat_summary.py` 0%（23）—— **报告生成层整片零覆盖**。先判定哪些还在跑（`daily_pipeline` 的 stage 列表里有它们）| 待补 |
+| 43 | `close_review/` 多个文件低覆盖：`final_close_review.py` 19%（164）、`execution_review.py` 0%（63）、`review_core.py` 51%（134）、`review_enrichment.py` 32% | 下一批 review 时一起 |
+| 44 | 研究脚本低覆盖（`adjust_diagnostic` 21% / `analyze_winner_features` 17% / `compare_signal_sets` 0% / `scan_signal_backtest` 0% / `m2_migrate_fingerprint` 0%）—— 风险最低，但先判定哪些已被取代可删 | 先判存废 |
+
 ## 需要 owner 拍板
 
 | # | 事项 | 出处 |
