@@ -62,8 +62,9 @@ def test_separated_from_version_log():
     不放研究结论/基建重构/待办。
     """
     log = ROOT / "05_strategy_versions" / "strategy_version_log.md"
-    if not log.exists():
-        pytest.skip("版本日志不存在")
+    # ⚠️ 不 skip：`strategy_version_log.md` 是**入库文件**，缺失说明仓库出了问题，
+    #    而 skip 会让这条测试静默通过。2026-08-07 清理 tests/ 时改为硬失败。
+    assert log.exists(), f"版本日志缺失（入库文件）：{log}"
     s = log.read_text(encoding="utf-8")
     for kw in ("## P0 · 阻塞项", "已失效的行动项"):
         assert kw not in s, f"版本日志里出现了待办内容：{kw}"

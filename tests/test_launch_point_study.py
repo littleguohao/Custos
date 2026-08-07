@@ -485,8 +485,10 @@ def test_build_sector_features_and_firings_integration(tmp_path):
 
 def test_kdj_j_at_and_launch_stats():
     # 起涨点 J 被记录:深跌后反转的赢家,起涨点在底部,J 应深度超卖
-    if getattr(lp.bt, "_kdj", None) is None:
-        pytest.skip("kdj 不可用")
+    # ⚠️ 不 skip：`bt._kdj` 消失就是回归（2026-08-07 拆 indicators 时它差点被移走），
+    #    而 skip 会让这条测试静默通过、J 统计从此不再被验证。
+    assert getattr(lp.bt, "_kdj", None) is not None, \
+        "backtest_factors._kdj 不见了 —— 若已迁到 indicators.j_series，请改这里而不是让测试 skip"
     dates = pd.date_range("2025-01-01", periods=60, freq="B")
     close = [20 - 0.3 * i for i in range(20)] + [14 + 0.6 * i for i in range(40)]
     df = pd.DataFrame({"date": dates, "open": close, "high": [c * 1.01 for c in close],
