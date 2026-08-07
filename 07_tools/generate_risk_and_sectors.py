@@ -88,6 +88,14 @@ def build_sector_state(date: str) -> list[dict]:
 
 def build_risk_decision(date: str) -> dict:
     holding_reviews = load(DATA / "holdings" / f"{date}_holding_review.json", [])
+    # ⚠️ **证据日 ≠ 运行日。** 09:05 盘前也会跑这条链（`daily_pipeline` 里
+    # `generate_risk_and_sectors` 不受 session_type 限制），那时当日 K 线还不存在，
+    # 所以盘前产出的 risk_decision 打着当日日期、依据却是**前一交易日收盘**。
+    # 不把这件事写进产物，14:45 报告只能按文件名判「当日」，读者会以为
+    # 风控依据是今天的 —— 同「把缺数渲染成读数」那一类失真。
+    _tech = load(DATA / "holdings" / f"{date}_holding_technical_summary.json", [])
+    _tech_dates = sorted({str(x.get("latest_date")) for x in _tech if x.get("latest_date")})
+    evidence_date = _tech_dates[-1] if _tech_dates else ""
     risks = []
     for h in holding_reviews:
         action = h.get("action")
@@ -130,7 +138,7 @@ def build_risk_decision(date: str) -> dict:
     else:
         regime_directive = {"reduce_top_priority": False}
 
-    return {"date": date, "market_regime": market_regime, "regime_directive": regime_directive, "risk_level": level, "forbidden_actions": forbidden, "stock_risks": ordered}
+    return {"date": date, "evidence_date": evidence_date, "market_regime": market_regime, "regime_directive": regime_directive, "risk_level": level, "forbidden_actions": forbidden, "stock_risks": ordered}
 
 
 def main():

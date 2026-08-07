@@ -159,6 +159,10 @@ SPECS: dict[str, dict] = {
         "kind": "object",
         "fields": {
             "date": {"type": str, "required": True, "non_empty": True},
+            # ⚠️ **证据日 ≠ 运行日**：09:05 盘前也产 risk_decision，那时当日 K 线
+            # 不存在 ⇒ 依据是前一交易日收盘。缺这个字段的话，下游只能按文件名
+            # 判「当日」，把 T-1 的风控依据显示成今天的。允许空串（技术面全缺时）。
+            "evidence_date": {"type": str, "required": True},
             "market_regime": {"type": str, "required": True, "choices": REGIMES},
             "regime_directive": {"type": dict, "required": True, "fields": {
                 "reduce_top_priority": {"type": bool, "required": True},

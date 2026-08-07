@@ -318,9 +318,25 @@ def main() -> None:
     tech = technical_map(target_date)
     risks = risk_map(target_date)
     _risk_path, risk_src_date = risk_source_date(target_date)
-    risk_date_note = ("缺失（无 risk_decision，按无风控依据处理）" if not risk_src_date else
-                      f"**{risk_src_date}**（当日）" if risk_src_date == target_date else
-                      f"**{risk_src_date}**（⚠️非当日，当日 risk_decision 缺失，已回退最近一份，不得据此放宽任何权限）")
+    # ⚠️ 同时看**文件日**与**证据日**。2026-08-07 修：此前只按文件日判，
+    # 于是 09:05 盘前产出的 risk_decision（文件日=当日、依据=前一交易日收盘）
+    # 在 14:45 报告里被标成「当日」—— 读者会以为风控依据是今天的。
+    # `evidence_date` 由 `generate_risk_and_sectors` 从技术面 `latest_date` 取得。
+    _risk_obj = load(_risk_path, {}) if _risk_path else {}
+    _evidence = str(_risk_obj.get("evidence_date") or "")
+    if not risk_src_date:
+        risk_date_note = "缺失（无 risk_decision，按无风控依据处理）"
+    elif risk_src_date != target_date:
+        risk_date_note = (f"**{risk_src_date}**（⚠️非当日，当日 risk_decision 缺失，"
+                          f"已回退最近一份，不得据此放宽任何权限）")
+    elif _evidence and _evidence != target_date:
+        risk_date_note = (f"**{risk_src_date}**（文件为当日，但**证据日是 {_evidence}** —— "
+                          f"盘前生成、依据前一交易日收盘；盘中动作以 14:45 实时行情"
+                          f"重算的 B1 为准，见 05_strategy_versions/TODO.md #50）")
+    elif not _evidence:
+        risk_date_note = f"**{risk_src_date}**（当日；证据日未标注，无法确认依据新鲜度）"
+    else:
+        risk_date_note = f"**{risk_src_date}**（当日，证据日同为当日）"
     quotes, quote_snapshot = quote_map(target_date)
     gate = load(QUALITY / f"{target_date}_runtime_gate.json", {})
     input_errors = validate_quote_snapshot(target_date, positions, quote_snapshot)

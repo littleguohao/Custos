@@ -32,7 +32,9 @@ VALID_GATE = {
     "generated_at": "2026-08-07T17:00:00+08:00",
 }
 VALID_RISK = {
-    "date": "2026-08-07", "market_regime": "空头",
+    # ⚠️ `evidence_date` 是 2026-08-07 新增：09:05 盘前也产 risk_decision，
+    # 那时当日 K 线不存在 ⇒ 依据是前一交易日收盘。缺它下游只能按文件名判「当日」。
+    "date": "2026-08-07", "evidence_date": "2026-08-06", "market_regime": "空头",
     "regime_directive": {"reduce_top_priority": True},
     "risk_level": "强风控", "forbidden_actions": ["止损"],
     "stock_risks": [{"code": "600000", "risk_type": "亏损扩大", "action": "止损",
@@ -207,3 +209,27 @@ class TestRequireVsCheck:
     def test_check_never_raises(self):
         for bad in [None, [], "x", 0, {"a": float("nan")}]:
             C.check("runtime_gate", bad)   # 不得抛异常
+
+
+class TestEvidenceDate:
+    """⚠️ `risk_decision.evidence_date` —— **证据日 ≠ 运行日**。
+
+    09:05 盘前也会跑 `generate_risk_and_sectors`（`daily_pipeline` 里它不受
+    session_type 限制），那时当日 K 线还不存在，所以盘前产出的 risk_decision
+    打着当日日期、依据却是**前一交易日收盘**。
+
+    不把这件事写进产物，14:45 报告只能按文件名判「当日」，
+    读者会以为风控依据是今天的 —— 同「把缺数渲染成读数」那一类失真。
+    """
+
+    def test_required(self):
+        obj = {k: v for k, v in VALID_RISK.items() if k != "evidence_date"}
+        r = C.check("risk_decision", obj)
+        assert not r["valid"] and any("evidence_date" in e for e in r["errors"])
+
+    def test_empty_allowed(self):
+        """技术面全缺时取不到证据日 —— 允许空串（比编一个日期好）。"""
+        assert C.check("risk_decision", {**VALID_RISK, "evidence_date": ""})["valid"]
+
+    def test_null_rejected(self):
+        assert not C.check("risk_decision", {**VALID_RISK, "evidence_date": None})["valid"]
