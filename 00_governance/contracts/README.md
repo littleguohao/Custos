@@ -34,6 +34,7 @@
 | 文件 | 行 | 状态 |
 |---|---|---|
 | [MASTER_WORKFLOW.md](MASTER_WORKFLOW.md) | ~370 | ⚠️ 含 1 个未实现的报告（月度复盘）|
+| [RUNTIME_GATE.md](RUNTIME_GATE.md) | 44 | ⚠️ **改门控判定前必读**。退出码被 cron 直接消费（3/4/5 穿透 `daily_pipeline`）、`--require-*` 会真的中断链路 ⇒ 算契约不是说明。含评分权重、`blocked` 覆盖率规则、加仓授权五条件、各时点策略、2026-07-30 硬闸事故记录。2026-08-07 从根 README 抽出 |
 | [SCREENING_WORKFLOW.md](SCREENING_WORKFLOW.md) | 291 | 18:00 选股链编排 |
 
 ## ⚠️ 2026-08-06 核查查出的契约失真

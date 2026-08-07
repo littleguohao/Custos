@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-08-06",
+  "updated_at": "2026-08-07",
   "purpose": "策略上下文注册表。新增策略/因子必须在此登记，由 tests/test_strategy_index.py 校验注册表与目录一致。",
   "conventions": {
     "dir": "策略上下文用无前缀目录（b1/ cz/）；非策略用 _ 前缀（_factors/ 可复用因子、_shared/ 跨策略规则）",
@@ -81,6 +81,13 @@
       "status": "partially_stale",
       "superseded_by": "00_governance/contracts/MASTER_WORKFLOW.md",
       "note": "写于 Agent 架构时代；优先级原则仍有效，冲突时以 MASTER_WORKFLOW 与仓库 README 为准。跨策略，不属于任何单一策略"
+    },
+    {
+      "id": "system_principles",
+      "name": "系统原则与用户画像",
+      "doc": "_shared/system_principles.md",
+      "status": "live",
+      "note": "2026-08-07 从根目录 TEAM_BLUEPRINT.md 抢救（该文件已删）。含核心原则 5 条 + 用户画像 6 条 + 卖出风控规则的「声称 vs 实测」核对表。原文档把 6 条规则一律写成「不可被总控决策覆盖」，逐条核实后 2 条零实现（连亏冷却、胜率降仓），已如实标为「意图，不是机制」，见待办 #51。跨策略，不属于任何单一策略"
     }
   ]
 }
