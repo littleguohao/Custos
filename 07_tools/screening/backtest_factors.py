@@ -1854,8 +1854,17 @@ def peak_rss_mb() -> Optional[float]:
     return None
 
 
-def write_json(path: Path, payload: dict[str, Any], *, big: bool = False) -> None:
-    """落盘 JSON。``big=True`` 时**流式写且不缩进**。
+def write_json_stream(path: Path, payload: dict[str, Any], *, big: bool = False) -> None:
+    """落盘 JSON（**流式**）。``big=True`` 时不缩进。
+
+    ⚠️ 2026-08-07 从 `write_json` 改名：`paths.write_json` 是全项目的 JSON 产物写入口，
+    两者**同名不同行为**，混用会出事 ——
+
+        paths.write_json         allow_nan=False ⇒ NaN 当场崩（要的就是显式失败）
+        write_json_stream(此处)  允许 NaN        ⇒ 研究指标里 NaN 是合法读数
+                                                 （零方差的 Sharpe、无交易的胜率）
+
+    所以这份**不能**换成 `paths.write_json`，也不该叫一样的名字。
 
     ⚠️ `path.write_text(json.dumps(...))` 会先在内存里拼出**整个字符串**再写，
     等于把 payload 复制一份到内存；`indent=2` 又让这份字符串再大 1.36 倍（实测）。
@@ -1969,7 +1978,7 @@ def _portfolio_from_trades(args: Any, codes: list[str]) -> int:
         # ⚠️ **不重写 trades**：它与源文件逐字相同，`trades_reused_from` 已指明来源。
         # 复用路径本来就要把源文件整份读进内存，再写一遍等于同一份数据占三份
         # （源 dict + payload 引用 + 落盘缓冲）——OOM 就是这么攒出来的。
-        write_json(Path(args.out), payload)
+        write_json_stream(Path(args.out), payload)
         print(f"[OK] 写出 {args.out}（逐笔见 {src.name}，不重复落盘）")
     print("\n" + payload["portfolio"]["text"])
     return 0
@@ -2303,7 +2312,7 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                 payload = {k: v for k, v in payload.items() if k != "trades"}
             # 流式写：`write_text(json.dumps(...))` 会先拼出整个字符串（indent=2 再放大
             # 1.36 倍），逐笔上万条时白送一次内存峰值——这个回测本来就常被 OOM Kill。
-            write_json(out, payload, big=len(trades) > 20000)
+            write_json_stream(out, payload, big=len(trades) > 20000)
             print(f"[OK] 写出 {out}（{len(trades)} 笔交易，scorer={args.scorer}, {'周线' if args.weekly else '日线'}, cost={args.cost_bps}bps, amv_long_only={bool(args.amv_long_only)}）")
         stop_desc = (f"买入K最低" if args.stop_mode == "low" else f"pct {args.stop_pct}%")
         tstop_desc = f" / 时间止损{args.time_stop}根" if args.time_stop else ""
@@ -2342,7 +2351,7 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
         payload["factor_lift"] = factor_lift(records, args.factor_field, horizon=args.summary_horizon)
     if args.out:
         out = Path(args.out)
-        write_json(out, payload, big=len(records) > 20000)
+        write_json_stream(out, payload, big=len(records) > 20000)
         print(f"[OK] 写出 {out}（{len(records)} 条信号，scorer={args.scorer}, entry_filter={args.entry_filter}）")
     print(f"\n=== 分档 × horizon 网格（scorer={args.scorer}, entry_filter={args.entry_filter}, 信号 {len(records)} 条）===")
     print(matrix["text"])

@@ -12,16 +12,12 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from paths import BASE  # noqa: E402
+from paths import read_json as load  # noqa: E402
+from code_utils import bare_code as bare  # noqa: E402
 
 DATA = BASE / "01_data"
 
 
-def load(path: Path, default):
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
-
-
-def bare(value):
-    return str(value or "").split(".")[0]
 
 
 def lifecycle(row: dict, event_count: int) -> dict:

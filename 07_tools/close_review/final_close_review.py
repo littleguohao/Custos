@@ -21,39 +21,18 @@ except ImportError:
 
 from paths import BASE, cn_now  # noqa: E402
 from code_utils import market_of  # noqa: E402
+from paths import read_json as load  # noqa: E402
+from code_utils import bare_code as bare  # noqa: E402
+from code_utils import finite  # noqa: E402
+from code_utils import fnum as optional_finite  # noqa: E402
+from fmt import pct_text  # noqa: E402
 
 DATA = BASE / "01_data"
 REV = BASE / "04_reviews" / "daily"
 
 
-def load(path, default):
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
 
 
-def finite(value, default=0.0):
-    try:
-        number = float(value)
-        return default if not math.isfinite(number) else number
-    except (TypeError, ValueError):
-        return default
-
-
-def optional_finite(value):
-    try:
-        number = float(value)
-        return number if math.isfinite(number) else None
-    except (TypeError, ValueError):
-        return None
-
-
-def pct_text(value) -> str:
-    """带符号百分比文本；缺失/非有限值渲染 unavailable。
-
-    此前用 finite(value)（缺失回落 0.0）直接格式化，指数涨跌缺数据会渲染成
-    +0.00%，把「不知道」伪装成「平盘」。
-    """
-    number = optional_finite(value)
-    return "unavailable" if number is None else f"{number:+.2f}%"
 
 
 def ma_flag(value) -> str:
@@ -68,9 +47,6 @@ def render_index_row(row: dict) -> str:
             f"{ma_flag(row.get('above_ma25'))}MA25 / {ma_flag(row.get('above_ma60'))}MA60 / "
             f"{ma_flag(row.get('above_ma144'))}MA144 / {ma_flag(row.get('above_ma240'))}MA240 |")
 
-
-def bare(value):
-    return str(value or "").split(".")[0]
 
 
 def index_name(code):

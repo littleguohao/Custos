@@ -99,7 +99,7 @@
   · `--jobs` 按可用内存**自动收敛**（`_cap_jobs`，预算见 `MEM_PER_JOB_MB`）
   · collect_all 方案**单独串行**，不与别人抢内存（`_is_heavy`）
   · `backtest_factors` 每轮打 `[MEM] 峰值 XXXMb / N 笔`，据此校准 `MEM_PER_JOB_MB`；
-    落盘改流式（`write_json`，不再先拼出整个 JSON 字符串），复用路径不重写逐笔
+    落盘改流式（`write_json_stream`，不再先拼出整个 JSON 字符串），复用路径不重写逐笔
 
 ## 数据源：tdx vs qlib（2026-08-05）
 
@@ -617,7 +617,7 @@ def _load(p: pathlib.Path) -> dict:
     静默失效——**读不到就明确报错，不要静默返回空**。
     """
     try:
-        d = json.loads(p.read_text(encoding="utf-8"))
+        d = json.loads(p.read_text(encoding="utf-8-sig"))  # BOM 容错，见 paths.read_json
     except Exception as e:                                        # noqa: BLE001
         print(f"[WARN] 读不了 {p.name}: {e}")
         return {}

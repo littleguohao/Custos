@@ -10,10 +10,11 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from paths import BASE  # noqa: E402
+from paths import read_json as load  # noqa: E402
 
 DATA=BASE/'01_data'; PLANS=BASE/'03_daily_plans'
 
-def load(p,d): return json.loads(p.read_text(encoding='utf-8')) if p.exists() else d
+
 def extract(pattern,text,default):
     m=re.search(pattern,text); return m.group(1).strip() if m else default
 

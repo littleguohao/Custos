@@ -12,17 +12,17 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from paths import BASE, RSS_FILTER_CONFIG_FILE, RSS_SOURCE_REGISTRY_FILE  # noqa: E402
+from paths import read_json as load  # noqa: E402
+from paths import write_json as dump  # noqa: E402
+from code_utils import bare_code as bare  # noqa: E402
 from runtime_guards import previous_confirmed_trading_day  # noqa: E402
 
 DATA=BASE/'01_data'; LOG=BASE/'06_logs'/'rss'
 CFG=RSS_FILTER_CONFIG_FILE; REG=RSS_SOURCE_REGISTRY_FILE
 SH=ZoneInfo('Asia/Shanghai')
 
-def load(p,default):
- try:return json.loads(p.read_text(encoding='utf-8-sig')) if p.exists() else default
- except Exception:return default
 
-def dump(p,x): p.parent.mkdir(parents=True,exist_ok=True); p.write_text(json.dumps(x,ensure_ascii=False,indent=2,allow_nan=False),encoding='utf-8')
+
 def norm_text(s): return re.sub(r'[^0-9a-z\u4e00-\u9fff]+','',str(s or '').lower())
 def canonical_url(u):
  try:
@@ -32,7 +32,6 @@ def canonical_url(u):
 def parse_dt(s):
  try:return datetime.fromisoformat(str(s).replace('Z','+00:00')).astimezone(timezone.utc)
  except Exception:return None
-def bare(code): return str(code or '').split('.')[0]
 
 def premarket_window(day, asof, fallback_hours):
  previous=previous_confirmed_trading_day(day)

@@ -35,6 +35,7 @@ if str(LOCAL_TDX_DIR) not in sys.path:
 
 import local_tdx_data as ltd  # type: ignore
 from paths import BASE, TDX_ROOT, cn_now  # noqa: E402
+from indicators import pct_change as pct  # noqa: E402
 from runtime_guards import previous_confirmed_trading_day  # noqa: E402
 from breadth_basis import breadth_counts, resolve_total_stocks  # noqa: E402
 
@@ -93,11 +94,6 @@ def read_day(prefix: str, code: str) -> list[dict]:
         })
     return rows
 
-
-def pct(a, b):
-    if b in (None, 0) or a is None:
-        return None
-    return round((a / b - 1) * 100, 4)
 
 
 def trend(rows: list[dict]) -> dict:

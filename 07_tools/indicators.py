@@ -39,6 +39,20 @@ J_N, J_M1, J_M2 = 9, 3, 3
 DKS_MA_WINDOWS = (14, 28, 57, 114)  # 知行多空线的四均线（good_b1 图上参数）          # KDJ 标准参数；com = m - 1 ⇒ com=2
 
 
+def pct_change(a, b):
+    """从 b 到 a 的涨跌幅（百分数，保留 4 位）；b 为 None/0 或 a 为 None 时返回 None。
+
+    2026-08-07 从 `market_timing_collector` 与 `refresh_market_indices` 两份
+    逐字相同的私有 `pct(a, b)` 收敛而来。
+
+    返回 None 而不是 0：**「涨跌幅是 0」与「算不出涨跌幅」必须可区分**
+    （同 `code_utils.fnum` 的理由）。
+    """
+    if b in (None, 0) or a is None:
+        return None
+    return round((a / b - 1) * 100, 4)
+
+
 def kdj_series(df: pd.DataFrame, *, n: int = J_N, m1: int = J_M1, m2: int = J_M2,
                fill_na: Optional[float] = None) -> tuple[pd.Series, pd.Series, pd.Series]:
     """返回 `(K, D, J)` 三条序列。

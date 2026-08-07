@@ -213,3 +213,41 @@ class TestMainWritesBothArtifacts:
         sec = json.loads((env / "sectors" / "2026-08-07_sector_state.json").read_text(encoding="utf-8"))
         assert risk["risk_level"] == "强风控" and risk["regime_directive"]["allow_add"] is False
         assert sec[0]["trade_permission"] == "支持"
+
+
+class TestNanScoreHandling:
+    """⚠️ 板块 `score` 为 NaN 时，判定与落盘**刻意走两条路**。
+
+    NaN 会从技术面上游漏进来（pandas 的缺失值就是 NaN）。两侧要求相反：
+
+        判定侧：读原值 ⇒ `float(nan) >= 60` 为 False ⇒ 落「观察」（保守）
+                若改用 fnum，NaN→None 会命中「没打分不算减分项」⇒ **放宽成支持**
+        落盘侧：写 fnum(score) ⇒ None
+                NaN 不是合法 JSON，且 write_json 的 allow_nan=False 会当场崩，
+                而这是硬失败 stage —— 不能因一个板块的脏分数拖垮整条 17:00 链
+    """
+
+    def test_nan_score_downgrades_to_observe(self, env):
+        _w(env, "sectors/2026-08-07_sector_technical_summary.json",
+           [{"theme_name": "x", "available": True, "stage": "主升/加速",
+             "trend_state": "上涨", "score": float("nan"), "action_bias": "观察"}])
+        r = g.build_sector_state("2026-08-07")
+        assert r[0]["trade_permission"] == "观察", "NaN 分数不得放宽成支持"
+
+    def test_nan_score_written_as_null(self, env):
+        _w(env, "sectors/2026-08-07_sector_technical_summary.json",
+           [{"theme_name": "x", "available": True, "stage": "主升/加速",
+             "trend_state": "上涨", "score": float("nan"), "action_bias": "观察"}])
+        assert g.build_sector_state("2026-08-07")[0]["score"] is None
+
+    def test_main_survives_nan_score(self, env, monkeypatch):
+        """端到端：脏分数不得让硬失败 stage 崩。"""
+        _w(env, "holdings/2026-08-07_holding_review.json", [])
+        _w(env, "sectors/2026-08-07_sector_technical_summary.json",
+           [{"theme_name": "x", "available": True, "stage": "主升", "trend_state": "上涨",
+             "score": float("inf"), "action_bias": "观察"}])
+        monkeypatch.setattr(sys, "argv", ["x", "--date", "2026-08-07"])
+        g.main()
+        txt = (env / "sectors" / "2026-08-07_sector_state.json").read_text(encoding="utf-8")
+        assert "NaN" not in txt and "Infinity" not in txt
+        assert json.loads(txt)[0]["score"] is None

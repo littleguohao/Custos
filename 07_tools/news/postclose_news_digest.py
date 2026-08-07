@@ -12,19 +12,14 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from paths import BASE  # noqa: E402
+from paths import read_json as load  # noqa: E402
+from paths import write_json as dump  # noqa: E402
 from premarket_intel_schema import validate_premarket_intelligence  # noqa: E402
 from daily_report import load_premarket_intelligence, premarket_intelligence_path  # noqa: E402
 
 DATA = BASE / "01_data"
 
 
-def load(path: Path, default):
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
-
-
-def dump(path: Path, value):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
 
 
 # 政策分类口径。`A or B and C` 在 Python 里是 `A or (B and C)` —— 原写法

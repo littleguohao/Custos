@@ -17,9 +17,9 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from paths import BASE, cn_now, write_json_atomic  # noqa: E402
+from paths import read_json as load  # noqa: E402
 
 MARKET=BASE/'01_data'/'market'; STATE=MARKET/'0amv_regime_history.json'; LEDGER=MARKET/'0amv_observations.jsonl'
-def load(p,d): return json.loads(p.read_text(encoding='utf-8')) if p.exists() else d
 
 def append_observation(day:str, amv:dict):
     value=amv.get('amv_change_pct')

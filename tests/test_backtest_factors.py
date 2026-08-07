@@ -417,25 +417,25 @@ class TestMemoryHygiene:
         assert bt.peak_rss_mb() is None
         assert "resource" in bt._RSS_FAIL and "test" in bt._RSS_FAIL
 
-    def test_write_json_roundtrips_both_modes(self, tmp_path):
+    def test_write_json_stream_roundtrips_both_modes(self, tmp_path):
         payload = {"a": 1, "trades": [{"ret": 0.1}] * 10}
         for big in (False, True):
             p = tmp_path / f"o_{big}.json"
-            bt.write_json(p, payload, big=big)
+            bt.write_json_stream(p, payload, big=big)
             assert _json.loads(p.read_text(encoding="utf-8")) == payload
 
-    def test_write_json_big_mode_has_no_indent(self, tmp_path):
+    def test_write_json_stream_big_mode_has_no_indent(self, tmp_path):
         """indent=2 让字符串再大 1.36 倍（实测）——大 payload 不加缩进。"""
         payload = {"trades": [{"ret": 0.1, "code": "600000"}] * 200}
         small, big = tmp_path / "s.json", tmp_path / "b.json"
-        bt.write_json(small, payload, big=False)
-        bt.write_json(big, payload, big=True)
+        bt.write_json_stream(small, payload, big=False)
+        bt.write_json_stream(big, payload, big=True)
         assert big.stat().st_size < small.stat().st_size
         assert "\n" not in big.read_text(encoding="utf-8")
 
-    def test_write_json_creates_parent_dir(self, tmp_path):
+    def test_write_json_stream_creates_parent_dir(self, tmp_path):
         p = tmp_path / "sub" / "dir" / "o.json"
-        bt.write_json(p, {"a": 1})
+        bt.write_json_stream(p, {"a": 1})
         assert p.is_file()
 
     def test_reused_file_does_not_duplicate_trades(self, tmp_path):

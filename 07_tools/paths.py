@@ -121,6 +121,29 @@ def read_json(path, default):
     return _json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else default
 
 
+def write_json(path, obj, *, indent: int = 2) -> None:
+    """写 JSON 产物：建父目录 + `ensure_ascii=False` + **`allow_nan=False`**。
+
+    ⚠️ `allow_nan=False` 是这个函数存在的**主要理由**。收敛 3 份 `dump()` 时发现
+    只有两份带它（`postclose_news_digest` / `rss_filter`），
+    `generate_risk_and_sectors` 没带 —— 而它写的正是 RiskDecision 与 SectorState。
+
+    不带这个参数时 `json.dumps` 会把 NaN 写成 `NaN`、inf 写成 `Infinity`，
+    **两者都不是合法 JSON**（RFC 7159）。危害不止「格式不对」：
+
+        sector_state[].score = NaN  →  下游 `score >= 60` 判定里 `nan >= 60` 恒为 False
+                                    ⇒ 板块**静默降级**成「观察」，且没有任何告警
+
+    带上它则在写入时就**当场崩**，把静默错误变成显式失败 —— 这是想要的方向。
+
+    需要原子性（累积状态 / 读-改-写共享文件）时用 `write_json_atomic`。
+    """
+    import json as _json
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_json.dumps(obj, ensure_ascii=False, indent=indent, allow_nan=False),
+                    encoding="utf-8")
+
+
 def write_json_atomic(path, obj, *, indent: int = 2) -> None:
     """原子写 JSON：先写同目录 tmp，再 `os.replace` 换名。
 

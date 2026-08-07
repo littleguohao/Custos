@@ -21,19 +21,13 @@ from runtime_guards import normalize_regime  # noqa: E402
 
 from paths import BASE  # noqa: E402
 from code_utils import norm_code  # noqa: E402
+from code_utils import fnum  # noqa: E402
 
 DATA = BASE / "01_data"
 
 # 次新股前置排除阈值：上市日历天数 < 20 标记
 NEW_LISTING_DAYS = 20
 
-
-def finite(value: Any) -> float | None:
-    try:
-        result = float(value)
-        return result if math.isfinite(result) else None
-    except (TypeError, ValueError):
-        return None
 
 
 def action_rank(priority: str) -> int:
@@ -51,10 +45,10 @@ SIGNAL_ORDER = {
 
 
 def evaluate(row: dict[str, Any], market_regime: str = "未知", price: Any = None, price_date: str | None = None) -> dict[str, Any]:
-    current = finite(price)
+    current = fnum(price)
     if current is None:
-        current = finite(row.get("close"))
-    pnl = finite(row.get("holding_pnl_pct"))
+        current = fnum(row.get("close"))
+    pnl = fnum(row.get("holding_pnl_pct"))
     trend = str(row.get("trend_state") or "未知")
     box = str(row.get("box20_position") or "未知")
     pv = row.get("price_volume") or {}
@@ -73,8 +67,8 @@ def evaluate(row: dict[str, Any], market_regime: str = "未知", price: Any = No
     elif pnl is not None and pnl <= -0.07:
         add("loss_reduction", "P1", "减仓评估", f"持有盈亏{pnl:.2%}低于-7%")
 
-    l1 = finite(structure.get("prior_low"))
-    l2 = finite(structure.get("pullback_low"))
+    l1 = fnum(structure.get("prior_low"))
+    l2 = fnum(structure.get("pullback_low"))
     if structure.get("available") and current is not None and l1 is not None:
         if structure.get("stale"):
             # 结构陈旧（破位过久/顶部旧N），不作为当前 P0；由趋势/箱体/亏损信号覆盖
@@ -88,7 +82,7 @@ def evaluate(row: dict[str, Any], market_regime: str = "未知", price: Any = No
 
     # Descending N-structure: H1 -> L1 -> lower H2 -> close below L1
     if desc_structure.get("available") and current is not None:
-        structural_low = finite(desc_structure.get("structural_low"))
+        structural_low = fnum(desc_structure.get("structural_low"))
         if desc_structure.get("stale"):
             unavailable.append("descending_n_structure_stale")
         elif structural_low is not None and current < structural_low:
@@ -96,7 +90,7 @@ def evaluate(row: dict[str, Any], market_regime: str = "未知", price: Any = No
     elif not desc_structure.get("available"):
         unavailable.append("descending_n_structure")
 
-    below_days = int(finite(row.get("consecutive_closes_below_bbi")) or 0)
+    below_days = int(fnum(row.get("consecutive_closes_below_bbi")) or 0)
     if row.get("above_bbi") is False:
         if below_days >= 2:
             add("bbi_two_close_breach", "P1", "BBI清仓评估", f"连续{below_days}日收盘跌破BBI")
@@ -117,7 +111,7 @@ def evaluate(row: dict[str, Any], market_regime: str = "未知", price: Any = No
     if row.get("daily_kdj_death_cross"):
         add("kdj_death_cross", "P2", "动能转弱观察", "日线KDJ死叉，需结合趋势和结构确认")
 
-    j = finite(row.get("daily_j"))
+    j = fnum(row.get("daily_j"))
     reversal = bool(price_volume_current and pv.get("reversal_k_candidate_without_j") and j is not None and j < 13)
     if reversal:
         add("reversal_k_candidate", "P3", "反转K候选观察", "J<13、极致缩量、收盘±2%且振幅<=7%；仍需后续修复确认")
@@ -126,7 +120,7 @@ def evaluate(row: dict[str, Any], market_regime: str = "未知", price: Any = No
         add("bear_regime_reduce_top_priority", "P1", "空头区间反弹减仓(最高优先级)",
             "0AMV空头区间:降低仓位为最高优先级,任何反弹都是卖出机会;禁止加仓补仓")
 
-    if price_volume_current and market_regime == "空头" and finite(pv.get("change_pct")) is not None and finite(pv.get("change_pct")) > 0:
+    if price_volume_current and market_regime == "空头" and fnum(pv.get("change_pct")) is not None and fnum(pv.get("change_pct")) > 0:
         add("bear_rebound_reduce", "P1", "空头反弹减仓", "0AMV空头区间出现反弹，优先降低风险敞口")
 
     if not pv.get("available"):
@@ -216,8 +210,8 @@ def build_pre_checks(code: Any, as_of: date | None = None, tq: Any = None) -> di
         "listing_days": listing_days,  # 日历天数（上市日至 --date）
         "new_listing_lt20": (listing_days < NEW_LISTING_DAYS) if listing_days is not None else None,
         "is_suspended": (tp_flag not in ("", "0")) if more["ok"] else None,
-        "limit_up_price": finite(more_v.get("ZTPrice")),
-        "limit_down_price": finite(more_v.get("DTPrice")),
+        "limit_up_price": fnum(more_v.get("ZTPrice")),
+        "limit_down_price": fnum(more_v.get("DTPrice")),
         "hq_date": str(more_v.get("HqDate") or "").strip() or None,
     }
 

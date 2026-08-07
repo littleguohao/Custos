@@ -19,6 +19,7 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from paths import BASE  # noqa: E402
+from paths import read_json as load  # noqa: E402
 
 PY=Path(sys.executable)
 TECH=BASE/'07_tools'/'market_timing'/'technical_monitor.py'
@@ -34,7 +35,6 @@ def clear_analysis_cache() -> None:
     _ANALYSIS_CACHE.clear()
 
 
-def load(path, default): return json.loads(path.read_text(encoding='utf-8')) if path.exists() else default
 
 def pos_to_row(p):
     code=str(p.get('代码','')).split('.')[0]

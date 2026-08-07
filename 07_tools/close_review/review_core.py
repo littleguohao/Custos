@@ -23,6 +23,10 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from paths import BASE, cn_today, cn_now  # noqa: E402
+from paths import read_json as load  # noqa: E402
+from code_utils import finite  # noqa: E402
+from code_utils import fnum as optional_finite  # noqa: E402
+from fmt import pct_text as _fmt_pct_text  # noqa: E402
 
 TRADES = BASE / "01_data" / "trades"
 HOLDINGS = BASE / "01_data" / "holdings"
@@ -35,29 +39,12 @@ PLANS.mkdir(parents=True, exist_ok=True)
 LOGS.mkdir(parents=True, exist_ok=True)
 
 
-def load(path: Path, default):
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
-
 
 def latest(pattern: str, folder: Path) -> Path | None:
     files = sorted(folder.glob(pattern))
     return files[-1] if files else None
 
 
-def finite(value, default=0.0):
-    try:
-        v = float(value)
-        return default if not math.isfinite(v) else v
-    except (TypeError, ValueError):
-        return default
-
-
-def optional_finite(value):
-    try:
-        v = float(value)
-        return None if not math.isfinite(v) else v
-    except (TypeError, ValueError):
-        return None
 
 
 def price_text(value, digits=2):
@@ -65,7 +52,13 @@ def price_text(value, digits=2):
 
 
 def pct_text(value, digits=2):
-    return "缺失" if value is None else f"{value:+.{digits}f}%"
+    """本报告的缺数占位用中文「缺失」（与表格里其他列一致）；口径同 `fmt.pct_text`。
+
+    只在措辞上与共享实现不同，**有限性判定单一来源** ——
+    收敛前这份自己判 `is None`，NaN 会渲染成 `+nan%`。
+    """
+    return _fmt_pct_text(value, digits, missing="缺失")
+
 
 
 def normalized_code(value) -> str:

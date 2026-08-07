@@ -14,19 +14,14 @@ from pathlib import Path
 
 from paths import BASE
 from paths import read_json as load
+from paths import write_json as dump
+from code_utils import bare_code as bare, fnum
 from runtime_guards import normalize_regime
 
 DATA = BASE / "01_data"
 
 
 
-def dump(path: Path, value):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def bare(code: str) -> str:
-    return str(code or "").split(".")[0]
 
 
 # ── Sector state normalization (from ThemeStageAdapter) ──
@@ -57,6 +52,12 @@ def build_sector_state(date: str) -> list[dict]:
         raw_stage = row.get("raw_stage", row.get("stage", row.get("state", "")))
         trend = row.get("trend", row.get("trend_state", "横盘震荡"))
         state = normalize_stage(raw_stage, trend)
+        # ⚠️ 判定读**原值**、落盘写 `fnum(score)`，两者刻意不同：
+        #   · 判定：NaN 时 `float(nan) >= 60` 为 False ⇒ 落到「观察」，这是**保守**的。
+        #     不能顺手换成 fnum —— 那会让 NaN 变 None，命中下面 `score is None`
+        #     （「没打分不算减分项」）⇒ 从观察**放宽成支持**，方向正好反了。
+        #   · 落盘：NaN 不是合法 JSON，且 `paths.write_json` 的 `allow_nan=False`
+        #     会当场崩；这是硬失败 stage，不能因一个板块的脏分数拖垮整条 17:00 链。
         score = row.get("score")
         action = str(row.get("action_bias") or "")
         if state == "退潮" or "回避" in action or "禁止" in action:
@@ -76,7 +77,7 @@ def build_sector_state(date: str) -> list[dict]:
             "support": row.get("box20_lower", row.get("support")),
             "resistance": row.get("box20_upper", row.get("resistance")),
             "trade_permission": permission,
-            "score": score,
+            "score": fnum(score),
             "risk_flags": list(dict.fromkeys(x for x in (row.get("risk_flags") or []) if x)),
         })
     return result

@@ -33,6 +33,25 @@ def clean_code(v):
     return s.split('.')[0].zfill(6) if s.split('.')[0].isdigit() else s.split('.')[0]
 
 
+def bare_code(code) -> str:
+    """去掉交易所后缀，返回裸代码：`"600000.SH"` → `"600000"`。
+
+    ⚠️ **与 `clean_code()` 不是一回事，两个都要留**：
+
+        bare_code("1")   → "1"        只切后缀，不补位
+        clean_code("1")  → "000001"   台账语义：补足 6 位
+
+    `bare_code` 的用途是**跨数据源对齐同一只票**（技术面表用裸码、
+    chief_decision 用带后缀码，要能互相查到）。这里不能顺手改用 `clean_code`：
+    补位是台账口径，对指数代码（`880863`）和潜在的非 6 位标识会改变结果，
+    而这些调用点从没验证过补位是否安全。
+
+    2026-08-07 从 6 份逐字相同的私有 `bare()` 收敛而来
+    （close_review 三份 + generate_risk_and_sectors + chief_decision_report + rss_filter）。
+    """
+    return str(code or "").split(".")[0]
+
+
 def is_index(code: str) -> bool:
     """代码是否为指数（而非可交易个股）。复权与 ST 判定都要靠它。
 
@@ -137,10 +156,22 @@ def suffix(code: str) -> str:
 
 
 def finite(v, d=0.0):
-    """Coerce v to float; return d on failure or NaN (incremental_ledger version, verbatim)."""
+    """转 float 并**保证结果有限**；失败 / NaN / ±inf 一律返回默认值 d。
+
+    用于**参与计算**的场景。要区分「缺数」与「读数是 0」时用 `fnum()`。
+
+    ⚠️ 2026-08-07 补上 `isinf`：此前只判 `isnan`，`float("inf")` 会原样返回。
+    后果有两层 ——
+      ① `json.dumps` 默认把它写成 `Infinity`，**这不是合法 JSON**（RFC 7159 不允许），
+         严格解析器（JS `JSON.parse`、`allow_nan=False`）会拒收或崩；
+      ② 它会污染一切下游算术，且不像 NaN 那样在比较中恒为 False——
+         `inf > 阈值` 恒真，能把任意阈值判定骗过去。
+    """
     try:
-        x = float(v); return d if math.isnan(x) else x
-    except: return d
+        x = float(v)
+    except (TypeError, ValueError):
+        return d
+    return d if not math.isfinite(x) else x
 
 
 def fnum(v):
@@ -158,10 +189,20 @@ def fnum(v):
 
     2026-08-06 从 `collect_holding_quotes`（10 处调用）与
     `collect_incremental_market`（4 处）收敛而来。
+
+    ⚠️ 2026-08-07 补上有限性判定：此前 NaN / ±inf **原样穿过**，而名字与
+    `finite()` 这个兄弟都暗示它会拦。这不是理论风险，两个常见守卫都拦不住 NaN：
+
+        _fnum(x) or 0.0          # bool(nan) 是 **True** ⇒ 得到 nan 而不是 0.0
+        if v is None or v <= 0   # nan <= 0 是 **False** ⇒ NaN 当合法价格穿过
+
+    pandas 的缺失值就是 NaN，采集层大量用它。NaN 落进 JSON 后，
+    `allow_nan=False` 的写入方会直接崩，不带该参数的会写出非法 JSON。
     """
     if v is None:
         return None
     try:
-        return float(v)
+        x = float(v)
     except (TypeError, ValueError):
         return None
+    return x if math.isfinite(x) else None

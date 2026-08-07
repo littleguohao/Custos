@@ -233,13 +233,32 @@ class TestBearRegime:
         assert not ({"bear_regime_reduce_top_priority", "bear_rebound_reduce"} & _names(s))
 
 
-class TestFiniteHelper:
+class TestNumberCoercion:
+    """⚠️ 这个模块的数值转换**必须返回 None 而非 0.0**。
+
+    历史（2026-08-07 收敛重复助手时的近失）：本文件原有一个私有函数叫 `finite()`，
+    但它返回 `float | None` —— 与 `code_utils.finite()`（失败返回默认值 `0.0`）
+    **同名反语义**。按名字合并会把 11 个调用点从「缺数→None」改成「缺数→0.0」，
+    后果是：
+
+        current = fnum(row.get("close"))   # close 缺失
+        # 若返回 0.0： current < l1(8.0) 恒真
+        #   ⇒ 凭空产生 n_l1_breach 「N型主结构清仓评估」P0
+
+    即**没有价格的持仓每天被判最高优先级清仓**。已改为语义正确的 `code_utils.fnum`。
+    """
+
     def test_zero_is_kept(self):
-        """⚠️ `0` 是合法读数（涨跌幅 0、盈亏 0 都真实存在），不得变 None。"""
-        assert bh.finite(0) == 0.0 and bh.finite("0") == 0.0
+        """`0` 是合法读数（涨跌幅 0、盈亏 0 都真实存在），不得变 None。"""
+        assert bh.fnum(0) == 0.0 and bh.fnum("0") == 0.0
 
-    def test_garbage_and_none(self):
-        assert bh.finite(None) is None and bh.finite("x") is None
+    def test_missing_returns_none_not_zero(self):
+        assert bh.fnum(None) is None and bh.fnum("x") is None
 
-    def test_nan_rejected(self):
-        assert bh.finite(float("nan")) is None
+    def test_nan_and_inf_rejected(self):
+        assert bh.fnum(float("nan")) is None and bh.fnum(float("inf")) is None
+
+    def test_missing_close_does_not_fabricate_a_breach(self):
+        """端到端钉住上面那个后果：close 缺失时**不得**出结构破位信号。"""
+        s = bh.evaluate(_row(close=None), "", price_date="2026-08-07")
+        assert not ({"n_l1_breach", "n_l2_breach", "desc_n_confirmed"} & _names(s))
