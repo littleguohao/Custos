@@ -11,6 +11,7 @@ if str(TOOLS_DIR) not in sys.path:
 
 from paths import BASE  # noqa: E402
 from paths import read_json as load  # noqa: E402
+from contracts import require  # noqa: E402
 
 DATA=BASE/'01_data'; PLANS=BASE/'03_daily_plans'
 
@@ -53,6 +54,7 @@ def main():
           'holding_days':r.get('holding_days'),'sector':r.get('industry') or '、'.join(r.get('primary_themes') or []),'trend_state':r.get('trend_state'),
           'box_position':r.get('box20_position'),'daily_j':r.get('daily_j'),'macd_state':r.get('daily_macd_hist_direction'),
           'action':action,'priority':priority,'reason':[x for x in reasons if x], 'b1_holding_state':hold})
+    require("holding_review", reviews)
     out_json=DATA/'holdings'/f'{a.date}_holding_review.json'; out_json.write_text(json.dumps(reviews,ensure_ascii=False,indent=2),encoding='utf-8')
     lines=['# portfolio_review 每日持仓研判','',f'日期：{a.date}','', '## 1. 总体持仓风险','',f'- market_timing：**{market_state}**',f'- 建议总仓位：**{position}**','- 原则：低位指标不能覆盖趋势、板块与风险规则。','', '## 2. 持仓逐只研判','', '| 优先级 | 代码 | 名称 | 仓位 | 盈亏 | 趋势/位置 | 动作 | 理由 |','|---|---|---|---:|---:|---|---|---|']
     for x in sorted(reviews,key=lambda y:(y['priority'],y['code'])):

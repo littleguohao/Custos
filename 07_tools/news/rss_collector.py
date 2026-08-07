@@ -13,6 +13,7 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from paths import BASE, RSS_SOURCE_REGISTRY_FILE, cn_now  # noqa: E402
+from contracts import require  # noqa: E402
 from net_retry import retry_call  # noqa: E402
 
 REG=RSS_SOURCE_REGISTRY_FILE
@@ -205,6 +206,7 @@ def main():
     for x in sorted(normalized,key=lambda z:(z.get('published_at') or '',z['item_id']),reverse=True):
         if x['item_id'] in seen: continue
         seen.add(x['item_id']); unique.append(x)
+    require("rss_evidence", unique)
     out=DATA/'normalized'/f'{a.date}_rss_evidence.json'; out.parent.mkdir(parents=True,exist_ok=True); out.write_text(json.dumps(unique,ensure_ascii=False,indent=2),encoding='utf-8')
     LOG.mkdir(parents=True,exist_ok=True); lp=LOG/f'{a.date}_collection_log.json'; lp.write_text(json.dumps({'date':a.date,'fetched_at':fetched,'sources':log,'item_count':len(unique),'output':str(out)},ensure_ascii=False,indent=2),encoding='utf-8')
     print(json.dumps({'output':str(out),'log':str(lp),'items':len(unique),'sources_ok':sum(x['status']=='ok' for x in log),'sources_failed':sum(x['status']!='ok' for x in log)},ensure_ascii=False))

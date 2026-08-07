@@ -26,6 +26,7 @@ if str(_TOOLS) not in sys.path:
     sys.path.insert(0, str(_TOOLS))
 
 from paths import BASE, TDX_ROOT, cn_today  # noqa: E402
+from contracts import require  # noqa: E402
 
 POSITIONS = BASE / "01_data" / "trades" / "current_positions.json"
 LEDGER = BASE / "01_data" / "trades" / "master_trade_ledger.csv"
@@ -298,7 +299,10 @@ def main(argv=None):
 
     coverage = coverage_summary(results)
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps({"date": target, "coverage": coverage, "holdings": results},
+    # 提成变量以便落盘前校验（原为内联字面量）。
+    payload = {"date": target, "coverage": coverage, "holdings": results}
+    require("mfe_mae", payload)
+    OUT.write_text(json.dumps(payload,
                               ensure_ascii=False, indent=2), encoding="utf-8")
     # 摘要行是 run_1700 的判据:降级/失败必须以 [WARN] 开头,否则 runner 照报 [OK]
     tag = "[OK]" if coverage["status"] == "complete" else "[WARN]"

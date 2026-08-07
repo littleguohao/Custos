@@ -102,7 +102,7 @@
     tests/test_architecture_layers.py::test_money_path_producers_validate_before_write
                               强制 11 个生产者都在落盘前校验
 
-覆盖 **11 个产物**，硬失败链上的 10 个**全部覆盖**。执行策略是「写严、读松」：
+覆盖 **24 个产物** —— 全部按日期命名的 JSON 产物都已纳入，5 类刻意豁免（执行痕迹 / md 报告 / 人工输入 / 副本 / 可选产物）的理由写在 `contracts.py`「第五批」注释块，并由 `tests/test_architecture_layers.py::TestContractCoverageOfArtifacts` 强制：**新增产物时忘了建契约会让它挂**。执行策略是「写严、读松」：
 生产者不合规当场 SystemExit，消费者只拿结构化结论、按既有降级策略裁决
 （README 记着 2026-07-30 悄悄收紧硬闸导致 17:00 链失败的教训）。
 
@@ -113,5 +113,6 @@
 | `nullable` | `market_timing_input.amv_0.as_of` | 渐进填充产物里**刻意留 None** 的字段；每个都必须说清理由 |
 | `only=(...)` | `merge_incremental_market` | **责任边界**：部分写者只为自己写的字段背责，支持点号路径，一律去掉 `required` |
 | 分支型 | `holding_quotes` / `sector_technical_summary` / `holding_technical_summary` | `available=False` 时后面的字段**全不存在**，契约只能要求普遍字段 |
+| 能力边界 | —— | 只查**字段**，查不出**跨字段矛盾**（如 `transport_verified=False` 却 `confirmed=True`）；那类不变量靠单元测试 |
 
 `DATA_FLOW_CONTRACT.md` 仍是**给人读**的数据流全景；字段级真相以 `contracts.py` 为准。

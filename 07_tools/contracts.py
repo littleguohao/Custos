@@ -34,6 +34,21 @@
 在源头失败比让下游猜要好 —— 这也让排错从「下游哪个字段是 None」
 变成「哪个生产者写坏了」。
 
+## 能力边界：只查**字段**，查不出**跨字段矛盾**
+
+契约能查「字段存在 / 类型对 / 枚举在域内 / 非有限值拒收」，
+**查不出多个字段之间的逻辑矛盾**。实例：
+
+    {"transport_verified": False, "confirmed": True, "quality": "confirmed"}
+
+每个字段单看都合法，但组合起来自相矛盾（传输未校验却声称已确认）。
+这类不变量靠**单元测试**保证 —— 上例由
+`tests/test_rss_collector.py::TestTierQuality::test_unverified_transport_never_confirmed`
+覆盖（参数化四个 tier，全部要求 candidate）。
+
+不把跨字段检查做进契约是有意的：那需要在 spec 里写谓词，
+而谓词的可读性和可测性都不如一条带说明的单元测试。
+
 ## 两类产物，契约的约束对象不同
 
     **终态产物**（`runtime_gate` / `risk_decision` / `chief_decision` / `b1_holding_state`）
@@ -86,6 +101,12 @@ SECTOR_PERMISSIONS = {"支持", "观察", "回避"}
 # `amv_0.quality` 的取值域。只有 merge_incremental_market 会置 confirmed
 # （数据日可证）；collector 手工 --amv 时刻意不置，门控按 candidate 处理。
 AMV_QUALITY = {"confirmed", "candidate", "auto", "missing", "unknown"}
+# score_candidates 的分层域（A/B/C/D 四档，RESONANCE_MATRIX 的值域）
+BUCKETS = {"A", "B", "C", "D"}
+# final_close_review 的报告可信度
+REPORT_QUALITY = {"complete", "degraded"}
+# rss_collector._tier_quality 的输出域
+EVIDENCE_QUALITY = {"confirmed", "candidate"}
 FRESHNESS = {"confirmed", "stale", "missing", "candidate", "auto"}
 
 # ── 已知的 new_position_permission 取值。它是**从 markdown 报告正则抽出来的**
@@ -400,6 +421,205 @@ SPECS: dict[str, dict] = {
             "rule_review": {"type": dict, "required": True},
             "unavailable": {"type": list, "required": True},
             # ⚠️ 复盘层是**解释**不是裁决 —— 这句必须在产物里。
+            "permission_rule": {"type": str, "required": True, "non_empty": True},
+        },
+    },
+
+    # ══ 第五批（2026-08-07）：扫描发现的剩余产物
+    # ⚠️ **刻意不纳入**的几类（不是漏了）：
+    #   · run log / `daily_pipeline_log` / `1445_review.md`
+    #       —— **执行痕迹**不是决策产物。stage 成败已由退出码与
+    #          `pipeline_kit.write_run_log` 的固定结构保证，再加契约是重复。
+    #   · `manual_position_updates` —— **人工输入**，不是本项目的产出，
+    #       形状由外部决定；校验点应在读取侧（`apply_manual_position_updates`）。
+    #   · `premarket_chief_decision` —— 它是 `chief_decision` 的 `shutil.copy2`
+    #       **副本**（daily_pipeline:246），schema 完全相同、源头已 require
+    #       ⇒ 副本无需再校验。
+    #   · `holding_sector_mapping_enriched` —— 可选产物，取不到时
+    #       `batch_holding_technical` 会回落 `current_positions.json`
+    #       （daily_pipeline 注释写明），即它缺失是**已设计的正常路径**。
+
+    # collect_intraday_snapshot.main —— 14:45 盘中快照
+    "intraday_snapshot": {
+        "kind": "object",
+        "fields": {
+            "date": {"type": str, "required": True, "non_empty": True},
+            # ⚠️ 盘中快照的 quality 直接决定 14:45 报告敢不敢用它算动作。
+            "quality": {"type": str, "required": True, "non_empty": True},
+            # ⚠️ `indices_ok` 是**计数**（成功取到的指数条数）而不是布尔 ——
+            # 名字带 `_ok` 容易读成布尔，实测是 int。名字有误导性但不改它：
+            # 改名要动消费端，而契约把真实类型写在这里同样能防误用。
+            "indices_ok": {"type": (int, float), "required": True, "finite": True},
+        },
+    },
+    # tq_sector.main —— 板块成分表（sector_phase / sector_mainstream 的下层）
+    "tq_sector_map": {
+        "kind": "object",
+        "fields": {
+            "as_of": {"type": str, "required": True, "non_empty": True},
+            "source": {"type": str, "required": True, "non_empty": True},
+            "sector_count": {"type": (int, float), "required": True, "finite": True},
+            "stock_total": {"type": (int, float), "required": True, "finite": True},
+            # ⚠️ `sectors` 是**数组**不是对象（`tq_sector.py:334` 返回 `sectors` 列表）。
+            # 第一版猜成 dict，接生产者时被既有测试当场打回 —— 又一次「不能凭想象写 spec」。
+            "sectors": {"type": list, "required": True},
+            # ⚠️ `quality.name_coverage` / `sector_success_rate` 决定这份成分表
+            # 能不能当全量用 —— 残缺的成分表会让板块因子算在**子集**上而不自知。
+            "quality": {"type": dict, "required": True},
+            "errors": {"type": list, "required": True},
+        },
+    },
+    # holding_sector_mapper.main —— 落盘是**数组**（持仓 → 板块映射）
+    "holding_sector_mapping": {
+        "kind": "array",
+        "items": {
+            "code": {"type": str, "required": True, "non_empty": True},
+            "name": {"type": str, "required": True},
+        },
+    },
+
+    # ══ 第四批（2026-08-07）：硬失败链之外的产物，按需铺完
+    # 这批的共同点是**都不阻断日常链**，所以契约的价值主要在
+    # 「消费端读到的东西是不是它以为的东西」，而不是防止链路挂掉。
+
+    # score_candidates.score_all —— 选股链终点，18:00 独立链（不阻断三份报告）
+    "stock_pool": {
+        "kind": "object",
+        "fields": {
+            "date": {"type": str, "required": True, "non_empty": True},
+            "status": {"type": str, "required": True, "non_empty": True},
+            "candidates": {"type": list, "required": True, "items": {
+                "code": {"type": str, "required": True, "non_empty": True},
+                "bucket": {"type": str, "required": True, "choices": BUCKETS},
+                # ⚠️ `next_step` 是「这只票下一步能做什么」，A/B/C/D 分层的落点。
+                "next_step": {"type": str, "required": True, "non_empty": True},
+                "risk_flags": {"type": list, "required": True},
+                "entry_reason": {"type": list, "required": True},
+            }},
+            "bucket_counts": {"type": dict, "required": True},
+        },
+    },
+    # final_close_review.main —— 17:00 复盘产物（md 之外的机器可读版）
+    "final_review": {
+        "kind": "object",
+        "fields": {
+            "date": {"type": str, "required": True, "non_empty": True},
+            # ⚠️ `report_quality` 是「这份复盘有多可信」，degraded 时下游不得当完整证据。
+            "report_quality": {"type": str, "required": True, "choices": REPORT_QUALITY},
+            "unavailable": {"type": list, "required": True},
+            "revalued_positions": {"type": list, "required": True},
+            "next_day_plan": {"type": dict, "required": True},
+            # ⚠️ 这个布尔来自门控，决定次日计划能不能给精确数量。
+            "precise_quantity_allowed": {"type": bool, "required": True},
+            "quotes_current": {"type": bool, "required": True},
+            "technical_current": {"type": bool, "required": True},
+        },
+    },
+    # portfolio_review_report.main —— 落盘是**数组**。RiskDecision 的直接上游。
+    "holding_review": {
+        "kind": "array",
+        "items": {
+            "code": {"type": str, "required": True, "non_empty": True},
+            # ⚠️ `action` / `priority` 会被 build_risk_decision 转成风险条目
+            # （止损/清仓 ⇒ 高优先），标错就直接错在 RiskDecision 里。
+            "action": {"type": str, "required": True, "non_empty": True},
+            "priority": {"type": str, "required": True, "choices": B1_PRIORITY},
+            "reason": {"type": list, "required": True},
+        },
+    },
+    # calc_mfe_mae.main
+    "mfe_mae": {
+        "kind": "object",
+        "fields": {
+            "date": {"type": str, "required": True, "non_empty": True},
+            # ⚠️ 必须报 coverage —— 「卖飞 N 笔」不说分母会被读成「没卖飞」
+            # （weekly_review._sell_fly_review 同类教训）。
+            "coverage": {"type": dict, "required": True},
+            "holdings": {"type": list, "required": True},
+        },
+    },
+    # collect_fund_flow.main
+    "fund_flow_rank": {
+        "kind": "object",
+        "fields": {
+            "date": {"type": str, "required": True, "non_empty": True},
+            "status": {"type": str, "required": True, "choices": {"ok", "partial", "failed"}},
+            "stock_rank": {"type": list, "required": True},
+            "sector_rank": {"type": dict, "required": True},
+            # ⚠️ 分板块类型的失败状态要单独留痕：industry 成功而 concept 失败时，
+            # 顶层 status=partial 说不出是哪个坏了。
+            "sector_rank_status": {"type": dict, "required": True},
+            "source": {"type": str, "required": True, "non_empty": True},
+        },
+    },
+    # formula_screen.main
+    # ⚠️ 字段取自**落盘的 `result`**，不是只被 print 的 `summary` ——
+    # 第一版按 summary 提字段（它有 date/hit_total，result 没有），接生产者时才发现。
+    # 教训：契约要对着**真正写进文件的那个对象**建。
+    "formula_hits": {
+        "kind": "object",
+        "fields": {
+            "status": {"type": str, "required": True, "non_empty": True},
+            "universe_size": {"type": (int, float), "required": True, "finite": True},
+            "universe_source": {"type": str, "required": True, "non_empty": True},
+            # ⚠️ ST 硬排除的可信度标记 —— `stock_names.resolve_name_map` 的 diag 传下来。
+            # 它不是 ok 就意味着 ST 排除不完全可信（见 stock_names 模块 docstring）。
+            "st_filter": {"type": str, "required": True, "non_empty": True},
+            "formulas": {"type": list, "required": True},
+        },
+    },
+    # enrich_candidates.enrich —— 同上，字段取自落盘的 `result`
+    "candidates_enriched": {
+        "kind": "object",
+        "fields": {
+            "status": {"type": str, "required": True, "non_empty": True},
+            "candidates": {"type": list, "required": True},
+            # ⚠️ 被剔除的票要留清单 —— 否则「候选少」无法归因
+            # （是没命中还是被筛掉了）。
+            "excluded": {"type": list, "required": True},
+            "st_filter": {"type": str, "required": True, "non_empty": True},
+            # ⚠️ 公式命中来自 TQ 在线（按最新交易日报出），而本段用本地日线
+            # `last_date==date` 校验 —— 两者口径不同，这句话把它写进产物。
+            "signal_date_contract": {"type": str, "required": True, "non_empty": True},
+        },
+    },
+    # rss_collector.main —— 落盘是**数组**
+    "rss_evidence": {
+        "kind": "array",
+        "items": {
+            "item_id": {"type": str, "required": True, "non_empty": True},
+            "source_id": {"type": str, "required": True, "non_empty": True},
+            "source_tier": {"type": str, "required": True, "non_empty": True},
+            "title": {"type": str, "required": True},
+            # ⚠️ 这三个一起决定「这条能不能当既成事实」。
+            # `transport_verified=False` 时 quality 必须是 candidate
+            # （tier 说的是机构权威性，transport 说的是字节真来自那个机构）。
+            "quality": {"type": str, "required": True, "choices": EVIDENCE_QUALITY},
+            "confirmed": {"type": bool, "required": True},
+            "transport_verified": {"type": bool, "required": True},
+        },
+    },
+    # rss_filter.main —— 落盘是**数组**（选中的候选）
+    "rss_candidates": {
+        "kind": "array",
+        "items": {
+            "item_id": {"type": str, "required": True, "non_empty": True},
+            "source_id": {"type": str, "required": True, "non_empty": True},
+            "relevance_score": {"type": (int, float), "required": True, "finite": True},
+            "matched_themes": {"type": list, "required": True},
+            "matched_holdings_or_pool": {"type": dict, "required": True},
+            "filter_session": {"type": str, "required": True, "non_empty": True},
+        },
+    },
+    # postclose_news_digest.main
+    "postclose_news_digest": {
+        "kind": "object",
+        "fields": {
+            "date": {"type": str, "required": True, "non_empty": True},
+            "status": {"type": str, "required": True, "non_empty": True},
+            "sections": {"type": dict, "required": True},
+            "missing": {"type": list, "required": True},
+            # ⚠️ 新闻只能加验证条件或收紧风险，**不能直接放宽交易权限**。
             "permission_rule": {"type": str, "required": True, "non_empty": True},
         },
     },

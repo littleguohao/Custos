@@ -36,6 +36,7 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from paths import SECTORS_DIR, TDX_PYPLUGINS, TDX_ROOT  # noqa: E402
+from contracts import require  # noqa: E402
 
 SOURCE = "tq_tqcenter"
 # tdxzs3.cfg 是 tdxzs.cfg 的超集（额外含 467 个 881xxx 细分行业），优先使用
@@ -357,6 +358,7 @@ def main(argv: Optional[list] = None) -> int:
 
     out_path = SECTORS_DIR / f"{args.date}_tq_sector_map.json"
     SECTORS_DIR.mkdir(parents=True, exist_ok=True)
+    require("tq_sector_map", result)
     out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 
     quality = result.get("quality") or {}

@@ -26,6 +26,7 @@ from code_utils import bare_code as bare  # noqa: E402
 from code_utils import finite  # noqa: E402
 from code_utils import fnum as optional_finite  # noqa: E402
 from fmt import pct_text  # noqa: E402
+from contracts import require  # noqa: E402
 
 DATA = BASE / "01_data"
 REV = BASE / "04_reviews" / "daily"
@@ -357,6 +358,7 @@ def main():
         "output": str(out),
     }
     json_out = REV / f"{day}_final_review.json"
+    require("final_review", payload)
     json_out.write_text(json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
     print(out)
     print(json_out)

@@ -14,6 +14,7 @@ if str(TOOLS_DIR) not in sys.path:
 from paths import BASE  # noqa: E402
 from paths import read_json as load  # noqa: E402
 from paths import write_json as dump  # noqa: E402
+from contracts import require  # noqa: E402
 from premarket_intel_schema import validate_premarket_intelligence  # noqa: E402
 # ⚠️ **必须包限定导入** `news.premarket_intel_schema`。它持有可变的模块级状态
 # （`PREMARKET_DIR`，测试要 monkeypatch）。`07_tools` 与 `07_tools/news` 都在
@@ -132,6 +133,7 @@ def main():
         "permission_rule": "news may add validation or tighten risk; it cannot directly increase trading permissions",
         "sources": [str(rss_path), str(intel_path or (DATA / "news" / "premarket" / f"{day}_premarket_intelligence.json"))],
     }
+    require("postclose_news_digest", result)
     dump(DATA / "news" / "postclose" / f"{day}_postclose_news_digest.json", result)
     print(json.dumps(result, ensure_ascii=True))
 

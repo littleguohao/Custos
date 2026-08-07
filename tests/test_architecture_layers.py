@@ -229,6 +229,21 @@ class TestContractsLayer:
             "market_timing/theme_tracker_report.py": "sector_technical_summary",
             "close_review/execution_review.py": "execution_review",
             "close_review/review_enrichment.py": "review_enrichment",
+            # 第四批：硬失败链之外，铺完剩余
+            "screening/score_candidates.py": "stock_pool",
+            "close_review/final_close_review.py": "final_review",
+            "market_timing/portfolio_review_report.py": "holding_review",
+            "analysis/calc_mfe_mae.py": "mfe_mae",
+            "collect/collect_fund_flow.py": "fund_flow_rank",
+            "screening/formula_screen.py": "formula_hits",
+            "screening/enrich_candidates.py": "candidates_enriched",
+            "news/rss_collector.py": "rss_evidence",
+            "news/rss_filter.py": "rss_candidates",
+            "news/postclose_news_digest.py": "postclose_news_digest",
+            # 第五批：扫描发现的剩余产物
+            "market_timing/collect_intraday_snapshot.py": "intraday_snapshot",
+            "local_tdx/tq_sector.py": "tq_sector_map",
+            "market_timing/holding_sector_mapper.py": "holding_sector_mapping",
         }
         for rel, artifact in expect.items():
             src = (TOOLS / rel).read_text(encoding="utf-8")
@@ -266,3 +281,42 @@ class TestResearchProductionSplit:
         got = {p.stem for p in (TOOLS / "screening").glob("*.py")} - {"__init__"}
         assert got == {"formula_screen", "enrich_candidates", "score_candidates",
                        "candidate_table", "manual_pools", "signal_labels", "financials"}, got
+
+
+class TestContractCoverageOfArtifacts:
+    """⚠️ 所有**按日期命名的 JSON 产物**都必须有契约，或在 `contracts.py` 里
+    **写明为什么不纳入**。
+
+    2026-08-07 铺完时的口径：24 个产物有契约，刻意不纳入的 5 类是
+    run log / md 报告 / 人工输入 / 副本（`premarket_chief_decision`）/
+    可选产物（`holding_sector_mapping_enriched`）—— 理由都写在 contracts.py 的
+    「第五批」注释块里。
+
+    这条测试防的是**新增产物时忘了建契约**：新产物一出现就会让它挂，
+    迫使作者要么建契约、要么在那个注释块里写明理由。
+    """
+
+    # 刻意不纳入，理由见 contracts.py「第五批」注释块
+    EXEMPT = {
+        "daily_pipeline_log", "1445_review",          # 执行痕迹，非决策产物
+        "manual_position_updates",                     # 人工输入，形状由外部决定
+        "premarket_chief_decision",                    # chief_decision 的 copy2 副本
+        "holding_sector_mapping_enriched",             # 可选产物，缺失是设计好的路径
+    }
+
+    def test_every_dated_artifact_has_contract_or_exemption(self):
+        import re
+        import sys
+        sys.path.insert(0, str(TOOLS))
+        import contracts
+
+        found = set()
+        for p in TOOLS.rglob("*.py"):
+            for m in re.finditer(r'f?"\{?[a-z_.]*date[a-z_]*\}?_([a-z0-9_]+)\.json"',
+                                 p.read_text(encoding="utf-8")):
+                found.add(m.group(1))
+        missing = sorted(found - set(contracts.SPECS) - self.EXEMPT)
+        assert not missing, (
+            f"这些按日期命名的产物既没有契约、也没登记豁免：{missing}\n"
+            "要么在 contracts.SPECS 里建契约，"
+            "要么在 contracts.py「第五批」注释块 + 本测试的 EXEMPT 里写明理由")

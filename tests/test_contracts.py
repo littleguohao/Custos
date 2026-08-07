@@ -187,11 +187,12 @@ class TestWarningsNotErrors:
         """未定义契约的产物**放行 + 告警**，不阻断 —— 铺量是渐进的，
         不能因为某个产物还没写 spec 就让消费端拿不到结论。
 
-        （原本这条用 `holding_quotes` 当例子，2026-08-07 第三批把它纳入了 ⇒
-        换成仍未纳入的 `mfe_mae`。这类「例子被实现追上」的测试要及时换，
-        否则它会变成断言「某产物永远没有契约」。）
+        ⚠️ 这条**必须用明确虚构的名字**。原本用 `holding_quotes`，第三批把它纳入后
+        测试挂了；改用 `mfe_mae`，第四批又把它纳入、又挂一次。
+        拿真实产物名当「未定义」的例子，等于断言「它**永远**不会有契约」——
+        而铺契约正是在推翻这个断言。用虚构名才测的是 fallback 行为本身。
         """
-        r = C.check("mfe_mae", {"anything": 1})
+        r = C.check("__not_a_real_artifact__", {"anything": 1})
         assert r["valid"] and "尚未定义契约" in r["warnings"][0]
 
 
@@ -511,3 +512,113 @@ class TestReviewStepContracts:
         """⚠️ 复盘层是**解释**不是裁决 —— 这句必须在产物里。"""
         bad = {k: v for k, v in self.ENRICH.items() if k != "permission_rule"}
         assert not C.check("review_enrichment", bad)["valid"]
+
+
+class TestFourthBatch:
+    """第四批：硬失败链之外的产物。这批的价值不是防链路挂掉（它们本来就不阻断），
+    而是「消费端读到的东西是不是它以为的东西」。
+    """
+
+    def test_stock_pool_bucket_domain(self):
+        base = {"date": "2026-08-07", "status": "ok", "bucket_counts": {},
+                "candidates": [{"code": "600000", "bucket": "A",
+                                "next_step": "generate_buy_plan",
+                                "risk_flags": [], "entry_reason": []}]}
+        assert C.check("stock_pool", base)["valid"]
+        bad = {**base, "candidates": [{**base["candidates"][0], "bucket": "S"}]}
+        assert not C.check("stock_pool", bad)["valid"], "分层只有 A/B/C/D"
+
+    def test_final_review_quality_domain(self):
+        base = {"date": "2026-08-07", "report_quality": "degraded", "unavailable": [],
+                "revalued_positions": [], "next_day_plan": {},
+                "precise_quantity_allowed": False, "quotes_current": True,
+                "technical_current": False}
+        assert C.check("final_review", base)["valid"]
+        assert not C.check("final_review", {**base, "report_quality": "ok"})["valid"]
+
+    def test_precise_quantity_allowed_must_be_bool(self):
+        """⚠️ 这个布尔来自门控，决定次日计划能不能给精确数量。
+        `1` 会通过真值判定但不是布尔 —— 类型收紧是为了让「未授权」不能伪装成已授权。"""
+        base = {"date": "2026-08-07", "report_quality": "complete", "unavailable": [],
+                "revalued_positions": [], "next_day_plan": {}, "quotes_current": True,
+                "technical_current": True, "precise_quantity_allowed": 1}
+        assert not C.check("final_review", base)["valid"]
+
+    def test_holding_review_priority_domain(self):
+        """⚠️ `holding_review` 是 RiskDecision 的**直接上游**：
+        `action` ∈ {止损,清仓} ⇒ 高优先风险。`priority` 用 P0-P3。"""
+        ok = [{"code": "600000", "action": "止损", "priority": "P1", "reason": ["破位"]}]
+        assert C.check("holding_review", ok)["valid"]
+        assert not C.check("holding_review",
+                           [{**ok[0], "priority": "高"}])["valid"]
+
+    def test_mfe_mae_requires_coverage(self):
+        """⚠️ 必须报 coverage —— 「卖飞 N 笔」不说分母会被读成「没卖飞」。"""
+        assert C.check("mfe_mae", {"date": "2026-08-07", "coverage": {},
+                                   "holdings": []})["valid"]
+        assert not C.check("mfe_mae", {"date": "2026-08-07", "holdings": []})["valid"]
+
+    def test_fund_flow_status_domain_and_per_type_status(self):
+        """⚠️ `sector_rank_status` 要单独留痕：industry 成功而 concept 失败时，
+        顶层 `status=partial` 说不出是哪个坏了。"""
+        base = {"date": "2026-08-07", "status": "partial", "stock_rank": [],
+                "sector_rank": {}, "sector_rank_status": {"industry": {"status": "ok"},
+                                                          "concept": {"status": "failed"}},
+                "source": "eastmoney_direct_api"}
+        assert C.check("fund_flow_rank", base)["valid"]
+        assert not C.check("fund_flow_rank", {**base, "status": "degraded"})["valid"]
+        assert not C.check("fund_flow_rank",
+                           {k: v for k, v in base.items()
+                            if k != "sector_rank_status"})["valid"]
+
+    def test_formula_hits_fields_come_from_result_not_summary(self):
+        """⚠️ 字段取自**落盘的 `result`**，不是只被 print 的 `summary`。
+
+        第一版按 summary 提字段（它有 `date`/`hit_total`，result 没有），
+        接生产者时才发现 —— 契约要对着**真正写进文件的那个对象**建。
+        """
+        ok = {"status": "ok", "universe_size": 5000, "universe_source": "tq_local",
+              "st_filter": "ok", "formulas": []}
+        assert C.check("formula_hits", ok)["valid"]
+        # summary 才有的键不该被要求
+        assert C.check("formula_hits", {k: v for k, v in ok.items()})["valid"]
+
+    def test_candidates_enriched_records_signal_date_contract(self):
+        """⚠️ 公式命中来自 TQ 在线（按最新交易日报出），而充实段用本地日线
+        `last_date==date` 校验 —— 两者口径不同，这句话必须写进产物。"""
+        ok = {"status": "ok", "candidates": [], "excluded": [], "st_filter": "ok",
+              "signal_date_contract": "公式命中按最新交易日报出；本段以 last_date==date 为准"}
+        assert C.check("candidates_enriched", ok)["valid"]
+        assert not C.check("candidates_enriched",
+                           {k: v for k, v in ok.items()
+                            if k != "signal_date_contract"})["valid"]
+
+    def test_rss_evidence_three_trust_fields(self):
+        """⚠️ `quality` / `confirmed` / `transport_verified` 三个一起决定
+        「这条能不能当既成事实」。契约查各自的域 ——
+        **跨字段矛盾**（未校验却 confirmed）查不出来，
+        由 `test_rss_collector.py::TestTierQuality` 覆盖。"""
+        ok = [{"item_id": "abc", "source_id": "gov", "source_tier": "S", "title": "t",
+               "quality": "candidate", "confirmed": False, "transport_verified": False}]
+        assert C.check("rss_evidence", ok)["valid"]
+        assert not C.check("rss_evidence",
+                           [{**ok[0], "quality": "verified"}])["valid"]
+
+    def test_rss_candidates_requires_item_id(self):
+        """`item_id` 是去重与可追溯的键，`rss_collector` 一定会写。"""
+        ok = [{"item_id": "abc", "source_id": "gov", "relevance_score": 80,
+               "matched_themes": [], "matched_holdings_or_pool": {"names": [], "codes": []},
+               "filter_session": "premarket"}]
+        assert C.check("rss_candidates", ok)["valid"]
+        assert not C.check("rss_candidates",
+                           [{k: v for k, v in ok[0].items() if k != "item_id"}])["valid"]
+
+    def test_postclose_digest_permission_rule(self):
+        """⚠️ 新闻只能加验证条件或收紧风险，**不能直接放宽交易权限**。"""
+        ok = {"date": "2026-08-07", "status": "ok", "sections": {}, "missing": [],
+              "permission_rule": "news may add validation or tighten risk; "
+                                 "it cannot directly increase trading permissions"}
+        assert C.check("postclose_news_digest", ok)["valid"]
+        assert not C.check("postclose_news_digest",
+                           {k: v for k, v in ok.items()
+                            if k != "permission_rule"})["valid"]

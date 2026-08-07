@@ -66,6 +66,7 @@ if _FACTORS_DIR not in sys.path:
 
 from s_shape import sstar_level  # noqa: E402
 from runtime_guards import normalize_regime  # noqa: E402
+from contracts import require  # noqa: E402
 
 SCREENING_DIR = DATA / "screening"
 CZ_SECTOR_PREF_PATH = CZ_SECTOR_PREFERENCE_FILE
@@ -852,6 +853,7 @@ def main(argv: Optional[list] = None) -> int:
 
     STOCK_POOL_DIR.mkdir(parents=True, exist_ok=True)
     out_path = STOCK_POOL_DIR / f"{args.date}_stock_pool.json"
+    require("stock_pool", result)
     out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 
     summary = {

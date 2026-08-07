@@ -31,6 +31,7 @@ if str(LOCAL_TDX_DIR) not in sys.path:
     sys.path.insert(0, str(LOCAL_TDX_DIR))
 
 from paths import MARKET_DIR  # noqa: E402
+from contracts import require  # noqa: E402
 import tq_http  # noqa: E402
 
 SOURCE = "tq_http_snapshot"
@@ -112,6 +113,7 @@ def main(argv: Optional[list] = None) -> int:
 
     MARKET_DIR.mkdir(parents=True, exist_ok=True)
     out_path = MARKET_DIR / f"{args.date}_intraday_snapshot.json"
+    require("intraday_snapshot", result)
     out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 
     summary = {

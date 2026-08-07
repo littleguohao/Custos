@@ -21,6 +21,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 from paths import BASE, cn_today, cn_now
+from contracts import require  # noqa: E402
 
 # 东方财富 push2 的**公开** ut 参数(网页端硬编码在前端 JS 里,非账号凭据、非密钥,
 # 全网通用)。抽成常量只为不再散落三处魔法串;它不是 secret,无需进环境变量。
@@ -137,6 +138,7 @@ def main(argv=None) -> int:
     }
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
+    require("fund_flow_rank", result)
     OUT.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"[OK] fund_flow_rank: {len(stocks)} stocks, {len(sectors.get('industry',[]))} industry sectors, {len(sectors.get('concept',[]))} concept sectors -> {OUT.name}")
     if failed:

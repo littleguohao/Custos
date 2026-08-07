@@ -70,8 +70,19 @@ def _positions(env, rows):
         json.dumps(rows, ensure_ascii=False), encoding="utf-8")
 
 
+_ITEM_SEQ = iter(range(1, 10000))
+
+
 def _item(**kw):
-    base = {"title": "t", "summary": "", "published_at": "2026-08-07T08:00:00+08:00",
+    """一条归一化 RSS 条目。
+
+    ⚠️ **必须带 `item_id`** —— `rss_collector` 一定会写它
+    （`sha256(source_id|guid|link|norm_title)[:24]`，去重与可追溯的键），
+    而 `rss_filter` 的产物契约要求它。2026-08-07 铺契约时这批 fixture
+    因为没有它而全挂 —— 是 fixture 不真实，不是契约太严。
+    """
+    base = {"item_id": f"id{next(_ITEM_SEQ):04d}",
+            "title": "t", "summary": "", "published_at": "2026-08-07T08:00:00+08:00",
             "source_id": "media1", "source_tier": "B", "category": "media",
             "source_url": "https://x.com/a"}
     base.update(kw)

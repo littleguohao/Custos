@@ -33,6 +33,7 @@ for p in (TOOLS_DIR, TOOLS_DIR / "local_tdx"):
         sys.path.insert(0, str(p))
 
 from paths import DATA, SCREEN_FORMULA_REGISTRY_FILE  # noqa: E402
+from contracts import require  # noqa: E402
 import tq_http  # noqa: E402
 from tq_sector import is_tdxw_running  # noqa: E402
 import local_tdx_data  # noqa: E402
@@ -453,6 +454,7 @@ def main(argv: Optional[list] = None) -> int:
 
     SCREENING_DIR.mkdir(parents=True, exist_ok=True)
     out_path = SCREENING_DIR / f"{args.date}_formula_hits.json"
+    require("formula_hits", result)
     out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 
     summary = {

@@ -30,6 +30,7 @@ if str(TOOLS_DIR) not in sys.path:
 
 from paths import BASE, TDX_ROOT  # noqa: E402
 from code_utils import suffix  # noqa: E402
+from contracts import require  # noqa: E402
 
 OUT_DIR = BASE / "01_data" / "holdings"
 DEFAULT_POSITIONS = BASE / "01_data" / "trades" / "current_positions.json"
@@ -204,6 +205,7 @@ def main():
     date = args.date or pd.Timestamp.now().strftime("%Y-%m-%d")
     out_json = OUT_DIR / f"{date}_holding_sector_mapping.json"
     out_csv = OUT_DIR / f"{date}_holding_sector_mapping.csv"
+    require("holding_sector_mapping", rows)
     out_json.write_text(json.dumps(rows, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     pd.DataFrame(rows).drop(columns=["raw_relation"]).to_csv(out_csv, index=False, encoding="utf-8-sig")
     print(out_json)

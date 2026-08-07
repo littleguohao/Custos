@@ -84,6 +84,7 @@ import s_shape as s_shape_mod  # noqa: E402
 import financials as financials_mod  # noqa: E402
 import sector_phase as sector_phase_mod  # noqa: E402
 from indicators import bbi_state, ema, kdj, macd, resample, zhixing_state, _infer_price_limit # noqa: E402
+from contracts import require  # noqa: E402
 
 SCREENING_DIR = DATA / "screening"
 SECTOR_CODE_MAP = SECTORS_DIR / "sector_code_map.json"
@@ -1337,6 +1338,7 @@ def main(argv: Optional[list] = None) -> int:
 
     SCREENING_DIR.mkdir(parents=True, exist_ok=True)
     out_path = SCREENING_DIR / f"{args.date}_candidates_enriched.json"
+    require("candidates_enriched", result)
     out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
 
     summary = {
