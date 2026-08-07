@@ -233,3 +233,157 @@ class TestEvidenceDate:
 
     def test_null_rejected(self):
         assert not C.check("risk_decision", {**VALID_RISK, "evidence_date": None})["valid"]
+
+
+VALID_MTI = {
+    "date": "2026-08-07", "collector_version": "v1",
+    "amv_0": {"amv_zone": "", "amv_change_pct": None, "as_of": None},
+    "overseas_market": {}, "a_share_indices": {}, "market_breadth": {},
+    "sentiment": {}, "turnover": {}, "theme": {}, "macro_policy": {},
+    "data_quality": {},
+}
+
+
+class TestProgressiveFillArtifact:
+    """⚠️ `market_timing_input` 是**渐进填充产物**，契约只管**结构**。
+
+    它是全项目扇出最大的产物：**19 个消费者**，12 个读 `amv_0`。
+    4 个 stage 依次改写它（collector → sync_compass_amv 填 amv_0day →
+    merge 置 quality/effective_state → amv_state 切 regime），
+    要求「值已填」会让第一个写者就失败。
+
+    字段集与空值形态**核对过真实 collector 产出**（跑了带/不带 `--amv` 两种）：
+    `amv_change_pct: null`、`amv_zone: ""`（空串）、`as_of: null`。
+    """
+
+    def test_collector_baseline_valid(self):
+        assert C.check("market_timing_input", VALID_MTI)["valid"]
+
+    def test_amv_zone_empty_string_allowed(self):
+        """0AMV 未填时 `amv_zone` 就是空串（实测），不得因此判畸形。"""
+        assert C.check("market_timing_input",
+                       {**VALID_MTI, "amv_0": {**VALID_MTI["amv_0"], "amv_zone": ""}})["valid"]
+
+    def test_as_of_null_allowed_deliberately(self):
+        """⚠️ `as_of` **刻意留 None**（collector 源码原话）：08:50 手工读数属哪个
+        数据日无法自证，「编一个 as_of 等于给门控一个假的新鲜度」。"""
+        assert C.check("market_timing_input", VALID_MTI)["valid"]
+
+    def test_amv_change_pct_nan_still_rejected(self):
+        """允许 null 不等于允许 NaN —— NaN 会让下游阈值判定静默为 False。"""
+        bad = {**VALID_MTI, "amv_0": {**VALID_MTI["amv_0"], "amv_change_pct": float("nan")}}
+        assert not C.check("market_timing_input", bad)["valid"]
+
+    def test_missing_section_rejected(self):
+        """11 个顶层节缺任一即畸形 —— 消费端 19 处 `.get()` 会静默拿到 None。"""
+        bad = {k: v for k, v in VALID_MTI.items() if k != "turnover"}
+        r = C.check("market_timing_input", bad)
+        assert not r["valid"] and any("turnover" in e for e in r["errors"])
+
+    def test_quality_and_effective_state_optional_but_domained(self):
+        """⚠️ 这两个由 **merge** 写、collector 刻意不置 ⇒ 非必填；
+        但**出现时必须在域内** —— 正是审计 B1 的所在。"""
+        assert C.check("market_timing_input", VALID_MTI)["valid"], "缺它们要放行"
+        bad = {**VALID_MTI, "amv_0": {**VALID_MTI["amv_0"], "effective_state": "空头触发"}}
+        assert not C.check("market_timing_input", bad)["valid"], "未归一的词表必须拒收"
+
+
+class TestOnlyScoping:
+    """⚠️ `only` 是**责任边界**，不是「放松校验」的出口。
+
+    实测两次撞在这上面（都在 `merge_incremental_market` 上）：
+      · 它用 `setdefault`，只为**有增量数据的节**建节 ⇒ 只给 breadth 增量时，
+        sentiment/turnover 本就不该存在
+      · 它的第一处落盘**根本不碰 amv_0** ⇒ 要求 amv_0 存在是替 collector 背责
+    ⇒ `only` 一律去掉 `required`：部分写者只保证「我写的字段格式正确」，
+       存在性由文档创建者（collector 的完整 require）保证。
+    """
+
+    OWN = ("amv_0.quality", "amv_0.effective_state", "amv_0.as_of")
+
+    def test_catches_unnormalized_regime(self):
+        """审计 B1：`effective_state` 写成「空头触发」会让下游精确等值比较落空、
+        `allow_add=False` 漏置。契约在 merge 那一步就该拦住。"""
+        r = C.check("market_timing_input",
+                    {"amv_0": {"effective_state": "空头触发", "quality": "confirmed"}},
+                    only=self.OWN)
+        assert not r["valid"] and "空头触发" in r["errors"][0]
+
+    def test_accepts_normalized(self):
+        assert C.check("market_timing_input",
+                       {"amv_0": {"effective_state": "空头", "quality": "confirmed"}},
+                       only=self.OWN)["valid"]
+
+    def test_catches_misspelled_quality(self):
+        r = C.check("market_timing_input", {"amv_0": {"quality": "comfirmed"}},
+                    only=self.OWN)
+        assert not r["valid"]
+
+    def test_absent_section_allowed(self):
+        """整块不存在是第一处落盘的常态 —— 不得判畸形。"""
+        assert C.check("market_timing_input", {}, only=self.OWN)["valid"]
+
+    def test_unlisted_sibling_not_checked(self):
+        """⚠️ `amv_zone` 不在 only 里就**不该被检查** —— 它是 collector 派生的。
+
+        （第一版的 `_narrow` 把裁剪结果合并回完整集，等于没裁，
+        `amv_0.amv_zone: 缺失` 照样报出来。）
+        """
+        assert C.check("market_timing_input", {"amv_0": {"quality": "confirmed"}},
+                       only=self.OWN)["valid"]
+
+    def test_typo_in_only_path_warns(self):
+        """`only` 里的路径拼错会让校验**变成空操作** —— 必须告警。"""
+        r = C.check("market_timing_input", {}, only=("amv_0.qualtiy",))
+        assert any("only" in w for w in r["warnings"])
+
+
+class TestSectorStateContract:
+    VALID = [{"date": "2026-08-07", "sector": "半导体", "state": "主升", "trend": "上涨",
+              "trade_permission": "支持", "score": 80.0, "risk_flags": []}]
+
+    def test_baseline(self):
+        assert C.check("sector_state", self.VALID)["valid"]
+
+    def test_nan_score_rejected(self):
+        """⚠️ 这条对应实际 bug：`score` 为 NaN 时 `nan >= 60` 恒为 False
+        ⇒ 板块**静默降级**成「观察」且无告警。生产者已过 fnum，契约在此兜底。"""
+        bad = [{**self.VALID[0], "score": float("nan")}]
+        assert not C.check("sector_state", bad)["valid"]
+
+    def test_null_score_allowed(self):
+        """板块技术面没给分是正常的 ⇒ null 放行（与 NaN 区别对待）。"""
+        assert C.check("sector_state", [{**self.VALID[0], "score": None}])["valid"]
+
+    @pytest.mark.parametrize("field,bad", [
+        ("state", "暴涨"), ("trend", "横盘"), ("trade_permission", "买入")])
+    def test_enum_domains(self, field, bad):
+        assert not C.check("sector_state", [{**self.VALID[0], field: bad}])["valid"]
+
+    def test_empty_list_valid(self):
+        assert C.check("sector_state", [])["valid"]
+
+
+class TestHoldingTechnicalContract:
+    """⚠️ **分支型产物**：`technical_available=False` 时后面那堆技术字段**全不存在**
+    （生产者直接 `return {**it, 'technical_available': False, 'technical_error': ...}`）。
+    所以契约只要求 `code` + `technical_available` —— 要求技术字段会让
+    「取不到技术面」这个正常状态被判成畸形产物。
+    """
+
+    def test_both_branches_valid(self):
+        rows = [{"code": "600000", "technical_available": True,
+                 "latest_date": "2026-08-07", "trend_state": "上涨"},
+                {"code": "600001", "technical_available": False,
+                 "technical_error": "vipdoc 缺失"}]
+        assert C.check("holding_technical_summary", rows)["valid"]
+
+    def test_missing_code_rejected(self):
+        assert not C.check("holding_technical_summary", [{"technical_available": True}])["valid"]
+
+    def test_available_must_be_bool(self):
+        assert not C.check("holding_technical_summary",
+                           [{"code": "600000", "technical_available": "yes"}])["valid"]
+
+    def test_empty_list_valid(self):
+        assert C.check("holding_technical_summary", [])["valid"]

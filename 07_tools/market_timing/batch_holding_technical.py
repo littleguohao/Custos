@@ -20,6 +20,7 @@ if str(TOOLS_DIR) not in sys.path:
 
 from paths import BASE  # noqa: E402
 from paths import read_json as load  # noqa: E402
+from contracts import require  # noqa: E402
 
 PY=Path(sys.executable)
 TECH=BASE/'07_tools'/'market_timing'/'technical_monitor.py'
@@ -154,6 +155,8 @@ def main(argv=None):
     summary=build_summary(items, a.date, use_subprocess=a.subprocess)
     dest=HOLD/f'{a.date}_holding_technical_summary.json'
     dest.parent.mkdir(parents=True, exist_ok=True)
+    # ⚠️ 落盘前校验：11 个消费者，其中 8 处读 latest_date 做陈旧判定。
+    require("holding_technical_summary", summary)
     dest.write_text(json.dumps(summary,ensure_ascii=False,indent=2),encoding='utf-8')
     print(dest)
     return 0

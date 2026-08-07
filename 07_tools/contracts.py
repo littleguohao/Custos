@@ -34,6 +34,18 @@
 在源头失败比让下游猜要好 —— 这也让排错从「下游哪个字段是 None」
 变成「哪个生产者写坏了」。
 
+## 两类产物，契约的约束对象不同
+
+    **终态产物**（`runtime_gate` / `risk_decision` / `chief_decision` / `b1_holding_state`）
+        一次写成、之后只被读。契约管**值**：字段必须有内容、枚举必须在域内。
+
+    **渐进填充产物**（`market_timing_input`）
+        多个 stage 依次读-改-写（collector → sync_compass_amv → merge → amv_state），
+        每一步都只填自己那部分。契约只能管**结构**（哪些节存在、类型对不对），
+        不能要求「值已填」—— 那会让第一个写者就失败。
+        这类产物里有**刻意留 None** 的字段（用 `nullable`），
+        每个都必须在 spec 里说清为什么。
+
 ## 只覆盖钱的路径
 
 四个产物：`runtime_gate`（权限总闸）、`risk_decision`（风控否决）、
@@ -52,6 +64,13 @@ RISK_LEVELS = {"普通", "提高", "强风控"}            # generate_risk_and_s
 GATE_STATUS = {"pass", "degraded", "blocked"}       # runtime_guards.market_quality_gate / position_gate
 RISK_PRIORITY = {"高", "中", "低"}                  # build_risk_decision
 B1_PRIORITY = {"P0", "P1", "P2", "P3"}              # b1_holding_state.evaluate
+# generate_risk_and_sectors.build_sector_state 的三个枚举域（与 normalize_stage 一致）
+SECTOR_STATES = {"退潮", "主升", "修复", "分歧", "震荡"}
+SECTOR_TRENDS = {"上涨", "横盘震荡", "下跌"}
+SECTOR_PERMISSIONS = {"支持", "观察", "回避"}
+# `amv_0.quality` 的取值域。只有 merge_incremental_market 会置 confirmed
+# （数据日可证）；collector 手工 --amv 时刻意不置，门控按 candidate 处理。
+AMV_QUALITY = {"confirmed", "candidate", "auto", "missing", "unknown"}
 FRESHNESS = {"confirmed", "stale", "missing", "candidate", "auto"}
 
 # ── 已知的 new_position_permission 取值。它是**从 markdown 报告正则抽出来的**
@@ -69,6 +88,13 @@ def _type_name(t) -> str:
 
 def _check_field(path: str, value: Any, spec: dict, errors: list, warnings: list) -> None:
     if value is None:
+        if spec.get("nullable"):
+            # ⚠️ `nullable` 只给**渐进填充产物**里「刻意留 None」的字段用，
+            # 且必须能说出为什么。反例：`market_timing_input.amv_0.as_of` 就是
+            # 刻意的 —— 08:50 手工填的 0AMV 属哪个数据日无法自证，
+            # 「编一个 as_of 等于给门控一个假的新鲜度」（源码原话）。
+            # 不要拿它当「懒得填」的出口：null 与缺失在下游会走不同分支。
+            return
         errors.append(f"{path}: 值为 null（字段存在但没有内容 —— "
                       f"`.get(k, 默认值)` 在这种情况下返回 None 而不是默认值）")
         return
@@ -154,6 +180,66 @@ SPECS: dict[str, dict] = {
             "generated_at": {"type": str, "required": True, "non_empty": True},
         },
     },
+    # batch_holding_technical.analyze_one —— 落盘是**数组**（每持仓一条）。
+    # **11 个消费者**（扇出第二），其中 27 处读 `code`、8 处读 `latest_date`。
+    # ⚠️ 这是**分支型产物**：`technical_available=False` 时后面那堆技术字段**全不存在**
+    # （生产者直接 `return {**it, 'technical_available': False, 'technical_error': ...}`）。
+    # 所以契约只能要求这两个字段 + code —— 要求技术字段会让「取不到技术面」这个
+    # 正常状态被判成畸形产物。技术字段的存在性由消费端按 `technical_available` 分支判。
+    "holding_technical_summary": {
+        "kind": "array",
+        "items": {
+            "code": {"type": str, "required": True, "non_empty": True},
+            # ⚠️ 消费端 8 处读它做**陈旧判定**（`runtime_gate.technical_freshness`
+            # 就靠它比对目标日）。取不到技术面时它不存在，所以这里不 required——
+            # 但 `technical_available=True` 却缺 latest_date 是矛盾态，见下面 warning。
+            "technical_available": {"type": bool, "required": True},
+        },
+    },
+
+    # market_timing_collector.main —— ⚠️ **渐进填充产物**（见模块 docstring）
+    #
+    # 它是全项目扇出最大的产物：**19 个消费者**，其中 12 个读 `amv_0`。
+    # 契约只管**结构**：多个 stage 依次改写它
+    # （collector → sync_compass_amv 填 amv_0day → merge 置 quality/effective_state
+    #  → amv_state 切 regime），要求「值已填」会让第一个写者就失败。
+    "market_timing_input": {
+        "kind": "object",
+        "fields": {
+            "date": {"type": str, "required": True, "non_empty": True},
+            "collector_version": {"type": str, "required": True, "non_empty": True},
+            # ⚠️ 12 个消费者读它，也是审计 B1 与 v0.22（confirmed 门）的所在。
+            "amv_0": {"type": dict, "required": True, "fields": {
+                # `amv_zone` 由 `amv_zone(args.amv)` 派生，collector 一定会写。
+                # **不设 non_empty**：实测 0AMV 未填时它就是空串（已核对真实产出）。
+                "amv_zone": {"type": str, "required": True},
+                # 0AMV 是**盘后**指标，08:50 手工 --amv 时值可能还没有 ⇒ 允许 null。
+                # 门控按「缺 0AMV」降级处理（不得 pass），那是既有校准过的行为。
+                "amv_change_pct": {"type": (int, float), "required": True,
+                                   "nullable": True, "finite": True},
+                # ⚠️ **刻意留 None**（collector 源码原话）：08:50 手工读数属哪个数据日
+                # 无法自证（盘前能看到的最新值其实是 T-1），
+                # 「编一个 as_of 等于给门控一个假的新鲜度」。
+                # 唯一会写它的是 merge_incremental_market（数据日可证）。
+                "as_of": {"type": str, "required": True, "nullable": True},
+                # ⚠️ 以下两个由 **merge_incremental_market** 写，collector 刻意不置
+                # （门控按 candidate 处理）⇒ `required=False`，
+                # 但**出现时必须在域内** —— 这正是审计 B1 的所在：
+                # `effective_state` 写成「空头触发」这种未归一的值，会让
+                # 下游精确等值比较落空、`allow_add=False` 漏置。
+                "quality": {"type": str, "required": False, "choices": AMV_QUALITY},
+                "effective_state": {"type": str, "required": False, "choices": REGIMES},
+            }},
+            "overseas_market": {"type": dict, "required": True},
+            "a_share_indices": {"type": dict, "required": True},
+            "market_breadth": {"type": dict, "required": True},
+            "sentiment": {"type": dict, "required": True},
+            "turnover": {"type": dict, "required": True},
+            "theme": {"type": dict, "required": True},
+            "macro_policy": {"type": dict, "required": True},
+            "data_quality": {"type": dict, "required": True},
+        },
+    },
     # generate_risk_and_sectors.build_risk_decision
     "risk_decision": {
         "kind": "object",
@@ -207,6 +293,26 @@ SPECS: dict[str, dict] = {
             }},
         },
     },
+    # generate_risk_and_sectors.build_sector_state —— 落盘是**数组**。
+    # 6 个消费者。⚠️ `score` 的 NaN 曾让 `nan >= 60` 恒为 False ⇒ 板块**静默降级**
+    # 成「观察」，2026-08-07 已在生产者侧过 `fnum`（NaN→None）；契约在此把它钉住。
+    "sector_state": {
+        "kind": "array",
+        "items": {
+            "date": {"type": str, "required": True, "non_empty": True},
+            "sector": {"type": str, "required": True, "non_empty": True},
+            "state": {"type": str, "required": True, "choices": SECTOR_STATES},
+            "trend": {"type": str, "required": True, "choices": SECTOR_TRENDS},
+            "trade_permission": {"type": str, "required": True,
+                                 "choices": SECTOR_PERMISSIONS},
+            # 允许 null（板块技术面没给分是正常的），但**不允许 NaN** ——
+            # 那会让下游阈值判定静默为 False。
+            "score": {"type": (int, float), "required": True,
+                      "nullable": True, "finite": True},
+            "risk_flags": {"type": list, "required": True},
+        },
+    },
+
     # b1_holding_state.evaluate —— 落盘是**数组**（每持仓一条）
     "b1_holding_state": {
         "kind": "array",
@@ -230,11 +336,63 @@ SPECS: dict[str, dict] = {
 }
 
 
-def check(name: str, obj: Any) -> dict[str, Any]:
+def _narrow(fields: dict, only: tuple[str, ...]) -> tuple[dict, list[str]]:
+    """按 `only` 裁剪 spec，支持**点号路径**（`"amv_0.quality"`）。
+
+    ⚠️ 责任是**字段级**的，不是节级。实例：`merge_incremental_market` 只写
+    `amv_0` 里的 `quality`/`effective_state`/`as_of`，**不拥有** `amv_zone`
+    （那是 collector 从 `--amv` 派生的）。给它 `only=("amv_0",)` 会让它为
+    collector 的字段背责 —— 那正是第一版踩到的（既有测试的最小 fixture
+    没有 amv_zone，merge 直接硬失败）。
+    """
+    keep: dict = {}
+    unknown: list[str] = []
+    for path in only:
+        head, _, rest = path.partition(".")
+        if head not in fields:
+            unknown.append(path)
+            continue
+        if not rest:
+            # ⚠️ **`only` 一律去掉 `required`**。部分写者的责任是
+            # 「**我写的字段格式正确**」，字段是否**存在**是文档创建者的责任。
+            #
+            # 这不是放松，是把责任划清。两次实测都撞在这上面：
+            #   · merge_incremental 用 `setdefault`，只为**有增量数据的节**建节
+            #     ⇒ 只给了 breadth 增量时，sentiment/turnover 本就不该存在
+            #   · merge 的第一处落盘根本不碰 amv_0 ⇒ 要求 amv_0 存在是替 collector 背责
+            # 存在性由 collector 侧的完整 `require("market_timing_input", data)` 保证。
+            keep[head] = {**fields[head], "required": False}
+            continue
+        sub = fields[head].get("fields") or {}
+        narrowed, sub_unknown = _narrow(sub, (rest,))
+        unknown += [f"{head}.{x}" for x in sub_unknown]
+        if narrowed:
+            # ⚠️ 起点必须**去掉原始的 fields**，否则把裁剪结果合并回完整集
+            # 等于没裁（第一版就是这个 bug：`amv_0.amv_zone: 缺失` 仍然报出来，
+            # 而 amv_zone 根本不在 only 里）。
+            prev = keep.get(head)
+            base = dict(prev) if prev else {k: v for k, v in fields[head].items()
+                                           if k != "fields"}
+            keep[head] = {**base, "required": False,
+                          "fields": {**(base.get("fields") or {}), **narrowed}}
+    return keep, unknown
+
+
+def check(name: str, obj: Any, only: tuple[str, ...] | None = None) -> dict[str, Any]:
     """校验产物，返回 `{"artifact","valid","errors","warnings"}`。**不抛异常。**
 
     供消费端使用：拿到结构化结论后由调用方按**自己既有的**降级策略裁决。
     刻意不在这里决定阻断与否 —— 见模块 docstring「写严、读松」。
+
+    `only`：只校验这几个顶层字段。用于**部分写者** ——
+
+        每个写者只保证**自己负责的那部分**，不为别人写的部分背责。
+
+    ⚠️ 这个参数不是「放松校验」的出口，它是**责任边界**。实例：
+    `market_timing_input` 由 4 个 stage 依次改写，`merge_incremental_market`
+    只修补 `amv_0`（置 quality/effective_state/as_of）。要它保证整份 11 节文档
+    等于要它为 collector 的产出背责 —— 而它既没写那些节、也无法补出来。
+    真正该由它保证的是「改完之后 `amv_0` 仍然合规」。
     """
     spec = SPECS.get(name)
     if spec is None:
@@ -255,17 +413,25 @@ def check(name: str, obj: Any) -> dict[str, Any]:
         if not isinstance(obj, dict):
             errors.append(f"{name}: 期望对象，得到 {type(obj).__name__}")
         else:
-            _check_obj("", obj, spec["fields"], errors, warnings)
+            fields = spec["fields"]
+            if only is not None:
+                fields, unknown = _narrow(fields, only)
+                if unknown:
+                    warnings.append(f"{name}: only 里有契约未定义的路径 {unknown}"
+                                    f" —— 拼错了会让校验变成空操作")
+            _check_obj("", obj, fields, errors, warnings)
     return {"artifact": name, "valid": not errors, "errors": errors, "warnings": warnings}
 
 
-def require(name: str, obj: Any) -> Any:
+def require(name: str, obj: Any, only: tuple[str, ...] | None = None) -> Any:
     """校验产物，不合规**当场 SystemExit**。供**生产者**在落盘前调用。
 
     为什么生产者要硬失败：产物是它自己造的，造出畸形产物没有正当理由。
     在源头失败让排错从「下游哪个字段是 None」变成「哪个生产者写坏了」。
+
+    `only` 见 `check()` —— 部分写者只为自己改的那部分背责。
     """
-    result = check(name, obj)
+    result = check(name, obj, only=only)
     if not result["valid"]:
         raise SystemExit(
             f"产物契约校验失败 [{name}]（见 07_tools/contracts.py）：\n  "

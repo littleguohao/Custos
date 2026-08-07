@@ -220,11 +220,20 @@ class TestContractsLayer:
             "generate_risk_and_sectors.py": "risk_decision",
             "market_timing/chief_decision_report.py": "chief_decision",
             "market_timing/b1_holding_state.py": "b1_holding_state",
+            # 2026-08-07 第二批（按消费者数量排的优先级）
+            "market_timing/market_timing_collector.py": "market_timing_input",
+            "market_timing/merge_incremental_market.py": "market_timing_input",
+            "market_timing/batch_holding_technical.py": "holding_technical_summary",
         }
         for rel, artifact in expect.items():
             src = (TOOLS / rel).read_text(encoding="utf-8")
             assert re.search(rf"require\(['\"]{artifact}['\"]", src), \
                 f"{rel} 未在落盘前校验 {artifact}"
+
+    def test_sector_state_validated(self):
+        import re
+        src = (TOOLS / "generate_risk_and_sectors.py").read_text(encoding="utf-8")
+        assert re.search(r"require\(['\"]sector_state['\"]", src)
 
 
 class TestResearchProductionSplit:

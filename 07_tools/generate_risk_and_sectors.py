@@ -147,6 +147,9 @@ def main():
     args = ap.parse_args()
 
     sector_states = build_sector_state(args.date)
+    # ⚠️ 落盘前校验：6 个消费者。`score` 的 NaN 曾让 `nan >= 60` 恒为 False
+    # ⇒ 板块**静默降级**成「观察」；上面已过 fnum，这里把它钉住。
+    require("sector_state", sector_states)
     dump(DATA / "sectors" / f"{args.date}_sector_state.json", sector_states)
 
     risk = build_risk_decision(args.date)

@@ -23,6 +23,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from paths import BASE, cn_today, write_json_atomic  # noqa: E402
+from contracts import require  # noqa: E402
 
 
 def section_quality(as_of: str, target: str) -> str:
@@ -147,6 +148,12 @@ def main(argv=None) -> int:
             inc = json.loads(incremental_path.read_text(encoding="utf-8"))
             mkt = json.loads(market_path.read_text(encoding="utf-8"))
             mkt, stale = merge_incremental(inc, mkt, target)
+            # ⚠️ 落盘前校验：这一步合并的是**宽度/情绪/成交额/海外**几节，
+            # 责任范围就是它们（`setdefault` 的「只增不毁」语义 ⇒ 只会新增节）。
+            # **不校验 amv_0** —— 这一步根本不碰它，替 collector 背责是错的
+            # （第一版这么写，既有测试的最小 fixture 立刻硬失败）。见 contracts._narrow。
+            require("market_timing_input", mkt,
+                    only=("market_breadth", "sentiment", "turnover", "overseas_market"))
             write_json_atomic(market_path, mkt)   # 读-改-写的共享文件
             print("[OK] incremental data merged into market_timing_input.json")
             status.update({"status": "ok", "merged": True, "stale": stale})
@@ -207,6 +214,13 @@ def main(argv=None) -> int:
                     else:
                         amv["effective_state"] = "未知"
                 mkt["amv_0"] = amv
+                # ⚠️ 落盘前校验：这一步把 amv_0 的 quality 置 confirmed 并写
+                # effective_state / as_of ——**只校验这三个它自己写的字段**。
+                # `effective_state` 的枚举域正是审计 B1 的所在：写成「空头触发」这种
+                # 未归一的值，会让下游精确等值比较落空、`allow_add=False` 漏置。
+                # `amv_zone` 是 collector 派生的，不该由 merge 背责。
+                require("market_timing_input", mkt,
+                        only=("amv_0.quality", "amv_0.effective_state", "amv_0.as_of"))
                 write_json_atomic(market_path, mkt)   # 读-改-写的共享文件
                 print(f"[OK] 0AMV quality auto-set to confirmed (value={amv_day}%, as_of={amv_as_of}, "
                       f"regime={amv['effective_state']}, source={amv_source})")

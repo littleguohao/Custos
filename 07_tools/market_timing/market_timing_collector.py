@@ -37,6 +37,7 @@ import local_tdx_data as ltd  # type: ignore
 from paths import BASE, TDX_ROOT, cn_now  # noqa: E402
 from indicators import pct_change as pct  # noqa: E402
 from runtime_guards import previous_confirmed_trading_day  # noqa: E402
+from contracts import require  # noqa: E402
 from breadth_basis import breadth_counts, resolve_total_stocks  # noqa: E402
 
 OUT_DIR = BASE / "01_data" / "market"
@@ -335,6 +336,9 @@ def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     out = Path(args.out) if args.out else OUT_DIR / f"{args.date}_market_timing_input.json"
     out.parent.mkdir(parents=True, exist_ok=True)
+    # ⚠️ 落盘前校验：这是全项目扇出最大的产物（19 个消费者，12 个读 amv_0）。
+    # 它是渐进填充文档，契约只管结构 —— 见 contracts.py。
+    require("market_timing_input", data)
     out.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     print(out)
 
