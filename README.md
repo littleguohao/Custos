@@ -126,37 +126,32 @@ uv run python 07_tools/run_1800.py
 
 ## 数据源
 
-| 数据 | 来源 | 工具 |
-|---|---|---|
-| A 股日线 | mootdx Reader（本地 .day 文件） | `local_tdx_data.py` |
-| 实时行情 | mootdx Quotes（在线 bars） | `collect_holding_quotes.py` |
-| 指数行情 | mootdx Reader / online index | `collect_holding_quotes.py` |
-| 市场宽度（880系列） | mootdx Reader | `collect_incremental_market.py` |
-| 财务数据 | mootdx Affair | `local_tdx_data.py` |
-| **PIT 财务（带公告日）** | 东方财富 datacenter（业绩报表 RPT_LICO_FN_CPD） | `local_tdx/fetch_pit_financials.py` |
-| **真市值 / 总股本** | 东方财富 datacenter（估值分析 RPT_VALUEANALYSIS_DET，2018-01-02 起） | `local_tdx/fetch_market_cap.py` |
-| **前复权（全链默认口径）** | 通达信协议 xdxr 权息数据（分红/送转/配股/缩股）→ 本地缓存 → 自算因子 | `local_tdx/adjust_factors.py` |
-| 复权因子（旧路径，仅 CLI） | mootdx get_adjust_year | `local_tdx_data.py --mode adjust` |
-| A50/汇率 | Yahoo Finance | `collect_incremental_market.py` |
-| 资金流向 | 东方财富 push2 API | `collect_fund_flow.py` |
-| 北交所行情 | 东方财富 push2 API（mootdx 不支持 BJ） | `collect_holding_quotes.py` |
-| 公告 | wenda_notice_query | cron LLM 调用 |
-| 概念/主题标签 | TQ download_file down_type=4（miscinfo） | `local_tdx/concept_tags.py` |
-| **股票名称（ST 判定唯一依据）** | 东财 push2 ulist（多域名轮询，按需批量查候选）→ TQ-Local get_stock_info → 本地缓存 | `local_tdx/stock_names.py` |
-| 新闻 | RSS | `rss_collector.py` |
-| TQ 选股公式批量筛选 | TQ-Local（formula_process_mul_xg，需 TdxW 运行） | `screening/formula_screen.py` |
+原则：**本地优先**（通达信 vipdoc / TQ-Local），HTTP 只做补齐。
+全链默认**前复权**（基于通达信 xdxr 权息自算，`local_tdx/adjust_factors.py`）。
+
+| 类别 | 主路径 |
+|---|---|
+| A 股日线 / 财务 | 通达信本地（`local_tdx/local_tdx_data.py`） |
+| 实时行情 / 快照 | mootdx Quotes、TQ-Local（`collect/`） |
+| 市场宽度、指数 | 880 系列 + 指数（`collect/`、`market_timing/`） |
+| 东财补齐 | 北交所行情、真市值、PIT 财务、资金流、股票名称 |
+| 新闻 / 概念标签 | RSS（`news/`）、TQ miscinfo |
+| 回测数据 | qlib bundle / CSV（`s_data.py`，`S_DATA_ROOT`） |
+
+⚠️ 三个反复踩的坑：**mootdx 不支持北交所**（920xxx 走东财）；
+**mootdx Reader 返回 DatetimeIndex 而非列**（传入分析前要 `reset_index()`）；
+**股票名称表是 ST 硬排除的唯一依据**，残缺表落盘会让 ST 过滤静默失效。
+
+各源的实测性能、覆盖率与风险等级见 [`00_governance/data/`](00_governance/data/)。
 
 ## 策略核心
 
 ### B1 波段策略
 
-详见 `00_governance/strategy/b1/01_swing_rules.md`。关键机制：
-
-- **BBI**：`(MA3 + MA6 + MA12 + MA24) / 4`，预警而非最终权威
-- **N 结构**：上升 N（L1→H1→更高 L2）/ 下降 N（H1→L1→更低 H2→收盘低于 L1）
-- **反转 K**：`J<13` + 量比 `≤50%` + 20 日成交量底部 10% + 收盘变动 `-2%~+2%` + 振幅 `≤7%`
-- **P0/P1/P2/P3 优先级**：P0 > P1 > P2 > P3
-- **持仓状态**：`b1_holding_state.py` 输出 `B1-holding-v1` 契约
+详见 [`00_governance/strategy/b1/01_swing_rules.md`](00_governance/strategy/b1/01_swing_rules.md)。
+关键机制：**BBI**（预警而非权威）、**N 结构**（L1 主结构 / L2 回踩）、
+**反转 K**（J<13 + 极致缩量 + 收盘 ±2% + 振幅 ≤7%，**是观察点不是买点**）、
+**P0~P3 优先级**、持仓状态输出 `B1-holding-v1` 契约（`holdings/b1_holding_state.py`）。
 
 ### 决策优先级
 

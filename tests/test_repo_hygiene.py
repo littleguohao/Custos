@@ -20,6 +20,7 @@ from __future__ import annotations
 import pathlib
 import re
 import subprocess
+import time
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -84,3 +85,40 @@ def test_gitignore_runtime_patterns_have_recursive_form():
     text = (ROOT / ".gitignore").read_text(encoding="utf-8")
     for pat in ("**/01_data/**", "**/06_logs/"):
         assert pat in text, f".gitignore 缺递归模式 {pat}（含 / 的模式只锚定仓库根）"
+
+
+# ⚠️ 在**模块导入时**（pytest 收集阶段，早于任何测试执行）记下时刻。
+# 只有晚于它的文件才可能是**测试**写的 —— 这样才能与「owner 手动跑了管线」区分开。
+# 第一版用「一小时内」判定，结果我自己手动跑 run_1445 验证修复后它就误报了；
+# 在目标机上会**每天误报**（那里天天跑管线）。
+_SESSION_START = time.time()
+
+
+def test_test_suite_does_not_write_into_repo():
+    """⚠️ 测试不得往**仓库内**写运行时目录。
+
+    2026-08-07 两次踩到同一形态：
+      ① 基线脚本把 `tmp_path` 实参写成字符串 `"2026-07-16"`
+         ⇒ 仓库根建出该目录并被提交
+      ② `test_pipeline_orchestration` 的 fixture 漏 patch `PLAN_DIR`/`SUPPORT_DIR`
+         ⇒ 在真实 `03_daily_plans/_supporting/` 下建出日期目录
+         （空、且被 gitignore，所以没污染 git —— 但那是运气，不是设计）
+
+    判据是「**本次 pytest 会话开始之后**新建」，不是「最近一小时」——
+    后者分不清测试泄漏与 owner 手动跑管线（目标机天天跑）。
+
+    与 `test_no_runtime_data_tracked_anywhere`（查已入库）互补：
+    这条查「有没有漏网」，那条查「有没有已经进 git」。
+    """
+    watched = [ROOT / "01_data", ROOT / "03_daily_plans", ROOT / "06_logs",
+               ROOT / "04_reviews"]
+    fresh = []
+    for d in watched:
+        if not d.exists():
+            continue
+        for p in d.rglob("*"):
+            if p.is_file() and p.stat().st_mtime > _SESSION_START and p.suffix != ".md":
+                fresh.append(str(p.relative_to(ROOT)))
+    assert not fresh, (
+        "这些运行时文件是**本次测试会话期间**产生的 —— "
+        f"某个测试的 fixture 漏 patch 了路径常量：\n  " + "\n  ".join(fresh[:20]))
