@@ -149,6 +149,7 @@
 
 | # | 事项 | 出处 |
 |---|---|---|
+| 52 | **`overseas_market.as_of` 在时间戳全缺时被写成采集时刻（now），门控据此判 `confirmed`** —— 一处 fail-open。生产者留了痕（`as_of_basis: "collection_time_fallback"`）但 `runtime_guards.market_quality_gate` **从不读**它，判据只有「有值 且 as_of 非空」。⚠️ 与契约层已拍板的相反决定不一致：`amv_0.as_of` 刻意允许 None，理由原话是**「编一个 as_of 等于给门控假的新鲜度」**。影响面有界（overseas 权重 10/100，且排除在 `core` 覆盖率判定外）。两条路子：① 生产者不再伪造（as_of 缺省 ⇒ 门控自然判 candidate）；② 门控改读 `as_of_basis`。⚠️ 未擅自改 —— 2026-07-30 有「门控与口径同时收紧致 17:00 链失败」的事故。现状已由 `tests/test_tdx_ext_fallback.py::TestOverseasAsOfDerivation` 钉住 | 2026-08-07 review tests/ 时查出（该推导此前零测试覆盖） |
 | 51 | **两条「卖出风控硬规则」零实现**（2026-08-07 逐条核实 `TEAM_BLUEPRINT.md` 时查出）：<br>① **连亏冷却**「同股连续亏损 2 次 → 冷却 10 个交易日」—— 代码里零实现。同一件事今天还出现过一次：`DATA_FLOW_CONTRACT.md` 的 `RiskDecision.cooldown_list` 也是声明过但从未实现（已删）。<br>② **胜率降仓**「当月短线胜率 < 35% → 降低短线仓位」—— 只有研究脚本算胜率，无任何 live 组件据此降仓。<br>⚠️ 原文档把它们与另外 4 条真规则并列写成「不可被总控决策覆盖」，**把未实现写成已执行比没写更危险**（读的人以为有这道防线）。现已在 `_shared/system_principles.md` 如实登记为「意图，不是机制」，来源与样本量见 `trade_lessons.md`（那 6 条**没有一条记了统计区间**）。<br>⇒ **需 owner 定：实现它们，还是明确放弃这两条**（用户画像第 4 条恰恰说「九丰能源等案例显示需要连续亏损冷却机制」，所以①有真实动因）|
 | 23 | 「白线大于黄线」的歧义口径 | [R16 ⑧](../00_governance/research/R16_input_material_corrections.md) |
 | 24 | `S**` 阈值 70/60 是否采纳（当前未采纳）| R16 ⑦ |
