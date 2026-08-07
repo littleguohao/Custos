@@ -29,14 +29,14 @@ _TOOLS_ROOT = Path(__file__).resolve().parents[1]
 if str(_TOOLS_ROOT) not in sys.path:
     sys.path.insert(0, str(_TOOLS_ROOT))
 
-from paths import BASE  # noqa: E402
+from paths import BASE, MARKET_TIMING  # noqa: E402
 from contracts import require  # noqa: E402
 
 SECTOR_MAP = BASE / "01_data" / "sectors" / "sector_code_map.json"
 SECTOR_DIR = BASE / "01_data" / "sectors"
 HOLDINGS_DIR = BASE / "01_data" / "holdings"
 OUT_DIR = BASE / "03_daily_plans"
-TOOLS_DIR = BASE / "07_tools" / "market_timing"
+TOOLS_DIR = MARKET_TIMING
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 

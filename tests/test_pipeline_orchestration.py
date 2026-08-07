@@ -84,13 +84,13 @@ class Recorder:
 def pipeline(monkeypatch, tmp_path):
     import daily_pipeline as dp
 
-    # ⚠️ **必须 patch 全部路径常量**。第一版漏了 `PLAN_DIR` / `SUPPORT_DIR`，
+    # ⚠️ **必须 patch 全部路径常量**。第一版漏了 `PLANS` / `SUPPORT_DIR`，
     # 测试在**真实仓库**里建出了 `03_daily_plans/_supporting/2026-08-07/`
     # （空目录、且被 gitignore，所以没污染 git —— 但这正是今天
     # `2026-07-16/` 那次事故的同一形态：脚本往仓库里写东西）。
     monkeypatch.setattr(dp, "BASE", tmp_path, raising=False)
-    for attr in ("DATA_DIR", "MARKET_DIR", "HOLD_DIR", "PLAN_DIR",
-                 "SUPPORT_DIR", "LOG_DIR"):
+    for attr in ("DATA", "MARKET_DIR", "HOLDINGS_DIR", "PLANS",
+                 "SUPPORT_DIR", "LOGS"):
         assert hasattr(dp, attr), f"daily_pipeline 少了路径常量 {attr}（改名了？）"
         d = tmp_path / attr.lower()
         d.mkdir(parents=True, exist_ok=True)
@@ -683,7 +683,7 @@ class TestManualInputs:
         说不出它是清了还是从来没有过。
         """
         import json
-        hd = pipeline.HOLD_DIR
+        hd = pipeline.HOLDINGS_DIR
         hd.mkdir(parents=True, exist_ok=True)
         (hd / "2026-08-07_manual_position_updates.json").write_text(
             json.dumps({"updates": [{"code": "600000", "action": "已清仓"}]}),
@@ -706,7 +706,7 @@ class TestManualInputs:
     def test_manual_clearance_without_target_files_is_noop(self, pipeline, tmp_path):
         """有更新文件但没有技术面表时不得崩 —— 顺序上它可能先于 batch_holding_technical。"""
         import json
-        hd = pipeline.HOLD_DIR
+        hd = pipeline.HOLDINGS_DIR
         hd.mkdir(parents=True, exist_ok=True)
         (hd / "2026-08-07_manual_position_updates.json").write_text(
             json.dumps({"updates": [{"code": "600000", "action": "已清仓"}]}),
@@ -717,7 +717,7 @@ class TestManualInputs:
     def test_non_clearance_actions_ignored(self, pipeline, tmp_path):
         """只有 `action == "已清仓"` 触发移除 —— 「减仓」等不得让整行消失。"""
         import json
-        hd = pipeline.HOLD_DIR
+        hd = pipeline.HOLDINGS_DIR
         hd.mkdir(parents=True, exist_ok=True)
         (hd / "2026-08-07_manual_position_updates.json").write_text(
             json.dumps({"updates": [{"code": "600000", "action": "减仓"}]}),

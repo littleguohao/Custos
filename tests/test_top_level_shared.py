@@ -303,17 +303,24 @@ class TestToolsPathSingleSource:
             "sys.path 引导被误删了 —— 它跑在 import paths 之前，只能用 __file__"
 
     def test_daily_pipeline_market_timing_not_named_tools(self):
-        """`daily_pipeline` 里指向 market_timing 的常量**不能叫 TOOLS**。
+        """`daily_pipeline` 里指向 market_timing 的常量**不能叫 TOOLS**
+        —— 仓库其他地方 `TOOLS` 一律指 07_tools，同名不同义会让读者把
+        `TOOLS / "x.py"` 读成顶层脚本。
 
-        仓库其他地方 `TOOLS` 一律指 `07_tools`；同名不同义会让读者把
-        `TOOLS / "x.py"` 读成顶层脚本，而它其实是 `market_timing/x.py`。
+        ⚠️ 判据从「源码里有那行字面量」改成**运行时真值比对**（2026-08-07）：
+        原判据是 `assert 'MARKET_TIMING = TOOLS / "market_timing"' in src`，
+        把常量改成从 `paths` 导入之后它就挂了 —— 而语义完全没变。
+        这正是今天反复踩的「查字符串形式而非语义」。
         """
-        s = (T / "daily_pipeline.py").read_text(encoding="utf-8")
-        assert 'TOOLS = TOOLS / "market_timing"' not in s
-        assert 'MARKET_TIMING = TOOLS / "market_timing"' in s
-        assert not re.search(r'^TOOLS *=', s, re.M), \
-            "daily_pipeline 不该自己定义 TOOLS（应从 paths 导入）"
+        import sys
+        tools = pathlib.Path(__file__).resolve().parent.parent / "07_tools"
+        sys.path.insert(0, str(tools))
+        import daily_pipeline as dp
 
+        assert dp.TOOLS == tools, "TOOLS 必须指 07_tools 本身"
+        assert dp.MARKET_TIMING == tools / "market_timing"
+        assert dp.HOLDINGS == tools / "holdings", \
+            "持仓工具目录 —— 2026-08-07 拆分后 daily_pipeline 必须指向它"
 
 class TestGateCodePropagation:
     """门控退出码必须**端到端**到 cron，不能在 runner 这层被压平。

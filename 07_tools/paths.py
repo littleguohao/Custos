@@ -44,6 +44,15 @@ REVIEWS = BASE / "04_reviews"
 TOOLS = BASE / "07_tools"
 LOGS = BASE / "06_logs"
 
+# 07_tools/ 下的工具子目录 —— 编排层用它拼 subprocess 命令。
+# ⚠️ 必须在这里定义：`daily_pipeline` 曾自己拼 `TOOLS / "market_timing"`，
+#    2026-08-07 把 holdings/ 从 market_timing/ 拆出时它没跟着改，
+#    四个持仓 stage 全部指向不存在的文件（其中三个 required=True ⇒ 整链硬失败）。
+MARKET_TIMING = TOOLS / "market_timing"
+HOLDINGS = TOOLS / "holdings"          # 工具目录；持仓**数据**目录是 HOLDINGS_DIR
+SCREENING = TOOLS / "screening"
+CLOSE_REVIEW = TOOLS / "close_review"
+
 # Subdirectories under 01_data/
 HOLDINGS_DIR = DATA / "holdings"
 MARKET_DIR = DATA / "market"
