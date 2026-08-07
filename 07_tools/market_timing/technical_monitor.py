@@ -32,7 +32,7 @@ if str(TOOLS_DIR) not in sys.path:
 from indicators import bbi_series, kdj_series  # noqa: E402
 
 from paths import BASE, TDX_ROOT  # noqa: E402
-from code_utils import norm_code, split_code  # noqa: E402
+from code_utils import norm_code, price_limit_pct, split_code  # noqa: E402
 
 OUT_DIR = BASE / "01_data" / "market"
 
@@ -239,7 +239,7 @@ def zhixing_state(df: pd.DataFrame, m1: int = 14, m2: int = 28, m3: int = 57, m4
 def _infer_price_limit(code: str, df: pd.DataFrame) -> int:
     """Infer the daily price-limit percentage for a stock.
 
-    Uses code prefix as the base (688/920/300/301 => 20%, else 10%), then
+    Base comes from ``code_utils.price_limit_pct`` (single source), then
     validates against observed historical daily changes: if any completed
     bar shows |change_pct| > 9.9 for a 10%-prefix stock, upgrade to 20%.
     This catches edge cases without relying solely on static prefix rules.
@@ -248,8 +248,11 @@ def _infer_price_limit(code: str, df: pd.DataFrame) -> int:
     downgrade only applies to 10%-prefix stocks — a quiet 20-day window must
     never demote a 300/301/688/920 stock to 5%.
     """
-    raw = str(code).strip().upper().split(".")[0]
-    base = 20 if raw.startswith(("688", "920", "300", "301")) else 10
+    # ⚠️ base 必须来自 `code_utils.price_limit_pct`（唯一来源）。此前这里内联写
+    # `20 if startswith(("688","920","300","301")) else 10`，对北交所给 20 而
+    # 实际限制是 **30**，且漏了 83/87/43 前缀。下面的数据自纠只能把 10 升到 20、
+    # **永远到不了 30**，所以那个偏差不会被历史波动纠正 —— 详见唯一实现的 docstring。
+    base = int(price_limit_pct(code))
     if len(df) >= 20:
         changes = (df["close"] / df["close"].shift(1) - 1).abs() * 100
         max_change = float(changes.dropna().max())

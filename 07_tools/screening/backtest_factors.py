@@ -51,6 +51,7 @@ from reversal_quality_inv import score as _sc_reversal_quality_inv  # noqa: E402
 
 
 from indicators import bbi_series as _bbi_series  # noqa: E402
+from code_utils import price_limit_pct  # noqa: E402
 
 def _bbi_series_from(df: pd.DataFrame) -> np.ndarray:
     """DataFrame 入口的 BBI（返回 ndarray）—— 逐 bar 评估里用 ndarray 更快。"""
@@ -1005,13 +1006,8 @@ _R_RISK_FLOOR = 0.02   # R 计算的 risk_frac 地板(2%)：周线收盘贴低�
 
 
 def _limit_pct(code: str) -> float:
-    """Daily price-limit percentage inferred from the code prefix."""
-    raw = str(code).strip().upper().split(".")[0]
-    if raw.startswith(("688", "300", "301")):
-        return 20.0
-    if raw.startswith(("920", "83", "87", "43")):        # 北交所
-        return 30.0
-    return 10.0
+    """委托 `code_utils.price_limit_pct`（唯一来源）。这份原本是**对的**那两份之一。"""
+    return price_limit_pct(code)
 
 
 def tradable_flags(df: pd.DataFrame, code: str) -> tuple[np.ndarray, np.ndarray]:

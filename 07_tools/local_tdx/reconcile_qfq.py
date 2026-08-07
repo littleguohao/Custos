@@ -59,6 +59,8 @@ BASE = pathlib.Path(__file__).resolve().parents[2]
 for _p in ("07_tools", "07_tools/local_tdx", "07_tools/screening"):
     sys.path.insert(0, str(BASE / _p))
 
+
+from code_utils import price_limit_pct  # noqa: E402
 OUTDIR = BASE / "06_logs" / "qfq_reconcile"
 
 # 对账窗口：落在 2021_2026 bundle 内部，避开 10 个月缺口与 2026-02 右端
@@ -93,13 +95,11 @@ def _load_tdx(code: str) -> Any:
 
 
 def _limit_pct(code: str) -> float:
-    """按代码前缀推断涨跌幅限制 —— **日收益超过它就是数据错**（物理不可能）。"""
-    c = str(code).strip()[:6]
-    if c.startswith(("688", "300", "301")):
-        return 20.0
-    if c.startswith(("920", "83", "87", "43")):
-        return 30.0
-    return 10.0
+    """按代码前缀推断涨跌幅限制 —— **日收益超过它就是数据错**（物理不可能）。
+
+    委托 `code_utils.price_limit_pct`（唯一来源）。这份原本是**对的**那两份之一。
+    """
+    return price_limit_pct(code)
 
 
 def _load_qlib(code: str) -> Any:

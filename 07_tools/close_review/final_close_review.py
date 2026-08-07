@@ -36,6 +36,21 @@ REV = BASE / "04_reviews" / "daily"
 
 
 def ma_flag(value) -> str:
+    """均线上下标记；`None` 渲染 `?` 而**不是「下」**。
+
+    ⚠️ 2026-08-07 修：原写法 `"上" if value else "下"` 把 `None` 当假值 ⇒
+    渲染成「下MA240」。而上游是**刻意**给 None 的：
+
+        refresh_market_indices:124   `bool(close > ma240) if ma240 else None`
+        market_timing_collector:129  同上
+        technical_monitor:566        `c > ma240v if ma240v is not None else None`
+
+    即**历史不足 240 日**（新股/次新）时根本算不出 MA240。
+    把它显示成「下MA240」是一个未被支持的事实断言，而且方向偏空 ——
+    同 `fmt.pct_text` 那条教训：不能把「不知道」渲染成一个具体读数。
+    """
+    if value is None:
+        return "?"
     return "上" if value else "下"
 
 

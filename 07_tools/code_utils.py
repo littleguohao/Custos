@@ -33,6 +33,47 @@ def clean_code(v):
     return s.split('.')[0].zfill(6) if s.split('.')[0].isdigit() else s.split('.')[0]
 
 
+def price_limit_pct(code) -> float:
+    """按代码前缀推断**日涨跌幅限制**（百分数）。全项目唯一来源。
+
+    | 板块 | 前缀 | 限制 |
+    |---|---|---|
+    | 科创板（含 CDR） | 688 / **689** | 20% |
+    | 创业板 | 300 / 301 | 20% |
+    | 北交所 | 920 / 83 / 87 / 43 | **30%** |
+    | 沪深主板 | 其余 | 10% |
+
+    ⚠️ 2026-08-07 收敛 4 份实现时发现它们**对同一输入给出不一致的答案**：
+
+        backtest_factors._limit_pct        北交所 → 30 ✅
+        reconcile_qfq._limit_pct           北交所 → 30 ✅
+        technical_monitor._infer_price_limit  北交所 → **20** ⛔（且只认 920，漏 83/87/43）
+        s_shape 的 fallback                   北交所 → **20** ⛔
+
+    北交所竞价交易的涨跌幅比例是 **30%**（上市首日不设限）。写 20 的那两份是
+    **live 路径**：`technical_monitor` 的结果经 `price_limit / 2` 变成
+    「中大阳/中大阴门槛」，BJ 股按 20% 算出 10% 门槛（应为 15%），于是
+
+        10~15% 的涨/跌被误判成中大阳/中大阴
+          → b1_holding_state 的 `two_bull_profit_take`（P2 分批止盈）
+            与 `heavy_large_bear`（P1 减仓）**在不该触发时触发**
+
+    而 `technical_monitor` 的数据自纠只能把 10 升到 20、**永远到不了 30**，
+    所以这个偏差不会被历史波动纠正回来。
+
+    ⚠️ **为什么不含 `88` 前缀**：北交所老代码里有 88xxxx，但通达信的板块指数是
+    **880xxx 系列**（本项目用它算市场宽度）。把 `88` 算进北交所会让 880863
+    这类指数被判 30% 限制。`launch_point_study.BOARDS` 含 `88` 是因为它只用于
+    板块归类、不参与涨跌幅判定。需要区分指数时用 `is_index()`。
+    """
+    raw = str(code or "").strip().upper().split(".")[0]
+    if raw.startswith(("688", "689", "300", "301")):
+        return 20.0
+    if raw.startswith(("920", "83", "87", "43")):
+        return 30.0
+    return 10.0
+
+
 def bare_code(code) -> str:
     """去掉交易所后缀，返回裸代码：`"600000.SH"` → `"600000"`。
 

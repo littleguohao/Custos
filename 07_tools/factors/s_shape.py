@@ -46,14 +46,20 @@ for _p in (str(_TOOLS), str(_TOOLS / "market_timing")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+
+from code_utils import price_limit_pct  # noqa: E402
 try:
     from technical_monitor import _infer_price_limit, kdj as _kdj_fn  # noqa: E402
 except Exception:  # noqa: BLE001 —— 导入失败时用保守默认涨跌幅
     _kdj_fn = None
 
     def _infer_price_limit(code: str, df) -> int:  # type: ignore
-        raw = str(code).strip().upper().split(".")[0]
-        return 20 if raw.startswith(("688", "920", "300", "301")) else 10
+        """`technical_monitor` 导入失败时的退路：只按前缀、无数据自纠。
+
+        前缀表仍走 `code_utils.price_limit_pct`（唯一来源）—— 此前这里内联写
+        北交所 20%（实际 30%），与主实现同错。
+        """
+        return int(price_limit_pct(code))
 
 
 def _kdj_jvals(df) -> tuple[Optional[float], Optional[float]]:

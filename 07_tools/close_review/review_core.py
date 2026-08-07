@@ -241,7 +241,10 @@ def risk_map(target_date: str) -> dict[str, list[dict]]:
     data = load(path, {}) if path else {}
     out: dict[str, list[dict]] = {}
     for x in data.get("stock_risks", []):
-        code = str(x.get("code", "")).split(".")[0]
+        # ⚠️ 不能写 `str(x.get("code", ""))`：key 存在而值为 `None` 时 `.get` 返回
+        # **None 而不是默认值**，`str(None)` == "None" 是真值 ⇒ 建出一个叫 "None"
+        # 的幽灵持仓键，下游按代码查风险时永远查不到、还多一条无主风险。
+        code = str(x.get("code") or "").split(".")[0]
         if code:
             out.setdefault(code, []).append(x)
     return out
@@ -261,7 +264,23 @@ def classify(position: dict, tech: dict, risks: list[dict], quote: dict, bearish
     structure_reason = f"{structure['state']}；{structure['reminder']}"
     high_risk = any(x.get("priority") == "高" for x in risks)
     if b1_state and b1_state.get("final_priority") in {"P0", "P1", "P2"}:
-        return b1_state["final_priority"], b1_state["final_action"], b1_state["final_reason"]
+        # ⚠️ B1 状态短路在 high_risk 判定**之前**，所以要在这里把高优先风险的理由
+        # 补回来，否则它在整份 14:45 报告里**一个字都看不到**（`risks` 只经由
+        # 本函数影响输出，别处不渲染）——而「所有计划必须可复盘」。
+        #
+        # 举例：RiskDecision 说「已触发止损线」（高），而 B1 按实时价重算只判 P2
+        # 「尾盘跌破BBI待收盘确认」。修前该行显示 P2 且止损理由消失。
+        #
+        # 只补理由、**不动优先级**：B1 用的是 14:45 实时价、RiskDecision 可能来自
+        # 前一日 17:00，谁该压过谁是决策优先级问题（README 写「risk_control 拥有
+        # 否决权」，但那条没区分依据的新鲜度），交 owner 定案 —— 见待办 #50。
+        reason = b1_state["final_reason"]
+        if high_risk:
+            outstanding = "；".join(
+                str(x.get("reason") or x.get("risk_type")) for x in risks
+                if x.get("priority") == "高")
+            reason = f"{reason}；⚠️未消化的高优先风控依据：{outstanding}"
+        return b1_state["final_priority"], b1_state["final_action"], reason
     if structure.get("signal") == "structural_clear":
         return "P0", "N型前低清仓评估", structure_reason
     if structure.get("signal") == "pullback_failure":
