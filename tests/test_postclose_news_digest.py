@@ -14,8 +14,10 @@ def _run(monkeypatch, tmp_path, intel_filenames, day="2026-07-17"):
     for name in intel_filenames:
         (news_dir / name).write_text(json.dumps({"market_events": [{"title": "t"}]}),
                                      encoding="utf-8")
-    # daily_report 的加载函数读 daily_report.DATA;postclose 其余路径读自身 DATA
     monkeypatch.setattr(daily_report, "DATA", tmp_path)
+    # ⚠️ 盘前情报访问器已移到 `news/premarket_intel_schema`，需单独打桩它的 PREMARKET_DIR
+    from news import premarket_intel_schema as _intel
+    monkeypatch.setattr(_intel, "PREMARKET_DIR", tmp_path / "news" / "premarket")
     monkeypatch.setattr(postclose_news_digest, "DATA", tmp_path)
     monkeypatch.setattr("sys.argv", ["postclose_news_digest.py", "--date", day])
     postclose_news_digest.main()

@@ -168,7 +168,7 @@ def detect_weekly_b1_resonance(df: pd.DataFrame,
     ``date`` 列为字符串时先转 datetime（resample 需要 DatetimeIndex）——不改原 df。
     """
     try:
-        from technical_monitor import kdj, resample
+        from indicators import kdj, resample
     except Exception as exc:  # noqa: BLE001
         return {"available": False, "hit": False, "reason": f"dep_missing:{type(exc).__name__}"}
     try:
@@ -259,7 +259,7 @@ def detect_breakout_pullback_b1(df: pd.DataFrame, code: str = "",
         det = detect_platform_pullback(df)
         if not det:
             return {"available": True, "hit": False, "reason": "no_platform_pullback"}
-        from technical_monitor import kdj
+        from indicators import kdj
         k = kdj(df)
         if not k.get("available") or k.get("j") is None:
             return {"available": True, "hit": False, "reason": "kdj_unavailable",

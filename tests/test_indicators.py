@@ -166,9 +166,19 @@ class TestHoldingStateSharesJWithSelection:
         assert np.allclose((3 * k - 2 * d).to_numpy(), j.to_numpy(), equal_nan=True)
 
     def test_j_series_is_thin_wrapper(self):
-        """`j_series` 必须复用 `kdj_series`，不许两套算法并存。"""
+        """`j_series` 必须复用 `kdj_series`，不许两套算法并存。
+
+        ⚠️ 用 **AST 取函数体**而不是字符串切片。原实现是
+        `src[src.rindex("def j_series"):]` —— 取到**文件末尾**，
+        于是 2026-08-07 往 indicators 追加 `ema`（内含 `ewm(`）之后
+        这条测试假失败了。查结构就该用 AST，别用字符串位置。
+        """
+        import ast as _ast
+
         src = (ROOT / "07_tools" / "indicators.py").read_text(encoding="utf-8")
-        body = src[src.rindex("def j_series"):]
+        node = next(n for n in _ast.parse(src).body
+                    if isinstance(n, _ast.FunctionDef) and n.name == "j_series")
+        body = _ast.unparse(node)
         assert "kdj_series(" in body, "j_series 应委托给 kdj_series"
         assert "ewm(" not in body, "j_series 又自己算了一遍 EWM"
 

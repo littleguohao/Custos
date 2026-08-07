@@ -3,7 +3,7 @@
 ⚠️ 后定义的会**静默遮蔽**前者，前者变成永不执行的死代码 ——
 而它的 docstring 仍会被人读到，产生「代码写了但没生效」的错觉。
 
-2026-08-06 实例：`screening/s_data.py` 里 `load_bars_qlib` 被定义了两次
+2026-08-06 实例：`s_data.py`（当时在 `screening/`）里 `load_bars_qlib` 被定义了两次
 （我当天加 `allow_unverified` 时没删干净）。第一份只有 def + docstring、**返回 None**，
 而那份 docstring 挂着 ⚠️ 价格口径警示 —— 幸好活的那份有更完整的版本，
 但读者若先看到死的那份，就会以为警示已经在生效的代码里。

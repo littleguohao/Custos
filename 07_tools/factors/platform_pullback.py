@@ -36,6 +36,8 @@ for _p in (str(_TOOLS), str(_TOOLS / "screening")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+
+from indicators import j_series as _j_canonical  # noqa: E402
 PLATFORM_LOOKBACK = 60      # 平台回看窗
 BREAKOUT_WITHIN = 40        # 突破须发生在近 40 日内
 PULLBACK_WITHIN = 15        # 回踩发生在近 15 日内
@@ -127,14 +129,18 @@ def detect_platform_pullback(df: pd.DataFrame,
         if stabilize:                                         # 可选企稳过滤
             vma5 = vol[-6:-1].mean() if len(vol) >= 6 else 0.0
             out["vol_shrink"] = bool(vma5 > 0 and vol[-1] / vma5 <= 0.7)
+            # ⚠️ 2026-08-07 破环：这里原本惰性 `import backtest_factors as bt`
+            # 只为拿 `bt._kdj` —— 而 `bt._kdj` 就是 `technical_monitor.kdj`
+            # （backtest_factors:64 `from technical_monitor import kdj as _kdj`）。
+            # 代价是 import 一个 1959 行、连带 40+ 模块的回测器，且构成
+            # `factors/ → screening/ → factors/` 的环。
+            # 这里只需要 J 的**数值**，直接用底层 `indicators.j_series`
+            # （与 b1_pullback_fit / main_rally_factor / b2_surge_factor 同一路径）。
+            j_series_ = _j_canonical(df)
             j_val = None
-            try:
-                import backtest_factors as bt  # noqa: PLC0415
-                if bt._kdj is not None:
-                    r = bt._kdj(df)
-                    j_val = r.get("j") if r.get("available") else None
-            except Exception:  # noqa: BLE001
-                pass
+            if j_series_ is not None and len(j_series_):
+                last = j_series_.iloc[-1]
+                j_val = float(last) if last == last else None
             out["j"] = j_val
             out["stabilized"] = bool(out["vol_shrink"] or (j_val is not None and j_val < 20))
         return out

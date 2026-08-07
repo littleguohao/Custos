@@ -83,7 +83,7 @@ import local_tdx_data  # noqa: E402
 import s_shape as s_shape_mod  # noqa: E402
 import financials as financials_mod  # noqa: E402
 import sector_phase as sector_phase_mod  # noqa: E402
-from technical_monitor import bbi_state, ema, kdj, macd, resample, zhixing_state, _infer_price_limit  # noqa: E402
+from indicators import bbi_state, ema, kdj, macd, resample, zhixing_state, _infer_price_limit # noqa: E402
 
 SCREENING_DIR = DATA / "screening"
 SECTOR_CODE_MAP = SECTORS_DIR / "sector_code_map.json"

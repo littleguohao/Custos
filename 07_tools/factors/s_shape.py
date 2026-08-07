@@ -49,7 +49,7 @@ for _p in (str(_TOOLS), str(_TOOLS / "market_timing")):
 
 from code_utils import price_limit_pct  # noqa: E402
 try:
-    from technical_monitor import _infer_price_limit, kdj as _kdj_fn  # noqa: E402
+    from indicators import _infer_price_limit, kdj as _kdj_fn # noqa: E402
 except Exception:  # noqa: BLE001 —— 导入失败时用保守默认涨跌幅
     _kdj_fn = None
 

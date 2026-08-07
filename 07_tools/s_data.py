@@ -1,6 +1,14 @@
 # -*- coding: utf-8 -*-
 """E:\\S_DATA 数据接入(qlib bundle / 单票 CSV)——供回测用的只读 loader。
 
+⚠️ 2026-08-07 从 `screening/` 移到 `07_tools/` 根层。它是**数据层**模块
+（零内部依赖，只用 stdlib + numpy/pandas），放在选股目录里会让
+`local_tdx/` 的探针与对账工具（数据层）反向依赖 `screening/`（L3）。
+移动后也只剩**一条导入路径**（扁平 `import s_data`）——
+此前只有 `tests/test_s_data.py` 用 `from screening import s_data`，
+而 `s_data.list_universe` 是被 monkeypatch 的目标，
+两个模块对象会让打桩静默失效。
+
 数据概况(2026-07 探明):
 - Q_DATA 下若干 qlib bundle(2006_2020: 1999-11→2020-09; 2021_2026: 2021-08→2026-02),
   **含退市股**(point-in-time 宇宙,可消幸存者偏差),价格为**前复权**(与 tdx 未复权比价,因子随分红阶梯)。

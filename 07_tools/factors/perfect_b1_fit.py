@@ -18,7 +18,7 @@ for _p in (str(_TOOLS), str(_TOOLS / "market_timing")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from technical_monitor import macd  # noqa: E402
+from indicators import macd # noqa: E402
 
 # J 门槛与 live 选股链同值；唯一定义在 b1_dual_factor（因子层内），此处引用不另写
 from b1_dual_factor import J_LOW_THRESHOLD  # noqa: E402

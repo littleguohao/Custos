@@ -29,7 +29,12 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from indicators import bbi_series, kdj_series  # noqa: E402
+# 2026-08-07 架构审查：以下 7 个纯指标函数已下移到 `indicators`（底层）——
+# 它们此前定义在本模块，却被 factors/（底层）与 screening/ 跨层调用，
+# 构成「底层依赖决策层」的分层反转。本模块自己也用它们，故导入回来。
+from indicators import (bbi_series, kdj_series,  # noqa: E402
+                        ema, resample, kdj, macd, bbi_state, zhixing_state,
+                        _infer_price_limit)
 
 from paths import BASE, TDX_ROOT  # noqa: E402
 from code_utils import norm_code, price_limit_pct, split_code  # noqa: E402
@@ -58,72 +63,6 @@ def _read_vipdoc_mootdx(tdx_code: str) -> pd.DataFrame:
 def read_vipdoc(tdx_code: str) -> pd.DataFrame:
     """Read K-line via unified mootdx data layer (replaces struct.unpack binary parsing)."""
     return _read_vipdoc_mootdx(tdx_code)
-
-
-def ema(s: pd.Series, span: int) -> pd.Series:
-    return s.ewm(span=span, adjust=False).mean()
-
-
-def macd(df: pd.DataFrame) -> dict[str, Any]:
-    if len(df) < 35:
-        return {"available": False}
-    close = df["close"]
-    dif = ema(close, 12) - ema(close, 26)
-    dea = ema(dif, 9)
-    hist = (dif - dea) * 2
-    return {
-        "available": True,
-        "dif": round(float(dif.iloc[-1]), 4),
-        "dea": round(float(dea.iloc[-1]), 4),
-        "hist": round(float(hist.iloc[-1]), 4),
-        "hist_prev": round(float(hist.iloc[-2]), 4),
-        "hist_direction": "扩张" if hist.iloc[-1] > hist.iloc[-2] else "收缩",
-        "golden_cross": bool(dif.iloc[-2] <= dea.iloc[-2] and dif.iloc[-1] > dea.iloc[-1]),
-        "death_cross": bool(dif.iloc[-2] >= dea.iloc[-2] and dif.iloc[-1] < dea.iloc[-1]),
-    }
-
-
-def kdj(df: pd.DataFrame, n=9, m1=3, m2=3) -> dict[str, Any]:
-    if len(df) < n + 3:
-        return {"available": False}
-    # J 用共享实现（2026-08-06 收敛第 4 份重复）。`fill_na=50` 保留本模块原行为。
-    # ⚠️ 为什么要和 live 选股链共用：同一只票可能同时被 enrich_candidates（选股）
-    # 与本模块（持仓状态机）评估 —— 两边算出不同的 J，就会出现
-    # 「选股说 J<13 可进，持仓说 J 不低」这类无法解释的矛盾。
-    k, d, j = kdj_series(df, n=n, m1=m1, m2=m2, fill_na=50.0)
-    jv = float(j.iloc[-1])
-    if jv < 13:
-        state = "低位调整到位观察"
-    elif jv > 90:
-        state = "高位过热"
-    elif j.iloc[-1] > j.iloc[-2] and jv < 30:
-        state = "低位拐头"
-    else:
-        state = "中性"
-    return {
-        "available": True,
-        "k": round(float(k.iloc[-1]), 4),
-        "d": round(float(d.iloc[-1]), 4),
-        "j": round(jv, 4),
-        "j_prev": round(float(j.iloc[-2]), 4),
-        "golden_cross": bool(k.iloc[-2] <= d.iloc[-2] and k.iloc[-1] > d.iloc[-1]),
-        "death_cross": bool(k.iloc[-2] >= d.iloc[-2] and k.iloc[-1] < d.iloc[-1]),
-        "state": state,
-    }
-
-
-def resample(df: pd.DataFrame, rule: str) -> pd.DataFrame:
-    if df.empty:
-        return df
-    x = df.set_index("date").resample(rule).agg({
-        "open": "first",
-        "high": "max",
-        "low": "min",
-        "close": "last",
-        "amount": "sum",
-        "volume": "sum",
-    }).dropna().reset_index()
-    return x
 
 
 def box(df: pd.DataFrame, n: int) -> dict[str, Any]:
@@ -162,107 +101,6 @@ def slope(vals: pd.Series, n: int) -> float | None:
     if prev == 0:
         return None
     return (now / prev - 1) * 100
-
-
-def bbi_state(df: pd.DataFrame) -> dict[str, Any]:
-    """Return the standard TDX BBI state used by the B1 holding rules."""
-    if len(df) < 24:
-        return {"available": False, "reason": "少于24根K线"}
-    close = df["close"]
-    bbi = bbi_series(close)
-    valid = bbi.notna()
-    if not valid.any():
-        return {"available": False, "reason": "BBI无法计算"}
-
-    c = float(close.iloc[-1])
-    value = float(bbi.iloc[-1])
-    below = close < bbi
-    consecutive_below = 0
-    for is_below in reversed(below.tolist()):
-        if not is_below:
-            break
-        consecutive_below += 1
-
-    distance_pct = (c / value - 1) * 100 if value else None
-    return {
-        "available": True,
-        "formula": "(MA3+MA6+MA12+MA24)/4",
-        "value": round(value, 4),
-        "close_above": bool(c >= value),
-        "distance_pct": round(distance_pct, 4) if distance_pct is not None else None,
-        "consecutive_closes_below": consecutive_below,
-        "previous_close_above": bool(close.iloc[-2] >= bbi.iloc[-2]) if len(df) >= 25 else None,
-    }
-
-
-def zhixing_state(df: pd.DataFrame, m1: int = 14, m2: int = 28, m3: int = 57, m4: int = 114) -> dict[str, Any]:
-    """知行趋势线（通达信 ZSDKX）：快线 QSX 上穿慢线 DKS 为多头/金叉。
-
-    - QSX = EMA(EMA(CLOSE,10),10)（短期趋势线，图上白线）。
-    - DKS = (MA(CLOSE,m1)+MA(CLOSE,m2)+MA(CLOSE,m3)+MA(CLOSE,m4))/4（多空线，图上黄线）。
-    - 多头状态 QSX>DKS；金叉=QSX 由下向上穿越 DKS 当日。
-    - 辅助：MA1=MA(CLOSE,60)、MA2=EMA(CLOSE,13)。
-    需 >= m4 根 K 线才能计算 DKS，否则 available=False。
-    """
-    if len(df) < m4:
-        return {"available": False, "reason": f"少于{m4}根K线，DKS(MA{m4})无法计算"}
-    close = df["close"].astype(float).reset_index(drop=True)
-    qsx = ema(ema(close, 10), 10)
-    dks = sum(close.rolling(n).mean() for n in (m1, m2, m3, m4)) / 4
-    valid = qsx.notna() & dks.notna()
-    if not valid.any():
-        return {"available": False, "reason": "QSX/DKS 无有效值"}
-    gt = (qsx > dks) & valid
-    prev_gt = gt.shift(1, fill_value=False)
-    cross_up = gt & (~prev_gt) & valid.shift(1, fill_value=False)
-    idxs = [i for i, v in enumerate(cross_up.tolist()) if v]
-    days_since = (len(close) - 1 - idxs[-1]) if idxs else None
-    qsx_last = float(qsx.iloc[-1])
-    dks_last = float(dks.iloc[-1])
-    c = float(close.iloc[-1])
-    ma1 = float(close.rolling(60).mean().iloc[-1]) if len(close) >= 60 else None
-    ma2 = float(ema(close, 13).iloc[-1])
-    return {
-        "available": True,
-        "qsx": round(qsx_last, 4),
-        "dks": round(dks_last, 4),
-        "qsx_gt_dks": bool(qsx_last > dks_last),
-        "golden_cross_today": bool(cross_up.iloc[-1]),
-        "days_since_golden_cross": days_since,
-        "close_above_qsx": bool(c >= qsx_last),
-        "ma1_ma60": round(ma1, 4) if ma1 is not None else None,
-        "ma2_ema13": round(ma2, 4),
-        "params": {"m1": m1, "m2": m2, "m3": m3, "m4": m4},
-    }
-
-
-def _infer_price_limit(code: str, df: pd.DataFrame) -> int:
-    """Infer the daily price-limit percentage for a stock.
-
-    Base comes from ``code_utils.price_limit_pct`` (single source), then
-    validates against observed historical daily changes: if any completed
-    bar shows |change_pct| > 9.9 for a 10%-prefix stock, upgrade to 20%.
-    This catches edge cases without relying solely on static prefix rules.
-    ST/special-treatment stocks typically have 5% limits; we detect those
-    by checking if observed max |change_pct| is consistently <= 5.2. The ST
-    downgrade only applies to 10%-prefix stocks — a quiet 20-day window must
-    never demote a 300/301/688/920 stock to 5%.
-    """
-    # ⚠️ base 必须来自 `code_utils.price_limit_pct`（唯一来源）。此前这里内联写
-    # `20 if startswith(("688","920","300","301")) else 10`，对北交所给 20 而
-    # 实际限制是 **30**，且漏了 83/87/43 前缀。下面的数据自纠只能把 10 升到 20、
-    # **永远到不了 30**，所以那个偏差不会被历史波动纠正 —— 详见唯一实现的 docstring。
-    base = int(price_limit_pct(code))
-    if len(df) >= 20:
-        changes = (df["close"] / df["close"].shift(1) - 1).abs() * 100
-        max_change = float(changes.dropna().max())
-        if base == 10 and max_change > 9.9:
-            base = 20
-        if base == 10 and max_change <= 5.2:
-            # ST 降级仅适用于 10% 前缀品种；20% 前缀（300/301/688/920）
-            # 即使近 20 日波动很小也不得降级为 5%。
-            base = 5
-    return base
 
 
 def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:

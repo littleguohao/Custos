@@ -90,7 +90,7 @@ def compute_signals(df: pd.DataFrame, code: str = "", *,
             qsx=zx.get("qsx"), dks=zx.get("dks"))
     else:
         try:
-            from technical_monitor import zhixing_state
+            from indicators import zhixing_state
             z = zhixing_state(df)
             put("qsx_gt_dks", bool(z.get("available")), bool(z.get("qsx_gt_dks")))
         except Exception:  # noqa: BLE001

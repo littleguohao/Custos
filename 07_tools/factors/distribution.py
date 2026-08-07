@@ -19,7 +19,7 @@ for _p in (str(_TOOLS), str(_TOOLS / "market_timing")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from technical_monitor import _infer_price_limit  # noqa: E402
+from indicators import _infer_price_limit # noqa: E402
 
 FACTOR: dict[str, Any] = {
     "id": "distribution",

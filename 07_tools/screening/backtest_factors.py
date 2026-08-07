@@ -61,7 +61,7 @@ def _bbi_series_from(df: pd.DataFrame) -> np.ndarray:
 from s_shape import compute_s_shape, compute_s_reversal, SSHAPE_MIN_BARS, SSTAR_STRONG, SSTAR_MID  # noqa: E402
 
 try:
-    from technical_monitor import kdj as _kdj  # noqa: E402
+    from indicators import kdj as _kdj # noqa: E402
 except Exception:  # noqa: BLE001
     _kdj = None
 

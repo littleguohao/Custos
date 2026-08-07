@@ -5,7 +5,7 @@
 > 代码已默认跳过（`load_bars_qlib` / `list_universe` 同口径），`allow_unverified=True` 可放行。
 > ⇒ **qlib 现在只覆盖 1999-11 ~ 2020-09**（老 bundle），且只在这段有 214 只退市票可去偏。
 >
-> `E:\S_DATA` 下的 qlib bundle / 单票 CSV，通过 `07_tools/screening/s_data.py` 只读访问。
+> `E:\S_DATA` 下的 qlib bundle / 单票 CSV，通过 `07_tools/s_data.py` 只读访问。
 > **只服务研究与回测链，live 链不用。**
 >
 > 2026-08-06 新建。此前它的关键事实只写在 `s_data.py` 的 docstring 里，

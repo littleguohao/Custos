@@ -15,6 +15,11 @@ from news.premarket_intel_schema import validate_premarket_intelligence
 
 from paths import BASE, cn_now
 from paths import read_json as load
+# 2026-08-07 架构审查：这两个访问器已移到 `news/premarket_intel_schema`——
+# 它们读的是 `01_data/news/premarket/`，而 `news/postclose_news_digest`
+# 也要用；放在本模块（根层报告生成器）里会让 news/（L1）反向依赖根层。
+from news.premarket_intel_schema import (  # noqa: E402
+    load_premarket_intelligence, premarket_intelligence_path)
 
 DATA=BASE/'01_data'; PLAN=BASE/'03_daily_plans'; WEEKDAY='一二三四五六日'
 
@@ -48,17 +53,6 @@ ACTION_LABELS={
     'no dip-buy; reduce 10%-20% on weak rebound or renewed reversal':'禁止逢跌补仓；弱反弹或再次转弱时减持10%-20%',
 }
 
-def premarket_intelligence_path(day:str)->Path|None:
-    # 生成方(仓库外的 OpenClaw cron)存在两种命名:带连字符 2026-07-16_... 与无连字符 20260717_...,加载端兼容两种
-    news_dir=DATA/'news'/'premarket'
-    for name in (f'{day}_premarket_intelligence.json', f"{day.replace('-','')}_premarket_intelligence.json"):
-        path=news_dir/name
-        if path.exists(): return path
-    return None
-
-def load_premarket_intelligence(day:str)->dict[str,Any]:
-    path=premarket_intelligence_path(day)
-    return load(path,{}) if path else {}
 
 def premarket_schema_note(check:dict[str,Any])->str:
     # schema 不合规时的降级标注,插在 2.1 节首行,让情报失效在报告中显式可见
