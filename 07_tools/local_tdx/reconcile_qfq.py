@@ -789,9 +789,12 @@ def report(rows: list[dict]) -> int:
     if bad:
         print("\n⚠️ **分歧明细**（比值跳变的日子就是两边对某个事件处理不同的日子）：")
         for r in bad:
-            print(f"   {r['code']}: 比值离散 {r['ratio_spread']:.4%}，"
-                  f"最大日收益差 {r['worst_ret_diff']:.4%}，"
-                  f"分歧 {r['n_mismatch']} 天，前 10 天 {r['mismatch_days']}")
+            # ⚠️ 用 .get：`reconcile` 总是成对设置 mismatch_days/n_mismatch，但
+            # **一份诊断报告的全部价值就是被打出来** —— 少一个键就 KeyError 崩在
+            # **打印中途**（前面几行已输出，读者以为看全了），比显示「—」糟得多。
+            print(f"   {r['code']}: 比值离散 {r.get('ratio_spread', float('nan')):.4%}，"
+                  f"最大日收益差 {r.get('worst_ret_diff', float('nan')):.4%}，"
+                  f"分歧 {r.get('n_mismatch', '—')} 天，前 10 天 {r.get('mismatch_days', '—')}")
         print("\n   ⇒ 拿其中一天去查 `01_data/market/xdxr/{code}.json` 里那天附近的事件，"
               "对照 `event_ratio()` 的公式。")
     if skip:
