@@ -136,6 +136,10 @@
 | 43 | `close_review/` 多个文件低覆盖：`final_close_review.py` 19%（164）、`execution_review.py` 0%（63）、`review_core.py` 51%（134）、`review_enrichment.py` 32% | 下一批 review 时一起 |
 | 44 | 研究脚本低覆盖（`adjust_diagnostic` 21% / `analyze_winner_features` 17% / `compare_signal_sets` 0% / `scan_signal_backtest` 0% / `m2_migrate_fingerprint` 0%）—— 风险最低，但先判定哪些已被取代可删 | 先判存废 |
 
+| 45 | ⚠️ **`market_timing_scorer.is_stale` 是 fail-open**：`return bool(day and as_of) and as_of != day` —— **缺 `as_of` 时返回 False**（当成新鲜），于是没写 `as_of` 的 section 拿当日满分。与仓库别处的 fail-closed 原则相反（`runtime_gate._QUALITY_PASS` 注释：「风控组件的未知状态必须等于阻断」）。上游已缓解（`merge_incremental_market` 必须写 as_of），但判据本身仍是 fail-open。改成 fail-closed 会降低评分、改变 live 择时行为 ⇒ **需 owner 定**。测试已锁住现状 | **需 owner 拍板** |
+
+| 46 | ⚠️ **覆盖率读数不稳定**：`market_timing_scorer.py` 在三次全量运行里读出 15% / 36% / 48%（语句总数不变）。已排除「导入形式不一致」（统一为包限定后仍 36%），未能在合理成本内定位。可验证的是「排除新测试 15% → 包含 36%」，即新测试确实 +21pp。**影响**：单文件覆盖率不能当精确指标用，只能看趋势。怀疑与 conftest 把 `07_tools` 与各子目录**都**铺进 sys.path、同一文件可两路导入有关 | 待查 |
+
 ## 需要 owner 拍板
 
 | # | 事项 | 出处 |
