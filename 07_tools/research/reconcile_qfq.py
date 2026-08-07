@@ -42,10 +42,10 @@ qlib bundle 有两个坑（见 `00_governance/data/QLIB_LOCAL_DATA.md`）：
 
 用法：
     # 自动挑「除权影响最大」的票（累计因子偏离 1 最多）
-    uv run python 07_tools/local_tdx/reconcile_qfq.py --auto 20
+    uv run python 07_tools/research/reconcile_qfq.py --auto 20
 
     # 指定代码
-    uv run python 07_tools/local_tdx/reconcile_qfq.py --codes 600000,000001,920808
+    uv run python 07_tools/research/reconcile_qfq.py --codes 600000,000001,920808
 """
 from __future__ import annotations
 

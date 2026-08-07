@@ -354,3 +354,32 @@ class TestNoStaleScriptPaths:
                     bad.append(f"{p.relative_to(TOOLS)}: 07_tools/{m.group(1)}/{m.group(2)}")
         assert not bad, ("引用了不存在的脚本路径（移动文件时漏改）：\n  "
                          + "\n  ".join(sorted(set(bad))))
+
+
+class TestNoDuplicateModuleNames:
+    """⚠️ 同一个模块名不得出现在两个目录 —— 否则**扁平 import 会拿到哪一个不确定**
+    （`07_tools` 与各子目录都在 sys.path 上，取决于插入顺序）。
+
+    2026-08-07 实际踩到，而且是自己的搬迁脚本造成的：脚本先按**原路径**算出
+    「哪些文件需要更新引用」，再 `git mv`，最后**按原路径写回** ——
+    于是那些「既被移动、又需要更新引用」的文件在**旧位置被重建**，
+    同时新位置留着一份引用未更新的。4 个文件同时存在两处。
+
+    ⚠️ 已有的 `TestNoStaleScriptPaths` **抓不到这个** —— 两个路径都存在，
+    所有引用都能解析。所以需要这条独立检查。
+
+    教训：搬迁脚本必须**先移动、再按新路径重算引用**，
+    或者至少在写回前确认目标路径仍然是文件的当前位置。
+    """
+
+    def test_no_module_basename_in_two_dirs(self):
+        import collections
+
+        dup = collections.defaultdict(list)
+        for p in TOOLS.rglob("*.py"):
+            if "__pycache__" in str(p) or p.name in {"__init__.py", "__main__.py"}:
+                continue
+            dup[p.name].append(str(p.relative_to(TOOLS)))
+        bad = {k: v for k, v in dup.items() if len(v) > 1}
+        assert not bad, ("同名模块出现在多个目录（扁平 import 会拿到哪一个不确定）：\n  "
+                         + "\n  ".join(f"{k}: {v}" for k, v in sorted(bad.items())))

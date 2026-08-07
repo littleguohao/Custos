@@ -39,8 +39,8 @@
 
 CLI::
 
-    uv run python 07_tools/trades/backtest_0amv_bear_regime.py
-    uv run python 07_tools/trades/backtest_0amv_bear_regime.py --start 2020-07-10 --end 2026-07-09
+    uv run python 07_tools/research/backtest_0amv_bear_regime.py
+    uv run python 07_tools/research/backtest_0amv_bear_regime.py --start 2020-07-10 --end 2026-07-09
 """
 from __future__ import annotations
 

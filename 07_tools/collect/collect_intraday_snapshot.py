@@ -9,7 +9,7 @@ best-effort 语义：TdxW 未运行或任一指数失败都不会 raise、exit �
 
 CLI::
 
-    uv run python 07_tools/market_timing/collect_intraday_snapshot.py --date YYYY-MM-DD
+    uv run python 07_tools/collect/collect_intraday_snapshot.py --date YYYY-MM-DD
 """
 from __future__ import annotations
 
