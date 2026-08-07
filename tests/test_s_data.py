@@ -12,7 +12,7 @@ import pytest
 # 此前全部调用点用扁平 `import s_data`、只有本测试用 `from screening import`，
 # 那是「同一文件两个模块对象」的隐患（`s_data.list_universe` 是被打桩的目标）。
 import s_data
-from screening import backtest_factors as bt
+from research import backtest_factors as bt
 
 
 def _mk_bundle(root, name, dates, stocks):

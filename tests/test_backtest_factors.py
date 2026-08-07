@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 
-from screening import backtest_factors as bt
+from research import backtest_factors as bt
 
 
 def make_df(closes, highs=None, lows=None, vols=None):

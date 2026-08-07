@@ -1,7 +1,7 @@
 # B1 波段战法基础模型
 
 > **上下文**：B1 波段策略（**主**）　｜　**执行者**：**代码** + 人　｜　**状态**：✅ 现行
-> **版本**：`B1-base-v11`（2026-07-13）　｜　**代码依赖**：`screening/enrich_candidates.py`、`market_timing/b1_holding_state.py`、`screening/backtest_factors.py`
+> **版本**：`B1-base-v11`（2026-07-13）　｜　**代码依赖**：`screening/enrich_candidates.py`、`market_timing/b1_holding_state.py`、`research/backtest_factors.py`
 > **索引**：[`../README.md`](../README.md)　·　改动须记 [`strategy_version_log.md`](../../../05_strategy_versions/strategy_version_log.md)
 >
 > 🔒 **止损口径（owner 2026-08-06 定案）：B1 按本文档的规则止损，自成一套。**

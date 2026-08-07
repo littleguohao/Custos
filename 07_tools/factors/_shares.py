@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """股本事件索引 —— 因子层的**唯一**所有者。
 
-2026-08-06 从 `screening/backtest_factors.py` 移来。为什么必须移：
+2026-08-06 从 `research/backtest_factors.py` 移来。为什么必须移：
 
 `factors/mcap.py` 需要它，而原先它在回测器里 ⇒ 因子层要**反向依赖**回测器。
 更糟的是**同一文件被加载成两个模块**的老陷阱当场发作：
-测试用 `from screening import backtest_factors as bt` 打桩 `bt._SHARE_IDX`，
+测试用 `from research import backtest_factors as bt` 打桩 `bt._SHARE_IDX`，
 而 mcap 用扁平 `import backtest_factors` ⇒ 两个模块对象，patch 不互通、mcap 拿不到桩数据。
 （见 `00_governance/data/DATA_SOURCE_PRINCIPLE.md`「模块级常量 + 运行时替换 = 陷阱」变体①。）
 

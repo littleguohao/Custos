@@ -94,7 +94,7 @@ class TestNoLocalReimplementation:
         ("screening/enrich_candidates.py", "_j_canonical"),
         ("factors/main_rally_factor.py", "j_series as _j_series"),
         ("factors/b2_surge_factor.py", "_j_canonical"),
-        ("screening/backtest_factors.py", "bbi_series as _bbi_series"),
+        ("research/backtest_factors.py", "bbi_series as _bbi_series"),
         ("market_timing/technical_monitor.py", "kdj_series"),
     ]
 

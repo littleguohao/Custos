@@ -43,12 +43,12 @@
     （执行率仅 22% 时，先到先得等于抽签命中大赢家）
 
 用法：
-    uv run python 07_tools/screening/m2_stop_sweep.py --sample 300      # 小样本试跑
-    uv run python 07_tools/screening/m2_stop_sweep.py                   # 全部
-    uv run python 07_tools/screening/m2_stop_sweep.py -j 6              # 6 进程并行
-    uv run python 07_tools/screening/m2_stop_sweep.py --only B_stop_pct # 只跑一组
-    uv run python 07_tools/screening/m2_stop_sweep.py --report-only     # 只重出报表
-    uv run python 07_tools/screening/m2_stop_sweep.py --cross-window    # 2022-2024 复核
+    uv run python 07_tools/research/m2_stop_sweep.py --sample 300      # 小样本试跑
+    uv run python 07_tools/research/m2_stop_sweep.py                   # 全部
+    uv run python 07_tools/research/m2_stop_sweep.py -j 6              # 6 进程并行
+    uv run python 07_tools/research/m2_stop_sweep.py --only B_stop_pct # 只跑一组
+    uv run python 07_tools/research/m2_stop_sweep.py --report-only     # 只重出报表
+    uv run python 07_tools/research/m2_stop_sweep.py --cross-window    # 2022-2024 复核
 
 ## 为什么慢，以及怎么快（2026-08-05）
 
@@ -131,7 +131,7 @@ import time
 from typing import Any, Optional
 
 BASE = pathlib.Path(__file__).resolve().parents[2]
-SCRIPT = BASE / "07_tools" / "screening" / "backtest_factors.py"
+SCRIPT = BASE / "07_tools" / "research" / "backtest_factors.py"
 OUTDIR = BASE / "06_logs" / "m2_sweep"
 
 DEFAULT_SAMPLE = 1000           # 样本股票数默认值（300 样本实测不可靠，见模块文档）

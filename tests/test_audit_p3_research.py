@@ -23,7 +23,7 @@ import backtest_factors as bt
 import launch_point_study as lp
 import s_data
 from screening import financials as fin_mod
-from screening import run_bear_to_long_study as rb
+from research import run_bear_to_long_study as rb
 
 
 def _bars(n=80, start="2024-01-02", base=10.0, step=0.1, vol=1e6):
@@ -341,15 +341,15 @@ class TestTierYouVisibilitySemantics:
                            ("2026-04-20", "2026-03-31", 2.0, 0.6, 9.0)]}
 
     def test_announcement_day_itself_not_yet_visible(self):
-        from screening import scan_signals_ytd as scan
+        from research import scan_signals_ytd as scan
         assert scan._tier_you(self._idx(), "600000", "2026-01-10") is False
 
     def test_next_day_visible(self):
-        from screening import scan_signals_ytd as scan
+        from research import scan_signals_ytd as scan
         assert scan._tier_you(self._idx(), "600000", "2026-01-11") is True
 
     def test_unknown_code_false(self):
-        from screening import scan_signals_ytd as scan
+        from research import scan_signals_ytd as scan
         assert scan._tier_you(self._idx(), "999999", "2026-01-11") is False
 
 

@@ -40,8 +40,9 @@ def test_package_exists_with_doc():
 @pytest.mark.parametrize("m", MODULES)
 def test_module_moved(m):
     assert (FACTORS_DIR / f"{m}.py").exists(), f"{m} 未在 factors/"
-    assert not (ROOT / "07_tools" / "screening" / f"{m}.py").exists(), \
-        f"{m} 仍留在 screening/（重复文件）"
+    for d in ("screening", "research"):
+        assert not (ROOT / "07_tools" / d / f"{m}.py").exists(), \
+            f"{m} 仍留在 {d}/（重复文件）"
 
 
 class TestConsumersCanResolve:
@@ -52,14 +53,19 @@ class TestConsumersCanResolve:
     改成包限定 import 要动 34 处、其中还有多行 `from X import (a, b,` —— 风险更高。
     """
 
-    CONSUMERS = ["backtest_factors.py", "enrich_candidates.py", "score_candidates.py",
-                 "signal_labels.py", "launch_point_study.py", "candidate_table.py",
-                 "scan_signals_ytd.py", "run_bear_to_long_study.py",
-                 "compare_signal_sets.py", "scan_signal_backtest.py"]
+    # ⚠️ 因子消费方**跨两个目录**：2026-08-07 研究脚本从 `screening/` 拆到 `research/`
+    # （研究代码占了 screening/ 的 70%，性质与生产链不同）。
+    # 这里存「目录/文件名」而不是只存文件名 —— 只存文件名的写法在拆分当天
+    # 就让 6 条测试 FileNotFoundError。
+    CONSUMERS = ["research/backtest_factors.py", "screening/enrich_candidates.py",
+                 "screening/score_candidates.py", "screening/signal_labels.py",
+                 "research/launch_point_study.py", "screening/candidate_table.py",
+                 "research/scan_signals_ytd.py", "research/run_bear_to_long_study.py",
+                 "research/compare_signal_sets.py", "research/scan_signal_backtest.py"]
 
     @pytest.mark.parametrize("f", CONSUMERS)
     def test_has_factors_bootstrap(self, f):
-        s = (ROOT / "07_tools" / "screening" / f).read_text(encoding="utf-8")
+        s = (ROOT / "07_tools" / f).read_text(encoding="utf-8")
         assert "_FACTORS_DIR" in s, f"{f} 未把 factors/ 加进 sys.path"
 
     @pytest.mark.parametrize("f", CONSUMERS)
@@ -70,7 +76,7 @@ class TestConsumersCanResolve:
         而 `launch_point_study` / `run_bear_to_long_study` 在**函数内部**做懒引导，
         于是引导被插进函数体 ⇒ `IndentationError`。
         """
-        for ln in (ROOT / "07_tools" / "screening" / f).read_text(encoding="utf-8").splitlines():
+        for ln in (ROOT / "07_tools" / f).read_text(encoding="utf-8").splitlines():
             if "_FACTORS_DIR = str(" in ln:
                 assert not ln.startswith((" ", "\t")), f"{f} 的 factors 引导有缩进（在函数内）"
 

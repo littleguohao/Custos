@@ -16,11 +16,11 @@ import math
 import pandas as pd
 import pytest
 
-from screening import backtest_factors as bt
+from research import backtest_factors as bt
 from screening import candidate_table as ct
 from screening import enrich_candidates as ec
-from screening import launch_point_study as lp
-from screening import run_bear_to_long_study as bl
+from research import launch_point_study as lp
+from research import run_bear_to_long_study as bl
 from screening import score_candidates as sc
 from factors import s_shape as ss
 

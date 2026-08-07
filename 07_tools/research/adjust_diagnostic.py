@@ -23,13 +23,13 @@
 
 用法：
     # ① 检测 tdx 数据里的疑似除权跳空（不需要 qlib）
-    uv run python 07_tools/screening/adjust_diagnostic.py --scan --sample 300
+    uv run python 07_tools/research/adjust_diagnostic.py --scan --sample 300
 
     # ② 与前复权源逐日对比，精确识别除权（需要 S_DATA）
-    uv run python 07_tools/screening/adjust_diagnostic.py --compare --sample 100
+    uv run python 07_tools/research/adjust_diagnostic.py --compare --sample 100
 
     # ③ 同一批票同参数，两个口径各跑一遍回测，看结论差多少（最有说服力）
-    uv run python 07_tools/screening/adjust_diagnostic.py --backtest-diff --sample 300
+    uv run python 07_tools/research/adjust_diagnostic.py --backtest-diff --sample 300
 """
 from __future__ import annotations
 
@@ -46,6 +46,15 @@ for _p in (BASE / "07_tools", BASE / "07_tools" / "local_tdx",
            BASE / "07_tools" / "screening"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
+
+# ── research/ 与 screening/ 分家（2026-08-07）后的路径引导。
+# 研究脚本要能同时导**自己的兄弟**（research/）与**生产链模块**（screening/）：
+# 方向是研究依赖生产（回测要跑生产的因子与打分），反向为 0 ——
+# 见 tests/test_architecture_layers.py。
+for _p in (str(pathlib.Path(__file__).resolve().parent), str(pathlib.Path(__file__).resolve().parents[1] / "screening")):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 
 import numpy as np                                            # noqa: E402
 import pandas as pd                                           # noqa: E402
@@ -267,7 +276,7 @@ def cmd_compare(sample: int, count: int, seed: int, s_data_root: str) -> int:
 def cmd_backtest_diff(sample: int, seed: int, s_data_root: str,
                       extra: Optional[list[str]] = None) -> int:
     """同一批票同参数，两个口径各跑一遍回测——最有说服力的证据。"""
-    script = BASE / "07_tools" / "screening" / "backtest_factors.py"
+    script = BASE / "07_tools" / "research" / "backtest_factors.py"
     outdir = BASE / "06_logs" / "adjust_diag"
     outdir.mkdir(parents=True, exist_ok=True)
     common = ["--trade-sim", "--entry-filter", "j_low", "--scorer", "b1_dual",
@@ -336,7 +345,12 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--s-data-root", default="")
     ap.add_argument("--gap-threshold", type=float, default=GAP_THRESHOLD,
-                    help=f"深跳空阈值(默认 {GAP_THRESHOLD:.0%});分档统计一律从 2%% 起扫")
+                    # ⚠️ argparse 会对 help 串做 `% params` 格式化，所以**里面的每个 % 都要写成 %%**。
+                    # 2026-08-07 修：原写法用 `{GAP_THRESHOLD:.0%}` 注入了一个**未转义的** %，
+                    # 于是 `--help` 直接 `ValueError: unsupported format character ')'` ——
+                    # 后面那个 `2%%` 转义是对的，f-string 注进来的那个漏了。
+                    # `--help` 崩掉等于这个脚本的参数无法被发现。
+                    help=f"深跳空阈值(默认 {GAP_THRESHOLD * 100:.0f}%%);分档统计一律从 2%% 起扫")
     a = ap.parse_args()
 
     import os

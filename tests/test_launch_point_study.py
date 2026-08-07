@@ -4,7 +4,7 @@ import json
 import pandas as pd
 import pytest
 
-from screening import launch_point_study as lp
+from research import launch_point_study as lp
 
 
 @pytest.fixture(autouse=True)

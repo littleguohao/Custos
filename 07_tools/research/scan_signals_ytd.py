@@ -24,6 +24,15 @@ _FACTORS_DIR = str(Path(__file__).resolve().parents[1] / "factors")
 if _FACTORS_DIR not in sys.path:
     sys.path.insert(0, _FACTORS_DIR)   # 因子层：见 factors/__init__.py
 
+# ── research/ 与 screening/ 分家（2026-08-07）后的路径引导。
+# 研究脚本要能同时导**自己的兄弟**（research/）与**生产链模块**（screening/）：
+# 方向是研究依赖生产（回测要跑生产的因子与打分），反向为 0 ——
+# 见 tests/test_architecture_layers.py。
+for _p in (str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[1] / "screening")):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+
 
 import backtest_factors as bt  # noqa: E402
 # 财报时效阈值走 financials 的**单一定义**,不在此二次定义——两处口径漂移会让同一只票

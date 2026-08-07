@@ -99,7 +99,7 @@ universe 逻辑。落盘失败时**退回各自抽样并明确告警**，不中�
 可复现跑法：
 
 ```bash
-uv run python 07_tools/screening/m2_stop_sweep.py \
+uv run python 07_tools/research/m2_stop_sweep.py \
     --window 2024-08-01 2026-08-05 --pin-universe -j 4
 ```
 

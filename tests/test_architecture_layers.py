@@ -3,7 +3,7 @@
 2026-08-07 架构审查实测出的问题（本文件把结论钉住，防回归）：
 
   ① `factors/`（因子层，本该是最底层）依赖 `market_timing/technical_monitor`
-     与 `screening/backtest_factors` —— **底层依赖决策层**。
+     与 `research/backtest_factors` —— **底层依赖决策层**。
      后果：import 任一因子会拖进整个持仓状态机 + 1959 行回测器及其 40+ 依赖。
      成因：`technical_monitor` 552 行里**只有 7 个函数被模块外使用**，
      而这 7 个全是纯指标（`kdj`/`macd`/`ema`/`resample`/`bbi_state`/
@@ -39,6 +39,9 @@ LAYER_OF_DIR = {
     "local_tdx": 1, "collect": 1, "news": 1,
     "factors": 2, "trades": 2,
     "screening": 3, "market_timing": 3, "close_review": 3, "analysis": 3,
+    # research/ 在生产链**之上**：回测要跑生产的因子与打分逻辑。
+    # 2026-08-07 从 screening/ 拆出（研究代码占了那个目录的 70%）。
+    "research": 4,
 }
 # 根目录下的**数据适配器**：性质是 L1，不是编排层。
 # `s_data.py` 是 qlib/CSV 只读 loader（零内部依赖），2026-08-07 从 `screening/`
@@ -222,3 +225,30 @@ class TestContractsLayer:
             src = (TOOLS / rel).read_text(encoding="utf-8")
             assert re.search(rf"require\(['\"]{artifact}['\"]", src), \
                 f"{rel} 未在落盘前校验 {artifact}"
+
+
+class TestResearchProductionSplit:
+    """⚠️ `research/` 与 `screening/` 的依赖方向：**只许研究 → 生产**。
+
+    2026-08-07 拆分前实测反向为 0，所以能干净拆开。这条测试保住它 ——
+    一旦生产链 import 了研究脚本，18:00 的每日选股就会依赖一个
+    「探索性、可以失败、可以废弃」的模块。
+    """
+
+    def test_production_never_imports_research(self):
+        bad = [f"{a} → {b}" for a, deps in GRAPH.items() if a.startswith("screening/")
+               for b in deps if b.startswith("research/")]
+        assert not bad, ("生产选股链不得依赖研究脚本：\n  " + "\n  ".join(bad))
+
+    def test_research_may_import_production(self):
+        """反向是允许且实际存在的（`backtest_factors → enrich_candidates`）——
+        这条测试确认拆分没把它切断（切断了说明研究脚本已经跑不起来）。"""
+        edges = [f"{a} → {b}" for a, deps in GRAPH.items() if a.startswith("research/")
+                 for b in deps if b.startswith("screening/")]
+        assert edges, "研究脚本应仍能依赖生产模块（回测要跑生产逻辑）"
+
+    def test_screening_has_only_production_chain(self):
+        """`screening/` 里只剩 18:00 生产链会用到的模块。"""
+        got = {p.stem for p in (TOOLS / "screening").glob("*.py")} - {"__init__"}
+        assert got == {"formula_screen", "enrich_candidates", "score_candidates",
+                       "candidate_table", "manual_pools", "signal_labels", "financials"}, got

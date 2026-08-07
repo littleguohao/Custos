@@ -9,7 +9,7 @@
 
 CLI（在有本地通达信日线的机器上跑）::
 
-    uv run python 07_tools/screening/backtest_factors.py --codes 600000,000001 --count 500 \
+    uv run python 07_tools/research/backtest_factors.py --codes 600000,000001 --count 500 \
         --horizons 5,10,20 --out 01_data/screening/backtest_s_shape.json
 
 评估逻辑与数据加载解耦：evaluate() 接收 {code: DataFrame}，便于单测注入合成 bars。
@@ -29,14 +29,23 @@ from typing import Any, Callable, Optional
 import numpy as np
 import pandas as pd
 
-_SCREEN_DIR = Path(__file__).resolve().parent
-_TOOLS = _SCREEN_DIR.parent
-for _p in (str(_TOOLS), str(_SCREEN_DIR), str(_TOOLS / "local_tdx")):
+_RESEARCH_DIR = Path(__file__).resolve().parent
+_TOOLS = _RESEARCH_DIR.parent
+for _p in (str(_TOOLS), str(_RESEARCH_DIR), str(_TOOLS / "local_tdx")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 _FACTORS_DIR = str(Path(__file__).resolve().parents[1] / "factors")
 if _FACTORS_DIR not in sys.path:
     sys.path.insert(0, _FACTORS_DIR)   # 因子层：见 factors/__init__.py
+
+# ── research/ 与 screening/ 分家（2026-08-07）后的路径引导。
+# 研究脚本要能同时导**自己的兄弟**（research/）与**生产链模块**（screening/）：
+# 方向是研究依赖生产（回测要跑生产的因子与打分），反向为 0 ——
+# 见 tests/test_architecture_layers.py。
+for _p in (str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[1] / "screening")):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 
 # 9 个自包含 scorer 已抽到 factors/ 各自成模块（2026-08-06），此处仅保留别名。
 from alpha101 import score as _sc_alpha101  # noqa: E402

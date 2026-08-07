@@ -48,7 +48,7 @@
 - **资金流**无历史存档,回测验不了,只能上线后实时用。
 
 ## 五、工具与数据
-- 回测器:`07_tools/screening/backtest_factors.py`(入场门槛/止损模式/0AMV/板块相位/组合/top-N/成本/流式;`--data-source qlib` 含退市(⚠️ **仅 1999-2020 老 bundle**,214 只;2021_2026 已弃用);`--start/--end` walk-forward)。
+- 回测器:`07_tools/research/backtest_factors.py`(入场门槛/止损模式/0AMV/板块相位/组合/top-N/成本/流式;`--data-source qlib` 含退市(⚠️ **仅 1999-2020 老 bundle**,214 只;2021_2026 已弃用);`--start/--end` walk-forward)。
 - 板块相位:`07_tools/screening/sector_phase.py` + `07_tools/local_tdx/fetch_sector_index_history.py`(TQ 板块指数 2021-08 起)。
 - 结论详档:`00_governance/research/README.md`(索引与主图)。
 

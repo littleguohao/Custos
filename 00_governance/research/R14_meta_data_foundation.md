@@ -90,17 +90,17 @@ H1/H2 终审的全部数字都是在未复权数据上跑的（`--universe-local
 
 ### 诊断工具
 
-`07_tools/screening/adjust_diagnostic.py`：
+`07_tools/research/adjust_diagnostic.py`：
 
 ```bash
 # ① 分档统计 tdx 数据里的跳空（2%~5% / 5%~11% / 11%~25% / ≥25%），并对比 B1 止损空间
-uv run python 07_tools/screening/adjust_diagnostic.py --scan --sample 300
+uv run python 07_tools/research/adjust_diagnostic.py --scan --sample 300
 
 # ② 与前复权源逐日比对，精确区分「除权」与「一字跌停」
-uv run python 07_tools/screening/adjust_diagnostic.py --compare --sample 100
+uv run python 07_tools/research/adjust_diagnostic.py --compare --sample 100
 
 # ③ 同一批票同参数，两个口径各跑一遍回测，看结论差多少
-uv run python 07_tools/screening/adjust_diagnostic.py --backtest-diff --sample 300
+uv run python 07_tools/research/adjust_diagnostic.py --backtest-diff --sample 300
 ```
 
 ### ✅ 已解决：owner 2026-08-04 拍板「全链统一前复权」

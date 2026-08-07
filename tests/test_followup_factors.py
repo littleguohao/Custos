@@ -5,7 +5,7 @@ import json
 import pandas as pd
 
 from screening import enrich_candidates as ec
-from screening import backtest_factors as bt
+from research import backtest_factors as bt
 from factors import _shares
 from screening import financials as fin
 

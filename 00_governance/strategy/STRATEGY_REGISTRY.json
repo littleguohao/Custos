@@ -30,7 +30,7 @@
       "code": [
         "07_tools/screening/enrich_candidates.py",
         "07_tools/market_timing/b1_holding_state.py",
-        "07_tools/screening/backtest_factors.py"
+        "07_tools/research/backtest_factors.py"
       ],
       "research": "00_governance/research/README.md",
       "known_issues": [

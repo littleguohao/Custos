@@ -229,7 +229,7 @@ owner 跑完后汇总表里 A/B 组的笔数天然分成三簇：
 
 ### 迁移工具
 
-`07_tools/screening/m2_migrate_fingerprint.py`：按每个旧结果文件里的实际笔数
+`07_tools/research/m2_migrate_fingerprint.py`：按每个旧结果文件里的实际笔数
 反推它属于哪一批，重命名加上指纹，省掉已完成方案的重跑。默认只预览，
 `--apply` 才动文件。择时方案（名字含 `amv`）用单独的档位表推断
 （它们的笔数只有普通方案的约 18%）。

@@ -20,13 +20,25 @@ _FACTORS_DIR = str(Path(__file__).resolve().parents[1] / "factors")
 if _FACTORS_DIR not in sys.path:
     sys.path.insert(0, _FACTORS_DIR)   # 因子层：见 factors/__init__.py
 
+# ── research/ 与 screening/ 分家（2026-08-07）后的路径引导。
+# 研究脚本要能同时导**自己的兄弟**（research/）与**生产链模块**（screening/）：
+# 方向是研究依赖生产（回测要跑生产的因子与打分），反向为 0 ——
+# 见 tests/test_architecture_layers.py。
+for _p in (str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[1] / "screening")):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+
 
 import backtest_factors as bt  # noqa: E402
-import importlib.util  # noqa: E402
 
-spec = importlib.util.spec_from_file_location("scan", str(BASE / "07_tools" / "screening" / "scan_signals_ytd.py"))
-scan = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(scan)
+# ⚠️ 2026-08-07：原本用 `spec_from_file_location` 按**文件路径**加载
+# `scan_signals_ytd`，硬编码了 `07_tools/screening/...` —— 研究脚本拆到
+# `research/` 时这行直接 FileNotFoundError（被 `--help` 子进程冒烟抓到，
+# import 测试抓不到）。现在两者同在 `research/` 且该目录已在 sys.path 上，
+# 普通 import 即可；顺带去掉了「按路径加载」这第三种导入机制
+# —— 它会为同一文件再造一个模块对象。
+import scan_signals_ytd as scan  # noqa: E402
 
 import local_tdx_data  # noqa: E402
 

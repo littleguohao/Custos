@@ -119,7 +119,12 @@ strategy_team/
 │   ├── close_review/                # 尾盘+盘后复盘
 │   ├── market_timing/               # 市场择时、B1 状态
 │   ├── news/                        # RSS 采集与过滤
-│   ├── screening/                   # 每日选股链（公式初筛→充实→打分→表格）
+│   ├── screening/                   # 每日选股链（公式初筛→充实→打分→表格）**只放生产链**
+│   ├── research/                    # 回测/扫描/参数 sweep（2026-08-07 从 screening 拆出）
+│   │   # 依赖方向只许 research → screening；反向由 tests/test_architecture_layers.py 强制
+│   ├── contracts.py                 # **可执行**产物 schema（钱的路径 4 个产物，生产者落盘前 require）
+│   ├── s_data.py                    # qlib/CSV 只读 loader（数据层，2026-08-07 从 screening 移来）
+│   ├── fmt.py                       # 报告文本格式化（num_text / pct_text，缺数不得伪装成读数）
 │   ├── trades/                      # 交易台账维护
 │   └── local_tdx/                   # mootdx 封装
 └── tests/                  # 独立测试目录（pytest，59 个测试文件，670 passed）

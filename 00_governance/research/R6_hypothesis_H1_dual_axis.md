@@ -134,25 +134,25 @@ RSV 窗口），而那么长的回调会**破坏 QSX>DKS**。合成用例实测�
 
 ```bash
 # ① 分档 × horizon 网格：双轴 vs 现状 s_shape vs 消融
-uv run python 07_tools/screening/backtest_factors.py --scorer b1_dual   --entry-filter j_low --horizons 5,20,60
-uv run python 07_tools/screening/backtest_factors.py --scorer s_shape   --entry-filter j_low --horizons 5,20,60
-uv run python 07_tools/screening/backtest_factors.py --scorer long_structure --entry-filter j_low --horizons 5,20,60
-uv run python 07_tools/screening/backtest_factors.py --scorer s_reversal --entry-filter j_low --horizons 5,20,60
+uv run python 07_tools/research/backtest_factors.py --scorer b1_dual   --entry-filter j_low --horizons 5,20,60
+uv run python 07_tools/research/backtest_factors.py --scorer s_shape   --entry-filter j_low --horizons 5,20,60
+uv run python 07_tools/research/backtest_factors.py --scorer long_structure --entry-filter j_low --horizons 5,20,60
+uv run python 07_tools/research/backtest_factors.py --scorer s_reversal --entry-filter j_low --horizons 5,20,60
 
 # ② 门槛对比：J<13 单独 vs 叠加 QSX>DKS vs 突破回踩型
-uv run python 07_tools/screening/backtest_factors.py --entry-filter j_low
-uv run python 07_tools/screening/backtest_factors.py --entry-filter j_low_qsx_gt_dks
-uv run python 07_tools/screening/backtest_factors.py --entry-filter breakout_pullback_b1
+uv run python 07_tools/research/backtest_factors.py --entry-filter j_low
+uv run python 07_tools/research/backtest_factors.py --entry-filter j_low_qsx_gt_dks
+uv run python 07_tools/research/backtest_factors.py --entry-filter breakout_pullback_b1
 
 # ③ 日周共振（H1c）：共振加分是否有增益 / 共振与结构完好哪个胜率高
-uv run python 07_tools/screening/backtest_factors.py --scorer b1_dual        --entry-filter j_low --horizons 5,20,60
-uv run python 07_tools/screening/backtest_factors.py --scorer b1_dual_no_res --entry-filter j_low --horizons 5,20,60
-uv run python 07_tools/screening/backtest_factors.py --entry-filter weekly_j_low
-uv run python 07_tools/screening/backtest_factors.py --entry-filter j_low_weekly_resonance
-uv run python 07_tools/screening/backtest_factors.py --entry-filter j_low_qsx_weekly   # 最严一档，看召回代价
+uv run python 07_tools/research/backtest_factors.py --scorer b1_dual        --entry-filter j_low --horizons 5,20,60
+uv run python 07_tools/research/backtest_factors.py --scorer b1_dual_no_res --entry-filter j_low --horizons 5,20,60
+uv run python 07_tools/research/backtest_factors.py --entry-filter weekly_j_low
+uv run python 07_tools/research/backtest_factors.py --entry-filter j_low_weekly_resonance
+uv run python 07_tools/research/backtest_factors.py --entry-filter j_low_qsx_weekly   # 最严一档，看召回代价
 
 # ④ 净值终审（跨窗，必须赢过无条件基准）
-uv run python 07_tools/screening/backtest_factors.py --trade-sim --scorer b1_dual --entry-filter j_low_qsx_gt_dks --cost-bps 25
+uv run python 07_tools/research/backtest_factors.py --trade-sim --scorer b1_dual --entry-filter j_low_qsx_gt_dks --cost-bps 25
 ```
 
 **判定标准（沿用结论#15 的教训）**：先问"是否赢过无条件基准"，且必须跨窗方向一致；
@@ -208,9 +208,9 @@ uv run python 07_tools/screening/backtest_factors.py --trade-sim --scorer b1_dua
 
 ```bash
 # 换 scorer（否则 A/B 档无样本）+ 扩样本 + 随机抽样（避免"前 100 个代码"的选择偏差）
-uv run python 07_tools/screening/backtest_factors.py --scorer b1_dual --entry-filter weekly_j_low            --universe-local --universe-sample 1000
-uv run python 07_tools/screening/backtest_factors.py --scorer b1_dual --entry-filter j_low_weekly_resonance  --universe-local --universe-sample 1000
-uv run python 07_tools/screening/backtest_factors.py --scorer b1_dual --entry-filter j_low_qsx_weekly        --universe-local --universe-sample 1000
+uv run python 07_tools/research/backtest_factors.py --scorer b1_dual --entry-filter weekly_j_low            --universe-local --universe-sample 1000
+uv run python 07_tools/research/backtest_factors.py --scorer b1_dual --entry-filter j_low_weekly_resonance  --universe-local --universe-sample 1000
+uv run python 07_tools/research/backtest_factors.py --scorer b1_dual --entry-filter j_low_qsx_weekly        --universe-local --universe-sample 1000
 ```
 
 ---
@@ -273,12 +273,12 @@ C 档 H20 59.3% / B 档 58.3% / A 档 55.9%（D 档仅 72 条垫底 H60 47.1%）
 
 ```bash
 # 跨 seed + 跨区间（方向一致性终审）：③ 与 ① 对照
-uv run python 07_tools/screening/backtest_factors.py --scorer b1_dual --entry-filter j_low_qsx_weekly --universe-local --universe-sample 1000 --seed 1 --horizons 5,10,20,60
+uv run python 07_tools/research/backtest_factors.py --scorer b1_dual --entry-filter j_low_qsx_weekly --universe-local --universe-sample 1000 --seed 1 --horizons 5,10,20,60
 # ⚠️ 跨区间必须加大 --count:count 默认 500 根从今天往前数,加 --start/--end 只覆盖
 #    窗口尾部(实测只剩 2024H2);--count 1500 才能覆盖 2021 年初的预热段
-uv run python 07_tools/screening/backtest_factors.py --scorer b1_dual --entry-filter j_low_qsx_weekly --universe-local --universe-sample 1000 --start 2022-01-01 --end 2024-12-31 --count 1500 --horizons 5,10,20,60
+uv run python 07_tools/research/backtest_factors.py --scorer b1_dual --entry-filter j_low_qsx_weekly --universe-local --universe-sample 1000 --start 2022-01-01 --end 2024-12-31 --count 1500 --horizons 5,10,20,60
 # 净值终审（跨窗必须赢无条件基准）
-uv run python 07_tools/screening/backtest_factors.py --trade-sim --scorer b1_dual --entry-filter j_low_qsx_weekly --cost-bps 25 --universe-local --universe-sample 1000
+uv run python 07_tools/research/backtest_factors.py --trade-sim --scorer b1_dual --entry-filter j_low_qsx_weekly --cost-bps 25 --universe-local --universe-sample 1000
 ```
 
 ---

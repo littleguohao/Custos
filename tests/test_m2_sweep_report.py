@@ -17,7 +17,7 @@ import sys
 
 import pytest
 
-from screening import m2_stop_sweep as m2
+from research import m2_stop_sweep as m2
 
 
 def _write(tmp, group, name, *, fp="s1000", **kw):

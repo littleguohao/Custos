@@ -9,9 +9,9 @@
   - 数据止于 2026-02-06:赢家窗超出即剔除(否则赢家收益按残缺区间算)。
 
 用法(先看计划,不跑):
-  uv run python 07_tools/screening/run_bear_to_long_study.py --dry-run
+  uv run python 07_tools/research/run_bear_to_long_study.py --dry-run
 真跑:
-  uv run python 07_tools/screening/run_bear_to_long_study.py --out-dir 06_logs/bear2long
+  uv run python 07_tools/research/run_bear_to_long_study.py --out-dir 06_logs/bear2long
 """
 from __future__ import annotations
 
@@ -508,6 +508,15 @@ def survivorship_report(firings_files: list[Path], s_data_root: str,
                      "剔除仅影响停牌/低流动性直线样本")
     out["text"] = "\n".join(lines)
     return out
+
+# ── research/ 与 screening/ 分家（2026-08-07）后的路径引导。
+# 研究脚本要能同时导**自己的兄弟**（research/）与**生产链模块**（screening/）：
+# 方向是研究依赖生产（回测要跑生产的因子与打分），反向为 0 ——
+# 见 tests/test_architecture_layers.py。
+for _p in (str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[1] / "screening")):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 
 
 def main(argv=None, runner=None) -> int:

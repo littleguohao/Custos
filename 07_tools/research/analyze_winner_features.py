@@ -25,6 +25,15 @@ BASE = Path(__file__).resolve().parents[2]
 for p in (BASE / "07_tools", BASE / "07_tools" / "screening", BASE / "07_tools" / "local_tdx"):
     sys.path.insert(0, str(p))
 
+# ── research/ 与 screening/ 分家（2026-08-07）后的路径引导。
+# 研究脚本要能同时导**自己的兄弟**（research/）与**生产链模块**（screening/）：
+# 方向是研究依赖生产（回测要跑生产的因子与打分），反向为 0 ——
+# 见 tests/test_architecture_layers.py。
+for _p in (str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[1] / "screening")):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+
 import backtest_factors as bt  # noqa: E402
 import local_tdx_data  # noqa: E402
 from launch_point_study import _auc  # noqa: E402  Mann-Whitney 正确实现(本文件曾用错公式)

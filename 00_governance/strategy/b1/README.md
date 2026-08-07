@@ -30,7 +30,7 @@
 |---|---|
 | `07_tools/screening/enrich_candidates.py` | 反转K 六项阈值、B1 模式识别 |
 | `07_tools/market_timing/b1_holding_state.py` | 持仓状态机（`B1-holding-v1` 契约）|
-| `07_tools/screening/backtest_factors.py` | 研究用回测器 |
+| `07_tools/research/backtest_factors.py` | 研究用回测器 |
 
 ⚠️ **只有 `01_swing_rules.md` 是「代码执行」的** —— 改它的阈值必须同步改代码常量并跑测试。
 反转K 六项已于 2026-08-06 逐项核查一致（见 [`../README.md`](../README.md)）。

@@ -12,7 +12,7 @@
 ⚠️ 幸存者偏差(赢家=现存赢家)+ 起涨点后视 → 结论是"规律观察",不是可交易策略。
 ⚠️ 右删失:起涨点靠近 end 时此后可能再无做多日,lead=None 的样本被丢弃,lead 分布偏"较快转多"。
 ⚠️ 板块共振相关含机械成分:赢家本身贡献板块指数收益,corr>0 部分是恒真的,仅作描述。
-用法(用户机):uv run python 07_tools/screening/launch_point_study.py --data-source qlib --universe-sdata \
+用法(用户机):uv run python 07_tools/research/launch_point_study.py --data-source qlib --universe-sdata \
   --start 2024-09-01 --end 2025-06-30 --entry-filter reversal_k --top-pct 10 --buffer-days 60
 """
 from __future__ import annotations
@@ -2014,6 +2014,15 @@ def main(argv=None, loader=None) -> int:
     if args.out:
         _write_json_out(args.out, res)
     return 0
+
+# ── research/ 与 screening/ 分家（2026-08-07）后的路径引导。
+# 研究脚本要能同时导**自己的兄弟**（research/）与**生产链模块**（screening/）：
+# 方向是研究依赖生产（回测要跑生产的因子与打分），反向为 0 ——
+# 见 tests/test_architecture_layers.py。
+for _p in (str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[1] / "screening")):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 
 
 if __name__ == "__main__":

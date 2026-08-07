@@ -512,7 +512,7 @@ class TestCliFullMarketPath:
     @pytest.mark.parametrize("mod", [
         "07_tools/local_tdx/adjust_factors.py",
         "07_tools/local_tdx/fetch_market_cap.py",
-        "07_tools/screening/adjust_diagnostic.py",
+        "07_tools/research/adjust_diagnostic.py",
     ])
     def test_no_stale_function_name(self, mod):
         import pathlib
@@ -522,7 +522,7 @@ class TestCliFullMarketPath:
     @pytest.mark.parametrize("mod", [
         "07_tools/local_tdx/adjust_factors.py",
         "07_tools/local_tdx/fetch_market_cap.py",
-        "07_tools/screening/adjust_diagnostic.py",
+        "07_tools/research/adjust_diagnostic.py",
     ])
     def test_lister_attribute_resolvable(self, mod):
         """更强的检查：脚本里**调用**的 local_tdx_data.X() 都必须真实存在。

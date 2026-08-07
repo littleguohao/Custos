@@ -102,7 +102,7 @@ base bucket ＝ 技术结构 × 资金意图（均为个股维度）：
   分项封顶天然有界（解决旧 technical_score 无界累加饱和问题），实现见
   `07_tools/screening/s_shape.py`；**幻灯片部分阈值被遮挡，相关常量取合理猜测并标注"待回测"**，
   校准前不视为定型，各分项实际值随候选落盘可复盘。
-  **校准工具**：`07_tools/screening/backtest_factors.py`（纯分析、只读本地日线、as-of 切片无未来函数）
+  **校准工具**：`07_tools/research/backtest_factors.py`（纯分析、只读本地日线、as-of 切片无未来函数）
   走查历史 S** → 前向 MFE/MAE/胜率，按 S** 档/建议/分项分组，验证"可买(≥70)"是否显著优于"不买(<60)"、
   各分项 hit 是否有正向 lift，据此重估 s_shape.py 顶部的待回测阈值与权重。
 

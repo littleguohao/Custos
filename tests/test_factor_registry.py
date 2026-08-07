@@ -178,7 +178,7 @@ class TestSharedMutableStateImportRule:
     """
 
     def test_shares_imported_package_qualified(self):
-        for rel in ("factors/mcap.py", "screening/backtest_factors.py"):
+        for rel in ("factors/mcap.py", "research/backtest_factors.py"):
             s = (ROOT / "07_tools" / rel).read_text(encoding="utf-8")
             assert "from factors._shares import" in s, f"{rel} 应包限定导入 _shares"
             assert "\nfrom _shares import" not in s, f"{rel} 有扁平导入 _shares（会产生两份状态）"

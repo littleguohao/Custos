@@ -7,13 +7,13 @@
 
     compute_xxx(df) -> dict        s_shape / sector_phase / b1_dual 的一部分
     detect_xxx(df)  -> dict|None   b2_surge / main_rally / platform_pullback / b1_dual 的一部分
-    _sc_xxx(df,code) -> dict|None  `screening/backtest_factors.SCORERS` 里的适配层
+    _sc_xxx(df,code) -> dict|None  `research/backtest_factors.SCORERS` 里的适配层
                                    （统一返回 {score, suggestion, aux, components}）
 
 ## ⚠️ 两种消费方式
 
     live 标注   `screening/signal_labels.py` → 把因子结果转成候选表上的标签
-    研究打分    `screening/backtest_factors.SCORERS` → 横截面排序与回测
+    研究打分    `research/backtest_factors.SCORERS` → 横截面排序与回测
 
 其中 `b1_dual_factor` / `b2_surge_factor` / `main_rally_factor` / `rsi_state`
 **同时被两处消费、各自包装一遍** ⇒ 新增因子要在两处各写一个适配，

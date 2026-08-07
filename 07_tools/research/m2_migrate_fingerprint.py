@@ -12,8 +12,8 @@ owner 先跑 300 样本、再跑 1000 样本时，300 的旧文件被 `[SKIP]` �
 **默认只打印推断结果，不动文件**；核对无误后加 `--apply`。
 
 用法：
-    uv run python 07_tools/screening/m2_migrate_fingerprint.py            # 预览
-    uv run python 07_tools/screening/m2_migrate_fingerprint.py --apply    # 执行
+    uv run python 07_tools/research/m2_migrate_fingerprint.py            # 预览
+    uv run python 07_tools/research/m2_migrate_fingerprint.py --apply    # 执行
 """
 from __future__ import annotations
 
@@ -133,7 +133,7 @@ def main() -> int:
         old.rename(new)
         done += 1
     print(f"\n已重命名 {done} 个文件。现在跑："
-          f"\n  uv run python 07_tools/screening/m2_stop_sweep.py --sample 1000"
+          f"\n  uv run python 07_tools/research/m2_stop_sweep.py --sample 1000"
           f"\n缺失的方案会自动补跑，已完成的会 [SKIP]。")
     return 0
 
