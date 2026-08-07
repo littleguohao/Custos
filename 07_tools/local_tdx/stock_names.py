@@ -86,6 +86,17 @@ EM_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
 # 回退旧缓存：残缺表 save_cache 后会覆盖完整缓存且 generated_at 刷新为当天。
 CLIST_MIN_COVERAGE = 0.8
 
+# ⚠️ **落盘覆盖门槛**：新表小于既有缓存的这个比例时，拒绝覆盖。
+# 2026-08-07 实测的事故形态：TQ 只成功取到 3 只（TdxW 忙/连接抖动），
+# 那 3 只照样落盘覆盖了 5000 只的完整缓存、`generated_at` 刷新成当天
+# （30 天时效计时重置），而 `st_filter` 报 **ok** ⇒ ST 硬排除静默失效。
+#
+# 原先门槛只加在 `fetch_all_from_clist` 上，可它在源顺序里**排最后**；
+# 排在前面的 `fetch_from_tdx_protocol`（沪深两市，一市失败就剩一半）与
+# `fetch_from_tq`（逐只 RPC，部分失败照样返回）都没有门槛。
+# ⇒ 门槛该在**落盘边界**，不是在每个源里各写一份。
+NAME_MAP_MIN_OVERWRITE_RATIO = 0.8
+
 # 本次运行内记住可用域名，避免每批都从头重试已知不通的域名
 _working_host: Optional[str] = None
 
@@ -469,6 +480,36 @@ def _age_days(generated_at: str) -> Optional[int]:
         return None
 
 
+def _refuses_overwrite(new_map: dict, source: str, diag: dict) -> bool:
+    """新表是否**过小以致不该覆盖**既有缓存。返回 True = 拒绝。
+
+    判据：既有缓存存在且非空，而 `len(new) < len(old) * NAME_MAP_MIN_OVERWRITE_RATIO`。
+    首次构建（无缓存）一律放行。
+
+    ⚠️ 这里**不区分既有缓存是否陈旧**：陈旧但完整的表仍比新鲜但残缺的表适合做
+    ST 排除（ST 名称变动不频繁，残缺表会让大部分票查不到名字）。
+    陈旧本身会被 `load_cache` 判出来并让 `st_filter="stale"`，信息不会丢。
+    """
+    try:
+        old, _meta = load_cache()
+    except Exception:                                              # noqa: BLE001
+        return False
+    if not old:
+        return False
+    floor = len(old) * NAME_MAP_MIN_OVERWRITE_RATIO
+    if len(new_map) >= floor:
+        return False
+    diag.update(name_map_rejected_source=source,
+                name_map_rejected_size=len(new_map),
+                name_map_rejected_reason=(
+                    f"新表 {len(new_map)} 只 < 既有缓存 {len(old)} 只的 "
+                    f"{NAME_MAP_MIN_OVERWRITE_RATIO:.0%}（{floor:.0f}）⇒ 拒绝覆盖"))
+    print(f"[WARN] 名称表拒绝落盘：{source} 只取到 {len(new_map)} 只，"
+          f"既有缓存 {len(old)} 只 —— 残缺表覆盖完整缓存会让 ST 硬排除静默失效，"
+          f"已回退缓存", file=sys.stderr)
+    return True
+
+
 def resolve_name_map(session=None, allow_fetch: bool = True) -> tuple[dict[str, str], dict[str, Any]]:
     """取名称表并如实报告质量：在线成功即刷新缓存，失败回退缓存并判时效。
 
@@ -478,6 +519,11 @@ def resolve_name_map(session=None, allow_fetch: bool = True) -> tuple[dict[str, 
     diag: dict[str, Any] = {}
     if allow_fetch:
         name_map, source = fetch_name_map(session=session)
+        if name_map and _refuses_overwrite(name_map, source, diag):
+            # 新表相对既有缓存过小 ⇒ 不落盘、不当在线结果用，回退缓存路径。
+            # 一份**陈旧但完整**的表比一份**新鲜但残缺**的表更适合做 ST 排除：
+            # ST 名称变动不频繁，而残缺表会让 90% 的票根本查不到名字。
+            name_map = {}
         if name_map:
             try:
                 save_cache(name_map, source)
