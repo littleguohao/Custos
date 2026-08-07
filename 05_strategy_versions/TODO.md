@@ -120,9 +120,16 @@
 
 ## P8 · 测试覆盖率（2026-08-07 首次量化）
 
-总覆盖率 **70.3%**（19587 语句，5784 未覆盖）。按风险分层的未覆盖语句：
+总覆盖率 **78.2%**（19719 语句，4303 未覆盖）—— 2026-08-07 从 70.3% 提上来。
 
-    🔴 live/资金   ~540   🟠 live 链   ~860   ⚪ 研究  ~1297   🟡 其他  ~3087
+编排层已收口（此前是最大的空洞，**两个 live bug 都藏在这里**）：
+
+    run_0850 96.7%   run_0905 90.4%   run_1445 82.7%
+    run_1700 90.3%   run_1800 87.8%   daily_pipeline 85.5%
+
+⚠️ 但**覆盖率高 ≠ 链是通的**：编排测试里 stage 一律被打桩，
+从不真的去看被调用的脚本文件在不在 —— 2026-08-07 `daily_pipeline` 四个持仓
+stage 全部指向不存在的文件、整条链硬失败，而 3481 条测试全绿。见 #53。
 
 ⚠️ **补测试前先问「这段代码该不该存在」** —— 首轮清点就删掉一个 0% 的死文件
 （`sync_trades.py`：零调用 + 依赖的 config 不存在 + 3 个真 bug），
@@ -130,10 +137,6 @@
 
 | # | 事项 | 当前 |
 |---|---|---|
-| 40 | `daily_pipeline.py` 23%（132 未覆盖）—— 编排核心。主要是 subprocess 串联，测试成本高；关键分支（门控码穿透、stage 失败）已由 `pipeline_kit` 覆盖，剩下的是 stage 清单本身 | 待评估 ROI |
-| 41 | `run_1800.py` 21% / `run_1445.py` 22% / `run_0905.py` 52% —— runner 主流程。同上，stage 编排为主 | 待评估 ROI |
-| 42 | **报告生成层零覆盖（部分已补）**：✅ `portfolio_review_report` 0→96%（当场抓出 state 变量覆盖 bug）、✅ `execution_review` 0→97%。剩 `theme_tracker_report` **0%（225 语句，⛔硬失败 stage）**、`holding_sector_mapper` 0%（130，非硬失败）、`wechat_summary` 0%（23）、`chief_decision_report` 19%（58，⛔硬失败）| 待补（theme_tracker 最要紧）|
-| 43 | `close_review/` 低覆盖（部分已补）：✅ `execution_review` 0→97%。剩 `final_close_review.py` 19%（164）、`review_core.py` 51%（134）、`review_enrichment.py` 32%（45，⛔硬失败）| 待补 |
 | 44 | **研究脚本存废**（部分推进）：2026-08-07 建了统一入口 `07_tools/research/__main__.py` 与注册表，**3 个覆盖率 0% 的已标 `stale`** 并在运行时打警告：`compare_signal_sets` / `scan_signal_backtest` / `m2_migrate_fingerprint`（后者是一次性迁移脚本，大概率可删）。留在表里而不是删掉，是因为「不确定」本身要可见。⇒ **需 owner 逐个定：删 / 转正 / 继续留**。`tests/test_research_entry.py` 钉住了这三个的 stale 状态，定案后要同步 | 待 owner |
 
 | 45 | ⚠️ **`market_timing_scorer.is_stale` 是 fail-open**：`return bool(day and as_of) and as_of != day` —— **缺 `as_of` 时返回 False**（当成新鲜），于是没写 `as_of` 的 section 拿当日满分。与仓库别处的 fail-closed 原则相反（`runtime_gate._QUALITY_PASS` 注释：「风控组件的未知状态必须等于阻断」）。上游已缓解（`merge_incremental_market` 必须写 as_of），但判据本身仍是 fail-open。改成 fail-closed 会降低评分、改变 live 择时行为 ⇒ **需 owner 定**。测试已锁住现状 | **需 owner 拍板** |
@@ -144,6 +147,10 @@
 
 | 48 | **RSS 代码命中的残余误配**：`rss_filter` 已加数字边界（修掉「嵌在更长数字里」），但「`净利润600000元`」这种**代码恰好等于一个独立金额**仍会误配 +45 分并顶到候选首位。要分辨得看上下文（前后是否有「元/万元/亿」等量词，或要求邻近出现持仓名称）。收益 vs 复杂度待评估 | 待定 |
 | 49 | `rss_filter.entities(date)` 的 `date` **未被使用** —— `current_positions.json` 无历史版本，回填历史日期会用今天的持仓筛那天的新闻。等持仓快照有历史版本后接上 | ⏸ 依赖持仓历史 |
+
+| 53 | **端到端真跑一次 `daily_pipeline`**（🔴 最要紧的一条）—— 2026-08-07 一天连出**两个 live bug**，共性都是「链断了但测试全绿」：① `run_1445` 的 `TOOLS` 未导入（14:45 报告从 08-06 起整天产不出来）；② `daily_pipeline` 四个持仓 stage 指向不存在的文件（`batch_holding_technical`/`b1_holding_state`/`portfolio_review_report` 都是 `required=True` ⇒ 09:05 与 17:00 两份报告都产不出来）。根因是**所有 stage 都被打桩**，没有任何测试真起子进程走一遍。已加 `SubprocessTargetTests`（验目标文件存在）挡住这一类，但那只是静态检查。缺的是：在有完整数据的日子真跑一次并校验产出。⚠️ 需要 Windows 目标机（vipdoc + TQ-Local），开发机跑不了 —— 这是它一直没做的原因，但代价已经见到了 | 待安排（需目标机） |
+| 54 | **生产代码剩余覆盖缺口**（按缺失语句排）：`market_timing/market_timing_scorer` 35%（159，⚠️ 读数不稳见 #46）、`market_timing/refresh_market_indices` 17%（130）、`local_tdx/adjust_factors` 62%（154）、`local_tdx/local_tdx_data` 69%（143）、`holdings/holding_sector_mapper` 20%（106）、`collect/collect_holding_quotes` 65%（102）、`market_timing/market_timing_collector` 48%（81，产 19 个消费者的产物）、`daily_report` 65%（66）。⚠️ 编排层各 runner 只剩 8~24 行未覆盖，且全是单行 `[WARN]` 打印分支，**边际收益低，不必再追** | 待补 |
+| 55 | **`audit_*` 测试家族按模块重组**：11 文件 4821 行（占测试 15%），按**审计轮次**（P0/P1/P2/P3/opt）组织而非按模块 —— 找「`technical_monitor` 的测试」要翻 9 个文件（含 4 个 audit）。⚠️ 2026-08-07 评估后**决定先不动**：搬 4800 行测试的风险大于可读性收益（同日搬迁脚本已两次出错：按行替换撞上分号连写、正则把注释当导入名）。若哪天要做，前置条件是先有一次真跑验收（#53） | 已评估，暂不动 |
 
 ## 需要 owner 拍板
 
