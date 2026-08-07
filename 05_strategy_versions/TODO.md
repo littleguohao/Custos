@@ -142,6 +142,9 @@
 
 | 47 | **硬失败 stage 覆盖收尾**：11 个里 **7 个已 ≥90%**（portfolio_review 96 / theme_tracker 94 / execution_review 97 / chief_decision 99 / review_enrichment 97 / generate_risk_and_sectors 99 / amv_state 92）。剩 4 个：`market_timing_scorer` 36%（159，读数不稳见 #46）、`b1_holding_state` 84%（24，剩 main 与 pre_checks 的 TQ 分支）、`batch_holding_technical` 61%（30）、`daily_report` 66%（66）| 待补 |
 
+| 48 | **RSS 代码命中的残余误配**：`rss_filter` 已加数字边界（修掉「嵌在更长数字里」），但「`净利润600000元`」这种**代码恰好等于一个独立金额**仍会误配 +45 分并顶到候选首位。要分辨得看上下文（前后是否有「元/万元/亿」等量词，或要求邻近出现持仓名称）。收益 vs 复杂度待评估 | 待定 |
+| 49 | `rss_filter.entities(date)` 的 `date` **未被使用** —— `current_positions.json` 无历史版本，回填历史日期会用今天的持仓筛那天的新闻。等持仓快照有历史版本后接上 | ⏸ 依赖持仓历史 |
+
 ## 需要 owner 拍板
 
 | # | 事项 | 出处 |

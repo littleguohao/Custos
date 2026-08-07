@@ -40,6 +40,13 @@ def premarket_window(day, asof, fallback_hours):
  return start,previous
 
 def entities(date):
+ """持仓的名称与代码集合，用于相关性加分。
+
+ ⚠️ `date` **未被使用**：`current_positions.json` 是**当前快照**、没有历史版本，
+ 所以给任何日期都返回同一份。日常当日运行没问题；但**回填历史日期时
+ 会用今天的持仓去筛那天的新闻**，结论不可复现。保留参数是为了让调用点
+ 显式表达「这是按日期筛」的意图，等持仓有了历史版本可直接接上。
+ """
  positions=load(DATA/'trades'/'current_positions.json',[])
  names=set(); codes=set()
  for x in positions:
@@ -72,12 +79,19 @@ def main():
  if a.session_type=='premarket': cutoff,previous_close_date=premarket_window(a.date,asof,hours)
  limit=cfg['limits'][a.session_type]; per_source_limit=cfg.get('per_source_limits',{}).get(a.session_type,limit)
  names,codes=entities(a.date); scored=[]; excluded={}
+ # ⚠️ 代码命中必须要求**数字边界**，不能裸子串匹配。持仓命中值 +45 分（单项最大）
+ # 且是排序的**首要键**，误配会把无关新闻顶到候选第一条。实测误配：
+ #   "成交额达0024156万元"  → 裸匹配命中 002415（嵌在更长数字里）
+ #   "上证指数报3600000点"  → 裸匹配命中 600000
+ # 数字边界修掉这两类，且不伤真命中（"浦发银行600000发布公告" / "（600000）" 仍命中）。
+ # 尚未解决："净利润600000元" 这种「代码恰好等于一个独立金额」需语义上下文，见待办 #48。
+ code_pats={c:re.compile(r'(?<!\d)'+re.escape(c)+r'(?!\d)') for c in codes if c}
  for x in raw:
   pub=parse_dt(x.get('published_at')); text=(str(x.get('title') or '')+' '+str(x.get('summary') or '')).lower(); tier=x.get('source_tier','C'); cat=x.get('category','')
   if pub is None:
    excluded['published_at_missing']=excluded.get('published_at_missing',0)+1; continue
   if pub and (pub>asof+timedelta(minutes=10) or pub<cutoff): excluded['outside_window']=excluded.get('outside_window',0)+1; continue
-  hits_names=sorted(n for n in names if n and n.lower() in text); hits_codes=sorted(c for c in codes if c in text)
+  hits_names=sorted(n for n in names if n and n.lower() in text); hits_codes=sorted(c for c,pat in code_pats.items() if pat.search(text))
   themes=[]
   for theme,words in cfg.get('theme_keywords',{}).items():
    if any(w.lower() in text for w in words): themes.append(theme)
