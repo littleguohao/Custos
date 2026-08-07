@@ -124,3 +124,93 @@ class TestRenderNews:
         lines = []
         fcr.render_news(lines, {"missing": ["rss_filter", "postclose_digest"]})
         assert any("新闻数据缺失" in x and "rss_filter" in x for x in lines)
+
+
+class TestExtractedUnits:
+    """2026-08-07 `main`（210 行）按报告小节拆开后，这些单元**可以单测** ——
+    此前要验证持仓重估或指数行，得先铺齐 8 份上游产物再读整份报告。
+
+    重构用 AST 自由变量分析算出每个函数的签名（手写参数列表漏了 `sectors`，
+    第一版直接 NameError），并以**归一化后逐字节比对** md+json 验证行为等价。
+    """
+
+    def test_index_rows_shape(self):
+        rows = fcr.index_rows({"a_share_indices": {
+            "上证指数": {"latest_close": 3400.5, "daily_change_pct": -1.2,
+                       "above_ma25": True, "above_ma60": False,
+                       "above_ma144": None, "above_ma240": None}}})
+        assert len(rows) == 1
+        r = rows[0]
+        assert r["name"] == "上证指数" and r["close"] == 3400.5
+        assert r["change_pct"] == -1.2
+        assert r["above_ma144"] is None, "缺 MA 必须保持 None，交给 ma_flag 渲染 ?"
+
+    def test_index_rows_tolerates_non_dict(self):
+        """上游给了非字典（例如只写了一个数）时**跳过该指数**而不是崩 ——
+        指数块是可选证据层。"""
+        assert fcr.index_rows({"a_share_indices": {"x": 3400}}) == []
+
+    def test_intraday_preferred_over_daily(self):
+        """盘中值优先于日线收盘 —— 17:00 时两者都可能在，要用更新的那个。"""
+        rows = fcr.index_rows({"a_share_indices": {"上证指数": {
+            "latest_close": 3400.0, "daily_change_pct": -1.0,
+            "intraday": {"now": 3410.0, "intraday_change_pct": -0.7}}}})
+        assert rows[0]["close"] == 3410.0 and rows[0]["change_pct"] == -0.7
+
+    def test_unavailable_index_skipped(self):
+        assert fcr.index_rows({"a_share_indices": {
+            "x": {"available": False, "latest_close": 1.0}}}) == []
+
+    def test_index_rows_empty(self):
+        assert fcr.index_rows({}) == []
+
+    def test_revalue_positions_uses_live_quote_not_cost(self):
+        """重估必须用**当日行情**，不是持仓快照里的价格。"""
+        pmap = {"600000": {"代码": "600000", "名称": "浦发", "持有数量": 1000,
+                           "单位成本": 10.0, "持有金额": 8500, "仓位占比": 0.25}}
+        out = fcr.revalue_positions(
+            day="2026-08-07", ff_map={}, mfe_map={}, pmap=pmap,
+            qmap={"600000": {"code": "600000", "price": 8.5, "change_pct": -3.2,
+                             "date": "2026-08-07"}},
+            regime="空头", sectors=[],
+            tmap={"600000": {"code": "600000", "latest_date": "2026-08-07",
+                             "trend_state": "下跌"}},
+            total_assets=34000.0)
+        assert len(out) == 1
+        r = out[0]
+        assert r["close"] == 8.5
+        assert r["pnl_pct"] == pytest.approx(-0.15), "(8.5/10 - 1) = -15%"
+
+    def test_revalue_positions_without_quote_keeps_none(self):
+        """⚠️ 没有当日行情时 `close` 必须留 None —— 不得回落到成本价，
+        那会让一只没行情的票在报告里显示成「盈亏 0%」。"""
+        pmap = {"600000": {"代码": "600000", "名称": "浦发", "持有数量": 1000,
+                           "单位成本": 10.0}}
+        out = fcr.revalue_positions(day="2026-08-07", ff_map={}, mfe_map={}, pmap=pmap,
+                                    qmap={}, regime="中性", sectors=[], tmap={},
+                                    total_assets=None)
+        assert out[0]["close"] is None
+
+    def test_render_helpers_append_to_lines(self):
+        """render_* 沿用本文件既有约定 `render_news(lines, ...)`：**就地追加**。"""
+        lines = []
+        fcr.render_themes(lines, {"theme_lifecycles": [
+            {"theme_name": "半导体", "phase": "退潮", "technical_stage": "退潮/下跌",
+             "score": 45, "event_evidence_count": 2}]})
+        text = "\n".join(lines)
+        assert "## 4." in text and "半导体" in text and "退潮" in text
+
+    def test_render_next_day_returns_plan(self):
+        """§6 要把 `next_plan` 交回 main —— 落盘 payload 还要用它。"""
+        lines = []
+        plan = fcr.render_next_day(lines, {"next_day_plan": {
+            "total_position_range": "0%-20%", "holding_plans": []}})
+        assert plan["total_position_range"] == "0%-20%"
+        assert any("## 6." in x for x in lines)
+
+    def test_render_discipline_returns_rules(self):
+        lines = []
+        rules = fcr.render_discipline(lines, {"rule_review": {
+            "effective": ["e1"], "failed": [], "pending": ["p1"]}}, {})
+        assert rules["effective"] == ["e1"]
+        assert any("### 7.2" in x for x in lines)
