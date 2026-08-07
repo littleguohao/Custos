@@ -504,6 +504,16 @@ class TestReversalKBoundaryBehavior:
             assert (mods[name].REVERSAL_CHANGE_MIN_PCT,
                     mods[name].REVERSAL_CHANGE_MAX_PCT) == (-3.5, 0.5), name
 
+        # ⚠️ 只断言常量值**不够** —— 2026-08-07 的变异测试证明了这点：
+        #    把判定从 `MIN <= x <= MAX` 改成 `abs(x) <= MAX` 之后，
+        #    3595 条测试**全部通过**（默认对称时两者等价，而本条只看常量）。
+        #    所以必须在**不对称**配置下断言行为：-3.0 在 [-3.5, 0.5] 内、
+        #    但 abs(-3.0)=3.0 > 0.5，两种实现在这里给出相反答案。
+        cir = mods["b1_thresholds"].change_in_range
+        assert cir(-3.0) is True, "下界应放宽到 -3.5"
+        assert cir(1.0) is False, "上界应收紧到 0.5"
+        assert cir(-3.6) is False and cir(0.5) is True
+
 
 
 class TestReversalKThresholdSingleSource:
