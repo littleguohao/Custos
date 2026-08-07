@@ -77,9 +77,20 @@ class FetchIncomplete(RuntimeError):
 
 
 def _as_int(v):
+    """转 int；不可解析或非有限值返回 None。
+
+    ⚠️ 必须捕 `OverflowError`：这个函数解析东财响应自报的 `pages` / `count`，
+    而 Python 的 `json.loads` **接受** `Infinity`（非标准但 json 模块允许），
+    `int(float("inf"))` 抛的是 OverflowError —— 只 catch TypeError/ValueError
+    会让一个畸形响应直接崩掉整次抓取，而本函数的全部用途就是「坏输入返回 None」。
+
+    ⚠️ 为什么不并入 `code_utils.fnum`：语义不同 —— 这里要的是**整数截断**
+    （`pages`/`count` 是页数），`fnum` 返回 float。同名不同语义的合并踩过一次
+    （`b1_holding_state.finite` 与 `code_utils.finite` 失败语义相反），不再重复。
+    """
     try:
         return int(v)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
 
 

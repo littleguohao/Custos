@@ -158,7 +158,14 @@ def _describe(out: Any) -> Any:
         return f"dict {len(out)} 键: {list(out)[:6]}"
     if isinstance(out, (list, tuple, set)):
         return f"{type(out).__name__} {len(out)} 项: {list(out)[:3]}"
-    return f"{type(out).__name__}: {str(out)[:60]}"
+    # ⚠️ 兜底分支要包 try：`str(out)` 会执行对象的 `__str__`/`__repr__`，那可能抛。
+    # 而 `_describe` 在 `Probe.run` 里是**在 try 之外**调用的 ⇒ 抛上去就打破
+    # 本模块最明确的那条契约「任何异常都收进 error 字段，不向上抛」，
+    # 并中断整轮探测（拿不到其余数据源的现状）。
+    try:
+        return f"{type(out).__name__}: {str(out)[:60]}"
+    except Exception as exc:                                       # noqa: BLE001
+        return f"{type(out).__name__}: <无法描述: {type(exc).__name__}>"
 
 
 # ---------------------------------------------------------------------------
