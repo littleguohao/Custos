@@ -600,6 +600,211 @@ def advice_review(base: Path, trading_days: list[str], sse_map: dict[str, dict],
 
 # ---------------------------------------------------------------- 归因
 
+def _trading_days_and_reviews(base, days, unavailable):
+    """本周交易日与已生成的日报。缺日报要记进 `unavailable`（就地 append）。
+
+    2026-08-07 从 `build_weekly_review`（原 354 行）抽出。
+    """
+    td_map = trading_days_of_week(base, days)
+    trading_days = [d for d in days if td_map[d] is True]
+    unknown_td = [d for d in days if td_map[d] is None]
+    if unknown_td:
+        unavailable.append(f"交易日历未覆盖，交易日状态未知：{', '.join(unknown_td)}")
+
+    # --- 每日复盘覆盖 ---
+    daily_reviews = {}
+    for d in days:
+        path = base / "04_reviews" / "daily" / f"{d}_final_review.json"
+        if path.exists():
+            daily_reviews[d] = load_json(path, {})
+    missing_reviews = [d for d in trading_days if d not in daily_reviews]
+    if missing_reviews:
+        unavailable.append(f"缺少每日复盘：{', '.join(missing_reviews)}")
+    return trading_days, daily_reviews
+
+
+def _plan_adherence(base, daily_reviews, execution_issues, unavailable, week_trades):
+    """计划执行核查：每笔成交是否在前一交易日的计划里。
+
+    ⚠️ 分母只算 `status != 'unknown'` 的 —— 拿不到当日计划的不能算「计划外」，
+    否则日报缺失会伪装成纪律问题。
+    """
+    plan_checks = []
+    plan_cache: dict = dict(daily_reviews)   # 本周的 final_review 已读过，直接复用
+    for t in week_trades:
+        plan, source = find_plan_for_day(base, t["date"], cache=plan_cache)
+        if plan is None:
+            unavailable.append(f"{t['date']} 无前置 final_review，{t['code']} 计划归属无法判定")
+            plan_checks.append({"trade": t, "status": "unknown", "plan_source": None})
+            continue
+        planned = any(str(p.get("code")) == t["code"] for p in plan)
+        plan_checks.append({"trade": t, "status": "planned" if planned else "unplanned", "plan_source": source})
+    unplanned = [p for p in plan_checks if p["status"] == "unplanned"]
+    known = [p for p in plan_checks if p["status"] != "unknown"]
+    unplanned_ratio = round(len(unplanned) / len(known) * 100, 2) if known else None
+    if unplanned:
+        execution_issues.append({
+            "rule": "unplanned_trade",
+            "summary": f"计划外交易 {len(unplanned)}/{len(known)} 笔（占比 {unplanned_ratio}%）",
+            "evidence": [{"date": p["trade"]["date"], "code": p["trade"]["code"],
+                          "name": p["trade"]["name"], "side": p["trade"]["side"],
+                          "plan_source": p["plan_source"]} for p in unplanned],
+        })
+    return plan_checks, unplanned_ratio
+
+
+def _slow_stops(execution_issues, losses):
+    """慢止损：亏损超阈值且持有偏久的平仓。"""
+    slow_stops = [c for c in losses if c["pnl_pct"] is not None and c["pnl_pct"] <= STOP_LOSS_PCT]
+    if slow_stops:
+        execution_issues.append({
+            "rule": "slow_stop_loss",
+            "summary": f"止损偏慢 {len(slow_stops)} 单：已实现亏损超过 {STOP_LOSS_PCT}% 止损线",
+            "evidence": [{"code": c["code"], "name": c["name"], "sell_date": c["sell_date"],
+                          "pnl_pct": c["pnl_pct"], "hold_days": c["hold_days"]} for c in slow_stops],
+        })
+    return slow_stops
+
+
+def _no_trade_confirmations(base, execution_issues, trading_days, unavailable, week_trades):
+    """无交易日的人工确认核查。
+
+    ⚠️ 确认文件本身缺失 ≠ 全部未确认 —— 前者是**数据缺口**（记 unavailable），
+    后者是**纪律问题**（记 execution_issues）。两者混淆会让缺文件看起来像违纪。
+    """
+    confirm_path = base / "01_data" / "trades" / "position_confirmations.json"
+    confirmations = load_json(confirm_path, None)
+    traded_dates = {t["date"] for t in week_trades}
+    no_trade_days = [d for d in trading_days if d not in traded_dates]
+    confirmed_no_trade: dict = {}
+    if isinstance(confirmations, dict):
+        confirmed_no_trade = {d: rec for d, rec in confirmations.items()
+                              if isinstance(rec, dict) and rec.get("no_trades") is True}
+    unconfirmed = [d for d in no_trade_days if d not in confirmed_no_trade]
+    if not isinstance(confirmations, dict):
+        if no_trade_days:
+            unavailable.append(f"无交易确认文件缺失：{confirm_path}")
+    elif unconfirmed:
+        execution_issues.append({
+            "rule": "no_trade_confirmation_missing",
+            "summary": f"无交易确认缺失 {len(unconfirmed)} 天：{', '.join(unconfirmed)}",
+            "evidence": {"no_trade_days": no_trade_days, "confirmed": sorted(confirmed_no_trade),
+                         "source": str(confirm_path)},
+        })
+    return no_trade_days, unconfirmed
+
+
+def _sell_fly_review(base, closings, strategy_issues, unavailable):
+    """卖飞评估：卖出后 MFE 是否显著高于卖出价。
+
+    ⚠️ 必须同时报 **coverage** —— 有多少平仓根本没有 MFE 数据可评。
+    只报「卖飞 N 笔」而不说分母，读者会把「没数据」当成「没卖飞」。
+    """
+    sell_fly = []
+    sell_fly_unevaluated = []
+    mfe_files = mfe_index(base)
+    mfe_cache: dict = {}
+    for c in closings:
+        mfe_map = load_mfe_after(base, c["sell_date"], index=mfe_files, cache=mfe_cache)
+        if mfe_map is None:
+            sell_fly_unevaluated.append({"code": c["code"], "name": c["name"],
+                                         "sell_date": c["sell_date"],
+                                         "reason": "卖出日之后无 mfe_mae 数据"})
+            continue
+        entry = mfe_map.get(c["code"])
+        if not entry or entry.get("mfe_pct") is None or entry.get("cost") is None:
+            reason = ("后续 mfe_mae 中无该代码（MFE/MAE 只覆盖仍持仓的票，全清仓单无法评估）"
+                      if not entry else
+                      f"后续 mfe_mae 中该代码未出数（{entry.get('unable_reason') or 'mfe_pct/cost 缺失'}）")
+            sell_fly_unevaluated.append({"code": c["code"], "name": c["name"],
+                                         "sell_date": c["sell_date"], "reason": reason})
+            continue
+        mfe_date = entry.get("mfe_date")
+        implied_mfe_price = entry["cost"] * (1 + entry["mfe_pct"] / 100)
+        if mfe_date and mfe_date > c["sell_date"] and implied_mfe_price > c["avg_sell_price"] * (1 + SELL_FLY_PCT):
+            sell_fly.append({
+                "code": c["code"], "name": c["name"], "sell_date": c["sell_date"],
+                "sell_price": c["avg_sell_price"], "implied_mfe_price": round(implied_mfe_price, 4),
+                "mfe_date": mfe_date,
+                "overshoot_pct": round((implied_mfe_price / c["avg_sell_price"] - 1) * 100, 2),
+            })
+    sell_fly_evaluated = len(closings) - len(sell_fly_unevaluated)
+    sell_fly_coverage = (round(sell_fly_evaluated / len(closings) * 100, 2)
+                         if closings else None)
+    if sell_fly_unevaluated:
+        unavailable.append(
+            f"卖飞审计覆盖 {sell_fly_evaluated}/{len(closings)} 单"
+            f"（{sell_fly_coverage}%）：无法评估 "
+            + "；".join(f"{u['sell_date']} {u['code']} {u['reason']}"
+                        for u in sell_fly_unevaluated[:5])
+            + ("……" if len(sell_fly_unevaluated) > 5 else ""))
+    if sell_fly:
+        strategy_issues.append({
+            "rule": "sell_fly",
+            "summary": f"卖飞候选 {len(sell_fly)} 单：后续 MFE 超卖出价 {SELL_FLY_PCT * 100:.0f}% 以上",
+            "evidence": sell_fly,
+        })
+    return sell_fly, sell_fly_unevaluated, sell_fly_evaluated, sell_fly_coverage
+
+
+def _loss_structure(losses, strategy_issues):
+    """亏损结构：短持有 vs 长持有各占多少亏损额。"""
+    short_losses = [c for c in losses if c["hold_days"] is not None and c["hold_days"] <= SHORT_HOLD_DAYS]
+    long_losses = [c for c in losses if c["hold_days"] is not None and c["hold_days"] > SHORT_HOLD_DAYS]
+    total_loss = sum(c["gross_pnl"] for c in losses)
+    short_loss_sum = sum(c["gross_pnl"] for c in short_losses)
+    short_loss_share = round(short_loss_sum / total_loss * 100, 2) if total_loss else None
+    if losses:
+        strategy_issues.append({
+            "rule": "short_hold_loss_profile",
+            "summary": (f"{SHORT_HOLD_DAYS} 天以内平仓的亏损单 {len(short_losses)}/{len(losses)} 笔，"
+                        f"贡献亏损 {short_loss_share}%（历史画像：短持有交易贡献主要亏损）"),
+            "evidence": {
+                "short_hold_loss_count": len(short_losses),
+                "long_hold_loss_count": len(long_losses),
+                "short_hold_loss_amount": round(short_loss_sum, 2),
+                "total_loss_amount": round(total_loss, 2),
+                "short_hold_loss_share_pct": short_loss_share,
+            },
+        })
+    return short_loss_share, total_loss
+
+
+def _bear_regime_stats(base, losses, total_loss, trading_days, unavailable):
+    """0AMV 空头日占比与空头期亏损占比。
+
+    ⚠️ 取不到 regime 台账时 `bear_loss_share` 留 None 而不是 0 ——
+    「空头期没亏」与「不知道空头是哪几天」必须可区分。
+    """
+    amv_path = base / "01_data" / "market" / "0amv_observations.jsonl"
+    regimes = load_amv_regimes(amv_path)
+    bear_days: list[str] = []
+    bear_loss_share = None
+    if regimes is None:
+        unavailable.append(f"0AMV 历史缺失：{amv_path}")
+    else:
+        observed = [d for d in trading_days if d in regimes]
+        bear_days = [d for d in observed if regimes[d]["regime"] == "空头"]
+        bear_closings = [c for c in losses if regimes.get(c["sell_date"], {}).get("regime") == "空头"]
+        if losses and observed:
+            bear_loss = sum(c["gross_pnl"] for c in bear_closings)
+            bear_loss_share = round(bear_loss / total_loss * 100, 2) if total_loss else None
+        elif not observed:
+            unavailable.append("本周交易日无 0AMV 观测记录")
+    bear_day_ratio = round(len(bear_days) / len([d for d in trading_days if regimes and d in regimes]) * 100, 2) \
+        if regimes and any(d in regimes for d in trading_days) else None
+    return bear_days, bear_loss_share, bear_day_ratio
+
+
+def _risk_levels_of_week(base, days):
+    """本周各日的风控等级（来自当日 risk_decision）。"""
+    risk_days = [d for d in days if (base / "01_data" / "risk" / f"{d}_risk_decision.json").exists()]
+    risk_levels = {}
+    for d in risk_days:
+        risk_levels[d] = load_json(base / "01_data" / "risk" / f"{d}_risk_decision.json", {}).get("risk_level")
+    return risk_levels
+
+
 def build_weekly_review(base: Path, day: str) -> dict:
     week = iso_week_range(day)
     days = week_dates(week)
@@ -666,54 +871,13 @@ def build_weekly_review(base: Path, day: str) -> dict:
     avg_hold = round(sum(hold_vals) / len(hold_vals), 1) if hold_vals else None
 
     # --- 交易日历 ---
-    td_map = trading_days_of_week(base, days)
-    trading_days = [d for d in days if td_map[d] is True]
-    unknown_td = [d for d in days if td_map[d] is None]
-    if unknown_td:
-        unavailable.append(f"交易日历未覆盖，交易日状态未知：{', '.join(unknown_td)}")
-
-    # --- 每日复盘覆盖 ---
-    daily_reviews = {}
-    for d in days:
-        path = base / "04_reviews" / "daily" / f"{d}_final_review.json"
-        if path.exists():
-            daily_reviews[d] = load_json(path, {})
-    missing_reviews = [d for d in trading_days if d not in daily_reviews]
-    if missing_reviews:
-        unavailable.append(f"缺少每日复盘：{', '.join(missing_reviews)}")
+    trading_days, daily_reviews = _trading_days_and_reviews(base, days, unavailable)
 
     # --- 执行维度 1：计划外交易 ---
-    plan_checks = []
-    plan_cache: dict = dict(daily_reviews)   # 本周的 final_review 已读过，直接复用
-    for t in week_trades:
-        plan, source = find_plan_for_day(base, t["date"], cache=plan_cache)
-        if plan is None:
-            unavailable.append(f"{t['date']} 无前置 final_review，{t['code']} 计划归属无法判定")
-            plan_checks.append({"trade": t, "status": "unknown", "plan_source": None})
-            continue
-        planned = any(str(p.get("code")) == t["code"] for p in plan)
-        plan_checks.append({"trade": t, "status": "planned" if planned else "unplanned", "plan_source": source})
-    unplanned = [p for p in plan_checks if p["status"] == "unplanned"]
-    known = [p for p in plan_checks if p["status"] != "unknown"]
-    unplanned_ratio = round(len(unplanned) / len(known) * 100, 2) if known else None
-    if unplanned:
-        execution_issues.append({
-            "rule": "unplanned_trade",
-            "summary": f"计划外交易 {len(unplanned)}/{len(known)} 笔（占比 {unplanned_ratio}%）",
-            "evidence": [{"date": p["trade"]["date"], "code": p["trade"]["code"],
-                          "name": p["trade"]["name"], "side": p["trade"]["side"],
-                          "plan_source": p["plan_source"]} for p in unplanned],
-        })
+    plan_checks, unplanned_ratio = _plan_adherence(base, daily_reviews, execution_issues, unavailable, week_trades)
 
     # --- 执行维度 2：止损合规 ---
-    slow_stops = [c for c in losses if c["pnl_pct"] is not None and c["pnl_pct"] <= STOP_LOSS_PCT]
-    if slow_stops:
-        execution_issues.append({
-            "rule": "slow_stop_loss",
-            "summary": f"止损偏慢 {len(slow_stops)} 单：已实现亏损超过 {STOP_LOSS_PCT}% 止损线",
-            "evidence": [{"code": c["code"], "name": c["name"], "sell_date": c["sell_date"],
-                          "pnl_pct": c["pnl_pct"], "hold_days": c["hold_days"]} for c in slow_stops],
-        })
+    slow_stops = _slow_stops(execution_issues, losses)
 
     # --- 执行维度 3：无交易确认完备性 ---
     # 唯一有生产者的数据源是 incremental_ledger.py --confirm-no-trades 写的
@@ -722,120 +886,23 @@ def build_weekly_review(base: Path, day: str) -> dict:
     # 写的持仓快照确认条目没有该键，不能顶替。
     # 旧实现读 _import_meta.json 的 no_trades_confirmed_dates —— 该键全仓库无任何写入方，
     # 恒为空 ⇒ 每周误报 no_trade_confirmation_missing。
-    confirm_path = base / "01_data" / "trades" / "position_confirmations.json"
-    confirmations = load_json(confirm_path, None)
-    traded_dates = {t["date"] for t in week_trades}
-    no_trade_days = [d for d in trading_days if d not in traded_dates]
-    confirmed_no_trade: dict = {}
-    if isinstance(confirmations, dict):
-        confirmed_no_trade = {d: rec for d, rec in confirmations.items()
-                              if isinstance(rec, dict) and rec.get("no_trades") is True}
-    unconfirmed = [d for d in no_trade_days if d not in confirmed_no_trade]
-    if not isinstance(confirmations, dict):
-        if no_trade_days:
-            unavailable.append(f"无交易确认文件缺失：{confirm_path}")
-    elif unconfirmed:
-        execution_issues.append({
-            "rule": "no_trade_confirmation_missing",
-            "summary": f"无交易确认缺失 {len(unconfirmed)} 天：{', '.join(unconfirmed)}",
-            "evidence": {"no_trade_days": no_trade_days, "confirmed": sorted(confirmed_no_trade),
-                         "source": str(confirm_path)},
-        })
+    no_trade_days, unconfirmed = _no_trade_confirmations(base, execution_issues, trading_days, unavailable, week_trades)
 
     # --- 策略维度 1：卖飞分析 ---
     # 覆盖率必须显式报告:MFE/MAE 只对**仍持仓**的票出数(calc_mfe_mae 按 current_positions
     # 逐票算),因此**全清仓**的平仓单在后续 mfe_mae.json 里根本不存在 —— 永远"无法评估"。
     # 此前只把它塞进 sell_fly_unevaluated 列表,报告正文写"卖飞候选 0 单",读者会当成
     # "本周没卖飞",而真相是"本周根本没查"。
-    sell_fly = []
-    sell_fly_unevaluated = []
-    mfe_files = mfe_index(base)
-    mfe_cache: dict = {}
-    for c in closings:
-        mfe_map = load_mfe_after(base, c["sell_date"], index=mfe_files, cache=mfe_cache)
-        if mfe_map is None:
-            sell_fly_unevaluated.append({"code": c["code"], "name": c["name"],
-                                         "sell_date": c["sell_date"],
-                                         "reason": "卖出日之后无 mfe_mae 数据"})
-            continue
-        entry = mfe_map.get(c["code"])
-        if not entry or entry.get("mfe_pct") is None or entry.get("cost") is None:
-            reason = ("后续 mfe_mae 中无该代码（MFE/MAE 只覆盖仍持仓的票，全清仓单无法评估）"
-                      if not entry else
-                      f"后续 mfe_mae 中该代码未出数（{entry.get('unable_reason') or 'mfe_pct/cost 缺失'}）")
-            sell_fly_unevaluated.append({"code": c["code"], "name": c["name"],
-                                         "sell_date": c["sell_date"], "reason": reason})
-            continue
-        mfe_date = entry.get("mfe_date")
-        implied_mfe_price = entry["cost"] * (1 + entry["mfe_pct"] / 100)
-        if mfe_date and mfe_date > c["sell_date"] and implied_mfe_price > c["avg_sell_price"] * (1 + SELL_FLY_PCT):
-            sell_fly.append({
-                "code": c["code"], "name": c["name"], "sell_date": c["sell_date"],
-                "sell_price": c["avg_sell_price"], "implied_mfe_price": round(implied_mfe_price, 4),
-                "mfe_date": mfe_date,
-                "overshoot_pct": round((implied_mfe_price / c["avg_sell_price"] - 1) * 100, 2),
-            })
-    sell_fly_evaluated = len(closings) - len(sell_fly_unevaluated)
-    sell_fly_coverage = (round(sell_fly_evaluated / len(closings) * 100, 2)
-                         if closings else None)
-    if sell_fly_unevaluated:
-        unavailable.append(
-            f"卖飞审计覆盖 {sell_fly_evaluated}/{len(closings)} 单"
-            f"（{sell_fly_coverage}%）：无法评估 "
-            + "；".join(f"{u['sell_date']} {u['code']} {u['reason']}"
-                        for u in sell_fly_unevaluated[:5])
-            + ("……" if len(sell_fly_unevaluated) > 5 else ""))
-    if sell_fly:
-        strategy_issues.append({
-            "rule": "sell_fly",
-            "summary": f"卖飞候选 {len(sell_fly)} 单：后续 MFE 超卖出价 {SELL_FLY_PCT * 100:.0f}% 以上",
-            "evidence": sell_fly,
-        })
+    sell_fly, sell_fly_unevaluated, sell_fly_evaluated, sell_fly_coverage = _sell_fly_review(base, closings, strategy_issues, unavailable)
 
     # --- 策略维度 2：亏损单持有期分布 ---
-    short_losses = [c for c in losses if c["hold_days"] is not None and c["hold_days"] <= SHORT_HOLD_DAYS]
-    long_losses = [c for c in losses if c["hold_days"] is not None and c["hold_days"] > SHORT_HOLD_DAYS]
-    total_loss = sum(c["gross_pnl"] for c in losses)
-    short_loss_sum = sum(c["gross_pnl"] for c in short_losses)
-    short_loss_share = round(short_loss_sum / total_loss * 100, 2) if total_loss else None
-    if losses:
-        strategy_issues.append({
-            "rule": "short_hold_loss_profile",
-            "summary": (f"{SHORT_HOLD_DAYS} 天以内平仓的亏损单 {len(short_losses)}/{len(losses)} 笔，"
-                        f"贡献亏损 {short_loss_share}%（历史画像：短持有交易贡献主要亏损）"),
-            "evidence": {
-                "short_hold_loss_count": len(short_losses),
-                "long_hold_loss_count": len(long_losses),
-                "short_hold_loss_amount": round(short_loss_sum, 2),
-                "total_loss_amount": round(total_loss, 2),
-                "short_hold_loss_share_pct": short_loss_share,
-            },
-        })
+    short_loss_share, total_loss = _loss_structure(losses, strategy_issues)
 
     # --- 策略维度 3：市场背景 ---
-    amv_path = base / "01_data" / "market" / "0amv_observations.jsonl"
-    regimes = load_amv_regimes(amv_path)
-    bear_days: list[str] = []
-    bear_loss_share = None
-    if regimes is None:
-        unavailable.append(f"0AMV 历史缺失：{amv_path}")
-    else:
-        observed = [d for d in trading_days if d in regimes]
-        bear_days = [d for d in observed if regimes[d]["regime"] == "空头"]
-        bear_closings = [c for c in losses if regimes.get(c["sell_date"], {}).get("regime") == "空头"]
-        if losses and observed:
-            bear_loss = sum(c["gross_pnl"] for c in bear_closings)
-            bear_loss_share = round(bear_loss / total_loss * 100, 2) if total_loss else None
-        elif not observed:
-            unavailable.append("本周交易日无 0AMV 观测记录")
-    bear_day_ratio = round(len(bear_days) / len([d for d in trading_days if regimes and d in regimes]) * 100, 2) \
-        if regimes and any(d in regimes for d in trading_days) else None
+    bear_days, bear_loss_share, bear_day_ratio = _bear_regime_stats(base, losses, total_loss, trading_days, unavailable)
 
     # --- 风控决策覆盖（事实记录，不归因） ---
-    risk_days = [d for d in days if (base / "01_data" / "risk" / f"{d}_risk_decision.json").exists()]
-    risk_levels = {}
-    for d in risk_days:
-        risk_levels[d] = load_json(base / "01_data" / "risk" / f"{d}_risk_decision.json", {}).get("risk_level")
+    risk_levels = _risk_levels_of_week(base, days)
 
     # --- 板块1：持仓周度表现 ---
     holdings_section = holding_week_performance(base, days, daily_reviews, unavailable)
