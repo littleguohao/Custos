@@ -32,6 +32,7 @@ FACTOR: dict[str, Any] = {
     "note": "「完美 B1」指纹拟合度；⚠️ R2：作进场过滤有害（期望 −0.42%/笔），仅描述性",
     "min_bars": 1,
     "live_use": "evidence_only",  # R2：仅描述性，不作买入依据（落候选表供人看，不驱动分层/gate）
+    "stage": "release",
 }
 
 FIT_J_DEEP = 0.0                  # J<0 → 2 分

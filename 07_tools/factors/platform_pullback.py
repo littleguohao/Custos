@@ -27,6 +27,7 @@ FACTOR: dict[str, Any] = {
     "note": "R2：识别有术、盈利无效；净值 3 窗方向随环境摆动。证据层保留（候选表「平台回踩」列）",
     "min_bars": 60,
     "live_use": "evidence_only",
+    "stage": "release",
 }
 
 

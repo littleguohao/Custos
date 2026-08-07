@@ -36,6 +36,7 @@ FACTOR: dict[str, Any] = {
     "note": "稳健负预测；且口径与 live 反转K不一致（对称 vs 不对称）",
     "min_bars": 21,
     "live_use": "none",
+    "stage": "debug",
 }
 
 def score(df: pd.DataFrame, code: str):

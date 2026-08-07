@@ -23,6 +23,7 @@ FACTOR: dict[str, Any] = {
     "note": "缺独立终审记录；按 R2 整体结论推定不可用",
     "min_bars": 10,
     "live_use": "none",
+    "stage": "debug",
 }
 
 def score(df: pd.DataFrame, code: str):

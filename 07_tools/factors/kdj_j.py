@@ -23,6 +23,7 @@ FACTOR: dict[str, Any] = {
     "note": "同号率仅 50%，不稳定",
     "min_bars": 12,
     "live_use": "none",
+    "stage": "debug",
 }
 
 def score(df: pd.DataFrame, code: str):

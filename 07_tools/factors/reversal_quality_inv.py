@@ -27,6 +27,7 @@ FACTOR: dict[str, Any] = {
     "note": "样本内大胜、含退市跨年翻转；归因未分离",
     "min_bars": 21,
     "live_use": "none",
+    "stage": "debug",
 }
 
 def score(df: pd.DataFrame, code: str):

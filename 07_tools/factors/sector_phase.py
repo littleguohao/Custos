@@ -22,6 +22,7 @@ FACTOR: dict[str, Any] = {
     "note": "R4：0AMV 之后第二个 OOS 站得住的增强，熊市减亏 ~4-6pp",
     "min_bars": 60,
     "live_use": "gate",
+    "stage": "release",
 }
 
 

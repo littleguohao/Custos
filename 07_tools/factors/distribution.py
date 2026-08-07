@@ -30,6 +30,7 @@ FACTOR: dict[str, Any] = {
     "note": "主力出货五方式（顶部派发形态），用于清仓与选股规避",
     "min_bars": 1,
     "live_use": "gate",
+    "stage": "release",
 }
 
 DIST_RECENT = 5                    # 待回测：出货形态观察最近N根

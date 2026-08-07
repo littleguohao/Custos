@@ -30,6 +30,7 @@ import argparse
 import glob
 import inspect
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -134,9 +135,13 @@ RS_STRONG_PP = 3.0           # 20日相对强度 >= +3pp
 # 而 R2 的结论建立在前者上。统一到对称后两边可比。
 # 🔁 **这一改反转了 R16（材料纠偏）第 ④ 条**，若要回退：把下面三个常量恢复为
 #    MIN=-2.0 / MAX=1.8，并同步 01_swing_rules.md §三.3 注与本文件的判定式。
-REVERSAL_CHANGE_PCT = 2.0    # 对称阈值：|涨跌幅| <= 2%
-REVERSAL_CHANGE_MIN_PCT = -REVERSAL_CHANGE_PCT
-REVERSAL_CHANGE_MAX_PCT = REVERSAL_CHANGE_PCT
+# 📐 **可配置**（owner 2026-08-06）：默认对称 ±2%，可用环境变量覆盖以验证不同区间的效果。
+#    `B1_REVK_CHG_PCT=2.5` → ±2.5%；`B1_REVK_CHG_MIN=-2 B1_REVK_CHG_MAX=1.8` → 回到不对称。
+#    ⚠️ 覆盖值会**同时**影响 live 选股与回测（两边读同一处），这是有意的 ——
+#    口径不同就没法拿回测结论解释 live（2026-08-06 查出的 REVK_* 分叉正是这么来的）。
+REVERSAL_CHANGE_PCT = float(os.environ.get("B1_REVK_CHG_PCT", "2.0"))
+REVERSAL_CHANGE_MIN_PCT = float(os.environ.get("B1_REVK_CHG_MIN", -REVERSAL_CHANGE_PCT))
+REVERSAL_CHANGE_MAX_PCT = float(os.environ.get("B1_REVK_CHG_MAX", REVERSAL_CHANGE_PCT))
 REVERSAL_AMPLITUDE_PCT = 7.0
 STOP_LOOKBACK = 10           # 建议止损位：近10日最低价
 

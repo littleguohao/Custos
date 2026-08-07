@@ -49,6 +49,7 @@ FACTOR: dict[str, Any] = {
     "note": "R6：未过跨窗终审；j_low_qsx_weekly 净值只多 0.019R 却付 90% 召回",
     "min_bars": 120,
     "live_use": "evidence_only",  # signal_labels 出标签落候选表；该模块头部已声明「标注不是交易依据」
+    "stage": "release",
 }
 
 

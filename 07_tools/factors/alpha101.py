@@ -22,6 +22,7 @@ FACTOR: dict[str, Any] = {
     "note": "判别层过线但净值终审未过；2025 窗明确输",
     "min_bars": 1,
     "live_use": "none",
+    "stage": "debug",
 }
 
 def score(df: pd.DataFrame, code: str):

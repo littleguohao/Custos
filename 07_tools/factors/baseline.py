@@ -20,6 +20,7 @@ FACTOR: dict[str, Any] = {
     "note": "所有进场信号的对照臂，必须保留",
     "min_bars": 1,
     "live_use": "none",
+    "stage": "debug",
 }
 
 def score(df: pd.DataFrame, code: str):

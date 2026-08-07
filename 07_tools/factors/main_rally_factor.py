@@ -53,6 +53,7 @@ FACTOR: dict[str, Any] = {
     "note": "R8：已实现未跑；原文两处矛盾，两种 CROSS 口径都实现由回测判定",
     "min_bars": 60,
     "live_use": "evidence_only",  # signal_labels 出标签落候选表；该模块头部已声明「标注不是交易依据」
+    "stage": "release",
 }
 
 

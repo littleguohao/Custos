@@ -27,6 +27,7 @@ FACTOR: dict[str, Any] = {
     "note": "判别层过线、净值终审惨败；止损把下跌端对称兑现",
     "min_bars": 1,
     "live_use": "none",
+    "stage": "debug",
 }
 
 def score(df: pd.DataFrame, code: str):

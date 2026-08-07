@@ -58,6 +58,13 @@ KINDS = ("selector", "pattern", "state", "control")
 #: 只看 status 会把这种合法用法误判成违规（2026-08-06 第一版守卫就误报了）。
 LIVE_USES = ("none", "evidence_only", "gate", "scorer")
 
+#: **是否已上线** —— 第三个维度，与 status/live_use 正交。
+#: `release` = 18:00 选股链真的在跑它；`debug` = 只在研究/回测里用。
+#: 三个维度各答不同的问题：status「证据够不够」/ live_use「允许怎么用」/ stage「现在真的在跑吗」。
+#: ⚠️ 由测试对着 import 图核对，不靠手写维护 ——
+#: 「以为上线了其实没有」比没有标记更糟。
+STAGES = ("release", "debug")
+
 #: **已知矛盾的显式白名单**：`status` 说证据不够，而 live 确实拿它驱动决策。
 #: 不静默放过、也不擅自改 live —— 改分层是策略决策。列在这里是为了
 #: ①矛盾可见 ②新出现的矛盾会被测试挡住（ratchet）。
@@ -100,6 +107,11 @@ def live_allowed() -> dict[str, dict]:
     return {k: v for k, v in registry().items()
             if v["meta"].get("status") not in NOT_FOR_LIVE
             and v["meta"].get("live_use") in ("gate", "scorer")}
+
+
+def released() -> dict[str, dict]:
+    """已上线的因子（`stage == "release"`）。"""
+    return {k: v for k, v in registry().items() if v["meta"].get("stage") == "release"}
 
 
 def live_evidence_only() -> dict[str, dict]:

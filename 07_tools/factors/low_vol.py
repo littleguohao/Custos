@@ -20,6 +20,7 @@ FACTOR: dict[str, Any] = {
     "note": "特征溢价类，未终审",
     "min_bars": 21,
     "live_use": "none",
+    "stage": "debug",
 }
 
 def score(df: pd.DataFrame, code: str):

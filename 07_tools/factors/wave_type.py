@@ -28,6 +28,7 @@ FACTOR: dict[str, Any] = {
     "note": "前置拉升波分类（建仓/拉升/冲刺），冲刺波首个 B1 禁止买入",
     "min_bars": 1,
     "live_use": "gate",
+    "stage": "release",
 }
 
 WAVE_LOOKBACK = 60                  # 拉升波分析窗口（日）

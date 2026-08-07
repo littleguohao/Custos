@@ -37,6 +37,7 @@ FACTOR: dict[str, Any] = {
     #   不擅自改（改分层是策略决策，且 README 明确 StockPool 只是证据层、
     #   买入由 chief_decision 裁决），已登记 TODO 待拍板。
     "live_use": "scorer",  # ⚠️ 见下「已知矛盾」
+    "stage": "release",
 }
 
 

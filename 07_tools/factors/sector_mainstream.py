@@ -29,6 +29,7 @@ FACTOR: dict[str, Any] = {
     "note": "R2：板块族+密度是准确的「窗口主线指纹」（归因工具），但「跟随主流」机械规则不成立",
     "min_bars": 1,
     "live_use": "evidence_only",
+    "stage": "release",
 }
 
 

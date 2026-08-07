@@ -229,15 +229,21 @@ class TestReversalKMatchesCode:
         assert "反转了 R16" in doc, "反转材料纠偏必须留痕"
         assert "有意的选择" in doc
 
-    def test_min_max_derived_from_single_constant(self):
-        """MIN/MAX 必须由 `REVERSAL_CHANGE_PCT` **派生**，不是各写一个数。
+    def test_min_max_default_symmetric_and_configurable(self):
+        """默认对称 ±2%，且**可配置**（owner 2026-08-06）。
 
-        对称口径下写成两个独立字面量，就会出现「改了一个忘另一个」的半对称状态。
+        阈值改成读环境变量（`B1_REVK_CHG_PCT` / `_MIN` / `_MAX`），
+        用来验证不同区间的效果（待办 #39）。默认值必须仍是对称 ±2%。
+
+        ⚠️ 覆盖值**同时**影响 live 与回测（两边读同一处）—— 这是有意的：
+        口径不同就没法拿回测结论解释 live，2026-08-06 查出的 REVK_* 分叉正是这么来的。
         """
         code = self._code()
-        assert "REVERSAL_CHANGE_MIN_PCT = -REVERSAL_CHANGE_PCT" in code
-        assert "REVERSAL_CHANGE_MAX_PCT = REVERSAL_CHANGE_PCT" in code
-
+        assert 'os.environ.get("B1_REVK_CHG_PCT", "2.0")' in code, "默认必须是 2.0"
+        assert 'os.environ.get("B1_REVK_CHG_MIN"' in code
+        assert 'os.environ.get("B1_REVK_CHG_MAX"' in code
+        # 未设环境变量时 MIN/MAX 由 PCT 派生（不是各写一个字面量）
+        assert "-REVERSAL_CHANGE_PCT" in code
 
 class TestKnownIssuesStayVisible:
     """三处待处理问题必须留在索引里，直到被真正解决。

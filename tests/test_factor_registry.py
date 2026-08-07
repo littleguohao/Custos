@@ -262,3 +262,64 @@ class TestKnownConflicts:
         """矛盾也要写在因子模块自己的元数据里 —— 读那个文件的人才看得到。"""
         s = (ROOT / "07_tools" / "factors" / "s_shape.py").read_text(encoding="utf-8")
         assert "已知矛盾" in s and "score_candidates" in s
+
+
+class TestStageMatchesReality:
+    """`stage` 必须与**实际 import 图**一致，不靠手写维护。
+
+    owner 2026-08-06 要求给因子加 release/debug 标记表示是否已上线。
+    做成**可自验证**的：`stage="release"` ⇔ 18:00 选股链真的引用它。
+
+    ⚠️ 为什么必须自验证：手写标签会很快与事实脱节，而
+    **「以为上线了其实没有」比没有标记更糟** —— 前者会让人拿一个没跑的因子去解释线上结果。
+
+    三个维度各答不同的问题，别混：
+        status    证据够不够？      —— 研究结论
+        live_use  允许怎么用？      —— 规则约束
+        stage     现在真的在跑吗？  —— 部署事实
+    """
+
+    LIVE_FILES = ["screening/enrich_candidates.py", "screening/score_candidates.py",
+                  "screening/candidate_table.py", "screening/signal_labels.py",
+                  "screening/formula_screen.py"]
+
+    def _referenced(self) -> set[str]:
+        import re
+        srcs = [(ROOT / "07_tools" / f).read_text(encoding="utf-8") for f in self.LIVE_FILES]
+        out = set()
+        for fid in factors.registry():
+            if any(re.search(rf"\bfrom {fid} import|\bimport {fid}\b", s) for s in srcs):
+                out.add(fid)
+        return out
+
+    def test_every_factor_declares_stage(self):
+        for fid, e in factors.registry().items():
+            assert e["meta"].get("stage") in factors.STAGES, \
+                f"{fid} 的 stage={e['meta'].get('stage')!r} 不合法"
+
+    def test_release_means_actually_referenced(self):
+        """标 release 的必须真被 live 链引用 —— 否则是虚假的「已上线」。"""
+        ref = self._referenced()
+        bad = [f for f, e in factors.registry().items()
+               if e["meta"]["stage"] == "release" and f not in ref]
+        assert not bad, f"标了 release 但 live 链没引用：{bad}"
+
+    def test_debug_means_not_in_live(self):
+        """标 debug 的不许被 live 链引用 —— 那说明它其实上线了，标记撒谎。"""
+        ref = self._referenced()
+        bad = [f for f, e in factors.registry().items()
+               if e["meta"]["stage"] == "debug" and f in ref]
+        assert not bad, f"标了 debug 却在 live 链里：{bad}"
+
+    def test_release_set_is_the_known_twelve(self):
+        """已上线集合当前 12 个。变动必须是有意识的 —— 上线/下线都该被看见。"""
+        got = set(factors.released())
+        assert len(got) == 12, f"已上线因子数变了（{len(got)}）：{sorted(got)}"
+
+    def test_debug_factors_are_research_only(self):
+        """未上线的因子 live_use 应为 none —— 既没上线又声明可用是自相矛盾。"""
+        for fid, e in factors.registry().items():
+            m = e["meta"]
+            if m["stage"] == "debug":
+                assert m["live_use"] == "none", \
+                    f"{fid} stage=debug 却声明 live_use={m['live_use']}"
