@@ -7,9 +7,19 @@ __pycache__/
 .ruff_cache/
 
 # Generated strategy data. Keep Markdown templates and documentation.
+#
+# ⚠️ **必须带 `**/` 前缀**。含 `/` 的模式在 gitignore 里是**锚定仓库根**的，
+# 所以 `01_data/**` 拦不住 `<任意目录>/01_data/**`。2026-08-07 实际出过事：
+# 一个基线脚本把测试助手的 tmp_path 实参写成了字符串 "2026-07-16"，
+# 于是在**仓库根**建出 `2026-07-16/01_data/trades/master_trade_ledger.csv`
+# 并被 `git add -A` 提交（那次是合成 fixture，没泄露真数据 —— 但同类事故
+# 若写的是真实台账就是账户数据外泄）。
 01_data/**
+**/01_data/**
 !01_data/**/
+!**/01_data/**/
 !01_data/**/*.md
+!**/01_data/**/*.md
 
 # Generated review reports (may contain sensitive account data). Keep directories only.
 04_reviews/trade_review/**
@@ -24,6 +34,12 @@ __pycache__/
 03_daily_plans/*_1445_review.md
 04_reviews/daily/*_final_review.json
 04_reviews/daily/*_final_review.md
+# 同上：这些也要能拦住嵌套位置的误写
+**/04_reviews/daily/*_final_review.json
+**/04_reviews/daily/*_final_review.md
+**/03_daily_plans/*_daily_report.md
+**/03_daily_plans/*_1445_review.md
+**/06_logs/
 07_tools/_debug/
 *.log
 *.tmp
