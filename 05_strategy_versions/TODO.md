@@ -140,7 +140,7 @@
 
 | 46 | ⚠️ **覆盖率读数不稳定**：`market_timing_scorer.py` 在三次全量运行里读出 15% / 36% / 48%（语句总数不变）。已排除「导入形式不一致」（统一为包限定后仍 36%），未能在合理成本内定位。可验证的是「排除新测试 15% → 包含 36%」，即新测试确实 +21pp。**影响**：单文件覆盖率不能当精确指标用，只能看趋势。怀疑与 conftest 把 `07_tools` 与各子目录**都**铺进 sys.path、同一文件可两路导入有关 | 待查 |
 
-| 47 | **硬失败 stage 覆盖收尾**：11 个硬失败 stage 里 6 个已达 92%+（portfolio_review 96 / theme_tracker 94 / execution_review 97 / chief_decision 99 / generate_risk_and_sectors 99 / amv_state 92）。剩 `review_enrichment` 32%（45）、`market_timing_scorer` 36%（159）、`batch_holding_technical` 61%（30）、`daily_report` 66%（66）、`b1_holding_state` 75%（37）| 待补 |
+| 47 | **硬失败 stage 覆盖收尾**：11 个里 **7 个已 ≥90%**（portfolio_review 96 / theme_tracker 94 / execution_review 97 / chief_decision 99 / review_enrichment 97 / generate_risk_and_sectors 99 / amv_state 92）。剩 4 个：`market_timing_scorer` 36%（159，读数不稳见 #46）、`b1_holding_state` 84%（24，剩 main 与 pre_checks 的 TQ 分支）、`batch_holding_technical` 61%（30）、`daily_report` 66%（66）| 待补 |
 
 ## 需要 owner 拍板
 
