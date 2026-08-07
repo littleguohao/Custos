@@ -17,6 +17,7 @@ from paths import read_json as load
 from paths import write_json as dump
 from code_utils import bare_code as bare, fnum
 from runtime_guards import normalize_regime
+from contracts import require
 
 DATA = BASE / "01_data"
 
@@ -141,6 +142,7 @@ def main():
     dump(DATA / "sectors" / f"{args.date}_sector_state.json", sector_states)
 
     risk = build_risk_decision(args.date)
+    require("risk_decision", risk)
     dump(DATA / "risk" / f"{args.date}_risk_decision.json", risk)
 
     print(json.dumps({

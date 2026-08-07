@@ -13,6 +13,7 @@ if str(TOOLS_DIR) not in sys.path:
 from paths import BASE  # noqa: E402
 from paths import read_json as load  # noqa: E402
 from code_utils import bare_code as bare  # noqa: E402
+from contracts import require  # noqa: E402
 
 DATA=BASE/'01_data'; PLANS=BASE/'03_daily_plans'
 
@@ -45,7 +46,14 @@ def main():
         code=bare(h.get('code')); rlist=risk_by_code.get(code,[]); high=[x for x in rlist if x.get('priority')=='高']
         b1=b1_by_code.get(code,{}); action=b1.get('final_action') or h.get('action','观察'); priority=b1.get('final_priority') or h.get('priority','P3'); reasons=[b1.get('final_reason')] if b1.get('final_reason') else list(h.get('reason') or [])
         if high:
-            priority='P1'; actions=[x.get('action') for x in high]
+            # ⚠️ 高优先风险**至少**升到 P1，但**不得把已经更紧急的 P0 降下来**。
+            # 2026-08-07 修：原写法是无条件 `priority='P1'`，于是
+            #   甲(b1=P0 + 高风险止损) → P1，在处置表里排到
+            #   乙(b1=P0、无风险)      → P0 的**后面**
+            # 即「多一条高优先风控依据反而降了优先级」。而 holding_actions 是按
+            # priority 排序的「先动手处理哪个」清单 —— 增加风险绝不该降低紧急度。
+            priority = 'P0' if priority == 'P0' else 'P1'
+            actions=[x.get('action') for x in high]
             if '清仓' in actions: action='清仓'
             elif '止损' in actions: action='止损'
             elif '减仓' in actions: action='减仓'
@@ -80,6 +88,8 @@ def main():
       'allowed_actions':allowed,'forbidden_actions':forbidden,'holding_actions':holding_actions,'buy_actions':buy_actions,
       'watchlist':main_sectors,'tomorrow_validation':['市场数据质量是否改善','主线是否形成并保持支持状态','风险持仓是否修复关键结构'], 
       'risk_notice':'RiskDecision为强制输入；B1持仓状态只可在硬风险优先级下裁决；任何上游证据均不得提高交易权限或覆盖风险否决。','sources':{'risk_decision':str(risk_path),'b1_holding_state':str(DATA/'holdings'/f'{a.date}_b1_holding_state.json'),'runtime_gate':str(DATA/'quality'/f'{a.date}_runtime_gate.json')}}
+    # ⚠️ 落盘前强制校验：这是**最终交易计划**，开仓权限与持仓处理优先级在此定稿。
+    require('chief_decision', decision)
     out_json=DATA/'decisions'/f'{a.date}_chief_decision.json'; out_json.parent.mkdir(parents=True,exist_ok=True); out_json.write_text(json.dumps(decision,ensure_ascii=False,indent=2),encoding='utf-8')
     lines=['# chief_decision 每日总控交易计划','',f'日期：{a.date}','', '## 1. 总控结论','',f'- 市场状态：**{state}**（{score}）',f'- 总仓位建议：**{position}**',f'- 新开仓权限：**{permission}**',f"- 风控等级：**{decision['risk_level']}**",f"- 持仓时效：**{decision['position_freshness'].get('status','未知')}** — {decision['position_freshness'].get('reason','')}",'', '## 2. 持仓处理优先级','', '| 优先级 | 代码 | 名称 | 动作 | 理由 |','|---|---|---|---|---|']
     for x in holding_actions: lines.append(f"| {x['priority']} | {x['code']} | {x['name']} | {x['action']} | {'；'.join(x['reasons'])} |")

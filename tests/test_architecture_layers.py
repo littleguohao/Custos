@@ -30,7 +30,11 @@ TOOLS = ROOT / "07_tools"
 
 # ── 分层：数字越小越底层。同层互相依赖允许，下层依赖上层不允许。
 BASE_MODULES = {"paths.py", "code_utils.py", "indicators.py", "fmt.py",
-                "net_retry.py", "pipeline_kit.py", "runtime_guards.py"}
+                "net_retry.py", "pipeline_kit.py", "runtime_guards.py",
+                # `contracts.py` 是产物 schema 的唯一来源，被 L1~L3 的生产者调用。
+                # 它**只依赖 stdlib**（math + typing）—— 一条测试强制这一点，
+                # 因为契约层若依赖别的模块，就可能被它校验的对象反向依赖。
+                "contracts.py"}
 LAYER_OF_DIR = {
     "local_tdx": 1, "collect": 1, "news": 1,
     "factors": 2, "trades": 2,
@@ -193,3 +197,28 @@ class TestIndicatorLayer:
         """`indicators.py` 是底层，只许依赖 `code_utils`（取涨跌幅前缀基准）。"""
         assert GRAPH.get("indicators.py", set()) <= {"code_utils.py"}, \
             f"indicators 多出依赖：{GRAPH.get('indicators.py')}"
+
+
+class TestContractsLayer:
+    def test_contracts_depends_on_nothing_internal(self):
+        """⚠️ `contracts.py` 必须**零内部依赖**。
+
+        它是产物 schema 的唯一来源，被 L1~L3 的生产者在落盘前调用。
+        若它依赖别的项目模块，就可能出现「校验层依赖被校验对象」的环。
+        """
+        assert GRAPH.get("contracts.py", set()) == set(), \
+            f"contracts.py 不得依赖项目内模块，实际: {GRAPH.get('contracts.py')}"
+
+    def test_money_path_producers_validate_before_write(self):
+        """四个钱的路径产物的生产者必须在落盘前 `require(...)`。"""
+        import re
+        expect = {
+            "runtime_guards.py": "runtime_gate",
+            "generate_risk_and_sectors.py": "risk_decision",
+            "market_timing/chief_decision_report.py": "chief_decision",
+            "market_timing/b1_holding_state.py": "b1_holding_state",
+        }
+        for rel, artifact in expect.items():
+            src = (TOOLS / rel).read_text(encoding="utf-8")
+            assert re.search(rf"require\(['\"]{artifact}['\"]", src), \
+                f"{rel} 未在落盘前校验 {artifact}"

@@ -22,6 +22,7 @@ from runtime_guards import normalize_regime  # noqa: E402
 from paths import BASE  # noqa: E402
 from code_utils import norm_code  # noqa: E402
 from code_utils import fnum  # noqa: E402
+from contracts import require  # noqa: E402
 
 DATA = BASE / "01_data"
 
@@ -237,6 +238,9 @@ def main() -> None:
         except Exception as exc:  # noqa: BLE001 —— 预检失败不影响 B1 主流程
             state["pre_checks"] = {"available": False, "error": {"code": "pre_checks_failed", "detail": str(exc)}}
         result.append(state)
+    # ⚠️ 落盘前强制校验：`final_priority` 会一路传到 RiskDecision 与
+    # ChiefDecision（P0 ⇒ 清仓、P1 ⇒ 减仓），标错就直接错在交易计划里。
+    require("b1_holding_state", result)
     out = DATA / "holdings" / f"{args.date}_b1_holding_state.json"
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(out)

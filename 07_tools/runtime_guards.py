@@ -9,6 +9,7 @@ from typing import Any
 
 from paths import BASE, CN_TZ, CONTRACTS_DIR, cn_now, write_json_atomic
 from paths import read_json as load_json
+from contracts import require
 
 DATA = BASE / "01_data"
 CALENDAR_CONFIG = CONTRACTS_DIR / "CN_TRADING_CALENDAR.json"
@@ -437,6 +438,10 @@ def write_runtime_gate(day: str, expected_day: str | None = None) -> dict[str, A
         "market_quality": market_quality,
         "generated_at": cn_now().isoformat(timespec="seconds"),
     }
+    # ⚠️ 落盘前强制校验：这份产物是**权限总闸**，三个 allow_* 布尔缺失或为
+    # null 时，下游的 `is False` / `== "blocked"` 判定会落空 ⇒
+    # **未获授权被当成已获授权**（审计 A3 的原始机制）。见 contracts.py。
+    require("runtime_gate", result)
     out = DATA / "quality" / f"{day}_runtime_gate.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
