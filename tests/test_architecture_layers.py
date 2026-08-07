@@ -224,6 +224,11 @@ class TestContractsLayer:
             "market_timing/market_timing_collector.py": "market_timing_input",
             "market_timing/merge_incremental_market.py": "market_timing_input",
             "market_timing/batch_holding_technical.py": "holding_technical_summary",
+            # 第三批：硬失败链上其余产物
+            "collect/collect_holding_quotes.py": "holding_quotes",
+            "market_timing/theme_tracker_report.py": "sector_technical_summary",
+            "close_review/execution_review.py": "execution_review",
+            "close_review/review_enrichment.py": "review_enrichment",
         }
         for rel, artifact in expect.items():
             src = (TOOLS / rel).read_text(encoding="utf-8")

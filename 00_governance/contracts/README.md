@@ -88,3 +88,30 @@
 - 无生产者的实体/字段必须显式标 🔴，并写清「保留它的理由」（通常是重建时的目标形状）。
 - 配置类 JSON 的路径只在 `paths.py` 定义，不要在模块里拼。
 - 待办不要写进契约文档，写进 `05_strategy_versions/TODO.md`。
+
+## 可执行契约（`07_tools/contracts.py`）
+
+⚠️ **本目录的 `.md` 是文档，不参与执行，所以会漂移** —— 这份 README 自己就记着
+7 处契约失真的核查结论，而其中 `SkillEvidence` 那个实体**项目里从来没有过**
+任何产出同时具备它描述的 8 个字段。
+
+2026-08-07 起，**钱的路径与硬失败链上的产物 schema 变成可执行代码**：
+
+    07_tools/contracts.py     SPECS 是唯一来源；生产者落盘前 require(...)
+    tests/test_contracts.py   每条校验规则标注它对应的**真实 bug**
+    tests/test_architecture_layers.py::test_money_path_producers_validate_before_write
+                              强制 11 个生产者都在落盘前校验
+
+覆盖 **11 个产物**，硬失败链上的 10 个**全部覆盖**。执行策略是「写严、读松」：
+生产者不合规当场 SystemExit，消费者只拿结构化结论、按既有降级策略裁决
+（README 记着 2026-07-30 悄悄收紧硬闸导致 17:00 链失败的教训）。
+
+三个由真实数据逼出来的概念，改 spec 前先读它们的说明：
+
+| 概念 | 用在哪 | 为什么 |
+|---|---|---|
+| `nullable` | `market_timing_input.amv_0.as_of` | 渐进填充产物里**刻意留 None** 的字段；每个都必须说清理由 |
+| `only=(...)` | `merge_incremental_market` | **责任边界**：部分写者只为自己写的字段背责，支持点号路径，一律去掉 `required` |
+| 分支型 | `holding_quotes` / `sector_technical_summary` / `holding_technical_summary` | `available=False` 时后面的字段**全不存在**，契约只能要求普遍字段 |
+
+`DATA_FLOW_CONTRACT.md` 仍是**给人读**的数据流全景；字段级真相以 `contracts.py` 为准。

@@ -184,7 +184,14 @@ class TestWarningsNotErrors:
         assert any("上游措辞可能变了" in w for w in r["warnings"])
 
     def test_undefined_artifact_warns_not_fails(self):
-        r = C.check("holding_quotes", {"anything": 1})
+        """未定义契约的产物**放行 + 告警**，不阻断 —— 铺量是渐进的，
+        不能因为某个产物还没写 spec 就让消费端拿不到结论。
+
+        （原本这条用 `holding_quotes` 当例子，2026-08-07 第三批把它纳入了 ⇒
+        换成仍未纳入的 `mfe_mae`。这类「例子被实现追上」的测试要及时换，
+        否则它会变成断言「某产物永远没有契约」。）
+        """
+        r = C.check("mfe_mae", {"anything": 1})
         assert r["valid"] and "尚未定义契约" in r["warnings"][0]
 
 
@@ -387,3 +394,120 @@ class TestHoldingTechnicalContract:
 
     def test_empty_list_valid(self):
         assert C.check("holding_technical_summary", [])["valid"]
+
+
+class TestHoldingQuotesContract:
+    """⚠️ **分支型**：取不到数的票只有 `{code, name, market, available, reason}`。
+
+    5 个消费者、⛔硬失败链。`price` 由落盘时归一补上
+    （`q["price"] = q.get("close")`）—— 9 个 quote 变体里有 5 个原本只有 `close`，
+    而 **5 个消费者读 `price`**，所以它是契约的一部分而非实现细节；
+    但取不到数的票没有它 ⇒ 不设 required。
+    """
+
+    VALID = {"as_of_date": "2026-08-07", "captured_at": "2026-08-07T17:00:00+08:00",
+             "source": "mootdx", "indices": {}, "breadth": {},
+             "quotes": [{"code": "600000", "name": "甲", "market": "SH", "available": True,
+                         "date": "2026-08-07", "date_verified": False,
+                         "close": 10.5, "price": 10.5, "change_pct": 1.2},
+                        {"code": "920808", "name": "乙", "market": "BJ",
+                         "available": False, "reason": "no data"}]}
+
+    def test_both_branches(self):
+        assert C.check("holding_quotes", self.VALID)["valid"]
+
+    def test_missing_code_rejected(self):
+        bad = {**self.VALID, "quotes": [{"name": "缺code", "available": True}]}
+        assert not C.check("holding_quotes", bad)["valid"]
+
+    def test_empty_as_of_date_rejected(self):
+        """`as_of_date` 是门控判「行情是否当日」的依据，空串等于没有。"""
+        assert not C.check("holding_quotes", {**self.VALID, "as_of_date": ""})["valid"]
+
+    def test_empty_quotes_valid(self):
+        """零持仓时 quotes 为空是正常的。"""
+        assert C.check("holding_quotes", {**self.VALID, "quotes": []})["valid"]
+
+
+class TestSectorTechnicalSummaryContract:
+    """⚠️ **分支型**：`available=False` 的板块技术字段全不存在。
+
+    消费端有 **96 处 `.get("available")`** —— 那是全项目最常被读的分支键，
+    所以契约要保证它是**真布尔**（`"no"` 这种字符串会让所有分支判定翻转）。
+    字段集来自 `theme_tracker_report.py:133`(unavailable) / `:148`(available) 的 AST 提取。
+    """
+
+    UN = {"theme_id": "chip", "theme_name": "半导体", "priority": 1, "available": False,
+          "reason": "无成分股行情", "representative_stocks": [], "semantic_tags": []}
+    AV = {**UN, "available": True, "latest_date": "2026-08-07", "trend_state": "上涨",
+          "close": 1234.5, "stage": "主升/加速", "score": 80, "action_bias": "可关注核心股"}
+
+    @pytest.mark.parametrize("rows", [[AV, UN], [UN], [AV], []])
+    def test_valid_shapes(self, rows):
+        assert C.check("sector_technical_summary", rows)["valid"]
+
+    def test_available_must_be_real_bool(self):
+        """⚠️ 字符串 `"no"` 是**真值** ⇒ 96 处分支判定会全部翻转。"""
+        assert not C.check("sector_technical_summary",
+                           [{**self.UN, "available": "no"}])["valid"]
+
+    def test_missing_theme_id_rejected(self):
+        bad = [{k: v for k, v in self.UN.items() if k != "theme_id"}]
+        assert not C.check("sector_technical_summary", bad)["valid"]
+
+
+class TestReviewStepContracts:
+    EXEC = {"date": "2026-08-07", "status": "ok", "recorded_trade_count": 2,
+            "no_trades_confirmed": False, "premarket_snapshot_available": True,
+            "rows": [], "behavior_checks": {}, "missing": [], "sources": []}
+    ENRICH = {"date": "2026-08-07", "theme_lifecycles": [], "holding_diagnoses": [],
+              "next_day_plan": {"holding_plans": []}, "rule_review": {},
+              "unavailable": [], "permission_rule": "enrichment cannot override "
+              "RiskDecision or ChiefDecision"}
+
+    def test_execution_review_baseline(self):
+        assert C.check("execution_review", self.EXEC)["valid"]
+
+    def test_behavior_checks_and_missing_both_required(self):
+        """⚠️ `behavior_checks`（纪律结论）与 `missing`（数据缺口）**都要在** ——
+        缺一个会让「缺文件」与「违纪」分不开（weekly_review 同类教训）。"""
+        for k in ("behavior_checks", "missing"):
+            bad = {kk: vv for kk, vv in self.EXEC.items() if kk != k}
+            assert not C.check("execution_review", bad)["valid"], k
+
+    def test_trade_count_must_be_finite_number(self):
+        assert not C.check("execution_review",
+                           {**self.EXEC, "recorded_trade_count": float("nan")})["valid"]
+        assert not C.check("execution_review",
+                           {**self.EXEC, "recorded_trade_count": True})["valid"]
+
+    def test_review_enrichment_baseline(self):
+        assert C.check("review_enrichment", self.ENRICH)["valid"]
+
+    def test_exact_quantity_must_stay_none(self):
+        """⚠️ 次日计划**不得给精确数量**：那另需当日行情授权
+        （`runtime_gate.position_gate.allow_precise_quantity`），复盘层无权给出。
+
+        契约允许 null（正是它应有的值），但**给了数字也会通过类型检查** ——
+        所以这里同时断言「生产者写的是 None」这条由
+        `test_review_enrichment.py::test_exact_quantity_always_none` 端到端保证。
+        """
+        plan = {"code": "600000", "priority": "P0", "direction": "清仓",
+                "exact_quantity": None}
+        ok = {**self.ENRICH, "next_day_plan": {"holding_plans": [plan]}}
+        assert C.check("review_enrichment", ok)["valid"]
+        # 缺这个键则拒收 —— 不能靠「没写」来表达「不给数量」
+        bad = {**self.ENRICH, "next_day_plan": {"holding_plans": [
+            {k: v for k, v in plan.items() if k != "exact_quantity"}]}}
+        assert not C.check("review_enrichment", bad)["valid"]
+
+    def test_plan_priority_domain(self):
+        bad = {**self.ENRICH, "next_day_plan": {"holding_plans": [
+            {"code": "600000", "priority": "高", "direction": "清仓",
+             "exact_quantity": None}]}}
+        assert not C.check("review_enrichment", bad)["valid"], "计划用 P0-P3，不是高/中/低"
+
+    def test_permission_rule_required(self):
+        """⚠️ 复盘层是**解释**不是裁决 —— 这句必须在产物里。"""
+        bad = {k: v for k, v in self.ENRICH.items() if k != "permission_rule"}
+        assert not C.check("review_enrichment", bad)["valid"]

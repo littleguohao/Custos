@@ -18,6 +18,7 @@ if str(TOOLS_DIR) not in sys.path:
 from paths import BASE  # noqa: E402
 from paths import read_json as load  # noqa: E402
 from code_utils import bare_code as bare  # noqa: E402
+from contracts import require  # noqa: E402
 
 DATA = BASE / "01_data"
 LOG = BASE / "06_logs"
@@ -101,6 +102,9 @@ def main():
     }
     out = DATA / "review_steps" / f"{day}_execution_review.json"
     out.parent.mkdir(parents=True, exist_ok=True)
+    # ⚠️ 落盘前校验：⛔硬失败链。`behavior_checks`（纪律结论）与 `missing`
+    # （数据缺口）必须都在 —— 混淆会让「缺文件」看起来像「违纪」。
+    require("execution_review", result)
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
     print(out)
 

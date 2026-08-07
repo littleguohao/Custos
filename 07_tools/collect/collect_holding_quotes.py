@@ -54,6 +54,7 @@ if str(_TOOLS) not in sys.path:
 from paths import BASE, TDX_ROOT, cn_today, cn_now  # noqa: E402
 from code_utils import norm_code, fnum as _fnum  # noqa: E402
 from code_utils import market_of  # noqa: E402
+from contracts import require  # noqa: E402
 import tq_http  # noqa: E402
 import online_quotes  # noqa: E402
 
@@ -519,6 +520,9 @@ def main(argv=None) -> int:
     }
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    # ⚠️ 落盘前校验：5 个消费者、⛔硬失败链。分支型 —— 取不到数的票
+    # 只有 code/name/market/available/reason，所以只有普遍字段进契约。
+    require("holding_quotes", output)
     out_path.write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
 
     ok = sum(1 for q in holding_quotes if q.get("available"))

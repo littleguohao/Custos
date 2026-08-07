@@ -14,6 +14,7 @@ if str(TOOLS_DIR) not in sys.path:
 from paths import BASE  # noqa: E402
 from paths import read_json as load  # noqa: E402
 from code_utils import bare_code as bare  # noqa: E402
+from contracts import require  # noqa: E402
 
 DATA = BASE / "01_data"
 
@@ -131,6 +132,10 @@ def main():
     }
     out = DATA / "review_steps" / f"{day}_review_enrichment.json"
     out.parent.mkdir(parents=True, exist_ok=True)
+    # ⚠️ 落盘前校验：⛔硬失败链。钉两条：`exact_quantity` **恒为 None**
+    # （精确减仓量另需当日行情授权，复盘层无权给出）、
+    # `permission_rule` 必须在（复盘层是解释不是裁决）。
+    require("review_enrichment", result)
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
     print(out)
 

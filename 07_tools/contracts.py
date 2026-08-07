@@ -46,11 +46,26 @@
         这类产物里有**刻意留 None** 的字段（用 `nullable`），
         每个都必须在 spec 里说清为什么。
 
-## 只覆盖钱的路径
+## 覆盖范围（按**消费者数量**与是否在硬失败链上排的优先级）
 
-四个产物：`runtime_gate`（权限总闸）、`risk_decision`（风控否决）、
-`chief_decision`（最终交易计划）、`b1_holding_state`（持仓动作）。
-其余 15 种产物暂不纳入 —— 先在最贵的路径上验证这套机制的成本与收益。
+    钱的路径（第一批）
+      runtime_gate               9 消费者  ⛔  权限总闸
+      chief_decision             7 消费者  ⛔  最终交易计划
+      risk_decision              6 消费者  ⛔  风控否决
+      b1_holding_state           3 消费者  ⛔  持仓动作
+    扇出最大（第二批）
+      market_timing_input       19 消费者  ⛔  渐进填充，12 个读 amv_0
+      holding_technical_summary 11 消费者  ⛔  分支型
+      sector_state               6 消费者      score 的 NaN 曾致静默降级
+    硬失败链其余（第三批）
+      holding_quotes             5 消费者  ⛔  分支型
+      sector_technical_summary   3 消费者  ⛔  96 处读 available
+      execution_review           2 消费者  ⛔
+      review_enrichment          1 消费者  ⛔
+
+仍未纳入的：`stock_pool` / `final_review` / `mfe_mae` / `fund_flow_rank` /
+`holding_review` / `formula_hits` / `candidates_enriched` / `rss_*` /
+`postclose_news_digest` —— 都不在硬失败链上，按需再加。
 """
 from __future__ import annotations
 
@@ -313,6 +328,82 @@ SPECS: dict[str, dict] = {
         },
     },
 
+    # collect_holding_quotes.main —— 5 个消费者，⛔ 硬失败链
+    # ⚠️ **分支型**：取不到数的票只有 `{code, name, market, available: False, reason}`，
+    # 所以只有 `code`/`name`/`available` 是普遍字段。
+    "holding_quotes": {
+        "kind": "object",
+        "fields": {
+            "as_of_date": {"type": str, "required": True, "non_empty": True},
+            "captured_at": {"type": str, "required": True, "non_empty": True},
+            "source": {"type": str, "required": True, "non_empty": True},
+            "quotes": {"type": list, "required": True, "items": {
+                "code": {"type": str, "required": True, "non_empty": True},
+                "available": {"type": bool, "required": True},
+                # `price` 由落盘时归一补上（`q["price"] = q.get("close")`）——
+                # 5 个 quote 变体里有 5 个原本只有 close。**5 个消费者读 price**，
+                # 所以它是契约的一部分，不是实现细节。取不到数的票没有它 ⇒ 非必填。
+            }},
+            "indices": {"type": dict, "required": True},
+            "breadth": {"type": dict, "required": True},
+        },
+    },
+    # theme_tracker_report.build_sector_summary —— 3 个消费者，⛔ 硬失败链
+    # ⚠️ **分支型**：`available=False` 的板块只有
+    # `{theme_id, theme_name, priority, available, reason, representative_stocks,
+    #   semantic_tags}`，技术字段全不存在。
+    # 消费端有 **96 处 `.get("available")`** —— 这个布尔是全项目最常被读的分支键。
+    "sector_technical_summary": {
+        "kind": "array",
+        "items": {
+            "theme_id": {"type": str, "required": True, "non_empty": True},
+            "theme_name": {"type": str, "required": True, "non_empty": True},
+            "available": {"type": bool, "required": True},
+        },
+    },
+    # execution_review.main —— 2 个消费者，⛔ 硬失败链
+    "execution_review": {
+        "kind": "object",
+        "fields": {
+            "date": {"type": str, "required": True, "non_empty": True},
+            "status": {"type": str, "required": True, "non_empty": True},
+            "recorded_trade_count": {"type": (int, float), "required": True, "finite": True},
+            "no_trades_confirmed": {"type": bool, "required": True},
+            "premarket_snapshot_available": {"type": bool, "required": True},
+            "rows": {"type": list, "required": True},
+            # ⚠️ `behavior_checks` 是纪律核查结论，`missing` 是数据缺口清单 ——
+            # 两者混淆会让「缺文件」看起来像「违纪」（见 weekly_review 同类教训）。
+            "behavior_checks": {"type": dict, "required": True},
+            "missing": {"type": list, "required": True},
+            "sources": {"type": list, "required": True},
+        },
+    },
+    # review_enrichment.main —— ⛔ 硬失败链
+    "review_enrichment": {
+        "kind": "object",
+        "fields": {
+            "date": {"type": str, "required": True, "non_empty": True},
+            "theme_lifecycles": {"type": list, "required": True},
+            "holding_diagnoses": {"type": list, "required": True},
+            "next_day_plan": {"type": dict, "required": True, "fields": {
+                "holding_plans": {"type": list, "required": True, "items": {
+                    "code": {"type": str, "required": True, "non_empty": True},
+                    "priority": {"type": str, "required": True, "choices": B1_PRIORITY},
+                    "direction": {"type": str, "required": True, "non_empty": True},
+                    # ⚠️ **必须恒为 None**：精确减仓量另需当日行情授权
+                    # （`runtime_gate.position_gate.allow_precise_quantity`），
+                    # 复盘层无权给出。契约把这条钉死。
+                    "exact_quantity": {"type": (int, float), "required": True,
+                                       "nullable": True, "finite": True},
+                }},
+            }},
+            "rule_review": {"type": dict, "required": True},
+            "unavailable": {"type": list, "required": True},
+            # ⚠️ 复盘层是**解释**不是裁决 —— 这句必须在产物里。
+            "permission_rule": {"type": str, "required": True, "non_empty": True},
+        },
+    },
+
     # b1_holding_state.evaluate —— 落盘是**数组**（每持仓一条）
     "b1_holding_state": {
         "kind": "array",
@@ -397,7 +488,8 @@ def check(name: str, obj: Any, only: tuple[str, ...] | None = None) -> dict[str,
     spec = SPECS.get(name)
     if spec is None:
         return {"artifact": name, "valid": True, "errors": [],
-                "warnings": [f"{name}: 尚未定义契约（当前只覆盖钱的路径 4 个产物）"]}
+                "warnings": [f"{name}: 尚未定义契约（已覆盖 {len(SPECS)} 个，"
+                             f"见 SPECS；其余产物暂按无契约处理）"]}
     errors: list[str] = []
     warnings: list[str] = []
     if spec["kind"] == "array":
