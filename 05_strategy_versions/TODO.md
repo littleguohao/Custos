@@ -132,7 +132,7 @@
 |---|---|---|
 | 40 | `daily_pipeline.py` 23%（132 未覆盖）—— 编排核心。主要是 subprocess 串联，测试成本高；关键分支（门控码穿透、stage 失败）已由 `pipeline_kit` 覆盖，剩下的是 stage 清单本身 | 待评估 ROI |
 | 41 | `run_1800.py` 21% / `run_1445.py` 22% / `run_0905.py` 52% —— runner 主流程。同上，stage 编排为主 | 待评估 ROI |
-| 42 | `market_timing/theme_tracker_report.py` 0%（225）、`holding_sector_mapper.py` 0%（130）、`portfolio_review_report.py` 0%（48）、`wechat_summary.py` 0%（23）—— **报告生成层整片零覆盖**。先判定哪些还在跑（`daily_pipeline` 的 stage 列表里有它们）| 待补 |
+| 42 | **报告生成层零覆盖（部分已补）**：✅ `portfolio_review_report` 0→96%（当场抓出 state 变量覆盖 bug）、✅ `execution_review` 0→97%。剩 `theme_tracker_report` **0%（225 语句，⛔硬失败 stage）**、`holding_sector_mapper` 0%（130，非硬失败）、`wechat_summary` 0%（23）、`chief_decision_report` 19%（58，⛔硬失败）| 待补（theme_tracker 最要紧）|
 | 43 | `close_review/` 多个文件低覆盖：`final_close_review.py` 19%（164）、`execution_review.py` 0%（63）、`review_core.py` 51%（134）、`review_enrichment.py` 32% | 下一批 review 时一起 |
 | 44 | 研究脚本低覆盖（`adjust_diagnostic` 21% / `analyze_winner_features` 17% / `compare_signal_sets` 0% / `scan_signal_backtest` 0% / `m2_migrate_fingerprint` 0%）—— 风险最低，但先判定哪些已被取代可删 | 先判存废 |
 
