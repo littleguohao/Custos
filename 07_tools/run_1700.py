@@ -131,7 +131,7 @@ def main(argv=None) -> int:
     #     不能无条件报 [OK]:脚本对每只持仓 fail-closed(台账无未平仓记录/K线未覆盖入场日
     #     都不出数),全员不出数时它退 2 并把摘要行以 [WARN] 开头。这里回显该摘要行,
     #     否则"0/5 出数"在 runner 输出里长得和"5/5 出数"一模一样。
-    r = _run_stage(["uv", "run", "python", str(TOOLS / "analysis" / "calc_mfe_mae.py"), "--date", target],
+    r = _run_stage(["uv", "run", "python", str(TOOLS / "close_review" / "calc_mfe_mae.py"), "--date", target],
                    "calc_mfe_mae", note="best-effort，失败不中断")
     tail = _last_line(r["out"])
     if not r["ok"]:

@@ -675,7 +675,7 @@ class TestCalendarCache:
 
 class TestBatchHoldingTechnicalCache:
     def test_analysis_computed_in_process_and_cached(self, tmp_path, monkeypatch):
-        from market_timing import batch_holding_technical as bht
+        from holdings import batch_holding_technical as bht
         bht.clear_analysis_cache()
         calls: list[str] = []
 
@@ -693,7 +693,7 @@ class TestBatchHoldingTechnicalCache:
         assert calls == ["600000", "000001"], "同一代码重复持仓不该重复计算"
 
     def test_no_subprocess_fork_per_holding(self, tmp_path, monkeypatch):
-        from market_timing import batch_holding_technical as bht
+        from holdings import batch_holding_technical as bht
         bht.clear_analysis_cache()
         monkeypatch.setattr(bht.subprocess, "run",
                             lambda *a, **k: (_ for _ in ()).throw(
@@ -705,7 +705,7 @@ class TestBatchHoldingTechnicalCache:
         assert rows[0]["technical_available"] is True
 
     def test_analysis_error_degrades_per_code(self, tmp_path, monkeypatch):
-        from market_timing import batch_holding_technical as bht
+        from holdings import batch_holding_technical as bht
         bht.clear_analysis_cache()
         monkeypatch.setattr(bht, "analyze_code",
                             lambda code, name: (_ for _ in ()).throw(RuntimeError("bad kline")))

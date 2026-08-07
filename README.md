@@ -110,17 +110,29 @@ strategy_team/
 │   │   ├── collect_holding_quotes.py    # 持仓行情（mootdx）
 │   │   ├── collect_incremental_market.py # 增量市场数据
 │   │   ├── collect_fund_flow.py         # 资金流向（东方财富）
+│   │   ├── collect_intraday_snapshot.py # 14:45 盘中快照（2026-08-07 从 market_timing 移来）
 │   │   └── online_quotes.py             # 在线报价（纯库，无 __main__）
-│   ├── analysis/                    # **交易分析**
-│   │   ├── analyze_trades.py            # 台账统计
-│   │   └── calc_mfe_mae.py              # MFE/MAE 计算
+│   ├── holdings/                    # **持仓链**（2026-08-07 从 market_timing 拆出）
+│   │   │  # 持仓状态与择时是不同的事：找「持仓状态机」不该去 market_timing 找
+│   │   ├── batch_holding_technical.py   # 持仓技术面批算
+│   │   ├── b1_holding_state.py          # B1-holding-v1 契约
+│   │   ├── portfolio_review_report.py   # 持仓复盘
+│   │   └── holding_sector_mapper.py     # 持仓 → 板块映射
 │   ├── trading_calendar.py          # 交易日历查询
 │   ├── runtime_gate.py              # 运行门控
 │   ├── close_review/                # 尾盘+盘后复盘
 │   ├── market_timing/               # 市场择时、B1 状态
 │   ├── news/                        # RSS 采集与过滤
 │   ├── screening/                   # 每日选股链（公式初筛→充实→打分→表格）**只放生产链**
-│   ├── research/                    # 回测/扫描/参数 sweep（2026-08-07 从 screening 拆出）
+│   ├── research/                    # 回测/扫描/诊断（2026-08-07 从 screening 拆出）
+│   │   │  # **统一入口**：uv run python 07_tools/research/__main__.py（列出全部工具+状态）
+│   │   │  # 刻意不合并成一个脚本：m2_stop_sweep / adjust_diagnostic 靠 subprocess
+│   │   │  # 隔离 backtest_factors 的内存（它常被 OOM Kill）
+│   │   ├── __main__.py                  # 注册表 + 分发；stale 状态代码级可见
+│   │   ├── backtest_factors.py          # 引擎：因子走查回测（11 个模式开关）
+│   │   ├── launch_point_study.py        # 引擎：起涨点研究（**17 个**模式开关）
+│   │   ├── m2_stop_sweep.py             # 驱动：参数扫描
+│   │   └── ...                          # 其余 10 个见入口列表
 │   │   # 依赖方向只许 research → screening；反向由 tests/test_architecture_layers.py 强制
 │   ├── contracts.py                 # **可执行**产物 schema（钱的路径 4 个产物，生产者落盘前 require）
 │   ├── s_data.py                    # qlib/CSV 只读 loader（数据层，2026-08-07 从 screening 移来）

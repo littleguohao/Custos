@@ -23,7 +23,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 for _p in ("07_tools", "07_tools/market_timing"):
     sys.path.insert(0, str(ROOT / _p))
 
-from market_timing import b1_holding_state as bh  # noqa: E402
+from holdings import b1_holding_state as bh  # noqa: E402
 
 
 def _row(**kw):

@@ -9,7 +9,7 @@
 输入为 trade-sim 的 --out JSON(含逐笔 trades,即不带 --summary-only)。纯分析,绝不 raise。
 
 用法::
-    uv run python 07_tools/screening/sector_mainstream.py --trades 06_logs/x.json [--top-k 10]
+    uv run python 07_tools/factors/sector_mainstream.py --trades 06_logs/x.json [--top-k 10]
 """
 from __future__ import annotations
 

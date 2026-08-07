@@ -86,7 +86,7 @@ def main(argv=None) -> int:
     # 2a. Intraday market snapshot via TQ-Local HTTP (best-effort, WARN on failure)
     s_started = _now_iso()
     s_t0 = time.time()
-    r = _stage(["uv", "run", "python", str(TOOLS / "market_timing" / "collect_intraday_snapshot.py"),
+    r = _stage(["uv", "run", "python", str(TOOLS / "collect" / "collect_intraday_snapshot.py"),
                 "--date", target], "collect_intraday_snapshot")
     stages_log.append(_log_stage("collect_intraday_snapshot", r, s_started, _now_iso(), time.time() - s_t0,
                                  note="best-effort，失败不中断"))

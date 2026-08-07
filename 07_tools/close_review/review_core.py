@@ -10,7 +10,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from market_timing.b1_holding_state import evaluate as evaluate_b1_holding
+from holdings.b1_holding_state import evaluate as evaluate_b1_holding
 
 try:
     from .holding_bbi import bbi_basis, intraday_bbi_basis

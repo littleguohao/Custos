@@ -32,9 +32,9 @@
 - **短超时**：默认 15s，避免探针自己卡死在一个挂掉的服务上。
 
 用法：
-    uv run python 07_tools/research/probe_data_sources.py                # 全部
-    uv run python 07_tools/research/probe_data_sources.py --only tq      # 只探 TQ
-    uv run python 07_tools/research/probe_data_sources.py --repeat 5     # 每项跑 5 次
+    uv run python 07_tools/local_tdx/probe_data_sources.py                # 全部
+    uv run python 07_tools/local_tdx/probe_data_sources.py --only tq      # 只探 TQ
+    uv run python 07_tools/local_tdx/probe_data_sources.py --repeat 5     # 每项跑 5 次
 """
 from __future__ import annotations
 

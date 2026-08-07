@@ -134,7 +134,7 @@
 | 41 | `run_1800.py` 21% / `run_1445.py` 22% / `run_0905.py` 52% —— runner 主流程。同上，stage 编排为主 | 待评估 ROI |
 | 42 | **报告生成层零覆盖（部分已补）**：✅ `portfolio_review_report` 0→96%（当场抓出 state 变量覆盖 bug）、✅ `execution_review` 0→97%。剩 `theme_tracker_report` **0%（225 语句，⛔硬失败 stage）**、`holding_sector_mapper` 0%（130，非硬失败）、`wechat_summary` 0%（23）、`chief_decision_report` 19%（58，⛔硬失败）| 待补（theme_tracker 最要紧）|
 | 43 | `close_review/` 低覆盖（部分已补）：✅ `execution_review` 0→97%。剩 `final_close_review.py` 19%（164）、`review_core.py` 51%（134）、`review_enrichment.py` 32%（45，⛔硬失败）| 待补 |
-| 44 | 研究脚本低覆盖（`adjust_diagnostic` 21% / `analyze_winner_features` 17% / `compare_signal_sets` 0% / `scan_signal_backtest` 0% / `m2_migrate_fingerprint` 0%）—— 风险最低，但先判定哪些已被取代可删 | 先判存废 |
+| 44 | **研究脚本存废**（部分推进）：2026-08-07 建了统一入口 `07_tools/research/__main__.py` 与注册表，**3 个覆盖率 0% 的已标 `stale`** 并在运行时打警告：`compare_signal_sets` / `scan_signal_backtest` / `m2_migrate_fingerprint`（后者是一次性迁移脚本，大概率可删）。留在表里而不是删掉，是因为「不确定」本身要可见。⇒ **需 owner 逐个定：删 / 转正 / 继续留**。`tests/test_research_entry.py` 钉住了这三个的 stale 状态，定案后要同步 | 待 owner |
 
 | 45 | ⚠️ **`market_timing_scorer.is_stale` 是 fail-open**：`return bool(day and as_of) and as_of != day` —— **缺 `as_of` 时返回 False**（当成新鲜），于是没写 `as_of` 的 section 拿当日满分。与仓库别处的 fail-closed 原则相反（`runtime_gate._QUALITY_PASS` 注释：「风控组件的未知状态必须等于阻断」）。上游已缓解（`merge_incremental_market` 必须写 as_of），但判据本身仍是 fail-open。改成 fail-closed 会降低评分、改变 live 择时行为 ⇒ **需 owner 定**。测试已锁住现状 | **需 owner 拍板** |
 

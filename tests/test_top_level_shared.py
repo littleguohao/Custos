@@ -221,8 +221,11 @@ class TestMovedScriptsRunAsMain:
         "collect/collect_holding_quotes.py",
         "collect/collect_incremental_market.py",
         "collect/collect_fund_flow.py",
-        "analysis/analyze_trades.py",
-        "analysis/calc_mfe_mae.py",
+        # 2026-08-07 二次搬迁：analyze_trades → research/（手工工具）、
+        # calc_mfe_mae → close_review/（17:00 链的一步，且已依赖 weekly_review）。
+        # `analysis/` 因此空掉并删除 —— 一个只剩单文件的目录不值得留。
+        "research/analyze_trades.py",
+        "close_review/calc_mfe_mae.py",
     ]
     # online_quotes.py 不在列：它没有 main()/`if __name__`，是纯库模块，
     # 由同目录的 collect_holding_quotes 导入（后者已铺 sys.path）。

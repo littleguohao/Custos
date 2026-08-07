@@ -4,7 +4,7 @@ r"""Unified stock-code normalization helpers for strategy_team.
 Consolidates the four divergent code-normalization implementations found in
 07_tools/trades/incremental_ledger.py, 07_tools/trades/standardize_trades.py,
 07_tools/market_timing/technical_monitor.py and
-07_tools/market_timing/holding_sector_mapper.py.
+07_tools/holdings/holding_sector_mapper.py.
 
 Semantics are locked by tests/test_pipeline_kit.py.
 """

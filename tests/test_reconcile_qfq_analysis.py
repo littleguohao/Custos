@@ -21,7 +21,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 for _p in ("07_tools", "07_tools/local_tdx"):
     sys.path.insert(0, str(ROOT / _p))
 
-from local_tdx import reconcile_qfq as R  # noqa: E402
+from research import reconcile_qfq as R  # noqa: E402
 
 
 def _series(n=200, start="2021-09-01"):

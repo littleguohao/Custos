@@ -38,7 +38,11 @@ BASE_MODULES = {"paths.py", "code_utils.py", "indicators.py", "fmt.py",
 LAYER_OF_DIR = {
     "local_tdx": 1, "collect": 1, "news": 1,
     "factors": 2, "trades": 2,
-    "screening": 3, "market_timing": 3, "close_review": 3, "analysis": 3,
+    "screening": 3, "market_timing": 3, "close_review": 3,
+    # 2026-08-07：`holdings/` 从 market_timing 拆出 —— 持仓状态与择时是不同的事，
+    # 读者找「持仓状态机」不会想到去 market_timing 找。
+    # `analysis/` 同日删除（两个文件各归其位后空了）。
+    "holdings": 3,
     # research/ 在生产链**之上**：回测要跑生产的因子与打分逻辑。
     # 2026-08-07 从 screening/ 拆出（研究代码占了那个目录的 70%）。
     "research": 4,
@@ -219,11 +223,11 @@ class TestContractsLayer:
             "runtime_guards.py": "runtime_gate",
             "generate_risk_and_sectors.py": "risk_decision",
             "market_timing/chief_decision_report.py": "chief_decision",
-            "market_timing/b1_holding_state.py": "b1_holding_state",
+            "holdings/b1_holding_state.py": "b1_holding_state",
             # 2026-08-07 第二批（按消费者数量排的优先级）
             "market_timing/market_timing_collector.py": "market_timing_input",
             "market_timing/merge_incremental_market.py": "market_timing_input",
-            "market_timing/batch_holding_technical.py": "holding_technical_summary",
+            "holdings/batch_holding_technical.py": "holding_technical_summary",
             # 第三批：硬失败链上其余产物
             "collect/collect_holding_quotes.py": "holding_quotes",
             "market_timing/theme_tracker_report.py": "sector_technical_summary",
@@ -232,8 +236,8 @@ class TestContractsLayer:
             # 第四批：硬失败链之外，铺完剩余
             "screening/score_candidates.py": "stock_pool",
             "close_review/final_close_review.py": "final_review",
-            "market_timing/portfolio_review_report.py": "holding_review",
-            "analysis/calc_mfe_mae.py": "mfe_mae",
+            "holdings/portfolio_review_report.py": "holding_review",
+            "close_review/calc_mfe_mae.py": "mfe_mae",
             "collect/collect_fund_flow.py": "fund_flow_rank",
             "screening/formula_screen.py": "formula_hits",
             "screening/enrich_candidates.py": "candidates_enriched",
@@ -241,9 +245,9 @@ class TestContractsLayer:
             "news/rss_filter.py": "rss_candidates",
             "news/postclose_news_digest.py": "postclose_news_digest",
             # 第五批：扫描发现的剩余产物
-            "market_timing/collect_intraday_snapshot.py": "intraday_snapshot",
+            "collect/collect_intraday_snapshot.py": "intraday_snapshot",
             "local_tdx/tq_sector.py": "tq_sector_map",
-            "market_timing/holding_sector_mapper.py": "holding_sector_mapping",
+            "holdings/holding_sector_mapper.py": "holding_sector_mapping",
         }
         for rel, artifact in expect.items():
             src = (TOOLS / rel).read_text(encoding="utf-8")
@@ -320,3 +324,33 @@ class TestContractCoverageOfArtifacts:
             f"这些按日期命名的产物既没有契约、也没登记豁免：{missing}\n"
             "要么在 contracts.SPECS 里建契约，"
             "要么在 contracts.py「第五批」注释块 + 本测试的 EXEMPT 里写明理由")
+
+
+class TestNoStaleScriptPaths:
+    """⚠️ 所有以 **Path 构造 / 字符串**形式引用的 `.py` 路径都必须真实存在。
+
+    2026-08-07 实际漏过一次：把研究脚本从 `screening/` 移到 `research/` 时，
+    替换脚本只匹配字符串路径 `"07_tools/screening/x.py"`，漏了
+    `TOOLS / "screening" / "launch_point_study.py"` 这种 **Path 构造形式**。
+    `--help` 子进程冒烟也抓不到 —— 那个路径只在真正 spawn 子进程时才用到。
+
+    ⇒ 这类「跨文件的脚本路径」必须有可执行检查，靠 grep 和冒烟都不够。
+    """
+
+    def test_all_referenced_script_paths_exist(self):
+        import re
+
+        bad = []
+        for p in sorted(TOOLS.rglob("*.py")):
+            src = p.read_text(encoding="utf-8")
+            # ① Path 构造形式：X / "dir" / "name.py"（允许中间多层）
+            for m in re.finditer(r'/\s*"([a-z_0-9]+)"\s*/\s*"([a-z_0-9]+\.py)"', src):
+                d, name = m.group(1), m.group(2)
+                if not (TOOLS / d / name).exists() and not (ROOT / d / name).exists():
+                    bad.append(f"{p.relative_to(TOOLS)}: {d}/{name}")
+            # ② 字符串路径形式：07_tools/dir/name.py
+            for m in re.finditer(r'07_tools/([a-z_0-9]+)/([a-z_0-9]+\.py)', src):
+                if not (TOOLS / m.group(1) / m.group(2)).exists():
+                    bad.append(f"{p.relative_to(TOOLS)}: 07_tools/{m.group(1)}/{m.group(2)}")
+        assert not bad, ("引用了不存在的脚本路径（移动文件时漏改）：\n  "
+                         + "\n  ".join(sorted(set(bad))))

@@ -12,7 +12,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from local_tdx import reconcile_qfq as R
+from research import reconcile_qfq as R
 
 
 def _series(dates, closes):

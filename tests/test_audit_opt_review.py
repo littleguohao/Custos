@@ -960,13 +960,13 @@ class TestBearRatioZeroDivision:
     """0AMV 记录里没有 >=2020 的样本时 `bear_days / len(days_since_2020)` 直接 ZeroDivisionError。"""
 
     def test_ratio_none_when_no_days(self):
-        from trades import backtest_0amv_bear_regime as bt
+        from research import backtest_0amv_bear_regime as bt
 
         assert bt.safe_ratio_pct(0, 0) is None
         assert bt.safe_ratio_pct(3, 0) is None
 
     def test_ratio_computed_when_days_exist(self):
-        from trades import backtest_0amv_bear_regime as bt
+        from research import backtest_0amv_bear_regime as bt
 
         assert bt.safe_ratio_pct(1, 4) == 25.0
 

@@ -37,7 +37,11 @@ if _FACTORS_DIR not in sys.path:
     sys.path.insert(0, _FACTORS_DIR)   # 因子层：见 factors/__init__.py
 
 
-STUDY = TOOLS / "screening" / "launch_point_study.py"
+# ⚠️ 2026-08-07 修：`launch_point_study` 已随研究脚本从 `screening/` 移到 `research/`，
+# 而这行是用 Path 除法逐段拼出来的（不是一整条字符串字面量路径），
+# 当时的替换脚本只按字符串匹配 ⇒ 漏了它。`--help` 冒烟也抓不到
+# （路径只在真正执行子进程时才用到）。
+STUDY = TOOLS / "research" / "launch_point_study.py"
 QLIB_GAP = ("2020-09-28", "2021-07-30")     # 两 bundle 之间无数据
 QLIB_END = "2026-02-06"                     # qlib 数据末尾
 # 真市值/总股本的历史起点(fetch_market_cap 二分探明)。用市值类特征时须据此再剔窗口。
