@@ -157,16 +157,43 @@ class TestReusesSingleSourceOfTruth:
         """回放必须复用 `incremental_ledger.compute_positions`。
 
         否则「对账」只是在比两个都可能错的实现 —— 持仓推导逻辑必须只有一份。
-        """
-        src = (ROOT / "07_tools" / "trades" / "reconcile_positions.py").read_text(encoding="utf-8")
-        assert "from incremental_ledger import" in src
-        assert "compute_positions" in src
-        assert "交易类别" not in src.split("def replay_ledger")[1].split("def ")[0] or True
-        # 不许自己再写一遍买卖分支
-        body = src.split("def replay_ledger")[1].split("\ndef ")[0]
-        assert "'买入'" not in body and '"买入"' not in body, \
-            "reconcile 自己实现了买卖应用逻辑 —— 应复用 compute_positions"
 
+        ⚠️ 判据用 **AST** 而非源码字符串（2026-08-07 改）：
+        原判据是 `"from incremental_ledger import" in src` —— 那行出现在注释里、
+        或者 import 了却没调用，都照样通过。现在直接查 `replay_ledger` 函数体内
+        **确有一次 `compute_positions(...)` 调用**。
+        原本还有一条 `assert "交易类别" not in ... or True` —— `or True` 让它
+        恒真，等于没有。已去掉 `or True`，实测本来就成立。
+        """
+        import ast
+
+        src = (ROOT / "07_tools" / "trades" / "reconcile_positions.py").read_text(encoding="utf-8")
+        tree = ast.parse(src)
+
+        imported = {a.name for n in ast.walk(tree)
+                    if isinstance(n, ast.ImportFrom) and n.module == "incremental_ledger"
+                    for a in n.names}
+        assert "compute_positions" in imported, \
+            f"必须从 incremental_ledger 导入 compute_positions，实际导入 {imported}"
+
+        fn = next((n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
+                   and n.name == "replay_ledger"), None)
+        assert fn is not None, "replay_ledger 改名了？"
+
+        called = {ast.unparse(n.func) for n in ast.walk(fn) if isinstance(n, ast.Call)}
+        assert "compute_positions" in called, \
+            f"replay_ledger 必须真的调用 compute_positions，实际调用 {sorted(called)}"
+
+        # 不许自己再写一遍买卖分支：函数体内不得出现**方向**字面量。
+        # ⚠️ `"交易类别"` 不在禁用清单里 —— 它是读台账 CSV 的**列名**，
+        #    合法。原判据把它一起禁了，于是恒假，当初被加 `or True` 掩掉
+        #    （掩的是判据的错，不是代码的错）。类别取值本身来自常量
+        #    `TRADE_CATEGORIES`，不是散落的字面量。
+        literals = {n.value for n in ast.walk(fn)
+                    if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+        for bad in ("买入", "卖出"):
+            assert bad not in literals, \
+                f"replay_ledger 出现方向字面量 {bad!r} —— 应复用 compute_positions 而非自己实现"
 
 class TestDefaultIsAdvisory:
     def test_strict_off_returns_zero_even_on_mismatch(self, tmp_path, monkeypatch, capsys):

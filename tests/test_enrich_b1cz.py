@@ -385,12 +385,201 @@ class TestReversalChangeSymmetric:
         assert not (lo <= 2.1 <= hi)
         assert lo == -2.0 and hi == 2.0
 
-    def test_judgment_uses_asymmetric_bounds(self):
-        """判定代码必须用新常量，不能还在用 abs(chg) <= 2.0。"""
+    def test_judgment_reads_the_shared_source(self):
+        """判定必须走 `b1_thresholds`（L0 唯一来源），不得本地重写比较式。
+
+        ⚠️ 原判据是
+        `assert "REVERSAL_CHANGE_MIN_PCT" in inspect.getsource(ec.compute_metrics)`
+        —— 常量名出现在**注释**里也算通过，而且它验不了「可配置」（owner 明确要求）。
+        2026-08-07 阈值收敛到 `b1_thresholds` 后判定式变成 `change_in_range(...)`，
+        那条断言直接假失败 —— 语义完全没变。改为 AST 查真实调用。
+        """
+        import ast as _ast
         import inspect
 
-        import enrich_candidates as ec
-        src = inspect.getsource(ec.compute_metrics)
-        assert "REVERSAL_CHANGE_MIN_PCT" in src and "REVERSAL_CHANGE_MAX_PCT" in src
-        # 对称口径下用 MIN/MAX 派生判定（而非 abs），保持与不对称期一致的写法
-        assert "REVERSAL_CHANGE_MIN_PCT <= change_pct <= REVERSAL_CHANGE_MAX_PCT" in src
+        tree = _ast.parse(inspect.getsource(ec.compute_metrics))
+        called = {_ast.unparse(n.func) for n in _ast.walk(tree) if isinstance(n, _ast.Call)}
+        assert "change_in_range" in called, \
+            f"必须调用 b1_thresholds.change_in_range，实际调用 {sorted(called)[:12]}"
+        assert ec.change_in_range is __import__("b1_thresholds").change_in_range, \
+            "必须是同一个函数对象，不能本地再实现一份"
+
+
+class TestReversalKBoundaryBehavior:
+    """⚠️ 反转 K 的收盘区间 **±2% 对称、且可配置** —— 原先只有文本判据。
+
+    改这里之前 `test_judgment_uses_asymmetric_bounds` 断言的是
+    `assert "REVERSAL_CHANGE_MIN_PCT" in inspect.getsource(ec.compute_metrics)`
+    —— 常量名出现在**注释**里也算通过，而且它**验不了「可配置」**
+    （owner 明确要求可配置）。这里改成驱动真实判定看结果。
+    """
+
+    @staticmethod
+    def _reversal_df(change_pct: float):
+        """造一支满足 j_low + 极致缩量 + 小振幅的票，只让收盘涨跌幅可调。
+
+        反转 K 的四个条件里另外三个必须**稳定成立**，否则边界测试测的是别的条件。
+        """
+        # ⚠️ 用**陡降**序列（-0.5/根而非 -0.22/根）：斜率不够时末根 +1.9% 会把 J
+        #    从 4.7 顶到 19.4（>13），`j_low` 变 False ⇒ 上界那两例失败的原因
+        #    根本不是 change_pct 判定。要测某个条件的边界，其余条件必须稳稳成立。
+        #    陡降把近 9 日波幅拉宽，末根 ±2% 在区间里只占一小截，J 维持在 6 以下。
+        closes = [40.0 - i * 0.5 for i in range(60)]
+        # ⚠️ 56 而非 55：后面还要 append 一根，两个数组长度必须一致，
+        #    否则 pandas 直接 ValueError（第一版写 55 就是这么挂的）。
+        vols = [3000.0] * 56 + [2800.0, 2600.0, 2400.0, 2200.0]
+        prev = closes[-1]
+        closes.append(round(prev * (1 + change_pct / 100), 4))
+        vols.append(300.0)                    # 极致缩量
+        last = closes[-1]
+        highs = [c * 1.005 for c in closes]
+        lows = [c * 0.995 for c in closes]
+        # 末根振幅压到 ≤7%（相对前收）
+        highs[-1] = max(last, prev) * 1.005
+        lows[-1] = min(last, prev) * 0.995
+        return make_df(closes, vols=vols, highs=highs, lows=lows)
+
+    @staticmethod
+    def _flag(change_pct, mod=None):
+        """⚠️ 标志位在 `patterns` 子字典里，不在顶层。
+
+        第一版读 `m.get("reversal_k_candidate")` 恒得 None ⇒ 「+2.1% 应为 False」
+        会**空转通过**，只有 `test_preconditions_hold_at_zero_change`
+        （断言 0% 处为 True）才把它揪出来。这就是为什么必须有那条前置断言。
+        """
+        m = (mod or ec).compute_metrics((mod or ec) and
+                                        TestReversalKBoundaryBehavior._reversal_df(change_pct), None)
+        return m["patterns"]["reversal_k_candidate"]
+
+    def test_preconditions_hold_at_zero_change(self):
+        """先确认另外三个条件在 0% 处成立 —— 否则下面的边界断言全是空转。
+
+        ⚠️ 这一条是必须的：如果 j_low 或缩量没成立，`_flag()` 会**恒为 False**，
+        「+2.1% 被拒绝」照样通过，而测试什么都没验。今天已经因为这类空转
+        踩过四次（桩不真 ⇒ 测试静默变 skip）。
+        """
+        assert self._flag(0.0) is True, \
+            "0% 处反转 K 应成立；不成立说明合成数据没满足 j_low/缩量/振幅"
+
+    @pytest.mark.parametrize("chg,expect", [
+        (-2.1, False), (-2.0, True), (-1.9, True),
+        (0.0, True),
+        (1.9, True), (2.0, True), (2.1, False),
+    ])
+    def test_symmetric_bounds_inclusive(self, chg, expect):
+        """±2.0 **含端点**，两侧对称。
+
+        对称性是 owner 2026-08-06 的决定，动因是研究侧
+        `factors/reversal_quality` 一直用对称 ±2%，两边不一致会让
+        「reversal_quality 与 live 的反转 K 不是同一个东西」。
+        """
+        assert self._flag(chg) is expect, f"change_pct={chg} 应为 {expect}"
+
+    def test_bounds_are_configurable_via_env(self, reversal_thresholds):
+        """⚠️ 区间可由 `B1_REVK_CHG_PCT` 配置 —— 但只在**模块导入时**生效。
+
+        常量是模块级 `float(os.environ.get(...))`，运行中改环境变量对已导入的模块
+        无效，必须 reload。这条同时钉住「可配置」与「配置的时机」：
+        改了环境变量却不 reload 就以为改了，是个真实的踩坑姿势。
+        """
+        import b1_thresholds as bt
+
+        assert bt.REVERSAL_CHANGE_MAX_PCT == 2.0, "默认必须对称 ±2%"
+
+        mods = reversal_thresholds(B1_REVK_CHG_PCT="1.0")
+        assert (mods["b1_thresholds"].REVERSAL_CHANGE_MIN_PCT,
+                mods["b1_thresholds"].REVERSAL_CHANGE_MAX_PCT) == (-1.0, 1.0)
+        assert mods["enrich_candidates"].REVERSAL_CHANGE_MAX_PCT == 1.0, "转出的名字要跟着变"
+        # 收紧后 1.5% 应被拒（默认 ±2% 时它通过）
+        assert self._flag(1.5, mod=mods["enrich_candidates"]) is False
+
+
+    def test_min_max_can_be_set_independently(self, reversal_thresholds):
+        """`B1_REVK_CHG_MIN` / `_MAX` 可各自覆盖 —— 留了做不对称实验的口子。
+
+        默认对称，但研究时可能想单独放宽一侧；不测的话这两个变量形同虚设。
+        """
+        mods = reversal_thresholds(B1_REVK_CHG_MIN="-3.5", B1_REVK_CHG_MAX="0.5")
+        for name in ("b1_thresholds", "enrich_candidates"):
+            assert (mods[name].REVERSAL_CHANGE_MIN_PCT,
+                    mods[name].REVERSAL_CHANGE_MAX_PCT) == (-3.5, 0.5), name
+
+
+
+class TestReversalKThresholdSingleSource:
+    """⚠️ 反转 K 阈值的**唯一来源**边界：live 两链跟随配置，研究侧刻意钉死。
+
+    2026-08-07 实测查出的分散：
+
+        screening/enrich_candidates.py      读环境变量（唯一可配置的那份）
+        market_timing/technical_monitor.py  硬编码 -2 <= change_pct <= 2、amp <= 7
+        holdings/b1_holding_state.py        硬编码 j < 13
+        factors/reversal_quality.py         REVK_CHG_PCT = 2.0（刻意钉死）
+
+    后果：owner 2026-08-06 要求「对称 ±2% **且可配置**」，但设
+    `B1_REVK_CHG_PCT=1.0` 只收紧了选股链，14:45/17:00 报告走的持仓链仍按 ±2 判，
+    而 `technical_monitor` 的 `thresholds` 字典还会上报 `[-2.0, 2.0]` 当作
+    「当前阈值」—— 配置一改它就在谎报。
+    """
+
+    def test_live_chains_share_one_source(self, reversal_thresholds):
+        """选股链与持仓链读的必须是同一个模块对象。
+
+        ⚠️ 用 `reversal_thresholds` fixture 先把整条链按依赖顺序刷新 ——
+        直接比 `is` 会受**前序测试**影响：`importlib.reload(b1_thresholds)`
+        造出新的函数对象，而 `enrich_candidates.change_in_range` 仍绑在旧对象上。
+        2026-08-07 实测：单文件跑通过、全量跑失败，正是这个顺序污染。
+        """
+        mods = reversal_thresholds()
+        bt = mods["b1_thresholds"]
+        assert mods["technical_monitor"].change_in_range is bt.change_in_range
+        assert mods["enrich_candidates"].change_in_range is bt.change_in_range
+        assert mods["technical_monitor"].REVERSAL_AMPLITUDE_PCT == bt.REVERSAL_AMPLITUDE_PCT
+        assert mods["b1_holding_state"].J_LOW_THRESHOLD == bt.J_LOW_THRESHOLD
+
+
+    def test_env_override_reaches_both_live_chains(self, reversal_thresholds):
+        """⚠️ 覆盖环境变量后**两条链一起变** —— 这是 2026-08-07 之前不成立的那条。"""
+        mods = reversal_thresholds(B1_REVK_CHG_PCT="1.0")
+        assert mods["b1_thresholds"].REVERSAL_CHANGE_MAX_PCT == 1.0
+        assert mods["enrich_candidates"].REVERSAL_CHANGE_MAX_PCT == 1.0, "选股链没跟上"
+        assert mods["technical_monitor"].change_in_range(1.5) is False, \
+            "持仓链没跟上（原先就是这里漏了）"
+
+
+    def test_research_factor_deliberately_pinned(self):
+        """⚠️ 研究因子**不跟随**环境变量 —— 这是**有意的**，不是漏改。
+
+        `factors/reversal_quality` 的阈值钉死才能复现既有回测数字
+        （R2 P1 重跑清单依赖那些数字）。若哪天决定让它跟随，
+        改的同时必须作废并重跑相关回测。
+        """
+        import importlib
+        import os
+
+        from factors import reversal_quality as rq
+
+        assert rq.REVK_CHG_PCT == 2.0, "默认值必须与 live 一致（对称 ±2%）"
+        os.environ["B1_REVK_CHG_PCT"] = "3.0"
+        try:
+            r = importlib.reload(rq)
+            assert r.REVK_CHG_PCT == 2.0, \
+                "研究因子跟随了环境变量 —— 会作废已有回测数字，需先重跑 R2"
+        finally:
+            del os.environ["B1_REVK_CHG_PCT"]
+            importlib.reload(rq)
+
+    def test_thresholds_dict_reports_effective_values(self, reversal_thresholds):
+        """⚠️ `technical_monitor` 上报的 `thresholds` 必须是**实际生效值**。
+
+        原先写死 `[-2.0, 2.0]`，环境变量一改就成假话 —— 而这个字典正是下游
+        解释「为什么这支票没标反转 K」的依据。
+        """
+        mods = reversal_thresholds(B1_REVK_CHG_MIN="-1.5", B1_REVK_CHG_MAX="0.5")
+        closes = [40.0 - i * 0.5 for i in range(60)]
+        vols = [3000.0] * 56 + [2800.0, 2600.0, 2400.0, 2200.0]
+        closes.append(round(closes[-1], 4))
+        vols.append(300.0)
+        r = mods["technical_monitor"].analyze(make_df(closes, vols=vols), "600000")
+        got = r["price_volume"]["thresholds"]["reversal_close_change_pct"]
+        assert got == [-1.5, 0.5], f"上报的阈值不是生效值：{got}"

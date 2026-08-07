@@ -7,12 +7,18 @@
 🟡 **待优化，且是稳健的负预测**：特征归因 train −3.42% / test −2.75%（Q4−Q1）
 —— **越「教科书」越差**。正向择优劣于随机（+33% vs baseline +43%）。
 
-⚠️⚠️ **口径与 live 不一致（2026-08-06 查出）**：本因子的「小实体」判据是
-`abs(涨跌幅) <= 2.0`（**对称**），而 live 的反转K是
-`-2.0% ~ +1.8%`（**不对称**，B1_w.pdf 纠偏后的口径）。
-⇒ **本因子与 live 的反转K不是同一个东西**，而 R2 的结论建立在本因子上。
-抽取时**保持原口径不动**（改了会作废已有回测数字，而那些数字已在重跑清单里），
-已登记 TODO 待 owner 定：研究口径该不该跟 live 对齐。
+✅ **口径已与 live 默认值一致**（owner 2026-08-06 把 live 改回对称 ±2%）。
+本因子的「小实体」判据是 `abs(涨跌幅) <= 2.0`，live 是 `-2.0% ~ +2.0%` —— 同一区间。
+
+⚠️ 但**不是同一个来源**：live 两链（选股 + 持仓）2026-08-07 收敛到
+`b1_thresholds`（L0）并跟随 `B1_REVK_*` 环境变量；本因子的常量**刻意钉死**，
+不跟随。理由是钉死才能复现既有回测数字（R2 P1 重跑清单依赖它们）。
+⇒ 设了环境变量之后，**只有 live 会变，本因子不变**。这是有意的边界，
+由 `tests/test_enrich_b1cz.py::TestReversalKThresholdSingleSource` 钉住。
+若哪天决定让本因子跟随，改的同时必须作废并重跑相关回测。
+
+⚠️ 此处原写「本因子与 live 的反转K不是同一个东西（live 是 -2.0~+1.8 不对称）」——
+owner 08-06 统一后已过时，2026-08-07 订正。那条 TODO 也已闭环。
 """
 from __future__ import annotations
 
@@ -20,11 +26,12 @@ from typing import Any, Optional
 
 import pandas as pd
 
-# ⚠️ 阈值**保持与 backtest_factors 原值一致**（对称 ±2%），不跟 live 的不对称口径对齐。
-# 改了会作废已有回测数字，而那些数字已在重跑清单里（R2 P1）。已登记 TODO 待 owner 定。
+# ⚠️ 阈值**保持与 backtest_factors 原值一致**（对称 ±2%）并**刻意不读环境变量** ——
+# 改了会作废已有回测数字，而那些数字已在重跑清单里（R2 P1）。
+# live 侧的同名阈值在 `07_tools/b1_thresholds.py`，可配置；两者默认值相同。
 REVK_VOL_RATIO = 0.5        # 量比 <= 50%
 REVK_VOL_PCTILE = 0.10      # 20 日量分位 <= 10%
-REVK_CHG_PCT = 2.0          # 🔴 对称；live 是 -2.0 ~ +1.8（不对称）
+REVK_CHG_PCT = 2.0          # 对称，与 live 默认值同；刻意不跟随 B1_REVK_CHG_PCT
 REVK_AMP_PCT = 7.0          # 振幅 <= 7%
 
 FACTOR: dict[str, Any] = {

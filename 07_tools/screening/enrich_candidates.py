@@ -138,12 +138,16 @@ RS_STRONG_PP = 3.0           # 20日相对强度 >= +3pp
 #    MIN=-2.0 / MAX=1.8，并同步 01_swing_rules.md §三.3 注与本文件的判定式。
 # 📐 **可配置**（owner 2026-08-06）：默认对称 ±2%，可用环境变量覆盖以验证不同区间的效果。
 #    `B1_REVK_CHG_PCT=2.5` → ±2.5%；`B1_REVK_CHG_MIN=-2 B1_REVK_CHG_MAX=1.8` → 回到不对称。
-#    ⚠️ 覆盖值会**同时**影响 live 选股与回测（两边读同一处），这是有意的 ——
-#    口径不同就没法拿回测结论解释 live（2026-08-06 查出的 REVK_* 分叉正是这么来的）。
-REVERSAL_CHANGE_PCT = float(os.environ.get("B1_REVK_CHG_PCT", "2.0"))
-REVERSAL_CHANGE_MIN_PCT = float(os.environ.get("B1_REVK_CHG_MIN", -REVERSAL_CHANGE_PCT))
-REVERSAL_CHANGE_MAX_PCT = float(os.environ.get("B1_REVK_CHG_MAX", REVERSAL_CHANGE_PCT))
-REVERSAL_AMPLITUDE_PCT = 7.0
+#    ⚠️ 覆盖值影响 **live 两条链**（选股链 + 持仓链，2026-08-07 收敛到 b1_thresholds），
+#    但**不影响研究侧** `factors/reversal_quality` —— 那份刻意钉死以复现既有回测数字
+#    （R2 P1 重跑清单依赖它们）。两边默认值相同，覆盖时只有 live 会变。
+#    ⚠️ 原写「两边读同一处」，实测不成立（只是默认值恰好相同），2026-08-07 订正。
+# ⚠️ 阈值已收敛到 `b1_thresholds`（L0）—— 这里只做转出，不再自己读环境变量。
+#    2026-08-07 实测：原先「可配置」只覆盖本文件（选股链），持仓链
+#    （technical_monitor + b1_holding_state）硬编码 ±2 与 j<13，改 env 后两链分歧。
+from b1_thresholds import (REVERSAL_AMPLITUDE_PCT, REVERSAL_CHANGE_MAX_PCT,  # noqa: E402
+                           REVERSAL_CHANGE_MIN_PCT, REVERSAL_CHANGE_PCT,
+                           change_in_range)
 STOP_LOOKBACK = 10           # 建议止损位：近10日最低价
 
 # 概念标签命中主题所需的最小标签数。默认 1＝历史行为（命中1个语义标签即归入该主题）；
@@ -961,8 +965,7 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
     )
     reversal_k = bool(
         j_low and vol_contraction
-        and change_pct is not None
-        and REVERSAL_CHANGE_MIN_PCT <= change_pct <= REVERSAL_CHANGE_MAX_PCT
+        and change_in_range(change_pct)
         and amplitude_pct is not None and amplitude_pct <= REVERSAL_AMPLITUDE_PCT
     )
     rs_strong = rs_20d is not None and rs_20d >= RS_STRONG_PP

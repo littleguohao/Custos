@@ -229,21 +229,29 @@ class TestReversalKMatchesCode:
         assert "反转了 R16" in doc, "反转材料纠偏必须留痕"
         assert "有意的选择" in doc
 
-    def test_min_max_default_symmetric_and_configurable(self):
+    def test_min_max_default_symmetric_and_configurable(self, reversal_thresholds):
         """默认对称 ±2%，且**可配置**（owner 2026-08-06）。
 
-        阈值改成读环境变量（`B1_REVK_CHG_PCT` / `_MIN` / `_MAX`），
-        用来验证不同区间的效果（待办 #39）。默认值必须仍是对称 ±2%。
+        ⚠️ 判据 2026-08-07 从「源码里有 `os.environ.get("B1_REVK_CHG_PCT", "2.0")`」
+        改成**行为验证** —— 阈值当天收敛到 `b1_thresholds`（L0）之后，
+        `enrich_candidates` 里已经没有那行字面量了，而可配置性完全没变。
+        又一次「查字符串形式而非语义」。
 
-        ⚠️ 覆盖值**同时**影响 live 与回测（两边读同一处）—— 这是有意的：
-        口径不同就没法拿回测结论解释 live，2026-08-06 查出的 REVK_* 分叉正是这么来的。
+        ⚠️ 原 docstring 写「覆盖值**同时**影响 live 与回测（两边读同一处）」——
+        **实测不成立**：`factors/reversal_quality` 有自己的 `REVK_CHG_PCT = 2.0`
+        且刻意不读环境变量（钉死才能复现既有回测数字，R2 P1 重跑清单依赖）。
+        两边只是默认值相同。这条边界由
+        `test_enrich_b1cz.py::TestReversalKThresholdSingleSource` 钉住。
         """
-        code = self._code()
-        assert 'os.environ.get("B1_REVK_CHG_PCT", "2.0")' in code, "默认必须是 2.0"
-        assert 'os.environ.get("B1_REVK_CHG_MIN"' in code
-        assert 'os.environ.get("B1_REVK_CHG_MAX"' in code
-        # 未设环境变量时 MIN/MAX 由 PCT 派生（不是各写一个字面量）
-        assert "-REVERSAL_CHANGE_PCT" in code
+        mods = reversal_thresholds()
+        bt = mods["b1_thresholds"]
+        assert (bt.REVERSAL_CHANGE_MIN_PCT, bt.REVERSAL_CHANGE_MAX_PCT) == (-2.0, 2.0)
+
+        mods = reversal_thresholds(B1_REVK_CHG_PCT="3.0")
+        assert (mods["b1_thresholds"].REVERSAL_CHANGE_MIN_PCT,
+                mods["b1_thresholds"].REVERSAL_CHANGE_MAX_PCT) == (-3.0, 3.0), \
+            "MIN/MAX 必须由 PCT 派生，不是各写一个字面量"
+
 
 class TestKnownIssuesStayVisible:
     """三处待处理问题必须留在索引里，直到被真正解决。

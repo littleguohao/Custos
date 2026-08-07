@@ -38,6 +38,9 @@ from indicators import (bbi_series, kdj_series,  # noqa: E402
 
 from paths import BASE, TDX_ROOT  # noqa: E402
 from code_utils import norm_code, price_limit_pct, split_code  # noqa: E402
+from b1_thresholds import (J_LOW_THRESHOLD, REVERSAL_AMPLITUDE_PCT,  # noqa: E402
+                           REVERSAL_CHANGE_MAX_PCT, REVERSAL_CHANGE_MIN_PCT,
+                           VOL_PCTILE_MAX, VOL_RATIO_MAX, change_in_range)
 
 OUT_DIR = BASE / "01_data" / "market"
 
@@ -137,12 +140,16 @@ def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
     shrink_small_bear = bool(small_bear and volume_ratio_5 is not None and volume_ratio_5 <= 0.8)
     large_bear = bool(change_pct is not None and change_pct <= -4 and close < open_)
     heavy_large_bear = bool(large_bear and volume_ratio_5 is not None and volume_ratio_5 >= 1.5)
+    # `volume_rank20` 是 0~1 的比例，`VOL_PCTILE_MAX` 的单位是 %（10.0）—— 故 /100。
     extreme_shrink = bool(
-        volume_ratio_5 is not None and volume_ratio_5 <= 0.5 and volume_rank20 <= 0.10
+        volume_ratio_5 is not None and volume_ratio_5 <= VOL_RATIO_MAX
+        and volume_rank20 <= VOL_PCTILE_MAX / 100
     )
+    # ⚠️ 阈值来自 `b1_thresholds`（L0 单一来源）—— 原先硬编码 `-2 <= change_pct <= 2`
+    #    与 `amplitude_pct <= 7`，于是 `B1_REVK_*` 只对选股链生效、持仓链无视配置。
     reversal_k_candidate = bool(
-        extreme_shrink and change_pct is not None and -2 <= change_pct <= 2
-        and amplitude_pct is not None and amplitude_pct <= 7
+        extreme_shrink and change_in_range(change_pct)
+        and amplitude_pct is not None and amplitude_pct <= REVERSAL_AMPLITUDE_PCT
     )
 
     # BBI上方连续两根中大阳线判断 (B1第五层止盈)
@@ -195,10 +202,12 @@ def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
             "small_bear_change_pct": [-2.0, 0.0],
             "shrink_volume_ratio_5_max": 0.8,
             "heavy_volume_ratio_5_min": 1.5,
-            "reversal_volume_ratio_5_max": 0.5,
-            "reversal_volume_rank20_pct_max": 10.0,
-            "reversal_close_change_pct": [-2.0, 2.0],
-            "reversal_amplitude_pct_max": 7.0,
+            # ⚠️ 上报**实际生效值**而非字面量 —— 原先写死 [-2.0, 2.0]，
+            #    环境变量一改它就在谎报自己的阈值。
+            "reversal_volume_ratio_5_max": VOL_RATIO_MAX,
+            "reversal_volume_rank20_pct_max": VOL_PCTILE_MAX,
+            "reversal_close_change_pct": [REVERSAL_CHANGE_MIN_PCT, REVERSAL_CHANGE_MAX_PCT],
+            "reversal_amplitude_pct_max": REVERSAL_AMPLITUDE_PCT,
         },
     }
 

@@ -98,14 +98,59 @@ class TestAccumulativeStateUsesAtomic:
         而那行以 `# noqa: E402` 结尾 ⇒ 变成
         `from paths import BASE  # noqa: E402, write_json_atomic`，
         名字进了注释、导入没生效，直到测试报 NameError 才发现。
+
+        ⚠️ **2026-08-07 第三次犯，而这条守卫没抓到** —— 它的字符类是 `[a-z_]`，
+        只认小写。当天被折进注释的是 `LOGS` / `HOLDINGS_DIR` /
+        `MARKET_TIMING, PLANS, SECTORS_DIR`，**全大写**，直接逃过。
+        典型的「守卫过拟合到当初那个实例」：为 `write_json_atomic` 写的正则
+        从没推广到常量名。
+
+        判据已改为**结构性**的：取 `from ... import ...` 行的行尾注释，
+        凡是出现「逗号 + 标识符」就算可疑 —— 不再依赖大小写，
+        也不再依赖注释以 `noqa:` 开头。
         """
         import re
         bad = []
         for p in (ROOT / "07_tools").rglob("*.py"):
-            for i, ln in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
-                if re.search(r"#\s*noqa:\s*E\d+,\s*[a-z_]", ln):
-                    bad.append(f"{p.relative_to(ROOT)}:{i}")
-        assert not bad, f"导入名被塞进 noqa 注释：{bad}"
+            for i, ln in enumerate(p.read_text(encoding="utf-8-sig").splitlines(), 1):
+                if not re.match(r"\s*(from\s+[\w.]+\s+)?import\s", ln):
+                    continue
+                if "#" not in ln:
+                    continue
+                comment = ln.split("#", 1)[1]
+                # noqa 码本身长这样：E402 / F401 / E501,W605 —— 字母+数字，排除掉
+                for tok in re.findall(r",\s*([A-Za-z_][A-Za-z0-9_]*)", comment):
+                    if re.fullmatch(r"[A-Z]\d+", tok):     # E402、F401 这类码
+                        continue
+                    bad.append(f"{p.relative_to(ROOT)}:{i}  可疑名 {tok!r}  →  {ln.strip()}")
+        assert not bad, "导入名被塞进注释（名字进了注释、导入没生效）：\n  " + "\n  ".join(bad)
+
+    def test_noqa_guard_catches_the_2026_08_07_shape(self, tmp_path):
+        """⚠️ 守卫必须能抓到**当天真实发生过的四种形状**（含大写常量）。
+
+        上一版守卫对着这四行全部放行。
+        """
+        import re
+
+        def suspicious(ln: str) -> bool:
+            if not re.match(r"\s*(from\s+[\w.]+\s+)?import\s", ln) or "#" not in ln:
+                return False
+            comment = ln.split("#", 1)[1]
+            return any(not re.fullmatch(r"[A-Z]\d+", t)
+                       for t in re.findall(r",\s*([A-Za-z_][A-Za-z0-9_]*)", comment))
+
+        for ln in ["from paths import BASE  # noqa: E402, LOGS",
+                   "from paths import BASE  # noqa: E402, HOLDINGS_DIR",
+                   "from paths import BASE  # noqa: E402, MARKET_TIMING, PLANS, SECTORS_DIR",
+                   "from paths import BASE  # noqa: E402, PLANS",
+                   "from paths import BASE  # noqa: E402, write_json_atomic"]:
+            assert suspicious(ln), f"守卫漏掉：{ln}"
+        # 合法写法不得误报
+        for ln in ["from paths import BASE, LOGS  # noqa: E402",
+                   "from paths import BASE  # noqa: E402,F401  (照惯例统一入口)",
+                   "import pandas as pd  # type: ignore",
+                   "from x import a, b, c"]:
+            assert not suspicious(ln), f"守卫误报：{ln}"
 
 
 class TestRegimeLockRespectedEverywhere:

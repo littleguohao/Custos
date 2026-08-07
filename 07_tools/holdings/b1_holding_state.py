@@ -21,6 +21,7 @@ from runtime_guards import normalize_regime  # noqa: E402
 
 from paths import BASE  # noqa: E402
 from code_utils import norm_code  # noqa: E402
+from b1_thresholds import J_LOW_THRESHOLD  # noqa: E402
 from code_utils import fnum  # noqa: E402
 from contracts import require  # noqa: E402
 
@@ -113,7 +114,10 @@ def evaluate(row: dict[str, Any], market_regime: str = "未知", price: Any = No
         add("kdj_death_cross", "P2", "动能转弱观察", "日线KDJ死叉，需结合趋势和结构确认")
 
     j = fnum(row.get("daily_j"))
-    reversal = bool(price_volume_current and pv.get("reversal_k_candidate_without_j") and j is not None and j < 13)
+    # ⚠️ `13` 原为硬编码 —— 与 `enrich_candidates.J_LOW_THRESHOLD` 是同一个门槛。
+    #    改一处不改另一处会让选股与持仓对同一支票给出不同的反转 K 结论。
+    reversal = bool(price_volume_current and pv.get("reversal_k_candidate_without_j")
+                    and j is not None and j < J_LOW_THRESHOLD)
     if reversal:
         add("reversal_k_candidate", "P3", "反转K候选观察", "J<13、极致缩量、收盘±2%且振幅<=7%；仍需后续修复确认")
 

@@ -284,7 +284,7 @@ class TestWatchlistAndForbidden:
         md = (plans / "2026-08-07_chief_decision.md").read_text(encoding="utf-8")
         assert "# chief_decision 每日总控交易计划" in md
         assert "| - | 暂无 | - | - | - |" in md, "无买入计划时应有占位行"
-        assert "RiskDecision为强制输入" not in md or True
+        assert "RiskDecision为强制输入" not in md
 
 
 class TestHelpers:

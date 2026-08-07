@@ -34,7 +34,11 @@ BASE_MODULES = {"paths.py", "code_utils.py", "indicators.py", "fmt.py",
                 # `contracts.py` 是产物 schema 的唯一来源，被 L1~L3 的生产者调用。
                 # 它**只依赖 stdlib**（math + typing）—— 一条测试强制这一点，
                 # 因为契约层若依赖别的模块，就可能被它校验的对象反向依赖。
-                "contracts.py"}
+                "contracts.py",
+                # `b1_thresholds.py` 是 B1 反转 K 判定阈值的唯一来源，被 L2/L3 读。
+                # 2026-08-07 建：同一组阈值原先散在 screening/market_timing/holdings
+                # 三个 **L3** 目录里（彼此不能互相 import），只能上提到 L0。
+                "b1_thresholds.py"}
 LAYER_OF_DIR = {
     "local_tdx": 1, "collect": 1, "news": 1,
     "factors": 2, "trades": 2,
