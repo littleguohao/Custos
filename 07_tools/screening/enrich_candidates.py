@@ -13,6 +13,7 @@
   relative_strength_strong：相对强度 >= +3pp。
 - reversal_k_candidate：j_low + volume_contraction + 涨跌幅∈[-2%,+2%]
   + 振幅<=7%，四项同时满足。
+  （以上阈值为默认值，均可经 B1_* 环境变量覆盖 —— 唯一来源 `b1_thresholds`。）
 
 硬排除：名称含 ST、停牌（无当日K线）、上市不足 min_list_days 天、
 risk_decision 高优先级股、北交所（exclude_bj）。已持仓股打 is_holding
@@ -62,18 +63,6 @@ from distribution import detect_distribution  # noqa: E402
 
 
 
-from indicators import j_series as _j_canonical, dks_series  # noqa: E402
-
-def _j_series(df, n: int = 9, m1: int = 3, m2: int = 3):
-    """委托给 `indicators.j_series`。
-
-    `fill_na=50.0` 保留本模块原有行为（数据不足按中性处理）——
-    2026-08-06 收敛 3 份重复实现时**刻意不统一 NaN 策略**：
-    指标语义的改动应单独立项、单独回测，不该搭在重构里。
-    实测本模块用法是 `min()`（跳过 NaN），填 50 只在整段 NaN 时改变结果 ⇒ 当前无影响。
-    """
-    return _j_canonical(df, n=n, m1=m1, m2=m2, fill_na=50.0)
-
 
 from paths import (DATA, RISK_DIR, SCREEN_FORMULA_REGISTRY_FILE, SECTORS_DIR,
                    TRADES_DIR)  # noqa: E402
@@ -83,7 +72,11 @@ import local_tdx_data  # noqa: E402
 import s_shape as s_shape_mod  # noqa: E402
 import financials as financials_mod  # noqa: E402
 import sector_phase as sector_phase_mod  # noqa: E402
-from indicators import bbi_state, ema, kdj, macd, resample, zhixing_state, _infer_price_limit # noqa: E402
+# 死代码清理（2026-08-08）：本地 `_j_series` 包装已删 —— 唯一调用方早已搬走
+# （全项目 grep 确认无引用），本模块的 J 走下方 `kdj`（indicators 共享实现，
+# 内部 fill_na=50，行为不变）；`macd` 导入同步删除（check_macd_technics 自己
+# 用 ema 算 DIF/DEA，从未调用它）。
+from indicators import bbi_state, ema, kdj, resample, zhixing_state, _infer_price_limit # noqa: E402
 from contracts import require  # noqa: E402
 
 SCREENING_DIR = DATA / "screening"
@@ -97,8 +90,12 @@ INDEX_CODE = "999999"  # 上证指数 vipdoc 代码（reader.daily 里 000001 �
 _A_SHARE_RE = re.compile(r"^(60[0-5]|688|00[0-3]|30[0-3])\d{3}$")
 _BJ_PREFIX = ("4", "8", "920")
 
-J_LOW_THRESHOLD = 13.0
-VOL_RATIO_MAX = 0.5          # 量比 <= 50%
+# J 低位/极致缩量三阈值与反转 K 区间同源：`b1_thresholds`（L0，env 可配）。
+# ⚠️ 这里原先本地硬编码同名常量（J_LOW_THRESHOLD=13.0 / VOL_RATIO_MAX=0.5 /
+# VOL_PCTILE_MAX=10.0）：REVERSAL_* 收敛后这三个仍留在本地，设 B1_J_LOW 只改到
+# 持仓链、选股链不动 —— 2026-08-07 补收敛。默认值见 b1_thresholds。
+from b1_thresholds import (J_LOW_THRESHOLD, VOL_PCTILE_MAX,  # noqa: E402
+                           VOL_RATIO_MAX)
 
 # 默认日线加载根数（get_ohlcv_table(count=...)）。它同时是 list_days 的**上界**：
 # 加载器内部 `df.tail(count)`，所以 len(df)==OHLCV_LOAD_BARS 只说明"至少这么多根"，
@@ -124,7 +121,6 @@ def j_below_threshold(j: Any, threshold: float = J_LOW_THRESHOLD) -> bool:
     if not np.isfinite(v):          # NaN / ±inf 均视为不可用
         return False
     return v < threshold
-VOL_PCTILE_MAX = 10.0        # 20日量分位 <= 10%
 RS_STRONG_PP = 3.0           # 20日相对强度 >= +3pp
 # 反转K的收盘涨幅区间：**不对称**（B1_w.pdf「分歧转一致的反转K」与「如何筛选最强壮的
 # B1宝宝」两处都明确写「涨幅为 -2% 到 1.8%」）。此前实现与治理文档都写成对称 ±2%，

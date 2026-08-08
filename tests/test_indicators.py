@@ -91,7 +91,9 @@ class TestNoLocalReimplementation:
     """收敛后不许再有本地实现 —— 那是最常见的回退方式。"""
 
     CASES = [
-        ("screening/enrich_candidates.py", "_j_canonical"),
+        # enrich 的本地 `_j_series` 包装 2026-08-08 已删（死代码）：它的 J 直接走
+        # 共享 `kdj`。marker 从 "_j_canonical" 改为 "kdj" —— 钉的是「不许再长本地实现」。
+        ("screening/enrich_candidates.py", "kdj"),
         ("factors/main_rally_factor.py", "j_series as _j_series"),
         ("factors/b2_surge_factor.py", "_j_canonical"),
         ("research/backtest_factors.py", "bbi_series as _bbi_series"),
@@ -117,10 +119,16 @@ class TestBehaviorPreserved:
     """合并必须**零行为变化**：三个调用方的语义各自保留。"""
 
     def test_enrich_keeps_fill_50(self):
+        """enrich 的 J 仍是 fill-50 口径 —— 本地包装删了，行为不能跟着丢。
+
+        2026-08-08 死代码清理删掉了 enrich 的本地 `_j_series`（无调用方），
+        它的 J 走共享 `kdj()`（内部 `kdj_series(..., fill_na=50.0)`）。
+        """
         import enrich_candidates as E
-        df = _bars(6)
-        assert (np.asarray(E._j_series(df), dtype=float) == 50.0).all(), \
-            "enrich 的 fillna(50) 行为丢了"
+        assert not hasattr(E, "_j_series"), "enrich 又长出了本地 _j_series"
+        assert E.kdj is I.kdj, "enrich 的 J 必须来自共享实现"
+        # fill-50 语义本身：短序列按中性 50 填充（原 enrich 包装的行为）
+        assert (I.j_series(_bars(6), fill_na=50.0) == 50.0).all()
 
     def test_b2_keeps_short_series_guard(self):
         """b2 的 n<12 守卫要留着：返回 None 让调用方知道「数据不足」而非「没信号」。"""
@@ -154,7 +162,8 @@ class TestHoldingStateSharesJWithSelection:
         df = _bars(50, seed=3)
         r = TM.kdj(df)
         assert r.get("available") is not False
-        je = float(np.asarray(E._j_series(df), dtype=float)[-1])
+        # enrich 的本地 `_j_series` 2026-08-08 已删；选股链的 J 就是它导入的共享 `kdj`。
+        je = E.kdj(df)["j"]
         # ⚠️ 容差要匹配 `kdj()` 的 `round(..., 4)` —— 它输出的是给人看的四位数，
         #    不是原始精度。用 1e-9 比会假失败（我第一版就是这么写错的）。
         assert abs(r["j"] - je) < 5e-5, f"持仓状态机 {r['j']} vs 选股链 {je}"

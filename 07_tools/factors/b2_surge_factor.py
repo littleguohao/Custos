@@ -28,7 +28,10 @@ B2 对本项目的用途不止是"多一个入场点"——它是 **B1 是否真
 B1 给出回调买点。这比 b1_dual_factor 里那个简版"放量启动段"更完整（多了穿越 60 日线、
 9 个月新高、点火后量能维持三个维度）。
 
-**全部为可回测因子，未接入选股链。** 阈值均标"待回测"。
+**已接入选股链，但只作描述性证据**（`signal_labels` 出标签落候选表，
+`live_use="evidence_only"`、`stage="release"`）：标注不是交易依据，不驱动分层/gate/排序。
+原先这里写「未接入选股链」，2026-08-08 订正 —— 它**在跑**，只是不作决策。
+阈值均标"待回测"。
 """
 from __future__ import annotations
 
@@ -40,9 +43,10 @@ import numpy as np
 import pandas as pd
 
 _TOOLS = Path(__file__).resolve().parents[1]
-for _p in (str(_TOOLS), str(_TOOLS / "screening"), str(_TOOLS / "market_timing")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+if str(_TOOLS) not in sys.path:
+    sys.path.insert(0, str(_TOOLS))   # indicators 在 07_tools 根
+# 原先的 screening/market_timing 两项已于 2026-08-08 删除：本模块只依赖 07_tools 根
+# （因子层惯例：sys.path 由消费方设置，见 factors/__init__.py）。
 
 from indicators import j_series as _j_canonical  # noqa: E402
 

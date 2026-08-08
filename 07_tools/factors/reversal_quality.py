@@ -40,7 +40,7 @@ FACTOR: dict[str, Any] = {
     "kind": "selector",
     "status": "needs_work",
     "evidence": "00_governance/research/R2_selection_price_volume.md",
-    "note": "稳健负预测；且口径与 live 反转K不一致（对称 vs 不对称）",
+    "note": "稳健负预测；口径已与 live 默认值一致（对称 ±2%），但刻意不跟随 B1_REVK_* env",
     "min_bars": 21,
     "live_use": "none",
     "stage": "debug",

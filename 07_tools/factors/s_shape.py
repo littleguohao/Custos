@@ -42,9 +42,10 @@ FACTOR: dict[str, Any] = {
 
 
 _TOOLS = Path(__file__).resolve().parents[1]
-for _p in (str(_TOOLS), str(_TOOLS / "market_timing")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+if str(_TOOLS) not in sys.path:
+    sys.path.insert(0, str(_TOOLS))   # code_utils / indicators 在 07_tools 根
+# 原先的 market_timing 一项已于 2026-08-08 删除：本模块只依赖 07_tools 根
+# 与同目录（因子层惯例：同目录扁平 import 的路径由消费方设置，见 factors/__init__.py）。
 
 
 from code_utils import price_limit_pct  # noqa: E402

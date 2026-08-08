@@ -32,9 +32,10 @@ FACTOR: dict[str, Any] = {
 
 
 _TOOLS = Path(__file__).resolve().parents[1]
-for _p in (str(_TOOLS), str(_TOOLS / "screening")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+if str(_TOOLS) not in sys.path:
+    sys.path.insert(0, str(_TOOLS))   # indicators 在 07_tools 根；__main__ 段还用 local_tdx
+# 原先的 screening 一项已于 2026-08-08 删除：本模块只依赖 07_tools 根
+# （因子层惯例：sys.path 由消费方设置，见 factors/__init__.py）。
 
 
 from indicators import j_series as _j_canonical  # noqa: E402

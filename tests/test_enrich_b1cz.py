@@ -579,6 +579,39 @@ class TestReversalKThresholdSingleSource:
             del os.environ["B1_REVK_CHG_PCT"]
             importlib.reload(rq)
 
+    def test_j_vol_thresholds_also_single_source(self, reversal_thresholds, monkeypatch):
+        """J 低位与极致缩量三阈值同样走唯一来源。
+
+        2026-08-07 前 `enrich_candidates` 本地硬编码 `J_LOW_THRESHOLD=13.0 /
+        VOL_RATIO_MAX=0.5 / VOL_PCTILE_MAX=10.0`：REVERSAL_* 收敛后这三个仍各写
+        一份，设 `B1_J_LOW` 只改到持仓链、选股链不动 —— 与上面 chg_pct 同款分歧。
+        """
+        mods = reversal_thresholds()
+        bt, ec = mods["b1_thresholds"], mods["enrich_candidates"]
+        assert (ec.J_LOW_THRESHOLD, ec.VOL_RATIO_MAX, ec.VOL_PCTILE_MAX) == \
+               (bt.J_LOW_THRESHOLD, bt.VOL_RATIO_MAX, bt.VOL_PCTILE_MAX), "默认值两边就不一致"
+
+        # vol 两个 env 不在 fixture 的还原清单里 ⇒ 用 monkeypatch 管还原
+        # （monkeypatch 先于 fixture finalizer 拆，还原 env 后 fixture 会再 reload 一次）。
+        monkeypatch.setenv("B1_J_LOW", "10")
+        monkeypatch.setenv("B1_REVK_VOL_RATIO", "0.4")
+        monkeypatch.setenv("B1_REVK_VOL_PCTILE", "5")
+        mods = reversal_thresholds()
+        bt2, ec2 = mods["b1_thresholds"], mods["enrich_candidates"]
+        assert ec2.J_LOW_THRESHOLD == bt2.J_LOW_THRESHOLD == 10.0, "选股链 J 阈值没跟上"
+        assert ec2.VOL_RATIO_MAX == bt2.VOL_RATIO_MAX == 0.4, "选股链量比阈值没跟上"
+        assert ec2.VOL_PCTILE_MAX == bt2.VOL_PCTILE_MAX == 5.0, "选股链量分位阈值没跟上"
+        assert mods["b1_holding_state"].J_LOW_THRESHOLD == 10.0, "持仓链 J 阈值没跟上"
+        # ⚠️ 只比常量不够：`j_below_threshold` 的默认参数在 def 时绑定 ——
+        #    reload 后必须重新绑定到新阈值，否则门槛仍按 13 判。
+        assert ec2.j_below_threshold(11.0) is False and ec2.j_below_threshold(9.0) is True
+        # 持仓链反转K的理由文案也要随配置变 —— 硬编码「J<13」会在改配置后谎报依据。
+        s = mods["b1_holding_state"].evaluate(
+            {"price_volume": {"available": True, "reversal_k_candidate_without_j": True},
+             "daily_j": 8.0})
+        sig = [x for x in s["signals"] if x["signal"] == "reversal_k_candidate"][0]
+        assert "J<10" in sig["reason"], f"理由文案没跟上配置：{sig['reason']}"
+
     def test_thresholds_dict_reports_effective_values(self, reversal_thresholds):
         """⚠️ `technical_monitor` 上报的 `thresholds` 必须是**实际生效值**。
 

@@ -355,19 +355,23 @@ def test_build_stock_theme_map_codes_no_tag_hit_keeps_concept_path(monkeypatch):
 
 def test_dks_single_definition_matches_zhixing_state():
     """DKS 曾有两份实现（technical_monitor.zhixing_state 与 perfect_b1_fit 内联）。"""
+    from indicators import dks_series
     from technical_monitor import zhixing_state
     df = _wavy(200)
     zx = zhixing_state(df)
-    series = ec.dks_series(df["close"].astype(float).reset_index(drop=True))
+    # 共享实现现在直取 `indicators.dks_series` —— 原先经 `enrich_candidates` 顶层
+    # 偶然再导出，2026-08-08 死代码清理时随 `_j_series` 一并删掉。
+    series = dks_series(df["close"].astype(float).reset_index(drop=True))
     assert zx["available"]
     assert round(float(series.iloc[-1]), 4) == zx["dks"]
 
 
 def test_perfect_b1_fit_dks_uses_shared_series():
+    from indicators import dks_series
     df = _wavy(200)
     fit = ec.compute_perfect_b1_fit(df, daily_j=5.0, zx={"available": False},
                                     pullback={"available": False})
-    series = ec.dks_series(df["close"].astype(float).reset_index(drop=True))
+    series = dks_series(df["close"].astype(float).reset_index(drop=True))
     assert fit["components"]["dks_rising"]["dks"] == pytest.approx(float(series.iloc[-1]))
 
 

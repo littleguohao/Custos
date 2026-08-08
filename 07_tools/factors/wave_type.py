@@ -105,7 +105,9 @@ def detect_wave_type(df) -> dict[str, Any]:
     start_bull = False
     for t in range(i_low + 1, min(i_low + 6, n)):
         base = vol[max(0, t - 5):t].mean()
-        if base and close[t] / close[t - 1] - 1 >= WAVE_START_CANDLE_PCT / 100 and vol[t] >= base * WAVE_START_CANDLE_VOL:
+        # close[t-1] 守卫与上方 accel_10d（close[t-10] > 0）同款：prev close<=0 的脏数据
+        # bar 直接跳过，不算启动长阳（此前缺这个守卫会 RuntimeWarning: divide by zero）。
+        if base and close[t - 1] > 0 and close[t] / close[t - 1] - 1 >= WAVE_START_CANDLE_PCT / 100 and vol[t] >= base * WAVE_START_CANDLE_VOL:
             start_bull = True
             break
     # 二次启动：启动低点之前的窗口段已存在 >=15% 摆动（前一段拉升）

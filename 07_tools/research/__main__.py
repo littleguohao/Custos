@@ -43,6 +43,13 @@ import re
 import subprocess
 import sys
 
+# GBK（cp936）终端/管道打不了 ⚠️/⛔ 等符号 —— 不 reconfigure 会 UnicodeEncodeError
+# 直接退出。惯例同 technical_monitor（stdout 与 stderr 都要，⚠️ 往 stderr 打）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 HERE = pathlib.Path(__file__).resolve().parent
 BASE = HERE.parents[1]
 

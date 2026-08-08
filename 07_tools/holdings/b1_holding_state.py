@@ -21,7 +21,8 @@ from runtime_guards import normalize_regime  # noqa: E402
 
 from paths import BASE  # noqa: E402
 from code_utils import norm_code  # noqa: E402
-from b1_thresholds import J_LOW_THRESHOLD  # noqa: E402
+from b1_thresholds import (J_LOW_THRESHOLD, REVERSAL_AMPLITUDE_PCT,  # noqa: E402
+                           REVERSAL_CHANGE_MAX_PCT, REVERSAL_CHANGE_MIN_PCT)
 from code_utils import fnum  # noqa: E402
 from contracts import require  # noqa: E402
 
@@ -119,7 +120,16 @@ def evaluate(row: dict[str, Any], market_regime: str = "未知", price: Any = No
     reversal = bool(price_volume_current and pv.get("reversal_k_candidate_without_j")
                     and j is not None and j < J_LOW_THRESHOLD)
     if reversal:
-        add("reversal_k_candidate", "P3", "反转K候选观察", "J<13、极致缩量、收盘±2%且振幅<=7%；仍需后续修复确认")
+        # 理由文案随 `b1_thresholds` 动态拼 —— 阈值可经 B1_* env 覆盖，
+        # 硬编码「J<13、±2%、振幅<=7%」会在配置改动后谎报判定依据（与
+        # technical_monitor.thresholds 2026-08-07 收敛同因）。对称区间显示 ±N，
+        # 不对称显示 MIN~MAX，保持原文案格式。
+        _chg = (f"±{REVERSAL_CHANGE_MAX_PCT:g}"
+                if REVERSAL_CHANGE_MIN_PCT == -REVERSAL_CHANGE_MAX_PCT
+                else f"{REVERSAL_CHANGE_MIN_PCT:g}~{REVERSAL_CHANGE_MAX_PCT:g}")
+        add("reversal_k_candidate", "P3", "反转K候选观察",
+            f"J<{J_LOW_THRESHOLD:g}、极致缩量、收盘{_chg}%且振幅<={REVERSAL_AMPLITUDE_PCT:g}%；"
+            "仍需后续修复确认")
 
     if market_regime == "空头":
         add("bear_regime_reduce_top_priority", "P1", "空头区间反弹减仓(最高优先级)",

@@ -44,3 +44,26 @@ class TestStDowngradeOnlyForTenPercentPrefix:
     def test_short_history_uses_prefix(self):
         assert _infer_price_limit("300750", _df([1.0] * 5)) == 20
         assert _infer_price_limit("600519", _df([1.0] * 5)) == 10
+
+
+class TestSelfCorrectWindowIsRecent20:
+    """数据自纠只看**最近 20 个交易日**（docstring 一直写「近20日」，实现曾取整条序列）。
+
+    2026-08-08 前：10% 板块新股的窗口含上市首日 +44% 时，max_change 被永久顶穿 9.9
+    ⇒ 该股**永久**升级为 20% 口径，首日异动滚出窗口也回不去。
+    """
+
+    def test_ipo_first_day_spike_rolls_out_of_window(self):
+        """上市首日 +44% 已滚出近 20 日窗口 ⇒ 不再升级为 20%。
+
+        窗口内放一天 +6%（>5.2、<9.9）是为了**隔离升级与降级两条分支**：
+        全安静的窗口会走 ST 降级（==5），断言 ==10 就分不清测的是哪条。
+        """
+        changes = [44.0] + [1.0, -1.0] * 10 + [6.0]
+        assert len(changes) == 22 and max(changes[-20:]) == 6.0   # 首日已出窗
+        assert _infer_price_limit("600519", _df(changes)) == 10
+
+    def test_big_move_inside_window_still_upgrades(self):
+        """对照：同样的 +44% 落在近 20 日窗口**内** ⇒ 仍升级。"""
+        changes = [1.0, -1.0] * 9 + [44.0] + [1.0]
+        assert _infer_price_limit("600519", _df(changes)) == 20

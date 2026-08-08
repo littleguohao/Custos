@@ -39,8 +39,9 @@
 import importlib as _il                     # noqa: E402
 import pkgutil as _pk                       # noqa: E402
 import pathlib as _pl                       # noqa: E402
+import sys as _sys                          # noqa: E402
 
-_SKIP = {"_template", "_util", "__init__"}
+_SKIP = {"_template", "_util", "_shares", "__init__"}
 
 # ⚠️ **没有 "falsified" 这一档，是刻意的。**
 # 2026-08-06 我一度把 alpha101/mcap/reversal_quality 等标成 falsified，owner 纠正：
@@ -84,14 +85,20 @@ def registry() -> dict[str, dict]:
     """扫本包，收集所有声明了 `FACTOR` 的模块。
 
     返回 ``{id: {"meta": FACTOR, "module": mod, "score": fn|None, "detect": fn|None}}``。
+    单个模块导入失败：跳过该模块并 print `[WARN]` 到 stderr（fail-open 但**不静默**）。
     """
     out: dict[str, dict] = {}
+    failed: list[str] = []
     for m in _pk.iter_modules([str(_pl.Path(__file__).resolve().parent)]):
         if m.name in _SKIP:
             continue
         try:
             mod = _il.import_module(m.name)
-        except Exception:                    # noqa: BLE001 —— 单个因子坏了不该让注册表整体失效
+        except Exception as exc:              # noqa: BLE001 —— 单个因子坏了不该让注册表整体失效
+            # ⚠️ 但**不得静默**：2026-08-06 `_shares` 漏 import json 就是这类 fail-open
+            # 吞掉的 —— 空注册表和全员坏掉无法区分。失败照常跳过，但必须留痕到 stderr
+            # （项目惯例 `[WARN] ...`，同 enrich_candidates.build_stock_theme_map）。
+            failed.append(f"{m.name}: {type(exc).__name__}: {exc}")
             continue
         meta = getattr(mod, "FACTOR", None)
         if not isinstance(meta, dict) or meta.get("id") in (None, "template"):
@@ -99,6 +106,9 @@ def registry() -> dict[str, dict]:
         out[meta["id"]] = {"meta": meta, "module": mod,
                            "score": getattr(mod, "score", None),
                            "detect": getattr(mod, "detect", None)}
+    if failed:
+        print(f"[WARN] 因子注册表：{len(failed)} 个因子模块导入失败被跳过 —— "
+              + "; ".join(failed), file=_sys.stderr)
     return out
 
 

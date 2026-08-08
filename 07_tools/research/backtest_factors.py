@@ -38,6 +38,13 @@ _FACTORS_DIR = str(Path(__file__).resolve().parents[1] / "factors")
 if _FACTORS_DIR not in sys.path:
     sys.path.insert(0, _FACTORS_DIR)   # 因子层：见 factors/__init__.py
 
+# GBK（cp936）终端/管道下 --help 与报告里的 ⇒/⚠️ 等符号会 UnicodeEncodeError
+# 直接崩掉。惯例同项目其他入口（hasattr 守卫：pytest 捕获替换过 stdout）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 # ── research/ 与 screening/ 分家（2026-08-07）后的路径引导。
 # 研究脚本要能同时导**自己的兄弟**（research/）与**生产链模块**（screening/）：
 # 方向是研究依赖生产（回测要跑生产的因子与打分），反向为 0 ——
@@ -354,7 +361,9 @@ def _sc_invert_s_shape(df: pd.DataFrame, code: str):
 # 可选打分器：同一批信号可跑三方对比（突破式 vs 买弱式 vs 反转突破分）
 def _sc_b1_pullback(df: pd.DataFrame, code: str):
     """完美B1 缩量回踩买弱指纹（0-7 → 归一 0-100）。10只赢家反标，precision 待本回测确认。"""
-    from enrich_candidates import compute_b1_pullback_fit  # noqa: PLC0415 —— 懒加载避免重导入开销
+    # 函数本体在因子层 `factors/b1_pullback_fit.py`；此前从 `enrich_candidates`
+    # 导入只是蹭它顶层的偶然再导出（2026-08-08 订正）。保持 lazy：避免重导入开销。
+    from b1_pullback_fit import compute_b1_pullback_fit  # noqa: PLC0415
     r = compute_b1_pullback_fit(df)
     if not r.get("available"):
         return None

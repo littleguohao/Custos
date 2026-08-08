@@ -18,9 +18,11 @@
   - 轴1 **软加权**（不做硬门槛）：熊市里 QSX>DKS 会大面积不满足，硬门槛会让候选枯竭。
   - 出货形态（detect_distribution 五式）作否决层，由 gate 负责，不混进打分。
 
-**本模块只是可回测因子，未接入选股链。** 先按项目既有方法论回测验证（三重门槛 +
-净值终审），确认赢过无条件基准再谈接线——结论#15（平台突破回踩）的教训正是
-"形态类信号先问是否赢过无条件基准"。
+**已接入选股链，但只作描述性证据**（`signal_labels` 出标签落候选表，
+`live_use="evidence_only"`、`stage="release"`）：标注不是交易依据，不驱动分层/gate/排序。
+原先这里写「未接入选股链」，2026-08-08 订正 —— 它**在跑**，只是不作决策。
+确认赢过无条件基准（三重门槛 + 净值终审）之前不得升级为决策依据——结论#15
+（平台突破回踩）的教训正是"形态类信号先问是否赢过无条件基准"。
 """
 from __future__ import annotations
 
@@ -32,9 +34,10 @@ import numpy as np
 import pandas as pd
 
 _TOOLS = Path(__file__).resolve().parents[1]
-for _p in (str(_TOOLS), str(_TOOLS / "screening"), str(_TOOLS / "market_timing")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+if str(_TOOLS) not in sys.path:
+    sys.path.insert(0, str(_TOOLS))   # indicators 在 07_tools 根
+# 原先的 screening/market_timing 两项已于 2026-08-08 删除：本模块只依赖
+# 07_tools 根与同目录（s_shape / platform_pullback，扁平 import 惯例见 factors/__init__.py）。
 
 from indicators import dks_series as _dks_series  # noqa: E402
 

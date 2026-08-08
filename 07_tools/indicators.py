@@ -6,6 +6,8 @@
 2026-08-06 清点：`_j_series` 有 **3 份**（screening/enrich_candidates、b2_surge_factor、
 main_rally_factor），BBI 公式在 **4 处**代码里各写一遍（backtest_factors ×2、
 market_timing/technical_monitor ×2）。这两个指标恰好是 B1 最核心的两个：
+（2026-08-08 更新：enrich 的那份包装已作死代码删除 —— 无调用方；它的 J 走
+`kdj()`，内部 `fill_na=50`，行为与原来的本地包装一致。）
 
     J < 13      —— 入场触发（B1 候选的唯一硬条件）
     BBI         —— 移动止盈与持仓状态（`bbi_above` / 连破 N 日清仓）
@@ -24,9 +26,11 @@ market_timing/technical_monitor ×2）。这两个指标恰好是 B1 最核心�
 
 ## NaN 策略是显式参数，不是隐含默认
 
-`fill_na` 保留 `enrich_candidates` 原有行为（填 50 = 中性），其余调用方传 None
-（保持 NaN）。做成参数而不是统一取一种，是为了**这次合并零行为变化** ——
+`fill_na` 保留原 `enrich_candidates` 本地实现的行为（填 50 = 中性），其余调用方传 None
+（保持 NaN）。做成参数而不是统一取一种，是为了**那次合并零行为变化** ——
 指标语义的改动应该单独立项、单独回测，不该搭在重构里。
+（2026-08-08：enrich 的本地包装已删，它经 `kdj()` 仍走 fill 50；
+`j_series(fill_na=50.0)` 的现存调用方是 `factors/b1_pullback_fit`。）
 """
 from __future__ import annotations
 
@@ -83,7 +87,7 @@ def j_series(df: pd.DataFrame, *, n: int = J_N, m1: int = J_M1, m2: int = J_M2,
     """KDJ 的 J 序列：`RSV → K(EWM) → D(EWM) → J = 3K − 2D`。
 
     ``fill_na``：``None``（默认）保持 NaN；给数值则在 RSV 层填充
-    （`enrich_candidates` 传 50.0，即"数据不足按中性处理"）。
+    （`factors/b1_pullback_fit` 传 50.0，即"数据不足按中性处理"）。
 
     ⚠️ **零振幅要先变 NaN 再决定怎么填**。`high == low`（一字板/停牌）时
     `(close-low)/(high-low)` 是 0/0：不先 replace 会得到 inf/NaN 混杂，
@@ -270,13 +274,13 @@ def _infer_price_limit(code: str, df: pd.DataFrame) -> int:
     """Infer the daily price-limit percentage for a stock.
 
     Base comes from ``code_utils.price_limit_pct`` (single source), then
-    validates against observed historical daily changes: if any completed
-    bar shows |change_pct| > 9.9 for a 10%-prefix stock, upgrade to 20%.
-    This catches edge cases without relying solely on static prefix rules.
-    ST/special-treatment stocks typically have 5% limits; we detect those
-    by checking if observed max |change_pct| is consistently <= 5.2. The ST
-    downgrade only applies to 10%-prefix stocks — a quiet 20-day window must
-    never demote a 300/301/688/920 stock to 5%.
+    validates against observed historical daily changes: if any of the
+    **last 20 trading days** shows |change_pct| > 9.9 for a 10%-prefix stock,
+    upgrade to 20%. This catches edge cases without relying solely on static
+    prefix rules. ST/special-treatment stocks typically have 5% limits; we
+    detect those by checking if observed max |change_pct| is consistently
+    <= 5.2. The ST downgrade only applies to 10%-prefix stocks — a quiet
+    20-day window must never demote a 300/301/688/920 stock to 5%.
     """
     # ⚠️ base 必须来自 `code_utils.price_limit_pct`（唯一来源）。此前这里内联写
     # `20 if startswith(("688","920","300","301")) else 10`，对北交所给 20 而
@@ -284,8 +288,12 @@ def _infer_price_limit(code: str, df: pd.DataFrame) -> int:
     # **永远到不了 30**，所以那个偏差不会被历史波动纠正 —— 详见唯一实现的 docstring。
     base = int(price_limit_pct(code))
     if len(df) >= 20:
+        # ⚠️ 自纠只看**最近 20 个交易日**（docstring 一直写「近20日」，实现却取整条
+        # 序列）：10% 板块新股的窗口若含上市首日 +44%，max_change 会被它永久顶穿
+        # 9.9 ⇒ 该股被**永久**升级为 20% 口径，再也回不去。tail(20) 后首日异动
+        # 滚出窗口即恢复（2026-08-08 修复）。
         changes = (df["close"] / df["close"].shift(1) - 1).abs() * 100
-        max_change = float(changes.dropna().max())
+        max_change = float(changes.tail(20).dropna().max())
         if base == 10 and max_change > 9.9:
             base = 20
         if base == 10 and max_change <= 5.2:

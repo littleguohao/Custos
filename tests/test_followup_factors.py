@@ -3,6 +3,7 @@
 import json
 
 import pandas as pd
+import pytest
 
 from screening import enrich_candidates as ec
 from research import backtest_factors as bt
@@ -603,6 +604,23 @@ def test_mcap_scorer_prefers_small_cap(monkeypatch):
     # 事件在信号日之后 → 不可用(防 look-ahead)
     monkeypatch.setattr(_shares, "_SHARE_IDX", {"600000": [("2099-01-01", 1e9)]})
     assert bt.SCORERS["mcap"](df, "600000") is None
+
+
+def test_shares_idx_smoke_with_real_data(monkeypatch):
+    """冒烟：真实 `share_changes.jsonl` 存在时 `shares_idx()` **不得为空**。
+
+    2026-08-06 漏 `import json`：`json.loads` 抛 NameError 被 `except Exception`
+    吞掉 ⇒ `shares_idx()` 恒返回 {}、mcap 因子静默失效，而所有既有测试都打桩
+    `_SHARE_IDX`，没人走真实加载路径 —— 这条专门走真实路径，防「静默全空」。
+    无真实数据的环境（CI/新机）跳过，不 mock。
+    """
+    from paths import BASE
+    if not (BASE / "01_data" / "fundamentals" / "share_changes.jsonl").is_file():
+        pytest.skip("无 share_changes.jsonl（非真实数据环境）")
+    monkeypatch.setattr(_shares, "_SHARE_IDX", None)   # 清掉前序测试的桩，强制真实加载
+    idx = _shares.shares_idx()
+    assert idx, "真实 share_changes.jsonl 在，shares_idx() 却为空 —— 加载路径坏了"
+    assert all(isinstance(v, list) and v for v in idx.values())
 
 
 def test_financial_factor_duplicate_column_names():

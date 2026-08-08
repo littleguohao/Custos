@@ -38,6 +38,8 @@ owner 2026-08-06 要求反转 K「对称 ±2% **且可配置**」。实测（202
     B1_REVK_CHG_MIN=-2 B1_REVK_CHG_MAX=1.8 → 回到不对称（2026-08-04 的旧口径）
     B1_REVK_AMP_PCT=6                      → 振幅上限 6%
     B1_J_LOW=10                            → J 低位阈值 10
+    B1_REVK_VOL_RATIO=0.4                  → 极致缩量：量比 vs MA5 <= 0.4
+    B1_REVK_VOL_PCTILE=5                   → 极致缩量：20 日量分位 <= 5（单位：%）
 
 ⚠️ 全部在**模块导入时**求值。运行中改 `os.environ` 对已导入的模块无效，
 必须 `importlib.reload`。这不是疏漏 —— 阈值在一次运行内保持恒定，

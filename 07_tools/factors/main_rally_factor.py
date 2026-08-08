@@ -36,9 +36,10 @@ import pandas as pd
 from numpy.lib.stride_tricks import sliding_window_view
 
 _TOOLS = Path(__file__).resolve().parents[1]
-for _p in (str(_TOOLS), str(_TOOLS / "screening"), str(_TOOLS / "market_timing")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+if str(_TOOLS) not in sys.path:
+    sys.path.insert(0, str(_TOOLS))   # indicators 在 07_tools 根
+# 原先的 screening/market_timing 两项已于 2026-08-08 删除：本模块只依赖
+# 07_tools 根与同目录（`from rsi_state import rsi`，扁平 import 惯例见 factors/__init__.py）。
 
 from indicators import j_series as _j_series  # noqa: E402
 
