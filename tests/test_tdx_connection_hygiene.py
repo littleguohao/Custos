@@ -368,5 +368,6 @@ class TestOnlineQuotesMarkedUnavailable:
             def stocks(self, market):
                 return pd.DataFrame({"code": ["600000"]}) if market == 1 else pd.DataFrame()
 
-        monkeypatch.setattr(L, "_get_client", lambda: _C())
+        # get_stock_list 已改走 `_with_client_retry`（会传 force_new 关键字），桩要吃下它
+        monkeypatch.setattr(L, "_get_client", lambda force_new=False: _C())
         assert L.get_stock_list() == ["600000"]

@@ -23,7 +23,8 @@
 
 为什么不用东财 clist 拉全市场：实测它单页最多 100 条，且连续翻页约 10 页（1000 条）
 后即 RemoteDisconnected，拉不完 5888 只。全市场缓存构建仍保留 clist 路径但只是
-尽力而为（:func:`fetch_all_from_clist`），真正的全量构建应走 TQ-Local。
+尽力而为（:func:`fetch_all_from_clist`），真正的全量构建应走 ① TDX 协议
+（``--source auto`` 的第一顺位，与主路径说法一致）。
 **凡是要落盘当全量缓存的路径**（:func:`fetch_name_map` / ``--source clist``）都强制
 ``CLIST_MIN_COVERAGE`` 覆盖率门槛：残缺表落盘会覆盖完整缓存并把 generated_at 刷新成
 当天（30 天时效计时被重置），比"没更新"更危险，宁可回退旧缓存。
@@ -53,6 +54,12 @@ _TOOLS = Path(__file__).resolve().parents[1]
 for _p in (str(_TOOLS), str(_TOOLS / "local_tdx")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
+
+# Windows 生产链（run_1800 起子进程）默认 GBK 控制台：本模块的 WARN 里有 "⇒" 等
+# 字符，不 reconfigure 会在**拒绝落盘那条最关键的路径**上抛 UnicodeEncodeError。
+for _s in (sys.stdout, sys.stderr):
+    if hasattr(_s, "reconfigure"):
+        _s.reconfigure(encoding="utf-8", errors="replace")
 
 from code_utils import market_of  # noqa: E402
 from paths import DATA, cn_today  # noqa: E402
@@ -94,7 +101,9 @@ CLIST_MIN_COVERAGE = 0.8
 # 原先门槛只加在 `fetch_all_from_clist` 上，可它在源顺序里**排最后**；
 # 排在前面的 `fetch_from_tdx_protocol`（沪深两市，一市失败就剩一半）与
 # `fetch_from_tq`（逐只 RPC，部分失败照样返回）都没有门槛。
-# ⇒ 门槛该在**落盘边界**，不是在每个源里各写一份。
+# ⇒ 门槛该在**落盘边界**，不是在每个源里各写一份。落盘边界有两条——
+# `resolve_name_map`（链内调用）与 `main()`（生产每日刷新走这条）——
+# 两条都在 `save_cache` 之前过 `_refuses_overwrite`，缺一条等于没挂。
 NAME_MAP_MIN_OVERWRITE_RATIO = 0.8
 
 # 本次运行内记住可用域名，避免每批都从头重试已知不通的域名
@@ -198,7 +207,8 @@ def fetch_all_from_clist(session=None, max_pages: int = EM_MAX_PAGES,
 
     实测限制：单页最多 100 条，且连续翻页约 10 页后 RemoteDisconnected。所以它
     通常拉不完全市场，默认取到多少算多少并由调用方判断是否够用；一条都没取到才抛。
-    真正的全量构建请走 :func:`fetch_from_tq`。
+    真正的全量构建请走 TDX 协议（:func:`fetch_from_tdx_protocol`，``--source auto``
+    的第一顺位），TQ-Local 只是其后的兜底。
 
     ``min_coverage`` > 0 时启用覆盖率门槛：接口报告了 total 且
     ``len(out) / total < min_coverage`` 即抛 :class:`NameFetchIncomplete`——
@@ -234,9 +244,10 @@ def fetch_all_from_clist(session=None, max_pages: int = EM_MAX_PAGES,
     if total and len(out) < total * min_coverage:
         raise NameFetchIncomplete(
             f"clist 覆盖率不足: {len(out)}/{total} (<{min_coverage:.0%})，"
-            "拒绝当全量表落盘（全量构建请用 --source tq）")
+            "拒绝当全量表落盘（全量构建请用 --source auto，TDX 协议为第一顺位）")
     if total and len(out) < total:
-        print(f"[WARN] clist 受限流只取到 {len(out)}/{total} 条（全量构建请用 --source tq）",
+        print(f"[WARN] clist 受限流只取到 {len(out)}/{total} 条"
+              f"（全量构建请用 --source auto，TDX 协议为第一顺位）",
               file=sys.stderr)
     return out
 
@@ -480,18 +491,21 @@ def _age_days(generated_at: str) -> Optional[int]:
         return None
 
 
-def _refuses_overwrite(new_map: dict, source: str, diag: dict) -> bool:
+def _refuses_overwrite(new_map: dict, source: str, diag: dict, path: Path = None) -> bool:
     """新表是否**过小以致不该覆盖**既有缓存。返回 True = 拒绝。
 
     判据：既有缓存存在且非空，而 `len(new) < len(old) * NAME_MAP_MIN_OVERWRITE_RATIO`。
     首次构建（无缓存）一律放行。
+
+    ``path`` 是**实际落盘目标**（缺省 = :data:`CACHE`）：main() 支持 ``--out``
+    自定义路径，门槛必须对着将被覆盖的那份文件判，而不是固定对着默认缓存。
 
     ⚠️ 这里**不区分既有缓存是否陈旧**：陈旧但完整的表仍比新鲜但残缺的表适合做
     ST 排除（ST 名称变动不频繁，残缺表会让大部分票查不到名字）。
     陈旧本身会被 `load_cache` 判出来并让 `st_filter="stale"`，信息不会丢。
     """
     try:
-        old, _meta = load_cache()
+        old, _meta = load_cache(path)
     except Exception:                                              # noqa: BLE001
         return False
     if not old:
@@ -552,9 +566,9 @@ def resolve_name_map(session=None, allow_fetch: bool = True) -> tuple[dict[str, 
 
 def main(argv=None) -> int:
     import argparse
-    ap = argparse.ArgumentParser(description="构建股票名称缓存（东财优先，TdxW 兜底）")
+    ap = argparse.ArgumentParser(description="构建股票名称缓存（TDX 协议优先，TQ/clist 兜底）")
     ap.add_argument("--source", choices=["auto", "clist", "tq", "mootdx"], default="auto",
-                    help="auto=TQ→clist→mootdx；clist 受限流通常拉不全，全量请用 tq")
+                    help="auto=TDX协议→TQ→clist；clist 受限流通常拉不全，全量构建走 auto（TDX 协议）")
     ap.add_argument("--out", default=str(CACHE))
     ap.add_argument("--limit", type=int, default=0, help="仅 tq 源：只处理前 N 只（排障用）")
     args = ap.parse_args(argv)
@@ -582,6 +596,17 @@ def main(argv=None) -> int:
     if not name_map:
         print(json.dumps({"ok": False, "source": source, "count": 0,
                           "reason": "all_sources_failed"}, ensure_ascii=False))
+        return 2
+    # ⚠️ 落盘边界门槛（与 resolve_name_map 同一条，见 NAME_MAP_MIN_OVERWRITE_RATIO）。
+    # 生产每日刷新走的就是 main()，而不是 resolve_name_map——门槛只挂后者时，
+    # 「TQ 只取到 3 只照样覆盖 5000 只完整缓存」的事故形态在这条路径上原样可复现。
+    # 放在 save_cache 之前 ⇒ 覆盖全部 source 分支；传 --out ⇒ 对着实际落盘目标判。
+    guard_diag: dict[str, Any] = {}
+    if _refuses_overwrite(name_map, source, guard_diag, path=Path(args.out)):
+        print(json.dumps({"ok": False, "source": source, "count": len(name_map),
+                          "reason": "overwrite_refused",
+                          "detail": guard_diag.get("name_map_rejected_reason")},
+                         ensure_ascii=False))
         return 2
     out = save_cache(name_map, source, Path(args.out))
     st_count = sum(1 for n in name_map.values() if "ST" in n.upper())

@@ -330,14 +330,15 @@ def get_online_bars(code: str, frequency: int = 9, offset: int = 120, adjust: st
 
 
 def get_online_index(code: str, market: int = 1, frequency: int = 9, offset: int = 120) -> pd.DataFrame:
-    """⚠️ 默认被标记为不可用（实测 9992ms 返回空），见 `_online_quotes_enabled`。"""
-    if not _online_quotes_enabled():
-        print(f"[WARN] get_online_index({code}) 跳过：{_ONLINE_DISABLED_MSG}", file=sys.stderr)
-        return pd.DataFrame()
     """Fetch index K-line (including 880 series) from mootdx online server.
 
     market: 0=SZ, 1=SH (880 series use SH)
+
+    ⚠️ 默认被标记为不可用（实测 9992ms 返回空），见 `_online_quotes_enabled`。
     """
+    if not _online_quotes_enabled():
+        print(f"[WARN] get_online_index({code}) 跳过：{_ONLINE_DISABLED_MSG}", file=sys.stderr)
+        return pd.DataFrame()
     client = _get_client()
     raw = _strip_suffix(code)
     try:
@@ -437,7 +438,12 @@ def get_snapshots(codes: Iterable[str]) -> dict[str, dict[str, Any]]:
 
     宁可让调用方发现「这只票没拿到行情」（缺失可检测），也不能给它一条 0 价快照
     （0 价会被当真值参与涨跌幅/仓位计算）。
+
+    ⚠️ 默认被 `_online_quotes_enabled()` 短路（返回空 dict）——与单只版
+    `get_snapshot` 同一道闸，批量版此前漏接了它。
     """
+    if not _online_quotes_enabled():
+        return {}
     client = _get_client()
     raw_codes = [_strip_suffix(c) for c in codes]
     try:
@@ -571,16 +577,19 @@ def get_stock_list(pool_type: str = "5", ashare_only: bool = True) -> list[str]:
 
     过滤后与 `list_local_vipdoc_codes()` 口径可比（都是 A 股个股），差异只剩
     「在线代码表 vs 本地实有文件」和「含不含 BJ」。传 `ashare_only=False` 取原始全表。
+
+    走 `_with_client_retry`（与隔壁 `get_stock_name_map` 对齐，2026-08-08）：连接失效
+    会强制重建再试，而不是拿死连接把两市都拖挂。单市连续失败仍只 WARN 降级、不抛。
     """
-    client = _get_client()
     from mootdx.consts import MARKET_SH, MARKET_SZ
     result = []
     for mkt in [MARKET_SH, MARKET_SZ]:
         try:
-            stocks = client.stocks(market=mkt)
+            stocks = _with_client_retry(
+                lambda c, m=mkt: c.stocks(market=m), what=f"stocks(market={mkt})")
             if stocks is not None and not stocks.empty:
                 result.extend(stocks["code"].tolist() if "code" in stocks.columns else [])
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"[WARN] get_stock_list market={mkt} failed: {e}", file=sys.stderr)
     if not ashare_only:
         return result
@@ -767,7 +776,14 @@ def get_ohlcv_table(code: str, count: int = 260, prefer: str = "vipdoc",
             df.attrs["adjust"] = "n/a-index"                 # 指数不除权，无需复权
         else:
             try:
-                from adjust_factors import qfq_table        # noqa: PLC0415
+                # ⚠️ 包内优先、脚本回退（与 fetch_market_cap.build_from_tdx 同一模式）：
+                # 本模块既被当包模块导入（`local_tdx.local_tdx_data`）也被当脚本/扁平
+                # 模块跑，固定写扁平导入会在包模式下建出**第二个** adjust_factors
+                # 模块对象，monkeypatch 与异常类都会对不上。
+                try:
+                    from .adjust_factors import qfq_table     # noqa: PLC0415
+                except ImportError:                           # 脚本/扁平模式
+                    from adjust_factors import qfq_table      # noqa: PLC0415
                 df = qfq_table(code, df, strict=False)
             except Exception as e:                          # noqa: BLE001
                 print(f"[WARN] {code} 前复权失败，按未复权使用: {e}", file=sys.stderr)

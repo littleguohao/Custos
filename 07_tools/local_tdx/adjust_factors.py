@@ -238,10 +238,6 @@ def normalize_shares(df: Any) -> list[dict[str, Any]]:
     rows = _to_records(df)
     if not rows:
         return []
-    try:
-        pass
-    except Exception:                                          # noqa: BLE001
-        return []
     out = []
     for r in rows:
         try:

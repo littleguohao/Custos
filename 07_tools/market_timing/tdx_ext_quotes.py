@@ -73,7 +73,9 @@ def _drop_ext_client() -> None:
 def fetch_ext_change(symbol: str, *, timeout: int = 12) -> Optional[dict[str, Any]]:
     """取一个品种的最新涨跌幅。不支持的 symbol 返回 None（调用方保留原 error）。
 
-    返回 {change_pct, last_close, prev_close, source, proxy, proxy_note}。
+    返回 {change_pct, last_close, prev_close, stale_bars_skipped, source, proxy, proxy_note}。
+    ``stale_bars_skipped`` 是被滤掉的脏 bar（close≤0）根数 —— 非 0 意味着「最新」
+    收盘其实来自更早的 bar，时间窗已平移，调用方据此自行裁量可信度。
     """
     ent = EXT_MAP.get(symbol)
     if ent is None:
@@ -99,11 +101,18 @@ def fetch_ext_change(symbol: str, *, timeout: int = 12) -> Optional[dict[str, An
         return None
     if len(closes) < 2:
         return None
+    # 脏 bar（close≤0：停牌/缺数）被滤掉后，若**最后一根**恰是脏 bar，「最新」收盘
+    # 其实是更早的 bar —— 时间窗悄悄平移。不能静默：跳过根数随结果暴露，并打 WARN。
+    stale_bars_skipped = len(df) - len(closes)
+    if stale_bars_skipped:
+        print(f"[WARN] TDX ext {symbol}({code}) 滤掉 {stale_bars_skipped} 根脏 bar（close≤0），"
+              f"change_pct 按更早的有效 bar 计算", file=sys.stderr)
     last, prev = closes[-1], closes[-2]
     return {
         "change_pct": round((last / prev - 1) * 100, 3) if prev else None,
         "last_close": round(last, 4),
         "prev_close": round(prev, 4),
+        "stale_bars_skipped": stale_bars_skipped,
         "source": f"TDX ext (market={market}, {code})",
         "proxy": is_proxy,
         "proxy_note": note,

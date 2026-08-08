@@ -114,8 +114,17 @@ def _signal_labels_section(candidates: list[dict]) -> list[str]:
     被误读成"不符合条件"。
     """
     try:
-        import signal_labels as sl
-    except Exception:  # noqa: BLE001
+        # 包内优先、脚本回退（与 fetch_market_cap.build_from_tdx 同一模式）：本模块
+        # 被当包模块导入（`screening.candidate_table`）时 screening/ 不在 sys.path 上，
+        # 扁平 `import signal_labels` 会 ImportError —— 此前被外层 except 吞掉，
+        # 整个区块静默消失。降级必须留一行说明，不能无声。
+        try:
+            from . import signal_labels as sl                 # noqa: PLC0415
+        except ImportError:                                   # 脚本/扁平模式
+            import signal_labels as sl                        # noqa: PLC0415
+    except Exception as exc:  # noqa: BLE001
+        print(f"[WARN] 信号标注区块不可用（signal_labels 导入失败: "
+              f"{type(exc).__name__}: {exc}），跳过该区块", file=sys.stderr)
         return []
     with_sig = [c for c in candidates if isinstance(c.get("signals"), dict)]
     if not with_sig:

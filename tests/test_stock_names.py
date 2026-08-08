@@ -499,7 +499,7 @@ class TestGetStockListAShareFilter:
                  "113050", "128036",                  # 可转债
                  "880005"]                            # 板块指数
         monkeypatch.setattr(local_tdx_data, "_get_client",
-                            lambda: self._fake_client(codes))
+                            lambda force_new=False: self._fake_client(codes))
         got = local_tdx_data.get_stock_list()
         assert got == ["600000", "601398", "688001", "000001", "002415",
                        "300750", "301001"], got
@@ -509,7 +509,7 @@ class TestGetStockListAShareFilter:
         """需要原始全表时仍可取——过滤是默认值，不是能力删除。"""
         codes = ["600000", "999999", "510300"]
         monkeypatch.setattr(local_tdx_data, "_get_client",
-                            lambda: self._fake_client(codes))
+                            lambda force_new=False: self._fake_client(codes))
         assert local_tdx_data.get_stock_list(ashare_only=False) == codes
 
     def test_prefix_rule_matches_vipdoc_rule(self):
@@ -536,7 +536,8 @@ class TestNameMapOverwriteGuard:
     原先门槛只加在 `fetch_all_from_clist` 上，可它在源顺序里**排最后**；
     排在前面的 `fetch_from_tdx_protocol`（沪深两市，一市失败就剩一半）与
     `fetch_from_tq`（逐只 RPC，部分失败照样返回）都没有门槛。
-    ⇒ 门槛移到**落盘边界**（`resolve_name_map` 调 `save_cache` 之前）。
+    ⇒ 门槛移到**落盘边界**（`resolve_name_map` 与 `main()` 两条落盘路径的
+    `save_cache` 之前——生产每日刷新走的是 main()，只挂前者等于没挂）。
     """
 
     @staticmethod
@@ -597,3 +598,33 @@ class TestNameMapOverwriteGuard:
         names, diag, after = self._run(tmp_path, monkeypatch, 5000, 3, days_ago=99)
         assert after["count"] == 5000 and len(names) == 5000
         assert diag["st_filter"] == "stale", "陈旧要如实报出"
+
+
+    def test_main_refuses_tiny_table(self, tmp_path, monkeypatch, capsys):
+        """🔴 直接打 main()：生产每日刷新的实际路径，门槛必须同样挂在它的落盘前。
+
+        review 发现门槛一度只挂在 `resolve_name_map` 里，而 main() 直接 `save_cache`
+        ——「3 只残缺表覆盖 5000 只完整缓存」的事故形态在这条路径上原样可复现。
+        拒绝时必须非零退出并打清原因，缓存原封不动。
+        """
+        p = self._write_cache(tmp_path, 5000)
+        tiny = {str(600000 + i): f"新{i}" for i in range(3)}
+        monkeypatch.setattr(sn, "CACHE", p)
+        monkeypatch.setattr(sn, "fetch_name_map", lambda session=None: (tiny, "tq_local"))
+        rc = sn.main(["--out", str(p)])
+        assert rc != 0, "残缺表必须拒绝落盘且非零退出"
+        after = json.loads(p.read_text(encoding="utf-8"))
+        assert after["count"] == 5000, "缓存必须原封不动"
+        out = capsys.readouterr().out
+        assert "overwrite_refused" in out and "拒绝覆盖" in out
+
+    def test_main_accepts_complete_table(self, tmp_path, monkeypatch):
+        """对照组：新表不小于门槛时 main() 正常落盘（门槛不误伤正常刷新）。"""
+        p = self._write_cache(tmp_path, 5000)
+        full = {str(600000 + i): f"新{i}" for i in range(5000)}
+        monkeypatch.setattr(sn, "CACHE", p)
+        monkeypatch.setattr(sn, "fetch_name_map", lambda session=None: (full, "tdx_protocol"))
+        rc = sn.main(["--out", str(p)])
+        assert rc == 0
+        assert json.loads(p.read_text(encoding="utf-8"))["count"] == 5000
+        assert json.loads(p.read_text(encoding="utf-8"))["source"] == "tdx_protocol"

@@ -54,14 +54,15 @@ for _p in ("07_tools", "07_tools/local_tdx", "07_tools/screening",
 
 OUTDIR = BASE / "06_logs" / "data_probe"
 
-# 探测用样本：覆盖三个交易所 + 一个指数。故意包含 BJ ——
-# 它是 xdxr 唯一不覆盖的市场，前复权会静默降级成未复权（本仓库已知问题）。
+# 探测用样本：覆盖三个交易所 + 一个指数。故意包含 BJ —— 它**曾是** xdxr 唯一
+# 不覆盖的市场（mootdx 把 920 段判错 market）；84ee19f 修好 market=2 后，
+# 920808 实测有 24 条权息（8 条影响价格 + 16 条股本变化），BJ 前复权已可用。
 SAMPLE_SH = "600000"        # 浦发银行
 # TQ 要求带市场后缀（裸 6 位 → ErrorId=2 stock_code error，实测踩到）
 TQ_SH = "600000.SH"
 SAMPLE_SZ = "000001"        # 平安银行
 SAMPLE_CY = "300750"        # 宁德时代（创业板，20% 涨跌幅）
-SAMPLE_BJ = "920808"        # 北交所（xdxr 不覆盖）
+SAMPLE_BJ = "920808"        # 北交所（84ee19f 修好 market=2 后 xdxr 已覆盖，实测 24 条权息）
 SAMPLE_INDEX = "999999"     # 上证指数（注意：vipdoc 里 sh000001 不是上证指数）
 
 
@@ -242,9 +243,12 @@ def probe_qfq(repeat: int) -> list[Probe]:
     out.append(Probe("qfq", "cache_age_days(SH)", "缓存新鲜度").run(
         lambda: A.cache_age_days(SAMPLE_SH), repeat))
 
-    # ⚠️ 空权息事件会被盖章成 adjust="qfq"（实测）——`get_xdxr(BJ)` 返回 [] 而非抛错，
-    # 于是 qfq_table 走成功路径，把**未复权**数据标成「已前复权」。
+    # ⚠️ 空权息事件会被盖章成 adjust="qfq"（实测）——`get_xdxr` 对取不到权息的票
+    # 返回 [] 而非抛错，于是 qfq_table 走成功路径，把**未复权**数据标成「已前复权」。
     # 唯一线索是 attrs["adjust_events"]==0，而目前没有调用方检查它。
+    # 注：BJ 曾是这样的票（mootdx 把 920 段判错 market ⇒ get_xdxr(BJ) 恒空）；
+    # 84ee19f 修好 market=2 后 920808 实测有 24 条权息，本探针在 BJ 样本上可能
+    # 不再触发暴露路径，但「空事件盖章 qfq」对任何无权息记录的票仍然存在。
     def _bj_adjust_stamp() -> Any:
         import pandas as pd  # noqa: PLC0415
         df = pd.DataFrame({"date": ["2026-08-04", "2026-08-05"],
