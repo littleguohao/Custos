@@ -369,7 +369,15 @@ SPECS: dict[str, dict] = {
                 # 5 个 quote 变体里有 5 个原本只有 close。**5 个消费者读 price**，
                 # 所以它是契约的一部分，不是实现细节。取不到数的票没有它 ⇒ 非必填。
             }},
-            "indices": {"type": dict, "required": True},
+            # ⚠️ indices 是 **list**（每项 {code, name, close, ...}），不是 dict ——
+            # 两个消费端（review_core x2）都按 list 迭代。spec 曾误写成 dict，
+            # 而契约 08-07 傍晚才挂上、当时 run_1445 正处在 TOOLS bug 窗口，
+            # 生产从未跑过 ⇒ 首个交易日 14:45 必败（08-08 重跑 08-07 时抓到）。
+            # items 只钉 code：成功分支没有 available 键（仅失败分支写
+            # available=False），别把成功路径判成畸形。
+            "indices": {"type": list, "required": True, "items": {
+                "code": {"type": str, "required": True, "non_empty": True},
+            }},
             "breadth": {"type": dict, "required": True},
         },
     },

@@ -414,8 +414,15 @@ class TestHoldingQuotesContract:
     但取不到数的票没有它 ⇒ 不设 required。
     """
 
+    # indices 形状按生产实况（collect_holding_quotes._collect_indices）：list，
+    # 成功项无 available 键、失败项才有 available=False。曾误记为 dict，
+    # 导致 1445 链契约校验必败（2026-08-08 重跑抓到）。
     VALID = {"as_of_date": "2026-08-07", "captured_at": "2026-08-07T17:00:00+08:00",
-             "source": "mootdx", "indices": {}, "breadth": {},
+             "source": "mootdx", "breadth": {},
+             "indices": [{"code": "000001", "name": "上证指数", "close": 3500.0,
+                          "price": 3500.0, "change_pct": 0.5, "source": "mootdx_online_index"},
+                         {"code": "399006", "name": "创业板指",
+                          "available": False, "reason": "no data"}],
              "quotes": [{"code": "600000", "name": "甲", "market": "SH", "available": True,
                          "date": "2026-08-07", "date_verified": False,
                          "close": 10.5, "price": 10.5, "change_pct": 1.2},
