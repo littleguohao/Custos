@@ -168,6 +168,12 @@ def write_json_atomic(path, obj, *, indent: int = 2) -> None:
 
     纯产物（报告、run log、门控 JSON、采集输出）不必原子化：下次跑会重写。
 
+    与 `write_json` 一样带 **`allow_nan=False`**：NaN/Infinity 不是合法 JSON，
+    带它在写入时当场崩，把静默错误变成显式失败（理由见 `write_json` 的 docstring，
+    原子版写的恰恰是累积状态，更经不起静默降级）。
+    `default=str` 只兜**不可序列化的类型**（date 等），管不到 NaN ——
+    float 的 NaN 本来「可序列化」，没有 `allow_nan=False` 就被写成 `NaN` 混过去了。
+
     为什么单独抽出来：`trades/incremental_ledger` 早就有一份私有 `_write_atomic`
     （它踩过「持仓已加、台账没记 ⇒ 下次导入重复计账、持仓静默翻倍」的真实缺陷），
     但 `amv_state` / `merge_incremental_market` 这些同样是累积/读改写的地方还在裸写。
@@ -177,6 +183,7 @@ def write_json_atomic(path, obj, *, indent: int = 2) -> None:
     import os as _os
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(_json.dumps(obj, ensure_ascii=False, indent=indent, default=str),
+    tmp.write_text(_json.dumps(obj, ensure_ascii=False, indent=indent,
+                               allow_nan=False, default=str),
                    encoding="utf-8")
     _os.replace(tmp, path)

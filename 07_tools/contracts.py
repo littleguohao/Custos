@@ -226,9 +226,13 @@ SPECS: dict[str, dict] = {
         "kind": "array",
         "items": {
             "code": {"type": str, "required": True, "non_empty": True},
-            # ⚠️ 消费端 8 处读它做**陈旧判定**（`runtime_gate.technical_freshness`
-            # 就靠它比对目标日）。取不到技术面时它不存在，所以这里不 required——
-            # 但 `technical_available=True` 却缺 latest_date 是矛盾态，见下面 warning。
+            # ⚠️ `latest_date` 刻意**不在** spec 里：消费端 8 处读它做**陈旧判定**
+            # （`runtime_gate.technical_freshness` 就靠它比对目标日），
+            # 但取不到技术面时它根本不存在（分支型产物，见上），要求它会让
+            # 「取不到技术面」这个正常状态被判成畸形。
+            # 「`technical_available=True` 却缺 latest_date」是矛盾态 ——
+            # 但那是**跨字段**不变量，按本模块「只查字段、查不出跨字段矛盾」的
+            # 能力边界（见模块 docstring），契约不查，靠单元测试保证。
             "technical_available": {"type": bool, "required": True},
         },
     },
@@ -713,6 +717,12 @@ def check(name: str, obj: Any, only: tuple[str, ...] | None = None) -> dict[str,
     errors: list[str] = []
     warnings: list[str] = []
     if spec["kind"] == "array":
+        if only is not None:
+            # ⚠️ array 类契约按**条目**校验，`only`（顶层字段裁剪）对它无意义。
+            # 不能静默忽略：调用方会误以为自己只校验了部分字段，
+            # 实际校验的是整个数组 —— 与 unknown path 一样发 warning。
+            warnings.append(f"{name}: array 类契约不支持 only（已按整个数组校验）"
+                            f" —— 拼错了会让校验范围与预期不符")
         if not isinstance(obj, list):
             errors.append(f"{name}: 期望数组，得到 {type(obj).__name__}")
         else:

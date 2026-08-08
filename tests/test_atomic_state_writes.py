@@ -70,6 +70,17 @@ class TestWriteJsonAtomic:
         got = json.loads(f.read_text(encoding="utf-8"))
         assert got["名称"] == "测试" and got["d"] == "2026-08-06"
 
+    def test_nan_rejected_like_write_json(self, tmp_path):
+        """⚠️ 与 `write_json` 对齐带 `allow_nan=False` —— 那是这对函数存在的
+        **主要理由**（NaN/Infinity 不是合法 JSON，写出去会让下游比较静默为 False），
+        原子版曾漏带。注意 `default=str` 兜不住 NaN：float 的 NaN 本来
+        「可序列化」，`default` 钩子根本不会被调用。"""
+        f = tmp_path / "nan.json"
+        with pytest.raises(ValueError):
+            paths.write_json_atomic(f, {"score": float("nan")})
+        assert not f.exists() and list(tmp_path.iterdir()) == [], \
+            "拒绝后不得留下目标文件或 tmp 残留"
+
 
 class TestAccumulativeStateUsesAtomic:
     """两类必须原子写的地方，不许退回裸 write_text。"""

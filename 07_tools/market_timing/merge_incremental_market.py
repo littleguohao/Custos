@@ -159,6 +159,15 @@ def main(argv=None) -> int:
             status.update({"status": "ok", "merged": True, "stale": stale})
             if stale:
                 print(f"[WARN] 以下指标数据日非目标日 {target},已标记 stale(不得当作当日数据): {', '.join(stale)}")
+        except SystemExit as e:
+            # ⚠️ require() 失败抛的是 **SystemExit**，不是 Exception 子类 ——
+            # 只捕 Exception 会让它直接穿出 main()：退出码虽仍是失败（1），
+            # 但 _write_status 不执行、status JSON 留旧值，「合并没生效」
+            # 在事后复盘里完全没有痕迹（这正是 _write_status 存在的理由）。
+            print(f"[WARN] merge incremental failed: {e}", file=sys.stderr)
+            status.update({"status": "failed", "error": f"SystemExit: {e}"})
+            _write_status(target, status)
+            return 1
         except Exception as e:
             print(f"[WARN] merge incremental failed: {e}", file=sys.stderr)
             status.update({"status": "failed", "error": f"{type(e).__name__}: {e}"})
@@ -228,6 +237,13 @@ def main(argv=None) -> int:
                                "amv_source": amv_source})
             if status["status"] == "skipped":
                 status["status"] = "ok"
+        except SystemExit as e:
+            # ⚠️ 同上：require() 抛 SystemExit（非 Exception 子类），
+            # 必须显式捕获才能保证失败状态落盘。
+            print(f"[WARN] 0AMV quality auto-fix failed: {e}", file=sys.stderr)
+            status.update({"status": "failed", "error": f"SystemExit: {e}"})
+            _write_status(target, status)
+            return 1
         except Exception as e:
             print(f"[WARN] 0AMV quality auto-fix failed: {e}", file=sys.stderr)
             status.update({"status": "failed", "error": f"{type(e).__name__}: {e}"})

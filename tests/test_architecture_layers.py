@@ -77,13 +77,16 @@ def _build_graph():
     files = sorted(p for p in TOOLS.rglob("*.py") if "__pycache__" not in str(p))
     mods = {}
     for p in files:
-        rel = p.relative_to(TOOLS)
-        mods.setdefault(p.stem, str(rel))
-        mods[str(rel.with_suffix("")).replace("/", ".")] = str(rel)
+        # ⚠️ 必须 as_posix()：Windows 上 str(relative_to) 产反斜杠，
+        # 与 import 名（点号）/ ALLOWED 白名单（正斜杠）/ _layer() 的
+        # startswith('screening/') 全部对不上，多条检查会 vacuous 通过。
+        rel = p.relative_to(TOOLS).as_posix()
+        mods.setdefault(p.stem, rel)
+        mods[rel[:-3].replace("/", ".")] = rel
 
     graph = collections.defaultdict(set)
     for p in files:
-        rel = str(p.relative_to(TOOLS))
+        rel = p.relative_to(TOOLS).as_posix()
         try:
             tree = ast.parse(p.read_text(encoding="utf-8"))
         except SyntaxError:

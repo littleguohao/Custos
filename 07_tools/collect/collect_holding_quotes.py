@@ -20,7 +20,7 @@ tq_http 干净返回 error，自然 fall through 到下一数据源。
 
 CLI::
 
-    uv run python 07_tools/collect_holding_quotes.py --date YYYY-MM-DD --session intraday
+    uv run python 07_tools/collect/collect_holding_quotes.py --date YYYY-MM-DD --session intraday
 """
 from __future__ import annotations
 

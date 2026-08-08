@@ -345,6 +345,14 @@ class TestOnlyScoping:
         r = C.check("market_timing_input", {}, only=("amv_0.qualtiy",))
         assert any("only" in w for w in r["warnings"])
 
+    def test_only_on_array_spec_warns_not_silently_ignored(self):
+        """⚠️ array 类契约按**条目**校验，`only`（顶层字段裁剪）对它无意义。
+        静默忽略会让调用方误以为只校验了部分字段、实际查了整份数组 ——
+        与 unknown path 一样发 warning（不升级为 error）。"""
+        r = C.check("sector_state", [], only=("score",))
+        assert r["valid"], "warning 不得升级为 error"
+        assert any("only" in w for w in r["warnings"])
+
 
 class TestSectorStateContract:
     VALID = [{"date": "2026-08-07", "sector": "半导体", "state": "主升", "trend": "上涨",

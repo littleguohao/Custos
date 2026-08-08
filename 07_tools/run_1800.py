@@ -13,16 +13,13 @@ machine-consumed protocol; observability goes to
 from __future__ import annotations
 
 import argparse
-import contextlib
-import io
 import json
 import os
 import sys
 import time
-from datetime import date
 
 from paths import BASE, SCREENING, TOOLS, cn_today
-from pipeline_kit import check_trading_day, log_stage, md_to_digest, now_iso, run_stage, write_run_log, run_stage_quiet as _stage, calendar_gate
+from pipeline_kit import log_stage, md_to_digest, now_iso, write_run_log, run_stage_quiet as _stage, calendar_gate
 
 SCREEN_DIR = SCREENING
 TABLE_DIR = BASE / "03_daily_plans" / "_supporting"

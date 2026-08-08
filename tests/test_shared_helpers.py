@@ -172,7 +172,9 @@ class TestNoRefork:
     def test_no_duplicate_definitions(self):
         offenders = []
         for p in sorted((ROOT / "07_tools").rglob("*.py")):
-            rel = str(p.relative_to(ROOT / "07_tools"))
+            # ⚠️ 必须 as_posix()：Windows 上 str() 产反斜杠，
+            # 与 CANON 白名单（'close_review/review_core.py' 正斜杠）永不匹配 ⇒ 误报。
+            rel = p.relative_to(ROOT / "07_tools").as_posix()
             tree = ast.parse(p.read_text(encoding="utf-8"))
             for node in ast.walk(tree):
                 if isinstance(node, ast.FunctionDef) and node.name in self.CANON:
