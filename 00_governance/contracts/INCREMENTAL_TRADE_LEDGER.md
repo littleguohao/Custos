@@ -45,7 +45,7 @@
 反过来（持仓已加、台账没记）会让下次导入把同一批成交再算一遍（持仓静默翻倍，真实发生过）。
 
 ⚠️ **但此前没有任何常规检查在「检测」它** —— 唯一的对账逻辑埋在
-`trades/backtest_0amv_bear_regime.py`（自称「不触碰任何管线」的研究脚本）里，
+`research/backtest_0amv_bear_regime.py`（自称「不触碰任何管线」的研究脚本）里，
 而 `runtime_guards` 读台账只判**新鲜度**、不校验「持仓 == 台账回放」。
 
 现由 `07_tools/trades/reconcile_positions.py` 补上，并接入 17:00 链（**非阻断**）：

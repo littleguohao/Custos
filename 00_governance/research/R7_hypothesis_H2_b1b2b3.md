@@ -68,6 +68,8 @@ H2 全部方向至此均有否决结论，不得据此改选股链。
 
 ### 实现与验证状态
 
+> 注：下文因子路径 `screening/b2_surge_factor.py` 已迁至 `07_tools/factors/`。
+
 - 因子：`screening/b2_surge_factor.py`（`detect_b2` / `detect_bottom_surge` /
   `detect_surge_then_b1`；`_j_series` 与 `technical_monitor.kdj` 同口径，测试逐值钉住）
 - 回测入口：`SCORERS["b2"]`（按命中硬条件数×20 + 无上影线 20 合成，最少假设）；

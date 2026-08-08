@@ -128,7 +128,8 @@ class TestRegistry:
             declared.add(f["doc"])
         for x in r["shared_rules"]:
             declared.add(x["doc"])
-        actual = {str(p.relative_to(STRATEGY)) for p in STRATEGY.rglob("*")
+        # as_posix()：Windows 下 relative_to 产出反斜杠，与注册表里的正斜杠永不匹配
+        actual = {p.relative_to(STRATEGY).as_posix() for p in STRATEGY.rglob("*")
                   if p.is_file() and p.name not in ("README.md", "STRATEGY_REGISTRY.json")}
         assert actual <= declared, f"未登记的文件：{sorted(actual - declared)}"
 
@@ -174,6 +175,54 @@ class TestDocHeaders:
     def test_no_bom(self, doc):
         assert not doc.read_text(encoding="utf-8").startswith("\ufeff"), \
             f"{doc.name} 带 BOM"
+
+
+class TestReferencedPathsExist:
+    """文档里写的代码/治理路径必须真实存在。
+
+    本周大重构搬移了大量文件（holdings/ 从 market_timing 拆出、research/ 从
+    screening/analysis 搬入），引用漂移是最常见的失效形式——
+    `b1_holding_state.py`、`s_shape.py`、`reconcile_qfq.py` 都踩过。
+    """
+
+    # 只收「形如路径」的 token：07_tools/ 或 00_governance/ 开头、以扩展名
+    # （文件）或 `/`（目录）结尾；容忍 `:行号` / `#锚点` 后缀。
+    # `07_tools/pipeline_kit.propagate_gate_code` 这类「模块.符号」不算路径。
+    PATHISH = re.compile(r"^(?:07_tools|00_governance)/\S+?(\.[a-z0-9]+|/)$")
+
+    @staticmethod
+    def _strip_suffix(token):
+        """去掉 `:行号` / `#锚点` 后缀，只校验路径部分。"""
+        return re.split(r"[:#]", token, maxsplit=1)[0]
+
+    def test_header_code_deps_exist(self):
+        """策略文档头部「代码依赖」字段里的每个路径（相对 07_tools/）必须存在。"""
+        bad = []
+        for doc in STRATEGY.rglob("*.md"):
+            for ln in doc.read_text(encoding="utf-8")[:1200].splitlines():
+                if "**代码依赖**：" not in ln:
+                    continue
+                # 只取标记之后的 token——同一行前文可能引用别的文件（如抢救来源）
+                deps = ln.split("**代码依赖**：", 1)[1]
+                for tok in re.findall(r"`([^`]+)`", deps):
+                    path = self._strip_suffix(tok)
+                    if not re.search(r"\.[a-z0-9]+$", path):
+                        continue
+                    if not (ROOT / "07_tools" / path).exists():
+                        bad.append(f"{doc.relative_to(STRATEGY).as_posix()}: {tok}")
+        assert not bad, f"「代码依赖」里的路径不存在：{bad}"
+
+    def test_contracts_backtick_paths_exist(self):
+        """contracts/*.md 里反引号包裹的 07_tools/** 与 00_governance/** 路径必须存在。"""
+        bad = []
+        for doc in (ROOT / "00_governance" / "contracts").glob("*.md"):
+            for tok in re.findall(r"`([^`]+)`", doc.read_text(encoding="utf-8")):
+                path = self._strip_suffix(tok)
+                if not self.PATHISH.match(path):
+                    continue
+                if not (ROOT / path).exists():
+                    bad.append(f"{doc.name}: {tok}")
+        assert not bad, f"contracts 里的路径不存在：{bad}"
 
 
 class TestReversalKMatchesCode:

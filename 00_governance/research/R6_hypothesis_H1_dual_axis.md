@@ -120,6 +120,8 @@ RSV 窗口），而那么长的回调会**破坏 QSX>DKS**。合成用例实测�
 
 ### 实现与验证状态
 
+> 注：下文因子路径 `screening/b1_dual_factor.py` 已迁至 `07_tools/factors/`。
+
 - 因子：`screening/b1_dual_factor.py`（`compute_b1_dual` / `compute_long_structure` /
   `detect_launch_segment` / `detect_breakout_pullback_b1` / `detect_weekly_b1_resonance`）
 - 回测入口：`SCORERS["b1_dual"]`、`["b1_dual_no_res"]`、`["long_structure"]`（后两个消融用）；

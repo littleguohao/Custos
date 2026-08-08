@@ -17,7 +17,7 @@
 | MarketState | `generate_risk_and_sectors.py`、`market_timing/` |
 | SectorState | `generate_risk_and_sectors.py` |
 | StockCandidate | `screening/` 链（enrich → score → table）|
-| HoldingReview | `market_timing/b1_holding_state.py` |
+| HoldingReview | `holdings/b1_holding_state.py` |
 | RiskDecision | `generate_risk_and_sectors.py` |
 | ChiefDecision | `chief_decision_report.py`、`daily_report.py` |
 

@@ -98,7 +98,7 @@ Affair.files()        ×3      Affair.fetch/parse
 | `get_stock_list()` 现默认 | 约 **5300** | 已过滤为 A 股个股，仅沪深 |
 
 2026-08-06 起 `get_stock_list(ashare_only=True)` 为默认。
-原因：`backtest_factors:2285`（不传 `--universe-local` 时的 universe 源）
+原因：`backtest_factors` 的 `sample_codes()`（不传 `--universe-local` 时的 universe 源）
 **没有下游过滤**，51567 项直接进 `sample_codes()` ⇒ 抽样约 89% 概率抽到非个股。
 案底见 `DATA_SOURCE_COVERAGE_MATRIX.md` 备注 C。
 
