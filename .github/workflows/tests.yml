@@ -1,0 +1,23 @@
+# 双平台全绿门禁：本项目开发/运行在 Windows，但路径分隔符、控制台编码
+# 这类平台差异已多次让「守卫测试在一侧空转或恒红」（2026-08-08 review），
+# 所以两侧都必须真绿，不许只看一边。
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv run pytest -q
