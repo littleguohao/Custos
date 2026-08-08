@@ -251,7 +251,7 @@ class TestOhlcvFreshness:
         from local_tdx import local_tdx_data as ltd
         monkeypatch.setattr(ltd, "read_vipdoc_daily", lambda c: self._df("2026-07-30"))
         monkeypatch.setattr(ltd, "get_online_bars", lambda c, offset=0: pd.DataFrame())
-        df = ltd.get_ohlcv_table("600000", count=30, expect_last_date="2026-08-03")
+        df = ltd.get_ohlcv_table("600000", count=30, expect_last_date="2026-08-03", adjust="none")
         assert df.attrs["stale"] is True
         assert df.attrs["last_date"] == "2026-07-30"
         assert df.attrs["expected"] == "2026-08-03"
@@ -259,7 +259,7 @@ class TestOhlcvFreshness:
     def test_fresh_local_data_not_flagged(self, monkeypatch):
         from local_tdx import local_tdx_data as ltd
         monkeypatch.setattr(ltd, "read_vipdoc_daily", lambda c: self._df("2026-08-03"))
-        df = ltd.get_ohlcv_table("600000", count=30, expect_last_date="2026-08-03")
+        df = ltd.get_ohlcv_table("600000", count=30, expect_last_date="2026-08-03", adjust="none")
         assert df.attrs["stale"] is False
 
     def test_online_refresh_wins_over_stale_local(self, monkeypatch):
@@ -268,7 +268,7 @@ class TestOhlcvFreshness:
         monkeypatch.setattr(ltd, "read_vipdoc_daily", lambda c: self._df("2026-07-30"))
         monkeypatch.setattr(ltd, "get_online_bars",
                             lambda c, offset=0: self._df("2026-08-03"))
-        df = ltd.get_ohlcv_table("600000", count=30, expect_last_date="2026-08-03")
+        df = ltd.get_ohlcv_table("600000", count=30, expect_last_date="2026-08-03", adjust="none")
         assert df.attrs["stale"] is False and df.attrs["last_date"] == "2026-08-03"
 
     def test_without_expect_date_behaviour_unchanged(self):
@@ -276,7 +276,7 @@ class TestOhlcvFreshness:
         from local_tdx import local_tdx_data as ltd
         import unittest.mock as m
         with m.patch.object(ltd, "read_vipdoc_daily", lambda c: self._df("2026-07-30")):
-            df = ltd.get_ohlcv_table("600000", count=30)
+            df = ltd.get_ohlcv_table("600000", count=30, adjust="none")
         assert "stale" not in df.attrs
 
 

@@ -1367,6 +1367,9 @@ class TestMemoryGuards:
         assert "超过 CPU 核数 4" in capsys.readouterr().out
 
     def test_cap_jobs_keeps_when_memory_ample(self, monkeypatch):
+        # CPU 核数也要钉：CI runner 只有 4 核，_cap_jobs 先按核数收敛，
+        # 不钉会在「内存充足」用例里拿到 4 而非 6。
+        monkeypatch.setattr(m2.os, "cpu_count", lambda: 64)
         monkeypatch.setattr(m2, "_avail_mem_mb", lambda: 64_000.0)
         assert m2._cap_jobs(6, 20) == 6
 

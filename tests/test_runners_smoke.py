@@ -35,6 +35,8 @@ RUNNERS = {
     "run_1800.py": "休市",
 }
 
+LOG_DIR = BASE / "06_logs"
+
 
 def _is_trading_day(target: str) -> bool:
     r = subprocess.run(
@@ -47,11 +49,32 @@ def _is_trading_day(target: str) -> bool:
     return True  # calendar broken → skip to stay safe
 
 
+class _RunLogRestore:
+    """runner 子进程走日历门时会把 run_log 落进**真实** 06_logs/（LOG_DIR 是模块级
+    常量，子进程打不了桩）。不处理的话：① 干净环境下被 repo hygiene 测试抓到；
+    ② 目标机上若当天已有同名师手动日志会被覆盖。所以：跑前备份、跑后恢复/删除。
+    """
+
+    def __init__(self, testcase: unittest.TestCase, script: str, target: str):
+        session = script.removeprefix("run_").removesuffix(".py")
+        self.path = LOG_DIR / f"{target}_{session}_run_log.json"
+        self.prior = self.path.read_bytes() if self.path.is_file() else None
+        testcase.addCleanup(self._restore)
+
+    def _restore(self):
+        if self.prior is None:
+            self.path.unlink(missing_ok=True)
+        else:
+            self.path.write_bytes(self.prior)
+
+
 @unittest.skipIf(_is_trading_day(date.today().strftime("%Y-%m-%d")), "today is a trading day")
 class RunnerSmokeTests(unittest.TestCase):
     def test_runner_exits_cleanly_on_closed_day(self):
+        target = date.today().strftime("%Y-%m-%d")
         for script, marker in RUNNERS.items():
             with self.subTest(script=script):
+                _RunLogRestore(self, script, target)
                 r = subprocess.run(
                     ["uv", "run", "python", str(TOOLS / script)],
                     capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -70,6 +93,7 @@ class RunnerSmokeTests(unittest.TestCase):
             self.skipTest(f"{target} is a make-up trading day")
         for script, marker in RUNNERS.items():
             with self.subTest(script=script):
+                _RunLogRestore(self, script, target)
                 r = subprocess.run(
                     ["uv", "run", "python", str(TOOLS / script), "--date", target],
                     capture_output=True, text=True, encoding="utf-8", errors="replace",

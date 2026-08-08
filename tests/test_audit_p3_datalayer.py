@@ -495,7 +495,7 @@ class TestC7DoesNotBreakOnlineFallback:
             "open": [1.0] * 5, "high": [1.0] * 5, "low": [1.0] * 5,
             "close": [1.0] * 5, "volume": [1.0] * 5})
         monkeypatch.setattr(ltd, "get_online_bars", lambda c, offset=0: online)
-        df = ltd.get_ohlcv_table("600000", count=5)
+        df = ltd.get_ohlcv_table("600000", count=5, adjust="none")
         assert len(df) == 5
 
     def test_module_annotations_resolve(self):

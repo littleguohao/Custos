@@ -132,6 +132,14 @@ class TestWhoIsWrong:
     分歧、事件日跳变却都 <0.4%，正是必须定方向的场景。
     """
 
+    @pytest.fixture(autouse=True)
+    def _no_xdxr_network(self, monkeypatch):
+        # detail() 内部 `import adjust_factors` 取事件表：xdxr 缓存缺失时会走网络
+        # 取数并落盘到真实 01_data/market/xdxr/（干净环境下被 repo hygiene 测试抓到）。
+        # 本类判据用的是合成数据，不需要真事件表。
+        import adjust_factors
+        monkeypatch.setattr(adjust_factors, "get_xdxr", lambda code, **kw: [])
+
     def test_limit_pct_by_prefix(self):
         assert R._limit_pct("600519") == 10.0
         assert R._limit_pct("300750") == 20.0

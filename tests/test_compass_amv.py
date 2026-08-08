@@ -259,9 +259,14 @@ class ErrorPathTest(unittest.TestCase):
 
 
 REAL_PATH = compass_amv._day_vdat_path()
+TRUTH_PATH = compass_amv.DEFAULT_TRUTH_LEDGER
 
 
-@unittest.skipUnless(REAL_PATH.is_file(), f"真实 day.vdat 不存在: {REAL_PATH}")
+# 两个都要在：day.vdat 在宿主 TDX 安装目录（仓库外，可能恰存在），真值台账在
+# 01_data（gitignore，干净 checkout 没有）——只查前者会在干净环境误判成
+# fallback 而失败（2026-08-08 干净副本实测）。
+@unittest.skipUnless(REAL_PATH.is_file() and TRUTH_PATH.is_file(),
+                     f"真实 day.vdat 或真值台账不存在: {REAL_PATH} / {TRUTH_PATH}")
 class RealFileTest(unittest.TestCase):
     """真实数据与真值台账 01_data/market/0amv_observations.jsonl 已确认值核对。"""
 

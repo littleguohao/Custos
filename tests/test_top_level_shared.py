@@ -233,8 +233,12 @@ class TestMovedScriptsRunAsMain:
     @pytest.mark.parametrize("rel", ENTRIES)
     def test_help_works(self, rel):
         import subprocess
+        # 入口脚本已陆续 reconfigure 成 UTF-8（cp936/cp1252 下中文 help 会崩），
+        # 没 reconfigure 的仍按 locale 出字节 —— 统一按 utf-8+replace 解码，
+        # 断言目标（usage 行、returncode）都是 ASCII，不受残余乱码影响。
         r = subprocess.run([sys.executable, str(T / rel), "--help"],
-                           capture_output=True, text=True, timeout=90)
+                           capture_output=True, encoding="utf-8", errors="replace",
+                           timeout=90)
         assert r.returncode == 0, f"{rel} 不能作为脚本执行：\n{r.stderr[-600:]}"
         assert r.stdout.lstrip().startswith("usage"), f"{rel} 未输出 usage"
 

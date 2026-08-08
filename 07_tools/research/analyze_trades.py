@@ -5,9 +5,9 @@
 current_positions.json 读取持仓/清仓数据，输出多维度复盘分析 Excel。
 
 用法:
-    uv run python -m tools.analyze_trades              # 默认输出到 04_reviews/
-    uv run python -m tools.analyze_trades --preview    # 仅打印数据概览
-    uv run python tools/analyze_trades.py              # 直接运行
+    uv run python 07_tools/research/analyze_trades.py              # 默认输出到 04_reviews/
+    uv run python 07_tools/research/analyze_trades.py --preview    # 仅打印数据概览
+    uv run python 07_tools/research/__main__.py analyze_trades     # 经统一研究入口
 """
 from __future__ import annotations
 
@@ -18,6 +18,14 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+
+# 非 UTF-8 终端/管道（cp936、CI windows 的 cp1252）打不了中文 help ——
+# 不 reconfigure 会 UnicodeEncodeError（2026-08-08 CI windows-latest 实测）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
 # ⚠️ 本文件在 07_tools 的**子目录**里：作为 __main__ 跑时 sys.path[0] 是本目录，
