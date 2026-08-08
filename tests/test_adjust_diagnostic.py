@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """复权口径诊断的回归测试。
 
-背景（B1_STRATEGY_SUMMARY.md:31/40 记录、至今未解决）：live 选股与默认回测都读
+背景（90_research_summary.md:31/40 记录、至今未解决）：live 选股与默认回测都读
 通达信 vipdoc `.day` = **未复权**；只有 `--data-source qlib/csv` 是前复权。
 `get_adjusted_daily()` 有复权能力但从未被生产链或回测链调用。
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from screening.adjust_diagnostic import SPLIT_RATIOS, _risk_frac_stats, detect_gaps
+from research.adjust_diagnostic import SPLIT_RATIOS, _risk_frac_stats, detect_gaps
 
 
 def _mk(rows):

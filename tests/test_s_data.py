@@ -6,8 +6,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from screening import s_data
-from screening import backtest_factors as bt
+# ⚠️ 扁平 `import s_data`：2026-08-07 它从 `screening/` 移到 `07_tools/` 根层
+# （它是零内部依赖的**只读数据 loader**，放在选股目录里让 `local_tdx/` 的
+# 探针与对账工具反向依赖了 L3）。移动后**只有一条导入路径** ——
+# 此前全部调用点用扁平 `import s_data`、只有本测试用 `from screening import`，
+# 那是「同一文件两个模块对象」的隐患（`s_data.list_universe` 是被打桩的目标）。
+import s_data
+from research import backtest_factors as bt
 
 
 def _mk_bundle(root, name, dates, stocks):

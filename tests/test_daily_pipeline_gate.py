@@ -40,7 +40,7 @@ class TestPipelineLogOnEarlyExit:
     """
 
     def test_write_pipeline_log_creates_file_with_stages(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(dp, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(dp, "LOGS", tmp_path)
         stages = [{"stage": "runtime_gate", "ok": False, "returncode": 4,
                    "note": "market_quality=blocked(score=0.2)"}]
         path = dp._write_pipeline_log("2026-07-31", stages)
@@ -51,14 +51,14 @@ class TestPipelineLogOnEarlyExit:
         assert "blocked" in data["stages"][0]["note"]
 
     def test_creates_missing_log_dir(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(dp, "LOG_DIR", tmp_path / "nested" / "logs")
+        monkeypatch.setattr(dp, "LOGS", tmp_path / "nested" / "logs")
         path = dp._write_pipeline_log("2026-07-31", [])
         assert path.is_file()
 
 
 class TestGateStatusNote:
     def _write(self, tmp_path, monkeypatch, gate: dict):
-        monkeypatch.setattr(dp, "DATA_DIR", tmp_path)
+        monkeypatch.setattr(dp, "DATA", tmp_path)
         (tmp_path / "quality").mkdir(parents=True, exist_ok=True)
         (tmp_path / "quality" / "2026-07-30_runtime_gate.json").write_text(
             json.dumps(gate, ensure_ascii=False), encoding="utf-8")
@@ -80,5 +80,5 @@ class TestGateStatusNote:
         assert "stale=" not in dp.gate_status_note("2026-07-30")
 
     def test_missing_file_is_reported_not_raised(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(dp, "DATA_DIR", tmp_path)
+        monkeypatch.setattr(dp, "DATA", tmp_path)
         assert dp.gate_status_note("2026-07-30") == "gate_json_unreadable"

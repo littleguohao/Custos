@@ -12,19 +12,20 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from paths import BASE  # noqa: E402
+from paths import read_json as load  # noqa: E402
+from paths import write_json as dump  # noqa: E402
+from contracts import require  # noqa: E402
 from premarket_intel_schema import validate_premarket_intelligence  # noqa: E402
-from daily_report import load_premarket_intelligence, premarket_intelligence_path  # noqa: E402
+# ⚠️ **必须包限定导入** `news.premarket_intel_schema`。它持有可变的模块级状态
+# （`PREMARKET_DIR`，测试要 monkeypatch）。`07_tools` 与 `07_tools/news` 都在
+# sys.path 上，扁平写法 `from premarket_intel_schema import ...` 会建出
+# **第二个模块对象**，于是打桩打在另一个对象上、静默失效。
+from news.premarket_intel_schema import (  # noqa: E402
+    load_premarket_intelligence, premarket_intelligence_path)
 
 DATA = BASE / "01_data"
 
 
-def load(path: Path, default):
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
-
-
-def dump(path: Path, value):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
 
 
 # 政策分类口径。`A or B and C` 在 Python 里是 `A or (B and C)` —— 原写法
@@ -132,6 +133,7 @@ def main():
         "permission_rule": "news may add validation or tighten risk; it cannot directly increase trading permissions",
         "sources": [str(rss_path), str(intel_path or (DATA / "news" / "premarket" / f"{day}_premarket_intelligence.json"))],
     }
+    require("postclose_news_digest", result)
     dump(DATA / "news" / "postclose" / f"{day}_postclose_news_digest.json", result)
     print(json.dumps(result, ensure_ascii=True))
 

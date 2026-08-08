@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from screening import run_bear_to_long_study as rb
+from research import run_bear_to_long_study as rb
 
 
 def _pair(sig=("2022-03-01", "2022-06-01"), lab=("2022-06-02", "2022-07-22")):

@@ -20,10 +20,9 @@ import sys
 import time
 from datetime import date
 
-from paths import BASE, cn_today
-from pipeline_kit import check_trading_day, log_stage, md_to_digest, now_iso, run_stage, write_run_log
+from paths import BASE, cn_today, TOOLS
+from pipeline_kit import check_trading_day, log_stage, md_to_digest, now_iso, run_stage, write_run_log, run_stage_quiet as _stage, calendar_gate, propagate_gate_code
 
-TOOLS = BASE / "07_tools"
 REVIEWS = BASE / "04_reviews" / "daily"
 LOG_DIR = BASE / "06_logs"
 
@@ -65,14 +64,18 @@ def _last_line(text: str) -> str:
     return lines[-1] if lines else ""
 
 
-def _stage(cmd: list[str], name: str) -> dict:
-    """Run a stage quietly: runner stdout is a machine-consumed protocol, so
-    the stage echo ([RUN] header, subprocess output) is suppressed; only the
-    summary lines below are printed."""
-    with contextlib.redirect_stdout(io.StringIO()):
-        r = run_stage(cmd, name, required=False)
-    r["out"] = (r["stdout"] + r["stderr"]).strip()
-    return r
+
+
+def _reconcile_note(target: str) -> str:
+    """把对账结论摘进 run log —— 不阻断也要留痕，否则「持仓与台账脱节」事后无从察觉。"""
+    path = BASE / "01_data" / "quality" / f"{target}_ledger_reconcile.json"
+    try:
+        import json  # noqa: PLC0415
+        g = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "reconcile_json_unreadable"
+    return (f"status={g.get('status')}, 数量不一致={g.get('qty_mismatch_count')}只, "
+            f"台账成交={g.get('trade_rows')}笔, 回放ok={g.get('replay_ok')}")
 
 
 def main(argv=None) -> int:
@@ -98,31 +101,17 @@ def main(argv=None) -> int:
         return r
 
     # 1. Trading calendar
-    c_started = _now_iso()
-    c_t0 = time.time()
-    cal_buf = io.StringIO()
-    try:
-        with contextlib.redirect_stdout(cal_buf):
-            cal = check_trading_day(target)
-    except RuntimeError as e:
-        stages_log.append(_log_stage("calendar", {"ok": False, "returncode": None, "timeout": False,
-                                                  "stdout": cal_buf.getvalue(), "stderr": str(e)},
-                                     c_started, _now_iso(), time.time() - c_t0,
-                                     note=str(e)[:500]))
-        _write_run_log(target, "calendar_failed", run_started, t0, stages_log)
-        print(f"【盘后复盘失败｜{target}】日历检查失败：{str(e)[:200]}")
-        return 1
-    stages_log.append(_log_stage("calendar", {"ok": True, "returncode": 0, "timeout": False,
-                                              "stdout": cal_buf.getvalue()},
-                                 c_started, _now_iso(), time.time() - c_t0,
-                                 note=f"is_trading_day={cal.get('is_trading_day')}"))
-    if not cal.get("is_trading_day", False):
-        _write_run_log(target, "closed", run_started, t0, stages_log)
-        print(f"今日休市，盘后复盘不生成（{target}）")
-        return 0
+    _cg = calendar_gate(
+        target, log_dir=LOG_DIR, session="1700", run_started=run_started,
+        t0=t0, stages_log=stages_log,
+        fail_msg="【盘后复盘失败｜{target}】日历检查失败：{err}",
+        closed_msg="今日休市，盘后复盘不生成（{target}）")
+    if _cg.exit_code is not None:
+        return _cg.exit_code
+    cal = _cg.cal
 
     # 2. Collect postclose holding quotes via mootdx (online bars for today's close)
-    r = _run_stage(["uv", "run", "python", str(TOOLS / "collect_holding_quotes.py"), "--date", target,
+    r = _run_stage(["uv", "run", "python", str(TOOLS / "collect" / "collect_holding_quotes.py"), "--date", target,
                     "--session", "postclose"], "collect_holding_quotes",
                    note="best-effort，失败不中断")
     if not r["ok"]:
@@ -131,7 +120,7 @@ def main(argv=None) -> int:
         print(f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'holding quotes collected'}")
 
     # 3. Collect incremental market data (breadth/turnover/limit via mootdx + A50/CNH via Yahoo)
-    r = _run_stage(["uv", "run", "python", str(TOOLS / "collect_incremental_market.py"), "--date", target],
+    r = _run_stage(["uv", "run", "python", str(TOOLS / "collect" / "collect_incremental_market.py"), "--date", target],
                    "collect_incremental_market", note="best-effort，失败不中断")
     if not r["ok"]:
         print(f"[WARN] collect_incremental_market failed: {r['out'][:200]}")
@@ -142,7 +131,7 @@ def main(argv=None) -> int:
     #     不能无条件报 [OK]:脚本对每只持仓 fail-closed(台账无未平仓记录/K线未覆盖入场日
     #     都不出数),全员不出数时它退 2 并把摘要行以 [WARN] 开头。这里回显该摘要行,
     #     否则"0/5 出数"在 runner 输出里长得和"5/5 出数"一模一样。
-    r = _run_stage(["uv", "run", "python", str(TOOLS / "calc_mfe_mae.py"), "--date", target],
+    r = _run_stage(["uv", "run", "python", str(TOOLS / "close_review" / "calc_mfe_mae.py"), "--date", target],
                    "calc_mfe_mae", note="best-effort，失败不中断")
     tail = _last_line(r["out"])
     if not r["ok"]:
@@ -152,8 +141,24 @@ def main(argv=None) -> int:
     else:
         print(f"[OK] {tail or 'MFE/MAE calculated'}")
 
+    # 3b2. 台账↔持仓对账（**只报告，不阻断**）。
+    #      incremental_ledger 刻意选择「ledger 先落、positions 后落」，理由是
+    #      崩在两次 os.replace 之间留下的「已记录成交但持仓未更新」**可检测、可修复**。
+    #      但 2026-08-06 review 发现没有任何常规检查在检测它 —— 唯一的对账逻辑埋在
+    #      backtest_0amv_bear_regime.py（研究脚本）里。这一 stage 就是把「可检测」变成真的每天检测。
+    #      默认不阻断：新校验先观察若干交易日（2026-07-30 的教训是别同时收紧多个闸）。
+    #      注：_run_stage 内部已 append 到 stages_log，且底层 run_stage_quiet 就是
+    #      required=False，所以「非阻断」不需要额外传参 —— 只是这里不检查 r["ok"] 中断。
+    #      ⚠️ note 必须在 stage **跑完之后**算：`note=` 作为实参会在子进程启动前求值，
+    #      那时今天的对账 JSON 还没写，读到的是上一次的结果（或读不到）。
+    r = _run_stage(["uv", "run", "python", str(TOOLS / "trades" / "reconcile_positions.py"),
+                    "--date", target], "ledger_reconcile")
+    stages_log[-1]["note"] = _reconcile_note(target)
+    if not r["ok"]:
+        print(f"[WARN] ledger_reconcile 未成功（不阻断）：{r['out'][:200]}")
+
     # 3c. Collect fund flow rank (eastmoney direct API)
-    r = _run_stage(["uv", "run", "python", str(TOOLS / "collect_fund_flow.py"), "--date", target],
+    r = _run_stage(["uv", "run", "python", str(TOOLS / "collect" / "collect_fund_flow.py"), "--date", target],
                    "collect_fund_flow", note="best-effort，失败不中断")
     if not r["ok"]:
         print(f"[WARN] collect_fund_flow failed: {r['out'][:200]}")
@@ -205,7 +210,7 @@ def main(argv=None) -> int:
     if not r["ok"]:
         _write_run_log(target, "failed", run_started, t0, stages_log)
         print(f"【盘后复盘失败｜{target}】daily_pipeline失败：{r['out'][:500]}")
-        return 1
+        return propagate_gate_code(r)   # 门控码 3/4/5 原样上抛供 cron 判定
 
     # 6. Final close review
     no_trades_flag = _no_trades_flag(target)

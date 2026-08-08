@@ -121,6 +121,9 @@ class TestMainDegradesOnInvalidSchema:
             "position_gate": {}, "holding_actions": [], "buy_actions": [],
         }), encoding="utf-8")
         monkeypatch.setattr(daily_report, "DATA", data)
+        # ⚠️ 盘前情报访问器已移到 `news/premarket_intel_schema`，需单独打桩它的 PREMARKET_DIR
+        from news import premarket_intel_schema as _intel
+        monkeypatch.setattr(_intel, "PREMARKET_DIR", data / "news" / "premarket")
         monkeypatch.setattr(daily_report, "BASE", tmp_path)
         return data
 

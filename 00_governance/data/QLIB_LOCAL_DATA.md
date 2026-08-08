@@ -5,7 +5,7 @@
 > 代码已默认跳过（`load_bars_qlib` / `list_universe` 同口径），`allow_unverified=True` 可放行。
 > ⇒ **qlib 现在只覆盖 1999-11 ~ 2020-09**（老 bundle），且只在这段有 214 只退市票可去偏。
 >
-> `E:\S_DATA` 下的 qlib bundle / 单票 CSV，通过 `07_tools/screening/s_data.py` 只读访问。
+> `E:\S_DATA` 下的 qlib bundle / 单票 CSV，通过 `07_tools/s_data.py` 只读访问。
 > **只服务研究与回测链，live 链不用。**
 >
 > 2026-08-06 新建。此前它的关键事实只写在 `s_data.py` 的 docstring 里，
@@ -162,7 +162,7 @@ vipdoc 有数据的时段。**
 3. **换去偏路径**：另找 point-in-time 的退市股名单 + 价格源。
 
 ⇒ **在解决之前，所有基于 `--data-source qlib` 的结论都要打折**，包括那些
-「跨年 walk-forward 证伪」的结论（`research/B1_BACKTEST_FINDINGS.md` 结论 #8 等）——
+「跨年 walk-forward 证伪」的结论（`research/R2_selection_price_volume.md`）——
 它们用的收益率被放大过。
 
 ---

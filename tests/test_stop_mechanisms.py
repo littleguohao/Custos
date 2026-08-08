@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """保本止损（盈亏平衡保护）与移动止损回归测试。
 
-保本止损**不是新发明**——`b1_swing_strategy.md:328` 早就写了「已形成有效浮盈后，同时启用
+保本止损**不是新发明**——`01_swing_rules.md:328` 早就写了「已形成有效浮盈后，同时启用
 盈亏平衡保护，防止赢转亏」，但回测里一直没有。这和分批止盈是同一类缺口：文档定义了、
 检测/规则都在，只有回测没实现，于是回测系统性低估策略、也没法验证这些机制值不值得。
 
@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from screening.backtest_factors import _bbi_series, simulate_b1_trade
+from research.backtest_factors import _bbi_series, simulate_b1_trade
 
 BASE = [(10, 10.1, 9.9, 10)] * 30          # 进场 close=10，初始止损 low=9.9
 ENTRY = 29
@@ -55,7 +55,7 @@ class TestDefaultOff:
 
 
 class TestBreakevenStop:
-    """b1_swing_strategy.md:328「已形成有效浮盈后…防止赢转亏」。"""
+    """01_swing_rules.md:328「已形成有效浮盈后…防止赢转亏」。"""
 
     def test_converts_loss_to_flat(self):
         loss = _run(WIN_TO_LOSS)["ret"]
@@ -167,7 +167,7 @@ class TestCliWiring:
     def test_flags_reach_evaluate_trades(self):
         import inspect
 
-        from screening.backtest_factors import evaluate_trades
+        from research.backtest_factors import evaluate_trades
         ps = inspect.signature(evaluate_trades).parameters
         assert ps["breakeven_trigger"].default == 0.0
         assert ps["trail_pct"].default == 0.0
@@ -177,7 +177,7 @@ class TestCliWiring:
 
     def test_cli_exposes_flags(self):
         import pathlib
-        src = pathlib.Path("07_tools/screening/backtest_factors.py").read_text(encoding="utf-8")
+        src = pathlib.Path("07_tools/research/backtest_factors.py").read_text(encoding="utf-8")
         assert '"--breakeven"' in src and '"--trail"' in src
         assert "breakeven_trigger=args.breakeven" in src and "trail_pct=args.trail" in src
 
@@ -283,7 +283,7 @@ class TestCenterRising:
         ([10, 10.01, 9.99, 10.02, 9.98, 10.0], False),    # 横盘
     ])
     def test_segment_mean_comparison(self, seq, expect):
-        from screening.backtest_factors import _center_rising
+        from research.backtest_factors import _center_rising
         assert _center_rising(np.array(seq, float)) is expect
 
     def test_uses_means_not_endpoints(self):
@@ -292,14 +292,14 @@ class TestCenterRising:
         「重心」是中枢概念——末值比较会被最后一根噪声左右（一根小阴线就把
         「重心上升」判成否），而那正是材料反复告诫的「忽略盘中/单日波动」。
         """
-        from screening.backtest_factors import _center_rising
+        from research.backtest_factors import _center_rising
         # 末值 9.99 < 首值 10（末值比较会判 False），但前段均值 10.05 < 后段 10.46
         seq = np.array([10, 10.05, 10.1, 10.6, 10.8, 9.99], float)
         assert seq[-1] < seq[0], "构造前提：末值低于首值"
         assert _center_rising(seq) is True, "重心明显上移，不该被末根小阴否掉"
 
     def test_too_short_returns_false(self):
-        from screening.backtest_factors import _center_rising
+        from research.backtest_factors import _center_rising
         for seq in ([], [10.0], [10, 10.5], [10, 10.5, 11]):
             assert _center_rising(np.array(seq, float)) is False
 

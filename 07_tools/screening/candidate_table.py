@@ -24,6 +24,10 @@ if hasattr(sys.stdout, "reconfigure"):
 TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
+_FACTORS_DIR = str(Path(__file__).resolve().parents[1] / "factors")
+if _FACTORS_DIR not in sys.path:
+    sys.path.insert(0, _FACTORS_DIR)   # 因子层：见 factors/__init__.py
+
 
 from paths import PLANS, QUALITY_DIR, STOCK_POOL_DIR  # noqa: E402
 from runtime_guards import normalize_regime  # noqa: E402
@@ -149,7 +153,7 @@ def _signal_labels_section(candidates: list[dict]) -> list[str]:
                      + "、".join(f"{sl.SIGNAL_META[k][0]} {v} 只" for k, v in top))
     lines.append("> 分母为**可评估数**；缩写见各行反引号。这些标注不改写分层/next_step。")
     lines.append("> ⚠️ **这些因子已在跨窗终审中被否决**（edge 仅存在于 2025-2026 单一 regime，"
-                 "详见 00_governance/research/B1_BACKTEST_FINDINGS.md「H1/H2 终审」）："
+                 "详见 00_governance/research/README.md「跨窗终审总账」）："
                  "本区块是**观察记录，不是交易依据**，不得据命中数决定仓位。")
     lines.append("")
     return lines
@@ -213,35 +217,12 @@ def _gate_advisory_section(date: str, gate: Optional[dict] = None) -> list[str]:
     return lines
 
 
-def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
-    lines: list[str] = [
-        f"# 公式选股备选池｜{date}",
-        "",
-        f"> 选股链状态：{pool.get('status', '未知')}"
-        + (f"（{pool['degraded_reason']}）" if pool.get("degraded_reason") else "")
-        + f"；0AMV：{pool.get('amv_state', '未知')}；市场许可：{pool.get('market_permission', '未知')}",
-        "> 本表为证据层候选，不构成买入计划；A/B 池亦须经总控与风控审批。",
-        "> 「平台回踩」列：✓@平台高 = 平台突破回踩形态命中（回踩不破前期平台高点）；平台高即自然止损位（证据层，非进场条件）。",
-        "",
-    ]
-    counts = pool.get("bucket_counts") or {}
-    candidates = pool.get("candidates") or []
-    # 先看全景分组(供置顶信号一览 + 后续各区复用)
-    watch_all = [c for c in candidates
-                 if (c.get("fundamental_quality") or {}).get("tier") == "优"
-                 and (c.get("resonance_4leg") or {}).get("sector")
-                 and (c.get("resonance_4leg") or {}).get("technical")]
-    _watch_key = lambda c: ((c.get("resonance_4leg") or {}).get("aligned", 0),
-                            (c.get("score_detail") or {}).get("total") or 0)
-    watch = sorted((c for c in watch_all if c.get("bucket") in ("A", "B")), key=_watch_key, reverse=True)
-    watch_capped = sorted((c for c in watch_all if c.get("bucket") not in ("A", "B")),
-                          key=_watch_key, reverse=True)
-    # 与 score_candidates 共用同一套归一,避免"报告说空头不买、A池却仍生成买入计划"的自相矛盾
-    is_bear = normalize_regime(pool.get("amv_state")) == "空头"
-    # 🚦 门控建议:独立区块,置于信号一览之前(先知道数据可不可信,再看信号)。
-    # **不改任何分层/next_step** —— 18:00 是纯粹选股流程,详见 _gate_advisory_section。
-    lines += _gate_advisory_section(date, gate)
-    # ⭐ 置顶:今日信号一览——可买/观察价位/待0AMV做多 三档,一眼看清"今天哪些是真信号"
+def _signal_overview(lines, is_bear, watch):
+    """⭐ 今日信号一览：按四面共振把候选分成可买 / 观察价位 / 待 0AMV 做多。
+
+    2026-08-07 从 `render_table`（原 211 行）抽出。
+    ⚠️ 空头 regime 下会先打一条禁买提示 —— 共振度**不能**在空头里放宽权限。
+    """
     _buy = [c for c in watch if (c.get("resonance_4leg") or {}).get("bull_candidate")
             and c.get("bucket") == "A"]
     _obs = [c for c in watch if (c.get("resonance_4leg") or {}).get("bull_candidate")
@@ -258,9 +239,10 @@ def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
     lines.append(f"- **观察价位（B+四面共振）**：{('、'.join(_nm(c) for c in _obs)) or '无'}")
     lines.append(f"- **待0AMV做多（三面已共振）**：{('、'.join(_nm(c) for c in _wait)) or '无'}")
     lines.append("")
-    # 🧭 当日主线指纹:候选池板块族密度榜(情境感知,非进场 gate)——置于最前,先看当前主线全貌
-    lines += _mainline_fingerprint_section(candidates)
-    lines += _signal_labels_section(candidates)
+
+
+def _fundamental_bulls(lines, watch):
+    """🐂 基本面牛股候选（共振观察区）。三面已共振 + 0AMV 做多 = 可买。"""
     lines.append("## 🐂 基本面牛股候选（共振观察区）")
     lines.append("")
     lines.append("> 基本面优 + 板块相位有利 + 技术强 = 三面已共振；再叠 0AMV做多即为可买牛股候选（🐂）。单独列出供持续观察（基本面为当前快照、非回测验证，仅辅助）。")
@@ -291,6 +273,13 @@ def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
                 f" | {mark} |"
             )
         lines.append("")
+
+
+def _capped_but_resonant(lines, watch_capped):
+    """🔍 共振成立但分层受限 —— **重点研究观察，非可买**。
+
+    分层受限（bucket 落到 C/D）意味着技术或资金面有硬伤，共振不覆盖它。
+    """
     if watch_capped:
         lines.append("## 🔍 共振成立但分层受限（重点研究观察·非可买）")
         lines.append("")
@@ -313,9 +302,10 @@ def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
                 f" | {_fmt((c.get('stop_loss_ref') or {}).get('price'))} |"
             )
         lines.append("")
-    # 📡 空头前哨(0AMV 空头期启用)：回测显示大量优秀股票起涨点在空头(领先 0AMV 转多 ~12 交易日,
-    # 治理文档结论#11)——空头里板块/市场腿天然未到位(滞后),严格四面共振永远不会在空头触发,
-    # 故空头期单列"基本面优+技术强"的提前埋伏观察对象,跟踪其板块/市场腿何时补齐。
+
+
+def _bear_outposts(lines, _watch_key, candidates, is_bear, watch_all):
+    """📡 空头前哨（提前埋伏观察·非可买）。只在 0AMV 空头时出现。"""
     if is_bear:
         _watch_codes = {c.get("code") for c in watch_all}
         outposts = sorted((c for c in candidates
@@ -348,7 +338,10 @@ def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
                     f" | {_fmt((c.get('stop_loss_ref') or {}).get('price'))} |"
                 )
             lines.append("")
-    # 得分 Top5：按总分降序（跨分层），供快速浏览当日最强候选
+
+
+def _top5(lines, candidates):
+    """得分 Top 5（与分层无关的纯排序视图）。"""
     top5 = sorted(candidates,
                   key=lambda c: ((c.get("score_detail") or {}).get("total") or 0),
                   reverse=True)[:5]
@@ -370,6 +363,10 @@ def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
                 f" | {'、'.join(c.get('risk_flags') or []) or '-'} |"
             )
         lines.append("")
+
+
+def _bucket_pools(lines, candidates, counts):
+    """A/B/C/D 四个分层池的明细表。"""
     for bucket in ("A", "B", "C", "D"):
         rows = [c for c in candidates if c.get("bucket") == bucket]
         lines.append(f"## {bucket} 池（{counts.get(bucket, 0)} 只）")
@@ -423,6 +420,50 @@ def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
                 f" | {c.get('next_step', '-')} |"
             )
         lines.append("")
+
+
+def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
+    lines: list[str] = [
+        f"# 公式选股备选池｜{date}",
+        "",
+        f"> 选股链状态：{pool.get('status', '未知')}"
+        + (f"（{pool['degraded_reason']}）" if pool.get("degraded_reason") else "")
+        + f"；0AMV：{pool.get('amv_state', '未知')}；市场许可：{pool.get('market_permission', '未知')}",
+        "> 本表为证据层候选，不构成买入计划；A/B 池亦须经总控与风控审批。",
+        "> 「平台回踩」列：✓@平台高 = 平台突破回踩形态命中（回踩不破前期平台高点）；平台高即自然止损位（证据层，非进场条件）。",
+        "",
+    ]
+    counts = pool.get("bucket_counts") or {}
+    candidates = pool.get("candidates") or []
+    # 先看全景分组(供置顶信号一览 + 后续各区复用)
+    watch_all = [c for c in candidates
+                 if (c.get("fundamental_quality") or {}).get("tier") == "优"
+                 and (c.get("resonance_4leg") or {}).get("sector")
+                 and (c.get("resonance_4leg") or {}).get("technical")]
+    _watch_key = lambda c: ((c.get("resonance_4leg") or {}).get("aligned", 0),
+                            (c.get("score_detail") or {}).get("total") or 0)
+    watch = sorted((c for c in watch_all if c.get("bucket") in ("A", "B")), key=_watch_key, reverse=True)
+    watch_capped = sorted((c for c in watch_all if c.get("bucket") not in ("A", "B")),
+                          key=_watch_key, reverse=True)
+    # 与 score_candidates 共用同一套归一,避免"报告说空头不买、A池却仍生成买入计划"的自相矛盾
+    is_bear = normalize_regime(pool.get("amv_state")) == "空头"
+    # 🚦 门控建议:独立区块,置于信号一览之前(先知道数据可不可信,再看信号)。
+    # **不改任何分层/next_step** —— 18:00 是纯粹选股流程,详见 _gate_advisory_section。
+    lines += _gate_advisory_section(date, gate)
+    # ⭐ 置顶:今日信号一览——可买/观察价位/待0AMV做多 三档,一眼看清"今天哪些是真信号"
+    _signal_overview(lines, is_bear, watch)
+    # 🧭 当日主线指纹:候选池板块族密度榜(情境感知,非进场 gate)——置于最前,先看当前主线全貌
+    lines += _mainline_fingerprint_section(candidates)
+    lines += _signal_labels_section(candidates)
+    _fundamental_bulls(lines, watch)
+    _capped_but_resonant(lines, watch_capped)
+    # 📡 空头前哨(0AMV 空头期启用)：回测显示大量优秀股票起涨点在空头(领先 0AMV 转多 ~12 交易日,
+    # 治理文档结论#11)——空头里板块/市场腿天然未到位(滞后),严格四面共振永远不会在空头触发,
+    # 故空头期单列"基本面优+技术强"的提前埋伏观察对象,跟踪其板块/市场腿何时补齐。
+    _bear_outposts(lines, _watch_key, candidates, is_bear, watch_all)
+    # 得分 Top5：按总分降序（跨分层），供快速浏览当日最强候选
+    _top5(lines, candidates)
+    _bucket_pools(lines, candidates, counts)
     return "\n".join(lines)
 
 

@@ -49,74 +49,41 @@ uv sync
 ## 目录结构
 
 ```
-strategy_team/
-├── 00_governance/          # 治理层，按**生命周期**分四类（2026-08-06 重构）
-│   ├── strategy/                    # 规则：改动要进 05_strategy_versions
-│   │   ├── b1_swing_strategy.md         # B1 波段策略主文件
-│   │   ├── cz_strategy.md               # CZ 认知框架（18.1–18.22）
-│   │   ├── DECISION_PRIORITY_RULES.md
-│   │   ├── BUY_STRATEGY_INTEGRATION_RULES.md
-│   │   └── ...                          # 持仓检查手册/执行纪律/均线框架等
-│   ├── data/                        # 数据层现状与接口能力（随数据源变动）
-│   │   ├── DATA_SOURCE_PRINCIPLE.md     # 三条原则 + 各源现状（含连接管理硬要求）
-│   │   ├── DATA_SOURCE_COVERAGE_MATRIX.md  # 九大类数据需求 × 可用性标记
-│   │   ├── TDX_LOCAL_INTERFACES.md      # 已接入用法 + 探过未接（附风险等级）
-│   │   ├── MOOTDX_INTERFACES.md         # Reader/Quotes/Affair 三入口
-│   │   └── QLIB_LOCAL_DATA.md           # S_DATA bundle（含退市股、已前复权）
-│   ├── research/                    # 回测研究：只增，结论会被推翻
-│   │   └── B1_BACKTEST_FINDINGS.md
-│   └── contracts/                   # 契约 + 运行时配置：**代码直接依赖**
-│       ├── MASTER_WORKFLOW.md / SCREENING_WORKFLOW.md / DATA_FLOW_CONTRACT.md
-│       ├── CN_TRADING_CALENDAR.json     # 交易日历（7 处代码引用）
-│       ├── SCREEN_FORMULA_REGISTRY.json # 选股公式注册表
-│       └── RSS_SOURCE_REGISTRY.json / RSS_FILTER_CONFIG.json
-│   # ⚠️ 所有配置路径只在 07_tools/paths.py 定义一次，不要自己拼 BASE/"00_governance"/...
-├── 01_data/                # 运行时数据（gitignore）
-│   ├── holdings/                    # 持仓技术分析
-│   ├── market/                      # 行情、市场择时输入
-│   ├── news/                        # RSS 新闻
-│   ├── quality/                     # 运行门控
-│   ├── screening/                   # 选股链中间产物（公式命中、充实候选）
-│   ├── stock_pool/                  # 选股链分层输出（StockPool 契约）
-│   ├── trades/                      # 交易台账、持仓快照
-│   └── ...
-├── 02_agents/              # [已废弃] 纯脚本驱动不再需要多角色 Agent 规格（编号不复用，目录已删）
-├── 03_daily_plans/         # 盘前日报、14:45 报告（gitignore，运行时生成）
-├── 04_reviews/             # 盘后复盘
-├── 05_strategy_versions/   # 策略版本记录
-├── 06_logs/                # 运行日志（gitignore，运行时创建）
-├── 07_tools/               # 全部脚本
-│   ├── run_0850.py                  # 08:50 盘前预采集
-│   ├── run_0905.py                  # 09:05 盘前日报
-│   ├── run_1445.py                  # 14:45 尾盘操作建议
-│   ├── run_1700.py                  # 17:00 盘后复盘
-│   ├── run_1800.py                  # 18:00 每日选股（独立链）
-│   ├── daily_pipeline.py            # 通用管线
-│   ├── generate_risk_and_sectors.py # risk_decision + sector_state 生成
-│   ├── collect_holding_quotes.py    # 持仓行情采集（mootdx）
-│   ├── collect_incremental_market.py # 增量市场数据
-│   ├── collect_fund_flow.py         # 资金流向（东方财富）
-│   ├── calc_mfe_mae.py              # MFE/MAE 计算
-│   ├── trading_calendar.py          # 交易日历查询
-│   ├── runtime_gate.py              # 运行门控
-│   ├── close_review/                # 尾盘+盘后复盘
-│   ├── market_timing/               # 市场择时、B1 状态
-│   ├── news/                        # RSS 采集与过滤
-│   ├── screening/                   # 每日选股链（公式初筛→充实→打分→表格）
-│   ├── trades/                      # 交易台账维护
-│   └── local_tdx/                   # mootdx 封装
-└── tests/                  # 独立测试目录（pytest，59 个测试文件，670 passed）
-    ├── conftest.py                  # sys.path + 导入设置
-    ├── test_base_path_depth.py      # BASE 路径深度防回归
-    ├── test_run_0850.py / test_run_0905.py / test_run_1445.py / test_run_1700.py  # 四个时点 runner
-    ├── test_runners_smoke.py        # runner 冒烟
-    ├── test_runtime_guards.py       # 运行门控（含 as_of 陈旧判定）
-    ├── test_feishu_report_publisher.py  # 报告投递（摘要提取 / HTTP / 门控阻断 / 半成功）
-    ├── test_close_review.py / test_final_review_validator.py / test_review_enrichment.py
-    ├── test_b1_holding_state.py / test_amv_state.py / test_technical_monitor.py
-    ├── test_backtest_factors.py / test_launch_point_study.py / test_s_data.py  # 研究链
-    ├── test_score_candidates.py / test_enrich_b1cz.py / test_candidate_table.py  # 选股链
-    └── ...                          # 其余见 `ls tests/`；全量执行 `uv run pytest -q`
+├── 00_governance/     治理层，按**生命周期**分四类（各目录有自己的 README 索引）
+│   ├── strategy/          规则：一个策略 = 一个上下文目录（b1/ cz/ _factors/ _shared/）
+│   ├── data/              数据源现状与接口能力（随数据源变动）
+│   ├── research/          回测研究：17 个单元，只增，结论会被推翻
+│   └── contracts/         契约 + 运行时配置：**代码直接依赖**
+├── 01_data/           运行时数据（gitignore，只保留 .md 模板）
+├── 03_daily_plans/    盘前日报、14:45 报告（gitignore）
+├── 04_reviews/        盘后复盘
+├── 05_strategy_versions/  版本记录 + TODO.md（待办）+ trade_lessons.md（实盘复盘→反思→进化）
+├── 06_logs/           运行日志（gitignore）
+├── 07_tools/          全部脚本（分层见下）
+└── tests/             pytest（3400+ 用例，`uv run pytest -q`）
+```
+
+`07_tools/` 按**依赖分层**组织，下层不得依赖上层（`tests/test_architecture_layers.py` 强制）：
+
+| 层 | 目录 | 职责 |
+|---|---|---|
+| L0 基础 | 根目录 `paths` `code_utils` `indicators` `fmt` `contracts` `pipeline_kit` `runtime_guards` `net_retry` | 路径/代码/指标/格式化/**产物契约**/管线工具 |
+| L1 数据 | `local_tdx/` `collect/` `news/` `s_data.py` | 通达信、行情采集、RSS、qlib bundle |
+| L2 因子 | `factors/`(21 因子，每个一份) `trades/` | 因子实现层 + 交易台账 |
+| L3 决策 | `screening/` `market_timing/` `holdings/` `close_review/` | 选股链、择时、持仓状态、复盘 |
+| L4 编排 | 根目录 `run_*.py` `daily_pipeline.py`、`research/` | 五个时点 runner；研究/回测（在生产链**之上**） |
+
+三条硬约束：
+
+- **路径只在 `07_tools/paths.py` 定义一次** —— 不要自己拼 `BASE / "00_governance" / ...`（有测试强制）
+- **因子实现全项目唯一一份**，其他模块通过调用访问（`factors/` + 注册表，测试对着 import 图核对）
+- **产物 schema 在 `07_tools/contracts.py`**（24 个产物），生产者落盘前 `require(...)`；
+  治理层的 `.md` 不参与执行、会漂移，字段级真相以代码为准
+
+研究/回测**统一入口**（14 个工具，含状态与模式清单）：
+
+```bash
+uv run python 07_tools/research/__main__.py
 ```
 
 ### 运行测试
@@ -159,61 +126,51 @@ uv run python 07_tools/run_1800.py
 
 ## 数据源
 
-| 数据 | 来源 | 工具 |
-|---|---|---|
-| A 股日线 | mootdx Reader（本地 .day 文件） | `local_tdx_data.py` |
-| 实时行情 | mootdx Quotes（在线 bars） | `collect_holding_quotes.py` |
-| 指数行情 | mootdx Reader / online index | `collect_holding_quotes.py` |
-| 市场宽度（880系列） | mootdx Reader | `collect_incremental_market.py` |
-| 财务数据 | mootdx Affair | `local_tdx_data.py` |
-| **PIT 财务（带公告日）** | 东方财富 datacenter（业绩报表 RPT_LICO_FN_CPD） | `local_tdx/fetch_pit_financials.py` |
-| **真市值 / 总股本** | 东方财富 datacenter（估值分析 RPT_VALUEANALYSIS_DET，2018-01-02 起） | `local_tdx/fetch_market_cap.py` |
-| **前复权（全链默认口径）** | 通达信协议 xdxr 权息数据（分红/送转/配股/缩股）→ 本地缓存 → 自算因子 | `local_tdx/adjust_factors.py` |
-| 复权因子（旧路径，仅 CLI） | mootdx get_adjust_year | `local_tdx_data.py --mode adjust` |
-| A50/汇率 | Yahoo Finance | `collect_incremental_market.py` |
-| 资金流向 | 东方财富 push2 API | `collect_fund_flow.py` |
-| 北交所行情 | 东方财富 push2 API（mootdx 不支持 BJ） | `collect_holding_quotes.py` |
-| 公告 | wenda_notice_query | cron LLM 调用 |
-| 概念/主题标签 | TQ download_file down_type=4（miscinfo） | `local_tdx/concept_tags.py` |
-| **股票名称（ST 判定唯一依据）** | 东财 push2 ulist（多域名轮询，按需批量查候选）→ TQ-Local get_stock_info → 本地缓存 | `local_tdx/stock_names.py` |
-| 新闻 | RSS | `rss_collector.py` |
-| TQ 选股公式批量筛选 | TQ-Local（formula_process_mul_xg，需 TdxW 运行） | `screening/formula_screen.py` |
+原则：**本地优先**（通达信 vipdoc / TQ-Local），HTTP 只做补齐。
+全链默认**前复权**（基于通达信 xdxr 权息自算，`local_tdx/adjust_factors.py`）。
+
+| 类别 | 主路径 |
+|---|---|
+| A 股日线 / 财务 | 通达信本地（`local_tdx/local_tdx_data.py`） |
+| 实时行情 / 快照 | mootdx Quotes、TQ-Local（`collect/`） |
+| 市场宽度、指数 | 880 系列 + 指数（`collect/`、`market_timing/`） |
+| 东财补齐 | 北交所行情、真市值、PIT 财务、资金流、股票名称 |
+| 新闻 / 概念标签 | RSS（`news/`）、TQ miscinfo |
+| 回测数据 | qlib bundle / CSV（`s_data.py`，`S_DATA_ROOT`） |
+
+⚠️ 三个反复踩的坑：**mootdx 不支持北交所**（920xxx 走东财）；
+**mootdx Reader 返回 DatetimeIndex 而非列**（传入分析前要 `reset_index()`）；
+**股票名称表是 ST 硬排除的唯一依据**，残缺表落盘会让 ST 过滤静默失效。
+
+各源的实测性能、覆盖率与风险等级见 [`00_governance/data/`](00_governance/data/)。
 
 ## 策略核心
 
 ### B1 波段策略
 
-详见 `00_governance/strategy/b1_swing_strategy.md`。关键机制：
-
-- **BBI**：`(MA3 + MA6 + MA12 + MA24) / 4`，预警而非最终权威
-- **N 结构**：上升 N（L1→H1→更高 L2）/ 下降 N（H1→L1→更低 H2→收盘低于 L1）
-- **反转 K**：`J<13` + 量比 `≤50%` + 20 日成交量底部 10% + 收盘变动 `-2%~+2%` + 振幅 `≤7%`
-- **P0/P1/P2/P3 优先级**：P0 > P1 > P2 > P3
-- **持仓状态**：`b1_holding_state.py` 输出 `B1-holding-v1` 契约
+详见 [`00_governance/strategy/b1/01_swing_rules.md`](00_governance/strategy/b1/01_swing_rules.md)。
+关键机制：**BBI**（预警而非权威）、**N 结构**（L1 主结构 / L2 回踩）、
+**反转 K**（J<13 + 极致缩量 + 收盘 ±2% + 振幅 ≤7%，**是观察点不是买点**）、
+**P0~P3 优先级**、持仓状态输出 `B1-holding-v1` 契约（`holdings/b1_holding_state.py`）。
 
 ### 决策优先级
 
 1. 个股服从板块，板块服从大盘
-2. 风控优先于买入
-3. 候选池由每日选股 screening 链产出（18:00 独立运行，与三份报告分离：`screening/formula_screen.py` 公式初筛 → `enrich_candidates.py` 模式识别 → `score_candidates.py` 板块共振打分分层 A/B/C/D → `candidate_table.py` 备选表格，输出 `01_data/stock_pool/`，详见 `00_governance/contracts/SCREENING_WORKFLOW.md`）；StockPool 仅为证据层候选，买入计划由 chief_decision 统一裁决
-4. risk_control 拥有否决权
-5. chief_decision 是最终交易计划输出层
-6. 所有计划必须可复盘
+2. **风控优先于买入**；`risk_control` 拥有否决权
+3. 候选池由 18:00 选股链产出（与三份报告分离），**仅为证据层候选** —— 买入计划由 `chief_decision` 统一裁决
+4. `chief_decision` 是最终交易计划输出层
+5. 所有计划必须可复盘
+
+⚠️ **同一事实的多个读数按「证据新鲜度」取**（2026-08-07 定案）：14:45 盘中以**实时价重算的 B1** 为准，
+压过同日期标签但依据为 T-1 收盘的 RiskDecision；17:00 盘后两边依据相同，回到「风控优先」。
+完整规则见 [`00_governance/strategy/_shared/decision_priority.md`](00_governance/strategy/_shared/decision_priority.md)。
 
 ### 运行门控
 
-`runtime_gate.py` 在每次报告生成前检查：
-- 交易日历
-- 持仓新鲜度
-- 技术数据新鲜度
-- 市场质量（0AMV、宽度、成交额；**按 `as_of` 判定新鲜度**，当日文件里装 T-1 数据同样记 `stale`）
-  - **评分按关键性加权**（2026-07-31）：`0AMV 35 / 宽度 20 / 成交额 20 / 情绪 15 / 海外 10`。此前是无权重算术平均（5 项各 0.2），导致「0AMV 全缺 + 其余齐全」= 4/5 = **0.8 恰好判 pass 并授予加仓权**。0AMV 决定 regime，缺它等于不知道方向，故 **0AMV 非 confirmed/auto 时一律不得 pass**（只降为 `degraded`，不新增阻断）。
-  - **`blocked` 改为显式覆盖率规则**：四个核心块（0AMV/宽度/情绪/成交额）**全部** stale/missing 才算「大面积缺数」。原先是 `score < 0.4` 这个魔数阈值——加权后它会凭空多出 24 种阻断场景（256 组合实测），而 blocked 经 `--require-quality`/`--require-gate` 真正中断链路，重演 07-30 事故。现规则下：新增 blocked = 0，6 个原 pass 收紧为 degraded，0 个放松为 pass。
-  - **`limitations` 字段**：degraded 时列出具体受限项（哪个块 stale、as_of 是哪天），报告可据此归因，不再只有一个分数。
-- 持仓行情是否当日
-- **加仓授权（`position_gate.allow_position_increase`）**：需 ①持仓基线 confirmed + 全持仓当日行情 ②当日技术指标 ③`market_quality=pass` ④0AMV 新鲜 ⑤regime 属白名单 `{做多, 中性}`。此前写作 `regime != "空头"`，0AMV 缺失时 `effective_state` 是 None → 空串 → `"" != "空头"` 为真 ⇒ **regime 未知却授予加仓权**（2026-07-31 修）。regime 文本经 `normalize_regime` 归一，覆盖三套并行词表：`effective_state`（做多/中性/空头）、`amv_zone`（做多触发/空头触发/阈值内，merge 会用它兜底填 effective_state）、README 曾用的「多头」。判定逻辑抽成纯函数 `position_increase_decision`，可单测。
+`runtime_gate.py` 在每次报告生成前检查交易日历、持仓新鲜度、技术数据新鲜度、
+市场质量（**按 `as_of` 判新鲜度** —— 当日文件里装 T-1 数据同样记 `stale`）、加仓授权。
 
-门控必须能**真正阻断**，而非只写 JSON。退出码：
+门控必须能**真正阻断**，而非只写 JSON。退出码会穿透 `daily_pipeline`，cron 可直接按码判定：
 
 | 退出码 | 触发条件 | 启用开关 |
 |---|---|---|
@@ -222,21 +179,24 @@ uv run python 07_tools/run_1800.py
 | 4 | `market_quality=blocked` | `--require-quality` |
 | 5 | `position_gate=blocked` | `--require-position-gate` |
 
-- **17:00 盘后链**：门控结论一律落盘并记进 stage note（含 stale 明细），但**默认不阻断**。需要硬失败时给 `daily_pipeline --strict-quality-gate`（仅对 postclose 生效，blocked → exit 4）。⚠️ 2026-07-30 曾让 postclose 默认带 `--require-quality`，同时又收紧了 `as_of` 陈旧判定，两者叠加导致 17:00 盘后复盘直接失败——硬闸须等新的 stale 校准跑过若干交易日、确认 blocked 只在真正大面积缺数时出现，再显式开启。
-- **session 期望数据日**：陈旧判定按 session 比对——preclose(08:50/09:05/14:45)期望 T-1（当日 K 线尚不存在，as_of=T-1 不算陈旧），postclose(17:00/1800)期望当日。`daily_pipeline` 已按 `--session-type` 自动传 `--data-session`；评分器(market_timing_scorer)按 section `as_of` 与评分日比对，T-1 数据一律按中性处理不给满分。
-- **退出码可消费**：门控退出码会穿透 `daily_pipeline` 进程本身（非交易日 3 / 质量 blocked 4 / 持仓 blocked 5）,cron 可直接按码判定。
-- **18:00 选股链只落盘、不阻断**：18:00 是纯粹的选股流程，门控**不得影响选股结果**（不改 bucket / next_step / 分层、不筛候选），只由 `candidate_table` 在备选表里给出独立的「🚦 数据可信度提示」区块。这样选股结果与回测同口径且可复现——门控若改写分层，live 候选就无法与回测对照，「策略本身选出了什么」将不可回溯。
-- **09:05 / 14:45 不启用**：0AMV 与市场宽度本就要等收盘，盘中 blocked 属正常；14:45 把门控结论写进 `06_logs/{date}_1445_run_log.json`（`_gate_note`）留痕并降低报告内的权限文案。
-- **投递侧**：`feishu_report_publisher.py --require-gate` 在投递前复核门控，非交易日或 `market_quality=blocked` 时拒发并 `exit 4`。
-- **08:50 采集**：任一 stage 失败 → run log 写 `status="degraded"` 并列出失败项；09:05 按 **discovery stage 逐项 ok** 决定是否复用（`overseas`/`rss_collect`/`rss_filter` 任一失败即重采），不再只看 `status=="completed"`。
+各时点策略：**09:05 / 14:45 不启用**（0AMV 与宽度本就要等收盘）；
+**17:00 落盘但默认不阻断**（硬闸需 `--strict-quality-gate` 显式开）；
+**18:00 选股链只提示、不得影响选股结果**（否则 live 候选无法与回测对照）。
+
+⚠️ 评分权重、`blocked` 覆盖率规则、加仓授权的五个条件，以及 2026-07-30
+「硬闸叠加导致 17:00 链失败」的事故记录 ——
+见 [`00_governance/contracts/RUNTIME_GATE.md`](00_governance/contracts/RUNTIME_GATE.md)。**改任何判定前先读它。**
 
 ## OpenClaw Cron 配置
 
 如果使用 OpenClaw 作为运行时，cron job 配置如下（以 `state/openclaw.sqlite` 的 `cron_jobs` 表为准）：
 
-> 报告投递：三个报告 job（0905/1445/1700）统一由 `07_tools/feishu_report_publisher.py` 完成——聊天发执行摘要（≤800 字）+ 完整报告 md 文件附件，不再经 LLM message 工具。凭据从环境变量或 `OPENCLAW_CONFIG` 读取。建议加 `--require-gate`（门控 blocked 时拒发，exit 4）；失败时 stdout 会打印 `{"sent": false, "partial": ..., "progress": {...}}`，可据此识别"附件已发、摘要未发"的半成功。
+> **报告投递**：三个报告 job（0905/1445/1700）统一由 `07_tools/feishu_report_publisher.py` 完成
+> —— 聊天发执行摘要（≤800 字）+ 完整报告 md 附件。建议加 `--require-gate`（门控 blocked 时拒发，exit 4）。
 >
-> ⚠️ **收件人必须显式配置**（2026-08-03 起）：`FEISHU_TO_OPEN_ID` 环境变量，或 `openclaw.json` 的 `channels.feishu.accounts.default.reportToOpenId`（亦接受 `toOpenId` / `defaultToOpenId`）。此前缺配置会兜底到一个**硬编码 open_id**——换人/换租户/别人机器上跑都会把报告静默发给那个写死的账号。现在缺配置直接 `FeishuError` + exit 1，请在部署环境里补上这项配置。
+> ⚠️ **收件人必须显式配置**（`FEISHU_TO_OPEN_ID` 或 `openclaw.json` 的 `reportToOpenId`）——
+> 缺配置直接报错而不是兜底。凭据/收件人的完整优先级、以及为什么不再兜底到硬编码 open_id，
+> 见该脚本的模块与 `_recipient()` 的 docstring（就在会改它的人眼前，不在这里重复）。
 
 | job ID 前缀 | 时间 | 任务 | toolsAllow |
 |---|---|---|---|

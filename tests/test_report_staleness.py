@@ -22,7 +22,7 @@ import pandas as pd
 import pytest
 
 from screening import financials as fin
-from screening import scan_signals_ytd as scan
+from research import scan_signals_ytd as scan
 
 # A 股法定披露截止日
 DISCLOSURE_DEADLINES = [

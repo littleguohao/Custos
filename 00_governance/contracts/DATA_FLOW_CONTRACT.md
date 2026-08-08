@@ -8,31 +8,31 @@
 
 统一各 Agent 的输入输出，避免后续扩展时数据混乱。
 
+## 实现状态（2026-08-06 逐实体核查）
+
+**契约的第一件事是说清哪些真有产出。** 现存 6 个实体全部有生产者：
+
+| 实体 | 生产者 |
+|---|---|
+| MarketState | `generate_risk_and_sectors.py`、`market_timing/` |
+| SectorState | `generate_risk_and_sectors.py` |
+| StockCandidate | `screening/` 链（enrich → score → table）|
+| HoldingReview | `market_timing/b1_holding_state.py` |
+| RiskDecision | `generate_risk_and_sectors.py` |
+| ChiefDecision | `chief_decision_report.py`、`daily_report.py` |
+
+#### 已删除的两个实体（2026-08-06）
+
+| 实体 | 为什么删 | 独有内容去哪了 |
+|---|---|---|
+| **SkillEvidence** | Skill 架构遗留（`build_skill_contracts.py` + `skill_adapters.py` 已被 `generate_risk_and_sectors.py` 取代）。而且它描述的「**统一证据信封**」实际并不存在 —— `as_of`/`facts`/`signals`/`status`/`risk_flags` 这些字段确实散落在各产出里，但**没有任何一份产出同时具备它们** | 无独有内容 |
+| **BuyPlan** | `buy_strategy` 代码已移除，代码里只剩 `next_step="generate_buy_plan"` 这个字符串标签 | **结论四档 / 买入方式五类 / 最大亏损比例**已抢救到 [`../strategy/b1/03_execution_discipline.md`](../strategy/b1/03_execution_discipline.md) |
+
+⚠️ 另删掉 `RiskDecision.cooldown_list`：**声明过但从未实现**的风控机制
+（全仓 `cooldown`/`冷却`/`blacklist` 零命中）。是否要真做冷却见 `05_strategy_versions/TODO.md` #31。
+删掉字段本身就是最好的标记 —— 契约里没有它，就不会有人以为它存在。
+
 ## 核心实体
-
-### SkillEvidence
-
-所有本地 TDX 技能必须先转换为证据对象，不能把自由文本结论直接送入总控：
-
-```json
-{
-  "skill_id": "tdx-hot-topic",
-  "entity_type": "stock|sector|market",
-  "entity_id": "600000.SH",
-  "as_of": "YYYY-MM-DDTHH:mm:ss+08:00",
-  "trade_date": "YYYY-MM-DD",
-  "report_date": null,
-  "horizon": "intraday|short|medium|long",
-  "source_tools": ["tdx_api_data"],
-  "status": "ok|partial|stale|failed",
-  "facts": {},
-  "signals": [],
-  "risk_flags": [],
-  "raw_ref": ""
-}
-```
-
-适配器实现：`07_tools/skill_adapters.py`。
 
 ### MarketState
 
@@ -44,7 +44,7 @@
   "position_range": "20%-40%",
   "new_position_permission": "允许|小仓试探|原则不允许|禁止",
   "risk_level": "普通|提高|强风控",
-  "zero_amv_state": "做多区间|中性|空头区间",
+  "amv_state": "做多|中性|空头",            // ⚠️ 契约原写 `zero_amv_state`，代码实际用 `amv_state`/`amv_zone`/`effective_state`
   "evidence": []
 }
 ```
@@ -74,14 +74,13 @@
   "sector": "示例板块",
   "theme_id": "semiconductor_chip_memory_packaging",
   "source": ["theme_tracker", "tdx_screener", "industry_research", "formula_screen"],
-  "technical_sources": [
-    {
-      "source_id": "B1_low_j_factor_similarity",
-      "signal": "KDJ低位+因子相似度",
-      "technical_score": 0,
-      "raw_rank": 0
-    }
-  ],
+  // ⚠️ 契约原写嵌套的 `technical_sources[{source_id, signal, technical_score, raw_rank}]`，
+  // 实际产出是**平铺**的（`technical` / `technical_level` / `technical_score` / `signals`），
+  // 且从无 `technical_sources` 与 `raw_rank` 这两个名字。已按实际形状改写：
+  "technical": {},
+  "technical_level": "强|中|弱|未知",
+  "technical_score": 0,
+  "signals": [],
   "sector_heat_filter": {
     "sector_state": "主升|修复|分歧|震荡|退潮|未知",
     "sector_score": 0,
@@ -102,36 +101,6 @@
   "entry_reason": [],
   "risk_flags": [],
   "next_step": "generate_buy_plan|observe_price|long_term_track|avoid"
-}
-```
-
-### BuyPlan
-
-```json
-{
-  "code": "600000",
-  "name": "示例股票",
-  "stock_pool_bucket": "A|B|C|D",
-  "conclusion": "允许|小仓试探|仅观察|禁止",
-  "buy_mode": "趋势回踩|箱体低吸|放量突破|事件催化|无",
-  "buy_price_range": {
-    "lower": null,
-    "upper": null,
-    "basis": ""
-  },
-  "first_position_pct": {
-    "lower": 0.0,
-    "upper": 0.0
-  },
-  "entry_conditions": [],
-  "add_conditions": [],
-  "invalid_conditions": [],
-  "stop_loss": {
-    "price": null,
-    "basis": "",
-    "max_loss_pct": null
-  },
-  "risk_level": "低|中|高"
 }
 ```
 
@@ -161,12 +130,11 @@
   "date": "YYYY-MM-DD",
   "risk_level": "普通|提高|强风控",
   "forbidden_actions": [],
-  "cooldown_list": [],
   "stock_risks": [
     {
       "code": "600000",
       "name": "示例股票",
-      "risk_type": "破位|亏损扩大|板块退潮|冷却|无止损计划",
+      "risk_type": "破位|亏损扩大|板块退潮|无止损计划",   // 原枚举含「冷却」，与 cooldown_list 一起未实现，已移除
       "action": "禁止加仓|减仓|止损|清仓|观察",
       "priority": "高|中|低"
     }

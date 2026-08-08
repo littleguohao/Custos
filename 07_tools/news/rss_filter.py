@@ -12,17 +12,18 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from paths import BASE, RSS_FILTER_CONFIG_FILE, RSS_SOURCE_REGISTRY_FILE  # noqa: E402
+from paths import read_json as load  # noqa: E402
+from paths import write_json as dump  # noqa: E402
+from code_utils import bare_code as bare  # noqa: E402
 from runtime_guards import previous_confirmed_trading_day  # noqa: E402
+from contracts import require  # noqa: E402
 
 DATA=BASE/'01_data'; LOG=BASE/'06_logs'/'rss'
 CFG=RSS_FILTER_CONFIG_FILE; REG=RSS_SOURCE_REGISTRY_FILE
 SH=ZoneInfo('Asia/Shanghai')
 
-def load(p,default):
- try:return json.loads(p.read_text(encoding='utf-8-sig')) if p.exists() else default
- except Exception:return default
 
-def dump(p,x): p.parent.mkdir(parents=True,exist_ok=True); p.write_text(json.dumps(x,ensure_ascii=False,indent=2,allow_nan=False),encoding='utf-8')
+
 def norm_text(s): return re.sub(r'[^0-9a-z\u4e00-\u9fff]+','',str(s or '').lower())
 def canonical_url(u):
  try:
@@ -32,7 +33,6 @@ def canonical_url(u):
 def parse_dt(s):
  try:return datetime.fromisoformat(str(s).replace('Z','+00:00')).astimezone(timezone.utc)
  except Exception:return None
-def bare(code): return str(code or '').split('.')[0]
 
 def premarket_window(day, asof, fallback_hours):
  previous=previous_confirmed_trading_day(day)
@@ -41,6 +41,13 @@ def premarket_window(day, asof, fallback_hours):
  return start,previous
 
 def entities(date):
+ """持仓的名称与代码集合，用于相关性加分。
+
+ ⚠️ `date` **未被使用**：`current_positions.json` 是**当前快照**、没有历史版本，
+ 所以给任何日期都返回同一份。日常当日运行没问题；但**回填历史日期时
+ 会用今天的持仓去筛那天的新闻**，结论不可复现。保留参数是为了让调用点
+ 显式表达「这是按日期筛」的意图，等持仓有了历史版本可直接接上。
+ """
  positions=load(DATA/'trades'/'current_positions.json',[])
  names=set(); codes=set()
  for x in positions:
@@ -73,12 +80,19 @@ def main():
  if a.session_type=='premarket': cutoff,previous_close_date=premarket_window(a.date,asof,hours)
  limit=cfg['limits'][a.session_type]; per_source_limit=cfg.get('per_source_limits',{}).get(a.session_type,limit)
  names,codes=entities(a.date); scored=[]; excluded={}
+ # ⚠️ 代码命中必须要求**数字边界**，不能裸子串匹配。持仓命中值 +45 分（单项最大）
+ # 且是排序的**首要键**，误配会把无关新闻顶到候选第一条。实测误配：
+ #   "成交额达0024156万元"  → 裸匹配命中 002415（嵌在更长数字里）
+ #   "上证指数报3600000点"  → 裸匹配命中 600000
+ # 数字边界修掉这两类，且不伤真命中（"浦发银行600000发布公告" / "（600000）" 仍命中）。
+ # 尚未解决："净利润600000元" 这种「代码恰好等于一个独立金额」需语义上下文，见待办 #48。
+ code_pats={c:re.compile(r'(?<!\d)'+re.escape(c)+r'(?!\d)') for c in codes if c}
  for x in raw:
   pub=parse_dt(x.get('published_at')); text=(str(x.get('title') or '')+' '+str(x.get('summary') or '')).lower(); tier=x.get('source_tier','C'); cat=x.get('category','')
   if pub is None:
    excluded['published_at_missing']=excluded.get('published_at_missing',0)+1; continue
   if pub and (pub>asof+timedelta(minutes=10) or pub<cutoff): excluded['outside_window']=excluded.get('outside_window',0)+1; continue
-  hits_names=sorted(n for n in names if n and n.lower() in text); hits_codes=sorted(c for c in codes if c in text)
+  hits_names=sorted(n for n in names if n and n.lower() in text); hits_codes=sorted(c for c,pat in code_pats.items() if pat.search(text))
   themes=[]
   for theme,words in cfg.get('theme_keywords',{}).items():
    if any(w.lower() in text for w in words): themes.append(theme)
@@ -101,6 +115,7 @@ def main():
   if source_selected.get(source,0)>=per_source_limit:continue
   selected.append(x); source_selected[source]=source_selected.get(source,0)+1
   if len(selected)>=limit:break
+ require("rss_candidates", selected)
  out=DATA/'news'/'rss'/'filtered'/f'{a.date}_{a.session_type}_rss_candidates.json'; dump(out,selected)
  report={'date':a.date,'session_type':a.session_type,'as_of':asof.isoformat(),'window_start':cutoff.isoformat(),'previous_close_date':previous_close_date,'window_hours_actual':round((asof-cutoff).total_seconds()/3600,2),'input_count':len(raw),'within_window_and_relevant':len(scored),'after_dedupe':len(unique),'selected_count':len(selected),'limit':limit,'per_source_limit':per_source_limit,'excluded':excluded,'tier_counts':{},'theme_counts':{},'source_counts':{},'output':str(out),'permission_rule':'RSS candidates cannot directly increase trading permissions'}
  for x in selected:

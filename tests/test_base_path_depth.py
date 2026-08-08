@@ -147,6 +147,16 @@ class TestNoPatchingDefaultArgConstants:
                 tree = ast.parse(p.read_text(encoding="utf-8"))
             except SyntaxError:
                 continue
+            alias = {}                       # 别名 → 真实模块名
+            for n in ast.walk(tree):
+                if isinstance(n, ast.Import):
+                    for al in n.names:
+                        if al.asname:
+                            alias[al.asname] = al.name.split(".")[-1]
+                elif isinstance(n, ast.ImportFrom):
+                    for al in n.names:
+                        if al.asname:
+                            alias[al.asname] = al.name
             for n in ast.walk(tree):
                 if not isinstance(n, ast.Call):
                     continue
@@ -164,6 +174,11 @@ class TestNoPatchingDefaultArgConstants:
                 tgt = n.args[0]
                 mod = tgt.id if isinstance(tgt, ast.Name) else (
                     tgt.attr if isinstance(tgt, ast.Attribute) else None)
+                # ⚠️ 解析导入别名：`import reconcile_positions as rp` 之后
+                # patch 的目标写作 `rp`，而 risky 是按**文件名**建索引的。
+                # 2026-08-06 实测漏报一次（reconcile_positions 的 LEDGER 默认参数），
+                # 就是因为第一版没做这一步 —— 检查器只认字面名字。
+                mod = alias.get(mod, mod)
                 if mod and const in risky.get(mod, set()):
                     offenders.append(
                         f"{p.name}:{n.lineno} patch 了 {mod}.{const}"
@@ -185,3 +200,157 @@ class TestNoPatchingDefaultArgConstants:
             "AB = 1\nlower = 2\ndef g(a=AB, b=lower):\n    return a, b\n", encoding="utf-8")
         got2 = self._default_arg_constants(tmp_path)
         assert got2.get("n") is None, got2      # 短名/小写都不该被收进来
+
+
+class SubprocessTargetTests(unittest.TestCase):
+    """⚠️ 编排层用 `CONST / "script.py"` 拼 subprocess 命令 —— 这类引用
+    **不是 import**，所以 import 图检查、架构分层检查、`--help` 冒烟全都看不见它。
+
+    2026-08-07 的实际后果：把 `holdings/` 从 `market_timing/` 拆出来时，
+    `daily_pipeline` 里四个 `MARKET_TIMING / "xxx.py"` 全部指向不存在的文件，
+    其中三个 `required=True`（`run_stage` 的默认值）⇒ **整条 daily_pipeline
+    在第一个持仓 stage 就硬失败**，09:05 与 17:00 两份报告都产不出来。
+    3481 条测试全绿，因为 stage 一律被打桩、从不真的去看文件在不在。
+
+    同一天早些时候 `run_1445` 的 `TOOLS` 未导入是同一类：**非 import 的引用没人查**。
+    """
+
+    def _iter_subprocess_targets(self):
+        """产出 (文件, 行号, 常量名, 脚本名, 解析出的绝对路径)。
+
+        ⚠️ 常量值用**运行时真值**取（import 模块后 getattr），不解析源码字符串 ——
+        字符串解析看不出 `X = Y / "z"` 里 Y 又是什么。
+        """
+        import ast
+        import importlib
+        import sys
+        sys.path.insert(0, str(TOOLS))
+        for f in sorted(TOOLS.rglob("*.py")):
+            if f.name in ("__init__.py", "conftest.py"):
+                continue
+            try:
+                tree = ast.parse(f.read_text(encoding="utf-8-sig"))
+            except SyntaxError:
+                continue
+            hits = []
+            for node in ast.walk(tree):
+                if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)):
+                    continue
+                if not (isinstance(node.left, ast.Name) and node.left.id.isupper()):
+                    continue
+                if not (isinstance(node.right, ast.Constant)
+                        and isinstance(node.right.value, str)
+                        and node.right.value.endswith(".py")):
+                    continue
+                hits.append((node.lineno, node.left.id, node.right.value))
+            if not hits:
+                continue
+            try:
+                mod = importlib.import_module(f.stem if f.parent == TOOLS
+                                             else f"{f.parent.name}.{f.stem}")
+            except Exception:
+                continue          # 导入失败由别的测试负责报告
+            for lineno, const, script in hits:
+                base = getattr(mod, const, None)
+                if isinstance(base, Path):
+                    yield f, lineno, const, script, base / script
+
+    def test_every_subprocess_script_target_exists(self):
+        broken = [f"{f.relative_to(TOOLS.parent)}:{ln}  {const}/{script}"
+                  for f, ln, const, script, p in self._iter_subprocess_targets()
+                  if not p.exists()]
+        self.assertEqual(broken, [], "subprocess 目标脚本不存在（搬迁后漏改路径）：\n  "
+                                     + "\n  ".join(broken))
+
+    def test_check_itself_catches_a_planted_break(self):
+        """⚠️ 守卫必须自证能抓到 —— 上面那条测试为空也可能是**扫不到任何目标**。
+
+        今天有四条测试因为桩不真而静默变 skip，同一个坑不能再踩。
+        """
+        found = list(self._iter_subprocess_targets())
+        self.assertGreaterEqual(len(found), 15,
+                                f"只扫到 {len(found)} 个 subprocess 目标，扫描逻辑可能失效了")
+        # 植入一个必然不存在的目标，确认判据真的会判它失败
+        import ast
+        tree = ast.parse('X = 1\nsubprocess.run([str(TOOLS / "definitely_absent_xyz.py")])')
+        hits = [n for n in ast.walk(tree)
+                if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Div)
+                and isinstance(n.right, ast.Constant)
+                and str(n.right.value).endswith(".py")]
+        self.assertEqual(len(hits), 1, "AST 模式匹配不到植入的用例")
+        self.assertFalse((TOOLS / "definitely_absent_xyz.py").exists())
+
+
+class LocalPathRedefinitionTests(unittest.TestCase):
+    """⚠️ 模块不得本地重拼 `paths.py` 已定义的 **07_tools 子目录**路径。
+
+    原有守卫 `test_modules_do_not_rebuild_governance_paths` 只查**治理层**路径，
+    所以没拦住 `daily_pipeline` 本地重定义的 `MARKET_TIMING = TOOLS / "market_timing"`
+    —— 正是它在 2026-08-07 拆 holdings/ 时成了死路径：`paths.py` 改过了，
+    本地副本没改，「唯一来源」形同虚设。
+
+    **为什么只查工具目录，不查数据目录**：两者危险度差一个量级。
+    `TOOLS / "子目录"` 随代码重构而变（今天一天断了两次），断了以后
+    subprocess 只报「文件不存在」，而 `required=False` 的 stage 会**静默降级**。
+    `BASE / "01_data" / "market"` 只在数据布局变更时才变，那种变更本来就会
+    在所有读写点响亮地报缺文件。把 20 多处数据目录别名一起纳入只会让守卫
+    带着一张长长的既有违规清单上线，那样它就不再是守卫了。
+    真正接住故障的是下面 `SubprocessTargetTests` —— 它直接验目标文件在不在，
+    与常量是本地拼的还是导入的无关。
+    """
+
+    def test_no_module_rebuilds_a_paths_constant(self):
+        import ast
+        import sys
+        sys.path.insert(0, str(TOOLS))
+        import paths as paths_mod
+
+        # 只取 07_tools 下的子目录常量
+        known = {v: k for k, v in vars(paths_mod).items()
+                 if isinstance(v, Path) and k.isupper()
+                 and v != paths_mod.TOOLS and paths_mod.TOOLS in v.parents}
+        offenders = []
+        for f in sorted(TOOLS.rglob("*.py")):
+            if f.name in ("paths.py", "__init__.py", "conftest.py"):
+                continue
+            try:
+                tree = ast.parse(f.read_text(encoding="utf-8-sig"))
+            except SyntaxError:
+                continue
+            # ⚠️ 豁免 bootstrap：有些模块既当包内模块 import、也被直接当脚本跑，
+            # 必须先本地算出 07_tools 再塞进 sys.path，`paths` 那时还导不进来（鸡生蛋）。
+            # 判据是「该赋值出现在 `from paths import` **之前**」—— 用行号比，
+            # 不猜变量名（`adjust_factors` 叫 TOOLS_DIR，别的模块叫 _TOOLS_ROOT）。
+            paths_import_line = min(
+                (n.lineno for n in ast.walk(tree)
+                 if isinstance(n, ast.ImportFrom) and n.module == "paths"),
+                default=10 ** 9)
+            for node in tree.body:      # 只看模块级赋值
+                if not (isinstance(node, ast.Assign) and len(node.targets) == 1
+                        and isinstance(node.targets[0], ast.Name)
+                        and node.targets[0].id.isupper()):
+                    continue
+                if node.lineno < paths_import_line:
+                    continue            # bootstrap，见上
+                name = node.targets[0].id
+                # 形如 BASE / "01_data" 或 TOOLS / "market_timing"（不含 .py）
+                v = node.value
+                if not (isinstance(v, ast.BinOp) and isinstance(v.op, ast.Div)
+                        and isinstance(v.right, ast.Constant)
+                        and isinstance(v.right.value, str)
+                        and not v.right.value.endswith(".py")):
+                    continue
+                try:
+                    import importlib
+                    mod = importlib.import_module(
+                        f.stem if f.parent == TOOLS else f"{f.parent.name}.{f.stem}")
+                    val = getattr(mod, name, None)
+                except Exception:
+                    continue
+                if isinstance(val, Path) and val in known and known[val] != name:
+                    offenders.append(
+                        f"{f.relative_to(TOOLS.parent)}:{node.lineno}  "
+                        f"{name} 重拼了 paths.{known[val]}")
+        self.assertEqual(offenders, [],
+                         "本地重拼 paths.py 已有的路径（搬迁时必然漏改）：\n  "
+                         + "\n  ".join(offenders))

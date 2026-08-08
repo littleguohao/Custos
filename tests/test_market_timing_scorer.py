@@ -1,127 +1,165 @@
-# -*- coding: utf-8 -*-
-"""market_timing_scorer 首批测试——它给出 100 分制择时评分，此前 0% 覆盖。
+"""`market_timing_scorer` —— **0AMV 择时的评分器**，`daily_pipeline` 硬失败 stage。
 
-重点:①各模块评分边界;②**缺数不得当成好数**(中性半分且理由写明);
-③**stale(数据日非当日)不得按当日给分**——T-1 涨跌比曾能拿满分。
+覆盖率清点（2026-08-07）：48%、128 语句未覆盖。
+
+为什么要认真测：R4 的结论是「**0AMV 是最强单层过滤器，熊市减亏 ~15pp**」——
+而这个模块把 0AMV 状态换算成择时总分，总分又决定 `market_state`（进攻/防守/冰点）
+与建议总仓位。**换算错了，那 15pp 就无从兑现。**
+
+而且它历史上出过一次真错（审计 B1，注释里记着）：
+「空头触发」曾按 9/15 分（中性偏多）而非 0 分计入总分 ——
+**0AMV 说空头，评分器却给中性偏多**。现已归一化，本测试钉住它。
 """
 from __future__ import annotations
 
-from market_timing import market_timing_scorer as sc
+import pathlib
+import sys
 
+import pytest
 
-class TestFnum:
-    def test_parses_and_tolerates_garbage(self):
-        assert sc.fnum("1.5") == 1.5
-        assert sc.fnum(None) is None
-        assert sc.fnum("n/a") is None
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+for _p in ("07_tools", "07_tools/market_timing"):
+    sys.path.insert(0, str(ROOT / _p))
+
+# ⚠️ **包限定导入**，与 `tests/test_audit_opt_tools.py:608` 保持一致。
+# 用扁平 `import market_timing_scorer` 会与它形成**同一文件的两个模块对象**
+# （conftest 把 07_tools 与 07_tools/market_timing 都铺进了 sys.path），
+# 实测会让这个文件的覆盖率读数在 15%/36%/48% 之间跳 —— **测量本身变得不可信**。
+# 这是 DATA_SOURCE_PRINCIPLE「模块级常量 + 运行时替换 = 陷阱」变体①的又一处后果。
+from market_timing import market_timing_scorer as ms  # noqa: E402
 
 
 class TestScoreAmv:
-    def test_bear_regime_scores_zero(self):
-        s, note = sc.score_amv({"amv_0": {"effective_state": "空头", "amv_change_pct": -3.0}})
-        assert s == 0 and "空头" in note
+    """0AMV 计分 —— 权重最高（15 分），且是 regime 的直接来源。"""
 
-    def test_long_regime_scores_full(self):
-        s, _ = sc.score_amv({"amv_0": {"effective_state": "做多", "amv_change_pct": 5.0}})
-        assert s == 15
+    def test_bear_scores_zero_not_neutral(self):
+        """⚠️ **回归**（审计 B1）：空头必须 0 分。
 
-    def test_missing_value_is_neutral_half(self):
-        s, note = sc.score_amv({})
-        assert s == 7.5 and "中性半分" in note
+        曾按 9/15（中性偏多）计入 ⇒ 0AMV 说空头、评分器却偏多，
+        择时总分被系统性抬高、`market_state` 可能仍判「震荡偏强」。
+        """
+        s, why = ms.score_amv({"amv_0": {"effective_state": "空头", "amv_change_pct": -3.0}})
+        assert s == 0, f"空头给了 {s} 分"
+        assert "空头" in why
 
-    def test_unlocked_positive_and_negative(self):
-        assert sc.score_amv({"amv_0": {"amv_change_pct": 1.0}})[0] == 9
-        assert sc.score_amv({"amv_0": {"amv_change_pct": -1.0}})[0] == 5
+    def test_bear_zone_wording_also_zero(self):
+        """三套并行词表都要归一 —— `amv_zone` 写的是「空头触发」。"""
+        assert ms.score_amv({"amv_0": {"amv_zone": "空头触发"}})[0] == 0
+
+    def test_long_scores_full(self):
+        assert ms.score_amv({"amv_0": {"effective_state": "做多", "amv_change_pct": 5.0}})[0] == 15
+
+    def test_long_zone_wording(self):
+        assert ms.score_amv({"amv_0": {"amv_zone": "做多触发"}})[0] == 15
+
+    def test_missing_value_without_lock_is_half(self):
+        """无锁定态且无读数 ⇒ 半分，并**说明是按中性处理** ——
+        不能给 0（那等于把「不知道」当成「空头」）也不能给满分。"""
+        s, why = ms.score_amv({"amv_0": {}})
+        assert s == 7.5 and "中性半分" in why
+
+    def test_no_lock_positive_is_slightly_bullish(self):
+        assert ms.score_amv({"amv_0": {"amv_change_pct": 1.5}})[0] == 9
+
+    def test_no_lock_negative_is_slightly_bearish(self):
+        assert ms.score_amv({"amv_0": {"amv_change_pct": -1.0}})[0] == 5
+
+    def test_lock_overrides_daily_value(self):
+        """锁定态优先于当日读数 —— 状态机的锁定语义不能被单日读数推翻。"""
+        assert ms.score_amv({"amv_0": {"effective_state": "空头", "amv_change_pct": 3.0}})[0] == 0
+
+
+class TestScoreMacro:
+    def test_all_blank_is_half_with_explicit_note(self):
+        s, why = ms.score_macro({})
+        assert s == 7.5 and "未填" in why and "人工补充" in why
+
+    def test_best_case_capped_at_15(self):
+        s, _ = ms.score_macro({"macro_policy": {
+            "monetary_policy": "宽松", "fiscal_policy": "积极",
+            "credit_environment": "扩张", "regulation_environment": "呵护市场"}})
+        assert s == 15, "加起来 4+4+3+4=15，且必须被 min 夹住"
+
+    def test_neutral_across_the_board(self):
+        s, _ = ms.score_macro({"macro_policy": {
+            "monetary_policy": "中性", "fiscal_policy": "中性",
+            "credit_environment": "稳定", "regulation_environment": "中性"}})
+        assert s == 7.5
+
+    def test_adverse_items_are_listed(self):
+        """不利项必须逐条列出 —— 只给分数无法复盘。"""
+        _, why = ms.score_macro({"macro_policy": {"monetary_policy": "收紧"}})
+        assert "货币政策非宽松" in why
 
 
 class TestScoreOverseas:
-    def test_missing_is_neutral_half(self):
-        s, note = sc.score_overseas({})
-        assert s == 5 and "中性半分" in note
+    @pytest.mark.parametrize("avg,want", [(1.0, 10), (0.5, 7), (0.0, 5), (-0.5, 3), (-1.0, 1)])
+    def test_tiers(self, avg, want):
+        d = {"overseas_market": {"nasdaq_change_pct": avg}}
+        assert ms.score_overseas(d)[0] == want
 
-    def test_monotonic_in_average(self):
-        def _s(v):
-            return sc.score_overseas({"overseas_market": {"nasdaq_change_pct": v}})[0]
-        assert _s(2.0) > _s(0.5) > _s(0.0) > _s(-0.5) > _s(-2.0)
+    def test_missing_is_half(self):
+        s, why = ms.score_overseas({})
+        assert s == 5 and "未填" in why
 
-
-class TestScoreBreadth:
-    def _d(self, up, down, **kw):
-        return {"market_breadth": {"up_count": up, "down_count": down, **kw}}
-
-    def test_missing_is_neutral(self):
-        assert sc.score_breadth({})[0] == 7.5
-        assert sc.score_breadth(self._d(100, 0))[0] == 7.5     # 除零保护
-
-    def test_ratio_bands_monotonic(self):
-        assert sc.score_breadth(self._d(3000, 1000))[0] == 15
-        assert sc.score_breadth(self._d(1300, 1000))[0] == 11
-        assert sc.score_breadth(self._d(900, 1000))[0] == 8
-        assert sc.score_breadth(self._d(600, 1000))[0] == 5
-        assert sc.score_breadth(self._d(300, 1000))[0] == 2
-
-    def test_candidate_quality_is_averaged_with_neutral(self):
-        s, note = sc.score_breadth(self._d(3000, 1000, quality="candidate"))
-        assert s == 11.25 and "候选口径" in note
-
-    def test_stale_data_scores_neutral_not_full(self):
-        """核心回归:数据日非当日时不得按满分计,否则 T-1 宽度会撑起当日评分。"""
-        s, note = sc.score_breadth(self._d(3000, 1000, quality="stale", as_of="2026-07-17"))
-        assert s == 7.5
-        assert "stale" in note and "2026-07-17" in note
-
-
-class TestScoreTurnoverAndSentiment:
-    def test_turnover_bands(self):
-        def _s(chg, **kw):
-            return sc.score_turnover({"turnover": {"turnover_change_pct": chg, **kw}})[0]
-        assert _s(20) == 8 and _s(10) == 6 and _s(0) == 4 and _s(-10) == 3 and _s(-20) == 1
-
-    def test_turnover_missing_and_stale(self):
-        assert sc.score_turnover({})[0] == 4
-        s, note = sc.score_turnover({"turnover": {"turnover_change_pct": 30, "quality": "stale"}})
-        assert s == 4 and "stale" in note
-
-    def test_sentiment_clamped_and_stale(self):
-        hot = sc.score_sentiment({"sentiment": {"limit_up_count": 120, "limit_down_count": 0,
-                                                "blowup_rate": 0.05, "market_height": 6}})[0]
-        cold = sc.score_sentiment({"sentiment": {"limit_up_count": 10, "limit_down_count": 60,
-                                                 "blowup_rate": 0.6, "market_height": 1}})[0]
-        assert 0 <= cold < hot <= 15
-        s, note = sc.score_sentiment({"sentiment": {"limit_up_count": 120, "limit_down_count": 0,
-                                                    "quality": "stale"}})
-        assert s == 7.5 and "stale" in note
+    def test_averages_only_available_markets(self):
+        """缺的市场不参与平均 —— 用 0 填充会把缺数算成「持平」。"""
+        d = {"overseas_market": {"nasdaq_change_pct": 2.0, "sp500_change_pct": None}}
+        assert ms.score_overseas(d)[0] == 10
 
 
 class TestStatusFromScore:
-    def test_monotonic_labels(self):
-        labels = [sc.status_from_score(x)[0] for x in (95, 75, 55, 35, 10)]
-        assert len(set(labels)) >= 3            # 不同分档给出不同结论
-        assert all(isinstance(x, str) and x for x in labels)
-
-    def test_extremes_do_not_raise(self):
-        for v in (0, 0.0, 100, 100.0, 49.9999):
-            assert isinstance(sc.status_from_score(v), tuple)
-
-
-class TestIsStale:
-    def test_only_stale_quality_flagged(self):
-        assert sc.is_stale({"quality": "stale"}) is True
-        for q in ("auto", "confirmed", "candidate", None):
-            assert sc.is_stale({"quality": q}) is False
-        assert sc.is_stale({}) is False
-        assert sc.is_stale(None) is False
+    def test_monotonic(self):
+        """分数→状态必须单调 —— 非单调会让「分数更高但状态更弱」这种荒谬结果出现。"""
+        seen = [ms.status_from_score(s) for s in range(0, 101, 5)]
+        order = {}
+        for i, st in enumerate(seen):
+            order.setdefault(st, i)
+        # 同一状态的出现区间不得交叉
+        idx = [order[st] for st in dict.fromkeys(seen)]
+        assert idx == sorted(idx), f"状态随分数非单调：{list(dict.fromkeys(seen))}"
 
 
-def test_stale_as_of_auto_quality_scores_neutral():
-    """生产形态回归(H1):collector 取上一根 K 线 → quality=auto + as_of=T-1。
-    仅看 quality 会漏,必须按 as_of!=date 判陈旧,否则 T-1 宽度照样拿满分。"""
-    d = {"date": "2026-07-30",
-         "market_breadth": {"up_count": 3000, "down_count": 1000, "quality": "auto",
-                            "as_of": "2026-07-29"}}
-    s, note = sc.score_breadth(d)
-    assert s == 7.5 and "stale" in note and "2026-07-29" in note
-    d2 = {"date": "2026-07-30",
-          "market_breadth": {"up_count": 3000, "down_count": 1000, "quality": "auto",
-                             "as_of": "2026-07-30"}}
-    assert sc.score_breadth(d2)[0] == 15        # as_of 当日 → 正常给分
+class TestStaleDetection:
+    def test_stale_when_as_of_is_older(self):
+        """`as_of` 早于评分日 ⇒ stale。
+
+        README 记着这条的由来：当日文件里装 T-1 数据同样记 stale，
+        否则「昨天的数据」会拿到满分。
+        """
+        assert ms.is_stale({"as_of": "2026-08-06"}, "2026-08-07") is True
+
+    def test_not_stale_when_same_day(self):
+        assert ms.is_stale({"as_of": "2026-08-07"}, "2026-08-07") is False
+
+    def test_quality_stale_flag_alone_is_enough(self):
+        """判据①：`quality` 已被门控/合并标 stale ⇒ 直接 stale，不看 as_of。"""
+        assert ms.is_stale({"quality": "stale"}) is True
+
+    def test_missing_as_of_is_currently_fail_open(self):
+        """⚠️ **如实记录现状：缺 `as_of` 被当成「新鲜」**（fail-open）。
+
+        `return bool(day and as_of) and as_of != day` —— `as_of` 为空时整式为 False。
+        于是一个没写 `as_of` 的 section 会**拿到当日满分**。
+
+        这与仓库别处的 fail-closed 原则相反（比较 `runtime_gate._QUALITY_PASS`：
+        「风控组件的未知状态必须等于阻断」）。上游已缓解：
+        `merge_incremental_market` 被改成**必须写 as_of**（README 记着同一隐患：
+        「一个『确认过但其实是上周的』0AMV 会拿满分并授予加仓权」）。
+
+        **不在补测试的这一轮改它** —— 改成 fail-closed 会降低评分、改变 live 择时行为，
+        属语义改动。已登记待办交 owner 定。本测试锁住现状，改动时会被提醒。
+        """
+        assert ms.is_stale({}, "2026-08-07") is False, "行为变了：请同步更新待办与本测试"
+        assert ms.is_stale({"as_of": None}, "2026-08-07") is False
+
+
+class TestFnum:
+    def test_none_and_garbage(self):
+        assert ms.fnum(None) is None
+        assert ms.fnum("x") is None
+
+    def test_zero_is_kept(self):
+        """⚠️ `0` 是合法读数（涨跌幅为 0 真实存在），不得变 None。"""
+        assert ms.fnum(0) == 0.0
+        assert ms.fnum("0") == 0.0

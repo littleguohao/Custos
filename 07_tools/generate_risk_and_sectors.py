@@ -13,22 +13,16 @@ import re
 from pathlib import Path
 
 from paths import BASE
+from paths import read_json as load
+from paths import write_json as dump
+from code_utils import bare_code as bare, fnum
 from runtime_guards import normalize_regime
+from contracts import require
 
 DATA = BASE / "01_data"
 
 
-def load(path: Path, default):
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
 
-
-def dump(path: Path, value):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def bare(code: str) -> str:
-    return str(code or "").split(".")[0]
 
 
 # ── Sector state normalization (from ThemeStageAdapter) ──
@@ -59,6 +53,12 @@ def build_sector_state(date: str) -> list[dict]:
         raw_stage = row.get("raw_stage", row.get("stage", row.get("state", "")))
         trend = row.get("trend", row.get("trend_state", "横盘震荡"))
         state = normalize_stage(raw_stage, trend)
+        # ⚠️ 判定读**原值**、落盘写 `fnum(score)`，两者刻意不同：
+        #   · 判定：NaN 时 `float(nan) >= 60` 为 False ⇒ 落到「观察」，这是**保守**的。
+        #     不能顺手换成 fnum —— 那会让 NaN 变 None，命中下面 `score is None`
+        #     （「没打分不算减分项」）⇒ 从观察**放宽成支持**，方向正好反了。
+        #   · 落盘：NaN 不是合法 JSON，且 `paths.write_json` 的 `allow_nan=False`
+        #     会当场崩；这是硬失败 stage，不能因一个板块的脏分数拖垮整条 17:00 链。
         score = row.get("score")
         action = str(row.get("action_bias") or "")
         if state == "退潮" or "回避" in action or "禁止" in action:
@@ -78,7 +78,7 @@ def build_sector_state(date: str) -> list[dict]:
             "support": row.get("box20_lower", row.get("support")),
             "resistance": row.get("box20_upper", row.get("resistance")),
             "trade_permission": permission,
-            "score": score,
+            "score": fnum(score),
             "risk_flags": list(dict.fromkeys(x for x in (row.get("risk_flags") or []) if x)),
         })
     return result
@@ -88,6 +88,14 @@ def build_sector_state(date: str) -> list[dict]:
 
 def build_risk_decision(date: str) -> dict:
     holding_reviews = load(DATA / "holdings" / f"{date}_holding_review.json", [])
+    # ⚠️ **证据日 ≠ 运行日。** 09:05 盘前也会跑这条链（`daily_pipeline` 里
+    # `generate_risk_and_sectors` 不受 session_type 限制），那时当日 K 线还不存在，
+    # 所以盘前产出的 risk_decision 打着当日日期、依据却是**前一交易日收盘**。
+    # 不把这件事写进产物，14:45 报告只能按文件名判「当日」，读者会以为
+    # 风控依据是今天的 —— 同「把缺数渲染成读数」那一类失真。
+    _tech = load(DATA / "holdings" / f"{date}_holding_technical_summary.json", [])
+    _tech_dates = sorted({str(x.get("latest_date")) for x in _tech if x.get("latest_date")})
+    evidence_date = _tech_dates[-1] if _tech_dates else ""
     risks = []
     for h in holding_reviews:
         action = h.get("action")
@@ -130,7 +138,7 @@ def build_risk_decision(date: str) -> dict:
     else:
         regime_directive = {"reduce_top_priority": False}
 
-    return {"date": date, "market_regime": market_regime, "regime_directive": regime_directive, "risk_level": level, "forbidden_actions": forbidden, "stock_risks": ordered}
+    return {"date": date, "evidence_date": evidence_date, "market_regime": market_regime, "regime_directive": regime_directive, "risk_level": level, "forbidden_actions": forbidden, "stock_risks": ordered}
 
 
 def main():
@@ -139,9 +147,13 @@ def main():
     args = ap.parse_args()
 
     sector_states = build_sector_state(args.date)
+    # ⚠️ 落盘前校验：6 个消费者。`score` 的 NaN 曾让 `nan >= 60` 恒为 False
+    # ⇒ 板块**静默降级**成「观察」；上面已过 fnum，这里把它钉住。
+    require("sector_state", sector_states)
     dump(DATA / "sectors" / f"{args.date}_sector_state.json", sector_states)
 
     risk = build_risk_decision(args.date)
+    require("risk_decision", risk)
     dump(DATA / "risk" / f"{args.date}_risk_decision.json", risk)
 
     print(json.dumps({

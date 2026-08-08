@@ -28,18 +28,13 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from paths import BASE, cn_now  # noqa: E402
+from code_utils import fnum  # noqa: E402
 from runtime_guards import normalize_regime  # noqa: E402
 
 IN_DIR = BASE / "01_data" / "market"
 OUT_DIR = BASE / "03_daily_plans"
 QUALITY_DIR = BASE / "01_data" / "quality"
 
-
-def fnum(x):
-    try:
-        return float(x) if x is not None else None
-    except Exception:
-        return None
 
 
 def score_macro(d: dict) -> tuple[float, str]:

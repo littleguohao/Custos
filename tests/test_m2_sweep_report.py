@@ -17,7 +17,7 @@ import sys
 
 import pytest
 
-from screening import m2_stop_sweep as m2
+from research import m2_stop_sweep as m2
 
 
 def _write(tmp, group, name, *, fp="s1000", **kw):
@@ -1347,7 +1347,7 @@ class TestReportUsesTheBatchJustRun:
 
 
 class TestMemoryGuards:
-    """OOM Kill 是这套回测的老问题（B1_BACKTEST_FINDINGS「全市场 OOM」），
+    """OOM Kill 是这套回测的老问题（research/R17_infra_tooling.md「全市场 OOM」），
     而 `--jobs N` 会把内存**乘 N** ⇒ 并行必须有闸。
     被 kill 掉的方案在报表里只是少一行，比跑得慢糟得多。"""
 

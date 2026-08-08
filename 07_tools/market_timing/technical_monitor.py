@@ -29,8 +29,18 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
+# 2026-08-07 架构审查：以下 7 个纯指标函数已下移到 `indicators`（底层）——
+# 它们此前定义在本模块，却被 factors/（底层）与 screening/ 跨层调用，
+# 构成「底层依赖决策层」的分层反转。本模块自己也用它们，故导入回来。
+from indicators import (bbi_series, kdj_series,  # noqa: E402
+                        ema, resample, kdj, macd, bbi_state, zhixing_state,
+                        _infer_price_limit)
+
 from paths import BASE, TDX_ROOT  # noqa: E402
-from code_utils import norm_code, split_code  # noqa: E402
+from code_utils import norm_code, price_limit_pct, split_code  # noqa: E402
+from b1_thresholds import (J_LOW_THRESHOLD, REVERSAL_AMPLITUDE_PCT,  # noqa: E402
+                           REVERSAL_CHANGE_MAX_PCT, REVERSAL_CHANGE_MIN_PCT,
+                           VOL_PCTILE_MAX, VOL_RATIO_MAX, change_in_range)
 
 OUT_DIR = BASE / "01_data" / "market"
 
@@ -56,74 +66,6 @@ def _read_vipdoc_mootdx(tdx_code: str) -> pd.DataFrame:
 def read_vipdoc(tdx_code: str) -> pd.DataFrame:
     """Read K-line via unified mootdx data layer (replaces struct.unpack binary parsing)."""
     return _read_vipdoc_mootdx(tdx_code)
-
-
-def ema(s: pd.Series, span: int) -> pd.Series:
-    return s.ewm(span=span, adjust=False).mean()
-
-
-def macd(df: pd.DataFrame) -> dict[str, Any]:
-    if len(df) < 35:
-        return {"available": False}
-    close = df["close"]
-    dif = ema(close, 12) - ema(close, 26)
-    dea = ema(dif, 9)
-    hist = (dif - dea) * 2
-    return {
-        "available": True,
-        "dif": round(float(dif.iloc[-1]), 4),
-        "dea": round(float(dea.iloc[-1]), 4),
-        "hist": round(float(hist.iloc[-1]), 4),
-        "hist_prev": round(float(hist.iloc[-2]), 4),
-        "hist_direction": "扩张" if hist.iloc[-1] > hist.iloc[-2] else "收缩",
-        "golden_cross": bool(dif.iloc[-2] <= dea.iloc[-2] and dif.iloc[-1] > dea.iloc[-1]),
-        "death_cross": bool(dif.iloc[-2] >= dea.iloc[-2] and dif.iloc[-1] < dea.iloc[-1]),
-    }
-
-
-def kdj(df: pd.DataFrame, n=9, m1=3, m2=3) -> dict[str, Any]:
-    if len(df) < n + 3:
-        return {"available": False}
-    low_n = df["low"].rolling(n).min()
-    high_n = df["high"].rolling(n).max()
-    rsv = (df["close"] - low_n) / (high_n - low_n) * 100
-    rsv = rsv.replace([float("inf"), -float("inf")], pd.NA).fillna(50)
-    k = rsv.ewm(com=m1-1, adjust=False).mean()
-    d = k.ewm(com=m2-1, adjust=False).mean()
-    j = 3 * k - 2 * d
-    jv = float(j.iloc[-1])
-    if jv < 13:
-        state = "低位调整到位观察"
-    elif jv > 90:
-        state = "高位过热"
-    elif j.iloc[-1] > j.iloc[-2] and jv < 30:
-        state = "低位拐头"
-    else:
-        state = "中性"
-    return {
-        "available": True,
-        "k": round(float(k.iloc[-1]), 4),
-        "d": round(float(d.iloc[-1]), 4),
-        "j": round(jv, 4),
-        "j_prev": round(float(j.iloc[-2]), 4),
-        "golden_cross": bool(k.iloc[-2] <= d.iloc[-2] and k.iloc[-1] > d.iloc[-1]),
-        "death_cross": bool(k.iloc[-2] >= d.iloc[-2] and k.iloc[-1] < d.iloc[-1]),
-        "state": state,
-    }
-
-
-def resample(df: pd.DataFrame, rule: str) -> pd.DataFrame:
-    if df.empty:
-        return df
-    x = df.set_index("date").resample(rule).agg({
-        "open": "first",
-        "high": "max",
-        "low": "min",
-        "close": "last",
-        "amount": "sum",
-        "volume": "sum",
-    }).dropna().reset_index()
-    return x
 
 
 def box(df: pd.DataFrame, n: int) -> dict[str, Any]:
@@ -164,104 +106,6 @@ def slope(vals: pd.Series, n: int) -> float | None:
     return (now / prev - 1) * 100
 
 
-def bbi_state(df: pd.DataFrame) -> dict[str, Any]:
-    """Return the standard TDX BBI state used by the B1 holding rules."""
-    if len(df) < 24:
-        return {"available": False, "reason": "少于24根K线"}
-    close = df["close"]
-    bbi = sum(close.rolling(n).mean() for n in (3, 6, 12, 24)) / 4
-    valid = bbi.notna()
-    if not valid.any():
-        return {"available": False, "reason": "BBI无法计算"}
-
-    c = float(close.iloc[-1])
-    value = float(bbi.iloc[-1])
-    below = close < bbi
-    consecutive_below = 0
-    for is_below in reversed(below.tolist()):
-        if not is_below:
-            break
-        consecutive_below += 1
-
-    distance_pct = (c / value - 1) * 100 if value else None
-    return {
-        "available": True,
-        "formula": "(MA3+MA6+MA12+MA24)/4",
-        "value": round(value, 4),
-        "close_above": bool(c >= value),
-        "distance_pct": round(distance_pct, 4) if distance_pct is not None else None,
-        "consecutive_closes_below": consecutive_below,
-        "previous_close_above": bool(close.iloc[-2] >= bbi.iloc[-2]) if len(df) >= 25 else None,
-    }
-
-
-def zhixing_state(df: pd.DataFrame, m1: int = 14, m2: int = 28, m3: int = 57, m4: int = 114) -> dict[str, Any]:
-    """知行趋势线（通达信 ZSDKX）：快线 QSX 上穿慢线 DKS 为多头/金叉。
-
-    - QSX = EMA(EMA(CLOSE,10),10)（短期趋势线，图上白线）。
-    - DKS = (MA(CLOSE,m1)+MA(CLOSE,m2)+MA(CLOSE,m3)+MA(CLOSE,m4))/4（多空线，图上黄线）。
-    - 多头状态 QSX>DKS；金叉=QSX 由下向上穿越 DKS 当日。
-    - 辅助：MA1=MA(CLOSE,60)、MA2=EMA(CLOSE,13)。
-    需 >= m4 根 K 线才能计算 DKS，否则 available=False。
-    """
-    if len(df) < m4:
-        return {"available": False, "reason": f"少于{m4}根K线，DKS(MA{m4})无法计算"}
-    close = df["close"].astype(float).reset_index(drop=True)
-    qsx = ema(ema(close, 10), 10)
-    dks = sum(close.rolling(n).mean() for n in (m1, m2, m3, m4)) / 4
-    valid = qsx.notna() & dks.notna()
-    if not valid.any():
-        return {"available": False, "reason": "QSX/DKS 无有效值"}
-    gt = (qsx > dks) & valid
-    prev_gt = gt.shift(1, fill_value=False)
-    cross_up = gt & (~prev_gt) & valid.shift(1, fill_value=False)
-    idxs = [i for i, v in enumerate(cross_up.tolist()) if v]
-    days_since = (len(close) - 1 - idxs[-1]) if idxs else None
-    qsx_last = float(qsx.iloc[-1])
-    dks_last = float(dks.iloc[-1])
-    c = float(close.iloc[-1])
-    ma1 = float(close.rolling(60).mean().iloc[-1]) if len(close) >= 60 else None
-    ma2 = float(ema(close, 13).iloc[-1])
-    return {
-        "available": True,
-        "qsx": round(qsx_last, 4),
-        "dks": round(dks_last, 4),
-        "qsx_gt_dks": bool(qsx_last > dks_last),
-        "golden_cross_today": bool(cross_up.iloc[-1]),
-        "days_since_golden_cross": days_since,
-        "close_above_qsx": bool(c >= qsx_last),
-        "ma1_ma60": round(ma1, 4) if ma1 is not None else None,
-        "ma2_ema13": round(ma2, 4),
-        "params": {"m1": m1, "m2": m2, "m3": m3, "m4": m4},
-    }
-
-
-def _infer_price_limit(code: str, df: pd.DataFrame) -> int:
-    """Infer the daily price-limit percentage for a stock.
-
-    Uses code prefix as the base (688/920/300/301 => 20%, else 10%), then
-    validates against observed historical daily changes: if any completed
-    bar shows |change_pct| > 9.9 for a 10%-prefix stock, upgrade to 20%.
-    This catches edge cases without relying solely on static prefix rules.
-    ST/special-treatment stocks typically have 5% limits; we detect those
-    by checking if observed max |change_pct| is consistently <= 5.2. The ST
-    downgrade only applies to 10%-prefix stocks — a quiet 20-day window must
-    never demote a 300/301/688/920 stock to 5%.
-    """
-    raw = str(code).strip().upper().split(".")[0]
-    base = 20 if raw.startswith(("688", "920", "300", "301")) else 10
-    if len(df) >= 20:
-        changes = (df["close"] / df["close"].shift(1) - 1).abs() * 100
-        max_change = float(changes.dropna().max())
-        if base == 10 and max_change > 9.9:
-            base = 20
-        if base == 10 and max_change <= 5.2:
-            # ST 降级仅适用于 10% 前缀品种；20% 前缀（300/301/688/920）
-            # 即使近 20 日波动很小也不得降级为 5%。
-            base = 5
-    return base
-
-
 def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
     """Compute deterministic B1 holding signals from completed daily bars."""
     if len(df) < 20:
@@ -296,18 +140,22 @@ def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
     shrink_small_bear = bool(small_bear and volume_ratio_5 is not None and volume_ratio_5 <= 0.8)
     large_bear = bool(change_pct is not None and change_pct <= -4 and close < open_)
     heavy_large_bear = bool(large_bear and volume_ratio_5 is not None and volume_ratio_5 >= 1.5)
+    # `volume_rank20` 是 0~1 的比例，`VOL_PCTILE_MAX` 的单位是 %（10.0）—— 故 /100。
     extreme_shrink = bool(
-        volume_ratio_5 is not None and volume_ratio_5 <= 0.5 and volume_rank20 <= 0.10
+        volume_ratio_5 is not None and volume_ratio_5 <= VOL_RATIO_MAX
+        and volume_rank20 <= VOL_PCTILE_MAX / 100
     )
+    # ⚠️ 阈值来自 `b1_thresholds`（L0 单一来源）—— 原先硬编码 `-2 <= change_pct <= 2`
+    #    与 `amplitude_pct <= 7`，于是 `B1_REVK_*` 只对选股链生效、持仓链无视配置。
     reversal_k_candidate = bool(
-        extreme_shrink and change_pct is not None and -2 <= change_pct <= 2
-        and amplitude_pct is not None and amplitude_pct <= 7
+        extreme_shrink and change_in_range(change_pct)
+        and amplitude_pct is not None and amplitude_pct <= REVERSAL_AMPLITUDE_PCT
     )
 
     # BBI上方连续两根中大阳线判断 (B1第五层止盈)
     price_limit = _infer_price_limit(code, df)
     medium_large_threshold = price_limit / 2  # 半个涨停幅度
-    bbi_val = sum(df["close"].rolling(n).mean() for n in (3, 6, 12, 24)) / 4
+    bbi_val = bbi_series(df["close"])
     bbi_latest = float(bbi_val.iloc[-1]) if bbi_val.notna().any() else None
     bbi_prev = float(bbi_val.iloc[-2]) if len(bbi_val) >= 2 and bbi_val.notna().iloc[-2] else None
     close_prev = float(x["close"].iloc[-2])
@@ -354,10 +202,12 @@ def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
             "small_bear_change_pct": [-2.0, 0.0],
             "shrink_volume_ratio_5_max": 0.8,
             "heavy_volume_ratio_5_min": 1.5,
-            "reversal_volume_ratio_5_max": 0.5,
-            "reversal_volume_rank20_pct_max": 10.0,
-            "reversal_close_change_pct": [-2.0, 2.0],
-            "reversal_amplitude_pct_max": 7.0,
+            # ⚠️ 上报**实际生效值**而非字面量 —— 原先写死 [-2.0, 2.0]，
+            #    环境变量一改它就在谎报自己的阈值。
+            "reversal_volume_ratio_5_max": VOL_RATIO_MAX,
+            "reversal_volume_rank20_pct_max": VOL_PCTILE_MAX,
+            "reversal_close_change_pct": [REVERSAL_CHANGE_MIN_PCT, REVERSAL_CHANGE_MAX_PCT],
+            "reversal_amplitude_pct_max": REVERSAL_AMPLITUDE_PCT,
         },
     }
 

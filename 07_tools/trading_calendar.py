@@ -10,14 +10,12 @@ from typing import Any
 
 from runtime_guards import trading_day_status
 from paths import BASE, CONTRACTS_DIR, TOOLS, cn_today, cn_now
+from paths import read_json as load_json
 
 CONFIG = CONTRACTS_DIR / "CN_TRADING_CALENDAR.json"
 CACHE = BASE / "01_data" / "market" / "CN_TRADING_CALENDAR_CACHE.json"
 DEFAULT_ENDPOINT = "http://127.0.0.1:17709/"
 
-
-def load_json(path: Path, default: dict[str, Any]) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else default
 
 
 def normalize_day(value: Any) -> str | None:

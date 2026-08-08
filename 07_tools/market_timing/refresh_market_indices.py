@@ -19,6 +19,7 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from paths import BASE  # noqa: E402
+from indicators import pct_change as pct  # noqa: E402
 
 LOCAL_TDX_DIR = BASE / "07_tools" / "local_tdx"
 if str(LOCAL_TDX_DIR) not in sys.path:
@@ -57,11 +58,6 @@ def to_float(x):
     except Exception:
         return None
 
-
-def pct(a, b):
-    if b in (None, 0) or a is None:
-        return None
-    return round((a / b - 1) * 100, 4)
 
 
 def _is_stale(as_of, target_date) -> bool:

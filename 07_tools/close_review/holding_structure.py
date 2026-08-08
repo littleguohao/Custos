@@ -2,14 +2,22 @@
 """Presentation and risk signal for confirmed N-structure prior lows."""
 from __future__ import annotations
 
+import math
 from typing import Any
 
 
 def _number(value: Any, digits: int = 2) -> str:
+    """定点小数文本；缺失 / 非有限值渲染「待确认」。
+
+    ⚠️ 2026-08-07 补 `isfinite`：只 catch `TypeError/ValueError` 是不够的 ——
+    `f"{float('nan'):.2f}"` **不抛异常**，而是渲染出字符串 `"nan"`，
+    于是报告里出现「BBI nan」这种既不是数也不是「待确认」的东西。
+    """
     try:
-        return f"{float(value):.{digits}f}"
+        number = float(value)
     except (TypeError, ValueError):
         return "待确认"
+    return f"{number:.{digits}f}" if math.isfinite(number) else "待确认"
 
 
 def n_structure_basis(row: dict[str, Any], price: Any) -> dict[str, Any]:

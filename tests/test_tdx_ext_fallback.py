@@ -167,3 +167,97 @@ class TestCollectorIntegration:
         ov = json.loads(out.read_text(encoding="utf-8"))["overseas_market"]
         assert "fallback_source" not in ov
         assert ov["source"] == "Yahoo Finance chart API"
+
+
+class TestOverseasAsOfDerivation:
+    """⚠️ `overseas_market.as_of` 的**推导**此前零测试覆盖。
+
+    检索到的 `as_of` 出现在 6 个地方，全部是**手写给消费者**
+    （`runtime_guards`）的输入，从没有人验证生产者是怎么算出来的 ——
+    而 `as_of` 正是运行门控判新鲜度的依据（「当日文件里装 T-1 数据同样记 stale」）。
+
+    2026-08-07 review tests/ 时补上。补的过程里查出下面那条 fail-open。
+    """
+
+    @staticmethod
+    def _run(monkeypatch, tmp_path, chart):
+        import json
+        import sys as _s
+
+        from market_timing import overseas_market_collector as omc
+        monkeypatch.setattr(omc, "SYMBOLS",
+                            {"nvda": {"symbol": "NVDA", "name": "英伟达", "group": "ai_leader"},
+                             "sox": {"symbol": "^SOX", "name": "费半", "group": "ai_leader"}})
+        monkeypatch.setattr(omc, "FIELD_MAP",
+                            {"nvda": "nvda_change_pct", "sox": "sox_change_pct"})
+        monkeypatch.setattr(omc, "fetch_chart", chart)
+        out = tmp_path / "o.json"
+        monkeypatch.setattr(_s, "argv", ["x", "--date", "2026-08-04", "--input", str(out)])
+        try:
+            omc.main()
+        except SystemExit:
+            pass
+        return json.loads(out.read_text(encoding="utf-8"))["overseas_market"]
+
+    def test_as_of_is_max_timestamp_across_symbols(self, monkeypatch, tmp_path):
+        """有时间戳时取**跨 symbol 的最大值** —— 不是第一个、也不是最后一个。
+
+        取 max 的道理：几个市场收盘时间不同，`as_of` 该表示「这批数字里最新的
+        那个截止到什么时候」。取错会让门控对着更早的时间判新鲜度。
+        """
+        stamps = {"NVDA": 1_754_300_000, "^SOX": 1_754_400_000}   # ^SOX 更晚
+
+        def chart(symbol, region=""):
+            return {"change_pct": 1.0, "last_timestamp": stamps[symbol],
+                    "source": "Yahoo Finance chart API"}
+
+        ov = self._run(monkeypatch, tmp_path, chart)
+        assert ov["as_of_basis"] == "max(last_timestamp) across symbols"
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        want = datetime.fromtimestamp(max(stamps.values()),
+                                      ZoneInfo("Asia/Shanghai")).isoformat(timespec="seconds")
+        assert ov["as_of"] == want, "as_of 应为最大时间戳，取到的却是别的"
+
+    def test_partial_timestamps_still_use_the_available_max(self, monkeypatch, tmp_path):
+        """只有部分 symbol 带时间戳时，用**拿到的那些**里的最大值，不回落到采集时刻。"""
+        def chart(symbol, region=""):
+            if symbol == "NVDA":
+                return {"change_pct": 1.0, "last_timestamp": 1_754_300_000}
+            return {"change_pct": 0.5}          # ^SOX 没给时间戳
+
+        ov = self._run(monkeypatch, tmp_path, chart)
+        assert ov["as_of_basis"] == "max(last_timestamp) across symbols"
+
+    def test_no_timestamp_fabricates_collection_time_and_gate_calls_it_confirmed(
+            self, monkeypatch, tmp_path):
+        """⚠️⚠️ **一个时间戳都没拿到时，`as_of` 被写成采集时刻（now）**，
+        而运行门控据此判 `confirmed`。
+
+        这是一处 **fail-open**，且与本项目已拍板的相反决定不一致：
+        契约层刻意允许 `amv_0.as_of` 为 None，理由原话是
+        **「编一个 as_of 等于给门控假的新鲜度」**。这里的代码正是在编。
+
+        生产者其实留了痕 —— `as_of_basis: "collection_time_fallback"` ——
+        但 `runtime_guards.market_quality_gate` **从不读这个字段**，
+        它的判据只有「有值 且 as_of 非空」⇒ 伪造的 as_of 照样得满分。
+
+        影响面有界：overseas 权重 10/100，且被排除在 `core` 覆盖率判定之外。
+        本条测试**钉住现状**（不擅自改门控 —— 2026-07-30 有过「门控与口径同时
+        收紧导致 17:00 链失败」的事故），并把问题记入 TODO 待 owner 定：
+        是「生产者不再伪造」还是「门控改读 as_of_basis」。
+        """
+        def chart(symbol, region=""):
+            return {"change_pct": 1.0}          # 两个 symbol 都没时间戳
+
+        ov = self._run(monkeypatch, tmp_path, chart)
+        assert ov["as_of_basis"] == "collection_time_fallback"
+        assert ov["as_of"], "当前实现会填采集时刻"
+
+        # 门控对着这份伪造的 as_of 判 confirmed —— 记录现状
+        import runtime_guards as rg
+        gate = rg.market_quality_gate(
+            {"date": "2026-08-04", "overseas_market": ov}, "2026-08-04")
+        chk = next(c for c in gate["checks"] if c["field"] == "overseas")
+        assert chk["quality"] == "confirmed", \
+            "若这里变成 candidate/missing，说明门控或生产者已修 —— 请同步更新本测试与 TODO"

@@ -17,10 +17,9 @@ import sys
 import time
 from datetime import date
 
-from paths import BASE, cn_today
-from pipeline_kit import check_trading_day, log_stage, md_to_digest, now_iso, run_stage, warn, write_run_log
+from paths import BASE, cn_today, TOOLS
+from pipeline_kit import check_trading_day, log_stage, md_to_digest, now_iso, run_stage, warn, write_run_log, run_stage_quiet as _stage, calendar_gate, propagate_gate_code
 
-TOOLS = BASE / "07_tools"
 PLANS = BASE / "03_daily_plans"
 LOG_DIR = BASE / "06_logs"
 
@@ -33,14 +32,6 @@ def _write_run_log(target: str, status: str, started_at: str, t0: float, stages:
     return write_run_log(LOG_DIR, "0905", target, status, started_at, t0, stages)
 
 
-def _stage(cmd: list[str], name: str) -> dict:
-    """Run a stage quietly: runner stdout is a machine-consumed protocol, so
-    the stage echo ([RUN] header, subprocess output) is suppressed; only the
-    summary lines below are printed."""
-    with contextlib.redirect_stdout(io.StringIO()):
-        r = run_stage(cmd, name, required=False)
-    r["out"] = (r["stdout"] + r["stderr"]).strip()
-    return r
 
 
 DISCOVERY_STAGES = ("overseas", "rss_collect", "rss_filter")
@@ -98,28 +89,14 @@ def main(argv=None) -> int:
     stages_log: list[dict] = []
 
     # 1. Trading calendar
-    c_started = _now_iso()
-    c_t0 = time.time()
-    cal_buf = io.StringIO()
-    try:
-        with contextlib.redirect_stdout(cal_buf):
-            cal = check_trading_day(target)
-    except RuntimeError as e:
-        stages_log.append(_log_stage("calendar", {"ok": False, "returncode": None, "timeout": False,
-                                                  "stdout": cal_buf.getvalue(), "stderr": str(e)},
-                                     c_started, _now_iso(), time.time() - c_t0,
-                                     note=str(e)[:500]))
-        _write_run_log(target, "calendar_failed", run_started, t0, stages_log)
-        print(f"【盘前日报失败｜{target}】日历检查失败：{str(e)[:200]}")
-        return 1
-    stages_log.append(_log_stage("calendar", {"ok": True, "returncode": 0, "timeout": False,
-                                              "stdout": cal_buf.getvalue()},
-                                 c_started, _now_iso(), time.time() - c_t0,
-                                 note=f"is_trading_day={cal.get('is_trading_day')}"))
-    if not cal.get("is_trading_day", False):
-        _write_run_log(target, "closed", run_started, t0, stages_log)
-        print(f"今日休市，盘前日报不生成（{target}）")
-        return 0
+    _cg = calendar_gate(
+        target, log_dir=LOG_DIR, session="0905", run_started=run_started,
+        t0=t0, stages_log=stages_log,
+        fail_msg="【盘前日报失败｜{target}】日历检查失败：{err}",
+        closed_msg="今日休市，盘前日报不生成（{target}）")
+    if _cg.exit_code is not None:
+        return _cg.exit_code
+    cal = _cg.cal
 
     # 2. Daily pipeline (premarket; reuse 08:50 discovery only when it completed)
     s_started = _now_iso()
@@ -133,7 +110,7 @@ def main(argv=None) -> int:
     if not r["ok"]:
         _write_run_log(target, "failed", run_started, t0, stages_log)
         print(f"【盘前日报失败｜{target}】daily_pipeline失败：{r['out'][:500]}")
-        return 1
+        return propagate_gate_code(r)   # 门控码 3/4/5 原样上抛供 cron 判定
 
     # 3. Read generated report and convert to text digest
     d_started = _now_iso()

@@ -102,7 +102,7 @@ base bucket ＝ 技术结构 × 资金意图（均为个股维度）：
   分项封顶天然有界（解决旧 technical_score 无界累加饱和问题），实现见
   `07_tools/screening/s_shape.py`；**幻灯片部分阈值被遮挡，相关常量取合理猜测并标注"待回测"**，
   校准前不视为定型，各分项实际值随候选落盘可复盘。
-  **校准工具**：`07_tools/screening/backtest_factors.py`（纯分析、只读本地日线、as-of 切片无未来函数）
+  **校准工具**：`07_tools/research/backtest_factors.py`（纯分析、只读本地日线、as-of 切片无未来函数）
   走查历史 S** → 前向 MFE/MAE/胜率，按 S** 档/建议/分项分组，验证"可买(≥70)"是否显著优于"不买(<60)"、
   各分项 hit 是否有正向 lift，据此重估 s_shape.py 顶部的待回测阈值与权重。
 
@@ -156,8 +156,8 @@ next_step：A→generate_buy_plan，B→observe_price，C→long_term_track，D�
 
 ## 策略对齐（B1/CZ）
 
-2026-07-21 起，enrich 段新增对齐 `00_governance/strategy/b1_swing_strategy.md`（B1）与
-`00_governance/strategy/cz_strategy.md`（CZ）的确定性检测器。全部只依赖本地 vipdoc
+2026-07-21 起，enrich 段新增对齐 `00_governance/strategy/b1/01_swing_rules.md`（B1）与
+`00_governance/strategy/cz/01_cognition_framework.md`（CZ）的确定性检测器。全部只依赖本地 vipdoc
 日线 OHLCV，不引入新数据源。**所有阈值集中在 `enrich_candidates.py` 顶部常量
 并标注"待回测参数"**：策略原文要求阈值可配置、实际值随候选落盘，完成样本
 回测前不得视为已校准。
@@ -201,7 +201,7 @@ next_step：A→generate_buy_plan，B→observe_price，C→long_term_track，D�
 与面积背离未确定性化，暂不实现。
 
 ### 板块白/黑名单（CZ §七）
-`00_governance/strategy/CZ_SECTOR_PREFERENCE.json`（cz-sector-v1）。作用于候选股经
+`00_governance/strategy/cz/CZ_SECTOR_PREFERENCE.json`（cz-sector-v1）。作用于候选股经
 `sector_code_map.json` 映射后的**主题名子串匹配**：命中 favored →
 cz_sector=favored，命中 avoid → cz_sector=avoid（avoid 优先，保守），否则
 neutral。**注意：现有 sector_code_map 覆盖粗糙，匹配不上即 neutral，宁缺
@@ -278,7 +278,7 @@ stock_pool.json 的 `cz_sector_status`/`degraded_reason` 注明。
 
 ## 明确不做
 
-- 不接 chief_decision.buy_actions、不生成 BuyPlan、不改新开仓权限逻辑。
+- 不接 chief_decision.buy_actions、不生成买入计划、不改新开仓权限逻辑。（`BuyPlan` 契约实体已于 2026-08-06 删除：无生产者；买入计划的必备项清单见 `../strategy/b1/03_execution_discipline.md`。）
 - 不做盘中实时选股；不接龙虎榜。
 - StockPool 仅为证据层候选；A/B 池亦须经总控与风控审批。
 

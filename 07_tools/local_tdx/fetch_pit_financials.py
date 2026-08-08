@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Point-in-time 财务数据:按报告期批量拉东方财富业绩报表,以**公告日**为可见日落盘。
 
-解决什么问题:B1_BACKTEST_FINDINGS 结论#11/#14 的"基本面腿进不来"——mootdx Affair 的财报
+解决什么问题:research/R5(0AMV 迟到)与 R3(判别力)记的"基本面腿进不来"——mootdx Affair 的财报
 **没有发布日期**,任何基本面特征在回测里都是 look-ahead,只能 live 验证。本脚本取的
 `NOTICE_DATE`(公告日期)就是缺的那把 PIT 钥匙:一季报报告期 3/31,公告日中位在 4/29
 (滞后 ~29 天),年报滞后中位 ~113 天。用报告期当可见日等于白拿一个月的未来信息。
@@ -75,9 +75,20 @@ class FetchIncomplete(RuntimeError):
 
 
 def _as_int(v):
+    """转 int；不可解析或非有限值返回 None。
+
+    ⚠️ 必须捕 `OverflowError`：这个函数解析东财响应自报的 `pages` / `count`，
+    而 Python 的 `json.loads` **接受** `Infinity`（非标准但 json 模块允许），
+    `int(float("inf"))` 抛的是 OverflowError —— 只 catch TypeError/ValueError
+    会让一个畸形响应直接崩掉整次抓取，而本函数的全部用途就是「坏输入返回 None」。
+
+    ⚠️ 为什么不并入 `code_utils.fnum`：语义不同 —— 这里要的是**整数截断**
+    （`pages`/`count` 是页数），`fnum` 返回 float。同名不同语义的合并踩过一次
+    （`b1_holding_state.finite` 与 `code_utils.finite` 失败语义相反），不再重复。
+    """
     try:
         return int(v)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
 
 

@@ -60,8 +60,13 @@ from paths import (CZ_SECTOR_PREFERENCE_FILE, DATA, MARKET_DIR,
 _SCREEN_DIR = Path(__file__).resolve().parent
 if str(_SCREEN_DIR) not in sys.path:
     sys.path.insert(0, str(_SCREEN_DIR))
+_FACTORS_DIR = str(Path(__file__).resolve().parents[1] / "factors")
+if _FACTORS_DIR not in sys.path:
+    sys.path.insert(0, _FACTORS_DIR)   # 因子层：见 factors/__init__.py
+
 from s_shape import sstar_level  # noqa: E402
 from runtime_guards import normalize_regime  # noqa: E402
+from contracts import require  # noqa: E402
 
 SCREENING_DIR = DATA / "screening"
 CZ_SECTOR_PREF_PATH = CZ_SECTOR_PREFERENCE_FILE
@@ -397,37 +402,16 @@ def fundamental_quality(fin: Optional[dict]) -> dict:
             "net_profit_positive": np_pos, "cashflow_positive": ocf_pos, "roe_positive": roe_pos}
 
 
-def score_candidate(
-    cand: dict,
-    sector_entry: Optional[dict],
-    amv_state: str,
-    cz_sector: str = "neutral",
-    cap_rules: Optional[dict] = None,
-    sector_score_max: float = SECTOR_SCORE_MAX,
-) -> dict:
-    """对单只充实候选打分分层，输出 StockPool 契约条目（含打分明细）。
+def apply_risk_downgrades(amv_state, base_bucket, cand, cz_sector, rules, sector_score_available):
+    """风险标记与 bucket 降级 —— **只降不升**的一串判据。
 
-    cap_rules 传 None 时用 DEFAULT_CAP_RULES（全开＝历史行为）；显式传部分键可
-    单独关闭某条待回测封顶规则（关闭后仅在 risk_flags 记录检出、不降档）。
-    sector_score_max 指定 sector_state.score 的量纲上界，用于归一化到 0-100。
+    2026-08-07 从 `score_candidate`（原 258 行）抽出。这是整个打分里最该单独看的一段：
+    76 行、13 条独立降级判据，每条都能把候选往下压一级或直接踢出可买。
+    抽出后可以对着单条判据写测试，而不必构造一整份充实候选。
+
+    返回 `(risk_flags, bucket, wave_type, dist)` —— 后三个下游还要用
+    （`wave_type` 决定 next_step、`dist` 进 entry_reason、`bucket` 是分层结论）。
     """
-    rules = resolve_cap_rules(cap_rules)
-    tech_score, tech_level, factor_contrib = technical_score(cand)
-    capital_level, capital_score, capital_detail = capital_intent_strength(cand)
-    heat, pass_level, sector_cap, reason = sector_heat(sector_entry)
-    trade_style = trade_style_of(heat)
-    sector_score_raw = (sector_entry or {}).get("score") if sector_entry else None
-    # 板块分不可用（NaN/inf）与"无评分"（None）在**打分上**都按最弱 0 处理，但前者是
-    # 脏数据、必须在 risk_flags/degraded_reason 留痕，否则无从区分"板块真弱"和"数据坏"。
-    sector_score_norm = normalize_sector_score(sector_score_raw, sector_score_max)
-    sector_score_available = sector_score_norm is not None
-    sector_score = sector_score_norm if sector_score_available else 0.0
-
-    # 分层由个股（技术结构 × 资金意图）定夺；板块不封顶（降为提示，只进 score/共振/trade_style）
-    base_bucket = RESONANCE_MATRIX[(tech_level, capital_level)]
-    res_level = resonance_level(tech_level, heat)
-    permission = market_permission(amv_state)
-
     risk_flags: list[str] = []
     if cand.get("is_holding"):
         risk_flags.append("is_holding")
@@ -504,12 +488,15 @@ def score_candidate(
         risk_flags.append("low_liquidity")
         if rules.get("liquidity_floor"):
             bucket = cap_bucket(bucket, "C")
+    return risk_flags, bucket, wave_type, dist
 
-    # 总分：技术 60% + 板块 40% + 共振调整，0-100
-    resonance_adj = {"强共振": 5, "弱共振": 0, "无共振": 0, "反向": -5}[res_level]
-    total = round(0.6 * tech_score + 0.4 * sector_score + resonance_adj, 1)
-    total = max(0.0, min(100.0, total))
 
+def build_entry_reasons(cand, dist, wave_type):
+    """把命中的公式、形态、信号翻译成人读的入选理由清单。
+
+    2026-08-07 从 `score_candidate` 抽出。它只做**措辞**，不参与任何判定 ——
+    与上面的 `apply_risk_downgrades`（判定）分开，改文案时不必担心动到分层。
+    """
     entry_reason: list[str] = []
     for fid in cand.get("formula_hits") or []:
         entry_reason.append(f"公式命中:{fid}")
@@ -548,15 +535,16 @@ def score_candidate(
             entry_reason.append("MACD第一区间再启动")
         if (_mt.get("bottom_divergence") or {}).get("hit"):
             entry_reason.append("MACD底背离")
+    return entry_reason
 
-    next_step = NEXT_STEP[bucket]
-    if amv_state == "空头":
-        next_step = "observe_price"
-    if wave_type == "sprint" and rules["sprint_wave"] and next_step == "generate_buy_plan":
-        # 双保险：冲刺波后首个 B1 禁买，不得生成买入计划
-        next_step = "observe_price"
 
-    # 四面共振(市场+板块+基本面+技术)——hint/优先级,不驱动分层。牛股=三/四面共振(cz理念)。
+def four_leg_resonance(cand, permission, tech_level):
+    """四面共振（市场/板块/基本面/技术）。
+
+    ⚠️ 这是**证据层描述**，不是 gate —— `aligned` 不参与 bucket 或 next_step，
+    只写进产物供复盘对账。R2 的结论是「跟随主流」机械规则不成立，
+    所以共振度不得反过来放宽权限。
+    """
     fq = fundamental_quality(cand.get("financials"))
     sp_fav = bool((cand.get("sector_phase") or {}).get("favorable"))
     legs = {"market": permission == "允许", "sector": sp_fav,
@@ -566,6 +554,58 @@ def score_candidate(
                       "label": {4: "四面共振", 3: "三面共振", 2: "两面", 1: "单面", 0: "无"}[aligned],
                       "bull_candidate": bool(legs["market"] and sp_fav
                                              and fq.get("tier") == "优" and legs["technical"])}
+    return fq, sp_fav, legs, aligned, resonance_4leg
+
+
+def score_candidate(
+    cand: dict,
+    sector_entry: Optional[dict],
+    amv_state: str,
+    cz_sector: str = "neutral",
+    cap_rules: Optional[dict] = None,
+    sector_score_max: float = SECTOR_SCORE_MAX,
+) -> dict:
+    """对单只充实候选打分分层，输出 StockPool 契约条目（含打分明细）。
+
+    cap_rules 传 None 时用 DEFAULT_CAP_RULES（全开＝历史行为）；显式传部分键可
+    单独关闭某条待回测封顶规则（关闭后仅在 risk_flags 记录检出、不降档）。
+    sector_score_max 指定 sector_state.score 的量纲上界，用于归一化到 0-100。
+    """
+    rules = resolve_cap_rules(cap_rules)
+    tech_score, tech_level, factor_contrib = technical_score(cand)
+    capital_level, capital_score, capital_detail = capital_intent_strength(cand)
+    heat, pass_level, sector_cap, reason = sector_heat(sector_entry)
+    trade_style = trade_style_of(heat)
+    sector_score_raw = (sector_entry or {}).get("score") if sector_entry else None
+    # 板块分不可用（NaN/inf）与"无评分"（None）在**打分上**都按最弱 0 处理，但前者是
+    # 脏数据、必须在 risk_flags/degraded_reason 留痕，否则无从区分"板块真弱"和"数据坏"。
+    sector_score_norm = normalize_sector_score(sector_score_raw, sector_score_max)
+    sector_score_available = sector_score_norm is not None
+    sector_score = sector_score_norm if sector_score_available else 0.0
+
+    # 分层由个股（技术结构 × 资金意图）定夺；板块不封顶（降为提示，只进 score/共振/trade_style）
+    base_bucket = RESONANCE_MATRIX[(tech_level, capital_level)]
+    res_level = resonance_level(tech_level, heat)
+    permission = market_permission(amv_state)
+
+    risk_flags, bucket, wave_type, dist = apply_risk_downgrades(amv_state, base_bucket, cand, cz_sector, rules, sector_score_available)
+
+    # 总分：技术 60% + 板块 40% + 共振调整，0-100
+    resonance_adj = {"强共振": 5, "弱共振": 0, "无共振": 0, "反向": -5}[res_level]
+    total = round(0.6 * tech_score + 0.4 * sector_score + resonance_adj, 1)
+    total = max(0.0, min(100.0, total))
+
+    entry_reason = build_entry_reasons(cand, dist, wave_type)
+
+    next_step = NEXT_STEP[bucket]
+    if amv_state == "空头":
+        next_step = "observe_price"
+    if wave_type == "sprint" and rules["sprint_wave"] and next_step == "generate_buy_plan":
+        # 双保险：冲刺波后首个 B1 禁买，不得生成买入计划
+        next_step = "observe_price"
+
+    # 四面共振(市场+板块+基本面+技术)——hint/优先级,不驱动分层。牛股=三/四面共振(cz理念)。
+    fq, sp_fav, legs, aligned, resonance_4leg = four_leg_resonance(cand, permission, tech_level)
 
     return {
         "code": cand.get("code", ""),
@@ -701,7 +741,7 @@ def score_all(
 ) -> dict:
     """整池打分。输入缺失时干净降级，绝不 raise。
 
-    cz_preference 传 None 时从 00_governance/strategy/CZ_SECTOR_PREFERENCE.json 加载；
+    cz_preference 传 None 时从 00_governance/strategy/cz/CZ_SECTOR_PREFERENCE.json 加载；
     显式传 {} 表示"已加载但不可用"（测试降级路径用）。
     cap_rules / sector_score_max 传 None 时从 registry "scoring" 段加载，缺失回退
     默认（全开 + 0-100），行为与历史一致。
@@ -813,6 +853,7 @@ def main(argv: Optional[list] = None) -> int:
 
     STOCK_POOL_DIR.mkdir(parents=True, exist_ok=True)
     out_path = STOCK_POOL_DIR / f"{args.date}_stock_pool.json"
+    require("stock_pool", result)
     out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 
     summary = {

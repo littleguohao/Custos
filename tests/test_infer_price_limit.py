@@ -20,10 +20,18 @@ QUIET_20 = [1.0, -1.0] * 10  # 20 日最大 |涨跌幅| = 1% <= 5.2
 
 
 class TestStDowngradeOnlyForTenPercentPrefix:
-    @pytest.mark.parametrize("code", ["300750", "301269", "688981", "920808"])
-    def test_quiet_20pct_prefix_stays_20(self, code):
-        # 修复前：20% 品种近 20 日波动 <=5.2 会被错误降级为 5
-        assert _infer_price_limit(code, _df(QUIET_20)) == 20
+    @pytest.mark.parametrize("code,want", [("300750", 20), ("301269", 20),
+                                           ("688981", 20), ("689009", 20),
+                                           ("920808", 30), ("830799", 30)])
+    def test_quiet_wide_limit_prefix_not_demoted(self, code, want):
+        """安静窗口不得把宽幅品种降级为 5%（原意），期望值按真实限制。
+
+        ⚠️ 2026-08-07：原本这条参数化里 `920808` 期望 **20**，**把一个 bug 锁死了**
+        —— 北交所是 **30%**。同时补上此前完全没测的 `689`（科创板 CDR）与
+        `830799`（北交所老前缀，此前连 20 都拿不到、只有 10）。
+        见 `code_utils.price_limit_pct`。
+        """
+        assert _infer_price_limit(code, _df(QUIET_20)) == want
 
     @pytest.mark.parametrize("code", ["600519", "000001"])
     def test_quiet_10pct_prefix_demotes_to_5(self, code):

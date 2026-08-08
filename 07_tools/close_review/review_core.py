@@ -10,7 +10,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from market_timing.b1_holding_state import evaluate as evaluate_b1_holding
+from holdings.b1_holding_state import evaluate as evaluate_b1_holding
 
 try:
     from .holding_bbi import bbi_basis, intraday_bbi_basis
@@ -23,6 +23,10 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from paths import BASE, cn_today, cn_now  # noqa: E402
+from paths import read_json as load  # noqa: E402
+from code_utils import finite  # noqa: E402
+from code_utils import fnum as optional_finite  # noqa: E402
+from fmt import pct_text as _fmt_pct_text  # noqa: E402
 
 TRADES = BASE / "01_data" / "trades"
 HOLDINGS = BASE / "01_data" / "holdings"
@@ -35,29 +39,12 @@ PLANS.mkdir(parents=True, exist_ok=True)
 LOGS.mkdir(parents=True, exist_ok=True)
 
 
-def load(path: Path, default):
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
-
 
 def latest(pattern: str, folder: Path) -> Path | None:
     files = sorted(folder.glob(pattern))
     return files[-1] if files else None
 
 
-def finite(value, default=0.0):
-    try:
-        v = float(value)
-        return default if not math.isfinite(v) else v
-    except (TypeError, ValueError):
-        return default
-
-
-def optional_finite(value):
-    try:
-        v = float(value)
-        return None if not math.isfinite(v) else v
-    except (TypeError, ValueError):
-        return None
 
 
 def price_text(value, digits=2):
@@ -65,7 +52,13 @@ def price_text(value, digits=2):
 
 
 def pct_text(value, digits=2):
-    return "缺失" if value is None else f"{value:+.{digits}f}%"
+    """本报告的缺数占位用中文「缺失」（与表格里其他列一致）；口径同 `fmt.pct_text`。
+
+    只在措辞上与共享实现不同，**有限性判定单一来源** ——
+    收敛前这份自己判 `is None`，NaN 会渲染成 `+nan%`。
+    """
+    return _fmt_pct_text(value, digits, missing="缺失")
+
 
 
 def normalized_code(value) -> str:
@@ -248,7 +241,10 @@ def risk_map(target_date: str) -> dict[str, list[dict]]:
     data = load(path, {}) if path else {}
     out: dict[str, list[dict]] = {}
     for x in data.get("stock_risks", []):
-        code = str(x.get("code", "")).split(".")[0]
+        # ⚠️ 不能写 `str(x.get("code", ""))`：key 存在而值为 `None` 时 `.get` 返回
+        # **None 而不是默认值**，`str(None)` == "None" 是真值 ⇒ 建出一个叫 "None"
+        # 的幽灵持仓键，下游按代码查风险时永远查不到、还多一条无主风险。
+        code = str(x.get("code") or "").split(".")[0]
         if code:
             out.setdefault(code, []).append(x)
     return out
@@ -268,7 +264,23 @@ def classify(position: dict, tech: dict, risks: list[dict], quote: dict, bearish
     structure_reason = f"{structure['state']}；{structure['reminder']}"
     high_risk = any(x.get("priority") == "高" for x in risks)
     if b1_state and b1_state.get("final_priority") in {"P0", "P1", "P2"}:
-        return b1_state["final_priority"], b1_state["final_action"], b1_state["final_reason"]
+        # ⚠️ B1 状态短路在 high_risk 判定**之前**，所以要在这里把高优先风险的理由
+        # 补回来，否则它在整份 14:45 报告里**一个字都看不到**（`risks` 只经由
+        # 本函数影响输出，别处不渲染）——而「所有计划必须可复盘」。
+        #
+        # 举例：RiskDecision 说「已触发止损线」（高），而 B1 按实时价重算只判 P2
+        # 「尾盘跌破BBI待收盘确认」。修前该行显示 P2 且止损理由消失。
+        #
+        # 只补理由、**不动优先级**：B1 用的是 14:45 实时价、RiskDecision 可能来自
+        # 前一日 17:00，谁该压过谁是决策优先级问题（README 写「risk_control 拥有
+        # 否决权」，但那条没区分依据的新鲜度），交 owner 定案 —— 见待办 #50。
+        reason = b1_state["final_reason"]
+        if high_risk:
+            outstanding = "；".join(
+                str(x.get("reason") or x.get("risk_type")) for x in risks
+                if x.get("priority") == "高")
+            reason = f"{reason}；⚠️未消化的高优先风控依据：{outstanding}"
+        return b1_state["final_priority"], b1_state["final_action"], reason
     if structure.get("signal") == "structural_clear":
         return "P0", "N型前低清仓评估", structure_reason
     if structure.get("signal") == "pullback_failure":
@@ -306,9 +318,25 @@ def main() -> None:
     tech = technical_map(target_date)
     risks = risk_map(target_date)
     _risk_path, risk_src_date = risk_source_date(target_date)
-    risk_date_note = ("缺失（无 risk_decision，按无风控依据处理）" if not risk_src_date else
-                      f"**{risk_src_date}**（当日）" if risk_src_date == target_date else
-                      f"**{risk_src_date}**（⚠️非当日，当日 risk_decision 缺失，已回退最近一份，不得据此放宽任何权限）")
+    # ⚠️ 同时看**文件日**与**证据日**。2026-08-07 修：此前只按文件日判，
+    # 于是 09:05 盘前产出的 risk_decision（文件日=当日、依据=前一交易日收盘）
+    # 在 14:45 报告里被标成「当日」—— 读者会以为风控依据是今天的。
+    # `evidence_date` 由 `generate_risk_and_sectors` 从技术面 `latest_date` 取得。
+    _risk_obj = load(_risk_path, {}) if _risk_path else {}
+    _evidence = str(_risk_obj.get("evidence_date") or "")
+    if not risk_src_date:
+        risk_date_note = "缺失（无 risk_decision，按无风控依据处理）"
+    elif risk_src_date != target_date:
+        risk_date_note = (f"**{risk_src_date}**（⚠️非当日，当日 risk_decision 缺失，"
+                          f"已回退最近一份，不得据此放宽任何权限）")
+    elif _evidence and _evidence != target_date:
+        risk_date_note = (f"**{risk_src_date}**（文件为当日，但**证据日是 {_evidence}** —— "
+                          f"盘前生成、依据前一交易日收盘；盘中动作以 14:45 实时行情"
+                          f"重算的 B1 为准，见 05_strategy_versions/TODO.md #50）")
+    elif not _evidence:
+        risk_date_note = f"**{risk_src_date}**（当日；证据日未标注，无法确认依据新鲜度）"
+    else:
+        risk_date_note = f"**{risk_src_date}**（当日，证据日同为当日）"
     quotes, quote_snapshot = quote_map(target_date)
     gate = load(QUALITY / f"{target_date}_runtime_gate.json", {})
     input_errors = validate_quote_snapshot(target_date, positions, quote_snapshot)

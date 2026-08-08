@@ -26,17 +26,14 @@ import sys
 import shutil
 from pathlib import Path
 
-from paths import BASE
+from paths import BASE, DATA, HOLDINGS, HOLDINGS_DIR, LOGS, MARKET_DIR, MARKET_TIMING, PLANS, TOOLS
 from pipeline_kit import run_stage
 
 PY = sys.executable
-TOOLS = BASE / "07_tools" / "market_timing"
-DATA_DIR = BASE / "01_data"
-MARKET_DIR = DATA_DIR / "market"
-HOLD_DIR = BASE / "01_data" / "holdings"
-PLAN_DIR = BASE / "03_daily_plans"
-SUPPORT_DIR = PLAN_DIR / "_supporting"
-LOG_DIR = BASE / "06_logs"
+# ⚠️ 路径**一律从 paths 导入**，不在这里重拼。
+#    2026-08-07 的教训：本地重定义的 `MARKET_TIMING` 在 holdings/ 拆分后成了死路径，
+#    而 paths.py 是改过的 —— 本地副本让「唯一来源」形同虚设。
+SUPPORT_DIR = PLANS / "_supporting"
 
 
 def apply_manual_market(date: str, macro: str | None, amv_zone: str | None, amv_pct: float | None):
@@ -70,15 +67,15 @@ def apply_manual_market(date: str, macro: str | None, amv_zone: str | None, amv_
 
 def apply_manual_position_updates(date: str):
     """Remove manually cleared positions from enriched mapping and technical summary."""
-    upd = HOLD_DIR / f"{date}_manual_position_updates.json"
+    upd = HOLDINGS_DIR / f"{date}_manual_position_updates.json"
     if not upd.exists():
         return {"stage": "apply_manual_position_updates", "ok": True, "message": "no manual updates"}
     u = json.loads(upd.read_text(encoding="utf-8"))
     closed = {str(x.get("code")): x for x in u.get("updates", []) if x.get("action") == "已清仓"}
     changed = []
     for fname in [
-        HOLD_DIR / f"{date}_holding_sector_mapping_enriched.json",
-        HOLD_DIR / f"{date}_holding_technical_summary.json",
+        HOLDINGS_DIR / f"{date}_holding_sector_mapping_enriched.json",
+        HOLDINGS_DIR / f"{date}_holding_technical_summary.json",
     ]:
         if not fname.exists():
             continue
@@ -106,7 +103,7 @@ def archive_supporting_reports(date: str) -> dict:
     ]
     moved = []
     for name in names:
-        source = PLAN_DIR / name
+        source = PLANS / name
         if not source.exists():
             continue
         destination = target / name
@@ -124,7 +121,7 @@ def build_gate_cmd(date: str, session_type: str, strict_quality: bool = False) -
     大面积缺数时出现,再由 `--strict-quality-gate` 显式开启。
     门控结论无论是否开闸都会落盘到 01_data/quality/{date}_runtime_gate.json,并记进 stage note。
     """
-    cmd = [str(PY), str(BASE / "07_tools" / "runtime_gate.py"), "--date", date,
+    cmd = [str(PY), str(TOOLS / "runtime_gate.py"), "--date", date,
            "--require-trading-day",
            "--data-session", "preclose" if session_type == "premarket" else "postclose"]
     if strict_quality and session_type == "postclose":
@@ -134,7 +131,7 @@ def build_gate_cmd(date: str, session_type: str, strict_quality: bool = False) -
 
 def gate_status_note(date: str) -> str:
     """把门控结论摘进 stage note——不阻断也要留痕,否则"数据大面积缺失却出了报告"事后无从察觉。"""
-    path = DATA_DIR / "quality" / f"{date}_runtime_gate.json"
+    path = DATA / "quality" / f"{date}_runtime_gate.json"
     try:
         g = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -148,7 +145,7 @@ def gate_status_note(date: str) -> str:
 
 def _write_pipeline_log(date: str, stages: list[dict]) -> Path:
     """落盘 pipeline 运行日志。抽成函数是为了让**提前退出路径**(门控阻断)也能留痕。"""
-    log = LOG_DIR / f"{date}_daily_pipeline_log.json"
+    log = LOGS / f"{date}_daily_pipeline_log.json"
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text(json.dumps({"date": date, "stages": stages}, ensure_ascii=False, indent=2),
                    encoding="utf-8")
@@ -170,13 +167,13 @@ def main():
                          "默认关闭:门控只落盘+留痕,不阻断报告生成")
     args = ap.parse_args()
 
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    LOGS.mkdir(parents=True, exist_ok=True)
     stages = []
     market_input = MARKET_DIR / f"{args.date}_market_timing_input.json"
 
     # 1. Market input base
     if args.refresh_market or not market_input.exists():
-        cmd = [str(PY), str(TOOLS / "market_timing_collector.py"), "--date", args.date]
+        cmd = [str(PY), str(MARKET_TIMING / "market_timing_collector.py"), "--date", args.date]
         if args.amv_pct is not None:
             cmd += ["--amv", str(args.amv_pct)]
         stages.append(run_stage(cmd, "market_timing_collector"))
@@ -196,14 +193,14 @@ def main():
             {"stage": "rss_filter", "ok": True, "skipped": True, "reason": "08:50 discovery reused"},
         ])
     else:
-        stages.append(run_stage([str(PY), str(TOOLS / "overseas_market_collector.py"), "--date", args.date], "overseas_market_collector", required=False))
-        stages.append(run_stage([str(PY), str(BASE / "07_tools" / "news" / "rss_collector.py"), "--date", args.date], "rss_collector", required=False))
-        stages.append(run_stage([str(PY), str(BASE / "07_tools" / "news" / "rss_filter.py"), "--date", args.date,
+        stages.append(run_stage([str(PY), str(MARKET_TIMING / "overseas_market_collector.py"), "--date", args.date], "overseas_market_collector", required=False))
+        stages.append(run_stage([str(PY), str(TOOLS / "news" / "rss_collector.py"), "--date", args.date], "rss_collector", required=False))
+        stages.append(run_stage([str(PY), str(TOOLS / "news" / "rss_filter.py"), "--date", args.date,
                            "--session-type", args.session_type], "rss_filter", required=False))
 
     # 4. Resolve persistent 0AMV regime before scoring. A locked bearish
     # regime remains bearish until a confirmed daily change is > +4%.
-    stages.append(run_stage([str(PY), str(TOOLS / "amv_state.py"), "--date", args.date], "amv_state"))
+    stages.append(run_stage([str(PY), str(MARKET_TIMING / "amv_state.py"), "--date", args.date], "amv_state"))
     # Runtime guards and market scorer consume the effective regime.
     # 门控结论一律落盘+记 note;是否**硬阻断**由 --strict-quality-gate 决定(默认不阻断,见 build_gate_cmd)。
     gate_stage = run_stage(build_gate_cmd(args.date, args.session_type, args.strict_quality_gate),
@@ -217,13 +214,13 @@ def main():
         # 这次阻断连记录都不留(门控留痕的初衷就没了,事后只能翻 stdout)。
         _write_pipeline_log(args.date, stages)
         raise SystemExit(gate_stage["returncode"] or 1)
-    stages.append(run_stage([str(PY), str(TOOLS / "market_timing_scorer.py"), "--date", args.date], "market_timing_scorer"))
+    stages.append(run_stage([str(PY), str(MARKET_TIMING / "market_timing_scorer.py"), "--date", args.date], "market_timing_scorer"))
 
     # 5. Holdings mapping refresh optional
-    enriched = HOLD_DIR / f"{args.date}_holding_sector_mapping_enriched.json"
+    enriched = HOLDINGS_DIR / f"{args.date}_holding_sector_mapping_enriched.json"
     if args.refresh_holdings or not enriched.exists():
         # First try local mapper. It may return empty sectors but still creates base mapping.
-        stages.append(run_stage([str(PY), str(TOOLS / "holding_sector_mapper.py"), "--date", args.date], "holding_sector_mapper", required=False))
+        stages.append(run_stage([str(PY), str(HOLDINGS / "holding_sector_mapper.py"), "--date", args.date], "holding_sector_mapper", required=False))
         stages.append({"stage": "holding_enrichment", "ok": True, "skipped": True, "reason": "enriched mapping optional; standardized current positions remain authoritative"})
     else:
         stages.append({"stage": "holding_sector_mapper", "ok": True, "skipped": True, "reason": "existing enriched mapping reused"})
@@ -232,28 +229,28 @@ def main():
     # current_positions.json when an enriched mapping is unavailable, so a new
     # trade date must never skip the entire holding/risk/chief chain.
     stages.append(apply_manual_position_updates(args.date))
-    stages.append(run_stage([str(PY), str(TOOLS / "batch_holding_technical.py"), "--date", args.date], "batch_holding_technical"))
-    stages.append(run_stage([str(PY), str(TOOLS / "b1_holding_state.py"), "--date", args.date], "b1_holding_state"))
-    stages.append(run_stage([str(PY), str(TOOLS / "portfolio_review_report.py"), "--date", args.date], "portfolio_review_report"))
-    stages.append(run_stage([str(PY), str(TOOLS / "theme_tracker_report.py"), "--date", args.date], "theme_tracker_report"))
+    stages.append(run_stage([str(PY), str(HOLDINGS / "batch_holding_technical.py"), "--date", args.date], "batch_holding_technical"))
+    stages.append(run_stage([str(PY), str(HOLDINGS / "b1_holding_state.py"), "--date", args.date], "b1_holding_state"))
+    stages.append(run_stage([str(PY), str(HOLDINGS / "portfolio_review_report.py"), "--date", args.date], "portfolio_review_report"))
+    stages.append(run_stage([str(PY), str(MARKET_TIMING / "theme_tracker_report.py"), "--date", args.date], "theme_tracker_report"))
     # Generate risk_decision + sector_state from deterministic pipeline outputs
-    stages.append(run_stage([str(PY), str(BASE / "07_tools" / "generate_risk_and_sectors.py"), "--date", args.date], "generate_risk_and_sectors"))
+    stages.append(run_stage([str(PY), str(TOOLS / "generate_risk_and_sectors.py"), "--date", args.date], "generate_risk_and_sectors"))
 
-    stages.append(run_stage([str(PY), str(TOOLS / "chief_decision_report.py"), "--date", args.date], "chief_decision_report"))
+    stages.append(run_stage([str(PY), str(MARKET_TIMING / "chief_decision_report.py"), "--date", args.date], "chief_decision_report"))
     if args.session_type == "premarket":
-        chief_source = DATA_DIR / "decisions" / f"{args.date}_chief_decision.json"
-        chief_snapshot = DATA_DIR / "decisions" / f"{args.date}_premarket_chief_decision.json"
+        chief_source = DATA / "decisions" / f"{args.date}_chief_decision.json"
+        chief_snapshot = DATA / "decisions" / f"{args.date}_premarket_chief_decision.json"
         if chief_source.exists():
             shutil.copy2(chief_source, chief_snapshot)
             stages.append({"stage": "snapshot_premarket_chief_decision", "ok": True, "path": str(chief_snapshot)})
         else:
             stages.append({"stage": "snapshot_premarket_chief_decision", "ok": False, "reason": "chief decision missing"})
     if args.session_type == "postclose":
-        stages.append(run_stage([str(PY), str(BASE / "07_tools" / "news" / "postclose_news_digest.py"), "--date", args.date], "postclose_news_digest", required=False))
-        stages.append(run_stage([str(PY), str(BASE / "07_tools" / "close_review" / "execution_review.py"), "--date", args.date], "execution_review"))
-        stages.append(run_stage([str(PY), str(BASE / "07_tools" / "close_review" / "review_enrichment.py"), "--date", args.date], "review_enrichment"))
-    stages.append(run_stage([str(PY), str(BASE / "07_tools" / "daily_report.py"), "--date", args.date], "daily_report"))
-    stages.append(run_stage([str(PY), str(TOOLS / "wechat_summary.py"), "--date", args.date], "wechat_summary", required=False))
+        stages.append(run_stage([str(PY), str(TOOLS / "news" / "postclose_news_digest.py"), "--date", args.date], "postclose_news_digest", required=False))
+        stages.append(run_stage([str(PY), str(TOOLS / "close_review" / "execution_review.py"), "--date", args.date], "execution_review"))
+        stages.append(run_stage([str(PY), str(TOOLS / "close_review" / "review_enrichment.py"), "--date", args.date], "review_enrichment"))
+    stages.append(run_stage([str(PY), str(TOOLS / "daily_report.py"), "--date", args.date], "daily_report"))
+    stages.append(run_stage([str(PY), str(MARKET_TIMING / "wechat_summary.py"), "--date", args.date], "wechat_summary", required=False))
 
     stages.append(archive_supporting_reports(args.date))
 
@@ -281,12 +278,12 @@ def main():
     for p in [
         MARKET_DIR / f"{args.date}_market_timing_input.json",
         SUPPORT_DIR / args.date / f"{args.date}_market_timing_score.md",
-        HOLD_DIR / f"{args.date}_holding_technical_summary.json",
+        HOLDINGS_DIR / f"{args.date}_holding_technical_summary.json",
         SUPPORT_DIR / args.date / f"{args.date}_portfolio_review.md",
         SUPPORT_DIR / args.date / f"{args.date}_chief_decision.md",
-        PLAN_DIR / f"{args.date}_daily_report.md",
-        DATA_DIR / "sectors" / f"{args.date}_sector_state.json",
-        DATA_DIR / "risk" / f"{args.date}_risk_decision.json",
+        PLANS / f"{args.date}_daily_report.md",
+        DATA / "sectors" / f"{args.date}_sector_state.json",
+        DATA / "risk" / f"{args.date}_risk_decision.json",
         SUPPORT_DIR / args.date / f"{args.date}_wechat_summary.txt",
     ]:
         print(f"- {p} {'OK' if p.exists() else 'MISSING'}")

@@ -524,3 +524,76 @@ class TestGetStockListAShareFilter:
             assert local_tdx_data._is_ashare_stock_file(mkt, code6) is True, code6
         for bad in ("999999", "510300", "159915", "113050", "880005"):
             assert local_tdx_data._is_ashare_prefix(bad) is False, bad
+
+
+class TestNameMapOverwriteGuard:
+    """⚠️ **落盘覆盖门槛**（2026-08-07 新增）：残缺表不得覆盖完整缓存。
+
+    实测的事故形态：TQ 只成功取到 3 只（TdxW 忙 / 连接抖动），那 3 只照样落盘
+    覆盖了 5000 只的完整缓存、`generated_at` 刷新成当天（30 天时效计时重置），
+    而 `st_filter` 报 **ok** ⇒ **ST 硬排除静默失效**。
+
+    原先门槛只加在 `fetch_all_from_clist` 上，可它在源顺序里**排最后**；
+    排在前面的 `fetch_from_tdx_protocol`（沪深两市，一市失败就剩一半）与
+    `fetch_from_tq`（逐只 RPC，部分失败照样返回）都没有门槛。
+    ⇒ 门槛移到**落盘边界**（`resolve_name_map` 调 `save_cache` 之前）。
+    """
+
+    @staticmethod
+    def _write_cache(tmp_path, n, days_ago=0):
+        p = tmp_path / "stock_name_map.json"
+        names = {str(600000 + i): f"票{i}" for i in range(n)}
+        gen = (cn_today() - timedelta(days=days_ago)).isoformat()
+        p.write_text(json.dumps({"generated_at": gen, "source": "eastmoney",
+                                 "count": n, "names": names}, ensure_ascii=False),
+                     encoding="utf-8")
+        return p
+
+    def _run(self, tmp_path, monkeypatch, cache_n, new_n, days_ago=0):
+        p = self._write_cache(tmp_path, cache_n, days_ago)
+        new = {str(600000 + i): f"新{i}" for i in range(new_n)}
+        monkeypatch.setattr(sn, "CACHE", p)
+        monkeypatch.setattr(sn, "fetch_name_map", lambda session=None: (new, "tq_local"))
+        names, diag = sn.resolve_name_map()
+        return names, diag, json.loads(p.read_text(encoding="utf-8"))
+
+    def test_tiny_table_refused(self, tmp_path, monkeypatch):
+        """3 只不得覆盖 5000 只 —— 缓存必须原封不动。"""
+        names, diag, after = self._run(tmp_path, monkeypatch, 5000, 3)
+        assert after["count"] == 5000
+        assert len(names) == 5000, "应回退到缓存而不是用那 3 只"
+        assert "拒绝覆盖" in diag.get("name_map_rejected_reason", "")
+        assert diag.get("name_map_rejected_size") == 3
+
+    def test_at_threshold_accepted(self, tmp_path, monkeypatch):
+        """恰好 80%（4000/5000）放行 —— 退市会让 universe 自然缩小，
+        门槛不能把正常波动也拦住。"""
+        _n, diag, after = self._run(tmp_path, monkeypatch, 5000, 4000)
+        assert after["count"] == 4000 and "name_map_rejected_reason" not in diag
+
+    def test_just_below_threshold_refused(self, tmp_path, monkeypatch):
+        _n, _d, after = self._run(tmp_path, monkeypatch, 5000, 3999)
+        assert after["count"] == 5000
+
+    def test_larger_table_accepted(self, tmp_path, monkeypatch):
+        _n, _d, after = self._run(tmp_path, monkeypatch, 4000, 5000)
+        assert after["count"] == 5000
+
+    def test_first_build_accepted(self, tmp_path, monkeypatch):
+        """首次构建（无缓存）一律放行 —— 否则永远建不起来。"""
+        monkeypatch.setattr(sn, "CACHE", tmp_path / "stock_name_map.json")
+        monkeypatch.setattr(sn, "fetch_name_map",
+                            lambda session=None: ({"600000": "浦发"}, "tq_local"))
+        names, diag = sn.resolve_name_map()
+        assert len(names) == 1 and diag["st_filter"] == "ok"
+
+    def test_stale_but_complete_preferred_over_fresh_partial(self, tmp_path, monkeypatch):
+        """⚠️ 既有缓存**陈旧**时仍拒绝残缺表。
+
+        一份陈旧但完整的表比一份新鲜但残缺的表更适合做 ST 排除 ——
+        ST 名称变动不频繁，而残缺表会让大部分票**根本查不到名字**。
+        陈旧本身会被 `load_cache` 判出来、`st_filter="stale"`，信息不会丢。
+        """
+        names, diag, after = self._run(tmp_path, monkeypatch, 5000, 3, days_ago=99)
+        assert after["count"] == 5000 and len(names) == 5000
+        assert diag["st_filter"] == "stale", "陈旧要如实报出"

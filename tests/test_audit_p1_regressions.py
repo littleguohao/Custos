@@ -128,7 +128,11 @@ class TestPriceLimitInferenceGetsCode:
         assert tm._infer_price_limit("300750", self._quiet_df()) == 20
         assert tm._infer_price_limit("301029", self._quiet_df()) == 20
         assert tm._infer_price_limit("688111", self._quiet_df()) == 20
-        assert tm._infer_price_limit("920819", self._quiet_df()) == 20
+        # ⚠️ 2026-08-07：这里原本断言 920xxx == 20，**把一个 bug 锁死了** ——
+        # 北交所竞价交易的涨跌幅是 **30%**，见 `code_utils.price_limit_pct`。
+        # 本测试的**意图**（20%/30% 品种不得被安静窗口降级为 5%）不变，
+        # 只把 BJ 的期望值改成正确的 30。
+        assert tm._infer_price_limit("920819", self._quiet_df()) == 30
 
     def test_missing_code_is_what_broke_it(self):
         """留证:不传 code 时安静窗口会被判成 5%,这正是 analyze 旧行为。"""

@@ -182,7 +182,7 @@ class TestTableRendering:
     def test_carries_terminal_review_disclaimer(self):
         """必须写明这些因子已被跨窗终审否决——否则读者会把标注当交易依据。
 
-        终审(B1_BACKTEST_FINDINGS「H1/H2 终审」)显示它们的 edge 只存在于 2025-2026
+        终审(research/R6_hypothesis_H1_dual_axis.md + R7)显示它们的 edge 只存在于 2025-2026
         单一 regime,所以"标注多⇒确信度高"这个推论已被证伪,不得据命中数定仓位。
         """
         txt = ct.render_table(self._pool(), "2026-08-04")

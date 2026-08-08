@@ -13,6 +13,7 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from paths import BASE, RSS_SOURCE_REGISTRY_FILE, cn_now  # noqa: E402
+from contracts import require  # noqa: E402
 from net_retry import retry_call  # noqa: E402
 
 REG=RSS_SOURCE_REGISTRY_FILE
@@ -21,6 +22,8 @@ DATA=BASE/'01_data'/'news'/'rss'; LOG=BASE/'06_logs'/'rss'
 # 单个 feed 的字节上限。国家统计局的 feed 实测约 4.5MB,所以上限不能定得太小;
 # 但 r.read() 完全不设限意味着任何被劫持/故障的源都能把内存打爆,故设 16MB 硬顶。
 MAX_FEED_BYTES = 16 * 1024 * 1024
+# 只扫文件头：实体声明必须在 DOCTYPE 内部子集里，不可能出现在正文深处。
+MAX_DTD_SCAN_BYTES = 64 * 1024
 # source_id 会直接拼进落盘文件名,必须白名单,否则 registry 里一个 "../../x" 就能写到库外。
 SAFE_ID = re.compile(r'^[A-Za-z0-9_-]{1,64}$')
 
@@ -82,6 +85,38 @@ def _tier_quality(tier, transport_verified=True):
         return 'candidate'
     return 'candidate' if tier in {'B','C'} else 'confirmed'
 
+def refuse_entity_expansion(decoded: str) -> None:
+    """拒收**嵌套实体声明**的 XML —— 这是「billion laughs」放大攻击的特征。
+
+    ⚠️ 实测（2026-08-07）：`xml.etree.ElementTree` 对两类实体攻击的表现**不同**：
+
+        外部实体（XXE, `<!ENTITY x SYSTEM "file:///etc/passwd">`）→ 已被拒 ✅
+          ParseError: undefined entity —— 不必额外防。
+        内部实体嵌套（`<!ENTITY b "&a;&a;...">`）→ **可行** ⚠️
+          345 字节的 payload 4 层展开出 500 KB；再加两层就是 50 MB。
+          `MAX_FEED_BYTES`（16 MB）只限**输入**大小，管不住展开后的内存。
+
+    为什么这条路径值得防：这些 feed 是**远端不可信输入**，而
+    `build_ssl_context` 按设计允许个别源 `ssl_verify=false`（需显式 ack 承担风险）。
+    那类源上的中间人可以直接投递放大 payload，把 08:50 采集 OOM 掉。
+
+    为什么**不**引 `defusedxml`：只为一条已知特征加一个依赖不划算。
+    为什么只拒**嵌套**而不是所有 `<!ENTITY`：扁平声明（`<!ENTITY nbsp "&#160;">`）
+    是真实 feed 的合法用法且无放大能力，一律拒会误杀正常源。
+    放大的必要条件是「一个实体的值里引用了另一个被声明的实体」，只拦这个。
+    """
+    head = decoded[:MAX_DTD_SCAN_BYTES]
+    if '<!ENTITY' not in head:
+        return
+    declared = dict(re.findall(r'<!ENTITY\s+(\S+)\s+["\']([^"\']*)["\']', head))
+    for name, value in declared.items():
+        for ref in re.findall(r'&(\w+);', value):
+            if ref in declared:
+                raise ValueError(
+                    f'refused nested XML entity declaration: &{name}; references &{ref}; '
+                    '(billion-laughs signature)')
+
+
 def parse_feed(raw, src, fetched, transport_verified=True):
     # ElementTree rejects some valid legacy multibyte declarations (for
     # example GB2312). Decode explicitly and normalize the XML declaration.
@@ -91,6 +126,7 @@ def parse_feed(raw, src, fetched, transport_verified=True):
     if encoding in {'gb2312','gbk','gb_2312-80'}: encoding='gb18030'
     decoded=raw.decode(encoding,errors='replace')
     decoded=re.sub(r'(<\?xml[^>]*encoding=)["\'][^"\']+["\']',r'\1"utf-8"',decoded,count=1,flags=re.I)
+    refuse_entity_expansion(decoded)
     root=ET.fromstring(decoded); nodes=[]
     for e in root.iter():
         if e.tag.rsplit('}',1)[-1].lower() in {'item','entry'}: nodes.append(e)
@@ -170,6 +206,7 @@ def main():
     for x in sorted(normalized,key=lambda z:(z.get('published_at') or '',z['item_id']),reverse=True):
         if x['item_id'] in seen: continue
         seen.add(x['item_id']); unique.append(x)
+    require("rss_evidence", unique)
     out=DATA/'normalized'/f'{a.date}_rss_evidence.json'; out.parent.mkdir(parents=True,exist_ok=True); out.write_text(json.dumps(unique,ensure_ascii=False,indent=2),encoding='utf-8')
     LOG.mkdir(parents=True,exist_ok=True); lp=LOG/f'{a.date}_collection_log.json'; lp.write_text(json.dumps({'date':a.date,'fetched_at':fetched,'sources':log,'item_count':len(unique),'output':str(out)},ensure_ascii=False,indent=2),encoding='utf-8')
     print(json.dumps({'output':str(out),'log':str(lp),'items':len(unique),'sources_ok':sum(x['status']=='ok' for x in log),'sources_failed':sum(x['status']!='ok' for x in log)},ensure_ascii=False))

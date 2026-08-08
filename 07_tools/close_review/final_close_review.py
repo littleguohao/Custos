@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from market_timing.b1_holding_state import evaluate as evaluate_b1_holding
+from holdings.b1_holding_state import evaluate as evaluate_b1_holding
 
 try:
     from .holding_bbi import intraday_bbi_basis
@@ -21,42 +21,37 @@ except ImportError:
 
 from paths import BASE, cn_now  # noqa: E402
 from code_utils import market_of  # noqa: E402
+from paths import read_json as load  # noqa: E402
+from code_utils import bare_code as bare  # noqa: E402
+from code_utils import finite  # noqa: E402
+from code_utils import fnum as optional_finite  # noqa: E402
+from fmt import pct_text  # noqa: E402
+from contracts import require  # noqa: E402
 
 DATA = BASE / "01_data"
 REV = BASE / "04_reviews" / "daily"
 
 
-def load(path, default):
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
 
 
-def finite(value, default=0.0):
-    try:
-        number = float(value)
-        return default if not math.isfinite(number) else number
-    except (TypeError, ValueError):
-        return default
-
-
-def optional_finite(value):
-    try:
-        number = float(value)
-        return number if math.isfinite(number) else None
-    except (TypeError, ValueError):
-        return None
-
-
-def pct_text(value) -> str:
-    """带符号百分比文本；缺失/非有限值渲染 unavailable。
-
-    此前用 finite(value)（缺失回落 0.0）直接格式化，指数涨跌缺数据会渲染成
-    +0.00%，把「不知道」伪装成「平盘」。
-    """
-    number = optional_finite(value)
-    return "unavailable" if number is None else f"{number:+.2f}%"
 
 
 def ma_flag(value) -> str:
+    """均线上下标记；`None` 渲染 `?` 而**不是「下」**。
+
+    ⚠️ 2026-08-07 修：原写法 `"上" if value else "下"` 把 `None` 当假值 ⇒
+    渲染成「下MA240」。而上游是**刻意**给 None 的：
+
+        refresh_market_indices:124   `bool(close > ma240) if ma240 else None`
+        market_timing_collector:129  同上
+        technical_monitor:566        `c > ma240v if ma240v is not None else None`
+
+    即**历史不足 240 日**（新股/次新）时根本算不出 MA240。
+    把它显示成「下MA240」是一个未被支持的事实断言，而且方向偏空 ——
+    同 `fmt.pct_text` 那条教训：不能把「不知道」渲染成一个具体读数。
+    """
+    if value is None:
+        return "?"
     return "上" if value else "下"
 
 
@@ -68,9 +63,6 @@ def render_index_row(row: dict) -> str:
             f"{ma_flag(row.get('above_ma25'))}MA25 / {ma_flag(row.get('above_ma60'))}MA60 / "
             f"{ma_flag(row.get('above_ma144'))}MA144 / {ma_flag(row.get('above_ma240'))}MA240 |")
 
-
-def bare(value):
-    return str(value or "").split(".")[0]
 
 
 def index_name(code):
@@ -109,6 +101,137 @@ def render_news(lines, news):
             lines.append(f"| {row.get('published_at')} | {row.get('title')} | {row.get('source_name')}/{row.get('fact_status')} | {affected} | {row.get('trade_meaning')} |")
     if news.get("missing"):
         lines.append("\n- 新闻数据缺失：" + "、".join(news["missing"]))
+
+
+def revalue_positions(day, ff_map, mfe_map, pmap, qmap, regime, sectors, tmap, total_assets):
+    """按当日行情重估每只持仓，返回逐票字典列表。
+
+    2026-08-07 从 `main`（原 210 行）抽出。抽的是**数据计算**，与下面的
+    `render_*` 分开 —— 重估逻辑因此可以单测，不必先铺一整份报告的上游产物。
+    """
+    revalued = []
+    for code, position in pmap.items():
+        technical = tmap.get(code, {})
+        quote = qmap.get(code, {})
+        close = optional_finite(quote.get("close", quote.get("price")))
+        quantity = finite(position.get("持有数量"))
+        cost = finite(position.get("单位成本"))
+        market_value = close * quantity if close is not None else None
+        pnl_pct = close / cost - 1 if close is not None and cost else None
+        sector = sector_for(code, sectors)
+        b1 = evaluate_b1_holding({**technical, "holding_pnl_pct": pnl_pct}, regime, close, quote.get("date") or day)
+        revalued.append({
+            "code": code,
+            "name": position.get("名称"),
+            "quantity": quantity,
+            "cost": cost,
+            "close": close,
+            "price_date": quote.get("date"),
+            "price_time": quote.get("time"),
+            "technical_date": technical.get("latest_date"),
+            "market_value": market_value,
+            "pnl_pct": pnl_pct,
+            "position_pct": market_value / total_assets if market_value is not None and total_assets else None,
+            "trend": technical.get("trend_state"),
+            "box": technical.get("box20_position"),
+            "bbi": intraday_bbi_basis(technical, close, technical.get("latest_date")),
+            "n_structure": n_structure_basis(technical, close),
+            "b1_holding_state": b1,
+            "sector": sector,
+            "index": index_name(code),
+            "mfe_pct": mfe_map.get(code, {}).get("mfe_pct"),
+            "mae_pct": mfe_map.get(code, {}).get("mae_pct"),
+            "main_net_inflow": ff_map.get(code, {}).get("main_net_inflow"),
+            "main_net_pct": ff_map.get(code, {}).get("main_net_pct"),
+        })
+    return revalued
+
+
+def index_rows(market):
+    """指数结构表的数据行（不含渲染）。"""
+    indices = []
+    for name, row in market.get("a_share_indices", {}).items():
+        if not isinstance(row, dict) or not row.get("available", True):
+            continue
+        intraday = row.get("intraday") or {}
+        # Prefer intraday change; fallback to daily_change_pct from vipdoc K-line
+        change_pct = intraday.get("intraday_change_pct")
+        if change_pct is None:
+            change_pct = row.get("daily_change_pct")
+        indices.append({
+            "name": name,
+            "close": intraday.get("now", row.get("latest_close")),
+            "change_pct": change_pct,
+            "above_ma25": row.get("above_ma25"),
+            "above_ma60": row.get("above_ma60"),
+            "above_ma144": row.get("above_ma144"),
+            "above_ma240": row.get("above_ma240"),
+        })
+    return indices
+
+
+def render_execution_rows(lines, execution):
+    """§1 今日计划/建议/实际执行 的表格行（表头在 `lines` 初始化时给出）。"""
+    for row in execution.get("rows") or []:
+        actual = "无成交" if not row.get("actual_trades") else "；".join(f"{x.get('交易类别')} {x.get('成交数量')}股@{x.get('成交价格')}" for x in row["actual_trades"])
+        lines.append(f"| {row.get('code')} | {row.get('name')} | {row.get('premarket_action')}（参考：{row.get('premarket_reference_action')}） | {row.get('tail_priority')} {row.get('tail_action')} | {actual} | {row.get('execution_reason')} |")
+
+
+def render_market(lines, checks, chief, indices):
+    """§3 大盘、资金与市场许可。"""
+    lines += ["", "## 3. 大盘、资金与市场许可", "", "### 3.1 指数结构", "", "| 指数 | 收盘/最新 | 当日涨跌 | MA25/60/144/240状态 |", "|---|---:|---:|---|"]
+    for row in indices:
+        lines.append(render_index_row(row))
+    lines += ["", "### 3.2 宽度、成交与情绪", ""]
+    for field, label in (("market_breadth", "市场宽度"), ("turnover", "全市场成交额"), ("sentiment", "涨跌停与情绪")):
+        check = checks.get(field, {})
+        lines.append(f"- {label}：**{check.get('quality', 'unavailable')}**，数据日 {check.get('as_of') or 'unavailable'}；过期或缺失值不参与当日权限放宽。")
+    lines += [f"- 市场许可：新开仓 **{chief.get('new_position_permission')}**，总仓位建议 **{chief.get('total_position_range')}**。"]
+
+
+def render_themes(lines, enrichment):
+    """§4 主线、题材生命周期与持续性。"""
+    lines += ["", "## 4. 主线、题材生命周期与持续性", "", "| 方向 | 生命周期 | 技术阶段 | 分数 | 事件证据 | 资金/龙头证据 | 持续性 | 次日验证 |", "|---|---|---|---:|---:|---|---|---|"]
+    for row in enrichment.get("theme_lifecycles") or []:
+        lines.append(f"| {row.get('theme_name')} | {row.get('phase')} | {row.get('technical_stage')} | {row.get('score')} | {row.get('event_evidence_count')} | {row.get('fund_flow_evidence')}/{row.get('leader_structure')} | {row.get('continuity')} | {row.get('validation')} |")
+
+
+def render_holdings(lines, enrichment, revalued):
+    """§5 持仓逐只诊断与仓位审计。"""
+    lines += ["", "## 5. 持仓逐只诊断与仓位审计", "", "| 代码 | 名称 | 收盘/成本 | 盈亏 | 仓位 | MFE/MAE | 主力净流入 | 走势 | BBI/N型 | B1动作 | 原始逻辑/相对板块 |", "|---|---|---|---:|---:|---|---:|---|---|---|---|"]
+    diagnoses = {bare(x.get("code")): x for x in enrichment.get("holding_diagnoses") or []}
+    for row in revalued:
+        diagnosis = diagnoses.get(row["code"], {})
+        close_text = "缺失" if row["close"] is None else f"{row['close']:.2f}/{row['cost']:.3f}"
+        pnl_text = "缺失" if row["pnl_pct"] is None else f"{row['pnl_pct']:+.2%}"
+        pos_text = "缺失" if row["position_pct"] is None else f"{row['position_pct']:.1%}"
+        b1 = row["b1_holding_state"]
+        mfe_text = f"{row.get('mfe_pct','N/A')}%/{row.get('mae_pct','N/A')}%" if row.get('mfe_pct') is not None else "缺失"
+        ff_text = f"{row.get('main_net_inflow','N/A')}" if row.get('main_net_inflow') is not None else "缺失"
+        lines.append(f"| {row['code']} | {row['name']} | {close_text} | {pnl_text} | {pos_text} | {mfe_text} | {ff_text} | {row['trend']}/{row['box']} | {row['bbi']['signal']}/{row['n_structure']['signal']} | {b1['final_priority']} {b1['final_action']}：{b1['final_reason']} | {diagnosis.get('original_holding_logic', 'B1策略')}/{diagnosis.get('relative_to_sector', 'unavailable')} |")
+    lines.append("\n- 单票20%审计：" + "；".join(f"{x['name']} {x['position_pct']:.1%}{'，超限' if x['position_pct'] > .2 else ''}" for x in revalued if x["position_pct"] is not None))
+
+
+def render_next_day(lines, enrichment):
+    """§6 下一交易日条件化交易计划；返回 `next_plan`（§8 还要用）。"""
+    next_plan = enrichment.get("next_day_plan") or {}
+    lines += ["", "## 6. 下一交易日条件化交易计划", "", f"- 总仓位目标：**{next_plan.get('total_position_range')}**；新开仓权限：**{next_plan.get('new_position_permission')}**。", "", "| 代码 | 名称 | 方向/优先级 | 比例 | 触发条件 | 无效条件 | 开盘/盘中/14:45 |", "|---|---|---|---|---|---|---|"]
+    for row in next_plan.get("holding_plans") or []:
+        reduction = row.get("reduction_pct_of_holding")
+        reduction_text = "unavailable" if not reduction else f"持仓的{reduction[0]}%-{reduction[-1]}%"
+        lines.append(f"| {row.get('code')} | {row.get('name')} | {row.get('priority')} {row.get('direction')} | {reduction_text} | {row.get('trigger')} | {row.get('invalidation')} | {row.get('open_scenario')} / {row.get('intraday_scenario')} / {row.get('tail_scenario')} |")
+    return next_plan
+
+
+def render_discipline(lines, enrichment, execution):
+    """§7 纪律偏差、规则有效性与待验证参数；返回 `rules`（落盘 payload 还要用）。"""
+    rules = enrichment.get("rule_review") or {}
+    behavior = execution.get("behavior_checks") or {}
+    lines += ["", "## 7. 纪律偏差、规则有效性与待验证参数", "", "### 7.1 行为纪律", ""]
+    lines += [f"- {key}: {value}" for key, value in behavior.items()]
+    lines += ["", "### 7.2 有效规则", ""] + [f"- {x}" for x in rules.get("effective") or ["unavailable"]]
+    lines += ["", "### 7.3 失效/待验证规则", ""] + [f"- {x}" for x in (rules.get("failed") or []) + (rules.get("pending") or []) or ["unavailable"]]
+    return rules
 
 
 def main():
@@ -171,62 +294,11 @@ def main():
     technical_current = technical_dates == [day]
     asset_samples = [finite(x.get("持有金额")) / finite(x.get("仓位占比")) for x in positions if finite(x.get("仓位占比")) > 0]
     total_assets = sorted(asset_samples)[len(asset_samples) // 2] if asset_samples else 0
-    revalued = []
-    for code, position in pmap.items():
-        technical = tmap.get(code, {})
-        quote = qmap.get(code, {})
-        close = optional_finite(quote.get("close", quote.get("price")))
-        quantity = finite(position.get("持有数量"))
-        cost = finite(position.get("单位成本"))
-        market_value = close * quantity if close is not None else None
-        pnl_pct = close / cost - 1 if close is not None and cost else None
-        sector = sector_for(code, sectors)
-        b1 = evaluate_b1_holding({**technical, "holding_pnl_pct": pnl_pct}, regime, close, quote.get("date") or day)
-        revalued.append({
-            "code": code,
-            "name": position.get("名称"),
-            "quantity": quantity,
-            "cost": cost,
-            "close": close,
-            "price_date": quote.get("date"),
-            "price_time": quote.get("time"),
-            "technical_date": technical.get("latest_date"),
-            "market_value": market_value,
-            "pnl_pct": pnl_pct,
-            "position_pct": market_value / total_assets if market_value is not None and total_assets else None,
-            "trend": technical.get("trend_state"),
-            "box": technical.get("box20_position"),
-            "bbi": intraday_bbi_basis(technical, close, technical.get("latest_date")),
-            "n_structure": n_structure_basis(technical, close),
-            "b1_holding_state": b1,
-            "sector": sector,
-            "index": index_name(code),
-            "mfe_pct": mfe_map.get(code, {}).get("mfe_pct"),
-            "mae_pct": mfe_map.get(code, {}).get("mae_pct"),
-            "main_net_inflow": ff_map.get(code, {}).get("main_net_inflow"),
-            "main_net_pct": ff_map.get(code, {}).get("main_net_pct"),
-        })
+    revalued = revalue_positions(day, ff_map, mfe_map, pmap, qmap, regime, sectors, tmap, total_assets)
     quotes_current = bool(revalued) and all(x["close"] is not None and x["price_date"] == day for x in revalued)
     actual_position = sum(x["position_pct"] for x in revalued if x["position_pct"] is not None) if quotes_current else None
     position_text = "缺失" if actual_position is None else f"{actual_position:.1%}"
-    indices = []
-    for name, row in market.get("a_share_indices", {}).items():
-        if not isinstance(row, dict) or not row.get("available", True):
-            continue
-        intraday = row.get("intraday") or {}
-        # Prefer intraday change; fallback to daily_change_pct from vipdoc K-line
-        change_pct = intraday.get("intraday_change_pct")
-        if change_pct is None:
-            change_pct = row.get("daily_change_pct")
-        indices.append({
-            "name": name,
-            "close": intraday.get("now", row.get("latest_close")),
-            "change_pct": change_pct,
-            "above_ma25": row.get("above_ma25"),
-            "above_ma60": row.get("above_ma60"),
-            "above_ma144": row.get("above_ma144"),
-            "above_ma240": row.get("above_ma240"),
-        })
+    indices = index_rows(market)
 
     quality = chief.get("market_quality") or {}
     checks = {x.get("field"): x for x in quality.get("checks") or []}
@@ -243,50 +315,18 @@ def main():
         f"- 执行对账质量：**{execution.get('status', 'unavailable')}**；成交记录 {execution.get('recorded_trade_count', 0)} 笔。",
         "", "| 代码 | 名称 | 盘前动作 | 14:45动作 | 实际动作 | 对账结论 |", "|---|---|---|---|---|---|",
     ]
-    for row in execution.get("rows") or []:
-        actual = "无成交" if not row.get("actual_trades") else "；".join(f"{x.get('交易类别')} {x.get('成交数量')}股@{x.get('成交价格')}" for x in row["actual_trades"])
-        lines.append(f"| {row.get('code')} | {row.get('name')} | {row.get('premarket_action')}（参考：{row.get('premarket_reference_action')}） | {row.get('tail_priority')} {row.get('tail_action')} | {actual} | {row.get('execution_reason')} |")
+    render_execution_rows(lines, execution)
     render_news(lines, news)
 
-    lines += ["", "## 3. 大盘、资金与市场许可", "", "### 3.1 指数结构", "", "| 指数 | 收盘/最新 | 当日涨跌 | MA25/60/144/240状态 |", "|---|---:|---:|---|"]
-    for row in indices:
-        lines.append(render_index_row(row))
-    lines += ["", "### 3.2 宽度、成交与情绪", ""]
-    for field, label in (("market_breadth", "市场宽度"), ("turnover", "全市场成交额"), ("sentiment", "涨跌停与情绪")):
-        check = checks.get(field, {})
-        lines.append(f"- {label}：**{check.get('quality', 'unavailable')}**，数据日 {check.get('as_of') or 'unavailable'}；过期或缺失值不参与当日权限放宽。")
-    lines += [f"- 市场许可：新开仓 **{chief.get('new_position_permission')}**，总仓位建议 **{chief.get('total_position_range')}**。"]
+    render_market(lines, checks, chief, indices)
 
-    lines += ["", "## 4. 主线、题材生命周期与持续性", "", "| 方向 | 生命周期 | 技术阶段 | 分数 | 事件证据 | 资金/龙头证据 | 持续性 | 次日验证 |", "|---|---|---|---:|---:|---|---|---|"]
-    for row in enrichment.get("theme_lifecycles") or []:
-        lines.append(f"| {row.get('theme_name')} | {row.get('phase')} | {row.get('technical_stage')} | {row.get('score')} | {row.get('event_evidence_count')} | {row.get('fund_flow_evidence')}/{row.get('leader_structure')} | {row.get('continuity')} | {row.get('validation')} |")
+    render_themes(lines, enrichment)
 
-    lines += ["", "## 5. 持仓逐只诊断与仓位审计", "", "| 代码 | 名称 | 收盘/成本 | 盈亏 | 仓位 | MFE/MAE | 主力净流入 | 走势 | BBI/N型 | B1动作 | 原始逻辑/相对板块 |", "|---|---|---|---:|---:|---|---:|---|---|---|---|"]
-    diagnoses = {bare(x.get("code")): x for x in enrichment.get("holding_diagnoses") or []}
-    for row in revalued:
-        diagnosis = diagnoses.get(row["code"], {})
-        close_text = "缺失" if row["close"] is None else f"{row['close']:.2f}/{row['cost']:.3f}"
-        pnl_text = "缺失" if row["pnl_pct"] is None else f"{row['pnl_pct']:+.2%}"
-        pos_text = "缺失" if row["position_pct"] is None else f"{row['position_pct']:.1%}"
-        b1 = row["b1_holding_state"]
-        mfe_text = f"{row.get('mfe_pct','N/A')}%/{row.get('mae_pct','N/A')}%" if row.get('mfe_pct') is not None else "缺失"
-        ff_text = f"{row.get('main_net_inflow','N/A')}" if row.get('main_net_inflow') is not None else "缺失"
-        lines.append(f"| {row['code']} | {row['name']} | {close_text} | {pnl_text} | {pos_text} | {mfe_text} | {ff_text} | {row['trend']}/{row['box']} | {row['bbi']['signal']}/{row['n_structure']['signal']} | {b1['final_priority']} {b1['final_action']}：{b1['final_reason']} | {diagnosis.get('original_holding_logic', 'B1策略')}/{diagnosis.get('relative_to_sector', 'unavailable')} |")
-    lines.append("\n- 单票20%审计：" + "；".join(f"{x['name']} {x['position_pct']:.1%}{'，超限' if x['position_pct'] > .2 else ''}" for x in revalued if x["position_pct"] is not None))
+    render_holdings(lines, enrichment, revalued)
 
-    next_plan = enrichment.get("next_day_plan") or {}
-    lines += ["", "## 6. 下一交易日条件化交易计划", "", f"- 总仓位目标：**{next_plan.get('total_position_range')}**；新开仓权限：**{next_plan.get('new_position_permission')}**。", "", "| 代码 | 名称 | 方向/优先级 | 比例 | 触发条件 | 无效条件 | 开盘/盘中/14:45 |", "|---|---|---|---|---|---|---|"]
-    for row in next_plan.get("holding_plans") or []:
-        reduction = row.get("reduction_pct_of_holding")
-        reduction_text = "unavailable" if not reduction else f"持仓的{reduction[0]}%-{reduction[-1]}%"
-        lines.append(f"| {row.get('code')} | {row.get('name')} | {row.get('priority')} {row.get('direction')} | {reduction_text} | {row.get('trigger')} | {row.get('invalidation')} | {row.get('open_scenario')} / {row.get('intraday_scenario')} / {row.get('tail_scenario')} |")
+    next_plan = render_next_day(lines, enrichment)
 
-    rules = enrichment.get("rule_review") or {}
-    behavior = execution.get("behavior_checks") or {}
-    lines += ["", "## 7. 纪律偏差、规则有效性与待验证参数", "", "### 7.1 行为纪律", ""]
-    lines += [f"- {key}: {value}" for key, value in behavior.items()]
-    lines += ["", "### 7.2 有效规则", ""] + [f"- {x}" for x in rules.get("effective") or ["unavailable"]]
-    lines += ["", "### 7.3 失效/待验证规则", ""] + [f"- {x}" for x in (rules.get("failed") or []) + (rules.get("pending") or []) or ["unavailable"]]
+    rules = render_discipline(lines, enrichment, execution)
 
     unavailable = list(dict.fromkeys((enrichment.get("unavailable") or []) + (news.get("missing") or []) + (execution.get("missing") or [])))
     lines += ["", "## 8. 数据时效、缺失项与风险提示", "", f"- 目标日行情完整：{quotes_current}；技术数据日：{','.join(technical_dates) or 'unavailable'}；目标日技术完整：{technical_current}。", "- 缺失项：" + ("、".join(unavailable) if unavailable else "无"), "- RSS仅用于事件发现；未确认候选不得直接形成交易授权。", "- 新闻、题材、技术信号均不得覆盖0AMV、运行质量门、RiskDecision和ChiefDecision。", "", "## 9. 数据来源", ""]
@@ -318,6 +358,7 @@ def main():
         "output": str(out),
     }
     json_out = REV / f"{day}_final_review.json"
+    require("final_review", payload)
     json_out.write_text(json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
     print(out)
     print(json_out)

@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import json
+import pathlib
 import unittest
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 import sys
 
@@ -123,3 +125,133 @@ class TransportConvergenceTests(unittest.TestCase):
             got = tc.rpc_trading_dates(tc.DEFAULT_ENDPOINT, "SH",
                                        date(2026, 8, 1), date(2026, 8, 6), 5)
         self.assertEqual(got, ["2026-08-03", "2026-08-04"])
+
+
+class RefreshAndCliTests(unittest.TestCase):
+    """`refresh()` 与 CLI 退出码 —— **cron 直接依赖它们**。
+
+    覆盖率清点（2026-08-07）显示这两块此前 0 覆盖：`refresh()` 全函数、
+    `main()` 的两个 `exit 2` 分支。而 cron 周五 14:35 跑
+    `trading_calendar.py --require-refresh`，**靠退出码判成败**；
+    五个 runner 又都用 `trading_day_status` 判交易日。
+    这块坏了不是「少一个功能」，是**整周的调度判断都可能错**。
+    """
+
+    def setUp(self):
+        import tempfile
+        import trading_calendar as tc
+        self.tc = tc
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self._cache, self._config = tc.CACHE, tc.CONFIG
+        tc.CACHE = self.tmp / "cache.json"
+        tc.CONFIG = self.tmp / "config.json"
+
+    def tearDown(self):
+        self.tc.CACHE, self.tc.CONFIG = self._cache, self._config
+
+    def test_refresh_success_updates_cache(self):
+        from unittest import mock
+        tc = self.tc
+        with mock.patch.object(tc, "rpc_trading_dates",
+                              return_value=["2026-08-03", "2026-08-04", "2026-08-05"]):
+            r = tc.refresh(date(2026, 8, 3), date(2026, 8, 5), tc.DEFAULT_ENDPOINT, "SH", 5)
+        self.assertEqual(r["status"], "updated")
+        cached = json.loads(tc.CACHE.read_text(encoding="utf-8"))
+        self.assertIn("2026-08-04", cached["trading_days"])
+        self.assertIsNone(cached["source"]["last_error"])
+        self.assertEqual(cached["source"]["last_success_at"], cached["source"]["last_refresh_at"])
+
+    def test_refresh_failure_preserves_cache(self):
+        """RPC 挂掉时**必须保住旧缓存**并记 last_error。
+
+        这是最要紧的语义：日历缓存是五个 runner 判交易日的依据，
+        一次刷新失败绝不能把它清空 —— 那会让所有 runner 以为「今天不是交易日」。
+        """
+        from unittest import mock
+        tc = self.tc
+        tc.CACHE.write_text(json.dumps({
+            "version": 1, "covered_ranges": [["2026-07-01", "2026-07-31"]],
+            "trading_days": ["2026-07-15"], "non_trading_days": []}), encoding="utf-8")
+        with mock.patch.object(tc, "rpc_trading_dates",
+                               side_effect=RuntimeError("TdxW 未运行")):
+            r = tc.refresh(date(2026, 8, 3), date(2026, 8, 5), tc.DEFAULT_ENDPOINT, "SH", 5)
+        self.assertEqual(r["status"], "cache_preserved")
+        self.assertIsNone(r["covered"])
+        cached = json.loads(tc.CACHE.read_text(encoding="utf-8"))
+        self.assertEqual(cached["trading_days"], ["2026-07-15"], "旧缓存被刷新失败清掉了")
+        self.assertIn("TdxW 未运行", cached["source"]["last_error"])
+        self.assertIn("RuntimeError", cached["source"]["last_error"])
+
+    def test_refresh_covered_span_reflects_answer_not_request(self):
+        """`covered` 报的是**RPC 实际答到的区间**，不是请求区间。
+
+        交易所只发布当年安排，请求 370 天可能只答到年底 ——
+        若按请求区间记「已覆盖」，之后的日期会被当成「已知非交易日」。
+        """
+        from unittest import mock
+        tc = self.tc
+        with mock.patch.object(tc, "rpc_trading_dates", return_value=["2026-08-03", "2026-08-04"]):
+            r = tc.refresh(date(2026, 8, 1), date(2027, 8, 1), tc.DEFAULT_ENDPOINT, "SH", 5)
+        self.assertEqual(r["covered"], {"start": "2026-08-03", "end": "2026-08-04"})
+
+    def test_default_range_starts_at_month_begin(self):
+        start, end = self.tc.default_range(date(2026, 8, 7))
+        self.assertEqual(start, date(2026, 8, 1))
+        self.assertEqual(end, date(2026, 8, 7) + timedelta(days=370))
+
+    def test_extract_dates_non_list_returns_empty(self):
+        self.assertEqual(self.tc.extract_dates({"result": {"Date": "not-a-list"}}), [])
+        self.assertEqual(self.tc.extract_dates(None), [])
+
+    def test_normalize_day_rejects_garbage(self):
+        self.assertIsNone(self.tc.normalize_day("not-a-date"))
+        self.assertIsNone(self.tc.normalize_day(""))
+
+
+class CliExitCodeTests(unittest.TestCase):
+    """CLI 退出码 —— cron 按码判定，不能靠 stdout。"""
+
+    def test_check_date_exit_2_when_unknown(self):
+        """`--check-date` 落在日历覆盖范围外时 exit 2（**未知 ≠ 非交易日**）。"""
+        from unittest import mock
+        import trading_calendar as tc
+        with mock.patch.object(tc, "trading_day_status",
+                               return_value={"is_trading_day": None, "reason": "超出覆盖"}):
+            with self.assertRaises(SystemExit) as cm:
+                tc.main.__wrapped__() if hasattr(tc.main, "__wrapped__") else self._run(tc, ["--check-date", "2030-01-01"])
+        self.assertEqual(cm.exception.code, 2)
+
+    def _run(self, tc, argv):
+        import sys
+        from unittest import mock
+        with mock.patch.object(sys, "argv", ["trading_calendar"] + argv):
+            return tc.main()
+
+    def test_check_date_ok_returns_none(self):
+        from unittest import mock
+        import trading_calendar as tc
+        with mock.patch.object(tc, "trading_day_status",
+                               return_value={"is_trading_day": True, "reason": "ok"}):
+            self.assertIsNone(self._run(tc, ["--check-date", "2026-08-07"]))
+
+    def test_require_refresh_exit_2_when_not_updated(self):
+        """`--require-refresh` 且刷新未成功 → exit 2。cron 周五 14:35 就靠这个。"""
+        from unittest import mock
+        import trading_calendar as tc
+        with mock.patch.object(tc, "refresh",
+                               return_value={"status": "cache_preserved", "covered": None}):
+            with self.assertRaises(SystemExit) as cm:
+                self._run(tc, ["--require-refresh"])
+        self.assertEqual(cm.exception.code, 2)
+
+    def test_require_refresh_ok_when_updated(self):
+        from unittest import mock
+        import trading_calendar as tc
+        with mock.patch.object(tc, "refresh",
+                               return_value={"status": "updated", "covered": None}):
+            self.assertIsNone(self._run(tc, ["--require-refresh"]))
+
+    def test_end_before_start_is_a_usage_error(self):
+        import trading_calendar as tc
+        with self.assertRaises(SystemExit):
+            self._run(tc, ["--start", "2026-08-10", "--end", "2026-08-01"])
