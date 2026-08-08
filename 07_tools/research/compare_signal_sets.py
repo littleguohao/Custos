@@ -64,6 +64,10 @@ def classify(code, day, extra, pit, regime):
 
 
 def main() -> None:
+    # argparse 仅为 --help：此前无参数解析，"--help" 会静默跑完整分析
+    # （加载 walkforward 日志 + 逐票 TDX 取数，裸跑挂数分钟）。
+    import argparse
+    argparse.ArgumentParser(description=__doc__).parse_args()
     pit = scan._pit_index(BASE / "01_data" / "fundamentals" / "pit_financials.jsonl")
     regime = bt.load_amv_regime(since="2024-01-01")
     bars_cache: dict = {}

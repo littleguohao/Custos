@@ -25,6 +25,12 @@ sys.path.insert(0, str(ROOT / "07_tools"))
 
 from research import __main__ as entry  # noqa: E402
 
+# 入口与 backtest_factors 2026-08-08 起按项目惯例把 stdout/stderr reconfigure 成
+# **UTF-8**（GBK 控制台打不了 ⚠️/⇒ 会 UnicodeEncodeError 直接崩）。subprocess 侧
+# 必须显式 `encoding="utf-8"` —— `text=True` 默认按 locale（本机 GBK）解码，
+# 会在 reader 线程里 UnicodeDecodeError。
+_RUN = dict(capture_output=True, text=True, encoding="utf-8")
+
 
 class TestRegistryMatchesDisk:
     """⚠️ 注册表与磁盘不得漂移 —— 这是「索引会过期」那类问题的可执行防线。"""
@@ -67,22 +73,27 @@ class TestStaleIsVisible:
             "若某个已判定存废（删除或转正），请同步 05_strategy_versions/TODO.md #44")
 
     def test_running_stale_tool_warns(self):
-        """跑 stale 工具必须先打警告 —— 结论不该被直接采信。"""
+        """跑 stale 工具必须先打警告 —— 结论不该被直接采信。
+
+        带 --help 走快速路径：compare_signal_sets 裸跑会做全量分析
+        （逐票 TDX 取数，分钟级），而断言目标只是入口的 stale 警告。
+        """
         r = subprocess.run([sys.executable, str(RESEARCH / "__main__.py"),
-                            "compare_signal_sets"],
-                           cwd=str(ROOT), capture_output=True, text=True, timeout=120)
+                            "compare_signal_sets", "--help"],
+                           cwd=str(ROOT), **_RUN, timeout=120)
+        assert r.returncode == 0
         assert "存废待定" in r.stderr
 
     def test_listing_marks_stale_section(self):
         r = subprocess.run([sys.executable, str(RESEARCH / "__main__.py")],
-                           cwd=str(ROOT), capture_output=True, text=True, timeout=60)
+                           cwd=str(ROOT), **_RUN, timeout=60)
         assert "存废待定" in r.stdout
 
 
 class TestListingAndDispatch:
     def test_listing_shows_all_tools(self):
         r = subprocess.run([sys.executable, str(RESEARCH / "__main__.py")],
-                           cwd=str(ROOT), capture_output=True, text=True, timeout=60)
+                           cwd=str(ROOT), **_RUN, timeout=60)
         assert r.returncode == 0
         for n in entry.TOOLS:
             assert n in r.stdout, f"列表里缺 {n}"
@@ -92,13 +103,13 @@ class TestListingAndDispatch:
         （`launch_point_study` 有 17 个）。看 `--help` 分不清模式与选项，
         所以入口要把模式单独列出来。"""
         r = subprocess.run([sys.executable, str(RESEARCH / "__main__.py")],
-                           cwd=str(ROOT), capture_output=True, text=True, timeout=60)
+                           cwd=str(ROOT), **_RUN, timeout=60)
         assert "模式（17）" in r.stdout or "模式（1" in r.stdout
         assert "discriminate" in r.stdout, "launch_point_study 的模式要列出来"
 
     def test_unknown_tool_exits_nonzero_and_lists(self):
         r = subprocess.run([sys.executable, str(RESEARCH / "__main__.py"), "nope"],
-                           cwd=str(ROOT), capture_output=True, text=True, timeout=60)
+                           cwd=str(ROOT), **_RUN, timeout=60)
         assert r.returncode == 2 and "未登记的工具" in r.stderr
         assert "backtest_factors" in r.stdout, "报错时也要给出可用清单"
 
@@ -106,7 +117,7 @@ class TestListingAndDispatch:
         """分发必须原样透传参数 —— 否则每个工具都要在入口再声明一遍。"""
         r = subprocess.run([sys.executable, str(RESEARCH / "__main__.py"),
                             "backtest_factors", "--help"],
-                           cwd=str(ROOT), capture_output=True, text=True, timeout=180)
+                           cwd=str(ROOT), **_RUN, timeout=180)
         assert r.returncode == 0 and "backtest_factors.py" in r.stdout
 
     def test_dispatch_uses_subprocess_not_import(self):

@@ -137,7 +137,9 @@ class TestRun1700MfeStageEcho:
         (review_dir / "2026-07-17_final_review.md").write_text("# 复盘\n正文\n", encoding="utf-8")
         monkeypatch.setattr(run_1700, "REVIEWS", review_dir)
         monkeypatch.setattr(run_1700, "LOG_DIR", tmp_path / "06_logs")
-        monkeypatch.setattr(run_1700, "check_trading_day", lambda d: {"is_trading_day": True})
+        # 日历门控已抽进 pipeline_kit.calendar_gate，桩要打在它查日历的地方
+        import pipeline_kit
+        monkeypatch.setattr(pipeline_kit, "check_trading_day", lambda d: {"is_trading_day": True})
         monkeypatch.setattr(run_1700.os, "chdir", lambda p: None)
 
         def _fake_stage(cmd, name):
