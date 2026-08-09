@@ -27,11 +27,14 @@
 
 | # | 单元 | 重跑什么 | 前置 |
 |---|---|---|---|
-| 5 | [R10](../00_governance/research/R10_mechanism_M2_stops.md)/[R11](../00_governance/research/R11_baseline_margin_collapse.md) | 3000 样本 + **已实现口径**（剔 `open_end` 的分子分母）+ `margin > 3pp` 判据。提法换成「有没有方案能在 3000 只宇宙里做出可用 margin」 | — |
-| 6 | [R9](../00_governance/research/R9_method_M1_payoff_ratio.md) | 三个对照臂 `scale_out_0/03/08` 于**收盘口径** + 3000 样本 | 与 #5 同批 |
 | 7 | [R2](../00_governance/research/R2_selection_price_volume.md) | 把「换宇宙」与「换数据源」**拆成两次单变量对照** | — |
 | 8 | [R3](../00_governance/research/R3_selection_discriminability_recall.md) | 只重算受影响窗的 `recall_by_band` 与净增益（「≥100% 带 −37.5%」这个被反复引用的数字）| — |
-| 9 | [R1](../00_governance/research/R1_core_framework.md) | 重写**收益量级**。在此之前**任何 CAGR/期望数字都不应被引用** | #4 #5 #6 |
+| 9 | [R1](../00_governance/research/R1_core_framework.md) | 重写**收益量级**。在此之前**任何 CAGR/期望数字都不应被引用** | 前置（#4/#5/#6）全部就绪（2026-08-09） |
+
+✅ **#5/#6 已完成（2026-08-09）**：m2 全扫描 27 方案 × s3000（钉死宇宙+窗口、已实现口径）。
+R10：可用 margin 只在含 0AMV 的方案（pct_05_amv +7.8pp / pct_12_amv_cz3 +11.1pp）；
+纯出场最强 trail_08（已实现 +0.116R）不过 3pp。R9：scale_out 四臂单调递增，∂E/∂b>0 成立。
+**后续**：通过方案须 `--cross-window`（2022-2024）复核（待跑）；#15（组合层 --top-n 宽度）前置已解。
 
 ## P2 · 待跑（新验证）
 

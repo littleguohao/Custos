@@ -150,12 +150,11 @@ class TestRerunMarks:
 
         R4 于 2026-08-09 完成重跑（16 格 2×2 × 4 窗）后移出本集合——
         重取完成的单元应摘标记，而不是永久挂着。
+        R9/R10 同日完成（s3000 已实现口径全扫描）后移出。
         """
         want = {
             "R1_core_framework.md", "R2_selection_price_volume.md",
             "R3_selection_discriminability_recall.md",
-            "R9_method_M1_payoff_ratio.md",
-            "R10_mechanism_M2_stops.md",
         }
         got = set(self._marked())
         assert want <= got, f"缺重跑标记：{sorted(want - got)}"
