@@ -146,11 +146,15 @@ class TestRerunMarks:
         return out
 
     def test_expected_units_are_marked(self):
-        """这 6 个单元的结论依赖已失效的口径，必须带重跑标记。"""
+        """这些单元的结论依赖已失效的口径，必须带重跑标记。
+
+        R4 于 2026-08-09 完成重跑（16 格 2×2 × 4 窗）后移出本集合——
+        重取完成的单元应摘标记，而不是永久挂着。
+        """
         want = {
             "R1_core_framework.md", "R2_selection_price_volume.md",
             "R3_selection_discriminability_recall.md",
-            "R4_timing_amv_sector.md", "R9_method_M1_payoff_ratio.md",
+            "R9_method_M1_payoff_ratio.md",
             "R10_mechanism_M2_stops.md",
         }
         got = set(self._marked())
@@ -171,12 +175,13 @@ class TestRerunMarks:
             assert name in seg, f"{name} 未列入 README 重跑清单"
 
     def test_p0_is_the_live_dependency(self):
-        """P0 的定义是「live 正在依赖它」。当前只有 R4（择时腿）满足。
+        """P0 的定义是「live 正在依赖它」。
 
+        R4（择时腿）曾是唯一 P0，2026-08-09 重跑完成后摘标记 ⇒ 当前 P0 为空。
         若哪天 P0 变多，说明有更多 live 决策建立在待重跑的结论上 —— 那是要立即处理的信号。
         """
         p0 = [k for k, v in self._marked().items() if v == "P0"]
-        assert p0 == ["R4_timing_amv_sector.md"], f"P0 集合变了：{p0}"
+        assert p0 == [], f"P0 集合变了：{p0}"
 
     def test_level_and_state_not_contradicting_mark(self):
         """带重跑标记的单元，**不许**同时宣称干净的 L4 + ✅成立 —— 那会误导读者。"""
