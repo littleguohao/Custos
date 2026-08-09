@@ -49,6 +49,7 @@ if str(_TOOLS) not in sys.path:
 
 
 from code_utils import price_limit_pct  # noqa: E402
+from b1_thresholds import change_in_range  # noqa: E402  反转K涨跌幅判定（live 同口径，round-2）
 try:
     from indicators import _infer_price_limit, kdj as _kdj_fn # noqa: E402
 except Exception:  # noqa: BLE001 —— 导入失败时用保守默认涨跌幅
@@ -395,9 +396,11 @@ def compute_s_reversal(df, code: str = "") -> dict[str, Any]:
         contraction = min(30.0, shrink_pts + pull_pts + hold_pts)
 
         # --- 反转确认 0-30：反转K + J拐头 + 低位反包 + 底部巨量 ---
+        # 2026-08-09 对齐 live 口径（enrich_candidates 经 b1_thresholds）：
+        # 振幅分母 low→prev_close，涨跌幅判定改 round-2（change_in_range，2026-08-07 owner 拍板）。
         chg = (close[-1] / close[-2] - 1) * 100 if n >= 2 and close[-2] else 0.0
-        amp = (high[-1] / low[-1] - 1) * 100 if low[-1] else 0.0
-        reversal_k = bool((j is not None and j < 13) and extreme and abs(chg) <= 2 and amp <= 7)
+        amp = (high[-1] - low[-1]) / close[-2] * 100 if n >= 2 and close[-2] else 0.0
+        reversal_k = bool((j is not None and j < 13) and extreme and change_in_range(chg) and amp <= 7)
         rk_pts = 10.0 if reversal_k else 0.0
         jturn_pts = 6.0 if (j is not None and j_prev is not None and j > j_prev and j_prev < 20) else 0.0
         prev_bear = bool(n >= 2 and close[-2] < open_[-2])

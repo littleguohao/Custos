@@ -22,10 +22,21 @@ owner 2026-08-06 要求反转 K「对称 ±2% **且可配置**」。实测（202
 
 ## 研究侧刻意**不**读这里
 
-`factors/reversal_quality.py` 保留自己的 `REVK_*` 常量，不跟随环境变量。
-理由是它的阈值钉死才能复现既有回测数字（R2 P1 重跑清单依赖那些数字）。
-两边默认值相同（对称 ±2%），但覆盖环境变量时**只有 live 会变** —— 这是有意的，
-`tests/test_enrich_b1cz.py::TestReversalKThresholdSingleSource` 把这条边界钉住了。
+豁免清单（刻意钉死默认值、不跟随环境变量；两边相等由
+`tests/test_enrich_b1cz.py::TestReversalKThresholdSingleSource` 钉住）：
+
+    factors/reversal_quality.py     REVK_* 钉死。理由是它的阈值钉死才能复现既有
+                                    回测数字（R2 P1 重跑清单依赖那些数字）。
+    research/backtest_factors.py    REVK_* / J_LOW_THRESHOLD 钉死 = 本模块默认值，
+                                    同理由（2026-08-09 登记）。判定逻辑（round-2
+                                    涨跌幅、prev_close 振幅分母、`<` 量分位）
+                                    已与 live 对齐，只有「不读 env」是刻意的。
+
+两边默认值相同（对称 ±2%），但覆盖环境变量时**只有 live 会变** —— 这是有意的。
+
+反向（**跟随**本模块）：release 标注因子 `b1_dual_factor.J_LOW_THRESHOLD` /
+`b2_surge_factor.B2_J_LOW` 自 2026-08-09 起从这里导入 —— live 候选表的标注
+应反映 live 口径，其默认值 13.0 由同一测试类钉住。
 
 ⚠️ 之前两边的文档朝**相反方向**说错：`reversal_quality` 的 docstring 说
 「本因子与 live 的反转 K 不是同一个东西」（owner 08-06 统一后已过时），

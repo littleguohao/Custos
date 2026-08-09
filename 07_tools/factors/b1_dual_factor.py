@@ -39,7 +39,8 @@ if str(_TOOLS) not in sys.path:
 # 原先的 screening/market_timing 两项已于 2026-08-08 删除：本模块只依赖
 # 07_tools 根与同目录（s_shape / platform_pullback，扁平 import 惯例见 factors/__init__.py）。
 
-from indicators import dks_series as _dks_series  # noqa: E402
+from indicators import dks_series as _dks_series, qsx_series as _qsx_series  # noqa: E402
+from b1_thresholds import J_LOW_THRESHOLD  # noqa: E402  L0 唯一来源；见下方常量区注释
 
 from s_shape import compute_ma_structure, compute_overhead_supply, compute_s_reversal  # noqa: E402
 
@@ -76,14 +77,12 @@ W_REVERSAL = 0.60                # 轴2 短期回调（B1 是回调买入，买�
 # 周线 J<13 意味着**更大周期的回调也到位**，回调充分度比只有日线低更强。
 # 记为独立加分而非并进某个轴，便于回测消融（返回里同时给 score_without_resonance）。
 RESONANCE_BONUS_PTS = 12.0       # 待回测
-J_LOW_THRESHOLD = 13.0           # B1 区间上界（与 backtest_factors.j_low_gate 同值）
+# J_LOW_THRESHOLD 自 2026-08-09 起从 `b1_thresholds`（L0 唯一来源）导入：
+# 本因子是 release 标注因子（live 候选表标签），标注应反映 live 口径 ⇒ 跟随 live
+# （含 B1_J_LOW env 覆盖）；回测可复现性由测试钉住默认值 13.0
+# （tests/test_enrich_b1cz.py::TestReversalKThresholdSingleSource）。
 
 DUAL_MIN_BARS = 120              # DKS 需要 MA114 → 至少 120 根
-
-
-def _qsx_series(close: pd.Series) -> pd.Series:
-    """QSX 知行短期趋势线 = EMA(EMA(CLOSE,10),10)（与 technical_monitor.zhixing_state 同口径）。"""
-    return close.astype(float).ewm(span=10, adjust=False).mean().ewm(span=10, adjust=False).mean()
 
 
 

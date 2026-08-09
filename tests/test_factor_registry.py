@@ -281,7 +281,13 @@ class TestStageMatchesReality:
 
     LIVE_FILES = ["screening/enrich_candidates.py", "screening/score_candidates.py",
                   "screening/candidate_table.py", "screening/signal_labels.py",
-                  "screening/formula_screen.py"]
+                  "screening/formula_screen.py",
+                  # 2026-08-09 扩：盘中监控与持仓链也是 live 消费者 —— 它们若哪天开始
+                  # import 因子模块，stage 标记必须与事实一致。当前它们不引用任何因子，
+                  # 扫描结果不变，只是把网织在事发之前。
+                  "market_timing/technical_monitor.py",
+                  "holdings/b1_holding_state.py",
+                  "holdings/batch_holding_technical.py"]
 
     def _referenced(self) -> set[str]:
         import re

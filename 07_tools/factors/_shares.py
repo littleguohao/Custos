@@ -29,6 +29,21 @@ from typing import Optional
 _SHARE_IDX: Optional[dict] = None
 
 
+def events_to_idx(events) -> dict:
+    """把股本变动事件列表压成 ``code → [(observed_on, total_shares)]`` 升序索引。
+
+    2026-08-09 抽出：`research/launch_point_study.extract_firings` 此前内联同一套
+    构建逻辑（两处数据源本来就是同一个 `share_changes.jsonl`），收敛到本模块。
+    """
+    idx: dict[str, list] = {}
+    for e in events:
+        if e.get("code") and e.get("observed_on") and e.get("total_shares"):
+            idx.setdefault(e["code"], []).append((e["observed_on"], e["total_shares"]))
+    for c in idx:
+        idx[c].sort()
+    return idx
+
+
 def shares_idx() -> dict:
     """股本事件索引 code → [(observed_on, total_shares)](01_data/fundamentals/share_changes.jsonl,
     东财 F10 全史回填,2018 前亦有;as-of 取值只可能 stale 不会 look-ahead)。加载失败 → {}。"""
@@ -39,14 +54,10 @@ def shares_idx() -> dict:
             from paths import BASE  # noqa: PLC0415
             p = BASE / "01_data" / "fundamentals" / "share_changes.jsonl"
             if p.is_file():
-                for line in p.read_text(encoding="utf-8").splitlines():
-                    if not line.strip():
-                        continue
-                    e = json.loads(line)
-                    if e.get("code") and e.get("observed_on") and e.get("total_shares"):
-                        idx.setdefault(e["code"], []).append((e["observed_on"], e["total_shares"]))
-                for c in idx:
-                    idx[c].sort()
+                idx = events_to_idx(
+                    json.loads(line)
+                    for line in p.read_text(encoding="utf-8").splitlines()
+                    if line.strip())
         except Exception:  # noqa: BLE001
             idx = {}
         _SHARE_IDX = idx

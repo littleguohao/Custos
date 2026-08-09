@@ -49,6 +49,7 @@ if str(_TOOLS) not in sys.path:
 # （因子层惯例：sys.path 由消费方设置，见 factors/__init__.py）。
 
 from indicators import j_series as _j_canonical  # noqa: E402
+from b1_thresholds import J_LOW_THRESHOLD  # noqa: E402  L0 唯一来源；见 B2_J_LOW 注释
 
 FACTOR: dict[str, Any] = {
     "id": "b2_surge_factor",
@@ -79,7 +80,11 @@ B2_GAIN_PCT = 4.0            # 原文:涨幅大于 4%
 B2_J_MAX = 55.0              # 原文:J < 55
 B2_B1_WITHIN = 5             # "B1 之后"的回看窗:原文未给天数,B1 确认条件是"3 个交易日内
                              # 有效上涨",故取 5 日留一点余量（待回测）
-B2_J_LOW = 13.0              # B1 的 J 阈值（与 j_low_gate 同值）
+# B1 的 J 阈值：自 2026-08-09 起从 `b1_thresholds`（L0 唯一来源）导入 ——
+# 本因子是 release 标注因子（live 候选表标签），标注应反映 live 口径 ⇒ 跟随 live
+# （含 B1_J_LOW env 覆盖）；默认值 13.0 由测试钉住
+# （tests/test_enrich_b1cz.py::TestReversalKThresholdSingleSource）。
+B2_J_LOW = J_LOW_THRESHOLD
 B2_NO_UPPER_SHADOW_FRAC = 0.15   # "无上影线最好":上影 ≤ 实体×此值算无上影（待回测）
 B2_MIN_BARS = 30
 

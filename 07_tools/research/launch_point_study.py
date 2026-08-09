@@ -39,6 +39,9 @@ _FACTORS_DIR = str(Path(__file__).resolve().parents[1] / "factors")
 if _FACTORS_DIR not in sys.path:
     sys.path.insert(0, _FACTORS_DIR)   # 因子层：见 factors/__init__.py
 
+# 股本事件索引构建的唯一所有者（包限定导入：该模块持可变缓存，见 _shares 模块头）。
+from factors._shares import events_to_idx as _shares_events_to_idx  # noqa: E402
+
 
 
 def window_return(dates: list, closes: list, start: str, end: str,
@@ -430,19 +433,16 @@ def extract_firings(bars, start: str, end: str, entry_gate, scorer=None,
     (log10 20日均 close×volume ≈ 成交额,**市值代理**——qlib bundle 无总股本)。
     shares_events:fetch_market_cap 的股本变动事件(load_events 产物)——提供时追加
     f_mcap = log10(信号日总股本×信号日收盘 / 1e8)(**真市值,亿元**;股本按 observed_on≤信号日
-    取最近事件,只可能 stale 不会 look-ahead;2018-01-02 前无数据 → 特征缺省)。
-    ⚠️ 2026-07-31 起真市值已可得:`local_tdx/fetch_market_cap.py` 提供总股本/总市值
-    (历史起点 2018-01-02),新研究应改用真市值,成交额只作流动性因子。"""
+    取最近事件,只可能 stale 不会 look-ahead;早于最早事件的信号日 → 特征缺省)。
+    ⚠️ 2026-07-31 起真市值已可得:`local_tdx/fetch_market_cap.py` 提供总股本/总市值;
+    台账此后已**东财 F10 全史回填**(2018 前亦有,最早事件 1979)——新研究应改用真市值,
+    成交额只作流动性因子。索引构建走 `factors/_shares.events_to_idx`(唯一所有者,
+    2026-08-09 收敛;load_events 的 LEDGER 与 `_shares.shares_idx()` 读的是同一个
+    share_changes.jsonl)。"""
     import gc  # noqa: PLC0415
     # 真市值索引:code → [(observed_on, total_shares)] 升序,信号日 bisect 取 as-of 股本(O(1)/信号)
-    shares_idx: Optional[dict] = None
-    if shares_events:
-        shares_idx = {}
-        for e in shares_events:
-            if e.get("code") and e.get("observed_on") and e.get("total_shares"):
-                shares_idx.setdefault(e["code"], []).append((e["observed_on"], e["total_shares"]))
-        for c in shares_idx:
-            shares_idx[c].sort()
+    # 2026-08-09:不再本地构建,复用 factors/_shares.events_to_idx(同一数据源,见 docstring)。
+    shares_idx: Optional[dict] = _shares_events_to_idx(shares_events) if shares_events else None
     items = bars.items() if isinstance(bars, dict) else bars
     out: list[dict] = []
     skipped_no_score = 0        # 打分器无数据 → 跳过的信号数(不得当 0 分参与排名)
@@ -1888,7 +1888,7 @@ def main(argv=None, loader=None) -> int:
                         continue
                 return merged
         shares_ev = None
-        if args.style_features:                          # 真市值事件(fetch_market_cap 台账,2018-01 起)
+        if args.style_features:                          # 真市值事件(fetch_market_cap 台账,已 F10 全史回填)
             try:
                 from fetch_market_cap import load_events, LEDGER  # noqa: PLC0415
                 shares_ev = load_events(LEDGER) or None

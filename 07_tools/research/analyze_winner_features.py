@@ -101,7 +101,7 @@ def _features(df, i: int) -> dict:
     c = sub["close"].astype(float)
     feats: dict = {}
     h = bt._macd_hist(c)
-    dif = c.ewm(span=12, adjust=False).mean() - c.ewm(span=26, adjust=False).mean()
+    dif = bt._macd_dif_series(c)   # 2026-08-09 收敛：DIF 复用唯一实现（原内联 EMA12−EMA26 同式）
     feats["macd_dif"] = round(float(dif.iloc[-1]), 4)
     feats["macd_hist"] = round(float(h.iloc[-1]), 4)
     feats["macd_hist_rising"] = float(h.iloc[-1] > h.iloc[-2])

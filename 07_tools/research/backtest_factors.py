@@ -66,7 +66,7 @@ from reversal_quality import score as _sc_reversal_quality  # noqa: E402
 from reversal_quality_inv import score as _sc_reversal_quality_inv  # noqa: E402
 
 
-from indicators import bbi_series as _bbi_series  # noqa: E402
+from indicators import bbi_series as _bbi_series, macd_series as _macd_series  # noqa: E402
 from code_utils import price_limit_pct  # noqa: E402
 
 def _bbi_series_from(df: pd.DataFrame) -> np.ndarray:
@@ -100,6 +100,10 @@ def j_low_gate(df_slice: pd.DataFrame) -> bool:
 
 
 # 完整 B1 反转K：J<13 + 缩量(量比≤50%) + 20日量底10% + 收盘变动±2% + 振幅≤7%（企稳，非落刀）
+# ⚠️ 常量值**刻意钉死 = live 默认值**（`b1_thresholds` 的默认，不跟随 B1_REVK_* env）——
+# 研究钉死才能复现既有回测数字；判定逻辑（round-2 涨跌幅、prev_close 振幅分母、`<` 量分位）
+# 2026-08-09 已与 live 对齐，两边常量相等由
+# tests/test_enrich_b1cz.py::TestReversalKThresholdSingleSource 钉住。
 REVK_VOL_RATIO = 0.5
 REVK_VOL_PCTILE = 0.10
 REVK_CHG_PCT = 2.0
@@ -107,7 +111,12 @@ REVK_AMP_PCT = 7.0
 
 
 def reversal_k_gate(df_slice: pd.DataFrame) -> bool:
-    """B1 反转K 完整买点：J<13 且缩量企稳(小实体/小振幅)——排除收盘贴低的落刀。绝不 raise。"""
+    """B1 反转K 完整买点：J<13 且缩量企稳(小实体/小振幅)——排除收盘贴低的落刀。绝不 raise。
+
+    2026-08-09 对齐 live（`enrich_candidates.compute_metrics` 经 `b1_thresholds`）：
+    涨跌幅按 **round-2 显示精度**判定（2026-08-07 owner 拍板的刻意行为）、
+    振幅分母 prev_close、量分位用 `<`。常量仍钉死默认值，不读 env（见上方注释）。
+    """
     if _kdj is None or len(df_slice) < 21:
         return False
     try:
@@ -122,12 +131,14 @@ def reversal_k_gate(df_slice: pd.DataFrame) -> bool:
         if not (vma5 > 0 and vol[-1] / vma5 <= REVK_VOL_RATIO):        # 量比≤50%
             return False
         v20 = vol[-20:]
-        if (v20 <= vol[-1]).mean() > REVK_VOL_PCTILE:                  # 当日量在20日底部10%
+        if (v20 < vol[-1]).mean() > REVK_VOL_PCTILE:                   # 当日量在20日底部10%（`<`，与 live 同向）
             return False
         chg = (close[-1] / close[-2] - 1) * 100 if close[-2] else 99   # 收盘变动 ±2%
-        if abs(chg) > REVK_CHG_PCT:
+        # 判定精度 = 显示精度（round-2），同 live 的 b1_thresholds.change_in_range。
+        # 不直接调 change_in_range：它读 env 覆盖值，而研究侧要钉死默认 ±2%。
+        if not (-REVK_CHG_PCT <= round(chg, 2) <= REVK_CHG_PCT):
             return False
-        amp = (high[-1] - low[-1]) / close[-2] * 100 if close[-2] else 99  # 振幅≤7%
+        amp = (high[-1] - low[-1]) / close[-2] * 100 if close[-2] else 99  # 振幅≤7%（分母 prev_close，同 live）
         return bool(amp <= REVK_AMP_PCT)
     except Exception:  # noqa: BLE001
         return False
@@ -142,10 +153,13 @@ ENTRY_GATES: dict[str, Optional[Callable[[pd.DataFrame], bool]]] = {
 
 
 def _macd_hist(close: pd.Series) -> pd.Series:
-    """MACD 柱(DIF-DEA, 12/26/9)。柱>0=红、<0=绿；柱上行=绿柱缩短或红柱变长。"""
-    c = close.astype(float)
-    dif = c.ewm(span=12, adjust=False).mean() - c.ewm(span=26, adjust=False).mean()
-    dea = dif.ewm(span=9, adjust=False).mean()
+    """MACD 柱(DIF-DEA, 12/26/9)。柱>0=红、<0=绿；柱上行=绿柱缩短或红柱变长。
+
+    ⚠️ 口径是 **×1**（柱 = DIF − DEA），刻意**不是** `indicators.macd` 的中式 ×2 ——
+    本模块语义就是「柱=dif-dea」。EMA 走唯一实现 `macd_series`（2026-08-09 收敛），
+    这里只做相减，不得再自己写 EMA。
+    """
+    dif, dea, _hist_x2 = _macd_series(close)
     return dif - dea
 
 
@@ -167,8 +181,8 @@ ENTRY_GATES["j_macd_turn"] = j_low_macd_turn_gate
 
 
 def _macd_dif_series(close: pd.Series) -> pd.Series:
-    c = close.astype(float)
-    return c.ewm(span=12, adjust=False).mean() - c.ewm(span=26, adjust=False).mean()
+    """DIF 序列（12/26）—— 委托 `indicators.macd_series`（2026-08-09 收敛，唯一实现）。"""
+    return _macd_series(close)[0]
 
 
 def j_low_dif_pos_gate(df_slice: pd.DataFrame) -> bool:
@@ -383,11 +397,7 @@ SCORERS = {"s_shape": _sc_s_shape, "s_reversal": _sc_s_reversal,
 # --- 借鉴「101 Formulaic Alphas」(Kakushadze 2016) 的思想：纯**选择器**,配 --entry-filter 定义 B1 池,
 #     --top-n 做横截面择优。⚠️ 原论文 alpha 为 0.6~6.4 日超短持有的市场中性反转,与 B1(周级/单边/择时)
 #     不同源,是否加值必须回测验证；此处仅作可排序因子,suggestion 恒「可买」,靠 entry_gate 约束进场池。 ---
-def _ts_corr(x: pd.Series, y: pd.Series, n: int) -> Optional[float]:
-    if len(x) < n:
-        return None
-    c = x.iloc[-n:].reset_index(drop=True).corr(y.iloc[-n:].reset_index(drop=True))
-    return None if (c is None or c != c) else float(c)
+# （2026-08-09：本处原有的死 `_ts_corr` 已删 —— 无调用方；唯一实现在 `factors/_util.ts_corr`。）
 
 
 

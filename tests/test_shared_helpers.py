@@ -167,6 +167,46 @@ class TestNoRefork:
         "pct_text": {"fmt.py", "close_review/review_core.py"},  # 后者是 1 行措辞适配器
         "num_text": {"fmt.py"},
         "optional_finite": set(),  # 已全部改为 code_utils.fnum
+        # ── 指标序列级入口（2026-08-09 收敛：QSX/MACD 曾各有 3~4 份逐位相同的实现）──
+        "qsx_series": {"indicators.py"},
+        "macd_series": {"indicators.py"},
+        "dks_series": {"indicators.py"},
+        "bbi_series": {"indicators.py"},
+        "kdj_series": {"indicators.py"},
+        "j_series": {"indicators.py"},
+        # ── 21 个因子的入口函数（唯一实现 = 因子模块本身）──
+        "detect_wave_type": {"factors/wave_type.py"},
+        "compute_s_shape": {"factors/s_shape.py"},
+        "compute_s_reversal": {"factors/s_shape.py"},
+        "ts_corr": {"factors/_util.py"},
+        "shares_idx": {"factors/_shares.py"},
+        "events_to_idx": {"factors/_shares.py"},
+        "detect_distribution": {"factors/distribution.py"},
+        "compute_b1_dual": {"factors/b1_dual_factor.py"},
+        "compute_long_structure": {"factors/b1_dual_factor.py"},
+        "detect_weekly_b1_resonance": {"factors/b1_dual_factor.py"},
+        "detect_breakout_pullback_b1": {"factors/b1_dual_factor.py"},
+        "detect_launch_segment": {"factors/b1_dual_factor.py"},
+        "compute_b1_pullback_fit": {"factors/b1_pullback_fit.py"},
+        "compute_perfect_b1_fit": {"factors/perfect_b1_fit.py"},
+        "detect_b2": {"factors/b2_surge_factor.py"},
+        "detect_bottom_surge": {"factors/b2_surge_factor.py"},
+        "detect_surge_then_b1": {"factors/b2_surge_factor.py"},
+        "detect_main_rally_start": {"factors/main_rally_factor.py"},
+        "main_rally_score": {"factors/main_rally_factor.py"},
+        "rsi_regime": {"factors/rsi_state.py"},
+        "rsi_divergence": {"factors/rsi_state.py"},
+        "rsi_multi": {"factors/rsi_state.py"},
+        "rsi_state_score": {"factors/rsi_state.py"},
+        "detect_platform_pullback": {"factors/platform_pullback.py"},
+        "compute_sector_phase": {"factors/sector_phase.py"},
+        "favorable_series": {"factors/sector_phase.py"},
+        "mainline_fingerprint": {"factors/sector_mainstream.py"},
+        # 注册表接口名（约定：每个 selector 各一份），但不得再长出新文件
+        "score": {"factors/_template.py", "factors/alpha101.py", "factors/alpha_pvcorr.py",
+                  "factors/baseline.py", "factors/kdj_j.py", "factors/low_vol.py",
+                  "factors/mcap.py", "factors/momentum.py", "factors/reversal_quality.py",
+                  "factors/reversal_quality_inv.py"},
     }
 
     def test_no_duplicate_definitions(self):

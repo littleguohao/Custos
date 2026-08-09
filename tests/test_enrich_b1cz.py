@@ -626,3 +626,40 @@ class TestReversalKThresholdSingleSource:
         r = mods["technical_monitor"].analyze(make_df(closes, vols=vols), "600000")
         got = r["price_volume"]["thresholds"]["reversal_close_change_pct"]
         assert got == [-1.5, 0.5], f"上报的阈值不是生效值：{got}"
+
+    def test_research_backtest_revk_pinned_to_live_defaults(self, reversal_thresholds):
+        """研究回测器 `backtest_factors` 的 REVK_*/J_LOW 钉死 = live 默认值。
+
+        2026-08-09 登记进 `b1_thresholds` 豁免清单：判定逻辑（round-2 涨跌幅、
+        prev_close 振幅分母、`<` 量分位）已与 live 对齐，只有「不读 env」是刻意的
+        （复现既有回测数字，同 reversal_quality 的理由）。
+        ⚠️ 单位注意：研究侧量分位是小数（0.10），live 是百分数（10.0）。
+        """
+        mods = reversal_thresholds()
+        thr = mods["b1_thresholds"]
+        import backtest_factors as bf
+        assert bf.REVK_VOL_RATIO == thr.VOL_RATIO_MAX
+        assert bf.REVK_VOL_PCTILE * 100 == thr.VOL_PCTILE_MAX, "单位：研究侧小数 vs live 百分数"
+        assert bf.REVK_CHG_PCT == thr.REVERSAL_CHANGE_PCT
+        assert bf.REVK_AMP_PCT == thr.REVERSAL_AMPLITUDE_PCT
+        assert bf.J_LOW_THRESHOLD == thr.J_LOW_THRESHOLD
+
+    def test_release_label_factors_j_low_follow_live(self, reversal_thresholds):
+        """release 标注因子（落 live 候选表的标签）的 J 阈值必须**跟随** live。
+
+        2026-08-09：`b1_dual_factor.J_LOW_THRESHOLD` / `b2_surge_factor.B2_J_LOW`
+        改从 `b1_thresholds` 导入（L2→L0 合规）—— 标注应反映 live 口径（含 env 覆盖）。
+        本条钉住：reload 后两者与阈值模块当前值相等，且默认是 13.0（回测可复现性）。
+        不在这里做 env 覆盖实验：那会 reload `b1_thresholds` 造出新函数对象，
+        污染不做整链刷新的其它用例（本 fixture 存在的理由）。
+        """
+        import importlib
+
+        import b1_dual_factor
+        import b2_surge_factor
+        mods = reversal_thresholds()
+        thr = mods["b1_thresholds"]
+        d1 = importlib.reload(b1_dual_factor)
+        d2 = importlib.reload(b2_surge_factor)
+        assert d1.J_LOW_THRESHOLD == thr.J_LOW_THRESHOLD == 13.0, "b1_dual_factor 没跟上 live"
+        assert d2.B2_J_LOW == thr.J_LOW_THRESHOLD == 13.0, "b2_surge_factor 没跟上 live"

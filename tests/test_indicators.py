@@ -98,6 +98,11 @@ class TestNoLocalReimplementation:
         ("factors/b2_surge_factor.py", "_j_canonical"),
         ("research/backtest_factors.py", "bbi_series as _bbi_series"),
         ("market_timing/technical_monitor.py", "kdj_series"),
+        # 2026-08-09 QSX/MACD 收敛：下列各处一律改为导入序列级唯一实现
+        ("factors/b1_dual_factor.py", "qsx_series"),
+        ("factors/distribution.py", "qsx_series"),
+        ("factors/sector_phase.py", "macd_series"),
+        ("research/backtest_factors.py", "macd_series"),
     ]
 
     @pytest.mark.parametrize("rel,marker", CASES)
@@ -145,6 +150,47 @@ class TestBehaviorPreserved:
         df = _bars(60)
         assert np.allclose(BT._bbi_series(df["close"]).to_numpy(),
                            BT._bbi_series_from(df), equal_nan=True)
+
+
+class TestQsxMacdSeries:
+    """序列级 QSX / MACD 的唯一实现（2026-08-09 收敛）。
+
+    QSX 曾有三份逐位相同的实现、MACD DIF/DEA 四份 —— 与 J/BBI 同款风险，
+    趁未发散合并到 `qsx_series` / `macd_series`。
+    """
+
+    def test_qsx_series_formula(self):
+        c = _bars(120)["close"]
+        want = c.astype(float).ewm(span=10, adjust=False).mean().ewm(span=10, adjust=False).mean()
+        assert np.allclose(I.qsx_series(c).to_numpy(), want.to_numpy(), equal_nan=True)
+
+    def test_macd_series_hist_is_chinese_x2(self):
+        """hist 必须与 `macd()` 末根字典同为中式 ×2 口径。"""
+        c = _bars(120)["close"]
+        dif, dea, hist = I.macd_series(c)
+        assert np.allclose(hist.to_numpy(), ((dif - dea) * 2).to_numpy(), equal_nan=True)
+
+    def test_macd_dict_matches_series_last_bar(self):
+        """末根字典版就是序列版的最后一根 —— 不允许两套 EMA 并存。"""
+        df = _bars(80)
+        dif, dea, hist = I.macd_series(df["close"])
+        m = I.macd(df)
+        assert m["available"]
+        assert m["dif"] == round(float(dif.iloc[-1]), 4)
+        assert m["dea"] == round(float(dea.iloc[-1]), 4)
+        assert m["hist"] == round(float(hist.iloc[-1]), 4)
+
+    def test_zhixing_state_delegates_to_shared_series(self):
+        """zhixing_state 的 QSX/DKS 必须调共享序列函数（AST 查真实调用，不查注释）。"""
+        import ast as _ast
+
+        src = (ROOT / "07_tools" / "indicators.py").read_text(encoding="utf-8")
+        node = next(n for n in _ast.parse(src).body
+                    if isinstance(n, _ast.FunctionDef) and n.name == "zhixing_state")
+        body = _ast.unparse(node)
+        assert "qsx_series(" in body, "zhixing_state 又内联了 QSX"
+        assert "dks_series(" in body, "zhixing_state 又内联了 DKS"
+        assert "ewm(" not in body, "zhixing_state 又自己算 EMA"
 
 
 class TestHoldingStateSharesJWithSelection:

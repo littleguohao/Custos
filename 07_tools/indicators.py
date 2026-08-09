@@ -31,6 +31,19 @@ market_timing/technical_monitor ×2）。这两个指标恰好是 B1 最核心�
 指标语义的改动应该单独立项、单独回测，不该搭在重构里。
 （2026-08-08：enrich 的本地包装已删，它经 `kdj()` 仍走 fill 50；
 `j_series(fill_na=50.0)` 的现存调用方是 `factors/b1_pullback_fit`。）
+
+## 序列级 QSX / MACD 同样是唯一实现（2026-08-09 收敛）
+
+QSX（`EMA(EMA(C,10),10)`）曾有三份逐位相同的实现（本文件 `zhixing_state` 内联、
+`factors/b1_dual_factor._qsx_series`、`factors/distribution` 内联）；
+MACD DIF/DEA 曾有四份（本文件 `macd()`、`research/backtest_factors._macd_hist`/
+`_macd_dif_series`、`factors/sector_phase._macd`、`research/analyze_winner_features`
+内联），实测 max diff = 0.0。⇒ 新增序列级唯一实现 `qsx_series` / `macd_series`，
+上述各处一律改为调用，不再各自写 EMA。
+
+⚠️ hist 口径：`macd_series` 与 `macd()` 同为**中式 ×2**（`(dif-dea)*2`）；
+研究侧 `backtest_factors._macd_hist` 的语义是「柱 = dif − dea」（×1）——
+它从 `macd_series` 取 dif/dea 后**自行相减、不乘 2**，两种口径共享同一份 EMA。
 """
 from __future__ import annotations
 
@@ -122,6 +135,31 @@ def dks_series(close: pd.Series, windows: tuple[int, ...] = DKS_MA_WINDOWS) -> p
     c = close.astype(float)
     return sum(c.rolling(w).mean() for w in windows) / len(windows)
 
+
+def qsx_series(close: pd.Series) -> pd.Series:
+    """QSX 知行短期趋势线 = EMA(EMA(CLOSE,10),10)（序列级**唯一实现**）。
+
+    2026-08-09 收敛：同一公式此前有三份（本文件 `zhixing_state` 内联、
+    `factors/b1_dual_factor._qsx_series`、`factors/distribution` 内联），
+    实测逐位相同（max diff = 0.0），趁未发散合并。
+    """
+    c = close.astype(float)
+    return ema(ema(c, 10), 10)
+
+
+def macd_series(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9
+                ) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """返回 `(dif, dea, hist)` 三条序列（序列级**唯一实现**）。
+
+    hist 为**中式 ×2 口径** ``(dif - dea) * 2``，与 `macd()` 末根字典一致。
+    ⚠️ 只要 `dif - dea`（×1）的调用方（如 `backtest_factors._macd_hist`）
+    取本函数的 dif/dea 自行相减，**不得再写一份 EMA**。
+    """
+    c = close.astype(float)
+    dif = ema(c, fast) - ema(c, slow)
+    dea = ema(dif, signal)
+    return dif, dea, (dif - dea) * 2
+
 # ══════════════════════════════════════════════════════════════════════════
 # 以下 7 个函数 2026-08-07 从 `market_timing/technical_monitor.py` 下移。
 #
@@ -131,7 +169,7 @@ def dks_series(close: pd.Series, windows: tuple[int, ...] = DKS_MA_WINDOWS) -> p
 # 是分层反转。后果是 import 任一因子都会拖进整个持仓状态机及其依赖。
 #
 # 它们与上面的 `*_series` 函数的分工：
-#   `*_series`（kdj_series / bbi_series / dks_series / j_series）
+#   `*_series`（kdj_series / bbi_series / dks_series / qsx_series / macd_series / j_series）
 #       → 返回**序列**，供需要逐 bar 计算的回测与因子用
 #   下面这些（kdj / macd / bbi_state / zhixing_state）
 #       → 返回**最新一根的字典 + 状态文本**，供报告与状态机用
@@ -185,10 +223,7 @@ def kdj(df: pd.DataFrame, n=9, m1=3, m2=3) -> dict[str, Any]:
 def macd(df: pd.DataFrame) -> dict[str, Any]:
     if len(df) < 35:
         return {"available": False}
-    close = df["close"]
-    dif = ema(close, 12) - ema(close, 26)
-    dea = ema(dif, 9)
-    hist = (dif - dea) * 2
+    dif, dea, hist = macd_series(df["close"])   # 序列级唯一实现（hist 为中式 ×2）
     return {
         "available": True,
         "dif": round(float(dif.iloc[-1]), 4),
@@ -242,8 +277,8 @@ def zhixing_state(df: pd.DataFrame, m1: int = 14, m2: int = 28, m3: int = 57, m4
     if len(df) < m4:
         return {"available": False, "reason": f"少于{m4}根K线，DKS(MA{m4})无法计算"}
     close = df["close"].astype(float).reset_index(drop=True)
-    qsx = ema(ema(close, 10), 10)
-    dks = sum(close.rolling(n).mean() for n in (m1, m2, m3, m4)) / 4
+    qsx = qsx_series(close)                      # 2026-08-09 起走序列级唯一实现
+    dks = dks_series(close, (m1, m2, m3, m4))    # 同上（原内联四均线均值）
     valid = qsx.notna() & dks.notna()
     if not valid.any():
         return {"available": False, "reason": "QSX/DKS 无有效值"}

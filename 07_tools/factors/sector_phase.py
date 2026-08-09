@@ -8,10 +8,18 @@
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
+
+_TOOLS = Path(__file__).resolve().parents[1]
+if str(_TOOLS) not in sys.path:
+    sys.path.insert(0, str(_TOOLS))   # indicators 在 07_tools 根
+
+from indicators import macd_series as _macd_series  # noqa: E402  DIF/DEA 唯一实现
 
 FACTOR: dict[str, Any] = {
     "id": "sector_phase",
@@ -44,13 +52,6 @@ def _clean_close(close) -> "tuple[pd.Series, list[int]]":
     return pd.Series([s[i] for i in keep], dtype=float).reset_index(drop=True), keep
 
 
-def _macd(close: pd.Series) -> tuple[pd.Series, pd.Series]:
-    c = close.astype(float)
-    dif = c.ewm(span=MACD_FAST, adjust=False).mean() - c.ewm(span=MACD_SLOW, adjust=False).mean()
-    dea = dif.ewm(span=MACD_SIGNAL, adjust=False).mean()
-    return dif, dea
-
-
 def _swing_highs(x: np.ndarray, f: int, w0: int) -> list[int]:
     """收盘摆动高点:窗口[i-f,i+f]内 x[i]=max 且至少 2f-1 根严格更低(允许1平台)。"""
     out = []
@@ -69,7 +70,7 @@ def compute_sector_phase(close, lookback: int = PHASE_LOOKBACK,
     n = len(c)
     if n < MACD_SLOW + MACD_SIGNAL + fractal + 5:
         return {"available": False}
-    dif, dea = _macd(c)
+    dif, dea, _hist = _macd_series(c)   # 2026-08-09 起走 indicators.macd_series（唯一实现）
     dif_v = dif.values
     close_v = c.values
     dif_last = float(dif_v[-1])
@@ -107,7 +108,7 @@ def favorable_series(dates, close, lookback: int = PHASE_LOOKBACK,
     ds = [str(dates[i])[:10] for i in keep]               # 与被保留的收盘对齐(丢非数值项不错位)
     if n < MACD_SLOW + MACD_SIGNAL + fractal + 5:
         return {d: False for d in ds}
-    dif = _macd(pd.Series(c))[0].values
+    dif = _macd_series(pd.Series(c))[0].values
     sh = _swing_highs(c, fractal, 0)                       # 全部摆动高点(每个在 i+fractal 才确认)
     out: dict[str, bool] = {}
     for t in range(n):

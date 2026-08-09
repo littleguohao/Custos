@@ -19,7 +19,7 @@ for _p in (str(_TOOLS), str(_TOOLS / "market_timing")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from indicators import _infer_price_limit # noqa: E402
+from indicators import _infer_price_limit, qsx_series # noqa: E402
 
 FACTOR: dict[str, Any] = {
     "id": "distribution",
@@ -70,7 +70,7 @@ def detect_distribution(df, code: str = "") -> dict[str, Any]:
         return {"available": False, "signals": {}, "hits": [], "hit_count": 0,
                 "severe": False, "risk_level": "none",
                 "reason": f"vol_ma20 近零（{vol_ma20:.1f} < 全序列均量 {series_vol_mean:.1f}×{DIST_MIN_VOL_MA20_FRAC}）"}
-    qsx = df["close"].astype(float).ewm(span=10, adjust=False).mean().ewm(span=10, adjust=False).mean().to_numpy()
+    qsx = qsx_series(df["close"]).to_numpy()   # 2026-08-09 起走 indicators 唯一实现（原内联 EMA×2 同式）
 
     def chg(t: int) -> float:
         return (close[t] / close[t - 1] - 1) * 100 if t >= 1 and close[t - 1] else 0.0
