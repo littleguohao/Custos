@@ -6,7 +6,7 @@
 > 优先级按**「它阻塞了什么」**排，不按工作量：
 > P0 = 阻塞其他事或 live 正在依赖 ｜ P1 = 已有结论悬空 ｜ P2 = 新验证 ｜ P3 = 技术债
 >
-> 最后更新：2026-08-08（vipdoc 完整历史已就位，#1~#3 完成，#4 批跑中）
+> 最后更新：2026-08-09（#21/#27/#36 核实收口已删，#53 首次真跑已记录；#4 批跑中）
 
 ## P0 · 阻塞项
 
@@ -53,12 +53,10 @@
 
 | # | 事项 | 出处 |
 |---|---|---|
-| 16 | **复权失败率不可见**：`qfq_table` 失败只打一条 stderr WARN、**没有汇总** ⇒ 3000 只票的日志里早被淹没，不知道实际多少只没复权成功 | [DATA_SOURCE_PRINCIPLE ③](../00_governance/data/DATA_SOURCE_PRINCIPLE.md) |
 | 17 | 宇宙/窗口钉死开关**默认关** ⇒ 要不要改默认（改了会让历史命令行为变化） | [R13](../00_governance/research/R13_meta_reproducibility.md) |
 | 18 | 跨 bundle 拼接**口径混合**（已加告警，未解决）| [R14](../00_governance/research/R14_meta_data_foundation.md) |
 | 19 | `m2_stop_sweep` 的 `MEM_PER_JOB_MB=1200` 用实测 `[MEM]` 校准 | R10 待跑 #1 |
 | 20 | `tick_buffer` **参数本身设计有问题**：余量应按**风险单位**而非价位数，才能让不同价位的股票是同一个风险 | [R10](../00_governance/research/R10_mechanism_M2_stops.md) |
-| 21 | 核实老 bundle 是否覆盖 BJ | [QLIB_LOCAL_DATA 待做](../00_governance/data/QLIB_LOCAL_DATA.md) |
 | 22 | `platform_high` 的口径待确认（按最高价 vs 收盘）| [R6](../00_governance/research/R6_hypothesis_H1_dual_axis.md) |
 
 ## ⚠️ 已失效的行动项（**别照着做**）
@@ -79,7 +77,6 @@
 | # | 事项 | 性质 |
 |---|---|---|
 | 26 | **持仓手册 §七 依赖一份零实现的文档**：`04_pullback_rotation.md` 要求的主题切换/主题内分化/大小票切换/高低位切换四项检查**全仓零实现** ⇒ 要么手册第七节是空条款，要么在靠 LLM 判断（**违反项目核心原则**）| 需定性后处理 |
-| 27 | 代码里 `REVERSAL_CHANGE_PCT = 2.0`（旧对称阈值残留）**无人对照** ⇒ 留着有被误用的风险 | 技术债 |
 
 ## P5 · contracts 梳理查出的问题（2026-08-06）
 
@@ -104,8 +101,6 @@
 |---|---|---|
 | 34 | 🔴 **反转K 涨跌幅口径 live 与研究不一致**：live（`enrich_candidates`）用 **−2.0% ~ +1.8%**（不对称，B1_w.pdf 纠偏后），而研究侧（`factors/reversal_quality`，原 `backtest_factors.REVK_CHG_PCT`）用 **对称 ±2%**。⇒ **`reversal_quality` 与 live 的反转K不是同一个东西**，而 [R2](../00_governance/research/R2_selection_price_volume.md) 的「稳健负预测」结论建立在它上面。抽取时保持原口径不动（改了会作废已有回测数字，而那些数字已在重跑清单里）| **需 owner 定**：研究口径该不该跟 live 对齐 |
 | 35 | `alpha_pvcorr` / `low_vol` / `momentum` 标 `untested` —— 实现了但没有独立的净值终审记录。按 R2 整体结论推定不可用，但**缺它们自己的证据**。要么补跑，要么明确降级为「不再研究」| 补证据或明确废弃 |
-| 36 | `enrich_candidates.py` 里还有 4 个内联因子未抽（`detect_wave_type` 72 行 / `compute_perfect_b1_fit` 68 / `compute_b1_pullback_fit` 51 / `detect_distribution` 132）。其中 `compute_b1_pullback_fit` 已被 live 与研究双方共用，最该先抽 | 下一步 |
-
 | 37 | ⚠️⚠️ **研究说没用、live 却在用**：R2 结论「S_shape 无 alpha，全市场阈值扫描无 lift」，而 `score_candidates.technical_score` 的**主路径**就是它——`sstar_level(s_star)` 直接出技术层级、参与候选表 A/B/C/D 分层。已在 `factors/s_shape.py` 元数据与 `factors.KNOWN_STATUS_USE_CONFLICTS` 显式登记（不静默放过、也不擅自改分层）。**需 owner 定**：分层要不要换掉 s_shape，还是维持（README 说 StockPool 只是证据层、买入由 chief_decision 裁决，所以维持也讲得通）| **需 owner 拍板** |
 
 | 38 | **1800 评分系统待完善**（owner 2026-08-06 记）：`score_candidates` 的技术分/共振分/分层阈值整体还要打磨。与 #37（s_shape 是主路径但 R2 说无 alpha）同一片区域，宜一起做 | 后续迭代 |
@@ -141,7 +136,7 @@ stage 全部指向不存在的文件、整条链硬失败，而 3481 条测试�
 | 48 | **RSS 代码命中的残余误配**：`rss_filter` 已加数字边界（修掉「嵌在更长数字里」），但「`净利润600000元`」这种**代码恰好等于一个独立金额**仍会误配 +45 分并顶到候选首位。要分辨得看上下文（前后是否有「元/万元/亿」等量词，或要求邻近出现持仓名称）。收益 vs 复杂度待评估 | 待定 |
 | 49 | `rss_filter.entities(date)` 的 `date` **未被使用** —— `current_positions.json` 无历史版本，回填历史日期会用今天的持仓筛那天的新闻。等持仓快照有历史版本后接上 | ⏸ 依赖持仓历史 |
 
-| 53 | **端到端真跑一次 `daily_pipeline`**（🔴 最要紧的一条）—— 2026-08-07 一天连出**两个 live bug**，共性都是「链断了但测试全绿」：① `run_1445` 的 `TOOLS` 未导入（14:45 报告从 08-06 起整天产不出来）；② `daily_pipeline` 四个持仓 stage 指向不存在的文件（`batch_holding_technical`/`b1_holding_state`/`portfolio_review_report` 都是 `required=True` ⇒ 09:05 与 17:00 两份报告都产不出来）。根因是**所有 stage 都被打桩**，没有任何测试真起子进程走一遍。已加 `SubprocessTargetTests`（验目标文件存在）挡住这一类，但那只是静态检查。缺的是：在有完整数据的日子真跑一次并校验产出。⚠️ 需要 Windows 目标机（vipdoc + TQ-Local），开发机跑不了 —— 这是它一直没做的原因，但代价已经见到了 | 待安排（需目标机） |
+| 53 | **端到端真跑 `daily_pipeline`** —— ✅ **首次真跑已完成（2026-08-08）**：目标机按 `--date 2026-08-07` 重跑全部五个 runner（证据：`06_logs/2026-08-07_*_run_log.json`，started_at 为 08-08 深夜）。1800 选股链 11 stage 全 OK；0850 7/7、0905 3/3、1700 completed。且立刻抓到一个下周一就会发作的真 bug：`holding_quotes` 契约 spec 把 `indices` 误写为 dict（生产者是 list），被 1700 链契约校验报出 → 已修（commit `1f118b1`）。⚠️ **残余缺口**：① 1445 的盘中快照类 stage 无法用历史日期复现 fresh 校验（本次 `close_review` 因 `captured_at` 非目标日失败，属预期）；② `collect_fund_flow` 网络失败为 best-effort 不阻断。⇒ 例行化缺口仍在：把「每交易日五个 runner 的 run_log status 检查」做成例行核对 | 已首跑，例行核对待做 |
 | 54 | **生产代码剩余覆盖缺口**（按缺失语句排）：`market_timing/market_timing_scorer` 35%（159，⚠️ 读数不稳见 #46）、`market_timing/refresh_market_indices` 17%（130）、`local_tdx/adjust_factors` 62%（154）、`local_tdx/local_tdx_data` 69%（143）、`holdings/holding_sector_mapper` 20%（106）、`collect/collect_holding_quotes` 65%（102）、`market_timing/market_timing_collector` 48%（81，产 19 个消费者的产物）、`daily_report` 65%（66）。⚠️ 编排层各 runner 只剩 8~24 行未覆盖，且全是单行 `[WARN]` 打印分支，**边际收益低，不必再追** | 待补 |
 | 55 | **`audit_*` 测试家族按模块重组**：11 文件 4821 行（占测试 15%），按**审计轮次**（P0/P1/P2/P3/opt）组织而非按模块 —— 找「`technical_monitor` 的测试」要翻 9 个文件（含 4 个 audit）。⚠️ 2026-08-07 评估后**决定先不动**：搬 4800 行测试的风险大于可读性收益（同日搬迁脚本已两次出错：按行替换撞上分号连写、正则把注释当导入名）。若哪天要做，前置条件是先有一次真跑验收（#53） | 已评估，暂不动 |
 

@@ -450,3 +450,60 @@ class TestMemoryHygiene:
         assert d["trades_reused_from"] == "src.json", "必须指明逐笔在哪"
         # 摘要仍然完整，报表不受影响
         assert d["trade_summary"]["n"] == len(_TRADES)
+
+
+# ---------- 前复权失败汇总（DATA_SOURCE_PRINCIPLE ③ / 原 TODO #16） ----------
+
+def test_load_bars_local_prints_qfq_failure_summary(monkeypatch, capsys):
+    """全宇宙加载完后必须有一行失败汇总——逐票 WARN 在 3000+ 只票日志里会被淹没。
+
+    ⚠️ 读写身份必须一致：`_load_bars_local` 内部是**扁平** `import local_tdx_data`，
+    所以这里也 monkeypatch 扁平模块（`local_tdx.local_tdx_data` 是另一个模块对象，
+    计数互不可见——这是模块头注释声明的已知限制）。
+    """
+    import adjust_factors as af_flat
+    import local_tdx_data as ltd_flat
+
+    def fake_qfq(code, df, strict=False):
+        if code.startswith("600"):
+            out = df.copy()
+            out.attrs["adjust"] = "qfq"
+            return out
+        raise af_flat.AdjustError("权息取不到")
+
+    monkeypatch.setattr(ltd_flat, "read_vipdoc_daily",
+                        lambda code: make_df([10.0, 10.1, 10.2]))
+    monkeypatch.setattr(af_flat, "qfq_table", fake_qfq)
+    ltd_flat.reset_qfq_failure_stats()
+    try:
+        out = bt._load_bars_local(["600000", "000002"], count=3)
+    finally:
+        stats = ltd_flat.qfq_failure_stats()
+        ltd_flat.reset_qfq_failure_stats()
+
+    assert set(out) == {"600000", "000002"}, "降级票按未复权继续参与，不能被丢掉"
+    assert stats["count"] == 1 and stats["codes"] == ["000002"]
+    err = capsys.readouterr().err
+    assert "[WARN] 前复权失败 1/2 只（50.0%），按未复权使用: 000002" in err
+
+
+def test_load_bars_local_no_summary_when_all_qfq_ok(monkeypatch, capsys):
+    """全部复权成功时不打汇总行——0 失败告警本身就是噪声。"""
+    import adjust_factors as af_flat
+    import local_tdx_data as ltd_flat
+
+    def fake_qfq(code, df, strict=False):
+        out = df.copy()
+        out.attrs["adjust"] = "qfq"
+        return out
+
+    monkeypatch.setattr(ltd_flat, "read_vipdoc_daily",
+                        lambda code: make_df([10.0, 10.1, 10.2]))
+    monkeypatch.setattr(af_flat, "qfq_table", fake_qfq)
+    ltd_flat.reset_qfq_failure_stats()
+    try:
+        out = bt._load_bars_local(["600000"], count=3)
+    finally:
+        ltd_flat.reset_qfq_failure_stats()
+    assert set(out) == {"600000"}
+    assert "前复权失败" not in capsys.readouterr().err

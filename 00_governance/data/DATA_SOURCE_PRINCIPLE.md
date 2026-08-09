@@ -152,6 +152,12 @@ apply_qfq(df, []) → attrs: {'adjust': 'qfq', 'adjust_events': 0}
 **③ 复权失败率不可见。** `qfq_table` 失败时只打一条 `[WARN]` 到 stderr，**没有汇总**。
 3000 只票的回测日志里那些 WARN 早被淹没 —— 我们不知道实际有多少只票没复权成功。
 
+**已实现（2026-08-09）**：`local_tdx_data.py` 加模块级计数（`qfq_failure_stats()` /
+`reset_qfq_failure_stats()`），`get_ohlcv_table` 走 except 降级（`adjust="none"`）时计数；
+汇总出口在 `research/backtest_factors.py::_load_bars_local`——全宇宙加载完后打一行
+`[WARN] 前复权失败 N/总数（占比），按未复权使用: <失败 code 前 10 个>`。
+注意读写须同一导入路径（扁平 vs 包内是两个模块对象，计数不合并，代码注释有说明）。
+
 ---
 
 ## 三项东财依赖的查证结论（2026-08-04）

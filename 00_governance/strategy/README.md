@@ -114,8 +114,10 @@ strategy/
 | 振幅 ≤7% | `REVERSAL_AMPLITUDE_PCT` | 7.0 |
 | 振幅算法 `(高−低)/前收` | `amplitude_pct` 计算式 | 一致 |
 
-⚠️ 代码里还留着 `REVERSAL_CHANGE_PCT = 2.0`（旧对称阈值），**判定已不使用**，仅供口径对照；
-由 `tests/test_enrich_b1cz.py` 断言旧对称表达式不得重现。留着有被误用的风险（待办 #28）。
+✅ 该残留已收口（2026-08-07 收敛 + 2026-08-09 全仓复查）：`REVERSAL_CHANGE_PCT = 2.0`
+现是 `b1_thresholds.py`（L0，env 可配 `B1_REVK_CHG_PCT`）里 MIN/MAX 的派生源 ——
+owner 2026-08-06 已改回对称 ±2%（v0.32），它本身就是现行口径，不再是死代码；
+消费方一律从 `b1_thresholds` 导入，全仓无其他硬编码残留。
 
 ## 写入规范
 

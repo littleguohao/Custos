@@ -142,7 +142,7 @@ RS_STRONG_PP = 3.0           # 20日相对强度 >= +3pp
 #    2026-08-07 实测：原先「可配置」只覆盖本文件（选股链），持仓链
 #    （technical_monitor + b1_holding_state）硬编码 ±2 与 j<13，改 env 后两链分歧。
 from b1_thresholds import (REVERSAL_AMPLITUDE_PCT, REVERSAL_CHANGE_MAX_PCT,  # noqa: E402
-                           REVERSAL_CHANGE_MIN_PCT, REVERSAL_CHANGE_PCT,
+                           REVERSAL_CHANGE_MIN_PCT,
                            change_in_range)
 STOP_LOOKBACK = 10           # 建议止损位：近10日最低价
 

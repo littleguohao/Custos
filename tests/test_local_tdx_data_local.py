@@ -158,3 +158,74 @@ class TestCodeHelpers:
         assert L._strip_suffix("600000.SH") == "600000"
         assert L._strip_suffix("920808.BJ") == "920808"
         assert L._strip_suffix("600000") == "600000"
+
+
+class TestQfqFailureStats:
+    """复权失败率可见性（DATA_SOURCE_PRINCIPLE ③ / 原 TODO #16）。
+
+    单票 qfq 失败只有一条 stderr WARN，跑全宇宙时没人知道失败率；
+    `get_ohlcv_table` 必须在走 except 降级时计数，并给出查询/重置出口。
+    读写都走包路径 `local_tdx.local_tdx_data`（本文件顶部 L），与本模块
+    被扁平导入时的另一份计数互不影响（模块头注释说明了该限制）。
+    """
+
+    @staticmethod
+    def _bars():
+        import pandas as pd
+        return pd.DataFrame({
+            "date": pd.bdate_range("2025-01-01", periods=3).astype(str),
+            "open": [10.0] * 3, "high": [10.1] * 3,
+            "low": [9.9] * 3, "close": [10.0] * 3, "volume": [1e6] * 3})
+
+    @pytest.fixture(autouse=True)
+    def _clean_stats(self):
+        L.reset_qfq_failure_stats()
+        yield
+        L.reset_qfq_failure_stats()
+
+    def test_one_success_one_failure_counts_only_failure(self, monkeypatch, capsys):
+        from local_tdx import adjust_factors as af
+
+        monkeypatch.setattr(L, "read_vipdoc_daily", lambda code: self._bars())
+
+        def fake_qfq(code, df, strict=False):
+            if code.startswith("600"):
+                out = df.copy()
+                out.attrs["adjust"] = "qfq"
+                return out
+            raise af.AdjustError("权息取不到")
+
+        monkeypatch.setattr(af, "qfq_table", fake_qfq)
+
+        ok = L.get_ohlcv_table("600000", count=3)
+        bad = L.get_ohlcv_table("000002", count=3)
+        assert ok.attrs["adjust"] == "qfq"
+        assert bad.attrs["adjust"] == "none", "失败必须按未复权降级"
+        assert "权息取不到" in str(bad.attrs["adjust_error"])
+
+        stats = L.qfq_failure_stats()
+        assert stats["count"] == 1
+        assert stats["codes"] == ["000002"], "只记走 except 的那只，成功票不计"
+        # 逐票 WARN 仍在（计数是补充，不替代留痕）
+        assert "000002 前复权失败" in capsys.readouterr().err
+
+    def test_index_not_counted_as_failure(self, monkeypatch):
+        """指数不除权（adjust='n/a-index'）是正常路径，不算失败。"""
+        monkeypatch.setattr(L, "read_vipdoc_daily", lambda code: self._bars())
+        df = L.get_ohlcv_table("000001.SH", count=3)
+        assert df.attrs["adjust"] == "n/a-index"
+        assert L.qfq_failure_stats()["count"] == 0
+
+    def test_reset_clears(self, monkeypatch):
+        from local_tdx import adjust_factors as af
+
+        monkeypatch.setattr(L, "read_vipdoc_daily", lambda code: self._bars())
+
+        def boom(code, df, strict=False):
+            raise af.AdjustError("down")
+
+        monkeypatch.setattr(af, "qfq_table", boom)
+        L.get_ohlcv_table("600000", count=3)
+        assert L.qfq_failure_stats()["count"] == 1
+        L.reset_qfq_failure_stats()
+        assert L.qfq_failure_stats() == {"count": 0, "codes": []}

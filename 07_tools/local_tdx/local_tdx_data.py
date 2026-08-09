@@ -43,6 +43,28 @@ _client_created_at: Optional[float] = None
 # 中途连接失效时旧实现会把剩下全部拖挂（且报的是看不懂的 "'>' NoneType"）。
 CLIENT_MAX_AGE_SEC = 600.0
 
+# --- 前复权失败计数（DATA_SOURCE_PRINCIPLE ③ / 原 TODO #16）---
+# 全链统一前复权后，单票 qfq 失败只打一条 stderr WARN，跑 3000~5500 只票时
+# 淹没在日志里，没人知道实际失败率。这里做模块级轻量计数（本项目单线程逐票
+# 处理，不加锁），批量加载方在收尾处读 `qfq_failure_stats()` 打汇总行。
+#
+# ⚠️ 已知限制（不做跨对象合并）：本模块可能以两种身份被导入——扁平
+# `local_tdx_data`（sys.path 直挂 07_tools/local_tdx）与包内
+# `local_tdx.local_tdx_data`——同进程里是**两个模块对象**，计数各自独立。
+# 读取方必须与写入方走**同一导入路径**，否则读到的是另一份恒为 0 的计数。
+_qfq_failed_codes: list = []
+
+
+def qfq_failure_stats() -> dict:
+    """本进程内 `get_ohlcv_table` 前复权失败的统计（失败=走了 except、adjust='none'；
+    指数的 'n/a-index' 不算失败）。返回 {"count": N, "codes": [...]}。"""
+    return {"count": len(_qfq_failed_codes), "codes": list(_qfq_failed_codes)}
+
+
+def reset_qfq_failure_stats() -> None:
+    """清空计数——新一轮批量加载开始前调用，避免跨轮累积重复告警。"""
+    _qfq_failed_codes.clear()
+
 
 def _get_reader():
     global _reader
@@ -789,6 +811,8 @@ def get_ohlcv_table(code: str, count: int = 260, prefer: str = "vipdoc",
                 print(f"[WARN] {code} 前复权失败，按未复权使用: {e}", file=sys.stderr)
                 df.attrs["adjust"] = "none"
                 df.attrs["adjust_error"] = str(e)
+                # 计数留出口（见模块头 _qfq_failed_codes 的导入身份限制说明）
+                _qfq_failed_codes.append(code)
     elif not df.empty:
         df.attrs.setdefault("adjust", "none")
     return df

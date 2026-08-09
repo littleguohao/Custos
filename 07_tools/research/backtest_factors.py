@@ -2004,6 +2004,7 @@ def _load_bars_local(codes: list[str], count: int, start: Optional[str] = None,
     start/end(YYYY-MM-DD)在 count 之前应用(此前 tdx 路径静默忽略 --start/--end,
     导致指定窗口无效、实际跑全历史)。"""
     import local_tdx_data  # noqa: PLC0415
+    local_tdx_data.reset_qfq_failure_stats()    # 计数限定本轮加载，见下方汇总
     out: dict[str, pd.DataFrame] = {}
     for c in codes:
         try:
@@ -2021,6 +2022,17 @@ def _load_bars_local(codes: list[str], count: int, start: Optional[str] = None,
             df = None
         if df is not None and len(df):
             out[c] = df
+    # 前复权失败汇总（DATA_SOURCE_PRINCIPLE ③ / 原 TODO #16）：逐票 WARN 在全宇宙
+    # 日志里会被淹没，加载完整轮后必须有一行总数。
+    # ⚠️ 必须用与写入方相同的**扁平**导入路径（本函数顶部 `import local_tdx_data`）：
+    # 包路径 `local_tdx.local_tdx_data` 是另一个模块对象，计数恒为 0。
+    stats = local_tdx_data.qfq_failure_stats()
+    if stats["count"]:
+        shown = " ".join(stats["codes"][:10])
+        more = f" 等{stats['count']}只" if stats["count"] > 10 else ""
+        print(f"[WARN] 前复权失败 {stats['count']}/{len(codes)} 只"
+              f"（{stats['count'] / max(len(codes), 1) * 100:.1f}%），按未复权使用: {shown}{more}",
+              file=sys.stderr)
     return out
 
 
