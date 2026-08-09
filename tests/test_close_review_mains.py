@@ -191,6 +191,63 @@ class TestReviewCoreMain:
         assert "等待当日行情" in body
 
 
+class TestReportAuditBlock:
+    """可审计块（待办 #29）：`report_id` / 策略版本 / 数据截止 / 输入清单。
+
+    原 MASTER_WORKFLOW §十二 第 8 条全仓零实现；出问题时无法定位
+    「当时用的哪版规则、哪天的数据」（研究侧 R13 同类问题）。
+    """
+
+    def test_strategy_version_reads_latest_from_log(self):
+        import re
+        import report_audit
+        version = report_audit.strategy_version()
+        assert re.fullmatch(r"v\d+\.\d+", version), f"应取到版本日志最新版本号，得到 {version!r}"
+
+    def test_build_fields_and_missing_input_marker(self, tmp_path):
+        import report_audit
+        present = tmp_path / "a.json"
+        present.write_text("{}", encoding="utf-8")
+        audit = report_audit.build("2026-08-07", "1445", [present, tmp_path / "gone.json"])
+        assert audit["report_id"].startswith("2026-08-07_1445_")
+        assert audit["strategy_version"] and audit["data_as_of"]
+        assert audit["inputs"][0]["sha1"] and audit["inputs"][1]["sha1"] is None
+
+    def test_same_inputs_same_report_id(self, tmp_path):
+        """同一天同一份输入重跑 → 同一个 report_id（简单确定，不掺随机/时钟）。"""
+        import report_audit
+        present = tmp_path / "a.json"
+        present.write_text("{}", encoding="utf-8")
+        a1 = report_audit.build("2026-08-07", "1445", [present])
+        a2 = report_audit.build("2026-08-07", "1445", [present])
+        assert a1["report_id"] == a2["report_id"]
+        present.write_text('{"x": 1}', encoding="utf-8")
+        assert report_audit.build("2026-08-07", "1445", [present])["report_id"] != a1["report_id"]
+
+    def test_1445_md_and_log_json_carry_audit(self, rc_env, monkeypatch):
+        _run_rc(monkeypatch)
+        body = next((rc_env / "03_daily_plans").glob("*.md")).read_text(encoding="utf-8")
+        assert "report_id" in body and "策略版本" in body and "输入清单" in body
+        log = json.loads(next((rc_env / "06_logs").glob("*_1445_review.json")).read_text(encoding="utf-8"))
+        audit = log["audit"]
+        assert audit["report_id"].startswith(f"{DAY}_1445_")
+        assert audit["strategy_version"] and audit["data_as_of"] and audit["inputs"]
+
+    def test_final_review_md_and_json_carry_audit(self, fcr_env, monkeypatch):
+        _run_fcr(monkeypatch)
+        rev = fcr_env / "04_reviews" / "daily"
+        body = (rev / f"{DAY}_final_review.md").read_text(encoding="utf-8")
+        assert "report_id" in body and "策略版本" in body and "输入清单" in body
+        payload = json.loads((rev / f"{DAY}_final_review.json").read_text(encoding="utf-8"))
+        audit = payload["audit"]
+        assert audit["report_id"].startswith(f"{DAY}_close_review_")
+        assert audit["strategy_version"] and audit["data_as_of"] and audit["inputs"]
+        # 契约把 audit 钉住：四件齐全且 data_as_of 可 null 但存在
+        from contracts import check
+        result = check("final_review", payload)
+        assert result["valid"], result["errors"]
+
+
 class TestZeroAmvGate:
     """⚠️ 盘后复盘要求 **0AMV 必须是 confirmed 观测**，否则硬失败。
 

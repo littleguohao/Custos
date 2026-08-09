@@ -67,6 +67,7 @@ if _FACTORS_DIR not in sys.path:
 from s_shape import sstar_level  # noqa: E402
 from runtime_guards import normalize_regime  # noqa: E402
 from contracts import require  # noqa: E402
+import report_audit  # noqa: E402
 
 SCREENING_DIR = DATA / "screening"
 CZ_SECTOR_PREF_PATH = CZ_SECTOR_PREFERENCE_FILE
@@ -851,6 +852,12 @@ def main(argv: Optional[list] = None) -> int:
 
     result = score_all(args.date)
 
+    # 可审计块（待办 #29）：登记选股链实际读过的输入，出问题时可定位规则版本与数据时点
+    result["audit"] = report_audit.build(args.date, "screening", [
+        SCREENING_DIR / f"{args.date}_candidates_enriched.json",
+        SECTORS_DIR / f"{args.date}_sector_state.json",
+        MARKET_DIR / f"{args.date}_market_timing_input.json",
+    ])
     STOCK_POOL_DIR.mkdir(parents=True, exist_ok=True)
     out_path = STOCK_POOL_DIR / f"{args.date}_stock_pool.json"
     require("stock_pool", result)

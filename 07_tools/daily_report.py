@@ -15,6 +15,7 @@ from news.premarket_intel_schema import validate_premarket_intelligence
 
 from paths import BASE, cn_now
 from paths import read_json as load
+import report_audit
 # 2026-08-07 架构审查：这两个访问器已移到 `news/premarket_intel_schema`——
 # 它们读的是 `01_data/news/premarket/`，而 `news/postclose_news_digest`
 # 也要用；放在本模块（根层报告生成器）里会让 news/（L1）反向依赖根层。
@@ -171,7 +172,10 @@ def main():
     holding_event_map={code(x.get('code')):x for x in holding_events}
     pos={code(x.get('代码')):x for x in positions}; quality=chief.get('market_quality',{}); freshness=chief.get('position_freshness',{}); pgate=chief.get('position_gate',{})
     window=intel.get('window') or {}; window_start=window.get('start') or f'{prior_day} 15:00'; window_end=window.get('end') or f'{a.date} 09:00'
-    lines=[f'# 每日投研简报｜{dt.year}年{dt.month}月{dt.day}日（星期{WEEKDAY[dt.weekday()]}）'+(f'｜{a.session}' if a.session else ''),'',f'> 信息窗口：{window_start} 至 {window_end}（Asia/Shanghai）  ',f'> 生成时间：{cn_now().strftime("%Y-%m-%d %H:%M:%S")} Asia/Shanghai','', '## 1. 今日核心结论','',f"**{chief.get('market_state','未知')}，总仓位建议 {chief.get('total_position_range','待确认')}；新开仓权限：{chief.get('new_position_permission','禁止')}。**",'',f"- 择时评分：{chief.get('market_score','待确认')}",f"- 风控等级：{chief.get('risk_level','提高')}",f"- 市场数据质量：{quality.get('status','未知')}（{quality.get('quality_score','NA')}）",f"- 持仓快照：{freshness.get('status','未知')}——{freshness.get('reason','')}",f"- 精确数量权限：{'允许' if pgate.get('allow_precise_quantity') else '禁止'}",'', '## 2. 隔夜重大消息与持仓公告','', '### 2.1 市场重大消息','']
+    # 可审计块（待办 #29）：本报告实际读过的输入；盘前情报缺失时也登记为缺失项
+    audit_inputs=[chief_path,DATA/'market'/f'{day}_market_timing_input.json',DATA/'trades'/'current_positions.json',DATA/'sectors'/f'{day}_sector_state.json',DATA/'holdings'/f'{day}_holding_technical_summary.json',intel_path or (DATA/'news'/'premarket'/f'{day}_premarket_intelligence.json')]
+    audit=report_audit.build(a.date,a.session or 'premarket',audit_inputs)
+    lines=[f'# 每日投研简报｜{dt.year}年{dt.month}月{dt.day}日（星期{WEEKDAY[dt.weekday()]}）'+(f'｜{a.session}' if a.session else ''),'',f'> 信息窗口：{window_start} 至 {window_end}（Asia/Shanghai）  ',f'> 生成时间：{cn_now().strftime("%Y-%m-%d %H:%M:%S")} Asia/Shanghai',*report_audit.render_md(audit),'', '## 1. 今日核心结论','',f"**{chief.get('market_state','未知')}，总仓位建议 {chief.get('total_position_range','待确认')}；新开仓权限：{chief.get('new_position_permission','禁止')}。**",'',f"- 择时评分：{chief.get('market_score','待确认')}",f"- 风控等级：{chief.get('risk_level','提高')}",f"- 市场数据质量：{quality.get('status','未知')}（{quality.get('quality_score','NA')}）",f"- 持仓快照：{freshness.get('status','未知')}——{freshness.get('reason','')}",f"- 精确数量权限：{'允许' if pgate.get('allow_precise_quantity') else '禁止'}",'', '## 2. 隔夜重大消息与持仓公告','', '### 2.1 市场重大消息','']
     schema_note=premarket_schema_note(intel_check)
     if schema_note: lines += [schema_note,'']
     overseas=market.get('overseas_market',{}); amv=market.get('amv_0',{})

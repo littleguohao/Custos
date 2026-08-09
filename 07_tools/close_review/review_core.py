@@ -24,6 +24,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from paths import BASE, cn_today, cn_now  # noqa: E402
 from paths import read_json as load  # noqa: E402
+import report_audit  # noqa: E402
 from code_utils import finite  # noqa: E402
 from code_utils import fnum as optional_finite  # noqa: E402
 from fmt import pct_text as _fmt_pct_text  # noqa: E402
@@ -376,9 +377,19 @@ def main() -> None:
         for x in indices
     ] or ["| 缺失 | 缺失 | 缺失 | 缺失 |"]
 
+    # 可审计块（待办 #29）：本报告实际读过的输入；风控依据回退旧文件时按实际来源登记
+    audit = report_audit.build(target_date, "1445", [p for p in [
+        TRADES / "current_positions.json",
+        MARKET / f"{target_date}_holding_quotes.json",
+        HOLDINGS / f"{target_date}_holding_technical_summary.json",
+        _risk_path,
+        QUALITY / f"{target_date}_runtime_gate.json",
+        MARKET / f"{target_date}_market_timing_input.json",
+    ] if p is not None])
     lines = [
         f"# 14:45 收盘前操作建议 — {target_date}", "",
         f"> 生成时间：{cn_now().strftime('%Y-%m-%d %H:%M:%S')}",
+        *report_audit.render_md(audit),
         f"> 持仓状态：**{snap['status']}**｜{snap['reason']}",
         f"> 持仓基线：{snap.get('assumption') or '按当前已确认持仓基线评估14:45操作建议'}",
         f"> 行情来源：{quote_snapshot.get('source', '缺失')}｜行情日期：{quote_snapshot.get('as_of_date', '缺失')}｜采集时间：{quote_snapshot.get('captured_at', '缺失')}",
@@ -427,7 +438,7 @@ def main() -> None:
         raise SystemExit("[close_review] strict report validation failed:\n- " + "\n- ".join(report_errors))
     out = PLANS / f"{target_date}_1445_review.md"
     out.write_text(report, encoding="utf-8")
-    log = {"date": target_date, "generated_at": cn_now().isoformat(timespec="seconds"), "position_snapshot": snap,
+    log = {"date": target_date, "generated_at": cn_now().isoformat(timespec="seconds"), "audit": audit, "position_snapshot": snap,
            "total_position": total_position, "positions": positions, "revalued_positions": revalued,
            "actions": actions, "quote_snapshot": quote_snapshot, "live_quotes_pending": not all(x["price"] is not None for x in revalued),
            "position_gate": gate.get("position_gate", {})}

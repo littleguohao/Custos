@@ -200,3 +200,30 @@ def test_resonance_four_leg():
     # 空头 → market 腿灭 → 非四面共振、非牛股候选(hint 不改分层由既有测试覆盖)
     e2 = sc.score_candidate(cand, SECTOR_STRONG, "空头")
     assert e2["resonance_4leg"]["market"] is False and e2["resonance_4leg"]["bull_candidate"] is False
+
+
+def test_stock_pool_json_carries_audit_block(tmp_path, monkeypatch):
+    """可审计块（待办 #29）：stock_pool.json 落盘前注入 audit 四件，
+    且过 stock_pool 契约（audit 为可选字段，出现时四件必须齐）。"""
+    import json
+    import sys
+
+    monkeypatch.setattr(sc, "SCREENING_DIR", tmp_path / "screening")
+    monkeypatch.setattr(sc, "SECTORS_DIR", tmp_path / "sectors")
+    monkeypatch.setattr(sc, "MARKET_DIR", tmp_path / "market")
+    monkeypatch.setattr(sc, "STOCK_POOL_DIR", tmp_path / "stock_pool")
+    monkeypatch.setattr(sc, "CZ_SECTOR_PREF_PATH", tmp_path / "cz.json")
+    monkeypatch.setattr(sc, "REGISTRY_PATH", tmp_path / "registry.json")
+    (tmp_path / "screening").mkdir()
+    (tmp_path / "screening" / "2026-08-07_candidates_enriched.json").write_text(
+        json.dumps({"status": "ok", "candidates": [], "excluded": []}), encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["x", "--date", "2026-08-07"])
+    assert sc.main() == 0
+    pool = json.loads((tmp_path / "stock_pool" / "2026-08-07_stock_pool.json").read_text(
+        encoding="utf-8"))
+    audit = pool["audit"]
+    assert audit["report_id"].startswith("2026-08-07_screening_")
+    assert audit["strategy_version"] and audit["data_as_of"] and audit["inputs"]
+    from contracts import check
+    result = check("stock_pool", pool)
+    assert result["valid"], result["errors"]

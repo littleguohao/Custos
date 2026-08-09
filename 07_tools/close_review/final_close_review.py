@@ -20,6 +20,7 @@ except ImportError:
     from holding_structure import n_structure_basis
 
 from paths import BASE, cn_now  # noqa: E402
+import report_audit  # noqa: E402
 from code_utils import market_of  # noqa: E402
 from paths import read_json as load  # noqa: E402
 from code_utils import bare_code as bare  # noqa: E402
@@ -302,9 +303,18 @@ def main():
 
     quality = chief.get("market_quality") or {}
     checks = {x.get("field"): x for x in quality.get("checks") or []}
+    # 可审计块（待办 #29）：8 个强制输入 + 持仓/台账 + 可选输入（缺失者留「缺失」标记）
+    audit = report_audit.build(day, "close_review", [
+        *paths.values(),
+        DATA / "trades" / "current_positions.json",
+        DATA / "trades" / "trades_stock.json",
+        mfe_path,
+        ff_path,
+    ])
     lines = [
         f"# {day} 最终盘后复盘", "",
         f"> 生成时间：{cn_now().strftime('%Y-%m-%d %H:%M:%S')}",
+        *report_audit.render_md(audit),
         f"> 报告质量：**{'complete' if not enrichment.get('unavailable') and news.get('status') == 'complete' else 'degraded'}**",
         f"> 0AMV当日变动：**{float(value):+.2f}%**；有效状态：**{regime}**",
         f"> 今日实际交易：**{'无交易动作' if not today else str(len(today)) + '笔'}**",
@@ -338,6 +348,7 @@ def main():
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     payload = {
         "date": day,
+        "audit": audit,
         "report_quality": "degraded" if unavailable else "complete",
         "amv": amv,
         "news_digest": news,

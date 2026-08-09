@@ -6,7 +6,7 @@
 > 优先级按**「它阻塞了什么」**排，不按工作量：
 > P0 = 阻塞其他事或 live 正在依赖 ｜ P1 = 已有结论悬空 ｜ P2 = 新验证 ｜ P3 = 技术债
 >
-> 最后更新：2026-08-09（#21/#27/#36 核实收口已删，#53 首次真跑已记录；#4 批跑中）
+> 最后更新：2026-08-09（#4 重跑完成；#16/#19/#21/#22/#27/#29/#36/#46 收口；#53 首跑记录）
 
 ## P0 · 阻塞项
 
@@ -53,9 +53,7 @@
 |---|---|---|
 | 17 | 宇宙/窗口钉死开关**默认关** ⇒ 要不要改默认（改了会让历史命令行为变化） | [R13](../00_governance/research/R13_meta_reproducibility.md) |
 | 18 | 跨 bundle 拼接**口径混合**（已加告警，未解决）| [R14](../00_governance/research/R14_meta_data_foundation.md) |
-| 19 | `m2_stop_sweep` 的 `MEM_PER_JOB_MB=1200` 用实测 `[MEM]` 校准 | R10 待跑 #1 |
 | 20 | `tick_buffer` **参数本身设计有问题**：余量应按**风险单位**而非价位数，才能让不同价位的股票是同一个风险 | [R10](../00_governance/research/R10_mechanism_M2_stops.md) |
-| 22 | `platform_high` 的口径待确认（按最高价 vs 收盘）| [R6](../00_governance/research/R6_hypothesis_H1_dual_axis.md) |
 
 ## ⚠️ 已失效的行动项（**别照着做**）
 
@@ -82,7 +80,6 @@
 
 | # | 事项 | 性质 |
 |---|---|---|
-| 29 | **报告缺可审计字段**：`report_id` / 规则版本 / 数据截止时间 / 输入清单**全仓零命中**（原 `MASTER_WORKFLOW §十二` 第 8 条）。研究侧刚查出「历史批次不可复现」（[R13](../00_governance/research/R13_meta_reproducibility.md)），**报告侧是同一类问题**：出了问题无法定位当时用的哪版规则、哪天的数据 | 可审计性 |
 | 30 | **月度复盘未实现**：`MASTER_WORKFLOW §七` 有完整一节（时间/目标/结构/指标/产物），但全仓 `月度`/`month_review` 零命中；周度有 `weekly_review.py` | 要么实现要么降级为目标 |
 | 31 | **冷却机制未实现**：`RiskDecision.cooldown_list` 与 `risk_type` 的「冷却」枚举已从契约**删除**（不是标注——契约里没有它就不会有人依赖）。若确实需要「触发止损的票进冷却、不重复买入」，须单独立项 | 需 owner 判定是否要做 |
 
@@ -127,7 +124,7 @@ stage 全部指向不存在的文件、整条链硬失败，而 3481 条测试�
 
 | 45 | ⚠️ **`market_timing_scorer.is_stale` 是 fail-open**：`return bool(day and as_of) and as_of != day` —— **缺 `as_of` 时返回 False**（当成新鲜），于是没写 `as_of` 的 section 拿当日满分。与仓库别处的 fail-closed 原则相反（`runtime_gate._QUALITY_PASS` 注释：「风控组件的未知状态必须等于阻断」）。上游已缓解（`merge_incremental_market` 必须写 as_of），但判据本身仍是 fail-open。改成 fail-closed 会降低评分、改变 live 择时行为 ⇒ **需 owner 定**。测试已锁住现状 | **需 owner 拍板** |
 
-| 46 | ⚠️ **覆盖率读数不稳定**：`market_timing_scorer.py` 在三次全量运行里读出 15% / 36% / 48%（语句总数不变）。已排除「导入形式不一致」（统一为包限定后仍 36%），未能在合理成本内定位。可验证的是「排除新测试 15% → 包含 36%」，即新测试确实 +21pp。**影响**：单文件覆盖率不能当精确指标用，只能看趋势。怀疑与 conftest 把 `07_tools` 与各子目录**都**铺进 sys.path、同一文件可两路导入有关 | 待查 |
+| 46 | ✅ **已定位（2026-08-09）**：覆盖率读数不稳（15%/36%/48%）根因 = ① `--cov` 单文件路径/点分模块两种写法在 pytest-cov 下行为异常（静默无数据/抢先 import 漏记模块级行），只有目录形式可靠；② 读数由「哪些测试文件跑了 scorer」决定；③ 各次全量的通过/跳过组合不同。⇒ **单文件覆盖率不做门禁只看趋势**；测量配方与旧读数订正见 `tests/test_market_timing_scorer.py` 头部 | 已收口 |
 
 | 47 | **硬失败 stage 覆盖收尾**：11 个里 **7 个已 ≥90%**（portfolio_review 96 / theme_tracker 94 / execution_review 97 / chief_decision 99 / review_enrichment 97 / generate_risk_and_sectors 99 / amv_state 92）。剩 4 个：`market_timing_scorer` 36%（159，读数不稳见 #46）、`b1_holding_state` 84%（24，剩 main 与 pre_checks 的 TQ 分支）、`batch_holding_technical` 61%（30）、`daily_report` 66%（66）| 待补 |
 

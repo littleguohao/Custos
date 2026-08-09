@@ -31,6 +31,7 @@ if _FACTORS_DIR not in sys.path:
 
 from paths import PLANS, QUALITY_DIR, STOCK_POOL_DIR  # noqa: E402
 from runtime_guards import normalize_regime  # noqa: E402
+import report_audit  # noqa: E402
 
 PATTERN_LABELS = {
     "bbi_above": "BBI上",
@@ -432,9 +433,15 @@ def _bucket_pools(lines, candidates, counts):
 
 
 def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
+    # 可审计块（待办 #29）：本表实际读过的输入（stock_pool 本体 + 门控结论）
+    audit = report_audit.build(date, "candidate_table", [
+        STOCK_POOL_DIR / f"{date}_stock_pool.json",
+        QUALITY_DIR / f"{date}_runtime_gate.json",
+    ])
     lines: list[str] = [
         f"# 公式选股备选池｜{date}",
         "",
+        *report_audit.render_md(audit),
         f"> 选股链状态：{pool.get('status', '未知')}"
         + (f"（{pool['degraded_reason']}）" if pool.get("degraded_reason") else "")
         + f"；0AMV：{pool.get('amv_state', '未知')}；市场许可：{pool.get('market_permission', '未知')}",
@@ -488,8 +495,11 @@ def main(argv: Optional[list] = None) -> int:
         pool = None
 
     if pool is None:
+        audit_lines = report_audit.render_md(report_audit.build(
+            args.date, "candidate_table", [pool_path]))
         text = (
             f"# 公式选股备选池｜{args.date}\n\n"
+            + "\n".join(audit_lines) + "\n"
             "> 当日未运行选股链（stock_pool.json 缺失或不可解析）。\n"
         )
         status = "missing_pool"

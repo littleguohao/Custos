@@ -138,7 +138,12 @@ DEFAULT_SAMPLE = 1000           # 样本股票数默认值（300 样本实测不
 # 单个方案子进程的内存预算（MB）。保守值：1000 只票流式加载 + 逐笔 list + 落盘。
 # 实测数字看 backtest_factors 每轮打的 `[MEM] 峰值 XXXMb`，据此调这个常量。
 # 这个数只用于**按可用内存收敛 --jobs**——OOM Kill 是这套回测的老问题。
-MEM_PER_JOB_MB = 1200
+# 2026-08-09 校准（TODO #19）：R4 批跑 16 格全量实测峰值最大 282MB
+# （sector 腿 229–282MB 最高；m2 s3000 实测 93MB），归一 22–60MB/千只，
+# 峰值不随只数线性增长（加载流式）。1200 → 400（对最大观测留 ~1.4×）。
+# 未测盲区：--cross-window（count 1500，3 倍 K 线）与 collect_all/--top-n 重活
+# 方案无 [MEM] 记录 —— 不再往下压的原因。
+MEM_PER_JOB_MB = 400
 
 MIN_EXPECTANCY_GAIN = 0.02      # 组内：expectancy_R 至少提升 2%
 MAX_AVG_WIN_DROP = 0.05         # 均盈跌幅超 5% 即判「削大赢家」

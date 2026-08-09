@@ -182,6 +182,17 @@ _GATE_BLOCK = {
     "status": {"type": str, "required": True, "choices": GATE_STATUS},
 }
 
+# 报告可审计块（待办 #29，report_audit.build 的输出）。**可选字段**：
+# 出现时四件必须齐（report_id / 策略版本 / 数据截止 / 输入清单），
+# 不出现不判畸形 —— 旧产物没有它，而契约管的是「写了的东西对不对」。
+# `data_as_of` 允许 null：全部输入缺失时没的可报（与「编一个假新鲜度」同理）。
+_AUDIT_FIELD = {"type": dict, "required": False, "fields": {
+    "report_id": {"type": str, "required": True, "non_empty": True},
+    "strategy_version": {"type": str, "required": True, "non_empty": True},
+    "data_as_of": {"type": str, "required": True, "nullable": True},
+    "inputs": {"type": list, "required": True},
+}}
+
 SPECS: dict[str, dict] = {
     # runtime_guards.write_runtime_gate
     "runtime_gate": {
@@ -509,6 +520,7 @@ SPECS: dict[str, dict] = {
                 "entry_reason": {"type": list, "required": True},
             }},
             "bucket_counts": {"type": dict, "required": True},
+            "audit": _AUDIT_FIELD,
         },
     },
     # final_close_review.main —— 17:00 复盘产物（md 之外的机器可读版）
@@ -525,6 +537,7 @@ SPECS: dict[str, dict] = {
             "precise_quantity_allowed": {"type": bool, "required": True},
             "quotes_current": {"type": bool, "required": True},
             "technical_current": {"type": bool, "required": True},
+            "audit": _AUDIT_FIELD,
         },
     },
     # portfolio_review_report.main —— 落盘是**数组**。RiskDecision 的直接上游。

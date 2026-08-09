@@ -370,9 +370,11 @@ Excel 全量文件只用于历史迁移、对账和灾备重建，不再作为�
 | 5 | 14:45 升级为实时执行报告 | ✅ 已完成（`run_1445.py`）|
 | 6 | 盘后复盘含收盘大盘/板块/持仓板块/同日重估 | ✅ 已完成（`final_close_review`）|
 | 7 | 周/月复盘数据契约与指标 | ⚠️ 周 ✅、**月 🔴 未实现**（见 §七）|
-| 8 | 所有报告加 `report_id` / 数据截止时间 / 规则版本 / 输入清单 | 🔴 **未完成** |
+| 8 | 所有报告加 `report_id` / 数据截止时间 / 规则版本 / 输入清单 | ✅ 已完成（2026-08-09，`07_tools/report_audit.py`）|
 
-**第 8 条是唯一还完全没做的**，且它关乎**可审计与可重跑** ——
-`report_id` / `规则版本` 全仓零命中。研究侧今天刚查出「历史批次不可复现」
-（见 `../research/R13_meta_reproducibility.md`），报告侧是同一类问题。
-已登记 `05_strategy_versions/TODO.md`。
+第 8 条曾是唯一完全没做的（它关乎**可审计与可重跑**，研究侧同类的
+「历史批次不可复现」见 `../research/R13_meta_reproducibility.md`）。
+2026-08-09 实现：四份正式报告（盘前 `daily_report`、14:45 `review_core`、
+盘后 `final_close_review`、选股 `score_candidates`/`candidate_table`）统一经
+`07_tools/report_audit.py` 注入可审计块；规则版本取自
+`05_strategy_versions/strategy_version_log.md` 最新条目。

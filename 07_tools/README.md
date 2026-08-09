@@ -50,6 +50,7 @@
 | `pipeline_kit.py` | 共享基建 | runner 共享件:run_stage、交易日历、md 摘要 |
 | `code_utils.py` | 共享基建 | 股票代码归一化 |
 | `net_retry.py` | 共享基建 | 网络请求指数退避重试 |
+| `report_audit.py` | 共享基建 | 报告可审计块（report_id/策略版本/数据截止/输入清单）唯一实现 |
 | `runtime_guards.py` | 共享基建 | 交易日历/新鲜度/数据质量守卫 |
 | `trading_calendar.py` | 共享基建 | 交易日历维护(经 TDX JSON-RPC 刷新) |
 

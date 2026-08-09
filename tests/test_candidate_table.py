@@ -160,3 +160,20 @@ def test_industry_preferred_over_theme_sector_in_table():
         _cand("000977", "浪潮信息", "AI算力/服务器/液冷", "A", "优", 4, True)]}, "2026-08-04")
     bull2 = md2.split("## 🐂 基本面牛股候选")[1].split("\n## ")[0]
     assert "AI算力/服务器/液冷" in bull2
+
+
+def test_render_table_carries_audit_block(tmp_path, monkeypatch):
+    """可审计块（待办 #29）：选股表头部必须带 report_id / 策略版本 / 输入清单。
+
+    出问题时靠它定位「当时用的哪版规则、哪天的数据」；
+    输入文件缺失时登记「缺失」标记而不是不产出。
+    """
+    pool_dir = tmp_path / "stock_pool"
+    pool_dir.mkdir()
+    monkeypatch.setattr(ct, "STOCK_POOL_DIR", pool_dir)
+    monkeypatch.setattr(ct, "QUALITY_DIR", tmp_path / "quality")
+    md = ct.render_table({"status": "ok", "candidates": []}, "2026-08-07")
+    header = md.split("## ")[0]
+    assert "report_id `2026-08-07_candidate_table_" in header
+    assert "策略版本" in header and "数据截止" in header and "输入清单" in header
+    assert "缺失" in header        # 两个输入都不存在 → 如实标缺失
