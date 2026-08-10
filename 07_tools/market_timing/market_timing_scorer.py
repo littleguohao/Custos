@@ -29,6 +29,7 @@ if str(TOOLS_DIR) not in sys.path:
 
 from paths import BASE, cn_now  # noqa: E402
 from code_utils import fnum  # noqa: E402
+from contracts import SECTION_NOT_FRESH  # noqa: E402  section.quality 的「不新鲜」域
 from runtime_guards import normalize_regime  # noqa: E402
 
 IN_DIR = BASE / "01_data" / "market"
@@ -136,7 +137,16 @@ def is_stale(section: dict, day: Optional[str] = None) -> bool:
 
     两种判据:① quality 已被门控/合并标为 stale;② 传入 day 时,section.as_of 与 day 不符
     (生产数据的实际形态:collector 取上一根 K 线,quality=auto,as_of=T-1——仅看 quality 会漏)。"""
-    if str((section or {}).get("quality") or "") == "stale":
+    # ⚠️ 2026-08-10：判据从 `== "stale"` 改为 `in SECTION_NOT_FRESH`。
+    #    原来只认 `"stale"` 一个词，而两个生产者用的是**不同词表**：
+    #        merge_incremental_market  → auto / stale / **raw_only**（无数据日）
+    #        market_timing_collector   → auto / **degraded**（数据日与预期不符）/ missing
+    #    ⇒ `raw_only` 与 `degraded` 被当成新鲜、照满分计入（实测 11/15 分且归因文案
+    #      完全正常，读报告的人无从知道分数建立在「不知道是哪天的数据」上）。
+    #    触发路径是真的：`collect_incremental_market` 在索引非日期时写 `date: ''`
+    #    （「mootdx Reader 返回 DatetimeIndex 而非列」是记录在案的反复踩坑点），
+    #    merge 据此写 `quality: raw_only` —— **生产者已如实声明，只是没人听**。
+    if str((section or {}).get("quality") or "") in SECTION_NOT_FRESH:
         return True
     as_of = str((section or {}).get("as_of") or "")[:10]
     return bool(day and as_of) and as_of != day

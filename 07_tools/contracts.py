@@ -109,6 +109,21 @@ REPORT_QUALITY = {"complete", "degraded"}
 EVIDENCE_QUALITY = {"confirmed", "candidate"}
 FRESHNESS = {"confirmed", "stale", "missing", "candidate", "auto"}
 
+# ── `market_timing_input` **各 section 的 `quality`** 取值域（与上面的 FRESHNESS 无关，
+#    后者只管 `runtime_gate.technical_freshness.status`）。
+# ⚠️ 两个生产者用的是**不同词表**，2026-08-10 清点才发现：
+#       merge_incremental_market.section_quality  → auto / stale / raw_only
+#       market_timing_collector._freshness        → auto / degraded（+ missing 分支）
+#    而消费者 `market_timing_scorer.is_stale` **只认 `"stale"` 这一个词**
+#    ⇒ `raw_only` 与 `degraded` 都被当成新鲜、照满分计入评分，
+#      实测 `score_breadth` 给 11 分（满分 15）且归因文案完全正常
+#      —— 读报告的人无从知道这个分数建立在「不知道是哪天的数据」上。
+SECTION_QUALITY = {"auto", "stale", "raw_only", "degraded", "missing"}
+# 「不可按当日满分计入」的那些：**生产者已经声明过不新鲜/不可证**，消费者必须听。
+# ⚠️ 判据是**生产者声明**，不是「有没有 as_of」—— 后者是更宽的 fail-closed，
+#    会把「合法但没写 as_of」的段也打成陈旧，超出本次修复范围（见 TODO #45）。
+SECTION_NOT_FRESH = {"stale", "raw_only", "degraded", "missing"}
+
 # ── 已知的 new_position_permission 取值。它是**从 markdown 报告正则抽出来的**
 #    （chief_decision_report:39 `extract(r'今日是否允许开新仓：\*\*(.*?)\*\*', ...)`），
 #    所以不能强枚举 —— 上游报告改一个字就会出现新值。
