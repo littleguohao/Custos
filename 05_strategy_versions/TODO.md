@@ -97,6 +97,7 @@ R10：可用 margin 只在含 0AMV 的方案（pct_05_amv +7.8pp / pct_12_amv_cz
 
 | # | 事项 | 性质 |
 |---|---|---|
+| 56 | **涨跌幅仍有多份内联实现，但收敛前要先定精度口径**（2026-08-10 振幅收敛时顺带清点）：`indicators.pct_change` 已存在（round-4），却有 ~18 处内联算「相对前值的变化率」——`chg`×11（`collect_holding_quotes`，round-2）、`change_pct`×4（`compass_amv`，round-2）、`day_change`（`technical_monitor`，**不取整**）、`change`（`weekly_review`，round-2）、`chg_pct`（成交额，round-3）。公式相同，**取整精度三种**。⚠️ 不能机械替换：2026-08-07 已定「**判定精度 = 显示精度**」（v0.36，`change_in_range` 用 round-2），而 `pct_change` 是 round-4 ⇒ 收敛需先定「哪些是显示用、哪些参与判定」，各自该取几位。⚠️ 同时**不要**把这些收敛：`distance`/`distance_pct`（距 BBI / 距起涨低点）、`mfe_pct`/`mae_pct`（相对成本偏移）、`body_pct`/`body`（K 线实体）、`gain`/`dist`/`seg_gain`（段涨幅 / 距枢轴）、`close_tops`（双顶容差）——它们只是**同形状的不同量**，为形式统一而收敛正是 `s_shape` VCP 那处要避免的错误 | 2026-08-10 清点，待定精度口径 |
 | 35 | `alpha_pvcorr` / `low_vol` / `momentum` 标 `untested` —— 实现了但没有独立的净值终审记录。按 R2 整体结论推定不可用，但**缺它们自己的证据**。要么补跑，要么明确降级为「不再研究」| 补证据或明确废弃 |
 | 37 | ⚠️⚠️ **研究说没用、live 却在用**：R2 结论「S_shape 无 alpha，全市场阈值扫描无 lift」，而 `score_candidates.technical_score` 的**主路径**就是它——`sstar_level(s_star)` 直接出技术层级、参与候选表 A/B/C/D 分层。已在 `factors/s_shape.py` 元数据与 `factors.KNOWN_STATUS_USE_CONFLICTS` 显式登记（不静默放过、也不擅自改分层）。**需 owner 定**：分层要不要换掉 s_shape，还是维持（README 说 StockPool 只是证据层、买入由 chief_decision 裁决，所以维持也讲得通）| **需 owner 拍板** |
 
