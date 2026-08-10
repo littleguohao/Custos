@@ -20,6 +20,15 @@ except ImportError:
     from holding_structure import n_structure_basis
 
 from paths import BASE, cn_now  # noqa: E402
+from close_review.loss_streak import format_lines as loss_streak_lines  # noqa: E402
+from close_review.loss_streak import loss_streaks  # noqa: E402
+# ⚠️ 台账解析与 FIFO 配平的唯一实现在 `weekly_review` —— 这里**单向**依赖它。
+#    曾想把「加载→配平→连亏」包进 `loss_streak.from_ledger()` 做统一入口，
+#    但 `weekly_review` 已经导入 `loss_streak` ⇒ 那会造成
+#    `loss_streak ↔ weekly_review` 循环（`test_no_unexpected_cycles` 当场拦下）。
+#    改成各调用方自己加载：这里两行、周报本来就有 `closings_all`，
+#    共享的是 `parse_ledger`/`fifo_pair`/`loss_streaks` 三个函数，没有重复实现。
+from close_review.weekly_review import fifo_pair, parse_ledger  # noqa: E402
 import report_audit  # noqa: E402
 from code_utils import market_of  # noqa: E402
 from paths import read_json as load  # noqa: E402
@@ -211,6 +220,28 @@ def render_holdings(lines, enrichment, revalued):
         ff_text = f"{row.get('main_net_inflow','N/A')}" if row.get('main_net_inflow') is not None else "缺失"
         lines.append(f"| {row['code']} | {row['name']} | {close_text} | {pnl_text} | {pos_text} | {mfe_text} | {ff_text} | {row['trend']}/{row['box']} | {row['bbi']['signal']}/{row['n_structure']['signal']} | {b1['final_priority']} {b1['final_action']}：{b1['final_reason']} | {diagnosis.get('original_holding_logic', 'B1策略')}/{diagnosis.get('relative_to_sector', 'unavailable')} |")
     lines.append("\n- 单票20%审计：" + "；".join(f"{x['name']} {x['position_pct']:.1%}{'，超限' if x['position_pct'] > .2 else ''}" for x in revalued if x["position_pct"] is not None))
+
+    # 连亏检查（owner 2026-08-10：连亏冷却落在复盘环节，每日/每周都要统计并判断）。
+    # ⚠️ 只报事实、不拦交易 —— 自动链里 `chief_decision.buy_actions` 恒为空表，
+    #    没有买入决策可拦；作用是让复盘看见「这只票已连亏 N 次」。
+    lines += loss_streak_lines(_loss_streak_today())
+
+
+def _loss_streak_today() -> dict:
+    """当日连亏检查：读主台账 → FIFO 配平 → 连亏聚合。
+
+    台账缺失/解析失败时返回 `available=False` 并说明原因 ——
+    **不返回「无连亏」**，那会把「没查」显示成「查了没有」。
+    """
+    ledger = DATA / "trades" / "master_trade_ledger.csv"
+    if not ledger.exists():
+        return {"available": False, "reason": f"主台账不存在：{ledger}"}
+    trades = parse_ledger(ledger)
+    if trades is None:
+        return {"available": False, "reason": f"主台账解析失败：{ledger}"}
+    out = loss_streaks(fifo_pair(trades))
+    out["available"] = True
+    return out
 
 
 def render_next_day(lines, enrichment):

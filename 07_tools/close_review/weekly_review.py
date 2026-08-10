@@ -70,6 +70,8 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from paths import BASE, CALENDAR_RELPATH, cn_today, cn_now  # noqa: E402
+from close_review.loss_streak import (format_lines as loss_streak_lines,  # noqa: E402
+                                      loss_streaks)
 
 # 规则阈值
 STOP_LOSS_PCT = -7.0       # b1 短线止损线：已实现亏损超过该值 = 止损偏慢
@@ -1008,7 +1010,11 @@ def build_weekly_review(base: Path, day: str) -> dict:
         "advice_wrong_count": len(advice_wrong),
     }
 
+    # 连亏检查用 **closings_all（全台账）** 而不是本周切片 —— 连亏是跨周的事实，
+    # 只喂本周的单子会把上周那次亏损截断，两次连亏被看成一次。
+    loss_streak = loss_streaks(closings_all)
     return {
+        "loss_streak": loss_streak,
         "iso_year": week["iso_year"],
         "iso_week": week["iso_week"],
         "range": {"start": week["start"], "end": week["end"]},
@@ -1148,6 +1154,12 @@ def render_markdown(review: dict) -> str:
                     f"{c['gross_pnl']:,.2f} | {c['pnl_pct']}% |")
     else:
         lines.append("- 本周无成交记录。")
+
+    # 连亏检查（owner 2026-08-10：连亏冷却落在复盘环节，每日/每周都要统计）。
+    # 结果在 build_weekly_review 里算好放进 payload —— 本函数只拿 `review`，
+    # 那里才有 `closings_all`（全台账配平结果）。
+    if review.get("loss_streak") is not None:
+        lines += loss_streak_lines(review["loss_streak"], title="连亏检查（全台账）")
     unmatched = f.get("unmatched_closings") or []
     if unmatched:
         lines += ["", "### 配平异常平仓单（已排除出盈亏与胜率统计）", "",

@@ -78,23 +78,56 @@ class TestFieldsExistInCode:
 class TestUnimplementedMechanismsFlagged:
     """被声明过但没实现的机制，必须显式标出来。"""
 
-    def test_cooldown_field_removed_not_just_marked(self):
-        """⚠️ 安全相关：冷却机制不存在，字段已从契约**删除**。
+    def test_cooldown_is_a_review_statistic_not_a_gate(self):
+        """⚠️ 安全相关：冷却**不是闸门**，是复盘统计（owner 2026-08-10 定）。
 
-        删掉比标注更彻底 —— 读契约的人不会再以为「触发止损的票会自动进冷却、
-        不会被重复买入」。**契约里没有它，就不会有人依赖它。**
-        是否要真做冷却见 TODO #31。
+        原状态是「完全不存在，字段已从契约删除」。2026-08-10 owner 定了落点：
+        **连亏冷却放在复盘环节，每日/每周统计并判断是否有连亏行为** ——
+        于是新增 `close_review/loss_streak.py`（每日 `final_close_review` +
+        每周 `weekly_review` 各出一节）。
+
+        本测试随之改判据，但**要守的东西没变**：读契约的人不能以为
+        「触发止损的票会自动进冷却、不会被重复买入」。所以仍然断言：
+
+        ① `RiskDecision` 契约里**没有** `cooldown_list`（没有它就不会有人依赖它）；
+        ② 全仓**没有任何 gate/拦截**语义的冷却实现 —— 判据是不出现
+           `cooldown_list` / `blacklist` / `banned` 这类「名单式拦截」的名字。
+           （「冷却」二字现在合法出现在 `loss_streak` 与两处复盘的注释里，
+           因为那是在解释「为什么只统计不拦」。）
+
+        ⚠️ 为什么不做成闸门：`chief_decision_report` 的 `buy_actions` 是字面量空表
+        （源码注释 `buy_actions always empty`）⇒ 自动链里没有买入决策可拦，
+        闸门会挂在空处。见 TODO #51 / #31。
         """
         code = _all_code()
-        for kw in ("cooldown", "冷却", "blacklist", "banned"):
+        for kw in ("cooldown_list", "blacklist", "banned"):
             assert kw not in code, (
-                f"代码里出现了 {kw} —— 冷却机制若已实现，请更新契约与本测试")
+                f"代码里出现了 {kw} —— 名单式拦截若已实现，请更新契约与本测试")
         s = DFC.read_text(encoding="utf-8")
-        # 字段本体不许出现在任何 JSON 示例里
         for l in s.splitlines():
             if l.strip().startswith('"cooldown_list"'):
                 raise AssertionError("cooldown_list 字段应已删除，不是保留加注释")
         assert "从未实现" in s, "删除记录要说明原因，否则下次有人会加回来"
+
+    def test_loss_streak_exists_and_does_not_gate(self):
+        """⚠️ 连亏统计必须存在（owner 已定要做），且**不得**参与任何拦截。
+
+        「存在」这一半同样要测 —— 否则哪天它被删掉，只剩上面那条「没有闸门」
+        的断言仍然通过，而 owner 定的复盘统计悄悄消失了。
+        """
+        import sys
+        sys.path.insert(0, str(ROOT / "07_tools"))
+        from close_review import loss_streak as ls
+
+        assert callable(ls.loss_streaks) and callable(ls.format_lines)
+        src = (ROOT / "07_tools" / "close_review" / "loss_streak.py").read_text(encoding="utf-8")
+        for bad in ("return False", "raise SystemExit", "blocked", "forbid"):
+            assert bad not in src, f"loss_streak 里出现 {bad!r} —— 它不该有拦截语义"
+        # 两处复盘都要接入（少一处就等于「每日/每周都统计」没做到）
+        for rel in ("close_review/final_close_review.py", "close_review/weekly_review.py"):
+            t = (ROOT / "07_tools" / rel).read_text(encoding="utf-8")
+            assert "loss_streak" in t, f"{rel} 未接入连亏检查"
+
 
     def test_monthly_review_marked_unimplemented(self):
         code = _all_code()
