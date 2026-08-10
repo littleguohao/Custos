@@ -29,12 +29,13 @@
 |---|---|---|---|
 | 7 | [R2](../00_governance/research/R2_selection_price_volume.md) | 把「换宇宙」与「换数据源」**拆成两次单变量对照** | — |
 | 8 | [R3](../00_governance/research/R3_selection_discriminability_recall.md) | 只重算受影响窗的 `recall_by_band` 与净增益（「≥100% 带 −37.5%」这个被反复引用的数字）| — |
-| 9 | [R1](../00_governance/research/R1_core_framework.md) | 重写**收益量级**。在此之前**任何 CAGR/期望数字都不应被引用** | 前置（#4/#5/#6）全部就绪（2026-08-09） |
 
 ✅ **#5/#6 已完成（2026-08-09）**：m2 全扫描 27 方案 × s3000（钉死宇宙+窗口、已实现口径）。
 R10：可用 margin 只在含 0AMV 的方案（pct_05_amv +7.8pp / pct_12_amv_cz3 +11.1pp）；
 纯出场最强 trail_08（已实现 +0.116R）不过 3pp。R9：scale_out 四臂单调递增，∂E/∂b>0 成立。
-**后续**：通过方案须 `--cross-window`（2022-2024）复核（待跑）；#15（组合层 --top-n 宽度）前置已解。
+✅ **#9 已完成（2026-08-10）**：R1 量级重写——per-trade edge 只在 0AMV 做多期成立
+（+0.454R vs 基准 −0.009R）；组合量级 = 做多期年化 ~10%、回撤个位数、熊市空仓。
+**后续**：通过方案 `--cross-window` 复核（2026-08-10 夜跑批中）；#15（组合层 --top-n 宽度）前置已解。
 
 ## P2 · 待跑（新验证）
 
