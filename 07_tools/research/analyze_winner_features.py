@@ -20,6 +20,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
+from indicators import dmi_arrays  # noqa: E402  DMI/ADX 唯一实现
 
 BASE = Path(__file__).resolve().parents[2]
 for p in (BASE / "07_tools", BASE / "07_tools" / "screening", BASE / "07_tools" / "local_tdx"):
@@ -66,30 +67,15 @@ def _cache_path() -> Path:
 
 
 def _adx_features(high, low, close, n: int = 14) -> dict:
-    """Wilder DMI/ADX(as-of 最后一点)。"""
-    h, l, c = np.asarray(high), np.asarray(low), np.asarray(close)
-    if len(c) < 2 * n + 2:
+    """Wilder DMI/ADX（as-of 最后一点）。
+
+    ⚠️ 计算体 2026-08-10 收敛到 `indicators.dmi_arrays` —— 它与
+    `backtest_factors._adx_last` 曾是**逐行相同**的 19 行复制粘贴。
+    这里取 pdi/mdi/adx 与两个派生标志。
+    """
+    pdi, mdi, adx = dmi_arrays(high, low, close, n)
+    if adx is None:
         return {}
-    tr = np.maximum(h[1:] - l[1:], np.maximum(abs(h[1:] - c[:-1]), abs(l[1:] - c[:-1])))
-    pdm = np.where((h[1:] - h[:-1]) > (l[:-1] - l[1:]), np.maximum(h[1:] - h[:-1], 0), 0.0)
-    mdm = np.where((l[:-1] - l[1:]) > (h[1:] - h[:-1]), np.maximum(l[:-1] - l[1:], 0), 0.0)
-
-    def wilder(x):
-        out = np.zeros(len(x))
-        out[n - 1] = x[:n].sum()
-        for i in range(n, len(x)):
-            out[i] = out[i - 1] - out[i - 1] / n + x[i]
-        return out / n
-
-    atr, sp, sm = wilder(tr), wilder(pdm), wilder(mdm)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        pdi = np.where(atr > 0, 100 * sp / atr, 0.0)
-        mdi = np.where(atr > 0, 100 * sm / atr, 0.0)
-        dx = np.where(pdi + mdi > 0, 100 * abs(pdi - mdi) / (pdi + mdi), 0.0)
-    adx = np.zeros(len(dx))
-    adx[2 * n - 2] = dx[n - 1:2 * n - 1].mean()
-    for i in range(2 * n - 1, len(dx)):
-        adx[i] = (adx[i - 1] * (n - 1) + dx[i]) / n
     return {"dmi_adx": round(float(adx[-1]), 2), "dmi_pdi": round(float(pdi[-1]), 2),
             "dmi_mdi": round(float(mdi[-1]), 2),
             "dmi_pdi_gt": float(pdi[-1] > mdi[-1]),

@@ -67,6 +67,7 @@ from reversal_quality_inv import score as _sc_reversal_quality_inv  # noqa: E402
 
 
 from indicators import bbi_series as _bbi_series, macd_series as _macd_series  # noqa: E402
+from indicators import dmi_arrays  # noqa: E402  DMI/ADX 唯一实现
 from indicators import amplitude_pct as amplitude_pct_of  # noqa: E402  振幅唯一实现
 from code_utils import price_limit_pct  # noqa: E402
 
@@ -207,32 +208,15 @@ def j_low_dif_pos_gate(df_slice: pd.DataFrame) -> bool:
 
 
 def _adx_last(df_slice: pd.DataFrame, n: int = 14) -> float:
-    """Wilder ADX 最后一点(len 不足返回 NaN)。"""
-    h = df_slice["high"].astype(float).values
-    l = df_slice["low"].astype(float).values
-    c = df_slice["close"].astype(float).values
-    if len(c) < 2 * n + 2:
+    """Wilder ADX 最后一点（len 不足返回 NaN）。
+
+    ⚠️ 计算体 2026-08-10 收敛到 `indicators.dmi_arrays` —— 它与
+    `analyze_winner_features._adx_features` 曾是**逐行相同**的 19 行复制粘贴，
+    只有返回形状不同。这里只取 adx 末点。
+    """
+    pdi, mdi, adx = dmi_arrays(df_slice["high"], df_slice["low"], df_slice["close"], n)
+    if adx is None:
         return float("nan")
-    tr = np.maximum(h[1:] - l[1:], np.maximum(abs(h[1:] - c[:-1]), abs(l[1:] - c[:-1])))
-    pdm = np.where((h[1:] - h[:-1]) > (l[:-1] - l[1:]), np.maximum(h[1:] - h[:-1], 0), 0.0)
-    mdm = np.where((l[:-1] - l[1:]) > (h[1:] - h[:-1]), np.maximum(l[:-1] - l[1:], 0), 0.0)
-
-    def wilder(x):
-        out = np.zeros(len(x))
-        out[n - 1] = x[:n].sum()
-        for i in range(n, len(x)):
-            out[i] = out[i - 1] - out[i - 1] / n + x[i]
-        return out / n
-
-    atr, sp, sm = wilder(tr), wilder(pdm), wilder(mdm)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        pdi = np.where(atr > 0, 100 * sp / atr, 0.0)
-        mdi = np.where(atr > 0, 100 * sm / atr, 0.0)
-        dx = np.where(pdi + mdi > 0, 100 * abs(pdi - mdi) / (pdi + mdi), 0.0)
-    adx = np.zeros(len(dx))
-    adx[2 * n - 2] = dx[n - 1:2 * n - 1].mean()
-    for i in range(2 * n - 1, len(dx)):
-        adx[i] = (adx[i - 1] * (n - 1) + dx[i]) / n
     return float(adx[-1])
 
 

@@ -101,6 +101,52 @@ def amplitude_pct(high, low, prev_close) -> float | None:
     return (h - lo) / pc * 100
 
 
+def dmi_arrays(high, low, close, n: int = 14):
+    """Wilder DMI ⇒ `(pdi, mdi, adx)` 三个等长数组（**全项目唯一实现**）。
+
+    2026-08-10 从两份**逐行相同**的实现收敛而来：
+
+        research/backtest_factors._adx_last          只取 adx[-1]
+        research/analyze_winner_features._adx_features  取 pdi/mdi/adx 与派生标志
+
+    19 行计算体是复制粘贴的，返回形状不同而已 —— 所以这里出**数组**，
+    两个调用方各自取自己要的那部分（同 `macd_series` 的做法：
+    出序列级口径，别逼调用方各写一遍）。
+
+    ⚠️ 长度不足 `2n + 2` 时返回 `(None, None, None)` —— 让调用方决定是
+    NaN 还是空字典，本函数不替它选（`_adx_last` 要 NaN，`_adx_features` 要 {}）。
+
+    口径是 Wilder 原始平滑（`out[i] = out[i-1] - out[i-1]/n + x[i]`），
+    **不是** pandas 的 `ewm`。两者对 ADX 有差异，收敛时逐位比对过。
+    """
+    h = np.asarray(high, dtype=float)
+    l = np.asarray(low, dtype=float)
+    c = np.asarray(close, dtype=float)
+    if len(c) < 2 * n + 2:
+        return None, None, None
+    tr = np.maximum(h[1:] - l[1:], np.maximum(abs(h[1:] - c[:-1]), abs(l[1:] - c[:-1])))
+    pdm = np.where((h[1:] - h[:-1]) > (l[:-1] - l[1:]), np.maximum(h[1:] - h[:-1], 0), 0.0)
+    mdm = np.where((l[:-1] - l[1:]) > (h[1:] - h[:-1]), np.maximum(l[:-1] - l[1:], 0), 0.0)
+
+    def _wilder(x):
+        out = np.zeros(len(x))
+        out[n - 1] = x[:n].sum()
+        for i in range(n, len(x)):
+            out[i] = out[i - 1] - out[i - 1] / n + x[i]
+        return out / n
+
+    atr, sp, sm = _wilder(tr), _wilder(pdm), _wilder(mdm)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        pdi = np.where(atr > 0, 100 * sp / atr, 0.0)
+        mdi = np.where(atr > 0, 100 * sm / atr, 0.0)
+        dx = np.where(pdi + mdi > 0, 100 * abs(pdi - mdi) / (pdi + mdi), 0.0)
+    adx = np.zeros(len(dx))
+    adx[2 * n - 2] = dx[n - 1:2 * n - 1].mean()
+    for i in range(2 * n - 1, len(dx)):
+        adx[i] = (adx[i - 1] * (n - 1) + dx[i]) / n
+    return pdi, mdi, adx
+
+
 def pct_change(a, b):
     """从 b 到 a 的涨跌幅（百分数，保留 4 位）；b 为 None/0 或 a 为 None 时返回 None。
 

@@ -174,6 +174,14 @@ class TestNoRefork:
         "bbi_series": {"indicators.py"},
         "kdj_series": {"indicators.py"},
         "j_series": {"indicators.py"},
+        # ── 2026-08-10 收敛 ──
+        # 振幅：五份内联实现，其中 `technical_monitor` 的分母是**当日最低价**
+        # 而非前收 ⇒ 同一支票在选股链与持仓链可能得出相反的反转K 结论
+        # （合成 20 万根日 K 实测约 2% 在 7% 门槛上翻转）。
+        "amplitude_pct": {"indicators.py"},
+        # DMI/ADX：两份**逐行相同**的 19 行复制粘贴（只有返回形状不同），
+        # `_adx_last` 取 adx 末点、`_adx_features` 取 pdi/mdi/adx 与派生标志。
+        "dmi_arrays": {"indicators.py"},
         # ── 21 个因子的入口函数（唯一实现 = 因子模块本身）──
         "detect_wave_type": {"factors/wave_type.py"},
         "compute_s_shape": {"factors/s_shape.py"},
