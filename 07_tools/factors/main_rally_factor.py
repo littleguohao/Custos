@@ -33,6 +33,7 @@ from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
+from indicators import avedev, cci, rsi  # noqa: E402  指标唯一实现
 from numpy.lib.stride_tricks import sliding_window_view
 
 _TOOLS = Path(__file__).resolve().parents[1]
@@ -43,7 +44,6 @@ if str(_TOOLS) not in sys.path:
 
 from indicators import j_series as _j_series  # noqa: E402
 
-from rsi_state import rsi  # noqa: E402
 
 FACTOR: dict[str, Any] = {
     "id": "main_rally_factor",
@@ -83,36 +83,6 @@ def flow_ratio(df: pd.DataFrame, win: int = FLOW_WIN) -> pd.Series:
     d2 = dn.rolling(win).sum()
     tot = d1 + d2
     return (d1 / tot.replace(0, np.nan))
-
-
-def avedev(x: pd.Series, n: int) -> pd.Series:
-    """AVEDEV(x,n) = 窗口内 mean(|x − mean(x)|)（**平均绝对偏差**，不是标准差）。
-
-    向量化实现：`rolling(n).apply()` 会退化成 Python 循环（每窗口一次函数调用），
-    在候选上千只时是可观的开销。改用 sliding_window_view 一次算完。
-    """
-    v = x.astype(float).to_numpy()
-    n = int(n)
-    out = np.full(len(v), np.nan)
-    if len(v) >= n >= 1:
-        w = sliding_window_view(v, n)                       # (len-n+1, n) 视图，零拷贝
-        out[n - 1:] = np.abs(w - w.mean(axis=1, keepdims=True)).mean(axis=1)
-    return pd.Series(out, index=x.index)
-
-
-def cci(df: pd.DataFrame, n: int = CCI_N) -> pd.Series:
-    """CCI(n) = (TP - MA(TP,n)) / (0.015 × AVEDEV(TP,n))，TP=(H+L+C)/3。
-
-    AVEDEV 是**平均绝对偏差**（不是标准差），与通达信同口径。
-    """
-    tp = (df["high"].astype(float) + df["low"].astype(float)
-          + df["close"].astype(float)) / 3.0
-    ma = tp.rolling(n).mean()
-    ad = avedev(tp, n)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        out = (tp - ma) / (0.015 * ad.replace(0, np.nan))
-    return out.replace([np.inf, -np.inf], np.nan)
-
 
 
 def detect_main_rally_start(df: pd.DataFrame, code: str = "",

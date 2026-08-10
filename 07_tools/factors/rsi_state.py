@@ -28,6 +28,8 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
+from indicators import rsi  # noqa: E402  RSI 唯一实现（本模块只保留对它的解读）
+
 FACTOR: dict[str, Any] = {
     "id": "rsi_state",
     "name": "RSI 状态因子（H3）",
@@ -66,20 +68,6 @@ DIV_LOOKBACK = 30            # 背离观察窗
 DIV_MIN_GAP = 5              # 两个低点之间至少间隔的根数
 
 RSI_MIN_BARS = 40
-
-
-def rsi(close: pd.Series, n: int = 14) -> pd.Series:
-    """Wilder RSI —— 与通达信 `SMA(MAX(C-REF(C,1),0),N,1)/SMA(ABS(C-REF(C,1)),N,1)*100`
-    同口径（`SMA(X,N,1)` 即 α=1/N 的指数平滑）。"""
-    c = close.astype(float)
-    d = c.diff()
-    up = d.clip(lower=0.0)
-    dn = d.abs()
-    au = up.ewm(alpha=1.0 / n, adjust=False).mean()
-    ad = dn.ewm(alpha=1.0 / n, adjust=False).mean()
-    with np.errstate(divide="ignore", invalid="ignore"):
-        out = au / ad * 100.0
-    return out.replace([np.inf, -np.inf], np.nan)
 
 
 def rsi_regime(df: pd.DataFrame, n: int = RSI_MID,

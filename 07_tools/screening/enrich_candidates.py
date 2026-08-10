@@ -384,7 +384,20 @@ def build_stock_theme_map(min_match: int = THEME_MIN_MATCH,
     return stock_theme, True
 
 
-def _pct_change(df, n: int) -> Optional[float]:
+def _close_ret_pct(df, n: int) -> Optional[float]:
+    """n 日收盘收益率 %（`close[-1] / close[-n-1] - 1`），**不取整**。
+
+    ⚠️ 原名 `_close_ret_pct` 与 L0 的 `indicators.pct_change` **撞名但不同义**，
+    2026-08-10 改名避让（守卫 `TestNamedIndicatorsLiveInL0` 会拦同名）：
+
+        indicators.pct_change(a, b)   两个**标量**，round-4
+        本函数(df, n)                 从 DataFrame 取 close[-n-1] 与 close[-1]，**不取整**
+
+    **刻意不收敛**：改调 L0 会引入 round-4，而本函数的结果进
+    `relative_strength_20d_pp` 并与 `RS_STRONG_PP` 比较 —— 精度口径的统一
+    是 TODO #56 未定的事（全仓有 round-2/round-3/不取整三种），
+    不该借「形式统一」偷偷改判定。
+    """
     if len(df) < n + 1:
         return None
     prev = float(df["close"].iloc[-n - 1])
@@ -943,8 +956,8 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
     change_pct = ((float(last["close"]) / prev_close - 1) * 100) if prev_close else None
     amplitude_pct = amplitude_pct_of(last["high"], last["low"], prev_close)
 
-    stock_ret20 = _pct_change(df, 20)
-    index_ret20 = _pct_change(index_df, 20) if index_df is not None and not index_df.empty else None
+    stock_ret20 = _close_ret_pct(df, 20)
+    index_ret20 = _close_ret_pct(index_df, 20) if index_df is not None and not index_df.empty else None
     rs_20d = (stock_ret20 - index_ret20) if (stock_ret20 is not None and index_ret20 is not None) else None
 
     stop_ref = None

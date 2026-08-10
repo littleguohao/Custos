@@ -497,3 +497,82 @@ class TestAmplitudeSingleImplementation:
         # 反证：把标记去掉后，该处应落入 bad 列表
         stripped = [x.replace("刻意不同", "XX") for x in above]
         assert not any("刻意不同" in x for x in stripped)
+
+
+class TestNamedIndicatorsLiveInL0:
+    """⚠️ **有公认定义的技术指标必须定义在 `indicators.py`**（owner 2026-08-10 定）。
+
+    判据是「**是否存在口径选择**」—— 该量在项目外有标准定义，因而有人可能挑到
+    不同变体，一旦分叉就是**同名不同义**且很难在报告里看出来。实际发生过的：
+
+        振幅   `technical_monitor` 分母用当日最低价、另四处用前收
+               ⇒ 同一支票在选股链与持仓链可能得出相反的反转K 结论
+        MACD   柱 ×1 与 ×2 两种口径并存（现已各自留痕说明）
+        RSI    Wilder 指数平滑 vs 简单算术均值，两者同名不同值
+        AVEDEV 平均绝对偏差 vs 标准差 —— 都叫「偏差」、量级相近、代入 CCI 后不同
+
+    ⚠️ **刻意不采用「所有公式一律进 L0」**：实测全仓 255 个含 ≥3 个算术运算的函数、
+    共 14066 行（含组合回测、报告评分、MFE/MAE），全搬会让 `indicators.py`
+    约 14500 行 —— 既无法执行（「什么算公式」没边界），也会毁掉因子内聚。
+    因子自己的判定/打分逻辑（VCP 压缩度、D1/D2、贴合打分）留在因子里。
+    """
+
+    # 有公认定义的指标名。新增指标时加进来。
+    NAMED = {
+        "rsi", "cci", "avedev", "kdj", "macd", "bbi", "dks", "qsx",
+        "amplitude_pct", "pct_change", "dmi_arrays", "ema", "atr", "obv",
+        "boll", "trix", "psy", "roc", "mfi", "sar", "bias", "wr",
+    }
+    # 允许的后缀变体：`_series` / `_state` 是本项目的命名惯例
+    SUFFIXES = ("", "_series", "_state", "_arrays", "_pct")
+
+    def _canonical_names(self):
+        out = set()
+        for n in self.NAMED:
+            for suf in self.SUFFIXES:
+                out.add(n + suf if not n.endswith(suf) or suf == "" else n)
+        return out
+
+    def test_named_indicators_defined_only_in_indicators(self):
+        import ast
+
+        allowed = self._canonical_names()
+        offenders = []
+        for f in sorted(T.rglob("*.py")):
+            if f.name == "indicators.py":
+                continue
+            try:
+                tree = ast.parse(f.read_text(encoding="utf-8-sig"))
+            except SyntaxError:
+                continue
+            for node in tree.body:            # 只看模块级函数（嵌套的是局部工具）
+                if not isinstance(node, ast.FunctionDef):
+                    continue
+                nm = node.name.lower().strip("_")
+                if nm in allowed:
+                    offenders.append(f"{f.relative_to(T.parent)}:{node.lineno}  def {node.name}")
+        assert not offenders, (
+            "有公认定义的指标被定义在 `indicators.py` 之外：\n  "
+            + "\n  ".join(offenders)
+            + "\n判据是「是否存在口径选择」——这类指标一旦分叉就是同名不同义。"
+              "\n若它其实是**因子自己的量**（定义就是这个因子本身），请改个不撞车的名字"
+              "并在此说明；若是新指标，请搬到 indicators.py 并加进 NAMED。")
+
+    def test_guard_catches_a_planted_fork(self, tmp_path):
+        """⚠️ 守卫自证：在别处定义 `def rsi(...)` 必须被抓到。
+
+        今天已多次遇到「守卫看着通过、其实什么都没验」，所以每条守卫都要能自证。
+        """
+        import ast
+
+        planted = ast.parse("def rsi(close, n=14):\n    return close\n")
+        fn = planted.body[0]
+        assert isinstance(fn, ast.FunctionDef)
+        assert fn.name.lower().strip("_") in self._canonical_names(), \
+            "NAMED 表里没有 rsi —— 守卫会放行第二份 RSI"
+
+    def test_policy_is_documented_in_the_module(self):
+        """政策必须写在 `indicators.py` 里 —— 只写在测试里，改代码的人看不到。"""
+        src = (T / "indicators.py").read_text(encoding="utf-8-sig")
+        assert "是否存在口径选择" in src, "indicators.py 头部的归属政策不见了"
+        assert "杂物抽屉" in src, "「为什么不全搬」的理由不见了"

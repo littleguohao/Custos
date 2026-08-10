@@ -45,6 +45,38 @@ MACD DIF/DEA 曾有四份（本文件 `macd()`、`research/backtest_factors._mac
 研究侧 `backtest_factors._macd_hist` 的语义是「柱 = dif − dea」（×1）——
 它从 `macd_series` 取 dif/dea 后**自行相减、不乘 2**，两种口径共享同一份 EMA。
 """
+
+# ════════════════════════════════════════════════════════════════════════
+# 归属政策（owner 2026-08-10 定）：**有公认定义的指标放这里，因子的判定留因子里**
+# ════════════════════════════════════════════════════════════════════════
+#
+# 判据是「**是否存在口径选择**」，不是「有没有复用」也不是「形状像不像」：
+#
+#   放 indicators.py —— 该量在**项目外有公认定义**，因而有人可能挑到不同变体：
+#       RSI（Wilder 平滑 vs 简单均值）、AVEDEV（平均绝对偏差 vs 标准差）、
+#       CCI（TP 定义 / 0.015 / 分母三处都有变体）、KDJ、MACD（柱 ×1 vs ×2）、
+#       BBI、DKS、QSX、DMI/ADX、振幅（分母前收 vs 当日最低）、涨跌幅。
+#       ⇒ 这些一旦分叉就是**同名不同义**，而且很难在报告里看出来。
+#
+#   留在因子/模块里 —— 该量的定义**就是这个因子本身**，换实现等于换因子：
+#       s_shape 的 VCP 压缩度、b1_pullback_fit 的贴合打分、
+#       main_rally 的 D1/D2 高低点累计移动、low_vol 的收益率标准差、
+#       rsi_state 对 RSI 的解读（regime / divergence / multi / score）。
+#       ⇒ 把它们搬上来只会让 indicators.py 变成杂物抽屉，
+#         而读者在因子文件里看不到这个因子是怎么算的。
+#
+# ⚠️ **不采用「所有公式一律放这里」**：实测全仓有 255 个含 ≥3 个算术运算的函数、
+#    共 14066 行（组合回测、报告评分、MFE/MAE 都在内），全搬会让本文件约 14500 行。
+#    那条规则既无法执行（「什么算公式」没有边界），也会毁掉因子的内聚。
+#
+# ⚠️ pandas/numpy 原语（`rolling(n).mean()` 之类）**不算指标**：简单均线没有口径选择，
+#    且全仓 `min_periods` 零使用 ⇒ 窗口不足一律 NaN，本就一致。包一层没有收益。
+#
+# 新增指标时：写在这里 + 加进 `tests/test_shared_helpers.py::TestNoRefork.CANON`
+# + 若是有公认定义的新指标，加进
+#   `tests/test_top_level_shared.py::TestNamedIndicatorsLiveInL0.NAMED`。
+# 两个守卫分别防「同名两份」与「有名指标写在别处」。
+
 from __future__ import annotations
 
 import math
@@ -52,6 +84,7 @@ import math
 from typing import Any, Optional
 
 import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
 import pandas as pd
 
 # `_infer_price_limit` 用它取前缀基准（涨跌幅上限的唯一来源）。
@@ -145,6 +178,66 @@ def dmi_arrays(high, low, close, n: int = 14):
     for i in range(2 * n - 1, len(dx)):
         adx[i] = (adx[i - 1] * (n - 1) + dx[i]) / n
     return pdi, mdi, adx
+
+
+def rsi(close: pd.Series, n: int = 14) -> pd.Series:
+    """Wilder RSI（**全项目唯一实现**）—— 与通达信
+    `SMA(MAX(C-REF(C,1),0),N,1)/SMA(ABS(C-REF(C,1)),N,1)*100` 同口径
+    （`SMA(X,N,1)` 即 α=1/N 的指数平滑）。
+
+    ⚠️ RSI 有**两种流行口径**：Wilder 指数平滑（本实现）与简单算术均值。
+    两者数值不同却同名 —— 正是「有公认定义 ⇒ 存在口径选择」的典型，
+    所以归 `indicators.py` 而不是留在因子里。
+
+    2026-08-10 从 `factors/rsi_state` 搬来；那边保留对 RSI 的**解读**
+    （regime / divergence / multi / score）—— 解读是因子的身份，指标不是。
+    搬迁前 `factors/main_rally_factor` 是靠 `from rsi_state import rsi`
+    跨因子取用的，收敛后两者都从 L0 取。
+    """
+    c = close.astype(float)
+    d = c.diff()
+    up = d.clip(lower=0.0)
+    dn = d.abs()
+    au = up.ewm(alpha=1.0 / n, adjust=False).mean()
+    ad = dn.ewm(alpha=1.0 / n, adjust=False).mean()
+    with np.errstate(divide="ignore", invalid="ignore"):
+        out = au / ad * 100.0
+    return out.replace([np.inf, -np.inf], np.nan)
+
+
+def avedev(x: pd.Series, n: int) -> pd.Series:
+    """AVEDEV(x,n) = 窗口内 mean(|x − mean(x)|)（**平均绝对偏差，不是标准差**）。
+
+    ⚠️ 「平均绝对偏差 vs 标准差」是个真实的踩坑点：两者都叫「偏差」、量级相近、
+    代入 CCI 后结果不同。通达信的 AVEDEV 是前者。
+    2026-08-10 从 `factors/main_rally_factor` 搬来。
+
+    向量化实现：`rolling(n).apply()` 会退化成 Python 循环（每窗口一次函数调用），
+    候选上千只时开销可观。改用 `sliding_window_view` 一次算完。
+    """
+    v = x.astype(float).to_numpy()
+    n = int(n)
+    out = np.full(len(v), np.nan)
+    if len(v) >= n >= 1:
+        w = sliding_window_view(v, n)                       # (len-n+1, n) 视图，零拷贝
+        out[n - 1:] = np.abs(w - w.mean(axis=1, keepdims=True)).mean(axis=1)
+    return pd.Series(out, index=x.index)
+
+
+def cci(df: pd.DataFrame, n: int = 14) -> pd.Series:
+    """CCI(n) = (TP − MA(TP,n)) / (0.015 × AVEDEV(TP,n))，TP=(H+L+C)/3。
+
+    ⚠️ 三处都有变体空间：TP 的定义（有用 (H+L+C)/3 也有用收盘）、`0.015` 这个
+    Lambert 常数、以及分母用 AVEDEV 还是标准差。本实现取通达信口径。
+    2026-08-10 从 `factors/main_rally_factor` 搬来。
+    """
+    tp = (df["high"].astype(float) + df["low"].astype(float)
+          + df["close"].astype(float)) / 3.0
+    ma = tp.rolling(n).mean()
+    ad = avedev(tp, n)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        out = (tp - ma) / (0.015 * ad.replace(0, np.nan))
+    return out.replace([np.inf, -np.inf], np.nan)
 
 
 def pct_change(a, b):
