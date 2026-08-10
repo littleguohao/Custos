@@ -90,6 +90,14 @@ def fingerprint(row):
 
 
 def read_input(p):
+    """读导入文件；`p is None` 视为空输入（仅 `--confirm-no-trades` 会走到）。
+
+    ⚠️ 支持 None 是为了**不再逼操作者造空文件**：`--confirm-no-trades` 本就要求
+    输入为空，此前 `--input` 却是必需的，于是每次无交易确认都要 `echo {} > x.json`。
+    那些文件留在 CWD 被目标机自动提交扫进仓库（2026-08-10 清理了三个）。
+    """
+    if p is None:
+        return pd.DataFrame()
     suffix = p.suffix.lower()
     if suffix == '.csv':
         return pd.read_csv(p, dtype={'代码': str})
@@ -236,13 +244,25 @@ def _assign_transaction_ids(existing, new):
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument('--input', required=True)
+    # ⚠️ `--confirm-no-trades` 模式下 `--input` 不再必需。
+    #    此前 required=True，而该模式又**要求输入为空**（下面 `and len(incoming)` 会抛），
+    #    于是操作者必须造一个只含 `{}` 的空文件纯粹为了满足参数 ——
+    #    那些文件留在 CWD 里被目标机的自动提交扫进仓库
+    #    （`07_tools/trades/_no_trades_2026080{5,6,7}.json`，2026-08-10 清理）。
+    #    **是 CLI 设计逼出来的垃圾，不是操作者不小心。**
+    ap.add_argument('--input')
     ap.add_argument('--confirm-no-trades', action='store_true')
     ap.add_argument('--date')
     ap.add_argument('--allow-identical', action='store_true',
                     help='跳过幂等去重强制全量追加（危险：对已导入文件会重复计账，仅用于人工修数）')
     a = ap.parse_args(argv)
-    src = Path(a.input)
+    if not a.input:
+        # 仅 `--confirm-no-trades` 允许省略 —— 见 `--input` 的注释。
+        if not a.confirm_no_trades:
+            raise SystemExit('--input 必需（除 --confirm-no-trades 外）')
+        src = None
+    else:
+        src = Path(a.input)
 
     incoming = norm(read_input(src))
     incoming['_fingerprint'] = incoming.apply(fingerprint, axis=1) if len(incoming) else []
@@ -280,7 +300,10 @@ def main(argv=None):
 
     audit = {
         'appended_at': cn_now().isoformat(timespec='seconds'),
-        'source': str(src),
+        # ⚠️ 不写 `str(src)` —— src 为 None 时会落成字符串 `"None"`，
+        #    审计记录里出现一个看着像路径的假值（同形状的 `str(None)` 幽灵键
+        #    2026-08-07 已在 `risk_map` 修过一次）。
+        'source': str(src) if src is not None else '(无输入文件：--confirm-no-trades)',
         'requested_date': a.date,
         'incoming_rows': len(incoming),
         'appended_rows': len(new),

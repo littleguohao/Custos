@@ -21,7 +21,7 @@ flowchart TB
         R3["R3 判别力与召回<br/>❌ 判别力证伪<br/>⚠️ 瓶颈在召回（未研究）"]
     end
     subgraph TIM["择时 —— 唯一站得住"]
-        R4["R4 0AMV + 板块相位<br/>✅ 15pp + 4~6pp"]
+        R4["R4 0AMV ✅ ~15pp<br/>板块相位 ⚠️ 方向不稳（降级）"]
         R5["R5 迟到与前哨<br/>⚠️ 无固定提前量"]
     end
     subgraph HYP["假设验证 —— 全否决"]

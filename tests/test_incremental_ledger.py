@@ -174,3 +174,62 @@ class TestXlsxInputPath:
         p.write_text("noop", encoding="utf-8")
         with pytest.raises(ValueError):
             il.read_input(p)
+
+
+class TestConfirmNoTradesNeedsNoInputFile:
+    """⚠️ `--confirm-no-trades` 不得再要求 `--input`。
+
+    此前 `--input` 是 `required=True`，而该模式又**要求输入为空**
+    （`if a.confirm_no_trades and len(incoming): raise`）⇒ 操作者必须造一个
+    只含 `{}` 的文件纯粹为了满足参数。那些文件留在 CWD 里被目标机的自动提交
+    扫进仓库：`07_tools/trades/_no_trades_2026080{5,6,7}.json`（2026-08-10 清理）。
+
+    **是 CLI 设计逼出来的垃圾，不是操作者不小心** —— 所以修的是 CLI。
+    """
+
+    def test_confirm_without_input_writes_confirmation(self, tmp_path, monkeypatch):
+        import json
+
+        import incremental_ledger as il
+
+        # ⚠️ patch **全部** Path 常量，不能只挑想到的那几个 ——
+        #    第一版漏了 `AUDIT`，测试把审计记录写进了真实
+        #    `01_data/trades/ledger_append_audit.jsonl`（被 repo-hygiene 守卫抓到）。
+        #    同一教训在 2026-08-07 给 runner 写 harness 时踩过：漏了 `REVIEWS`。
+        import pathlib as _pl
+        for attr in dir(il):
+            v = getattr(il, attr, None)
+            if not (attr.isupper() and isinstance(v, _pl.Path)):
+                continue
+            # ⚠️ 保留**原文件名**（含后缀）—— 用属性名当文件名会把
+            #    `CONFIRM` 变成无后缀的 `tmp/confirm`，按 `*.json` 找不到产物。
+            monkeypatch.setattr(il, attr,
+                                tmp_path if v.suffix == "" else tmp_path / v.name,
+                                raising=False)
+
+        # ⚠️ `main()` 返回**审计记录 dict**，不是退出码（第一版断言 `rc in (0, None)` 就挂了）
+        rec = il.main(["--confirm-no-trades", "--date", "2026-08-10"])
+        assert isinstance(rec, dict) and rec.get("no_trades_confirmed") is True, rec
+        assert rec["source"] == "(无输入文件：--confirm-no-trades)", \
+            f"src 为 None 时不得落成字符串 \"None\"，实际 {rec['source']!r}"
+        # 确认文件落盘（路径常量名可能不同，扫 tmp_path 下的 json）
+        found = [p for p in tmp_path.rglob("*.json")]
+        assert found, "应写出无交易确认"
+        data = json.loads(found[0].read_text(encoding="utf-8"))
+        assert "2026-08-10" in data
+        assert data["2026-08-10"].get("no_trades") is True
+
+    def test_missing_input_without_confirm_still_errors(self, tmp_path, monkeypatch):
+        """普通导入模式缺 `--input` 必须报错 —— 别把校验一起放松了。"""
+        import pytest
+
+        import incremental_ledger as il
+
+        monkeypatch.setattr(il, "LEDGER", tmp_path / "l.csv", raising=False)
+        with pytest.raises(SystemExit):
+            il.main([])
+
+    def test_read_input_none_is_empty_frame(self):
+        import incremental_ledger as il
+
+        assert len(il.read_input(None)) == 0

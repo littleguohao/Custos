@@ -122,3 +122,60 @@ def test_test_suite_does_not_write_into_repo():
     assert not fresh, (
         "这些运行时文件是**本次测试会话期间**产生的 —— "
         f"某个测试的 fixture 漏 patch 了路径常量：\n  " + "\n  ".join(fresh[:20]))
+
+
+def test_no_scratch_files_in_code_tree():
+    """⚠️ 代码目录与仓库根不得有临时/草稿文件入库。
+
+    2026-08-10 拉取时发现两类，都是目标机 cron 的自动提交（`git add -A`）扫进来的：
+
+        07_tools/trades/_no_trades_2026080{5,6,7}.json   2 字节 `{}`
+        _summ_m2.py                                      根目录一次性分析手稿
+
+    前者的根因是 **CLI 设计逼出来的**：`incremental_ledger --confirm-no-trades`
+    本就要求输入为空，而 `--input` 却是 `required=True` ⇒ 每次无交易确认都得
+    `echo {} > x.json`，文件留在 CWD。已把 `--input` 改为该模式下可选。
+    后者是 `m2_stop_sweep --report-only` 的冗余劣化副本，已删。
+
+    ⚠️ 已有的两条守卫都拦不住：`test_no_runtime_data_tracked_anywhere` 只看
+    **运行时目录**（`07_tools/` 不是），`test_no_sensitive_filenames_tracked` 只看
+    **敏感名**（`_no_trades_` / `_summ_` 都不在表里）。这是第三个角度：**形态**。
+    """
+    import re
+
+    # 形态：下划线开头 + 含日期、或 _tmp/_scratch/_summ/_debug 前缀、或 .bak/.orig 后缀
+    SCRATCH = re.compile(
+        r"(^_\w*\d{6,8}\w*\.|^_(tmp|scratch|summ|debug|test|old)\w*\.|"
+        r"\.(bak|orig|tmp|swp|rej)$|^~)", re.I)
+    bad = []
+    for f in _tracked():
+        parts = f.split("/")
+        # 只查代码树与仓库根；运行时目录另有守卫，`tests/` 的夹具允许下划线命名
+        if parts[0] not in ("07_tools",) and len(parts) > 1:
+            continue
+        if parts[0] == "tests":
+            continue
+        if SCRATCH.search(pathlib.Path(f).name):
+            bad.append(f)
+    assert not bad, (
+        "代码树/仓库根有临时文件入库：\n  " + "\n  ".join(bad)
+        + "\n目标机 cron 用 `git add -A` 自动提交，任何留在树里的草稿都会被扫走。"
+          "\n若是 CLI 逼你造的文件（如 --confirm-no-trades 需要空 --input），改 CLI 而不是靠自律。")
+
+
+def test_scratch_guard_catches_the_2026_08_10_shapes():
+    """⚠️ 守卫自证：必须能抓到当天真实入库的那两种形态。
+
+    上一版（只有目录守卫 + 敏感名守卫）对这两个文件全部放行。
+    """
+    import re
+    SCRATCH = re.compile(
+        r"(^_\w*\d{6,8}\w*\.|^_(tmp|scratch|summ|debug|test|old)\w*\.|"
+        r"\.(bak|orig|tmp|swp|rej)$|^~)", re.I)
+    for name in ("_no_trades_20260805.json", "_summ_m2.py",
+                 "daily_report.py.bak", "_tmp_check.py"):
+        assert SCRATCH.search(name), f"守卫漏掉：{name}"
+    # 正常文件不得误报 —— `_shares.py` / `_util.py` / `_template.py` 是 factors/ 的真实私有模块
+    for name in ("_shares.py", "_util.py", "_template.py", "paths.py",
+                 "b1_thresholds.py", "__init__.py"):
+        assert not SCRATCH.search(name), f"守卫误报：{name}"
