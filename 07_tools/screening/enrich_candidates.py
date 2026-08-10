@@ -77,6 +77,7 @@ import sector_phase as sector_phase_mod  # noqa: E402
 # 内部 fill_na=50，行为不变）；`macd` 导入同步删除（check_macd_technics 自己
 # 用 ema 算 DIF/DEA，从未调用它）。
 from indicators import bbi_state, ema, kdj, resample, zhixing_state, _infer_price_limit # noqa: E402
+from indicators import amplitude_pct as amplitude_pct_of  # noqa: E402
 from contracts import require  # noqa: E402
 
 SCREENING_DIR = DATA / "screening"
@@ -940,10 +941,7 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
     vol_pctile = float((vol20 < vol_today).mean() * 100) if len(vol20) >= 20 else None
 
     change_pct = ((float(last["close"]) / prev_close - 1) * 100) if prev_close else None
-    amplitude_pct = (
-        (float(last["high"]) / prev_close - float(last["low"]) / prev_close) * 100
-        if prev_close else None
-    )
+    amplitude_pct = amplitude_pct_of(last["high"], last["low"], prev_close)
 
     stock_ret20 = _pct_change(df, 20)
     index_ret20 = _pct_change(index_df, 20) if index_df is not None and not index_df.empty else None

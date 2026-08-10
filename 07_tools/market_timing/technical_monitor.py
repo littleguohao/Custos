@@ -38,6 +38,7 @@ from indicators import (bbi_series, kdj_series,  # noqa: E402
 
 from paths import BASE, TDX_ROOT  # noqa: E402
 from code_utils import norm_code, price_limit_pct, split_code  # noqa: E402
+from indicators import amplitude_pct as amplitude_pct_of  # noqa: E402
 from b1_thresholds import (J_LOW_THRESHOLD, REVERSAL_AMPLITUDE_PCT,  # noqa: E402
                            REVERSAL_CHANGE_MAX_PCT, REVERSAL_CHANGE_MIN_PCT,
                            VOL_PCTILE_MAX, VOL_RATIO_MAX, change_in_range)
@@ -122,7 +123,11 @@ def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
     volume_ma5 = float(x["volume"].iloc[-6:-1].mean())
     volume_ma20 = float(x["volume"].iloc[-21:-1].mean()) if len(x) >= 21 else float(x["volume"].iloc[:-1].tail(20).mean())
     change_pct = (close / previous_close - 1) * 100 if previous_close else None
-    amplitude_pct = (high / low - 1) * 100 if low else None
+    # ⚠️ 口径 2026-08-10 由 `(high/low - 1)` 改为 **`(high-low)/前收`**（owner 拍板）。
+    #    前者分母是**当日最低价**，与治理文档明文（01_swing_rules §反转K）及另两处
+    #    live 实现都不一致 ⇒ 同一支票在选股链与持仓链可能得出相反的反转K 结论。
+    #    实测约 2% 的日 K 在 7% 门槛上因此翻转，且方向是缩量回踩形态时本式更严。
+    amplitude_pct = amplitude_pct_of(high, low, previous_close)
     body_pct = abs(close / open_ - 1) * 100 if open_ else None
     volume_ratio_5 = volume / volume_ma5 if volume_ma5 else None
     volume_ratio_20 = volume / volume_ma20 if volume_ma20 else None

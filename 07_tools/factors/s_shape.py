@@ -50,6 +50,7 @@ if str(_TOOLS) not in sys.path:
 
 from code_utils import price_limit_pct  # noqa: E402
 from b1_thresholds import change_in_range  # noqa: E402  反转K涨跌幅判定（live 同口径，round-2）
+from indicators import amplitude_pct as amplitude_pct_of  # noqa: E402  振幅唯一实现
 try:
     from indicators import _infer_price_limit, kdj as _kdj_fn # noqa: E402
 except Exception:  # noqa: BLE001 —— 导入失败时用保守默认涨跌幅
@@ -140,6 +141,11 @@ def compute_vcp(df) -> dict[str, Any]:
     if n < 2 * VCP_LEG:
         return {"points": 0.0, "available": False}
     with np.errstate(divide="ignore", invalid="ignore"):
+        # ⚠️ 这里的分母是**当日收盘**，与 `indicators.amplitude_pct` 的
+        #    「(高−低)/**前收**」**刻意不同**，不是漏改（2026-08-10 清点确认）：
+        #    本量只作为 `recent/prior` 的**比值**参与打分，分母口径在比值里基本抵消；
+        #    换成前收会改动 VCP 得分（= 改 live 的 S 分），为「形式统一」付这个代价不值。
+        #    ⇒ 它不是「当日振幅」这个指标，只是 VCP 压缩度的中间量。
         rng = (high - low) / np.where(close == 0, np.nan, close)
     recent = float(np.nanmean(rng[-VCP_LEG:]))
     prior = float(np.nanmean(rng[-2 * VCP_LEG:-VCP_LEG]))
@@ -399,7 +405,12 @@ def compute_s_reversal(df, code: str = "") -> dict[str, Any]:
         # 2026-08-09 对齐 live 口径（enrich_candidates 经 b1_thresholds）：
         # 振幅分母 low→prev_close，涨跌幅判定改 round-2（change_in_range，2026-08-07 owner 拍板）。
         chg = (close[-1] / close[-2] - 1) * 100 if n >= 2 and close[-2] else 0.0
-        amp = (high[-1] - low[-1]) / close[-2] * 100 if n >= 2 and close[-2] else 0.0
+        # ⚠️ 收敛到 `indicators.amplitude_pct`（全项目唯一实现，2026-08-10）。
+        #    算不出时它返回 **None** 而非 0.0 —— 0.0 会被 `<= 7` 判成「振幅很小」，
+        #    把「算不出」显示成「符合条件」。本因子下游按数值比较，故保留 0.0 兜底，
+        #    但那是**沿用旧行为**，不是说 0.0 语义正确。
+        _amp = amplitude_pct_of(high[-1], low[-1], close[-2]) if n >= 2 else None
+        amp = _amp if _amp is not None else 0.0
         reversal_k = bool((j is not None and j < 13) and extreme and change_in_range(chg) and amp <= 7)
         rk_pts = 10.0 if reversal_k else 0.0
         jturn_pts = 6.0 if (j is not None and j_prev is not None and j > j_prev and j_prev < 20) else 0.0

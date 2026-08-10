@@ -378,3 +378,122 @@ class TestGateCodePropagation:
         assert "_write_pipeline_log" in seg, \
             "退出前必须先落 pipeline 日志，否则这次阻断连记录都不留"
         assert 'gate_stage["returncode"]' in seg, "必须抛门控原码，不能包成 exit 1"
+
+
+class TestAmplitudeSingleImplementation:
+    """⚠️ 当日振幅**全项目唯一一份**：`indicators.amplitude_pct`（owner 2026-08-10 定口径）。
+
+    清点时发现**四份**内联实现，且分母不一致：
+
+        screening/enrich_candidates       (high−low)/prev_close    ✅
+        factors/s_shape                   (high−low)/close[-2]     ✅（08-09 才改对）
+        research/backtest_factors         (high−low)/close[-2]      ✅
+        market_timing/technical_monitor   (high/low − 1)            ❌ 分母是**当日最低价**
+
+    四份来自四个独立特性，当时没有共享出口可用。
+    ⚠️ 分母之差不是小数点问题：合成 20 万根日 K 实测，**约 2% 在 7% 门槛上给出相反结论**，
+    方向是 `low < prev_close`（正是反转K 要找的缩量回踩形态）时 `high/low` 更严
+    ⇒ **同一支票在选股链与持仓链可能得出相反的反转K 结论**。
+    """
+
+    def test_no_inline_amplitude_formula(self):
+        """除 L0 唯一实现外，不得再出现内联振幅式。
+
+        ⚠️ 判据用 **AST** 而非文本正则：第一版正则 `high[\w]*\s*/\s*low` 把
+        docstring 里的字段列表 `open/high/low/close/volume` 全部误报
+        （`s_data.py`、`reconcile_qfq.py`、`platform_pullback.py` 各中一枪）。
+        AST 只看真实的除法表达式，注释与字符串天然排除。
+        """
+        import ast
+        bad = []
+        for f in sorted(T.rglob("*.py")):
+            if f.name == "indicators.py":
+                continue                       # 唯一实现所在
+            try:
+                raw = f.read_text(encoding="utf-8-sig")
+                tree = ast.parse(raw)
+            except SyntaxError:
+                continue
+            src_lines = raw.split("\n")
+            for node in ast.walk(tree):
+                if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)):
+                    continue
+                src = ast.unparse(node)
+                # 形态一：high / low     形态二：(high - low) / x
+                looks = (re.search(r'\bhigh\b[^/]{0,12}/\s*low\b', src)
+                         or re.search(r'\(\s*high\b.{0,14}-\s*low\b.{0,6}\)\s*/', src))
+                if not looks:
+                    continue
+                # ⚠️ 豁免靠**源码里的标记**，不是硬编码行号（行号会随编辑腐坏）：
+                #    该表达式上方 6 行内必须有含「刻意不同」的注释说明为什么。
+                #    这样豁免与代码同进退，且**强制写下理由** ——
+                #    目前唯一一处是 `s_shape` 的 VCP 压缩度（分母用当日收盘、
+                #    只作 recent/prior 比值参与打分，换分母会改 live 的 S 分）。
+                above = src_lines[max(0, node.lineno - 7):node.lineno - 1]
+                if any("刻意不同" in x for x in above):
+                    continue
+                bad.append(f"{f.relative_to(T.parent)}:{node.lineno}  {src[:74]}")
+        assert not bad, ("发现内联振幅式，应改调 `indicators.amplitude_pct`：\n  "
+                         + "\n  ".join(bad)
+                         + "\n若确为**不同的量**（如 s_shape 的 VCP 压缩度用当日收盘作分母、"
+                           "且只作比值参与打分），请在该行上方写明为何刻意不同"
+                           "并把它加进本测试的豁免。")
+
+
+    def test_all_live_chains_share_the_function(self):
+        """三条 live 路径必须是**同一个函数对象**。"""
+        import sys
+        sys.path.insert(0, str(T))
+        import indicators
+        from market_timing import technical_monitor as tm
+        from screening import enrich_candidates as ec
+
+        assert ec.amplitude_pct_of is indicators.amplitude_pct
+        assert tm.amplitude_pct_of is indicators.amplitude_pct
+
+    def test_canonical_denominator_is_prev_close(self):
+        """⚠️ 分母是**前收盘**，不是当日最低价 —— 治理文档明文
+        （`01_swing_rules.md`：「当日振幅优先按 `(最高价 - 最低价) / 前收盘价` 计算」）。
+
+        用一组两式**结论相反**的数据钉住方向：前收 10.0 / 低 9.30 / 高 9.95
+        ⇒ 规范口径 6.5%（≤7 判入），`high/low` 口径 6.99%…（也判入）——
+        所以要选真正跨过 7% 的那组。
+        """
+        import sys
+        sys.path.insert(0, str(T))
+        from indicators import amplitude_pct
+
+        # 前收 10.0、低 9.00、高 9.65：规范 6.5%（入）；high/low = 7.22%（出）
+        assert abs(amplitude_pct(9.65, 9.00, 10.0) - 6.5) < 1e-9
+        assert (9.65 / 9.00 - 1) * 100 > 7, "这组数据没能跨过门槛，测不出方向"
+
+    def test_returns_none_not_zero_when_uncomputable(self):
+        """⚠️ 算不出返回 **None**，不是 0.0 —— 0.0 会被 `<= 7` 判成「振幅很小」，
+        把「算不出」显示成「符合条件」。"""
+        import sys
+        sys.path.insert(0, str(T))
+        from indicators import amplitude_pct
+
+        assert amplitude_pct(10.0, 9.5, 0) is None
+        assert amplitude_pct(10.0, 9.5, None) is None
+        assert amplitude_pct(None, 9.5, 10.0) is None
+        assert amplitude_pct(float("nan"), 9.5, 10.0) is None
+        assert amplitude_pct(10.0, 9.5, float("inf")) is None
+
+    def test_exemption_requires_a_written_reason(self):
+        """⚠️ 守卫自证：豁免必须靠「刻意不同」标记，删掉标记就该报警。
+
+        否则豁免会变成一个静默的白名单 —— 而今天已经三次遇到
+        「守卫看着通过、其实什么都没验」。
+        """
+        import ast
+
+        raw = (T / "factors" / "s_shape.py").read_text(encoding="utf-8-sig")
+        lines = raw.split("\n")
+        i = next(k for k, l in enumerate(lines) if "rng = (high - low) / np.where" in l)
+        above = lines[max(0, i - 6):i]
+        assert any("刻意不同" in x for x in above), \
+            "s_shape 的 VCP 豁免依赖上方注释里的「刻意不同」标记，它不见了"
+        # 反证：把标记去掉后，该处应落入 bad 列表
+        stripped = [x.replace("刻意不同", "XX") for x in above]
+        assert not any("刻意不同" in x for x in stripped)

@@ -67,6 +67,7 @@ from reversal_quality_inv import score as _sc_reversal_quality_inv  # noqa: E402
 
 
 from indicators import bbi_series as _bbi_series, macd_series as _macd_series  # noqa: E402
+from indicators import amplitude_pct as amplitude_pct_of  # noqa: E402  振幅唯一实现
 from code_utils import price_limit_pct  # noqa: E402
 
 def _bbi_series_from(df: pd.DataFrame) -> np.ndarray:
@@ -138,7 +139,13 @@ def reversal_k_gate(df_slice: pd.DataFrame) -> bool:
         # 不直接调 change_in_range：它读 env 覆盖值，而研究侧要钉死默认 ±2%。
         if not (-REVK_CHG_PCT <= round(chg, 2) <= REVK_CHG_PCT):
             return False
-        amp = (high[-1] - low[-1]) / close[-2] * 100 if close[-2] else 99  # 振幅≤7%（分母 prev_close，同 live）
+        # 振幅≤7%。收敛到 `indicators.amplitude_pct`（全项目唯一实现，2026-08-10）。
+        # ⚠️ 与上面的 `change_in_range` 不同，这个函数**不读 env** —— 纯公式、无可配置阈值，
+        #    所以收敛它不违反「研究侧阈值钉死」的原则。
+        # 算不出时它返回 None，这里按 **99** 处理（沿用旧兜底）⇒ 必然判出，
+        # 方向安全：不能让「算不出」冒充「振幅很小」。
+        _amp = amplitude_pct_of(high[-1], low[-1], close[-2])
+        amp = _amp if _amp is not None else 99
         return bool(amp <= REVK_AMP_PCT)
     except Exception:  # noqa: BLE001
         return False

@@ -112,7 +112,7 @@ strategy/
 | 20 日量分位最低 10% | `VOL_PCTILE_MAX` | 10.0 |
 | 涨跌幅 −2% ~ +1.8%（**不对称**）| `REVERSAL_CHANGE_MIN_PCT` / `MAX_PCT` | −2.0 / 1.8 |
 | 振幅 ≤7% | `REVERSAL_AMPLITUDE_PCT` | 7.0 |
-| 振幅算法 `(高−低)/前收` | `amplitude_pct` 计算式 | 一致 |
+| 振幅算法 `(高−低)/前收` | `indicators.amplitude_pct`（**全项目唯一实现**，2026-08-10 收敛五份内联式）| 一致 |
 
 ✅ 该残留已收口（2026-08-07 收敛 + 2026-08-09 全仓复查）：`REVERSAL_CHANGE_PCT = 2.0`
 现是 `b1_thresholds.py`（L0，env 可配 `B1_REVK_CHG_PCT`）里 MIN/MAX 的派生源 ——

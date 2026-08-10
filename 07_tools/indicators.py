@@ -47,6 +47,8 @@ MACD DIF/DEA 曾有四份（本文件 `macd()`、`research/backtest_factors._mac
 """
 from __future__ import annotations
 
+import math
+
 from typing import Any, Optional
 
 import numpy as np
@@ -58,6 +60,45 @@ from code_utils import price_limit_pct
 
 J_N, J_M1, J_M2 = 9, 3, 3
 DKS_MA_WINDOWS = (14, 28, 57, 114)  # 知行多空线的四均线（good_b1 图上参数）          # KDJ 标准参数；com = m - 1 ⇒ com=2
+
+
+def amplitude_pct(high, low, prev_close) -> float | None:
+    """当日振幅 % —— **全项目唯一实现**（owner 2026-08-10 定口径）。
+
+        振幅 = (最高价 − 最低价) / 前收盘价 × 100
+
+    这是 A 股标准口径，也是治理文档的明文规定
+    （`00_governance/strategy/b1/01_swing_rules.md` §反转K：
+    「当日振幅优先按 `(最高价 - 最低价) / 前收盘价` 计算」）。
+
+    ## 为什么要有这个函数
+
+    2026-08-10 清点时全仓有**三份**内联实现，且**分母不一致**：
+
+        screening/enrich_candidates    (high−low)/prev_close   ✅ 合口径
+        factors/s_shape               (high−low)/close[-2]     ✅ 合口径（08-09 才改对）
+        market_timing/technical_monitor (high/low − 1)          ❌ 分母是**当日最低价**
+
+    三份各自来自三个独立特性（选股链 18de9a0、持仓链 3c80fbc、因子抽取），
+    当时没有共享出口可用，于是各写一遍。
+
+    ⚠️ 分母之差不是小数点问题：合成 20 万根日 K 实测，**约 2% 在 7% 门槛上给出
+    相反结论**，而方向是 `low < prev_close`（正是反转K 要找的缩量回踩形态）时
+    `high/low` 口径**更严** ⇒ 持仓链比选股链更难判出反转K，同一支票两条链结论可能相反。
+
+    ## 边界
+
+    `prev_close` 为 0/None 时返回 `None`（**不返回 0.0**）——
+    0.0 会被下游的 `<= 7` 判成「振幅很小」，把「算不出」显示成「符合条件」。
+    这是本项目反复出现的那类失真（见 `code_utils.fnum` 的 docstring）。
+    """
+    try:
+        h, lo, pc = float(high), float(low), float(prev_close)
+    except (TypeError, ValueError):
+        return None
+    if not pc or not math.isfinite(pc) or not math.isfinite(h) or not math.isfinite(lo):
+        return None
+    return (h - lo) / pc * 100
 
 
 def pct_change(a, b):

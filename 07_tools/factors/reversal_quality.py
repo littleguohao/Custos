@@ -26,6 +26,8 @@ from typing import Any, Optional
 
 import pandas as pd
 
+from indicators import amplitude_pct as amplitude_pct_of  # 振幅唯一实现
+
 # ⚠️ 阈值**保持与 backtest_factors 原值一致**（对称 ±2%）并**刻意不读环境变量** ——
 # 改了会作废已有回测数字，而那些数字已在重跑清单里（R2 P1）。
 # live 侧的同名阈值在 `07_tools/b1_thresholds.py`，可配置；两者默认值相同。
@@ -62,7 +64,11 @@ def score(df: pd.DataFrame, code: str):
         pts += int(vma5 > 0 and vol[-1] / vma5 <= REVK_VOL_RATIO)             # 缩量
         pts += int((v20 <= vol[-1]).mean() <= REVK_VOL_PCTILE)               # 量底10%
         pts += int(close[-2] and abs(close[-1] / close[-2] - 1) * 100 <= REVK_CHG_PCT)   # 小实体
-        pts += int(close[-2] and (high[-1] - low[-1]) / close[-2] * 100 <= REVK_AMP_PCT)  # 小振幅
+        # 振幅≤7%：收敛到 `indicators.amplitude_pct`（全项目唯一实现，2026-08-10）。
+        # ⚠️ 它是**纯公式、不读 env**，所以收敛不违反本因子「阈值钉死」的原则
+        #    （钉死的是 REVK_AMP_PCT 这个数，不是怎么算振幅）。
+        _amp = amplitude_pct_of(high[-1], low[-1], close[-2])
+        pts += int(_amp is not None and _amp <= REVK_AMP_PCT)   # 小振幅
         return {"score": float(pts), "suggestion": "可买",
                 "aux": {"selector": "reversal_quality_0_4"}, "components": {}}
     except Exception:  # noqa: BLE001
