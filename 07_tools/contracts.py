@@ -281,7 +281,15 @@ SPECS: dict[str, dict] = {
                 "quality": {"type": str, "required": False, "choices": AMV_QUALITY},
                 "effective_state": {"type": str, "required": False, "choices": REGIMES},
             }},
-            "overseas_market": {"type": dict, "required": True},
+            "overseas_market": {"type": dict, "required": True, "fields": {
+                # ⚠️ `required + nullable`，与 `amv_0.as_of` 同形（2026-08-10，TODO #52）：
+                #    键必须在（缺失与 null 在门控里走不同分支），值允许 None
+                #    —— 一个 symbol 都没给时间戳时**不许编一个**，原话
+                #    「编一个 as_of 等于给门控一个假的新鲜度」。
+                #    ⚠️ 契约只能保证键存在，**拦不住重新伪造** ——
+                #    那件事由 `tests/test_tdx_ext_fallback.py::TestOverseasAsOfDerivation` 守。
+                "as_of": {"type": str, "required": True, "nullable": True},
+            }},
             "a_share_indices": {"type": dict, "required": True},
             "market_breadth": {"type": dict, "required": True},
             "sentiment": {"type": dict, "required": True},

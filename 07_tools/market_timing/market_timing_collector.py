@@ -315,6 +315,9 @@ def main():
             "nikkei_change_pct": None,
             "kospi_change_pct": None,
             "hstech_change_pct": None,
+            # ⚠️ 与 `amv_0.as_of` 同形：键恒存在、初值 None。
+            #    骨架阶段没有任何数据日可证，**不得填采集时刻**（TODO #52）。
+            "as_of": None,
             "overseas_summary": ""
         },
         "a_share_indices": {},

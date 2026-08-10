@@ -218,8 +218,21 @@ def main():
         overseas["as_of"] = datetime.fromtimestamp(max(ts_vals), ZoneInfo("Asia/Shanghai")).isoformat(timespec="seconds")
         overseas["as_of_basis"] = "max(last_timestamp) across symbols"
     else:
-        overseas["as_of"] = datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(timespec="seconds")
-        overseas["as_of_basis"] = "collection_time_fallback"
+        # ⚠️ **不编 as_of**（2026-08-10，TODO #52 路子①）。
+        #    此前这里写 `datetime.now()`，于是门控的判据「有值 且 as_of 非空」
+        #    对一批**没有任何时间戳**的数字给出最强结论 `confirmed`。
+        #    而这条路径不是罕见分支：Yahoo 不可达时走的 TDX ext 降级
+        #    (`tdx_ext_quotes.fetch_ext_change`) **根本不返回 last_timestamp**
+        #    ⇒ Yahoo 全挂时必然走到这里，而那恰恰是最需要判新鲜度的时候
+        #    （实测那一跑的 sox 值还是 SOXX ETF 的代理值）。
+        #    与契约层已拍板的 `amv_0.as_of` 同一原则 —— 原话：
+        #    **「编一个 as_of 等于给门控一个假的新鲜度」**。
+        #    形状也对齐 amv_0：**键存在、值为 None**（不是省略键）——
+        #    null 与缺失在下游会走不同分支。门控据此判 `candidate`（值还在）。
+        overseas["as_of"] = None
+        overseas["as_of_basis"] = "no_timestamp_from_any_symbol"
+        # 采集时刻本身有排障价值，但它**不是数据新鲜度** —— 换个键名存，别让它冒充。
+        overseas["collected_at"] = datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(timespec="seconds")
     overseas["quality"] = "auto" if not errors else "degraded"
 
     dq = data.setdefault("data_quality", {})

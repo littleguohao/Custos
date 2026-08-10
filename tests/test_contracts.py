@@ -246,7 +246,17 @@ class TestEvidenceDate:
 VALID_MTI = {
     "date": "2026-08-07", "collector_version": "v1",
     "amv_0": {"amv_zone": "", "amv_change_pct": None, "as_of": None},
-    "overseas_market": {}, "a_share_indices": {}, "market_breadth": {},
+    # ⚠️ 按**真实 collector 骨架**写全（2026-08-10 核对 `market_timing_collector`
+    #    的字面量：6 个 change_pct + as_of + overseas_summary）。
+    #    此前这里是 `{}` —— 而下面 docstring 却声称「字段集核对过真实产出」，
+    #    这一节没核对到。空夹具让 `overseas_market.as_of` 的契约缺失一直没被发现
+    #    （同形状的事 08-10 在 `holding_quotes.indices` 上刚踩过：
+    #     spec 写错 + 夹具按错的形状写 ⇒ 两者相互印证，真实产出才是判据）。
+    "overseas_market": {"nasdaq_change_pct": None, "sp500_change_pct": None,
+                        "sox_change_pct": None, "nikkei_change_pct": None,
+                        "kospi_change_pct": None, "hstech_change_pct": None,
+                        "as_of": None, "overseas_summary": ""},
+    "a_share_indices": {}, "market_breadth": {},
     "sentiment": {}, "turnover": {}, "theme": {}, "macro_policy": {},
     "data_quality": {},
 }
@@ -260,8 +270,12 @@ class TestProgressiveFillArtifact:
     merge 置 quality/effective_state → amv_state 切 regime），
     要求「值已填」会让第一个写者就失败。
 
-    字段集与空值形态**核对过真实 collector 产出**（跑了带/不带 `--amv` 两种）：
+    `amv_0` 的字段集与空值形态**核对过真实 collector 产出**（跑了带/不带 `--amv` 两种）：
     `amv_change_pct: null`、`amv_zone: ""`（空串）、`as_of: null`。
+
+    ⚠️ 但 `overseas_market` 一节**当初没核对**，夹具写的是 `{}` ——
+    于是 `overseas_market.as_of` 的契约缺失一直没被发现（2026-08-10 补，TODO #52）。
+    「核对过真实产出」这句话当时只对 `amv_0` 成立，现已按 collector 字面量补全。
     """
 
     def test_collector_baseline_valid(self):

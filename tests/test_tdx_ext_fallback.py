@@ -229,35 +229,93 @@ class TestOverseasAsOfDerivation:
         ov = self._run(monkeypatch, tmp_path, chart)
         assert ov["as_of_basis"] == "max(last_timestamp) across symbols"
 
-    def test_no_timestamp_fabricates_collection_time_and_gate_calls_it_confirmed(
-            self, monkeypatch, tmp_path):
-        """⚠️⚠️ **一个时间戳都没拿到时，`as_of` 被写成采集时刻（now）**，
-        而运行门控据此判 `confirmed`。
+    def test_no_timestamp_does_not_fabricate_as_of(self, monkeypatch, tmp_path):
+        """⚠️ 一个时间戳都没拿到时**不得编 `as_of`** —— 2026-08-10 按 TODO #52 路子① 改。
 
-        这是一处 **fail-open**，且与本项目已拍板的相反决定不一致：
-        契约层刻意允许 `amv_0.as_of` 为 None，理由原话是
-        **「编一个 as_of 等于给门控假的新鲜度」**。这里的代码正是在编。
+        改之前：`as_of = datetime.now()`，门控的判据「有值 且 as_of 非空」
+        据此给出**最强结论 `confirmed`**。而这不是罕见分支 —— Yahoo 不可达时走的
+        TDX ext 降级 `tdx_ext_quotes.fetch_ext_change` **根本不返回 last_timestamp**
+        ⇒ Yahoo 全挂时必然走到这里，恰恰是最需要判新鲜度的时候。
 
-        生产者其实留了痕 —— `as_of_basis: "collection_time_fallback"` ——
-        但 `runtime_guards.market_quality_gate` **从不读这个字段**，
-        它的判据只有「有值 且 as_of 非空」⇒ 伪造的 as_of 照样得满分。
-
-        影响面有界：overseas 权重 10/100，且被排除在 `core` 覆盖率判定之外。
-        本条测试**钉住现状**（不擅自改门控 —— 2026-07-30 有过「门控与口径同时
-        收紧导致 17:00 链失败」的事故），并把问题记入 TODO 待 owner 定：
-        是「生产者不再伪造」还是「门控改读 as_of_basis」。
+        与契约层已拍板的 `amv_0.as_of` 同一原则，原话：
+        **「编一个 as_of 等于给门控一个假的新鲜度」**。
+        形状也对齐 amv_0：**键存在、值为 None**（不是省略键）。
         """
         def chart(symbol, region=""):
             return {"change_pct": 1.0}          # 两个 symbol 都没时间戳
 
         ov = self._run(monkeypatch, tmp_path, chart)
-        assert ov["as_of_basis"] == "collection_time_fallback"
-        assert ov["as_of"], "当前实现会填采集时刻"
+        assert ov["as_of"] is None, f"不得编 as_of，实际 {ov['as_of']!r}"
+        assert ov["as_of_basis"] == "no_timestamp_from_any_symbol"
+        # 采集时刻另存 —— 有排障价值，但它不是数据新鲜度，不许冒充
+        assert ov.get("collected_at"), "采集时刻应保留在独立键里"
+        assert ov["collected_at"] != ov["as_of"]
 
-        # 门控对着这份伪造的 as_of 判 confirmed —— 记录现状
+    def test_gate_degrades_to_candidate_not_confirmed(self, monkeypatch, tmp_path):
+        """⚠️ 门控随之自然降到 `candidate` —— **不是 `missing`**（值还在，只是新鲜度不可证）。
+
+        这个区分是路子① 成立的前提：若降到 `missing` 就等于把「有数但不知何时」
+        和「压根没数」混为一谈，那才是过度收紧。
+        """
         import runtime_guards as rg
+
+        ov = self._run(monkeypatch, tmp_path, lambda symbol, region="": {"change_pct": 1.0})
         gate = rg.market_quality_gate(
             {"date": "2026-08-04", "overseas_market": ov}, "2026-08-04")
         chk = next(c for c in gate["checks"] if c["field"] == "overseas")
-        assert chk["quality"] == "confirmed", \
-            "若这里变成 candidate/missing，说明门控或生产者已修 —— 请同步更新本测试与 TODO"
+        assert chk["quality"] == "candidate", \
+            f"应降到 candidate（值在、新鲜度不可证），实际 {chk['quality']}"
+
+    def test_fallback_path_really_lacks_timestamp(self):
+        """⚠️ 钉住上面几条的**前提事实**：TDX ext 降级不返回 `last_timestamp`。
+
+        若哪天它开始返回时间戳，上面「必然走到 else 分支」的论证就不再成立，
+        本条会失败，提醒回来重新推敲（而不是让那几条测试悄悄变成测别的东西）。
+        """
+        import inspect
+
+        from market_timing import tdx_ext_quotes as tq
+
+        src = inspect.getsource(tq.fetch_ext_change)
+        assert "last_timestamp" not in src, \
+            "fetch_ext_change 开始返回 last_timestamp 了 —— 请重新评估 #52 的前提"
+
+    def test_downgrade_does_not_change_overall_status(self):
+        """⚠️ overseas 降级**不得改变整体 `status`** —— 这是路子① 安全的前提。
+
+        `runtime_guards` 把 overseas 排除在 `core` 之外
+        （`core = [x for x in checks if x["field"] != "overseas"]`，权重也只有 10/100），
+        所以它从 `confirmed` 掉到 `candidate` 不会波及门控结论。
+
+        2026-08-10 实测：完整数据下修复前后都是 `status=pass`。
+        本条钉住这层隔离 —— 若哪天 core 的排除规则改了，这个 as_of 修复会
+        **静默变成一个阻断源**，而 2026-07-30 正是「门控与 stale 判定同时收紧
+        导致 17:00 整条链失败」。
+        """
+        import runtime_guards as rg
+
+        D = "2026-08-10"
+        full = {
+            "date": D,
+            "amv_0": {"amv_change_pct": 1.0, "quality": "confirmed",
+                      "as_of": D, "effective_state": "中性"},
+            "market_breadth": {"up_count": 2600, "down_count": 2100,
+                               "as_of": D, "quality": "auto"},
+            "turnover": {"total_turnover": 9e11, "turnover_change_pct": 3.0,
+                         "as_of": D, "quality": "auto"},
+            "sentiment": {"limit_up_count": 45, "as_of": D, "quality": "auto"},
+        }
+        results = {}
+        for label, ov in [
+            ("fabricated", {"sox_change_pct": 2.019, "as_of": f"{D}T14:44:40+08:00"}),
+            ("none", {"sox_change_pct": 2.019, "as_of": None,
+                      "as_of_basis": "no_timestamp_from_any_symbol"}),
+        ]:
+            r = rg.market_quality_gate({**full, "overseas_market": ov}, D)
+            chk = next(c for c in r["checks"] if c["field"] == "overseas")
+            results[label] = (chk["quality"], r.get("status"))
+
+        assert results["fabricated"][0] == "confirmed"
+        assert results["none"][0] == "candidate"
+        assert results["fabricated"][1] == results["none"][1] == "pass", \
+            f"overseas 降级改变了整体 status：{results}"
