@@ -182,7 +182,7 @@ class TestConfirmNoTradesNeedsNoInputFile:
     此前 `--input` 是 `required=True`，而该模式又**要求输入为空**
     （`if a.confirm_no_trades and len(incoming): raise`）⇒ 操作者必须造一个
     只含 `{}` 的文件纯粹为了满足参数。那些文件留在 CWD 里被目标机的自动提交
-    扫进仓库：`07_tools/trades/_no_trades_2026080{5,6,7}.json`（2026-08-10 清理）。
+    扫进仓库：`src/core/trades/_no_trades_2026080{5,6,7}.json`（2026-08-10 清理）。
 
     **是 CLI 设计逼出来的垃圾，不是操作者不小心** —— 所以修的是 CLI。
     """

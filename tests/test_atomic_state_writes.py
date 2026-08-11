@@ -24,7 +24,7 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "07_tools"))
+sys.path.insert(0, str(ROOT / "src"))
 import paths  # noqa: E402
 
 
@@ -86,19 +86,19 @@ class TestAccumulativeStateUsesAtomic:
     """两类必须原子写的地方，不许退回裸 write_text。"""
 
     CASES = [
-        ("market_timing/amv_state.py", "0amv_regime_history 是全历史 regime，驱动加仓授权"),
-        ("runtime_guards.py", "position_confirmations 是人工确认记录"),
-        ("market_timing/merge_incremental_market.py", "market_timing_input 被多 stage 读改写"),
+        ("pipeline/market_timing/amv_state.py", "0amv_regime_history 是全历史 regime，驱动加仓授权"),
+        ("core/runtime_guards.py", "position_confirmations 是人工确认记录"),
+        ("pipeline/market_timing/merge_incremental_market.py", "market_timing_input 被多 stage 读改写"),
     ]
 
     @pytest.mark.parametrize("rel,why", CASES, ids=lambda x: x if isinstance(x, str) else "")
     def test_uses_atomic_writer(self, rel, why):
-        s = (ROOT / "07_tools" / rel).read_text(encoding="utf-8")
+        s = (ROOT / "src" / rel).read_text(encoding="utf-8")
         assert "write_json_atomic" in s, f"{rel} 应用原子写：{why}"
 
     def test_amv_state_regime_history_atomic(self):
         """regime 历史那一行必须是原子写 —— 它损坏会让 regime 判定失去全部历史。"""
-        s = (ROOT / "07_tools" / "market_timing" / "amv_state.py").read_text(encoding="utf-8")
+        s = (ROOT / "src" / "pipeline" / "market_timing" / "amv_state.py").read_text(encoding="utf-8")
         assert "write_json_atomic(STATE" in s
         assert "STATE.write_text" not in s
 
@@ -122,7 +122,7 @@ class TestAccumulativeStateUsesAtomic:
         """
         import re
         bad = []
-        for p in (ROOT / "07_tools").rglob("*.py"):
+        for p in (ROOT / "src").rglob("*.py"):
             for i, ln in enumerate(p.read_text(encoding="utf-8-sig").splitlines(), 1):
                 if not re.match(r"\s*(from\s+[\w.]+\s+)?import\s", ln):
                     continue
@@ -182,7 +182,7 @@ class TestRegimeLockRespectedEverywhere:
     读到它，就会拿到一个被解锁的 regime。
     """
 
-    SRC = (ROOT / "07_tools" / "market_timing" / "merge_incremental_market.py").read_text(encoding="utf-8")
+    SRC = (ROOT / "src" / "pipeline" / "market_timing" / "merge_incremental_market.py").read_text(encoding="utf-8")
 
     def test_fallback_does_not_reset_lock_to_neutral(self):
         assert 'else "中性")' not in self.SRC, \
@@ -202,13 +202,13 @@ class TestRegimeLockRespectedEverywhere:
 
     def test_amv_state_invariant_still_documented(self):
         """不变量本身必须留在 amv_state 的 docstring 里 —— 它是这条约束的来源。"""
-        s = (ROOT / "07_tools" / "market_timing" / "amv_state.py").read_text(encoding="utf-8")
+        s = (ROOT / "src" / "pipeline" / "market_timing" / "amv_state.py").read_text(encoding="utf-8")
         head = s[:s.index("from __future__")]
         assert "must not reset the regime to neutral" in head
 
     def test_unknown_not_in_increase_whitelist(self):
         """反面确认：「未知」确实拿不到加仓权（否则上面的 fail-closed 是空话）。"""
-        sys.path.insert(0, str(ROOT / "07_tools"))
+        sys.path.insert(0, str(ROOT / "src"))
         import runtime_guards as rg
         assert rg.normalize_regime("未知") == "未知"
         assert "未知" not in rg._REGIME_ALLOW_INCREASE

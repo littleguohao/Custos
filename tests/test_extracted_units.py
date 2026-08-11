@@ -27,8 +27,8 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("07_tools", "07_tools/screening", "07_tools/close_review",
-           "07_tools/market_timing", "07_tools/factors"):
+for _p in ("src", "src/pipeline/screening", "src/pipeline/close_review",
+           "src/pipeline/market_timing", "src/core/factors"):
     sys.path.insert(0, str(ROOT / _p))
 
 from close_review import weekly_review as wr  # noqa: E402

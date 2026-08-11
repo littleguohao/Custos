@@ -19,7 +19,7 @@ import pandas as pd
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("07_tools", "07_tools/factors", "07_tools/screening"):
+for _p in ("src", "src/core/factors", "src/pipeline/screening"):
     sys.path.insert(0, str(ROOT / _p))
 
 import factors  # noqa: E402
@@ -106,11 +106,11 @@ class TestNotForLive:
         只看前者会把合法用法判成违规。
         """
         reg = factors.registry()
-        live = ["screening/enrich_candidates.py", "screening/score_candidates.py",
-                "screening/candidate_table.py", "screening/signal_labels.py"]
+        live = ["pipeline/screening/enrich_candidates.py", "pipeline/screening/score_candidates.py",
+                "pipeline/screening/candidate_table.py", "pipeline/screening/signal_labels.py"]
         bad = []
         for rel in live:
-            s = (ROOT / "07_tools" / rel).read_text(encoding="utf-8")
+            s = (ROOT / "src" / rel).read_text(encoding="utf-8")
             for fid, e in reg.items():
                 imported = f"import {fid}" in s or f"from {fid} import" in s
                 if not imported:
@@ -172,19 +172,19 @@ class TestNumericEquivalence:
 class TestSharedMutableStateImportRule:
     """持有**可变模块级状态**的模块必须包限定导入。
 
-    ⚠️ 2026-08-06 当场发作：`07_tools` 与 `07_tools/factors` 都在 sys.path 上 ⇒
+    ⚠️ 2026-08-06 当场发作：`src` 与 `src/core/factors` 都在 sys.path 上 ⇒
     同一文件有两条可导路径（`_shares` / `factors._shares`），Python 建**两个模块对象**，
     而 `_shares` 持有可变缓存 `_SHARE_IDX` ⇒ 测试打桩一个、生产读另一个。
     """
 
     def test_shares_imported_package_qualified(self):
-        for rel in ("factors/mcap.py", "research/backtest_factors.py"):
-            s = (ROOT / "07_tools" / rel).read_text(encoding="utf-8")
+        for rel in ("core/factors/mcap.py", "research/backtest_factors.py"):
+            s = (ROOT / "src" / rel).read_text(encoding="utf-8")
             assert "from factors._shares import" in s, f"{rel} 应包限定导入 _shares"
             assert "\nfrom _shares import" not in s, f"{rel} 有扁平导入 _shares（会产生两份状态）"
 
     def test_rule_documented(self):
-        s = (ROOT / "07_tools" / "factors" / "_shares.py").read_text(encoding="utf-8")
+        s = (ROOT / "src" / "core" / "factors" / "_shares.py").read_text(encoding="utf-8")
         assert "包限定" in s and "两个模块对象" in s
 
 
@@ -212,12 +212,12 @@ class TestInlineFactorsExtracted:
 
     @pytest.mark.parametrize("fid", INLINE_EXTRACTED)
     def test_module_file_exists(self, fid):
-        assert (ROOT / "07_tools" / "factors" / f"{fid}.py").exists()
+        assert (ROOT / "src" / "core" / "factors" / f"{fid}.py").exists()
 
     def test_enrich_no_longer_defines_them(self):
         """`enrich_candidates` 里不许再有本地定义 —— 那就成了第二份。"""
         import re
-        s = (ROOT / "07_tools" / "screening" / "enrich_candidates.py").read_text(encoding="utf-8")
+        s = (ROOT / "src" / "pipeline" / "screening" / "enrich_candidates.py").read_text(encoding="utf-8")
         for fn in ("detect_wave_type", "compute_perfect_b1_fit",
                    "compute_b1_pullback_fit", "detect_distribution"):
             assert not re.search(rf"^def {fn}\(", s, re.M), f"enrich 又定义了本地 {fn}"
@@ -226,7 +226,7 @@ class TestInlineFactorsExtracted:
     def test_constants_moved_with_their_factor(self):
         """常量必须跟着因子走，`enrich_candidates` 里不该再有它们的定义。"""
         import re
-        s = (ROOT / "07_tools" / "screening" / "enrich_candidates.py").read_text(encoding="utf-8")
+        s = (ROOT / "src" / "pipeline" / "screening" / "enrich_candidates.py").read_text(encoding="utf-8")
         for pfx in ("WAVE_", "FIT_", "B1PB_", "DIST_"):
             defs = re.findall(rf"^({pfx}[A-Z0-9_]+) *=", s, re.M)
             assert not defs, f"{pfx}* 常量应随因子迁走，enrich 里还剩：{defs}"
@@ -237,7 +237,7 @@ class TestInlineFactorsExtracted:
         pairs = [("wave_type", "WAVE_"), ("perfect_b1_fit", "FIT_"),
                  ("b1_pullback_fit", "B1PB_"), ("distribution", "DIST_")]
         for fid, pfx in pairs:
-            s = (ROOT / "07_tools" / "factors" / f"{fid}.py").read_text(encoding="utf-8")
+            s = (ROOT / "src" / "core" / "factors" / f"{fid}.py").read_text(encoding="utf-8")
             assert re.search(rf"^{pfx}[A-Z0-9_]+ *=", s, re.M), f"{fid} 缺 {pfx}* 常量"
 
 
@@ -260,7 +260,7 @@ class TestKnownConflicts:
 
     def test_conflict_documented_in_module(self):
         """矛盾也要写在因子模块自己的元数据里 —— 读那个文件的人才看得到。"""
-        s = (ROOT / "07_tools" / "factors" / "s_shape.py").read_text(encoding="utf-8")
+        s = (ROOT / "src" / "core" / "factors" / "s_shape.py").read_text(encoding="utf-8")
         assert "已知矛盾" in s and "score_candidates" in s
 
 
@@ -279,19 +279,19 @@ class TestStageMatchesReality:
         stage     现在真的在跑吗？  —— 部署事实
     """
 
-    LIVE_FILES = ["screening/enrich_candidates.py", "screening/score_candidates.py",
-                  "screening/candidate_table.py", "screening/signal_labels.py",
-                  "screening/formula_screen.py",
+    LIVE_FILES = ["pipeline/screening/enrich_candidates.py", "pipeline/screening/score_candidates.py",
+                  "pipeline/screening/candidate_table.py", "pipeline/screening/signal_labels.py",
+                  "pipeline/screening/formula_screen.py",
                   # 2026-08-09 扩：盘中监控与持仓链也是 live 消费者 —— 它们若哪天开始
                   # import 因子模块，stage 标记必须与事实一致。当前它们不引用任何因子，
                   # 扫描结果不变，只是把网织在事发之前。
-                  "market_timing/technical_monitor.py",
-                  "holdings/b1_holding_state.py",
-                  "holdings/batch_holding_technical.py"]
+                  "pipeline/market_timing/technical_monitor.py",
+                  "pipeline/holdings/b1_holding_state.py",
+                  "pipeline/holdings/batch_holding_technical.py"]
 
     def _referenced(self) -> set[str]:
         import re
-        srcs = [(ROOT / "07_tools" / f).read_text(encoding="utf-8") for f in self.LIVE_FILES]
+        srcs = [(ROOT / "src" / f).read_text(encoding="utf-8") for f in self.LIVE_FILES]
         out = set()
         for fid in factors.registry():
             if any(re.search(rf"\bfrom {fid} import|\bimport {fid}\b", s) for s in srcs):

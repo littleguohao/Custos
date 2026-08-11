@@ -55,7 +55,7 @@ def test_no_sensitive_filenames_tracked():
     """⚠️ 台账/持仓/确认这几类文件名一旦入库就是账户数据外泄。
 
     与上一条互补：上一条按**目录**查，这条按**文件名**查 ——
-    脚本把台账写到别的目录（如 `07_tools/master_trade_ledger.csv`）时上一条查不出来。
+    脚本把台账写到别的目录（如 `src/master_trade_ledger.csv`）时上一条查不出来。
     """
     bad = [f for f in _tracked()
            if any(s in pathlib.Path(f).name for s in SENSITIVE)
@@ -129,7 +129,7 @@ def test_no_scratch_files_in_code_tree():
 
     2026-08-10 拉取时发现两类，都是目标机 cron 的自动提交（`git add -A`）扫进来的：
 
-        07_tools/trades/_no_trades_2026080{5,6,7}.json   2 字节 `{}`
+        src/core/trades/_no_trades_2026080{5,6,7}.json   2 字节 `{}`
         _summ_m2.py                                      根目录一次性分析手稿
 
     前者的根因是 **CLI 设计逼出来的**：`incremental_ledger --confirm-no-trades`
@@ -138,7 +138,7 @@ def test_no_scratch_files_in_code_tree():
     后者是 `m2_stop_sweep --report-only` 的冗余劣化副本，已删。
 
     ⚠️ 已有的两条守卫都拦不住：`test_no_runtime_data_tracked_anywhere` 只看
-    **运行时目录**（`07_tools/` 不是），`test_no_sensitive_filenames_tracked` 只看
+    **运行时目录**（`src/` 不是），`test_no_sensitive_filenames_tracked` 只看
     **敏感名**（`_no_trades_` / `_summ_` 都不在表里）。这是第三个角度：**形态**。
     """
     import re
@@ -151,7 +151,7 @@ def test_no_scratch_files_in_code_tree():
     for f in _tracked():
         parts = f.split("/")
         # 只查代码树与仓库根；运行时目录另有守卫，`tests/` 的夹具允许下划线命名
-        if parts[0] not in ("07_tools",) and len(parts) > 1:
+        if parts[0] not in ("src",) and len(parts) > 1:
             continue
         if parts[0] == "tests":
             continue

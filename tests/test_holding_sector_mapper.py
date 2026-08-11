@@ -24,7 +24,7 @@ import pandas as pd
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("07_tools", "07_tools/holdings"):
+for _p in ("src", "src/pipeline/holdings"):
     sys.path.insert(0, str(ROOT / _p))
 
 from holdings import holding_sector_mapper as hsm  # noqa: E402

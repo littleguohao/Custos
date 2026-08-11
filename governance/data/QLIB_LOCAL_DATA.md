@@ -5,7 +5,7 @@
 > 代码已默认跳过（`load_bars_qlib` / `list_universe` 同口径），`allow_unverified=True` 可放行。
 > ⇒ **qlib 现在只覆盖 1999-11 ~ 2020-09**（老 bundle），且只在这段有 214 只退市票可去偏。
 >
-> `E:\S_DATA` 下的 qlib bundle / 单票 CSV，通过 `07_tools/s_data.py` 只读访问。
+> `E:\S_DATA` 下的 qlib bundle / 单票 CSV，通过 `src/datasource/s_data.py` 只读访问。
 > **只服务研究与回测链，live 链不用。**
 >
 > 2026-08-06 新建。此前它的关键事实只写在 `s_data.py` 的 docstring 里，
@@ -107,7 +107,7 @@ qlib 偏离 134/186/3 天。
 ⇒ 老 bundle 只能**自洽检验**，用它自带的两个字段：
 
 ```bash
-uv run python 07_tools/research/reconcile_qfq.py --qlib-selfcheck 600519
+uv run python src/research/reconcile_qfq.py --qlib-selfcheck 600519
 ```
 
     change  日收益率 ⇒ 与 close.pct_change() 比对，可知 close 的收益口径
@@ -171,16 +171,16 @@ vipdoc 有数据的时段。**
 
 ```bash
 # 全量对账（自动挑窗口内除权影响最大的票）
-uv run python 07_tools/research/reconcile_qfq.py --auto 20
+uv run python src/research/reconcile_qfq.py --auto 20
 
 # 单只票明细：逐日数字 + 谁错（未复权收益作第三方基准）+ 涨跌停越界
-uv run python 07_tools/research/reconcile_qfq.py --detail 600519
+uv run python src/research/reconcile_qfq.py --detail 600519
 
 # 复权约定探测：乘法 vs 加法，并列出每段的调整量 c
-uv run python 07_tools/research/reconcile_qfq.py --convention 600519
+uv run python src/research/reconcile_qfq.py --convention 600519
 
 # bundle 实有字段（看有没有 factor 能还原）
-uv run python 07_tools/research/reconcile_qfq.py --qlib-fields 600519
+uv run python src/research/reconcile_qfq.py --qlib-fields 600519
 ```
 
 ---
@@ -277,7 +277,7 @@ SH600000	1999-11-10	2026-02-27
 量化诊断：
 
 ```bash
-uv run python 07_tools/research/reconcile_qfq.py --gap-report
+uv run python src/research/reconcile_qfq.py --gap-report
 ```
 
 它报三件事：**① vipdoc 深度分布**（各票根数接近 ⇒ 是下载设置，可扩）；

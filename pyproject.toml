@@ -20,7 +20,11 @@ dev = [
 # Linux/Mac 仅可使用 online 模式
 
 [tool.pytest.ini_options]
-pythonpath = ["07_tools", "07_tools/market_timing", "07_tools/close_review", "07_tools/news", "07_tools/local_tdx", "07_tools/trades"]
+pythonpath = ["src", "src/core", "src/core/factors", "src/core/trades",
+              "src/datasource", "src/datasource/collect", "src/datasource/local_tdx",
+              "src/datasource/news",
+              "src/pipeline", "src/pipeline/screening", "src/pipeline/market_timing",
+              "src/pipeline/holdings", "src/pipeline/close_review", "src/research"]
 testpaths = ["tests"]
 
 [dependency-groups]

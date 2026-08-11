@@ -177,7 +177,7 @@ class TestCliWiring:
 
     def test_cli_exposes_flags(self):
         import pathlib
-        src = pathlib.Path("07_tools/research/backtest_factors.py").read_text(encoding="utf-8")
+        src = pathlib.Path("src/research/backtest_factors.py").read_text(encoding="utf-8")
         assert '"--breakeven"' in src and '"--trail"' in src
         assert "breakeven_trigger=args.breakeven" in src and "trail_pct=args.trail" in src
 

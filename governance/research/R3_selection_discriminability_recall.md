@@ -88,7 +88,7 @@
     - 准入门槛(§5):必须 `--data-source qlib --universe-sdata`(含退市宇宙)+ 多窗;⚠️ qlib 有
       2020-09-28→2021-07-30 缺口、止于 2026-02-06,跨该缺口的窗口对须剔除。
     - 边界:**基本面腿此前进不来**(结论#11 唯一未测项)。mootdx Affair 财报无发布日期 → 任何基本面
-      特征在回测里都是 look-ahead。**2026-07-31 已解**:`07_tools/local_tdx/fetch_pit_financials.py`
+      特征在回测里都是 look-ahead。**2026-07-31 已解**:`src/datasource/local_tdx/fetch_pit_financials.py`
       按报告期批量拉东方财富业绩报表,取 `NOTICE_DATE`(公告日)作 PIT 可见日,以
       `(code, report_date, notice_date)` 三元组落 JSONL,`as_of()` 返回某日真正可见的最新一期。
       实测节奏正确:浦发银行 2024-08-01 看到的仍是**一季报**(中报 8/20 才公告),9/1 才切中报;

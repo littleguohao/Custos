@@ -1,23 +1,23 @@
 # -*- coding: utf-8 -*-
-"""Guard against BASE path depth regressions in 07_tools subdirectory scripts."""
+"""Guard against BASE path depth regressions in src subdirectory scripts."""
 import unittest
 from pathlib import Path
 
-TOOLS = Path(__file__).resolve().parent.parent / "07_tools"
+TOOLS = Path(__file__).resolve().parent.parent / "src"
 
 
 class BasePathDepthTests(unittest.TestCase):
-    """Every script in 07_tools/<subdir>/ must resolve BASE to the project root."""
+    """Every script in src/<subdir>/ must resolve BASE to the project root."""
 
     def test_subdir_scripts_resolve_base_to_project_root(self):
         project_root = TOOLS.parent
-        markers = {"governance", "data", "07_tools"}
+        markers = {"governance", "data", "src"}
         broken = []
         for p in sorted(TOOLS.rglob("*.py")):
             if p.name in ("__init__.py", "conftest.py", "paths.py"):
                 continue
             if p.parent == TOOLS:
-                continue  # 07_tools/*.py — parent.parent is correct
+                continue  # src/*.py — parent.parent is correct
             text = p.read_text(encoding="utf-8")
             if "parent.parent" in text and "parents[2]" not in text:
                 # Check if it's actually a BASE definition
@@ -27,7 +27,7 @@ class BasePathDepthTests(unittest.TestCase):
 
     def test_project_root_has_expected_markers(self):
         root = TOOLS.parent
-        for marker in ["governance", "data", "07_tools", "tests"]:
+        for marker in ["governance", "data", "src", "tests"]:
             self.assertTrue((root / marker).exists(), f"Missing project marker: {marker}/")
 
 
@@ -74,7 +74,7 @@ class TestGovernanceLayout:
         import pathlib
         root = pathlib.Path(__file__).resolve().parents[1]
         offenders = []
-        for p in (root / "07_tools").rglob("*.py"):
+        for p in (root / "src").rglob("*.py"):
             if p.name == "paths.py":
                 continue
             for i, ln in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
@@ -106,7 +106,7 @@ class TestNoPatchingDefaultArgConstants:
     """
 
     def _default_arg_constants(self, root):
-        """AST 扫 07_tools：``{模块名: {被当作函数默认参数用的模块级常量}}``。
+        """AST 扫 src：``{模块名: {被当作函数默认参数用的模块级常量}}``。
 
         ⚠️ **必须按模块分开**。第一版把常量名跨模块收成一个集合，于是
         `amv_state.LEDGER`（在**函数体内**读、patch 完全有效）被
@@ -115,7 +115,7 @@ class TestNoPatchingDefaultArgConstants:
         """
         import ast
         out: dict[str, set[str]] = {}
-        for p in (root / "07_tools").rglob("*.py"):
+        for p in (root / "src").rglob("*.py"):
             try:
                 tree = ast.parse(p.read_text(encoding="utf-8"))
             except SyntaxError:
@@ -190,13 +190,13 @@ class TestNoPatchingDefaultArgConstants:
     def test_check_itself_detects_a_planted_case(self, tmp_path):
         """检查函数自己要有测试——写 test_tdx_connection_hygiene 时的教训：
         第一版字符串匹配被一个残留常量骗过、反向验证全绿。"""
-        (tmp_path / "07_tools").mkdir()
-        (tmp_path / "07_tools" / "m.py").write_text(
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "m.py").write_text(
             "SOME_ROOT = 1\ndef f(root=SOME_ROOT):\n    return root\n", encoding="utf-8")
         got = self._default_arg_constants(tmp_path)
         assert got.get("m") == {"SOME_ROOT"}, got
         # 短名/小写不该被收进来（避免误报）
-        (tmp_path / "07_tools" / "n.py").write_text(
+        (tmp_path / "src" / "n.py").write_text(
             "AB = 1\nlower = 2\ndef g(a=AB, b=lower):\n    return a, b\n", encoding="utf-8")
         got2 = self._default_arg_constants(tmp_path)
         assert got2.get("n") is None, got2      # 短名/小写都不该被收进来
@@ -236,13 +236,21 @@ class SubprocessTargetTests(unittest.TestCase):
             for node in ast.walk(tree):
                 if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)):
                     continue
-                if not (isinstance(node.left, ast.Name) and node.left.id.isupper()):
-                    continue
                 if not (isinstance(node.right, ast.Constant)
                         and isinstance(node.right.value, str)
                         and node.right.value.endswith(".py")):
                     continue
-                hits.append((node.lineno, node.left.id, node.right.value))
+                # 向左展开多级链：X / "dir" / ... / "x.py"（归堆后 stage 路径至少三段）
+                segs = [node.right.value]
+                cur = node.left
+                while (isinstance(cur, ast.BinOp) and isinstance(cur.op, ast.Div)
+                       and isinstance(cur.right, ast.Constant)
+                       and isinstance(cur.right.value, str)):
+                    segs.append(cur.right.value)
+                    cur = cur.left
+                if not (isinstance(cur, ast.Name) and cur.id.isupper()):
+                    continue
+                hits.append((node.lineno, cur.id, list(reversed(segs))))
             if not hits:
                 continue
             try:
@@ -250,10 +258,10 @@ class SubprocessTargetTests(unittest.TestCase):
                                              else f"{f.parent.name}.{f.stem}")
             except Exception:
                 continue          # 导入失败由别的测试负责报告
-            for lineno, const, script in hits:
+            for lineno, const, segs in hits:
                 base = getattr(mod, const, None)
                 if isinstance(base, Path):
-                    yield f, lineno, const, script, base / script
+                    yield f, lineno, const, "/".join(segs), base.joinpath(*segs)
 
     def test_every_subprocess_script_target_exists(self):
         broken = [f"{f.relative_to(TOOLS.parent)}:{ln}  {const}/{script}"
@@ -282,7 +290,7 @@ class SubprocessTargetTests(unittest.TestCase):
 
 
 class LocalPathRedefinitionTests(unittest.TestCase):
-    """⚠️ 模块不得本地重拼 `paths.py` 已定义的 **07_tools 子目录**路径。
+    """⚠️ 模块不得本地重拼 `paths.py` 已定义的 **src 子目录**路径。
 
     原有守卫 `test_modules_do_not_rebuild_governance_paths` 只查**治理层**路径，
     所以没拦住 `daily_pipeline` 本地重定义的 `MARKET_TIMING = TOOLS / "market_timing"`
@@ -305,7 +313,7 @@ class LocalPathRedefinitionTests(unittest.TestCase):
         sys.path.insert(0, str(TOOLS))
         import paths as paths_mod
 
-        # 只取 07_tools 下的子目录常量
+        # 只取 src 下的子目录常量
         known = {v: k for k, v in vars(paths_mod).items()
                  if isinstance(v, Path) and k.isupper()
                  and v != paths_mod.TOOLS and paths_mod.TOOLS in v.parents}
@@ -318,7 +326,7 @@ class LocalPathRedefinitionTests(unittest.TestCase):
             except SyntaxError:
                 continue
             # ⚠️ 豁免 bootstrap：有些模块既当包内模块 import、也被直接当脚本跑，
-            # 必须先本地算出 07_tools 再塞进 sys.path，`paths` 那时还导不进来（鸡生蛋）。
+            # 必须先本地算出 src 再塞进 sys.path，`paths` 那时还导不进来（鸡生蛋）。
             # 判据是「该赋值出现在 `from paths import` **之前**」—— 用行号比，
             # 不猜变量名（`adjust_factors` 叫 TOOLS_DIR，别的模块叫 _TOOLS_ROOT）。
             paths_import_line = min(

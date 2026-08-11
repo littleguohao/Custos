@@ -7,13 +7,13 @@
 
 ```
 全A股(~5500)
-  → [1] 公式初筛  07_tools/screening/formula_screen.py
+  → [1] 公式初筛  src/pipeline/screening/formula_screen.py
         TQ formula_process_mul_xg 批量跑注册公式 → data/screening/{date}_formula_hits.json
-  → [2] 充实+模式识别  07_tools/screening/enrich_candidates.py
+  → [2] 充实+模式识别  src/pipeline/screening/enrich_candidates.py
         本地日线算 BBI/日J/量比/20日相对强度；硬排除 → data/screening/{date}_candidates_enriched.json
-  → [3] 板块过滤+打分  07_tools/screening/score_candidates.py
+  → [3] 板块过滤+打分  src/pipeline/screening/score_candidates.py
         sector_state + 0AMV 共振矩阵打分分层 A/B/C/D → data/stock_pool/{date}_stock_pool.json
-  → [4] 渲染备选表格  07_tools/screening/candidate_table.py
+  → [4] 渲染备选表格  src/pipeline/screening/candidate_table.py
         → artifacts/reports/daily/_supporting/{date}/{date}_candidate_table.md（日报证据层）
 ```
 
@@ -32,7 +32,7 @@ TdxW 未运行或任一阶段失败时整链干净降级（status=unavailable / 
   ErrorId=9）。当前启用：KDJ_J_LOW（用户自建 `J小于13`，B1 回调型初筛，
   2026-07-22 接入；同日用户决策停用 UPN_3/MA_BUY 等非 B1 动量/趋势公式）。
 - **自选池通道**（`manual_pools`）：用户在通达信客户端手工维护的备选池
-  （如"震荡"），经 `07_tools/screening/manual_pools.py` 读取
+  （如"震荡"），经 `src/pipeline/screening/manual_pools.py` 读取
   `T0002/blocknew/*.blk`（本地文件，TdxW 离线也可用），以
   `category=manual_pool` 伪公式条目与公式命中并集进入 [2]。池子增删股票
   只需在客户端操作，次日自动生效；新增池子在注册表 `manual_pools` 加一条
@@ -69,7 +69,7 @@ TdxW 未运行或任一阶段失败时整链干净降级（status=unavailable / 
 MACD 零轴上/DKS 上行，阈值见 enrich 顶部待回测常量）给贴合度分，
 越符合 good_b1 完美图形分数越高。
 
-板块映射：**优先 miscinfo 概念标签**（`07_tools/local_tdx/concept_tags.py`，
+板块映射：**优先 miscinfo 概念标签**（`src/datasource/local_tdx/concept_tags.py`，
 TQ `download_file down_type=4`，run_1800 第 2 步每日刷新，落盘
 `data/sectors/stock_concept_tags.json`）——个股官方概念标签与各主题
 `semantic_tags` 双向子串匹配，命中数最多的主题中标，无命中则 sector=未知
@@ -100,9 +100,9 @@ base bucket ＝ 技术结构 × 资金意图（均为个股维度）：
   > 建议：S**≥70 可买 / 60-69 观望 / <60 不买。
 
   分项封顶天然有界（解决旧 technical_score 无界累加饱和问题），实现见
-  `07_tools/factors/s_shape.py`；**幻灯片部分阈值被遮挡，相关常量取合理猜测并标注"待回测"**，
+  `src/core/factors/s_shape.py`；**幻灯片部分阈值被遮挡，相关常量取合理猜测并标注"待回测"**，
   校准前不视为定型，各分项实际值随候选落盘可复盘。
-  **校准工具**：`07_tools/research/backtest_factors.py`（纯分析、只读本地日线、as-of 切片无未来函数）
+  **校准工具**：`src/research/backtest_factors.py`（纯分析、只读本地日线、as-of 切片无未来函数）
   走查历史 S** → 前向 MFE/MAE/胜率，按 S** 档/建议/分项分组，验证"可买(≥70)"是否显著优于"不买(<60)"、
   各分项 hit 是否有正向 lift，据此重估 s_shape.py 顶部的待回测阈值与权重。
 
@@ -118,7 +118,7 @@ base bucket ＝ 技术结构 × 资金意图（均为个股维度）：
     `{date}_fund_flow_rank.json`）：个股在主力净流入榜且净流入、或所属主题板块净流入 → 计入
     `capital_intent`(资金意图轴，正交于量价)。文件缺失干净降级。
     **多日累计**：`fund_flow.cumulative_days`(默认1)>1 时累加最近N个每日快照的主力净流入(单日噪声大、多日更稳)。
-  - **财务维度（脚手架，默认关）**：`07_tools/screening/financials.py` 用 mootdx Affair 财务表做
+  - **财务维度（脚手架，默认关）**：`src/pipeline/screening/financials.py` 用 mootdx Affair 财务表做
     CZ §四抄底三条件代理。列名关键词自动映射(`auto_colmap`)+ `registry.financials.columns` 按字段覆盖，
     `--inspect` 可验证最终映射与抽样。已校准映射：net_profit=`五、净利润`、revenue=`营业总收入(单季度)(万元)`、
     net_profit_yoy=`扣非净利润同比(%)`、roe=`加权净资产收益率`、code=行索引。`dixi_proxy` 优雅降级：

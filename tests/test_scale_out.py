@@ -202,7 +202,7 @@ class TestCliWiring:
         import subprocess
         import sys
         from paths import BASE
-        r = subprocess.run([sys.executable, str(BASE / "07_tools" / "research"
+        r = subprocess.run([sys.executable, str(BASE / "src" / "research"
                                                 / "backtest_factors.py"), "--help"],
                            capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=120)

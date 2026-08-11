@@ -39,7 +39,7 @@ import re
 
 import pytest
 
-TOOLS = pathlib.Path(__file__).resolve().parents[1] / "07_tools"
+TOOLS = pathlib.Path(__file__).resolve().parents[1] / "src"
 
 # 允许豁免的文件及理由（豁免必须写理由，不能空着）
 EXEMPT: dict[str, str] = {
@@ -153,17 +153,17 @@ class TestKnownFixesStayFixed:
     """三处已修的地方各钉一条，防止回退。"""
 
     def test_local_tdx_data(self):
-        src = (TOOLS / "local_tdx" / "local_tdx_data.py").read_text(encoding="utf-8")
+        src = (TOOLS / "datasource" / "local_tdx" / "local_tdx_data.py").read_text(encoding="utf-8")
         assert "force_new" in src and "CLIENT_MAX_AGE_SEC" in src
         assert "_with_client_retry" in src
 
     def test_tdx_ext_quotes(self):
-        src = (TOOLS / "market_timing" / "tdx_ext_quotes.py").read_text(encoding="utf-8")
+        src = (TOOLS / "pipeline" / "market_timing" / "tdx_ext_quotes.py").read_text(encoding="utf-8")
         assert any(m in src for m in RECONNECT_MARKERS), \
             "tdx_ext_quotes 的重连机制被移除了（aeb3e25 修过）"
 
     def test_collect_holding_quotes(self):
-        src = (TOOLS / "collect" / "collect_holding_quotes.py").read_text(encoding="utf-8")
+        src = (TOOLS / "datasource" / "collect" / "collect_holding_quotes.py").read_text(encoding="utf-8")
         assert "_client_call" in src, "持仓行情采集的重连包装被移除了"
         # 三处协议调用都必须走包装，不能直连
         assert not re.search(r"_get_client\(\)\.(bars|index|quotes)\(", src), \

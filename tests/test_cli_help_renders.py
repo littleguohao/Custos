@@ -16,13 +16,13 @@ import re
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-TOOLS = ROOT / "07_tools"
+TOOLS = ROOT / "src"
 
 
 def _discover_cli() -> list[tuple[pathlib.Path, str, bool]]:
     """扫出所有「有 ArgumentParser + main()」的模块。
 
-    ⚠️ 原先是**硬编码 7 个模块**的清单，而 07_tools 里有 **69 个** CLI。
+    ⚠️ 原先是**硬编码 7 个模块**的清单，而 src 里有 **69 个** CLI。
     2026-08-07 改为自动发现 —— 手维护的清单会漏，而漏掉的那些恰恰是
     没人跑 `--help` 的冷门脚本（`adjust_diagnostic` 的 `--help` 因未转义 `%`
     崩掉，当天是**手工**才发现的，清单里没有它）。

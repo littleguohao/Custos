@@ -45,7 +45,7 @@ artifacts/reports/daily/*_final_review.md
 **/artifacts/reports/daily/*_daily_report.md
 **/artifacts/reports/daily/*_1445_review.md
 **/artifacts/logs/
-07_tools/_debug/
+src/_debug/
 *.log
 *.tmp
 ~$*

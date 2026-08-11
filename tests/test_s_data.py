@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-# ⚠️ 扁平 `import s_data`：2026-08-07 它从 `screening/` 移到 `07_tools/` 根层
+# ⚠️ 扁平 `import s_data`：2026-08-07 它从 `screening/` 移到 `src/` 根层
 # （它是零内部依赖的**只读数据 loader**，放在选股目录里让 `local_tdx/` 的
 # 探针与对账工具反向依赖了 L3）。移动后**只有一条导入路径** ——
 # 此前全部调用点用扁平 `import s_data`、只有本测试用 `from screening import`，

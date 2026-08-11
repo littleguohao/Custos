@@ -27,7 +27,7 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("07_tools", "07_tools/market_timing", "07_tools/screening", "07_tools/local_tdx"):
+for _p in ("src", "src/pipeline/market_timing", "src/pipeline/screening", "src/datasource/local_tdx"):
     sys.path.insert(0, str(ROOT / _p))
 
 from code_utils import price_limit_pct  # noqa: E402
@@ -98,8 +98,8 @@ class TestNoRefork:
         """
         allowed = {"code_utils.py"}
         offenders = []
-        for p in sorted((ROOT / "07_tools").rglob("*.py")):
-            rel = str(p.relative_to(ROOT / "07_tools"))
+        for p in sorted((ROOT / "src").rglob("*.py")):
+            rel = str(p.relative_to(ROOT / "src"))
             if rel in allowed:
                 continue
             for i, line in enumerate(p.read_text(encoding="utf-8").split("\n"), 1):

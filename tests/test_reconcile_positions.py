@@ -1,6 +1,6 @@
 """台账↔持仓对账。
 
-2026-08-06 review `07_tools/trades/` 时发现的缺口：
+2026-08-06 review `src/core/trades/` 时发现的缺口：
 `incremental_ledger._commit` 刻意选择「ledger 先落、positions 后落」这个失败顺序，
 理由是崩在两次 `os.replace` 之间留下的「已记录成交但持仓未更新」**可检测、可修复**；
 反过来会让下次导入把同一批成交再算一遍（持仓静默翻倍，真实发生过）。
@@ -20,8 +20,8 @@ import pandas as pd
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "07_tools"))
-sys.path.insert(0, str(ROOT / "07_tools" / "trades"))
+sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "src" / "core" / "trades"))
 
 import reconcile_positions as rp  # noqa: E402
 
@@ -167,7 +167,7 @@ class TestReusesSingleSourceOfTruth:
         """
         import ast
 
-        src = (ROOT / "07_tools" / "trades" / "reconcile_positions.py").read_text(encoding="utf-8")
+        src = (ROOT / "src" / "core" / "trades" / "reconcile_positions.py").read_text(encoding="utf-8")
         tree = ast.parse(src)
 
         imported = {a.name for n in ast.walk(tree)
@@ -223,7 +223,7 @@ class TestWiredIntoDailyChain:
     （2026-07-30 的教训是别同时收紧多个闸）。
     """
 
-    SRC = (ROOT / "07_tools" / "run_1700.py").read_text(encoding="utf-8")
+    SRC = (ROOT / "src" / "pipeline" / "run_1700.py").read_text(encoding="utf-8")
 
     def test_stage_present(self):
         assert "reconcile_positions.py" in self.SRC, "17:00 链未接入对账"

@@ -18,7 +18,7 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("07_tools", "07_tools/market_timing"):
+for _p in ("src", "src/pipeline/market_timing"):
     sys.path.insert(0, str(ROOT / _p))
 
 from market_timing import market_timing_collector as mtc  # noqa: E402

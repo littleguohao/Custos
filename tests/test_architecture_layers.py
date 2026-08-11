@@ -26,9 +26,11 @@ import pathlib
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-TOOLS = ROOT / "07_tools"
+TOOLS = ROOT / "src"
 
 # ── 分层：数字越小越底层。同层互相依赖允许，下层依赖上层不允许。
+# 2026-08-11 归堆（src/{core,datasource,pipeline,research}）后 rel 带组前缀：
+# core 顶层文件名 ∈ BASE_MODULES 才是 L0；组内子目录用两级键查 LAYER_OF_DIR。
 BASE_MODULES = {"paths.py", "code_utils.py", "indicators.py", "fmt.py",
                 "net_retry.py", "pipeline_kit.py", "runtime_guards.py",
                 # `contracts.py` 是产物 schema 的唯一来源，被 L1~L3 的生产者调用。
@@ -44,30 +46,35 @@ BASE_MODULES = {"paths.py", "code_utils.py", "indicators.py", "fmt.py",
                 # 只依赖 `paths`（L0）与 stdlib。
                 "report_audit.py"}
 LAYER_OF_DIR = {
-    "local_tdx": 1, "collect": 1, "news": 1,
-    "factors": 2, "trades": 2,
-    "screening": 3, "market_timing": 3, "close_review": 3,
+    "datasource/local_tdx": 1, "datasource/collect": 1, "datasource/news": 1,
+    "core/factors": 2, "core/trades": 2,
+    "pipeline/screening": 3, "pipeline/market_timing": 3, "pipeline/close_review": 3,
     # 2026-08-07：`holdings/` 从 market_timing 拆出 —— 持仓状态与择时是不同的事，
     # 读者找「持仓状态机」不会想到去 market_timing 找。
     # `analysis/` 同日删除（两个文件各归其位后空了）。
-    "holdings": 3,
+    "pipeline/holdings": 3,
     # research/ 在生产链**之上**：回测要跑生产的因子与打分逻辑。
     # 2026-08-07 从 screening/ 拆出（研究代码占了那个目录的 70%）。
     "research": 4,
 }
-# 根目录下的**数据适配器**：性质是 L1，不是编排层。
-# `s_data.py` 是 qlib/CSV 只读 loader（零内部依赖），2026-08-07 从 `screening/`
-# 移来 —— 放在选股目录里会让 `local_tdx/` 的探针与对账工具反向依赖 L3。
-DATA_ADAPTERS = {"s_data.py"}
-ROOT_LAYER = 4   # 07_tools 根目录：runner 与编排
+# datasource/ 顶层文件是**数据适配器**：性质是 L1，不是编排层。
+# `s_data.py` 是 qlib/CSV 只读 loader（零内部依赖）；
+# `trading_calendar.py` 是 TDX 交易日历维护（只依赖 L0）。
+DATA_ADAPTERS = {"datasource/s_data.py", "datasource/trading_calendar.py"}
+ROOT_LAYER = 4   # pipeline 顶层：runner 与编排
 
 
 def _layer(rel: str) -> int:
-    if rel in BASE_MODULES:
+    parts = rel.split("/")
+    if parts[0] == "core" and len(parts) == 2 and parts[1] in BASE_MODULES:
         return 0
     if rel in DATA_ADAPTERS:
         return 1
-    return LAYER_OF_DIR.get(rel.split("/")[0], ROOT_LAYER) if "/" in rel else ROOT_LAYER
+    if parts[0] == "research":
+        return LAYER_OF_DIR["research"]
+    if parts[0] == "datasource" and len(parts) == 2:
+        return 1                       # datasource/__init__.py 等
+    return LAYER_OF_DIR.get("/".join(parts[:2]), ROOT_LAYER)
 
 
 def _build_graph():
@@ -143,16 +150,16 @@ class TestLayerDirection:
         """
         bad = []
         for a, deps in GRAPH.items():
-            if not a.startswith("factors/"):
+            if not a.startswith("core/factors/"):
                 continue
             for b in deps:
-                if not (b in BASE_MODULES or b.startswith("factors/") or _layer(b) <= 1):
+                if not (b.startswith("core/factors/") or _layer(b) <= 1):
                     bad.append(f"{a} → {b}")
         assert not bad, "factors/ 越层依赖：\n  " + "\n  ".join(sorted(bad))
 
     def test_no_factor_imports_backtester(self):
         """单列一条：因子**绝不许** import 回测器（1959 行、连带 40+ 模块）。"""
-        bad = [f"{a} → {b}" for a, deps in GRAPH.items() if a.startswith("factors/")
+        bad = [f"{a} → {b}" for a, deps in GRAPH.items() if a.startswith("core/factors/")
                for b in deps if "backtest_factors" in b]
         assert not bad, "\n  ".join(bad)
 
@@ -164,8 +171,8 @@ class TestNoCycles:
     """
 
     ALLOWED = {
-        ("local_tdx/adjust_factors.py", "local_tdx/local_tdx_data.py"),
-        ("screening/enrich_candidates.py", "screening/signal_labels.py"),
+        ("datasource/local_tdx/adjust_factors.py", "datasource/local_tdx/local_tdx_data.py"),
+        ("pipeline/screening/enrich_candidates.py", "pipeline/screening/signal_labels.py"),
     }
 
     def test_no_unexpected_cycles(self):
@@ -201,20 +208,20 @@ class TestIndicatorLayer:
         """指标函数集中在 `indicators.py`，`technical_monitor` 不得再定义它们。"""
         moved = {"kdj", "macd", "ema", "resample", "bbi_state", "zhixing_state",
                  "_infer_price_limit"}
-        tm = ast.parse((TOOLS / "market_timing" / "technical_monitor.py")
+        tm = ast.parse((TOOLS / "pipeline" / "market_timing" / "technical_monitor.py")
                        .read_text(encoding="utf-8"))
         redefined = {n.name for n in tm.body
                      if isinstance(n, ast.FunctionDef) and n.name in moved}
         assert not redefined, f"这些已下移到 indicators，不得在 technical_monitor 重新定义：{redefined}"
 
-        ind = ast.parse((TOOLS / "indicators.py").read_text(encoding="utf-8"))
+        ind = ast.parse((TOOLS / "core" / "indicators.py").read_text(encoding="utf-8"))
         have = {n.name for n in ind.body if isinstance(n, ast.FunctionDef)}
         assert moved <= have, f"indicators 缺少：{moved - have}"
 
     def test_indicators_has_no_upward_dependency(self):
         """`indicators.py` 是底层，只许依赖 `code_utils`（取涨跌幅前缀基准）。"""
-        assert GRAPH.get("indicators.py", set()) <= {"code_utils.py"}, \
-            f"indicators 多出依赖：{GRAPH.get('indicators.py')}"
+        assert GRAPH.get("core/indicators.py", set()) <= {"core/code_utils.py"}, \
+            f"indicators 多出依赖：{GRAPH.get('core/indicators.py')}"
 
 
 class TestContractsLayer:
@@ -224,41 +231,41 @@ class TestContractsLayer:
         它是产物 schema 的唯一来源，被 L1~L3 的生产者在落盘前调用。
         若它依赖别的项目模块，就可能出现「校验层依赖被校验对象」的环。
         """
-        assert GRAPH.get("contracts.py", set()) == set(), \
-            f"contracts.py 不得依赖项目内模块，实际: {GRAPH.get('contracts.py')}"
+        assert GRAPH.get("core/contracts.py", set()) == set(), \
+            f"contracts.py 不得依赖项目内模块，实际: {GRAPH.get('core/contracts.py')}"
 
     def test_money_path_producers_validate_before_write(self):
         """四个钱的路径产物的生产者必须在落盘前 `require(...)`。"""
         import re
         expect = {
-            "runtime_guards.py": "runtime_gate",
-            "generate_risk_and_sectors.py": "risk_decision",
-            "market_timing/chief_decision_report.py": "chief_decision",
-            "holdings/b1_holding_state.py": "b1_holding_state",
+            "core/runtime_guards.py": "runtime_gate",
+            "pipeline/generate_risk_and_sectors.py": "risk_decision",
+            "pipeline/market_timing/chief_decision_report.py": "chief_decision",
+            "pipeline/holdings/b1_holding_state.py": "b1_holding_state",
             # 2026-08-07 第二批（按消费者数量排的优先级）
-            "market_timing/market_timing_collector.py": "market_timing_input",
-            "market_timing/merge_incremental_market.py": "market_timing_input",
-            "holdings/batch_holding_technical.py": "holding_technical_summary",
+            "pipeline/market_timing/market_timing_collector.py": "market_timing_input",
+            "pipeline/market_timing/merge_incremental_market.py": "market_timing_input",
+            "pipeline/holdings/batch_holding_technical.py": "holding_technical_summary",
             # 第三批：硬失败链上其余产物
-            "collect/collect_holding_quotes.py": "holding_quotes",
-            "market_timing/theme_tracker_report.py": "sector_technical_summary",
-            "close_review/execution_review.py": "execution_review",
-            "close_review/review_enrichment.py": "review_enrichment",
+            "datasource/collect/collect_holding_quotes.py": "holding_quotes",
+            "pipeline/market_timing/theme_tracker_report.py": "sector_technical_summary",
+            "pipeline/close_review/execution_review.py": "execution_review",
+            "pipeline/close_review/review_enrichment.py": "review_enrichment",
             # 第四批：硬失败链之外，铺完剩余
-            "screening/score_candidates.py": "stock_pool",
-            "close_review/final_close_review.py": "final_review",
-            "holdings/portfolio_review_report.py": "holding_review",
-            "close_review/calc_mfe_mae.py": "mfe_mae",
-            "collect/collect_fund_flow.py": "fund_flow_rank",
-            "screening/formula_screen.py": "formula_hits",
-            "screening/enrich_candidates.py": "candidates_enriched",
-            "news/rss_collector.py": "rss_evidence",
-            "news/rss_filter.py": "rss_candidates",
-            "news/postclose_news_digest.py": "postclose_news_digest",
+            "pipeline/screening/score_candidates.py": "stock_pool",
+            "pipeline/close_review/final_close_review.py": "final_review",
+            "pipeline/holdings/portfolio_review_report.py": "holding_review",
+            "pipeline/close_review/calc_mfe_mae.py": "mfe_mae",
+            "datasource/collect/collect_fund_flow.py": "fund_flow_rank",
+            "pipeline/screening/formula_screen.py": "formula_hits",
+            "pipeline/screening/enrich_candidates.py": "candidates_enriched",
+            "datasource/news/rss_collector.py": "rss_evidence",
+            "datasource/news/rss_filter.py": "rss_candidates",
+            "datasource/news/postclose_news_digest.py": "postclose_news_digest",
             # 第五批：扫描发现的剩余产物
-            "collect/collect_intraday_snapshot.py": "intraday_snapshot",
-            "local_tdx/tq_sector.py": "tq_sector_map",
-            "holdings/holding_sector_mapper.py": "holding_sector_mapping",
+            "datasource/collect/collect_intraday_snapshot.py": "intraday_snapshot",
+            "datasource/local_tdx/tq_sector.py": "tq_sector_map",
+            "pipeline/holdings/holding_sector_mapper.py": "holding_sector_mapping",
         }
         for rel, artifact in expect.items():
             src = (TOOLS / rel).read_text(encoding="utf-8")
@@ -267,7 +274,7 @@ class TestContractsLayer:
 
     def test_sector_state_validated(self):
         import re
-        src = (TOOLS / "generate_risk_and_sectors.py").read_text(encoding="utf-8")
+        src = (TOOLS / "pipeline" / "generate_risk_and_sectors.py").read_text(encoding="utf-8")
         assert re.search(r"require\(['\"]sector_state['\"]", src)
 
 
@@ -280,7 +287,7 @@ class TestResearchProductionSplit:
     """
 
     def test_production_never_imports_research(self):
-        bad = [f"{a} → {b}" for a, deps in GRAPH.items() if a.startswith("screening/")
+        bad = [f"{a} → {b}" for a, deps in GRAPH.items() if a.startswith("pipeline/screening/")
                for b in deps if b.startswith("research/")]
         assert not bad, ("生产选股链不得依赖研究脚本：\n  " + "\n  ".join(bad))
 
@@ -288,12 +295,12 @@ class TestResearchProductionSplit:
         """反向是允许且实际存在的（`backtest_factors → enrich_candidates`）——
         这条测试确认拆分没把它切断（切断了说明研究脚本已经跑不起来）。"""
         edges = [f"{a} → {b}" for a, deps in GRAPH.items() if a.startswith("research/")
-                 for b in deps if b.startswith("screening/")]
+                 for b in deps if b.startswith("pipeline/screening/")]
         assert edges, "研究脚本应仍能依赖生产模块（回测要跑生产逻辑）"
 
     def test_screening_has_only_production_chain(self):
         """`screening/` 里只剩 18:00 生产链会用到的模块。"""
-        got = {p.stem for p in (TOOLS / "screening").glob("*.py")} - {"__init__"}
+        got = {p.stem for p in (TOOLS / "pipeline" / "screening").glob("*.py")} - {"__init__"}
         assert got == {"formula_screen", "enrich_candidates", "score_candidates",
                        "candidate_table", "manual_pools", "signal_labels", "financials"}, got
 
@@ -341,7 +348,7 @@ class TestNoStaleScriptPaths:
     """⚠️ 所有以 **Path 构造 / 字符串**形式引用的 `.py` 路径都必须真实存在。
 
     2026-08-07 实际漏过一次：把研究脚本从 `screening/` 移到 `research/` 时，
-    替换脚本只匹配字符串路径 `"07_tools/screening/x.py"`，漏了
+    替换脚本只匹配字符串路径 `"src/pipeline/screening/x.py"`，漏了
     `TOOLS / "screening" / "launch_point_study.py"` 这种 **Path 构造形式**。
     `--help` 子进程冒烟也抓不到 —— 那个路径只在真正 spawn 子进程时才用到。
 
@@ -351,25 +358,28 @@ class TestNoStaleScriptPaths:
     def test_all_referenced_script_paths_exist(self):
         import re
 
+        # 归堆后（src/{core,datasource,pipeline,research}）按「目录名+文件名」对判存在：
+        # `MARKET_TIMING / "x.py"` 的末两段是 stage 目录名 + 文件名。
+        existing = {(p.parent.name, p.name) for p in TOOLS.rglob("*.py")}
         bad = []
         for p in sorted(TOOLS.rglob("*.py")):
             src = p.read_text(encoding="utf-8")
             # ① Path 构造形式：X / "dir" / "name.py"（允许中间多层）
             for m in re.finditer(r'/\s*"([a-z_0-9]+)"\s*/\s*"([a-z_0-9]+\.py)"', src):
                 d, name = m.group(1), m.group(2)
-                if not (TOOLS / d / name).exists() and not (ROOT / d / name).exists():
+                if (d, name) not in existing and not (ROOT / d / name).exists():
                     bad.append(f"{p.relative_to(TOOLS)}: {d}/{name}")
-            # ② 字符串路径形式：07_tools/dir/name.py
-            for m in re.finditer(r'07_tools/([a-z_0-9]+)/([a-z_0-9]+\.py)', src):
-                if not (TOOLS / m.group(1) / m.group(2)).exists():
-                    bad.append(f"{p.relative_to(TOOLS)}: 07_tools/{m.group(1)}/{m.group(2)}")
+            # ② 字符串路径形式：src/.../name.py（任意层数）
+            for m in re.finditer(r'src/((?:[a-z_0-9]+/)+)([a-z_0-9]+\.py)', src):
+                if not (ROOT / "src" / m.group(1) / m.group(2)).exists():
+                    bad.append(f"{p.relative_to(TOOLS)}: src/{m.group(1)}{m.group(2)}")
         assert not bad, ("引用了不存在的脚本路径（移动文件时漏改）：\n  "
                          + "\n  ".join(sorted(set(bad))))
 
 
 class TestNoDuplicateModuleNames:
     """⚠️ 同一个模块名不得出现在两个目录 —— 否则**扁平 import 会拿到哪一个不确定**
-    （`07_tools` 与各子目录都在 sys.path 上，取决于插入顺序）。
+    （`src` 与各子目录都在 sys.path 上，取决于插入顺序）。
 
     2026-08-07 实际踩到，而且是自己的搬迁脚本造成的：脚本先按**原路径**算出
     「哪些文件需要更新引用」，再 `git mv`，最后**按原路径写回** ——

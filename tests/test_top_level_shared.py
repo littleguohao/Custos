@@ -1,4 +1,4 @@
-"""`07_tools/` 顶层的公用抽取与防重复。
+"""`src/` 顶层的公用抽取与防重复。
 
 2026-08-06 收敛三处真重复。**每一处都不是「形状相同」那么简单**：
 
@@ -19,8 +19,9 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-T = ROOT / "07_tools"
-RUNNERS = ["run_0850.py", "run_0905.py", "run_1445.py", "run_1700.py", "run_1800.py"]
+T = ROOT / "src"
+RUNNERS = ["pipeline/run_0850.py", "pipeline/run_0905.py", "pipeline/run_1445.py",
+           "pipeline/run_1700.py", "pipeline/run_1800.py"]
 
 
 class TestNoLocalRedefinition:
@@ -34,10 +35,10 @@ class TestNoLocalRedefinition:
         assert "run_stage_quiet" in s, f"{runner} 未使用 pipeline_kit.run_stage_quiet"
 
     @pytest.mark.parametrize("mod,fn", [
-        ("runtime_guards.py", "load_json"),
-        ("trading_calendar.py", "load_json"),
-        ("daily_report.py", "load"),
-        ("generate_risk_and_sectors.py", "load"),
+        ("core/runtime_guards.py", "load_json"),
+        ("datasource/trading_calendar.py", "load_json"),
+        ("pipeline/daily_report.py", "load"),
+        ("pipeline/generate_risk_and_sectors.py", "load"),
     ])
     def test_no_local_json_reader(self, mod, fn):
         s = (T / mod).read_text(encoding="utf-8")
@@ -45,8 +46,8 @@ class TestNoLocalRedefinition:
             f"{mod} 又定义了本地 {fn} —— 应用 paths.read_json（它才是 utf-8-sig 的那一份）"
         assert "read_json" in s
 
-    @pytest.mark.parametrize("mod", ["collect/collect_holding_quotes.py",
-                                     "collect/collect_incremental_market.py"])
+    @pytest.mark.parametrize("mod", ["datasource/collect/collect_holding_quotes.py",
+                                     "datasource/collect/collect_incremental_market.py"])
     def test_no_local_fnum(self, mod):
         s = (T / mod).read_text(encoding="utf-8")
         assert not re.search(r"^def _fnum\(", s, re.M), \
@@ -60,7 +61,7 @@ class TestSharedImplBehavior:
         用 utf-8 读带 BOM 的 JSON 会 `JSONDecodeError`（BOM 变成内容字符）。
         utf-8-sig 对无 BOM 文件同样正常，所以它是安全的那一侧。
         """
-        s = (T / "paths.py").read_text(encoding="utf-8")
+        s = (T / "core" / "paths.py").read_text(encoding="utf-8")
         m = re.search(r"def read_json\(.*?return", s, re.S)
         assert m and "utf-8-sig" in m.group(0), "read_json 必须用 utf-8-sig"
 
@@ -205,10 +206,10 @@ class TestMovedScriptsRunAsMain:
     """搬进子目录的**入口脚本**必须仍能作为 `__main__` 跑起来。
 
     ⚠️ **这是 import 型测试抓不到的一类断裂。** 2026-08-06 分包时实际发生：
-    测试全绿（conftest 把 `07_tools` 与各子目录都铺进了 `sys.path`），
-    但 `uv run python 07_tools/collect/collect_fund_flow.py --help` 直接
+    测试全绿（conftest 把 `src` 与各子目录都铺进了 `sys.path`），
+    但 `uv run python src/datasource/collect/collect_fund_flow.py --help` 直接
     `ModuleNotFoundError: net_retry` —— 因为作为脚本跑时 `sys.path[0]` 是**本目录**，
-    不含 `07_tools`。
+    不含 `src`。
 
     而且第一版引导插错了位置：放在 `from paths import` 之前是**不够的** ——
     `collect_fund_flow` 的 `from net_retry import` 在更早的行，会先失败。
@@ -218,14 +219,14 @@ class TestMovedScriptsRunAsMain:
     """
 
     ENTRIES = [
-        "collect/collect_holding_quotes.py",
-        "collect/collect_incremental_market.py",
-        "collect/collect_fund_flow.py",
+        "datasource/collect/collect_holding_quotes.py",
+        "datasource/collect/collect_incremental_market.py",
+        "datasource/collect/collect_fund_flow.py",
         # 2026-08-07 二次搬迁：analyze_trades → research/（手工工具）、
         # calc_mfe_mae → close_review/（17:00 链的一步，且已依赖 weekly_review）。
         # `analysis/` 因此空掉并删除 —— 一个只剩单文件的目录不值得留。
         "research/analyze_trades.py",
-        "close_review/calc_mfe_mae.py",
+        "pipeline/close_review/calc_mfe_mae.py",
     ]
     # online_quotes.py 不在列：它没有 main()/`if __name__`，是纯库模块，
     # 由同目录的 collect_holding_quotes 导入（后者已铺 sys.path）。
@@ -242,7 +243,7 @@ class TestMovedScriptsRunAsMain:
         assert r.returncode == 0, f"{rel} 不能作为脚本执行：\n{r.stderr[-600:]}"
         assert r.stdout.lstrip().startswith("usage"), f"{rel} 未输出 usage"
 
-    @pytest.mark.parametrize("rel", ENTRIES + ["collect/online_quotes.py"])
+    @pytest.mark.parametrize("rel", ENTRIES + ["datasource/collect/online_quotes.py"])
     def test_bootstrap_precedes_first_local_import(self, rel):
         """引导必须在第一个本地模块导入**之前**。"""
         local = {p.stem for p in T.rglob("*.py")} - {"__init__"}
@@ -262,13 +263,13 @@ class TestMovedScriptsRunAsMain:
             f"{rel} 的引导在第 {boot+1} 行，而第一个本地导入在第 {first+1} 行 —— 顺序反了"
 
     def test_no_stale_parent_paths(self):
-        """搬进子目录后，`__file__.parent` 指向的是子目录，不再是 07_tools。
+        """搬进子目录后，`__file__.parent` 指向的是子目录，不再是 src。
 
         `calc_mfe_mae` 原有两处 `Path(__file__).resolve().parent / "close_review"`，
         搬后会指向不存在的 `analysis/close_review` —— 而 `sys.path.insert`
         **对不存在的路径不报错**，是静默失效。已改为 `parents[1]`。
         """
-        for rel in self.ENTRIES + ["collect/online_quotes.py"]:
+        for rel in self.ENTRIES + ["datasource/collect/online_quotes.py"]:
             s = (T / rel).read_text(encoding="utf-8")
             for m in re.finditer(r"Path\(__file__\)\.resolve\(\)\.parent\b(?!s)", s):
                 ctx = s[max(0, m.start() - 60):m.end() + 60].replace("\n", " ")
@@ -277,38 +278,39 @@ class TestMovedScriptsRunAsMain:
 
 
 class TestToolsPathSingleSource:
-    """`07_tools` 路径只从 `paths.TOOLS` 取，不许重新推导。
+    """`src` 路径只从 `paths.TOOLS` 取，不许重新推导。
 
     ⚠️ **必须区分两种 `__file__` 用法，不能一刀切**：
 
         _TOOLS = Path(__file__).resolve().parents[1]   ✅ **sys.path 引导，合法**
                                                        它跑在 `from paths import` 之前，
                                                        是鸡生蛋问题，只能用 __file__
-        TOOLS = BASE / "07_tools"                      ❌ 已 import paths 之后重新推导
+        TOOLS = BASE / "src"                      ❌ 已 import paths 之后重新推导
 
-    2026-08-06 收敛：`run_1700` / `run_1800` 各有一份 `TOOLS = BASE / "07_tools"`；
-    `daily_pipeline` 有 9 处 `BASE / "07_tools" / ...` 硬编码。
+    2026-08-06 收敛：`run_1700` / `run_1800` 各有一份 `TOOLS = BASE / "src"`；
+    `daily_pipeline` 有 9 处 `BASE / "src" / ...` 硬编码。
     """
 
-    AFTER_PATHS = ["run_0850.py", "run_0905.py", "run_1445.py", "run_1700.py",
-                   "run_1800.py", "daily_pipeline.py", "runtime_gate.py",
-                   "generate_risk_and_sectors.py", "trading_calendar.py"]
+    AFTER_PATHS = ["pipeline/run_0850.py", "pipeline/run_0905.py", "pipeline/run_1445.py",
+                   "pipeline/run_1700.py", "pipeline/run_1800.py", "pipeline/daily_pipeline.py",
+                   "core/runtime_gate.py", "pipeline/generate_risk_and_sectors.py",
+                   "datasource/trading_calendar.py"]
 
     @pytest.mark.parametrize("f", AFTER_PATHS)
     def test_no_rederiving_tools_from_base(self, f):
         s = (T / f).read_text(encoding="utf-8")
-        assert 'BASE / "07_tools"' not in s, \
-            f'{f} 用 BASE / "07_tools" 重新推导 —— 应 `from paths import TOOLS`'
+        assert 'BASE / "src"' not in s, \
+            f'{f} 用 BASE / "src" 重新推导 —— 应 `from paths import TOOLS`'
 
     def test_bootstrap_pattern_still_allowed(self):
         """反面：子目录脚本的 `__file__` 引导必须仍然存在，不能被误删。"""
-        s = (T / "collect" / "collect_fund_flow.py").read_text(encoding="utf-8")
+        s = (T / "datasource" / "collect" / "collect_fund_flow.py").read_text(encoding="utf-8")
         assert "_TOOLS = Path(__file__).resolve().parents[1]" in s, \
             "sys.path 引导被误删了 —— 它跑在 import paths 之前，只能用 __file__"
 
     def test_daily_pipeline_market_timing_not_named_tools(self):
         """`daily_pipeline` 里指向 market_timing 的常量**不能叫 TOOLS**
-        —— 仓库其他地方 `TOOLS` 一律指 07_tools，同名不同义会让读者把
+        —— 仓库其他地方 `TOOLS` 一律指 src，同名不同义会让读者把
         `TOOLS / "x.py"` 读成顶层脚本。
 
         ⚠️ 判据从「源码里有那行字面量」改成**运行时真值比对**（2026-08-07）：
@@ -317,13 +319,13 @@ class TestToolsPathSingleSource:
         这正是今天反复踩的「查字符串形式而非语义」。
         """
         import sys
-        tools = pathlib.Path(__file__).resolve().parent.parent / "07_tools"
+        tools = pathlib.Path(__file__).resolve().parent.parent / "src"
         sys.path.insert(0, str(tools))
         import daily_pipeline as dp
 
-        assert dp.TOOLS == tools, "TOOLS 必须指 07_tools 本身"
-        assert dp.MARKET_TIMING == tools / "market_timing"
-        assert dp.HOLDINGS == tools / "holdings", \
+        assert dp.TOOLS == tools, "TOOLS 必须指 src 本身"
+        assert dp.MARKET_TIMING == tools / "pipeline" / "market_timing"
+        assert dp.HOLDINGS == tools / "pipeline" / "holdings", \
             "持仓工具目录 —— 2026-08-07 拆分后 daily_pipeline 必须指向它"
 
 class TestGateCodePropagation:
@@ -362,7 +364,7 @@ class TestGateCodePropagation:
     def test_custom_default(self):
         assert self._kit().propagate_gate_code({"returncode": 9}, default=7) == 7
 
-    @pytest.mark.parametrize("runner", ["run_0905.py", "run_1700.py"])
+    @pytest.mark.parametrize("runner", ["pipeline/run_0905.py", "pipeline/run_1700.py"])
     def test_runner_no_longer_flattens(self, runner):
         s = (T / runner).read_text(encoding="utf-8")
         i = s.index("daily_pipeline失败")
@@ -372,7 +374,7 @@ class TestGateCodePropagation:
 
     def test_daily_pipeline_still_propagates(self):
         """上游那一跳也要在：`daily_pipeline` 必须先落日志再抛原码。"""
-        s = (T / "daily_pipeline.py").read_text(encoding="utf-8")
+        s = (T / "pipeline" / "daily_pipeline.py").read_text(encoding="utf-8")
         i = s.index("raise SystemExit")
         seg = s[max(0, i - 400):i + 80]
         assert "_write_pipeline_log" in seg, \
@@ -488,7 +490,7 @@ class TestAmplitudeSingleImplementation:
         """
         import ast
 
-        raw = (T / "factors" / "s_shape.py").read_text(encoding="utf-8-sig")
+        raw = (T / "core" / "factors" / "s_shape.py").read_text(encoding="utf-8-sig")
         lines = raw.split("\n")
         i = next(k for k, l in enumerate(lines) if "rng = (high - low) / np.where" in l)
         above = lines[max(0, i - 6):i]
@@ -573,6 +575,6 @@ class TestNamedIndicatorsLiveInL0:
 
     def test_policy_is_documented_in_the_module(self):
         """政策必须写在 `indicators.py` 里 —— 只写在测试里，改代码的人看不到。"""
-        src = (T / "indicators.py").read_text(encoding="utf-8-sig")
+        src = (T / "core" / "indicators.py").read_text(encoding="utf-8-sig")
         assert "是否存在口径选择" in src, "indicators.py 头部的归属政策不见了"
         assert "杂物抽屉" in src, "「为什么不全搬」的理由不见了"

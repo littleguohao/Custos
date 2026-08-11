@@ -48,10 +48,10 @@
 `research/backtest_0amv_bear_regime.py`（自称「不触碰任何管线」的研究脚本）里，
 而 `runtime_guards` 读台账只判**新鲜度**、不校验「持仓 == 台账回放」。
 
-现由 `07_tools/trades/reconcile_positions.py` 补上，并接入 17:00 链（**非阻断**）：
+现由 `src/core/trades/reconcile_positions.py` 补上，并接入 17:00 链（**非阻断**）：
 
 ```bash
-uv run python 07_tools/trades/reconcile_positions.py --date 2026-08-06
+uv run python src/core/trades/reconcile_positions.py --date 2026-08-06
 # 台账非从零开始时须给期初持仓：--baseline path/to/initial_positions.json
 # 观察若干交易日后可加 --strict（数量不一致 exit 1）
 ```

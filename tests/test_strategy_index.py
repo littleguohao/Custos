@@ -185,10 +185,10 @@ class TestReferencedPathsExist:
     `b1_holding_state.py`、`s_shape.py`、`reconcile_qfq.py` 都踩过。
     """
 
-    # 只收「形如路径」的 token：07_tools/ 或 governance/ 开头、以扩展名
+    # 只收「形如路径」的 token：src/ 或 governance/ 开头、以扩展名
     # （文件）或 `/`（目录）结尾；容忍 `:行号` / `#锚点` 后缀。
-    # `07_tools/pipeline_kit.propagate_gate_code` 这类「模块.符号」不算路径。
-    PATHISH = re.compile(r"^(?:07_tools|governance)/\S+?(\.[a-z0-9]+|/)$")
+    # `src/pipeline_kit.propagate_gate_code` 这类「模块.符号」不算路径。
+    PATHISH = re.compile(r"^(?:src|governance)/\S+?(\.[a-z0-9]+|/)$")
 
     @staticmethod
     def _strip_suffix(token):
@@ -196,7 +196,7 @@ class TestReferencedPathsExist:
         return re.split(r"[:#]", token, maxsplit=1)[0]
 
     def test_header_code_deps_exist(self):
-        """策略文档头部「代码依赖」字段里的每个路径（相对 07_tools/）必须存在。"""
+        """策略文档头部「代码依赖」字段里的每个路径（相对 src/）必须存在。"""
         bad = []
         for doc in STRATEGY.rglob("*.md"):
             for ln in doc.read_text(encoding="utf-8")[:1200].splitlines():
@@ -208,12 +208,16 @@ class TestReferencedPathsExist:
                     path = self._strip_suffix(tok)
                     if not re.search(r"\.[a-z0-9]+$", path):
                         continue
-                    if not (ROOT / "07_tools" / path).exists():
+                    # 归堆（src/{core,pipeline,...}）后文档保持「stage/文件.py」简写，
+                    # 按相对路径后缀匹配
+                    if not (ROOT / "src" / path).exists() and not any(
+                            str(p.relative_to(ROOT / "src")).endswith("/" + path)
+                            for p in (ROOT / "src").rglob("*.py")):
                         bad.append(f"{doc.relative_to(STRATEGY).as_posix()}: {tok}")
         assert not bad, f"「代码依赖」里的路径不存在：{bad}"
 
     def test_contracts_backtick_paths_exist(self):
-        """contracts/*.md 里反引号包裹的 07_tools/** 与 governance/** 路径必须存在。"""
+        """contracts/*.md 里反引号包裹的 src/** 与 governance/** 路径必须存在。"""
         bad = []
         for doc in (ROOT / "governance" / "contracts").glob("*.md"):
             for tok in re.findall(r"`([^`]+)`", doc.read_text(encoding="utf-8")):
@@ -242,7 +246,7 @@ class TestReversalKMatchesCode:
     }
 
     def _code(self):
-        return (ROOT / "07_tools" / "screening"
+        return (ROOT / "src" / "pipeline" / "screening"
                 / "enrich_candidates.py").read_text(encoding="utf-8")
 
     @pytest.mark.parametrize("name,want", sorted(CONSTS.items()))
@@ -255,8 +259,8 @@ class TestReversalKMatchesCode:
         与今天反复踩的「查字符串形式而非语义」同形：**能读真值就别读源码。**
         """
         import sys as _s
-        _s.path.insert(0, str(ROOT / "07_tools"))
-        _s.path.insert(0, str(ROOT / "07_tools" / "screening"))
+        _s.path.insert(0, str(ROOT / "src"))
+        _s.path.insert(0, str(ROOT / "src" / "pipeline" / "screening"))
         import enrich_candidates as ec
         got = getattr(ec, name, None)
         assert got is not None, f"代码里找不到常量 {name}"
@@ -347,12 +351,12 @@ class TestPathsConstants:
     """新目录必须在 paths.py 有常量——模块不得自己拼 strategy 子目录。"""
 
     def test_constants_exist(self):
-        s = (ROOT / "07_tools" / "paths.py").read_text(encoding="utf-8")
+        s = (ROOT / "src" / "core/paths.py").read_text(encoding="utf-8")
         for c in ("B1_DIR", "CZ_DIR", "FACTORS_DIR", "STRATEGY_REGISTRY_FILE"):
             assert c in s, f"paths.py 缺 {c}"
 
     def test_cz_config_points_into_cz_dir(self):
-        s = (ROOT / "07_tools" / "paths.py").read_text(encoding="utf-8")
+        s = (ROOT / "src" / "core/paths.py").read_text(encoding="utf-8")
         assert 'CZ_SECTOR_PREFERENCE_FILE = CZ_DIR / "CZ_SECTOR_PREFERENCE.json"' in s
 
 

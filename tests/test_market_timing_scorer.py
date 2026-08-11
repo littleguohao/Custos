@@ -3,7 +3,7 @@
 覆盖率清点（2026-08-09 订正）：35% 基线（244 语句/165 未覆盖）。
 ⚠️ 单文件覆盖率读数不稳（曾读出 15%/36%/48%）——根因已定位（TODO #46）：
 ① `--cov` 单文件路径与点分模块两种写法在 pytest-cov 下行为异常（静默无数据/
-抢先 import 漏记模块级行），只有目录形式 `--cov=07_tools/market_timing` 可靠；
+抢先 import 漏记模块级行），只有目录形式 `--cov=src/pipeline/market_timing` 可靠；
 ② 读数由「哪些测试文件跑了 scorer」决定（本文件 + test_audit_opt_tools 两处）；
 ③ 全量跑在不同通过/跳过组合下读数本就不同。⇒ 单文件覆盖率不做门禁，只看趋势。
 
@@ -23,12 +23,12 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("07_tools", "07_tools/market_timing"):
+for _p in ("src", "src/pipeline/market_timing"):
     sys.path.insert(0, str(ROOT / _p))
 
 # ⚠️ **包限定导入**，与 `tests/test_audit_opt_tools.py:608` 保持一致。
 # 用扁平 `import market_timing_scorer` 会与它形成**同一文件的两个模块对象**
-# （conftest 把 07_tools 与 07_tools/market_timing 都铺进了 sys.path），
+# （conftest 把 src 与 src/pipeline/market_timing 都铺进了 sys.path），
 # 实测会让这个文件的覆盖率读数在 15%/36%/48% 之间跳 —— **测量本身变得不可信**。
 # 这是 DATA_SOURCE_PRINCIPLE「模块级常量 + 运行时替换 = 陷阱」变体①的又一处后果。
 from market_timing import market_timing_scorer as ms  # noqa: E402

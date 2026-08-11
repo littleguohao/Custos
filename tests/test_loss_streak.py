@@ -12,8 +12,8 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "07_tools"))
-sys.path.insert(0, str(ROOT / "07_tools" / "close_review"))
+sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "src" / "pipeline" / "close_review"))
 
 from close_review import loss_streak as ls  # noqa: E402
 
@@ -135,7 +135,7 @@ class TestReusesFifoPair:
     """
 
     def test_no_local_fifo_implementation(self):
-        src = (ROOT / "07_tools" / "close_review" / "loss_streak.py").read_text(encoding="utf-8")
+        src = (ROOT / "src" / "pipeline" / "close_review" / "loss_streak.py").read_text(encoding="utf-8")
         for bad in ("open_lots", "matched_qty", "'买入'", '"买入"'):
             assert bad not in src, f"loss_streak 里出现 {bad!r} —— 疑似自己实现了配平"
 

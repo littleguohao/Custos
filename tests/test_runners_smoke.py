@@ -21,7 +21,7 @@ import unittest
 from datetime import date, timedelta
 from pathlib import Path
 
-TOOLS = Path(__file__).resolve().parent.parent / "07_tools"
+TOOLS = Path(__file__).resolve().parent.parent / "src"
 BASE = TOOLS.parent
 
 sys.path.insert(0, str(TOOLS))
@@ -29,11 +29,11 @@ from pipeline_kit import _extract_json
 from paths import LOGS
 
 RUNNERS = {
-    "run_0850.py": "休市",
-    "run_0905.py": "休市",
-    "run_1445.py": "休市",
-    "run_1700.py": "休市",
-    "run_1800.py": "休市",
+    "pipeline/run_0850.py": "休市",
+    "pipeline/run_0905.py": "休市",
+    "pipeline/run_1445.py": "休市",
+    "pipeline/run_1700.py": "休市",
+    "pipeline/run_1800.py": "休市",
 }
 
 LOG_DIR = LOGS
@@ -41,7 +41,7 @@ LOG_DIR = LOGS
 
 def _is_trading_day(target: str) -> bool:
     r = subprocess.run(
-        ["uv", "run", "python", str(TOOLS / "trading_calendar.py"), "--check-date", target],
+        ["uv", "run", "python", str(TOOLS / "datasource/trading_calendar.py"), "--check-date", target],
         capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=str(BASE),
     )
     d = _extract_json(r.stdout)

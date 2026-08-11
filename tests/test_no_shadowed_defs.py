@@ -20,7 +20,7 @@ import pathlib
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-FILES = sorted(p for p in (ROOT / "07_tools").rglob("*.py") if p.name != "__init__.py")
+FILES = sorted(p for p in (ROOT / "src").rglob("*.py") if p.name != "__init__.py")
 
 
 def _dups(path: pathlib.Path) -> dict[str, list[int]]:
@@ -35,7 +35,7 @@ def _dups(path: pathlib.Path) -> dict[str, list[int]]:
     return {k: v for k, v in seen.items() if len(v) > 1}
 
 
-@pytest.mark.parametrize("path", FILES, ids=lambda p: str(p.relative_to(ROOT / "07_tools")))
+@pytest.mark.parametrize("path", FILES, ids=lambda p: str(p.relative_to(ROOT / "src")))
 def test_no_duplicate_toplevel_defs(path):
     d = _dups(path)
     assert not d, ("同名顶层定义会静默遮蔽，前者成死代码："

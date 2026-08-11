@@ -49,11 +49,13 @@ def test_mechanism_entries_cite_existing_code():
     这条是整份文件的价值所在：它把「声称有防线」变成可验证的。
     """
     s = _text()
-    # 取所有反引号里的 07_tools 路径（允许带 ::函数名）
+    # 取所有反引号里的 src 路径（允许带 ::函数名）
     refs = set(re.findall(r"`((?:close_review|holdings|market_timing|screening|factors|"
                           r"collect|news|trades|local_tdx|research)/[a-z_0-9]+\.py)"
                           r"(?:::[A-Za-z_0-9]+)?`", s))
-    missing = sorted(r for r in refs if not (ROOT / "07_tools" / r).exists())
+    srcrels = [str(p.relative_to(ROOT / "src")) for p in (ROOT / "src").rglob("*.py")]
+    missing = sorted(r for r in refs
+                     if not any(rel == r or rel.endswith("/" + r) for rel in srcrels))
     assert not missing, (f"trade_lessons.md 引用了不存在的代码：{missing}\n"
                          "移动文件时要同步这份记录 —— 否则它会变成又一份说谎的文档")
 

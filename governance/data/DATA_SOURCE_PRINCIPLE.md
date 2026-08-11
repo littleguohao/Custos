@@ -202,7 +202,7 @@ TDX ext 有海外品种但覆盖不全、代码映射需维护。Yahoo 为主、
 
 ### ① 同一文件被加载成两个模块
 
-`07_tools/` 下的模块既被 `import x` 直接引用、也被 `from pkg import x` 引用时，
+`src/` 下的模块既被 `import x` 直接引用、也被 `from pkg import x` 引用时，
 会成为**两个独立的模块对象** —— 模块级缓存/常量各存一份，
 monkeypatch 只影响其中一个 ⇒ **测试通过而生产失效**。
 

@@ -19,7 +19,7 @@
       "macd_divergence": true,
       "liquidity_floor": false
     },
-    "_note": "cap_rules 为待回测启发式驱动的封顶开关，默认全开＝历史行为；样本回测校准前如需只观察不降档，可逐条置 false（关闭后仍在候选 risk_flags 记录检出）。distribution_cap 控制主力出货五方式（顶部派发，B1 §七.3）：命中 high→封 D、watch→封 C。sector_score_max 为 sector_state.score 量纲上界，用于归一化到 0-100。知行量价/出货因子阈值见 enrich_candidates.py 顶部'待回测参数'常量。technical_score 优先用 S_shape v3.0 有界加权评分（借鉴 workflow 沙漏模型：压缩/枢轴/量/口袋妖怪/上方套牢/均线/事件 + Δ催化 − P惩罚，S**≥70可买/60-69观望/<60不买；分项权重与阈值见 07_tools/factors/s_shape.py 顶部'待回测参数'，部分源值被遮挡取合理猜测），无 s_shape 数据时回退旧 patterns 加权。2026-07-23 全市场回测证实突破式打分非短周期 alpha，S_shape 定性为描述性排序辅助(不作买入 alpha)；新增正交因子：流动性(近20日均成交额<底线→low_liquidity，cap_rules.liquidity_floor 控制是否封顶C，默认仅flag) 与 资金流向(collect_fund_flow 的个股主力净流入在榜/板块净流入 → 计入 capital_intent)。"
+    "_note": "cap_rules 为待回测启发式驱动的封顶开关，默认全开＝历史行为；样本回测校准前如需只观察不降档，可逐条置 false（关闭后仍在候选 risk_flags 记录检出）。distribution_cap 控制主力出货五方式（顶部派发，B1 §七.3）：命中 high→封 D、watch→封 C。sector_score_max 为 sector_state.score 量纲上界，用于归一化到 0-100。知行量价/出货因子阈值见 enrich_candidates.py 顶部'待回测参数'常量。technical_score 优先用 S_shape v3.0 有界加权评分（借鉴 workflow 沙漏模型：压缩/枢轴/量/口袋妖怪/上方套牢/均线/事件 + Δ催化 − P惩罚，S**≥70可买/60-69观望/<60不买；分项权重与阈值见 src/core/factors/s_shape.py 顶部'待回测参数'，部分源值被遮挡取合理猜测），无 s_shape 数据时回退旧 patterns 加权。2026-07-23 全市场回测证实突破式打分非短周期 alpha，S_shape 定性为描述性排序辅助(不作买入 alpha)；新增正交因子：流动性(近20日均成交额<底线→low_liquidity，cap_rules.liquidity_floor 控制是否封顶C，默认仅flag) 与 资金流向(collect_fund_flow 的个股主力净流入在榜/板块净流入 → 计入 capital_intent)。"
   },
   "theme_mapping": {
     "min_match": 1,
@@ -42,7 +42,7 @@
     "columns": {
       "net_profit": "五、净利润"
     },
-    "_note": "财务维度(CZ §四 抄底三条件代理，见 07_tools/screening/financials.py)。默认关(enabled=false)。Affair 财务表列为中文命名。auto_map=true 按关键词自动识别，registry.columns 按字段覆盖(auto打底)。已知修正:net_profit 用'五、净利润'(标准利润表净利润行,含少数股东,较'归属于母公司所有者的净利润'在季报期更常有值);revenue 自动取'营业总收入(单季度)(万元)';net_profit_yoy 用'扣非净利润同比(%)';roe 用'加权净资产收益率';code 用行索引('__index__')。启用前先 `uv run python 07_tools/screening/financials.py --inspect` 确认 net_profit/op_cashflow 抽样非 null。现金流量表在季报期常缺失(op_cashflow=null)→dixi_proxy 优雅降级:net_profit_positive/roe_positive/perf_surge_ge_100 仍可用，real_earnings_cashflow 仅在净利与现金流同为正时成立(现金流缺失不冒充,cashflow_available=false)；如需完整现金流可把 report_period 设为年报(如 20251231)。映射不全/代码不匹配→available=false，只证据层落盘、不驱动分层。"
+    "_note": "财务维度(CZ §四 抄底三条件代理，见 src/pipeline/screening/financials.py)。默认关(enabled=false)。Affair 财务表列为中文命名。auto_map=true 按关键词自动识别，registry.columns 按字段覆盖(auto打底)。已知修正:net_profit 用'五、净利润'(标准利润表净利润行,含少数股东,较'归属于母公司所有者的净利润'在季报期更常有值);revenue 自动取'营业总收入(单季度)(万元)';net_profit_yoy 用'扣非净利润同比(%)';roe 用'加权净资产收益率';code 用行索引('__index__')。启用前先 `uv run python src/pipeline/screening/financials.py --inspect` 确认 net_profit/op_cashflow 抽样非 null。现金流量表在季报期常缺失(op_cashflow=null)→dixi_proxy 优雅降级:net_profit_positive/roe_positive/perf_surge_ge_100 仍可用，real_earnings_cashflow 仅在净利与现金流同为正时成立(现金流缺失不冒充,cashflow_available=false)；如需完整现金流可把 report_period 设为年报(如 20251231)。映射不全/代码不匹配→available=false，只证据层落盘、不驱动分层。"
   },
   "manual_pools": [
     {

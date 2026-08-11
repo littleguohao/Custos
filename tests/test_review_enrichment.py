@@ -19,7 +19,7 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("07_tools", "07_tools/close_review"):
+for _p in ("src", "src/pipeline/close_review"):
     sys.path.insert(0, str(ROOT / _p))
 
 from close_review import review_enrichment as re_mod  # noqa: E402

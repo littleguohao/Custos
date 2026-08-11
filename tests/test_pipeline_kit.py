@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Semantic-lock tests for 07_tools/pipeline_kit.py and 07_tools/code_utils.py."""
+"""Semantic-lock tests for src/pipeline_kit.py and src/code_utils.py."""
 from __future__ import annotations
 
 import math

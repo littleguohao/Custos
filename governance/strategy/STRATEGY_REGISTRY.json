@@ -28,9 +28,9 @@
       ],
       "configs": [],
       "code": [
-        "07_tools/screening/enrich_candidates.py",
-        "07_tools/holdings/b1_holding_state.py",
-        "07_tools/research/backtest_factors.py"
+        "src/pipeline/screening/enrich_candidates.py",
+        "src/pipeline/holdings/b1_holding_state.py",
+        "src/research/backtest_factors.py"
       ],
       "research": "00_governance/research/README.md",
       "known_issues": [
@@ -53,8 +53,8 @@
         "cz/CZ_SECTOR_PREFERENCE.json"
       ],
       "code": [
-        "07_tools/screening/enrich_candidates.py",
-        "07_tools/screening/score_candidates.py"
+        "src/pipeline/screening/enrich_candidates.py",
+        "src/pipeline/screening/score_candidates.py"
       ],
       "research": null,
       "known_issues": [

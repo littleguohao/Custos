@@ -77,10 +77,10 @@ regime 依赖的风险：胜率 18.0% 一位小数没动，期望 +16%、累计 
 已有测试钉住"无回撤的单边上涨不得触发"（`test_does_not_cut_trend_without_pullback`），
 但真实数据里回撤总会有，所以这条只能靠回测判。
 
-### 回测命令（`S=07_tools/research/backtest_factors.py`，全部带 `--trade-sim`）
+### 回测命令（`S=src/research/backtest_factors.py`，全部带 `--trade-sim`）
 
 ```bash
-S=07_tools/research/backtest_factors.py
+S=src/research/backtest_factors.py
 U="--universe-local --universe-sample 1000"          # seed 随机抽样,不是前 1000 个代码
 B="--trade-sim --entry-filter j_low --scorer b1_dual --cost-bps 25 --scale-out 0.5"
 

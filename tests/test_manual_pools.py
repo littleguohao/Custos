@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 TESTS_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(TESTS_DIR.parent / "07_tools" / "screening"))
+sys.path.insert(0, str(TESTS_DIR.parent / "src" / "pipeline" / "screening"))
 
 import manual_pools
 import formula_screen as fs

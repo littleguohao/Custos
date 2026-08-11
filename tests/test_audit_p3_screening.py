@@ -20,7 +20,7 @@ import pandas as pd
 import pytest
 
 TESTS_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(TESTS_DIR.parent / "07_tools" / "screening"))
+sys.path.insert(0, str(TESTS_DIR.parent / "src" / "pipeline" / "screening"))
 
 import enrich_candidates as ec
 import formula_screen as fs

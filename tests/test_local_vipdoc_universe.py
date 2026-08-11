@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 TESTS_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(TESTS_DIR.parent / "07_tools" / "local_tdx"))
+sys.path.insert(0, str(TESTS_DIR.parent / "src" / "datasource" / "local_tdx"))
 
 import local_tdx_data as ltd
 

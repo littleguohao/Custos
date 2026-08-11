@@ -33,7 +33,7 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-TOOLS = ROOT / "07_tools"
+TOOLS = ROOT / "src"
 sys.path.insert(0, str(TOOLS))
 
 
@@ -163,7 +163,7 @@ class TestSessionBranching:
         （第一版为了「让它过」写成 `assert ... or True` —— 那种永真断言
         比没有测试更糟：看着有覆盖，实际什么都没验。）
         """
-        src = (TOOLS / "daily_pipeline.py").read_text(encoding="utf-8")
+        src = (TOOLS / "pipeline/daily_pipeline.py").read_text(encoding="utf-8")
         assert 'session_type == "premarket"' in src
         assert "premarket_chief_decision" in src
         assert "snapshot_premarket_chief_decision" in src
@@ -203,7 +203,7 @@ class TestFailurePropagation:
                 # required 默认 True；调用点若显式传 False 会出现在 kwargs 里，
                 # Recorder 收不到 —— 所以改查源码更可靠，见下面的源码断言
                 pass
-        src = (TOOLS / "daily_pipeline.py").read_text(encoding="utf-8")
+        src = (TOOLS / "pipeline/daily_pipeline.py").read_text(encoding="utf-8")
         import re
         for name in hard:
             m = re.search(rf'"{name}"\s*,\s*required=False', src)
@@ -249,7 +249,7 @@ def _run_runner(mod, monkeypatch, rec, tmp_path, argv=(), seed=None):
     # ⚠️ patch **全部大写的 Path 属性**，不能只挑名字带 DIR 的 ——
     # `run_1700` 的复盘目录叫 `REV`，第一版按 "DIR" 过滤就漏了它，
     # 测试于是往**真实** `artifacts/reports/daily/` 里写。
-    # 唯一例外是 `TOOLS`：它必须指向真实 07_tools，否则拼出的 stage 命令没意义
+    # 唯一例外是 `TOOLS`：它必须指向真实 src，否则拼出的 stage 命令没意义
     # （虽然 stage 被打桩不会真跑，但断言里要查命令内容）。
     for attr in dir(mod):
         if not attr.isupper() or attr in {"TOOLS", "PY"}:
@@ -387,7 +387,7 @@ class TestRunnerNamesResolve:
     """⚠️ 回归（2026-08-07 发现）：**runner 里用到的模块级名字必须真的存在**。
 
     `run_1445.py` 从 **2026-08-06** 起就是坏的：那天的提交
-    「收敛 07_tools 路径推导并修一处 TOOLS 误名」把 `TOOLS` 加进了**注释**
+    「收敛 src 路径推导并修一处 TOOLS 误名」把 `TOOLS` 加进了**注释**
     却没加进**导入列表** ——
 
         -from paths import BASE, cn_today  # strategy_team/
@@ -411,7 +411,7 @@ class TestRunnerNamesResolve:
         import builtins
 
         mod = __import__(name)
-        src = (TOOLS / f"{name}.py").read_text(encoding="utf-8")
+        src = (TOOLS / "pipeline" / f"{name}.py").read_text(encoding="utf-8")
         tree = _ast.parse(src)
         fn = next((n for n in tree.body
                    if isinstance(n, _ast.FunctionDef) and n.name == "main"), None)

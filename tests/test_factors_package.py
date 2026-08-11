@@ -1,4 +1,4 @@
-"""因子层独立成包：`07_tools/factors/`。
+"""因子层独立成包：`src/core/factors/`。
 
 2026-08-06 依赖扫描显示 8 个因子模块其实是**live 选股链与研究回测器共同依赖的下层**：
 
@@ -22,7 +22,7 @@ import re
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-FACTORS_DIR = ROOT / "07_tools" / "factors"
+FACTORS_DIR = ROOT / "src" / "core" / "factors"
 MODULES = ["s_shape", "b1_dual_factor", "b2_surge_factor", "main_rally_factor",
            "platform_pullback", "rsi_state", "sector_phase", "sector_mainstream"]
 
@@ -41,7 +41,7 @@ def test_package_exists_with_doc():
 def test_module_moved(m):
     assert (FACTORS_DIR / f"{m}.py").exists(), f"{m} 未在 factors/"
     for d in ("screening", "research"):
-        assert not (ROOT / "07_tools" / d / f"{m}.py").exists(), \
+        assert not (ROOT / "src" / d / f"{m}.py").exists(), \
             f"{m} 仍留在 {d}/（重复文件）"
 
 
@@ -57,15 +57,15 @@ class TestConsumersCanResolve:
     # （研究代码占了 screening/ 的 70%，性质与生产链不同）。
     # 这里存「目录/文件名」而不是只存文件名 —— 只存文件名的写法在拆分当天
     # 就让 6 条测试 FileNotFoundError。
-    CONSUMERS = ["research/backtest_factors.py", "screening/enrich_candidates.py",
-                 "screening/score_candidates.py", "screening/signal_labels.py",
-                 "research/launch_point_study.py", "screening/candidate_table.py",
+    CONSUMERS = ["research/backtest_factors.py", "pipeline/screening/enrich_candidates.py",
+                 "pipeline/screening/score_candidates.py", "pipeline/screening/signal_labels.py",
+                 "research/launch_point_study.py", "pipeline/screening/candidate_table.py",
                  "research/scan_signals_ytd.py", "research/run_bear_to_long_study.py",
                  "research/compare_signal_sets.py", "research/scan_signal_backtest.py"]
 
     @pytest.mark.parametrize("f", CONSUMERS)
     def test_has_factors_bootstrap(self, f):
-        s = (ROOT / "07_tools" / f).read_text(encoding="utf-8")
+        s = (ROOT / "src" / f).read_text(encoding="utf-8")
         assert "_FACTORS_DIR" in s, f"{f} 未把 factors/ 加进 sys.path"
 
     @pytest.mark.parametrize("f", CONSUMERS)
@@ -76,7 +76,7 @@ class TestConsumersCanResolve:
         而 `launch_point_study` / `run_bear_to_long_study` 在**函数内部**做懒引导，
         于是引导被插进函数体 ⇒ `IndentationError`。
         """
-        for ln in (ROOT / "07_tools" / f).read_text(encoding="utf-8").splitlines():
+        for ln in (ROOT / "src" / f).read_text(encoding="utf-8").splitlines():
             if "_FACTORS_DIR = str(" in ln:
                 assert not ln.startswith((" ", "\t")), f"{f} 的 factors 引导有缩进（在函数内）"
 
@@ -95,7 +95,7 @@ class TestImportsStillWork:
     def test_no_stale_screening_qualified_refs(self):
         """不许再有 `from screening import <因子>` —— 那会 ImportError。"""
         bad = []
-        for p in list((ROOT / "tests").glob("*.py")) + list((ROOT / "07_tools").rglob("*.py")):
+        for p in list((ROOT / "tests").glob("*.py")) + list((ROOT / "src").rglob("*.py")):
             s = p.read_text(encoding="utf-8", errors="ignore")
             for m in MODULES:
                 if re.search(rf"\bfrom screening import {m}\b|\bscreening\.{m}\b", s):

@@ -176,7 +176,7 @@ class TestMarketClockIsExchangeTime:
         assert rg._as_cn_datetime("2026-08-03T14:30:00+08:00").time() < rg.CLOSE_TIME
 
     def test_no_naive_now_calls_left_in_tools(self):
-        """静态防线:07_tools 下不得再出现裸 datetime.now()/date.today()。"""
+        """静态防线:src 下不得再出现裸 datetime.now()/date.today()。"""
         import pathlib
         offenders = []
         root = pathlib.Path(rg.__file__).resolve().parent

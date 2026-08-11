@@ -16,7 +16,7 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("07_tools", "07_tools/news"):
+for _p in ("src", "src/datasource/news"):
     sys.path.insert(0, str(ROOT / _p))
 
 from news import rss_filter as rf  # noqa: E402

@@ -19,8 +19,8 @@ import pandas as pd
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "07_tools"))
-sys.path.insert(0, str(ROOT / "07_tools" / "trades"))
+sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "src" / "core" / "trades"))
 
 import standardize_trades as st  # noqa: E402
 
@@ -148,5 +148,5 @@ class TestGuards:
     def test_docstring_warns_about_mixing_with_incremental(self):
         """必须写明**不能与 incremental_ledger 混用** —— 一个覆盖式、一个增量式，
         混用后台账与持仓快照会不一致（那正是 reconcile_positions 要检测的失配）。"""
-        s = (ROOT / "07_tools" / "trades" / "standardize_trades.py").read_text(encoding="utf-8")
+        s = (ROOT / "src" / "core" / "trades" / "standardize_trades.py").read_text(encoding="utf-8")
         assert "不能混用" in s and "reconcile_positions" in s

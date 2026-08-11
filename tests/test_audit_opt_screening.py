@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""审计【建议优化】批次 —— 07_tools/screening 域回归测试。
+"""审计【建议优化】批次 —— src/pipeline/screening 域回归测试。
 
 覆盖：边界与数值防御（NaN 绕过 J 门槛、未知模式名下标、天量阈值自旁路、
 板块 2 字前缀误配、list_days 被 tail 截断、窗内新上市污染、summarize 分项键

@@ -99,7 +99,7 @@ universe 逻辑。落盘失败时**退回各自抽样并明确告警**，不中�
 可复现跑法：
 
 ```bash
-uv run python 07_tools/research/m2_stop_sweep.py \
+uv run python src/research/m2_stop_sweep.py \
     --window 2024-08-01 2026-08-05 --pin-universe -j 4
 ```
 
@@ -107,10 +107,10 @@ uv run python 07_tools/research/m2_stop_sweep.py \
 
 ## 可复现批次的跑批入口（2026-08-05 夜）
 
-`07_tools/screening/run_m2_sweep.cmd` —— Windows 后台跑批。
+`src/pipeline/screening/run_m2_sweep.cmd` —— Windows 后台跑批。
 
 ```powershell
-Start-Process -WindowStyle Hidden -FilePath "07_tools\screening\run_m2_sweep.cmd"
+Start-Process -WindowStyle Hidden -FilePath "src\pipeline\screening\run_m2_sweep.cmd"
 Get-Content -Wait -Tail 40 artifacts/logs\m2_sweep\sweep_run.log     # 看进度
 ```
 

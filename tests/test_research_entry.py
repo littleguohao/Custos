@@ -1,4 +1,4 @@
-"""研究/回测的**统一入口** —— `07_tools/research/__main__.py`。
+"""研究/回测的**统一入口** —— `src/research/__main__.py`。
 
 owner 2026-08-07 问「总的回测和研究是否可以统一到一个入口」。
 实测 14 个脚本、9002 行，其中两个引擎各约 2000 行。结论是
@@ -20,8 +20,8 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-RESEARCH = ROOT / "07_tools" / "research"
-sys.path.insert(0, str(ROOT / "07_tools"))
+RESEARCH = ROOT / "src" / "research"
+sys.path.insert(0, str(ROOT / "src"))
 
 from research import __main__ as entry  # noqa: E402
 

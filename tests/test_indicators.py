@@ -25,7 +25,7 @@ import pandas as pd
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("07_tools", "07_tools/screening", "07_tools/market_timing"):
+for _p in ("src", "src/pipeline/screening", "src/pipeline/market_timing"):
     sys.path.insert(0, str(ROOT / _p))
 
 import indicators as I  # noqa: E402
@@ -93,28 +93,28 @@ class TestNoLocalReimplementation:
     CASES = [
         # enrich 的本地 `_j_series` 包装 2026-08-08 已删（死代码）：它的 J 直接走
         # 共享 `kdj`。marker 从 "_j_canonical" 改为 "kdj" —— 钉的是「不许再长本地实现」。
-        ("screening/enrich_candidates.py", "kdj"),
-        ("factors/main_rally_factor.py", "j_series as _j_series"),
-        ("factors/b2_surge_factor.py", "_j_canonical"),
+        ("pipeline/screening/enrich_candidates.py", "kdj"),
+        ("core/factors/main_rally_factor.py", "j_series as _j_series"),
+        ("core/factors/b2_surge_factor.py", "_j_canonical"),
         ("research/backtest_factors.py", "bbi_series as _bbi_series"),
-        ("market_timing/technical_monitor.py", "kdj_series"),
+        ("pipeline/market_timing/technical_monitor.py", "kdj_series"),
         # 2026-08-09 QSX/MACD 收敛：下列各处一律改为导入序列级唯一实现
-        ("factors/b1_dual_factor.py", "qsx_series"),
-        ("factors/distribution.py", "qsx_series"),
-        ("factors/sector_phase.py", "macd_series"),
+        ("core/factors/b1_dual_factor.py", "qsx_series"),
+        ("core/factors/distribution.py", "qsx_series"),
+        ("core/factors/sector_phase.py", "macd_series"),
         ("research/backtest_factors.py", "macd_series"),
     ]
 
     @pytest.mark.parametrize("rel,marker", CASES)
     def test_delegates_to_indicators(self, rel, marker):
-        s = (ROOT / "07_tools" / rel).read_text(encoding="utf-8")
+        s = (ROOT / "src" / rel).read_text(encoding="utf-8")
         assert "from indicators import" in s, f"{rel} 未导入共享指标"
         assert marker in s
 
     @pytest.mark.parametrize("rel", [c[0] for c in CASES])
     def test_no_inline_kdj_or_bbi_formula(self, rel):
         """源码里不许再出现 `3*k-2*d` 或 `(MA3+..+MA24)/4` 的内联算式。"""
-        s = (ROOT / "07_tools" / rel).read_text(encoding="utf-8")
+        s = (ROOT / "src" / rel).read_text(encoding="utf-8")
         assert not re.search(r"3 ?\* ?k ?- ?2 ?\* ?d", s), f"{rel} 又内联了 J 公式"
         assert not re.search(r"rolling\(n\)\.mean\(\) for n in \(3, 6, 12, 24\)", s), \
             f"{rel} 又内联了 BBI 公式"
@@ -184,7 +184,7 @@ class TestQsxMacdSeries:
         """zhixing_state 的 QSX/DKS 必须调共享序列函数（AST 查真实调用，不查注释）。"""
         import ast as _ast
 
-        src = (ROOT / "07_tools" / "indicators.py").read_text(encoding="utf-8")
+        src = (ROOT / "src" / "core/indicators.py").read_text(encoding="utf-8")
         node = next(n for n in _ast.parse(src).body
                     if isinstance(n, _ast.FunctionDef) and n.name == "zhixing_state")
         body = _ast.unparse(node)
@@ -230,7 +230,7 @@ class TestHoldingStateSharesJWithSelection:
         """
         import ast as _ast
 
-        src = (ROOT / "07_tools" / "indicators.py").read_text(encoding="utf-8")
+        src = (ROOT / "src" / "core/indicators.py").read_text(encoding="utf-8")
         node = next(n for n in _ast.parse(src).body
                     if isinstance(n, _ast.FunctionDef) and n.name == "j_series")
         body = _ast.unparse(node)

@@ -68,7 +68,7 @@ H2 全部方向至此均有否决结论，不得据此改选股链。
 
 ### 实现与验证状态
 
-> 注：下文因子路径 `screening/b2_surge_factor.py` 已迁至 `07_tools/factors/`。
+> 注：下文因子路径 `screening/b2_surge_factor.py` 已迁至 `src/core/factors/`。
 
 - 因子：`screening/b2_surge_factor.py`（`detect_b2` / `detect_bottom_surge` /
   `detect_surge_then_b1`；`_j_series` 与 `technical_monitor.kdj` 同口径，测试逐值钉住）
@@ -82,14 +82,14 @@ H2 全部方向至此均有否决结论，不得据此改选股链。
 
 ```bash
 # B2 作为验证信号:B1 后是否出现 B2 → 把 B1 分成"启动了"和"没启动"两组
-uv run python 07_tools/research/backtest_factors.py --entry-filter j_low --scorer b2 --horizons 5,20,60 --universe-local --universe-sample 1000
-uv run python 07_tools/research/backtest_factors.py --entry-filter b2                --horizons 5,20,60 --universe-local --universe-sample 1000
+uv run python src/research/backtest_factors.py --entry-filter j_low --scorer b2 --horizons 5,20,60 --universe-local --universe-sample 1000
+uv run python src/research/backtest_factors.py --entry-filter b2                --horizons 5,20,60 --universe-local --universe-sample 1000
 
 # 底部异动:宽/严口径 + 异动后的 B1
-uv run python 07_tools/research/backtest_factors.py --entry-filter bottom_surge         --universe-local --universe-sample 1000
-uv run python 07_tools/research/backtest_factors.py --entry-filter bottom_surge_strict  --universe-local --universe-sample 1000
-uv run python 07_tools/research/backtest_factors.py --entry-filter surge_then_b1        --universe-local --universe-sample 1000
-uv run python 07_tools/research/backtest_factors.py --entry-filter surge_strict_then_b1 --universe-local --universe-sample 1000
+uv run python src/research/backtest_factors.py --entry-filter bottom_surge         --universe-local --universe-sample 1000
+uv run python src/research/backtest_factors.py --entry-filter bottom_surge_strict  --universe-local --universe-sample 1000
+uv run python src/research/backtest_factors.py --entry-filter surge_then_b1        --universe-local --universe-sample 1000
+uv run python src/research/backtest_factors.py --entry-filter surge_strict_then_b1 --universe-local --universe-sample 1000
 ```
 
 ---
@@ -136,8 +136,8 @@ n=133、召回 0.14%（全市场日均 ~0.13 个信号），单 seed 单区间�
 
 ```bash
 # surge_strict_then_b1 稳健性:换 seed、换区间
-uv run python 07_tools/research/backtest_factors.py --entry-filter surge_strict_then_b1 --universe-local --universe-sample 1000 --seed 1 --horizons 5,10,20,60
-uv run python 07_tools/research/backtest_factors.py --entry-filter surge_strict_then_b1 --universe-local --universe-sample 1000 --start 2022-01-01 --end 2024-12-31 --horizons 5,10,20,60
+uv run python src/research/backtest_factors.py --entry-filter surge_strict_then_b1 --universe-local --universe-sample 1000 --seed 1 --horizons 5,10,20,60
+uv run python src/research/backtest_factors.py --entry-filter surge_strict_then_b1 --universe-local --universe-sample 1000 --start 2022-01-01 --end 2024-12-31 --horizons 5,10,20,60
 # 宽口径 bottom_surge 的 gate 语义修正(异动后 60 天持续为真 → 只在异动当日/异动后首次 J<13 触发)后再议
 ```
 

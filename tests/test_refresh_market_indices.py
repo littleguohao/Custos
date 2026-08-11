@@ -17,7 +17,7 @@ import pandas as pd
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("07_tools", "07_tools/market_timing", "07_tools/local_tdx"):
+for _p in ("src", "src/pipeline/market_timing", "src/datasource/local_tdx"):
     sys.path.insert(0, str(ROOT / _p))
 
 from market_timing import refresh_market_indices as rmi  # noqa: E402

@@ -30,7 +30,7 @@
 
 ## 证据与过程
 
-## 1. 工具：`07_tools/research/backtest_factors.py`
+## 1. 工具：`src/research/backtest_factors.py`
 研究用回测器（只读本地日线，不改线上）。可组合的开关：
 - **入场门槛 `--entry-filter`**：`none` / `j_low`(J<13) / `reversal_k`(J<13+缩量+量底+小实体+小振幅) / `j_macd_turn`(J<13+MACD柱上行)。
 - **打分/选择器 `--scorer`**：`baseline`(不选) / `reversal_quality`(反转成色0-4) / `s_shape` / `b1_pullback` / `alpha101` / `alpha_pvcorr` / `low_vol` / `momentum`。
@@ -56,7 +56,7 @@ CLI          --scale-out（分批止盈比例，原文"放飞一半"→0.5）
 ### 待跑回测（**判定看 expectancy_R / payoff_ratio / total_R，不看胜率**）
 
 ```bash
-S=07_tools/research/backtest_factors.py
+S=src/research/backtest_factors.py
 
 # ① 分批止盈的价值（M1 的核心验证：胜率不变、盈亏比该提升）
 uv run python $S --trade-sim --entry-filter j_low --scorer b1_dual --cost-bps 25 --universe-local --universe-sample 1000

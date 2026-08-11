@@ -511,9 +511,9 @@ class TestCliFullMarketPath:
         assert hasattr(ltd, "list_local_vipdoc_codes")
 
     @pytest.mark.parametrize("mod", [
-        "07_tools/local_tdx/adjust_factors.py",
-        "07_tools/local_tdx/fetch_market_cap.py",
-        "07_tools/research/adjust_diagnostic.py",
+        "src/datasource/local_tdx/adjust_factors.py",
+        "src/datasource/local_tdx/fetch_market_cap.py",
+        "src/research/adjust_diagnostic.py",
     ])
     def test_no_stale_function_name(self, mod):
         import pathlib
@@ -521,9 +521,9 @@ class TestCliFullMarketPath:
         assert "list_local_codes()" not in src, f"{mod} 用了不存在的 list_local_codes"
 
     @pytest.mark.parametrize("mod", [
-        "07_tools/local_tdx/adjust_factors.py",
-        "07_tools/local_tdx/fetch_market_cap.py",
-        "07_tools/research/adjust_diagnostic.py",
+        "src/datasource/local_tdx/adjust_factors.py",
+        "src/datasource/local_tdx/fetch_market_cap.py",
+        "src/research/adjust_diagnostic.py",
     ])
     def test_lister_attribute_resolvable(self, mod):
         """更强的检查：脚本里**调用**的 local_tdx_data.X() 都必须真实存在。

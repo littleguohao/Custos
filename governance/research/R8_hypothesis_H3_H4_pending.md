@@ -84,7 +84,7 @@ H4 原文**两处矛盾**，两种 CROSS 口径都已实现，**由回测判定*
 
 ### 实现
 
-> 注：本节历史路径 `screening/rsi_state.py` 与 `screening/main_rally_factor.py` 已迁至 `07_tools/factors/`。
+> 注：本节历史路径 `screening/rsi_state.py` 与 `screening/main_rally_factor.py` 已迁至 `src/core/factors/`。
 
 `screening/rsi_state.py`：`rsi`（与通达信 `SMA(X,N,1)` 逐值一致）、`rsi_regime`（四态+深水）、
 `rsi_divergence`（底背离——系统原有 MACD 背离但无 RSI 的，而 RSI 更敏感更早）、

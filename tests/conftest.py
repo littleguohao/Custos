@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
-"""Pytest configuration: make 07_tools packages importable from tests/."""
+"""Pytest configuration: make src packages importable from tests/."""
 import sys
 from pathlib import Path
 
 import pytest
 
-TOOLS = Path(__file__).resolve().parent.parent / "07_tools"
-sys.path.insert(0, str(TOOLS))
-for sub in TOOLS.iterdir():
-    if sub.is_dir() and (sub / "__init__.py").exists():
-        sys.path.insert(0, str(sub))
+SRC = Path(__file__).resolve().parent.parent / "src"
+sys.path.insert(0, str(SRC))
+# 「有 __init__.py 即入 path」：src 本身 + core/datasource/pipeline 分组层 +
+# 各 stage/包目录（2026-08-11 重组后子包深一层，改为递归发现）。
+for init in sorted(SRC.rglob("__init__.py")):
+    sys.path.insert(0, str(init.parent))
 
 
 @pytest.fixture(autouse=True)

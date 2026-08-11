@@ -29,7 +29,7 @@ DELETED_ENTITIES = {"SkillEvidence", "BuyPlan"}
 
 def _all_code() -> str:
     return "\n".join(p.read_text(encoding="utf-8", errors="ignore")
-                     for p in (ROOT / "07_tools").rglob("*.py"))
+                     for p in (ROOT / "src").rglob("*.py"))
 
 
 def _entities() -> dict[str, str]:
@@ -56,7 +56,7 @@ class TestFieldsExistInCode:
         code = _all_code()
         missing = sorted(f for f in _fields(_entities()[ent]) if f not in code)
         assert not missing, (
-            f"{ent} 的这些字段在 07_tools/ 里零命中 —— 要么改契约（以代码为准），"
+            f"{ent} 的这些字段在 src/ 里零命中 —— 要么改契约（以代码为准），"
             f"要么显式标 🔴 未实现：{missing}")
 
     @pytest.mark.parametrize("ent", sorted(DELETED_ENTITIES))
@@ -116,16 +116,16 @@ class TestUnimplementedMechanismsFlagged:
         的断言仍然通过，而 owner 定的复盘统计悄悄消失了。
         """
         import sys
-        sys.path.insert(0, str(ROOT / "07_tools"))
+        sys.path.insert(0, str(ROOT / "src"))
         from close_review import loss_streak as ls
 
         assert callable(ls.loss_streaks) and callable(ls.format_lines)
-        src = (ROOT / "07_tools" / "close_review" / "loss_streak.py").read_text(encoding="utf-8")
+        src = (ROOT / "src" / "pipeline" / "close_review" / "loss_streak.py").read_text(encoding="utf-8")
         for bad in ("return False", "raise SystemExit", "blocked", "forbid"):
             assert bad not in src, f"loss_streak 里出现 {bad!r} —— 它不该有拦截语义"
         # 两处复盘都要接入（少一处就等于「每日/每周都统计」没做到）
-        for rel in ("close_review/final_close_review.py", "close_review/weekly_review.py"):
-            t = (ROOT / "07_tools" / rel).read_text(encoding="utf-8")
+        for rel in ("pipeline/close_review/final_close_review.py", "pipeline/close_review/weekly_review.py"):
+            t = (ROOT / "src" / rel).read_text(encoding="utf-8")
             assert "loss_streak" in t, f"{rel} 未接入连亏检查"
 
 
@@ -149,7 +149,7 @@ class TestWorkflowMatchesReality:
     def test_every_mentioned_runner_exists(self):
         s = MW.read_text(encoding="utf-8") + (CONTRACTS / "SCREENING_WORKFLOW.md").read_text(encoding="utf-8")
         for m in sorted({x for x in re.findall(r"run_\d{4}\.py", s)}):
-            assert (ROOT / "07_tools" / m).exists(), f"文档提到 {m} 但文件不存在"
+            assert list((ROOT / "src").rglob(m)), f"文档提到 {m} 但文件不存在"
 
     def test_no_todo_buried_in_contract(self):
         """待办不许埋在契约文档里——找不到，也不会被跟踪。
@@ -179,7 +179,7 @@ class TestConfigsHavePathsConstants:
         "RSSHUB_PRIVATE_ROUTE_CANDIDATES.json",
     ])
     def test_has_constant(self, name):
-        pv = (ROOT / "07_tools" / "paths.py").read_text(encoding="utf-8")
+        pv = (ROOT / "src" / "core/paths.py").read_text(encoding="utf-8")
         assert name in pv, f"{name} 未在 paths.py 定义常量"
 
 

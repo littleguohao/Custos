@@ -226,7 +226,7 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 
 ### 实现状态（2026-07-19 起）
 
-由 `07_tools/close_review/weekly_review.py` 确定性生成，cron `f15c0d06`（每周六 10:07）触发，LLM 仅基于脚本事实写归因总结。已覆盖：交易明细与 FIFO 平仓盈亏、计划内/外交易、止损合规（-7% 线）、无交易确认完备性、卖飞分析（MFE）、持有期画像、0AMV 背景、执行/策略归因规则命中。未覆盖（待后续）：A/B/C/D 池迁移（候选池重建后）、组合回撤曲线、报告准时率、下周情景与风险预算（由 LLM 总结部分承担）。
+由 `src/pipeline/close_review/weekly_review.py` 确定性生成，cron `f15c0d06`（每周六 10:07）触发，LLM 仅基于脚本事实写归因总结。已覆盖：交易明细与 FIFO 平仓盈亏、计划内/外交易、止损合规（-7% 线）、无交易确认完备性、卖飞分析（MFE）、持有期画像、0AMV 背景、执行/策略归因规则命中。未覆盖（待后续）：A/B/C/D 池迁移（候选池重建后）、组合回撤曲线、报告准时率、下周情景与风险预算（由 LLM 总结部分承担）。
 
 ---
 
@@ -370,11 +370,11 @@ Excel 全量文件只用于历史迁移、对账和灾备重建，不再作为�
 | 5 | 14:45 升级为实时执行报告 | ✅ 已完成（`run_1445.py`）|
 | 6 | 盘后复盘含收盘大盘/板块/持仓板块/同日重估 | ✅ 已完成（`final_close_review`）|
 | 7 | 周/月复盘数据契约与指标 | ⚠️ 周 ✅、**月 🔴 未实现**（见 §七）|
-| 8 | 所有报告加 `report_id` / 数据截止时间 / 规则版本 / 输入清单 | ✅ 已完成（2026-08-09，`07_tools/report_audit.py`）|
+| 8 | 所有报告加 `report_id` / 数据截止时间 / 规则版本 / 输入清单 | ✅ 已完成（2026-08-09，`src/core/report_audit.py`）|
 
 第 8 条曾是唯一完全没做的（它关乎**可审计与可重跑**，研究侧同类的
 「历史批次不可复现」见 `../research/R13_meta_reproducibility.md`）。
 2026-08-09 实现：四份正式报告（盘前 `daily_report`、14:45 `review_core`、
 盘后 `final_close_review`、选股 `score_candidates`/`candidate_table`）统一经
-`07_tools/report_audit.py` 注入可审计块；规则版本取自
+`src/core/report_audit.py` 注入可审计块；规则版本取自
 `strategy_version_log.md` 最新条目。

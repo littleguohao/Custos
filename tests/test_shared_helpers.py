@@ -25,7 +25,7 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "07_tools"))
+sys.path.insert(0, str(ROOT / "src"))
 
 import code_utils  # noqa: E402
 import fmt  # noqa: E402
@@ -157,72 +157,72 @@ class TestNoRefork:
 
     # 名字 → 允许定义它的文件（唯一实现所在处）
     CANON = {
-        "read_json": {"paths.py"},
-        "write_json": {"paths.py"},
-        "write_json_atomic": {"paths.py"},
-        "bare_code": {"code_utils.py"},
-        "clean_code": {"code_utils.py"},
-        "fnum": {"code_utils.py"},
-        "pct_change": {"indicators.py"},
-        "pct_text": {"fmt.py", "close_review/review_core.py"},  # 后者是 1 行措辞适配器
-        "num_text": {"fmt.py"},
+        "read_json": {"core/paths.py"},
+        "write_json": {"core/paths.py"},
+        "write_json_atomic": {"core/paths.py"},
+        "bare_code": {"core/code_utils.py"},
+        "clean_code": {"core/code_utils.py"},
+        "fnum": {"core/code_utils.py"},
+        "pct_change": {"core/indicators.py"},
+        "pct_text": {"core/fmt.py", "pipeline/close_review/review_core.py"},  # 后者是 1 行措辞适配器
+        "num_text": {"core/fmt.py"},
         "optional_finite": set(),  # 已全部改为 code_utils.fnum
         # ── 指标序列级入口（2026-08-09 收敛：QSX/MACD 曾各有 3~4 份逐位相同的实现）──
-        "qsx_series": {"indicators.py"},
-        "macd_series": {"indicators.py"},
-        "dks_series": {"indicators.py"},
-        "bbi_series": {"indicators.py"},
-        "kdj_series": {"indicators.py"},
-        "j_series": {"indicators.py"},
+        "qsx_series": {"core/indicators.py"},
+        "macd_series": {"core/indicators.py"},
+        "dks_series": {"core/indicators.py"},
+        "bbi_series": {"core/indicators.py"},
+        "kdj_series": {"core/indicators.py"},
+        "j_series": {"core/indicators.py"},
         # ── 2026-08-10 收敛 ──
         # 振幅：五份内联实现，其中 `technical_monitor` 的分母是**当日最低价**
         # 而非前收 ⇒ 同一支票在选股链与持仓链可能得出相反的反转K 结论
         # （合成 20 万根日 K 实测约 2% 在 7% 门槛上翻转）。
-        "amplitude_pct": {"indicators.py"},
+        "amplitude_pct": {"core/indicators.py"},
         # DMI/ADX：两份**逐行相同**的 19 行复制粘贴（只有返回形状不同），
         # `_adx_last` 取 adx 末点、`_adx_features` 取 pdi/mdi/adx 与派生标志。
-        "dmi_arrays": {"indicators.py"},
+        "dmi_arrays": {"core/indicators.py"},
         # ── 21 个因子的入口函数（唯一实现 = 因子模块本身）──
-        "detect_wave_type": {"factors/wave_type.py"},
-        "compute_s_shape": {"factors/s_shape.py"},
-        "compute_s_reversal": {"factors/s_shape.py"},
-        "ts_corr": {"factors/_util.py"},
-        "shares_idx": {"factors/_shares.py"},
-        "events_to_idx": {"factors/_shares.py"},
-        "detect_distribution": {"factors/distribution.py"},
-        "compute_b1_dual": {"factors/b1_dual_factor.py"},
-        "compute_long_structure": {"factors/b1_dual_factor.py"},
-        "detect_weekly_b1_resonance": {"factors/b1_dual_factor.py"},
-        "detect_breakout_pullback_b1": {"factors/b1_dual_factor.py"},
-        "detect_launch_segment": {"factors/b1_dual_factor.py"},
-        "compute_b1_pullback_fit": {"factors/b1_pullback_fit.py"},
-        "compute_perfect_b1_fit": {"factors/perfect_b1_fit.py"},
-        "detect_b2": {"factors/b2_surge_factor.py"},
-        "detect_bottom_surge": {"factors/b2_surge_factor.py"},
-        "detect_surge_then_b1": {"factors/b2_surge_factor.py"},
-        "detect_main_rally_start": {"factors/main_rally_factor.py"},
-        "main_rally_score": {"factors/main_rally_factor.py"},
-        "rsi_regime": {"factors/rsi_state.py"},
-        "rsi_divergence": {"factors/rsi_state.py"},
-        "rsi_multi": {"factors/rsi_state.py"},
-        "rsi_state_score": {"factors/rsi_state.py"},
-        "detect_platform_pullback": {"factors/platform_pullback.py"},
-        "compute_sector_phase": {"factors/sector_phase.py"},
-        "favorable_series": {"factors/sector_phase.py"},
-        "mainline_fingerprint": {"factors/sector_mainstream.py"},
+        "detect_wave_type": {"core/factors/wave_type.py"},
+        "compute_s_shape": {"core/factors/s_shape.py"},
+        "compute_s_reversal": {"core/factors/s_shape.py"},
+        "ts_corr": {"core/factors/_util.py"},
+        "shares_idx": {"core/factors/_shares.py"},
+        "events_to_idx": {"core/factors/_shares.py"},
+        "detect_distribution": {"core/factors/distribution.py"},
+        "compute_b1_dual": {"core/factors/b1_dual_factor.py"},
+        "compute_long_structure": {"core/factors/b1_dual_factor.py"},
+        "detect_weekly_b1_resonance": {"core/factors/b1_dual_factor.py"},
+        "detect_breakout_pullback_b1": {"core/factors/b1_dual_factor.py"},
+        "detect_launch_segment": {"core/factors/b1_dual_factor.py"},
+        "compute_b1_pullback_fit": {"core/factors/b1_pullback_fit.py"},
+        "compute_perfect_b1_fit": {"core/factors/perfect_b1_fit.py"},
+        "detect_b2": {"core/factors/b2_surge_factor.py"},
+        "detect_bottom_surge": {"core/factors/b2_surge_factor.py"},
+        "detect_surge_then_b1": {"core/factors/b2_surge_factor.py"},
+        "detect_main_rally_start": {"core/factors/main_rally_factor.py"},
+        "main_rally_score": {"core/factors/main_rally_factor.py"},
+        "rsi_regime": {"core/factors/rsi_state.py"},
+        "rsi_divergence": {"core/factors/rsi_state.py"},
+        "rsi_multi": {"core/factors/rsi_state.py"},
+        "rsi_state_score": {"core/factors/rsi_state.py"},
+        "detect_platform_pullback": {"core/factors/platform_pullback.py"},
+        "compute_sector_phase": {"core/factors/sector_phase.py"},
+        "favorable_series": {"core/factors/sector_phase.py"},
+        "mainline_fingerprint": {"core/factors/sector_mainstream.py"},
         # 注册表接口名（约定：每个 selector 各一份），但不得再长出新文件
-        "score": {"factors/_template.py", "factors/alpha101.py", "factors/alpha_pvcorr.py",
-                  "factors/baseline.py", "factors/kdj_j.py", "factors/low_vol.py",
-                  "factors/mcap.py", "factors/momentum.py", "factors/reversal_quality.py",
-                  "factors/reversal_quality_inv.py"},
+        "score": {"core/factors/_template.py", "core/factors/alpha101.py", "core/factors/alpha_pvcorr.py",
+                  "core/factors/baseline.py", "core/factors/kdj_j.py", "core/factors/low_vol.py",
+                  "core/factors/mcap.py", "core/factors/momentum.py", "core/factors/reversal_quality.py",
+                  "core/factors/reversal_quality_inv.py"},
     }
 
     def test_no_duplicate_definitions(self):
         offenders = []
-        for p in sorted((ROOT / "07_tools").rglob("*.py")):
+        for p in sorted((ROOT / "src").rglob("*.py")):
             # ⚠️ 必须 as_posix()：Windows 上 str() 产反斜杠，
             # 与 CANON 白名单（'close_review/review_core.py' 正斜杠）永不匹配 ⇒ 误报。
-            rel = p.relative_to(ROOT / "07_tools").as_posix()
+            rel = p.relative_to(ROOT / "src").as_posix()
             tree = ast.parse(p.read_text(encoding="utf-8"))
             for node in ast.walk(tree):
                 if isinstance(node, ast.FunctionDef) and node.name in self.CANON:
@@ -237,23 +237,23 @@ class TestNoRefork:
         （缺数返回 None）。若有人再定义一个 `finite`，必须先确认它返回默认值
         而不是 None，否则合并时会静默改变 11 个调用点的行为。"""
         found = []
-        for p in sorted((ROOT / "07_tools").rglob("*.py")):
+        for p in sorted((ROOT / "src").rglob("*.py")):
             tree = ast.parse(p.read_text(encoding="utf-8"))
             for node in tree.body:
                 if isinstance(node, ast.FunctionDef) and node.name == "finite":
-                    found.append(str(p.relative_to(ROOT / "07_tools")))
-        assert found == ["code_utils.py"], f"finite 应只在 code_utils 定义，实际: {found}"
+                    found.append(str(p.relative_to(ROOT / "src")))
+        assert found == ["core/code_utils.py"], f"finite 应只在 code_utils 定义，实际: {found}"
 
     def test_no_plain_utf8_json_read_helper(self):
         """守卫 BOM：不得再出现用裸 `utf-8` 读 JSON 的私有 load。"""
         offenders = []
-        for p in sorted((ROOT / "07_tools").rglob("*.py")):
+        for p in sorted((ROOT / "src").rglob("*.py")):
             t = p.read_text(encoding="utf-8")
             for m in re.finditer(r"^def (load|_load|read_json)\(.*?(?=\n(?:def |class |@|\Z))",
                                  t, re.S | re.M):
                 body = m.group(0)
                 if "read_text" in body and "utf-8-sig" not in body:
-                    offenders.append(f"{p.relative_to(ROOT / '07_tools')}: def {m.group(1)}")
+                    offenders.append(f'{p.relative_to(ROOT / "src")}: def {m.group(1)}')
         assert not offenders, ("读 JSON 必须用 `utf-8-sig`（Windows 记事本会加 BOM），"
                               "或直接用 paths.read_json：\n  " + "\n  ".join(offenders))
 
@@ -271,7 +271,7 @@ class TestStreamWriterStaysSeparate:
     """
 
     def test_stream_writer_tolerates_nan(self, tmp_path):
-        sys.path.insert(0, str(ROOT / "07_tools" / "screening"))
+        sys.path.insert(0, str(ROOT / "src" / "pipeline" / "screening"))
         import backtest_factors as bt
 
         p = tmp_path / "r.json"

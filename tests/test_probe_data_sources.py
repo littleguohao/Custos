@@ -15,7 +15,7 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("07_tools", "07_tools/local_tdx"):
+for _p in ("src", "src/datasource/local_tdx"):
     sys.path.insert(0, str(ROOT / _p))
 
 from research import probe_data_sources as P  # noqa: E402
