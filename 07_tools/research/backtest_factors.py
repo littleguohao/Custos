@@ -1542,8 +1542,8 @@ def _amv_ledger_records(since: str, after_date: Optional[str],
     同一日期多条记录时后写入(recorded_at 晚)的覆盖先写的。best-effort：缺失/异常返回 []。"""
     try:
         if ledger_path is None:
-            from paths import BASE  # noqa: PLC0415
-            ledger_path = BASE / "01_data" / "market" / "0amv_observations.jsonl"
+            from paths import MARKET_DIR  # noqa: PLC0415
+            ledger_path = MARKET_DIR / "0amv_observations.jsonl"
         if not ledger_path.is_file():
             return []
         latest: dict[str, tuple[str, float]] = {}

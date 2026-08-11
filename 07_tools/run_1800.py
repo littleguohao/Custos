@@ -18,12 +18,12 @@ import os
 import sys
 import time
 
-from paths import BASE, SCREENING, TOOLS, cn_today
+from paths import BASE, SCREENING, TOOLS, cn_today, LOGS, MARKET_DIR, PLANS
 from pipeline_kit import log_stage, md_to_digest, now_iso, write_run_log, run_stage_quiet as _stage, calendar_gate
 
 SCREEN_DIR = SCREENING
-TABLE_DIR = BASE / "03_daily_plans" / "_supporting"
-LOG_DIR = BASE / "06_logs"
+TABLE_DIR = PLANS / "_supporting"
+LOG_DIR = LOGS
 
 _now_iso = now_iso
 _log_stage = log_stage
@@ -143,7 +143,7 @@ def main(argv=None) -> int:
     #     此前每天全量重拉 20180101 起的 400+ 板块 → 600s stage 超时;
     #     且 --period day 是错的周期串(TQ 要 1d,见 TDX_LOCAL_INTERFACES.md),现由脚本自动探测。
     r = _run_stage(["uv", "run", "python", str(TOOLS / "local_tdx" / "fetch_sector_index_history.py"),
-                    "--out", str(BASE / "01_data" / "market" / "sector_index"),
+                    "--out", str(MARKET_DIR / "sector_index"),
                     "--start", "20180101", "--incremental"],
                    "refresh_sector_index", note="best-effort，失败不中断(仅影响板块相位 hint)")
     tail = _last_line(r["out"])

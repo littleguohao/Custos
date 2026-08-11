@@ -37,6 +37,7 @@ class TestCalcMfeMaeFieldNames:
 
         pos = self._positions(tmp_path)
         monkeypatch.setattr(cm, "BASE", tmp_path)
+        monkeypatch.setattr(cm, "HOLDINGS_DIR", tmp_path / "01_data" / "holdings")
         monkeypatch.setattr(cm, "POSITIONS", pos)
         monkeypatch.setattr(cm, "load_entry_dates",
                             lambda *a, **k: {"600000": {"entry_date": "2026-06-10"}})
@@ -635,6 +636,7 @@ class TestPendingPositionMissingFields:
         pos_path.parent.mkdir(parents=True, exist_ok=True)
         pos_path.write_text(json.dumps([row], ensure_ascii=False), encoding="utf-8")
         monkeypatch.setattr(cm, "BASE", tmp_path)
+        monkeypatch.setattr(cm, "HOLDINGS_DIR", tmp_path / "01_data" / "holdings")
         monkeypatch.setattr(cm, "POSITIONS", pos_path)
         monkeypatch.setattr(cm, "load_entry_dates",
                             lambda *a, **k: {"600000": {"entry_date": "2026-06-10"}})
@@ -680,6 +682,7 @@ class TestPendingPositionMissingFields:
         pos_path.write_text(json.dumps([{"代码": "600000", "名称": "A", "持有数量": 100}],
                                        ensure_ascii=False), encoding="utf-8")
         monkeypatch.setattr(cm, "BASE", tmp_path)
+        monkeypatch.setattr(cm, "HOLDINGS_DIR", tmp_path / "01_data" / "holdings")
         monkeypatch.setattr(cm, "POSITIONS", pos_path)
         monkeypatch.setattr(cm, "load_entry_dates",
                             lambda *a, **k: {"600000": {"entry_date": "2026-06-10"}})

@@ -34,13 +34,13 @@ if str(LOCAL_TDX_DIR) not in sys.path:
     sys.path.insert(0, str(LOCAL_TDX_DIR))
 
 import local_tdx_data as ltd  # type: ignore
-from paths import BASE, TDX_ROOT, cn_now  # noqa: E402
+from paths import BASE, TDX_ROOT, cn_now, MARKET_DIR  # noqa: E402
 from indicators import pct_change as pct  # noqa: E402
 from runtime_guards import previous_confirmed_trading_day  # noqa: E402
 from contracts import require  # noqa: E402
 from breadth_basis import breadth_counts, resolve_total_stocks  # noqa: E402
 
-OUT_DIR = BASE / "01_data" / "market"
+OUT_DIR = MARKET_DIR
 
 INDICES = {
     "上证指数": {"prefix": "sh", "code": "999999"},

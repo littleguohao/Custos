@@ -51,8 +51,8 @@ def shares_idx() -> dict:
     if _SHARE_IDX is None:
         idx: dict[str, list] = {}
         try:
-            from paths import BASE  # noqa: PLC0415
-            p = BASE / "01_data" / "fundamentals" / "share_changes.jsonl"
+            from paths import DATA  # noqa: PLC0415
+            p = DATA / "fundamentals" / "share_changes.jsonl"
             if p.is_file():
                 idx = events_to_idx(
                     json.loads(line)

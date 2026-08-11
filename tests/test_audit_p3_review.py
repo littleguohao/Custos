@@ -250,20 +250,24 @@ class TestNoTradeConfirmationSource:
 class TestRun1700NoTradesFlag:
     def test_flag_from_position_confirmations(self, tmp_path, monkeypatch):
         monkeypatch.setattr(run_1700, "BASE", tmp_path)
+        monkeypatch.setattr(run_1700, "TRADES_DIR", tmp_path / "01_data" / "trades")
         write_confirmations(tmp_path, no_trade_records(["2026-07-14"]))
         assert run_1700._no_trades_flag("2026-07-14") == ["--no-trades-confirmed"]
 
     def test_no_flag_when_not_confirmed(self, tmp_path, monkeypatch):
         monkeypatch.setattr(run_1700, "BASE", tmp_path)
+        monkeypatch.setattr(run_1700, "TRADES_DIR", tmp_path / "01_data" / "trades")
         write_confirmations(tmp_path, no_trade_records(["2026-07-13"]))
         assert run_1700._no_trades_flag("2026-07-14") == []
 
     def test_no_flag_when_file_absent(self, tmp_path, monkeypatch):
         monkeypatch.setattr(run_1700, "BASE", tmp_path)
+        monkeypatch.setattr(run_1700, "TRADES_DIR", tmp_path / "01_data" / "trades")
         assert run_1700._no_trades_flag("2026-07-14") == []
 
     def test_snapshot_only_entry_does_not_set_flag(self, tmp_path, monkeypatch):
         monkeypatch.setattr(run_1700, "BASE", tmp_path)
+        monkeypatch.setattr(run_1700, "TRADES_DIR", tmp_path / "01_data" / "trades")
         write_confirmations(tmp_path, {"2026-07-14": {"confirmed_at": "x", "note": "y"}})
         assert run_1700._no_trades_flag("2026-07-14") == []
 

@@ -38,6 +38,8 @@ for _p in (str(TOOLS), str(TOOLS / "screening"), str(TOOLS / "local_tdx")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+from paths import MARKET_DIR  # noqa: E402
+
 EXCLUDE_TDX_TYPES = {"3", "5"}     # 地区/风格板块不进合集(江西板块、保险重仓之类无"主线"语义)
 
 
@@ -185,7 +187,7 @@ def main(argv: Optional[list] = None) -> int:
     ap = argparse.ArgumentParser(description="回测交易的板块族聚合:主流 vs 分散")
     ap.add_argument("--trades", required=True, help="trade-sim --out JSON(含逐笔 trades)")
     ap.add_argument("--sector-members",
-                    default=str(TOOLS.parent / "01_data" / "market" / "sector_members.json"))
+                    default=str(MARKET_DIR / "sector_members.json"))
     ap.add_argument("--top-k", type=int, default=10)
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)

@@ -22,20 +22,18 @@ except ImportError:
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from paths import BASE, cn_today, cn_now  # noqa: E402
+from paths import BASE, cn_today, cn_now, HOLDINGS_DIR, LOGS, MARKET_DIR, PLANS, QUALITY_DIR, RISK_DIR, TRADES_DIR  # noqa: E402
 from paths import read_json as load  # noqa: E402
 import report_audit  # noqa: E402
 from code_utils import finite  # noqa: E402
 from code_utils import fnum as optional_finite  # noqa: E402
 from fmt import pct_text as _fmt_pct_text  # noqa: E402
 
-TRADES = BASE / "01_data" / "trades"
-HOLDINGS = BASE / "01_data" / "holdings"
-RISK = BASE / "01_data" / "risk"
-MARKET = BASE / "01_data" / "market"
-QUALITY = BASE / "01_data" / "quality"
-PLANS = BASE / "03_daily_plans"
-LOGS = BASE / "06_logs"
+TRADES = TRADES_DIR
+HOLDINGS = HOLDINGS_DIR
+RISK = RISK_DIR
+MARKET = MARKET_DIR
+QUALITY = QUALITY_DIR
 PLANS.mkdir(parents=True, exist_ok=True)
 LOGS.mkdir(parents=True, exist_ok=True)
 

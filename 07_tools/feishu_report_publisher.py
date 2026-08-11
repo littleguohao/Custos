@@ -32,7 +32,7 @@ if str(TOOLS_DIR) not in sys.path:
 import requests  # noqa: E402
 
 from net_retry import retry_call  # noqa: E402
-from paths import BASE  # noqa: E402
+from paths import BASE, QUALITY_DIR  # noqa: E402
 
 TOKEN_URL = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
 FILES_URL = "https://open.feishu.cn/open-apis/im/v1/files"
@@ -267,7 +267,7 @@ def check_delivery_gate(date: str, gate_path: Path | None = None) -> dict:
     position_gate 只影响仓位权限文案(日常会 degraded),不作为投递闸,避免过度阻断。
     返回 {"ok":bool, "reason":str, "gate":dict|None}。
     """
-    path = gate_path or (BASE / "01_data" / "quality" / f"{date}_runtime_gate.json")
+    path = gate_path or (QUALITY_DIR / f"{date}_runtime_gate.json")
     if not path.exists():
         return {"ok": False, "reason": f"缺少运行门控文件 {path}(未跑 runtime_gate)", "gate": None}
     try:

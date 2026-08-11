@@ -43,9 +43,9 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from code_utils import market_of                               # noqa: E402
-from paths import cn_now                                       # noqa: E402
+from paths import cn_now, MARKET_DIR  # noqa: E402
 
-CACHE_DIR = BASE / "01_data" / "market" / "xdxr"
+CACHE_DIR = MARKET_DIR / "xdxr"
 
 # 只有这些 category 影响价格；5=股本变化(增发/回购)不改变单股权益，不复权
 PRICE_AFFECTING_CATEGORY = {1}          # 1 = 除权除息（分红/送转/配股）

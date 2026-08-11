@@ -21,6 +21,7 @@ if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import tq_sector  # noqa: E402  复用其 TdxW 探测 + tqcenter 惰性导入
+from paths import MARKET_DIR  # noqa: E402
 
 # TQ 的周期串是 "1d"(探针 00_governance/data/TDX_LOCAL_INTERFACES.md「周期串是 1d」:缺省或写错报
 # ErrorId=5 periodstr error)。此前默认 "day" → 400+ 板块逐个报错、日复一日刷不到数据。
@@ -221,7 +222,7 @@ def write_fetch_status(outdir: Path, total: int, ok: int, failed: list[str],
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="抓取通达信板块指数(880xxx)收盘历史→CSV缓存")
-    ap.add_argument("--out", default=str(TOOLS.parent / "01_data" / "market" / "sector_index"))
+    ap.add_argument("--out", default=str(MARKET_DIR / "sector_index"))
     ap.add_argument("--start", default="20180101", help="起始日 YYYYMMDD(TQ 会给到本地实有最早)")
     ap.add_argument("--period", default="", help=f"周期串(缺省自动探测: {', '.join(PERIOD_CANDIDATES)})")
     ap.add_argument("--incremental", action="store_true",

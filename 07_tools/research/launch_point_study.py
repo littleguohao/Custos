@@ -41,6 +41,7 @@ if _FACTORS_DIR not in sys.path:
 
 # 股本事件索引构建的唯一所有者（包限定导入：该模块持可变缓存，见 _shares 模块头）。
 from factors._shares import events_to_idx as _shares_events_to_idx  # noqa: E402
+from paths import MARKET_DIR  # noqa: E402
 
 
 
@@ -1498,10 +1499,10 @@ def main(argv=None, loader=None) -> int:
     ap.add_argument("--top-pct", type=float, default=10.0)
     ap.add_argument("--buffer-days", type=int, default=60)
     ap.add_argument("--sector-members",
-                    default=str(TOOLS.parent / "01_data" / "market" / "sector_members.json"),
+                    default=str(MARKET_DIR / "sector_members.json"),
                     help="板块成员 JSON(算赢家板块集中度/共振;缺失则跳过)")
     ap.add_argument("--sector-index-dir",
-                    default=str(TOOLS.parent / "01_data" / "market" / "sector_index"))
+                    default=str(MARKET_DIR / "sector_index"))
     ap.add_argument("--capture-rank", action="store_true",
                     help="额外跑赢家捕捉率+排名质量研究(recall/surfaced/埋没),量化'选出来但没发现'")
     ap.add_argument("--capture-only", action="store_true",

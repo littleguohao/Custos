@@ -36,13 +36,14 @@ for _p in (str(Path(__file__).resolve().parent), str(Path(__file__).resolve().pa
 
 
 import backtest_factors as bt  # noqa: E402
+from paths import LOGS  # noqa: E402
 import local_tdx_data  # noqa: E402
 from launch_point_study import _auc  # noqa: E402  Mann-Whitney 正确实现(本文件曾用错公式)
 
 # 历史缓存路径(无参数指纹)。保留仅为兼容,实际读写走 _cache_path()。
-ROWS_CACHE = BASE / "06_logs" / "walkforward" / "winner_feature_rows.json"
+ROWS_CACHE = LOGS / "walkforward" / "winner_feature_rows.json"
 
-FIRINGS = BASE / "06_logs" / "walkforward" / "firings_jlow_2026H1_tdx.json"
+FIRINGS = LOGS / "walkforward" / "firings_jlow_2026H1_tdx.json"
 FWD = 20
 WIN_Q = 0.2          # 全体前 20% 算"跑出来"
 PICKS = 3
@@ -63,7 +64,7 @@ def _cache_path() -> Path:
     except OSError:
         sig = f"{FIRINGS.name}:missing:{FWD}"
     digest = hashlib.sha256(sig.encode()).hexdigest()[:12]
-    return BASE / "06_logs" / "walkforward" / f"winner_feature_rows_{digest}.json"
+    return LOGS / "walkforward" / f"winner_feature_rows_{digest}.json"
 
 
 def _adx_features(high, low, close, n: int = 14) -> dict:
@@ -238,7 +239,7 @@ def main() -> None:
     print(f"\n过三重门槛(日内AUC≥0.53 + 净增益≥2pp + 半程同号): "
           f"{[r['f'] for r in strong] or '无'}")
     out = {"n": len(rows), "thr": thr, "base_rate": base, "features": results, "strong": strong}
-    (BASE / "06_logs" / "walkforward" / "winner_feature_study.json").write_text(
+    (LOGS / "walkforward" / "winner_feature_study.json").write_text(
         json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
 
 

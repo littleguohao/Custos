@@ -51,7 +51,7 @@ _TOOLS = Path(__file__).resolve().parents[1]
 if str(_TOOLS) not in sys.path:
     sys.path.insert(0, str(_TOOLS))
 
-from paths import BASE, TDX_ROOT, cn_today, cn_now  # noqa: E402
+from paths import BASE, TDX_ROOT, cn_today, cn_now, MARKET_DIR, TRADES_DIR  # noqa: E402
 from code_utils import norm_code, fnum as _fnum  # noqa: E402
 from code_utils import market_of  # noqa: E402
 from contracts import require  # noqa: E402
@@ -474,7 +474,7 @@ def main(argv=None) -> int:
     target = args.date
 
     # Load positions
-    raw = json.loads((BASE / "01_data/trades/current_positions.json").read_text(encoding="utf-8"))
+    raw = json.loads((TRADES_DIR / "current_positions.json").read_text(encoding="utf-8"))
     holdings = raw if isinstance(raw, list) else raw.get("holdings", [])
 
     holding_quotes = []
@@ -500,7 +500,7 @@ def main(argv=None) -> int:
     breadth = _collect_breadth()
 
     # Write output (preserve unavailable stocks from previous file)
-    out_path = BASE / "01_data" / "market" / f"{target}_holding_quotes.json"
+    out_path = MARKET_DIR / f"{target}_holding_quotes.json"
     if out_path.exists():
         try:
             prev_data = json.loads(out_path.read_text(encoding="utf-8"))

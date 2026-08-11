@@ -75,6 +75,8 @@ def test_require_systemexit_still_writes_failed_status(tmp_path, monkeypatch):
     import json
 
     monkeypatch.setattr(mim, "BASE", tmp_path)
+    monkeypatch.setattr(mim, "MARKET_DIR", tmp_path / "01_data" / "market")
+    monkeypatch.setattr(mim, "QUALITY_DIR", tmp_path / "01_data" / "quality")
     mkt_dir = tmp_path / "01_data" / "market"
     mkt_dir.mkdir(parents=True)
     (mkt_dir / f"{TARGET}_incremental_market.json").write_text(

@@ -15,13 +15,12 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import BASE  # noqa: E402
+from paths import BASE, DATA, LOGS  # noqa: E402
 from paths import read_json as load  # noqa: E402
 from code_utils import bare_code as bare  # noqa: E402
 from contracts import require  # noqa: E402
 
-DATA = BASE / "01_data"
-LOG = BASE / "06_logs"
+LOG = LOGS
 
 
 

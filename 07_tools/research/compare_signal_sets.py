@@ -31,6 +31,7 @@ for _p in (str(Path(__file__).resolve().parent), str(Path(__file__).resolve().pa
 
 
 import backtest_factors as bt  # noqa: E402
+from paths import DATA, LOGS  # noqa: E402
 
 # ⚠️ 2026-08-07：原本用 `spec_from_file_location` 按**文件路径**加载
 # `scan_signals_ytd`，硬编码了 `07_tools/screening/...` —— 研究脚本拆到
@@ -43,9 +44,9 @@ import local_tdx_data  # noqa: E402
 
 COST = 0.003
 SETS = {
-    "reversal_k(研究)": [BASE / "06_logs" / "walkforward" / "firings_rk_2026Jan_tdx.json",
-                       BASE / "06_logs" / "walkforward" / "firings_rk_2026H1_tdx.json"],
-    "j_low(live代理)": [BASE / "06_logs" / "walkforward" / "firings_jlow_2026H1_tdx.json"],
+    "reversal_k(研究)": [LOGS / "walkforward" / "firings_rk_2026Jan_tdx.json",
+                       LOGS / "walkforward" / "firings_rk_2026H1_tdx.json"],
+    "j_low(live代理)": [LOGS / "walkforward" / "firings_jlow_2026H1_tdx.json"],
 }
 
 
@@ -68,7 +69,7 @@ def main() -> None:
     # （加载 walkforward 日志 + 逐票 TDX 取数，裸跑挂数分钟）。
     import argparse
     argparse.ArgumentParser(description=__doc__).parse_args()
-    pit = scan._pit_index(BASE / "01_data" / "fundamentals" / "pit_financials.jsonl")
+    pit = scan._pit_index(DATA / "fundamentals" / "pit_financials.jsonl")
     regime = bt.load_amv_regime(since="2024-01-01")
     bars_cache: dict = {}
 

@@ -12,14 +12,13 @@ import json
 import re
 from pathlib import Path
 
-from paths import BASE
+from paths import BASE, DATA
 from paths import read_json as load
 from paths import write_json as dump
 from code_utils import bare_code as bare, fnum
 from runtime_guards import normalize_regime
 from contracts import require
 
-DATA = BASE / "01_data"
 
 
 

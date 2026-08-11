@@ -18,14 +18,14 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import BASE  # noqa: E402
+from paths import BASE, HOLDINGS_DIR, TRADES_DIR  # noqa: E402
 from paths import read_json as load  # noqa: E402
 from contracts import require  # noqa: E402
 
 PY=Path(sys.executable)
 TECH=BASE/'07_tools'/'market_timing'/'technical_monitor.py'
-HOLD=BASE/'01_data'/'holdings'
-TRADES=BASE/'01_data'/'trades'/'current_positions.json'
+HOLD=HOLDINGS_DIR
+TRADES=TRADES_DIR / "current_positions.json"
 
 # code -> analysis dict（或 {"__error__": msg}）。一次运行内的 memo，避免重复计算。
 _ANALYSIS_CACHE: dict[str, dict] = {}

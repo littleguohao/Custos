@@ -26,6 +26,7 @@ BASE = TOOLS.parent
 
 sys.path.insert(0, str(TOOLS))
 from pipeline_kit import _extract_json
+from paths import LOGS
 
 RUNNERS = {
     "run_0850.py": "休市",
@@ -35,7 +36,7 @@ RUNNERS = {
     "run_1800.py": "休市",
 }
 
-LOG_DIR = BASE / "06_logs"
+LOG_DIR = LOGS
 
 
 def _is_trading_day(target: str) -> bool:

@@ -57,6 +57,7 @@ for _p in (str(pathlib.Path(__file__).resolve().parent), str(pathlib.Path(__file
 
 
 import numpy as np                                            # noqa: E402
+from paths import LOGS                                        # noqa: E402
 import pandas as pd                                           # noqa: E402
 
 # 送转除权的典型跳空幅度（10送N ⇒ 价格 ×10/(10+N)）
@@ -277,7 +278,7 @@ def cmd_backtest_diff(sample: int, seed: int, s_data_root: str,
                       extra: Optional[list[str]] = None) -> int:
     """同一批票同参数，两个口径各跑一遍回测——最有说服力的证据。"""
     script = BASE / "07_tools" / "research" / "backtest_factors.py"
-    outdir = BASE / "06_logs" / "adjust_diag"
+    outdir = LOGS / "adjust_diag"
     outdir.mkdir(parents=True, exist_ok=True)
     common = ["--trade-sim", "--entry-filter", "j_low", "--scorer", "b1_dual",
               "--cost-bps", "25", "--scale-out", "0.5",

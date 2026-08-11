@@ -28,7 +28,7 @@ for _p in (str(TOOLS), str(TOOLS / "screening")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from paths import BASE  # noqa: E402
+from paths import BASE, LOGS  # noqa: E402
 
 import backtest_factors as bt  # noqa: E402
 import launch_point_study as lp  # noqa: E402
@@ -525,7 +525,7 @@ for _p in (str(Path(__file__).resolve().parent), str(Path(__file__).resolve().pa
 
 def main(argv=None, runner=None) -> int:
     ap = argparse.ArgumentParser(description="空头段识别未来赢家:窗口枚举 → Pass1 逐对 → Pass2 汇总")
-    ap.add_argument("--out-dir", default="06_logs/bear2long")
+    ap.add_argument("--out-dir", default=str(LOGS / "bear2long"))
     ap.add_argument("--pairs-file", default="", help="复用已有窗口对 JSON(缺省则现算)")
     ap.add_argument("--min-bear-days", type=int, default=10)
     ap.add_argument("--min-long-days", type=int, default=20)

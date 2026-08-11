@@ -48,7 +48,7 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import BASE  # noqa: E402,F401  (照 07_tools 惯例统一入口)
+from paths import BASE, MARKET_DIR  # noqa: E402,F401  (照 07_tools 惯例统一入口)
 
 DEFAULT_COMPASS_ROOT = Path(r"E:\Compass")
 DAY_VDAT_REL = Path("WavMain") / "ANALYSE" / "Data" / "ChinaStk" / "Z_SK" / "day.vdat"
@@ -63,7 +63,7 @@ TRUTH_PAIRS = 30          # 真值比对取最近 confirmed 记录条数
 TRUTH_MIN_PRESENT = 3     # 真值日期至少落在链内 N 条才可判定
 TRUTH_MATCH_RATIO = 0.9   # 真值匹配率下限
 TRUTH_TOL = 0.05          # change_pct 匹配容差（百分点）
-DEFAULT_TRUTH_LEDGER = BASE / "01_data" / "market" / "0amv_observations.jsonl"
+DEFAULT_TRUTH_LEDGER = MARKET_DIR / "0amv_observations.jsonl"
 
 
 def _compass_root(root: Optional[str] = None) -> Path:

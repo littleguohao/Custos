@@ -614,8 +614,8 @@ def test_shares_idx_smoke_with_real_data(monkeypatch):
     `_SHARE_IDX`，没人走真实加载路径 —— 这条专门走真实路径，防「静默全空」。
     无真实数据的环境（CI/新机）跳过，不 mock。
     """
-    from paths import BASE
-    if not (BASE / "01_data" / "fundamentals" / "share_changes.jsonl").is_file():
+    from paths import DATA
+    if not (DATA / "fundamentals" / "share_changes.jsonl").is_file():
         pytest.skip("无 share_changes.jsonl（非真实数据环境）")
     monkeypatch.setattr(_shares, "_SHARE_IDX", None)   # 清掉前序测试的桩，强制真实加载
     idx = _shares.shares_idx()

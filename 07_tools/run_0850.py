@@ -15,10 +15,10 @@ import sys
 import time
 from datetime import date
 
-from paths import BASE, cn_today, TOOLS
+from paths import BASE, cn_today, TOOLS, LOGS
 from pipeline_kit import _extract_json, check_trading_day, log_stage, now_iso, run_stage, write_run_log, run_stage_quiet as _stage, calendar_gate
 
-LOG_DIR = BASE / "06_logs"
+LOG_DIR = LOGS
 
 # Module-level aliases kept for tests and readability; implementation lives in pipeline_kit.
 _now_iso = now_iso

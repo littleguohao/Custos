@@ -45,11 +45,11 @@ for _p in (str(TOOLS),):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from paths import BASE, cn_today  # noqa: E402
+from paths import BASE, cn_today, DATA  # noqa: E402
 
 API = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 UA = {"User-Agent": "Mozilla/5.0"}
-OUT_DIR = BASE / "01_data" / "fundamentals"
+OUT_DIR = DATA / "fundamentals"
 LEDGER = OUT_DIR / "pit_financials.jsonl"
 
 # 只保留**绝对值**字段:同比/环比会被次年同期报告重算,不是 PIT 值(见模块 docstring)

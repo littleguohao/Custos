@@ -29,13 +29,12 @@ _TOOLS_ROOT = Path(__file__).resolve().parents[1]
 if str(_TOOLS_ROOT) not in sys.path:
     sys.path.insert(0, str(_TOOLS_ROOT))
 
-from paths import BASE, MARKET_TIMING  # noqa: E402
+from paths import BASE, MARKET_TIMING, HOLDINGS_DIR, MARKET_DIR, PLANS, SECTORS_DIR  # noqa: E402
 from contracts import require  # noqa: E402
 
-SECTOR_MAP = BASE / "01_data" / "sectors" / "sector_code_map.json"
-SECTOR_DIR = BASE / "01_data" / "sectors"
-HOLDINGS_DIR = BASE / "01_data" / "holdings"
-OUT_DIR = BASE / "03_daily_plans"
+SECTOR_MAP = SECTORS_DIR / "sector_code_map.json"
+SECTOR_DIR = SECTORS_DIR
+OUT_DIR = PLANS
 TOOLS_DIR = MARKET_TIMING
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
@@ -269,7 +268,7 @@ def make_report(date: str, rows: list[dict[str, Any]]) -> str:
     lines.append("")
 
     lines.append("## 5. 板块-大盘一致性\n")
-    market = load_json(BASE / "01_data" / "market" / f"{date}_market_timing_input.json", {}) or {}
+    market = load_json(MARKET_DIR / f"{date}_market_timing_input.json", {}) or {}
     amv = market.get("amv_0", {})
     lines.append(f"- 大盘状态：{market_status}；0AMV当日 {amv.get('amv_change_pct', '缺失')}%，有效状态 **{amv.get('effective_state', amv.get('amv_zone', '未知'))}**。")
     lines.append("- 强于大盘的板块：" + ("、".join([r.get("theme_name") for r in strong[:5]]) if strong else "暂不明确"))

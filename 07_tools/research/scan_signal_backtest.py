@@ -31,6 +31,7 @@ for _p in (str(Path(__file__).resolve().parent), str(Path(__file__).resolve().pa
 
 
 import backtest_factors as bt  # noqa: E402
+from paths import DATA, LOGS  # noqa: E402
 
 # ⚠️ 2026-08-07：原本用 `spec_from_file_location` 按**文件路径**加载
 # `scan_signals_ytd`，硬编码了 `07_tools/screening/...` —— 研究脚本拆到
@@ -42,13 +43,13 @@ import scan_signals_ytd as scan  # noqa: E402
 
 import local_tdx_data  # noqa: E402
 
-FIRINGS = [BASE / "06_logs" / "walkforward" / "firings_rk_2026YTD.json",
-           BASE / "06_logs" / "walkforward" / "firings_rk_2026H1_tdx.json"]
+FIRINGS = [LOGS / "walkforward" / "firings_rk_2026YTD.json",
+           LOGS / "walkforward" / "firings_rk_2026H1_tdx.json"]
 COST = 0.003
 
 
 def collect_signals() -> list[dict]:
-    pit = scan._pit_index(BASE / "01_data" / "fundamentals" / "pit_financials.jsonl")
+    pit = scan._pit_index(DATA / "fundamentals" / "pit_financials.jsonl")
     regime = bt.load_amv_regime(since="2024-01-01")
     out = []
     for fp in FIRINGS:

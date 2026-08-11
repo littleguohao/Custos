@@ -28,12 +28,12 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import BASE, TDX_ROOT  # noqa: E402
+from paths import BASE, TDX_ROOT, HOLDINGS_DIR, TRADES_DIR  # noqa: E402
 from code_utils import suffix  # noqa: E402
 from contracts import require  # noqa: E402
 
-OUT_DIR = BASE / "01_data" / "holdings"
-DEFAULT_POSITIONS = BASE / "01_data" / "trades" / "current_positions.json"
+OUT_DIR = HOLDINGS_DIR
+DEFAULT_POSITIONS = TRADES_DIR / "current_positions.json"
 
 HQ_CACHE = TDX_ROOT / "T0002" / "hq_cache"
 TDXHY_CFG = HQ_CACHE / "tdxhy.cfg"

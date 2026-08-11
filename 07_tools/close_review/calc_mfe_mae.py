@@ -25,11 +25,11 @@ _TOOLS = Path(__file__).resolve().parents[1]
 if str(_TOOLS) not in sys.path:
     sys.path.insert(0, str(_TOOLS))
 
-from paths import BASE, TDX_ROOT, cn_today  # noqa: E402
+from paths import BASE, TDX_ROOT, cn_today, HOLDINGS_DIR, TRADES_DIR  # noqa: E402
 from contracts import require  # noqa: E402
 
-POSITIONS = BASE / "01_data" / "trades" / "current_positions.json"
-LEDGER = BASE / "01_data" / "trades" / "master_trade_ledger.csv"
+POSITIONS = TRADES_DIR / "current_positions.json"
+LEDGER = TRADES_DIR / "master_trade_ledger.csv"
 
 
 def resolve_open_entry_dates(trades: list[dict]) -> dict[str, dict]:
@@ -161,7 +161,7 @@ def main(argv=None):
     ap.add_argument("--date", default=cn_today().strftime("%Y-%m-%d"))
     args = ap.parse_args(argv)
     target = args.date
-    OUT = BASE / "01_data" / "holdings" / f"{target}_mfe_mae.json"
+    OUT = HOLDINGS_DIR / f"{target}_mfe_mae.json"
 
     from mootdx.reader import Reader
 

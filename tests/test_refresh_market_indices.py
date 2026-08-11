@@ -47,6 +47,9 @@ def env(monkeypatch, tmp_path):
         if attr.isupper() and isinstance(v, pathlib.Path):
             monkeypatch.setattr(rmi, attr, tmp_path)
     monkeypatch.setattr(rmi, "BASE", tmp_path)
+    # MARKET_DIR 是 paths 常量（= BASE/01_data/market），打平 patch 成 tmp_path 后
+    # 与下面的 fixture 树（tmp/01_data/market）对不上，单独指到子目录。
+    monkeypatch.setattr(rmi, "MARKET_DIR", tmp_path / "01_data" / "market")
     # ⚠️ main() 的 breadth 分支会经 resolve_total_stocks() 读**真实**的
     # 01_data/.../a_share_universe.json（breadth_basis 的模块常量不在上面的
     # patch 范围内）——只读但也有真实文件依赖，打桩断掉（2026-08-11 评审指出）。

@@ -24,8 +24,9 @@ import json
 import os
 from pathlib import Path
 
-BASE = Path(__file__).resolve().parents[2]
-UNIVERSE_FILE = BASE / "01_data" / "market" / "a_share_universe.json"
+from paths import MARKET_DIR
+
+UNIVERSE_FILE = MARKET_DIR / "a_share_universe.json"
 ENV_KEY = "A_SHARE_TOTAL_STOCKS"
 # 合理区间:A 股上市家数在 4000~7000 之间;超出即视为脏值,宁可标不可用。
 MIN_TOTAL, MAX_TOTAL = 4000, 7000

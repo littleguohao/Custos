@@ -63,6 +63,17 @@ SECTORS_DIR = DATA / "sectors"
 DECISIONS_DIR = DATA / "decisions"
 RISK_DIR = DATA / "risk"
 STOCK_POOL_DIR = DATA / "stock_pool"
+REVIEW_STEPS_DIR = DATA / "review_steps"   # 复盘链各 step 的中间产物
+CACHE_DIR = DATA / "cache"                 # 采集缓存（如 tdx_affair 权息缓存）
+
+# artifacts/ —— 目录重组的目标布局（03_daily_plans + 04_reviews + 06_logs 三合为一）。
+# 阶段 0 只定义常量、不改任何指向；后续阶段再把 PLANS/REVIEWS/LOGS 切到这里。
+ARTIFACTS = BASE / "artifacts"
+REPORTS = ARTIFACTS / "reports"
+DAILY_REPORTS = REPORTS / "daily"        # 每日计划与日报
+WEEKLY_REPORTS = REPORTS / "weekly"      # 周报
+MONTHLY_REPORTS = REPORTS / "monthly"    # 月报
+ARTIFACT_LOGS = ARTIFACTS / "logs"       # 运行日志与诊断输出
 
 # ---------------------------------------------------------------------------
 # 00_governance/ 的四个子目录（2026-08-06 分类重构）

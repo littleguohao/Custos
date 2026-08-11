@@ -7,7 +7,7 @@ date/collected_at/holdings/data_quality)。消费端静默降级时报告中不�
 """
 from __future__ import annotations
 
-from paths import BASE, read_json
+from paths import BASE, read_json, NEWS_DIR
 
 from pathlib import Path
 
@@ -18,7 +18,7 @@ REQUIRED_LIST_KEYS = ("market_events", "holding_events")
 # ⚠️ 独立的模块常量而不是在函数里拼 `BASE / ...`：测试要能 monkeypatch 它。
 # 2026-08-07 从 daily_report 搬这两个函数时踩过 —— 既有测试打桩
 # `daily_report.DATA`，函数搬走后桩就失效了（打在旧模块上）。
-PREMARKET_DIR = BASE / "01_data" / "news" / "premarket"
+PREMARKET_DIR = NEWS_DIR / "premarket"
 
 
 def validate_premarket_intelligence(data: Any) -> dict[str, Any]:

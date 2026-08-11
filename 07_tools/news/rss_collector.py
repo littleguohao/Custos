@@ -12,12 +12,12 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import BASE, RSS_SOURCE_REGISTRY_FILE, cn_now  # noqa: E402
+from paths import BASE, LOGS, NEWS_DIR, RSS_SOURCE_REGISTRY_FILE, cn_now  # noqa: E402
 from contracts import require  # noqa: E402
 from net_retry import retry_call  # noqa: E402
 
 REG=RSS_SOURCE_REGISTRY_FILE
-DATA=BASE/'01_data'/'news'/'rss'; LOG=BASE/'06_logs'/'rss'
+DATA=NEWS_DIR/'rss'; LOG=LOGS/'rss'
 
 # 单个 feed 的字节上限。国家统计局的 feed 实测约 4.5MB,所以上限不能定得太小;
 # 但 r.read() 完全不设限意味着任何被劫持/故障的源都能把内存打爆,故设 16MB 硬顶。

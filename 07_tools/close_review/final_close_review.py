@@ -19,7 +19,7 @@ except ImportError:
     from holding_bbi import intraday_bbi_basis
     from holding_structure import n_structure_basis
 
-from paths import BASE, cn_now  # noqa: E402
+from paths import BASE, cn_now, DATA, REVIEWS  # noqa: E402
 from close_review.loss_streak import format_lines as loss_streak_lines  # noqa: E402
 from close_review.loss_streak import loss_streaks  # noqa: E402
 # ⚠️ 台账解析与 FIFO 配平的唯一实现在 `weekly_review` —— 这里**单向**依赖它。
@@ -38,8 +38,7 @@ from code_utils import fnum as optional_finite  # noqa: E402
 from fmt import pct_text  # noqa: E402
 from contracts import require  # noqa: E402
 
-DATA = BASE / "01_data"
-REV = BASE / "04_reviews" / "daily"
+REV = REVIEWS / "daily"
 
 
 

@@ -32,7 +32,7 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import BASE, TDX_ROOT, cn_today  # noqa: E402
+from paths import BASE, TDX_ROOT, cn_today, CACHE_DIR  # noqa: E402
 from code_utils import market_of, norm_code as _cu_norm_code  # noqa: E402
 
 # --- mootdx lazy initialization ---
@@ -495,7 +495,7 @@ _financial_cache: dict[str, pd.DataFrame] = {}
 
 # 财务 zip 缓存目录。此前是 `BASE / ".." / "tdx_affair_cache"` —— 写在**项目外**的兄弟目录:
 # 不受项目 .gitignore 管、不随项目迁移、在只读父目录下直接失败。改到项目内的运行时数据区。
-AFFAIR_CACHE_DIR = BASE / "01_data" / "cache" / "tdx_affair"
+AFFAIR_CACHE_DIR = CACHE_DIR / "tdx_affair"
 
 
 def latest_report_period(files: list[dict]) -> str:

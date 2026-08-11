@@ -56,11 +56,11 @@ for _p in (str(TOOLS),):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from paths import BASE, cn_today  # noqa: E402
+from paths import BASE, cn_today, DATA  # noqa: E402
 
 API = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 UA = {"User-Agent": "Mozilla/5.0"}
-OUT_DIR = BASE / "01_data" / "fundamentals"
+OUT_DIR = DATA / "fundamentals"
 LEDGER = OUT_DIR / "share_changes.jsonl"
 SAMPLES = OUT_DIR / "share_change_samples.json"
 

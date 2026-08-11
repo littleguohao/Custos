@@ -52,7 +52,9 @@ for _p in ("07_tools", "07_tools/local_tdx", "07_tools/screening",
            "07_tools/market_timing"):
     sys.path.insert(0, str(BASE / _p))
 
-OUTDIR = BASE / "06_logs" / "data_probe"
+from paths import LOGS  # noqa: E402
+
+OUTDIR = LOGS / "data_probe"
 
 # 探测用样本：覆盖三个交易所 + 一个指数。故意包含 BJ —— 它**曾是** xdxr 唯一
 # 不覆盖的市场（mootdx 把 920 段判错 market）；84ee19f 修好 market=2 后，

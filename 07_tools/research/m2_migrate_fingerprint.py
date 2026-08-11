@@ -24,7 +24,12 @@ import re
 import sys
 
 BASE = pathlib.Path(__file__).resolve().parents[2]
-OUTDIR = BASE / "06_logs" / "m2_sweep"
+if str(BASE / "07_tools") not in sys.path:
+    sys.path.insert(0, str(BASE / "07_tools"))
+
+from paths import LOGS  # noqa: E402
+
+OUTDIR = LOGS / "m2_sweep"
 
 # 笔数 → 样本量的推断区间。信号数大致与样本股票数成正比（实测 1000 样本 ≈ 1300 笔）。
 # 择时方案（--amv-long-only）会把笔数砍到约 18%，所以要按「是否含 amv」分别定档。

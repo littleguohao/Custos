@@ -16,10 +16,10 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import BASE, cn_now, write_json_atomic  # noqa: E402
+from paths import BASE, cn_now, write_json_atomic, MARKET_DIR  # noqa: E402
 from paths import read_json as load  # noqa: E402
 
-MARKET=BASE/'01_data'/'market'; STATE=MARKET/'0amv_regime_history.json'; LEDGER=MARKET/'0amv_observations.jsonl'
+MARKET=MARKET_DIR; STATE=MARKET/'0amv_regime_history.json'; LEDGER=MARKET/'0amv_observations.jsonl'
 
 def append_observation(day:str, amv:dict):
     value=amv.get('amv_change_pct')

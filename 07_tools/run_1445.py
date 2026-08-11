@@ -13,10 +13,10 @@ import os
 import sys
 import time
 
-from paths import BASE, TOOLS, cn_today  # strategy_team/, 07_tools/
+from paths import BASE, TOOLS, cn_today, LOGS, QUALITY_DIR  # strategy_team/, 07_tools/
 from pipeline_kit import log_stage, now_iso, write_run_log, run_stage_quiet as _stage, calendar_gate
 
-LOG_DIR = BASE / "06_logs"
+LOG_DIR = LOGS
 
 # Module-level aliases kept for tests and readability; implementation lives in pipeline_kit.
 _now_iso = now_iso
@@ -32,7 +32,7 @@ def _write_run_log(target: str, status: str, started_at: str, t0: float, stages:
 def _gate_note(target: str) -> str:
     """把门控结论摘进 run log。14:45 盘中 0AMV/宽度本就未出,故**不阻断**报告,
     但 blocked/degraded 必须留痕,否则"数据大面积缺失却出了报告"事后无从察觉。"""
-    path = BASE / "01_data" / "quality" / f"{target}_runtime_gate.json"
+    path = QUALITY_DIR / f"{target}_runtime_gate.json"
     try:
         import json  # noqa: PLC0415
         g = json.loads(path.read_text(encoding="utf-8"))

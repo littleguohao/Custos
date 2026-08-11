@@ -131,8 +131,13 @@ import time
 from typing import Any, Optional
 
 BASE = pathlib.Path(__file__).resolve().parents[2]
+if str(BASE / "07_tools") not in sys.path:
+    sys.path.insert(0, str(BASE / "07_tools"))
+
+from paths import LOGS  # noqa: E402
+
 SCRIPT = BASE / "07_tools" / "research" / "backtest_factors.py"
-OUTDIR = BASE / "06_logs" / "m2_sweep"
+OUTDIR = LOGS / "m2_sweep"
 
 DEFAULT_SAMPLE = 1000           # 样本股票数默认值（300 样本实测不可靠，见模块文档）
 # 单个方案子进程的内存预算（MB）。保守值：1000 只票流式加载 + 逐笔 list + 落盘。

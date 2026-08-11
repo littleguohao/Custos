@@ -11,9 +11,9 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import BASE  # noqa: E402
+from paths import BASE, REVIEWS  # noqa: E402
 
-REV = BASE / "04_reviews" / "daily"
+REV = REVIEWS / "daily"
 REQUIRED_SECTIONS = [
     "今日计划、14:45建议与实际执行",
     "新闻、政策、风向与舆情",

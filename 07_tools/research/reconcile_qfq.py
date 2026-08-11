@@ -61,7 +61,8 @@ for _p in ("07_tools", "07_tools/local_tdx", "07_tools/screening"):
 
 
 from code_utils import price_limit_pct  # noqa: E402
-OUTDIR = BASE / "06_logs" / "qfq_reconcile"
+from paths import LOGS  # noqa: E402
+OUTDIR = LOGS / "qfq_reconcile"
 
 # 对账窗口：落在 2021_2026 bundle 内部，避开 10 个月缺口与 2026-02 右端
 WIN_START = "2021-08-02"

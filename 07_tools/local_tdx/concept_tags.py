@@ -32,9 +32,8 @@ for p in (str(TOOLS_DIR), str(SELF.parent)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from paths import BASE, cn_now  # noqa: E402
+from paths import BASE, cn_now, SECTORS_DIR  # noqa: E402
 
-SECTORS_DIR = BASE / "01_data" / "sectors"
 OUT_PATH = SECTORS_DIR / "stock_concept_tags.json"
 CONCEPT_ID = "10001"  # 概念和主题
 TDX_DATA_DIR = Path(os.environ.get("TDX_ROOT", r"E:\new_tdx64")) / "PYPlugins" / "data"

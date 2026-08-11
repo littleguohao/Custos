@@ -19,14 +19,13 @@ if str(LOCAL_TDX_DIR) not in sys.path:
 
 from runtime_guards import normalize_regime  # noqa: E402
 
-from paths import BASE  # noqa: E402
+from paths import BASE, DATA  # noqa: E402
 from code_utils import norm_code  # noqa: E402
 from b1_thresholds import (J_LOW_THRESHOLD, REVERSAL_AMPLITUDE_PCT,  # noqa: E402
                            REVERSAL_CHANGE_MAX_PCT, REVERSAL_CHANGE_MIN_PCT)
 from code_utils import fnum  # noqa: E402
 from contracts import require  # noqa: E402
 
-DATA = BASE / "01_data"
 
 # 次新股前置排除阈值：上市日历天数 < 20 标记
 NEW_LISTING_DAYS = 20

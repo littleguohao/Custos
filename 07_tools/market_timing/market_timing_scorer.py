@@ -27,14 +27,13 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import BASE, cn_now  # noqa: E402
+from paths import BASE, cn_now, MARKET_DIR, PLANS, QUALITY_DIR  # noqa: E402
 from code_utils import fnum  # noqa: E402
 from contracts import SECTION_NOT_FRESH  # noqa: E402  section.quality 的「不新鲜」域
 from runtime_guards import normalize_regime  # noqa: E402
 
-IN_DIR = BASE / "01_data" / "market"
-OUT_DIR = BASE / "03_daily_plans"
-QUALITY_DIR = BASE / "01_data" / "quality"
+IN_DIR = MARKET_DIR
+OUT_DIR = PLANS
 
 
 

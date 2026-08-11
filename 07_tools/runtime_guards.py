@@ -7,11 +7,10 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
-from paths import BASE, CN_TZ, CONTRACTS_DIR, cn_now, write_json_atomic
+from paths import BASE, CN_TZ, CONTRACTS_DIR, cn_now, write_json_atomic, DATA
 from paths import read_json as load_json
 from contracts import require
 
-DATA = BASE / "01_data"
 CALENDAR_CONFIG = CONTRACTS_DIR / "CN_TRADING_CALENDAR.json"
 CALENDAR_CACHE = DATA / "market" / "CN_TRADING_CALENDAR_CACHE.json"
 

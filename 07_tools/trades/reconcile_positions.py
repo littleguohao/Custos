@@ -44,7 +44,7 @@ _TOOLS = Path(__file__).resolve().parents[1]
 if str(_TOOLS) not in sys.path:
     sys.path.insert(0, str(_TOOLS))
 
-from paths import BASE, cn_now                                    # noqa: E402
+from paths import BASE, cn_now, QUALITY_DIR  # noqa: E402
 from code_utils import clean_code, finite                          # noqa: E402
 
 _TRADES = Path(__file__).resolve().parent
@@ -54,7 +54,6 @@ if str(_TRADES) not in sys.path:
 from incremental_ledger import (LEDGER, POS, TRADE_CATEGORIES,     # noqa: E402
                                 compute_positions, norm)
 
-QUALITY_DIR = BASE / "01_data" / "quality"
 
 
 def replay_ledger(ledger_path: Path | None = None,

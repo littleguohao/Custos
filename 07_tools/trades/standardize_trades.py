@@ -44,10 +44,10 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import BASE, cn_now  # noqa: E402
+from paths import BASE, cn_now, TRADES_DIR  # noqa: E402
 from code_utils import clean_code  # noqa: E402
 
-OUT_DIR = BASE / "01_data" / "trades"
+OUT_DIR = TRADES_DIR
 
 
 

@@ -42,10 +42,10 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import BASE, cn_now  # noqa: E402
+from paths import BASE, cn_now, TRADES_DIR  # noqa: E402
 from code_utils import clean_code, finite  # noqa: E402
 
-TD = BASE / '01_data' / 'trades'
+TD = TRADES_DIR
 LEDGER = TD / 'master_trade_ledger.csv'
 AUDIT = TD / 'ledger_append_audit.jsonl'
 POS = TD / 'current_positions.json'

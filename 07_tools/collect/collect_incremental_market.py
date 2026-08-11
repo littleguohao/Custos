@@ -24,7 +24,7 @@ if str(_TOOLS) not in sys.path:
 
 from code_utils import fnum as _fnum
 
-from paths import BASE, TDX_ROOT, cn_today, cn_now
+from paths import BASE, TDX_ROOT, cn_today, cn_now, MARKET_DIR
 
 import urllib.request, urllib.parse
 
@@ -200,7 +200,7 @@ def main(argv=None) -> int:
     result["northbound"] = derive_northbound(reader, reader_error)
 
     # ===== Write output =====
-    out_path = BASE / "01_data" / "market" / f"{target}_incremental_market.json"
+    out_path = MARKET_DIR / f"{target}_incremental_market.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 

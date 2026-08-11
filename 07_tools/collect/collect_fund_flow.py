@@ -20,7 +20,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
-from paths import BASE, cn_today, cn_now
+from paths import BASE, cn_today, cn_now, MARKET_DIR
 from contracts import require  # noqa: E402
 
 # 东方财富 push2 的**公开** ut 参数(网页端硬编码在前端 JS 里,非账号凭据、非密钥,
@@ -72,7 +72,7 @@ def main(argv=None) -> int:
     ap.add_argument("--date", default=cn_today().strftime("%Y-%m-%d"))
     args = ap.parse_args(argv)
     today = args.date
-    OUT = BASE / "01_data" / "market" / f"{today}_fund_flow_rank.json"
+    OUT = MARKET_DIR / f"{today}_fund_flow_rank.json"
 
     # Individual stock fund flow rank (top 200)
     try:

@@ -18,7 +18,7 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import BASE  # noqa: E402
+from paths import BASE, MARKET_DIR  # noqa: E402
 from indicators import pct_change as pct  # noqa: E402
 
 LOCAL_TDX_DIR = BASE / "07_tools" / "local_tdx"
@@ -132,7 +132,7 @@ def main():
     ap.add_argument("--date", required=True)
     args = ap.parse_args()
 
-    market_path = BASE / "01_data" / "market" / f"{args.date}_market_timing_input.json"
+    market_path = MARKET_DIR / f"{args.date}_market_timing_input.json"
     if not market_path.exists():
         print(f"[SKIP] market_timing_input.json not found for {args.date}")
         return

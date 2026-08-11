@@ -23,9 +23,8 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import BASE, cn_now  # noqa: E402
+from paths import BASE, cn_now, MARKET_DIR  # noqa: E402
 
-MARKET_DIR = BASE / "01_data" / "market"
 
 from net_retry import retry_call  # noqa: E402
 

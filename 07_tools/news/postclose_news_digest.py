@@ -11,7 +11,7 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import BASE  # noqa: E402
+from paths import BASE, DATA  # noqa: E402
 from paths import read_json as load  # noqa: E402
 from paths import write_json as dump  # noqa: E402
 from contracts import require  # noqa: E402
@@ -23,7 +23,6 @@ from news.premarket_intel_schema import (  # noqa: E402
     load_premarket_intelligence, premarket_intelligence_path,
     validate_premarket_intelligence)
 
-DATA = BASE / "01_data"
 
 
 

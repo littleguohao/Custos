@@ -36,14 +36,14 @@ from indicators import (bbi_series, kdj_series,  # noqa: E402
                         ema, resample, kdj, macd, bbi_state, zhixing_state,
                         _infer_price_limit)
 
-from paths import BASE, TDX_ROOT  # noqa: E402
+from paths import BASE, TDX_ROOT, MARKET_DIR  # noqa: E402
 from code_utils import norm_code, price_limit_pct, split_code  # noqa: E402
 from indicators import amplitude_pct as amplitude_pct_of  # noqa: E402
 from b1_thresholds import (J_LOW_THRESHOLD, REVERSAL_AMPLITUDE_PCT,  # noqa: E402
                            REVERSAL_CHANGE_MAX_PCT, REVERSAL_CHANGE_MIN_PCT,
                            VOL_PCTILE_MAX, VOL_RATIO_MAX, change_in_range)
 
-OUT_DIR = BASE / "01_data" / "market"
+OUT_DIR = MARKET_DIR
 
 
 def _read_vipdoc_mootdx(tdx_code: str) -> pd.DataFrame:

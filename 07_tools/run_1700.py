@@ -17,11 +17,12 @@ import os
 import sys
 import time
 
-from paths import BASE, cn_today, TOOLS
+from paths import BASE, cn_today, TOOLS, LOGS, QUALITY_DIR, TRADES_DIR
+from paths import REVIEWS as _REVIEWS_ROOT
 from pipeline_kit import log_stage, md_to_digest, now_iso, write_run_log, run_stage_quiet as _stage, calendar_gate, propagate_gate_code
 
-REVIEWS = BASE / "04_reviews" / "daily"
-LOG_DIR = BASE / "06_logs"
+REVIEWS = _REVIEWS_ROOT / "daily"
+LOG_DIR = LOGS
 
 # Module-level aliases kept for tests and readability; implementation lives in pipeline_kit.
 _now_iso = now_iso
@@ -40,7 +41,7 @@ def _no_trades_flag(target: str) -> list[str]:
     旧实现读 _import_meta.json 的 no_trades_confirmed_dates —— 无任何写入方，
     该开关永不生效。持仓快照确认（无 no_trades 键）不算无交易确认。
     """
-    path = BASE / "01_data" / "trades" / "position_confirmations.json"
+    path = TRADES_DIR / "position_confirmations.json"
     if not path.exists():
         return []
     try:
@@ -65,7 +66,7 @@ def _last_line(text: str) -> str:
 
 def _reconcile_note(target: str) -> str:
     """把对账结论摘进 run log —— 不阻断也要留痕，否则「持仓与台账脱节」事后无从察觉。"""
-    path = BASE / "01_data" / "quality" / f"{target}_ledger_reconcile.json"
+    path = QUALITY_DIR / f"{target}_ledger_reconcile.json"
     try:
         import json  # noqa: PLC0415
         g = json.loads(path.read_text(encoding="utf-8"))

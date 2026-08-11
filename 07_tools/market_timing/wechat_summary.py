@@ -8,10 +8,10 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import BASE  # noqa: E402
+from paths import BASE, DATA, PLANS  # noqa: E402
 from paths import read_json as load  # noqa: E402
 
-DATA=BASE/'01_data'; OUT=BASE/'03_daily_plans'
+OUT=PLANS
 
 def main():
     ap=argparse.ArgumentParser(); ap.add_argument('--date',required=True); a=ap.parse_args()

@@ -9,11 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from runtime_guards import trading_day_status
-from paths import BASE, CONTRACTS_DIR, TOOLS, cn_today, cn_now
+from paths import BASE, CONTRACTS_DIR, TOOLS, cn_today, cn_now, MARKET_DIR
 from paths import read_json as load_json
 
 CONFIG = CONTRACTS_DIR / "CN_TRADING_CALENDAR.json"
-CACHE = BASE / "01_data" / "market" / "CN_TRADING_CALENDAR_CACHE.json"
+CACHE = MARKET_DIR / "CN_TRADING_CALENDAR_CACHE.json"
 DEFAULT_ENDPOINT = "http://127.0.0.1:17709/"
 
 

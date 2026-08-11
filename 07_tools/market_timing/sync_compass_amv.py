@@ -37,12 +37,11 @@ for _p in (TOOLS_DIR, TOOLS_DIR / "local_tdx"):
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from paths import BASE, cn_today, cn_now  # noqa: E402
+from paths import BASE, cn_today, cn_now, MARKET_DIR  # noqa: E402
 import compass_amv  # noqa: E402
 from runtime_guards import trading_day_status  # noqa: E402
 
-LEDGER = BASE / "01_data" / "market" / "0amv_observations.jsonl"
-MARKET_DIR = BASE / "01_data" / "market"
+LEDGER = MARKET_DIR / "0amv_observations.jsonl"
 DEFAULT_WINDOW_DAYS = 30
 
 

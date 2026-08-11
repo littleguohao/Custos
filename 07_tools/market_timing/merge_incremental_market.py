@@ -22,7 +22,7 @@ if str(TOOLS_DIR) not in sys.path:
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from paths import BASE, cn_today, write_json_atomic  # noqa: E402
+from paths import BASE, cn_today, write_json_atomic, MARKET_DIR, QUALITY_DIR  # noqa: E402
 from contracts import require  # noqa: E402
 
 
@@ -123,7 +123,7 @@ def _write_status(target: str, payload: dict) -> Path:
     returncode,于是"增量合并整段没生效"在事后复盘里**完全没有痕迹**,而合并失败
     直接意味着当日宽度/成交额/0AMV 没并进 market_timing_input(评分全按缺失走)。
     """
-    out = BASE / "01_data" / "quality" / f"{target}_merge_incremental_status.json"
+    out = QUALITY_DIR / f"{target}_merge_incremental_status.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return out
@@ -135,8 +135,8 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     target = args.date
 
-    incremental_path = BASE / "01_data" / "market" / f"{target}_incremental_market.json"
-    market_path = BASE / "01_data" / "market" / f"{target}_market_timing_input.json"
+    incremental_path = MARKET_DIR / f"{target}_incremental_market.json"
+    market_path = MARKET_DIR / f"{target}_market_timing_input.json"
     status: dict = {"date": target, "status": "skipped", "merged": False,
                     "stale": [], "amv_confirmed": False,
                     "incremental_present": incremental_path.exists(),
@@ -186,7 +186,7 @@ def main(argv=None) -> int:
             # 台账观测也带自己的 as_of,两条路径的数据日都是 target。
             amv_as_of = target
             if amv_day is None:
-                ledger_path = BASE / "01_data" / "market" / "0amv_observations.jsonl"
+                ledger_path = MARKET_DIR / "0amv_observations.jsonl"
                 if ledger_path.exists():
                     for line in ledger_path.read_text(encoding="utf-8").splitlines():
                         try:

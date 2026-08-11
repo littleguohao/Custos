@@ -36,10 +36,9 @@ _TOOLS = Path(__file__).resolve().parents[1]
 if str(_TOOLS) not in sys.path:
     sys.path.insert(0, str(_TOOLS))
 
-from paths import BASE
+from paths import BASE, REVIEWS, TRADES_DIR
 
-TRADES_DIR = BASE / "01_data" / "trades"
-REVIEWS_DIR = BASE / "04_reviews" / "trade_review"
+REVIEWS_DIR = REVIEWS / "trade_review"
 
 LEDGER_CSV = TRADES_DIR / "master_trade_ledger.csv"
 CLOSED_JSON = TRADES_DIR / "closed_positions.json"

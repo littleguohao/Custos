@@ -292,7 +292,7 @@ class LocalPathRedefinitionTests(unittest.TestCase):
     **为什么只查工具目录，不查数据目录**：两者危险度差一个量级。
     `TOOLS / "子目录"` 随代码重构而变（今天一天断了两次），断了以后
     subprocess 只报「文件不存在」，而 `required=False` 的 stage 会**静默降级**。
-    `BASE / "01_data" / "market"` 只在数据布局变更时才变，那种变更本来就会
+    `DATA / "market"` 只在数据布局变更时才变，那种变更本来就会
     在所有读写点响亮地报缺文件。把 20 多处数据目录别名一起纳入只会让守卫
     带着一张长长的既有违规清单上线，那样它就不再是守卫了。
     真正接住故障的是下面 `SubprocessTargetTests` —— 它直接验目标文件在不在，
@@ -333,7 +333,7 @@ class LocalPathRedefinitionTests(unittest.TestCase):
                 if node.lineno < paths_import_line:
                     continue            # bootstrap，见上
                 name = node.targets[0].id
-                # 形如 BASE / "01_data" 或 TOOLS / "market_timing"（不含 .py）
+                # 形如 DATA / "market" 或 TOOLS / "market_timing"（不含 .py）
                 v = node.value
                 if not (isinstance(v, ast.BinOp) and isinstance(v.op, ast.Div)
                         and isinstance(v.right, ast.Constant)

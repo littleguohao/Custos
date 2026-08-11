@@ -13,7 +13,7 @@ from typing import Any
 from close_review.holding_structure import n_structure_basis
 from news.premarket_intel_schema import validate_premarket_intelligence
 
-from paths import BASE, cn_now
+from paths import BASE, DATA, PLANS, REVIEWS, cn_now
 from paths import read_json as load
 import report_audit
 # 2026-08-07 架构审查：这两个访问器已移到 `news/premarket_intel_schema`——
@@ -22,7 +22,7 @@ import report_audit
 from news.premarket_intel_schema import (  # noqa: E402
     load_premarket_intelligence, premarket_intelligence_path)
 
-DATA=BASE/'01_data'; PLAN=BASE/'03_daily_plans'; WEEKDAY='一二三四五六日'
+PLAN=PLANS; WEEKDAY='一二三四五六日'
 
 def clean(v:Any,d='待确认'):
     if v is None or (isinstance(v,float) and math.isnan(v)): return d
@@ -69,7 +69,7 @@ def premarket_schema_marker(check:dict[str,Any])->str:
     return ''
 
 def previous_review(day:str)->dict[str,Any]:
-    review_dir=BASE/'04_reviews'/'daily'
+    review_dir=REVIEWS/'daily'
     candidates=[]
     for path in review_dir.glob('*_final_review.json'):
         file_day=path.name[:10]

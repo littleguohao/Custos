@@ -21,7 +21,7 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from paths import BASE  # noqa: E402
+from paths import BASE, TRADES_DIR  # noqa: E402
 from code_utils import norm_code  # noqa: E402
 
 LOCAL_TDX_DIR = BASE / "07_tools" / "local_tdx"
@@ -37,7 +37,7 @@ INDEX_CODES = ["999999.SH", "399001.SZ", "399006.SZ", "000688.SH", "899050.BJ"]
 # 880 系列：全市场成交额 / 涨家数 / 涨跌停 / 细分指数
 BREADTH_880_CODES = ["880001.SH", "880005.SH", "880006.SH", "880390.SH", "880863.SH"]
 
-POSITIONS_PATH = BASE / "01_data" / "trades" / "current_positions.json"
+POSITIONS_PATH = TRADES_DIR / "current_positions.json"
 
 # tqcenter 建议单次 refresh_kline 不要塞太多标的（会堵塞），分批调用
 VERIFY_CODE = "999999.SH"

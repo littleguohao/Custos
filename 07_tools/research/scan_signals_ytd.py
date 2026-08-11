@@ -35,6 +35,7 @@ for _p in (str(Path(__file__).resolve().parent), str(Path(__file__).resolve().pa
 
 
 import backtest_factors as bt  # noqa: E402
+from paths import DATA, LOGS  # noqa: E402
 # 财报时效阈值走 financials 的**单一定义**,不在此二次定义——两处口径漂移会让同一只票
 # 在 live 与回测里得到相反的基本面判定。
 from financials import REPORT_MAX_AGE_DAYS, _parse_day  # noqa: E402
@@ -49,8 +50,8 @@ def _report_age_days(report_date, as_of) -> int | None:
     return (ref - d).days
 
 FIRINGS = Path(sys.argv[1]) if len(sys.argv) > 1 else (
-    BASE / "06_logs" / "walkforward" / "firings_rk_2026YTD.json")
-PIT = BASE / "01_data" / "fundamentals" / "pit_financials.jsonl"
+    LOGS / "walkforward" / "firings_rk_2026YTD.json")
+PIT = DATA / "fundamentals" / "pit_financials.jsonl"
 
 
 def _pit_index(path):
