@@ -73,6 +73,25 @@ uv run python src/custos/datasource/trading_calendar.py --check-date 20260717
 uv run python src/custos/research/__main__.py        # 研究/回测统一入口
 ```
 
+## 开发约定
+
+**每次大改之后跑一遍静态检查**（pylint / radon / vulture / mypy / pydeps），
+报告写到 `reports/`（已 gitignore，不入库）：
+
+```bash
+scripts/audit.sh              # Linux；全量（mypy 首次约 5-10 分钟）
+scripts/audit.sh --skip-mypy  # 快速版
+```
+
+```powershell
+scripts\audit.ps1             # Windows（PowerShell）
+scripts\audit.ps1 -SkipMypy
+```
+
+工具经 `uv run --with` 临时注入，不占依赖清单。pylint 退出码非零、vulture 退出码 3
+代表「有发现」，是正常输出而非脚本失败；vulture 的疑似死代码要人工甄别
+（`paths.py` 公共常量、`factors` 注册表元数据这类 API 面是已知误报）。
+
 ## 数据源
 
 **本地优先**（通达信 vipdoc / TQ-Local），HTTP 只做补齐；
