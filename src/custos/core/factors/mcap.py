@@ -12,8 +12,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Optional
-
+from typing import Any
 import pandas as pd
 
 from custos.core.factors._shares import shares_idx as _shares_idx  # ⚠️ 必须包限定：见 _shares 模块头

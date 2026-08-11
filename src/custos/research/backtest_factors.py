@@ -198,7 +198,7 @@ def _adx_last(df_slice: pd.DataFrame, n: int = 14) -> float:
     `analyze_winner_features._adx_features` 曾是**逐行相同**的 19 行复制粘贴，
     只有返回形状不同。这里只取 adx 末点。
     """
-    pdi, mdi, adx = dmi_arrays(df_slice["high"], df_slice["low"], df_slice["close"], n)
+    _, _, adx = dmi_arrays(df_slice["high"], df_slice["low"], df_slice["close"], n)
     if adx is None:
         return float("nan")
     return float(adx[-1])
@@ -612,7 +612,7 @@ if detect_b2 is not None:
 
 # ---- RSI 状态 + 主升始发点(来源:微信文章公式) ----
 try:
-    from custos.core.factors.rsi_state import rsi_divergence, rsi_multi, rsi_regime, rsi_state_score
+    from custos.core.factors.rsi_state import rsi_divergence, rsi_regime, rsi_state_score
     from custos.core.factors.main_rally_factor import detect_main_rally_start, main_rally_score
 except Exception:  # noqa: BLE001
     rsi_state_score = None
@@ -770,8 +770,7 @@ def evaluate(
     max_signals_per_code: Optional[int] = None,
     entry_gate: Optional[Callable[[pd.DataFrame], bool]] = None,
     scorer: Optional[Callable[[pd.DataFrame, str], Optional[dict]]] = None,
-    gate_window: int = 0,
-) -> list[dict[str, Any]]:
+    gate_window: int = 0) -> list[dict[str, Any]]:
     """逐股逐日走查：as-of 切片算打分，配前向指标。返回逐条记录（可复盘）。
 
     entry_gate(df_slice)->bool 若提供，只在返回 True 的 as-of 日评估（如 J<13 买点区）。
@@ -1054,7 +1053,6 @@ def _medium_large_bull_flags(df: pd.DataFrame, code: str = "") -> np.ndarray:
     """
     close = df["close"].astype(float).to_numpy()
     open_ = df["open"].astype(float).to_numpy()
-    n = len(close)
     thr = _limit_pct(code) / 2.0
     prev = np.concatenate(([np.nan], close[:-1]))
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -2310,7 +2308,7 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
             # 1.36 倍），逐笔上万条时白送一次内存峰值——这个回测本来就常被 OOM Kill。
             write_json_stream(out, payload, big=len(trades) > 20000)
             print(f"[OK] 写出 {out}（{len(trades)} 笔交易，scorer={args.scorer}, {'周线' if args.weekly else '日线'}, cost={args.cost_bps}bps, amv_long_only={bool(args.amv_long_only)}）")
-        stop_desc = (f"买入K最低" if args.stop_mode == "low" else f"pct {args.stop_pct}%")
+        stop_desc = ("买入K最低" if args.stop_mode == "low" else f"pct {args.stop_pct}%")
         tstop_desc = f" / 时间止损{args.time_stop}根" if args.time_stop else ""
         print(f"\n=== B1 交易模拟（scorer={args.scorer}, {'周线' if args.weekly else '日线'}, "
               f"数据源={args.data_source}"

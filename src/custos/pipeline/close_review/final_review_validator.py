@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 
 
-from custos.core.paths import BASE, REVIEWS  # noqa: E402
+from custos.core.paths import REVIEWS  # noqa: E402
 
 REV = REVIEWS / "daily"
 REQUIRED_SECTIONS = [

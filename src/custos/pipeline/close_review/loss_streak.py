@@ -28,7 +28,6 @@ owner 2026-08-10 定：**连亏冷却放在复盘环节，每日/每周都统计
 """
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 
@@ -117,7 +116,7 @@ def format_lines(result: dict, *, title: str = "连亏检查") -> list[str]:
     if not flagged:
         lines.append(f"- 无同股连亏 ≥{result.get('min_streak', LOSS_STREAK_MIN)} 次。")
     else:
-        lines.append(f"| 代码 | 名称 | 连亏次数 | 最近卖出日 | 累计净亏 |")
+        lines.append("| 代码 | 名称 | 连亏次数 | 最近卖出日 | 累计净亏 |")
         lines.append("|---|---|---|---|---|")
         for code in flagged:
             v = result["streaks"][code]

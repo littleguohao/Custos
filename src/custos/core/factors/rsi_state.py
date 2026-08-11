@@ -23,9 +23,7 @@ RSI 区间是连续的、看的是这只票**过去一段时间的回调行为�
 """
 from __future__ import annotations
 
-from typing import Any, Optional
-
-import numpy as np
+from typing import Any
 import pandas as pd
 
 from custos.core.indicators import rsi  # noqa: E402  RSI 唯一实现（本模块只保留对它的解读）

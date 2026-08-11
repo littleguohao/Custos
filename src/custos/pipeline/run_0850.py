@@ -8,18 +8,13 @@ instead — every run (completed / closed / calendar_failed) leaves one behind.
 from __future__ import annotations
 
 import argparse
-import contextlib
-import io
 import os
 import sys
 import time
-from datetime import date
-
-from pathlib import Path
 
 
 from custos.core.paths import BASE, cn_today, TOOLS, LOGS
-from custos.core.pipeline_kit import _extract_json, check_trading_day, log_stage, now_iso, run_stage, write_run_log, run_stage_quiet as _stage, calendar_gate
+from custos.core.pipeline_kit import _extract_json, log_stage, now_iso, write_run_log, run_stage_quiet as _stage, calendar_gate
 
 LOG_DIR = LOGS
 
@@ -72,7 +67,6 @@ def main(argv=None) -> int:
         closed_msg="今日休市，08:50预采集跳过（{target}）")
     if _cg.exit_code is not None:
         return _cg.exit_code
-    cal = _cg.cal
 
     steps = ["calendar=ok"]
 

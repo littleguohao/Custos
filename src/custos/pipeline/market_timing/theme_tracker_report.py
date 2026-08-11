@@ -26,7 +26,7 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
-from custos.core.paths import BASE, MARKET_TIMING, HOLDINGS_DIR, MARKET_DIR, PLANS, SECTORS_DIR  # noqa: E402
+from custos.core.paths import HOLDINGS_DIR, MARKET_DIR, PLANS, SECTORS_DIR  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
 
 SECTOR_MAP = SECTORS_DIR / "sector_code_map.json"
@@ -51,7 +51,6 @@ def classify_stage(a: dict[str, Any]) -> tuple[str, str]:
         return "数据不足", a.get("error", "无K线数据")
     trend = (a.get("trend") or {}).get("state")
     box20 = (a.get("box_20d") or {})
-    box60 = (a.get("box_60d") or {})
     daily_kdj = ((a.get("daily") or {}).get("kdj") or {})
     daily_macd = ((a.get("daily") or {}).get("macd") or {})
     weekly_macd = ((a.get("weekly") or {}).get("macd") or {})

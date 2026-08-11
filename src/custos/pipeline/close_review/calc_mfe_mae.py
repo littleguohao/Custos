@@ -9,15 +9,15 @@
 并按日期过滤;解析不出入场日或 K 线未覆盖入场日时**不出数**(fail-closed),给 unable_reason。
 """
 from __future__ import annotations
-import json, os, sys
-from datetime import date, timedelta
+import json, sys
+from datetime import date
 from pathlib import Path
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
-from custos.core.paths import BASE, TDX_ROOT, cn_today, HOLDINGS_DIR, TRADES_DIR  # noqa: E402
+from custos.core.paths import TDX_ROOT, cn_today, HOLDINGS_DIR, TRADES_DIR  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
 import sys
 

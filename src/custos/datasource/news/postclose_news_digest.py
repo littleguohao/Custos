@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
-from pathlib import Path
 
 
-from custos.core.paths import BASE, DATA  # noqa: E402
+from custos.core.paths import DATA  # noqa: E402
 from custos.core.paths import read_json as load  # noqa: E402
 from custos.core.paths import write_json as dump  # noqa: E402
 from custos.core.contracts import require  # noqa: E402

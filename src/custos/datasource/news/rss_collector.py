@@ -1,15 +1,14 @@
 # -*- coding: utf-8 -*-
 """Deterministic RSS/Atom collector with strict JSON and source-quality metadata."""
 from __future__ import annotations
-import argparse, hashlib, html, json, re, ssl, sys, urllib.request
+import argparse, hashlib, html, json, re, ssl, urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from pathlib import Path
 from custos.datasource.news.source_name_overrides import fix_source_name
 
 
-from custos.core.paths import BASE, LOGS, NEWS_DIR, RSS_SOURCE_REGISTRY_FILE, cn_now  # noqa: E402
+from custos.core.paths import LOGS, NEWS_DIR, RSS_SOURCE_REGISTRY_FILE, cn_now  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
 from custos.core.net_retry import retry_call  # noqa: E402
 

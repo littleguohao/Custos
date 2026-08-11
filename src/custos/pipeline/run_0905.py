@@ -14,8 +14,6 @@ import os
 import sys
 import time
 
-from pathlib import Path
-
 
 from custos.core.paths import BASE, cn_today, TOOLS, LOGS, PLANS
 from custos.core.pipeline_kit import log_stage, md_to_digest, now_iso, warn, write_run_log, run_stage_quiet as _stage, calendar_gate, propagate_gate_code
@@ -93,7 +91,6 @@ def main(argv=None) -> int:
         closed_msg="今日休市，盘前日报不生成（{target}）")
     if _cg.exit_code is not None:
         return _cg.exit_code
-    cal = _cg.cal
 
     # 2. Daily pipeline (premarket; reuse 08:50 discovery only when it completed)
     s_started = _now_iso()

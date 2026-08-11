@@ -7,7 +7,7 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
-from custos.core.paths import BASE, CN_TZ, CONTRACTS_DIR, cn_now, write_json_atomic, DATA
+from custos.core.paths import CN_TZ, CONTRACTS_DIR, cn_now, write_json_atomic, DATA
 from custos.core.paths import read_json as load_json
 from custos.core.contracts import require
 

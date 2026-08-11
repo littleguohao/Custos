@@ -20,15 +20,12 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-TOOLS_DIR = Path(__file__).resolve().parents[1]
 
 from custos.datasource.local_tdx import local_tdx_data as ltd  # type: ignore
-from custos.core.paths import BASE, TDX_ROOT, cn_now, MARKET_DIR  # noqa: E402
+from custos.core.paths import TDX_ROOT, cn_now, MARKET_DIR  # noqa: E402
 from custos.core.indicators import pct_change as pct  # noqa: E402
 from custos.core.runtime_guards import previous_confirmed_trading_day  # noqa: E402
 from custos.core.contracts import require  # noqa: E402

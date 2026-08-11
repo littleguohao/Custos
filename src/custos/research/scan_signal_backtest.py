@@ -11,7 +11,6 @@ import json
 import statistics
 import sys
 from collections import defaultdict
-from pathlib import Path
 
 
 from custos.research import backtest_factors as bt  # noqa: E402
@@ -109,8 +108,8 @@ def main() -> None:
             print(f"    出场[{rs}] {len(rr)} 笔  均收 {statistics.mean(rr) * 100:+.2f}%")
         worst = sorted(grp, key=lambda t: t["ret"])[:3]
         best = sorted(grp, key=lambda t: t["ret"], reverse=True)[:3]
-        print(f"  最好: " + "、".join(f"{t['code']}({t['date']},{t['ret'] * 100:+.1f}%)" for t in best))
-        print(f"  最差: " + "、".join(f"{t['code']}({t['date']},{t['ret'] * 100:+.1f}%)" for t in worst))
+        print("  最好: " + "、".join(f"{t['code']}({t['date']},{t['ret'] * 100:+.1f}%)" for t in best))
+        print("  最差: " + "、".join(f"{t['code']}({t['date']},{t['ret'] * 100:+.1f}%)" for t in worst))
 
 
 if __name__ == "__main__":

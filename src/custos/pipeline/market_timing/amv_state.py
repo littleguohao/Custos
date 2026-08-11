@@ -8,12 +8,10 @@ quality == "confirmed" drive regime transitions; candidate/unconfirmed
 readings crossing a threshold are recorded but keep the prior locked state.
 """
 from __future__ import annotations
-import argparse,json,sys
-from datetime import datetime
-from pathlib import Path
+import argparse,json
 
 
-from custos.core.paths import BASE, cn_now, write_json_atomic, MARKET_DIR  # noqa: E402
+from custos.core.paths import cn_now, write_json_atomic, MARKET_DIR  # noqa: E402
 from custos.core.paths import read_json as load  # noqa: E402
 
 MARKET=MARKET_DIR; STATE=MARKET/'0amv_regime_history.json'; LEDGER=MARKET/'0amv_observations.jsonl'

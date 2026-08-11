@@ -52,7 +52,7 @@ from pathlib import Path
 import requests
 
 
-from custos.core.paths import BASE, cn_today, DATA  # noqa: E402
+from custos.core.paths import cn_today, DATA  # noqa: E402
 
 API = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 UA = {"User-Agent": "Mozilla/5.0"}

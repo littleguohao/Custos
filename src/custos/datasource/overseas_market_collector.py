@@ -20,7 +20,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 
-from custos.core.paths import BASE, cn_now, MARKET_DIR  # noqa: E402
+from custos.core.paths import cn_now, MARKET_DIR  # noqa: E402
 
 
 from custos.core.net_retry import retry_call  # noqa: E402
@@ -59,8 +59,7 @@ def fetch_chart(symbol: str, region: str = "") -> dict[str, Any]:
         headers={
             "User-Agent": "Mozilla/5.0 OpenClaw strategy_team market collector",
             "Accept": "application/json",
-        },
-    )
+        })
     with retry_call(lambda: urllib.request.urlopen(req, timeout=20)) as resp:
         raw = resp.read().decode("utf-8")
     data = json.loads(raw)

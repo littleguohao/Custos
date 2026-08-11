@@ -11,7 +11,6 @@ Input can be TDX local vipdoc daily file by code, or future TQ Kline.
 """
 from __future__ import annotations
 
-import os
 import argparse
 import json
 import sys
@@ -29,14 +28,16 @@ import pandas as pd
 # 2026-08-07 架构审查：以下 7 个纯指标函数已下移到 `indicators`（底层）——
 # 它们此前定义在本模块，却被 factors/（底层）与 screening/ 跨层调用，
 # 构成「底层依赖决策层」的分层反转。本模块自己也用它们，故导入回来。
-from custos.core.indicators import (bbi_series, kdj_series,  # noqa: E402
-                        ema, resample, kdj, macd, bbi_state, zhixing_state,
+from custos.core.indicators import (bbi_series,  # noqa: E402
+                        resample, kdj, macd, bbi_state, zhixing_state,
                         _infer_price_limit)
+from custos.core.indicators import ema  # noqa: E402  包 API 面：market_timing/__init__ re-export
+__all__ = ["ema"]  # re-export 声明（pylint 依此识别非残留），无 star-import 故不影响其他名字
 
-from custos.core.paths import BASE, TDX_ROOT, MARKET_DIR  # noqa: E402
-from custos.core.code_utils import norm_code, price_limit_pct, split_code  # noqa: E402
+from custos.core.paths import TDX_ROOT, MARKET_DIR  # noqa: E402
+from custos.core.code_utils import norm_code, split_code  # noqa: E402
 from custos.core.indicators import amplitude_pct as amplitude_pct_of  # noqa: E402
-from custos.core.b1_thresholds import (J_LOW_THRESHOLD, REVERSAL_AMPLITUDE_PCT,  # noqa: E402
+from custos.core.b1_thresholds import (REVERSAL_AMPLITUDE_PCT,  # noqa: E402
                            REVERSAL_CHANGE_MAX_PCT, REVERSAL_CHANGE_MIN_PCT,
                            VOL_PCTILE_MAX, VOL_RATIO_MAX, change_in_range)
 

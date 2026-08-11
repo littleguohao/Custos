@@ -28,7 +28,7 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
-from custos.core.paths import BASE, REVIEWS, TRADES_DIR
+from custos.core.paths import REVIEWS, TRADES_DIR
 
 REVIEWS_DIR = REVIEWS / "trade_review"
 
@@ -201,8 +201,7 @@ def build_period(closed: pd.DataFrame) -> pd.DataFrame:
         总盈亏=("总盈亏", "sum"),
         胜率=("总盈亏", lambda s: (s > 0).mean() if len(s) else np.nan),
         平均盈亏比=("盈亏比", "mean"),
-        平均跑赢大盘=("跑赢大盘", "mean"),
-    ).reset_index()
+        平均跑赢大盘=("跑赢大盘", "mean")).reset_index()
 
 
 def build_flow(trades: pd.DataFrame) -> pd.DataFrame:
@@ -215,8 +214,7 @@ def build_flow(trades: pd.DataFrame) -> pd.DataFrame:
         次数=("交易类别", "count"),
         成交金额=("成交金额", "sum"),
         发生金额=("发生金额", "sum"),
-        费用=("费用", "sum"),
-    ).reset_index()
+        费用=("费用", "sum")).reset_index()
 
 
 def build_top(closed: pd.DataFrame, n: int = 15, ascending: bool = False) -> pd.DataFrame:

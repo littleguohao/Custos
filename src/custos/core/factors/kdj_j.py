@@ -8,8 +8,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Optional
-
+from typing import Any
 import pandas as pd
 
 from custos.core.indicators import kdj_series

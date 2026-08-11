@@ -14,7 +14,6 @@ revenue_yoy、roe、total_shares(× 价格 → 市值)。
 from __future__ import annotations
 
 import datetime as _dt
-from pathlib import Path
 from typing import Any, Optional
 
 

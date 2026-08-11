@@ -12,8 +12,6 @@ as-of 严格(只用当日及以前数据);绝不 raise。参数尽量少(防过�
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from typing import Any, Optional
 
 import pandas as pd

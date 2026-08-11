@@ -14,12 +14,10 @@
 from __future__ import annotations
 
 import json
-import statistics
 import sys
 from collections import defaultdict
 from pathlib import Path
 
-import numpy as np
 from custos.core.indicators import dmi_arrays  # noqa: E402  DMI/ADX 唯一实现
 
 
@@ -187,7 +185,7 @@ def main() -> None:
         num = den = 0.0
         hit = tot = 0
         fair = 0.0
-        for day, lst in by_day.items():
+        for _day, lst in by_day.items():
             cand = [x for x in lst if vf(x) is not None]
             if not cand:
                 continue

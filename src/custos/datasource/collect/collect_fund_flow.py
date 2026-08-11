@@ -2,8 +2,6 @@
 """Collect fund flow rank from East Money direct API (no akshare dependency)."""
 from __future__ import annotations
 import json, sys, time
-from datetime import date, datetime
-from pathlib import Path
 import requests
 
 
@@ -13,7 +11,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
-from custos.core.paths import BASE, cn_today, cn_now, MARKET_DIR
+from custos.core.paths import cn_today, cn_now, MARKET_DIR
 from custos.core.contracts import require  # noqa: E402
 import sys
 

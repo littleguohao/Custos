@@ -7,9 +7,7 @@
 """
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, Optional
-
+from typing import Any
 import numpy as np
 from custos.core.indicators import j_series as _j_canonical
 

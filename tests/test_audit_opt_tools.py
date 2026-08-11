@@ -242,7 +242,6 @@ class TestFundFlowSectorFailure:
         return {"data": {"diff": [{"f12": "BK0001", "f14": "半导体", "f62": 2.0}]}}
 
     def test_sector_failure_marked_not_silently_empty(self, tmp_path, monkeypatch, capsys):
-        monkeypatch.setattr(cff, "BASE", tmp_path)
         monkeypatch.setattr(cff, "MARKET_DIR", tmp_path / "data" / "market")
 
         def fake_fetch(url):
@@ -269,7 +268,6 @@ class TestFundFlowSectorFailure:
         assert out["status"] == "partial"
 
     def test_all_ok_status_ok(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(cff, "BASE", tmp_path)
         monkeypatch.setattr(cff, "MARKET_DIR", tmp_path / "data" / "market")
         monkeypatch.setattr(cff, "fetch_json",
                             lambda url: self._sector_payload() if "m:90" in url
@@ -495,7 +493,6 @@ def _market_dir(tmp_path):
 class TestMergeAmvAsOf:
     def test_amv_0_gets_as_of_from_amv_0day(self, tmp_path, monkeypatch):
         mim = _mim()
-        monkeypatch.setattr(mim, "BASE", tmp_path)
         monkeypatch.setattr(mim, "MARKET_DIR", tmp_path / "data" / "market")
         monkeypatch.setattr(mim, "QUALITY_DIR", tmp_path / "data" / "quality")
         md = _market_dir(tmp_path)
@@ -508,7 +505,6 @@ class TestMergeAmvAsOf:
 
     def test_amv_0_as_of_from_observation_ledger(self, tmp_path, monkeypatch):
         mim = _mim()
-        monkeypatch.setattr(mim, "BASE", tmp_path)
         monkeypatch.setattr(mim, "MARKET_DIR", tmp_path / "data" / "market")
         monkeypatch.setattr(mim, "QUALITY_DIR", tmp_path / "data" / "quality")
         md = _market_dir(tmp_path)
@@ -525,7 +521,6 @@ class TestMergeAmvAsOf:
     def test_gate_sees_amv_as_of_and_not_stale(self, tmp_path, monkeypatch):
         """端到端不变量：merge 写完后门控不得把当日 0AMV 判成 stale。"""
         mim = _mim()
-        monkeypatch.setattr(mim, "BASE", tmp_path)
         monkeypatch.setattr(mim, "MARKET_DIR", tmp_path / "data" / "market")
         monkeypatch.setattr(mim, "QUALITY_DIR", tmp_path / "data" / "quality")
         md = _market_dir(tmp_path)
@@ -542,7 +537,6 @@ class TestMergeAmvAsOf:
 class TestMergeFailureLeavesTrace:
     def test_merge_exception_writes_status_and_nonzero(self, tmp_path, monkeypatch, capsys):
         mim = _mim()
-        monkeypatch.setattr(mim, "BASE", tmp_path)
         monkeypatch.setattr(mim, "MARKET_DIR", tmp_path / "data" / "market")
         monkeypatch.setattr(mim, "QUALITY_DIR", tmp_path / "data" / "quality")
         md = _market_dir(tmp_path)
@@ -559,7 +553,6 @@ class TestMergeFailureLeavesTrace:
 
     def test_success_writes_ok_status(self, tmp_path, monkeypatch):
         mim = _mim()
-        monkeypatch.setattr(mim, "BASE", tmp_path)
         monkeypatch.setattr(mim, "MARKET_DIR", tmp_path / "data" / "market")
         monkeypatch.setattr(mim, "QUALITY_DIR", tmp_path / "data" / "quality")
         md = _market_dir(tmp_path)

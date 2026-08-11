@@ -29,18 +29,15 @@ import json
 import re
 import sys
 import warnings
-from datetime import date, datetime
-from pathlib import Path
 
 warnings.filterwarnings("ignore")
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-TOOLS_DIR = Path(__file__).resolve().parents[1]   # parents[1]=src（本文件已移入 collect/）
 
 
-from custos.core.paths import BASE, TDX_ROOT, cn_today, cn_now, MARKET_DIR, TRADES_DIR  # noqa: E402
+from custos.core.paths import TDX_ROOT, cn_today, cn_now, MARKET_DIR, TRADES_DIR  # noqa: E402
 from custos.core.code_utils import norm_code, fnum as _fnum  # noqa: E402
 from custos.core.code_utils import market_of  # noqa: E402
 from custos.core.contracts import require  # noqa: E402

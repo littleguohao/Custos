@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 
 
-from custos.core.paths import BASE, TRADES_DIR  # noqa: E402
+from custos.core.paths import TRADES_DIR  # noqa: E402
 from custos.core.code_utils import norm_code  # noqa: E402
 
 

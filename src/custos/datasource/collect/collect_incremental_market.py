@@ -6,9 +6,8 @@ derive_northbound),CLI 只负责取数与落盘 —— 采集脚本的解析分�
 静默出错的地方(平盘 0.0 被当缺数、result=null 直接下标),必须可单测。
 """
 from __future__ import annotations
-import json, os, sys, warnings, time
-from datetime import date, datetime
-from pathlib import Path
+import json, sys, warnings
+from datetime import datetime
 
 warnings.filterwarnings("ignore")
 if hasattr(sys.stdout, "reconfigure"):
@@ -17,7 +16,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from custos.core.code_utils import fnum as _fnum
 
-from custos.core.paths import BASE, TDX_ROOT, cn_today, cn_now, MARKET_DIR
+from custos.core.paths import TDX_ROOT, cn_today, cn_now, MARKET_DIR
 
 import urllib.request, urllib.parse
 

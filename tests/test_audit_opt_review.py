@@ -36,7 +36,6 @@ class TestCalcMfeMaeFieldNames:
         from custos.pipeline.close_review import calc_mfe_mae as cm
 
         pos = self._positions(tmp_path)
-        monkeypatch.setattr(cm, "BASE", tmp_path)
         monkeypatch.setattr(cm, "HOLDINGS_DIR", tmp_path / "data" / "holdings")
         monkeypatch.setattr(cm, "POSITIONS", pos)
         monkeypatch.setattr(cm, "load_entry_dates",
@@ -437,7 +436,8 @@ class TestAffairCache:
         downdir = Path(calls["downdir"])
         # 不 resolve：data 在部分环境是指向项目外盘符的符号链接,resolve 后会"跑出"
         # 项目,但**配置路径**本身仍在项目内——本测试钉的是配置不写到 BASE/.. 项目外。
-        assert downdir.is_relative_to(ltd.BASE)
+        from custos.core.paths import BASE as _proj_root
+        assert downdir.is_relative_to(_proj_root)
         assert ".." not in downdir.parts
 
     def test_empty_report_period_returns_empty_not_fetch(self, monkeypatch, capsys):
@@ -635,7 +635,6 @@ class TestPendingPositionMissingFields:
         pos_path = tmp_path / "data" / "trades" / "current_positions.json"
         pos_path.parent.mkdir(parents=True, exist_ok=True)
         pos_path.write_text(json.dumps([row], ensure_ascii=False), encoding="utf-8")
-        monkeypatch.setattr(cm, "BASE", tmp_path)
         monkeypatch.setattr(cm, "HOLDINGS_DIR", tmp_path / "data" / "holdings")
         monkeypatch.setattr(cm, "POSITIONS", pos_path)
         monkeypatch.setattr(cm, "load_entry_dates",
@@ -681,7 +680,6 @@ class TestPendingPositionMissingFields:
         pos_path.parent.mkdir(parents=True, exist_ok=True)
         pos_path.write_text(json.dumps([{"代码": "600000", "名称": "A", "持有数量": 100}],
                                        ensure_ascii=False), encoding="utf-8")
-        monkeypatch.setattr(cm, "BASE", tmp_path)
         monkeypatch.setattr(cm, "HOLDINGS_DIR", tmp_path / "data" / "holdings")
         monkeypatch.setattr(cm, "POSITIONS", pos_path)
         monkeypatch.setattr(cm, "load_entry_dates",

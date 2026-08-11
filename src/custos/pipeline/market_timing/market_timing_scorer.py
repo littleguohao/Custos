@@ -18,12 +18,11 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 
-from custos.core.paths import BASE, cn_now, MARKET_DIR, PLANS, QUALITY_DIR  # noqa: E402
+from custos.core.paths import cn_now, MARKET_DIR, PLANS, QUALITY_DIR  # noqa: E402
 from custos.core.code_utils import fnum  # noqa: E402
 from custos.core.contracts import SECTION_NOT_FRESH  # noqa: E402  section.quality 的「不新鲜」域
 from custos.core.runtime_guards import normalize_regime  # noqa: E402
@@ -248,7 +247,7 @@ def make_report(d: dict, module_scores: list[tuple[str,int,float,str]], quality_
             open_perm = "仅观察 / 小仓待确认"
         risk = "提高"
     lines = []
-    lines.append(f"# market_timing 自动评分报告\n")
+    lines.append("# market_timing 自动评分报告\n")
     lines.append(f"日期：{d.get('date')}\n")
     lines.append("## 1. 市场状态\n")
     lines.append(f"- 状态：**{status}**")

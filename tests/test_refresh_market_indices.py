@@ -44,7 +44,6 @@ def env(monkeypatch, tmp_path):
         v = getattr(rmi, attr, None)
         if attr.isupper() and isinstance(v, pathlib.Path):
             monkeypatch.setattr(rmi, attr, tmp_path)
-    monkeypatch.setattr(rmi, "BASE", tmp_path)
     # MARKET_DIR 是 paths 常量（= BASE/data/market），打平 patch 成 tmp_path 后
     # 与下面的 fixture 树（tmp/data/market）对不上，单独指到子目录。
     monkeypatch.setattr(rmi, "MARKET_DIR", tmp_path / "data" / "market")

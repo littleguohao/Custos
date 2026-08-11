@@ -176,7 +176,7 @@ def cmd_scan(sample: int, count: int, seed: int, thr: float = GAP_THRESHOLD) -> 
         k, s = counts[label], len(codes_hit[label])
         print(f"{label:<30}{k:>7}{s:>10}{s / n:>8.1%}")
 
-    print(f"\nB1 实际止损空间（stop_mode=low ⇒ (close−low)/close）：")
+    print("\nB1 实际止损空间（stop_mode=low ⇒ (close−low)/close）：")
     print(f"  中位 {med_rf:.2%}   下四分位 {q25_rf:.2%}")
     danger = sum(counts[label] for lo_, _, label in bands if lo_ >= 0.02)
     print(f"\n⚠️ **止损空间中位仅 {med_rf:.2%}，而检出的 {danger} 次跳空全部 ≥2%**")

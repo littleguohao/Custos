@@ -27,7 +27,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
-from custos.core.paths import BASE, cn_now, SECTORS_DIR  # noqa: E402
+from custos.core.paths import cn_now, SECTORS_DIR  # noqa: E402
 
 OUT_PATH = SECTORS_DIR / "stock_concept_tags.json"
 CONCEPT_ID = "10001"  # 概念和主题

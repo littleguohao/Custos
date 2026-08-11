@@ -9,11 +9,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
-from pathlib import Path
 
 
-from custos.core.paths import BASE, DATA
+from custos.core.paths import DATA
 from custos.core.paths import read_json as load
 from custos.core.paths import write_json as dump
 from custos.core.code_utils import bare_code as bare, fnum
@@ -28,8 +26,7 @@ STAGE_RULES = (
     (("修复", "回流", "弱转强", "启动", "发酵"), "修复"),
     (("分歧", "扩散", "高位震荡"), "分歧"),
     (("退潮", "衰退", "下跌", "冰点"), "退潮"),
-    (("震荡", "盘整", "整理"), "震荡"),
-)
+    (("震荡", "盘整", "整理"), "震荡"))
 
 
 def normalize_stage(raw_stage: str, trend: str) -> str:

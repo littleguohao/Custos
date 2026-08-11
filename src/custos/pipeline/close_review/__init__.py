@@ -18,8 +18,7 @@ from custos.pipeline.close_review.review_core import (
     finite,
     optional_finite,
     price_text,
-    pct_text,
-)
+    pct_text)
 
 __all__ = [
     "build_delivery_digest",

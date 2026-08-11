@@ -22,8 +22,7 @@ owner 08-06 统一后已过时，2026-08-07 订正。那条 TODO 也已闭环。
 """
 from __future__ import annotations
 
-from typing import Any, Optional
-
+from typing import Any
 import pandas as pd
 
 from custos.core.indicators import amplitude_pct as amplitude_pct_of  # 振幅唯一实现

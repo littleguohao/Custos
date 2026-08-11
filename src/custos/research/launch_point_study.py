@@ -737,7 +737,7 @@ def discriminate_at_signal(records: list, horizon: int = 20, win_thresh: Optiona
                          "feats": {k[2:]: v for k, v in ex.items() if k.startswith("f_")}})
     if not rows:
         return {"n": 0, "n_censored": n_censored,
-                "text": (f"无窗口收益(Pass1 未记 ret)" if label_basis == "winner"
+                "text": ("无窗口收益(Pass1 未记 ret)" if label_basis == "winner"
                          else f"无前向数据(Pass1 需带 --horizons 含 {horizon})")}
 
     wmeta: dict = {}
@@ -1169,9 +1169,9 @@ def sector_concentration(winners: list[str], members: dict[str, list], index_dir
         f"分散: n={om.get('n')} 均收 {(om.get('expectancy') or 0)*100:+.1f}% "
         f"(差 {((agg['mainstream_lift'] or 0)*100):+.1f}pp);\n"
         f"  赢家数 vs 板块指数收益 相关 {corr} (n={len(pairs)},含零赢家板块;⚠️含机械成分,仅描述)。\n"
-        f"  归属数 Top: " + "; ".join(f"{r['name']}({r['n']},{(r['expectancy'] or 0)*100:+.0f}%)"
+        "  归属数 Top: " + "; ".join(f"{r['name']}({r['n']},{(r['expectancy'] or 0)*100:+.0f}%)"
                                      for r in top_rows[:6]) + "\n"
-        f"  密度 Top(纠大板块偏差): " + "; ".join(f"{r['name']}({r['density']*100:.0f}%×{r['n']})"
+        "  密度 Top(纠大板块偏差): " + "; ".join(f"{r['name']}({r['density']*100:.0f}%×{r['n']})"
                                                  for r in by_density[:6]))
     return out
 

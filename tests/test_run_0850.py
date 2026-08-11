@@ -70,8 +70,6 @@ class TestCollectionStatus:
 
     def _run(self, tmp_path, monkeypatch, failing: set[str], capsys):
         monkeypatch.setattr(run_0850, "LOG_DIR", tmp_path)
-        monkeypatch.setattr(run_0850, "check_trading_day",
-                            lambda target: {"is_trading_day": True, "date": target})
         monkeypatch.setattr(run_0850, "_stage", lambda cmd, name: {
             "ok": name not in failing, "returncode": 0 if name not in failing else 1,
             "timeout": False, "stdout": "", "stderr": "", "out": "",

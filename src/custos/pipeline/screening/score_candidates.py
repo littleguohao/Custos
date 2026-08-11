@@ -555,8 +555,7 @@ def score_candidate(
     amv_state: str,
     cz_sector: str = "neutral",
     cap_rules: Optional[dict] = None,
-    sector_score_max: float = SECTOR_SCORE_MAX,
-) -> dict:
+    sector_score_max: float = SECTOR_SCORE_MAX) -> dict:
     """对单只充实候选打分分层，输出 StockPool 契约条目（含打分明细）。
 
     cap_rules 传 None 时用 DEFAULT_CAP_RULES（全开＝历史行为）；显式传部分键可
@@ -566,7 +565,7 @@ def score_candidate(
     rules = resolve_cap_rules(cap_rules)
     tech_score, tech_level, factor_contrib = technical_score(cand)
     capital_level, capital_score, capital_detail = capital_intent_strength(cand)
-    heat, pass_level, sector_cap, reason = sector_heat(sector_entry)
+    heat, pass_level, _sector_cap, reason = sector_heat(sector_entry)
     trade_style = trade_style_of(heat)
     sector_score_raw = (sector_entry or {}).get("score") if sector_entry else None
     # 板块分不可用（NaN/inf）与"无评分"（None）在**打分上**都按最弱 0 处理，但前者是
@@ -597,7 +596,7 @@ def score_candidate(
         next_step = "observe_price"
 
     # 四面共振(市场+板块+基本面+技术)——hint/优先级,不驱动分层。牛股=三/四面共振(cz理念)。
-    fq, sp_fav, legs, aligned, resonance_4leg = four_leg_resonance(cand, permission, tech_level)
+    fq, _sp_fav, _legs, _aligned, resonance_4leg = four_leg_resonance(cand, permission, tech_level)
 
     return {
         "code": cand.get("code", ""),
@@ -729,8 +728,7 @@ def score_all(
     amv_state: Optional[str] = None,
     cz_preference: Optional[dict] = None,
     cap_rules: Optional[dict] = None,
-    sector_score_max: Optional[float] = None,
-) -> dict:
+    sector_score_max: Optional[float] = None) -> dict:
     """整池打分。输入缺失时干净降级，绝不 raise。
 
     cz_preference 传 None 时从 governance/strategy/cz/CZ_SECTOR_PREFERENCE.json 加载；

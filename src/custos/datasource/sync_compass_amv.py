@@ -25,7 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import date, datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -33,7 +33,7 @@ from typing import Optional
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from custos.core.paths import BASE, cn_today, cn_now, MARKET_DIR  # noqa: E402
+from custos.core.paths import cn_today, cn_now, MARKET_DIR  # noqa: E402
 from custos.datasource.local_tdx import compass_amv  # noqa: E402
 from custos.core.runtime_guards import trading_day_status  # noqa: E402
 

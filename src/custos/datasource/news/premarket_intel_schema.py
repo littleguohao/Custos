@@ -7,7 +7,7 @@ date/collected_at/holdings/data_quality)。消费端静默降级时报告中不�
 """
 from __future__ import annotations
 
-from custos.core.paths import BASE, read_json, NEWS_DIR
+from custos.core.paths import read_json, NEWS_DIR
 
 from pathlib import Path
 

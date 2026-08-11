@@ -41,7 +41,7 @@ if hasattr(sys.stdout, "reconfigure"):
 warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
 
-from custos.core.paths import BASE, cn_now, TRADES_DIR  # noqa: E402
+from custos.core.paths import cn_now, TRADES_DIR  # noqa: E402
 from custos.core.code_utils import clean_code  # noqa: E402
 
 OUT_DIR = TRADES_DIR
@@ -91,8 +91,7 @@ def main() -> None:
     cls_rows = cls.to_dict(orient="records")
     (OUT_DIR / "closed_positions.json").write_text(
         json.dumps(cls_rows, ensure_ascii=False, indent=2, default=str),
-        encoding="utf-8",
-    )
+        encoding="utf-8")
     print(f"[trades] closed_positions.json: {len(cls_rows)} entries")
 
     # ── 3. 当前持仓 ──
@@ -102,8 +101,7 @@ def main() -> None:
     pos_rows = pos.to_dict(orient="records")
     (OUT_DIR / "current_positions.json").write_text(
         json.dumps(pos_rows, ensure_ascii=False, indent=2, default=str),
-        encoding="utf-8",
-    )
+        encoding="utf-8")
     print(f"[trades] current_positions.json: {len(pos_rows)} holdings")
 
     # ── 4. 导入元数据 ──

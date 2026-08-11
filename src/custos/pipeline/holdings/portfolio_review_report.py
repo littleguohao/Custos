@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 import argparse,json,re,sys
-from pathlib import Path
 
 if hasattr(sys.stdout,'reconfigure'): sys.stdout.reconfigure(encoding='utf-8',errors='replace')
 
 
-from custos.core.paths import BASE, DATA, PLANS  # noqa: E402
+from custos.core.paths import DATA, PLANS  # noqa: E402
 from custos.core.paths import read_json as load  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
 import sys

@@ -114,7 +114,6 @@ def reconcile(code: str) -> dict:
     """对账单只票。**绝不 raise** —— 一只票的问题不该中断整轮。"""
     res: dict[str, Any] = {"code": code, "status": "", "note": ""}
     try:
-        import pandas as pd
         t, tnote = _load_tdx(code)
         if t is None:
             res.update(status="skip", note=tnote)
@@ -146,8 +145,7 @@ def reconcile(code: str) -> dict:
             bars=len(m), ratio_spread=round(spread, 6),
             worst_ret_diff=round(worst, 6),
             mismatch_days=bad[:10], n_mismatch=len(bad),
-            note=tnote,
-        )
+            note=tnote)
         return res
     except Exception as exc:                                   # noqa: BLE001
         res.update(status="error", note=f"{type(exc).__name__}: {exc}")
@@ -207,7 +205,6 @@ def detail(code: str, top: int = 25) -> int:
     而 `600519` 9 个事件却 134 天分歧、起始日是连续交易日（茅台除权一年一次 ⇒ 不可能是阶梯）。
     **不分开看就会把数据源差异误判成自己的公式 bug，或反之。**
     """
-    import pandas as pd
     t, tnote = _load_tdx(code)
     q, qnote = _load_qlib(code)
     if t is None or q is None:
@@ -285,7 +282,7 @@ def detail(code: str, top: int = 25) -> int:
             print(f"\n  ★ **谁错**（非事件日 {len(nb)} 天，与未复权收益比对）：")
             print(f"      tdx  偏离未复权收益 > {RET_TOL:.1%} 的：{t_off} 天")
             print(f"      qlib 偏离未复权收益 > {RET_TOL:.1%} 的：{q_off} 天")
-            print(f"      判据：非事件日复权只是乘同一个当日因子 ⇒ 收益必须与未复权一致。")
+            print("      判据：非事件日复权只是乘同一个当日因子 ⇒ 收益必须与未复权一致。")
             # ⚠️ 不用「≥N 天」这种机械阈值：**一边一天都不偏离**本身就足够定性。
             if t_off == 0 and q_off > 0:
                 print(f"      ⇒ **qlib 侧有问题**：tdx 与未复权收益完全一致（0 天偏离），"
@@ -298,8 +295,8 @@ def detail(code: str, top: int = 25) -> int:
             elif t_off > q_off * 3:
                 print(f"      ⇒ 倾向 **我们有问题**（偏离 {t_off} 天 vs qlib {q_off} 天）")
             else:
-                print(f"      ⇒ 两边都偏离，需再看逐日数字（可能是第三个原因："
-                      f"两边的交易日集合或停牌处理不同）")
+                print("      ⇒ 两边都偏离，需再看逐日数字（可能是第三个原因："
+                      "两边的交易日集合或停牌处理不同）")
 
     # ★ 涨跌停越界：日收益超过限制是物理不可能，直接证伪那一侧
     over_t = m[m["ret_tdx"].abs() > lim * 1.005]
@@ -307,11 +304,11 @@ def detail(code: str, top: int = 25) -> int:
     print(f"\n  ★ **涨跌停越界**（{code} 限制 ±{lim:.0%}，超过即物理不可能）：")
     print(f"      tdx  越界 {len(over_t)} 天   qlib 越界 {len(over_q)} 天")
     if len(over_q) and not len(over_t):
-        print(f"      ⇒ **只有 qlib 越界** ⇒ 那些天 qlib 的价格是错的")
+        print("      ⇒ **只有 qlib 越界** ⇒ 那些天 qlib 的价格是错的")
         for _, r in over_q.nlargest(min(5, len(over_q)), "ret_qlib").iterrows():
             print(f"        {r['date']}  qlib {r['ret_qlib']:+.4%}  vs  tdx {r['ret_tdx']:+.4%}")
     elif len(over_t) and not len(over_q):
-        print(f"      ⇒ **只有 tdx 越界** ⇒ 我们的复权把收益放大了")
+        print("      ⇒ **只有 tdx 越界** ⇒ 我们的复权把收益放大了")
 
     if has_raw:
         print(f"\n{'日期':<12}{'tdx复权':>10}{'tdx未复权':>11}{'qlib':>10}{'比值':>9}"
@@ -533,7 +530,6 @@ def qlib_selfcheck(code: str) -> int:
     再配合我们自己的 xdxr 事件日，就能判断：**close 到底是原始价还是已复权价、
     以及复权是乘法还是加法。**
     """
-    import numpy as np
     import pandas as pd
     from custos.datasource import s_data as Q
     bundles = Q.list_bundles()
@@ -662,7 +658,6 @@ def detect_convention(code: str) -> int:
     ⚠️ **加法调整会系统性放大百分比收益**（分母被减小）⇒ qlib 的涨跌幅能超过涨停限制
     （实测 600612 报出 +11.07%，而 600xxx 限 10%）。用它算百分比收益/止损一律偏大。
     """
-    import pandas as pd
     t, tnote = _load_tdx(code)
     q, qnote = _load_qlib(code)
     if t is None or q is None or "raw_close" not in (t.columns if t is not None else []):
@@ -795,7 +790,7 @@ def report(rows: list[dict]) -> int:
         print("\n   ⇒ 拿其中一天去查 `data/market/xdxr/{code}.json` 里那天附近的事件，"
               "对照 `event_ratio()` 的公式。")
     if skip:
-        print(f"\n跳过原因分布：")
+        print("\n跳过原因分布：")
         from collections import Counter
         for k, v in Counter(r.get("note", "")[:40] for r in skip).most_common():
             print(f"   {v:>3} 只  {k}")

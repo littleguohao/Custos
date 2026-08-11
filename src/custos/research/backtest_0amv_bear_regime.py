@@ -56,7 +56,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
-from custos.core.paths import BASE, cn_now, REVIEWS, TRADES_DIR  # noqa: E402
+from custos.core.paths import cn_now, REVIEWS, TRADES_DIR  # noqa: E402
 
 BEAR_THRESHOLD = -2.3     # amv_change_pct <= 此值当日进入空头
 BULL_THRESHOLD = 4.0      # amv_change_pct >= 此值当日进入多头

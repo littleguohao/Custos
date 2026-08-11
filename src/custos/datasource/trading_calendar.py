@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import date, datetime, timedelta
-from pathlib import Path
+from datetime import date, timedelta
 from typing import Any
 
 
 from custos.core.runtime_guards import trading_day_status  # noqa: E402
-from custos.core.paths import BASE, CONTRACTS_DIR, TOOLS, cn_today, cn_now, MARKET_DIR
+from custos.core.paths import CONTRACTS_DIR, cn_today, cn_now, MARKET_DIR
 from custos.core.paths import read_json as load_json
 
 CONFIG = CONTRACTS_DIR / "CN_TRADING_CALENDAR.json"
@@ -54,8 +53,6 @@ def rpc_trading_dates(endpoint: str, market: str, start: date, end: date, timeou
     这里仍**保持 raise 契约**：`refresh` 依赖 `except Exception` 记 `last_error`
     并保住旧缓存（`status="cache_preserved"`），改成返回 dict 会让失败被当成成功。
     """
-    import sys as _sys
-    d = str(TOOLS / "datasource" / "local_tdx")
     from custos.datasource.local_tdx import tq_http  # 懒导入：不扩大本模块的导入面
     res = tq_http.call(
         "get_trading_dates",

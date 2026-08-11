@@ -27,13 +27,10 @@
 """
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, Optional
-
+from typing import Any
 import numpy as np
 import pandas as pd
-from custos.core.indicators import avedev, cci, rsi  # noqa: E402  指标唯一实现
-from numpy.lib.stride_tricks import sliding_window_view
+from custos.core.indicators import cci, rsi  # noqa: E402  指标唯一实现
 
 # 原先的 screening/market_timing 两项已于 2026-08-08 删除：本模块只依赖
 # src 根与同目录（`from rsi_state import rsi`，扁平 import 惯例见 factors/__init__.py）。
@@ -61,7 +58,6 @@ RSI_N = 7                    # 原文 D5 用 7 日
 RSI_OVERSOLD = 20.0          # 原文 REF(D5,1)<20（震荡市可放宽到 30）
 CCI_N = 14                   # 原文 AVEDEV/MA 都用 14
 CCI_EXTREME = -100.0         # 原文 偏差<-100（想提高安全边际可下调到 -120）
-DEDUP_WIN = 20               # 原文 FILTER(基础信号,20)：20 天内只取第一次
 MAIN_RALLY_MIN_BARS = 60     # 原文 BARSCOUNT(C)>60
 
 

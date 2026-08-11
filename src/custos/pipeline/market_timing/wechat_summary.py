@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 """Render concise summary exclusively from structured ChiefDecision."""
 from __future__ import annotations
-import argparse,json,sys
-from pathlib import Path
+import argparse
 
 
-from custos.core.paths import BASE, DATA, PLANS  # noqa: E402
+from custos.core.paths import DATA, PLANS  # noqa: E402
 from custos.core.paths import read_json as load  # noqa: E402
 
 OUT=PLANS

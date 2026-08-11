@@ -7,7 +7,6 @@
 """
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Optional
 
 from custos.core.indicators import DKS_MA_WINDOWS, dks_series

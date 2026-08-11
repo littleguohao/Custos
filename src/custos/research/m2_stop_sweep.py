@@ -124,7 +124,6 @@ import json
 import os
 import pathlib
 import re
-import statistics
 import subprocess
 import sys
 import time

@@ -81,8 +81,7 @@ def _post(payload: dict, timeout: int, endpoint: Optional[str] = None) -> bytes:
         endpoint or TQ_HTTP_URL,
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         headers={"Content-Type": "application/json; charset=utf-8"},
-        method="POST",
-    )
+        method="POST")
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return resp.read()
 

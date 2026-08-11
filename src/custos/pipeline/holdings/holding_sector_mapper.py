@@ -25,7 +25,7 @@ from pathlib import Path
 import pandas as pd
 
 
-from custos.core.paths import BASE, TDX_ROOT, HOLDINGS_DIR, TRADES_DIR  # noqa: E402
+from custos.core.paths import TDX_ROOT, HOLDINGS_DIR, TRADES_DIR  # noqa: E402
 from custos.core.code_utils import suffix  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
 
@@ -94,7 +94,6 @@ def lookup_name(tree: dict, code: str) -> str:
 
 
 def init_tq():
-    user_path = TDX_ROOT / "PYPlugins" / "user"
     from tqcenter import tq  # type: ignore
     tq.initialize(__file__)
     return tq

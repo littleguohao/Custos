@@ -45,7 +45,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
-from custos.core.paths import BASE, MARKET_DIR  # noqa: E402,F401  (照 src 惯例统一入口)
+from custos.core.paths import MARKET_DIR  # noqa: E402,F401  (照 src 惯例统一入口)
 
 DEFAULT_COMPASS_ROOT = Path(r"E:\Compass")
 DAY_VDAT_REL = Path("WavMain") / "ANALYSE" / "Data" / "ChinaStk" / "Z_SK" / "day.vdat"

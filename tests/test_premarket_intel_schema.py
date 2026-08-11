@@ -125,7 +125,6 @@ class TestMainDegradesOnInvalidSchema:
         # ⚠️ 盘前情报访问器已移到 `news/premarket_intel_schema`，需单独打桩它的 PREMARKET_DIR
         from custos.datasource.news import premarket_intel_schema as _intel
         monkeypatch.setattr(_intel, "PREMARKET_DIR", data / "news" / "premarket")
-        monkeypatch.setattr(daily_report, "BASE", tmp_path)
         return data
 
     def _run_main(self, monkeypatch, tmp_path, out):

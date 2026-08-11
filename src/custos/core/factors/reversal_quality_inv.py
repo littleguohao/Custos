@@ -12,8 +12,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Optional
-
+from typing import Any
 import pandas as pd
 
 from custos.core.factors.reversal_quality import score as _rq_score

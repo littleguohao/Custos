@@ -31,7 +31,6 @@ import argparse
 import glob
 import inspect
 import json
-import os
 import re
 import sys
 from pathlib import Path
@@ -67,7 +66,7 @@ from custos.core.factors import sector_phase as sector_phase_mod  # noqa: E402
 # （全项目 grep 确认无引用），本模块的 J 走下方 `kdj`（indicators 共享实现，
 # 内部 fill_na=50，行为不变）；`macd` 导入同步删除（check_macd_technics 自己
 # 用 ema 算 DIF/DEA，从未调用它）。
-from custos.core.indicators import bbi_state, ema, kdj, resample, zhixing_state, _infer_price_limit # noqa: E402
+from custos.core.indicators import bbi_state, ema, kdj, resample, zhixing_state  # noqa: E402
 from custos.core.indicators import amplitude_pct as amplitude_pct_of  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
 
@@ -133,9 +132,11 @@ RS_STRONG_PP = 3.0           # 20日相对强度 >= +3pp
 # ⚠️ 阈值已收敛到 `b1_thresholds`（L0）—— 这里只做转出，不再自己读环境变量。
 #    2026-08-07 实测：原先「可配置」只覆盖本文件（选股链），持仓链
 #    （technical_monitor + b1_holding_state）硬编码 ±2 与 j<13，改 env 后两链分歧。
-from custos.core.b1_thresholds import (REVERSAL_AMPLITUDE_PCT, REVERSAL_CHANGE_MAX_PCT,  # noqa: E402
-                           REVERSAL_CHANGE_MIN_PCT,
+from custos.core.b1_thresholds import (REVERSAL_AMPLITUDE_PCT,  # noqa: E402
                            change_in_range)
+from custos.core.b1_thresholds import (REVERSAL_CHANGE_MAX_PCT,  # noqa: E402
+                           REVERSAL_CHANGE_MIN_PCT)
+__all__ = ["REVERSAL_CHANGE_MAX_PCT", "REVERSAL_CHANGE_MIN_PCT"]  # 阈值转出声明（测试钉这两个值）
 STOP_LOOKBACK = 10           # 建议止损位：近10日最低价
 
 # 概念标签命中主题所需的最小标签数。默认 1＝历史行为（命中1个语义标签即归入该主题）；
@@ -617,7 +618,7 @@ def check_three_lows(df) -> dict[str, Any]:
     第三维"低关注度"非量价可计算，不输出；财务排雷因数据源未接入暂缓。
     """
     close, high, _, vol = _ohlcv_arrays(df)
-    high250, dd = _drawdown_250d(close, high)
+    _high250, dd = _drawdown_250d(close, high)
     if dd is None:
         return {"hit": False, "available": False}
     vol_ma250 = float(vol[-CZ_MIN_BARS:].mean())
@@ -1056,8 +1057,7 @@ def enrich(
     theme_min_match: Optional[int] = None,
     fund_flow_days: int = 1,
     financials_cfg: Optional[dict] = None,
-    sector_phase_cfg: Optional[dict] = None,
-) -> dict:
+    sector_phase_cfg: Optional[dict] = None) -> dict:
     """充实命中股。loader 可注入以便测试；所有失败结构化落盘，绝不 raise。"""
     hits_data = hits_data if hits_data is not None else load_hits(date)
     cfg = universe_cfg or {}

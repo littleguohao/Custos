@@ -17,13 +17,11 @@ import argparse
 import json
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Optional
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-TOOLS_DIR = Path(__file__).resolve().parents[1]
 
 from custos.core.paths import MARKET_DIR  # noqa: E402
 from custos.core.contracts import require  # noqa: E402

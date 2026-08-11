@@ -13,7 +13,6 @@
 """
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
@@ -99,8 +98,6 @@ OVERHEAD_WIN = 60
 # 均线结构 0-10（10/20/50 多头 + 低点抬高）
 MA_SHORT, MA_MID, MA_LONG = 10, 20, 50
 
-# 事件风险 0-10（个股新闻未接入 enrich，取中性占位）
-EVENT_NEUTRAL = 5.0
 
 # Δ 催化 0-10
 DELTA_LOW_POS_PCT = 15.0         # 低位反包：收盘处于近20日低点上方 ≤此% 视为低位

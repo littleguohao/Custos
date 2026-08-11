@@ -18,8 +18,6 @@ import os
 import sys
 import time
 
-from pathlib import Path
-
 
 from custos.core.paths import BASE, SCREENING, TOOLS, cn_today, LOGS, MARKET_DIR, PLANS
 from custos.core.pipeline_kit import log_stage, md_to_digest, now_iso, write_run_log, run_stage_quiet as _stage, calendar_gate
@@ -89,7 +87,6 @@ def main(argv=None) -> int:
         closed_msg="今日休市，每日选股不运行（{target}）")
     if _cg.exit_code is not None:
         return _cg.exit_code
-    cal = _cg.cal
 
     # 2. Runtime gate —— **只落盘，不阻断**。
     #    18:00 是纯粹的选股流程，门控不得影响选股结果（不改 bucket/next_step/分层），

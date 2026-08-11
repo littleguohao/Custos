@@ -30,10 +30,9 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
 
-from custos.core.paths import BASE, TOOLS, cn_now
+from custos.core.paths import TOOLS, cn_now
 
 
 def _as_text(data) -> str:
@@ -200,8 +199,7 @@ def check_trading_day(date_str: str) -> dict:
     r = run_stage(
         ["uv", "run", "python", str(TOOLS / "datasource" / "trading_calendar.py"), "--check-date", date_str],
         f"trading_calendar {date_str}",
-        required=True,
-    )
+        required=True)
     return _extract_json(r["stdout"])
 
 

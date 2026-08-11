@@ -10,11 +10,9 @@ from __future__ import annotations
 
 import json
 import math
-import os
-from pathlib import Path
 
 
-from custos.core.paths import BASE, MARKET_DIR  # noqa: E402
+from custos.core.paths import MARKET_DIR  # noqa: E402
 from custos.core.indicators import pct_change as pct  # noqa: E402
 
 

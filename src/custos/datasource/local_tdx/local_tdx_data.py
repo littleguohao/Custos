@@ -29,7 +29,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
-from custos.core.paths import BASE, TDX_ROOT, cn_today, CACHE_DIR  # noqa: E402
+from custos.core.paths import TDX_ROOT, cn_today, CACHE_DIR  # noqa: E402
 from custos.core.code_utils import market_of, norm_code as _cu_norm_code  # noqa: E402
 
 # --- mootdx lazy initialization ---
@@ -381,7 +381,6 @@ def get_adjusted_daily(code: str, year: str = "", factor: str = "01") -> pd.Data
     from mootdx.contrib.adjust import get_adjust_year
     raw = _strip_suffix(code)
     if not year:
-        from datetime import date
         year = str(cn_today().year)
     try:
         df = get_adjust_year(symbol=raw, year=year, factor=factor)

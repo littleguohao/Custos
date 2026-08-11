@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 
 
 from custos.core.paths import MARKET_DIR  # noqa: E402

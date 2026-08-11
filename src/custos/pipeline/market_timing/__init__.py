@@ -14,8 +14,7 @@ from custos.pipeline.market_timing.technical_monitor import (
     slope,
     bbi_state,
     trend_state,
-    descending_n_structure_state,
-)
+    descending_n_structure_state)
 
 __all__ = [
     "n_structure_state",

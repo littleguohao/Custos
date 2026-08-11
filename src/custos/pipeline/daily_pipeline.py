@@ -29,7 +29,7 @@ from pathlib import Path
 import sys
 
 
-from custos.core.paths import BASE, DATA, HOLDINGS, HOLDINGS_DIR, LOGS, MARKET_DIR, MARKET_TIMING, PLANS, TOOLS
+from custos.core.paths import DATA, HOLDINGS, HOLDINGS_DIR, LOGS, MARKET_DIR, MARKET_TIMING, PLANS, TOOLS
 from custos.core.pipeline_kit import run_stage
 
 PY = sys.executable

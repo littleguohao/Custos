@@ -39,8 +39,7 @@ SOURCE = "tq_tqcenter"
 # tdxzs3.cfg 是 tdxzs.cfg 的超集（额外含 467 个 881xxx 细分行业），优先使用
 TDXZS_CFG_CANDIDATES = (
     TDX_ROOT / "T0002" / "hq_cache" / "tdxzs3.cfg",
-    TDX_ROOT / "T0002" / "hq_cache" / "tdxzs.cfg",
-)
+    TDX_ROOT / "T0002" / "hq_cache" / "tdxzs.cfg")
 
 # tdxzs*.cfg 第 3 字段（官方板块类型）→ 分类
 _TDX_TYPE_CATEGORY = {
@@ -73,8 +72,7 @@ def is_tdxw_running() -> bool:
             ["tasklist", "/FI", "IMAGENAME eq TdxW.exe", "/NH"],
             capture_output=True,
             text=True,
-            timeout=15,
-        )
+            timeout=15)
     except Exception:
         return False
     if proc.returncode != 0:
@@ -228,8 +226,7 @@ class TQSectorSession:
             return _err(
                 "sector_stocks_failed",
                 f"unexpected result: {type(stocks).__name__}",
-                sector=sector_code,
-            )
+                sector=sector_code)
         return list(stocks)
 
     def build_sector_map(
@@ -237,8 +234,7 @@ class TQSectorSession:
         limit: Optional[int] = None,
         progress: bool = False,
         sleep_ms: int = 0,
-        progress_every: int = 50,
-    ) -> dict:
+        progress_every: int = 50) -> dict:
         """全量板块映射。任何失败都体现在 error/errors 字段，绝不 raise。
 
         ``sleep_ms``：板块之间的限速。串行保留（不引入并发复杂度），但 400+ 次
@@ -310,8 +306,7 @@ class TQSectorSession:
                 print(
                     f"[tq_sector] {idx}/{len(codes)} sectors, 失败 {failed}, "
                     f"{time.monotonic() - started:.1f}s",
-                    flush=True,
-                )
+                    flush=True)
 
         succeeded = len(sectors) - failed
         quality = {

@@ -13,8 +13,6 @@ import os
 import sys
 import time
 
-from pathlib import Path
-
 
 from custos.core.paths import BASE, TOOLS, cn_today, LOGS, QUALITY_DIR  # strategy_team/ 与 src/ 路径
 from custos.core.pipeline_kit import log_stage, now_iso, write_run_log, run_stage_quiet as _stage, calendar_gate
@@ -68,7 +66,6 @@ def main(argv=None) -> int:
         closed_msg="今日确认休市，14:45报告不生成（{target}）")
     if _cg.exit_code is not None:
         return _cg.exit_code
-    cal = _cg.cal
 
     # 2. Collect holding quotes via mootdx (replaces LLM tdx_quotes calls)
     s_started = _now_iso()

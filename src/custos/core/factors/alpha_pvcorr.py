@@ -9,8 +9,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Optional
-
+from typing import Any
 import pandas as pd
 
 from custos.core.factors._util import ts_corr as _ts_corr

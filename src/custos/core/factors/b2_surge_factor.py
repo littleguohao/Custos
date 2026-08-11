@@ -35,8 +35,6 @@ B1 给出回调买点。这比 b1_dual_factor 里那个简版"放量启动段"�
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
@@ -114,7 +112,7 @@ def detect_b2(df: pd.DataFrame, code: str = "",
         n = len(df)
         if n < B2_MIN_BARS:
             return {"available": False, "hit": False, "reason": f"少于{B2_MIN_BARS}根K线"}
-        close, high, low, vol, open_ = _arr(df)
+        close, high, _low, vol, open_ = _arr(df)
         j = j_series if j_series is not None else _j_series(df)
         if j is None:
             return {"available": False, "hit": False, "reason": "kdj_unavailable"}
@@ -172,7 +170,7 @@ def detect_bottom_surge(df: pd.DataFrame, code: str = "",
         if n < SURGE_MIN_BARS:
             return {"available": False, "hit": False,
                     "reason": f"少于{SURGE_MIN_BARS}根K线（需{SURGE_NEW_HIGH_DAYS}日新高）"}
-        close, high, low, vol, _ = _arr(df)
+        close, _high, _low, vol, _ = _arr(df)
         ma60 = pd.Series(close).rolling(SURGE_MA_CROSS).mean().to_numpy()
 
         best = None

@@ -4,16 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
-from datetime import datetime
-from pathlib import Path
 
 from custos.pipeline.holdings.b1_holding_state import evaluate as evaluate_b1_holding
 
 from custos.pipeline.close_review.holding_bbi import intraday_bbi_basis
 from custos.pipeline.close_review.holding_structure import n_structure_basis
 
-from custos.core.paths import BASE, cn_now, DATA, REVIEWS  # noqa: E402
+from custos.core.paths import cn_now, DATA, REVIEWS  # noqa: E402
 from custos.pipeline.close_review.loss_streak import format_lines as loss_streak_lines  # noqa: E402
 from custos.pipeline.close_review.loss_streak import loss_streaks  # noqa: E402
 # ⚠️ 台账解析与 FIFO 配平的唯一实现在 `weekly_review` —— 这里**单向**依赖它。

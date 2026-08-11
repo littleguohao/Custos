@@ -6,18 +6,17 @@ import argparse
 import json
 import math
 import sys
-from datetime import date, datetime
 from pathlib import Path
 
 from custos.pipeline.holdings.b1_holding_state import evaluate as evaluate_b1_holding
 
-from custos.pipeline.close_review.holding_bbi import bbi_basis, intraday_bbi_basis
+from custos.pipeline.close_review.holding_bbi import intraday_bbi_basis
 from custos.pipeline.close_review.holding_structure import n_structure_basis
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from custos.core.paths import BASE, cn_today, cn_now, HOLDINGS_DIR, LOGS, MARKET_DIR, PLANS, QUALITY_DIR, RISK_DIR, TRADES_DIR  # noqa: E402
+from custos.core.paths import cn_today, cn_now, HOLDINGS_DIR, LOGS, MARKET_DIR, PLANS, QUALITY_DIR, RISK_DIR, TRADES_DIR  # noqa: E402
 from custos.core.paths import read_json as load  # noqa: E402
 from custos.core import report_audit  # noqa: E402
 from custos.core.code_utils import finite  # noqa: E402
@@ -139,8 +138,7 @@ def build_delivery_digest(
     snap: dict,
     gate: dict,
     amv_display: str,
-    regime: str,
-) -> str:
+    regime: str) -> str:
     action_map = {item["code"]: item for item in actions}
     index_names = {"000001": "上证指数", "399001": "深证成指", "399006": "创业板指"}
     index_text = "；".join(

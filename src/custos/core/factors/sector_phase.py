@@ -8,9 +8,7 @@
 """
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, Optional
-
+from typing import Any
 import numpy as np
 import pandas as pd
 
@@ -66,7 +64,7 @@ def compute_sector_phase(close, lookback: int = PHASE_LOOKBACK,
     n = len(c)
     if n < MACD_SLOW + MACD_SIGNAL + fractal + 5:
         return {"available": False}
-    dif, dea, _hist = _macd_series(c)   # 2026-08-09 起走 indicators.macd_series（唯一实现）
+    dif, _dea, _hist = _macd_series(c)   # 2026-08-09 起走 indicators.macd_series（唯一实现）
     dif_v = dif.values
     close_v = c.values
     dif_last = float(dif_v[-1])

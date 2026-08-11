@@ -72,8 +72,7 @@ def fetch_tencent_daily(code: str, count: int = 3) -> list[dict] | None:
     try:
         resp = fetch_with_retry(
             TENCENT_DAILY_URL.format(symbol=symbol, count=count),
-            timeout=TIMEOUT, session=_session,
-        )
+            timeout=TIMEOUT, session=_session)
         payload = resp.json()
     except Exception:
         return None
@@ -107,8 +106,7 @@ def fetch_sina_daily(code: str, count: int = 3) -> list[dict] | None:
     try:
         resp = fetch_with_retry(
             SINA_DAILY_URL.format(symbol=symbol, count=count),
-            timeout=TIMEOUT, session=_session, headers=SINA_HEADERS,
-        )
+            timeout=TIMEOUT, session=_session, headers=SINA_HEADERS)
         rows = resp.json()
     except Exception:
         return None

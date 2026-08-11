@@ -81,7 +81,6 @@ class TestDailyReportAuditBlock:
             encoding="utf-8")
         monkeypatch.setattr(daily_report, "DATA", data)
         monkeypatch.setattr(daily_report, "PLAN", tmp_path / "artifacts/reports/daily")
-        monkeypatch.setattr(daily_report, "BASE", tmp_path)   # previous_review 只扫 tmp
         # 盘前情报路径走模块自身常量，钉成「无」保证环境无关
         monkeypatch.setattr(daily_report, "premarket_intelligence_path", lambda day: None)
         monkeypatch.setattr(daily_report, "load_premarket_intelligence", lambda day: {})

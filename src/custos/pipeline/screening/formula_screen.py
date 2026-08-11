@@ -217,8 +217,7 @@ def screen_formulas(
     name_resolver=None,
     call: Optional[Callable[..., dict]] = None,
     running_check: Optional[Callable[[], bool]] = None,
-    timeout: int = FORMULA_TIMEOUT,
-) -> dict:
+    timeout: int = FORMULA_TIMEOUT) -> dict:
     """逐公式对全 A 批跑并汇总命中。所有失败都结构化落盘，绝不 raise。"""
     registry = registry if registry is not None else load_registry()
     call_fn = call if call is not None else tq_http.call

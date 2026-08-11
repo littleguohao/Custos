@@ -94,7 +94,6 @@ class TestNoLocalReimplementation:
         ("core/factors/main_rally_factor.py", "j_series as _j_series"),
         ("core/factors/b2_surge_factor.py", "_j_canonical"),
         ("research/backtest_factors.py", "bbi_series as _bbi_series"),
-        ("pipeline/market_timing/technical_monitor.py", "kdj_series"),
         # 2026-08-09 QSX/MACD 收敛：下列各处一律改为导入序列级唯一实现
         ("core/factors/b1_dual_factor.py", "qsx_series"),
         ("core/factors/distribution.py", "qsx_series"),

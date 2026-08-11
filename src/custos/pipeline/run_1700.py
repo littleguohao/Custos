@@ -17,8 +17,6 @@ import os
 import sys
 import time
 
-from pathlib import Path
-
 
 from custos.core.paths import BASE, cn_today, TOOLS, LOGS, QUALITY_DIR, TRADES_DIR
 from custos.core.paths import REVIEWS as _REVIEWS_ROOT
@@ -107,7 +105,6 @@ def main(argv=None) -> int:
         closed_msg="今日休市，盘后复盘不生成（{target}）")
     if _cg.exit_code is not None:
         return _cg.exit_code
-    cal = _cg.cal
 
     # 2. Collect postclose holding quotes via mootdx (online bars for today's close)
     r = _run_stage(["uv", "run", "python", str(TOOLS / "datasource" / "collect" / "collect_holding_quotes.py"), "--date", target,
@@ -162,7 +159,7 @@ def main(argv=None) -> int:
     if not r["ok"]:
         print(f"[WARN] collect_fund_flow failed: {r['out'][:200]}")
     else:
-        print(f"[OK] fund flow rank collected")
+        print("[OK] fund flow rank collected")
 
     # 3c2. Refresh EOD daily K-lines into vipdoc via TQ-Local (needs TdxW running;
     #      best-effort so the pipeline still works when TdxW is off)

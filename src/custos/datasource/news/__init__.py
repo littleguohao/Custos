@@ -9,8 +9,7 @@ from custos.datasource.news.rss_filter import (
     bare,
     premarket_window,
     entities,
-    dedupe,
-)
+    dedupe)
 
 __all__ = [
     "load",

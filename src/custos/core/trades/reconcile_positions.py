@@ -41,7 +41,7 @@ from pathlib import Path
 import pandas as pd
 
 
-from custos.core.paths import BASE, cn_now, QUALITY_DIR  # noqa: E402
+from custos.core.paths import cn_now, QUALITY_DIR  # noqa: E402
 from custos.core.code_utils import clean_code, finite                          # noqa: E402
 
 

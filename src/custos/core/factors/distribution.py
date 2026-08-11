@@ -7,10 +7,7 @@
 """
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, Optional
-
-import numpy as np
+from typing import Any
 from custos.core.factors._util import ohlcv_arrays as _ohlcv_arrays
 
 
@@ -49,7 +46,7 @@ def detect_distribution(df, code: str = "") -> dict[str, Any]:
     ① 顶部天量大阴、② 次高点巨量长阴、③ 阶梯放量跌破QSX、④ 双头双巨阴、
     ⑤ 顶部绿肥红瘦。命中≥1→watch；命中①/②或≥2→high。阈值均为待回测参数。
     """
-    close, high, low, vol = _ohlcv_arrays(df)
+    close, high, _low, vol = _ohlcv_arrays(df)
     open_ = df["open"].astype(float).to_numpy()
     n = len(df)
     if n < 30:
