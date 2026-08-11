@@ -32,7 +32,7 @@ governance/   治理层，按生命周期分四类，各有 README 索引
 data/         运行时数据（gitignore）
 artifacts/    产物三合一：reports/{daily,weekly,monthly}/ 日报·周报·复盘
               logs/ 运行日志与诊断输出（gitignore）
-TODO.md  strategy_version_log.md  trade_lessons.md   版本记录（实盘复盘→进化）
+TODO.md  CHANGELOG.md  TRADE_LESSONS.md   版本记录（实盘复盘→进化）
 src/          全部脚本（core/ datasource/ pipeline/ research/，见 src/README.md）
 tests/        pytest
 ```

@@ -1,6 +1,6 @@
 # 策略层索引
 
-> `governance/strategy/` 存放**规则**：改动要进 `strategy_version_log.md`。
+> `governance/strategy/` 存放**规则**：改动要进 `CHANGELOG.md`。
 > 与邻居的分工——`research/` 是「测出来的结论」（会被推翻），本目录是「我们决定怎么做」
 > （改了要记版本），`contracts/` 是「代码直接依赖的契约」。
 
@@ -44,7 +44,7 @@ strategy/
 ```markdown
 > **上下文**：… ｜ **执行者**：… ｜ **状态**：…
 > **版本**：… ｜ **代码依赖**：…
-> **索引**：… · 改动须记 strategy_version_log.md
+> **索引**：… · 改动须记 CHANGELOG.md
 ```
 
 **「执行者」是最重要的一栏**，它决定改动代价：

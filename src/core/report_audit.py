@@ -14,7 +14,7 @@
 - `report_id`：`{date}_{session}_{sha1前8位}`，哈希输入为
   日期 + session + 策略版本 + 各输入文件的路径与内容哈希 ——
   **同一天同一份输入重跑得到同一个 id**，输入变了 id 跟着变。
-- 策略版本：`strategy_version_log.md` 表格里**最后一个**
+- 策略版本：`CHANGELOG.md` 表格里**最后一个**
   `vX.Y`（该文件是版本变更的唯一登记处，解析它就是机器可读来源）；
   读不到返回 `未知`，不阻断报告。
 - 数据截止：输入文件 mtime 里**最晚**的一个（本地时区 ISO 秒）。
@@ -31,7 +31,7 @@ from typing import Iterable
 
 from paths import BASE
 
-VERSION_LOG = BASE / "strategy_version_log.md"
+VERSION_LOG = BASE / "CHANGELOG.md"
 _VERSION_RE = re.compile(r"\|\s*(v\d+(?:\.\d+)?)\s*\|")
 
 

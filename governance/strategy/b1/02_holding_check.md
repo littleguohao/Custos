@@ -2,7 +2,7 @@
 
 > **上下文**：B1 波段策略（主）　｜　**执行者**：**人** / LLM　｜　**状态**：⚠️ 现行，但 §七 有空条款
 > **版本**：`holding-check-v2`（2026-07-14）　｜　**代码依赖**：`holdings/b1_holding_state.py`（输出字段部分对应）
-> **索引**：[`../README.md`](../README.md)　·　改动须记 [`strategy_version_log.md`](../../../strategy_version_log.md)
+> **索引**：[`../README.md`](../README.md)　·　改动须记 [`CHANGELOG.md`](../../../CHANGELOG.md)
 >
 > ⚠️ **§七「大盘回调后的强弱分层」依赖 [`04_pullback_rotation.md`](04_pullback_rotation.md)，而那份文档要求的四项检查全仓零实现** ⇒ 该节目前无法机械执行。详见 [`../README.md`](../README.md) 问题①。
 

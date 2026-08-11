@@ -2,7 +2,7 @@
 
 > **上下文**：**跨策略规则**（不属于任何单一策略）　｜　**执行者**：**人**（原则/画像）+ 代码（下表已实现的 4 条）　｜　**状态**：live
 > **版本**：—（2026-08-07 从 `TEAM_BLUEPRINT.md` 抢救）　｜　**代码依赖**：`holdings/b1_holding_state.py`、`generate_risk_and_sectors.py`（仅下表标 ✅ 的规则）
-> **索引**：[`../README.md`](../README.md)　·　改动须记 [`strategy_version_log.md`](../../../strategy_version_log.md)
+> **索引**：[`../README.md`](../README.md)　·　改动须记 [`CHANGELOG.md`](../../../CHANGELOG.md)
 >
 > 2026-08-07 从根目录 `TEAM_BLUEPRINT.md` 抢救而来（该文件已删）。
 >
@@ -28,7 +28,7 @@
 改动它们要有新的复盘证据，不能凭感觉。
 
 ⚠️ **每条的来源、样本量与「是否已成机制」见
-[`trade_lessons.md`](../../../trade_lessons.md)。**
+[`TRADE_LESSONS.md`](../../../TRADE_LESSONS.md)。**
 那份表里如实标出：这 6 条**没有一条记了统计区间与样本量**，
 且第 1/2/4 条**没有任何代码在执行**（第 4 条「连亏冷却」是零实现，见待办 #51）。
 读到这一节时不要默认它们已经被系统保证。

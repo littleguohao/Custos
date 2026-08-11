@@ -1,4 +1,4 @@
-"""`trade_lessons.md` 的可执行约束。
+"""`TRADE_LESSONS.md` 的可执行约束。
 
 这份文件记「从交易记录看到什么 → 所以改了什么 → 现在是否真的在执行」。
 它最容易退化成一堆看起来有道理的散文，所以有三条机械检查：
@@ -16,7 +16,7 @@ import pathlib
 import re
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-DOC = ROOT / "trade_lessons.md"
+DOC = ROOT / "TRADE_LESSONS.md"
 STATUSES = {"已成机制", "仅人工约束", "待验证", "已推翻"}
 
 
@@ -26,7 +26,7 @@ def _text() -> str:
 
 def test_exists_and_declares_its_scope():
     s = _text()
-    assert "为什么改" in s, "必须写清它与 strategy_version_log / TODO 的分工"
+    assert "为什么改" in s, "必须写清它与 CHANGELOG / TODO 的分工"
     assert "只增不删" in s, "必须写明只增不删的约定（同 research/）"
 
 
@@ -56,7 +56,7 @@ def test_mechanism_entries_cite_existing_code():
     srcrels = [str(p.relative_to(ROOT / "src")) for p in (ROOT / "src").rglob("*.py")]
     missing = sorted(r for r in refs
                      if not any(rel == r or rel.endswith("/" + r) for rel in srcrels))
-    assert not missing, (f"trade_lessons.md 引用了不存在的代码：{missing}\n"
+    assert not missing, (f"TRADE_LESSONS.md 引用了不存在的代码：{missing}\n"
                          "移动文件时要同步这份记录 —— 否则它会变成又一份说谎的文档")
 
 
@@ -94,5 +94,5 @@ def test_system_principles_points_here():
     """
     sp = (ROOT / "governance" / "strategy" / "_shared"
           / "system_principles.md").read_text(encoding="utf-8")
-    assert "trade_lessons.md" in sp
+    assert "TRADE_LESSONS.md" in sp
     assert "不要默认它们已经被系统保证" in sp

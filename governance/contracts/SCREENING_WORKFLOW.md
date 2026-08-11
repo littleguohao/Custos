@@ -268,7 +268,7 @@ stock_pool.json 的 `cz_sector_status`/`degraded_reason` 注明。
 2. 在 `SCREEN_FORMULA_REGISTRY.json` 添加条目：`enabled:false` 起步，
    注明 category 与 note。
 3. **改公式或改参数前必须先回测**（历史信号质量验证），回测结论记录到
-   `strategy_version_log.md` 或对应复盘文件。
+   `CHANGELOG.md` 或对应复盘文件。
 4. 回测通过后置 `enabled:true`；次日 18:00 链自动纳入。
 5. 公式连续失败会触发熔断并落盘 error，排查时先看
    `data/screening/{date}_formula_hits.json` 的 per-formula error。

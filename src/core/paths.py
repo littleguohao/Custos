@@ -79,7 +79,7 @@ CACHE_DIR = DATA / "cache"                 # 采集缓存（如 tdx_affair 权�
 # governance/ 的四个子目录（2026-08-06 分类重构）
 #
 # 按**生命周期**分，而不是按主题分——这是分开的理由：
-#   strategy/   规则。人与 LLM 读；改动要进版本记录（根目录 strategy_version_log.md）
+#   strategy/   规则。人与 LLM 读；改动要进版本记录（根目录 CHANGELOG.md）
 #   data/       数据层现状与接口能力。随数据源变动
 #   research/   回测研究。只增，结论会被推翻
 #   contracts/  契约 + 运行时配置。**代码直接依赖**，改错直接影响运行

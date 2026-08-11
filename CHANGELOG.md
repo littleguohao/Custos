@@ -1,4 +1,4 @@
-# strategy_version_log
+# CHANGELOG（策略版本记录）
 
 记录策略 Team 的重要规则变化。
 

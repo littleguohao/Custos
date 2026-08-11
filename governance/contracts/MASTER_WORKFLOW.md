@@ -377,4 +377,4 @@ Excel 全量文件只用于历史迁移、对账和灾备重建，不再作为�
 2026-08-09 实现：四份正式报告（盘前 `daily_report`、14:45 `review_core`、
 盘后 `final_close_review`、选股 `score_candidates`/`candidate_table`）统一经
 `src/core/report_audit.py` 注入可审计块；规则版本取自
-`strategy_version_log.md` 最新条目。
+`CHANGELOG.md` 最新条目。

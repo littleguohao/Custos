@@ -2,7 +2,7 @@
 
 > **上下文**：CZ 长期主义认知框架（**辅**）　｜　**执行者**：**人**（认知输入）　｜　**状态**：⚠️ 辅助，非执行规则
 > **版本**：`CZ-base-v1`（2026-07-19）｜来源：星球社区认知提炼　｜　**代码依赖**：仅 §14.6 量能规则（`screening/enrich_candidates.py:670`）
-> **索引**：[`../README.md`](../README.md)　·　改动须记 [`strategy_version_log.md`](../../../strategy_version_log.md)
+> **索引**：[`../README.md`](../README.md)　·　改动须记 [`CHANGELOG.md`](../../../CHANGELOG.md)
 >
 > ⚠️ **认知框架里的数字不得直接当操作参数用。**
 > 🔒 **止损口径已定案（owner 2026-08-06）：15%/20% 只适用于 CZ 语境（长期持有）。**

@@ -58,11 +58,11 @@ def test_stale_actions_explain_why():
 def test_separated_from_version_log():
     """**TODO 记没做的事，版本日志记改过的规则**，不许混。
 
-    owner 明确过：`strategy_version_log.md` 只记策略规则变化，
+    owner 明确过：`CHANGELOG.md` 只记策略规则变化，
     不放研究结论/基建重构/待办。
     """
-    log = ROOT / "strategy_version_log.md"
-    # ⚠️ 不 skip：`strategy_version_log.md` 是**入库文件**，缺失说明仓库出了问题，
+    log = ROOT / "CHANGELOG.md"
+    # ⚠️ 不 skip：`CHANGELOG.md` 是**入库文件**，缺失说明仓库出了问题，
     #    而 skip 会让这条测试静默通过。2026-08-07 清理 tests/ 时改为硬失败。
     assert log.exists(), f"版本日志缺失（入库文件）：{log}"
     s = log.read_text(encoding="utf-8")

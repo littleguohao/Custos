@@ -2,7 +2,7 @@
 
 > **上下文**：B1 波段策略（主）　｜　**执行者**：**人**　｜　**状态**：✅ 现行
 > **版本**：`pit-recovery-v1`（2026-07-14）　｜　**代码依赖**：无
-> **索引**：[`../README.md`](../README.md)　·　改动须记 [`strategy_version_log.md`](../../../strategy_version_log.md)
+> **索引**：[`../README.md`](../README.md)　·　改动须记 [`CHANGELOG.md`](../../../CHANGELOG.md)
 >
 > 坑位分类（大坑/小坑/小洞）依赖长期形态判断，目前由人做。
 
