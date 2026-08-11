@@ -42,6 +42,7 @@ CLI::
     uv run python src/custos/research/backtest_0amv_bear_regime.py
     uv run python src/custos/research/backtest_0amv_bear_regime.py --start 2020-07-10 --end 2026-07-09
 """
+
 from __future__ import annotations
 
 import argparse
@@ -58,9 +59,9 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from custos.core.paths import cn_now, REVIEWS, TRADES_DIR  # noqa: E402
 
-BEAR_THRESHOLD = -2.3     # amv_change_pct <= 此值当日进入空头
-BULL_THRESHOLD = 4.0      # amv_change_pct >= 此值当日进入多头
-REBOUND_SELL_PCT = 0.20   # 反弹日减仓比例
+BEAR_THRESHOLD = -2.3  # amv_change_pct <= 此值当日进入空头
+BULL_THRESHOLD = 4.0  # amv_change_pct >= 此值当日进入多头
+REBOUND_SELL_PCT = 0.20  # 反弹日减仓比例
 
 LEDGER_PATH = TRADES_DIR / "master_trade_ledger.csv"
 POSITIONS_PATH = TRADES_DIR / "current_positions.json"
@@ -73,24 +74,27 @@ NON_SECURITY_CODES = {"000000", "131810", "204001"}
 
 # ---------------------------------------------------------------- 数据加载
 
+
 def load_ledger(path: Path = LEDGER_PATH) -> list[dict[str, Any]]:
     """读取主台账，返回按 日期+时间 升序的 dict 列表（数值已转 float）。"""
     with open(path, encoding="utf-8-sig", newline="") as f:
         rows = list(csv.DictReader(f))
     out = []
     for r in rows:
-        out.append({
-            "date": r["成交日期"],
-            "time": r.get("成交时间", ""),
-            "code": r["代码"].strip(),
-            "name": r["名称"],
-            "category": r["交易类别"],
-            "qty": float(r["成交数量"] or 0),
-            "price": float(r["成交价格"] or 0),
-            "amount": float(r["成交金额"] or 0),
-            "cash": float(r["发生金额"] or 0),
-            "fee": float(r["费用"] or 0),
-        })
+        out.append(
+            {
+                "date": r["成交日期"],
+                "time": r.get("成交时间", ""),
+                "code": r["代码"].strip(),
+                "name": r["名称"],
+                "category": r["交易类别"],
+                "qty": float(r["成交数量"] or 0),
+                "price": float(r["成交价格"] or 0),
+                "amount": float(r["成交金额"] or 0),
+                "cash": float(r["发生金额"] or 0),
+                "fee": float(r["费用"] or 0),
+            }
+        )
     out.sort(key=lambda t: (t["date"], t["time"]))
     return out
 
@@ -121,8 +125,9 @@ def safe_ratio_pct(part: float, whole: float, ndigits: int = 2):
     return round(part / whole * 100, ndigits)
 
 
-def regime_segments(regime_map: dict[str, str], target: str = "bear",
-                    since: str = "0000-00-00") -> list[dict[str, Any]]:
+def regime_segments(
+    regime_map: dict[str, str], target: str = "bear", since: str = "0000-00-00"
+) -> list[dict[str, Any]]:
     """提取 target 状态的连续区间 [{start, end, days}]，end 为区间最后一天（含）。"""
     days = sorted(d for d in regime_map if d >= since)
     segs: list[dict[str, Any]] = []
@@ -160,8 +165,10 @@ def load_price_data(codes: list[str]) -> tuple[dict[str, dict], list[str]]:
         if df is None or df.empty:
             missing.append(code)
             continue
-        dates = [d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)[:10]
-                 for d in df["date"]]
+        dates = [
+            d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)[:10]
+            for d in df["date"]
+        ]
         closes = [float(c) for c in df["close"]]
         prices[code] = {
             "dates": dates,
@@ -205,6 +212,7 @@ def is_rebound_day(price_entry: dict, day: str) -> bool:
 
 # ---------------------------------------------------------------- FIFO 账本
 
+
 class FifoBook:
     """单代码 FIFO 持仓。lot = (qty, unit_cost, tag)，tag 标记买入时区间（bear/other）。"""
 
@@ -244,10 +252,16 @@ class FifoBook:
 SCENARIOS = ("actual", "no_bear_buys", "rebound_reduce")
 
 
-def run_scenario(trades: list[dict], regime_map: dict[str, str],
-                 amv_days: list[str], prices: dict[str, dict],
-                 scenario: str, sell_fee_rate: float,
-                 start: str, end: str) -> dict[str, Any]:
+def run_scenario(
+    trades: list[dict],
+    regime_map: dict[str, str],
+    amv_days: list[str],
+    prices: dict[str, dict],
+    scenario: str,
+    sell_fee_rate: float,
+    start: str,
+    end: str,
+) -> dict[str, Any]:
     """按场景重放台账，返回盈亏/持仓/曲线等结果。"""
     assert scenario in SCENARIOS
     trades_by_date: dict[str, list[dict]] = defaultdict(list)
@@ -257,28 +271,37 @@ def run_scenario(trades: list[dict], regime_map: dict[str, str],
 
     books: dict[str, FifoBook] = defaultdict(FifoBook)
     cash = 0.0
-    realized = 0.0          # 已实现盈亏（卖出口径）
-    realized_bear = 0.0     # 其中：空头区买入批次的已实现盈亏
-    other_cf = 0.0          # 分红/费用/逆回购利息等非买卖现金流
+    realized = 0.0  # 已实现盈亏（卖出口径）
+    realized_bear = 0.0  # 其中：空头区买入批次的已实现盈亏
+    other_cf = 0.0  # 分红/费用/逆回购利息等非买卖现金流
     skipped_buys: list[dict] = []
     rebound_sells: list[dict] = []
     shortfalls: list[dict] = []
     equity_curve: list[dict] = []
 
-    def do_sell(code: str, qty: float, proceeds: float, day: str, kind: str,
-                price: float = 0.0) -> None:
+    def do_sell(
+        code: str, qty: float, proceeds: float, day: str, kind: str, price: float = 0.0
+    ) -> None:
         nonlocal cash, realized, realized_bear
         book = books[code]
         available = book.qty
         if available <= 1e-9:
-            shortfalls.append({"date": day, "code": code, "want": qty,
-                               "available": 0.0, "kind": kind})
+            shortfalls.append(
+                {"date": day, "code": code, "want": qty, "available": 0.0, "kind": kind}
+            )
             return
         sold = min(qty, available)
         eff_proceeds = proceeds * (sold / qty) if sold < qty - 1e-9 else proceeds
         if sold < qty - 1e-9:
-            shortfalls.append({"date": day, "code": code, "want": qty,
-                               "available": available, "kind": kind})
+            shortfalls.append(
+                {
+                    "date": day,
+                    "code": code,
+                    "want": qty,
+                    "available": available,
+                    "kind": kind,
+                }
+            )
         consumed = book.consume(sold)
         cost = sum(q * c for q, c, _ in consumed)
         bear_qty = sum(q for q, _, tag in consumed if tag == "bear")
@@ -290,9 +313,16 @@ def run_scenario(trades: list[dict], regime_map: dict[str, str],
             realized_bear += bear_proceeds - bear_cost
         cash += eff_proceeds
         if kind == "rebound":
-            rebound_sells.append({"date": day, "code": code, "qty": sold,
-                                  "price": price, "proceeds": eff_proceeds,
-                                  "pnl": pnl})
+            rebound_sells.append(
+                {
+                    "date": day,
+                    "code": code,
+                    "qty": sold,
+                    "price": price,
+                    "proceeds": eff_proceeds,
+                    "pnl": pnl,
+                }
+            )
 
     def market_value(day: str) -> tuple[float, float, float]:
         """返回 (市值, 剩余成本, 空头批次浮盈)。"""
@@ -329,8 +359,9 @@ def run_scenario(trades: list[dict], regime_map: dict[str, str],
                 do_sell(t["code"], t["qty"], t["cash"], day, "ledger", t["price"])
             elif cat == "转债转入":
                 cost_total = -t["cash"] if t["cash"] < 0 else 0.0
-                books[t["code"]].add(t["qty"],
-                                     cost_total / t["qty"] if t["qty"] else 0.0)
+                books[t["code"]].add(
+                    t["qty"], cost_total / t["qty"] if t["qty"] else 0.0
+                )
                 cash += t["cash"]
             elif cat == "拆股":
                 # 拆股/送转股：0 成本批次入库（发生金额为 0，不影响现金）
@@ -358,17 +389,26 @@ def run_scenario(trades: list[dict], regime_map: dict[str, str],
                 do_sell(code, qty, proceeds, day, "rebound", close)
 
         mv, _, _ = market_value(day)
-        equity_curve.append({"date": day, "cash": round(cash, 2),
-                             "market_value": round(mv, 2),
-                             "equity": round(cash + mv, 2)})
+        equity_curve.append(
+            {
+                "date": day,
+                "cash": round(cash, 2),
+                "market_value": round(mv, 2),
+                "equity": round(cash + mv, 2),
+            }
+        )
 
     mv_end, cost_end, bear_unrealized_end = market_value(end)
     unrealized = mv_end - cost_end
-    dd = compute_drawdown([p["equity"] for p in equity_curve],
-                          [p["date"] for p in equity_curve])
+    dd = compute_drawdown(
+        [p["equity"] for p in equity_curve], [p["date"] for p in equity_curve]
+    )
 
-    positions_end = {code: {"qty": round(b.qty, 4), "cost": round(b.cost, 2)}
-                     for code, b in sorted(books.items()) if b.qty > 1e-9}
+    positions_end = {
+        code: {"qty": round(b.qty, 4), "cost": round(b.cost, 2)}
+        for code, b in sorted(books.items())
+        if b.qty > 1e-9
+    }
     return {
         "scenario": scenario,
         "realized_pnl": round(realized, 2),
@@ -408,7 +448,7 @@ def compute_drawdown(equity: list[float], dates: list[str]) -> dict[str, Any]:
             max_dd = dd
             trough_date = d
             dd_peak_date = peak_date
-            window_min = min(equity[:i + 1])
+            window_min = min(equity[: i + 1])
             max_dd_pct = dd / peak if (peak and peak > 0 and window_min > 0) else None
     note = None
     if max_dd_pct is None and max_dd > 0:
@@ -424,8 +464,10 @@ def compute_drawdown(equity: list[float], dates: list[str]) -> dict[str, Any]:
 
 # ---------------------------------------------------------------- 统计汇总
 
-def trade_distribution(trades: list[dict], regime_map: dict[str, str],
-                       start: str, end: str) -> dict[str, Any]:
+
+def trade_distribution(
+    trades: list[dict], regime_map: dict[str, str], start: str, end: str
+) -> dict[str, Any]:
     """买入/卖出按区间（bear/bull/neutral）统计笔数与成交金额。"""
     dist: dict[str, dict] = {
         regime: {"buy_count": 0, "buy_amount": 0.0, "sell_count": 0, "sell_amount": 0.0}
@@ -454,8 +496,9 @@ def avg_sell_fee_rate(trades: list[dict]) -> float:
     return fee / amount if amount else 0.0
 
 
-def check_positions(positions_end: dict[str, dict],
-                    positions_path: Path = POSITIONS_PATH) -> list[dict]:
+def check_positions(
+    positions_end: dict[str, dict], positions_path: Path = POSITIONS_PATH
+) -> list[dict]:
     """actual 场景期末持仓与 current_positions.json 对账。"""
     ref = json.loads(positions_path.read_text(encoding="utf-8"))
     ref_map = {str(p["代码"]).zfill(6): float(p["持有数量"]) for p in ref}
@@ -464,12 +507,19 @@ def check_positions(positions_end: dict[str, dict],
     for code in codes:
         got = positions_end.get(code, {}).get("qty", 0.0)
         want = ref_map.get(code, 0.0)
-        rows.append({"code": code, "replay_qty": round(got, 2),
-                     "ledger_ref_qty": want, "diff": round(got - want, 2)})
+        rows.append(
+            {
+                "code": code,
+                "replay_qty": round(got, 2),
+                "ledger_ref_qty": want,
+                "diff": round(got - want, 2),
+            }
+        )
     return rows
 
 
 # ---------------------------------------------------------------- 报告
+
 
 def _wan(x: float) -> str:
     return f"{x / 10000:.2f} 万"
@@ -488,16 +538,20 @@ def build_report(result: dict[str, Any]) -> str:
     a(f"- 回测区间：{result['start']} ~ {result['end']}")
     a(f"- 生成时间：{result['generated_at']}")
     a(f"- 台账：{result['ledger_path']}（{result['trade_count']} 条）")
-    a(f"- 区间定义：amv_change_pct <= {BEAR_THRESHOLD} 当日进入空头；"
-      f">= +{BULL_THRESHOLD} 当日进入多头；触发日前为 neutral（边界含当日）")
+    a(
+        f"- 区间定义：amv_change_pct <= {BEAR_THRESHOLD} 当日进入空头；"
+        f">= +{BULL_THRESHOLD} 当日进入多头；触发日前为 neutral（边界含当日）"
+    )
     a("")
 
     a("## 1. 空头区间统计（2020 以来）")
     a("")
     a(f"- 空头区间次数：**{rg['bear_count']}** 次")
-    a(f"- 空头总天数：**{rg['bear_days']}** 个交易日，"
-      f"占同期 {rg['total_days']} 个交易日的 "
-      f"**{'unavailable' if rg['bear_ratio_pct'] is None else str(rg['bear_ratio_pct']) + '%'}**")
+    a(
+        f"- 空头总天数：**{rg['bear_days']}** 个交易日，"
+        f"占同期 {rg['total_days']} 个交易日的 "
+        f"**{'unavailable' if rg['bear_ratio_pct'] is None else str(rg['bear_ratio_pct']) + '%'}**"
+    )
     a(f"- 多头总天数：{rg['bull_days']} 天；neutral：{rg['neutral_days']} 天")
     a("")
     a("| # | 开始(触发日) | 结束(含) | 天数 |")
@@ -513,37 +567,64 @@ def build_report(result: dict[str, Any]) -> str:
     label = {"bear": "空头", "bull": "多头", "neutral": "neutral"}
     for k in ("bear", "bull", "neutral"):
         d = result["trade_distribution"][k]
-        a(f"| {label[k]} | {d['buy_count']} | {_wan(d['buy_amount'])} | "
-          f"{d['sell_count']} | {_wan(d['sell_amount'])} |")
+        a(
+            f"| {label[k]} | {d['buy_count']} | {_wan(d['buy_amount'])} | "
+            f"{d['sell_count']} | {_wan(d['sell_amount'])} |"
+        )
     a("")
 
     a("## 3. 三场景对比")
     a("")
     a("| 指标 | actual 实际 | no_bear_buys 空头不买 | +rebound_reduce 反弹再减20% |")
     a("|---|---|---|---|")
-    a(f"| 已实现盈亏 | {_wan(act['realized_pnl'])} | {_wan(nob['realized_pnl'])} | {_wan(reb['realized_pnl'])} |")
-    a(f"| 期末浮存盈亏 | {_wan(act['unrealized_pnl'])} | {_wan(nob['unrealized_pnl'])} | {_wan(reb['unrealized_pnl'])} |")
-    a(f"| 其他现金流(分红/费用/逆回购) | {_wan(act['other_cashflow'])} | {_wan(nob['other_cashflow'])} | {_wan(reb['other_cashflow'])} |")
-    a(f"| **合计总盈亏** | **{_wan(act['total_pnl'])}** | **{_wan(nob['total_pnl'])}** | **{_wan(reb['total_pnl'])}** |")
-    a(f"| 期末现金 | {_wan(act['end_cash'])} | {_wan(nob['end_cash'])} | {_wan(reb['end_cash'])} |")
-    a(f"| 期末持仓市值 | {_wan(act['end_market_value'])} | {_wan(nob['end_market_value'])} | {_wan(reb['end_market_value'])} |")
+    a(
+        f"| 已实现盈亏 | {_wan(act['realized_pnl'])} | {_wan(nob['realized_pnl'])} | {_wan(reb['realized_pnl'])} |"
+    )
+    a(
+        f"| 期末浮存盈亏 | {_wan(act['unrealized_pnl'])} | {_wan(nob['unrealized_pnl'])} | {_wan(reb['unrealized_pnl'])} |"
+    )
+    a(
+        f"| 其他现金流(分红/费用/逆回购) | {_wan(act['other_cashflow'])} | {_wan(nob['other_cashflow'])} | {_wan(reb['other_cashflow'])} |"
+    )
+    a(
+        f"| **合计总盈亏** | **{_wan(act['total_pnl'])}** | **{_wan(nob['total_pnl'])}** | **{_wan(reb['total_pnl'])}** |"
+    )
+    a(
+        f"| 期末现金 | {_wan(act['end_cash'])} | {_wan(nob['end_cash'])} | {_wan(reb['end_cash'])} |"
+    )
+    a(
+        f"| 期末持仓市值 | {_wan(act['end_market_value'])} | {_wan(nob['end_market_value'])} | {_wan(reb['end_market_value'])} |"
+    )
+
     def _dd(v: dict) -> str:
         dd = v["max_drawdown"]
-        pct = f"{dd['max_dd_pct']}%" if dd["max_dd_pct"] is not None else "n/a(权益曾跌破0)"
-        return f"{_wan(dd['max_dd_yuan'])} ({pct}, {dd['peak_date']}→{dd['trough_date']})"
+        pct = (
+            f"{dd['max_dd_pct']}%"
+            if dd["max_dd_pct"] is not None
+            else "n/a(权益曾跌破0)"
+        )
+        return (
+            f"{_wan(dd['max_dd_yuan'])} ({pct}, {dd['peak_date']}→{dd['trough_date']})"
+        )
 
     a(f"| 最大回撤(组合权益口径) | {_dd(act)} | {_dd(nob)} | {_dd(reb)} |")
     a("")
-    a("> 注：台账未记录出入金，权益从 0 起步，期末现金为负属口径产物；"
-      "三场景之间的**差值**才是可比的。")
+    a(
+        "> 注：台账未记录出入金，权益从 0 起步，期末现金为负属口径产物；"
+        "三场景之间的**差值**才是可比的。"
+    )
     a("")
-    diff_nb = nob['total_pnl'] - act['total_pnl']
-    diff_rb = reb['total_pnl'] - nob['total_pnl']
-    a(f"> 空头不买 vs 实际：总盈亏**减少 {_wan(-diff_nb)}**（空头区买入实际是赚钱的）；"
-      if diff_nb < 0 else
-      f"> 空头不买 vs 实际：总盈亏**增加 {_wan(diff_nb)}**；")
-    a(f"> 反弹再减仓 vs 空头不买：总盈亏**{'减少' if diff_rb < 0 else '增加'} "
-      f"{_wan(abs(diff_rb))}**（减仓卖在低位、错过后续修复）。")
+    diff_nb = nob["total_pnl"] - act["total_pnl"]
+    diff_rb = reb["total_pnl"] - nob["total_pnl"]
+    a(
+        f"> 空头不买 vs 实际：总盈亏**减少 {_wan(-diff_nb)}**（空头区买入实际是赚钱的）；"
+        if diff_nb < 0
+        else f"> 空头不买 vs 实际：总盈亏**增加 {_wan(diff_nb)}**；"
+    )
+    a(
+        f"> 反弹再减仓 vs 空头不买：总盈亏**{'减少' if diff_rb < 0 else '增加'} "
+        f"{_wan(abs(diff_rb))}**（减仓卖在低位、错过后续修复）。"
+    )
     a("")
 
     a("## 4. 空头区买入复盘（这些买单实际表现）")
@@ -557,8 +638,10 @@ def build_report(result: dict[str, Any]) -> str:
         a(f"- 结论：若空头区不买，可避免损失 **{_wan(-bb['total_pnl'])}**")
     else:
         a(f"- 结论：若空头区不买，将错过收益 **{_wan(bb['total_pnl'])}**")
-    a(f"- 同期全部总盈亏（actual）为 {_wan(act['total_pnl'])}，"
-      f"空头区买入贡献 **{bb['share_of_actual_total_pnl_pct']}%**")
+    a(
+        f"- 同期全部总盈亏（actual）为 {_wan(act['total_pnl'])}，"
+        f"空头区买入贡献 **{bb['share_of_actual_total_pnl_pct']}%**"
+    )
     a("")
 
     a("## 5. 反弹减仓明细摘要")
@@ -567,20 +650,25 @@ def build_report(result: dict[str, Any]) -> str:
     if rs:
         by_code: dict[str, dict] = {}
         for r in rs:
-            d = by_code.setdefault(r["code"], {"count": 0, "qty": 0.0,
-                                               "proceeds": 0.0, "pnl": 0.0})
+            d = by_code.setdefault(
+                r["code"], {"count": 0, "qty": 0.0, "proceeds": 0.0, "pnl": 0.0}
+            )
             d["count"] += 1
             d["qty"] += r["qty"]
             d["proceeds"] += r["proceeds"]
             d["pnl"] += r["pnl"]
-        a(f"- 反弹减仓共 **{len(rs)} 笔**，涉及 **{len(by_code)} 只**，"
-          f"回收现金 {_wan(sum(r['proceeds'] for r in rs))}，"
-          f"实现盈亏 {_wan(sum(r['pnl'] for r in rs))}")
+        a(
+            f"- 反弹减仓共 **{len(rs)} 笔**，涉及 **{len(by_code)} 只**，"
+            f"回收现金 {_wan(sum(r['proceeds'] for r in rs))}，"
+            f"实现盈亏 {_wan(sum(r['pnl'] for r in rs))}"
+        )
         a("")
         a("| 代码 | 次数 | 卖出数量 | 回收现金 | 实现盈亏 |")
         a("|---|---|---|---|---|")
         for code, d in sorted(by_code.items(), key=lambda kv: kv[1]["pnl"]):
-            a(f"| {code} | {d['count']} | {d['qty']:.0f} | {_wan(d['proceeds'])} | {_wan(d['pnl'])} |")
+            a(
+                f"| {code} | {d['count']} | {d['qty']:.0f} | {_wan(d['proceeds'])} | {_wan(d['pnl'])} |"
+            )
     else:
         a("- 回测区间内无反弹减仓触发。")
     a("")
@@ -590,25 +678,34 @@ def build_report(result: dict[str, Any]) -> str:
     a("| 代码 | 重放数量 | 台账持仓 | 差值 |")
     a("|---|---|---|---|")
     for row in result["position_check"]:
-        a(f"| {row['code']} | {row['replay_qty']} | {row['ledger_ref_qty']} | {row['diff']} |")
+        a(
+            f"| {row['code']} | {row['replay_qty']} | {row['ledger_ref_qty']} | {row['diff']} |"
+        )
     a("")
     a(f"- 说明：{result['position_check_note']}")
     a("")
 
     a("## 7. 口径与数据缺口")
     a("")
-    a("- 分红/除权除息、组合费用、逆回购（融券/融券购回）：只计现金、不动持仓（简单口径）。")
-    a("- 例外：拆股（603606 +600 股）与 0 成本转债转入（159938 +22500 份）按 0 成本批次入库，"
-      "否则台账重放不自洽（后续卖单无票可卖）。")
-    a("- 行情为 vipdoc 不复权日线，分红除权缺口使个券浮盈偏保守，但分红现金已计入其他现金流。")
-    a("- 反弹减仓费率取台账实际平均卖出费率："
-      f"{result['sell_fee_rate'] * 100:.4f}%。")
+    a(
+        "- 分红/除权除息、组合费用、逆回购（融券/融券购回）：只计现金、不动持仓（简单口径）。"
+    )
+    a(
+        "- 例外：拆股（603606 +600 股）与 0 成本转债转入（159938 +22500 份）按 0 成本批次入库，"
+        "否则台账重放不自洽（后续卖单无票可卖）。"
+    )
+    a(
+        "- 行情为 vipdoc 不复权日线，分红除权缺口使个券浮盈偏保守，但分红现金已计入其他现金流。"
+    )
+    a(f"- 反弹减仓费率取台账实际平均卖出费率：{result['sell_fee_rate'] * 100:.4f}%。")
     a("- 台账未记录出入金，现金从 0 起步，故期末现金为负值；三场景差值才是可比的。")
     sf = result.get("shortfalls", {})
-    a("- 卖单超持仓截断（shortfall）：actual "
-      f"{len(sf.get('actual', []))} 条、no_bear_buys {len(sf.get('no_bear_buys', []))} 条、"
-      f"rebound_reduce {len(sf.get('rebound_reduce', []))} 条。"
-      "反事实场景中被跳过的买入使后续台账卖单无票可卖，按可得数量撮合、发生金额按比例折算（详见 JSON）。")
+    a(
+        "- 卖单超持仓截断（shortfall）：actual "
+        f"{len(sf.get('actual', []))} 条、no_bear_buys {len(sf.get('no_bear_buys', []))} 条、"
+        f"rebound_reduce {len(sf.get('rebound_reduce', []))} 条。"
+        "反事实场景中被跳过的买入使后续台账卖单无票可卖，按可得数量撮合、发生金额按比例折算（详见 JSON）。"
+    )
     missing = result["missing_price_codes"]
     a(f"- vipdoc 缺数据代码（已跳过）：{missing if missing else '无'}")
     a("")
@@ -616,6 +713,7 @@ def build_report(result: dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------- 主流程
+
 
 def run_backtest(start: str, end: str) -> dict[str, Any]:
     from custos.datasource.local_tdx.compass_amv import parse_amv_daily
@@ -628,14 +726,20 @@ def run_backtest(start: str, end: str) -> dict[str, Any]:
     regime_map = build_regime_map(records)
     amv_days = [r["date"] for r in records]
 
-    trade_codes = [t["code"] for t in trades
-                   if t["category"] in ("买入", "卖出", "转债转入", "拆股")]
+    trade_codes = [
+        t["code"]
+        for t in trades
+        if t["category"] in ("买入", "卖出", "转债转入", "拆股")
+    ]
     prices, missing = load_price_data(trade_codes)
     sell_fee_rate = avg_sell_fee_rate(trades)
 
-    scenarios = {name: run_scenario(trades, regime_map, amv_days, prices,
-                                    name, sell_fee_rate, start, end)
-                 for name in SCENARIOS}
+    scenarios = {
+        name: run_scenario(
+            trades, regime_map, amv_days, prices, name, sell_fee_rate, start, end
+        )
+        for name in SCENARIOS
+    }
 
     days_since_2020 = [d for d in amv_days if d >= "2020-01-01"]
     bear_segs = regime_segments(regime_map, "bear", since="2020-01-01")
@@ -654,10 +758,16 @@ def run_backtest(start: str, end: str) -> dict[str, Any]:
     }
 
     act = scenarios["actual"]
-    bear_buys = [t for t in trades
-                 if t["category"] == "买入" and start <= t["date"] <= end
-                 and regime_map.get(t["date"]) == "bear"]
-    bear_total = round(act["bear_buys_pnl_realized"] + act["bear_buys_pnl_unrealized"], 2)
+    bear_buys = [
+        t
+        for t in trades
+        if t["category"] == "买入"
+        and start <= t["date"] <= end
+        and regime_map.get(t["date"]) == "bear"
+    ]
+    bear_total = round(
+        act["bear_buys_pnl_realized"] + act["bear_buys_pnl_unrealized"], 2
+    )
     bear_review = {
         "count": len(bear_buys),
         "amount": round(sum(t["amount"] for t in bear_buys), 2),
@@ -665,17 +775,19 @@ def run_backtest(start: str, end: str) -> dict[str, Any]:
         "unrealized_pnl": act["bear_buys_pnl_unrealized"],
         "total_pnl": bear_total,
         "share_of_actual_total_pnl_pct": (
-            round(bear_total / act["total_pnl"] * 100, 2) if act["total_pnl"] else None),
+            round(bear_total / act["total_pnl"] * 100, 2) if act["total_pnl"] else None
+        ),
     }
 
     pos_check = check_positions(act["positions_end"])
     bad = [r for r in pos_check if abs(r["diff"]) > 1e-6]
-    pos_note = ("重放持仓与台账持仓完全一致。" if not bad else
-                f"{len(bad)} 只存在差值（可能源于分红送转/手工调整/台账外操作），见上表。")
+    pos_note = (
+        "重放持仓与台账持仓完全一致。"
+        if not bad
+        else f"{len(bad)} 只存在差值（可能源于分红送转/手工调整/台账外操作），见上表。"
+    )
 
-    all_shortfalls = {
-        name: sc["shortfalls"] for name, sc in scenarios.items()
-    }
+    all_shortfalls = {name: sc["shortfalls"] for name, sc in scenarios.items()}
 
     result = {
         "start": start,
@@ -700,8 +812,12 @@ def run_backtest(start: str, end: str) -> dict[str, Any]:
 
 def main(argv: Optional[list] = None) -> int:
     ap = argparse.ArgumentParser(description="0AMV 空头区间只卖不买/反弹减仓回测")
-    ap.add_argument("--start", default=None, help="起始日期 YYYY-MM-DD（含），默认台账首笔")
-    ap.add_argument("--end", default=None, help="结束日期 YYYY-MM-DD（含），默认台账末笔")
+    ap.add_argument(
+        "--start", default=None, help="起始日期 YYYY-MM-DD（含），默认台账首笔"
+    )
+    ap.add_argument(
+        "--end", default=None, help="结束日期 YYYY-MM-DD（含），默认台账末笔"
+    )
     ap.add_argument("--out-dir", default=str(REPORT_DIR), help="报告输出目录")
     ap.add_argument("--json-only", action="store_true", help="只打印 JSON，不写文件")
     args = ap.parse_args(argv)
@@ -721,7 +837,8 @@ def main(argv: Optional[list] = None) -> int:
     md = build_report(result)
     (out_dir / "0amv_bear_regime_backtest.md").write_text(md, encoding="utf-8")
     (out_dir / "0amv_bear_regime_backtest.json").write_text(
-        json.dumps(result, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        json.dumps(result, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+    )
     print(f"报告已写入 {out_dir / '0amv_bear_regime_backtest.md'}")
     print(f"数据已写入 {out_dir / '0amv_bear_regime_backtest.json'}")
     a, n, r = (result["scenarios"][k]["total_pnl"] for k in SCENARIOS)

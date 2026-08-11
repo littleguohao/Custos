@@ -66,6 +66,7 @@
 ⚠️ **返回 None 与返回 score=0 语义不同**：None = 不参与排序（不误标），
 0 = 参与排序但中性。混用会让「数据缺失」被算成「中性表现」。
 """
+
 from __future__ import annotations
 
 from typing import Any, Optional

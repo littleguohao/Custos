@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Tests for technical_monitor._infer_price_limit (ST downgrade ordering)."""
+
 from __future__ import annotations
 
 import pandas as pd
@@ -20,9 +21,17 @@ QUIET_20 = [1.0, -1.0] * 10  # 20 日最大 |涨跌幅| = 1% <= 5.2
 
 
 class TestStDowngradeOnlyForTenPercentPrefix:
-    @pytest.mark.parametrize("code,want", [("300750", 20), ("301269", 20),
-                                           ("688981", 20), ("689009", 20),
-                                           ("920808", 30), ("830799", 30)])
+    @pytest.mark.parametrize(
+        "code,want",
+        [
+            ("300750", 20),
+            ("301269", 20),
+            ("688981", 20),
+            ("689009", 20),
+            ("920808", 30),
+            ("830799", 30),
+        ],
+    )
     def test_quiet_wide_limit_prefix_not_demoted(self, code, want):
         """安静窗口不得把宽幅品种降级为 5%（原意），期望值按真实限制。
 
@@ -60,7 +69,7 @@ class TestSelfCorrectWindowIsRecent20:
         全安静的窗口会走 ST 降级（==5），断言 ==10 就分不清测的是哪条。
         """
         changes = [44.0] + [1.0, -1.0] * 10 + [6.0]
-        assert len(changes) == 22 and max(changes[-20:]) == 6.0   # 首日已出窗
+        assert len(changes) == 22 and max(changes[-20:]) == 6.0  # 首日已出窗
         assert _infer_price_limit("600519", _df(changes)) == 10
 
     def test_big_move_inside_window_still_upgrades(self):

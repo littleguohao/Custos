@@ -40,6 +40,7 @@ PIT 性质:总股本是**当日事实**(某天就是那么多股),不存在财�
   # 自检
   uv run python src/custos/datasource/local_tdx/fetch_market_cap.py --verify
 """
+
 from __future__ import annotations
 
 import argparse
@@ -65,7 +66,7 @@ SAMPLES = OUT_DIR / "share_change_samples.json"
 MV_START = "2018-01-02"
 
 
-PAGE_SLEEP = 0.35        # 翻页间隔（秒）：东财 datacenter 无官方配额，连打会被静默限流
+PAGE_SLEEP = 0.35  # 翻页间隔（秒）：东财 datacenter 无官方配额，连打会被静默限流
 
 
 class FetchIncomplete(RuntimeError):
@@ -110,8 +111,13 @@ def _f(v):
     return None if v is None else float(v)
 
 
-def fetch_trade_date(trade_date: str, page_size: int = 500, max_pages: int = 40,
-                     session=None, sleep: float = PAGE_SLEEP) -> list[dict]:
+def fetch_trade_date(
+    trade_date: str,
+    page_size: int = 500,
+    max_pages: int = 40,
+    session=None,
+    sleep: float = PAGE_SLEEP,
+) -> list[dict]:
     """拉一个交易日的全市场总股本/总市值。非交易日返回空。
 
     **分页完整性由接口自报的 pages/count 校验，残缺一律抛 FetchIncomplete。**
@@ -131,32 +137,43 @@ def fetch_trade_date(trade_date: str, page_size: int = 500, max_pages: int = 40,
         if page > 1 and sleep:
             time.sleep(sleep)
         params = {
-            "sortColumns": "SECURITY_CODE", "sortTypes": "1",
-            "pageSize": page_size, "pageNumber": page,
+            "sortColumns": "SECURITY_CODE",
+            "sortTypes": "1",
+            "pageSize": page_size,
+            "pageNumber": page,
             "reportName": "RPT_VALUEANALYSIS_DET",
-            "columns": ("SECURITY_CODE,SECURITY_NAME_ABBR,TRADE_DATE,CLOSE_PRICE,"
-                        "TOTAL_SHARES,FREE_SHARES_A,TOTAL_MARKET_CAP,NOTLIMITED_MARKETCAP_A"),
+            "columns": (
+                "SECURITY_CODE,SECURITY_NAME_ABBR,TRADE_DATE,CLOSE_PRICE,"
+                "TOTAL_SHARES,FREE_SHARES_A,TOTAL_MARKET_CAP,NOTLIMITED_MARKETCAP_A"
+            ),
             "filter": f"(TRADE_DATE='{trade_date}')",
         }
-        r = s.get(API, params=params, headers=UA, timeout=30,
-                  proxies={"http": None, "https": None})
+        r = s.get(
+            API,
+            params=params,
+            headers=UA,
+            timeout=30,
+            proxies={"http": None, "https": None},
+        )
         r.raise_for_status()
         payload = r.json() or {}
         result = payload.get("result")
         if not isinstance(result, dict):
             if page == 1 and _is_empty_ok(payload):
-                return []                      # 非交易日
+                return []  # 非交易日
             raise FetchIncomplete(
                 f"{trade_date} 第 {page} 页无 result 段（限流/异常响应），"
-                f"已拿 {len(rows)} 行: {_brief(payload)}")
+                f"已拿 {len(rows)} 行: {_brief(payload)}"
+            )
         data = result.get("data") or []
         pages, count = _as_int(result.get("pages")), _as_int(result.get("count"))
         if not data:
             if page == 1 and not count:
-                return []                      # 非交易日
+                return []  # 非交易日
             raise FetchIncomplete(
                 f"{trade_date} 第 {page} 页空响应，但接口声明 pages={pages} count={count}"
-                f"（已拿 {len(rows)} 行）—— 疑似限流，不是翻完了")
+                f"（已拿 {len(rows)} 行）—— 疑似限流，不是翻完了"
+            )
         rows.extend(data)
         if pages is not None:
             if page >= pages:
@@ -165,17 +182,22 @@ def fetch_trade_date(trade_date: str, page_size: int = 500, max_pages: int = 40,
             break
         else:
             raise FetchIncomplete(
-                f"{trade_date} 第 {page} 页未给 pages/count，无法判断是否翻完")
+                f"{trade_date} 第 {page} 页未给 pages/count，无法判断是否翻完"
+            )
     else:
         raise FetchIncomplete(
-            f"{trade_date} 翻到 max_pages={max_pages} 仍未结束（声明 pages={pages}）")
+            f"{trade_date} 翻到 max_pages={max_pages} 仍未结束（声明 pages={pages}）"
+        )
     if count is not None and len(rows) < count:
         raise FetchIncomplete(
-            f"{trade_date} 只拿到 {len(rows)}/{count} 行，样本残缺不进 diff")
+            f"{trade_date} 只拿到 {len(rows)}/{count} 行，样本残缺不进 diff"
+        )
     return rows
 
 
-def sample_dates(since_year: int, freq: str = "month", until: str | None = None) -> list[str]:
+def sample_dates(
+    since_year: int, freq: str = "month", until: str | None = None
+) -> list[str]:
     """采样日期序列。freq=month 取每月 28 日、week 取每周一、day 逐日(慎用:调用量×20)。
 
     取 28 日而非月末是为了避开月末休市;非交易日接口返回空,由调用方跳过。
@@ -198,9 +220,9 @@ def sample_dates(since_year: int, freq: str = "month", until: str | None = None)
             if m > 12:
                 y, m = y + 1, 1
         if start == MV_START and out and out[0] > MV_START:
-            out.insert(0, MV_START)          # 首采样点对齐数据起点
+            out.insert(0, MV_START)  # 首采样点对齐数据起点
     elif freq == "week":
-        cur = d0 + timedelta(days=(7 - d0.weekday()) % 7)     # 下一个周一
+        cur = d0 + timedelta(days=(7 - d0.weekday()) % 7)  # 下一个周一
         while cur <= d1:
             out.append(cur.isoformat())
             cur += timedelta(days=7)
@@ -213,8 +235,9 @@ def sample_dates(since_year: int, freq: str = "month", until: str | None = None)
     return out
 
 
-def diff_events(prev: dict[str, float], rows: list[dict], observed_on: str,
-                prev_sample: str | None) -> list[dict]:
+def diff_events(
+    prev: dict[str, float], rows: list[dict], observed_on: str, prev_sample: str | None
+) -> list[dict]:
     """把一次采样与上次快照比对,只对**变化的**代码产出事件行。
 
     prev: {code: total_shares}(上次快照);返回事件列表。
@@ -229,24 +252,27 @@ def diff_events(prev: dict[str, float], rows: list[dict], observed_on: str,
             continue
         old = prev.get(code)
         if old is not None and abs(old - sh) < 1e-6:
-            continue                                  # 未变化,不写
-        out.append({
-            "code": code,
-            "name": str(x.get("SECURITY_NAME_ABBR") or ""),
-            "observed_on": observed_on,
-            "prev_sample": prev_sample,
-            "total_shares": sh,
-            "prev_shares": old,
-            "free_shares": _f(x.get("FREE_SHARES_A")),
-            "close": _f(x.get("CLOSE_PRICE")),
-            "market_cap": _f(x.get("TOTAL_MARKET_CAP")),
-            "kind": "first_seen" if old is None else "change",
-        })
+            continue  # 未变化,不写
+        out.append(
+            {
+                "code": code,
+                "name": str(x.get("SECURITY_NAME_ABBR") or ""),
+                "observed_on": observed_on,
+                "prev_sample": prev_sample,
+                "total_shares": sh,
+                "prev_shares": old,
+                "free_shares": _f(x.get("FREE_SHARES_A")),
+                "close": _f(x.get("CLOSE_PRICE")),
+                "market_cap": _f(x.get("TOTAL_MARKET_CAP")),
+                "kind": "first_seen" if old is None else "change",
+            }
+        )
     return out
 
 
-def build_from_tdx(codes: list[str], *, progress_every: int = 200,
-                   refresh: bool = False) -> list[dict]:
+def build_from_tdx(
+    codes: list[str], *, progress_every: int = 200, refresh: bool = False
+) -> list[dict]:
     """**本地 TDX 路径**：从通达信 xdxr 权息数据提取股本变动全史 → 同一事件契约。
 
     owner 原则「尽量用本地 TDX 接口，HTTP 不稳定」（2026-08-04）。这条路比东财优越
@@ -270,7 +296,10 @@ def build_from_tdx(codes: list[str], *, progress_every: int = 200,
     # （`adjust_factors` 与 `local_tdx.adjust_factors`），`AdjustError` 就成了两个
     # 不同的类，下面的 except 静默失效、异常直接穿透上抛。
     # 包式绝对导入：脚本与包两种模式同一份模块对象（custos 可编辑安装）。
-    from custos.datasource.local_tdx.adjust_factors import AdjustError, get_shares_events
+    from custos.datasource.local_tdx.adjust_factors import (
+        AdjustError,
+        get_shares_events,
+    )
 
     events: list[dict] = []
     failed = 0
@@ -288,24 +317,29 @@ def build_from_tdx(codes: list[str], *, progress_every: int = 200,
             if not ts or ts <= 0:
                 continue
             if prev is not None and abs(prev - ts) < 1e-6:
-                continue                                        # 未变化，不写
-            events.append({
-                "code": code,
-                "name": "",                                     # xdxr 不含名称
-                "observed_on": e["date"],                       # 精确变动日
-                "prev_sample": None,
-                "total_shares": float(ts),
-                "prev_shares": prev,
-                "free_shares": e.get("float_shares"),
-                "close": None,                                  # xdxr 不含价格
-                "market_cap": None,
-                "kind": "first_seen" if prev is None else "change",
-                "source": "tdx_xdxr",
-            })
+                continue  # 未变化，不写
+            events.append(
+                {
+                    "code": code,
+                    "name": "",  # xdxr 不含名称
+                    "observed_on": e["date"],  # 精确变动日
+                    "prev_sample": None,
+                    "total_shares": float(ts),
+                    "prev_shares": prev,
+                    "free_shares": e.get("float_shares"),
+                    "close": None,  # xdxr 不含价格
+                    "market_cap": None,
+                    "kind": "first_seen" if prev is None else "change",
+                    "source": "tdx_xdxr",
+                }
+            )
             prev = float(ts)
         if progress_every and i % progress_every == 0:
-            print(f"[tdx] {i} 只 | 事件 {len(events)} | 失败 {failed}",
-                  file=sys.stderr, flush=True)
+            print(
+                f"[tdx] {i} 只 | 事件 {len(events)} | 失败 {failed}",
+                file=sys.stderr,
+                flush=True,
+            )
     if failed:
         print(f"[WARN] {failed} 只股本取数失败（这些票没有股本事件）", file=sys.stderr)
     return events
@@ -322,20 +356,33 @@ def fetch_equity_history(code: str, session=None, timeout: int = 15) -> list[dic
         rows: list[dict] = []
         page = 1
         while True:
-            r = s.get(EM_F10_EQUITY_API, params={
-                "reportName": "RPT_F10_EH_EQUITY", "columns": "ALL",
-                "filter": f'(SECURITY_CODE="{code}")',
-                "pageNumber": page, "pageSize": 100,
-                "sortTypes": 1, "sortColumns": "END_DATE"},
-                timeout=timeout, headers={"User-Agent": "Mozilla/5.0"})
+            r = s.get(
+                EM_F10_EQUITY_API,
+                params={
+                    "reportName": "RPT_F10_EH_EQUITY",
+                    "columns": "ALL",
+                    "filter": f'(SECURITY_CODE="{code}")',
+                    "pageNumber": page,
+                    "pageSize": 100,
+                    "sortTypes": 1,
+                    "sortColumns": "END_DATE",
+                },
+                timeout=timeout,
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
             d = r.json().get("result") or {}
             for x in d.get("data") or []:
                 d10 = str(x.get("END_DATE") or "")[:10]
                 ts = x.get("TOTAL_SHARES")
                 if d10 and ts:
-                    rows.append({"observed_on": d10, "total_shares": float(ts),
-                                 "kind": str(x.get("CHANGE_REASON") or ""),
-                                 "name": str(x.get("SECURITY_NAME_ABBR") or "")})
+                    rows.append(
+                        {
+                            "observed_on": d10,
+                            "total_shares": float(ts),
+                            "kind": str(x.get("CHANGE_REASON") or ""),
+                            "name": str(x.get("SECURITY_NAME_ABBR") or ""),
+                        }
+                    )
             if page >= int(d.get("pages") or 1):
                 break
             page += 1
@@ -344,9 +391,14 @@ def fetch_equity_history(code: str, session=None, timeout: int = 15) -> list[dic
         return []
 
 
-def backfill_equity_history(codes: list[str], before: str = MV_START,
-                            out_path: str | Path = LEDGER, limit: int = 0,
-                            progress: int = 200, session=None) -> dict:
+def backfill_equity_history(
+    codes: list[str],
+    before: str = MV_START,
+    out_path: str | Path = LEDGER,
+    limit: int = 0,
+    progress: int = 200,
+    session=None,
+) -> dict:
     """把 before 之前的股本事件回填进台账(merge_write 原子去重)。
     返回 {added, failed, codes}。单只失败不中断。绝不 raise。"""
     session = session or requests.Session()
@@ -361,15 +413,28 @@ def backfill_equity_history(codes: list[str], before: str = MV_START,
             rows = fetch_equity_history(c, session=session)
             for r in rows:
                 if r["observed_on"] < before:
-                    events.append({"code": c, "name": r["name"], "observed_on": r["observed_on"],
-                                   "prev_sample": None, "total_shares": r["total_shares"],
-                                   "prev_shares": None, "free_shares": None,
-                                   "close": None, "market_cap": None,
-                                   "kind": r["kind"] or "backfill_f10"})
+                    events.append(
+                        {
+                            "code": c,
+                            "name": r["name"],
+                            "observed_on": r["observed_on"],
+                            "prev_sample": None,
+                            "total_shares": r["total_shares"],
+                            "prev_shares": None,
+                            "free_shares": None,
+                            "close": None,
+                            "market_cap": None,
+                            "kind": r["kind"] or "backfill_f10",
+                        }
+                    )
         except Exception:  # noqa: BLE001
             failed += 1
         if progress and n % progress == 0:
-            print(f"[backfill] {n} 只 | 事件 {len(events)} | 失败 {failed}", file=sys.stderr, flush=True)
+            print(
+                f"[backfill] {n} 只 | 事件 {len(events)} | 失败 {failed}",
+                file=sys.stderr,
+                flush=True,
+            )
     res = merge_write(events, out_path) if events else {"added": 0}
     return {"added": res["added"], "failed": failed, "codes": min(n, limit or n)}
 
@@ -393,8 +458,10 @@ def merge_write(events: list[dict], path: str | Path = LEDGER) -> dict:
         existing[(e["code"], e["observed_on"])] = e
     rows = sorted(existing.values(), key=lambda r: (r["observed_on"], r["code"]))
     tmp = path.with_suffix(".jsonl.tmp")
-    tmp.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n",
-                   encoding="utf-8")
+    tmp.write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n",
+        encoding="utf-8",
+    )
     tmp.replace(path)
     return {"before": before, "after": len(rows), "added": len(rows) - before}
 
@@ -413,7 +480,9 @@ def load_events(path: str | Path = LEDGER) -> list[dict]:
     return out
 
 
-def shares_as_of(events: list[dict], day: str, code: str | None = None) -> dict[str, dict]:
+def shares_as_of(
+    events: list[dict], day: str, code: str | None = None
+) -> dict[str, dict]:
     """截至 day 的总股本,按 code 返回最后一个 `observed_on <= day` 的事件。
 
     ⚠️ 分辨率:采样间隔内发生的变动只会被**延后**观测到,故此处返回的可能是变动前的旧股本
@@ -433,8 +502,9 @@ def shares_as_of(events: list[dict], day: str, code: str | None = None) -> dict[
     return best
 
 
-def market_cap(events: list[dict], day: str, closes: dict[str, float],
-               code: str | None = None) -> dict[str, dict]:
+def market_cap(
+    events: list[dict], day: str, closes: dict[str, float], code: str | None = None
+) -> dict[str, dict]:
     """市值 = 截至 day 的总股本 × 当日收盘价。closes: {code: close}(由价格链提供)。
 
     不直接用事件里的 `market_cap` 字段:那是**采样日**的市值,不是查询日的。
@@ -446,10 +516,14 @@ def market_cap(events: list[dict], day: str, closes: dict[str, float],
         px = closes.get(c)
         if px is None or e.get("total_shares") is None:
             continue
-        out[c] = {"code": c, "shares": e["total_shares"], "close": float(px),
-                  "market_cap": e["total_shares"] * float(px),
-                  "shares_observed_on": e.get("observed_on"),
-                  "shares_prev_sample": e.get("prev_sample")}
+        out[c] = {
+            "code": c,
+            "shares": e["total_shares"],
+            "close": float(px),
+            "market_cap": e["total_shares"] * float(px),
+            "shares_observed_on": e.get("observed_on"),
+            "shares_prev_sample": e.get("prev_sample"),
+        }
     return out
 
 
@@ -467,48 +541,73 @@ def verify(events: list[dict], samples: list[str]) -> dict:
     obs = sorted({e.get("observed_on") for e in events if e.get("observed_on")})
     out = {
         "ok": not early,
-        "n_events": len(events), "n_codes": len(codes),
-        "n_first_seen": len(firsts), "n_changes": len(changes),
+        "n_events": len(events),
+        "n_codes": len(codes),
+        "n_first_seen": len(firsts),
+        "n_changes": len(changes),
         "n_samples_recorded": len(samples),
-        "first_obs": obs[0] if obs else None, "last_obs": obs[-1] if obs else None,
+        "first_obs": obs[0] if obs else None,
+        "last_obs": obs[-1] if obs else None,
         "n_before_mv_start": len(early),
     }
-    lines = [f"股本事件 {len(events)} 条 / 覆盖 {len(codes)} 只;"
-             f"首见 {len(firsts)} + 变动 {len(changes)};"
-             f"观测区间 {out['first_obs']} ~ {out['last_obs']};已采样 {len(samples)} 个日期"]
+    lines = [
+        f"股本事件 {len(events)} 条 / 覆盖 {len(codes)} 只;"
+        f"首见 {len(firsts)} + 变动 {len(changes)};"
+        f"观测区间 {out['first_obs']} ~ {out['last_obs']};已采样 {len(samples)} 个日期"
+    ]
     if early:
-        lines.append(f"  ⚠️ {len(early)} 条事件早于 MV_START({MV_START}) —— 数据源在该日前无数据,可疑")
+        lines.append(
+            f"  ⚠️ {len(early)} 条事件早于 MV_START({MV_START}) —— 数据源在该日前无数据,可疑"
+        )
     else:
         lines.append(f"  ✅ 无早于 MV_START({MV_START}) 的事件")
     if changes:
-        lines.append(f"  股本变动率:{len(changes)}/{len(codes)} = 每只平均 "
-                     f"{len(changes) / max(len(codes), 1):.2f} 次变动")
-    lines.append("  注:采样间隔内的变动只会被延后观测到(stale 而非 look-ahead);"
-                 "精度由事件行的 prev_sample~observed_on 界定")
+        lines.append(
+            f"  股本变动率:{len(changes)}/{len(codes)} = 每只平均 "
+            f"{len(changes) / max(len(codes), 1):.2f} 次变动"
+        )
+    lines.append(
+        "  注:采样间隔内的变动只会被延后观测到(stale 而非 look-ahead);"
+        "精度由事件行的 prev_sample~observed_on 界定"
+    )
     out["text"] = "\n".join(lines)
     return out
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="真市值/总股本:按交易日取数,压成股本变动事件")
+    ap = argparse.ArgumentParser(
+        description="真市值/总股本:按交易日取数,压成股本变动事件"
+    )
     ap.add_argument("--dates", nargs="*", help="交易日,如 2024-06-28(可多个)")
     ap.add_argument("--since", type=int, help="从该年起按 --freq 采样")
-    ap.add_argument("--freq", choices=["month", "week", "day"], default="month",
-                    help="采样频率(默认 month:约 100 次调用覆盖 2018~今)")
+    ap.add_argument(
+        "--freq",
+        choices=["month", "week", "day"],
+        default="month",
+        help="采样频率(默认 month:约 100 次调用覆盖 2018~今)",
+    )
     ap.add_argument("--out", default=str(LEDGER))
     ap.add_argument("--samples-out", default=str(SAMPLES))
     ap.add_argument("--as-of", help="查询该日的总股本(不拉网络)")
     ap.add_argument("--code", help="配合 --as-of 限定单只")
     ap.add_argument("--verify", action="store_true", help="自检(有问题 exit 1)")
-    ap.add_argument("--backfill-history", action="store_true",
-                    help=f"回填 {MV_START} 之前的股本变动史(东财 F10 全史含增发;补 2015-2017 市值缺口)")
+    ap.add_argument(
+        "--backfill-history",
+        action="store_true",
+        help=f"回填 {MV_START} 之前的股本变动史(东财 F10 全史含增发;补 2015-2017 市值缺口)",
+    )
     ap.add_argument("--limit", type=int, default=0, help="只处理前 N 只(排障用)")
-    ap.add_argument("--from-tdx", action="store_true",
-                    help="**本地 TDX 路径**(推荐):从通达信 xdxr 提取股本变动全史。"
-                         "契约天然匹配(xdxr 的 category=5 本身就是事件流),"
-                         "且 observed_on 是精确变动日而非月频采样区间。"
-                         "代价:不含 close/market_cap/name(需自己乘收盘价)")
-    ap.add_argument("--codes", default="", help="配合 --from-tdx:逗号分隔;留空=本地全市场")
+    ap.add_argument(
+        "--from-tdx",
+        action="store_true",
+        help="**本地 TDX 路径**(推荐):从通达信 xdxr 提取股本变动全史。"
+        "契约天然匹配(xdxr 的 category=5 本身就是事件流),"
+        "且 observed_on 是精确变动日而非月频采样区间。"
+        "代价:不含 close/market_cap/name(需自己乘收盘价)",
+    )
+    ap.add_argument(
+        "--codes", default="", help="配合 --from-tdx:逗号分隔;留空=本地全市场"
+    )
     args = ap.parse_args(argv)
 
     if args.from_tdx:
@@ -517,32 +616,45 @@ def main(argv=None) -> int:
         else:
             try:
                 from custos.datasource.local_tdx import local_tdx_data
+
                 codes = sorted(local_tdx_data.list_local_vipdoc_codes())
-            except Exception as e:                             # noqa: BLE001
+            except Exception as e:  # noqa: BLE001
                 print(f"[ERR] 读不到本地代码表: {e}", file=sys.stderr)
                 return 2
         try:
             from custos.core.code_utils import is_index
-            codes = [c for c in codes if not is_index(c)]       # 指数没有股本
-        except Exception:                                      # noqa: BLE001, S110
+
+            codes = [c for c in codes if not is_index(c)]  # 指数没有股本
+        except Exception:  # noqa: BLE001, S110
             pass
         if args.limit:
-            codes = codes[:args.limit]
+            codes = codes[: args.limit]
         evs = build_from_tdx(codes)
         res = merge_write(evs, args.out) if evs else {"added": 0}
-        print(json.dumps({"source": "tdx_xdxr", "codes": len(codes),
-                          "events": len(evs), **res}, ensure_ascii=False))
+        print(
+            json.dumps(
+                {"source": "tdx_xdxr", "codes": len(codes), "events": len(evs), **res},
+                ensure_ascii=False,
+            )
+        )
         return 0
 
     out_path, sp_path = Path(args.out), Path(args.samples_out)
 
     if args.backfill_history:
         from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
+
         codes = local_tdx_data.list_local_vipdoc_codes()
-        print(f"[INFO] 回填 {MV_START} 前股本史: universe {len(codes)} 只", file=sys.stderr)
-        res = backfill_equity_history(codes, before=MV_START, out_path=out_path,
-                                      limit=args.limit)
-        print(f"[OK] 回填完成: +{res['added']} 事件(失败 {res['failed']} 只) → {out_path}")
+        print(
+            f"[INFO] 回填 {MV_START} 前股本史: universe {len(codes)} 只",
+            file=sys.stderr,
+        )
+        res = backfill_equity_history(
+            codes, before=MV_START, out_path=out_path, limit=args.limit
+        )
+        print(
+            f"[OK] 回填完成: +{res['added']} 事件(失败 {res['failed']} 只) → {out_path}"
+        )
         return 0 if res["added"] or res["failed"] == 0 else 2
 
     def _samples() -> dict:
@@ -552,8 +664,10 @@ def main(argv=None) -> int:
             try:
                 data = json.loads(sp_path.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
-                    return {"sampled": data.get("sampled") or [],
-                            "empty": data.get("empty") or []}
+                    return {
+                        "sampled": data.get("sampled") or [],
+                        "empty": data.get("empty") or [],
+                    }
             except ValueError:
                 pass
         return {"sampled": [], "empty": []}
@@ -574,13 +688,18 @@ def main(argv=None) -> int:
             print(f"[ERR] 股本事件台账为空: {out_path}", file=sys.stderr)
             return 2
         if before_mv_start(args.as_of):
-            print(f"[ERR] {args.as_of} 早于市值数据起点 {MV_START},无数据", file=sys.stderr)
+            print(
+                f"[ERR] {args.as_of} 早于市值数据起点 {MV_START},无数据",
+                file=sys.stderr,
+            )
             return 2
         got = shares_as_of(events, args.as_of, code=args.code)
         print(f"截至 {args.as_of}:{len(got)} 只有股本记录")
         for c, e in sorted(got.items())[:20]:
-            print(f"  {c} {e.get('name', ''):<8} 总股本={e['total_shares'] / 1e8:.2f}亿股 "
-                  f"(观测于 {e['observed_on']}, 上次采样 {e.get('prev_sample')})")
+            print(
+                f"  {c} {e.get('name', ''):<8} 总股本={e['total_shares'] / 1e8:.2f}亿股 "
+                f"(观测于 {e['observed_on']}, 上次采样 {e.get('prev_sample')})"
+            )
         if len(got) > 20:
             print(f"  ...(共 {len(got)} 只)")
         return 0
@@ -590,7 +709,9 @@ def main(argv=None) -> int:
         dates += sample_dates(args.since, freq=args.freq)
     dates = sorted(set(d for d in dates if not before_mv_start(d)))
     if not dates:
-        ap.error(f"需提供 --dates 或 --since(且不早于 {MV_START}),或用 --as-of / --verify")
+        ap.error(
+            f"需提供 --dates 或 --since(且不早于 {MV_START}),或用 --as-of / --verify"
+        )
 
     # 以台账里已有的最后状态为起点,避免重复写事件
     events = load_events(out_path)
@@ -611,17 +732,22 @@ def main(argv=None) -> int:
         if last_sample is not None and d < last_sample:
             # 乱序补采会拿台账**最终股本**当 prev:diff 基准错误、且会覆盖原事件的
             # prev_sample/prev_shares 元数据。拒绝比写错好 —— 要补只能清空台账按时间序重放。
-            print(f"[WARN] {d} 早于已采样末日 {last_sample},拒绝乱序补采"
-                  f"(prev 基准会是台账最终股本,diff 与元数据都会错);"
-                  f"如需补采请清空台账与采样记录后按时间序重放", file=sys.stderr)
+            print(
+                f"[WARN] {d} 早于已采样末日 {last_sample},拒绝乱序补采"
+                f"(prev 基准会是台账最终股本,diff 与元数据都会错);"
+                f"如需补采请清空台账与采样记录后按时间序重放",
+                file=sys.stderr,
+            )
             continue
         try:
             rows = fetch_trade_date(d, session=session)
         except FetchIncomplete as exc:
             # 整日丢弃：既不写事件、也不记入 sampled/empty，下次重跑会重新采这一天。
             # 残缺行进 diff 会把「没返回」当「股本未变」，污染台账且 verify 查不出来。
-            print(f"[WARN] {d} 分页残缺，整日丢弃不落盘（下次重跑会重采）: {exc}",
-                  file=sys.stderr)
+            print(
+                f"[WARN] {d} 分页残缺，整日丢弃不落盘（下次重跑会重采）: {exc}",
+                file=sys.stderr,
+            )
             continue
         except Exception as exc:  # noqa: BLE001
             print(f"[WARN] {d} 拉取失败: {exc}", file=sys.stderr)
@@ -638,17 +764,32 @@ def main(argv=None) -> int:
         sampled.append(d)
         last_sample = d
         n_new = sum(1 for e in evs if e["kind"] == "first_seen")
-        print(f"[OK] {d}: 全市场 {len(rows)} 只 → 事件 {len(evs)} 条"
-              f"(首见 {n_new} / 变动 {len(evs) - n_new}), 台账 {res['after']} 条")
+        print(
+            f"[OK] {d}: 全市场 {len(rows)} 只 → 事件 {len(evs)} 条"
+            f"(首见 {n_new} / 变动 {len(evs) - n_new}), 台账 {res['after']} 条"
+        )
 
     sp_path.parent.mkdir(parents=True, exist_ok=True)
-    sp_path.write_text(json.dumps({"sampled": sorted(set(sampled)),
-                                   "empty": sorted(known_empty), "freq": args.freq,
-                                   "mv_start": MV_START}, ensure_ascii=False, indent=2),
-                       encoding="utf-8")
+    sp_path.write_text(
+        json.dumps(
+            {
+                "sampled": sorted(set(sampled)),
+                "empty": sorted(known_empty),
+                "freq": args.freq,
+                "mv_start": MV_START,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     print(f"\n[OK] 共新增 {total} 条事件 → {out_path}")
-    print(f"     采样记录 {len(set(sampled))} 个日期(+{len(known_empty)} 个已知空日期) → {sp_path}")
-    print("提示:市值请用 market_cap()(股本 × 查询日收盘价),勿直接用事件里采样日的 market_cap 字段")
+    print(
+        f"     采样记录 {len(set(sampled))} 个日期(+{len(known_empty)} 个已知空日期) → {sp_path}"
+    )
+    print(
+        "提示:市值请用 market_cap()(股本 × 查询日收盘价),勿直接用事件里采样日的 market_cap 字段"
+    )
     return 0
 
 

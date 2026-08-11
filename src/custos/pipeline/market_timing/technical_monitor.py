@@ -9,6 +9,7 @@ Computes:
 
 Input can be TDX local vipdoc daily file by code, or future TQ Kline.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -28,18 +29,32 @@ import pandas as pd
 # 2026-08-07 架构审查：以下 7 个纯指标函数已下移到 `indicators`（底层）——
 # 它们此前定义在本模块，却被 factors/（底层）与 screening/ 跨层调用，
 # 构成「底层依赖决策层」的分层反转。本模块自己也用它们，故导入回来。
-from custos.core.indicators import (bbi_series,  # noqa: E402
-                        resample, kdj, macd, bbi_state, zhixing_state,
-                        _infer_price_limit)
+from custos.core.indicators import (
+    bbi_series,  # noqa: E402
+    resample,
+    kdj,
+    macd,
+    bbi_state,
+    zhixing_state,
+    _infer_price_limit,
+)
 from custos.core.indicators import ema  # noqa: E402  包 API 面：market_timing/__init__ re-export
-__all__ = ["ema"]  # re-export 声明（pylint 依此识别非残留），无 star-import 故不影响其他名字
+
+__all__ = [
+    "ema"
+]  # re-export 声明（pylint 依此识别非残留），无 star-import 故不影响其他名字
 
 from custos.core.paths import TDX_ROOT, MARKET_DIR  # noqa: E402
 from custos.core.code_utils import norm_code, split_code  # noqa: E402
 from custos.core.indicators import amplitude_pct as amplitude_pct_of  # noqa: E402
-from custos.core.b1_thresholds import (REVERSAL_AMPLITUDE_PCT,  # noqa: E402
-                           REVERSAL_CHANGE_MAX_PCT, REVERSAL_CHANGE_MIN_PCT,
-                           VOL_PCTILE_MAX, VOL_RATIO_MAX, change_in_range)
+from custos.core.b1_thresholds import (
+    REVERSAL_AMPLITUDE_PCT,  # noqa: E402
+    REVERSAL_CHANGE_MAX_PCT,
+    REVERSAL_CHANGE_MIN_PCT,
+    VOL_PCTILE_MAX,
+    VOL_RATIO_MAX,
+    change_in_range,
+)
 
 OUT_DIR = MARKET_DIR
 
@@ -50,6 +65,7 @@ def _read_vipdoc_mootdx(tdx_code: str) -> pd.DataFrame:
     raw = f"{prefix}{code}"
     try:
         from mootdx.reader import Reader
+
         reader = Reader.factory(market="std", tdxdir=str(TDX_ROOT))
         df = reader.daily(symbol=raw)
         if df is None or len(df) == 0:
@@ -98,7 +114,7 @@ def box(df: pd.DataFrame, n: int) -> dict[str, Any]:
 def slope(vals: pd.Series, n: int) -> float | None:
     if len(vals) < n + 1:
         return None
-    prev = float(vals.iloc[-n-1])
+    prev = float(vals.iloc[-n - 1])
     now = float(vals.iloc[-1])
     if prev == 0:
         return None
@@ -119,7 +135,11 @@ def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
     low = float(current["low"])
     volume = float(current["volume"])
     volume_ma5 = float(x["volume"].iloc[-6:-1].mean())
-    volume_ma20 = float(x["volume"].iloc[-21:-1].mean()) if len(x) >= 21 else float(x["volume"].iloc[:-1].tail(20).mean())
+    volume_ma20 = (
+        float(x["volume"].iloc[-21:-1].mean())
+        if len(x) >= 21
+        else float(x["volume"].iloc[:-1].tail(20).mean())
+    )
     change_pct = (close / previous_close - 1) * 100 if previous_close else None
     # ⚠️ 口径 2026-08-10 由 `(high/low - 1)` 改为 **`(high-low)/前收`**（owner 拍板）。
     #    前者分母是**当日最低价**，与治理文档明文（01_swing_rules §反转K）及另两处
@@ -135,24 +155,45 @@ def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
         row = x.iloc[i]
         prev_close = float(x.iloc[i - 1]["close"])
         day_change = (float(row["close"]) / prev_close - 1) * 100 if prev_close else 0
-        body = (float(row["close"]) / float(row["open"]) - 1) * 100 if float(row["open"]) else 0
-        return {"bull": float(row["close"]) > float(row["open"]), "change_pct": round(day_change, 4), "body_pct": round(body, 4)}
+        body = (
+            (float(row["close"]) / float(row["open"]) - 1) * 100
+            if float(row["open"])
+            else 0
+        )
+        return {
+            "bull": float(row["close"]) > float(row["open"]),
+            "change_pct": round(day_change, 4),
+            "body_pct": round(body, 4),
+        }
 
     latest_bulls = [bull_metrics(-2), bull_metrics(-1)]
-    small_bear = close < open_ and change_pct is not None and -2 <= change_pct < 0 and body_pct is not None and body_pct <= 2
-    shrink_small_bear = bool(small_bear and volume_ratio_5 is not None and volume_ratio_5 <= 0.8)
+    small_bear = (
+        close < open_
+        and change_pct is not None
+        and -2 <= change_pct < 0
+        and body_pct is not None
+        and body_pct <= 2
+    )
+    shrink_small_bear = bool(
+        small_bear and volume_ratio_5 is not None and volume_ratio_5 <= 0.8
+    )
     large_bear = bool(change_pct is not None and change_pct <= -4 and close < open_)
-    heavy_large_bear = bool(large_bear and volume_ratio_5 is not None and volume_ratio_5 >= 1.5)
+    heavy_large_bear = bool(
+        large_bear and volume_ratio_5 is not None and volume_ratio_5 >= 1.5
+    )
     # `volume_rank20` 是 0~1 的比例，`VOL_PCTILE_MAX` 的单位是 %（10.0）—— 故 /100。
     extreme_shrink = bool(
-        volume_ratio_5 is not None and volume_ratio_5 <= VOL_RATIO_MAX
+        volume_ratio_5 is not None
+        and volume_ratio_5 <= VOL_RATIO_MAX
         and volume_rank20 <= VOL_PCTILE_MAX / 100
     )
     # ⚠️ 阈值来自 `b1_thresholds`（L0 单一来源）—— 原先硬编码 `-2 <= change_pct <= 2`
     #    与 `amplitude_pct <= 7`，于是 `B1_REVK_*` 只对选股链生效、持仓链无视配置。
     reversal_k_candidate = bool(
-        extreme_shrink and change_in_range(change_pct)
-        and amplitude_pct is not None and amplitude_pct <= REVERSAL_AMPLITUDE_PCT
+        extreme_shrink
+        and change_in_range(change_pct)
+        and amplitude_pct is not None
+        and amplitude_pct <= REVERSAL_AMPLITUDE_PCT
     )
 
     # BBI上方连续两根中大阳线判断 (B1第五层止盈)
@@ -160,7 +201,11 @@ def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
     medium_large_threshold = price_limit / 2  # 半个涨停幅度
     bbi_val = bbi_series(df["close"])
     bbi_latest = float(bbi_val.iloc[-1]) if bbi_val.notna().any() else None
-    bbi_prev = float(bbi_val.iloc[-2]) if len(bbi_val) >= 2 and bbi_val.notna().iloc[-2] else None
+    bbi_prev = (
+        float(bbi_val.iloc[-2])
+        if len(bbi_val) >= 2 and bbi_val.notna().iloc[-2]
+        else None
+    )
     close_prev = float(x["close"].iloc[-2])
     above_bbi_now = bbi_latest is not None and close >= bbi_latest
     above_bbi_prev = bbi_prev is not None and close_prev >= bbi_prev
@@ -169,9 +214,17 @@ def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
     if bbi_latest is not None and bbi_prev is not None:
         bull_today = latest_bulls[-1]
         bull_prev = latest_bulls[-2]
-        today_qualifies = bull_today["bull"] and (bull_today["change_pct"] >= medium_large_threshold or bull_today["body_pct"] >= medium_large_threshold)
-        prev_qualifies = bull_prev["bull"] and (bull_prev["change_pct"] >= medium_large_threshold or bull_prev["body_pct"] >= medium_large_threshold)
-        two_medium_large_bull = bool(above_bbi_now and above_bbi_prev and today_qualifies and prev_qualifies)
+        today_qualifies = bull_today["bull"] and (
+            bull_today["change_pct"] >= medium_large_threshold
+            or bull_today["body_pct"] >= medium_large_threshold
+        )
+        prev_qualifies = bull_prev["bull"] and (
+            bull_prev["change_pct"] >= medium_large_threshold
+            or bull_prev["body_pct"] >= medium_large_threshold
+        )
+        two_medium_large_bull = bool(
+            above_bbi_now and above_bbi_prev and today_qualifies and prev_qualifies
+        )
         two_medium_large_bull_reason = (
             f"涨跌幅限制={price_limit}%，中大阳门槛={medium_large_threshold}%；"
             f"T-1阳={bull_prev['bull']}/涨幅{bull_prev['change_pct']}%/实体{bull_prev['body_pct']}%，"
@@ -186,8 +239,12 @@ def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
         "change_pct": round(change_pct, 4) if change_pct is not None else None,
         "amplitude_pct": round(amplitude_pct, 4) if amplitude_pct is not None else None,
         "body_pct": round(body_pct, 4) if body_pct is not None else None,
-        "volume_ratio_5": round(volume_ratio_5, 4) if volume_ratio_5 is not None else None,
-        "volume_ratio_20": round(volume_ratio_20, 4) if volume_ratio_20 is not None else None,
+        "volume_ratio_5": round(volume_ratio_5, 4)
+        if volume_ratio_5 is not None
+        else None,
+        "volume_ratio_20": round(volume_ratio_20, 4)
+        if volume_ratio_20 is not None
+        else None,
         "volume_rank20_pct": round(volume_rank20 * 100, 4),
         "close_raised": bool(close > previous_close),
         "shrink_small_bear": shrink_small_bear,
@@ -209,14 +266,22 @@ def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
             #    环境变量一改它就在谎报自己的阈值。
             "reversal_volume_ratio_5_max": VOL_RATIO_MAX,
             "reversal_volume_rank20_pct_max": VOL_PCTILE_MAX,
-            "reversal_close_change_pct": [REVERSAL_CHANGE_MIN_PCT, REVERSAL_CHANGE_MAX_PCT],
+            "reversal_close_change_pct": [
+                REVERSAL_CHANGE_MIN_PCT,
+                REVERSAL_CHANGE_MAX_PCT,
+            ],
             "reversal_amplitude_pct_max": REVERSAL_AMPLITUDE_PCT,
         },
     }
 
 
-def n_structure_state(df: pd.DataFrame, left: int = 3, right: int = 3,
-                      lookback: int = 90, stale_breach_bars: int = 10) -> dict[str, Any]:
+def n_structure_state(
+    df: pd.DataFrame,
+    left: int = 3,
+    right: int = 3,
+    lookback: int = 90,
+    stale_breach_bars: int = 10,
+) -> dict[str, Any]:
     """Find the latest rising-N structure using confirmed closing-price pivots.
 
     L1 is the major closing low, H1 the rebound closing high, and L2 the
@@ -234,11 +299,17 @@ def n_structure_state(df: pd.DataFrame, left: int = 3, right: int = 3,
     pivot_highs: list[int] = []
     search_start = max(left, len(x) - max(lookback, left + right + 8))
     for i in range(search_start, len(x) - right):
-        close_window = x["close"].iloc[i-left:i+right+1]
+        close_window = x["close"].iloc[i - left : i + right + 1]
         close = float(x.at[i, "close"])
-        if close == float(close_window.min()) and int((close_window == close).sum()) == 1:
+        if (
+            close == float(close_window.min())
+            and int((close_window == close).sum()) == 1
+        ):
             pivot_lows.append(i)
-        if close == float(close_window.max()) and int((close_window == close).sum()) == 1:
+        if (
+            close == float(close_window.max())
+            and int((close_window == close).sum()) == 1
+        ):
             pivot_highs.append(i)
 
     latest = None
@@ -253,7 +324,9 @@ def n_structure_state(df: pd.DataFrame, left: int = 3, right: int = 3,
         h1 = max(highs, key=lambda i: float(x.at[i, "close"]))
         if float(x.at[l2, "close"]) <= float(x.at[l1, "close"]):
             continue
-        breakout_rows = x.index[(x.index > l2) & (x["close"] > float(x.at[h1, "close"]))]
+        breakout_rows = x.index[
+            (x.index > l2) & (x["close"] > float(x.at[h1, "close"]))
+        ]
         breakout = int(breakout_rows[0]) if len(breakout_rows) else None
         latest = (l1, h1, l2, breakout)
         break
@@ -265,17 +338,24 @@ def n_structure_state(df: pd.DataFrame, left: int = 3, right: int = 3,
     origin_low = float(x.at[l1, "close"])
     pullback_low = float(x.at[l2, "close"])
     swing_high = float(x.at[h1, "close"])
-    origin_extreme_low = float(x["low"].iloc[max(0,l1-left):min(len(x),l1+right+1)].min())
+    origin_extreme_low = float(
+        x["low"].iloc[max(0, l1 - left) : min(len(x), l1 + right + 1)].min()
+    )
     distance_pct = (current_close / origin_low - 1) * 100 if origin_low else None
     # 破位新鲜度：L2 之后首次收盘跌破 L1 的位置；破位过久(> stale_breach_bars)视为陈旧结构
     breach_rows = x.index[(x.index > l2) & (x["close"] < origin_low)]
     first_breach = int(breach_rows[0]) if len(breach_rows) else None
     breach_bars_ago = (len(x) - 1 - first_breach) if first_breach is not None else None
     currently_breached = current_close < origin_low
-    stale = bool(currently_breached and breach_bars_ago is not None and breach_bars_ago > stale_breach_bars)
+    stale = bool(
+        currently_breached
+        and breach_bars_ago is not None
+        and breach_bars_ago > stale_breach_bars
+    )
     return {
         "available": True,
-        "pattern": "L1-H1-higher_L2" + ("-breakout" if breakout is not None else "-candidate"),
+        "pattern": "L1-H1-higher_L2"
+        + ("-breakout" if breakout is not None else "-candidate"),
         "status": "confirmed" if breakout is not None else "candidate",
         "prior_low": round(origin_low, 4),
         "prior_low_date": x.at[l1, "date"].strftime("%Y-%m-%d"),
@@ -284,22 +364,31 @@ def n_structure_state(df: pd.DataFrame, left: int = 3, right: int = 3,
         "breakout_level_date": x.at[h1, "date"].strftime("%Y-%m-%d"),
         "pullback_low": round(pullback_low, 4),
         "pullback_low_date": x.at[l2, "date"].strftime("%Y-%m-%d"),
-        "confirmed_date": x.at[breakout, "date"].strftime("%Y-%m-%d") if breakout is not None else None,
+        "confirmed_date": x.at[breakout, "date"].strftime("%Y-%m-%d")
+        if breakout is not None
+        else None,
         "current_close": round(current_close, 4),
         "distance_pct": round(distance_pct, 4) if distance_pct is not None else None,
         "close_above": bool(current_close >= origin_low),
         "breached_on_close": bool(currently_breached),
         "pullback_breached_on_close": bool(current_close < pullback_low),
         "breach_bars_ago": breach_bars_ago,
-        "first_breach_date": x.at[first_breach, "date"].strftime("%Y-%m-%d") if first_breach is not None else None,
+        "first_breach_date": x.at[first_breach, "date"].strftime("%Y-%m-%d")
+        if first_breach is not None
+        else None,
         "stale": stale,
         "fresh_breach": bool(currently_breached and not stale),
         "pivot_window": {"left": left, "right": right, "lookback": lookback},
     }
 
 
-def descending_n_structure_state(df: pd.DataFrame, left: int = 3, right: int = 3,
-                                 lookback: int = 90, stale_breach_bars: int = 10) -> dict[str, Any]:
+def descending_n_structure_state(
+    df: pd.DataFrame,
+    left: int = 3,
+    right: int = 3,
+    lookback: int = 90,
+    stale_breach_bars: int = 10,
+) -> dict[str, Any]:
     """Find the latest descending-N structure using confirmed closing-price pivots.
 
     Descending N: H1 -> L1 -> lower H2 -> close below L1.
@@ -319,11 +408,17 @@ def descending_n_structure_state(df: pd.DataFrame, left: int = 3, right: int = 3
     pivot_highs: list[int] = []
     search_start = max(left, len(x) - max(lookback, left + right + 8))
     for i in range(search_start, len(x) - right):
-        close_window = x["close"].iloc[i-left:i+right+1]
+        close_window = x["close"].iloc[i - left : i + right + 1]
         close = float(x.at[i, "close"])
-        if close == float(close_window.min()) and int((close_window == close).sum()) == 1:
+        if (
+            close == float(close_window.min())
+            and int((close_window == close).sum()) == 1
+        ):
             pivot_lows.append(i)
-        if close == float(close_window.max()) and int((close_window == close).sum()) == 1:
+        if (
+            close == float(close_window.max())
+            and int((close_window == close).sum()) == 1
+        ):
             pivot_highs.append(i)
 
     latest = None
@@ -351,12 +446,18 @@ def descending_n_structure_state(df: pd.DataFrame, left: int = 3, right: int = 3
     origin_high = float(x.at[h1, "close"])
     pullback_low = float(x.at[l1, "close"])
     lower_high = float(x.at[h2, "close"])
-    origin_extreme_high = float(x["high"].iloc[max(0, h1-left):min(len(x), h1+right+1)].max())
+    origin_extreme_high = float(
+        x["high"].iloc[max(0, h1 - left) : min(len(x), h1 + right + 1)].max()
+    )
     distance_pct = (current_close / pullback_low - 1) * 100 if pullback_low else None
     breach_rows = x.index[(x.index > h2) & (x["close"] < pullback_low)]
     first_breach = int(breach_rows[0]) if len(breach_rows) else None
     breach_bars_ago = (len(x) - 1 - first_breach) if first_breach is not None else None
-    stale = bool(confirmed and breach_bars_ago is not None and breach_bars_ago > stale_breach_bars)
+    stale = bool(
+        confirmed
+        and breach_bars_ago is not None
+        and breach_bars_ago > stale_breach_bars
+    )
     return {
         "available": True,
         "pattern": "H1-L1-lower_H2" + ("-confirmed" if confirmed else "-candidate"),
@@ -369,10 +470,14 @@ def descending_n_structure_state(df: pd.DataFrame, left: int = 3, right: int = 3
         "lower_high": round(lower_high, 4),
         "lower_high_date": x.at[h2, "date"].strftime("%Y-%m-%d"),
         "current_close": round(current_close, 4),
-        "distance_to_structural_low_pct": round(distance_pct, 4) if distance_pct is not None else None,
+        "distance_to_structural_low_pct": round(distance_pct, 4)
+        if distance_pct is not None
+        else None,
         "below_structural_low": bool(current_close < pullback_low),
         "breach_bars_ago": breach_bars_ago,
-        "first_breach_date": x.at[first_breach, "date"].strftime("%Y-%m-%d") if first_breach is not None else None,
+        "first_breach_date": x.at[first_breach, "date"].strftime("%Y-%m-%d")
+        if first_breach is not None
+        else None,
         "stale": stale,
         "fresh_breach": bool(confirmed and not stale),
         "pivot_window": {"left": left, "right": right, "lookback": lookback},
@@ -400,9 +505,19 @@ def trend_state(df: pd.DataFrame) -> dict[str, Any]:
     low20_now = float(df["low"].tail(20).min())
     low20_prev = float(df["low"].iloc[-40:-20].min()) if len(df) >= 40 else low20_now
 
-    if c > ma25v > ma60v and (ma25_slope or 0) > 0 and high20_now >= high20_prev and low20_now >= low20_prev:
+    if (
+        c > ma25v > ma60v
+        and (ma25_slope or 0) > 0
+        and high20_now >= high20_prev
+        and low20_now >= low20_prev
+    ):
         state = "上涨"
-    elif c < ma25v < ma60v and (ma25_slope or 0) < 0 and high20_now <= high20_prev and low20_now <= low20_prev:
+    elif (
+        c < ma25v < ma60v
+        and (ma25_slope or 0) < 0
+        and high20_now <= high20_prev
+        and low20_now <= low20_prev
+    ):
         state = "下跌"
     else:
         state = "横盘震荡"
@@ -419,8 +534,12 @@ def trend_state(df: pd.DataFrame) -> dict[str, Any]:
         "above_ma240": c > ma240v if ma240v is not None else None,
         "ma25_slope_5d_pct": round(ma25_slope, 4) if ma25_slope is not None else None,
         "ma60_slope_10d_pct": round(ma60_slope, 4) if ma60_slope is not None else None,
-        "ma144_slope_20d_pct": round(ma144_slope, 4) if ma144_slope is not None else None,
-        "ma240_slope_20d_pct": round(ma240_slope, 4) if ma240_slope is not None else None,
+        "ma144_slope_20d_pct": round(ma144_slope, 4)
+        if ma144_slope is not None
+        else None,
+        "ma240_slope_20d_pct": round(ma240_slope, 4)
+        if ma240_slope is not None
+        else None,
         "higher_high_20d": high20_now >= high20_prev,
         "higher_low_20d": low20_now >= low20_prev,
         "lower_high_20d": high20_now <= high20_prev,
@@ -459,14 +578,24 @@ def analyze(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--code", required=True, help="证券/板块代码，如 600150 或 880xxx.SH")
+    ap.add_argument(
+        "--code", required=True, help="证券/板块代码，如 600150 或 880xxx.SH"
+    )
     ap.add_argument("--name", default="")
     ap.add_argument("--date", default=pd.Timestamp.now().strftime("%Y-%m-%d"))
     ap.add_argument("--out", default="")
     args = ap.parse_args()
     tcode = norm_code(args.code)
-    result = {"code": tcode, "name": args.name, "analysis": analyze(read_vipdoc(tcode), tcode)}
-    out = Path(args.out) if args.out else OUT_DIR / f"{args.date}_technical_{tcode.replace('.', '_')}.json"
+    result = {
+        "code": tcode,
+        "name": args.name,
+        "analysis": analyze(read_vipdoc(tcode), tcode),
+    }
+    out = (
+        Path(args.out)
+        if args.out
+        else OUT_DIR / f"{args.date}_technical_{tcode.replace('.', '_')}.json"
+    )
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(out)

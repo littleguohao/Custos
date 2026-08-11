@@ -9,6 +9,7 @@
   ② 旧 s_shape 主轴在同样样本上**方向相反**——它把"突破未回调"排第一、把 good_b1
      型排倒数第二。这是把它移出 B1 技术轴的量化依据，不能日后被"顺手改回去"。
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -25,11 +26,17 @@ def _mk(rows):
     c = np.array([r[0] for r in rows], float)
     v = np.array([r[1] for r in rows], float)
     o = np.concatenate(([c[0]], c[:-1]))
-    return pd.DataFrame({
-        "date": pd.bdate_range("2024-06-03", periods=len(c)).strftime("%Y-%m-%d"),
-        "open": o, "high": np.maximum(c, o) * 1.012, "low": np.minimum(c, o) * 0.988,
-        "close": c, "volume": v, "amount": v * c,
-    })
+    return pd.DataFrame(
+        {
+            "date": pd.bdate_range("2024-06-03", periods=len(c)).strftime("%Y-%m-%d"),
+            "open": o,
+            "high": np.maximum(c, o) * 1.012,
+            "low": np.minimum(c, o) * 0.988,
+            "close": c,
+            "volume": v,
+            "amount": v * c,
+        }
+    )
 
 
 def _platform(n, base, v, amp=0.035, period=14):
@@ -39,7 +46,7 @@ def _platform(n, base, v, amp=0.035, period=14):
 def _launch(start, v, bars=(0.07, 0.06, 0.03, 0.02, 0.02)):
     out, p = [], start
     for i, g in enumerate(bars):
-        p *= (1 + g)
+        p *= 1 + g
         out.append((p, v * (3.2 if i < 2 else 1.8)))
     return out
 
@@ -47,7 +54,7 @@ def _launch(start, v, bars=(0.07, 0.06, 0.03, 0.02, 0.02)):
 def _drift(start, n, per, v):
     out, p = [], start
     for _ in range(n):
-        p *= (1 + per)
+        p *= 1 + per
         out.append((p, v))
     return out
 
@@ -58,13 +65,13 @@ def shapes():
     a = _platform(110, 10.0, 4.0e5)
     a += _launch(a[-1][0], 4.0e5)
     a += _drift(a[-1][0], 12, 0.012, 7.0e5)
-    a += _drift(a[-1][0], 10, -0.022, 2.6e5)          # 缩量回调创近9日新低
+    a += _drift(a[-1][0], 10, -0.022, 2.6e5)  # 缩量回调创近9日新低
 
-    b = _drift(22.0, 150, -0.006, 3.0e5)              # 长期无量阴跌
+    b = _drift(22.0, 150, -0.006, 3.0e5)  # 长期无量阴跌
 
     c = _platform(120, 10.0, 4.0e5)
     c += _launch(c[-1][0], 4.0e5)
-    c += _drift(c[-1][0], 8, 0.015, 8.0e5)            # 突破后仍在高位
+    c += _drift(c[-1][0], 8, 0.015, 8.0e5)  # 突破后仍在高位
 
     plat = _platform(130, 10.0, 4.0e5)
     ph = max(p for p, _ in plat[-60:])
@@ -72,8 +79,7 @@ def shapes():
     d += _drift(d[-1][0], 6, 0.012, 7.0e5)
     d += [(float(x), 2.8e5) for x in np.linspace(d[-1][0], ph * 1.005, 9)]
 
-    return {k: _mk(v) for k, v in
-            (("A", a), ("B", b), ("C", c), ("D", d))}
+    return {k: _mk(v) for k, v in (("A", a), ("B", b), ("C", c), ("D", d))}
 
 
 class TestQsxDksMatchesZhixing:
@@ -101,9 +107,12 @@ class TestQsxDksMatchesZhixing:
         立刻假失败（值是对的、文本读不到）。**能读真值就别读源码。**
         """
         from custos.core import indicators
-        assert indicators.DKS_MA_WINDOWS == (14, 28, 57, 114), \
+
+        assert indicators.DKS_MA_WINDOWS == (14, 28, 57, 114), (
             "参数必须与 good_b1 图上的知行趋势线一致"
+        )
         import inspect
+
         sig = inspect.signature(indicators.dks_series)
         assert sig.parameters["windows"].default == (14, 28, 57, 114)
 
@@ -120,11 +129,16 @@ class TestLaunchSegment:
 
     def test_requires_both_gain_and_volume(self):
         """只涨不放量、只放量不涨都不算启动。"""
-        rise_only = _mk(_platform(30, 10.0, 4e5) + _launch(10.0, 4e5 / 3.2, bars=(0.07,)))
+        rise_only = _mk(
+            _platform(30, 10.0, 4e5) + _launch(10.0, 4e5 / 3.2, bars=(0.07,))
+        )
         assert bd.detect_launch_segment(rise_only)["hit"] is False
 
     def test_short_history_unavailable(self):
-        assert bd.detect_launch_segment(_mk(_platform(10, 10.0, 4e5)))["available"] is False
+        assert (
+            bd.detect_launch_segment(_mk(_platform(10, 10.0, 4e5)))["available"]
+            is False
+        )
 
 
 class TestLongStructure:
@@ -199,8 +213,8 @@ class TestBreakoutPullbackB1:
     def test_strict_vs_tolerant_ph(self, shapes):
         """两种"不低于前高"口径都要报出来，供回测对比（platform_high 基于最高价）。"""
         r = bd.detect_breakout_pullback_b1(shapes["D"], "600000")
-        assert r["close_ge_platform_high"] is True      # 默认 0.98 容差
-        assert r["close_ge_ph_strict"] is False         # 严格口径要求收盘超历史最高价
+        assert r["close_ge_platform_high"] is True  # 默认 0.98 容差
+        assert r["close_ge_ph_strict"] is False  # 严格口径要求收盘超历史最高价
         assert r["ph_tol"] == 0.98
 
     def test_no_platform_no_hit(self, shapes):
@@ -237,12 +251,15 @@ class TestWeeklyResonance:
         datetime 再比，避免比的是"谁更能容错"而不是口径。
         """
         from custos.pipeline.screening.enrich_candidates import weekly_j_state
+
         for df in resonance_shapes.values():
             dt = df.copy()
             dt["date"] = pd.to_datetime(dt["date"])
             mine = bd.detect_weekly_b1_resonance(df)
             theirs = weekly_j_state(dt)
-            assert mine["weekly_j"] == pytest.approx(float(theirs["weekly_j"]), abs=1e-2)
+            assert mine["weekly_j"] == pytest.approx(
+                float(theirs["weekly_j"]), abs=1e-2
+            )
             assert mine["weekly_j_low"] is theirs["weekly_j_low"]
 
     def test_hits_only_when_both_periods_low(self, resonance_shapes):
@@ -260,7 +277,8 @@ class TestWeeklyResonance:
         assert a["score"] == a["score_without_resonance"]
         assert b["resonance_bonus"] == bd.RESONANCE_BONUS_PTS
         assert b["score"] == pytest.approx(
-            min(100.0, b["score_without_resonance"] + bd.RESONANCE_BONUS_PTS), abs=0.11)
+            min(100.0, b["score_without_resonance"] + bd.RESONANCE_BONUS_PTS), abs=0.11
+        )
 
     def test_string_dates_are_handled(self, resonance_shapes):
         """生产 df 的 date 是 datetime，但测试/中间产物常是字符串——resample 需要兜底。"""
@@ -302,9 +320,17 @@ class TestBacktestRegistration:
     def test_scorer_registered(self, name):
         assert name in bt.SCORERS
 
-    @pytest.mark.parametrize("name", ["qsx_gt_dks", "j_low_qsx_gt_dks",
-                                      "breakout_pullback_b1", "weekly_j_low",
-                                      "j_low_weekly_resonance", "j_low_qsx_weekly"])
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "qsx_gt_dks",
+            "j_low_qsx_gt_dks",
+            "breakout_pullback_b1",
+            "weekly_j_low",
+            "j_low_weekly_resonance",
+            "j_low_qsx_weekly",
+        ],
+    )
     def test_gate_registered(self, name):
         assert name in bt.ENTRY_GATES
 
@@ -313,8 +339,14 @@ class TestBacktestRegistration:
         assert bt.SCORERS["b1_dual"](_mk(_platform(30, 10.0, 4e5)), "600000") is None
 
     def test_gates_never_raise(self, shapes):
-        for name in ("qsx_gt_dks", "j_low_qsx_gt_dks", "breakout_pullback_b1",
-                     "weekly_j_low", "j_low_weekly_resonance", "j_low_qsx_weekly"):
+        for name in (
+            "qsx_gt_dks",
+            "j_low_qsx_gt_dks",
+            "breakout_pullback_b1",
+            "weekly_j_low",
+            "j_low_weekly_resonance",
+            "j_low_qsx_weekly",
+        ):
             for df in list(shapes.values()) + [_mk(_platform(5, 10.0, 4e5))]:
                 assert isinstance(bt.ENTRY_GATES[name](df), bool)
 
@@ -332,5 +364,6 @@ class TestNotYetWiredIntoScreening:
         import inspect
 
         from custos.pipeline.screening import score_candidates as sc
+
         src = inspect.getsource(sc)
         assert "b1_dual" not in src, "接入选股链前必须先有回测证据"

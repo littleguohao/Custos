@@ -20,6 +20,7 @@
 ⚠️ 此处原写「本因子与 live 的反转K不是同一个东西（live 是 -2.0~+1.8 不对称）」——
 owner 08-06 统一后已过时，2026-08-07 订正。那条 TODO 也已闭环。
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -30,10 +31,10 @@ from custos.core.indicators import amplitude_pct as amplitude_pct_of  # 振幅�
 # ⚠️ 阈值**保持与 backtest_factors 原值一致**（对称 ±2%）并**刻意不读环境变量** ——
 # 改了会作废已有回测数字，而那些数字已在重跑清单里（R2 P1）。
 # live 侧的同名阈值在 `src/b1_thresholds.py`，可配置；两者默认值相同。
-REVK_VOL_RATIO = 0.5        # 量比 <= 50%
-REVK_VOL_PCTILE = 0.10      # 20 日量分位 <= 10%
-REVK_CHG_PCT = 2.0          # 对称，与 live 默认值同；刻意不跟随 B1_REVK_CHG_PCT
-REVK_AMP_PCT = 7.0          # 振幅 <= 7%
+REVK_VOL_RATIO = 0.5  # 量比 <= 50%
+REVK_VOL_PCTILE = 0.10  # 20 日量分位 <= 10%
+REVK_CHG_PCT = 2.0  # 对称，与 live 默认值同；刻意不跟随 B1_REVK_CHG_PCT
+REVK_AMP_PCT = 7.0  # 振幅 <= 7%
 
 FACTOR: dict[str, Any] = {
     "id": "reversal_quality",
@@ -46,6 +47,7 @@ FACTOR: dict[str, Any] = {
     "live_use": "none",
     "stage": "debug",
 }
+
 
 def score(df: pd.DataFrame, code: str):
     """反转K质量分(0-4)：缩量(量比≤50%)+量底(20日底10%)+小实体(收盘±2%)+小振幅(≤7%) 各计1分。
@@ -60,15 +62,21 @@ def score(df: pd.DataFrame, code: str):
         vma5 = vol[-6:-1].mean() if len(vol) >= 6 else vol[:-1].mean()
         v20 = vol[-20:]
         pts = 0
-        pts += int(vma5 > 0 and vol[-1] / vma5 <= REVK_VOL_RATIO)             # 缩量
-        pts += int((v20 <= vol[-1]).mean() <= REVK_VOL_PCTILE)               # 量底10%
-        pts += int(close[-2] and abs(close[-1] / close[-2] - 1) * 100 <= REVK_CHG_PCT)   # 小实体
+        pts += int(vma5 > 0 and vol[-1] / vma5 <= REVK_VOL_RATIO)  # 缩量
+        pts += int((v20 <= vol[-1]).mean() <= REVK_VOL_PCTILE)  # 量底10%
+        pts += int(
+            close[-2] and abs(close[-1] / close[-2] - 1) * 100 <= REVK_CHG_PCT
+        )  # 小实体
         # 振幅≤7%：收敛到 `indicators.amplitude_pct`（全项目唯一实现，2026-08-10）。
         # ⚠️ 它是**纯公式、不读 env**，所以收敛不违反本因子「阈值钉死」的原则
         #    （钉死的是 REVK_AMP_PCT 这个数，不是怎么算振幅）。
         _amp = amplitude_pct_of(high[-1], low[-1], close[-2])
-        pts += int(_amp is not None and _amp <= REVK_AMP_PCT)   # 小振幅
-        return {"score": float(pts), "suggestion": "可买",
-                "aux": {"selector": "reversal_quality_0_4"}, "components": {}}
+        pts += int(_amp is not None and _amp <= REVK_AMP_PCT)  # 小振幅
+        return {
+            "score": float(pts),
+            "suggestion": "可买",
+            "aux": {"selector": "reversal_quality_0_4"},
+            "components": {},
+        }
     except Exception:  # noqa: BLE001
         return None

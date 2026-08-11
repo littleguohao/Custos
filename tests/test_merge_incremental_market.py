@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """merge_incremental_market 新鲜度测试——T-1 数据不得冒充当日(必须标 stale)。"""
+
 from __future__ import annotations
 
 from custos.pipeline.market_timing import merge_incremental_market as mim
@@ -8,11 +9,13 @@ TARGET = "2026-07-20"
 
 
 def _inc(day: str):
-    return {"breadth": {
-        "880005": {"date": day, "up_count": 3000, "down_count": 1500},
-        "880006": {"date": day, "close": 42},
-        "880001": {"date": day, "amount": 1.2e12, "previous_amount": 1.0e12},
-    }}
+    return {
+        "breadth": {
+            "880005": {"date": day, "up_count": 3000, "down_count": 1500},
+            "880006": {"date": day, "close": 42},
+            "880001": {"date": day, "amount": 1.2e12, "previous_amount": 1.0e12},
+        }
+    }
 
 
 def test_section_quality_same_day_is_auto():
@@ -45,7 +48,11 @@ def test_prior_day_data_marked_stale_and_reported():
     assert mkt["sentiment"]["quality"] == "stale"
     assert mkt["turnover"]["quality"] == "stale"
     assert mkt["market_turnover"]["quality"] == "stale"
-    assert {s.split("(")[0] for s in stale} == {"market_breadth", "sentiment", "turnover"}
+    assert {s.split("(")[0] for s in stale} == {
+        "market_breadth",
+        "sentiment",
+        "turnover",
+    }
     assert all("2026-07-17" in s for s in stale)
 
 
@@ -57,11 +64,14 @@ def test_existing_sections_not_overwritten():
 
 
 def test_overseas_and_northbound_merge():
-    inc = {"a50_futures": {"change_pct": 0.8}, "cnh_usd": {"change_pct": None},
-           "northbound": {"net": 12.3}}
+    inc = {
+        "a50_futures": {"change_pct": 0.8},
+        "cnh_usd": {"change_pct": None},
+        "northbound": {"net": 12.3},
+    }
     out, _ = mim.merge_incremental(inc, {}, TARGET)
     assert out["overseas_market"]["a50_change_pct"] == 0.8
-    assert "cnh_change_pct" not in out["overseas_market"]      # None 不写入
+    assert "cnh_change_pct" not in out["overseas_market"]  # None 不写入
     assert out["northbound"] == {"net": 12.3}
 
 
@@ -79,7 +89,8 @@ def test_require_systemexit_still_writes_failed_status(tmp_path, monkeypatch):
     mkt_dir = tmp_path / "data" / "market"
     mkt_dir.mkdir(parents=True)
     (mkt_dir / f"{TARGET}_incremental_market.json").write_text(
-        json.dumps(_inc(TARGET)), encoding="utf-8")
+        json.dumps(_inc(TARGET)), encoding="utf-8"
+    )
     (mkt_dir / f"{TARGET}_market_timing_input.json").write_text("{}", encoding="utf-8")
 
     def boom(*a, **k):
@@ -88,7 +99,11 @@ def test_require_systemexit_still_writes_failed_status(tmp_path, monkeypatch):
     monkeypatch.setattr(mim, "require", boom)
     rc = mim.main(["--date", TARGET])
     assert rc == 1, "退出码语义不变：契约失败仍是 1"
-    status = json.loads((tmp_path / "data" / "quality"
-                         / f"{TARGET}_merge_incremental_status.json").read_text(encoding="utf-8"))
-    assert status["status"] == "failed" and "SystemExit" in status["error"], \
+    status = json.loads(
+        (
+            tmp_path / "data" / "quality" / f"{TARGET}_merge_incremental_status.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert status["status"] == "failed" and "SystemExit" in status["error"], (
         "require 硬失败也必须把 failed 状态落盘"
+    )

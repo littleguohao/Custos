@@ -25,6 +25,7 @@ xdxr 字段口径（每 **10 股**）：
     fenhong=现金分红(元)  songzhuangu=送股+转股  peigu=配股数  peigujia=配股价(元/股)
     suogu=缩股比例        category: 1=除权除息  5=股本变化(不影响价格,忽略)
 """
+
 from __future__ import annotations
 
 import json
@@ -37,15 +38,15 @@ import pandas as pd
 
 # 与 local_tdx_data.py 同一套路径处理：本模块既被当包内模块 import，也被直接当脚本跑
 
-from custos.core.code_utils import market_of                               # noqa: E402
+from custos.core.code_utils import market_of  # noqa: E402
 from custos.core.paths import cn_now, MARKET_DIR  # noqa: E402
 
 CACHE_DIR = MARKET_DIR / "xdxr"
 
 # 只有这些 category 影响价格；5=股本变化(增发/回购)不改变单股权益，不复权
-PRICE_AFFECTING_CATEGORY = {1}          # 1 = 除权除息（分红/送转/配股）
-MIN_RATIO = 0.01                        # 因子下限：ratio<1% 视为数据异常，跳过该事件
-MAX_EVENTS_SANE = 500                   # 单票权息事件数上限（超出视为数据异常）
+PRICE_AFFECTING_CATEGORY = {1}  # 1 = 除权除息（分红/送转/配股）
+MIN_RATIO = 0.01  # 因子下限：ratio<1% 视为数据异常，跳过该事件
+MAX_EVENTS_SANE = 500  # 单票权息事件数上限（超出视为数据异常）
 
 
 class AdjustError(Exception):
@@ -53,6 +54,7 @@ class AdjustError(Exception):
 
 
 # ---------------------------------------------------------------- 权息数据
+
 
 def _cache_path(code: str) -> pathlib.Path:
     return CACHE_DIR / f"{str(code)[:6]}.json"
@@ -74,22 +76,28 @@ def load_xdxr_cache(code: str) -> Optional[list[dict[str, Any]]]:
         return None
     try:
         d = json.loads(p.read_text(encoding="utf-8"))
-    except Exception as e:                                     # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
         print(f"[WARN] xdxr 缓存损坏 {p.name}: {e}", file=sys.stderr)
         return None
     ev = d.get("events")
     if not isinstance(ev, list):
         return None
     if not ev and d.get("market") is None:
-        print(f"[WARN] {code} 的空权息缓存缺 market 标记（可能是 920xxx 判错市场时写下的），"
-              f"作废并重取", file=sys.stderr)
+        print(
+            f"[WARN] {code} 的空权息缓存缺 market 标记（可能是 920xxx 判错市场时写下的），"
+            f"作废并重取",
+            file=sys.stderr,
+        )
         return None
     return ev
 
 
-def save_xdxr_cache(code: str, events: list[dict[str, Any]],
-                    fetched_at: str = "",
-                    shares: Optional[list[dict[str, Any]]] = None) -> None:
+def save_xdxr_cache(
+    code: str,
+    events: list[dict[str, Any]],
+    fetched_at: str = "",
+    shares: Optional[list[dict[str, Any]]] = None,
+) -> None:
     """一份缓存同时装权息事件与股本事件——两者来自同一次 xdxr 调用，分开存会多跑一次网络。"""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     p = _cache_path(code)
@@ -98,20 +106,25 @@ def save_xdxr_cache(code: str, events: list[dict[str, Any]],
         mkt = _tdx_market(c6)
     except AdjustError:
         mkt = None
-    payload = {"code": c6, "events": events, "market": mkt,
-               "fetched_at": fetched_at, "n": len(events)}
+    payload = {
+        "code": c6,
+        "events": events,
+        "market": mkt,
+        "fetched_at": fetched_at,
+        "n": len(events),
+    }
     if shares is not None:
         payload["shares"] = shares
-    elif p.exists():                       # 别把已有的股本数据覆盖没了
+    elif p.exists():  # 别把已有的股本数据覆盖没了
         try:
             old = json.loads(p.read_text(encoding="utf-8")).get("shares")
             if isinstance(old, list):
                 payload["shares"] = old
-        except Exception:                  # noqa: BLE001, S110
+        except Exception:  # noqa: BLE001, S110
             pass
     tmp = p.with_suffix(".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(p)                                             # 原子替换
+    tmp.replace(p)  # 原子替换
 
 
 def _tdx_market(code: str) -> int:
@@ -166,7 +179,7 @@ def _to_records(df: Any) -> list[dict[str, Any]]:
         return []
     try:
         return df.to_dict("records")
-    except Exception:                                          # noqa: BLE001
+    except Exception:  # noqa: BLE001
         return []
 
 
@@ -183,14 +196,14 @@ def normalize_xdxr(df: Any) -> list[dict[str, Any]]:
     for r in rows:
         try:
             cat = int(r.get("category") or 0)
-        except Exception:                                      # noqa: BLE001
+        except Exception:  # noqa: BLE001
             continue
         if cat not in PRICE_AFFECTING_CATEGORY:
             continue
         try:
             y, m, d = int(r.get("year")), int(r.get("month")), int(r.get("day"))
             date = f"{y:04d}-{m:02d}-{d:02d}"
-        except Exception:                                      # noqa: BLE001
+        except Exception:  # noqa: BLE001
             continue
 
         def _f(k: str) -> float:
@@ -199,13 +212,17 @@ def normalize_xdxr(df: Any) -> list[dict[str, Any]]:
                 x = float(v)
             except (TypeError, ValueError):
                 return 0.0
-            return 0.0 if x != x else x                        # NaN → 0
+            return 0.0 if x != x else x  # NaN → 0
 
-        ev = {"date": date, "fenhong": _f("fenhong"),
-              "songzhuangu": _f("songzhuangu"), "peigu": _f("peigu"),
-              "peigujia": _f("peigujia"), "suogu": _f("suogu")}
-        if any(abs(ev[k]) > 0 for k in
-               ("fenhong", "songzhuangu", "peigu", "suogu")):
+        ev = {
+            "date": date,
+            "fenhong": _f("fenhong"),
+            "songzhuangu": _f("songzhuangu"),
+            "peigu": _f("peigu"),
+            "peigujia": _f("peigujia"),
+            "suogu": _f("suogu"),
+        }
+        if any(abs(ev[k]) > 0 for k in ("fenhong", "songzhuangu", "peigu", "suogu")):
             out.append(ev)
     out.sort(key=lambda e: e["date"])
     # 超限截断保留**最新**的：新事件才影响近期复权（此前保留最旧 500 条,方向反了）
@@ -237,7 +254,7 @@ def normalize_shares(df: Any) -> list[dict[str, Any]]:
     for r in rows:
         try:
             y, m, d = int(r.get("year")), int(r.get("month")), int(r.get("day"))
-        except Exception:                                      # noqa: BLE001
+        except Exception:  # noqa: BLE001
             continue
 
         def _f(k: str) -> float:
@@ -246,21 +263,26 @@ def normalize_shares(df: Any) -> list[dict[str, Any]]:
                 x = float(v)
             except (TypeError, ValueError):
                 return 0.0
-            return 0.0 if x != x else x                        # NaN → 0
+            return 0.0 if x != x else x  # NaN → 0
 
-        total = _f("houzongguben") * 10000.0                   # 万股 → 股
+        total = _f("houzongguben") * 10000.0  # 万股 → 股
         flt = _f("panhouliutong") * 10000.0
         if total <= 0 and flt <= 0:
             continue
-        out.append({"date": f"{y:04d}-{m:02d}-{d:02d}",
-                    "total_shares": total or None,
-                    "float_shares": flt or None})
+        out.append(
+            {
+                "date": f"{y:04d}-{m:02d}-{d:02d}",
+                "total_shares": total or None,
+                "float_shares": flt or None,
+            }
+        )
     out.sort(key=lambda e: e["date"])
     return out
 
 
-def get_shares_events(code: str, *, refresh: bool = False,
-                      timeout: int = 10) -> list[dict[str, Any]]:
+def get_shares_events(
+    code: str, *, refresh: bool = False, timeout: int = 10
+) -> list[dict[str, Any]]:
     """股本变化事件（优先缓存）。缓存与权息同一份文件，避免两次取数。"""
     if not refresh:
         p = _cache_path(code)
@@ -270,24 +292,27 @@ def get_shares_events(code: str, *, refresh: bool = False,
                 sh = d.get("shares")
                 if isinstance(sh, list):
                     return sh
-            except Exception:                                  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 pass
     try:
         from mootdx.quotes import Quotes
+
         c6 = str(code)[:6]
         q = Quotes.factory(market="std", timeout=timeout)
         # 显式传 market —— 见 _tdx_market（mootdx 把 920xxx 判成沪市 ⇒ 取到空）
         raw = q.client.get_xdxr_info(_tdx_market(c6), c6)
-    except Exception as e:                                     # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
         raise AdjustError(f"xdxr({code}) 取数失败: {e}") from e
     ev, sh = normalize_xdxr(raw), normalize_shares(raw)
-    save_xdxr_cache(code, ev, fetched_at=cn_now().isoformat(timespec="seconds"),
-                    shares=sh)
+    save_xdxr_cache(
+        code, ev, fetched_at=cn_now().isoformat(timespec="seconds"), shares=sh
+    )
     return sh
 
 
-def total_shares_at(code: str, date: str, *,
-                    field: str = "total_shares") -> Optional[float]:
+def total_shares_at(
+    code: str, date: str, *, field: str = "total_shares"
+) -> Optional[float]:
     """给定日期的总股本/流通股本（取**不晚于该日**的最后一条事件）。
 
     ``field``: "total_shares"（总股本）| "float_shares"（流通股本）。
@@ -314,18 +339,23 @@ def fetch_xdxr(code: str, timeout: int = 10) -> list[dict[str, Any]]:
     """从通达信协议取权息数据（走 mootdx bestip）。失败 raise AdjustError。"""
     try:
         from mootdx.quotes import Quotes
+
         c6 = str(code)[:6]
         q = Quotes.factory(market="std", timeout=timeout)
         # 显式传 market —— 不走 q.xdxr() 的内部推断（它把 920xxx 判成沪市）
         df = q.client.get_xdxr_info(_tdx_market(c6), c6)
-    except Exception as e:                                     # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
         raise AdjustError(f"xdxr({code}) 取数失败: {e}") from e
     return normalize_xdxr(df)
 
 
-def fetch_xdxr_batch(codes: list[str], *, timeout: int = 10,
-                     progress_every: int = 200,
-                     on_error: str = "skip") -> dict[str, list[dict[str, Any]]]:
+def fetch_xdxr_batch(
+    codes: list[str],
+    *,
+    timeout: int = 10,
+    progress_every: int = 200,
+    on_error: str = "skip",
+) -> dict[str, list[dict[str, Any]]]:
     """批量取权息并写缓存，**复用同一个 Quotes 连接**。
 
     为什么必须批量：`Quotes.factory()` 每次都要选 bestip + 建 TCP 连接。18:00 选股链
@@ -338,8 +368,9 @@ def fetch_xdxr_batch(codes: list[str], *, timeout: int = 10,
         return out
     try:
         from mootdx.quotes import Quotes
+
         q = Quotes.factory(market="std", timeout=timeout)
-    except Exception as e:                                     # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
         raise AdjustError(f"通达信连接建立失败: {e}") from e
 
     now = cn_now().isoformat(timespec="seconds")
@@ -352,7 +383,7 @@ def fetch_xdxr_batch(codes: list[str], *, timeout: int = 10,
             out[c6] = ev
             # 同一次调用顺手把股本事件也存下(替代东财市值接口,见 normalize_shares)
             save_xdxr_cache(c6, ev, fetched_at=now, shares=normalize_shares(raw))
-        except Exception as e:                                 # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
             failed += 1
             if on_error == "raise":
                 raise AdjustError(f"xdxr({c6}) 失败: {e}") from e
@@ -360,11 +391,13 @@ def fetch_xdxr_batch(codes: list[str], *, timeout: int = 10,
             print(f"[INFO] 权息 {i}/{len(codes)}（失败 {failed}）", file=sys.stderr)
     try:
         q.close()
-    except Exception:                                          # noqa: BLE001, S110
+    except Exception:  # noqa: BLE001, S110
         pass
     if failed:
-        print(f"[WARN] 权息取数 {failed}/{len(codes)} 只失败（这些票将按未复权处理）",
-              file=sys.stderr)
+        print(
+            f"[WARN] 权息取数 {failed}/{len(codes)} 只失败（这些票将按未复权处理）",
+            file=sys.stderr,
+        )
     return out
 
 
@@ -378,13 +411,14 @@ def cache_age_days(code: str) -> Optional[float]:
         ts = d.get("fetched_at")
         if not ts:
             return None
-        from datetime import datetime                          # noqa: PLC0415
+        from datetime import datetime  # noqa: PLC0415
+
         t = datetime.fromisoformat(ts)
         now = cn_now()
         if t.tzinfo is None:
             t = t.replace(tzinfo=now.tzinfo)
         return (now - t).total_seconds() / 86400.0
-    except Exception:                                          # noqa: BLE001
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -394,12 +428,12 @@ def stale_codes(codes: list[str], max_age_days: float = 7.0) -> list[str]:
     除权事件本身是历史事实不会变，但**新的除权会不断出现**。分红送转有预案公告
     提前期（通常 >2 周），7 天上限足以在除权日前拿到新事件。
     """
-    return [c for c in codes
-            if (a := cache_age_days(c)) is None or a > max_age_days]
+    return [c for c in codes if (a := cache_age_days(c)) is None or a > max_age_days]
 
 
-def get_xdxr(code: str, *, refresh: bool = False,
-             timeout: int = 10) -> list[dict[str, Any]]:
+def get_xdxr(
+    code: str, *, refresh: bool = False, timeout: int = 10
+) -> list[dict[str, Any]]:
     """取权息数据：默认优先缓存（除权是历史事实，不会变），refresh=True 强制重取。"""
     if not refresh:
         ev = load_xdxr_cache(code)
@@ -407,18 +441,24 @@ def get_xdxr(code: str, *, refresh: bool = False,
             return ev
     try:
         from mootdx.quotes import Quotes
+
         q = Quotes.factory(market="std", timeout=timeout)
         # 显式传 market —— 不走 q.xdxr() 的内部推断（它把 920xxx 判成沪市 ⇒ 取到空）
         raw = q.client.get_xdxr_info(_tdx_market(str(code)[:6]), str(code)[:6])
-    except Exception as e:                                     # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
         raise AdjustError(f"xdxr({code}) 取数失败: {e}") from e
     ev = normalize_xdxr(raw)
-    save_xdxr_cache(code, ev, fetched_at=cn_now().isoformat(timespec="seconds"),
-                    shares=normalize_shares(raw))
+    save_xdxr_cache(
+        code,
+        ev,
+        fetched_at=cn_now().isoformat(timespec="seconds"),
+        shares=normalize_shares(raw),
+    )
     return ev
 
 
 # ---------------------------------------------------------------- 因子计算
+
 
 def event_ratio(prev_close: float, ev: dict[str, Any]) -> Optional[float]:
     """单个除权事件的价格缩放比 = 除权参考价 / 前收盘。
@@ -432,29 +472,29 @@ def event_ratio(prev_close: float, ev: dict[str, Any]) -> Optional[float]:
     """
     if prev_close is None or prev_close <= 0:
         return None
-    fh = float(ev.get("fenhong") or 0.0) / 10.0               # 每股现金红利
-    sz = float(ev.get("songzhuangu") or 0.0) / 10.0           # 送转比例
-    pg = float(ev.get("peigu") or 0.0) / 10.0                 # 配股比例
-    pgj = float(ev.get("peigujia") or 0.0)                    # 配股价
+    fh = float(ev.get("fenhong") or 0.0) / 10.0  # 每股现金红利
+    sz = float(ev.get("songzhuangu") or 0.0) / 10.0  # 送转比例
+    pg = float(ev.get("peigu") or 0.0) / 10.0  # 配股比例
+    pgj = float(ev.get("peigujia") or 0.0)  # 配股价
     sg = float(ev.get("suogu") or 0.0)
 
     denom = 1.0 + sz + pg
     if denom <= 0:
         return None
     ref = (prev_close - fh + pgj * pg) / denom
-    if sg > 0:                                                 # 缩股：10 股 → sg 股
+    if sg > 0:  # 缩股：10 股 → sg 股
         ref = ref * 10.0 / sg
     if ref <= 0:
         return None
     ratio = ref / prev_close
     if not (MIN_RATIO <= ratio <= 100.0):
-        return None                                            # 明显异常，跳过
+        return None  # 明显异常，跳过
     return float(ratio)
 
 
-def compute_qfq_factors(dates: Any, closes: Any,
-                        events: list[dict[str, Any]],
-                        stats: Optional[dict] = None) -> np.ndarray:
+def compute_qfq_factors(
+    dates: Any, closes: Any, events: list[dict[str, Any]], stats: Optional[dict] = None
+) -> np.ndarray:
     """逐根 K 线的前复权因子（乘到未复权价上即得前复权价）。
 
     因子(t) = Π ratio_d for 除权日 d > t   ⇒ **最新一天恒为 1.0**。
@@ -478,9 +518,9 @@ def compute_qfq_factors(dates: Any, closes: Any,
 
     for ev in events:
         ed = ev["date"]
-        idx = int(np.searchsorted(d, ed, side="left"))         # 首个 >= 除权日
+        idx = int(np.searchsorted(d, ed, side="left"))  # 首个 >= 除权日
         if idx <= 0 or idx >= n:
-            continue                                           # 落在样本外
+            continue  # 落在样本外
         if stats is not None:
             stats["events_in_sample"] += 1
         prev_close = c[idx - 1]
@@ -489,13 +529,17 @@ def compute_qfq_factors(dates: Any, closes: Any,
             if stats is not None:
                 stats["events_dropped"] += 1
             continue
-        factors[:idx] *= r                                     # 只缩放除权日之前
+        factors[:idx] *= r  # 只缩放除权日之前
     return factors
 
 
-def apply_qfq(df: pd.DataFrame, events: list[dict[str, Any]],
-              *, price_cols: tuple[str, ...] = ("open", "high", "low", "close"),
-              volume_col: str = "volume") -> pd.DataFrame:
+def apply_qfq(
+    df: pd.DataFrame,
+    events: list[dict[str, Any]],
+    *,
+    price_cols: tuple[str, ...] = ("open", "high", "low", "close"),
+    volume_col: str = "volume",
+) -> pd.DataFrame:
     """返回前复权后的副本，并把因子与原始收盘写进 attrs / 列。
 
     · 价格列 × 因子
@@ -513,8 +557,9 @@ def apply_qfq(df: pd.DataFrame, events: list[dict[str, Any]],
         out.attrs["adjust_error"] = "missing date/close columns"
         return out
     st: dict = {}
-    f = compute_qfq_factors(out["date"].to_numpy(),
-                            out["close"].astype(float).to_numpy(), events, stats=st)
+    f = compute_qfq_factors(
+        out["date"].to_numpy(), out["close"].astype(float).to_numpy(), events, stats=st
+    )
     out["raw_close"] = out["close"].astype(float)
     for col in price_cols:
         if col in out.columns:
@@ -528,18 +573,26 @@ def apply_qfq(df: pd.DataFrame, events: list[dict[str, Any]],
     out.attrs["adjust"] = "qfq_partial" if dropped else "qfq"
     if dropped:
         out.attrs["adjust_events_dropped"] = dropped
-        print(f"[WARN] {dropped} 个除权事件未能参与复权（ratio 异常被跳过）,"
-              f"结果仅为部分前复权", file=sys.stderr)
+        print(
+            f"[WARN] {dropped} 个除权事件未能参与复权（ratio 异常被跳过）,"
+            f"结果仅为部分前复权",
+            file=sys.stderr,
+        )
     out.attrs["adjust_factor_first"] = float(f[0]) if len(f) else 1.0
     out.attrs["adjust_events"] = sum(
-        1 for ev in events
-        if len(out) and str(out["date"].iloc[0])[:10] <= ev["date"]
-        <= str(out["date"].iloc[-1])[:10])
+        1
+        for ev in events
+        if len(out)
+        and str(out["date"].iloc[0])[:10]
+        <= ev["date"]
+        <= str(out["date"].iloc[-1])[:10]
+    )
     return out
 
 
-def qfq_table(code: str, df: pd.DataFrame, *, refresh: bool = False,
-              strict: bool = False) -> pd.DataFrame:
+def qfq_table(
+    code: str, df: pd.DataFrame, *, refresh: bool = False, strict: bool = False
+) -> pd.DataFrame:
     """给未复权 K 线加前复权。取不到权息数据时按 ``strict`` 决定 raise 还是原样返回。
 
     默认不 raise：权息取数依赖网络，而 18:00 选股链不能因为一只票的权息拿不到就整体停摆。
@@ -564,11 +617,24 @@ def qfq_table(code: str, df: pd.DataFrame, *, refresh: bool = False,
     return out
 
 
-__all__ = ["AdjustError", "apply_qfq", "cache_age_days", "compute_qfq_factors",
-           "get_shares_events", "normalize_shares", "total_shares_at",
-           "event_ratio", "fetch_xdxr", "fetch_xdxr_batch", "get_xdxr",
-           "load_xdxr_cache", "normalize_xdxr", "qfq_table", "save_xdxr_cache",
-           "stale_codes"]
+__all__ = [
+    "AdjustError",
+    "apply_qfq",
+    "cache_age_days",
+    "compute_qfq_factors",
+    "get_shares_events",
+    "normalize_shares",
+    "total_shares_at",
+    "event_ratio",
+    "fetch_xdxr",
+    "fetch_xdxr_batch",
+    "get_xdxr",
+    "load_xdxr_cache",
+    "normalize_xdxr",
+    "qfq_table",
+    "save_xdxr_cache",
+    "stale_codes",
+]
 
 
 def main() -> int:
@@ -580,12 +646,18 @@ def main() -> int:
     import argparse
 
     ap = argparse.ArgumentParser(description="前复权权息缓存管理")
-    ap.add_argument("--warmup", action="store_true",
-                    help="批量拉取权息并缓存（首次必做）")
-    ap.add_argument("--codes", default="",
-                    help="逗号分隔的代码；留空=本地全市场（配合 --warmup）")
-    ap.add_argument("--max-age", type=float, default=7.0,
-                    help="缓存超过该天数才刷新（默认 7；除权公告有 >2 周提前期）")
+    ap.add_argument(
+        "--warmup", action="store_true", help="批量拉取权息并缓存（首次必做）"
+    )
+    ap.add_argument(
+        "--codes", default="", help="逗号分隔的代码；留空=本地全市场（配合 --warmup）"
+    )
+    ap.add_argument(
+        "--max-age",
+        type=float,
+        default=7.0,
+        help="缓存超过该天数才刷新（默认 7；除权公告有 >2 周提前期）",
+    )
     ap.add_argument("--force", action="store_true", help="忽略缓存年龄，全部重取")
     ap.add_argument("--show", default="", help="打印某只票的权息事件与因子")
     ap.add_argument("--stats", action="store_true", help="缓存统计")
@@ -600,8 +672,10 @@ def main() -> int:
             return 2
         print(f"{code} 共 {len(ev)} 个影响价格的权息事件：")
         for e in ev:
-            print(f"  {e['date']}  分红{e['fenhong']:>6.3f}  送转{e['songzhuangu']:>5.2f}  "
-                  f"配股{e['peigu']:>5.2f}@{e['peigujia']:>6.2f}  缩股{e['suogu']:>5.2f}")
+            print(
+                f"  {e['date']}  分红{e['fenhong']:>6.3f}  送转{e['songzhuangu']:>5.2f}  "
+                f"配股{e['peigu']:>5.2f}@{e['peigujia']:>6.2f}  缩股{e['suogu']:>5.2f}"
+            )
         age = cache_age_days(code)
         print(f"缓存年龄：{'—' if age is None else f'{age:.1f} 天'}")
         return 0
@@ -616,12 +690,14 @@ def main() -> int:
         for p in files:
             try:
                 n_ev += int(json.loads(p.read_text(encoding="utf-8")).get("n") or 0)
-            except Exception:                                  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 pass
         print(f"缓存 {len(files)} 只，累计 {n_ev} 个权息事件")
         if ages:
-            print(f"缓存年龄：中位 {sorted(ages)[len(ages) // 2]:.1f} 天  "
-                  f"最旧 {max(ages):.1f} 天")
+            print(
+                f"缓存年龄：中位 {sorted(ages)[len(ages) // 2]:.1f} 天  "
+                f"最旧 {max(ages):.1f} 天"
+            )
             stale = sum(1 for x in ages if x > a.max_age)
             print(f"超过 {a.max_age} 天需刷新：{stale} 只")
         return 0
@@ -635,19 +711,23 @@ def main() -> int:
     else:
         try:
             from custos.datasource.local_tdx import local_tdx_data
+
             codes = sorted(local_tdx_data.list_local_vipdoc_codes())
-        except Exception as e:                                 # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
             print(f"[ERR] 读不到本地代码表: {e}")
             return 2
     # 指数不除权，跳过（880/881 光细分行业就有 467 个）
     try:
         from custos.core.code_utils import is_index
+
         codes = [c for c in codes if not is_index(c)]
-    except Exception:                                          # noqa: BLE001
+    except Exception:  # noqa: BLE001
         pass
     todo = codes if a.force else stale_codes(codes, a.max_age)
-    print(f"共 {len(codes)} 只，需要取数 {len(todo)} 只"
-          f"{'（--force 全量）' if a.force else f'（缓存 ≤{a.max_age} 天的已跳过）'}")
+    print(
+        f"共 {len(codes)} 只，需要取数 {len(todo)} 只"
+        f"{'（--force 全量）' if a.force else f'（缓存 ≤{a.max_age} 天的已跳过）'}"
+    )
     if not todo:
         print("全部命中缓存，无需取数")
         return 0
@@ -657,8 +737,10 @@ def main() -> int:
         print(f"[ERR] {e}")
         return 2
     with_ev = sum(1 for v in got.values() if v)
-    print(f"完成：{len(got)} 只取到数据，其中 {with_ev} 只有权息事件"
-          f"（无事件的票也缓存，避免反复重试）")
+    print(
+        f"完成：{len(got)} 只取到数据，其中 {with_ev} 只有权息事件"
+        f"（无事件的票也缓存，避免反复重试）"
+    )
     return 0
 
 

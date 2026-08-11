@@ -28,6 +28,7 @@
   # as-of 查询:某日可见的最新一期
   uv run python src/custos/datasource/local_tdx/fetch_pit_financials.py --as-of 2024-05-06 --code 600000
 """
+
 from __future__ import annotations
 
 import argparse
@@ -50,20 +51,20 @@ LEDGER = OUT_DIR / "pit_financials.jsonl"
 
 # 只保留**绝对值**字段:同比/环比会被次年同期报告重算,不是 PIT 值(见模块 docstring)
 VALUE_FIELDS = {
-    "BASIC_EPS": "eps",                     # 基本每股收益
-    "DEDUCT_BASIC_EPS": "eps_deduct",       # 扣非每股收益
-    "TOTAL_OPERATE_INCOME": "revenue",      # 营业总收入
-    "PARENT_NETPROFIT": "net_profit",       # 归母净利润
-    "WEIGHTAVG_ROE": "roe_waa",             # 加权平均净资产收益率
-    "BPS": "bps",                           # 每股净资产
-    "MGJYXJJE": "ocf_ps",                   # 每股经营现金流
-    "XSMLL": "gross_margin",                # 销售毛利率
+    "BASIC_EPS": "eps",  # 基本每股收益
+    "DEDUCT_BASIC_EPS": "eps_deduct",  # 扣非每股收益
+    "TOTAL_OPERATE_INCOME": "revenue",  # 营业总收入
+    "PARENT_NETPROFIT": "net_profit",  # 归母净利润
+    "WEIGHTAVG_ROE": "roe_waa",  # 加权平均净资产收益率
+    "BPS": "bps",  # 每股净资产
+    "MGJYXJJE": "ocf_ps",  # 每股经营现金流
+    "XSMLL": "gross_margin",  # 销售毛利率
 }
 # 派生字段一律不存,列出来是为了防止以后有人"顺手"加回去
 _REFUSED_FIELDS = ("YSTZ", "SJLTZ", "YSHZ", "SJLHZ")
 A_SHARE_TYPES = {"A股"}
 
-PAGE_SLEEP = 0.35        # 翻页间隔（秒）：东财 datacenter 无官方配额，连打会被静默限流
+PAGE_SLEEP = 0.35  # 翻页间隔（秒）：东财 datacenter 无官方配额，连打会被静默限流
 
 
 class FetchIncomplete(RuntimeError):
@@ -124,8 +125,13 @@ def quarter_ends(since_year: int, until: str | None = None) -> list[str]:
     return out
 
 
-def fetch_period(report_date: str, page_size: int = 500, max_pages: int = 40,
-                 session=None, sleep: float = PAGE_SLEEP) -> list[dict]:
+def fetch_period(
+    report_date: str,
+    page_size: int = 500,
+    max_pages: int = 40,
+    session=None,
+    sleep: float = PAGE_SLEEP,
+) -> list[dict]:
     """拉一个报告期的全市场业绩报表原始行。接口与 akshare stock_yjbb_em 同源。
 
     **分页完整性由接口自报的 pages/count 校验，残缺一律抛 FetchIncomplete。**
@@ -139,60 +145,84 @@ def fetch_period(report_date: str, page_size: int = 500, max_pages: int = 40,
     pages = count = None
     for page in range(1, max_pages + 1):
         if page > 1 and sleep:
-            time.sleep(sleep)                  # 主动限速：连打几十页必被静默限流
+            time.sleep(sleep)  # 主动限速：连打几十页必被静默限流
         params = {
-            "sortColumns": "UPDATE_DATE,SECURITY_CODE", "sortTypes": "-1,-1",
-            "pageSize": page_size, "pageNumber": page,
-            "reportName": "RPT_LICO_FN_CPD", "columns": "ALL",
+            "sortColumns": "UPDATE_DATE,SECURITY_CODE",
+            "sortTypes": "-1,-1",
+            "pageSize": page_size,
+            "pageNumber": page,
+            "reportName": "RPT_LICO_FN_CPD",
+            "columns": "ALL",
             "filter": f"(REPORTDATE='{report_date}')",
         }
-        r = s.get(API, params=params, headers=UA, timeout=30,
-                  proxies={"http": None, "https": None})
+        r = s.get(
+            API,
+            params=params,
+            headers=UA,
+            timeout=30,
+            proxies={"http": None, "https": None},
+        )
         r.raise_for_status()
         payload = r.json() or {}
         result = payload.get("result")
         if not isinstance(result, dict):
             if page == 1 and _is_empty_ok(payload):
-                return []                      # 该报告期确实还没有数据（未到披露期）
+                return []  # 该报告期确实还没有数据（未到披露期）
             raise FetchIncomplete(
                 f"{report_date} 第 {page} 页无 result 段（限流/异常响应），"
-                f"已拿 {len(rows)} 行: {_brief(payload)}")
+                f"已拿 {len(rows)} 行: {_brief(payload)}"
+            )
         data = result.get("data") or []
         pages, count = _as_int(result.get("pages")), _as_int(result.get("count"))
         if not data:
             if page == 1 and not count:
-                return []                      # 真的没有这一期
+                return []  # 真的没有这一期
             raise FetchIncomplete(
                 f"{report_date} 第 {page} 页空响应，但接口声明 pages={pages} count={count}"
-                f"（已拿 {len(rows)} 行）—— 疑似限流，不是翻完了")
+                f"（已拿 {len(rows)} 行）—— 疑似限流，不是翻完了"
+            )
         rows.extend(data)
         if pages is not None:
             if page >= pages:
                 break
         elif count is not None and len(rows) >= count:
-            break                              # 没给 pages 但行数已够
+            break  # 没给 pages 但行数已够
         else:
             raise FetchIncomplete(
-                f"{report_date} 第 {page} 页未给 pages/count，无法判断是否翻完")
+                f"{report_date} 第 {page} 页未给 pages/count，无法判断是否翻完"
+            )
     else:
         raise FetchIncomplete(
             f"{report_date} 翻到 max_pages={max_pages} 仍未结束（声明 pages={pages}），"
-            f"提高 max_pages 后重拉")
+            f"提高 max_pages 后重拉"
+        )
     if count is not None and len(rows) < count:
         raise FetchIncomplete(
-            f"{report_date} 只拿到 {len(rows)}/{count} 行，样本残缺不落盘")
+            f"{report_date} 只拿到 {len(rows)}/{count} 行，样本残缺不落盘"
+        )
     return rows
 
 
-def normalize(rows: list[dict], report_date: str,
-              a_share_only: bool = True) -> tuple[list[dict], dict]:
+def normalize(
+    rows: list[dict], report_date: str, a_share_only: bool = True
+) -> tuple[list[dict], dict]:
     """原始行 → PIT 记录。返回 (记录, 统计)。
 
     记录键 = (code, report_date, notice_date);notice_date 缺失或早于报告期的行**丢弃**
     (公告日不晚于报告期在现实中不可能,宁可不要也不能拿一条错的可见日进回测)。
     """
-    out, stats = [], {"raw": len(rows), "dropped_type": 0, "dropped_no_notice": 0,
-                      "dropped_bad_lag": 0, "kept": 0, "bad_value": 0, "types": {}}
+    out, stats = (
+        [],
+        {
+            "raw": len(rows),
+            "dropped_type": 0,
+            "dropped_no_notice": 0,
+            "dropped_bad_lag": 0,
+            "kept": 0,
+            "bad_value": 0,
+            "types": {},
+        },
+    )
     rd = date.fromisoformat(report_date)
     for x in rows:
         stype = str(x.get("SECURITY_TYPE") or "")
@@ -228,7 +258,10 @@ def normalize(rows: list[dict], report_date: str,
             v = x.get(src)
             try:
                 rec[dst] = None if v is None else float(v)
-            except (TypeError, ValueError):        # 脏值(如 "--")按缺失处理,绝不让一行炸掉批量
+            except (
+                TypeError,
+                ValueError,
+            ):  # 脏值(如 "--")按缺失处理,绝不让一行炸掉批量
                 rec[dst] = None
                 stats["bad_value"] += 1
         out.append(rec)
@@ -257,11 +290,14 @@ def merge_write(records: list[dict], path: str | Path = LEDGER) -> dict:
     before = len(existing)
     for r in records:
         existing[(r["code"], r["report_date"], r["notice_date"])] = r
-    rows = sorted(existing.values(), key=lambda r: (r["report_date"], r["code"],
-                                                    r["notice_date"]))
+    rows = sorted(
+        existing.values(), key=lambda r: (r["report_date"], r["code"], r["notice_date"])
+    )
     tmp = path.with_suffix(".jsonl.tmp")
-    tmp.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n",
-                   encoding="utf-8")
+    tmp.write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n",
+        encoding="utf-8",
+    )
     tmp.replace(path)
     return {"before": before, "after": len(rows), "added": len(rows) - before}
 
@@ -280,8 +316,12 @@ def load_ledger(path: str | Path = LEDGER) -> list[dict]:
     return out
 
 
-def as_of(records: list[dict], day: str, code: str | None = None,
-          visible_next_day: bool = True) -> dict[str, dict]:
+def as_of(
+    records: list[dict],
+    day: str,
+    code: str | None = None,
+    visible_next_day: bool = True,
+) -> dict[str, dict]:
     """**PIT 查询**:截至 day 可见的最新一期财报,按 code 返回。
 
     可见判定:`notice_date < day`(visible_next_day=True,默认)——公告常在**盘后/晚间**发布
@@ -303,13 +343,20 @@ def as_of(records: list[dict], day: str, code: str | None = None,
         c = r["code"]
         cur = best.get(c)
         key = (r.get("report_date") or "", nd)
-        if cur is None or key > (cur.get("report_date") or "", cur.get("notice_date") or ""):
+        if cur is None or key > (
+            cur.get("report_date") or "",
+            cur.get("notice_date") or "",
+        ):
             best[c] = r
     return best
 
 
-def verify_ledger(records: list[dict], since_year: int | None = None,
-                  until: str | None = None, low_ratio: float = 0.6) -> dict:
+def verify_ledger(
+    records: list[dict],
+    since_year: int | None = None,
+    until: str | None = None,
+    low_ratio: float = 0.6,
+) -> dict:
     """台账完整性自检:应有报告期 vs 实有,列缺口 + 逐期行数异常 + 一年跑道检查。
 
     为什么必须自检:`as_of()` 遇到台账**缺期不会报错** —— 它只会静默返回上一个可见期,
@@ -337,14 +384,14 @@ def verify_ledger(records: list[dict], since_year: int | None = None,
     y0 = since_year or int(have[0][:4])
     stop = until or cn_today().isoformat()
     expect = quarter_ends(y0, until=stop)
-    if since_year is None:                            # 按实际首期对齐:年中起步不误报
+    if since_year is None:  # 按实际首期对齐:年中起步不误报
         expect = [p for p in expect if p >= have[0]]
     missing = [p for p in expect if p not in by_period]
-    tail_missing = [p for p in missing if p > have[-1]]     # 台账末至今的缺期(停更信号)
+    tail_missing = [p for p in missing if p > have[-1]]  # 台账末至今的缺期(停更信号)
     counts = {p: len(by_period[p]) for p in have}
     med_all = int(statistics.median(counts.values())) if counts else 0
     thin = []
-    for i, p in enumerate(have):                      # 邻期中位数:相邻 2~4 期(不含自身)
+    for i, p in enumerate(have):  # 邻期中位数:相邻 2~4 期(不含自身)
         neigh = [counts[q] for j, q in enumerate(have) if j != i and abs(j - i) <= 2]
         if not neigh:
             continue
@@ -358,7 +405,9 @@ def verify_ledger(records: list[dict], since_year: int | None = None,
         "n_records": len(records),
         "n_periods_have": len(have),
         "n_periods_expect": len(expect),
-        "first": have[0], "last": have[-1], "checked_until": stop,
+        "first": have[0],
+        "last": have[-1],
+        "checked_until": stop,
         "missing": missing,
         "tail_missing": tail_missing,
         "runway_missing": runway_missing,
@@ -366,28 +415,44 @@ def verify_ledger(records: list[dict], since_year: int | None = None,
         "thin_periods": thin,
         "periods": [{"period": p, "n_codes": counts[p]} for p in have],
     }
-    lines = [f"台账 {len(records)} 条;报告期 实有 {len(have)} / 应有 {len(expect)} "
-             f"({have[0]} ~ {have[-1]},自检终点 {stop});每期去重代码全期中位 {med_all}"]
+    lines = [
+        f"台账 {len(records)} 条;报告期 实有 {len(have)} / 应有 {len(expect)} "
+        f"({have[0]} ~ {have[-1]},自检终点 {stop});每期去重代码全期中位 {med_all}"
+    ]
     if missing:
         lines.append(f"  ⚠️ **缺 {len(missing)} 期**: {', '.join(missing)}")
         if tail_missing:
-            lines.append(f"     其中**台账末({have[-1]})至今**缺 {len(tail_missing)} 期: "
-                         f"{', '.join(tail_missing)} —— 台账疑似停更,必须补拉到最新")
-        lines.append("     缺期不会让 as_of() 报错,只会静默返回上一期 ⇒ 回测会用陈旧财报,必须补拉")
+            lines.append(
+                f"     其中**台账末({have[-1]})至今**缺 {len(tail_missing)} 期: "
+                f"{', '.join(tail_missing)} —— 台账疑似停更,必须补拉到最新"
+            )
+        lines.append(
+            "     缺期不会让 as_of() 报错,只会静默返回上一期 ⇒ 回测会用陈旧财报,必须补拉"
+        )
     else:
         lines.append("  ✅ 报告期无缺口")
     if thin:
-        lines.append(f"  ⚠️ **{len(thin)} 期行数异常偏少**(低于相邻 2~4 期中位的 {low_ratio:.0%}): "
-                     + ", ".join(f"{t['period']}={t['n_codes']}(邻期中位 {t['neighbor_median']})"
-                                 for t in thin))
-        lines.append("     多为分页中断/接口限流导致该期样本残缺,建议 --periods 单独重拉")
+        lines.append(
+            f"  ⚠️ **{len(thin)} 期行数异常偏少**(低于相邻 2~4 期中位的 {low_ratio:.0%}): "
+            + ", ".join(
+                f"{t['period']}={t['n_codes']}(邻期中位 {t['neighbor_median']})"
+                for t in thin
+            )
+        )
+        lines.append(
+            "     多为分页中断/接口限流导致该期样本残缺,建议 --periods 单独重拉"
+        )
     else:
         lines.append("  ✅ 各期行数无异常偏少")
     if runway_missing:
-        lines.append(f"  ⚠️ **一年跑道缺失**: 最早期 {have[0]} 的上一年度({y0 - 1})缺 "
-                     f"{len(runway_missing)} 期: {', '.join(runway_missing)}")
-        lines.append(f"     若信号窗口从 {y0} 年起,其同比特征需要 {y0 - 1} 各期的当时可见版本"
-                     f"(补拉:--since {y0 - 1} --all-quarters)")
+        lines.append(
+            f"  ⚠️ **一年跑道缺失**: 最早期 {have[0]} 的上一年度({y0 - 1})缺 "
+            f"{len(runway_missing)} 期: {', '.join(runway_missing)}"
+        )
+        lines.append(
+            f"     若信号窗口从 {y0} 年起,其同比特征需要 {y0 - 1} 各期的当时可见版本"
+            f"(补拉:--since {y0 - 1} --all-quarters)"
+        )
     else:
         lines.append(f"  ✅ 一年跑道充足({y0 - 1} 年各期在台账中)")
     out["text"] = "\n".join(lines)
@@ -401,8 +466,13 @@ def prior_year_period(report_date: str) -> str:
     return f"{int(y) - 1}{rest}"
 
 
-def as_of_period(records: list[dict], day: str, report_date: str,
-                 code: str | None = None, visible_next_day: bool = True) -> dict[str, dict]:
+def as_of_period(
+    records: list[dict],
+    day: str,
+    report_date: str,
+    code: str | None = None,
+    visible_next_day: bool = True,
+) -> dict[str, dict]:
     """**取某个特定报告期**在 day 时可见的版本(同比计算必需)。
 
     与 `as_of()` 的区别:`as_of` 给"最新可见期",本函数给"指定期的可见版本"。
@@ -441,8 +511,9 @@ def _ratio(cur, prev):
     return cur / prev - 1
 
 
-def pit_features(records: list[dict], day: str, code: str,
-                 visible_next_day: bool = True) -> dict:
+def pit_features(
+    records: list[dict], day: str, code: str, visible_next_day: bool = True
+) -> dict:
     """信号日 day 时**可见**的基本面特征(A 组:纯财务比率,不需市值)。
 
     全部 as-of:先取该 code 截至 day 可见的最新一期,再取**同口径上年同期的可见版本**算同比。
@@ -466,8 +537,13 @@ def pit_features(records: list[dict], day: str, code: str,
     # (与负基数同比抑制口径一致),给 None 而不是算出个数。
     if eps is not None and float(eps) > 0 and eps_d is not None:
         out["f_deduct_ratio"] = round(float(eps_d) / float(eps), 4)
-    prior = as_of_period(records, day, prior_year_period(cur["report_date"]),
-                         code=code, visible_next_day=visible_next_day).get(code)
+    prior = as_of_period(
+        records,
+        day,
+        prior_year_period(cur["report_date"]),
+        code=code,
+        visible_next_day=visible_next_day,
+    ).get(code)
     if prior:
         rv = _ratio(cur.get("revenue"), prior.get("revenue"))
         np_ = _ratio(cur.get("net_profit"), prior.get("net_profit"))
@@ -476,16 +552,18 @@ def pit_features(records: list[dict], day: str, code: str,
         if np_ is not None:
             out["f_np_yoy"] = round(np_, 4)
     try:
-        lag = (date.fromisoformat(str(day)[:10])
-               - date.fromisoformat(cur["notice_date"])).days
+        lag = (
+            date.fromisoformat(str(day)[:10]) - date.fromisoformat(cur["notice_date"])
+        ).days
         out["f_pit_lag_days"] = float(lag)
     except (ValueError, KeyError, TypeError):
         pass
     return out
 
 
-def as_of_period_latest(records: list[dict], day: str, code: str,
-                        visible_next_day: bool = True) -> dict | None:
+def as_of_period_latest(
+    records: list[dict], day: str, code: str, visible_next_day: bool = True
+) -> dict | None:
     """单只:截至 day 可见的最新一期(as_of 的单 code 便捷版)。"""
     got = as_of(records, day, code=code, visible_next_day=visible_next_day)
     return got.get(code)
@@ -503,14 +581,17 @@ def build_pit_feature_fn(records: list[dict], visible_next_day: bool = True):
         if c:
             by_code.setdefault(c, []).append(r)
     for c in by_code:
-        by_code[c].sort(key=lambda r: (r.get("report_date") or "", r.get("notice_date") or ""))
+        by_code[c].sort(
+            key=lambda r: (r.get("report_date") or "", r.get("notice_date") or "")
+        )
 
     def fn(code: str, as_of_day) -> dict:
         recs = by_code.get(str(code))
         if not recs:
             return {}
-        return pit_features(recs, str(as_of_day)[:10], str(code),
-                            visible_next_day=visible_next_day)
+        return pit_features(
+            recs, str(as_of_day)[:10], str(code), visible_next_day=visible_next_day
+        )
 
     return fn
 
@@ -518,30 +599,50 @@ def build_pit_feature_fn(records: list[dict], visible_next_day: bool = True):
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="PIT 财务:按报告期拉取,以公告日为可见日")
     ap.add_argument("--periods", nargs="*", help="报告期,如 2024-03-31(可多个)")
-    ap.add_argument("--since", type=int,
-                    help="从该年起拉所有季度末(需留一年跑道:首个信号年为 2015 时应从 2014 起,"
-                         "同比特征需要上一年度各期的当时可见版本)")
+    ap.add_argument(
+        "--since",
+        type=int,
+        help="从该年起拉所有季度末(需留一年跑道:首个信号年为 2015 时应从 2014 起,"
+        "同比特征需要上一年度各期的当时可见版本)",
+    )
     ap.add_argument("--all-quarters", action="store_true", help="配合 --since 使用")
     ap.add_argument("--out", default=str(LEDGER), help="输出 JSONL 路径")
-    ap.add_argument("--include-non-ashare", action="store_true",
-                    help="保留新三板/B股/CDR(默认只留 A 股;不加过滤会把 5890 只新三板灌进宇宙)")
+    ap.add_argument(
+        "--include-non-ashare",
+        action="store_true",
+        help="保留新三板/B股/CDR(默认只留 A 股;不加过滤会把 5890 只新三板灌进宇宙)",
+    )
     ap.add_argument("--as-of", help="PIT 查询:该日可见的最新一期(不拉网络)")
     ap.add_argument("--code", help="配合 --as-of 限定单只")
-    ap.add_argument("--visible-same-day", action="store_true",
-                    help="--as-of 时把公告当日算作可见(默认次日,因公告多在盘后发布)")
-    ap.add_argument("--verify", action="store_true",
-                    help="台账完整性自检:报告期缺口 + 逐期行数异常(有问题 exit 1)")
-    ap.add_argument("--verify-since", type=int,
-                    help="--verify 的应有报告期起始年(缺省按台账最早期推断,且只从台账实际首期起对齐)")
-    ap.add_argument("--verify-until",
-                    help="--verify 的自检终点(缺省=今天:台账停更两季也会在尾部报出缺期)")
+    ap.add_argument(
+        "--visible-same-day",
+        action="store_true",
+        help="--as-of 时把公告当日算作可见(默认次日,因公告多在盘后发布)",
+    )
+    ap.add_argument(
+        "--verify",
+        action="store_true",
+        help="台账完整性自检:报告期缺口 + 逐期行数异常(有问题 exit 1)",
+    )
+    ap.add_argument(
+        "--verify-since",
+        type=int,
+        help="--verify 的应有报告期起始年(缺省按台账最早期推断,且只从台账实际首期起对齐)",
+    )
+    ap.add_argument(
+        "--verify-until",
+        help="--verify 的自检终点(缺省=今天:台账停更两季也会在尾部报出缺期)",
+    )
     args = ap.parse_args(argv)
     out_path = Path(args.out)
 
     if args.verify:
         if args.periods or args.since or args.as_of:
-            print("[WARN] --verify 为纯自检模式,--periods/--since/--as-of 被忽略;"
-                  "补拉请先不带 --verify 运行", file=sys.stderr)
+            print(
+                "[WARN] --verify 为纯自检模式,--periods/--since/--as-of 被忽略;"
+                "补拉请先不带 --verify 运行",
+                file=sys.stderr,
+            )
         recs = load_ledger(out_path)
         if not recs:
             print(f"[ERR] 台账为空: {out_path}", file=sys.stderr)
@@ -552,8 +653,11 @@ def main(argv=None) -> int:
         if not rep["ok"]:
             missing = rep.get("missing") or []
             if missing:
-                print(f"\n补拉命令:\n  uv run python src/custos/datasource/local_tdx/{Path(__file__).name} "
-                      f"--periods {' '.join(missing)}", file=sys.stderr)
+                print(
+                    f"\n补拉命令:\n  uv run python src/custos/datasource/local_tdx/{Path(__file__).name} "
+                    f"--periods {' '.join(missing)}",
+                    file=sys.stderr,
+                )
             return 1
         return 0
 
@@ -562,13 +666,18 @@ def main(argv=None) -> int:
         if not recs:
             print(f"[ERR] 台账为空: {out_path}(先拉取)", file=sys.stderr)
             return 2
-        got = as_of(recs, args.as_of, code=args.code,
-                    visible_next_day=not args.visible_same_day)
-        print(f"截至 {args.as_of} 可见:{len(got)} 只"
-              f"({'公告当日即可见' if args.visible_same_day else '公告次日起可见'})")
+        got = as_of(
+            recs, args.as_of, code=args.code, visible_next_day=not args.visible_same_day
+        )
+        print(
+            f"截至 {args.as_of} 可见:{len(got)} 只"
+            f"({'公告当日即可见' if args.visible_same_day else '公告次日起可见'})"
+        )
         for c, r in sorted(got.items())[:20]:
-            print(f"  {c} {r['name']:<8} 报告期={r['report_date']} 公告={r['notice_date']}"
-                  f"(滞后{r['lag_days']}天) eps={r.get('eps')} roe={r.get('roe_waa')}")
+            print(
+                f"  {c} {r['name']:<8} 报告期={r['report_date']} 公告={r['notice_date']}"
+                f"(滞后{r['lag_days']}天) eps={r.get('eps')} roe={r.get('roe_waa')}"
+            )
         if len(got) > 20:
             print(f"  ...(共 {len(got)} 只)")
         return 0
@@ -588,7 +697,10 @@ def main(argv=None) -> int:
         except FetchIncomplete as exc:
             # 残缺期整期丢弃：写一半样本进台账，as_of() 会把它当完整期用，
             # 静默污染回测；缺期至少能被 verify_ledger 报出来。
-            print(f"[WARN] {p} 分页残缺，整期丢弃不落盘（请重拉该期）: {exc}", file=sys.stderr)
+            print(
+                f"[WARN] {p} 分页残缺，整期丢弃不落盘（请重拉该期）: {exc}",
+                file=sys.stderr,
+            )
             continue
         except Exception as exc:  # noqa: BLE001
             print(f"[WARN] {p} 拉取失败: {exc}", file=sys.stderr)
@@ -602,14 +714,18 @@ def main(argv=None) -> int:
         total += res["added"]
         lags = sorted(r["lag_days"] for r in recs)
         med = lags[len(lags) // 2] if lags else None
-        print(f"[OK] {p}: 原始 {st['raw']} → A股保留 {st['kept']} "
-              f"(非A股剔 {st['dropped_type']} / 无公告日剔 {st['dropped_no_notice']} / "
-              f"公告日不晚于报告期剔 {st['dropped_bad_lag']}"
-              + (f" / 脏值置空 {st['bad_value']}" if st.get("bad_value") else "")
-              + f"), 滞后中位 {med} 天, "
-              f"新增 {res['added']} 条(台账 {res['after']})")
+        print(
+            f"[OK] {p}: 原始 {st['raw']} → A股保留 {st['kept']} "
+            f"(非A股剔 {st['dropped_type']} / 无公告日剔 {st['dropped_no_notice']} / "
+            f"公告日不晚于报告期剔 {st['dropped_bad_lag']}"
+            + (f" / 脏值置空 {st['bad_value']}" if st.get("bad_value") else "")
+            + f"), 滞后中位 {med} 天, "
+            f"新增 {res['added']} 条(台账 {res['after']})"
+        )
     print(f"\n[OK] 共新增 {total} 条 → {out_path}")
-    print("提示:同比请用上年同期绝对值自行计算,勿用接口的 YSTZ/SJLTZ(次年同期发布时会被重算)")
+    print(
+        "提示:同比请用上年同期绝对值自行计算,勿用接口的 YSTZ/SJLTZ(次年同期发布时会被重算)"
+    )
     return 0
 
 

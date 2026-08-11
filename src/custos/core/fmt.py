@@ -8,6 +8,7 @@
 强行统一会改报告措辞而收益有限。这里只收敛**真正重复**的那几个，
 占位文本做成参数而不是写死。
 """
+
 from __future__ import annotations
 
 import math

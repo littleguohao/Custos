@@ -5,6 +5,7 @@
 同时又收紧了 as_of 陈旧判定,两者叠加使 17:00 盘后复盘直接失败。此后硬闸改为显式 opt-in,
 默认只落盘+留痕。本文件把"默认不阻断"钉住。
 """
+
 from __future__ import annotations
 
 import json
@@ -16,7 +17,7 @@ class TestBuildGateCmd:
     def test_postclose_default_does_not_hard_block(self):
         cmd = dp.build_gate_cmd("2026-07-30", "postclose")
         assert "--require-trading-day" in cmd
-        assert "--require-quality" not in cmd            # 默认不得阻断盘后链
+        assert "--require-quality" not in cmd  # 默认不得阻断盘后链
 
     def test_premarket_default_does_not_hard_block(self):
         assert "--require-quality" not in dp.build_gate_cmd("2026-07-30", "premarket")
@@ -24,7 +25,9 @@ class TestBuildGateCmd:
     def test_strict_flag_enables_block_only_for_postclose(self):
         assert "--require-quality" in dp.build_gate_cmd("2026-07-30", "postclose", True)
         # 盘前/盘中即使开了开关也不阻断:0AMV/宽度本就要等收盘,blocked 属正常
-        assert "--require-quality" not in dp.build_gate_cmd("2026-07-30", "premarket", True)
+        assert "--require-quality" not in dp.build_gate_cmd(
+            "2026-07-30", "premarket", True
+        )
 
     def test_date_and_script_present(self):
         cmd = dp.build_gate_cmd("2026-07-30", "postclose")
@@ -41,8 +44,14 @@ class TestPipelineLogOnEarlyExit:
 
     def test_write_pipeline_log_creates_file_with_stages(self, tmp_path, monkeypatch):
         monkeypatch.setattr(dp, "LOGS", tmp_path)
-        stages = [{"stage": "runtime_gate", "ok": False, "returncode": 4,
-                   "note": "market_quality=blocked(score=0.2)"}]
+        stages = [
+            {
+                "stage": "runtime_gate",
+                "ok": False,
+                "returncode": 4,
+                "note": "market_quality=blocked(score=0.2)",
+            }
+        ]
         path = dp._write_pipeline_log("2026-07-31", stages)
         assert path.name == "2026-07-31_daily_pipeline_log.json"
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -61,22 +70,42 @@ class TestGateStatusNote:
         monkeypatch.setattr(dp, "DATA", tmp_path)
         (tmp_path / "quality").mkdir(parents=True, exist_ok=True)
         (tmp_path / "quality" / "2026-07-30_runtime_gate.json").write_text(
-            json.dumps(gate, ensure_ascii=False), encoding="utf-8")
+            json.dumps(gate, ensure_ascii=False), encoding="utf-8"
+        )
 
     def test_note_records_status_and_stale_fields(self, tmp_path, monkeypatch):
-        self._write(tmp_path, monkeypatch, {
-            "market_quality": {"status": "degraded", "quality_score": 0.4,
-                               "checks": [{"field": "market_breadth", "quality": "stale"},
-                                          {"field": "0AMV", "quality": "confirmed"}]},
-            "position_gate": {"status": "degraded"}})
+        self._write(
+            tmp_path,
+            monkeypatch,
+            {
+                "market_quality": {
+                    "status": "degraded",
+                    "quality_score": 0.4,
+                    "checks": [
+                        {"field": "market_breadth", "quality": "stale"},
+                        {"field": "0AMV", "quality": "confirmed"},
+                    ],
+                },
+                "position_gate": {"status": "degraded"},
+            },
+        )
         note = dp.gate_status_note("2026-07-30")
         assert "market_quality=degraded" in note and "score=0.4" in note
         assert "stale=market_breadth" in note and "position_gate=degraded" in note
 
     def test_no_stale_section_omitted(self, tmp_path, monkeypatch):
-        self._write(tmp_path, monkeypatch, {
-            "market_quality": {"status": "pass", "quality_score": 1.0, "checks": []},
-            "position_gate": {"status": "pass"}})
+        self._write(
+            tmp_path,
+            monkeypatch,
+            {
+                "market_quality": {
+                    "status": "pass",
+                    "quality_score": 1.0,
+                    "checks": [],
+                },
+                "position_gate": {"status": "pass"},
+            },
+        )
         assert "stale=" not in dp.gate_status_note("2026-07-30")
 
     def test_missing_file_is_reported_not_raised(self, tmp_path, monkeypatch):

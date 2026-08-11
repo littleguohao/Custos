@@ -10,6 +10,7 @@
 B2 对本项目的主要用途是**验证信号**：把 B1 样本按"N 日内是否出现 B2"分组对比，
 直接回答"什么样的 B1 会启动"。
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -25,11 +26,17 @@ def _mk(rows):
     c = np.array([r[0] for r in rows], float)
     v = np.array([r[1] for r in rows], float)
     o = np.concatenate(([c[0]], c[:-1]))
-    return pd.DataFrame({
-        "date": pd.bdate_range("2023-01-02", periods=len(c)),
-        "open": o, "high": np.maximum(c, o) * 1.012, "low": np.minimum(c, o) * 0.988,
-        "close": c, "volume": v, "amount": v * c,
-    })
+    return pd.DataFrame(
+        {
+            "date": pd.bdate_range("2023-01-02", periods=len(c)),
+            "open": o,
+            "high": np.maximum(c, o) * 1.012,
+            "low": np.minimum(c, o) * 0.988,
+            "close": c,
+            "volume": v,
+            "amount": v * c,
+        }
+    )
 
 
 def _b1_then(final_bar, n_flat=30, n_drop=8, drop=0.25, v_flat=4.0e5, v_drop=3.0e5):
@@ -60,7 +67,7 @@ class TestB2:
     """B2 的四条硬条件 + 无上影线加分项。"""
 
     def test_hits_all_conditions(self):
-        df = _b1_then(lambda p: (p * 1.055, 9.0e5))     # 涨 5.5% + 量 ×3
+        df = _b1_then(lambda p: (p * 1.055, 9.0e5))  # 涨 5.5% + 量 ×3
         r = bs.detect_b2(df)
         assert r["hit"] is True
         assert r["b1_before"] is True and r["b1_bars_ago"] == 1
@@ -76,12 +83,12 @@ class TestB2:
         assert r["b1_before"] is False and r["hit"] is False
 
     def test_requires_gain_over_4pct(self):
-        df = _b1_then(lambda p: (p * 1.02, 9.0e5))      # 只涨 2%
+        df = _b1_then(lambda p: (p * 1.02, 9.0e5))  # 只涨 2%
         r = bs.detect_b2(df)
         assert r["gain_ok"] is False and r["hit"] is False
 
     def test_requires_volume_up(self):
-        df = _b1_then(lambda p: (p * 1.055, 1.0e5))     # 涨够但缩量
+        df = _b1_then(lambda p: (p * 1.055, 1.0e5))  # 涨够但缩量
         r = bs.detect_b2(df)
         assert r["vol_up"] is False and r["hit"] is False
 
@@ -92,7 +99,7 @@ class TestB2:
         for _ in range(8):
             p -= 0.25
             rows.append((p, 3e5))
-        for _ in range(6):                               # 连续大涨把 J 拉高
+        for _ in range(6):  # 连续大涨把 J 拉高
             p *= 1.06
             rows.append((p, 9e5))
         r = bs.detect_b2(_mk(rows))
@@ -103,11 +110,11 @@ class TestB2:
         """无上影线是加分项,不影响 hit（原文"最好",非必须）。"""
         df = _b1_then(lambda p: (p * 1.055, 9.0e5))
         r = bs.detect_b2(df)
-        assert r["hit"] is True                          # 命中与上影无关
+        assert r["hit"] is True  # 命中与上影无关
         assert "no_upper_shadow" in r
 
     def test_b1_window_is_parameterized(self):
-        """"B1 之后"的天数原文未给,必须可调（现默认 5,待回测）。"""
+        """ "B1 之后"的天数原文未给,必须可调（现默认 5,待回测）。"""
         df = _b1_then(lambda p: (p * 1.055, 9.0e5))
         assert bs.detect_b2(df, b1_within=1)["b1_before"] is True
         assert bs.detect_b2(df, b1_within=0)["b1_before"] is False
@@ -125,13 +132,13 @@ class TestBottomSurge:
     def surge_df():
         base = [(10.0 + 0.15 * np.sin(i / 4), 4.0e5) for i in range(200)]
         p = base[-1][0]
-        rows = list(base) + [(p * 1.09, 1.4e6)]          # 巨量点火 +9%、3.5×量
+        rows = list(base) + [(p * 1.09, 1.4e6)]  # 巨量点火 +9%、3.5×量
         for _ in range(4):
-            rows.append((rows[-1][0] * 1.02, 9.0e5))     # 后4天量 > 巨量一半
+            rows.append((rows[-1][0] * 1.02, 9.0e5))  # 后4天量 > 巨量一半
         for _ in range(6):
             rows.append((rows[-1][0] * 1.012, 7.0e5))
         q = rows[-1][0]
-        for _ in range(9):                               # 缩量回调 → J 落低位
+        for _ in range(9):  # 缩量回调 → J 落低位
             q *= 0.978
             rows.append((q, 2.6e5))
         return _mk(rows)
@@ -141,13 +148,13 @@ class TestBottomSurge:
         assert r["hit"] is True
         assert r["vol_ratio_ma20"] >= bs.SURGE_VOL_MULT
         assert r["gain_pct"] >= bs.SURGE_GAIN_PCT
-        assert r["hold_4d_ok"] is True                   # 后4天量不低于巨量一半
-        assert r["cross_ma60"] is True                   # 穿越60日线
-        assert r["new_high_9m"] is True                  # 9个月新高
+        assert r["hold_4d_ok"] is True  # 后4天量不低于巨量一半
+        assert r["cross_ma60"] is True  # 穿越60日线
+        assert r["new_high_9m"] is True  # 9个月新高
         assert r["strict_hit"] is True
 
     def test_no_surge_in_quiet_decline(self):
-        df = _mk([(22.0 * (0.997 ** i), 3.0e5) for i in range(210)])
+        df = _mk([(22.0 * (0.997**i), 3.0e5) for i in range(210)])
         r = bs.detect_bottom_surge(df)
         assert r["hit"] is False and r["reason"] == "no_surge"
 
@@ -184,7 +191,7 @@ class TestSurgeThenB1:
         assert r["hit"] is True and r["surge_hit"] is True and r["in_b1_zone"] is True
 
     def test_no_hit_without_surge(self):
-        df = _mk([(22.0 * (0.997 ** i), 3.0e5) for i in range(210)])
+        df = _mk([(22.0 * (0.997**i), 3.0e5) for i in range(210)])
         r = bs.detect_surge_then_b1(df)
         assert r["hit"] is False
 
@@ -207,16 +214,35 @@ class TestRegistration:
     def test_scorer_registered(self, name):
         assert name in bt.SCORERS
 
-    @pytest.mark.parametrize("name", ["b2", "bottom_surge", "bottom_surge_strict",
-                                      "surge_then_b1", "surge_strict_then_b1"])
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "b2",
+            "bottom_surge",
+            "bottom_surge_strict",
+            "surge_then_b1",
+            "surge_strict_then_b1",
+        ],
+    )
     def test_gate_registered(self, name):
         assert name in bt.ENTRY_GATES
 
-    @pytest.mark.parametrize("name", ["b2", "bottom_surge", "bottom_surge_strict",
-                                      "surge_then_b1", "surge_strict_then_b1"])
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "b2",
+            "bottom_surge",
+            "bottom_surge_strict",
+            "surge_then_b1",
+            "surge_strict_then_b1",
+        ],
+    )
     def test_gates_never_raise(self, name):
-        for df in (_mk([(10.0, 4e5)] * 5), _mk([(10.0, 4e5)] * 250),
-                   _b1_then(lambda p: (p * 1.055, 9.0e5))):
+        for df in (
+            _mk([(10.0, 4e5)] * 5),
+            _mk([(10.0, 4e5)] * 250),
+            _b1_then(lambda p: (p * 1.055, 9.0e5)),
+        ):
             assert isinstance(bt.ENTRY_GATES[name](df), bool)
 
     def test_b2_scorer_returns_none_on_short_history(self):
@@ -226,7 +252,7 @@ class TestRegistration:
     def test_b2_score_counts_hard_conditions(self):
         df = _b1_then(lambda p: (p * 1.055, 9.0e5))
         r = bt.SCORERS["b2"](df, "600000")
-        assert r["components"]["hard_conditions"] == 4      # 四条硬条件全中
+        assert r["components"]["hard_conditions"] == 4  # 四条硬条件全中
         assert r["score"] >= 80.0
 
 
@@ -237,6 +263,7 @@ class TestNotWiredIntoScreening:
         import inspect
 
         from custos.pipeline.screening import score_candidates as sc
+
         src = inspect.getsource(sc)
         for name in ("detect_b2", "bottom_surge", "b2_surge_factor"):
             assert name not in src, "接入选股链前必须先有回测证据"

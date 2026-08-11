@@ -16,6 +16,7 @@ CLI::
 
 输出 ``data/sectors/{date}_tq_sector_map.json``，并打印一行 JSON 摘要。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -39,7 +40,8 @@ SOURCE = "tq_tqcenter"
 # tdxzs3.cfg 是 tdxzs.cfg 的超集（额外含 467 个 881xxx 细分行业），优先使用
 TDXZS_CFG_CANDIDATES = (
     TDX_ROOT / "T0002" / "hq_cache" / "tdxzs3.cfg",
-    TDX_ROOT / "T0002" / "hq_cache" / "tdxzs.cfg")
+    TDX_ROOT / "T0002" / "hq_cache" / "tdxzs.cfg",
+)
 
 # tdxzs*.cfg 第 3 字段（官方板块类型）→ 分类
 _TDX_TYPE_CATEGORY = {
@@ -52,8 +54,8 @@ _TDX_TYPE_CATEGORY = {
 
 _CODE_RE = re.compile(r"^(88[01]\d{3})(?:\.(?:SH|SZ|BJ))?$", re.IGNORECASE)
 
-DEFAULT_MIN_SUCCESS_RATE = 0.6   # 成分股取数成功率门槛，低于此值 main 非零退出
-DEFAULT_SLEEP_MS = 0             # 板块间限速（毫秒）；默认 0 保持既有节奏，生产可调
+DEFAULT_MIN_SUCCESS_RATE = 0.6  # 成分股取数成功率门槛，低于此值 main 非零退出
+DEFAULT_SLEEP_MS = 0  # 板块间限速（毫秒）；默认 0 保持既有节奏，生产可调
 
 
 def _err(code: str, detail: str = "", **extra: Any) -> dict:
@@ -72,7 +74,8 @@ def is_tdxw_running() -> bool:
             ["tasklist", "/FI", "IMAGENAME eq TdxW.exe", "/NH"],
             capture_output=True,
             text=True,
-            timeout=15)
+            timeout=15,
+        )
     except Exception:
         return False
     if proc.returncode != 0:
@@ -210,7 +213,9 @@ class TQSectorSession:
         except Exception as exc:  # noqa: BLE001
             return _err("sector_list_failed", exc)
         if not isinstance(codes, (list, tuple)):
-            return _err("sector_list_failed", f"unexpected result: {type(codes).__name__}")
+            return _err(
+                "sector_list_failed", f"unexpected result: {type(codes).__name__}"
+            )
         return list(codes)
 
     def get_sector_stocks(self, sector_code: str) -> Any:
@@ -226,7 +231,8 @@ class TQSectorSession:
             return _err(
                 "sector_stocks_failed",
                 f"unexpected result: {type(stocks).__name__}",
-                sector=sector_code)
+                sector=sector_code,
+            )
         return list(stocks)
 
     def build_sector_map(
@@ -234,7 +240,8 @@ class TQSectorSession:
         limit: Optional[int] = None,
         progress: bool = False,
         sleep_ms: int = 0,
-        progress_every: int = 50) -> dict:
+        progress_every: int = 50,
+    ) -> dict:
         """全量板块映射。任何失败都体现在 error/errors 字段，绝不 raise。
 
         ``sleep_ms``：板块之间的限速。串行保留（不引入并发复杂度），但 400+ 次
@@ -306,7 +313,8 @@ class TQSectorSession:
                 print(
                     f"[tq_sector] {idx}/{len(codes)} sectors, 失败 {failed}, "
                     f"{time.monotonic() - started:.1f}s",
-                    flush=True)
+                    flush=True,
+                )
 
         succeeded = len(sectors) - failed
         quality = {
@@ -315,7 +323,9 @@ class TQSectorSession:
             "name_coverage": round(named / len(sectors), 4) if sectors else 0.0,
             "sector_success": succeeded,
             "sector_failed": failed,
-            "sector_success_rate": round(succeeded / len(sectors), 4) if sectors else 0.0,
+            "sector_success_rate": round(succeeded / len(sectors), 4)
+            if sectors
+            else 0.0,
         }
         return {
             "as_of": as_of,
@@ -330,28 +340,45 @@ class TQSectorSession:
 
 
 def main(argv: Optional[list] = None) -> int:
-    parser = argparse.ArgumentParser(description="TQ 板块映射采集（独立封装，不影响现有消费者）")
-    parser.add_argument("--date", required=True, help="采集日期 YYYY-MM-DD，用于输出文件命名")
-    parser.add_argument("--limit", type=int, default=None, help="只采集前 N 个板块（调试用）")
+    parser = argparse.ArgumentParser(
+        description="TQ 板块映射采集（独立封装，不影响现有消费者）"
+    )
+    parser.add_argument(
+        "--date", required=True, help="采集日期 YYYY-MM-DD，用于输出文件命名"
+    )
+    parser.add_argument(
+        "--limit", type=int, default=None, help="只采集前 N 个板块（调试用）"
+    )
     parser.add_argument("--progress", action="store_true", help="打印采集进度")
-    parser.add_argument("--sleep-ms", type=int, default=DEFAULT_SLEEP_MS,
-                        help=f"板块之间限速（毫秒，默认 {DEFAULT_SLEEP_MS}）；"
-                             "400+ 板块串行请求，不限速会把 TdxW 打满")
-    parser.add_argument("--min-success-rate", type=float, default=DEFAULT_MIN_SUCCESS_RATE,
-                        help=f"成分股取数成功率低于此值则非零退出（默认 {DEFAULT_MIN_SUCCESS_RATE}）；"
-                             "此前单板块失败只进 errors，430 个全失败也 exit 0")
+    parser.add_argument(
+        "--sleep-ms",
+        type=int,
+        default=DEFAULT_SLEEP_MS,
+        help=f"板块之间限速（毫秒，默认 {DEFAULT_SLEEP_MS}）；"
+        "400+ 板块串行请求，不限速会把 TdxW 打满",
+    )
+    parser.add_argument(
+        "--min-success-rate",
+        type=float,
+        default=DEFAULT_MIN_SUCCESS_RATE,
+        help=f"成分股取数成功率低于此值则非零退出（默认 {DEFAULT_MIN_SUCCESS_RATE}）；"
+        "此前单板块失败只进 errors，430 个全失败也 exit 0",
+    )
     args = parser.parse_args(argv)
 
     started = time.monotonic()
     with TQSectorSession() as session:
-        result = session.build_sector_map(limit=args.limit, progress=args.progress,
-                                          sleep_ms=args.sleep_ms)
+        result = session.build_sector_map(
+            limit=args.limit, progress=args.progress, sleep_ms=args.sleep_ms
+        )
     result["date"] = args.date
 
     out_path = SECTORS_DIR / f"{args.date}_tq_sector_map.json"
     SECTORS_DIR.mkdir(parents=True, exist_ok=True)
     require("tq_sector_map", result)
-    out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    out_path.write_text(
+        json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     quality = result.get("quality") or {}
     rate = quality.get("sector_success_rate")
@@ -368,7 +395,9 @@ def main(argv: Optional[list] = None) -> int:
     else:
         status = "ok"
     result["collection_status"] = status
-    out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    out_path.write_text(
+        json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     summary = {
         "date": args.date,

@@ -8,6 +8,7 @@
 ②每个单元都标了证据等级与状态（**没等级的结论就是猜测**）；
 ③README 主图覆盖全部单元，不许有孤儿文件。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -21,7 +22,9 @@ LEVELS = {"L0", "L1", "L2", "L3", "L4"}
 
 
 def test_units_exist():
-    assert len(UNITS) == 17, f"预期 17 个研究单元，实际 {len(UNITS)}：{[p.name for p in UNITS]}"
+    assert len(UNITS) == 17, (
+        f"预期 17 个研究单元，实际 {len(UNITS)}：{[p.name for p in UNITS]}"
+    )
 
 
 @pytest.mark.parametrize("path", UNITS, ids=lambda p: p.name)
@@ -35,7 +38,9 @@ class TestUnitStructure:
         i_t, i_g, i_c = s.index("## 主题"), s.index("## 目标"), s.index("## 结论")
         assert i_t < i_g < i_c, f"{path.name} 三段顺序不对"
         assert "## 证据与过程" in s, f"{path.name} 缺证据段"
-        assert i_c < s.index("## 证据与过程"), f"{path.name} 结论必须在证据之前（给人读的在前）"
+        assert i_c < s.index("## 证据与过程"), (
+            f"{path.name} 结论必须在证据之前（给人读的在前）"
+        )
 
     def test_has_evidence_level(self, path):
         """**没有证据等级的结论就是猜测。** L3 及以下不得进 live。"""
@@ -52,8 +57,10 @@ class TestUnitStructure:
     def test_conclusion_is_not_empty(self, path):
         """结论段不得是占位符——空结论比没有更糟，它看起来像有结论。"""
         s = path.read_text(encoding="utf-8")
-        body = s[s.index("## 结论") + len("## 结论"):s.index("---\n\n## 证据与过程")]
-        assert len(body.strip()) >= 80, f"{path.name} 结论段过短（{len(body.strip())} 字）"
+        body = s[s.index("## 结论") + len("## 结论") : s.index("---\n\n## 证据与过程")]
+        assert len(body.strip()) >= 80, (
+            f"{path.name} 结论段过短（{len(body.strip())} 字）"
+        )
 
     def test_linked_from_readme(self, path):
         """孤儿单元＝写了没人读。"""
@@ -94,8 +101,9 @@ class TestReadmeIndex:
         s = self._readme()
         assert not (RESEARCH / "B1_BACKTEST_FINDINGS.md").exists()
         # 提到原文件是可以的（说明来历），但必须点明它在 git 历史里而非现存文件
-        assert "B1_BACKTEST_FINDINGS" not in s or "git 历史" in s, \
+        assert "B1_BACKTEST_FINDINGS" not in s or "git 历史" in s, (
             "提到原文件必须说明它已在 git 历史里，否则读者会去找一个不存在的文件"
+        )
 
 
 class TestNoStaleReferences:
@@ -108,7 +116,11 @@ class TestNoStaleReferences:
             if p.suffix not in {".py", ".md", ".json", ".cmd"}:
                 continue
             # 排除 research/ 目录（单元头部指向 git 历史是有意的）与本测试自身
-            if ".git" in p.parts or RESEARCH == p.parent or p.name == pathlib.Path(__file__).name:
+            if (
+                ".git" in p.parts
+                or RESEARCH == p.parent
+                or p.name == pathlib.Path(__file__).name
+            ):
                 continue
             try:
                 s = p.read_text(encoding="utf-8")
@@ -117,8 +129,9 @@ class TestNoStaleReferences:
             for i, ln in enumerate(s.splitlines(), 1):
                 if "B1_BACKTEST_FINDINGS" in ln:
                     bad.append(f"{p.relative_to(root)}:{i}")
-        assert not bad, ("这些引用指向已拆分删除的文件，请改到具体单元：\n  "
-                         + "\n  ".join(bad))
+        assert not bad, (
+            "这些引用指向已拆分删除的文件，请改到具体单元：\n  " + "\n  ".join(bad)
+        )
 
 
 class TestRerunMarks:
@@ -169,7 +182,7 @@ class TestRerunMarks:
         """标了却不在清单里 = 没人会去跑。"""
         readme = (RESEARCH / "README.md").read_text(encoding="utf-8")
         assert "重跑清单" in readme
-        seg = readme[readme.index("重跑清单"):]
+        seg = readme[readme.index("重跑清单") :]
         for name in self._marked():
             assert name in seg, f"{name} 未列入 README 重跑清单"
 
@@ -187,7 +200,7 @@ class TestRerunMarks:
         bad = []
         for name in self._marked():
             s = (RESEARCH / name).read_text(encoding="utf-8")
-            head = s[:s.index("## 主题")]
+            head = s[: s.index("## 主题")]
             if re.search(r"\*\*证据等级\*\*：L4\s*　", head) and "**状态**：✅" in head:
                 bad.append(name)
         assert not bad, f"这些单元的等级/状态与重跑标记自相矛盾：{bad}"
@@ -202,8 +215,10 @@ class TestStrategyDocsFlagUnstableNumbers:
     `01_swing_rules.md` 写「含退市跨年 OOS」（对 2021-08 后的窗口不成立）。
     """
 
-    DOCS = ("governance/strategy/b1/90_research_summary.md",
-            "governance/strategy/b1/01_swing_rules.md")
+    DOCS = (
+        "governance/strategy/b1/90_research_summary.md",
+        "governance/strategy/b1/01_swing_rules.md",
+    )
 
     @pytest.mark.parametrize("rel", DOCS)
     def test_points_to_rerun_list(self, rel):
@@ -215,10 +230,13 @@ class TestStrategyDocsFlagUnstableNumbers:
     def test_no_stale_debias_claim(self, rel):
         """不得再声称近期窗口「含退市/已去偏」而不加限定。"""
         root = RESEARCH.parents[1]
-        for i, ln in enumerate((root / rel).read_text(encoding="utf-8").splitlines(), 1):
+        for i, ln in enumerate(
+            (root / rel).read_text(encoding="utf-8").splitlines(), 1
+        ):
             if "含退市" in ln and "⚠️" not in ln and "不成立" not in ln:
-                assert "1999" in ln or "老 bundle" in ln or "qlib" not in ln, \
+                assert "1999" in ln or "老 bundle" in ln or "qlib" not in ln, (
                     f"{rel}:{i} 无限定地声称含退市：{ln.strip()[:80]!r}"
+                )
 
 
 class TestSummaryTracksRerunState:
@@ -243,8 +261,8 @@ class TestSummaryTracksRerunState:
         # ⚠️ 终止于**下一个任意级别的标题**（h2/h3/...都算）：清单后面紧跟的
         # 「### 三个根因」是 h3，只认 "\n## " 会让后续小节里带 [Rn] 的表格行
         # 静默混进两个桶（2026-08-11 评审指出的脆弱点）。
-        m = re.search(r"\n#{2,6} ", s[i + 5:])
-        return s[i:i + 5 + m.start()] if m else s[i:]
+        m = re.search(r"\n#{2,6} ", s[i + 5 :])
+        return s[i : i + 5 + m.start()] if m else s[i:]
 
     def _rows(self):
         """重跑清单的表格数据行：(状态列, 单元号)。表头/分隔行被剔除。
@@ -257,7 +275,11 @@ class TestSummaryTracksRerunState:
                 continue
             cells = [c.strip() for c in ln.split("|")]
             # cells[0] 是行首 "|" 前的空串；cells[1]=状态列，cells[2]=单元列
-            if len(cells) < 4 or cells[1] in ("", "优先级") or set(cells[1]) <= set("-: "):
+            if (
+                len(cells) < 4
+                or cells[1] in ("", "优先级")
+                or set(cells[1]) <= set("-: ")
+            ):
                 continue
             m = re.search(r"\[(R\d+)\]", cells[2])
             if m:
@@ -288,7 +310,8 @@ class TestSummaryTracksRerunState:
         s = (RESEARCH.parents[1] / self.SUMMARY).read_text(encoding="utf-8")
         for bad in ("量级数字勿引用", "量级数字待重跑", "量级待重跑", "量级待重估"):
             assert bad not in s, (
-                f"R1 量级已重取，但摘要页仍写「{bad}」—— 请同步（见 R1「量级」节）")
+                f"R1 量级已重取，但摘要页仍写「{bad}」—— 请同步（见 R1「量级」节）"
+            )
 
     def test_summary_still_points_at_pending_units(self):
         """⚠️ 仍有单元待重跑时，摘要页必须点名它们 —— 不能只说「见重跑清单」。
@@ -304,4 +327,5 @@ class TestSummaryTracksRerunState:
         missing = [u for u in pending if not re.search(rf"\b{u}\b", s)]
         assert not missing, (
             f"以下单元仍待重跑但摘要页未点名：{missing}；"
-            f"摘要页的结论若依赖它们，读者无从知道哪条还悬着")
+            f"摘要页的结论若依赖它们，读者无从知道哪条还悬着"
+        )

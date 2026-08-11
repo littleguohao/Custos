@@ -12,6 +12,7 @@
 ③ **三处已知问题必须留在索引里**直到真正解决 —— 这类问题最容易随时间被
    当作「已经这样了」而接受。
 """
+
 from __future__ import annotations
 
 import json
@@ -74,15 +75,18 @@ class TestLayout:
         for d in declared:
             name = pathlib.Path(d).name
             if "deprecated" in name:
-                assert name.startswith("99_deprecated_"), \
+                assert name.startswith("99_deprecated_"), (
                     f"{d} 含 deprecated 却不是 99_deprecated_* 命名"
+                )
 
     def test_configs_keep_upper_snake(self):
         """代码消费的配置保持 UPPER_SNAKE（与 contracts/ 一致，一眼看出代码在读它）。"""
         for s in reg()["strategies"]:
             for c in s["configs"]:
                 name = pathlib.Path(c).name
-                assert re.fullmatch(r"[A-Z0-9_]+\.json", name), f"{c} 应为 UPPER_SNAKE.json"
+                assert re.fullmatch(r"[A-Z0-9_]+\.json", name), (
+                    f"{c} 应为 UPPER_SNAKE.json"
+                )
 
 
 class TestRegistry:
@@ -129,8 +133,11 @@ class TestRegistry:
         for x in r["shared_rules"]:
             declared.add(x["doc"])
         # as_posix()：Windows 下 relative_to 产出反斜杠，与注册表里的正斜杠永不匹配
-        actual = {p.relative_to(STRATEGY).as_posix() for p in STRATEGY.rglob("*")
-                  if p.is_file() and p.name not in ("README.md", "STRATEGY_REGISTRY.json")}
+        actual = {
+            p.relative_to(STRATEGY).as_posix()
+            for p in STRATEGY.rglob("*")
+            if p.is_file() and p.name not in ("README.md", "STRATEGY_REGISTRY.json")
+        }
         assert actual <= declared, f"未登记的文件：{sorted(actual - declared)}"
 
     def test_roles_and_statuses_valid(self):
@@ -173,8 +180,9 @@ class TestDocHeaders:
 
     @pytest.mark.parametrize("doc", DOCS, ids=lambda p: str(p.relative_to(STRATEGY)))
     def test_no_bom(self, doc):
-        assert not doc.read_text(encoding="utf-8").startswith("\ufeff"), \
+        assert not doc.read_text(encoding="utf-8").startswith("\ufeff"), (
             f"{doc.name} 带 BOM"
+        )
 
 
 class TestReferencedPathsExist:
@@ -211,8 +219,9 @@ class TestReferencedPathsExist:
                     # 归堆（src/{core,pipeline,...}）后文档保持「stage/文件.py」简写，
                     # 按相对路径后缀匹配
                     if not (ROOT / "src" / "custos" / path).exists() and not any(
-                            str(p.relative_to(ROOT / "src")).endswith("/" + path)
-                            for p in (ROOT / "src").rglob("*.py")):
+                        str(p.relative_to(ROOT / "src")).endswith("/" + path)
+                        for p in (ROOT / "src").rglob("*.py")
+                    ):
                         bad.append(f"{doc.relative_to(STRATEGY).as_posix()}: {tok}")
         assert not bad, f"「代码依赖」里的路径不存在：{bad}"
 
@@ -246,8 +255,9 @@ class TestReversalKMatchesCode:
     }
 
     def _code(self):
-        return (ROOT / "src" / "custos" / "pipeline" / "screening"
-                / "enrich_candidates.py").read_text(encoding="utf-8")
+        return (
+            ROOT / "src" / "custos" / "pipeline" / "screening" / "enrich_candidates.py"
+        ).read_text(encoding="utf-8")
 
     @pytest.mark.parametrize("name,want", sorted(CONSTS.items()))
     def test_constant_value(self, name, want):
@@ -259,9 +269,11 @@ class TestReversalKMatchesCode:
         与今天反复踩的「查字符串形式而非语义」同形：**能读真值就别读源码。**
         """
         import sys as _s
+
         _s.path.insert(0, str(ROOT / "src"))
         _s.path.insert(0, str(ROOT / "src" / "custos" / "pipeline" / "screening"))
         from custos.pipeline.screening import enrich_candidates as ec
+
         got = getattr(ec, name, None)
         assert got is not None, f"代码里找不到常量 {name}"
         assert float(got) == want, f"{name} 实际 {got}、索引记 {want} —— 必须一起改"
@@ -301,9 +313,10 @@ class TestReversalKMatchesCode:
         assert (bt.REVERSAL_CHANGE_MIN_PCT, bt.REVERSAL_CHANGE_MAX_PCT) == (-2.0, 2.0)
 
         mods = reversal_thresholds(B1_REVK_CHG_PCT="3.0")
-        assert (mods["b1_thresholds"].REVERSAL_CHANGE_MIN_PCT,
-                mods["b1_thresholds"].REVERSAL_CHANGE_MAX_PCT) == (-3.0, 3.0), \
-            "MIN/MAX 必须由 PCT 派生，不是各写一个字面量"
+        assert (
+            mods["b1_thresholds"].REVERSAL_CHANGE_MIN_PCT,
+            mods["b1_thresholds"].REVERSAL_CHANGE_MAX_PCT,
+        ) == (-3.0, 3.0), "MIN/MAX 必须由 PCT 派生，不是各写一个字面量"
 
 
 class TestKnownIssuesStayVisible:
@@ -333,8 +346,9 @@ class TestKnownIssuesStayVisible:
         cz = (STRATEGY / "cz" / "01_cognition_framework.md").read_text(encoding="utf-8")
         assert "只适用于 CZ 语境" in cz[:2000], "CZ 头部要限定 15%/20% 的适用范围"
         k = cz.index("### 强制止损体系")
-        assert "仅 CZ 长期持有语境" in cz[k:k + 400], \
+        assert "仅 CZ 长期持有语境" in cz[k : k + 400], (
             "「强制止损体系」那一节必须就地限定——它的措辞是普适口气，最易被误读"
+        )
 
         b1 = (STRATEGY / "b1" / "01_swing_rules.md").read_text(encoding="utf-8")
         assert "B1 按本文档的规则止损" in b1[:2500]
@@ -378,13 +392,23 @@ class TestSalvagedBuyPlanChecklist:
 
     DOC = STRATEGY / "b1" / "03_execution_discipline.md"
 
-    @pytest.mark.parametrize("item", [
-        "触发信号", "买入价格区间", "首仓比例", "加仓条件",
-        "无效条件", "止损位", "时间止损", "风险等级",
-    ])
+    @pytest.mark.parametrize(
+        "item",
+        [
+            "触发信号",
+            "买入价格区间",
+            "首仓比例",
+            "加仓条件",
+            "无效条件",
+            "止损位",
+            "时间止损",
+            "风险等级",
+        ],
+    )
     def test_checklist_item_present(self, item):
-        assert item in self.DOC.read_text(encoding="utf-8"), \
+        assert item in self.DOC.read_text(encoding="utf-8"), (
             f"买入计划必备项缺「{item}」—— 这是删已废文档时抢救来的清单，不许再丢"
+        )
 
     def test_hard_rule_present(self):
         """**缺任一项不得放行**——没有这条，清单只是建议。"""

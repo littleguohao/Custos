@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """sync_compass_amv 单测：台账合并（新增/跳过重复/格式）、amv_0day 写入
 （存在/不存在/已 confirmed 不覆盖）、compass 失败优雅降级。"""
+
 from __future__ import annotations
 
 import json
@@ -11,12 +12,36 @@ from custos.datasource import sync_compass_amv as sync_mod
 
 def _records() -> list:
     return [
-        {"date": "2026-07-15", "open": 1, "high": 2, "low": 0.5, "close": 1.5,
-         "volume": 1e11, "amount": 2e12, "change_pct": -2.53},
-        {"date": "2026-07-16", "open": 1, "high": 2, "low": 0.5, "close": 1.4,
-         "volume": 1e11, "amount": 2e12, "change_pct": -3.5},
-        {"date": "2026-07-17", "open": 1, "high": 2, "low": 0.5, "close": 1.3,
-         "volume": 1e11, "amount": 2e12, "change_pct": -5.84},
+        {
+            "date": "2026-07-15",
+            "open": 1,
+            "high": 2,
+            "low": 0.5,
+            "close": 1.5,
+            "volume": 1e11,
+            "amount": 2e12,
+            "change_pct": -2.53,
+        },
+        {
+            "date": "2026-07-16",
+            "open": 1,
+            "high": 2,
+            "low": 0.5,
+            "close": 1.4,
+            "volume": 1e11,
+            "amount": 2e12,
+            "change_pct": -3.5,
+        },
+        {
+            "date": "2026-07-17",
+            "open": 1,
+            "high": 2,
+            "low": 0.5,
+            "close": 1.3,
+            "volume": 1e11,
+            "amount": 2e12,
+            "change_pct": -5.84,
+        },
     ]
 
 
@@ -41,10 +66,19 @@ class TestMergeLedger:
     def test_skip_existing_any_source(self, tmp_path: Path) -> None:
         ledger = tmp_path / "0amv_observations.jsonl"
         ledger.write_text(
-            json.dumps({"date": "2026-07-16", "amv_change_pct": -3.5, "as_of": "2026-07-16",
-                        "quality": "confirmed", "source": "user_manual_input",
-                        "recorded_at": "2026-07-16T21:00:00+08:00"}) + "\n",
-            encoding="utf-8")
+            json.dumps(
+                {
+                    "date": "2026-07-16",
+                    "amv_change_pct": -3.5,
+                    "as_of": "2026-07-16",
+                    "quality": "confirmed",
+                    "source": "user_manual_input",
+                    "recorded_at": "2026-07-16T21:00:00+08:00",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         added, skipped = sync_mod.merge_ledger(_records(), ledger)
         assert (added, skipped) == (2, 1)
         lines = ledger.read_text(encoding="utf-8").splitlines()
@@ -88,24 +122,39 @@ class TestFillAmv0day:
         assert mkt["amv_0"]["amv_change_pct"] is None  # 不动 amv_0
 
     def test_confirmed_not_overwritten(self, tmp_path: Path) -> None:
-        p = self._market(tmp_path, amv_0day=-5.84,
-                         amv_0={"amv_change_pct": -5.84, "quality": "confirmed"})
+        p = self._market(
+            tmp_path,
+            amv_0day=-5.84,
+            amv_0={"amv_change_pct": -5.84, "quality": "confirmed"},
+        )
         assert sync_mod.fill_amv_0day("2026-07-17", -9.99, tmp_path) is False
         assert json.loads(p.read_text(encoding="utf-8"))["amv_0day"] == -5.84
 
     def test_unconfirmed_overwritten(self, tmp_path: Path) -> None:
-        p = self._market(tmp_path, amv_0day=-1.0,
-                         amv_0={"amv_change_pct": None, "quality": "candidate"})
+        p = self._market(
+            tmp_path,
+            amv_0day=-1.0,
+            amv_0={"amv_change_pct": None, "quality": "candidate"},
+        )
         assert sync_mod.fill_amv_0day("2026-07-17", -5.84, tmp_path) is True
         assert json.loads(p.read_text(encoding="utf-8"))["amv_0day"] == -5.84
 
 
 class TestMainDegradation:
     def test_parse_error_exits_zero(self, tmp_path: Path, monkeypatch, capsys) -> None:
-        monkeypatch.setattr(sync_mod.compass_amv, "parse_amv_daily",
-                            lambda **kw: {"source": "compass_day_vdat", "path": "x",
-                                          "count": 0, "first_date": None, "latest_date": None,
-                                          "records": [], "error": "parse_failed: PermissionError"})
+        monkeypatch.setattr(
+            sync_mod.compass_amv,
+            "parse_amv_daily",
+            lambda **kw: {
+                "source": "compass_day_vdat",
+                "path": "x",
+                "count": 0,
+                "first_date": None,
+                "latest_date": None,
+                "records": [],
+                "error": "parse_failed: PermissionError",
+            },
+        )
         monkeypatch.setattr(sync_mod, "LEDGER", tmp_path / "ledger.jsonl")
         assert sync_mod.main(["--date", "2026-07-17"]) == 0
         out = capsys.readouterr().out
@@ -115,12 +164,22 @@ class TestMainDegradation:
         assert summary["error"].startswith("parse_failed")
         assert not (tmp_path / "ledger.jsonl").exists()
 
-    def test_success_merges_and_prints_summary(self, tmp_path: Path, monkeypatch, capsys) -> None:
+    def test_success_merges_and_prints_summary(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
         recs = _records()
-        monkeypatch.setattr(sync_mod.compass_amv, "parse_amv_daily",
-                            lambda **kw: {"source": "compass_day_vdat", "path": "x",
-                                          "count": 3, "first_date": "2026-07-15",
-                                          "latest_date": "2026-07-17", "records": recs})
+        monkeypatch.setattr(
+            sync_mod.compass_amv,
+            "parse_amv_daily",
+            lambda **kw: {
+                "source": "compass_day_vdat",
+                "path": "x",
+                "count": 3,
+                "first_date": "2026-07-15",
+                "latest_date": "2026-07-17",
+                "records": recs,
+            },
+        )
         monkeypatch.setattr(sync_mod, "LEDGER", tmp_path / "ledger.jsonl")
         monkeypatch.setattr(sync_mod, "MARKET_DIR", tmp_path)
         # 非交易日（周日）→ 不做 amv_0day 填充
@@ -129,9 +188,16 @@ class TestMainDegradation:
         summary = json.loads(out.strip().splitlines()[-1])
         # 只断言本用例关心的键:summary 会随传导链演进新增字段(如 quality /
         # identification),精确 == 比较会让"上游把质量信息透出来"变成回归。
-        for k, v in {"added": 3, "skipped_existing": 0,
-                     "amv_0day_filled": False, "latest_date": "2026-07-17"}.items():
+        for k, v in {
+            "added": 3,
+            "skipped_existing": 0,
+            "amv_0day_filled": False,
+            "latest_date": "2026-07-17",
+        }.items():
             assert summary[k] == v, f"{k}: {summary[k]!r} != {v!r}"
         # fake parse_amv_daily 未给 quality → 按 fail-closed 记 unverified
         assert summary["quality"] == "unverified"
-        assert len((tmp_path / "ledger.jsonl").read_text(encoding="utf-8").splitlines()) == 3
+        assert (
+            len((tmp_path / "ledger.jsonl").read_text(encoding="utf-8").splitlines())
+            == 3
+        )

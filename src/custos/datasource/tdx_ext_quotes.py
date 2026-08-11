@@ -22,6 +22,7 @@ ETF 代理与指数的口径差（报告里要如实说明）：
   · 交易时段可能不同（如日经 ETF 在 A 股时段交易，日经指数在东京时段）
   · 因此 change_pct 与指数本身**不会完全一致**，只可用于方向性参考
 """
+
 from __future__ import annotations
 
 import sys
@@ -45,7 +46,7 @@ EXT_MAP: dict[str, tuple[int, str, bool, str]] = {
 
 _client = None
 _client_created_at = 0.0
-CLIENT_MAX_AGE_SEC = 600.0   # 与 local_tdx_data 同口径：超时连接必须重建而非复用
+CLIENT_MAX_AGE_SEC = 600.0  # 与 local_tdx_data 同口径：超时连接必须重建而非复用
 
 
 def _get_ext_client(timeout: int = 12):
@@ -59,6 +60,7 @@ def _get_ext_client(timeout: int = 12):
     now = time.monotonic()
     if _client is None or (now - _client_created_at) > CLIENT_MAX_AGE_SEC:
         from mootdx.quotes import Quotes
+
         _client = Quotes.factory(market="ext", timeout=timeout)
         _client_created_at = now
     return _client
@@ -88,10 +90,12 @@ def fetch_ext_change(symbol: str, *, timeout: int = 12) -> Optional[dict[str, An
             df = q.bars(symbol=code, market=market, frequency=9, offset=4)
             break
         except Exception as e:  # noqa: BLE001
-            _drop_ext_client()               # 连接可能已死：丢弃缓存，重建后再试一次
+            _drop_ext_client()  # 连接可能已死：丢弃缓存，重建后再试一次
             if attempt == 1:
-                print(f"[WARN] TDX ext {symbol}({code}) 取数失败: {type(e).__name__}: {e}",
-                      file=sys.stderr)
+                print(
+                    f"[WARN] TDX ext {symbol}({code}) 取数失败: {type(e).__name__}: {e}",
+                    file=sys.stderr,
+                )
                 return None
     if df is None or len(df) < 2 or "close" not in df.columns:
         return None
@@ -105,8 +109,11 @@ def fetch_ext_change(symbol: str, *, timeout: int = 12) -> Optional[dict[str, An
     # 其实是更早的 bar —— 时间窗悄悄平移。不能静默：跳过根数随结果暴露，并打 WARN。
     stale_bars_skipped = len(df) - len(closes)
     if stale_bars_skipped:
-        print(f"[WARN] TDX ext {symbol}({code}) 滤掉 {stale_bars_skipped} 根脏 bar（close≤0），"
-              f"change_pct 按更早的有效 bar 计算", file=sys.stderr)
+        print(
+            f"[WARN] TDX ext {symbol}({code}) 滤掉 {stale_bars_skipped} 根脏 bar（close≤0），"
+            f"change_pct 按更早的有效 bar 计算",
+            file=sys.stderr,
+        )
     last, prev = closes[-1], closes[-2]
     return {
         "change_pct": round((last / prev - 1) * 100, 3) if prev else None,

@@ -30,6 +30,7 @@ CLI::
     uv run python src/custos/datasource/local_tdx/compass_amv.py --since 2026-07-01
     uv run python src/custos/datasource/local_tdx/compass_amv.py --json     # 全量记录
 """
+
 from __future__ import annotations
 
 import argparse
@@ -50,16 +51,16 @@ from custos.core.paths import MARKET_DIR  # noqa: E402,F401  (照 src 惯例统�
 DEFAULT_COMPASS_ROOT = Path(r"E:\Compass")
 DAY_VDAT_REL = Path("WavMain") / "ANALYSE" / "Data" / "ChinaStk" / "Z_SK" / "day.vdat"
 
-RECORD_SIZE = 28          # date(uint32) + 6 * float32
-MIN_RUN = 20              # 候选数据段最少连续条数
-OHLC_SANE_RATIO = 0.95    # 序列中 OHLC 关系合理的最低占比
-_TOL = 1e-4               # OHLC 关系容差（相对价格量级可忽略）
+RECORD_SIZE = 28  # date(uint32) + 6 * float32
+MIN_RUN = 20  # 候选数据段最少连续条数
+OHLC_SANE_RATIO = 0.95  # 序列中 OHLC 关系合理的最低占比
+_TOL = 1e-4  # OHLC 关系容差（相对价格量级可忽略）
 
-MAX_CHAIN_GAP_DAYS = 15   # 段间日期间隙上限（跨长假下一块，实测最大 10 天）
-TRUTH_PAIRS = 30          # 真值比对取最近 confirmed 记录条数
-TRUTH_MIN_PRESENT = 3     # 真值日期至少落在链内 N 条才可判定
-TRUTH_MATCH_RATIO = 0.9   # 真值匹配率下限
-TRUTH_TOL = 0.05          # change_pct 匹配容差（百分点）
+MAX_CHAIN_GAP_DAYS = 15  # 段间日期间隙上限（跨长假下一块，实测最大 10 天）
+TRUTH_PAIRS = 30  # 真值比对取最近 confirmed 记录条数
+TRUTH_MIN_PRESENT = 3  # 真值日期至少落在链内 N 条才可判定
+TRUTH_MATCH_RATIO = 0.9  # 真值匹配率下限
+TRUTH_TOL = 0.05  # change_pct 匹配容差（百分点）
 DEFAULT_TRUTH_LEDGER = MARKET_DIR / "0amv_observations.jsonl"
 
 
@@ -266,9 +267,11 @@ def _identify_amv(chains: list, truth: list) -> tuple:
             key = (matched, chain[-1][0], len(chain))
             if best_key is None or key > best_key:
                 best_key = key
-                best = (chain,
-                        f"truth_match: {matched}/{len(present)} confirmed pairs within ±{TRUTH_TOL}",
-                        "verified")
+                best = (
+                    chain,
+                    f"truth_match: {matched}/{len(present)} confirmed pairs within ±{TRUTH_TOL}",
+                    "verified",
+                )
         if best is not None:
             return best
     chain = max(chains, key=lambda c: (c[-1][0], len(c)))
@@ -287,22 +290,27 @@ def _to_records(series: list) -> list:
         change_pct = None
         if prev_close:
             change_pct = round((c / prev_close - 1) * 100, 2)
-        out.append({
-            "date": d,
-            "open": round(o, 2),
-            "high": round(h, 2),
-            "low": round(l, 2),
-            "close": round(c, 2),
-            "volume": v,
-            "amount": a,
-            "change_pct": change_pct,
-        })
+        out.append(
+            {
+                "date": d,
+                "open": round(o, 2),
+                "high": round(h, 2),
+                "low": round(l, 2),
+                "close": round(c, 2),
+                "volume": v,
+                "amount": a,
+                "change_pct": change_pct,
+            }
+        )
         prev_close = c
     return out
 
 
-def parse_amv_daily(since: str = "2024-01-01", root: Optional[str] = None,
-                    truth_path: Optional[str] = None) -> dict:
+def parse_amv_daily(
+    since: str = "2024-01-01",
+    root: Optional[str] = None,
+    truth_path: Optional[str] = None,
+) -> dict:
     """解析 0AMV 日线主序列，返回结构化结果（绝不 raise）。
 
     返回::
@@ -349,9 +357,12 @@ def parse_amv_daily(since: str = "2024-01-01", root: Optional[str] = None,
         result["identification"] = identification
         result["quality"] = quality
         if quality != "verified":
-            print(f"[WARN] 0AMV 选链未经真值验证（{identification}）："
-                  f"series_start={result['series_start']}，"
-                  f"该值不得当 confirmed 真值使用", file=sys.stderr)
+            print(
+                f"[WARN] 0AMV 选链未经真值验证（{identification}）："
+                f"series_start={result['series_start']}，"
+                f"该值不得当 confirmed 真值使用",
+                file=sys.stderr,
+            )
         if records:
             result["first_date"] = records[0]["date"]
             result["latest_date"] = records[-1]["date"]

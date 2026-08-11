@@ -6,6 +6,7 @@ kept byte-compatible; observability goes to artifacts/logs/{date}_0905_run_log.j
 instead — every run (completed / closed / calendar_failed / failed) leaves
 one behind.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -16,7 +17,16 @@ import time
 
 
 from custos.core.paths import BASE, cn_today, TOOLS, LOGS, PLANS
-from custos.core.pipeline_kit import log_stage, md_to_digest, now_iso, warn, write_run_log, run_stage_quiet as _stage, calendar_gate, propagate_gate_code
+from custos.core.pipeline_kit import (
+    log_stage,
+    md_to_digest,
+    now_iso,
+    warn,
+    write_run_log,
+    run_stage_quiet as _stage,
+    calendar_gate,
+    propagate_gate_code,
+)
 
 LOG_DIR = LOGS
 
@@ -25,7 +35,9 @@ _now_iso = now_iso
 _log_stage = log_stage
 
 
-def _write_run_log(target: str, status: str, started_at: str, t0: float, stages: list[dict]):
+def _write_run_log(
+    target: str, status: str, started_at: str, t0: float, stages: list[dict]
+):
     return write_run_log(LOG_DIR, "0905", target, status, started_at, t0, stages)
 
 
@@ -49,10 +61,17 @@ def _check_0850_status(target: str) -> tuple[bool, str]:
     except (OSError, ValueError):
         return False, "0850_log_unreadable, fallback to full collection"
     status = log.get("status")
-    stage_ok = {s.get("name"): s.get("ok") for s in (log.get("stages") or []) if isinstance(s, dict)}
+    stage_ok = {
+        s.get("name"): s.get("ok")
+        for s in (log.get("stages") or [])
+        if isinstance(s, dict)
+    }
     bad = [n for n in DISCOVERY_STAGES if stage_ok.get(n) is not True]
     if bad:
-        return False, f"0850_status={status}, discovery_failed={','.join(bad)}, fallback to full collection"
+        return (
+            False,
+            f"0850_status={status}, discovery_failed={','.join(bad)}, fallback to full collection",
+        )
     if status not in {"completed", "degraded"}:
         return False, f"0850_status={status}, fallback to full collection"
     if status == "degraded":
@@ -61,8 +80,16 @@ def _check_0850_status(target: str) -> tuple[bool, str]:
 
 
 def _daily_pipeline_cmd(target: str, reuse_discovery: bool) -> list[str]:
-    cmd = ["uv", "run", "python", str(TOOLS / "pipeline" / "daily_pipeline.py"), "--date", target,
-           "--session-type", "premarket"]
+    cmd = [
+        "uv",
+        "run",
+        "python",
+        str(TOOLS / "pipeline" / "daily_pipeline.py"),
+        "--date",
+        target,
+        "--session-type",
+        "premarket",
+    ]
     if reuse_discovery:
         cmd.append("--reuse-discovery")
     return cmd
@@ -85,10 +112,15 @@ def main(argv=None) -> int:
 
     # 1. Trading calendar
     _cg = calendar_gate(
-        target, log_dir=LOG_DIR, session="0905", run_started=run_started,
-        t0=t0, stages_log=stages_log,
+        target,
+        log_dir=LOG_DIR,
+        session="0905",
+        run_started=run_started,
+        t0=t0,
+        stages_log=stages_log,
         fail_msg="【盘前日报失败｜{target}】日历检查失败：{err}",
-        closed_msg="今日休市，盘前日报不生成（{target}）")
+        closed_msg="今日休市，盘前日报不生成（{target}）",
+    )
     if _cg.exit_code is not None:
         return _cg.exit_code
 
@@ -99,29 +131,51 @@ def main(argv=None) -> int:
     if fallback_note:
         warn(fallback_note)
     r = _stage(_daily_pipeline_cmd(target, reuse_discovery), "daily_pipeline premarket")
-    stages_log.append(_log_stage("daily_pipeline premarket", r, s_started, _now_iso(), time.time() - s_t0,
-                                 note=fallback_note))
+    stages_log.append(
+        _log_stage(
+            "daily_pipeline premarket",
+            r,
+            s_started,
+            _now_iso(),
+            time.time() - s_t0,
+            note=fallback_note,
+        )
+    )
     if not r["ok"]:
         _write_run_log(target, "failed", run_started, t0, stages_log)
         print(f"【盘前日报失败｜{target}】daily_pipeline失败：{r['out'][:500]}")
-        return propagate_gate_code(r)   # 门控码 3/4/5 原样上抛供 cron 判定
+        return propagate_gate_code(r)  # 门控码 3/4/5 原样上抛供 cron 判定
 
     # 3. Read generated report and convert to text digest
     d_started = _now_iso()
     d_t0 = time.time()
     report_path = PLANS / f"{target}_daily_report.md"
     if not report_path.exists():
-        stages_log.append(_log_stage("report_digest", {"ok": False, "returncode": None, "timeout": False},
-                                     d_started, _now_iso(), time.time() - d_t0,
-                                     note=f"报告文件未生成：{report_path}"))
+        stages_log.append(
+            _log_stage(
+                "report_digest",
+                {"ok": False, "returncode": None, "timeout": False},
+                d_started,
+                _now_iso(),
+                time.time() - d_t0,
+                note=f"报告文件未生成：{report_path}",
+            )
+        )
         _write_run_log(target, "failed", run_started, t0, stages_log)
         print(f"【盘前日报失败｜{target}】报告文件未生成：{report_path}")
         return 1
 
     digest = md_to_digest(report_path.read_text(encoding="utf-8"))
-    stages_log.append(_log_stage("report_digest", {"ok": True, "returncode": 0, "timeout": False},
-                                 d_started, _now_iso(), time.time() - d_t0,
-                                 note=f"report={report_path}；digest_chars={len(digest)}"))
+    stages_log.append(
+        _log_stage(
+            "report_digest",
+            {"ok": True, "returncode": 0, "timeout": False},
+            d_started,
+            _now_iso(),
+            time.time() - d_t0,
+            note=f"report={report_path}；digest_chars={len(digest)}",
+        )
+    )
     _write_run_log(target, "completed", run_started, t0, stages_log)
 
     print(f"【盘前日报｜{target}】")

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Pytest configuration：custos 包已可编辑安装，import 无需任何 sys.path 注入。"""
+
 import pytest
 
 
@@ -17,19 +18,31 @@ def _block_name_resolution_network(monkeypatch):
     """
     try:
         from custos.datasource.local_tdx import stock_names
-    except ImportError:                      # 该模块不可用时无需阻断
+    except ImportError:  # 该模块不可用时无需阻断
         return
     monkeypatch.setattr(
-        stock_names, "resolve_names_for",
-        lambda codes, **kw: ({}, {"st_filter": "ok", "requested": len(list(codes)),
-                                  "name_map_size": 0, "missing_count": 0,
-                                  "name_map_source": "test_stub"}),
-        raising=False)
+        stock_names,
+        "resolve_names_for",
+        lambda codes, **kw: (
+            {},
+            {
+                "st_filter": "ok",
+                "requested": len(list(codes)),
+                "name_map_size": 0,
+                "missing_count": 0,
+                "name_map_source": "test_stub",
+            },
+        ),
+        raising=False,
+    )
+
     # 网络层也堵死：万一有别的路径绕过 resolve_names_for，直接失败而不是静默走网络
     def _no_net(*a, **kw):
         raise AssertionError(
             "测试试图发起真实 HTTP 请求（stock_names.fetch_names_for）；"
-            "请注入 name_resolver 或 monkeypatch 替身")
+            "请注入 name_resolver 或 monkeypatch 替身"
+        )
+
     monkeypatch.setattr(stock_names, "fetch_names_for", _no_net, raising=False)
     monkeypatch.setattr(stock_names, "fetch_all_from_clist", _no_net, raising=False)
     # TDX 协议源同样要堵：2026-08-04 起它是名称表主路径，走的是通达信 TCP 协议
@@ -63,12 +76,22 @@ def reversal_thresholds():
     import os
 
     # 依赖顺序：阈值 → 读它的三个 live 模块
-    names = ["custos.core.b1_thresholds", "custos.pipeline.screening.enrich_candidates",
-             "custos.pipeline.market_timing.technical_monitor",
-             "custos.pipeline.holdings.b1_holding_state"]
-    saved = {k: os.environ.get(k) for k in
-             ("B1_REVK_CHG_PCT", "B1_REVK_CHG_MIN", "B1_REVK_CHG_MAX",
-              "B1_REVK_AMP_PCT", "B1_J_LOW")}
+    names = [
+        "custos.core.b1_thresholds",
+        "custos.pipeline.screening.enrich_candidates",
+        "custos.pipeline.market_timing.technical_monitor",
+        "custos.pipeline.holdings.b1_holding_state",
+    ]
+    saved = {
+        k: os.environ.get(k)
+        for k in (
+            "B1_REVK_CHG_PCT",
+            "B1_REVK_CHG_MIN",
+            "B1_REVK_CHG_MAX",
+            "B1_REVK_AMP_PCT",
+            "B1_J_LOW",
+        )
+    }
 
     def _apply(**env):
         for k, v in env.items():
@@ -79,11 +102,11 @@ def reversal_thresholds():
             out[n.split(".")[-1]] = importlib.reload(mod)
         return out
 
-    _apply()          # 先刷新，消除前序测试残留
+    _apply()  # 先刷新，消除前序测试残留
     yield _apply
     for k, v in saved.items():
         if v is None:
             os.environ.pop(k, None)
         else:
             os.environ[k] = v
-    _apply()          # 还原
+    _apply()  # 还原

@@ -15,6 +15,7 @@
 那次写进去的是合成 fixture（「测试A」、600000、10.0/10.5），**没有真数据外泄**；
 但同类事故若写的是真实台账，就是账户数据进公开仓库。所以这里加两道**可执行**检查。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -27,13 +28,20 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 # 运行时数据目录：只允许 .md（模板/文档）入库
 RUNTIME_DIRS = ("data", "artifacts/logs", "artifacts/reports/daily/_supporting")
 # 敏感文件名片段：这些一旦出现在 git 里就是事故
-SENSITIVE = ("master_trade_ledger", "current_positions", "position_confirmations",
-             "trades_stock", "_import_meta", "0amv_observations")
+SENSITIVE = (
+    "master_trade_ledger",
+    "current_positions",
+    "position_confirmations",
+    "trades_stock",
+    "_import_meta",
+    "0amv_observations",
+)
 
 
 def _tracked() -> list[str]:
-    out = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True,
-                         text=True, check=True).stdout
+    out = subprocess.run(
+        ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True
+    ).stdout
     return [x for x in out.splitlines() if x.strip()]
 
 
@@ -43,12 +51,18 @@ def test_no_runtime_data_tracked_anywhere():
     「任何嵌套位置」是关键 —— 事故就是发生在 `2026-07-16/data/` 这种
     非根位置，而 gitignore 的 `data/**` 只锚定根。
     """
-    bad = [f for f in _tracked()
-           if any(f == d or f"/{d}/" in f"/{f}" for d in RUNTIME_DIRS)
-           and not f.endswith(".md")]
-    assert not bad, ("运行时数据被提交（只允许 .md）：\n  " + "\n  ".join(bad)
-                     + "\n提示：gitignore 里含 `/` 的模式锚定仓库根，"
-                       "嵌套位置需要 `**/` 前缀")
+    bad = [
+        f
+        for f in _tracked()
+        if any(f == d or f"/{d}/" in f"/{f}" for d in RUNTIME_DIRS)
+        and not f.endswith(".md")
+    ]
+    assert not bad, (
+        "运行时数据被提交（只允许 .md）：\n  "
+        + "\n  ".join(bad)
+        + "\n提示：gitignore 里含 `/` 的模式锚定仓库根，"
+        "嵌套位置需要 `**/` 前缀"
+    )
 
 
 def test_no_sensitive_filenames_tracked():
@@ -57,9 +71,11 @@ def test_no_sensitive_filenames_tracked():
     与上一条互补：上一条按**目录**查，这条按**文件名**查 ——
     脚本把台账写到别的目录（如 `src/master_trade_ledger.csv`）时上一条查不出来。
     """
-    bad = [f for f in _tracked()
-           if any(s in pathlib.Path(f).name for s in SENSITIVE)
-           and not f.endswith(".md")]
+    bad = [
+        f
+        for f in _tracked()
+        if any(s in pathlib.Path(f).name for s in SENSITIVE) and not f.endswith(".md")
+    ]
     assert not bad, "敏感文件被提交：\n  " + "\n  ".join(bad)
 
 
@@ -70,10 +86,15 @@ def test_no_stray_date_named_dirs_at_root():
     如 `data/market/2026-08-07_xxx.json`）。根目录出现日期名目录 = 有脚本
     把日期当路径参数传了 —— 这正是那次事故的形态。
     """
-    stray = sorted(p.name for p in ROOT.iterdir()
-                   if p.is_dir() and re.fullmatch(r"\d{4}-\d{2}-\d{2}", p.name))
-    assert not stray, (f"仓库根有日期命名的目录：{stray}\n"
-                       "很可能是某个脚本把日期字符串当成了 tmp_path / 输出目录实参")
+    stray = sorted(
+        p.name
+        for p in ROOT.iterdir()
+        if p.is_dir() and re.fullmatch(r"\d{4}-\d{2}-\d{2}", p.name)
+    )
+    assert not stray, (
+        f"仓库根有日期命名的目录：{stray}\n"
+        "很可能是某个脚本把日期字符串当成了 tmp_path / 输出目录实参"
+    )
 
 
 def test_gitignore_runtime_patterns_have_recursive_form():
@@ -110,8 +131,12 @@ def test_test_suite_does_not_write_into_repo():
     与 `test_no_runtime_data_tracked_anywhere`（查已入库）互补：
     这条查「有没有漏网」，那条查「有没有已经进 git」。
     """
-    watched = [ROOT / "data", ROOT / "artifacts/reports/daily", ROOT / "artifacts/logs",
-               ROOT / "artifacts/reports"]
+    watched = [
+        ROOT / "data",
+        ROOT / "artifacts/reports/daily",
+        ROOT / "artifacts/logs",
+        ROOT / "artifacts/reports",
+    ]
     fresh = []
     for d in watched:
         if not d.exists():
@@ -121,7 +146,8 @@ def test_test_suite_does_not_write_into_repo():
                 fresh.append(str(p.relative_to(ROOT)))
     assert not fresh, (
         "这些运行时文件是**本次测试会话期间**产生的 —— "
-        f"某个测试的 fixture 漏 patch 了路径常量：\n  " + "\n  ".join(fresh[:20]))
+        f"某个测试的 fixture 漏 patch 了路径常量：\n  " + "\n  ".join(fresh[:20])
+    )
 
 
 def test_no_scratch_files_in_code_tree():
@@ -146,7 +172,9 @@ def test_no_scratch_files_in_code_tree():
     # 形态：下划线开头 + 含日期、或 _tmp/_scratch/_summ/_debug 前缀、或 .bak/.orig 后缀
     SCRATCH = re.compile(
         r"(^_\w*\d{6,8}\w*\.|^_(tmp|scratch|summ|debug|test|old)\w*\.|"
-        r"\.(bak|orig|tmp|swp|rej)$|^~)", re.I)
+        r"\.(bak|orig|tmp|swp|rej)$|^~)",
+        re.I,
+    )
     bad = []
     for f in _tracked():
         parts = f.split("/")
@@ -158,9 +186,11 @@ def test_no_scratch_files_in_code_tree():
         if SCRATCH.search(pathlib.Path(f).name):
             bad.append(f)
     assert not bad, (
-        "代码树/仓库根有临时文件入库：\n  " + "\n  ".join(bad)
+        "代码树/仓库根有临时文件入库：\n  "
+        + "\n  ".join(bad)
         + "\n目标机 cron 用 `git add -A` 自动提交，任何留在树里的草稿都会被扫走。"
-          "\n若是 CLI 逼你造的文件（如 --confirm-no-trades 需要空 --input），改 CLI 而不是靠自律。")
+        "\n若是 CLI 逼你造的文件（如 --confirm-no-trades 需要空 --input），改 CLI 而不是靠自律。"
+    )
 
 
 def test_scratch_guard_catches_the_2026_08_10_shapes():
@@ -169,13 +199,26 @@ def test_scratch_guard_catches_the_2026_08_10_shapes():
     上一版（只有目录守卫 + 敏感名守卫）对这两个文件全部放行。
     """
     import re
+
     SCRATCH = re.compile(
         r"(^_\w*\d{6,8}\w*\.|^_(tmp|scratch|summ|debug|test|old)\w*\.|"
-        r"\.(bak|orig|tmp|swp|rej)$|^~)", re.I)
-    for name in ("_no_trades_20260805.json", "_summ_m2.py",
-                 "daily_report.py.bak", "_tmp_check.py"):
+        r"\.(bak|orig|tmp|swp|rej)$|^~)",
+        re.I,
+    )
+    for name in (
+        "_no_trades_20260805.json",
+        "_summ_m2.py",
+        "daily_report.py.bak",
+        "_tmp_check.py",
+    ):
         assert SCRATCH.search(name), f"守卫漏掉：{name}"
     # 正常文件不得误报 —— `_shares.py` / `_util.py` / `_template.py` 是 factors/ 的真实私有模块
-    for name in ("_shares.py", "_util.py", "_template.py", "paths.py",
-                 "b1_thresholds.py", "__init__.py"):
+    for name in (
+        "_shares.py",
+        "_util.py",
+        "_template.py",
+        "paths.py",
+        "b1_thresholds.py",
+        "__init__.py",
+    ):
         assert not SCRATCH.search(name), f"守卫误报：{name}"

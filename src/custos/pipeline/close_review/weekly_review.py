@@ -55,6 +55,7 @@
 不要凭印象写。⚠️ 引的时候**必须带样本量** —— 实盘侧的样本量问题与研究侧一样致命
 （回填 6 条用户画像时发现它们没有一条记了统计区间）。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -67,16 +68,18 @@ from pathlib import Path
 
 
 from custos.core.paths import BASE, CALENDAR_RELPATH, cn_today, cn_now  # noqa: E402
-from custos.pipeline.close_review.loss_streak import (format_lines as loss_streak_lines,  # noqa: E402
-                                      loss_streaks)
+from custos.pipeline.close_review.loss_streak import (
+    format_lines as loss_streak_lines,  # noqa: E402
+    loss_streaks,
+)
 
 # 规则阈值
-STOP_LOSS_PCT = -7.0       # b1 短线止损线：已实现亏损超过该值 = 止损偏慢
-SELL_FLY_PCT = 0.03        # 后续 MFE 超卖出价 3% 以上 = 卖飞候选
-SHORT_HOLD_DAYS = 20       # 短持有分界线（天）
-PLAN_LOOKBACK_DAYS = 10    # 向前寻找计划来源 final_review 的最大自然日数
-AMV_BULL_PCT = 4.0         # 0AMV 多头阈值
-AMV_BEAR_PCT = -2.3        # 0AMV 空头阈值
+STOP_LOSS_PCT = -7.0  # b1 短线止损线：已实现亏损超过该值 = 止损偏慢
+SELL_FLY_PCT = 0.03  # 后续 MFE 超卖出价 3% 以上 = 卖飞候选
+SHORT_HOLD_DAYS = 20  # 短持有分界线（天）
+PLAN_LOOKBACK_DAYS = 10  # 向前寻找计划来源 final_review 的最大自然日数
+AMV_BULL_PCT = 4.0  # 0AMV 多头阈值
+AMV_BEAR_PCT = -2.3  # 0AMV 空头阈值
 
 BUY, SELL = "买入", "卖出"
 
@@ -102,6 +105,7 @@ def week_dates(week: dict) -> list[str]:
 
 # ---------------------------------------------------------------- 输入加载
 
+
 def load_json(path: Path, default):
     if not path.exists():
         return default
@@ -122,17 +126,19 @@ def parse_ledger(path: Path) -> list[dict] | None:
         if side not in (BUY, SELL):
             continue
         try:
-            rows.append({
-                "date": (raw.get("成交日期") or "").strip(),
-                "time": (raw.get("成交时间") or "").strip(),
-                "code": (raw.get("代码") or "").strip(),
-                "name": (raw.get("名称") or "").strip(),
-                "side": side,
-                "qty": float(raw.get("成交数量") or 0),
-                "price": float(raw.get("成交价格") or 0),
-                "amount": float(raw.get("成交金额") or 0),
-                "fee": float(raw.get("费用") or 0),
-            })
+            rows.append(
+                {
+                    "date": (raw.get("成交日期") or "").strip(),
+                    "time": (raw.get("成交时间") or "").strip(),
+                    "code": (raw.get("代码") or "").strip(),
+                    "name": (raw.get("名称") or "").strip(),
+                    "side": side,
+                    "qty": float(raw.get("成交数量") or 0),
+                    "price": float(raw.get("成交价格") or 0),
+                    "amount": float(raw.get("成交金额") or 0),
+                    "fee": float(raw.get("费用") or 0),
+                }
+            )
         except ValueError:
             continue
     rows.sort(key=lambda r: (r["date"], r["time"], 0 if r["side"] == BUY else 1))
@@ -157,14 +163,17 @@ def fifo_pair(trades: list[dict]) -> list[dict]:
       部分，系统性少算，**不可**用于盈亏/胜率；
     - none：完全无买入来源，gross_pnl 为 None。
     """
-    open_lots: dict[str, list[list]] = {}  # code -> [[qty, price, date, fee_per_share], ...]
+    open_lots: dict[
+        str, list[list]
+    ] = {}  # code -> [[qty, price, date, fee_per_share], ...]
     sells_by_key: dict[tuple, dict] = {}
     order: list[tuple] = []
     for t in trades:
         if t["side"] == BUY:
             fee_per_share = (t["fee"] / t["qty"]) if t["qty"] else 0.0
             open_lots.setdefault(t["code"], []).append(
-                [t["qty"], t["price"], t["date"], fee_per_share])
+                [t["qty"], t["price"], t["date"], fee_per_share]
+            )
             continue
         lots = open_lots.setdefault(t["code"], [])
         remaining = t["qty"]
@@ -186,9 +195,15 @@ def fifo_pair(trades: list[dict]) -> list[dict]:
         key = (t["code"], t["date"])
         if key not in sells_by_key:
             sells_by_key[key] = {
-                "code": t["code"], "name": t["name"], "sell_date": t["date"],
-                "sell_qty": 0.0, "sell_amount": 0.0, "sell_fee": 0.0,
-                "matched_cost": 0.0, "matched_qty": 0.0, "matched_fee": 0.0,
+                "code": t["code"],
+                "name": t["name"],
+                "sell_date": t["date"],
+                "sell_qty": 0.0,
+                "sell_amount": 0.0,
+                "sell_fee": 0.0,
+                "matched_cost": 0.0,
+                "matched_qty": 0.0,
+                "matched_fee": 0.0,
                 "buy_dates": [],
             }
             order.append(key)
@@ -210,14 +225,21 @@ def fifo_pair(trades: list[dict]) -> list[dict]:
         sell_d = date.fromisoformat(agg["sell_date"])
         if agg["buy_dates"]:
             total = sum(q for _, q in agg["buy_dates"])
-            avg_buy_ordinal = sum(date.fromisoformat(d).toordinal() * q for d, q in agg["buy_dates"]) / total
+            avg_buy_ordinal = (
+                sum(date.fromisoformat(d).toordinal() * q for d, q in agg["buy_dates"])
+                / total
+            )
             hold_days = sell_d.toordinal() - round(avg_buy_ordinal)
             first_buy = min(d for d, _ in agg["buy_dates"])
         else:
             hold_days = None
             first_buy = None
         gross = (avg_sell * mqty - agg["matched_cost"]) if mqty else None
-        pnl_pct = (gross / agg["matched_cost"] * 100) if (gross is not None and agg["matched_cost"]) else None
+        pnl_pct = (
+            (gross / agg["matched_cost"] * 100)
+            if (gross is not None and agg["matched_cost"])
+            else None
+        )
         unmatched = round(qty - mqty, 4)
         if mqty <= 1e-9:
             status = "none"
@@ -225,21 +247,30 @@ def fifo_pair(trades: list[dict]) -> list[dict]:
             status = "partial"
         else:
             status = "full"
-        closings.append({
-            "code": agg["code"], "name": agg["name"], "sell_date": agg["sell_date"],
-            "sell_qty": qty, "avg_sell_price": round(avg_sell, 4),
-            "avg_buy_cost": round(avg_cost, 4) if avg_cost is not None else None,
-            "first_buy_date": first_buy, "hold_days": hold_days,
-            "gross_pnl": round(gross, 2) if gross is not None else None,
-            "pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None,
-            "matched_qty": round(mqty, 4),
-            "unmatched_qty": unmatched,
-            "match_status": status,
-            "sell_fee": round(agg["sell_fee"], 2),
-            "matched_buy_fee": round(agg["matched_fee"], 2),
-            "net_pnl": (round(gross - agg["sell_fee"] - agg["matched_fee"], 2)
-                        if gross is not None else None),
-        })
+        closings.append(
+            {
+                "code": agg["code"],
+                "name": agg["name"],
+                "sell_date": agg["sell_date"],
+                "sell_qty": qty,
+                "avg_sell_price": round(avg_sell, 4),
+                "avg_buy_cost": round(avg_cost, 4) if avg_cost is not None else None,
+                "first_buy_date": first_buy,
+                "hold_days": hold_days,
+                "gross_pnl": round(gross, 2) if gross is not None else None,
+                "pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None,
+                "matched_qty": round(mqty, 4),
+                "unmatched_qty": unmatched,
+                "match_status": status,
+                "sell_fee": round(agg["sell_fee"], 2),
+                "matched_buy_fee": round(agg["matched_fee"], 2),
+                "net_pnl": (
+                    round(gross - agg["sell_fee"] - agg["matched_fee"], 2)
+                    if gross is not None
+                    else None
+                ),
+            }
+        )
     return closings
 
 
@@ -274,10 +305,14 @@ def load_amv_regimes(path: Path) -> dict[str, dict] | None:
         except (TypeError, ValueError):
             skipped += 1
             continue
-        regime = "多头" if pct > AMV_BULL_PCT else ("空头" if pct < AMV_BEAR_PCT else "震荡")
+        regime = (
+            "多头" if pct > AMV_BULL_PCT else ("空头" if pct < AMV_BEAR_PCT else "震荡")
+        )
         regimes[day] = {"amv_change_pct": pct, "regime": regime}
     if skipped:
-        print(f"[WARN] 0AMV 历史跳过 {skipped} 条无法解析的记录: {path}", file=sys.stderr)
+        print(
+            f"[WARN] 0AMV 历史跳过 {skipped} 条无法解析的记录: {path}", file=sys.stderr
+        )
     return regimes
 
 
@@ -309,7 +344,7 @@ def trading_days_of_week(base: Path, days: list[str]) -> dict[str, bool | None]:
             result[day] = False
             continue
         year_cfg = official.get(str(d.year))
-        if not isinstance(year_cfg, dict):     # 年份未登记 / 结构异常一律"未知"，不猜
+        if not isinstance(year_cfg, dict):  # 年份未登记 / 结构异常一律"未知"，不猜
             result[day] = None
             continue
         closed = _in_closed_range(day, year_cfg.get("closed_ranges"))
@@ -317,7 +352,9 @@ def trading_days_of_week(base: Path, days: list[str]) -> dict[str, bool | None]:
     return result
 
 
-def find_plan_for_day(base: Path, day: str, cache: dict | None = None) -> tuple[dict | None, str | None]:
+def find_plan_for_day(
+    base: Path, day: str, cache: dict | None = None
+) -> tuple[dict | None, str | None]:
     """找 day 的交易计划 = 最近一份早于 day 的 final_review 的 next_day_plan。
 
     返回 (holding_plans, 来源日期)；找不到返回 (None, None)。
@@ -347,11 +384,14 @@ def mfe_index(base: Path) -> list[tuple[str, Path]]:
     holdings_dir = base / "data" / "holdings"
     if not holdings_dir.exists():
         return []
-    return sorted((p.name.split("_")[0], p) for p in holdings_dir.glob("*_mfe_mae.json"))
+    return sorted(
+        (p.name.split("_")[0], p) for p in holdings_dir.glob("*_mfe_mae.json")
+    )
 
 
-def load_mfe_after(base: Path, sell_date: str, index: list | None = None,
-                   cache: dict | None = None) -> dict[str, dict] | None:
+def load_mfe_after(
+    base: Path, sell_date: str, index: list | None = None, cache: dict | None = None
+) -> dict[str, dict] | None:
     """卖出日之后最近的 mfe_mae.json -> {code: entry}；无任何文件返回 None。
 
     ``index``/``cache``：调用方可传入 `mfe_index(base)` 的结果与解析缓存。卖飞审计对
@@ -394,7 +434,10 @@ def sse_daily_map(base: Path, start: str, end: str) -> dict[str, dict]:
     cursor = date.fromisoformat(start)
     last = date.fromisoformat(end)
     while cursor <= last:
-        data = load_json(base / "data" / "market" / f"{cursor.isoformat()}_market_timing_input.json", None)
+        data = load_json(
+            base / "data" / "market" / f"{cursor.isoformat()}_market_timing_input.json",
+            None,
+        )
         if isinstance(data, dict):
             sse = (data.get("a_share_indices") or {}).get("上证指数") or {}
             latest = str(sse.get("latest_date") or "")
@@ -404,7 +447,9 @@ def sse_daily_map(base: Path, start: str, end: str) -> dict[str, dict]:
                 prev = out.get(iso) or {}
                 out[iso] = {
                     "close": float(close),
-                    "chg": sse.get("daily_change_pct") if sse.get("daily_change_pct") is not None else prev.get("chg"),
+                    "chg": sse.get("daily_change_pct")
+                    if sse.get("daily_change_pct") is not None
+                    else prev.get("chg"),
                 }
         cursor += timedelta(days=1)
     return out
@@ -426,8 +471,9 @@ def sse_change(sse_map: dict[str, dict], day: str) -> float | None:
     return round((entry["close"] / prev_close - 1) * 100, 2)
 
 
-def holding_week_performance(base: Path, days: list[str], daily_reviews: dict,
-                             unavailable: list[str]) -> dict:
+def holding_week_performance(
+    base: Path, days: list[str], daily_reviews: dict, unavailable: list[str]
+) -> dict:
     """板块1：每只持仓的周度表现。
 
     价格来源优先级：final_review.revalued_positions(含权重) > holding_quotes(仅收盘价)。
@@ -441,18 +487,35 @@ def holding_week_performance(base: Path, days: list[str], daily_reviews: dict,
         for p in review.get("revalued_positions") or []:
             if p.get("code") and p.get("close") is not None:
                 entry[str(p["code"])] = {
-                    "close": float(p["close"]), "weight": p.get("position_pct"),
-                    "pnl_pct": p.get("pnl_pct"), "cost": p.get("cost"), "name": p.get("name"),
+                    "close": float(p["close"]),
+                    "weight": p.get("position_pct"),
+                    "pnl_pct": p.get("pnl_pct"),
+                    "cost": p.get("cost"),
+                    "name": p.get("name"),
                 }
         quotes = load_holding_quote_closes(base, d)
         for code, close in (quotes or {}).items():
-            entry.setdefault(code, {"close": close, "weight": None, "pnl_pct": None, "cost": None, "name": None})
+            entry.setdefault(
+                code,
+                {
+                    "close": close,
+                    "weight": None,
+                    "pnl_pct": None,
+                    "cost": None,
+                    "name": None,
+                },
+            )
         if entry:
             per_day[d] = entry
     codes = sorted({c for e in per_day.values() for c in e})
     if not codes:
-        unavailable.append("持仓周度表现：本周无 revalued_positions 与 holding_quotes 数据")
-        if not any((base / "data" / "holdings" / f"{d}_b1_holding_state.json").exists() for d in days):
+        unavailable.append(
+            "持仓周度表现：本周无 revalued_positions 与 holding_quotes 数据"
+        )
+        if not any(
+            (base / "data" / "holdings" / f"{d}_b1_holding_state.json").exists()
+            for d in days
+        ):
             unavailable.append("B1 持仓状态：本周无 b1_holding_state 数据")
         return {"rows": [], "days_with_data": [], "b1_trajectory": {}}
     # 名称兜底：current_positions.json
@@ -465,27 +528,49 @@ def holding_week_performance(base: Path, days: list[str], daily_reviews: dict,
         series = [(d, per_day[d][code]) for d in days if code in per_day.get(d, {})]
         first_d, first = series[0]
         last_d, last = series[-1]
-        change = round((last["close"] / first["close"] - 1) * 100, 2) if first["close"] else None
+        change = (
+            round((last["close"] / first["close"] - 1) * 100, 2)
+            if first["close"]
+            else None
+        )
         # 权重取各自首个/末个有权重值的日期（价格日期与权重日期可能不同，如周初仅有 quotes）
         weights = [(d, e["weight"]) for d, e in series if e.get("weight") is not None]
         w0 = round(weights[0][1] * 100, 2) if weights else None
         w1 = round(weights[-1][1] * 100, 2) if weights else None
-        contribution = round(weights[0][1] * change, 2) if (weights and change is not None) else None
-        float_pnl = round(last["pnl_pct"] * 100, 2) if last.get("pnl_pct") is not None else None
+        contribution = (
+            round(weights[0][1] * change, 2)
+            if (weights and change is not None)
+            else None
+        )
+        float_pnl = (
+            round(last["pnl_pct"] * 100, 2) if last.get("pnl_pct") is not None else None
+        )
         name = last.get("name") or first.get("name") or names.get(code)
-        rows.append({
-            "code": code, "name": name,
-            "first_date": first_d, "first_close": first["close"],
-            "last_date": last_d, "last_close": last["close"],
-            "week_change_pct": change,
-            "first_weight_pct": w0, "last_weight_pct": w1,
-            "first_weight_date": weights[0][0] if weights else None,
-            "last_weight_date": weights[-1][0] if weights else None,
-            "float_pnl_pct": float_pnl, "contribution_pp": contribution,
-        })
-    rows.sort(key=lambda r: (r["contribution_pp"] if r["contribution_pp"] is not None else 0))
+        rows.append(
+            {
+                "code": code,
+                "name": name,
+                "first_date": first_d,
+                "first_close": first["close"],
+                "last_date": last_d,
+                "last_close": last["close"],
+                "week_change_pct": change,
+                "first_weight_pct": w0,
+                "last_weight_pct": w1,
+                "first_weight_date": weights[0][0] if weights else None,
+                "last_weight_date": weights[-1][0] if weights else None,
+                "float_pnl_pct": float_pnl,
+                "contribution_pp": contribution,
+            }
+        )
+    rows.sort(
+        key=lambda r: r["contribution_pp"] if r["contribution_pp"] is not None else 0
+    )
     # B1 状态轨迹
-    b1_files = {d: load_json(base / "data" / "holdings" / f"{d}_b1_holding_state.json", None) for d in days}
+    b1_files = {
+        d: load_json(base / "data" / "holdings" / f"{d}_b1_holding_state.json", None)
+        for d in days
+    }
     if not any(isinstance(v, list) for v in b1_files.values()):
         unavailable.append("B1 持仓状态：本周无 b1_holding_state 数据")
     trajectory = {}
@@ -497,14 +582,28 @@ def holding_week_performance(base: Path, days: list[str], daily_reviews: dict,
                 continue
             for item in data:
                 if str(item.get("code")) == code:
-                    steps.append({"date": d, "priority": item.get("final_priority"),
-                                  "action": item.get("final_action")})
+                    steps.append(
+                        {
+                            "date": d,
+                            "priority": item.get("final_priority"),
+                            "action": item.get("final_action"),
+                        }
+                    )
         trajectory[code] = steps
-    return {"rows": rows, "days_with_data": sorted(per_day), "b1_trajectory": trajectory}
+    return {
+        "rows": rows,
+        "days_with_data": sorted(per_day),
+        "b1_trajectory": trajectory,
+    }
 
 
-def portfolio_trajectory(days: list[str], trading_days: list[str], daily_reviews: dict,
-                         sse_map: dict[str, dict], unavailable: list[str]) -> dict:
+def portfolio_trajectory(
+    days: list[str],
+    trading_days: list[str],
+    daily_reviews: dict,
+    sse_map: dict[str, dict],
+    unavailable: list[str],
+) -> dict:
     """板块2：组合与账户轨迹。
 
     口径：总仓位/持仓市值 = 当日 revalued_positions 合计（权重分母为当日估算总权益）；
@@ -518,20 +617,35 @@ def portfolio_trajectory(days: list[str], trading_days: list[str], daily_reviews
         if not rp:
             continue
         priced = [p for p in rp if p.get("market_value") is not None]
-        unpriced = sorted(str(p.get("code")) for p in rp if p.get("market_value") is None)
+        unpriced = sorted(
+            str(p.get("code")) for p in rp if p.get("market_value") is None
+        )
         mv = sum(p["market_value"] for p in priced)
         wt = sum(p.get("position_pct") or 0 for p in priced)
         if unpriced:
-            partial_notes.append(f"{d} 缺 {','.join(unpriced)} 报价，当日市值/仓位为部分合计，不参与周收益与回撤")
-        daily.append({"date": d, "market_value": round(mv, 2), "total_position_pct": round(wt * 100, 2),
-                      "partial": bool(unpriced), "unpriced_codes": unpriced})
+            partial_notes.append(
+                f"{d} 缺 {','.join(unpriced)} 报价，当日市值/仓位为部分合计，不参与周收益与回撤"
+            )
+        daily.append(
+            {
+                "date": d,
+                "market_value": round(mv, 2),
+                "total_position_pct": round(wt * 100, 2),
+                "partial": bool(unpriced),
+                "unpriced_codes": unpriced,
+            }
+        )
     complete = [pt for pt in daily if not pt["partial"]]
     if len(complete) < 2:
-        unavailable.append("组合轨迹：本周完整 revalued_positions 不足两日，周收益与回撤 unavailable")
+        unavailable.append(
+            "组合轨迹：本周完整 revalued_positions 不足两日，周收益与回撤 unavailable"
+        )
     week_return = None
     max_drawdown = None
     if len(complete) >= 2 and complete[0]["market_value"]:
-        week_return = round((complete[-1]["market_value"] / complete[0]["market_value"] - 1) * 100, 2)
+        week_return = round(
+            (complete[-1]["market_value"] / complete[0]["market_value"] - 1) * 100, 2
+        )
         peak = complete[0]["market_value"]
         dd = 0.0
         for pt in complete:
@@ -570,8 +684,13 @@ def classify_advice(market_state: str | None, permission: str | None) -> str:
     return "neutral"
 
 
-def advice_review(base: Path, trading_days: list[str], sse_map: dict[str, dict],
-                  next_trading_day, unavailable: list[str]) -> dict:
+def advice_review(
+    base: Path,
+    trading_days: list[str],
+    sse_map: dict[str, dict],
+    next_trading_day,
+    unavailable: list[str],
+) -> dict:
     """板块3：每日建议事后检验。
 
     判定规则：bearish 建议 + 次日下跌 = 正确；bearish + 次日上涨 = 失误；
@@ -579,36 +698,48 @@ def advice_review(base: Path, trading_days: list[str], sse_map: dict[str, dict],
     """
     rows = []
     for d in trading_days:
-        chief = load_json(base / "data" / "decisions" / f"{d}_chief_decision.json", None)
+        chief = load_json(
+            base / "data" / "decisions" / f"{d}_chief_decision.json", None
+        )
         if not isinstance(chief, dict):
             rows.append({"date": d, "available": False, "verdict": "unavailable"})
             continue
-        direction = classify_advice(chief.get("market_state"), chief.get("new_position_permission"))
+        direction = classify_advice(
+            chief.get("market_state"), chief.get("new_position_permission")
+        )
         nxt = next_trading_day(d)
         chg = sse_change(sse_map, nxt) if nxt else None
         if direction == "neutral":
             verdict = "中性不判定"
         elif chg is None:
             verdict = "待验证"
-        elif (direction == "bearish" and chg < 0) or (direction == "bullish" and chg > 0):
+        elif (direction == "bearish" and chg < 0) or (
+            direction == "bullish" and chg > 0
+        ):
             verdict = "正确"
         else:
             verdict = "失误"
-        rows.append({
-            "date": d, "available": True,
-            "market_state": chief.get("market_state"),
-            "market_score": chief.get("market_score"),
-            "total_position_range": chief.get("total_position_range"),
-            "new_position_permission": chief.get("new_position_permission"),
-            "direction": direction, "next_day": nxt, "next_day_sse_chg_pct": chg,
-            "verdict": verdict,
-        })
+        rows.append(
+            {
+                "date": d,
+                "available": True,
+                "market_state": chief.get("market_state"),
+                "market_score": chief.get("market_score"),
+                "total_position_range": chief.get("total_position_range"),
+                "new_position_permission": chief.get("new_position_permission"),
+                "direction": direction,
+                "next_day": nxt,
+                "next_day_sse_chg_pct": chg,
+                "verdict": verdict,
+            }
+        )
     if trading_days and not any(r["available"] for r in rows):
         unavailable.append("每日建议检验：本周无 chief_decision 数据")
     return {"rows": rows}
 
 
 # ---------------------------------------------------------------- 归因
+
 
 def _trading_days_and_reviews(base, days, unavailable):
     """本周交易日与已生成的日报。缺日报要记进 `unavailable`（就地 append）。
@@ -640,43 +771,74 @@ def _plan_adherence(base, daily_reviews, execution_issues, unavailable, week_tra
     否则日报缺失会伪装成纪律问题。
     """
     plan_checks = []
-    plan_cache: dict = dict(daily_reviews)   # 本周的 final_review 已读过，直接复用
+    plan_cache: dict = dict(daily_reviews)  # 本周的 final_review 已读过，直接复用
     for t in week_trades:
         plan, source = find_plan_for_day(base, t["date"], cache=plan_cache)
         if plan is None:
-            unavailable.append(f"{t['date']} 无前置 final_review，{t['code']} 计划归属无法判定")
+            unavailable.append(
+                f"{t['date']} 无前置 final_review，{t['code']} 计划归属无法判定"
+            )
             plan_checks.append({"trade": t, "status": "unknown", "plan_source": None})
             continue
         planned = any(str(p.get("code")) == t["code"] for p in plan)
-        plan_checks.append({"trade": t, "status": "planned" if planned else "unplanned", "plan_source": source})
+        plan_checks.append(
+            {
+                "trade": t,
+                "status": "planned" if planned else "unplanned",
+                "plan_source": source,
+            }
+        )
     unplanned = [p for p in plan_checks if p["status"] == "unplanned"]
     known = [p for p in plan_checks if p["status"] != "unknown"]
     unplanned_ratio = round(len(unplanned) / len(known) * 100, 2) if known else None
     if unplanned:
-        execution_issues.append({
-            "rule": "unplanned_trade",
-            "summary": f"计划外交易 {len(unplanned)}/{len(known)} 笔（占比 {unplanned_ratio}%）",
-            "evidence": [{"date": p["trade"]["date"], "code": p["trade"]["code"],
-                          "name": p["trade"]["name"], "side": p["trade"]["side"],
-                          "plan_source": p["plan_source"]} for p in unplanned],
-        })
+        execution_issues.append(
+            {
+                "rule": "unplanned_trade",
+                "summary": f"计划外交易 {len(unplanned)}/{len(known)} 笔（占比 {unplanned_ratio}%）",
+                "evidence": [
+                    {
+                        "date": p["trade"]["date"],
+                        "code": p["trade"]["code"],
+                        "name": p["trade"]["name"],
+                        "side": p["trade"]["side"],
+                        "plan_source": p["plan_source"],
+                    }
+                    for p in unplanned
+                ],
+            }
+        )
     return plan_checks, unplanned_ratio
 
 
 def _slow_stops(execution_issues, losses):
     """慢止损：亏损超阈值且持有偏久的平仓。"""
-    slow_stops = [c for c in losses if c["pnl_pct"] is not None and c["pnl_pct"] <= STOP_LOSS_PCT]
+    slow_stops = [
+        c for c in losses if c["pnl_pct"] is not None and c["pnl_pct"] <= STOP_LOSS_PCT
+    ]
     if slow_stops:
-        execution_issues.append({
-            "rule": "slow_stop_loss",
-            "summary": f"止损偏慢 {len(slow_stops)} 单：已实现亏损超过 {STOP_LOSS_PCT}% 止损线",
-            "evidence": [{"code": c["code"], "name": c["name"], "sell_date": c["sell_date"],
-                          "pnl_pct": c["pnl_pct"], "hold_days": c["hold_days"]} for c in slow_stops],
-        })
+        execution_issues.append(
+            {
+                "rule": "slow_stop_loss",
+                "summary": f"止损偏慢 {len(slow_stops)} 单：已实现亏损超过 {STOP_LOSS_PCT}% 止损线",
+                "evidence": [
+                    {
+                        "code": c["code"],
+                        "name": c["name"],
+                        "sell_date": c["sell_date"],
+                        "pnl_pct": c["pnl_pct"],
+                        "hold_days": c["hold_days"],
+                    }
+                    for c in slow_stops
+                ],
+            }
+        )
     return slow_stops
 
 
-def _no_trade_confirmations(base, execution_issues, trading_days, unavailable, week_trades):
+def _no_trade_confirmations(
+    base, execution_issues, trading_days, unavailable, week_trades
+):
     """无交易日的人工确认核查。
 
     ⚠️ 确认文件本身缺失 ≠ 全部未确认 —— 前者是**数据缺口**（记 unavailable），
@@ -688,19 +850,27 @@ def _no_trade_confirmations(base, execution_issues, trading_days, unavailable, w
     no_trade_days = [d for d in trading_days if d not in traded_dates]
     confirmed_no_trade: dict = {}
     if isinstance(confirmations, dict):
-        confirmed_no_trade = {d: rec for d, rec in confirmations.items()
-                              if isinstance(rec, dict) and rec.get("no_trades") is True}
+        confirmed_no_trade = {
+            d: rec
+            for d, rec in confirmations.items()
+            if isinstance(rec, dict) and rec.get("no_trades") is True
+        }
     unconfirmed = [d for d in no_trade_days if d not in confirmed_no_trade]
     if not isinstance(confirmations, dict):
         if no_trade_days:
             unavailable.append(f"无交易确认文件缺失：{confirm_path}")
     elif unconfirmed:
-        execution_issues.append({
-            "rule": "no_trade_confirmation_missing",
-            "summary": f"无交易确认缺失 {len(unconfirmed)} 天：{', '.join(unconfirmed)}",
-            "evidence": {"no_trade_days": no_trade_days, "confirmed": sorted(confirmed_no_trade),
-                         "source": str(confirm_path)},
-        })
+        execution_issues.append(
+            {
+                "rule": "no_trade_confirmation_missing",
+                "summary": f"无交易确认缺失 {len(unconfirmed)} 天：{', '.join(unconfirmed)}",
+                "evidence": {
+                    "no_trade_days": no_trade_days,
+                    "confirmed": sorted(confirmed_no_trade),
+                    "source": str(confirm_path),
+                },
+            }
+        )
     return no_trade_days, unconfirmed
 
 
@@ -717,66 +887,110 @@ def _sell_fly_review(base, closings, strategy_issues, unavailable):
     for c in closings:
         mfe_map = load_mfe_after(base, c["sell_date"], index=mfe_files, cache=mfe_cache)
         if mfe_map is None:
-            sell_fly_unevaluated.append({"code": c["code"], "name": c["name"],
-                                         "sell_date": c["sell_date"],
-                                         "reason": "卖出日之后无 mfe_mae 数据"})
+            sell_fly_unevaluated.append(
+                {
+                    "code": c["code"],
+                    "name": c["name"],
+                    "sell_date": c["sell_date"],
+                    "reason": "卖出日之后无 mfe_mae 数据",
+                }
+            )
             continue
         entry = mfe_map.get(c["code"])
         if not entry or entry.get("mfe_pct") is None or entry.get("cost") is None:
-            reason = ("后续 mfe_mae 中无该代码（MFE/MAE 只覆盖仍持仓的票，全清仓单无法评估）"
-                      if not entry else
-                      f"后续 mfe_mae 中该代码未出数（{entry.get('unable_reason') or 'mfe_pct/cost 缺失'}）")
-            sell_fly_unevaluated.append({"code": c["code"], "name": c["name"],
-                                         "sell_date": c["sell_date"], "reason": reason})
+            reason = (
+                "后续 mfe_mae 中无该代码（MFE/MAE 只覆盖仍持仓的票，全清仓单无法评估）"
+                if not entry
+                else f"后续 mfe_mae 中该代码未出数（{entry.get('unable_reason') or 'mfe_pct/cost 缺失'}）"
+            )
+            sell_fly_unevaluated.append(
+                {
+                    "code": c["code"],
+                    "name": c["name"],
+                    "sell_date": c["sell_date"],
+                    "reason": reason,
+                }
+            )
             continue
         mfe_date = entry.get("mfe_date")
         implied_mfe_price = entry["cost"] * (1 + entry["mfe_pct"] / 100)
-        if mfe_date and mfe_date > c["sell_date"] and implied_mfe_price > c["avg_sell_price"] * (1 + SELL_FLY_PCT):
-            sell_fly.append({
-                "code": c["code"], "name": c["name"], "sell_date": c["sell_date"],
-                "sell_price": c["avg_sell_price"], "implied_mfe_price": round(implied_mfe_price, 4),
-                "mfe_date": mfe_date,
-                "overshoot_pct": round((implied_mfe_price / c["avg_sell_price"] - 1) * 100, 2),
-            })
+        if (
+            mfe_date
+            and mfe_date > c["sell_date"]
+            and implied_mfe_price > c["avg_sell_price"] * (1 + SELL_FLY_PCT)
+        ):
+            sell_fly.append(
+                {
+                    "code": c["code"],
+                    "name": c["name"],
+                    "sell_date": c["sell_date"],
+                    "sell_price": c["avg_sell_price"],
+                    "implied_mfe_price": round(implied_mfe_price, 4),
+                    "mfe_date": mfe_date,
+                    "overshoot_pct": round(
+                        (implied_mfe_price / c["avg_sell_price"] - 1) * 100, 2
+                    ),
+                }
+            )
     sell_fly_evaluated = len(closings) - len(sell_fly_unevaluated)
-    sell_fly_coverage = (round(sell_fly_evaluated / len(closings) * 100, 2)
-                         if closings else None)
+    sell_fly_coverage = (
+        round(sell_fly_evaluated / len(closings) * 100, 2) if closings else None
+    )
     if sell_fly_unevaluated:
         unavailable.append(
             f"卖飞审计覆盖 {sell_fly_evaluated}/{len(closings)} 单"
             f"（{sell_fly_coverage}%）：无法评估 "
-            + "；".join(f"{u['sell_date']} {u['code']} {u['reason']}"
-                        for u in sell_fly_unevaluated[:5])
-            + ("……" if len(sell_fly_unevaluated) > 5 else ""))
+            + "；".join(
+                f"{u['sell_date']} {u['code']} {u['reason']}"
+                for u in sell_fly_unevaluated[:5]
+            )
+            + ("……" if len(sell_fly_unevaluated) > 5 else "")
+        )
     if sell_fly:
-        strategy_issues.append({
-            "rule": "sell_fly",
-            "summary": f"卖飞候选 {len(sell_fly)} 单：后续 MFE 超卖出价 {SELL_FLY_PCT * 100:.0f}% 以上",
-            "evidence": sell_fly,
-        })
+        strategy_issues.append(
+            {
+                "rule": "sell_fly",
+                "summary": f"卖飞候选 {len(sell_fly)} 单：后续 MFE 超卖出价 {SELL_FLY_PCT * 100:.0f}% 以上",
+                "evidence": sell_fly,
+            }
+        )
     return sell_fly, sell_fly_unevaluated, sell_fly_evaluated, sell_fly_coverage
 
 
 def _loss_structure(losses, strategy_issues):
     """亏损结构：短持有 vs 长持有各占多少亏损额。"""
-    short_losses = [c for c in losses if c["hold_days"] is not None and c["hold_days"] <= SHORT_HOLD_DAYS]
-    long_losses = [c for c in losses if c["hold_days"] is not None and c["hold_days"] > SHORT_HOLD_DAYS]
+    short_losses = [
+        c
+        for c in losses
+        if c["hold_days"] is not None and c["hold_days"] <= SHORT_HOLD_DAYS
+    ]
+    long_losses = [
+        c
+        for c in losses
+        if c["hold_days"] is not None and c["hold_days"] > SHORT_HOLD_DAYS
+    ]
     total_loss = sum(c["gross_pnl"] for c in losses)
     short_loss_sum = sum(c["gross_pnl"] for c in short_losses)
-    short_loss_share = round(short_loss_sum / total_loss * 100, 2) if total_loss else None
+    short_loss_share = (
+        round(short_loss_sum / total_loss * 100, 2) if total_loss else None
+    )
     if losses:
-        strategy_issues.append({
-            "rule": "short_hold_loss_profile",
-            "summary": (f"{SHORT_HOLD_DAYS} 天以内平仓的亏损单 {len(short_losses)}/{len(losses)} 笔，"
-                        f"贡献亏损 {short_loss_share}%（历史画像：短持有交易贡献主要亏损）"),
-            "evidence": {
-                "short_hold_loss_count": len(short_losses),
-                "long_hold_loss_count": len(long_losses),
-                "short_hold_loss_amount": round(short_loss_sum, 2),
-                "total_loss_amount": round(total_loss, 2),
-                "short_hold_loss_share_pct": short_loss_share,
-            },
-        })
+        strategy_issues.append(
+            {
+                "rule": "short_hold_loss_profile",
+                "summary": (
+                    f"{SHORT_HOLD_DAYS} 天以内平仓的亏损单 {len(short_losses)}/{len(losses)} 笔，"
+                    f"贡献亏损 {short_loss_share}%（历史画像：短持有交易贡献主要亏损）"
+                ),
+                "evidence": {
+                    "short_hold_loss_count": len(short_losses),
+                    "long_hold_loss_count": len(long_losses),
+                    "short_hold_loss_amount": round(short_loss_sum, 2),
+                    "total_loss_amount": round(total_loss, 2),
+                    "short_hold_loss_share_pct": short_loss_share,
+                },
+            }
+        )
     return short_loss_share, total_loss
 
 
@@ -795,23 +1009,39 @@ def _bear_regime_stats(base, losses, total_loss, trading_days, unavailable):
     else:
         observed = [d for d in trading_days if d in regimes]
         bear_days = [d for d in observed if regimes[d]["regime"] == "空头"]
-        bear_closings = [c for c in losses if regimes.get(c["sell_date"], {}).get("regime") == "空头"]
+        bear_closings = [
+            c for c in losses if regimes.get(c["sell_date"], {}).get("regime") == "空头"
+        ]
         if losses and observed:
             bear_loss = sum(c["gross_pnl"] for c in bear_closings)
-            bear_loss_share = round(bear_loss / total_loss * 100, 2) if total_loss else None
+            bear_loss_share = (
+                round(bear_loss / total_loss * 100, 2) if total_loss else None
+            )
         elif not observed:
             unavailable.append("本周交易日无 0AMV 观测记录")
-    bear_day_ratio = round(len(bear_days) / len([d for d in trading_days if regimes and d in regimes]) * 100, 2) \
-        if regimes and any(d in regimes for d in trading_days) else None
+    bear_day_ratio = (
+        round(
+            len(bear_days)
+            / len([d for d in trading_days if regimes and d in regimes])
+            * 100,
+            2,
+        )
+        if regimes and any(d in regimes for d in trading_days)
+        else None
+    )
     return bear_days, bear_loss_share, bear_day_ratio
 
 
 def _risk_levels_of_week(base, days):
     """本周各日的风控等级（来自当日 risk_decision）。"""
-    risk_days = [d for d in days if (base / "data" / "risk" / f"{d}_risk_decision.json").exists()]
+    risk_days = [
+        d for d in days if (base / "data" / "risk" / f"{d}_risk_decision.json").exists()
+    ]
     risk_levels = {}
     for d in risk_days:
-        risk_levels[d] = load_json(base / "data" / "risk" / f"{d}_risk_decision.json", {}).get("risk_level")
+        risk_levels[d] = load_json(
+            base / "data" / "risk" / f"{d}_risk_decision.json", {}
+        ).get("risk_level")
     return risk_levels
 
 
@@ -841,8 +1071,14 @@ def build_weekly_review(base: Path, day: str) -> dict:
     # 买入来源的那部分数量，系统性少算；零配平根本没有成本基准。二者一律排除出
     # 盈亏/胜率/止损/持有期/空头归因，并单独 unavailable 报告，不得静默少算。
     closings_all = fifo_pair(all_trades)
-    closings = [c for c in closings_all if week["start"] <= c["sell_date"] <= week["end"]]
-    valued = [c for c in closings if c["gross_pnl"] is not None and c["match_status"] == "full"]
+    closings = [
+        c for c in closings_all if week["start"] <= c["sell_date"] <= week["end"]
+    ]
+    valued = [
+        c
+        for c in closings
+        if c["gross_pnl"] is not None and c["match_status"] == "full"
+    ]
     unmatched_closings = [c for c in closings if c["match_status"] != "full"]
     partial_closings = [c for c in unmatched_closings if c["match_status"] == "partial"]
     zero_closings = [c for c in unmatched_closings if c["match_status"] == "none"]
@@ -850,16 +1086,24 @@ def build_weekly_review(base: Path, day: str) -> dict:
         unavailable.append(
             f"{c['sell_date']} {c['code']} 平仓单部分配平：卖出 {c['sell_qty']:g} 股仅 "
             f"{c['matched_qty']:g} 股找到买入来源（缺 {c['unmatched_qty']:g} 股），"
-            "已实现盈亏不可信，已排除出盈亏与胜率统计")
+            "已实现盈亏不可信，已排除出盈亏与胜率统计"
+        )
     for c in zero_closings:
         unavailable.append(
             f"{c['sell_date']} {c['code']} 平仓单未配平：卖出 {c['sell_qty']:g} 股在台账中"
-            "无任何买入来源，无成本基准，已排除出盈亏与胜率统计")
+            "无任何买入来源，无成本基准，已排除出盈亏与胜率统计"
+        )
     unmatched_evidence = [
-        {"code": c["code"], "name": c["name"], "sell_date": c["sell_date"],
-         "sell_qty": c["sell_qty"], "matched_qty": c["matched_qty"],
-         "unmatched_qty": c["unmatched_qty"], "match_status": c["match_status"],
-         "excluded_gross_pnl": c["gross_pnl"]}
+        {
+            "code": c["code"],
+            "name": c["name"],
+            "sell_date": c["sell_date"],
+            "sell_qty": c["sell_qty"],
+            "matched_qty": c["matched_qty"],
+            "unmatched_qty": c["unmatched_qty"],
+            "match_status": c["match_status"],
+            "excluded_gross_pnl": c["gross_pnl"],
+        }
         for c in unmatched_closings
     ]
     gross_total = round(sum(c["gross_pnl"] for c in valued), 2)
@@ -875,7 +1119,9 @@ def build_weekly_review(base: Path, day: str) -> dict:
     losses = [c for c in valued if c["gross_pnl"] < 0]
     win_rate = round(len(wins) / len(valued) * 100, 2) if valued else None
     avg_win = sum(c["gross_pnl"] for c in wins) / len(wins) if wins else None
-    avg_loss = abs(sum(c["gross_pnl"] for c in losses)) / len(losses) if losses else None
+    avg_loss = (
+        abs(sum(c["gross_pnl"] for c in losses)) / len(losses) if losses else None
+    )
     pl_ratio = round(avg_win / avg_loss, 2) if (avg_win and avg_loss) else None
     hold_vals = [c["hold_days"] for c in valued if c["hold_days"] is not None]
     avg_hold = round(sum(hold_vals) / len(hold_vals), 1) if hold_vals else None
@@ -884,7 +1130,9 @@ def build_weekly_review(base: Path, day: str) -> dict:
     trading_days, daily_reviews = _trading_days_and_reviews(base, days, unavailable)
 
     # --- 执行维度 1：计划外交易 ---
-    plan_checks, unplanned_ratio = _plan_adherence(base, daily_reviews, execution_issues, unavailable, week_trades)
+    plan_checks, unplanned_ratio = _plan_adherence(
+        base, daily_reviews, execution_issues, unavailable, week_trades
+    )
 
     # --- 执行维度 2：止损合规 ---
     slow_stops = _slow_stops(execution_issues, losses)
@@ -896,20 +1144,26 @@ def build_weekly_review(base: Path, day: str) -> dict:
     # 写的持仓快照确认条目没有该键，不能顶替。
     # 旧实现读 _import_meta.json 的 no_trades_confirmed_dates —— 该键全仓库无任何写入方，
     # 恒为空 ⇒ 每周误报 no_trade_confirmation_missing。
-    no_trade_days, unconfirmed = _no_trade_confirmations(base, execution_issues, trading_days, unavailable, week_trades)
+    no_trade_days, unconfirmed = _no_trade_confirmations(
+        base, execution_issues, trading_days, unavailable, week_trades
+    )
 
     # --- 策略维度 1：卖飞分析 ---
     # 覆盖率必须显式报告:MFE/MAE 只对**仍持仓**的票出数(calc_mfe_mae 按 current_positions
     # 逐票算),因此**全清仓**的平仓单在后续 mfe_mae.json 里根本不存在 —— 永远"无法评估"。
     # 此前只把它塞进 sell_fly_unevaluated 列表,报告正文写"卖飞候选 0 单",读者会当成
     # "本周没卖飞",而真相是"本周根本没查"。
-    sell_fly, sell_fly_unevaluated, sell_fly_evaluated, sell_fly_coverage = _sell_fly_review(base, closings, strategy_issues, unavailable)
+    sell_fly, sell_fly_unevaluated, sell_fly_evaluated, sell_fly_coverage = (
+        _sell_fly_review(base, closings, strategy_issues, unavailable)
+    )
 
     # --- 策略维度 2：亏损单持有期分布 ---
     short_loss_share, total_loss = _loss_structure(losses, strategy_issues)
 
     # --- 策略维度 3：市场背景 ---
-    bear_days, bear_loss_share, bear_day_ratio = _bear_regime_stats(base, losses, total_loss, trading_days, unavailable)
+    bear_days, bear_loss_share, bear_day_ratio = _bear_regime_stats(
+        base, losses, total_loss, trading_days, unavailable
+    )
 
     # --- 风控决策覆盖（事实记录，不归因） ---
     risk_levels = _risk_levels_of_week(base, days)
@@ -922,7 +1176,12 @@ def build_weekly_review(base: Path, day: str) -> dict:
     sse_end = (date.fromisoformat(week["end"]) + timedelta(days=7)).isoformat()
     sse_map = sse_daily_map(base, sse_start, sse_end)
     td_extended = trading_days_of_week(
-        base, days + [(date.fromisoformat(week["end"]) + timedelta(days=i)).isoformat() for i in range(1, 8)]
+        base,
+        days
+        + [
+            (date.fromisoformat(week["end"]) + timedelta(days=i)).isoformat()
+            for i in range(1, 8)
+        ],
     )
 
     def next_trading_day(day: str) -> str | None:
@@ -934,7 +1193,9 @@ def build_weekly_review(base: Path, day: str) -> dict:
         return None
 
     # --- 板块2：组合与账户轨迹 ---
-    portfolio = portfolio_trajectory(days, trading_days, daily_reviews, sse_map, unavailable)
+    portfolio = portfolio_trajectory(
+        days, trading_days, daily_reviews, sse_map, unavailable
+    )
 
     # --- 板块3：每日建议事后检验 ---
     advice = advice_review(base, trading_days, sse_map, next_trading_day, unavailable)
@@ -946,23 +1207,39 @@ def build_weekly_review(base: Path, day: str) -> dict:
     week_ret = portfolio["week_return_pct"]
     if week_ret is not None and week_ret < 0:
         if advice_wrong:
-            strategy_issues.append({
-                "rule": "wrong_advice_direction",
-                "summary": (f"组合周收益 {week_ret}% 为负，且 {len(advice_wrong)} 天操作建议方向失误"
-                            f"（{', '.join(r['date'] for r in advice_wrong)}），亏损含可避免部分"),
-                "evidence": [{"date": r["date"], "market_state": r["market_state"],
-                              "next_day": r["next_day"], "next_day_sse_chg_pct": r["next_day_sse_chg_pct"]}
-                             for r in advice_wrong],
-            })
+            strategy_issues.append(
+                {
+                    "rule": "wrong_advice_direction",
+                    "summary": (
+                        f"组合周收益 {week_ret}% 为负，且 {len(advice_wrong)} 天操作建议方向失误"
+                        f"（{', '.join(r['date'] for r in advice_wrong)}），亏损含可避免部分"
+                    ),
+                    "evidence": [
+                        {
+                            "date": r["date"],
+                            "market_state": r["market_state"],
+                            "next_day": r["next_day"],
+                            "next_day_sse_chg_pct": r["next_day_sse_chg_pct"],
+                        }
+                        for r in advice_wrong
+                    ],
+                }
+            )
         elif advice_correct:
-            environment_issues.append({
-                "rule": "adverse_market_environment",
-                "summary": (f"组合周收益 {week_ret}% 为负，但 {len(advice_correct)} 天有方向的建议全部正确，"
-                            "亏损归因于市场环境而非执行/建议失误"),
-                "evidence": {"week_return_pct": week_ret,
-                             "benchmark_week_pct": portfolio["benchmark_week_pct"],
-                             "correct_days": [r["date"] for r in advice_correct]},
-            })
+            environment_issues.append(
+                {
+                    "rule": "adverse_market_environment",
+                    "summary": (
+                        f"组合周收益 {week_ret}% 为负，但 {len(advice_correct)} 天有方向的建议全部正确，"
+                        "亏损归因于市场环境而非执行/建议失误"
+                    ),
+                    "evidence": {
+                        "week_return_pct": week_ret,
+                        "benchmark_week_pct": portfolio["benchmark_week_pct"],
+                        "correct_days": [r["date"] for r in advice_correct],
+                    },
+                }
+            )
 
     facts = {
         "trade_count": len(week_trades),
@@ -1029,8 +1306,14 @@ def build_weekly_review(base: Path, day: str) -> dict:
             "trades": week_trades,
             "closings": closings,
             "plan_checks": [
-                {"date": p["trade"]["date"], "code": p["trade"]["code"], "name": p["trade"]["name"],
-                 "side": p["trade"]["side"], "status": p["status"], "plan_source": p["plan_source"]}
+                {
+                    "date": p["trade"]["date"],
+                    "code": p["trade"]["code"],
+                    "name": p["trade"]["name"],
+                    "side": p["trade"]["side"],
+                    "status": p["status"],
+                    "plan_source": p["plan_source"],
+                }
                 for p in plan_checks
             ],
         },
@@ -1038,6 +1321,7 @@ def build_weekly_review(base: Path, day: str) -> dict:
 
 
 # ---------------------------------------------------------------- Markdown
+
 
 def fmt_money(v) -> str:
     return f"{v:,.2f}" if isinstance(v, (int, float)) else "unavailable"
@@ -1050,7 +1334,9 @@ def render_markdown(review: dict) -> str:
     def or_na(v, suffix: str = "") -> str:
         return f"{v}{suffix}" if v is not None else "unavailable"
 
-    hold_text = f"{f['avg_hold_days']} 天" if f["avg_hold_days"] is not None else "unavailable"
+    hold_text = (
+        f"{f['avg_hold_days']} 天" if f["avg_hold_days"] is not None else "unavailable"
+    )
     lines = [
         f"# {review['iso_year']}W{review['iso_week']:02d} 周度复盘（{r['start']} ~ {r['end']}）",
         "",
@@ -1058,8 +1344,12 @@ def render_markdown(review: dict) -> str:
         f"> 交易日：{len(review['trading_days'])} 天（{', '.join(review['trading_days']) or '无'}）",
         f"> 成交：**{f['trade_count']}** 笔（买 {f['buy_count']} / 卖 {f['sell_count']}）；"
         f"平仓 **{f['closing_count']}** 单"
-        + (f"（可计盈亏 {f['valued_closing_count']} 单，配平异常 "
-           f"{f['unmatched_closing_count']} 单）" if f.get('unmatched_closing_count') else ""),
+        + (
+            f"（可计盈亏 {f['valued_closing_count']} 单，配平异常 "
+            f"{f['unmatched_closing_count']} 单）"
+            if f.get("unmatched_closing_count")
+            else ""
+        ),
         f"> 已实现毛盈亏：**{fmt_money(f['gross_pnl'])}**；扣已平仓对应费用 "
         f"{fmt_money(f.get('closed_fee_total'))} 后净盈亏 **{fmt_money(f['net_pnl'])}**",
         f"> 胜率：**{or_na(f['win_rate_pct'], '%')}**；"
@@ -1093,17 +1383,22 @@ def render_markdown(review: dict) -> str:
                 f"| {row['code']} | {row['name'] or ''} | {row['first_close']:g}({row['first_date'][5:]}) | "
                 f"{row['last_close']:g}({row['last_date'][5:]}) | {or_na(row['week_change_pct'], '%')} | "
                 f"{or_na(row['first_weight_pct'], '%')} | {or_na(row['last_weight_pct'], '%')} | "
-                f"{or_na(row['float_pnl_pct'], '%')} | {or_na(row['contribution_pp'], 'pp')} |")
+                f"{or_na(row['float_pnl_pct'], '%')} | {or_na(row['contribution_pp'], 'pp')} |"
+            )
         traj = hp["b1_trajectory"]
         if any(traj.values()):
             lines += ["", "### B1 状态/风控标志周轨迹", ""]
             for row in hp["rows"]:
                 steps = traj.get(row["code"]) or []
                 if steps:
-                    text = " → ".join(f"{s['date'][5:]}:{s['priority']} {s['action']}" for s in steps)
+                    text = " → ".join(
+                        f"{s['date'][5:]}:{s['priority']} {s['action']}" for s in steps
+                    )
                     lines.append(f"- {row['code']} {row['name'] or ''}：{text}")
                 else:
-                    lines.append(f"- {row['code']} {row['name'] or ''}：`unavailable`（本周无 B1 状态记录）")
+                    lines.append(
+                        f"- {row['code']} {row['name'] or ''}：`unavailable`（本周无 B1 状态记录）"
+                    )
     else:
         lines.append("- `unavailable`：本周无持仓价格数据。")
     pf = review["portfolio"]
@@ -1116,17 +1411,29 @@ def render_markdown(review: dict) -> str:
         for pt in pf["daily"]:
             chg = pf["benchmark_daily_chg"].get(pt["date"])
             mark = "（部分）" if pt.get("partial") else ""
-            lines.append(f"| {pt['date']} | {pt['total_position_pct']}%{mark} | "
-                         f"{pt['market_value']:,.2f}{mark} | {or_na(chg, '%')} |")
+            lines.append(
+                f"| {pt['date']} | {pt['total_position_pct']}%{mark} | "
+                f"{pt['market_value']:,.2f}{mark} | {or_na(chg, '%')} |"
+            )
         lines.append("")
     else:
         lines.append("- `unavailable`：本周无每日组合重估数据。")
     for note in pf.get("partial_notes", []):
         lines.append(f"- 数据注意：{note}")
-    lines.append(f"- 组合周收益率估算（完整日持仓市值口径，不含现金/费用）：**{or_na(pf['week_return_pct'], '%')}**")
-    lines.append(f"- 周内最大回撤（按日市值序列）：{or_na(pf['max_drawdown_pct'], '%')}")
-    bench_note = f"（缺 {', '.join(pf['benchmark_missing_days'])} 的数据）" if pf["benchmark_missing_days"] else ""
-    lines.append(f"- 基准对照：上证指数本周 {or_na(pf['benchmark_week_pct'], '%')}{bench_note}")
+    lines.append(
+        f"- 组合周收益率估算（完整日持仓市值口径，不含现金/费用）：**{or_na(pf['week_return_pct'], '%')}**"
+    )
+    lines.append(
+        f"- 周内最大回撤（按日市值序列）：{or_na(pf['max_drawdown_pct'], '%')}"
+    )
+    bench_note = (
+        f"（缺 {', '.join(pf['benchmark_missing_days'])} 的数据）"
+        if pf["benchmark_missing_days"]
+        else ""
+    )
+    lines.append(
+        f"- 基准对照：上证指数本周 {or_na(pf['benchmark_week_pct'], '%')}{bench_note}"
+    )
     lines += ["", "## 4. 交易明细", ""]
     trades = review["details"]["trades"]
     if trades:
@@ -1135,20 +1442,30 @@ def render_markdown(review: dict) -> str:
             "|---|---|---|---|---:|---:|---:|---:|",
         ]
         for t in trades:
-            lines.append(f"| {t['date']} | {t['code']} | {t['name']} | {t['side']} | "
-                         f"{t['qty']:g} | {t['price']:g} | {t['amount']:,.2f} | {t['fee']:,.2f} |")
-        closings = [c for c in review["details"]["closings"]
-                    if c["gross_pnl"] is not None and c.get("match_status", "full") == "full"]
+            lines.append(
+                f"| {t['date']} | {t['code']} | {t['name']} | {t['side']} | "
+                f"{t['qty']:g} | {t['price']:g} | {t['amount']:,.2f} | {t['fee']:,.2f} |"
+            )
+        closings = [
+            c
+            for c in review["details"]["closings"]
+            if c["gross_pnl"] is not None and c.get("match_status", "full") == "full"
+        ]
         if closings:
-            lines += ["", "### 平仓盈亏（FIFO 配对，仅完整配平）", "",
-                      "| 卖出日 | 代码 | 名称 | 数量 | 均价(卖/买) | 持有天数 | 毛盈亏 | 收益率 |",
-                      "|---|---|---|---:|---|---:|---:|---:|"]
+            lines += [
+                "",
+                "### 平仓盈亏（FIFO 配对，仅完整配平）",
+                "",
+                "| 卖出日 | 代码 | 名称 | 数量 | 均价(卖/买) | 持有天数 | 毛盈亏 | 收益率 |",
+                "|---|---|---|---:|---|---:|---:|---:|",
+            ]
             for c in closings:
                 lines.append(
                     f"| {c['sell_date']} | {c['code']} | {c['name']} | {c['sell_qty']:g} | "
                     f"{c['avg_sell_price']:g}/{c['avg_buy_cost']:g} | "
                     f"{c['hold_days'] if c['hold_days'] is not None else 'unavailable'} | "
-                    f"{c['gross_pnl']:,.2f} | {c['pnl_pct']}% |")
+                    f"{c['gross_pnl']:,.2f} | {c['pnl_pct']}% |"
+                )
     else:
         lines.append("- 本周无成交记录。")
 
@@ -1159,32 +1476,57 @@ def render_markdown(review: dict) -> str:
         lines += loss_streak_lines(review["loss_streak"], title="连亏检查（全台账）")
     unmatched = f.get("unmatched_closings") or []
     if unmatched:
-        lines += ["", "### 配平异常平仓单（已排除出盈亏与胜率统计）", "",
-                  "| 卖出日 | 代码 | 名称 | 卖出数量 | 已配平 | 缺配平 | 状态 | 被排除的盈亏 |",
-                  "|---|---|---|---:|---:|---:|---|---:|"]
+        lines += [
+            "",
+            "### 配平异常平仓单（已排除出盈亏与胜率统计）",
+            "",
+            "| 卖出日 | 代码 | 名称 | 卖出数量 | 已配平 | 缺配平 | 状态 | 被排除的盈亏 |",
+            "|---|---|---|---:|---:|---:|---|---:|",
+        ]
         status_text = {"partial": "部分配平", "none": "未配平"}
         for c in unmatched:
-            pnl = f"{c['excluded_gross_pnl']:,.2f}" if c.get("excluded_gross_pnl") is not None else "unavailable"
+            pnl = (
+                f"{c['excluded_gross_pnl']:,.2f}"
+                if c.get("excluded_gross_pnl") is not None
+                else "unavailable"
+            )
             lines.append(
                 f"| {c['sell_date']} | {c['code']} | {c['name']} | {c['sell_qty']:g} | "
                 f"{c['matched_qty']:g} | {c['unmatched_qty']:g} | "
-                f"{status_text.get(c['match_status'], c['match_status'])} | {pnl} |")
-        lines.append("- 口径说明：部分配平的毛盈亏只覆盖已找到买入来源的数量，系统性少算；"
-                     "未配平单无成本基准。二者均不计入本周毛/净盈亏、胜率、盈亏比、"
-                     "止损合规、持有期与空头亏损归因。")
+                f"{status_text.get(c['match_status'], c['match_status'])} | {pnl} |"
+            )
+        lines.append(
+            "- 口径说明：部分配平的毛盈亏只覆盖已找到买入来源的数量，系统性少算；"
+            "未配平单无成本基准。二者均不计入本周毛/净盈亏、胜率、盈亏比、"
+            "止损合规、持有期与空头亏损归因。"
+        )
     lines += ["", "## 5. 执行纪律审计", ""]
-    lines.append(f"- 计划外交易占比："
-                 f"{f['unplanned_ratio_pct'] if f['unplanned_ratio_pct'] is not None else 'unavailable'}"
-                 f"（判定口径见 plan_checks）")
+    lines.append(
+        f"- 计划外交易占比："
+        f"{f['unplanned_ratio_pct'] if f['unplanned_ratio_pct'] is not None else 'unavailable'}"
+        f"（判定口径见 plan_checks）"
+    )
     lines.append(f"- 止损偏慢（亏损超 {STOP_LOSS_PCT}% 线）：{f['slow_stop_count']} 单")
-    lines.append(f"- 无交易日：{', '.join(f['no_trade_days']) or '无'}；"
-                 f"缺确认：{', '.join(f['no_trade_unconfirmed']) or '无'}")
+    lines.append(
+        f"- 无交易日：{', '.join(f['no_trade_days']) or '无'}；"
+        f"缺确认：{', '.join(f['no_trade_unconfirmed']) or '无'}"
+    )
     if review["details"]["plan_checks"]:
-        lines += ["", "| 日期 | 代码 | 名称 | 方向 | 计划归属 | 计划来源 |", "|---|---|---|---|---|---|"]
+        lines += [
+            "",
+            "| 日期 | 代码 | 名称 | 方向 | 计划归属 | 计划来源 |",
+            "|---|---|---|---|---|---|",
+        ]
         for p in review["details"]["plan_checks"]:
-            status = {"planned": "计划内", "unplanned": "**计划外**", "unknown": "无法判定"}[p["status"]]
-            lines.append(f"| {p['date']} | {p['code']} | {p['name']} | {p['side']} | {status} | "
-                         f"{p['plan_source'] or 'unavailable'} |")
+            status = {
+                "planned": "计划内",
+                "unplanned": "**计划外**",
+                "unknown": "无法判定",
+            }[p["status"]]
+            lines.append(
+                f"| {p['date']} | {p['code']} | {p['name']} | {p['side']} | {status} | "
+                f"{p['plan_source'] or 'unavailable'} |"
+            )
     lines += ["", "## 6. 每日建议事后检验", ""]
     advice_rows = [r for r in review["advice_review"]["rows"] if r["available"]]
     if advice_rows:
@@ -1197,21 +1539,32 @@ def render_markdown(review: dict) -> str:
             lines.append(
                 f"| {r['date']} | {r['market_state']} | {r['market_score']} | "
                 f"{r['total_position_range']} | {direction_text[r['direction']]} | "
-                f"{r['next_day'] or 'unavailable'} {or_na(r['next_day_sse_chg_pct'], '%')} | {r['verdict']} |")
+                f"{r['next_day'] or 'unavailable'} {or_na(r['next_day_sse_chg_pct'], '%')} | {r['verdict']} |"
+            )
     else:
         lines.append("- `unavailable`：本周无每日总控决策数据。")
     lines += ["", "## 7. 策略有效性", ""]
-    lines.append(f"- 卖飞候选（后续 MFE 超卖出价 {SELL_FLY_PCT * 100:.0f}%）：{f['sell_fly_count']} 单；"
-                 f"审计覆盖 {f.get('sell_fly_evaluated_count', 0)}/{f['closing_count']} 单"
-                 f"（{or_na(f.get('sell_fly_coverage_pct'), '%')}），"
-                 f"无法评估 {len(f['sell_fly_unevaluated'])} 单"
-                 + ("；无法评估明细见「数据缺口声明」" if f['sell_fly_unevaluated'] else ""))
-    lines.append(f"- {SHORT_HOLD_DAYS} 天以内持有单亏损贡献：{or_na(f['short_hold_loss_share_pct'], '%')}")
-    lines.append(f"- 0AMV 空头天数：{', '.join(f['bear_days']) or '无'}"
-                 f"（占比 {or_na(f['bear_day_ratio_pct'], '%')}）；"
-                 f"空头期间亏损占比：{or_na(f['bear_loss_share_pct'], '%')}")
+    lines.append(
+        f"- 卖飞候选（后续 MFE 超卖出价 {SELL_FLY_PCT * 100:.0f}%）：{f['sell_fly_count']} 单；"
+        f"审计覆盖 {f.get('sell_fly_evaluated_count', 0)}/{f['closing_count']} 单"
+        f"（{or_na(f.get('sell_fly_coverage_pct'), '%')}），"
+        f"无法评估 {len(f['sell_fly_unevaluated'])} 单"
+        + ("；无法评估明细见「数据缺口声明」" if f["sell_fly_unevaluated"] else "")
+    )
+    lines.append(
+        f"- {SHORT_HOLD_DAYS} 天以内持有单亏损贡献：{or_na(f['short_hold_loss_share_pct'], '%')}"
+    )
+    lines.append(
+        f"- 0AMV 空头天数：{', '.join(f['bear_days']) or '无'}"
+        f"（占比 {or_na(f['bear_day_ratio_pct'], '%')}）；"
+        f"空头期间亏损占比：{or_na(f['bear_loss_share_pct'], '%')}"
+    )
     lines += ["", "## 8. 归因汇总（规则命中清单）", ""]
-    all_issues = review["execution_issues"] + review["strategy_issues"] + review.get("environment_issues", [])
+    all_issues = (
+        review["execution_issues"]
+        + review["strategy_issues"]
+        + review.get("environment_issues", [])
+    )
     if not all_issues:
         lines.append("- 本周无规则命中。")
     for issue in review["execution_issues"]:
@@ -1232,7 +1585,9 @@ def render_markdown(review: dict) -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="确定性周度复盘")
-    ap.add_argument("--date", default=cn_today().isoformat(), help="周内任意日期，默认今天")
+    ap.add_argument(
+        "--date", default=cn_today().isoformat(), help="周内任意日期，默认今天"
+    )
     ap.add_argument("--base", default=str(BASE), help="项目根目录（测试用）")
     args = ap.parse_args()
     base = Path(args.base)
@@ -1243,7 +1598,9 @@ def main() -> None:
     stem = f"{review['iso_year']}W{review['iso_week']:02d}_weekly_review"
     json_path = out_dir / f"{stem}.json"
     md_path = out_dir / f"{stem}.md"
-    json_path.write_text(json.dumps(review, ensure_ascii=False, indent=2), encoding="utf-8")
+    json_path.write_text(
+        json.dumps(review, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     md_path.write_text(render_markdown(review), encoding="utf-8")
     print(f"weekly review written: {json_path}")
     print(f"weekly review written: {md_path}")

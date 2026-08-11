@@ -10,6 +10,7 @@
 
 ⚠️ 那次翻转**同时换了宇宙与数据源**，归因未分离（见 R2 重跑 P1）。
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -28,6 +29,7 @@ FACTOR: dict[str, Any] = {
     "live_use": "none",
     "stage": "debug",
 }
+
 
 def score(df: pd.DataFrame, code: str):
     """反转质量**反向**选择器：归因显示 reversal_quality 是稳健负预测(越"教科书"越差),

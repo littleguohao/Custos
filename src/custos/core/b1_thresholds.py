@@ -56,6 +56,7 @@ owner 2026-08-06 要求反转 K「对称 ±2% **且可配置**」。实测（202
 必须 `importlib.reload`。这不是疏漏 —— 阈值在一次运行内保持恒定，
 否则同一份报告里不同股票可能按不同阈值判定。
 """
+
 from __future__ import annotations
 
 import os
@@ -81,8 +82,8 @@ def _f(name: str, default: float) -> float:
 J_LOW_THRESHOLD = _f("B1_J_LOW", 13.0)
 
 # --- 极致缩量 ---
-VOL_RATIO_MAX = _f("B1_REVK_VOL_RATIO", 0.5)      # 量比 vs MA5 <= 0.5
-VOL_PCTILE_MAX = _f("B1_REVK_VOL_PCTILE", 10.0)   # 20 日量分位 <= 10（单位：%）
+VOL_RATIO_MAX = _f("B1_REVK_VOL_RATIO", 0.5)  # 量比 vs MA5 <= 0.5
+VOL_PCTILE_MAX = _f("B1_REVK_VOL_PCTILE", 10.0)  # 20 日量分位 <= 10（单位：%）
 
 # --- 收盘涨跌幅区间（默认对称，owner 2026-08-06 拍板）---
 REVERSAL_CHANGE_PCT = _f("B1_REVK_CHG_PCT", 2.0)
@@ -108,4 +109,8 @@ def change_in_range(change_pct: float | None) -> bool:
     """
     if change_pct is None:
         return False
-    return REVERSAL_CHANGE_MIN_PCT <= round(float(change_pct), 2) <= REVERSAL_CHANGE_MAX_PCT
+    return (
+        REVERSAL_CHANGE_MIN_PCT
+        <= round(float(change_pct), 2)
+        <= REVERSAL_CHANGE_MAX_PCT
+    )

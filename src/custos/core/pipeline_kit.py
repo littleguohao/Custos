@@ -18,6 +18,7 @@ runners. Behavior must match the sources exactly:
   timings/stdout/stderr tails and an overall status.
 - warn: unified [WARN] output to stderr.
 """
+
 from __future__ import annotations
 
 import io
@@ -44,15 +45,24 @@ def _as_text(data) -> str:
     return data
 
 
-def run_stage(cmd: list[str], name: str, required: bool = True, timeout: int = 600) -> dict:
+def run_stage(
+    cmd: list[str], name: str, required: bool = True, timeout: int = 600
+) -> dict:
     print(f"\n[RUN] {name}")
     print(" ".join(cmd))
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
     timed_out = False
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                           env=env, timeout=timeout)
+        p = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            timeout=timeout,
+        )
         stdout, stderr, returncode = p.stdout, p.stderr, p.returncode
     except subprocess.TimeoutExpired as e:
         timed_out = True
@@ -61,27 +71,47 @@ def run_stage(cmd: list[str], name: str, required: bool = True, timeout: int = 6
         returncode = None
         print(f"[TIMEOUT] {name} exceeded {timeout}s, process killed")
     if stdout:
-        print(stdout.encode('utf-8', errors='replace').decode('utf-8', errors='replace'))
+        print(
+            stdout.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
+        )
     if stderr:
-        print("[stderr]", stderr.encode('utf-8', errors='replace').decode('utf-8', errors='replace'))
+        print(
+            "[stderr]",
+            stderr.encode("utf-8", errors="replace").decode("utf-8", errors="replace"),
+        )
     ok = not timed_out and returncode == 0
     if required and not ok:
         if timed_out:
             raise RuntimeError(f"stage timed out: {name}, timeout={timeout}s")
         raise RuntimeError(f"stage failed: {name}, code={returncode}")
-    return {"stage": name, "ok": ok, "returncode": returncode, "timeout": timed_out,
-            "stdout": stdout[-4000:], "stderr": stderr[-4000:]}
+    return {
+        "stage": name,
+        "ok": ok,
+        "returncode": returncode,
+        "timeout": timed_out,
+        "stdout": stdout[-4000:],
+        "stderr": stderr[-4000:],
+    }
 
 
 class CalendarGate(NamedTuple):
     """交易日门控结果。`exit_code` 非 None 时调用方应立即 return 它。"""
+
     cal: dict
     exit_code: int | None
 
 
-def calendar_gate(target: str, *, log_dir, session: str, run_started: str,
-                  t0: float, stages_log: list[dict],
-                  fail_msg: str, closed_msg: str) -> CalendarGate:
+def calendar_gate(
+    target: str,
+    *,
+    log_dir,
+    session: str,
+    run_started: str,
+    t0: float,
+    stages_log: list[dict],
+    fail_msg: str,
+    closed_msg: str,
+) -> CalendarGate:
     """跑交易日检查，落 stage 日志，决定是否继续。
 
     2026-08-06 从 5 个 runner 抽出 —— 那 5 份是**结构完全相同**的 23 行块
@@ -107,19 +137,42 @@ def calendar_gate(target: str, *, log_dir, session: str, run_started: str,
         with contextlib.redirect_stdout(cal_buf):
             cal = check_trading_day(target)
     except RuntimeError as e:
-        stages_log.append(log_stage("calendar",
-                                    {"ok": False, "returncode": None, "timeout": False,
-                                     "stdout": cal_buf.getvalue(), "stderr": str(e)},
-                                    c_started, now_iso(), time.time() - c_t0,
-                                    note=str(e)[:500]))
-        write_run_log(log_dir, session, target, "calendar_failed", run_started, t0, stages_log)
+        stages_log.append(
+            log_stage(
+                "calendar",
+                {
+                    "ok": False,
+                    "returncode": None,
+                    "timeout": False,
+                    "stdout": cal_buf.getvalue(),
+                    "stderr": str(e),
+                },
+                c_started,
+                now_iso(),
+                time.time() - c_t0,
+                note=str(e)[:500],
+            )
+        )
+        write_run_log(
+            log_dir, session, target, "calendar_failed", run_started, t0, stages_log
+        )
         print(fail_msg.format(target=target, err=str(e)[:200]))
         return CalendarGate({}, 1)
-    stages_log.append(log_stage("calendar",
-                                {"ok": True, "returncode": 0, "timeout": False,
-                                 "stdout": cal_buf.getvalue()},
-                                c_started, now_iso(), time.time() - c_t0,
-                                note=f"is_trading_day={cal.get('is_trading_day')}"))
+    stages_log.append(
+        log_stage(
+            "calendar",
+            {
+                "ok": True,
+                "returncode": 0,
+                "timeout": False,
+                "stdout": cal_buf.getvalue(),
+            },
+            c_started,
+            now_iso(),
+            time.time() - c_t0,
+            note=f"is_trading_day={cal.get('is_trading_day')}",
+        )
+    )
     if not cal.get("is_trading_day", False):
         write_run_log(log_dir, session, target, "closed", run_started, t0, stages_log)
         print(closed_msg.format(target=target))
@@ -127,7 +180,7 @@ def calendar_gate(target: str, *, log_dir, session: str, run_started: str,
     return CalendarGate(cal, None)
 
 
-GATE_EXIT_CODES = frozenset({3, 4, 5})   # 3 非交易日 / 4 质量 blocked / 5 持仓 blocked
+GATE_EXIT_CODES = frozenset({3, 4, 5})  # 3 非交易日 / 4 质量 blocked / 5 持仓 blocked
 
 
 def propagate_gate_code(r: dict, default: int = 1) -> int:
@@ -197,9 +250,17 @@ def check_trading_day(date_str: str) -> dict:
     failure semantics are decided by the caller (e.g. cal.get("is_trading_day")).
     """
     r = run_stage(
-        ["uv", "run", "python", str(TOOLS / "datasource" / "trading_calendar.py"), "--check-date", date_str],
+        [
+            "uv",
+            "run",
+            "python",
+            str(TOOLS / "datasource" / "trading_calendar.py"),
+            "--check-date",
+            date_str,
+        ],
         f"trading_calendar {date_str}",
-        required=True)
+        required=True,
+    )
     return _extract_json(r["stdout"])
 
 
@@ -237,8 +298,11 @@ def _truncate_digest(digest: str, limit: int, truncate_note: str) -> str:
         head = section.split("\n", 1)[0].strip()
         return head.startswith("1.") or head.startswith("6.")
 
-    priority = ([0] + [i for i in range(1, len(sections)) if is_key(sections[i])]
-                + [i for i in range(1, len(sections)) if not is_key(sections[i])])
+    priority = (
+        [0]
+        + [i for i in range(1, len(sections)) if is_key(sections[i])]
+        + [i for i in range(1, len(sections)) if not is_key(sections[i])]
+    )
     picked: list[int] = []
     total = 0
     for i in priority:
@@ -253,7 +317,9 @@ def _truncate_digest(digest: str, limit: int, truncate_note: str) -> str:
     return body + "\n" + truncate_note
 
 
-def md_to_digest(md_text: str, limit: int = 3500, truncate_note: str = "...(完整报告见文件)") -> str:
+def md_to_digest(
+    md_text: str, limit: int = 3500, truncate_note: str = "...(完整报告见文件)"
+) -> str:
     """Convert a markdown report to a plaintext digest.
 
     Headers become text followed by a ─ underline, table rows become
@@ -299,8 +365,14 @@ def now_iso() -> str:
     return cn_now().isoformat(timespec="seconds")
 
 
-def log_stage(name: str, r: dict, started_at: str, finished_at: str, duration_sec: float,
-              note: str = "") -> dict:
+def log_stage(
+    name: str,
+    r: dict,
+    started_at: str,
+    finished_at: str,
+    duration_sec: float,
+    note: str = "",
+) -> dict:
     """Build one run-log stage entry from a run_stage-style result dict."""
     entry = {
         "name": name,
@@ -318,8 +390,15 @@ def log_stage(name: str, r: dict, started_at: str, finished_at: str, duration_se
     return entry
 
 
-def write_run_log(log_dir: Path, tag: str, target: str, status: str, started_at: str,
-                  t0: float, stages: list[dict]) -> Path:
+def write_run_log(
+    log_dir: Path,
+    tag: str,
+    target: str,
+    status: str,
+    started_at: str,
+    t0: float,
+    stages: list[dict],
+) -> Path:
     """Write artifacts/logs/{date}_{tag}_run_log.json; tag is the runner suffix
     ("0850", "0905", "1700", "1800"), which also determines the script field (run_{tag})."""
     log = {

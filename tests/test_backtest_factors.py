@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """S_shape 因子走查回测校准工具测试（注入合成 bars，验证无未来函数 + 数学 + 聚合）。"""
+
 import pandas as pd
 import pytest
 
@@ -9,16 +10,27 @@ from custos.research import backtest_factors as bt
 def make_df(closes, highs=None, lows=None, vols=None):
     n = len(closes)
     closes = [float(x) for x in closes]
-    highs = [float(x) for x in (highs if highs is not None else [c * 1.01 for c in closes])]
-    lows = [float(x) for x in (lows if lows is not None else [c * 0.99 for c in closes])]
-    return pd.DataFrame({
-        "date": pd.date_range("2024-01-01", periods=n, freq="B"),
-        "open": closes, "high": highs, "low": lows, "close": closes,
-        "volume": [float(v) for v in (vols or [1000.0] * n)], "amount": [0.0] * n,
-    })
+    highs = [
+        float(x) for x in (highs if highs is not None else [c * 1.01 for c in closes])
+    ]
+    lows = [
+        float(x) for x in (lows if lows is not None else [c * 0.99 for c in closes])
+    ]
+    return pd.DataFrame(
+        {
+            "date": pd.date_range("2024-01-01", periods=n, freq="B"),
+            "open": closes,
+            "high": highs,
+            "low": lows,
+            "close": closes,
+            "volume": [float(v) for v in (vols or [1000.0] * n)],
+            "amount": [0.0] * n,
+        }
+    )
 
 
 # ---------- forward_metrics 数学正确 + 只看未来 ----------
+
 
 def test_forward_metrics_math():
     closes = [10.0, 11.0, 9.0, 12.0]
@@ -27,9 +39,9 @@ def test_forward_metrics_math():
     df = make_df(closes, highs=highs, lows=lows)
     fm = bt.forward_metrics(df, 0, 3)  # 入场=close[0]=10；未来=bars1..3
     assert fm["available"] and fm["bars"] == 3
-    assert abs(fm["fwd_return"] - (12.0 / 10 - 1)) < 1e-9      # 末收盘/入场
-    assert abs(fm["mfe"] - (12.5 / 10 - 1)) < 1e-9            # 未来最高/入场
-    assert abs(fm["mae"] - (8.5 / 10 - 1)) < 1e-9             # 未来最低/入场
+    assert abs(fm["fwd_return"] - (12.0 / 10 - 1)) < 1e-9  # 末收盘/入场
+    assert abs(fm["mfe"] - (12.5 / 10 - 1)) < 1e-9  # 未来最高/入场
+    assert abs(fm["mae"] - (8.5 / 10 - 1)) < 1e-9  # 未来最低/入场
 
 
 def test_forward_metrics_excludes_entry_bar():
@@ -47,14 +59,22 @@ def test_forward_metrics_no_future_bars():
 
 # ---------- evaluate 无未来函数：as-of 切片不含未来 ----------
 
+
 def test_evaluate_no_future_leak(monkeypatch):
     """通过 monkeypatch 断言 compute_s_shape 每次拿到的切片末日 == as-of 日，且长度== i+1。"""
     seen = []
 
     def spy(df_slice, code):
         seen.append((code, len(df_slice), str(df_slice["date"].iloc[-1])[:10]))
-        return {"available": True, "s_star": 50.0, "s_shape": 45.0, "delta": 5.0,
-                "penalty": 0.0, "suggestion": "不买", "components": {}}
+        return {
+            "available": True,
+            "s_star": 50.0,
+            "s_shape": 45.0,
+            "delta": 5.0,
+            "penalty": 0.0,
+            "suggestion": "不买",
+            "components": {},
+        }
 
     monkeypatch.setattr(bt, "compute_s_shape", spy)
     df = make_df([10.0 + i * 0.1 for i in range(70)])
@@ -73,7 +93,16 @@ def test_evaluate_records_shape():
     recs = bt.evaluate({"600000": df}, horizons=(5, 10), min_bars=60, step=5)
     assert recs
     r = recs[0]
-    for key in ("code", "date", "s_star", "suggestion", "ret5", "mfe5", "mae5", "ret10"):
+    for key in (
+        "code",
+        "date",
+        "s_star",
+        "suggestion",
+        "ret5",
+        "mfe5",
+        "mae5",
+        "ret10",
+    ):
         assert key in r
     # 分项以 c_ 前缀落盘
     assert any(k.startswith("c_") for k in r)
@@ -81,17 +110,27 @@ def test_evaluate_records_shape():
 
 # ---------- summarize 分组聚合正确 ----------
 
+
 def _rec(s_star, suggestion, ret10, c_pivot=0.0):
-    return {"code": "x", "date": "d", "s_star": s_star, "suggestion": suggestion,
-            "ret10": ret10, "mfe10": abs(ret10) + 0.01, "mae10": -abs(ret10) - 0.01,
-            "c_pivot": c_pivot}
+    return {
+        "code": "x",
+        "date": "d",
+        "s_star": s_star,
+        "suggestion": suggestion,
+        "ret10": ret10,
+        "mfe10": abs(ret10) + 0.01,
+        "mae10": -abs(ret10) - 0.01,
+        "c_pivot": c_pivot,
+    }
 
 
 def test_summarize_bands_and_winrate():
     records = [
-        _rec(80, "可买", 0.10), _rec(75, "可买", -0.02),   # 可买: 2 条, 1 胜
-        _rec(65, "观望", 0.03),                             # 观望: 1 条
-        _rec(30, "不买", -0.05), _rec(20, "不买", -0.08),  # 不买: 2 条, 0 胜
+        _rec(80, "可买", 0.10),
+        _rec(75, "可买", -0.02),  # 可买: 2 条, 1 胜
+        _rec(65, "观望", 0.03),  # 观望: 1 条
+        _rec(30, "不买", -0.05),
+        _rec(20, "不买", -0.08),  # 不买: 2 条, 0 胜
     ]
     s = bt.summarize(records, horizon=10)
     assert s["total_signals"] == 5
@@ -113,30 +152,42 @@ def test_summarize_component_lift():
 
 # ---------- 全 A 随机抽样 ----------
 
+
 def test_sample_codes_deterministic_and_bounded():
     allc = [f"{i:06d}" for i in range(100)]
     a = bt.sample_codes(allc, 10, seed=42)
     b = bt.sample_codes(allc, 10, seed=42)
     assert a == b and len(a) == 10 and a == sorted(a) and len(set(a)) == 10
-    assert bt.sample_codes(allc, 0, seed=1) == sorted(allc)     # n<=0 → 全部
-    assert bt.sample_codes(allc, 999, seed=1) == sorted(allc)   # n>=总数 → 全部
+    assert bt.sample_codes(allc, 0, seed=1) == sorted(allc)  # n<=0 → 全部
+    assert bt.sample_codes(allc, 999, seed=1) == sorted(allc)  # n>=总数 → 全部
     # 去空去重
-    assert bt.sample_codes(["600000", "600000", "", "000001"], 0) == ["000001", "600000"]
+    assert bt.sample_codes(["600000", "600000", "", "000001"], 0) == [
+        "000001",
+        "600000",
+    ]
 
 
 # ---------- 入场过滤 (entry_gate) ----------
 
+
 def test_evaluate_entry_gate_filters():
     df = make_df([10.0 + i * 0.1 for i in range(70)])
     all_recs = bt.evaluate({"600000": df}, horizons=(5,), min_bars=60)
-    none_recs = bt.evaluate({"600000": df}, horizons=(5,), min_bars=60, entry_gate=lambda s: False)
-    some_recs = bt.evaluate({"600000": df}, horizons=(5,), min_bars=60,
-                            entry_gate=lambda s: float(s["close"].iloc[-1]) > 16.0)
+    none_recs = bt.evaluate(
+        {"600000": df}, horizons=(5,), min_bars=60, entry_gate=lambda s: False
+    )
+    some_recs = bt.evaluate(
+        {"600000": df},
+        horizons=(5,),
+        min_bars=60,
+        entry_gate=lambda s: float(s["close"].iloc[-1]) > 16.0,
+    )
     assert len(none_recs) == 0
     assert 0 < len(some_recs) < len(all_recs)
 
 
 # ---------- 多 horizon 网格 ----------
+
 
 def _mrec(s_star, suggestion, r5, r10, r20):
     d = {"s_star": s_star, "suggestion": suggestion}
@@ -154,11 +205,12 @@ def test_summarize_multi_and_matrix():
     assert multi[10]["total_signals"] == 2
     m = bt.horizon_band_matrix(recs, (5, 10, 20))
     assert "win_rate" in m and "avg_return" in m and "text" in m
-    assert m["win_rate"]["A_可买(>=70)"][20] == 1.0   # 可买记录 H20 为正 → 胜率 1.0
-    assert m["win_rate"]["D_弱(<40)"][5] == 0.0        # 不买记录 H5 为负 → 胜率 0
+    assert m["win_rate"]["A_可买(>=70)"][20] == 1.0  # 可买记录 H20 为正 → 胜率 1.0
+    assert m["win_rate"]["D_弱(<40)"][5] == 0.0  # 不买记录 H5 为负 → 胜率 0
 
 
 # ---------- 可选打分器 --scorer ----------
+
 
 def test_scorers_registry_all_run():
     """每个 scorer 都能跑通且不抛异常。
@@ -171,7 +223,7 @@ def test_scorers_registry_all_run():
     # 140 根:b1_dual / long_structure 需 ≥120 根(DKS = MA114)，90 根会让它们恒返回
     # None 而被误判成"scorer 坏了"。样本加长不影响本用例的断言(只看能否产出记录)。
     df = make_df([10.0 + (i % 11) * 0.2 for i in range(140)])
-    external_data_scorers = {"mcap"}          # 需要本地不一定存在的外部数据集
+    external_data_scorers = {"mcap"}  # 需要本地不一定存在的外部数据集
     for name, fn in bt.SCORERS.items():
         recs = bt.evaluate({"600000": df}, horizons=(5,), min_bars=60, scorer=fn)
         if not recs:
@@ -183,14 +235,22 @@ def test_scorers_registry_all_run():
 def test_scorer_returning_none_produces_no_record():
     """缺数据的 scorer 不得被填 0 分混进记录集。"""
     df = make_df([10.0 + (i % 11) * 0.2 for i in range(90)])
-    assert bt.evaluate({"600000": df}, horizons=(5,), min_bars=60,
-                       scorer=lambda d, c: None) == []
+    assert (
+        bt.evaluate(
+            {"600000": df}, horizons=(5,), min_bars=60, scorer=lambda d, c: None
+        )
+        == []
+    )
 
 
 def test_invert_scorer_is_complement_of_s_shape():
     df = make_df([10.0 + (i % 11) * 0.2 for i in range(90)])
-    ss_recs = bt.evaluate({"600000": df}, horizons=(5,), min_bars=60, scorer=bt.SCORERS["s_shape"])
-    inv_recs = bt.evaluate({"600000": df}, horizons=(5,), min_bars=60, scorer=bt.SCORERS["invert_s_shape"])
+    ss_recs = bt.evaluate(
+        {"600000": df}, horizons=(5,), min_bars=60, scorer=bt.SCORERS["s_shape"]
+    )
+    inv_recs = bt.evaluate(
+        {"600000": df}, horizons=(5,), min_bars=60, scorer=bt.SCORERS["invert_s_shape"]
+    )
     m_ss = {r["date"]: r["s_star"] for r in ss_recs}
     m_inv = {r["date"]: r["s_star"] for r in inv_recs}
     common = set(m_ss) & set(m_inv)
@@ -200,13 +260,15 @@ def test_invert_scorer_is_complement_of_s_shape():
 
 
 def test_sweep_threshold_cutoffs():
-    recs = [_mrec(80, "可买", 0.10, 0.10, 0.10),
-            _mrec(66, "观望", 0.02, 0.02, 0.02),
-            _mrec(30, "不买", -0.05, -0.05, -0.05)]
+    recs = [
+        _mrec(80, "可买", 0.10, 0.10, 0.10),
+        _mrec(66, "观望", 0.02, 0.02, 0.02),
+        _mrec(30, "不买", -0.05, -0.05, -0.05),
+    ]
     s = bt.sweep_threshold(recs, horizon=10, cutoffs=(60, 70))
     by = {row["cutoff"]: row for row in s["cutoffs"]}
-    assert by[70]["n"] == 1 and by[70]["win_rate"] == 1.0   # 仅 s_star=80
-    assert by[60]["n"] == 2                                  # 80 与 66
+    assert by[70]["n"] == 1 and by[70]["win_rate"] == 1.0  # 仅 s_star=80
+    assert by[60]["n"] == 2  # 80 与 66
     assert "text" in s
 
 
@@ -224,15 +286,39 @@ import types as _types  # noqa: E402
 
 
 def _args(**kw):
-    base = dict(data_source="tdx", scorer="b1_dual", weekly=False, step=1,
-                cost_bps=25.0, entry_filter="j_low", amv_long_only=False,
-                bbi_consec=2, time_stop=0, stop_mode="pct", stop_pct=12.0,
-                stop_trigger="close", stop_tick_buffer=0, scale_out=0.5,
-                breakeven=0.0, trail=0.0, cost_zone_bars=0, cost_zone_pct=3.0,
-                max_signals_per_code=0, sector_filter=False, start="", end="",
-                count=500, top_n=0, portfolio=True, risk_pct=1.0,
-                max_concurrent=5, max_pos=20.0, from_trades="", out="",
-                summary_only=False)
+    base = dict(
+        data_source="tdx",
+        scorer="b1_dual",
+        weekly=False,
+        step=1,
+        cost_bps=25.0,
+        entry_filter="j_low",
+        amv_long_only=False,
+        bbi_consec=2,
+        time_stop=0,
+        stop_mode="pct",
+        stop_pct=12.0,
+        stop_trigger="close",
+        stop_tick_buffer=0,
+        scale_out=0.5,
+        breakeven=0.0,
+        trail=0.0,
+        cost_zone_bars=0,
+        cost_zone_pct=3.0,
+        max_signals_per_code=0,
+        sector_filter=False,
+        start="",
+        end="",
+        count=500,
+        top_n=0,
+        portfolio=True,
+        risk_pct=1.0,
+        max_concurrent=5,
+        max_pos=20.0,
+        from_trades="",
+        out="",
+        summary_only=False,
+    )
     base.update(kw)
     return _types.SimpleNamespace(**base)
 
@@ -243,18 +329,30 @@ CODES = ["600000", "000001", "300750"]
 class TestTradesSignature:
     def test_portfolio_layer_params_excluded(self):
         """组合层参数只改资金曲线、不改 trades ⇒ 不该进指纹，否则复用永远被拒。"""
-        a = bt.trades_signature(_args(risk_pct=1.0, max_concurrent=5, max_pos=20.0), CODES)
-        b = bt.trades_signature(_args(risk_pct=2.0, max_concurrent=2, max_pos=5.0), CODES)
+        a = bt.trades_signature(
+            _args(risk_pct=1.0, max_concurrent=5, max_pos=20.0), CODES
+        )
+        b = bt.trades_signature(
+            _args(risk_pct=2.0, max_concurrent=2, max_pos=5.0), CODES
+        )
         assert a == b
 
     def test_stop_params_change_signature(self):
         """被扫描的止损参数必须进指纹——它们直接改逐笔结果。"""
         base = bt.trades_signature(_args(), CODES)
-        for kw in ({"stop_pct": 8.0}, {"trail": 0.08}, {"breakeven": 0.05},
-                   {"stop_trigger": "intraday"}, {"stop_tick_buffer": 3},
-                   {"cost_zone_bars": 3}, {"scale_out": 0.0},
-                   {"amv_long_only": True}, {"entry_filter": "none"},
-                   {"count": 1500}, {"start": "2022-01-01"}):
+        for kw in (
+            {"stop_pct": 8.0},
+            {"trail": 0.08},
+            {"breakeven": 0.05},
+            {"stop_trigger": "intraday"},
+            {"stop_tick_buffer": 3},
+            {"cost_zone_bars": 3},
+            {"scale_out": 0.0},
+            {"amv_long_only": True},
+            {"entry_filter": "none"},
+            {"count": 1500},
+            {"start": "2022-01-01"},
+        ):
             assert bt.trades_signature(_args(**kw), CODES) != base, f"{kw} 未进指纹"
 
     def test_collect_all_in_signature(self):
@@ -262,8 +360,9 @@ class TestTradesSignature:
         assert bt.trades_signature(_args(top_n=0), CODES)["collect_all"] is False
         assert bt.trades_signature(_args(top_n=3), CODES)["collect_all"] is True
         # 但 top_n 的**取值**不影响 trades（2 与 3 都是全候选）
-        assert (bt.trades_signature(_args(top_n=2), CODES)
-                == bt.trades_signature(_args(top_n=3), CODES))
+        assert bt.trades_signature(_args(top_n=2), CODES) == bt.trades_signature(
+            _args(top_n=3), CODES
+        )
 
     def test_universe_in_signature(self):
         a = bt.trades_signature(_args(), CODES)
@@ -273,17 +372,36 @@ class TestTradesSignature:
 
 def _src_file(tmp_path, sig, trades, name="src.json"):
     p = tmp_path / name
-    p.write_text(_json.dumps({"trades_signature": sig, "trades": trades}),
-                 encoding="utf-8")
+    p.write_text(
+        _json.dumps({"trades_signature": sig, "trades": trades}), encoding="utf-8"
+    )
     return p
 
 
-_TRADES = [{"entry_date": "2024-01-02", "exit_date": "2024-01-10", "ret": 0.12,
-            "risk_frac": 0.05, "r_multiple": 2.4, "score": 3.0, "reason": "bbi",
-            "holding": 6, "code": "600000"},
-           {"entry_date": "2024-02-01", "exit_date": "2024-02-20", "ret": -0.05,
-            "risk_frac": 0.05, "r_multiple": -1.0, "score": 2.0, "reason": "stop",
-            "holding": 13, "code": "000001"}]
+_TRADES = [
+    {
+        "entry_date": "2024-01-02",
+        "exit_date": "2024-01-10",
+        "ret": 0.12,
+        "risk_frac": 0.05,
+        "r_multiple": 2.4,
+        "score": 3.0,
+        "reason": "bbi",
+        "holding": 6,
+        "code": "600000",
+    },
+    {
+        "entry_date": "2024-02-01",
+        "exit_date": "2024-02-20",
+        "ret": -0.05,
+        "risk_frac": 0.05,
+        "r_multiple": -1.0,
+        "score": 2.0,
+        "reason": "stop",
+        "holding": 13,
+        "code": "000001",
+    },
+]
 
 
 class TestPortfolioFromTrades:
@@ -299,8 +417,9 @@ class TestPortfolioFromTrades:
 
     def test_rejects_mismatched_signature(self, tmp_path, capsys):
         """止损参数不同的 trades 绝不能复用——曲线看不出异常。"""
-        src = _src_file(tmp_path, bt.trades_signature(_args(stop_pct=8.0), CODES),
-                        _TRADES)
+        src = _src_file(
+            tmp_path, bt.trades_signature(_args(stop_pct=8.0), CODES), _TRADES
+        )
         a = _args(out=str(tmp_path / "o.json"), from_trades=str(src))
         assert bt._portfolio_from_trades(a, CODES) != 0
         assert not (tmp_path / "o.json").exists(), "口径不一致不得落盘"
@@ -348,9 +467,12 @@ class TestPortfolioFromTrades:
         src = _src_file(tmp_path, bt.trades_signature(a, CODES), _TRADES)
         a.from_trades = str(src)
         bt._portfolio_from_trades(a, CODES)
-        got = _json.loads((tmp_path / "o.json").read_text(encoding="utf-8"))["portfolio"]
-        want = bt.simulate_portfolio(_TRADES, risk_pct=0.01, max_concurrent=5,
-                                     max_pos_frac=0.20)
+        got = _json.loads((tmp_path / "o.json").read_text(encoding="utf-8"))[
+            "portfolio"
+        ]
+        want = bt.simulate_portfolio(
+            _TRADES, risk_pct=0.01, max_concurrent=5, max_pos_frac=0.20
+        )
         assert got["total_return"] == want["total_return"]
         assert got["max_drawdown"] == want["max_drawdown"]
 
@@ -366,15 +488,19 @@ class TestPinnedUniverseCLI:
         codes = ["600000", "000001", "300750"]
         p = tmp_path / "u.txt"
         p.write_text("\n".join(codes) + "\n", encoding="utf-8")
-        got = [ln.strip() for ln in p.read_text(encoding="utf-8").splitlines()
-               if ln.strip() and not ln.strip().startswith("#")]
+        got = [
+            ln.strip()
+            for ln in p.read_text(encoding="utf-8").splitlines()
+            if ln.strip() and not ln.strip().startswith("#")
+        ]
         assert got == codes
 
     def test_codes_file_dump_exits_before_backtest(self, tmp_path):
         """--dump-codes 必须在加载任何 K 线**之前**返回，否则等于白跑一轮。"""
         out = tmp_path / "u.txt"
-        rc = bt.main(["--trade-sim", "--codes", "600000,000001",
-                      "--dump-codes", str(out)])
+        rc = bt.main(
+            ["--trade-sim", "--codes", "600000,000001", "--dump-codes", str(out)]
+        )
         assert rc == 0
         assert out.read_text(encoding="utf-8").split() == ["600000", "000001"]
 
@@ -382,16 +508,24 @@ class TestPinnedUniverseCLI:
         src = tmp_path / "u.txt"
         src.write_text("# 这是注释\n600000\n\n000001\n", encoding="utf-8")
         out = tmp_path / "dump.txt"
-        rc = bt.main(["--trade-sim", "--codes-file", str(src),
-                      "--dump-codes", str(out)])
+        rc = bt.main(
+            ["--trade-sim", "--codes-file", str(src), "--dump-codes", str(out)]
+        )
         assert rc == 0
         assert out.read_text(encoding="utf-8").split() == ["600000", "000001"]
         assert "已钉死" in capsys.readouterr().err
 
     def test_missing_codes_file_errors(self, tmp_path):
         with pytest.raises(SystemExit):
-            bt.main(["--trade-sim", "--codes-file", str(tmp_path / "nope.txt"),
-                     "--dump-codes", str(tmp_path / "o.txt")])
+            bt.main(
+                [
+                    "--trade-sim",
+                    "--codes-file",
+                    str(tmp_path / "nope.txt"),
+                    "--dump-codes",
+                    str(tmp_path / "o.txt"),
+                ]
+            )
 
 
 class TestMemoryHygiene:
@@ -405,6 +539,7 @@ class TestMemoryHygiene:
         """探测失败必须**留下原因**——owner 实测在 Windows 上打出「峰值 未知」，
         而静默返回 None 的诊断价值为零（本仓库反复踩的「静默降级」坑）。"""
         import builtins
+
         real = builtins.__import__
 
         def boom(name, *a, **k):
@@ -454,6 +589,7 @@ class TestMemoryHygiene:
 
 # ---------- 前复权失败汇总（DATA_SOURCE_PRINCIPLE ③ / 原 TODO #16） ----------
 
+
 def test_load_bars_local_prints_qfq_failure_summary(monkeypatch, capsys):
     """全宇宙加载完后必须有一行失败汇总——逐票 WARN 在 3000+ 只票日志里会被淹没。
 
@@ -471,8 +607,9 @@ def test_load_bars_local_prints_qfq_failure_summary(monkeypatch, capsys):
             return out
         raise af_flat.AdjustError("权息取不到")
 
-    monkeypatch.setattr(ltd_flat, "read_vipdoc_daily",
-                        lambda code: make_df([10.0, 10.1, 10.2]))
+    monkeypatch.setattr(
+        ltd_flat, "read_vipdoc_daily", lambda code: make_df([10.0, 10.1, 10.2])
+    )
     monkeypatch.setattr(af_flat, "qfq_table", fake_qfq)
     ltd_flat.reset_qfq_failure_stats()
     try:
@@ -497,8 +634,9 @@ def test_load_bars_local_no_summary_when_all_qfq_ok(monkeypatch, capsys):
         out.attrs["adjust"] = "qfq"
         return out
 
-    monkeypatch.setattr(ltd_flat, "read_vipdoc_daily",
-                        lambda code: make_df([10.0, 10.1, 10.2]))
+    monkeypatch.setattr(
+        ltd_flat, "read_vipdoc_daily", lambda code: make_df([10.0, 10.1, 10.2])
+    )
     monkeypatch.setattr(af_flat, "qfq_table", fake_qfq)
     ltd_flat.reset_qfq_failure_stats()
     try:

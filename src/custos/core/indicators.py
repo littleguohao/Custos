@@ -92,7 +92,12 @@ import pandas as pd
 from custos.core.code_utils import price_limit_pct
 
 J_N, J_M1, J_M2 = 9, 3, 3
-DKS_MA_WINDOWS = (14, 28, 57, 114)  # 知行多空线的四均线（good_b1 图上参数）          # KDJ 标准参数；com = m - 1 ⇒ com=2
+DKS_MA_WINDOWS = (
+    14,
+    28,
+    57,
+    114,
+)  # 知行多空线的四均线（good_b1 图上参数）          # KDJ 标准参数；com = m - 1 ⇒ com=2
 
 
 def amplitude_pct(high, low, prev_close) -> float | None:
@@ -158,8 +163,12 @@ def dmi_arrays(high, low, close, n: int = 14):
     if len(c) < 2 * n + 2:
         return None, None, None
     tr = np.maximum(h[1:] - l[1:], np.maximum(abs(h[1:] - c[:-1]), abs(l[1:] - c[:-1])))
-    pdm = np.where((h[1:] - h[:-1]) > (l[:-1] - l[1:]), np.maximum(h[1:] - h[:-1], 0), 0.0)
-    mdm = np.where((l[:-1] - l[1:]) > (h[1:] - h[:-1]), np.maximum(l[:-1] - l[1:], 0), 0.0)
+    pdm = np.where(
+        (h[1:] - h[:-1]) > (l[:-1] - l[1:]), np.maximum(h[1:] - h[:-1], 0), 0.0
+    )
+    mdm = np.where(
+        (l[:-1] - l[1:]) > (h[1:] - h[:-1]), np.maximum(l[:-1] - l[1:], 0), 0.0
+    )
 
     def _wilder(x):
         out = np.zeros(len(x))
@@ -174,7 +183,7 @@ def dmi_arrays(high, low, close, n: int = 14):
         mdi = np.where(atr > 0, 100 * sm / atr, 0.0)
         dx = np.where(pdi + mdi > 0, 100 * abs(pdi - mdi) / (pdi + mdi), 0.0)
     adx = np.zeros(len(dx))
-    adx[2 * n - 2] = dx[n - 1:2 * n - 1].mean()
+    adx[2 * n - 2] = dx[n - 1 : 2 * n - 1].mean()
     for i in range(2 * n - 1, len(dx)):
         adx[i] = (adx[i - 1] * (n - 1) + dx[i]) / n
     return pdi, mdi, adx
@@ -219,8 +228,8 @@ def avedev(x: pd.Series, n: int) -> pd.Series:
     n = int(n)
     out = np.full(len(v), np.nan)
     if len(v) >= n >= 1:
-        w = sliding_window_view(v, n)                       # (len-n+1, n) 视图，零拷贝
-        out[n - 1:] = np.abs(w - w.mean(axis=1, keepdims=True)).mean(axis=1)
+        w = sliding_window_view(v, n)  # (len-n+1, n) 视图，零拷贝
+        out[n - 1 :] = np.abs(w - w.mean(axis=1, keepdims=True)).mean(axis=1)
     return pd.Series(out, index=x.index)
 
 
@@ -231,8 +240,9 @@ def cci(df: pd.DataFrame, n: int = 14) -> pd.Series:
     Lambert 常数、以及分母用 AVEDEV 还是标准差。本实现取通达信口径。
     2026-08-10 从 `factors/main_rally_factor` 搬来。
     """
-    tp = (df["high"].astype(float) + df["low"].astype(float)
-          + df["close"].astype(float)) / 3.0
+    tp = (
+        df["high"].astype(float) + df["low"].astype(float) + df["close"].astype(float)
+    ) / 3.0
     ma = tp.rolling(n).mean()
     ad = avedev(tp, n)
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -254,8 +264,14 @@ def pct_change(a, b):
     return round((a / b - 1) * 100, 4)
 
 
-def kdj_series(df: pd.DataFrame, *, n: int = J_N, m1: int = J_M1, m2: int = J_M2,
-               fill_na: Optional[float] = None) -> tuple[pd.Series, pd.Series, pd.Series]:
+def kdj_series(
+    df: pd.DataFrame,
+    *,
+    n: int = J_N,
+    m1: int = J_M1,
+    m2: int = J_M2,
+    fill_na: Optional[float] = None,
+) -> tuple[pd.Series, pd.Series, pd.Series]:
     """返回 `(K, D, J)` 三条序列。
 
     需要 K/D 的调用方（如 `technical_monitor.kdj` 要输出 k/d 字段）用这个，
@@ -275,8 +291,14 @@ def kdj_series(df: pd.DataFrame, *, n: int = J_N, m1: int = J_M1, m2: int = J_M2
     return k, d, 3 * k - 2 * d
 
 
-def j_series(df: pd.DataFrame, *, n: int = J_N, m1: int = J_M1, m2: int = J_M2,
-             fill_na: Optional[float] = None) -> pd.Series:
+def j_series(
+    df: pd.DataFrame,
+    *,
+    n: int = J_N,
+    m1: int = J_M1,
+    m2: int = J_M2,
+    fill_na: Optional[float] = None,
+) -> pd.Series:
     """KDJ 的 J 序列：`RSV → K(EWM) → D(EWM) → J = 3K − 2D`。
 
     ``fill_na``：``None``（默认）保持 NaN；给数值则在 RSV 层填充
@@ -299,18 +321,20 @@ def bbi_series(close: pd.Series) -> pd.Series:
     return sum(c.rolling(k).mean() for k in (3, 6, 12, 24)) / 4
 
 
-def dks_series(close: pd.Series, windows: tuple[int, ...] = DKS_MA_WINDOWS) -> pd.Series:
+def dks_series(
+    close: pd.Series, windows: tuple[int, ...] = DKS_MA_WINDOWS
+) -> pd.Series:
     """DKS（知行多空线）= (MA14+MA28+MA57+MA114)/4。
 
-    2026-08-06 收敛第 3 份重复指标（前两个是 J 与 BBI）。此前有两处：
-    · `screening/enrich_candidates.dks_series` —— docstring 自称「**唯一实现**」，
-      并记录了它当初就是为了收敛 `technical_monitor.zhixing_state` 才建的
-    · `factors/b1_dual_factor._dks_series` —— **但这份它没收进去**
+        2026-08-06 收敛第 3 份重复指标（前两个是 J 与 BBI）。此前有两处：
+        · `screening/enrich_candidates.dks_series` —— docstring 自称「**唯一实现**」，
+          并记录了它当初就是为了收敛 `technical_monitor.zhixing_state` 才建的
+        · `factors/b1_dual_factor._dks_series` —— **但这份它没收进去**
 
-⇒ 「唯一实现」的声明与事实不符，而两份实测逐点相同（尚未发散）。
-    移到这里后才真的唯一，并顺带**断开一处循环依赖**：
-    `factors/perfect_b1_fit` 需要 DKS，若从 `enrich_candidates` 取就成了
-    factors → screening → factors 的环。
+    ⇒ 「唯一实现」的声明与事实不符，而两份实测逐点相同（尚未发散）。
+        移到这里后才真的唯一，并顺带**断开一处循环依赖**：
+        `factors/perfect_b1_fit` 需要 DKS，若从 `enrich_candidates` 取就成了
+        factors → screening → factors 的环。
     """
     c = close.astype(float)
     return sum(c.rolling(w).mean() for w in windows) / len(windows)
@@ -327,8 +351,9 @@ def qsx_series(close: pd.Series) -> pd.Series:
     return ema(ema(c, 10), 10)
 
 
-def macd_series(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9
-                ) -> tuple[pd.Series, pd.Series, pd.Series]:
+def macd_series(
+    close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9
+) -> tuple[pd.Series, pd.Series, pd.Series]:
     """返回 `(dif, dea, hist)` 三条序列（序列级**唯一实现**）。
 
     hist 为**中式 ×2 口径** ``(dif - dea) * 2``，与 `macd()` 末根字典一致。
@@ -339,6 +364,7 @@ def macd_series(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 
     dif = ema(c, fast) - ema(c, slow)
     dea = ema(dif, signal)
     return dif, dea, (dif - dea) * 2
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # 以下 7 个函数 2026-08-07 从 `market_timing/technical_monitor.py` 下移。
@@ -356,21 +382,32 @@ def macd_series(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 
 # 两层都要留：前者是数据，后者是对数据的分类判断。
 # ══════════════════════════════════════════════════════════════════════════
 
+
 def ema(s: pd.Series, span: int) -> pd.Series:
     return s.ewm(span=span, adjust=False).mean()
+
 
 def resample(df: pd.DataFrame, rule: str) -> pd.DataFrame:
     if df.empty:
         return df
-    x = df.set_index("date").resample(rule).agg({
-        "open": "first",
-        "high": "max",
-        "low": "min",
-        "close": "last",
-        "amount": "sum",
-        "volume": "sum",
-    }).dropna().reset_index()
+    x = (
+        df.set_index("date")
+        .resample(rule)
+        .agg(
+            {
+                "open": "first",
+                "high": "max",
+                "low": "min",
+                "close": "last",
+                "amount": "sum",
+                "volume": "sum",
+            }
+        )
+        .dropna()
+        .reset_index()
+    )
     return x
+
 
 def kdj(df: pd.DataFrame, n=9, m1=3, m2=3) -> dict[str, Any]:
     if len(df) < n + 3:
@@ -400,10 +437,11 @@ def kdj(df: pd.DataFrame, n=9, m1=3, m2=3) -> dict[str, Any]:
         "state": state,
     }
 
+
 def macd(df: pd.DataFrame) -> dict[str, Any]:
     if len(df) < 35:
         return {"available": False}
-    dif, dea, hist = macd_series(df["close"])   # 序列级唯一实现（hist 为中式 ×2）
+    dif, dea, hist = macd_series(df["close"])  # 序列级唯一实现（hist 为中式 ×2）
     return {
         "available": True,
         "dif": round(float(dif.iloc[-1]), 4),
@@ -411,9 +449,14 @@ def macd(df: pd.DataFrame) -> dict[str, Any]:
         "hist": round(float(hist.iloc[-1]), 4),
         "hist_prev": round(float(hist.iloc[-2]), 4),
         "hist_direction": "扩张" if hist.iloc[-1] > hist.iloc[-2] else "收缩",
-        "golden_cross": bool(dif.iloc[-2] <= dea.iloc[-2] and dif.iloc[-1] > dea.iloc[-1]),
-        "death_cross": bool(dif.iloc[-2] >= dea.iloc[-2] and dif.iloc[-1] < dea.iloc[-1]),
+        "golden_cross": bool(
+            dif.iloc[-2] <= dea.iloc[-2] and dif.iloc[-1] > dea.iloc[-1]
+        ),
+        "death_cross": bool(
+            dif.iloc[-2] >= dea.iloc[-2] and dif.iloc[-1] < dea.iloc[-1]
+        ),
     }
+
 
 def bbi_state(df: pd.DataFrame) -> dict[str, Any]:
     """Return the standard TDX BBI state used by the B1 holding rules."""
@@ -442,10 +485,15 @@ def bbi_state(df: pd.DataFrame) -> dict[str, Any]:
         "close_above": bool(c >= value),
         "distance_pct": round(distance_pct, 4) if distance_pct is not None else None,
         "consecutive_closes_below": consecutive_below,
-        "previous_close_above": bool(close.iloc[-2] >= bbi.iloc[-2]) if len(df) >= 25 else None,
+        "previous_close_above": bool(close.iloc[-2] >= bbi.iloc[-2])
+        if len(df) >= 25
+        else None,
     }
 
-def zhixing_state(df: pd.DataFrame, m1: int = 14, m2: int = 28, m3: int = 57, m4: int = 114) -> dict[str, Any]:
+
+def zhixing_state(
+    df: pd.DataFrame, m1: int = 14, m2: int = 28, m3: int = 57, m4: int = 114
+) -> dict[str, Any]:
     """知行趋势线（通达信 ZSDKX）：快线 QSX 上穿慢线 DKS 为多头/金叉。
 
     - QSX = EMA(EMA(CLOSE,10),10)（短期趋势线，图上白线）。
@@ -457,8 +505,8 @@ def zhixing_state(df: pd.DataFrame, m1: int = 14, m2: int = 28, m3: int = 57, m4
     if len(df) < m4:
         return {"available": False, "reason": f"少于{m4}根K线，DKS(MA{m4})无法计算"}
     close = df["close"].astype(float).reset_index(drop=True)
-    qsx = qsx_series(close)                      # 2026-08-09 起走序列级唯一实现
-    dks = dks_series(close, (m1, m2, m3, m4))    # 同上（原内联四均线均值）
+    qsx = qsx_series(close)  # 2026-08-09 起走序列级唯一实现
+    dks = dks_series(close, (m1, m2, m3, m4))  # 同上（原内联四均线均值）
     valid = qsx.notna() & dks.notna()
     if not valid.any():
         return {"available": False, "reason": "QSX/DKS 无有效值"}
@@ -484,6 +532,7 @@ def zhixing_state(df: pd.DataFrame, m1: int = 14, m2: int = 28, m3: int = 57, m4
         "ma2_ema13": round(ma2, 4),
         "params": {"m1": m1, "m2": m2, "m3": m3, "m4": m4},
     }
+
 
 def _infer_price_limit(code: str, df: pd.DataFrame) -> int:
     """Infer the daily price-limit percentage for a stock.

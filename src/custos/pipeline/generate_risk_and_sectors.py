@@ -5,6 +5,7 @@ Replaces build_skill_contracts.py + skill_adapters.py in the pure-script pipelin
 Reads: holding_review.json, sector_technical_summary.json
 Writes: risk_decision.json, sector_state.json
 """
+
 from __future__ import annotations
 
 import argparse
@@ -26,7 +27,8 @@ STAGE_RULES = (
     (("修复", "回流", "弱转强", "启动", "发酵"), "修复"),
     (("分歧", "扩散", "高位震荡"), "分歧"),
     (("退潮", "衰退", "下跌", "冰点"), "退潮"),
-    (("震荡", "盘整", "整理"), "震荡"))
+    (("震荡", "盘整", "整理"), "震荡"),
+)
 
 
 def normalize_stage(raw_stage: str, trend: str) -> str:
@@ -60,24 +62,29 @@ def build_sector_state(date: str) -> list[dict]:
             permission = "支持"
         else:
             permission = "观察"
-        result.append({
-            "date": date,
-            "sector": row.get("theme_name") or row.get("sector") or "未知板块",
-            "theme_id": row.get("theme_id"),
-            "raw_stage": raw_stage or "未知",
-            "state": state,
-            "trend": trend if trend in {"上涨", "横盘震荡", "下跌"} else "横盘震荡",
-            "relative_strength": row.get("relative_strength", "待确认"),
-            "support": row.get("box20_lower", row.get("support")),
-            "resistance": row.get("box20_upper", row.get("resistance")),
-            "trade_permission": permission,
-            "score": fnum(score),
-            "risk_flags": list(dict.fromkeys(x for x in (row.get("risk_flags") or []) if x)),
-        })
+        result.append(
+            {
+                "date": date,
+                "sector": row.get("theme_name") or row.get("sector") or "未知板块",
+                "theme_id": row.get("theme_id"),
+                "raw_stage": raw_stage or "未知",
+                "state": state,
+                "trend": trend if trend in {"上涨", "横盘震荡", "下跌"} else "横盘震荡",
+                "relative_strength": row.get("relative_strength", "待确认"),
+                "support": row.get("box20_lower", row.get("support")),
+                "resistance": row.get("box20_upper", row.get("resistance")),
+                "trade_permission": permission,
+                "score": fnum(score),
+                "risk_flags": list(
+                    dict.fromkeys(x for x in (row.get("risk_flags") or []) if x)
+                ),
+            }
+        )
     return result
 
 
 # ── Risk decision (from RiskFlagAdapter + holding risk extraction) ──
+
 
 def build_risk_decision(date: str) -> dict:
     holding_reviews = load(DATA / "holdings" / f"{date}_holding_review.json", [])
@@ -87,7 +94,9 @@ def build_risk_decision(date: str) -> dict:
     # 不把这件事写进产物，14:45 报告只能按文件名判「当日」，读者会以为
     # 风控依据是今天的 —— 同「把缺数渲染成读数」那一类失真。
     _tech = load(DATA / "holdings" / f"{date}_holding_technical_summary.json", [])
-    _tech_dates = sorted({str(x.get("latest_date")) for x in _tech if x.get("latest_date")})
+    _tech_dates = sorted(
+        {str(x.get("latest_date")) for x in _tech if x.get("latest_date")}
+    )
     evidence_date = _tech_dates[-1] if _tech_dates else ""
     risks = []
     for h in holding_reviews:
@@ -95,33 +104,71 @@ def build_risk_decision(date: str) -> dict:
         b1 = h.get("b1_holding_state") or {}
         b1_priority = b1.get("final_priority")
         if action in {"减仓", "止损", "清仓"} or b1_priority in {"P0", "P1"}:
-            normalized_action = action if action in {"减仓", "止损", "清仓"} else ("清仓" if b1_priority == "P0" else "减仓")
-            risks.append({
-                "code": h.get("code"),
-                "name": h.get("name", ""),
-                "risk_type": "B1持仓结构" if b1_priority else ("破位" if "破位" in str(h.get("box_position")) else "亏损扩大"),
-                "action": normalized_action,
-                "priority": "高" if b1_priority == "P0" or normalized_action in {"止损", "清仓"} else "中",
-                "reason": "；".join(h.get("reason") or ["portfolio_review触发风控"]),
-                "evidence_ref": str(DATA / "holdings" / f"{date}_holding_review.json"),
-                "b1_signal_refs": [x.get("signal") for x in b1.get("signals", [])],
-            })
+            normalized_action = (
+                action
+                if action in {"减仓", "止损", "清仓"}
+                else ("清仓" if b1_priority == "P0" else "减仓")
+            )
+            risks.append(
+                {
+                    "code": h.get("code"),
+                    "name": h.get("name", ""),
+                    "risk_type": "B1持仓结构"
+                    if b1_priority
+                    else (
+                        "破位" if "破位" in str(h.get("box_position")) else "亏损扩大"
+                    ),
+                    "action": normalized_action,
+                    "priority": "高"
+                    if b1_priority == "P0" or normalized_action in {"止损", "清仓"}
+                    else "中",
+                    "reason": "；".join(
+                        h.get("reason") or ["portfolio_review触发风控"]
+                    ),
+                    "evidence_ref": str(
+                        DATA / "holdings" / f"{date}_holding_review.json"
+                    ),
+                    "b1_signal_refs": [x.get("signal") for x in b1.get("signals", [])],
+                }
+            )
 
     # Dedupe by (code, risk_type, reason)
     unique: dict[tuple, dict] = {}
     for risk in risks:
-        key = (bare(risk.get("code")), str(risk.get("risk_type")), str(risk.get("reason")))
+        key = (
+            bare(risk.get("code")),
+            str(risk.get("risk_type")),
+            str(risk.get("reason")),
+        )
         unique[key] = {**risk, "code": key[0]}
-    ordered = sorted(unique.values(), key=lambda x: ({"高": 0, "中": 1, "低": 2}.get(x.get("priority"), 9), x.get("code", "")))
+    ordered = sorted(
+        unique.values(),
+        key=lambda x: (
+            {"高": 0, "中": 1, "低": 2}.get(x.get("priority"), 9),
+            x.get("code", ""),
+        ),
+    )
 
-    level = "强风控" if any(x.get("priority") == "高" for x in ordered) else ("提高" if ordered else "普通")
-    forbidden = list(dict.fromkeys(x.get("action") for x in ordered if x.get("action") in {"禁止加仓", "止损", "清仓"}))
+    level = (
+        "强风控"
+        if any(x.get("priority") == "高" for x in ordered)
+        else ("提高" if ordered else "普通")
+    )
+    forbidden = list(
+        dict.fromkeys(
+            x.get("action")
+            for x in ordered
+            if x.get("action") in {"禁止加仓", "止损", "清仓"}
+        )
+    )
 
     market = load(DATA / "market" / f"{date}_market_timing_input.json", {})
     # 补 amv_zone 兜底并归一:此前只读 effective_state 且精确等值,
     # "空头触发"会让 risk_decision 漏置 allow_add=False(审计 B1)
     _amv = market.get("amv_0") or {}
-    market_regime = normalize_regime(_amv.get("effective_state") or _amv.get("amv_zone") or "未知")
+    market_regime = normalize_regime(
+        _amv.get("effective_state") or _amv.get("amv_zone") or "未知"
+    )
     if market_regime == "空头":
         regime_directive = {
             "reduce_top_priority": True,
@@ -131,7 +178,15 @@ def build_risk_decision(date: str) -> dict:
     else:
         regime_directive = {"reduce_top_priority": False}
 
-    return {"date": date, "evidence_date": evidence_date, "market_regime": market_regime, "regime_directive": regime_directive, "risk_level": level, "forbidden_actions": forbidden, "stock_risks": ordered}
+    return {
+        "date": date,
+        "evidence_date": evidence_date,
+        "market_regime": market_regime,
+        "regime_directive": regime_directive,
+        "risk_level": level,
+        "forbidden_actions": forbidden,
+        "stock_risks": ordered,
+    }
 
 
 def main():
@@ -149,16 +204,26 @@ def main():
     require("risk_decision", risk)
     dump(DATA / "risk" / f"{args.date}_risk_decision.json", risk)
 
-    print(json.dumps({
-        "date": args.date,
-        "sector_states": len(sector_states),
-        "stock_risks": len(risk["stock_risks"]),
-        "risk_level": risk["risk_level"],
-        "outputs": {
-            "sector_state": str(DATA / "sectors" / f"{args.date}_sector_state.json"),
-            "risk_decision": str(DATA / "risk" / f"{args.date}_risk_decision.json"),
-        },
-    }, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {
+                "date": args.date,
+                "sector_states": len(sector_states),
+                "stock_risks": len(risk["stock_risks"]),
+                "risk_level": risk["risk_level"],
+                "outputs": {
+                    "sector_state": str(
+                        DATA / "sectors" / f"{args.date}_sector_state.json"
+                    ),
+                    "risk_decision": str(
+                        DATA / "risk" / f"{args.date}_risk_decision.json"
+                    ),
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

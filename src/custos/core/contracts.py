@@ -82,6 +82,7 @@
 `holding_review` / `formula_hits` / `candidates_enriched` / `rss_*` /
 `postclose_news_digest` —— 都不在硬失败链上，按需再加。
 """
+
 from __future__ import annotations
 
 import math
@@ -89,11 +90,19 @@ from typing import Any
 
 # ── 取值域。**必须与生产者代码一致**，不是理想设计。
 #    改这些值之前先确认生产者真的会写出新值，否则会把正常产物判成畸形。
-REGIMES = {"做多", "中性", "空头", "未知"}          # runtime_guards.normalize_regime 的输出域
-RISK_LEVELS = {"普通", "提高", "强风控"}            # generate_risk_and_sectors.build_risk_decision
-GATE_STATUS = {"pass", "degraded", "blocked"}       # runtime_guards.market_quality_gate / position_gate
-RISK_PRIORITY = {"高", "中", "低"}                  # build_risk_decision
-B1_PRIORITY = {"P0", "P1", "P2", "P3"}              # b1_holding_state.evaluate
+REGIMES = {"做多", "中性", "空头", "未知"}  # runtime_guards.normalize_regime 的输出域
+RISK_LEVELS = {
+    "普通",
+    "提高",
+    "强风控",
+}  # generate_risk_and_sectors.build_risk_decision
+GATE_STATUS = {
+    "pass",
+    "degraded",
+    "blocked",
+}  # runtime_guards.market_quality_gate / position_gate
+RISK_PRIORITY = {"高", "中", "低"}  # build_risk_decision
+B1_PRIORITY = {"P0", "P1", "P2", "P3"}  # b1_holding_state.evaluate
 # generate_risk_and_sectors.build_sector_state 的三个枚举域（与 normalize_stage 一致）
 SECTOR_STATES = {"退潮", "主升", "修复", "分歧", "震荡"}
 SECTOR_TRENDS = {"上涨", "横盘震荡", "下跌"}
@@ -128,16 +137,31 @@ SECTION_NOT_FRESH = {"stale", "raw_only", "degraded", "missing"}
 #    （chief_decision_report:39 `extract(r'今日是否允许开新仓：\*\*(.*?)\*\*', ...)`），
 #    所以不能强枚举 —— 上游报告改一个字就会出现新值。
 #    这里只作 warning 白名单：出现未知值时提示「上游措辞可能变了」，不阻断。
-KNOWN_PERMISSIONS = {"禁止", "仅观察，不得加仓", "原则不允许", "允许", "谨慎允许", "待确认"}
+KNOWN_PERMISSIONS = {
+    "禁止",
+    "仅观察，不得加仓",
+    "原则不允许",
+    "允许",
+    "谨慎允许",
+    "待确认",
+}
 
-_TYPE_NAMES = {str: "字符串", dict: "对象", list: "数组", bool: "布尔", (int, float): "数字"}
+_TYPE_NAMES = {
+    str: "字符串",
+    dict: "对象",
+    list: "数组",
+    bool: "布尔",
+    (int, float): "数字",
+}
 
 
 def _type_name(t) -> str:
     return _TYPE_NAMES.get(t, getattr(t, "__name__", str(t)))
 
 
-def _check_field(path: str, value: Any, spec: dict, errors: list, warnings: list) -> None:
+def _check_field(
+    path: str, value: Any, spec: dict, errors: list, warnings: list
+) -> None:
     if value is None:
         if spec.get("nullable"):
             # ⚠️ `nullable` 只给**渐进填充产物**里「刻意留 None」的字段用，
@@ -146,8 +170,10 @@ def _check_field(path: str, value: Any, spec: dict, errors: list, warnings: list
             # 「编一个 as_of 等于给门控一个假的新鲜度」（源码原话）。
             # 不要拿它当「懒得填」的出口：null 与缺失在下游会走不同分支。
             return
-        errors.append(f"{path}: 值为 null（字段存在但没有内容 —— "
-                      f"`.get(k, 默认值)` 在这种情况下返回 None 而不是默认值）")
+        errors.append(
+            f"{path}: 值为 null（字段存在但没有内容 —— "
+            f"`.get(k, 默认值)` 在这种情况下返回 None 而不是默认值）"
+        )
         return
     want = spec.get("type")
     if want is not None:
@@ -156,13 +182,21 @@ def _check_field(path: str, value: Any, spec: dict, errors: list, warnings: list
             errors.append(f"{path}: 期望数字，得到布尔")
             return
         if not isinstance(value, want):
-            errors.append(f"{path}: 期望{_type_name(want)}，得到 {type(value).__name__}")
+            errors.append(
+                f"{path}: 期望{_type_name(want)}，得到 {type(value).__name__}"
+            )
             return
     if spec.get("non_empty") and not str(value).strip():
         errors.append(f"{path}: 不得为空串")
-    if spec.get("finite") and isinstance(value, (int, float)) and not math.isfinite(value):
-        errors.append(f"{path}: 非有限值（{value}）—— NaN/Infinity 不是合法 JSON，"
-                      f"且会让下游数值比较静默为 False")
+    if (
+        spec.get("finite")
+        and isinstance(value, (int, float))
+        and not math.isfinite(value)
+    ):
+        errors.append(
+            f"{path}: 非有限值（{value}）—— NaN/Infinity 不是合法 JSON，"
+            f"且会让下游数值比较静默为 False"
+        )
     choices = spec.get("choices")
     if choices and value not in choices:
         errors.append(f"{path}: 取值 {value!r} 不在允许集合 {sorted(choices)} 内")
@@ -179,7 +213,9 @@ def _check_field(path: str, value: Any, spec: dict, errors: list, warnings: list
             _check_obj(f"{path}[{i}]", item, spec["items"], errors, warnings)
 
 
-def _check_obj(path: str, obj: dict, fields: dict, errors: list, warnings: list) -> None:
+def _check_obj(
+    path: str, obj: dict, fields: dict, errors: list, warnings: list
+) -> None:
     for name, spec in fields.items():
         p = f"{path}.{name}" if path else name
         if name not in obj:
@@ -201,12 +237,16 @@ _GATE_BLOCK = {
 # 出现时四件必须齐（report_id / 策略版本 / 数据截止 / 输入清单），
 # 不出现不判畸形 —— 旧产物没有它，而契约管的是「写了的东西对不对」。
 # `data_as_of` 允许 null：全部输入缺失时没的可报（与「编一个假新鲜度」同理）。
-_AUDIT_FIELD = {"type": dict, "required": False, "fields": {
-    "report_id": {"type": str, "required": True, "non_empty": True},
-    "strategy_version": {"type": str, "required": True, "non_empty": True},
-    "data_as_of": {"type": str, "required": True, "nullable": True},
-    "inputs": {"type": list, "required": True},
-}}
+_AUDIT_FIELD = {
+    "type": dict,
+    "required": False,
+    "fields": {
+        "report_id": {"type": str, "required": True, "non_empty": True},
+        "strategy_version": {"type": str, "required": True, "non_empty": True},
+        "data_as_of": {"type": str, "required": True, "nullable": True},
+        "inputs": {"type": list, "required": True},
+    },
+}
 
 SPECS: dict[str, dict] = {
     # runtime_guards.write_runtime_gate
@@ -214,31 +254,59 @@ SPECS: dict[str, dict] = {
         "kind": "object",
         "fields": {
             "date": {"type": str, "required": True, "non_empty": True},
-            "calendar": {"type": dict, "required": True, "fields": {
-                "is_trading_day": {"type": bool, "required": True},
-            }},
-            "position_freshness": {"type": dict, "required": True, "fields": {
-                "status": {"type": str, "required": True},
-            }},
-            "technical_freshness": {"type": dict, "required": True, "fields": {
-                "status": {"type": str, "required": True, "choices": FRESHNESS},
-            }},
+            "calendar": {
+                "type": dict,
+                "required": True,
+                "fields": {
+                    "is_trading_day": {"type": bool, "required": True},
+                },
+            },
+            "position_freshness": {
+                "type": dict,
+                "required": True,
+                "fields": {
+                    "status": {"type": str, "required": True},
+                },
+            },
+            "technical_freshness": {
+                "type": dict,
+                "required": True,
+                "fields": {
+                    "status": {"type": str, "required": True, "choices": FRESHNESS},
+                },
+            },
             # ⚠️ 这三个布尔是**权限本身**。缺失或为 null 时下游的
             # `is False` / `== "blocked"` 判定会落空 ⇒ 未获授权被当成已获授权。
-            "position_gate": {"type": dict, "required": True, "fields": {
-                "status": {"type": str, "required": True, "choices": GATE_STATUS},
-                "allow_position_increase": {"type": bool, "required": True},
-                "allow_position_reduction": {"type": bool, "required": True},
-                "allow_precise_quantity": {"type": bool, "required": True},
-                "market_regime": {"type": str, "required": True, "choices": REGIMES},
-                "limitations": {"type": list, "required": True},
-            }},
-            "market_quality": {"type": dict, "required": True, "fields": {
-                "status": {"type": str, "required": True, "choices": GATE_STATUS},
-                "quality_score": {"type": (int, float), "required": True, "finite": True},
-                "checks": {"type": list, "required": True},
-                "limitations": {"type": list, "required": True},
-            }},
+            "position_gate": {
+                "type": dict,
+                "required": True,
+                "fields": {
+                    "status": {"type": str, "required": True, "choices": GATE_STATUS},
+                    "allow_position_increase": {"type": bool, "required": True},
+                    "allow_position_reduction": {"type": bool, "required": True},
+                    "allow_precise_quantity": {"type": bool, "required": True},
+                    "market_regime": {
+                        "type": str,
+                        "required": True,
+                        "choices": REGIMES,
+                    },
+                    "limitations": {"type": list, "required": True},
+                },
+            },
+            "market_quality": {
+                "type": dict,
+                "required": True,
+                "fields": {
+                    "status": {"type": str, "required": True, "choices": GATE_STATUS},
+                    "quality_score": {
+                        "type": (int, float),
+                        "required": True,
+                        "finite": True,
+                    },
+                    "checks": {"type": list, "required": True},
+                    "limitations": {"type": list, "required": True},
+                },
+            },
             "generated_at": {"type": str, "required": True, "non_empty": True},
         },
     },
@@ -262,7 +330,6 @@ SPECS: dict[str, dict] = {
             "technical_available": {"type": bool, "required": True},
         },
     },
-
     # market_timing_collector.main —— ⚠️ **渐进填充产物**（见模块 docstring）
     #
     # 它是全项目扇出最大的产物：**19 个消费者**，其中 12 个读 `amv_0`。
@@ -275,36 +342,52 @@ SPECS: dict[str, dict] = {
             "date": {"type": str, "required": True, "non_empty": True},
             "collector_version": {"type": str, "required": True, "non_empty": True},
             # ⚠️ 12 个消费者读它，也是审计 B1 与 v0.22（confirmed 门）的所在。
-            "amv_0": {"type": dict, "required": True, "fields": {
-                # `amv_zone` 由 `amv_zone(args.amv)` 派生，collector 一定会写。
-                # **不设 non_empty**：实测 0AMV 未填时它就是空串（已核对真实产出）。
-                "amv_zone": {"type": str, "required": True},
-                # 0AMV 是**盘后**指标，08:50 手工 --amv 时值可能还没有 ⇒ 允许 null。
-                # 门控按「缺 0AMV」降级处理（不得 pass），那是既有校准过的行为。
-                "amv_change_pct": {"type": (int, float), "required": True,
-                                   "nullable": True, "finite": True},
-                # ⚠️ **刻意留 None**（collector 源码原话）：08:50 手工读数属哪个数据日
-                # 无法自证（盘前能看到的最新值其实是 T-1），
-                # 「编一个 as_of 等于给门控一个假的新鲜度」。
-                # 唯一会写它的是 merge_incremental_market（数据日可证）。
-                "as_of": {"type": str, "required": True, "nullable": True},
-                # ⚠️ 以下两个由 **merge_incremental_market** 写，collector 刻意不置
-                # （门控按 candidate 处理）⇒ `required=False`，
-                # 但**出现时必须在域内** —— 这正是审计 B1 的所在：
-                # `effective_state` 写成「空头触发」这种未归一的值，会让
-                # 下游精确等值比较落空、`allow_add=False` 漏置。
-                "quality": {"type": str, "required": False, "choices": AMV_QUALITY},
-                "effective_state": {"type": str, "required": False, "choices": REGIMES},
-            }},
-            "overseas_market": {"type": dict, "required": True, "fields": {
-                # ⚠️ `required + nullable`，与 `amv_0.as_of` 同形（2026-08-10，TODO #52）：
-                #    键必须在（缺失与 null 在门控里走不同分支），值允许 None
-                #    —— 一个 symbol 都没给时间戳时**不许编一个**，原话
-                #    「编一个 as_of 等于给门控一个假的新鲜度」。
-                #    ⚠️ 契约只能保证键存在，**拦不住重新伪造** ——
-                #    那件事由 `tests/test_tdx_ext_fallback.py::TestOverseasAsOfDerivation` 守。
-                "as_of": {"type": str, "required": True, "nullable": True},
-            }},
+            "amv_0": {
+                "type": dict,
+                "required": True,
+                "fields": {
+                    # `amv_zone` 由 `amv_zone(args.amv)` 派生，collector 一定会写。
+                    # **不设 non_empty**：实测 0AMV 未填时它就是空串（已核对真实产出）。
+                    "amv_zone": {"type": str, "required": True},
+                    # 0AMV 是**盘后**指标，08:50 手工 --amv 时值可能还没有 ⇒ 允许 null。
+                    # 门控按「缺 0AMV」降级处理（不得 pass），那是既有校准过的行为。
+                    "amv_change_pct": {
+                        "type": (int, float),
+                        "required": True,
+                        "nullable": True,
+                        "finite": True,
+                    },
+                    # ⚠️ **刻意留 None**（collector 源码原话）：08:50 手工读数属哪个数据日
+                    # 无法自证（盘前能看到的最新值其实是 T-1），
+                    # 「编一个 as_of 等于给门控一个假的新鲜度」。
+                    # 唯一会写它的是 merge_incremental_market（数据日可证）。
+                    "as_of": {"type": str, "required": True, "nullable": True},
+                    # ⚠️ 以下两个由 **merge_incremental_market** 写，collector 刻意不置
+                    # （门控按 candidate 处理）⇒ `required=False`，
+                    # 但**出现时必须在域内** —— 这正是审计 B1 的所在：
+                    # `effective_state` 写成「空头触发」这种未归一的值，会让
+                    # 下游精确等值比较落空、`allow_add=False` 漏置。
+                    "quality": {"type": str, "required": False, "choices": AMV_QUALITY},
+                    "effective_state": {
+                        "type": str,
+                        "required": False,
+                        "choices": REGIMES,
+                    },
+                },
+            },
+            "overseas_market": {
+                "type": dict,
+                "required": True,
+                "fields": {
+                    # ⚠️ `required + nullable`，与 `amv_0.as_of` 同形（2026-08-10，TODO #52）：
+                    #    键必须在（缺失与 null 在门控里走不同分支），值允许 None
+                    #    —— 一个 symbol 都没给时间戳时**不许编一个**，原话
+                    #    「编一个 as_of 等于给门控一个假的新鲜度」。
+                    #    ⚠️ 契约只能保证键存在，**拦不住重新伪造** ——
+                    #    那件事由 `tests/test_tdx_ext_fallback.py::TestOverseasAsOfDerivation` 守。
+                    "as_of": {"type": str, "required": True, "nullable": True},
+                },
+            },
             "a_share_indices": {"type": dict, "required": True},
             "market_breadth": {"type": dict, "required": True},
             "sentiment": {"type": dict, "required": True},
@@ -324,18 +407,30 @@ SPECS: dict[str, dict] = {
             # 判「当日」，把 T-1 的风控依据显示成今天的。允许空串（技术面全缺时）。
             "evidence_date": {"type": str, "required": True},
             "market_regime": {"type": str, "required": True, "choices": REGIMES},
-            "regime_directive": {"type": dict, "required": True, "fields": {
-                "reduce_top_priority": {"type": bool, "required": True},
-            }},
+            "regime_directive": {
+                "type": dict,
+                "required": True,
+                "fields": {
+                    "reduce_top_priority": {"type": bool, "required": True},
+                },
+            },
             "risk_level": {"type": str, "required": True, "choices": RISK_LEVELS},
             "forbidden_actions": {"type": list, "required": True},
-            "stock_risks": {"type": list, "required": True, "items": {
-                "code": {"type": str, "required": True, "non_empty": True},
-                "risk_type": {"type": str, "required": True},
-                "action": {"type": str, "required": True, "non_empty": True},
-                "priority": {"type": str, "required": True, "choices": RISK_PRIORITY},
-                "reason": {"type": str, "required": True, "non_empty": True},
-            }},
+            "stock_risks": {
+                "type": list,
+                "required": True,
+                "items": {
+                    "code": {"type": str, "required": True, "non_empty": True},
+                    "risk_type": {"type": str, "required": True},
+                    "action": {"type": str, "required": True, "non_empty": True},
+                    "priority": {
+                        "type": str,
+                        "required": True,
+                        "choices": RISK_PRIORITY,
+                    },
+                    "reason": {"type": str, "required": True, "non_empty": True},
+                },
+            },
         },
     },
     # chief_decision_report.main
@@ -346,25 +441,37 @@ SPECS: dict[str, dict] = {
             "market_state": {"type": str, "required": True, "non_empty": True},
             "total_position_range": {"type": str, "required": True, "non_empty": True},
             # 从 markdown 正则抽取 ⇒ 只作已知值告警，不强枚举
-            "new_position_permission": {"type": str, "required": True, "non_empty": True,
-                                        "known": KNOWN_PERMISSIONS},
+            "new_position_permission": {
+                "type": str,
+                "required": True,
+                "non_empty": True,
+                "known": KNOWN_PERMISSIONS,
+            },
             "risk_level": {"type": str, "required": True, "choices": RISK_LEVELS},
             "position_gate": {"type": dict, "required": True},
             "market_quality": {"type": dict, "required": True},
             "allowed_actions": {"type": list, "required": True},
             "forbidden_actions": {"type": list, "required": True},
-            "holding_actions": {"type": list, "required": True, "items": {
-                "priority": {"type": str, "required": True, "choices": B1_PRIORITY},
-                "code": {"type": str, "required": True, "non_empty": True},
-                "action": {"type": str, "required": True, "non_empty": True},
-                "reasons": {"type": list, "required": True},
-            }},
+            "holding_actions": {
+                "type": list,
+                "required": True,
+                "items": {
+                    "priority": {"type": str, "required": True, "choices": B1_PRIORITY},
+                    "code": {"type": str, "required": True, "non_empty": True},
+                    "action": {"type": str, "required": True, "non_empty": True},
+                    "reasons": {"type": list, "required": True},
+                },
+            },
             "buy_actions": {"type": list, "required": True},
             "risk_notice": {"type": str, "required": True, "non_empty": True},
-            "sources": {"type": dict, "required": True, "fields": {
-                "risk_decision": {"type": str, "required": True, "non_empty": True},
-                "runtime_gate": {"type": str, "required": True, "non_empty": True},
-            }},
+            "sources": {
+                "type": dict,
+                "required": True,
+                "fields": {
+                    "risk_decision": {"type": str, "required": True, "non_empty": True},
+                    "runtime_gate": {"type": str, "required": True, "non_empty": True},
+                },
+            },
         },
     },
     # generate_risk_and_sectors.build_sector_state —— 落盘是**数组**。
@@ -377,16 +484,22 @@ SPECS: dict[str, dict] = {
             "sector": {"type": str, "required": True, "non_empty": True},
             "state": {"type": str, "required": True, "choices": SECTOR_STATES},
             "trend": {"type": str, "required": True, "choices": SECTOR_TRENDS},
-            "trade_permission": {"type": str, "required": True,
-                                 "choices": SECTOR_PERMISSIONS},
+            "trade_permission": {
+                "type": str,
+                "required": True,
+                "choices": SECTOR_PERMISSIONS,
+            },
             # 允许 null（板块技术面没给分是正常的），但**不允许 NaN** ——
             # 那会让下游阈值判定静默为 False。
-            "score": {"type": (int, float), "required": True,
-                      "nullable": True, "finite": True},
+            "score": {
+                "type": (int, float),
+                "required": True,
+                "nullable": True,
+                "finite": True,
+            },
             "risk_flags": {"type": list, "required": True},
         },
     },
-
     # collect_holding_quotes.main —— 5 个消费者，⛔ 硬失败链
     # ⚠️ **分支型**：取不到数的票只有 `{code, name, market, available: False, reason}`，
     # 所以只有 `code`/`name`/`available` 是普遍字段。
@@ -396,22 +509,30 @@ SPECS: dict[str, dict] = {
             "as_of_date": {"type": str, "required": True, "non_empty": True},
             "captured_at": {"type": str, "required": True, "non_empty": True},
             "source": {"type": str, "required": True, "non_empty": True},
-            "quotes": {"type": list, "required": True, "items": {
-                "code": {"type": str, "required": True, "non_empty": True},
-                "available": {"type": bool, "required": True},
-                # `price` 由落盘时归一补上（`q["price"] = q.get("close")`）——
-                # 5 个 quote 变体里有 5 个原本只有 close。**5 个消费者读 price**，
-                # 所以它是契约的一部分，不是实现细节。取不到数的票没有它 ⇒ 非必填。
-            }},
+            "quotes": {
+                "type": list,
+                "required": True,
+                "items": {
+                    "code": {"type": str, "required": True, "non_empty": True},
+                    "available": {"type": bool, "required": True},
+                    # `price` 由落盘时归一补上（`q["price"] = q.get("close")`）——
+                    # 5 个 quote 变体里有 5 个原本只有 close。**5 个消费者读 price**，
+                    # 所以它是契约的一部分，不是实现细节。取不到数的票没有它 ⇒ 非必填。
+                },
+            },
             # ⚠️ indices 是 **list**（每项 {code, name, close, ...}），不是 dict ——
             # 两个消费端（review_core x2）都按 list 迭代。spec 曾误写成 dict，
             # 而契约 08-07 傍晚才挂上、当时 run_1445 正处在 TOOLS bug 窗口，
             # 生产从未跑过 ⇒ 首个交易日 14:45 必败（08-08 重跑 08-07 时抓到）。
             # items 只钉 code：成功分支没有 available 键（仅失败分支写
             # available=False），别把成功路径判成畸形。
-            "indices": {"type": list, "required": True, "items": {
-                "code": {"type": str, "required": True, "non_empty": True},
-            }},
+            "indices": {
+                "type": list,
+                "required": True,
+                "items": {
+                    "code": {"type": str, "required": True, "non_empty": True},
+                },
+            },
             "breadth": {"type": dict, "required": True},
         },
     },
@@ -434,7 +555,11 @@ SPECS: dict[str, dict] = {
         "fields": {
             "date": {"type": str, "required": True, "non_empty": True},
             "status": {"type": str, "required": True, "non_empty": True},
-            "recorded_trade_count": {"type": (int, float), "required": True, "finite": True},
+            "recorded_trade_count": {
+                "type": (int, float),
+                "required": True,
+                "finite": True,
+            },
             "no_trades_confirmed": {"type": bool, "required": True},
             "premarket_snapshot_available": {"type": bool, "required": True},
             "rows": {"type": list, "required": True},
@@ -452,25 +577,44 @@ SPECS: dict[str, dict] = {
             "date": {"type": str, "required": True, "non_empty": True},
             "theme_lifecycles": {"type": list, "required": True},
             "holding_diagnoses": {"type": list, "required": True},
-            "next_day_plan": {"type": dict, "required": True, "fields": {
-                "holding_plans": {"type": list, "required": True, "items": {
-                    "code": {"type": str, "required": True, "non_empty": True},
-                    "priority": {"type": str, "required": True, "choices": B1_PRIORITY},
-                    "direction": {"type": str, "required": True, "non_empty": True},
-                    # ⚠️ **必须恒为 None**：精确减仓量另需当日行情授权
-                    # （`runtime_gate.position_gate.allow_precise_quantity`），
-                    # 复盘层无权给出。契约把这条钉死。
-                    "exact_quantity": {"type": (int, float), "required": True,
-                                       "nullable": True, "finite": True},
-                }},
-            }},
+            "next_day_plan": {
+                "type": dict,
+                "required": True,
+                "fields": {
+                    "holding_plans": {
+                        "type": list,
+                        "required": True,
+                        "items": {
+                            "code": {"type": str, "required": True, "non_empty": True},
+                            "priority": {
+                                "type": str,
+                                "required": True,
+                                "choices": B1_PRIORITY,
+                            },
+                            "direction": {
+                                "type": str,
+                                "required": True,
+                                "non_empty": True,
+                            },
+                            # ⚠️ **必须恒为 None**：精确减仓量另需当日行情授权
+                            # （`runtime_gate.position_gate.allow_precise_quantity`），
+                            # 复盘层无权给出。契约把这条钉死。
+                            "exact_quantity": {
+                                "type": (int, float),
+                                "required": True,
+                                "nullable": True,
+                                "finite": True,
+                            },
+                        },
+                    },
+                },
+            },
             "rule_review": {"type": dict, "required": True},
             "unavailable": {"type": list, "required": True},
             # ⚠️ 复盘层是**解释**不是裁决 —— 这句必须在产物里。
             "permission_rule": {"type": str, "required": True, "non_empty": True},
         },
     },
-
     # ══ 第五批（2026-08-07）：扫描发现的剩余产物
     # ⚠️ **刻意不纳入**的几类（不是漏了）：
     #   · run log / `daily_pipeline_log` / `1445_review.md`
@@ -484,7 +628,6 @@ SPECS: dict[str, dict] = {
     #   · `holding_sector_mapping_enriched` —— 可选产物，取不到时
     #       `batch_holding_technical` 会回落 `current_positions.json`
     #       （daily_pipeline 注释写明），即它缺失是**已设计的正常路径**。
-
     # collect_intraday_snapshot.main —— 14:45 盘中快照
     "intraday_snapshot": {
         "kind": "object",
@@ -523,25 +666,27 @@ SPECS: dict[str, dict] = {
             "name": {"type": str, "required": True},
         },
     },
-
     # ══ 第四批（2026-08-07）：硬失败链之外的产物，按需铺完
     # 这批的共同点是**都不阻断日常链**，所以契约的价值主要在
     # 「消费端读到的东西是不是它以为的东西」，而不是防止链路挂掉。
-
     # score_candidates.score_all —— 选股链终点，18:00 独立链（不阻断三份报告）
     "stock_pool": {
         "kind": "object",
         "fields": {
             "date": {"type": str, "required": True, "non_empty": True},
             "status": {"type": str, "required": True, "non_empty": True},
-            "candidates": {"type": list, "required": True, "items": {
-                "code": {"type": str, "required": True, "non_empty": True},
-                "bucket": {"type": str, "required": True, "choices": BUCKETS},
-                # ⚠️ `next_step` 是「这只票下一步能做什么」，A/B/C/D 分层的落点。
-                "next_step": {"type": str, "required": True, "non_empty": True},
-                "risk_flags": {"type": list, "required": True},
-                "entry_reason": {"type": list, "required": True},
-            }},
+            "candidates": {
+                "type": list,
+                "required": True,
+                "items": {
+                    "code": {"type": str, "required": True, "non_empty": True},
+                    "bucket": {"type": str, "required": True, "choices": BUCKETS},
+                    # ⚠️ `next_step` 是「这只票下一步能做什么」，A/B/C/D 分层的落点。
+                    "next_step": {"type": str, "required": True, "non_empty": True},
+                    "risk_flags": {"type": list, "required": True},
+                    "entry_reason": {"type": list, "required": True},
+                },
+            },
             "bucket_counts": {"type": dict, "required": True},
             "audit": _AUDIT_FIELD,
         },
@@ -552,7 +697,11 @@ SPECS: dict[str, dict] = {
         "fields": {
             "date": {"type": str, "required": True, "non_empty": True},
             # ⚠️ `report_quality` 是「这份复盘有多可信」，degraded 时下游不得当完整证据。
-            "report_quality": {"type": str, "required": True, "choices": REPORT_QUALITY},
+            "report_quality": {
+                "type": str,
+                "required": True,
+                "choices": REPORT_QUALITY,
+            },
             "unavailable": {"type": list, "required": True},
             "revalued_positions": {"type": list, "required": True},
             "next_day_plan": {"type": dict, "required": True},
@@ -591,7 +740,11 @@ SPECS: dict[str, dict] = {
         "kind": "object",
         "fields": {
             "date": {"type": str, "required": True, "non_empty": True},
-            "status": {"type": str, "required": True, "choices": {"ok", "partial", "failed"}},
+            "status": {
+                "type": str,
+                "required": True,
+                "choices": {"ok", "partial", "failed"},
+            },
             "stock_rank": {"type": list, "required": True},
             "sector_rank": {"type": dict, "required": True},
             # ⚠️ 分板块类型的失败状态要单独留痕：industry 成功而 concept 失败时，
@@ -671,7 +824,6 @@ SPECS: dict[str, dict] = {
             "permission_rule": {"type": str, "required": True, "non_empty": True},
         },
     },
-
     # b1_holding_state.evaluate —— 落盘是**数组**（每持仓一条）
     "b1_holding_state": {
         "kind": "array",
@@ -682,12 +834,16 @@ SPECS: dict[str, dict] = {
             "final_priority": {"type": str, "required": True, "choices": B1_PRIORITY},
             "final_action": {"type": str, "required": True, "non_empty": True},
             "final_reason": {"type": str, "required": True},
-            "signals": {"type": list, "required": True, "items": {
-                "signal": {"type": str, "required": True, "non_empty": True},
-                "priority": {"type": str, "required": True, "choices": B1_PRIORITY},
-                "action": {"type": str, "required": True, "non_empty": True},
-                "reason": {"type": str, "required": True, "non_empty": True},
-            }},
+            "signals": {
+                "type": list,
+                "required": True,
+                "items": {
+                    "signal": {"type": str, "required": True, "non_empty": True},
+                    "priority": {"type": str, "required": True, "choices": B1_PRIORITY},
+                    "action": {"type": str, "required": True, "non_empty": True},
+                    "reason": {"type": str, "required": True, "non_empty": True},
+                },
+            },
             "unavailable": {"type": list, "required": True},
             "facts": {"type": dict, "required": True},
         },
@@ -730,10 +886,16 @@ def _narrow(fields: dict, only: tuple[str, ...]) -> tuple[dict, list[str]]:
             # 等于没裁（第一版就是这个 bug：`amv_0.amv_zone: 缺失` 仍然报出来，
             # 而 amv_zone 根本不在 only 里）。
             prev = keep.get(head)
-            base = dict(prev) if prev else {k: v for k, v in fields[head].items()
-                                           if k != "fields"}
-            keep[head] = {**base, "required": False,
-                          "fields": {**(base.get("fields") or {}), **narrowed}}
+            base = (
+                dict(prev)
+                if prev
+                else {k: v for k, v in fields[head].items() if k != "fields"}
+            )
+            keep[head] = {
+                **base,
+                "required": False,
+                "fields": {**(base.get("fields") or {}), **narrowed},
+            }
     return keep, unknown
 
 
@@ -755,9 +917,15 @@ def check(name: str, obj: Any, only: tuple[str, ...] | None = None) -> dict[str,
     """
     spec = SPECS.get(name)
     if spec is None:
-        return {"artifact": name, "valid": True, "errors": [],
-                "warnings": [f"{name}: 尚未定义契约（已覆盖 {len(SPECS)} 个，"
-                             f"见 SPECS；其余产物暂按无契约处理）"]}
+        return {
+            "artifact": name,
+            "valid": True,
+            "errors": [],
+            "warnings": [
+                f"{name}: 尚未定义契约（已覆盖 {len(SPECS)} 个，"
+                f"见 SPECS；其余产物暂按无契约处理）"
+            ],
+        }
     errors: list[str] = []
     warnings: list[str] = []
     if spec["kind"] == "array":
@@ -765,8 +933,10 @@ def check(name: str, obj: Any, only: tuple[str, ...] | None = None) -> dict[str,
             # ⚠️ array 类契约按**条目**校验，`only`（顶层字段裁剪）对它无意义。
             # 不能静默忽略：调用方会误以为自己只校验了部分字段，
             # 实际校验的是整个数组 —— 与 unknown path 一样发 warning。
-            warnings.append(f"{name}: array 类契约不支持 only（已按整个数组校验）"
-                            f" —— 拼错了会让校验范围与预期不符")
+            warnings.append(
+                f"{name}: array 类契约不支持 only（已按整个数组校验）"
+                f" —— 拼错了会让校验范围与预期不符"
+            )
         if not isinstance(obj, list):
             errors.append(f"{name}: 期望数组，得到 {type(obj).__name__}")
         else:
@@ -783,10 +953,17 @@ def check(name: str, obj: Any, only: tuple[str, ...] | None = None) -> dict[str,
             if only is not None:
                 fields, unknown = _narrow(fields, only)
                 if unknown:
-                    warnings.append(f"{name}: only 里有契约未定义的路径 {unknown}"
-                                    f" —— 拼错了会让校验变成空操作")
+                    warnings.append(
+                        f"{name}: only 里有契约未定义的路径 {unknown}"
+                        f" —— 拼错了会让校验变成空操作"
+                    )
             _check_obj("", obj, fields, errors, warnings)
-    return {"artifact": name, "valid": not errors, "errors": errors, "warnings": warnings}
+    return {
+        "artifact": name,
+        "valid": not errors,
+        "errors": errors,
+        "warnings": warnings,
+    }
 
 
 def require(name: str, obj: Any, only: tuple[str, ...] | None = None) -> Any:
@@ -801,5 +978,6 @@ def require(name: str, obj: Any, only: tuple[str, ...] | None = None) -> Any:
     if not result["valid"]:
         raise SystemExit(
             f"产物契约校验失败 [{name}]（见 src/contracts.py）：\n  "
-            + "\n  ".join(result["errors"]))
+            + "\n  ".join(result["errors"])
+        )
     return obj

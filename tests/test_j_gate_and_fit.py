@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """J<13 硬门槛 + 完美 B1 图形贴合度（perfect_b1_fit）测试。"""
+
 from __future__ import annotations
 
 import pandas as pd
@@ -11,23 +12,42 @@ from test_enrich_b1cz import make_df
 
 def _flat_df(n=120, close=10.0):
     dates = pd.date_range(end="2026-07-22", periods=n, freq="B")
-    return pd.DataFrame({
-        "date": dates, "open": close, "high": close * 1.005, "low": close * 0.995,
-        "close": close, "volume": 1000.0, "amount": 0.0,
-    })
+    return pd.DataFrame(
+        {
+            "date": dates,
+            "open": close,
+            "high": close * 1.005,
+            "low": close * 0.995,
+            "close": close,
+            "volume": 1000.0,
+            "amount": 0.0,
+        }
+    )
 
 
 def _hits(*codes):
-    return {"date": "2026-07-22", "status": "ok",
-            "formulas": [{"id": "POOL_ZHENDANG", "category": "manual_pool",
-                          "hits": [{"code": c, "name": ""} for c in codes]}]}
+    return {
+        "date": "2026-07-22",
+        "status": "ok",
+        "formulas": [
+            {
+                "id": "POOL_ZHENDANG",
+                "category": "manual_pool",
+                "hits": [{"code": c, "name": ""} for c in codes],
+            }
+        ],
+    }
 
 
 def _run_enrich(monkeypatch, df_by_code, universe_cfg):
     monkeypatch.setattr(ec, "build_stock_theme_map", lambda **k: ({}, True))
-    return ec.enrich("2026-07-22", hits_data=_hits(*df_by_code),
-                     ohlcv_loader=lambda c: df_by_code[c].copy(),
-                     index_loader=lambda: None, universe_cfg=universe_cfg)
+    return ec.enrich(
+        "2026-07-22",
+        hits_data=_hits(*df_by_code),
+        ohlcv_loader=lambda c: df_by_code[c].copy(),
+        index_loader=lambda: None,
+        universe_cfg=universe_cfg,
+    )
 
 
 def test_j_gate_excludes_high_j_pool_member(monkeypatch):
@@ -57,8 +77,8 @@ def test_fit_grading_uptrend_perfect_pattern():
     pull = {"available": True, "detail": {"pullback_vol_ratio": 0.4}}
     fit = ec.compute_perfect_b1_fit(df, daily_j=-2.0, zx=zx, pullback=pull)
     c = fit["components"]
-    assert c["j_depth"]["points"] == 2.0        # J<0
-    assert c["near_line"]["points"] == 2.0      # 贴 QSX
+    assert c["j_depth"]["points"] == 2.0  # J<0
+    assert c["near_line"]["points"] == 2.0  # 贴 QSX
     assert c["shrink_degree"]["points"] == 2.0  # 深缩量
     assert c["macd_above_zero"]["points"] == 1.0
     assert c["dks_rising"]["points"] == 1.0
@@ -72,7 +92,7 @@ def test_fit_grading_poor_pattern():
     pull = {"available": True, "detail": {"pullback_vol_ratio": 0.95}}
     fit = ec.compute_perfect_b1_fit(df, daily_j=12.5, zx=zx, pullback=pull)
     c = fit["components"]
-    assert c["j_depth"]["points"] == 1.0   # 仅 J<13 及格线
+    assert c["j_depth"]["points"] == 1.0  # 仅 J<13 及格线
     assert c["near_line"]["points"] == 0.0
     assert c["shrink_degree"]["points"] == 0.0
     assert c["macd_above_zero"]["points"] == 0.0
@@ -82,6 +102,7 @@ def test_fit_grading_poor_pattern():
 
 def test_fit_handles_missing_inputs():
     df = make_df([10.0] * 30)  # K线不足 114+5 → DKS 分量 0，不炸
-    fit = ec.compute_perfect_b1_fit(df, daily_j=None, zx={"available": False},
-                                    pullback={"available": False})
+    fit = ec.compute_perfect_b1_fit(
+        df, daily_j=None, zx={"available": False}, pullback={"available": False}
+    )
     assert fit["score"] == 0.0

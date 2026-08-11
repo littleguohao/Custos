@@ -14,6 +14,7 @@
 2026-08-10 的教训：这个文件曾是 0% 覆盖，而正是查它在链上的地位时
 发现 `daily_pipeline` 四个持仓 stage 的路径全断（commit f6c6568）。
 """
+
 from __future__ import annotations
 
 import json
@@ -33,10 +34,17 @@ class TestNormCode:
     与 `code_utils.norm_code`（会加 .SH/.SZ/.BJ）**刻意不同**，源码注释明写「Do not merge」。
     """
 
-    @pytest.mark.parametrize("raw,want", [
-        ("600000", "600000"), (600000, "600000"), ("600000.0", "600000"),
-        ("1", "000001"), ("920808", "920808"), ("", ""),
-    ])
+    @pytest.mark.parametrize(
+        "raw,want",
+        [
+            ("600000", "600000"),
+            (600000, "600000"),
+            ("600000.0", "600000"),
+            ("1", "000001"),
+            ("920808", "920808"),
+            ("", ""),
+        ],
+    )
     def test_pads_to_six_without_suffix(self, raw, want):
         assert hsm.norm_code(raw) == want
 
@@ -49,23 +57,28 @@ class TestNormCode:
 
     def test_does_not_append_exchange_suffix(self):
         from custos.core.code_utils import norm_code as shared
+
         assert hsm.norm_code("600000") == "600000"
-        assert shared("600000") != hsm.norm_code("600000"), \
+        assert shared("600000") != hsm.norm_code("600000"), (
             "两者刻意不同；若哪天一致了，请回去读两边的 docstring 再决定是否合并"
+        )
 
 
 class TestLoadTdxhy:
     def test_parses_pipe_layout(self, tmp_path):
         p = tmp_path / "tdxhy.cfg"
-        p.write_text("1|688114|T0403|||X270302\n0|000001|T0301|||X480101\n",
-                     encoding="ascii")
+        p.write_text(
+            "1|688114|T0403|||X270302\n0|000001|T0301|||X480101\n", encoding="ascii"
+        )
         m = hsm.load_tdxhy(p)
         assert m["688114"] == {"tdx": "T0403", "sw": "X270302"}
         assert m["000001"]["sw"] == "X480101"
 
     def test_skips_malformed_and_header_lines(self, tmp_path):
         p = tmp_path / "tdxhy.cfg"
-        p.write_text("# comment\n\nbad|line\n1|600000|T0101|||X110101\n", encoding="ascii")
+        p.write_text(
+            "# comment\n\nbad|line\n1|600000|T0101|||X110101\n", encoding="ascii"
+        )
         m = hsm.load_tdxhy(p)
         assert list(m) == ["600000"], f"畸形行应被跳过：{m}"
 
@@ -79,8 +92,11 @@ class TestLoadTdxhy:
 class TestLoadInconSections:
     def test_parses_gbk_sections(self, tmp_path):
         p = tmp_path / "incon.dat"
-        p.write_bytes(("#TDXNHY\nT0403|半导体\nT01|金融\n######\n"
-                       "#TDXRSHY\nX270302|集成电路\n").encode("gbk"))
+        p.write_bytes(
+            (
+                "#TDXNHY\nT0403|半导体\nT01|金融\n######\n#TDXRSHY\nX270302|集成电路\n"
+            ).encode("gbk")
+        )
         sec = hsm.load_incon_sections(p)
         assert sec["TDXNHY"]["T0403"] == "半导体"
         assert sec["TDXRSHY"]["X270302"] == "集成电路"
@@ -140,27 +156,33 @@ class TestMainMapping:
         """
         out = tmp_path / "out_dir"
         monkeypatch.setattr(hsm, "OUT_DIR", out)
-        monkeypatch.setattr(hsm, "load_tdxhy",
-                            lambda *a, **k: {"600000": {"tdx": "T01", "sw": "X48"}})
-        monkeypatch.setattr(hsm, "load_incon_sections",
-                            lambda *a, **k: {"TDXNHY": {"T01": "银行"},
-                                             "TDXRSHY": {"X48": "银行II"}})
+        monkeypatch.setattr(
+            hsm, "load_tdxhy", lambda *a, **k: {"600000": {"tdx": "T01", "sw": "X48"}}
+        )
+        monkeypatch.setattr(
+            hsm,
+            "load_incon_sections",
+            lambda *a, **k: {"TDXNHY": {"T01": "银行"}, "TDXRSHY": {"X48": "银行II"}},
+        )
         return tmp_path
-
 
     def _run(self, env, monkeypatch, positions, extra=()):
         src = env / "pos.json"
         src.write_text(json.dumps(positions, ensure_ascii=False), encoding="utf-8")
-        monkeypatch.setattr(sys, "argv",
-                            ["x", "--input", str(src), "--date", "2026-08-11", *extra])
+        monkeypatch.setattr(
+            sys, "argv", ["x", "--input", str(src), "--date", "2026-08-11", *extra]
+        )
         hsm.main()
         out = hsm.OUT_DIR / "2026-08-11_holding_sector_mapping.json"
         assert out.exists(), "映射未落盘"
         return json.loads(out.read_text(encoding="utf-8"))
 
     def test_maps_industry_and_shenwan(self, env, monkeypatch):
-        rows = self._run(env, monkeypatch,
-                         [{"代码": "600000", "名称": "浦发银行", "持有金额": 10000}])
+        rows = self._run(
+            env,
+            monkeypatch,
+            [{"代码": "600000", "名称": "浦发银行", "持有金额": 10000}],
+        )
         assert len(rows) == 1
         r = rows[0]
         assert r["industry"] == "银行" and r["industry_code"] == "T01"
@@ -194,15 +216,19 @@ class TestMainMapping:
 
     def test_summary_row_is_dropped(self, env, monkeypatch):
         """台账导出常带「汇总」行，不能被当成一只股票。"""
-        rows = self._run(env, monkeypatch,
-                         [{"代码": "600000", "名称": "浦发银行"},
-                          {"代码": "汇总", "名称": "合计"}])
+        rows = self._run(
+            env,
+            monkeypatch,
+            [{"代码": "600000", "名称": "浦发银行"}, {"代码": "汇总", "名称": "合计"}],
+        )
         assert [r["code"] for r in rows] == ["600000"]
 
     def test_rows_without_name_are_dropped(self, env, monkeypatch):
-        rows = self._run(env, monkeypatch,
-                         [{"代码": "600000", "名称": "浦发银行"},
-                          {"代码": "600001", "名称": None}])
+        rows = self._run(
+            env,
+            monkeypatch,
+            [{"代码": "600000", "名称": "浦发银行"}, {"代码": "600001", "名称": None}],
+        )
         assert len(rows) == 1
 
     def test_csv_drops_raw_relation(self, env, monkeypatch):
@@ -216,8 +242,10 @@ class TestMainMapping:
         """⚠️ TQ 兜底默认**关闭** —— 它要加载通达信插件、有副作用。
         不传 `--use-tq-fallback` 时不得触碰 `init_tq`。
         """
+
         def boom():
             raise AssertionError("默认不该初始化 TQ")
+
         monkeypatch.setattr(hsm, "init_tq", boom)
         rows = self._run(env, monkeypatch, [{"代码": "600999", "名称": "未知票"}])
         assert rows[0]["source"] == hsm.LOCAL_SOURCE
@@ -227,8 +255,10 @@ class TestMainMapping:
 
         class FakeTq:
             def get_relation(self, tcode):
-                return [{"BlockCode": "C1", "BlockName": "人工智能",
-                         "BlockType": "概念"}]
+                return [
+                    {"BlockCode": "C1", "BlockName": "人工智能", "BlockType": "概念"}
+                ]
+
             def close(self):
                 called["closed"] += 1
 
@@ -237,32 +267,54 @@ class TestMainMapping:
             return FakeTq()
 
         monkeypatch.setattr(hsm, "init_tq", fake_init)
-        rows = self._run(env, monkeypatch, [{"代码": "600999", "名称": "未知票"}],
-                         extra=("--use-tq-fallback",))
-        assert called["init"] == 1 and called["closed"] == 1, \
+        rows = self._run(
+            env,
+            monkeypatch,
+            [{"代码": "600999", "名称": "未知票"}],
+            extra=("--use-tq-fallback",),
+        )
+        assert called["init"] == 1 and called["closed"] == 1, (
             f"TQ 必须初始化一次并**关闭**（插件句柄不关会泄漏）：{called}"
+        )
         r = rows[0]
         assert r["source"] == "tq"
         assert r["concepts"] == ["人工智能"]
-        assert r["quality"]["not_covered"] == [], "走 TQ 时是全量维度，不该再报 not_covered"
+        assert r["quality"]["not_covered"] == [], (
+            "走 TQ 时是全量维度，不该再报 not_covered"
+        )
 
     def test_tq_returning_nothing_records_the_miss(self, env, monkeypatch):
         class Empty:
-            def get_relation(self, tcode): return []
-            def close(self): pass
+            def get_relation(self, tcode):
+                return []
+
+            def close(self):
+                pass
 
         monkeypatch.setattr(hsm, "init_tq", lambda: Empty())
-        rows = self._run(env, monkeypatch, [{"代码": "600999", "名称": "未知票"}],
-                         extra=("--use-tq-fallback",))
+        rows = self._run(
+            env,
+            monkeypatch,
+            [{"代码": "600999", "名称": "未知票"}],
+            extra=("--use-tq-fallback",),
+        )
         assert "tq fallback returned nothing" in (rows[0]["relation_error"] or "")
 
     def test_tq_exception_does_not_break_the_run(self, env, monkeypatch):
         """⚠️ `tq_relation` 吞掉异常返回 [] —— TQ 挂了不该让整个 stage 失败。"""
+
         class Boom:
-            def get_relation(self, tcode): raise RuntimeError("TQ 挂了")
-            def close(self): pass
+            def get_relation(self, tcode):
+                raise RuntimeError("TQ 挂了")
+
+            def close(self):
+                pass
 
         monkeypatch.setattr(hsm, "init_tq", lambda: Boom())
-        rows = self._run(env, monkeypatch, [{"代码": "600999", "名称": "未知票"}],
-                         extra=("--use-tq-fallback",))
+        rows = self._run(
+            env,
+            monkeypatch,
+            [{"代码": "600999", "名称": "未知票"}],
+            extra=("--use-tq-fallback",),
+        )
         assert rows[0]["industry"] == ""

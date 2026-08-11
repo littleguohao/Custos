@@ -5,6 +5,7 @@
 失效模式是:检测能力充足,但降级信息不传导——检测到异常后落盘一个标记,
 然后用默认值继续跑,下游把默认值当真值。以下每个 class 钉住一条传导链。
 """
+
 from __future__ import annotations
 
 import json
@@ -30,33 +31,45 @@ class TestCalendarRefreshDoesNotOverreach:
     def test_days_outside_answered_span_are_left_unknown(self):
         cfg = {"trading_days": [], "non_trading_days": [], "covered_ranges": []}
         # 请求 2026-07-01 ~ 2027-08-05,但 RPC 只答到 2026-07-03
-        merged = tc.merge_range(cfg, date(2026, 7, 1), date(2027, 8, 5),
-                                ["2026-07-01", "2026-07-02", "2026-07-03"])
+        merged = tc.merge_range(
+            cfg,
+            date(2026, 7, 1),
+            date(2027, 8, 5),
+            ["2026-07-01", "2026-07-02", "2026-07-03"],
+        )
         closed = set(merged["non_trading_days"])
-        assert not any(d.startswith("2027") for d in closed), "答复区间外的次年不得被标休市"
+        assert not any(d.startswith("2027") for d in closed), (
+            "答复区间外的次年不得被标休市"
+        )
         assert not any(d > "2026-07-03" for d in closed), "答复区间外一律不表态"
 
     def test_gaps_inside_answered_span_are_still_inferred(self):
         """区间内的缺口仍要推断为休市——这是本函数的正常职责,不能一并放弃。"""
         cfg = {"trading_days": [], "non_trading_days": [], "covered_ranges": []}
-        merged = tc.merge_range(cfg, date(2026, 7, 1), date(2026, 12, 31),
-                               ["2026-07-01", "2026-07-03"])
+        merged = tc.merge_range(
+            cfg, date(2026, 7, 1), date(2026, 12, 31), ["2026-07-01", "2026-07-03"]
+        )
         assert "2026-07-02" in set(merged["non_trading_days"])
         assert set(merged["trading_days"]) == {"2026-07-01", "2026-07-03"}
 
     def test_covered_range_records_answered_span_not_requested(self):
         cfg = {"trading_days": [], "non_trading_days": [], "covered_ranges": []}
-        merged = tc.merge_range(cfg, date(2026, 7, 1), date(2027, 8, 5),
-                               ["2026-07-01", "2026-07-03"])
+        merged = tc.merge_range(
+            cfg, date(2026, 7, 1), date(2027, 8, 5), ["2026-07-01", "2026-07-03"]
+        )
         rng = merged["covered_ranges"][-1]
         assert (rng["start"], rng["end"]) == ("2026-07-01", "2026-07-03")
-        assert rng["requested"]["end"] == "2027-08-05"      # 请求区间仅作留痕
+        assert rng["requested"]["end"] == "2027-08-05"  # 请求区间仅作留痕
 
     def test_empty_answer_refuses_to_merge(self):
         """空答复必须抛错而不是把整个区间标成休市。"""
         with pytest.raises(RuntimeError, match="empty trading_days"):
-            tc.merge_range({"trading_days": [], "non_trading_days": []},
-                           date(2026, 7, 1), date(2026, 7, 31), [])
+            tc.merge_range(
+                {"trading_days": [], "non_trading_days": []},
+                date(2026, 7, 1),
+                date(2026, 7, 31),
+                [],
+            )
 
 
 class TestAmvQualityNoLongerDefaultsConfirmed:
@@ -68,11 +81,25 @@ class TestAmvQualityNoLongerDefaultsConfirmed:
     """
 
     def _market(self, **amv):
-        return {"amv_0": {"amv_change_pct": 1.2, "as_of": "2026-07-20", **amv},
-                "market_breadth": {"up_count": 3000, "as_of": "2026-07-20", "quality": "confirmed"},
-                "sentiment": {"limit_up_count": 50, "as_of": "2026-07-20", "quality": "confirmed"},
-                "turnover": {"turnover_change_pct": 5.0, "as_of": "2026-07-20", "quality": "confirmed"},
-                "overseas_market": {"nasdaq_change_pct": 1.0, "as_of": "2026-07-20"}}
+        return {
+            "amv_0": {"amv_change_pct": 1.2, "as_of": "2026-07-20", **amv},
+            "market_breadth": {
+                "up_count": 3000,
+                "as_of": "2026-07-20",
+                "quality": "confirmed",
+            },
+            "sentiment": {
+                "limit_up_count": 50,
+                "as_of": "2026-07-20",
+                "quality": "confirmed",
+            },
+            "turnover": {
+                "turnover_change_pct": 5.0,
+                "as_of": "2026-07-20",
+                "quality": "confirmed",
+            },
+            "overseas_market": {"nasdaq_change_pct": 1.0, "as_of": "2026-07-20"},
+        }
 
     def test_missing_quality_is_not_confirmed(self):
         r = rg.market_quality_gate(self._market(), "2026-07-20")
@@ -88,8 +115,12 @@ class TestAmvQualityNoLongerDefaultsConfirmed:
     def test_missing_quality_denies_position_increase(self):
         mq = rg.market_quality_gate(self._market(), "2026-07-20")
         d = rg.position_increase_decision(
-            self._market(effective_state="做多"), reduction_ready=True,
-            technical_current=True, quotes_current=True, market_quality=mq)
+            self._market(effective_state="做多"),
+            reduction_ready=True,
+            technical_current=True,
+            quotes_current=True,
+            market_quality=mq,
+        )
         assert d["allow"] is False, "0AMV 未确认时即便 regime 是做多也不得加仓"
 
     def test_degraded_is_recognized_not_upgraded(self):
@@ -109,8 +140,15 @@ class TestLedgerIdempotence:
         return df
 
     def _row(self, **kw):
-        base = {"成交日期": "2026-07-20", "成交时间": "093000", "代码": "000001",
-                "名称": "平安", "交易类别": "买入", "成交数量": 100, "成交价格": 10.0}
+        base = {
+            "成交日期": "2026-07-20",
+            "成交时间": "093000",
+            "代码": "000001",
+            "名称": "平安",
+            "交易类别": "买入",
+            "成交数量": 100,
+            "成交价格": 10.0,
+        }
         base.update(kw)
         return base
 
@@ -130,8 +168,9 @@ class TestLedgerIdempotence:
         assert len(il.select_new_rows(inc, [])) == 2
 
     def test_partial_overlap_appends_only_the_new_rows(self):
-        inc = self._incoming([self._row(), self._row(成交时间="094500"),
-                              self._row(成交时间="100000")])
+        inc = self._incoming(
+            [self._row(), self._row(成交时间="094500"), self._row(成交时间="100000")]
+        )
         picked = il.select_new_rows(inc, [inc["_fingerprint"].iloc[0]])
         assert list(picked["成交时间"]) == ["094500", "100000"]
 
@@ -168,12 +207,32 @@ class TestLedgerAtomicity:
         return {x["代码"]: x for x in json.loads(self.pos.read_text(encoding="utf-8"))}
 
     def test_oversell_leaves_both_files_untouched(self):
-        self.pos.write_text(json.dumps([{"代码": "000001", "名称": "平安",
-                                         "持有数量": 100.0, "单位成本": 10.0}]),
-                            encoding="utf-8")
-        self._write_input([{"成交日期": "2026-07-20", "成交时间": "093000", "代码": "000001",
-                            "名称": "平安", "交易类别": "卖出", "成交数量": 500,
-                            "成交价格": 11.0}])
+        self.pos.write_text(
+            json.dumps(
+                [
+                    {
+                        "代码": "000001",
+                        "名称": "平安",
+                        "持有数量": 100.0,
+                        "单位成本": 10.0,
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        self._write_input(
+            [
+                {
+                    "成交日期": "2026-07-20",
+                    "成交时间": "093000",
+                    "代码": "000001",
+                    "名称": "平安",
+                    "交易类别": "卖出",
+                    "成交数量": 500,
+                    "成交价格": 11.0,
+                }
+            ]
+        )
         with pytest.raises(ValueError, match="超过台账持仓"):
             il.main(["--input", str(self.src)])
         assert self._positions()["000001"]["持有数量"] == 100.0, "失败必须原样保留持仓"
@@ -182,9 +241,19 @@ class TestLedgerAtomicity:
     def test_ledger_write_failure_does_not_move_positions(self, monkeypatch):
         """模拟 CSV 落盘失败(Excel 占用/磁盘满):持仓必须保持原值。"""
         self.pos.write_text("[]", encoding="utf-8")
-        self._write_input([{"成交日期": "2026-07-20", "成交时间": "093000", "代码": "000001",
-                            "名称": "平安", "交易类别": "买入", "成交数量": 100,
-                            "成交价格": 10.0}])
+        self._write_input(
+            [
+                {
+                    "成交日期": "2026-07-20",
+                    "成交时间": "093000",
+                    "代码": "000001",
+                    "名称": "平安",
+                    "交易类别": "买入",
+                    "成交数量": 100,
+                    "成交价格": 10.0,
+                }
+            ]
+        )
         orig = pd.DataFrame.to_csv
 
         def boom(self_df, *args, **kwargs):
@@ -198,9 +267,20 @@ class TestLedgerAtomicity:
 
     def test_successful_run_commits_both(self):
         self.pos.write_text("[]", encoding="utf-8")
-        self._write_input([{"成交日期": "2026-07-20", "成交时间": "093000", "代码": "000001",
-                            "名称": "平安", "交易类别": "买入", "成交数量": 100,
-                            "成交价格": 10.0, "费用": 5.0}])
+        self._write_input(
+            [
+                {
+                    "成交日期": "2026-07-20",
+                    "成交时间": "093000",
+                    "代码": "000001",
+                    "名称": "平安",
+                    "交易类别": "买入",
+                    "成交数量": 100,
+                    "成交价格": 10.0,
+                    "费用": 5.0,
+                }
+            ]
+        )
         il.main(["--input", str(self.src)])
         assert self._positions()["000001"]["持有数量"] == 100
         assert len(pd.read_csv(self.ledger)) == 1
@@ -208,9 +288,19 @@ class TestLedgerAtomicity:
     def test_rerun_same_input_is_idempotent(self):
         """端到端幂等:同一份文件跑两次,持仓与台账都不变。"""
         self.pos.write_text("[]", encoding="utf-8")
-        self._write_input([{"成交日期": "2026-07-20", "成交时间": "093000", "代码": "000001",
-                            "名称": "平安", "交易类别": "买入", "成交数量": 100,
-                            "成交价格": 10.0}])
+        self._write_input(
+            [
+                {
+                    "成交日期": "2026-07-20",
+                    "成交时间": "093000",
+                    "代码": "000001",
+                    "名称": "平安",
+                    "交易类别": "买入",
+                    "成交数量": 100,
+                    "成交价格": 10.0,
+                }
+            ]
+        )
         il.main(["--input", str(self.src)])
         il.main(["--input", str(self.src)])
         assert self._positions()["000001"]["持有数量"] == 100, "重复导入不得翻倍"
@@ -218,9 +308,19 @@ class TestLedgerAtomicity:
 
     def test_no_temp_files_left_behind(self):
         self.pos.write_text("[]", encoding="utf-8")
-        self._write_input([{"成交日期": "2026-07-20", "成交时间": "093000", "代码": "000001",
-                            "名称": "平安", "交易类别": "买入", "成交数量": 100,
-                            "成交价格": 10.0}])
+        self._write_input(
+            [
+                {
+                    "成交日期": "2026-07-20",
+                    "成交时间": "093000",
+                    "代码": "000001",
+                    "名称": "平安",
+                    "交易类别": "买入",
+                    "成交数量": 100,
+                    "成交价格": 10.0,
+                }
+            ]
+        )
         il.main(["--input", str(self.src)])
         assert not list(self.ledger.parent.glob("*.tmp"))
 
@@ -233,8 +333,9 @@ class TestRssTransportTrust:
             rc.build_ssl_context({"id": "gov_cn", "ssl_verify": False})
 
     def test_insecure_with_ack_is_marked_unverified(self):
-        ctx, verified = rc.build_ssl_context({"id": "x", "ssl_verify": False,
-                                              "ssl_insecure_ack": True})
+        ctx, verified = rc.build_ssl_context(
+            {"id": "x", "ssl_verify": False, "ssl_insecure_ack": True}
+        )
         assert verified is False and ctx.verify_mode == rc.ssl.CERT_NONE
 
     def test_default_is_verified(self):
@@ -249,14 +350,17 @@ class TestRssTransportTrust:
     def test_registry_has_no_unacknowledged_insecure_source(self):
         """配置层防线:仓库里不得再出现未承担风险的关校验源。"""
         cfg = json.loads(rc.REG.read_text(encoding="utf-8-sig"))
-        bad = [s["id"] for s in cfg["sources"]
-               if s.get("ssl_verify") is False and not s.get("ssl_insecure_ack")]
+        bad = [
+            s["id"]
+            for s in cfg["sources"]
+            if s.get("ssl_verify") is False and not s.get("ssl_insecure_ack")
+        ]
         assert bad == [], f"这些源关闭了 TLS 校验却未显式承担: {bad}"
 
     def test_oversized_feed_is_refused(self):
         class _Resp:
             def read(self, n):
-                return b"x" * n              # 永远给满,模拟无限大响应
+                return b"x" * n  # 永远给满,模拟无限大响应
 
         with pytest.raises(ValueError, match="exceeds"):
             rc._read_limited(_Resp())

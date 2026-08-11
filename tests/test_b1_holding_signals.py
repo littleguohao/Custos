@@ -12,6 +12,7 @@
 既有测试（`test_b1_holding_state.py`）覆盖了整体契约形状与部分分支，
 这里补的是逐条信号的**触发条件与优先级**。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -26,9 +27,14 @@ from custos.pipeline.holdings import b1_holding_state as bh  # noqa: E402
 def _row(**kw):
     """一份「什么信号都不触发」的干净持仓行，测试只覆盖需要的字段。"""
     base = {
-        "code": "600000", "name": "浦发", "close": 10.0, "holding_pnl_pct": 0.05,
-        "trend_state": "横盘震荡", "box20_position": "箱体上半区",
-        "latest_date": "2026-08-07", "above_bbi": True,
+        "code": "600000",
+        "name": "浦发",
+        "close": 10.0,
+        "holding_pnl_pct": 0.05,
+        "trend_state": "横盘震荡",
+        "box20_position": "箱体上半区",
+        "latest_date": "2026-08-07",
+        "above_bbi": True,
         "consecutive_closes_below_bbi": 0,
         "n_structure": {"available": True, "prior_low": 8.0, "pullback_low": 9.0},
         "descending_n_structure": {"available": True, "structural_low": 7.0},
@@ -91,8 +97,14 @@ class TestNStructure:
         否则一个几个月前就破的结构会每天重复报最高优先级。
         它进 `unavailable`，由趋势/箱体/亏损信号覆盖。
         """
-        s = bh.evaluate(_row(close=7.0, n_structure={
-            "available": True, "prior_low": 8.0, "stale": True}), "", price_date="2026-08-07")
+        s = bh.evaluate(
+            _row(
+                close=7.0,
+                n_structure={"available": True, "prior_low": 8.0, "stale": True},
+            ),
+            "",
+            price_date="2026-08-07",
+        )
         assert "n_l1_breach" not in _names(s)
         assert "n_structure_stale" in s["unavailable"]
 
@@ -105,36 +117,58 @@ class TestNStructure:
         assert _sig(s, "desc_n_confirmed")["priority"] == "P0"
 
     def test_descending_n_stale_not_p0(self):
-        s = bh.evaluate(_row(close=6.0, descending_n_structure={
-            "available": True, "structural_low": 7.0, "stale": True}), "", price_date="2026-08-07")
+        s = bh.evaluate(
+            _row(
+                close=6.0,
+                descending_n_structure={
+                    "available": True,
+                    "structural_low": 7.0,
+                    "stale": True,
+                },
+            ),
+            "",
+            price_date="2026-08-07",
+        )
         assert "desc_n_confirmed" not in _names(s)
         assert "descending_n_structure_stale" in s["unavailable"]
 
 
 class TestBbiBreach:
     def test_two_closes_below_is_p1(self):
-        s = bh.evaluate(_row(above_bbi=False, consecutive_closes_below_bbi=2), "",
-                        price_date="2026-08-07")
+        s = bh.evaluate(
+            _row(above_bbi=False, consecutive_closes_below_bbi=2),
+            "",
+            price_date="2026-08-07",
+        )
         assert _sig(s, "bbi_two_close_breach")["priority"] == "P1"
 
     def test_first_close_below_is_only_p2_observation(self):
         """⚠️ **首日跌破只给 P2「次日收复观察」** —— B1 的 BBI 是预警而非最终权威，
         首日就清仓会被单日洗盘打掉。"""
-        s = bh.evaluate(_row(above_bbi=False, consecutive_closes_below_bbi=1), "",
-                        price_date="2026-08-07")
+        s = bh.evaluate(
+            _row(above_bbi=False, consecutive_closes_below_bbi=1),
+            "",
+            price_date="2026-08-07",
+        )
         sig = _sig(s, "bbi_first_breach")
         assert sig["priority"] == "P2" and "次日收复" in sig["action"]
 
     def test_above_bbi_gives_no_breach_signal(self):
-        s = bh.evaluate(_row(above_bbi=True, consecutive_closes_below_bbi=5), "",
-                        price_date="2026-08-07")
+        s = bh.evaluate(
+            _row(above_bbi=True, consecutive_closes_below_bbi=5),
+            "",
+            price_date="2026-08-07",
+        )
         assert not ({"bbi_first_breach", "bbi_two_close_breach"} & _names(s))
 
 
 class TestTrendAndBox:
     def test_downtrend_with_box_break_is_p0(self):
-        s = bh.evaluate(_row(trend_state="下跌", box20_position="下沿/破位区"), "",
-                        price_date="2026-08-07")
+        s = bh.evaluate(
+            _row(trend_state="下跌", box20_position="下沿/破位区"),
+            "",
+            price_date="2026-08-07",
+        )
         assert _sig(s, "trend_box_break")["priority"] == "P0"
 
     def test_downtrend_alone_is_p1(self):
@@ -145,28 +179,47 @@ class TestTrendAndBox:
 
 class TestPriceVolume:
     def test_heavy_large_bear_is_p1(self):
-        s = bh.evaluate(_row(price_volume={"available": True, "heavy_large_bear": True}), "",
-                        price_date="2026-08-07")
+        s = bh.evaluate(
+            _row(price_volume={"available": True, "heavy_large_bear": True}),
+            "",
+            price_date="2026-08-07",
+        )
         assert _sig(s, "heavy_large_bear")["priority"] == "P1"
 
     def test_shrink_small_bear_is_only_p3(self):
         """缩量小阴只 P3「条件持有一天」—— 缩量说明抛压衰减，不该按风险处置。"""
-        s = bh.evaluate(_row(price_volume={"available": True, "shrink_small_bear": True}), "",
-                        price_date="2026-08-07")
+        s = bh.evaluate(
+            _row(price_volume={"available": True, "shrink_small_bear": True}),
+            "",
+            price_date="2026-08-07",
+        )
         assert _sig(s, "shrink_small_bear")["priority"] == "P3"
 
     def test_heavy_bear_wins_over_shrink(self):
-        s = bh.evaluate(_row(price_volume={
-            "available": True, "heavy_large_bear": True, "shrink_small_bear": True}), "",
-            price_date="2026-08-07")
+        s = bh.evaluate(
+            _row(
+                price_volume={
+                    "available": True,
+                    "heavy_large_bear": True,
+                    "shrink_small_bear": True,
+                }
+            ),
+            "",
+            price_date="2026-08-07",
+        )
         assert "heavy_large_bear" in _names(s) and "shrink_small_bear" not in _names(s)
 
     def test_two_bull_profit_take_needs_above_bbi(self):
         """连续两根中大阳的分批止盈**只在 BBI 上方**成立 —— BBI 下方是反弹不是利润。"""
         pv = {"available": True, "two_medium_large_bull": True}
-        on = bh.evaluate(_row(price_volume=pv, above_bbi=True), "", price_date="2026-08-07")
-        off = bh.evaluate(_row(price_volume=pv, above_bbi=False,
-                               consecutive_closes_below_bbi=1), "", price_date="2026-08-07")
+        on = bh.evaluate(
+            _row(price_volume=pv, above_bbi=True), "", price_date="2026-08-07"
+        )
+        off = bh.evaluate(
+            _row(price_volume=pv, above_bbi=False, consecutive_closes_below_bbi=1),
+            "",
+            price_date="2026-08-07",
+        )
         assert "two_bull_profit_take" in _names(on)
         assert "two_bull_profit_take" not in _names(off)
 
@@ -175,14 +228,21 @@ class TestPriceVolume:
 
         用昨天的量价下今天的处置结论，是这条链最容易犯的错。
         """
-        s = bh.evaluate(_row(latest_date="2026-08-06",
-                             price_volume={"available": True, "heavy_large_bear": True}),
-                        "", price_date="2026-08-07")
+        s = bh.evaluate(
+            _row(
+                latest_date="2026-08-06",
+                price_volume={"available": True, "heavy_large_bear": True},
+            ),
+            "",
+            price_date="2026-08-07",
+        )
         assert "heavy_large_bear" not in _names(s)
         assert "current_price_volume" in s["unavailable"]
 
     def test_unavailable_price_volume_recorded(self):
-        s = bh.evaluate(_row(price_volume={"available": False}), "", price_date="2026-08-07")
+        s = bh.evaluate(
+            _row(price_volume={"available": False}), "", price_date="2026-08-07"
+        )
         assert "price_volume" in s["unavailable"]
 
 
@@ -195,16 +255,28 @@ class TestKdjAndReversalK:
     def test_reversal_k_needs_both_pattern_and_low_j(self):
         """反转K 候选要求**形态 + J<13 同时** —— 单有形态不算。"""
         pv = {"available": True, "reversal_k_candidate_without_j": True}
-        both = bh.evaluate(_row(price_volume=pv, daily_j=12.0), "", price_date="2026-08-07")
-        high_j = bh.evaluate(_row(price_volume=pv, daily_j=13.0), "", price_date="2026-08-07")
+        both = bh.evaluate(
+            _row(price_volume=pv, daily_j=12.0), "", price_date="2026-08-07"
+        )
+        high_j = bh.evaluate(
+            _row(price_volume=pv, daily_j=13.0), "", price_date="2026-08-07"
+        )
         assert "reversal_k_candidate" in _names(both)
         assert "reversal_k_candidate" not in _names(high_j)
 
     def test_reversal_k_is_p3_not_a_buy(self):
         """它只是 P3 观察 —— **反转K 不是买点**（B1 主规则原话）。"""
-        s = bh.evaluate(_row(price_volume={
-            "available": True, "reversal_k_candidate_without_j": True}, daily_j=8.0),
-            "", price_date="2026-08-07")
+        s = bh.evaluate(
+            _row(
+                price_volume={
+                    "available": True,
+                    "reversal_k_candidate_without_j": True,
+                },
+                daily_j=8.0,
+            ),
+            "",
+            price_date="2026-08-07",
+        )
         sig = _sig(s, "reversal_k_candidate")
         assert sig["priority"] == "P3" and "仍需后续修复确认" in sig["reason"]
 
@@ -218,16 +290,24 @@ class TestBearRegime:
 
     def test_bear_rebound_needs_positive_change(self):
         """空头里**出现反弹**（当日涨）才加第二条 —— 下跌日不重复报。"""
-        up = bh.evaluate(_row(price_volume={"available": True, "change_pct": 1.5}),
-                         "空头", price_date="2026-08-07")
-        down = bh.evaluate(_row(price_volume={"available": True, "change_pct": -1.5}),
-                           "空头", price_date="2026-08-07")
+        up = bh.evaluate(
+            _row(price_volume={"available": True, "change_pct": 1.5}),
+            "空头",
+            price_date="2026-08-07",
+        )
+        down = bh.evaluate(
+            _row(price_volume={"available": True, "change_pct": -1.5}),
+            "空头",
+            price_date="2026-08-07",
+        )
         assert "bear_rebound_reduce" in _names(up)
         assert "bear_rebound_reduce" not in _names(down)
 
     def test_non_bear_regime_adds_nothing(self):
         s = bh.evaluate(_row(), "做多", price_date="2026-08-07")
-        assert not ({"bear_regime_reduce_top_priority", "bear_rebound_reduce"} & _names(s))
+        assert not (
+            {"bear_regime_reduce_top_priority", "bear_rebound_reduce"} & _names(s)
+        )
 
 
 class TestNumberCoercion:
@@ -272,6 +352,7 @@ class TestB1HoldingStateMain:
     def _env(monkeypatch, tmp_path):
         import pathlib as _pl
         from custos.pipeline.holdings import b1_holding_state as m
+
         for attr in dir(m):
             v = getattr(m, attr, None)
             if attr.isupper() and isinstance(v, _pl.Path):
@@ -280,20 +361,33 @@ class TestB1HoldingStateMain:
         (tmp_path / "market").mkdir(parents=True, exist_ok=True)
         return m
 
-    ROW = {"code": "600000", "name": "浦发银行", "close": 10.0, "cost": 9.0,
-           "latest_date": "2026-08-11",
-           "bbi": {"signal": "上方", "available": True},
-           "n_structure": {"signal": "无", "available": True},
-           "price_volume": {}, "trend": {}, "box_20d": {}, "box_60d": {}}
+    ROW = {
+        "code": "600000",
+        "name": "浦发银行",
+        "close": 10.0,
+        "cost": 9.0,
+        "latest_date": "2026-08-11",
+        "bbi": {"signal": "上方", "available": True},
+        "n_structure": {"signal": "无", "available": True},
+        "price_volume": {},
+        "trend": {},
+        "box_20d": {},
+        "box_60d": {},
+    }
 
     def _run(self, monkeypatch, tmp_path, market, row=None, argv_extra=()):
         import json
         import sys as _s
+
         m = self._env(monkeypatch, tmp_path)
-        (tmp_path / "holdings" / "2026-08-11_holding_technical_summary.json").write_text(
-            json.dumps([row or self.ROW], ensure_ascii=False), encoding="utf-8")
+        (
+            tmp_path / "holdings" / "2026-08-11_holding_technical_summary.json"
+        ).write_text(
+            json.dumps([row or self.ROW], ensure_ascii=False), encoding="utf-8"
+        )
         (tmp_path / "market" / "2026-08-11_market_timing_input.json").write_text(
-            json.dumps(market, ensure_ascii=False), encoding="utf-8")
+            json.dumps(market, ensure_ascii=False), encoding="utf-8"
+        )
         monkeypatch.setattr(_s, "argv", ["x", "--date", "2026-08-11", *argv_extra])
         m.main()
         out = tmp_path / "holdings" / "2026-08-11_b1_holding_state.json"
@@ -301,8 +395,7 @@ class TestB1HoldingStateMain:
         return json.loads(out.read_text(encoding="utf-8"))
 
     def test_writes_state_with_priority(self, monkeypatch, tmp_path):
-        rows = self._run(monkeypatch, tmp_path,
-                         {"amv_0": {"effective_state": "中性"}})
+        rows = self._run(monkeypatch, tmp_path, {"amv_0": {"effective_state": "中性"}})
         assert len(rows) == 1
         assert rows[0]["final_priority"] in ("P0", "P1", "P2", "P3", "P4", "无")
 
@@ -311,19 +404,26 @@ class TestB1HoldingStateMain:
         #    「别猜名字，去读」，今天第三次了。
         """⚠️ `amv_zone` 写的是「空头触发」，按 `== "空头"` 判会让 P1 减仓信号**不发**
         （审计 B1 的原始事故）。这里确认归一化真的生效。"""
-        rows = self._run(monkeypatch, tmp_path,
-                         {"amv_0": {"amv_zone": "空头触发"}})
-        assert rows[0]["market_regime"] in ("空头",), f"未归一化：{rows[0].get('market_regime')}"
+        rows = self._run(monkeypatch, tmp_path, {"amv_0": {"amv_zone": "空头触发"}})
+        assert rows[0]["market_regime"] in ("空头",), (
+            f"未归一化：{rows[0].get('market_regime')}"
+        )
 
     def test_effective_state_wins_over_amv_zone(self, monkeypatch, tmp_path):
-        rows = self._run(monkeypatch, tmp_path,
-                         {"amv_0": {"effective_state": "做多", "amv_zone": "空头触发"}})
+        rows = self._run(
+            monkeypatch,
+            tmp_path,
+            {"amv_0": {"effective_state": "做多", "amv_zone": "空头触发"}},
+        )
         assert rows[0]["market_regime"] == "做多"
 
     def test_cli_regime_overrides_file(self, monkeypatch, tmp_path):
-        rows = self._run(monkeypatch, tmp_path,
-                         {"amv_0": {"effective_state": "中性"}},
-                         argv_extra=("--market-regime", "空头"))
+        rows = self._run(
+            monkeypatch,
+            tmp_path,
+            {"amv_0": {"effective_state": "中性"}},
+            argv_extra=("--market-regime", "空头"),
+        )
         assert rows[0]["market_regime"] == "空头"
 
     def test_missing_amv_is_unknown_not_neutral(self, monkeypatch, tmp_path):
@@ -336,12 +436,19 @@ class TestB1HoldingStateMain:
         """⚠️ 预检失败**不得**影响 B1 主流程 —— 它是附加证据，不是判定依据。
         失败时如实写 `available: False` + error，而不是静默省略。"""
         from custos.pipeline.holdings import b1_holding_state as m
-        monkeypatch.setattr(m, "build_pre_checks",
-                            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("TQ 挂了")))
+
+        monkeypatch.setattr(
+            m,
+            "build_pre_checks",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("TQ 挂了")),
+        )
         rows = self._run(monkeypatch, tmp_path, {"amv_0": {"effective_state": "中性"}})
         pc = rows[0]["pre_checks"]
         assert pc["available"] is False
-        assert pc["error"]["code"] == "pre_checks_failed" and "TQ 挂了" in pc["error"]["detail"]
+        assert (
+            pc["error"]["code"] == "pre_checks_failed"
+            and "TQ 挂了" in pc["error"]["detail"]
+        )
 
 
 class TestBatchHoldingTechnicalMain:
@@ -354,6 +461,7 @@ class TestBatchHoldingTechnicalMain:
     def _env(monkeypatch, tmp_path):
         import pathlib as _pl
         from custos.pipeline.holdings import batch_holding_technical as b
+
         for attr in dir(b):
             v = getattr(b, attr, None)
             if attr.isupper() and isinstance(v, _pl.Path):
@@ -364,35 +472,53 @@ class TestBatchHoldingTechnicalMain:
         # ⚠️ 真实签名是 `_analysis_for(code, name, date, use_subprocess)` —— 四个位置参数。
         #    第一版按三个写，TypeError。桩的形状必须照着被替换者读，不能猜
         #    （08-07 补编排测试时同一个坑让 4 条测试静默变 skip）。
-        monkeypatch.setattr(b, "_analysis_for",
-                            lambda code, name, date, use_subprocess=False: {
-                                "available": True, "latest_date": date,
-                                "bbi": {"signal": "上方", "available": True},
-                                "n_structure": {"signal": "无", "available": True},
-                                "price_volume": {}, "trend": {}})
+        monkeypatch.setattr(
+            b,
+            "_analysis_for",
+            lambda code, name, date, use_subprocess=False: {
+                "available": True,
+                "latest_date": date,
+                "bbi": {"signal": "上方", "available": True},
+                "n_structure": {"signal": "无", "available": True},
+                "price_volume": {},
+                "trend": {},
+            },
+        )
         return b
 
     def test_prefers_enriched_mapping_over_positions(self, monkeypatch, tmp_path):
         import json
+
         b = self._env(monkeypatch, tmp_path)
         (tmp_path / "2026-08-11_holding_sector_mapping_enriched.json").write_text(
-            json.dumps([{"code": "600000", "name": "浦发银行"}]), encoding="utf-8")
+            json.dumps([{"code": "600000", "name": "浦发银行"}]), encoding="utf-8"
+        )
         (tmp_path / "current_positions.json").write_text(
-            json.dumps([{"代码": "000001", "名称": "平安银行"}]), encoding="utf-8")
+            json.dumps([{"代码": "000001", "名称": "平安银行"}]), encoding="utf-8"
+        )
         assert b.main(["--date", "2026-08-11"]) == 0
-        rows = json.loads((tmp_path / "2026-08-11_holding_technical_summary.json")
-                          .read_text(encoding="utf-8"))
-        assert [r["code"] for r in rows] == ["600000"], \
+        rows = json.loads(
+            (tmp_path / "2026-08-11_holding_technical_summary.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert [r["code"] for r in rows] == ["600000"], (
             "有 enriched mapping 时应用它（它带板块等增强字段），而不是回落到持仓快照"
+        )
 
     def test_falls_back_to_positions_when_mapping_absent(self, monkeypatch, tmp_path):
         import json
+
         b = self._env(monkeypatch, tmp_path)
         (tmp_path / "current_positions.json").write_text(
-            json.dumps([{"代码": "000001", "名称": "平安银行"}]), encoding="utf-8")
+            json.dumps([{"代码": "000001", "名称": "平安银行"}]), encoding="utf-8"
+        )
         assert b.main(["--date", "2026-08-11"]) == 0
-        rows = json.loads((tmp_path / "2026-08-11_holding_technical_summary.json")
-                          .read_text(encoding="utf-8"))
+        rows = json.loads(
+            (tmp_path / "2026-08-11_holding_technical_summary.json").read_text(
+                encoding="utf-8"
+            )
+        )
         assert [r["code"] for r in rows] == ["000001"]
 
     def test_no_holdings_exits_loudly(self, monkeypatch, tmp_path):
@@ -402,17 +528,23 @@ class TestBatchHoldingTechnicalMain:
         「持仓文件没同步」。让它响亮地失败。
         """
         import pytest as _pt
+
         b = self._env(monkeypatch, tmp_path)
         with _pt.raises(SystemExit):
             b.main(["--date", "2026-08-11"])
 
     def test_explicit_mapping_path_is_honored(self, monkeypatch, tmp_path):
         import json
+
         b = self._env(monkeypatch, tmp_path)
         alt = tmp_path / "alt.json"
-        alt.write_text(json.dumps([{"code": "600519", "name": "贵州茅台"}]),
-                       encoding="utf-8")
+        alt.write_text(
+            json.dumps([{"code": "600519", "name": "贵州茅台"}]), encoding="utf-8"
+        )
         assert b.main(["--date", "2026-08-11", "--mapping", str(alt)]) == 0
-        rows = json.loads((tmp_path / "2026-08-11_holding_technical_summary.json")
-                          .read_text(encoding="utf-8"))
+        rows = json.loads(
+            (tmp_path / "2026-08-11_holding_technical_summary.json").read_text(
+                encoding="utf-8"
+            )
+        )
         assert [r["code"] for r in rows] == ["600519"]

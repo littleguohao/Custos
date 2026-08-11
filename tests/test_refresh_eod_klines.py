@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Tests for refresh_eod_klines: batching logic and best-effort degradation."""
+
 from __future__ import annotations
 
 import json
@@ -21,8 +22,10 @@ def _err(code="tq_error"):
 class TestLoadHoldingsCodes:
     def test_norm_codes(self, tmp_path):
         p = tmp_path / "current_positions.json"
-        p.write_text(json.dumps([{"代码": "600150"}, {"代码": "920808"}, {"代码": "399006"}]),
-                     encoding="utf-8")
+        p.write_text(
+            json.dumps([{"代码": "600150"}, {"代码": "920808"}, {"代码": "399006"}]),
+            encoding="utf-8",
+        )
         assert rek.load_holdings_codes(p) == ["600150.SH", "920808.BJ", "399006.SZ"]
 
     def test_missing_file(self, tmp_path):
@@ -82,7 +85,9 @@ class TestRefreshAll:
         def fake_call(method, params):
             return _err("tdxw_not_running")
 
-        monkeypatch.setattr(rek, "verify_latest_date", lambda: verify_called.append(1) or None)
+        monkeypatch.setattr(
+            rek, "verify_latest_date", lambda: verify_called.append(1) or None
+        )
         summary = rek.refresh_all("2026-07-20", ["600150.SH"], call_fn=fake_call)
         assert summary["refreshed"] is False
         assert summary["verified"] is False
@@ -104,7 +109,9 @@ class TestRefreshAll:
 
 class TestVerifyLatestDate:
     def test_datetime_column(self):
-        df = pd.DataFrame({"date": [pd.Timestamp("2026-07-17"), pd.Timestamp("2026-07-20")]})
+        df = pd.DataFrame(
+            {"date": [pd.Timestamp("2026-07-17"), pd.Timestamp("2026-07-20")]}
+        )
         assert rek.verify_latest_date(read_fn=lambda code: df) == "2026-07-20"
 
     def test_empty_df(self):
@@ -119,7 +126,9 @@ class TestVerifyLatestDate:
 
 class TestMain:
     def test_exit_zero_on_failure(self, monkeypatch, capsys):
-        monkeypatch.setattr(rek.tq_http, "call", lambda m, p, **kw: _err("tdxw_not_running"))
+        monkeypatch.setattr(
+            rek.tq_http, "call", lambda m, p, **kw: _err("tdxw_not_running")
+        )
         monkeypatch.setattr(rek, "load_holdings_codes", lambda: [])
         rc = rek.main(["--date", "2026-07-20"])
         assert rc == 0

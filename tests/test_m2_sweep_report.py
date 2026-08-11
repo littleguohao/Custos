@@ -9,6 +9,7 @@
   ② **用大赢家绝对笔数比较**。择时类方案（--amv-long-only）会过滤掉部分信号，
      样本量下降时绝对数必然下降 ⇒ 把它们全部误杀。
 """
+
 from __future__ import annotations
 
 import json
@@ -27,11 +28,20 @@ def _write(tmp, group, name, *, fp="s1000", **kw):
     n = kw.pop("n", 1000)
     big = kw.pop("big", 20)
     pf = kw.pop("pf", None)
-    o = {"n": n, "win_rate": kw.get("wr", 0.18), "expectancy": kw.get("exp", 0.004),
-         "expectancy_R": kw.get("expR", 0.35), "total_R": kw.get("totR", 300.0),
-         "payoff_ratio": kw.get("payoff", 5.6), "avg_win": kw.get("aw", 0.2),
-         "avg_loss": 0.035, "avg_holding": 4.2, "median_return": -0.01,
-         "exit_reasons": {}, "trades": [{"ret": 0.3}] * big + [{"ret": 0.01}] * (n - big)}
+    o = {
+        "n": n,
+        "win_rate": kw.get("wr", 0.18),
+        "expectancy": kw.get("exp", 0.004),
+        "expectancy_R": kw.get("expR", 0.35),
+        "total_R": kw.get("totR", 300.0),
+        "payoff_ratio": kw.get("payoff", 5.6),
+        "avg_win": kw.get("aw", 0.2),
+        "avg_loss": 0.035,
+        "avg_holding": 4.2,
+        "median_return": -0.01,
+        "exit_reasons": {},
+        "trades": [{"ret": 0.3}] * big + [{"ret": 0.01}] * (n - big),
+    }
     if pf:
         o["portfolio"] = pf
     (tmp / f"{group}__{name}__{fp}.json").write_text(json.dumps(o), encoding="utf-8")
@@ -74,7 +84,9 @@ class TestBigWinnerRate:
         _write(tmp_path, "A_stop_low", "amv_long_only", n=900, big=28, expR=0.410)
         m2.report(cross=False)
         out = capsys.readouterr().out
-        line = next(ln for ln in out.split("\n") if "amv_long_only" in ln and "期望R" in ln)
+        line = next(
+            ln for ln in out.split("\n") if "amv_long_only" in ln and "期望R" in ln
+        )
         assert "✅ 通过" in line, f"占比上升却被否决: {line}"
         assert "2.38%" in line and "3.11%" in line, "应显示占比而非只有绝对数"
 
@@ -85,12 +97,16 @@ class TestBigWinnerRate:
         所以这里构造入场类场景（笔数腰斩）才能验证这条判据。
         """
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write(tmp_path, "A_stop_low", "00_baseline", n=1345, big=32, expR=0.352, aw=0.198)
+        _write(
+            tmp_path, "A_stop_low", "00_baseline", n=1345, big=32, expR=0.352, aw=0.198
+        )
         # 入场过滤把样本砍半，且大赢家占比从 2.38% 崩到 0.67%
         _write(tmp_path, "A_stop_low", "some_filter", n=600, big=4, expR=0.50, aw=0.121)
         m2.report(cross=False)
         out = capsys.readouterr().out
-        line = next(ln for ln in out.split("\n") if "some_filter" in ln and "期望R" in ln)
+        line = next(
+            ln for ln in out.split("\n") if "some_filter" in ln and "期望R" in ln
+        )
         assert "❌ 否决" in line and "[入场]" in line
         assert "削大赢家" in line or "大赢家占比" in line
 
@@ -100,10 +116,26 @@ class TestCrossGroupUsesReturnsOnly:
 
     def test_no_r_columns_in_cross_table(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write(tmp_path, "A_stop_low", "00_baseline", wr=0.18, exp=0.0043,
-               payoff=5.661, expR=0.352, totR=332.0)
-        _write(tmp_path, "B_stop_pct", "pct_12", wr=0.512, exp=0.0142,
-               payoff=1.27, expR=0.118, totR=135.0)
+        _write(
+            tmp_path,
+            "A_stop_low",
+            "00_baseline",
+            wr=0.18,
+            exp=0.0043,
+            payoff=5.661,
+            expR=0.352,
+            totR=332.0,
+        )
+        _write(
+            tmp_path,
+            "B_stop_pct",
+            "pct_12",
+            wr=0.512,
+            exp=0.0142,
+            payoff=1.27,
+            expR=0.118,
+            totR=135.0,
+        )
         m2.report(cross=False)
         out = capsys.readouterr().out
         seg = out.split("跨组比较")[1].split("【C_portfolio】")[0]
@@ -125,8 +157,9 @@ class TestCrossGroupUsesReturnsOnly:
 class TestBreakevenMargin:
     """margin = 实际胜率 − 盈亏平衡胜率。它比胜率或盈亏比单独看都有意义。"""
 
-    @pytest.mark.parametrize("payoff,expect", [(5.661, 0.1503), (1.27, 0.4405),
-                                               (1.0, 0.5)])
+    @pytest.mark.parametrize(
+        "payoff,expect", [(5.661, 0.1503), (1.27, 0.4405), (1.0, 0.5)]
+    )
     def test_breakeven_formula(self, payoff, expect):
         assert m2._breakeven_wr(payoff) == pytest.approx(expect, abs=1e-3)
 
@@ -148,9 +181,18 @@ class TestBreakevenMargin:
 class TestPortfolioTable:
     def test_shows_exposure_and_fill_rate(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write(tmp_path, "C_portfolio", "pf_c5_p20",
-               pf={"total_return": -0.234, "cagr": -0.155, "max_drawdown": 0.361,
-                   "n_taken": 299, "n_skipped": 1046})
+        _write(
+            tmp_path,
+            "C_portfolio",
+            "pf_c5_p20",
+            pf={
+                "total_return": -0.234,
+                "cagr": -0.155,
+                "max_drawdown": 0.361,
+                "n_taken": 299,
+                "n_skipped": 1046,
+            },
+        )
         m2.report(cross=False)
         out = capsys.readouterr().out
         assert "总敞口" in out, "必须提示决定因素是总敞口而非持仓数"
@@ -159,12 +201,30 @@ class TestPortfolioTable:
 
     def test_ranked_by_total_return(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write(tmp_path, "C_portfolio", "bad",
-               pf={"total_return": -0.30, "cagr": -0.2, "max_drawdown": 0.33,
-                   "n_taken": 299, "n_skipped": 1046})
-        _write(tmp_path, "C_portfolio", "good",
-               pf={"total_return": 0.185, "cagr": 0.12, "max_drawdown": 0.115,
-                   "n_taken": 150, "n_skipped": 1195})
+        _write(
+            tmp_path,
+            "C_portfolio",
+            "bad",
+            pf={
+                "total_return": -0.30,
+                "cagr": -0.2,
+                "max_drawdown": 0.33,
+                "n_taken": 299,
+                "n_skipped": 1046,
+            },
+        )
+        _write(
+            tmp_path,
+            "C_portfolio",
+            "good",
+            pf={
+                "total_return": 0.185,
+                "cagr": 0.12,
+                "max_drawdown": 0.115,
+                "n_taken": 150,
+                "n_skipped": 1195,
+            },
+        )
         m2.report(cross=False)
         seg = capsys.readouterr().out.split("C_portfolio")[1]
         assert seg.index("good") < seg.index("bad")
@@ -179,9 +239,11 @@ class TestStopPctLowerBound:
 
     def test_stop_pct_ladder_spans_a_range(self):
         """纯档位方案（不含择时/移动止盈变体）必须覆盖到 5% 以下，才能探到拐点。"""
-        pcts = sorted(float(e[e.index("--stop-pct") + 1])
-                      for n, e in m2.GROUPS["B_stop_pct"]["runs"].items()
-                      if "--stop-pct" in e and len(e) == 2)   # 只有 --stop-pct 一项
+        pcts = sorted(
+            float(e[e.index("--stop-pct") + 1])
+            for n, e in m2.GROUPS["B_stop_pct"]["runs"].items()
+            if "--stop-pct" in e and len(e) == 2
+        )  # 只有 --stop-pct 一项
         assert pcts == [3.0, 4.0, 5.0, 8.0, 12.0]
         assert min(pcts) < 5.0, "下界必须比上一轮的 5% 更紧，否则探不到拐点"
 
@@ -195,8 +257,12 @@ class TestStopPctLowerBound:
     def test_real_backtest_count(self):
         """35 个方案但只有 28 次真回测——C 组 7 个走 trades 复用。"""
         total = sum(len(v["runs"]) for v in m2.GROUPS.values())
-        real = sum(1 for g, v in m2.GROUPS.items() for n in v["runs"]
-                   if n not in (v.get("reuse") or {}))
+        real = sum(
+            1
+            for g, v in m2.GROUPS.items()
+            for n in v["runs"]
+            if n not in (v.get("reuse") or {})
+        )
         assert total == 35 and real == 28
 
 
@@ -216,8 +282,11 @@ class TestScaleOutHasControlArm:
 
     def test_control_arm_exists(self):
         runs = m2.GROUPS["A_stop_low"]["runs"]
-        offs = [n for n, e in runs.items()
-                if "--scale-out" in e and float(e[e.index("--scale-out") + 1]) == 0.0]
+        offs = [
+            n
+            for n, e in runs.items()
+            if "--scale-out" in e and float(e[e.index("--scale-out") + 1]) == 0.0
+        ]
         assert offs, "缺 scale_out=0 对照臂 ⇒ 分批止盈的价值无法验证"
 
     def test_control_arm_overrides_base_args(self):
@@ -242,12 +311,26 @@ def _write_reasons(tmp, group, name, reasons, *, expR=0.2, fp="s1000"):
     for rs, (cnt, ret, r) in reasons.items():
         trades += [{"reason": rs, "ret": ret, "r_multiple": r} for _ in range(cnt)]
     n = len(trades)
-    (tmp / f"{group}__{name}__{fp}.json").write_text(json.dumps({
-        "trade_summary": {"n": n, "win_rate": 0.3, "expectancy": 0.004,
-                          "expectancy_R": expR, "total_R": round(expR * n, 1),
-                          "payoff_ratio": 2.7, "avg_win": 0.11, "avg_loss": 0.04,
-                          "avg_holding": 5.0, "exit_reasons": {}},
-        "trades": trades}), encoding="utf-8")
+    (tmp / f"{group}__{name}__{fp}.json").write_text(
+        json.dumps(
+            {
+                "trade_summary": {
+                    "n": n,
+                    "win_rate": 0.3,
+                    "expectancy": 0.004,
+                    "expectancy_R": expR,
+                    "total_R": round(expR * n, 1),
+                    "payoff_ratio": 2.7,
+                    "avg_win": 0.11,
+                    "avg_loss": 0.04,
+                    "avg_holding": 5.0,
+                    "exit_reasons": {},
+                },
+                "trades": trades,
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 class TestExitReasonBreakdown:
@@ -260,9 +343,11 @@ class TestExitReasonBreakdown:
 
     def test_sums_r_not_just_avg_return(self):
         """可加的是 sum_r，不是均收——exit_reasons 里只有 {n, avg_return}，不够用。"""
-        trades = [{"reason": "bbi_exit+scaled", "ret": 0.36, "r_multiple": 40.0},
-                  {"reason": "bbi_exit+scaled", "ret": 0.36, "r_multiple": 40.0},
-                  {"reason": "stop", "ret": -0.03, "r_multiple": -1.0}] * 1
+        trades = [
+            {"reason": "bbi_exit+scaled", "ret": 0.36, "r_multiple": 40.0},
+            {"reason": "bbi_exit+scaled", "ret": 0.36, "r_multiple": 40.0},
+            {"reason": "stop", "ret": -0.03, "r_multiple": -1.0},
+        ] * 1
         st = m2._reason_stats(trades)
         assert st["bbi_exit+scaled"]["n"] == 2
         assert st["bbi_exit+scaled"]["sum_r"] == pytest.approx(80.0)
@@ -272,18 +357,33 @@ class TestExitReasonBreakdown:
     def test_ignores_trades_without_reason(self):
         assert m2._reason_stats([{"ret": 0.1}, {}, "junk"]) == {}
 
-    def test_ranked_by_r_contribution_not_avg_return(self, tmp_path, monkeypatch,
-                                                     capsys):
+    def test_ranked_by_r_contribution_not_avg_return(
+        self, tmp_path, monkeypatch, capsys
+    ):
         """均收最高但只 20 笔的桶，R 贡献可能不如均收平平的 900 笔 ⇒ 按 R 排序。"""
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
         trades = [{"reason": "bbi_exit+scaled", "ret": 0.36, "r_multiple": 1.0}] * 20
         trades += [{"reason": "bbi_exit", "ret": 0.09, "r_multiple": 5.0}] * 900
-        (tmp_path / "A_stop_low__00_baseline__s1000.json").write_text(json.dumps({
-            "trade_summary": {"n": 920, "win_rate": 0.3, "expectancy": 0.004,
-                              "expectancy_R": 0.2, "total_R": 4520.0,
-                              "payoff_ratio": 2.7, "avg_win": 0.11, "avg_loss": 0.04,
-                              "avg_holding": 5.0, "exit_reasons": {}},
-            "trades": trades}), encoding="utf-8")
+        (tmp_path / "A_stop_low__00_baseline__s1000.json").write_text(
+            json.dumps(
+                {
+                    "trade_summary": {
+                        "n": 920,
+                        "win_rate": 0.3,
+                        "expectancy": 0.004,
+                        "expectancy_R": 0.2,
+                        "total_R": 4520.0,
+                        "payoff_ratio": 2.7,
+                        "avg_win": 0.11,
+                        "avg_loss": 0.04,
+                        "avg_holding": 5.0,
+                        "exit_reasons": {},
+                    },
+                    "trades": trades,
+                }
+            ),
+            encoding="utf-8",
+        )
         m2.report(cross=False)
         seg = capsys.readouterr().out.split("离场原因分布")[1]
         i_scaled = seg.index("bbi_exit+scaled")
@@ -292,14 +392,29 @@ class TestExitReasonBreakdown:
 
     def test_warns_that_reason_is_an_outcome(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        (tmp_path / "A_stop_low__00_baseline__s1000.json").write_text(json.dumps({
-            "trade_summary": {"n": 2, "win_rate": 0.5, "expectancy": 0.004,
-                              "expectancy_R": 0.2, "total_R": 1.0,
-                              "payoff_ratio": 2.7, "avg_win": 0.11, "avg_loss": 0.04,
-                              "avg_holding": 5.0, "exit_reasons": {}},
-            "trades": [{"reason": "bbi_exit+scaled", "ret": 0.36, "r_multiple": 2.0},
-                       {"reason": "stop", "ret": -0.03, "r_multiple": -1.0}]}),
-            encoding="utf-8")
+        (tmp_path / "A_stop_low__00_baseline__s1000.json").write_text(
+            json.dumps(
+                {
+                    "trade_summary": {
+                        "n": 2,
+                        "win_rate": 0.5,
+                        "expectancy": 0.004,
+                        "expectancy_R": 0.2,
+                        "total_R": 1.0,
+                        "payoff_ratio": 2.7,
+                        "avg_win": 0.11,
+                        "avg_loss": 0.04,
+                        "avg_holding": 5.0,
+                        "exit_reasons": {},
+                    },
+                    "trades": [
+                        {"reason": "bbi_exit+scaled", "ret": 0.36, "r_multiple": 2.0},
+                        {"reason": "stop", "ret": -0.03, "r_multiple": -1.0},
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
         m2.report(cross=False)
         out = capsys.readouterr().out
         assert "这是结果分组，不是可选参数" in out
@@ -321,29 +436,35 @@ class TestExitStructureMatrix:
     有判别力的是**行与行的差**：哪个机制把交易从 `stop` 桶搬走了、期望从哪补回来。
     """
 
-    @pytest.mark.parametrize("reason,want", [
-        ("bbi_exit", ("bbi", False)),
-        ("bbi_exit+scaled", ("bbi", True)),
-        ("bbi_exit_delayed", ("bbi", False)),
-        ("stop", ("stop", False)),
-        ("stop_delayed", ("stop", False)),          # 跳空次日成交，仍是止损
-        ("trail_stop", ("trail", False)),
-        ("breakeven_stop", ("be", False)),
-        ("cost_zone_stop", ("cz", False)),
-        ("open_end", ("末持", False)),
-        ("open_end+scaled", ("末持", True)),
-        ("某个新原因", ("其它", False)),              # 词表扩了也不炸
-    ])
+    @pytest.mark.parametrize(
+        "reason,want",
+        [
+            ("bbi_exit", ("bbi", False)),
+            ("bbi_exit+scaled", ("bbi", True)),
+            ("bbi_exit_delayed", ("bbi", False)),
+            ("stop", ("stop", False)),
+            ("stop_delayed", ("stop", False)),  # 跳空次日成交，仍是止损
+            ("trail_stop", ("trail", False)),
+            ("breakeven_stop", ("be", False)),
+            ("cost_zone_stop", ("cz", False)),
+            ("open_end", ("末持", False)),
+            ("open_end+scaled", ("末持", True)),
+            ("某个新原因", ("其它", False)),  # 词表扩了也不炸
+        ],
+    )
     def test_family_mapping(self, reason, want):
         assert m2._reason_family(reason) == want
 
     def test_scaled_is_an_overlay_not_a_family(self):
         """`+scaled` 与基础族**重叠**：一笔 bbi_exit+scaled 同时计入 bbi 和 scaled。"""
-        st = m2._family_stats([
-            {"reason": "bbi_exit+scaled", "ret": 0.36, "r_multiple": 3.0},
-            {"reason": "bbi_exit", "ret": 0.04, "r_multiple": 0.4},
-            {"reason": "stop", "ret": -0.15, "r_multiple": -1.2}])
-        assert st["bbi"]["n"] == 2          # 含 +scaled 那笔
+        st = m2._family_stats(
+            [
+                {"reason": "bbi_exit+scaled", "ret": 0.36, "r_multiple": 3.0},
+                {"reason": "bbi_exit", "ret": 0.04, "r_multiple": 0.4},
+                {"reason": "stop", "ret": -0.15, "r_multiple": -1.2},
+            ]
+        )
+        assert st["bbi"]["n"] == 2  # 含 +scaled 那笔
         assert st["scaled"]["n"] == 1
         assert st["stop"]["n"] == 1
         # 族的笔数合计（不含 scaled）= 总笔数
@@ -352,19 +473,34 @@ class TestExitStructureMatrix:
     def test_matrix_needs_two_schemes(self, tmp_path, monkeypatch, capsys):
         """单方案没有可比性，不打矩阵。"""
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write_reasons(tmp_path, "A_stop_low", "00_baseline",
-                       {"bbi_exit": (50, 0.05, 0.5), "stop": (50, -0.03, -1.0)})
+        _write_reasons(
+            tmp_path,
+            "A_stop_low",
+            "00_baseline",
+            {"bbi_exit": (50, 0.05, 0.5), "stop": (50, -0.03, -1.0)},
+        )
         m2.report(cross=False)
         assert "出场结构对比" not in capsys.readouterr().out
 
     def test_distribution_shift_is_visible(self, tmp_path, monkeypatch, capsys):
         """cost_zone 把 40% 的交易从 stop 桶搬进 cz 桶——这才是要看的东西。"""
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write_reasons(tmp_path, "A_stop_low", "00_baseline",
-                       {"bbi_exit": (60, 0.05, 0.5), "stop": (40, -0.15, -1.2)})
-        _write_reasons(tmp_path, "A_stop_low", "cost_zone_3",
-                       {"bbi_exit": (55, 0.09, 0.8), "cost_zone_stop": (40, -0.044, -0.37),
-                        "stop": (5, -0.14, -1.2)})
+        _write_reasons(
+            tmp_path,
+            "A_stop_low",
+            "00_baseline",
+            {"bbi_exit": (60, 0.05, 0.5), "stop": (40, -0.15, -1.2)},
+        )
+        _write_reasons(
+            tmp_path,
+            "A_stop_low",
+            "cost_zone_3",
+            {
+                "bbi_exit": (55, 0.09, 0.8),
+                "cost_zone_stop": (40, -0.044, -0.37),
+                "stop": (5, -0.14, -1.2),
+            },
+        )
         m2.report(cross=False)
         seg = capsys.readouterr().out.split("出场结构对比")[1]
         assert "cz" in seg
@@ -381,12 +517,20 @@ class TestExitStructureMatrix:
         """
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
         # 80 笔 × +0.5R + 20 笔 × -1.2R = 40 - 24 = 16R / 100 笔 = +0.16R/笔
-        _write_reasons(tmp_path, "A_stop_low", "00_baseline",
-                       {"bbi_exit": (80, 0.05, 0.5), "stop": (20, -0.15, -1.2)},
-                       expR=0.16)
-        _write_reasons(tmp_path, "A_stop_low", "trail_08",
-                       {"bbi_exit": (70, 0.06, 0.6), "trail_stop": (30, -0.02, -0.3)},
-                       expR=0.33)
+        _write_reasons(
+            tmp_path,
+            "A_stop_low",
+            "00_baseline",
+            {"bbi_exit": (80, 0.05, 0.5), "stop": (20, -0.15, -1.2)},
+            expR=0.16,
+        )
+        _write_reasons(
+            tmp_path,
+            "A_stop_low",
+            "trail_08",
+            {"bbi_exit": (70, 0.06, 0.6), "trail_stop": (30, -0.02, -0.3)},
+            expR=0.33,
+        )
         m2.report(cross=False)
         seg = capsys.readouterr().out.split("每笔 R 贡献")[1]
         base = next(ln for ln in seg.split("\n") if "00_baseline" in ln)
@@ -394,13 +538,22 @@ class TestExitStructureMatrix:
         tr = next(ln for ln in seg.split("\n") if "trail_08" in ln)
         assert tr.split()[-1] == "+0.330", f"行合计应等于期望R: {tr}"
 
-    def test_warns_r_only_comparable_within_denominator(self, tmp_path, monkeypatch,
-                                                        capsys):
+    def test_warns_r_only_comparable_within_denominator(
+        self, tmp_path, monkeypatch, capsys
+    ):
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write_reasons(tmp_path, "B_stop_pct", "pct_08",
-                       {"bbi_exit": (80, 0.05, 0.6), "stop": (20, -0.08, -1.0)})
-        _write_reasons(tmp_path, "B_stop_pct", "pct_12",
-                       {"bbi_exit": (75, 0.05, 0.4), "stop": (25, -0.12, -1.0)})
+        _write_reasons(
+            tmp_path,
+            "B_stop_pct",
+            "pct_08",
+            {"bbi_exit": (80, 0.05, 0.6), "stop": (20, -0.08, -1.0)},
+        )
+        _write_reasons(
+            tmp_path,
+            "B_stop_pct",
+            "pct_12",
+            {"bbi_exit": (75, 0.05, 0.4), "stop": (25, -0.12, -1.0)},
+        )
         m2.report(cross=False)
         seg = capsys.readouterr().out.split("每笔 R 贡献")[1]
         assert "risk_frac 相同的方案之间可比" in seg
@@ -417,15 +570,32 @@ class TestRealizedVsUnrealized:
     """
 
     def test_realized_excludes_open_end_from_both_numerator_and_denominator(
-            self, tmp_path, monkeypatch, capsys):
+        self, tmp_path, monkeypatch, capsys
+    ):
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
         # 90 笔已平仓净 -9R，10 笔末持 +20R ⇒ 合计 +11R/100 = +0.11；已实现 -9/90 = -0.1
-        _write_reasons(tmp_path, "A_stop_low", "00_baseline",
-                       {"bbi_exit": (30, 0.05, 1.0), "stop": (60, -0.03, -0.65),
-                        "open_end": (10, 0.12, 2.0)}, expR=0.11)
-        _write_reasons(tmp_path, "A_stop_low", "trail_08",
-                       {"bbi_exit": (35, 0.06, 1.2), "stop": (55, -0.03, -0.6),
-                        "open_end": (10, 0.12, 2.0)}, expR=0.31)
+        _write_reasons(
+            tmp_path,
+            "A_stop_low",
+            "00_baseline",
+            {
+                "bbi_exit": (30, 0.05, 1.0),
+                "stop": (60, -0.03, -0.65),
+                "open_end": (10, 0.12, 2.0),
+            },
+            expR=0.11,
+        )
+        _write_reasons(
+            tmp_path,
+            "A_stop_low",
+            "trail_08",
+            {
+                "bbi_exit": (35, 0.06, 1.2),
+                "stop": (55, -0.03, -0.6),
+                "open_end": (10, 0.12, 2.0),
+            },
+            expR=0.31,
+        )
         m2.report(cross=False)
         seg = capsys.readouterr().out.split("每笔 R 贡献")[1]
         line = next(ln for ln in seg.split("\n") if "00_baseline" in ln)
@@ -435,33 +605,73 @@ class TestRealizedVsUnrealized:
     def test_flip_is_flagged(self, tmp_path, monkeypatch, capsys):
         """含未实现为正、已实现非正 ⇒ 必须点出「没兑现的边际不是边际」。"""
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write_reasons(tmp_path, "A_stop_low", "00_baseline",
-                       {"bbi_exit": (30, 0.05, 1.0), "stop": (60, -0.03, -0.65),
-                        "open_end": (10, 0.12, 2.0)}, expR=0.11)
-        _write_reasons(tmp_path, "A_stop_low", "trail_08",
-                       {"bbi_exit": (35, 0.06, 1.2), "stop": (55, -0.03, -0.6),
-                        "open_end": (10, 0.12, 2.0)}, expR=0.31)
+        _write_reasons(
+            tmp_path,
+            "A_stop_low",
+            "00_baseline",
+            {
+                "bbi_exit": (30, 0.05, 1.0),
+                "stop": (60, -0.03, -0.65),
+                "open_end": (10, 0.12, 2.0),
+            },
+            expR=0.11,
+        )
+        _write_reasons(
+            tmp_path,
+            "A_stop_low",
+            "trail_08",
+            {
+                "bbi_exit": (35, 0.06, 1.2),
+                "stop": (55, -0.03, -0.6),
+                "open_end": (10, 0.12, 2.0),
+            },
+            expR=0.31,
+        )
         out = (m2.report(cross=False), capsys.readouterr().out)[1]
         assert "正期望全部来自未平仓浮盈" in out
         assert "没兑现的边际不是边际" in out
 
     def test_no_flip_when_realized_positive(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write_reasons(tmp_path, "A_stop_low", "00_baseline",
-                       {"bbi_exit": (50, 0.08, 2.0), "stop": (40, -0.03, -0.6),
-                        "open_end": (10, 0.12, 2.0)}, expR=1.0)
-        _write_reasons(tmp_path, "A_stop_low", "trail_08",
-                       {"bbi_exit": (55, 0.09, 2.2), "stop": (35, -0.03, -0.6),
-                        "open_end": (10, 0.12, 2.0)}, expR=1.2)
+        _write_reasons(
+            tmp_path,
+            "A_stop_low",
+            "00_baseline",
+            {
+                "bbi_exit": (50, 0.08, 2.0),
+                "stop": (40, -0.03, -0.6),
+                "open_end": (10, 0.12, 2.0),
+            },
+            expR=1.0,
+        )
+        _write_reasons(
+            tmp_path,
+            "A_stop_low",
+            "trail_08",
+            {
+                "bbi_exit": (55, 0.09, 2.2),
+                "stop": (35, -0.03, -0.6),
+                "open_end": (10, 0.12, 2.0),
+            },
+            expR=1.2,
+        )
         m2.report(cross=False)
         assert "没兑现的边际不是边际" not in capsys.readouterr().out
 
     def test_baseline_block_shows_realized(self, tmp_path, monkeypatch, capsys):
         """基准结构块也要打已实现口径——那是判读所有「改进」的绝对水平基线。"""
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write_reasons(tmp_path, "A_stop_low", "00_baseline",
-                       {"bbi_exit": (30, 0.05, 1.0), "stop": (60, -0.03, -0.65),
-                        "open_end": (10, 0.12, 2.0)}, expR=0.11)
+        _write_reasons(
+            tmp_path,
+            "A_stop_low",
+            "00_baseline",
+            {
+                "bbi_exit": (30, 0.05, 1.0),
+                "stop": (60, -0.03, -0.65),
+                "open_end": (10, 0.12, 2.0),
+            },
+            expR=0.11,
+        )
         m2.report(cross=False)
         out = capsys.readouterr().out
         assert "基准已实现口径" in out
@@ -480,16 +690,21 @@ class TestStopIsTooTightHypothesis:
 
     def test_tick_buffer_ladder(self):
         """B1_w.pdf 说「或向下 3-5 个价位」，5 是它给的上界，8 用来看斜率是否续。"""
-        buf = sorted(int(e[e.index("--stop-tick-buffer") + 1])
-                     for e in m2.GROUPS["A_stop_low"]["runs"].values()
-                     if "--stop-tick-buffer" in e and "--trail" not in e)
+        buf = sorted(
+            int(e[e.index("--stop-tick-buffer") + 1])
+            for e in m2.GROUPS["A_stop_low"]["runs"].values()
+            if "--stop-tick-buffer" in e and "--trail" not in e
+        )
         assert buf == [3, 5, 8]
 
     def test_best_pct_tier_has_timing_variant(self):
         """最优档必须有择时变体——跨组表前三全是 amv，却都配 8%/12% 止损。"""
         runs = m2.GROUPS["B_stop_pct"]["runs"]
-        amv_tiers = {float(e[e.index("--stop-pct") + 1]) for e in runs.values()
-                     if "--amv-long-only" in e and "--stop-pct" in e}
+        amv_tiers = {
+            float(e[e.index("--stop-pct") + 1])
+            for e in runs.values()
+            if "--amv-long-only" in e and "--stop-pct" in e
+        }
         assert 5.0 in amv_tiers, f"最优档 5% 缺 amv 变体，实有 {sorted(amv_tiers)}"
 
     def test_orthogonal_mechanisms_are_stacked(self):
@@ -498,12 +713,14 @@ class TestStopIsTooTightHypothesis:
         正交**不等于**可叠加（可能互相抵消），所以必须有实测方案而不是靠推断。
         """
         runs = m2.GROUPS["A_stop_low"]["runs"]
-        stacked = [n for n, e in runs.items()
-                   if "--trail" in e and "--stop-tick-buffer" in e]
+        stacked = [
+            n for n, e in runs.items() if "--trail" in e and "--stop-tick-buffer" in e
+        ]
         assert stacked, "缺 trail × tick-buffer 的叠加方案"
         b_runs = m2.GROUPS["B_stop_pct"]["runs"]
-        assert any("--trail" in e and "--stop-pct" in e for e in b_runs.values()), \
+        assert any("--trail" in e and "--stop-pct" in e for e in b_runs.values()), (
             "缺「可执行止损 × 移动止盈」的叠加方案"
+        )
 
 
 class TestNewRunsWired:
@@ -522,7 +739,11 @@ class TestNewRunsWired:
         runs = m2.GROUPS["C_portfolio"]["runs"]
         exposures = []
         for e in runs.values():
-            c = int(e[e.index("--max-concurrent") + 1]) if "--max-concurrent" in e else 5
+            c = (
+                int(e[e.index("--max-concurrent") + 1])
+                if "--max-concurrent" in e
+                else 5
+            )
             p = int(e[e.index("--max-pos") + 1]) if "--max-pos" in e else 20
             exposures.append(c * p / 100)
         assert min(exposures) <= 0.4, f"缺低敞口方案，实际最低 {min(exposures):.0%}"
@@ -539,13 +760,26 @@ class TestLoadKeyName:
 
     def test_reads_trade_summary_key(self, tmp_path, monkeypatch):
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        (tmp_path / "A_stop_low__x__s1000.json").write_text(json.dumps({
-            "trade_summary": {"n": 410, "win_rate": 0.363, "expectancy": 0.006,
-                              "expectancy_R": 0.769, "total_R": 304.0,
-                              "payoff_ratio": 3.2, "avg_win": 0.1212,
-                              "avg_loss": 0.04, "avg_holding": 5.0,
-                              "exit_reasons": {}},
-            "trades": [{"ret": 0.3}] * 20}), encoding="utf-8")
+        (tmp_path / "A_stop_low__x__s1000.json").write_text(
+            json.dumps(
+                {
+                    "trade_summary": {
+                        "n": 410,
+                        "win_rate": 0.363,
+                        "expectancy": 0.006,
+                        "expectancy_R": 0.769,
+                        "total_R": 304.0,
+                        "payoff_ratio": 3.2,
+                        "avg_win": 0.1212,
+                        "avg_loss": 0.04,
+                        "avg_holding": 5.0,
+                        "exit_reasons": {},
+                    },
+                    "trades": [{"ret": 0.3}] * 20,
+                }
+            ),
+            encoding="utf-8",
+        )
         got = m2._collect(cross=False)["A_stop_low"]
         assert len(got) == 1
         assert got[0]["expR"] == 0.769 and got[0]["totR"] == 304.0
@@ -554,20 +788,45 @@ class TestLoadKeyName:
     def test_portfolio_at_top_level(self, tmp_path, monkeypatch):
         """组合级结果的 portfolio 在顶层，与 trade_summary 平级。"""
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        (tmp_path / "C_portfolio__p__s1000.json").write_text(json.dumps({
-            "trade_summary": {"n": 342, "expectancy": 0.01, "expectancy_R": 0.2},
-            "portfolio": {"total_return": 0.171, "cagr": 0.108,
-                          "max_drawdown": 0.029, "n_taken": 150,
-                          "n_skipped": 1195}}), encoding="utf-8")
+        (tmp_path / "C_portfolio__p__s1000.json").write_text(
+            json.dumps(
+                {
+                    "trade_summary": {
+                        "n": 342,
+                        "expectancy": 0.01,
+                        "expectancy_R": 0.2,
+                    },
+                    "portfolio": {
+                        "total_return": 0.171,
+                        "cagr": 0.108,
+                        "max_drawdown": 0.029,
+                        "n_taken": 150,
+                        "n_skipped": 1195,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
         got = m2._collect(cross=False)["C_portfolio"]
         assert got and got[0]["pf"]["total_return"] == 0.171
 
     def test_unknown_key_falls_back(self, tmp_path, monkeypatch, capsys):
         """键名再改也要能活——扫一层子字典兜底。"""
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        (tmp_path / "A_stop_low__y__s1000.json").write_text(json.dumps({
-            "some_new_name": {"n": 100, "expectancy": 0.005, "expectancy_R": 0.5,
-                              "total_R": 50.0, "avg_win": 0.1}}), encoding="utf-8")
+        (tmp_path / "A_stop_low__y__s1000.json").write_text(
+            json.dumps(
+                {
+                    "some_new_name": {
+                        "n": 100,
+                        "expectancy": 0.005,
+                        "expectancy_R": 0.5,
+                        "total_R": 50.0,
+                        "avg_win": 0.1,
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
         got = m2._collect(cross=False)["A_stop_low"]
         assert got and got[0]["expR"] == 0.5
         assert "兜底" in capsys.readouterr().out
@@ -575,7 +834,8 @@ class TestLoadKeyName:
     def test_missing_summary_warns_not_silent(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
         (tmp_path / "A_stop_low__z__s1000.json").write_text(
-            json.dumps({"codes": ["600000"], "count": 500}), encoding="utf-8")
+            json.dumps({"codes": ["600000"], "count": 500}), encoding="utf-8"
+        )
         m2._collect(cross=False)
         assert "找不到交易摘要" in capsys.readouterr().out
 
@@ -621,7 +881,8 @@ class TestSampleFingerprint:
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
         (tmp_path / "A_stop_low__old.json").write_text(
             json.dumps({"trade_summary": {"n": 400, "expectancy": 0.01}}),
-            encoding="utf-8")
+            encoding="utf-8",
+        )
         m2._collect(cross=False)
         out = capsys.readouterr().out
         assert "样本量指纹" in out and "旧结果文件" in out
@@ -658,36 +919,66 @@ def _write_tr(tmp, group, name, *, n, expR, totR, aw, big, tail=0.7, fp="s1000")
     """带逐笔 r_multiple 的结果文件（尾部 R 占比可控）。"""
     tail_r = totR * tail
     trades = [{"ret": 0.35, "r_multiple": tail_r / big} for _ in range(big)]
-    trades += [{"ret": 0.01, "r_multiple": (totR - tail_r) / (n - big)}
-               for _ in range(n - big)]
-    (tmp / f"{group}__{name}__{fp}.json").write_text(json.dumps({
-        "trade_summary": {"n": n, "win_rate": 0.3, "expectancy": 0.004,
-                          "expectancy_R": expR, "total_R": totR, "payoff_ratio": 2.7,
-                          "avg_win": aw, "avg_loss": 0.04, "avg_holding": 5.0,
-                          "exit_reasons": {}},
-        "trades": trades}), encoding="utf-8")
+    trades += [
+        {"ret": 0.01, "r_multiple": (totR - tail_r) / (n - big)} for _ in range(n - big)
+    ]
+    (tmp / f"{group}__{name}__{fp}.json").write_text(
+        json.dumps(
+            {
+                "trade_summary": {
+                    "n": n,
+                    "win_rate": 0.3,
+                    "expectancy": 0.004,
+                    "expectancy_R": expR,
+                    "total_R": totR,
+                    "payoff_ratio": 2.7,
+                    "avg_win": aw,
+                    "avg_loss": 0.04,
+                    "avg_holding": 5.0,
+                    "exit_reasons": {},
+                },
+                "trades": trades,
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
-def _write_split(tmp, group, name, *, n, expR, aw, big, tail_r, nontail_r,
-                 fp="s1000"):
+def _write_split(tmp, group, name, *, n, expR, aw, big, tail_r, nontail_r, fp="s1000"):
     """按**尾部R / 非尾部R 绝对量**构造结果文件。
 
     非尾部为负是实测常态（基准 -673R），比值口径在这里会 >1 并把方向读反，
     所以测试也必须按绝对量构造。
     """
     trades = [{"ret": 0.35, "r_multiple": tail_r / big} for _ in range(big)]
-    trades += [{"ret": 0.01, "r_multiple": nontail_r / (n - big)}
-               for _ in range(n - big)]
-    (tmp / f"{group}__{name}__{fp}.json").write_text(json.dumps({
-        "trade_summary": {"n": n, "win_rate": 0.3, "expectancy": 0.004,
-                          "expectancy_R": expR, "total_R": tail_r + nontail_r,
-                          "payoff_ratio": 2.7, "avg_win": aw, "avg_loss": 0.04,
-                          "avg_holding": 5.0, "exit_reasons": {}},
-        "trades": trades}), encoding="utf-8")
+    trades += [
+        {"ret": 0.01, "r_multiple": nontail_r / (n - big)} for _ in range(n - big)
+    ]
+    (tmp / f"{group}__{name}__{fp}.json").write_text(
+        json.dumps(
+            {
+                "trade_summary": {
+                    "n": n,
+                    "win_rate": 0.3,
+                    "expectancy": 0.004,
+                    "expectancy_R": expR,
+                    "total_R": tail_r + nontail_r,
+                    "payoff_ratio": 2.7,
+                    "avg_win": aw,
+                    "avg_loss": 0.04,
+                    "avg_holding": 5.0,
+                    "exit_reasons": {},
+                },
+                "trades": trades,
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
-def _write_pct(tmp, name, *, n, exp, stop, win, payoff, big, group="B_stop_pct",
-               fp="s1000"):
+def _write_pct(
+    tmp, name, *, n, exp, stop, win, payoff, big, group="B_stop_pct", fp="s1000"
+):
     """按「期望% + 固定 risk_frac」构造结果——期望R 由二者算出，与实盘口径一致。
 
     pct 模式下 risk_frac 恒等于 stop_pct（backtest_factors:1294）⇒
@@ -697,13 +988,26 @@ def _write_pct(tmp, name, *, n, exp, stop, win, payoff, big, group="B_stop_pct",
     expR = exp / stop
     trades = [{"ret": 0.35, "r_multiple": 0.35 / stop} for _ in range(big)]
     trades += [{"ret": 0.01, "r_multiple": 0.01 / stop} for _ in range(n - big)]
-    (tmp / f"{group}__{name}__{fp}.json").write_text(json.dumps({
-        "trade_summary": {"n": n, "win_rate": win, "expectancy": exp,
-                          "expectancy_R": round(expR, 3),
-                          "total_R": round(expR * n, 1), "payoff_ratio": payoff,
-                          "avg_win": 0.104, "avg_loss": 0.04, "avg_holding": 5.0,
-                          "exit_reasons": {}},
-        "trades": trades}), encoding="utf-8")
+    (tmp / f"{group}__{name}__{fp}.json").write_text(
+        json.dumps(
+            {
+                "trade_summary": {
+                    "n": n,
+                    "win_rate": win,
+                    "expectancy": exp,
+                    "expectancy_R": round(expR, 3),
+                    "total_R": round(expR * n, 1),
+                    "payoff_ratio": payoff,
+                    "avg_win": 0.104,
+                    "avg_loss": 0.04,
+                    "avg_holding": 5.0,
+                    "exit_reasons": {},
+                },
+                "trades": trades,
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 class TestExitVsEntrySideVerdict:
@@ -717,84 +1021,188 @@ class TestExitVsEntrySideVerdict:
 
     def test_classifies_by_trade_count(self):
         base = {"n": 1294}
-        assert m2._is_exit_side({"n": 1298}, base) is True     # 笔数几乎不变 ⇒ 出场
-        assert m2._is_exit_side({"n": 230}, base) is False     # 择时大幅减少 ⇒ 入场
+        assert m2._is_exit_side({"n": 1298}, base) is True  # 笔数几乎不变 ⇒ 出场
+        assert m2._is_exit_side({"n": 230}, base) is False  # 择时大幅减少 ⇒ 入场
         assert m2._is_exit_side({"n": 409}, base) is False
 
     def test_exit_side_passes_on_total_r(self, tmp_path, monkeypatch, capsys):
         """出场类：累计R 提升即通过，即使均盈/大赢家占比略降。"""
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write_tr(tmp_path, "A_stop_low", "00_baseline", n=1294, expR=0.202,
-                  totR=250.5, aw=0.1098, big=61)
-        _write_tr(tmp_path, "A_stop_low", "trail_08", n=1298, expR=0.288,
-                  totR=358.4, aw=0.1015, big=52)
+        _write_tr(
+            tmp_path,
+            "A_stop_low",
+            "00_baseline",
+            n=1294,
+            expR=0.202,
+            totR=250.5,
+            aw=0.1098,
+            big=61,
+        )
+        _write_tr(
+            tmp_path,
+            "A_stop_low",
+            "trail_08",
+            n=1298,
+            expR=0.288,
+            totR=358.4,
+            aw=0.1015,
+            big=52,
+        )
         m2.report(cross=False)
-        line = next(ln for ln in capsys.readouterr().out.split("\n")
-                    if "trail_08" in ln and "累计R" in ln)
+        line = next(
+            ln
+            for ln in capsys.readouterr().out.split("\n")
+            if "trail_08" in ln and "累计R" in ln
+        )
         assert "✅ 通过" in line and "[出场]" in line
         assert "+43" in line
 
     def test_exit_side_rejected_when_total_r_flat(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write_tr(tmp_path, "A_stop_low", "00_baseline", n=1294, expR=0.202,
-                  totR=250.5, aw=0.1098, big=61)
-        _write_tr(tmp_path, "A_stop_low", "cost_zone_3", n=1290, expR=0.19,
-                  totR=245.0, aw=0.0976, big=45)
+        _write_tr(
+            tmp_path,
+            "A_stop_low",
+            "00_baseline",
+            n=1294,
+            expR=0.202,
+            totR=250.5,
+            aw=0.1098,
+            big=61,
+        )
+        _write_tr(
+            tmp_path,
+            "A_stop_low",
+            "cost_zone_3",
+            n=1290,
+            expR=0.19,
+            totR=245.0,
+            aw=0.0976,
+            big=45,
+        )
         m2.report(cross=False)
-        line = next(ln for ln in capsys.readouterr().out.split("\n")
-                    if "cost_zone_3" in ln and "累计R" in ln)
+        line = next(
+            ln
+            for ln in capsys.readouterr().out.split("\n")
+            if "cost_zone_3" in ln and "累计R" in ln
+        )
         assert "❌ 否决" in line
 
     def test_entry_side_keeps_strict_rule(self, tmp_path, monkeypatch, capsys):
         """入场类仍严格：筛掉大赢家的收益永久消失，不能只看总量。"""
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write_tr(tmp_path, "A_stop_low", "00_baseline", n=1294, expR=0.202,
-                  totR=250.5, aw=0.1098, big=61)
+        _write_tr(
+            tmp_path,
+            "A_stop_low",
+            "00_baseline",
+            n=1294,
+            expR=0.202,
+            totR=250.5,
+            aw=0.1098,
+            big=61,
+        )
         # 笔数腰斩且大赢家占比下降 ⇒ 入场类应否决
-        _write_tr(tmp_path, "A_stop_low", "some_filter", n=600, expR=0.30,
-                  totR=180.0, aw=0.09, big=15)
+        _write_tr(
+            tmp_path,
+            "A_stop_low",
+            "some_filter",
+            n=600,
+            expR=0.30,
+            totR=180.0,
+            aw=0.09,
+            big=15,
+        )
         m2.report(cross=False)
-        line = next(ln for ln in capsys.readouterr().out.split("\n")
-                    if "some_filter" in ln and "期望R" in ln)
+        line = next(
+            ln
+            for ln in capsys.readouterr().out.split("\n")
+            if "some_filter" in ln and "期望R" in ln
+        )
         assert "❌ 否决" in line and "[入场]" in line
 
-    def test_no_warning_when_only_nontail_improves(self, tmp_path, monkeypatch,
-                                                   capsys):
+    def test_no_warning_when_only_nontail_improves(self, tmp_path, monkeypatch, capsys):
         """**实测 trail_08 场景**：尾部 924→846(-8%)、非尾部 -673→-488(少亏 185R)。
 
         旧比值口径（369%→236%）会警示「收益更依赖中等赢家」——方向反了。
         中部失血减少正是这个出场机制该干的事，不得警示。
         """
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write_split(tmp_path, "A_stop_low", "00_baseline", n=1294, expR=0.202,
-                     aw=0.1098, big=61, tail_r=924.0, nontail_r=-673.5)
-        _write_split(tmp_path, "A_stop_low", "trail_08", n=1298, expR=0.288,
-                     aw=0.1015, big=52, tail_r=846.0, nontail_r=-487.6)
+        _write_split(
+            tmp_path,
+            "A_stop_low",
+            "00_baseline",
+            n=1294,
+            expR=0.202,
+            aw=0.1098,
+            big=61,
+            tail_r=924.0,
+            nontail_r=-673.5,
+        )
+        _write_split(
+            tmp_path,
+            "A_stop_low",
+            "trail_08",
+            n=1298,
+            expR=0.288,
+            aw=0.1015,
+            big=52,
+            tail_r=846.0,
+            nontail_r=-487.6,
+        )
         m2.report(cross=False)
         out = capsys.readouterr().out
         line = next(ln for ln in out.split("\n") if "trail_08" in ln and "累计R" in ln)
         assert "✅ 通过" in line
-        warn = [ln for ln in out.split("\n") if ln.startswith("      ⚠️") and "尾部R" in ln]
+        warn = [
+            ln for ln in out.split("\n") if ln.startswith("      ⚠️") and "尾部R" in ln
+        ]
         assert not warn, f"中部改善不该被警示成退化: {warn}"
 
     def test_warns_when_tail_r_actually_shrinks(self, tmp_path, monkeypatch, capsys):
         """尾部R 绝对量缩水 >30% 才警示——那才是真的「削大赢家」。"""
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write_split(tmp_path, "A_stop_low", "00_baseline", n=1294, expR=0.202,
-                     aw=0.1098, big=61, tail_r=924.0, nontail_r=-673.5)
-        _write_split(tmp_path, "A_stop_low", "trail_12", n=1295, expR=0.236,
-                     aw=0.1070, big=30, tail_r=500.0, nontail_r=-200.0)
+        _write_split(
+            tmp_path,
+            "A_stop_low",
+            "00_baseline",
+            n=1294,
+            expR=0.202,
+            aw=0.1098,
+            big=61,
+            tail_r=924.0,
+            nontail_r=-673.5,
+        )
+        _write_split(
+            tmp_path,
+            "A_stop_low",
+            "trail_12",
+            n=1295,
+            expR=0.236,
+            aw=0.1070,
+            big=30,
+            tail_r=500.0,
+            nontail_r=-200.0,
+        )
         m2.report(cross=False)
         out = capsys.readouterr().out
         assert "尾部R 924→500" in out and "大赢家贡献显著缩水" in out
         assert "非尾部R -674→-200" in out, "同时打出非尾部变化，供判断净效果"
 
-    def test_baseline_structure_surfaces_negative_nontail(self, tmp_path, monkeypatch,
-                                                          capsys):
+    def test_baseline_structure_surfaces_negative_nontail(
+        self, tmp_path, monkeypatch, capsys
+    ):
         """基准收益结构要显式打出来——「非尾部整体亏损」是这套策略最关键的事实。"""
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write_split(tmp_path, "A_stop_low", "00_baseline", n=1294, expR=0.202,
-                     aw=0.1098, big=61, tail_r=924.0, nontail_r=-673.5)
+        _write_split(
+            tmp_path,
+            "A_stop_low",
+            "00_baseline",
+            n=1294,
+            expR=0.202,
+            aw=0.1098,
+            big=61,
+            tail_r=924.0,
+            nontail_r=-673.5,
+        )
         m2.report(cross=False)
         out = capsys.readouterr().out
         assert "基准收益结构" in out
@@ -813,14 +1221,19 @@ class TestTailSplit:
     """
 
     def test_splits_tail_and_nontail(self):
-        trades = [{"ret": 0.3, "r_multiple": 7.0}, {"ret": 0.3, "r_multiple": 7.0},
-                  {"ret": 0.01, "r_multiple": 3.0}, {"ret": -0.02, "r_multiple": -1.0}]
+        trades = [
+            {"ret": 0.3, "r_multiple": 7.0},
+            {"ret": 0.3, "r_multiple": 7.0},
+            {"ret": 0.01, "r_multiple": 3.0},
+            {"ret": -0.02, "r_multiple": -1.0},
+        ]
         assert m2._tail_split(trades) == pytest.approx((14.0, 2.0))
 
     def test_nontail_can_be_negative(self):
         """非尾部为负是**实测常态**（基准 -673R），不能当异常处理掉。"""
-        trades = [{"ret": 0.35, "r_multiple": 40.0}] + \
-                 [{"ret": -0.03, "r_multiple": -1.5}] * 20
+        trades = [{"ret": 0.35, "r_multiple": 40.0}] + [
+            {"ret": -0.03, "r_multiple": -1.5}
+        ] * 20
         tail, non = m2._tail_split(trades)
         assert tail == pytest.approx(40.0) and non == pytest.approx(-30.0)
 
@@ -831,8 +1244,9 @@ class TestTailSplit:
 
     def test_zero_total_still_splits(self):
         """总R 为 0 也要能拆——比值口径在这里会除零，绝对量不会。"""
-        assert m2._tail_split([{"ret": 0.3, "r_multiple": 5.0},
-                               {"ret": -0.1, "r_multiple": -5.0}]) == (5.0, -5.0)
+        assert m2._tail_split(
+            [{"ret": 0.3, "r_multiple": 5.0}, {"ret": -0.1, "r_multiple": -5.0}]
+        ) == (5.0, -5.0)
 
 
 class TestSideClassifiedByFlags:
@@ -844,36 +1258,57 @@ class TestSideClassifiedByFlags:
     去过「大赢家占比不降」——正是 6785724 刚修掉的那类误否。
     """
 
-    @pytest.mark.parametrize("group,name,want", [
-        ("A_stop_low", "trail_08", "exit"),
-        ("A_stop_low", "be_05", "exit"),
-        ("A_stop_low", "cost_zone_3", "exit"),
-        ("A_stop_low", "tick_buffer_3", "exit"),
-        ("A_stop_low", "trigger_intraday", "exit"),
-        ("A_stop_low", "amv_long_only", "entry"),      # 择时筛信号
-        ("B_stop_pct", "pct_05", "exit"),              # 关键：止损距离仍是出场类
-        ("B_stop_pct", "pct_12", "exit"),
-        ("B_stop_pct", "pct_12_amv", "entry"),         # 带 amv ⇒ 按入场类严格判
-        ("B_stop_pct", "pct_08_amv", "entry"),
-    ])
+    @pytest.mark.parametrize(
+        "group,name,want",
+        [
+            ("A_stop_low", "trail_08", "exit"),
+            ("A_stop_low", "be_05", "exit"),
+            ("A_stop_low", "cost_zone_3", "exit"),
+            ("A_stop_low", "tick_buffer_3", "exit"),
+            ("A_stop_low", "trigger_intraday", "exit"),
+            ("A_stop_low", "amv_long_only", "entry"),  # 择时筛信号
+            ("B_stop_pct", "pct_05", "exit"),  # 关键：止损距离仍是出场类
+            ("B_stop_pct", "pct_12", "exit"),
+            ("B_stop_pct", "pct_12_amv", "entry"),  # 带 amv ⇒ 按入场类严格判
+            ("B_stop_pct", "pct_08_amv", "entry"),
+        ],
+    )
     def test_flag_semantics(self, group, name, want):
         base = m2.GROUPS[group]["baseline"]
         assert m2._side_from_flags(group, name, base) == want
 
-    def test_pct_05_not_misjudged_despite_trade_count_gap(self, tmp_path, monkeypatch,
-                                                          capsys):
+    def test_pct_05_not_misjudged_despite_trade_count_gap(
+        self, tmp_path, monkeypatch, capsys
+    ):
         """笔数差 6.4%（越过旧 5% 线）也必须归为出场机制，不能判成入场类。
 
         但它同时**改了 R 分母**（stop_pct 5 vs 8）⇒ 标 [出场·R口径变]，改用期望% 判。
         """
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write_tr(tmp_path, "B_stop_pct", "pct_08", n=342, expR=0.24, totR=83.0,
-                  aw=0.11, big=40)
-        _write_tr(tmp_path, "B_stop_pct", "pct_05", n=364, expR=0.433, totR=157.7,
-                  aw=0.095, big=38)
+        _write_tr(
+            tmp_path,
+            "B_stop_pct",
+            "pct_08",
+            n=342,
+            expR=0.24,
+            totR=83.0,
+            aw=0.11,
+            big=40,
+        )
+        _write_tr(
+            tmp_path,
+            "B_stop_pct",
+            "pct_05",
+            n=364,
+            expR=0.433,
+            totR=157.7,
+            aw=0.095,
+            big=38,
+        )
         m2.report(cross=False)
-        line = next(ln for ln in capsys.readouterr().out.split("\n")
-                    if "  pct_05  " in ln)
+        line = next(
+            ln for ln in capsys.readouterr().out.split("\n") if "  pct_05  " in ln
+        )
         assert "[出场·R口径变]" in line, f"止损距离是出场机制但改了 R 分母: {line}"
 
 
@@ -891,20 +1326,23 @@ class TestRDenominatorGuard:
     ——分组只按 stop_mode 分，没按 stop_pct 分。
     """
 
-    @pytest.mark.parametrize("group,name,same", [
-        # 改止损距离 ⇒ 分母变
-        ("B_stop_pct", "pct_05", False),
-        ("B_stop_pct", "pct_12", False),
-        ("A_stop_low", "tick_buffer_3", False),
-        # 只改离场时点 ⇒ risk_frac 在 1297 行按**初始**止损算完，分母不变
-        ("A_stop_low", "trail_08", True),
-        ("A_stop_low", "be_03", True),
-        ("A_stop_low", "cost_zone_3", True),
-        ("A_stop_low", "trigger_intraday", True),
-        ("A_stop_low", "amv_long_only", True),
-        # 与基准同档位的择时变体 ⇒ 分母一致，R 可比
-        ("B_stop_pct", "pct_08_amv", True),
-    ])
+    @pytest.mark.parametrize(
+        "group,name,same",
+        [
+            # 改止损距离 ⇒ 分母变
+            ("B_stop_pct", "pct_05", False),
+            ("B_stop_pct", "pct_12", False),
+            ("A_stop_low", "tick_buffer_3", False),
+            # 只改离场时点 ⇒ risk_frac 在 1297 行按**初始**止损算完，分母不变
+            ("A_stop_low", "trail_08", True),
+            ("A_stop_low", "be_03", True),
+            ("A_stop_low", "cost_zone_3", True),
+            ("A_stop_low", "trigger_intraday", True),
+            ("A_stop_low", "amv_long_only", True),
+            # 与基准同档位的择时变体 ⇒ 分母一致，R 可比
+            ("B_stop_pct", "pct_08_amv", True),
+        ],
+    )
     def test_denominator_identity(self, group, name, same):
         base = m2.GROUPS[group]["baseline"]
         assert m2._same_r_denom(group, name, base) is same
@@ -916,10 +1354,26 @@ class TestRDenominatorGuard:
     def test_diff_denominator_judged_by_expectancy(self, tmp_path, monkeypatch, capsys):
         """实测 pct_05 vs pct_08：期望 0.67% vs 0.64% ⇒ **+4.7%**，不是 +73.8%。"""
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write_pct(tmp_path, "pct_08", n=1136, exp=0.0064, stop=0.08, win=0.482,
-                   payoff=1.227, big=76)
-        _write_pct(tmp_path, "pct_05", n=1177, exp=0.0067, stop=0.05, win=0.446,
-                   payoff=1.453, big=70)
+        _write_pct(
+            tmp_path,
+            "pct_08",
+            n=1136,
+            exp=0.0064,
+            stop=0.08,
+            win=0.482,
+            payoff=1.227,
+            big=76,
+        )
+        _write_pct(
+            tmp_path,
+            "pct_05",
+            n=1177,
+            exp=0.0067,
+            stop=0.05,
+            win=0.446,
+            payoff=1.453,
+            big=70,
+        )
         m2.report(cross=False)
         out = capsys.readouterr().out
         line = next(ln for ln in out.split("\n") if "  pct_05  " in ln)
@@ -928,18 +1382,36 @@ class TestRDenominatorGuard:
         assert "R 口径不同" in out
         assert "✅ 通过" in line
 
-    def test_diff_denominator_rejects_on_thin_margin(self, tmp_path, monkeypatch,
-                                                     capsys):
+    def test_diff_denominator_rejects_on_thin_margin(
+        self, tmp_path, monkeypatch, capsys
+    ):
         """异口径的出场类还要看 margin：期望% 涨一点但安全边际变薄 ⇒ 否决。"""
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write_pct(tmp_path, "pct_08", n=1136, exp=0.0064, stop=0.08, win=0.482,
-                   payoff=1.227, big=76)
+        _write_pct(
+            tmp_path,
+            "pct_08",
+            n=1136,
+            exp=0.0064,
+            stop=0.08,
+            win=0.482,
+            payoff=1.227,
+            big=76,
+        )
         # 期望 +9%，但胜率掉到勉强够本 ⇒ margin 从 +3.3pp 缩到 +0.5pp
-        _write_pct(tmp_path, "pct_05", n=1177, exp=0.0070, stop=0.05, win=0.413,
-                   payoff=1.325, big=70)
+        _write_pct(
+            tmp_path,
+            "pct_05",
+            n=1177,
+            exp=0.0070,
+            stop=0.05,
+            win=0.413,
+            payoff=1.325,
+            big=70,
+        )
         m2.report(cross=False)
-        line = next(ln for ln in capsys.readouterr().out.split("\n")
-                    if "  pct_05  " in ln)
+        line = next(
+            ln for ln in capsys.readouterr().out.split("\n") if "  pct_05  " in ln
+        )
         assert "❌ 否决" in line and "margin" in line and "变薄" in line
 
     def test_tick_buffer_no_longer_judged_by_r(self, tmp_path, monkeypatch, capsys):
@@ -949,10 +1421,28 @@ class TestRDenominatorGuard:
         ⇒ 分母可能多出近 50%，R 被系统性压低。**那个否决是分母造成的。**
         """
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write_pct(tmp_path, "00_baseline", n=1294, exp=0.0039, stop=0.0065,
-                   win=0.298, payoff=2.678, big=61, group="A_stop_low")
-        _write_pct(tmp_path, "tick_buffer_3", n=1283, exp=0.0052, stop=0.0095,
-                   win=0.324, payoff=2.450, big=63, group="A_stop_low")
+        _write_pct(
+            tmp_path,
+            "00_baseline",
+            n=1294,
+            exp=0.0039,
+            stop=0.0065,
+            win=0.298,
+            payoff=2.678,
+            big=61,
+            group="A_stop_low",
+        )
+        _write_pct(
+            tmp_path,
+            "tick_buffer_3",
+            n=1283,
+            exp=0.0052,
+            stop=0.0095,
+            win=0.324,
+            payoff=2.450,
+            big=63,
+            group="A_stop_low",
+        )
         m2.report(cross=False)
         out = capsys.readouterr().out
         line = next(ln for ln in out.split("\n") if "  tick_buffer_3  " in ln)
@@ -962,10 +1452,21 @@ class TestRDenominatorGuard:
     def test_unknown_scheme_falls_back_to_trade_count(self):
         """GROUPS 里查不到的方案（手工拷进来的文件）回落到笔数启发式。"""
         assert m2._side_from_flags("A_stop_low", "手工方案", "00_baseline") is None
-        assert m2._side_of("A_stop_low", {"name": "手工方案", "n": 1298},
-                           {"n": 1294}, "00_baseline") == "exit"
-        assert m2._side_of("A_stop_low", {"name": "手工方案", "n": 230},
-                           {"n": 1294}, "00_baseline") == "entry"
+        assert (
+            m2._side_of(
+                "A_stop_low",
+                {"name": "手工方案", "n": 1298},
+                {"n": 1294},
+                "00_baseline",
+            )
+            == "exit"
+        )
+        assert (
+            m2._side_of(
+                "A_stop_low", {"name": "手工方案", "n": 230}, {"n": 1294}, "00_baseline"
+            )
+            == "entry"
+        )
 
     def test_baseline_flags_subtracted(self):
         """与基准做差：B 组基准自带 --stop-pct，不能因此把所有方案都算成出场。"""
@@ -976,51 +1477,109 @@ class TestRDenominatorGuard:
         """只比 flag 名会把 `--stop-pct 5` 和 `--stop-pct 8` 看成「没差异」。"""
         assert m2._flag_pairs(["--stop-pct", "5"]) == {"--stop-pct": "5"}
         assert m2._flag_pairs(["--amv-long-only"]) == {"--amv-long-only": None}
-        assert m2._flag_pairs(["--stop-pct", "12", "--amv-long-only",
-                               "--cost-zone-bars", "3"]) == {
-            "--stop-pct": "12", "--amv-long-only": None, "--cost-zone-bars": "3"}
+        assert m2._flag_pairs(
+            ["--stop-pct", "12", "--amv-long-only", "--cost-zone-bars", "3"]
+        ) == {"--stop-pct": "12", "--amv-long-only": None, "--cost-zone-bars": "3"}
         assert m2._flag_pairs([]) == {}
 
 
 class TestExitSideNeedsExpectancyToo:
     """出场类不能只看累计R——**止损越紧笔数越多**，纯摊薄就能凑够 +2%。"""
 
-    def test_total_r_gain_from_trade_count_is_rejected(self, tmp_path, monkeypatch,
-                                                      capsys):
+    def test_total_r_gain_from_trade_count_is_rejected(
+        self, tmp_path, monkeypatch, capsys
+    ):
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
         # 期望R 略降(0.202→0.198)，但笔数 +6% ⇒ 累计R +3.9% 达标
-        _write_tr(tmp_path, "A_stop_low", "00_baseline", n=1294, expR=0.202,
-                  totR=261.4, aw=0.11, big=61)
-        _write_tr(tmp_path, "A_stop_low", "cost_zone_3", n=1372, expR=0.198,
-                  totR=271.7, aw=0.11, big=64)
+        _write_tr(
+            tmp_path,
+            "A_stop_low",
+            "00_baseline",
+            n=1294,
+            expR=0.202,
+            totR=261.4,
+            aw=0.11,
+            big=61,
+        )
+        _write_tr(
+            tmp_path,
+            "A_stop_low",
+            "cost_zone_3",
+            n=1372,
+            expR=0.198,
+            totR=271.7,
+            aw=0.11,
+            big=64,
+        )
         m2.report(cross=False)
-        line = next(ln for ln in capsys.readouterr().out.split("\n")
-                    if "cost_zone_3" in ln and "累计R" in ln)
+        line = next(
+            ln
+            for ln in capsys.readouterr().out.split("\n")
+            if "cost_zone_3" in ln and "累计R" in ln
+        )
         assert "❌ 否决" in line, f"累计R 靠笔数摊薄不算改进: {line}"
         assert "摊薄" in line
 
     def test_real_improvement_still_passes(self, tmp_path, monkeypatch, capsys):
         """trail_08 实测：期望R +42.6% 且累计R +43.1% ⇒ 必须通过。"""
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write_tr(tmp_path, "A_stop_low", "00_baseline", n=1294, expR=0.202,
-                  totR=250.5, aw=0.1098, big=61)
-        _write_tr(tmp_path, "A_stop_low", "trail_08", n=1298, expR=0.288,
-                  totR=358.4, aw=0.1015, big=52)
+        _write_tr(
+            tmp_path,
+            "A_stop_low",
+            "00_baseline",
+            n=1294,
+            expR=0.202,
+            totR=250.5,
+            aw=0.1098,
+            big=61,
+        )
+        _write_tr(
+            tmp_path,
+            "A_stop_low",
+            "trail_08",
+            n=1298,
+            expR=0.288,
+            totR=358.4,
+            aw=0.1015,
+            big=52,
+        )
         m2.report(cross=False)
-        line = next(ln for ln in capsys.readouterr().out.split("\n")
-                    if "trail_08" in ln and "累计R" in ln)
+        line = next(
+            ln
+            for ln in capsys.readouterr().out.split("\n")
+            if "trail_08" in ln and "累计R" in ln
+        )
         assert "✅ 通过" in line and "笔数" in line
 
     def test_trade_count_delta_is_shown(self, tmp_path, monkeypatch, capsys):
         """笔数变化必须显式打出来——它是累计R 判读的前提。"""
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write_tr(tmp_path, "A_stop_low", "00_baseline", n=1000, expR=0.2,
-                  totR=200.0, aw=0.11, big=50)
-        _write_tr(tmp_path, "A_stop_low", "trail_12", n=1100, expR=0.25,
-                  totR=275.0, aw=0.11, big=55)
+        _write_tr(
+            tmp_path,
+            "A_stop_low",
+            "00_baseline",
+            n=1000,
+            expR=0.2,
+            totR=200.0,
+            aw=0.11,
+            big=50,
+        )
+        _write_tr(
+            tmp_path,
+            "A_stop_low",
+            "trail_12",
+            n=1100,
+            expR=0.25,
+            totR=275.0,
+            aw=0.11,
+            big=55,
+        )
         m2.report(cross=False)
-        line = next(ln for ln in capsys.readouterr().out.split("\n")
-                    if "trail_12" in ln and "累计R" in ln)
+        line = next(
+            ln
+            for ln in capsys.readouterr().out.split("\n")
+            if "trail_12" in ln and "累计R" in ln
+        )
         assert "+10.0%" in line
 
 
@@ -1031,20 +1590,41 @@ class TestBGroupBaselineIsMiddleTier:
         assert m2.GROUPS["B_stop_pct"]["baseline"] == "pct_08"
 
     def test_baseline_is_not_an_extreme(self):
-        pcts = sorted(float(e[e.index("--stop-pct") + 1])
-                      for n, e in m2.GROUPS["B_stop_pct"]["runs"].items()
-                      if "--stop-pct" in e and "amv" not in n)
+        pcts = sorted(
+            float(e[e.index("--stop-pct") + 1])
+            for n, e in m2.GROUPS["B_stop_pct"]["runs"].items()
+            if "--stop-pct" in e and "amv" not in n
+        )
         base = m2.GROUPS["B_stop_pct"]["baseline"]
-        bp = float(m2.GROUPS["B_stop_pct"]["runs"][base][
-            m2.GROUPS["B_stop_pct"]["runs"][base].index("--stop-pct") + 1])
+        bp = float(
+            m2.GROUPS["B_stop_pct"]["runs"][base][
+                m2.GROUPS["B_stop_pct"]["runs"][base].index("--stop-pct") + 1
+            ]
+        )
         assert min(pcts) < bp < max(pcts), f"基准 {bp} 不该是极端档位（{pcts}）"
 
     def test_report_says_relative(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write_tr(tmp_path, "B_stop_pct", "pct_08", n=342, expR=0.24, totR=83.0,
-                  aw=0.11, big=40)
-        _write_tr(tmp_path, "B_stop_pct", "pct_12", n=330, expR=0.17, totR=57.2,
-                  aw=0.12, big=38)
+        _write_tr(
+            tmp_path,
+            "B_stop_pct",
+            "pct_08",
+            n=342,
+            expR=0.24,
+            totR=83.0,
+            aw=0.11,
+            big=40,
+        )
+        _write_tr(
+            tmp_path,
+            "B_stop_pct",
+            "pct_12",
+            n=330,
+            expR=0.17,
+            totR=57.2,
+            aw=0.12,
+            big=38,
+        )
         m2.report(cross=False)
         out = capsys.readouterr().out
         assert "参数扫描" in out and "相对中间档" in out
@@ -1067,9 +1647,18 @@ class TestMissingSchemesSurfaced:
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
         for g, meta in m2.GROUPS.items():
             for n in meta["runs"]:
-                _write(tmp_path, g, n,
-                       pf={"total_return": 0.1, "cagr": 0.05, "max_drawdown": 0.1,
-                           "n_taken": 100, "n_skipped": 100})
+                _write(
+                    tmp_path,
+                    g,
+                    n,
+                    pf={
+                        "total_return": 0.1,
+                        "cagr": 0.05,
+                        "max_drawdown": 0.1,
+                        "n_taken": 100,
+                        "n_skipped": 100,
+                    },
+                )
         m2.report(cross=False)
         assert "个方案的结果文件" not in capsys.readouterr().out
 
@@ -1081,8 +1670,9 @@ class TestPortfolioRankedByReturnOverDD:
         assert m2._ret_over_dd({"return_over_maxdd": 1.61}) == pytest.approx(1.61)
 
     def test_ret_over_dd_computed_when_absent(self):
-        assert m2._ret_over_dd({"total_return": 0.2,
-                                "max_drawdown": 0.1}) == pytest.approx(2.0)
+        assert m2._ret_over_dd(
+            {"total_return": 0.2, "max_drawdown": 0.1}
+        ) == pytest.approx(2.0)
 
     def test_ret_over_dd_none_on_zero_dd(self):
         assert m2._ret_over_dd({"total_return": 0.2, "max_drawdown": 0}) is None
@@ -1091,12 +1681,30 @@ class TestPortfolioRankedByReturnOverDD:
     def test_high_exposure_not_ranked_first(self, tmp_path, monkeypatch, capsys):
         """高敞口：总收益更高但回撤更大 ⇒ 不该排第一。"""
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write(tmp_path, "C_portfolio", "pf_c5_p20",       # 满仓：收益高、回撤更高
-               pf={"total_return": 0.40, "cagr": 0.20, "max_drawdown": 0.47,
-                   "n_taken": 299, "n_skipped": 1046})
-        _write(tmp_path, "C_portfolio", "pf_c5_p05",       # 低敞口：收益低但回撤小
-               pf={"total_return": 0.18, "cagr": 0.11, "max_drawdown": 0.09,
-                   "n_taken": 150, "n_skipped": 1195})
+        _write(
+            tmp_path,
+            "C_portfolio",
+            "pf_c5_p20",  # 满仓：收益高、回撤更高
+            pf={
+                "total_return": 0.40,
+                "cagr": 0.20,
+                "max_drawdown": 0.47,
+                "n_taken": 299,
+                "n_skipped": 1046,
+            },
+        )
+        _write(
+            tmp_path,
+            "C_portfolio",
+            "pf_c5_p05",  # 低敞口：收益低但回撤小
+            pf={
+                "total_return": 0.18,
+                "cagr": 0.11,
+                "max_drawdown": 0.09,
+                "n_taken": 150,
+                "n_skipped": 1195,
+            },
+        )
         m2.report(cross=False)
         seg = capsys.readouterr().out.split("【C_portfolio】")[1]
         assert seg.index("pf_c5_p05") < seg.index("pf_c5_p20")
@@ -1115,27 +1723,40 @@ class TestReuseTradesForPortfolio:
     差异全在资金曲线层；只有 `--top-n`（collect_all，逐笔口径不同）必须自己跑。"""
 
     def test_reuse_map_points_at_same_backtest_params(self):
-        pf_layer = {"--max-concurrent", "--max-pos", "--risk-pct", "--top-n",
-                    "--portfolio"}
+        pf_layer = {
+            "--max-concurrent",
+            "--max-pos",
+            "--risk-pct",
+            "--top-n",
+            "--portfolio",
+        }
         for g, meta in m2.GROUPS.items():
             for dst, ref in (meta.get("reuse") or {}).items():
                 sg, sn = ref.split("/", 1) if "/" in ref else (g, ref)
                 # 必须含 common：C 组的 --stop-pct 12 写在 common 里
                 a = m2._flag_pairs(list(meta["common"]) + list(meta["runs"][dst]))
-                b = m2._flag_pairs(list(m2.GROUPS[sg]["common"])
-                                   + list(m2.GROUPS[sg]["runs"][sn]))
-                changed = {f for f in set(a) | set(b) if a.get(f, "\0") != b.get(f, "\0")}
-                assert changed <= pf_layer, f"{g}/{dst} 与 {ref} 差异不止资金曲线层: {changed}"
+                b = m2._flag_pairs(
+                    list(m2.GROUPS[sg]["common"]) + list(m2.GROUPS[sg]["runs"][sn])
+                )
+                changed = {
+                    f for f in set(a) | set(b) if a.get(f, "\0") != b.get(f, "\0")
+                }
+                assert changed <= pf_layer, (
+                    f"{g}/{dst} 与 {ref} 差异不止资金曲线层: {changed}"
+                )
                 # collect_all 由 --top-n 决定，两边必须一致，否则逐笔口径不同
-                assert ("--top-n" in a) == ("--top-n" in b), f"{g}/{dst} vs {ref} top-n 不一致"
+                assert ("--top-n" in a) == ("--top-n" in b), (
+                    f"{g}/{dst} vs {ref} top-n 不一致"
+                )
 
     def test_reuse_sources_are_not_themselves_derived(self):
         for g, meta in m2.GROUPS.items():
             reuse = meta.get("reuse") or {}
             for ref in reuse.values():
                 sg, sn = ref.split("/", 1) if "/" in ref else (g, ref)
-                assert sn not in (m2.GROUPS[sg].get("reuse") or {}), \
+                assert sn not in (m2.GROUPS[sg].get("reuse") or {}), (
                     f"{ref} 既是源又是派生，会形成依赖链"
+                )
 
     def test_only_one_real_backtest_left_in_c_group(self):
         """C 组 8 个方案里只该剩 1 个真回测（collect_all 那条）。"""
@@ -1153,12 +1774,14 @@ class TestReuseTradesForPortfolio:
         def fake_run(cmd, **kw):
             seen["cmd"] = cmd
             (tmp_path / "C_portfolio__pf_c2_p20__s1000.json").write_text(
-                "{}", encoding="utf-8")
+                "{}", encoding="utf-8"
+            )
             return type("R", (), {"returncode": 0, "stdout": ""})()
 
         monkeypatch.setattr(m2.subprocess, "run", fake_run)
-        m2._run("C_portfolio", "pf_c2_p20", ["--max-concurrent", "2"], 1000,
-                False, False)
+        m2._run(
+            "C_portfolio", "pf_c2_p20", ["--max-concurrent", "2"], 1000, False, False
+        )
         assert "--from-trades" in seen["cmd"]
         assert str(src) in seen["cmd"], "跨组复用要指向 B 组的结果文件"
 
@@ -1170,12 +1793,20 @@ class TestReuseTradesForPortfolio:
         def fake_run(cmd, **kw):
             seen["cmd"] = cmd
             (tmp_path / "C_portfolio__pf_c2_p20__s1000.json").write_text(
-                "{}", encoding="utf-8")
+                "{}", encoding="utf-8"
+            )
             return type("R", (), {"returncode": 0, "stdout": ""})()
 
         monkeypatch.setattr(m2.subprocess, "run", fake_run)
-        _, _, log = m2._run("C_portfolio", "pf_c2_p20", ["--max-concurrent", "2"],
-                            1000, False, False, True)   # capture=True：日志进返回值
+        _, _, log = m2._run(
+            "C_portfolio",
+            "pf_c2_p20",
+            ["--max-concurrent", "2"],
+            1000,
+            False,
+            False,
+            True,
+        )  # capture=True：日志进返回值
         assert "--from-trades" not in seen["cmd"]
         assert "改为全量回测" in log
 
@@ -1191,16 +1822,23 @@ class TestReuseTradesForPortfolio:
 
         def fake_run(cmd, **kw):
             calls.append(cmd)
-            if "--from-trades" in cmd:                       # 第一次：复用失败
+            if "--from-trades" in cmd:  # 第一次：复用失败
                 return type("R", (), {"returncode": 2, "stdout": "口径不一致"})()
             (tmp_path / "C_portfolio__pf_c2_p20__s1000.json").write_text(
-                "{}", encoding="utf-8")
+                "{}", encoding="utf-8"
+            )
             return type("R", (), {"returncode": 0, "stdout": ""})()
 
         monkeypatch.setattr(m2.subprocess, "run", fake_run)
-        _, path, log = m2._run("C_portfolio", "pf_c2_p20",
-                               ["--max-concurrent", "2", "--max-pos", "20"],
-                               1000, False, False, True)
+        _, path, log = m2._run(
+            "C_portfolio",
+            "pf_c2_p20",
+            ["--max-concurrent", "2", "--max-pos", "20"],
+            1000,
+            False,
+            False,
+            True,
+        )
         assert len(calls) == 2, "应重试一次"
         assert "--from-trades" in calls[0] and "--from-trades" not in calls[1]
         # 退回后 --max-concurrent 等原参数必须还在
@@ -1210,11 +1848,18 @@ class TestReuseTradesForPortfolio:
     def test_sources_run_before_derived(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
         order: list[str] = []
-        monkeypatch.setattr(m2, "_run",
-                            lambda g, n, e, s, c, f, cap=False, ds="tdx", w=None, cf=None:
-                            (order.append(n), (f"{g}/{n}", tmp_path / "x", ""))[1])
-        todo = [("C_portfolio", "pf_c2_p20", []),      # 派生（复用 B 组）
-                ("B_stop_pct", "pct_12", [])]          # 源（故意排在后面）
+        monkeypatch.setattr(
+            m2,
+            "_run",
+            lambda g, n, e, s, c, f, cap=False, ds="tdx", w=None, cf=None: (
+                order.append(n),
+                (f"{g}/{n}", tmp_path / "x", ""),
+            )[1],
+        )
+        todo = [
+            ("C_portfolio", "pf_c2_p20", []),  # 派生（复用 B 组）
+            ("B_stop_pct", "pct_12", []),
+        ]  # 源（故意排在后面）
         m2._run_all(todo, 1000, False, False, 1)
         assert order.index("pct_12") < order.index("pf_c2_p20")
 
@@ -1222,11 +1867,18 @@ class TestReuseTradesForPortfolio:
         """collect_all 方案单独串行——它的逐笔条数高一个量级，并行会撞 OOM。"""
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
         order: list[str] = []
-        monkeypatch.setattr(m2, "_run",
-                            lambda g, n, e, s, c, f, cap=False, ds="tdx", w=None, cf=None:
-                            (order.append(n), (f"{g}/{n}", tmp_path / "x", ""))[1])
-        todo = [("C_portfolio", "pf_top2_c2_amv", []),   # 重活
-                ("A_stop_low", "be_03", [])]             # 轻活
+        monkeypatch.setattr(
+            m2,
+            "_run",
+            lambda g, n, e, s, c, f, cap=False, ds="tdx", w=None, cf=None: (
+                order.append(n),
+                (f"{g}/{n}", tmp_path / "x", ""),
+            )[1],
+        )
+        todo = [
+            ("C_portfolio", "pf_top2_c2_amv", []),  # 重活
+            ("A_stop_low", "be_03", []),
+        ]  # 轻活
         m2._run_all(todo, 1000, False, False, 4)
         assert order.index("be_03") < order.index("pf_top2_c2_amv")
         assert "单独串行" in capsys.readouterr().out
@@ -1235,9 +1887,15 @@ class TestReuseTradesForPortfolio:
 class TestFailureRecap:
     def test_failed_runs_listed_at_end(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        monkeypatch.setattr(m2, "_run",
-                            lambda g, n, e, s, c, f, cap=False, ds="tdx", w=None, cf=None:
-                            (f"{g}/{n}", None, "[FAIL] boom"))
+        monkeypatch.setattr(
+            m2,
+            "_run",
+            lambda g, n, e, s, c, f, cap=False, ds="tdx", w=None, cf=None: (
+                f"{g}/{n}",
+                None,
+                "[FAIL] boom",
+            ),
+        )
         m2._run_all([("A_stop_low", "be_03", [])], 1000, False, False, 1)
         out = capsys.readouterr().out
         assert "1 个方案失败" in out and "A_stop_low/be_03" in out
@@ -1248,12 +1906,15 @@ class TestFailureRecap:
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
 
         def fake_run(cmd, **kw):
-            (tmp_path / "A_stop_low__be_03__s1000.json").write_text("{}", encoding="utf-8")
+            (tmp_path / "A_stop_low__be_03__s1000.json").write_text(
+                "{}", encoding="utf-8"
+            )
             return type("R", (), {"returncode": 0, "stdout": ""})()
 
         monkeypatch.setattr(m2.subprocess, "run", fake_run)
-        m2._run_all([("A_stop_low", "be_03", ["--breakeven", "0.03"])],
-                    1000, False, False, 1)
+        m2._run_all(
+            [("A_stop_low", "be_03", ["--breakeven", "0.03"])], 1000, False, False, 1
+        )
         out = capsys.readouterr().out
         assert out.count("[RUN ] A_stop_low/be_03") == 1
         assert out.count("[DONE] A_stop_low/be_03") == 1
@@ -1274,26 +1935,38 @@ class TestFailureRecap:
             return type("R", (), {"returncode": 0, "stdout": ""})()
 
         monkeypatch.setattr(m2.subprocess, "run", fake_run)
-        m2._run_all([("A_stop_low", "be_03", ["--breakeven", "0.03"]),
-                     ("A_stop_low", "be_05", ["--breakeven", "0.05"])],
-                    1000, False, False, 2)
+        m2._run_all(
+            [
+                ("A_stop_low", "be_03", ["--breakeven", "0.03"]),
+                ("A_stop_low", "be_05", ["--breakeven", "0.05"]),
+            ],
+            1000,
+            False,
+            False,
+            2,
+        )
         out = capsys.readouterr().out
         assert out.count("[START] A_stop_low/be_03") == 1
         assert out.count("[START] A_stop_low/be_05") == 1
         # 心跳在结果块之前
-        assert out.index("[START] A_stop_low/be_03") < out.index("[DONE] A_stop_low/be_03")
+        assert out.index("[START] A_stop_low/be_03") < out.index(
+            "[DONE] A_stop_low/be_03"
+        )
 
     def test_serial_has_no_duplicate_heartbeat(self, tmp_path, monkeypatch, capsys):
         """串行本来就实时打印，不该再多一行心跳。"""
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
 
         def fake_run(cmd, **kw):
-            (tmp_path / "A_stop_low__be_03__s1000.json").write_text("{}", encoding="utf-8")
+            (tmp_path / "A_stop_low__be_03__s1000.json").write_text(
+                "{}", encoding="utf-8"
+            )
             return type("R", (), {"returncode": 0, "stdout": ""})()
 
         monkeypatch.setattr(m2.subprocess, "run", fake_run)
-        m2._run_all([("A_stop_low", "be_03", ["--breakeven", "0.03"])],
-                    1000, False, False, 1)
+        m2._run_all(
+            [("A_stop_low", "be_03", ["--breakeven", "0.03"])], 1000, False, False, 1
+        )
         assert "[START]" not in capsys.readouterr().out
 
     def test_parallel_prints_each_line_once(self, tmp_path, monkeypatch, capsys):
@@ -1306,9 +1979,16 @@ class TestFailureRecap:
             return type("R", (), {"returncode": 0, "stdout": "子进程输出"})()
 
         monkeypatch.setattr(m2.subprocess, "run", fake_run)
-        m2._run_all([("A_stop_low", "be_03", ["--breakeven", "0.03"]),
-                     ("A_stop_low", "be_05", ["--breakeven", "0.05"])],
-                    1000, False, False, 2)
+        m2._run_all(
+            [
+                ("A_stop_low", "be_03", ["--breakeven", "0.03"]),
+                ("A_stop_low", "be_05", ["--breakeven", "0.05"]),
+            ],
+            1000,
+            False,
+            False,
+            2,
+        )
         out = capsys.readouterr().out
         assert out.count("[RUN ] A_stop_low/be_03") == 1
         assert out.count("[DONE] A_stop_low/be_03") == 1
@@ -1333,8 +2013,9 @@ class TestReportUsesTheBatchJustRun:
         out = capsys.readouterr().out
         assert "样本 300 只" in out, "应汇总刚跑的 s300，而非最大的 s2000"
 
-    def test_report_only_without_sample_takes_largest(self, tmp_path, monkeypatch,
-                                                     capsys):
+    def test_report_only_without_sample_takes_largest(
+        self, tmp_path, monkeypatch, capsys
+    ):
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
         _write(tmp_path, "A_stop_low", "00_baseline", fp="s300", n=409)
         _write(tmp_path, "A_stop_low", "00_baseline", fp="s2000", n=2600)
@@ -1355,7 +2036,7 @@ class TestMemoryGuards:
         monkeypatch.setattr(m2.os, "cpu_count", lambda: 32)
         monkeypatch.setattr(m2, "_avail_mem_mb", lambda: 3_000.0)
         monkeypatch.setattr(m2, "MEM_PER_JOB_MB", 1200)
-        assert m2._cap_jobs(8, 20) == 2          # 3000*0.8/1200 = 2
+        assert m2._cap_jobs(8, 20) == 2  # 3000*0.8/1200 = 2
         assert "降到 2" in capsys.readouterr().out
 
     def test_cap_jobs_bounded_by_cpu_count(self, monkeypatch, capsys):
@@ -1387,8 +2068,9 @@ class TestMemoryGuards:
         assert "读不到可用内存" in capsys.readouterr().out
 
     def test_serial_skips_memory_check(self, monkeypatch):
-        monkeypatch.setattr(m2, "_avail_mem_mb",
-                            lambda: pytest.fail("串行不该去探内存"))
+        monkeypatch.setattr(
+            m2, "_avail_mem_mb", lambda: pytest.fail("串行不该去探内存")
+        )
         assert m2._cap_jobs(1, 20) == 1
 
     def test_avail_mem_returns_positive_or_none(self):
@@ -1418,7 +2100,9 @@ class TestPinnedWindowAndUniverse:
         assert a[a.index("--start") + 1] == "2024-08-01"
         assert a[a.index("--end") + 1] == "2026-08-05"
         assert int(a[a.index("--count") + 1]) == m2.WINDOW_COUNT
-        assert m2.WINDOW_COUNT > 500, "count 必须大于窗口内 K 线根数，否则 tail 又来定窗口"
+        assert m2.WINDOW_COUNT > 500, (
+            "count 必须大于窗口内 K 线根数，否则 tail 又来定窗口"
+        )
 
     def test_no_window_keeps_default_count(self):
         a = m2._base_args(1000, False, "tdx")
@@ -1443,12 +2127,15 @@ class TestPinnedWindowAndUniverse:
     def test_collect_isolates_pinned_from_unpinned(self, tmp_path, monkeypatch):
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
         _write(tmp_path, "A_stop_low", "00_baseline", fp="s1000", n=1106)
-        _write(tmp_path, "A_stop_low", "trail_08",
-               fp="s1000_w20240801-20260805_u", n=1150)
-        assert [r["name"] for r in m2._collect(cross=False)["A_stop_low"]] \
-            == ["00_baseline"]
-        got = m2._collect(cross=False, window=("2024-08-01", "2026-08-05"),
-                          pin_universe=True)["A_stop_low"]
+        _write(
+            tmp_path, "A_stop_low", "trail_08", fp="s1000_w20240801-20260805_u", n=1150
+        )
+        assert [r["name"] for r in m2._collect(cross=False)["A_stop_low"]] == [
+            "00_baseline"
+        ]
+        got = m2._collect(
+            cross=False, window=("2024-08-01", "2026-08-05"), pin_universe=True
+        )["A_stop_low"]
         assert [r["name"] for r in got] == ["trail_08"]
 
     def test_report_warns_when_not_reproducible(self, tmp_path, monkeypatch, capsys):
@@ -1469,25 +2156,37 @@ class TestPinnedWindowAndUniverse:
     def test_prepare_universe_reuses_existing(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
         fp = m2._fingerprint(1000, False, "tdx", None, True)
-        (tmp_path / f"_universe__{fp}.txt").write_text("600000\n000001\n",
-                                                      encoding="utf-8")
-        monkeypatch.setattr(m2.subprocess, "run",
-                            lambda *a, **k: pytest.fail("已有代码表不该再跑一次"))
+        (tmp_path / f"_universe__{fp}.txt").write_text(
+            "600000\n000001\n", encoding="utf-8"
+        )
+        monkeypatch.setattr(
+            m2.subprocess, "run", lambda *a, **k: pytest.fail("已有代码表不该再跑一次")
+        )
         got = m2._prepare_universe(1000, False, "tdx", None)
         assert got and "2 只" in capsys.readouterr().out
 
     def test_prepare_universe_degrades_on_failure(self, tmp_path, monkeypatch, capsys):
         """落盘失败不能中断扫描——退回各自抽样（可能漂移）并明确告警。"""
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        monkeypatch.setattr(m2.subprocess, "run",
-                            lambda *a, **k: type("R", (), {"returncode": 1})())
+        monkeypatch.setattr(
+            m2.subprocess, "run", lambda *a, **k: type("R", (), {"returncode": 1})()
+        )
         assert m2._prepare_universe(1000, False, "tdx", None) is None
         assert "本轮不钉宇宙" in capsys.readouterr().out
 
     def test_window_conflicts_with_cross_window(self, monkeypatch, capsys):
-        monkeypatch.setattr(sys, "argv",
-                            ["m2", "--report-only", "--cross-window",
-                             "--window", "2024-01-01", "2025-01-01"])
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "m2",
+                "--report-only",
+                "--cross-window",
+                "--window",
+                "2024-01-01",
+                "2025-01-01",
+            ],
+        )
         assert m2.main() == 2
         assert "冲突" in capsys.readouterr().out
 
@@ -1498,7 +2197,7 @@ class TestDataSourceIsolation:
     否则重演「混批」事故（见 TestSampleFingerprint）。"""
 
     def test_fingerprint_includes_data_source(self):
-        assert m2._fingerprint(1000, False) == "s1000"                 # tdx 不加后缀
+        assert m2._fingerprint(1000, False) == "s1000"  # tdx 不加后缀
         assert m2._fingerprint(1000, False, "tdx") == "s1000"
         assert m2._fingerprint(1000, False, "qlib") == "s1000_qlib"
         assert m2._fingerprint(1000, True, "qlib") == "s1000_qlib_cw"
@@ -1508,9 +2207,13 @@ class TestDataSourceIsolation:
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
         _write(tmp_path, "A_stop_low", "00_baseline", fp="s1000", n=1294)
         _write(tmp_path, "A_stop_low", "trail_08", fp="s1000_qlib", n=1600)
-        assert [r["name"] for r in m2._collect(cross=False)["A_stop_low"]] == ["00_baseline"]
-        assert [r["name"] for r in m2._collect(cross=False, data_source="qlib")
-                ["A_stop_low"]] == ["trail_08"]
+        assert [r["name"] for r in m2._collect(cross=False)["A_stop_low"]] == [
+            "00_baseline"
+        ]
+        assert [
+            r["name"]
+            for r in m2._collect(cross=False, data_source="qlib")["A_stop_low"]
+        ] == ["trail_08"]
 
     def test_qlib_cross_window_separate(self, tmp_path, monkeypatch):
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)

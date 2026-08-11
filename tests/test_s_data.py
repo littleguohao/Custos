@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """s_data(E:\\S_DATA qlib/csv 接入)测试——全部用 tmp_path 迷你 fixture,不碰真实数据。"""
+
 import json
 
 import numpy as np
@@ -27,33 +28,49 @@ def _mk_bundle(root, name, dates, stocks):
         fdir.mkdir(parents=True)
         for field in s_data._FIELDS:
             si, vals = fields.get(field, (0, [1.0] * len(dates)))
-            np.array([float(si)] + [float(v) for v in vals], dtype="<f4").tofile(fdir / f"{field}.day.bin")
+            np.array([float(si)] + [float(v) for v in vals], dtype="<f4").tofile(
+                fdir / f"{field}.day.bin"
+            )
         # ⚠️ 补 factor：`load_bars_qlib` 默认跳过**缺 factor**的 bundle
-        #（口径无法从内部验证，而实测缺 factor 的 2021_2026 是加法调整、
+        # （口径无法从内部验证，而实测缺 factor 的 2021_2026 是加法调整、
         # 百分比收益放大 13~21%）。本组测试测的是**加载机制**（跨 bundle 拼接 /
         # start-end / count / NaN 丢弃），不是口径 ⇒ fixture 造成"可信 bundle"。
         # 口径判定本身由 TestBundleConvention 单独覆盖。
-        np.array([0.0] + [1.0] * len(dates), dtype="<f4").tofile(fdir / "factor.day.bin")
+        np.array([0.0] + [1.0] * len(dates), dtype="<f4").tofile(
+            fdir / "factor.day.bin"
+        )
     return b
 
 
-DATES_A = ["2020-01-0%d" % d for d in (2, 3, 6, 7)]          # bundle A: 4 天
-DATES_B = ["2021-01-0%d" % d for d in (4, 5, 6, 7, 8)]       # bundle B: 5 天
+DATES_A = ["2020-01-0%d" % d for d in (2, 3, 6, 7)]  # bundle A: 4 天
+DATES_B = ["2021-01-0%d" % d for d in (4, 5, 6, 7, 8)]  # bundle B: 5 天
 
 
 @pytest.fixture
 def qroot(tmp_path):
     root = tmp_path / "Q_DATA"
-    close_a = [10.0, 10.1, np.nan, 10.3]                     # 含 NaN(停牌) → 该行应被丢
-    _mk_bundle(root, "2006_2020", DATES_A, {
-        "SZ000001": {f: (0, close_a) for f in s_data._FIELDS},
-    })
+    close_a = [10.0, 10.1, np.nan, 10.3]  # 含 NaN(停牌) → 该行应被丢
+    _mk_bundle(
+        root,
+        "2006_2020",
+        DATES_A,
+        {
+            "SZ000001": {f: (0, close_a) for f in s_data._FIELDS},
+        },
+    )
     close_b = [11.0, 11.1, 11.2, 11.3, 11.4]
-    _mk_bundle(root, "2021_2026", DATES_B, {
-        "SZ000001": {f: (2, close_b[:3]) for f in s_data._FIELDS},   # start_index=2 → 对齐 DATES_B[2:]
-        "SH600000": {f: (0, close_b) for f in s_data._FIELDS},
-        "BJ920000": {f: (0, close_b) for f in s_data._FIELDS},
-    })
+    _mk_bundle(
+        root,
+        "2021_2026",
+        DATES_B,
+        {
+            "SZ000001": {
+                f: (2, close_b[:3]) for f in s_data._FIELDS
+            },  # start_index=2 → 对齐 DATES_B[2:]
+            "SH600000": {f: (0, close_b) for f in s_data._FIELDS},
+            "BJ920000": {f: (0, close_b) for f in s_data._FIELDS},
+        },
+    )
     return root
 
 
@@ -67,16 +84,26 @@ def test_qlib_cross_bundle_concat_and_nan_drop(qroot):
     d = s_data.load_bars_qlib(["000001"], count=0, root=qroot)
     df = d["000001"]
     # bundle A 丢 NaN 行后 3 条 + bundle B start_index=2 → 3 条(DATES_B[2:]),跨段拼接
-    assert list(df["date"]) == ["2020-01-02", "2020-01-03", "2020-01-07",
-                                "2021-01-06", "2021-01-07", "2021-01-08"]
-    assert float(df["close"].iloc[-1]) == pytest.approx(11.2, abs=1e-4)  # close_b[2] 对齐末日
+    assert list(df["date"]) == [
+        "2020-01-02",
+        "2020-01-03",
+        "2020-01-07",
+        "2021-01-06",
+        "2021-01-07",
+        "2021-01-08",
+    ]
+    assert float(df["close"].iloc[-1]) == pytest.approx(
+        11.2, abs=1e-4
+    )  # close_b[2] 对齐末日
 
 
 def test_qlib_start_end_and_count(qroot):
-    d = s_data.load_bars_qlib(["000001"], count=0, start="2021-01-01", end="2021-01-07", root=qroot)
+    d = s_data.load_bars_qlib(
+        ["000001"], count=0, start="2021-01-01", end="2021-01-07", root=qroot
+    )
     assert list(d["000001"]["date"]) == ["2021-01-06", "2021-01-07"]
     d2 = s_data.load_bars_qlib(["000001"], count=2, root=qroot)
-    assert list(d2["000001"]["date"]) == ["2021-01-07", "2021-01-08"]   # tail(count)
+    assert list(d2["000001"]["date"]) == ["2021-01-07", "2021-01-08"]  # tail(count)
 
 
 def test_qlib_code_mapping_and_universe(qroot):
@@ -89,14 +116,28 @@ def test_qlib_code_mapping_and_universe(qroot):
 def test_csv_loader(tmp_path):
     croot = tmp_path / "CSV_DATA"
     croot.mkdir()
-    pd.DataFrame({
-        "Date": ["2021-01-04", "2021-01-05", "2021-01-06"], "Code": ["000001.SZ"] * 3,
-        "Open": [1, 2, 3], "High": [1, 2, 3], "Low": [1, 2, 3], "Close": [10.0, 10.5, 11.0],
-        "Volume": [100, 200, 300], "Amount": [1, 2, 3],
-    }).to_csv(croot / "000001.SZ-all-latest.csv", index=False)
+    pd.DataFrame(
+        {
+            "Date": ["2021-01-04", "2021-01-05", "2021-01-06"],
+            "Code": ["000001.SZ"] * 3,
+            "Open": [1, 2, 3],
+            "High": [1, 2, 3],
+            "Low": [1, 2, 3],
+            "Close": [10.0, 10.5, 11.0],
+            "Volume": [100, 200, 300],
+            "Amount": [1, 2, 3],
+        }
+    ).to_csv(croot / "000001.SZ-all-latest.csv", index=False)
     d = s_data.load_bars_csv(["000001"], count=0, start="2021-01-05", root=croot)
     assert list(d["000001"]["date"]) == ["2021-01-05", "2021-01-06"]
-    assert list(d["000001"].columns) == ["date", "open", "high", "low", "close", "volume"]
+    assert list(d["000001"].columns) == [
+        "date",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+    ]
     assert s_data.list_universe(croot, source="csv") == ["000001"]
 
 
@@ -105,17 +146,44 @@ def test_main_with_qlib_data_source(tmp_path):
     dates = [d.strftime("%Y-%m-%d") for d in pd.bdate_range("2021-01-04", periods=45)]
     qdir = tmp_path / "sroot" / "Q_DATA"
     n = len(dates)
-    _mk_bundle(qdir, "2021_2026", dates, {
-        "SZ000001": {f: (0, [10.0 + 0.1 * i for i in range(n)]) for f in s_data._FIELDS},
-    })
+    _mk_bundle(
+        qdir,
+        "2021_2026",
+        dates,
+        {
+            "SZ000001": {
+                f: (0, [10.0 + 0.1 * i for i in range(n)]) for f in s_data._FIELDS
+            },
+        },
+    )
     out = tmp_path / "sim.json"
-    rc = bt.main(["--codes", "000001", "--data-source", "qlib", "--s-data-root", str(tmp_path / "sroot"),
-                  "--start", "2021-01-04", "--end", dates[-1], "--trade-sim", "--scorer", "baseline",
-                  "--entry-filter", "none", "--out", str(out)])
+    rc = bt.main(
+        [
+            "--codes",
+            "000001",
+            "--data-source",
+            "qlib",
+            "--s-data-root",
+            str(tmp_path / "sroot"),
+            "--start",
+            "2021-01-04",
+            "--end",
+            dates[-1],
+            "--trade-sim",
+            "--scorer",
+            "baseline",
+            "--entry-filter",
+            "none",
+            "--out",
+            str(out),
+        ]
+    )
     assert rc == 0
     payload = json.loads(out.read_text(encoding="utf-8"))
     assert payload["data_source"] == "qlib" and payload["start"] == "2021-01-04"
-    assert payload["trade_summary"]["n"] >= 1          # 真数据加载进 evaluate_trades 并产生了交易
+    assert (
+        payload["trade_summary"]["n"] >= 1
+    )  # 真数据加载进 evaluate_trades 并产生了交易
 
 
 class TestListUniverseParsing:
@@ -130,18 +198,23 @@ class TestListUniverseParsing:
         d = tmp_path / "Q_DATA" / "2021_2026"
         (d / "instruments").mkdir(parents=True)
         (d / "calendars").mkdir(parents=True)
-        (d / "calendars" / "day.txt").write_text("2021-08-02\n2026-02-27\n",
-                                                 encoding="utf-8")
-        (d / "instruments" / "all.txt").write_text("\n".join(lines) + "\n",
-                                                   encoding="utf-8")
+        (d / "calendars" / "day.txt").write_text(
+            "2021-08-02\n2026-02-27\n", encoding="utf-8"
+        )
+        (d / "instruments" / "all.txt").write_text(
+            "\n".join(lines) + "\n", encoding="utf-8"
+        )
         return tmp_path / "Q_DATA"
 
     def test_tab_separated_lines_yield_codes_not_dates(self, tmp_path):
-        root = self._bundle(tmp_path, [
-            "SH600000\t1999-11-10\t2026-02-27",
-            "SZ000001\t1991-04-03\t2026-02-27",
-            "SZ300750\t2018-06-11\t2024-06-09",
-        ])
+        root = self._bundle(
+            tmp_path,
+            [
+                "SH600000\t1999-11-10\t2026-02-27",
+                "SZ000001\t1991-04-03\t2026-02-27",
+                "SZ300750\t2018-06-11\t2024-06-09",
+            ],
+        )
         got = s_data.list_universe(root)
         assert got == ["000001", "300750", "600000"], got
         assert not any(c.startswith("-") for c in got), "日期碎片混进了宇宙"
@@ -153,8 +226,15 @@ class TestListUniverseParsing:
 
     def test_high_reject_rate_warns(self, tmp_path, capsys):
         """若 bundle 换了格式导致大面积取不出代码，必须**大声告警**而不是静默返回空。"""
-        root = self._bundle(tmp_path, ["# header", "garbage line", "another bad one",
-                                       "SH600000\t1999-11-10\t2026-02-27"])
+        root = self._bundle(
+            tmp_path,
+            [
+                "# header",
+                "garbage line",
+                "another bad one",
+                "SH600000\t1999-11-10\t2026-02-27",
+            ],
+        )
         s_data.list_universe(root)
         err = capsys.readouterr().err
         assert "取不出 6 位代码" in err and "宇宙不可信" in err
@@ -187,7 +267,9 @@ class TestMixedConventionWarning:
         d = root / name
         (d / "instruments").mkdir(parents=True)
         (d / "calendars").mkdir(parents=True)
-        (d / "calendars" / "day.txt").write_text("\n".join(days) + "\n", encoding="utf-8")
+        (d / "calendars" / "day.txt").write_text(
+            "\n".join(days) + "\n", encoding="utf-8"
+        )
         (d / "instruments" / "all.txt").write_text("SH600000\n", encoding="utf-8")
         f = d / "features" / "sh600000"
         f.mkdir(parents=True)
@@ -198,10 +280,18 @@ class TestMixedConventionWarning:
     def test_warns_when_field_sets_differ(self, tmp_path, capsys):
         s_data._MIXED_WARNED.clear()
         root = tmp_path / "Q_DATA"
-        self._bundle(root, "2006_2020", ["2019-01-02", "2020-09-25"],
-                     ["open", "high", "low", "close", "volume", "factor", "change"])
-        self._bundle(root, "2021_2026", ["2021-08-02", "2026-01-30"],
-                     ["open", "high", "low", "close", "volume"])
+        self._bundle(
+            root,
+            "2006_2020",
+            ["2019-01-02", "2020-09-25"],
+            ["open", "high", "low", "close", "volume", "factor", "change"],
+        )
+        self._bundle(
+            root,
+            "2021_2026",
+            ["2021-08-02", "2026-01-30"],
+            ["open", "high", "low", "close", "volume"],
+        )
         bundles = s_data.list_bundles(root)
         hits = s_data.code_to_qlib_dir("600000", bundles)
         s_data._warn_if_mixed_convention("600000", hits)
@@ -216,17 +306,27 @@ class TestMixedConventionWarning:
         self._bundle(root, "2006_2020", ["2019-01-02"], fields)
         self._bundle(root, "2021_2026", ["2021-08-02"], fields)
         bundles = s_data.list_bundles(root)
-        s_data._warn_if_mixed_convention("600000", s_data.code_to_qlib_dir("600000", bundles))
+        s_data._warn_if_mixed_convention(
+            "600000", s_data.code_to_qlib_dir("600000", bundles)
+        )
         assert "字段集不同" not in capsys.readouterr().err
 
     def test_warns_once_per_code(self, tmp_path, capsys):
         """全市场跑批时不能刷屏——每个代码只警告一次。"""
         s_data._MIXED_WARNED.clear()
         root = tmp_path / "Q_DATA"
-        self._bundle(root, "2006_2020", ["2019-01-02"],
-                     ["open", "high", "low", "close", "volume", "factor"])
-        self._bundle(root, "2021_2026", ["2021-08-02"],
-                     ["open", "high", "low", "close", "volume"])
+        self._bundle(
+            root,
+            "2006_2020",
+            ["2019-01-02"],
+            ["open", "high", "low", "close", "volume", "factor"],
+        )
+        self._bundle(
+            root,
+            "2021_2026",
+            ["2021-08-02"],
+            ["open", "high", "low", "close", "volume"],
+        )
         hits = s_data.code_to_qlib_dir("600000", s_data.list_bundles(root))
         for _ in range(3):
             s_data._warn_if_mixed_convention("600000", hits)
@@ -253,26 +353,39 @@ class TestBundleConvention:
         d = root / name
         (d / "instruments").mkdir(parents=True)
         (d / "calendars").mkdir(parents=True)
-        (d / "calendars" / "day.txt").write_text("\n".join(days) + "\n", encoding="utf-8")
+        (d / "calendars" / "day.txt").write_text(
+            "\n".join(days) + "\n", encoding="utf-8"
+        )
         (d / "instruments" / "all.txt").write_text("SH600000\n", encoding="utf-8")
         f = d / "features" / "sh600000"
         f.mkdir(parents=True)
         import numpy as np
+
         for fn in fields:
             # 首元素=start_index，其后逐日对齐
-            np.array([0.0] + [10.0] * len(days), dtype="<f4").tofile(f / f"{fn}.day.bin")
+            np.array([0.0] + [10.0] * len(days), dtype="<f4").tofile(
+                f / f"{fn}.day.bin"
+            )
         return d
 
     def test_factor_means_multiplicative(self, tmp_path):
         root = tmp_path / "Q_DATA"
-        d = self._mk(root, "2006_2020", ["2019-01-02", "2019-01-03"],
-                     ["open", "high", "low", "close", "volume", "factor", "change"])
+        d = self._mk(
+            root,
+            "2006_2020",
+            ["2019-01-02", "2019-01-03"],
+            ["open", "high", "low", "close", "volume", "factor", "change"],
+        )
         assert s_data.bundle_convention(d) == "multiplicative"
 
     def test_no_factor_means_unverified(self, tmp_path):
         root = tmp_path / "Q_DATA"
-        d = self._mk(root, "2021_2026", ["2021-08-02", "2021-08-03"],
-                     ["open", "high", "low", "close", "volume"])
+        d = self._mk(
+            root,
+            "2021_2026",
+            ["2021-08-02", "2021-08-03"],
+            ["open", "high", "low", "close", "volume"],
+        )
         assert s_data.bundle_convention(d) == "unverified"
 
     def test_missing_features_is_unknown(self, tmp_path):
@@ -282,10 +395,18 @@ class TestBundleConvention:
 
     def test_list_bundles_stamps_convention(self, tmp_path):
         root = tmp_path / "Q_DATA"
-        self._mk(root, "2006_2020", ["2019-01-02"],
-                 ["open", "high", "low", "close", "volume", "factor"])
-        self._mk(root, "2021_2026", ["2021-08-02"],
-                 ["open", "high", "low", "close", "volume"])
+        self._mk(
+            root,
+            "2006_2020",
+            ["2019-01-02"],
+            ["open", "high", "low", "close", "volume", "factor"],
+        )
+        self._mk(
+            root,
+            "2021_2026",
+            ["2021-08-02"],
+            ["open", "high", "low", "close", "volume"],
+        )
         got = {b["dir"].name: b["convention"] for b in s_data.list_bundles(root)}
         assert got == {"2006_2020": "multiplicative", "2021_2026": "unverified"}
 
@@ -293,10 +414,18 @@ class TestBundleConvention:
         """加法 bundle 默认跳过，且必须**出声**——静默少一段数据比报错更糟。"""
         s_data._UNVERIFIED_SKIP_WARNED.clear()
         root = tmp_path / "Q_DATA"
-        self._mk(root, "2006_2020", ["2019-01-02", "2019-01-03"],
-                 ["open", "high", "low", "close", "volume", "factor"])
-        self._mk(root, "2021_2026", ["2021-08-02", "2021-08-03"],
-                 ["open", "high", "low", "close", "volume"])
+        self._mk(
+            root,
+            "2006_2020",
+            ["2019-01-02", "2019-01-03"],
+            ["open", "high", "low", "close", "volume", "factor"],
+        )
+        self._mk(
+            root,
+            "2021_2026",
+            ["2021-08-02", "2021-08-03"],
+            ["open", "high", "low", "close", "volume"],
+        )
         got = s_data.load_bars_qlib(["600000"], 100, root=root)
         err = capsys.readouterr().err
         assert "跳过**口径无法验证**" in err and "2021_2026" in err
@@ -307,8 +436,12 @@ class TestBundleConvention:
         """确需放行时可用（比如只看绝对价差的研究）——不是删掉能力。"""
         s_data._UNVERIFIED_SKIP_WARNED.clear()
         root = tmp_path / "Q_DATA"
-        self._mk(root, "2021_2026", ["2021-08-02", "2021-08-03"],
-                 ["open", "high", "low", "close", "volume"])
+        self._mk(
+            root,
+            "2021_2026",
+            ["2021-08-02", "2021-08-03"],
+            ["open", "high", "low", "close", "volume"],
+        )
         assert s_data.load_bars_qlib(["600000"], 100, root=root) == {}
         got = s_data.load_bars_qlib(["600000"], 100, root=root, allow_unverified=True)
         assert got and len(got["600000"]) == 2
@@ -316,8 +449,12 @@ class TestBundleConvention:
     def test_skip_warning_once(self, tmp_path, capsys):
         s_data._UNVERIFIED_SKIP_WARNED.clear()
         root = tmp_path / "Q_DATA"
-        self._mk(root, "2021_2026", ["2021-08-02"],
-                 ["open", "high", "low", "close", "volume"])
+        self._mk(
+            root,
+            "2021_2026",
+            ["2021-08-02"],
+            ["open", "high", "low", "close", "volume"],
+        )
         for _ in range(3):
             s_data.load_bars_qlib(["600000"], 100, root=root)
         assert capsys.readouterr().err.count("跳过**口径无法验证**") == 1
@@ -334,26 +471,43 @@ class TestUniverseAndPriceSameFilter:
 
     def _mk(self, root, name, days, insts, fields):
         import numpy as np
+
         d = root / name
         (d / "instruments").mkdir(parents=True)
         (d / "calendars").mkdir(parents=True)
-        (d / "calendars" / "day.txt").write_text("\n".join(days) + "\n", encoding="utf-8")
+        (d / "calendars" / "day.txt").write_text(
+            "\n".join(days) + "\n", encoding="utf-8"
+        )
         (d / "instruments" / "all.txt").write_text(
-            "\n".join(f"{i}\t{days[0]}\t{days[-1]}" for i in insts) + "\n", encoding="utf-8")
+            "\n".join(f"{i}\t{days[0]}\t{days[-1]}" for i in insts) + "\n",
+            encoding="utf-8",
+        )
         for i in insts:
             f = d / "features" / i.lower()
             f.mkdir(parents=True)
             for fn in fields:
-                np.array([0.0] + [10.0] * len(days), dtype="<f4").tofile(f / f"{fn}.day.bin")
+                np.array([0.0] + [10.0] * len(days), dtype="<f4").tofile(
+                    f / f"{fn}.day.bin"
+                )
         return d
 
     def _roots(self, tmp_path):
         root = tmp_path / "Q_DATA"
         ohlcv = ["open", "high", "low", "close", "volume"]
-        self._mk(root, "2006_2020", ["2019-01-02", "2020-09-25"],
-                 ["SH600000"], ohlcv + ["factor"])
-        self._mk(root, "2021_2026", ["2021-08-02", "2026-02-06"],
-                 ["SH600000", "SH688888"], ohlcv)          # 688888 只在被弃用的 bundle
+        self._mk(
+            root,
+            "2006_2020",
+            ["2019-01-02", "2020-09-25"],
+            ["SH600000"],
+            ohlcv + ["factor"],
+        )
+        self._mk(
+            root,
+            "2021_2026",
+            ["2021-08-02", "2026-02-06"],
+            ["SH600000", "SH688888"],
+            ohlcv,
+        )  # 688888 只在被弃用的 bundle
         return root
 
     def test_universe_excludes_skipped_bundle(self, tmp_path, capsys):
@@ -362,7 +516,8 @@ class TestUniverseAndPriceSameFilter:
         got = s_data.list_universe(root)
         assert got == ["600000"], got
         assert "688888" not in got, (
-            "被跳过 bundle 的票不该进宇宙——它拿不到价格，会被当成'没信号'")
+            "被跳过 bundle 的票不该进宇宙——它拿不到价格，会被当成'没信号'"
+        )
         assert "宇宙也跳过" in capsys.readouterr().err
 
     def test_universe_can_include_when_allowed(self, tmp_path):
@@ -375,7 +530,9 @@ class TestUniverseAndPriceSameFilter:
         ⇒ 必然返回空。只靠"0 行"会被读成"因子无判别力"（审计 E9 的失效模式）。"""
         s_data._UNVERIFIED_SKIP_WARNED.clear()
         root = self._roots(tmp_path)
-        s_data.load_bars_qlib(["600000"], 0, start="2022-01-01", end="2024-12-31", root=root)
+        s_data.load_bars_qlib(
+            ["600000"], 0, start="2022-01-01", end="2024-12-31", root=root
+        )
         err = capsys.readouterr().err
         assert "完全不相交" in err and "2019-01-02~2020-09-25" in err
         assert "--data-source tdx" in err, "要给出可行的替代路径，不能只报错"
@@ -383,5 +540,7 @@ class TestUniverseAndPriceSameFilter:
     def test_window_inside_coverage_silent(self, tmp_path, capsys):
         s_data._UNVERIFIED_SKIP_WARNED.clear()
         root = self._roots(tmp_path)
-        s_data.load_bars_qlib(["600000"], 0, start="2019-01-01", end="2020-01-01", root=root)
+        s_data.load_bars_qlib(
+            ["600000"], 0, start="2019-01-01", end="2020-01-01", root=root
+        )
         assert "完全不相交" not in capsys.readouterr().err

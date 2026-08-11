@@ -9,6 +9,7 @@
 
 抽取原则同前两轮：**零行为变化**，逐个用数值等价验证（见 TestNumericEquivalence）。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -23,8 +24,17 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 from custos.core import factors  # noqa: E402
 
 #: 从 `backtest_factors.SCORERS` 抽出的 9 个自包含 scorer
-EXTRACTED = ["baseline", "alpha101", "alpha_pvcorr", "low_vol", "momentum",
-             "reversal_quality", "reversal_quality_inv", "mcap", "kdj_j"]
+EXTRACTED = [
+    "baseline",
+    "alpha101",
+    "alpha_pvcorr",
+    "low_vol",
+    "momentum",
+    "reversal_quality",
+    "reversal_quality_inv",
+    "mcap",
+    "kdj_j",
+]
 
 #: 从 `enrich_candidates` 抽出的 4 个内联因子（pattern/state，**不在 SCORERS 里**）
 INLINE_EXTRACTED = ["wave_type", "perfect_b1_fit", "b1_pullback_fit", "distribution"]
@@ -33,11 +43,16 @@ INLINE_EXTRACTED = ["wave_type", "perfect_b1_fit", "b1_pullback_fit", "distribut
 def _bars(n=80, seed=5):
     rng = np.random.default_rng(seed)
     c = 10 + np.cumsum(rng.normal(0, 0.2, n))
-    return pd.DataFrame({
-        "date": pd.date_range("2026-01-01", periods=n).astype(str),
-        "open": c + rng.normal(0, 0.05, n), "close": c,
-        "high": c + abs(rng.normal(0, 0.15, n)), "low": c - abs(rng.normal(0, 0.15, n)),
-        "volume": abs(rng.normal(1e6, 2e5, n))})
+    return pd.DataFrame(
+        {
+            "date": pd.date_range("2026-01-01", periods=n).astype(str),
+            "open": c + rng.normal(0, 0.05, n),
+            "close": c,
+            "high": c + abs(rng.normal(0, 0.15, n)),
+            "low": c - abs(rng.normal(0, 0.15, n)),
+            "volume": abs(rng.normal(1e6, 2e5, n)),
+        }
+    )
 
 
 class TestRegistry:
@@ -62,8 +77,9 @@ class TestRegistry:
         """判「待优化」必须给出处 —— 否则下次有人会以为是拍脑袋否掉的。"""
         m = factors.registry()[fid]["meta"]
         if m["status"] == "needs_work":
-            assert m["evidence"].startswith("governance/research/"), \
+            assert m["evidence"].startswith("governance/research/"), (
                 f"{fid} 标 needs_work 但没给 research 出处"
+            )
             assert (ROOT / m["evidence"]).exists(), f"{fid} 的 evidence 路径不存在"
 
     @pytest.mark.parametrize("fid", EXTRACTED)
@@ -83,14 +99,23 @@ class TestNotForLive:
         allowed = factors.live_allowed()
         for fid, e in factors.registry().items():
             if e["meta"]["status"] in factors.NOT_FOR_LIVE:
-                assert fid not in allowed, f"{fid}({e['meta']['status']}) 不该在 live 白名单里"
+                assert fid not in allowed, (
+                    f"{fid}({e['meta']['status']}) 不该在 live 白名单里"
+                )
 
     def test_known_needs_work_are_marked(self):
         """R2/R3 明确否决过的这几个，状态必须是 needs_work。"""
         reg = factors.registry()
-        for fid in ("alpha101", "reversal_quality", "reversal_quality_inv", "mcap", "kdj_j"):
-            assert reg[fid]["meta"]["status"] == "needs_work", \
+        for fid in (
+            "alpha101",
+            "reversal_quality",
+            "reversal_quality_inv",
+            "mcap",
+            "kdj_j",
+        ):
+            assert reg[fid]["meta"]["status"] == "needs_work", (
                 f"{fid} 在 research 里已被否决，状态却不是 needs_work"
+            )
 
     def test_live_chain_only_uses_allowed_factors(self):
         """live 链可以**计算**待优化因子作证据，但不得让它**驱动决策**。
@@ -104,8 +129,12 @@ class TestNotForLive:
         只看前者会把合法用法判成违规。
         """
         reg = factors.registry()
-        live = ["pipeline/screening/enrich_candidates.py", "pipeline/screening/score_candidates.py",
-                "pipeline/screening/candidate_table.py", "pipeline/screening/signal_labels.py"]
+        live = [
+            "pipeline/screening/enrich_candidates.py",
+            "pipeline/screening/score_candidates.py",
+            "pipeline/screening/candidate_table.py",
+            "pipeline/screening/signal_labels.py",
+        ]
         bad = []
         for rel in live:
             s = (ROOT / "src" / "custos" / rel).read_text(encoding="utf-8")
@@ -115,7 +144,9 @@ class TestNotForLive:
                     continue
                 use = e["meta"].get("live_use")
                 if use == "none":
-                    bad.append(f"{rel} → {fid}（live_use=none，根本不该出现在 live 链）")
+                    bad.append(
+                        f"{rel} → {fid}（live_use=none，根本不该出现在 live 链）"
+                    )
         assert not bad, f"live 链用了不该用的因子：{bad}"
 
     def test_every_factor_declares_live_use(self):
@@ -129,9 +160,10 @@ class TestNotForLive:
             m = e["meta"]
             if m["status"] in factors.NOT_FOR_LIVE:
                 if fid in factors.KNOWN_STATUS_USE_CONFLICTS:
-                    continue          # 已知矛盾，显式登记过（见白名单里的原因）
-                assert m.get("live_use") in ("none", "evidence_only"), \
+                    continue  # 已知矛盾，显式登记过（见白名单里的原因）
+                assert m.get("live_use") in ("none", "evidence_only"), (
                     f"{fid} status={m['status']} 却声明 live_use={m.get('live_use')}"
+                )
 
     def test_evidence_only_factors_are_the_documented_ones(self):
         """`evidence_only` 集合当前只有 R2 明确说「仅描述性」的那两个。
@@ -141,14 +173,20 @@ class TestNotForLive:
         got = set(factors.live_evidence_only())
         assert got == {
             # R2 明确说「仅描述性，不作买入依据」的
-            "perfect_b1_fit", "b1_pullback_fit", "platform_pullback",
+            "perfect_b1_fit",
+            "b1_pullback_fit",
+            "platform_pullback",
             # signal_labels 出标签落候选表；该模块头部已声明「标注不是交易依据，
             # 尤其不得据标注数决定仓位」
-            "b1_dual_factor", "b2_surge_factor", "main_rally_factor", "rsi_state",
+            "b1_dual_factor",
+            "b2_surge_factor",
+            "main_rally_factor",
+            "rsi_state",
             # 板块族密度：R2 说它是准确的「窗口主线指纹」（归因工具），
             # 但「跟随主流」机械规则不成立 ⇒ 只作情境感知，不作 gate
             "sector_mainstream",
         }, f"evidence_only 集合变了：{got}"
+
 
 class TestNumericEquivalence:
     """抽取必须**零行为变化**：新 `score` 与原 `SCORERS[fid]` 逐点相同。"""
@@ -156,13 +194,17 @@ class TestNumericEquivalence:
     @pytest.mark.parametrize("fid", [f for f in EXTRACTED if f != "mcap"])
     def test_matches_scorers_entry(self, fid):
         from custos.research import backtest_factors as BF
+
         df = _bars()
         assert fid in BF.SCORERS, f"{fid} 不在 SCORERS 里"
-        assert factors.registry()[fid]["score"](df, "600000") == BF.SCORERS[fid](df, "600000")
+        assert factors.registry()[fid]["score"](df, "600000") == BF.SCORERS[fid](
+            df, "600000"
+        )
 
     def test_scorers_keys_unchanged(self):
         """SCORERS 的键集合不能因为重构而变 —— CLI `--scorer` 参数依赖它。"""
         from custos.research import backtest_factors as BF
+
         for fid in EXTRACTED:
             assert fid in BF.SCORERS
 
@@ -178,11 +220,17 @@ class TestSharedMutableStateImportRule:
     def test_shares_imported_package_qualified(self):
         for rel in ("core/factors/mcap.py", "research/backtest_factors.py"):
             s = (ROOT / "src" / "custos" / rel).read_text(encoding="utf-8")
-            assert "from custos.core.factors._shares import" in s, f"{rel} 应包限定导入 _shares"
-            assert "\nfrom _shares import" not in s, f"{rel} 有扁平导入 _shares（会产生两份状态）"
+            assert "from custos.core.factors._shares import" in s, (
+                f"{rel} 应包限定导入 _shares"
+            )
+            assert "\nfrom _shares import" not in s, (
+                f"{rel} 有扁平导入 _shares（会产生两份状态）"
+            )
 
     def test_rule_documented(self):
-        s = (ROOT / "src" / "custos" / "core" / "factors" / "_shares.py").read_text(encoding="utf-8")
+        s = (ROOT / "src" / "custos" / "core" / "factors" / "_shares.py").read_text(
+            encoding="utf-8"
+        )
         assert "包限定" in s and "两个模块对象" in s
 
 
@@ -206,6 +254,7 @@ class TestInlineFactorsExtracted:
     def test_not_in_scorers(self, fid):
         """它们是 pattern/state，不是横截面 scorer —— 不该混进 SCORERS。"""
         from custos.research import backtest_factors as BF
+
         assert fid not in BF.SCORERS
 
     @pytest.mark.parametrize("fid", INLINE_EXTRACTED)
@@ -215,16 +264,26 @@ class TestInlineFactorsExtracted:
     def test_enrich_no_longer_defines_them(self):
         """`enrich_candidates` 里不许再有本地定义 —— 那就成了第二份。"""
         import re
-        s = (ROOT / "src" / "custos" / "pipeline" / "screening" / "enrich_candidates.py").read_text(encoding="utf-8")
-        for fn in ("detect_wave_type", "compute_perfect_b1_fit",
-                   "compute_b1_pullback_fit", "detect_distribution"):
+
+        s = (
+            ROOT / "src" / "custos" / "pipeline" / "screening" / "enrich_candidates.py"
+        ).read_text(encoding="utf-8")
+        for fn in (
+            "detect_wave_type",
+            "compute_perfect_b1_fit",
+            "compute_b1_pullback_fit",
+            "detect_distribution",
+        ):
             assert not re.search(rf"^def {fn}\(", s, re.M), f"enrich 又定义了本地 {fn}"
             assert fn in s, f"enrich 应通过导入访问 {fn}"
 
     def test_constants_moved_with_their_factor(self):
         """常量必须跟着因子走，`enrich_candidates` 里不该再有它们的定义。"""
         import re
-        s = (ROOT / "src" / "custos" / "pipeline" / "screening" / "enrich_candidates.py").read_text(encoding="utf-8")
+
+        s = (
+            ROOT / "src" / "custos" / "pipeline" / "screening" / "enrich_candidates.py"
+        ).read_text(encoding="utf-8")
         for pfx in ("WAVE_", "FIT_", "B1PB_", "DIST_"):
             defs = re.findall(rf"^({pfx}[A-Z0-9_]+) *=", s, re.M)
             assert not defs, f"{pfx}* 常量应随因子迁走，enrich 里还剩：{defs}"
@@ -232,10 +291,17 @@ class TestInlineFactorsExtracted:
     def test_factors_own_their_constants(self):
         """反面：常量确实在因子模块里。"""
         import re
-        pairs = [("wave_type", "WAVE_"), ("perfect_b1_fit", "FIT_"),
-                 ("b1_pullback_fit", "B1PB_"), ("distribution", "DIST_")]
+
+        pairs = [
+            ("wave_type", "WAVE_"),
+            ("perfect_b1_fit", "FIT_"),
+            ("b1_pullback_fit", "B1PB_"),
+            ("distribution", "DIST_"),
+        ]
         for fid, pfx in pairs:
-            s = (ROOT / "src" / "custos" / "core" / "factors" / f"{fid}.py").read_text(encoding="utf-8")
+            s = (ROOT / "src" / "custos" / "core" / "factors" / f"{fid}.py").read_text(
+                encoding="utf-8"
+            )
             assert re.search(rf"^{pfx}[A-Z0-9_]+ *=", s, re.M), f"{fid} 缺 {pfx}* 常量"
 
 
@@ -248,8 +314,9 @@ class TestKnownConflicts:
     """
 
     def test_conflict_set_is_the_known_one(self):
-        assert set(factors.KNOWN_STATUS_USE_CONFLICTS) == {"s_shape"}, \
+        assert set(factors.KNOWN_STATUS_USE_CONFLICTS) == {"s_shape"}, (
             "已知矛盾集合变了 —— 新增的必须是有意识的决定，并写清原因"
+        )
 
     def test_each_conflict_has_a_reason(self):
         for fid, why in factors.KNOWN_STATUS_USE_CONFLICTS.items():
@@ -258,7 +325,9 @@ class TestKnownConflicts:
 
     def test_conflict_documented_in_module(self):
         """矛盾也要写在因子模块自己的元数据里 —— 读那个文件的人才看得到。"""
-        s = (ROOT / "src" / "custos" / "core" / "factors" / "s_shape.py").read_text(encoding="utf-8")
+        s = (ROOT / "src" / "custos" / "core" / "factors" / "s_shape.py").read_text(
+            encoding="utf-8"
+        )
         assert "已知矛盾" in s and "score_candidates" in s
 
 
@@ -277,42 +346,63 @@ class TestStageMatchesReality:
         stage     现在真的在跑吗？  —— 部署事实
     """
 
-    LIVE_FILES = ["pipeline/screening/enrich_candidates.py", "pipeline/screening/score_candidates.py",
-                  "pipeline/screening/candidate_table.py", "pipeline/screening/signal_labels.py",
-                  "pipeline/screening/formula_screen.py",
-                  # 2026-08-09 扩：盘中监控与持仓链也是 live 消费者 —— 它们若哪天开始
-                  # import 因子模块，stage 标记必须与事实一致。当前它们不引用任何因子，
-                  # 扫描结果不变，只是把网织在事发之前。
-                  "pipeline/market_timing/technical_monitor.py",
-                  "pipeline/holdings/b1_holding_state.py",
-                  "pipeline/holdings/batch_holding_technical.py"]
+    LIVE_FILES = [
+        "pipeline/screening/enrich_candidates.py",
+        "pipeline/screening/score_candidates.py",
+        "pipeline/screening/candidate_table.py",
+        "pipeline/screening/signal_labels.py",
+        "pipeline/screening/formula_screen.py",
+        # 2026-08-09 扩：盘中监控与持仓链也是 live 消费者 —— 它们若哪天开始
+        # import 因子模块，stage 标记必须与事实一致。当前它们不引用任何因子，
+        # 扫描结果不变，只是把网织在事发之前。
+        "pipeline/market_timing/technical_monitor.py",
+        "pipeline/holdings/b1_holding_state.py",
+        "pipeline/holdings/batch_holding_technical.py",
+    ]
 
     def _referenced(self) -> set[str]:
         import re
-        srcs = [(ROOT / "src" / "custos" / f).read_text(encoding="utf-8") for f in self.LIVE_FILES]
+
+        srcs = [
+            (ROOT / "src" / "custos" / f).read_text(encoding="utf-8")
+            for f in self.LIVE_FILES
+        ]
         out = set()
         for fid in factors.registry():
-            if any(re.search(rf"\bfrom [\w.]*\.{fid} import|\bfrom {fid} import|\bimport [\w.]*\b{fid}\b", s) for s in srcs):
+            if any(
+                re.search(
+                    rf"\bfrom [\w.]*\.{fid} import|\bfrom {fid} import|\bimport [\w.]*\b{fid}\b",
+                    s,
+                )
+                for s in srcs
+            ):
                 out.add(fid)
         return out
 
     def test_every_factor_declares_stage(self):
         for fid, e in factors.registry().items():
-            assert e["meta"].get("stage") in factors.STAGES, \
+            assert e["meta"].get("stage") in factors.STAGES, (
                 f"{fid} 的 stage={e['meta'].get('stage')!r} 不合法"
+            )
 
     def test_release_means_actually_referenced(self):
         """标 release 的必须真被 live 链引用 —— 否则是虚假的「已上线」。"""
         ref = self._referenced()
-        bad = [f for f, e in factors.registry().items()
-               if e["meta"]["stage"] == "release" and f not in ref]
+        bad = [
+            f
+            for f, e in factors.registry().items()
+            if e["meta"]["stage"] == "release" and f not in ref
+        ]
         assert not bad, f"标了 release 但 live 链没引用：{bad}"
 
     def test_debug_means_not_in_live(self):
         """标 debug 的不许被 live 链引用 —— 那说明它其实上线了，标记撒谎。"""
         ref = self._referenced()
-        bad = [f for f, e in factors.registry().items()
-               if e["meta"]["stage"] == "debug" and f in ref]
+        bad = [
+            f
+            for f, e in factors.registry().items()
+            if e["meta"]["stage"] == "debug" and f in ref
+        ]
         assert not bad, f"标了 debug 却在 live 链里：{bad}"
 
     def test_release_set_is_the_known_twelve(self):
@@ -325,5 +415,6 @@ class TestStageMatchesReality:
         for fid, e in factors.registry().items():
             m = e["meta"]
             if m["stage"] == "debug":
-                assert m["live_use"] == "none", \
+                assert m["live_use"] == "none", (
                     f"{fid} stage=debug 却声明 live_use={m['live_use']}"
+                )

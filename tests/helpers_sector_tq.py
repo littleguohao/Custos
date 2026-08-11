@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """测试替身:部分板块成功的 TQ(用于板块指数成功率门槛回归)。"""
+
 from __future__ import annotations
 
 
@@ -24,11 +25,17 @@ class PartialTQ:
         if not all(self._allowed(c) for c in codes):
             raise RuntimeError(f"refresh failed: {codes}")
 
-    def get_market_data(self, field_list=None, stock_list=None, period="", start_time="", count=0):
+    def get_market_data(
+        self, field_list=None, stock_list=None, period="", start_time="", count=0
+    ):
         import pandas as pd
 
         code = (stock_list or ["880001.SH"])[0]
         if not self._allowed(code):
             raise RuntimeError(f"no data: {code}")
-        return {code: pd.DataFrame({"Close": [c for _, c in self.rows]},
-                                   index=pd.to_datetime([d for d, _ in self.rows]))}
+        return {
+            code: pd.DataFrame(
+                {"Close": [c for _, c in self.rows]},
+                index=pd.to_datetime([d for d, _ in self.rows]),
+            )
+        }

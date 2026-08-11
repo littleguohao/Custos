@@ -9,6 +9,7 @@
 ② 可选输入缺失必须降级并留痕
 ③ 产物落到约定路径
 """
+
 from __future__ import annotations
 
 import json
@@ -27,24 +28,42 @@ DAY = "2026-08-07"
 # ── final_close_review 的 8 个强制输入（缺任一即 SystemExit）
 MANDATORY = {
     "decisions/2026-08-07_chief_decision.json": {
-        "date": DAY, "total_position_range": "20%-40%", "new_position_permission": "禁止",
-        "risk_level": "普通", "holding_actions": [], "forbidden_actions": [],
-        "market_quality": {"status": "pass", "checks": []}},
+        "date": DAY,
+        "total_position_range": "20%-40%",
+        "new_position_permission": "禁止",
+        "risk_level": "普通",
+        "holding_actions": [],
+        "forbidden_actions": [],
+        "market_quality": {"status": "pass", "checks": []},
+    },
     "market/2026-08-07_market_timing_input.json": {
         # ⚠️ 0AMV 必须 confirmed + 有 regime + 有数值 —— 见 TestZeroAmvGate
-        "date": DAY, "amv_0": {"effective_state": "中性", "quality": "confirmed",
-                               "amv_change_pct": 0.5},
-        "a_share_indices": {}, "breadth": {}, "sentiment": {}},
+        "date": DAY,
+        "amv_0": {
+            "effective_state": "中性",
+            "quality": "confirmed",
+            "amv_change_pct": 0.5,
+        },
+        "a_share_indices": {},
+        "breadth": {},
+        "sentiment": {},
+    },
     "quality/2026-08-07_runtime_gate.json": {
-        "date": DAY, "market_quality": {"status": "pass"},
-        "position_gate": {"allow_position_increase": True}},
+        "date": DAY,
+        "market_quality": {"status": "pass"},
+        "position_gate": {"allow_position_increase": True},
+    },
     "holdings/2026-08-07_holding_technical_summary.json": [],
     "sectors/2026-08-07_sector_technical_summary.json": [],
     "market/2026-08-07_holding_quotes.json": {"date": DAY, "quotes": []},
     "review_steps/2026-08-07_execution_review.json": {"date": DAY, "rows": []},
     "review_steps/2026-08-07_review_enrichment.json": {
-        "date": DAY, "theme_lifecycles": [], "holding_diagnoses": [],
-        "next_day_plan": {"holding_plans": []}, "rule_review": {}},
+        "date": DAY,
+        "theme_lifecycles": [],
+        "holding_diagnoses": [],
+        "next_day_plan": {"holding_plans": []},
+        "rule_review": {},
+    },
 }
 
 
@@ -91,8 +110,9 @@ class TestFinalCloseReviewInputContract:
         理由：新闻是证据层补充，缺它不影响「今天做了什么、权限是什么」这个核心。
         """
         _run_fcr(monkeypatch)
-        body = (fcr_env / "artifacts/reports" / "daily" / f"{DAY}_final_review.md").read_text(
-            encoding="utf-8")
+        body = (
+            fcr_env / "artifacts/reports" / "daily" / f"{DAY}_final_review.md"
+        ).read_text(encoding="utf-8")
         assert "新闻数据缺失" in body and "postclose_news_digest" in body
 
     def test_writes_md_and_json(self, fcr_env, monkeypatch):
@@ -104,8 +124,9 @@ class TestFinalCloseReviewInputContract:
     def test_json_artifact_is_valid_json(self, fcr_env, monkeypatch):
         """产物必须是合法 JSON（NaN/Infinity 都不是）—— 下游要能解析。"""
         _run_fcr(monkeypatch)
-        raw = (fcr_env / "artifacts/reports" / "daily" / f"{DAY}_final_review.json").read_text(
-            encoding="utf-8")
+        raw = (
+            fcr_env / "artifacts/reports" / "daily" / f"{DAY}_final_review.json"
+        ).read_text(encoding="utf-8")
         assert "NaN" not in raw and "Infinity" not in raw
         json.loads(raw)
 
@@ -113,35 +134,68 @@ class TestFinalCloseReviewInputContract:
         """`--no-trades-confirmed` 是「当日确认无交易」，必须在报告里可辨识 ——
         否则「没有成交记录」与「没导入成交」分不开。"""
         _run_fcr(monkeypatch, extra=["--no-trades-confirmed"])
-        body = (fcr_env / "artifacts/reports" / "daily" / f"{DAY}_final_review.md").read_text(
-            encoding="utf-8")
-        plain = (fcr_env / "artifacts/reports" / "daily" / f"{DAY}_final_review.json").read_text(
-            encoding="utf-8")
+        body = (
+            fcr_env / "artifacts/reports" / "daily" / f"{DAY}_final_review.md"
+        ).read_text(encoding="utf-8")
+        plain = (
+            fcr_env / "artifacts/reports" / "daily" / f"{DAY}_final_review.json"
+        ).read_text(encoding="utf-8")
         assert "无交易" in body or "no_trades" in plain
 
 
 # ── review_core（14:45）
 @pytest.fixture()
 def rc_env(tmp_path, monkeypatch):
-    for name, sub in [("TRADES", "data/trades"), ("HOLDINGS", "data/holdings"),
-                      ("RISK", "data/risk"), ("MARKET", "data/market"),
-                      ("QUALITY", "data/quality"), ("PLANS", "artifacts/reports/daily"),
-                      ("LOGS", "artifacts/logs")]:
+    for name, sub in [
+        ("TRADES", "data/trades"),
+        ("HOLDINGS", "data/holdings"),
+        ("RISK", "data/risk"),
+        ("MARKET", "data/market"),
+        ("QUALITY", "data/quality"),
+        ("PLANS", "artifacts/reports/daily"),
+        ("LOGS", "artifacts/logs"),
+    ]:
         d = tmp_path / sub
         d.mkdir(parents=True, exist_ok=True)
         monkeypatch.setattr(rc, name, d)
-    _write(tmp_path, "data/trades/current_positions.json",
-           [{"代码": "600000", "名称": "浦发银行", "持有数量": 1000, "单位成本": 10.0}])
-    _write(tmp_path, "data/market/2026-08-07_holding_quotes.json",
-           {"date": DAY, "as_of": f"{DAY} 14:45:00",
-            "quotes": [{"code": "600000", "price": 11.0, "change_pct": 1.5, "date": DAY}]})
-    _write(tmp_path, "data/holdings/2026-08-07_holding_technical_summary.json",
-           [{"code": "600000", "trend_state": "上涨", "box20_position": "箱体上半区",
-             "latest_date": DAY}])
-    _write(tmp_path, "data/market/2026-08-07_market_timing_input.json",
-           {"date": DAY, "amv_0": {"effective_state": "中性"}})
-    _write(tmp_path, "data/quality/2026-08-07_runtime_gate.json",
-           {"date": DAY, "market_quality": {"status": "pass"}})
+    _write(
+        tmp_path,
+        "data/trades/current_positions.json",
+        [{"代码": "600000", "名称": "浦发银行", "持有数量": 1000, "单位成本": 10.0}],
+    )
+    _write(
+        tmp_path,
+        "data/market/2026-08-07_holding_quotes.json",
+        {
+            "date": DAY,
+            "as_of": f"{DAY} 14:45:00",
+            "quotes": [
+                {"code": "600000", "price": 11.0, "change_pct": 1.5, "date": DAY}
+            ],
+        },
+    )
+    _write(
+        tmp_path,
+        "data/holdings/2026-08-07_holding_technical_summary.json",
+        [
+            {
+                "code": "600000",
+                "trend_state": "上涨",
+                "box20_position": "箱体上半区",
+                "latest_date": DAY,
+            }
+        ],
+    )
+    _write(
+        tmp_path,
+        "data/market/2026-08-07_market_timing_input.json",
+        {"date": DAY, "amv_0": {"effective_state": "中性"}},
+    )
+    _write(
+        tmp_path,
+        "data/quality/2026-08-07_runtime_gate.json",
+        {"date": DAY, "market_quality": {"status": "pass"}},
+    )
     return tmp_path
 
 
@@ -153,22 +207,31 @@ def _run_rc(monkeypatch, extra=()):
 class TestReviewCoreMain:
     def test_writes_report(self, rc_env, monkeypatch):
         _run_rc(monkeypatch)
-        assert list((rc_env / "artifacts/reports/daily").glob("*.md")), "应产出 14:45 报告"
+        assert list((rc_env / "artifacts/reports/daily").glob("*.md")), (
+            "应产出 14:45 报告"
+        )
 
     def test_missing_risk_decision_flagged_not_crashed(self, rc_env, monkeypatch):
         """⚠️ 无 risk_decision 时不崩，但报告里必须写明「按无风控依据处理」——
         14:45 常态就是当日 risk_decision 还没产出（它 17:00 才跑）。"""
         _run_rc(monkeypatch)
-        body = next((rc_env / "artifacts/reports/daily").glob("*.md")).read_text(encoding="utf-8")
+        body = next((rc_env / "artifacts/reports/daily").glob("*.md")).read_text(
+            encoding="utf-8"
+        )
         assert "风控依据数据日" in body
         assert "缺失" in body or "非当日" in body
 
     def test_stale_risk_decision_marked_non_current(self, rc_env, monkeypatch):
         """回退到旧 risk_decision 必须打「⚠️非当日」并写明不得据此放宽权限。"""
-        _write(rc_env, "data/risk/2026-08-05_risk_decision.json",
-               {"date": "2026-08-05", "stock_risks": []})
+        _write(
+            rc_env,
+            "data/risk/2026-08-05_risk_decision.json",
+            {"date": "2026-08-05", "stock_risks": []},
+        )
         _run_rc(monkeypatch)
-        body = next((rc_env / "artifacts/reports/daily").glob("*.md")).read_text(encoding="utf-8")
+        body = next((rc_env / "artifacts/reports/daily").glob("*.md")).read_text(
+            encoding="utf-8"
+        )
         assert "2026-08-05" in body and "非当日" in body
         assert "不得据此放宽" in body
 
@@ -181,11 +244,15 @@ class TestReviewCoreMain:
         _run_rc(monkeypatch, extra=["--emit-report"])
         assert "##" in capsys.readouterr().out, "--emit-report 应输出报告正文"
 
-    def test_missing_quotes_does_not_produce_actions_from_stale_price(self, rc_env, monkeypatch):
+    def test_missing_quotes_does_not_produce_actions_from_stale_price(
+        self, rc_env, monkeypatch
+    ):
         """⚠️ 当日行情缺失时，持仓动作必须是「等待当日行情」而非用旧价算出的动作。"""
         (rc_env / "data" / "market" / f"{DAY}_holding_quotes.json").unlink()
         _run_rc(monkeypatch)
-        body = next((rc_env / "artifacts/reports/daily").glob("*.md")).read_text(encoding="utf-8")
+        body = next((rc_env / "artifacts/reports/daily").glob("*.md")).read_text(
+            encoding="utf-8"
+        )
         assert "等待当日行情" in body
 
 
@@ -199,14 +266,20 @@ class TestReportAuditBlock:
     def test_strategy_version_reads_latest_from_log(self):
         import re
         from custos.core import report_audit
+
         version = report_audit.strategy_version()
-        assert re.fullmatch(r"v\d+\.\d+", version), f"应取到版本日志最新版本号，得到 {version!r}"
+        assert re.fullmatch(r"v\d+\.\d+", version), (
+            f"应取到版本日志最新版本号，得到 {version!r}"
+        )
 
     def test_build_fields_and_missing_input_marker(self, tmp_path):
         from custos.core import report_audit
+
         present = tmp_path / "a.json"
         present.write_text("{}", encoding="utf-8")
-        audit = report_audit.build("2026-08-07", "1445", [present, tmp_path / "gone.json"])
+        audit = report_audit.build(
+            "2026-08-07", "1445", [present, tmp_path / "gone.json"]
+        )
         assert audit["report_id"].startswith("2026-08-07_1445_")
         assert audit["strategy_version"] and audit["data_as_of"]
         assert audit["inputs"][0]["sha1"] and audit["inputs"][1]["sha1"] is None
@@ -214,19 +287,29 @@ class TestReportAuditBlock:
     def test_same_inputs_same_report_id(self, tmp_path):
         """同一天同一份输入重跑 → 同一个 report_id（简单确定，不掺随机/时钟）。"""
         from custos.core import report_audit
+
         present = tmp_path / "a.json"
         present.write_text("{}", encoding="utf-8")
         a1 = report_audit.build("2026-08-07", "1445", [present])
         a2 = report_audit.build("2026-08-07", "1445", [present])
         assert a1["report_id"] == a2["report_id"]
         present.write_text('{"x": 1}', encoding="utf-8")
-        assert report_audit.build("2026-08-07", "1445", [present])["report_id"] != a1["report_id"]
+        assert (
+            report_audit.build("2026-08-07", "1445", [present])["report_id"]
+            != a1["report_id"]
+        )
 
     def test_1445_md_and_log_json_carry_audit(self, rc_env, monkeypatch):
         _run_rc(monkeypatch)
-        body = next((rc_env / "artifacts/reports/daily").glob("*.md")).read_text(encoding="utf-8")
+        body = next((rc_env / "artifacts/reports/daily").glob("*.md")).read_text(
+            encoding="utf-8"
+        )
         assert "report_id" in body and "策略版本" in body and "输入清单" in body
-        log = json.loads(next((rc_env / "artifacts/logs").glob("*_1445_review.json")).read_text(encoding="utf-8"))
+        log = json.loads(
+            next((rc_env / "artifacts/logs").glob("*_1445_review.json")).read_text(
+                encoding="utf-8"
+            )
+        )
         audit = log["audit"]
         assert audit["report_id"].startswith(f"{DAY}_1445_")
         assert audit["strategy_version"] and audit["data_as_of"] and audit["inputs"]
@@ -236,12 +319,15 @@ class TestReportAuditBlock:
         rev = fcr_env / "artifacts/reports" / "daily"
         body = (rev / f"{DAY}_final_review.md").read_text(encoding="utf-8")
         assert "report_id" in body and "策略版本" in body and "输入清单" in body
-        payload = json.loads((rev / f"{DAY}_final_review.json").read_text(encoding="utf-8"))
+        payload = json.loads(
+            (rev / f"{DAY}_final_review.json").read_text(encoding="utf-8")
+        )
         audit = payload["audit"]
         assert audit["report_id"].startswith(f"{DAY}_close_review_")
         assert audit["strategy_version"] and audit["data_as_of"] and audit["inputs"]
         # 契约把 audit 钉住：四件齐全且 data_as_of 可 null 但存在
         from custos.core.contracts import check
+
         result = check("final_review", payload)
         assert result["valid"], result["errors"]
 
@@ -257,22 +343,45 @@ class TestZeroAmvGate:
     盘后是当日 regime 的定稿时点，所以这里是硬闸而不是降级。
     """
 
-    @pytest.mark.parametrize("amv,why", [
-        ({"effective_state": "中性", "quality": "confirmed"}, "缺数值"),
-        ({"effective_state": "中性", "quality": "candidate", "amv_change_pct": 0.5}, "非 confirmed"),
-        ({"effective_state": "中性", "amv_change_pct": 0.5}, "无 quality 字段"),
-        ({"effective_state": "", "quality": "confirmed", "amv_change_pct": 0.5}, "regime 为空串"),
-        ({"quality": "confirmed", "amv_change_pct": 0.5}, "无 regime"),
-        ({}, "整块缺失"),
-    ])
+    @pytest.mark.parametrize(
+        "amv,why",
+        [
+            ({"effective_state": "中性", "quality": "confirmed"}, "缺数值"),
+            (
+                {
+                    "effective_state": "中性",
+                    "quality": "candidate",
+                    "amv_change_pct": 0.5,
+                },
+                "非 confirmed",
+            ),
+            ({"effective_state": "中性", "amv_change_pct": 0.5}, "无 quality 字段"),
+            (
+                {"effective_state": "", "quality": "confirmed", "amv_change_pct": 0.5},
+                "regime 为空串",
+            ),
+            ({"quality": "confirmed", "amv_change_pct": 0.5}, "无 regime"),
+            ({}, "整块缺失"),
+        ],
+    )
     def test_unconfirmed_amv_is_refused(self, fcr_env, monkeypatch, amv, why):
-        _write(fcr_env / "data", "market/2026-08-07_market_timing_input.json",
-               {"date": DAY, "amv_0": amv, "a_share_indices": {},
-                "breadth": {}, "sentiment": {}})
+        _write(
+            fcr_env / "data",
+            "market/2026-08-07_market_timing_input.json",
+            {
+                "date": DAY,
+                "amv_0": amv,
+                "a_share_indices": {},
+                "breadth": {},
+                "sentiment": {},
+            },
+        )
         with pytest.raises(SystemExit) as e:
             _run_fcr(monkeypatch)
         assert "0AMV" in str(e.value), f"{why} 应被拒"
 
     def test_confirmed_amv_passes(self, fcr_env, monkeypatch):
         _run_fcr(monkeypatch)
-        assert (fcr_env / "artifacts/reports" / "daily" / f"{DAY}_final_review.md").exists()
+        assert (
+            fcr_env / "artifacts/reports" / "daily" / f"{DAY}_final_review.md"
+        ).exists()

@@ -8,6 +8,7 @@
 如果静默删除，别人可能正照着做 —— 实例：R10 待跑 #3「去幸存者偏差用 --data-source qlib」
 在 2026-08-06 之后照做只会引入放大 13~21% 的收益，去偏一点没做到。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -32,14 +33,17 @@ def test_all_relative_links_resolve():
     assert not bad, f"待办清单里这些链接已失效（目录重构后要同步）：{bad}"
 
 
-@pytest.mark.parametrize("section", [
-    "## P0 · 阻塞项",
-    "## P1 · 重跑（结论悬空）",
-    "## P2 · 待跑（新验证）",
-    "## P3 · 待收敛 / 技术债",
-    "## ⚠️ 已失效的行动项",
-    "## 需要 owner 拍板",
-])
+@pytest.mark.parametrize(
+    "section",
+    [
+        "## P0 · 阻塞项",
+        "## P1 · 重跑（结论悬空）",
+        "## P2 · 待跑（新验证）",
+        "## P3 · 待收敛 / 技术债",
+        "## ⚠️ 已失效的行动项",
+        "## 需要 owner 拍板",
+    ],
+)
 def test_has_section(section):
     assert section in TODO.read_text(encoding="utf-8"), f"缺区块：{section}"
 
@@ -47,12 +51,14 @@ def test_has_section(section):
 def test_stale_actions_explain_why():
     """已失效项必须写清**为什么失效**，否则读者无法判断能不能改回去。"""
     s = TODO.read_text(encoding="utf-8")
-    seg = s[s.index("## ⚠️ 已失效的行动项"):]
-    seg = seg[:seg.index("\n## ")] if "\n## " in seg else seg
+    seg = s[s.index("## ⚠️ 已失效的行动项") :]
+    seg = seg[: seg.index("\n## ")] if "\n## " in seg else seg
     rows = [ln for ln in seg.splitlines() if ln.startswith("| ") and "---" not in ln]
     assert len(rows) >= 4, "已失效表至少要有表头 + 3 项（当前已知 3 项）"
     for ln in rows[1:]:
-        assert len(ln.split("|")) >= 4, f"已失效项缺列（原项/出处/为什么失效）：{ln[:60]}"
+        assert len(ln.split("|")) >= 4, (
+            f"已失效项缺列（原项/出处/为什么失效）：{ln[:60]}"
+        )
 
 
 def test_separated_from_version_log():
@@ -86,14 +92,18 @@ def test_no_strikethrough_entries():
     """
     s = TODO.read_text(encoding="utf-8")
     # 只查表格行——「维护约定」正文里引用 `~~删除线~~` 这个写法本身是合法的
-    bad = [ln.strip()[:70] for ln in s.splitlines()
-           if "~~" in ln and ln.lstrip().startswith("|")]
+    bad = [
+        ln.strip()[:70]
+        for ln in s.splitlines()
+        if "~~" in ln and ln.lstrip().startswith("|")
+    ]
     assert not bad, f"待办里有删除线条目，应直接删除：{bad}"
 
 
 def test_item_numbers_are_unique():
     """编号重复会让「待办 #26」这类跨文档引用指向两处。"""
     import collections
+
     s = TODO.read_text(encoding="utf-8")
     nums = re.findall(r"^\| (\d+) \|", s, re.M)
     dup = [n for n, c in collections.Counter(nums).items() if c > 1]

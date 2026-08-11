@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """compass_amv 单测：临时 fixture 二进制文件覆盖解析/拼接/真值识别/error 路径；
 真实 day.vdat 存在时与已知真值（0amv_observations.jsonl 已确认值）核对。"""
+
 from __future__ import annotations
 
 import datetime as dt
@@ -18,10 +19,18 @@ HEADER = b"\x00" * 16
 GAP = b"\x00" * 28  # 全零记录，用于打断两段序列
 
 
-def _record(date: dt.date, o: float, h: float, l: float, c: float,
-            v: float = 1e11, a: float = 2e12) -> bytes:
-    return struct.pack("<I6f", date.year * 10000 + date.month * 100 + date.day,
-                       o, h, l, c, v, a)
+def _record(
+    date: dt.date,
+    o: float,
+    h: float,
+    l: float,
+    c: float,
+    v: float = 1e11,
+    a: float = 2e12,
+) -> bytes:
+    return struct.pack(
+        "<I6f", date.year * 10000 + date.month * 100 + date.day, o, h, l, c, v, a
+    )
 
 
 def _series(start: dt.date, closes: list) -> bytes:
@@ -69,8 +78,9 @@ class ParseFixtureTest(unittest.TestCase):
         )
 
     def _parse(self, since: str = "2024-01-01") -> dict:
-        return compass_amv.parse_amv_daily(since=since, root=str(self.root),
-                                           truth_path=self.no_truth)
+        return compass_amv.parse_amv_daily(
+            since=since, root=str(self.root), truth_path=self.no_truth
+        )
 
     def test_parse_selects_latest_ending_series(self) -> None:
         out = self._parse()
@@ -87,8 +97,8 @@ class ParseFixtureTest(unittest.TestCase):
     def test_change_pct(self) -> None:
         recs = self._parse()["records"]
         self.assertIsNone(recs[0]["change_pct"])  # 首条无前值
-        self.assertEqual(recs[28]["change_pct"], 100.0)   # 100 -> 200
-        self.assertEqual(recs[29]["change_pct"], -5.0)    # 200 -> 190
+        self.assertEqual(recs[28]["change_pct"], 100.0)  # 100 -> 200
+        self.assertEqual(recs[29]["change_pct"], -5.0)  # 200 -> 190
 
     def test_since_filter(self) -> None:
         since = (MAIN_START + dt.timedelta(days=25)).isoformat()
@@ -100,14 +110,16 @@ class ParseFixtureTest(unittest.TestCase):
 
     def test_compass_root_env_override(self) -> None:
         with mock.patch.dict(os.environ, {"COMPASS_ROOT": str(self.root)}):
-            out = compass_amv.parse_amv_daily(since="2024-01-01",
-                                              truth_path=self.no_truth)
+            out = compass_amv.parse_amv_daily(
+                since="2024-01-01", truth_path=self.no_truth
+            )
         self.assertNotIn("error", out)
         self.assertEqual(out["count"], 30)
         # 显式 root 参数优先于环境变量
         with mock.patch.dict(os.environ, {"COMPASS_ROOT": str(self.root / "nope")}):
-            out2 = compass_amv.parse_amv_daily(root=str(self.root),
-                                               truth_path=self.no_truth)
+            out2 = compass_amv.parse_amv_daily(
+                root=str(self.root), truth_path=self.no_truth
+            )
         self.assertNotIn("error", out2)
 
     def test_latest_amv(self) -> None:
@@ -140,8 +152,9 @@ class MultiBlockChainTest(unittest.TestCase):
         )
 
     def test_blocks_chained_into_single_series(self) -> None:
-        out = compass_amv.parse_amv_daily(since="1990-01-01", root=str(self.root),
-                                          truth_path=self.no_truth)
+        out = compass_amv.parse_amv_daily(
+            since="1990-01-01", root=str(self.root), truth_path=self.no_truth
+        )
         self.assertNotIn("error", out)
         self.assertEqual(out["count"], 530)
         self.assertEqual(out["first_date"], self.CHAIN_START.isoformat())
@@ -155,7 +168,7 @@ class MultiBlockChainTest(unittest.TestCase):
 
 # 真值识别 fixture：WRONG 系列结束更新也更长，TRUE 系列（0AMV）靠真值匹配胜出
 WRONG_START = dt.date(2026, 5, 10)
-WRONG_CLOSES = [500.0] * 60                       # 平盘，change_pct 全 0
+WRONG_CLOSES = [500.0] * 60  # 平盘，change_pct 全 0
 TRUE_START = dt.date(2026, 6, 1)
 # 周期性波动收盘（2.0/1.96/1.92/1.89/-7.41%），与 WRONG 的全 0 明显区分
 TRUE_CLOSES = [100.0 + (i % 5) * 2 for i in range(30)]
@@ -177,43 +190,59 @@ class TruthSelectionTest(unittest.TestCase):
         lines = []
         for i in range(20, len(TRUE_CLOSES)):
             d = (TRUE_START + dt.timedelta(days=i)).isoformat()
-            lines.append(json.dumps({"date": d, "amv_change_pct": pcts[i],
-                                     "quality": "confirmed"}))
+            lines.append(
+                json.dumps(
+                    {"date": d, "amv_change_pct": pcts[i], "quality": "confirmed"}
+                )
+            )
         self.truth.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     def test_truth_match_selects_amv_series(self) -> None:
-        out = compass_amv.parse_amv_daily(since="1990-01-01", root=str(self.root),
-                                          truth_path=str(self.truth))
+        out = compass_amv.parse_amv_daily(
+            since="1990-01-01", root=str(self.root), truth_path=str(self.truth)
+        )
         self.assertNotIn("error", out)
         # 真值匹配应选中 TRUE 系列，尽管 WRONG 结束日期更新也更长
-        self.assertTrue(out["identification"].startswith("truth_match"),
-                        out["identification"])
+        self.assertTrue(
+            out["identification"].startswith("truth_match"), out["identification"]
+        )
         self.assertEqual(out["series_start"], TRUE_START.isoformat())
         self.assertEqual(out["count"], len(TRUE_CLOSES))
         self.assertEqual(out["records"][-1]["close"], TRUE_CLOSES[-1])
-        self.assertEqual(out["records"][1]["change_pct"], 2.0)   # 100 -> 102
+        self.assertEqual(out["records"][1]["change_pct"], 2.0)  # 100 -> 102
         self.assertEqual(out["records"][2]["change_pct"], 1.96)  # 102 -> 104
 
     def test_no_truth_fallback_picks_latest_longest(self) -> None:
         out = compass_amv.parse_amv_daily(
-            since="1990-01-01", root=str(self.root),
-            truth_path=str(self.root / "no_such_ledger.jsonl"))
+            since="1990-01-01",
+            root=str(self.root),
+            truth_path=str(self.root / "no_such_ledger.jsonl"),
+        )
         self.assertNotIn("error", out)
-        self.assertEqual(out["identification"],
-                         "fallback: latest end + longest history")
+        self.assertEqual(
+            out["identification"], "fallback: latest end + longest history"
+        )
         self.assertEqual(out["series_start"], WRONG_START.isoformat())
         self.assertEqual(out["count"], len(WRONG_CLOSES))
 
     def test_unmatched_truth_still_falls_back(self) -> None:
         # 真值存在但与任何链都不匹配（日期不在链内）→ 回退
         junk = self.root / "junk_truth.jsonl"
-        junk.write_text(json.dumps({"date": "2031-01-05", "amv_change_pct": 1.0,
-                                    "quality": "confirmed"}) + "\n", encoding="utf-8")
-        out = compass_amv.parse_amv_daily(since="1990-01-01", root=str(self.root),
-                                          truth_path=str(junk))
+        junk.write_text(
+            json.dumps(
+                {"date": "2031-01-05", "amv_change_pct": 1.0, "quality": "confirmed"}
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        out = compass_amv.parse_amv_daily(
+            since="1990-01-01", root=str(self.root), truth_path=str(junk)
+        )
         self.assertNotIn("error", out)
-        self.assertEqual(out["identification"],
-                         "fallback: no chain matched truth; latest end + longest history")
+        self.assertEqual(
+            out["identification"],
+            "fallback: no chain matched truth; latest end + longest history",
+        )
         self.assertEqual(out["series_start"], WRONG_START.isoformat())
 
 
@@ -265,8 +294,10 @@ TRUTH_PATH = compass_amv.DEFAULT_TRUTH_LEDGER
 # 两个都要在：day.vdat 在宿主 TDX 安装目录（仓库外，可能恰存在），真值台账在
 # data（gitignore，干净 checkout 没有）——只查前者会在干净环境误判成
 # fallback 而失败（2026-08-08 干净副本实测）。
-@unittest.skipUnless(REAL_PATH.is_file() and TRUTH_PATH.is_file(),
-                     f"真实 day.vdat 或真值台账不存在: {REAL_PATH} / {TRUTH_PATH}")
+@unittest.skipUnless(
+    REAL_PATH.is_file() and TRUTH_PATH.is_file(),
+    f"真实 day.vdat 或真值台账不存在: {REAL_PATH} / {TRUTH_PATH}",
+)
 class RealFileTest(unittest.TestCase):
     """真实数据与真值台账 data/market/0amv_observations.jsonl 已确认值核对。"""
 
@@ -279,8 +310,10 @@ class RealFileTest(unittest.TestCase):
         self.assertNotIn("error", self.out)
 
     def test_series_identified_by_truth(self) -> None:
-        self.assertTrue(self.out["identification"].startswith("truth_match"),
-                        self.out["identification"])
+        self.assertTrue(
+            self.out["identification"].startswith("truth_match"),
+            self.out["identification"],
+        )
 
     def test_known_change_pct(self) -> None:
         # 与 0amv_observations.jsonl 中 quality=confirmed 记录一致

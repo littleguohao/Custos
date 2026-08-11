@@ -36,10 +36,10 @@
 # ─────────────────────────── 注册表 ───────────────────────────
 # 每个因子模块声明 `FACTOR` 元数据 + `score()`/`detect()`。模板见 `_template.py`。
 
-import importlib as _il                     # noqa: E402
-import pkgutil as _pk                       # noqa: E402
-import pathlib as _pl                       # noqa: E402
-import sys as _sys                          # noqa: E402
+import importlib as _il  # noqa: E402
+import pkgutil as _pk  # noqa: E402
+import pathlib as _pl  # noqa: E402
+import sys as _sys  # noqa: E402
 
 _SKIP = {"_template", "_util", "_shares", "__init__"}
 
@@ -71,7 +71,7 @@ STAGES = ("release", "debug")
 #: ①矛盾可见 ②新出现的矛盾会被测试挡住（ratchet）。
 KNOWN_STATUS_USE_CONFLICTS = {
     "s_shape": "R2 说无 alpha，但 score_candidates.technical_score 主路径用它出技术层级"
-               "（参与 A/B/C/D 分层）。待 owner 定，见 TODO。",
+    "（参与 A/B/C/D 分层）。待 owner 定，见 TODO。",
 }
 
 #: `status` 在这个集合里的因子**不得进入 live 选股链**。
@@ -94,7 +94,7 @@ def registry() -> dict[str, dict]:
             continue
         try:
             mod = _il.import_module(f".{m.name}", package=__name__)
-        except Exception as exc:              # noqa: BLE001 —— 单个因子坏了不该让注册表整体失效
+        except Exception as exc:  # noqa: BLE001 —— 单个因子坏了不该让注册表整体失效
             # ⚠️ 但**不得静默**：2026-08-06 `_shares` 漏 import json 就是这类 fail-open
             # 吞掉的 —— 空注册表和全员坏掉无法区分。失败照常跳过，但必须留痕到 stderr
             # （项目惯例 `[WARN] ...`，同 enrich_candidates.build_stock_theme_map）。
@@ -103,20 +103,29 @@ def registry() -> dict[str, dict]:
         meta = getattr(mod, "FACTOR", None)
         if not isinstance(meta, dict) or meta.get("id") in (None, "template"):
             continue
-        out[meta["id"]] = {"meta": meta, "module": mod,
-                           "score": getattr(mod, "score", None),
-                           "detect": getattr(mod, "detect", None)}
+        out[meta["id"]] = {
+            "meta": meta,
+            "module": mod,
+            "score": getattr(mod, "score", None),
+            "detect": getattr(mod, "detect", None),
+        }
     if failed:
-        print(f"[WARN] 因子注册表：{len(failed)} 个因子模块导入失败被跳过 —— "
-              + "; ".join(failed), file=_sys.stderr)
+        print(
+            f"[WARN] 因子注册表：{len(failed)} 个因子模块导入失败被跳过 —— "
+            + "; ".join(failed),
+            file=_sys.stderr,
+        )
     return out
 
 
 def live_allowed() -> dict[str, dict]:
     """可在 live 里**驱动决策**的因子：status 通过 且 live_use 是 gate/scorer。"""
-    return {k: v for k, v in registry().items()
-            if v["meta"].get("status") not in NOT_FOR_LIVE
-            and v["meta"].get("live_use") in ("gate", "scorer")}
+    return {
+        k: v
+        for k, v in registry().items()
+        if v["meta"].get("status") not in NOT_FOR_LIVE
+        and v["meta"].get("live_use") in ("gate", "scorer")
+    }
 
 
 def released() -> dict[str, dict]:
@@ -126,5 +135,8 @@ def released() -> dict[str, dict]:
 
 def live_evidence_only() -> dict[str, dict]:
     """只能作**描述性证据**的因子 —— 可以出现在 live 链，但不得驱动决策。"""
-    return {k: v for k, v in registry().items()
-            if v["meta"].get("live_use") == "evidence_only"}
+    return {
+        k: v
+        for k, v in registry().items()
+        if v["meta"].get("live_use") == "evidence_only"
+    }

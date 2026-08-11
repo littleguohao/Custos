@@ -17,6 +17,7 @@
 而 `technical_monitor` 的数据自纠只能把 10 升到 20、**永远到不了 30**，
 所以这个偏差不会被历史波动纠正回来。
 """
+
 from __future__ import annotations
 
 import ast
@@ -31,13 +32,23 @@ from custos.core.code_utils import price_limit_pct  # noqa: E402
 
 
 class TestCanonicalTable:
-    @pytest.mark.parametrize("code,want", [
-        ("600000", 10.0), ("601398", 10.0), ("000001", 10.0), ("002415", 10.0),
-        ("300750", 20.0), ("301001", 20.0),
-        ("688111", 20.0),
-        ("689009", 20.0),   # 科创板 CDR —— 收敛前没有一份实现认它
-        ("920808", 30.0), ("830799", 30.0), ("870508", 30.0), ("430047", 30.0),
-    ])
+    @pytest.mark.parametrize(
+        "code,want",
+        [
+            ("600000", 10.0),
+            ("601398", 10.0),
+            ("000001", 10.0),
+            ("002415", 10.0),
+            ("300750", 20.0),
+            ("301001", 20.0),
+            ("688111", 20.0),
+            ("689009", 20.0),  # 科创板 CDR —— 收敛前没有一份实现认它
+            ("920808", 30.0),
+            ("830799", 30.0),
+            ("870508", 30.0),
+            ("430047", 30.0),
+        ],
+    )
     def test_table(self, code, want):
         assert price_limit_pct(code) == want
 
@@ -62,15 +73,18 @@ class TestDelegation:
 
     def test_backtest_factors(self):
         from custos.research import backtest_factors as bt
+
         assert bt._limit_pct("920808") == 30.0 and bt._limit_pct("689009") == 20.0
 
     def test_reconcile_qfq(self):
         from custos.research import reconcile_qfq as rq
+
         assert rq._limit_pct("920808") == 30.0 and rq._limit_pct("689009") == 20.0
 
     def test_technical_monitor_base(self):
         import pandas as pd
         from custos.pipeline.market_timing import technical_monitor as tm
+
         quiet = pd.DataFrame({"close": [10.0 + (i % 2) * 0.01 for i in range(25)]})
         assert tm._infer_price_limit("920808", quiet) == 30
         assert tm._infer_price_limit("830799", quiet) == 30
@@ -80,6 +94,7 @@ class TestDelegation:
         """回归保护：安静窗口把 10% 品种降级 5%，但**不得**降级宽幅品种。"""
         import pandas as pd
         from custos.pipeline.market_timing import technical_monitor as tm
+
         quiet = pd.DataFrame({"close": [10.0 + (i % 2) * 0.01 for i in range(25)]})
         assert tm._infer_price_limit("600000", quiet) == 5
         for code in ("300750", "688111", "920808"):
@@ -102,11 +117,14 @@ class TestNoRefork:
             for i, line in enumerate(p.read_text(encoding="utf-8").split("\n"), 1):
                 if line.lstrip().startswith("#"):
                     continue
-                if re.search(r'"688".*\b20\b|\b20\b.*"688"', line) or \
-                   re.search(r'"920".*\b(?:20|30)\b|\b(?:20|30)\b.*"920"', line):
+                if re.search(r'"688".*\b20\b|\b20\b.*"688"', line) or re.search(
+                    r'"920".*\b(?:20|30)\b|\b(?:20|30)\b.*"920"', line
+                ):
                     offenders.append(f"{rel}:{i} {line.strip()[:70]}")
-        assert not offenders, ("涨跌幅上限只许在 code_utils.price_limit_pct 定义：\n  "
-                              + "\n  ".join(offenders))
+        assert not offenders, (
+            "涨跌幅上限只许在 code_utils.price_limit_pct 定义：\n  "
+            + "\n  ".join(offenders)
+        )
 
 
 class TestMaFlag:
@@ -122,19 +140,28 @@ class TestMaFlag:
         同 `fmt.pct_text` 那条教训：不能把「不知道」渲染成一个具体读数。
         """
         from custos.pipeline.close_review import final_close_review as fcr
+
         assert fcr.ma_flag(None) == "?"
         assert fcr.ma_flag(True) == "上" and fcr.ma_flag(False) == "下"
 
     def test_index_row_shows_question_for_missing_ma(self):
         from custos.pipeline.close_review import final_close_review as fcr
-        row = {"name": "上证指数", "close": 3500.0, "change_pct": 0.5,
-               "above_ma25": True, "above_ma60": False,
-               "above_ma144": None, "above_ma240": None}
+
+        row = {
+            "name": "上证指数",
+            "close": 3500.0,
+            "change_pct": 0.5,
+            "above_ma25": True,
+            "above_ma60": False,
+            "above_ma144": None,
+            "above_ma240": None,
+        }
         line = fcr.render_index_row(row)
         assert "?MA144" in line and "?MA240" in line
         assert "上MA25" in line and "下MA60" in line
 
     def test_index_row_missing_close_is_unavailable(self):
         from custos.pipeline.close_review import final_close_review as fcr
+
         line = fcr.render_index_row({"name": "x", "close": None, "change_pct": None})
         assert "unavailable" in line

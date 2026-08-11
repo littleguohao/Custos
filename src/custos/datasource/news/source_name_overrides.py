@@ -4,6 +4,7 @@
 Used as fallback when registry name contains '?' (encoding corruption),
 or when source_id is not in the current registry but appears in historical data.
 """
+
 SOURCE_NAME_OVERRIDES = {
     # 新时空系列
     "newtimespace": "新时空",
@@ -34,8 +35,9 @@ SOURCE_NAME_OVERRIDES = {
     "unknown_ai_shortlink": "用户提供AI短链",
 }
 
+
 def fix_source_name(source_id: str, source_name: str) -> str:
     """Return corrected source_name if it contains '?' or is empty."""
-    if not source_name or '?' in source_name:
+    if not source_name or "?" in source_name:
         return SOURCE_NAME_OVERRIDES.get(source_id, source_name or source_id)
     return source_name

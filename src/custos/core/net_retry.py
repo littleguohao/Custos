@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Simple network fetch retry helper: exponential backoff, re-raise the last error."""
+
 from __future__ import annotations
 
 import random
@@ -12,7 +13,7 @@ import requests
 # 结果一模一样,只是把管线拖慢 backoff 之和,并给对端多刷两条 403 日志。
 # 408 Request Timeout / 429 Too Many Requests 是明确的"稍后再来"语义,必须重试。
 RETRYABLE_4XX = frozenset({408, 429})
-DEFAULT_JITTER = 0.5      # 退避区间 [base, base*(1+jitter)]
+DEFAULT_JITTER = 0.5  # 退避区间 [base, base*(1+jitter)]
 DEFAULT_MAX_SLEEP = 60.0  # Retry-After 可能给出极大值,必须封顶
 
 
@@ -59,8 +60,13 @@ def _retry_after_seconds(exc: BaseException) -> float | None:
     return secs if secs >= 0 else None
 
 
-def _sleep_seconds(attempt: int, backoff: float, jitter: float,
-                   exc: BaseException | None, max_sleep: float) -> float:
+def _sleep_seconds(
+    attempt: int,
+    backoff: float,
+    jitter: float,
+    exc: BaseException | None,
+    max_sleep: float,
+) -> float:
     """退避时长:优先服务端 Retry-After,否则指数退避 + jitter。
 
     jitter 的作用:一个时点会并发拉多个数据源(东财/Yahoo/腾讯/新浪),它们同时失败时
@@ -70,17 +76,23 @@ def _sleep_seconds(attempt: int, backoff: float, jitter: float,
     hinted = _retry_after_seconds(exc) if exc is not None else None
     if hinted is not None:
         return min(hinted, max_sleep)
-    base = backoff ** attempt
+    base = backoff**attempt
     if jitter:
         base *= 1.0 + random.random() * jitter
     return min(base, max_sleep)
 
 
-def fetch_with_retry(url: str, *, tries: int = 3, timeout: int = 15, backoff: float = 2.0,
-                     session: requests.Session | None = None,
-                     jitter: float = DEFAULT_JITTER,
-                     max_sleep: float = DEFAULT_MAX_SLEEP,
-                     **kwargs) -> requests.Response:
+def fetch_with_retry(
+    url: str,
+    *,
+    tries: int = 3,
+    timeout: int = 15,
+    backoff: float = 2.0,
+    session: requests.Session | None = None,
+    jitter: float = DEFAULT_JITTER,
+    max_sleep: float = DEFAULT_MAX_SLEEP,
+    **kwargs,
+) -> requests.Response:
     """requests GET with exponential backoff; re-raises the last exception.
 
     Calls raise_for_status(), so HTTP errors are retried as well — **except**
@@ -101,8 +113,14 @@ def fetch_with_retry(url: str, *, tries: int = 3, timeout: int = 15, backoff: fl
     raise RuntimeError("unreachable")  # pragma: no cover
 
 
-def retry_call(func: Callable[[], Any], *, tries: int = 3, backoff: float = 2.0,
-               jitter: float = 0.0, max_sleep: float = DEFAULT_MAX_SLEEP) -> Any:
+def retry_call(
+    func: Callable[[], Any],
+    *,
+    tries: int = 3,
+    backoff: float = 2.0,
+    jitter: float = 0.0,
+    max_sleep: float = DEFAULT_MAX_SLEEP,
+) -> Any:
     """Retry a zero-arg callable (e.g. urllib.request.urlopen) with exponential backoff.
 
     ``jitter`` 默认 0(与历史行为一致);带 response 的 4xx 异常同样不重试。

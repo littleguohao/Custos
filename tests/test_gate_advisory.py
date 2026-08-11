@@ -12,6 +12,7 @@
 
 本文件的核心是最后一个 class：无论门控说什么，选股输出必须逐字节一致。
 """
+
 from __future__ import annotations
 
 import json
@@ -21,31 +22,55 @@ import pytest
 from custos.pipeline.screening import candidate_table as ct
 
 
-def _gate(status="degraded", amv_ok=False, limitations=None, allow_increase=False,
-          pg_limits=None):
+def _gate(
+    status="degraded",
+    amv_ok=False,
+    limitations=None,
+    allow_increase=False,
+    pg_limits=None,
+):
     return {
-        "market_quality": {"status": status, "amv_ok": amv_ok, "quality_score": 0.65,
-                           "limitations": limitations if limitations is not None
-                           else ["0AMV=candidate：regime 未知，不得据此加仓"]},
-        "position_gate": {"allow_position_increase": allow_increase,
-                          "limitations": pg_limits or ["regime=未知不在加仓白名单"]},
+        "market_quality": {
+            "status": status,
+            "amv_ok": amv_ok,
+            "quality_score": 0.65,
+            "limitations": limitations
+            if limitations is not None
+            else ["0AMV=candidate：regime 未知，不得据此加仓"],
+        },
+        "position_gate": {
+            "allow_position_increase": allow_increase,
+            "limitations": pg_limits or ["regime=未知不在加仓白名单"],
+        },
     }
 
 
 def _pool(amv_state="做多", status="ok"):
     """一个最小但完整的 stock_pool，含 A/B 池与四面共振候选。"""
+
     def cand(code, bucket, aligned, bull):
         return {
-            "code": code, "name": f"股{code}", "bucket": bucket,
+            "code": code,
+            "name": f"股{code}",
+            "bucket": bucket,
             "next_step": "generate_buy_plan" if bucket == "A" else "observe_price",
             "fundamental_quality": {"tier": "优"},
-            "resonance_4leg": {"sector": True, "technical": True, "market": True,
-                               "aligned": aligned, "bull_candidate": bull},
+            "resonance_4leg": {
+                "sector": True,
+                "technical": True,
+                "market": True,
+                "aligned": aligned,
+                "bull_candidate": bull,
+            },
             "score_detail": {"total": 80 if bucket == "A" else 60},
-            "sector": "半导体", "sector_state": "主升",
+            "sector": "半导体",
+            "sector_state": "主升",
         }
+
     return {
-        "date": "2026-08-03", "status": status, "amv_state": amv_state,
+        "date": "2026-08-03",
+        "status": status,
+        "amv_state": amv_state,
         "market_permission": "允许",
         "bucket_counts": {"A": 1, "B": 1},
         "candidates": [cand("600000", "A", 4, True), cand("000001", "B", 3, True)],
@@ -55,9 +80,12 @@ def _pool(amv_state="做多", status="ok"):
 class TestAdvisoryRendering:
     def test_pass_takes_no_space(self):
         """数据齐全时不占版面。"""
-        assert ct._gate_advisory_section("2026-08-03",
-                                         _gate(status="pass", amv_ok=True,
-                                               limitations=[])) == []
+        assert (
+            ct._gate_advisory_section(
+                "2026-08-03", _gate(status="pass", amv_ok=True, limitations=[])
+            )
+            == []
+        )
 
     def test_degraded_shows_status_and_limitations(self):
         out = "\n".join(ct._gate_advisory_section("2026-08-03", _gate()))
@@ -73,20 +101,29 @@ class TestAdvisoryRendering:
         assert "空头不买" in out and "待0AMV做多" in out
 
     def test_no_regime_warning_when_amv_fresh(self):
-        out = "\n".join(ct._gate_advisory_section(
-            "2026-08-03", _gate(status="degraded", amv_ok=True,
-                                limitations=["turnover=stale(as_of=2026-08-01)"])))
+        out = "\n".join(
+            ct._gate_advisory_section(
+                "2026-08-03",
+                _gate(
+                    status="degraded",
+                    amv_ok=True,
+                    limitations=["turnover=stale(as_of=2026-08-01)"],
+                ),
+            )
+        )
         assert "regime 值可能来自过期数据" not in out
         assert "turnover=stale" in out
 
     def test_shows_position_gate_denial(self):
-        out = "\n".join(ct._gate_advisory_section("2026-08-03",
-                                                 _gate(allow_increase=False)))
+        out = "\n".join(
+            ct._gate_advisory_section("2026-08-03", _gate(allow_increase=False))
+        )
         assert "加仓授权：**未授予**" in out
 
     def test_omits_position_gate_when_granted(self):
-        out = "\n".join(ct._gate_advisory_section("2026-08-03",
-                                                 _gate(allow_increase=True)))
+        out = "\n".join(
+            ct._gate_advisory_section("2026-08-03", _gate(allow_increase=True))
+        )
         assert "加仓授权" not in out
 
     def test_always_states_it_does_not_rewrite(self):
@@ -105,11 +142,12 @@ class TestAdvisoryRendering:
         (tmp_path / "2026-08-03_runtime_gate.json").write_text("{bad", encoding="utf-8")
         monkeypatch.setattr(ct, "QUALITY_DIR", tmp_path)
         out = "\n".join(ct._gate_advisory_section("2026-08-03"))
-        assert "运行门控结论缺失" in out          # 降级为"缺失"，不抛异常
+        assert "运行门控结论缺失" in out  # 降级为"缺失"，不抛异常
 
     def test_reads_from_disk_when_not_injected(self, tmp_path, monkeypatch):
         (tmp_path / "2026-08-03_runtime_gate.json").write_text(
-            json.dumps(_gate()), encoding="utf-8")
+            json.dumps(_gate()), encoding="utf-8"
+        )
         monkeypatch.setattr(ct, "QUALITY_DIR", tmp_path)
         out = "\n".join(ct._gate_advisory_section("2026-08-03"))
         assert "degraded" in out
@@ -123,8 +161,11 @@ class TestGateNeverAltersSelection:
         {},
         _gate(status="pass", amv_ok=True, limitations=[]),
         _gate(status="degraded", amv_ok=False),
-        _gate(status="blocked", amv_ok=False,
-              limitations=["0AMV=missing", "market_breadth=stale", "turnover=missing"]),
+        _gate(
+            status="blocked",
+            amv_ok=False,
+            limitations=["0AMV=missing", "market_breadth=stale", "turnover=missing"],
+        ),
         _gate(status="pass", amv_ok=True, limitations=[], allow_increase=False),
     ]
 
@@ -141,7 +182,7 @@ class TestGateNeverAltersSelection:
                 skipping = True
                 continue
             if skipping:
-                if line.startswith("## "):        # 下一个标题：区块结束
+                if line.startswith("## "):  # 下一个标题：区块结束
                     skipping = False
                 else:
                     continue
@@ -161,9 +202,17 @@ class TestGateNeverAltersSelection:
     def test_selection_output_is_byte_identical(self, gate, tmp_path, monkeypatch):
         monkeypatch.setattr(ct, "QUALITY_DIR", tmp_path)
         # 基准用"pass 且无受限项"的门控——该场景区块返回空，是最干净的对照
-        clean = {"market_quality": {"status": "pass", "amv_ok": True,
-                                    "quality_score": 1.0, "limitations": []}}
-        baseline = self._selection_part(ct.render_table(_pool(), "2026-08-03", gate=clean))
+        clean = {
+            "market_quality": {
+                "status": "pass",
+                "amv_ok": True,
+                "quality_score": 1.0,
+                "limitations": [],
+            }
+        }
+        baseline = self._selection_part(
+            ct.render_table(_pool(), "2026-08-03", gate=clean)
+        )
         got = self._selection_part(ct.render_table(_pool(), "2026-08-03", gate=gate))
         assert got == baseline, "门控改变了选股输出——违反 18:00 纯选股的设计边界"
 
@@ -183,15 +232,22 @@ class TestGateNeverAltersSelection:
             assert code in text
 
     def test_bear_discipline_still_from_pool_not_gate(self, tmp_path, monkeypatch):
-        """"空头不买"来自 pool.amv_state（选股链自己的风控腿），不是门控。"""
+        """ "空头不买"来自 pool.amv_state（选股链自己的风控腿），不是门控。"""
         monkeypatch.setattr(ct, "QUALITY_DIR", tmp_path)
-        bear = ct.render_table(_pool(amv_state="空头触发"), "2026-08-03",
-                               gate=_gate(status="pass", amv_ok=True, limitations=[]))
+        bear = ct.render_table(
+            _pool(amv_state="空头触发"),
+            "2026-08-03",
+            gate=_gate(status="pass", amv_ok=True, limitations=[]),
+        )
         assert "0AMV 空头：今日无可买信号" in bear
-        long_ = ct.render_table(_pool(amv_state="做多"), "2026-08-03",
-                                gate=_gate(status="blocked", amv_ok=False))
-        assert "0AMV 空头：今日无可买信号" not in long_, \
+        long_ = ct.render_table(
+            _pool(amv_state="做多"),
+            "2026-08-03",
+            gate=_gate(status="blocked", amv_ok=False),
+        )
+        assert "0AMV 空头：今日无可买信号" not in long_, (
             "门控 blocked 不该让做多日显示空头纪律"
+        )
 
     def test_advisory_placed_before_signal_summary(self, tmp_path, monkeypatch):
         """先知道数据可不可信，再看信号。"""
@@ -207,8 +263,15 @@ class TestRun1800GateStage:
         import inspect
 
         from custos.pipeline import run_1800
+
         src = inspect.getsource(run_1800.main)
         assert "runtime_gate.py" in src, "18:00 链需落盘门控供候选表引用"
-        gate_call = src[src.index("runtime_gate.py") - 400:src.index("runtime_gate.py") + 400]
-        for flag in ("--require-quality", "--require-position-gate", "--require-trading-day"):
+        gate_call = src[
+            src.index("runtime_gate.py") - 400 : src.index("runtime_gate.py") + 400
+        ]
+        for flag in (
+            "--require-quality",
+            "--require-position-gate",
+            "--require-trading-day",
+        ):
             assert flag not in gate_call, f"选股链不得因 {flag} 失败"

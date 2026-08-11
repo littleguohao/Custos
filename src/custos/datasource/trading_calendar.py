@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Refresh and inspect the A-share calendar using local TDX JSON-RPC."""
+
 from __future__ import annotations
 
 import argparse
@@ -36,7 +37,9 @@ def extract_dates(response: Any) -> list[str]:
     return sorted({day for item in value if (day := normalize_day(item))})
 
 
-def rpc_trading_dates(endpoint: str, market: str, start: date, end: date, timeout: int) -> list[str]:
+def rpc_trading_dates(
+    endpoint: str, market: str, start: date, end: date, timeout: int
+) -> list[str]:
     """向 TQ-Local 取交易日。**传输层走 `local_tdx/tq_http.call`**（2026-08-06 收敛）。
 
     原先这里自己拼 JSON-RPC + `urlopen`，与 `tq_http` 是同一个服务
@@ -54,16 +57,24 @@ def rpc_trading_dates(endpoint: str, market: str, start: date, end: date, timeou
     并保住旧缓存（`status="cache_preserved"`），改成返回 dict 会让失败被当成成功。
     """
     from custos.datasource.local_tdx import tq_http  # 懒导入：不扩大本模块的导入面
+
     res = tq_http.call(
         "get_trading_dates",
-        {"market": market, "start_time": start.strftime("%Y%m%d"),
-         "end_time": end.strftime("%Y%m%d"), "count": 0},
-        timeout=timeout, endpoint=endpoint)
+        {
+            "market": market,
+            "start_time": start.strftime("%Y%m%d"),
+            "end_time": end.strftime("%Y%m%d"),
+            "count": 0,
+        },
+        timeout=timeout,
+        endpoint=endpoint,
+    )
     if not res.get("ok"):
         err = res.get("error") or {}
         raise RuntimeError(
             f"TQ get_trading_dates 失败[{err.get('code', 'unknown')}]"
-            f"{': ' + str(err['detail']) if err.get('detail') else ''}")
+            f"{': ' + str(err['detail']) if err.get('detail') else ''}"
+        )
     days = extract_dates(res.get("value"))
     if not days:
         raise RuntimeError("TDX get_trading_dates returned no valid dates")
@@ -71,10 +82,14 @@ def rpc_trading_dates(endpoint: str, market: str, start: date, end: date, timeou
 
 
 def calendar_days(start: date, end: date) -> list[str]:
-    return [(start + timedelta(days=i)).isoformat() for i in range((end - start).days + 1)]
+    return [
+        (start + timedelta(days=i)).isoformat() for i in range((end - start).days + 1)
+    ]
 
 
-def merge_range(cfg: dict[str, Any], start: date, end: date, trading_days: list[str]) -> dict[str, Any]:
+def merge_range(
+    cfg: dict[str, Any], start: date, end: date, trading_days: list[str]
+) -> dict[str, Any]:
     """Merge an RPC trading-day answer into the cache.
 
     Only days inside the span the RPC actually answered for
@@ -90,7 +105,9 @@ def merge_range(cfg: dict[str, Any], start: date, end: date, trading_days: list[
     ("don't know") instead of a confident False.
     """
     if not trading_days:
-        raise RuntimeError("refuse to merge an empty trading_days set into the calendar cache")
+        raise RuntimeError(
+            "refuse to merge an empty trading_days set into the calendar cache"
+        )
     covered_lo, covered_hi = min(trading_days), max(trading_days)
     range_days = {d for d in calendar_days(start, end) if covered_lo <= d <= covered_hi}
     trading = set(cfg.get("trading_days", [])) - range_days
@@ -98,10 +115,19 @@ def merge_range(cfg: dict[str, Any], start: date, end: date, trading_days: list[
     trading.update(trading_days)
     closed.update(range_days - set(trading_days))
 
-    ranges = [x for x in cfg.get("covered_ranges", [])
-              if x.get("start") != covered_lo or x.get("end") != covered_hi]
-    ranges.append({"start": covered_lo, "end": covered_hi, "source": "local_tdx_http",
-                   "requested": {"start": start.isoformat(), "end": end.isoformat()}})
+    ranges = [
+        x
+        for x in cfg.get("covered_ranges", [])
+        if x.get("start") != covered_lo or x.get("end") != covered_hi
+    ]
+    ranges.append(
+        {
+            "start": covered_lo,
+            "end": covered_hi,
+            "source": "local_tdx_http",
+            "requested": {"start": start.isoformat(), "end": end.isoformat()},
+        }
+    )
     cfg["trading_days"] = sorted(trading)
     cfg["non_trading_days"] = sorted(closed)
     cfg["covered_ranges"] = sorted(ranges, key=lambda x: (x["start"], x["end"]))
@@ -119,11 +145,28 @@ def default_range(today: date) -> tuple[date, date]:
     return start, today + timedelta(days=370)
 
 
-def refresh(start: date, end: date, endpoint: str, market: str, timeout: int) -> dict[str, Any]:
+def refresh(
+    start: date, end: date, endpoint: str, market: str, timeout: int
+) -> dict[str, Any]:
     config = load_json(CONFIG, {})
-    cfg = load_json(CACHE, {"version": 1, "covered_ranges": [], "trading_days": [], "non_trading_days": []})
+    cfg = load_json(
+        CACHE,
+        {
+            "version": 1,
+            "covered_ranges": [],
+            "trading_days": [],
+            "non_trading_days": [],
+        },
+    )
     source = cfg.setdefault("source", {})
-    source.update({"provider": "local_tdx_http", "method": "get_trading_dates", "market": market, "endpoint": endpoint})
+    source.update(
+        {
+            "provider": "local_tdx_http",
+            "method": "get_trading_dates",
+            "market": market,
+            "endpoint": endpoint,
+        }
+    )
     source["last_refresh_at"] = cn_now().isoformat(timespec="seconds")
     try:
         days = rpc_trading_dates(endpoint, market, start, end, timeout)
@@ -137,7 +180,9 @@ def refresh(start: date, end: date, endpoint: str, market: str, timeout: int) ->
         days = []
     cfg["timezone"] = config.get("timezone", "Asia/Shanghai")
     CACHE.parent.mkdir(parents=True, exist_ok=True)
-    CACHE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    CACHE.write_text(
+        json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
     return {
         "status": status,
         "start": start.isoformat(),
@@ -156,7 +201,10 @@ def refresh(start: date, end: date, endpoint: str, market: str, timeout: int) ->
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--check-date", help="return the deterministic trading-day status without refreshing TDX")
+    parser.add_argument(
+        "--check-date",
+        help="return the deterministic trading-day status without refreshing TDX",
+    )
     parser.add_argument("--start")
     parser.add_argument("--end")
     parser.add_argument("--endpoint", default=DEFAULT_ENDPOINT)

@@ -20,6 +20,7 @@ xlsx 必须含三个 sheet：`持仓数据` / `已清仓` / `交易记录`。
 但 argparse 是 `required=True` ⇒ fallback 分支**永不可达**（`find_latest_xlsx` 是死代码）。
 灾备脚本不该猜输入文件 —— 猜错会用错误的 xlsx 覆盖持仓快照。故保持必填，删掉死分支。
 """
+
 # 输出（项目单一事实源）：
 #   data/trades/trades_all.csv         — 全量流水 (cleaned)
 #   data/trades/trades_stock.json      — 股票买卖明细
@@ -48,13 +49,19 @@ OUT_DIR = TRADES_DIR
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(prog="standardize_trades", description="Import trade records from a user-provided xlsx into strategy_team data/trades/. Every time you download a new xlsx, pass --src.")
-    ap.add_argument("--src", required=True, help="path to xlsx file, e.g. C:/Users/gh/Downloads/交易记录3.xlsx")
+    ap = argparse.ArgumentParser(
+        prog="standardize_trades",
+        description="Import trade records from a user-provided xlsx into strategy_team data/trades/. Every time you download a new xlsx, pass --src.",
+    )
+    ap.add_argument(
+        "--src",
+        required=True,
+        help="path to xlsx file, e.g. C:/Users/gh/Downloads/交易记录3.xlsx",
+    )
     args = ap.parse_args()
     src = Path(args.src)
     if not src.exists():
         raise FileNotFoundError(src)
-
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     print(f"[trades] src: {src}")
@@ -69,8 +76,19 @@ def main() -> None:
     for col in ["成交数量", "成交价格", "成交金额", "发生金额", "费用"]:
         trades[col] = pd.to_numeric(trades[col], errors="coerce")
 
-    col_order = ["成交日期", "成交时间", "代码", "名称", "交易类别",
-                 "成交数量", "成交价格", "成交金额", "发生金额", "费用", "备注"]
+    col_order = [
+        "成交日期",
+        "成交时间",
+        "代码",
+        "名称",
+        "交易类别",
+        "成交数量",
+        "成交价格",
+        "成交金额",
+        "发生金额",
+        "费用",
+        "备注",
+    ]
     trades = trades[[c for c in col_order if c in trades.columns]]
     trades = trades.sort_values(["成交日期", "成交时间"]).reset_index(drop=True)
 
@@ -80,7 +98,9 @@ def main() -> None:
 
     stock = trades[trades["交易类别"].isin(["买入", "卖出"])].copy()
     stock_json = OUT_DIR / "trades_stock.json"
-    stock.to_json(stock_json, orient="records", force_ascii=False, indent=2, date_format="iso")
+    stock.to_json(
+        stock_json, orient="records", force_ascii=False, indent=2, date_format="iso"
+    )
     print(f"[trades] trades_stock.json: {len(stock)} rows")
 
     # ── 2. 已清仓 ──
@@ -91,7 +111,8 @@ def main() -> None:
     cls_rows = cls.to_dict(orient="records")
     (OUT_DIR / "closed_positions.json").write_text(
         json.dumps(cls_rows, ensure_ascii=False, indent=2, default=str),
-        encoding="utf-8")
+        encoding="utf-8",
+    )
     print(f"[trades] closed_positions.json: {len(cls_rows)} entries")
 
     # ── 3. 当前持仓 ──
@@ -101,7 +122,8 @@ def main() -> None:
     pos_rows = pos.to_dict(orient="records")
     (OUT_DIR / "current_positions.json").write_text(
         json.dumps(pos_rows, ensure_ascii=False, indent=2, default=str),
-        encoding="utf-8")
+        encoding="utf-8",
+    )
     print(f"[trades] current_positions.json: {len(pos_rows)} holdings")
 
     # ── 4. 导入元数据 ──
@@ -118,14 +140,18 @@ def main() -> None:
         "sheets": ["持仓数据", "已清仓", "交易记录"],
     }
     meta_path = OUT_DIR / "_import_meta.json"
-    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    meta_path.write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     print(f"[trades] _import_meta.json: {meta_path}")
 
     # ── 5. 摘要 ──
     print("\n=== 当前持仓摘要 ===")
     for r in pos_rows:
         try:
-            print(f"  {r['代码']} {r['名称']} 仓位{r['仓位占比']:.1%} 盈亏{r['持有盈亏率']:+.2%} 天数{r['持仓天数']} 成本{r['单位成本']} 现价{r['最新价']}")
+            print(
+                f"  {r['代码']} {r['名称']} 仓位{r['仓位占比']:.1%} 盈亏{r['持有盈亏率']:+.2%} 天数{r['持仓天数']} 成本{r['单位成本']} 现价{r['最新价']}"
+            )
         except (TypeError, KeyError):
             print(f"  {r}")
 

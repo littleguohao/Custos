@@ -25,6 +25,7 @@ CLI::
 
 输出 ``data/screening/{date}_candidates_enriched.json``。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -45,8 +46,12 @@ if hasattr(sys.stdout, "reconfigure"):
 # 本模块通过调用访问。常量随因子走（`WAVE_*` 在 wave_type、`DIST_*` 在 distribution…），
 # 需要它们的地方从对应因子模块导入，不要在这里再抄一份。
 from custos.core.factors._util import ohlcv_arrays as _ohlcv_arrays  # noqa: E402
-from custos.core.factors.wave_type import (WAVE_MIN_BARS, _find_rally_segment,  # noqa: E402
-                       detect_wave_type)
+from custos.core.factors.wave_type import (
+    WAVE_MIN_BARS,
+    _find_rally_segment,  # noqa: E402
+    detect_wave_type,
+)
+
 #   ↑ `WAVE_MIN_BARS` / `_find_rally_segment` 在本模块**别处也被用到**（不只 detect_wave_type），
 #     所以一并导入。常量与助手跟着因子走、由因子模块拥有，这里只引用。
 from custos.core.factors.perfect_b1_fit import compute_perfect_b1_fit  # noqa: E402
@@ -54,14 +59,20 @@ from custos.core.factors.b1_pullback_fit import compute_b1_pullback_fit  # noqa:
 from custos.core.factors.distribution import detect_distribution  # noqa: E402
 
 
-from custos.core.paths import (DATA, RISK_DIR, SCREEN_FORMULA_REGISTRY_FILE, SECTORS_DIR,
-                   TRADES_DIR)  # noqa: E402
+from custos.core.paths import (
+    DATA,
+    RISK_DIR,
+    SCREEN_FORMULA_REGISTRY_FILE,
+    SECTORS_DIR,
+    TRADES_DIR,
+)  # noqa: E402
 from custos.datasource.local_tdx import concept_tags  # noqa: E402
 from custos.pipeline.screening import signal_labels  # noqa: E402
 from custos.datasource.local_tdx import local_tdx_data  # noqa: E402
 from custos.core.factors import s_shape as s_shape_mod  # noqa: E402
 from custos.pipeline.screening import financials as financials_mod  # noqa: E402
 from custos.core.factors import sector_phase as sector_phase_mod  # noqa: E402
+
 # 死代码清理（2026-08-08）：本地 `_j_series` 包装已删 —— 唯一调用方早已搬走
 # （全项目 grep 确认无引用），本模块的 J 走下方 `kdj`（indicators 共享实现，
 # 内部 fill_na=50，行为不变）；`macd` 导入同步删除（check_macd_technics 自己
@@ -85,8 +96,11 @@ _BJ_PREFIX = ("4", "8", "920")
 # ⚠️ 这里原先本地硬编码同名常量（J_LOW_THRESHOLD=13.0 / VOL_RATIO_MAX=0.5 /
 # VOL_PCTILE_MAX=10.0）：REVERSAL_* 收敛后这三个仍留在本地，设 B1_J_LOW 只改到
 # 持仓链、选股链不动 —— 2026-08-07 补收敛。默认值见 b1_thresholds。
-from custos.core.b1_thresholds import (J_LOW_THRESHOLD, VOL_PCTILE_MAX,  # noqa: E402
-                           VOL_RATIO_MAX)
+from custos.core.b1_thresholds import (
+    J_LOW_THRESHOLD,
+    VOL_PCTILE_MAX,  # noqa: E402
+    VOL_RATIO_MAX,
+)
 
 # 默认日线加载根数（get_ohlcv_table(count=...)）。它同时是 list_days 的**上界**：
 # 加载器内部 `df.tail(count)`，所以 len(df)==OHLCV_LOAD_BARS 只说明"至少这么多根"，
@@ -109,10 +123,12 @@ def j_below_threshold(j: Any, threshold: float = J_LOW_THRESHOLD) -> bool:
         v = float(j)
     except (TypeError, ValueError):
         return False
-    if not np.isfinite(v):          # NaN / ±inf 均视为不可用
+    if not np.isfinite(v):  # NaN / ±inf 均视为不可用
         return False
     return v < threshold
-RS_STRONG_PP = 3.0           # 20日相对强度 >= +3pp
+
+
+RS_STRONG_PP = 3.0  # 20日相对强度 >= +3pp
 # 反转K的收盘涨幅区间：**不对称**（B1_w.pdf「分歧转一致的反转K」与「如何筛选最强壮的
 # B1宝宝」两处都明确写「涨幅为 -2% 到 1.8%」）。此前实现与治理文档都写成对称 ±2%，
 # 上界宽了 0.2pp。不是刻意收紧门槛，是按材料原文纠偏。
@@ -132,12 +148,20 @@ RS_STRONG_PP = 3.0           # 20日相对强度 >= +3pp
 # ⚠️ 阈值已收敛到 `b1_thresholds`（L0）—— 这里只做转出，不再自己读环境变量。
 #    2026-08-07 实测：原先「可配置」只覆盖本文件（选股链），持仓链
 #    （technical_monitor + b1_holding_state）硬编码 ±2 与 j<13，改 env 后两链分歧。
-from custos.core.b1_thresholds import (REVERSAL_AMPLITUDE_PCT,  # noqa: E402
-                           change_in_range)
-from custos.core.b1_thresholds import (REVERSAL_CHANGE_MAX_PCT,  # noqa: E402
-                           REVERSAL_CHANGE_MIN_PCT)
-__all__ = ["REVERSAL_CHANGE_MAX_PCT", "REVERSAL_CHANGE_MIN_PCT"]  # 阈值转出声明（测试钉这两个值）
-STOP_LOOKBACK = 10           # 建议止损位：近10日最低价
+from custos.core.b1_thresholds import (
+    REVERSAL_AMPLITUDE_PCT,  # noqa: E402
+    change_in_range,
+)
+from custos.core.b1_thresholds import (
+    REVERSAL_CHANGE_MAX_PCT,  # noqa: E402
+    REVERSAL_CHANGE_MIN_PCT,
+)
+
+__all__ = [
+    "REVERSAL_CHANGE_MAX_PCT",
+    "REVERSAL_CHANGE_MIN_PCT",
+]  # 阈值转出声明（测试钉这两个值）
+STOP_LOOKBACK = 10  # 建议止损位：近10日最低价
 
 # 概念标签命中主题所需的最小标签数。默认 1＝历史行为（命中1个语义标签即归入该主题）；
 # 提高到 2+ 可要求更强证据、降低子串过度匹配，可经 registry.theme_mapping.min_match 覆盖。
@@ -148,45 +172,52 @@ THEME_MIN_MATCH = 1
 # 要求阈值可配置、实际值随候选落盘，不得静默使用；完成样本回测前不得
 # 视为已校准。口径出处见 governance/contracts/SCREENING_WORKFLOW.md "策略对齐"章。
 
-NOW_MILD_VOL_BURST = 2.0            # 待回测参数：上涨段单日量/段均量上限（温和放量）
-NOW_BEAR_DROP_PCT = -3.0            # 待回测参数：放量大阴跌幅%
-NOW_BEAR_VOL_RATIO = 1.5            # 待回测参数：放量大阴量比（量/前5日均量）
-NOW_PULLBACK_VOL_RATIO = 0.7        # 待回测参数：回调段均量/上涨段均量上限
-NOW_TOP_ZONE = 3                    # 待回测参数：阶段高点观察区±N日
+NOW_MILD_VOL_BURST = 2.0  # 待回测参数：上涨段单日量/段均量上限（温和放量）
+NOW_BEAR_DROP_PCT = -3.0  # 待回测参数：放量大阴跌幅%
+NOW_BEAR_VOL_RATIO = 1.5  # 待回测参数：放量大阴量比（量/前5日均量）
+NOW_PULLBACK_VOL_RATIO = 0.7  # 待回测参数：回调段均量/上涨段均量上限
+NOW_TOP_ZONE = 3  # 待回测参数：阶段高点观察区±N日
 
-REPAIR_J_PREV_MAX = 20.0            # 待回测参数：J拐头向上（昨日J上限）
-REPAIR_VOL_SHRINK = 0.7             # 待回测参数：缩量止跌量比上限
-REPAIR_CHANGE_PCT = 2.0             # 待回测参数：止跌涨跌幅区间±%
+REPAIR_J_PREV_MAX = 20.0  # 待回测参数：J拐头向上（昨日J上限）
+REPAIR_VOL_SHRINK = 0.7  # 待回测参数：缩量止跌量比上限
+REPAIR_CHANGE_PCT = 2.0  # 待回测参数：止跌涨跌幅区间±%
 
-FIVE_DAY_SPIKE_RATIO = 1.45         # 五日战法：近7日巨量倍数（CZ §十六）。原文"前一交易日均量"存歧义，按前一交易日单日量实现（vol[t]/vol[t-1]），待策略 owner 确认
-FIVE_DAY_SPIKE_WINDOW = 7           # 五日战法：巨量观察窗口（CZ §十六）
-VOLUME_SUSTAIN_WINDOW = 13          # 量能持续性窗口（CZ §14.6：7-13日）
-VOLUME_SUSTAIN_MIN_POST_DAYS = 7    # 待回测参数：峰值日后确认主线最少观察日数
-VOLUME_SUSTAIN_RATIO = 0.55         # 峰值55%（CZ §14.6）
-VOLUME_SUSTAIN_RETREAT_DAYS = 3     # 连续N日<峰值55%判撤退（CZ §14.6）
-LEADER_VOL_BASE_DAYS = 20           # 龙头量能基准窗口（CZ §九）
-LEADER_VOL_RATIO = 1.7              # 地量1.7倍（CZ §九）
-THREE_LOWS_DRAWDOWN_PCT = 40.0      # 待回测参数：三低之低价格（自250日高点回撤%）
-THREE_LOWS_VOL_RATIO = 0.3          # 待回测参数：三低之低量（<250日均量×30%）
-BOTTOM_VOL_RATIO = 2.0              # 待回测参数：底部巨量（≥250日均量×2，CZ §14.6）
-BOTTOM_NO_NEW_LOW_DAYS = 20         # 待回测参数：不再创新低观察窗口
-CZ_MIN_BARS = 250                   # CZ 三低/底部巨量最少K线数（不足→available=false）
+FIVE_DAY_SPIKE_RATIO = 1.45  # 五日战法：近7日巨量倍数（CZ §十六）。原文"前一交易日均量"存歧义，按前一交易日单日量实现（vol[t]/vol[t-1]），待策略 owner 确认
+FIVE_DAY_SPIKE_WINDOW = 7  # 五日战法：巨量观察窗口（CZ §十六）
+VOLUME_SUSTAIN_WINDOW = 13  # 量能持续性窗口（CZ §14.6：7-13日）
+VOLUME_SUSTAIN_MIN_POST_DAYS = 7  # 待回测参数：峰值日后确认主线最少观察日数
+VOLUME_SUSTAIN_RATIO = 0.55  # 峰值55%（CZ §14.6）
+VOLUME_SUSTAIN_RETREAT_DAYS = 3  # 连续N日<峰值55%判撤退（CZ §14.6）
+LEADER_VOL_BASE_DAYS = 20  # 龙头量能基准窗口（CZ §九）
+LEADER_VOL_RATIO = 1.7  # 地量1.7倍（CZ §九）
+THREE_LOWS_DRAWDOWN_PCT = 40.0  # 待回测参数：三低之低价格（自250日高点回撤%）
+THREE_LOWS_VOL_RATIO = 0.3  # 待回测参数：三低之低量（<250日均量×30%）
+BOTTOM_VOL_RATIO = 2.0  # 待回测参数：底部巨量（≥250日均量×2，CZ §14.6）
+BOTTOM_NO_NEW_LOW_DAYS = 20  # 待回测参数：不再创新低观察窗口
+CZ_MIN_BARS = 250  # CZ 三低/底部巨量最少K线数（不足→available=false）
 
 # --- 知行量价（good_b1 图集）与出货五方式 待回测参数 ---
-ZX_CROSS_RECENT = 10                # 待回测：知行金叉"近N日"窗口
-IGNITION_WINDOW = 10                # 待回测：放量点火扫描窗口（日）
-IGNITION_VOL_RATIO = 1.5            # 待回测：点火量比（当日量/前5日均量）
-IGNITION_MIN_GAIN = 3.0            # 待回测：点火单日涨幅%下限
-PULLBACK_LOOKBACK = 20             # 待回测：回调缩量企稳观察窗口（日）
-PULLBACK_MIN_DROP = 3.0           # 待回测：距窗口高点回撤%下限
-PULLBACK_VOL_RATIO = 0.8         # 待回测：回调段/上涨段均量上限
+ZX_CROSS_RECENT = 10  # 待回测：知行金叉"近N日"窗口
+IGNITION_WINDOW = 10  # 待回测：放量点火扫描窗口（日）
+IGNITION_VOL_RATIO = 1.5  # 待回测：点火量比（当日量/前5日均量）
+IGNITION_MIN_GAIN = 3.0  # 待回测：点火单日涨幅%下限
+PULLBACK_LOOKBACK = 20  # 待回测：回调缩量企稳观察窗口（日）
+PULLBACK_MIN_DROP = 3.0  # 待回测：距窗口高点回撤%下限
+PULLBACK_VOL_RATIO = 0.8  # 待回测：回调段/上涨段均量上限
 
 
 # --- 完美 B1 图形贴合度（good_b1 图集共性特征的梯度评分）待回测参数 ---
 # 2026-07-22 用户决策：J<13 为全通道硬门槛（公式与自选池一视同仁），
 # 在 J<13 基础上按贴合度梯度给分，越符合完美图形分数越高。
-J_GATE_REQUIRED_DEFAULT = True    # J<13 硬门槛默认开（registry universe.j_low_required 可覆盖）
-DKS_MA_WINDOWS = (14, 28, 57, 114)  # DKS=(MA14+MA28+MA57+MA114)/4，与 technical_monitor.zhixing_state 同参
+J_GATE_REQUIRED_DEFAULT = (
+    True  # J<13 硬门槛默认开（registry universe.j_low_required 可覆盖）
+)
+DKS_MA_WINDOWS = (
+    14,
+    28,
+    57,
+    114,
+)  # DKS=(MA14+MA28+MA57+MA114)/4，与 technical_monitor.zhixing_state 同参
 
 # --- 完美B1「缩量回踩超卖企稳」买弱指纹（10只确认赢家反标，见 worklog）---
 # recall 达标(10/10)，但全市场回测证伪：周线交易模拟(止损+BBI出场)加0AMV做多+25bps成本后
@@ -194,16 +225,16 @@ DKS_MA_WINDOWS = (14, 28, 57, 114)  # DKS=(MA14+MA28+MA57+MA114)/4，与 technic
 # 排除了做多区间的突破赢家)。故仅作**描述性证据**落盘、绝不作买入依据、不驱动分层。参数下方保留。
 
 # --- MACD 十大技术（macd十大技术精讲）待回测参数 ---
-MACD_SWING_FRACTAL = 2           # 摆动高/低点分型：左右各 N 根确认
-MACD_DIV_LOOKBACK = 60           # 背离观察窗口（日）
-MACD_OVEREXT_PCTL = 0.9          # 开口/空间拐离：|DIF| 近 120 日分位上限
-MACD_OVEREXT_WIN = 120           # 拐离分位窗口（日）
+MACD_SWING_FRACTAL = 2  # 摆动高/低点分型：左右各 N 根确认
+MACD_DIV_LOOKBACK = 60  # 背离观察窗口（日）
+MACD_OVEREXT_PCTL = 0.9  # 开口/空间拐离：|DIF| 近 120 日分位上限
+MACD_OVEREXT_WIN = 120  # 拐离分位窗口（日）
 
 # --- 正交因子（非量价形态）待回测参数 ---
 # 方向A(2026-07-23)：全市场回测证实突破式打分非短周期 alpha，转接正交维度。
-LIQUIDITY_WIN = 20               # 待回测：近N日均成交额窗口
-LIQUIDITY_FLOOR_YI = 0.5         # 待回测：均成交额底线(亿元)，低于→low_liquidity(默认仅flag)
-FUND_FLOW_SECTOR_MIN_NAME = 2    # 板块名整名匹配所需最小长度（短于此视为不可判，不给分）
+LIQUIDITY_WIN = 20  # 待回测：近N日均成交额窗口
+LIQUIDITY_FLOOR_YI = 0.5  # 待回测：均成交额底线(亿元)，低于→low_liquidity(默认仅flag)
+FUND_FLOW_SECTOR_MIN_NAME = 2  # 板块名整名匹配所需最小长度（短于此视为不可判，不给分）
 
 
 def _load_json(path: Path, default: Any) -> Any:
@@ -225,7 +256,7 @@ def load_hits(date: str) -> dict:
 def load_risk_high_codes(date: str) -> set[str]:
     data = _load_json(RISK_DIR / f"{date}_risk_decision.json", {})
     out = set()
-    for x in (data.get("stock_risks") or []):
+    for x in data.get("stock_risks") or []:
         if str(x.get("priority", "")) == "高" and x.get("code"):
             out.add(str(x["code"]).split(".")[0].zfill(6))
     return out
@@ -259,7 +290,7 @@ def build_stock_industry_map() -> dict[str, str]:
     """
     out: dict[str, str] = {}
     try:
-        for s in (latest_tq_sector_map().get("sectors") or []):
+        for s in latest_tq_sector_map().get("sectors") or []:
             if s.get("category") != "sub_industry":
                 continue
             name = str(s.get("name") or "").strip()
@@ -283,8 +314,9 @@ def _match_theme_tags(stock_tags: list[str], semantic_tags: list[str]) -> list[s
     return matched
 
 
-def build_stock_theme_map(min_match: int = THEME_MIN_MATCH,
-                          codes: Optional[set] = None) -> tuple[dict[str, dict], bool]:
+def build_stock_theme_map(
+    min_match: int = THEME_MIN_MATCH, codes: Optional[set] = None
+) -> tuple[dict[str, dict], bool]:
     """股 → 主题方向（theme_id/sector 名）。
 
     优先用 miscinfo 概念标签（concept_tags，每股官方概念）匹配
@@ -309,13 +341,20 @@ def build_stock_theme_map(min_match: int = THEME_MIN_MATCH,
     # monkeypatch(load_tags) 的测试静默走到 fallback 分支。元数据另取一次,
     # 拿不到就当"无元数据"处理(不告警),行为与改动前一致。
     tags_map = concept_tags.load_tags()
-    tags_meta = concept_tags.load_tags_meta()[1] if hasattr(concept_tags, "load_tags_meta") else {}
+    tags_meta = (
+        concept_tags.load_tags_meta()[1]
+        if hasattr(concept_tags, "load_tags_meta")
+        else {}
+    )
     if tags_meta.get("stale"):
         # 概念标签退化慢,陈旧仍可用,但必须留痕:不能让"上周的标签"以当日身份
         # 进入主线指纹,否则板块族密度榜会指向一条已经冷掉的主线(审计 C6)。
-        print(f"[WARN] 概念标签陈旧(date={tags_meta.get('date')}, "
-              f"requested={tags_meta.get('requested_date')})：主线指纹据此生成,"
-              f"仅作情境参考", file=sys.stderr)
+        print(
+            f"[WARN] 概念标签陈旧(date={tags_meta.get('date')}, "
+            f"requested={tags_meta.get('requested_date')})：主线指纹据此生成,"
+            f"仅作情境参考",
+            file=sys.stderr,
+        )
 
     def _scan(items) -> dict[str, dict]:
         out: dict[str, dict] = {}
@@ -371,8 +410,14 @@ def build_stock_theme_map(min_match: int = THEME_MIN_MATCH,
             continue
         for raw in s.get("stocks") or []:
             code6 = str(raw).split(".")[0].zfill(6)
-            stock_theme.setdefault(code6, {**theme, "matched_code": s.get("code", ""),
-                                           "sector_source": "tq_880_fallback"})
+            stock_theme.setdefault(
+                code6,
+                {
+                    **theme,
+                    "matched_code": s.get("code", ""),
+                    "sector_source": "tq_880_fallback",
+                },
+            )
     return stock_theme, True
 
 
@@ -414,10 +459,18 @@ def weekly_j_state(df) -> dict[str, Any]:
     weekly = resample(df, "W-FRI")
     w = kdj(weekly)
     if not w.get("available"):
-        return {"available": False, "weekly_j_available": False,
-                "weekly_j": None, "weekly_j_low": False}
-    return {"available": True, "weekly_j_available": True, "weekly_j": w["j"],
-            "weekly_j_low": j_below_threshold(w["j"])}
+        return {
+            "available": False,
+            "weekly_j_available": False,
+            "weekly_j": None,
+            "weekly_j_low": False,
+        }
+    return {
+        "available": True,
+        "weekly_j_available": True,
+        "weekly_j": w["j"],
+        "weekly_j_low": j_below_threshold(w["j"]),
+    }
 
 
 def check_non_one_wave(df) -> dict[str, Any]:
@@ -429,11 +482,15 @@ def check_non_one_wave(df) -> dict[str, Any]:
     n = len(df)
     seg = _find_rally_segment(df)
     if seg is None or n < WAVE_MIN_BARS or seg[2] >= n - 2:
-        return {"status": "insufficient", "available": False,
-                "conditions": {}, "reason": "无完整上涨段+回调段"}
+        return {
+            "status": "insufficient",
+            "available": False,
+            "conditions": {},
+            "reason": "无完整上涨段+回调段",
+        }
     _, i_low, i_high, _ = seg
 
-    up_vol = vol[i_low:i_high + 1]
+    up_vol = vol[i_low : i_high + 1]
     up_vol_mean = float(up_vol.mean()) if len(up_vol) else 0.0
     # (a) 上涨段温和放量：无单日爆量（单日量/段均量 < 2）
     max_burst = float(up_vol.max() / up_vol_mean) if up_vol_mean else None
@@ -444,7 +501,7 @@ def check_non_one_wave(df) -> dict[str, Any]:
     big_bear = False
     for t in range(max(1, i_high - NOW_TOP_ZONE), min(n, i_high + NOW_TOP_ZONE + 1)):
         drop = (close[t] / close[t - 1] - 1) * 100
-        base = vol[max(0, t - 5):t].mean()
+        base = vol[max(0, t - 5) : t].mean()
         vr = float(vol[t] / base) if base else None
         if worst_drop is None or drop < worst_drop:
             worst_drop = drop
@@ -454,13 +511,19 @@ def check_non_one_wave(df) -> dict[str, Any]:
             big_bear = True
     no_big_bear = not big_bear
     # (c) 回调段缩量：回调段均量/上涨段均量 < 0.7
-    pull_vol = vol[i_high + 1:]
-    pull_ratio = float(pull_vol.mean() / up_vol_mean) if len(pull_vol) and up_vol_mean else None
+    pull_vol = vol[i_high + 1 :]
+    pull_ratio = (
+        float(pull_vol.mean() / up_vol_mean) if len(pull_vol) and up_vol_mean else None
+    )
     shrink = pull_ratio is not None and pull_ratio < NOW_PULLBACK_VOL_RATIO
     # 撤销：回调放量破位（跌回启动位且量>=上涨段均量）
     break_with_vol = bool(
-        len(pull_vol) and up_vol_mean
-        and any(close[t] < close[i_low] and vol[t] >= up_vol_mean for t in range(i_high + 1, n))
+        len(pull_vol)
+        and up_vol_mean
+        and any(
+            close[t] < close[i_low] and vol[t] >= up_vol_mean
+            for t in range(i_high + 1, n)
+        )
     )
     if big_bear or break_with_vol:
         status = "revoked"
@@ -472,17 +535,33 @@ def check_non_one_wave(df) -> dict[str, Any]:
         "status": status,
         "available": True,
         "conditions": {
-            "mild_volume": {"hit": bool(mild), "max_vol_burst": round(max_burst, 3) if max_burst is not None else None},
-            "no_top_big_bear": {"hit": bool(no_big_bear),
-                                "worst_drop_pct": round(worst_drop, 2) if worst_drop is not None else None,
-                                "worst_vol_ratio": round(worst_vol_ratio, 3) if worst_vol_ratio is not None else None},
-            "pullback_shrink": {"hit": bool(shrink), "pullback_vol_ratio": round(pull_ratio, 3) if pull_ratio is not None else None},
+            "mild_volume": {
+                "hit": bool(mild),
+                "max_vol_burst": round(max_burst, 3) if max_burst is not None else None,
+            },
+            "no_top_big_bear": {
+                "hit": bool(no_big_bear),
+                "worst_drop_pct": round(worst_drop, 2)
+                if worst_drop is not None
+                else None,
+                "worst_vol_ratio": round(worst_vol_ratio, 3)
+                if worst_vol_ratio is not None
+                else None,
+            },
+            "pullback_shrink": {
+                "hit": bool(shrink),
+                "pullback_vol_ratio": round(pull_ratio, 3)
+                if pull_ratio is not None
+                else None,
+            },
         },
         "break_with_volume": break_with_vol,
     }
 
 
-def check_repair_signals(df, index_df, kdj_state: Optional[dict] = None) -> dict[str, Any]:
+def check_repair_signals(
+    df, index_df, kdj_state: Optional[dict] = None
+) -> dict[str, Any]:
     """B1 修复信号（B1 §四.2）：输出命中数组+各信号实际值。
 
     kdj_state 可传调用方已算好的 kdj(df)（compute_metrics 就有一份），避免同一只票
@@ -494,14 +573,22 @@ def check_repair_signals(df, index_df, kdj_state: Optional[dict] = None) -> dict
     j_now = j.get("j") if j.get("available") else None
     j_prev = j.get("j_prev") if j.get("available") else None
 
-    j_turn_up = bool(j_now is not None and j_prev is not None
-                     and j_now > j_prev and j_prev < REPAIR_J_PREV_MAX)
+    j_turn_up = bool(
+        j_now is not None
+        and j_prev is not None
+        and j_now > j_prev
+        and j_prev < REPAIR_J_PREV_MAX
+    )
 
     vol_ma5_prev = float(vol[-6:-1].mean()) if n >= 6 else None
     vol_ratio = float(vol[-1] / vol_ma5_prev) if vol_ma5_prev else None
     change = (close[-1] / close[-2] - 1) * 100 if n >= 2 and close[-2] else None
-    shrink_stop = bool(vol_ratio is not None and vol_ratio <= REPAIR_VOL_SHRINK
-                       and change is not None and abs(change) <= REPAIR_CHANGE_PCT)
+    shrink_stop = bool(
+        vol_ratio is not None
+        and vol_ratio <= REPAIR_VOL_SHRINK
+        and change is not None
+        and abs(change) <= REPAIR_CHANGE_PCT
+    )
 
     rs_turn = False
     rs5_now = rs5_prev = None
@@ -522,10 +609,16 @@ def check_repair_signals(df, index_df, kdj_state: Optional[dict] = None) -> dict
         "signals": signals,
         "detail": {
             "j_turn_up": {"hit": j_turn_up, "j": j_now, "j_prev": j_prev},
-            "volume_shrink_stop_fall": {"hit": shrink_stop, "vol_ratio": round(vol_ratio, 3) if vol_ratio is not None else None,
-                                        "change_pct": round(change, 2) if change is not None else None},
-            "rs_turn_strong": {"hit": rs_turn, "rs5_now_pp": round(rs5_now, 2) if rs5_now is not None else None,
-                               "rs5_prev_pp": round(rs5_prev, 2) if rs5_prev is not None else None},
+            "volume_shrink_stop_fall": {
+                "hit": shrink_stop,
+                "vol_ratio": round(vol_ratio, 3) if vol_ratio is not None else None,
+                "change_pct": round(change, 2) if change is not None else None,
+            },
+            "rs_turn_strong": {
+                "hit": rs_turn,
+                "rs5_now_pp": round(rs5_now, 2) if rs5_now is not None else None,
+                "rs5_prev_pp": round(rs5_prev, 2) if rs5_prev is not None else None,
+            },
         },
     }
 
@@ -539,19 +632,34 @@ def check_five_day_entry(df) -> dict[str, Any]:
     ma5 = float(close[-5:].mean())
     cond1 = bool(close[-1] > ma5)
     vol_ma20 = float(vol[-20:].mean())
-    cond2 = bool((vol[-1] > vol[-2] > vol[-3])
-                 or all(v >= vol_ma20 for v in vol[-3:]))
-    spike_ratios = [float(vol[t] / vol[t - 1]) for t in range(max(1, n - FIVE_DAY_SPIKE_WINDOW), n) if vol[t - 1]]
+    cond2 = bool((vol[-1] > vol[-2] > vol[-3]) or all(v >= vol_ma20 for v in vol[-3:]))
+    spike_ratios = [
+        float(vol[t] / vol[t - 1])
+        for t in range(max(1, n - FIVE_DAY_SPIKE_WINDOW), n)
+        if vol[t - 1]
+    ]
     max_spike = max(spike_ratios) if spike_ratios else None
     cond3 = bool(max_spike is not None and max_spike >= FIVE_DAY_SPIKE_RATIO)
     return {
         "hit": bool(cond1 and cond2 and cond3),
         "available": True,
         "conditions": {
-            "close_above_ma5": {"hit": cond1, "close": round(float(close[-1]), 4), "ma5": round(ma5, 4)},
-            "three_day_volume_up": {"hit": cond2, "vols_last3": [float(v) for v in vol[-3:]],
-                                    "vol_ma20": round(vol_ma20, 2)},
-            "spike_within_7d": {"hit": cond3, "max_spike_ratio": round(max_spike, 3) if max_spike is not None else None},
+            "close_above_ma5": {
+                "hit": cond1,
+                "close": round(float(close[-1]), 4),
+                "ma5": round(ma5, 4),
+            },
+            "three_day_volume_up": {
+                "hit": cond2,
+                "vols_last3": [float(v) for v in vol[-3:]],
+                "vol_ma20": round(vol_ma20, 2),
+            },
+            "spike_within_7d": {
+                "hit": cond3,
+                "max_spike_ratio": round(max_spike, 3)
+                if max_spike is not None
+                else None,
+            },
         },
     }
 
@@ -568,25 +676,40 @@ def check_volume_sustain(df) -> dict[str, Any]:
     days_since = VOLUME_SUSTAIN_WINDOW - 1 - peak_rel
     peak_pos = n - VOLUME_SUSTAIN_WINDOW + peak_rel
     peak_date = str(df["date"].iloc[peak_pos])[:10]
-    post = vol[peak_pos + 1:]
+    post = vol[peak_pos + 1 :]
     post_mean_ratio = float(post.mean() / peak) if len(post) and peak else None
     post_min_ratio = float(post.min() / peak) if len(post) and peak else None
     ratios_last13 = [round(float(v / peak), 3) if peak else None for v in win]
-    retreat = bool(days_since >= VOLUME_SUSTAIN_RETREAT_DAYS and peak
-                   and all(v < peak * VOLUME_SUSTAIN_RATIO for v in vol[-VOLUME_SUSTAIN_RETREAT_DAYS:]))
+    retreat = bool(
+        days_since >= VOLUME_SUSTAIN_RETREAT_DAYS
+        and peak
+        and all(
+            v < peak * VOLUME_SUSTAIN_RATIO for v in vol[-VOLUME_SUSTAIN_RETREAT_DAYS:]
+        )
+    )
     # 与 01_cognition_framework.md §14.6 一致：峰值日后窗口内"逐日"量都必须 ≥ 峰值×55%
     # （均值达标但有单日跌破不算主线确认）。
-    confirmed = bool(not retreat and days_since >= VOLUME_SUSTAIN_MIN_POST_DAYS
-                     and len(post) and peak
-                     and all(v >= peak * VOLUME_SUSTAIN_RATIO for v in post))
-    status = "retreat" if retreat else ("mainline_confirmed" if confirmed else "neutral")
+    confirmed = bool(
+        not retreat
+        and days_since >= VOLUME_SUSTAIN_MIN_POST_DAYS
+        and len(post)
+        and peak
+        and all(v >= peak * VOLUME_SUSTAIN_RATIO for v in post)
+    )
+    status = (
+        "retreat" if retreat else ("mainline_confirmed" if confirmed else "neutral")
+    )
     return {
         "status": status,
         "available": True,
         "peak_date": peak_date,
         "days_since_peak": days_since,
-        "post_mean_ratio": round(post_mean_ratio, 3) if post_mean_ratio is not None else None,
-        "post_min_ratio": round(post_min_ratio, 3) if post_min_ratio is not None else None,
+        "post_mean_ratio": round(post_mean_ratio, 3)
+        if post_mean_ratio is not None
+        else None,
+        "post_min_ratio": round(post_min_ratio, 3)
+        if post_min_ratio is not None
+        else None,
         "vol_ratios_last13": ratios_last13,
     }
 
@@ -597,11 +720,15 @@ def check_leader_volume(df) -> dict[str, Any]:
     n = len(df)
     if n < LEADER_VOL_BASE_DAYS + 3:
         return {"hit": False, "available": False}
-    base = float(vol[-(LEADER_VOL_BASE_DAYS + 3):-3].min())
+    base = float(vol[-(LEADER_VOL_BASE_DAYS + 3) : -3].min())
     ratios = [float(v / base) if base else None for v in vol[-3:]]
     hit = bool(base and all(v >= base * LEADER_VOL_RATIO for v in vol[-3:]))
-    return {"hit": hit, "available": True, "base_vol": base,
-            "vol_ratios_last3": [round(r, 3) if r is not None else None for r in ratios]}
+    return {
+        "hit": hit,
+        "available": True,
+        "base_vol": base,
+        "vol_ratios_last3": [round(r, 3) if r is not None else None for r in ratios],
+    }
 
 
 def _drawdown_250d(close, high) -> tuple[Optional[float], Optional[float]]:
@@ -628,10 +755,18 @@ def check_three_lows(df) -> dict[str, Any]:
         "hit": bool(low_price and low_vol),
         "available": True,
         "conditions": {
-            "low_price": {"hit": bool(low_price), "drawdown_from_250d_high_pct": round(dd, 2)},
-            "low_volume": {"hit": low_vol, "vol_today": float(vol[-1]),
-                           "vol_ma250": round(vol_ma250, 2),
-                           "vol_ratio_vs_ma250": round(float(vol[-1] / vol_ma250), 3) if vol_ma250 else None},
+            "low_price": {
+                "hit": bool(low_price),
+                "drawdown_from_250d_high_pct": round(dd, 2),
+            },
+            "low_volume": {
+                "hit": low_vol,
+                "vol_today": float(vol[-1]),
+                "vol_ma250": round(vol_ma250, 2),
+                "vol_ratio_vs_ma250": round(float(vol[-1] / vol_ma250), 3)
+                if vol_ma250
+                else None,
+            },
         },
     }
 
@@ -647,17 +782,27 @@ def check_bottom_volume(df) -> dict[str, Any]:
         return {"hit": False, "available": False}
     vol_ma250 = float(vol[-CZ_MIN_BARS:].mean())
     huge_vol = bool(vol_ma250 and vol[-1] >= vol_ma250 * BOTTOM_VOL_RATIO)
-    low20 = float(low[-(BOTTOM_NO_NEW_LOW_DAYS + 1):-1].min())
+    low20 = float(low[-(BOTTOM_NO_NEW_LOW_DAYS + 1) : -1].min())
     no_new_low = bool(low[-1] >= low20)
     return {
         "hit": bool(dd >= THREE_LOWS_DRAWDOWN_PCT and huge_vol and no_new_low),
         "available": True,
         "conditions": {
-            "deep_drawdown": {"hit": bool(dd >= THREE_LOWS_DRAWDOWN_PCT),
-                              "drawdown_from_250d_high_pct": round(dd, 2)},
-            "huge_volume": {"hit": huge_vol,
-                            "vol_ratio_vs_ma250": round(float(vol[-1] / vol_ma250), 3) if vol_ma250 else None},
-            "no_new_low": {"hit": no_new_low, "low_today": float(low[-1]), "low_20d": low20},
+            "deep_drawdown": {
+                "hit": bool(dd >= THREE_LOWS_DRAWDOWN_PCT),
+                "drawdown_from_250d_high_pct": round(dd, 2),
+            },
+            "huge_volume": {
+                "hit": huge_vol,
+                "vol_ratio_vs_ma250": round(float(vol[-1] / vol_ma250), 3)
+                if vol_ma250
+                else None,
+            },
+            "no_new_low": {
+                "hit": no_new_low,
+                "low_today": float(low[-1]),
+                "low_20d": low20,
+            },
         },
     }
 
@@ -676,17 +821,26 @@ def check_ignition(df) -> dict[str, Any]:
         return {"hit": False, "available": False}
     hit_detail = None
     for t in range(max(11, n - IGNITION_WINDOW), n):
-        base5 = vol[t - 5:t].mean()
+        base5 = vol[t - 5 : t].mean()
         if not base5:
             continue
         vr = float(vol[t] / base5)
         chg = (close[t] / close[t - 1] - 1) * 100 if close[t - 1] else 0.0
         is_bull = close[t] > open_[t]
-        prev5 = vol[t - 10:t - 5].mean()
+        prev5 = vol[t - 10 : t - 5].mean()
         pre_contracted = (prev5 == 0) or (base5 <= prev5)
-        if vr >= IGNITION_VOL_RATIO and is_bull and chg >= IGNITION_MIN_GAIN and pre_contracted:
-            hit_detail = {"bars_ago": n - 1 - t, "vol_ratio5": round(vr, 3),
-                          "change_pct": round(chg, 2), "pre_contracted": bool(pre_contracted)}
+        if (
+            vr >= IGNITION_VOL_RATIO
+            and is_bull
+            and chg >= IGNITION_MIN_GAIN
+            and pre_contracted
+        ):
+            hit_detail = {
+                "bars_ago": n - 1 - t,
+                "vol_ratio5": round(vr, 3),
+                "change_pct": round(chg, 2),
+                "pre_contracted": bool(pre_contracted),
+            }
             break
     return {"hit": hit_detail is not None, "available": True, "detail": hit_detail}
 
@@ -706,18 +860,27 @@ def check_pullback_shrink(df, dks_last: Optional[float] = None) -> dict[str, Any
     hi_pos = n - PULLBACK_LOOKBACK + hi_rel
     high = float(close[hi_pos])
     drop_pct = (1 - close[-1] / high) * 100 if high else 0.0
-    run_vol = vol[n - PULLBACK_LOOKBACK:hi_pos + 1]
-    pull_vol = vol[hi_pos + 1:]
+    run_vol = vol[n - PULLBACK_LOOKBACK : hi_pos + 1]
+    pull_vol = vol[hi_pos + 1 :]
     run_mean = float(run_vol.mean()) if len(run_vol) else 0.0
-    pull_ratio = (float(pull_vol.mean()) / run_mean) if (len(pull_vol) >= 2 and run_mean) else None
+    pull_ratio = (
+        (float(pull_vol.mean()) / run_mean)
+        if (len(pull_vol) >= 2 and run_mean)
+        else None
+    )
     shrink = pull_ratio is not None and pull_ratio < PULLBACK_VOL_RATIO
     hold_dks = (dks_last is None) or (close[-1] >= dks_last)
     hit = bool(drop_pct >= PULLBACK_MIN_DROP and shrink and hold_dks)
     return {
-        "hit": hit, "available": True,
-        "detail": {"drop_from_high_pct": round(drop_pct, 2),
-                   "pullback_vol_ratio": round(pull_ratio, 3) if pull_ratio is not None else None,
-                   "hold_dks": bool(hold_dks)},
+        "hit": hit,
+        "available": True,
+        "detail": {
+            "drop_from_high_pct": round(drop_pct, 2),
+            "pullback_vol_ratio": round(pull_ratio, 3)
+            if pull_ratio is not None
+            else None,
+            "hold_dks": bool(hold_dks),
+        },
     }
 
 
@@ -751,55 +914,93 @@ def check_macd_technics(df) -> dict[str, Any]:
         if h0 > 0:
             zone = 1 if h0 >= h1 else 2  # 扩张=第一区间；收缩（脱离DIF）=第二区间
         else:
-            zone = 3                     # 柱体脱离 DEA（≤0）=第三区间
+            zone = 3  # 柱体脱离 DEA（≤0）=第三区间
     else:
-        zone = 0                         # 零轴下方，不做多区间分级
+        zone = 0  # 零轴下方，不做多区间分级
     zone1_restart = bool(dif_last > 0 and h0 > 0 and h0 > h1 and h1 <= 0)
 
     # 摆动高/低点（左右各 MACD_SWING_FRACTAL 根分型，右确认避免未来函数）。
     # 唯一或近唯一峰/谷：窗口内其余 2f 根中至少 2f-1 根严格更低/更高
-    #（允许至多 1 根等值，兼容双顶平台；>=2f-1 而非 <=，写反会导致唯一峰永不被检出）。
+    # （允许至多 1 根等值，兼容双顶平台；>=2f-1 而非 <=，写反会导致唯一峰永不被检出）。
     f = MACD_SWING_FRACTAL
     w0 = max(f, n - MACD_DIV_LOOKBACK)
-    swing_hi = [i for i in range(w0, n - f)
-                if close[i] == close[i - f:i + f + 1].max() and (close[i - f:i + f + 1] < close[i]).sum() >= 2 * f - 1]
-    swing_lo = [i for i in range(w0, n - f)
-                if close[i] == close[i - f:i + f + 1].min() and (close[i - f:i + f + 1] > close[i]).sum() >= 2 * f - 1]
+    swing_hi = [
+        i
+        for i in range(w0, n - f)
+        if close[i] == close[i - f : i + f + 1].max()
+        and (close[i - f : i + f + 1] < close[i]).sum() >= 2 * f - 1
+    ]
+    swing_lo = [
+        i
+        for i in range(w0, n - f)
+        if close[i] == close[i - f : i + f + 1].min()
+        and (close[i - f : i + f + 1] > close[i]).sum() >= 2 * f - 1
+    ]
 
     top_div = {"hit": False}
     if len(swing_hi) >= 2:
         a, b = swing_hi[-2], swing_hi[-1]
         if close[b] > close[a] and (d[b] < d[a] or h[b] < h[a]):
-            top_div = {"hit": True, "a_bars_ago": n - 1 - a, "b_bars_ago": n - 1 - b,
-                       "close_a": round(float(close[a]), 4), "close_b": round(float(close[b]), 4),
-                       "dif_a": round(float(d[a]), 4), "dif_b": round(float(d[b]), 4),
-                       "hist_a": round(float(h[a]), 4), "hist_b": round(float(h[b]), 4)}
+            top_div = {
+                "hit": True,
+                "a_bars_ago": n - 1 - a,
+                "b_bars_ago": n - 1 - b,
+                "close_a": round(float(close[a]), 4),
+                "close_b": round(float(close[b]), 4),
+                "dif_a": round(float(d[a]), 4),
+                "dif_b": round(float(d[b]), 4),
+                "hist_a": round(float(h[a]), 4),
+                "hist_b": round(float(h[b]), 4),
+            }
     three_peaks = {"hit": False}
     if len(swing_hi) >= 3:
         p1, p2, p3 = swing_hi[-3], swing_hi[-2], swing_hi[-1]
         if close[p1] < close[p2] < close[p3] and d[p1] > d[p2] > d[p3]:
-            three_peaks = {"hit": True, "peaks_bars_ago": [n - 1 - p1, n - 1 - p2, n - 1 - p3],
-                           "dif_peaks": [round(float(d[p1]), 4), round(float(d[p2]), 4), round(float(d[p3]), 4)]}
+            three_peaks = {
+                "hit": True,
+                "peaks_bars_ago": [n - 1 - p1, n - 1 - p2, n - 1 - p3],
+                "dif_peaks": [
+                    round(float(d[p1]), 4),
+                    round(float(d[p2]), 4),
+                    round(float(d[p3]), 4),
+                ],
+            }
     bottom_div = {"hit": False}
     if len(swing_lo) >= 2:
         a, b = swing_lo[-2], swing_lo[-1]
         if close[b] < close[a] and d[b] > d[a]:
-            bottom_div = {"hit": True, "a_bars_ago": n - 1 - a, "b_bars_ago": n - 1 - b,
-                          "close_a": round(float(close[a]), 4), "close_b": round(float(close[b]), 4),
-                          "dif_a": round(float(d[a]), 4), "dif_b": round(float(d[b]), 4)}
+            bottom_div = {
+                "hit": True,
+                "a_bars_ago": n - 1 - a,
+                "b_bars_ago": n - 1 - b,
+                "close_a": round(float(close[a]), 4),
+                "close_b": round(float(close[b]), 4),
+                "dif_a": round(float(d[a]), 4),
+                "dif_b": round(float(d[b]), 4),
+            }
 
     # 开口/空间拐离：|DIF| 分位 + 柱体仍在
     win = min(MACD_OVEREXT_WIN, n)
     abs_dif = [abs(float(x)) for x in d[-win:]]
-    pctl = float(sum(1 for x in abs_dif if x <= abs_dif[-1]) / len(abs_dif)) if win >= 20 else None
-    overextended = {"hit": bool(pctl is not None and pctl >= MACD_OVEREXT_PCTL
-                                and h0 * dif_last > 0),  # “下面还有柱体”＝柱体与 DIF 同号
-                    "dif_abs_percentile": round(pctl, 3) if pctl is not None else None}
+    pctl = (
+        float(sum(1 for x in abs_dif if x <= abs_dif[-1]) / len(abs_dif))
+        if win >= 20
+        else None
+    )
+    overextended = {
+        "hit": bool(
+            pctl is not None and pctl >= MACD_OVEREXT_PCTL and h0 * dif_last > 0
+        ),  # “下面还有柱体”＝柱体与 DIF 同号
+        "dif_abs_percentile": round(pctl, 3) if pctl is not None else None,
+    }
 
     return {
         "available": True,
-        "zone": zone, "zone1_restart": zone1_restart,
-        "dif": round(dif_last, 4), "dea": round(dea_last, 4), "hist": round(h0, 4),
+        "zone": zone,
+        "zone1_restart": zone1_restart,
+        "dif": round(dif_last, 4),
+        "dea": round(dea_last, 4),
+        "hist": round(h0, 4),
         "bottom_divergence": bottom_div,
         "top_divergence": top_div,
         "three_peaks": three_peaks,
@@ -813,11 +1014,17 @@ def check_liquidity(df, win: int = LIQUIDITY_WIN) -> dict[str, Any]:
         return {"available": False}
     amt = df["amount"].astype(float).to_numpy()
     avg = float(amt[-win:].mean())
-    return {"available": bool(avg > 0), "avg_amount_yi": round(avg / 1e8, 4),
-            "avg_amount": round(avg, 0), "window": win}
+    return {
+        "available": bool(avg > 0),
+        "avg_amount_yi": round(avg / 1e8, 4),
+        "avg_amount": round(avg, 0),
+        "window": win,
+    }
 
 
-def load_fund_flow(date: str, cumulative_days: int = 1, market_dir=None) -> dict[str, Any]:
+def load_fund_flow(
+    date: str, cumulative_days: int = 1, market_dir=None
+) -> dict[str, Any]:
     """读 collect_fund_flow 落盘的每日资金流快照（东财）。
 
     cumulative_days<=1：仅读 {date}_fund_flow_rank.json（现状）。
@@ -832,7 +1039,9 @@ def load_fund_flow(date: str, cumulative_days: int = 1, market_dir=None) -> dict
         sector_maps = [data.get("sector_rank") or {}]
         files_used = [date] if data else []
     else:
-        allf = sorted(p for p in mdir.glob("*_fund_flow_rank.json") if p.name[:10] <= date)
+        allf = sorted(
+            p for p in mdir.glob("*_fund_flow_rank.json") if p.name[:10] <= date
+        )
         use = allf[-cumulative_days:]
         files_used = [p.name[:10] for p in use]
         stock_ranks, sector_maps = [], []
@@ -847,10 +1056,19 @@ def load_fund_flow(date: str, cumulative_days: int = 1, market_dir=None) -> dict
             c = str(s.get("code", "")).split(".")[0].zfill(6)
             if not (c.isdigit() and len(c) == 6):
                 continue
-            e = by_code.setdefault(c, {"code": c, "name": s.get("name", ""),
-                                       "main_net_inflow": 0.0, "days": 0,
-                                       # 单日快照才有意义的日内占比；多日累计无法相加 → None
-                                       "main_net_pct": (s.get("main_net_pct") if cumulative_days <= 1 else None)})
+            e = by_code.setdefault(
+                c,
+                {
+                    "code": c,
+                    "name": s.get("name", ""),
+                    "main_net_inflow": 0.0,
+                    "days": 0,
+                    # 单日快照才有意义的日内占比；多日累计无法相加 → None
+                    "main_net_pct": (
+                        s.get("main_net_pct") if cumulative_days <= 1 else None
+                    ),
+                },
+            )
             v = s.get("main_net_inflow")
             if isinstance(v, (int, float)):
                 e["main_net_inflow"] += v
@@ -865,13 +1083,18 @@ def load_fund_flow(date: str, cumulative_days: int = 1, market_dir=None) -> dict
             v = item.get("main_net_inflow")
             if isinstance(v, (int, float)):
                 e["main_net_inflow"] += v
-    return {"available": bool(by_code or sec_agg), "by_code": by_code,
-            "sectors": list(sec_agg.values()), "cumulative_days": cumulative_days,
-            "files_used": files_used}
+    return {
+        "available": bool(by_code or sec_agg),
+        "by_code": by_code,
+        "sectors": list(sec_agg.values()),
+        "cumulative_days": cumulative_days,
+        "files_used": files_used,
+    }
 
 
-def sector_name_matches(flow_name: str, sector_name: str,
-                        min_len: int = FUND_FLOW_SECTOR_MIN_NAME) -> bool:
+def sector_name_matches(
+    flow_name: str, sector_name: str, min_len: int = FUND_FLOW_SECTOR_MIN_NAME
+) -> bool:
     """资金流板块名 vs 候选主题名是否算同一板块（**整名双向包含**，不截前缀）。
 
     审计：原实现除了 `nm in sector_name` 还允许 `nm[:2] in sector_name`——2 个汉字
@@ -893,17 +1116,23 @@ def fund_flow_of(code6: str, sector_name: str, ff: dict) -> dict[str, Any]:
         return {"available": False}
     entry = (ff.get("by_code") or {}).get(code6)
     main_inflow = entry.get("main_net_inflow") if entry else None
-    in_rank_positive = bool(entry is not None and isinstance(main_inflow, (int, float)) and main_inflow > 0)
+    in_rank_positive = bool(
+        entry is not None and isinstance(main_inflow, (int, float)) and main_inflow > 0
+    )
     sec_match = None
     if sector_name and sector_name != "未知":
         for s in ff.get("sectors") or []:
             nm = str(s.get("name") or "")
             if not sector_name_matches(nm, sector_name):
                 continue
-            if sec_match is None or (s.get("main_net_inflow") or 0) > (sec_match.get("main_net_inflow") or 0):
+            if sec_match is None or (s.get("main_net_inflow") or 0) > (
+                sec_match.get("main_net_inflow") or 0
+            ):
                 sec_match = s
     sector_inflow = (sec_match or {}).get("main_net_inflow")
-    sector_inflow_positive = bool(isinstance(sector_inflow, (int, float)) and sector_inflow > 0)
+    sector_inflow_positive = bool(
+        isinstance(sector_inflow, (int, float)) and sector_inflow > 0
+    )
     return {
         "available": True,
         "in_rank": entry is not None,
@@ -935,8 +1164,16 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
     amplitude_pct = amplitude_pct_of(last["high"], last["low"], prev_close)
 
     stock_ret20 = _close_ret_pct(df, 20)
-    index_ret20 = _close_ret_pct(index_df, 20) if index_df is not None and not index_df.empty else None
-    rs_20d = (stock_ret20 - index_ret20) if (stock_ret20 is not None and index_ret20 is not None) else None
+    index_ret20 = (
+        _close_ret_pct(index_df, 20)
+        if index_df is not None and not index_df.empty
+        else None
+    )
+    rs_20d = (
+        (stock_ret20 - index_ret20)
+        if (stock_ret20 is not None and index_ret20 is not None)
+        else None
+    )
 
     stop_ref = None
     if len(df) >= STOP_LOOKBACK:
@@ -945,13 +1182,17 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
     daily_j = j.get("j") if j.get("available") else None
     j_low = daily_j is not None and daily_j < J_LOW_THRESHOLD
     vol_contraction = (
-        vol_ratio is not None and vol_ratio <= VOL_RATIO_MAX
-        and vol_pctile is not None and vol_pctile <= VOL_PCTILE_MAX
+        vol_ratio is not None
+        and vol_ratio <= VOL_RATIO_MAX
+        and vol_pctile is not None
+        and vol_pctile <= VOL_PCTILE_MAX
     )
     reversal_k = bool(
-        j_low and vol_contraction
+        j_low
+        and vol_contraction
         and change_in_range(change_pct)
-        and amplitude_pct is not None and amplitude_pct <= REVERSAL_AMPLITUDE_PCT
+        and amplitude_pct is not None
+        and amplitude_pct <= REVERSAL_AMPLITUDE_PCT
     )
     rs_strong = rs_20d is not None and rs_20d >= RS_STRONG_PP
 
@@ -960,14 +1201,18 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
     dks_last = zx.get("dks") if zx.get("available") else None
     ignition = check_ignition(df)
     pullback_shrink = check_pullback_shrink(df, dks_last)
-    ride_above_fast = bool(zx.get("available") and zx.get("close_above_qsx") and zx.get("qsx_gt_dks"))
+    ride_above_fast = bool(
+        zx.get("available") and zx.get("close_above_qsx") and zx.get("qsx_gt_dks")
+    )
     zx_recent_gold = bool(
-        zx.get("available") and zx.get("qsx_gt_dks")
+        zx.get("available")
+        and zx.get("qsx_gt_dks")
         and zx.get("days_since_golden_cross") is not None
         and zx["days_since_golden_cross"] <= ZX_CROSS_RECENT
     )
     b1_ignition_hit = bool(
-        (j_low or reversal_k) and pullback_shrink.get("hit")
+        (j_low or reversal_k)
+        and pullback_shrink.get("hit")
         and (zx_recent_gold or ignition.get("hit"))
     )
     distribution = detect_distribution(df, code)
@@ -978,16 +1223,22 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
     # 这些因子还没跑过真实回测，而结论#15 的教训是"识别有术、盈利无效"。
     # 复用上面已算的 zx / distribution / daily_j / weekly_j，避免重复 resample 与 kdj。
     _wk = weekly_j_state(df)
-    try:                                    # 平台回踩:与下方证据层同一份检测,延迟导入
+    try:  # 平台回踩:与下方证据层同一份检测,延迟导入
         from custos.core.factors.platform_pullback import detect_platform_pullback  # noqa: PLC0415
+
         _plat = detect_platform_pullback(df)
     except Exception:  # noqa: BLE001
         _plat = None
     signals = signal_labels.compute_signals(
-        df, code, daily_j=daily_j,
+        df,
+        code,
+        daily_j=daily_j,
         weekly_j_low=_wk.get("weekly_j_low"),
         weekly_j_available=_wk.get("weekly_j_available"),
-        zx=zx, distribution=distribution, platform_pullback=_plat)
+        zx=zx,
+        distribution=distribution,
+        platform_pullback=_plat,
+    )
 
     return {
         "close": round(float(last["close"]), 4),
@@ -1001,7 +1252,9 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
         "stock_ret_20d_pct": round(stock_ret20, 2) if stock_ret20 is not None else None,
         "index_ret_20d_pct": round(index_ret20, 2) if index_ret20 is not None else None,
         "relative_strength_20d_pp": round(rs_20d, 2) if rs_20d is not None else None,
-        "stop_loss_ref": {"price": stop_ref, "basis": f"近{STOP_LOOKBACK}日最低价"} if stop_ref else None,
+        "stop_loss_ref": {"price": stop_ref, "basis": f"近{STOP_LOOKBACK}日最低价"}
+        if stop_ref
+        else None,
         "patterns": {
             "bbi_above": bool(bbi.get("available") and bbi.get("close_above")),
             "j_low": bool(j_low),
@@ -1026,11 +1279,15 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
         "ignition": ignition,
         "pullback_shrink": pullback_shrink,
         "ride_above_fast": ride_above_fast,
-        "b1_ignition": {"hit": b1_ignition_hit, "zhixing_recent_golden": zx_recent_gold},
+        "b1_ignition": {
+            "hit": b1_ignition_hit,
+            "zhixing_recent_golden": zx_recent_gold,
+        },
         "distribution": distribution,
         "macd_technics": macd_technics,
-        "perfect_b1_fit": compute_perfect_b1_fit(df, daily_j, zx, pullback_shrink,
-                                                 macd_state=macd_technics),
+        "perfect_b1_fit": compute_perfect_b1_fit(
+            df, daily_j, zx, pullback_shrink, macd_state=macd_technics
+        ),
         # TODO(策略口径,需 owner 拍板 —— 审计【建议优化】14):这两条是**对称的两笔浪费**,
         # 但都涉及选股行为,本批只留痕不改:
         #   ① b1_pullback_fit 已被全市场回测**证伪**(见 compute_b1_pullback_fit docstring:
@@ -1057,7 +1314,8 @@ def enrich(
     theme_min_match: Optional[int] = None,
     fund_flow_days: int = 1,
     financials_cfg: Optional[dict] = None,
-    sector_phase_cfg: Optional[dict] = None) -> dict:
+    sector_phase_cfg: Optional[dict] = None,
+) -> dict:
     """充实命中股。loader 可注入以便测试；所有失败结构化落盘，绝不 raise。"""
     hits_data = hits_data if hits_data is not None else load_hits(date)
     cfg = universe_cfg or {}
@@ -1085,7 +1343,8 @@ def enrich(
     if hits_date and hits_date != date:
         result["status"] = "partial"
         result["degraded_reason"] = _append_reason(
-            result["degraded_reason"], f"formula_hits_date_mismatch:{hits_date}")
+            result["degraded_reason"], f"formula_hits_date_mismatch:{hits_date}"
+        )
     result["signal_date_contract"] = (
         "公式命中(TQ在线)按最新交易日报出；本段以本地日线 last_date==date 逐票二次校验，"
         "不满足者计入 excluded(no_today_bar)，确保命中信号与所算指标同为当日。"
@@ -1105,7 +1364,8 @@ def enrich(
             result["status"] = "partial"
         result["degraded_reason"] = _append_reason(
             result["degraded_reason"],
-            f"st_filter_unavailable:{st_filter}(名称表不可用 → 无名候选按 st_unverified 剔除)")
+            f"st_filter_unavailable:{st_filter}(名称表不可用 → 无名候选按 st_unverified 剔除)",
+        )
 
     # 去重合并：code → {name, formula_ids}
     merged: dict[str, dict] = {}
@@ -1114,7 +1374,9 @@ def enrich(
             code6 = str(h.get("code", "")).split(".")[0].zfill(6)
             if not (code6.isdigit() and len(code6) == 6):
                 continue
-            entry = merged.setdefault(code6, {"code": code6, "name": h.get("name", ""), "formula_hits": []})
+            entry = merged.setdefault(
+                code6, {"code": code6, "name": h.get("name", ""), "formula_hits": []}
+            )
             if not entry["name"] and h.get("name"):
                 entry["name"] = h["name"]
             if f.get("id") and f["id"] not in entry["formula_hits"]:
@@ -1125,19 +1387,24 @@ def enrich(
     fund_flow = load_fund_flow(date, cumulative_days=fund_flow_days)
     fin_cfg = financials_cfg or {}
     fin_enabled = bool(fin_cfg.get("enabled"))
-    fin_df = financials_mod.load_financials(fin_cfg.get("report_period", "")) if fin_enabled else None
+    fin_df = (
+        financials_mod.load_financials(fin_cfg.get("report_period", ""))
+        if fin_enabled
+        else None
+    )
     fin_colmap = dict(fin_cfg.get("columns") or {})
     if fin_enabled and fin_df is not None and fin_cfg.get("auto_map", True):
         _cm = financials_mod.auto_colmap(getattr(fin_df, "columns", []))
-        _cm.update(fin_colmap)   # 显式 registry.columns 按字段覆盖自动识别
+        _cm.update(fin_colmap)  # 显式 registry.columns 按字段覆盖自动识别
         fin_colmap = _cm
     # 板块相位(hint,不封顶)：best-effort 构建 resolver；数据缺失则跳过
     sp_cfg = sector_phase_cfg or {}
     sp_resolve = None
     if sp_cfg.get("enabled", True):
         try:
-            mpath = Path(sp_cfg.get("members_path")
-                         or (DATA / "market" / "sector_members.json"))
+            mpath = Path(
+                sp_cfg.get("members_path") or (DATA / "market" / "sector_members.json")
+            )
             idir = Path(sp_cfg.get("index_dir") or (DATA / "market" / "sector_index"))
             if mpath.is_file() and idir.is_dir():
                 members = _load_json(mpath, {})
@@ -1149,22 +1416,28 @@ def enrich(
     # codes 关键字用 signature 探测后再传：既有测试把 build_stock_theme_map
     # monkeypatch 成 `lambda min_match=None: ...`，硬传会 TypeError 打挂整段。
     _bstm_kwargs: dict[str, Any] = {
-        "min_match": theme_min_match if theme_min_match is not None else THEME_MIN_MATCH}
+        "min_match": theme_min_match if theme_min_match is not None else THEME_MIN_MATCH
+    }
     try:
         if "codes" in inspect.signature(build_stock_theme_map).parameters:
             _bstm_kwargs["codes"] = set(merged)
-    except (TypeError, ValueError):      # 无法取签名（C 实现/内建）→ 退回全市场
+    except (TypeError, ValueError):  # 无法取签名（C 实现/内建）→ 退回全市场
         pass
     stock_theme, theme_map_available = build_stock_theme_map(**_bstm_kwargs)
     if not theme_map_available:
         result["status"] = "partial"
         result["degraded_reason"] = _append_reason(
-            result["degraded_reason"], "sector_map_unavailable")
+            result["degraded_reason"], "sector_map_unavailable"
+        )
     # 每股官方细分行业（881xxx，展示层「板块」列；与主题族聚合层并存，取不到全"未知"）
     stock_industry = build_stock_industry_map()
 
-    load_ohlcv = ohlcv_loader or (lambda c: local_tdx_data.get_ohlcv_table(c, count=OHLCV_LOAD_BARS))
-    load_index = index_loader or (lambda: local_tdx_data.get_ohlcv_table(INDEX_CODE, count=OHLCV_LOAD_BARS))
+    load_ohlcv = ohlcv_loader or (
+        lambda c: local_tdx_data.get_ohlcv_table(c, count=OHLCV_LOAD_BARS)
+    )
+    load_index = index_loader or (
+        lambda: local_tdx_data.get_ohlcv_table(INDEX_CODE, count=OHLCV_LOAD_BARS)
+    )
     # 指数序列与个股同等对待：**必须排序 + 必须当日**（审计 B7）。
     # 此前指数只有一个裸 try/except：
     #   1) 加载失败 → index_df=None，rs_20d/rs_turn 整列静默变 None/False，
@@ -1199,7 +1472,8 @@ def enrich(
             result["status"] = "partial"
         result["degraded_reason"] = _append_reason(
             result["degraded_reason"],
-            f"{index_status}(上证指数不可用/非当日 → 20日相对强度整列置空，不做错窗口相减)")
+            f"{index_status}(上证指数不可用/非当日 → 20日相对强度整列置空，不做错窗口相减)",
+        )
 
     for code6 in sorted(merged):
         item = merged[code6]
@@ -1214,7 +1488,7 @@ def enrich(
                 exclude("exclude_bj")
                 continue
         elif not _A_SHARE_RE.match(code6):
-            exclude("not_a_share")          # ETF/可转债/B股/指数：不是可买个股（审计 B10）
+            exclude("not_a_share")  # ETF/可转债/B股/指数：不是可买个股（审计 B10）
             continue
         if exclude_st:
             if "ST" in name.upper():
@@ -1261,8 +1535,9 @@ def enrich(
             # 都必须先看 list_days_exact，否则会把老票误当刚上市（审计）。
             "list_days": len(df),
             "list_days_exact": len(df) < OHLCV_LOAD_BARS,
-            "list_days_basis": ("loaded_bars" if len(df) < OHLCV_LOAD_BARS
-                                else "loaded_bars_censored"),
+            "list_days_basis": (
+                "loaded_bars" if len(df) < OHLCV_LOAD_BARS else "loaded_bars_censored"
+            ),
             "signal_date": last_date,
             **metrics,
         }
@@ -1285,24 +1560,33 @@ def enrich(
         cand["industry"] = stock_industry.get(code6, "未知")
         cand["fund_flow"] = fund_flow_of(code6, cand["sector"], fund_flow)
         if sp_resolve is not None:
-            cand["sector_phase"] = sp_resolve(code6)     # 板块相位 hint(不封顶,证据层)
-        try:                                             # 平台突破回踩形态(证据层,不驱动分层)
+            cand["sector_phase"] = sp_resolve(code6)  # 板块相位 hint(不封顶,证据层)
+        try:  # 平台突破回踩形态(证据层,不驱动分层)
             from custos.core.factors.platform_pullback import detect_platform_pullback  # noqa: PLC0415
+
             pp = detect_platform_pullback(df)
             if pp:
-                cand["platform_pullback"] = pp           # {platform_high, breakout_date, pullback_low, ...}
+                cand["platform_pullback"] = (
+                    pp  # {platform_high, breakout_date, pullback_low, ...}
+                )
         except Exception:  # noqa: BLE001
             pass
         if fin_enabled and fin_colmap:
             # 财务维度(CZ抄底代理)：最佳努力落盘证据层，不驱动分层
             cand["financials"] = financials_mod.financial_factor(
-                code6, fin_df, fin_colmap, price=cand.get("close"))
+                code6, fin_df, fin_colmap, price=cand.get("close")
+            )
         result["candidates"].append(cand)
 
     # 名称表挂掉导致"筛完 0 只"必须报 unavailable 而不是 partial：score_candidates 只对
     # unavailable 整池降级，partial + 空 candidates 会被读成"今天市场没有符合条件的票"。
-    if st_filter_broken and not result["candidates"] and any(
-        str(x.get("reason", "")).startswith("st_unverified") for x in result["excluded"]
+    if (
+        st_filter_broken
+        and not result["candidates"]
+        and any(
+            str(x.get("reason", "")).startswith("st_unverified")
+            for x in result["excluded"]
+        )
     ):
         result["status"] = "unavailable"
 
@@ -1310,23 +1594,28 @@ def enrich(
 
 
 def main(argv: Optional[list] = None) -> int:
-    parser = argparse.ArgumentParser(description="screening 链第 2 段：命中股充实+模式识别（确定性）")
+    parser = argparse.ArgumentParser(
+        description="screening 链第 2 段：命中股充实+模式识别（确定性）"
+    )
     parser.add_argument("--date", required=True, help="交易日期 YYYY-MM-DD")
     args = parser.parse_args(argv)
 
-    registry = _load_json(
-        SCREEN_FORMULA_REGISTRY_FILE, {}
+    registry = _load_json(SCREEN_FORMULA_REGISTRY_FILE, {})
+    result = enrich(
+        args.date,
+        universe_cfg=registry.get("universe") or {},
+        theme_min_match=(registry.get("theme_mapping") or {}).get("min_match"),
+        fund_flow_days=int((registry.get("fund_flow") or {}).get("cumulative_days", 1)),
+        financials_cfg=registry.get("financials") or {},
+        sector_phase_cfg=registry.get("sector_phase") or {},
     )
-    result = enrich(args.date, universe_cfg=registry.get("universe") or {},
-                    theme_min_match=(registry.get("theme_mapping") or {}).get("min_match"),
-                    fund_flow_days=int((registry.get("fund_flow") or {}).get("cumulative_days", 1)),
-                    financials_cfg=registry.get("financials") or {},
-                    sector_phase_cfg=registry.get("sector_phase") or {})
 
     SCREENING_DIR.mkdir(parents=True, exist_ok=True)
     out_path = SCREENING_DIR / f"{args.date}_candidates_enriched.json"
     require("candidates_enriched", result)
-    out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    out_path.write_text(
+        json.dumps(result, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+    )
 
     summary = {
         "date": args.date,

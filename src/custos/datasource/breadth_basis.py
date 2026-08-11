@@ -18,6 +18,7 @@ down_count=None 会走 7.5 中性），绝不用一个来源不明的近似值�
 两者都没有就返回 ``(None, reason)``。**不**拿本地 vipdoc 文件数当总数：那里含
 已退市标的，会把总数抬高、跌家数推得更多，正好加重要修的这个偏差。
 """
+
 from __future__ import annotations
 
 import json
@@ -57,7 +58,10 @@ def resolve_total_stocks() -> tuple[int | None, str]:
         n = _sane(raw)
         if n is not None:
             return n, f"env:{ENV_KEY}"
-        return None, f"env:{ENV_KEY} 取值非法（{raw!r}，要求 {MIN_TOTAL}~{MAX_TOTAL} 整数）"
+        return (
+            None,
+            f"env:{ENV_KEY} 取值非法（{raw!r}，要求 {MIN_TOTAL}~{MAX_TOTAL} 整数）",
+        )
     try:
         if UNIVERSE_FILE.is_file():
             data = json.loads(UNIVERSE_FILE.read_text(encoding="utf-8"))
@@ -70,7 +74,9 @@ def resolve_total_stocks() -> tuple[int | None, str]:
     return None, "无真实总数来源（未设 env，且 a_share_universe.json 不存在）"
 
 
-def breadth_counts(up_count, total: int | None = None, source: str | None = None) -> dict:
+def breadth_counts(
+    up_count, total: int | None = None, source: str | None = None
+) -> dict:
     """由涨家数推导 down_count / up_down_ratio 及其口径标记。
 
     ``total`` / ``source`` 可由调用方注入（调用方自己 resolve，便于单测替换真值源）；
@@ -82,18 +88,30 @@ def breadth_counts(up_count, total: int | None = None, source: str | None = None
     if total is None and source is None:
         total, source = resolve_total_stocks()
     if up_count is None or total is None:
-        return {"down_count": None, "up_down_ratio": None,
-                "up_down_ratio_status": "unavailable",
-                "total_stocks": None, "total_stocks_source": source,
-                "note": UNAVAILABLE_NOTE}
+        return {
+            "down_count": None,
+            "up_down_ratio": None,
+            "up_down_ratio_status": "unavailable",
+            "total_stocks": None,
+            "total_stocks_source": source,
+            "note": UNAVAILABLE_NOTE,
+        }
     down = total - int(up_count)
     if down <= 0:
-        return {"down_count": None, "up_down_ratio": None,
-                "up_down_ratio_status": "unavailable",
-                "total_stocks": total, "total_stocks_source": source,
-                "note": f"涨家数 {up_count} ≥ 总数 {total}，推算跌家数不成立；" + UNAVAILABLE_NOTE}
-    return {"down_count": int(down),
-            "up_down_ratio": round(int(up_count) / down, 4),
-            "up_down_ratio_status": "derived_from_total",
-            "total_stocks": total, "total_stocks_source": source,
-            "note": DERIVED_NOTE}
+        return {
+            "down_count": None,
+            "up_down_ratio": None,
+            "up_down_ratio_status": "unavailable",
+            "total_stocks": total,
+            "total_stocks_source": source,
+            "note": f"涨家数 {up_count} ≥ 总数 {total}，推算跌家数不成立；"
+            + UNAVAILABLE_NOTE,
+        }
+    return {
+        "down_count": int(down),
+        "up_down_ratio": round(int(up_count) / down, 4),
+        "up_down_ratio_status": "derived_from_total",
+        "total_stocks": total,
+        "total_stocks_source": source,
+        "note": DERIVED_NOTE,
+    }

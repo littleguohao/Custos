@@ -11,14 +11,15 @@ CZ 抄底三条件：① 业绩预增 ≥100%；② 收入/利润/现金流真�
 逻辑字段：code(必填,用于定位)、net_profit、op_cashflow(②必需)、revenue、net_profit_yoy、
 revenue_yoy、roe、total_shares(× 价格 → 市值)。
 """
+
 from __future__ import annotations
 
 import datetime as _dt
 from typing import Any, Optional
 
 
-REQUIRED = ("code", "net_profit", "op_cashflow")   # 缺任一 → available=False
-DIXI_NET_PROFIT_YOY = 100.0                          # 待回测：业绩预增代理阈值（净利同比%）
+REQUIRED = ("code", "net_profit", "op_cashflow")  # 缺任一 → available=False
+DIXI_NET_PROFIT_YOY = 100.0  # 待回测：业绩预增代理阈值（净利同比%）
 
 # 财报时效上限（日）：报告期距 as-of 超过它就不再算"有效财报"。
 #
@@ -55,19 +56,54 @@ def auto_colmap(columns) -> dict[str, str]:
     m: dict[str, Optional[str]] = {
         "code": find([("证券代码",), ("股票代码",), ("代码",), ("code",), ("symbol",)]),
         "report_date": find([("report_date",), ("报告期",), ("报表日期",)]),
-        "net_profit": find([("归属于母公司", "净利润"), ("归母净利润",), ("净利润",)],
-                            excludes=("同比", "增长", "率", "比率", "每股", "现金")),
-        "net_profit_yoy": find([("净利润", "同比"), ("归母净利润", "同比"), ("净利润", "增长率"), ("净利润", "增长")]),
-        "revenue": find([("营业总收入",), ("营业收入",)],
-                        excludes=("同比", "增长", "成本", "率", "每股", "EBITDA", "%", "/", "比率", "占比")),
-        "revenue_yoy": find([("营业总收入", "同比"), ("营业收入", "同比"), ("营业收入", "增长")]),
-        "op_cashflow": find([("经营活动", "现金流量净额"), ("经营活动产生的现金流量净额",), ("经营", "现金流")],
-                            excludes=("每股",)),
-        "roe": find([("净资产收益率", "加权"), ("净资产收益率",), ("ROE",)], excludes=("同比", "增长")),
+        "net_profit": find(
+            [("归属于母公司", "净利润"), ("归母净利润",), ("净利润",)],
+            excludes=("同比", "增长", "率", "比率", "每股", "现金"),
+        ),
+        "net_profit_yoy": find(
+            [
+                ("净利润", "同比"),
+                ("归母净利润", "同比"),
+                ("净利润", "增长率"),
+                ("净利润", "增长"),
+            ]
+        ),
+        "revenue": find(
+            [("营业总收入",), ("营业收入",)],
+            excludes=(
+                "同比",
+                "增长",
+                "成本",
+                "率",
+                "每股",
+                "EBITDA",
+                "%",
+                "/",
+                "比率",
+                "占比",
+            ),
+        ),
+        "revenue_yoy": find(
+            [("营业总收入", "同比"), ("营业收入", "同比"), ("营业收入", "增长")]
+        ),
+        "op_cashflow": find(
+            [
+                ("经营活动", "现金流量净额"),
+                ("经营活动产生的现金流量净额",),
+                ("经营", "现金流"),
+            ],
+            excludes=("每股",),
+        ),
+        "roe": find(
+            [("净资产收益率", "加权"), ("净资产收益率",), ("ROE",)],
+            excludes=("同比", "增长"),
+        ),
         "total_shares": find([("总股本",)], excludes=("流通",)),
     }
     if m["code"] is None:
-        m["code"] = "__index__"   # 无代码列 → 假定行索引即代码，financial_factor 用 index 定位
+        m["code"] = (
+            "__index__"  # 无代码列 → 假定行索引即代码，financial_factor 用 index 定位
+        )
     return {k: v for k, v in m.items() if v}
 
 
@@ -79,6 +115,7 @@ def load_financials(report_period: str = ""):
     df = None
     try:
         from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
+
         df = local_tdx_data.get_financial_data(report_period)
     except Exception:  # noqa: BLE001
         df = None
@@ -118,7 +155,7 @@ def _cell_text(row, colmap: dict, logical: str) -> str:
             v = next((x for x in v if x is not None and x == x), None)
         except Exception:  # noqa: BLE001
             return ""
-    if v is None or v != v:            # None / NaN
+    if v is None or v != v:  # None / NaN
         return ""
     return str(v).strip()
 
@@ -130,7 +167,9 @@ def _parse_day(s) -> Optional[_dt.date]:
         return None
     for fmt in ("%Y-%m-%d", "%Y%m%d", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
         try:
-            return _dt.datetime.strptime(t[:len(_dt.datetime.now().strftime(fmt))], fmt).date()
+            return _dt.datetime.strptime(
+                t[: len(_dt.datetime.now().strftime(fmt))], fmt
+            ).date()
         except ValueError:
             continue
     try:
@@ -148,8 +187,14 @@ def report_age_days(report_date, as_of=None) -> Optional[int]:
     return (ref - d).days
 
 
-def financial_factor(code: str, fin_df, colmap: dict, price: Optional[float] = None,
-                     as_of=None, max_age_days: int = REPORT_MAX_AGE_DAYS) -> dict[str, Any]:
+def financial_factor(
+    code: str,
+    fin_df,
+    colmap: dict,
+    price: Optional[float] = None,
+    as_of=None,
+    max_age_days: int = REPORT_MAX_AGE_DAYS,
+) -> dict[str, Any]:
     """CZ 抄底三条件代理（①②）。colmap 不全、数据缺失或定位不到 → available=False。绝不 raise。
 
     时效上限（审计 E11）：报告期距 `as_of`（缺省=今天）超过 `max_age_days` → available=False
@@ -168,7 +213,9 @@ def financial_factor(code: str, fin_df, colmap: dict, price: Optional[float] = N
             idx = fin_df.index.astype(str).str.split(".").str[0].str.zfill(6)
             sub = fin_df[idx.values == code6]
         elif code_col in getattr(fin_df, "columns", []):
-            sub = fin_df[fin_df[code_col].astype(str).str.split(".").str[0].str.zfill(6) == code6]
+            sub = fin_df[
+                fin_df[code_col].astype(str).str.split(".").str[0].str.zfill(6) == code6
+            ]
         else:
             return {"available": False, "reason": "code_col_missing"}
         if sub.empty:
@@ -191,10 +238,15 @@ def financial_factor(code: str, fin_df, colmap: dict, price: Optional[float] = N
         stale = age > max_age_days
         stale_check = "stale" if stale else "ok"
     if stale:
-        return {"available": False, "reason": "report_stale",
-                "report_date": rpt_date, "report_age_days": age,
-                "report_stale": True, "stale_check": stale_check,
-                "max_age_days": max_age_days}
+        return {
+            "available": False,
+            "reason": "report_stale",
+            "report_date": rpt_date,
+            "report_age_days": age,
+            "report_stale": True,
+            "stale_check": stale_check,
+            "max_age_days": max_age_days,
+        }
     op_cf = _cell(row, colmap, "op_cashflow")
 
     revenue = _cell(row, colmap, "revenue")
@@ -207,10 +259,12 @@ def financial_factor(code: str, fin_df, colmap: dict, price: Optional[float] = N
     mkt_cap = (shares * price) if (shares is not None and price) else None
     mkt_cap_yi = round(mkt_cap / 1e8, 2) if mkt_cap is not None else None
 
-    perf_surge = bool(np_yoy is not None and np_yoy >= DIXI_NET_PROFIT_YOY)   # ① 扣非同比≥100% 代理
-    np_pos = bool(net_profit is not None and net_profit > 0)                   # ②a 净利为正
+    perf_surge = bool(
+        np_yoy is not None and np_yoy >= DIXI_NET_PROFIT_YOY
+    )  # ① 扣非同比≥100% 代理
+    np_pos = bool(net_profit is not None and net_profit > 0)  # ②a 净利为正
     ocf_available = op_cf is not None
-    ocf_pos = bool(ocf_available and op_cf > 0)                                # ②b 经营现金流为正(缺失→未确认)
+    ocf_pos = bool(ocf_available and op_cf > 0)  # ②b 经营现金流为正(缺失→未确认)
     roe_positive = bool(roe is not None and roe > 0)
     # ②综合(CZ 真实盈利+现金流)：净利与现金流同为正才成立；现金流缺失(季报常见)时不冒充成立，
     # 但 net_profit_positive 仍独立可用 —— 优雅降级而非整项作废。
@@ -223,12 +277,21 @@ def financial_factor(code: str, fin_df, colmap: dict, price: Optional[float] = N
         "roe_positive": roe_positive,
     }
     return {
-        "available": True, "cashflow_available": ocf_available,
-        "report_date": rpt_date or None, "report_age_days": age,
-        "report_stale": stale, "stale_check": stale_check, "max_age_days": max_age_days,
-        "net_profit": net_profit, "op_cashflow": op_cf, "revenue": revenue,
-        "net_profit_yoy": np_yoy, "revenue_yoy": rev_yoy, "roe": roe,
-        "market_cap": mkt_cap, "market_cap_yi": mkt_cap_yi,
+        "available": True,
+        "cashflow_available": ocf_available,
+        "report_date": rpt_date or None,
+        "report_age_days": age,
+        "report_stale": stale,
+        "stale_check": stale_check,
+        "max_age_days": max_age_days,
+        "net_profit": net_profit,
+        "op_cashflow": op_cf,
+        "revenue": revenue,
+        "net_profit_yoy": np_yoy,
+        "revenue_yoy": rev_yoy,
+        "roe": roe,
+        "market_cap": mkt_cap,
+        "market_cap_yi": mkt_cap_yi,
         "dixi_proxy": proxy,
         "hits": [k for k, v in proxy.items() if v is True],
     }
@@ -238,19 +301,27 @@ def main(argv=None) -> int:
     """--inspect：加载 Affair 财务、打印自动列映射 + 抽样一只，供人工确认后写入 registry。"""
     import argparse
     import json
-    ap = argparse.ArgumentParser(description="财务维度脚手架：--inspect 打印自动列映射供确认")
+
+    ap = argparse.ArgumentParser(
+        description="财务维度脚手架：--inspect 打印自动列映射供确认"
+    )
     ap.add_argument("--inspect", action="store_true")
     ap.add_argument("--code", default="600000", help="抽样验证的股票代码")
     ap.add_argument("--report-period", default="")
     args = ap.parse_args(argv)
     df = load_financials(args.report_period)
     if df is None or getattr(df, "empty", True):
-        print(json.dumps({"available": False, "reason": "no_financials"}, ensure_ascii=False))
+        print(
+            json.dumps(
+                {"available": False, "reason": "no_financials"}, ensure_ascii=False
+            )
+        )
         return 0
     cm = auto_colmap(getattr(df, "columns", []))
     override = {}
     try:
         from custos.core.paths import SCREEN_FORMULA_REGISTRY_FILE  # noqa: PLC0415
+
         reg = json.loads(SCREEN_FORMULA_REGISTRY_FILE.read_text(encoding="utf-8"))
         override = (reg.get("financials") or {}).get("columns") or {}
     except Exception:  # noqa: BLE001
@@ -260,11 +331,18 @@ def main(argv=None) -> int:
     print("[自动识别 auto_colmap]:")
     print(json.dumps(cm, ensure_ascii=False, indent=2))
     if override:
-        print("[registry.financials.columns 覆盖]:", json.dumps(override, ensure_ascii=False))
+        print(
+            "[registry.financials.columns 覆盖]:",
+            json.dumps(override, ensure_ascii=False),
+        )
     print("[最终映射(enrich 实际使用)]:")
     print(json.dumps(final, ensure_ascii=False, indent=2))
-    print(f"shape={df.shape}  code定位={'行索引' if final.get('code') == '__index__' else final.get('code')}")
-    print(f"[抽样 {args.code}] {json.dumps(financial_factor(args.code, df, final), ensure_ascii=False)}")
+    print(
+        f"shape={df.shape}  code定位={'行索引' if final.get('code') == '__index__' else final.get('code')}"
+    )
+    print(
+        f"[抽样 {args.code}] {json.dumps(financial_factor(args.code, df, final), ensure_ascii=False)}"
+    )
     return 0
 
 

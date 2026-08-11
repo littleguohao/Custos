@@ -14,6 +14,7 @@ Scoring modules:
 - turnover: 8
 - theme: 7
 """
+
 from __future__ import annotations
 
 import argparse
@@ -33,22 +34,42 @@ OUT_DIR = PLANS
 
 def score_macro(d: dict) -> tuple[float, str]:
     mp = d.get("macro_policy", {})
-    if not any(mp.get(k) for k in ["monetary_policy", "fiscal_policy", "credit_environment", "regulation_environment"]):
+    if not any(
+        mp.get(k)
+        for k in [
+            "monetary_policy",
+            "fiscal_policy",
+            "credit_environment",
+            "regulation_environment",
+        ]
+    ):
         return 7.5, "宏观政策未填，按中性半分处理；需人工补充货币/财政/信用/监管判断。"
     score = 0
     notes = []
-    if mp.get("monetary_policy") == "宽松": score += 4
-    elif mp.get("monetary_policy") == "中性": score += 2
-    else: notes.append("货币政策非宽松")
-    if mp.get("fiscal_policy") == "积极": score += 4
-    elif mp.get("fiscal_policy") == "中性": score += 2
-    else: notes.append("财政政策非积极")
-    if mp.get("credit_environment") == "扩张": score += 3
-    elif mp.get("credit_environment") == "稳定": score += 1.5
-    else: notes.append("信用环境偏收缩")
-    if mp.get("regulation_environment") == "呵护市场": score += 4
-    elif mp.get("regulation_environment") == "中性": score += 2
-    else: notes.append("监管环境压制风险偏好")
+    if mp.get("monetary_policy") == "宽松":
+        score += 4
+    elif mp.get("monetary_policy") == "中性":
+        score += 2
+    else:
+        notes.append("货币政策非宽松")
+    if mp.get("fiscal_policy") == "积极":
+        score += 4
+    elif mp.get("fiscal_policy") == "中性":
+        score += 2
+    else:
+        notes.append("财政政策非积极")
+    if mp.get("credit_environment") == "扩张":
+        score += 3
+    elif mp.get("credit_environment") == "稳定":
+        score += 1.5
+    else:
+        notes.append("信用环境偏收缩")
+    if mp.get("regulation_environment") == "呵护市场":
+        score += 4
+    elif mp.get("regulation_environment") == "中性":
+        score += 2
+    else:
+        notes.append("监管环境压制风险偏好")
     return min(score, 15), "；".join(notes) or "宏观环境偏友好。"
 
 
@@ -59,9 +80,15 @@ def score_amv(d: dict) -> tuple[float, str]:
     effective = normalize_regime(amv.get("effective_state") or amv.get("amv_zone"))
     reason = amv.get("state_transition_reason") or ""
     if effective == "空头":
-        return 0, f"0AMV有效状态为空头。{reason} 当日值={v if v is not None else '缺失'}%。"
+        return (
+            0,
+            f"0AMV有效状态为空头。{reason} 当日值={v if v is not None else '缺失'}%。",
+        )
     if effective == "做多":
-        return 15, f"0AMV有效状态为做多。{reason} 当日值={v if v is not None else '缺失'}%。"
+        return (
+            15,
+            f"0AMV有效状态为做多。{reason} 当日值={v if v is not None else '缺失'}%。",
+        )
     if v is None:
         return 7.5, "0AMV 未填且无锁定状态，按中性半分处理。"
     if v > 0:
@@ -71,15 +98,29 @@ def score_amv(d: dict) -> tuple[float, str]:
 
 def score_overseas(d: dict) -> tuple[float, str]:
     om = d.get("overseas_market", {})
-    vals = [fnum(om.get(k)) for k in ["nasdaq_change_pct", "sp500_change_pct", "sox_change_pct", "nikkei_change_pct", "kospi_change_pct", "hstech_change_pct"]]
+    vals = [
+        fnum(om.get(k))
+        for k in [
+            "nasdaq_change_pct",
+            "sp500_change_pct",
+            "sox_change_pct",
+            "nikkei_change_pct",
+            "kospi_change_pct",
+            "hstech_change_pct",
+        ]
+    ]
     vals = [v for v in vals if v is not None]
     if not vals:
         return 5, "外围市场未填，按中性半分处理。"
-    avg = sum(vals)/len(vals)
-    if avg >= 1.0: return 10, f"外围平均涨幅 {avg:.2f}%，利多风险偏好。"
-    if avg >= 0.2: return 7, f"外围平均涨幅 {avg:.2f}%，中性偏多。"
-    if avg <= -1.0: return 1, f"外围平均跌幅 {avg:.2f}%，明显利空。"
-    if avg < -0.2: return 3, f"外围平均跌幅 {avg:.2f}%，中性偏弱。"
+    avg = sum(vals) / len(vals)
+    if avg >= 1.0:
+        return 10, f"外围平均涨幅 {avg:.2f}%，利多风险偏好。"
+    if avg >= 0.2:
+        return 7, f"外围平均涨幅 {avg:.2f}%，中性偏多。"
+    if avg <= -1.0:
+        return 1, f"外围平均跌幅 {avg:.2f}%，明显利空。"
+    if avg < -0.2:
+        return 3, f"外围平均跌幅 {avg:.2f}%，中性偏弱。"
     return 5, f"外围平均 {avg:.2f}%，中性。"
 
 
@@ -97,22 +138,37 @@ def score_indices(d: dict) -> tuple[float, str]:
         above240 = x.get("above_ma240")
         s = 0
         if intraday is not None:
-            if intraday > 1: s += 1.5
-            elif intraday > 0: s += 1
-            elif intraday < -1: s -= 1
+            if intraday > 1:
+                s += 1.5
+            elif intraday > 0:
+                s += 1
+            elif intraday < -1:
+                s -= 1
         if ch20 is not None:
-            if ch20 > 3: s += 1.5
-            elif ch20 > 0: s += 1
-            elif ch20 < -3: s -= 1.5
-            elif ch20 < 0: s -= 0.8
-        if above25 is True: s += 0.8
-        elif above25 is False: s -= 0.6
-        if above60 is True: s += 1
-        elif above60 is False: s -= 0.8
-        if above144 is True: s += 0.6
-        elif above144 is False: s -= 0.5
-        if above240 is True: s += 0.6
-        elif above240 is False: s -= 0.5
+            if ch20 > 3:
+                s += 1.5
+            elif ch20 > 0:
+                s += 1
+            elif ch20 < -3:
+                s -= 1.5
+            elif ch20 < 0:
+                s -= 0.8
+        if above25 is True:
+            s += 0.8
+        elif above25 is False:
+            s -= 0.6
+        if above60 is True:
+            s += 1
+        elif above60 is False:
+            s -= 0.8
+        if above144 is True:
+            s += 0.6
+        elif above144 is False:
+            s -= 0.5
+        if above240 is True:
+            s += 0.6
+        elif above240 is False:
+            s -= 0.5
         items.append((name, s, intraday, ch20, above25, above60, above144, above240))
     if not items:
         return 7.5, "指数数据缺失，按中性处理。"
@@ -153,16 +209,27 @@ def score_breadth(d: dict) -> tuple[float, str]:
         # 跌家数标为不可用(拒绝用硬编码总数推算,见 breadth_basis)时如实归因:
         # 中性 7.5 是**正确**的降级,不能被误读成"这天没采到宽度数据"。
         if b.get("up_down_ratio_status") == "unavailable" and up is not None:
-            return 7.5, f"涨家数 {int(up)}，但跌家数无真实来源、涨跌比不可用，按中性处理。"
+            return (
+                7.5,
+                f"涨家数 {int(up)}，但跌家数无真实来源、涨跌比不可用，按中性处理。",
+            )
         return 7.5, "涨跌家数缺失，按中性处理。"
     if is_stale(b, d.get("date")):
-        return 7.5, f"涨跌家数数据日 {b.get('as_of') or '未知'} 非当日（stale），按中性处理，不据陈旧宽度给分。"
-    ratio = up/down
-    if ratio >= 2: s = 15
-    elif ratio >= 1.2: s = 11
-    elif ratio >= 0.8: s = 8
-    elif ratio >= 0.5: s = 5
-    else: s = 2
+        return (
+            7.5,
+            f"涨跌家数数据日 {b.get('as_of') or '未知'} 非当日（stale），按中性处理，不据陈旧宽度给分。",
+        )
+    ratio = up / down
+    if ratio >= 2:
+        s = 15
+    elif ratio >= 1.2:
+        s = 11
+    elif ratio >= 0.8:
+        s = 8
+    elif ratio >= 0.5:
+        s = 5
+    else:
+        s = 2
     if q == "candidate":
         s = (s + 7.5) / 2
         return round(s, 2), f"涨跌比 {ratio:.2f}，但字段为候选口径，折中处理。"
@@ -178,24 +245,42 @@ def score_sentiment(d: dict) -> tuple[float, str]:
     if lu is None or ld is None:
         return 7.5, "涨跌停数据缺失，按中性处理。"
     if is_stale(snt, d.get("date")):
-        return 7.5, f"情绪数据日 {snt.get('as_of') or '未知'} 非当日（stale），按中性处理。"
+        return (
+            7.5,
+            f"情绪数据日 {snt.get('as_of') or '未知'} 非当日（stale），按中性处理。",
+        )
     score = 7.5
-    if lu >= 80: score += 4
-    elif lu >= 50: score += 2
-    elif lu < 30: score -= 1.5
-    if ld >= 40: score -= 4
-    elif ld >= 20: score -= 2
-    elif ld <= 5: score += 1
+    if lu >= 80:
+        score += 4
+    elif lu >= 50:
+        score += 2
+    elif lu < 30:
+        score -= 1.5
+    if ld >= 40:
+        score -= 4
+    elif ld >= 20:
+        score -= 2
+    elif ld <= 5:
+        score += 1
     if blow is not None:
-        if blow > 0.45: score -= 2.5
-        elif blow > 0.3: score -= 1.5
-        elif blow < 0.15: score += 1
+        if blow > 0.45:
+            score -= 2.5
+        elif blow > 0.3:
+            score -= 1.5
+        elif blow < 0.15:
+            score += 1
     if height is not None:
-        if height >= 5: score += 2
-        elif height >= 3: score += 1
-        elif height <= 2: score -= 1
+        if height >= 5:
+            score += 2
+        elif height >= 3:
+            score += 1
+        elif height <= 2:
+            score -= 1
     score = max(0, min(15, score))
-    return round(score, 2), f"涨停 {lu:.0f}、跌停 {ld:.0f}、炸板率 {blow if blow is not None else 'NA'}、高度 {height if height is not None else 'NA'}。"
+    return (
+        round(score, 2),
+        f"涨停 {lu:.0f}、跌停 {ld:.0f}、炸板率 {blow if blow is not None else 'NA'}、高度 {height if height is not None else 'NA'}。",
+    )
 
 
 def score_turnover(d: dict) -> tuple[float, str]:
@@ -204,20 +289,30 @@ def score_turnover(d: dict) -> tuple[float, str]:
     if chg is None:
         return 4, "成交额变化率未确认；Amount候选已采集但单位/口径待确认，按半分处理。"
     if is_stale(t, d.get("date")):
-        return 4, f"成交额数据日 {t.get('as_of') or '未知'} 非当日（stale），按半分处理，不据陈旧成交额给分。"
-    if chg > 15: return 8, f"成交额放量 {chg:.2f}%。"
-    if chg > 5: return 6, f"成交额温和放量 {chg:.2f}%。"
-    if chg < -15: return 1, f"成交额明显缩量 {chg:.2f}%。"
-    if chg < -5: return 3, f"成交额缩量 {chg:.2f}%。"
+        return (
+            4,
+            f"成交额数据日 {t.get('as_of') or '未知'} 非当日（stale），按半分处理，不据陈旧成交额给分。",
+        )
+    if chg > 15:
+        return 8, f"成交额放量 {chg:.2f}%。"
+    if chg > 5:
+        return 6, f"成交额温和放量 {chg:.2f}%。"
+    if chg < -15:
+        return 1, f"成交额明显缩量 {chg:.2f}%。"
+    if chg < -5:
+        return 3, f"成交额缩量 {chg:.2f}%。"
     return 4, f"成交额变化 {chg:.2f}%，中性。"
 
 
 def score_theme(d: dict) -> tuple[float, str]:
     th = d.get("theme", {})
     clarity = th.get("theme_clarity")
-    if clarity == "强": return 7, th.get("theme_summary") or "主线清晰。"
-    if clarity == "中": return 4.5, th.get("theme_summary") or "主线一般。"
-    if clarity == "弱": return 2, th.get("theme_summary") or "主线弱。"
+    if clarity == "强":
+        return 7, th.get("theme_summary") or "主线清晰。"
+    if clarity == "中":
+        return 4.5, th.get("theme_summary") or "主线一般。"
+    if clarity == "弱":
+        return 2, th.get("theme_summary") or "主线弱。"
     # Infer a little from sentiment details, but keep conservative.
     details = (d.get("sentiment") or {}).get("details") or {}
     leaders = details.get("sample_leaders") or []
@@ -227,14 +322,22 @@ def score_theme(d: dict) -> tuple[float, str]:
 
 
 def status_from_score(score: float) -> tuple[str, str, str, str]:
-    if score >= 80: return "进攻", "60%-80%", "允许", "普通"
-    if score >= 60: return "震荡偏强", "40%-60%", "允许，但精选", "普通"
-    if score >= 40: return "震荡偏弱", "30%-50%", "仅低吸 / 小仓核心主线", "提高"
-    if score >= 20: return "防守", "20%-40%", "原则上不新开", "提高"
+    if score >= 80:
+        return "进攻", "60%-80%", "允许", "普通"
+    if score >= 60:
+        return "震荡偏强", "40%-60%", "允许，但精选", "普通"
+    if score >= 40:
+        return "震荡偏弱", "30%-50%", "仅低吸 / 小仓核心主线", "提高"
+    if score >= 20:
+        return "防守", "20%-40%", "原则上不新开", "提高"
     return "冰点", "0%-20%", "禁止追涨", "强风控"
 
 
-def make_report(d: dict, module_scores: list[tuple[str,int,float,str]], quality_gate: dict | None = None) -> str:
+def make_report(
+    d: dict,
+    module_scores: list[tuple[str, int, float, str]],
+    quality_gate: dict | None = None,
+) -> str:
     total = round(sum(x[2] for x in module_scores), 2)
     status, position, open_perm, risk = status_from_score(total)
     q = quality_gate or {}
@@ -276,7 +379,9 @@ def make_report(d: dict, module_scores: list[tuple[str,int,float,str]], quality_
     if not (d.get("data_quality") or {}).get("notes"):
         lines.append("- 无特殊数据质量提示。")
     if q:
-        lines.append(f"- 运行时质量门：{q_status or '未知'}，评分 {(q.get('market_quality') or {}).get('quality_score', 'NA')}。candidate/partial 数据不得上调交易权限。")
+        lines.append(
+            f"- 运行时质量门：{q_status or '未知'}，评分 {(q.get('market_quality') or {}).get('quality_score', 'NA')}。candidate/partial 数据不得上调交易权限。"
+        )
     lines.append("")
     return "\n".join(lines)
 
@@ -286,7 +391,11 @@ def main():
     ap.add_argument("--date", default=cn_now().strftime("%Y-%m-%d"))
     ap.add_argument("--input", default="")
     args = ap.parse_args()
-    inp = Path(args.input) if args.input else IN_DIR / f"{args.date}_market_timing_input.json"
+    inp = (
+        Path(args.input)
+        if args.input
+        else IN_DIR / f"{args.date}_market_timing_input.json"
+    )
     d = json.loads(inp.read_text(encoding="utf-8"))
     modules = [
         ("宏观政策环境", 15, *score_macro(d)),
@@ -301,7 +410,9 @@ def main():
     # tuple shape: name, weight, score, note after star expansion
     modules = [(m[0], m[1], float(m[2]), str(m[3])) for m in modules]
     gate_path = QUALITY_DIR / f"{d.get('date')}_runtime_gate.json"
-    quality_gate = json.loads(gate_path.read_text(encoding="utf-8")) if gate_path.exists() else {}
+    quality_gate = (
+        json.loads(gate_path.read_text(encoding="utf-8")) if gate_path.exists() else {}
+    )
     report = make_report(d, modules, quality_gate)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     out = OUT_DIR / f"{d.get('date')}_market_timing_score.md"

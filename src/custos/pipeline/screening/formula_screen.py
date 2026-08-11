@@ -15,6 +15,7 @@ CLI::
 
 输出 ``data/screening/{date}_formula_hits.json``，并打印一行 JSON 摘要。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -39,11 +40,11 @@ from custos.pipeline.screening import manual_pools  # noqa: E402
 SCREENING_DIR = DATA / "screening"
 REGISTRY_PATH = SCREEN_FORMULA_REGISTRY_FILE
 
-FORMULA_TIMEOUT = 15          # 单公式调用超时（秒）
-CIRCUIT_BREAK_AFTER = 2       # 连续失败熔断阈值
-FORMULA_COUNT = 60            # 每股回溯 K 线根数（供公式内部指标计算，非返回序列长度）
-FORMULA_BATCH = 1000          # 每次 formula_process_mul_xg 调用携带的最大股票数
-                              # (全市场 6k+ 只×60根单调用会让 TQ 服务端 OOM;分批逐块合并命中)
+FORMULA_TIMEOUT = 15  # 单公式调用超时（秒）
+CIRCUIT_BREAK_AFTER = 2  # 连续失败熔断阈值
+FORMULA_COUNT = 60  # 每股回溯 K 线根数（供公式内部指标计算，非返回序列长度）
+FORMULA_BATCH = 1000  # 每次 formula_process_mul_xg 调用携带的最大股票数
+# (全市场 6k+ 只×60根单调用会让 TQ 服务端 OOM;分批逐块合并命中)
 
 # 沪深 A 股代码前缀（mootdx stocks 返回全品类证券，含指数/基金/债券，必须过滤）
 _A_SHARE_RE = re.compile(r"^(60[0-5]|688|00[0-3]|30[0-3])\d{3}$")
@@ -99,13 +100,16 @@ def _load_name_map(diag: Optional[dict] = None) -> dict[str, str]:
             diag["name_map_age_days"] = meta.get("age_days")
             diag["st_filter"] = "stale" if meta.get("stale") else "ok"
     if not names:
-        print("[WARN] 名称缓存不可用：universe 阶段无名，ST 判定改由候选名称刷新兜底",
-              file=sys.stderr)
+        print(
+            "[WARN] 名称缓存不可用：universe 阶段无名，ST 判定改由候选名称刷新兜底",
+            file=sys.stderr,
+        )
     return names
 
 
-def build_universe(universe_cfg: Optional[dict] = None,
-                   diag: Optional[dict] = None) -> tuple[list[str], dict[str, str]]:
+def build_universe(
+    universe_cfg: Optional[dict] = None, diag: Optional[dict] = None
+) -> tuple[list[str], dict[str, str]]:
     """全 A 股票列表（6 位代码）+ 名称表。exclude_bj 在此过滤；ST/上市天数
     在 enrich 段按名称与本地日线过滤。失败时返回空列表（调用方降级）。
 
@@ -163,17 +167,20 @@ def _extract_hits(value: Any, date: str, name_map: dict[str, str]) -> list[dict]
         if not hit:
             continue
         code6 = _strip_suffix(raw_code)
-        hits.append({
-            "code": code6,
-            "name": name_map.get(code6, ""),
-            "signal_date": date,
-        })
+        hits.append(
+            {
+                "code": code6,
+                "name": name_map.get(code6, ""),
+                "signal_date": date,
+            }
+        )
     hits.sort(key=lambda x: x["code"])
     return hits
 
 
-def _load_manual_pools(registry: dict, date: str,
-                       name_map: dict[str, str]) -> tuple[list[dict], int, list[str]]:
+def _load_manual_pools(
+    registry: dict, date: str, name_map: dict[str, str]
+) -> tuple[list[dict], int, list[str]]:
     """自选池（manual_pools）→ 与公式条目同构的伪公式列表。本地文件，不依赖 TQ。
 
     第三个返回值是失败池的诊断串。自选池是公式之外的**独立候选通道**：blk 文件被改名、
@@ -217,7 +224,8 @@ def screen_formulas(
     name_resolver=None,
     call: Optional[Callable[..., dict]] = None,
     running_check: Optional[Callable[[], bool]] = None,
-    timeout: int = FORMULA_TIMEOUT) -> dict:
+    timeout: int = FORMULA_TIMEOUT,
+) -> dict:
     """逐公式对全 A 批跑并汇总命中。所有失败都结构化落盘，绝不 raise。"""
     registry = registry if registry is not None else load_registry()
     call_fn = call if call is not None else tq_http.call
@@ -251,7 +259,8 @@ def screen_formulas(
             if res["status"] == "ok":
                 res["status"] = "partial"
             res["degraded_reason"] = (
-                f"{res['degraded_reason']};{note}" if res["degraded_reason"] else note)
+                f"{res['degraded_reason']};{note}" if res["degraded_reason"] else note
+            )
         return res
 
     if result["st_filter"] != "ok":
@@ -259,7 +268,8 @@ def screen_formulas(
         # 下游 enrich 读 st_filter 走 fail-closed（无名候选按 st_unverified 剔除）。
         pending_notes.append(
             "st_filter_unavailable(名称表在线+缓存均不可用 → ST 硬排除失效,"
-            "下游按 st_unverified 剔除无名候选)")
+            "下游按 st_unverified 剔除无名候选)"
+        )
 
     pool_entries, pool_hits, pool_errors = _load_manual_pools(registry, date, name_map)
     result["formulas"].extend(pool_entries)
@@ -270,29 +280,39 @@ def screen_formulas(
         result["manual_pool_status"] = "ok"
     else:
         result["manual_pool_status"] = (
-            "unavailable" if len(pool_errors) == len(enabled_pools) else "partial")
+            "unavailable" if len(pool_errors) == len(enabled_pools) else "partial"
+        )
         # 自选池读不到 ≠ 池里今天没票（审计 B6）
         pending_notes.append(
             f"manual_pool_{result['manual_pool_status']}:{','.join(pool_errors)}"
-            "(自选池通道读取失败,候选缺口不代表池内无票)")
+            "(自选池通道读取失败,候选缺口不代表池内无票)"
+        )
 
     if not is_running():
         result["status"] = "partial" if pool_hits else "unavailable"
         result["degraded_reason"] = "tdxw_not_running"
         for f in registry.get("formulas", []):
-            result["formulas"].append({
-                "id": f.get("id", ""), "tq_name": f.get("tq_name", ""),
-                "enabled": bool(f.get("enabled")), "hits": [],
-                "error": "tdxw_not_running" if f.get("enabled") else None,
-            })
+            result["formulas"].append(
+                {
+                    "id": f.get("id", ""),
+                    "tq_name": f.get("tq_name", ""),
+                    "enabled": bool(f.get("enabled")),
+                    "hits": [],
+                    "error": "tdxw_not_running" if f.get("enabled") else None,
+                }
+            )
         return _finalize(result)
 
     if not stock_list:
         result["status"] = "partial" if pool_hits else "unavailable"
-        result["degraded_reason"] = ("universe_unavailable(本地 vipdoc 与在线全代码表均为空 → "
-                                    "**全市场公式初筛整段跳过**,当日命中仅来自自选池,不代表市场无标的)")
-        print("[WARN] universe 为空:本次未扫全市场,只有自选池命中。检查 TDX_ROOT/vipdoc 是否可读",
-              file=sys.stderr)
+        result["degraded_reason"] = (
+            "universe_unavailable(本地 vipdoc 与在线全代码表均为空 → "
+            "**全市场公式初筛整段跳过**,当日命中仅来自自选池,不代表市场无标的)"
+        )
+        print(
+            "[WARN] universe 为空:本次未扫全市场,只有自选池命中。检查 TDX_ROOT/vipdoc 是否可读",
+            file=sys.stderr,
+        )
         return _finalize(result)
 
     tq_codes = [local_tdx_data.normalize_code(c) for c in stock_list]
@@ -331,7 +351,7 @@ def screen_formulas(
                 "formula_arg": str(f.get("args", "") or ""),
                 "return_count": 1,
                 "return_date": False,
-                "stock_list": tq_codes[k:k + FORMULA_BATCH],
+                "stock_list": tq_codes[k : k + FORMULA_BATCH],
                 "stock_period": f.get("stock_period", "1d") or "1d",
                 "count": FORMULA_COUNT,
                 "dividend_type": 1,
@@ -346,12 +366,14 @@ def screen_formulas(
             succeeded += 1
             consecutive_failures = 0
             entry["hits"] = hits_all
-        elif chunk_fail < n_chunks:                      # 部分批次成功:命中保留,错误显式记录
+        elif chunk_fail < n_chunks:  # 部分批次成功:命中保留,错误显式记录
             succeeded += 1
             consecutive_failures = 0
             entry["hits"] = hits_all
             entry["error"] = "partial_chunks_failed"
-            entry["error_detail"] = f"{chunk_fail}/{n_chunks} 批失败: {last_err.get('code', 'unknown')}"
+            entry["error_detail"] = (
+                f"{chunk_fail}/{n_chunks} 批失败: {last_err.get('code', 'unknown')}"
+            )
         else:
             consecutive_failures += 1
             entry["error"] = last_err.get("code", "unknown")
@@ -360,12 +382,18 @@ def screen_formulas(
 
     if attempted == 0:
         result["status"] = "partial" if pool_hits else "unavailable"
-        result["degraded_reason"] = "no_enabled_formula" + (";manual_pool_only" if pool_hits else "")
+        result["degraded_reason"] = "no_enabled_formula" + (
+            ";manual_pool_only" if pool_hits else ""
+        )
     elif succeeded == 0:
         result["status"] = "partial" if pool_hits else "unavailable"
-        result["degraded_reason"] = "all_formulas_failed" + (";manual_pool_only" if pool_hits else "")
+        result["degraded_reason"] = "all_formulas_failed" + (
+            ";manual_pool_only" if pool_hits else ""
+        )
     elif succeeded < attempted or any(
-        e.get("error") for e in result["formulas"] if e.get("enabled") and e.get("category") != "manual_pool"
+        e.get("error")
+        for e in result["formulas"]
+        if e.get("enabled") and e.get("category") != "manual_pool"
     ):
         result["status"] = "partial"
         result["degraded_reason"] = "some_formulas_failed"
@@ -393,8 +421,9 @@ def _candidate_codes(result: dict) -> list[str]:
     return sorted(set(codes))
 
 
-def _refresh_candidate_names(result: dict, pending_notes: list[str],
-                            resolver=None) -> None:
+def _refresh_candidate_names(
+    result: dict, pending_notes: list[str], resolver=None
+) -> None:
     """用最新名称覆盖候选的 name，并据覆盖率重判 st_filter。就地修改 result。
 
     ``resolver(codes) -> (names, diag)`` 可注入：默认走
@@ -415,10 +444,14 @@ def _refresh_candidate_names(result: dict, pending_notes: list[str],
             c = str(h.get("code") or "").split(".")[0]
             if c in names:
                 h["name"] = names[c]
-    result["name_map_source"] = diag.get("name_map_source", result.get("name_map_source"))
+    result["name_map_source"] = diag.get(
+        "name_map_source", result.get("name_map_source")
+    )
     result["candidate_name_coverage"] = {
-        "requested": diag.get("requested"), "resolved": diag.get("name_map_size"),
-        "missing_count": diag.get("missing_count"), "missing_codes": diag.get("missing_codes"),
+        "requested": diag.get("requested"),
+        "resolved": diag.get("name_map_size"),
+        "missing_count": diag.get("missing_count"),
+        "missing_codes": diag.get("missing_codes"),
         "generated_at": diag.get("name_map_generated_at"),
         "age_days": diag.get("name_map_age_days"),
     }
@@ -430,18 +463,23 @@ def _refresh_candidate_names(result: dict, pending_notes: list[str],
     if now == "partial":
         pending_notes.append(
             f"st_filter_partial({diag.get('missing_count')}/{diag.get('requested')} "
-            f"只候选取不到名称,其 ST 状态未知)")
+            f"只候选取不到名称,其 ST 状态未知)"
+        )
     elif now == "stale":
         pending_notes.append(
             f"st_filter_stale(候选名称全部来自陈旧缓存,age={diag.get('name_map_age_days')}天 "
-            f"> {stock_names.NAME_MAP_MAX_AGE_DAYS}天,新被 ST 的票可能不在表内)")
+            f"> {stock_names.NAME_MAP_MAX_AGE_DAYS}天,新被 ST 的票可能不在表内)"
+        )
     elif now == "unavailable":
         pending_notes.append(
-            "st_filter_unavailable(候选名称全部取不到 → ST 硬排除失效)")
+            "st_filter_unavailable(候选名称全部取不到 → ST 硬排除失效)"
+        )
 
 
 def main(argv: Optional[list] = None) -> int:
-    parser = argparse.ArgumentParser(description="screening 链第 1 段：TQ 公式初筛（干净降级，不阻塞主链）")
+    parser = argparse.ArgumentParser(
+        description="screening 链第 1 段：TQ 公式初筛（干净降级，不阻塞主链）"
+    )
     parser.add_argument("--date", required=True, help="交易日期 YYYY-MM-DD")
     args = parser.parse_args(argv)
 
@@ -450,7 +488,9 @@ def main(argv: Optional[list] = None) -> int:
     SCREENING_DIR.mkdir(parents=True, exist_ok=True)
     out_path = SCREENING_DIR / f"{args.date}_formula_hits.json"
     require("formula_hits", result)
-    out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    out_path.write_text(
+        json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     summary = {
         "date": args.date,

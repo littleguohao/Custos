@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """tq_http 单测：mock HTTP 层覆盖两种响应形态、ErrorId 非 0、连接失败等。"""
+
 from __future__ import annotations
 
 import json
@@ -25,7 +26,10 @@ class CallTest(unittest.TestCase):
 
     def test_value_shape(self) -> None:
         """Value 形态：返回 result.Value。"""
-        resp = {"id": 1, "result": {"ErrorId": "0", "Value": {"TPFlag": "0", "ZTPrice": "33.00"}}}
+        resp = {
+            "id": 1,
+            "result": {"ErrorId": "0", "Value": {"TPFlag": "0", "ZTPrice": "33.00"}},
+        }
         with mock.patch.object(tq_http, "_post", return_value=_body(resp)):
             out = tq_http.call("get_more_info", {"stock_code": "600150.SH"})
         self.assertTrue(out["ok"])
@@ -34,7 +38,13 @@ class CallTest(unittest.TestCase):
 
     def test_value_shape_array(self) -> None:
         """Value 为数组（get_match_stkinfo）时原样返回。"""
-        resp = {"id": 1, "result": {"ErrorId": "0", "Value": [{"Code": "600000.SH", "Name": "浦发银行"}]}}
+        resp = {
+            "id": 1,
+            "result": {
+                "ErrorId": "0",
+                "Value": [{"Code": "600000.SH", "Name": "浦发银行"}],
+            },
+        }
         with mock.patch.object(tq_http, "_post", return_value=_body(resp)):
             out = tq_http.call("get_match_stkinfo", {"key_word": "浦发"})
         self.assertTrue(out["ok"])
@@ -42,11 +52,21 @@ class CallTest(unittest.TestCase):
 
     def test_direct_shape(self) -> None:
         """直挂形态（snapshot）：value 为 result 去掉 ErrorId。"""
-        resp = {"id": 1, "result": {"ErrorId": "0", "Now": "3764.15", "UpHome": "202", "DownHome": "2119"}}
+        resp = {
+            "id": 1,
+            "result": {
+                "ErrorId": "0",
+                "Now": "3764.15",
+                "UpHome": "202",
+                "DownHome": "2119",
+            },
+        }
         with mock.patch.object(tq_http, "_post", return_value=_body(resp)):
             out = tq_http.call("get_market_snapshot", {"stock_code": "999999.SH"})
         self.assertTrue(out["ok"])
-        self.assertEqual(out["value"], {"Now": "3764.15", "UpHome": "202", "DownHome": "2119"})
+        self.assertEqual(
+            out["value"], {"Now": "3764.15", "UpHome": "202", "DownHome": "2119"}
+        )
 
     def test_error_id_nonzero(self) -> None:
         resp = {"id": 1, "result": {"ErrorId": "1001", "Value": None}}
@@ -57,7 +77,9 @@ class CallTest(unittest.TestCase):
         self.assertEqual(out["error"]["code"], "tq_error")
 
     def test_connection_failure(self) -> None:
-        with mock.patch.object(tq_http, "_post", side_effect=urllib.error.URLError("refused")):
+        with mock.patch.object(
+            tq_http, "_post", side_effect=urllib.error.URLError("refused")
+        ):
             out = tq_http.call("get_market_snapshot", {"stock_code": "999999.SH"})
         self.assertFalse(out["ok"])
         self.assertEqual(out["error"]["code"], "connection_failed")
@@ -75,14 +97,18 @@ class CallTest(unittest.TestCase):
         self.assertEqual(out["error"]["code"], "invalid_response")
 
     def test_jsonrpc_error_field(self) -> None:
-        with mock.patch.object(tq_http, "_post", return_value=_body({"id": 1, "error": {"code": -1}})):
+        with mock.patch.object(
+            tq_http, "_post", return_value=_body({"id": 1, "error": {"code": -1}})
+        ):
             out = tq_http.call("get_stock_info", {"stock_code": "600000.SH"})
         self.assertFalse(out["ok"])
         self.assertEqual(out["error"]["code"], "jsonrpc_error")
 
     def test_tdxw_not_running(self) -> None:
-        with mock.patch.object(tq_http, "is_tdxw_running", return_value=False), \
-             mock.patch.object(tq_http, "_post") as post:
+        with (
+            mock.patch.object(tq_http, "is_tdxw_running", return_value=False),
+            mock.patch.object(tq_http, "_post") as post,
+        ):
             out = tq_http.call("get_stock_info", {"stock_code": "600000.SH"})
         self.assertFalse(out["ok"])
         self.assertEqual(out["error"]["code"], "tdxw_not_running")
@@ -114,7 +140,9 @@ class ConvenienceTest(unittest.TestCase):
         self.assertEqual(seen["params"], {"stock_code": "880006.SH"})
 
     def test_more_info_fields(self) -> None:
-        seen, fake = self._captured({"id": 1, "result": {"ErrorId": "0", "Value": {"TPFlag": "0"}}})
+        seen, fake = self._captured(
+            {"id": 1, "result": {"ErrorId": "0", "Value": {"TPFlag": "0"}}}
+        )
         with mock.patch.object(tq_http, "_post", side_effect=fake):
             out = tq_http.more_info("600150.SH", fields=["TPFlag", "ZTPrice"])
         self.assertTrue(out["ok"])
@@ -122,7 +150,9 @@ class ConvenienceTest(unittest.TestCase):
         self.assertEqual(seen["params"]["field_list"], ["TPFlag", "ZTPrice"])
 
     def test_stock_info_params(self) -> None:
-        seen, fake = self._captured({"id": 1, "result": {"ErrorId": "0", "Value": {"Name": "浦发银行"}}})
+        seen, fake = self._captured(
+            {"id": 1, "result": {"ErrorId": "0", "Value": {"Name": "浦发银行"}}}
+        )
         with mock.patch.object(tq_http, "_post", side_effect=fake):
             out = tq_http.stock_info("600000.SH")
         self.assertTrue(out["ok"])
@@ -169,9 +199,14 @@ class TestUnsafeDownTypeGuard:
         """down_type=4 必须放行（它是概念标签的唯一来源）。"""
         seen = {}
         monkeypatch.setattr(tq_http, "is_tdxw_running", lambda: True)
-        monkeypatch.setattr(tq_http, "_post",
-                            lambda payload, timeout, endpoint=None: (seen.update(payload),
-                                                      b'{"result":{"ErrorId":"0","Value":1}}')[1])
+        monkeypatch.setattr(
+            tq_http,
+            "_post",
+            lambda payload, timeout, endpoint=None: (
+                seen.update(payload),
+                b'{"result":{"ErrorId":"0","Value":1}}',
+            )[1],
+        )
         r = tq_http.call("download_file", {"down_type": 4})
         assert r["ok"] is True
         assert seen["params"]["down_type"] == 4
@@ -183,8 +218,11 @@ class TestUnsafeDownTypeGuard:
         `"4"`（字符串）也要挡：白名单是整数集合，类型不符说明调用方没按约定传参。
         """
         monkeypatch.setattr(tq_http, "is_tdxw_running", lambda: True)
-        monkeypatch.setattr(tq_http, "_post", lambda *a, **k: pytest.fail(
-            "拦截失败：危险 down_type 竟然发出了请求"))
+        monkeypatch.setattr(
+            tq_http,
+            "_post",
+            lambda *a, **k: pytest.fail("拦截失败：危险 down_type 竟然发出了请求"),
+        )
         r = tq_http.call("download_file", {"down_type": dt})
         assert r["ok"] is False
         assert r["error"]["code"] == "unsafe_down_type"
@@ -194,23 +232,27 @@ class TestUnsafeDownTypeGuard:
         """拦截要在 is_tdxw_running 之前——TdxW 没开时也该报真正的原因。"""
         monkeypatch.setattr(tq_http, "is_tdxw_running", lambda: False)
         r = tq_http.call("download_file", {"down_type": 1})
-        assert r["error"]["code"] == "unsafe_down_type", \
+        assert r["error"]["code"] == "unsafe_down_type", (
             "应先报 unsafe_down_type，而不是被 tdxw_not_running 掩盖"
+        )
 
     def test_explicit_override_allowed(self, monkeypatch):
         """确需探测时可显式签名放行——让调用方为它负责，而不是无法探测。"""
         monkeypatch.setattr(tq_http, "is_tdxw_running", lambda: True)
-        monkeypatch.setattr(tq_http, "_post",
-                            lambda *a, **k: b'{"result":{"ErrorId":"0","Value":1}}')
-        r = tq_http.call("download_file", {"down_type": 1},
-                         allow_unsafe_download=True)
+        monkeypatch.setattr(
+            tq_http, "_post", lambda *a, **k: b'{"result":{"ErrorId":"0","Value":1}}'
+        )
+        r = tq_http.call("download_file", {"down_type": 1}, allow_unsafe_download=True)
         assert r["ok"] is True
 
     def test_other_methods_unaffected(self, monkeypatch):
         """拦截只针对 download_file，别的方法不受影响。"""
         monkeypatch.setattr(tq_http, "is_tdxw_running", lambda: True)
-        monkeypatch.setattr(tq_http, "_post",
-                            lambda *a, **k: b'{"result":{"ErrorId":"0","Value":{"a":1}}}')
+        monkeypatch.setattr(
+            tq_http,
+            "_post",
+            lambda *a, **k: b'{"result":{"ErrorId":"0","Value":{"a":1}}}',
+        )
         assert tq_http.call("get_stock_info", {"stock_code": "600000.SH"})["ok"] is True
 
 
@@ -225,22 +267,30 @@ class TestStockCodeFormatGuard:
     ⚠️ 刻意**不自动补后缀**：补错市场比报错更糟（`600000.SZ` 是另一只票或不存在）。
     """
 
-    @pytest.mark.parametrize("bad", ["600000", "60000.SH", "600000.XX",
-                                     "6000000.SH", "abcdef.SH"])
+    @pytest.mark.parametrize(
+        "bad", ["600000", "60000.SH", "600000.XX", "6000000.SH", "abcdef.SH"]
+    )
     def test_bad_code_blocked_without_request(self, bad, monkeypatch):
         monkeypatch.setattr(tq_http, "is_tdxw_running", lambda: True)
-        monkeypatch.setattr(tq_http, "_post", lambda *a, **k: pytest.fail(
-            "校验失败：不合规的 stock_code 竟然发出了请求"))
+        monkeypatch.setattr(
+            tq_http,
+            "_post",
+            lambda *a, **k: pytest.fail("校验失败：不合规的 stock_code 竟然发出了请求"),
+        )
         r = tq_http.call("get_stock_info", {"stock_code": bad})
         assert r["ok"] is False
         assert r["error"]["code"] == "bad_stock_code"
 
-    @pytest.mark.parametrize("good", ["600000.SH", "000001.SZ", "920808.BJ",
-                                      "600000.sh"])
+    @pytest.mark.parametrize(
+        "good", ["600000.SH", "000001.SZ", "920808.BJ", "600000.sh"]
+    )
     def test_good_code_passes(self, good, monkeypatch):
         monkeypatch.setattr(tq_http, "is_tdxw_running", lambda: True)
-        monkeypatch.setattr(tq_http, "_post",
-                            lambda *a, **k: b'{"result":{"ErrorId":"0","Value":{"Name":"x"}}}')
+        monkeypatch.setattr(
+            tq_http,
+            "_post",
+            lambda *a, **k: b'{"result":{"ErrorId":"0","Value":{"Name":"x"}}}',
+        )
         assert tq_http.call("get_stock_info", {"stock_code": good})["ok"] is True
 
     def test_error_message_says_how_to_fix(self, monkeypatch):
@@ -253,8 +303,9 @@ class TestStockCodeFormatGuard:
     def test_methods_without_stock_code_unaffected(self, monkeypatch):
         """get_match_stkinfo / download_file 不吃 stock_code，不该被校验挡。"""
         monkeypatch.setattr(tq_http, "is_tdxw_running", lambda: True)
-        monkeypatch.setattr(tq_http, "_post",
-                            lambda *a, **k: b'{"result":{"ErrorId":"0","Value":[1]}}')
+        monkeypatch.setattr(
+            tq_http, "_post", lambda *a, **k: b'{"result":{"ErrorId":"0","Value":[1]}}'
+        )
         assert tq_http.call("get_match_stkinfo", {"key_word": "平安"})["ok"] is True
 
 
@@ -279,8 +330,11 @@ class TestCustomEndpoint(unittest.TestCase):
             return _body({"id": 1, "result": {"ErrorId": "0", "Value": []}})
 
         with mock.patch.object(tq_http, "_post", side_effect=fake_post):
-            tq_http.call("get_trading_dates", {"market": "SH"},
-                         endpoint="http://127.0.0.1:19999/")
+            tq_http.call(
+                "get_trading_dates",
+                {"market": "SH"},
+                endpoint="http://127.0.0.1:19999/",
+            )
         self.assertEqual(seen["endpoint"], "http://127.0.0.1:19999/")
 
     def test_default_endpoint_resolved_at_call_time(self) -> None:
@@ -289,8 +343,10 @@ class TestCustomEndpoint(unittest.TestCase):
         见 DATA_SOURCE_PRINCIPLE「模块级常量 + 运行时替换 = 陷阱」变体②：
         写成 `endpoint=TQ_HTTP_URL` 的话，改 `TQ_HTTP_URL` 就对已定义的函数无效。
         """
-        with mock.patch.object(tq_http, "TQ_HTTP_URL", "http://example/"), \
-             mock.patch.object(tq_http.urllib.request, "urlopen") as uo:
+        with (
+            mock.patch.object(tq_http, "TQ_HTTP_URL", "http://example/"),
+            mock.patch.object(tq_http.urllib.request, "urlopen") as uo,
+        ):
             uo.side_effect = urllib.error.URLError("stop here")
             tq_http.call("get_trading_dates", {})
         req = uo.call_args[0][0]

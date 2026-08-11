@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """feishu_report_publisher 单测: 摘要生成(三种报告结构)、凭据优先级、失败路径(mock HTTP)。"""
+
 from __future__ import annotations
 
 import io
@@ -128,18 +129,22 @@ class BuildSummaryTest(unittest.TestCase):
 
     def test_action_lines_capped_at_6(self):
         extra = "\n".join(f"- P1 60000{i} 测试股{i} 减仓" for i in range(8))
-        s = frp.build_exec_summary(DAILY_REPORT + "\n## 9. 补充\n\n" + extra, "T", "2026-07-20",
-                                   limit=10000)
+        s = frp.build_exec_summary(
+            DAILY_REPORT + "\n## 9. 补充\n\n" + extra, "T", "2026-07-20", limit=10000
+        )
         action_part = s.split("\n逐股行动：\n", 1)[1].split("\n权限：", 1)[0]
         count = sum(1 for line in action_part.splitlines() if line.startswith("- "))
         self.assertEqual(count, 6)
 
     def test_permission_lines_capped_at_2(self):
         extra = "\n".join(f"- 禁止事项{i}" for i in range(5))
-        s = frp.build_exec_summary(DAILY_REPORT + "\n## 9. 补充\n\n" + extra, "T", "2026-07-20",
-                                   limit=10000)
+        s = frp.build_exec_summary(
+            DAILY_REPORT + "\n## 9. 补充\n\n" + extra, "T", "2026-07-20", limit=10000
+        )
         perm_part = s.split("\n权限：\n", 1)[1]
-        count = sum(1 for line in perm_part.splitlines() if "禁止" in line or "权限" in line)
+        count = sum(
+            1 for line in perm_part.splitlines() if "禁止" in line or "权限" in line
+        )
         self.assertEqual(count, 2)
 
     def test_truncation_with_marker(self):
@@ -166,10 +171,19 @@ class CredentialsTest(unittest.TestCase):
 
     def test_config_fallback(self):
         import tempfile
-        cfg = {"channels": {"feishu": {"accounts": {"default": {
-            "appId": "cfg_id", "appSecret": "cfg_secret"}}}}}
-        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False,
-                                         encoding="utf-8") as fh:
+
+        cfg = {
+            "channels": {
+                "feishu": {
+                    "accounts": {
+                        "default": {"appId": "cfg_id", "appSecret": "cfg_secret"}
+                    }
+                }
+            }
+        }
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".json", delete=False, encoding="utf-8"
+        ) as fh:
             json.dump(cfg, fh)
             path = fh.name
         self.addCleanup(lambda: __import__("os").unlink(path))
@@ -184,8 +198,10 @@ class CredentialsTest(unittest.TestCase):
 
     def test_malformed_config_raises(self):
         import tempfile
-        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False,
-                                         encoding="utf-8") as fh:
+
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".json", delete=False, encoding="utf-8"
+        ) as fh:
             json.dump({"channels": {}}, fh)
             path = fh.name
         self.addCleanup(lambda: __import__("os").unlink(path))
@@ -203,10 +219,25 @@ class CredentialsTest(unittest.TestCase):
                 frp.resolve_to_open_id({"OPENCLAW_CONFIG": missing})
 
     def test_to_open_id_from_openclaw_config(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False,
-                                         encoding="utf-8") as fh:
-            json.dump({"channels": {"feishu": {"accounts": {"default": {
-                "appId": "cli_x", "appSecret": "s", "reportToOpenId": "ou_cfg"}}}}}, fh)
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".json", delete=False, encoding="utf-8"
+        ) as fh:
+            json.dump(
+                {
+                    "channels": {
+                        "feishu": {
+                            "accounts": {
+                                "default": {
+                                    "appId": "cli_x",
+                                    "appSecret": "s",
+                                    "reportToOpenId": "ou_cfg",
+                                }
+                            }
+                        }
+                    }
+                },
+                fh,
+            )
             path = fh.name
         self.addCleanup(lambda: __import__("os").unlink(path))
         self.assertEqual(frp.resolve_to_open_id({"OPENCLAW_CONFIG": path}), "ou_cfg")
@@ -223,16 +254,32 @@ class SendFlowTest(unittest.TestCase):
     """mock HTTP 层: 成功路径与每一步 code!=0 的失败路径。"""
 
     def _run_main(self, tmp_report):
-        argv = ["--report", str(tmp_report), "--title", "盘后复盘", "--date", "2026-07-20"]
-        with mock.patch.dict("os.environ", {"FEISHU_APP_ID": "id", "FEISHU_APP_SECRET": "sec",
-                                            # 收件人必须显式配置（不再有硬编码兜底）
-                                            "FEISHU_TO_OPEN_ID": "ou_test"},
-                             clear=False):
+        argv = [
+            "--report",
+            str(tmp_report),
+            "--title",
+            "盘后复盘",
+            "--date",
+            "2026-07-20",
+        ]
+        with mock.patch.dict(
+            "os.environ",
+            {
+                "FEISHU_APP_ID": "id",
+                "FEISHU_APP_SECRET": "sec",
+                # 收件人必须显式配置（不再有硬编码兜底）
+                "FEISHU_TO_OPEN_ID": "ou_test",
+            },
+            clear=False,
+        ):
             return frp.main(argv)
 
     def setUp(self):
         import tempfile
-        fh = tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8")
+
+        fh = tempfile.NamedTemporaryFile(
+            "w", suffix=".md", delete=False, encoding="utf-8"
+        )
         fh.write(FINAL_REVIEW)
         fh.close()
         self.report = fh.name
@@ -242,9 +289,16 @@ class SendFlowTest(unittest.TestCase):
         token_ok = {"code": 0, "tenant_access_token": "tok"}
         upload_ok = {"code": 0, "data": {"file_key": "fk_123"}}
         msg_ok = {"code": 0, "data": {}}
-        with mock.patch.object(frp.requests, "post",
-                               side_effect=[_resp(token_ok), _resp(upload_ok), _resp(msg_ok),
-                                            _resp(msg_ok)]) as post:
+        with mock.patch.object(
+            frp.requests,
+            "post",
+            side_effect=[
+                _resp(token_ok),
+                _resp(upload_ok),
+                _resp(msg_ok),
+                _resp(msg_ok),
+            ],
+        ) as post:
             rc = self._run_main(self.report)
         self.assertEqual(rc, 0)
         self.assertEqual(post.call_count, 4)
@@ -256,40 +310,73 @@ class SendFlowTest(unittest.TestCase):
         self.assertEqual(upload_kwargs["data"]["file_name"], "2026-07-20_盘后复盘.md")
 
     def test_token_failure_exits_1(self):
-        with mock.patch.object(frp.requests, "post",
-                               return_value=_resp({"code": 999, "msg": "bad app"})):
+        with mock.patch.object(
+            frp.requests, "post", return_value=_resp({"code": 999, "msg": "bad app"})
+        ):
             rc = self._run_main(self.report)
         self.assertEqual(rc, 1)
 
     def test_upload_failure_exits_1(self):
-        with mock.patch.object(frp.requests, "post",
-                               side_effect=[_resp({"code": 0, "tenant_access_token": "t"}),
-                                            _resp({"code": 1, "msg": "upload denied"})]):
+        with mock.patch.object(
+            frp.requests,
+            "post",
+            side_effect=[
+                _resp({"code": 0, "tenant_access_token": "t"}),
+                _resp({"code": 1, "msg": "upload denied"}),
+            ],
+        ):
             rc = self._run_main(self.report)
         self.assertEqual(rc, 1)
 
     def test_message_failure_exits_1(self):
-        with mock.patch.object(frp.requests, "post",
-                               side_effect=[_resp({"code": 0, "tenant_access_token": "t"}),
-                                            _resp({"code": 0, "data": {"file_key": "fk"}}),
-                                            _resp({"code": 2, "msg": "no permission"})]):
+        with mock.patch.object(
+            frp.requests,
+            "post",
+            side_effect=[
+                _resp({"code": 0, "tenant_access_token": "t"}),
+                _resp({"code": 0, "data": {"file_key": "fk"}}),
+                _resp({"code": 2, "msg": "no permission"}),
+            ],
+        ):
             rc = self._run_main(self.report)
         self.assertEqual(rc, 1)
 
     def test_network_exception_exits_1(self):
-        with mock.patch.object(frp.requests, "post", side_effect=TimeoutError("timed out")), \
-             mock.patch.object(frp, "retry_call", side_effect=lambda f, **kw: f()):
+        with (
+            mock.patch.object(
+                frp.requests, "post", side_effect=TimeoutError("timed out")
+            ),
+            mock.patch.object(frp, "retry_call", side_effect=lambda f, **kw: f()),
+        ):
             rc = self._run_main(self.report)
         self.assertEqual(rc, 1)
 
     def test_missing_report_exits_1(self):
-        rc = frp.main(["--report", "nonexistent_dir/nope.md", "--title", "T", "--date", "2026-07-20"])
+        rc = frp.main(
+            [
+                "--report",
+                "nonexistent_dir/nope.md",
+                "--title",
+                "T",
+                "--date",
+                "2026-07-20",
+            ]
+        )
         self.assertEqual(rc, 1)
 
     def test_dry_run_never_calls_http(self):
         with mock.patch.object(frp.requests, "post") as post:
-            rc = frp.main(["--report", self.report, "--title", "盘后复盘",
-                           "--date", "2026-07-20", "--dry-run"])
+            rc = frp.main(
+                [
+                    "--report",
+                    self.report,
+                    "--title",
+                    "盘后复盘",
+                    "--date",
+                    "2026-07-20",
+                    "--dry-run",
+                ]
+            )
         self.assertEqual(rc, 0)
         post.assert_not_called()
 
@@ -321,22 +408,35 @@ class SendFlowTest(unittest.TestCase):
 
     def test_empty_report_refused_before_upload(self):
         import tempfile
-        fh = tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8")
+
+        fh = tempfile.NamedTemporaryFile(
+            "w", suffix=".md", delete=False, encoding="utf-8"
+        )
         fh.close()
         self.addCleanup(lambda: __import__("os").unlink(fh.name))
-        with mock.patch.object(frp.requests, "post",
-                               side_effect=[_resp({"code": 0, "tenant_access_token": "t"})]):
+        with mock.patch.object(
+            frp.requests,
+            "post",
+            side_effect=[_resp({"code": 0, "tenant_access_token": "t"})],
+        ):
             rc = self._run_main(fh.name)
         self.assertEqual(rc, 1)
 
     def test_half_success_is_reported_on_stdout(self):
         """附件已发但摘要失败时,stdout 协议里必须能看出半成功。"""
-        with mock.patch.object(frp.requests, "post",
-                               side_effect=[_resp({"code": 0, "tenant_access_token": "t"}),
-                                            _resp({"code": 0, "data": {"file_key": "fk"}}),
-                                            _resp({"code": 0, "data": {}}),
-                                            _resp({"code": 9, "msg": "text rejected"})]), \
-             mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+        with (
+            mock.patch.object(
+                frp.requests,
+                "post",
+                side_effect=[
+                    _resp({"code": 0, "tenant_access_token": "t"}),
+                    _resp({"code": 0, "data": {"file_key": "fk"}}),
+                    _resp({"code": 0, "data": {}}),
+                    _resp({"code": 9, "msg": "text rejected"}),
+                ],
+            ),
+            mock.patch("sys.stdout", new_callable=io.StringIO) as out,
+        ):
             rc = self._run_main(self.report)
         payload = json.loads(out.getvalue().strip().splitlines()[-1])
         self.assertEqual(rc, 1)
@@ -351,17 +451,29 @@ class DeliveryGateTest(unittest.TestCase):
 
     def _write_gate(self, tmp, *, trading=True, quality="pass"):
         p = tmp / "2026-07-20_runtime_gate.json"
-        p.write_text(json.dumps({"date": "2026-07-20",
-                                 "calendar": {"is_trading_day": trading},
-                                 "market_quality": {"status": quality, "quality_score": 0.3,
-                                                    "checks": [{"field": "0AMV", "quality": "stale"}]}}),
-                     encoding="utf-8")
+        p.write_text(
+            json.dumps(
+                {
+                    "date": "2026-07-20",
+                    "calendar": {"is_trading_day": trading},
+                    "market_quality": {
+                        "status": quality,
+                        "quality_score": 0.3,
+                        "checks": [{"field": "0AMV", "quality": "stale"}],
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
         return p
 
     def setUp(self):
         import tempfile
+
         self.tmp = Path(tempfile.mkdtemp())
-        fh = tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8")
+        fh = tempfile.NamedTemporaryFile(
+            "w", suffix=".md", delete=False, encoding="utf-8"
+        )
         fh.write(FINAL_REVIEW)
         fh.close()
         self.report = fh.name
@@ -389,26 +501,66 @@ class DeliveryGateTest(unittest.TestCase):
 
     def test_main_exits_4_without_any_http(self):
         gate = self._write_gate(self.tmp, quality="blocked")
-        with mock.patch.object(frp.requests, "post") as post, \
-             mock.patch.dict("os.environ", {"FEISHU_APP_ID": "id", "FEISHU_APP_SECRET": "sec"},
-                             clear=False):
-            rc = frp.main(["--report", self.report, "--title", "盘后复盘", "--date", "2026-07-20",
-                           "--require-gate", "--gate-file", str(gate)])
+        with (
+            mock.patch.object(frp.requests, "post") as post,
+            mock.patch.dict(
+                "os.environ",
+                {"FEISHU_APP_ID": "id", "FEISHU_APP_SECRET": "sec"},
+                clear=False,
+            ),
+        ):
+            rc = frp.main(
+                [
+                    "--report",
+                    self.report,
+                    "--title",
+                    "盘后复盘",
+                    "--date",
+                    "2026-07-20",
+                    "--require-gate",
+                    "--gate-file",
+                    str(gate),
+                ]
+            )
         self.assertEqual(rc, frp.GATE_BLOCKED_EXIT)
         post.assert_not_called()
 
     def test_gate_pass_proceeds_to_send(self):
         gate = self._write_gate(self.tmp)
-        with mock.patch.object(frp.requests, "post",
-                               side_effect=[_resp({"code": 0, "tenant_access_token": "t"}),
-                                            _resp({"code": 0, "data": {"file_key": "fk"}}),
-                                            _resp({"code": 0, "data": {}}),
-                                            _resp({"code": 0, "data": {}})]) as post, \
-             mock.patch.dict("os.environ", {"FEISHU_APP_ID": "id", "FEISHU_APP_SECRET": "sec",
-                                            "FEISHU_TO_OPEN_ID": "ou_test"},
-                             clear=False):
-            rc = frp.main(["--report", self.report, "--title", "盘后复盘", "--date", "2026-07-20",
-                           "--require-gate", "--gate-file", str(gate)])
+        with (
+            mock.patch.object(
+                frp.requests,
+                "post",
+                side_effect=[
+                    _resp({"code": 0, "tenant_access_token": "t"}),
+                    _resp({"code": 0, "data": {"file_key": "fk"}}),
+                    _resp({"code": 0, "data": {}}),
+                    _resp({"code": 0, "data": {}}),
+                ],
+            ) as post,
+            mock.patch.dict(
+                "os.environ",
+                {
+                    "FEISHU_APP_ID": "id",
+                    "FEISHU_APP_SECRET": "sec",
+                    "FEISHU_TO_OPEN_ID": "ou_test",
+                },
+                clear=False,
+            ),
+        ):
+            rc = frp.main(
+                [
+                    "--report",
+                    self.report,
+                    "--title",
+                    "盘后复盘",
+                    "--date",
+                    "2026-07-20",
+                    "--require-gate",
+                    "--gate-file",
+                    str(gate),
+                ]
+            )
         self.assertEqual(rc, 0)
         self.assertEqual(post.call_count, 4)
 

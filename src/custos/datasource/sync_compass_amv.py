@@ -20,6 +20,7 @@ CLI::
     uv run python src/custos/datasource/sync_compass_amv.py
     uv run python src/custos/datasource/sync_compass_amv.py --backfill-since 2025-11-11
 """
+
 from __future__ import annotations
 
 import argparse
@@ -56,8 +57,9 @@ def _existing_dates(ledger_path: Path) -> set:
     return dates
 
 
-def merge_ledger(records: list, ledger_path: Path,
-                 quality: str = "confirmed") -> tuple[int, int]:
+def merge_ledger(
+    records: list, ledger_path: Path, quality: str = "confirmed"
+) -> tuple[int, int]:
     """把 records 合并进台账，返回 (added, skipped_existing)。
 
     已存在日期（任何 source）跳过；change_pct 为 None 的记录（序列首条）
@@ -80,14 +82,19 @@ def merge_ledger(records: list, ledger_path: Path,
             skipped += 1
             continue
         existing.add(r["date"])
-        lines.append(json.dumps({
-            "date": r["date"],
-            "amv_change_pct": round(pct, 2),
-            "as_of": r["date"],
-            "quality": quality,
-            "source": "compass_day_vdat",
-            "recorded_at": now,
-        }, ensure_ascii=False))
+        lines.append(
+            json.dumps(
+                {
+                    "date": r["date"],
+                    "amv_change_pct": round(pct, 2),
+                    "as_of": r["date"],
+                    "quality": quality,
+                    "source": "compass_day_vdat",
+                    "recorded_at": now,
+                },
+                ensure_ascii=False,
+            )
+        )
         added += 1
     if lines:
         ledger_path.parent.mkdir(parents=True, exist_ok=True)
@@ -106,7 +113,10 @@ def fill_amv_0day(target: str, change_pct: float, market_dir: Path) -> bool:
     if not path.is_file():
         return False
     mkt = json.loads(path.read_text(encoding="utf-8"))
-    if mkt.get("amv_0day") is not None and mkt.get("amv_0", {}).get("quality") == "confirmed":
+    if (
+        mkt.get("amv_0day") is not None
+        and mkt.get("amv_0", {}).get("quality") == "confirmed"
+    ):
         return False
     mkt["amv_0day"] = change_pct
     path.write_text(json.dumps(mkt, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -114,17 +124,37 @@ def fill_amv_0day(target: str, change_pct: float, market_dir: Path) -> bool:
 
 
 def main(argv: Optional[list] = None) -> int:
-    ap = argparse.ArgumentParser(description="同步指南针 0AMV 到台账与 market_timing_input（best-effort）")
-    ap.add_argument("--date", default=cn_today().isoformat(), help="当日填充目标日期 YYYY-MM-DD（默认今天）")
-    ap.add_argument("--backfill-since", default=None, help="台账回填起点 YYYY-MM-DD（默认最近 30 天）")
+    ap = argparse.ArgumentParser(
+        description="同步指南针 0AMV 到台账与 market_timing_input（best-effort）"
+    )
+    ap.add_argument(
+        "--date",
+        default=cn_today().isoformat(),
+        help="当日填充目标日期 YYYY-MM-DD（默认今天）",
+    )
+    ap.add_argument(
+        "--backfill-since",
+        default=None,
+        help="台账回填起点 YYYY-MM-DD（默认最近 30 天）",
+    )
     args = ap.parse_args(argv)
 
-    summary = {"added": 0, "skipped_existing": 0, "amv_0day_filled": False, "latest_date": None}
+    summary = {
+        "added": 0,
+        "skipped_existing": 0,
+        "amv_0day_filled": False,
+        "latest_date": None,
+    }
     try:
-        since = args.backfill_since or (cn_today() - timedelta(days=DEFAULT_WINDOW_DAYS)).isoformat()
+        since = (
+            args.backfill_since
+            or (cn_today() - timedelta(days=DEFAULT_WINDOW_DAYS)).isoformat()
+        )
         parsed = compass_amv.parse_amv_daily(since=since)
         if parsed.get("error") or not parsed["records"]:
-            print(f"[WARN] compass 0AMV 解析失败，保持人工输入路径: {parsed.get('error', 'no_records')}")
+            print(
+                f"[WARN] compass 0AMV 解析失败，保持人工输入路径: {parsed.get('error', 'no_records')}"
+            )
             summary["error"] = parsed.get("error", "no_records")
             print(json.dumps(summary, ensure_ascii=False))
             return 0
@@ -137,9 +167,11 @@ def main(argv: Optional[list] = None) -> int:
         summary["quality"] = ledger_quality
         summary["identification"] = parsed.get("identification")
         if not verified:
-            print(f"[WARN] compass 0AMV 识别未经真值校验(quality={raw_quality!r}, "
-                  f"identification={parsed.get('identification')!r})："
-                  f"台账按 unverified 记录，且不自动填充 amv_0day —— 回落人工确认路径")
+            print(
+                f"[WARN] compass 0AMV 识别未经真值校验(quality={raw_quality!r}, "
+                f"identification={parsed.get('identification')!r})："
+                f"台账按 unverified 记录，且不自动填充 amv_0day —— 回落人工确认路径"
+            )
         added, skipped = merge_ledger(parsed["records"], LEDGER, quality=ledger_quality)
         summary["added"], summary["skipped_existing"] = added, skipped
         if added:
@@ -151,9 +183,13 @@ def main(argv: Optional[list] = None) -> int:
         if is_trading and verified and parsed["latest_date"] == target:
             latest_pct = parsed["records"][-1]["change_pct"]
             if latest_pct is not None:
-                summary["amv_0day_filled"] = fill_amv_0day(target, latest_pct, MARKET_DIR)
+                summary["amv_0day_filled"] = fill_amv_0day(
+                    target, latest_pct, MARKET_DIR
+                )
                 if summary["amv_0day_filled"]:
-                    print(f"[OK] amv_0day 已写入 {target}_market_timing_input.json (value={latest_pct}%)")
+                    print(
+                        f"[OK] amv_0day 已写入 {target}_market_timing_input.json (value={latest_pct}%)"
+                    )
         print(json.dumps(summary, ensure_ascii=False))
         return 0
     except Exception as exc:  # noqa: BLE001 —— best-effort，绝不炸管线

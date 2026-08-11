@@ -1,19 +1,32 @@
 # -*- coding: utf-8 -*-
 """盘前情报 schema 校验:daily_report 加载后先校验,不合规时显式降级标注。"""
+
 from __future__ import annotations
 
 import json
 
 from custos.pipeline import daily_report
-from custos.datasource.news.premarket_intel_schema import validate_premarket_intelligence
+from custos.datasource.news.premarket_intel_schema import (
+    validate_premarket_intelligence,
+)
 import sys
 
 STANDARD = {
     "date": "2026-07-16",
-    "window": {"start": "2026-07-15 15:00:00", "end": "2026-07-16 09:00:00", "timezone": "Asia/Shanghai"},
+    "window": {
+        "start": "2026-07-15 15:00:00",
+        "end": "2026-07-16 09:00:00",
+        "timezone": "Asia/Shanghai",
+    },
     "market_events": [
-        {"published_at": "2026-07-15 17:14:09", "title": "港股三大指数继续走强",
-         "direction": "neutral_positive", "impact": "外围候选线索", "source": "RSS候选", "quality": "candidate"}
+        {
+            "published_at": "2026-07-15 17:14:09",
+            "title": "港股三大指数继续走强",
+            "direction": "neutral_positive",
+            "impact": "外围候选线索",
+            "source": "RSS候选",
+            "quality": "candidate",
+        }
     ],
     "holding_events": [],
     "data_quality": {"status": "degraded", "reason": "补做核验"},
@@ -83,11 +96,21 @@ class TestValidatePremarketIntelligence:
 
 class TestPremarketSchemaNote:
     def test_valid_returns_empty(self):
-        assert daily_report.premarket_schema_note({"valid": True, "errors": [], "warnings": []}) == ""
+        assert (
+            daily_report.premarket_schema_note(
+                {"valid": True, "errors": [], "warnings": []}
+            )
+            == ""
+        )
 
     def test_invalid_renders_degraded_banner(self):
         note = daily_report.premarket_schema_note(
-            {"valid": False, "errors": ["缺 market_events(list)", "缺 holding_events(list)"], "warnings": []})
+            {
+                "valid": False,
+                "errors": ["缺 market_events(list)", "缺 holding_events(list)"],
+                "warnings": [],
+            }
+        )
         assert "schema 不合规" in note
         assert "market_events" in note and "holding_events" in note
         assert "RSS" in note
@@ -95,15 +118,24 @@ class TestPremarketSchemaNote:
 
 class TestPremarketSchemaMarker:
     def test_valid_no_warnings_returns_empty(self):
-        assert daily_report.premarket_schema_marker({"valid": True, "errors": [], "warnings": []}) == ""
+        assert (
+            daily_report.premarket_schema_marker(
+                {"valid": True, "errors": [], "warnings": []}
+            )
+            == ""
+        )
 
     def test_invalid_marks_schema_invalid(self):
-        marker = daily_report.premarket_schema_marker({"valid": False, "errors": ["缺 market_events(list)"], "warnings": []})
+        marker = daily_report.premarket_schema_marker(
+            {"valid": False, "errors": ["缺 market_events(list)"], "warnings": []}
+        )
         assert marker.startswith("（schema invalid: ")
         assert "market_events" in marker
 
     def test_valid_with_warnings_marks_count(self):
-        marker = daily_report.premarket_schema_marker({"valid": True, "errors": [], "warnings": ["w1", "w2"]})
+        marker = daily_report.premarket_schema_marker(
+            {"valid": True, "errors": [], "warnings": ["w1", "w2"]}
+        )
         assert marker == "（schema warnings: 2）"
 
 
@@ -114,22 +146,39 @@ class TestMainDegradesOnInvalidSchema:
         (data / "news" / "rss" / "filtered").mkdir(parents=True)
         (data / "decisions").mkdir(parents=True)
         if intel is not None:
-            (data / "news" / "premarket" / "2026-07-17_premarket_intelligence.json").write_text(
-                json.dumps(intel, ensure_ascii=False), encoding="utf-8")
-        (data / "decisions" / "2026-07-17_chief_decision.json").write_text(json.dumps({
-            "date": "2026-07-17", "market_state": "震荡", "total_position_range": "30%-40%",
-            "market_quality": {"status": "ok"}, "position_freshness": {"status": "ok"},
-            "position_gate": {}, "holding_actions": [], "buy_actions": [],
-        }), encoding="utf-8")
+            (
+                data / "news" / "premarket" / "2026-07-17_premarket_intelligence.json"
+            ).write_text(json.dumps(intel, ensure_ascii=False), encoding="utf-8")
+        (data / "decisions" / "2026-07-17_chief_decision.json").write_text(
+            json.dumps(
+                {
+                    "date": "2026-07-17",
+                    "market_state": "震荡",
+                    "total_position_range": "30%-40%",
+                    "market_quality": {"status": "ok"},
+                    "position_freshness": {"status": "ok"},
+                    "position_gate": {},
+                    "holding_actions": [],
+                    "buy_actions": [],
+                }
+            ),
+            encoding="utf-8",
+        )
         monkeypatch.setattr(daily_report, "DATA", data)
         # ⚠️ 盘前情报访问器已移到 `news/premarket_intel_schema`，需单独打桩它的 PREMARKET_DIR
         from custos.datasource.news import premarket_intel_schema as _intel
+
         monkeypatch.setattr(_intel, "PREMARKET_DIR", data / "news" / "premarket")
         return data
 
     def _run_main(self, monkeypatch, tmp_path, out):
         import sys
-        monkeypatch.setattr(sys, "argv", ["daily_report.py", "--date", "2026-07-17", "--output", str(out)])
+
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["daily_report.py", "--date", "2026-07-17", "--output", str(out)],
+        )
         daily_report.main()
         return out.read_text(encoding="utf-8")
 

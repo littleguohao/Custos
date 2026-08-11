@@ -9,6 +9,7 @@
 ② 「BJ 曾因查错 market 拿不到权息」（`DATA_SOURCE_COVERAGE_MATRIX` 记录）
 所以这条路径值得有测试。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -37,10 +38,14 @@ def _write_bj(tmp_root, code, records):
 class TestBjVipdocReader:
     def test_reads_binary_records(self, tmp_path, monkeypatch):
         monkeypatch.setattr(L, "TDX_ROOT", tmp_path)
-        _write_bj(tmp_path, "920808", [
-            _day_record(20260805, 1000, 1100, 990, 1050, 1.23e7, 50000),
-            _day_record(20260806, 1050, 1200, 1040, 1180, 2.34e7, 80000),
-        ])
+        _write_bj(
+            tmp_path,
+            "920808",
+            [
+                _day_record(20260805, 1000, 1100, 990, 1050, 1.23e7, 50000),
+                _day_record(20260806, 1050, 1200, 1040, 1180, 2.34e7, 80000),
+            ],
+        )
         df = L._read_bj_vipdoc_daily("920808")
         assert len(df) == 2
         assert list(df["date"].dt.strftime("%Y-%m-%d")) == ["2026-08-05", "2026-08-06"]
@@ -51,7 +56,9 @@ class TestBjVipdocReader:
     def test_accepts_suffixed_code(self, tmp_path, monkeypatch):
         """带 `.BJ` 后缀也要能读 —— 上游代码形式不统一。"""
         monkeypatch.setattr(L, "TDX_ROOT", tmp_path)
-        _write_bj(tmp_path, "920808", [_day_record(20260805, 1000, 1000, 1000, 1000, 1.0, 1)])
+        _write_bj(
+            tmp_path, "920808", [_day_record(20260805, 1000, 1000, 1000, 1000, 1.0, 1)]
+        )
         assert len(L._read_bj_vipdoc_daily("920808.BJ")) == 1
 
     def test_missing_file_returns_reason_not_silence(self, tmp_path, monkeypatch):
@@ -77,18 +84,23 @@ class TestBjVipdocReader:
     def test_zero_date_records_skipped(self, tmp_path, monkeypatch):
         """`.day` 文件尾部有 date=0 的填充记录，必须跳过而不是产出 1970 年的行。"""
         monkeypatch.setattr(L, "TDX_ROOT", tmp_path)
-        _write_bj(tmp_path, "920808", [
-            _day_record(20260805, 1000, 1000, 1000, 1000, 1.0, 1),
-            _day_record(0, 0, 0, 0, 0, 0.0, 0),
-        ])
+        _write_bj(
+            tmp_path,
+            "920808",
+            [
+                _day_record(20260805, 1000, 1000, 1000, 1000, 1.0, 1),
+                _day_record(0, 0, 0, 0, 0, 0.0, 0),
+            ],
+        )
         df = L._read_bj_vipdoc_daily("920808")
         assert len(df) == 1
 
     def test_truncated_tail_ignored(self, tmp_path, monkeypatch):
         """不足 32 字节的尾部残块直接停 —— 不得当成一条记录解出垃圾。"""
         monkeypatch.setattr(L, "TDX_ROOT", tmp_path)
-        p = _write_bj(tmp_path, "920808",
-                      [_day_record(20260805, 1000, 1000, 1000, 1000, 1.0, 1)])
+        p = _write_bj(
+            tmp_path, "920808", [_day_record(20260805, 1000, 1000, 1000, 1000, 1.0, 1)]
+        )
         p.write_bytes(p.read_bytes() + b"\x01\x02\x03")
         assert len(L._read_bj_vipdoc_daily("920808")) == 1
 
@@ -104,7 +116,9 @@ class TestEOdataReader:
         code = L.normalize_code("600000")
         (tmp_path / f"{code}-all-latest.csv").write_text(
             "Date,Code,Open,High,Low,Close,Volume,Amount\n"
-            "2026-08-05,600000,10.0,11.0,9.9,10.5,50000,520000\n", encoding="utf-8")
+            "2026-08-05,600000,10.0,11.0,9.9,10.5,50000,520000\n",
+            encoding="utf-8",
+        )
         df = L.read_e_odata_daily("600000")
         assert len(df) == 1 and df["close"].iloc[0] == 10.5
         assert df["source"].iloc[0] == "e_odata", "来源必须标出，供下游判断口径"
@@ -118,7 +132,8 @@ class TestEOdataReader:
         monkeypatch.setenv("TDX_E_ODATA", str(tmp_path))
         code = L.normalize_code("600000")
         (tmp_path / f"{code}-all-latest.csv").write_text(
-            "Date,Close\n2026-08-05,10.5\n不是日期,9.9\n", encoding="utf-8")
+            "Date,Close\n2026-08-05,10.5\n不是日期,9.9\n", encoding="utf-8"
+        )
         assert len(L.read_e_odata_daily("600000")) == 1
 
 
@@ -127,20 +142,24 @@ class TestSavers:
         p = tmp_path / "a" / "b" / "c.json"
         L.save_json(p, {"名": "值"})
         import json
+
         assert json.loads(p.read_text(encoding="utf-8")) == {"名": "值"}
 
     def test_save_csv_uses_bom(self, tmp_path):
         """⚠️ CSV 用 `utf-8-sig`（带 BOM）—— 目标机是 Windows，
         Excel 打无 BOM 的 utf-8 CSV 会把中文显示成乱码。"""
         import pandas as pd
+
         p = tmp_path / "x.csv"
         L.save_csv(p, pd.DataFrame({"名称": ["浦发"]}))
         assert p.read_bytes().startswith(b"\xef\xbb\xbf")
 
 
 class TestCodeHelpers:
-    @pytest.mark.parametrize("raw,want", [("600000", True), ("601398", True),
-                                          ("000001", False), ("920808", False)])
+    @pytest.mark.parametrize(
+        "raw,want",
+        [("600000", True), ("601398", True), ("000001", False), ("920808", False)],
+    )
     def test_sh_prefix(self, raw, want):
         assert (L._get_market_code(raw) == 1) is want
 
@@ -170,10 +189,17 @@ class TestQfqFailureStats:
     @staticmethod
     def _bars():
         import pandas as pd
-        return pd.DataFrame({
-            "date": pd.bdate_range("2025-01-01", periods=3).astype(str),
-            "open": [10.0] * 3, "high": [10.1] * 3,
-            "low": [9.9] * 3, "close": [10.0] * 3, "volume": [1e6] * 3})
+
+        return pd.DataFrame(
+            {
+                "date": pd.bdate_range("2025-01-01", periods=3).astype(str),
+                "open": [10.0] * 3,
+                "high": [10.1] * 3,
+                "low": [9.9] * 3,
+                "close": [10.0] * 3,
+                "volume": [1e6] * 3,
+            }
+        )
 
     @pytest.fixture(autouse=True)
     def _clean_stats(self):

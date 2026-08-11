@@ -9,6 +9,7 @@ ST 股会不会进候选池。
 生成、永不更新、读取时不校验时效的缓存在跑 ⇒ 缓存非空就报 st_filter=ok，而旧缓存里
 新被 ST 的票名字还是正常的，照样通过硬排除。
 """
+
 from __future__ import annotations
 
 import json
@@ -23,7 +24,9 @@ from custos.core.paths import cn_today
 # 这些函数本身，所以在模块导入期（fixture 生效之前）先抓住真实实现。
 _REAL_FETCH_NAMES = sn.fetch_names_for
 _REAL_CLIST = sn.fetch_all_from_clist
-_REAL_RESOLVE = sn.resolve_names_for   # conftest 连这个也 stub 了(它是 formula_screen 的入口)
+_REAL_RESOLVE = (
+    sn.resolve_names_for
+)  # conftest 连这个也 stub 了(它是 formula_screen 的入口)
 
 
 class FakeResp:
@@ -84,16 +87,19 @@ def _no_real_sleep(monkeypatch):
 class TestSecidMapping:
     """secid 前缀必须复用 code_utils.market_of —— 手写"9 开头即沪市"会误判北交所。"""
 
-    @pytest.mark.parametrize("code,expect", [
-        ("600000", "1.600000"),     # 沪主板
-        ("688111", "1.688111"),     # 科创板
-        ("900001", "1.900001"),     # 沪 B
-        ("000001", "0.000001"),     # 深主板
-        ("300750", "0.300750"),     # 创业板
-        ("920819", "0.920819"),     # 北交所新代码段 —— 首字符也是 9，最易误判
-        ("830799", "0.830799"),     # 北交所旧代码段
-        ("430047", "0.430047"),     # 北交所旧代码段
-    ])
+    @pytest.mark.parametrize(
+        "code,expect",
+        [
+            ("600000", "1.600000"),  # 沪主板
+            ("688111", "1.688111"),  # 科创板
+            ("900001", "1.900001"),  # 沪 B
+            ("000001", "0.000001"),  # 深主板
+            ("300750", "0.300750"),  # 创业板
+            ("920819", "0.920819"),  # 北交所新代码段 —— 首字符也是 9，最易误判
+            ("830799", "0.830799"),  # 北交所旧代码段
+            ("430047", "0.430047"),  # 北交所旧代码段
+        ],
+    )
     def test_secid(self, code, expect):
         assert sn._secid(code) == expect
 
@@ -129,7 +135,7 @@ class TestFetchNamesFor:
         s = FakeSession([[_row("600000", "浦发银行")]])
         _REAL_FETCH_NAMES(["600000", "600000.SH", "6000"], session=s)
         secids = s.calls[0][1]["secids"].split(",")
-        assert sorted(secids) == ["0.006000", "1.600000"]   # 6000→006000 属深市
+        assert sorted(secids) == ["0.006000", "1.600000"]  # 6000→006000 属深市
 
     def test_empty_request_no_call(self):
         s = FakeSession()
@@ -146,6 +152,7 @@ class TestFetchNamesFor:
         class S(FakeSession):
             def get(self, url, params=None, timeout=None, proxies=None):
                 return FakeResp({"data": None})
+
         with pytest.raises(sn.NameFetchIncomplete):
             _REAL_FETCH_NAMES(["600000"], session=S())
 
@@ -154,12 +161,13 @@ class TestHostRotation:
     """单域名故障不该让整个数据源失效（实测 push2 全挂而 push2delay 可用）。"""
 
     def test_falls_over_to_next_host(self):
-        s = FakeSession([[_row("600000", "浦发银行")]],
-                        dead_hosts={"push2delay.eastmoney.com"})
+        s = FakeSession(
+            [[_row("600000", "浦发银行")]], dead_hosts={"push2delay.eastmoney.com"}
+        )
         got = _REAL_FETCH_NAMES(["600000"], session=s)
         assert got == {"600000": "浦发银行"}
-        assert s.calls[0][0] == "push2delay.eastmoney.com"      # 先试默认首选
-        assert s.calls[-1][0] != "push2delay.eastmoney.com"     # 失败后换域名
+        assert s.calls[0][0] == "push2delay.eastmoney.com"  # 先试默认首选
+        assert s.calls[-1][0] != "push2delay.eastmoney.com"  # 失败后换域名
 
     def test_all_hosts_dead_raises(self):
         s = FakeSession(dead_hosts=set(sn.EM_HOSTS))
@@ -167,8 +175,10 @@ class TestHostRotation:
             _REAL_FETCH_NAMES(["600000"], session=s)
 
     def test_working_host_is_remembered(self):
-        s = FakeSession([[_row("600000", "浦发银行")], [_row("000001", "平安银行")]],
-                        dead_hosts={"push2delay.eastmoney.com"})
+        s = FakeSession(
+            [[_row("600000", "浦发银行")], [_row("000001", "平安银行")]],
+            dead_hosts={"push2delay.eastmoney.com"},
+        )
         _REAL_FETCH_NAMES(["600000"], session=s)
         first_ok = sn._working_host
         assert first_ok and first_ok != "push2delay.eastmoney.com"
@@ -200,16 +210,20 @@ class TestCache:
     def test_stale_when_old(self, tmp_path):
         p = tmp_path / "names.json"
         old = (cn_today() - timedelta(days=sn.NAME_MAP_MAX_AGE_DAYS + 1)).isoformat()
-        p.write_text(json.dumps({"generated_at": old, "names": {"600000": "浦发银行"}}),
-                     encoding="utf-8")
+        p.write_text(
+            json.dumps({"generated_at": old, "names": {"600000": "浦发银行"}}),
+            encoding="utf-8",
+        )
         _, meta = sn.load_cache(p)
         assert meta["stale"] is True and meta["age_days"] > sn.NAME_MAP_MAX_AGE_DAYS
 
     def test_boundary_not_stale(self, tmp_path):
         p = tmp_path / "names.json"
         at = (cn_today() - timedelta(days=sn.NAME_MAP_MAX_AGE_DAYS)).isoformat()
-        p.write_text(json.dumps({"generated_at": at, "names": {"600000": "浦发银行"}}),
-                     encoding="utf-8")
+        p.write_text(
+            json.dumps({"generated_at": at, "names": {"600000": "浦发银行"}}),
+            encoding="utf-8",
+        )
         _, meta = sn.load_cache(p)
         assert meta["stale"] is False, "恰好等于上限不算陈旧"
 
@@ -235,8 +249,10 @@ class TestCache:
 
     def test_empty_names_treated_unavailable(self, tmp_path):
         p = tmp_path / "names.json"
-        p.write_text(json.dumps({"generated_at": cn_today().isoformat(), "names": {}}),
-                     encoding="utf-8")
+        p.write_text(
+            json.dumps({"generated_at": cn_today().isoformat(), "names": {}}),
+            encoding="utf-8",
+        )
         names, meta = sn.load_cache(p)
         assert names == {} and meta["available"] is False
 
@@ -244,18 +260,27 @@ class TestCache:
 class TestResolveNamesFor:
     """st_filter 四态必须如实反映 ST 判定可信度——调用方据此决定能否声称已排除 ST。"""
 
-    def _patch_sources(self, monkeypatch, *, em=None, tq=None, cache=None,
-                       cache_meta=None, tdx=None):
+    def _patch_sources(
+        self, monkeypatch, *, em=None, tq=None, cache=None, cache_meta=None, tdx=None
+    ):
         # TDX 协议是 2026-08-04 起的主路径；默认给空表 = 模拟 TDX 不可用，
         # 这样既有用例（验证 HTTP/TQ/缓存回退链）的语义保持不变。
         monkeypatch.setattr(sn, "fetch_from_tdx_protocol", lambda **kw: tdx or {})
-        monkeypatch.setattr(sn, "fetch_names_for",
-                            (lambda codes, **kw: em) if em is not None
-                            else (lambda codes, **kw: (_ for _ in ()).throw(
-                                sn.NameFetchIncomplete("down"))))
+        monkeypatch.setattr(
+            sn,
+            "fetch_names_for",
+            (lambda codes, **kw: em)
+            if em is not None
+            else (
+                lambda codes, **kw: (_ for _ in ()).throw(
+                    sn.NameFetchIncomplete("down")
+                )
+            ),
+        )
         monkeypatch.setattr(sn, "fetch_from_tq", lambda codes=None, **kw: tq or {})
-        monkeypatch.setattr(sn, "load_cache",
-                            lambda path=None: (cache or {}, cache_meta or {}))
+        monkeypatch.setattr(
+            sn, "load_cache", lambda path=None: (cache or {}, cache_meta or {})
+        )
 
     def test_ok_when_all_resolved(self, monkeypatch):
         self._patch_sources(monkeypatch, em={"600000": "浦发银行", "000005": "ST星源"})
@@ -283,17 +308,27 @@ class TestResolveNamesFor:
         assert "tq_local" in diag["name_map_source"]
 
     def test_stale_when_only_stale_cache(self, monkeypatch, capsys):
-        self._patch_sources(monkeypatch, cache={"600000": "浦发银行"},
-                            cache_meta={"available": True, "stale": True,
-                                        "age_days": 99, "generated_at": "2026-04-01"})
+        self._patch_sources(
+            monkeypatch,
+            cache={"600000": "浦发银行"},
+            cache_meta={
+                "available": True,
+                "stale": True,
+                "age_days": 99,
+                "generated_at": "2026-04-01",
+            },
+        )
         names, diag = _REAL_RESOLVE(["600000"])
         assert names == {"600000": "浦发银行"}
         assert diag["st_filter"] == "stale" and diag["name_map_age_days"] == 99
         assert "新被 ST 的票可能不在表内" in capsys.readouterr().err
 
     def test_fresh_cache_is_ok(self, monkeypatch):
-        self._patch_sources(monkeypatch, cache={"600000": "浦发银行"},
-                            cache_meta={"available": True, "stale": False, "age_days": 2})
+        self._patch_sources(
+            monkeypatch,
+            cache={"600000": "浦发银行"},
+            cache_meta={"available": True, "stale": False, "age_days": 2},
+        )
         _, diag = _REAL_RESOLVE(["600000"])
         assert diag["st_filter"] == "ok"
 
@@ -304,10 +339,13 @@ class TestResolveNamesFor:
 
     def test_sources_are_combined(self, monkeypatch):
         """东财缺的由 TQ 补，TQ 也缺的由缓存补。"""
-        self._patch_sources(monkeypatch, em={"600000": "浦发银行"},
-                            tq={"000005": "ST星源"},
-                            cache={"300750": "宁德时代"},
-                            cache_meta={"available": True, "stale": False, "age_days": 1})
+        self._patch_sources(
+            monkeypatch,
+            em={"600000": "浦发银行"},
+            tq={"000005": "ST星源"},
+            cache={"300750": "宁德时代"},
+            cache_meta={"available": True, "stale": False, "age_days": 1},
+        )
         names, diag = _REAL_RESOLVE(["600000", "000005", "300750"])
         assert len(names) == 3 and diag["st_filter"] == "ok"
         assert "eastmoney_ulist" in diag["name_map_source"]
@@ -317,8 +355,9 @@ class TestClistBestEffort:
     """clist 全市场受限流，取到多少算多少；一条都没取到才抛。落盘路径另有覆盖率门槛。"""
 
     def test_partial_pages_kept(self):
-        s = FakeSession([[_row("600000", "浦发银行")], [_row("000001", "平安银行")]],
-                        total=5888)
+        s = FakeSession(
+            [[_row("600000", "浦发银行")], [_row("000001", "平安银行")]], total=5888
+        )
         got = _REAL_CLIST(session=s)
         assert len(got) == 2, "被限流断连后保留已取部分"
 
@@ -330,15 +369,18 @@ class TestClistBestEffort:
     def test_below_coverage_threshold_raises(self):
         """要落盘当全量表的调用方必须设 min_coverage：残缺表落盘比不更新更危险
         （覆盖完整缓存 + generated_at 刷新 → 30 天时效计时被重置）。"""
-        s = FakeSession([[_row("600000", "浦发银行")], [_row("000001", "平安银行")]],
-                        total=5888)
+        s = FakeSession(
+            [[_row("600000", "浦发银行")], [_row("000001", "平安银行")]], total=5888
+        )
         with pytest.raises(sn.NameFetchIncomplete, match="覆盖率不足"):
             _REAL_CLIST(session=s, min_coverage=sn.CLIST_MIN_COVERAGE)
 
     def test_at_coverage_threshold_kept(self):
         """恰好达到门槛（800/1000）不抛——边界口径是 len < total*coverage 才拒绝。"""
-        pages = [[_row(f"60{p:02d}{i:02d}", f"股{p}{i}") for i in range(100)]
-                 for p in range(8)]
+        pages = [
+            [_row(f"60{p:02d}{i:02d}", f"股{p}{i}") for i in range(100)]
+            for p in range(8)
+        ]
         s = FakeSession(pages, total=1000)
         got = _REAL_CLIST(session=s, min_coverage=sn.CLIST_MIN_COVERAGE)
         assert len(got) == 800
@@ -362,17 +404,21 @@ class TestTdxProtocolIsPrimary:
         monkeypatch.setattr(sn, "fetch_from_tdx_protocol", lambda **kw: tdx or {})
         monkeypatch.setattr(sn, "fetch_names_for", lambda codes, **kw: em or {})
         monkeypatch.setattr(sn, "fetch_from_tq", lambda codes=None, **kw: tq or {})
-        monkeypatch.setattr(sn, "load_cache",
-                            lambda path=None: (cache or {}, {"available": bool(cache),
-                                                             "stale": False}))
+        monkeypatch.setattr(
+            sn,
+            "load_cache",
+            lambda path=None: (cache or {}, {"available": bool(cache), "stale": False}),
+        )
 
     def test_tdx_wins_when_available(self, monkeypatch):
         """TDX 有数据时不该再走 HTTP。"""
         called = []
-        monkeypatch.setattr(sn, "fetch_from_tdx_protocol",
-                            lambda **kw: {"600000": "浦发银行"})
-        monkeypatch.setattr(sn, "fetch_names_for",
-                            lambda codes, **kw: called.append(codes) or {})
+        monkeypatch.setattr(
+            sn, "fetch_from_tdx_protocol", lambda **kw: {"600000": "浦发银行"}
+        )
+        monkeypatch.setattr(
+            sn, "fetch_names_for", lambda codes, **kw: called.append(codes) or {}
+        )
         monkeypatch.setattr(sn, "fetch_from_tq", lambda codes=None, **kw: {})
         monkeypatch.setattr(sn, "load_cache", lambda path=None: ({}, {}))
         names, diag = _REAL_RESOLVE(["600000"])
@@ -387,8 +433,12 @@ class TestTdxProtocolIsPrimary:
         def _em(codes, **kw):
             asked.extend(codes)
             return {"920819": "颖泰生物"}
-        monkeypatch.setattr(sn, "fetch_from_tdx_protocol",
-                            lambda **kw: {"600000": "浦发银行", "300750": "宁德时代"})
+
+        monkeypatch.setattr(
+            sn,
+            "fetch_from_tdx_protocol",
+            lambda **kw: {"600000": "浦发银行", "300750": "宁德时代"},
+        )
         monkeypatch.setattr(sn, "fetch_names_for", _em)
         monkeypatch.setattr(sn, "fetch_from_tq", lambda codes=None, **kw: {})
         monkeypatch.setattr(sn, "load_cache", lambda path=None: ({}, {}))
@@ -407,10 +457,14 @@ class TestTdxProtocolIsPrimary:
 
     def test_degrades_to_http_when_tdx_down(self, monkeypatch):
         """TDX 挂了要能回退 HTTP，不能因为改了优先级就失去冗余。"""
+
         def _boom(**kw):
             raise RuntimeError("tdx down")
+
         monkeypatch.setattr(sn, "fetch_from_tdx_protocol", _boom)
-        monkeypatch.setattr(sn, "fetch_names_for", lambda codes, **kw: {"600000": "浦发银行"})
+        monkeypatch.setattr(
+            sn, "fetch_names_for", lambda codes, **kw: {"600000": "浦发银行"}
+        )
         monkeypatch.setattr(sn, "fetch_from_tq", lambda codes=None, **kw: {})
         monkeypatch.setattr(sn, "load_cache", lambda path=None: ({}, {}))
         names, diag = _REAL_RESOLVE(["600000"])
@@ -418,8 +472,9 @@ class TestTdxProtocolIsPrimary:
         assert diag["st_filter"] == "ok"
 
     def test_full_map_prefers_tdx(self, monkeypatch):
-        monkeypatch.setattr(sn, "fetch_from_tdx_protocol",
-                            lambda **kw: {"600000": "浦发银行"})
+        monkeypatch.setattr(
+            sn, "fetch_from_tdx_protocol", lambda **kw: {"600000": "浦发银行"}
+        )
         m, src = sn.fetch_name_map()
         assert src == "tdx_protocol" and m
 
@@ -429,8 +484,10 @@ class TestClistCoverageGuard:
 
     def _patch_sources(self, monkeypatch, clist_exc):
         monkeypatch.setattr(sn, "fetch_from_tq", lambda *a, **kw: {})
+
         def _clist(*a, **kw):
             raise clist_exc
+
         monkeypatch.setattr(sn, "fetch_all_from_clist", _clist)
         monkeypatch.setattr(sn, "fetch_from_mootdx", lambda: {})
 
@@ -439,8 +496,11 @@ class TestClistCoverageGuard:
         """auto 路径调 clist 必须带 min_coverage（否则残缺表会被当成功结果落盘）。"""
         seen = {}
         monkeypatch.setattr(sn, "fetch_from_tq", lambda *a, **kw: {})
-        monkeypatch.setattr(sn, "fetch_all_from_clist",
-                            lambda *a, **kw: seen.update(kw) or {"600000": "浦发银行"})
+        monkeypatch.setattr(
+            sn,
+            "fetch_all_from_clist",
+            lambda *a, **kw: seen.update(kw) or {"600000": "浦发银行"},
+        )
         monkeypatch.setattr(sn, "fetch_from_mootdx", lambda: {})
         m, source = sn.fetch_name_map()
         assert source == "eastmoney_clist" and m
@@ -449,16 +509,33 @@ class TestClistCoverageGuard:
     def test_partial_clist_falls_back_to_cache_without_overwrite(self, monkeypatch):
         monkeypatch.setattr(sn, "fetch_from_tdx_protocol", lambda **kw: {})
         """TdxW 关 + clist 覆盖率不足 → 回退旧缓存，且**绝不**调 save_cache。"""
-        self._patch_sources(monkeypatch, sn.NameFetchIncomplete(
-            "clist 覆盖率不足: 1000/5888 (<80%)，拒绝当全量表落盘"))
-        monkeypatch.setattr(sn, "load_cache",
-                            lambda *a, **kw: ({"600000": "浦发银行"},
-                                              {"available": True, "stale": False,
-                                               "age_days": 2, "generated_at": "2026-08-01",
-                                               "source": "tq_local"}))
-        monkeypatch.setattr(sn, "save_cache",
-                            lambda *a, **kw: (_ for _ in ()).throw(
-                                AssertionError("残缺/未更新时不允许落盘覆盖缓存")))
+        self._patch_sources(
+            monkeypatch,
+            sn.NameFetchIncomplete(
+                "clist 覆盖率不足: 1000/5888 (<80%)，拒绝当全量表落盘"
+            ),
+        )
+        monkeypatch.setattr(
+            sn,
+            "load_cache",
+            lambda *a, **kw: (
+                {"600000": "浦发银行"},
+                {
+                    "available": True,
+                    "stale": False,
+                    "age_days": 2,
+                    "generated_at": "2026-08-01",
+                    "source": "tq_local",
+                },
+            ),
+        )
+        monkeypatch.setattr(
+            sn,
+            "save_cache",
+            lambda *a, **kw: (_ for _ in ()).throw(
+                AssertionError("残缺/未更新时不允许落盘覆盖缓存")
+            ),
+        )
         names, diag = sn.resolve_name_map()
         assert names == {"600000": "浦发银行"}
         assert diag["st_filter"] == "ok"
@@ -489,35 +566,70 @@ class TestGetStockListAShareFilter:
                 if market != 1:
                     return pd.DataFrame()
                 return pd.DataFrame({"code": codes})
+
         return _C()
 
     def test_filters_indices_etf_bonds(self, monkeypatch, capsys):
-        codes = ["600000", "601398", "688001",        # 沪 A
-                 "000001", "002415", "300750", "301001",  # 深 A
-                 "999999", "999998",                  # 指数
-                 "510300", "159915",                  # ETF
-                 "113050", "128036",                  # 可转债
-                 "880005"]                            # 板块指数
-        monkeypatch.setattr(local_tdx_data, "_get_client",
-                            lambda force_new=False: self._fake_client(codes))
+        codes = [
+            "600000",
+            "601398",
+            "688001",  # 沪 A
+            "000001",
+            "002415",
+            "300750",
+            "301001",  # 深 A
+            "999999",
+            "999998",  # 指数
+            "510300",
+            "159915",  # ETF
+            "113050",
+            "128036",  # 可转债
+            "880005",
+        ]  # 板块指数
+        monkeypatch.setattr(
+            local_tdx_data,
+            "_get_client",
+            lambda force_new=False: self._fake_client(codes),
+        )
         got = local_tdx_data.get_stock_list()
-        assert got == ["600000", "601398", "688001", "000001", "002415",
-                       "300750", "301001"], got
+        assert got == [
+            "600000",
+            "601398",
+            "688001",
+            "000001",
+            "002415",
+            "300750",
+            "301001",
+        ], got
         assert "滤掉 7 项" in capsys.readouterr().err
 
     def test_raw_list_available_on_demand(self, monkeypatch):
         """需要原始全表时仍可取——过滤是默认值，不是能力删除。"""
         codes = ["600000", "999999", "510300"]
-        monkeypatch.setattr(local_tdx_data, "_get_client",
-                            lambda force_new=False: self._fake_client(codes))
+        monkeypatch.setattr(
+            local_tdx_data,
+            "_get_client",
+            lambda force_new=False: self._fake_client(codes),
+        )
         assert local_tdx_data.get_stock_list(ashare_only=False) == codes
 
     def test_prefix_rule_matches_vipdoc_rule(self):
         """与 `_is_ashare_stock_file` 的沪深两段规则必须一致，否则两个 universe
         源口径不同，而它们会被拿来互相对照。"""
-        for p in ("600", "601", "603", "605", "688",
-                  "000", "001", "002", "003", "300", "301"):
-            code6 = p + "000"[:6 - len(p)] + "0" * (6 - len(p) - 3)
+        for p in (
+            "600",
+            "601",
+            "603",
+            "605",
+            "688",
+            "000",
+            "001",
+            "002",
+            "003",
+            "300",
+            "301",
+        ):
+            code6 = p + "000"[: 6 - len(p)] + "0" * (6 - len(p) - 3)
             code6 = (p + "000000")[:6]
             mkt = "sh" if p.startswith(("60", "68")) else "sz"
             assert local_tdx_data._is_ashare_prefix(code6) is True, code6
@@ -545,16 +657,27 @@ class TestNameMapOverwriteGuard:
         p = tmp_path / "stock_name_map.json"
         names = {str(600000 + i): f"票{i}" for i in range(n)}
         gen = (cn_today() - timedelta(days=days_ago)).isoformat()
-        p.write_text(json.dumps({"generated_at": gen, "source": "eastmoney",
-                                 "count": n, "names": names}, ensure_ascii=False),
-                     encoding="utf-8")
+        p.write_text(
+            json.dumps(
+                {
+                    "generated_at": gen,
+                    "source": "eastmoney",
+                    "count": n,
+                    "names": names,
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
         return p
 
     def _run(self, tmp_path, monkeypatch, cache_n, new_n, days_ago=0):
         p = self._write_cache(tmp_path, cache_n, days_ago)
         new = {str(600000 + i): f"新{i}" for i in range(new_n)}
         monkeypatch.setattr(sn, "CACHE", p)
-        monkeypatch.setattr(sn, "fetch_name_map", lambda session=None: (new, "tq_local"))
+        monkeypatch.setattr(
+            sn, "fetch_name_map", lambda session=None: (new, "tq_local")
+        )
         names, diag = sn.resolve_name_map()
         return names, diag, json.loads(p.read_text(encoding="utf-8"))
 
@@ -583,12 +706,15 @@ class TestNameMapOverwriteGuard:
     def test_first_build_accepted(self, tmp_path, monkeypatch):
         """首次构建（无缓存）一律放行 —— 否则永远建不起来。"""
         monkeypatch.setattr(sn, "CACHE", tmp_path / "stock_name_map.json")
-        monkeypatch.setattr(sn, "fetch_name_map",
-                            lambda session=None: ({"600000": "浦发"}, "tq_local"))
+        monkeypatch.setattr(
+            sn, "fetch_name_map", lambda session=None: ({"600000": "浦发"}, "tq_local")
+        )
         names, diag = sn.resolve_name_map()
         assert len(names) == 1 and diag["st_filter"] == "ok"
 
-    def test_stale_but_complete_preferred_over_fresh_partial(self, tmp_path, monkeypatch):
+    def test_stale_but_complete_preferred_over_fresh_partial(
+        self, tmp_path, monkeypatch
+    ):
         """⚠️ 既有缓存**陈旧**时仍拒绝残缺表。
 
         一份陈旧但完整的表比一份新鲜但残缺的表更适合做 ST 排除 ——
@@ -598,7 +724,6 @@ class TestNameMapOverwriteGuard:
         names, diag, after = self._run(tmp_path, monkeypatch, 5000, 3, days_ago=99)
         assert after["count"] == 5000 and len(names) == 5000
         assert diag["st_filter"] == "stale", "陈旧要如实报出"
-
 
     def test_main_refuses_tiny_table(self, tmp_path, monkeypatch, capsys):
         """🔴 直接打 main()：生产每日刷新的实际路径，门槛必须同样挂在它的落盘前。
@@ -610,7 +735,9 @@ class TestNameMapOverwriteGuard:
         p = self._write_cache(tmp_path, 5000)
         tiny = {str(600000 + i): f"新{i}" for i in range(3)}
         monkeypatch.setattr(sn, "CACHE", p)
-        monkeypatch.setattr(sn, "fetch_name_map", lambda session=None: (tiny, "tq_local"))
+        monkeypatch.setattr(
+            sn, "fetch_name_map", lambda session=None: (tiny, "tq_local")
+        )
         rc = sn.main(["--out", str(p)])
         assert rc != 0, "残缺表必须拒绝落盘且非零退出"
         after = json.loads(p.read_text(encoding="utf-8"))
@@ -623,7 +750,9 @@ class TestNameMapOverwriteGuard:
         p = self._write_cache(tmp_path, 5000)
         full = {str(600000 + i): f"新{i}" for i in range(5000)}
         monkeypatch.setattr(sn, "CACHE", p)
-        monkeypatch.setattr(sn, "fetch_name_map", lambda session=None: (full, "tdx_protocol"))
+        monkeypatch.setattr(
+            sn, "fetch_name_map", lambda session=None: (full, "tdx_protocol")
+        )
         rc = sn.main(["--out", str(p)])
         assert rc == 0
         assert json.loads(p.read_text(encoding="utf-8"))["count"] == 5000

@@ -6,6 +6,7 @@
 (ValueError: unsupported format character)。help 文本里的百分号必须写 `%%`。
 这类错误只在有人执行 --help 时暴露,单测不覆盖就会一直躺在仓库里。
 """
+
 from __future__ import annotations
 
 import ast
@@ -37,14 +38,24 @@ def _discover_cli() -> list[tuple[pathlib.Path, str, bool]]:
             tree = ast.parse(f.read_text(encoding="utf-8-sig"))
         except SyntaxError:
             continue
-        if not any(isinstance(n, ast.Call) and "ArgumentParser" in ast.unparse(n.func)
-                   for n in ast.walk(tree)):
+        if not any(
+            isinstance(n, ast.Call) and "ArgumentParser" in ast.unparse(n.func)
+            for n in ast.walk(tree)
+        ):
             continue
-        mn = next((n for n in tree.body
-                   if isinstance(n, ast.FunctionDef) and n.name == "main"), None)
+        mn = next(
+            (
+                n
+                for n in tree.body
+                if isinstance(n, ast.FunctionDef) and n.name == "main"
+            ),
+            None,
+        )
         if mn is None:
             continue
-        modname = "custos." + f.relative_to(TOOLS / "custos").with_suffix("").as_posix().replace("/", ".")
+        modname = "custos." + f.relative_to(TOOLS / "custos").with_suffix(
+            ""
+        ).as_posix().replace("/", ".")
         out.append((f, modname, bool(mn.args.args)))
     return out
 
@@ -92,9 +103,13 @@ def _unescaped_percents_in_help(src: str) -> list[str]:
         return []
     bad = []
     for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call)
-                and (getattr(node.func, "attr", None) == "add_argument"
-                     or getattr(node.func, "id", None) == "add_argument")):
+        if not (
+            isinstance(node, ast.Call)
+            and (
+                getattr(node.func, "attr", None) == "add_argument"
+                or getattr(node.func, "id", None) == "add_argument"
+            )
+        ):
             continue
         kw = next((k for k in node.keywords if k.arg == "help"), None)
         if kw is None:
@@ -106,17 +121,21 @@ def _unescaped_percents_in_help(src: str) -> list[str]:
         if isinstance(v, ast.Constant) and isinstance(v.value, str):
             text = v.value
         elif isinstance(v, ast.JoinedStr):
-            text = "".join(x.value for x in v.values
-                           if isinstance(x, ast.Constant) and isinstance(x.value, str))
+            text = "".join(
+                x.value
+                for x in v.values
+                if isinstance(x, ast.Constant) and isinstance(x.value, str)
+            )
         else:
-            continue                      # help=变量 / 调用，静态判不了
+            continue  # help=变量 / 调用，静态判不了
         if "%" in text.replace("%%", ""):
             bad.append(text[:70])
     return bad
 
 
-@pytest.mark.parametrize("path,modname", ALL_CLI_FILES,
-                         ids=[m for _, m in ALL_CLI_FILES])
+@pytest.mark.parametrize(
+    "path,modname", ALL_CLI_FILES, ids=[m for _, m in ALL_CLI_FILES]
+)
 def test_no_unescaped_percent_in_help_strings(path, modname):
     """静态兜底：help 文本里出现单个 % 就是隐患（即便当前恰好没触发）。
 
@@ -140,11 +159,12 @@ def test_discovery_found_a_realistic_number_of_clis():
 
 def test_scanner_catches_percent_in_continuation_segment():
     """实证：未转义的 % 藏在隐式拼接的**后续段**里也必须被抓到（原 bug 正是如此）。"""
-    src = ('ap.add_argument("--x", action="store_true",\n'
-           '                help="第一段没问题"\n'
-           '                     "实测 100% 是正常成交的")\n')
-    assert _unescaped_percents_in_help(src), \
-        "后续字符串段里的未转义 % 漏检了"
+    src = (
+        'ap.add_argument("--x", action="store_true",\n'
+        '                help="第一段没问题"\n'
+        '                     "实测 100% 是正常成交的")\n'
+    )
+    assert _unescaped_percents_in_help(src), "后续字符串段里的未转义 % 漏检了"
     # 正确转义(%%)则放行
     assert _unescaped_percents_in_help(src.replace("100% 是", "100%% 是")) == []
 
@@ -156,9 +176,11 @@ def test_scanner_does_not_flag_percent_consumed_by_formatting():
     `fetch_sector_index_history` 的 `--incremental`，实跑 `--help` 退出码 0、
     渲染成「末日期前 30 天」。**先验证再动手**，否则会去「修」一个没坏的东西。
     """
-    src = ('ap.add_argument("--incremental", action="store_true",\n'
-           '                help="缓存末日期前 %d 天起的增量并合并"\n'
-           '                     "(不加则全量重拉)" % OVERLAP_DAYS)\n')
+    src = (
+        'ap.add_argument("--incremental", action="store_true",\n'
+        '                help="缓存末日期前 %d 天起的增量并合并"\n'
+        '                     "(不加则全量重拉)" % OVERLAP_DAYS)\n'
+    )
     assert _unescaped_percents_in_help(src) == [], "把已被 % 格式化消费的 %d 误报成隐患"
 
 

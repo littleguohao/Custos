@@ -15,6 +15,7 @@
 报告里「market_timing：**…**」一直在打印**最后一只票的 b1 状态字典**。
 每份日报都错，而没有测试会发现 —— 这正是补覆盖率的价值。
 """
+
 from __future__ import annotations
 
 import json
@@ -28,9 +29,11 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 # ─────────────────────────── portfolio_review_report ───────────────────────────
 
+
 @pytest.fixture()
 def prr_env(tmp_path, monkeypatch):
     from custos.pipeline.holdings import portfolio_review_report as prr
+
     (tmp_path / "holdings").mkdir()
     plans = tmp_path / "plans"
     plans.mkdir()
@@ -39,11 +42,15 @@ def prr_env(tmp_path, monkeypatch):
     return prr, tmp_path, plans
 
 
-def _write_prr_inputs(tmp_path, plans, day, tech, b1, mt="状态：**进攻**\n建议总仓位：**40%-60%**\n"):
+def _write_prr_inputs(
+    tmp_path, plans, day, tech, b1, mt="状态：**进攻**\n建议总仓位：**40%-60%**\n"
+):
     (tmp_path / "holdings" / f"{day}_holding_technical_summary.json").write_text(
-        json.dumps(tech, ensure_ascii=False), encoding="utf-8")
+        json.dumps(tech, ensure_ascii=False), encoding="utf-8"
+    )
     (tmp_path / "holdings" / f"{day}_b1_holding_state.json").write_text(
-        json.dumps(b1, ensure_ascii=False), encoding="utf-8")
+        json.dumps(b1, ensure_ascii=False), encoding="utf-8"
+    )
     if mt is not None:
         (plans / f"{day}_market_timing_score.md").write_text(mt, encoding="utf-8")
 
@@ -58,11 +65,28 @@ class TestPortfolioReviewStateShadowing:
     def test_market_timing_line_is_the_regime_not_a_dict(self, prr_env, monkeypatch):
         prr, tmp, plans = prr_env
         day = "2026-08-07"
-        _write_prr_inputs(tmp, plans, day,
-                          [{"code": "600000", "name": "浦发", "trend_state": "横盘震荡",
-                            "box20_position": "上半区"}],
-                          [{"code": "600000", "final_priority": "P3", "final_action": "持有",
-                            "final_reason": "结构完好", "signals": []}])
+        _write_prr_inputs(
+            tmp,
+            plans,
+            day,
+            [
+                {
+                    "code": "600000",
+                    "name": "浦发",
+                    "trend_state": "横盘震荡",
+                    "box20_position": "上半区",
+                }
+            ],
+            [
+                {
+                    "code": "600000",
+                    "final_priority": "P3",
+                    "final_action": "持有",
+                    "final_reason": "结构完好",
+                    "signals": [],
+                }
+            ],
+        )
         monkeypatch.setattr(sys, "argv", ["x", "--date", day])
         prr.main()
         md = (plans / f"{day}_portfolio_review.md").read_text(encoding="utf-8")
@@ -85,6 +109,7 @@ class TestPortfolioReviewClassify:
 
     def _c(self, **kw):
         from custos.pipeline.holdings import portfolio_review_report as prr
+
         return prr.classify(kw)
 
     def test_downtrend_and_breakdown_is_stop_loss(self):
@@ -102,7 +127,9 @@ class TestPortfolioReviewClassify:
 
     def test_low_j_is_never_a_reason_to_add(self):
         """⚠️ J 低只作观察，**不构成加仓理由** —— 这条是 B1 的核心纪律。"""
-        _, act, why = self._c(daily_j=8.0, trend_state="横盘震荡", box20_position="上半区")
+        _, act, why = self._c(
+            daily_j=8.0, trend_state="横盘震荡", box20_position="上半区"
+        )
         assert act == "持有"
         assert any("不构成加仓理由" in r for r in why)
 
@@ -131,11 +158,18 @@ class TestPortfolioReviewClassify:
         prr.main()
         md = (plans / f"{day}_portfolio_review.md").read_text(encoding="utf-8")
         assert "## 3. 风控触发项" in md and "- 暂无。" in md
-        assert json.loads((tmp / "holdings" / f"{day}_holding_review.json")
-                          .read_text(encoding="utf-8")) == []
+        assert (
+            json.loads(
+                (tmp / "holdings" / f"{day}_holding_review.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            == []
+        )
 
 
 # ─────────────────────────── execution_review ───────────────────────────
+
 
 class TestExecutionReviewStatuses:
     """执行复盘的四种状态 —— 它决定「有没有违纪」，措辞必须严谨。
@@ -147,6 +181,7 @@ class TestExecutionReviewStatuses:
     @pytest.fixture(autouse=True)
     def env(self, tmp_path, monkeypatch):
         from custos.pipeline.close_review import execution_review as er
+
         (tmp_path / "decisions").mkdir()
         (tmp_path / "trades").mkdir()
         log = tmp_path / "logs"
@@ -158,13 +193,17 @@ class TestExecutionReviewStatuses:
     def _run(self, day, chief=None, tail=None, trades=None, monkeypatch=None):
         if chief is not None:
             (self.data / "decisions" / f"{day}_chief_decision.json").write_text(
-                json.dumps(chief, ensure_ascii=False), encoding="utf-8")
+                json.dumps(chief, ensure_ascii=False), encoding="utf-8"
+            )
         if tail is not None:
             (self.log / f"{day}_1445_review.json").write_text(
-                json.dumps(tail, ensure_ascii=False), encoding="utf-8")
+                json.dumps(tail, ensure_ascii=False), encoding="utf-8"
+            )
         (self.data / "trades" / "trades_stock.json").write_text(
-            json.dumps(trades or [], ensure_ascii=False), encoding="utf-8")
+            json.dumps(trades or [], ensure_ascii=False), encoding="utf-8"
+        )
         import sys as _s
+
         old = _s.argv
         _s.argv = ["x", "--date", day]
         try:
@@ -182,11 +221,21 @@ class TestExecutionReviewStatuses:
         assert self.er.load(tmp_path / "nope.json", {"d": 1}) == {"d": 1}
 
     def test_executed_when_trade_exists(self, monkeypatch):
-        r = self._run("2026-08-07",
-                      chief={"holding_actions": [{"code": "600000", "action": "减仓"}]},
-                      tail={"actions": [{"code": "600000", "action": "减仓一半", "priority": "P1"}]},
-                      trades=[{"成交日期": "2026-08-07", "代码": "600000.SH", "名称": "浦发",
-                               "交易类别": "卖出"}])
+        r = self._run(
+            "2026-08-07",
+            chief={"holding_actions": [{"code": "600000", "action": "减仓"}]},
+            tail={
+                "actions": [{"code": "600000", "action": "减仓一半", "priority": "P1"}]
+            },
+            trades=[
+                {
+                    "成交日期": "2026-08-07",
+                    "代码": "600000.SH",
+                    "名称": "浦发",
+                    "交易类别": "卖出",
+                }
+            ],
+        )
         row = next(x for x in r["rows"] if x["code"] == "600000")
         assert row["execution_status"] == "executed"
         assert row["discipline_status"] == "no_breach_detected"
@@ -195,8 +244,14 @@ class TestExecutionReviewStatuses:
         """⚠️ **最要紧的一条**：尾盘是「评估/观察」类建议且当日无成交，
         **不得自动判违纪** —— 真实未执行原因未记录时无从判断。
         """
-        r = self._run("2026-08-07", chief={}, tail={"actions": [
-            {"code": "600000", "action": "减仓评估", "priority": "P2"}]}, trades=[])
+        r = self._run(
+            "2026-08-07",
+            chief={},
+            tail={
+                "actions": [{"code": "600000", "action": "减仓评估", "priority": "P2"}]
+            },
+            trades=[],
+        )
         row = r["rows"][0]
         assert row["execution_status"] == "not_executed_reason_unavailable"
         assert row["discipline_status"] == "unavailable", "评估类无成交被判成了违纪"
@@ -204,17 +259,24 @@ class TestExecutionReviewStatuses:
 
     def test_explicit_tail_action_without_trade_requires_review(self):
         """尾盘有**明确动作**却无成交 → 需要人补原因，但仍不自动判违纪。"""
-        r = self._run("2026-08-07", chief={}, tail={"actions": [
-            {"code": "600000", "action": "清仓", "priority": "P1"}]}, trades=[])
+        r = self._run(
+            "2026-08-07",
+            chief={},
+            tail={"actions": [{"code": "600000", "action": "清仓", "priority": "P1"}]},
+            trades=[],
+        )
         row = r["rows"][0]
         assert row["execution_status"] == "not_executed_requires_review"
         assert row["discipline_status"] == "unavailable"
         assert "user_execution_reason" in r["missing"]
 
     def test_no_action_no_trade(self):
-        r = self._run("2026-08-07",
-                      chief={"holding_actions": [{"code": "600000", "action": "持有"}]},
-                      tail={}, trades=[])
+        r = self._run(
+            "2026-08-07",
+            chief={"holding_actions": [{"code": "600000", "action": "持有"}]},
+            tail={},
+            trades=[],
+        )
         assert r["rows"][0]["execution_status"] == "no_action_no_trade"
 
     def test_status_degraded_without_trades_or_confirmation(self):
@@ -227,16 +289,24 @@ class TestExecutionReviewStatuses:
         assert r["status"] == "degraded"
 
     def test_status_complete_when_no_trades_confirmed(self):
-        r = self._run("2026-08-07",
-                      chief={"position_freshness": {"confirmation": {"no_trades": True}}},
-                      tail={}, trades=[])
+        r = self._run(
+            "2026-08-07",
+            chief={"position_freshness": {"confirmation": {"no_trades": True}}},
+            tail={},
+            trades=[],
+        )
         assert r["status"] == "complete" and r["no_trades_confirmed"] is True
 
     def test_trades_of_other_days_excluded(self):
         """台账是全量的，必须只取当日 —— 否则历史成交会被当成今天执行了。"""
-        r = self._run("2026-08-07", chief={}, tail={"actions": [
-            {"code": "600000", "action": "清仓", "priority": "P1"}]},
-            trades=[{"成交日期": "2026-08-06", "代码": "600000.SH", "交易类别": "卖出"}])
+        r = self._run(
+            "2026-08-07",
+            chief={},
+            tail={"actions": [{"code": "600000", "action": "清仓", "priority": "P1"}]},
+            trades=[
+                {"成交日期": "2026-08-06", "代码": "600000.SH", "交易类别": "卖出"}
+            ],
+        )
         assert r["recorded_trade_count"] == 0
         assert r["rows"][0]["execution_status"] == "not_executed_requires_review"
 

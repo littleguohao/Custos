@@ -5,6 +5,7 @@
 悄悄偏掉（实测同一段真实上涨走势，未复权 −42.50% vs 前复权 +25.00%，差 67.5pp）。
 这正是本次审计反复遇到的最危险失效模式，只能靠断言钉住。
 """
+
 from __future__ import annotations
 
 import json
@@ -19,29 +20,45 @@ from custos.datasource.local_tdx import adjust_factors as af
 
 
 def _ev(date, *, fenhong=0.0, songzhuangu=0.0, peigu=0.0, peigujia=0.0, suogu=0.0):
-    return {"date": date, "fenhong": fenhong, "songzhuangu": songzhuangu,
-            "peigu": peigu, "peigujia": peigujia, "suogu": suogu}
+    return {
+        "date": date,
+        "fenhong": fenhong,
+        "songzhuangu": songzhuangu,
+        "peigu": peigu,
+        "peigujia": peigujia,
+        "suogu": suogu,
+    }
 
 
 def _mk(closes, dates=None):
     n = len(closes)
     d = dates or pd.bdate_range("2025-01-01", periods=n).astype(str).tolist()
     c = np.asarray(closes, float)
-    return pd.DataFrame({"date": d, "open": c, "high": c * 1.01,
-                         "low": c * 0.99, "close": c,
-                         "volume": np.full(n, 1e6)})
+    return pd.DataFrame(
+        {
+            "date": d,
+            "open": c,
+            "high": c * 1.01,
+            "low": c * 0.99,
+            "close": c,
+            "volume": np.full(n, 1e6),
+        }
+    )
 
 
 class TestEventRatio:
     """除权参考价公式：(前收 − 现金红利 + 配股价×配股比例) / (1 + 送股比例 + 配股比例)"""
 
-    @pytest.mark.parametrize("ev,prev,expect", [
-        (_ev("2025-01-05", fenhong=4.2), 10.0, (10 - 0.42) / 10),
-        (_ev("2025-01-05", songzhuangu=10), 20.0, 1 / 2),
-        (_ev("2025-01-05", songzhuangu=5), 15.0, 1 / 1.5),
-        (_ev("2025-01-05", peigu=3, peigujia=5.0), 10.0, (10 + 5 * 0.3) / 1.3 / 10),
-        (_ev("2025-01-05", fenhong=2, songzhuangu=5), 20.0, (20 - 0.2) / 1.5 / 20),
-    ])
+    @pytest.mark.parametrize(
+        "ev,prev,expect",
+        [
+            (_ev("2025-01-05", fenhong=4.2), 10.0, (10 - 0.42) / 10),
+            (_ev("2025-01-05", songzhuangu=10), 20.0, 1 / 2),
+            (_ev("2025-01-05", songzhuangu=5), 15.0, 1 / 1.5),
+            (_ev("2025-01-05", peigu=3, peigujia=5.0), 10.0, (10 + 5 * 0.3) / 1.3 / 10),
+            (_ev("2025-01-05", fenhong=2, songzhuangu=5), 20.0, (20 - 0.2) / 1.5 / 20),
+        ],
+    )
     def test_textbook_cases(self, ev, prev, expect):
         assert af.event_ratio(prev, ev) == pytest.approx(expect, rel=1e-12)
 
@@ -75,34 +92,44 @@ class TestFactorSeries:
         这条成立，「统一用前复权」才不会让买入价/止损价偏离盘面，
         也才不需要把展示价与指标价分成两套维护。
         """
-        for events in ([], [_ev("2025-01-03", songzhuangu=10)],
-                       [_ev("2025-01-03", fenhong=5), _ev("2025-01-07", songzhuangu=5)]):
+        for events in (
+            [],
+            [_ev("2025-01-03", songzhuangu=10)],
+            [_ev("2025-01-03", fenhong=5), _ev("2025-01-07", songzhuangu=5)],
+        ):
             f = af.compute_qfq_factors(
                 pd.bdate_range("2025-01-01", periods=10).astype(str).tolist(),
-                np.full(10, 20.0), events)
+                np.full(10, 20.0),
+                events,
+            )
             assert f[-1] == 1.0
 
     def test_factor_applies_only_before_event(self):
         dates = pd.bdate_range("2025-01-01", periods=6).astype(str).tolist()
-        f = af.compute_qfq_factors(dates, np.full(6, 20.0),
-                                   [_ev(dates[3], songzhuangu=10)])
+        f = af.compute_qfq_factors(
+            dates, np.full(6, 20.0), [_ev(dates[3], songzhuangu=10)]
+        )
         assert list(f[:3]) == [0.5, 0.5, 0.5]
         assert list(f[3:]) == [1.0, 1.0, 1.0]
 
     def test_multiple_events_compound(self):
         dates = pd.bdate_range("2025-01-01", periods=8).astype(str).tolist()
-        f = af.compute_qfq_factors(dates, np.full(8, 20.0),
-                                   [_ev(dates[2], songzhuangu=10),
-                                    _ev(dates[5], songzhuangu=10)])
-        assert f[0] == pytest.approx(0.25)      # 两次腰斩累乘
+        f = af.compute_qfq_factors(
+            dates,
+            np.full(8, 20.0),
+            [_ev(dates[2], songzhuangu=10), _ev(dates[5], songzhuangu=10)],
+        )
+        assert f[0] == pytest.approx(0.25)  # 两次腰斩累乘
         assert f[3] == pytest.approx(0.5)
         assert f[-1] == 1.0
 
     def test_events_outside_sample_ignored(self):
         dates = pd.bdate_range("2025-06-01", periods=5).astype(str).tolist()
-        f = af.compute_qfq_factors(dates, np.full(5, 20.0),
-                                   [_ev("2020-01-01", songzhuangu=10),
-                                    _ev("2030-01-01", songzhuangu=10)])
+        f = af.compute_qfq_factors(
+            dates,
+            np.full(5, 20.0),
+            [_ev("2020-01-01", songzhuangu=10), _ev("2030-01-01", songzhuangu=10)],
+        )
         assert list(f) == [1.0] * 5
 
     def test_empty_inputs(self):
@@ -113,7 +140,7 @@ class TestApplyQfq:
     def test_removes_fake_gap(self):
         """核心目的：除权日的假跳空必须消失。"""
         d = pd.bdate_range("2025-01-01", periods=6).astype(str).tolist()
-        raw = _mk([20, 20, 20, 10, 10, 10], d)          # 未复权：10送10 后腰斩
+        raw = _mk([20, 20, 20, 10, 10, 10], d)  # 未复权：10送10 后腰斩
         adj = af.apply_qfq(raw, [_ev(d[3], songzhuangu=10)])
         gap_raw = raw["close"].iloc[3] / raw["close"].iloc[2] - 1
         gap_adj = adj["close"].iloc[3] / adj["close"].iloc[2] - 1
@@ -138,7 +165,7 @@ class TestApplyQfq:
         d = pd.bdate_range("2025-01-01", periods=4).astype(str).tolist()
         raw = _mk([20, 20, 10, 10], d)
         adj = af.apply_qfq(raw, [_ev(d[2], songzhuangu=10)])
-        assert adj["volume"].iloc[0] == pytest.approx(2e6)      # 1e6 / 0.5
+        assert adj["volume"].iloc[0] == pytest.approx(2e6)  # 1e6 / 0.5
         assert adj["volume"].iloc[-1] == pytest.approx(1e6)
 
     def test_attrs_marked(self):
@@ -149,7 +176,7 @@ class TestApplyQfq:
         """样本内事件 ratio 求不出(前收盘<=0)被跳过 ⇒ 必须标 qfq_partial,不许盖章 qfq
         ——「部分除权事件没参与复权」是静默降级,attrs 必须可观测。"""
         d = pd.bdate_range("2025-01-01", periods=4).astype(str).tolist()
-        raw = _mk([0, 0, 10, 10], d)                      # 事件日前收盘为 0 → ratio None
+        raw = _mk([0, 0, 10, 10], d)  # 事件日前收盘为 0 → ratio None
         adj = af.apply_qfq(raw, [_ev(d[2], songzhuangu=10)])
         assert adj.attrs.get("adjust") == "qfq_partial"
         assert adj.attrs.get("adjust_events_dropped") == 1
@@ -170,25 +197,69 @@ class TestApplyQfq:
 
 class TestNormalizeXdxr:
     def test_keeps_only_price_affecting(self):
-        df = pd.DataFrame([
-            {"year": 2025, "month": 7, "day": 16, "category": 1, "fenhong": 4.2,
-             "songzhuangu": 0, "peigu": 0, "peigujia": 0, "suogu": None},
-            {"year": 2025, "month": 10, "day": 16, "category": 5, "fenhong": None,
-             "songzhuangu": None, "peigu": None, "peigujia": None, "suogu": None},
-        ])
+        df = pd.DataFrame(
+            [
+                {
+                    "year": 2025,
+                    "month": 7,
+                    "day": 16,
+                    "category": 1,
+                    "fenhong": 4.2,
+                    "songzhuangu": 0,
+                    "peigu": 0,
+                    "peigujia": 0,
+                    "suogu": None,
+                },
+                {
+                    "year": 2025,
+                    "month": 10,
+                    "day": 16,
+                    "category": 5,
+                    "fenhong": None,
+                    "songzhuangu": None,
+                    "peigu": None,
+                    "peigujia": None,
+                    "suogu": None,
+                },
+            ]
+        )
         ev = af.normalize_xdxr(df)
         assert len(ev) == 1 and ev[0]["date"] == "2025-07-16"
 
     def test_drops_all_zero_rows(self):
-        df = pd.DataFrame([{"year": 2025, "month": 1, "day": 1, "category": 1,
-                            "fenhong": 0, "songzhuangu": 0, "peigu": 0,
-                            "peigujia": 0, "suogu": 0}])
+        df = pd.DataFrame(
+            [
+                {
+                    "year": 2025,
+                    "month": 1,
+                    "day": 1,
+                    "category": 1,
+                    "fenhong": 0,
+                    "songzhuangu": 0,
+                    "peigu": 0,
+                    "peigujia": 0,
+                    "suogu": 0,
+                }
+            ]
+        )
         assert af.normalize_xdxr(df) == []
 
     def test_nan_becomes_zero(self):
-        df = pd.DataFrame([{"year": 2025, "month": 1, "day": 1, "category": 1,
-                            "fenhong": 3.0, "songzhuangu": float("nan"),
-                            "peigu": None, "peigujia": None, "suogu": None}])
+        df = pd.DataFrame(
+            [
+                {
+                    "year": 2025,
+                    "month": 1,
+                    "day": 1,
+                    "category": 1,
+                    "fenhong": 3.0,
+                    "songzhuangu": float("nan"),
+                    "peigu": None,
+                    "peigujia": None,
+                    "suogu": None,
+                }
+            ]
+        )
         ev = af.normalize_xdxr(df)
         assert ev[0]["songzhuangu"] == 0.0 and ev[0]["fenhong"] == 3.0
 
@@ -197,11 +268,32 @@ class TestNormalizeXdxr:
         assert af.normalize_xdxr(pd.DataFrame()) == []
 
     def test_sorted_by_date(self):
-        df = pd.DataFrame([
-            {"year": 2025, "month": 7, "day": 1, "category": 1, "fenhong": 1,
-             "songzhuangu": 0, "peigu": 0, "peigujia": 0, "suogu": 0},
-            {"year": 2023, "month": 5, "day": 1, "category": 1, "fenhong": 2,
-             "songzhuangu": 0, "peigu": 0, "peigujia": 0, "suogu": 0}])
+        df = pd.DataFrame(
+            [
+                {
+                    "year": 2025,
+                    "month": 7,
+                    "day": 1,
+                    "category": 1,
+                    "fenhong": 1,
+                    "songzhuangu": 0,
+                    "peigu": 0,
+                    "peigujia": 0,
+                    "suogu": 0,
+                },
+                {
+                    "year": 2023,
+                    "month": 5,
+                    "day": 1,
+                    "category": 1,
+                    "fenhong": 2,
+                    "songzhuangu": 0,
+                    "peigu": 0,
+                    "peigujia": 0,
+                    "suogu": 0,
+                },
+            ]
+        )
         ev = af.normalize_xdxr(df)
         assert [e["date"] for e in ev] == ["2023-05-01", "2025-07-01"]
 
@@ -209,10 +301,22 @@ class TestNormalizeXdxr:
         """超 MAX_EVENTS_SANE 截断必须保留**最新**事件（新事件才影响近期复权，
         此前保留最旧 500 条方向反了）。"""
         days = pd.date_range("2000-01-01", periods=600, freq="D")
-        df = pd.DataFrame([
-            {"year": d.year, "month": d.month, "day": d.day, "category": 1,
-             "fenhong": 1, "songzhuangu": 0, "peigu": 0, "peigujia": 0, "suogu": 0}
-            for d in days])
+        df = pd.DataFrame(
+            [
+                {
+                    "year": d.year,
+                    "month": d.month,
+                    "day": d.day,
+                    "category": 1,
+                    "fenhong": 1,
+                    "songzhuangu": 0,
+                    "peigu": 0,
+                    "peigujia": 0,
+                    "suogu": 0,
+                }
+                for d in days
+            ]
+        )
         ev = af.normalize_xdxr(df)
         assert len(ev) == af.MAX_EVENTS_SANE
         assert ev[-1]["date"] == str(days[-1])[:10]
@@ -255,14 +359,26 @@ class TestCache:
 class TestIndexSkip:
     """指数不除权，对它取权息是白费网络请求（880/881 细分行业有 467 个）。"""
 
-    @pytest.mark.parametrize("code", ["999999", "880001", "880005.SH", "881101",
-                                      "399001", "399006.SZ", "899050",
-                                      "000300.SH", "000688.SH"])
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "999999",
+            "880001",
+            "880005.SH",
+            "881101",
+            "399001",
+            "399006.SZ",
+            "899050",
+            "000300.SH",
+            "000688.SH",
+        ],
+    )
     def test_indices_detected(self, code):
         assert is_index(code) is True
 
-    @pytest.mark.parametrize("code", ["600000", "000002", "300750", "920819",
-                                      "688111", "603001", "001979"])
+    @pytest.mark.parametrize(
+        "code", ["600000", "000002", "300750", "920819", "688111", "603001", "001979"]
+    )
     def test_stocks_not_flagged(self, code):
         assert is_index(code) is False
 
@@ -282,12 +398,15 @@ class TestEntryPointDefault:
         import inspect
 
         from custos.datasource.local_tdx.local_tdx_data import get_ohlcv_table
+
         assert inspect.signature(get_ohlcv_table).parameters["adjust"].default == "qfq"
 
     def test_qfq_failure_degrades_with_trace(self, monkeypatch):
         """权息取不到时不得中断选股链，但**必须留痕**——否则又是「降级了没人知道」。"""
+
         def boom(*a, **k):
             raise af.AdjustError("网络不可用")
+
         monkeypatch.setattr(af, "get_xdxr", boom)
         raw = _mk([10] * 5)
         out = af.qfq_table("600000", raw, strict=False)
@@ -297,6 +416,7 @@ class TestEntryPointDefault:
     def test_strict_mode_raises(self, monkeypatch):
         def boom(*a, **k):
             raise af.AdjustError("网络不可用")
+
         monkeypatch.setattr(af, "get_xdxr", boom)
         with pytest.raises(af.AdjustError):
             af.qfq_table("600000", _mk([10] * 5), strict=True)
@@ -309,19 +429,49 @@ class TestSharesEvents:
     """
 
     def _raw(self):
-        return pd.DataFrame([
-            {"year": 2020, "month": 5, "day": 20, "category": 5,
-             "houzongguben": 1130200.0, "panhouliutong": 970000.0,
-             "fenhong": None, "songzhuangu": None, "peigu": None,
-             "peigujia": None, "suogu": None},
-            {"year": 2023, "month": 6, "day": 30, "category": 5,
-             "houzongguben": 1163100.0, "panhouliutong": 971000.0,
-             "fenhong": None, "songzhuangu": None, "peigu": None,
-             "peigujia": None, "suogu": None},
-            {"year": 2025, "month": 7, "day": 16, "category": 1,
-             "fenhong": 4.2, "songzhuangu": 0, "peigu": 0, "peigujia": 0,
-             "suogu": None, "houzongguben": None, "panhouliutong": None},
-        ])
+        return pd.DataFrame(
+            [
+                {
+                    "year": 2020,
+                    "month": 5,
+                    "day": 20,
+                    "category": 5,
+                    "houzongguben": 1130200.0,
+                    "panhouliutong": 970000.0,
+                    "fenhong": None,
+                    "songzhuangu": None,
+                    "peigu": None,
+                    "peigujia": None,
+                    "suogu": None,
+                },
+                {
+                    "year": 2023,
+                    "month": 6,
+                    "day": 30,
+                    "category": 5,
+                    "houzongguben": 1163100.0,
+                    "panhouliutong": 971000.0,
+                    "fenhong": None,
+                    "songzhuangu": None,
+                    "peigu": None,
+                    "peigujia": None,
+                    "suogu": None,
+                },
+                {
+                    "year": 2025,
+                    "month": 7,
+                    "day": 16,
+                    "category": 1,
+                    "fenhong": 4.2,
+                    "songzhuangu": 0,
+                    "peigu": 0,
+                    "peigujia": 0,
+                    "suogu": None,
+                    "houzongguben": None,
+                    "panhouliutong": None,
+                },
+            ]
+        )
 
     def test_extracts_shares_in_shares_not_wan(self):
         """xdxr 单位是**万股**，必须换算成股——差 10000 倍的错误不会报错只会算错市值。"""
@@ -348,35 +498,48 @@ class TestSharesEvents:
     def test_point_in_time_lookup(self, tmp_path, monkeypatch):
         """**PIT**：算历史市值只能用当时的股本，用今天的是未来函数。"""
         monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
-        af.save_xdxr_cache("000002", [], fetched_at=af.cn_now().isoformat(),
-                           shares=af.normalize_shares(self._raw()))
+        af.save_xdxr_cache(
+            "000002",
+            [],
+            fetched_at=af.cn_now().isoformat(),
+            shares=af.normalize_shares(self._raw()),
+        )
         assert af.total_shares_at("000002", "2019-01-01") is None, "事件之前应为 None"
         assert af.total_shares_at("000002", "2021-01-01") == pytest.approx(1130200e4)
         assert af.total_shares_at("000002", "2026-08-04") == pytest.approx(1163100e4)
 
     def test_float_shares_field(self, tmp_path, monkeypatch):
         monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
-        af.save_xdxr_cache("000002", [], fetched_at=af.cn_now().isoformat(),
-                           shares=af.normalize_shares(self._raw()))
+        af.save_xdxr_cache(
+            "000002",
+            [],
+            fetched_at=af.cn_now().isoformat(),
+            shares=af.normalize_shares(self._raw()),
+        )
         v = af.total_shares_at("000002", "2026-08-04", field="float_shares")
         assert v == pytest.approx(971000e4)
 
     def test_cache_holds_both_kinds(self, tmp_path, monkeypatch):
         """一份缓存装两类——两者来自同一次 xdxr 调用，分开存会多跑一次网络。"""
         monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
-        af.save_xdxr_cache("600000", [_ev("2025-07-16", fenhong=4.2)],
-                           fetched_at="x", shares=[{"date": "2025-01-01",
-                                                    "total_shares": 1e10,
-                                                    "float_shares": 1e10}])
+        af.save_xdxr_cache(
+            "600000",
+            [_ev("2025-07-16", fenhong=4.2)],
+            fetched_at="x",
+            shares=[{"date": "2025-01-01", "total_shares": 1e10, "float_shares": 1e10}],
+        )
         d = json.loads((tmp_path / "600000.json").read_text(encoding="utf-8"))
         assert len(d["events"]) == 1 and len(d["shares"]) == 1
 
     def test_saving_events_preserves_existing_shares(self, tmp_path, monkeypatch):
         """只更新权息时不得把已有股本数据覆盖没了。"""
         monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
-        af.save_xdxr_cache("600000", [], fetched_at="x",
-                           shares=[{"date": "2025-01-01", "total_shares": 1e10,
-                                    "float_shares": 1e10}])
+        af.save_xdxr_cache(
+            "600000",
+            [],
+            fetched_at="x",
+            shares=[{"date": "2025-01-01", "total_shares": 1e10, "float_shares": 1e10}],
+        )
         af.save_xdxr_cache("600000", [_ev("2026-07-16", fenhong=4.2)], fetched_at="y")
         d = json.loads((tmp_path / "600000.json").read_text(encoding="utf-8"))
         assert len(d["shares"]) == 1, "股本数据被覆盖丢失"
@@ -392,24 +555,38 @@ class TestMarketCapFromTdx:
             "custos.datasource.local_tdx.adjust_factors.get_shares_events",
             lambda code, refresh=False: [
                 {"date": "2020-05-20", "total_shares": 1.13e10, "float_shares": 9.7e9},
-                {"date": "2023-06-30", "total_shares": 1.16e10, "float_shares": 9.71e9}])
+                {"date": "2023-06-30", "total_shares": 1.16e10, "float_shares": 9.71e9},
+            ],
+        )
         evs = fmc.build_from_tdx(["000002"], progress_every=0)
         assert len(evs) == 2
         for e in evs:
-            assert set(e) >= {"code", "name", "observed_on", "prev_sample",
-                              "total_shares", "prev_shares", "free_shares",
-                              "close", "market_cap", "kind"}
+            assert set(e) >= {
+                "code",
+                "name",
+                "observed_on",
+                "prev_sample",
+                "total_shares",
+                "prev_shares",
+                "free_shares",
+                "close",
+                "market_cap",
+                "kind",
+            }
         assert evs[0]["kind"] == "first_seen" and evs[1]["kind"] == "change"
         assert evs[1]["prev_shares"] == pytest.approx(1.13e10)
         assert evs[0]["source"] == "tdx_xdxr"
 
     def test_unchanged_shares_not_written(self, monkeypatch):
         from custos.datasource.local_tdx import fetch_market_cap as fmc
+
         monkeypatch.setattr(
             "custos.datasource.local_tdx.adjust_factors.get_shares_events",
             lambda code, refresh=False: [
                 {"date": "2020-05-20", "total_shares": 1.13e10, "float_shares": None},
-                {"date": "2021-05-20", "total_shares": 1.13e10, "float_shares": None}])
+                {"date": "2021-05-20", "total_shares": 1.13e10, "float_shares": None},
+            ],
+        )
         evs = fmc.build_from_tdx(["000002"], progress_every=0)
         assert len(evs) == 1, "股本没变不该写事件"
 
@@ -418,7 +595,10 @@ class TestMarketCapFromTdx:
 
         def boom(code, refresh=False):
             raise af.AdjustError("down")
-        monkeypatch.setattr("custos.datasource.local_tdx.adjust_factors.get_shares_events", boom)
+
+        monkeypatch.setattr(
+            "custos.datasource.local_tdx.adjust_factors.get_shares_events", boom
+        )
         assert fmc.build_from_tdx(["000002"], progress_every=0) == []
 
 
@@ -431,6 +611,7 @@ class TestClientReconnect:
 
     def test_retry_rebuilds_connection(self, monkeypatch):
         from custos.datasource.local_tdx import local_tdx_data as ltd
+
         built = []
 
         class Good:
@@ -456,6 +637,7 @@ class TestClientReconnect:
         monkeypatch.setattr(ltd, "_client", None)
         monkeypatch.setattr(ltd, "_client_created_at", None)
         import mootdx.quotes as mq
+
         monkeypatch.setattr(mq.Quotes, "factory", staticmethod(fake_factory))
         got = ltd._with_client_retry(lambda c: c.stocks(market=1), tries=2)
         assert got == "ok"
@@ -474,6 +656,7 @@ class TestClientReconnect:
         monkeypatch.setattr(ltd, "_client", None)
         monkeypatch.setattr(ltd, "_client_created_at", None)
         import mootdx.quotes as mq
+
         monkeypatch.setattr(mq.Quotes, "factory", staticmethod(lambda **kw: Dead()))
         with pytest.raises(ltd.LocalTdxError):
             ltd._with_client_retry(lambda c: c.stocks(market=1), tries=2)
@@ -481,6 +664,7 @@ class TestClientReconnect:
     def test_connection_expires_by_age(self, monkeypatch):
         """长跑进程（18:00 跑几百只票）中途连接会被服务器踢，靠时效主动重建。"""
         from custos.datasource.local_tdx import local_tdx_data as ltd
+
         built = []
 
         class C:
@@ -488,10 +672,12 @@ class TestClientReconnect:
                 pass
 
         monkeypatch.setattr(ltd, "_client", C())
-        monkeypatch.setattr(ltd, "_client_created_at", 0.0)     # 很久以前
+        monkeypatch.setattr(ltd, "_client_created_at", 0.0)  # 很久以前
         import mootdx.quotes as mq
-        monkeypatch.setattr(mq.Quotes, "factory",
-                            staticmethod(lambda **kw: built.append(1) or C()))
+
+        monkeypatch.setattr(
+            mq.Quotes, "factory", staticmethod(lambda **kw: built.append(1) or C())
+        )
         ltd._get_client()
         assert built, "超过 CLIENT_MAX_AGE_SEC 应重建"
 
@@ -508,23 +694,31 @@ class TestCliFullMarketPath:
 
     def test_referenced_lister_exists(self):
         from custos.datasource.local_tdx import local_tdx_data as ltd
+
         assert hasattr(ltd, "list_local_vipdoc_codes")
 
-    @pytest.mark.parametrize("mod", [
-        "src/custos/datasource/local_tdx/adjust_factors.py",
-        "src/custos/datasource/local_tdx/fetch_market_cap.py",
-        "src/custos/research/adjust_diagnostic.py",
-    ])
+    @pytest.mark.parametrize(
+        "mod",
+        [
+            "src/custos/datasource/local_tdx/adjust_factors.py",
+            "src/custos/datasource/local_tdx/fetch_market_cap.py",
+            "src/custos/research/adjust_diagnostic.py",
+        ],
+    )
     def test_no_stale_function_name(self, mod):
         import pathlib
+
         src = pathlib.Path(mod).read_text(encoding="utf-8")
         assert "list_local_codes()" not in src, f"{mod} 用了不存在的 list_local_codes"
 
-    @pytest.mark.parametrize("mod", [
-        "src/custos/datasource/local_tdx/adjust_factors.py",
-        "src/custos/datasource/local_tdx/fetch_market_cap.py",
-        "src/custos/research/adjust_diagnostic.py",
-    ])
+    @pytest.mark.parametrize(
+        "mod",
+        [
+            "src/custos/datasource/local_tdx/adjust_factors.py",
+            "src/custos/datasource/local_tdx/fetch_market_cap.py",
+            "src/custos/research/adjust_diagnostic.py",
+        ],
+    )
     def test_lister_attribute_resolvable(self, mod):
         """更强的检查：脚本里**调用**的 local_tdx_data.X() 都必须真实存在。
 
@@ -535,6 +729,7 @@ class TestCliFullMarketPath:
         import re
 
         from custos.datasource.local_tdx import local_tdx_data as ltd
+
         src = pathlib.Path(mod).read_text(encoding="utf-8")
         called = set(re.findall(r"local_tdx_data\.([a-zA-Z_][a-zA-Z0-9_]*)\s*\(", src))
         assert called, f"{mod} 没有调用 local_tdx_data 的任何函数（测试假设失效）"
@@ -560,13 +755,23 @@ class TestBjMarketRouting:
     任何除权日在样本里都长得像 -96% 暴跌。BJ 约占 universe 4.8%。
     """
 
-    @pytest.mark.parametrize("code,want", [
-        ("600000", 1), ("601398", 1), ("688001", 1),      # 沪
-        ("000001", 0), ("002415", 0), ("300750", 0),      # 深
-        ("920808", 2), ("920002", 2),                     # 北（新代码段，mootdx 判错的）
-        ("830799", 2), ("870204", 2), ("430047", 2),      # 北（老代码段）
-        ("880005", 1),                                    # ⚠️ 沪市统计指数，不是北交所
-    ])
+    @pytest.mark.parametrize(
+        "code,want",
+        [
+            ("600000", 1),
+            ("601398", 1),
+            ("688001", 1),  # 沪
+            ("000001", 0),
+            ("002415", 0),
+            ("300750", 0),  # 深
+            ("920808", 2),
+            ("920002", 2),  # 北（新代码段，mootdx 判错的）
+            ("830799", 2),
+            ("870204", 2),
+            ("430047", 2),  # 北（老代码段）
+            ("880005", 1),  # ⚠️ 沪市统计指数，不是北交所
+        ],
+    )
     def test_market_mapping(self, code, want):
         assert af._tdx_market(code) == want
 
@@ -578,10 +783,15 @@ class TestBjMarketRouting:
     def test_does_not_use_mootdx_inference(self):
         """回归：源码里不得再出现 `q.xdxr(symbol=` 调用（它会走内部推断）。"""
         import pathlib
+
         src = pathlib.Path(af.__file__).read_text(encoding="utf-8")
-        calls = [ln for ln in src.splitlines()
-                 if "q.xdxr(symbol=" in ln and not ln.strip().startswith(("#", "`"))
-                 and "而 `q.xdxr" not in ln]
+        calls = [
+            ln
+            for ln in src.splitlines()
+            if "q.xdxr(symbol=" in ln
+            and not ln.strip().startswith(("#", "`"))
+            and "而 `q.xdxr" not in ln
+        ]
         assert not calls, f"仍在用 mootdx 的 market 推断: {calls}"
 
 
@@ -598,27 +808,41 @@ class TestXdxrCacheMarketStamp:
         d = json.loads((tmp_path / "920808.json").read_text(encoding="utf-8"))
         assert d["market"] == 2
 
-    def test_empty_cache_without_market_is_discarded(self, tmp_path, monkeypatch, capsys):
+    def test_empty_cache_without_market_is_discarded(
+        self, tmp_path, monkeypatch, capsys
+    ):
         monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
-        (tmp_path / "920808.json").write_text(json.dumps(
-            {"code": "920808", "events": [], "n": 0}), encoding="utf-8")
+        (tmp_path / "920808.json").write_text(
+            json.dumps({"code": "920808", "events": [], "n": 0}), encoding="utf-8"
+        )
         assert af.load_xdxr_cache("920808") is None
         assert "缺 market 标记" in capsys.readouterr().err
 
     def test_empty_cache_with_market_is_trusted(self, tmp_path, monkeypatch):
         """带 market 的空事件是真查过的结论（该票确实没除权），不该反复重取。"""
         monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
-        (tmp_path / "600000.json").write_text(json.dumps(
-            {"code": "600000", "events": [], "n": 0, "market": 1}), encoding="utf-8")
+        (tmp_path / "600000.json").write_text(
+            json.dumps({"code": "600000", "events": [], "n": 0, "market": 1}),
+            encoding="utf-8",
+        )
         assert af.load_xdxr_cache("600000") == []
 
     def test_nonempty_old_cache_still_usable(self, tmp_path, monkeypatch):
         """非空的老缓存是真查到的事件，不能因为缺 market 就丢掉。"""
         monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
-        ev = [{"date": "2020-07-09", "fenhong": 5.1, "songzhuangu": 0.0,
-               "peigu": 0.0, "peigujia": 0.0, "suogu": 0.0}]
-        (tmp_path / "600000.json").write_text(json.dumps(
-            {"code": "600000", "events": ev, "n": 1}), encoding="utf-8")
+        ev = [
+            {
+                "date": "2020-07-09",
+                "fenhong": 5.1,
+                "songzhuangu": 0.0,
+                "peigu": 0.0,
+                "peigujia": 0.0,
+                "suogu": 0.0,
+            }
+        ]
+        (tmp_path / "600000.json").write_text(
+            json.dumps({"code": "600000", "events": ev, "n": 1}), encoding="utf-8"
+        )
         assert af.load_xdxr_cache("600000") == ev
 
 
@@ -629,12 +853,34 @@ class TestNormalizeAcceptsRawList:
 
     def _raw(self):
         return [
-            {"year": 2018, "month": 7, "day": 2, "category": 1, "name": "除权除息",
-             "fenhong": 2.4, "songzhuangu": 30.75, "peigu": 0.0, "peigujia": 0.0,
-             "suogu": 0.0, "houzongguben": None, "panhouliutong": None},
-            {"year": 2018, "month": 6, "day": 12, "category": 5, "name": "股本变化",
-             "fenhong": None, "songzhuangu": None, "peigu": None, "peigujia": None,
-             "suogu": None, "houzongguben": 736.196, "panhouliutong": 304.349},
+            {
+                "year": 2018,
+                "month": 7,
+                "day": 2,
+                "category": 1,
+                "name": "除权除息",
+                "fenhong": 2.4,
+                "songzhuangu": 30.75,
+                "peigu": 0.0,
+                "peigujia": 0.0,
+                "suogu": 0.0,
+                "houzongguben": None,
+                "panhouliutong": None,
+            },
+            {
+                "year": 2018,
+                "month": 6,
+                "day": 12,
+                "category": 5,
+                "name": "股本变化",
+                "fenhong": None,
+                "songzhuangu": None,
+                "peigu": None,
+                "peigujia": None,
+                "suogu": None,
+                "houzongguben": 736.196,
+                "panhouliutong": 304.349,
+            },
         ]
 
     def test_xdxr_from_list(self):
@@ -658,6 +904,7 @@ class TestCacheAgeAndStaleness:
 
     def _write(self, tmp_path, monkeypatch, code, payload):
         import json
+
         monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
         p = tmp_path / f"{code}.json"
         p.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
@@ -682,8 +929,13 @@ class TestCacheAgeAndStaleness:
 
     def test_fresh_cache_age_near_zero(self, tmp_path, monkeypatch):
         from custos.core.paths import cn_now
-        self._write(tmp_path, monkeypatch, "600000",
-                    {"fetched_at": cn_now().isoformat(timespec="seconds")})
+
+        self._write(
+            tmp_path,
+            monkeypatch,
+            "600000",
+            {"fetched_at": cn_now().isoformat(timespec="seconds")},
+        )
         age = af.cache_age_days("600000")
         assert age is not None and age < 0.01
 
@@ -693,7 +945,12 @@ class TestCacheAgeAndStaleness:
         from datetime import timedelta
 
         from custos.core.paths import cn_now
-        naive = (cn_now() - timedelta(days=2)).replace(tzinfo=None).isoformat(timespec="seconds")
+
+        naive = (
+            (cn_now() - timedelta(days=2))
+            .replace(tzinfo=None)
+            .isoformat(timespec="seconds")
+        )
         self._write(tmp_path, monkeypatch, "600000", {"fetched_at": naive})
         age = af.cache_age_days("600000")
         assert age is not None and 1.9 < age < 2.1, age
@@ -702,11 +959,24 @@ class TestCacheAgeAndStaleness:
         from datetime import timedelta
 
         from custos.core.paths import cn_now
+
         monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
-        self._write(tmp_path, monkeypatch, "600000",
-                    {"fetched_at": cn_now().isoformat(timespec="seconds")})
-        self._write(tmp_path, monkeypatch, "000001",
-                    {"fetched_at": (cn_now() - timedelta(days=30)).isoformat(timespec="seconds")})
+        self._write(
+            tmp_path,
+            monkeypatch,
+            "600000",
+            {"fetched_at": cn_now().isoformat(timespec="seconds")},
+        )
+        self._write(
+            tmp_path,
+            monkeypatch,
+            "000001",
+            {
+                "fetched_at": (cn_now() - timedelta(days=30)).isoformat(
+                    timespec="seconds"
+                )
+            },
+        )
         out = af.stale_codes(["600000", "000001", "600519"], max_age_days=7.0)
         assert "600000" not in out, "新缓存不该被重取"
         assert "000001" in out and "600519" in out, f"旧缓存与无缓存都要重取：{out}"
@@ -721,30 +991,48 @@ class TestGetXdxrCacheFirst:
 
     def test_cache_hit_does_not_touch_network(self, tmp_path, monkeypatch):
         import json
+
         monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
-        (tmp_path / "600000.json").write_text(json.dumps(
-            {"fetched_at": "2026-08-01T00:00:00+08:00",
-             "events": [{"date": "20260610", "category": 1, "songzhuangu": 0.0,
-                         "fenhong": 1.0, "peigu": 0.0, "peigujia": 0.0}]}),
-            encoding="utf-8")
+        (tmp_path / "600000.json").write_text(
+            json.dumps(
+                {
+                    "fetched_at": "2026-08-01T00:00:00+08:00",
+                    "events": [
+                        {
+                            "date": "20260610",
+                            "category": 1,
+                            "songzhuangu": 0.0,
+                            "fenhong": 1.0,
+                            "peigu": 0.0,
+                            "peigujia": 0.0,
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
 
         def boom(*a, **k):
             raise AssertionError("命中缓存时不该建连接")
+
         monkeypatch.setattr(af, "_tdx_market", boom)
         ev = af.get_xdxr("600000")
         assert ev and ev[0]["date"] == "20260610"
 
     def test_refresh_true_bypasses_cache(self, tmp_path, monkeypatch):
         import json
+
         monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
-        (tmp_path / "600000.json").write_text(json.dumps(
-            {"fetched_at": "2026-08-01T00:00:00+08:00", "events": []}),
-            encoding="utf-8")
+        (tmp_path / "600000.json").write_text(
+            json.dumps({"fetched_at": "2026-08-01T00:00:00+08:00", "events": []}),
+            encoding="utf-8",
+        )
         called = {"n": 0}
 
         def mark(c):
             called["n"] += 1
             raise RuntimeError("stop here")
+
         monkeypatch.setattr(af, "_tdx_market", mark)
         with pytest.raises(af.AdjustError):
             af.get_xdxr("600000", refresh=True)
@@ -754,8 +1042,9 @@ class TestGetXdxrCacheFirst:
         """⚠️ 取数失败必须包成 `AdjustError` 并带代码 —— 裸异常在批量路径里
         会丢掉「是哪只票」这个信息。"""
         monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
-        monkeypatch.setattr(af, "_tdx_market",
-                            lambda c: (_ for _ in ()).throw(RuntimeError("net down")))
+        monkeypatch.setattr(
+            af, "_tdx_market", lambda c: (_ for _ in ()).throw(RuntimeError("net down"))
+        )
         with pytest.raises(af.AdjustError) as e:
             af.get_xdxr("600519")
         assert "600519" in str(e.value)
@@ -766,14 +1055,22 @@ class TestSharesEventsCacheShared:
 
     def test_shares_read_from_same_cache(self, tmp_path, monkeypatch):
         import json
+
         monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
-        (tmp_path / "600000.json").write_text(json.dumps(
-            {"fetched_at": "2026-08-01T00:00:00+08:00", "events": [],
-             "shares": [{"date": "20260610", "total": 1.0e10}]}),
-            encoding="utf-8")
+        (tmp_path / "600000.json").write_text(
+            json.dumps(
+                {
+                    "fetched_at": "2026-08-01T00:00:00+08:00",
+                    "events": [],
+                    "shares": [{"date": "20260610", "total": 1.0e10}],
+                }
+            ),
+            encoding="utf-8",
+        )
 
         def boom(*a, **k):
             raise AssertionError("共用缓存时不该重新取数")
+
         monkeypatch.setattr(af, "_tdx_market", boom)
         sh = af.get_shares_events("600000")
         assert sh and sh[0]["total"] == 1.0e10
@@ -783,12 +1080,15 @@ class TestSharesEventsCacheShared:
         空列表会让 `total_shares_at` 算出 None 而市值静默变缺失
         （`_shares` 曾因漏 `import json` 让 mcap 静默失效，同一类）。"""
         import json
+
         monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
-        (tmp_path / "600000.json").write_text(json.dumps(
-            {"fetched_at": "2026-08-01T00:00:00+08:00", "events": []}),
-            encoding="utf-8")
-        monkeypatch.setattr(af, "_tdx_market",
-                            lambda c: (_ for _ in ()).throw(RuntimeError("net")))
+        (tmp_path / "600000.json").write_text(
+            json.dumps({"fetched_at": "2026-08-01T00:00:00+08:00", "events": []}),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            af, "_tdx_market", lambda c: (_ for _ in ()).throw(RuntimeError("net"))
+        )
         with pytest.raises(af.AdjustError):
             af.get_shares_events("600000")
 
@@ -814,6 +1114,7 @@ class TestFetchBatchReusesConnection:
                 return FakeQuotes()
 
         import types
+
         mod = types.ModuleType("mootdx.quotes")
         mod.Quotes = Factory
         monkeypatch.setitem(sys.modules, "mootdx.quotes", mod)
@@ -824,7 +1125,9 @@ class TestFetchBatchReusesConnection:
     def test_empty_codes_returns_empty_without_connecting(self, monkeypatch):
         def boom(**k):
             raise AssertionError("空清单不该建连接")
+
         import types
+
         mod = types.ModuleType("mootdx.quotes")
         mod.Quotes = type("Q", (), {"factory": staticmethod(boom)})
         monkeypatch.setitem(sys.modules, "mootdx.quotes", mod)
@@ -842,9 +1145,17 @@ class TestFetchBatchReusesConnection:
                 return []
 
         import types
+
         mod = types.ModuleType("mootdx.quotes")
-        mod.Quotes = type("Q", (), {"factory": staticmethod(
-            lambda **k: type("Q2", (), {"client": FakeClient()})())})
+        mod.Quotes = type(
+            "Q",
+            (),
+            {
+                "factory": staticmethod(
+                    lambda **k: type("Q2", (), {"client": FakeClient()})()
+                )
+            },
+        )
         monkeypatch.setitem(sys.modules, "mootdx.quotes", mod)
         out = af.fetch_xdxr_batch(["600000", "000001", "600519"], on_error="skip")
         assert "000001" not in out

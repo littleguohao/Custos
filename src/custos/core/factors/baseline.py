@@ -5,6 +5,7 @@
 任何进场信号必须**显著优于**它，才证明信号本身有价值 ——
 否则 edge 全来自出场规则而非进场指纹（R1 的核心判据之一）。
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -21,6 +22,7 @@ FACTOR: dict[str, Any] = {
     "live_use": "none",
     "stage": "debug",
 }
+
 
 def score(df: pd.DataFrame, code: str):
     """基线打分器：任何 as-of 日都判「可买」。用于对照——同样的止损+BBI出场规则下，

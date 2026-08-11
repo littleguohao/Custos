@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Shared P0 runtime guards: trading calendar, freshness and data quality."""
+
 from __future__ import annotations
 
 import json
@@ -25,7 +26,7 @@ def clear_calendar_cache() -> None:
 
 
 def _load_calendar_json(path: Path, default: Any):
-    loader = load_json          # late-bound: 尊重调用方对 load_json 的 monkeypatch
+    loader = load_json  # late-bound: 尊重调用方对 load_json 的 monkeypatch
     try:
         st = path.stat()
         key = (str(path), st.st_mtime_ns, st.st_size, loader)
@@ -46,12 +47,27 @@ def official_year_status(d: date, cfg: dict[str, Any]) -> dict[str, Any] | None:
         return None
     source = year.get("source_url") or str(CALENDAR_CONFIG)
     if d.weekday() >= 5:
-        return {"is_trading_day": False, "reason": "周末休市", "quality": "confirmed", "source": source}
+        return {
+            "is_trading_day": False,
+            "reason": "周末休市",
+            "quality": "confirmed",
+            "source": source,
+        }
     day = d.isoformat()
     for item in year.get("closed_ranges") or []:
         if item.get("start") <= day <= item.get("end"):
-            return {"is_trading_day": False, "reason": f"交易所官方{item.get('name', '节假日')}休市安排", "quality": "confirmed", "source": source}
-    return {"is_trading_day": True, "reason": "交易所官方年度安排：周一至周五且不在休市区间", "quality": "confirmed", "source": source}
+            return {
+                "is_trading_day": False,
+                "reason": f"交易所官方{item.get('name', '节假日')}休市安排",
+                "quality": "confirmed",
+                "source": source,
+            }
+    return {
+        "is_trading_day": True,
+        "reason": "交易所官方年度安排：周一至周五且不在休市区间",
+        "quality": "confirmed",
+        "source": source,
+    }
 
 
 def trading_day_status(day: str) -> dict[str, Any]:
@@ -61,17 +77,47 @@ def trading_day_status(day: str) -> dict[str, Any]:
     overrides = cfg.get("overrides", {})
     if day in overrides:
         item = overrides[day]
-        return {"date": day, "is_trading_day": bool(item["is_trading_day"]), "reason": item.get("reason", "配置覆盖"), "quality": "confirmed", "source": str(CALENDAR_CONFIG)}
+        return {
+            "date": day,
+            "is_trading_day": bool(item["is_trading_day"]),
+            "reason": item.get("reason", "配置覆盖"),
+            "quality": "confirmed",
+            "source": str(CALENDAR_CONFIG),
+        }
     official = official_year_status(d, cfg)
     if official is not None:
         return {"date": day, **official}
     if day in set(cache.get("trading_days", [])):
-        return {"date": day, "is_trading_day": True, "reason": "本地通达信交易日历缓存", "quality": "confirmed", "source": str(CALENDAR_CACHE)}
+        return {
+            "date": day,
+            "is_trading_day": True,
+            "reason": "本地通达信交易日历缓存",
+            "quality": "confirmed",
+            "source": str(CALENDAR_CACHE),
+        }
     if day in set(cache.get("non_trading_days", [])):
-        return {"date": day, "is_trading_day": False, "reason": "本地通达信日历覆盖范围内非交易日", "quality": "confirmed", "source": str(CALENDAR_CACHE)}
+        return {
+            "date": day,
+            "is_trading_day": False,
+            "reason": "本地通达信日历覆盖范围内非交易日",
+            "quality": "confirmed",
+            "source": str(CALENDAR_CACHE),
+        }
     if d.weekday() >= 5:
-        return {"date": day, "is_trading_day": False, "reason": "周末", "quality": "confirmed", "source": "weekday_rule"}
-    return {"date": day, "is_trading_day": None, "reason": "工作日但不在通达信缓存覆盖范围；禁止自动假定开市", "quality": "unknown", "source": str(CALENDAR_CONFIG)}
+        return {
+            "date": day,
+            "is_trading_day": False,
+            "reason": "周末",
+            "quality": "confirmed",
+            "source": "weekday_rule",
+        }
+    return {
+        "date": day,
+        "is_trading_day": None,
+        "reason": "工作日但不在通达信缓存覆盖范围；禁止自动假定开市",
+        "quality": "unknown",
+        "source": str(CALENDAR_CONFIG),
+    }
 
 
 def previous_confirmed_trading_day(day: str) -> str | None:
@@ -87,7 +133,7 @@ def previous_confirmed_trading_day(day: str) -> str | None:
     return None
 
 
-CLOSE_TIME = time(15, 0)          # 收盘时刻:导入时间晚于它才算"收盘后快照"
+CLOSE_TIME = time(15, 0)  # 收盘时刻:导入时间晚于它才算"收盘后快照"
 
 
 def _as_cn_datetime(text: str) -> datetime:
@@ -130,19 +176,26 @@ def position_freshness(day: str) -> dict[str, Any]:
         except ValueError:
             reason = "导入时间格式无效"
     return {
-        "date": day, "status": status, "confirmed": status == "confirmed",
-        "imported_at": imported_at, "source_mtime": source_mtime,
+        "date": day,
+        "status": status,
+        "confirmed": status == "confirmed",
+        "imported_at": imported_at,
+        "source_mtime": source_mtime,
         "snapshot_date": snapshot_date or (imported_at[:10] if imported_at else None),
         "expected_close_date": expected_close_date,
-        "reason": reason, "source": str(DATA / "trades" / "_import_meta.json"),
+        "reason": reason,
+        "source": str(DATA / "trades" / "_import_meta.json"),
     }
 
 
 def confirm_position_snapshot(day: str, note: str = "user_confirmed") -> dict[str, Any]:
     path = DATA / "trades" / "position_confirmations.json"
     records = load_json(path, {})
-    records[day] = {"confirmed_at": cn_now().isoformat(timespec="seconds"), "note": note}
-    write_json_atomic(path, records)   # 累积状态：人工确认记录，损坏丢历史
+    records[day] = {
+        "confirmed_at": cn_now().isoformat(timespec="seconds"),
+        "note": note,
+    }
+    write_json_atomic(path, records)  # 累积状态：人工确认记录，损坏丢历史
     return records[day]
 
 
@@ -168,39 +221,66 @@ def position_freshness_with_confirmation(day: str) -> dict[str, Any]:
     # 成交台账出现目标日成交时，立即覆盖"沿用无交易"基线
     day_trades = ledger_trades_on(day)
     if day_trades:
-        summary = "；".join(f"{r.get('交易类别')}{r.get('名称')}({r.get('代码')}) {r.get('成交数量')}股@{r.get('成交价格')}" for r in day_trades)
-        result.update({
-            "status": "confirmed", "confirmed": True,
-            "inherited": False, "ledger_trades": len(day_trades),
-            "reason": f"成交台账记录 {day} 当日交易 {len(day_trades)} 笔，持仓已按增量成交更新：{summary}",
-            "source": str(DATA / "trades" / "master_trade_ledger.csv"),
-        })
+        summary = "；".join(
+            f"{r.get('交易类别')}{r.get('名称')}({r.get('代码')}) {r.get('成交数量')}股@{r.get('成交价格')}"
+            for r in day_trades
+        )
+        result.update(
+            {
+                "status": "confirmed",
+                "confirmed": True,
+                "inherited": False,
+                "ledger_trades": len(day_trades),
+                "reason": f"成交台账记录 {day} 当日交易 {len(day_trades)} 笔，持仓已按增量成交更新：{summary}",
+                "source": str(DATA / "trades" / "master_trade_ledger.csv"),
+            }
+        )
         result.pop("assumption", None)
         return result
 
     if day in confirmations:
-        result.update({"status": "confirmed", "confirmed": True, "reason": "用户已确认当日持仓快照", "confirmation": confirmations[day]})
+        result.update(
+            {
+                "status": "confirmed",
+                "confirmed": True,
+                "reason": "用户已确认当日持仓快照",
+                "confirmation": confirmations[day],
+            }
+        )
         return result
 
     eligible = [d for d in confirmations if d <= day]
     if eligible:
         confirmed_day = max(eligible)
         confirmation = confirmations[confirmed_day]
-        no_trades = confirmation.get("no_trades") is True or "无交易" in str(confirmation.get("note", ""))
+        no_trades = confirmation.get("no_trades") is True or "无交易" in str(
+            confirmation.get("note", "")
+        )
         if no_trades:
-            result.update({
-                "status": "confirmed",
-                "confirmed": True,
-                "inherited": True,
-                "inherited_from": confirmed_day,
-                "assumption": "B1盘中默认不交易；若用户告知或成交台账出现目标日成交，则立即覆盖此基线",
-                "reason": f"默认 {day} 盘中无交易，沿用 {confirmed_day} 已确认无交易后的收盘持仓作为14:45尾盘建议基线",
-                "confirmation": confirmation,
-            })
+            result.update(
+                {
+                    "status": "confirmed",
+                    "confirmed": True,
+                    "inherited": True,
+                    "inherited_from": confirmed_day,
+                    "assumption": "B1盘中默认不交易；若用户告知或成交台账出现目标日成交，则立即覆盖此基线",
+                    "reason": f"默认 {day} 盘中无交易，沿用 {confirmed_day} 已确认无交易后的收盘持仓作为14:45尾盘建议基线",
+                    "confirmation": confirmation,
+                }
+            )
     return result
 
 
-_QUALITY_LEVELS = {"confirmed", "auto", "candidate", "partial", "degraded", "raw_only", "stale", "missing"}
+_QUALITY_LEVELS = {
+    "confirmed",
+    "auto",
+    "candidate",
+    "partial",
+    "degraded",
+    "raw_only",
+    "stale",
+    "missing",
+}
 
 
 def _quality(value: Any, section: dict[str, Any], default: str = "candidate") -> str:
@@ -215,8 +295,12 @@ def _quality(value: Any, section: dict[str, Any], default: str = "candidate") ->
     return q if q in _QUALITY_LEVELS else default
 
 
-def _latest_market_section(day: str, section_name: str, value_key: str) -> tuple[dict[str, Any], str | None]:
-    for path in sorted((DATA / "market").glob("*_market_timing_input.json"), reverse=True):
+def _latest_market_section(
+    day: str, section_name: str, value_key: str
+) -> tuple[dict[str, Any], str | None]:
+    for path in sorted(
+        (DATA / "market").glob("*_market_timing_input.json"), reverse=True
+    ):
         source_day = path.name[:10]
         if source_day >= day:
             continue
@@ -230,7 +314,13 @@ def _latest_market_section(day: str, section_name: str, value_key: str) -> tuple
 # 海外行情只是背景参考。此前 score 是无权重算术平均(5 项各 0.2),导致
 # 「0AMV 全缺 + 其余齐全」= 4/5 = 0.8 **恰好判 pass 并授予加仓权**(已实测复现)。
 # 改为加权后同一场景为 0.65 → degraded,且 0AMV 不新鲜时一律不得 pass。
-_CHECK_WEIGHT = {"0AMV": 35, "market_breadth": 20, "turnover": 20, "sentiment": 15, "overseas": 10}
+_CHECK_WEIGHT = {
+    "0AMV": 35,
+    "market_breadth": 20,
+    "turnover": 20,
+    "sentiment": 15,
+    "overseas": 10,
+}
 _DEFAULT_WEIGHT = 10
 # 允许加仓的 regime 白名单。**不能写成 `!= "空头"`**:0AMV 缺失时 effective_state 是
 # None → 空串 → 空串 != "空头" 为真 → 未知 regime 被当成可加仓(这就是修掉的漏洞)。
@@ -256,7 +346,9 @@ def normalize_regime(raw: str) -> str:
     return "未知"
 
 
-def market_quality_gate(market: dict[str, Any], day: str, expected_day: str | None = None) -> dict[str, Any]:
+def market_quality_gate(
+    market: dict[str, Any], day: str, expected_day: str | None = None
+) -> dict[str, Any]:
     """expected_day:该 session 期望的数据日(盘前/盘中=T-1,盘后=T;缺省=day,保持既有行为)。"""
     exp = expected_day or day
     checks = []
@@ -295,20 +387,54 @@ def market_quality_gate(market: dict[str, Any], day: str, expected_day: str | No
         stale_source = source_day != day and source_day != exp
         if (stale_source or stale_as_of) and quality in {"confirmed", "auto"}:
             quality = "stale"
-        checks.append({
-            "field": field,
-            "quality": quality,
-            "as_of": section.get("as_of") or source_day,
-            "inherited": source_day != day,
-            "stale_source": stale_source,
-            "stale_as_of": stale_as_of,
-        })
+        checks.append(
+            {
+                "field": field,
+                "quality": quality,
+                "as_of": section.get("as_of") or source_day,
+                "inherited": source_day != day,
+                "stale_source": stale_source,
+                "stale_as_of": stale_as_of,
+            }
+        )
     overseas = market.get("overseas_market", {})
-    overseas_values = [overseas.get(k) for k in ("nasdaq_change_pct", "sp500_change_pct", "sox_change_pct", "nikkei_change_pct", "kospi_change_pct", "hstech_change_pct")]
-    checks.append({"field": "overseas", "quality": "confirmed" if any(v is not None for v in overseas_values) and overseas.get("as_of") else ("candidate" if any(v is not None for v in overseas_values) else "missing"), "as_of": overseas.get("as_of")})
-    rank = {"confirmed": 1.0, "auto": 1.0, "candidate": 0.5, "partial": 0.4, "degraded": 0.4,
-            "raw_only": 0.0, "stale": 0.0, "missing": 0.0}
-    weights = {x["field"]: _CHECK_WEIGHT.get(x["field"], _DEFAULT_WEIGHT) for x in checks}
+    overseas_values = [
+        overseas.get(k)
+        for k in (
+            "nasdaq_change_pct",
+            "sp500_change_pct",
+            "sox_change_pct",
+            "nikkei_change_pct",
+            "kospi_change_pct",
+            "hstech_change_pct",
+        )
+    ]
+    checks.append(
+        {
+            "field": "overseas",
+            "quality": "confirmed"
+            if any(v is not None for v in overseas_values) and overseas.get("as_of")
+            else (
+                "candidate"
+                if any(v is not None for v in overseas_values)
+                else "missing"
+            ),
+            "as_of": overseas.get("as_of"),
+        }
+    )
+    rank = {
+        "confirmed": 1.0,
+        "auto": 1.0,
+        "candidate": 0.5,
+        "partial": 0.4,
+        "degraded": 0.4,
+        "raw_only": 0.0,
+        "stale": 0.0,
+        "missing": 0.0,
+    }
+    weights = {
+        x["field"]: _CHECK_WEIGHT.get(x["field"], _DEFAULT_WEIGHT) for x in checks
+    }
     total_w = sum(weights.values()) or 1
     score = sum(rank[x["quality"]] * weights[x["field"]] for x in checks) / total_w
     # blocked 用**显式覆盖率规则**而不是分数阈值:加权会让"只剩一个次要块新鲜"的场景掉到
@@ -335,18 +461,28 @@ def market_quality_gate(market: dict[str, Any], day: str, expected_day: str | No
         if x["quality"] in {"stale", "missing", "raw_only"} and x["field"] != "0AMV":
             limitations.append(f"{x['field']}={x['quality']}(as_of={x.get('as_of')})")
     return {
-        "date": day, "expected_day": exp,
+        "date": day,
+        "expected_day": exp,
         "status": status,
-        "quality_score": round(score, 3), "checks": checks, "inherited_sections": inherited,
-        "weights": weights, "amv_ok": amv_ok, "limitations": limitations,
+        "quality_score": round(score, 3),
+        "checks": checks,
+        "inherited_sections": inherited,
+        "weights": weights,
+        "amv_ok": amv_ok,
+        "limitations": limitations,
         "rule": "盘中缺少盘后指标时沿用最近有效交易日并标明日期；继承值仅供状态判断，不单独授予加仓权限；"
-                "评分按关键性加权（0AMV 权重最高），0AMV 不新鲜时一律不得 pass",
+        "评分按关键性加权（0AMV 权重最高），0AMV 不新鲜时一律不得 pass",
     }
 
 
-def position_increase_decision(market: dict[str, Any], *, reduction_ready: bool,
-                               technical_current: bool, quotes_current: bool,
-                               market_quality: dict[str, Any]) -> dict[str, Any]:
+def position_increase_decision(
+    market: dict[str, Any],
+    *,
+    reduction_ready: bool,
+    technical_current: bool,
+    quotes_current: bool,
+    market_quality: dict[str, Any],
+) -> dict[str, Any]:
     """是否授予**加仓**权限。抽成纯函数以便单测——这是钱的路径,不能只靠端到端覆盖。
 
     历史漏洞:曾写作 `market_regime != "空头"`,而 0AMV 缺失时 effective_state 是 None →
@@ -354,22 +490,36 @@ def position_increase_decision(market: dict[str, Any], *, reduction_ready: bool,
     新鲜(market_quality.amv_ok),任一不满足都不放行(风控优先于买入,DECISION_PRIORITY_RULES)。
     """
     amv_section = market.get("amv_0") or {}
-    regime_raw = str(amv_section.get("effective_state") or amv_section.get("amv_zone") or "")
+    regime_raw = str(
+        amv_section.get("effective_state") or amv_section.get("amv_zone") or ""
+    )
     regime = normalize_regime(regime_raw)
     regime_ok = regime in _REGIME_ALLOW_INCREASE
     amv_ok = bool(market_quality.get("amv_ok"))
-    allow = (reduction_ready and technical_current
-             and market_quality.get("status") == "pass" and regime_ok and amv_ok)
+    allow = (
+        reduction_ready
+        and technical_current
+        and market_quality.get("status") == "pass"
+        and regime_ok
+        and amv_ok
+    )
     limits = list(market_quality.get("limitations") or [])
     if not regime_ok:
-        limits.append(f"regime={regime}(原始值 {regime_raw!r})不在加仓白名单 "
-                      f"{sorted(_REGIME_ALLOW_INCREASE)}")
+        limits.append(
+            f"regime={regime}(原始值 {regime_raw!r})不在加仓白名单 "
+            f"{sorted(_REGIME_ALLOW_INCREASE)}"
+        )
     if not technical_current:
         limits.append("持仓技术指标未更新至目标日")
     if not quotes_current:
         limits.append("持仓行情未覆盖全部持仓")
-    return {"allow": allow, "regime": regime, "regime_raw": regime_raw,
-            "regime_ok": regime_ok, "limitations": limits}
+    return {
+        "allow": allow,
+        "regime": regime,
+        "regime_raw": regime_raw,
+        "regime_ok": regime_ok,
+        "limitations": limits,
+    }
 
 
 def write_runtime_gate(day: str, expected_day: str | None = None) -> dict[str, Any]:
@@ -380,45 +530,72 @@ def write_runtime_gate(day: str, expected_day: str | None = None) -> dict[str, A
     market_quality = market_quality_gate(market, day, expected_day=expected_day)
     quote_path = DATA / "market" / f"{day}_holding_quotes.json"
     quote_snapshot = load_json(quote_path, {})
-    quotes = quote_snapshot.get("quotes", []) if isinstance(quote_snapshot, dict) else []
+    quotes = (
+        quote_snapshot.get("quotes", []) if isinstance(quote_snapshot, dict) else []
+    )
     position_codes = {str(x.get("代码", "")).split(".")[0] for x in positions}
-    quote_codes = {str(x.get("code", "")).split(".")[0] for x in quotes if x.get("date") == day and x.get("price") is not None}
+    quote_codes = {
+        str(x.get("code", "")).split(".")[0]
+        for x in quotes
+        if x.get("date") == day and x.get("price") is not None
+    }
     quotes_current = bool(position_codes) and position_codes.issubset(quote_codes)
     # 行情日期是否**经数据自证**。快照源(tq_http / 东财 push2)没有日期字段,采集侧只能
     # 把目标日写进去,这会消解 collect 里 `q["date"] != target` 那唯一一道陈旧检测
     # (审计 C1)。此处仅**如实报告**、不改变 quotes_current 的既有判定:门控收紧必须
     # 先跑几个交易日校准,README 记着 2026-07-30 悄悄收紧硬闸导致盘后复盘失败的教训。
-    unverified = sorted({str(x.get("code", "")).split(".")[0] for x in quotes
-                         if x.get("date") == day and x.get("date_verified") is False})
-    technical = load_json(DATA / "holdings" / f"{day}_holding_technical_summary.json", [])
-    technical_dates = sorted({str(x.get("latest_date")) for x in technical if x.get("latest_date")})
+    unverified = sorted(
+        {
+            str(x.get("code", "")).split(".")[0]
+            for x in quotes
+            if x.get("date") == day and x.get("date_verified") is False
+        }
+    )
+    technical = load_json(
+        DATA / "holdings" / f"{day}_holding_technical_summary.json", []
+    )
+    technical_dates = sorted(
+        {str(x.get("latest_date")) for x in technical if x.get("latest_date")}
+    )
     technical_current = bool(technical_dates) and technical_dates == [day]
     technical_freshness = {
-        "status": "confirmed" if technical_current else ("stale" if technical_dates else "missing"),
+        "status": "confirmed"
+        if technical_current
+        else ("stale" if technical_dates else "missing"),
         "latest_dates": technical_dates,
         "expected_date": day,
-        "reason": "持仓技术行情已更新至目标日" if technical_current else "持仓技术指标未更新至目标日，不得据此提高仓位；精确减仓数量另由当日行情快照授权",
+        "reason": "持仓技术行情已更新至目标日"
+        if technical_current
+        else "持仓技术指标未更新至目标日，不得据此提高仓位；精确减仓数量另由当日行情快照授权",
     }
     reduction_ready = freshness.get("status") == "confirmed" and quotes_current
-    decision = position_increase_decision(market, reduction_ready=reduction_ready,
-                                          technical_current=technical_current,
-                                          quotes_current=quotes_current,
-                                          market_quality=market_quality)
+    decision = position_increase_decision(
+        market,
+        reduction_ready=reduction_ready,
+        technical_current=technical_current,
+        quotes_current=quotes_current,
+        market_quality=market_quality,
+    )
     increase_ready = decision["allow"]
     market_regime, regime_raw = decision["regime"], decision["regime_raw"]
     regime_ok, gate_limits = decision["regime_ok"], decision["limitations"]
     if unverified:
         gate_limits = gate_limits + [
             f"行情日期未经数据自证(快照源无日期字段)：{'、'.join(unverified)}"
-            f"——postclose 时若 TdxW 未刷新可能实为 T-1 价"]
+            f"——postclose 时若 TdxW 未刷新可能实为 T-1 价"
+        ]
     position_gate = {
-        "status": "pass" if increase_ready else ("degraded" if reduction_ready else "blocked"),
+        "status": "pass"
+        if increase_ready
+        else ("degraded" if reduction_ready else "blocked"),
         "allow_precise_quantity": reduction_ready,
         "allow_position_reduction": reduction_ready,
         "allow_position_increase": increase_ready,
         "position_count": len(positions),
         "quote_snapshot": str(quote_path),
-        "quote_date": quote_snapshot.get("as_of_date") if isinstance(quote_snapshot, dict) else None,
+        "quote_date": quote_snapshot.get("as_of_date")
+        if isinstance(quote_snapshot, dict)
+        else None,
         "quotes_current": quotes_current,
         "quotes_date_unverified": unverified,
         "market_regime": market_regime,

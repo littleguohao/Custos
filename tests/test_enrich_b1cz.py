@@ -3,6 +3,7 @@
 
 表驱动：注入合成 OHLCV DataFrame，每个检测器至少正反两例；不依赖 TdxW/网络。
 """
+
 import pandas as pd
 import pytest
 
@@ -12,18 +13,21 @@ from custos.pipeline.screening import enrich_candidates as ec
 def make_df(closes, vols=None, highs=None, lows=None):
     n = len(closes)
     closes = [float(x) for x in closes]
-    return pd.DataFrame({
-        "date": pd.date_range("2025-01-01", periods=n, freq="B"),
-        "open": closes,
-        "high": [float(x) for x in (highs or [c * 1.005 for c in closes])],
-        "low": [float(x) for x in (lows or [c * 0.995 for c in closes])],
-        "close": closes,
-        "volume": [float(v) for v in (vols or [1000.0] * n)],
-        "amount": [0.0] * n,
-    })
+    return pd.DataFrame(
+        {
+            "date": pd.date_range("2025-01-01", periods=n, freq="B"),
+            "open": closes,
+            "high": [float(x) for x in (highs or [c * 1.005 for c in closes])],
+            "low": [float(x) for x in (lows or [c * 0.995 for c in closes])],
+            "close": closes,
+            "volume": [float(v) for v in (vols or [1000.0] * n)],
+            "amount": [0.0] * n,
+        }
+    )
 
 
 # ---------- wave_type（B1 §四.0 拉升波三分类） ----------
+
 
 def test_wave_buildup():
     # 50 平盘 + 启动放量长阳(+6%, 量2x) + 10日温和上行至13（段涨幅约31%）
@@ -40,9 +44,9 @@ def test_wave_buildup():
 def test_wave_rally():
     # 前一段 10.5→12.2（摆动>15%）→ 回踩 10.6（窗口最低）→ 二段至 14.5（段涨幅约37%）
     closes = [11.0] * 20
-    closes += [10.5 + i * 0.19 for i in range(10)]          # 10.5→12.21
-    closes += [10.6]                                          # 回踩低点
-    closes += [10.6 + (i + 1) * 0.39 for i in range(10)]      # →14.5
+    closes += [10.5 + i * 0.19 for i in range(10)]  # 10.5→12.21
+    closes += [10.6]  # 回踩低点
+    closes += [10.6 + (i + 1) * 0.39 for i in range(10)]  # →14.5
     lows = [c * 0.995 for c in closes]
     lows[30] = 10.4  # 窗口最低价在回踩处
     r = ec.detect_wave_type(make_df(closes, lows=lows))
@@ -73,6 +77,7 @@ def test_wave_insufficient_bars():
 
 # ---------- weekly_j（B1 §四.1 主线口径） ----------
 
+
 def test_weekly_j_low_in_downtrend():
     closes = [20.0 - i * 0.1 for i in range(120)]  # 单边阴跌
     r = ec.weekly_j_state(make_df(closes))
@@ -86,6 +91,7 @@ def test_weekly_j_not_low_in_uptrend():
 
 
 # ---------- non_one_wave（B1 §四 非一波流确认） ----------
+
 
 def _now_base_df(pull_vols, top_drop=None):
     # 30 平盘 → 10日上行（均量1000）→ 高点 → 5日回调（可控量与跌幅）
@@ -135,12 +141,13 @@ def test_non_one_wave_unavailable_without_segment():
 
 # ---------- five_day_entry（CZ §十六） ----------
 
+
 def _five_day_df(last_close_drop=False):
     closes = [10.0 + i * 0.05 for i in range(25)]
     if last_close_drop:
         closes[-1] = closes[-1] - 0.5
     vols = [100.0] * 25
-    vols[20] = 150.0          # 7日内单日量 ≥ 前一日×1.45
+    vols[20] = 150.0  # 7日内单日量 ≥ 前一日×1.45
     vols[-3:] = [100.0, 110.0, 120.0]  # 连续3日放量（递增）
     return make_df(closes, vols=vols)
 
@@ -159,8 +166,9 @@ def test_five_day_entry_miss_when_below_ma5():
 
 # ---------- volume_sustain（CZ §14.6） ----------
 
+
 def test_volume_sustain_mainline_confirmed():
-    vols = [100.0] * 7 + [1000.0] + [600.0] * 12   # 峰值12日前，后续均值60%≥55%
+    vols = [100.0] * 7 + [1000.0] + [600.0] * 12  # 峰值12日前，后续均值60%≥55%
     r = ec.check_volume_sustain(make_df([10.0] * 20, vols=vols))
     assert r["status"] == "mainline_confirmed"
     assert r["days_since_peak"] == 12
@@ -181,6 +189,7 @@ def test_volume_sustain_neutral_when_peak_too_recent():
 
 # ---------- leader_volume（CZ §九） ----------
 
+
 def test_leader_volume_hit_and_miss():
     vols = [100.0] * 22 + [200.0, 200.0, 200.0]
     assert ec.check_leader_volume(make_df([10.0] * 25, vols=vols))["hit"] is True
@@ -190,6 +199,7 @@ def test_leader_volume_hit_and_miss():
 
 
 # ---------- three_lows / bottom_volume（CZ §九/§14.6，250日口径） ----------
+
 
 def _cz250_df(today_vol, close_now=11.0):
     closes = [20.0] * 125 + [close_now] * 125
@@ -224,6 +234,7 @@ def test_cz_tags_unavailable_below_250_bars():
 
 # ---------- repair_signals（B1 §四.2） ----------
 
+
 def test_repair_signals_volume_shrink_stop_fall():
     closes = [10.0 - i * 0.05 for i in range(30)]
     closes[-1] = closes[-2] * 1.01  # 涨跌幅∈[-2%,+2%]
@@ -241,32 +252,57 @@ def test_repair_signals_empty_when_no_repair():
 
 # ---------- compute_metrics 整合 ----------
 
+
 def test_compute_metrics_contains_b1cz_fields():
     df = _cz250_df(2500.0)
     m = ec.compute_metrics(df, None)
-    for key in ["wave", "weekly_j", "weekly_j_low", "non_one_wave", "repair_signals",
-                "five_day_entry", "volume_sustain", "leader_volume",
-                "three_lows", "bottom_volume"]:
+    for key in [
+        "wave",
+        "weekly_j",
+        "weekly_j_low",
+        "non_one_wave",
+        "repair_signals",
+        "five_day_entry",
+        "volume_sustain",
+        "leader_volume",
+        "three_lows",
+        "bottom_volume",
+    ]:
         assert key in m, f"compute_metrics 缺字段 {key}"
     assert m["bottom_volume"]["hit"] is True
 
 
 # ---------- P2: 数据源当日一致性（formula_hits 日期交叉校验 + signal_date） ----------
 
+
 def test_enrich_flags_formula_hits_date_mismatch(monkeypatch):
     # 命中清单是昨日产出、本段目标是今日 → partial + formula_hits_date_mismatch
-    hits = {"date": "2026-07-20", "status": "ok",
-            "formulas": [{"id": "F1", "hits": [{"code": "600000", "name": "浦发"}]}]}
+    hits = {
+        "date": "2026-07-20",
+        "status": "ok",
+        "formulas": [{"id": "F1", "hits": [{"code": "600000", "name": "浦发"}]}],
+    }
     dates = pd.date_range(end="2026-07-21", periods=80, freq="B")
-    df = pd.DataFrame({
-        "date": dates, "open": 10.0, "high": 10.05, "low": 9.95,
-        "close": 10.0, "volume": 1000.0, "amount": 0.0,
-    })
+    df = pd.DataFrame(
+        {
+            "date": dates,
+            "open": 10.0,
+            "high": 10.05,
+            "low": 9.95,
+            "close": 10.0,
+            "volume": 1000.0,
+            "amount": 0.0,
+        }
+    )
     # 隔离板块映射，聚焦一致性断言
     monkeypatch.setattr(ec, "build_stock_theme_map", lambda **k: ({}, True))
-    result = ec.enrich("2026-07-21", hits_data=hits,
-                       ohlcv_loader=lambda c: df.copy(), index_loader=lambda: None,
-                       universe_cfg={"j_low_required": False})
+    result = ec.enrich(
+        "2026-07-21",
+        hits_data=hits,
+        ohlcv_loader=lambda c: df.copy(),
+        index_loader=lambda: None,
+        universe_cfg={"j_low_required": False},
+    )
     assert result["status"] == "partial"
     assert "formula_hits_date_mismatch:2026-07-20" in result["degraded_reason"]
     assert "signal_date_contract" in result
@@ -275,22 +311,37 @@ def test_enrich_flags_formula_hits_date_mismatch(monkeypatch):
 
 
 def test_enrich_same_day_hits_no_mismatch(monkeypatch):
-    hits = {"date": "2026-07-21", "status": "ok",
-            "formulas": [{"id": "F1", "hits": [{"code": "600000", "name": "浦发"}]}]}
+    hits = {
+        "date": "2026-07-21",
+        "status": "ok",
+        "formulas": [{"id": "F1", "hits": [{"code": "600000", "name": "浦发"}]}],
+    }
     dates = pd.date_range(end="2026-07-21", periods=80, freq="B")
-    df = pd.DataFrame({
-        "date": dates, "open": 10.0, "high": 10.05, "low": 9.95,
-        "close": 10.0, "volume": 1000.0, "amount": 0.0,
-    })
+    df = pd.DataFrame(
+        {
+            "date": dates,
+            "open": 10.0,
+            "high": 10.05,
+            "low": 9.95,
+            "close": 10.0,
+            "volume": 1000.0,
+            "amount": 0.0,
+        }
+    )
     monkeypatch.setattr(ec, "build_stock_theme_map", lambda **k: ({}, True))
-    result = ec.enrich("2026-07-21", hits_data=hits,
-                       ohlcv_loader=lambda c: df.copy(), index_loader=lambda: None,
-                       universe_cfg={"j_low_required": False})
+    result = ec.enrich(
+        "2026-07-21",
+        hits_data=hits,
+        ohlcv_loader=lambda c: df.copy(),
+        index_loader=lambda: None,
+        universe_cfg={"j_low_required": False},
+    )
     assert "formula_hits_date_mismatch" not in result["degraded_reason"]
     assert result["candidates"][0]["signal_date"] == "2026-07-21"
 
 
 # ---------- code review 修复回归 ----------
+
 
 def test_bottom_volume_miss_when_today_makes_new_20d_low():
     # #1：当日刚创 20 日新低（剔除当日的前20日最低被跌破）→ no_new_low=False 不命中
@@ -338,21 +389,47 @@ def test_enrich_metrics_error_excluded_not_abort():
     # #5：单股 compute_metrics 抛错计入 excluded，不中断批次
     date = "2026-07-21"
     dates = pd.date_range(end="2026-07-21", periods=60, freq="B")
-    good = pd.DataFrame({
-        "date": dates, "open": [10.0] * 60, "high": [10.1] * 60, "low": [9.9] * 60,
-        "close": [10.0] * 60, "volume": [1000.0] * 60, "amount": [0.0] * 60,
-    })
+    good = pd.DataFrame(
+        {
+            "date": dates,
+            "open": [10.0] * 60,
+            "high": [10.1] * 60,
+            "low": [9.9] * 60,
+            "close": [10.0] * 60,
+            "volume": [1000.0] * 60,
+            "amount": [0.0] * 60,
+        }
+    )
     bad = pd.DataFrame({"date": dates, "open": [10.0] * 60})  # 缺 close/high/low/volume
     # 代码用真 A 股段（600xxx）：原来用的 900001/900002 是**沪B**代码，enrich 自 2026-08-03
     # 起对候选做 A 股白名单过滤（审计 B10：ETF/可转债/B股不得进 StockPool），
     # 占位代码会先被 not_a_share 剔除，测不到本用例真正关心的 metrics_error 分支。
-    hits = {"date": date, "status": "ok", "formulas": [{"id": "F", "hits": [
-        {"code": "600001", "name": "好股票"}, {"code": "600002", "name": "坏数据"},
-    ]}]}
+    hits = {
+        "date": date,
+        "status": "ok",
+        "formulas": [
+            {
+                "id": "F",
+                "hits": [
+                    {"code": "600001", "name": "好股票"},
+                    {"code": "600002", "name": "坏数据"},
+                ],
+            }
+        ],
+    }
     loader = lambda c: good if c == "600001" else bad
-    r = ec.enrich(date, hits_data=hits, ohlcv_loader=loader, index_loader=lambda: None,
-                  universe_cfg={"exclude_bj": True, "exclude_st": True, "min_list_days": 60,
-                            "j_low_required": False})
+    r = ec.enrich(
+        date,
+        hits_data=hits,
+        ohlcv_loader=loader,
+        index_loader=lambda: None,
+        universe_cfg={
+            "exclude_bj": True,
+            "exclude_st": True,
+            "min_list_days": 60,
+            "j_low_required": False,
+        },
+    )
     assert [c["code"] for c in r["candidates"]] == ["600001"]
     assert len(r["excluded"]) == 1
     assert r["excluded"][0]["code"] == "600002"
@@ -371,6 +448,7 @@ class TestReversalChangeSymmetric:
 
     def test_bounds_are_asymmetric(self):
         from custos.pipeline.screening import enrich_candidates as ec
+
         assert ec.REVERSAL_CHANGE_MIN_PCT == -2.0
         assert ec.REVERSAL_CHANGE_MAX_PCT == 2.0
 
@@ -398,11 +476,18 @@ class TestReversalChangeSymmetric:
         import inspect
 
         tree = _ast.parse(inspect.getsource(ec.compute_metrics))
-        called = {_ast.unparse(n.func) for n in _ast.walk(tree) if isinstance(n, _ast.Call)}
-        assert "change_in_range" in called, \
+        called = {
+            _ast.unparse(n.func) for n in _ast.walk(tree) if isinstance(n, _ast.Call)
+        }
+        assert "change_in_range" in called, (
             f"必须调用 b1_thresholds.change_in_range，实际调用 {sorted(called)[:12]}"
-        assert ec.change_in_range is __import__("custos.core.b1_thresholds", fromlist=["change_in_range"]).change_in_range, \
-            "必须是同一个函数对象，不能本地再实现一份"
+        )
+        assert (
+            ec.change_in_range
+            is __import__(
+                "custos.core.b1_thresholds", fromlist=["change_in_range"]
+            ).change_in_range
+        ), "必须是同一个函数对象，不能本地再实现一份"
 
 
 class TestReversalKBoundaryBehavior:
@@ -430,7 +515,7 @@ class TestReversalKBoundaryBehavior:
         vols = [3000.0] * 56 + [2800.0, 2600.0, 2400.0, 2200.0]
         prev = closes[-1]
         closes.append(round(prev * (1 + change_pct / 100), 4))
-        vols.append(300.0)                    # 极致缩量
+        vols.append(300.0)  # 极致缩量
         last = closes[-1]
         highs = [c * 1.005 for c in closes]
         lows = [c * 0.995 for c in closes]
@@ -447,8 +532,9 @@ class TestReversalKBoundaryBehavior:
         会**空转通过**，只有 `test_preconditions_hold_at_zero_change`
         （断言 0% 处为 True）才把它揪出来。这就是为什么必须有那条前置断言。
         """
-        m = (mod or ec).compute_metrics((mod or ec) and
-                                        TestReversalKBoundaryBehavior._reversal_df(change_pct), None)
+        m = (mod or ec).compute_metrics(
+            (mod or ec) and TestReversalKBoundaryBehavior._reversal_df(change_pct), None
+        )
         return m["patterns"]["reversal_k_candidate"]
 
     def test_preconditions_hold_at_zero_change(self):
@@ -458,14 +544,22 @@ class TestReversalKBoundaryBehavior:
         「+2.1% 被拒绝」照样通过，而测试什么都没验。今天已经因为这类空转
         踩过四次（桩不真 ⇒ 测试静默变 skip）。
         """
-        assert self._flag(0.0) is True, \
+        assert self._flag(0.0) is True, (
             "0% 处反转 K 应成立；不成立说明合成数据没满足 j_low/缩量/振幅"
+        )
 
-    @pytest.mark.parametrize("chg,expect", [
-        (-2.1, False), (-2.0, True), (-1.9, True),
-        (0.0, True),
-        (1.9, True), (2.0, True), (2.1, False),
-    ])
+    @pytest.mark.parametrize(
+        "chg,expect",
+        [
+            (-2.1, False),
+            (-2.0, True),
+            (-1.9, True),
+            (0.0, True),
+            (1.9, True),
+            (2.0, True),
+            (2.1, False),
+        ],
+    )
     def test_symmetric_bounds_inclusive(self, chg, expect):
         """±2.0 **含端点**，两侧对称。
 
@@ -487,12 +581,15 @@ class TestReversalKBoundaryBehavior:
         assert bt.REVERSAL_CHANGE_MAX_PCT == 2.0, "默认必须对称 ±2%"
 
         mods = reversal_thresholds(B1_REVK_CHG_PCT="1.0")
-        assert (mods["b1_thresholds"].REVERSAL_CHANGE_MIN_PCT,
-                mods["b1_thresholds"].REVERSAL_CHANGE_MAX_PCT) == (-1.0, 1.0)
-        assert mods["enrich_candidates"].REVERSAL_CHANGE_MAX_PCT == 1.0, "转出的名字要跟着变"
+        assert (
+            mods["b1_thresholds"].REVERSAL_CHANGE_MIN_PCT,
+            mods["b1_thresholds"].REVERSAL_CHANGE_MAX_PCT,
+        ) == (-1.0, 1.0)
+        assert mods["enrich_candidates"].REVERSAL_CHANGE_MAX_PCT == 1.0, (
+            "转出的名字要跟着变"
+        )
         # 收紧后 1.5% 应被拒（默认 ±2% 时它通过）
         assert self._flag(1.5, mod=mods["enrich_candidates"]) is False
-
 
     def test_min_max_can_be_set_independently(self, reversal_thresholds):
         """`B1_REVK_CHG_MIN` / `_MAX` 可各自覆盖 —— 留了做不对称实验的口子。
@@ -501,8 +598,10 @@ class TestReversalKBoundaryBehavior:
         """
         mods = reversal_thresholds(B1_REVK_CHG_MIN="-3.5", B1_REVK_CHG_MAX="0.5")
         for name in ("b1_thresholds", "enrich_candidates"):
-            assert (mods[name].REVERSAL_CHANGE_MIN_PCT,
-                    mods[name].REVERSAL_CHANGE_MAX_PCT) == (-3.5, 0.5), name
+            assert (
+                mods[name].REVERSAL_CHANGE_MIN_PCT,
+                mods[name].REVERSAL_CHANGE_MAX_PCT,
+            ) == (-3.5, 0.5), name
 
         # ⚠️ 只断言常量值**不够** —— 2026-08-07 的变异测试证明了这点：
         #    把判定从 `MIN <= x <= MAX` 改成 `abs(x) <= MAX` 之后，
@@ -543,18 +642,20 @@ class TestReversalKThresholdSingleSource:
         bt = mods["b1_thresholds"]
         assert mods["technical_monitor"].change_in_range is bt.change_in_range
         assert mods["enrich_candidates"].change_in_range is bt.change_in_range
-        assert mods["technical_monitor"].REVERSAL_AMPLITUDE_PCT == bt.REVERSAL_AMPLITUDE_PCT
+        assert (
+            mods["technical_monitor"].REVERSAL_AMPLITUDE_PCT
+            == bt.REVERSAL_AMPLITUDE_PCT
+        )
         assert mods["b1_holding_state"].J_LOW_THRESHOLD == bt.J_LOW_THRESHOLD
-
 
     def test_env_override_reaches_both_live_chains(self, reversal_thresholds):
         """⚠️ 覆盖环境变量后**两条链一起变** —— 这是 2026-08-07 之前不成立的那条。"""
         mods = reversal_thresholds(B1_REVK_CHG_PCT="1.0")
         assert mods["b1_thresholds"].REVERSAL_CHANGE_MAX_PCT == 1.0
         assert mods["enrich_candidates"].REVERSAL_CHANGE_MAX_PCT == 1.0, "选股链没跟上"
-        assert mods["technical_monitor"].change_in_range(1.5) is False, \
+        assert mods["technical_monitor"].change_in_range(1.5) is False, (
             "持仓链没跟上（原先就是这里漏了）"
-
+        )
 
     def test_research_factor_deliberately_pinned(self):
         """⚠️ 研究因子**不跟随**环境变量 —— 这是**有意的**，不是漏改。
@@ -572,13 +673,16 @@ class TestReversalKThresholdSingleSource:
         os.environ["B1_REVK_CHG_PCT"] = "3.0"
         try:
             r = importlib.reload(rq)
-            assert r.REVK_CHG_PCT == 2.0, \
+            assert r.REVK_CHG_PCT == 2.0, (
                 "研究因子跟随了环境变量 —— 会作废已有回测数字，需先重跑 R2"
+            )
         finally:
             del os.environ["B1_REVK_CHG_PCT"]
             importlib.reload(rq)
 
-    def test_j_vol_thresholds_also_single_source(self, reversal_thresholds, monkeypatch):
+    def test_j_vol_thresholds_also_single_source(
+        self, reversal_thresholds, monkeypatch
+    ):
         """J 低位与极致缩量三阈值同样走唯一来源。
 
         2026-08-07 前 `enrich_candidates` 本地硬编码 `J_LOW_THRESHOLD=13.0 /
@@ -587,8 +691,11 @@ class TestReversalKThresholdSingleSource:
         """
         mods = reversal_thresholds()
         bt, ec = mods["b1_thresholds"], mods["enrich_candidates"]
-        assert (ec.J_LOW_THRESHOLD, ec.VOL_RATIO_MAX, ec.VOL_PCTILE_MAX) == \
-               (bt.J_LOW_THRESHOLD, bt.VOL_RATIO_MAX, bt.VOL_PCTILE_MAX), "默认值两边就不一致"
+        assert (ec.J_LOW_THRESHOLD, ec.VOL_RATIO_MAX, ec.VOL_PCTILE_MAX) == (
+            bt.J_LOW_THRESHOLD,
+            bt.VOL_RATIO_MAX,
+            bt.VOL_PCTILE_MAX,
+        ), "默认值两边就不一致"
 
         # vol 两个 env 不在 fixture 的还原清单里 ⇒ 用 monkeypatch 管还原
         # （monkeypatch 先于 fixture finalizer 拆，还原 env 后 fixture 会再 reload 一次）。
@@ -603,11 +710,19 @@ class TestReversalKThresholdSingleSource:
         assert mods["b1_holding_state"].J_LOW_THRESHOLD == 10.0, "持仓链 J 阈值没跟上"
         # ⚠️ 只比常量不够：`j_below_threshold` 的默认参数在 def 时绑定 ——
         #    reload 后必须重新绑定到新阈值，否则门槛仍按 13 判。
-        assert ec2.j_below_threshold(11.0) is False and ec2.j_below_threshold(9.0) is True
+        assert (
+            ec2.j_below_threshold(11.0) is False and ec2.j_below_threshold(9.0) is True
+        )
         # 持仓链反转K的理由文案也要随配置变 —— 硬编码「J<13」会在改配置后谎报依据。
         s = mods["b1_holding_state"].evaluate(
-            {"price_volume": {"available": True, "reversal_k_candidate_without_j": True},
-             "daily_j": 8.0})
+            {
+                "price_volume": {
+                    "available": True,
+                    "reversal_k_candidate_without_j": True,
+                },
+                "daily_j": 8.0,
+            }
+        )
         sig = [x for x in s["signals"] if x["signal"] == "reversal_k_candidate"][0]
         assert "J<10" in sig["reason"], f"理由文案没跟上配置：{sig['reason']}"
 
@@ -637,8 +752,11 @@ class TestReversalKThresholdSingleSource:
         mods = reversal_thresholds()
         thr = mods["b1_thresholds"]
         from custos.research import backtest_factors as bf
+
         assert bf.REVK_VOL_RATIO == thr.VOL_RATIO_MAX
-        assert bf.REVK_VOL_PCTILE * 100 == thr.VOL_PCTILE_MAX, "单位：研究侧小数 vs live 百分数"
+        assert bf.REVK_VOL_PCTILE * 100 == thr.VOL_PCTILE_MAX, (
+            "单位：研究侧小数 vs live 百分数"
+        )
         assert bf.REVK_CHG_PCT == thr.REVERSAL_CHANGE_PCT
         assert bf.REVK_AMP_PCT == thr.REVERSAL_AMPLITUDE_PCT
         assert bf.J_LOW_THRESHOLD == thr.J_LOW_THRESHOLD
@@ -656,9 +774,12 @@ class TestReversalKThresholdSingleSource:
 
         from custos.core.factors import b1_dual_factor
         from custos.core.factors import b2_surge_factor
+
         mods = reversal_thresholds()
         thr = mods["b1_thresholds"]
         d1 = importlib.reload(b1_dual_factor)
         d2 = importlib.reload(b2_surge_factor)
-        assert d1.J_LOW_THRESHOLD == thr.J_LOW_THRESHOLD == 13.0, "b1_dual_factor 没跟上 live"
+        assert d1.J_LOW_THRESHOLD == thr.J_LOW_THRESHOLD == 13.0, (
+            "b1_dual_factor 没跟上 live"
+        )
         assert d2.B2_J_LOW == thr.J_LOW_THRESHOLD == 13.0, "b2_surge_factor 没跟上 live"

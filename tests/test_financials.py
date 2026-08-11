@@ -8,6 +8,7 @@
 ⚠️ 通达信财务表**有重复列名** ⇒ `row.get(col)` 返回 Series 而不是标量。
 不处理会让报告里出现 `0    20260630\nName: rp, dtype: object` 这种东西。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -44,12 +45,14 @@ class TestLoadFinancialsBestEffort:
     def test_import_failure_returns_none_not_raise(self, monkeypatch):
         self._clear()
         import builtins
+
         real = builtins.__import__
 
         def blow(name, *a, **k):
             if "local_tdx" in name:
                 raise ImportError("no tdx here")
             return real(name, *a, **k)
+
         monkeypatch.setattr(builtins, "__import__", blow)
         assert fin.load_financials("20260630") is None
 
@@ -57,6 +60,7 @@ class TestLoadFinancialsBestEffort:
         self._clear()
         import types
         import custos.datasource.local_tdx as _ltd_pkg
+
         mod = types.ModuleType("local_tdx_data")
         mod.get_financial_data = lambda p: (_ for _ in ()).throw(RuntimeError("boom"))
         monkeypatch.setattr(_ltd_pkg, "local_tdx_data", mod, raising=False)
@@ -69,11 +73,13 @@ class TestLoadFinancialsBestEffort:
         import types
         import pandas as pd
         import custos.datasource.local_tdx as _ltd_pkg
+
         mod = types.ModuleType("local_tdx_data")
 
         def get(period):
             calls["n"] += 1
             return pd.DataFrame({"x": [1]})
+
         mod.get_financial_data = get
         monkeypatch.setattr(_ltd_pkg, "local_tdx_data", mod, raising=False)
         fin.load_financials("20260630")
@@ -103,13 +109,18 @@ class TestCellText:
         """⚠️ 通达信财务表**有重复列名** ⇒ `row.get()` 返回 Series。
         取首个非空值，而不是让它变成 `"0    xxx\\nName: ..."` 那种字符串。"""
         import pandas as pd
+
         row = pd.Series([None, "20260630"], index=["rp", "rp"])
-        out = fin._cell_text({"rp": row["rp"]} if not hasattr(row["rp"], "iloc") else
-                             {"rp": row}, {"report_period": "rp"}, "report_period")
+        out = fin._cell_text(
+            {"rp": row["rp"]} if not hasattr(row["rp"], "iloc") else {"rp": row},
+            {"report_period": "rp"},
+            "report_period",
+        )
         assert "Name:" not in out, f"Series 泄漏进文案：{out!r}"
 
     def test_getter_exception_is_swallowed(self):
         class Bad:
             def get(self, k):
                 raise RuntimeError("bad row")
+
         assert fin._cell_text(Bad(), {"report_period": "rp"}, "report_period") == ""

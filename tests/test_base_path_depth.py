@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Guard against BASE path depth regressions in src subdirectory scripts."""
+
 import unittest
 from pathlib import Path
 
@@ -22,13 +23,19 @@ class BasePathDepthTests(unittest.TestCase):
             if "parent.parent" in text and "parents[3]" not in text:
                 # Check if it's actually a BASE definition
                 if "BASE" in text and "parent.parent" in text:
-                    broken.append(f"{p.relative_to(TOOLS)}: uses parent.parent (should be parents[3])")
-        self.assertEqual(broken, [], f"Scripts with wrong BASE depth:\n" + "\n".join(broken))
+                    broken.append(
+                        f"{p.relative_to(TOOLS)}: uses parent.parent (should be parents[3])"
+                    )
+        self.assertEqual(
+            broken, [], f"Scripts with wrong BASE depth:\n" + "\n".join(broken)
+        )
 
     def test_project_root_has_expected_markers(self):
         root = TOOLS.parents[1]
         for marker in ["governance", "data", "src", "tests"]:
-            self.assertTrue((root / marker).exists(), f"Missing project marker: {marker}/")
+            self.assertTrue(
+                (root / marker).exists(), f"Missing project marker: {marker}/"
+            )
 
 
 if __name__ == "__main__":
@@ -45,23 +52,38 @@ class TestGovernanceLayout:
 
     def test_four_subdirs_exist(self):
         from custos.core import paths
-        for d in (paths.STRATEGY_DIR, paths.DATA_DOCS_DIR,
-                  paths.RESEARCH_DIR, paths.CONTRACTS_DIR):
+
+        for d in (
+            paths.STRATEGY_DIR,
+            paths.DATA_DOCS_DIR,
+            paths.RESEARCH_DIR,
+            paths.CONTRACTS_DIR,
+        ):
             assert d.is_dir(), f"{d} 不存在"
 
     def test_no_loose_files_at_governance_root(self):
         """治理根目录下不应再有平铺文件——新增文档必须落到四个子目录之一。"""
         from custos.core import paths
-        loose = [p.name for p in paths.GOVERNANCE.iterdir()
-                 if p.is_file() and not p.name.startswith(".")]
+
+        loose = [
+            p.name
+            for p in paths.GOVERNANCE.iterdir()
+            if p.is_file() and not p.name.startswith(".")
+        ]
         assert not loose, f"这些文件没有归类: {loose}"
 
     def test_config_paths_resolve(self):
         """每个配置常量都必须指向真实存在的文件——搬目录最容易漏的就是这些。"""
         from custos.core import paths
-        for name in ("CALENDAR_FILE", "SCREEN_FORMULA_REGISTRY_FILE",
-                     "RSS_SOURCE_REGISTRY_FILE", "RSS_FILTER_CONFIG_FILE",
-                     "RSSHUB_ROUTES_FILE", "CZ_SECTOR_PREFERENCE_FILE"):
+
+        for name in (
+            "CALENDAR_FILE",
+            "SCREEN_FORMULA_REGISTRY_FILE",
+            "RSS_SOURCE_REGISTRY_FILE",
+            "RSS_FILTER_CONFIG_FILE",
+            "RSSHUB_ROUTES_FILE",
+            "CZ_SECTOR_PREFERENCE_FILE",
+        ):
             p = getattr(paths, name)
             assert p.is_file(), f"paths.{name} 指向不存在的文件: {p}"
 
@@ -72,6 +94,7 @@ class TestGovernanceLayout:
         下次搬动就会漏。paths.py 自身与测试的 tmp 目录构造除外。
         """
         import pathlib
+
         root = pathlib.Path(__file__).resolve().parents[1]
         offenders = []
         for p in (root / "src").rglob("*.py"):
@@ -80,8 +103,9 @@ class TestGovernanceLayout:
             for i, ln in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
                 if '"governance"' in ln or "'governance'" in ln:
                     offenders.append(f"{p.relative_to(root)}:{i}")
-        assert not offenders, ("这些地方绕过了 paths.py 自己拼治理路径: "
-                               + ", ".join(offenders))
+        assert not offenders, "这些地方绕过了 paths.py 自己拼治理路径: " + ", ".join(
+            offenders
+        )
 
 
 class TestNoPatchingDefaultArgConstants:
@@ -114,6 +138,7 @@ class TestNoPatchingDefaultArgConstants:
         同名常量在不同模块里的用法可以完全不同。
         """
         import ast
+
         out: dict[str, set[str]] = {}
         for p in (root / "src").rglob("*.py"):
             try:
@@ -125,7 +150,9 @@ class TestNoPatchingDefaultArgConstants:
                 if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     continue
                 a = fn.args
-                defaults = list(a.defaults) + [d for d in a.kw_defaults if d is not None]
+                defaults = list(a.defaults) + [
+                    d for d in a.kw_defaults if d is not None
+                ]
                 for d in defaults:
                     for n in ast.walk(d):
                         # 只关心全大写的模块级常量（路径/配置），忽略字面量与局部名
@@ -138,6 +165,7 @@ class TestNoPatchingDefaultArgConstants:
     def test_no_test_patches_a_default_arg_constant(self):
         import ast
         import pathlib
+
         root = pathlib.Path(__file__).resolve().parents[1]
         risky = self._default_arg_constants(root)
         assert risky, "没扫到任何默认参数常量，检查本身可能失效了"
@@ -147,7 +175,7 @@ class TestNoPatchingDefaultArgConstants:
                 tree = ast.parse(p.read_text(encoding="utf-8"))
             except SyntaxError:
                 continue
-            alias = {}                       # 别名 → 真实模块名
+            alias = {}  # 别名 → 真实模块名
             for n in ast.walk(tree):
                 if isinstance(n, ast.Import):
                     for al in n.names:
@@ -172,8 +200,11 @@ class TestNoPatchingDefaultArgConstants:
                     continue
                 # 第一个实参通常就是被 patch 的模块对象；用它的名字对上模块文件名
                 tgt = n.args[0]
-                mod = tgt.id if isinstance(tgt, ast.Name) else (
-                    tgt.attr if isinstance(tgt, ast.Attribute) else None)
+                mod = (
+                    tgt.id
+                    if isinstance(tgt, ast.Name)
+                    else (tgt.attr if isinstance(tgt, ast.Attribute) else None)
+                )
                 # ⚠️ 解析导入别名：`import reconcile_positions as rp` 之后
                 # patch 的目标写作 `rp`，而 risky 是按**文件名**建索引的。
                 # 2026-08-06 实测漏报一次（reconcile_positions 的 LEDGER 默认参数），
@@ -182,24 +213,29 @@ class TestNoPatchingDefaultArgConstants:
                 if mod and const in risky.get(mod, set()):
                     offenders.append(
                         f"{p.name}:{n.lineno} patch 了 {mod}.{const}"
-                        f"（它在该模块里被用作函数默认参数 ⇒ patch 不生效）")
+                        f"（它在该模块里被用作函数默认参数 ⇒ patch 不生效）"
+                    )
         assert not offenders, (
             "这些 patch 不会生效——默认参数在 def 时已求值。"
-            "把值改成显式参数（None 时回落默认）：\n  " + "\n  ".join(offenders))
+            "把值改成显式参数（None 时回落默认）：\n  " + "\n  ".join(offenders)
+        )
 
     def test_check_itself_detects_a_planted_case(self, tmp_path):
         """检查函数自己要有测试——写 test_tdx_connection_hygiene 时的教训：
         第一版字符串匹配被一个残留常量骗过、反向验证全绿。"""
         (tmp_path / "src").mkdir()
         (tmp_path / "src" / "m.py").write_text(
-            "SOME_ROOT = 1\ndef f(root=SOME_ROOT):\n    return root\n", encoding="utf-8")
+            "SOME_ROOT = 1\ndef f(root=SOME_ROOT):\n    return root\n", encoding="utf-8"
+        )
         got = self._default_arg_constants(tmp_path)
         assert got.get("m") == {"SOME_ROOT"}, got
         # 短名/小写不该被收进来（避免误报）
         (tmp_path / "src" / "n.py").write_text(
-            "AB = 1\nlower = 2\ndef g(a=AB, b=lower):\n    return a, b\n", encoding="utf-8")
+            "AB = 1\nlower = 2\ndef g(a=AB, b=lower):\n    return a, b\n",
+            encoding="utf-8",
+        )
         got2 = self._default_arg_constants(tmp_path)
-        assert got2.get("n") is None, got2      # 短名/小写都不该被收进来
+        assert got2.get("n") is None, got2  # 短名/小写都不该被收进来
 
 
 class SubprocessTargetTests(unittest.TestCase):
@@ -224,6 +260,7 @@ class SubprocessTargetTests(unittest.TestCase):
         import ast
         import importlib
         import sys
+
         for f in sorted(TOOLS.rglob("*.py")):
             if f.name in ("__init__.py", "conftest.py"):
                 continue
@@ -235,16 +272,21 @@ class SubprocessTargetTests(unittest.TestCase):
             for node in ast.walk(tree):
                 if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)):
                     continue
-                if not (isinstance(node.right, ast.Constant)
-                        and isinstance(node.right.value, str)
-                        and node.right.value.endswith(".py")):
+                if not (
+                    isinstance(node.right, ast.Constant)
+                    and isinstance(node.right.value, str)
+                    and node.right.value.endswith(".py")
+                ):
                     continue
                 # 向左展开多级链：X / "dir" / ... / "x.py"（归堆后 stage 路径至少三段）
                 segs = [node.right.value]
                 cur = node.left
-                while (isinstance(cur, ast.BinOp) and isinstance(cur.op, ast.Div)
-                       and isinstance(cur.right, ast.Constant)
-                       and isinstance(cur.right.value, str)):
+                while (
+                    isinstance(cur, ast.BinOp)
+                    and isinstance(cur.op, ast.Div)
+                    and isinstance(cur.right, ast.Constant)
+                    and isinstance(cur.right.value, str)
+                ):
                     segs.append(cur.right.value)
                     cur = cur.left
                 if not (isinstance(cur, ast.Name) and cur.id.isupper()):
@@ -254,20 +296,27 @@ class SubprocessTargetTests(unittest.TestCase):
                 continue
             try:
                 mod = importlib.import_module(
-                    "custos." + f.relative_to(TOOLS).with_suffix("").as_posix().replace("/", "."))
+                    "custos."
+                    + f.relative_to(TOOLS).with_suffix("").as_posix().replace("/", ".")
+                )
             except Exception:
-                continue          # 导入失败由别的测试负责报告
+                continue  # 导入失败由别的测试负责报告
             for lineno, const, segs in hits:
                 base = getattr(mod, const, None)
                 if isinstance(base, Path):
                     yield f, lineno, const, "/".join(segs), base.joinpath(*segs)
 
     def test_every_subprocess_script_target_exists(self):
-        broken = [f"{f.relative_to(TOOLS.parent)}:{ln}  {const}/{script}"
-                  for f, ln, const, script, p in self._iter_subprocess_targets()
-                  if not p.exists()]
-        self.assertEqual(broken, [], "subprocess 目标脚本不存在（搬迁后漏改路径）：\n  "
-                                     + "\n  ".join(broken))
+        broken = [
+            f"{f.relative_to(TOOLS.parent)}:{ln}  {const}/{script}"
+            for f, ln, const, script, p in self._iter_subprocess_targets()
+            if not p.exists()
+        ]
+        self.assertEqual(
+            broken,
+            [],
+            "subprocess 目标脚本不存在（搬迁后漏改路径）：\n  " + "\n  ".join(broken),
+        )
 
     def test_check_itself_catches_a_planted_break(self):
         """⚠️ 守卫必须自证能抓到 —— 上面那条测试为空也可能是**扫不到任何目标**。
@@ -275,15 +324,25 @@ class SubprocessTargetTests(unittest.TestCase):
         今天有四条测试因为桩不真而静默变 skip，同一个坑不能再踩。
         """
         found = list(self._iter_subprocess_targets())
-        self.assertGreaterEqual(len(found), 15,
-                                f"只扫到 {len(found)} 个 subprocess 目标，扫描逻辑可能失效了")
+        self.assertGreaterEqual(
+            len(found),
+            15,
+            f"只扫到 {len(found)} 个 subprocess 目标，扫描逻辑可能失效了",
+        )
         # 植入一个必然不存在的目标，确认判据真的会判它失败
         import ast
-        tree = ast.parse('X = 1\nsubprocess.run([str(TOOLS / "definitely_absent_xyz.py")])')
-        hits = [n for n in ast.walk(tree)
-                if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Div)
-                and isinstance(n.right, ast.Constant)
-                and str(n.right.value).endswith(".py")]
+
+        tree = ast.parse(
+            'X = 1\nsubprocess.run([str(TOOLS / "definitely_absent_xyz.py")])'
+        )
+        hits = [
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.BinOp)
+            and isinstance(n.op, ast.Div)
+            and isinstance(n.right, ast.Constant)
+            and str(n.right.value).endswith(".py")
+        ]
         self.assertEqual(len(hits), 1, "AST 模式匹配不到植入的用例")
         self.assertFalse((TOOLS / "definitely_absent_xyz.py").exists())
 
@@ -312,9 +371,14 @@ class LocalPathRedefinitionTests(unittest.TestCase):
         from custos.core import paths as paths_mod
 
         # 只取 src 下的子目录常量
-        known = {v: k for k, v in vars(paths_mod).items()
-                 if isinstance(v, Path) and k.isupper()
-                 and v != paths_mod.TOOLS and paths_mod.TOOLS in v.parents}
+        known = {
+            v: k
+            for k, v in vars(paths_mod).items()
+            if isinstance(v, Path)
+            and k.isupper()
+            and v != paths_mod.TOOLS
+            and paths_mod.TOOLS in v.parents
+        }
         offenders = []
         for f in sorted(TOOLS.rglob("*.py")):
             if f.name in ("paths.py", "__init__.py", "conftest.py"):
@@ -327,35 +391,55 @@ class LocalPathRedefinitionTests(unittest.TestCase):
             # 判据是「该赋值出现在 `from paths import` **之前**」—— 用行号比，
             # 不猜变量名（`adjust_factors` 叫 TOOLS_DIR，别的模块叫 _TOOLS_ROOT）。
             paths_import_line = min(
-                (n.lineno for n in ast.walk(tree)
-                 if isinstance(n, ast.ImportFrom) and n.module == "paths"),
-                default=10 ** 9)
-            for node in tree.body:      # 只看模块级赋值
-                if not (isinstance(node, ast.Assign) and len(node.targets) == 1
-                        and isinstance(node.targets[0], ast.Name)
-                        and node.targets[0].id.isupper()):
+                (
+                    n.lineno
+                    for n in ast.walk(tree)
+                    if isinstance(n, ast.ImportFrom) and n.module == "paths"
+                ),
+                default=10**9,
+            )
+            for node in tree.body:  # 只看模块级赋值
+                if not (
+                    isinstance(node, ast.Assign)
+                    and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Name)
+                    and node.targets[0].id.isupper()
+                ):
                     continue
                 if node.lineno < paths_import_line:
-                    continue            # bootstrap，见上
+                    continue  # bootstrap，见上
                 name = node.targets[0].id
                 # 形如 DATA / "market" 或 TOOLS / "market_timing"（不含 .py）
                 v = node.value
-                if not (isinstance(v, ast.BinOp) and isinstance(v.op, ast.Div)
-                        and isinstance(v.right, ast.Constant)
-                        and isinstance(v.right.value, str)
-                        and not v.right.value.endswith(".py")):
+                if not (
+                    isinstance(v, ast.BinOp)
+                    and isinstance(v.op, ast.Div)
+                    and isinstance(v.right, ast.Constant)
+                    and isinstance(v.right.value, str)
+                    and not v.right.value.endswith(".py")
+                ):
                     continue
                 try:
                     import importlib
+
                     mod = importlib.import_module(
-                        "custos." + f.relative_to(TOOLS).with_suffix("").as_posix().replace("/", "."))
+                        "custos."
+                        + f.relative_to(TOOLS)
+                        .with_suffix("")
+                        .as_posix()
+                        .replace("/", ".")
+                    )
                     val = getattr(mod, name, None)
                 except Exception:
                     continue
                 if isinstance(val, Path) and val in known and known[val] != name:
                     offenders.append(
                         f"{f.relative_to(TOOLS.parent)}:{node.lineno}  "
-                        f"{name} 重拼了 paths.{known[val]}")
-        self.assertEqual(offenders, [],
-                         "本地重拼 paths.py 已有的路径（搬迁时必然漏改）：\n  "
-                         + "\n  ".join(offenders))
+                        f"{name} 重拼了 paths.{known[val]}"
+                    )
+        self.assertEqual(
+            offenders,
+            [],
+            "本地重拼 paths.py 已有的路径（搬迁时必然漏改）：\n  "
+            + "\n  ".join(offenders),
+        )

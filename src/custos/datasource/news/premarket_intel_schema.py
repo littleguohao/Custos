@@ -5,6 +5,7 @@
 date/collected_at/holdings/data_quality)。消费端静默降级时报告中不可见,
 因此加载后必须先校验,不合规时显式标注降级。
 """
+
 from __future__ import annotations
 
 from custos.core.paths import read_json, NEWS_DIR
@@ -57,12 +58,14 @@ def validate_premarket_intelligence(data: Any) -> dict[str, Any]:
                 warnings.append(f"{key}[{i}] 缺 direction")
     return {"valid": not errors, "errors": errors, "warnings": warnings}
 
+
 # ══ 文件定位与加载（2026-08-07 从 `daily_report.py` 移来）
 #
 # 为什么移：它们读 `data/news/premarket/`，而 `news/postclose_news_digest`
 # 与 `daily_report` **都要用**。原先放在 `daily_report.py`（根层报告生成器）里，
 # 导致 `news/`（L1 数据/采集层）反向依赖根层编排 —— 分层反转。
 # 放这里则与它们加载的 schema 同处一个模块。
+
 
 def premarket_intelligence_path(day: str) -> Path | None:
     """定位当日盘前情报文件。
@@ -71,8 +74,10 @@ def premarket_intelligence_path(day: str) -> Path | None:
     `2026-07-16_...` 与无连字符 `20260717_...`），加载端必须兼容两种 ——
     这不是我们能单方面统一的口径。
     """
-    for name in (f"{day}_premarket_intelligence.json",
-                 f"{day.replace('-', '')}_premarket_intelligence.json"):
+    for name in (
+        f"{day}_premarket_intelligence.json",
+        f"{day.replace('-', '')}_premarket_intelligence.json",
+    ):
         path = PREMARKET_DIR / name
         if path.exists():
             return path

@@ -3,6 +3,7 @@
 
 离线用例不依赖 TdxW；需要 TdxW 的用例用 skipUnless 守卫。
 """
+
 from __future__ import annotations
 
 import unittest
@@ -11,7 +12,12 @@ from unittest import mock
 
 
 from custos.datasource.local_tdx import tq_sector  # noqa: E402
-from custos.datasource.local_tdx.tq_sector import TQSectorSession, classify_sector, is_tdxw_running, load_sector_names  # noqa: E402
+from custos.datasource.local_tdx.tq_sector import (
+    TQSectorSession,
+    classify_sector,
+    is_tdxw_running,
+    load_sector_names,
+)  # noqa: E402
 
 TDXW_UP = is_tdxw_running()
 
@@ -93,7 +99,9 @@ class TestStructuredErrors(unittest.TestCase):
     def test_initialize_failed(self):
         with (
             mock.patch.object(tq_sector, "is_tdxw_running", return_value=True),
-            mock.patch.object(tq_sector, "_import_tq", side_effect=RuntimeError("boom")),
+            mock.patch.object(
+                tq_sector, "_import_tq", side_effect=RuntimeError("boom")
+            ),
         ):
             session = TQSectorSession(name_map={})
             result = session.build_sector_map()
@@ -114,7 +122,9 @@ class TestStructuredErrors(unittest.TestCase):
             mock.patch.object(tq_sector, "is_tdxw_running", return_value=True),
             mock.patch.object(tq_sector, "_import_tq", return_value=fake_tq),
         ):
-            session = TQSectorSession(name_map={"880201": {"name": "黑龙江", "tdx_type": "3"}})
+            session = TQSectorSession(
+                name_map={"880201": {"name": "黑龙江", "tdx_type": "3"}}
+            )
             result = session.build_sector_map()
         self.assertNotIn("error", result)
         self.assertEqual(result["sector_count"], 2)

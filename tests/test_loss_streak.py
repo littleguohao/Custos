@@ -4,6 +4,7 @@
 owner 2026-08-10 定：连亏冷却**放在复盘环节**，每日/每周统计并判断。
 ⇒ 本模块只产出事实，不拦交易（自动链里 `buy_actions` 恒空，没有买入决策可拦）。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -16,14 +17,23 @@ from custos.pipeline.close_review import loss_streak as ls  # noqa: E402
 
 
 def closing(code, sell_date, net_pnl, *, status="full", name="甲"):
-    return {"code": code, "name": name, "sell_date": sell_date,
-            "net_pnl": net_pnl, "match_status": status}
+    return {
+        "code": code,
+        "name": name,
+        "sell_date": sell_date,
+        "net_pnl": net_pnl,
+        "match_status": status,
+    }
 
 
 class TestStreakCounting:
     def test_two_consecutive_losses_flagged(self):
-        r = ls.loss_streaks([closing("600000", "2026-08-03", -500),
-                             closing("600000", "2026-08-06", -300)])
+        r = ls.loss_streaks(
+            [
+                closing("600000", "2026-08-03", -500),
+                closing("600000", "2026-08-06", -300),
+            ]
+        )
         assert r["flagged"] == ["600000"]
         assert r["streaks"]["600000"]["count"] == 2
         assert r["streaks"]["600000"]["total_net_pnl"] == -800
@@ -40,42 +50,63 @@ class TestStreakCounting:
         不是「历史累计亏损次数」—— 那会让一只长期做得不错的票因为几年前的
         两次亏损被永久标记。
         """
-        r = ls.loss_streaks([closing("600000", "2026-08-01", -500),
-                             closing("600000", "2026-08-03", -400),
-                             closing("600000", "2026-08-05", +900),   # 打断
-                             closing("600000", "2026-08-07", -100)])
+        r = ls.loss_streaks(
+            [
+                closing("600000", "2026-08-01", -500),
+                closing("600000", "2026-08-03", -400),
+                closing("600000", "2026-08-05", +900),  # 打断
+                closing("600000", "2026-08-07", -100),
+            ]
+        )
         assert r["streaks"]["600000"]["count"] == 1
         assert r["flagged"] == [], "盈利之后只剩 1 次亏损，不该仍被标"
 
     def test_streak_is_the_most_recent_segment(self):
-        r = ls.loss_streaks([closing("600000", "2026-08-01", -100),
-                             closing("600000", "2026-08-02", +50),
-                             closing("600000", "2026-08-03", -200),
-                             closing("600000", "2026-08-04", -300),
-                             closing("600000", "2026-08-05", -400)])
+        r = ls.loss_streaks(
+            [
+                closing("600000", "2026-08-01", -100),
+                closing("600000", "2026-08-02", +50),
+                closing("600000", "2026-08-03", -200),
+                closing("600000", "2026-08-04", -300),
+                closing("600000", "2026-08-05", -400),
+            ]
+        )
         v = r["streaks"]["600000"]
         assert v["count"] == 3
         assert v["sell_dates"] == ["2026-08-03", "2026-08-04", "2026-08-05"]
 
     def test_zero_pnl_breaks_streak(self):
         """净盈亏恰好 0 不算亏损 —— 判据是 `< 0`，不是 `<= 0`。"""
-        r = ls.loss_streaks([closing("600000", "2026-08-01", -100),
-                             closing("600000", "2026-08-02", 0.0),
-                             closing("600000", "2026-08-03", -200)])
+        r = ls.loss_streaks(
+            [
+                closing("600000", "2026-08-01", -100),
+                closing("600000", "2026-08-02", 0.0),
+                closing("600000", "2026-08-03", -200),
+            ]
+        )
         assert r["streaks"]["600000"]["count"] == 1
 
     def test_out_of_order_input_is_sorted_by_sell_date(self):
         """入参顺序不可靠（可能来自多个来源），必须按卖出日排序后再判连续。"""
-        r = ls.loss_streaks([closing("600000", "2026-08-05", -400),
-                             closing("600000", "2026-08-01", -100),
-                             closing("600000", "2026-08-03", +50)])
-        assert r["streaks"]["600000"]["count"] == 1, \
-            "排序后最近一段只有 08-05 一次亏损"
+        r = ls.loss_streaks(
+            [
+                closing("600000", "2026-08-05", -400),
+                closing("600000", "2026-08-01", -100),
+                closing("600000", "2026-08-03", +50),
+            ]
+        )
+        assert r["streaks"]["600000"]["count"] == 1, "排序后最近一段只有 08-05 一次亏损"
 
     def test_multiple_codes_sorted_by_count_desc(self):
-        r = ls.loss_streaks([closing("600000", "2026-08-01", -1), closing("600000", "2026-08-02", -1),
-                             closing("000001", "2026-08-01", -1), closing("000001", "2026-08-02", -1),
-                             closing("000001", "2026-08-03", -1)])
+        r = ls.loss_streaks(
+            [
+                closing("600000", "2026-08-01", -1),
+                closing("600000", "2026-08-02", -1),
+                closing("000001", "2026-08-01", -1),
+                closing("000001", "2026-08-02", -1),
+                closing("000001", "2026-08-03", -1),
+            ]
+        )
         assert r["flagged"] == ["000001", "600000"], "连亏多的排前面"
 
 
@@ -85,8 +116,12 @@ class TestExclusionsAreHonest:
     def test_partial_match_excluded_and_counted(self):
         """`partial` 的 gross/net 只覆盖已配平部分、**系统性少算**
         ⇒ 拿它判盈亏会把赚的算成亏的。必须排除**且如实计数**。"""
-        r = ls.loss_streaks([closing("600000", "2026-08-01", -500, status="partial"),
-                             closing("600000", "2026-08-02", -300, status="partial")])
+        r = ls.loss_streaks(
+            [
+                closing("600000", "2026-08-01", -500, status="partial"),
+                closing("600000", "2026-08-02", -300, status="partial"),
+            ]
+        )
         assert r["flagged"] == []
         assert r["streaks"] == {}
         assert r["excluded"]["partial"] == 2
@@ -117,8 +152,12 @@ class TestReportFormatting:
         assert text.strip().startswith("### ")
 
     def test_hit_renders_table_with_evidence(self):
-        r = ls.loss_streaks([closing("600000", "2026-08-03", -500, name="浦发银行"),
-                             closing("600000", "2026-08-06", -300, name="浦发银行")])
+        r = ls.loss_streaks(
+            [
+                closing("600000", "2026-08-03", -500, name="浦发银行"),
+                closing("600000", "2026-08-06", -300, name="浦发银行"),
+            ]
+        )
         text = "\n".join(ls.format_lines(r))
         for token in ("600000", "浦发银行", "2026-08-06", "-800"):
             assert token in text, token
@@ -132,7 +171,9 @@ class TestReusesFifoPair:
     """
 
     def test_no_local_fifo_implementation(self):
-        src = (ROOT / "src" / "custos" / "pipeline" / "close_review" / "loss_streak.py").read_text(encoding="utf-8")
+        src = (
+            ROOT / "src" / "custos" / "pipeline" / "close_review" / "loss_streak.py"
+        ).read_text(encoding="utf-8")
         for bad in ("open_lots", "matched_qty", "'买入'", '"买入"'):
             assert bad not in src, f"loss_streak 里出现 {bad!r} —— 疑似自己实现了配平"
 
@@ -146,19 +187,33 @@ class TestReusesFifoPair:
         from custos.pipeline.close_review import weekly_review as wr
 
         BUY, SELL = wr.BUY, wr.SELL
+
         # ⚠️ `amount`（成交金额）是 `fifo_pair` 的必需字段 —— 第一版漏了它，
         #    KeyError('amount')。这正是本条测试的价值：手写字典的那些测试
         #    永远发现不了「入参形状对不上」。
         def t(side, qty, price, date):
-            return {"code": "600000", "name": "浦发银行", "side": side, "qty": qty,
-                    "price": price, "date": date, "fee": 5.0, "amount": qty * price}
+            return {
+                "code": "600000",
+                "name": "浦发银行",
+                "side": side,
+                "qty": qty,
+                "price": price,
+                "date": date,
+                "fee": 5.0,
+                "amount": qty * price,
+            }
 
-        trades = [t(BUY, 100, 10.0, "2026-08-01"), t(SELL, 100, 9.0, "2026-08-03"),
-                  t(BUY, 100, 9.5, "2026-08-05"), t(SELL, 100, 9.0, "2026-08-07")]
+        trades = [
+            t(BUY, 100, 10.0, "2026-08-01"),
+            t(SELL, 100, 9.0, "2026-08-03"),
+            t(BUY, 100, 9.5, "2026-08-05"),
+            t(SELL, 100, 9.0, "2026-08-07"),
+        ]
         closings = wr.fifo_pair(trades)
         assert closings, "fifo_pair 没产出平仓单 —— 入参形状变了？"
-        assert all("match_status" in c and "net_pnl" in c for c in closings), \
+        assert all("match_status" in c and "net_pnl" in c for c in closings), (
             "fifo_pair 的字段名变了，loss_streak 读不到"
+        )
         r = ls.loss_streaks(closings)
         assert r["flagged"] == ["600000"], f"两次亏损平仓应被标，实际 {r}"
         assert r["streaks"]["600000"]["count"] == 2

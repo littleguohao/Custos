@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """因子层共享小工具。放这里而不是各因子内联，是因为它们跨因子复用。"""
+
 from __future__ import annotations
 
 from typing import Optional

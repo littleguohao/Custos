@@ -5,6 +5,7 @@
 口径备注:live 另有 POOL_ZHENDANG(震荡池低J)为 TQ 私有公式无法历史回放,
 j_low 是可复现的最接近代理。
 """
+
 from __future__ import annotations
 
 import json
@@ -25,8 +26,10 @@ from custos.datasource.local_tdx import local_tdx_data  # noqa: E402
 
 COST = 0.003
 SETS = {
-    "reversal_k(研究)": [LOGS / "walkforward" / "firings_rk_2026Jan_tdx.json",
-                       LOGS / "walkforward" / "firings_rk_2026H1_tdx.json"],
+    "reversal_k(研究)": [
+        LOGS / "walkforward" / "firings_rk_2026Jan_tdx.json",
+        LOGS / "walkforward" / "firings_rk_2026H1_tdx.json",
+    ],
     "j_low(live代理)": [LOGS / "walkforward" / "firings_jlow_2026H1_tdx.json"],
 }
 
@@ -49,6 +52,7 @@ def main() -> None:
     # argparse 仅为 --help：此前无参数解析，"--help" 会静默跑完整分析
     # （加载 walkforward 日志 + 逐票 TDX 取数，裸跑挂数分钟）。
     import argparse
+
     argparse.ArgumentParser(description=__doc__).parse_args()
     pit = scan._pit_index(DATA / "fundamentals" / "pit_financials.jsonl")
     regime = bt.load_amv_regime(since="2024-01-01")
@@ -84,7 +88,7 @@ def main() -> None:
         for fp in files:
             payload = json.loads(fp.read_text(encoding="utf-8"))
             for r in payload.get("records") or []:
-                for d in (r.get("days") or []):
+                for d in r.get("days") or []:
                     key = (r["code"], d[0])
                     if key in seen:
                         continue
@@ -108,25 +112,34 @@ def main() -> None:
         rets = [t["ret"] for t in allt]
         wins = [r for r in rets if r > 0]
         print(f"\n=== {name}: 总信号 {len(allt)} ===")
-        print(f"  胜率 {len(wins)/len(rets)*100:.1f}%  期望 {statistics.mean(rets)*100:+.2f}%/笔  "
-              f"中位 {statistics.median(rets)*100:+.2f}%")
+        print(
+            f"  胜率 {len(wins) / len(rets) * 100:.1f}%  期望 {statistics.mean(rets) * 100:+.2f}%/笔  "
+            f"中位 {statistics.median(rets) * 100:+.2f}%"
+        )
         for kind in ("可买候选", "待0AMV做多", "前哨"):
             grp = cohorts.get(kind, [])
             if grp:
                 g = [t["ret"] for t in grp]
                 gw = [r for r in g if r > 0]
-                print(f"    {kind:<12} n={len(grp):<5} 胜率 {len(gw)/len(g)*100:.1f}%  "
-                      f"期望 {statistics.mean(g)*100:+.2f}%/笔")
+                print(
+                    f"    {kind:<12} n={len(grp):<5} 胜率 {len(gw) / len(g) * 100:.1f}%  "
+                    f"期望 {statistics.mean(g) * 100:+.2f}%/笔"
+                )
 
     # 牛股命中对比
     print("\n=== 各自 Top10(收益) ===")
     # 走统一 loader:缓存已改为带 generated_at 的新格式,直接 json.loads 会拿到
     # {"names": {...}} 这层壳而不是名称表本身(新旧格式兼容见 stock_names.load_cache)。
     from custos.datasource.local_tdx import stock_names
+
     names, _meta = stock_names.load_cache()
     for name in SETS:
-        tops = [(f"{t['code']} {names.get(t['code'], '')[:6]}({t['date']},{t['ret']*100:+.0f}%)" )
-                for t in best[name]]
+        tops = [
+            (
+                f"{t['code']} {names.get(t['code'], '')[:6]}({t['date']},{t['ret'] * 100:+.0f}%)"
+            )
+            for t in best[name]
+        ]
         print(f"  {name}: " + "、".join(tops))
     top_codes = {t["code"] for name in SETS for t in best[name][:5]}
     for c in sorted(top_codes):

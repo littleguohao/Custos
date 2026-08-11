@@ -7,6 +7,7 @@
 ——「没抛异常」被当成「拿到数据」。源码里记着它差点犯：
 `get_online_bars` 返回 0行×0列却被记成 3/3 成功。本文件把这条钉住。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -24,6 +25,7 @@ class TestEmptyIsNotSuccess:
 
     def test_empty_dataframe_counted_as_empty(self):
         import pandas as pd
+
         pr = P.Probe("g", "n").run(lambda: pd.DataFrame(), repeat=3)
         d = pr.as_dict()
         assert d["ok"] == 0 and d["empty"] == 3
@@ -83,6 +85,7 @@ class TestDescribe:
 
     def test_dataframe_shape(self):
         import pandas as pd
+
         s = P._describe(pd.DataFrame({"a": [1, 2], "b": [3, 4]}))
         assert "2" in s and ("a" in s or "col" in s.lower())
 
@@ -101,6 +104,7 @@ class TestDescribe:
         本模块最明确的契约「任何异常都收进 error 字段，不向上抛」，
         并中断整轮探测（拿不到其余数据源的现状）。
         """
+
         class Weird:
             def __repr__(self):
                 raise RuntimeError("no repr")
@@ -112,10 +116,13 @@ class TestDescribe:
 
     def test_probe_run_survives_undescribable_result(self):
         """端到端：返回值无法描述时 `run` 仍要正常收尾。"""
+
         class Weird:
             def __repr__(self):
                 raise RuntimeError("x")
+
             __str__ = __repr__
+
             def __len__(self):
                 return 1
 
@@ -127,9 +134,11 @@ class TestReport:
     def test_report_prints_all_groups(self, capsys):
         """`report` 是**打印器**（返回 None）。它必须把每个探针都打出来 ——
         少打一行就等于治理文档里那一格没数据却没人知道。"""
-        probes = [P.Probe("mootdx", "daily").run(lambda: [1], 1),
-                  P.Probe("mootdx", "quotes").run(lambda: None, 1),
-                  P.Probe("tq", "sector", wired=False).run(lambda: 1 / 0, 1)]
+        probes = [
+            P.Probe("mootdx", "daily").run(lambda: [1], 1),
+            P.Probe("mootdx", "quotes").run(lambda: None, 1),
+            P.Probe("tq", "sector", wired=False).run(lambda: 1 / 0, 1),
+        ]
         assert P.report(probes) is None
         text = capsys.readouterr().out
         for g in ("mootdx", "tq"):
@@ -140,6 +149,7 @@ class TestReport:
     def test_report_marks_not_wired(self):
         """⚠️ 报告要能看出「探过但没接入」—— 否则会被当成在用。"""
         import io, contextlib
+
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             P.report([P.Probe("tq", "x", wired=False).run(lambda: [1], 1)])
@@ -149,6 +159,7 @@ class TestReport:
     def _out(probes):
         import contextlib
         import io
+
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             P.report(probes)

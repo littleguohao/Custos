@@ -6,6 +6,7 @@ even if the 08:50 collector failed (e.g. TdxW not running at that time).
 
 Preserves all other fields in market_timing_input.json (AMV, macro, etc.).
 """
+
 from __future__ import annotations
 
 import json
@@ -28,8 +29,8 @@ INDICES = {
 }
 
 # Market breadth/sentiment codes
-BREADTH_CODE = "880005.SH"   # close=涨家数, open=涨家数(开盘)
-SENTIMENT_CODE = "880006.SH" # close=涨停数(收盘), high=涨停数(最高), low=跌停数(最低)
+BREADTH_CODE = "880005.SH"  # close=涨家数, open=涨家数(开盘)
+SENTIMENT_CODE = "880006.SH"  # close=涨停数(收盘), high=涨停数(最高), low=跌停数(最低)
 # 跌家数口径见 breadth_basis：原先这里有 TOTAL_STOCKS_APPROX = 5530 硬编码近似总数推算
 # 跌家数（把平盘/停牌计入下跌 ⇒ up_down_ratio 系统性偏低，而 scorer 直接吃这个比值）。
 
@@ -62,12 +63,14 @@ def compute_index(code: str) -> dict:
     rows = []
     for _, r in df.iterrows():
         dt = r.get("date")
-        rows.append({
-            "date": dt.strftime("%Y%m%d") if hasattr(dt, "strftime") else str(dt),
-            "close": to_float(r.get("close")),
-            "amount": to_float(r.get("amount")),
-            "volume": to_float(r.get("volume")),
-        })
+        rows.append(
+            {
+                "date": dt.strftime("%Y%m%d") if hasattr(dt, "strftime") else str(dt),
+                "close": to_float(r.get("close")),
+                "amount": to_float(r.get("amount")),
+                "volume": to_float(r.get("volume")),
+            }
+        )
     rows = sorted(rows, key=lambda x: x["date"])
     if not rows:
         return {"available": False, "source": "vipdoc_day"}
@@ -115,6 +118,7 @@ def compute_index(code: str) -> dict:
 
 def main():
     import argparse
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", required=True)
     args = ap.parse_args()
@@ -133,8 +137,11 @@ def main():
     for name, code in INDICES.items():
         cur = existing.get(name, {})
         # Only refresh if not available, missing daily_change_pct, or stale (latest_date < --date)
-        if (cur.get("available") and cur.get("daily_change_pct") is not None
-                and not _is_stale(cur.get("latest_date"), args.date)):
+        if (
+            cur.get("available")
+            and cur.get("daily_change_pct") is not None
+            and not _is_stale(cur.get("latest_date"), args.date)
+        ):
             continue
         fresh = compute_index(code)
         if fresh.get("available"):
@@ -144,7 +151,9 @@ def main():
             existing[name] = fresh
             updated = True
             indices_fixed += 1
-            print(f"[OK] {name}: close={fresh['latest_close']}, change={fresh.get('daily_change_pct')}%")
+            print(
+                f"[OK] {name}: close={fresh['latest_close']}, change={fresh.get('daily_change_pct')}%"
+            )
 
     if updated:
         mkt["a_share_indices"] = existing
@@ -167,9 +176,11 @@ def main():
             print(f"[OK] turnover: {daily_amount} (from 上证指数)")
 
     # Also try 880001 for full-market turnover and turnover_change_pct
-    turnover_needs_fix = (not mkt.get("turnover")
-                          or mkt.get("turnover", {}).get("turnover_change_pct") is None
-                          or _is_stale(mkt.get("turnover", {}).get("as_of"), args.date))
+    turnover_needs_fix = (
+        not mkt.get("turnover")
+        or mkt.get("turnover", {}).get("turnover_change_pct") is None
+        or _is_stale(mkt.get("turnover", {}).get("as_of"), args.date)
+    )
     if turnover_needs_fix:
         try:
             df_880001 = ltd.get_ohlcv_table("880001.SH", count=5, prefer="vipdoc")
@@ -204,8 +215,12 @@ def main():
 
     # Refresh market breadth (涨跌家数) from 880005.SH
     breadth = mkt.get("market_breadth", {})
-    if (not breadth or breadth.get("quality") in (None, "missing", "")
-            or breadth.get("up_count") is None or _is_stale(breadth.get("as_of"), args.date)):
+    if (
+        not breadth
+        or breadth.get("quality") in (None, "missing", "")
+        or breadth.get("up_count") is None
+        or _is_stale(breadth.get("as_of"), args.date)
+    ):
         try:
             df_bd = ltd.get_ohlcv_table(BREADTH_CODE, count=3, prefer="vipdoc")
             if not df_bd.empty:
@@ -214,8 +229,11 @@ def main():
                 bd_date = str(last_bd.get("date", ""))
                 # 跌家数无真实来源时标 unavailable，不用硬编码总数推算（见 breadth_basis）
                 total, total_source = resolve_total_stocks()
-                counts = breadth_counts(int(up_count) if up_count else None,
-                                        total=total, source=total_source)
+                counts = breadth_counts(
+                    int(up_count) if up_count else None,
+                    total=total,
+                    source=total_source,
+                )
                 mkt["market_breadth"] = {
                     "up_count": int(up_count) if up_count else None,
                     "down_count": counts["down_count"],
@@ -229,16 +247,22 @@ def main():
                     "as_of": bd_date[:10] if bd_date else "",
                 }
                 updated = True
-                print(f"[OK] market_breadth: up={int(up_count) if up_count else 'N/A'}, "
-                      f"down={counts['down_count'] if counts['down_count'] is not None else 'unavailable'} "
-                      f"(from 880005, ratio={counts['up_down_ratio_status']})")
+                print(
+                    f"[OK] market_breadth: up={int(up_count) if up_count else 'N/A'}, "
+                    f"down={counts['down_count'] if counts['down_count'] is not None else 'unavailable'} "
+                    f"(from 880005, ratio={counts['up_down_ratio_status']})"
+                )
         except Exception as e:
             print(f"[WARN] 880005 breadth fetch failed: {e}")
 
     # Refresh sentiment (涨跌停) from 880006.SH
     sentiment = mkt.get("sentiment", {})
-    if (not sentiment or sentiment.get("quality") in (None, "missing", "")
-            or sentiment.get("limit_up_count") is None or _is_stale(sentiment.get("as_of"), args.date)):
+    if (
+        not sentiment
+        or sentiment.get("quality") in (None, "missing", "")
+        or sentiment.get("limit_up_count") is None
+        or _is_stale(sentiment.get("as_of"), args.date)
+    ):
         try:
             df_st = ltd.get_ohlcv_table(SENTIMENT_CODE, count=3, prefer="vipdoc")
             if not df_st.empty:
@@ -247,7 +271,11 @@ def main():
                 limit_up_max = to_float(last_st.get("high"))
                 limit_down_max = to_float(last_st.get("low"))
                 once_up = limit_up_max if limit_up_max else None
-                blowup = round((once_up - limit_up_close) / once_up, 4) if once_up and limit_up_close is not None and once_up else None
+                blowup = (
+                    round((once_up - limit_up_close) / once_up, 4)
+                    if once_up and limit_up_close is not None and once_up
+                    else None
+                )
                 st_date = str(last_st.get("date", ""))
                 mkt["sentiment"] = {
                     "limit_up_count": int(limit_up_close) if limit_up_close else None,
@@ -261,13 +289,19 @@ def main():
                     "as_of": st_date[:10] if st_date else "",
                 }
                 updated = True
-                print(f"[OK] sentiment: limit_up={int(limit_up_close) if limit_up_close else 'N/A'}, once_up={int(once_up) if once_up else 'N/A'}, limit_down={int(limit_down_max) if limit_down_max else 'N/A'} (from 880006)")
+                print(
+                    f"[OK] sentiment: limit_up={int(limit_up_close) if limit_up_close else 'N/A'}, once_up={int(once_up) if once_up else 'N/A'}, limit_down={int(limit_down_max) if limit_down_max else 'N/A'} (from 880006)"
+                )
         except Exception as e:
             print(f"[WARN] 880006 sentiment fetch failed: {e}")
 
     if updated:
-        market_path.write_text(json.dumps(mkt, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"[DONE] {indices_fixed} indices refreshed, market_timing_input.json updated")
+        market_path.write_text(
+            json.dumps(mkt, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        print(
+            f"[DONE] {indices_fixed} indices refreshed, market_timing_input.json updated"
+        )
     else:
         print("[SKIP] all indices already available, no refresh needed")
 

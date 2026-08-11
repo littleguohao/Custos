@@ -20,6 +20,7 @@ Python 会建**两个模块对象**。而本模块持有**可变的模块级缓�
 
 ⇒ **规则：持有可变模块级状态的模块，一律包限定导入。**
 """
+
 from __future__ import annotations
 
 import json
@@ -51,12 +52,14 @@ def shares_idx() -> dict:
         idx: dict[str, list] = {}
         try:
             from custos.core.paths import DATA  # noqa: PLC0415
+
             p = DATA / "fundamentals" / "share_changes.jsonl"
             if p.is_file():
                 idx = events_to_idx(
                     json.loads(line)
                     for line in p.read_text(encoding="utf-8").splitlines()
-                    if line.strip())
+                    if line.strip()
+                )
         except Exception:  # noqa: BLE001
             idx = {}
         _SHARE_IDX = idx

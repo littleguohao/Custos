@@ -62,7 +62,9 @@ class ParseWscnLivesTests(unittest.TestCase):
             first["published_at"],
             datetime.fromtimestamp(1784272800, timezone.utc).isoformat(),
         )
-        self.assertEqual(first["source_url"], "https://wallstreetcn.com/livenews/123456")
+        self.assertEqual(
+            first["source_url"], "https://wallstreetcn.com/livenews/123456"
+        )
         self.assertEqual(first["feed_url"], SRC["url"])
         self.assertEqual(first["source_id"], "wscn_lives")
         self.assertEqual(first["source_tier"], "B")
@@ -74,12 +76,16 @@ class ParseWscnLivesTests(unittest.TestCase):
         self.assertIsNone(items[1]["published_at"])
         self.assertEqual(items[1]["title"], "央行开展500亿元逆回购操作。")
         # 实测 API 无 uri 字段:按 id 构造 wallstreetcn.com/livenews/{id}
-        self.assertEqual(items[1]["source_url"], "https://wallstreetcn.com/livenews/123458")
+        self.assertEqual(
+            items[1]["source_url"], "https://wallstreetcn.com/livenews/123458"
+        )
 
     def test_duplicate_group_id_matches_content_norm(self):
         first = self.parse()[0]
         norm = re.sub(r"\W+", "", first["summary"].lower())[:300]
-        self.assertEqual(first["duplicate_group_id"], hashlib.sha256(norm.encode()).hexdigest()[:20])
+        self.assertEqual(
+            first["duplicate_group_id"], hashlib.sha256(norm.encode()).hexdigest()[:20]
+        )
 
     def test_bad_code_raises(self):
         with self.assertRaises(ValueError):

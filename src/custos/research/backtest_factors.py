@@ -14,6 +14,7 @@ CLI（在有本地通达信日线的机器上跑）::
 
 评估逻辑与数据加载解耦：evaluate() 接收 {code: DataFrame}，便于单测注入合成 bars。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -50,20 +51,30 @@ from custos.core.factors.reversal_quality import score as _sc_reversal_quality  
 from custos.core.factors.reversal_quality_inv import score as _sc_reversal_quality_inv  # noqa: E402
 
 
-from custos.core.indicators import bbi_series as _bbi_series, macd_series as _macd_series  # noqa: E402
+from custos.core.indicators import (
+    bbi_series as _bbi_series,
+    macd_series as _macd_series,
+)  # noqa: E402
 from custos.core.indicators import dmi_arrays  # noqa: E402  DMI/ADX 唯一实现
 from custos.core.indicators import amplitude_pct as amplitude_pct_of  # noqa: E402  振幅唯一实现
 from custos.core.code_utils import price_limit_pct  # noqa: E402
+
 
 def _bbi_series_from(df: pd.DataFrame) -> np.ndarray:
     """DataFrame 入口的 BBI（返回 ndarray）—— 逐 bar 评估里用 ndarray 更快。"""
     return _bbi_series(df["close"]).to_numpy()
 
 
-from custos.core.factors.s_shape import compute_s_shape, compute_s_reversal, SSHAPE_MIN_BARS, SSTAR_STRONG, SSTAR_MID  # noqa: E402
+from custos.core.factors.s_shape import (
+    compute_s_shape,
+    compute_s_reversal,
+    SSHAPE_MIN_BARS,
+    SSTAR_STRONG,
+    SSTAR_MID,
+)  # noqa: E402
 
 try:
-    from custos.core.indicators import kdj as _kdj # noqa: E402
+    from custos.core.indicators import kdj as _kdj  # noqa: E402
 except Exception:  # noqa: BLE001
     _kdj = None
 
@@ -82,7 +93,9 @@ def j_low_gate(df_slice: pd.DataFrame) -> bool:
     if _kdj is None:
         return False
     r = _kdj(df_slice)
-    return bool(r.get("available") and r.get("j") is not None and r["j"] < J_LOW_THRESHOLD)
+    return bool(
+        r.get("available") and r.get("j") is not None and r["j"] < J_LOW_THRESHOLD
+    )
 
 
 # 完整 B1 反转K：J<13 + 缩量(量比≤50%) + 20日量底10% + 收盘变动±2% + 振幅≤7%（企稳，非落刀）
@@ -107,19 +120,23 @@ def reversal_k_gate(df_slice: pd.DataFrame) -> bool:
         return False
     try:
         r = _kdj(df_slice)
-        if not (r.get("available") and r.get("j") is not None and r["j"] < J_LOW_THRESHOLD):
+        if not (
+            r.get("available") and r.get("j") is not None and r["j"] < J_LOW_THRESHOLD
+        ):
             return False
         close = df_slice["close"].astype(float).values
         high = df_slice["high"].astype(float).values
         low = df_slice["low"].astype(float).values
         vol = df_slice["volume"].astype(float).values
         vma5 = vol[-6:-1].mean() if len(vol) >= 6 else vol[:-1].mean()
-        if not (vma5 > 0 and vol[-1] / vma5 <= REVK_VOL_RATIO):        # 量比≤50%
+        if not (vma5 > 0 and vol[-1] / vma5 <= REVK_VOL_RATIO):  # 量比≤50%
             return False
         v20 = vol[-20:]
-        if (v20 < vol[-1]).mean() > REVK_VOL_PCTILE:                   # 当日量在20日底部10%（`<`，与 live 同向）
+        if (
+            v20 < vol[-1]
+        ).mean() > REVK_VOL_PCTILE:  # 当日量在20日底部10%（`<`，与 live 同向）
             return False
-        chg = (close[-1] / close[-2] - 1) * 100 if close[-2] else 99   # 收盘变动 ±2%
+        chg = (close[-1] / close[-2] - 1) * 100 if close[-2] else 99  # 收盘变动 ±2%
         # 判定精度 = 显示精度（round-2），同 live 的 b1_thresholds.change_in_range。
         # 不直接调 change_in_range：它读 env 覆盖值，而研究侧要钉死默认 ±2%。
         if not (-REVK_CHG_PCT <= round(chg, 2) <= REVK_CHG_PCT):
@@ -137,7 +154,7 @@ def reversal_k_gate(df_slice: pd.DataFrame) -> bool:
 
 
 ENTRY_GATES: dict[str, Optional[Callable[[pd.DataFrame], bool]]] = {
-    "none": None,        # 每根 K 线都当信号（全市场基线）
+    "none": None,  # 每根 K 线都当信号（全市场基线）
     "j_low": j_low_gate,  # 只在 J<13 入场区评估（仅J,含落刀）
     "reversal_k": reversal_k_gate,  # 完整 B1 反转K：J<13+缩量企稳(排除贴低落刀)
     "j_macd_turn": None,  # 占位，下方 j_low_macd_turn_gate 定义后回填
@@ -161,10 +178,12 @@ def j_low_macd_turn_gate(df_slice: pd.DataFrame) -> bool:
         return False
     try:
         r = _kdj(df_slice)
-        if not (r.get("available") and r.get("j") is not None and r["j"] < J_LOW_THRESHOLD):
+        if not (
+            r.get("available") and r.get("j") is not None and r["j"] < J_LOW_THRESHOLD
+        ):
             return False
         h = _macd_hist(df_slice["close"])
-        return bool(len(h) >= 2 and h.iloc[-1] > h.iloc[-2])   # 柱上行(拐头)
+        return bool(len(h) >= 2 and h.iloc[-1] > h.iloc[-2])  # 柱上行(拐头)
     except Exception:  # noqa: BLE001
         return False
 
@@ -184,7 +203,9 @@ def j_low_dif_pos_gate(df_slice: pd.DataFrame) -> bool:
         return False
     try:
         r = _kdj(df_slice)
-        if not (r.get("available") and r.get("j") is not None and r["j"] < J_LOW_THRESHOLD):
+        if not (
+            r.get("available") and r.get("j") is not None and r["j"] < J_LOW_THRESHOLD
+        ):
             return False
         return bool(_macd_dif_series(df_slice["close"]).iloc[-1] > 0)
     except Exception:  # noqa: BLE001
@@ -209,7 +230,9 @@ def _j_low_adx_gate(df_slice: pd.DataFrame, thr: float) -> bool:
         return False
     try:
         r = _kdj(df_slice)
-        if not (r.get("available") and r.get("j") is not None and r["j"] < J_LOW_THRESHOLD):
+        if not (
+            r.get("available") and r.get("j") is not None and r["j"] < J_LOW_THRESHOLD
+        ):
             return False
         a = _adx_last(df_slice)
         return bool(a == a and a >= thr)
@@ -272,16 +295,23 @@ def gate_stats_report() -> dict[str, Any]:
     lines: list[str] = []
     for name, st in sorted(GATE_STATS.items()):
         n_bad = sum(st.get(k, 0) for k in BROKEN_GATE_KINDS)
-        lines.append(f"  {name}: 命中 {st.get('hit', 0)} / 不命中 {st.get('miss', 0)}"
-                     f" / 依赖缺失 {st.get('dep_missing', 0)} / 异常 {st.get('error', 0)}"
-                     f" / 历史不足 {st.get('short_history', 0)}")
+        lines.append(
+            f"  {name}: 命中 {st.get('hit', 0)} / 不命中 {st.get('miss', 0)}"
+            f" / 依赖缺失 {st.get('dep_missing', 0)} / 异常 {st.get('error', 0)}"
+            f" / 历史不足 {st.get('short_history', 0)}"
+        )
         if n_bad:
             broken.append({"gate": name, "n_failed": n_bad, **st})
     if broken:
-        lines.append("  ⚠️ 上列门槛存在**依赖缺失/异常**:这些 K 线根本没被评估过,"
-                     "不得据此下'该因子无判别力'的结论——先修依赖再重跑")
-    return {"broken": broken, "stats": {k: dict(v) for k, v in GATE_STATS.items()},
-            "text": "\n".join(lines)}
+        lines.append(
+            "  ⚠️ 上列门槛存在**依赖缺失/异常**:这些 K 线根本没被评估过,"
+            "不得据此下'该因子无判别力'的结论——先修依赖再重跑"
+        )
+    return {
+        "broken": broken,
+        "stats": {k: dict(v) for k, v in GATE_STATS.items()},
+        "text": "\n".join(lines),
+    }
 
 
 def platform_pullback_gate(df_slice: pd.DataFrame) -> bool:
@@ -295,17 +325,21 @@ def platform_pullback_gate(df_slice: pd.DataFrame) -> bool:
         from custos.core.factors.platform_pullback import detect_platform_pullback  # noqa: PLC0415
     except Exception as exc:  # noqa: BLE001
         _note_gate("platform_pullback", "dep_missing")
-        _warn_once("platform_pullback:dep",
-                   f"platform_pullback 检测器不可用({exc}):该入场门槛将全程 0 命中,"
-                   "结果只能读成'没跑成'而非'无判别力'")
+        _warn_once(
+            "platform_pullback:dep",
+            f"platform_pullback 检测器不可用({exc}):该入场门槛将全程 0 命中,"
+            "结果只能读成'没跑成'而非'无判别力'",
+        )
         return False
     try:
         hit = detect_platform_pullback(df_slice) is not None
     except Exception as exc:  # noqa: BLE001
         _note_gate("platform_pullback", "error")
-        _warn_once("platform_pullback:err",
-                   f"platform_pullback 检测器异常({exc.__class__.__name__}: {exc}):"
-                   "该 K 线未被评估,已计入 GATE_STATS.error")
+        _warn_once(
+            "platform_pullback:err",
+            f"platform_pullback 检测器异常({exc.__class__.__name__}: {exc}):"
+            "该 K 线未被评估,已计入 GATE_STATS.error",
+        )
         return False
     _note_gate("platform_pullback", "hit" if hit else "miss")
     return hit
@@ -324,17 +358,24 @@ def _sc_s_shape(df: pd.DataFrame, code: str):
     r = compute_s_shape(df, code)
     if not r.get("available"):
         return None
-    return {"score": r["s_star"], "suggestion": r["suggestion"],
-            "aux": {"s_shape": r["s_shape"], "delta": r["delta"], "penalty": r["penalty"]},
-            "components": _components(r)}
+    return {
+        "score": r["s_star"],
+        "suggestion": r["suggestion"],
+        "aux": {"s_shape": r["s_shape"], "delta": r["delta"], "penalty": r["penalty"]},
+        "components": _components(r),
+    }
 
 
 def _sc_s_reversal(df: pd.DataFrame, code: str):
     r = compute_s_reversal(df, code)
     if not r.get("available"):
         return None
-    return {"score": r["s_reversal"], "suggestion": r["suggestion"], "aux": {},
-            "components": _components(r)}
+    return {
+        "score": r["s_reversal"],
+        "suggestion": r["suggestion"],
+        "aux": {},
+        "components": _components(r),
+    }
 
 
 def _sc_invert_s_shape(df: pd.DataFrame, code: str):
@@ -343,8 +384,12 @@ def _sc_invert_s_shape(df: pd.DataFrame, code: str):
         return None
     inv = round(100.0 - float(r["s_star"]), 1)
     sug = "可买" if inv >= 70 else ("观望" if inv >= 60 else "不买")
-    return {"score": inv, "suggestion": sug, "aux": {"s_shape_star": r["s_star"]},
-            "components": _components(r)}
+    return {
+        "score": inv,
+        "suggestion": sug,
+        "aux": {"s_shape_star": r["s_star"]},
+        "components": _components(r),
+    }
 
 
 # 可选打分器：同一批信号可跑三方对比（突破式 vs 买弱式 vs 反转突破分）
@@ -353,18 +398,27 @@ def _sc_b1_pullback(df: pd.DataFrame, code: str):
     # 函数本体在因子层 `factors/b1_pullback_fit.py`；此前从 `enrich_candidates`
     # 导入只是蹭它顶层的偶然再导出（2026-08-08 订正）。保持 lazy：避免重导入开销。
     from custos.core.factors.b1_pullback_fit import compute_b1_pullback_fit  # noqa: PLC0415
+
     r = compute_b1_pullback_fit(df)
     if not r.get("available"):
         return None
-    return {"score": round(r["score"] / 7 * 100, 1),
-            "suggestion": "可买" if r.get("hit") else "不买",
-            "aux": {"fit_raw": r["score"], "hit": r["hit"]},
-            "components": {k: (1.0 if v else 0.0) for k, v in (r.get("components") or {}).items()}}
+    return {
+        "score": round(r["score"] / 7 * 100, 1),
+        "suggestion": "可买" if r.get("hit") else "不买",
+        "aux": {"fit_raw": r["score"], "hit": r["hit"]},
+        "components": {
+            k: (1.0 if v else 0.0) for k, v in (r.get("components") or {}).items()
+        },
+    }
 
 
-SCORERS = {"s_shape": _sc_s_shape, "s_reversal": _sc_s_reversal,
-           "invert_s_shape": _sc_invert_s_shape, "b1_pullback": _sc_b1_pullback,
-           "baseline": _sc_baseline}
+SCORERS = {
+    "s_shape": _sc_s_shape,
+    "s_reversal": _sc_s_reversal,
+    "invert_s_shape": _sc_invert_s_shape,
+    "b1_pullback": _sc_b1_pullback,
+    "baseline": _sc_baseline,
+}
 
 
 # --- 借鉴「101 Formulaic Alphas」(Kakushadze 2016) 的思想：纯**选择器**,配 --entry-filter 定义 B1 池,
@@ -407,9 +461,12 @@ SCORERS["kdj_j"] = _sc_kdj_j
 # compression)不进技术轴;轴1 软加权。依据 other/good_b1.pptx 九例形态统计,详见
 # b1_dual_factor 模块 docstring。**先回测验证再谈接入选股链。**
 try:
-    from custos.core.factors.b1_dual_factor import (compute_b1_dual, compute_long_structure,
-                                detect_breakout_pullback_b1,
-                                detect_weekly_b1_resonance)
+    from custos.core.factors.b1_dual_factor import (
+        compute_b1_dual,
+        compute_long_structure,
+        detect_breakout_pullback_b1,
+        detect_weekly_b1_resonance,
+    )
 except Exception:  # noqa: BLE001 —— 缺依赖时不阻断其它 scorer
     compute_b1_dual = None
 
@@ -421,13 +478,18 @@ def _sc_b1_dual(df: pd.DataFrame, code: str):
     r = compute_b1_dual(df, code)
     if not r.get("available"):
         return None
-    return {"score": r["score"], "suggestion": r["suggestion"],
-            "aux": {"long_structure": r["long_structure"],
-                    "short_reversal": r["short_reversal"],
-                    "qsx_gt_dks": r["qsx_gt_dks"],
-                    "weekly_resonance": r["weekly_resonance"],
-                    "score_without_resonance": r["score_without_resonance"]},
-            "components": {"struct": r["long_structure"], "reversal": r["short_reversal"]}}
+    return {
+        "score": r["score"],
+        "suggestion": r["suggestion"],
+        "aux": {
+            "long_structure": r["long_structure"],
+            "short_reversal": r["short_reversal"],
+            "qsx_gt_dks": r["qsx_gt_dks"],
+            "weekly_resonance": r["weekly_resonance"],
+            "score_without_resonance": r["score_without_resonance"],
+        },
+        "components": {"struct": r["long_structure"], "reversal": r["short_reversal"]},
+    }
 
 
 def _sc_long_structure(df: pd.DataFrame, code: str):
@@ -437,8 +499,12 @@ def _sc_long_structure(df: pd.DataFrame, code: str):
     r = compute_long_structure(df)
     if not r.get("available"):
         return None
-    return {"score": r["score"], "suggestion": "可买" if r["score"] >= 70 else "不买",
-            "aux": {"qsx_gt_dks": r["qsx_gt_dks"]}, "components": r["components"]}
+    return {
+        "score": r["score"],
+        "suggestion": "可买" if r["score"] >= 70 else "不买",
+        "aux": {"qsx_gt_dks": r["qsx_gt_dks"]},
+        "components": r["components"],
+    }
 
 
 if compute_b1_dual is not None:
@@ -454,9 +520,12 @@ def _sc_b1_dual_no_resonance(df: pd.DataFrame, code: str):
     if not r.get("available"):
         return None
     base = r["score_without_resonance"]
-    return {"score": base, "suggestion": "可买" if base >= 70 else "不买",
-            "aux": {"weekly_resonance": r["weekly_resonance"]},
-            "components": {"struct": r["long_structure"], "reversal": r["short_reversal"]}}
+    return {
+        "score": base,
+        "suggestion": "可买" if base >= 70 else "不买",
+        "aux": {"weekly_resonance": r["weekly_resonance"]},
+        "components": {"struct": r["long_structure"], "reversal": r["short_reversal"]},
+    }
 
 
 if compute_b1_dual is not None:
@@ -526,7 +595,11 @@ if compute_b1_dual is not None:
 
 # ---- B2 战法 + 底部异动（来源 other/B1.pdf；见 b2_surge_factor 模块 docstring）----
 try:
-    from custos.core.factors.b2_surge_factor import detect_b2, detect_bottom_surge, detect_surge_then_b1
+    from custos.core.factors.b2_surge_factor import (
+        detect_b2,
+        detect_bottom_surge,
+        detect_surge_then_b1,
+    )
 except Exception:  # noqa: BLE001
     detect_b2 = None
 
@@ -591,14 +664,27 @@ def _sc_b2(df: pd.DataFrame, code: str):
     r = detect_b2(df, code)
     if not r.get("available"):
         return None
-    hard = (int(bool(r["b1_before"])) + int(bool(r["gain_ok"]))
-            + int(bool(r["vol_up"])) + int(bool(r["j_ok"])))
+    hard = (
+        int(bool(r["b1_before"]))
+        + int(bool(r["gain_ok"]))
+        + int(bool(r["vol_up"]))
+        + int(bool(r["j_ok"]))
+    )
     score = hard * 20.0 + (20.0 if r.get("no_upper_shadow") else 0.0)
-    return {"score": round(score, 1), "suggestion": "可买" if r["hit"] else "不买",
-            "aux": {"b2_hit": r["hit"], "b1_bars_ago": r.get("b1_bars_ago"),
-                    "gain_pct": r.get("gain_pct"), "no_upper_shadow": r.get("no_upper_shadow")},
-            "components": {"hard_conditions": hard,
-                           "no_upper_shadow": int(bool(r.get("no_upper_shadow")))}}
+    return {
+        "score": round(score, 1),
+        "suggestion": "可买" if r["hit"] else "不买",
+        "aux": {
+            "b2_hit": r["hit"],
+            "b1_bars_ago": r.get("b1_bars_ago"),
+            "gain_pct": r.get("gain_pct"),
+            "no_upper_shadow": r.get("no_upper_shadow"),
+        },
+        "components": {
+            "hard_conditions": hard,
+            "no_upper_shadow": int(bool(r.get("no_upper_shadow"))),
+        },
+    }
 
 
 if detect_b2 is not None:
@@ -612,8 +698,15 @@ if detect_b2 is not None:
 
 # ---- RSI 状态 + 主升始发点(来源:微信文章公式) ----
 try:
-    from custos.core.factors.rsi_state import rsi_divergence, rsi_regime, rsi_state_score
-    from custos.core.factors.main_rally_factor import detect_main_rally_start, main_rally_score
+    from custos.core.factors.rsi_state import (
+        rsi_divergence,
+        rsi_regime,
+        rsi_state_score,
+    )
+    from custos.core.factors.main_rally_factor import (
+        detect_main_rally_start,
+        main_rally_score,
+    )
 except Exception:  # noqa: BLE001
     rsi_state_score = None
 
@@ -625,10 +718,16 @@ def _sc_rsi_state(df: pd.DataFrame, code: str):
     r = rsi_state_score(df, code)
     if not r.get("available"):
         return None
-    return {"score": r["score"], "suggestion": "可买" if r["score"] >= 60 else "不买",
-            "aux": {"rsi_regime": r["regime"], "rsi": r["rsi"],
-                    "bullish_divergence": r["bullish_divergence"]},
-            "components": {"regime": r["regime"]}}
+    return {
+        "score": r["score"],
+        "suggestion": "可买" if r["score"] >= 60 else "不买",
+        "aux": {
+            "rsi_regime": r["regime"],
+            "rsi": r["rsi"],
+            "bullish_divergence": r["bullish_divergence"],
+        },
+        "components": {"regime": r["regime"]},
+    }
 
 
 def _sc_main_rally(df: pd.DataFrame, code: str):
@@ -638,9 +737,12 @@ def _sc_main_rally(df: pd.DataFrame, code: str):
     r = main_rally_score(df, code, cross_mode="below")
     if not r.get("available"):
         return None
-    return {"score": r["score"], "suggestion": "可买" if r["hit"] else "不买",
-            "aux": {"hit": r["hit"]},
-            "components": {"conditions_met": r["detail"]["conditions_met"]}}
+    return {
+        "score": r["score"],
+        "suggestion": "可买" if r["hit"] else "不买",
+        "aux": {"hit": r["hit"]},
+        "components": {"conditions_met": r["detail"]["conditions_met"]},
+    }
 
 
 def rsi_strong_regime_gate(df_slice: pd.DataFrame) -> bool:
@@ -714,8 +816,9 @@ def sample_codes(all_codes: list[str], n: int, seed: int = 0) -> list[str]:
     return sorted(random.Random(seed).sample(codes, n))
 
 
-def forward_metrics(df: pd.DataFrame, i: int, horizon: int,
-                    require_full: bool = True) -> dict[str, Any]:
+def forward_metrics(
+    df: pd.DataFrame, i: int, horizon: int, require_full: bool = True
+) -> dict[str, Any]:
     """as-of 第 i 根后、未来 horizon 根内的前向收益/MFE/MAE（严格只看 i+1..i+H）。
 
     入场基准＝第 i 根收盘价；前向窗口＝df[i+1 : i+horizon]（不含 i，杜绝未来泄漏）。
@@ -735,10 +838,15 @@ def forward_metrics(df: pd.DataFrame, i: int, horizon: int,
     available_bars = n - 1 - i
     if available_bars < horizon:
         if require_full:
-            return {"available": False, "reason": "前向窗口不足",
-                    "bars": available_bars, "need": horizon, "censored": True}
+            return {
+                "available": False,
+                "reason": "前向窗口不足",
+                "bars": available_bars,
+                "need": horizon,
+                "censored": True,
+            }
     j = min(i + horizon, n - 1)
-    fut = df.iloc[i + 1:j + 1]
+    fut = df.iloc[i + 1 : j + 1]
     if fut.empty:
         return {"available": False, "reason": "前向窗口为空"}
     last = float(fut["close"].iloc[-1])
@@ -749,8 +857,8 @@ def forward_metrics(df: pd.DataFrame, i: int, horizon: int,
         "bars": len(fut),
         "truncated": len(fut) < horizon,
         "fwd_return": last / entry - 1,
-        "mfe": hi / entry - 1,   # 最大有利偏移
-        "mae": lo / entry - 1,   # 最大不利偏移
+        "mfe": hi / entry - 1,  # 最大有利偏移
+        "mae": lo / entry - 1,  # 最大不利偏移
     }
 
 
@@ -770,7 +878,8 @@ def evaluate(
     max_signals_per_code: Optional[int] = None,
     entry_gate: Optional[Callable[[pd.DataFrame], bool]] = None,
     scorer: Optional[Callable[[pd.DataFrame, str], Optional[dict]]] = None,
-    gate_window: int = 0) -> list[dict[str, Any]]:
+    gate_window: int = 0,
+) -> list[dict[str, Any]]:
     """逐股逐日走查：as-of 切片算打分，配前向指标。返回逐条记录（可复盘）。
 
     entry_gate(df_slice)->bool 若提供，只在返回 True 的 as-of 日评估（如 J<13 买点区）。
@@ -802,7 +911,7 @@ def evaluate(
         emitted = 0
         for i in range(min_bars, n - 1, max(1, step)):
             lo = max(0, i + 1 - gate_window) if gate_window else 0
-            slice_df = df.iloc[lo:i + 1]  # 只含 lo..i（含当日），无未来
+            slice_df = df.iloc[lo : i + 1]  # 只含 lo..i（含当日），无未来
             if entry_gate is not None and not entry_gate(slice_df):
                 continue
             res = scorer(slice_df, code)
@@ -817,13 +926,15 @@ def evaluate(
             rec.update(res.get("aux") or {})
             for k, v in (res.get("components") or {}).items():
                 rec[f"c_{k}"] = v
-            rec["c_liquidity"] = _liquidity_yi(slice_df)  # 流动性(亿元)：可历史回测的正交因子
+            rec["c_liquidity"] = _liquidity_yi(
+                slice_df
+            )  # 流动性(亿元)：可历史回测的正交因子
             for h in horizons:
                 fm = forward_metrics(df, i, h)  # 只用到 i+1..i+H；窗口不足即删失
                 rec[f"ret{h}"] = fm.get("fwd_return")
                 rec[f"mfe{h}"] = fm.get("mfe")
                 rec[f"mae{h}"] = fm.get("mae")
-                rec[f"ret{h}_bars"] = fm.get("bars")   # 删失/截断可诊断
+                rec[f"ret{h}_bars"] = fm.get("bars")  # 删失/截断可诊断
             records.append(rec)
             emitted += 1
             if max_signals_per_code and emitted >= max_signals_per_code:
@@ -844,10 +955,14 @@ def _stats(rows: list[dict[str, Any]], horizon: int) -> dict[str, Any]:
     losses = [-x for x in rets if x < 0]
     avg_win = statistics.mean(gains) if gains else 0.0
     avg_loss = statistics.mean(losses) if losses else 0.0
-    payoff = round(avg_win / avg_loss, 3) if avg_loss > 0 else None   # 盈亏比：均盈/均亏(核心目标)
+    payoff = (
+        round(avg_win / avg_loss, 3) if avg_loss > 0 else None
+    )  # 盈亏比：均盈/均亏(核心目标)
     med_mfe = statistics.median(mfes) if mfes else None
     med_mae = statistics.median(maes) if maes else None
-    mfe_mae = (round(med_mfe / abs(med_mae), 3) if (med_mfe is not None and med_mae) else None)
+    mfe_mae = (
+        round(med_mfe / abs(med_mae), 3) if (med_mfe is not None and med_mae) else None
+    )
     return {
         "n": len(rets),
         "win_rate": round(wins / len(rets), 4),
@@ -855,10 +970,10 @@ def _stats(rows: list[dict[str, Any]], horizon: int) -> dict[str, Any]:
         "median_return": round(statistics.median(rets), 4),
         "avg_win": round(avg_win, 4),
         "avg_loss": round(avg_loss, 4),
-        "payoff_ratio": payoff,                 # 均盈/均亏；追求盈亏比时看这个而非胜率
+        "payoff_ratio": payoff,  # 均盈/均亏；追求盈亏比时看这个而非胜率
         "median_mfe": round(med_mfe, 4) if med_mfe is not None else None,
         "median_mae": round(med_mae, 4) if med_mae is not None else None,
-        "mfe_mae_ratio": mfe_mae,               # 中位 MFE/|MAE|：潜在盈亏比
+        "mfe_mae_ratio": mfe_mae,  # 中位 MFE/|MAE|：潜在盈亏比
     }
 
 
@@ -876,7 +991,9 @@ def summarize(records: list[dict[str, Any]], horizon: int = 10) -> dict[str, Any
     ]
     by_band = []
     for label, lo, hi in bands:
-        rows = [r for r in records if r.get("s_star") is not None and lo <= r["s_star"] < hi]
+        rows = [
+            r for r in records if r.get("s_star") is not None and lo <= r["s_star"] < hi
+        ]
         by_band.append({"band": label, **_stats(rows, horizon)})
 
     by_suggestion = {}
@@ -894,7 +1011,7 @@ def summarize(records: list[dict[str, Any]], horizon: int = 10) -> dict[str, Any
         for k in r:
             if k.startswith("c_") and k not in seen:
                 seen.add(k)
-                comp_keys.append(k)     # 保持首次出现顺序，输出稳定可 diff
+                comp_keys.append(k)  # 保持首次出现顺序，输出稳定可 diff
     by_component = {}
     for ck in comp_keys:
         # 分项可能是**非数值**（如 rsi_state 的 c_regime="strong" 状态串）——
@@ -914,16 +1031,20 @@ def summarize(records: list[dict[str, Any]], horizon: int = 10) -> dict[str, Any
         "by_suggestion": by_suggestion,
         "by_component_hit": by_component,
         "note": "阈值/权重待回测：若 可买 组胜率与均值收益未显著高于 不买 组，"
-                "或某分项 hit 不优于 miss，则该阈值/权重需重估（见 s_shape.py 顶部常量）。",
+        "或某分项 hit 不优于 miss，则该阈值/权重需重估（见 s_shape.py 顶部常量）。",
     }
 
 
-def summarize_multi(records: list[dict[str, Any]], horizons: tuple[int, ...]) -> dict[int, dict]:
+def summarize_multi(
+    records: list[dict[str, Any]], horizons: tuple[int, ...]
+) -> dict[int, dict]:
     """多 horizon 汇总：{h: summarize(records, h)}，用于看反转是否随周期翻转。"""
     return {h: summarize(records, h) for h in horizons}
 
 
-def horizon_band_matrix(records: list[dict[str, Any]], horizons: tuple[int, ...]) -> dict[str, Any]:
+def horizon_band_matrix(
+    records: list[dict[str, Any]], horizons: tuple[int, ...]
+) -> dict[str, Any]:
     """S** 档 × horizon 的胜率/均收益矩阵（诊断：高分档是否在长周期翻正）。"""
     bands = ["A_可买(>=70)", "B_观望(60-70)", "C_中(40-60)", "D_弱(<40)"]
     multi = summarize_multi(records, horizons)
@@ -937,15 +1058,24 @@ def horizon_band_matrix(records: list[dict[str, Any]], horizons: tuple[int, ...]
             avg[b][h] = cell.get("avg_return")
     lines = ["S**档 \\ horizon(日): " + "  ".join(f"H{h}" for h in horizons)]
     for b in bands:
-        wr = "  ".join(f"{win[b][h] * 100:.1f}%" if win[b][h] is not None else "  -  " for h in horizons)
-        ar = "  ".join(f"{avg[b][h] * 100:+.2f}%" if avg[b][h] is not None else "  -  " for h in horizons)
+        wr = "  ".join(
+            f"{win[b][h] * 100:.1f}%" if win[b][h] is not None else "  -  "
+            for h in horizons
+        )
+        ar = "  ".join(
+            f"{avg[b][h] * 100:+.2f}%" if avg[b][h] is not None else "  -  "
+            for h in horizons
+        )
         lines.append(f"  {b:<14} 胜率 {wr}")
         lines.append(f"  {'':<14} 均收 {ar}")
     return {"win_rate": win, "avg_return": avg, "text": "\n".join(lines)}
 
 
-def sweep_threshold(records: list[dict[str, Any]], horizon: int = 10,
-                    cutoffs: tuple[int, ...] = (50, 55, 60, 65, 70, 75, 80)) -> dict[str, Any]:
+def sweep_threshold(
+    records: list[dict[str, Any]],
+    horizon: int = 10,
+    cutoffs: tuple[int, ...] = (50, 55, 60, 65, 70, 75, 80),
+) -> dict[str, Any]:
     """扫描"分数 >= cutoff"分组的胜率/均收益，用于校准"可买"门槛（务必在全量数据上做，
     小样本上调门槛=过拟合）。返回每个 cutoff 的 n/胜率/均收益/中位MFE-MAE。"""
     rows = []
@@ -955,42 +1085,64 @@ def sweep_threshold(records: list[dict[str, Any]], horizon: int = 10,
     lines = [f"score>=cutoff \\ horizon={horizon}:"]
     for r in rows:
         if r.get("n"):
-            lines.append(f"  >= {r['cutoff']:<3} n={r['n']:<5} 胜率 {r['win_rate'] * 100:5.1f}%  均收 {r['avg_return'] * 100:+.2f}%")
+            lines.append(
+                f"  >= {r['cutoff']:<3} n={r['n']:<5} 胜率 {r['win_rate'] * 100:5.1f}%  均收 {r['avg_return'] * 100:+.2f}%"
+            )
         else:
             lines.append(f"  >= {r['cutoff']:<3} n=0")
     return {"horizon": horizon, "cutoffs": rows, "text": "\n".join(lines)}
 
 
-def factor_lift(records: list[dict[str, Any]], field: str, horizon: int = 10,
-                quantiles: int = 4) -> dict[str, Any]:
+def factor_lift(
+    records: list[dict[str, Any]], field: str, horizon: int = 10, quantiles: int = 4
+) -> dict[str, Any]:
     """把任意数值字段按分位分组，报前向胜率/均收益，验证该因子是否有 lift。
 
     用于流动性(c_liquidity)、S_shape 分项(c_*) 等**历史可计算**因子。
     注：资金流(fund_flow)无历史存档(只有每日快照)，无法走 as-of 回测，只能前向验证。
     """
-    vals = [(r[field], r) for r in records
-            if isinstance(r.get(field), (int, float)) and r.get(f"ret{horizon}") is not None]
+    vals = [
+        (r[field], r)
+        for r in records
+        if isinstance(r.get(field), (int, float)) and r.get(f"ret{horizon}") is not None
+    ]
     if len(vals) < quantiles * 5:
-        return {"field": field, "horizon": horizon, "n": len(vals), "note": "样本不足",
-                "text": f"{field}: 样本不足({len(vals)})"}
+        return {
+            "field": field,
+            "horizon": horizon,
+            "n": len(vals),
+            "note": "样本不足",
+            "text": f"{field}: 样本不足({len(vals)})",
+        }
     vals.sort(key=lambda x: x[0])
     n = len(vals)
     buckets = []
     for q in range(quantiles):
         lo, hi = q * n // quantiles, (q + 1) * n // quantiles
         chunk = [r for _, r in vals[lo:hi]]
-        buckets.append({"quantile": q + 1,
-                        "value_range": [round(vals[lo][0], 4), round(vals[hi - 1][0], 4)],
-                        **_stats(chunk, horizon)})
+        buckets.append(
+            {
+                "quantile": q + 1,
+                "value_range": [round(vals[lo][0], 4), round(vals[hi - 1][0], 4)],
+                **_stats(chunk, horizon),
+            }
+        )
     lines = [f"{field} 分位(升序) \\ horizon={horizon}:"]
     for b in buckets:
-        lines.append(f"  Q{b['quantile']} [{b['value_range'][0]}~{b['value_range'][1]}] "
-                     f"n={b.get('n', 0)} 胜率 {(b.get('win_rate') or 0) * 100:.1f}% "
-                     f"均收 {(b.get('avg_return') or 0) * 100:+.2f}%")
-    return {"field": field, "horizon": horizon, "quantiles": buckets, "text": "\n".join(lines)}
+        lines.append(
+            f"  Q{b['quantile']} [{b['value_range'][0]}~{b['value_range'][1]}] "
+            f"n={b.get('n', 0)} 胜率 {(b.get('win_rate') or 0) * 100:.1f}% "
+            f"均收 {(b.get('avg_return') or 0) * 100:+.2f}%"
+        )
+    return {
+        "field": field,
+        "horizon": horizon,
+        "quantiles": buckets,
+        "text": "\n".join(lines),
+    }
 
 
-_R_RISK_FLOOR = 0.02   # R 计算的 risk_frac 地板(2%)：周线收盘贴低时防 ret/≈0 炸成极端 R
+_R_RISK_FLOOR = 0.02  # R 计算的 risk_frac 地板(2%)：周线收盘贴低时防 ret/≈0 炸成极端 R
 
 
 def _limit_pct(code: str) -> float:
@@ -1017,8 +1169,11 @@ def tradable_flags(df: pd.DataFrame, code: str) -> tuple[np.ndarray, np.ndarray]
     close = df["close"].astype(float).to_numpy()
     high = df["high"].astype(float).to_numpy()
     low = df["low"].astype(float).to_numpy()
-    vol = (df["volume"].astype(float).to_numpy() if "volume" in df.columns
-           else np.ones(len(close)))
+    vol = (
+        df["volume"].astype(float).to_numpy()
+        if "volume" in df.columns
+        else np.ones(len(close))
+    )
     prev = np.concatenate(([np.nan], close[:-1]))
     limit = _limit_pct(code) / 100.0
     with np.errstate(invalid="ignore"):
@@ -1028,10 +1183,10 @@ def tradable_flags(df: pd.DataFrame, code: str) -> tuple[np.ndarray, np.ndarray]
     halted = vol <= 0
     limit_up = chg >= (limit - tol)
     limit_down = chg <= -(limit - tol)
-    sealed = high == low                      # 一字板:全天单一价位,完全无法成交
+    sealed = high == low  # 一字板:全天单一价位,完全无法成交
     can_buy = ~halted & ~limit_up & ~(sealed & limit_up)
     can_sell = ~halted & ~limit_down & ~(sealed & limit_down)
-    can_buy[0] = False                        # 首根无前收,无法判定涨跌停
+    can_buy[0] = False  # 首根无前收,无法判定涨跌停
     can_sell[0] = False
     return can_buy, can_sell
 
@@ -1062,7 +1217,7 @@ def _medium_large_bull_flags(df: pd.DataFrame, code: str = "") -> np.ndarray:
     return is_bull & ((chg >= thr) | (body >= thr))
 
 
-_TICK = 0.01          # A股最小价格变动单位(元);材料的「向下 3-5 个价位」以此为单位
+_TICK = 0.01  # A股最小价格变动单位(元);材料的「向下 3-5 个价位」以此为单位
 
 
 def _center_rising(closes: np.ndarray) -> bool:
@@ -1083,22 +1238,28 @@ def _center_rising(closes: np.ndarray) -> bool:
     return back > front
 
 
-def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
-                      bbi_exit_consec: int = 2, time_stop_bars: int = 0,
-                      stop_mode: str = "low", stop_pct: float = 8.0,
-                      stop_override: Optional[float] = None,
-                      can_sell: Optional[np.ndarray] = None,
-                      max_exit_delay: int = 5,
-                      scale_out_frac: float = 0.0,
-                      code: str = "",
-                      bull_flags: Optional[np.ndarray] = None,
-                      breakeven_trigger: float = 0.0,
-                      trail_pct: float = 0.0,
-                      stop_trigger: str = "close",
-                      stop_tick_buffer: int = 0,
-                      cost_zone_bars: int = 0,
-                      cost_zone_pct: float = 3.0,
-                      cost_zone_grace: int = 1) -> dict[str, Any]:
+def simulate_b1_trade(
+    df: pd.DataFrame,
+    entry_idx: int,
+    bbi: pd.Series,
+    bbi_exit_consec: int = 2,
+    time_stop_bars: int = 0,
+    stop_mode: str = "low",
+    stop_pct: float = 8.0,
+    stop_override: Optional[float] = None,
+    can_sell: Optional[np.ndarray] = None,
+    max_exit_delay: int = 5,
+    scale_out_frac: float = 0.0,
+    code: str = "",
+    bull_flags: Optional[np.ndarray] = None,
+    breakeven_trigger: float = 0.0,
+    trail_pct: float = 0.0,
+    stop_trigger: str = "close",
+    stop_tick_buffer: int = 0,
+    cost_zone_bars: int = 0,
+    cost_zone_pct: float = 3.0,
+    cost_zone_grace: int = 1,
+) -> dict[str, Any]:
     """B1 交易规则模拟：买入当日收盘进场。
 
     止损位：stop_override 显式指定(如平台高×0.98)优先;否则 stop_mode='low'=买入当日最低价
@@ -1157,12 +1318,16 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
     open_ = df["open"].astype(float).values
     n = len(close)
     entry = float(close[entry_idx])
-    if stop_override is not None and stop_override < entry:   # 显式止损位(如平台高×0.98)
+    if stop_override is not None and stop_override < entry:  # 显式止损位(如平台高×0.98)
         stop = float(stop_override)
     else:
-        stop = entry * (1 - stop_pct / 100.0) if stop_mode == "pct" else float(low[entry_idx])
+        stop = (
+            entry * (1 - stop_pct / 100.0)
+            if stop_mode == "pct"
+            else float(low[entry_idx])
+        )
         if stop_mode != "pct" and stop_tick_buffer > 0:
-            stop -= stop_tick_buffer * _TICK          # 「或向下 3-5 个价位」
+            stop -= stop_tick_buffer * _TICK  # 「或向下 3-5 个价位」
     risk_frac = (entry - stop) / entry if entry else 0.0
     bbi_v = bbi.values
     has_above = False
@@ -1171,17 +1336,20 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
 
     # 动态止损状态
     stop_cur = stop
-    peak = entry                          # 截至 j-1 的最高价（不含当日，防未来函数）
-    be_armed = False                      # 保本止损是否已触发
+    peak = entry  # 截至 j-1 的最高价（不含当日，防未来函数）
+    be_armed = False  # 保本止损是否已触发
     trail_armed = False
-    be_level = 0.0                        # 各机制给出的止损位（用于归因 reason）
+    be_level = 0.0  # 各机制给出的止损位（用于归因 reason）
     trail_level = 0.0
-    peak_close = entry                    # 成本区判定用收盘价，不用盘中高点
+    peak_close = entry  # 成本区判定用收盘价，不用盘中高点
 
     # 分批止盈准备
     scale = max(0.0, min(1.0, float(scale_out_frac)))
-    bulls = bull_flags if bull_flags is not None else (
-        _medium_large_bull_flags(df, code) if scale > 0 else None)
+    bulls = (
+        bull_flags
+        if bull_flags is not None
+        else (_medium_large_bull_flags(df, code) if scale > 0 else None)
+    )
     scaled_at: Optional[int] = None
     scaled_ret = 0.0
 
@@ -1193,12 +1361,20 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
         else:
             total = scale * scaled_ret + (1 - scale) * rest_ret
             reason = f"{reason}+scaled"
-        out = {"exit_idx": exit_idx, "reason": reason, "ret": total,
-               "holding": exit_idx - entry_idx, "risk_frac": risk_frac}
+        out = {
+            "exit_idx": exit_idx,
+            "reason": reason,
+            "ret": total,
+            "holding": exit_idx - entry_idx,
+            "risk_frac": risk_frac,
+        }
         if scaled_at is not None:
-            out.update(scale_out_frac=scale, scale_out_idx=scaled_at,
-                       scale_out_ret=round(scaled_ret, 4),
-                       rest_ret=round(rest_ret, 4))
+            out.update(
+                scale_out_frac=scale,
+                scale_out_idx=scaled_at,
+                scale_out_ret=round(scaled_ret, 4),
+                rest_ret=round(rest_ret, 4),
+            )
         if be_armed:
             out["breakeven_armed"] = True
         if trail_armed:
@@ -1209,7 +1385,7 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
         """Settle an exit at bar j, deferring to the next sellable bar."""
         if can_sell is not None and not can_sell[j]:
             k = _next_tradable(can_sell, j, max_exit_delay)
-            if k is None:                     # 一直卖不掉:持有到数据末
+            if k is None:  # 一直卖不掉:持有到数据末
                 return _settle(n - 1, reason + "_unfillable", float(close[-1]))
             return _settle(k, reason + "_delayed", float(close[k]))
         return _settle(j, reason, price)
@@ -1246,7 +1422,11 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
             else:
                 fill = float(open_[j]) if open_[j] < stop_cur else stop_cur
             # 按**实际决定当前止损位**的机制归因，而非按启用顺序
-            if trail_armed and trail_level >= max(be_level, stop) and trail_level >= stop_cur:
+            if (
+                trail_armed
+                and trail_level >= max(be_level, stop)
+                and trail_level >= stop_cur
+            ):
                 reason = "trail_stop"
             elif be_armed and be_level >= stop_cur:
                 reason = "breakeven_stop"
@@ -1254,17 +1434,25 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
                 reason = "stop"
             return _exit(j, reason, fill)
         b = bbi_v[j]
-        if b == b:                                            # ② 收盘 BBI 退出（b==b 排除 NaN）
+        if b == b:  # ② 收盘 BBI 退出（b==b 排除 NaN）
             # ②a 分批止盈:BBI 上方连续两根中大阳线（首次触发，且此前未减仓）
-            if (scale > 0 and scaled_at is None and bulls is not None and j >= 1
-                    and bulls[j] and bulls[j - 1]
-                    and close[j] >= b and bbi_v[j - 1] == bbi_v[j - 1]
-                    and close[j - 1] >= bbi_v[j - 1]
-                    and (can_sell is None or can_sell[j])):
+            if (
+                scale > 0
+                and scaled_at is None
+                and bulls is not None
+                and j >= 1
+                and bulls[j]
+                and bulls[j - 1]
+                and close[j] >= b
+                and bbi_v[j - 1] == bbi_v[j - 1]
+                and close[j - 1] >= bbi_v[j - 1]
+                and (can_sell is None or can_sell[j])
+            ):
                 scaled_at = j
                 scaled_ret = float(close[j]) / entry - 1
             if close[j] > b:
-                has_above = True; consec_below = 0
+                has_above = True
+                consec_below = 0
             elif close[j] < b:
                 if has_above:
                     consec_below += 1
@@ -1280,21 +1468,24 @@ def simulate_b1_trade(df: pd.DataFrame, entry_idx: int, bbi: pd.Series,
         #    任一维度显示还在涨就留着。第一版只看「未脱离成本区 3%」这一条，
         #    实测胜率 38.5%（全场最高）但均盈 9.76%（全场最低）——典型「砍掉慢热单」，
         #    因为一个已站上 BBI、重心上行、只是涨幅还没到 3% 的票会被误杀。
-        if (cost_zone_bars and entry
-                and (j - entry_idx) >= cost_zone_bars + max(0, cost_zone_grace)):
+        if (
+            cost_zone_bars
+            and entry
+            and (j - entry_idx) >= cost_zone_bars + max(0, cost_zone_grace)
+        ):
             bj = bbi_v[j]
             # 严格 `>`：贴着 BBI 横盘正是材料说的「不温不火，没上BBI」，
             # 用 `>=` 会把横盘误判成「站上」而永不触发（实测场景①因此没被拍掉）。
             # 也与下方 BBI 退出逻辑一致——那里对「相等」同样按中性处理
             # （既不算站上也不算跌破）。
             above_bbi = bool(bj == bj and close[j] > bj)
-            rising = _center_rising(close[entry_idx + 1:j + 1])
+            rising = _center_rising(close[entry_idx + 1 : j + 1])
             escaped = (peak_close / entry - 1) >= cost_zone_pct / 100.0
             if not (above_bbi or rising or escaped):
                 return _exit(j, "cost_zone_stop", float(close[j]))
-        if time_stop_bars and (j - entry_idx) >= time_stop_bars:   # ④ 无条件时间止损
+        if time_stop_bars and (j - entry_idx) >= time_stop_bars:  # ④ 无条件时间止损
             return _exit(j, "time_stop", float(close[j]))
-        peak = max(peak, float(high[j]))          # 当日收盘后才把当日高点纳入 peak
+        peak = max(peak, float(high[j]))  # 当日收盘后才把当日高点纳入 peak
         peak_close = max(peak_close, float(close[j]))
     return _settle(n - 1, "open_end", float(close[-1]))
 
@@ -1312,27 +1503,33 @@ def _to_weekly(df: pd.DataFrame) -> pd.DataFrame:
     return d.resample("W-FRI").agg(agg).dropna(subset=["close"]).reset_index()
 
 
-def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
-                    scorer: Optional[Callable[[pd.DataFrame, str], Optional[dict]]] = None,
-                    min_bars: int = 30, step: int = 1,
-                    max_signals_per_code: Optional[int] = None,
-                    weekly: bool = False, cost_bps: float = 0.0,
-                    amv_regime: Optional[dict] = None,
-                    bbi_exit_consec: int = 2, time_stop_bars: int = 0,
-                    collect_all: bool = False,
-                    entry_gate: Optional[Callable[[pd.DataFrame], bool]] = None,
-                    stop_mode: str = "low", stop_pct: float = 8.0,
-                    feature_panel: bool = False,
-                    sector_gate: Optional[Callable[[str, str], bool]] = None,
-                    tradability: bool = True,
-                    max_exit_delay: int = 5,
-                    scale_out_frac: float = 0.0,
-                    breakeven_trigger: float = 0.0,
-                    trail_pct: float = 0.0,
-                    stop_trigger: str = "close",
-                    stop_tick_buffer: int = 0,
-                    cost_zone_bars: int = 0,
-                    cost_zone_pct: float = 3.0) -> list[dict[str, Any]]:
+def evaluate_trades(
+    bars_by_code: dict[str, pd.DataFrame],
+    scorer: Optional[Callable[[pd.DataFrame, str], Optional[dict]]] = None,
+    min_bars: int = 30,
+    step: int = 1,
+    max_signals_per_code: Optional[int] = None,
+    weekly: bool = False,
+    cost_bps: float = 0.0,
+    amv_regime: Optional[dict] = None,
+    bbi_exit_consec: int = 2,
+    time_stop_bars: int = 0,
+    collect_all: bool = False,
+    entry_gate: Optional[Callable[[pd.DataFrame], bool]] = None,
+    stop_mode: str = "low",
+    stop_pct: float = 8.0,
+    feature_panel: bool = False,
+    sector_gate: Optional[Callable[[str, str], bool]] = None,
+    tradability: bool = True,
+    max_exit_delay: int = 5,
+    scale_out_frac: float = 0.0,
+    breakeven_trigger: float = 0.0,
+    trail_pct: float = 0.0,
+    stop_trigger: str = "close",
+    stop_tick_buffer: int = 0,
+    cost_zone_bars: int = 0,
+    cost_zone_pct: float = 3.0,
+) -> list[dict[str, Any]]:
     """在 scorer 判「可买」的 as-of 日进场，按 B1 规则(止损+BBI)模拟到出场；非重叠(平仓后再找)。
 
     cost_bps：单边成本合计的往返基点(A股约20~30bps含佣金/印花税/滑点)，从每笔收益中扣除，看净期望。
@@ -1350,12 +1547,13 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
     scorer = scorer or _sc_b1_pullback
     cost = cost_bps / 1e4
     import bisect
+
     amv_dates = sorted(amv_regime) if amv_regime else None
 
     def _amv_ok(date: str) -> bool:
         if not amv_regime:
             return True
-        idx = bisect.bisect_right(amv_dates, date) - 1     # as-of：最近 ≤ date 的regime
+        idx = bisect.bisect_right(amv_dates, date) - 1  # as-of：最近 ≤ date 的regime
         return idx >= 0 and amv_regime[amv_dates[idx]] == "做多"
 
     trades: list[dict[str, Any]] = []
@@ -1377,47 +1575,71 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
         i = min_bars
         while i < n - 1:
             entry_date = str(df["date"].iloc[i])[:10]
-            slice_df = df.iloc[:i + 1]
+            slice_df = df.iloc[: i + 1]
             if entry_gate is not None and not entry_gate(slice_df):
                 i += max(1, step)
                 continue
-            if sector_gate is not None and not sector_gate(code, entry_date):   # 板块相位择时
+            if sector_gate is not None and not sector_gate(
+                code, entry_date
+            ):  # 板块相位择时
                 i += max(1, step)
                 continue
             res = scorer(slice_df, code)
-            if (res is not None and res.get("suggestion") == "可买" and _amv_ok(entry_date)
-                    and (buy_ok is None or buy_ok[i])):     # 涨停/停牌当日买不到
+            if (
+                res is not None
+                and res.get("suggestion") == "可买"
+                and _amv_ok(entry_date)
+                and (buy_ok is None or buy_ok[i])
+            ):  # 涨停/停牌当日买不到
                 stop_ov = None
-                if stop_mode == "platform":                  # 平台高止损:形态自带止损位
+                if stop_mode == "platform":  # 平台高止损:形态自带止损位
                     try:
-                        from custos.core.factors.platform_pullback import detect_platform_pullback  # noqa: PLC0415
+                        from custos.core.factors.platform_pullback import (
+                            detect_platform_pullback,
+                        )  # noqa: PLC0415
+
                         det = detect_platform_pullback(slice_df)
                         if det:
                             stop_ov = det["platform_high"] * 0.98
                     except Exception:  # noqa: BLE001
                         stop_ov = None
-                tr = simulate_b1_trade(df, i, bbi, bbi_exit_consec=bbi_exit_consec,
-                                       time_stop_bars=time_stop_bars,
-                                       stop_mode=stop_mode, stop_pct=stop_pct,
-                                       stop_override=stop_ov,
-                                       can_sell=sell_ok, max_exit_delay=max_exit_delay,
-                                       scale_out_frac=scale_out_frac, code=code,
-                                       bull_flags=bull_flags,
-                                       breakeven_trigger=breakeven_trigger,
-                                       trail_pct=trail_pct,
-                                       stop_trigger=stop_trigger,
-                                       stop_tick_buffer=stop_tick_buffer,
-                                       cost_zone_bars=cost_zone_bars,
-                                       cost_zone_pct=cost_zone_pct)
+                tr = simulate_b1_trade(
+                    df,
+                    i,
+                    bbi,
+                    bbi_exit_consec=bbi_exit_consec,
+                    time_stop_bars=time_stop_bars,
+                    stop_mode=stop_mode,
+                    stop_pct=stop_pct,
+                    stop_override=stop_ov,
+                    can_sell=sell_ok,
+                    max_exit_delay=max_exit_delay,
+                    scale_out_frac=scale_out_frac,
+                    code=code,
+                    bull_flags=bull_flags,
+                    breakeven_trigger=breakeven_trigger,
+                    trail_pct=trail_pct,
+                    stop_trigger=stop_trigger,
+                    stop_tick_buffer=stop_tick_buffer,
+                    cost_zone_bars=cost_zone_bars,
+                    cost_zone_pct=cost_zone_pct,
+                )
                 ret_net = tr["ret"] - cost
                 rf = tr.get("risk_frac") or 0.0
-                rf_eff = max(rf, _R_RISK_FLOOR)   # 地板：周线收盘贴低时 risk_frac≈0 会把 R 炸成极端值
-                rec = {"code": code, "entry_date": entry_date,
-                       "exit_date": str(df["date"].iloc[tr["exit_idx"]])[:10],
-                       "score": res.get("score"), "ret": round(ret_net, 4),
-                       "risk_frac": round(rf, 4),
-                       "r_multiple": round(ret_net / rf_eff, 3) if rf > 0 else None,
-                       "holding": tr["holding"], "reason": tr["reason"]}
+                rf_eff = max(
+                    rf, _R_RISK_FLOOR
+                )  # 地板：周线收盘贴低时 risk_frac≈0 会把 R 炸成极端值
+                rec = {
+                    "code": code,
+                    "entry_date": entry_date,
+                    "exit_date": str(df["date"].iloc[tr["exit_idx"]])[:10],
+                    "score": res.get("score"),
+                    "ret": round(ret_net, 4),
+                    "risk_frac": round(rf, 4),
+                    "r_multiple": round(ret_net / rf_eff, 3) if rf > 0 else None,
+                    "holding": tr["holding"],
+                    "reason": tr["reason"],
+                }
                 if tr.get("scale_out_idx") is not None:
                     rec["scale_out_ret"] = tr.get("scale_out_ret")
                     rec["rest_ret"] = tr.get("rest_ret")
@@ -1428,7 +1650,9 @@ def evaluate_trades(bars_by_code: dict[str, pd.DataFrame],
                 emitted += 1
                 if max_signals_per_code and emitted >= max_signals_per_code:
                     break
-                i = (i + max(1, step)) if collect_all else (tr["exit_idx"] + 1)  # 收集全部候选 / 或非重叠
+                i = (
+                    (i + max(1, step)) if collect_all else (tr["exit_idx"] + 1)
+                )  # 收集全部候选 / 或非重叠
             else:
                 i += max(1, step)
     return trades
@@ -1439,6 +1663,7 @@ def summarize_trades(trades: list[dict[str, Any]]) -> dict[str, Any]:
     if not trades:
         return {"n": 0, "text": "无交易"}
     import collections
+
     rets = [t["ret"] for t in trades]
     wins = [r for r in rets if r > 0]
     losses = [-r for r in rets if r < 0]
@@ -1449,32 +1674,42 @@ def summarize_trades(trades: list[dict[str, Any]]) -> dict[str, Any]:
     for rs in collections.Counter(t["reason"] for t in trades):
         rr = [t["ret"] for t in trades if t["reason"] == rs]
         by_reason[rs] = {"n": len(rr), "avg_return": round(statistics.mean(rr), 4)}
-    d = {"n": len(trades), "win_rate": round(len(wins) / len(rets), 4),
-         "expectancy": round(statistics.mean(rets), 4),
-         "median_return": round(statistics.median(rets), 4),
-         "avg_win": round(avg_win, 4), "avg_loss": round(avg_loss, 4),
-         "payoff_ratio": payoff,
-         "avg_holding": round(statistics.mean([t["holding"] for t in trades]), 1),
-         "exit_reasons": by_reason}
+    d = {
+        "n": len(trades),
+        "win_rate": round(len(wins) / len(rets), 4),
+        "expectancy": round(statistics.mean(rets), 4),
+        "median_return": round(statistics.median(rets), 4),
+        "avg_win": round(avg_win, 4),
+        "avg_loss": round(avg_loss, 4),
+        "payoff_ratio": payoff,
+        "avg_holding": round(statistics.mean([t["holding"] for t in trades]), 1),
+        "exit_reasons": by_reason,
+    }
     # R 倍数视角（风险定额仓位）：R=净收益/单笔风险敞口；期望R×每笔风险% ≈ 每笔账户增长
     rmults = [t["r_multiple"] for t in trades if t.get("r_multiple") is not None]
     if rmults:
         rwin = [r for r in rmults if r > 0]
         rloss = [-r for r in rmults if r < 0]
-        d["expectancy_R"] = round(statistics.mean(rmults), 3)      # 每笔期望R(已对 risk_frac 设地板)
-        d["median_R"] = round(statistics.median(rmults), 3)        # 中位R(抗极端值,更稳)
+        d["expectancy_R"] = round(
+            statistics.mean(rmults), 3
+        )  # 每笔期望R(已对 risk_frac 设地板)
+        d["median_R"] = round(statistics.median(rmults), 3)  # 中位R(抗极端值,更稳)
         d["avg_win_R"] = round(statistics.mean(rwin), 3) if rwin else 0.0
         d["avg_loss_R"] = round(statistics.mean(rloss), 3) if rloss else 0.0
-        d["total_R"] = round(sum(rmults), 1)                       # 累计R(样本期总盈亏,以R计)
-    lines = [f"交易 {d['n']} 笔  胜率 {d['win_rate']*100:.1f}%  期望(均) {d['expectancy']*100:+.2f}%/笔  "
-             f"中位 {d['median_return']*100:+.2f}%  盈亏比 {d['payoff_ratio']}  均持 {d['avg_holding']} 根",
-             f"  均盈 {d['avg_win']*100:+.2f}%  均亏 -{d['avg_loss']*100:.2f}%  "
-             f"(均≫中位 → 少数肥尾大赢主导,警惕幸存者偏差)"]
+        d["total_R"] = round(sum(rmults), 1)  # 累计R(样本期总盈亏,以R计)
+    lines = [
+        f"交易 {d['n']} 笔  胜率 {d['win_rate'] * 100:.1f}%  期望(均) {d['expectancy'] * 100:+.2f}%/笔  "
+        f"中位 {d['median_return'] * 100:+.2f}%  盈亏比 {d['payoff_ratio']}  均持 {d['avg_holding']} 根",
+        f"  均盈 {d['avg_win'] * 100:+.2f}%  均亏 -{d['avg_loss'] * 100:.2f}%  "
+        f"(均≫中位 → 少数肥尾大赢主导,警惕幸存者偏差)",
+    ]
     if rmults:
-        lines.append(f"  期望 {d['expectancy_R']:+.3f}R/笔  (均盈 {d['avg_win_R']:.2f}R / 均亏 "
-                     f"{d['avg_loss_R']:.2f}R)  累计 {d['total_R']:+.0f}R —— 按风险r%/笔计,每笔账户增长≈r%×{d['expectancy_R']:+.3f}")
+        lines.append(
+            f"  期望 {d['expectancy_R']:+.3f}R/笔  (均盈 {d['avg_win_R']:.2f}R / 均亏 "
+            f"{d['avg_loss_R']:.2f}R)  累计 {d['total_R']:+.0f}R —— 按风险r%/笔计,每笔账户增长≈r%×{d['expectancy_R']:+.3f}"
+        )
     for rs, s in by_reason.items():
-        lines.append(f"  出场[{rs}] {s['n']} 笔  均收 {s['avg_return']*100:+.2f}%")
+        lines.append(f"  出场[{rs}] {s['n']} 笔  均收 {s['avg_return'] * 100:+.2f}%")
     d["text"] = "\n".join(lines)
     return d
 
@@ -1497,14 +1732,16 @@ def _amv_regime_from_records(records: list[dict[str, Any]]) -> dict[str, str]:
     return regime
 
 
-def _amv_ledger_records(since: str, after_date: Optional[str],
-                        ledger_path: Optional[Path] = None) -> list[dict[str, Any]]:
+def _amv_ledger_records(
+    since: str, after_date: Optional[str], ledger_path: Optional[Path] = None
+) -> list[dict[str, Any]]:
     """从人工上报台账(0amv_observations.jsonl)取 after_date 之后的 confirmed 记录，
     补齐指南针 day.vdat 主序列的尾部缺口(用户每日收盘上报的 0AMV 只进台账,vdat 由客户端维护)。
     同一日期多条记录时后写入(recorded_at 晚)的覆盖先写的。best-effort：缺失/异常返回 []。"""
     try:
         if ledger_path is None:
             from custos.core.paths import MARKET_DIR  # noqa: PLC0415
+
             ledger_path = MARKET_DIR / "0amv_observations.jsonl"
         if not ledger_path.is_file():
             return []
@@ -1516,20 +1753,30 @@ def _amv_ledger_records(since: str, after_date: Optional[str],
             r = json.loads(line)
             d = str(r.get("date") or "")
             pct = r.get("amv_change_pct")
-            if (r.get("quality") == "confirmed" and pct is not None and len(d) == 10
-                    and d >= since and (after_date is None or d > after_date)):
+            if (
+                r.get("quality") == "confirmed"
+                and pct is not None
+                and len(d) == 10
+                and d >= since
+                and (after_date is None or d > after_date)
+            ):
                 if d not in latest or str(r.get("recorded_at", "")) >= latest[d][0]:
                     latest[d] = (str(r.get("recorded_at", "")), float(pct))
-        return [{"date": d, "change_pct": pct} for d, (_, pct) in sorted(latest.items())]
+        return [
+            {"date": d, "change_pct": pct} for d, (_, pct) in sorted(latest.items())
+        ]
     except Exception:  # noqa: BLE001
         return []
 
 
-def load_amv_regime(since: str = "2015-01-01", root: Optional[str] = None) -> dict[str, str]:
+def load_amv_regime(
+    since: str = "2015-01-01", root: Optional[str] = None
+) -> dict[str, str]:
     """从指南针 0AMV 日线(compass_amv)构建历史 date→regime。best-effort：数据缺失返回 {}。
     day.vdat 主序列之后,拼接人工上报台账(0amv_observations.jsonl)的 confirmed 记录补齐尾部。"""
     try:
         from custos.datasource.local_tdx import compass_amv  # noqa: PLC0415
+
         parsed = compass_amv.parse_amv_daily(since=since, root=root)
         if parsed.get("error") or not parsed.get("records"):
             return {}
@@ -1541,9 +1788,13 @@ def load_amv_regime(since: str = "2015-01-01", root: Optional[str] = None) -> di
         return {}
 
 
-def simulate_portfolio(trades: list[dict[str, Any]], risk_pct: float = 0.01,
-                       max_concurrent: int = 5, max_pos_frac: float = 0.20,
-                       max_gross: float = 1.0) -> dict[str, Any]:
+def simulate_portfolio(
+    trades: list[dict[str, Any]],
+    risk_pct: float = 0.01,
+    max_concurrent: int = 5,
+    max_pos_frac: float = 0.20,
+    max_gross: float = 1.0,
+) -> dict[str, Any]:
     """组合级资金曲线：把逐笔交易按**固定风险仓位**(每笔风险 risk_pct 的本金)+ 并发持仓上限
     + 单仓/总敞口上限,事件驱动地放到一条资金曲线上,输出总收益/CAGR/最大回撤/成交与被限笔数。
 
@@ -1553,15 +1804,24 @@ def simulate_portfolio(trades: list[dict[str, Any]], risk_pct: float = 0.01,
     回撤：按平仓时点的已实现权益序列计（**不含持仓中浮亏 → 真实回撤更大，本值为乐观下界**）。绝不 raise。
     """
     import heapq
-    entries = sorted([t for t in trades if t.get("entry_date") and t.get("exit_date")
-                      and (t.get("risk_frac") or 0) > 0], key=lambda t: t["entry_date"])
+
+    entries = sorted(
+        [
+            t
+            for t in trades
+            if t.get("entry_date")
+            and t.get("exit_date")
+            and (t.get("risk_frac") or 0) > 0
+        ],
+        key=lambda t: t["entry_date"],
+    )
     if not entries:
         return {"n_taken": 0, "n_skipped": 0, "text": "无可用交易(缺 risk_frac/日期)"}
     equity = 1.0
     peak = 1.0
     max_dd = 0.0
-    gross = 0.0                       # 已开仓名义敞口合计(进场时资金)
-    open_heap: list = []              # (exit_date, seq, alloc_cap, ret)
+    gross = 0.0  # 已开仓名义敞口合计(进场时资金)
+    open_heap: list = []  # (exit_date, seq, alloc_cap, ret)
     curve: list[dict[str, Any]] = []
     taken = 0
     skipped = 0
@@ -1600,25 +1860,38 @@ def simulate_portfolio(trades: list[dict[str, Any]], risk_pct: float = 0.01,
         cagr = equity ** (1 / years) - 1 if equity > 0 else None
     except Exception:  # noqa: BLE001
         pass
-    out = {"n_taken": taken, "n_skipped": skipped, "final_equity": round(equity, 4),
-           "total_return": round(equity - 1, 4), "max_drawdown": round(max_dd, 4),
-           "cagr": round(cagr, 4) if cagr is not None else None,
-           "years": round(years, 2) if years else None,
-           "risk_pct": risk_pct, "max_concurrent": max_concurrent,
-           "max_pos_frac": max_pos_frac, "max_gross": max_gross}
-    ret_dd = (round(out["total_return"] / max_dd, 2) if max_dd > 0 else None)
+    out = {
+        "n_taken": taken,
+        "n_skipped": skipped,
+        "final_equity": round(equity, 4),
+        "total_return": round(equity - 1, 4),
+        "max_drawdown": round(max_dd, 4),
+        "cagr": round(cagr, 4) if cagr is not None else None,
+        "years": round(years, 2) if years else None,
+        "risk_pct": risk_pct,
+        "max_concurrent": max_concurrent,
+        "max_pos_frac": max_pos_frac,
+        "max_gross": max_gross,
+    }
+    ret_dd = round(out["total_return"] / max_dd, 2) if max_dd > 0 else None
     out["return_over_maxdd"] = ret_dd
     out["text"] = (
-        f"组合资金曲线(风险{risk_pct*100:.1f}%/笔, 并发≤{max_concurrent}, 单仓≤{max_pos_frac*100:.0f}%): "
-        f"成交 {taken} 笔/限跳 {skipped}  总收益 {out['total_return']*100:+.1f}%  "
-        f"CAGR {out['cagr']*100:.1f}%  最大回撤 {out['max_drawdown']*100:.1f}%  "
-        f"收益/回撤 {ret_dd}  (期约 {out['years']} 年; 回撤=已实现权益口径,不含浮亏,真实更大)")
+        f"组合资金曲线(风险{risk_pct * 100:.1f}%/笔, 并发≤{max_concurrent}, 单仓≤{max_pos_frac * 100:.0f}%): "
+        f"成交 {taken} 笔/限跳 {skipped}  总收益 {out['total_return'] * 100:+.1f}%  "
+        f"CAGR {out['cagr'] * 100:.1f}%  最大回撤 {out['max_drawdown'] * 100:.1f}%  "
+        f"收益/回撤 {ret_dd}  (期约 {out['years']} 年; 回撤=已实现权益口径,不含浮亏,真实更大)"
+    )
     return out
 
 
-def simulate_portfolio_topn(candidates: list[dict[str, Any]], top_n: int = 5,
-                            risk_pct: float = 0.01, max_concurrent: int = 5,
-                            max_pos_frac: float = 0.20, max_gross: float = 1.0) -> dict[str, Any]:
+def simulate_portfolio_topn(
+    candidates: list[dict[str, Any]],
+    top_n: int = 5,
+    risk_pct: float = 0.01,
+    max_concurrent: int = 5,
+    max_pos_frac: float = 0.20,
+    max_gross: float = 1.0,
+) -> dict[str, Any]:
     """组合级**横截面 top-N 择优**资金曲线：每个进场日在所有「可买」候选里按 score 降序取前 top_n
     (排除已持有该股、受并发/敞口上限约束)，固定风险仓位入场，事件驱动出资金曲线/CAGR/最大回撤。
 
@@ -1628,8 +1901,12 @@ def simulate_portfolio_topn(candidates: list[dict[str, Any]], top_n: int = 5,
     """
     import heapq
     import collections as _c
-    cands = [t for t in candidates if t.get("entry_date") and t.get("exit_date")
-             and (t.get("risk_frac") or 0) > 0]
+
+    cands = [
+        t
+        for t in candidates
+        if t.get("entry_date") and t.get("exit_date") and (t.get("risk_frac") or 0) > 0
+    ]
     if not cands:
         return {"n_taken": 0, "n_skipped": 0, "text": "无可用候选"}
     by_date: dict[str, list] = _c.defaultdict(list)
@@ -1640,7 +1917,7 @@ def simulate_portfolio_topn(candidates: list[dict[str, Any]], top_n: int = 5,
     peak = 1.0
     max_dd = 0.0
     gross = 0.0
-    open_heap: list = []                 # (exit_date, seq, alloc_cap, ret, code)
+    open_heap: list = []  # (exit_date, seq, alloc_cap, ret, code)
     held: set = set()
     curve: list[dict[str, Any]] = []
     taken = 0
@@ -1665,18 +1942,26 @@ def simulate_portfolio_topn(candidates: list[dict[str, Any]], top_n: int = 5,
         if slots <= 0:
             skipped += sum(1 for t in by_date[date] if t["code"] not in held)
             continue
-        ranked = sorted((t for t in by_date[date] if t["code"] not in held),
-                        key=lambda t: (t.get("score") or 0), reverse=True)
+        ranked = sorted(
+            (t for t in by_date[date] if t["code"] not in held),
+            key=lambda t: t.get("score") or 0,
+            reverse=True,
+        )
         opened = 0
         for t in ranked:
             if opened >= top_n or len(open_heap) >= max_concurrent:
                 skipped += 1
                 continue
-            alloc_cap = min(risk_pct / max(t["risk_frac"], _R_RISK_FLOOR), max_pos_frac) * equity
+            alloc_cap = (
+                min(risk_pct / max(t["risk_frac"], _R_RISK_FLOOR), max_pos_frac)
+                * equity
+            )
             if (gross + alloc_cap) > max_gross * equity:
                 skipped += 1
                 continue
-            heapq.heappush(open_heap, (t["exit_date"], seq, alloc_cap, t["ret"], t["code"]))
+            heapq.heappush(
+                open_heap, (t["exit_date"], seq, alloc_cap, t["ret"], t["code"])
+            )
             seq += 1
             gross += alloc_cap
             held.add(t["code"])
@@ -1698,19 +1983,30 @@ def simulate_portfolio_topn(candidates: list[dict[str, Any]], top_n: int = 5,
         cagr = equity ** (1 / years) - 1 if equity > 0 else None
     except Exception:  # noqa: BLE001
         pass
-    ret_dd = (round((equity - 1) / max_dd, 2) if max_dd > 0 else None)
-    out = {"mode": "topn", "top_n": top_n, "n_taken": taken, "n_skipped": skipped,
-           "final_equity": round(equity, 4), "total_return": round(equity - 1, 4),
-           "max_drawdown": round(max_dd, 4), "cagr": round(cagr, 4) if cagr is not None else None,
-           "years": round(years, 2) if years else None, "return_over_maxdd": ret_dd,
-           "selected_win_rate": sel_win, "selected_expectancy": sel_exp,
-           "risk_pct": risk_pct, "max_concurrent": max_concurrent}
+    ret_dd = round((equity - 1) / max_dd, 2) if max_dd > 0 else None
+    out = {
+        "mode": "topn",
+        "top_n": top_n,
+        "n_taken": taken,
+        "n_skipped": skipped,
+        "final_equity": round(equity, 4),
+        "total_return": round(equity - 1, 4),
+        "max_drawdown": round(max_dd, 4),
+        "cagr": round(cagr, 4) if cagr is not None else None,
+        "years": round(years, 2) if years else None,
+        "return_over_maxdd": ret_dd,
+        "selected_win_rate": sel_win,
+        "selected_expectancy": sel_exp,
+        "risk_pct": risk_pct,
+        "max_concurrent": max_concurrent,
+    }
     out["text"] = (
-        f"组合 top-{top_n} 横截面择优(风险{risk_pct*100:.1f}%/笔, 并发≤{max_concurrent}): "
-        f"成交 {taken}/限跳 {skipped}  总收益 {out['total_return']*100:+.1f}%  "
-        f"CAGR {out['cagr']*100:.1f}%  最大回撤 {out['max_drawdown']*100:.1f}%  收益/回撤 {ret_dd}  "
-        f"(期约 {out['years']} 年)\n  [被选中子集] 胜率 {(sel_win or 0)*100:.1f}%  "
-        f"期望 {(sel_exp or 0)*100:+.2f}%/笔 (n={sel_n}) —— top-N 模式看这个,非全候选池")
+        f"组合 top-{top_n} 横截面择优(风险{risk_pct * 100:.1f}%/笔, 并发≤{max_concurrent}): "
+        f"成交 {taken}/限跳 {skipped}  总收益 {out['total_return'] * 100:+.1f}%  "
+        f"CAGR {out['cagr'] * 100:.1f}%  最大回撤 {out['max_drawdown'] * 100:.1f}%  收益/回撤 {ret_dd}  "
+        f"(期约 {out['years']} 年)\n  [被选中子集] 胜率 {(sel_win or 0) * 100:.1f}%  "
+        f"期望 {(sel_exp or 0) * 100:+.2f}%/笔 (n={sel_n}) —— top-N 模式看这个,非全候选池"
+    )
     return out
 
 
@@ -1748,30 +2044,52 @@ def attribution_report(trades: list[dict[str, Any]]) -> dict[str, Any]:
     feats = sorted({k for t in ts for k in t["features"]})
 
     def _lift(grp, f):
-        vals = sorted(((t["features"].get(f), t["ret"]) for t in grp
-                       if isinstance(t["features"].get(f), (int, float))), key=lambda x: x[0])
+        vals = sorted(
+            (
+                (t["features"].get(f), t["ret"])
+                for t in grp
+                if isinstance(t["features"].get(f), (int, float))
+            ),
+            key=lambda x: x[0],
+        )
         if len(vals) < 20:
             return None
         q = len(vals) // 4
-        return (statistics.mean(r for _, r in vals[-q:])
-                - statistics.mean(r for _, r in vals[:q]))
+        return statistics.mean(r for _, r in vals[-q:]) - statistics.mean(
+            r for _, r in vals[:q]
+        )
 
     rows = []
-    lines = [f"特征归因（train {len(train)} / test {len(test)} 笔；每半按特征4分位，报 Q4均收−Q1均收）：",
-             "  →只有 train/test **同号且|lift|>0.5%** 才算稳健判别子(否则过拟合/幸存者假象)"]
+    lines = [
+        f"特征归因（train {len(train)} / test {len(test)} 笔；每半按特征4分位，报 Q4均收−Q1均收）：",
+        "  →只有 train/test **同号且|lift|>0.5%** 才算稳健判别子(否则过拟合/幸存者假象)",
+    ]
     for f in feats:
         lt, lv = _lift(train, f), _lift(test, f)
-        robust = bool(lt is not None and lv is not None and (lt > 0) == (lv > 0)
-                      and min(abs(lt), abs(lv)) > 0.005)
+        robust = bool(
+            lt is not None
+            and lv is not None
+            and (lt > 0) == (lv > 0)
+            and min(abs(lt), abs(lv)) > 0.005
+        )
         rows.append({"feature": f, "train_lift": lt, "test_lift": lv, "robust": robust})
-        fmt = lambda x: f"{x*100:+.2f}%" if x is not None else "NA"
-        lines.append(f"  {f:<16} train {fmt(lt):>8}  test {fmt(lv):>8}  {'✓稳健判别' if robust else ''}")
+        fmt = lambda x: f"{x * 100:+.2f}%" if x is not None else "NA"
+        lines.append(
+            f"  {f:<16} train {fmt(lt):>8}  test {fmt(lv):>8}  {'✓稳健判别' if robust else ''}"
+        )
     robust_feats = [r["feature"] for r in rows if r["robust"]]
-    lines.append(f"结论：稳健判别子 = {robust_feats or '无(→无可泛化的赢家规律,选股不加值,与前述一致)'}")
-    return {"n": len(ts), "features": rows, "robust_features": robust_feats, "text": "\n".join(lines)}
+    lines.append(
+        f"结论：稳健判别子 = {robust_feats or '无(→无可泛化的赢家规律,选股不加值,与前述一致)'}"
+    )
+    return {
+        "n": len(ts),
+        "features": rows,
+        "robust_features": robust_feats,
+        "text": "\n".join(lines),
+    }
 
 
-_RSS_FAIL: str = ""             # 峰值内存探测失败原因（供 [MEM] 行诊断，只记最后一次）
+_RSS_FAIL: str = ""  # 峰值内存探测失败原因（供 [MEM] 行诊断，只记最后一次）
 
 
 def peak_rss_mb() -> Optional[float]:
@@ -1789,54 +2107,64 @@ def peak_rss_mb() -> Optional[float]:
     errs = []
     try:
         import resource  # noqa: PLC0415  Unix
+
         v = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         # Linux 是 KB，macOS 是字节
-        return v / 1024.0 if sys.platform != "darwin" else v / (1024.0 ** 2)
-    except Exception as e:                                        # noqa: BLE001
+        return v / 1024.0 if sys.platform != "darwin" else v / (1024.0**2)
+    except Exception as e:  # noqa: BLE001
         errs.append(f"resource: {e}")
-    try:                                                          # Windows
+    try:  # Windows
         import ctypes  # noqa: PLC0415
         from ctypes import wintypes  # noqa: PLC0415
 
         class _PMC(ctypes.Structure):
-            _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD),
-                        ("PeakWorkingSetSize", ctypes.c_size_t),
-                        ("WorkingSetSize", ctypes.c_size_t),
-                        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
-                        ("QuotaPagedPoolUsage", ctypes.c_size_t),
-                        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
-                        ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
-                        ("PagefileUsage", ctypes.c_size_t),
-                        ("PeakPagefileUsage", ctypes.c_size_t)]
+            _fields_ = [
+                ("cb", wintypes.DWORD),
+                ("PageFaultCount", wintypes.DWORD),
+                ("PeakWorkingSetSize", ctypes.c_size_t),
+                ("WorkingSetSize", ctypes.c_size_t),
+                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                ("PagefileUsage", ctypes.c_size_t),
+                ("PeakPagefileUsage", ctypes.c_size_t),
+            ]
 
-        k32 = ctypes.WinDLL("kernel32", use_last_error=True)      # type: ignore[attr-defined]
-        k32.GetCurrentProcess.restype = wintypes.HANDLE           # 不设会按 c_int 截断句柄
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+        k32.GetCurrentProcess.restype = wintypes.HANDLE  # 不设会按 c_int 截断句柄
         h = k32.GetCurrentProcess()
         pmc = _PMC()
         pmc.cb = ctypes.sizeof(_PMC)
         # Win7+ 把 psapi 的实现搬进了 kernel32（K32 前缀），psapi.dll 仍是转发壳；
         # 两个都试，哪个在就用哪个。
-        for dll_name, fn_name in (("kernel32", "K32GetProcessMemoryInfo"),
-                                  ("psapi", "GetProcessMemoryInfo")):
+        for dll_name, fn_name in (
+            ("kernel32", "K32GetProcessMemoryInfo"),
+            ("psapi", "GetProcessMemoryInfo"),
+        ):
             try:
-                dll = k32 if dll_name == "kernel32" else \
-                    ctypes.WinDLL(dll_name, use_last_error=True)  # type: ignore[attr-defined]
+                dll = (
+                    k32
+                    if dll_name == "kernel32"
+                    else ctypes.WinDLL(dll_name, use_last_error=True)
+                )  # type: ignore[attr-defined]
                 fn = getattr(dll, fn_name)
                 fn.argtypes = [wintypes.HANDLE, ctypes.POINTER(_PMC), wintypes.DWORD]
                 fn.restype = wintypes.BOOL
                 if fn(h, ctypes.byref(pmc), pmc.cb):
-                    return pmc.PeakWorkingSetSize / (1024.0 ** 2)
-                errs.append(f"{dll_name}.{fn_name}: "
-                            f"err={ctypes.get_last_error()}")
-            except Exception as e:                                # noqa: BLE001
+                    return pmc.PeakWorkingSetSize / (1024.0**2)
+                errs.append(f"{dll_name}.{fn_name}: err={ctypes.get_last_error()}")
+            except Exception as e:  # noqa: BLE001
                 errs.append(f"{dll_name}.{fn_name}: {e}")
-    except Exception as e:                                        # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
         errs.append(f"ctypes: {e}")
     _RSS_FAIL = "; ".join(errs)[:200]
     return None
 
 
-def write_json_stream(path: Path, payload: dict[str, Any], *, big: bool = False) -> None:
+def write_json_stream(
+    path: Path, payload: dict[str, Any], *, big: bool = False
+) -> None:
     """落盘 JSON（**流式**）。``big=True`` 时不缩进。
 
     ⚠️ 2026-08-07 从 `write_json` 改名：`paths.write_json` 是全项目的 JSON 产物写入口，
@@ -1873,21 +2201,35 @@ def trades_signature(args: Any, codes: list[str]) -> dict[str, Any]:
          而这些恰好就是 M2 扫描在扫的参数，等于结果文件不自述身份。
     """
     import hashlib  # noqa: PLC0415
+
     digest = hashlib.sha1(",".join(codes).encode("utf-8")).hexdigest()[:12]
     return {
-        "data_source": args.data_source, "scorer": args.scorer,
-        "weekly": bool(args.weekly), "step": args.step, "cost_bps": args.cost_bps,
-        "entry_filter": args.entry_filter, "amv_long_only": bool(args.amv_long_only),
-        "bbi_consec": args.bbi_consec, "time_stop": args.time_stop,
-        "stop_mode": args.stop_mode, "stop_pct": args.stop_pct,
-        "stop_trigger": args.stop_trigger, "stop_tick_buffer": args.stop_tick_buffer,
-        "scale_out": args.scale_out, "breakeven": args.breakeven, "trail": args.trail,
-        "cost_zone_bars": args.cost_zone_bars, "cost_zone_pct": args.cost_zone_pct,
+        "data_source": args.data_source,
+        "scorer": args.scorer,
+        "weekly": bool(args.weekly),
+        "step": args.step,
+        "cost_bps": args.cost_bps,
+        "entry_filter": args.entry_filter,
+        "amv_long_only": bool(args.amv_long_only),
+        "bbi_consec": args.bbi_consec,
+        "time_stop": args.time_stop,
+        "stop_mode": args.stop_mode,
+        "stop_pct": args.stop_pct,
+        "stop_trigger": args.stop_trigger,
+        "stop_tick_buffer": args.stop_tick_buffer,
+        "scale_out": args.scale_out,
+        "breakeven": args.breakeven,
+        "trail": args.trail,
+        "cost_zone_bars": args.cost_zone_bars,
+        "cost_zone_pct": args.cost_zone_pct,
         "max_signals_per_code": args.max_signals_per_code,
         "sector_filter": bool(args.sector_filter),
-        "start": args.start or None, "end": args.end or None, "count": args.count,
+        "start": args.start or None,
+        "end": args.end or None,
+        "count": args.count,
         "collect_all": bool(args.top_n > 0),
-        "n_codes": len(codes), "codes_digest": digest,
+        "n_codes": len(codes),
+        "codes_digest": digest,
     }
 
 
@@ -1908,19 +2250,24 @@ def _portfolio_from_trades(args: Any, codes: list[str]) -> int:
         return 2
     try:
         d = json.loads(src.read_text(encoding="utf-8"))
-    except Exception as e:                                        # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
         print(f"[FAIL] --from-trades 读不了 {src.name}: {e}", file=sys.stderr)
         return 2
     trades = d.get("trades")
     if not trades:
-        print(f"[FAIL] {src.name} 里没有 trades（--summary-only 落的盘不能复用）",
-              file=sys.stderr)
+        print(
+            f"[FAIL] {src.name} 里没有 trades（--summary-only 落的盘不能复用）",
+            file=sys.stderr,
+        )
         return 2
     want = trades_signature(args, codes)
     got = d.get("trades_signature")
     if not isinstance(got, dict):
-        print(f"[FAIL] {src.name} 没有 trades_signature（旧版结果文件）⇒ "
-              f"无法确认口径一致，拒绝复用", file=sys.stderr)
+        print(
+            f"[FAIL] {src.name} 没有 trades_signature（旧版结果文件）⇒ "
+            f"无法确认口径一致，拒绝复用",
+            file=sys.stderr,
+        )
         return 2
     diff = {k: (got.get(k), v) for k, v in want.items() if got.get(k) != v}
     if diff:
@@ -1929,33 +2276,56 @@ def _portfolio_from_trades(args: Any, codes: list[str]) -> int:
             print(f"       {k}: 源={a!r} 本次={b!r}", file=sys.stderr)
         return 2
     if args.top_n <= 0 and not args.portfolio:
-        print("[FAIL] --from-trades 只用于组合模拟，需同时给 --portfolio 或 --top-n",
-              file=sys.stderr)
+        print(
+            "[FAIL] --from-trades 只用于组合模拟，需同时给 --portfolio 或 --top-n",
+            file=sys.stderr,
+        )
         return 2
 
     tsum = summarize_trades(trades)
-    payload = {"mode": "trade_sim", "scorer": args.scorer, "weekly": args.weekly,
-               "data_source": args.data_source, "start": args.start or None,
-               "end": args.end or None, "cost_bps": args.cost_bps,
-               "amv_long_only": bool(args.amv_long_only),
-               "entry_filter": args.entry_filter, "top_n": args.top_n,
-               "bbi_consec": args.bbi_consec, "time_stop": args.time_stop,
-               "stop_mode": args.stop_mode, "stop_pct": args.stop_pct,
-               "codes": codes, "count": args.count,
-               "trades_signature": want, "trades_reused_from": src.name,
-               "n_trades": len(trades), "trade_summary": tsum}
+    payload = {
+        "mode": "trade_sim",
+        "scorer": args.scorer,
+        "weekly": args.weekly,
+        "data_source": args.data_source,
+        "start": args.start or None,
+        "end": args.end or None,
+        "cost_bps": args.cost_bps,
+        "amv_long_only": bool(args.amv_long_only),
+        "entry_filter": args.entry_filter,
+        "top_n": args.top_n,
+        "bbi_consec": args.bbi_consec,
+        "time_stop": args.time_stop,
+        "stop_mode": args.stop_mode,
+        "stop_pct": args.stop_pct,
+        "codes": codes,
+        "count": args.count,
+        "trades_signature": want,
+        "trades_reused_from": src.name,
+        "n_trades": len(trades),
+        "trade_summary": tsum,
+    }
     if args.top_n > 0:
         payload["portfolio"] = simulate_portfolio_topn(
-            trades, top_n=args.top_n, risk_pct=args.risk_pct / 100.0,
-            max_concurrent=args.max_concurrent, max_pos_frac=args.max_pos / 100.0)
+            trades,
+            top_n=args.top_n,
+            risk_pct=args.risk_pct / 100.0,
+            max_concurrent=args.max_concurrent,
+            max_pos_frac=args.max_pos / 100.0,
+        )
     else:
         payload["portfolio"] = simulate_portfolio(
-            trades, risk_pct=args.risk_pct / 100.0,
-            max_concurrent=args.max_concurrent, max_pos_frac=args.max_pos / 100.0)
+            trades,
+            risk_pct=args.risk_pct / 100.0,
+            max_concurrent=args.max_concurrent,
+            max_pos_frac=args.max_pos / 100.0,
+        )
     _rss = peak_rss_mb()
-    print(f"[OK] 复用 {src.name} 的 {len(trades)} 笔交易（口径已核对一致），只跑资金曲线"
-          f"  [MEM] 峰值 {f'{_rss:.0f}MB' if _rss else '未知'}")
-    del d, trades                       # 组合曲线已算完，尽早还内存
+    print(
+        f"[OK] 复用 {src.name} 的 {len(trades)} 笔交易（口径已核对一致），只跑资金曲线"
+        f"  [MEM] 峰值 {f'{_rss:.0f}MB' if _rss else '未知'}"
+    )
+    del d, trades  # 组合曲线已算完，尽早还内存
     if args.out:
         # ⚠️ **不重写 trades**：它与源文件逐字相同，`trades_reused_from` 已指明来源。
         # 复用路径本来就要把源文件整份读进内存，再写一遍等于同一份数据占三份
@@ -1966,13 +2336,15 @@ def _portfolio_from_trades(args: Any, codes: list[str]) -> int:
     return 0
 
 
-def _load_bars_local(codes: list[str], count: int, start: Optional[str] = None,
-                     end: Optional[str] = None) -> dict[str, pd.DataFrame]:
+def _load_bars_local(
+    codes: list[str], count: int, start: Optional[str] = None, end: Optional[str] = None
+) -> dict[str, pd.DataFrame]:
     """CLI 用：经 local_tdx 读取本地日线（需通达信数据；单测走注入不经此）。
     start/end(YYYY-MM-DD)在 count 之前应用(此前 tdx 路径静默忽略 --start/--end,
     导致指定窗口无效、实际跑全历史)。"""
     from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
-    local_tdx_data.reset_qfq_failure_stats()    # 计数限定本轮加载，见下方汇总
+
+    local_tdx_data.reset_qfq_failure_stats()  # 计数限定本轮加载，见下方汇总
     out: dict[str, pd.DataFrame] = {}
     for c in codes:
         try:
@@ -1984,7 +2356,11 @@ def _load_bars_local(codes: list[str], count: int, start: Optional[str] = None,
                     df = df[df["date"] >= start]
                 if end:
                     df = df[df["date"] <= end]
-                df = df.tail(count).reset_index(drop=True) if count else df.reset_index(drop=True)
+                df = (
+                    df.tail(count).reset_index(drop=True)
+                    if count
+                    else df.reset_index(drop=True)
+                )
         except Exception as exc:  # noqa: BLE001
             print(f"[WARN] 加载 {c} 失败: {exc}", file=sys.stderr)
             df = None
@@ -1998,9 +2374,11 @@ def _load_bars_local(codes: list[str], count: int, start: Optional[str] = None,
     if stats["count"]:
         shown = " ".join(stats["codes"][:10])
         more = f" 等{stats['count']}只" if stats["count"] > 10 else ""
-        print(f"[WARN] 前复权失败 {stats['count']}/{len(codes)} 只"
-              f"（{stats['count'] / max(len(codes), 1) * 100:.1f}%），按未复权使用: {shown}{more}",
-              file=sys.stderr)
+        print(
+            f"[WARN] 前复权失败 {stats['count']}/{len(codes)} 只"
+            f"（{stats['count'] / max(len(codes), 1) * 100:.1f}%），按未复权使用: {shown}{more}",
+            file=sys.stderr,
+        )
     return out
 
 
@@ -2011,8 +2389,10 @@ def _report_gates() -> None:
         return
     print("[INFO] 入场门槛统计:\n" + gr["text"], file=sys.stderr)
     if gr["broken"]:
-        print("[WARN] 入场门槛存在依赖缺失/异常,本轮结果**不可用于判定因子有效性**",
-              file=sys.stderr)
+        print(
+            "[WARN] 入场门槛存在依赖缺失/异常,本轮结果**不可用于判定因子有效性**",
+            file=sys.stderr,
+        )
 
 
 def _empty_result_guard(n_loaded: int, n_out: int, unit: str, allow_empty: bool) -> int:
@@ -2031,118 +2411,274 @@ def _empty_result_guard(n_loaded: int, n_out: int, unit: str, allow_empty: bool)
     if allow_empty:
         print(f"[WARN] {msg};--allow-empty 已开,按空结果继续", file=sys.stderr)
         return 0
-    print(f"[ERR] {msg};拒绝落盘——空结果会被误读成'该因子无判别力'。"
-          "确需空结果请显式加 --allow-empty", file=sys.stderr)
+    print(
+        f"[ERR] {msg};拒绝落盘——空结果会被误读成'该因子无判别力'。"
+        "确需空结果请显式加 --allow-empty",
+        file=sys.stderr,
+    )
     return 2
 
 
-def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int], dict]] = None) -> int:
-    ap = argparse.ArgumentParser(description="S_shape 因子走查回测校准（纯分析，只读本地日线）")
-    ap.add_argument("--codes", default="", help="逗号分隔的 6 位代码（与 --universe-sample 二选一）")
-    ap.add_argument("--codes-file", default="",
-                    help="从文件读代码(每行一个,# 开头为注释)。用于**钉死宇宙**:"
-                         "vipdoc 目录会随下载变动(实测 5535→5536),"
-                         "sample_codes(seed=0) 就会抽到另一组票 ⇒ 长时间扫描里各方案宇宙不同")
-    ap.add_argument("--dump-codes", default="",
-                    help="只解析 universe 并把代码写到该文件后**立即退出**(不跑回测)。"
-                         "配合 --codes-file 让一轮扫描的所有方案共用同一份宇宙")
-    ap.add_argument("--universe-sample", type=int, default=0,
-                    help="从 universe 随机抽 N 只（代表性样本；0=不抽，用 --codes 或全量 universe）")
-    ap.add_argument("--universe-local", action="store_true",
-                    help="universe 用本地 vipdoc 实有文件（推荐：覆盖率~100%%、不依赖在线代码表；否则用在线 get_stock_list）")
-    ap.add_argument("--data-source", choices=["tdx", "qlib", "csv"], default="tdx",
-                    help="行情数据源:tdx=本地通达信(默认,**已前复权** owner 2026-08-04 拍板;\n"
-                         "首次须跑 local_tdx/adjust_factors.py --warmup 预热权息);"
-                         "qlib/csv=E:\\S_DATA(含退市股,前复权,1999~2026-02)")
-    ap.add_argument("--s-data-root", default=os.environ.get("S_DATA_ROOT") or r"E:\S_DATA",
-                    help=r"s_data 根目录(含 Q_DATA/CSV_DATA);可用环境变量 S_DATA_ROOT 覆盖,默认 E:\S_DATA")
-    ap.add_argument("--start", default="", help="回测起点 YYYY-MM-DD(在 --count 之前应用;配合 walk-forward)")
+def main(
+    argv: Optional[list] = None,
+    loader: Optional[Callable[[list[str], int], dict]] = None,
+) -> int:
+    ap = argparse.ArgumentParser(
+        description="S_shape 因子走查回测校准（纯分析，只读本地日线）"
+    )
+    ap.add_argument(
+        "--codes", default="", help="逗号分隔的 6 位代码（与 --universe-sample 二选一）"
+    )
+    ap.add_argument(
+        "--codes-file",
+        default="",
+        help="从文件读代码(每行一个,# 开头为注释)。用于**钉死宇宙**:"
+        "vipdoc 目录会随下载变动(实测 5535→5536),"
+        "sample_codes(seed=0) 就会抽到另一组票 ⇒ 长时间扫描里各方案宇宙不同",
+    )
+    ap.add_argument(
+        "--dump-codes",
+        default="",
+        help="只解析 universe 并把代码写到该文件后**立即退出**(不跑回测)。"
+        "配合 --codes-file 让一轮扫描的所有方案共用同一份宇宙",
+    )
+    ap.add_argument(
+        "--universe-sample",
+        type=int,
+        default=0,
+        help="从 universe 随机抽 N 只（代表性样本；0=不抽，用 --codes 或全量 universe）",
+    )
+    ap.add_argument(
+        "--universe-local",
+        action="store_true",
+        help="universe 用本地 vipdoc 实有文件（推荐：覆盖率~100%%、不依赖在线代码表；否则用在线 get_stock_list）",
+    )
+    ap.add_argument(
+        "--data-source",
+        choices=["tdx", "qlib", "csv"],
+        default="tdx",
+        help="行情数据源:tdx=本地通达信(默认,**已前复权** owner 2026-08-04 拍板;\n"
+        "首次须跑 local_tdx/adjust_factors.py --warmup 预热权息);"
+        "qlib/csv=E:\\S_DATA(含退市股,前复权,1999~2026-02)",
+    )
+    ap.add_argument(
+        "--s-data-root",
+        default=os.environ.get("S_DATA_ROOT") or r"E:\S_DATA",
+        help=r"s_data 根目录(含 Q_DATA/CSV_DATA);可用环境变量 S_DATA_ROOT 覆盖,默认 E:\S_DATA",
+    )
+    ap.add_argument(
+        "--start",
+        default="",
+        help="回测起点 YYYY-MM-DD(在 --count 之前应用;配合 walk-forward)",
+    )
     ap.add_argument("--end", default="", help="回测终点 YYYY-MM-DD(默认不限)")
-    ap.add_argument("--universe-sdata", action="store_true",
-                    help="universe 用 s_data 全市场(含退市股;替代 --universe-local 的 tdx 文件列表)")
+    ap.add_argument(
+        "--universe-sdata",
+        action="store_true",
+        help="universe 用 s_data 全市场(含退市股;替代 --universe-local 的 tdx 文件列表)",
+    )
     ap.add_argument("--seed", type=int, default=0, help="随机抽样种子（可复现）")
     ap.add_argument("--count", type=int, default=500, help="每股回溯 K 线根数")
     ap.add_argument("--horizons", default="5,10,20", help="前向窗口(日)，逗号分隔")
     ap.add_argument("--step", type=int, default=1, help="as-of 采样步长")
-    ap.add_argument("--gate-window", type=int, default=0,
-                    help=f"传给 gate/scorer 的尾窗口根数（0=整段前缀，默认）。"
-                         f"{GATE_WINDOW_SAFE} 是与整段前缀逐字段等价的保守预热值；"
-                         "调得更小可能改变因子值（KDJ/MACD 递归、momentum 回看随长度自适应）。"
-                         "实测本模块打分器的单次开销几乎与切片长度无关（见 evaluate docstring），"
-                         "所以默认不开、保持已跑结果可复现")
-    ap.add_argument("--entry-filter", choices=list(ENTRY_GATES.keys()), default="none",
-                    help="只在满足入场条件的 as-of 日评估：none=每根K线；j_low=仅 J<13 买点区")
-    ap.add_argument("--scorer", choices=list(SCORERS.keys()), default="s_shape",
-                    help="打分器：s_shape(突破式)/s_reversal(买弱式)/invert_s_shape(反转突破分)")
+    ap.add_argument(
+        "--gate-window",
+        type=int,
+        default=0,
+        help=f"传给 gate/scorer 的尾窗口根数（0=整段前缀，默认）。"
+        f"{GATE_WINDOW_SAFE} 是与整段前缀逐字段等价的保守预热值；"
+        "调得更小可能改变因子值（KDJ/MACD 递归、momentum 回看随长度自适应）。"
+        "实测本模块打分器的单次开销几乎与切片长度无关（见 evaluate docstring），"
+        "所以默认不开、保持已跑结果可复现",
+    )
+    ap.add_argument(
+        "--entry-filter",
+        choices=list(ENTRY_GATES.keys()),
+        default="none",
+        help="只在满足入场条件的 as-of 日评估：none=每根K线；j_low=仅 J<13 买点区",
+    )
+    ap.add_argument(
+        "--scorer",
+        choices=list(SCORERS.keys()),
+        default="s_shape",
+        help="打分器：s_shape(突破式)/s_reversal(买弱式)/invert_s_shape(反转突破分)",
+    )
     ap.add_argument("--summary-horizon", type=int, default=10)
-    ap.add_argument("--threshold-sweep", action="store_true",
-                    help="扫描 score>=cutoff 的胜率/均收益(校准可买门槛；仅在全量数据上有意义)")
-    ap.add_argument("--factor-field", default="",
-                    help="按该数值字段分位评估前向 lift(如 c_liquidity / c_compression / s_star)")
-    ap.add_argument("--trade-sim", action="store_true",
-                    help="按B1交易规则模拟(进场=可买日收盘;止损=买入当日最低;站上BBI后连破2日收盘卖出)测真实盈亏比")
-    ap.add_argument("--weekly", action="store_true",
-                    help="日线重采样为周线后再回测(周线B1;配合 --trade-sim)")
-    ap.add_argument("--cost-bps", type=float, default=0.0,
-                    help="往返交易成本(基点),从每笔收益扣除(A股约20~30bps含佣金/印花/滑点);默认0=毛收益")
-    ap.add_argument("--amv-long-only", action="store_true",
-                    help="仅在0AMV『做多』区间进场(读指南针compass_amv历史→状态机>4%%做多/<-2.3%%空头;配合 --trade-sim)")
-    ap.add_argument("--bbi-consec", type=int, default=2,
-                    help="出场:站上BBI后连续N日收盘跌破BBI才卖出(默认2;可扫描出场松紧)")
-    ap.add_argument("--time-stop", type=int, default=0,
-                    help="出场:持有N根仍未触发止损/BBI则到期平仓(默认0=不启用)")
-    ap.add_argument("--portfolio", action="store_true",
-                    help="在逐笔交易上叠加组合级资金曲线(固定风险仓位+并发上限),输出总收益/CAGR/最大回撤")
-    ap.add_argument("--from-trades", default="",
-                    help="从已有结果 JSON 读 trades、**跳过回测**只跑资金曲线(配合 --portfolio/--top-n)。"
-                         "复用前核对 trades_signature,口径不一致直接非零退出")
-    ap.add_argument("--risk-pct", type=float, default=1.0, help="组合:每笔风险占本金%%(默认1.0)")
-    ap.add_argument("--max-concurrent", type=int, default=5, help="组合:同时持仓上限(默认5)")
-    ap.add_argument("--max-pos", type=float, default=20.0, help="组合:单仓名义上限%%本金(默认20)")
-    ap.add_argument("--top-n", type=int, default=0,
-                    help="组合:每个进场日按score降序只取前N只(横截面择优;0=不启用,取全部可买)")
-    ap.add_argument("--max-signals-per-code", type=int, default=0,
-                    help="每只股最多保留N个候选(0=不限;--top-n 下限制单股候选爆炸、省内存/CPU)")
-    ap.add_argument("--stop-mode", choices=["low", "pct", "platform"], default="low",
-                    help="止损:low=买入K最低;pct=entry×(1-stop_pct%%);platform=平台高×0.98(配 platform_pullback 入场)")
-    ap.add_argument("--stop-pct", type=float, default=8.0, help="--stop-mode pct 时的止损百分比(默认8)")
-    ap.add_argument("--scale-out", type=float, default=0.0,
-                    help="分批止盈比例:BBI 上方两根中大阳线时减仓比例(B1 原文「放飞一半」→ 0.5;"
-                         "默认 0=不启用,便于与旧结果对照)")
-    ap.add_argument("--breakeven", type=float, default=0.0,
-                    help="盈亏平衡保护:浮盈达该比例后止损上移到成本价(如 0.05=浮盈5%%后保本;"
-                         "01_swing_rules.md §六 已定义但回测此前未实现;默认 0=不启用)")
-    ap.add_argument("--trail", type=float, default=0.0,
-                    help="移动止损:止损跟随持仓期最高价,回撤该比例出场(如 0.08=回撤8%%;"
-                         "默认 0=不启用)。只用截至前一根的最高价更新,避免未来函数")
-    ap.add_argument("--stop-trigger", choices=["close", "intraday"], default="close",
-                    help="止损触发口径(2026-08-04 按 B1_w.pdf 修正):close=收盘价跌破才算破位"
-                         "(材料原文「看收盘价」「收盘时」「忽略盘中冲高回落」,**默认**);"
-                         "intraday=盘中最低触及即出(旧行为,留作口径对照)。"
-                         "保本止损不受此参数影响,始终盘中判定(材料:「盘中关注」)")
-    ap.add_argument("--stop-tick-buffer", type=int, default=0,
-                    help="止损位再向下留几个价位(1 价位=0.01 元)。材料「买入K线最低点"
-                         "**或向下 3-5 个价位**」;贴着最低点容易被一笔扫掉。默认 0=旧行为")
-    ap.add_argument("--cost-zone-bars", type=int, default=0,
-                    help="成本区时间止损:进场后 N+1 根内收盘涨幅始终 <--cost-zone-pct 则平仓"
-                         "(材料「三个交易日还没脱离成本区,又没打止损,多等一天」/"
-                         "持股手册「低等马…不涨就拍」)。默认 0=不启用,建议 3")
-    ap.add_argument("--cost-zone-pct", type=float, default=3.0,
-                    help="脱离成本区的涨幅阈值%%(默认 3,取自材料深V玩法「脱离成本线3%%以上」)")
-    ap.add_argument("--summary-only", action="store_true",
-                    help="输出JSON不含逐笔trades(仅摘要;全市场日线省内存,防OOM)")
-    ap.add_argument("--attribution", action="store_true",
-                    help="记录每笔特征面板,按日期切train/test,报各特征前向lift——严谨检验'赢家共性'是否可泛化(防幸存者/过拟合)")
-    ap.add_argument("--sector-filter", action="store_true",
-                    help="板块相位择时:只在个股所属板块处于有利相位(DIF>0且无近期顶背离/三打)时进场")
-    ap.add_argument("--sector-index-dir",
-                    default=str(Path(__file__).resolve().parents[3] / "data" / "market" / "sector_index"),
-                    help="板块指数CSV目录(fetch_sector_index_history.py 产出)")
-    ap.add_argument("--sector-members",
-                    default=str(Path(__file__).resolve().parents[3] / "data" / "market" / "sector_members.json"),
-                    help="板块成员映射 JSON({sector:[codes]}; fetcher --members 产出)")
-    ap.add_argument("--allow-empty", action="store_true",
-                    help="允许空结果(0 K线/0 信号)仍 exit 0 并落盘;默认拒绝——空结果会被误读成'因子无效'")
+    ap.add_argument(
+        "--threshold-sweep",
+        action="store_true",
+        help="扫描 score>=cutoff 的胜率/均收益(校准可买门槛；仅在全量数据上有意义)",
+    )
+    ap.add_argument(
+        "--factor-field",
+        default="",
+        help="按该数值字段分位评估前向 lift(如 c_liquidity / c_compression / s_star)",
+    )
+    ap.add_argument(
+        "--trade-sim",
+        action="store_true",
+        help="按B1交易规则模拟(进场=可买日收盘;止损=买入当日最低;站上BBI后连破2日收盘卖出)测真实盈亏比",
+    )
+    ap.add_argument(
+        "--weekly",
+        action="store_true",
+        help="日线重采样为周线后再回测(周线B1;配合 --trade-sim)",
+    )
+    ap.add_argument(
+        "--cost-bps",
+        type=float,
+        default=0.0,
+        help="往返交易成本(基点),从每笔收益扣除(A股约20~30bps含佣金/印花/滑点);默认0=毛收益",
+    )
+    ap.add_argument(
+        "--amv-long-only",
+        action="store_true",
+        help="仅在0AMV『做多』区间进场(读指南针compass_amv历史→状态机>4%%做多/<-2.3%%空头;配合 --trade-sim)",
+    )
+    ap.add_argument(
+        "--bbi-consec",
+        type=int,
+        default=2,
+        help="出场:站上BBI后连续N日收盘跌破BBI才卖出(默认2;可扫描出场松紧)",
+    )
+    ap.add_argument(
+        "--time-stop",
+        type=int,
+        default=0,
+        help="出场:持有N根仍未触发止损/BBI则到期平仓(默认0=不启用)",
+    )
+    ap.add_argument(
+        "--portfolio",
+        action="store_true",
+        help="在逐笔交易上叠加组合级资金曲线(固定风险仓位+并发上限),输出总收益/CAGR/最大回撤",
+    )
+    ap.add_argument(
+        "--from-trades",
+        default="",
+        help="从已有结果 JSON 读 trades、**跳过回测**只跑资金曲线(配合 --portfolio/--top-n)。"
+        "复用前核对 trades_signature,口径不一致直接非零退出",
+    )
+    ap.add_argument(
+        "--risk-pct", type=float, default=1.0, help="组合:每笔风险占本金%%(默认1.0)"
+    )
+    ap.add_argument(
+        "--max-concurrent", type=int, default=5, help="组合:同时持仓上限(默认5)"
+    )
+    ap.add_argument(
+        "--max-pos", type=float, default=20.0, help="组合:单仓名义上限%%本金(默认20)"
+    )
+    ap.add_argument(
+        "--top-n",
+        type=int,
+        default=0,
+        help="组合:每个进场日按score降序只取前N只(横截面择优;0=不启用,取全部可买)",
+    )
+    ap.add_argument(
+        "--max-signals-per-code",
+        type=int,
+        default=0,
+        help="每只股最多保留N个候选(0=不限;--top-n 下限制单股候选爆炸、省内存/CPU)",
+    )
+    ap.add_argument(
+        "--stop-mode",
+        choices=["low", "pct", "platform"],
+        default="low",
+        help="止损:low=买入K最低;pct=entry×(1-stop_pct%%);platform=平台高×0.98(配 platform_pullback 入场)",
+    )
+    ap.add_argument(
+        "--stop-pct",
+        type=float,
+        default=8.0,
+        help="--stop-mode pct 时的止损百分比(默认8)",
+    )
+    ap.add_argument(
+        "--scale-out",
+        type=float,
+        default=0.0,
+        help="分批止盈比例:BBI 上方两根中大阳线时减仓比例(B1 原文「放飞一半」→ 0.5;"
+        "默认 0=不启用,便于与旧结果对照)",
+    )
+    ap.add_argument(
+        "--breakeven",
+        type=float,
+        default=0.0,
+        help="盈亏平衡保护:浮盈达该比例后止损上移到成本价(如 0.05=浮盈5%%后保本;"
+        "01_swing_rules.md §六 已定义但回测此前未实现;默认 0=不启用)",
+    )
+    ap.add_argument(
+        "--trail",
+        type=float,
+        default=0.0,
+        help="移动止损:止损跟随持仓期最高价,回撤该比例出场(如 0.08=回撤8%%;"
+        "默认 0=不启用)。只用截至前一根的最高价更新,避免未来函数",
+    )
+    ap.add_argument(
+        "--stop-trigger",
+        choices=["close", "intraday"],
+        default="close",
+        help="止损触发口径(2026-08-04 按 B1_w.pdf 修正):close=收盘价跌破才算破位"
+        "(材料原文「看收盘价」「收盘时」「忽略盘中冲高回落」,**默认**);"
+        "intraday=盘中最低触及即出(旧行为,留作口径对照)。"
+        "保本止损不受此参数影响,始终盘中判定(材料:「盘中关注」)",
+    )
+    ap.add_argument(
+        "--stop-tick-buffer",
+        type=int,
+        default=0,
+        help="止损位再向下留几个价位(1 价位=0.01 元)。材料「买入K线最低点"
+        "**或向下 3-5 个价位**」;贴着最低点容易被一笔扫掉。默认 0=旧行为",
+    )
+    ap.add_argument(
+        "--cost-zone-bars",
+        type=int,
+        default=0,
+        help="成本区时间止损:进场后 N+1 根内收盘涨幅始终 <--cost-zone-pct 则平仓"
+        "(材料「三个交易日还没脱离成本区,又没打止损,多等一天」/"
+        "持股手册「低等马…不涨就拍」)。默认 0=不启用,建议 3",
+    )
+    ap.add_argument(
+        "--cost-zone-pct",
+        type=float,
+        default=3.0,
+        help="脱离成本区的涨幅阈值%%(默认 3,取自材料深V玩法「脱离成本线3%%以上」)",
+    )
+    ap.add_argument(
+        "--summary-only",
+        action="store_true",
+        help="输出JSON不含逐笔trades(仅摘要;全市场日线省内存,防OOM)",
+    )
+    ap.add_argument(
+        "--attribution",
+        action="store_true",
+        help="记录每笔特征面板,按日期切train/test,报各特征前向lift——严谨检验'赢家共性'是否可泛化(防幸存者/过拟合)",
+    )
+    ap.add_argument(
+        "--sector-filter",
+        action="store_true",
+        help="板块相位择时:只在个股所属板块处于有利相位(DIF>0且无近期顶背离/三打)时进场",
+    )
+    ap.add_argument(
+        "--sector-index-dir",
+        default=str(
+            Path(__file__).resolve().parents[3] / "data" / "market" / "sector_index"
+        ),
+        help="板块指数CSV目录(fetch_sector_index_history.py 产出)",
+    )
+    ap.add_argument(
+        "--sector-members",
+        default=str(
+            Path(__file__).resolve().parents[3]
+            / "data"
+            / "market"
+            / "sector_members.json"
+        ),
+        help="板块成员映射 JSON({sector:[codes]}; fetcher --members 产出)",
+    )
+    ap.add_argument(
+        "--allow-empty",
+        action="store_true",
+        help="允许空结果(0 K线/0 信号)仍 exit 0 并落盘;默认拒绝——空结果会被误读成'因子无效'",
+    )
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
     reset_gate_stats()
@@ -2156,52 +2692,89 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
         p = Path(args.codes_file)
         if not p.is_file():
             ap.error(f"--codes-file 不存在: {p}")
-        codes = [ln.strip() for ln in p.read_text(encoding="utf-8").splitlines()
-                 if ln.strip() and not ln.strip().startswith("#")]
-        print(f"[INFO] universe=codes_file({p.name}) {len(codes)} 只（**已钉死**）",
-              file=sys.stderr)
+        codes = [
+            ln.strip()
+            for ln in p.read_text(encoding="utf-8").splitlines()
+            if ln.strip() and not ln.strip().startswith("#")
+        ]
+        print(
+            f"[INFO] universe=codes_file({p.name}) {len(codes)} 只（**已钉死**）",
+            file=sys.stderr,
+        )
     elif args.universe_sdata:
         from custos.datasource import s_data  # noqa: PLC0415
-        src_root = Path(args.s_data_root) / ("CSV_DATA" if args.data_source == "csv" else "Q_DATA")
+
+        src_root = Path(args.s_data_root) / (
+            "CSV_DATA" if args.data_source == "csv" else "Q_DATA"
+        )
         base = s_data.list_universe(src_root, source=args.data_source)
-        codes = sample_codes(base, args.universe_sample, args.seed) if args.universe_sample > 0 else list(base)
-        print(f"[INFO] universe=s_data({args.data_source}) 共 {len(base)} 只，取 {len(codes)} 只（seed={args.seed}）", file=sys.stderr)
+        codes = (
+            sample_codes(base, args.universe_sample, args.seed)
+            if args.universe_sample > 0
+            else list(base)
+        )
+        print(
+            f"[INFO] universe=s_data({args.data_source}) 共 {len(base)} 只，取 {len(codes)} 只（seed={args.seed}）",
+            file=sys.stderr,
+        )
     elif args.universe_local or args.universe_sample > 0:
         from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
+
         if args.universe_local:
             base = local_tdx_data.list_local_vipdoc_codes()
             src = "local_vipdoc"
         else:
             base = local_tdx_data.get_stock_list()
             src = "online_get_stock_list"
-        codes = sample_codes(base, args.universe_sample, args.seed) if args.universe_sample > 0 else list(base)
-        print(f"[INFO] universe={src} 共 {len(base)} 只，取 {len(codes)} 只（seed={args.seed}）", file=sys.stderr)
+        codes = (
+            sample_codes(base, args.universe_sample, args.seed)
+            if args.universe_sample > 0
+            else list(base)
+        )
+        print(
+            f"[INFO] universe={src} 共 {len(base)} 只，取 {len(codes)} 只（seed={args.seed}）",
+            file=sys.stderr,
+        )
     else:
         codes = [c.strip() for c in args.codes.split(",") if c.strip()]
     if not codes:
-        ap.error("需提供 --codes / --universe-sample N / --universe-local / --universe-sdata")
+        ap.error(
+            "需提供 --codes / --universe-sample N / --universe-local / --universe-sdata"
+        )
     if args.dump_codes:
         # 只解析宇宙就退出——让一轮扫描先落一份代码表，后续所有方案用 --codes-file 读它。
         # 放在这里(codes 已解析、任何数据加载之前)是为了快：只做一次目录列举。
         out = Path(args.dump_codes)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text("\n".join(codes) + "\n", encoding="utf-8")
-        print(f"[OK] 宇宙已落盘 {out}（{len(codes)} 只）；"
-              f"后续用 --codes-file 复用即可钉死宇宙")
+        print(
+            f"[OK] 宇宙已落盘 {out}（{len(codes)} 只）；"
+            f"后续用 --codes-file 复用即可钉死宇宙"
+        )
         return 0
     horizons = tuple(int(h) for h in args.horizons.split(",") if h.strip())
     if loader is not None:
         load = loader
     elif args.data_source == "tdx":
         import functools
-        load = functools.partial(_load_bars_local, start=args.start or None, end=args.end or None)
+
+        load = functools.partial(
+            _load_bars_local, start=args.start or None, end=args.end or None
+        )
     else:
         import functools
         from custos.datasource import s_data  # noqa: PLC0415
-        fn = s_data.load_bars_csv if args.data_source == "csv" else s_data.load_bars_qlib
+
+        fn = (
+            s_data.load_bars_csv if args.data_source == "csv" else s_data.load_bars_qlib
+        )
         sub = "CSV_DATA" if args.data_source == "csv" else "Q_DATA"
-        load = functools.partial(fn, start=args.start or None, end=args.end or None,
-                                 root=str(Path(args.s_data_root) / sub))
+        load = functools.partial(
+            fn,
+            start=args.start or None,
+            end=args.end or None,
+            root=str(Path(args.s_data_root) / sub),
+        )
 
     if args.trade_sim:
         if args.from_trades:
@@ -2209,35 +2782,56 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
             return _portfolio_from_trades(args, codes)
         amv_regime = None
         if args.amv_long_only:
-            amv_regime = load_amv_regime(since=args.start or "2015-01-01")  # regime 起点跟随回测起点
+            amv_regime = load_amv_regime(
+                since=args.start or "2015-01-01"
+            )  # regime 起点跟随回测起点
             if not amv_regime:
-                ap.error("--amv-long-only 需要指南针 0AMV 数据(compass_amv)，未读到；请在有指南针的机器运行")
-            print(f"[INFO] 0AMV regime 覆盖 {len(amv_regime)} 个交易日，仅在『做多』区间进场", file=sys.stderr)
+                ap.error(
+                    "--amv-long-only 需要指南针 0AMV 数据(compass_amv)，未读到；请在有指南针的机器运行"
+                )
+            print(
+                f"[INFO] 0AMV regime 覆盖 {len(amv_regime)} 个交易日，仅在『做多』区间进场",
+                file=sys.stderr,
+            )
         sector_gate = None
         if args.sector_filter:
             from custos.core.factors import sector_phase  # noqa: PLC0415
+
             mpath = Path(args.sector_members)
-            members = json.loads(mpath.read_text(encoding="utf-8")) if mpath.is_file() else {}
+            members = (
+                json.loads(mpath.read_text(encoding="utf-8")) if mpath.is_file() else {}
+            )
             if not members:
-                ap.error("--sector-filter 需 sector_members.json(先跑 fetch_sector_index_history.py --members)")
+                ap.error(
+                    "--sector-filter 需 sector_members.json(先跑 fetch_sector_index_history.py --members)"
+                )
             sector_gate = sector_phase.load_sector_gate(args.sector_index_dir, members)
             n_loaded = getattr(sector_gate, "n_sectors", 0)
             if not n_loaded:
-                ap.error(f"--sector-filter 无任何板块指数数据(dir={args.sector_index_dir});"
-                         f"先跑 fetch_sector_index_history.py,否则 gate 会静默退化为全放行")
+                ap.error(
+                    f"--sector-filter 无任何板块指数数据(dir={args.sector_index_dir});"
+                    f"先跑 fetch_sector_index_history.py,否则 gate 会静默退化为全放行"
+                )
             eff = getattr(sector_gate, "effective_start", None)
-            print(f"[INFO] 板块相位 gate: {n_loaded}/{len(members)} 板块有数据, 有效起始 {eff}"
-                  f" (dir={args.sector_index_dir})", file=sys.stderr)
+            print(
+                f"[INFO] 板块相位 gate: {n_loaded}/{len(members)} 板块有数据, 有效起始 {eff}"
+                f" (dir={args.sector_index_dir})",
+                file=sys.stderr,
+            )
             if args.start and eff and args.start < eff:
-                print(f"[WARN] --start {args.start} 早于板块数据起始 {eff}:该日前已分类个股一律被 gate 拦截,"
-                      f"样本期与不带 filter 的 baseline 不可比", file=sys.stderr)
+                print(
+                    f"[WARN] --start {args.start} 早于板块数据起始 {eff}:该日前已分类个股一律被 gate 拦截,"
+                    f"样本期与不带 filter 的 baseline 不可比",
+                    file=sys.stderr,
+                )
         trades: list[dict[str, Any]] = []
         import gc
         import time as _time
+
         n_loaded = 0
-        t_load = 0.0        # 读盘 + 前复权累计秒数
-        t_eval = 0.0        # 逐 bar 评估累计秒数
-        for k, c in enumerate(codes):     # 流式：逐股加载→评估→释放，避免全量载入 OOM
+        t_load = 0.0  # 读盘 + 前复权累计秒数
+        t_eval = 0.0  # 逐 bar 评估累计秒数
+        for k, c in enumerate(codes):  # 流式：逐股加载→评估→释放，避免全量载入 OOM
             _t0 = _time.time()
             d = load([c], args.count)
             t_load += _time.time() - _t0
@@ -2245,24 +2839,37 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
                 n_loaded += len(d)
                 _t0 = _time.time()
                 trades += evaluate_trades(
-                    d, scorer=SCORERS[args.scorer], step=args.step, weekly=args.weekly,
-                    cost_bps=args.cost_bps, amv_regime=amv_regime, bbi_exit_consec=args.bbi_consec,
-                    time_stop_bars=args.time_stop, collect_all=bool(args.top_n > 0),
+                    d,
+                    scorer=SCORERS[args.scorer],
+                    step=args.step,
+                    weekly=args.weekly,
+                    cost_bps=args.cost_bps,
+                    amv_regime=amv_regime,
+                    bbi_exit_consec=args.bbi_consec,
+                    time_stop_bars=args.time_stop,
+                    collect_all=bool(args.top_n > 0),
                     entry_gate=ENTRY_GATES[args.entry_filter],
-                    stop_mode=args.stop_mode, stop_pct=args.stop_pct,
+                    stop_mode=args.stop_mode,
+                    stop_pct=args.stop_pct,
                     max_signals_per_code=(args.max_signals_per_code or None),
-                    feature_panel=bool(args.attribution), sector_gate=sector_gate,
+                    feature_panel=bool(args.attribution),
+                    sector_gate=sector_gate,
                     scale_out_frac=args.scale_out,
-                    breakeven_trigger=args.breakeven, trail_pct=args.trail,
+                    breakeven_trigger=args.breakeven,
+                    trail_pct=args.trail,
                     stop_trigger=args.stop_trigger,
                     stop_tick_buffer=args.stop_tick_buffer,
                     cost_zone_bars=args.cost_zone_bars,
-                    cost_zone_pct=args.cost_zone_pct)
+                    cost_zone_pct=args.cost_zone_pct,
+                )
                 t_eval += _time.time() - _t0
             del d
             if (k + 1) % 500 == 0:
                 gc.collect()
-                print(f"[INFO] 已处理 {k + 1}/{len(codes)} 只，累计 {len(trades)} 笔候选", file=sys.stderr)
+                print(
+                    f"[INFO] 已处理 {k + 1}/{len(codes)} 只，累计 {len(trades)} 笔候选",
+                    file=sys.stderr,
+                )
         # 加载(含前复权)与评估的耗时拆分。加载结果对**所有扫描方案都相同**，
         # 若加载占比高，则「方案外循环」改「股票外循环」可省掉 (N-1)/N 的加载时间
         # ——m2_stop_sweep 模块文档第 ③ 条要的就是这个数。
@@ -2270,35 +2877,60 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
         # 内存乘 N ⇒ 必须有实测数字才能定安全路数。
         _rss = peak_rss_mb()
         _mem = f"{_rss:.0f}MB" if _rss else f"未知({_RSS_FAIL or '无原因'})"
-        print(f"[TIME] 加载(含前复权) {t_load:.0f}s / 评估 {t_eval:.0f}s"
-              f"（加载占 {t_load / max(t_load + t_eval, 1e-9):.0%}，"
-              f"{len(codes)} 只票）"
-              f"  [MEM] 峰值 {_mem} / {len(trades)} 笔"
-              f"{'（collect_all 全候选）' if args.top_n > 0 else ''}", file=sys.stderr)
+        print(
+            f"[TIME] 加载(含前复权) {t_load:.0f}s / 评估 {t_eval:.0f}s"
+            f"（加载占 {t_load / max(t_load + t_eval, 1e-9):.0%}，"
+            f"{len(codes)} 只票）"
+            f"  [MEM] 峰值 {_mem} / {len(trades)} 笔"
+            f"{'（collect_all 全候选）' if args.top_n > 0 else ''}",
+            file=sys.stderr,
+        )
         _report_gates()
-        rc_empty = _empty_result_guard(n_loaded, len(trades), "笔交易", args.allow_empty)
+        rc_empty = _empty_result_guard(
+            n_loaded, len(trades), "笔交易", args.allow_empty
+        )
         if rc_empty:
             return rc_empty
         tsum = summarize_trades(trades)
-        payload = {"mode": "trade_sim", "scorer": args.scorer, "weekly": args.weekly,
-                   "data_source": args.data_source, "start": args.start or None, "end": args.end or None,
-                   "cost_bps": args.cost_bps, "amv_long_only": bool(args.amv_long_only),
-                   "entry_filter": args.entry_filter, "top_n": args.top_n,
-                   "bbi_consec": args.bbi_consec, "time_stop": args.time_stop,
-                   "stop_mode": args.stop_mode, "stop_pct": args.stop_pct,
-                   # 被 M2 扫描的那几个参数原先**没有落盘** ⇒ 结果文件不自述身份，
-                   # 事后无法确认某个文件是哪套参数跑的。指纹见 trades_signature。
-                   "trades_signature": trades_signature(args, codes),
-                   "codes": codes, "count": args.count, "trade_summary": tsum, "trades": trades}
+        payload = {
+            "mode": "trade_sim",
+            "scorer": args.scorer,
+            "weekly": args.weekly,
+            "data_source": args.data_source,
+            "start": args.start or None,
+            "end": args.end or None,
+            "cost_bps": args.cost_bps,
+            "amv_long_only": bool(args.amv_long_only),
+            "entry_filter": args.entry_filter,
+            "top_n": args.top_n,
+            "bbi_consec": args.bbi_consec,
+            "time_stop": args.time_stop,
+            "stop_mode": args.stop_mode,
+            "stop_pct": args.stop_pct,
+            # 被 M2 扫描的那几个参数原先**没有落盘** ⇒ 结果文件不自述身份，
+            # 事后无法确认某个文件是哪套参数跑的。指纹见 trades_signature。
+            "trades_signature": trades_signature(args, codes),
+            "codes": codes,
+            "count": args.count,
+            "trade_summary": tsum,
+            "trades": trades,
+        }
         if args.top_n > 0:
             payload["portfolio"] = simulate_portfolio_topn(
-                trades, top_n=args.top_n, risk_pct=args.risk_pct / 100.0,
-                max_concurrent=args.max_concurrent, max_pos_frac=args.max_pos / 100.0)
+                trades,
+                top_n=args.top_n,
+                risk_pct=args.risk_pct / 100.0,
+                max_concurrent=args.max_concurrent,
+                max_pos_frac=args.max_pos / 100.0,
+            )
         elif args.portfolio:
             payload["portfolio"] = simulate_portfolio(
-                trades, risk_pct=args.risk_pct / 100.0, max_concurrent=args.max_concurrent,
-                max_pos_frac=args.max_pos / 100.0)
-        if args.attribution:      # 先算归因,保证 --out JSON 里也带 attribution
+                trades,
+                risk_pct=args.risk_pct / 100.0,
+                max_concurrent=args.max_concurrent,
+                max_pos_frac=args.max_pos / 100.0,
+            )
+        if args.attribution:  # 先算归因,保证 --out JSON 里也带 attribution
             payload["attribution"] = attribution_report(trades)
         if args.out:
             out = Path(args.out)
@@ -2307,15 +2939,19 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
             # 流式写：`write_text(json.dumps(...))` 会先拼出整个字符串（indent=2 再放大
             # 1.36 倍），逐笔上万条时白送一次内存峰值——这个回测本来就常被 OOM Kill。
             write_json_stream(out, payload, big=len(trades) > 20000)
-            print(f"[OK] 写出 {out}（{len(trades)} 笔交易，scorer={args.scorer}, {'周线' if args.weekly else '日线'}, cost={args.cost_bps}bps, amv_long_only={bool(args.amv_long_only)}）")
-        stop_desc = ("买入K最低" if args.stop_mode == "low" else f"pct {args.stop_pct}%")
+            print(
+                f"[OK] 写出 {out}（{len(trades)} 笔交易，scorer={args.scorer}, {'周线' if args.weekly else '日线'}, cost={args.cost_bps}bps, amv_long_only={bool(args.amv_long_only)}）"
+            )
+        stop_desc = "买入K最低" if args.stop_mode == "low" else f"pct {args.stop_pct}%"
         tstop_desc = f" / 时间止损{args.time_stop}根" if args.time_stop else ""
-        print(f"\n=== B1 交易模拟（scorer={args.scorer}, {'周线' if args.weekly else '日线'}, "
-              f"数据源={args.data_source}"
-              f"{(' ' + (args.start or '…') + '~' + (args.end or '…')) if (args.start or args.end) else ''}, "
-              f"入场门槛={args.entry_filter}, cost={args.cost_bps}bps, "
-              f"{'仅0AMV做多' if args.amv_long_only else '全regime'}, "
-              f"止损={stop_desc} / 站上BBI后连破{args.bbi_consec}日卖出{tstop_desc}）===")
+        print(
+            f"\n=== B1 交易模拟（scorer={args.scorer}, {'周线' if args.weekly else '日线'}, "
+            f"数据源={args.data_source}"
+            f"{(' ' + (args.start or '…') + '~' + (args.end or '…')) if (args.start or args.end) else ''}, "
+            f"入场门槛={args.entry_filter}, cost={args.cost_bps}bps, "
+            f"{'仅0AMV做多' if args.amv_long_only else '全regime'}, "
+            f"止损={stop_desc} / 站上BBI后连破{args.bbi_consec}日卖出{tstop_desc}）==="
+        )
         print(tsum["text"])
         if payload.get("portfolio"):
             print("\n" + payload["portfolio"]["text"])
@@ -2325,35 +2961,60 @@ def main(argv: Optional[list] = None, loader: Optional[Callable[[list[str], int]
         return 0
 
     bars = load(codes, args.count)
-    records = evaluate(bars, horizons=horizons, step=args.step,
-                       entry_gate=ENTRY_GATES[args.entry_filter],
-                       scorer=SCORERS[args.scorer],
-                       gate_window=args.gate_window)
+    records = evaluate(
+        bars,
+        horizons=horizons,
+        step=args.step,
+        entry_gate=ENTRY_GATES[args.entry_filter],
+        scorer=SCORERS[args.scorer],
+        gate_window=args.gate_window,
+    )
     _report_gates()
-    rc_empty = _empty_result_guard(len(bars or {}), len(records), "条信号", args.allow_empty)
+    rc_empty = _empty_result_guard(
+        len(bars or {}), len(records), "条信号", args.allow_empty
+    )
     if rc_empty:
         return rc_empty
     summary = summarize(records, horizon=args.summary_horizon)
     matrix = horizon_band_matrix(records, horizons)
 
-    payload = {"codes": codes, "count": args.count, "horizons": list(horizons),
-               "entry_filter": args.entry_filter, "scorer": args.scorer,
-               "summary": summary, "horizon_band_matrix": matrix, "records": records}
+    payload = {
+        "codes": codes,
+        "count": args.count,
+        "horizons": list(horizons),
+        "entry_filter": args.entry_filter,
+        "scorer": args.scorer,
+        "summary": summary,
+        "horizon_band_matrix": matrix,
+        "records": records,
+    }
     if args.threshold_sweep:
-        payload["threshold_sweep"] = sweep_threshold(records, horizon=args.summary_horizon)
+        payload["threshold_sweep"] = sweep_threshold(
+            records, horizon=args.summary_horizon
+        )
     if args.factor_field:
-        payload["factor_lift"] = factor_lift(records, args.factor_field, horizon=args.summary_horizon)
+        payload["factor_lift"] = factor_lift(
+            records, args.factor_field, horizon=args.summary_horizon
+        )
     if args.out:
         out = Path(args.out)
         write_json_stream(out, payload, big=len(records) > 20000)
-        print(f"[OK] 写出 {out}（{len(records)} 条信号，scorer={args.scorer}, entry_filter={args.entry_filter}）")
-    print(f"\n=== 分档 × horizon 网格（scorer={args.scorer}, entry_filter={args.entry_filter}, 信号 {len(records)} 条）===")
+        print(
+            f"[OK] 写出 {out}（{len(records)} 条信号，scorer={args.scorer}, entry_filter={args.entry_filter}）"
+        )
+    print(
+        f"\n=== 分档 × horizon 网格（scorer={args.scorer}, entry_filter={args.entry_filter}, 信号 {len(records)} 条）==="
+    )
     print(matrix["text"])
     if args.threshold_sweep:
-        print(f"\n=== 门槛扫描（scorer={args.scorer}, horizon={args.summary_horizon}）===")
+        print(
+            f"\n=== 门槛扫描（scorer={args.scorer}, horizon={args.summary_horizon}）==="
+        )
         print(payload["threshold_sweep"]["text"])
     if args.factor_field:
-        print(f"\n=== 因子 lift（field={args.factor_field}, horizon={args.summary_horizon}）===")
+        print(
+            f"\n=== 因子 lift（field={args.factor_field}, horizon={args.summary_horizon}）==="
+        )
         print(payload["factor_lift"]["text"])
     print("\n=== summary(horizon=%d) ===" % args.summary_horizon)
     print(json.dumps(summary, ensure_ascii=False, indent=2))

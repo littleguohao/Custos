@@ -20,6 +20,7 @@
 接口与 backtest_factors loader 约定一致: {6位代码: DataFrame[date,open,high,low,close,volume]}。
 纯只读,绝不 raise(失败返回空 dict 并 stderr WARN)。
 """
+
 from __future__ import annotations
 
 import os
@@ -46,8 +47,10 @@ def _warn_if_nothing_loaded(out: dict, codes: list, source: str, root) -> None:
     """请求了 N 只票却一只都没读到 → 出声。调用方(回测/研究)据此区分"数据没挂上"
     与"因子没命中";此前空 dict 静默返回,一路走成 exit 0 的空结论(审计 E9)。"""
     if codes and not out:
-        _warn(f"{source} 加载 0/{len(codes)} 只(root={root}):一根 K 线都没读到,"
-              "请确认数据根目录与代码列表")
+        _warn(
+            f"{source} 加载 0/{len(codes)} 只(root={root}):一根 K 线都没读到,"
+            "请确认数据根目录与代码列表"
+        )
 
 
 def _exchange(code6: str) -> str:
@@ -56,7 +59,7 @@ def _exchange(code6: str) -> str:
         return "SH"
     if code6[:2] in ("00", "30"):
         return "SZ"
-    return "BJ"          # 4xxxxx/8xxxxx/920xxx 北交所
+    return "BJ"  # 4xxxxx/8xxxxx/920xxx 北交所
 
 
 def bundle_convention(bundle_dir: Path) -> str:
@@ -91,7 +94,7 @@ def bundle_convention(bundle_dir: Path) -> str:
     feat = bundle_dir / "features"
     if not feat.is_dir():
         return "unknown"
-    for inst in feat.iterdir():                    # 抽第一只有数据的票看字段
+    for inst in feat.iterdir():  # 抽第一只有数据的票看字段
         if not inst.is_dir():
             continue
         names = {p.name.split(".")[0] for p in inst.glob("*.bin")}
@@ -119,20 +122,35 @@ def list_bundles(root: str | Path = DEFAULT_Q_ROOT) -> list[dict[str, Any]]:
         if not cal_path.is_file():
             continue
         try:
-            cal = [ln.strip() for ln in cal_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+            cal = [
+                ln.strip()
+                for ln in cal_path.read_text(encoding="utf-8").splitlines()
+                if ln.strip()
+            ]
             if cal:
-                out.append({"dir": sub, "calendar": cal, "start": cal[0], "end": cal[-1],
-                            "convention": bundle_convention(sub)})
+                out.append(
+                    {
+                        "dir": sub,
+                        "calendar": cal,
+                        "start": cal[0],
+                        "end": cal[-1],
+                        "convention": bundle_convention(sub),
+                    }
+                )
         except Exception as exc:  # noqa: BLE001
             _warn(f"读取日历失败 {cal_path}: {exc}")
     if not out:
-        _warn(f"qlib root 存在但未发现任何 bundle(子项 {n_sub} 个,均缺 calendars/day.txt): {root}"
-              " —— 后续加载必然全空,请先确认 S_DATA_ROOT / --s-data-root")
+        _warn(
+            f"qlib root 存在但未发现任何 bundle(子项 {n_sub} 个,均缺 calendars/day.txt): {root}"
+            " —— 后续加载必然全空,请先确认 S_DATA_ROOT / --s-data-root"
+        )
     out.sort(key=lambda b: b["start"])
     return out
 
 
-def code_to_qlib_dir(code6: str, bundles: list[dict[str, Any]]) -> list[tuple[Path, str]]:
+def code_to_qlib_dir(
+    code6: str, bundles: list[dict[str, Any]]
+) -> list[tuple[Path, str]]:
     """6 位代码 → 各 bundle 内的 (bundle_dir, instrument_dir) 列表(跨 bundle 可多个,按日历升序)。
     先按交易所前缀规则定位,不存在则扫 features/ 后缀兜底。"""
     pref = _exchange(code6) + code6
@@ -165,11 +183,13 @@ def _read_field_bin(fdir: Path, field: str, cal_len: int) -> Optional[np.ndarray
     lo = max(si, 0)
     hi = min(si + vals.size, cal_len)
     if hi > lo:
-        out[lo:hi] = vals[lo - si: hi - si]
+        out[lo:hi] = vals[lo - si : hi - si]
     return out
 
 
-def _load_one_qlib(bundles_by_dir: dict[Path, dict], bundle_dir: Path, inst: str) -> Optional[pd.DataFrame]:
+def _load_one_qlib(
+    bundles_by_dir: dict[Path, dict], bundle_dir: Path, inst: str
+) -> Optional[pd.DataFrame]:
     cal = bundles_by_dir[bundle_dir]["calendar"]
     fdir = bundle_dir / "features" / inst
     cols: dict[str, np.ndarray] = {}
@@ -179,7 +199,7 @@ def _load_one_qlib(bundles_by_dir: dict[Path, dict], bundle_dir: Path, inst: str
             return None
         cols[f] = a
     df = pd.DataFrame({"date": cal, **cols})
-    return df.dropna(subset=["close"])          # 丢停牌/未上市/已退市段
+    return df.dropna(subset=["close"])  # 丢停牌/未上市/已退市段
 
 
 def _bundle_field_set(bundle_dir: Path, inst: str) -> frozenset[str]:
@@ -218,17 +238,24 @@ def _warn_if_mixed_convention(code: str, hits: list[tuple[Path, str]]) -> None:
     if len(uniq) > 1:
         _MIXED_WARNED.add(code)
         desc = "; ".join(f"{k}={sorted(v)}" for k, v in sets.items())
-        _warn(f"{code} 跨 bundle 拼接，但各 bundle **字段集不同** ⇒ 可能是不同价格口径，"
-              f"接缝处收益率会失真：{desc}"
-              f" —— 详见 governance/data/QLIB_LOCAL_DATA.md「加法调整」")
+        _warn(
+            f"{code} 跨 bundle 拼接，但各 bundle **字段集不同** ⇒ 可能是不同价格口径，"
+            f"接缝处收益率会失真：{desc}"
+            f" —— 详见 governance/data/QLIB_LOCAL_DATA.md「加法调整」"
+        )
 
 
 _UNVERIFIED_SKIP_WARNED: set[str] = set()
 
 
-def load_bars_qlib(codes: list[str], count: int, start: Optional[str] = None,
-                   end: Optional[str] = None, root: str | Path = DEFAULT_Q_ROOT,
-                   allow_unverified: bool = False) -> dict[str, pd.DataFrame]:
+def load_bars_qlib(
+    codes: list[str],
+    count: int,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    root: str | Path = DEFAULT_Q_ROOT,
+    allow_unverified: bool = False,
+) -> dict[str, pd.DataFrame]:
     """从 qlib bundle 读日线。start/end(YYYY-MM-DD)在 count 之前应用;跨 bundle 段拼接去重。
 
     ⚠️ **默认跳过「口径无法验证」的 bundle**（缺 `factor`，2026-08-06 起）。
@@ -253,10 +280,12 @@ def load_bars_qlib(codes: list[str], count: int, start: Optional[str] = None,
             key = ",".join(sorted(b["dir"].name for b in unver))
             if key not in _UNVERIFIED_SKIP_WARNED:
                 _UNVERIFIED_SKIP_WARNED.add(key)
-                _warn(f"跳过**口径无法验证**的 bundle {key}（缺 factor 字段）。"
-                      f"实测缺 factor 的 2021_2026 是**加法调整**（价格=原始价−累计现金"
-                      f"分红 ⇒ 百分比收益放大 13~21%，涨跌幅可超涨跌停）。"
-                      f"该时段改用 tdx vipdoc；确需放行传 allow_unverified=True")
+                _warn(
+                    f"跳过**口径无法验证**的 bundle {key}（缺 factor 字段）。"
+                    f"实测缺 factor 的 2021_2026 是**加法调整**（价格=原始价−累计现金"
+                    f"分红 ⇒ 百分比收益放大 13~21%，涨跌幅可超涨跌停）。"
+                    f"该时段改用 tdx vipdoc；确需放行传 allow_unverified=True"
+                )
             bundles = [b for b in bundles if b.get("convention") != "unverified"]
     if not bundles:
         _warn("没有可用 bundle（可能全被判为口径无法验证而跳过）")
@@ -273,9 +302,11 @@ def load_bars_qlib(codes: list[str], count: int, start: Optional[str] = None,
         cov = [(b["start"], b["end"]) for b in bundles]
         w0, w1 = start or "0000-00-00", end or "9999-99-99"
         if not any(not (w1 < s0 or w0 > s1) for s0, s1 in cov):
-            _warn(f"请求窗口 {w0}~{w1} 与可用 bundle 区间**完全不相交**"
-                  f"（可用：{'; '.join(f'{a}~{b}' for a, b in cov)}）⇒ 必然返回空。"
-                  f"该时段请改用 tdx vipdoc（--data-source tdx）")
+            _warn(
+                f"请求窗口 {w0}~{w1} 与可用 bundle 区间**完全不相交**"
+                f"（可用：{'; '.join(f'{a}~{b}' for a, b in cov)}）⇒ 必然返回空。"
+                f"该时段请改用 tdx vipdoc（--data-source tdx）"
+            )
     by_dir = {b["dir"]: b for b in bundles}
     out: dict[str, pd.DataFrame] = {}
     for c in codes:
@@ -286,8 +317,12 @@ def load_bars_qlib(codes: list[str], count: int, start: Optional[str] = None,
             segs = [s for s in segs if s is not None and len(s)]
             if not segs:
                 continue
-            df = (pd.concat(segs).drop_duplicates(subset=["date"]).sort_values("date")
-                    .reset_index(drop=True))
+            df = (
+                pd.concat(segs)
+                .drop_duplicates(subset=["date"])
+                .sort_values("date")
+                .reset_index(drop=True)
+            )
             if start:
                 df = df[df["date"] >= start]
             if end:
@@ -302,8 +337,13 @@ def load_bars_qlib(codes: list[str], count: int, start: Optional[str] = None,
     return out
 
 
-def load_bars_csv(codes: list[str], count: int, start: Optional[str] = None,
-                  end: Optional[str] = None, root: str | Path = DEFAULT_CSV_ROOT) -> dict[str, pd.DataFrame]:
+def load_bars_csv(
+    codes: list[str],
+    count: int,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    root: str | Path = DEFAULT_CSV_ROOT,
+) -> dict[str, pd.DataFrame]:
     """从单票 CSV 读日线({code6}.{EX}-all-latest.csv,列 Date,Code,Open..Amount)。"""
     root = Path(root)
     out: dict[str, pd.DataFrame] = {}
@@ -314,7 +354,9 @@ def load_bars_csv(codes: list[str], count: int, start: Optional[str] = None,
         try:
             df = pd.read_csv(p, dtype={"Code": str})
             df.columns = [x.lower() for x in df.columns]
-            df = df[["date", "open", "high", "low", "close", "volume"]].dropna(subset=["close"])
+            df = df[["date", "open", "high", "low", "close", "volume"]].dropna(
+                subset=["close"]
+            )
             df["date"] = df["date"].astype(str).str[:10]
             df = df.sort_values("date").reset_index(drop=True)
             if start:
@@ -331,8 +373,11 @@ def load_bars_csv(codes: list[str], count: int, start: Optional[str] = None,
     return out
 
 
-def list_universe(root: str | Path = DEFAULT_Q_ROOT, source: str = "qlib",
-                  allow_unverified: bool = False) -> list[str]:
+def list_universe(
+    root: str | Path = DEFAULT_Q_ROOT,
+    source: str = "qlib",
+    allow_unverified: bool = False,
+) -> list[str]:
     """s_data 全市场宇宙(6 位代码)。qlib=各 bundle instruments/all.txt 并集;csv=列目录文件名。
 
     ⚠️ **必须与 `load_bars_qlib` 用同一套 bundle 过滤**（2026-08-06 加 `allow_unverified`）。
@@ -357,17 +402,22 @@ def list_universe(root: str | Path = DEFAULT_Q_ROOT, source: str = "qlib",
     try:
         if source == "csv":
             for p in root.glob("*-all-latest.csv"):
-                head = p.name.split("-")[0]           # 000001.SZ
+                head = p.name.split("-")[0]  # 000001.SZ
                 codes.add(head.split(".")[0])
         else:
             bundles = list_bundles(root)
             if not allow_unverified:
-                skipped = [b["dir"].name for b in bundles
-                           if b.get("convention") == "unverified"]
+                skipped = [
+                    b["dir"].name
+                    for b in bundles
+                    if b.get("convention") == "unverified"
+                ]
                 if skipped:
-                    _warn(f"宇宙也跳过口径无法验证的 bundle {','.join(skipped)}"
-                          f"（与 load_bars_qlib 保持同一口径；否则宇宙里会有拿不到"
-                          f"价格的票）")
+                    _warn(
+                        f"宇宙也跳过口径无法验证的 bundle {','.join(skipped)}"
+                        f"（与 load_bars_qlib 保持同一口径；否则宇宙里会有拿不到"
+                        f"价格的票）"
+                    )
                 bundles = [b for b in bundles if b.get("convention") != "unverified"]
             for b in bundles:
                 inst = b["dir"] / "instruments" / "all.txt"
@@ -378,7 +428,7 @@ def list_universe(root: str | Path = DEFAULT_Q_ROOT, source: str = "qlib",
                     if not ln:
                         continue
                     n_lines += 1
-                    tok = ln.split()[0]              # SH600000 / 600000.SH / 600000
+                    tok = ln.split()[0]  # SH600000 / 600000.SH / 600000
                     digits = "".join(ch for ch in tok if ch.isdigit())
                     if len(digits) == 6:
                         codes.add(digits)
@@ -386,8 +436,10 @@ def list_universe(root: str | Path = DEFAULT_Q_ROOT, source: str = "qlib",
                         if len(rejected) < 5:
                             rejected.append(ln[:40])
             if n_lines and len(rejected) / n_lines > 0.05:
-                _warn(f"instruments/all.txt 有 {len(rejected)}/{n_lines} 行取不出 6 位代码"
-                      f"（样例 {rejected}）—— bundle 格式可能变了，宇宙不可信")
+                _warn(
+                    f"instruments/all.txt 有 {len(rejected)}/{n_lines} 行取不出 6 位代码"
+                    f"（样例 {rejected}）—— bundle 格式可能变了，宇宙不可信"
+                )
     except Exception as exc:  # noqa: BLE001
         _warn(f"列 universe 失败: {exc}")
     return sorted(codes)

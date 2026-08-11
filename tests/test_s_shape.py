@@ -3,6 +3,7 @@
 
 合成 OHLCV，不依赖网络/TdxW。阈值为待回测猜测，断言只校验方向/边界，不锁死具体值。
 """
+
 import pandas as pd
 
 from custos.core.factors import s_shape as ss
@@ -13,16 +14,37 @@ def make_df(closes, vols=None, opens=None, highs=None, lows=None):
     n = len(closes)
     closes = [float(x) for x in closes]
     opens = [float(x) for x in (opens if opens is not None else closes)]
-    highs = [float(x) for x in (highs if highs is not None else [max(o, c) * 1.01 for o, c in zip(opens, closes)])]
-    lows = [float(x) for x in (lows if lows is not None else [min(o, c) * 0.99 for o, c in zip(opens, closes)])]
-    return pd.DataFrame({
-        "date": pd.date_range("2024-01-01", periods=n, freq="B"),
-        "open": opens, "high": highs, "low": lows, "close": closes,
-        "volume": [float(v) for v in (vols or [1000.0] * n)], "amount": [0.0] * n,
-    })
+    highs = [
+        float(x)
+        for x in (
+            highs
+            if highs is not None
+            else [max(o, c) * 1.01 for o, c in zip(opens, closes)]
+        )
+    ]
+    lows = [
+        float(x)
+        for x in (
+            lows
+            if lows is not None
+            else [min(o, c) * 0.99 for o, c in zip(opens, closes)]
+        )
+    ]
+    return pd.DataFrame(
+        {
+            "date": pd.date_range("2024-01-01", periods=n, freq="B"),
+            "open": opens,
+            "high": highs,
+            "low": lows,
+            "close": closes,
+            "volume": [float(v) for v in (vols or [1000.0] * n)],
+            "amount": [0.0] * n,
+        }
+    )
 
 
 # ---------- 压缩/收敛 VCP ----------
+
 
 def test_vcp_strong_contraction_scores_high():
     # 前10日大振幅高量，近10日小振幅低量 → 强收敛
@@ -44,6 +66,7 @@ def test_vcp_no_contraction_scores_zero():
 
 # ---------- 枢轴 ----------
 
+
 def test_pivot_breakout_scores_high():
     closes = [10 + i * 0.1 for i in range(22)]  # 单边上行，末位突破前高
     r = ss.compute_pivot(make_df(closes))
@@ -58,6 +81,7 @@ def test_pivot_far_below_scores_zero():
 
 # ---------- 量 ----------
 
+
 def test_volume_health_surge_and_uptrend():
     vols = [800.0] * 40 + [1200.0] * 21 + [2000.0]  # ma20 抬升 + 当日放量
     r = ss.compute_volume_health(make_df([10.0] * 62, vols=vols))
@@ -66,9 +90,42 @@ def test_volume_health_surge_and_uptrend():
 
 # ---------- 口袋妖怪 ----------
 
+
 def test_pocket_pivot_hit():
-    closes = [10, 9.9, 10.0, 9.8, 10.0, 9.7, 10.0, 9.9, 10.1, 10.0, 10.05, 10.1, 10.0, 10.05, 10.6]
-    vols = [1000, 1200, 1000, 1400, 1000, 1300, 1000, 1100, 1000, 1000, 1000, 1000, 900, 1000, 2500]
+    closes = [
+        10,
+        9.9,
+        10.0,
+        9.8,
+        10.0,
+        9.7,
+        10.0,
+        9.9,
+        10.1,
+        10.0,
+        10.05,
+        10.1,
+        10.0,
+        10.05,
+        10.6,
+    ]
+    vols = [
+        1000,
+        1200,
+        1000,
+        1400,
+        1000,
+        1300,
+        1000,
+        1100,
+        1000,
+        1000,
+        1000,
+        1000,
+        900,
+        1000,
+        2500,
+    ]
     r = ss.check_pocket_pivot(make_df(closes, vols=vols))
     assert r["available"] and r["hit"] is True and r["points"] == 15.0
 
@@ -79,6 +136,7 @@ def test_pocket_pivot_miss_on_flat():
 
 
 # ---------- 上方套牢供给 ----------
+
 
 def test_overhead_supply_low_when_price_at_highs():
     closes = [10 + i * 0.05 for i in range(60)]  # 单边上行 → 上方几乎无套牢
@@ -94,10 +152,16 @@ def test_overhead_supply_high_when_price_near_bottom():
 
 # ---------- 均线结构 ----------
 
+
 def test_ma_structure_bull_stack_and_higher_low():
     closes = [10 + i * 0.1 for i in range(52)]  # 多头排列 + 低点抬高
     r = ss.compute_ma_structure(make_df(closes))
-    assert r["available"] and r["bull_stack"] is True and r["higher_low"] is True and r["points"] == 10.0
+    assert (
+        r["available"]
+        and r["bull_stack"] is True
+        and r["higher_low"] is True
+        and r["points"] == 10.0
+    )
 
 
 def test_ma_structure_downtrend_zero():
@@ -107,6 +171,7 @@ def test_ma_structure_downtrend_zero():
 
 
 # ---------- Δ 催化 ----------
+
 
 def test_delta_strong_close_and_up():
     # 末日大阳、收在最高附近
@@ -119,6 +184,7 @@ def test_delta_strong_close_and_up():
 
 
 # ---------- P 惩罚 ----------
+
 
 def test_penalty_recent_unrecovered_big_bear():
     # 末日放量大阴(-6%)、未收复
@@ -137,6 +203,7 @@ def test_penalty_none_on_healthy():
 
 # ---------- 聚合 S** ----------
 
+
 def test_compute_s_shape_bounds_and_suggestion():
     closes = [10 + i * 0.08 for i in range(80)]
     r = ss.compute_s_shape(make_df(closes), "600000")
@@ -144,8 +211,15 @@ def test_compute_s_shape_bounds_and_suggestion():
     assert 0.0 <= r["s_star"] <= 100.0
     assert r["suggestion"] in ("可买", "观望", "不买")
     # 分项都在各自上限内
-    caps = {"compression": 20, "pivot": 15, "volume": 20, "pocket_pivot": 15,
-            "overhead_supply": 10, "ma_structure": 10, "event_risk": 10}
+    caps = {
+        "compression": 20,
+        "pivot": 15,
+        "volume": 20,
+        "pocket_pivot": 15,
+        "overhead_supply": 10,
+        "ma_structure": 10,
+        "event_risk": 10,
+    }
     for k, cap in caps.items():
         assert 0.0 <= r["components"][k]["points"] <= cap
 
@@ -163,10 +237,20 @@ def test_sstar_level_thresholds():
 
 # ---------- technical_score 两条路径 ----------
 
+
 def test_technical_score_uses_s_shape_when_present():
-    cand = {"patterns": {}, "s_shape": {
-        "available": True, "s_star": 78.0, "s_shape": 73.0, "delta": 5.0, "penalty": 0.0,
-        "suggestion": "可买", "components": {"compression": {"points": 18.0}}}}
+    cand = {
+        "patterns": {},
+        "s_shape": {
+            "available": True,
+            "s_star": 78.0,
+            "s_shape": 73.0,
+            "delta": 5.0,
+            "penalty": 0.0,
+            "suggestion": "可买",
+            "components": {"compression": {"points": 18.0}},
+        },
+    }
     score, level, detail = sc.technical_score(cand)
     assert score == 78 and level == "强"
     assert detail["scorer"] == "s_shape_v3" and detail["s_star"] == 78.0
@@ -176,21 +260,24 @@ def test_technical_score_uses_s_shape_when_present():
 def test_technical_score_falls_back_without_s_shape():
     cand = {"patterns": {"bbi_above": True, "j_low": True, "volume_contraction": True}}
     score, level, detail = sc.technical_score(cand)
-    assert "scorer" not in detail          # 走旧加权路径
-    assert detail.get("bbi_above") == 25   # 旧因子贡献仍在
+    assert "scorer" not in detail  # 走旧加权路径
+    assert detail.get("bbi_above") == 25  # 旧因子贡献仍在
     assert score == 60 and level == "强"
 
 
 # ---------- S_reversal 买弱/反转分 ----------
 
+
 def test_s_reversal_oversold_ranks_above_uptrend():
-    down = make_df([20 - i * 0.1 for i in range(80)], vols=[2000.0] * 75 + [500.0] * 5)  # 超跌+末段缩量
+    down = make_df(
+        [20 - i * 0.1 for i in range(80)], vols=[2000.0] * 75 + [500.0] * 5
+    )  # 超跌+末段缩量
     up = make_df([10 + i * 0.1 for i in range(80)])  # 强势上行
     rd = ss.compute_s_reversal(down, "600000")
     ru = ss.compute_s_reversal(up, "600000")
     assert rd["available"] and ru["available"]
     assert 0.0 <= rd["s_reversal"] <= 100.0 and 0.0 <= ru["s_reversal"] <= 100.0
-    assert rd["s_reversal"] > ru["s_reversal"]   # 超跌缩量应远高于强上行
+    assert rd["s_reversal"] > ru["s_reversal"]  # 超跌缩量应远高于强上行
     caps = {"oversold": 40, "contraction_stabilize": 30, "reversal_confirm": 30}
     for k, cap in caps.items():
         assert 0.0 <= rd["components"][k]["points"] <= cap

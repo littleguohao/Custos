@@ -15,6 +15,7 @@
 
 纯产物（报告 / run log / 门控 JSON / 采集输出）不必原子化：下次跑会重写。
 """
+
 from __future__ import annotations
 
 import json
@@ -51,18 +52,20 @@ class TestWriteJsonAtomic:
 
         def boom(self, *a, **k):
             if self.suffix == ".tmp":
-                real(self, *a, **k)          # tmp 写成功
-                raise OSError("disk full")   # 但 replace 之前崩
+                real(self, *a, **k)  # tmp 写成功
+                raise OSError("disk full")  # 但 replace 之前崩
             return real(self, *a, **k)
 
         monkeypatch.setattr(pathlib.Path, "write_text", boom)
         with pytest.raises(OSError):
             paths.write_json_atomic(f, {"v": 2})
-        assert json.loads(f.read_text(encoding="utf-8")) == {"v": 1}, \
+        assert json.loads(f.read_text(encoding="utf-8")) == {"v": 1}, (
             "崩溃后目标文件应仍是上一版完整内容"
+        )
 
     def test_non_ascii_and_non_serializable(self, tmp_path):
         from datetime import date
+
         f = tmp_path / "u.json"
         paths.write_json_atomic(f, {"名称": "测试", "d": date(2026, 8, 6)})
         got = json.loads(f.read_text(encoding="utf-8"))
@@ -76,27 +79,38 @@ class TestWriteJsonAtomic:
         f = tmp_path / "nan.json"
         with pytest.raises(ValueError):
             paths.write_json_atomic(f, {"score": float("nan")})
-        assert not f.exists() and list(tmp_path.iterdir()) == [], \
+        assert not f.exists() and list(tmp_path.iterdir()) == [], (
             "拒绝后不得留下目标文件或 tmp 残留"
+        )
 
 
 class TestAccumulativeStateUsesAtomic:
     """两类必须原子写的地方，不许退回裸 write_text。"""
 
     CASES = [
-        ("pipeline/market_timing/amv_state.py", "0amv_regime_history 是全历史 regime，驱动加仓授权"),
+        (
+            "pipeline/market_timing/amv_state.py",
+            "0amv_regime_history 是全历史 regime，驱动加仓授权",
+        ),
         ("core/runtime_guards.py", "position_confirmations 是人工确认记录"),
-        ("pipeline/market_timing/merge_incremental_market.py", "market_timing_input 被多 stage 读改写"),
+        (
+            "pipeline/market_timing/merge_incremental_market.py",
+            "market_timing_input 被多 stage 读改写",
+        ),
     ]
 
-    @pytest.mark.parametrize("rel,why", CASES, ids=lambda x: x if isinstance(x, str) else "")
+    @pytest.mark.parametrize(
+        "rel,why", CASES, ids=lambda x: x if isinstance(x, str) else ""
+    )
     def test_uses_atomic_writer(self, rel, why):
         s = (ROOT / "src" / "custos" / rel).read_text(encoding="utf-8")
         assert "write_json_atomic" in s, f"{rel} 应用原子写：{why}"
 
     def test_amv_state_regime_history_atomic(self):
         """regime 历史那一行必须是原子写 —— 它损坏会让 regime 判定失去全部历史。"""
-        s = (ROOT / "src" / "custos" / "pipeline" / "market_timing" / "amv_state.py").read_text(encoding="utf-8")
+        s = (
+            ROOT / "src" / "custos" / "pipeline" / "market_timing" / "amv_state.py"
+        ).read_text(encoding="utf-8")
         assert "write_json_atomic(STATE" in s
         assert "STATE.write_text" not in s
 
@@ -119,6 +133,7 @@ class TestAccumulativeStateUsesAtomic:
         也不再依赖注释以 `noqa:` 开头。
         """
         import re
+
         bad = []
         for p in (ROOT / "src").rglob("*.py"):
             for i, ln in enumerate(p.read_text(encoding="utf-8-sig").splitlines(), 1):
@@ -129,10 +144,14 @@ class TestAccumulativeStateUsesAtomic:
                 comment = ln.split("#", 1)[1]
                 # noqa 码本身长这样：E402 / F401 / E501,W605 —— 字母+数字，排除掉
                 for tok in re.findall(r",\s*([A-Za-z_][A-Za-z0-9_]*)", comment):
-                    if re.fullmatch(r"[A-Z]\d+", tok):     # E402、F401 这类码
+                    if re.fullmatch(r"[A-Z]\d+", tok):  # E402、F401 这类码
                         continue
-                    bad.append(f"{p.relative_to(ROOT)}:{i}  可疑名 {tok!r}  →  {ln.strip()}")
-        assert not bad, "导入名被塞进注释（名字进了注释、导入没生效）：\n  " + "\n  ".join(bad)
+                    bad.append(
+                        f"{p.relative_to(ROOT)}:{i}  可疑名 {tok!r}  →  {ln.strip()}"
+                    )
+        assert not bad, (
+            "导入名被塞进注释（名字进了注释、导入没生效）：\n  " + "\n  ".join(bad)
+        )
 
     def test_noqa_guard_catches_the_2026_08_07_shape(self, tmp_path):
         """⚠️ 守卫必须能抓到**当天真实发生过的四种形状**（含大写常量）。
@@ -145,20 +164,26 @@ class TestAccumulativeStateUsesAtomic:
             if not re.match(r"\s*(from\s+[\w.]+\s+)?import\s", ln) or "#" not in ln:
                 return False
             comment = ln.split("#", 1)[1]
-            return any(not re.fullmatch(r"[A-Z]\d+", t)
-                       for t in re.findall(r",\s*([A-Za-z_][A-Za-z0-9_]*)", comment))
+            return any(
+                not re.fullmatch(r"[A-Z]\d+", t)
+                for t in re.findall(r",\s*([A-Za-z_][A-Za-z0-9_]*)", comment)
+            )
 
-        for ln in ["from paths import BASE  # noqa: E402, LOGS",
-                   "from paths import BASE  # noqa: E402, HOLDINGS_DIR",
-                   "from paths import BASE  # noqa: E402, MARKET_TIMING, PLANS, SECTORS_DIR",
-                   "from paths import BASE  # noqa: E402, PLANS",
-                   "from paths import BASE  # noqa: E402, write_json_atomic"]:
+        for ln in [
+            "from paths import BASE  # noqa: E402, LOGS",
+            "from paths import BASE  # noqa: E402, HOLDINGS_DIR",
+            "from paths import BASE  # noqa: E402, MARKET_TIMING, PLANS, SECTORS_DIR",
+            "from paths import BASE  # noqa: E402, PLANS",
+            "from paths import BASE  # noqa: E402, write_json_atomic",
+        ]:
             assert suspicious(ln), f"守卫漏掉：{ln}"
         # 合法写法不得误报
-        for ln in ["from paths import BASE, LOGS  # noqa: E402",
-                   "from paths import BASE  # noqa: E402,F401  (照惯例统一入口)",
-                   "import pandas as pd  # type: ignore",
-                   "from x import a, b, c"]:
+        for ln in [
+            "from paths import BASE, LOGS  # noqa: E402",
+            "from paths import BASE  # noqa: E402,F401  (照惯例统一入口)",
+            "import pandas as pd  # type: ignore",
+            "from x import a, b, c",
+        ]:
             assert not suspicious(ln), f"守卫误报：{ln}"
 
 
@@ -180,14 +205,22 @@ class TestRegimeLockRespectedEverywhere:
     读到它，就会拿到一个被解锁的 regime。
     """
 
-    SRC = (ROOT / "src" / "custos" / "pipeline" / "market_timing" / "merge_incremental_market.py").read_text(encoding="utf-8")
+    SRC = (
+        ROOT
+        / "src"
+        / "custos"
+        / "pipeline"
+        / "market_timing"
+        / "merge_incremental_market.py"
+    ).read_text(encoding="utf-8")
 
     def test_fallback_does_not_reset_lock_to_neutral(self):
-        assert 'else "中性")' not in self.SRC, \
+        assert 'else "中性")' not in self.SRC, (
             "兜底又在阈值之间写「中性」—— 那会重置锁定的空头"
+        )
 
     def test_fallback_carries_prior_locked_state(self):
-        seg = self.SRC[self.SRC.index("prior_effective_state"):][:600]
+        seg = self.SRC[self.SRC.index("prior_effective_state") :][:600]
         assert '"空头", "做多"' in seg, "阈值之间应延续已知锁定前态"
 
     def test_unknown_prior_stays_unknown(self):
@@ -195,18 +228,21 @@ class TestRegimeLockRespectedEverywhere:
 
         `normalize_regime("未知")` 不在加仓白名单里 ⇒ 风控优先于买入。
         """
-        seg = self.SRC[self.SRC.index("prior_effective_state"):][:600]
+        seg = self.SRC[self.SRC.index("prior_effective_state") :][:600]
         assert '"未知"' in seg, "前态未知时不得凭空给方向"
 
     def test_amv_state_invariant_still_documented(self):
         """不变量本身必须留在 amv_state 的 docstring 里 —— 它是这条约束的来源。"""
-        s = (ROOT / "src" / "custos" / "pipeline" / "market_timing" / "amv_state.py").read_text(encoding="utf-8")
-        head = s[:s.index("from __future__")]
+        s = (
+            ROOT / "src" / "custos" / "pipeline" / "market_timing" / "amv_state.py"
+        ).read_text(encoding="utf-8")
+        head = s[: s.index("from __future__")]
         assert "must not reset the regime to neutral" in head
 
     def test_unknown_not_in_increase_whitelist(self):
         """反面确认：「未知」确实拿不到加仓权（否则上面的 fail-closed 是空话）。"""
         from custos.core import runtime_guards as rg
+
         assert rg.normalize_regime("未知") == "未知"
         assert "未知" not in rg._REGIME_ALLOW_INCREASE
         assert rg.normalize_regime("") == "未知", "空值也必须归到未知，不能漏成可加仓"

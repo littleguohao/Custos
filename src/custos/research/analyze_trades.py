@@ -9,6 +9,7 @@ current_positions.json 读取持仓/清仓数据，输出多维度复盘分析 E
     uv run python src/custos/research/analyze_trades.py --preview    # 仅打印数据概览
     uv run python src/custos/research/__main__.py analyze_trades     # 经统一研究入口
 """
+
 from __future__ import annotations
 
 import argparse
@@ -39,18 +40,48 @@ POSITIONS_JSON = TRADES_DIR / "current_positions.json"
 # JSON 文件中字段名的中文映射（原始 JSON 可能存在 GBK 乱码）
 # 通过 CSV 的列名作为权威来源，JSON 用位置索引解析
 CLOSED_FIELDS = [
-    "清仓日期", "代码", "名称", "总盈亏", "盈亏比",
-    "同期大盘", "跑赢大盘", "买入均价", "卖出均价",
-    "清仓距今", "持仓天数", "交易费用", "建仓日期",
+    "清仓日期",
+    "代码",
+    "名称",
+    "总盈亏",
+    "盈亏比",
+    "同期大盘",
+    "跑赢大盘",
+    "买入均价",
+    "卖出均价",
+    "清仓距今",
+    "持仓天数",
+    "交易费用",
+    "建仓日期",
 ]
 POS_FIELDS = [
-    "代码", "名称", "持有金额", "当日盈亏", "当日盈亏率",
-    "关联板块", "板块涨幅", "组合盈亏", "组合涨幅",
-    "持有盈亏", "持有盈亏率", "累计盈亏", "累计盈亏率",
-    "本周盈亏", "本月盈亏", "今年盈亏", "仓位占比",
-    "持有数量", "持仓天数", "最新涨幅", "最新价",
-    "单位成本", "回本涨幅", "近1月涨幅", "近3月涨幅",
-    "近6月涨幅", "近1年涨幅",
+    "代码",
+    "名称",
+    "持有金额",
+    "当日盈亏",
+    "当日盈亏率",
+    "关联板块",
+    "板块涨幅",
+    "组合盈亏",
+    "组合涨幅",
+    "持有盈亏",
+    "持有盈亏率",
+    "累计盈亏",
+    "累计盈亏率",
+    "本周盈亏",
+    "本月盈亏",
+    "今年盈亏",
+    "仓位占比",
+    "持有数量",
+    "持仓天数",
+    "最新涨幅",
+    "最新价",
+    "单位成本",
+    "回本涨幅",
+    "近1月涨幅",
+    "近3月涨幅",
+    "近6月涨幅",
+    "近1年涨幅",
 ]
 
 
@@ -70,7 +101,8 @@ def _map_fields(raw: list[dict], fields: list[str]) -> pd.DataFrame:
         raise ValueError(
             f"乱码字段映射失败：源列数 {len(df.columns)} 与权威字段数 {len(fields)} 不一致，"
             f"按位置重命名会让盈亏读到相邻列。源列名={list(df.columns)}；"
-            f"期望字段={fields}。请先修正导出源编码或更新字段表，不做猜测映射。")
+            f"期望字段={fields}。请先修正导出源编码或更新字段表，不做猜测映射。"
+        )
     df.columns = fields
     return df
 
@@ -123,6 +155,7 @@ def to_dt(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
 
 # ── 分析 ──────────────────────────────────────────────
 
+
 def build_summary(closed: pd.DataFrame, positions: pd.DataFrame) -> pd.DataFrame:
     """总览指标。"""
     rows = []
@@ -153,7 +186,11 @@ def build_summary(closed: pd.DataFrame, positions: pd.DataFrame) -> pd.DataFrame
             add("已清仓交易费用合计", closed["交易费用"].sum())
 
     if not positions.empty:
-        hold_pnl = positions["持有盈亏"].dropna() if "持有盈亏" in positions else pd.Series(dtype=float)
+        hold_pnl = (
+            positions["持有盈亏"].dropna()
+            if "持有盈亏" in positions
+            else pd.Series(dtype=float)
+        )
         add("当前持仓数量", len(positions))
         if "持有金额" in positions:
             add("当前持仓市值合计", positions["持有金额"].sum())
@@ -163,7 +200,12 @@ def build_summary(closed: pd.DataFrame, positions: pd.DataFrame) -> pd.DataFrame
             add("当前持仓亏损数量", int((hold_pnl < 0).sum()))
         if "仓位占比" in positions:
             add("当前持仓最大仓位占比", positions["仓位占比"].max())
-            add("当前持仓前三仓位合计", positions.sort_values("仓位占比", ascending=False)["仓位占比"].head(3).sum())
+            add(
+                "当前持仓前三仓位合计",
+                positions.sort_values("仓位占比", ascending=False)["仓位占比"]
+                .head(3)
+                .sum(),
+            )
 
     return pd.DataFrame(rows)
 
@@ -196,12 +238,17 @@ def build_period(closed: pd.DataFrame) -> pd.DataFrame:
     bins = [-1, 5, 20, 60, 120, 250, 99999]
     labels = ["≤5天", "6-20天", "21-60天", "61-120天", "121-250天", ">250天"]
     df["持仓周期"] = pd.cut(df["持仓天数"], bins=bins, labels=labels)
-    return df.groupby("持仓周期", observed=False).agg(
-        笔数=("代码", "count"),
-        总盈亏=("总盈亏", "sum"),
-        胜率=("总盈亏", lambda s: (s > 0).mean() if len(s) else np.nan),
-        平均盈亏比=("盈亏比", "mean"),
-        平均跑赢大盘=("跑赢大盘", "mean")).reset_index()
+    return (
+        df.groupby("持仓周期", observed=False)
+        .agg(
+            笔数=("代码", "count"),
+            总盈亏=("总盈亏", "sum"),
+            胜率=("总盈亏", lambda s: (s > 0).mean() if len(s) else np.nan),
+            平均盈亏比=("盈亏比", "mean"),
+            平均跑赢大盘=("跑赢大盘", "mean"),
+        )
+        .reset_index()
+    )
 
 
 def build_flow(trades: pd.DataFrame) -> pd.DataFrame:
@@ -210,14 +257,21 @@ def build_flow(trades: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
     df = trades.copy()
     df["年份"] = df["成交日期"].dt.year
-    return df.groupby(["年份", "交易类别"], dropna=False).agg(
-        次数=("交易类别", "count"),
-        成交金额=("成交金额", "sum"),
-        发生金额=("发生金额", "sum"),
-        费用=("费用", "sum")).reset_index()
+    return (
+        df.groupby(["年份", "交易类别"], dropna=False)
+        .agg(
+            次数=("交易类别", "count"),
+            成交金额=("成交金额", "sum"),
+            发生金额=("发生金额", "sum"),
+            费用=("费用", "sum"),
+        )
+        .reset_index()
+    )
 
 
-def build_top(closed: pd.DataFrame, n: int = 15, ascending: bool = False) -> pd.DataFrame:
+def build_top(
+    closed: pd.DataFrame, n: int = 15, ascending: bool = False
+) -> pd.DataFrame:
     """盈亏 Top N。"""
     if closed.empty:
         return pd.DataFrame()
@@ -230,8 +284,18 @@ def build_hold_risk(positions: pd.DataFrame) -> pd.DataFrame:
     """当前持仓风险排序（按持有盈亏升序，亏损在前）。"""
     if positions.empty:
         return pd.DataFrame()
-    cols = ["代码", "名称", "持有金额", "持有盈亏", "持有盈亏率", "仓位占比",
-            "持仓天数", "本周盈亏", "本月盈亏", "今年盈亏"]
+    cols = [
+        "代码",
+        "名称",
+        "持有金额",
+        "持有盈亏",
+        "持有盈亏率",
+        "仓位占比",
+        "持仓天数",
+        "本周盈亏",
+        "本月盈亏",
+        "今年盈亏",
+    ]
     cols = [c for c in cols if c in positions.columns]
     sort_col = "持有盈亏" if "持有盈亏" in positions else cols[0] if cols else None
     if sort_col:
@@ -240,6 +304,7 @@ def build_hold_risk(positions: pd.DataFrame) -> pd.DataFrame:
 
 
 # ── 主流程 ────────────────────────────────────────────
+
 
 def preview(trades, closed, positions):
     """打印数据概览。"""
@@ -265,7 +330,9 @@ def preview(trades, closed, positions):
 
 def main():
     parser = argparse.ArgumentParser(description="交易记录复盘分析")
-    parser.add_argument("--preview", action="store_true", help="仅打印数据概览，不输出 Excel")
+    parser.add_argument(
+        "--preview", action="store_true", help="仅打印数据概览，不输出 Excel"
+    )
     parser.add_argument("--output", type=str, default=None, help="输出 Excel 路径")
     args = parser.parse_args()
 
@@ -276,15 +343,40 @@ def main():
     # 类型转换
     if not closed.empty:
         closed = to_dt(closed, ["清仓日期", "建仓日期"])
-        closed = to_num(closed, ["总盈亏", "盈亏比", "同期大盘", "跑赢大盘",
-                                  "买入均价", "卖出均价", "持仓天数", "交易费用"])
+        closed = to_num(
+            closed,
+            [
+                "总盈亏",
+                "盈亏比",
+                "同期大盘",
+                "跑赢大盘",
+                "买入均价",
+                "卖出均价",
+                "持仓天数",
+                "交易费用",
+            ],
+        )
         closed = closed[closed["代码"].notna()].copy()
 
     if not positions.empty:
-        positions = to_num(positions, ["持有金额", "当日盈亏", "当日盈亏率",
-                                        "持有盈亏", "持有盈亏率", "累计盈亏",
-                                        "累计盈亏率", "本周盈亏", "本月盈亏",
-                                        "今年盈亏", "仓位占比", "持有数量", "持仓天数"])
+        positions = to_num(
+            positions,
+            [
+                "持有金额",
+                "当日盈亏",
+                "当日盈亏率",
+                "持有盈亏",
+                "持有盈亏率",
+                "累计盈亏",
+                "累计盈亏率",
+                "本周盈亏",
+                "本月盈亏",
+                "今年盈亏",
+                "仓位占比",
+                "持有数量",
+                "持仓天数",
+            ],
+        )
         positions = positions[positions["代码"].notna()].copy()
 
     if not trades.empty:
@@ -327,7 +419,11 @@ def main():
         print(period.to_string(index=False))
     if not top_loss.empty:
         print("\n=== 清仓亏损 Top10 ===")
-        cols = [c for c in ["清仓日期", "代码", "名称", "总盈亏", "盈亏比", "持仓天数"] if c in top_loss.columns]
+        cols = [
+            c
+            for c in ["清仓日期", "代码", "名称", "总盈亏", "盈亏比", "持仓天数"]
+            if c in top_loss.columns
+        ]
         print(top_loss[cols].head(10).to_string(index=False))
     if not hold_risk.empty:
         print("\n=== 当前持仓风险 ===")

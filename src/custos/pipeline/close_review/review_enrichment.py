@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Build theme lifecycle, holding diagnosis, next-day plans and rule review."""
+
 from __future__ import annotations
 
 import argparse
@@ -56,9 +57,14 @@ def main():
         for event in values:
             for theme in event.get("matched_themes") or []:
                 event_counts[theme] = event_counts.get(theme, 0) + 1
-    lifecycles = [lifecycle(x, event_counts.get(str(x.get("sector") or "").split("/")[0], 0)) for x in sectors]
+    lifecycles = [
+        lifecycle(x, event_counts.get(str(x.get("sector") or "").split("/")[0], 0))
+        for x in sectors
+    ]
     exec_by_code = {bare(x.get("code")): x for x in execution.get("rows") or []}
-    action_by_code = {bare(x.get("code")): x for x in chief.get("holding_actions") or []}
+    action_by_code = {
+        bare(x.get("code")): x for x in chief.get("holding_actions") or []
+    }
     diagnoses = []
     plans = []
     for row in tech:
@@ -76,32 +82,53 @@ def main():
             "box": facts.get("box20_position") or row.get("box20_position"),
             "relative_to_sector": row.get("relative_to_sector") or "unavailable",
             "b1_priority": b1.get("final_priority") or action.get("priority"),
-            "b1_action": b1.get("final_action") or action.get("b1_reference_action") or action.get("action"),
-            "b1_reason": b1.get("final_reason") or ";".join(action.get("reasons") or []),
+            "b1_action": b1.get("final_action")
+            or action.get("b1_reference_action")
+            or action.get("action"),
+            "b1_reason": b1.get("final_reason")
+            or ";".join(action.get("reasons") or []),
             "n_l1": n.get("prior_low"),
             "n_l2": n.get("pullback_low"),
             "execution_status": exec_row.get("execution_status") or "unavailable",
             "max_favorable_excursion": "unavailable",
-            "trade_feedback": "unavailable" if not exec_row.get("actual_trades") else "recorded",
-            "risk_flags": list(dict.fromkeys([x.get("signal") for x in b1.get("signals") or [] if x.get("signal")])),
+            "trade_feedback": "unavailable"
+            if not exec_row.get("actual_trades")
+            else "recorded",
+            "risk_flags": list(
+                dict.fromkeys(
+                    [
+                        x.get("signal")
+                        for x in b1.get("signals") or []
+                        if x.get("signal")
+                    ]
+                )
+            ),
         }
         diagnoses.append(diagnosis)
         action_plan = b1.get("action_plan") or {}
-        plans.append({
-            "code": code,
-            "name": row.get("name"),
-            "direction": diagnosis["b1_action"] or "观察",
-            "priority": diagnosis["b1_priority"] or "P3",
-            "reduction_pct_of_holding": action_plan.get("suggested_reduction_pct_of_holding"),
-            "exact_quantity": None,
-            "trigger": diagnosis["b1_reason"] or "等待目标日技术确认",
-            "invalidation": "若目标日收盘重新修复关键结构，则重新评估；不得由单一低位指标放宽权限",
-            "open_scenario": "仅观察，不因集合竞价或单条消息直接执行",
-            "intraday_scenario": "监控硬止损、重大风险和异常流动性；普通波段动作等待14:45确认",
-            "tail_scenario": "按目标日行情重算B1并服从RiskDecision/ChiefDecision",
-        })
+        plans.append(
+            {
+                "code": code,
+                "name": row.get("name"),
+                "direction": diagnosis["b1_action"] or "观察",
+                "priority": diagnosis["b1_priority"] or "P3",
+                "reduction_pct_of_holding": action_plan.get(
+                    "suggested_reduction_pct_of_holding"
+                ),
+                "exact_quantity": None,
+                "trigger": diagnosis["b1_reason"] or "等待目标日技术确认",
+                "invalidation": "若目标日收盘重新修复关键结构，则重新评估；不得由单一低位指标放宽权限",
+                "open_scenario": "仅观察，不因集合竞价或单条消息直接执行",
+                "intraday_scenario": "监控硬止损、重大风险和异常流动性；普通波段动作等待14:45确认",
+                "tail_scenario": "按目标日行情重算B1并服从RiskDecision/ChiefDecision",
+            }
+        )
     market_quality = chief.get("market_quality") or {}
-    unavailable = [x.get("field") for x in market_quality.get("checks") or [] if x.get("quality") in {"missing", "candidate", "stale"}]
+    unavailable = [
+        x.get("field")
+        for x in market_quality.get("checks") or []
+        if x.get("quality") in {"missing", "candidate", "stale"}
+    ]
     result = {
         "date": day,
         "theme_lifecycles": lifecycles,
@@ -114,11 +141,29 @@ def main():
             "forbidden_actions": chief.get("forbidden_actions") or [],
         },
         "rule_review": {
-            "effective": ["0AMV风险上限已进入总控", "B1按硬风险、N型、BBI、趋势箱体统一排序"],
+            "effective": [
+                "0AMV风险上限已进入总控",
+                "B1按硬风险、N型、BBI、趋势箱体统一排序",
+            ],
             "failed": [],
-            "pending": ["主线持续性缺资金流和龙头结构证据", "单日结果不足以调整B1、BBI或N型参数", "计划未执行原因需用户确认"],
+            "pending": [
+                "主线持续性缺资金流和龙头结构证据",
+                "单日结果不足以调整B1、BBI或N型参数",
+                "计划未执行原因需用户确认",
+            ],
         },
-        "unavailable": list(dict.fromkeys(unavailable + ["market_turnover", "current_market_sentiment", "fund_flow_rank", "original_holding_logic", "max_favorable_excursion"])),
+        "unavailable": list(
+            dict.fromkeys(
+                unavailable
+                + [
+                    "market_turnover",
+                    "current_market_sentiment",
+                    "fund_flow_rank",
+                    "original_holding_logic",
+                    "max_favorable_excursion",
+                ]
+            )
+        ),
         "permission_rule": "enrichment cannot override RiskDecision or ChiefDecision",
     }
     out = DATA / "review_steps" / f"{day}_review_enrichment.json"
@@ -127,7 +172,10 @@ def main():
     # （精确减仓量另需当日行情授权，复盘层无权给出）、
     # `permission_rule` 必须在（复盘层是解释不是裁决）。
     require("review_enrichment", result)
-    out.write_text(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
+    out.write_text(
+        json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False),
+        encoding="utf-8",
+    )
     print(out)
 
 

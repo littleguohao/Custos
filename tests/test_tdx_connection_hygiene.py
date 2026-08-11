@@ -31,6 +31,7 @@ def _get_client():
 `stock_count()` 失败返回 None ⇒ `None > 0` ⇒ 抛看不懂的 `'>' NoneType`。
 当年就因此把「连接层 bug」误判成「上游接口失效」，改用了更不稳的 HTTP 源绕过。
 """
+
 from __future__ import annotations
 
 import ast
@@ -49,10 +50,10 @@ EXEMPT: dict[str, str] = {
 
 # 认可的重连机制标志（任一即可）
 RECONNECT_MARKERS = (
-    "_with_client_retry",      # 复用 local_tdx_data 的统一实现
-    "_client_call",            # 模块内的等价包装
-    "force_new",               # 支持强制重建
-    "CLIENT_MAX_AGE",          # 连接时效上限
+    "_with_client_retry",  # 复用 local_tdx_data 的统一实现
+    "_client_call",  # 模块内的等价包装
+    "force_new",  # 支持强制重建
+    "CLIENT_MAX_AGE",  # 连接时效上限
     "_MAX_AGE",
     "reconnect",
 )
@@ -63,8 +64,9 @@ def _modules_creating_tdx_clients() -> list[pathlib.Path]:
     for p in sorted(TOOLS.rglob("*.py")):
         src = p.read_text(encoding="utf-8", errors="replace")
         # 只看真正的调用，排除文档字符串里提到的（形如 `Quotes.factory(market='ext')` 能取…）
-        if re.search(r"Quotes\.factory\s*\([^)]*\)\s*$", src, re.M) or \
-           re.search(r"=\s*Quotes\.factory\s*\(", src):
+        if re.search(r"Quotes\.factory\s*\([^)]*\)\s*$", src, re.M) or re.search(
+            r"=\s*Quotes\.factory\s*\(", src
+        ):
             out.append(p)
     return out
 
@@ -80,7 +82,7 @@ def _client_getters(src: str, *, path: str = "<str>"):
     ⚠️ 语法错误**不静默跳过**（第二版曾 `except SyntaxError: return []`，
     于是文件一坏就等于放行——反向验证时正是因此再次全绿）。
     """
-    tree = ast.parse(src)          # 故意不捕获：语法错误本身就是要报出来的问题
+    tree = ast.parse(src)  # 故意不捕获：语法错误本身就是要报出来的问题
     out = []
     for fn in ast.walk(tree):
         if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -89,8 +91,13 @@ def _client_getters(src: str, *, path: str = "<str>"):
         if not any("client" in g.lower() for g in gvars):
             continue
         # 函数体里确实给该全局变量赋过值（真的是 getter/缓存点）
-        vals = [a.value for a in ast.walk(fn) if isinstance(a, ast.Assign)
-                for t in a.targets if isinstance(t, ast.Name) and t.id in gvars]
+        vals = [
+            a.value
+            for a in ast.walk(fn)
+            if isinstance(a, ast.Assign)
+            for t in a.targets
+            if isinstance(t, ast.Name) and t.id in gvars
+        ]
         if not vals:
             continue
         # 排除 invalidate/drop 型函数：只把客户端置为 None。
@@ -111,7 +118,9 @@ def _getter_can_rebuild(fn) -> bool:
       · 直接委托给已知带重连的实现（local_tdx_data._get_client）
     """
     args = {a.arg for a in list(fn.args.args) + list(fn.args.kwonlyargs)}
-    if any(k in a.lower() for a in args for k in ("force", "new", "refresh", "rebuild")):
+    if any(
+        k in a.lower() for a in args for k in ("force", "new", "refresh", "rebuild")
+    ):
         return True
     body = ast.unparse(fn)
     if re.search(r"time\.time\(\)|MAX_AGE|created_at|_age|monotonic", body):
@@ -126,8 +135,9 @@ class TestNoUnreconnectableSingletons:
         """保证扫描本身有效——一个都没扫到说明正则失效了。"""
         assert _modules_creating_tdx_clients(), "没扫到任何创建 TDX 客户端的模块"
 
-    @pytest.mark.parametrize("path", _modules_creating_tdx_clients(),
-                             ids=lambda p: p.name)
+    @pytest.mark.parametrize(
+        "path", _modules_creating_tdx_clients(), ids=lambda p: p.name
+    )
     def test_singleton_has_reconnect(self, path: pathlib.Path):
         """模块级单例必须带重连机制（AST 判定，常量残留骗不过去）。
 
@@ -146,46 +156,62 @@ class TestNoUnreconnectableSingletons:
                 f"看不懂的 \"'>' NoneType\"（mootdx 内部 `if counts > 0` 撞上 None）。\n"
                 f"修法：加 force_new 形参 + 连接时效，或直接委托 "
                 f"local_tdx_data._get_client(force_new=)。\n"
-                f"见 governance/data/DATA_SOURCE_PRINCIPLE.md「连接管理要求」。")
+                f"见 governance/data/DATA_SOURCE_PRINCIPLE.md「连接管理要求」。"
+            )
 
 
 class TestKnownFixesStayFixed:
     """三处已修的地方各钉一条，防止回退。"""
 
     def test_local_tdx_data(self):
-        src = (TOOLS / "datasource" / "local_tdx" / "local_tdx_data.py").read_text(encoding="utf-8")
+        src = (TOOLS / "datasource" / "local_tdx" / "local_tdx_data.py").read_text(
+            encoding="utf-8"
+        )
         assert "force_new" in src and "CLIENT_MAX_AGE_SEC" in src
         assert "_with_client_retry" in src
 
     def test_tdx_ext_quotes(self):
         src = (TOOLS / "datasource" / "tdx_ext_quotes.py").read_text(encoding="utf-8")
-        assert any(m in src for m in RECONNECT_MARKERS), \
+        assert any(m in src for m in RECONNECT_MARKERS), (
             "tdx_ext_quotes 的重连机制被移除了（aeb3e25 修过）"
+        )
 
     def test_collect_holding_quotes(self):
-        src = (TOOLS / "datasource" / "collect" / "collect_holding_quotes.py").read_text(encoding="utf-8")
+        src = (
+            TOOLS / "datasource" / "collect" / "collect_holding_quotes.py"
+        ).read_text(encoding="utf-8")
         assert "_client_call" in src, "持仓行情采集的重连包装被移除了"
         # 三处协议调用都必须走包装，不能直连
-        assert not re.search(r"_get_client\(\)\.(bars|index|quotes)\(", src), \
+        assert not re.search(r"_get_client\(\)\.(bars|index|quotes)\(", src), (
             "有协议调用绕过了 _client_call（连接失效时不会重试）"
+        )
 
 
 class TestGovernanceDocStaysAligned:
     """文档与代码必须一致——否则规范就成了摆设（本文件存在的起因）。"""
 
     def test_principle_doc_states_requirement(self):
-        doc = (pathlib.Path(__file__).resolve().parents[1] / "governance" / "data"
-               / "DATA_SOURCE_PRINCIPLE.md").read_text(encoding="utf-8")
+        doc = (
+            pathlib.Path(__file__).resolve().parents[1]
+            / "governance"
+            / "data"
+            / "DATA_SOURCE_PRINCIPLE.md"
+        ).read_text(encoding="utf-8")
         assert "_with_client_retry" in doc
         assert "永不重连" in doc, "反模式的描述被删了"
 
     def test_doc_points_to_this_check(self):
         """文档应指向这份可执行检查，而不是只描述规范。"""
-        doc = (pathlib.Path(__file__).resolve().parents[1] / "governance" / "data"
-               / "DATA_SOURCE_PRINCIPLE.md").read_text(encoding="utf-8")
+        doc = (
+            pathlib.Path(__file__).resolve().parents[1]
+            / "governance"
+            / "data"
+            / "DATA_SOURCE_PRINCIPLE.md"
+        ).read_text(encoding="utf-8")
         assert "test_tdx_connection_hygiene" in doc, (
             "DATA_SOURCE_PRINCIPLE.md 应指向 tests/test_tdx_connection_hygiene.py——"
-            "光有文字规范挡不住重犯，实测同一天犯了两次")
+            "光有文字规范挡不住重犯，实测同一天犯了两次"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +224,7 @@ class TestGovernanceDocStaysAligned:
 #   ② 反向验证要用可控样本，不要动生产代码。
 # ---------------------------------------------------------------------------
 
-BAD_SINGLETON = '''
+BAD_SINGLETON = """
 from mootdx.quotes import Quotes
 _client = None
 def _get_client():
@@ -206,9 +232,9 @@ def _get_client():
     if _client is None:
         _client = Quotes.factory(market="std")
     return _client
-'''
+"""
 
-GOOD_FORCE_NEW = '''
+GOOD_FORCE_NEW = """
 from mootdx.quotes import Quotes
 _client = None
 def _get_client(force_new: bool = False):
@@ -216,9 +242,9 @@ def _get_client(force_new: bool = False):
     if force_new or _client is None:
         _client = Quotes.factory(market="std")
     return _client
-'''
+"""
 
-GOOD_MAX_AGE = '''
+GOOD_MAX_AGE = """
 import time
 from mootdx.quotes import Quotes
 _client = None
@@ -231,9 +257,9 @@ def _get_client(timeout: int = 12):
         _client = Quotes.factory(market="ext", timeout=timeout)
         _created = now
     return _client
-'''
+"""
 
-GOOD_DELEGATES = '''
+GOOD_DELEGATES = """
 from mootdx.quotes import Quotes
 _client = None
 def _get_client(force_new: bool = False):
@@ -245,40 +271,45 @@ def _get_client(force_new: bool = False):
         if force_new or _client is None:
             _client = Quotes.factory(market="std")
         return _client
-'''
+"""
 
-PURE_DELEGATE = '''
+PURE_DELEGATE = """
 def _get_client(x: bool = False):
     import local_tdx_data as _ltd
     return _ltd._get_client(force_new=x)
-'''
+"""
 
-DROP_ONLY = '''
+DROP_ONLY = """
 _client = None
 def _drop_client():
     global _client
     _client = None
-'''
+"""
 
-NOT_A_SINGLETON = '''
+NOT_A_SINGLETON = """
 from mootdx.quotes import Quotes
 def fetch():
     q = Quotes.factory(market="std")
     return q.bars(symbol="600000")
-'''
+"""
 
 
 class TestCheckerItself:
     def test_detects_bad_singleton(self):
         fns = _client_getters(BAD_SINGLETON)
         assert len(fns) == 1
-        assert _getter_can_rebuild(fns[0]) is False, "永不重连的单例必须被判为无重建路径"
+        assert _getter_can_rebuild(fns[0]) is False, (
+            "永不重连的单例必须被判为无重建路径"
+        )
 
-    @pytest.mark.parametrize("src,why", [
-        (GOOD_FORCE_NEW, "force_new 形参"),
-        (GOOD_MAX_AGE, "连接时效"),
-        (GOOD_DELEGATES, "委托 + 带 force_new 的本地 fallback"),
-    ])
+    @pytest.mark.parametrize(
+        "src,why",
+        [
+            (GOOD_FORCE_NEW, "force_new 形参"),
+            (GOOD_MAX_AGE, "连接时效"),
+            (GOOD_DELEGATES, "委托 + 带 force_new 的本地 fallback"),
+        ],
+    )
     def test_accepts_valid_patterns(self, src, why):
         fns = _client_getters(src)
         assert len(fns) == 1
@@ -324,36 +355,44 @@ class TestOnlineQuotesMarkedUnavailable:
 
     def test_disabled_by_default(self, monkeypatch):
         from custos.datasource.local_tdx import local_tdx_data as L
+
         self._fresh(monkeypatch)
         assert L._online_quotes_enabled() is False
 
     def test_bars_short_circuits_without_client(self, monkeypatch, capsys):
         """必须在 `_get_client()` 之前短路——建连本身就要花时间。"""
         from custos.datasource.local_tdx import local_tdx_data as L
+
         self._fresh(monkeypatch)
-        monkeypatch.setattr(L, "_get_client",
-                            lambda: pytest.fail("短路失败：仍去建了连接"))
+        monkeypatch.setattr(
+            L, "_get_client", lambda: pytest.fail("短路失败：仍去建了连接")
+        )
         assert L.get_online_bars("600000").empty
         assert "标记为不可用" in capsys.readouterr().err
 
     def test_index_short_circuits(self, monkeypatch):
         from custos.datasource.local_tdx import local_tdx_data as L
+
         self._fresh(monkeypatch)
-        monkeypatch.setattr(L, "_get_client",
-                            lambda: pytest.fail("短路失败：仍去建了连接"))
+        monkeypatch.setattr(
+            L, "_get_client", lambda: pytest.fail("短路失败：仍去建了连接")
+        )
         assert L.get_online_index("999999").empty
 
     def test_snapshot_short_circuits(self, monkeypatch):
         from custos.datasource.local_tdx import local_tdx_data as L
+
         self._fresh(monkeypatch)
-        monkeypatch.setattr(L, "_get_client",
-                            lambda: pytest.fail("短路失败：仍去建了连接"))
+        monkeypatch.setattr(
+            L, "_get_client", lambda: pytest.fail("短路失败：仍去建了连接")
+        )
         assert L.get_snapshot("600000") == {}
 
     @pytest.mark.parametrize("val", ["1", "true", "TRUE", "yes"])
     def test_env_override_reenables(self, val, monkeypatch):
         """换了网络环境或服务端恢复时要能重新启用，而不是把能力删掉。"""
         from custos.datasource.local_tdx import local_tdx_data as L
+
         monkeypatch.setenv("TDX_ONLINE_QUOTES", val)
         assert L._online_quotes_enabled() is True
 
@@ -362,11 +401,16 @@ class TestOnlineQuotesMarkedUnavailable:
         import pandas as pd
 
         from custos.datasource.local_tdx import local_tdx_data as L
+
         self._fresh(monkeypatch)
 
         class _C:
             def stocks(self, market):
-                return pd.DataFrame({"code": ["600000"]}) if market == 1 else pd.DataFrame()
+                return (
+                    pd.DataFrame({"code": ["600000"]})
+                    if market == 1
+                    else pd.DataFrame()
+                )
 
         # get_stock_list 已改走 `_with_client_retry`（会传 force_new 关键字），桩要吃下它
         monkeypatch.setattr(L, "_get_client", lambda force_new=False: _C())

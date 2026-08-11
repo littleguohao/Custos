@@ -8,6 +8,7 @@ src/custos/pipeline/holdings/holding_sector_mapper.py.
 
 Semantics are locked by tests/test_pipeline_kit.py.
 """
+
 from __future__ import annotations
 
 import math
@@ -29,8 +30,8 @@ def clean_code(v):
     - empty input: ``None``/falsy values become "" here; standardize_trades
       would stringify None to "None".
     """
-    s = str(v or '').strip().replace('.0', '')
-    return s.split('.')[0].zfill(6) if s.split('.')[0].isdigit() else s.split('.')[0]
+    s = str(v or "").strip().replace(".0", "")
+    return s.split(".")[0].zfill(6) if s.split(".")[0].isdigit() else s.split(".")[0]
 
 
 def price_limit_pct(code) -> float:
@@ -123,8 +124,17 @@ def is_index(code: str) -> bool:
     if b == "999999" or b.startswith(("880", "881", "399", "899")):
         return True
     # 沪市指数白名单：与深市 000xxx 个股同形，必须靠后缀或白名单区分
-    SH_INDEX = {"000001", "000010", "000016", "000300", "000688",
-                "000852", "000903", "000905", "000906"}
+    SH_INDEX = {
+        "000001",
+        "000010",
+        "000016",
+        "000300",
+        "000688",
+        "000852",
+        "000903",
+        "000905",
+        "000906",
+    }
     if b in SH_INDEX and suf == "SH":
         return True
     return False

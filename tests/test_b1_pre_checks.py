@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """b1_holding_state.build_pre_checks 单测：注入 fake tq，不触网。"""
+
 from __future__ import annotations
 
 import unittest
@@ -31,7 +32,9 @@ class FakeTQ:
 
 
 INFO = _ok({"J_start": "20100608", "Name": "测试股", "IsSTGP": "0"})
-MORE = _ok({"TPFlag": "0", "ZTPrice": "33.00", "DTPrice": "27.00", "HqDate": "20260717"})
+MORE = _ok(
+    {"TPFlag": "0", "ZTPrice": "33.00", "DTPrice": "27.00", "HqDate": "20260717"}
+)
 
 
 class PreChecksTest(unittest.TestCase):
@@ -42,7 +45,9 @@ class PreChecksTest(unittest.TestCase):
         self.assertFalse(out["partial"])
         self.assertEqual(tq.calls, ["600150.SH"])  # norm_code 补后缀
         self.assertEqual(out["listing_date"], "20100608")
-        self.assertEqual(out["listing_days"], (date(2026, 7, 17) - date(2010, 6, 8)).days)
+        self.assertEqual(
+            out["listing_days"], (date(2026, 7, 17) - date(2010, 6, 8)).days
+        )
         self.assertFalse(out["new_listing_lt20"])
         self.assertFalse(out["is_suspended"])
         self.assertEqual(out["limit_up_price"], 33.0)

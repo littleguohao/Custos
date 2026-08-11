@@ -11,6 +11,7 @@
   kdj_k / kdj_d / kdj_j / kdj_j_rising(J上行)
   dmi_adx / dmi_pdi / dmi_mdi / dmi_pdi_gt(+DI>-DI) / dmi_adx_rising(ADX上行)
 """
+
 from __future__ import annotations
 
 import json
@@ -31,7 +32,7 @@ ROWS_CACHE = LOGS / "walkforward" / "winner_feature_rows.json"
 
 FIRINGS = LOGS / "walkforward" / "firings_jlow_2026H1_tdx.json"
 FWD = 20
-WIN_Q = 0.2          # 全体前 20% 算"跑出来"
+WIN_Q = 0.2  # 全体前 20% 算"跑出来"
 PICKS = 3
 
 
@@ -63,18 +64,23 @@ def _adx_features(high, low, close, n: int = 14) -> dict:
     pdi, mdi, adx = dmi_arrays(high, low, close, n)
     if adx is None:
         return {}
-    return {"dmi_adx": round(float(adx[-1]), 2), "dmi_pdi": round(float(pdi[-1]), 2),
-            "dmi_mdi": round(float(mdi[-1]), 2),
-            "dmi_pdi_gt": float(pdi[-1] > mdi[-1]),
-            "dmi_adx_rising": float(adx[-1] > adx[-2])}
+    return {
+        "dmi_adx": round(float(adx[-1]), 2),
+        "dmi_pdi": round(float(pdi[-1]), 2),
+        "dmi_mdi": round(float(mdi[-1]), 2),
+        "dmi_pdi_gt": float(pdi[-1] > mdi[-1]),
+        "dmi_adx_rising": float(adx[-1] > adx[-2]),
+    }
 
 
 def _features(df, i: int) -> dict:
-    sub = df.iloc[:i + 1]
+    sub = df.iloc[: i + 1]
     c = sub["close"].astype(float)
     feats: dict = {}
     h = bt._macd_hist(c)
-    dif = bt._macd_dif_series(c)   # 2026-08-09 收敛：DIF 复用唯一实现（原内联 EMA12−EMA26 同式）
+    dif = bt._macd_dif_series(
+        c
+    )  # 2026-08-09 收敛：DIF 复用唯一实现（原内联 EMA12−EMA26 同式）
     feats["macd_dif"] = round(float(dif.iloc[-1]), 4)
     feats["macd_hist"] = round(float(h.iloc[-1]), 4)
     feats["macd_hist_rising"] = float(h.iloc[-1] > h.iloc[-2])
@@ -88,8 +94,11 @@ def _features(df, i: int) -> dict:
             k2 = bt._kdj(sub.iloc[:-1])
             if k2.get("available"):
                 feats["kdj_j_rising"] = float(k["j"] > k2["j"])
-    feats.update(_adx_features(sub["high"].astype(float).values,
-                               sub["low"].astype(float).values, c.values))
+    feats.update(
+        _adx_features(
+            sub["high"].astype(float).values, sub["low"].astype(float).values, c.values
+        )
+    )
     return feats
 
 
@@ -102,8 +111,10 @@ def main() -> None:
         rows = []
         payload = json.loads(FIRINGS.read_text(encoding="utf-8"))
         recs = payload.get("records") or []
-        print(f"信号池 {sum(len(r.get('days') or []) for r in recs)} 个(j_low 全年),逐信号算特征+标签…",
-              file=sys.stderr)
+        print(
+            f"信号池 {sum(len(r.get('days') or []) for r in recs)} 个(j_low 全年),逐信号算特征+标签…",
+            file=sys.stderr,
+        )
         bars_cache: dict = {}
         for n, r in enumerate(recs):
             code = r["code"]
@@ -122,7 +133,7 @@ def main() -> None:
             if df is None:
                 continue
             closes = df["close"].astype(float).values
-            for d in (r.get("days") or []):
+            for d in r.get("days") or []:
                 idx = df.index[df["date"] == d[0]]
                 if not len(idx):
                     continue
@@ -136,7 +147,11 @@ def main() -> None:
                     continue
                 rows.append({"date": d[0], "y": fwd, "feats": feats})
             if (n + 1) % 500 == 0:
-                print(f"  {n + 1}/{len(recs)} 股 | {len(rows)} 样本", file=sys.stderr, flush=True)
+                print(
+                    f"  {n + 1}/{len(recs)} 股 | {len(rows)} 样本",
+                    file=sys.stderr,
+                    flush=True,
+                )
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(json.dumps(rows), encoding="utf-8")
 
@@ -173,11 +188,15 @@ def main() -> None:
         hthr = hy[max(0, int(len(hy) * WIN_Q) - 1)]
         for x in half:
             x["win_half"] = x["y"] >= hthr
-    print(f"半程切分点 {split_date}（前段 {len(first_half)} 样本 / 后段 {len(second_half)} 样本，"
-          f"各自独立定阈值）")
+    print(
+        f"半程切分点 {split_date}（前段 {len(first_half)} 样本 / 后段 {len(second_half)} 样本，"
+        f"各自独立定阈值）"
+    )
 
     feat_names = sorted({k for x in rows for k in x["feats"]})
-    print(f"基准率 {base:.1%} | {'特征':<18}{'日内AUC':>8}{'精确率':>8}{'公平随机':>8}{'净增益':>8}  半程一致")
+    print(
+        f"基准率 {base:.1%} | {'特征':<18}{'日内AUC':>8}{'精确率':>8}{'公平随机':>8}{'净增益':>8}  半程一致"
+    )
     results = []
     for f in feat_names:
         vf = lambda x: x["feats"].get(f)
@@ -205,28 +224,56 @@ def main() -> None:
         auc = num / den if den else None
         prec = hit / tot if tot else None
         fair_p = fair / tot if tot else None
+
         # 前后半程同号(按日期切分,各半程用自己的 win_half 标签)
         def _h(samples):
             p = [vf(x) for x in samples if x.get("win_half") and vf(x) is not None]
             q = [vf(x) for x in samples if not x.get("win_half") and vf(x) is not None]
             a = _auc(p, q)
             return a - 0.5 if a is not None else None
+
         h1, h2 = _h(first_half), _h(second_half)
-        consistent = (h1 is not None and h2 is not None and (h1 > 0) == (h2 > 0))
-        results.append({"f": f, "auc": auc, "prec": prec, "fair": fair_p,
-                        "lift": (prec - fair_p) if prec and fair_p else None,
-                        "h1": h1, "h2": h2, "consistent": consistent})
-        print(f"{'':2}{f:<18}{(f'{auc:.4f}' if auc else '-'):>8}{(f'{prec:.1%}' if prec else '-'):>8}"
-              f"{(f'{fair_p:.1%}' if fair_p else '-'):>8}"
-              f"{(f'{(prec - fair_p) * 100:+.1f}pp' if prec and fair_p else '-'):>8}"
-              f"  {'✓' if consistent else '✗'}")
-    strong = [r for r in results if r["auc"] and r["auc"] - 0.5 >= 0.03
-              and (r["lift"] or 0) >= 0.02 and r["consistent"]]
-    print(f"\n过三重门槛(日内AUC≥0.53 + 净增益≥2pp + 半程同号): "
-          f"{[r['f'] for r in strong] or '无'}")
-    out = {"n": len(rows), "thr": thr, "base_rate": base, "features": results, "strong": strong}
+        consistent = h1 is not None and h2 is not None and (h1 > 0) == (h2 > 0)
+        results.append(
+            {
+                "f": f,
+                "auc": auc,
+                "prec": prec,
+                "fair": fair_p,
+                "lift": (prec - fair_p) if prec and fair_p else None,
+                "h1": h1,
+                "h2": h2,
+                "consistent": consistent,
+            }
+        )
+        print(
+            f"{'':2}{f:<18}{(f'{auc:.4f}' if auc else '-'):>8}{(f'{prec:.1%}' if prec else '-'):>8}"
+            f"{(f'{fair_p:.1%}' if fair_p else '-'):>8}"
+            f"{(f'{(prec - fair_p) * 100:+.1f}pp' if prec and fair_p else '-'):>8}"
+            f"  {'✓' if consistent else '✗'}"
+        )
+    strong = [
+        r
+        for r in results
+        if r["auc"]
+        and r["auc"] - 0.5 >= 0.03
+        and (r["lift"] or 0) >= 0.02
+        and r["consistent"]
+    ]
+    print(
+        f"\n过三重门槛(日内AUC≥0.53 + 净增益≥2pp + 半程同号): "
+        f"{[r['f'] for r in strong] or '无'}"
+    )
+    out = {
+        "n": len(rows),
+        "thr": thr,
+        "base_rate": base,
+        "features": results,
+        "strong": strong,
+    }
     (LOGS / "walkforward" / "winner_feature_study.json").write_text(
-        json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+        json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
 if __name__ == "__main__":

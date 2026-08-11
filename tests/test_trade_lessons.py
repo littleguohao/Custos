@@ -10,6 +10,7 @@
   ③ 每条结论要么有样本量、要么显式标 `⚠️ 未记录` ——
      研究侧已因样本量吃过教训（R11 基准崩塌、「5% 是崖不是坡」），实盘侧同理。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -50,14 +51,22 @@ def test_mechanism_entries_cite_existing_code():
     """
     s = _text()
     # 取所有反引号里的 src 路径（允许带 ::函数名）
-    refs = set(re.findall(r"`((?:close_review|holdings|market_timing|screening|factors|"
-                          r"collect|news|trades|local_tdx|research)/[a-z_0-9]+\.py)"
-                          r"(?:::[A-Za-z_0-9]+)?`", s))
+    refs = set(
+        re.findall(
+            r"`((?:close_review|holdings|market_timing|screening|factors|"
+            r"collect|news|trades|local_tdx|research)/[a-z_0-9]+\.py)"
+            r"(?:::[A-Za-z_0-9]+)?`",
+            s,
+        )
+    )
     srcrels = [str(p.relative_to(ROOT / "src")) for p in (ROOT / "src").rglob("*.py")]
-    missing = sorted(r for r in refs
-                     if not any(rel == r or rel.endswith("/" + r) for rel in srcrels))
-    assert not missing, (f"TRADE_LESSONS.md 引用了不存在的代码：{missing}\n"
-                         "移动文件时要同步这份记录 —— 否则它会变成又一份说谎的文档")
+    missing = sorted(
+        r for r in refs if not any(rel == r or rel.endswith("/" + r) for rel in srcrels)
+    )
+    assert not missing, (
+        f"TRADE_LESSONS.md 引用了不存在的代码：{missing}\n"
+        "移动文件时要同步这份记录 —— 否则它会变成又一份说谎的文档"
+    )
 
 
 def test_every_record_has_sample_size_or_explicit_unknown():
@@ -66,15 +75,21 @@ def test_every_record_has_sample_size_or_explicit_unknown():
     「不知道」是合法答案；**假装知道**不是。
     """
     s = _text()
-    body = s[s.index("## 记录"):]
-    rows = [ln for ln in body.splitlines()
-            if ln.startswith("|") and "---" not in ln and "样本量" not in ln]
+    body = s[s.index("## 记录") :]
+    rows = [
+        ln
+        for ln in body.splitlines()
+        if ln.startswith("|") and "---" not in ln and "样本量" not in ln
+    ]
     bad = []
     for ln in rows:
         cells = [c.strip() for c in ln.strip("|").split("|")]
-        if len(cells) < 4:            # 竖排表（| 项 | 内容 |）跳过
+        if len(cells) < 4:  # 竖排表（| 项 | 内容 |）跳过
             continue
-        if not any(("未记录" in c) or re.search(r"\d", c) or c in {"—", "不适用"} for c in cells):
+        if not any(
+            ("未记录" in c) or re.search(r"\d", c) or c in {"—", "不适用"}
+            for c in cells
+        ):
             bad.append(ln[:70])
     assert not bad, "这些行既没给样本量也没标「未记录」：\n  " + "\n  ".join(bad)
 
@@ -92,7 +107,8 @@ def test_system_principles_points_here():
 
     否则读者会把那 6 条当成「系统已保证」—— 而实测其中 3 条没有任何代码在执行。
     """
-    sp = (ROOT / "governance" / "strategy" / "_shared"
-          / "system_principles.md").read_text(encoding="utf-8")
+    sp = (
+        ROOT / "governance" / "strategy" / "_shared" / "system_principles.md"
+    ).read_text(encoding="utf-8")
     assert "TRADE_LESSONS.md" in sp
     assert "不要默认它们已经被系统保证" in sp

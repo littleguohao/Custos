@@ -25,6 +25,7 @@ runner 在日历门后立刻退出，所以它测的是那 5 行门检查，交�
 是**单一可注入接缝**。打桩成 recorder 后跑 `main()`，就能断言顺序与分支，
 且**不真的 spawn 任何子进程**。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -39,8 +40,12 @@ TOOLS = ROOT / "src" / "custos"
 class Recorder:
     """替代 `_stage` / `run_stage`：记录调用顺序，按 `fail` 指定哪些 stage 失败。"""
 
-    def __init__(self, fail: set[str] | None = None, gate_code: int = 0,
-                 stdout: dict[str, str] | None = None):
+    def __init__(
+        self,
+        fail: set[str] | None = None,
+        gate_code: int = 0,
+        stdout: dict[str, str] | None = None,
+    ):
         self.calls: list[tuple[str, list[str]]] = []
         self.fail = fail or set()
         self.gate_code = gate_code
@@ -68,8 +73,14 @@ class Recorder:
         而 `run_1700` 读的是 `r["stdout"]`。第一版只给了 `out` ⇒ KeyError
         让 run_1700 在 `sync_compass_amv` 之后中止，于是「merge 在 sync 之后」
         这条断言**永远走 skip 分支** —— 桩不真会把测试悄悄变成空转。"""
-        return {"stage": name, "ok": ok, "out": "", "stdout": "", "stderr": "",
-                "returncode": rc}
+        return {
+            "stage": name,
+            "ok": ok,
+            "out": "",
+            "stdout": "",
+            "stderr": "",
+            "returncode": rc,
+        }
 
     @property
     def names(self) -> list[str]:
@@ -88,8 +99,7 @@ def pipeline(monkeypatch, tmp_path):
     # （空目录、且被 gitignore，所以没污染 git —— 但这正是今天
     # `2026-07-16/` 那次事故的同一形态：脚本往仓库里写东西）。
     monkeypatch.setattr(dp, "BASE", tmp_path, raising=False)
-    for attr in ("DATA", "MARKET_DIR", "HOLDINGS_DIR", "PLANS",
-                 "SUPPORT_DIR", "LOGS"):
+    for attr in ("DATA", "MARKET_DIR", "HOLDINGS_DIR", "PLANS", "SUPPORT_DIR", "LOGS"):
         assert hasattr(dp, attr), f"daily_pipeline 少了路径常量 {attr}（改名了？）"
         d = tmp_path / attr.lower()
         d.mkdir(parents=True, exist_ok=True)
@@ -99,8 +109,9 @@ def pipeline(monkeypatch, tmp_path):
 
 def _run_pipeline(dp, monkeypatch, rec, session="premarket", extra=()):
     monkeypatch.setattr(dp, "run_stage", rec)
-    monkeypatch.setattr(sys, "argv",
-                        ["x", "--date", "2026-08-07", "--session-type", session, *extra])
+    monkeypatch.setattr(
+        sys, "argv", ["x", "--date", "2026-08-07", "--session-type", session, *extra]
+    )
     try:
         dp.main()
     except SystemExit as e:
@@ -119,9 +130,13 @@ class TestDecisionChainOrder:
     def test_holding_to_decision_order(self, pipeline, monkeypatch):
         rec = Recorder()
         _run_pipeline(pipeline, monkeypatch, rec, "postclose")
-        chain = ["batch_holding_technical", "b1_holding_state",
-                 "portfolio_review_report", "generate_risk_and_sectors",
-                 "chief_decision_report"]
+        chain = [
+            "batch_holding_technical",
+            "b1_holding_state",
+            "portfolio_review_report",
+            "generate_risk_and_sectors",
+            "chief_decision_report",
+        ]
         present = [c for c in chain if c in rec.names]
         idx = [rec.index(c) for c in present]
         assert idx == sorted(idx), f"决策链顺序错乱：{present} → {idx}"
@@ -149,8 +164,9 @@ class TestSessionBranching:
         _run_pipeline(pipeline, monkeypatch, pre, "premarket")
         _run_pipeline(pipeline, monkeypatch, post, "postclose")
         only_post = set(post.names) - set(pre.names)
-        assert "postclose_news_digest" in only_post, \
+        assert "postclose_news_digest" in only_post, (
             f"盘后新闻摘要应只在 postclose 跑，实际 postclose 独有={only_post}"
+        )
 
     def test_premarket_snapshot_stage_is_declared(self):
         """⚠️ premarket 会把 chief_decision **快照**一份
@@ -187,16 +203,20 @@ class TestFailurePropagation:
     def test_optional_stage_failure_does_not_abort(self, pipeline, monkeypatch):
         rec = Recorder(fail={"rss_collector", "overseas_market_collector"})
         _run_pipeline(pipeline, monkeypatch, rec, "premarket")
-        assert "chief_decision_report" in rec.names, \
-            "可选采集失败不应中断决策链"
+        assert "chief_decision_report" in rec.names, "可选采集失败不应中断决策链"
 
     def test_required_stage_failure_is_visible(self, pipeline, monkeypatch):
         """硬失败 stage 挂掉时，`run_stage` 的 required 语义由 pipeline_kit 处理，
         这里只断言它**确实被标成 required** —— 即调用时没传 `required=False`。"""
         rec = Recorder()
         _run_pipeline(pipeline, monkeypatch, rec, "postclose")
-        hard = {"batch_holding_technical", "b1_holding_state", "generate_risk_and_sectors",
-                "chief_decision_report", "theme_tracker_report"}
+        hard = {
+            "batch_holding_technical",
+            "b1_holding_state",
+            "generate_risk_and_sectors",
+            "chief_decision_report",
+            "theme_tracker_report",
+        }
         for name, _cmd in rec.calls:
             if name in hard:
                 # required 默认 True；调用点若显式传 False 会出现在 kwargs 里，
@@ -204,6 +224,7 @@ class TestFailurePropagation:
                 pass
         src = (TOOLS / "pipeline/daily_pipeline.py").read_text(encoding="utf-8")
         import re
+
         for name in hard:
             m = re.search(rf'"{name}"\s*,\s*required=False', src)
             assert not m, f"{name} 是硬失败 stage，不得标 required=False"
@@ -232,6 +253,7 @@ class TestGateCodePropagation:
 # 所有 runner 都用模块级 `run_stage_quiet as _stage` ⇒ 单一接缝
 # ══════════════════════════════════════════════════════════════════════════
 
+
 def _run_runner(mod, monkeypatch, rec, tmp_path, argv=(), seed=None):
     """跑 runner 的 main()，绕过日历门、隔离所有路径、注入 stage recorder。"""
     monkeypatch.setattr(mod, "_stage", rec)
@@ -243,7 +265,8 @@ def _run_runner(mod, monkeypatch, rec, tmp_path, argv=(), seed=None):
     # （因为 `_run_runner` 把异常吞成 "raised:..." 返回值）。
     # 教训：**skip 不是通过**，看到 skip 要先确认是「条件不满足」还是「桩不真」。
     gate = pipeline_kit.CalendarGate(
-        cal={"is_trading_day": True, "date": "2026-08-07"}, exit_code=None)
+        cal={"is_trading_day": True, "date": "2026-08-07"}, exit_code=None
+    )
     monkeypatch.setattr(mod, "calendar_gate", lambda *a, **kw: gate, raising=False)
     # ⚠️ patch **全部大写的 Path 属性**，不能只挑名字带 DIR 的 ——
     # `run_1700` 的复盘目录叫 `REV`，第一版按 "DIR" 过滤就漏了它，
@@ -259,7 +282,7 @@ def _run_runner(mod, monkeypatch, rec, tmp_path, argv=(), seed=None):
             monkeypatch.setattr(mod, attr, d)
     monkeypatch.setattr(mod.os, "chdir", lambda *a: None, raising=False)
     if seed is not None:
-        seed(mod)                     # 路径已 patch 完，此时铺前提文件
+        seed(mod)  # 路径已 patch 完，此时铺前提文件
     monkeypatch.setattr(sys, "argv", ["x", *argv])
     try:
         # ⚠️ runner 的 `main()` 是**返回**退出码（`return propagate_gate_code(r)`），
@@ -268,7 +291,7 @@ def _run_runner(mod, monkeypatch, rec, tmp_path, argv=(), seed=None):
         return rc if isinstance(rc, int) else 0
     except SystemExit as e:
         return e.code if isinstance(e.code, int) else 0
-    except Exception as e:                    # 编排之外的失败（缺数据）不该淹没顺序断言
+    except Exception as e:  # 编排之外的失败（缺数据）不该淹没顺序断言
         return f"raised:{type(e).__name__}"
 
 
@@ -289,8 +312,9 @@ class TestRun1700Order:
         _run_runner(run_1700, monkeypatch, rec, tmp_path)
         assert "sync_compass_amv" in rec.names, rec.names
         assert "merge_incremental_market" in rec.names, rec.names
-        assert rec.index("sync_compass_amv") < rec.index("merge_incremental_market"), \
+        assert rec.index("sync_compass_amv") < rec.index("merge_incremental_market"), (
             "sync_compass_amv 必须先跑，否则 amv quality 永远不会被置 confirmed"
+        )
 
     def test_collect_precedes_mfe_and_review(self, monkeypatch, tmp_path):
         """行情采集要在 MFE/MAE 与复盘之前 —— 它们都读当日行情。"""
@@ -338,7 +362,7 @@ class TestRun1445Order:
         """14:45 门控**只留痕不阻断**（0AMV 与宽度本就要等收盘）。"""
         from custos.pipeline import run_1445
 
-        rec = Recorder(gate_code=4)     # blocked
+        rec = Recorder(gate_code=4)  # blocked
         rc = _run_runner(run_1445, monkeypatch, rec, tmp_path)
         assert rc != 4, "14:45 不得因门控 blocked 而退出 4"
 
@@ -365,8 +389,12 @@ class TestRun1800Order:
         _run_runner(run_1800, monkeypatch, rec, tmp_path)
         # ⚠️ 名字带 `screening_` 前缀 —— 实测得来。第一版按无前缀写，
         # 条件不满足直接 skip，而 **skip 不是通过**。
-        chain = ["screening_formula_screen", "screening_enrich_candidates",
-                 "screening_score_candidates", "screening_candidate_table"]
+        chain = [
+            "screening_formula_screen",
+            "screening_enrich_candidates",
+            "screening_score_candidates",
+            "screening_candidate_table",
+        ]
         present = [c for c in chain if c in rec.names]
         assert len(present) == len(chain), f"选股链 stage 缺失：{rec.names}"
         idx = [rec.index(c) for c in present]
@@ -402,8 +430,10 @@ class TestRunnerNamesResolve:
     ⇒ 这就是编排测试存在的理由：它是唯一会**执行 main() 主体**的一层。
     """
 
-    @pytest.mark.parametrize("name", ["run_0850", "run_0905", "run_1445",
-                                      "run_1700", "run_1800", "daily_pipeline"])
+    @pytest.mark.parametrize(
+        "name",
+        ["run_0850", "run_0905", "run_1445", "run_1700", "run_1800", "daily_pipeline"],
+    )
     def test_module_level_names_used_in_main_are_defined(self, name):
         """AST 扫 `main()` 里读取的全局名，逐个确认模块命名空间里有。"""
         import ast as _ast
@@ -412,8 +442,14 @@ class TestRunnerNamesResolve:
         mod = __import__(f"custos.pipeline.{name}", fromlist=[name])
         src = (TOOLS / "pipeline" / f"{name}.py").read_text(encoding="utf-8")
         tree = _ast.parse(src)
-        fn = next((n for n in tree.body
-                   if isinstance(n, _ast.FunctionDef) and n.name == "main"), None)
+        fn = next(
+            (
+                n
+                for n in tree.body
+                if isinstance(n, _ast.FunctionDef) and n.name == "main"
+            ),
+            None,
+        )
         assert fn is not None, f"{name} 没有 main()"
         local = set()
         for n in _ast.walk(fn):
@@ -424,12 +460,21 @@ class TestRunnerNamesResolve:
                 local |= {a.arg for a in n.args.args}
             elif isinstance(n, _ast.ExceptHandler) and n.name:
                 local.add(n.name)
-        known = set(dir(builtins)) | set(vars(mod)) | local | {a.arg for a in fn.args.args}
-        missing = sorted({n.id for n in _ast.walk(fn)
-                          if isinstance(n, _ast.Name) and isinstance(n.ctx, _ast.Load)}
-                         - known)
-        assert not missing, (f"{name}.main() 用到未定义的名字：{missing}\n"
-                             "很可能是重构时改了注释没改导入（run_1445 的 TOOLS 就是这样）")
+        known = (
+            set(dir(builtins)) | set(vars(mod)) | local | {a.arg for a in fn.args.args}
+        )
+        missing = sorted(
+            {
+                n.id
+                for n in _ast.walk(fn)
+                if isinstance(n, _ast.Name) and isinstance(n.ctx, _ast.Load)
+            }
+            - known
+        )
+        assert not missing, (
+            f"{name}.main() 用到未定义的名字：{missing}\n"
+            "很可能是重构时改了注释没改导入（run_1445 的 TOOLS 就是这样）"
+        )
 
 
 class TestRun0905:
@@ -476,13 +521,25 @@ class TestRun0905:
         from custos.pipeline import run_0905
 
         rec = Recorder()
-        _run_runner(run_0905, monkeypatch, rec, tmp_path)   # PLANS 是空的 tmp
-        logs = list((tmp_path / "log_dir").glob("*.json")) if (tmp_path / "log_dir").exists() else []
-        logs += [p for d in tmp_path.iterdir() if d.is_dir() for p in d.glob("*run_log*.json")]
+        _run_runner(run_0905, monkeypatch, rec, tmp_path)  # PLANS 是空的 tmp
+        logs = (
+            list((tmp_path / "log_dir").glob("*.json"))
+            if (tmp_path / "log_dir").exists()
+            else []
+        )
+        logs += [
+            p
+            for d in tmp_path.iterdir()
+            if d.is_dir()
+            for p in d.glob("*run_log*.json")
+        ]
         assert logs, "应写出 run log"
         import json
+
         data = json.loads(logs[0].read_text(encoding="utf-8"))
-        assert data.get("status") == "failed", f"报告缺失时应为 failed，实际 {data.get('status')}"
+        assert data.get("status") == "failed", (
+            f"报告缺失时应为 failed，实际 {data.get('status')}"
+        )
 
 
 class TestRun1800Degradation:
@@ -490,7 +547,8 @@ class TestRun1800Degradation:
     而降级判定里有一条很容易被忽略的语义。"""
 
     def test_stage_ok_but_json_says_unavailable_counts_as_degraded(
-            self, monkeypatch, tmp_path):
+        self, monkeypatch, tmp_path
+    ):
         """⚠️ **退出码 0 但 JSON 里 `status=unavailable/partial` 也算降级。**
 
         这是「没抛异常 ≠ 拿到数据」在选股链的形态：公式初筛可能正常退出
@@ -498,16 +556,25 @@ class TestRun1800Degradation:
         """
         from custos.pipeline import run_1800
 
-        rec = Recorder(stdout={"screening_formula_screen":
-                               '{"status": "unavailable", "reason": "universe empty"}'})
+        rec = Recorder(
+            stdout={
+                "screening_formula_screen": '{"status": "unavailable", "reason": "universe empty"}'
+            }
+        )
         _run_runner(run_1800, monkeypatch, rec, tmp_path)
-        logs = [p for d in tmp_path.rglob("*") if d.is_dir()
-                for p in d.glob("*run_log*.json")]
+        logs = [
+            p
+            for d in tmp_path.rglob("*")
+            if d.is_dir()
+            for p in d.glob("*run_log*.json")
+        ]
         assert logs, "应写出 run log"
         import json
+
         data = json.loads(logs[0].read_text(encoding="utf-8"))
-        assert data.get("status") == "degraded", \
+        assert data.get("status") == "degraded", (
             f"stage 报 unavailable 时整链应 degraded，实际 {data.get('status')}"
+        )
 
     def test_stage_failure_counts_as_degraded(self, monkeypatch, tmp_path):
         import json
@@ -516,8 +583,12 @@ class TestRun1800Degradation:
 
         rec = Recorder(fail={"screening_score_candidates"})
         _run_runner(run_1800, monkeypatch, rec, tmp_path)
-        logs = [p for d in tmp_path.rglob("*") if d.is_dir()
-                for p in d.glob("*run_log*.json")]
+        logs = [
+            p
+            for d in tmp_path.rglob("*")
+            if d.is_dir()
+            for p in d.glob("*run_log*.json")
+        ]
         data = json.loads(logs[0].read_text(encoding="utf-8"))
         assert data.get("status") == "degraded"
 
@@ -531,12 +602,18 @@ class TestRun1800Degradation:
         rec = Recorder()
         rc = _run_runner(run_1800, monkeypatch, rec, tmp_path)
         assert rc in (0, 1), f"不该异常退出，实际 {rc}"
-        logs = [p for d in tmp_path.rglob("*") if d.is_dir()
-                for p in d.glob("*run_log*.json")]
+        logs = [
+            p
+            for d in tmp_path.rglob("*")
+            if d.is_dir()
+            for p in d.glob("*run_log*.json")
+        ]
         data = json.loads(logs[0].read_text(encoding="utf-8"))
         # ⚠️ run log 里的键是 `name` 不是 `stage`（`pipeline_kit.log_stage`）——
         # 第一版按 `stage` 查，取到全 None，断言「应有该 stage」于是失败。
-        digest = [x for x in data.get("stages", []) if x.get("name") == "candidate_digest"]
+        digest = [
+            x for x in data.get("stages", []) if x.get("name") == "candidate_digest"
+        ]
         assert digest, "应有 candidate_digest stage 记录"
         assert digest[0].get("ok") is False
         assert "备选表未生成" in (digest[0].get("note") or "")
@@ -549,8 +626,9 @@ class TestRun1700HardFailures:
     记 degraded」区分开。混淆的代价：盘后复盘没产出却报成功，第二天没人知道。
     """
 
-    @pytest.mark.parametrize("stage", ["daily_pipeline", "final_close_review",
-                                       "final_review_validator"])
+    @pytest.mark.parametrize(
+        "stage", ["daily_pipeline", "final_close_review", "final_review_validator"]
+    )
     def test_hard_stage_failure_writes_failed(self, monkeypatch, tmp_path, stage):
         import json
 
@@ -558,12 +636,17 @@ class TestRun1700HardFailures:
 
         rec = Recorder(fail={stage})
         _run_runner(run_1700, monkeypatch, rec, tmp_path)
-        logs = [p for d in tmp_path.rglob("*") if d.is_dir()
-                for p in d.glob("*run_log*.json")]
+        logs = [
+            p
+            for d in tmp_path.rglob("*")
+            if d.is_dir()
+            for p in d.glob("*run_log*.json")
+        ]
         assert logs, f"{stage} 失败也要写 run log"
         data = json.loads(logs[0].read_text(encoding="utf-8"))
-        assert data.get("status") == "failed", \
+        assert data.get("status") == "failed", (
             f"{stage} 是硬失败 stage，应记 failed，实际 {data.get('status')}"
+        )
 
     def test_best_effort_failures_do_not_mark_failed(self, monkeypatch, tmp_path):
         """采集类失败是 best-effort ⇒ 不得记 failed（否则每次网络抖动都像事故）。"""
@@ -571,8 +654,13 @@ class TestRun1700HardFailures:
 
         from custos.pipeline import run_1700
 
-        rec = Recorder(fail={"collect_fund_flow", "refresh_eod_klines",
-                             "collect_incremental_market"})
+        rec = Recorder(
+            fail={
+                "collect_fund_flow",
+                "refresh_eod_klines",
+                "collect_incremental_market",
+            }
+        )
 
         # ⚠️ 必须先把复盘产物造出来。stage 被打桩后不会真的产文件，而 run_1700
         # 会检查 `{date}_final_review.md` 是否存在、不存在就（正确地）记 failed。
@@ -587,13 +675,24 @@ class TestRun1700HardFailures:
             rev.mkdir(parents=True, exist_ok=True)
             (rev / "2026-08-07_final_review.md").write_text("# x", encoding="utf-8")
 
-        _run_runner(run_1700, monkeypatch, rec, tmp_path,
-                    argv=("--date", "2026-08-07"), seed=_seed)
-        logs = [p for d in tmp_path.rglob("*") if d.is_dir()
-                for p in d.glob("*run_log*.json")]
+        _run_runner(
+            run_1700,
+            monkeypatch,
+            rec,
+            tmp_path,
+            argv=("--date", "2026-08-07"),
+            seed=_seed,
+        )
+        logs = [
+            p
+            for d in tmp_path.rglob("*")
+            if d.is_dir()
+            for p in d.glob("*run_log*.json")
+        ]
         data = json.loads(logs[0].read_text(encoding="utf-8"))
-        assert data.get("status") != "failed", \
+        assert data.get("status") != "failed", (
             f"best-effort 采集失败不应记 failed，实际 {data.get('status')}"
+        )
 
 
 class TestManualInputs:
@@ -614,6 +713,7 @@ class TestManualInputs:
 
     def _seed_market(self, pipeline, tmp_path):
         import json
+
         p = pipeline.MARKET_DIR / "2026-08-07_market_timing_input.json"
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps({"date": "2026-08-07", "amv_0": {}}), encoding="utf-8")
@@ -626,6 +726,7 @@ class TestManualInputs:
         否则复盘时无法区分「指南针同步来的真值」与「人填的」。
         """
         import json
+
         p = self._seed_market(pipeline, tmp_path)
         r = pipeline.apply_manual_market("2026-08-07", None, None, 5.0)
         assert r["ok"] is True
@@ -640,12 +741,14 @@ class TestManualInputs:
         """未显式给 zone 时按阈值派生：>4 做多 / <-2.3 空头 / 其余中性。
         这三个阈值与 `amv_state` 的 regime 切换线是同一套。"""
         import json
+
         p = self._seed_market(pipeline, tmp_path)
         pipeline.apply_manual_market("2026-08-07", None, None, pct)
         assert json.loads(p.read_text(encoding="utf-8"))["amv_0"]["amv_zone"] == zone
 
     def test_explicit_zone_wins_over_derived(self, pipeline, tmp_path):
         import json
+
         p = self._seed_market(pipeline, tmp_path)
         pipeline.apply_manual_market("2026-08-07", None, "空头", 5.0)
         assert json.loads(p.read_text(encoding="utf-8"))["amv_0"]["amv_zone"] == "空头"
@@ -653,6 +756,7 @@ class TestManualInputs:
     def test_manual_args_recorded_in_data_quality(self, pipeline, tmp_path):
         """⚠️ 人工参数要进 `data_quality.notes` —— 报告的数据质量段据此提示读者。"""
         import json
+
         p = self._seed_market(pipeline, tmp_path)
         pipeline.apply_manual_market("2026-08-07", "double_wide", None, 5.0)
         dq = json.loads(p.read_text(encoding="utf-8"))["data_quality"]
@@ -661,11 +765,16 @@ class TestManualInputs:
 
     def test_double_wide_writes_all_four_policy_fields(self, pipeline, tmp_path):
         import json
+
         p = self._seed_market(pipeline, tmp_path)
         pipeline.apply_manual_market("2026-08-07", "double_wide", None, None)
         mp = json.loads(p.read_text(encoding="utf-8"))["macro_policy"]
-        for k in ("monetary_policy", "fiscal_policy", "credit_environment",
-                  "regulation_environment"):
+        for k in (
+            "monetary_policy",
+            "fiscal_policy",
+            "credit_environment",
+            "regulation_environment",
+        ):
             assert mp.get(k), k
         assert "人工输入" in mp["policy_summary"], "必须自称人工输入"
 
@@ -682,14 +791,20 @@ class TestManualInputs:
         说不出它是清了还是从来没有过。
         """
         import json
+
         hd = pipeline.HOLDINGS_DIR
         hd.mkdir(parents=True, exist_ok=True)
         (hd / "2026-08-07_manual_position_updates.json").write_text(
             json.dumps({"updates": [{"code": "600000", "action": "已清仓"}]}),
-            encoding="utf-8")
+            encoding="utf-8",
+        )
         tech = hd / "2026-08-07_holding_technical_summary.json"
-        tech.write_text(json.dumps([{"code": "600000", "name": "甲"},
-                                    {"code": "600001", "name": "乙"}]), encoding="utf-8")
+        tech.write_text(
+            json.dumps(
+                [{"code": "600000", "name": "甲"}, {"code": "600001", "name": "乙"}]
+            ),
+            encoding="utf-8",
+        )
 
         r = pipeline.apply_manual_position_updates("2026-08-07")
         assert r["ok"] is True and r["changed"], r
@@ -705,22 +820,26 @@ class TestManualInputs:
     def test_manual_clearance_without_target_files_is_noop(self, pipeline, tmp_path):
         """有更新文件但没有技术面表时不得崩 —— 顺序上它可能先于 batch_holding_technical。"""
         import json
+
         hd = pipeline.HOLDINGS_DIR
         hd.mkdir(parents=True, exist_ok=True)
         (hd / "2026-08-07_manual_position_updates.json").write_text(
             json.dumps({"updates": [{"code": "600000", "action": "已清仓"}]}),
-            encoding="utf-8")
+            encoding="utf-8",
+        )
         r = pipeline.apply_manual_position_updates("2026-08-07")
         assert r["ok"] is True and r["changed"] == []
 
     def test_non_clearance_actions_ignored(self, pipeline, tmp_path):
         """只有 `action == "已清仓"` 触发移除 —— 「减仓」等不得让整行消失。"""
         import json
+
         hd = pipeline.HOLDINGS_DIR
         hd.mkdir(parents=True, exist_ok=True)
         (hd / "2026-08-07_manual_position_updates.json").write_text(
             json.dumps({"updates": [{"code": "600000", "action": "减仓"}]}),
-            encoding="utf-8")
+            encoding="utf-8",
+        )
         tech = hd / "2026-08-07_holding_technical_summary.json"
         tech.write_text(json.dumps([{"code": "600000"}]), encoding="utf-8")
         pipeline.apply_manual_position_updates("2026-08-07")

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Collect fund flow rank from East Money direct API (no akshare dependency)."""
+
 from __future__ import annotations
 import json, sys, time
 import requests
@@ -52,14 +53,20 @@ SECTOR_URLS = {
 def fetch_json(url: str) -> dict:
     s = requests.Session()
     s.trust_env = False  # ignore system proxy
-    r = fetch_with_retry(url, timeout=15, session=s,
-                         headers={"User-Agent": "Mozilla/5.0"}, proxies={"http": None, "https": None})
+    r = fetch_with_retry(
+        url,
+        timeout=15,
+        session=s,
+        headers={"User-Agent": "Mozilla/5.0"},
+        proxies={"http": None, "https": None},
+    )
     r.raise_for_status()
     return r.json()
 
 
 def main(argv=None) -> int:
     import argparse
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", default=cn_today().strftime("%Y-%m-%d"))
     args = ap.parse_args(argv)
@@ -74,22 +81,24 @@ def main(argv=None) -> int:
         return 1
     stocks = []
     for item in data.get("data", {}).get("diff", []):
-        stocks.append({
-            "code": str(item.get("f12", "")),
-            "name": item.get("f14", ""),
-            "price": item.get("f2"),
-            "change_pct": item.get("f3"),
-            "main_net_inflow": item.get("f62"),
-            "main_net_pct": item.get("f184"),
-            "super_large_net": item.get("f66"),
-            "super_large_pct": item.get("f69"),
-            "large_net": item.get("f72"),
-            "large_pct": item.get("f75"),
-            "medium_net": item.get("f78"),
-            "medium_pct": item.get("f81"),
-            "small_net": item.get("f84"),
-            "small_pct": item.get("f87"),
-        })
+        stocks.append(
+            {
+                "code": str(item.get("f12", "")),
+                "name": item.get("f14", ""),
+                "price": item.get("f2"),
+                "change_pct": item.get("f3"),
+                "main_net_inflow": item.get("f62"),
+                "main_net_pct": item.get("f184"),
+                "super_large_net": item.get("f66"),
+                "super_large_pct": item.get("f69"),
+                "large_net": item.get("f72"),
+                "large_pct": item.get("f75"),
+                "medium_net": item.get("f78"),
+                "medium_pct": item.get("f81"),
+                "small_net": item.get("f84"),
+                "small_pct": item.get("f87"),
+            }
+        )
 
     # Sector fund flow
     # 失败与"今天真的没有资金流入"必须可区分:以前失败写 []，下游(enrich_candidates
@@ -103,13 +112,15 @@ def main(argv=None) -> int:
             sec_data = fetch_json(sec_url)
             sec_list = []
             for item in sec_data.get("data", {}).get("diff", []):
-                sec_list.append({
-                    "code": str(item.get("f12", "")),
-                    "name": item.get("f14", ""),
-                    "change_pct": item.get("f3"),
-                    "main_net_inflow": item.get("f62"),
-                    "main_net_pct": item.get("f184"),
-                })
+                sec_list.append(
+                    {
+                        "code": str(item.get("f12", "")),
+                        "name": item.get("f14", ""),
+                        "change_pct": item.get("f3"),
+                        "main_net_inflow": item.get("f62"),
+                        "main_net_pct": item.get("f184"),
+                    }
+                )
             sectors[sec_type] = sec_list
             sector_status[sec_type] = {"status": "ok", "count": len(sec_list)}
             time.sleep(1)  # rate limit
@@ -132,10 +143,15 @@ def main(argv=None) -> int:
     OUT.parent.mkdir(parents=True, exist_ok=True)
     require("fund_flow_rank", result)
     OUT.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"[OK] fund_flow_rank: {len(stocks)} stocks, {len(sectors.get('industry',[]))} industry sectors, {len(sectors.get('concept',[]))} concept sectors -> {OUT.name}")
+    print(
+        f"[OK] fund_flow_rank: {len(stocks)} stocks, {len(sectors.get('industry', []))} industry sectors, {len(sectors.get('concept', []))} concept sectors -> {OUT.name}"
+    )
     if failed:
-        print(f"[WARN] 板块资金流拉取失败: {', '.join(failed)}（已在 sector_rank_status 标记 failed，"
-              f"下游不得把空列表读成「今天没有资金流入」）", file=sys.stderr)
+        print(
+            f"[WARN] 板块资金流拉取失败: {', '.join(failed)}（已在 sector_rank_status 标记 failed，"
+            f"下游不得把空列表读成「今天没有资金流入」）",
+            file=sys.stderr,
+        )
     return 0
 
 

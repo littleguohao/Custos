@@ -10,6 +10,7 @@
 —— **主题生命周期只是过滤器，不是交易授权**。这与 R2「板块族+密度是归因工具，
 『跟随主流』机械规则不成立」一致，测试把它钉住。
 """
+
 from __future__ import annotations
 
 import json
@@ -33,11 +34,21 @@ class TestLifecyclePhase:
 
         两个字段来自不同上游，冲突时取更保守的那个。
         """
-        assert re_mod.lifecycle({"raw_stage": "主升/加速", "trend": "下跌"}, 0)["phase"] == "退潮"
+        assert (
+            re_mod.lifecycle({"raw_stage": "主升/加速", "trend": "下跌"}, 0)["phase"]
+            == "退潮"
+        )
 
-    @pytest.mark.parametrize("raw,want", [
-        ("主升/加速", "主升"), ("修复", "修复"), ("分歧/弱震荡", "分歧"),
-        ("震荡", "震荡/待确认"), ("", "震荡/待确认")])
+    @pytest.mark.parametrize(
+        "raw,want",
+        [
+            ("主升/加速", "主升"),
+            ("修复", "修复"),
+            ("分歧/弱震荡", "分歧"),
+            ("震荡", "震荡/待确认"),
+            ("", "震荡/待确认"),
+        ],
+    )
     def test_other_phases(self, raw, want):
         assert re_mod.lifecycle({"raw_stage": raw}, 0)["phase"] == want
 
@@ -56,7 +67,10 @@ class TestLifecyclePhase:
         与 R2 的结论一致：板块族/主线是归因工具，「跟随主流」机械规则不成立。
         """
         r = re_mod.lifecycle({"raw_stage": "主升/加速", "score": 95}, 10)
-        assert r["permission_rule"] == "theme lifecycle is a filter, not a direct trade authorization"
+        assert (
+            r["permission_rule"]
+            == "theme lifecycle is a filter, not a direct trade authorization"
+        )
 
     def test_unknown_evidence_marked_unavailable_not_zero(self):
         """资金流/龙头结构取不到时标 `unavailable`，**不能填 0 或空串** ——
@@ -92,6 +106,7 @@ class TestMainPipeline:
 
     def _run(self, day="2026-08-07", monkeypatch=None):
         import sys as _s
+
         old = _s.argv
         _s.argv = ["x", "--date", day]
         try:
@@ -109,50 +124,94 @@ class TestMainPipeline:
 
     def test_news_events_counted_per_theme(self):
         """盘后新闻按主题计数，供生命周期的 `event_evidence_count` 用。"""
-        self._w("sectors/2026-08-07_sector_state.json",
-                [{"theme_id": "chip", "sector": "半导体", "raw_stage": "主升/加速"}])
-        self._w("news/postclose/2026-08-07_postclose_news_digest.json",
-                {"sections": {"policy": [{"matched_themes": ["半导体"]},
-                                         {"matched_themes": ["半导体", "机器人"]}]}})
+        self._w(
+            "sectors/2026-08-07_sector_state.json",
+            [{"theme_id": "chip", "sector": "半导体", "raw_stage": "主升/加速"}],
+        )
+        self._w(
+            "news/postclose/2026-08-07_postclose_news_digest.json",
+            {
+                "sections": {
+                    "policy": [
+                        {"matched_themes": ["半导体"]},
+                        {"matched_themes": ["半导体", "机器人"]},
+                    ]
+                }
+            },
+        )
         r = self._run()
         assert r["theme_lifecycles"][0]["event_evidence_count"] == 2
 
     def test_sector_name_with_slash_uses_head_segment(self):
         """板块名含 `/` 时按**首段**匹配新闻主题 —— 命名口径不一致时仍能对上。"""
-        self._w("sectors/2026-08-07_sector_state.json",
-                [{"sector": "半导体/芯片", "raw_stage": "主升"}])
-        self._w("news/postclose/2026-08-07_postclose_news_digest.json",
-                {"sections": {"x": [{"matched_themes": ["半导体"]}]}})
+        self._w(
+            "sectors/2026-08-07_sector_state.json",
+            [{"sector": "半导体/芯片", "raw_stage": "主升"}],
+        )
+        self._w(
+            "news/postclose/2026-08-07_postclose_news_digest.json",
+            {"sections": {"x": [{"matched_themes": ["半导体"]}]}},
+        )
         assert self._run()["theme_lifecycles"][0]["event_evidence_count"] == 1
 
     def test_holding_diagnosis_prefers_chief_b1_state(self):
         """持仓诊断优先取 `chief_decision` 里的 b1 状态（那是定稿后的），
         技术面表里的只作兜底 —— 否则会用未经风控裁决的中间态复盘。"""
-        self._w("holdings/2026-08-07_holding_technical_summary.json",
-                [{"code": "600000", "name": "浦发", "trend_state": "兜底趋势"}])
-        self._w("decisions/2026-08-07_chief_decision.json", {"holding_actions": [
-            {"code": "600000", "b1_holding_state": {"facts": {"trend_state": "定稿趋势"}}}]})
+        self._w(
+            "holdings/2026-08-07_holding_technical_summary.json",
+            [{"code": "600000", "name": "浦发", "trend_state": "兜底趋势"}],
+        )
+        self._w(
+            "decisions/2026-08-07_chief_decision.json",
+            {
+                "holding_actions": [
+                    {
+                        "code": "600000",
+                        "b1_holding_state": {"facts": {"trend_state": "定稿趋势"}},
+                    }
+                ]
+            },
+        )
         r = self._run()
         assert r["holding_diagnoses"][0]["trend"] == "定稿趋势"
 
     def test_diagnosis_falls_back_to_tech_row(self):
-        self._w("holdings/2026-08-07_holding_technical_summary.json",
-                [{"code": "600000", "trend_state": "兜底趋势"}])
+        self._w(
+            "holdings/2026-08-07_holding_technical_summary.json",
+            [{"code": "600000", "trend_state": "兜底趋势"}],
+        )
         r = self._run()
         assert r["holding_diagnoses"][0]["trend"] == "兜底趋势"
 
     def test_code_suffix_matching_across_sources(self):
         """技术面用裸码、chief 用带后缀 —— 必须能对上。"""
-        self._w("holdings/2026-08-07_holding_technical_summary.json", [{"code": "600000"}])
-        self._w("decisions/2026-08-07_chief_decision.json", {"holding_actions": [
-            {"code": "600000.SH", "b1_holding_state": {"facts": {"trend_state": "定稿"}}}]})
+        self._w(
+            "holdings/2026-08-07_holding_technical_summary.json", [{"code": "600000"}]
+        )
+        self._w(
+            "decisions/2026-08-07_chief_decision.json",
+            {
+                "holding_actions": [
+                    {
+                        "code": "600000.SH",
+                        "b1_holding_state": {"facts": {"trend_state": "定稿"}},
+                    }
+                ]
+            },
+        )
         assert self._run()["holding_diagnoses"][0]["trend"] == "定稿"
 
     def test_next_day_plan_inherits_chief_permissions(self):
         """次日计划的仓位/权限**继承总控**，不自行放宽。"""
-        self._w("decisions/2026-08-07_chief_decision.json", {
-            "total_position_range": "20%-40%", "new_position_permission": "禁止",
-            "forbidden_actions": ["无计划追高"], "tomorrow_validation": ["v1"]})
+        self._w(
+            "decisions/2026-08-07_chief_decision.json",
+            {
+                "total_position_range": "20%-40%",
+                "new_position_permission": "禁止",
+                "forbidden_actions": ["无计划追高"],
+                "tomorrow_validation": ["v1"],
+            },
+        )
         r = self._run()["next_day_plan"]
         assert r["total_position_range"] == "20%-40%"
         assert r["new_position_permission"] == "禁止"
@@ -162,52 +221,111 @@ class TestMainPipeline:
     def test_enrichment_cannot_override_upstream(self):
         """⚠️ 输出必须写明**不得覆盖 RiskDecision / ChiefDecision** ——
         复盘层是解释，不是裁决。"""
-        assert self._run()["permission_rule"] == \
-            "enrichment cannot override RiskDecision or ChiefDecision"
+        assert (
+            self._run()["permission_rule"]
+            == "enrichment cannot override RiskDecision or ChiefDecision"
+        )
 
     def test_exact_quantity_always_none(self):
         """⚠️ 次日计划**不给精确数量** —— 精确减仓量另需当日行情授权
         （`runtime_guards.position_gate`），复盘层无权给出。"""
-        self._w("holdings/2026-08-07_holding_technical_summary.json", [{"code": "600000"}])
-        assert self._run()["next_day_plan"]["holding_plans"][0]["exact_quantity"] is None
+        self._w(
+            "holdings/2026-08-07_holding_technical_summary.json", [{"code": "600000"}]
+        )
+        assert (
+            self._run()["next_day_plan"]["holding_plans"][0]["exact_quantity"] is None
+        )
 
     def test_plan_defaults_when_no_b1_state(self):
         """无 b1 状态时方向默认「观察」、优先级 P3、触发条件写「等待目标日技术确认」——
         不得空着（空计划无法执行也无法复盘）。"""
-        self._w("holdings/2026-08-07_holding_technical_summary.json", [{"code": "600000"}])
+        self._w(
+            "holdings/2026-08-07_holding_technical_summary.json", [{"code": "600000"}]
+        )
         p = self._run()["next_day_plan"]["holding_plans"][0]
         assert p["direction"] == "观察" and p["priority"] == "P3"
         assert p["trigger"] == "等待目标日技术确认"
         assert "不得由单一低位指标放宽权限" in p["invalidation"]
 
     def test_risk_flags_deduped_from_signals(self):
-        self._w("holdings/2026-08-07_holding_technical_summary.json", [{"code": "600000"}])
-        self._w("decisions/2026-08-07_chief_decision.json", {"holding_actions": [
-            {"code": "600000", "b1_holding_state": {"signals": [
-                {"signal": "hard_loss"}, {"signal": "hard_loss"}, {"signal": "downtrend"}]}}]})
-        assert self._run()["holding_diagnoses"][0]["risk_flags"] == ["hard_loss", "downtrend"]
+        self._w(
+            "holdings/2026-08-07_holding_technical_summary.json", [{"code": "600000"}]
+        )
+        self._w(
+            "decisions/2026-08-07_chief_decision.json",
+            {
+                "holding_actions": [
+                    {
+                        "code": "600000",
+                        "b1_holding_state": {
+                            "signals": [
+                                {"signal": "hard_loss"},
+                                {"signal": "hard_loss"},
+                                {"signal": "downtrend"},
+                            ]
+                        },
+                    }
+                ]
+            },
+        )
+        assert self._run()["holding_diagnoses"][0]["risk_flags"] == [
+            "hard_loss",
+            "downtrend",
+        ]
 
     def test_trade_feedback_reflects_actual_trades(self):
-        self._w("holdings/2026-08-07_holding_technical_summary.json", [{"code": "600000"}])
-        self._w("review_steps/2026-08-07_execution_review.json", {"rows": [
-            {"code": "600000", "execution_status": "executed", "actual_trades": [{"x": 1}]}]})
+        self._w(
+            "holdings/2026-08-07_holding_technical_summary.json", [{"code": "600000"}]
+        )
+        self._w(
+            "review_steps/2026-08-07_execution_review.json",
+            {
+                "rows": [
+                    {
+                        "code": "600000",
+                        "execution_status": "executed",
+                        "actual_trades": [{"x": 1}],
+                    }
+                ]
+            },
+        )
         d = self._run()["holding_diagnoses"][0]
         assert d["trade_feedback"] == "recorded" and d["execution_status"] == "executed"
 
     def test_no_trades_marks_feedback_unavailable(self):
         """没有成交时标 `unavailable` 而非 `none` —— 区分「没交易」与「不知道」。"""
-        self._w("holdings/2026-08-07_holding_technical_summary.json", [{"code": "600000"}])
-        self._w("review_steps/2026-08-07_execution_review.json", {"rows": [
-            {"code": "600000", "execution_status": "no_action_no_trade", "actual_trades": []}]})
+        self._w(
+            "holdings/2026-08-07_holding_technical_summary.json", [{"code": "600000"}]
+        )
+        self._w(
+            "review_steps/2026-08-07_execution_review.json",
+            {
+                "rows": [
+                    {
+                        "code": "600000",
+                        "execution_status": "no_action_no_trade",
+                        "actual_trades": [],
+                    }
+                ]
+            },
+        )
         assert self._run()["holding_diagnoses"][0]["trade_feedback"] == "unavailable"
 
     def test_unavailable_list_includes_market_quality_gaps(self):
         """总控的质量检查里 missing/candidate/stale 的块要进 `unavailable` ——
         复盘时才知道哪些结论建立在缺数之上。"""
-        self._w("decisions/2026-08-07_chief_decision.json", {"market_quality": {"checks": [
-            {"field": "zero_amv", "quality": "missing"},
-            {"field": "breadth", "quality": "confirmed"},
-            {"field": "turnover", "quality": "stale"}]}})
+        self._w(
+            "decisions/2026-08-07_chief_decision.json",
+            {
+                "market_quality": {
+                    "checks": [
+                        {"field": "zero_amv", "quality": "missing"},
+                        {"field": "breadth", "quality": "confirmed"},
+                        {"field": "turnover", "quality": "stale"},
+                    ]
+                }
+            },
+        )
         u = self._run()["unavailable"]
         assert "zero_amv" in u and "turnover" in u and "breadth" not in u
 

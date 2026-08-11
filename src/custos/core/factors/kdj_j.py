@@ -6,6 +6,7 @@
 
 ⚠️ 判别力研究里同号率仅 50%，**不稳定**。
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -25,6 +26,7 @@ FACTOR: dict[str, Any] = {
     "stage": "debug",
 }
 
+
 def score(df: pd.DataFrame, code: str):
     """当日 KDJ 的 J 值(纯特征,恒可买)——信号池内 J 的具体深度(J=2 vs J=12)可作判别子,
     门槛(J<13)会把这条信息"吃掉",故显式记录。kdj 不可用 → None。"""
@@ -35,6 +37,9 @@ def score(df: pd.DataFrame, code: str):
     jv = float(j.iloc[-1])
     if jv != jv:
         return None
-    return {"score": round(jv, 3), "suggestion": "可买",
-            "aux": {"k": round(float(k.iloc[-1]), 4), "d": round(float(d.iloc[-1]), 4)},
-            "components": {}}
+    return {
+        "score": round(jv, 3),
+        "suggestion": "可买",
+        "aux": {"k": round(float(k.iloc[-1]), 4), "d": round(float(d.iloc[-1]), 4)},
+        "components": {},
+    }

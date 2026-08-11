@@ -37,6 +37,7 @@ CLI::
 输出 ``data/stock_pool/{date}_stock_pool.json``（StockPool 契约，
 见 governance/contracts/DATA_FLOW_CONTRACT.md）。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -50,9 +51,14 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
-from custos.core.paths import (CZ_SECTOR_PREFERENCE_FILE, DATA, MARKET_DIR,
-                   SCREEN_FORMULA_REGISTRY_FILE, SECTORS_DIR,
-                   STOCK_POOL_DIR)  # noqa: E402
+from custos.core.paths import (
+    CZ_SECTOR_PREFERENCE_FILE,
+    DATA,
+    MARKET_DIR,
+    SCREEN_FORMULA_REGISTRY_FILE,
+    SECTORS_DIR,
+    STOCK_POOL_DIR,
+)  # noqa: E402
 
 
 from custos.core.factors.s_shape import sstar_level  # noqa: E402
@@ -69,9 +75,18 @@ BUCKET_ORDER = ["A", "B", "C", "D"]
 # 个股共振矩阵：(technical_level, capital_intent_level) → base bucket。
 # 两轴均为个股维度（技术结构 × 资金意图）；板块不参与分层，只进 score/共振/trade_style。
 RESONANCE_MATRIX = {
-    ("强", "强"): "A", ("强", "中"): "B", ("强", "弱"): "C", ("强", "未知"): "C",
-    ("中", "强"): "B", ("中", "中"): "C", ("中", "弱"): "D", ("中", "未知"): "D",
-    ("弱", "强"): "C", ("弱", "中"): "D", ("弱", "弱"): "D", ("弱", "未知"): "D",
+    ("强", "强"): "A",
+    ("强", "中"): "B",
+    ("强", "弱"): "C",
+    ("强", "未知"): "C",
+    ("中", "强"): "B",
+    ("中", "中"): "C",
+    ("中", "弱"): "D",
+    ("中", "未知"): "D",
+    ("弱", "强"): "C",
+    ("弱", "中"): "D",
+    ("弱", "弱"): "D",
+    ("弱", "未知"): "D",
 }
 
 # 板块状态 → (heat_level, pass_level, 封顶)
@@ -105,13 +120,13 @@ TECH_MID_FALLBACK = 30
 # 回测校准前后对比）。可经 SCREEN_FORMULA_REGISTRY.json 的 "scoring".cap_rules
 # 覆盖，见 governance/contracts/SCREENING_WORKFLOW.md「可配置项」。
 DEFAULT_CAP_RULES = {
-    "sprint_wave": True,           # 冲刺波后首个 B1 禁买 → 封顶 B（检测阈值待回测）
-    "volume_retreat": True,        # 量能持续性=主力撤退 → 封顶 C（CZ §14.6，部分阈值待回测）
+    "sprint_wave": True,  # 冲刺波后首个 B1 禁买 → 封顶 B（检测阈值待回测）
+    "volume_retreat": True,  # 量能持续性=主力撤退 → 封顶 C（CZ §14.6，部分阈值待回测）
     "non_one_wave_revoked": True,  # 非一波流撤销 → 封顶 C（待回测）
-    "cz_avoid_sector": True,       # CZ 回避方向板块 → D（治理名单驱动）
-    "distribution_cap": True,      # 主力出货五方式命中 → high 封 D / watch 封 C（B1 §七.3，待回测）
-    "macd_divergence": True,       # MACD 顶背离/三打白骨精 → 封顶 C（macd十大技术，待回测）
-    "liquidity_floor": False,      # 流动性(近20日均成交额)低于底线 → 封顶 C（默认关，仅flag；待回测后开）
+    "cz_avoid_sector": True,  # CZ 回避方向板块 → D（治理名单驱动）
+    "distribution_cap": True,  # 主力出货五方式命中 → high 封 D / watch 封 C（B1 §七.3，待回测）
+    "macd_divergence": True,  # MACD 顶背离/三打白骨精 → 封顶 C（macd十大技术，待回测）
+    "liquidity_floor": False,  # 流动性(近20日均成交额)低于底线 → 封顶 C（默认关，仅flag；待回测后开）
 }
 
 # 流动性底线（亿元，待回测）：低于此值的候选打 low_liquidity；是否降档由 cap_rules.liquidity_floor 控制
@@ -133,7 +148,9 @@ def resolve_cap_rules(cap_rules: Optional[dict]) -> dict:
     return rules
 
 
-def normalize_sector_score(raw: Any, score_max: float = SECTOR_SCORE_MAX) -> Optional[float]:
+def normalize_sector_score(
+    raw: Any, score_max: float = SECTOR_SCORE_MAX
+) -> Optional[float]:
     """把 sector_state.score 归一化到 0-100 并 clamp，量纲异常/缺失时鲁棒兜底。
 
     - raw 为 None/非数值 → 0.0（板块无评分，等价最弱）。
@@ -199,9 +216,12 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
     if ss.get("available") and ss.get("s_star") is not None:
         s_star = float(ss["s_star"])
         detail: dict[str, Any] = {
-            "s_star": s_star, "s_shape": ss.get("s_shape"),
-            "delta": ss.get("delta"), "penalty": ss.get("penalty"),
-            "suggestion": ss.get("suggestion"), "scorer": "s_shape_v3",
+            "s_star": s_star,
+            "s_shape": ss.get("s_shape"),
+            "delta": ss.get("delta"),
+            "penalty": ss.get("penalty"),
+            "suggestion": ss.get("suggestion"),
+            "scorer": "s_shape_v3",
         }
         for _k, _v in (ss.get("components") or {}).items():
             detail[f"sshape_{_k}"] = (_v or {}).get("points")
@@ -254,7 +274,7 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
     # "贴合"列显示 "-"，复盘时无法区分"没算"和"算了是 0"）。
     fit = (cand.get("perfect_b1_fit") or {}).get("score")
     if fit is not None:
-        if fit:                       # 加 0 不改分，也不把 int 分数悄悄变成 float
+        if fit:  # 加 0 不改分，也不把 int 分数悄悄变成 float
             score += fit
         contrib["perfect_b1_fit"] = fit
     # MACD 十大技术（正向）：第一区间强势扩张 +3；第一区间再启动（3/5浪买点）+5；
@@ -288,8 +308,11 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
         score += 8
         contrib["b1_ignition"] = 8
     score = min(score, 100)
-    level = ("强" if score >= TECH_STRONG_FALLBACK
-             else ("中" if score >= TECH_MID_FALLBACK else "弱"))
+    level = (
+        "强"
+        if score >= TECH_STRONG_FALLBACK
+        else ("中" if score >= TECH_MID_FALLBACK else "弱")
+    )
     return score, level, contrib
 
 
@@ -298,9 +321,7 @@ def sector_heat(sector_entry: Optional[dict]) -> tuple[str, str, str, str]:
     if not sector_entry:
         return "未知", "reject_A", "B", "板块未映射或无 sector_state，不进 A"
     state = str(sector_entry.get("state") or sector_entry.get("sector_state") or "")
-    heat, pass_level, cap = SECTOR_STATE_MAP.get(
-        state, ("未知", "reject_A", "B")
-    )
+    heat, pass_level, cap = SECTOR_STATE_MAP.get(state, ("未知", "reject_A", "B"))
     reason = {
         "allow_A": f"板块{state}，可进 A/B",
         "allow_B": f"板块{state}，最多 B",
@@ -347,16 +368,33 @@ def capital_intent_strength(cand: dict) -> tuple[str, int, dict]:
     leader = cand.get("leader_volume") or {}
     bottom = cand.get("bottom_volume") or {}
     add("b1_ignition", (cand.get("b1_ignition") or {}).get("hit"), 3)
-    add("zhixing_ride", zx.get("available") and zx.get("qsx_gt_dks") and zx.get("close_above_qsx"), 2)
-    add("relative_strength_strong", (cand.get("patterns") or {}).get("relative_strength_strong"), 2)
+    add(
+        "zhixing_ride",
+        zx.get("available") and zx.get("qsx_gt_dks") and zx.get("close_above_qsx"),
+        2,
+    )
+    add(
+        "relative_strength_strong",
+        (cand.get("patterns") or {}).get("relative_strength_strong"),
+        2,
+    )
     add("leader_volume", leader.get("available") and leader.get("hit"), 2)
     add("bottom_volume", bottom.get("available") and bottom.get("hit"), 2)
-    add("volume_sustain_mainline", (cand.get("volume_sustain") or {}).get("status") == "mainline_confirmed", 2)
+    add(
+        "volume_sustain_mainline",
+        (cand.get("volume_sustain") or {}).get("status") == "mainline_confirmed",
+        2,
+    )
     add("ignition", (cand.get("ignition") or {}).get("hit"), 1)
     add("reversal_k", (cand.get("patterns") or {}).get("reversal_k_candidate"), 1)
     # 资金流向（正交于量价）：个股在主力净流入榜且净流入，或所属板块净流入
     ff = cand.get("fund_flow") or {}
-    add("fund_flow_inflow", ff.get("available") and (ff.get("in_rank_positive") or ff.get("sector_inflow_positive")), 2)
+    add(
+        "fund_flow_inflow",
+        ff.get("available")
+        and (ff.get("in_rank_positive") or ff.get("sector_inflow_positive")),
+        2,
+    )
 
     level = "强" if score >= CAP_STRONG else ("中" if score >= CAP_MID else "弱")
     return level, score, detail
@@ -365,10 +403,10 @@ def capital_intent_strength(cand: dict) -> tuple[str, int, dict]:
 def trade_style_of(heat_level: str) -> str:
     """板块热度 → 交易属性提示（不影响分层，只提示持有周期）。"""
     if heat_level == "强":
-        return "波段"          # 主升/修复：主线持续性强，适合波段
+        return "波段"  # 主升/修复：主线持续性强，适合波段
     if heat_level == "中":
-        return "波段(谨慎)"     # 震荡/分歧
-    return "短线(交易性)"       # 退潮/未知/缺失：板块不行，仅交易性机会
+        return "波段(谨慎)"  # 震荡/分歧
+    return "短线(交易性)"  # 退潮/未知/缺失：板块不行，仅交易性机会
 
 
 def market_permission(amv_state: str) -> str:
@@ -385,16 +423,26 @@ def fundamental_quality(fin: Optional[dict]) -> dict:
         return {"tier": "未知", "sanwu": False, "available": False}
     dp = f.get("dixi_proxy") or {}
     np_pos = bool(dp.get("net_profit_positive"))
-    ocf_pos = dp.get("op_cashflow_positive")            # True/False/None(未确认)
+    ocf_pos = dp.get("op_cashflow_positive")  # True/False/None(未确认)
     roe_pos = bool(dp.get("roe_positive"))
-    real = bool(dp.get("real_earnings_cashflow"))       # 净利+现金流双正
+    real = bool(dp.get("real_earnings_cashflow"))  # 净利+现金流双正
     tier = "优" if (real and roe_pos) else ("中" if np_pos else "差")
-    sanwu = bool((not np_pos) and (ocf_pos is False))   # 净利非正 且 现金流确认为负 → 三无
-    return {"tier": tier, "sanwu": sanwu, "available": True,
-            "net_profit_positive": np_pos, "cashflow_positive": ocf_pos, "roe_positive": roe_pos}
+    sanwu = bool(
+        (not np_pos) and (ocf_pos is False)
+    )  # 净利非正 且 现金流确认为负 → 三无
+    return {
+        "tier": tier,
+        "sanwu": sanwu,
+        "available": True,
+        "net_profit_positive": np_pos,
+        "cashflow_positive": ocf_pos,
+        "roe_positive": roe_pos,
+    }
 
 
-def apply_risk_downgrades(amv_state, base_bucket, cand, cz_sector, rules, sector_score_available):
+def apply_risk_downgrades(
+    amv_state, base_bucket, cand, cz_sector, rules, sector_score_available
+):
     """风险标记与 bucket 降级 —— **只降不升**的一串判据。
 
     2026-08-07 从 `score_candidate`（原 258 行）抽出。这是整个打分里最该单独看的一段：
@@ -475,7 +523,11 @@ def apply_risk_downgrades(amv_state, base_bucket, cand, cz_sector, rules, sector
     if mt_cap.get("available") and (mt_cap.get("overextended") or {}).get("hit"):
         risk_flags.append("macd_overextended")  # 开口/空间拐离：仅记录，不降档
     liq = cand.get("liquidity") or {}
-    if liq.get("available") and liq.get("avg_amount_yi") is not None and liq["avg_amount_yi"] < LIQUIDITY_FLOOR_YI:
+    if (
+        liq.get("available")
+        and liq.get("avg_amount_yi") is not None
+        and liq["avg_amount_yi"] < LIQUIDITY_FLOOR_YI
+    ):
         # 流动性底线（近20日均成交额），默认仅 flag；registry cap_rules.liquidity_floor=true 才封顶 C
         risk_flags.append("low_liquidity")
         if rules.get("liquidity_floor"):
@@ -517,7 +569,9 @@ def build_entry_reasons(cand, dist, wave_type):
         entry_reason.append(f"波浪:{WAVE_TYPE_LABELS.get(wave_type, wave_type)}")
     if (cand.get("b1_ignition") or {}).get("hit"):
         entry_reason.append("知行B1点火确认")
-    elif (cand.get("zhixing") or {}).get("available") and (cand.get("zhixing") or {}).get("qsx_gt_dks"):
+    elif (cand.get("zhixing") or {}).get("available") and (
+        cand.get("zhixing") or {}
+    ).get("qsx_gt_dks"):
         entry_reason.append("知行多头(QSX>DKS)")
     for _dk in dist.get("hits") or []:
         entry_reason.append(f"出货信号:{_dk}")
@@ -539,13 +593,21 @@ def four_leg_resonance(cand, permission, tech_level):
     """
     fq = fundamental_quality(cand.get("financials"))
     sp_fav = bool((cand.get("sector_phase") or {}).get("favorable"))
-    legs = {"market": permission == "允许", "sector": sp_fav,
-            "fundamental": fq.get("tier") in ("优", "中"), "technical": tech_level == "强"}
+    legs = {
+        "market": permission == "允许",
+        "sector": sp_fav,
+        "fundamental": fq.get("tier") in ("优", "中"),
+        "technical": tech_level == "强",
+    }
     aligned = sum(1 for v in legs.values() if v)
-    resonance_4leg = {**legs, "aligned": aligned,
-                      "label": {4: "四面共振", 3: "三面共振", 2: "两面", 1: "单面", 0: "无"}[aligned],
-                      "bull_candidate": bool(legs["market"] and sp_fav
-                                             and fq.get("tier") == "优" and legs["technical"])}
+    resonance_4leg = {
+        **legs,
+        "aligned": aligned,
+        "label": {4: "四面共振", 3: "三面共振", 2: "两面", 1: "单面", 0: "无"}[aligned],
+        "bull_candidate": bool(
+            legs["market"] and sp_fav and fq.get("tier") == "优" and legs["technical"]
+        ),
+    }
     return fq, sp_fav, legs, aligned, resonance_4leg
 
 
@@ -555,7 +617,8 @@ def score_candidate(
     amv_state: str,
     cz_sector: str = "neutral",
     cap_rules: Optional[dict] = None,
-    sector_score_max: float = SECTOR_SCORE_MAX) -> dict:
+    sector_score_max: float = SECTOR_SCORE_MAX,
+) -> dict:
     """对单只充实候选打分分层，输出 StockPool 契约条目（含打分明细）。
 
     cap_rules 传 None 时用 DEFAULT_CAP_RULES（全开＝历史行为）；显式传部分键可
@@ -579,7 +642,9 @@ def score_candidate(
     res_level = resonance_level(tech_level, heat)
     permission = market_permission(amv_state)
 
-    risk_flags, bucket, wave_type, dist = apply_risk_downgrades(amv_state, base_bucket, cand, cz_sector, rules, sector_score_available)
+    risk_flags, bucket, wave_type, dist = apply_risk_downgrades(
+        amv_state, base_bucket, cand, cz_sector, rules, sector_score_available
+    )
 
     # 总分：技术 60% + 板块 40% + 共振调整，0-100
     resonance_adj = {"强共振": 5, "弱共振": 0, "无共振": 0, "反向": -5}[res_level]
@@ -591,12 +656,18 @@ def score_candidate(
     next_step = NEXT_STEP[bucket]
     if amv_state == "空头":
         next_step = "observe_price"
-    if wave_type == "sprint" and rules["sprint_wave"] and next_step == "generate_buy_plan":
+    if (
+        wave_type == "sprint"
+        and rules["sprint_wave"]
+        and next_step == "generate_buy_plan"
+    ):
         # 双保险：冲刺波后首个 B1 禁买，不得生成买入计划
         next_step = "observe_price"
 
     # 四面共振(市场+板块+基本面+技术)——hint/优先级,不驱动分层。牛股=三/四面共振(cz理念)。
-    fq, _sp_fav, _legs, _aligned, resonance_4leg = four_leg_resonance(cand, permission, tech_level)
+    fq, _sp_fav, _legs, _aligned, resonance_4leg = four_leg_resonance(
+        cand, permission, tech_level
+    )
 
     return {
         "code": cand.get("code", ""),
@@ -609,7 +680,8 @@ def score_candidate(
         "formula_hits": cand.get("formula_hits") or [],
         "sector_heat_filter": {
             "sector_state": (sector_entry or {}).get("state")
-                            or (sector_entry or {}).get("sector_state") or "未知",
+            or (sector_entry or {}).get("sector_state")
+            or "未知",
             "sector_score": sector_score,
             "sector_score_raw": sector_score_raw,
             "sector_score_available": sector_score_available,
@@ -625,9 +697,15 @@ def score_candidate(
             "resonance_level": res_level,
         },
         "trade_style": trade_style,
-        "capital_intent": {"level": capital_level, "score": capital_score, "detail": capital_detail},
+        "capital_intent": {
+            "level": capital_level,
+            "score": capital_score,
+            "detail": capital_detail,
+        },
         "stock_role": "未定",
-        "relative_strength": "强" if (cand.get("patterns") or {}).get("relative_strength_strong") else "未定",
+        "relative_strength": "强"
+        if (cand.get("patterns") or {}).get("relative_strength_strong")
+        else "未定",
         "score": total,
         "score_detail": {
             "technical_score": tech_score,
@@ -694,7 +772,9 @@ def load_cz_sector_preference(path: Optional[Path] = None) -> Optional[dict]:
     data = _load_json(p, None)
     if not isinstance(data, dict):
         return None
-    if not isinstance(data.get("favored"), list) or not isinstance(data.get("avoid"), list):
+    if not isinstance(data.get("favored"), list) or not isinstance(
+        data.get("avoid"), list
+    ):
         return None
     return data
 
@@ -728,7 +808,8 @@ def score_all(
     amv_state: Optional[str] = None,
     cz_preference: Optional[dict] = None,
     cap_rules: Optional[dict] = None,
-    sector_score_max: Optional[float] = None) -> dict:
+    sector_score_max: Optional[float] = None,
+) -> dict:
     """整池打分。输入缺失时干净降级，绝不 raise。
 
     cz_preference 传 None 时从 governance/strategy/cz/CZ_SECTOR_PREFERENCE.json 加载；
@@ -745,7 +826,9 @@ def score_all(
         amv_0 = market.get("amv_0") or {}
         # 归一化后再判定:amv_zone 的"空头触发"若按 == "空头" 比较会漏判,
         # 导致空头封顶 B 与 next_step 降级双双失效(审计 B1)。
-        amv_state = normalize_regime(amv_0.get("effective_state") or amv_0.get("amv_zone") or "")
+        amv_state = normalize_regime(
+            amv_0.get("effective_state") or amv_0.get("amv_zone") or ""
+        )
     else:
         amv_state = normalize_regime(amv_state)
     if cz_preference is None:
@@ -811,17 +894,28 @@ def score_all(
             by_name[str(s["sector"])] = s
 
     for cand in enriched.get("candidates", []):
-        entry = by_theme.get(cand.get("theme_id", "")) or by_name.get(cand.get("sector", ""))
+        entry = by_theme.get(cand.get("theme_id", "")) or by_name.get(
+            cand.get("sector", "")
+        )
         cz_sector = cz_sector_of(cand.get("sector", ""), cz_preference)
-        scored = score_candidate(cand, entry, amv_state, cz_sector=cz_sector,
-                                 cap_rules=cap_rules, sector_score_max=sector_score_max)
+        scored = score_candidate(
+            cand,
+            entry,
+            amv_state,
+            cz_sector=cz_sector,
+            cap_rules=cap_rules,
+            sector_score_max=sector_score_max,
+        )
         result["candidates"].append(scored)
         result["bucket_counts"][scored["bucket"]] += 1
 
     # 板块分脏（NaN/inf）必须整池留痕：单票 risk_flags 只有细看明细才发现，
     # 而 status/degraded_reason 是报告与门控真正会读的字段（审计 B8）。
-    dirty_sector = [c["code"] for c in result["candidates"]
-                    if "sector_score_unavailable" in (c.get("risk_flags") or [])]
+    dirty_sector = [
+        c["code"]
+        for c in result["candidates"]
+        if "sector_score_unavailable" in (c.get("risk_flags") or [])
+    ]
     if dirty_sector:
         if result["status"] == "ok":
             result["status"] = "partial"
@@ -830,27 +924,37 @@ def score_all(
             f"{result['degraded_reason']};{note}" if result["degraded_reason"] else note
         )
 
-    result["candidates"].sort(key=lambda x: (BUCKET_ORDER.index(x["bucket"]), -x["score"], x["code"]))
+    result["candidates"].sort(
+        key=lambda x: (BUCKET_ORDER.index(x["bucket"]), -x["score"], x["code"])
+    )
     return result
 
 
 def main(argv: Optional[list] = None) -> int:
-    parser = argparse.ArgumentParser(description="screening 链第 3 段：板块过滤+共振打分分层（确定性）")
+    parser = argparse.ArgumentParser(
+        description="screening 链第 3 段：板块过滤+共振打分分层（确定性）"
+    )
     parser.add_argument("--date", required=True, help="交易日期 YYYY-MM-DD")
     args = parser.parse_args(argv)
 
     result = score_all(args.date)
 
     # 可审计块（待办 #29）：登记选股链实际读过的输入，出问题时可定位规则版本与数据时点
-    result["audit"] = report_audit.build(args.date, "screening", [
-        SCREENING_DIR / f"{args.date}_candidates_enriched.json",
-        SECTORS_DIR / f"{args.date}_sector_state.json",
-        MARKET_DIR / f"{args.date}_market_timing_input.json",
-    ])
+    result["audit"] = report_audit.build(
+        args.date,
+        "screening",
+        [
+            SCREENING_DIR / f"{args.date}_candidates_enriched.json",
+            SECTORS_DIR / f"{args.date}_sector_state.json",
+            MARKET_DIR / f"{args.date}_market_timing_input.json",
+        ],
+    )
     STOCK_POOL_DIR.mkdir(parents=True, exist_ok=True)
     out_path = STOCK_POOL_DIR / f"{args.date}_stock_pool.json"
     require("stock_pool", result)
-    out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    out_path.write_text(
+        json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     summary = {
         "date": args.date,

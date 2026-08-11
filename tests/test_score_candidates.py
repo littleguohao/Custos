@@ -4,6 +4,7 @@
 2026-07-23 重构后：分层 = 个股(技术结构 × 资金意图)矩阵，板块不封顶（只进
 score/共振/trade_style）。风控/回避（无止损/空头/sprint/派发/MACD顶背离/cz回避）仍硬封。
 """
+
 import pytest
 
 from custos.pipeline.screening import score_candidates as sc
@@ -20,18 +21,25 @@ def _mk(patterns=None, capital="weak", stop_price=10.0, code="600000", **extra):
     """
     patterns = dict(patterns or {})
     cand = {
-        "code": code, "name": "示例",
+        "code": code,
+        "name": "示例",
         "sector": "半导体/芯片/存储/封测",
         "theme_id": "semiconductor_chip_memory_packaging",
         "formula_hits": ["KDJ_J_LOW"],
         "patterns": patterns,
-        "daily_j": 10.0 if (patterns.get("j_low") or patterns.get("reversal_k_candidate")) else 55.0,
-        "stop_loss_ref": {"price": stop_price, "basis": "近10日最低价"} if stop_price else None,
+        "daily_j": 10.0
+        if (patterns.get("j_low") or patterns.get("reversal_k_candidate"))
+        else 55.0,
+        "stop_loss_ref": {"price": stop_price, "basis": "近10日最低价"}
+        if stop_price
+        else None,
         "is_holding": False,
     }
     if capital == "strong":
-        cand["b1_ignition"] = {"hit": True}                      # 资金意图 +3, 技术 +8
-        cand["volume_sustain"] = {"status": "mainline_confirmed"}  # 资金意图 +2, 技术 +0
+        cand["b1_ignition"] = {"hit": True}  # 资金意图 +3, 技术 +8
+        cand["volume_sustain"] = {
+            "status": "mainline_confirmed"
+        }  # 资金意图 +2, 技术 +0
     elif capital == "mid":
         cand["volume_sustain"] = {"status": "mainline_confirmed"}  # 资金意图 +2
     cand.update(extra)
@@ -39,9 +47,9 @@ def _mk(patterns=None, capital="weak", stop_price=10.0, code="600000", **extra):
 
 
 # 技术结构层级（纯技术、不污染资金意图轴）：
-TECH_STRONG = {"bbi_above": True, "j_low": True, "volume_contraction": True}   # 60 → 强
-TECH_MID = {"bbi_above": True, "j_low": True}                                   # 45 → 中
-TECH_WEAK: dict = {}                                                            # 0  → 弱
+TECH_STRONG = {"bbi_above": True, "j_low": True, "volume_contraction": True}  # 60 → 强
+TECH_MID = {"bbi_above": True, "j_low": True}  # 45 → 中
+TECH_WEAK: dict = {}  # 0  → 弱
 
 SECTOR_STRONG = {"state": "主升", "score": 80, "sector": "半导体/芯片/存储/封测"}
 SECTOR_MID = {"state": "震荡", "score": 50, "sector": "半导体/芯片/存储/封测"}
@@ -50,9 +58,15 @@ SECTOR_WEAK = {"state": "退潮", "score": 30, "sector": "半导体/芯片/存�
 
 # 个股共振矩阵：(技术结构, 资金意图) → bucket（与板块无关）
 GRID = [
-    (TECH_STRONG, "strong", "A"), (TECH_STRONG, "mid", "B"), (TECH_STRONG, "weak", "C"),
-    (TECH_MID, "strong", "B"), (TECH_MID, "mid", "C"), (TECH_MID, "weak", "D"),
-    (TECH_WEAK, "strong", "C"), (TECH_WEAK, "mid", "D"), (TECH_WEAK, "weak", "D"),
+    (TECH_STRONG, "strong", "A"),
+    (TECH_STRONG, "mid", "B"),
+    (TECH_STRONG, "weak", "C"),
+    (TECH_MID, "strong", "B"),
+    (TECH_MID, "mid", "C"),
+    (TECH_MID, "weak", "D"),
+    (TECH_WEAK, "strong", "C"),
+    (TECH_WEAK, "mid", "D"),
+    (TECH_WEAK, "weak", "D"),
 ]
 
 
@@ -77,28 +91,49 @@ def test_sector_does_not_cap_bucket_only_sets_trade_style():
 
 
 def test_bear_market_caps_pool_at_b_and_observe():
-    scored = sc.score_candidate(_mk(TECH_STRONG, capital="strong"), SECTOR_STRONG, "空头")
+    scored = sc.score_candidate(
+        _mk(TECH_STRONG, capital="strong"), SECTOR_STRONG, "空头"
+    )
     assert scored["bucket"] == "B"
     assert scored["next_step"] == "observe_price"
     assert scored["resonance"]["market_permission"] == "观察"
 
 
 def test_no_stop_loss_ref_cannot_enter_a():
-    scored = sc.score_candidate(_mk(TECH_STRONG, capital="strong", stop_price=None),
-                                SECTOR_STRONG, "做多")
+    scored = sc.score_candidate(
+        _mk(TECH_STRONG, capital="strong", stop_price=None), SECTOR_STRONG, "做多"
+    )
     assert scored["bucket"] == "B"
     assert "no_stop_loss_ref" in scored["risk_flags"]
 
 
 def test_contract_required_fields():
     scored = sc.score_candidate(_mk(TECH_MID, capital="mid"), SECTOR_STRONG, "做多")
-    for key in ["code", "name", "sector", "sector_heat_filter", "resonance",
-                "stock_role", "relative_strength", "score", "bucket",
-                "entry_reason", "risk_flags", "next_step", "trade_style", "capital_intent"]:
+    for key in [
+        "code",
+        "name",
+        "sector",
+        "sector_heat_filter",
+        "resonance",
+        "stock_role",
+        "relative_strength",
+        "score",
+        "bucket",
+        "entry_reason",
+        "risk_flags",
+        "next_step",
+        "trade_style",
+        "capital_intent",
+    ]:
         assert key in scored, f"缺契约字段 {key}"
     res = scored["resonance"]
-    for key in ["technical_level", "capital_intent_level", "sector_heat_level",
-                "market_permission", "resonance_level"]:
+    for key in [
+        "technical_level",
+        "capital_intent_level",
+        "sector_heat_level",
+        "market_permission",
+        "resonance_level",
+    ]:
         assert key in res
     assert scored["trade_style"] in ("波段", "波段(谨慎)", "短线(交易性)")
     assert scored["capital_intent"]["level"] in ("强", "中", "弱")
@@ -106,14 +141,18 @@ def test_contract_required_fields():
 
 
 def test_bucket_next_step_mapping():
-    scored = sc.score_candidate(_mk(TECH_STRONG, capital="strong"), SECTOR_STRONG, "做多")
+    scored = sc.score_candidate(
+        _mk(TECH_STRONG, capital="strong"), SECTOR_STRONG, "做多"
+    )
     assert scored["bucket"] == "A"
     assert scored["next_step"] == "generate_buy_plan"
 
 
 def test_score_all_missing_sector_state_partial():
     enriched = {"status": "ok", "candidates": [_mk(TECH_STRONG, capital="strong")]}
-    result = sc.score_all("2026-07-21", enriched=enriched, sector_states=[], amv_state="做多")
+    result = sc.score_all(
+        "2026-07-21", enriched=enriched, sector_states=[], amv_state="做多"
+    )
     assert result["status"] == "partial"
     assert "sector_state_missing" in result["degraded_reason"]
     # 板块缺失不再影响分层：强个股仍进 A
@@ -121,41 +160,58 @@ def test_score_all_missing_sector_state_partial():
 
 
 def test_score_all_enriched_unavailable_passthrough():
-    enriched = {"status": "unavailable", "degraded_reason": "formula_hits_unavailable:tdxw_not_running"}
-    result = sc.score_all("2026-07-21", enriched=enriched,
-                          sector_states=[SECTOR_STRONG], amv_state="做多")
+    enriched = {
+        "status": "unavailable",
+        "degraded_reason": "formula_hits_unavailable:tdxw_not_running",
+    }
+    result = sc.score_all(
+        "2026-07-21", enriched=enriched, sector_states=[SECTOR_STRONG], amv_state="做多"
+    )
     assert result["status"] == "unavailable"
     assert "tdxw_not_running" in result["degraded_reason"]
     assert result["candidates"] == []
 
 
 def test_score_all_bucket_counts_and_sort():
-    enriched = {"status": "ok", "candidates": [
-        _mk(TECH_MID, capital="mid", code="000001"),      # (中,中) → C
-        _mk(TECH_STRONG, capital="strong", code="600000"),  # (强,强) → A
-    ]}
+    enriched = {
+        "status": "ok",
+        "candidates": [
+            _mk(TECH_MID, capital="mid", code="000001"),  # (中,中) → C
+            _mk(TECH_STRONG, capital="strong", code="600000"),  # (强,强) → A
+        ],
+    }
     states = [{**SECTOR_STRONG, "theme_id": "semiconductor_chip_memory_packaging"}]
-    result = sc.score_all("2026-07-21", enriched=enriched, sector_states=states, amv_state="做多")
+    result = sc.score_all(
+        "2026-07-21", enriched=enriched, sector_states=states, amv_state="做多"
+    )
     assert result["bucket_counts"] == {"A": 1, "B": 0, "C": 1, "D": 0}
     assert result["candidates"][0]["bucket"] == "A"  # 按 bucket 优先排序
 
 
 # ---------- 资金意图强度 & trade_style 单元 ----------
 
+
 def test_capital_intent_strength_grades():
     strong = _mk(TECH_WEAK, capital="strong")  # b1_ignition(3)+mainline(2)=5
     lvl, sc_, _ = sc.capital_intent_strength(strong)
     assert lvl == "强" and sc_ >= 5
-    mid = _mk(TECH_WEAK, capital="mid")         # mainline(2)=2
+    mid = _mk(TECH_WEAK, capital="mid")  # mainline(2)=2
     assert sc.capital_intent_strength(mid)[0] == "中"
-    weak = _mk(TECH_WEAK, capital="weak")       # 0
+    weak = _mk(TECH_WEAK, capital="weak")  # 0
     assert sc.capital_intent_strength(weak)[0] == "弱"
 
 
 def test_capital_intent_ignores_distribution_negatives():
     # 派发是风控 cap 的职责，不在资金意图轴重复扣减（正向轴只看资金在进）
-    c = _mk(TECH_WEAK, capital="strong",
-            distribution={"available": True, "hits": ["top_huge_vol_bear"], "risk_level": "high"})
+    c = _mk(
+        TECH_WEAK,
+        capital="strong",
+        distribution={
+            "available": True,
+            "hits": ["top_huge_vol_bear"],
+            "risk_level": "high",
+        },
+    )
     assert sc.capital_intent_strength(c)[0] == "强"
 
 
@@ -173,34 +229,70 @@ def test_strong_stock_in_weak_sector_reaches_a_short_term():
     assert scored["trade_style"] == "短线(交易性)"
 
 
-_FIN_YOU = {"available": True, "dixi_proxy": {"real_earnings_cashflow": True, "roe_positive": True,
-                                              "net_profit_positive": True, "op_cashflow_positive": True}}
+_FIN_YOU = {
+    "available": True,
+    "dixi_proxy": {
+        "real_earnings_cashflow": True,
+        "roe_positive": True,
+        "net_profit_positive": True,
+        "op_cashflow_positive": True,
+    },
+}
 
 
 def test_fundamental_quality_tiers():
     assert sc.fundamental_quality(None)["tier"] == "未知"
     assert sc.fundamental_quality({"available": False})["available"] is False
-    assert sc.fundamental_quality(_FIN_YOU)["tier"] == "优" and sc.fundamental_quality(_FIN_YOU)["sanwu"] is False
-    zhong = {"available": True, "dixi_proxy": {"net_profit_positive": True, "op_cashflow_positive": None,
-                                               "real_earnings_cashflow": False, "roe_positive": False}}
-    assert sc.fundamental_quality(zhong)["tier"] == "中" and sc.fundamental_quality(zhong)["sanwu"] is False
-    sanwu = {"available": True, "dixi_proxy": {"net_profit_positive": False, "op_cashflow_positive": False,
-                                               "real_earnings_cashflow": False, "roe_positive": False}}
+    assert (
+        sc.fundamental_quality(_FIN_YOU)["tier"] == "优"
+        and sc.fundamental_quality(_FIN_YOU)["sanwu"] is False
+    )
+    zhong = {
+        "available": True,
+        "dixi_proxy": {
+            "net_profit_positive": True,
+            "op_cashflow_positive": None,
+            "real_earnings_cashflow": False,
+            "roe_positive": False,
+        },
+    }
+    assert (
+        sc.fundamental_quality(zhong)["tier"] == "中"
+        and sc.fundamental_quality(zhong)["sanwu"] is False
+    )
+    sanwu = {
+        "available": True,
+        "dixi_proxy": {
+            "net_profit_positive": False,
+            "op_cashflow_positive": False,
+            "real_earnings_cashflow": False,
+            "roe_positive": False,
+        },
+    }
     r = sc.fundamental_quality(sanwu)
-    assert r["tier"] == "差" and r["sanwu"] is True    # 净利非正+现金流确认负 → 三无
+    assert r["tier"] == "差" and r["sanwu"] is True  # 净利非正+现金流确认负 → 三无
 
 
 def test_resonance_four_leg():
-    cand = _mk(TECH_STRONG, capital="strong",
-               financials=_FIN_YOU, sector_phase={"favorable": True, "available": True})
+    cand = _mk(
+        TECH_STRONG,
+        capital="strong",
+        financials=_FIN_YOU,
+        sector_phase={"favorable": True, "available": True},
+    )
     e = sc.score_candidate(cand, SECTOR_STRONG, "做多")
     r = e["resonance_4leg"]
     assert r["market"] and r["sector"] and r["fundamental"] and r["technical"]
-    assert r["aligned"] == 4 and r["label"] == "四面共振" and r["bull_candidate"] is True
+    assert (
+        r["aligned"] == 4 and r["label"] == "四面共振" and r["bull_candidate"] is True
+    )
     assert e["fundamental_quality"]["tier"] == "优"
     # 空头 → market 腿灭 → 非四面共振、非牛股候选(hint 不改分层由既有测试覆盖)
     e2 = sc.score_candidate(cand, SECTOR_STRONG, "空头")
-    assert e2["resonance_4leg"]["market"] is False and e2["resonance_4leg"]["bull_candidate"] is False
+    assert (
+        e2["resonance_4leg"]["market"] is False
+        and e2["resonance_4leg"]["bull_candidate"] is False
+    )
 
 
 def test_stock_pool_json_carries_audit_block(tmp_path, monkeypatch):
@@ -217,14 +309,19 @@ def test_stock_pool_json_carries_audit_block(tmp_path, monkeypatch):
     monkeypatch.setattr(sc, "REGISTRY_PATH", tmp_path / "registry.json")
     (tmp_path / "screening").mkdir()
     (tmp_path / "screening" / "2026-08-07_candidates_enriched.json").write_text(
-        json.dumps({"status": "ok", "candidates": [], "excluded": []}), encoding="utf-8")
+        json.dumps({"status": "ok", "candidates": [], "excluded": []}), encoding="utf-8"
+    )
     monkeypatch.setattr(sys, "argv", ["x", "--date", "2026-08-07"])
     assert sc.main() == 0
-    pool = json.loads((tmp_path / "stock_pool" / "2026-08-07_stock_pool.json").read_text(
-        encoding="utf-8"))
+    pool = json.loads(
+        (tmp_path / "stock_pool" / "2026-08-07_stock_pool.json").read_text(
+            encoding="utf-8"
+        )
+    )
     audit = pool["audit"]
     assert audit["report_id"].startswith("2026-08-07_screening_")
     assert audit["strategy_version"] and audit["data_as_of"] and audit["inputs"]
     from custos.core.contracts import check
+
     result = check("stock_pool", pool)
     assert result["valid"], result["errors"]

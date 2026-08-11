@@ -10,6 +10,7 @@ This module wraps mootdx (online + offline) and provides stable helpers for:
 
 Replaces the previous tqcenter/vipdoc binary parsing with community-maintained mootdx.
 """
+
 from __future__ import annotations
 
 import json
@@ -66,6 +67,7 @@ def _get_reader():
     global _reader
     if _reader is None:
         from mootdx.reader import Reader
+
         _assert_tdx_root()
         _reader = Reader.factory(market="std", tdxdir=str(TDX_ROOT))
     return _reader
@@ -84,8 +86,10 @@ def _get_client(force_new: bool = False):
     """
     global _client, _client_created_at
     now = time.time()
-    too_old = (_client_created_at is not None
-               and (now - _client_created_at) > CLIENT_MAX_AGE_SEC)
+    too_old = (
+        _client_created_at is not None
+        and (now - _client_created_at) > CLIENT_MAX_AGE_SEC
+    )
     if force_new or _client is None or too_old:
         if _client is not None:
             try:
@@ -93,6 +97,7 @@ def _get_client(force_new: bool = False):
             except Exception:  # noqa: BLE001, S110
                 pass
         from mootdx.quotes import Quotes
+
         _client = Quotes.factory(market="std", quiet=True)
         _client_created_at = now
     return _client
@@ -110,8 +115,11 @@ def _with_client_retry(fn, *, tries: int = 2, what: str = "tdx"):
         except Exception as e:  # noqa: BLE001
             last = e
             if i + 1 < tries:
-                print(f"[WARN] {what} 第 {i + 1} 次失败（{type(e).__name__}: {e}），"
-                      f"重建连接重试", file=sys.stderr)
+                print(
+                    f"[WARN] {what} 第 {i + 1} 次失败（{type(e).__name__}: {e}），"
+                    f"重建连接重试",
+                    file=sys.stderr,
+                )
     raise LocalTdxError(f"{what} 连续 {tries} 次失败: {last}") from last
 
 
@@ -140,11 +148,13 @@ def _assert_tdx_root(root: Optional[Path] = None) -> Path:
     if not root.is_dir():
         raise LocalTdxError(
             f"TDX_ROOT 无效: {root} 不存在。默认值 E:\\new_tdx64 只是 Windows 占位，"
-            f"非 Windows 环境必须设置环境变量 TDX_ROOT 指向通达信安装目录")
+            f"非 Windows 环境必须设置环境变量 TDX_ROOT 指向通达信安装目录"
+        )
     if not (root / "vipdoc").is_dir():
         raise LocalTdxError(
             f"TDX_ROOT={root} 下没有 vipdoc 目录，不是有效的通达信安装目录"
-            f"（本地日线全部读不到，会表现为『全市场无数据』）")
+            f"（本地日线全部读不到，会表现为『全市场无数据』）"
+        )
     _tdx_root_verified.add(key)
     return root
 
@@ -196,6 +206,7 @@ def _is_bj_code(code: str) -> bool:
 def _read_bj_vipdoc_daily(code: str) -> "pd.DataFrame":
     """Read BJ vipdoc .day file directly (mootdx Reader misroutes 920xxx to SH)."""
     import struct
+
     raw = _strip_suffix(code)
     path = TDX_ROOT / "vipdoc" / "bj" / "lday" / f"bj{raw}.day"
     if not path.exists():
@@ -211,22 +222,29 @@ def _read_bj_vipdoc_daily(code: str) -> "pd.DataFrame":
             date_int, o, h, l, c, amt, vol, _ = struct.unpack("<IIIIIfII", buf[:32])
             if date_int == 0:
                 continue
-            dt = pd.Timestamp(year=date_int // 10000, month=(date_int // 100) % 100, day=date_int % 100)
-            records.append({
-                "date": dt,
-                "open": o / 100.0,
-                "high": h / 100.0,
-                "low": l / 100.0,
-                "close": c / 100.0,
-                "amount": amt,
-                "volume": vol,
-            })
+            dt = pd.Timestamp(
+                year=date_int // 10000,
+                month=(date_int // 100) % 100,
+                day=date_int % 100,
+            )
+            records.append(
+                {
+                    "date": dt,
+                    "open": o / 100.0,
+                    "high": h / 100.0,
+                    "low": l / 100.0,
+                    "close": c / 100.0,
+                    "amount": amt,
+                    "volume": vol,
+                }
+            )
     if not records:
         return _empty_with_reason(f"empty_file: {path}")
     return pd.DataFrame(records)
 
 
 # ========== K-line data ==========
+
 
 def read_vipdoc_daily(code: str, strict: bool = False) -> pd.DataFrame:
     """Read local vipdoc daily K-line via mootdx Reader.
@@ -247,11 +265,24 @@ def read_vipdoc_daily(code: str, strict: bool = False) -> pd.DataFrame:
         if df.empty:
             if strict:
                 raise LocalTdxError(
-                    f"read_vipdoc_daily({code}) 无数据: {df.attrs.get('missing_reason')}")
+                    f"read_vipdoc_daily({code}) 无数据: {df.attrs.get('missing_reason')}"
+                )
             return df
         df["code"] = normalize_code(code)
         df["source"] = "vipdoc_bj_direct"
-        return df[["date", "code", "open", "high", "low", "close", "amount", "volume", "source"]]
+        return df[
+            [
+                "date",
+                "code",
+                "open",
+                "high",
+                "low",
+                "close",
+                "amount",
+                "volume",
+                "source",
+            ]
+        ]
 
     reader = _get_reader()
     raw = _strip_suffix(code)
@@ -268,7 +299,9 @@ def read_vipdoc_daily(code: str, strict: bool = False) -> pd.DataFrame:
     df["source"] = "mootdx_reader"
     df.index.name = "date"
     df = df.reset_index()
-    return df[["date", "code", "open", "high", "low", "close", "amount", "volume", "source"]]
+    return df[
+        ["date", "code", "open", "high", "low", "close", "amount", "volume", "source"]
+    ]
 
 
 def read_e_odata_daily(code: str) -> pd.DataFrame:
@@ -280,14 +313,37 @@ def read_e_odata_daily(code: str) -> pd.DataFrame:
     df = pd.read_csv(path)
     if df.empty:
         return pd.DataFrame()
-    rename = {"Date": "date", "Code": "code", "Open": "open", "High": "high",
-              "Low": "low", "Close": "close", "Volume": "volume", "Amount": "amount"}
+    rename = {
+        "Date": "date",
+        "Code": "code",
+        "Open": "open",
+        "High": "high",
+        "Low": "low",
+        "Close": "close",
+        "Volume": "volume",
+        "Amount": "amount",
+    }
     df = df.rename(columns=rename)
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df["code"] = tcode
     df["source"] = "e_odata"
-    cols = ["date", "code", "open", "high", "low", "close", "volume", "amount", "source"]
-    return df[[c for c in cols if c in df.columns]].dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
+    cols = [
+        "date",
+        "code",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "amount",
+        "source",
+    ]
+    return (
+        df[[c for c in cols if c in df.columns]]
+        .dropna(subset=["date"])
+        .sort_values("date")
+        .reset_index(drop=True)
+    )
 
 
 def _online_quotes_enabled() -> bool:
@@ -310,14 +366,23 @@ def _online_quotes_enabled() -> bool:
     这条标记是「文档说不可用、代码却还在花 13 秒调它」的解 —— 本仓库反复吃过
     「规范只写在文档里」的亏。
     """
-    return os.environ.get("TDX_ONLINE_QUOTES", "").strip() in ("1", "true", "TRUE", "yes")
+    return os.environ.get("TDX_ONLINE_QUOTES", "").strip() in (
+        "1",
+        "true",
+        "TRUE",
+        "yes",
+    )
 
 
-_ONLINE_DISABLED_MSG = ("在线 TDX 行情已标记为不可用（实测 bars/index 约 10~13s 返回空）；"
-                        "设 TDX_ONLINE_QUOTES=1 可重新启用")
+_ONLINE_DISABLED_MSG = (
+    "在线 TDX 行情已标记为不可用（实测 bars/index 约 10~13s 返回空）；"
+    "设 TDX_ONLINE_QUOTES=1 可重新启用"
+)
 
 
-def get_online_bars(code: str, frequency: int = 9, offset: int = 120, adjust: str = "") -> pd.DataFrame:
+def get_online_bars(
+    code: str, frequency: int = 9, offset: int = 120, adjust: str = ""
+) -> pd.DataFrame:
     """Fetch K-line from mootdx online server.
 
     frequency: 0=5m, 1=15m, 2=30m, 3=1h, 9=day, 5=week, 6=month
@@ -326,7 +391,10 @@ def get_online_bars(code: str, frequency: int = 9, offset: int = 120, adjust: st
     ⚠️ 默认被 `_online_quotes_enabled()` 短路（返回空 DataFrame，**不再等 13 秒**）。
     """
     if not _online_quotes_enabled():
-        print(f"[WARN] get_online_bars({code}) 跳过：{_ONLINE_DISABLED_MSG}", file=sys.stderr)
+        print(
+            f"[WARN] get_online_bars({code}) 跳过：{_ONLINE_DISABLED_MSG}",
+            file=sys.stderr,
+        )
         return pd.DataFrame()
     client = _get_client()
     raw = _strip_suffix(code)
@@ -341,13 +409,15 @@ def get_online_bars(code: str, frequency: int = 9, offset: int = 120, adjust: st
         return pd.DataFrame()
     df = df.copy()
     df["code"] = normalize_code(code)
-    df["source"] = f"mootdx_online{'_'+adjust if adjust else ''}"
+    df["source"] = f"mootdx_online{'_' + adjust if adjust else ''}"
     df.index.name = "date"
     df = df.reset_index()
     return df
 
 
-def get_online_index(code: str, market: int = 1, frequency: int = 9, offset: int = 120) -> pd.DataFrame:
+def get_online_index(
+    code: str, market: int = 1, frequency: int = 9, offset: int = 120
+) -> pd.DataFrame:
     """Fetch index K-line (including 880 series) from mootdx online server.
 
     market: 0=SZ, 1=SH (880 series use SH)
@@ -355,12 +425,17 @@ def get_online_index(code: str, market: int = 1, frequency: int = 9, offset: int
     ⚠️ 默认被标记为不可用（实测 9992ms 返回空），见 `_online_quotes_enabled`。
     """
     if not _online_quotes_enabled():
-        print(f"[WARN] get_online_index({code}) 跳过：{_ONLINE_DISABLED_MSG}", file=sys.stderr)
+        print(
+            f"[WARN] get_online_index({code}) 跳过：{_ONLINE_DISABLED_MSG}",
+            file=sys.stderr,
+        )
         return pd.DataFrame()
     client = _get_client()
     raw = _strip_suffix(code)
     try:
-        df = client.index(frequency=frequency, market=market, symbol=raw, start=0, offset=offset)
+        df = client.index(
+            frequency=frequency, market=market, symbol=raw, start=0, offset=offset
+        )
     except Exception as e:
         raise LocalTdxError(f"online index({raw}) failed: {e}")
     if df is None or df.empty:
@@ -379,6 +454,7 @@ def get_adjusted_daily(code: str, year: str = "", factor: str = "01") -> pd.Data
     factor: "00"=不复权, "01"=前复权, "02"=后复权
     """
     from mootdx.contrib.adjust import get_adjust_year
+
     raw = _strip_suffix(code)
     if not year:
         year = str(cn_today().year)
@@ -397,6 +473,7 @@ def get_adjusted_daily(code: str, year: str = "", factor: str = "01") -> pd.Data
 
 
 # ========== Real-time quotes ==========
+
 
 def _clean_price(v: Any) -> Optional[float]:
     """行情价字段清洗：非数 / NaN / inf / 非正价一律 → None。
@@ -422,7 +499,7 @@ def _snapshot_fields(row: Any) -> dict[str, Any]:
         return {}
     out: dict[str, Any] = {"price": price}
     for key in ("last_close", "open", "high", "low"):
-        out[key] = _clean_price(row.get(key))     # 无效给 None，绝不给 0.0
+        out[key] = _clean_price(row.get(key))  # 无效给 None，绝不给 0.0
     return out
 
 
@@ -444,8 +521,10 @@ def get_snapshot(code: str) -> dict[str, Any]:
         return {}
     fields = _snapshot_fields(df.iloc[0])
     if not fields:
-        print(f"[WARN] quotes({raw}) 无有效价（停牌/字段缺失），返回空快照而非 0 价",
-              file=sys.stderr)
+        print(
+            f"[WARN] quotes({raw}) 无有效价（停牌/字段缺失），返回空快照而非 0 价",
+            file=sys.stderr,
+        )
         return {}
     return {"code": raw, **fields}
 
@@ -479,8 +558,11 @@ def get_snapshots(codes: Iterable[str]) -> dict[str, dict[str, Any]]:
             continue
         result[code] = fields
     if dropped:
-        print(f"[WARN] quotes batch 丢弃 {len(dropped)} 只无有效价的代码: "
-              f"{','.join(dropped[:10])}", file=sys.stderr)
+        print(
+            f"[WARN] quotes batch 丢弃 {len(dropped)} 只无有效价的代码: "
+            f"{','.join(dropped[:10])}",
+            file=sys.stderr,
+        )
     return result
 
 
@@ -495,10 +577,13 @@ AFFAIR_CACHE_DIR = CACHE_DIR / "tdx_affair"
 
 def latest_report_period(files: list[dict]) -> str:
     """从 Affair.files() 里挑最新**有内容**的 gpcw 期号;挑不出返回空串。"""
-    gpcw = sorted([f for f in (files or []) if str(f.get("filename", "")).startswith("gpcw")],
-                  key=lambda x: x["filename"], reverse=True)
+    gpcw = sorted(
+        [f for f in (files or []) if str(f.get("filename", "")).startswith("gpcw")],
+        key=lambda x: x["filename"],
+        reverse=True,
+    )
     for f in gpcw:
-        if f.get("filesize", 0) > 100000:      # 跳过尚未披露的空壳未来报告
+        if f.get("filesize", 0) > 100000:  # 跳过尚未披露的空壳未来报告
             return str(f["filename"]).replace("gpcw", "").replace(".zip", "")
     return ""
 
@@ -511,6 +596,7 @@ def get_financial_data(report_period: str = "") -> pd.DataFrame:
     降级。此前期号为空会去 fetch `gpcw.zip`，fetch/parse 的异常直接冒泡打断整条链。
     """
     from mootdx.affair import Affair
+
     if not report_period:
         try:
             report_period = latest_report_period(Affair.files())
@@ -539,6 +625,7 @@ def get_financial_data(report_period: str = "") -> pd.DataFrame:
 
 # ========== Sector data ==========
 
+
 def get_sector_list() -> list[str]:
     """Get sector names from local TDX block files."""
     reader = _get_reader()
@@ -557,7 +644,11 @@ def get_stock_list_in_sector(sector: str, block_type: int = 0) -> list[str]:
     try:
         blocks = reader.block(symbol="block_zs", group=False)
         if blocks is not None and not blocks.empty:
-            mask = blocks["name"] == sector if "name" in blocks.columns else pd.Series([False] * len(blocks))
+            mask = (
+                blocks["name"] == sector
+                if "name" in blocks.columns
+                else pd.Series([False] * len(blocks))
+            )
             subset = blocks[mask]
             return subset["code"].tolist() if "code" in subset.columns else []
     except Exception as e:
@@ -572,8 +663,21 @@ def _is_ashare_prefix(code6: str) -> bool:
     这里只有代码没有目录，所以两套前缀合并判断。BJ 段（43/83/87/88/920）不在这里，
     因为 `client.stocks()` 只返回沪深（TDX 服务器不给北交所）。
     """
-    return code6.startswith(("600", "601", "603", "605", "688",      # 沪 A
-                             "000", "001", "002", "003", "300", "301"))  # 深 A
+    return code6.startswith(
+        (
+            "600",
+            "601",
+            "603",
+            "605",
+            "688",  # 沪 A
+            "000",
+            "001",
+            "002",
+            "003",
+            "300",
+            "301",
+        )
+    )  # 深 A
 
 
 def get_stock_list(pool_type: str = "5", ashare_only: bool = True) -> list[str]:
@@ -599,21 +703,28 @@ def get_stock_list(pool_type: str = "5", ashare_only: bool = True) -> list[str]:
     会强制重建再试，而不是拿死连接把两市都拖挂。单市连续失败仍只 WARN 降级、不抛。
     """
     from mootdx.consts import MARKET_SH, MARKET_SZ
+
     result = []
     for mkt in [MARKET_SH, MARKET_SZ]:
         try:
             stocks = _with_client_retry(
-                lambda c, m=mkt: c.stocks(market=m), what=f"stocks(market={mkt})")
+                lambda c, m=mkt: c.stocks(market=m), what=f"stocks(market={mkt})"
+            )
             if stocks is not None and not stocks.empty:
-                result.extend(stocks["code"].tolist() if "code" in stocks.columns else [])
+                result.extend(
+                    stocks["code"].tolist() if "code" in stocks.columns else []
+                )
         except Exception as e:  # noqa: BLE001
             print(f"[WARN] get_stock_list market={mkt} failed: {e}", file=sys.stderr)
     if not ashare_only:
         return result
     kept = [c for c in result if _is_ashare_prefix(_strip_suffix(str(c)))]
     if result:
-        print(f"[INFO] get_stock_list: {len(result)} 项 → A 股个股 {len(kept)} 只"
-              f"（滤掉 {len(result) - len(kept)} 项指数/ETF/债券）", file=sys.stderr)
+        print(
+            f"[INFO] get_stock_list: {len(result)} 项 → A 股个股 {len(kept)} 只"
+            f"（滤掉 {len(result) - len(kept)} 项指数/ETF/债券）",
+            file=sys.stderr,
+        )
     return kept
 
 
@@ -634,19 +745,27 @@ def get_stock_name_map(pool_type: str = "5") -> dict[str, str]:
     返回的 name 会剥掉通达信的 `\\x00` 填充字节（原始数据形如 `创业板\\x00\\x00`）。
     """
     from mootdx.consts import MARKET_SH, MARKET_SZ
+
     result: dict[str, str] = {}
     for mkt in [MARKET_SH, MARKET_SZ]:
         try:
             stocks = _with_client_retry(
-                lambda c, m=mkt: c.stocks(market=m), what=f"stocks(market={mkt})")
+                lambda c, m=mkt: c.stocks(market=m), what=f"stocks(market={mkt})"
+            )
         except Exception as e:  # noqa: BLE001
-            print(f"[WARN] get_stock_name_map market={mkt} failed: {e}", file=sys.stderr)
+            print(
+                f"[WARN] get_stock_name_map market={mkt} failed: {e}", file=sys.stderr
+            )
             continue
         if stocks is None or stocks.empty or "code" not in stocks.columns:
             continue
         codes = stocks["code"].astype(str).str.split(".").str[0].str.zfill(6)
-        names = (stocks.get("name", pd.Series(dtype=str)).astype(str)
-                 .str.replace("\x00", "", regex=False).str.strip())
+        names = (
+            stocks.get("name", pd.Series(dtype=str))
+            .astype(str)
+            .str.replace("\x00", "", regex=False)
+            .str.strip()
+        )
         for code6, name in zip(codes, names):
             if code6 and name:
                 result[code6] = name
@@ -654,6 +773,7 @@ def get_stock_name_map(pool_type: str = "5") -> dict[str, str]:
 
 
 # ========== JSON/CSV helpers ==========
+
 
 def _is_ashare_stock_file(market: str, code6: str) -> bool:
     """按 vipdoc 文件的市场目录 + 6位代码判定是否 A 股个股（排除指数/ETF/债券）。
@@ -671,7 +791,9 @@ def _is_ashare_stock_file(market: str, code6: str) -> bool:
     return False
 
 
-def list_local_vipdoc_codes(tdx_root: Optional["Path"] = None, ashare_only: bool = True) -> list[str]:
+def list_local_vipdoc_codes(
+    tdx_root: Optional["Path"] = None, ashare_only: bool = True
+) -> list[str]:
     """枚举本地 vipdoc 实有的日线文件 → 6 位代码列表（回测 universe 首选）。
 
     直接读磁盘上有什么（TDX_ROOT/vipdoc/{sh,sz,bj}/lday/{prefix}######.day），
@@ -694,7 +816,7 @@ def list_local_vipdoc_codes(tdx_root: Optional["Path"] = None, ashare_only: bool
             name = p.stem
             if not name.startswith(mkt):
                 continue
-            code6 = name[len(mkt):]
+            code6 = name[len(mkt) :]
             if len(code6) != 6 or not code6.isdigit():
                 continue
             if ashare_only and not _is_ashare_stock_file(mkt, code6):
@@ -713,9 +835,13 @@ def save_csv(path: Path, df: pd.DataFrame) -> None:
     df.to_csv(path, index=False, encoding="utf-8-sig")
 
 
-def get_ohlcv_table(code: str, count: int = 260, prefer: str = "vipdoc",
-                    expect_last_date: str | None = None,
-                    adjust: str = "qfq") -> pd.DataFrame:
+def get_ohlcv_table(
+    code: str,
+    count: int = 260,
+    prefer: str = "vipdoc",
+    expect_last_date: str | None = None,
+    adjust: str = "qfq",
+) -> pd.DataFrame:
     """Unified OHLCV reader: try local vipdoc first, fallback to online bars.
 
     ``expect_last_date`` (YYYY-MM-DD) turns on freshness checking. The local
@@ -749,14 +875,20 @@ def get_ohlcv_table(code: str, count: int = 260, prefer: str = "vipdoc",
         try:
             df = read_vipdoc_daily(code)
         except Exception as e:
-            print(f"[WARN] read_vipdoc_daily({code}) failed, fallback to online: {e}", file=sys.stderr)
+            print(
+                f"[WARN] read_vipdoc_daily({code}) failed, fallback to online: {e}",
+                file=sys.stderr,
+            )
             df = pd.DataFrame()
     if df.empty:
         # 空 DataFrame 的具体原因（TDX_ROOT 配错已在 read_vipdoc_daily 里 raise，
         # 这里剩下的是单只票的 file_not_found / reader_empty）留痕再回退在线源
         reason = df.attrs.get("missing_reason") if hasattr(df, "attrs") else None
         if reason:
-            print(f"[WARN] {code} 本地 vipdoc 无数据（{reason}），回退在线源", file=sys.stderr)
+            print(
+                f"[WARN] {code} 本地 vipdoc 无数据（{reason}），回退在线源",
+                file=sys.stderr,
+            )
         try:
             df = get_online_bars(code, offset=count)
         except Exception as e:
@@ -768,11 +900,19 @@ def get_ohlcv_table(code: str, count: int = 260, prefer: str = "vipdoc",
         try:
             online = get_online_bars(code, offset=count)
         except Exception as e:
-            print(f"[WARN] get_online_bars({code}) failed while refreshing stale local: {e}",
-                  file=sys.stderr)
+            print(
+                f"[WARN] get_online_bars({code}) failed while refreshing stale local: {e}",
+                file=sys.stderr,
+            )
             online = pd.DataFrame()
-        df = online if (not online.empty
-                        and _last_bar_date(online) > _last_bar_date(stale_local)) else stale_local
+        df = (
+            online
+            if (
+                not online.empty
+                and _last_bar_date(online) > _last_bar_date(stale_local)
+            )
+            else stale_local
+        )
     if not df.empty and len(df) > count:
         df = df.tail(count).reset_index(drop=True)
     if expect_last_date and not df.empty:
@@ -781,16 +921,19 @@ def get_ohlcv_table(code: str, count: int = 260, prefer: str = "vipdoc",
         df.attrs["expected"] = expect_last_date
         df.attrs["stale"] = last < expect_last_date
         if df.attrs["stale"]:
-            print(f"[WARN] {code} 数据陈旧: 末根 K 线 {last} < 期望 {expect_last_date}",
-                  file=sys.stderr)
+            print(
+                f"[WARN] {code} 数据陈旧: 末根 K 线 {last} < 期望 {expect_last_date}",
+                file=sys.stderr,
+            )
     if adjust == "qfq" and not df.empty:
         # owner 2026-08-04 拍板：全链统一前复权。未复权数据会把除权跳空当成真实暴跌
         # ⇒ 假止损、假 J<13 信号、假跌停（详见 research/R14_meta_data_foundation.md）。
         # 权息取不到时按未复权返回并在 attrs 留痕（不 raise：一只票的权息拿不到
         # 不该让整条 18:00 选股链停摆），下游可查 attrs["adjust"] 判断。
-        from custos.core.code_utils import is_index                      # noqa: PLC0415
+        from custos.core.code_utils import is_index  # noqa: PLC0415
+
         if is_index(code):
-            df.attrs["adjust"] = "n/a-index"                 # 指数不除权，无需复权
+            df.attrs["adjust"] = "n/a-index"  # 指数不除权，无需复权
         else:
             try:
                 # ⚠️ 包内优先、脚本回退（与 fetch_market_cap.build_from_tdx 同一模式）：
@@ -798,8 +941,9 @@ def get_ohlcv_table(code: str, count: int = 260, prefer: str = "vipdoc",
                 # 包式绝对导入：脚本与包两种模式下都是同一份 adjust_factors
                 # 模块对象（custos 可编辑安装），monkeypatch 与异常类对得上。
                 from custos.datasource.local_tdx.adjust_factors import qfq_table  # noqa: PLC0415
+
                 df = qfq_table(code, df, strict=False)
-            except Exception as e:                          # noqa: BLE001
+            except Exception as e:  # noqa: BLE001
                 print(f"[WARN] {code} 前复权失败，按未复权使用: {e}", file=sys.stderr)
                 df.attrs["adjust"] = "none"
                 df.attrs["adjust_error"] = str(e)
@@ -818,14 +962,21 @@ def _last_bar_date(df: pd.DataFrame) -> str:
 
 
 def get_market_data(*args, **kwargs):
-    raise LocalTdxError("get_market_data is deprecated, use read_vipdoc_daily or get_online_bars")
+    raise LocalTdxError(
+        "get_market_data is deprecated, use read_vipdoc_daily or get_online_bars"
+    )
 
 
 def main() -> None:
     import argparse
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--code", default="600150")
-    ap.add_argument("--mode", choices=["daily", "online", "index", "adjust", "finance"], default="daily")
+    ap.add_argument(
+        "--mode",
+        choices=["daily", "online", "index", "adjust", "finance"],
+        default="daily",
+    )
     ap.add_argument("--offset", type=int, default=10)
     args = ap.parse_args()
     if args.mode == "daily":

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """market_timing package — re-export public API from technical_monitor.py."""
+
 from custos.pipeline.market_timing.technical_monitor import (
     n_structure_state,
     price_volume_state,
@@ -14,7 +15,8 @@ from custos.pipeline.market_timing.technical_monitor import (
     slope,
     bbi_state,
     trend_state,
-    descending_n_structure_state)
+    descending_n_structure_state,
+)
 
 __all__ = [
     "n_structure_state",

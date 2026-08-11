@@ -31,6 +31,7 @@
 
 数量是整数股，float 对 2^53 内整数精确，**数量不设容差** —— 有差就是真有差。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -42,15 +43,21 @@ import pandas as pd
 
 
 from custos.core.paths import cn_now, QUALITY_DIR  # noqa: E402
-from custos.core.code_utils import clean_code, finite                          # noqa: E402
+from custos.core.code_utils import clean_code, finite  # noqa: E402
 
 
-from custos.core.trades.incremental_ledger import (LEDGER, POS, TRADE_CATEGORIES,     # noqa: E402
-                                compute_positions, norm)
+from custos.core.trades.incremental_ledger import (
+    LEDGER,
+    POS,
+    TRADE_CATEGORIES,  # noqa: E402
+    compute_positions,
+    norm,
+)
 
 
-def replay_ledger(ledger_path: Path | None = None,
-                  baseline: list[dict] | None = None) -> dict:
+def replay_ledger(
+    ledger_path: Path | None = None, baseline: list[dict] | None = None
+) -> dict:
     """全量回放台账得到应有持仓。
 
     返回 ``{"ok": bool, "positions": [...], "error": str|None, "trade_rows": int}``。
@@ -62,55 +69,99 @@ def replay_ledger(ledger_path: Path | None = None,
     #    见 governance/data/DATA_SOURCE_PRINCIPLE.md「模块级常量 + 运行时替换 = 陷阱」变体②。
     ledger_path = ledger_path or LEDGER
     if not ledger_path.exists():
-        return {"ok": False, "positions": [], "error": "ledger_missing", "trade_rows": 0}
+        return {
+            "ok": False,
+            "positions": [],
+            "error": "ledger_missing",
+            "trade_rows": 0,
+        }
     df = pd.read_csv(ledger_path, dtype={"代码": str})
     trades = df[df["交易类别"].isin(TRADE_CATEGORIES)].copy() if len(df) else df
     if not len(trades):
-        return {"ok": True, "positions": list(baseline or []), "error": None, "trade_rows": 0}
+        return {
+            "ok": True,
+            "positions": list(baseline or []),
+            "error": None,
+            "trade_rows": 0,
+        }
     trades = norm(trades)
     # 回放必须按成交顺序：先卖后买的顺序会把合法卖出误判成超卖
     trades = trades.sort_values(["成交日期", "成交时间"], kind="stable")
     try:
         pos = compute_positions(trades, list(baseline or []))
-    except ValueError as e:                       # 超卖 = 诊断结论，不是故障
-        return {"ok": False, "positions": [], "error": f"replay_oversell: {e}",
-                "trade_rows": len(trades)}
+    except ValueError as e:  # 超卖 = 诊断结论，不是故障
+        return {
+            "ok": False,
+            "positions": [],
+            "error": f"replay_oversell: {e}",
+            "trade_rows": len(trades),
+        }
     return {"ok": True, "positions": pos, "error": None, "trade_rows": len(trades)}
 
 
-def diff_positions(replayed: list[dict], actual: list[dict], *,
-                   cost_tol: float = 1e-6) -> list[dict]:
+def diff_positions(
+    replayed: list[dict], actual: list[dict], *, cost_tol: float = 1e-6
+) -> list[dict]:
     """逐代码比对数量与单位成本。数量**不设容差**（整数股，float 精确）。"""
+
     def index(rows):
         return {clean_code(r.get("代码")): r for r in rows}
 
     a, b = index(replayed), index(actual)
     out = []
     for code in sorted(set(a) | set(b)):
-        rq, aq = finite(a.get(code, {}).get("持有数量")), finite(b.get(code, {}).get("持有数量"))
-        rc, ac = finite(a.get(code, {}).get("单位成本")), finite(b.get(code, {}).get("单位成本"))
+        rq, aq = (
+            finite(a.get(code, {}).get("持有数量")),
+            finite(b.get(code, {}).get("持有数量")),
+        )
+        rc, ac = (
+            finite(a.get(code, {}).get("单位成本")),
+            finite(b.get(code, {}).get("单位成本")),
+        )
         qty_diff = rq - aq
         base = max(abs(rc), abs(ac), 1e-9)
         cost_rel = abs(rc - ac) / base
         if qty_diff or cost_rel > cost_tol:
-            out.append({"code": code,
-                        "replay_qty": rq, "actual_qty": aq, "qty_diff": qty_diff,
-                        "replay_cost": round(rc, 6), "actual_cost": round(ac, 6),
-                        "cost_rel_diff": round(cost_rel, 9),
-                        "kind": ("only_in_replay" if code not in b else
-                                 "only_in_actual" if code not in a else
-                                 "qty_mismatch" if qty_diff else "cost_mismatch")})
+            out.append(
+                {
+                    "code": code,
+                    "replay_qty": rq,
+                    "actual_qty": aq,
+                    "qty_diff": qty_diff,
+                    "replay_cost": round(rc, 6),
+                    "actual_cost": round(ac, 6),
+                    "cost_rel_diff": round(cost_rel, 9),
+                    "kind": (
+                        "only_in_replay"
+                        if code not in b
+                        else "only_in_actual"
+                        if code not in a
+                        else "qty_mismatch"
+                        if qty_diff
+                        else "cost_mismatch"
+                    ),
+                }
+            )
     return out
 
 
-def reconcile(ledger_path: Path | None = None, positions_path: Path | None = None,
-              baseline: list[dict] | None = None, cost_tol: float = 1e-6) -> dict:
-    ledger_path = ledger_path or LEDGER          # 同上：调用时解析
+def reconcile(
+    ledger_path: Path | None = None,
+    positions_path: Path | None = None,
+    baseline: list[dict] | None = None,
+    cost_tol: float = 1e-6,
+) -> dict:
+    ledger_path = ledger_path or LEDGER  # 同上：调用时解析
     positions_path = positions_path or POS
     rep = replay_ledger(ledger_path, baseline)
-    actual = json.loads(positions_path.read_text(encoding="utf-8")) \
-        if positions_path.exists() else []
-    diffs = diff_positions(rep["positions"], actual, cost_tol=cost_tol) if rep["ok"] else []
+    actual = (
+        json.loads(positions_path.read_text(encoding="utf-8"))
+        if positions_path.exists()
+        else []
+    )
+    diffs = (
+        diff_positions(rep["positions"], actual, cost_tol=cost_tol) if rep["ok"] else []
+    )
     qty_mismatch = [d for d in diffs if d["qty_diff"]]
     return {
         "checked_at": cn_now().isoformat(timespec="seconds"),
@@ -126,10 +177,15 @@ def reconcile(ledger_path: Path | None = None, positions_path: Path | None = Non
         # ⚠️ 数量不一致才是**硬信号**：它意味着台账与持仓已经脱节
         # （典型成因：commit 崩在两次 rename 之间，或有人手改了 positions）。
         # 成本不一致多为浮点尾差或期初基线缺失，单独看。
-        "status": ("replay_failed" if not rep["ok"]
-                   else "mismatch" if qty_mismatch
-                   else "cost_only_diff" if diffs
-                   else "ok"),
+        "status": (
+            "replay_failed"
+            if not rep["ok"]
+            else "mismatch"
+            if qty_mismatch
+            else "cost_only_diff"
+            if diffs
+            else "ok"
+        ),
     }
 
 
@@ -138,13 +194,20 @@ def main(argv=None) -> int:
     ap.add_argument("--date", help="仅用于落盘文件名，不影响比对")
     ap.add_argument("--baseline", help="期初持仓 JSON（台账非从零开始时必须提供）")
     ap.add_argument("--cost-tol", type=float, default=1e-6, help="单位成本相对容差")
-    ap.add_argument("--strict", action="store_true",
-                    help="数量不一致时 exit 1（默认只报告 —— 新校验先观察若干交易日再开硬闸，"
-                         "见 2026-07-30 事故：门控与口径同时收紧导致整条链失败）")
-    ap.add_argument("--out", help="结果落盘路径（默认 data/quality/{date}_ledger_reconcile.json）")
+    ap.add_argument(
+        "--strict",
+        action="store_true",
+        help="数量不一致时 exit 1（默认只报告 —— 新校验先观察若干交易日再开硬闸，"
+        "见 2026-07-30 事故：门控与口径同时收紧导致整条链失败）",
+    )
+    ap.add_argument(
+        "--out", help="结果落盘路径（默认 data/quality/{date}_ledger_reconcile.json）"
+    )
     a = ap.parse_args(argv)
 
-    baseline = json.loads(Path(a.baseline).read_text(encoding="utf-8")) if a.baseline else None
+    baseline = (
+        json.loads(Path(a.baseline).read_text(encoding="utf-8")) if a.baseline else None
+    )
     r = reconcile(baseline=baseline, cost_tol=a.cost_tol)
 
     day = a.date or cn_now().strftime("%Y-%m-%d")
@@ -154,8 +217,11 @@ def main(argv=None) -> int:
 
     print(json.dumps(r, ensure_ascii=False, indent=2))
     if r["status"] != "ok":
-        print(f"[RECONCILE] {r['status']}：数量不一致 {r['qty_mismatch_count']} 只，"
-              f"其他差异 {r['diff_count'] - r['qty_mismatch_count']} 只", file=sys.stderr)
+        print(
+            f"[RECONCILE] {r['status']}：数量不一致 {r['qty_mismatch_count']} 只，"
+            f"其他差异 {r['diff_count'] - r['qty_mismatch_count']} 只",
+            file=sys.stderr,
+        )
     return 1 if (a.strict and r["qty_mismatch_count"]) else 0
 
 

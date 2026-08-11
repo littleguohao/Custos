@@ -11,6 +11,7 @@
 统一返回 ``[{"date","open","high","low","close","volume"}, ...]``（时间升序），
 失败返回 None。北交所（bj）两源均不支持，直接返回 None。
 """
+
 from __future__ import annotations
 
 import sys
@@ -39,8 +40,11 @@ def _warn_dropped(source: str, code: str, dropped: int, kept: int) -> None:
     并把丢弃数打到 stderr,避免静默降级。
     """
     if dropped:
-        print(f"[WARN] {source} {code}: dropped {dropped} malformed row(s), kept {kept}",
-              file=sys.stderr)
+        print(
+            f"[WARN] {source} {code}: dropped {dropped} malformed row(s), kept {kept}",
+            file=sys.stderr,
+        )
+
 
 _session = requests.Session()
 _session.trust_env = False  # 与 _eastmoney_bj_quote 一致，避免系统代理干扰直连
@@ -72,7 +76,9 @@ def fetch_tencent_daily(code: str, count: int = 3) -> list[dict] | None:
     try:
         resp = fetch_with_retry(
             TENCENT_DAILY_URL.format(symbol=symbol, count=count),
-            timeout=TIMEOUT, session=_session)
+            timeout=TIMEOUT,
+            session=_session,
+        )
         payload = resp.json()
     except Exception:
         return None
@@ -84,14 +90,16 @@ def fetch_tencent_daily(code: str, count: int = 3) -> list[dict] | None:
     for row in rows:
         try:
             # 腾讯列序: date, open, close, high, low, volume
-            bars.append({
-                "date": str(row[0])[:10],
-                "open": float(row[1]),
-                "high": float(row[3]),
-                "low": float(row[4]),
-                "close": float(row[2]),
-                "volume": float(row[5]),
-            })
+            bars.append(
+                {
+                    "date": str(row[0])[:10],
+                    "open": float(row[1]),
+                    "high": float(row[3]),
+                    "low": float(row[4]),
+                    "close": float(row[2]),
+                    "volume": float(row[5]),
+                }
+            )
         except (TypeError, ValueError, IndexError, KeyError):
             dropped += 1
     _warn_dropped("tencent_daily", str(code), dropped, len(bars))
@@ -106,7 +114,10 @@ def fetch_sina_daily(code: str, count: int = 3) -> list[dict] | None:
     try:
         resp = fetch_with_retry(
             SINA_DAILY_URL.format(symbol=symbol, count=count),
-            timeout=TIMEOUT, session=_session, headers=SINA_HEADERS)
+            timeout=TIMEOUT,
+            session=_session,
+            headers=SINA_HEADERS,
+        )
         rows = resp.json()
     except Exception:
         return None
@@ -116,21 +127,25 @@ def fetch_sina_daily(code: str, count: int = 3) -> list[dict] | None:
     dropped = 0
     for r in rows:
         try:
-            bars.append({
-                "date": str(r["day"])[:10],
-                "open": float(r["open"]),
-                "high": float(r["high"]),
-                "low": float(r["low"]),
-                "close": float(r["close"]),
-                "volume": float(r["volume"]),
-            })
+            bars.append(
+                {
+                    "date": str(r["day"])[:10],
+                    "open": float(r["open"]),
+                    "high": float(r["high"]),
+                    "low": float(r["low"]),
+                    "close": float(r["close"]),
+                    "volume": float(r["volume"]),
+                }
+            )
         except (TypeError, ValueError, KeyError, IndexError):
             dropped += 1
     _warn_dropped("sina_daily", str(code), dropped, len(bars))
     return bars or None
 
 
-def fetch_online_daily(code: str, count: int = 3) -> tuple[list[dict] | None, str | None]:
+def fetch_online_daily(
+    code: str, count: int = 3
+) -> tuple[list[dict] | None, str | None]:
     """域 B 入口：tencent → sina 顺序尝试。
 
     返回 ``(bars, source)``；全部失败返回 ``(None, None)``。

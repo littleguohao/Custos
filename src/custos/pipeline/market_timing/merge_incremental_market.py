@@ -7,6 +7,7 @@ Prints the same [OK]/[WARN] lines the in-process code used to print.
 Missing input files are a silent no-op (exit 0), matching the original
 behavior.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -41,7 +42,10 @@ def _usable(section) -> bool:
     setdefault 出一个 up_count=None 的空 market_breadth 段，而 setdefault 的
     「只增不毁」语义会让后续 refresh_market_indices 再也补不进真值。
     """
-    return isinstance(section, dict) and section.get("status") not in {"unavailable", "error"}
+    return isinstance(section, dict) and section.get("status") not in {
+        "unavailable",
+        "error",
+    }
 
 
 def merge_incremental(inc: dict, mkt: dict, target: str) -> tuple[dict, list[str]]:
@@ -60,22 +64,30 @@ def merge_incremental(inc: dict, mkt: dict, target: str) -> tuple[dict, list[str
     breadth = inc.get("breadth", {})
     if _usable(breadth.get("880005")):
         b = breadth["880005"]
-        mkt.setdefault("market_breadth", {
-            "quality": _q(b.get("date", ""), "market_breadth"),
-            "as_of": b.get("date", ""),
-            "up_count": b.get("up_count"),
-            "down_count": b.get("down_count"),
-            "source": "mootdx_reader_880005",
-        })
+        mkt.setdefault(
+            "market_breadth",
+            {
+                "quality": _q(b.get("date", ""), "market_breadth"),
+                "as_of": b.get("date", ""),
+                "up_count": b.get("up_count"),
+                "down_count": b.get("down_count"),
+                "source": "mootdx_reader_880005",
+            },
+        )
     if _usable(breadth.get("880006")):
         b6 = breadth["880006"]
-        mkt.setdefault("sentiment", {
-            "quality": _q(b6.get("date", ""), "sentiment"),
-            "as_of": b6.get("date", ""),
-            "limit_up_count": b6.get("close"),   # 与 guards/scorer 键名统一(此前写 limit_up,门控取不到误判 missing)
-            "limit_up": b6.get("close"),          # 兼容旧键
-            "source": "mootdx_reader_880006",
-        })
+        mkt.setdefault(
+            "sentiment",
+            {
+                "quality": _q(b6.get("date", ""), "sentiment"),
+                "as_of": b6.get("date", ""),
+                "limit_up_count": b6.get(
+                    "close"
+                ),  # 与 guards/scorer 键名统一(此前写 limit_up,门控取不到误判 missing)
+                "limit_up": b6.get("close"),  # 兼容旧键
+                "source": "mootdx_reader_880006",
+            },
+        )
     # Turnover from 880001 amount (全市场成交额; close 是平均股价指数点位,不是成交额)
     if _usable(breadth.get("880001")):
         b1 = breadth["880001"]
@@ -84,19 +96,25 @@ def merge_incremental(inc: dict, mkt: dict, target: str) -> tuple[dict, list[str
         chg_pct = round((amt / prev_amt - 1) * 100, 3) if amt and prev_amt else None
         if amt:
             q1 = _q(b1.get("date", ""), "turnover")
-            mkt.setdefault("turnover", {
-                "total_turnover": amt,
-                "turnover_change_pct": chg_pct,
-                "quality": q1,
-                "as_of": b1.get("date", ""),
-                "source": "vipdoc_880001_amount",
-            })
-            mkt.setdefault("market_turnover", {
-                "quality": q1,
-                "as_of": b1.get("date", ""),
-                "value": amt,
-                "source": "vipdoc_880001_amount",
-            })
+            mkt.setdefault(
+                "turnover",
+                {
+                    "total_turnover": amt,
+                    "turnover_change_pct": chg_pct,
+                    "quality": q1,
+                    "as_of": b1.get("date", ""),
+                    "source": "vipdoc_880001_amount",
+                },
+            )
+            mkt.setdefault(
+                "market_turnover",
+                {
+                    "quality": q1,
+                    "as_of": b1.get("date", ""),
+                    "value": amt,
+                    "source": "vipdoc_880001_amount",
+                },
+            )
     # Overseas from incremental (只增不毁: 不覆盖已有非空值,也不写入 None)
     if "a50_futures" in inc:
         v = inc["a50_futures"].get("change_pct")
@@ -126,17 +144,24 @@ def _write_status(target: str, payload: dict) -> Path:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Merge incremental market data into market_timing_input.json")
+    ap = argparse.ArgumentParser(
+        description="Merge incremental market data into market_timing_input.json"
+    )
     ap.add_argument("--date", default=cn_today().strftime("%Y-%m-%d"))
     args = ap.parse_args(argv)
     target = args.date
 
     incremental_path = MARKET_DIR / f"{target}_incremental_market.json"
     market_path = MARKET_DIR / f"{target}_market_timing_input.json"
-    status: dict = {"date": target, "status": "skipped", "merged": False,
-                    "stale": [], "amv_confirmed": False,
-                    "incremental_present": incremental_path.exists(),
-                    "market_input_present": market_path.exists()}
+    status: dict = {
+        "date": target,
+        "status": "skipped",
+        "merged": False,
+        "stale": [],
+        "amv_confirmed": False,
+        "incremental_present": incremental_path.exists(),
+        "market_input_present": market_path.exists(),
+    }
 
     # 1. Merge incremental data into market_timing_input.json
     if incremental_path.exists() and market_path.exists():
@@ -148,13 +173,18 @@ def main(argv=None) -> int:
             # 责任范围就是它们（`setdefault` 的「只增不毁」语义 ⇒ 只会新增节）。
             # **不校验 amv_0** —— 这一步根本不碰它，替 collector 背责是错的
             # （第一版这么写，既有测试的最小 fixture 立刻硬失败）。见 contracts._narrow。
-            require("market_timing_input", mkt,
-                    only=("market_breadth", "sentiment", "turnover", "overseas_market"))
-            write_json_atomic(market_path, mkt)   # 读-改-写的共享文件
+            require(
+                "market_timing_input",
+                mkt,
+                only=("market_breadth", "sentiment", "turnover", "overseas_market"),
+            )
+            write_json_atomic(market_path, mkt)  # 读-改-写的共享文件
             print("[OK] incremental data merged into market_timing_input.json")
             status.update({"status": "ok", "merged": True, "stale": stale})
             if stale:
-                print(f"[WARN] 以下指标数据日非目标日 {target},已标记 stale(不得当作当日数据): {', '.join(stale)}")
+                print(
+                    f"[WARN] 以下指标数据日非目标日 {target},已标记 stale(不得当作当日数据): {', '.join(stale)}"
+                )
         except SystemExit as e:
             # ⚠️ require() 失败抛的是 **SystemExit**，不是 Exception 子类 ——
             # 只捕 Exception 会让它直接穿出 main()：退出码虽仍是失败（1），
@@ -189,11 +219,18 @@ def main(argv=None) -> int:
                             obs = json.loads(line)
                         except ValueError:
                             continue
-                        if (obs.get("date") == target and obs.get("quality") == "confirmed"
-                                and obs.get("amv_change_pct") is not None):
-                            amv_day = obs["amv_change_pct"]  # 同日多条时取最后出现的(最新)
+                        if (
+                            obs.get("date") == target
+                            and obs.get("quality") == "confirmed"
+                            and obs.get("amv_change_pct") is not None
+                        ):
+                            amv_day = obs[
+                                "amv_change_pct"
+                            ]  # 同日多条时取最后出现的(最新)
                             amv_source = "0amv_observations"
-                            amv_as_of = str(obs.get("as_of") or obs.get("date") or target)[:10]
+                            amv_as_of = str(
+                                obs.get("as_of") or obs.get("date") or target
+                            )[:10]
             if amv_day is not None and amv.get("quality") != "confirmed":
                 amv["amv_change_pct"] = amv_day
                 amv["quality"] = "confirmed"
@@ -224,13 +261,23 @@ def main(argv=None) -> int:
                 # `effective_state` 的枚举域正是审计 B1 的所在：写成「空头触发」这种
                 # 未归一的值，会让下游精确等值比较落空、`allow_add=False` 漏置。
                 # `amv_zone` 是 collector 派生的，不该由 merge 背责。
-                require("market_timing_input", mkt,
-                        only=("amv_0.quality", "amv_0.effective_state", "amv_0.as_of"))
-                write_json_atomic(market_path, mkt)   # 读-改-写的共享文件
-                print(f"[OK] 0AMV quality auto-set to confirmed (value={amv_day}%, as_of={amv_as_of}, "
-                      f"regime={amv['effective_state']}, source={amv_source})")
-                status.update({"amv_confirmed": True, "amv_as_of": amv_as_of,
-                               "amv_source": amv_source})
+                require(
+                    "market_timing_input",
+                    mkt,
+                    only=("amv_0.quality", "amv_0.effective_state", "amv_0.as_of"),
+                )
+                write_json_atomic(market_path, mkt)  # 读-改-写的共享文件
+                print(
+                    f"[OK] 0AMV quality auto-set to confirmed (value={amv_day}%, as_of={amv_as_of}, "
+                    f"regime={amv['effective_state']}, source={amv_source})"
+                )
+                status.update(
+                    {
+                        "amv_confirmed": True,
+                        "amv_as_of": amv_as_of,
+                        "amv_source": amv_source,
+                    }
+                )
             if status["status"] == "skipped":
                 status["status"] = "ok"
         except SystemExit as e:

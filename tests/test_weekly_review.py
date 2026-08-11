@@ -13,7 +13,9 @@ WEEK_DAYS = ["2026-07-13", "2026-07-14", "2026-07-15", "2026-07-16", "2026-07-17
 CALENDAR = {
     "official_years": {
         "2026": {
-            "closed_ranges": [{"name": "测试假日", "start": "2026-10-01", "end": "2026-10-07"}],
+            "closed_ranges": [
+                {"name": "测试假日", "start": "2026-10-01", "end": "2026-10-07"}
+            ],
         }
     }
 }
@@ -25,12 +27,16 @@ def write_json(path: Path, data) -> None:
 
 
 def make_base(tmp_path: Path) -> Path:
-    write_json(tmp_path / "governance" / "contracts" / "CN_TRADING_CALENDAR.json", CALENDAR)
+    write_json(
+        tmp_path / "governance" / "contracts" / "CN_TRADING_CALENDAR.json", CALENDAR
+    )
     return tmp_path
 
 
 def write_ledger(base: Path, rows: list[list]) -> None:
-    lines = ["成交日期,成交时间,代码,名称,交易类别,成交数量,成交价格,成交金额,发生金额,费用,备注"]
+    lines = [
+        "成交日期,成交时间,代码,名称,交易类别,成交数量,成交价格,成交金额,发生金额,费用,备注"
+    ]
     for r in rows:
         lines.append(",".join(str(x) for x in r))
     path = base / "data" / "trades" / "master_trade_ledger.csv"
@@ -39,12 +45,20 @@ def write_ledger(base: Path, rows: list[list]) -> None:
 
 
 def write_review(base: Path, day: str, plan_codes: list[str] | None = None) -> None:
-    review = {"date": day, "next_day_plan": {"holding_plans": [{"code": c} for c in (plan_codes or [])]}}
-    write_json(base / "artifacts/reports" / "daily" / f"{day}_final_review.json", review)
+    review = {
+        "date": day,
+        "next_day_plan": {"holding_plans": [{"code": c} for c in (plan_codes or [])]},
+    }
+    write_json(
+        base / "artifacts/reports" / "daily" / f"{day}_final_review.json", review
+    )
 
 
 def write_mfe(base: Path, day: str, holdings: list[dict]) -> None:
-    write_json(base / "data" / "holdings" / f"{day}_mfe_mae.json", {"date": day, "holdings": holdings})
+    write_json(
+        base / "data" / "holdings" / f"{day}_mfe_mae.json",
+        {"date": day, "holdings": holdings},
+    )
 
 
 def write_amv(base: Path, entries: list[tuple[str, float]]) -> None:
@@ -59,8 +73,11 @@ def write_amv(base: Path, entries: list[tuple[str, float]]) -> None:
 def write_meta(base: Path, confirmed: dict) -> None:
     """写无交易确认。唯一生产者是 incremental_ledger.py --confirm-no-trades，
     落在 position_confirmations.json：{date: {confirmed_at, no_trades, note}}。"""
-    records = {d: {"confirmed_at": f"{d}T17:30:00", "no_trades": True, "note": "测试确认"}
-               for d, ok in confirmed.items() if ok}
+    records = {
+        d: {"confirmed_at": f"{d}T17:30:00", "no_trades": True, "note": "测试确认"}
+        for d, ok in confirmed.items()
+        if ok
+    }
     write_json(base / "data" / "trades" / "position_confirmations.json", records)
 
 
@@ -89,22 +106,82 @@ class LedgerTests(unittest.TestCase):
     def test_parse_skips_non_trade_and_reads_bom(self):
         with self.subTest("fixture"):
             import tempfile
+
             with tempfile.TemporaryDirectory() as td:
                 base = make_base(Path(td))
-                write_ledger(base, [
-                    ["2026-07-13", "10:00:00", "600000", "测试A", "买入", 100, 10.0, 1000.0, -1001.0, 1.0, ""],
-                    ["2026-07-13", "10:01:00", "600000", "测试A", "转债转入", 3, 0, 0, 0, 0, ""],
-                ])
-                trades = wr.parse_ledger(base / "data" / "trades" / "master_trade_ledger.csv")
+                write_ledger(
+                    base,
+                    [
+                        [
+                            "2026-07-13",
+                            "10:00:00",
+                            "600000",
+                            "测试A",
+                            "买入",
+                            100,
+                            10.0,
+                            1000.0,
+                            -1001.0,
+                            1.0,
+                            "",
+                        ],
+                        [
+                            "2026-07-13",
+                            "10:01:00",
+                            "600000",
+                            "测试A",
+                            "转债转入",
+                            3,
+                            0,
+                            0,
+                            0,
+                            0,
+                            "",
+                        ],
+                    ],
+                )
+                trades = wr.parse_ledger(
+                    base / "data" / "trades" / "master_trade_ledger.csv"
+                )
                 self.assertEqual(len(trades), 1)
                 self.assertEqual(trades[0]["code"], "600000")
                 self.assertEqual(trades[0]["qty"], 100.0)
 
     def test_fifo_partial_sell(self):
         trades = [
-            {"date": "2026-07-01", "time": "09:30:00", "code": "600000", "name": "A", "side": "买入", "qty": 100.0, "price": 10.0, "amount": 1000.0, "fee": 1.0},
-            {"date": "2026-07-02", "time": "09:30:00", "code": "600000", "name": "A", "side": "买入", "qty": 100.0, "price": 11.0, "amount": 1100.0, "fee": 1.0},
-            {"date": "2026-07-14", "time": "14:00:00", "code": "600000", "name": "A", "side": "卖出", "qty": 150.0, "price": 12.0, "amount": 1800.0, "fee": 1.0},
+            {
+                "date": "2026-07-01",
+                "time": "09:30:00",
+                "code": "600000",
+                "name": "A",
+                "side": "买入",
+                "qty": 100.0,
+                "price": 10.0,
+                "amount": 1000.0,
+                "fee": 1.0,
+            },
+            {
+                "date": "2026-07-02",
+                "time": "09:30:00",
+                "code": "600000",
+                "name": "A",
+                "side": "买入",
+                "qty": 100.0,
+                "price": 11.0,
+                "amount": 1100.0,
+                "fee": 1.0,
+            },
+            {
+                "date": "2026-07-14",
+                "time": "14:00:00",
+                "code": "600000",
+                "name": "A",
+                "side": "卖出",
+                "qty": 150.0,
+                "price": 12.0,
+                "amount": 1800.0,
+                "fee": 1.0,
+            },
         ]
         closings = wr.fifo_pair(trades)
         self.assertEqual(len(closings), 1)
@@ -120,11 +197,50 @@ class LedgerTests(unittest.TestCase):
 def traded_base(tmp_path: Path) -> Path:
     """构造一个有交易的 fixture：07-13 计划、07-14 卖 600000 亏 -9%、07-15 买 600001。"""
     base = make_base(tmp_path)
-    write_ledger(base, [
-        ["2026-07-06", "09:30:00", "600000", "测试A", "买入", 100, 100.0, 10000.0, -10001.0, 1.0, ""],
-        ["2026-07-14", "14:00:00", "600000", "测试A", "卖出", 100, 91.0, 9100.0, 9099.0, 1.0, ""],
-        ["2026-07-15", "09:30:00", "600001", "测试B", "买入", 100, 10.0, 1000.0, -1001.0, 1.0, ""],
-    ])
+    write_ledger(
+        base,
+        [
+            [
+                "2026-07-06",
+                "09:30:00",
+                "600000",
+                "测试A",
+                "买入",
+                100,
+                100.0,
+                10000.0,
+                -10001.0,
+                1.0,
+                "",
+            ],
+            [
+                "2026-07-14",
+                "14:00:00",
+                "600000",
+                "测试A",
+                "卖出",
+                100,
+                91.0,
+                9100.0,
+                9099.0,
+                1.0,
+                "",
+            ],
+            [
+                "2026-07-15",
+                "09:30:00",
+                "600001",
+                "测试B",
+                "买入",
+                100,
+                10.0,
+                1000.0,
+                -1001.0,
+                1.0,
+                "",
+            ],
+        ],
+    )
     write_review(base, "2026-07-13", plan_codes=["600000"])  # 600001 不在计划 → 计划外
     for d in WEEK_DAYS[1:]:
         write_review(base, d, plan_codes=[])
@@ -135,10 +251,14 @@ def traded_base(tmp_path: Path) -> Path:
 class ExecutionRuleTests(unittest.TestCase):
     def test_plan_match_hit_and_miss(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             base = traded_base(Path(td))
             review = wr.build_weekly_review(base, "2026-07-15")
-            checks = {(p["code"], p["date"]): p["status"] for p in review["details"]["plan_checks"]}
+            checks = {
+                (p["code"], p["date"]): p["status"]
+                for p in review["details"]["plan_checks"]
+            }
             self.assertEqual(checks[("600000", "2026-07-14")], "planned")
             self.assertEqual(checks[("600001", "2026-07-15")], "unplanned")
             rules = [i["rule"] for i in review["execution_issues"]]
@@ -146,11 +266,27 @@ class ExecutionRuleTests(unittest.TestCase):
 
     def test_plan_unknown_when_no_prior_review(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             base = make_base(Path(td))
-            write_ledger(base, [
-                ["2026-07-14", "09:30:00", "600000", "测试A", "买入", 100, 10.0, 1000.0, -1001.0, 1.0, ""],
-            ])
+            write_ledger(
+                base,
+                [
+                    [
+                        "2026-07-14",
+                        "09:30:00",
+                        "600000",
+                        "测试A",
+                        "买入",
+                        100,
+                        10.0,
+                        1000.0,
+                        -1001.0,
+                        1.0,
+                        "",
+                    ],
+                ],
+            )
             review = wr.build_weekly_review(base, "2026-07-15")
             checks = review["details"]["plan_checks"]
             self.assertEqual(checks[0]["status"], "unknown")
@@ -158,60 +294,141 @@ class ExecutionRuleTests(unittest.TestCase):
 
     def test_slow_stop_loss_rule(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             base = traded_base(Path(td))
             review = wr.build_weekly_review(base, "2026-07-15")
-            slow = [i for i in review["execution_issues"] if i["rule"] == "slow_stop_loss"]
+            slow = [
+                i for i in review["execution_issues"] if i["rule"] == "slow_stop_loss"
+            ]
             self.assertEqual(len(slow), 1)
             self.assertEqual(slow[0]["evidence"][0]["pnl_pct"], -9.0)
 
     def test_compliant_stop_not_flagged(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             base = make_base(Path(td))
-            write_ledger(base, [
-                ["2026-07-13", "09:30:00", "600000", "测试A", "买入", 100, 100.0, 10000.0, -10001.0, 1.0, ""],
-                ["2026-07-14", "14:00:00", "600000", "测试A", "卖出", 100, 95.0, 9500.0, 9499.0, 1.0, ""],
-            ])
+            write_ledger(
+                base,
+                [
+                    [
+                        "2026-07-13",
+                        "09:30:00",
+                        "600000",
+                        "测试A",
+                        "买入",
+                        100,
+                        100.0,
+                        10000.0,
+                        -10001.0,
+                        1.0,
+                        "",
+                    ],
+                    [
+                        "2026-07-14",
+                        "14:00:00",
+                        "600000",
+                        "测试A",
+                        "卖出",
+                        100,
+                        95.0,
+                        9500.0,
+                        9499.0,
+                        1.0,
+                        "",
+                    ],
+                ],
+            )
             write_review(base, "2026-07-13", plan_codes=["600000"])
             write_meta(base, {})
             review = wr.build_weekly_review(base, "2026-07-15")
-            self.assertNotIn("slow_stop_loss", [i["rule"] for i in review["execution_issues"]])
+            self.assertNotIn(
+                "slow_stop_loss", [i["rule"] for i in review["execution_issues"]]
+            )
 
     def test_no_trade_confirmation_completeness(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             base = make_base(Path(td))
             write_meta(base, {"2026-07-13": True})
             review = wr.build_weekly_review(base, "2026-07-15")
-            issues = [i for i in review["execution_issues"] if i["rule"] == "no_trade_confirmation_missing"]
+            issues = [
+                i
+                for i in review["execution_issues"]
+                if i["rule"] == "no_trade_confirmation_missing"
+            ]
             self.assertEqual(len(issues), 1)
             self.assertEqual(review["facts"]["no_trade_unconfirmed"], WEEK_DAYS[1:])
 
     def test_no_trade_confirmation_all_present(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             base = make_base(Path(td))
             write_meta(base, {d: True for d in WEEK_DAYS})
             review = wr.build_weekly_review(base, "2026-07-15")
-            self.assertNotIn("no_trade_confirmation_missing", [i["rule"] for i in review["execution_issues"]])
+            self.assertNotIn(
+                "no_trade_confirmation_missing",
+                [i["rule"] for i in review["execution_issues"]],
+            )
 
 
 class StrategyRuleTests(unittest.TestCase):
     def sell_fly_base(self, td: str, mfe_pct: float | None) -> Path:
         base = make_base(Path(td))
-        write_ledger(base, [
-            ["2026-07-13", "09:30:00", "600000", "测试A", "买入", 100, 10.0, 1000.0, -1001.0, 1.0, ""],
-            ["2026-07-14", "14:00:00", "600000", "测试A", "卖出", 100, 10.5, 1050.0, 1049.0, 1.0, ""],
-        ])
+        write_ledger(
+            base,
+            [
+                [
+                    "2026-07-13",
+                    "09:30:00",
+                    "600000",
+                    "测试A",
+                    "买入",
+                    100,
+                    10.0,
+                    1000.0,
+                    -1001.0,
+                    1.0,
+                    "",
+                ],
+                [
+                    "2026-07-14",
+                    "14:00:00",
+                    "600000",
+                    "测试A",
+                    "卖出",
+                    100,
+                    10.5,
+                    1050.0,
+                    1049.0,
+                    1.0,
+                    "",
+                ],
+            ],
+        )
         write_review(base, "2026-07-13", plan_codes=["600000"])
         write_meta(base, {})
         if mfe_pct is not None:
-            write_mfe(base, "2026-07-17", [{"code": "600000", "cost": 10.0, "mfe_pct": mfe_pct, "mfe_date": "2026-07-16"}])
+            write_mfe(
+                base,
+                "2026-07-17",
+                [
+                    {
+                        "code": "600000",
+                        "cost": 10.0,
+                        "mfe_pct": mfe_pct,
+                        "mfe_date": "2026-07-16",
+                    }
+                ],
+            )
         return base
 
     def test_sell_fly_hit(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             review = wr.build_weekly_review(self.sell_fly_base(td, 20.0), "2026-07-15")
             hits = [i for i in review["strategy_issues"] if i["rule"] == "sell_fly"]
@@ -220,12 +437,14 @@ class StrategyRuleTests(unittest.TestCase):
 
     def test_sell_fly_miss(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             review = wr.build_weekly_review(self.sell_fly_base(td, 2.0), "2026-07-15")
             self.assertNotIn("sell_fly", [i["rule"] for i in review["strategy_issues"]])
 
     def test_sell_fly_unevaluated_without_mfe(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             review = wr.build_weekly_review(self.sell_fly_base(td, None), "2026-07-15")
             self.assertNotIn("sell_fly", [i["rule"] for i in review["strategy_issues"]])
@@ -233,33 +452,119 @@ class StrategyRuleTests(unittest.TestCase):
 
     def test_short_hold_loss_profile(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             base = make_base(Path(td))
             # 短持有亏损 -100（持有 7 天）+ 长持有亏损 -300（持有 40 天）
-            write_ledger(base, [
-                ["2026-07-06", "09:30:00", "600000", "短持", "买入", 100, 10.0, 1000.0, -1000.0, 0.0, ""],
-                ["2026-07-13", "14:00:00", "600000", "短持", "卖出", 100, 9.0, 900.0, 900.0, 0.0, ""],
-                ["2026-06-01", "09:30:00", "600001", "长持", "买入", 100, 10.0, 1000.0, -1000.0, 0.0, ""],
-                ["2026-07-14", "14:00:00", "600001", "长持", "卖出", 100, 7.0, 700.0, 700.0, 0.0, ""],
-            ])
+            write_ledger(
+                base,
+                [
+                    [
+                        "2026-07-06",
+                        "09:30:00",
+                        "600000",
+                        "短持",
+                        "买入",
+                        100,
+                        10.0,
+                        1000.0,
+                        -1000.0,
+                        0.0,
+                        "",
+                    ],
+                    [
+                        "2026-07-13",
+                        "14:00:00",
+                        "600000",
+                        "短持",
+                        "卖出",
+                        100,
+                        9.0,
+                        900.0,
+                        900.0,
+                        0.0,
+                        "",
+                    ],
+                    [
+                        "2026-06-01",
+                        "09:30:00",
+                        "600001",
+                        "长持",
+                        "买入",
+                        100,
+                        10.0,
+                        1000.0,
+                        -1000.0,
+                        0.0,
+                        "",
+                    ],
+                    [
+                        "2026-07-14",
+                        "14:00:00",
+                        "600001",
+                        "长持",
+                        "卖出",
+                        100,
+                        7.0,
+                        700.0,
+                        700.0,
+                        0.0,
+                        "",
+                    ],
+                ],
+            )
             write_review(base, "2026-07-10", plan_codes=["600000", "600001"])
             write_meta(base, {})
             review = wr.build_weekly_review(base, "2026-07-15")
-            issue = [i for i in review["strategy_issues"] if i["rule"] == "short_hold_loss_profile"][0]
+            issue = [
+                i
+                for i in review["strategy_issues"]
+                if i["rule"] == "short_hold_loss_profile"
+            ][0]
             self.assertEqual(issue["evidence"]["short_hold_loss_share_pct"], 25.0)
             self.assertEqual(issue["evidence"]["short_hold_loss_count"], 1)
 
     def test_bear_regime_background(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             base = make_base(Path(td))
-            write_ledger(base, [
-                ["2026-07-06", "09:30:00", "600000", "测试A", "买入", 100, 10.0, 1000.0, -1000.0, 0.0, ""],
-                ["2026-07-13", "14:00:00", "600000", "测试A", "卖出", 100, 9.0, 900.0, 900.0, 0.0, ""],
-            ])
+            write_ledger(
+                base,
+                [
+                    [
+                        "2026-07-06",
+                        "09:30:00",
+                        "600000",
+                        "测试A",
+                        "买入",
+                        100,
+                        10.0,
+                        1000.0,
+                        -1000.0,
+                        0.0,
+                        "",
+                    ],
+                    [
+                        "2026-07-13",
+                        "14:00:00",
+                        "600000",
+                        "测试A",
+                        "卖出",
+                        100,
+                        9.0,
+                        900.0,
+                        900.0,
+                        0.0,
+                        "",
+                    ],
+                ],
+            )
             write_review(base, "2026-07-10", plan_codes=["600000"])
             write_meta(base, {})
-            write_amv(base, [("2026-07-13", -5.0), ("2026-07-14", 5.0), ("2026-07-15", 0.0)])
+            write_amv(
+                base, [("2026-07-13", -5.0), ("2026-07-14", 5.0), ("2026-07-15", 0.0)]
+            )
             review = wr.build_weekly_review(base, "2026-07-15")
             f = review["facts"]
             self.assertEqual(f["bear_days"], ["2026-07-13"])
@@ -270,6 +575,7 @@ class StrategyRuleTests(unittest.TestCase):
 class DegradationTests(unittest.TestCase):
     def test_empty_base_runs_and_marks_unavailable(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             base = Path(td)  # 连日历都没有
             review = wr.build_weekly_review(base, "2026-07-15")
@@ -282,20 +588,29 @@ class DegradationTests(unittest.TestCase):
 
     def test_main_writes_json_and_md(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             base = traded_base(Path(td))
-            with patch("sys.argv", ["weekly_review.py", "--date", "2026-07-19", "--base", str(base)]):
+            with patch(
+                "sys.argv",
+                ["weekly_review.py", "--date", "2026-07-19", "--base", str(base)],
+            ):
                 wr.main()
-            json_path = base / "artifacts/reports" / "weekly" / "2026W29_weekly_review.json"
+            json_path = (
+                base / "artifacts/reports" / "weekly" / "2026W29_weekly_review.json"
+            )
             md_path = base / "artifacts/reports" / "weekly" / "2026W29_weekly_review.md"
             self.assertTrue(json_path.exists())
             self.assertTrue(md_path.exists())
             data = json.loads(json_path.read_text(encoding="utf-8"))
-            self.assertEqual(data["range"], {"start": "2026-07-13", "end": "2026-07-17"})
+            self.assertEqual(
+                data["range"], {"start": "2026-07-13", "end": "2026-07-17"}
+            )
             self.assertIn("执行纪律审计", md_path.read_text(encoding="utf-8"))
 
     def test_holiday_weekday_not_counted(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             base = make_base(Path(td))
             write_meta(base, {})
@@ -306,26 +621,63 @@ class DegradationTests(unittest.TestCase):
 
 # ------------------------------------------------- 新板块 fixture 辅助
 
+
 def write_full_review(base: Path, day: str, revalued: list[dict]) -> None:
-    write_json(base / "artifacts/reports" / "daily" / f"{day}_final_review.json",
-               {"date": day, "revalued_positions": revalued})
+    write_json(
+        base / "artifacts/reports" / "daily" / f"{day}_final_review.json",
+        {"date": day, "revalued_positions": revalued},
+    )
 
 
-def revalued(code: str, name: str, close: float, weight: float, mv: float, pnl: float, cost: float) -> dict:
-    return {"code": code, "name": name, "close": close, "position_pct": weight,
-            "market_value": mv, "pnl_pct": pnl, "cost": cost, "quantity": 100}
+def revalued(
+    code: str,
+    name: str,
+    close: float,
+    weight: float,
+    mv: float,
+    pnl: float,
+    cost: float,
+) -> dict:
+    return {
+        "code": code,
+        "name": name,
+        "close": close,
+        "position_pct": weight,
+        "market_value": mv,
+        "pnl_pct": pnl,
+        "cost": cost,
+        "quantity": 100,
+    }
 
 
-def write_market_timing(base: Path, day: str, latest_date: str, close: float, chg: float | None) -> None:
-    write_json(base / "data" / "market" / f"{day}_market_timing_input.json",
-               {"a_share_indices": {"上证指数": {"latest_date": latest_date, "latest_close": close,
-                                               "daily_change_pct": chg}}})
+def write_market_timing(
+    base: Path, day: str, latest_date: str, close: float, chg: float | None
+) -> None:
+    write_json(
+        base / "data" / "market" / f"{day}_market_timing_input.json",
+        {
+            "a_share_indices": {
+                "上证指数": {
+                    "latest_date": latest_date,
+                    "latest_close": close,
+                    "daily_change_pct": chg,
+                }
+            }
+        },
+    )
 
 
 def write_chief(base: Path, day: str, state: str, permission: str) -> None:
-    write_json(base / "data" / "decisions" / f"{day}_chief_decision.json",
-               {"date": day, "market_state": state, "market_score": "40/100",
-                "total_position_range": "20%-40%", "new_position_permission": permission})
+    write_json(
+        base / "data" / "decisions" / f"{day}_chief_decision.json",
+        {
+            "date": day,
+            "market_state": state,
+            "market_score": "40/100",
+            "total_position_range": "20%-40%",
+            "new_position_permission": permission,
+        },
+    )
 
 
 def write_b1(base: Path, day: str, items: list[dict]) -> None:
@@ -335,19 +687,52 @@ def write_b1(base: Path, day: str, items: list[dict]) -> None:
 class HoldingPerformanceTests(unittest.TestCase):
     def test_with_data(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             base = make_base(Path(td))
-            write_full_review(base, "2026-07-14", [revalued("600000", "测试A", 10.0, 0.20, 20000.0, 0.05, 9.5)])
-            write_full_review(base, "2026-07-17", [revalued("600000", "测试A", 9.0, 0.19, 18000.0, -0.05, 9.5)])
-            write_b1(base, "2026-07-16", [{"code": "600000", "final_priority": "P1", "final_action": "N型回踩失守评估"}])
-            write_b1(base, "2026-07-17", [{"code": "600000", "final_priority": "P0", "final_action": "下降N型结构清仓评估"}])
+            write_full_review(
+                base,
+                "2026-07-14",
+                [revalued("600000", "测试A", 10.0, 0.20, 20000.0, 0.05, 9.5)],
+            )
+            write_full_review(
+                base,
+                "2026-07-17",
+                [revalued("600000", "测试A", 9.0, 0.19, 18000.0, -0.05, 9.5)],
+            )
+            write_b1(
+                base,
+                "2026-07-16",
+                [
+                    {
+                        "code": "600000",
+                        "final_priority": "P1",
+                        "final_action": "N型回踩失守评估",
+                    }
+                ],
+            )
+            write_b1(
+                base,
+                "2026-07-17",
+                [
+                    {
+                        "code": "600000",
+                        "final_priority": "P0",
+                        "final_action": "下降N型结构清仓评估",
+                    }
+                ],
+            )
             review = wr.build_weekly_review(base, "2026-07-15")
             hp = review["holding_performance"]
             self.assertEqual(len(hp["rows"]), 1)
             row = hp["rows"][0]
-            self.assertEqual((row["first_date"], row["last_date"]), ("2026-07-14", "2026-07-17"))
+            self.assertEqual(
+                (row["first_date"], row["last_date"]), ("2026-07-14", "2026-07-17")
+            )
             self.assertEqual(row["week_change_pct"], -10.0)
-            self.assertEqual((row["first_weight_pct"], row["last_weight_pct"]), (20.0, 19.0))
+            self.assertEqual(
+                (row["first_weight_pct"], row["last_weight_pct"]), (20.0, 19.0)
+            )
             self.assertEqual(row["float_pnl_pct"], -5.0)
             self.assertAlmostEqual(row["contribution_pp"], -2.0)
             traj = hp["b1_trajectory"]["600000"]
@@ -355,13 +740,23 @@ class HoldingPerformanceTests(unittest.TestCase):
 
     def test_holding_quotes_fallback_and_name_lookup(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             base = make_base(Path(td))
             # 只有 holding_quotes，无 revalued：价格可取，权重 unavailable；名称由 current_positions 兜底
-            write_json(base / "data" / "market" / "2026-07-14_holding_quotes.json",
-                       {"quotes": [{"code": "600000", "close": 10.0}]})
-            write_full_review(base, "2026-07-17", [revalued("600000", "测试A", 11.0, 0.2, 20000.0, 0.1, 10.0)])
-            write_json(base / "data" / "trades" / "current_positions.json", [{"代码": "600000", "名称": "兜底名"}])
+            write_json(
+                base / "data" / "market" / "2026-07-14_holding_quotes.json",
+                {"quotes": [{"code": "600000", "close": 10.0}]},
+            )
+            write_full_review(
+                base,
+                "2026-07-17",
+                [revalued("600000", "测试A", 11.0, 0.2, 20000.0, 0.1, 10.0)],
+            )
+            write_json(
+                base / "data" / "trades" / "current_positions.json",
+                [{"代码": "600000", "名称": "兜底名"}],
+            )
             review = wr.build_weekly_review(base, "2026-07-15")
             row = review["holding_performance"]["rows"][0]
             self.assertEqual(row["first_date"], "2026-07-14")
@@ -373,6 +768,7 @@ class HoldingPerformanceTests(unittest.TestCase):
 
     def test_missing_data_degrades(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             base = make_base(Path(td))
             write_meta(base, {d: True for d in WEEK_DAYS})
@@ -384,18 +780,34 @@ class HoldingPerformanceTests(unittest.TestCase):
 
 class PortfolioTrajectoryTests(unittest.TestCase):
     def write_portfolio_reviews(self, base: Path) -> None:
-        write_full_review(base, "2026-07-15", [
-            revalued("600000", "A", 10.0, 0.5, 60.0, 0.0, 10.0),
-            revalued("600001", "B", 10.0, 0.3, 40.0, 0.0, 10.0)])
-        write_full_review(base, "2026-07-16", [
-            revalued("600000", "A", 9.0, 0.5, 54.0, -0.1, 10.0),
-            revalued("600001", "B", 9.0, 0.3, 36.0, -0.1, 10.0)])
-        write_full_review(base, "2026-07-17", [
-            revalued("600000", "A", 9.5, 0.5, 57.0, -0.05, 10.0),
-            revalued("600001", "B", 9.5, 0.3, 38.0, -0.05, 10.0)])
+        write_full_review(
+            base,
+            "2026-07-15",
+            [
+                revalued("600000", "A", 10.0, 0.5, 60.0, 0.0, 10.0),
+                revalued("600001", "B", 10.0, 0.3, 40.0, 0.0, 10.0),
+            ],
+        )
+        write_full_review(
+            base,
+            "2026-07-16",
+            [
+                revalued("600000", "A", 9.0, 0.5, 54.0, -0.1, 10.0),
+                revalued("600001", "B", 9.0, 0.3, 36.0, -0.1, 10.0),
+            ],
+        )
+        write_full_review(
+            base,
+            "2026-07-17",
+            [
+                revalued("600000", "A", 9.5, 0.5, 57.0, -0.05, 10.0),
+                revalued("600001", "B", 9.5, 0.3, 38.0, -0.05, 10.0),
+            ],
+        )
 
     def test_return_drawdown_benchmark(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             base = make_base(Path(td))
             self.write_portfolio_reviews(base)
@@ -414,9 +826,14 @@ class PortfolioTrajectoryTests(unittest.TestCase):
 
     def test_insufficient_data_degrades(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             base = make_base(Path(td))
-            write_full_review(base, "2026-07-17", [revalued("600000", "A", 10.0, 0.5, 100.0, 0.0, 10.0)])
+            write_full_review(
+                base,
+                "2026-07-17",
+                [revalued("600000", "A", 10.0, 0.5, 100.0, 0.0, 10.0)],
+            )
             write_meta(base, {d: True for d in WEEK_DAYS})
             review = wr.build_weekly_review(base, "2026-07-15")
             pf = review["portfolio"]
@@ -427,33 +844,58 @@ class PortfolioTrajectoryTests(unittest.TestCase):
 
     def test_benchmark_chg_fallback_by_close_ratio(self):
         # daily_change_pct 为 None 时用相邻 latest_close 比值
-        sse_map = {"2026-07-13": {"close": 100.0, "chg": None},
-                   "2026-07-14": {"close": 98.0, "chg": None}}
+        sse_map = {
+            "2026-07-13": {"close": 100.0, "chg": None},
+            "2026-07-14": {"close": 98.0, "chg": None},
+        }
         self.assertEqual(wr.sse_change(sse_map, "2026-07-14"), -2.0)
         self.assertIsNone(wr.sse_change(sse_map, "2026-07-13"))
         self.assertIsNone(wr.sse_change(sse_map, "2026-07-15"))
 
     def test_partial_day_excluded_from_metrics(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             base = make_base(Path(td))
             write_meta(base, {d: True for d in WEEK_DAYS})
             # 中间日一只持仓缺报价（market_value None），不得造成虚假回撤
-            write_full_review(base, "2026-07-15", [
-                revalued("600000", "A", 10.0, 0.5, 60.0, 0.0, 10.0),
-                revalued("600001", "B", 10.0, 0.3, 40.0, 0.0, 10.0)])
-            write_full_review(base, "2026-07-16", [
-                revalued("600000", "A", 9.9, 0.5, 59.4, -0.01, 10.0),
-                {"code": "600001", "name": "B", "close": None, "position_pct": None,
-                 "market_value": None, "pnl_pct": None, "cost": 10.0}])
-            write_full_review(base, "2026-07-17", [
-                revalued("600000", "A", 9.5, 0.5, 57.0, -0.05, 10.0),
-                revalued("600001", "B", 9.5, 0.3, 38.0, -0.05, 10.0)])
+            write_full_review(
+                base,
+                "2026-07-15",
+                [
+                    revalued("600000", "A", 10.0, 0.5, 60.0, 0.0, 10.0),
+                    revalued("600001", "B", 10.0, 0.3, 40.0, 0.0, 10.0),
+                ],
+            )
+            write_full_review(
+                base,
+                "2026-07-16",
+                [
+                    revalued("600000", "A", 9.9, 0.5, 59.4, -0.01, 10.0),
+                    {
+                        "code": "600001",
+                        "name": "B",
+                        "close": None,
+                        "position_pct": None,
+                        "market_value": None,
+                        "pnl_pct": None,
+                        "cost": 10.0,
+                    },
+                ],
+            )
+            write_full_review(
+                base,
+                "2026-07-17",
+                [
+                    revalued("600000", "A", 9.5, 0.5, 57.0, -0.05, 10.0),
+                    revalued("600001", "B", 9.5, 0.3, 38.0, -0.05, 10.0),
+                ],
+            )
             review = wr.build_weekly_review(base, "2026-07-15")
             pf = review["portfolio"]
             self.assertTrue(pf["daily"][1]["partial"])
             self.assertEqual(pf["daily"][1]["unpriced_codes"], ["600001"])
-            self.assertEqual(pf["week_return_pct"], -5.0)   # 100 → 95，不受中间日影响
+            self.assertEqual(pf["week_return_pct"], -5.0)  # 100 → 95，不受中间日影响
             self.assertEqual(pf["max_drawdown_pct"], -5.0)
             self.assertEqual(len(pf["partial_notes"]), 1)
 
@@ -473,38 +915,60 @@ class AdviceReviewTests(unittest.TestCase):
         write_market_timing(base, "2026-07-16", "20260716", 95.0, -3.0)
         write_market_timing(base, "2026-07-17", "20260717", 92.0, -3.05)
         # 组合周收益为负（两天可得，100 → 95）
-        write_full_review(base, "2026-07-16", [revalued("600000", "A", 10.0, 0.5, 100.0, 0.0, 10.0)])
-        write_full_review(base, "2026-07-17", [revalued("600000", "A", 9.5, 0.5, 95.0, -0.05, 10.0)])
+        write_full_review(
+            base, "2026-07-16", [revalued("600000", "A", 10.0, 0.5, 100.0, 0.0, 10.0)]
+        )
+        write_full_review(
+            base, "2026-07-17", [revalued("600000", "A", 9.5, 0.5, 95.0, -0.05, 10.0)]
+        )
         return base
 
     def test_verdicts(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
-            review = wr.build_weekly_review(self.build_advice_base(td, 1.0), "2026-07-15")
-            verdicts = {r["date"]: r["verdict"] for r in review["advice_review"]["rows"]}
-            self.assertEqual(verdicts["2026-07-13"], "失误")      # 防守 + 次日 +1.0%
-            self.assertEqual(verdicts["2026-07-14"], "正确")      # 防守 + 次日 -2.0%
-            self.assertEqual(verdicts["2026-07-15"], "正确")      # 震荡偏弱(bearish) + 次日 -3.0%
-            self.assertEqual(verdicts["2026-07-16"], "正确")      # 防守 + 次日 -3.05%
-            self.assertEqual(verdicts["2026-07-17"], "待验证")    # 次日 07-20 无数据
+            review = wr.build_weekly_review(
+                self.build_advice_base(td, 1.0), "2026-07-15"
+            )
+            verdicts = {
+                r["date"]: r["verdict"] for r in review["advice_review"]["rows"]
+            }
+            self.assertEqual(verdicts["2026-07-13"], "失误")  # 防守 + 次日 +1.0%
+            self.assertEqual(verdicts["2026-07-14"], "正确")  # 防守 + 次日 -2.0%
+            self.assertEqual(
+                verdicts["2026-07-15"], "正确"
+            )  # 震荡偏弱(bearish) + 次日 -3.0%
+            self.assertEqual(verdicts["2026-07-16"], "正确")  # 防守 + 次日 -3.05%
+            self.assertEqual(verdicts["2026-07-17"], "待验证")  # 次日 07-20 无数据
 
     def test_wrong_advice_attribution(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
-            review = wr.build_weekly_review(self.build_advice_base(td, 1.0), "2026-07-15")
-            self.assertIn("wrong_advice_direction", [i["rule"] for i in review["strategy_issues"]])
+            review = wr.build_weekly_review(
+                self.build_advice_base(td, 1.0), "2026-07-15"
+            )
+            self.assertIn(
+                "wrong_advice_direction", [i["rule"] for i in review["strategy_issues"]]
+            )
             self.assertEqual(review["environment_issues"], [])
 
     def test_environment_attribution_when_all_correct(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
-            review = wr.build_weekly_review(self.build_advice_base(td, -1.0), "2026-07-15")
+            review = wr.build_weekly_review(
+                self.build_advice_base(td, -1.0), "2026-07-15"
+            )
             env = [i["rule"] for i in review["environment_issues"]]
             self.assertEqual(env, ["adverse_market_environment"])
-            self.assertNotIn("wrong_advice_direction", [i["rule"] for i in review["strategy_issues"]])
+            self.assertNotIn(
+                "wrong_advice_direction", [i["rule"] for i in review["strategy_issues"]]
+            )
 
     def test_missing_chief_degrades(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             base = make_base(Path(td))
             write_meta(base, {d: True for d in WEEK_DAYS})

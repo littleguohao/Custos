@@ -9,6 +9,7 @@
 非当前快照——历史扫描无 look-ahead。⚠️ 未含 live 的 A/B 分层与风控硬封(那是完整管线),
 本扫描是"信号事件层"回答:哪天、哪只、达几面。
 """
+
 from __future__ import annotations
 
 import bisect
@@ -20,6 +21,7 @@ from pathlib import Path
 
 from custos.research import backtest_factors as bt  # noqa: E402
 from custos.core.paths import DATA, LOGS  # noqa: E402
+
 # 财报时效阈值走 financials 的**单一定义**,不在此二次定义——两处口径漂移会让同一只票
 # 在 live 与回测里得到相反的基本面判定。
 from custos.pipeline.screening.financials import REPORT_MAX_AGE_DAYS, _parse_day  # noqa: E402
@@ -33,8 +35,12 @@ def _report_age_days(report_date, as_of) -> int | None:
         return None
     return (ref - d).days
 
-FIRINGS = Path(sys.argv[1]) if len(sys.argv) > 1 else (
-    LOGS / "walkforward" / "firings_rk_2026YTD.json")
+
+FIRINGS = (
+    Path(sys.argv[1])
+    if len(sys.argv) > 1
+    else (LOGS / "walkforward" / "firings_rk_2026YTD.json")
+)
 PIT = DATA / "fundamentals" / "pit_financials.jsonl"
 
 
@@ -55,8 +61,14 @@ def _pit_index(path):
             continue
         if r.get("notice_date") and r.get("net_profit") is not None:
             idx.setdefault(r["code"], []).append(
-                (r["notice_date"], str(r.get("report_date") or ""),
-                 r.get("net_profit"), r.get("ocf_ps"), r.get("roe_waa")))
+                (
+                    r["notice_date"],
+                    str(r.get("report_date") or ""),
+                    r.get("net_profit"),
+                    r.get("ocf_ps"),
+                    r.get("roe_waa"),
+                )
+            )
     for c in idx:
         idx[c].sort()
     return idx
@@ -93,18 +105,22 @@ def _tier_you(idx, code, day, max_age_days: int = REPORT_MAX_AGE_DAYS) -> bool:
         age = _report_age_days(rpt, day)
         if age is None or age > max_age_days:
             return False
-    return bool(np_ and np_ > 0 and ocf is not None and ocf > 0 and roe is not None and roe > 0)
+    return bool(
+        np_ and np_ > 0 and ocf is not None and ocf > 0 and roe is not None and roe > 0
+    )
 
 
 def main() -> None:
     payload = json.loads(FIRINGS.read_text(encoding="utf-8"))
     recs = payload.get("records") or []
     pit = _pit_index(PIT)
-    regime = bt.load_amv_regime(since="2024-01-01")   # 状态机粘滞,起点须远早于扫描窗
+    regime = bt.load_amv_regime(since="2024-01-01")  # 状态机粘滞,起点须远早于扫描窗
 
-    per_day: dict[str, dict] = defaultdict(lambda: {"可买候选": [], "待0AMV做多": [], "前哨": [], "total": 0})
+    per_day: dict[str, dict] = defaultdict(
+        lambda: {"可买候选": [], "待0AMV做多": [], "前哨": [], "total": 0}
+    )
     for r in recs:
-        for d in (r.get("days") or []):
+        for d in r.get("days") or []:
             day = d[0]
             extra = d[2] if len(d) > 2 and isinstance(d[2], dict) else {}
             sec_fav = bool(extra.get("f_sector_favorable"))
@@ -121,14 +137,18 @@ def main() -> None:
                 pd_["前哨"].append(r["code"])
 
     print(f"扫描 {len(recs)} 股 | 信号日 {len(per_day)} 天")
-    print(f"{'日期':<12}{'reversal_k':>10}{'可买候选':>10}{'待0AMV做多':>12}{'📡前哨':>10}  明细")
+    print(
+        f"{'日期':<12}{'reversal_k':>10}{'可买候选':>10}{'待0AMV做多':>12}{'📡前哨':>10}  明细"
+    )
     for day in sorted(per_day):
         pd_ = per_day[day]
         detail = ""
         for k in ("可买候选", "待0AMV做多", "前哨"):
             if pd_[k]:
                 detail += f" {k}={','.join(pd_[k][:6])}"
-        print(f"{day:<12}{pd_['total']:<10}{len(pd_['可买候选']):<10}{len(pd_['待0AMV做多']):<12}{len(pd_['前哨']):<10}{detail}")
+        print(
+            f"{day:<12}{pd_['total']:<10}{len(pd_['可买候选']):<10}{len(pd_['待0AMV做多']):<12}{len(pd_['前哨']):<10}{detail}"
+        )
 
 
 if __name__ == "__main__":

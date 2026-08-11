@@ -13,6 +13,7 @@
 决定正常公司"最新已披露报告期"距当日上限为 211 天（4月29日，最新可得仍是上年三季报）。
 270 = 211 + 59 天余量。本文件把这个推导钉住。
 """
+
 from __future__ import annotations
 
 import json
@@ -46,10 +47,19 @@ class TestThresholdDerivation:
 
     def test_normal_company_age_ceiling_is_211(self):
         """正常公司报告期陈旧度上限出现在 4/29（年报与一季报都未到截止）。"""
-        worst = max(newest_visible_age(p) for p in (
-            date(2026, 1, 15), date(2026, 3, 31), date(2026, 4, 29),
-            date(2026, 4, 30), date(2026, 6, 15), date(2026, 8, 30),
-            date(2026, 8, 31), date(2026, 10, 30)))
+        worst = max(
+            newest_visible_age(p)
+            for p in (
+                date(2026, 1, 15),
+                date(2026, 3, 31),
+                date(2026, 4, 29),
+                date(2026, 4, 30),
+                date(2026, 6, 15),
+                date(2026, 8, 30),
+                date(2026, 8, 31),
+                date(2026, 10, 30),
+            )
+        )
         assert worst == 211
         assert newest_visible_age(date(2026, 4, 29)) == 211
 
@@ -70,33 +80,51 @@ class TestThresholdDerivation:
         """
         assert scan.REPORT_MAX_AGE_DAYS == fin.REPORT_MAX_AGE_DAYS
         import inspect
+
         src = inspect.getsource(scan)
-        assert "from custos.pipeline.screening.financials import REPORT_MAX_AGE_DAYS" in src
+        assert (
+            "from custos.pipeline.screening.financials import REPORT_MAX_AGE_DAYS"
+            in src
+        )
         assert "REPORT_MAX_AGE_DAYS = " not in src, "阈值不得在 scan 侧二次定义"
 
 
 class TestFinancialFactorStaleness:
     """live 路径：financial_factor 按 report_date 判时效。"""
 
-    COLMAP = {"code": "证券代码", "report_date": "报告期", "net_profit": "净利润",
-              "op_cashflow": "经营现金流", "roe": "ROE"}
+    COLMAP = {
+        "code": "证券代码",
+        "report_date": "报告期",
+        "net_profit": "净利润",
+        "op_cashflow": "经营现金流",
+        "roe": "ROE",
+    }
 
     def _df(self, report_date):
-        return pd.DataFrame([{
-            "证券代码": "600000", "报告期": report_date, "净利润": 1.0e8,
-            "经营现金流": 5.0e7, "ROE": 12.5,
-        }])
+        return pd.DataFrame(
+            [
+                {
+                    "证券代码": "600000",
+                    "报告期": report_date,
+                    "净利润": 1.0e8,
+                    "经营现金流": 5.0e7,
+                    "ROE": 12.5,
+                }
+            ]
+        )
 
     def test_fresh_report_is_available(self):
-        r = fin.financial_factor("600000", self._df("2026-06-30"), self.COLMAP,
-                                 as_of="2026-08-03")
+        r = fin.financial_factor(
+            "600000", self._df("2026-06-30"), self.COLMAP, as_of="2026-08-03"
+        )
         assert r["available"] is True
         assert r["report_stale"] is False and r["stale_check"] == "ok"
 
     def test_stale_report_is_rejected(self):
         """壳公司场景：2023Q3 后停止披露，2026 年仍会取到那期。"""
-        r = fin.financial_factor("600000", self._df("2023-09-30"), self.COLMAP,
-                                 as_of="2026-08-03")
+        r = fin.financial_factor(
+            "600000", self._df("2023-09-30"), self.COLMAP, as_of="2026-08-03"
+        )
         assert r["available"] is False
         assert r["reason"] == "report_stale"
         assert r["report_age_days"] == 1038
@@ -106,10 +134,18 @@ class TestFinancialFactorStaleness:
         base = date(2026, 8, 3)
         at = base.toordinal() - fin.REPORT_MAX_AGE_DAYS
         over = at - 1
-        r_at = fin.financial_factor("600000", self._df(date.fromordinal(at).isoformat()),
-                                    self.COLMAP, as_of=base.isoformat())
-        r_over = fin.financial_factor("600000", self._df(date.fromordinal(over).isoformat()),
-                                      self.COLMAP, as_of=base.isoformat())
+        r_at = fin.financial_factor(
+            "600000",
+            self._df(date.fromordinal(at).isoformat()),
+            self.COLMAP,
+            as_of=base.isoformat(),
+        )
+        r_over = fin.financial_factor(
+            "600000",
+            self._df(date.fromordinal(over).isoformat()),
+            self.COLMAP,
+            as_of=base.isoformat(),
+        )
         assert r_at["available"] is True, "恰好 270 天不该被判陈旧"
         assert r_over["available"] is False and r_over["reason"] == "report_stale"
 
@@ -117,14 +153,21 @@ class TestFinancialFactorStaleness:
         """没有报告期列时不假定新鲜，交调用方裁决。"""
         cm = dict(self.COLMAP)
         cm.pop("report_date")
-        r = fin.financial_factor("600000", self._df("2023-09-30"), cm, as_of="2026-08-03")
-        assert r["available"] is True                  # 不硬否决
+        r = fin.financial_factor(
+            "600000", self._df("2023-09-30"), cm, as_of="2026-08-03"
+        )
+        assert r["available"] is True  # 不硬否决
         assert r["report_stale"] is None
-        assert r["stale_check"] == "no_report_date"    # 但如实标注无法判定
+        assert r["stale_check"] == "no_report_date"  # 但如实标注无法判定
 
     def test_check_can_be_disabled(self):
-        r = fin.financial_factor("600000", self._df("2023-09-30"), self.COLMAP,
-                                 as_of="2026-08-03", max_age_days=0)
+        r = fin.financial_factor(
+            "600000",
+            self._df("2023-09-30"),
+            self.COLMAP,
+            as_of="2026-08-03",
+            max_age_days=0,
+        )
         assert r["available"] is True and r["stale_check"] == "disabled"
 
 
@@ -152,13 +195,23 @@ class TestTierYouStaleness:
     def test_boundary_at_threshold(self):
         day = date(2026, 8, 3)
         at = date.fromordinal(day.toordinal() - fin.REPORT_MAX_AGE_DAYS).isoformat()
-        over = date.fromordinal(day.toordinal() - fin.REPORT_MAX_AGE_DAYS - 1).isoformat()
-        assert scan._tier_you(self._idx("2026-01-01", at), "600000", day.isoformat()) is True
-        assert scan._tier_you(self._idx("2026-01-01", over), "600000", day.isoformat()) is False
+        over = date.fromordinal(
+            day.toordinal() - fin.REPORT_MAX_AGE_DAYS - 1
+        ).isoformat()
+        assert (
+            scan._tier_you(self._idx("2026-01-01", at), "600000", day.isoformat())
+            is True
+        )
+        assert (
+            scan._tier_you(self._idx("2026-01-01", over), "600000", day.isoformat())
+            is False
+        )
 
     def test_missing_report_date_is_conservative(self):
         """报告期缺失(旧台账)时不给"优"——正向判定遇未知取保守。"""
-        assert scan._tier_you(self._idx("2026-07-15", ""), "600000", "2026-08-03") is False
+        assert (
+            scan._tier_you(self._idx("2026-07-15", ""), "600000", "2026-08-03") is False
+        )
 
     def test_bad_numbers_still_rejected(self):
         """时效通过也不代表达标，数字条件照样要满足。"""
@@ -170,10 +223,12 @@ class TestPitSemanticsPreserved:
     """加时效不能破坏原有的 as-of 语义（notice_date 必须留在元组首位）。"""
 
     def _idx(self):
-        return {"600000": [
-            ("2026-04-29", "2026-03-31", 1.0e8, 0.5, 12.5),   # 一季报
-            ("2026-08-28", "2026-06-30", 2.0e8, 0.8, 15.0),   # 半年报
-        ]}
+        return {
+            "600000": [
+                ("2026-04-29", "2026-03-31", 1.0e8, 0.5, 12.5),  # 一季报
+                ("2026-08-28", "2026-06-30", 2.0e8, 0.8, 15.0),  # 半年报
+            ]
+        }
 
     def test_picks_latest_visible_period(self):
         """8月3日只能看到一季报，看不到8月28日才公告的半年报。"""
@@ -200,10 +255,20 @@ class TestPitIndexStructure:
 
     def test_index_carries_report_date(self, tmp_path):
         p = tmp_path / "pit.jsonl"
-        p.write_text(json.dumps({
-            "code": "600000", "notice_date": "2026-07-15", "report_date": "2026-06-30",
-            "net_profit": 1.0e8, "ocf_ps": 0.5, "roe_waa": 12.5,
-        }) + "\n", encoding="utf-8")
+        p.write_text(
+            json.dumps(
+                {
+                    "code": "600000",
+                    "notice_date": "2026-07-15",
+                    "report_date": "2026-06-30",
+                    "net_profit": 1.0e8,
+                    "ocf_ps": 0.5,
+                    "roe_waa": 12.5,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         idx = scan._pit_index(p)
         assert idx["600000"][0][0] == "2026-07-15", "notice_date 必须在首位"
         assert idx["600000"][0][1] == "2026-06-30"
@@ -211,20 +276,41 @@ class TestPitIndexStructure:
 
     def test_legacy_record_without_report_date(self, tmp_path):
         p = tmp_path / "pit.jsonl"
-        p.write_text(json.dumps({
-            "code": "600000", "notice_date": "2026-07-15",
-            "net_profit": 1.0e8, "ocf_ps": 0.5, "roe_waa": 12.5,
-        }) + "\n", encoding="utf-8")
+        p.write_text(
+            json.dumps(
+                {
+                    "code": "600000",
+                    "notice_date": "2026-07-15",
+                    "net_profit": 1.0e8,
+                    "ocf_ps": 0.5,
+                    "roe_waa": 12.5,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         idx = scan._pit_index(p)
         assert idx["600000"][0][1] == "", "旧台账缺 report_date 时置空串"
 
     def test_sorted_by_notice_date(self, tmp_path):
         p = tmp_path / "pit.jsonl"
         rows = [
-            {"code": "600000", "notice_date": "2026-08-28", "report_date": "2026-06-30",
-             "net_profit": 2.0e8, "ocf_ps": 0.8, "roe_waa": 15.0},
-            {"code": "600000", "notice_date": "2026-04-29", "report_date": "2026-03-31",
-             "net_profit": 1.0e8, "ocf_ps": 0.5, "roe_waa": 12.5},
+            {
+                "code": "600000",
+                "notice_date": "2026-08-28",
+                "report_date": "2026-06-30",
+                "net_profit": 2.0e8,
+                "ocf_ps": 0.8,
+                "roe_waa": 15.0,
+            },
+            {
+                "code": "600000",
+                "notice_date": "2026-04-29",
+                "report_date": "2026-03-31",
+                "net_profit": 1.0e8,
+                "ocf_ps": 0.5,
+                "roe_waa": 12.5,
+            },
         ]
         p.write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
         idx = scan._pit_index(p)
@@ -232,7 +318,15 @@ class TestPitIndexStructure:
 
     def test_skips_records_without_notice_date(self, tmp_path):
         p = tmp_path / "pit.jsonl"
-        p.write_text(json.dumps({
-            "code": "600000", "report_date": "2026-06-30", "net_profit": 1.0e8,
-        }) + "\n", encoding="utf-8")
+        p.write_text(
+            json.dumps(
+                {
+                    "code": "600000",
+                    "report_date": "2026-06-30",
+                    "net_profit": 1.0e8,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         assert scan._pit_index(p) == {}

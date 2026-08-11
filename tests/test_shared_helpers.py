@@ -13,6 +13,7 @@
 ⇒ 这就是为什么重复实现不能靠「看起来一样」就合并，也不能放着不管：
    **分叉的那一份迟早会漏掉别人修过的东西。**
 """
+
 from __future__ import annotations
 
 import ast
@@ -109,8 +110,9 @@ class TestBareCode:
 
 
 class TestFmt:
-    @pytest.mark.parametrize("v,want", [
-        (1.5, "+1.50%"), (-1.5, "-1.50%"), (0, "+0.00%")])
+    @pytest.mark.parametrize(
+        "v,want", [(1.5, "+1.50%"), (-1.5, "-1.50%"), (0, "+0.00%")]
+    )
     def test_pct_text_signed(self, v, want):
         assert fmt.pct_text(v) == want
 
@@ -162,7 +164,10 @@ class TestNoRefork:
         "clean_code": {"core/code_utils.py"},
         "fnum": {"core/code_utils.py"},
         "pct_change": {"core/indicators.py"},
-        "pct_text": {"core/fmt.py", "pipeline/close_review/review_core.py"},  # 后者是 1 行措辞适配器
+        "pct_text": {
+            "core/fmt.py",
+            "pipeline/close_review/review_core.py",
+        },  # 后者是 1 行措辞适配器
         "num_text": {"core/fmt.py"},
         "optional_finite": set(),  # 已全部改为 code_utils.fnum
         # ── 指标序列级入口（2026-08-09 收敛：QSX/MACD 曾各有 3~4 份逐位相同的实现）──
@@ -209,10 +214,18 @@ class TestNoRefork:
         "favorable_series": {"core/factors/sector_phase.py"},
         "mainline_fingerprint": {"core/factors/sector_mainstream.py"},
         # 注册表接口名（约定：每个 selector 各一份），但不得再长出新文件
-        "score": {"core/factors/_template.py", "core/factors/alpha101.py", "core/factors/alpha_pvcorr.py",
-                  "core/factors/baseline.py", "core/factors/kdj_j.py", "core/factors/low_vol.py",
-                  "core/factors/mcap.py", "core/factors/momentum.py", "core/factors/reversal_quality.py",
-                  "core/factors/reversal_quality_inv.py"},
+        "score": {
+            "core/factors/_template.py",
+            "core/factors/alpha101.py",
+            "core/factors/alpha_pvcorr.py",
+            "core/factors/baseline.py",
+            "core/factors/kdj_j.py",
+            "core/factors/low_vol.py",
+            "core/factors/mcap.py",
+            "core/factors/momentum.py",
+            "core/factors/reversal_quality.py",
+            "core/factors/reversal_quality_inv.py",
+        },
     }
 
     def test_no_duplicate_definitions(self):
@@ -228,7 +241,8 @@ class TestNoRefork:
                         offenders.append(f"{rel}:{node.lineno} def {node.name}")
         assert not offenders, (
             "这些助手已有唯一实现，请改为导入而不要重新定义：\n  "
-            + "\n  ".join(offenders))
+            + "\n  ".join(offenders)
+        )
 
     def test_finite_is_only_defined_in_code_utils(self):
         """`finite` 单独一条：`b1_holding_state` 曾有个**同名反语义**的版本
@@ -240,20 +254,29 @@ class TestNoRefork:
             for node in tree.body:
                 if isinstance(node, ast.FunctionDef) and node.name == "finite":
                     found.append(str(p.relative_to(ROOT / "src" / "custos")))
-        assert found == ["core/code_utils.py"], f"finite 应只在 code_utils 定义，实际: {found}"
+        assert found == ["core/code_utils.py"], (
+            f"finite 应只在 code_utils 定义，实际: {found}"
+        )
 
     def test_no_plain_utf8_json_read_helper(self):
         """守卫 BOM：不得再出现用裸 `utf-8` 读 JSON 的私有 load。"""
         offenders = []
         for p in sorted((ROOT / "src").rglob("*.py")):
             t = p.read_text(encoding="utf-8")
-            for m in re.finditer(r"^def (load|_load|read_json)\(.*?(?=\n(?:def |class |@|\Z))",
-                                 t, re.S | re.M):
+            for m in re.finditer(
+                r"^def (load|_load|read_json)\(.*?(?=\n(?:def |class |@|\Z))",
+                t,
+                re.S | re.M,
+            ):
                 body = m.group(0)
                 if "read_text" in body and "utf-8-sig" not in body:
-                    offenders.append(f'{p.relative_to(ROOT / "src" / "custos")}: def {m.group(1)}')
-        assert not offenders, ("读 JSON 必须用 `utf-8-sig`（Windows 记事本会加 BOM），"
-                              "或直接用 paths.read_json：\n  " + "\n  ".join(offenders))
+                    offenders.append(
+                        f"{p.relative_to(ROOT / 'src' / 'custos')}: def {m.group(1)}"
+                    )
+        assert not offenders, (
+            "读 JSON 必须用 `utf-8-sig`（Windows 记事本会加 BOM），"
+            "或直接用 paths.read_json：\n  " + "\n  ".join(offenders)
+        )
 
 
 class TestStreamWriterStaysSeparate:
@@ -278,4 +301,6 @@ class TestStreamWriterStaysSeparate:
     def test_old_name_is_gone(self):
         from custos.research import backtest_factors as bt
 
-        assert not hasattr(bt, "write_json"), "旧名应已移除，避免与 paths.write_json 混用"
+        assert not hasattr(bt, "write_json"), (
+            "旧名应已移除，避免与 paths.write_json 混用"
+        )

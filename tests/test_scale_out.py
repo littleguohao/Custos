@@ -8,6 +8,7 @@
 此前回测完全没有这一层：所有盈利单必须等 BBI 跌破才离场（已经回撤过了），
 于是系统性低估了 B1 的 avg_win 与 payoff_ratio。
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -30,11 +31,17 @@ def _mk(rows, entry_idx=39, entry_low_frac=0.965):
     lo = np.minimum(c, o) * 0.996
     if entry_idx is not None and 0 <= entry_idx < len(lo):
         lo[entry_idx] = c[entry_idx] * entry_low_frac
-    return pd.DataFrame({
-        "date": pd.bdate_range("2024-01-02", periods=len(c)),
-        "open": o, "high": np.maximum(c, o) * 1.004, "low": lo,
-        "close": c, "volume": v, "amount": v * c,
-    })
+    return pd.DataFrame(
+        {
+            "date": pd.bdate_range("2024-01-02", periods=len(c)),
+            "open": o,
+            "high": np.maximum(c, o) * 1.004,
+            "low": lo,
+            "close": c,
+            "volume": v,
+            "amount": v * c,
+        }
+    )
 
 
 def _pump_then_fade(pump_pct, pump_bars=2, after=18, decay=-0.012):
@@ -42,17 +49,18 @@ def _pump_then_fade(pump_pct, pump_bars=2, after=18, decay=-0.012):
     rows = [(10.0, 4e5)] * 40
     p = 10.0
     for _ in range(pump_bars):
-        p *= (1 + pump_pct)
+        p *= 1 + pump_pct
         rows.append((p, 1.2e6))
     for _ in range(after):
-        p *= (1 + decay)
+        p *= 1 + decay
         rows.append((p, 5e5))
     return _mk(rows)
 
 
 def _sim(df, scale, code="600000"):
-    return bt.simulate_b1_trade(df, 39, pd.Series(bt._bbi_series_from(df)),
-                                scale_out_frac=scale, code=code)
+    return bt.simulate_b1_trade(
+        df, 39, pd.Series(bt._bbi_series_from(df)), scale_out_frac=scale, code=code
+    )
 
 
 class TestMediumLargeBullFlags:
@@ -61,7 +69,7 @@ class TestMediumLargeBullFlags:
 
     def test_threshold_is_half_price_limit(self):
         df = _mk([(10.0, 4e5)] * 5 + [(10.0 * 1.06, 4e5)])
-        assert bt._medium_large_bull_flags(df, "600000")[-1]      # 主板 6% ≥ 5% ✓
+        assert bt._medium_large_bull_flags(df, "600000")[-1]  # 主板 6% ≥ 5% ✓
         assert not bt._medium_large_bull_flags(df, "300750")[-1]  # 创业板门槛 10%
 
     def test_below_threshold_not_counted(self):
@@ -112,7 +120,7 @@ class TestScaleOutMechanics:
         """首次触发后不再重复减仓（避免多次计入）。"""
         rows = [(10.0, 4e5)] * 40
         p = 10.0
-        for _ in range(6):                       # 连续 6 根大阳（多次满足条件）
+        for _ in range(6):  # 连续 6 根大阳（多次满足条件）
             p *= 1.07
             rows.append((p, 1.2e6))
         for _ in range(14):
@@ -129,7 +137,7 @@ class TestScaleOutMechanics:
         """单根大阳不触发——原文是"两根"。"""
         rows = [(10.0, 4e5)] * 40
         p = 10.0 * 1.09
-        rows.append((p, 1.2e6))                  # 只有一根大阳
+        rows.append((p, 1.2e6))  # 只有一根大阳
         for _ in range(14):
             p *= 0.988
             rows.append((p, 5e5))
@@ -148,13 +156,19 @@ class TestScaleOutMechanics:
             p *= 1.06
             rows.append((p, 1.2e6))
         df = _mk(rows, entry_idx=41)
-        b = bt.simulate_b1_trade(df, 41, pd.Series(bt._bbi_series_from(df)),
-                                 scale_out_frac=0.5, code="600000")
+        b = bt.simulate_b1_trade(
+            df,
+            41,
+            pd.Series(bt._bbi_series_from(df)),
+            scale_out_frac=0.5,
+            code="600000",
+        )
         assert "scaled" not in b["reason"]
 
     def test_disabled_by_default(self):
         """默认 0（不启用），保证与旧回测结果可对照。"""
         import inspect
+
         sig = inspect.signature(bt.simulate_b1_trade)
         assert sig.parameters["scale_out_frac"].default == 0.0
         sig2 = inspect.signature(bt.evaluate_trades)
@@ -169,13 +183,13 @@ class TestScaleOutRaisesPayoffNotWinRate:
 
     def _portfolio(self, scale):
         trades = []
-        for pump in (0.09, 0.08, 0.10, 0.07, 0.11, 0.06):     # 6 笔赢单
+        for pump in (0.09, 0.08, 0.10, 0.07, 0.11, 0.06):  # 6 笔赢单
             trades.append(_sim(_pump_then_fade(pump), scale))
-        for drop in (-0.02, -0.025, -0.03, -0.022):           # 4 笔亏单
+        for drop in (-0.02, -0.025, -0.03, -0.022):  # 4 笔亏单
             rows = [(10.0, 4e5)] * 40
             p = 10.0
             for _ in range(12):
-                p *= (1 + drop)
+                p *= 1 + drop
                 rows.append((p, 5e5))
             trades.append(_sim(_mk(rows), scale))
         for t in trades:
@@ -188,8 +202,9 @@ class TestScaleOutRaisesPayoffNotWinRate:
 
     def test_avg_loss_unchanged(self):
         a, b = self._portfolio(0.0), self._portfolio(0.5)
-        assert a["avg_loss"] == pytest.approx(b["avg_loss"], abs=1e-9), \
+        assert a["avg_loss"] == pytest.approx(b["avg_loss"], abs=1e-9), (
             "亏损单不触发分批止盈，均亏应完全一致"
+        )
 
     def test_avg_win_and_payoff_improve(self):
         a, b = self._portfolio(0.0), self._portfolio(0.5)
@@ -203,8 +218,17 @@ class TestCliWiring:
         import subprocess
         import sys
         from custos.core.paths import BASE
-        r = subprocess.run([sys.executable, str(BASE / "src" / "custos" / "research"
-                                                / "backtest_factors.py"), "--help"],
-                           capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", timeout=120)
+
+        r = subprocess.run(
+            [
+                sys.executable,
+                str(BASE / "src" / "custos" / "research" / "backtest_factors.py"),
+                "--help",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+        )
         assert "--scale-out" in r.stdout

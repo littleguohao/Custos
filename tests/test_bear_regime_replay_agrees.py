@@ -20,6 +20,7 @@
 若不一致，那三个情景的对比就建立在与生产不同的基线上，
 而 R4/R10 的结论正引用这份回测。本文件钉住这一点。
 """
+
 from __future__ import annotations
 
 import csv
@@ -40,8 +41,20 @@ def _write_ledger(path: pathlib.Path, rows):
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
-        w.writerow(["成交日期", "成交时间", "代码", "名称", "交易类别",
-                    "成交数量", "成交价格", "成交金额", "费用", "发生金额"])
+        w.writerow(
+            [
+                "成交日期",
+                "成交时间",
+                "代码",
+                "名称",
+                "交易类别",
+                "成交数量",
+                "成交价格",
+                "成交金额",
+                "费用",
+                "发生金额",
+            ]
+        )
         for r in rows:
             date, time, code, name, cat, qty, price, amount, fee = r
             cash = (amount - fee) if cat == "卖出" else -(amount + fee)
@@ -58,12 +71,32 @@ class TestActualScenarioAgreesWithProductionReplay:
     """
 
     ROWS = [
-        ("2026-07-01", "09:31", "600000", "浦发银行", "买入", 1000, 10.00, 10000.0, 5.0),
+        (
+            "2026-07-01",
+            "09:31",
+            "600000",
+            "浦发银行",
+            "买入",
+            1000,
+            10.00,
+            10000.0,
+            5.0,
+        ),
         ("2026-07-03", "10:05", "600000", "浦发银行", "买入", 500, 10.50, 5250.0, 3.0),
         ("2026-07-10", "14:20", "600000", "浦发银行", "卖出", 800, 11.00, 8800.0, 6.0),
-        ("2026-07-15", "09:40", "000001", "平安银行", "买入", 2000, 12.00, 24000.0, 8.0),
+        (
+            "2026-07-15",
+            "09:40",
+            "000001",
+            "平安银行",
+            "买入",
+            2000,
+            12.00,
+            24000.0,
+            8.0,
+        ),
     ]
-    EXPECTED = {"600000": 700.0, "000001": 2000.0}   # 1000+500-800；2000
+    EXPECTED = {"600000": 700.0, "000001": 2000.0}  # 1000+500-800；2000
 
     def test_qty_matches_incremental_ledger(self, tmp_path):
         """⚠️ 两条推导路径必须给出同一份数量 —— 真跑两侧再互相比对。
@@ -78,6 +111,7 @@ class TestActualScenarioAgreesWithProductionReplay:
         _write_ledger(led, self.ROWS)
 
         import pandas as pd
+
         df = pd.read_csv(led, dtype={"代码": str})
         # ⚠️ 签名是 `compute_positions(new, current_rows)` —— 它是「把成交应用到
         #    一份持仓快照上」，不是「从零回放」。从零回放 = 传空快照。
@@ -90,18 +124,29 @@ class TestActualScenarioAgreesWithProductionReplay:
         # 无行情时市值按成本折算），给最小输入即可。
         trades = br.load_ledger(led)
         days = sorted({t["date"] for t in trades})
-        res = br.run_scenario(trades, regime_map={}, amv_days=days, prices={},
-                              scenario="actual", sell_fee_rate=0.0,
-                              start=days[0], end=days[-1])
+        res = br.run_scenario(
+            trades,
+            regime_map={},
+            amv_days=days,
+            prices={},
+            scenario="actual",
+            sell_fee_rate=0.0,
+            start=days[0],
+            end=days[-1],
+        )
         research_qty = {code: p["qty"] for code, p in res["positions_end"].items()}
 
         assert prod_qty == self.EXPECTED, f"生产回放偏离手算基准：{prod_qty}"
-        assert research_qty == self.EXPECTED, f"研究 actual 情景偏离手算基准：{research_qty}"
-        assert research_qty == prod_qty, \
+        assert research_qty == self.EXPECTED, (
+            f"研究 actual 情景偏离手算基准：{research_qty}"
+        )
+        assert research_qty == prod_qty, (
             f"两条路径不一致：研究 {research_qty} vs 生产 {prod_qty}"
+        )
 
-    def test_check_positions_reports_full_table_not_just_diffs(self, tmp_path,
-                                                              monkeypatch):
+    def test_check_positions_reports_full_table_not_just_diffs(
+        self, tmp_path, monkeypatch
+    ):
         """⚠️ 钉住 `check_positions` 的**输出契约**：全部代码都要在表里。
 
         这正是它不能被 `diff_positions` 替换的原因 —— 后者只返回有差异的。
@@ -111,12 +156,18 @@ class TestActualScenarioAgreesWithProductionReplay:
         from custos.research import backtest_0amv_bear_regime as br
 
         pos = tmp_path / "current_positions.json"
-        pos.write_text(json.dumps([{"代码": "600000", "持有数量": 700},
-                                   {"代码": "000001", "持有数量": 2000}]),
-                       encoding="utf-8")
-        rows = br.check_positions({"600000": {"qty": 700.0},
-                                   "000001": {"qty": 2000.0}},
-                                  positions_path=pos)
+        pos.write_text(
+            json.dumps(
+                [
+                    {"代码": "600000", "持有数量": 700},
+                    {"代码": "000001", "持有数量": 2000},
+                ]
+            ),
+            encoding="utf-8",
+        )
+        rows = br.check_positions(
+            {"600000": {"qty": 700.0}, "000001": {"qty": 2000.0}}, positions_path=pos
+        )
         assert len(rows) == 2, "一致的代码也必须出现在对照表里"
         assert all(abs(r["diff"]) < 1e-9 for r in rows)
         assert {r["code"] for r in rows} == {"600000", "000001"}
@@ -127,8 +178,9 @@ class TestActualScenarioAgreesWithProductionReplay:
         from custos.research import backtest_0amv_bear_regime as br
 
         pos = tmp_path / "current_positions.json"
-        pos.write_text(json.dumps([{"代码": "000001", "持有数量": 2000}]),
-                       encoding="utf-8")
+        pos.write_text(
+            json.dumps([{"代码": "000001", "持有数量": 2000}]), encoding="utf-8"
+        )
         rows = br.check_positions({"600000": {"qty": 700.0}}, positions_path=pos)
         by = {r["code"]: r for r in rows}
         assert by["600000"]["diff"] == 700.0, "只在重放里的票，diff 应为正"
@@ -159,9 +211,12 @@ class TestWhyNotMerged:
         忠实回放函数按定义做不到，所以不能替换。"""
         from custos.research import backtest_0amv_bear_regime as br
 
-        assert set(br.SCENARIOS) >= {"actual", "no_bear_buys", "rebound_reduce"}, \
+        assert set(br.SCENARIOS) >= {"actual", "no_bear_buys", "rebound_reduce"}, (
             f"情景集合变了：{br.SCENARIOS}"
+        )
         import inspect
+
         src = inspect.getsource(br.run_scenario)
-        assert "no_bear_buys" in src and "skipped_buys" in src, \
+        assert "no_bear_buys" in src and "skipped_buys" in src, (
             "run_scenario 不再做反事实模拟？那可以重新评估 #33"
+        )

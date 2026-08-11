@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """run_bear_to_long_study 驱动脚本测试:数据护栏、命令构造、断点续跑、Pass2 编排。"""
+
 from __future__ import annotations
 
 import json
@@ -9,9 +10,15 @@ from custos.research import run_bear_to_long_study as rb
 
 
 def _pair(sig=("2022-03-01", "2022-06-01"), lab=("2022-06-02", "2022-07-22")):
-    return {"signal_start": sig[0], "signal_end": sig[1],
-            "label_start": lab[0], "label_end": lab[1],
-            "bear_days": 60, "long_days": 35, "signal_days": 60}
+    return {
+        "signal_start": sig[0],
+        "signal_end": sig[1],
+        "label_start": lab[0],
+        "label_end": lab[1],
+        "bear_days": 60,
+        "long_days": 35,
+        "signal_days": 60,
+    }
 
 
 _RECS = [{"code": "600000", "ret": 0.1, "days": [["2022-06-01", 0.0, {"f_x": 1.0}]]}]
@@ -23,43 +30,62 @@ def _firings_text(**over):
     默认带**一条有信号日的记录**:空 firings 现在会被 firings_reusable 判为"未完成"
     (审计 E9——0 信号的产物是数据源没挂上,不是研究结论),故指纹类测试须用非空样本。
     """
-    head = {"start": "2022-03-01", "end": "2022-06-01",
-            "ret_start": "2022-06-02", "ret_end": "2022-07-22",
-            "entry_filter": "reversal_k", "rank_score": "none",
-            "feature_scores": rb.DEFAULT_FEATURES, "delisted_ret": -1.0,
-            "universe": "sdata",
-            "records": list(_RECS)}
+    head = {
+        "start": "2022-03-01",
+        "end": "2022-06-01",
+        "ret_start": "2022-06-02",
+        "ret_end": "2022-07-22",
+        "entry_filter": "reversal_k",
+        "rank_score": "none",
+        "feature_scores": rb.DEFAULT_FEATURES,
+        "delisted_ret": -1.0,
+        "universe": "sdata",
+        "records": list(_RECS),
+    }
     head.update(over)
     return json.dumps(head, ensure_ascii=False)
 
 
 def _firings_file(tmp_path, name, codes, with_sig=(), delisted=(), rets=None):
     """写一份最小 firings(默认 ret=0.1;rets 可给单只指定收益,如 0.0 造僵尸样本)。"""
-    recs = [{"code": c, "ret": (rets or {}).get(c, 0.1),
-             "days": [["2022-06-01", 0.0, {"f_x": 1.0}]] if c in with_sig else [],
-             **({"delisted": True} if c in delisted else {})} for c in codes]
+    recs = [
+        {
+            "code": c,
+            "ret": (rets or {}).get(c, 0.1),
+            "days": [["2022-06-01", 0.0, {"f_x": 1.0}]] if c in with_sig else [],
+            **({"delisted": True} if c in delisted else {}),
+        }
+        for c in codes
+    ]
     p = tmp_path / name
-    p.write_text(json.dumps({"start": "2022-05-06", "end": "2022-06-02",
-                             "records": recs}, ensure_ascii=False), encoding="utf-8")
+    p.write_text(
+        json.dumps(
+            {"start": "2022-05-06", "end": "2022-06-02", "records": recs},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
     return p
 
 
 class TestGapGuards:
     def test_overlaps_gap_boundaries(self):
-        assert rb.overlaps_gap("2020-09-01", "2020-09-28") is True     # 触到缺口起点
-        assert rb.overlaps_gap("2021-07-30", "2021-08-10") is True     # 触到缺口终点
+        assert rb.overlaps_gap("2020-09-01", "2020-09-28") is True  # 触到缺口起点
+        assert rb.overlaps_gap("2021-07-30", "2021-08-10") is True  # 触到缺口终点
         assert rb.overlaps_gap("2020-01-01", "2020-09-27") is False
         assert rb.overlaps_gap("2021-07-31", "2021-12-31") is False
-        assert rb.overlaps_gap("2020-01-01", "2022-01-01") is True     # 完全跨越
+        assert rb.overlaps_gap("2020-01-01", "2022-01-01") is True  # 完全跨越
 
     def test_signal_window_in_gap_dropped(self):
-        keep, drop = rb.usable_pairs([_pair(sig=("2020-07-16", "2020-11-20"),
-                                            lab=("2020-11-23", "2021-01-25"))])
+        keep, drop = rb.usable_pairs(
+            [_pair(sig=("2020-07-16", "2020-11-20"), lab=("2020-11-23", "2021-01-25"))]
+        )
         assert keep == [] and "缺口" in drop[0]["reason"]
 
     def test_label_window_beyond_data_end_dropped(self):
-        keep, drop = rb.usable_pairs([_pair(sig=("2026-02-02", "2026-04-21"),
-                                            lab=("2026-04-22", "2026-06-05"))])
+        keep, drop = rb.usable_pairs(
+            [_pair(sig=("2026-02-02", "2026-04-21"), lab=("2026-04-22", "2026-06-05"))]
+        )
         assert keep == [] and "数据末尾" in drop[0]["reason"]
 
     def test_clean_pair_kept(self):
@@ -68,12 +94,16 @@ class TestGapGuards:
 
     def test_market_cap_guard_off_by_default(self):
         """默认不开:否则 2015~2017 的窗口会被静默剔掉,12 窗池凭空缩水。"""
-        early = _pair(sig=("2016-01-04", "2016-03-01"), lab=("2016-03-02", "2016-05-01"))
+        early = _pair(
+            sig=("2016-01-04", "2016-03-01"), lab=("2016-03-02", "2016-05-01")
+        )
         keep, drop = rb.usable_pairs([early])
         assert len(keep) == 1 and drop == []
 
     def test_market_cap_guard_drops_pre_2018_signal_window(self):
-        early = _pair(sig=("2016-01-04", "2016-03-01"), lab=("2016-03-02", "2016-05-01"))
+        early = _pair(
+            sig=("2016-01-04", "2016-03-01"), lab=("2016-03-02", "2016-05-01")
+        )
         keep, drop = rb.usable_pairs([early], require_market_cap=True)
         assert keep == [] and len(drop) == 1
         assert rb.MV_START in drop[0]["reason"] and "市值" in drop[0]["reason"]
@@ -96,16 +126,20 @@ class TestGapGuards:
 
 
 class TestCommands:
-    def test_pass1_decouples_windows_and_keeps_delisted(self, tmp_path, monkeypatch, capsys):
-        monkeypatch.setattr(rb.bt, "load_amv_regime", lambda since=None: {"2022-01-03": "空头"})
+    def test_pass1_decouples_windows_and_keeps_delisted(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        monkeypatch.setattr(
+            rb.bt, "load_amv_regime", lambda since=None: {"2022-01-03": "空头"}
+        )
         monkeypatch.setattr(rb.lp, "bear_to_long_pairs", lambda *a, **k: [_pair()])
         rc = rb.main(["--dry-run", "--out-dir", str(tmp_path)])
         out = capsys.readouterr().out
         assert rc == 0
-        assert "--start 2022-03-01 --end 2022-06-01" in out          # 信号窗
+        assert "--start 2022-03-01 --end 2022-06-01" in out  # 信号窗
         assert "--ret-start 2022-06-02 --ret-end 2022-07-22" in out  # 赢家窗(解耦)
-        assert "--delisted-ret -1.0" in out                          # 去幸存者偏差
-        assert "--universe-sdata" in out                             # §5 含退市宇宙准入门槛
+        assert "--delisted-ret -1.0" in out  # 去幸存者偏差
+        assert "--universe-sdata" in out  # §5 含退市宇宙准入门槛
         assert "--label-basis winner" in out and "--per-window" in out
 
     def test_empty_regime_exits_2(self, monkeypatch, capsys):
@@ -118,8 +152,12 @@ class TestCommands:
         rc = rb.main(["--dry-run", "--pairs-file", str(pf), "--out-dir", str(tmp_path)])
         assert rc == 0 and "1 对可用" in capsys.readouterr().out
 
-    def test_few_windows_warns_about_statistical_power(self, tmp_path, monkeypatch, capsys):
-        monkeypatch.setattr(rb.bt, "load_amv_regime", lambda since=None: {"2022-01-03": "空头"})
+    def test_few_windows_warns_about_statistical_power(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        monkeypatch.setattr(
+            rb.bt, "load_amv_regime", lambda since=None: {"2022-01-03": "空头"}
+        )
         monkeypatch.setattr(rb.lp, "bear_to_long_pairs", lambda *a, **k: [_pair()])
         rb.main(["--dry-run", "--out-dir", str(tmp_path)])
         assert "统计力很弱" in capsys.readouterr().err
@@ -136,13 +174,23 @@ class TestSurvivorshipReport:
         return _firings_file(tmp_path, name, codes, with_sig, delisted, rets)
 
     def test_gone_cohort_counted_per_window(self, tmp_path, monkeypatch):
-        f = self._firings(tmp_path, "w1.json", ["600000", "000001", "900001"],
-                          with_sig=("600000", "900001"))
+        f = self._firings(
+            tmp_path,
+            "w1.json",
+            ["600000", "000001", "900001"],
+            with_sig=("600000", "900001"),
+        )
         from custos.datasource import s_data
-        monkeypatch.setattr(s_data, "list_universe",
-                            lambda root, source="qlib": ["600000", "000001", "900001"])
-        rep = rb.survivorship_report([f], "/tmp/sroot", today_codes={"600000", "000001"})
-        assert rep["gone_pool"] == 1                                  # 900001 今天已没有
+
+        monkeypatch.setattr(
+            s_data,
+            "list_universe",
+            lambda root, source="qlib": ["600000", "000001", "900001"],
+        )
+        rep = rb.survivorship_report(
+            [f], "/tmp/sroot", today_codes={"600000", "000001"}
+        )
+        assert rep["gone_pool"] == 1  # 900001 今天已没有
         w = rep["windows"][0]
         assert w["n_codes"] == 3 and w["n_gone_in_sample"] == 1
         assert w["n_gone_with_signal"] == 1 and w["n_delisted_flag"] == 0
@@ -152,26 +200,37 @@ class TestSurvivorshipReport:
         """宇宙里一只已摘牌股都没有 ⇒ 去偏无效,结论只能当乐观上界(§3 首条)。"""
         f = self._firings(tmp_path, "w1.json", ["600000"], with_sig=("600000",))
         from custos.datasource import s_data
-        monkeypatch.setattr(s_data, "list_universe", lambda root, source="qlib": ["600000"])
+
+        monkeypatch.setattr(
+            s_data, "list_universe", lambda root, source="qlib": ["600000"]
+        )
         rep = rb.survivorship_report([f], "/tmp/sroot", today_codes={"600000"})
         assert rep["gone_pool"] == 0
         assert "去偏无效" in rep["text"] and "乐观上界" in rep["text"]
 
     def test_window_without_gone_stock_flagged(self, tmp_path, monkeypatch):
-        f1 = self._firings(tmp_path, "w1.json", ["600000", "900001"], with_sig=("900001",))
+        f1 = self._firings(
+            tmp_path, "w1.json", ["600000", "900001"], with_sig=("900001",)
+        )
         f2 = self._firings(tmp_path, "w2.json", ["600000"], with_sig=("600000",))
         from custos.datasource import s_data
-        monkeypatch.setattr(s_data, "list_universe",
-                            lambda root, source="qlib": ["600000", "900001"])
+
+        monkeypatch.setattr(
+            s_data, "list_universe", lambda root, source="qlib": ["600000", "900001"]
+        )
         rep = rb.survivorship_report([f1, f2], "/tmp/sroot", today_codes={"600000"})
         assert [w["n_gone_in_sample"] for w in rep["windows"]] == [1, 0]
         assert "1 个窗的样本里一只已摘牌股都没有" in rep["text"]
 
     def test_n_delisted_zero_is_explained_as_expected(self, tmp_path, monkeypatch):
-        f = self._firings(tmp_path, "w1.json", ["600000", "900001"], with_sig=("900001",))
+        f = self._firings(
+            tmp_path, "w1.json", ["600000", "900001"], with_sig=("900001",)
+        )
         from custos.datasource import s_data
-        monkeypatch.setattr(s_data, "list_universe",
-                            lambda root, source="qlib": ["600000", "900001"])
+
+        monkeypatch.setattr(
+            s_data, "list_universe", lambda root, source="qlib": ["600000", "900001"]
+        )
         rep = rb.survivorship_report([f], "/tmp/sroot", today_codes={"600000"})
         assert "0 不代表去偏失效" in rep["text"]
 
@@ -179,12 +238,17 @@ class TestSurvivorshipReport:
         bad = tmp_path / "bad.json"
         bad.write_text("{not json", encoding="utf-8")
         from custos.datasource import s_data
-        monkeypatch.setattr(s_data, "list_universe", lambda root, source="qlib": ["600000"])
+
+        monkeypatch.setattr(
+            s_data, "list_universe", lambda root, source="qlib": ["600000"]
+        )
         rep = rb.survivorship_report([bad], "/tmp/sroot", today_codes=set())
         assert rep["windows"][0].get("error") and "读取失败" in rep["text"]
 
     def test_cli_requires_existing_firings(self, tmp_path, monkeypatch, capsys):
-        monkeypatch.setattr(rb.bt, "load_amv_regime", lambda since=None: {"2022-01-03": "空头"})
+        monkeypatch.setattr(
+            rb.bt, "load_amv_regime", lambda since=None: {"2022-01-03": "空头"}
+        )
         monkeypatch.setattr(rb.lp, "bear_to_long_pairs", lambda *a, **k: [_pair()])
         rc = rb.main(["--out-dir", str(tmp_path), "--survivorship-report"])
         assert rc == 2 and "没有可体检的 firings" in capsys.readouterr().err
@@ -194,12 +258,25 @@ class TestFeaturePassthrough:
     """Pass1 特征开关必须透传到子命令 —— 否则驱动跑一遍等于没开(2026-07-31 踩过)。"""
 
     def _args(self, **over):
-        base = dict(data_source="qlib", s_data_root="/x", entry_filter="reversal_k",
-                    delisted_ret=-1.0, buffer_days=60, gate_window=120,
-                    feature_scores="a,b", progress=200, chunk_size=0,
-                    sector_features=False, style_features=False, trade_sim=False,
-                    pit_features=False, pit_ledger="", pit_visible_same_day=False,
-                    stop_pct=8.0, bbi_consec=2)
+        base = dict(
+            data_source="qlib",
+            s_data_root="/x",
+            entry_filter="reversal_k",
+            delisted_ret=-1.0,
+            buffer_days=60,
+            gate_window=120,
+            feature_scores="a,b",
+            progress=200,
+            chunk_size=0,
+            sector_features=False,
+            style_features=False,
+            trade_sim=False,
+            pit_features=False,
+            pit_ledger="",
+            pit_visible_same_day=False,
+            stop_pct=8.0,
+            bbi_consec=2,
+        )
         base.update(over)
         return type("A", (), base)()
 
@@ -217,8 +294,9 @@ class TestFeaturePassthrough:
         assert "--style-features" in c and "--trade-sim" in c
 
     def test_pit_ledger_and_visibility_passed_through(self):
-        c = self._cmd(pit_features=True, pit_ledger="/tmp/led.jsonl",
-                      pit_visible_same_day=True)
+        c = self._cmd(
+            pit_features=True, pit_ledger="/tmp/led.jsonl", pit_visible_same_day=True
+        )
         assert "--pit-ledger" in c and "/tmp/led.jsonl" in c
         assert "--pit-visible-same-day" in c
 
@@ -235,19 +313,36 @@ class TestFingerprintLegacySafe:
     """新增布尔指纹键不得让**旧 firings** 被误判为参数不一致而全窗重跑(12 窗代价极大)。"""
 
     def _args(self, **over):
-        base = dict(entry_filter="reversal_k", feature_scores=rb.DEFAULT_FEATURES,
-                    delisted_ret=-1.0, sector_features=False, style_features=False,
-                    trade_sim=False, pit_features=False, pit_visible_same_day=False)
+        base = dict(
+            entry_filter="reversal_k",
+            feature_scores=rb.DEFAULT_FEATURES,
+            delisted_ret=-1.0,
+            sector_features=False,
+            style_features=False,
+            trade_sim=False,
+            pit_features=False,
+            pit_visible_same_day=False,
+        )
         base.update(over)
         return type("A", (), base)()
 
     def _legacy_firings(self, tmp_path):
         """旧格式:头部完全没有特征开关字段(records 必须非空——空产物另有专门的拒复用闸)。"""
         p = tmp_path / "old.json"
-        p.write_text(json.dumps({"entry_filter": "reversal_k", "rank_score": "none",
-                                 "feature_scores": rb.DEFAULT_FEATURES, "delisted_ret": -1.0,
-                                 "universe": "sdata", "records": _RECS}, ensure_ascii=False),
-                     encoding="utf-8")
+        p.write_text(
+            json.dumps(
+                {
+                    "entry_filter": "reversal_k",
+                    "rank_score": "none",
+                    "feature_scores": rb.DEFAULT_FEATURES,
+                    "delisted_ret": -1.0,
+                    "universe": "sdata",
+                    "records": _RECS,
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
         return p
 
     def test_legacy_firings_still_reusable_when_flags_off(self, tmp_path, capsys):
@@ -264,22 +359,43 @@ class TestFingerprintLegacySafe:
     def test_pit_firings_rejected_when_flag_turned_off(self, tmp_path, capsys):
         """反向也要成立:带 PIT 的 firings 在不开开关时也算不一致(特征集不同)。"""
         p = tmp_path / "pit.json"
-        p.write_text(json.dumps({"entry_filter": "reversal_k", "rank_score": "none",
-                                 "feature_scores": rb.DEFAULT_FEATURES, "delisted_ret": -1.0,
-                                 "universe": "sdata", "pit_features": True, "records": _RECS}),
-                     encoding="utf-8")
+        p.write_text(
+            json.dumps(
+                {
+                    "entry_filter": "reversal_k",
+                    "rank_score": "none",
+                    "feature_scores": rb.DEFAULT_FEATURES,
+                    "delisted_ret": -1.0,
+                    "universe": "sdata",
+                    "pit_features": True,
+                    "records": _RECS,
+                }
+            ),
+            encoding="utf-8",
+        )
         assert rb.firings_reusable(p, self._args()) is False
 
     def test_visibility_switch_counted_as_mismatch(self, tmp_path):
         p = tmp_path / "pit.json"
-        p.write_text(json.dumps({"entry_filter": "reversal_k", "rank_score": "none",
-                                 "feature_scores": rb.DEFAULT_FEATURES, "delisted_ret": -1.0,
-                                 "universe": "sdata", "pit_features": True,
-                                 "pit_visible_same_day": False, "records": _RECS}),
-                     encoding="utf-8")
+        p.write_text(
+            json.dumps(
+                {
+                    "entry_filter": "reversal_k",
+                    "rank_score": "none",
+                    "feature_scores": rb.DEFAULT_FEATURES,
+                    "delisted_ret": -1.0,
+                    "universe": "sdata",
+                    "pit_features": True,
+                    "pit_visible_same_day": False,
+                    "records": _RECS,
+                }
+            ),
+            encoding="utf-8",
+        )
         ok = rb.firings_reusable(p, self._args(pit_features=True))
-        bad = rb.firings_reusable(p, self._args(pit_features=True,
-                                               pit_visible_same_day=True))
+        bad = rb.firings_reusable(
+            p, self._args(pit_features=True, pit_visible_same_day=True)
+        )
         assert ok is True and bad is False
 
     def test_ledger_size_not_in_fingerprint(self):
@@ -293,65 +409,106 @@ class TestZeroRetVolumeDiagnosis:
 
     def _bars(self, dates, closes, volumes):
         import pandas as pd
+
         return pd.DataFrame({"date": dates, "close": closes, "volume": volumes})
 
     def test_all_zero_volume_is_suspended_all(self):
-        b = self._bars(["2026-06-01", "2026-06-02", "2026-06-03"], [10.0] * 3, [0, 0, 0])
+        b = self._bars(
+            ["2026-06-01", "2026-06-02", "2026-06-03"], [10.0] * 3, [0, 0, 0]
+        )
         got = rb.classify_zero_ret_bars(b, "2026-06-01", "2026-06-03")
         assert got["kind"] == "suspended_all" and got["n_zero_vol"] == 3
 
     def test_partial_zero_volume_is_suspended_part(self):
-        b = self._bars([f"2026-06-{d:02d}" for d in range(1, 8)], [10.0] * 7,
-                       [100, 0, 0, 0, 0, 0, 200])
+        b = self._bars(
+            [f"2026-06-{d:02d}" for d in range(1, 8)],
+            [10.0] * 7,
+            [100, 0, 0, 0, 0, 0, 200],
+        )
         got = rb.classify_zero_ret_bars(b, "2026-06-01", "2026-06-07")
         assert got["kind"] == "suspended_part" and got["n_zero_vol"] == 5
 
     def test_full_volume_flat_close_is_traded_flat(self):
         """有量却首末同价 —— 这类不是停牌僵尸,剔除它就剔错了对象。"""
-        b = self._bars([f"2026-06-{d:02d}" for d in range(1, 8)],
-                       [10.0, 10.5, 11.0, 9.8, 10.2, 10.4, 10.0], [100] * 7)
+        b = self._bars(
+            [f"2026-06-{d:02d}" for d in range(1, 8)],
+            [10.0, 10.5, 11.0, 9.8, 10.2, 10.4, 10.0],
+            [100] * 7,
+        )
         got = rb.classify_zero_ret_bars(b, "2026-06-01", "2026-06-07")
         assert got["kind"] == "traded_flat" and got["n_zero_vol"] == 0
         assert got["first_close"] == got["last_close"] == 10.0
 
     def test_few_bars_flagged_before_suspended_part(self):
         """窗内只有 3 根(新上市/末期退市)——不该按区间收益判赢家,优先报 few_bars。"""
-        b = self._bars(["2026-06-05", "2026-06-06", "2026-06-07"], [10.0] * 3, [100, 0, 100])
+        b = self._bars(
+            ["2026-06-05", "2026-06-06", "2026-06-07"], [10.0] * 3, [100, 0, 100]
+        )
         got = rb.classify_zero_ret_bars(b, "2026-06-01", "2026-06-07")
         assert got["kind"] == "few_bars" and got["n_bars"] == 3
 
     def test_bars_outside_window_excluded(self):
-        b = self._bars(["2026-05-01", "2026-06-01", "2026-06-02", "2026-07-01"],
-                       [50.0, 10.0, 10.0, 99.0], [100, 0, 0, 100])
+        b = self._bars(
+            ["2026-05-01", "2026-06-01", "2026-06-02", "2026-07-01"],
+            [50.0, 10.0, 10.0, 99.0],
+            [100, 0, 0, 100],
+        )
         got = rb.classify_zero_ret_bars(b, "2026-06-01", "2026-06-02")
         assert got["kind"] == "suspended_all" and got["n_bars"] == 2
 
     def test_missing_volume_column_reported_not_guessed(self):
         import pandas as pd
+
         b = pd.DataFrame({"date": ["2026-06-01", "2026-06-02"], "close": [10.0, 10.0]})
-        assert rb.classify_zero_ret_bars(b, "2026-06-01", "2026-06-02")["kind"] == "no_volume_col"
+        assert (
+            rb.classify_zero_ret_bars(b, "2026-06-01", "2026-06-02")["kind"]
+            == "no_volume_col"
+        )
 
     def test_no_bars_in_window(self):
         b = self._bars(["2026-05-01"], [10.0], [100])
-        assert rb.classify_zero_ret_bars(b, "2026-06-01", "2026-06-02")["kind"] == "no_bars"
-        assert rb.classify_zero_ret_bars(None, "2026-06-01", "2026-06-02")["kind"] == "no_bars"
+        assert (
+            rb.classify_zero_ret_bars(b, "2026-06-01", "2026-06-02")["kind"]
+            == "no_bars"
+        )
+        assert (
+            rb.classify_zero_ret_bars(None, "2026-06-01", "2026-06-02")["kind"]
+            == "no_bars"
+        )
 
     def test_diagnose_aggregates_and_verdicts_suspended(self, tmp_path):
         import pandas as pd
+
         f = tmp_path / "w1.json"
-        f.write_text(json.dumps({
-            "start": "2022-03-01", "end": "2022-06-01",
-            "ret_start": "2022-06-02", "ret_end": "2022-07-22",
-            "records": [{"code": "830001", "ret": 0.0}, {"code": "830002", "ret": 0.0},
-                        {"code": "600000", "ret": 0.25}]}, ensure_ascii=False), encoding="utf-8")
+        f.write_text(
+            json.dumps(
+                {
+                    "start": "2022-03-01",
+                    "end": "2022-06-01",
+                    "ret_start": "2022-06-02",
+                    "ret_end": "2022-07-22",
+                    "records": [
+                        {"code": "830001", "ret": 0.0},
+                        {"code": "830002", "ret": 0.0},
+                        {"code": "600000", "ret": 0.25},
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
 
         def loader(codes, start, end):
             dates = [f"2022-06-{d:02d}" for d in range(2, 12)]
-            return {c: pd.DataFrame({"date": dates, "close": [10.0] * 10, "volume": [0] * 10})
-                    for c in codes}
+            return {
+                c: pd.DataFrame(
+                    {"date": dates, "close": [10.0] * 10, "volume": [0] * 10}
+                )
+                for c in codes
+            }
 
         rep = rb.zero_ret_diagnose([f], loader)
-        assert rep["kind_total"] == {"suspended_all": 2}       # 只诊断 ret==0 的两只
+        assert rep["kind_total"] == {"suspended_all": 2}  # 只诊断 ret==0 的两只
         assert rep["n_total"] == 2
         assert "剔除对象正确" in rep["text"]
         assert rep["windows"][0]["board_mix"] == {"北交所": 2}
@@ -359,16 +516,31 @@ class TestZeroRetVolumeDiagnosis:
     def test_diagnose_flags_traded_flat_majority(self, tmp_path):
         """有量收平占多数时必须给出"剔错了对象"的告警,而不是默认认定僵尸。"""
         import pandas as pd
+
         f = tmp_path / "w1.json"
-        f.write_text(json.dumps({
-            "ret_start": "2022-06-02", "ret_end": "2022-07-22",
-            "records": [{"code": "600001", "ret": 0.0}, {"code": "600002", "ret": 0.0}]},
-            ensure_ascii=False), encoding="utf-8")
+        f.write_text(
+            json.dumps(
+                {
+                    "ret_start": "2022-06-02",
+                    "ret_end": "2022-07-22",
+                    "records": [
+                        {"code": "600001", "ret": 0.0},
+                        {"code": "600002", "ret": 0.0},
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
 
         def loader(codes, start, end):
             dates = [f"2022-06-{d:02d}" for d in range(2, 12)]
-            return {c: pd.DataFrame({"date": dates, "close": [10.0] * 10,
-                                     "volume": [1000] * 10}) for c in codes}
+            return {
+                c: pd.DataFrame(
+                    {"date": dates, "close": [10.0] * 10, "volume": [1000] * 10}
+                )
+                for c in codes
+            }
 
         rep = rb.zero_ret_diagnose([f], loader)
         assert rep["kind_total"] == {"traded_flat": 2}
@@ -376,9 +548,16 @@ class TestZeroRetVolumeDiagnosis:
 
     def test_diagnose_loader_failure_recorded_not_raised(self, tmp_path):
         f = tmp_path / "w1.json"
-        f.write_text(json.dumps({"ret_start": "2022-06-02", "ret_end": "2022-07-22",
-                                 "records": [{"code": "600001", "ret": 0.0}]}),
-                     encoding="utf-8")
+        f.write_text(
+            json.dumps(
+                {
+                    "ret_start": "2022-06-02",
+                    "ret_end": "2022-07-22",
+                    "records": [{"code": "600001", "ret": 0.0}],
+                }
+            ),
+            encoding="utf-8",
+        )
 
         def boom(codes, start, end):
             raise RuntimeError("bundle 不可用")
@@ -388,26 +567,45 @@ class TestZeroRetVolumeDiagnosis:
 
     def test_diagnose_window_without_zero_ret_samples(self, tmp_path):
         f = tmp_path / "w1.json"
-        f.write_text(json.dumps({"ret_start": "2022-06-02", "ret_end": "2022-07-22",
-                                 "records": [{"code": "600001", "ret": 0.3}]}),
-                     encoding="utf-8")
+        f.write_text(
+            json.dumps(
+                {
+                    "ret_start": "2022-06-02",
+                    "ret_end": "2022-07-22",
+                    "records": [{"code": "600001", "ret": 0.3}],
+                }
+            ),
+            encoding="utf-8",
+        )
         rep = rb.zero_ret_diagnose([f], lambda *a: {})
         assert rep["n_total"] == 0 and "无零收益样本" in rep["text"]
 
     def test_max_codes_caps_reload(self, tmp_path):
         """大窗(实跑 807 只)可先抽样,避免一次重载太多。"""
         import pandas as pd
+
         f = tmp_path / "w1.json"
-        f.write_text(json.dumps({"ret_start": "2022-06-02", "ret_end": "2022-07-22",
-                                 "records": [{"code": f"83000{i}", "ret": 0.0}
-                                             for i in range(5)]}), encoding="utf-8")
+        f.write_text(
+            json.dumps(
+                {
+                    "ret_start": "2022-06-02",
+                    "ret_end": "2022-07-22",
+                    "records": [{"code": f"83000{i}", "ret": 0.0} for i in range(5)],
+                }
+            ),
+            encoding="utf-8",
+        )
         seen = {}
 
         def loader(codes, start, end):
             seen["n"] = len(codes)
             dates = [f"2022-06-{d:02d}" for d in range(2, 12)]
-            return {c: pd.DataFrame({"date": dates, "close": [10.0] * 10,
-                                     "volume": [0] * 10}) for c in codes}
+            return {
+                c: pd.DataFrame(
+                    {"date": dates, "close": [10.0] * 10, "volume": [0] * 10}
+                )
+                for c in codes
+            }
 
         rb.zero_ret_diagnose([f], loader, max_codes=2)
         assert seen["n"] == 2
@@ -418,87 +616,137 @@ class TestZeroRetDiagnosis:
 
     def test_only_exact_zero_counted(self):
         """-1.0(退市按大亏计入)与 None(无收益)都不是零收益样本。"""
-        recs = [{"code": "600000", "ret": 0.0}, {"code": "000001", "ret": -1.0},
-                {"code": "300001", "ret": None}, {"code": "688001", "ret": 0.0001},
-                {"code": "830001", "ret": "0"}, {"ret": 0.0}]          # 字符串"0"可解析;无 code 跳过
+        recs = [
+            {"code": "600000", "ret": 0.0},
+            {"code": "000001", "ret": -1.0},
+            {"code": "300001", "ret": None},
+            {"code": "688001", "ret": 0.0001},
+            {"code": "830001", "ret": "0"},
+            {"ret": 0.0},
+        ]  # 字符串"0"可解析;无 code 跳过
         assert rb.zero_ret_codes(recs) == {"600000", "830001"}
 
     def test_board_mix_sorted_desc(self):
         mix = rb.board_mix(["830001", "430002", "920003", "600000"])
         assert list(mix)[0] == "北交所" and mix["北交所"] == 3 and mix["沪主板"] == 1
 
-    def test_gone_and_zero_ret_warns_about_deleting_real_knives(self, tmp_path, monkeypatch):
+    def test_gone_and_zero_ret_warns_about_deleting_real_knives(
+        self, tmp_path, monkeypatch
+    ):
         """已摘牌又恰好零收益 ⇒ --exclude-zero-ret 会删掉真飞刀,必须告警。
 
         这类记录 window_return 算得 0.0(窗内有价格、首末同价),走不进 `ret is None` 的
         --delisted-ret 分支,所以不带 delisted 标记,只能靠\"已摘牌队列 ∩ 零收益\"抓出来。
         """
         f = _firings_file(
-            tmp_path, "w1.json", ["600000", "900001", "830001"],
-            with_sig=("600000", "900001"), rets={"900001": 0.0, "830001": 0.0})
+            tmp_path,
+            "w1.json",
+            ["600000", "900001", "830001"],
+            with_sig=("600000", "900001"),
+            rets={"900001": 0.0, "830001": 0.0},
+        )
         from custos.datasource import s_data
-        monkeypatch.setattr(s_data, "list_universe",
-                            lambda root, source="qlib": ["600000", "900001", "830001"])
-        rep = rb.survivorship_report([f], "/tmp/sroot", today_codes={"600000", "830001"})
+
+        monkeypatch.setattr(
+            s_data,
+            "list_universe",
+            lambda root, source="qlib": ["600000", "900001", "830001"],
+        )
+        rep = rb.survivorship_report(
+            [f], "/tmp/sroot", today_codes={"600000", "830001"}
+        )
         w = rep["windows"][0]
-        assert w["n_zero_ret"] == 2 and w["n_zero_gone"] == 1          # 900001 已摘牌且零收益
+        assert w["n_zero_ret"] == 2 and w["n_zero_gone"] == 1  # 900001 已摘牌且零收益
         assert rep["n_zero_gone_total"] == 1
         assert "真飞刀" in rep["text"] and "重新引入幸存者偏差" in rep["text"]
-        assert "北交所 1 只" in rep["text"]                             # 830001 计入上市板分布
+        assert "北交所 1 只" in rep["text"]  # 830001 计入上市板分布
 
     def test_zero_ret_without_gone_intersection_is_safe(self, tmp_path, monkeypatch):
-        f = _firings_file(tmp_path, "w1.json", ["600000", "830001", "900001"],
-                          with_sig=("600000",), rets={"830001": 0.0})
+        f = _firings_file(
+            tmp_path,
+            "w1.json",
+            ["600000", "830001", "900001"],
+            with_sig=("600000",),
+            rets={"830001": 0.0},
+        )
         from custos.datasource import s_data
-        monkeypatch.setattr(s_data, "list_universe",
-                            lambda root, source="qlib": ["600000", "830001", "900001"])
-        rep = rb.survivorship_report([f], "/tmp/sroot", today_codes={"600000", "830001"})
+
+        monkeypatch.setattr(
+            s_data,
+            "list_universe",
+            lambda root, source="qlib": ["600000", "830001", "900001"],
+        )
+        rep = rb.survivorship_report(
+            [f], "/tmp/sroot", today_codes={"600000", "830001"}
+        )
         assert rep["n_zero_gone_total"] == 0
         assert "未删到真飞刀" in rep["text"] and "真飞刀,一并删掉" not in rep["text"]
 
     def test_board_distribution_aggregated_across_windows(self, tmp_path, monkeypatch):
         """跨窗合计的上市板分布 —— 判定\"零收益是否集中在北交所\"的直接证据。"""
-        f1 = _firings_file(tmp_path, "w1.json", ["830001", "600000"], rets={"830001": 0.0})
-        f2 = _firings_file(tmp_path, "w2.json", ["830002", "300001"],
-                           rets={"830002": 0.0, "300001": 0.0})
+        f1 = _firings_file(
+            tmp_path, "w1.json", ["830001", "600000"], rets={"830001": 0.0}
+        )
+        f2 = _firings_file(
+            tmp_path,
+            "w2.json",
+            ["830002", "300001"],
+            rets={"830002": 0.0, "300001": 0.0},
+        )
         from custos.datasource import s_data
-        monkeypatch.setattr(s_data, "list_universe",
-                            lambda root, source="qlib": ["830001", "830002", "600000", "300001"])
-        rep = rb.survivorship_report([f1, f2], "/tmp/sroot",
-                                     today_codes={"830001", "830002", "600000", "300001"})
+
+        monkeypatch.setattr(
+            s_data,
+            "list_universe",
+            lambda root, source="qlib": ["830001", "830002", "600000", "300001"],
+        )
+        rep = rb.survivorship_report(
+            [f1, f2], "/tmp/sroot", today_codes={"830001", "830002", "600000", "300001"}
+        )
         assert rep["zero_by_board_total"] == {"北交所": 2, "创业板": 1}
         assert "零收益样本上市板分布" in rep["text"]
 
 
 class TestResumeAndPass2:
     def _setup(self, monkeypatch, pairs):
-        monkeypatch.setattr(rb.bt, "load_amv_regime", lambda since=None: {"2022-01-03": "空头"})
+        monkeypatch.setattr(
+            rb.bt, "load_amv_regime", lambda since=None: {"2022-01-03": "空头"}
+        )
         monkeypatch.setattr(rb.lp, "bear_to_long_pairs", lambda *a, **k: pairs)
 
     def test_existing_firings_skipped_unless_force(self, tmp_path, monkeypatch, capsys):
         p = _pair()
         self._setup(monkeypatch, [p])
-        (tmp_path / f"firings_{rb.tag_of(p)}.json").write_text(_firings_text(), encoding="utf-8")
+        (tmp_path / f"firings_{rb.tag_of(p)}.json").write_text(
+            _firings_text(), encoding="utf-8"
+        )
         calls = []
         rb.main(["--out-dir", str(tmp_path)], runner=lambda cmd: calls.append(cmd) or 0)
-        assert len(calls) == 1 and "--from-firings" in calls[0]        # 只跑了 Pass2
+        assert len(calls) == 1 and "--from-firings" in calls[0]  # 只跑了 Pass2
         assert "[skip]" in capsys.readouterr().out
 
         calls.clear()
-        rb.main(["--out-dir", str(tmp_path), "--force"],
-                runner=lambda cmd: calls.append(cmd) or 0)
-        assert len(calls) == 2 and "--emit-firings" in calls[0]        # 强制重跑 Pass1
+        rb.main(
+            ["--out-dir", str(tmp_path), "--force"],
+            runner=lambda cmd: calls.append(cmd) or 0,
+        )
+        assert len(calls) == 2 and "--emit-firings" in calls[0]  # 强制重跑 Pass1
 
-    def test_param_mismatch_reruns_instead_of_reuse(self, tmp_path, monkeypatch, capsys):
+    def test_param_mismatch_reruns_instead_of_reuse(
+        self, tmp_path, monkeypatch, capsys
+    ):
         """断点续跑不能只认文件名:头部关键参数不一致 → WARN + 重跑(旧参数结果不得复用)。"""
         p = _pair()
         self._setup(monkeypatch, [p])
         (tmp_path / f"firings_{rb.tag_of(p)}.json").write_text(
-            _firings_text(entry_filter="kdj_j"), encoding="utf-8")     # 上次用别的 entry_filter 跑的
+            _firings_text(entry_filter="kdj_j"), encoding="utf-8"
+        )  # 上次用别的 entry_filter 跑的
         calls = []
-        rc = rb.main(["--out-dir", str(tmp_path)], runner=lambda cmd: calls.append(cmd) or 0)
+        rc = rb.main(
+            ["--out-dir", str(tmp_path)], runner=lambda cmd: calls.append(cmd) or 0
+        )
         assert rc == 0
-        assert len(calls) == 2 and "--emit-firings" in calls[0]        # Pass1 重跑
+        assert len(calls) == 2 and "--emit-firings" in calls[0]  # Pass1 重跑
         err = capsys.readouterr().err
         assert "[WARN]" in err and "entry_filter" in err and "kdj_j" in err
         assert "[skip]" not in capsys.readouterr().out
@@ -507,43 +755,54 @@ class TestResumeAndPass2:
         p = _pair()
         self._setup(monkeypatch, [p])
         (tmp_path / f"firings_{rb.tag_of(p)}.json").write_text(
-            _firings_text(feature_scores="momentum"), encoding="utf-8")
+            _firings_text(feature_scores="momentum"), encoding="utf-8"
+        )
         calls = []
         rb.main(["--out-dir", str(tmp_path)], runner=lambda cmd: calls.append(cmd) or 0)
         assert "--emit-firings" in calls[0]
         assert "feature_scores" in capsys.readouterr().err
 
-    def test_truncated_firings_reruns_not_skipped_nor_crashed(self, tmp_path, monkeypatch, capsys):
+    def test_truncated_firings_reruns_not_skipped_nor_crashed(
+        self, tmp_path, monkeypatch, capsys
+    ):
         """失败 Pass1 留下的半截 JSON:不得当完成 skip,也不得崩溃 —— WARN 后重跑并纳入 Pass2。"""
         p = _pair()
         self._setup(monkeypatch, [p])
         f = tmp_path / f"firings_{rb.tag_of(p)}.json"
-        f.write_text('{"start": "2022-03-01", "records": [{"code": "6000', encoding="utf-8")
+        f.write_text(
+            '{"start": "2022-03-01", "records": [{"code": "6000', encoding="utf-8"
+        )
 
         def _runner(cmd):
             if "--emit-firings" in cmd:
-                Path(cmd[cmd.index("--emit-firings") + 1]).write_text(_firings_text(),
-                                                                      encoding="utf-8")
+                Path(cmd[cmd.index("--emit-firings") + 1]).write_text(
+                    _firings_text(), encoding="utf-8"
+                )
             return 0
 
         calls = []
-        rc = rb.main(["--out-dir", str(tmp_path)],
-                     runner=lambda cmd: (calls.append(cmd), _runner(cmd))[1])
+        rc = rb.main(
+            ["--out-dir", str(tmp_path)],
+            runner=lambda cmd: (calls.append(cmd), _runner(cmd))[1],
+        )
         assert rc == 0
-        assert "--emit-firings" in calls[0]                            # 重跑 Pass1
+        assert "--emit-firings" in calls[0]  # 重跑 Pass1
         err = capsys.readouterr().err
         assert "[WARN]" in err and "截断" in err
         pass2 = [c for c in calls if "--from-firings" in c][0]
         assert rb.tag_of(p) in pass2[pass2.index("--from-firings") + 1]
 
-    def test_records_key_missing_treated_as_unfinished(self, tmp_path, monkeypatch, capsys):
+    def test_records_key_missing_treated_as_unfinished(
+        self, tmp_path, monkeypatch, capsys
+    ):
         """可解析但缺 records 键(如旧版/误写文件)同样视为未完成。"""
         p = _pair()
         self._setup(monkeypatch, [p])
         head = json.loads(_firings_text())
         del head["records"]
         (tmp_path / f"firings_{rb.tag_of(p)}.json").write_text(
-            json.dumps(head, ensure_ascii=False), encoding="utf-8")
+            json.dumps(head, ensure_ascii=False), encoding="utf-8"
+        )
         calls = []
         rb.main(["--out-dir", str(tmp_path)], runner=lambda cmd: calls.append(cmd) or 0)
         assert "--emit-firings" in calls[0]
@@ -557,50 +816,77 @@ class TestResumeAndPass2:
         rc = rb.main(["--dry-run", "--out-dir", str(target)], runner=lambda cmd: 0)
         assert rc == 0 and not target.exists()
 
-    def test_failed_pass1_excluded_from_pass2_but_others_continue(self, tmp_path, monkeypatch):
-        p1, p2 = _pair(), _pair(sig=("2023-01-03", "2023-02-10"), lab=("2023-02-13", "2023-05-11"))
+    def test_failed_pass1_excluded_from_pass2_but_others_continue(
+        self, tmp_path, monkeypatch
+    ):
+        p1, p2 = (
+            _pair(),
+            _pair(sig=("2023-01-03", "2023-02-10"), lab=("2023-02-13", "2023-05-11")),
+        )
         self._setup(monkeypatch, [p1, p2])
 
         def _runner(cmd):
             if "--emit-firings" in cmd:
                 out = cmd[cmd.index("--emit-firings") + 1]
                 if rb.tag_of(p1) in out:
-                    return 1                              # 第一窗失败
+                    return 1  # 第一窗失败
                 Path(out).write_text("{}", encoding="utf-8")
             return 0
 
         calls = []
-        rc = rb.main(["--out-dir", str(tmp_path)],
-                     runner=lambda cmd: (calls.append(cmd), _runner(cmd))[1])
+        rc = rb.main(
+            ["--out-dir", str(tmp_path)],
+            runner=lambda cmd: (calls.append(cmd), _runner(cmd))[1],
+        )
         pass2 = [c for c in calls if "--from-firings" in c][0]
         files = pass2[pass2.index("--from-firings") + 1]
-        assert rc == 1                                    # 整体标失败
-        assert rb.tag_of(p2) in files and rb.tag_of(p1) not in files   # 失败窗被排除,其余继续
+        assert rc == 1  # 整体标失败
+        assert (
+            rb.tag_of(p2) in files and rb.tag_of(p1) not in files
+        )  # 失败窗被排除,其余继续
 
     def test_pass2_only_skips_pass1(self, tmp_path, monkeypatch):
         p = _pair()
         self._setup(monkeypatch, [p])
         (tmp_path / f"firings_{rb.tag_of(p)}.json").write_text("{}", encoding="utf-8")
         calls = []
-        rb.main(["--out-dir", str(tmp_path), "--pass2-only"],
-                runner=lambda cmd: calls.append(cmd) or 0)
+        rb.main(
+            ["--out-dir", str(tmp_path), "--pass2-only"],
+            runner=lambda cmd: calls.append(cmd) or 0,
+        )
         assert len(calls) == 1 and "--from-firings" in calls[0]
 
 
 class TestStopPctBbiAndLedgerFingerprint:
     def _args(self, **over):
-        base = dict(data_source="qlib", s_data_root="/x", entry_filter="reversal_k",
-                    delisted_ret=-1.0, buffer_days=60, gate_window=120,
-                    feature_scores=rb.DEFAULT_FEATURES, progress=200, chunk_size=0,
-                    sector_features=False, style_features=False, trade_sim=False,
-                    pit_features=False, pit_ledger="", pit_visible_same_day=False,
-                    stop_pct=8.0, bbi_consec=2)
+        base = dict(
+            data_source="qlib",
+            s_data_root="/x",
+            entry_filter="reversal_k",
+            delisted_ret=-1.0,
+            buffer_days=60,
+            gate_window=120,
+            feature_scores=rb.DEFAULT_FEATURES,
+            progress=200,
+            chunk_size=0,
+            sector_features=False,
+            style_features=False,
+            trade_sim=False,
+            pit_features=False,
+            pit_ledger="",
+            pit_visible_same_day=False,
+            stop_pct=8.0,
+            bbi_consec=2,
+        )
         base.update(over)
         return type("A", (), base)()
 
     def test_stop_pct_bbi_passed_through_with_trade_sim(self):
-        cmd = rb.pass1_cmd(_pair(), Path("/tmp/f.json"),
-                           self._args(trade_sim=True, stop_pct=6.0, bbi_consec=3))
+        cmd = rb.pass1_cmd(
+            _pair(),
+            Path("/tmp/f.json"),
+            self._args(trade_sim=True, stop_pct=6.0, bbi_consec=3),
+        )
         assert "--stop-pct" in cmd and "6.0" in cmd
         assert "--bbi-consec" in cmd and "3" in cmd
 
@@ -612,19 +898,38 @@ class TestStopPctBbiAndLedgerFingerprint:
 
     def test_fingerprint_catches_stop_pct_and_ledger_change(self, tmp_path):
         p = tmp_path / "f.json"
-        p.write_text(_firings_text(stop_pct=8.0, bbi_consec=2, pit_ledger=""), encoding="utf-8")
-        assert rb.firings_reusable(p, self._args(stop_pct=6.0)) is False      # 出场参数变了 → 重跑
-        assert rb.firings_reusable(p, self._args(pit_ledger="/o.json")) is False  # 换台账 → 重跑
+        p.write_text(
+            _firings_text(stop_pct=8.0, bbi_consec=2, pit_ledger=""), encoding="utf-8"
+        )
+        assert (
+            rb.firings_reusable(p, self._args(stop_pct=6.0)) is False
+        )  # 出场参数变了 → 重跑
+        assert (
+            rb.firings_reusable(p, self._args(pit_ledger="/o.json")) is False
+        )  # 换台账 → 重跑
         assert rb.firings_reusable(p, self._args()) is True
 
 
 def test_zero_ret_diagnose_missing_ret_window_no_fallback(tmp_path):
     # 缺 ret_start/ret_end 不得回退信号窗当赢家窗(整窗错位且无提示)——显式 error
     p = tmp_path / "old.json"
-    p.write_text(json.dumps({"start": "2022-05-06", "end": "2022-06-02",
-                             "records": [{"code": "600000", "ret": 0.0,
-                                          "days": [["2022-06-01", 0.0, {"f_x": 1.0}]]}]},
-                            ensure_ascii=False), encoding="utf-8")
+    p.write_text(
+        json.dumps(
+            {
+                "start": "2022-05-06",
+                "end": "2022-06-02",
+                "records": [
+                    {
+                        "code": "600000",
+                        "ret": 0.0,
+                        "days": [["2022-06-01", 0.0, {"f_x": 1.0}]],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
     out = rb.zero_ret_diagnose([p], loader=lambda codes, s, e: {})
     w = out["windows"][0]
     assert "ret_start" in w["error"] and "重跑" in w["error"]

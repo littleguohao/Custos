@@ -10,6 +10,7 @@
 
 这份测试防的是「抽完之后又有人写一份本地实现」——那是最常见的回退方式。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -20,8 +21,13 @@ import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 T = ROOT / "src" / "custos"
-RUNNERS = ["pipeline/run_0850.py", "pipeline/run_0905.py", "pipeline/run_1445.py",
-           "pipeline/run_1700.py", "pipeline/run_1800.py"]
+RUNNERS = [
+    "pipeline/run_0850.py",
+    "pipeline/run_0905.py",
+    "pipeline/run_1445.py",
+    "pipeline/run_1700.py",
+    "pipeline/run_1800.py",
+]
 
 
 class TestNoLocalRedefinition:
@@ -30,28 +36,39 @@ class TestNoLocalRedefinition:
     @pytest.mark.parametrize("runner", RUNNERS)
     def test_runner_has_no_local_stage(self, runner):
         s = (T / runner).read_text(encoding="utf-8")
-        assert not re.search(r"^def _stage\(", s, re.M), \
+        assert not re.search(r"^def _stage\(", s, re.M), (
             f"{runner} 又定义了本地 _stage —— 应用 pipeline_kit.run_stage_quiet"
+        )
         assert "run_stage_quiet" in s, f"{runner} 未使用 pipeline_kit.run_stage_quiet"
 
-    @pytest.mark.parametrize("mod,fn", [
-        ("core/runtime_guards.py", "load_json"),
-        ("datasource/trading_calendar.py", "load_json"),
-        ("pipeline/daily_report.py", "load"),
-        ("pipeline/generate_risk_and_sectors.py", "load"),
-    ])
+    @pytest.mark.parametrize(
+        "mod,fn",
+        [
+            ("core/runtime_guards.py", "load_json"),
+            ("datasource/trading_calendar.py", "load_json"),
+            ("pipeline/daily_report.py", "load"),
+            ("pipeline/generate_risk_and_sectors.py", "load"),
+        ],
+    )
     def test_no_local_json_reader(self, mod, fn):
         s = (T / mod).read_text(encoding="utf-8")
-        assert not re.search(rf"^def {fn}\(", s, re.M), \
+        assert not re.search(rf"^def {fn}\(", s, re.M), (
             f"{mod} 又定义了本地 {fn} —— 应用 paths.read_json（它才是 utf-8-sig 的那一份）"
+        )
         assert "read_json" in s
 
-    @pytest.mark.parametrize("mod", ["datasource/collect/collect_holding_quotes.py",
-                                     "datasource/collect/collect_incremental_market.py"])
+    @pytest.mark.parametrize(
+        "mod",
+        [
+            "datasource/collect/collect_holding_quotes.py",
+            "datasource/collect/collect_incremental_market.py",
+        ],
+    )
     def test_no_local_fnum(self, mod):
         s = (T / mod).read_text(encoding="utf-8")
-        assert not re.search(r"^def _fnum\(", s, re.M), \
+        assert not re.search(r"^def _fnum\(", s, re.M), (
             f"{mod} 又定义了本地 _fnum —— 应用 code_utils.fnum"
+        )
 
 
 class TestSharedImplBehavior:
@@ -69,8 +86,9 @@ class TestSharedImplBehavior:
         """反向验证：真给一个带 BOM 的文件，必须读得出来。"""
         import sys
         from custos.core import paths
+
         f = tmp_path / "bom.json"
-        f.write_bytes("\ufeff{\"a\": 1}".encode("utf-8"))
+        f.write_bytes('\ufeff{"a": 1}'.encode("utf-8"))
         assert paths.read_json(f, None) == {"a": 1}
         assert paths.read_json(tmp_path / "nope.json", {"d": 2}) == {"d": 2}
 
@@ -83,10 +101,11 @@ class TestSharedImplBehavior:
         """
         import sys
         from custos.core import code_utils
+
         assert code_utils.fnum(None) is None
         assert code_utils.fnum("-") is None
-        assert code_utils.fnum("0") == 0.0        # 0 是合法读数，不能变 None
-        assert code_utils.finite(None) == 0.0     # finite 给默认值
+        assert code_utils.fnum("0") == 0.0  # 0 是合法读数，不能变 None
+        assert code_utils.finite(None) == 0.0  # finite 给默认值
         assert code_utils.finite("x", -1) == -1
 
     def test_run_stage_quiet_suppresses_stdout(self, capsys, monkeypatch):
@@ -114,9 +133,12 @@ class TestIntentionalWrappersKept:
     @pytest.mark.parametrize("runner", RUNNERS)
     def test_write_run_log_wrapper_present(self, runner):
         s = (T / runner).read_text(encoding="utf-8")
-        assert re.search(r"^def _write_run_log\(", s, re.M), \
+        assert re.search(r"^def _write_run_log\(", s, re.M), (
             f"{runner} 的 _write_run_log wrapper 被删了？它是有意的偏应用"
-        assert "write_run_log(LOG_DIR" in s, f"{runner} 应委托给 pipeline_kit.write_run_log"
+        )
+        assert "write_run_log(LOG_DIR" in s, (
+            f"{runner} 应委托给 pipeline_kit.write_run_log"
+        )
 
 
 class TestCalendarGate:
@@ -131,6 +153,7 @@ class TestCalendarGate:
     def _kit(self):
         import sys
         from custos.core import pipeline_kit
+
         return pipeline_kit
 
     @pytest.mark.parametrize("runner", RUNNERS)
@@ -142,11 +165,20 @@ class TestCalendarGate:
 
     def test_trading_day_continues(self, tmp_path, monkeypatch, capsys):
         kit = self._kit()
-        monkeypatch.setattr(kit, "check_trading_day", lambda t: {"is_trading_day": True})
+        monkeypatch.setattr(
+            kit, "check_trading_day", lambda t: {"is_trading_day": True}
+        )
         logs: list[dict] = []
-        r = kit.calendar_gate("2026-08-06", log_dir=tmp_path, session="0850",
-                              run_started="x", t0=0.0, stages_log=logs,
-                              fail_msg="F {target} {err}", closed_msg="C {target}")
+        r = kit.calendar_gate(
+            "2026-08-06",
+            log_dir=tmp_path,
+            session="0850",
+            run_started="x",
+            t0=0.0,
+            stages_log=logs,
+            fail_msg="F {target} {err}",
+            closed_msg="C {target}",
+        )
         assert r.exit_code is None, "交易日应继续"
         assert logs and logs[0]["name"] == "calendar"
         assert capsys.readouterr().out == "", "交易日不该打印门控消息"
@@ -154,11 +186,20 @@ class TestCalendarGate:
     def test_closed_returns_zero(self, tmp_path, monkeypatch, capsys):
         """非交易日是**正常结局**，exit 0 —— 不是失败。"""
         kit = self._kit()
-        monkeypatch.setattr(kit, "check_trading_day", lambda t: {"is_trading_day": False})
+        monkeypatch.setattr(
+            kit, "check_trading_day", lambda t: {"is_trading_day": False}
+        )
         logs: list[dict] = []
-        r = kit.calendar_gate("2026-08-08", log_dir=tmp_path, session="1700",
-                              run_started="x", t0=0.0, stages_log=logs,
-                              fail_msg="F {target} {err}", closed_msg="今日休市（{target}）")
+        r = kit.calendar_gate(
+            "2026-08-08",
+            log_dir=tmp_path,
+            session="1700",
+            run_started="x",
+            t0=0.0,
+            stages_log=logs,
+            fail_msg="F {target} {err}",
+            closed_msg="今日休市（{target}）",
+        )
         assert r.exit_code == 0
         assert "今日休市（2026-08-08）" in capsys.readouterr().out
         assert logs[0]["ok"] is True, "非交易日不是 stage 失败"
@@ -172,9 +213,16 @@ class TestCalendarGate:
 
         monkeypatch.setattr(kit, "check_trading_day", boom)
         logs: list[dict] = []
-        r = kit.calendar_gate("2026-08-06", log_dir=tmp_path, session="0905",
-                              run_started="x", t0=0.0, stages_log=logs,
-                              fail_msg="失败｜{target}：{err}", closed_msg="C")
+        r = kit.calendar_gate(
+            "2026-08-06",
+            log_dir=tmp_path,
+            session="0905",
+            run_started="x",
+            t0=0.0,
+            stages_log=logs,
+            fail_msg="失败｜{target}：{err}",
+            closed_msg="C",
+        )
         assert r.exit_code == 1
         out = capsys.readouterr().out
         assert "失败｜2026-08-06：日历缓存缺失" in out
@@ -190,12 +238,21 @@ class TestCalendarGate:
 
         monkeypatch.setattr(kit, "check_trading_day", noisy)
         logs: list[dict] = []
-        kit.calendar_gate("2026-08-06", log_dir=tmp_path, session="1445",
-                          run_started="x", t0=0.0, stages_log=logs,
-                          fail_msg="F", closed_msg="C")
+        kit.calendar_gate(
+            "2026-08-06",
+            log_dir=tmp_path,
+            session="1445",
+            run_started="x",
+            t0=0.0,
+            stages_log=logs,
+            fail_msg="F",
+            closed_msg="C",
+        )
         assert capsys.readouterr().out == "", "日历回显未被捕获"
         # log_stage 把 stdout 收进 `stdout_tail`（截末 1000 字），不是 `stdout`
-        assert "[CAL]" in logs[0]["stdout_tail"], "捕获的回显应留在 stage 日志里，不能丢"
+        assert "[CAL]" in logs[0]["stdout_tail"], (
+            "捕获的回显应留在 stage 日志里，不能丢"
+        )
 
 
 class TestMovedScriptsRunAsMain:
@@ -228,12 +285,17 @@ class TestMovedScriptsRunAsMain:
     @pytest.mark.parametrize("rel", ENTRIES)
     def test_help_works(self, rel):
         import subprocess
+
         # 入口脚本已陆续 reconfigure 成 UTF-8（cp936/cp1252 下中文 help 会崩），
         # 没 reconfigure 的仍按 locale 出字节 —— 统一按 utf-8+replace 解码，
         # 断言目标（usage 行、returncode）都是 ASCII，不受残余乱码影响。
-        r = subprocess.run([sys.executable, str(T / rel), "--help"],
-                           capture_output=True, encoding="utf-8", errors="replace",
-                           timeout=90)
+        r = subprocess.run(
+            [sys.executable, str(T / rel), "--help"],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=90,
+        )
         assert r.returncode == 0, f"{rel} 不能作为脚本执行：\n{r.stderr[-600:]}"
         assert r.stdout.lstrip().startswith("usage"), f"{rel} 未输出 usage"
 
@@ -246,7 +308,9 @@ class TestMovedScriptsRunAsMain:
         （它会复活「同一模块两份对象」那类缺陷）。
         """
         s = (T / rel).read_text(encoding="utf-8")
-        assert "sys.path" not in s, f"{rel} 又出现了 sys.path 引导（应靠 custos 包解析）"
+        assert "sys.path" not in s, (
+            f"{rel} 又出现了 sys.path 引导（应靠 custos 包解析）"
+        )
 
     def test_no_stale_parent_paths(self):
         """搬进子目录后，`__file__.parent` 指向的是子目录，不再是 src。
@@ -257,9 +321,10 @@ class TestMovedScriptsRunAsMain:
         for rel in self.ENTRIES + ["datasource/collect/online_quotes.py"]:
             s = (T / rel).read_text(encoding="utf-8")
             for m in re.finditer(r"Path\(__file__\)\.resolve\(\)\.parent\b(?!s)", s):
-                ctx = s[max(0, m.start() - 60):m.end() + 60].replace("\n", " ")
+                ctx = s[max(0, m.start() - 60) : m.end() + 60].replace("\n", " ")
                 raise AssertionError(
-                    f"{rel} 仍用 `.parent`（子目录里应为 `parents[1]`）：…{ctx}…")
+                    f"{rel} 仍用 `.parent`（子目录里应为 `parents[1]`）：…{ctx}…"
+                )
 
 
 class TestToolsPathSingleSource:
@@ -274,22 +339,33 @@ class TestToolsPathSingleSource:
     `daily_pipeline` 有 9 处 `BASE / "src" / ...` 硬编码。
     """
 
-    AFTER_PATHS = ["pipeline/run_0850.py", "pipeline/run_0905.py", "pipeline/run_1445.py",
-                   "pipeline/run_1700.py", "pipeline/run_1800.py", "pipeline/daily_pipeline.py",
-                   "core/runtime_gate.py", "pipeline/generate_risk_and_sectors.py",
-                   "datasource/trading_calendar.py"]
+    AFTER_PATHS = [
+        "pipeline/run_0850.py",
+        "pipeline/run_0905.py",
+        "pipeline/run_1445.py",
+        "pipeline/run_1700.py",
+        "pipeline/run_1800.py",
+        "pipeline/daily_pipeline.py",
+        "core/runtime_gate.py",
+        "pipeline/generate_risk_and_sectors.py",
+        "datasource/trading_calendar.py",
+    ]
 
     @pytest.mark.parametrize("f", AFTER_PATHS)
     def test_no_rederiving_tools_from_base(self, f):
         s = (T / f).read_text(encoding="utf-8")
-        assert 'BASE / "src"' not in s, \
+        assert 'BASE / "src"' not in s, (
             f'{f} 用 BASE / "src" 重新推导 —— 应 `from paths import TOOLS`'
+        )
 
     def test_bootstrap_pattern_still_allowed(self):
         """反面：入口脚本不得再出现 `__file__` 引导（阶段 4b 已删光）。"""
-        s = (T / "datasource" / "collect" / "collect_fund_flow.py").read_text(encoding="utf-8")
-        assert "sys.path" not in s, \
+        s = (T / "datasource" / "collect" / "collect_fund_flow.py").read_text(
+            encoding="utf-8"
+        )
+        assert "sys.path" not in s, (
             "sys.path 引导又回来了 —— 包式化后 import 唯一事实来源是 custos 包安装"
+        )
 
     def test_daily_pipeline_market_timing_not_named_tools(self):
         """`daily_pipeline` 里指向 market_timing 的常量**不能叫 TOOLS**
@@ -302,13 +378,16 @@ class TestToolsPathSingleSource:
         这正是今天反复踩的「查字符串形式而非语义」。
         """
         import sys
+
         tools = pathlib.Path(__file__).resolve().parent.parent / "src" / "custos"
         from custos.pipeline import daily_pipeline as dp
 
         assert dp.TOOLS == tools, "TOOLS 必须指 src 本身"
         assert dp.MARKET_TIMING == tools / "pipeline" / "market_timing"
-        assert dp.HOLDINGS == tools / "pipeline" / "holdings", \
+        assert dp.HOLDINGS == tools / "pipeline" / "holdings", (
             "持仓工具目录 —— 2026-08-07 拆分后 daily_pipeline 必须指向它"
+        )
+
 
 class TestGateCodePropagation:
     """门控退出码必须**端到端**到 cron，不能在 runner 这层被压平。
@@ -327,6 +406,7 @@ class TestGateCodePropagation:
 
     def _kit(self):
         from custos.core import pipeline_kit
+
         return pipeline_kit
 
     @pytest.mark.parametrize("rc,want", [(3, 3), (4, 4), (5, 5)])
@@ -349,17 +429,19 @@ class TestGateCodePropagation:
     def test_runner_no_longer_flattens(self, runner):
         s = (T / runner).read_text(encoding="utf-8")
         i = s.index("daily_pipeline失败")
-        seg = s[i:i + 300]
-        assert "propagate_gate_code(r)" in seg, \
+        seg = s[i : i + 300]
+        assert "propagate_gate_code(r)" in seg, (
             f"{runner} 仍把 daily_pipeline 的退出码压平"
+        )
 
     def test_daily_pipeline_still_propagates(self):
         """上游那一跳也要在：`daily_pipeline` 必须先落日志再抛原码。"""
         s = (T / "pipeline" / "daily_pipeline.py").read_text(encoding="utf-8")
         i = s.index("raise SystemExit")
-        seg = s[max(0, i - 400):i + 80]
-        assert "_write_pipeline_log" in seg, \
+        seg = s[max(0, i - 400) : i + 80]
+        assert "_write_pipeline_log" in seg, (
             "退出前必须先落 pipeline 日志，否则这次阻断连记录都不留"
+        )
         assert 'gate_stage["returncode"]' in seg, "必须抛门控原码，不能包成 exit 1"
 
 
@@ -388,10 +470,11 @@ class TestAmplitudeSingleImplementation:
         AST 只看真实的除法表达式，注释与字符串天然排除。
         """
         import ast
+
         bad = []
         for f in sorted(T.rglob("*.py")):
             if f.name == "indicators.py":
-                continue                       # 唯一实现所在
+                continue  # 唯一实现所在
             try:
                 raw = f.read_text(encoding="utf-8-sig")
                 tree = ast.parse(raw)
@@ -403,8 +486,9 @@ class TestAmplitudeSingleImplementation:
                     continue
                 src = ast.unparse(node)
                 # 形态一：high / low     形态二：(high - low) / x
-                looks = (re.search(r'\bhigh\b[^/]{0,12}/\s*low\b', src)
-                         or re.search(r'\(\s*high\b.{0,14}-\s*low\b.{0,6}\)\s*/', src))
+                looks = re.search(r"\bhigh\b[^/]{0,12}/\s*low\b", src) or re.search(
+                    r"\(\s*high\b.{0,14}-\s*low\b.{0,6}\)\s*/", src
+                )
                 if not looks:
                     continue
                 # ⚠️ 豁免靠**源码里的标记**，不是硬编码行号（行号会随编辑腐坏）：
@@ -412,16 +496,17 @@ class TestAmplitudeSingleImplementation:
                 #    这样豁免与代码同进退，且**强制写下理由** ——
                 #    目前唯一一处是 `s_shape` 的 VCP 压缩度（分母用当日收盘、
                 #    只作 recent/prior 比值参与打分，换分母会改 live 的 S 分）。
-                above = src_lines[max(0, node.lineno - 7):node.lineno - 1]
+                above = src_lines[max(0, node.lineno - 7) : node.lineno - 1]
                 if any("刻意不同" in x for x in above):
                     continue
                 bad.append(f"{f.relative_to(T.parent)}:{node.lineno}  {src[:74]}")
-        assert not bad, ("发现内联振幅式，应改调 `indicators.amplitude_pct`：\n  "
-                         + "\n  ".join(bad)
-                         + "\n若确为**不同的量**（如 s_shape 的 VCP 压缩度用当日收盘作分母、"
-                           "且只作比值参与打分），请在该行上方写明为何刻意不同"
-                           "并把它加进本测试的豁免。")
-
+        assert not bad, (
+            "发现内联振幅式，应改调 `indicators.amplitude_pct`：\n  "
+            + "\n  ".join(bad)
+            + "\n若确为**不同的量**（如 s_shape 的 VCP 压缩度用当日收盘作分母、"
+            "且只作比值参与打分），请在该行上方写明为何刻意不同"
+            "并把它加进本测试的豁免。"
+        )
 
     def test_all_live_chains_share_the_function(self):
         """三条 live 路径必须是**同一个函数对象**。"""
@@ -471,9 +556,10 @@ class TestAmplitudeSingleImplementation:
         raw = (T / "core" / "factors" / "s_shape.py").read_text(encoding="utf-8-sig")
         lines = raw.split("\n")
         i = next(k for k, l in enumerate(lines) if "rng = (high - low) / np.where" in l)
-        above = lines[max(0, i - 6):i]
-        assert any("刻意不同" in x for x in above), \
+        above = lines[max(0, i - 6) : i]
+        assert any("刻意不同" in x for x in above), (
             "s_shape 的 VCP 豁免依赖上方注释里的「刻意不同」标记，它不见了"
+        )
         # 反证：把标记去掉后，该处应落入 bad 列表
         stripped = [x.replace("刻意不同", "XX") for x in above]
         assert not any("刻意不同" in x for x in stripped)
@@ -499,9 +585,28 @@ class TestNamedIndicatorsLiveInL0:
 
     # 有公认定义的指标名。新增指标时加进来。
     NAMED = {
-        "rsi", "cci", "avedev", "kdj", "macd", "bbi", "dks", "qsx",
-        "amplitude_pct", "pct_change", "dmi_arrays", "ema", "atr", "obv",
-        "boll", "trix", "psy", "roc", "mfi", "sar", "bias", "wr",
+        "rsi",
+        "cci",
+        "avedev",
+        "kdj",
+        "macd",
+        "bbi",
+        "dks",
+        "qsx",
+        "amplitude_pct",
+        "pct_change",
+        "dmi_arrays",
+        "ema",
+        "atr",
+        "obv",
+        "boll",
+        "trix",
+        "psy",
+        "roc",
+        "mfi",
+        "sar",
+        "bias",
+        "wr",
     }
     # 允许的后缀变体：`_series` / `_state` 是本项目的命名惯例
     SUFFIXES = ("", "_series", "_state", "_arrays", "_pct")
@@ -525,18 +630,21 @@ class TestNamedIndicatorsLiveInL0:
                 tree = ast.parse(f.read_text(encoding="utf-8-sig"))
             except SyntaxError:
                 continue
-            for node in tree.body:            # 只看模块级函数（嵌套的是局部工具）
+            for node in tree.body:  # 只看模块级函数（嵌套的是局部工具）
                 if not isinstance(node, ast.FunctionDef):
                     continue
                 nm = node.name.lower().strip("_")
                 if nm in allowed:
-                    offenders.append(f"{f.relative_to(T.parent)}:{node.lineno}  def {node.name}")
+                    offenders.append(
+                        f"{f.relative_to(T.parent)}:{node.lineno}  def {node.name}"
+                    )
         assert not offenders, (
             "有公认定义的指标被定义在 `indicators.py` 之外：\n  "
             + "\n  ".join(offenders)
             + "\n判据是「是否存在口径选择」——这类指标一旦分叉就是同名不同义。"
-              "\n若它其实是**因子自己的量**（定义就是这个因子本身），请改个不撞车的名字"
-              "并在此说明；若是新指标，请搬到 indicators.py 并加进 NAMED。")
+            "\n若它其实是**因子自己的量**（定义就是这个因子本身），请改个不撞车的名字"
+            "并在此说明；若是新指标，请搬到 indicators.py 并加进 NAMED。"
+        )
 
     def test_guard_catches_a_planted_fork(self, tmp_path):
         """⚠️ 守卫自证：在别处定义 `def rsi(...)` 必须被抓到。
@@ -548,8 +656,9 @@ class TestNamedIndicatorsLiveInL0:
         planted = ast.parse("def rsi(close, n=14):\n    return close\n")
         fn = planted.body[0]
         assert isinstance(fn, ast.FunctionDef)
-        assert fn.name.lower().strip("_") in self._canonical_names(), \
+        assert fn.name.lower().strip("_") in self._canonical_names(), (
             "NAMED 表里没有 rsi —— 守卫会放行第二份 RSI"
+        )
 
     def test_policy_is_documented_in_the_module(self):
         """政策必须写在 `indicators.py` 里 —— 只写在测试里，改代码的人看不到。"""

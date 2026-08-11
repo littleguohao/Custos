@@ -11,6 +11,7 @@ CLI::
 
     uv run python src/custos/datasource/collect/collect_intraday_snapshot.py --date YYYY-MM-DD
 """
+
 from __future__ import annotations
 
 import argparse
@@ -36,8 +37,11 @@ INDEX_SPECS: dict[str, dict[str, Any]] = {
     "999999.SH": {
         "role": "sh_index",
         "fields": {
-            "Now": "now", "LastClose": "last_close",
-            "UpHome": "up_home", "DownHome": "down_home", "Amount": "amount",
+            "Now": "now",
+            "LastClose": "last_close",
+            "UpHome": "up_home",
+            "DownHome": "down_home",
+            "Amount": "amount",
         },
     },
     "880005.SH": {"role": "advance_count", "fields": {"Now": "up_count"}},
@@ -97,8 +101,12 @@ def collect() -> dict:
 
 
 def main(argv: Optional[list] = None) -> int:
-    parser = argparse.ArgumentParser(description="14:45 盘中市场快照采集（TQ-Local HTTP，best-effort）")
-    parser.add_argument("--date", required=True, help="采集日期 YYYY-MM-DD，用于输出文件命名")
+    parser = argparse.ArgumentParser(
+        description="14:45 盘中市场快照采集（TQ-Local HTTP，best-effort）"
+    )
+    parser.add_argument(
+        "--date", required=True, help="采集日期 YYYY-MM-DD，用于输出文件命名"
+    )
     args = parser.parse_args(argv)
 
     result = collect()
@@ -107,7 +115,9 @@ def main(argv: Optional[list] = None) -> int:
     MARKET_DIR.mkdir(parents=True, exist_ok=True)
     out_path = MARKET_DIR / f"{args.date}_intraday_snapshot.json"
     require("intraday_snapshot", result)
-    out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    out_path.write_text(
+        json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     summary = {
         "date": args.date,

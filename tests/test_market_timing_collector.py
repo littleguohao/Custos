@@ -9,6 +9,7 @@
 满分计入（v0.40 后 `degraded` 也算不新鲜），而 `runtime_guards` 靠 `as_of` 判门控。
 标错 = 用 T-1 的宽度/成交额给当日满分，且报告看不出来。
 """
+
 from __future__ import annotations
 
 import math
@@ -26,12 +27,23 @@ class TestToFloat:
     **不能变 0.0**：0.0 会被下游阈值判定当成真实读数
     （同 `code_utils.fnum` 的理由）。"""
 
-    @pytest.mark.parametrize("raw", [None, "", "  ", "--", "nan", "None", "abc", [], {}])
+    @pytest.mark.parametrize(
+        "raw", [None, "", "  ", "--", "nan", "None", "abc", [], {}]
+    )
     def test_non_numeric_is_none(self, raw):
         assert mtc.to_float(raw) is None
 
-    @pytest.mark.parametrize("raw,want", [("3.5", 3.5), (3.5, 3.5), ("  12 ", 12.0),
-                                          (0, 0.0), ("0", 0.0), ("-2.3", -2.3)])
+    @pytest.mark.parametrize(
+        "raw,want",
+        [
+            ("3.5", 3.5),
+            (3.5, 3.5),
+            ("  12 ", 12.0),
+            (0, 0.0),
+            ("0", 0.0),
+            ("-2.3", -2.3),
+        ],
+    )
     def test_numeric_passes(self, raw, want):
         assert mtc.to_float(raw) == want
 
@@ -62,9 +74,18 @@ class TestAmvZone:
     熊市减亏 ~15pp」就建立在它上面，分错区等于方向反了。
     """
 
-    @pytest.mark.parametrize("v,want", [(5.0, "做多"), (4.01, "做多"),
-                                        (4.0, "中性"), (0.0, "中性"), (-2.3, "中性"),
-                                        (-2.31, "空头"), (-5.0, "空头")])
+    @pytest.mark.parametrize(
+        "v,want",
+        [
+            (5.0, "做多"),
+            (4.01, "做多"),
+            (4.0, "中性"),
+            (0.0, "中性"),
+            (-2.3, "中性"),
+            (-2.31, "空头"),
+            (-5.0, "空头"),
+        ],
+    )
     def test_thresholds_are_exclusive(self, v, want):
         assert mtc.amv_zone(v) == want
 
@@ -77,9 +98,15 @@ class TestAmvZone:
 
 class TestTrend:
     def _rows(self, n, close=3000.0):
-        return [{"date": f"2026{m:02d}{d:02d}", "close": close + i * 0.5,
-                 "amount": 1e11, "volume": 1e9}
-                for i, (m, d) in enumerate([(1 + i // 28, 1 + i % 28) for i in range(n)])]
+        return [
+            {
+                "date": f"2026{m:02d}{d:02d}",
+                "close": close + i * 0.5,
+                "amount": 1e11,
+                "volume": 1e9,
+            }
+            for i, (m, d) in enumerate([(1 + i // 28, 1 + i % 28) for i in range(n)])
+        ]
 
     def test_empty_is_unavailable(self):
         assert mtc.trend([]) == {"available": False, "source": "vipdoc_day"}
@@ -114,7 +141,9 @@ class TestFreshnessLabeling:
 
     def test_mismatch_is_degraded_with_reason(self):
         q = {"notes": []}
-        assert mtc._freshness("20260807", "20260810", "880005 涨跌家数", q) == "degraded"
+        assert (
+            mtc._freshness("20260807", "20260810", "880005 涨跌家数", q) == "degraded"
+        )
         assert len(q["notes"]) == 1
         note = q["notes"][0]
         assert "20260807" in note and "20260810" in note, "note 必须给出两个日期"
@@ -139,5 +168,7 @@ class TestFreshnessLabeling:
         照满分计入（v0.40 修）。本条把两个模块的词表对上，防它再分叉。
         """
         from custos.core import contracts as C
-        assert "degraded" in C.SECTION_NOT_FRESH, \
+
+        assert "degraded" in C.SECTION_NOT_FRESH, (
             "collector 会产出 degraded，它必须在「不新鲜」域里"
+        )

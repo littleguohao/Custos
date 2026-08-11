@@ -7,6 +7,7 @@
 ⚠️ 它是**就地改写** `market_timing_input.json` 的 stage ——
 一个渐进填充产物，19 个消费者。改写时保留什么、覆盖什么，是本模块的全部风险。
 """
+
 from __future__ import annotations
 
 import json
@@ -27,10 +28,14 @@ def _bars(n=260, close=3000.0, amount=5e11, last_date="20260811"):
     """造 n 根日线；日期递增到 last_date。"""
     end = pd.Timestamp(last_date)
     dates = pd.date_range(end=end, periods=n, freq="B")
-    return pd.DataFrame({"date": dates,
-                         "close": [close + i * 0.1 for i in range(n)],
-                         "amount": [amount] * n,
-                         "volume": [1e9] * n})
+    return pd.DataFrame(
+        {
+            "date": dates,
+            "close": [close + i * 0.1 for i in range(n)],
+            "amount": [amount] * n,
+            "volume": [1e9] * n,
+        }
+    )
 
 
 @pytest.fixture
@@ -98,15 +103,13 @@ class TestStaleDetection:
 
 class TestComputeIndex:
     def test_empty_frame_is_unavailable(self, monkeypatch):
-        monkeypatch.setattr(rmi.ltd, "get_ohlcv_table",
-                            lambda *a, **k: pd.DataFrame())
+        monkeypatch.setattr(rmi.ltd, "get_ohlcv_table", lambda *a, **k: pd.DataFrame())
         r = rmi.compute_index("000001.SH")
         assert r == {"available": False, "source": "vipdoc_day"}
 
     def test_single_bar_is_unavailable(self, monkeypatch):
         """只有一根 K 线算不出涨跌幅 ⇒ unavailable，**不是** available+None。"""
-        monkeypatch.setattr(rmi.ltd, "get_ohlcv_table",
-                            lambda *a, **k: _bars(n=1))
+        monkeypatch.setattr(rmi.ltd, "get_ohlcv_table", lambda *a, **k: _bars(n=1))
         assert rmi.compute_index("000001.SH")["available"] is False
 
     def test_full_history_fills_all_mas(self, monkeypatch):
@@ -152,18 +155,40 @@ class TestMainRefreshPolicy:
         不跳过的代价：盘后刷新会用 vipdoc 收盘价盖掉 14:45 已算好的读数，
         而 vipdoc 在盘中/刚收盘时可能还没更新。
         """
-        fresh = {name: {"available": True, "daily_change_pct": 1.0,
-                        "latest_date": "20260811"} for name in rmi.INDICES}
-        _write_market(env, {"date": DAY, "a_share_indices": fresh,
-                            "turnover": {"quality": "auto", "as_of": DAY,
-                                         "turnover_change_pct": 3.0}})
+        fresh = {
+            name: {
+                "available": True,
+                "daily_change_pct": 1.0,
+                "latest_date": "20260811",
+            }
+            for name in rmi.INDICES
+        }
+        _write_market(
+            env,
+            {
+                "date": DAY,
+                "a_share_indices": fresh,
+                "turnover": {
+                    "quality": "auto",
+                    "as_of": DAY,
+                    "turnover_change_pct": 3.0,
+                },
+            },
+        )
         _, calls = _run(monkeypatch, env)
-        assert not [c for c in calls if c in rmi.INDICES.values()], \
+        assert not [c for c in calls if c in rmi.INDICES.values()], (
             f"新鲜数据被重新抓取了：{calls}"
+        )
 
     def test_stale_index_is_refreshed(self, env, monkeypatch):
-        stale = {name: {"available": True, "daily_change_pct": 1.0,
-                        "latest_date": "20260807"} for name in rmi.INDICES}
+        stale = {
+            name: {
+                "available": True,
+                "daily_change_pct": 1.0,
+                "latest_date": "20260807",
+            }
+            for name in rmi.INDICES
+        }
         _write_market(env, {"date": DAY, "a_share_indices": stale})
         out, calls = _run(monkeypatch, env)
         assert calls, "陈旧数据没有触发刷新"
@@ -174,9 +199,18 @@ class TestMainRefreshPolicy:
         vipdoc 里没有这个字段。冲掉它等于让盘后报告失去盘中读数，
         而 `score_indices` 的 intraday 分项会静默变成「无」。
         """
-        _write_market(env, {"date": DAY, "a_share_indices": {
-            "上证指数": {"available": False,
-                         "intraday": {"intraday_change_pct": 1.23}}}})
+        _write_market(
+            env,
+            {
+                "date": DAY,
+                "a_share_indices": {
+                    "上证指数": {
+                        "available": False,
+                        "intraday": {"intraday_change_pct": 1.23},
+                    }
+                },
+            },
+        )
         out, _ = _run(monkeypatch, env)
         sh = out["a_share_indices"]["上证指数"]
         assert sh["available"] is True, "应已刷新"
@@ -185,9 +219,20 @@ class TestMainRefreshPolicy:
     def test_unavailable_fetch_does_not_erase_existing(self, env, monkeypatch):
         """抓取失败（empty frame）时**不得**把已有条目改成 unavailable ——
         宁可留旧值，也不要用「没抓到」覆盖「抓到过」。"""
-        _write_market(env, {"date": DAY, "a_share_indices": {
-            "上证指数": {"available": True, "daily_change_pct": 0.5,
-                         "latest_date": "20260807", "latest_close": 3200.0}}})
+        _write_market(
+            env,
+            {
+                "date": DAY,
+                "a_share_indices": {
+                    "上证指数": {
+                        "available": True,
+                        "daily_change_pct": 0.5,
+                        "latest_date": "20260807",
+                        "latest_close": 3200.0,
+                    }
+                },
+            },
+        )
         out, _ = _run(monkeypatch, env, default=pd.DataFrame())
         sh = out["a_share_indices"]["上证指数"]
         assert sh["available"] is True and sh["latest_close"] == 3200.0
@@ -207,27 +252,37 @@ class TestTurnoverFallback:
         t = out.get("turnover") or {}
         assert t.get("source") == "vipdoc_880001_amount", f"应由 880001 定案：{t}"
         assert t.get("total_turnover"), "全市场成交额未回填"
-        assert t.get("turnover_change_pct") is not None, \
+        assert t.get("turnover_change_pct") is not None, (
             "环比变化率是 score_turnover 的唯一输入，缺了就只能给半分"
+        )
 
     def test_sh_fallback_survives_when_880001_unavailable(self, env, monkeypatch):
         """880001 抓不到时，上证窄口径兜底应留下**并带口径警示**。"""
         _write_market(env, {"date": DAY, "a_share_indices": {}})
-        out, _ = _run(monkeypatch, env,
-                      bars_by_code={"880001.SH": pd.DataFrame()})
+        out, _ = _run(monkeypatch, env, bars_by_code={"880001.SH": pd.DataFrame()})
         t = out.get("turnover") or {}
         assert t.get("source") == "vipdoc_000001_amount", f"上证兜底未留下：{t}"
-        assert "全市场口径需另采880001" in (t.get("note") or ""), \
+        assert "全市场口径需另采880001" in (t.get("note") or ""), (
             "窄口径必须留痕，否则下游会当成全市场成交额"
-
+        )
 
     def test_existing_good_turnover_is_not_overwritten(self, env, monkeypatch):
         """⚠️ 已有 `quality=auto` 的成交额不得被上证口径覆盖 ——
         后者是**窄口径**（源码 note 自己说了「全市场口径需另采880001」）。"""
-        _write_market(env, {"date": DAY, "a_share_indices": {},
-                            "turnover": {"quality": "auto", "as_of": DAY,
-                                         "value": 9.99e11, "turnover_change_pct": 5.0,
-                                         "source": "880001"}})
+        _write_market(
+            env,
+            {
+                "date": DAY,
+                "a_share_indices": {},
+                "turnover": {
+                    "quality": "auto",
+                    "as_of": DAY,
+                    "value": 9.99e11,
+                    "turnover_change_pct": 5.0,
+                    "source": "880001",
+                },
+            },
+        )
         out, _ = _run(monkeypatch, env)
         assert out["turnover"]["source"] == "880001"
         assert out["turnover"]["value"] == 9.99e11

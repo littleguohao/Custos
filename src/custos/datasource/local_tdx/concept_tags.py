@@ -13,6 +13,7 @@
 - 只调用 down_type=4（实测安全）；禁止触碰 1/5/6（可打挂 TQ 服务）。
 - 单次调用、30s 客户端超时、不重试；任何失败结构化返回，绝不 raise。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -46,7 +47,9 @@ def parse_miscinfo(path: Path) -> dict[str, list[str]]:
         code = str(item.get("code") or "").strip()
         if not (code.isdigit() and len(code) == 6):
             continue
-        concepts = [t.strip() for t in str(item.get("xq") or "").split(",") if t.strip()]
+        concepts = [
+            t.strip() for t in str(item.get("xq") or "").split(",") if t.strip()
+        ]
         if concepts:
             tags[code] = concepts
     return tags
@@ -80,22 +83,31 @@ def refresh(date: str, call_fn=None) -> dict[str, Any]:
     result: dict[str, Any] = {"date": date, "status": "ok", "output": str(OUT_PATH)}
     if call_fn is None:
         from custos.datasource.local_tdx import tq_http
+
         call_fn = tq_http.call
     src = TDX_DATA_DIR / "miscinfo.json"
-    mtime_before = _mtime(src)                    # 调用前的落盘时刻
+    mtime_before = _mtime(src)  # 调用前的落盘时刻
     r = call_fn("download_file", {"down_type": 4}, timeout=30)
     if not r.get("ok"):
-        result.update({"status": "unavailable",
-                       "degraded_reason": f"tq_download_failed:{(r.get('error') or {}).get('code', 'unknown')}"})
+        result.update(
+            {
+                "status": "unavailable",
+                "degraded_reason": f"tq_download_failed:{(r.get('error') or {}).get('code', 'unknown')}",
+            }
+        )
         return result
     mtime_after = _mtime(src)
     if mtime_after is None:
-        result.update({"status": "unavailable", "degraded_reason": f"miscinfo_missing:{src}"})
+        result.update(
+            {"status": "unavailable", "degraded_reason": f"miscinfo_missing:{src}"}
+        )
         return result
     try:
         tags = parse_miscinfo(src)
     except (OSError, ValueError) as exc:
-        result.update({"status": "unavailable", "degraded_reason": f"parse_failed:{exc}"})
+        result.update(
+            {"status": "unavailable", "degraded_reason": f"parse_failed:{exc}"}
+        )
         return result
     src_day = _mtime_day(mtime_after)
     rewritten = mtime_before is None or mtime_after > mtime_before
@@ -105,21 +117,24 @@ def refresh(date: str, call_fn=None) -> dict[str, Any]:
         "date": src_day if stale else date,
         "refreshed_at": cn_now().isoformat(timespec="seconds"),
         "source": str(src),
-        "source_mtime": datetime.fromtimestamp(mtime_after,
-                                               tz=cn_now().tzinfo).isoformat(timespec="seconds"),
+        "source_mtime": datetime.fromtimestamp(
+            mtime_after, tz=cn_now().tzinfo
+        ).isoformat(timespec="seconds"),
         "stock_count": len(tags),
         "tags": tags,
     }
     if stale:
         payload["stale"] = True
         payload["requested_date"] = date
-        result.update({
-            "status": "stale",
-            "degraded_reason": f"miscinfo_stale:mtime_day={src_day} 未随本次调用更新"
-                               f"(请求 {date})，标签可能是上一交易日/上周的",
-            "source_date": src_day,
-            "requested_date": date,
-        })
+        result.update(
+            {
+                "status": "stale",
+                "degraded_reason": f"miscinfo_stale:mtime_day={src_day} 未随本次调用更新"
+                f"(请求 {date})，标签可能是上一交易日/上周的",
+                "source_date": src_day,
+                "requested_date": date,
+            }
+        )
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUT_PATH.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     result["stock_count"] = len(tags)

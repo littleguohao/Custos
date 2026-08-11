@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Validate final review artifacts before delivery."""
+
 from __future__ import annotations
 
 import argparse
@@ -20,9 +21,16 @@ REQUIRED_SECTIONS = [
     "数据时效、缺失项与风险提示",
 ]
 REQUIRED_JSON_KEYS = [
-    "date", "report_quality", "news_digest", "execution_review",
-    "theme_lifecycles", "market_quality_checks", "revalued_positions",
-    "next_day_plan", "rule_review", "unavailable",
+    "date",
+    "report_quality",
+    "news_digest",
+    "execution_review",
+    "theme_lifecycles",
+    "market_quality_checks",
+    "revalued_positions",
+    "next_day_plan",
+    "rule_review",
+    "unavailable",
 ]
 
 
@@ -39,7 +47,9 @@ def validate(day: str, markdown: str, payload: dict) -> list[str]:
     if payload.get("report_quality") not in {"complete", "degraded"}:
         errors.append("invalid report_quality")
     news = payload.get("news_digest") or {}
-    if "cannot directly increase trading permissions" not in str(news.get("permission_rule")):
+    if "cannot directly increase trading permissions" not in str(
+        news.get("permission_rule")
+    ):
         errors.append("news permission rule missing")
     execution = payload.get("execution_review") or {}
     if not isinstance(execution.get("rows"), list):
@@ -65,7 +75,13 @@ def main():
     markdown = md_path.read_text(encoding="utf-8")
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     errors = validate(args.date, markdown, payload)
-    result = {"date": args.date, "status": "ok" if not errors else "failed", "errors": errors, "markdown": str(md_path), "json": str(json_path)}
+    result = {
+        "date": args.date,
+        "status": "ok" if not errors else "failed",
+        "errors": errors,
+        "markdown": str(md_path),
+        "json": str(json_path),
+    }
     print(json.dumps(result, ensure_ascii=True))
     if errors:
         raise SystemExit(2)

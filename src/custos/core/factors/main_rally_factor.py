@@ -25,6 +25,7 @@
 
 阈值全部沿用原文并**待回测**：占比 0.8、RSI7<20、CCI<-100、去重窗 20 日。
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -52,13 +53,13 @@ FACTOR: dict[str, Any] = {
 
 
 # ---- 原文参数（待回测）----
-FLOW_WIN = 15                # D1/D2 的统计窗（原文 15；文章说想更灵敏可改 10）
-FLOW_THRESHOLD = 0.8         # 主升占比阈值（原文 0.8；想过滤弱势反弹可上调 0.85）
-RSI_N = 7                    # 原文 D5 用 7 日
-RSI_OVERSOLD = 20.0          # 原文 REF(D5,1)<20（震荡市可放宽到 30）
-CCI_N = 14                   # 原文 AVEDEV/MA 都用 14
-CCI_EXTREME = -100.0         # 原文 偏差<-100（想提高安全边际可下调到 -120）
-MAIN_RALLY_MIN_BARS = 60     # 原文 BARSCOUNT(C)>60
+FLOW_WIN = 15  # D1/D2 的统计窗（原文 15；文章说想更灵敏可改 10）
+FLOW_THRESHOLD = 0.8  # 主升占比阈值（原文 0.8；想过滤弱势反弹可上调 0.85）
+RSI_N = 7  # 原文 D5 用 7 日
+RSI_OVERSOLD = 20.0  # 原文 REF(D5,1)<20（震荡市可放宽到 30）
+CCI_N = 14  # 原文 AVEDEV/MA 都用 14
+CCI_EXTREME = -100.0  # 原文 偏差<-100（想提高安全边际可下调到 -120）
+MAIN_RALLY_MIN_BARS = 60  # 原文 BARSCOUNT(C)>60
 
 
 def flow_ratio(df: pd.DataFrame, win: int = FLOW_WIN) -> pd.Series:
@@ -69,19 +70,22 @@ def flow_ratio(df: pd.DataFrame, win: int = FLOW_WIN) -> pd.Series:
     """
     high = df["high"].astype(float)
     low = df["low"].astype(float)
-    up = (high - high.shift(1)).clip(lower=0.0)              # IF(H>REF(H,1), H-REF(H,1), 0)
-    dn = (low.shift(1) - low).clip(lower=0.0)                # IF(L>REF(L,1), 0, REF(L,1)-L)
+    up = (high - high.shift(1)).clip(lower=0.0)  # IF(H>REF(H,1), H-REF(H,1), 0)
+    dn = (low.shift(1) - low).clip(lower=0.0)  # IF(L>REF(L,1), 0, REF(L,1)-L)
     d1 = up.rolling(win).sum()
     d2 = dn.rolling(win).sum()
     tot = d1 + d2
-    return (d1 / tot.replace(0, np.nan))
+    return d1 / tot.replace(0, np.nan)
 
 
-def detect_main_rally_start(df: pd.DataFrame, code: str = "",
-                            cross_mode: str = "below",
-                            flow_threshold: float = FLOW_THRESHOLD,
-                            rsi_oversold: float = RSI_OVERSOLD,
-                            cci_extreme: float = CCI_EXTREME) -> dict[str, Any]:
+def detect_main_rally_start(
+    df: pd.DataFrame,
+    code: str = "",
+    cross_mode: str = "below",
+    flow_threshold: float = FLOW_THRESHOLD,
+    rsi_oversold: float = RSI_OVERSOLD,
+    cci_extreme: float = CCI_EXTREME,
+) -> dict[str, Any]:
     """「主升始发点」三条件（原文源码口径）。绝不 raise。
 
     ``cross_mode``：
@@ -93,8 +97,11 @@ def detect_main_rally_start(df: pd.DataFrame, code: str = "",
     try:
         n = len(df) if df is not None else 0
         if n < MAIN_RALLY_MIN_BARS:
-            return {"available": False, "hit": False,
-                    "reason": f"少于{MAIN_RALLY_MIN_BARS}根K线（原文 BARSCOUNT>60）"}
+            return {
+                "available": False,
+                "hit": False,
+                "reason": f"少于{MAIN_RALLY_MIN_BARS}根K线（原文 BARSCOUNT>60）",
+            }
         # ① 资金流入占比穿越
         fr = flow_ratio(df, FLOW_WIN)
         cur_f = fr.iloc[-1]
@@ -102,10 +109,13 @@ def detect_main_rally_start(df: pd.DataFrame, code: str = "",
         if cur_f != cur_f or prev_f != prev_f:
             return {"available": False, "hit": False, "reason": "flow_ratio 不可用"}
         cur_f, prev_f = float(cur_f), float(prev_f)
-        cross_below = bool(prev_f >= flow_threshold > cur_f)   # 主升跌破（源码口径）
-        cross_above = bool(prev_f <= flow_threshold < cur_f)   # 主升突破（文字口径）
-        flow_ok = {"below": cross_below, "above": cross_above,
-                   "either": cross_below or cross_above}.get(cross_mode, cross_below)
+        cross_below = bool(prev_f >= flow_threshold > cur_f)  # 主升跌破（源码口径）
+        cross_above = bool(prev_f <= flow_threshold < cur_f)  # 主升突破（文字口径）
+        flow_ok = {
+            "below": cross_below,
+            "above": cross_above,
+            "either": cross_below or cross_above,
+        }.get(cross_mode, cross_below)
 
         # ② 超卖区金叉：前一日 RSI7 < 20 且今日上行
         r = rsi(df["close"], RSI_N)
@@ -129,26 +139,44 @@ def detect_main_rally_start(df: pd.DataFrame, code: str = "",
 
         t1_ok = bool(cci_ok and j_turn)
         hit = bool(flow_ok and rsi_ok and t1_ok)
-        return {"available": True, "hit": hit,
-                "cross_mode": cross_mode,
-                "flow_ratio": round(cur_f, 4), "flow_ratio_prev": round(prev_f, 4),
-                "flow_cross_below": cross_below, "flow_cross_above": cross_above,
-                "flow_ok": flow_ok,
-                "rsi7": round(cur_r, 2), "rsi7_prev": round(prev_r, 2), "rsi_ok": rsi_ok,
-                "cci": round(cur_c, 2), "cci_prev": round(prev_c, 2), "cci_ok": cci_ok,
-                "j": round(float(j0), 2) if j0 == j0 else None, "j_turn_up": j_turn,
-                "t1_ok": t1_ok,
-                "conditions_met": int(flow_ok) + int(rsi_ok) + int(t1_ok)}
+        return {
+            "available": True,
+            "hit": hit,
+            "cross_mode": cross_mode,
+            "flow_ratio": round(cur_f, 4),
+            "flow_ratio_prev": round(prev_f, 4),
+            "flow_cross_below": cross_below,
+            "flow_cross_above": cross_above,
+            "flow_ok": flow_ok,
+            "rsi7": round(cur_r, 2),
+            "rsi7_prev": round(prev_r, 2),
+            "rsi_ok": rsi_ok,
+            "cci": round(cur_c, 2),
+            "cci_prev": round(prev_c, 2),
+            "cci_ok": cci_ok,
+            "j": round(float(j0), 2) if j0 == j0 else None,
+            "j_turn_up": j_turn,
+            "t1_ok": t1_ok,
+            "conditions_met": int(flow_ok) + int(rsi_ok) + int(t1_ok),
+        }
     except Exception as exc:  # noqa: BLE001
-        return {"available": False, "hit": False,
-                "error": f"{type(exc).__name__}:{str(exc)[:80]}"}
+        return {
+            "available": False,
+            "hit": False,
+            "error": f"{type(exc).__name__}:{str(exc)[:80]}",
+        }
 
 
-def main_rally_score(df: pd.DataFrame, code: str = "",
-                     cross_mode: str = "below") -> dict[str, Any]:
+def main_rally_score(
+    df: pd.DataFrame, code: str = "", cross_mode: str = "below"
+) -> dict[str, Any]:
     """三条件命中数 ×33.3（0-100），仅用于回测排序。原文没给权重，故等权。"""
     r = detect_main_rally_start(df, code, cross_mode=cross_mode)
     if not r.get("available"):
         return {"available": False, "score": None, "reason": r.get("reason")}
-    return {"available": True, "score": round(r["conditions_met"] * 100.0 / 3.0, 1),
-            "hit": r["hit"], "detail": r}
+    return {
+        "available": True,
+        "score": round(r["conditions_met"] * 100.0 / 3.0, 1),
+        "hit": r["hit"],
+        "detail": r,
+    }

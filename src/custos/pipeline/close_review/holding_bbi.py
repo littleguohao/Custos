@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Shared BBI presentation and decision basis for close-review reports."""
+
 from __future__ import annotations
 
 import math
@@ -47,7 +48,9 @@ def bbi_basis(row: dict[str, Any]) -> dict[str, Any]:
         days = 0
     state = f"BBI {_number(value)}；收盘{'上方' if above else '下方'}（偏离{_signed_number(distance)}%）"
     if above:
-        reminder = "仅技术维度持有结构有效；连续两根中大阳时分批止盈；更高优先级风控仍有效"
+        reminder = (
+            "仅技术维度持有结构有效；连续两根中大阳时分批止盈；更高优先级风控仍有效"
+        )
         signal = "technical_hold"
     elif days >= 2:
         reminder = f"连续{days}日收盘跌破BBI；按B1进入清仓评估，最终动作服从总控"
@@ -67,7 +70,9 @@ def bbi_basis(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def intraday_bbi_basis(row: dict[str, Any], price: Any, technical_date: str | None) -> dict[str, Any]:
+def intraday_bbi_basis(
+    row: dict[str, Any], price: Any, technical_date: str | None
+) -> dict[str, Any]:
     """Compare a current quote with the latest confirmed BBI without rewriting history."""
     base = bbi_basis(row)
     if not base.get("available"):

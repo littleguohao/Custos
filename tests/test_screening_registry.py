@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Tests for governance/contracts/SCREEN_FORMULA_REGISTRY.json shape and invariants."""
+
 import json
 from pathlib import Path
 
@@ -52,6 +53,11 @@ def test_scoring_and_theme_mapping_sections():
     assert isinstance(scoring, dict)
     assert int(scoring["sector_score_max"]) > 0
     caps = scoring["cap_rules"]
-    for key in ("sprint_wave", "volume_retreat", "non_one_wave_revoked", "cz_avoid_sector"):
+    for key in (
+        "sprint_wave",
+        "volume_retreat",
+        "non_one_wave_revoked",
+        "cz_avoid_sector",
+    ):
         assert isinstance(caps[key], bool)
     assert int(data["theme_mapping"]["min_match"]) >= 1

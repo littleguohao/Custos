@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Semantic-lock tests for src/pipeline_kit.py and src/code_utils.py."""
+
 from __future__ import annotations
 
 import math
@@ -14,6 +15,7 @@ import sys
 # ---------------------------------------------------------------------------
 # code_utils.clean_code — ledger semantics (incremental_ledger baseline)
 # ---------------------------------------------------------------------------
+
 
 class TestCleanCode:
     def test_five_digit_padded(self):
@@ -55,6 +57,7 @@ class TestCleanCode:
 # code_utils.norm_code — market semantics (technical_monitor version)
 # ---------------------------------------------------------------------------
 
+
 class TestNormCode:
     def test_already_suffixed(self):
         assert code_utils.norm_code("600519.SH") == "600519.SH"
@@ -82,6 +85,7 @@ class TestNormCode:
 # ---------------------------------------------------------------------------
 # code_utils.split_code / suffix / finite
 # ---------------------------------------------------------------------------
+
 
 class TestSplitCode:
     def test_sh(self):
@@ -139,6 +143,7 @@ class TestFinite:
 # pipeline_kit.md_to_digest
 # ---------------------------------------------------------------------------
 
+
 class TestMdToDigest:
     def test_headers_converted(self):
         md = "# 标题一\n内容行\n"
@@ -191,11 +196,13 @@ class TestMdToDigest:
         return f"## {head}\n" + "字" * chars + "\n"
 
     def test_truncation_keeps_key_sections(self):
-        md = ("# 每日投研简报\n"
-              + self._section_md("1. 今日核心结论", 200)
-              + self._section_md("2. 隔夜重大消息", 2000)
-              + self._section_md("6. 当日行动建议", 200)
-              + self._section_md("7. 数据时效与声明", 2000))
+        md = (
+            "# 每日投研简报\n"
+            + self._section_md("1. 今日核心结论", 200)
+            + self._section_md("2. 隔夜重大消息", 2000)
+            + self._section_md("6. 当日行动建议", 200)
+            + self._section_md("7. 数据时效与声明", 2000)
+        )
         digest = pipeline_kit.md_to_digest(md, limit=1000)
         assert digest.endswith("...(完整报告见文件)")
         assert "1. 今日核心结论" in digest
@@ -205,18 +212,24 @@ class TestMdToDigest:
         assert len(digest) <= 1000
 
     def test_truncation_fills_remaining_sections_in_original_order(self):
-        md = ("# 标题\n"
-              + self._section_md("1. 今日核心结论", 100)
-              + self._section_md("2. 次要内容", 100)
-              + self._section_md("6. 当日行动建议", 100)
-              + self._section_md("9. 填充物", 5000))
+        md = (
+            "# 标题\n"
+            + self._section_md("1. 今日核心结论", 100)
+            + self._section_md("2. 次要内容", 100)
+            + self._section_md("6. 当日行动建议", 100)
+            + self._section_md("9. 填充物", 5000)
+        )
         digest = pipeline_kit.md_to_digest(md, limit=1000)
         assert "1. 今日核心结论" in digest
         assert "6. 当日行动建议" in digest
         assert "2. 次要内容" in digest
         assert "9. 填充物" not in digest
         # emitted in original document order
-        assert digest.index("1. 今日核心结论") < digest.index("2. 次要内容") < digest.index("6. 当日行动建议")
+        assert (
+            digest.index("1. 今日核心结论")
+            < digest.index("2. 次要内容")
+            < digest.index("6. 当日行动建议")
+        )
         assert len(digest) <= 1000
 
     def test_truncation_falls_back_to_plain_cut_when_no_section_fits(self):
@@ -231,8 +244,19 @@ class TestMdToDigest:
         u1 = "─" * min(len("标题") * 2, 40)
         u2 = "─" * min(len("1. 今日核心结论") * 2, 40)
         u3 = "─" * min(len("6. 当日行动建议") * 2, 40)
-        lines = ["标题", u1, "", "1. 今日核心结论", u2, "- 要点",
-                 "", "6. 当日行动建议", u3, "a | b", "x | y"]
+        lines = [
+            "标题",
+            u1,
+            "",
+            "1. 今日核心结论",
+            u2,
+            "- 要点",
+            "",
+            "6. 当日行动建议",
+            u3,
+            "a | b",
+            "x | y",
+        ]
         assert digest == "\n".join(lines)
 
 
@@ -240,13 +264,17 @@ class TestMdToDigest:
 # pipeline_kit._extract_json — pure JSON-line extraction
 # ---------------------------------------------------------------------------
 
+
 class TestExtractJson:
     def test_single_json_line(self):
         text = '{"is_trading_day": true, "date": "2026-07-17"}\n'
-        assert pipeline_kit._extract_json(text) == {"is_trading_day": True, "date": "2026-07-17"}
+        assert pipeline_kit._extract_json(text) == {
+            "is_trading_day": True,
+            "date": "2026-07-17",
+        }
 
     def test_mixed_stderr_noise(self):
-        text = "[WARN] something\nnot json at all\n{\"is_trading_day\": false}\ntrailing noise\n"
+        text = '[WARN] something\nnot json at all\n{"is_trading_day": false}\ntrailing noise\n'
         assert pipeline_kit._extract_json(text) == {"is_trading_day": False}
 
     def test_first_dict_wins(self):
@@ -266,7 +294,9 @@ class TestExtractJson:
         # fails on this shape (regression: runners misread trading days).
         text = '{\n  "date": "2026-07-18",\n  "is_trading_day": false,\n  "reason": "周末休市"\n}\n'
         assert pipeline_kit._extract_json(text) == {
-            "date": "2026-07-18", "is_trading_day": False, "reason": "周末休市",
+            "date": "2026-07-18",
+            "is_trading_day": False,
+            "reason": "周末休市",
         }
 
     def test_pretty_json_with_noise_around(self):
@@ -297,23 +327,31 @@ class TestRunStageTimeout:
             pipeline_kit.run_stage(self.SLEEP_5, "sleeper", required=True, timeout=1)
 
     def test_timeout_keeps_partial_stdout(self):
-        cmd = [sys.executable, "-c",
-               "import sys, time; print('early'); sys.stdout.flush(); time.sleep(5)"]
+        cmd = [
+            sys.executable,
+            "-c",
+            "import sys, time; print('early'); sys.stdout.flush(); time.sleep(5)",
+        ]
         r = pipeline_kit.run_stage(cmd, "partial", required=False, timeout=1)
         assert r["timeout"] is True
         assert "early" in r["stdout"]
 
     def test_success_not_flagged_as_timeout(self):
-        r = pipeline_kit.run_stage([sys.executable, "-c", "print('hi')"], "echo",
-                                   required=True, timeout=30)
+        r = pipeline_kit.run_stage(
+            [sys.executable, "-c", "print('hi')"], "echo", required=True, timeout=30
+        )
         assert r["ok"] is True
         assert r["timeout"] is False
         assert r["returncode"] == 0
         assert "hi" in r["stdout"]
 
     def test_nonzero_exit_not_flagged_as_timeout(self):
-        r = pipeline_kit.run_stage([sys.executable, "-c", "import sys; sys.exit(3)"], "fail3",
-                                   required=False, timeout=30)
+        r = pipeline_kit.run_stage(
+            [sys.executable, "-c", "import sys; sys.exit(3)"],
+            "fail3",
+            required=False,
+            timeout=30,
+        )
         assert r["ok"] is False
         assert r["timeout"] is False
         assert r["returncode"] == 3

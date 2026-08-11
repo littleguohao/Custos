@@ -6,6 +6,7 @@
 （其余数据源都是通达信本地文件或已知 API）。所以测的重点不是「解析对不对」，
 而是「**恶意或损坏的输入能造成多大伤害**」。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -17,8 +18,13 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 from custos.datasource.news import rss_collector as rc  # noqa: E402
 
-SRC = {"id": "s", "name": "源", "tier": "S", "category": "media",
-       "url": "https://x.com/feed"}
+SRC = {
+    "id": "s",
+    "name": "源",
+    "tier": "S",
+    "category": "media",
+    "url": "https://x.com/feed",
+}
 
 
 class TestSslPolicy:
@@ -37,7 +43,8 @@ class TestSslPolicy:
         """带 ack 时才允许，且**必须回报 transport_verified=False** ——
         下游据此拒绝把内容当既成事实。"""
         ctx, verified = rc.build_ssl_context(
-            {"id": "s", "ssl_verify": False, "ssl_insecure_ack": True})
+            {"id": "s", "ssl_verify": False, "ssl_insecure_ack": True}
+        )
         assert verified is False
         assert ctx.verify_mode == ssl.CERT_NONE and ctx.check_hostname is False
 
@@ -45,8 +52,15 @@ class TestSslPolicy:
 class TestTierQuality:
     """来源等级 → 证据质量。两个维度必须都成立才给 confirmed。"""
 
-    @pytest.mark.parametrize("tier,want", [("S", "confirmed"), ("A", "confirmed"),
-                                           ("B", "candidate"), ("C", "candidate")])
+    @pytest.mark.parametrize(
+        "tier,want",
+        [
+            ("S", "confirmed"),
+            ("A", "confirmed"),
+            ("B", "candidate"),
+            ("C", "candidate"),
+        ],
+    )
     def test_tier_mapping(self, tier, want):
         assert rc._tier_quality(tier, True) == want
 
@@ -69,11 +83,15 @@ class TestEntityExpansion:
     `MAX_FEED_BYTES`（16 MB）只限输入大小，管不住展开后的内存。
     """
 
-    NESTED = ('<?xml version="1.0"?>\n<!DOCTYPE r [\n'
-              '<!ENTITY a "aaaaa">\n<!ENTITY b "&a;&a;&a;&a;&a;">\n]>\n'
-              '<rss><channel><item><title>&b;</title></item></channel></rss>')
-    FLAT = ('<?xml version="1.0"?>\n<!DOCTYPE r [<!ENTITY nbsp "&#160;">]>\n'
-            '<rss><item><title>a&nbsp;b</title></item></rss>')
+    NESTED = (
+        '<?xml version="1.0"?>\n<!DOCTYPE r [\n'
+        '<!ENTITY a "aaaaa">\n<!ENTITY b "&a;&a;&a;&a;&a;">\n]>\n'
+        "<rss><channel><item><title>&b;</title></item></channel></rss>"
+    )
+    FLAT = (
+        '<?xml version="1.0"?>\n<!DOCTYPE r [<!ENTITY nbsp "&#160;">]>\n'
+        "<rss><item><title>a&nbsp;b</title></item></rss>"
+    )
     PLAIN = '<?xml version="1.0"?><rss><channel><item><title>t</title></item></channel></rss>'
 
     def test_nested_entity_refused(self):
@@ -91,17 +109,17 @@ class TestEntityExpansion:
     def test_parse_feed_refuses_nested(self):
         """端到端：`parse_feed` 必须在 `ET.fromstring` **之前**拦下。"""
         with pytest.raises(ValueError, match="billion-laughs"):
-            rc.parse_feed(self.NESTED.encode(), SRC,
-                          "2026-08-07T00:00:00+00:00")
+            rc.parse_feed(self.NESTED.encode(), SRC, "2026-08-07T00:00:00+00:00")
 
     def test_external_entity_still_rejected_by_parser(self):
         """外部实体（读本地文件）本来就被解析器拒，这里钉住它别退化。"""
-        xxe = ('<?xml version="1.0"?>\n'
-               '<!DOCTYPE r [<!ENTITY x SYSTEM "file:///etc/passwd">]>\n'
-               '<rss><channel><item><title>&x;</title></item></channel></rss>')
+        xxe = (
+            '<?xml version="1.0"?>\n'
+            '<!DOCTYPE r [<!ENTITY x SYSTEM "file:///etc/passwd">]>\n'
+            "<rss><channel><item><title>&x;</title></item></channel></rss>"
+        )
         with pytest.raises(Exception):
-            rc.parse_feed(xxe.encode(), SRC,
-                          "2026-08-07T00:00:00+00:00")
+            rc.parse_feed(xxe.encode(), SRC, "2026-08-07T00:00:00+00:00")
 
 
 class TestSizeLimit:
@@ -122,16 +140,17 @@ class TestSizeLimit:
 
 
 class TestParsing:
-    FEED = ('<?xml version="1.0" encoding="utf-8"?><rss><channel>'
-            '<item><title>标题 &amp; 摘要</title>'
-            '<description>&lt;p&gt;正文  多空格&lt;/p&gt;</description>'
-            '<link>https://x.com/a</link>'
-            '<pubDate>Fri, 07 Aug 2026 08:00:00 +0800</pubDate></item>'
-            '</channel></rss>')
+    FEED = (
+        '<?xml version="1.0" encoding="utf-8"?><rss><channel>'
+        "<item><title>标题 &amp; 摘要</title>"
+        "<description>&lt;p&gt;正文  多空格&lt;/p&gt;</description>"
+        "<link>https://x.com/a</link>"
+        "<pubDate>Fri, 07 Aug 2026 08:00:00 +0800</pubDate></item>"
+        "</channel></rss>"
+    )
 
     def test_basic_item(self):
-        items = rc.parse_feed(self.FEED.encode(), SRC,
-                              "2026-08-07T00:00:00+00:00")
+        items = rc.parse_feed(self.FEED.encode(), SRC, "2026-08-07T00:00:00+00:00")
         assert len(items) == 1
         it = items[0]
         assert it["title"] == "标题 & 摘要", "HTML 实体要还原"
@@ -144,17 +163,20 @@ class TestParsing:
         按字面 gb2312 解会在遇到扩展汉字时 replace 成乱码；
         而 ElementTree 本身也不接受这个声明，所以要显式解码并改写声明。
         """
-        raw = ('<?xml version="1.0" encoding="gb2312"?><rss><channel><item>'
-               '<title>浦发银行</title><link>https://x.com/a</link>'
-               '</item></channel></rss>').encode("gb18030")
-        items = rc.parse_feed(raw, SRC,
-                              "2026-08-07T00:00:00+00:00")
+        raw = (
+            '<?xml version="1.0" encoding="gb2312"?><rss><channel><item>'
+            "<title>浦发银行</title><link>https://x.com/a</link>"
+            "</item></channel></rss>"
+        ).encode("gb18030")
+        items = rc.parse_feed(raw, SRC, "2026-08-07T00:00:00+00:00")
         assert items[0]["title"] == "浦发银行"
 
     def test_atom_link_href_fallback(self):
         """Atom 用 `<link href="...">` 而非文本节点 —— 取不到文本时回退读 href。"""
-        feed = ('<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">'
-                '<entry><title>A</title><link href="https://x/1"/></entry></feed>')
+        feed = (
+            '<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">'
+            '<entry><title>A</title><link href="https://x/1"/></entry></feed>'
+        )
         items = rc.parse_feed(feed.encode(), SRC, "2026-08-07T00:00:00+00:00")
         assert items[0]["source_url"] == "https://x/1"
 
@@ -165,22 +187,36 @@ class TestParsing:
         URL 去重也会失效、只能靠标题近似去重。当前实现如此，这里如实钉住 ——
         若将来要求「证据必须可核验」，改动点就在这里。
         """
-        feed = ('<?xml version="1.0"?><rss><channel><item><title>无链接标题</title>'
-                '</item></channel></rss>')
+        feed = (
+            '<?xml version="1.0"?><rss><channel><item><title>无链接标题</title>'
+            "</item></channel></rss>"
+        )
         items = rc.parse_feed(feed.encode(), SRC, "2026-08-07T00:00:00+00:00")
         assert len(items) == 1 and items[0]["source_url"] == ""
         assert items[0]["item_id"], "无链接也要有稳定 item_id（退到标题哈希）"
 
     def test_atom_entry_also_parsed(self):
-        feed = ('<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">'
-                '<entry><title>A</title><link>https://x/1</link>'
-                '<summary>s</summary></entry></feed>')
-        assert len(rc.parse_feed(feed.encode(), {**SRC, "tier": "A"},
-                                 "2026-08-07T00:00:00+00:00")) == 1
+        feed = (
+            '<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">'
+            "<entry><title>A</title><link>https://x/1</link>"
+            "<summary>s</summary></entry></feed>"
+        )
+        assert (
+            len(
+                rc.parse_feed(
+                    feed.encode(), {**SRC, "tier": "A"}, "2026-08-07T00:00:00+00:00"
+                )
+            )
+            == 1
+        )
 
     def test_unverified_transport_marks_items_candidate(self):
-        items = rc.parse_feed(self.FEED.encode(), SRC,
-                              "2026-08-07T00:00:00+00:00", transport_verified=False)
+        items = rc.parse_feed(
+            self.FEED.encode(),
+            SRC,
+            "2026-08-07T00:00:00+00:00",
+            transport_verified=False,
+        )
         assert items[0]["quality"] == "candidate"
         assert items[0]["transport_verified"] is False
 
@@ -191,7 +227,9 @@ class TestHelpers:
         assert rc.clean(None) == ""
 
     def test_iso_date_handles_rfc822_and_iso(self):
-        assert rc.iso_date("Fri, 07 Aug 2026 08:00:00 +0800").startswith("2026-08-07T00:00")
+        assert rc.iso_date("Fri, 07 Aug 2026 08:00:00 +0800").startswith(
+            "2026-08-07T00:00"
+        )
         assert rc.iso_date("2026-08-07T00:00:00Z").startswith("2026-08-07T00:00")
         assert rc.iso_date("垃圾") is None and rc.iso_date(None) is None
 

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """fallback_rss_events:新源体系下按 relevance_score>=60 排序取 top3(不再要求 matched_market_keywords)。"""
+
 from __future__ import annotations
 
 import json
@@ -12,7 +13,8 @@ def _setup(monkeypatch, tmp_path, items):
     rss_dir = tmp_path / "news" / "rss" / "filtered"
     rss_dir.mkdir(parents=True)
     (rss_dir / "2026-07-19_premarket_rss_candidates.json").write_text(
-        json.dumps(items, ensure_ascii=False), encoding="utf-8")
+        json.dumps(items, ensure_ascii=False), encoding="utf-8"
+    )
     monkeypatch.setattr(daily_report, "DATA", tmp_path)
 
 
@@ -29,14 +31,20 @@ def _item(score, title="事件", keywords=None, quality="candidate"):
 
 
 class TestFallbackRssEvents:
-    def test_selects_top3_by_score_without_keyword_requirement(self, monkeypatch, tmp_path):
-        _setup(monkeypatch, tmp_path, [
-            _item(69, "低分但有词", keywords=["美联储"]),
-            _item(92, "高分无词A"),
-            _item(77, "中分无词"),
-            _item(92, "高分无词B"),
-            _item(88, "高分无词C"),
-        ])
+    def test_selects_top3_by_score_without_keyword_requirement(
+        self, monkeypatch, tmp_path
+    ):
+        _setup(
+            monkeypatch,
+            tmp_path,
+            [
+                _item(69, "低分但有词", keywords=["美联储"]),
+                _item(92, "高分无词A"),
+                _item(77, "中分无词"),
+                _item(92, "高分无词B"),
+                _item(88, "高分无词C"),
+            ],
+        )
         events = daily_report.fallback_rss_events("2026-07-19")
         assert [e["title"] for e in events] == ["高分无词A", "高分无词B", "高分无词C"]
 
@@ -74,21 +82,34 @@ class TestDailyReportAuditBlock:
         data = tmp_path / "data"
         (data / "decisions").mkdir(parents=True)
         (data / "decisions" / "2026-08-07_chief_decision.json").write_text(
-            json.dumps({"market_state": "震荡", "market_quality": {},
-                        "position_freshness": {}, "position_gate": {},
-                        "holding_actions": [], "buy_actions": [],
-                        "forbidden_actions": []}, ensure_ascii=False),
-            encoding="utf-8")
+            json.dumps(
+                {
+                    "market_state": "震荡",
+                    "market_quality": {},
+                    "position_freshness": {},
+                    "position_gate": {},
+                    "holding_actions": [],
+                    "buy_actions": [],
+                    "forbidden_actions": [],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
         monkeypatch.setattr(daily_report, "DATA", data)
         monkeypatch.setattr(daily_report, "PLAN", tmp_path / "artifacts/reports/daily")
         # 盘前情报路径走模块自身常量，钉成「无」保证环境无关
-        monkeypatch.setattr(daily_report, "premarket_intelligence_path", lambda day: None)
+        monkeypatch.setattr(
+            daily_report, "premarket_intelligence_path", lambda day: None
+        )
         monkeypatch.setattr(daily_report, "load_premarket_intelligence", lambda day: {})
         import sys
+
         monkeypatch.setattr(sys, "argv", ["x", "--date", "2026-08-07"])
         daily_report.main()
-        body = (tmp_path / "artifacts/reports/daily" / "2026-08-07_daily_report.md").read_text(
-            encoding="utf-8")
+        body = (
+            tmp_path / "artifacts/reports/daily" / "2026-08-07_daily_report.md"
+        ).read_text(encoding="utf-8")
         header = body.split("## 1.")[0]
         assert "report_id `2026-08-07_premarket_" in header
         assert "策略版本" in header and "数据截止" in header and "输入清单" in header

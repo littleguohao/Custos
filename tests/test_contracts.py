@@ -7,6 +7,7 @@
 ⚠️ 这里的每一条校验规则都对应一个**今天实际查到的 bug**，不是想象出来的防御。
 测试里逐条标出对应关系 —— 这样将来有人想放宽某条规则时，能看到放宽的代价。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -22,29 +23,61 @@ VALID_GATE = {
     "calendar": {"is_trading_day": True},
     "position_freshness": {"status": "confirmed"},
     "technical_freshness": {"status": "confirmed"},
-    "position_gate": {"status": "pass", "allow_position_increase": True,
-                      "allow_position_reduction": True, "allow_precise_quantity": True,
-                      "market_regime": "中性", "limitations": []},
-    "market_quality": {"status": "pass", "quality_score": 0.9, "checks": [],
-                       "limitations": []},
+    "position_gate": {
+        "status": "pass",
+        "allow_position_increase": True,
+        "allow_position_reduction": True,
+        "allow_precise_quantity": True,
+        "market_regime": "中性",
+        "limitations": [],
+    },
+    "market_quality": {
+        "status": "pass",
+        "quality_score": 0.9,
+        "checks": [],
+        "limitations": [],
+    },
     "generated_at": "2026-08-07T17:00:00+08:00",
 }
 VALID_RISK = {
     # ⚠️ `evidence_date` 是 2026-08-07 新增：09:05 盘前也产 risk_decision，
     # 那时当日 K 线不存在 ⇒ 依据是前一交易日收盘。缺它下游只能按文件名判「当日」。
-    "date": "2026-08-07", "evidence_date": "2026-08-06", "market_regime": "空头",
+    "date": "2026-08-07",
+    "evidence_date": "2026-08-06",
+    "market_regime": "空头",
     "regime_directive": {"reduce_top_priority": True},
-    "risk_level": "强风控", "forbidden_actions": ["止损"],
-    "stock_risks": [{"code": "600000", "risk_type": "亏损扩大", "action": "止损",
-                     "priority": "高", "reason": "浮亏达阈值"}],
+    "risk_level": "强风控",
+    "forbidden_actions": ["止损"],
+    "stock_risks": [
+        {
+            "code": "600000",
+            "risk_type": "亏损扩大",
+            "action": "止损",
+            "priority": "高",
+            "reason": "浮亏达阈值",
+        }
+    ],
 }
-VALID_B1 = [{
-    "version": "B1-holding-v1", "code": "600000", "market_regime": "中性",
-    "final_priority": "P0", "final_action": "止损/清仓评估", "final_reason": "跌破L1",
-    "signals": [{"signal": "hard_loss", "priority": "P0", "action": "止损/清仓评估",
-                 "reason": "达到-10%硬风控阈值"}],
-    "unavailable": [], "facts": {},
-}]
+VALID_B1 = [
+    {
+        "version": "B1-holding-v1",
+        "code": "600000",
+        "market_regime": "中性",
+        "final_priority": "P0",
+        "final_action": "止损/清仓评估",
+        "final_reason": "跌破L1",
+        "signals": [
+            {
+                "signal": "hard_loss",
+                "priority": "P0",
+                "action": "止损/清仓评估",
+                "reason": "达到-10%硬风控阈值",
+            }
+        ],
+        "unavailable": [],
+        "facts": {},
+    }
+]
 
 
 class TestBaselineValid:
@@ -62,9 +95,15 @@ class TestBaselineValid:
 
     def test_empty_collections_are_valid(self):
         """空数组是合法的（没有风险 / 没有信号是正常状态），不得当成缺数。"""
-        assert C.check("risk_decision", {**VALID_RISK, "stock_risks": [],
-                                        "forbidden_actions": [],
-                                        "risk_level": "普通"})["valid"]
+        assert C.check(
+            "risk_decision",
+            {
+                **VALID_RISK,
+                "stock_risks": [],
+                "forbidden_actions": [],
+                "risk_level": "普通",
+            },
+        )["valid"]
         assert C.check("b1_holding_state", [])["valid"]
 
 
@@ -86,10 +125,17 @@ class TestNullVsMissing:
         assert not r["valid"] and any("date: 缺失" in e for e in r["errors"])
 
     def test_nested_null_detected(self):
-        g = {**VALID_GATE, "position_gate": {**VALID_GATE["position_gate"],
-                                            "allow_position_increase": None}}
+        g = {
+            **VALID_GATE,
+            "position_gate": {
+                **VALID_GATE["position_gate"],
+                "allow_position_increase": None,
+            },
+        }
         r = C.check("runtime_gate", g)
-        assert not r["valid"] and any("allow_position_increase" in e for e in r["errors"])
+        assert not r["valid"] and any(
+            "allow_position_increase" in e for e in r["errors"]
+        )
 
 
 class TestEnumWhitelist:
@@ -101,28 +147,44 @@ class TestEnumWhitelist:
 
     @pytest.mark.parametrize("bad", [None, "blocked_", "PASS", "", "ok"])
     def test_unknown_gate_status_rejected(self, bad):
-        g = {**VALID_GATE, "market_quality": {**VALID_GATE["market_quality"], "status": bad}}
+        g = {
+            **VALID_GATE,
+            "market_quality": {**VALID_GATE["market_quality"], "status": bad},
+        }
         assert not C.check("runtime_gate", g)["valid"]
 
     def test_regime_must_be_normalized(self):
         """⚠️ 对应审计 B1：`market_regime` 曾只读 `effective_state` 且精确等值，
         「空头触发」这套词表会让 `allow_add=False` 漏置。
         契约要求它已经过 `normalize_regime` 归一。"""
-        assert not C.check("risk_decision", {**VALID_RISK, "market_regime": "空头触发"})["valid"]
-        assert C.check("risk_decision", {**VALID_RISK, "market_regime": "空头"})["valid"]
+        assert not C.check(
+            "risk_decision", {**VALID_RISK, "market_regime": "空头触发"}
+        )["valid"]
+        assert C.check("risk_decision", {**VALID_RISK, "market_regime": "空头"})[
+            "valid"
+        ]
 
     def test_b1_priority_domain(self):
         bad = [{**VALID_B1[0], "final_priority": "P4"}]
         assert not C.check("b1_holding_state", bad)["valid"]
 
     def test_risk_priority_domain(self):
-        bad = {**VALID_RISK, "stock_risks": [{**VALID_RISK["stock_risks"][0],
-                                             "priority": "紧急"}]}
+        bad = {
+            **VALID_RISK,
+            "stock_risks": [{**VALID_RISK["stock_risks"][0], "priority": "紧急"}],
+        }
         assert not C.check("risk_decision", bad)["valid"]
 
     def test_signal_priority_domain(self):
-        bad = [{**VALID_B1[0], "signals": [{**VALID_B1[0]["signals"][0], "priority": "高"}]}]
-        assert not C.check("b1_holding_state", bad)["valid"], "信号用 P0-P3，不是高/中/低"
+        bad = [
+            {
+                **VALID_B1[0],
+                "signals": [{**VALID_B1[0]["signals"][0], "priority": "高"}],
+            }
+        ]
+        assert not C.check("b1_holding_state", bad)["valid"], (
+            "信号用 P0-P3，不是高/中/低"
+        )
 
 
 class TestFiniteness:
@@ -131,15 +193,19 @@ class TestFiniteness:
 
     @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
     def test_non_finite_number_rejected(self, bad):
-        g = {**VALID_GATE, "market_quality": {**VALID_GATE["market_quality"],
-                                              "quality_score": bad}}
+        g = {
+            **VALID_GATE,
+            "market_quality": {**VALID_GATE["market_quality"], "quality_score": bad},
+        }
         r = C.check("runtime_gate", g)
         assert not r["valid"] and any("非有限值" in e for e in r["errors"])
 
     def test_zero_is_valid(self):
         """`0` 是合法读数，不得因为「假值」被拒。"""
-        g = {**VALID_GATE, "market_quality": {**VALID_GATE["market_quality"],
-                                              "quality_score": 0}}
+        g = {
+            **VALID_GATE,
+            "market_quality": {**VALID_GATE["market_quality"], "quality_score": 0},
+        }
         assert C.check("runtime_gate", g)["valid"]
 
 
@@ -147,21 +213,29 @@ class TestTypes:
     def test_bool_is_not_a_number(self):
         """`True` 是 `int` 的子类 —— 数字字段收到布尔必须报错，
         否则 `quality_score=True` 会被当成 1.0 通过。"""
-        g = {**VALID_GATE, "market_quality": {**VALID_GATE["market_quality"],
-                                              "quality_score": True}}
+        g = {
+            **VALID_GATE,
+            "market_quality": {**VALID_GATE["market_quality"], "quality_score": True},
+        }
         assert not C.check("runtime_gate", g)["valid"]
 
     def test_number_is_not_a_bool(self):
-        g = {**VALID_GATE, "position_gate": {**VALID_GATE["position_gate"],
-                                            "allow_position_increase": 1}}
+        g = {
+            **VALID_GATE,
+            "position_gate": {
+                **VALID_GATE["position_gate"],
+                "allow_position_increase": 1,
+            },
+        }
         assert not C.check("runtime_gate", g)["valid"], "权限字段必须是真布尔"
 
     def test_empty_string_rejected_where_non_empty_required(self):
         assert not C.check("risk_decision", {**VALID_RISK, "date": "  "})["valid"]
 
     def test_array_artifact_rejects_object(self):
-        assert not C.check("b1_holding_state", VALID_B1[0])["valid"], \
+        assert not C.check("b1_holding_state", VALID_B1[0])["valid"], (
             "b1_holding_state 落盘是数组"
+        )
 
 
 class TestWarningsNotErrors:
@@ -170,13 +244,21 @@ class TestWarningsNotErrors:
         （`chief_decision_report:39`），上游改一个字就会出现新值。
         所以只作已知值告警、**不阻断** —— 强枚举会让报告措辞变动打断交易计划。
         """
-        obj = {"date": "2026-08-07", "market_state": "中性",
-               "total_position_range": "20%-40%",
-               "new_position_permission": "视情况而定",  # 未登记的措辞
-               "risk_level": "普通", "position_gate": {}, "market_quality": {},
-               "allowed_actions": [], "forbidden_actions": [], "holding_actions": [],
-               "buy_actions": [], "risk_notice": "x",
-               "sources": {"risk_decision": "a", "runtime_gate": "b"}}
+        obj = {
+            "date": "2026-08-07",
+            "market_state": "中性",
+            "total_position_range": "20%-40%",
+            "new_position_permission": "视情况而定",  # 未登记的措辞
+            "risk_level": "普通",
+            "position_gate": {},
+            "market_quality": {},
+            "allowed_actions": [],
+            "forbidden_actions": [],
+            "holding_actions": [],
+            "buy_actions": [],
+            "risk_notice": "x",
+            "sources": {"risk_decision": "a", "runtime_gate": "b"},
+        }
         r = C.check("chief_decision", obj)
         assert r["valid"], "未知措辞不得阻断"
         assert any("上游措辞可能变了" in w for w in r["warnings"])
@@ -214,7 +296,7 @@ class TestRequireVsCheck:
 
     def test_check_never_raises(self):
         for bad in [None, [], "x", 0, {"a": float("nan")}]:
-            C.check("runtime_gate", bad)   # 不得抛异常
+            C.check("runtime_gate", bad)  # 不得抛异常
 
 
 class TestEvidenceDate:
@@ -238,11 +320,14 @@ class TestEvidenceDate:
         assert C.check("risk_decision", {**VALID_RISK, "evidence_date": ""})["valid"]
 
     def test_null_rejected(self):
-        assert not C.check("risk_decision", {**VALID_RISK, "evidence_date": None})["valid"]
+        assert not C.check("risk_decision", {**VALID_RISK, "evidence_date": None})[
+            "valid"
+        ]
 
 
 VALID_MTI = {
-    "date": "2026-08-07", "collector_version": "v1",
+    "date": "2026-08-07",
+    "collector_version": "v1",
     "amv_0": {"amv_zone": "", "amv_change_pct": None, "as_of": None},
     # ⚠️ 按**真实 collector 骨架**写全（2026-08-10 核对 `market_timing_collector`
     #    的字面量：6 个 change_pct + as_of + overseas_summary）。
@@ -250,12 +335,22 @@ VALID_MTI = {
     #    这一节没核对到。空夹具让 `overseas_market.as_of` 的契约缺失一直没被发现
     #    （同形状的事 08-10 在 `holding_quotes.indices` 上刚踩过：
     #     spec 写错 + 夹具按错的形状写 ⇒ 两者相互印证，真实产出才是判据）。
-    "overseas_market": {"nasdaq_change_pct": None, "sp500_change_pct": None,
-                        "sox_change_pct": None, "nikkei_change_pct": None,
-                        "kospi_change_pct": None, "hstech_change_pct": None,
-                        "as_of": None, "overseas_summary": ""},
-    "a_share_indices": {}, "market_breadth": {},
-    "sentiment": {}, "turnover": {}, "theme": {}, "macro_policy": {},
+    "overseas_market": {
+        "nasdaq_change_pct": None,
+        "sp500_change_pct": None,
+        "sox_change_pct": None,
+        "nikkei_change_pct": None,
+        "kospi_change_pct": None,
+        "hstech_change_pct": None,
+        "as_of": None,
+        "overseas_summary": "",
+    },
+    "a_share_indices": {},
+    "market_breadth": {},
+    "sentiment": {},
+    "turnover": {},
+    "theme": {},
+    "macro_policy": {},
     "data_quality": {},
 }
 
@@ -281,8 +376,10 @@ class TestProgressiveFillArtifact:
 
     def test_amv_zone_empty_string_allowed(self):
         """0AMV 未填时 `amv_zone` 就是空串（实测），不得因此判畸形。"""
-        assert C.check("market_timing_input",
-                       {**VALID_MTI, "amv_0": {**VALID_MTI["amv_0"], "amv_zone": ""}})["valid"]
+        assert C.check(
+            "market_timing_input",
+            {**VALID_MTI, "amv_0": {**VALID_MTI["amv_0"], "amv_zone": ""}},
+        )["valid"]
 
     def test_as_of_null_allowed_deliberately(self):
         """⚠️ `as_of` **刻意留 None**（collector 源码原话）：08:50 手工读数属哪个
@@ -291,7 +388,10 @@ class TestProgressiveFillArtifact:
 
     def test_amv_change_pct_nan_still_rejected(self):
         """允许 null 不等于允许 NaN —— NaN 会让下游阈值判定静默为 False。"""
-        bad = {**VALID_MTI, "amv_0": {**VALID_MTI["amv_0"], "amv_change_pct": float("nan")}}
+        bad = {
+            **VALID_MTI,
+            "amv_0": {**VALID_MTI["amv_0"], "amv_change_pct": float("nan")},
+        }
         assert not C.check("market_timing_input", bad)["valid"]
 
     def test_missing_section_rejected(self):
@@ -304,7 +404,10 @@ class TestProgressiveFillArtifact:
         """⚠️ 这两个由 **merge** 写、collector 刻意不置 ⇒ 非必填；
         但**出现时必须在域内** —— 正是审计 B1 的所在。"""
         assert C.check("market_timing_input", VALID_MTI)["valid"], "缺它们要放行"
-        bad = {**VALID_MTI, "amv_0": {**VALID_MTI["amv_0"], "effective_state": "空头触发"}}
+        bad = {
+            **VALID_MTI,
+            "amv_0": {**VALID_MTI["amv_0"], "effective_state": "空头触发"},
+        }
         assert not C.check("market_timing_input", bad)["valid"], "未归一的词表必须拒收"
 
 
@@ -324,19 +427,24 @@ class TestOnlyScoping:
     def test_catches_unnormalized_regime(self):
         """审计 B1：`effective_state` 写成「空头触发」会让下游精确等值比较落空、
         `allow_add=False` 漏置。契约在 merge 那一步就该拦住。"""
-        r = C.check("market_timing_input",
-                    {"amv_0": {"effective_state": "空头触发", "quality": "confirmed"}},
-                    only=self.OWN)
+        r = C.check(
+            "market_timing_input",
+            {"amv_0": {"effective_state": "空头触发", "quality": "confirmed"}},
+            only=self.OWN,
+        )
         assert not r["valid"] and "空头触发" in r["errors"][0]
 
     def test_accepts_normalized(self):
-        assert C.check("market_timing_input",
-                       {"amv_0": {"effective_state": "空头", "quality": "confirmed"}},
-                       only=self.OWN)["valid"]
+        assert C.check(
+            "market_timing_input",
+            {"amv_0": {"effective_state": "空头", "quality": "confirmed"}},
+            only=self.OWN,
+        )["valid"]
 
     def test_catches_misspelled_quality(self):
-        r = C.check("market_timing_input", {"amv_0": {"quality": "comfirmed"}},
-                    only=self.OWN)
+        r = C.check(
+            "market_timing_input", {"amv_0": {"quality": "comfirmed"}}, only=self.OWN
+        )
         assert not r["valid"]
 
     def test_absent_section_allowed(self):
@@ -349,8 +457,9 @@ class TestOnlyScoping:
         （第一版的 `_narrow` 把裁剪结果合并回完整集，等于没裁，
         `amv_0.amv_zone: 缺失` 照样报出来。）
         """
-        assert C.check("market_timing_input", {"amv_0": {"quality": "confirmed"}},
-                       only=self.OWN)["valid"]
+        assert C.check(
+            "market_timing_input", {"amv_0": {"quality": "confirmed"}}, only=self.OWN
+        )["valid"]
 
     def test_typo_in_only_path_warns(self):
         """`only` 里的路径拼错会让校验**变成空操作** —— 必须告警。"""
@@ -367,8 +476,17 @@ class TestOnlyScoping:
 
 
 class TestSectorStateContract:
-    VALID = [{"date": "2026-08-07", "sector": "半导体", "state": "主升", "trend": "上涨",
-              "trade_permission": "支持", "score": 80.0, "risk_flags": []}]
+    VALID = [
+        {
+            "date": "2026-08-07",
+            "sector": "半导体",
+            "state": "主升",
+            "trend": "上涨",
+            "trade_permission": "支持",
+            "score": 80.0,
+            "risk_flags": [],
+        }
+    ]
 
     def test_baseline(self):
         assert C.check("sector_state", self.VALID)["valid"]
@@ -383,8 +501,10 @@ class TestSectorStateContract:
         """板块技术面没给分是正常的 ⇒ null 放行（与 NaN 区别对待）。"""
         assert C.check("sector_state", [{**self.VALID[0], "score": None}])["valid"]
 
-    @pytest.mark.parametrize("field,bad", [
-        ("state", "暴涨"), ("trend", "横盘"), ("trade_permission", "买入")])
+    @pytest.mark.parametrize(
+        "field,bad",
+        [("state", "暴涨"), ("trend", "横盘"), ("trade_permission", "买入")],
+    )
     def test_enum_domains(self, field, bad):
         assert not C.check("sector_state", [{**self.VALID[0], field: bad}])["valid"]
 
@@ -400,18 +520,31 @@ class TestHoldingTechnicalContract:
     """
 
     def test_both_branches_valid(self):
-        rows = [{"code": "600000", "technical_available": True,
-                 "latest_date": "2026-08-07", "trend_state": "上涨"},
-                {"code": "600001", "technical_available": False,
-                 "technical_error": "vipdoc 缺失"}]
+        rows = [
+            {
+                "code": "600000",
+                "technical_available": True,
+                "latest_date": "2026-08-07",
+                "trend_state": "上涨",
+            },
+            {
+                "code": "600001",
+                "technical_available": False,
+                "technical_error": "vipdoc 缺失",
+            },
+        ]
         assert C.check("holding_technical_summary", rows)["valid"]
 
     def test_missing_code_rejected(self):
-        assert not C.check("holding_technical_summary", [{"technical_available": True}])["valid"]
+        assert not C.check(
+            "holding_technical_summary", [{"technical_available": True}]
+        )["valid"]
 
     def test_available_must_be_bool(self):
-        assert not C.check("holding_technical_summary",
-                           [{"code": "600000", "technical_available": "yes"}])["valid"]
+        assert not C.check(
+            "holding_technical_summary",
+            [{"code": "600000", "technical_available": "yes"}],
+        )["valid"]
 
     def test_empty_list_valid(self):
         assert C.check("holding_technical_summary", [])["valid"]
@@ -429,17 +562,48 @@ class TestHoldingQuotesContract:
     # indices 形状按生产实况（collect_holding_quotes._collect_indices）：list，
     # 成功项无 available 键、失败项才有 available=False。曾误记为 dict，
     # 导致 1445 链契约校验必败（2026-08-08 重跑抓到）。
-    VALID = {"as_of_date": "2026-08-07", "captured_at": "2026-08-07T17:00:00+08:00",
-             "source": "mootdx", "breadth": {},
-             "indices": [{"code": "000001", "name": "上证指数", "close": 3500.0,
-                          "price": 3500.0, "change_pct": 0.5, "source": "mootdx_online_index"},
-                         {"code": "399006", "name": "创业板指",
-                          "available": False, "reason": "no data"}],
-             "quotes": [{"code": "600000", "name": "甲", "market": "SH", "available": True,
-                         "date": "2026-08-07", "date_verified": False,
-                         "close": 10.5, "price": 10.5, "change_pct": 1.2},
-                        {"code": "920808", "name": "乙", "market": "BJ",
-                         "available": False, "reason": "no data"}]}
+    VALID = {
+        "as_of_date": "2026-08-07",
+        "captured_at": "2026-08-07T17:00:00+08:00",
+        "source": "mootdx",
+        "breadth": {},
+        "indices": [
+            {
+                "code": "000001",
+                "name": "上证指数",
+                "close": 3500.0,
+                "price": 3500.0,
+                "change_pct": 0.5,
+                "source": "mootdx_online_index",
+            },
+            {
+                "code": "399006",
+                "name": "创业板指",
+                "available": False,
+                "reason": "no data",
+            },
+        ],
+        "quotes": [
+            {
+                "code": "600000",
+                "name": "甲",
+                "market": "SH",
+                "available": True,
+                "date": "2026-08-07",
+                "date_verified": False,
+                "close": 10.5,
+                "price": 10.5,
+                "change_pct": 1.2,
+            },
+            {
+                "code": "920808",
+                "name": "乙",
+                "market": "BJ",
+                "available": False,
+                "reason": "no data",
+            },
+        ],
+    }
 
     def test_both_branches(self):
         assert C.check("holding_quotes", self.VALID)["valid"]
@@ -465,10 +629,25 @@ class TestSectorTechnicalSummaryContract:
     字段集来自 `theme_tracker_report.py:133`(unavailable) / `:148`(available) 的 AST 提取。
     """
 
-    UN = {"theme_id": "chip", "theme_name": "半导体", "priority": 1, "available": False,
-          "reason": "无成分股行情", "representative_stocks": [], "semantic_tags": []}
-    AV = {**UN, "available": True, "latest_date": "2026-08-07", "trend_state": "上涨",
-          "close": 1234.5, "stage": "主升/加速", "score": 80, "action_bias": "可关注核心股"}
+    UN = {
+        "theme_id": "chip",
+        "theme_name": "半导体",
+        "priority": 1,
+        "available": False,
+        "reason": "无成分股行情",
+        "representative_stocks": [],
+        "semantic_tags": [],
+    }
+    AV = {
+        **UN,
+        "available": True,
+        "latest_date": "2026-08-07",
+        "trend_state": "上涨",
+        "close": 1234.5,
+        "stage": "主升/加速",
+        "score": 80,
+        "action_bias": "可关注核心股",
+    }
 
     @pytest.mark.parametrize("rows", [[AV, UN], [UN], [AV], []])
     def test_valid_shapes(self, rows):
@@ -476,8 +655,9 @@ class TestSectorTechnicalSummaryContract:
 
     def test_available_must_be_real_bool(self):
         """⚠️ 字符串 `"no"` 是**真值** ⇒ 96 处分支判定会全部翻转。"""
-        assert not C.check("sector_technical_summary",
-                           [{**self.UN, "available": "no"}])["valid"]
+        assert not C.check(
+            "sector_technical_summary", [{**self.UN, "available": "no"}]
+        )["valid"]
 
     def test_missing_theme_id_rejected(self):
         bad = [{k: v for k, v in self.UN.items() if k != "theme_id"}]
@@ -485,13 +665,26 @@ class TestSectorTechnicalSummaryContract:
 
 
 class TestReviewStepContracts:
-    EXEC = {"date": "2026-08-07", "status": "ok", "recorded_trade_count": 2,
-            "no_trades_confirmed": False, "premarket_snapshot_available": True,
-            "rows": [], "behavior_checks": {}, "missing": [], "sources": []}
-    ENRICH = {"date": "2026-08-07", "theme_lifecycles": [], "holding_diagnoses": [],
-              "next_day_plan": {"holding_plans": []}, "rule_review": {},
-              "unavailable": [], "permission_rule": "enrichment cannot override "
-              "RiskDecision or ChiefDecision"}
+    EXEC = {
+        "date": "2026-08-07",
+        "status": "ok",
+        "recorded_trade_count": 2,
+        "no_trades_confirmed": False,
+        "premarket_snapshot_available": True,
+        "rows": [],
+        "behavior_checks": {},
+        "missing": [],
+        "sources": [],
+    }
+    ENRICH = {
+        "date": "2026-08-07",
+        "theme_lifecycles": [],
+        "holding_diagnoses": [],
+        "next_day_plan": {"holding_plans": []},
+        "rule_review": {},
+        "unavailable": [],
+        "permission_rule": "enrichment cannot override RiskDecision or ChiefDecision",
+    }
 
     def test_execution_review_baseline(self):
         assert C.check("execution_review", self.EXEC)["valid"]
@@ -504,10 +697,12 @@ class TestReviewStepContracts:
             assert not C.check("execution_review", bad)["valid"], k
 
     def test_trade_count_must_be_finite_number(self):
-        assert not C.check("execution_review",
-                           {**self.EXEC, "recorded_trade_count": float("nan")})["valid"]
-        assert not C.check("execution_review",
-                           {**self.EXEC, "recorded_trade_count": True})["valid"]
+        assert not C.check(
+            "execution_review", {**self.EXEC, "recorded_trade_count": float("nan")}
+        )["valid"]
+        assert not C.check(
+            "execution_review", {**self.EXEC, "recorded_trade_count": True}
+        )["valid"]
 
     def test_review_enrichment_baseline(self):
         assert C.check("review_enrichment", self.ENRICH)["valid"]
@@ -520,20 +715,42 @@ class TestReviewStepContracts:
         所以这里同时断言「生产者写的是 None」这条由
         `test_review_enrichment.py::test_exact_quantity_always_none` 端到端保证。
         """
-        plan = {"code": "600000", "priority": "P0", "direction": "清仓",
-                "exact_quantity": None}
+        plan = {
+            "code": "600000",
+            "priority": "P0",
+            "direction": "清仓",
+            "exact_quantity": None,
+        }
         ok = {**self.ENRICH, "next_day_plan": {"holding_plans": [plan]}}
         assert C.check("review_enrichment", ok)["valid"]
         # 缺这个键则拒收 —— 不能靠「没写」来表达「不给数量」
-        bad = {**self.ENRICH, "next_day_plan": {"holding_plans": [
-            {k: v for k, v in plan.items() if k != "exact_quantity"}]}}
+        bad = {
+            **self.ENRICH,
+            "next_day_plan": {
+                "holding_plans": [
+                    {k: v for k, v in plan.items() if k != "exact_quantity"}
+                ]
+            },
+        }
         assert not C.check("review_enrichment", bad)["valid"]
 
     def test_plan_priority_domain(self):
-        bad = {**self.ENRICH, "next_day_plan": {"holding_plans": [
-            {"code": "600000", "priority": "高", "direction": "清仓",
-             "exact_quantity": None}]}}
-        assert not C.check("review_enrichment", bad)["valid"], "计划用 P0-P3，不是高/中/低"
+        bad = {
+            **self.ENRICH,
+            "next_day_plan": {
+                "holding_plans": [
+                    {
+                        "code": "600000",
+                        "priority": "高",
+                        "direction": "清仓",
+                        "exact_quantity": None,
+                    }
+                ]
+            },
+        }
+        assert not C.check("review_enrichment", bad)["valid"], (
+            "计划用 P0-P3，不是高/中/低"
+        )
 
     def test_permission_rule_required(self):
         """⚠️ 复盘层是**解释**不是裁决 —— 这句必须在产物里。"""
@@ -547,56 +764,89 @@ class TestFourthBatch:
     """
 
     def test_stock_pool_bucket_domain(self):
-        base = {"date": "2026-08-07", "status": "ok", "bucket_counts": {},
-                "candidates": [{"code": "600000", "bucket": "A",
-                                "next_step": "generate_buy_plan",
-                                "risk_flags": [], "entry_reason": []}]}
+        base = {
+            "date": "2026-08-07",
+            "status": "ok",
+            "bucket_counts": {},
+            "candidates": [
+                {
+                    "code": "600000",
+                    "bucket": "A",
+                    "next_step": "generate_buy_plan",
+                    "risk_flags": [],
+                    "entry_reason": [],
+                }
+            ],
+        }
         assert C.check("stock_pool", base)["valid"]
         bad = {**base, "candidates": [{**base["candidates"][0], "bucket": "S"}]}
         assert not C.check("stock_pool", bad)["valid"], "分层只有 A/B/C/D"
 
     def test_final_review_quality_domain(self):
-        base = {"date": "2026-08-07", "report_quality": "degraded", "unavailable": [],
-                "revalued_positions": [], "next_day_plan": {},
-                "precise_quantity_allowed": False, "quotes_current": True,
-                "technical_current": False}
+        base = {
+            "date": "2026-08-07",
+            "report_quality": "degraded",
+            "unavailable": [],
+            "revalued_positions": [],
+            "next_day_plan": {},
+            "precise_quantity_allowed": False,
+            "quotes_current": True,
+            "technical_current": False,
+        }
         assert C.check("final_review", base)["valid"]
         assert not C.check("final_review", {**base, "report_quality": "ok"})["valid"]
 
     def test_precise_quantity_allowed_must_be_bool(self):
         """⚠️ 这个布尔来自门控，决定次日计划能不能给精确数量。
         `1` 会通过真值判定但不是布尔 —— 类型收紧是为了让「未授权」不能伪装成已授权。"""
-        base = {"date": "2026-08-07", "report_quality": "complete", "unavailable": [],
-                "revalued_positions": [], "next_day_plan": {}, "quotes_current": True,
-                "technical_current": True, "precise_quantity_allowed": 1}
+        base = {
+            "date": "2026-08-07",
+            "report_quality": "complete",
+            "unavailable": [],
+            "revalued_positions": [],
+            "next_day_plan": {},
+            "quotes_current": True,
+            "technical_current": True,
+            "precise_quantity_allowed": 1,
+        }
         assert not C.check("final_review", base)["valid"]
 
     def test_holding_review_priority_domain(self):
         """⚠️ `holding_review` 是 RiskDecision 的**直接上游**：
         `action` ∈ {止损,清仓} ⇒ 高优先风险。`priority` 用 P0-P3。"""
-        ok = [{"code": "600000", "action": "止损", "priority": "P1", "reason": ["破位"]}]
+        ok = [
+            {"code": "600000", "action": "止损", "priority": "P1", "reason": ["破位"]}
+        ]
         assert C.check("holding_review", ok)["valid"]
-        assert not C.check("holding_review",
-                           [{**ok[0], "priority": "高"}])["valid"]
+        assert not C.check("holding_review", [{**ok[0], "priority": "高"}])["valid"]
 
     def test_mfe_mae_requires_coverage(self):
         """⚠️ 必须报 coverage —— 「卖飞 N 笔」不说分母会被读成「没卖飞」。"""
-        assert C.check("mfe_mae", {"date": "2026-08-07", "coverage": {},
-                                   "holdings": []})["valid"]
+        assert C.check(
+            "mfe_mae", {"date": "2026-08-07", "coverage": {}, "holdings": []}
+        )["valid"]
         assert not C.check("mfe_mae", {"date": "2026-08-07", "holdings": []})["valid"]
 
     def test_fund_flow_status_domain_and_per_type_status(self):
         """⚠️ `sector_rank_status` 要单独留痕：industry 成功而 concept 失败时，
         顶层 `status=partial` 说不出是哪个坏了。"""
-        base = {"date": "2026-08-07", "status": "partial", "stock_rank": [],
-                "sector_rank": {}, "sector_rank_status": {"industry": {"status": "ok"},
-                                                          "concept": {"status": "failed"}},
-                "source": "eastmoney_direct_api"}
+        base = {
+            "date": "2026-08-07",
+            "status": "partial",
+            "stock_rank": [],
+            "sector_rank": {},
+            "sector_rank_status": {
+                "industry": {"status": "ok"},
+                "concept": {"status": "failed"},
+            },
+            "source": "eastmoney_direct_api",
+        }
         assert C.check("fund_flow_rank", base)["valid"]
         assert not C.check("fund_flow_rank", {**base, "status": "degraded"})["valid"]
-        assert not C.check("fund_flow_rank",
-                           {k: v for k, v in base.items()
-                            if k != "sector_rank_status"})["valid"]
+        assert not C.check(
+            "fund_flow_rank",
+            {k: v for k, v in base.items() if k != "sector_rank_status"},
+        )["valid"]
 
     def test_formula_hits_fields_come_from_result_not_summary(self):
         """⚠️ 字段取自**落盘的 `result`**，不是只被 print 的 `summary`。
@@ -604,8 +854,13 @@ class TestFourthBatch:
         第一版按 summary 提字段（它有 `date`/`hit_total`，result 没有），
         接生产者时才发现 —— 契约要对着**真正写进文件的那个对象**建。
         """
-        ok = {"status": "ok", "universe_size": 5000, "universe_source": "tq_local",
-              "st_filter": "ok", "formulas": []}
+        ok = {
+            "status": "ok",
+            "universe_size": 5000,
+            "universe_source": "tq_local",
+            "st_filter": "ok",
+            "formulas": [],
+        }
         assert C.check("formula_hits", ok)["valid"]
         # summary 才有的键不该被要求
         assert C.check("formula_hits", {k: v for k, v in ok.items()})["valid"]
@@ -613,39 +868,67 @@ class TestFourthBatch:
     def test_candidates_enriched_records_signal_date_contract(self):
         """⚠️ 公式命中来自 TQ 在线（按最新交易日报出），而充实段用本地日线
         `last_date==date` 校验 —— 两者口径不同，这句话必须写进产物。"""
-        ok = {"status": "ok", "candidates": [], "excluded": [], "st_filter": "ok",
-              "signal_date_contract": "公式命中按最新交易日报出；本段以 last_date==date 为准"}
+        ok = {
+            "status": "ok",
+            "candidates": [],
+            "excluded": [],
+            "st_filter": "ok",
+            "signal_date_contract": "公式命中按最新交易日报出；本段以 last_date==date 为准",
+        }
         assert C.check("candidates_enriched", ok)["valid"]
-        assert not C.check("candidates_enriched",
-                           {k: v for k, v in ok.items()
-                            if k != "signal_date_contract"})["valid"]
+        assert not C.check(
+            "candidates_enriched",
+            {k: v for k, v in ok.items() if k != "signal_date_contract"},
+        )["valid"]
 
     def test_rss_evidence_three_trust_fields(self):
         """⚠️ `quality` / `confirmed` / `transport_verified` 三个一起决定
         「这条能不能当既成事实」。契约查各自的域 ——
         **跨字段矛盾**（未校验却 confirmed）查不出来，
         由 `test_rss_collector.py::TestTierQuality` 覆盖。"""
-        ok = [{"item_id": "abc", "source_id": "gov", "source_tier": "S", "title": "t",
-               "quality": "candidate", "confirmed": False, "transport_verified": False}]
+        ok = [
+            {
+                "item_id": "abc",
+                "source_id": "gov",
+                "source_tier": "S",
+                "title": "t",
+                "quality": "candidate",
+                "confirmed": False,
+                "transport_verified": False,
+            }
+        ]
         assert C.check("rss_evidence", ok)["valid"]
-        assert not C.check("rss_evidence",
-                           [{**ok[0], "quality": "verified"}])["valid"]
+        assert not C.check("rss_evidence", [{**ok[0], "quality": "verified"}])["valid"]
 
     def test_rss_candidates_requires_item_id(self):
         """`item_id` 是去重与可追溯的键，`rss_collector` 一定会写。"""
-        ok = [{"item_id": "abc", "source_id": "gov", "relevance_score": 80,
-               "matched_themes": [], "matched_holdings_or_pool": {"names": [], "codes": []},
-               "filter_session": "premarket"}]
+        ok = [
+            {
+                "item_id": "abc",
+                "source_id": "gov",
+                "relevance_score": 80,
+                "matched_themes": [],
+                "matched_holdings_or_pool": {"names": [], "codes": []},
+                "filter_session": "premarket",
+            }
+        ]
         assert C.check("rss_candidates", ok)["valid"]
-        assert not C.check("rss_candidates",
-                           [{k: v for k, v in ok[0].items() if k != "item_id"}])["valid"]
+        assert not C.check(
+            "rss_candidates", [{k: v for k, v in ok[0].items() if k != "item_id"}]
+        )["valid"]
 
     def test_postclose_digest_permission_rule(self):
         """⚠️ 新闻只能加验证条件或收紧风险，**不能直接放宽交易权限**。"""
-        ok = {"date": "2026-08-07", "status": "ok", "sections": {}, "missing": [],
-              "permission_rule": "news may add validation or tighten risk; "
-                                 "it cannot directly increase trading permissions"}
+        ok = {
+            "date": "2026-08-07",
+            "status": "ok",
+            "sections": {},
+            "missing": [],
+            "permission_rule": "news may add validation or tighten risk; "
+            "it cannot directly increase trading permissions",
+        }
         assert C.check("postclose_news_digest", ok)["valid"]
-        assert not C.check("postclose_news_digest",
-                           {k: v for k, v in ok.items()
-                            if k != "permission_rule"})["valid"]
+        assert not C.check(
+            "postclose_news_digest",
+            {k: v for k, v in ok.items() if k != "permission_rule"},
+        )["valid"]

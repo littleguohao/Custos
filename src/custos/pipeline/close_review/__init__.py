@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """close_review package — re-export public API from review_core.py."""
+
 from custos.pipeline.close_review.review_core import (
     build_delivery_digest,
     classify,
@@ -18,7 +19,8 @@ from custos.pipeline.close_review.review_core import (
     finite,
     optional_finite,
     price_text,
-    pct_text)
+    pct_text,
+)
 
 __all__ = [
     "build_delivery_digest",

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Single deterministic B1 holding-state and action contract."""
+
 from __future__ import annotations
 
 import argparse
@@ -12,8 +13,12 @@ from custos.core.runtime_guards import normalize_regime  # noqa: E402
 
 from custos.core.paths import DATA  # noqa: E402
 from custos.core.code_utils import norm_code  # noqa: E402
-from custos.core.b1_thresholds import (J_LOW_THRESHOLD, REVERSAL_AMPLITUDE_PCT,  # noqa: E402
-                           REVERSAL_CHANGE_MAX_PCT, REVERSAL_CHANGE_MIN_PCT)
+from custos.core.b1_thresholds import (
+    J_LOW_THRESHOLD,
+    REVERSAL_AMPLITUDE_PCT,  # noqa: E402
+    REVERSAL_CHANGE_MAX_PCT,
+    REVERSAL_CHANGE_MIN_PCT,
+)
 from custos.core.code_utils import fnum  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
 
@@ -27,16 +32,31 @@ def action_rank(priority: str) -> int:
 
 
 SIGNAL_ORDER = {
-    "hard_loss": 0, "n_l1_breach": 1, "trend_box_break": 2, "desc_n_confirmed": 3,
+    "hard_loss": 0,
+    "n_l1_breach": 1,
+    "trend_box_break": 2,
+    "desc_n_confirmed": 3,
     "bear_regime_reduce_top_priority": 9,
-    "n_l2_breach": 10, "bbi_two_close_breach": 11, "heavy_large_bear": 12,
-    "downtrend": 13, "bear_rebound_reduce": 14, "loss_reduction": 15,
-    "bbi_first_breach": 20, "two_bull_profit_take": 21, "kdj_death_cross": 22,
-    "shrink_small_bear": 30, "reversal_k_candidate": 31,
+    "n_l2_breach": 10,
+    "bbi_two_close_breach": 11,
+    "heavy_large_bear": 12,
+    "downtrend": 13,
+    "bear_rebound_reduce": 14,
+    "loss_reduction": 15,
+    "bbi_first_breach": 20,
+    "two_bull_profit_take": 21,
+    "kdj_death_cross": 22,
+    "shrink_small_bear": 30,
+    "reversal_k_candidate": 31,
 }
 
 
-def evaluate(row: dict[str, Any], market_regime: str = "未知", price: Any = None, price_date: str | None = None) -> dict[str, Any]:
+def evaluate(
+    row: dict[str, Any],
+    market_regime: str = "未知",
+    price: Any = None,
+    price_date: str | None = None,
+) -> dict[str, Any]:
     current = fnum(price)
     if current is None:
         current = fnum(row.get("close"))
@@ -45,14 +65,18 @@ def evaluate(row: dict[str, Any], market_regime: str = "未知", price: Any = No
     box = str(row.get("box20_position") or "未知")
     pv = row.get("price_volume") or {}
     technical_date = str(row.get("latest_date") or "") or None
-    price_volume_current = not price_date or not technical_date or price_date == technical_date
+    price_volume_current = (
+        not price_date or not technical_date or price_date == technical_date
+    )
     structure = row.get("n_structure") or {}
     desc_structure = row.get("descending_n_structure") or {}
     signals: list[dict[str, Any]] = []
     unavailable: list[str] = []
 
     def add(signal: str, priority: str, action: str, reason: str) -> None:
-        signals.append({"signal": signal, "priority": priority, "action": action, "reason": reason})
+        signals.append(
+            {"signal": signal, "priority": priority, "action": action, "reason": reason}
+        )
 
     if pnl is not None and pnl <= -0.10:
         add("hard_loss", "P0", "止损/清仓评估", f"持有盈亏{pnl:.2%}达到-10%硬风控阈值")
@@ -66,9 +90,19 @@ def evaluate(row: dict[str, Any], market_regime: str = "未知", price: Any = No
             # 结构陈旧（破位过久/顶部旧N），不作为当前 P0；由趋势/箱体/亏损信号覆盖
             unavailable.append("n_structure_stale")
         elif current < l1:
-            add("n_l1_breach", "P0", "N型主结构清仓评估", f"价格{current:.2f}跌破L1主结构前低{l1:.2f}")
+            add(
+                "n_l1_breach",
+                "P0",
+                "N型主结构清仓评估",
+                f"价格{current:.2f}跌破L1主结构前低{l1:.2f}",
+            )
         elif l2 is not None and current < l2:
-            add("n_l2_breach", "P1", "N型回踩失守评估", f"价格{current:.2f}跌破L2更高回踩低点{l2:.2f}，但L1尚未失守")
+            add(
+                "n_l2_breach",
+                "P1",
+                "N型回踩失守评估",
+                f"价格{current:.2f}跌破L2更高回踩低点{l2:.2f}，但L1尚未失守",
+            )
     else:
         unavailable.append("n_structure")
 
@@ -78,16 +112,31 @@ def evaluate(row: dict[str, Any], market_regime: str = "未知", price: Any = No
         if desc_structure.get("stale"):
             unavailable.append("descending_n_structure_stale")
         elif structural_low is not None and current < structural_low:
-            add("desc_n_confirmed", "P0", "下降N型结构清仓评估", f"价格{current:.2f}跌破下降N型结构低点{structural_low:.2f}")
+            add(
+                "desc_n_confirmed",
+                "P0",
+                "下降N型结构清仓评估",
+                f"价格{current:.2f}跌破下降N型结构低点{structural_low:.2f}",
+            )
     elif not desc_structure.get("available"):
         unavailable.append("descending_n_structure")
 
     below_days = int(fnum(row.get("consecutive_closes_below_bbi")) or 0)
     if row.get("above_bbi") is False:
         if below_days >= 2:
-            add("bbi_two_close_breach", "P1", "BBI清仓评估", f"连续{below_days}日收盘跌破BBI")
+            add(
+                "bbi_two_close_breach",
+                "P1",
+                "BBI清仓评估",
+                f"连续{below_days}日收盘跌破BBI",
+            )
         else:
-            add("bbi_first_breach", "P2", "次日收复观察", "首日收盘跌破BBI，等待次日收复确认")
+            add(
+                "bbi_first_breach",
+                "P2",
+                "次日收复观察",
+                "首日收盘跌破BBI，等待次日收复确认",
+            )
 
     if trend == "下跌" and "破位" in box:
         add("trend_box_break", "P0", "趋势破位退出评估", "下跌趋势且跌破20日箱体")
@@ -95,37 +144,82 @@ def evaluate(row: dict[str, Any], market_regime: str = "未知", price: Any = No
         add("downtrend", "P1", "反弹减仓", "日线处于下跌趋势")
 
     if price_volume_current and pv.get("heavy_large_bear"):
-        add("heavy_large_bear", "P1", "放量长阴减仓/清仓评估", "放量中大阴线，量价风险显著")
+        add(
+            "heavy_large_bear",
+            "P1",
+            "放量长阴减仓/清仓评估",
+            "放量中大阴线，量价风险显著",
+        )
     elif price_volume_current and pv.get("shrink_small_bear"):
-        add("shrink_small_bear", "P3", "条件持有一天", "缩量小阴，未触发硬风险时观察次日修复")
-    if price_volume_current and pv.get("two_medium_large_bull") and row.get("above_bbi") is True:
-        add("two_bull_profit_take", "P2", "分批止盈", "BBI上方连续两根中大阳，按B1保护利润")
+        add(
+            "shrink_small_bear",
+            "P3",
+            "条件持有一天",
+            "缩量小阴，未触发硬风险时观察次日修复",
+        )
+    if (
+        price_volume_current
+        and pv.get("two_medium_large_bull")
+        and row.get("above_bbi") is True
+    ):
+        add(
+            "two_bull_profit_take",
+            "P2",
+            "分批止盈",
+            "BBI上方连续两根中大阳，按B1保护利润",
+        )
     if row.get("daily_kdj_death_cross"):
-        add("kdj_death_cross", "P2", "动能转弱观察", "日线KDJ死叉，需结合趋势和结构确认")
+        add(
+            "kdj_death_cross", "P2", "动能转弱观察", "日线KDJ死叉，需结合趋势和结构确认"
+        )
 
     j = fnum(row.get("daily_j"))
     # ⚠️ `13` 原为硬编码 —— 与 `enrich_candidates.J_LOW_THRESHOLD` 是同一个门槛。
     #    改一处不改另一处会让选股与持仓对同一支票给出不同的反转 K 结论。
-    reversal = bool(price_volume_current and pv.get("reversal_k_candidate_without_j")
-                    and j is not None and j < J_LOW_THRESHOLD)
+    reversal = bool(
+        price_volume_current
+        and pv.get("reversal_k_candidate_without_j")
+        and j is not None
+        and j < J_LOW_THRESHOLD
+    )
     if reversal:
         # 理由文案随 `b1_thresholds` 动态拼 —— 阈值可经 B1_* env 覆盖，
         # 硬编码「J<13、±2%、振幅<=7%」会在配置改动后谎报判定依据（与
         # technical_monitor.thresholds 2026-08-07 收敛同因）。对称区间显示 ±N，
         # 不对称显示 MIN~MAX，保持原文案格式。
-        _chg = (f"±{REVERSAL_CHANGE_MAX_PCT:g}"
-                if REVERSAL_CHANGE_MIN_PCT == -REVERSAL_CHANGE_MAX_PCT
-                else f"{REVERSAL_CHANGE_MIN_PCT:g}~{REVERSAL_CHANGE_MAX_PCT:g}")
-        add("reversal_k_candidate", "P3", "反转K候选观察",
+        _chg = (
+            f"±{REVERSAL_CHANGE_MAX_PCT:g}"
+            if REVERSAL_CHANGE_MIN_PCT == -REVERSAL_CHANGE_MAX_PCT
+            else f"{REVERSAL_CHANGE_MIN_PCT:g}~{REVERSAL_CHANGE_MAX_PCT:g}"
+        )
+        add(
+            "reversal_k_candidate",
+            "P3",
+            "反转K候选观察",
             f"J<{J_LOW_THRESHOLD:g}、极致缩量、收盘{_chg}%且振幅<={REVERSAL_AMPLITUDE_PCT:g}%；"
-            "仍需后续修复确认")
+            "仍需后续修复确认",
+        )
 
     if market_regime == "空头":
-        add("bear_regime_reduce_top_priority", "P1", "空头区间反弹减仓(最高优先级)",
-            "0AMV空头区间:降低仓位为最高优先级,任何反弹都是卖出机会;禁止加仓补仓")
+        add(
+            "bear_regime_reduce_top_priority",
+            "P1",
+            "空头区间反弹减仓(最高优先级)",
+            "0AMV空头区间:降低仓位为最高优先级,任何反弹都是卖出机会;禁止加仓补仓",
+        )
 
-    if price_volume_current and market_regime == "空头" and fnum(pv.get("change_pct")) is not None and fnum(pv.get("change_pct")) > 0:
-        add("bear_rebound_reduce", "P1", "空头反弹减仓", "0AMV空头区间出现反弹，优先降低风险敞口")
+    if (
+        price_volume_current
+        and market_regime == "空头"
+        and fnum(pv.get("change_pct")) is not None
+        and fnum(pv.get("change_pct")) > 0
+    ):
+        add(
+            "bear_rebound_reduce",
+            "P1",
+            "空头反弹减仓",
+            "0AMV空头区间出现反弹，优先降低风险敞口",
+        )
 
     if not pv.get("available"):
         unavailable.append("price_volume")
@@ -133,13 +227,29 @@ def evaluate(row: dict[str, Any], market_regime: str = "未知", price: Any = No
         unavailable.append("current_price_volume")
     if pv.get("two_medium_large_bull") is None:
         unavailable.append("price_limit_for_medium_large_bull")
-    unavailable += ["wave_stage", "opening_volume_ratio", "trade_execution_feedback", "max_favorable_excursion"]
-    signals.sort(key=lambda item: (action_rank(item["priority"]), SIGNAL_ORDER.get(item["signal"], 99)))
+    unavailable += [
+        "wave_stage",
+        "opening_volume_ratio",
+        "trade_execution_feedback",
+        "max_favorable_excursion",
+    ]
+    signals.sort(
+        key=lambda item: (
+            action_rank(item["priority"]),
+            SIGNAL_ORDER.get(item["signal"], 99),
+        )
+    )
     if signals:
         final = signals[0]
     else:
-        final = {"priority": "P3", "action": "条件持有", "reason": "未触发B1减仓、止损或止盈信号"}
-    reduction_range = {"P0": [100, 100], "P1": [10, 25], "P2": [10, 20]}.get(final["priority"], [0, 0])
+        final = {
+            "priority": "P3",
+            "action": "条件持有",
+            "reason": "未触发B1减仓、止损或止盈信号",
+        }
+    reduction_range = {"P0": [100, 100], "P1": [10, 25], "P2": [10, 20]}.get(
+        final["priority"], [0, 0]
+    )
     return {
         "version": "B1-holding-v1",
         "code": str(row.get("code") or "").split(".")[0],
@@ -185,7 +295,9 @@ def _parse_listing_date(value: Any) -> date | None:
     return None
 
 
-def build_pre_checks(code: Any, as_of: date | None = None, tq: Any = None) -> dict[str, Any]:
+def build_pre_checks(
+    code: Any, as_of: date | None = None, tq: Any = None
+) -> dict[str, Any]:
     """B1 前置排除预检（只做加法，不影响既有信号计算）。
 
     通过 TQ-Local HTTP 补充：listing_date（get_stock_info.J_start）、
@@ -212,7 +324,9 @@ def build_pre_checks(code: Any, as_of: date | None = None, tq: Any = None) -> di
         "partial": not (info["ok"] and more["ok"]),
         "listing_date": listing_date,
         "listing_days": listing_days,  # 日历天数（上市日至 --date）
-        "new_listing_lt20": (listing_days < NEW_LISTING_DAYS) if listing_days is not None else None,
+        "new_listing_lt20": (listing_days < NEW_LISTING_DAYS)
+        if listing_days is not None
+        else None,
         "is_suspended": (tp_flag not in ("", "0")) if more["ok"] else None,
         "limit_up_price": fnum(more_v.get("ZTPrice")),
         "limit_down_price": fnum(more_v.get("DTPrice")),
@@ -227,11 +341,18 @@ def main() -> None:
     args = ap.parse_args()
     technical_path = DATA / "holdings" / f"{args.date}_holding_technical_summary.json"
     rows = json.loads(technical_path.read_text(encoding="utf-8"))
-    market = json.loads((DATA / "market" / f"{args.date}_market_timing_input.json").read_text(encoding="utf-8"))
+    market = json.loads(
+        (DATA / "market" / f"{args.date}_market_timing_input.json").read_text(
+            encoding="utf-8"
+        )
+    )
     # 归一化:amv_zone 写的是"空头触发",按 == "空头" 判定会让 P1 最高优先级减仓信号不发(审计 B1)
-    regime = normalize_regime(args.market_regime
-                              or (market.get("amv_0") or {}).get("effective_state")
-                              or (market.get("amv_0") or {}).get("amv_zone") or "未知")
+    regime = normalize_regime(
+        args.market_regime
+        or (market.get("amv_0") or {}).get("effective_state")
+        or (market.get("amv_0") or {}).get("amv_zone")
+        or "未知"
+    )
     as_of = datetime.strptime(args.date, "%Y-%m-%d").date()
     result = []
     for row in rows:
@@ -239,7 +360,10 @@ def main() -> None:
         try:
             state["pre_checks"] = build_pre_checks(row.get("code"), as_of=as_of)
         except Exception as exc:  # noqa: BLE001 —— 预检失败不影响 B1 主流程
-            state["pre_checks"] = {"available": False, "error": {"code": "pre_checks_failed", "detail": str(exc)}}
+            state["pre_checks"] = {
+                "available": False,
+                "error": {"code": "pre_checks_failed", "detail": str(exc)},
+            }
         result.append(state)
     # ⚠️ 落盘前强制校验：`final_priority` 会一路传到 RiskDecision 与
     # ChiefDecision（P0 ⇒ 清仓、P1 ⇒ 减仓），标错就直接错在交易计划里。

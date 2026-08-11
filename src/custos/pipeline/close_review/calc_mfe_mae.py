@@ -8,6 +8,7 @@
 判定(SELL_FLY_PCT),口径错会直接误判"卖飞"。现改为从成交台账 FIFO 回放解析建仓日,
 并按日期过滤;解析不出入场日或 K 线未覆盖入场日时**不出数**(fail-closed),给 unable_reason。
 """
+
 from __future__ import annotations
 import json, sys
 from datetime import date
@@ -35,14 +36,22 @@ def resolve_open_entry_dates(trades: list[dict]) -> dict[str, dict]:
     返回 {code: {entry_date, avg_buy_date, open_qty, open_lots}}。
     卖出多于买入(台账不完整)时该股按无未平仓处理,不返回 —— 宁可不出数也不给错窗口。
     """
-    lots: dict[str, list[list]] = {}          # code -> [[qty, price, date], ...]
-    for t in sorted(trades, key=lambda r: (r.get("date") or "", r.get("time") or "",
-                                           0 if r.get("side") == "买入" else 1)):
+    lots: dict[str, list[list]] = {}  # code -> [[qty, price, date], ...]
+    for t in sorted(
+        trades,
+        key=lambda r: (
+            r.get("date") or "",
+            r.get("time") or "",
+            0 if r.get("side") == "买入" else 1,
+        ),
+    ):
         code, qty = str(t.get("code") or ""), float(t.get("qty") or 0)
         if not code or qty <= 0:
             continue
         if t.get("side") == "买入":
-            lots.setdefault(code, []).append([qty, float(t.get("price") or 0), t.get("date") or ""])
+            lots.setdefault(code, []).append(
+                [qty, float(t.get("price") or 0), t.get("date") or ""]
+            )
             continue
         remaining, book = qty, lots.setdefault(code, [])
         while remaining > 1e-9 and book:
@@ -91,8 +100,13 @@ def unable_row(code: str, name: str, reason: str, **extra) -> dict:
     判 `entry.get("mfe_pct") is None`。异常路径此前落 `{"mfe": None, "mae": None}`,
     键名不一致 ⇒ 失败信息在传导链上直接消失,下游只能当"无该代码"。
     """
-    row = {"code": code, "name": name, "mfe_pct": None, "mae_pct": None,
-           "unable_reason": reason}
+    row = {
+        "code": code,
+        "name": name,
+        "mfe_pct": None,
+        "mae_pct": None,
+        "unable_reason": reason,
+    }
     row.update(extra)
     return row
 
@@ -140,6 +154,7 @@ def load_entry_dates(ledger_path: Path = LEDGER) -> dict[str, dict]:
     """读台账并解析建仓日。复用 weekly_review.parse_ledger 的行规范化,避免两套解析漂移。"""
     try:
         from custos.pipeline.close_review import weekly_review as wr  # noqa: PLC0415
+
         rows = wr.parse_ledger(ledger_path)
     except Exception as exc:  # noqa: BLE001
         print(f"[WARN] 台账解析失败,MFE/MAE 无法锚定入场日: {exc}")
@@ -149,6 +164,7 @@ def load_entry_dates(ledger_path: Path = LEDGER) -> dict[str, dict]:
 
 def main(argv=None):
     import argparse
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", default=cn_today().strftime("%Y-%m-%d"))
     args = ap.parse_args(argv)
@@ -161,26 +177,36 @@ def main(argv=None):
     positions = json.loads(POSITIONS.read_text(encoding="utf-8"))
     entries = load_entry_dates()
     if not entries:
-        print("[WARN] 台账未解析出任何未平仓建仓日 —— 所有持仓将不出 MFE/MAE(fail-closed)")
+        print(
+            "[WARN] 台账未解析出任何未平仓建仓日 —— 所有持仓将不出 MFE/MAE(fail-closed)"
+        )
 
     results = []
     for pos in positions:
         code = str(pos["代码"])
         name = pos["名称"]
         cost = optional_float(pos, "单位成本") or 0.0
-        hold_days = optional_float(pos, "持仓天数")     # 增量新建持仓行没有该字段 → None
+        hold_days = optional_float(pos, "持仓天数")  # 增量新建持仓行没有该字段 → None
         qty = optional_float(pos, "持有数量")
 
         # 入场日锚点:解析不出就不出数,绝不退回「持仓天数当行数」的旧口径
         entry = entries.get(code) or {}
         entry_date = entry.get("entry_date")
         if not entry_date:
-            results.append(unable_row(code, name, "成交台账无该股未平仓记录，无法锚定入场日",
-                                      hold_days=hold_days))
+            results.append(
+                unable_row(
+                    code,
+                    name,
+                    "成交台账无该股未平仓记录，无法锚定入场日",
+                    hold_days=hold_days,
+                )
+            )
             print(f"[WARN] {code} {name}: 台账无未平仓记录，跳过")
             continue
         # 在线兜底取多少根:按自然日跨度换算并留足缓冲(过滤靠日期,多取无害)
-        span_days = max((date.fromisoformat(target) - date.fromisoformat(entry_date)).days, 0)
+        span_days = max(
+            (date.fromisoformat(target) - date.fromisoformat(entry_date)).days, 0
+        )
         bars_needed = span_days + 30
 
         # Determine market
@@ -200,12 +226,14 @@ def main(argv=None):
             # 沪深与 BJ 统一走 get_ohlcv_table(adjust="qfq")——此前只切了 BJ 分支,
             # 沪深仍走 reader.daily 未复权,除权跳空造假 MAE 的问题依然存在。
             from custos.datasource.local_tdx import local_tdx_data as ltd
+
             df = ltd.get_ohlcv_table(code, count=2000, adjust="qfq")
             if df is not None and len(df) > 0:
                 df = df.reset_index(drop=True)
             elif is_bj:
                 # BJ fallback: online bars (mootdx Reader misroutes 920xxx)
                 from mootdx.quotes import Quotes
+
                 client = Quotes.factory(market="std", quiet=True)
                 df = client.bars(symbol=code, frequency=9, count=bars_needed)
                 if df is not None and len(df) > 0:
@@ -217,14 +245,21 @@ def main(argv=None):
                 else:
                     # Fallback to online bars for any stock
                     from mootdx.quotes import Quotes
+
                     client = Quotes.factory(market="std", quiet=True)
                     df = client.bars(symbol=code, frequency=9, count=bars_needed)
                     if df is not None and len(df) > 0:
                         df = df.reset_index()
 
             if df is None or len(df) == 0:
-                results.append(unable_row(code, name, "无 K 线数据(本地 vipdoc 与在线 bars 均为空)",
-                                          entry_date=entry_date))
+                results.append(
+                    unable_row(
+                        code,
+                        name,
+                        "无 K 线数据(本地 vipdoc 与在线 bars 均为空)",
+                        entry_date=entry_date,
+                    )
+                )
                 print(f"[WARN] {code} {name}: no data")
                 continue
 
@@ -233,15 +268,27 @@ def main(argv=None):
 
             # 按**入场日**锚定窗口(不能用自然日「持仓天数」当 K 线行数)
             if df is None:
-                results.append(unable_row(code, name, "K线缺少日期列，无法按入场日锚定窗口",
-                                          entry_date=entry_date))
+                results.append(
+                    unable_row(
+                        code,
+                        name,
+                        "K线缺少日期列，无法按入场日锚定窗口",
+                        entry_date=entry_date,
+                    )
+                )
                 print(f"[WARN] {code} {name}: 无日期列，跳过")
                 continue
             df = df.assign(_d=df["date"].astype(str).str[:10])
             df = df[(df["_d"] >= entry_date) & (df["_d"] <= target)]
             if df.empty:
-                results.append(unable_row(code, name, f"K线未覆盖入场日 {entry_date}~{target}",
-                                          entry_date=entry_date))
+                results.append(
+                    unable_row(
+                        code,
+                        name,
+                        f"K线未覆盖入场日 {entry_date}~{target}",
+                        entry_date=entry_date,
+                    )
+                )
                 print(f"[WARN] {code} {name}: K线未覆盖 {entry_date}~{target}，跳过")
                 continue
 
@@ -251,8 +298,14 @@ def main(argv=None):
             if cost <= 0:
                 # 单位成本缺失/为 0(增量新建持仓行、脏数据)时百分比没有分母:
                 # 不出数并说明原因,不能落 0% 让下游当"没盈没亏"。
-                results.append(unable_row(code, name, "单位成本缺失或为 0，无法计算 MFE/MAE 百分比",
-                                          entry_date=entry_date))
+                results.append(
+                    unable_row(
+                        code,
+                        name,
+                        "单位成本缺失或为 0，无法计算 MFE/MAE 百分比",
+                        entry_date=entry_date,
+                    )
+                )
                 print(f"[WARN] {code} {name}: 单位成本缺失，跳过")
                 continue
             mfe_pct = (highs.max() / cost - 1) * 100
@@ -262,30 +315,38 @@ def main(argv=None):
             mfe_date = str(df.loc[mfe_idx, "_d"])[:10]
             mae_date = str(df.loc[mae_idx, "_d"])[:10]
 
-            results.append({
-                "code": code,
-                "name": name,
-                "cost": cost,
-                "hold_days": hold_days,
-                "entry_date": entry_date,
-                "avg_buy_date": entry.get("avg_buy_date"),
-                "window_bars": int(len(df)),
-                "mfe_pct": round(mfe_pct, 2) if mfe_pct is not None else None,
-                "mfe_date": mfe_date,
-                "mae_pct": round(mae_pct, 2) if mae_pct is not None else None,
-                "mae_date": mae_date,
-                "current_price": optional_float(pos, "最新价"),
-                "current_pnl_pct": (lambda v: v * 100 if v is not None else None)(
-                    optional_float(pos, "持有盈亏率")),
-                "position_qty": qty,
-                # 增量新建/待重估的持仓行透传状态,报告层才能标"市值盈亏尚未按收盘价重估"
-                "snapshot_status": pos.get("snapshot_status"),
-            })
-            print(f"[OK] {code} {name}: MFE={mfe_pct:.1f}% MAE={mae_pct:.1f}% "
-                  f"(入场 {entry_date}, {len(df)} 根)")
+            results.append(
+                {
+                    "code": code,
+                    "name": name,
+                    "cost": cost,
+                    "hold_days": hold_days,
+                    "entry_date": entry_date,
+                    "avg_buy_date": entry.get("avg_buy_date"),
+                    "window_bars": int(len(df)),
+                    "mfe_pct": round(mfe_pct, 2) if mfe_pct is not None else None,
+                    "mfe_date": mfe_date,
+                    "mae_pct": round(mae_pct, 2) if mae_pct is not None else None,
+                    "mae_date": mae_date,
+                    "current_price": optional_float(pos, "最新价"),
+                    "current_pnl_pct": (lambda v: v * 100 if v is not None else None)(
+                        optional_float(pos, "持有盈亏率")
+                    ),
+                    "position_qty": qty,
+                    # 增量新建/待重估的持仓行透传状态,报告层才能标"市值盈亏尚未按收盘价重估"
+                    "snapshot_status": pos.get("snapshot_status"),
+                }
+            )
+            print(
+                f"[OK] {code} {name}: MFE={mfe_pct:.1f}% MAE={mae_pct:.1f}% "
+                f"(入场 {entry_date}, {len(df)} 根)"
+            )
         except Exception as e:
-            results.append(unable_row(code, name, f"计算异常: {e}", entry_date=entry_date,
-                                      error=str(e)))
+            results.append(
+                unable_row(
+                    code, name, f"计算异常: {e}", entry_date=entry_date, error=str(e)
+                )
+            )
             print(f"[WARN] {code} {name}: {e}")
 
     coverage = coverage_summary(results)
@@ -293,15 +354,19 @@ def main(argv=None):
     # 提成变量以便落盘前校验（原为内联字面量）。
     payload = {"date": target, "coverage": coverage, "holdings": results}
     require("mfe_mae", payload)
-    OUT.write_text(json.dumps(payload,
-                              ensure_ascii=False, indent=2), encoding="utf-8")
+    OUT.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     # 摘要行是 run_1700 的判据:降级/失败必须以 [WARN] 开头,否则 runner 照报 [OK]
     tag = "[OK]" if coverage["status"] == "complete" else "[WARN]"
-    print(f"\n{tag} MFE/MAE {coverage['valued']}/{coverage['total']} 出数"
-          f"({coverage['status']}"
-          + (f"，未出数 {','.join(str(c) for c in coverage['unable_codes'][:10])}"
-             if coverage["unable_codes"] else "")
-          + f") -> {OUT.name}")
+    print(
+        f"\n{tag} MFE/MAE {coverage['valued']}/{coverage['total']} 出数"
+        f"({coverage['status']}"
+        + (
+            f"，未出数 {','.join(str(c) for c in coverage['unable_codes'][:10])}"
+            if coverage["unable_codes"]
+            else ""
+        )
+        + f") -> {OUT.name}"
+    )
     return 0 if coverage["status"] != "failed" else 2
 
 

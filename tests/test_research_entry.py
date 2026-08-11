@@ -11,6 +11,7 @@ owner 2026-08-07 问「总的回测和研究是否可以统一到一个入口」
 ① 注册表与磁盘**不得漂移**（登记了却没文件 / 有文件却没登记）
 ② `stale` 状态必须**代码级可见**（项目原则：不可用的东西要标记出来）
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -39,12 +40,16 @@ class TestRegistryMatchesDisk:
         assert not missing, f"注册表登记了不存在的工具：{missing}"
 
     def test_every_script_is_registered(self):
-        on_disk = {p.stem for p in RESEARCH.glob("*.py")
-                   if p.name not in {"__init__.py", "__main__.py"}}
+        on_disk = {
+            p.stem
+            for p in RESEARCH.glob("*.py")
+            if p.name not in {"__init__.py", "__main__.py"}
+        }
         unregistered = sorted(on_disk - set(entry.TOOLS))
         assert not unregistered, (
             f"这些研究脚本没登记进 `TOOLS`：{unregistered}\n"
-            "新增研究脚本必须登记 —— 否则它对使用者不可见（没有索引就得先知道该跑哪个）")
+            "新增研究脚本必须登记 —— 否则它对使用者不可见（没有索引就得先知道该跑哪个）"
+        )
 
     def test_all_statuses_are_known(self):
         bad = {n: k for n, (k, _) in entry.TOOLS.items() if k not in entry.ORDER}
@@ -68,8 +73,8 @@ class TestStaleIsVisible:
     def test_the_three_zero_coverage_tools_are_stale(self):
         got = {n for n, (k, _) in entry.TOOLS.items() if k == "stale"}
         assert got == self.STALE, (
-            f"stale 集合变了：{got}\n"
-            "若某个已判定存废（删除或转正），请同步 TODO.md #44")
+            f"stale 集合变了：{got}\n若某个已判定存废（删除或转正），请同步 TODO.md #44"
+        )
 
     def test_running_stale_tool_warns(self):
         """跑 stale 工具必须先打警告 —— 结论不该被直接采信。
@@ -77,22 +82,38 @@ class TestStaleIsVisible:
         带 --help 走快速路径：compare_signal_sets 裸跑会做全量分析
         （逐票 TDX 取数，分钟级），而断言目标只是入口的 stale 警告。
         """
-        r = subprocess.run([sys.executable, str(RESEARCH / "__main__.py"),
-                            "compare_signal_sets", "--help"],
-                           cwd=str(ROOT), **_RUN, timeout=120)
+        r = subprocess.run(
+            [
+                sys.executable,
+                str(RESEARCH / "__main__.py"),
+                "compare_signal_sets",
+                "--help",
+            ],
+            cwd=str(ROOT),
+            **_RUN,
+            timeout=120,
+        )
         assert r.returncode == 0
         assert "存废待定" in r.stderr
 
     def test_listing_marks_stale_section(self):
-        r = subprocess.run([sys.executable, str(RESEARCH / "__main__.py")],
-                           cwd=str(ROOT), **_RUN, timeout=60)
+        r = subprocess.run(
+            [sys.executable, str(RESEARCH / "__main__.py")],
+            cwd=str(ROOT),
+            **_RUN,
+            timeout=60,
+        )
         assert "存废待定" in r.stdout
 
 
 class TestListingAndDispatch:
     def test_listing_shows_all_tools(self):
-        r = subprocess.run([sys.executable, str(RESEARCH / "__main__.py")],
-                           cwd=str(ROOT), **_RUN, timeout=60)
+        r = subprocess.run(
+            [sys.executable, str(RESEARCH / "__main__.py")],
+            cwd=str(ROOT),
+            **_RUN,
+            timeout=60,
+        )
         assert r.returncode == 0
         for n in entry.TOOLS:
             assert n in r.stdout, f"列表里缺 {n}"
@@ -101,22 +122,38 @@ class TestListingAndDispatch:
         """⚠️ 模式开关是**互斥的运行模式**却被塞进 `store_true` flag
         （`launch_point_study` 有 17 个）。看 `--help` 分不清模式与选项，
         所以入口要把模式单独列出来。"""
-        r = subprocess.run([sys.executable, str(RESEARCH / "__main__.py")],
-                           cwd=str(ROOT), **_RUN, timeout=60)
+        r = subprocess.run(
+            [sys.executable, str(RESEARCH / "__main__.py")],
+            cwd=str(ROOT),
+            **_RUN,
+            timeout=60,
+        )
         assert "模式（17）" in r.stdout or "模式（1" in r.stdout
         assert "discriminate" in r.stdout, "launch_point_study 的模式要列出来"
 
     def test_unknown_tool_exits_nonzero_and_lists(self):
-        r = subprocess.run([sys.executable, str(RESEARCH / "__main__.py"), "nope"],
-                           cwd=str(ROOT), **_RUN, timeout=60)
+        r = subprocess.run(
+            [sys.executable, str(RESEARCH / "__main__.py"), "nope"],
+            cwd=str(ROOT),
+            **_RUN,
+            timeout=60,
+        )
         assert r.returncode == 2 and "未登记的工具" in r.stderr
         assert "backtest_factors" in r.stdout, "报错时也要给出可用清单"
 
     def test_dispatch_passes_args_through(self):
         """分发必须原样透传参数 —— 否则每个工具都要在入口再声明一遍。"""
-        r = subprocess.run([sys.executable, str(RESEARCH / "__main__.py"),
-                            "backtest_factors", "--help"],
-                           cwd=str(ROOT), **_RUN, timeout=180)
+        r = subprocess.run(
+            [
+                sys.executable,
+                str(RESEARCH / "__main__.py"),
+                "backtest_factors",
+                "--help",
+            ],
+            cwd=str(ROOT),
+            **_RUN,
+            timeout=180,
+        )
         assert r.returncode == 0 and "backtest_factors.py" in r.stdout
 
     def test_dispatch_uses_subprocess_not_import(self):

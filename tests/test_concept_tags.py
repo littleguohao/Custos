@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """concept_tags 解析与 build_stock_theme_map 映射优先级的测试。"""
+
 from __future__ import annotations
 
 import json
@@ -20,7 +21,12 @@ def miscinfo_file(tmp_path):
         {"sc": "0", "code": "002439", "xq": "网络安全,信创,军工信息化", "id": "10001"},
         {"sc": "0", "code": "603986", "xq": "存储芯片,半导体,MCU芯片", "id": "10001"},
         {"sc": "0", "code": "600150", "xq": "船舶制造,军工,央企改革", "id": "10001"},
-        {"sc": "0", "code": "600150", "xq": "非概念类条目", "id": "10004"},  # 非概念 id 忽略
+        {
+            "sc": "0",
+            "code": "600150",
+            "xq": "非概念类条目",
+            "id": "10004",
+        },  # 非概念 id 忽略
     ]
     p = tmp_path / "miscinfo.json"
     p.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
@@ -53,20 +59,43 @@ def test_match_theme_tags_bidirectional():
 
 
 def test_build_stock_theme_map_prefers_concept_tags(monkeypatch):
-    monkeypatch.setattr(concept_tags, "load_tags",
-                        lambda: {"603986": ["存储芯片", "半导体"], "002439": ["网络安全", "信创"]})
-    monkeypatch.setattr(ec, "_load_json", lambda p, d: {
-        "themes": [
-            {"theme_id": "semi", "theme_name": "半导体/芯片/存储/封测",
-             "semantic_tags": ["芯片", "半导体"], "primary_sector_codes": ["881319.SH"],
-             "candidate_sector_codes": []},
-            {"theme_id": "ai", "theme_name": "AI算力/服务器/液冷",
-             "semantic_tags": ["人工智能"], "primary_sector_codes": ["880545.SH"],
-             "candidate_sector_codes": []},
-        ]} if p == ec.SECTOR_CODE_MAP else d)
+    monkeypatch.setattr(
+        concept_tags,
+        "load_tags",
+        lambda: {"603986": ["存储芯片", "半导体"], "002439": ["网络安全", "信创"]},
+    )
+    monkeypatch.setattr(
+        ec,
+        "_load_json",
+        lambda p, d: (
+            {
+                "themes": [
+                    {
+                        "theme_id": "semi",
+                        "theme_name": "半导体/芯片/存储/封测",
+                        "semantic_tags": ["芯片", "半导体"],
+                        "primary_sector_codes": ["881319.SH"],
+                        "candidate_sector_codes": [],
+                    },
+                    {
+                        "theme_id": "ai",
+                        "theme_name": "AI算力/服务器/液冷",
+                        "semantic_tags": ["人工智能"],
+                        "primary_sector_codes": ["880545.SH"],
+                        "candidate_sector_codes": [],
+                    },
+                ]
+            }
+            if p == ec.SECTOR_CODE_MAP
+            else d
+        ),
+    )
     # 880 兜底源故意给一个错配：concept_tags 存在时必须被忽略
-    monkeypatch.setattr(ec, "latest_tq_sector_map",
-                        lambda: {"sectors": [{"code": "880545.SH", "stocks": ["603986.SH"]}]})
+    monkeypatch.setattr(
+        ec,
+        "latest_tq_sector_map",
+        lambda: {"sectors": [{"code": "880545.SH", "stocks": ["603986.SH"]}]},
+    )
     stock_theme, ok = ec.build_stock_theme_map()
     assert ok
     assert stock_theme["603986"]["theme_id"] == "semi"
@@ -76,14 +105,30 @@ def test_build_stock_theme_map_prefers_concept_tags(monkeypatch):
 
 def test_build_stock_theme_map_falls_back_to_880(monkeypatch):
     monkeypatch.setattr(concept_tags, "load_tags", lambda: {})
-    monkeypatch.setattr(ec, "_load_json", lambda p, d: {
-        "themes": [
-            {"theme_id": "ai", "theme_name": "AI算力/服务器/液冷",
-             "semantic_tags": ["人工智能"], "primary_sector_codes": ["880545.SH"],
-             "candidate_sector_codes": []},
-        ]} if p == ec.SECTOR_CODE_MAP else d)
-    monkeypatch.setattr(ec, "latest_tq_sector_map",
-                        lambda: {"sectors": [{"code": "880545.SH", "stocks": ["000977.SZ"]}]})
+    monkeypatch.setattr(
+        ec,
+        "_load_json",
+        lambda p, d: (
+            {
+                "themes": [
+                    {
+                        "theme_id": "ai",
+                        "theme_name": "AI算力/服务器/液冷",
+                        "semantic_tags": ["人工智能"],
+                        "primary_sector_codes": ["880545.SH"],
+                        "candidate_sector_codes": [],
+                    },
+                ]
+            }
+            if p == ec.SECTOR_CODE_MAP
+            else d
+        ),
+    )
+    monkeypatch.setattr(
+        ec,
+        "latest_tq_sector_map",
+        lambda: {"sectors": [{"code": "880545.SH", "stocks": ["000977.SZ"]}]},
+    )
     stock_theme, ok = ec.build_stock_theme_map()
     assert ok
     assert stock_theme["000977"]["theme_id"] == "ai"
@@ -92,15 +137,37 @@ def test_build_stock_theme_map_falls_back_to_880(monkeypatch):
 
 def test_build_stock_theme_map_min_match_requires_stronger_evidence(monkeypatch):
     # 603986 命中2标签(芯片/半导体)，600111 仅命中1标签(稀土)
-    monkeypatch.setattr(concept_tags, "load_tags",
-                        lambda: {"603986": ["存储芯片", "半导体"], "600111": ["稀土永磁"]})
-    monkeypatch.setattr(ec, "_load_json", lambda p, d: {
-        "themes": [
-            {"theme_id": "semi", "theme_name": "半导体/芯片/存储/封测",
-             "semantic_tags": ["芯片", "半导体"], "primary_sector_codes": [], "candidate_sector_codes": []},
-            {"theme_id": "rare", "theme_name": "稀土永磁",
-             "semantic_tags": ["稀土"], "primary_sector_codes": [], "candidate_sector_codes": []},
-        ]} if p == ec.SECTOR_CODE_MAP else d)
+    monkeypatch.setattr(
+        concept_tags,
+        "load_tags",
+        lambda: {"603986": ["存储芯片", "半导体"], "600111": ["稀土永磁"]},
+    )
+    monkeypatch.setattr(
+        ec,
+        "_load_json",
+        lambda p, d: (
+            {
+                "themes": [
+                    {
+                        "theme_id": "semi",
+                        "theme_name": "半导体/芯片/存储/封测",
+                        "semantic_tags": ["芯片", "半导体"],
+                        "primary_sector_codes": [],
+                        "candidate_sector_codes": [],
+                    },
+                    {
+                        "theme_id": "rare",
+                        "theme_name": "稀土永磁",
+                        "semantic_tags": ["稀土"],
+                        "primary_sector_codes": [],
+                        "candidate_sector_codes": [],
+                    },
+                ]
+            }
+            if p == ec.SECTOR_CODE_MAP
+            else d
+        ),
+    )
 
     # min_match=1（默认）：两只都归类，match_count 落盘
     m1, ok1 = ec.build_stock_theme_map(min_match=1)

@@ -117,6 +117,7 @@
 ⚠️ 换数据源=换宇宙，结果与之前几轮**不可比**，所以数据源已进文件名指纹
 （`_fingerprint`），两批结果不会被混着汇总。要换就整轮换。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -136,7 +137,7 @@ from custos.core.paths import LOGS  # noqa: E402
 SCRIPT = BASE / "src" / "custos" / "research" / "backtest_factors.py"
 OUTDIR = LOGS / "m2_sweep"
 
-DEFAULT_SAMPLE = 1000           # 样本股票数默认值（300 样本实测不可靠，见模块文档）
+DEFAULT_SAMPLE = 1000  # 样本股票数默认值（300 样本实测不可靠，见模块文档）
 # 单个方案子进程的内存预算（MB）。保守值：1000 只票流式加载 + 逐笔 list + 落盘。
 # 实测数字看 backtest_factors 每轮打的 `[MEM] 峰值 XXXMb`，据此调这个常量。
 # 这个数只用于**按可用内存收敛 --jobs**——OOM Kill 是这套回测的老问题。
@@ -147,9 +148,9 @@ DEFAULT_SAMPLE = 1000           # 样本股票数默认值（300 样本实测不
 # 方案无 [MEM] 记录 —— 不再往下压的原因。
 MEM_PER_JOB_MB = 400
 
-MIN_EXPECTANCY_GAIN = 0.02      # 组内：expectancy_R 至少提升 2%
-MAX_AVG_WIN_DROP = 0.05         # 均盈跌幅超 5% 即判「削大赢家」
-BIG_WIN_THRESHOLD = 0.20        # ret > +20% 记为大赢家
+MIN_EXPECTANCY_GAIN = 0.02  # 组内：expectancy_R 至少提升 2%
+MAX_AVG_WIN_DROP = 0.05  # 均盈跌幅超 5% 即判「削大赢家」
+BIG_WIN_THRESHOLD = 0.20  # ret > +20% 记为大赢家
 
 # 出场/入场分类：**按参数语义判，不按笔数判**（2026-08-05 修）
 #
@@ -160,14 +161,26 @@ BIG_WIN_THRESHOLD = 0.20        # ret > +20% 记为大赢家
 # 判成「入场类」、去过「大赢家占比不降」——正是 6785724 刚修掉的那类误否。
 #
 # 而方案改的是入场还是出场，`GROUPS` 里的参数**本来就写着**，不需要从数据反推。
-ENTRY_SIDE_FLAGS = {                 # 改变**信号集**：被筛掉的收益永久消失
-    "--amv-long-only", "--entry-filter", "--sector-gate", "--top-n",
-    "--max-signals-per-code", "--bbi-consec-entry",
+ENTRY_SIDE_FLAGS = {  # 改变**信号集**：被筛掉的收益永久消失
+    "--amv-long-only",
+    "--entry-filter",
+    "--sector-gate",
+    "--top-n",
+    "--max-signals-per-code",
+    "--bbi-consec-entry",
 }
-EXIT_SIDE_FLAGS = {                  # 只改**离场时点/仓位**：信号集不变
-    "--breakeven", "--trail", "--stop-mode", "--stop-pct", "--stop-trigger",
-    "--stop-tick-buffer", "--cost-zone-bars", "--cost-zone-pct",
-    "--scale-out", "--time-stop", "--bbi-consec",
+EXIT_SIDE_FLAGS = {  # 只改**离场时点/仓位**：信号集不变
+    "--breakeven",
+    "--trail",
+    "--stop-mode",
+    "--stop-pct",
+    "--stop-trigger",
+    "--stop-tick-buffer",
+    "--cost-zone-bars",
+    "--cost-zone-pct",
+    "--scale-out",
+    "--time-stop",
+    "--bbi-consec",
 }
 
 # 改动**止损距离**的参数 ⇒ 改动 R 的分母 ⇒ **R 不再可比**（2026-08-05 修）
@@ -235,8 +248,10 @@ GROUPS: dict[str, dict[str, Any]] = {
         },
     },
     "B_stop_pct": {
-        "desc": ("stop_mode=pct（固定百分比，止损可执行）⚠️ R 与 A 组不可比，"
-                 "**组内不同 stop_pct 之间也不可比**（risk_frac 恒等于 stop_pct）"),
+        "desc": (
+            "stop_mode=pct（固定百分比，止损可执行）⚠️ R 与 A 组不可比，"
+            "**组内不同 stop_pct 之间也不可比**（risk_frac 恒等于 stop_pct）"
+        ),
         "common": ["--stop-mode", "pct"],
         # 基准取**中间档** pct_08：本组是参数扫描，没有「未改动的原始方案」可当基准。
         # 原先取 pct_12，而 3932190/6785724 已认定它是三档里最差的（组内累计R：
@@ -265,8 +280,13 @@ GROUPS: dict[str, dict[str, Any]] = {
             "pct_08": ["--stop-pct", "8"],
             "pct_12": ["--stop-pct", "12"],
             "pct_12_amv": ["--stop-pct", "12", "--amv-long-only"],
-            "pct_12_amv_cz3": ["--stop-pct", "12", "--amv-long-only",
-                               "--cost-zone-bars", "3"],
+            "pct_12_amv_cz3": [
+                "--stop-pct",
+                "12",
+                "--amv-long-only",
+                "--cost-zone-bars",
+                "3",
+            ],
             "pct_08_amv": ["--stop-pct", "8", "--amv-long-only"],
         },
     },
@@ -292,34 +312,107 @@ GROUPS: dict[str, dict[str, Any]] = {
         },
         "runs": {
             # 第一轮的两组（敞口 100% / 60%），留作对照
-            "pf_c5_p20": ["--max-concurrent", "5", "--max-pos", "20", "--risk-pct", "1.0"],
-            "pf_c3_p20": ["--max-concurrent", "3", "--max-pos", "20", "--risk-pct", "2.0"],
+            "pf_c5_p20": [
+                "--max-concurrent",
+                "5",
+                "--max-pos",
+                "20",
+                "--risk-pct",
+                "1.0",
+            ],
+            "pf_c3_p20": [
+                "--max-concurrent",
+                "3",
+                "--max-pos",
+                "20",
+                "--risk-pct",
+                "2.0",
+            ],
             # 低敞口
-            "pf_c2_p20": ["--max-concurrent", "2", "--max-pos", "20", "--risk-pct", "1.0"],
-            "pf_c5_p05": ["--max-concurrent", "5", "--max-pos", "5", "--risk-pct", "1.0"],
+            "pf_c2_p20": [
+                "--max-concurrent",
+                "2",
+                "--max-pos",
+                "20",
+                "--risk-pct",
+                "1.0",
+            ],
+            "pf_c5_p05": [
+                "--max-concurrent",
+                "5",
+                "--max-pos",
+                "5",
+                "--risk-pct",
+                "1.0",
+            ],
             # 加择时（避开相关亏损来源）
-            "pf_c2_p20_amv": ["--max-concurrent", "2", "--max-pos", "20",
-                              "--risk-pct", "1.0", "--amv-long-only"],
-            "pf_c5_p05_amv": ["--max-concurrent", "5", "--max-pos", "5",
-                              "--risk-pct", "1.0", "--amv-long-only"],
+            "pf_c2_p20_amv": [
+                "--max-concurrent",
+                "2",
+                "--max-pos",
+                "20",
+                "--risk-pct",
+                "1.0",
+                "--amv-long-only",
+            ],
+            "pf_c5_p05_amv": [
+                "--max-concurrent",
+                "5",
+                "--max-pos",
+                "5",
+                "--risk-pct",
+                "1.0",
+                "--amv-long-only",
+            ],
             # 加横截面择优（替代先到先得）
-            "pf_top2_c2_amv": ["--top-n", "2", "--max-concurrent", "2", "--max-pos", "20",
-                               "--risk-pct", "1.0", "--amv-long-only"],
-            "pf_top3_c5_p05_amv": ["--top-n", "3", "--max-concurrent", "5", "--max-pos", "5",
-                                   "--risk-pct", "1.0", "--amv-long-only"],
+            "pf_top2_c2_amv": [
+                "--top-n",
+                "2",
+                "--max-concurrent",
+                "2",
+                "--max-pos",
+                "20",
+                "--risk-pct",
+                "1.0",
+                "--amv-long-only",
+            ],
+            "pf_top3_c5_p05_amv": [
+                "--top-n",
+                "3",
+                "--max-concurrent",
+                "5",
+                "--max-pos",
+                "5",
+                "--risk-pct",
+                "1.0",
+                "--amv-long-only",
+            ],
         },
     },
 }
 
 
-WINDOW_COUNT = 1500             # 钉窗口时的 --count：必须**大于窗口内的 K 线根数**，见 _base_args
+WINDOW_COUNT = 1500  # 钉窗口时的 --count：必须**大于窗口内的 K 线根数**，见 _base_args
 
 
-def _base_args(sample: int, cross: bool, data_source: str = "tdx",
-               window: Optional[tuple[str, str]] = None,
-               codes_file: Optional[str] = None) -> list[str]:
-    a = ["--trade-sim", "--entry-filter", "j_low", "--scorer", "b1_dual",
-         "--cost-bps", "25", "--scale-out", "0.5"]
+def _base_args(
+    sample: int,
+    cross: bool,
+    data_source: str = "tdx",
+    window: Optional[tuple[str, str]] = None,
+    codes_file: Optional[str] = None,
+) -> list[str]:
+    a = [
+        "--trade-sim",
+        "--entry-filter",
+        "j_low",
+        "--scorer",
+        "b1_dual",
+        "--cost-bps",
+        "25",
+        "--scale-out",
+        "0.5",
+    ]
     if codes_file:
         # 钉死宇宙。⚠️ 为什么必需：universe 来自 vipdoc 目录列举，会随通达信下载变动
         # （实测一轮扫描中 5535→5536）；seed 固定没用，**被抽的池子变了**
@@ -334,11 +427,23 @@ def _base_args(sample: int, cross: bool, data_source: str = "tdx",
         # ⇒ 去幸存者偏差 + 完全跳过 xdxr。代价：2020-09-28→2021-07-30 有约 10 个月
         # 缺口，且数据到 2026-02 截止。换数据源会改 trades_signature ⇒
         # **与之前几轮结果不可比**，要换就整轮换。
-        a += ["--data-source", data_source, "--universe-sdata",
-              "--universe-sample", str(sample)]
+        a += [
+            "--data-source",
+            data_source,
+            "--universe-sdata",
+            "--universe-sample",
+            str(sample),
+        ]
     if cross:
         # ⚠️ --count 必须加大：默认 500 根从今天往前数，加 --start/--end 只覆盖窗口尾部
-        a += ["--start", "2022-01-01", "--end", "2024-12-31", "--count", str(WINDOW_COUNT)]
+        a += [
+            "--start",
+            "2022-01-01",
+            "--end",
+            "2024-12-31",
+            "--count",
+            str(WINDOW_COUNT),
+        ]
     elif window:
         # 钉死 K 线窗口。⚠️ **必须两端都给 + 放大 --count**，只给 --end 钉不住：
         # `get_ohlcv_table`(local_tdx_data:674) 先做 `df.tail(count)`，
@@ -352,9 +457,12 @@ def _base_args(sample: int, cross: bool, data_source: str = "tdx",
     return a
 
 
-def _fp_suffix(cross: bool, data_source: str = "tdx",
-               window: Optional[tuple[str, str]] = None,
-               pin_universe: bool = False) -> str:
+def _fp_suffix(
+    cross: bool,
+    data_source: str = "tdx",
+    window: Optional[tuple[str, str]] = None,
+    pin_universe: bool = False,
+) -> str:
     """指纹里样本量之后的部分。**每个会改变「比的是什么」的开关都要进来。**
 
     拼装式而不是一串正则分组，是为了以后加开关时 `_collect` 不用同步改正则
@@ -370,9 +478,13 @@ def _fp_suffix(cross: bool, data_source: str = "tdx",
     return s
 
 
-def _fingerprint(sample: int, cross: bool, data_source: str = "tdx",
-                 window: Optional[tuple[str, str]] = None,
-                 pin_universe: bool = False) -> str:
+def _fingerprint(
+    sample: int,
+    cross: bool,
+    data_source: str = "tdx",
+    window: Optional[tuple[str, str]] = None,
+    pin_universe: bool = False,
+) -> str:
     """结果文件的参数指纹。
 
     ⚠️ **必须含样本量**：第一版文件名只有 `{组}__{方案}.json`，owner 先跑 300 样本、
@@ -389,10 +501,18 @@ def _fingerprint(sample: int, cross: bool, data_source: str = "tdx",
     return f"s{sample}" + _fp_suffix(cross, data_source, window, pin_universe)
 
 
-def _run(group: str, name: str, extra: list[str], sample: int, cross: bool,
-         force: bool, capture: bool = False,
-         data_source: str = "tdx", window: Optional[tuple[str, str]] = None,
-         codes_file: Optional[str] = None) -> tuple[str, Optional[pathlib.Path], str]:
+def _run(
+    group: str,
+    name: str,
+    extra: list[str],
+    sample: int,
+    cross: bool,
+    force: bool,
+    capture: bool = False,
+    data_source: str = "tdx",
+    window: Optional[tuple[str, str]] = None,
+    codes_file: Optional[str] = None,
+) -> tuple[str, Optional[pathlib.Path], str]:
     """跑一个方案。返回 ``(方案标识, 结果文件或 None, 待打印的日志)``。
 
     ``capture=True``（并行时）把子进程输出收进字符串，等该方案跑完整块打印——
@@ -408,8 +528,9 @@ def _run(group: str, name: str, extra: list[str], sample: int, cross: bool,
     note = ""
     src_ref = (GROUPS[group].get("reuse") or {}).get(name)
     if src_ref:
-        src_group, src_name = (src_ref.split("/", 1) if "/" in src_ref
-                               else (group, src_ref))
+        src_group, src_name = (
+            src_ref.split("/", 1) if "/" in src_ref else (group, src_ref)
+        )
         src = OUTDIR / f"{src_group}__{src_name}__{fp}.json"
         if src.is_file():
             extra += ["--from-trades", str(src)]
@@ -435,13 +556,23 @@ def _run(group: str, name: str, extra: list[str], sample: int, cross: bool,
         print(f"[START] {tag}  {time.strftime('%H:%M:%S')}", flush=True)
 
     def _exec(args: list[str]) -> tuple[int, float]:
-        cmd = ([sys.executable, str(SCRIPT)]
-               + _base_args(sample, cross, data_source, window, codes_file)
-               + GROUPS[group]["common"] + args + ["--out", str(out)])
+        cmd = (
+            [sys.executable, str(SCRIPT)]
+            + _base_args(sample, cross, data_source, window, codes_file)
+            + GROUPS[group]["common"]
+            + args
+            + ["--out", str(out)]
+        )
         t0 = time.time()
         if capture:
-            r = subprocess.run(cmd, cwd=str(BASE), stdout=subprocess.PIPE,
-                               stderr=subprocess.STDOUT, text=True, errors="replace")
+            r = subprocess.run(
+                cmd,
+                cwd=str(BASE),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                errors="replace",
+            )
             if r.stdout:
                 log.append(r.stdout.rstrip())
         else:
@@ -454,8 +585,11 @@ def _run(group: str, name: str, extra: list[str], sample: int, cross: bool,
         # 复用失败（多半是 trades 口径核对不过：扫描期间通达信又下了新数据、
         # universe 变了 ⇒ codes_digest 不同）。全量回测永远正确，只是慢 ⇒ 自动退回，
         # 不让「省时间」变成「少一个方案」——少一行的报表正是本脚本一直在防的失效。
-        plain = [x for i, x in enumerate(extra)
-                 if x != "--from-trades" and extra[i - 1] != "--from-trades"]
+        plain = [
+            x
+            for i, x in enumerate(extra)
+            if x != "--from-trades" and extra[i - 1] != "--from-trades"
+        ]
         _say(f"[RETRY] {tag}: 复用失败，退回全量回测")
         rc, dt = _exec(plain)
     if rc != 0:
@@ -467,31 +601,34 @@ def _run(group: str, name: str, extra: list[str], sample: int, cross: bool,
 
 def _avail_mem_mb() -> Optional[float]:
     """可用内存（MB）。取不到返回 None（那就只警告、不自动降并行度）。"""
-    try:                                                          # Linux
+    try:  # Linux
         for ln in pathlib.Path("/proc/meminfo").read_text().splitlines():
             if ln.startswith("MemAvailable:"):
                 return float(ln.split()[1]) / 1024.0
-    except Exception:                                             # noqa: BLE001
+    except Exception:  # noqa: BLE001
         pass
-    try:                                                          # Windows
+    try:  # Windows
         import ctypes  # noqa: PLC0415
         from ctypes import wintypes  # noqa: PLC0415
 
         class _MS(ctypes.Structure):
-            _fields_ = [("dwLength", wintypes.DWORD), ("dwMemoryLoad", wintypes.DWORD),
-                        ("ullTotalPhys", ctypes.c_ulonglong),
-                        ("ullAvailPhys", ctypes.c_ulonglong),
-                        ("ullTotalPageFile", ctypes.c_ulonglong),
-                        ("ullAvailPageFile", ctypes.c_ulonglong),
-                        ("ullTotalVirtual", ctypes.c_ulonglong),
-                        ("ullAvailVirtual", ctypes.c_ulonglong),
-                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+            _fields_ = [
+                ("dwLength", wintypes.DWORD),
+                ("dwMemoryLoad", wintypes.DWORD),
+                ("ullTotalPhys", ctypes.c_ulonglong),
+                ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+            ]
 
         ms = _MS()
         ms.dwLength = ctypes.sizeof(_MS)
         if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(ms)):  # type: ignore[attr-defined]
-            return ms.ullAvailPhys / (1024.0 ** 2)
-    except Exception:                                             # noqa: BLE001
+            return ms.ullAvailPhys / (1024.0**2)
+    except Exception:  # noqa: BLE001
         pass
     return None
 
@@ -504,7 +641,9 @@ def _is_heavy(group: str, name: str) -> bool:
     `research/R17_infra_tooling.md` 早就记着「全市场 OOM，`--top-n`(collect_all) 大样本仍重」。
     这类方案不与别人并行，单独串行跑。
     """
-    return "--top-n" in _flag_set((GROUPS.get(group, {}).get("runs") or {}).get(name, []))
+    return "--top-n" in _flag_set(
+        (GROUPS.get(group, {}).get("runs") or {}).get(name, [])
+    )
 
 
 def _cap_jobs(jobs: int, n_tasks: int) -> int:
@@ -524,29 +663,40 @@ def _cap_jobs(jobs: int, n_tasks: int) -> int:
     # 还会挤掉 TdxW（它要服务 xdxr 权息请求）。
     ncpu = os.cpu_count() or 1
     if jobs > ncpu:
-        print(f"[INFO] --jobs {jobs} 超过 CPU 核数 {ncpu}，降到 {ncpu}"
-              f"（评估是纯 CPU-bound，超订不会更快）")
+        print(
+            f"[INFO] --jobs {jobs} 超过 CPU 核数 {ncpu}，降到 {ncpu}"
+            f"（评估是纯 CPU-bound，超订不会更快）"
+        )
         jobs = ncpu
     avail = _avail_mem_mb()
     if avail is None:
-        print(f"⚠️ 读不到可用内存，按 {jobs} 路并行跑。每路约需 {MEM_PER_JOB_MB}MB，"
-              f"OOM 风险自行判断（跑完看 [MEM] 峰值）")
+        print(
+            f"⚠️ 读不到可用内存，按 {jobs} 路并行跑。每路约需 {MEM_PER_JOB_MB}MB，"
+            f"OOM 风险自行判断（跑完看 [MEM] 峰值）"
+        )
         return jobs
     safe = max(1, int(avail * 0.8 // MEM_PER_JOB_MB))
     if safe < jobs:
-        print(f"⚠️ 可用内存 {avail:.0f}MB，按每路 {MEM_PER_JOB_MB}MB 估算最多 {safe} 路，"
-              f"已把 --jobs {jobs} 降到 {safe}（被 OOM kill 掉的方案在报表里只是少一行，"
-              f"比跑得慢糟得多）")
+        print(
+            f"⚠️ 可用内存 {avail:.0f}MB，按每路 {MEM_PER_JOB_MB}MB 估算最多 {safe} 路，"
+            f"已把 --jobs {jobs} 降到 {safe}（被 OOM kill 掉的方案在报表里只是少一行，"
+            f"比跑得慢糟得多）"
+        )
         return safe
-    print(f"[INFO] 可用内存 {avail:.0f}MB，{jobs} 路并行约需 "
-          f"{jobs * MEM_PER_JOB_MB}MB")
+    print(f"[INFO] 可用内存 {avail:.0f}MB，{jobs} 路并行约需 {jobs * MEM_PER_JOB_MB}MB")
     return jobs
 
 
-def _run_all(todo: list[tuple[str, str, list[str]]], sample: int, cross: bool,
-             force: bool, jobs: int, data_source: str = "tdx",
-             window: Optional[tuple[str, str]] = None,
-             codes_file: Optional[str] = None) -> None:
+def _run_all(
+    todo: list[tuple[str, str, list[str]]],
+    sample: int,
+    cross: bool,
+    force: bool,
+    jobs: int,
+    data_source: str = "tdx",
+    window: Optional[tuple[str, str]] = None,
+    codes_file: Optional[str] = None,
+) -> None:
     """跑完 todo 里的全部方案，最后汇总失败项。
 
     ## 为什么可以并行
@@ -566,25 +716,50 @@ def _run_all(todo: list[tuple[str, str, list[str]]], sample: int, cross: bool,
     """
     fails: list[str] = []
 
-    def _one_wave(items: list[tuple[str, str, list[str]]], wave: str,
-                  wave_jobs: int) -> None:
+    def _one_wave(
+        items: list[tuple[str, str, list[str]]], wave: str, wave_jobs: int
+    ) -> None:
         if not items:
             return
         if wave_jobs <= 1:
             for g, n, e in items:
-                tag, path, log = _run(g, n, e, sample, cross, force, False,
-                                      data_source, window, codes_file)
+                tag, path, log = _run(
+                    g,
+                    n,
+                    e,
+                    sample,
+                    cross,
+                    force,
+                    False,
+                    data_source,
+                    window,
+                    codes_file,
+                )
                 if log:
                     print(log)
                 if path is None:
                     fails.append(tag)
             return
         from concurrent.futures import ThreadPoolExecutor, as_completed  # noqa: PLC0415
+
         # 线程只是在等子进程，真正的并行度由子进程数决定 ⇒ 用线程池最省事
         with ThreadPoolExecutor(max_workers=wave_jobs) as ex:
-            futs = {ex.submit(_run, g, n, e, sample, cross, force, True,
-                              data_source, window, codes_file): f"{g}/{n}"
-                    for g, n, e in items}
+            futs = {
+                ex.submit(
+                    _run,
+                    g,
+                    n,
+                    e,
+                    sample,
+                    cross,
+                    force,
+                    True,
+                    data_source,
+                    window,
+                    codes_file,
+                ): f"{g}/{n}"
+                for g, n, e in items
+            }
             done = 0
             for f in as_completed(futs):
                 tag, path, log = f.result()
@@ -594,10 +769,8 @@ def _run_all(todo: list[tuple[str, str, list[str]]], sample: int, cross: bool,
                 if path is None:
                     fails.append(tag)
 
-    derived = [(g, n, e) for g, n, e in todo
-               if n in (GROUPS[g].get("reuse") or {})]
-    rest = [(g, n, e) for g, n, e in todo
-            if n not in (GROUPS[g].get("reuse") or {})]
+    derived = [(g, n, e) for g, n, e in todo if n in (GROUPS[g].get("reuse") or {})]
+    rest = [(g, n, e) for g, n, e in todo if n not in (GROUPS[g].get("reuse") or {})]
     heavy = [t for t in rest if _is_heavy(t[0], t[1])]
     light = [t for t in rest if not _is_heavy(t[0], t[1])]
     # 三波，顺序有讲究：
@@ -605,8 +778,10 @@ def _run_all(todo: list[tuple[str, str, list[str]]], sample: int, cross: bool,
     #   → 复用波串行（要等源产出；且它要把源文件整份读进内存，本身也不轻）
     _one_wave(light, "主", _cap_jobs(jobs, len(light)))
     if heavy:
-        print(f"\n[INFO] {len(heavy)} 个 collect_all 方案单独串行"
-              f"（--top-n 逐笔是未去重全候选，内存高一个量级，见 _is_heavy）")
+        print(
+            f"\n[INFO] {len(heavy)} 个 collect_all 方案单独串行"
+            f"（--top-n 逐笔是未去重全候选，内存高一个量级，见 _is_heavy）"
+        )
     _one_wave(heavy, "重", 1)
     _one_wave(derived, "复用", 1)
     if fails:
@@ -624,8 +799,10 @@ def _load(p: pathlib.Path) -> dict:
     静默失效——**读不到就明确报错，不要静默返回空**。
     """
     try:
-        d = json.loads(p.read_text(encoding="utf-8-sig"))  # BOM 容错，见 paths.read_json
-    except Exception as e:                                        # noqa: BLE001
+        d = json.loads(
+            p.read_text(encoding="utf-8-sig")
+        )  # BOM 容错，见 paths.read_json
+    except Exception as e:  # noqa: BLE001
         print(f"[WARN] 读不了 {p.name}: {e}")
         return {}
     pf = d.get("portfolio")
@@ -636,7 +813,7 @@ def _load(p: pathlib.Path) -> dict:
             s["_trades"] = d.get("trades") or blk.get("trades") or []
             s["_portfolio"] = pf or blk.get("portfolio")
             return s
-    if "expectancy" in d:                                          # 摘要直接在顶层
+    if "expectancy" in d:  # 摘要直接在顶层
         s = dict(d)
         s["_trades"] = d.get("trades") or []
         s["_portfolio"] = pf
@@ -649,15 +826,18 @@ def _load(p: pathlib.Path) -> dict:
             s["_portfolio"] = pf
             print(f"[INFO] {p.name}: 摘要在非预期键 '{k}' 下，已兜底读取")
             return s
-    if pf:                                                         # 纯组合级结果
+    if pf:  # 纯组合级结果
         return {"_trades": [], "_portfolio": pf}
     print(f"[WARN] {p.name}: 找不到交易摘要（顶层键: {sorted(d)[:8]}）")
     return {}
 
 
 def _big_wins(trades: list) -> int:
-    return sum(1 for t in trades
-               if isinstance(t, dict) and (t.get("ret") or 0) > BIG_WIN_THRESHOLD)
+    return sum(
+        1
+        for t in trades
+        if isinstance(t, dict) and (t.get("ret") or 0) > BIG_WIN_THRESHOLD
+    )
 
 
 def _tail_split(trades: list) -> Optional[tuple[float, float]]:
@@ -674,8 +854,11 @@ def _tail_split(trades: list) -> Optional[tuple[float, float]]:
 
     返回 None 表示逐笔里没有 r_multiple（`--summary-only` 时会这样）。
     """
-    rs = [(t.get("ret") or 0, t.get("r_multiple")) for t in trades
-          if isinstance(t, dict) and t.get("r_multiple") is not None]
+    rs = [
+        (t.get("ret") or 0, t.get("r_multiple"))
+        for t in trades
+        if isinstance(t, dict) and t.get("r_multiple") is not None
+    ]
     if not rs:
         return None
     tail = sum(r for ret, r in rs if ret > BIG_WIN_THRESHOLD)
@@ -804,9 +987,13 @@ def _breakeven_wr(payoff: Optional[float]) -> Optional[float]:
     return 1.0 / (1.0 + payoff)
 
 
-def _collect(cross: bool, sample: Optional[int] = None,
-             data_source: str = "tdx", window: Optional[tuple[str, str]] = None,
-             pin_universe: bool = False) -> dict[str, list[dict]]:
+def _collect(
+    cross: bool,
+    sample: Optional[int] = None,
+    data_source: str = "tdx",
+    window: Optional[tuple[str, str]] = None,
+    pin_universe: bool = False,
+) -> dict[str, list[dict]]:
     """按指纹收集结果。``sample=None`` 时自动取**最大样本量**那一批。
 
     只汇总同一指纹的文件——混合样本量、混合数据源、混合窗口比较都是无意义的
@@ -825,21 +1012,25 @@ def _collect(cross: bool, sample: Optional[int] = None,
         # 兼容第一版无指纹的文件名，但明确告警
         legacy = list(OUTDIR.glob("*__*.json"))
         if legacy:
-            print(f"[WARN] 发现 {len(legacy)} 个**无样本量指纹**的旧结果文件"
-                  f"（第一版命名）。它们可能来自不同 --sample，混在一起比较无效。"
-                  f"建议删除 artifacts/logs/m2_sweep 后重跑。")
+            print(
+                f"[WARN] 发现 {len(legacy)} 个**无样本量指纹**的旧结果文件"
+                f"（第一版命名）。它们可能来自不同 --sample，混在一起比较无效。"
+                f"建议删除 artifacts/logs/m2_sweep 后重跑。"
+            )
         return {g: [] for g in GROUPS}
     if sample is None:
         sample = max(avail)
         if len(avail) > 1:
-            print(f"[INFO] 检测到多个样本量 {sorted(avail)}，"
-                  f"只汇总最大的 s{sample}（{avail[sample]} 个方案）。"
-                  f"用 --sample 指定其它批次。")
+            print(
+                f"[INFO] 检测到多个样本量 {sorted(avail)}，"
+                f"只汇总最大的 s{sample}（{avail[sample]} 个方案）。"
+                f"用 --sample 指定其它批次。"
+            )
     want = f"__s{sample}{suffix}.json"
 
     out: dict[str, list[dict]] = {g: [] for g in GROUPS}
     for p in sorted(OUTDIR.glob(f"*{want}")):
-        stem = p.name[:-len(want)]
+        stem = p.name[: -len(want)]
         if "__" not in stem:
             continue
         group, name = stem.split("__", 1)
@@ -848,26 +1039,35 @@ def _collect(cross: bool, sample: Optional[int] = None,
         s = _load(p)
         if not s:
             continue
-        out[group].append({
-            "name": name, "n": s.get("n"), "win": s.get("win_rate"),
-            "exp": s.get("expectancy"), "expR": s.get("expectancy_R"),
-            "totR": s.get("total_R"), "payoff": s.get("payoff_ratio"),
-            "avg_win": s.get("avg_win"), "avg_loss": s.get("avg_loss"),
-            "hold": s.get("avg_holding"), "big": _big_wins(s.get("_trades") or []),
-            "reasons": s.get("exit_reasons") or {}, "pf": s.get("_portfolio"),
-            # exit_reasons 只有 {n, avg_return}，没有 R ⇒ 从逐笔自算，
-            # 因为可加的是 sum_r 而非均收（见 _reason_stats）
-            "reasons_calc": _reason_stats(s.get("_trades") or []),
-            # 出场结构矩阵要按族重算，留一份逐笔引用（不复制，同一个 list 对象）
-            "_trades_ref": s.get("_trades") or [],
-            "tail_split": _tail_split(s.get("_trades") or []),
-            "sample": sample,
-            # `--top-n` 走 evaluate_trades(collect_all=True)，逐笔是**重叠未去重的全候选**
-            # （backtest_factors.py:2133）⇒ 它的 trade_summary 与其它方案不同口径，
-            # 只有 portfolio 块可用。标记出来，逐笔类表格一律排除。
-            "topn": "--top-n" in _flag_set(
-                (GROUPS.get(group, {}).get("runs") or {}).get(name, [])),
-        })
+        out[group].append(
+            {
+                "name": name,
+                "n": s.get("n"),
+                "win": s.get("win_rate"),
+                "exp": s.get("expectancy"),
+                "expR": s.get("expectancy_R"),
+                "totR": s.get("total_R"),
+                "payoff": s.get("payoff_ratio"),
+                "avg_win": s.get("avg_win"),
+                "avg_loss": s.get("avg_loss"),
+                "hold": s.get("avg_holding"),
+                "big": _big_wins(s.get("_trades") or []),
+                "reasons": s.get("exit_reasons") or {},
+                "pf": s.get("_portfolio"),
+                # exit_reasons 只有 {n, avg_return}，没有 R ⇒ 从逐笔自算，
+                # 因为可加的是 sum_r 而非均收（见 _reason_stats）
+                "reasons_calc": _reason_stats(s.get("_trades") or []),
+                # 出场结构矩阵要按族重算，留一份逐笔引用（不复制，同一个 list 对象）
+                "_trades_ref": s.get("_trades") or [],
+                "tail_split": _tail_split(s.get("_trades") or []),
+                "sample": sample,
+                # `--top-n` 走 evaluate_trades(collect_all=True)，逐笔是**重叠未去重的全候选**
+                # （backtest_factors.py:2133）⇒ 它的 trade_summary 与其它方案不同口径，
+                # 只有 portfolio 块可用。标记出来，逐笔类表格一律排除。
+                "topn": "--top-n"
+                in _flag_set((GROUPS.get(group, {}).get("runs") or {}).get(name, [])),
+            }
+        )
     return out
 
 
@@ -883,26 +1083,34 @@ def _warn_if_mixed(group: str, rows: list[dict]) -> None:
     ns = [n for _, n in plain]
     if max(ns) / max(min(ns), 1) > 1.5:
         lo = [f"{n}({c})" for n, c in plain if c < max(ns) / 1.5]
-        print(f"\n⚠️ **【{group}】笔数不一致，判定可能无效**：最多 {max(ns)} / 最少 {min(ns)}。")
+        print(
+            f"\n⚠️ **【{group}】笔数不一致，判定可能无效**：最多 {max(ns)} / 最少 {min(ns)}。"
+        )
         print(f"   偏少的方案：{'、'.join(lo)}")
         print("   同一 entry_filter 下信号数只由样本股票数决定，不由止损参数决定 ⇒")
-        print("   这些结果很可能来自不同 --sample。删除 artifacts/logs/m2_sweep 后重跑。")
+        print(
+            "   这些结果很可能来自不同 --sample。删除 artifacts/logs/m2_sweep 后重跑。"
+        )
 
 
 def _print_trade_group(group: str, rows: list[dict]) -> None:
     meta = GROUPS[group]
-    hdr = (f"{'组':<20}{'笔数':>7}{'胜率':>8}{'期望%':>8}{'期望R':>8}"
-           f"{'累计R':>9}{'盈亏比':>8}{'均盈%':>8}{'大赢家':>7}")
+    hdr = (
+        f"{'组':<20}{'笔数':>7}{'胜率':>8}{'期望%':>8}{'期望R':>8}"
+        f"{'累计R':>9}{'盈亏比':>8}{'均盈%':>8}{'大赢家':>7}"
+    )
     print("\n" + "=" * len(hdr))
     print(f"【{group}】{meta['desc']}")
     print("=" * len(hdr))
     print(hdr)
     print("-" * len(hdr))
     for r in sorted(rows, key=lambda x: x["name"]):
-        print(f"{r['name']:<20}{r['n'] or 0:>7}{(r['win'] or 0) * 100:>7.1f}%"
-              f"{(r['exp'] or 0) * 100:>+8.2f}{r['expR'] or 0:>8.3f}"
-              f"{r['totR'] or 0:>9.1f}{r['payoff'] or 0:>8.3f}"
-              f"{(r['avg_win'] or 0) * 100:>+8.2f}{r['big']:>7}")
+        print(
+            f"{r['name']:<20}{r['n'] or 0:>7}{(r['win'] or 0) * 100:>7.1f}%"
+            f"{(r['exp'] or 0) * 100:>+8.2f}{r['expR'] or 0:>8.3f}"
+            f"{r['totR'] or 0:>9.1f}{r['payoff'] or 0:>8.3f}"
+            f"{(r['avg_win'] or 0) * 100:>+8.2f}{r['big']:>7}"
+        )
 
     base_name = meta.get("baseline")
     base = next((r for r in rows if r["name"] == base_name), None)
@@ -910,20 +1118,32 @@ def _print_trade_group(group: str, rows: list[dict]) -> None:
         return
     print(f"\n组内判定（基准 = {base_name}；**R 仅在 risk_frac 相同的方案之间可比**）")
     print("  出场类（改离场时点：trail/breakeven/stop-pct/cost-zone…）：")
-    print("    **累计R** 提升 >2% **且 期望R 不下降** 即通过；尾部R 绝对量降 >30% 另行警示")
-    print("  入场类（改信号集：amv 择时 / 入场过滤 / top-n）：期望R 提升 >2% 且 大赢家**占比**不降")
-    print("  ⚠️ **改动止损距离的方案（stop-pct / stop-mode / tick-buffer）一律不用 R 判**：")
+    print(
+        "    **累计R** 提升 >2% **且 期望R 不下降** 即通过；尾部R 绝对量降 >30% 另行警示"
+    )
+    print(
+        "  入场类（改信号集：amv 择时 / 入场过滤 / top-n）：期望R 提升 >2% 且 大赢家**占比**不降"
+    )
+    print(
+        "  ⚠️ **改动止损距离的方案（stop-pct / stop-mode / tick-buffer）一律不用 R 判**："
+    )
     print("     R = ret/risk_frac，而 pct 模式下 risk_frac **恒等于 stop_pct**")
     print("     ⇒ 期望R = 期望% ÷ stop_pct。「pct_05 累计R +73.8%」里 1.6 倍纯粹是分母")
-    print("     8%/5%，真实期望率 0.67% vs 0.64% 几乎持平。这类方案改判 期望% 与 margin，")
+    print(
+        "     8%/5%，真实期望率 0.67% vs 0.64% 几乎持平。这类方案改判 期望% 与 margin，"
+    )
     print("     判定行标 [出场·R口径变]。")
     print("  ⚠️ 分开判的理由：「削大赢家」是防**为提高胜率而筛掉大赢家**——那些收益会")
     print("     **永久消失**。出场机制不筛信号，只改离场时点，用「少赚一点尾部」换")
     print("     「多一些赢家」；对它硬套「大赢家占比不降」会否掉累计R +43% 的方案。")
     print("  ⚠️ 出场类为何还要看期望R：累计R = 期望R × 笔数，而**止损越紧笔数越多**")
-    print("     （更早离场 ⇒ 后续还能再进场）。只看累计R，笔数涨 5% 就能凭摊薄「通过」。")
+    print(
+        "     （更早离场 ⇒ 后续还能再进场）。只看累计R，笔数涨 5% 就能凭摊薄「通过」。"
+    )
     if group == "B_stop_pct":
-        print("  ⚠️ B 组是**参数扫描**，基准取中间档，✅/❌ 只表示「相对中间档的方向」，")
+        print(
+            "  ⚠️ B 组是**参数扫描**，基准取中间档，✅/❌ 只表示「相对中间档的方向」，"
+        )
         print("     不代表绝对优劣。⚠️ **别拿本组的累计R 排序**——各档 risk_frac 不同，")
         print("     累计R 之间差着分母；绝对排序看 期望% 与跨组表的 margin。")
     b_expR, b_aw = base["expR"] or 0, base["avg_win"] or 0
@@ -933,11 +1153,15 @@ def _print_trade_group(group: str, rows: list[dict]) -> None:
     b_split = base.get("tail_split")
     if b_split:
         tail, non = b_split
-        print(f"  基准收益结构：尾部R {tail:+.0f}（大赢家 {b_big} 笔，ret>20%）"
-              f" / 非尾部R {non:+.0f} / 合计 {tail + non:+.0f}")
+        print(
+            f"  基准收益结构：尾部R {tail:+.0f}（大赢家 {b_big} 笔，ret>20%）"
+            f" / 非尾部R {non:+.0f} / 合计 {tail + non:+.0f}"
+        )
         if non < 0:
-            print(f"     ⚠️ **非尾部整体亏损**：全部收益来自 {b_big / b_n:.1%} 的大赢家，"
-                  f"其余 {1 - b_big / b_n:.1%} 交易净亏 {abs(non):.0f}R。")
+            print(
+                f"     ⚠️ **非尾部整体亏损**：全部收益来自 {b_big / b_n:.1%} 的大赢家，"
+                f"其余 {1 - b_big / b_n:.1%} 交易净亏 {abs(non):.0f}R。"
+            )
             print("        ⇒ 任何「提高胜率」的改动都要先看它有没有动到尾部；")
             print("          也意味着漏掉几只大赢家就足以让整个策略转负。")
     b_fam = _family_stats(base.get("_trades_ref") or [])
@@ -946,11 +1170,17 @@ def _print_trade_group(group: str, rows: list[dict]) -> None:
         r_open = b_fam.get("末持", {}).get("sum_r", 0.0)
         r_all = sum(d["sum_r"] for f, d in b_fam.items() if f != "scaled")
         if n_open and r_all:
-            print(f"  基准已实现口径：累计R {r_all:+.0f} → 剔除末持(open_end) "
-                  f"{n_open:.0f} 笔的 {r_open:+.0f}R ⇒ **{r_all - r_open:+.0f}R**")
+            print(
+                f"  基准已实现口径：累计R {r_all:+.0f} → 剔除末持(open_end) "
+                f"{n_open:.0f} 笔的 {r_open:+.0f}R ⇒ **{r_all - r_open:+.0f}R**"
+            )
             if r_all > 0 >= r_all - r_open:
-                print("     ⚠️ **基准的正期望完全来自未平仓浮盈**（期末仍持仓、按最后一根")
-                print("        收盘价标记）⇒ 已实现口径为负。在这个基准上比出来的「改进」")
+                print(
+                    "     ⚠️ **基准的正期望完全来自未平仓浮盈**（期末仍持仓、按最后一根"
+                )
+                print(
+                    "        收盘价标记）⇒ 已实现口径为负。在这个基准上比出来的「改进」"
+                )
                 print("        要格外小心：相对提升再大，绝对水平仍可能是负的。")
     for r in sorted(rows, key=lambda x: x["name"]):
         if r["name"] == base_name:
@@ -979,41 +1209,54 @@ def _print_trade_group(group: str, rows: list[dict]) -> None:
                 why.append(f"期望% {d_exp_pct:+.1%} 未达 +2%")
             if exit_side:
                 if mg is not None and b_mg is not None:
-                    if mg < b_mg - 0.002:            # margin 掉超过 0.2pp
+                    if mg < b_mg - 0.002:  # margin 掉超过 0.2pp
                         ok = False
                         why.append(f"margin {b_mg * 100:+.1f}→{mg * 100:+.1f}pp 变薄")
             elif d_rate <= -MAX_AVG_WIN_DROP:
                 ok = False
                 why.append(f"大赢家占比 {b_rate:.2%}→{rate:.2%}")
-            main = (f"期望% {b_exp_pct * 100:+.2f}→{exp_pct * 100:+.2f}"
-                    f"（{d_exp_pct:+6.1%}）"
-                    f"  margin {(b_mg or 0) * 100:+.1f}→{(mg or 0) * 100:+.1f}pp")
-            notes.append(f"**R 口径不同**（止损距离变了 ⇒ risk_frac 变了）："
-                         f"期望R {b_expR:.3f}→{expR:.3f} 的差异含纯分母变化，故不用 R 判")
+            main = (
+                f"期望% {b_exp_pct * 100:+.2f}→{exp_pct * 100:+.2f}"
+                f"（{d_exp_pct:+6.1%}）"
+                f"  margin {(b_mg or 0) * 100:+.1f}→{(mg or 0) * 100:+.1f}pp"
+            )
+            notes.append(
+                f"**R 口径不同**（止损距离变了 ⇒ risk_frac 变了）："
+                f"期望R {b_expR:.3f}→{expR:.3f} 的差异含纯分母变化，故不用 R 判"
+            )
         elif exit_side:
             ok = d_tot > MIN_EXPECTANCY_GAIN and d_exp >= 0
             if d_tot <= MIN_EXPECTANCY_GAIN:
                 why.append(f"累计R {d_tot:+.1%} 未达 +2%")
             if d_exp < 0:
-                why.append(f"期望R {d_exp:+.1%} 下降（累计R 靠笔数 {d_n:+.1%} 摊薄，非质量提升）")
+                why.append(
+                    f"期望R {d_exp:+.1%} 下降（累计R 靠笔数 {d_n:+.1%} 摊薄，非质量提升）"
+                )
             split = r.get("tail_split")
             if split and b_split:
-                d_tail = (split[0] - b_split[0]) / abs(b_split[0]) if b_split[0] else 0.0
+                d_tail = (
+                    (split[0] - b_split[0]) / abs(b_split[0]) if b_split[0] else 0.0
+                )
                 d_non = split[1] - b_split[1]
                 if d_tail < -0.30:
                     # 只在**尾部R 绝对量**明显缩水时警示——那是真的「削大赢家」。
                     # 非尾部同时改善多少一并打出来，供人判断净效果。
-                    notes.append(f"尾部R {b_split[0]:.0f}→{split[0]:.0f}"
-                                 f"（{d_tail:+.0%}，大赢家贡献显著缩水；"
-                                 f"非尾部R {b_split[1]:.0f}→{split[1]:.0f}，{d_non:+.0f}R）")
+                    notes.append(
+                        f"尾部R {b_split[0]:.0f}→{split[0]:.0f}"
+                        f"（{d_tail:+.0%}，大赢家贡献显著缩水；"
+                        f"非尾部R {b_split[1]:.0f}→{split[1]:.0f}，{d_non:+.0f}R）"
+                    )
             if d_aw <= -MAX_AVG_WIN_DROP:
                 notes.append(f"均盈 {d_aw:+.1%}")
             if d_rate <= -MAX_AVG_WIN_DROP:
                 notes.append(f"大赢家占比 {b_rate:.2%}→{rate:.2%}")
             main = f"累计R {d_tot:+6.1%}  期望R {d_exp:+6.1%}  笔数 {d_n:+5.1%}"
         else:
-            ok = (d_exp > MIN_EXPECTANCY_GAIN and d_aw > -MAX_AVG_WIN_DROP
-                  and d_rate > -MAX_AVG_WIN_DROP)
+            ok = (
+                d_exp > MIN_EXPECTANCY_GAIN
+                and d_aw > -MAX_AVG_WIN_DROP
+                and d_rate > -MAX_AVG_WIN_DROP
+            )
             if d_exp <= MIN_EXPECTANCY_GAIN:
                 why.append(f"期望R {d_exp:+.1%}")
             if d_aw <= -MAX_AVG_WIN_DROP:
@@ -1022,8 +1265,10 @@ def _print_trade_group(group: str, rows: list[dict]) -> None:
                 why.append(f"大赢家占比 {b_rate:.2%}→{rate:.2%}")
             main = f"期望R {d_exp:+6.1%}  均盈 {d_aw:+6.1%}"
         tag = ("出场" if exit_side else "入场") + ("" if same_denom else "·R口径变")
-        line = (f"  {r['name']:<20}{'✅ 通过' if ok else '❌ 否决'} [{tag}]  {main}"
-                f"  大赢家 {b_rate:.2%}→{rate:.2%}")
+        line = (
+            f"  {r['name']:<20}{'✅ 通过' if ok else '❌ 否决'} [{tag}]  {main}"
+            f"  大赢家 {b_rate:.2%}→{rate:.2%}"
+        )
         if why:
             line += "  ｜" + "；".join(why)
         print(line)
@@ -1040,8 +1285,12 @@ def _print_trade_group(group: str, rows: list[dict]) -> None:
 #   `+scaled` (1326)                   触发过分批止盈 ⇒ **单独一列**，与 bbi/末持 **重叠**
 #                                      （所以那一列不计入 100%）
 _REASON_FAMILY = {
-    "stop": "stop", "trail_stop": "trail", "breakeven_stop": "be",
-    "cost_zone_stop": "cz", "bbi_exit": "bbi", "open_end": "末持",
+    "stop": "stop",
+    "trail_stop": "trail",
+    "breakeven_stop": "be",
+    "cost_zone_stop": "cz",
+    "bbi_exit": "bbi",
+    "open_end": "末持",
 }
 _FAMILY_ORDER = ["bbi", "stop", "trail", "be", "cz", "末持", "其它"]
 
@@ -1077,7 +1326,9 @@ def _family_stats(trades: list) -> dict[str, dict[str, float]]:
     return out
 
 
-def _print_exit_structure(group: str, rows: list[dict], base_name: Optional[str]) -> None:
+def _print_exit_structure(
+    group: str, rows: list[dict], base_name: Optional[str]
+) -> None:
     """**跨方案**的出场结构对比矩阵。
 
     为什么必须是矩阵而不是单方案的原因表：每个方案单看都是「`bbi_exit+scaled` 均收最高」
@@ -1088,29 +1339,35 @@ def _print_exit_structure(group: str, rows: list[dict], base_name: Optional[str]
       ① 笔数占比 —— 看**交易去哪了**（分布迁移）
       ② R 贡献占比 —— 看**钱从哪来**（可加；均收不可加，不能用来加总）
     """
-    stats = {r["name"]: _family_stats(r.get("_trades_ref") or [])
-             for r in rows if r.get("_trades_ref")}
+    stats = {
+        r["name"]: _family_stats(r.get("_trades_ref") or [])
+        for r in rows
+        if r.get("_trades_ref")
+    }
     stats = {k: v for k, v in stats.items() if v}
-    if len(stats) < 2:                       # 单方案没有可比性，矩阵没意义
+    if len(stats) < 2:  # 单方案没有可比性，矩阵没意义
         return
-    fams = [f for f in _FAMILY_ORDER
-            if any(f in v for v in stats.values())]
+    fams = [f for f in _FAMILY_ORDER if any(f in v for v in stats.values())]
     cols = fams + ["scaled"]
-    order = ([base_name] if base_name in stats else []) + \
-            sorted(k for k in stats if k != base_name)
+    order = ([base_name] if base_name in stats else []) + sorted(
+        k for k in stats if k != base_name
+    )
 
     def _row_head(name: str) -> str:
         return "    " + f"{name:<20}"
 
-    print(f"\n  【出场结构对比】{group}"
-          f"（scaled 是**叠加标记**，与 bbi/末持重叠，不计入合计）")
+    print(
+        f"\n  【出场结构对比】{group}"
+        f"（scaled 是**叠加标记**，与 bbi/末持重叠，不计入合计）"
+    )
     print("\n  ① 笔数占比%（看**交易去哪了**）")
     print("    " + f"{'方案':<20}" + "".join(f"{c:>8}" for c in cols))
     for name in order:
         v = stats[name]
         tot = sum(d["n"] for f, d in v.items() if f != "scaled") or 1
-        cells = [(f"{v[c]['n'] / tot * 100:>7.1f}" if c in v else f"{'—':>8}")
-                 for c in cols]
+        cells = [
+            (f"{v[c]['n'] / tot * 100:>7.1f}" if c in v else f"{'—':>8}") for c in cols
+        ]
         print(_row_head(name) + "".join(cells))
 
     # ② 用**每笔 R 贡献**而不是「占总R 的百分比」：后者的分母是 total_R，
@@ -1124,8 +1381,13 @@ def _print_exit_structure(group: str, rows: list[dict], base_name: Optional[str]
     #    浮盈。只看「合计」会把一个已实现负期望的策略读成正期望。
     #    分母也要剔掉末持笔数，否则不是「已平仓交易的期望」。
     print("\n  ② 每笔 R 贡献（行合计 = 期望R；看**钱从哪来、在哪漏掉**）")
-    print("    " + f"{'方案':<20}" + "".join(f"{c:>8}" for c in cols)
-          + f"{'合计':>8}" + f"{'已实现':>9}")
+    print(
+        "    "
+        + f"{'方案':<20}"
+        + "".join(f"{c:>8}" for c in cols)
+        + f"{'合计':>8}"
+        + f"{'已实现':>9}"
+    )
     for name in order:
         v = stats[name]
         n_tot = sum(d["n"] for f, d in v.items() if f != "scaled") or 1
@@ -1143,20 +1405,32 @@ def _print_exit_structure(group: str, rows: list[dict], base_name: Optional[str]
                     realized += v[c]["sum_r"]
         n_closed = max(n_tot - n_open, 1)
         r_closed = realized / n_closed
-        flip = total > 0 >= r_closed          # 含未实现为正、已实现非正 ⇒ 必须点出来
-        print("    " + f"{name:<20}" + "".join(cells) + f"{total:>+8.3f}"
-              + f"{r_closed:>+9.3f}" + ("  ⚠️" if flip else ""))
+        flip = total > 0 >= r_closed  # 含未实现为正、已实现非正 ⇒ 必须点出来
+        print(
+            "    "
+            + f"{name:<20}"
+            + "".join(cells)
+            + f"{total:>+8.3f}"
+            + f"{r_closed:>+9.3f}"
+            + ("  ⚠️" if flip else "")
+        )
         if flip:
-            print(f"      ⚠️ **正期望全部来自未平仓浮盈**：末持 {n_open:.0f} 笔"
-                  f"（占 {n_open / n_tot:.1%}）贡献 {v.get('末持', {}).get('sum_r', 0):+.0f}R，"
-                  f"剔掉后已实现期望 {r_closed:+.3f}R/笔 ⇒ **没兑现的边际不是边际**")
-    print("    ⚠️ 「已实现」= 剔除 `末持`(open_end，期末仍持仓、按最后收盘价标记的未实现"
-          "盈亏)，")
+            print(
+                f"      ⚠️ **正期望全部来自未平仓浮盈**：末持 {n_open:.0f} 笔"
+                f"（占 {n_open / n_tot:.1%}）贡献 {v.get('末持', {}).get('sum_r', 0):+.0f}R，"
+                f"剔掉后已实现期望 {r_closed:+.3f}R/笔 ⇒ **没兑现的边际不是边际**"
+            )
+    print(
+        "    ⚠️ 「已实现」= 剔除 `末持`(open_end，期末仍持仓、按最后收盘价标记的未实现"
+        "盈亏)，"
+    )
     print("       分母也剔掉那些笔数 ⇒ 它才是「已平仓交易」的期望R。")
     print("    ⚠️ R 仅在 risk_frac 相同的方案之间可比（本组不同 stop_pct 差着分母）；")
     print("       跨档位只看表①的分布迁移。")
     print("    ⇒ 单看一个方案永远是「bbi_exit+scaled 均收最高」（那是它的定义）；")
-    print("       有判别力的是**行与行的差**：哪个机制把交易从 stop 桶搬走了、期望从哪补回来。")
+    print(
+        "       有判别力的是**行与行的差**：哪个机制把交易从 stop 桶搬走了、期望从哪补回来。"
+    )
 
 
 def _reason_stats(trades: list) -> dict[str, dict[str, Any]]:
@@ -1201,18 +1475,27 @@ def _print_reasons(rows: list[dict], base_name: Optional[str]) -> None:
         return
     tot_n = sum(d["n"] for d in st.values()) or 1
     tot_r = sum(d["sum_r"] for d in st.values())
-    print(f"\n  基准 {base_name} 的离场原因分布"
-          f"（⚠️ **这是结果分组，不是可选参数**）")
-    print(f"    {'原因':<20}{'笔数':>7}{'占比':>8}{'均收%':>9}{'R贡献':>10}{'占总R':>9}")
+    print(f"\n  基准 {base_name} 的离场原因分布（⚠️ **这是结果分组，不是可选参数**）")
+    print(
+        f"    {'原因':<20}{'笔数':>7}{'占比':>8}{'均收%':>9}{'R贡献':>10}{'占总R':>9}"
+    )
     for rs, d in sorted(st.items(), key=lambda kv: -kv[1]["sum_r"]):
         share_r = (d["sum_r"] / tot_r) if abs(tot_r) > 1e-9 else 0.0
-        print(f"    {rs:<20}{d['n']:>7}{d['n'] / tot_n * 100:>7.1f}%"
-              f"{d['avg_ret'] * 100:>+9.2f}{d['sum_r']:>+10.0f}{share_r * 100:>8.0f}%")
-    print("    ⚠️ `+scaled` 只在站上 BBI 且出两根中大阳线时才挂上，`bbi_exit` 也要求曾站上")
-    print("       BBI；而 stop/trail_stop 按定义就是跌下来的交易 ⇒ **按均收排序它必然第一，**")
+        print(
+            f"    {rs:<20}{d['n']:>7}{d['n'] / tot_n * 100:>7.1f}%"
+            f"{d['avg_ret'] * 100:>+9.2f}{d['sum_r']:>+10.0f}{share_r * 100:>8.0f}%"
+        )
+    print(
+        "    ⚠️ `+scaled` 只在站上 BBI 且出两根中大阳线时才挂上，`bbi_exit` 也要求曾站上"
+    )
+    print(
+        "       BBI；而 stop/trail_stop 按定义就是跌下来的交易 ⇒ **按均收排序它必然第一，**"
+    )
     print("       **那是定义不是发现**。离场原因由价格路径决定，选不了。")
     print("    ⇒ 该看的是：机制改动有没有把交易从 stop 桶**搬到** bbi 桶（分布迁移），")
-    print("       以及每桶**贡献的总 R**——均收高但只 20 笔的桶，影响可能不如均收平平的 900 笔。")
+    print(
+        "       以及每桶**贡献的总 R**——均收高但只 20 笔的桶，影响可能不如均收平平的 900 笔。"
+    )
 
 
 def _print_cross_group(groups: dict[str, list[dict]]) -> None:
@@ -1222,13 +1505,15 @@ def _print_cross_group(groups: dict[str, list[dict]]) -> None:
         if g == "C_portfolio":
             continue
         for r in rs:
-            if r.get("topn"):          # 全候选口径，逐笔指标不可与其它方案并列
+            if r.get("topn"):  # 全候选口径，逐笔指标不可与其它方案并列
                 continue
             rows.append((g, r))
     if not rows:
         return
-    hdr = (f"{'组/方案':<32}{'笔数':>7}{'胜率':>8}{'期望%':>9}{'盈亏比':>8}"
-           f"{'平衡胜率':>9}{'margin':>8}")
+    hdr = (
+        f"{'组/方案':<32}{'笔数':>7}{'胜率':>8}{'期望%':>9}{'盈亏比':>8}"
+        f"{'平衡胜率':>9}{'margin':>8}"
+    )
     print("\n" + "=" * len(hdr))
     print("跨组比较（**不同 stop_mode 之间 R 不可比，这里只看收益率**）")
     print("=" * len(hdr))
@@ -1237,12 +1522,16 @@ def _print_cross_group(groups: dict[str, list[dict]]) -> None:
     for g, r in sorted(rows, key=lambda x: -(x[1]["exp"] or -9)):
         be = _breakeven_wr(r["payoff"])
         margin = (r["win"] - be) if (be is not None and r["win"] is not None) else None
-        print(f"{g + '/' + r['name']:<32}{r['n'] or 0:>7}"
-              f"{(r['win'] or 0) * 100:>7.1f}%{(r['exp'] or 0) * 100:>+9.2f}"
-              f"{r['payoff'] or 0:>8.3f}"
-              f"{be * 100 if be else 0:>8.1f}%"
-              f"{margin * 100 if margin is not None else 0:>+7.1f}pp")
-    print("\n  margin = 实际胜率 − 盈亏平衡胜率。越薄越脆弱：成本上升或波动率下降就可能翻负。")
+        print(
+            f"{g + '/' + r['name']:<32}{r['n'] or 0:>7}"
+            f"{(r['win'] or 0) * 100:>7.1f}%{(r['exp'] or 0) * 100:>+9.2f}"
+            f"{r['payoff'] or 0:>8.3f}"
+            f"{be * 100 if be else 0:>8.1f}%"
+            f"{margin * 100 if margin is not None else 0:>+7.1f}pp"
+        )
+    print(
+        "\n  margin = 实际胜率 − 盈亏平衡胜率。越薄越脆弱：成本上升或波动率下降就可能翻负。"
+    )
 
 
 def _ret_over_dd(pf: dict) -> Optional[float]:
@@ -1267,33 +1556,46 @@ def _ret_over_dd(pf: dict) -> Optional[float]:
 def _print_portfolio(rows: list[dict]) -> None:
     if not rows:
         return
-    hdr = (f"{'方案':<24}{'总收益':>9}{'CAGR':>8}{'最大回撤':>9}{'收益/回撤':>10}"
-           f"{'成交':>7}{'被限':>7}{'执行率':>8}")
+    hdr = (
+        f"{'方案':<24}{'总收益':>9}{'CAGR':>8}{'最大回撤':>9}{'收益/回撤':>10}"
+        f"{'成交':>7}{'被限':>7}{'执行率':>8}"
+    )
     print("\n" + "=" * len(hdr))
     print("【C_portfolio】组合级（R 完全不适用；逐笔正期望 ≠ 组合能赚）")
     print("=" * len(hdr))
     print(hdr)
     print("-" * len(hdr))
     # 按 收益/回撤 降序（None 垫底）——不用总收益，理由见 _ret_over_dd
-    for r in sorted(rows, key=lambda x: (_ret_over_dd(x["pf"] or {}) is not None,
-                                         _ret_over_dd(x["pf"] or {}) or 0.0),
-                    reverse=True):
+    for r in sorted(
+        rows,
+        key=lambda x: (
+            _ret_over_dd(x["pf"] or {}) is not None,
+            _ret_over_dd(x["pf"] or {}) or 0.0,
+        ),
+        reverse=True,
+    ):
         d = r["pf"] or {}
         taken = d.get("n_taken") or d.get("filled") or 0
         skip = d.get("n_skipped") or d.get("skipped") or 0
         er = taken / (taken + skip) if (taken + skip) else 0
         rdd = _ret_over_dd(d)
-        print(f"{r['name']:<24}{(d.get('total_return') or 0) * 100:>8.1f}%"
-              f"{(d.get('cagr') or 0) * 100:>7.1f}%"
-              f"{(d.get('max_drawdown') or 0) * 100:>8.1f}%"
-              f"{(f'{rdd:+.2f}' if rdd is not None else '—'):>10}"
-              f"{taken:>7}{skip:>7}{er * 100:>7.1f}%")
+        print(
+            f"{r['name']:<24}{(d.get('total_return') or 0) * 100:>8.1f}%"
+            f"{(d.get('cagr') or 0) * 100:>7.1f}%"
+            f"{(d.get('max_drawdown') or 0) * 100:>8.1f}%"
+            f"{(f'{rdd:+.2f}' if rdd is not None else '—'):>10}"
+            f"{taken:>7}{skip:>7}{er * 100:>7.1f}%"
+        )
     print("\n  ⚠️ 排序用**收益/回撤**而非总收益：敞口翻倍会让收益与回撤同向放大，")
     print("     总收益榜首往往只是杠杆最大的那个。")
     print("  ⚠️ 受控实验结论：决定亏损幅度的是**总敞口**（max_concurrent × max_pos），")
-    print("     不是持仓数量——B1 信号高度相关（普跌时全市场同时触发），分散持仓数无效。")
+    print(
+        "     不是持仓数量——B1 信号高度相关（普跌时全市场同时触发），分散持仓数无效。"
+    )
     print("     执行率低时「先到先得」等于抽签命中大赢家，用 --top-n 做横截面择优。")
-    print("  ⚠️ 回撤是**已实现权益**口径（不含持仓浮亏），真实回撤更大 ⇒ 收益/回撤为乐观上界。")
+    print(
+        "  ⚠️ 回撤是**已实现权益**口径（不含持仓浮亏），真实回撤更大 ⇒ 收益/回撤为乐观上界。"
+    )
 
 
 def _warn_missing(groups: dict[str, list[dict]]) -> None:
@@ -1311,30 +1613,44 @@ def _warn_missing(groups: dict[str, list[dict]]) -> None:
                 miss.append(f"{g}/{n}")
     if not miss:
         return
-    print(f"\n⚠️ **缺 {len(miss)} 个方案的结果文件**（跑失败、被中断，或本轮 --only 没覆盖）：")
+    print(
+        f"\n⚠️ **缺 {len(miss)} 个方案的结果文件**（跑失败、被中断，或本轮 --only 没覆盖）："
+    )
     for i in range(0, len(miss), 3):
-        print("     " + "、".join(miss[i:i + 3]))
-    print("     判定只在**已有**方案之间成立；补跑：--only <方案名>（已完成的会 [SKIP]）")
+        print("     " + "、".join(miss[i : i + 3]))
+    print(
+        "     判定只在**已有**方案之间成立；补跑：--only <方案名>（已完成的会 [SKIP]）"
+    )
 
 
-def report(cross: bool, sample: Optional[int] = None,
-           data_source: str = "tdx", window: Optional[tuple[str, str]] = None,
-           pin_universe: bool = False) -> None:
+def report(
+    cross: bool,
+    sample: Optional[int] = None,
+    data_source: str = "tdx",
+    window: Optional[tuple[str, str]] = None,
+    pin_universe: bool = False,
+) -> None:
     groups = _collect(cross, sample, data_source, window, pin_universe)
     if not any(groups.values()):
         print("没有结果文件，先跑扫描")
         return
     n_sample = next((r["sample"] for rs in groups.values() for r in rs), None)
     print("\n" + "#" * 74)
-    print(f"# M2 机制扫描  样本 {n_sample} 只  数据源 {data_source}"
-          f"{'（含退市股/已前复权）' if data_source != 'tdx' else '（本地 vipdoc，仅当前挂牌）'}"
-          f"{'  区间 2022-2024（跨窗复核）' if cross else ''}"
-          f"{f'  窗口 {window[0]}~{window[1]}(已钉死)' if window else ''}"
-          f"{'  宇宙已钉死' if pin_universe else ''}")
+    print(
+        f"# M2 机制扫描  样本 {n_sample} 只  数据源 {data_source}"
+        f"{'（含退市股/已前复权）' if data_source != 'tdx' else '（本地 vipdoc，仅当前挂牌）'}"
+        f"{'  区间 2022-2024（跨窗复核）' if cross else ''}"
+        f"{f'  窗口 {window[0]}~{window[1]}(已钉死)' if window else ''}"
+        f"{'  宇宙已钉死' if pin_universe else ''}"
+    )
     if not (window and pin_universe) and not cross:
         print("# ⚠️ 未同时钉死窗口与宇宙 ⇒ **本批不可复现**：vipdoc 目录与 .day 都会随")
-        print("#    通达信下载变动，长时间扫描里各方案的宇宙/K线窗口不同（实测 5535→5536、")
-        print("#    同参数笔数 1106/1092/1087）。可复现跑法：--window S E --pin-universe")
+        print(
+            "#    通达信下载变动，长时间扫描里各方案的宇宙/K线窗口不同（实测 5535→5536、"
+        )
+        print(
+            "#    同参数笔数 1106/1092/1087）。可复现跑法：--window S E --pin-universe"
+        )
     print("#" * 74)
     for g in ("A_stop_low", "B_stop_pct"):
         if groups.get(g):
@@ -1349,8 +1665,9 @@ def report(cross: bool, sample: Optional[int] = None,
         print("\n⚠️ 通过的组仍须跨窗复核：--cross-window（2022-2024）。")
 
 
-def _prepare_universe(sample: int, cross: bool, data_source: str,
-                      window: Optional[tuple[str, str]]) -> Optional[str]:
+def _prepare_universe(
+    sample: int, cross: bool, data_source: str, window: Optional[tuple[str, str]]
+) -> Optional[str]:
     """先跑一次 `--dump-codes` 落一份代码表，供全部方案共用 ⇒ **钉死宇宙**。
 
     为什么不在本脚本里直接抽样：universe 解析要 import `local_tdx_data`（依赖 TDX_ROOT）
@@ -1370,75 +1687,126 @@ def _prepare_universe(sample: int, cross: bool, data_source: str,
     if data_source == "tdx":
         probe += ["--universe-local", "--universe-sample", str(sample)]
     else:
-        probe += ["--data-source", data_source, "--universe-sdata",
-                  "--universe-sample", str(sample)]
+        probe += [
+            "--data-source",
+            data_source,
+            "--universe-sdata",
+            "--universe-sample",
+            str(sample),
+        ]
     probe += ["--dump-codes", str(path)]
     print(f"[PREP] 落一份宇宙到 {path.name} 供全部方案共用")
     r = subprocess.run([sys.executable, str(SCRIPT)] + probe, cwd=str(BASE))
     if r.returncode != 0 or not path.is_file():
-        print(f"⚠️ 宇宙落盘失败（exit={r.returncode}）⇒ **本轮不钉宇宙**，"
-              f"各方案仍会各自抽样（可能漂移）")
+        print(
+            f"⚠️ 宇宙落盘失败（exit={r.returncode}）⇒ **本轮不钉宇宙**，"
+            f"各方案仍会各自抽样（可能漂移）"
+        )
         return None
     return str(path)
 
 
 def main() -> int:
     if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")   # GBK 终端打不了 ⚠️ 等符号
+        sys.stdout.reconfigure(
+            encoding="utf-8", errors="replace"
+        )  # GBK 终端打不了 ⚠️ 等符号
     ap = argparse.ArgumentParser(description="M2 机制类改进扫描（分组）")
     # default=None 而非 1000：区分「用户显式指定了批次」与「没指定」。
     # 前者报表就看那一批；后者实跑看刚跑的那批、--report-only 自动取最大批。
-    ap.add_argument("--sample", type=int, default=None,
-                    help="样本股票数（默认 1000）。--report-only 时用于指定汇总哪一批")
-    ap.add_argument("--only", default="",
-                    help="只跑匹配的组或方案（子串匹配组名/方案名）")
+    ap.add_argument(
+        "--sample",
+        type=int,
+        default=None,
+        help="样本股票数（默认 1000）。--report-only 时用于指定汇总哪一批",
+    )
+    ap.add_argument(
+        "--only", default="", help="只跑匹配的组或方案（子串匹配组名/方案名）"
+    )
     ap.add_argument("--cross-window", action="store_true")
     ap.add_argument("--report-only", action="store_true")
     ap.add_argument("--force", action="store_true")
-    ap.add_argument("--jobs", "-j", type=int, default=1,
-                    help="并行进程数（各方案相互独立；默认 1=串行）。见模块开头「为什么慢」。"
-                         "⚠️ 内存乘 N，会按可用内存自动收敛")
-    ap.add_argument("--data-source", choices=["tdx", "qlib", "csv"], default="tdx",
-                    help="tdx(默认)=本地通达信 vipdoc,只含当前挂牌股(有幸存者偏差)、"
-                         "要逐票算前复权; qlib/csv=S_DATA bundle,含退市股且已前复权"
-                         "(去偏且更快,但 2020-09~2021-07 有缺口、数据到 2026-02)。"
-                         "⚠️ 换数据源=换宇宙,结果与之前几轮不可比,已进文件名指纹")
-    ap.add_argument("--window", nargs=2, metavar=("START", "END"), default=None,
-                    help="钉死 K 线窗口(YYYY-MM-DD YYYY-MM-DD)。⚠️ **必须两端都给**："
-                         "只给 --end 钉不住(get_ohlcv_table 先 tail(count) 再过滤 ⇒ "
-                         "新 bar 到来时窗口缩水且滑动)。本项会自动放大 --count")
-    ap.add_argument("--pin-universe", action="store_true",
-                    help="先落一份代码表供全部方案共用 ⇒ 钉死宇宙。"
-                         "vipdoc 目录会随下载变动(实测扫描中 5535→5536)，"
-                         "seed 固定也没用——**被抽的池子变了**")
+    ap.add_argument(
+        "--jobs",
+        "-j",
+        type=int,
+        default=1,
+        help="并行进程数（各方案相互独立；默认 1=串行）。见模块开头「为什么慢」。"
+        "⚠️ 内存乘 N，会按可用内存自动收敛",
+    )
+    ap.add_argument(
+        "--data-source",
+        choices=["tdx", "qlib", "csv"],
+        default="tdx",
+        help="tdx(默认)=本地通达信 vipdoc,只含当前挂牌股(有幸存者偏差)、"
+        "要逐票算前复权; qlib/csv=S_DATA bundle,含退市股且已前复权"
+        "(去偏且更快,但 2020-09~2021-07 有缺口、数据到 2026-02)。"
+        "⚠️ 换数据源=换宇宙,结果与之前几轮不可比,已进文件名指纹",
+    )
+    ap.add_argument(
+        "--window",
+        nargs=2,
+        metavar=("START", "END"),
+        default=None,
+        help="钉死 K 线窗口(YYYY-MM-DD YYYY-MM-DD)。⚠️ **必须两端都给**："
+        "只给 --end 钉不住(get_ohlcv_table 先 tail(count) 再过滤 ⇒ "
+        "新 bar 到来时窗口缩水且滑动)。本项会自动放大 --count",
+    )
+    ap.add_argument(
+        "--pin-universe",
+        action="store_true",
+        help="先落一份代码表供全部方案共用 ⇒ 钉死宇宙。"
+        "vipdoc 目录会随下载变动(实测扫描中 5535→5536)，"
+        "seed 固定也没用——**被抽的池子变了**",
+    )
     a = ap.parse_args()
     sample = a.sample if a.sample else DEFAULT_SAMPLE
-    window = tuple(a.window) if a.window else None            # type: ignore[assignment]
+    window = tuple(a.window) if a.window else None  # type: ignore[assignment]
     if window and a.cross_window:
         print("--window 与 --cross-window 冲突（后者已自带 2022-2024 窗口）")
         return 2
     codes_file = None
 
     if not a.report_only:
-        todo = [(g, n, e) for g, meta in GROUPS.items()
-                for n, e in meta["runs"].items()
-                if not a.only or a.only in g or a.only in n]
+        todo = [
+            (g, n, e)
+            for g, meta in GROUPS.items()
+            for n, e in meta["runs"].items()
+            if not a.only or a.only in g or a.only in n
+        ]
         if not todo:
             print(f"--only {a.only} 没匹配到任何组/方案")
             return 2
         if a.pin_universe:
-            codes_file = _prepare_universe(sample, a.cross_window, a.data_source, window)
-        print(f"将跑 {len(todo)} 个方案，样本 {sample} 只，数据源 {a.data_source}"
-              f"{'，区间 2022-2024' if a.cross_window else ''}"
-              f"{f'，窗口 {window[0]}~{window[1]}' if window else ''}"
-              f"{'，宇宙已钉死' if codes_file else ''}"
-              f"{f'，并行 {a.jobs} 进程' if a.jobs > 1 else ''}")
-        _run_all(todo, sample, a.cross_window, a.force, max(1, a.jobs), a.data_source,
-                 window, codes_file)
+            codes_file = _prepare_universe(
+                sample, a.cross_window, a.data_source, window
+            )
+        print(
+            f"将跑 {len(todo)} 个方案，样本 {sample} 只，数据源 {a.data_source}"
+            f"{'，区间 2022-2024' if a.cross_window else ''}"
+            f"{f'，窗口 {window[0]}~{window[1]}' if window else ''}"
+            f"{'，宇宙已钉死' if codes_file else ''}"
+            f"{f'，并行 {a.jobs} 进程' if a.jobs > 1 else ''}"
+        )
+        _run_all(
+            todo,
+            sample,
+            a.cross_window,
+            a.force,
+            max(1, a.jobs),
+            a.data_source,
+            window,
+            codes_file,
+        )
     # ⚠️ 实跑时必须传**刚跑的那批**。原先这里传 None ⇒ 汇总「最大样本量」那批：
     #    跑 --sample 300 试跑，报表却显示 s1000 的旧结果，看起来像新结果。
-    report(a.cross_window, sample if not a.report_only else a.sample, a.data_source,
-           window, bool(codes_file) or (a.report_only and a.pin_universe))
+    report(
+        a.cross_window,
+        sample if not a.report_only else a.sample,
+        a.data_source,
+        window,
+        bool(codes_file) or (a.report_only and a.pin_universe),
+    )
     return 0
 
 

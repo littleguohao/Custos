@@ -9,6 +9,7 @@
 ① 契约里未标注的字段，必须在代码里真实出现（否则是空头承诺）；
 ② 已知无生产者的实体/字段，必须显式标 🔴（否则下游会以为可以依赖）。
 """
+
 from __future__ import annotations
 
 import json
@@ -28,14 +29,15 @@ DELETED_ENTITIES = {"SkillEvidence", "BuyPlan"}
 
 
 def _all_code() -> str:
-    return "\n".join(p.read_text(encoding="utf-8", errors="ignore")
-                     for p in (ROOT / "src").rglob("*.py"))
+    return "\n".join(
+        p.read_text(encoding="utf-8", errors="ignore")
+        for p in (ROOT / "src").rglob("*.py")
+    )
 
 
 def _entities() -> dict[str, str]:
     t = DFC.read_text(encoding="utf-8")
-    return {b.split("\n")[0].strip(): b
-            for b in re.split(r"^### ", t, flags=re.M)[1:]}
+    return {b.split("\n")[0].strip(): b for b in re.split(r"^### ", t, flags=re.M)[1:]}
 
 
 def _fields(block: str) -> set[str]:
@@ -57,7 +59,8 @@ class TestFieldsExistInCode:
         missing = sorted(f for f in _fields(_entities()[ent]) if f not in code)
         assert not missing, (
             f"{ent} 的这些字段在 src/ 里零命中 —— 要么改契约（以代码为准），"
-            f"要么显式标 🔴 未实现：{missing}")
+            f"要么显式标 🔴 未实现：{missing}"
+        )
 
     @pytest.mark.parametrize("ent", sorted(DELETED_ENTITIES))
     def test_deleted_entities_are_gone(self, ent):
@@ -71,8 +74,9 @@ class TestFieldsExistInCode:
         """
         assert ent not in _entities(), f"{ent} 无生产者，不该作为实体存在"
         # 但删除记录要留着，否则下次有人会重新加回来
-        assert ent in DFC.read_text(encoding="utf-8"), \
+        assert ent in DFC.read_text(encoding="utf-8"), (
             f"{ent} 的删除记录应保留在实现状态表里"
+        )
 
 
 class TestUnimplementedMechanismsFlagged:
@@ -102,7 +106,8 @@ class TestUnimplementedMechanismsFlagged:
         code = _all_code()
         for kw in ("cooldown_list", "blacklist", "banned"):
             assert kw not in code, (
-                f"代码里出现了 {kw} —— 名单式拦截若已实现，请更新契约与本测试")
+                f"代码里出现了 {kw} —— 名单式拦截若已实现，请更新契约与本测试"
+            )
         s = DFC.read_text(encoding="utf-8")
         for l in s.splitlines():
             if l.strip().startswith('"cooldown_list"'):
@@ -119,21 +124,25 @@ class TestUnimplementedMechanismsFlagged:
         from custos.pipeline.close_review import loss_streak as ls
 
         assert callable(ls.loss_streaks) and callable(ls.format_lines)
-        src = (ROOT / "src" / "custos" / "pipeline" / "close_review" / "loss_streak.py").read_text(encoding="utf-8")
+        src = (
+            ROOT / "src" / "custos" / "pipeline" / "close_review" / "loss_streak.py"
+        ).read_text(encoding="utf-8")
         for bad in ("return False", "raise SystemExit", "blocked", "forbid"):
             assert bad not in src, f"loss_streak 里出现 {bad!r} —— 它不该有拦截语义"
         # 两处复盘都要接入（少一处就等于「每日/每周都统计」没做到）
-        for rel in ("pipeline/close_review/final_close_review.py", "pipeline/close_review/weekly_review.py"):
+        for rel in (
+            "pipeline/close_review/final_close_review.py",
+            "pipeline/close_review/weekly_review.py",
+        ):
             t = (ROOT / "src" / "custos" / rel).read_text(encoding="utf-8")
             assert "loss_streak" in t, f"{rel} 未接入连亏检查"
-
 
     def test_monthly_review_marked_unimplemented(self):
         code = _all_code()
         assert "month_review" not in code
         s = MW.read_text(encoding="utf-8")
         k = s.index("## 七、正式报告五：月度复盘")
-        assert "🔴" in s[k:k + 300] and "未实现" in s[k:k + 300]
+        assert "🔴" in s[k : k + 300] and "未实现" in s[k : k + 300]
 
 
 class TestWorkflowMatchesReality:
@@ -146,7 +155,9 @@ class TestWorkflowMatchesReality:
         assert not re.search(r"交易日 08:30；", s), "08:30 与实际调度不符，已更正"
 
     def test_every_mentioned_runner_exists(self):
-        s = MW.read_text(encoding="utf-8") + (CONTRACTS / "SCREENING_WORKFLOW.md").read_text(encoding="utf-8")
+        s = MW.read_text(encoding="utf-8") + (
+            CONTRACTS / "SCREENING_WORKFLOW.md"
+        ).read_text(encoding="utf-8")
         for m in sorted({x for x in re.findall(r"run_\d{4}\.py", s)}):
             assert list((ROOT / "src").rglob(m)), f"文档提到 {m} 但文件不存在"
 
@@ -159,24 +170,32 @@ class TestWorkflowMatchesReality:
         docstring 里的原文件名、markdown 链接的显示文字）。
         **凡是查文档结构，就用标题/AST 之类的结构化锚点，别用全文字符串。**
         """
-        heads = [l for l in MW.read_text(encoding="utf-8").splitlines()
-                 if l.startswith("## ")]
-        assert not any("当前需要调整的旧设计" in h for h in heads), \
+        heads = [
+            l
+            for l in MW.read_text(encoding="utf-8").splitlines()
+            if l.startswith("## ")
+        ]
+        assert not any("当前需要调整的旧设计" in h for h in heads), (
             "这一节原是 8 条待办，应移入 TODO.md"
-        assert any("已移出" in h or "已完成" in h for h in heads), \
+        )
+        assert any("已移出" in h or "已完成" in h for h in heads), (
             "该节标题应说明待办已移出"
+        )
 
 
 class TestConfigsHavePathsConstants:
     """代码直接读的 JSON 必须走 paths.py 常量，不许模块自己拼路径。"""
 
-    @pytest.mark.parametrize("name", [
-        "CN_TRADING_CALENDAR.json",
-        "SCREEN_FORMULA_REGISTRY.json",
-        "RSS_SOURCE_REGISTRY.json",
-        "RSS_FILTER_CONFIG.json",
-        "RSSHUB_PRIVATE_ROUTE_CANDIDATES.json",
-    ])
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "CN_TRADING_CALENDAR.json",
+            "SCREEN_FORMULA_REGISTRY.json",
+            "RSS_SOURCE_REGISTRY.json",
+            "RSS_FILTER_CONFIG.json",
+            "RSSHUB_PRIVATE_ROUTE_CANDIDATES.json",
+        ],
+    )
     def test_has_constant(self, name):
         pv = (ROOT / "src" / "custos" / "core" / "paths.py").read_text(encoding="utf-8")
         assert name in pv, f"{name} 未在 paths.py 定义常量"
@@ -188,8 +207,9 @@ class TestIndex:
         for sec in ("代码直接读的配置", "数据契约", "工作流文档"):
             assert sec in s, f"索引缺分类：{sec}"
 
-    @pytest.mark.parametrize("f", sorted(p.name for p in CONTRACTS.iterdir()
-                                        if p.name != "README.md"))
+    @pytest.mark.parametrize(
+        "f", sorted(p.name for p in CONTRACTS.iterdir() if p.name != "README.md")
+    )
     def test_every_file_indexed(self, f):
         """防孤岛：不在索引里的契约没人知道谁在用它。"""
         assert f in INDEX.read_text(encoding="utf-8"), f"{f} 未列入 contracts/README.md"

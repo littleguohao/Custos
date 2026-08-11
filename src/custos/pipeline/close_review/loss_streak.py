@@ -26,6 +26,7 @@ owner 2026-08-10 定：**连亏冷却放在复盘环节，每日/每周都统计
 - **连亏 = 最近一段连续的亏损平仓单**，被任何一次盈利打断即归零。
   这是「冷却」的原意（连续踩同一只票），不是「历史累计亏损次数」。
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -36,7 +37,9 @@ from typing import Any
 LOSS_STREAK_MIN = 2
 
 
-def loss_streaks(closings: list[dict], *, min_streak: int = LOSS_STREAK_MIN) -> dict[str, Any]:
+def loss_streaks(
+    closings: list[dict], *, min_streak: int = LOSS_STREAK_MIN
+) -> dict[str, Any]:
     """从平仓单列表算每只票的**当前**连亏段。
 
     入参是 `weekly_review.fifo_pair()` 的输出（**全台账**，不是某一周的切片
@@ -82,7 +85,7 @@ def loss_streaks(closings: list[dict], *, min_streak: int = LOSS_STREAK_MIN) -> 
             if float(r["net_pnl"]) < 0:
                 streak.append(r)
             else:
-                streak = []            # 被一次盈利打断即归零 —— 「连续」的原意
+                streak = []  # 被一次盈利打断即归零 —— 「连续」的原意
         if not streak:
             continue
         streaks[code] = {
@@ -93,10 +96,16 @@ def loss_streaks(closings: list[dict], *, min_streak: int = LOSS_STREAK_MIN) -> 
             "sell_dates": [str(r.get("sell_date") or "") for r in streak],
         }
 
-    flagged = sorted([c for c, v in streaks.items() if v["count"] >= min_streak],
-                     key=lambda c: (-streaks[c]["count"], streaks[c]["last_sell_date"]))
-    return {"streaks": streaks, "flagged": flagged,
-            "excluded": excluded, "min_streak": min_streak}
+    flagged = sorted(
+        [c for c, v in streaks.items() if v["count"] >= min_streak],
+        key=lambda c: (-streaks[c]["count"], streaks[c]["last_sell_date"]),
+    )
+    return {
+        "streaks": streaks,
+        "flagged": flagged,
+        "excluded": excluded,
+        "min_streak": min_streak,
+    }
 
 
 def format_lines(result: dict, *, title: str = "连亏检查") -> list[str]:
@@ -107,8 +116,11 @@ def format_lines(result: dict, *, title: str = "连亏检查") -> list[str]:
     """
     lines = [f"### {title}", ""]
     if result.get("available") is False:
-        lines += [f"- unavailable：{result.get('reason') or '未说明'}"
-                  f"（**不等于「无连亏」**）", ""]
+        lines += [
+            f"- unavailable：{result.get('reason') or '未说明'}"
+            f"（**不等于「无连亏」**）",
+            "",
+        ]
         return lines
     ex = result.get("excluded") or {}
     n_ex = sum(int(v or 0) for v in ex.values())
@@ -120,11 +132,15 @@ def format_lines(result: dict, *, title: str = "连亏检查") -> list[str]:
         lines.append("|---|---|---|---|---|")
         for code in flagged:
             v = result["streaks"][code]
-            lines.append(f"| {code} | {v['name']} | {v['count']} | "
-                         f"{v['last_sell_date']} | {v['total_net_pnl']} |")
+            lines.append(
+                f"| {code} | {v['name']} | {v['count']} | "
+                f"{v['last_sell_date']} | {v['total_net_pnl']} |"
+            )
     if n_ex:
-        lines.append(f"- ⚠️ 有 {n_ex} 笔平仓单未计入"
-                     f"（部分配平 {ex.get('partial', 0)} / 无成本基准 {ex.get('none', 0)} / "
-                     f"缺净盈亏 {ex.get('no_net_pnl', 0)}）⇒ 以上基于**残缺台账**。")
+        lines.append(
+            f"- ⚠️ 有 {n_ex} 笔平仓单未计入"
+            f"（部分配平 {ex.get('partial', 0)} / 无成本基准 {ex.get('none', 0)} / "
+            f"缺净盈亏 {ex.get('no_net_pnl', 0)}）⇒ 以上基于**残缺台账**。"
+        )
     lines.append("")
     return lines

@@ -21,6 +21,7 @@
 - 输入清单：项目相对路径 + 内容 sha1 前 8 位；文件缺失留 `缺失` 标记
   （缺失本身是事实，报告不该因此不产出）。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -70,7 +71,9 @@ def build(date: str, session: str, inputs: Iterable[Path]) -> dict:
     entries = [_input_entry(Path(p)) for p in inputs]
     version = strategy_version()
     fingerprint = "|".join(f"{e['path']}:{e['sha1'] or '-'}" for e in entries)
-    short = hashlib.sha1(f"{date}|{session}|{version}|{fingerprint}".encode()).hexdigest()[:8]
+    short = hashlib.sha1(
+        f"{date}|{session}|{version}|{fingerprint}".encode()
+    ).hexdigest()[:8]
     mtimes = [e["mtime"] for e in entries if e["mtime"]]
     return {
         "report_id": f"{date}_{session}_{short}",
@@ -82,7 +85,9 @@ def build(date: str, session: str, inputs: Iterable[Path]) -> dict:
 
 def render_md(audit: dict) -> list[str]:
     """MD 报告头部的两行引用块（紧跟「生成时间」一行）。"""
-    items = "；".join(f"`{e['path']}`（{e['sha1'] or '缺失'}）" for e in audit["inputs"])
+    items = "；".join(
+        f"`{e['path']}`（{e['sha1'] or '缺失'}）" for e in audit["inputs"]
+    )
     return [
         f"> 可审计：report_id `{audit['report_id']}`｜策略版本 {audit['strategy_version']}"
         f"｜数据截止 {audit['data_as_of'] or '未知'}",

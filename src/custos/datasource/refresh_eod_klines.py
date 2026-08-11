@@ -9,6 +9,7 @@ to WARN + exit 0 (never aborts the pipeline).
 stdout prints a single JSON summary line:
   {"refreshed": bool, "verified": bool, "latest_date": str|None, ...}
 """
+
 from __future__ import annotations
 
 import argparse
@@ -55,7 +56,12 @@ def load_holdings_codes(positions_path: Path = POSITIONS_PATH) -> list[str]:
 
 def build_batches(holdings_codes: list[str]) -> list[dict]:
     """分批：批次1 = 指数 + 880 系列；批次2 = 当前持仓（无持仓则省略）。"""
-    batches = [{"name": "indices+880", "stock_list": list(INDEX_CODES) + list(BREADTH_880_CODES)}]
+    batches = [
+        {
+            "name": "indices+880",
+            "stock_list": list(INDEX_CODES) + list(BREADTH_880_CODES),
+        }
+    ]
     if holdings_codes:
         batches.append({"name": "holdings", "stock_list": list(holdings_codes)})
     return batches
@@ -83,17 +89,21 @@ def refresh_all(target_date: str, holdings_codes: list[str], call_fn=None) -> di
     t0 = time.time()
     for batch in batches:
         b_t0 = time.time()
-        r = call_fn("refresh_kline", {"stock_list": batch["stock_list"], "period": "1d"})
+        r = call_fn(
+            "refresh_kline", {"stock_list": batch["stock_list"], "period": "1d"}
+        )
         b_dur = round(time.time() - b_t0, 2)
         ok = bool(r.get("ok"))
         all_ok = all_ok and ok
-        batch_results.append({
-            "name": batch["name"],
-            "count": len(batch["stock_list"]),
-            "ok": ok,
-            "duration_sec": b_dur,
-            "error": r.get("error"),
-        })
+        batch_results.append(
+            {
+                "name": batch["name"],
+                "count": len(batch["stock_list"]),
+                "ok": ok,
+                "duration_sec": b_dur,
+                "error": r.get("error"),
+            }
+        )
     duration = round(time.time() - t0, 2)
 
     latest_date = verify_latest_date() if all_ok else None
@@ -119,13 +129,19 @@ def main(argv=None) -> int:
     summary = refresh_all(args.date, holdings)
 
     if not summary["refreshed"]:
-        print(f"[WARN] refresh_eod_klines 未全部成功（best-effort，不中断）: "
-              f"{[b['name'] for b in summary['batches'] if not b['ok']]}")
+        print(
+            f"[WARN] refresh_eod_klines 未全部成功（best-effort，不中断）: "
+            f"{[b['name'] for b in summary['batches'] if not b['ok']]}"
+        )
     elif not summary["verified"]:
-        print(f"[WARN] refresh 成功但 vipdoc 最新日期={summary['latest_date']} != {args.date}")
+        print(
+            f"[WARN] refresh 成功但 vipdoc 最新日期={summary['latest_date']} != {args.date}"
+        )
     else:
-        print(f"[OK] EOD K线已刷新并验证至 {summary['latest_date']} "
-              f"(耗时 {summary['duration_sec']}s)")
+        print(
+            f"[OK] EOD K线已刷新并验证至 {summary['latest_date']} "
+            f"(耗时 {summary['duration_sec']}s)"
+        )
     print(json.dumps(summary, ensure_ascii=False))
     return 0  # best-effort：永不因本阶段失败中断管线
 

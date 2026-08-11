@@ -15,6 +15,7 @@ the intraday field is annotated as pending intraday/post-close flows.
 Usage:
 python market_timing_collector.py --date 2026-07-09 --amv 1.2
 """
+
 from __future__ import annotations
 
 import argparse
@@ -41,9 +42,9 @@ INDICES = {
 }
 
 # vipdoc 880-series market-wide statistics (same codes as refresh_market_indices.py)
-BREADTH_CODE = "880005.SH"    # close=上涨家数
+BREADTH_CODE = "880005.SH"  # close=上涨家数
 SENTIMENT_CODE = "880006.SH"  # close=涨停数, high=盘中曾涨停数, low=跌停数
-TURNOVER_CODE = "880001.SH"   # amount=全市场成交额(元)
+TURNOVER_CODE = "880001.SH"  # amount=全市场成交额(元)
 # 跌家数口径见 breadth_basis：原先这里有个 TOTAL_STOCKS_APPROX = 5530 硬编码近似总数，
 # 用 `总数 - 涨家数` 推算跌家数，把平盘/停牌计入下跌，使 up_down_ratio 系统性偏低。
 
@@ -69,22 +70,26 @@ def read_day(prefix: str, code: str) -> list[dict]:
 
     prefix is kept for backward compatibility with old callers.
     """
-    tdx_code = {"sh": f"{code}.SH", "sz": f"{code}.SZ", "bj": f"{code}.BJ"}.get(prefix, code)
+    tdx_code = {"sh": f"{code}.SH", "sz": f"{code}.SZ", "bj": f"{code}.BJ"}.get(
+        prefix, code
+    )
     df = ltd.get_ohlcv_table(tdx_code, count=260, prefer="vipdoc")
     if df.empty:
         return []
     rows = []
     for _, r in df.iterrows():
         dt = r.get("date")
-        rows.append({
-            "date": dt.strftime("%Y%m%d") if hasattr(dt, "strftime") else str(dt),
-            "open": to_float(r.get("open")),
-            "high": to_float(r.get("high")),
-            "low": to_float(r.get("low")),
-            "close": to_float(r.get("close")),
-            "amount": to_float(r.get("amount")),
-            "volume": to_float(r.get("volume")),
-        })
+        rows.append(
+            {
+                "date": dt.strftime("%Y%m%d") if hasattr(dt, "strftime") else str(dt),
+                "open": to_float(r.get("open")),
+                "high": to_float(r.get("high")),
+                "low": to_float(r.get("low")),
+                "close": to_float(r.get("close")),
+                "amount": to_float(r.get("amount")),
+                "volume": to_float(r.get("volume")),
+            }
+        )
     return rows
 
 
@@ -97,7 +102,7 @@ def trend(rows: list[dict]) -> dict:
     latest_close = closes[-1]
 
     def close_n(n):
-        return closes[-1-n] if len(closes) > n else None
+        return closes[-1 - n] if len(closes) > n else None
 
     ma25 = sum(closes[-25:]) / 25 if len(closes) >= 25 else None
     ma60 = sum(closes[-60:]) / 60 if len(closes) >= 60 else None
@@ -146,6 +151,7 @@ def _get_mkt_reader():
     global _mkt_reader
     if _mkt_reader is None:
         from mootdx.reader import Reader
+
         _mkt_reader = Reader.factory(market="std", tdxdir=str(TDX_ROOT))
     return _mkt_reader
 
@@ -157,13 +163,17 @@ def _vipdoc_rows(code: str, count: int = 5) -> list[dict]:
         return []
     rows = []
     for idx, r in df.tail(count).iterrows():
-        rows.append({
-            "date": idx.strftime("%Y-%m-%d") if hasattr(idx, "strftime") else str(idx)[:10],
-            "high": to_float(r.get("high")),
-            "low": to_float(r.get("low")),
-            "close": to_float(r.get("close")),
-            "amount": to_float(r.get("amount")),
-        })
+        rows.append(
+            {
+                "date": idx.strftime("%Y-%m-%d")
+                if hasattr(idx, "strftime")
+                else str(idx)[:10],
+                "high": to_float(r.get("high")),
+                "low": to_float(r.get("low")),
+                "close": to_float(r.get("close")),
+                "amount": to_float(r.get("amount")),
+            }
+        )
     return sorted(rows, key=lambda r: r["date"])
 
 
@@ -171,7 +181,9 @@ def _freshness(as_of: str, expected: str | None, label: str, quality: dict) -> s
     """quality=auto when data date matches the expected previous trading day."""
     if expected is not None and as_of == expected:
         return "auto"
-    quality["notes"].append(f"{label} 最新数据日期 {as_of or '无'} 与预期前一交易日 {expected or '无法确认'} 不一致（周末/假日/vipdoc 未更新或已含更新数据），标记 degraded。")
+    quality["notes"].append(
+        f"{label} 最新数据日期 {as_of or '无'} 与预期前一交易日 {expected or '无法确认'} 不一致（周末/假日/vipdoc 未更新或已含更新数据），标记 degraded。"
+    )
     return "degraded"
 
 
@@ -192,9 +204,15 @@ def derive_market_fields(target_date: str) -> tuple[dict, dict, dict, dict]:
         "expected_data_date": expected,
     }
 
-    breadth = {"up_count": None, "down_count": None, "up_down_ratio": None,
-               "up_down_ratio_status": "unavailable",
-               "source": None, "quality": "missing", "as_of": None}
+    breadth = {
+        "up_count": None,
+        "down_count": None,
+        "up_down_ratio": None,
+        "up_down_ratio_status": "unavailable",
+        "source": None,
+        "quality": "missing",
+        "as_of": None,
+    }
     try:
         rows = _vipdoc_rows(BREADTH_CODE)
         if rows:
@@ -205,25 +223,37 @@ def derive_market_fields(target_date: str) -> tuple[dict, dict, dict, dict]:
                 # 880005 只给涨家数;跌家数没有真实来源时**不编造**(见 breadth_basis)
                 total, total_source = resolve_total_stocks()
                 counts = breadth_counts(int(up), total=total, source=total_source)
-                breadth.update({
-                    "up_count": int(up),
-                    "down_count": counts["down_count"],
-                    "up_down_ratio": counts["up_down_ratio"],
-                    "up_down_ratio_status": counts["up_down_ratio_status"],
-                    "total_stocks": counts["total_stocks"],
-                    "total_stocks_source": counts["total_stocks_source"],
-                    "source": "vipdoc_880005",
-                    "as_of": as_of,
-                    "quality": _freshness(as_of, expected, "880005 涨跌家数", quality),
-                })
+                breadth.update(
+                    {
+                        "up_count": int(up),
+                        "down_count": counts["down_count"],
+                        "up_down_ratio": counts["up_down_ratio"],
+                        "up_down_ratio_status": counts["up_down_ratio_status"],
+                        "total_stocks": counts["total_stocks"],
+                        "total_stocks_source": counts["total_stocks_source"],
+                        "source": "vipdoc_880005",
+                        "as_of": as_of,
+                        "quality": _freshness(
+                            as_of, expected, "880005 涨跌家数", quality
+                        ),
+                    }
+                )
                 quality["notes"].append(f"880005 涨跌家数: {counts['note']}")
     except Exception as e:
         quality["notes"].append(f"880005 涨跌家数读取失败: {e!r}")
 
-    sentiment = {"limit_up_count": None, "limit_down_count": None,
-                 "once_limit_up_count": None, "once_limit_down_count": None,
-                 "blowup_rate": None, "market_height": None, "above_2_board_count": None,
-                 "source": None, "quality": "missing", "as_of": None}
+    sentiment = {
+        "limit_up_count": None,
+        "limit_down_count": None,
+        "once_limit_up_count": None,
+        "once_limit_down_count": None,
+        "blowup_rate": None,
+        "market_height": None,
+        "above_2_board_count": None,
+        "source": None,
+        "quality": "missing",
+        "as_of": None,
+    }
     try:
         rows = _vipdoc_rows(SENTIMENT_CODE)
         if rows:
@@ -233,21 +263,39 @@ def derive_market_fields(target_date: str) -> tuple[dict, dict, dict, dict]:
             limit_down = last["low"]
             as_of = last["date"]
             if limit_up is not None:
-                sentiment.update({
-                    "limit_up_count": int(limit_up),
-                    "once_limit_up_count": int(once_up) if once_up is not None else None,
-                    "limit_down_count": int(limit_down) if limit_down is not None else None,
-                    "blowup_rate": round((once_up - limit_up) / once_up, 4) if once_up else None,
-                    "source": "vipdoc_880006",
-                    "as_of": as_of,
-                    "quality": _freshness(as_of, expected, "880006 涨跌停", quality),
-                })
-                quality["notes"].append("连板高度/2板以上家数无法从 880006 获取，market_height/above_2_board_count 留空待人工或盘后填充。")
+                sentiment.update(
+                    {
+                        "limit_up_count": int(limit_up),
+                        "once_limit_up_count": int(once_up)
+                        if once_up is not None
+                        else None,
+                        "limit_down_count": int(limit_down)
+                        if limit_down is not None
+                        else None,
+                        "blowup_rate": round((once_up - limit_up) / once_up, 4)
+                        if once_up
+                        else None,
+                        "source": "vipdoc_880006",
+                        "as_of": as_of,
+                        "quality": _freshness(
+                            as_of, expected, "880006 涨跌停", quality
+                        ),
+                    }
+                )
+                quality["notes"].append(
+                    "连板高度/2板以上家数无法从 880006 获取，market_height/above_2_board_count 留空待人工或盘后填充。"
+                )
     except Exception as e:
         quality["notes"].append(f"880006 涨跌停读取失败: {e!r}")
 
-    turnover = {"total_turnover": None, "turnover_change_pct": None, "volume_summary": "",
-                "source": None, "quality": "missing", "as_of": None}
+    turnover = {
+        "total_turnover": None,
+        "turnover_change_pct": None,
+        "volume_summary": "",
+        "source": None,
+        "quality": "missing",
+        "as_of": None,
+    }
     try:
         rows = _vipdoc_rows(TURNOVER_CODE)
         if rows:
@@ -256,14 +304,18 @@ def derive_market_fields(target_date: str) -> tuple[dict, dict, dict, dict]:
             as_of = last["date"]
             prev_amt = rows[-2]["amount"] if len(rows) >= 2 else None
             if amt is not None:
-                turnover.update({
-                    "total_turnover": amt,
-                    "turnover_change_pct": pct(amt, prev_amt),
-                    "source": "vipdoc_880001",
-                    "as_of": as_of,
-                    "quality": _freshness(as_of, expected, "880001 成交额", quality),
-                    "volume_summary": f"全市场成交额(元)来自 880001.SH vipdoc，数据日期 {as_of}（前一交易日 EOD）。",
-                })
+                turnover.update(
+                    {
+                        "total_turnover": amt,
+                        "turnover_change_pct": pct(amt, prev_amt),
+                        "source": "vipdoc_880001",
+                        "as_of": as_of,
+                        "quality": _freshness(
+                            as_of, expected, "880001 成交额", quality
+                        ),
+                        "volume_summary": f"全市场成交额(元)来自 880001.SH vipdoc，数据日期 {as_of}（前一交易日 EOD）。",
+                    }
+                )
     except Exception as e:
         quality["notes"].append(f"880001 成交额读取失败: {e!r}")
 
@@ -274,7 +326,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", default=cn_now().strftime("%Y-%m-%d"))
     ap.add_argument("--amv", type=float, default=None, help="0AMV 当日涨跌幅，百分比")
-    ap.add_argument("--out", default="", help="可选输出路径；为空则写入正式 market_timing_input.json")
+    ap.add_argument(
+        "--out",
+        default="",
+        help="可选输出路径；为空则写入正式 market_timing_input.json",
+    )
     args = ap.parse_args()
 
     breadth, sentiment, turnover, quality = derive_market_fields(args.date)
@@ -287,7 +343,7 @@ def main():
             "fiscal_policy": "",
             "credit_environment": "",
             "regulation_environment": "",
-            "policy_summary": ""
+            "policy_summary": "",
         },
         "amv_0": {
             "amv_change_pct": args.amv,
@@ -297,7 +353,7 @@ def main():
             # 这里也不置 quality=confirmed，门控按 candidate 处理。唯一会把 amv_0 标
             # confirmed 的是 merge_incremental_market（数据日可证），as_of 由它写。
             "as_of": None,
-            "note": "0AMV > 4% = 做多；0AMV < -2.3% = 空头"
+            "note": "0AMV > 4% = 做多；0AMV < -2.3% = 空头",
         },
         "overseas_market": {
             "nasdaq_change_pct": None,
@@ -309,7 +365,7 @@ def main():
             # ⚠️ 与 `amv_0.as_of` 同形：键恒存在、初值 None。
             #    骨架阶段没有任何数据日可证，**不得填采集时刻**（TODO #52）。
             "as_of": None,
-            "overseas_summary": ""
+            "overseas_summary": "",
         },
         "a_share_indices": {},
         "market_breadth": breadth,
@@ -328,7 +384,11 @@ def main():
         data["a_share_indices"][name] = item
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    out = Path(args.out) if args.out else OUT_DIR / f"{args.date}_market_timing_input.json"
+    out = (
+        Path(args.out)
+        if args.out
+        else OUT_DIR / f"{args.date}_market_timing_input.json"
+    )
     out.parent.mkdir(parents=True, exist_ok=True)
     # ⚠️ 落盘前校验：这是全项目扇出最大的产物（19 个消费者，12 个读 amv_0）。
     # 它是渐进填充文档，契约只管结构 —— 见 contracts.py。

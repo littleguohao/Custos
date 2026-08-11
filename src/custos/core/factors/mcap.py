@@ -10,12 +10,15 @@
 对称兑现成亏损 —— 「垃圾股反弹 beta」用带止损的规则收割不到
 （与 alpha101 同死法，第三次独立验证）。
 """
+
 from __future__ import annotations
 
 from typing import Any
 import pandas as pd
 
-from custos.core.factors._shares import shares_idx as _shares_idx  # ⚠️ 必须包限定：见 _shares 模块头
+from custos.core.factors._shares import (
+    shares_idx as _shares_idx,
+)  # ⚠️ 必须包限定：见 _shares 模块头
 
 FACTOR: dict[str, Any] = {
     "id": "mcap",
@@ -29,11 +32,13 @@ FACTOR: dict[str, Any] = {
     "stage": "debug",
 }
 
+
 def score(df: pd.DataFrame, code: str):
     """小市值选择器：score=-log10(信号日总市值/亿元),越小越高分(风格终审跨窗共同点:小市值反弹更强)。
     真市值=as-of 股本(东财 F10 全史)× 信号日收盘。无股本数据 → None(不参与排序,不误标)。"""
     import bisect as _b
     import math
+
     if len(df) < 1:
         return None
     evs = _shares_idx().get(str(code)[:6])
@@ -45,5 +50,9 @@ def score(df: pd.DataFrame, code: str):
     if k < 0 or not evs[k][1] or not close:
         return None
     mc = evs[k][1] * close / 1e8
-    return {"score": round(-math.log10(mc), 4), "suggestion": "可买",
-            "aux": {"factor": "mcap_small", "mcap_yi": round(mc, 1)}, "components": {}}
+    return {
+        "score": round(-math.log10(mc), 4),
+        "suggestion": "可买",
+        "aux": {"factor": "mcap_small", "mcap_yi": round(mc, 1)},
+        "components": {},
+    }

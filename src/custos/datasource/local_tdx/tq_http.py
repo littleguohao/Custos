@@ -12,6 +12,7 @@
   get_market_snapshot 字段直挂 result（去掉 ErrorId 后取 result 本体）。
 - 复用 tq_sector.is_tdxw_running 做进程级快速预检，不重复造轮子。
 """
+
 from __future__ import annotations
 
 import json
@@ -36,7 +37,7 @@ DEFAULT_TIMEOUT = 15
 # 本仓库反复踩的坑正是「写进文档不等于内化」（同一个连接反模式跨两天犯了三次）。
 # 所以这条约束做成拦截：非白名单的 down_type 直接返回结构化错误，不发请求。
 # 确有需要探测时，显式传 `allow_unsafe_download=True`，让调用方为它签名。
-SAFE_DOWN_TYPES = frozenset({4})        # 4 = miscinfo（概念/主题标签），实测安全
+SAFE_DOWN_TYPES = frozenset({4})  # 4 = miscinfo（概念/主题标签），实测安全
 
 # TQ 要求 `stock_code` **带市场后缀**（`600000.SH`）。传裸 6 位会得到 `ErrorId=2
 # stock_code error` —— 这是 2026-08-06 探针实测踩到的：探针传 `"600000"`，三个
@@ -53,9 +54,11 @@ def _bad_stock_code(code: Any) -> Optional[str]:
     """返回不合规的原因；合规返回 None。"""
     s = str(code).strip().upper()
     if "." not in s:
-        return (f"stock_code={code!r} 缺市场后缀。TQ 要求 `600000.SH` 形态，"
-                f"传裸 6 位会得到语义模糊的 ErrorId=2；请先过 "
-                f"local_tdx_data.normalize_code()")
+        return (
+            f"stock_code={code!r} 缺市场后缀。TQ 要求 `600000.SH` 形态，"
+            f"传裸 6 位会得到语义模糊的 ErrorId=2；请先过 "
+            f"local_tdx_data.normalize_code()"
+        )
     head, _, suf = s.partition(".")
     if not (head.isdigit() and len(head) == 6):
         return f"stock_code={code!r} 的代码段不是 6 位数字"
@@ -81,13 +84,19 @@ def _post(payload: dict, timeout: int, endpoint: Optional[str] = None) -> bytes:
         endpoint or TQ_HTTP_URL,
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         headers={"Content-Type": "application/json; charset=utf-8"},
-        method="POST")
+        method="POST",
+    )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return resp.read()
 
 
-def call(method: str, params: Optional[dict] = None, timeout: int = DEFAULT_TIMEOUT,
-         allow_unsafe_download: bool = False, endpoint: Optional[str] = None) -> dict:
+def call(
+    method: str,
+    params: Optional[dict] = None,
+    timeout: int = DEFAULT_TIMEOUT,
+    allow_unsafe_download: bool = False,
+    endpoint: Optional[str] = None,
+) -> dict:
     """调用 TQ-Local 接口，统一返回 {"ok", "value", "error"}，绝不 raise。
 
     ``allow_unsafe_download``：放行非白名单的 `download_file` down_type。
@@ -97,10 +106,12 @@ def call(method: str, params: Optional[dict] = None, timeout: int = DEFAULT_TIME
     if method == "download_file" and not allow_unsafe_download:
         dt = (params or {}).get("down_type")
         if dt not in SAFE_DOWN_TYPES:
-            return _err("unsafe_down_type",
-                        f"down_type={dt!r} 不在白名单 {sorted(SAFE_DOWN_TYPES)}；"
-                        f"1/5/6 实测可打挂 TdxW 服务。确需探测请显式传 "
-                        f"allow_unsafe_download=True")
+            return _err(
+                "unsafe_down_type",
+                f"down_type={dt!r} 不在白名单 {sorted(SAFE_DOWN_TYPES)}；"
+                f"1/5/6 实测可打挂 TdxW 服务。确需探测请显式传 "
+                f"allow_unsafe_download=True",
+            )
     if params and "stock_code" in params:
         why = _bad_stock_code(params["stock_code"])
         if why:
@@ -143,7 +154,9 @@ def snapshot(code: str, timeout: int = DEFAULT_TIMEOUT) -> dict:
     return call("get_market_snapshot", {"stock_code": code}, timeout=timeout)
 
 
-def more_info(code: str, fields: Optional[list] = None, timeout: int = DEFAULT_TIMEOUT) -> dict:
+def more_info(
+    code: str, fields: Optional[list] = None, timeout: int = DEFAULT_TIMEOUT
+) -> dict:
     """更多证券信息（get_more_info，Value 形态；传 field_list 实际仍返回全字段）。"""
     params = {"stock_code": code, "field_list": list(fields) if fields else []}
     return call("get_more_info", params, timeout=timeout)

@@ -14,6 +14,7 @@
 `_sc_*`）+ 两种消费方式（`signal_labels` 出标签 / `SCORERS` 出打分），
 统一接口会改 live 选股行为 ⇒ 属语义改动，必须单独立项 + 回测。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -24,8 +25,16 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 FACTORS_DIR = ROOT / "src" / "custos" / "core" / "factors"
-MODULES = ["s_shape", "b1_dual_factor", "b2_surge_factor", "main_rally_factor",
-           "platform_pullback", "rsi_state", "sector_phase", "sector_mainstream"]
+MODULES = [
+    "s_shape",
+    "b1_dual_factor",
+    "b2_surge_factor",
+    "main_rally_factor",
+    "platform_pullback",
+    "rsi_state",
+    "sector_phase",
+    "sector_mainstream",
+]
 
 
 def test_package_exists_with_doc():
@@ -42,8 +51,9 @@ def test_package_exists_with_doc():
 def test_module_moved(m):
     assert (FACTORS_DIR / f"{m}.py").exists(), f"{m} 未在 factors/"
     for d in ("screening", "research"):
-        assert not (ROOT / "src" / "custos" / d / f"{m}.py").exists(), \
+        assert not (ROOT / "src" / "custos" / d / f"{m}.py").exists(), (
             f"{m} 仍留在 {d}/（重复文件）"
+        )
 
 
 class TestConsumersCanResolve:
@@ -58,17 +68,25 @@ class TestConsumersCanResolve:
     # （研究代码占了 screening/ 的 70%，性质与生产链不同）。
     # 这里存「目录/文件名」而不是只存文件名 —— 只存文件名的写法在拆分当天
     # 就让 6 条测试 FileNotFoundError。
-    CONSUMERS = ["research/backtest_factors.py", "pipeline/screening/enrich_candidates.py",
-                 "pipeline/screening/score_candidates.py", "pipeline/screening/signal_labels.py",
-                 "research/launch_point_study.py", "pipeline/screening/candidate_table.py",
-                 "research/scan_signals_ytd.py", "research/run_bear_to_long_study.py",
-                 "research/compare_signal_sets.py", "research/scan_signal_backtest.py"]
+    CONSUMERS = [
+        "research/backtest_factors.py",
+        "pipeline/screening/enrich_candidates.py",
+        "pipeline/screening/score_candidates.py",
+        "pipeline/screening/signal_labels.py",
+        "research/launch_point_study.py",
+        "pipeline/screening/candidate_table.py",
+        "research/scan_signals_ytd.py",
+        "research/run_bear_to_long_study.py",
+        "research/compare_signal_sets.py",
+        "research/scan_signal_backtest.py",
+    ]
 
     @pytest.mark.parametrize("f", CONSUMERS)
     def test_no_factors_syspath_bootstrap(self, f):
         s = (ROOT / "src" / "custos" / f).read_text(encoding="utf-8")
-        assert "_FACTORS_DIR" not in s and "sys.path" not in s, \
+        assert "_FACTORS_DIR" not in s and "sys.path" not in s, (
             f"{f} 又出现了 factors/sys.path 引导（应靠 custos 包解析）"
+        )
 
 
 class TestImportsStillWork:
@@ -80,7 +98,9 @@ class TestImportsStillWork:
     def test_no_stale_screening_qualified_refs(self):
         """不许再有 `from screening import <因子>` —— 那会 ImportError。"""
         bad = []
-        for p in list((ROOT / "tests").glob("*.py")) + list((ROOT / "src").rglob("*.py")):
+        for p in list((ROOT / "tests").glob("*.py")) + list(
+            (ROOT / "src").rglob("*.py")
+        ):
             s = p.read_text(encoding="utf-8", errors="ignore")
             for m in MODULES:
                 if re.search(rf"\bfrom screening import {m}\b|\bscreening\.{m}\b", s):

@@ -9,6 +9,7 @@
 且有三个真 bug（输出路径指向仓库外、BJ 代码判成沪市、死 fallback），已删除。
 ⇒ **覆盖率低的地方要先问「这段代码该不该存在」**，给该删的代码写测试是浪费。
 """
+
 from __future__ import annotations
 
 import json
@@ -22,29 +23,101 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 from custos.core.trades import standardize_trades as st  # noqa: E402
 import sys
 
-TRADE_COLS = ["成交日期", "成交时间", "代码", "名称", "交易类别",
-              "成交数量", "成交价格", "成交金额", "发生金额", "费用", "备注"]
+TRADE_COLS = [
+    "成交日期",
+    "成交时间",
+    "代码",
+    "名称",
+    "交易类别",
+    "成交数量",
+    "成交价格",
+    "成交金额",
+    "发生金额",
+    "费用",
+    "备注",
+]
 
 
 def _xlsx(tmp_path, trades=None, closed=None, pos=None):
     """造一份三 sheet 的 xlsx。"""
-    trades = trades if trades is not None else [
-        ["2026-08-03", "09:31:00", "600000", "浦发银行", "买入", 1000, 10.0, 10000, -10005, 5.0, ""],
-        ["2026-08-04", "14:00:00", "600000", "浦发银行", "卖出", 400, 11.0, 4400, 4395, 5.0, ""],
-        ["2026-08-04", "15:00:00", "600000", "浦发银行", "银行转证券", 0, 0, 0, 0, 0, "非买卖"],
-    ]
-    closed = closed if closed is not None else [["000001", "平安银行", "2026-07-01", "2026-07-20", 3.5]]
-    pos = pos if pos is not None else [
-        ["600000", "浦发银行", 0.12, 0.034, 5, 10.02, 10.36],
-        ["汇总", "", 0.12, 0.034, 5, 0, 0],          # 汇总行必须被剔除
-    ]
+    trades = (
+        trades
+        if trades is not None
+        else [
+            [
+                "2026-08-03",
+                "09:31:00",
+                "600000",
+                "浦发银行",
+                "买入",
+                1000,
+                10.0,
+                10000,
+                -10005,
+                5.0,
+                "",
+            ],
+            [
+                "2026-08-04",
+                "14:00:00",
+                "600000",
+                "浦发银行",
+                "卖出",
+                400,
+                11.0,
+                4400,
+                4395,
+                5.0,
+                "",
+            ],
+            [
+                "2026-08-04",
+                "15:00:00",
+                "600000",
+                "浦发银行",
+                "银行转证券",
+                0,
+                0,
+                0,
+                0,
+                0,
+                "非买卖",
+            ],
+        ]
+    )
+    closed = (
+        closed
+        if closed is not None
+        else [["000001", "平安银行", "2026-07-01", "2026-07-20", 3.5]]
+    )
+    pos = (
+        pos
+        if pos is not None
+        else [
+            ["600000", "浦发银行", 0.12, 0.034, 5, 10.02, 10.36],
+            ["汇总", "", 0.12, 0.034, 5, 0, 0],  # 汇总行必须被剔除
+        ]
+    )
     p = tmp_path / "trades.xlsx"
     with pd.ExcelWriter(p) as w:
-        pd.DataFrame(trades, columns=TRADE_COLS).to_excel(w, sheet_name="交易记录", index=False)
-        pd.DataFrame(closed, columns=["代码", "名称", "建仓日期", "清仓日期", "收益率"]
-                     ).to_excel(w, sheet_name="已清仓", index=False)
-        pd.DataFrame(pos, columns=["代码", "名称", "仓位占比", "持有盈亏率", "持仓天数",
-                                   "单位成本", "最新价"]).to_excel(w, sheet_name="持仓数据", index=False)
+        pd.DataFrame(trades, columns=TRADE_COLS).to_excel(
+            w, sheet_name="交易记录", index=False
+        )
+        pd.DataFrame(
+            closed, columns=["代码", "名称", "建仓日期", "清仓日期", "收益率"]
+        ).to_excel(w, sheet_name="已清仓", index=False)
+        pd.DataFrame(
+            pos,
+            columns=[
+                "代码",
+                "名称",
+                "仓位占比",
+                "持有盈亏率",
+                "持仓天数",
+                "单位成本",
+                "最新价",
+            ],
+        ).to_excel(w, sheet_name="持仓数据", index=False)
     return p
 
 
@@ -60,11 +133,18 @@ class TestFullImport:
         src = _xlsx(tmp_path)
         monkeypatch.setattr(sys, "argv", ["standardize_trades", "--src", str(src)])
         st.main()
-        for f in ("trades_all.csv", "trades_stock.json", "closed_positions.json",
-                  "current_positions.json", "_import_meta.json"):
+        for f in (
+            "trades_all.csv",
+            "trades_stock.json",
+            "closed_positions.json",
+            "current_positions.json",
+            "_import_meta.json",
+        ):
             assert (out_dir / f).exists(), f"缺产物 {f}"
 
-    def test_stock_json_excludes_non_trade_categories(self, tmp_path, out_dir, monkeypatch):
+    def test_stock_json_excludes_non_trade_categories(
+        self, tmp_path, out_dir, monkeypatch
+    ):
         """`银行转证券` 之类的流水不该进买卖明细 —— 否则会被当成成交去算持仓。"""
         src = _xlsx(tmp_path)
         monkeypatch.setattr(sys, "argv", ["x", "--src", str(src)])
@@ -78,7 +158,9 @@ class TestFullImport:
         src = _xlsx(tmp_path)
         monkeypatch.setattr(sys, "argv", ["x", "--src", str(src)])
         st.main()
-        rows = json.loads((out_dir / "current_positions.json").read_text(encoding="utf-8"))
+        rows = json.loads(
+            (out_dir / "current_positions.json").read_text(encoding="utf-8")
+        )
         assert [r["代码"] for r in rows] == ["600000"]
 
     def test_codes_normalized_via_code_utils(self, tmp_path, out_dir, monkeypatch):
@@ -88,10 +170,37 @@ class TestFullImport:
         判成 `.SH`（因为以 `9` 开头）、把 `880006`（板块指数）判成 `.BJ` ——
         与昨天在 `mootdx.utils.get_stock_market` 里查出的是**同一个 bug 形状**。
         """
-        src = _xlsx(tmp_path, trades=[
-            ["2026-08-03", "09:31:00", "920808.0", "北交所票", "买入", 100, 10.0, 1000, -1005, 5.0, ""],
-            ["2026-08-03", "09:32:00", "1", "补零票", "买入", 100, 10.0, 1000, -1005, 5.0, ""],
-        ])
+        src = _xlsx(
+            tmp_path,
+            trades=[
+                [
+                    "2026-08-03",
+                    "09:31:00",
+                    "920808.0",
+                    "北交所票",
+                    "买入",
+                    100,
+                    10.0,
+                    1000,
+                    -1005,
+                    5.0,
+                    "",
+                ],
+                [
+                    "2026-08-03",
+                    "09:32:00",
+                    "1",
+                    "补零票",
+                    "买入",
+                    100,
+                    10.0,
+                    1000,
+                    -1005,
+                    5.0,
+                    "",
+                ],
+            ],
+        )
         monkeypatch.setattr(sys, "argv", ["x", "--src", str(src)])
         st.main()
         rows = json.loads((out_dir / "trades_stock.json").read_text(encoding="utf-8"))
@@ -112,10 +221,37 @@ class TestFullImport:
 
     def test_trades_sorted_by_time(self, tmp_path, out_dir, monkeypatch):
         """乱序输入必须按 (日期, 时间) 排好 —— 下游回放持仓依赖顺序。"""
-        src = _xlsx(tmp_path, trades=[
-            ["2026-08-05", "10:00:00", "600000", "x", "卖出", 100, 11.0, 1100, 1095, 5.0, ""],
-            ["2026-08-03", "09:31:00", "600000", "x", "买入", 500, 10.0, 5000, -5005, 5.0, ""],
-        ])
+        src = _xlsx(
+            tmp_path,
+            trades=[
+                [
+                    "2026-08-05",
+                    "10:00:00",
+                    "600000",
+                    "x",
+                    "卖出",
+                    100,
+                    11.0,
+                    1100,
+                    1095,
+                    5.0,
+                    "",
+                ],
+                [
+                    "2026-08-03",
+                    "09:31:00",
+                    "600000",
+                    "x",
+                    "买入",
+                    500,
+                    10.0,
+                    5000,
+                    -5005,
+                    5.0,
+                    "",
+                ],
+            ],
+        )
         monkeypatch.setattr(sys, "argv", ["x", "--src", str(src)])
         st.main()
         df = pd.read_csv(out_dir / "trades_all.csv")
@@ -133,6 +269,7 @@ class TestGuards:
     def test_src_is_required(self):
         """`--src` 必填：灾备脚本不该猜输入文件 —— 猜错会用错误的 xlsx 覆盖持仓快照。"""
         import argparse
+
         with pytest.raises(SystemExit):
             with pytest.MonkeyPatch.context() as mp:
                 mp.setattr(sys, "argv", ["x"])
@@ -146,5 +283,7 @@ class TestGuards:
     def test_docstring_warns_about_mixing_with_incremental(self):
         """必须写明**不能与 incremental_ledger 混用** —— 一个覆盖式、一个增量式，
         混用后台账与持仓快照会不一致（那正是 reconcile_positions 要检测的失配）。"""
-        s = (ROOT / "src" / "custos" / "core" / "trades" / "standardize_trades.py").read_text(encoding="utf-8")
+        s = (
+            ROOT / "src" / "custos" / "core" / "trades" / "standardize_trades.py"
+        ).read_text(encoding="utf-8")
         assert "不能混用" in s and "reconcile_positions" in s

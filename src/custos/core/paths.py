@@ -6,6 +6,7 @@ TDX_ROOT and PYTHON can be overridden via environment variables.
 
 Also the single source of truth for "what day is it" — see cn_now/cn_today.
 """
+
 from __future__ import annotations
 import os
 from datetime import date, datetime
@@ -44,10 +45,10 @@ TOOLS = BASE / "src" / "custos"
 # artifacts/ —— 2026-08-11 目录重组：原 03_daily_plans + 04_reviews + 06_logs 三合为一。
 ARTIFACTS = BASE / "artifacts"
 REPORTS = ARTIFACTS / "reports"
-DAILY_REPORTS = REPORTS / "daily"        # 每日计划与日报
-WEEKLY_REPORTS = REPORTS / "weekly"      # 周报
-MONTHLY_REPORTS = REPORTS / "monthly"    # 月报
-ARTIFACT_LOGS = ARTIFACTS / "logs"       # 运行日志与诊断输出
+DAILY_REPORTS = REPORTS / "daily"  # 每日计划与日报
+WEEKLY_REPORTS = REPORTS / "weekly"  # 周报
+MONTHLY_REPORTS = REPORTS / "monthly"  # 月报
+ARTIFACT_LOGS = ARTIFACTS / "logs"  # 运行日志与诊断输出
 
 PLANS = DAILY_REPORTS
 REVIEWS = REPORTS
@@ -72,8 +73,8 @@ SECTORS_DIR = DATA / "sectors"
 DECISIONS_DIR = DATA / "decisions"
 RISK_DIR = DATA / "risk"
 STOCK_POOL_DIR = DATA / "stock_pool"
-REVIEW_STEPS_DIR = DATA / "review_steps"   # 复盘链各 step 的中间产物
-CACHE_DIR = DATA / "cache"                 # 采集缓存（如 tdx_affair 权息缓存）
+REVIEW_STEPS_DIR = DATA / "review_steps"  # 复盘链各 step 的中间产物
+CACHE_DIR = DATA / "cache"  # 采集缓存（如 tdx_affair 权息缓存）
 
 # ---------------------------------------------------------------------------
 # governance/ 的四个子目录（2026-08-06 分类重构）
@@ -89,7 +90,7 @@ CACHE_DIR = DATA / "cache"                 # 采集缓存（如 tdx_affair 权�
 # 所有配置路径**只在这里定义一次**，模块不要再自己拼 `BASE / "governance" / ...`。
 # ---------------------------------------------------------------------------
 STRATEGY_DIR = GOVERNANCE / "strategy"
-DATA_DOCS_DIR = GOVERNANCE / "data"        # 命名区别于 DATA(顶层 data/ 运行时数据)
+DATA_DOCS_DIR = GOVERNANCE / "data"  # 命名区别于 DATA(顶层 data/ 运行时数据)
 RESEARCH_DIR = GOVERNANCE / "research"
 CONTRACTS_DIR = GOVERNANCE / "contracts"
 
@@ -98,9 +99,9 @@ SCREEN_FORMULA_REGISTRY_FILE = CONTRACTS_DIR / "SCREEN_FORMULA_REGISTRY.json"
 RSS_SOURCE_REGISTRY_FILE = CONTRACTS_DIR / "RSS_SOURCE_REGISTRY.json"
 RSS_FILTER_CONFIG_FILE = CONTRACTS_DIR / "RSS_FILTER_CONFIG.json"
 RSSHUB_ROUTES_FILE = CONTRACTS_DIR / "RSSHUB_PRIVATE_ROUTE_CANDIDATES.json"
-B1_DIR = STRATEGY_DIR / "b1"                     # B1 主策略上下文
-CZ_DIR = STRATEGY_DIR / "cz"                     # CZ 辅策略上下文
-FACTORS_DIR = STRATEGY_DIR / "_factors"          # 跨策略可复用因子
+B1_DIR = STRATEGY_DIR / "b1"  # B1 主策略上下文
+CZ_DIR = STRATEGY_DIR / "cz"  # CZ 辅策略上下文
+FACTORS_DIR = STRATEGY_DIR / "_factors"  # 跨策略可复用因子
 STRATEGY_REGISTRY_FILE = STRATEGY_DIR / "STRATEGY_REGISTRY.json"
 CZ_SECTOR_PREFERENCE_FILE = CZ_DIR / "CZ_SECTOR_PREFERENCE.json"
 
@@ -138,7 +139,10 @@ def read_json(path, default):
     （它此前已有 cn_today / cn_now）。
     """
     import json as _json
-    return _json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else default
+
+    return (
+        _json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else default
+    )
 
 
 def write_json(path, obj, *, indent: int = 2) -> None:
@@ -159,9 +163,12 @@ def write_json(path, obj, *, indent: int = 2) -> None:
     需要原子性（累积状态 / 读-改-写共享文件）时用 `write_json_atomic`。
     """
     import json as _json
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(_json.dumps(obj, ensure_ascii=False, indent=indent, allow_nan=False),
-                    encoding="utf-8")
+    path.write_text(
+        _json.dumps(obj, ensure_ascii=False, indent=indent, allow_nan=False),
+        encoding="utf-8",
+    )
 
 
 def write_json_atomic(path, obj, *, indent: int = 2) -> None:
@@ -192,9 +199,13 @@ def write_json_atomic(path, obj, *, indent: int = 2) -> None:
     """
     import json as _json
     import os as _os
+
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(_json.dumps(obj, ensure_ascii=False, indent=indent,
-                               allow_nan=False, default=str),
-                   encoding="utf-8")
+    tmp.write_text(
+        _json.dumps(
+            obj, ensure_ascii=False, indent=indent, allow_nan=False, default=str
+        ),
+        encoding="utf-8",
+    )
     _os.replace(tmp, path)

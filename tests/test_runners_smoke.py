@@ -15,6 +15,7 @@
 能抓到「模块导入期就炸」（语法错、import 循环、引导顺序错）这类
 打桩测试抓不到的问题。**但不要把它当编排测试用。**
 """
+
 import subprocess
 import unittest
 from datetime import date, timedelta
@@ -39,8 +40,19 @@ LOG_DIR = LOGS
 
 def _is_trading_day(target: str) -> bool:
     r = subprocess.run(
-        ["uv", "run", "python", str(TOOLS / "datasource/trading_calendar.py"), "--check-date", target],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=str(BASE),
+        [
+            "uv",
+            "run",
+            "python",
+            str(TOOLS / "datasource/trading_calendar.py"),
+            "--check-date",
+            target,
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        cwd=str(BASE),
     )
     d = _extract_json(r.stdout)
     if "is_trading_day" in d:
@@ -67,7 +79,9 @@ class _RunLogRestore:
             self.path.write_bytes(self.prior)
 
 
-@unittest.skipIf(_is_trading_day(date.today().strftime("%Y-%m-%d")), "today is a trading day")
+@unittest.skipIf(
+    _is_trading_day(date.today().strftime("%Y-%m-%d")), "today is a trading day"
+)
 class RunnerSmokeTests(unittest.TestCase):
     def test_runner_exits_cleanly_on_closed_day(self):
         target = date.today().strftime("%Y-%m-%d")
@@ -76,8 +90,12 @@ class RunnerSmokeTests(unittest.TestCase):
                 _RunLogRestore(self, script, target)
                 r = subprocess.run(
                     ["uv", "run", "python", str(TOOLS / script)],
-                    capture_output=True, text=True, encoding="utf-8", errors="replace",
-                    cwd=str(BASE), timeout=120,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    cwd=str(BASE),
+                    timeout=120,
                 )
                 self.assertEqual(r.returncode, 0, f"{script} failed: {r.stderr[:300]}")
                 self.assertIn(marker, r.stdout, f"{script} missing closed-day message")
@@ -95,12 +113,20 @@ class RunnerSmokeTests(unittest.TestCase):
                 _RunLogRestore(self, script, target)
                 r = subprocess.run(
                     ["uv", "run", "python", str(TOOLS / script), "--date", target],
-                    capture_output=True, text=True, encoding="utf-8", errors="replace",
-                    cwd=str(BASE), timeout=120,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    cwd=str(BASE),
+                    timeout=120,
                 )
                 self.assertEqual(r.returncode, 0, f"{script} failed: {r.stderr[:300]}")
                 self.assertIn(marker, r.stdout, f"{script} missing closed-day message")
-                self.assertIn(target, r.stdout, f"{script} output does not reflect --date {target}")
+                self.assertIn(
+                    target,
+                    r.stdout,
+                    f"{script} output does not reflect --date {target}",
+                )
 
 
 if __name__ == "__main__":

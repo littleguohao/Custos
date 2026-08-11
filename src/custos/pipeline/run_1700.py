@@ -9,6 +9,7 @@ abort): their failures are recorded as ok=false stage entries but do not set
 the run status to failed; only hard stages (daily_pipeline /
 final_close_review / final_review_validator / missing review file) do.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -20,7 +21,15 @@ import time
 
 from custos.core.paths import BASE, cn_today, TOOLS, LOGS, QUALITY_DIR, TRADES_DIR
 from custos.core.paths import REVIEWS as _REVIEWS_ROOT
-from custos.core.pipeline_kit import log_stage, md_to_digest, now_iso, write_run_log, run_stage_quiet as _stage, calendar_gate, propagate_gate_code
+from custos.core.pipeline_kit import (
+    log_stage,
+    md_to_digest,
+    now_iso,
+    write_run_log,
+    run_stage_quiet as _stage,
+    calendar_gate,
+    propagate_gate_code,
+)
 
 REVIEWS = _REVIEWS_ROOT / "daily"
 LOG_DIR = LOGS
@@ -30,7 +39,9 @@ _now_iso = now_iso
 _log_stage = log_stage
 
 
-def _write_run_log(target: str, status: str, started_at: str, t0: float, stages: list[dict]):
+def _write_run_log(
+    target: str, status: str, started_at: str, t0: float, stages: list[dict]
+):
     return write_run_log(LOG_DIR, "1700", target, status, started_at, t0, stages)
 
 
@@ -68,11 +79,14 @@ def _reconcile_note(target: str) -> str:
     path = QUALITY_DIR / f"{target}_ledger_reconcile.json"
     try:
         import json  # noqa: PLC0415
+
         g = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return "reconcile_json_unreadable"
-    return (f"status={g.get('status')}, 数量不一致={g.get('qty_mismatch_count')}只, "
-            f"台账成交={g.get('trade_rows')}笔, 回放ok={g.get('replay_ok')}")
+    return (
+        f"status={g.get('status')}, 数量不一致={g.get('qty_mismatch_count')}只, "
+        f"台账成交={g.get('trade_rows')}笔, 回放ok={g.get('replay_ok')}"
+    )
 
 
 def main(argv=None) -> int:
@@ -94,46 +108,88 @@ def main(argv=None) -> int:
         s_started = _now_iso()
         s_t0 = time.time()
         r = _stage(cmd, name)
-        stages_log.append(_log_stage(name, r, s_started, _now_iso(), time.time() - s_t0, note=note))
+        stages_log.append(
+            _log_stage(name, r, s_started, _now_iso(), time.time() - s_t0, note=note)
+        )
         return r
 
     # 1. Trading calendar
     _cg = calendar_gate(
-        target, log_dir=LOG_DIR, session="1700", run_started=run_started,
-        t0=t0, stages_log=stages_log,
+        target,
+        log_dir=LOG_DIR,
+        session="1700",
+        run_started=run_started,
+        t0=t0,
+        stages_log=stages_log,
         fail_msg="【盘后复盘失败｜{target}】日历检查失败：{err}",
-        closed_msg="今日休市，盘后复盘不生成（{target}）")
+        closed_msg="今日休市，盘后复盘不生成（{target}）",
+    )
     if _cg.exit_code is not None:
         return _cg.exit_code
 
     # 2. Collect postclose holding quotes via mootdx (online bars for today's close)
-    r = _run_stage(["uv", "run", "python", str(TOOLS / "datasource" / "collect" / "collect_holding_quotes.py"), "--date", target,
-                    "--session", "postclose"], "collect_holding_quotes",
-                   note="best-effort，失败不中断")
+    r = _run_stage(
+        [
+            "uv",
+            "run",
+            "python",
+            str(TOOLS / "datasource" / "collect" / "collect_holding_quotes.py"),
+            "--date",
+            target,
+            "--session",
+            "postclose",
+        ],
+        "collect_holding_quotes",
+        note="best-effort，失败不中断",
+    )
     if not r["ok"]:
         print(f"[WARN] collect_holding_quotes postclose failed: {r['out'][:200]}")
     else:
-        print(f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'holding quotes collected'}")
+        print(
+            f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'holding quotes collected'}"
+        )
 
     # 3. Collect incremental market data (breadth/turnover/limit via mootdx + A50/CNH via Yahoo)
-    r = _run_stage(["uv", "run", "python", str(TOOLS / "datasource" / "collect" / "collect_incremental_market.py"), "--date", target],
-                   "collect_incremental_market", note="best-effort，失败不中断")
+    r = _run_stage(
+        [
+            "uv",
+            "run",
+            "python",
+            str(TOOLS / "datasource" / "collect" / "collect_incremental_market.py"),
+            "--date",
+            target,
+        ],
+        "collect_incremental_market",
+        note="best-effort，失败不中断",
+    )
     if not r["ok"]:
         print(f"[WARN] collect_incremental_market failed: {r['out'][:200]}")
     else:
-        print(f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'incremental market collected'}")
+        print(
+            f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'incremental market collected'}"
+        )
 
     # 3b. Calculate MFE/MAE for holdings
     #     不能无条件报 [OK]:脚本对每只持仓 fail-closed(台账无未平仓记录/K线未覆盖入场日
     #     都不出数),全员不出数时它退 2 并把摘要行以 [WARN] 开头。这里回显该摘要行,
     #     否则"0/5 出数"在 runner 输出里长得和"5/5 出数"一模一样。
-    r = _run_stage(["uv", "run", "python", str(TOOLS / "pipeline" / "close_review" / "calc_mfe_mae.py"), "--date", target],
-                   "calc_mfe_mae", note="best-effort，失败不中断")
+    r = _run_stage(
+        [
+            "uv",
+            "run",
+            "python",
+            str(TOOLS / "pipeline" / "close_review" / "calc_mfe_mae.py"),
+            "--date",
+            target,
+        ],
+        "calc_mfe_mae",
+        note="best-effort，失败不中断",
+    )
     tail = _last_line(r["out"])
     if not r["ok"]:
         print(f"[WARN] calc_mfe_mae failed: {tail or r['out'][:200]}")
     elif tail.startswith("[WARN]"):
-        print(tail)                      # 降级摘要原样透出(含 x/y 出数与未出数代码)
+        print(tail)  # 降级摘要原样透出(含 x/y 出数与未出数代码)
     else:
         print(f"[OK] {tail or 'MFE/MAE calculated'}")
 
@@ -147,15 +203,34 @@ def main(argv=None) -> int:
     #      required=False，所以「非阻断」不需要额外传参 —— 只是这里不检查 r["ok"] 中断。
     #      ⚠️ note 必须在 stage **跑完之后**算：`note=` 作为实参会在子进程启动前求值，
     #      那时今天的对账 JSON 还没写，读到的是上一次的结果（或读不到）。
-    r = _run_stage(["uv", "run", "python", str(TOOLS / "core" / "trades" / "reconcile_positions.py"),
-                    "--date", target], "ledger_reconcile")
+    r = _run_stage(
+        [
+            "uv",
+            "run",
+            "python",
+            str(TOOLS / "core" / "trades" / "reconcile_positions.py"),
+            "--date",
+            target,
+        ],
+        "ledger_reconcile",
+    )
     stages_log[-1]["note"] = _reconcile_note(target)
     if not r["ok"]:
         print(f"[WARN] ledger_reconcile 未成功（不阻断）：{r['out'][:200]}")
 
     # 3c. Collect fund flow rank (eastmoney direct API)
-    r = _run_stage(["uv", "run", "python", str(TOOLS / "datasource" / "collect" / "collect_fund_flow.py"), "--date", target],
-                   "collect_fund_flow", note="best-effort，失败不中断")
+    r = _run_stage(
+        [
+            "uv",
+            "run",
+            "python",
+            str(TOOLS / "datasource" / "collect" / "collect_fund_flow.py"),
+            "--date",
+            target,
+        ],
+        "collect_fund_flow",
+        note="best-effort，失败不中断",
+    )
     if not r["ok"]:
         print(f"[WARN] collect_fund_flow failed: {r['out'][:200]}")
     else:
@@ -163,28 +238,62 @@ def main(argv=None) -> int:
 
     # 3c2. Refresh EOD daily K-lines into vipdoc via TQ-Local (needs TdxW running;
     #      best-effort so the pipeline still works when TdxW is off)
-    r = _run_stage(["uv", "run", "python", str(TOOLS / "datasource" / "refresh_eod_klines.py"),
-                    "--date", target], "refresh_eod_klines", note="best-effort，失败不中断")
+    r = _run_stage(
+        [
+            "uv",
+            "run",
+            "python",
+            str(TOOLS / "datasource" / "refresh_eod_klines.py"),
+            "--date",
+            target,
+        ],
+        "refresh_eod_klines",
+        note="best-effort，失败不中断",
+    )
     if not r["ok"]:
         print(f"[WARN] refresh_eod_klines failed: {r['out'][:200]}")
     else:
-        print(f"[OK] {r['out'].splitlines()[0] if r['out'] else 'EOD klines refreshed'}")
+        print(
+            f"[OK] {r['out'].splitlines()[0] if r['out'] else 'EOD klines refreshed'}"
+        )
 
     # 3d. Refresh market indices from vipdoc (ensure a_share_indices + turnover are populated)
-    r = _run_stage(["uv", "run", "python", str(TOOLS / "datasource" / "refresh_market_indices.py"),
-                    "--date", target], "refresh_market_indices", note="best-effort，失败不中断")
+    r = _run_stage(
+        [
+            "uv",
+            "run",
+            "python",
+            str(TOOLS / "datasource" / "refresh_market_indices.py"),
+            "--date",
+            target,
+        ],
+        "refresh_market_indices",
+        note="best-effort，失败不中断",
+    )
     if not r["ok"]:
         print(f"[WARN] refresh_market_indices failed: {r['out'][:200]}")
     else:
-        print(f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'market indices refreshed'}")
+        print(
+            f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'market indices refreshed'}"
+        )
 
     # 3b. 同步指南针 0AMV → 写 confirmed 观测 + 填 amv_0day（best-effort）。
     #     必须在 merge_incremental_market 之前：merge 据 amv_0day/confirmed观测 自动把
     #     amv_0.quality 置 confirmed，随后 daily_pipeline 的 amv_state 才能据真值切换 regime
     #     （单日 >+4% 自动进多头 / <-2.3% 进空头，无需人工确认）。此前该脚本未接线，
     #     导致 0AMV 长期停留 candidate、regime 被锁定。
-    r = _run_stage(["uv", "run", "python", str(TOOLS / "datasource" / "sync_compass_amv.py"),
-                    "--date", target], "sync_compass_amv", note="best-effort，失败不中断")
+    r = _run_stage(
+        [
+            "uv",
+            "run",
+            "python",
+            str(TOOLS / "datasource" / "sync_compass_amv.py"),
+            "--date",
+            target,
+        ],
+        "sync_compass_amv",
+        note="best-effort，失败不中断",
+    )
     if not r["ok"]:
         print(f"[WARN] sync_compass_amv failed: {r['out'][:200]}")
     elif r["stdout"]:
@@ -193,34 +302,74 @@ def main(argv=None) -> int:
     # 4. Merge incremental data into market_timing_input.json + auto-confirm 0AMV quality
     #    (best-effort: the script prints the [OK]/[WARN] lines, echoed here verbatim;
     #    a hard failure of the script itself only warns and never aborts the pipeline)
-    r = _run_stage(["uv", "run", "python", str(TOOLS / "pipeline" / "market_timing" / "merge_incremental_market.py"),
-                    "--date", target], "merge_incremental_market", note="best-effort，失败不中断")
+    r = _run_stage(
+        [
+            "uv",
+            "run",
+            "python",
+            str(TOOLS / "pipeline" / "market_timing" / "merge_incremental_market.py"),
+            "--date",
+            target,
+        ],
+        "merge_incremental_market",
+        note="best-effort，失败不中断",
+    )
     if not r["ok"]:
         print(f"[WARN] merge incremental failed: {r['out'][:200]}")
     elif r["stdout"]:
         sys.stdout.write(r["stdout"])
 
     # 5. Daily pipeline (postclose)
-    r = _run_stage(["uv", "run", "python", str(TOOLS / "pipeline" / "daily_pipeline.py"), "--date", target,
-                    "--session-type", "postclose"], "daily_pipeline")
+    r = _run_stage(
+        [
+            "uv",
+            "run",
+            "python",
+            str(TOOLS / "pipeline" / "daily_pipeline.py"),
+            "--date",
+            target,
+            "--session-type",
+            "postclose",
+        ],
+        "daily_pipeline",
+    )
     if not r["ok"]:
         _write_run_log(target, "failed", run_started, t0, stages_log)
         print(f"【盘后复盘失败｜{target}】daily_pipeline失败：{r['out'][:500]}")
-        return propagate_gate_code(r)   # 门控码 3/4/5 原样上抛供 cron 判定
+        return propagate_gate_code(r)  # 门控码 3/4/5 原样上抛供 cron 判定
 
     # 6. Final close review
     no_trades_flag = _no_trades_flag(target)
 
-    r = _run_stage(["uv", "run", "python", str(TOOLS / "pipeline" / "close_review" / "final_close_review.py"),
-                    "--date", target] + no_trades_flag, "final_close_review")
+    r = _run_stage(
+        [
+            "uv",
+            "run",
+            "python",
+            str(TOOLS / "pipeline" / "close_review" / "final_close_review.py"),
+            "--date",
+            target,
+        ]
+        + no_trades_flag,
+        "final_close_review",
+    )
     if not r["ok"]:
         _write_run_log(target, "failed", run_started, t0, stages_log)
         print(f"【盘后复盘失败｜{target}】final_close_review失败：{r['out'][:500]}")
         return 1
 
     # 7. Validator
-    r = _run_stage(["uv", "run", "python", str(TOOLS / "pipeline" / "close_review" / "final_review_validator.py"),
-                    "--date", target], "final_review_validator")
+    r = _run_stage(
+        [
+            "uv",
+            "run",
+            "python",
+            str(TOOLS / "pipeline" / "close_review" / "final_review_validator.py"),
+            "--date",
+            target,
+        ],
+        "final_review_validator",
+    )
     if not r["ok"]:
         _write_run_log(target, "failed", run_started, t0, stages_log)
         print(f"【盘后复盘失败｜{target}】验证未通过：{r['out'][:500]}")
@@ -229,18 +378,33 @@ def main(argv=None) -> int:
     # 8. Read generated review and convert to text digest
     review_path = REVIEWS / f"{target}_final_review.md"
     if not review_path.exists():
-        stages_log.append(_log_stage("review_digest",
-                                     {"ok": False, "returncode": None, "timeout": False},
-                                     _now_iso(), _now_iso(), 0.0,
-                                     note=f"复盘文件未生成：{review_path}"))
+        stages_log.append(
+            _log_stage(
+                "review_digest",
+                {"ok": False, "returncode": None, "timeout": False},
+                _now_iso(),
+                _now_iso(),
+                0.0,
+                note=f"复盘文件未生成：{review_path}",
+            )
+        )
         _write_run_log(target, "failed", run_started, t0, stages_log)
         print(f"【盘后复盘失败｜{target}】复盘文件未生成：{review_path}")
         return 1
 
-    stages_log.append(_log_stage("review_digest", {"ok": True, "returncode": 0, "timeout": False},
-                                 _now_iso(), _now_iso(), 0.0,
-                                 note=f"review={review_path.name}"))
-    digest = md_to_digest(review_path.read_text(encoding="utf-8"), truncate_note="...(完整复盘见文件)")
+    stages_log.append(
+        _log_stage(
+            "review_digest",
+            {"ok": True, "returncode": 0, "timeout": False},
+            _now_iso(),
+            _now_iso(),
+            0.0,
+            note=f"review={review_path.name}",
+        )
+    )
+    digest = md_to_digest(
+        review_path.read_text(encoding="utf-8"), truncate_note="...(完整复盘见文件)"
+    )
 
     _write_run_log(target, "completed", run_started, t0, stages_log)
 

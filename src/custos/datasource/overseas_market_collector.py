@@ -6,6 +6,7 @@ into strategy_team/data/market/YYYY-MM-DD_market_timing_input.json.
 
 No API key required. If a symbol fails, it is preserved as missing with an error note.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -26,13 +27,32 @@ from custos.core.paths import cn_now, MARKET_DIR  # noqa: E402
 from custos.core.net_retry import retry_call  # noqa: E402
 
 SYMBOLS = {
-    "dow": {"symbol": "^DJI", "name": "道琼斯工业指数", "group": "index", "region": "us"},
-    "nasdaq": {"symbol": "^IXIC", "name": "纳斯达克综合指数", "group": "index", "region": "us"},
+    "dow": {
+        "symbol": "^DJI",
+        "name": "道琼斯工业指数",
+        "group": "index",
+        "region": "us",
+    },
+    "nasdaq": {
+        "symbol": "^IXIC",
+        "name": "纳斯达克综合指数",
+        "group": "index",
+        "region": "us",
+    },
     "sp500": {"symbol": "^GSPC", "name": "标普500", "group": "index", "region": "us"},
-    "sox": {"symbol": "^SOX", "name": "费城半导体指数", "group": "index", "region": "us"},
+    "sox": {
+        "symbol": "^SOX",
+        "name": "费城半导体指数",
+        "group": "index",
+        "region": "us",
+    },
     "nikkei": {"symbol": "^N225", "name": "日经225", "group": "index", "region": "jp"},
     "kospi": {"symbol": "^KS11", "name": "韩国KOSPI", "group": "index", "region": "kr"},
-    "hstech": {"symbol": "3067.HK", "name": "恒生科技指数(iShares 3067.HK ETF代理,^HSTECH已被Yahoo下架404,^HSCI无数据)", "group": "index"},
+    "hstech": {
+        "symbol": "3067.HK",
+        "name": "恒生科技指数(iShares 3067.HK ETF代理,^HSTECH已被Yahoo下架404,^HSCI无数据)",
+        "group": "index",
+    },
     "nvda": {"symbol": "NVDA", "name": "英伟达", "group": "ai_leader"},
     "amd": {"symbol": "AMD", "name": "AMD", "group": "ai_leader"},
     "tsm": {"symbol": "TSM", "name": "台积电ADR", "group": "semiconductor"},
@@ -59,7 +79,8 @@ def fetch_chart(symbol: str, region: str = "") -> dict[str, Any]:
         headers={
             "User-Agent": "Mozilla/5.0 OpenClaw strategy_team market collector",
             "Accept": "application/json",
-        })
+        },
+    )
     with retry_call(lambda: urllib.request.urlopen(req, timeout=20)) as resp:
         raw = resp.read().decode("utf-8")
     data = json.loads(raw)
@@ -94,16 +115,28 @@ def fetch_chart(symbol: str, region: str = "") -> dict[str, Any]:
         "currency": meta.get("currency"),
         "exchange": meta.get("exchangeName") or meta.get("fullExchangeName"),
         "market_state": meta.get("marketState"),
-        "data_kind": "最新" if meta.get("marketState") == "REGULAR" or asia_live else "收盘",
+        "data_kind": "最新"
+        if meta.get("marketState") == "REGULAR" or asia_live
+        else "收盘",
         "last_timestamp": last_ts,
-        "last_time_local_hint": datetime.fromtimestamp(last_ts,ZoneInfo("Asia/Shanghai")).isoformat() if isinstance(last_ts, (int, float)) else None,
-        "recent_closes": [round(float(x), 4) if x is not None else None for x in closes[-5:]],
+        "last_time_local_hint": datetime.fromtimestamp(
+            last_ts, ZoneInfo("Asia/Shanghai")
+        ).isoformat()
+        if isinstance(last_ts, (int, float))
+        else None,
+        "recent_closes": [
+            round(float(x), 4) if x is not None else None for x in closes[-5:]
+        ],
         "source": "Yahoo Finance chart API",
     }
 
 
 def classify(details: dict[str, Any]) -> str:
-    vals = [v.get("change_pct") for v in details.values() if isinstance(v, dict) and v.get("change_pct") is not None]
+    vals = [
+        v.get("change_pct")
+        for v in details.values()
+        if isinstance(v, dict) and v.get("change_pct") is not None
+    ]
     if not vals:
         return "缺失"
     avg = sum(vals) / len(vals)
@@ -118,6 +151,7 @@ def impact_summary(details: dict[str, Any]) -> str:
     def v(k):
         item = details.get(k) or {}
         return item.get("change_pct")
+
     sox, nvda, amd, tsm = v("sox"), v("nvda"), v("amd"), v("tsm")
     hstech = v("hstech")
     nikkei, kospi, samsung, hynix = v("nikkei"), v("kospi"), v("samsung"), v("sk_hynix")
@@ -126,7 +160,9 @@ def impact_summary(details: dict[str, Any]) -> str:
     if tech_vals:
         avg_tech = sum(tech_vals) / len(tech_vals)
         if avg_tech > 1:
-            parts.append("美股AI/半导体链偏强，利于A股AI算力、半导体、光模块、PCB等风险偏好")
+            parts.append(
+                "美股AI/半导体链偏强，利于A股AI算力、半导体、光模块、PCB等风险偏好"
+            )
         elif avg_tech < -1:
             parts.append("美股AI/半导体链偏弱，A股科技成长追高权限应下降")
         else:
@@ -151,7 +187,11 @@ def main():
     ap.add_argument("--date", default=cn_now().strftime("%Y-%m-%d"))
     ap.add_argument("--input", default="")
     args = ap.parse_args()
-    inp = Path(args.input) if args.input else MARKET_DIR / f"{args.date}_market_timing_input.json"
+    inp = (
+        Path(args.input)
+        if args.input
+        else MARKET_DIR / f"{args.date}_market_timing_input.json"
+    )
     if inp.exists():
         data = json.loads(inp.read_text(encoding="utf-8"))
     else:
@@ -162,7 +202,10 @@ def main():
     fallback_used: dict[str, str] = {}
     for key, meta in SYMBOLS.items():
         try:
-            details[key] = {**meta, **fetch_chart(meta["symbol"], meta.get("region", ""))}
+            details[key] = {
+                **meta,
+                **fetch_chart(meta["symbol"], meta.get("region", "")),
+            }
         except Exception as e:
             errors[key] = repr(e)
             # Yahoo 失败 → 试 TDX 扩展市场（owner 原则：本地 TDX 优先，HTTP 不稳定）。
@@ -173,22 +216,37 @@ def main():
             try:
                 # ⚠️ 必须与调用方走同一条导入路径,否则同一文件会被加载成两个模块
                 # 包式绝对导入：脚本与包两种模式下都是同一份模块对象
-                #（custos 可编辑安装），monkeypatch/异常捕获对得上。
+                # （custos 可编辑安装），monkeypatch/异常捕获对得上。
                 from custos.datasource.tdx_ext_quotes import fetch_ext_change  # noqa: PLC0415
+
                 alt = fetch_ext_change(meta["symbol"])
             except Exception as e2:  # noqa: BLE001
-                print(f"[WARN] TDX ext fallback 不可用: {type(e2).__name__}: {e2}",
-                      file=sys.stderr)
+                print(
+                    f"[WARN] TDX ext fallback 不可用: {type(e2).__name__}: {e2}",
+                    file=sys.stderr,
+                )
             if alt and alt.get("change_pct") is not None:
-                details[key] = {**meta, "symbol": meta["symbol"], **alt,
-                                "yahoo_error": repr(e), "degraded": True}
+                details[key] = {
+                    **meta,
+                    "symbol": meta["symbol"],
+                    **alt,
+                    "yahoo_error": repr(e),
+                    "degraded": True,
+                }
                 fallback_used[key] = alt.get("source", "tdx_ext")
-                print(f"[INFO] {key} 走 TDX ext 降级：{alt.get('source')}"
-                      f"{'（' + alt['proxy_note'] + '）' if alt.get('proxy_note') else ''}",
-                      file=sys.stderr)
+                print(
+                    f"[INFO] {key} 走 TDX ext 降级：{alt.get('source')}"
+                    f"{'（' + alt['proxy_note'] + '）' if alt.get('proxy_note') else ''}",
+                    file=sys.stderr,
+                )
             else:
-                details[key] = {**meta, "symbol": meta["symbol"], "change_pct": None,
-                                "error": repr(e), "source": "Yahoo Finance chart API"}
+                details[key] = {
+                    **meta,
+                    "symbol": meta["symbol"],
+                    "change_pct": None,
+                    "error": repr(e),
+                    "source": "Yahoo Finance chart API",
+                }
         time.sleep(0.2)
 
     overseas = data.setdefault("overseas_market", {})
@@ -205,9 +263,15 @@ def main():
         overseas["source"] = "Yahoo Finance chart API + TDX ext fallback"
     # as_of: latest last_timestamp across all symbols (epoch -> Asia/Shanghai ISO);
     # falls back to collection time when no symbol returned a timestamp.
-    ts_vals = [d.get("last_timestamp") for d in details.values() if isinstance(d, dict) and isinstance(d.get("last_timestamp"), (int, float))]
+    ts_vals = [
+        d.get("last_timestamp")
+        for d in details.values()
+        if isinstance(d, dict) and isinstance(d.get("last_timestamp"), (int, float))
+    ]
     if ts_vals:
-        overseas["as_of"] = datetime.fromtimestamp(max(ts_vals), ZoneInfo("Asia/Shanghai")).isoformat(timespec="seconds")
+        overseas["as_of"] = datetime.fromtimestamp(
+            max(ts_vals), ZoneInfo("Asia/Shanghai")
+        ).isoformat(timespec="seconds")
         overseas["as_of_basis"] = "max(last_timestamp) across symbols"
     else:
         # ⚠️ **不编 as_of**（2026-08-10，TODO #52 路子①）。
@@ -224,20 +288,36 @@ def main():
         overseas["as_of"] = None
         overseas["as_of_basis"] = "no_timestamp_from_any_symbol"
         # 采集时刻本身有排障价值，但它**不是数据新鲜度** —— 换个键名存，别让它冒充。
-        overseas["collected_at"] = datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(timespec="seconds")
+        overseas["collected_at"] = datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(
+            timespec="seconds"
+        )
     overseas["quality"] = "auto" if not errors else "degraded"
 
     dq = data.setdefault("data_quality", {})
     dq.setdefault("sources", []).append("overseas_market_collector:yahoo_finance")
     if errors:
-        dq.setdefault("notes", []).append(f"外围市场部分标的抓取失败：{', '.join(errors.keys())}")
+        dq.setdefault("notes", []).append(
+            f"外围市场部分标的抓取失败：{', '.join(errors.keys())}"
+        )
     else:
-        dq.setdefault("notes", []).append("外围市场由 Yahoo Finance chart API 自动采集。")
+        dq.setdefault("notes", []).append(
+            "外围市场由 Yahoo Finance chart API 自动采集。"
+        )
 
     MARKET_DIR.mkdir(parents=True, exist_ok=True)
     inp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     print(inp)
-    print(json.dumps({"overall_signal": overseas.get("overall_signal"), "summary": overseas.get("overseas_summary"), "errors": errors}, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {
+                "overall_signal": overseas.get("overall_signal"),
+                "summary": overseas.get("overseas_summary"),
+                "errors": errors,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

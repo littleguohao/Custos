@@ -8,6 +8,7 @@
 方法论（M1，经 H1/H2 终审进一步印证）：排序类因子已全部跨窗失败，**机制类改进是唯一
 验证成功的方向**。判定看 `expectancy_R` / `payoff_ratio` / `total_R`，不看胜率。
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -16,16 +17,23 @@ import pytest
 
 from custos.research.backtest_factors import _bbi_series, simulate_b1_trade
 
-BASE = [(10, 10.1, 9.9, 10)] * 30          # 进场 close=10，初始止损 low=9.9
+BASE = [(10, 10.1, 9.9, 10)] * 30  # 进场 close=10，初始止损 low=9.9
 ENTRY = 29
 
 
 def _mk(bars):
     a = np.array(bars, float)
-    return pd.DataFrame({
-        "date": pd.bdate_range("2025-01-01", periods=len(a)),
-        "open": a[:, 0], "high": a[:, 1], "low": a[:, 2], "close": a[:, 3],
-        "volume": np.full(len(a), 5e5), "amount": a[:, 3] * 5e5})
+    return pd.DataFrame(
+        {
+            "date": pd.bdate_range("2025-01-01", periods=len(a)),
+            "open": a[:, 0],
+            "high": a[:, 1],
+            "low": a[:, 2],
+            "close": a[:, 3],
+            "volume": np.full(len(a), 5e5),
+            "amount": a[:, 3] * 5e5,
+        }
+    )
 
 
 def _run(bars, **kw):
@@ -35,9 +43,14 @@ def _run(bars, **kw):
 
 # 涨到 +12% 后渐进回落（不跳空），最终跌破初始止损
 WIN_TO_LOSS = BASE + [
-    (10.4, 10.5, 10.3, 10.4), (10.8, 10.9, 10.7, 10.8), (11.2, 11.3, 11.1, 11.2),
-    (11.1, 11.2, 10.85, 10.9), (10.85, 10.95, 10.05, 10.1),
-    (10.1, 10.15, 9.85, 9.88), (9.88, 9.9, 9.5, 9.55)]
+    (10.4, 10.5, 10.3, 10.4),
+    (10.8, 10.9, 10.7, 10.8),
+    (11.2, 11.3, 11.1, 11.2),
+    (11.1, 11.2, 10.85, 10.9),
+    (10.85, 10.95, 10.05, 10.1),
+    (10.1, 10.15, 9.85, 9.88),
+    (9.88, 9.9, 9.5, 9.55),
+]
 
 
 class TestDefaultOff:
@@ -49,6 +62,7 @@ class TestDefaultOff:
 
     def test_signature_defaults_are_zero(self):
         import inspect
+
         ps = inspect.signature(simulate_b1_trade).parameters
         assert ps["breakeven_trigger"].default == 0.0
         assert ps["trail_pct"].default == 0.0
@@ -68,7 +82,7 @@ class TestBreakevenStop:
     def test_not_armed_below_trigger(self):
         """浮盈没到阈值就不该上移止损。"""
         bars = BASE + [(10, 10.2, 9.6, 10.1)] * 2 + [(10, 10.1, 9.4, 9.5)]
-        r = _run(bars, breakeven_trigger=0.05)      # 浮盈仅 2%
+        r = _run(bars, breakeven_trigger=0.05)  # 浮盈仅 2%
         assert r["reason"] == "stop"
         assert not r.get("breakeven_armed")
 
@@ -76,7 +90,9 @@ class TestBreakevenStop:
         """跳空低开会穿过保本位——保本止损**不保证**一定保本，必须如实建模。"""
         bars = BASE + [(10.4, 10.6, 10.3, 10.5), (9.8, 9.9, 9.3, 9.4)]
         r = _run(bars, breakeven_trigger=0.03)
-        assert r["ret"] == pytest.approx(9.8 / 10 - 1), "按开盘价 9.8 成交，不是保本位 10.0"
+        assert r["ret"] == pytest.approx(9.8 / 10 - 1), (
+            "按开盘价 9.8 成交，不是保本位 10.0"
+        )
         assert r["ret"] < 0
 
     def test_stop_never_moves_down(self):
@@ -100,8 +116,10 @@ class TestTrailingStop:
         终审证实收益极端幂律——极少数大赢家贡献全部收益。若移动止损把趋势单砍掉，
         代价远大于它保护的那点回撤（结论#15）。
         """
-        big = BASE + [(10 + i * 0.35, 10 + i * 0.35 + 0.15, 10 + i * 0.35 - 0.12,
-                       10 + i * 0.35) for i in range(1, 25)]
+        big = BASE + [
+            (10 + i * 0.35, 10 + i * 0.35 + 0.15, 10 + i * 0.35 - 0.12, 10 + i * 0.35)
+            for i in range(1, 25)
+        ]
         for tp in (0.05, 0.08, 0.12):
             r = _run(big, trail_pct=tp)
             assert r["reason"] == "open_end", f"trail {tp} 砍掉了无回撤的趋势单"
@@ -110,9 +128,12 @@ class TestTrailingStop:
     def test_tighter_trail_exits_earlier(self):
         """上涨中夹一次深回撤：紧的 trail 被震出，松的能扛住。"""
         bars = BASE + [
-            (10.5, 10.7, 10.4, 10.6), (11.0, 11.2, 10.9, 11.1),     # 峰值 11.2
-            (11.0, 11.05, 10.35, 10.4),                              # 回撤 7.6%
-            (10.5, 11.5, 10.45, 11.4), (11.6, 12.0, 11.5, 11.9)]     # 继续上涨
+            (10.5, 10.7, 10.4, 10.6),
+            (11.0, 11.2, 10.9, 11.1),  # 峰值 11.2
+            (11.0, 11.05, 10.35, 10.4),  # 回撤 7.6%
+            (10.5, 11.5, 10.45, 11.4),
+            (11.6, 12.0, 11.5, 11.9),
+        ]  # 继续上涨
         tight = _run(bars, trail_pct=0.05)
         loose = _run(bars, trail_pct=0.15)
         assert tight["reason"] == "trail_stop"
@@ -142,8 +163,11 @@ class TestAttribution:
     """reason 要按**实际决定止损位**的机制归因，便于事后拆解贡献。"""
 
     def test_higher_level_wins_naming(self):
-        bars = BASE + [(10.3, 10.6, 10.2, 10.5), (10.4, 10.45, 9.95, 9.98),
-                       (9.9, 9.95, 9.6, 9.7)]
+        bars = BASE + [
+            (10.3, 10.6, 10.2, 10.5),
+            (10.4, 10.45, 9.95, 9.98),
+            (9.9, 9.95, 9.6, 9.7),
+        ]
         r = _run(bars, breakeven_trigger=0.05, trail_pct=0.08)
         # 保本位 10.0 > trail 位 10.6×0.92=9.75 ⇒ 是保本位决定的出场
         assert r["reason"] == "breakeven_stop"
@@ -155,8 +179,12 @@ class TestAttribution:
 
 class TestCombinedWithScaleOut:
     def test_scale_out_still_applies(self):
-        bars = BASE + [(10.4, 10.5, 10.3, 10.45), (10.9, 11.0, 10.8, 10.95),
-                       (11.0, 11.1, 10.2, 10.3), (10.2, 10.3, 9.6, 9.7)]
+        bars = BASE + [
+            (10.4, 10.5, 10.3, 10.45),
+            (10.9, 11.0, 10.8, 10.95),
+            (11.0, 11.1, 10.2, 10.3),
+            (10.2, 10.3, 9.6, 9.7),
+        ]
         r = _run(bars, scale_out_frac=0.5, breakeven_trigger=0.05, trail_pct=0.10)
         assert isinstance(r["ret"], float) and np.isfinite(r["ret"])
         if r.get("scale_out_idx") is not None:
@@ -168,6 +196,7 @@ class TestCliWiring:
         import inspect
 
         from custos.research.backtest_factors import evaluate_trades
+
         ps = inspect.signature(evaluate_trades).parameters
         assert ps["breakeven_trigger"].default == 0.0
         assert ps["trail_pct"].default == 0.0
@@ -177,9 +206,14 @@ class TestCliWiring:
 
     def test_cli_exposes_flags(self):
         import pathlib
-        src = pathlib.Path("src/custos/research/backtest_factors.py").read_text(encoding="utf-8")
+
+        src = pathlib.Path("src/custos/research/backtest_factors.py").read_text(
+            encoding="utf-8"
+        )
         assert '"--breakeven"' in src and '"--trail"' in src
-        assert "breakeven_trigger=args.breakeven" in src and "trail_pct=args.trail" in src
+        assert (
+            "breakeven_trigger=args.breakeven" in src and "trail_pct=args.trail" in src
+        )
 
 
 class TestStopTriggerCloseVsIntraday:
@@ -197,11 +231,15 @@ class TestStopTriggerCloseVsIntraday:
     """
 
     # 盘中最低 9.5 跌破止损 9.9，但收盘 10.2 收回，之后继续上涨
-    FAKE_BREAK = BASE + [(9.95, 10.3, 9.5, 10.2), (10.2, 10.5, 10.15, 10.45),
-                         (10.5, 10.8, 10.45, 10.75)]
+    FAKE_BREAK = BASE + [
+        (9.95, 10.3, 9.5, 10.2),
+        (10.2, 10.5, 10.15, 10.45),
+        (10.5, 10.8, 10.45, 10.75),
+    ]
 
     def test_default_is_close(self):
         import inspect
+
         d = inspect.signature(simulate_b1_trade).parameters["stop_trigger"].default
         assert d == "close"
 
@@ -235,8 +273,12 @@ class TestStopTriggerCloseVsIntraday:
 
     def test_breakeven_stays_intraday_under_close_mode(self):
         """保本止损在收盘口径下**仍按盘中**触发，且按保本位成交。"""
-        bars = BASE + [(10.4, 10.5, 10.35, 10.45), (10.9, 11.2, 10.85, 11.15),
-                       (11.0, 11.1, 9.98, 10.3), (10.3, 10.4, 10.2, 10.35)]
+        bars = BASE + [
+            (10.4, 10.5, 10.35, 10.45),
+            (10.9, 11.2, 10.85, 11.15),
+            (11.0, 11.1, 9.98, 10.3),
+            (10.3, 10.4, 10.2, 10.35),
+        ]
         r = _run(bars, breakeven_trigger=0.05)
         assert r["reason"] == "breakeven_stop"
         assert r["ret"] == pytest.approx(0.0, abs=1e-9), "按成本价成交，不是收盘价"
@@ -253,12 +295,18 @@ class TestStopTickBuffer:
 
     def test_default_zero_keeps_old_behavior(self):
         import inspect
-        assert inspect.signature(simulate_b1_trade).parameters[
-            "stop_tick_buffer"].default == 0
+
+        assert (
+            inspect.signature(simulate_b1_trade).parameters["stop_tick_buffer"].default
+            == 0
+        )
 
     def test_buffer_widens_stop_and_avoids_marginal_break(self):
-        bars = BASE + [(9.92, 9.98, 9.88, 9.89), (9.9, 10.1, 9.89, 10.05),
-                       (10.1, 10.3, 10.05, 10.25)]
+        bars = BASE + [
+            (9.92, 9.98, 9.88, 9.89),
+            (9.9, 10.1, 9.89, 10.05),
+            (10.1, 10.3, 10.05, 10.25),
+        ]
         tight = _run(bars, stop_tick_buffer=0)
         loose = _run(bars, stop_tick_buffer=3)
         assert tight["reason"] == "stop"
@@ -275,15 +323,19 @@ class TestStopTickBuffer:
 class TestCenterRising:
     """收盘价重心（材料持股手册「一等马：收盘价重心上升为主」）。"""
 
-    @pytest.mark.parametrize("seq,expect", [
-        ([10, 10.2, 10.4, 10.6, 10.8, 11], True),
-        ([11, 10.8, 10.6, 10.4, 10.2, 10], False),
-        ([10, 9.9, 9.95, 10.3, 10.5, 10.6], True),        # 先跌后涨，重心上移
-        ([10, 10.3, 10.6, 10.9, 11.0, 10.85], True),      # 末根小阴但重心仍上升
-        ([10, 10.01, 9.99, 10.02, 9.98, 10.0], False),    # 横盘
-    ])
+    @pytest.mark.parametrize(
+        "seq,expect",
+        [
+            ([10, 10.2, 10.4, 10.6, 10.8, 11], True),
+            ([11, 10.8, 10.6, 10.4, 10.2, 10], False),
+            ([10, 9.9, 9.95, 10.3, 10.5, 10.6], True),  # 先跌后涨，重心上移
+            ([10, 10.3, 10.6, 10.9, 11.0, 10.85], True),  # 末根小阴但重心仍上升
+            ([10, 10.01, 9.99, 10.02, 9.98, 10.0], False),  # 横盘
+        ],
+    )
     def test_segment_mean_comparison(self, seq, expect):
         from custos.research.backtest_factors import _center_rising
+
         assert _center_rising(np.array(seq, float)) is expect
 
     def test_uses_means_not_endpoints(self):
@@ -293,6 +345,7 @@ class TestCenterRising:
         「重心上升」判成否），而那正是材料反复告诫的「忽略盘中/单日波动」。
         """
         from custos.research.backtest_factors import _center_rising
+
         # 末值 9.99 < 首值 10（末值比较会判 False），但前段均值 10.05 < 后段 10.46
         seq = np.array([10, 10.05, 10.1, 10.6, 10.8, 9.99], float)
         assert seq[-1] < seq[0], "构造前提：末值低于首值"
@@ -300,6 +353,7 @@ class TestCenterRising:
 
     def test_too_short_returns_false(self):
         from custos.research.backtest_factors import _center_rising
+
         for seq in ([], [10.0], [10, 10.5], [10, 10.5, 11]):
             assert _center_rising(np.array(seq, float)) is False
 
@@ -316,28 +370,39 @@ class TestCostZoneStop:
     会被误杀，而这类票里有后来的大赢家。
     """
 
-    FLAT = BASE + [(10.0, 10.04, 9.97, 10.0)] * 8          # 贴着 BBI 横盘
-    ABOVE_BBI = BASE + [(10.05, 10.15, 10.0, 10.12)] * 8   # 站上 BBI 但只涨 1.2%
-    RISING = BASE + [(9.95, 10.0, 9.92, 9.96), (9.96, 10.0, 9.93, 9.97),
-                     (9.97, 10.02, 9.94, 9.99), (9.99, 10.03, 9.96, 10.0),
-                     (10.0, 10.04, 9.97, 10.01), (10.01, 10.05, 9.98, 10.02)]
-    ESCAPED = BASE + [(10.2, 10.4, 10.15, 10.35)] * 8      # 已涨 3.5%
+    FLAT = BASE + [(10.0, 10.04, 9.97, 10.0)] * 8  # 贴着 BBI 横盘
+    ABOVE_BBI = BASE + [(10.05, 10.15, 10.0, 10.12)] * 8  # 站上 BBI 但只涨 1.2%
+    RISING = BASE + [
+        (9.95, 10.0, 9.92, 9.96),
+        (9.96, 10.0, 9.93, 9.97),
+        (9.97, 10.02, 9.94, 9.99),
+        (9.99, 10.03, 9.96, 10.0),
+        (10.0, 10.04, 9.97, 10.01),
+        (10.01, 10.05, 9.98, 10.02),
+    ]
+    ESCAPED = BASE + [(10.2, 10.4, 10.15, 10.35)] * 8  # 已涨 3.5%
 
     def test_default_off(self):
         import inspect
-        assert inspect.signature(simulate_b1_trade).parameters[
-            "cost_zone_bars"].default == 0
+
+        assert (
+            inspect.signature(simulate_b1_trade).parameters["cost_zone_bars"].default
+            == 0
+        )
 
     def test_all_three_flat_is_cut(self):
         r = _run(self.FLAT, cost_zone_bars=3)
         assert r["reason"] == "cost_zone_stop"
         assert r["holding"] == 4, "3 个交易日 + 多等一天"
 
-    @pytest.mark.parametrize("attr,why", [
-        ("ABOVE_BBI", "已站上 BBI"),
-        ("RISING", "收盘价重心上升"),
-        ("ESCAPED", "已脱离成本区"),
-    ])
+    @pytest.mark.parametrize(
+        "attr,why",
+        [
+            ("ABOVE_BBI", "已站上 BBI"),
+            ("RISING", "收盘价重心上升"),
+            ("ESCAPED", "已脱离成本区"),
+        ],
+    )
     def test_any_rising_dimension_keeps_position(self, attr, why):
         """任一维度显示还在涨就留着——旧判据会把前两种也砍掉。"""
         r = _run(getattr(self, attr), cost_zone_bars=3)
@@ -355,7 +420,7 @@ class TestCostZoneStop:
 
     def test_uses_close_not_intraday_high(self):
         """脱离成本区用收盘价判——盘中冲高又回落不算（材料：忽略盘中冲高回落）。"""
-        spike = BASE + [(10.0, 10.9, 9.98, 10.0)] * 8       # 盘中冲 9%，收盘平
+        spike = BASE + [(10.0, 10.9, 9.98, 10.0)] * 8  # 盘中冲 9%，收盘平
         assert _run(spike, cost_zone_bars=3)["reason"] == "cost_zone_stop"
 
     def test_off_is_byte_identical(self):

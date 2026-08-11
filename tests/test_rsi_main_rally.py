@@ -9,6 +9,7 @@ RSI 的价值在**区间行为**而非 70/30 超买超卖：强势股 RSI 会长
 基于高低点的资金流入占比）。原文**源码与文字描述相反**（CROSS 方向），两种口径都实现
 由回测判定。
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -23,15 +24,23 @@ from custos.core.factors import rsi_state as rs
 def _mk(closes, highs=None, lows=None, vols=None):
     c = np.asarray(closes, float)
     o = np.concatenate(([c[0]], c[:-1]))
-    return pd.DataFrame({
-        "date": pd.bdate_range("2024-01-02", periods=len(c)),
-        "open": o,
-        "high": np.asarray(highs, float) if highs is not None else np.maximum(c, o) * 1.01,
-        "low": np.asarray(lows, float) if lows is not None else np.minimum(c, o) * 0.99,
-        "close": c,
-        "volume": np.asarray(vols, float) if vols is not None else np.full(len(c), 4e5),
-        "amount": np.full(len(c), 4e6),
-    })
+    return pd.DataFrame(
+        {
+            "date": pd.bdate_range("2024-01-02", periods=len(c)),
+            "open": o,
+            "high": np.asarray(highs, float)
+            if highs is not None
+            else np.maximum(c, o) * 1.01,
+            "low": np.asarray(lows, float)
+            if lows is not None
+            else np.minimum(c, o) * 0.99,
+            "close": c,
+            "volume": np.asarray(vols, float)
+            if vols is not None
+            else np.full(len(c), 4e5),
+            "amount": np.full(len(c), 4e6),
+        }
+    )
 
 
 class TestRsiFormula:
@@ -43,7 +52,9 @@ class TestRsiFormula:
         d = c.diff()
         au = d.clip(lower=0).ewm(alpha=1 / 14, adjust=False).mean()
         ad = d.abs().ewm(alpha=1 / 14, adjust=False).mean()
-        assert float(got.iloc[-1]) == pytest.approx(float((au / ad * 100).iloc[-1]), abs=1e-9)
+        assert float(got.iloc[-1]) == pytest.approx(
+            float((au / ad * 100).iloc[-1]), abs=1e-9
+        )
 
     def test_bounded_0_100(self):
         rising = pd.Series(np.linspace(10, 30, 80))
@@ -96,8 +107,12 @@ class TestRsiRegime:
         r = rs.rsi_regime(_mk(c))
         assert r["deep_oversold"] is True
         assert r["rsi"] < rs.DEEP_OVERSOLD
-        assert r["state"] in ("strong", "neutral", "weak_rebound",
-                              "decline_continuation")      # 不含 deep_oversold
+        assert r["state"] in (
+            "strong",
+            "neutral",
+            "weak_rebound",
+            "decline_continuation",
+        )  # 不含 deep_oversold
 
     def test_ideal_b1_is_strong_plus_deep(self):
         """长期强 + 当前深跌 = B1 最理想形态，必须能被识别且得最高分。"""
@@ -129,8 +144,11 @@ class TestRsiDivergence:
     def test_bullish_divergence(self):
         """价格创新低而 RSI 不创新低。"""
         # 第一段深跌到 10 → 反弹 → 再跌到略低于 10 但跌势缓和
-        c = list(np.linspace(20, 10, 40)) + list(np.linspace(10.2, 14, 12)) \
+        c = (
+            list(np.linspace(20, 10, 40))
+            + list(np.linspace(10.2, 14, 12))
             + list(np.linspace(13.8, 9.9, 18))
+        )
         r = rs.rsi_divergence(_mk(c))
         assert r["available"] is True
         assert r["price_new_low"] is True
@@ -158,6 +176,7 @@ class TestRsiMulti:
         ⚠️ 必须用**带波动**的序列：单调下跌时 up 恒为 0 ⇒ RSI 恒为 0、三者相等，
         测不出任何东西（我第一版就踩了这个坑）。
         """
+
         def walk(n, drift, seed, p0=30.0):
             rng = np.random.default_rng(seed)
             p, out = p0, []
@@ -165,10 +184,11 @@ class TestRsiMulti:
                 p *= (1 + drift) * (1 + 0.012 * np.sin(i / 2.3) + rng.normal(0, 0.004))
                 out.append(p)
             return out
+
         steady = _mk(walk(90, -0.004, 7))
         accel = _mk(walk(50, -0.001, 7) + walk(40, -0.012, 9))
         assert rs.rsi_multi(steady)["available"] is True
-        assert rs.rsi_multi(accel)["stacked_low"] is True        # 加速跌:短<中<长
+        assert rs.rsi_multi(accel)["stacked_low"] is True  # 加速跌:短<中<长
 
     def test_fast_cross_detected(self):
         c = list(np.linspace(30, 12, 70)) + list(np.linspace(12.2, 16, 12))
@@ -186,8 +206,9 @@ class TestCci:
         tp = (df.high + df.low + df.close) / 3
         ma = tp.rolling(14).mean()
         ad = tp.rolling(14).apply(lambda x: np.abs(x - x.mean()).mean(), raw=True)
-        assert float(got.iloc[-1]) == pytest.approx(float(((tp - ma) / (0.015 * ad)).iloc[-1]),
-                                                    abs=1e-9)
+        assert float(got.iloc[-1]) == pytest.approx(
+            float(((tp - ma) / (0.015 * ad)).iloc[-1]), abs=1e-9
+        )
 
     def test_negative_in_oversold(self):
         df = _mk(np.linspace(30, 10, 80))
@@ -222,7 +243,14 @@ class TestMainRallyStart:
     def test_reports_all_conditions(self):
         r = mr.detect_main_rally_start(self._oversold_turn())
         assert r["available"] is True
-        for k in ("flow_ok", "rsi_ok", "cci_ok", "j_turn_up", "t1_ok", "conditions_met"):
+        for k in (
+            "flow_ok",
+            "rsi_ok",
+            "cci_ok",
+            "j_turn_up",
+            "t1_ok",
+            "conditions_met",
+        ):
             assert k in r
 
     def test_cross_mode_both_directions_available(self):
@@ -237,12 +265,14 @@ class TestMainRallyStart:
     def test_source_code_semantics_is_default(self):
         """默认必须是**源码口径**(below)——文字描述与源码相反，源码更可信。"""
         import inspect
+
         sig = inspect.signature(mr.detect_main_rally_start)
         assert sig.parameters["cross_mode"].default == "below"
 
     def test_j_turn_matches_project_j(self):
         """原文 D11 就是本项目的 J 值，必须同口径。"""
         from custos.pipeline.market_timing.technical_monitor import kdj
+
         df = self._oversold_turn()
         mine = float(mr._j_series(df).iloc[-1])
         assert mine == pytest.approx(float(kdj(df)["j"]), abs=1e-3)
@@ -251,7 +281,7 @@ class TestMainRallyStart:
         assert mr.FLOW_THRESHOLD == 0.8
         assert mr.RSI_N == 7 and mr.RSI_OVERSOLD == 20.0
         assert mr.CCI_N == 14 and mr.CCI_EXTREME == -100.0
-        assert mr.MAIN_RALLY_MIN_BARS == 60      # 原文 BARSCOUNT(C)>60
+        assert mr.MAIN_RALLY_MIN_BARS == 60  # 原文 BARSCOUNT(C)>60
 
     def test_short_history_unavailable(self):
         r = mr.detect_main_rally_start(_mk(np.linspace(10, 12, 30)))
@@ -263,16 +293,37 @@ class TestRegistration:
     def test_scorer_registered(self, name):
         assert name in bt.SCORERS
 
-    @pytest.mark.parametrize("name", ["rsi_strong", "rsi_bull_div", "j_low_rsi_strong",
-                                      "j_low_rsi_div", "main_rally", "main_rally_above"])
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "rsi_strong",
+            "rsi_bull_div",
+            "j_low_rsi_strong",
+            "j_low_rsi_div",
+            "main_rally",
+            "main_rally_above",
+        ],
+    )
     def test_gate_registered(self, name):
         assert name in bt.ENTRY_GATES
 
-    @pytest.mark.parametrize("name", ["rsi_strong", "rsi_bull_div", "j_low_rsi_strong",
-                                      "j_low_rsi_div", "main_rally", "main_rally_above"])
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "rsi_strong",
+            "rsi_bull_div",
+            "j_low_rsi_strong",
+            "j_low_rsi_div",
+            "main_rally",
+            "main_rally_above",
+        ],
+    )
     def test_gates_never_raise(self, name):
-        for df in (_mk([10.0] * 5), _mk(np.linspace(10, 20, 150)),
-                   _mk(np.linspace(30, 10, 150))):
+        for df in (
+            _mk([10.0] * 5),
+            _mk(np.linspace(10, 20, 150)),
+            _mk(np.linspace(30, 10, 150)),
+        ):
             assert isinstance(bt.ENTRY_GATES[name](df), bool)
 
     def test_scorers_return_none_on_short_history(self):
@@ -282,8 +333,10 @@ class TestRegistration:
 
     def test_j_low_rsi_gates_are_intersections(self):
         df = _mk(np.linspace(30, 10, 150))
-        for name, part in (("j_low_rsi_strong", "rsi_strong"),
-                           ("j_low_rsi_div", "rsi_bull_div")):
+        for name, part in (
+            ("j_low_rsi_strong", "rsi_strong"),
+            ("j_low_rsi_div", "rsi_bull_div"),
+        ):
             expect = bt.ENTRY_GATES["j_low"](df) and bt.ENTRY_GATES[part](df)
             assert bt.ENTRY_GATES[name](df) is bool(expect)
 
@@ -293,6 +346,7 @@ class TestNotWiredIntoScreening:
         import inspect
 
         from custos.pipeline.screening import score_candidates as sc
+
         src = inspect.getsource(sc)
         for name in ("rsi_state", "main_rally", "rsi_regime"):
             assert name not in src, "接入选股链前必须先有回测证据"

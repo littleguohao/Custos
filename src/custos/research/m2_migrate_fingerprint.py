@@ -15,6 +15,7 @@ owner 先跑 300 样本、再跑 1000 样本时，300 的旧文件被 `[SKIP]` �
     uv run python src/custos/research/m2_migrate_fingerprint.py            # 预览
     uv run python src/custos/research/m2_migrate_fingerprint.py --apply    # 执行
 """
+
 from __future__ import annotations
 
 import argparse
@@ -36,7 +37,7 @@ BANDS_AMV = [(150, 99999, 1000), (45, 150, 300), (10, 45, 100)]
 def _n_of(p: pathlib.Path) -> int | None:
     try:
         d = json.loads(p.read_text(encoding="utf-8"))
-    except Exception as e:                                     # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
         print(f"[WARN] 读不了 {p.name}: {e}")
         return None
     for k in ("trade_summary", "trade_sim", "summary"):
@@ -64,15 +65,22 @@ def _infer(name: str, n: int) -> int | None:
 def main() -> int:
     ap = argparse.ArgumentParser(description="为 m2_sweep 旧结果补样本量指纹")
     ap.add_argument("--apply", action="store_true", help="真正重命名（默认只预览）")
-    ap.add_argument("--only-sample", type=int, default=0,
-                    help="只迁移推断为该样本量的文件（如 1000）")
+    ap.add_argument(
+        "--only-sample",
+        type=int,
+        default=0,
+        help="只迁移推断为该样本量的文件（如 1000）",
+    )
     a = ap.parse_args()
 
     if not OUTDIR.exists():
         print(f"目录不存在: {OUTDIR}")
         return 1
-    legacy = [p for p in sorted(OUTDIR.glob("*__*.json"))
-              if not re.search(r"__s\d+(_cw)?\.json$", p.name)]
+    legacy = [
+        p
+        for p in sorted(OUTDIR.glob("*__*.json"))
+        if not re.search(r"__s\d+(_cw)?\.json$", p.name)
+    ]
     if not legacy:
         print("没有需要迁移的旧文件（都已带指纹）")
         return 0
@@ -133,9 +141,11 @@ def main() -> int:
             continue
         old.rename(new)
         done += 1
-    print(f"\n已重命名 {done} 个文件。现在跑："
-          f"\n  uv run python src/custos/research/m2_stop_sweep.py --sample 1000"
-          f"\n缺失的方案会自动补跑，已完成的会 [SKIP]。")
+    print(
+        f"\n已重命名 {done} 个文件。现在跑："
+        f"\n  uv run python src/custos/research/m2_stop_sweep.py --sample 1000"
+        f"\n缺失的方案会自动补跑，已完成的会 [SKIP]。"
+    )
     return 0
 
 

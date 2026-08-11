@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """news package — re-export public API from rss_filter.py."""
+
 from custos.datasource.news.rss_filter import (
     load,
     dump,
@@ -9,7 +10,8 @@ from custos.datasource.news.rss_filter import (
     bare,
     premarket_window,
     entities,
-    dedupe)
+    dedupe,
+)
 
 __all__ = [
     "load",

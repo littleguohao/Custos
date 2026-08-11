@@ -7,6 +7,7 @@
 ② 用了代理必须留痕（proxy/proxy_note/fallback_source），不能让读报告的人
    把 ETF 涨跌当成指数涨跌。
 """
+
 from __future__ import annotations
 
 import pandas as pd
@@ -45,6 +46,7 @@ class TestFetch:
                 if closes is None:
                     return None
                 return pd.DataFrame({"close": closes})
+
         monkeypatch.setattr(t, "_get_ext_client", lambda timeout=12: Q())
 
     def test_change_pct_computed(self, monkeypatch):
@@ -66,6 +68,7 @@ class TestFetch:
     def test_exception_returns_none_not_raise(self, monkeypatch):
         def boom(timeout=12):
             raise OSError("ext down")
+
         monkeypatch.setattr(t, "_get_ext_client", boom)
         assert t.fetch_ext_change("NVDA") is None
 
@@ -101,6 +104,7 @@ class TestReconnect:
                 return object()
 
         import mootdx.quotes as mq
+
         monkeypatch.setattr(mq, "Quotes", FakeQuotes)
         monkeypatch.setattr(t, "_client", None)
         monkeypatch.setattr(t, "_client_created_at", 0.0)
@@ -117,28 +121,41 @@ class TestCollectorIntegration:
         """Yahoo 挂了走 ext 时，必须留下 degraded 与 fallback_source 供下游归因。"""
         from custos.datasource import overseas_market_collector as omc
 
-        monkeypatch.setattr(omc, "SYMBOLS",
-                            {"nvda": {"symbol": "NVDA", "name": "英伟达",
-                                      "group": "ai_leader"}})
+        monkeypatch.setattr(
+            omc,
+            "SYMBOLS",
+            {"nvda": {"symbol": "NVDA", "name": "英伟达", "group": "ai_leader"}},
+        )
         monkeypatch.setattr(omc, "FIELD_MAP", {"nvda": "nvda_change_pct"})
 
         def yahoo_down(symbol, region=""):
             raise OSError("yahoo 404")
+
         monkeypatch.setattr(omc, "fetch_chart", yahoo_down)
-        monkeypatch.setattr(t, "fetch_ext_change",
-                            lambda s, **kw: {"change_pct": 1.5, "last_close": 208.0,
-                                             "prev_close": 204.9,
-                                             "source": "TDX ext (market=74, NVDA)",
-                                             "proxy": False, "proxy_note": ""})
+        monkeypatch.setattr(
+            t,
+            "fetch_ext_change",
+            lambda s, **kw: {
+                "change_pct": 1.5,
+                "last_close": 208.0,
+                "prev_close": 204.9,
+                "source": "TDX ext (market=74, NVDA)",
+                "proxy": False,
+                "proxy_note": "",
+            },
+        )
         out = tmp_path / "o.json"
         import sys as _s
-        monkeypatch.setattr(_s, "argv",
-                            ["x", "--date", "2026-08-04", "--input", str(out)])
+
+        monkeypatch.setattr(
+            _s, "argv", ["x", "--date", "2026-08-04", "--input", str(out)]
+        )
         try:
             omc.main()
         except SystemExit:
             pass
         import json
+
         d = json.loads(out.read_text(encoding="utf-8"))
         ov = d["overseas_market"]
         assert ov["nvda_change_pct"] == 1.5
@@ -148,22 +165,33 @@ class TestCollectorIntegration:
 
     def test_no_fallback_key_when_yahoo_works(self, monkeypatch, tmp_path):
         from custos.datasource import overseas_market_collector as omc
-        monkeypatch.setattr(omc, "SYMBOLS",
-                            {"nvda": {"symbol": "NVDA", "name": "英伟达",
-                                      "group": "ai_leader"}})
+
+        monkeypatch.setattr(
+            omc,
+            "SYMBOLS",
+            {"nvda": {"symbol": "NVDA", "name": "英伟达", "group": "ai_leader"}},
+        )
         monkeypatch.setattr(omc, "FIELD_MAP", {"nvda": "nvda_change_pct"})
-        monkeypatch.setattr(omc, "fetch_chart",
-                            lambda symbol, region="": {"change_pct": 0.8,
-                                                       "source": "Yahoo Finance chart API"})
+        monkeypatch.setattr(
+            omc,
+            "fetch_chart",
+            lambda symbol, region="": {
+                "change_pct": 0.8,
+                "source": "Yahoo Finance chart API",
+            },
+        )
         out = tmp_path / "o.json"
         import sys as _s
-        monkeypatch.setattr(_s, "argv",
-                            ["x", "--date", "2026-08-04", "--input", str(out)])
+
+        monkeypatch.setattr(
+            _s, "argv", ["x", "--date", "2026-08-04", "--input", str(out)]
+        )
         try:
             omc.main()
         except SystemExit:
             pass
         import json
+
         ov = json.loads(out.read_text(encoding="utf-8"))["overseas_market"]
         assert "fallback_source" not in ov
         assert ov["source"] == "Yahoo Finance chart API"
@@ -185,14 +213,23 @@ class TestOverseasAsOfDerivation:
         import sys as _s
 
         from custos.datasource import overseas_market_collector as omc
-        monkeypatch.setattr(omc, "SYMBOLS",
-                            {"nvda": {"symbol": "NVDA", "name": "英伟达", "group": "ai_leader"},
-                             "sox": {"symbol": "^SOX", "name": "费半", "group": "ai_leader"}})
-        monkeypatch.setattr(omc, "FIELD_MAP",
-                            {"nvda": "nvda_change_pct", "sox": "sox_change_pct"})
+
+        monkeypatch.setattr(
+            omc,
+            "SYMBOLS",
+            {
+                "nvda": {"symbol": "NVDA", "name": "英伟达", "group": "ai_leader"},
+                "sox": {"symbol": "^SOX", "name": "费半", "group": "ai_leader"},
+            },
+        )
+        monkeypatch.setattr(
+            omc, "FIELD_MAP", {"nvda": "nvda_change_pct", "sox": "sox_change_pct"}
+        )
         monkeypatch.setattr(omc, "fetch_chart", chart)
         out = tmp_path / "o.json"
-        monkeypatch.setattr(_s, "argv", ["x", "--date", "2026-08-04", "--input", str(out)])
+        monkeypatch.setattr(
+            _s, "argv", ["x", "--date", "2026-08-04", "--input", str(out)]
+        )
         try:
             omc.main()
         except SystemExit:
@@ -205,26 +242,34 @@ class TestOverseasAsOfDerivation:
         取 max 的道理：几个市场收盘时间不同，`as_of` 该表示「这批数字里最新的
         那个截止到什么时候」。取错会让门控对着更早的时间判新鲜度。
         """
-        stamps = {"NVDA": 1_754_300_000, "^SOX": 1_754_400_000}   # ^SOX 更晚
+        stamps = {"NVDA": 1_754_300_000, "^SOX": 1_754_400_000}  # ^SOX 更晚
 
         def chart(symbol, region=""):
-            return {"change_pct": 1.0, "last_timestamp": stamps[symbol],
-                    "source": "Yahoo Finance chart API"}
+            return {
+                "change_pct": 1.0,
+                "last_timestamp": stamps[symbol],
+                "source": "Yahoo Finance chart API",
+            }
 
         ov = self._run(monkeypatch, tmp_path, chart)
         assert ov["as_of_basis"] == "max(last_timestamp) across symbols"
         from datetime import datetime
         from zoneinfo import ZoneInfo
-        want = datetime.fromtimestamp(max(stamps.values()),
-                                      ZoneInfo("Asia/Shanghai")).isoformat(timespec="seconds")
+
+        want = datetime.fromtimestamp(
+            max(stamps.values()), ZoneInfo("Asia/Shanghai")
+        ).isoformat(timespec="seconds")
         assert ov["as_of"] == want, "as_of 应为最大时间戳，取到的却是别的"
 
-    def test_partial_timestamps_still_use_the_available_max(self, monkeypatch, tmp_path):
+    def test_partial_timestamps_still_use_the_available_max(
+        self, monkeypatch, tmp_path
+    ):
         """只有部分 symbol 带时间戳时，用**拿到的那些**里的最大值，不回落到采集时刻。"""
+
         def chart(symbol, region=""):
             if symbol == "NVDA":
                 return {"change_pct": 1.0, "last_timestamp": 1_754_300_000}
-            return {"change_pct": 0.5}          # ^SOX 没给时间戳
+            return {"change_pct": 0.5}  # ^SOX 没给时间戳
 
         ov = self._run(monkeypatch, tmp_path, chart)
         assert ov["as_of_basis"] == "max(last_timestamp) across symbols"
@@ -241,8 +286,9 @@ class TestOverseasAsOfDerivation:
         **「编一个 as_of 等于给门控一个假的新鲜度」**。
         形状也对齐 amv_0：**键存在、值为 None**（不是省略键）。
         """
+
         def chart(symbol, region=""):
-            return {"change_pct": 1.0}          # 两个 symbol 都没时间戳
+            return {"change_pct": 1.0}  # 两个 symbol 都没时间戳
 
         ov = self._run(monkeypatch, tmp_path, chart)
         assert ov["as_of"] is None, f"不得编 as_of，实际 {ov['as_of']!r}"
@@ -259,12 +305,16 @@ class TestOverseasAsOfDerivation:
         """
         from custos.core import runtime_guards as rg
 
-        ov = self._run(monkeypatch, tmp_path, lambda symbol, region="": {"change_pct": 1.0})
+        ov = self._run(
+            monkeypatch, tmp_path, lambda symbol, region="": {"change_pct": 1.0}
+        )
         gate = rg.market_quality_gate(
-            {"date": "2026-08-04", "overseas_market": ov}, "2026-08-04")
+            {"date": "2026-08-04", "overseas_market": ov}, "2026-08-04"
+        )
         chk = next(c for c in gate["checks"] if c["field"] == "overseas")
-        assert chk["quality"] == "candidate", \
+        assert chk["quality"] == "candidate", (
             f"应降到 candidate（值在、新鲜度不可证），实际 {chk['quality']}"
+        )
 
     def test_fallback_path_really_lacks_timestamp(self):
         """⚠️ 钉住上面几条的**前提事实**：TDX ext 降级不返回 `last_timestamp`。
@@ -277,8 +327,9 @@ class TestOverseasAsOfDerivation:
         from custos.datasource import tdx_ext_quotes as tq
 
         src = inspect.getsource(tq.fetch_ext_change)
-        assert "last_timestamp" not in src, \
+        assert "last_timestamp" not in src, (
             "fetch_ext_change 开始返回 last_timestamp 了 —— 请重新评估 #52 的前提"
+        )
 
     def test_downgrade_does_not_change_overall_status(self):
         """⚠️ overseas 降级**不得改变整体 `status`** —— 这是路子① 安全的前提。
@@ -297,19 +348,37 @@ class TestOverseasAsOfDerivation:
         D = "2026-08-10"
         full = {
             "date": D,
-            "amv_0": {"amv_change_pct": 1.0, "quality": "confirmed",
-                      "as_of": D, "effective_state": "中性"},
-            "market_breadth": {"up_count": 2600, "down_count": 2100,
-                               "as_of": D, "quality": "auto"},
-            "turnover": {"total_turnover": 9e11, "turnover_change_pct": 3.0,
-                         "as_of": D, "quality": "auto"},
+            "amv_0": {
+                "amv_change_pct": 1.0,
+                "quality": "confirmed",
+                "as_of": D,
+                "effective_state": "中性",
+            },
+            "market_breadth": {
+                "up_count": 2600,
+                "down_count": 2100,
+                "as_of": D,
+                "quality": "auto",
+            },
+            "turnover": {
+                "total_turnover": 9e11,
+                "turnover_change_pct": 3.0,
+                "as_of": D,
+                "quality": "auto",
+            },
             "sentiment": {"limit_up_count": 45, "as_of": D, "quality": "auto"},
         }
         results = {}
         for label, ov in [
             ("fabricated", {"sox_change_pct": 2.019, "as_of": f"{D}T14:44:40+08:00"}),
-            ("none", {"sox_change_pct": 2.019, "as_of": None,
-                      "as_of_basis": "no_timestamp_from_any_symbol"}),
+            (
+                "none",
+                {
+                    "sox_change_pct": 2.019,
+                    "as_of": None,
+                    "as_of_basis": "no_timestamp_from_any_symbol",
+                },
+            ),
         ]:
             r = rg.market_quality_gate({**full, "overseas_market": ov}, D)
             chk = next(c for c in r["checks"] if c["field"] == "overseas")
@@ -317,8 +386,9 @@ class TestOverseasAsOfDerivation:
 
         assert results["fabricated"][0] == "confirmed"
         assert results["none"][0] == "candidate"
-        assert results["fabricated"][1] == results["none"][1] == "pass", \
+        assert results["fabricated"][1] == results["none"][1] == "pass", (
             f"overseas 降级改变了整体 status：{results}"
+        )
 
 
 class TestImpactSummary:
@@ -332,6 +402,7 @@ class TestImpactSummary:
     @staticmethod
     def _mod():
         from custos.datasource import overseas_market_collector as omc
+
         return omc
 
     @staticmethod
@@ -359,8 +430,7 @@ class TestImpactSummary:
         """
         out = self._mod().impact_summary({})
         assert "偏强" not in out and "偏弱" not in out
-        assert "AI/半导体链整体中性" not in out, \
-            "无数据时不该给出 AI 链的中性结论"
+        assert "AI/半导体链整体中性" not in out, "无数据时不该给出 AI 链的中性结论"
 
     def test_partial_data_uses_only_what_exists(self):
         """只有 sox 时也要能给结论 —— 平均是对**非 None** 的那些取的。"""
@@ -374,6 +444,7 @@ class TestA50Sanity:
     def test_large_move_is_flagged_not_silently_dropped(self):
         r = {"a50_futures": {"change_pct": 5.2}}
         from custos.datasource.collect import collect_incremental_market as cim
+
         cim._a50_sanity(r)
         a50 = r["a50_futures"]
         assert a50["suspect"] is True
@@ -382,18 +453,21 @@ class TestA50Sanity:
     def test_value_is_not_modified(self):
         """⚠️ **只标记不改值** —— 改值会让下游算出的数字与源不一致且无从追溯。"""
         from custos.datasource.collect import collect_incremental_market as cim
+
         r = {"a50_futures": {"change_pct": -4.4}}
         cim._a50_sanity(r)
         assert r["a50_futures"]["change_pct"] == -4.4
 
     def test_normal_move_is_not_flagged(self):
         from custos.datasource.collect import collect_incremental_market as cim
+
         r = {"a50_futures": {"change_pct": 1.2}}
         cim._a50_sanity(r)
         assert "suspect" not in r["a50_futures"]
 
     def test_non_numeric_does_not_crash(self):
         from custos.datasource.collect import collect_incremental_market as cim
+
         for bad in (None, "N/A", ""):
             r = {"a50_futures": {"change_pct": bad}}
             cim._a50_sanity(r)
@@ -401,6 +475,7 @@ class TestA50Sanity:
 
     def test_missing_section_does_not_crash(self):
         from custos.datasource.collect import collect_incremental_market as cim
+
         r = {}
         cim._a50_sanity(r)
         assert r == {}
