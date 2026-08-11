@@ -20,7 +20,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 for _p in ("src", "src/pipeline/market_timing", "src/datasource/local_tdx"):
     sys.path.insert(0, str(ROOT / _p))
 
-from market_timing import refresh_market_indices as rmi  # noqa: E402
+import refresh_market_indices as rmi  # noqa: E402
 
 DAY = "2026-08-11"
 

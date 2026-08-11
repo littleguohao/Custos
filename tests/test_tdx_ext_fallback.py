@@ -12,7 +12,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from market_timing import tdx_ext_quotes as t
+import tdx_ext_quotes as t
 
 
 class TestCoverage:
@@ -115,7 +115,7 @@ class TestReconnect:
 class TestCollectorIntegration:
     def test_fallback_marks_degraded_and_source(self, monkeypatch, tmp_path):
         """Yahoo 挂了走 ext 时，必须留下 degraded 与 fallback_source 供下游归因。"""
-        from market_timing import overseas_market_collector as omc
+        import overseas_market_collector as omc
 
         monkeypatch.setattr(omc, "SYMBOLS",
                             {"nvda": {"symbol": "NVDA", "name": "英伟达",
@@ -147,7 +147,7 @@ class TestCollectorIntegration:
         assert "fallback_source" in ov and "TDX ext" in ov["source"]
 
     def test_no_fallback_key_when_yahoo_works(self, monkeypatch, tmp_path):
-        from market_timing import overseas_market_collector as omc
+        import overseas_market_collector as omc
         monkeypatch.setattr(omc, "SYMBOLS",
                             {"nvda": {"symbol": "NVDA", "name": "英伟达",
                                       "group": "ai_leader"}})
@@ -184,7 +184,7 @@ class TestOverseasAsOfDerivation:
         import json
         import sys as _s
 
-        from market_timing import overseas_market_collector as omc
+        import overseas_market_collector as omc
         monkeypatch.setattr(omc, "SYMBOLS",
                             {"nvda": {"symbol": "NVDA", "name": "英伟达", "group": "ai_leader"},
                              "sox": {"symbol": "^SOX", "name": "费半", "group": "ai_leader"}})
@@ -274,7 +274,7 @@ class TestOverseasAsOfDerivation:
         """
         import inspect
 
-        from market_timing import tdx_ext_quotes as tq
+        import tdx_ext_quotes as tq
 
         src = inspect.getsource(tq.fetch_ext_change)
         assert "last_timestamp" not in src, \
@@ -331,7 +331,7 @@ class TestImpactSummary:
     #    类级别用不到 —— 第一版直接写 `omc.impact_summary` 得 NameError。
     @staticmethod
     def _mod():
-        from market_timing import overseas_market_collector as omc
+        import overseas_market_collector as omc
         return omc
 
     @staticmethod

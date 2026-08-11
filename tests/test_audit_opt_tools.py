@@ -623,26 +623,26 @@ class TestBreadthRatioHonesty:
         assert s == 7.5, "不可用必须走中性，不能吃一个偏低的估算比值"
 
     def test_resolve_total_stocks_env_override(self, monkeypatch):
-        from market_timing import breadth_basis as bb
+        import breadth_basis as bb
         monkeypatch.setenv("A_SHARE_TOTAL_STOCKS", "5401")
         total, src = bb.resolve_total_stocks()
         assert total == 5401 and "env" in src
 
     def test_resolve_total_stocks_rejects_garbage(self, monkeypatch):
-        from market_timing import breadth_basis as bb
+        import breadth_basis as bb
         monkeypatch.setenv("A_SHARE_TOTAL_STOCKS", "abc")
         total, src = bb.resolve_total_stocks()
         assert total is None
 
     def test_resolve_total_stocks_none_by_default(self, monkeypatch, tmp_path):
-        from market_timing import breadth_basis as bb
+        import breadth_basis as bb
         monkeypatch.delenv("A_SHARE_TOTAL_STOCKS", raising=False)
         monkeypatch.setattr(bb, "UNIVERSE_FILE", tmp_path / "nope.json")
         total, src = bb.resolve_total_stocks()
         assert total is None and src
 
     def test_resolve_total_stocks_from_universe_file(self, monkeypatch, tmp_path):
-        from market_timing import breadth_basis as bb
+        import breadth_basis as bb
         monkeypatch.delenv("A_SHARE_TOTAL_STOCKS", raising=False)
         p = tmp_path / "a_share_universe.json"
         p.write_text(json.dumps({"total": 5388, "as_of": "2026-07-20"}), encoding="utf-8")

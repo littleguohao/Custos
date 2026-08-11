@@ -23,7 +23,7 @@ class TestCompassQualityReachesLedger:
         return [{"date": "2026-08-03", "change_pct": 4.5}]
 
     def test_unverified_is_written_as_unverified(self, tmp_path):
-        from market_timing import sync_compass_amv as sca
+        import sync_compass_amv as sca
         led = tmp_path / "0amv_observations.jsonl"
         added, _ = sca.merge_ledger(self._records(), led, quality="unverified")
         assert added == 1
@@ -31,14 +31,14 @@ class TestCompassQualityReachesLedger:
         assert rec["quality"] == "unverified", "fallback 选链不得冒充真值"
 
     def test_verified_still_confirmed(self, tmp_path):
-        from market_timing import sync_compass_amv as sca
+        import sync_compass_amv as sca
         led = tmp_path / "0amv_observations.jsonl"
         sca.merge_ledger(self._records(), led, quality="confirmed")
         rec = json.loads(led.read_text(encoding="utf-8").strip())
         assert rec["quality"] == "confirmed"
 
     def test_default_remains_confirmed_for_back_compat(self, tmp_path):
-        from market_timing import sync_compass_amv as sca
+        import sync_compass_amv as sca
         led = tmp_path / "0amv_observations.jsonl"
         sca.merge_ledger(self._records(), led)
         assert json.loads(led.read_text(encoding="utf-8").strip())["quality"] == "confirmed"
@@ -46,7 +46,7 @@ class TestCompassQualityReachesLedger:
     def test_main_downgrades_and_skips_autofill_when_unverified(self, tmp_path, monkeypatch,
                                                                capsys):
         """端到端:parse_amv_daily 报 unverified → 台账降级 + 不写 amv_0day。"""
-        from market_timing import sync_compass_amv as sca
+        import sync_compass_amv as sca
 
         led = tmp_path / "led.jsonl"
         market = tmp_path / "market"
@@ -73,7 +73,7 @@ class TestCompassQualityReachesLedger:
         assert "未经真值校验" in out.out
 
     def test_main_autofills_when_verified(self, tmp_path, monkeypatch):
-        from market_timing import sync_compass_amv as sca
+        import sync_compass_amv as sca
 
         led = tmp_path / "led.jsonl"
         market = tmp_path / "market"

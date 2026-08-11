@@ -24,7 +24,13 @@ import json
 import os
 from pathlib import Path
 
-from paths import MARKET_DIR
+import sys
+
+_SRC = Path(__file__).resolve().parents[1]
+if str(_SRC / "core") not in sys.path:
+    sys.path.insert(0, str(_SRC / "core"))
+
+from paths import MARKET_DIR  # noqa: E402
 
 UNIVERSE_FILE = MARKET_DIR / "a_share_universe.json"
 ENV_KEY = "A_SHARE_TOTAL_STOCKS"

@@ -173,7 +173,7 @@ def main(argv=None) -> int:
 
     # 3c2. Refresh EOD daily K-lines into vipdoc via TQ-Local (needs TdxW running;
     #      best-effort so the pipeline still works when TdxW is off)
-    r = _run_stage(["uv", "run", "python", str(TOOLS / "pipeline" / "market_timing" / "refresh_eod_klines.py"),
+    r = _run_stage(["uv", "run", "python", str(TOOLS / "datasource" / "refresh_eod_klines.py"),
                     "--date", target], "refresh_eod_klines", note="best-effort，失败不中断")
     if not r["ok"]:
         print(f"[WARN] refresh_eod_klines failed: {r['out'][:200]}")
@@ -181,7 +181,7 @@ def main(argv=None) -> int:
         print(f"[OK] {r['out'].splitlines()[0] if r['out'] else 'EOD klines refreshed'}")
 
     # 3d. Refresh market indices from vipdoc (ensure a_share_indices + turnover are populated)
-    r = _run_stage(["uv", "run", "python", str(TOOLS / "pipeline" / "market_timing" / "refresh_market_indices.py"),
+    r = _run_stage(["uv", "run", "python", str(TOOLS / "datasource" / "refresh_market_indices.py"),
                     "--date", target], "refresh_market_indices", note="best-effort，失败不中断")
     if not r["ok"]:
         print(f"[WARN] refresh_market_indices failed: {r['out'][:200]}")
@@ -193,7 +193,7 @@ def main(argv=None) -> int:
     #     amv_0.quality 置 confirmed，随后 daily_pipeline 的 amv_state 才能据真值切换 regime
     #     （单日 >+4% 自动进多头 / <-2.3% 进空头，无需人工确认）。此前该脚本未接线，
     #     导致 0AMV 长期停留 candidate、regime 被锁定。
-    r = _run_stage(["uv", "run", "python", str(TOOLS / "pipeline" / "market_timing" / "sync_compass_amv.py"),
+    r = _run_stage(["uv", "run", "python", str(TOOLS / "datasource" / "sync_compass_amv.py"),
                     "--date", target], "sync_compass_amv", note="best-effort，失败不中断")
     if not r["ok"]:
         print(f"[WARN] sync_compass_amv failed: {r['out'][:200]}")

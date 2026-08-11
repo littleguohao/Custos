@@ -17,8 +17,8 @@
 
 CLI::
 
-    uv run python src/pipeline/market_timing/sync_compass_amv.py
-    uv run python src/pipeline/market_timing/sync_compass_amv.py --backfill-since 2025-11-11
+    uv run python src/datasource/sync_compass_amv.py
+    uv run python src/datasource/sync_compass_amv.py --backfill-since 2025-11-11
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Optional
 
 TOOLS_DIR = Path(__file__).resolve().parents[1]
-for _p in (TOOLS_DIR.parent / "core", TOOLS_DIR, TOOLS_DIR.parent / "datasource" / "local_tdx"):
+for _p in (TOOLS_DIR / "core", TOOLS_DIR / "datasource" / "local_tdx"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 

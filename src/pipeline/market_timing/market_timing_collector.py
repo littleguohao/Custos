@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 TOOLS_DIR = Path(__file__).resolve().parents[1]
-for _bp in (TOOLS_DIR, TOOLS_DIR.parent / "core"):  # core/: paths 等 L0 模块
+for _bp in (TOOLS_DIR, TOOLS_DIR.parent / "core", TOOLS_DIR.parent / "datasource"):  # core/: L0；datasource/: breadth_basis
     if str(_bp) not in sys.path:
         sys.path.insert(0, str(_bp))
 LOCAL_TDX_DIR = TOOLS_DIR.parent / "datasource" / "local_tdx"

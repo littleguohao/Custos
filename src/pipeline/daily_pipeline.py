@@ -201,7 +201,7 @@ def main():
             {"stage": "rss_filter", "ok": True, "skipped": True, "reason": "08:50 discovery reused"},
         ])
     else:
-        stages.append(run_stage([str(PY), str(MARKET_TIMING / "overseas_market_collector.py"), "--date", args.date], "overseas_market_collector", required=False))
+        stages.append(run_stage([str(PY), str(TOOLS / "datasource" / "overseas_market_collector.py"), "--date", args.date], "overseas_market_collector", required=False))
         stages.append(run_stage([str(PY), str(TOOLS / "datasource" / "news" / "rss_collector.py"), "--date", args.date], "rss_collector", required=False))
         stages.append(run_stage([str(PY), str(TOOLS / "datasource" / "news" / "rss_filter.py"), "--date", args.date,
                            "--session-type", args.session_type], "rss_filter", required=False))

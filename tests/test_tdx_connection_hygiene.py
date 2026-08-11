@@ -158,7 +158,7 @@ class TestKnownFixesStayFixed:
         assert "_with_client_retry" in src
 
     def test_tdx_ext_quotes(self):
-        src = (TOOLS / "pipeline" / "market_timing" / "tdx_ext_quotes.py").read_text(encoding="utf-8")
+        src = (TOOLS / "datasource" / "tdx_ext_quotes.py").read_text(encoding="utf-8")
         assert any(m in src for m in RECONNECT_MARKERS), \
             "tdx_ext_quotes 的重连机制被移除了（aeb3e25 修过）"
 

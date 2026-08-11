@@ -3,7 +3,7 @@ rem ============================================================================
 rem M2 扫描：可复现的后台跑批（Windows）
 rem
 rem 启动（在 strategy_team 根目录下，PowerShell）：
-rem     Start-Process -WindowStyle Hidden -FilePath "src\pipeline\screening\run_m2_sweep.cmd"
+rem     Start-Process -WindowStyle Hidden -FilePath "src\research\run_m2_sweep.cmd"
 rem 看进度（**必须加 -Encoding UTF8**，见下方第 5 条）：
 rem     Get-Content -Wait -Tail 40 -Encoding UTF8 artifacts\logs\m2_sweep\sweep_run.log
 rem 想中止：
@@ -53,7 +53,7 @@ rem 降路数时会在日志里打出原因。想更保守就把这里改小。
 set JOBS=6
 rem ---------------------------------------------------------------------------
 
-set SWEEP=src/pipeline/screening/m2_stop_sweep.py
+set SWEEP=src/research/m2_stop_sweep.py
 set LOG=artifacts\logs\m2_sweep\sweep_run.log
 set COMMON=--sample %SAMPLE% --window %WIN_START% %WIN_END% --pin-universe
 

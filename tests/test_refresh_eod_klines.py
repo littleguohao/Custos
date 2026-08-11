@@ -7,7 +7,7 @@ import json
 import pandas as pd
 import pytest
 
-from market_timing import refresh_eod_klines as rek
+import refresh_eod_klines as rek
 
 
 def _ok(value=None):
@@ -133,7 +133,7 @@ class TestMarketIndicesStaleness:
     """refresh_market_indices 的过期判定：available 但 latest_date/as_of 早于 --date 也要刷新。"""
 
     def test_is_stale_formats(self):
-        from market_timing import refresh_market_indices as rmi
+        import refresh_market_indices as rmi
 
         assert rmi._is_stale("20260717", "2026-07-20") is True
         assert rmi._is_stale("2026-07-17", "2026-07-20") is True
