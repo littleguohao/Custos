@@ -35,17 +35,30 @@ for _p in ("07_tools", "07_tools/trades", "07_tools/research"):
 
 
 def _write_ledger(path: pathlib.Path, rows):
+    """写主台账 CSV。列与生产口径一致（含 `发生金额`，`load_ledger` 必填）：
+
+    买入 = -(成交金额+费用)，卖出 = 成交金额-费用。本文件只核对**数量**，
+    现金流只要求列存在、口径大致正确。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
         w.writerow(["成交日期", "成交时间", "代码", "名称", "交易类别",
-                    "成交数量", "成交价格", "成交金额", "费用"])
+                    "成交数量", "成交价格", "成交金额", "费用", "发生金额"])
         for r in rows:
-            w.writerow(r)
+            date, time, code, name, cat, qty, price, amount, fee = r
+            cash = (amount - fee) if cat == "卖出" else -(amount + fee)
+            w.writerow([*r, cash])
 
 
 class TestActualScenarioAgreesWithProductionReplay:
-    """`actual` 情景的期末持仓 == 生产回放的持仓（数量口径）。"""
+    """`actual` 情景的期末持仓 == 生产回放的持仓（数量口径）。
+
+    核对的是这两层（同一份台账 CSV 各走一遍）：
+
+    - 生产侧：`incremental_ledger.compute_positions`（reconcile_positions 的同一条路径）
+    - 研究侧：`backtest_0amv_bear_regime.load_ledger` + `run_scenario("actual")`
+    """
 
     ROWS = [
         ("2026-07-01", "09:31", "600000", "浦发银行", "买入", 1000, 10.00, 10000.0, 5.0),
@@ -53,14 +66,16 @@ class TestActualScenarioAgreesWithProductionReplay:
         ("2026-07-10", "14:20", "600000", "浦发银行", "卖出", 800, 11.00, 8800.0, 6.0),
         ("2026-07-15", "09:40", "000001", "平安银行", "买入", 2000, 12.00, 24000.0, 8.0),
     ]
+    EXPECTED = {"600000": 700.0, "000001": 2000.0}   # 1000+500-800；2000
 
     def test_qty_matches_incremental_ledger(self, tmp_path):
-        """⚠️ 两条推导路径必须给出同一份数量。
+        """⚠️ 两条推导路径必须给出同一份数量 —— 真跑两侧再互相比对。
 
         差异的后果：反事实情景（no_bear_buys / rebound_reduce）都以 `actual`
         为基线做减法，基线错了三个数字全错，而 R4/R10 引用了这份回测。
         """
         from incremental_ledger import compute_positions
+        from research import backtest_0amv_bear_regime as br
 
         led = tmp_path / "master_trade_ledger.csv"
         _write_ledger(led, self.ROWS)
@@ -73,8 +88,20 @@ class TestActualScenarioAgreesWithProductionReplay:
         prod = compute_positions(df, [])
         prod_qty = {str(p["代码"]).zfill(6): float(p["持有数量"]) for p in prod}
 
-        # 期望：600000 = 1000+500-800 = 700；000001 = 2000
-        assert prod_qty == {"600000": 700.0, "000001": 2000.0}, prod_qty
+        # 研究侧：同一份台账走 load_ledger → run_scenario("actual")。
+        # regime/prices 不影响 actual 的数量（regime 只决定批次标签，
+        # 无行情时市值按成本折算），给最小输入即可。
+        trades = br.load_ledger(led)
+        days = sorted({t["date"] for t in trades})
+        res = br.run_scenario(trades, regime_map={}, amv_days=days, prices={},
+                              scenario="actual", sell_fee_rate=0.0,
+                              start=days[0], end=days[-1])
+        research_qty = {code: p["qty"] for code, p in res["positions_end"].items()}
+
+        assert prod_qty == self.EXPECTED, f"生产回放偏离手算基准：{prod_qty}"
+        assert research_qty == self.EXPECTED, f"研究 actual 情景偏离手算基准：{research_qty}"
+        assert research_qty == prod_qty, \
+            f"两条路径不一致：研究 {research_qty} vs 生产 {prod_qty}"
 
     def test_check_positions_reports_full_table_not_just_diffs(self, tmp_path,
                                                               monkeypatch):

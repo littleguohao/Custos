@@ -240,31 +240,35 @@ class TestSummaryTracksRerunState:
     def _rerun_table(self) -> str:
         s = (RESEARCH / "README.md").read_text(encoding="utf-8")
         i = s.index("## ⚠️ 重跑清单")
-        j = s.find("\n## ", i + 5)
-        return s[i:j] if j > 0 else s[i:]
+        # ⚠️ 终止于**下一个任意级别的标题**（h2/h3/...都算）：清单后面紧跟的
+        # 「### 三个根因」是 h3，只认 "\n## " 会让后续小节里带 [Rn] 的表格行
+        # 静默混进两个桶（2026-08-11 评审指出的脆弱点）。
+        m = re.search(r"\n#{2,6} ", s[i + 5:])
+        return s[i:i + 5 + m.start()] if m else s[i:]
+
+    def _rows(self):
+        """重跑清单的表格数据行：(状态列, 单元号)。表头/分隔行被剔除。
+
+        ⚠️ 完成与否只看**状态列**（第一列 `~~**P0**~~ ✅` 的删除线），
+        不看整行是否含 `~~` —— 待跑行的正文里出现删除线会被误判成已完成。
+        """
+        for ln in self._rerun_table().split("\n"):
+            if not ln.startswith("|"):
+                continue
+            cells = [c.strip() for c in ln.split("|")]
+            # cells[0] 是行首 "|" 前的空串；cells[1]=状态列，cells[2]=单元列
+            if len(cells) < 4 or cells[1] in ("", "优先级") or set(cells[1]) <= set("-: "):
+                continue
+            m = re.search(r"\[(R\d+)\]", cells[2])
+            if m:
+                yield cells[1], m.group(1)
 
     def _done_units(self) -> set[str]:
-        """重跑清单里已划掉（`~~P?~~ ✅`）的单元号。"""
-        import re
-        out = set()
-        for ln in self._rerun_table().split("\n"):
-            if not ln.startswith("|") or "~~" not in ln:
-                continue
-            m = re.search(r'\[(R\d+)\]', ln)
-            if m:
-                out.add(m.group(1))
-        return out
+        """重跑清单里状态列被删除线划掉（`~~P?~~ ✅`）的单元号。"""
+        return {u for status, u in self._rows() if status.startswith("~~")}
 
     def _pending_units(self) -> set[str]:
-        import re
-        out = set()
-        for ln in self._rerun_table().split("\n"):
-            if not ln.startswith("|") or "~~" in ln or ln.startswith("| 优先级") or ln.startswith("|---"):
-                continue
-            m = re.search(r'\[(R\d+)\]', ln)
-            if m:
-                out.add(m.group(1))
-        return out
+        return {u for status, u in self._rows() if not status.startswith("~~")}
 
     def test_table_parses_into_both_buckets(self):
         """⚠️ 守卫自证：两个桶都非空，否则下面的断言会**空转通过**。"""
@@ -296,7 +300,8 @@ class TestSummaryTracksRerunState:
         if not pending:
             pytest.skip("重跑清单已清空")
         s = (RESEARCH.parents[1] / self.SUMMARY).read_text(encoding="utf-8")
-        missing = [u for u in pending if u not in s]
+        # ⚠️ 带边界的匹配：子串 `u in s` 会让「R2」误中未来的「R20/R21」。
+        missing = [u for u in pending if not re.search(rf"\b{u}\b", s)]
         assert not missing, (
             f"以下单元仍待重跑但摘要页未点名：{missing}；"
             f"摘要页的结论若依赖它们，读者无从知道哪条还悬着")

@@ -21,6 +21,19 @@ for _p in ("07_tools", "07_tools/screening", "07_tools/local_tdx"):
 
 from screening import financials as fin  # noqa: E402
 
+
+@pytest.fixture(autouse=True)
+def _restore_fin_cache():
+    """`_fin_cache` 是模块级全局缓存 —— 测试写进去的条目（含 `latest: None`）
+    不还原会泄漏给同进程里后跑的其他测试文件（2026-08-11 评审指出）。"""
+    saved = dict(fin._fin_cache)
+    try:
+        yield
+    finally:
+        fin._fin_cache.clear()
+        fin._fin_cache.update(saved)
+
+
 class TestLoadFinancialsBestEffort:
     """⚠️ `load_financials` 是 **best-effort、绝不 raise、带缓存**（docstring）。
 

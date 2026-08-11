@@ -363,13 +363,27 @@ class BreadthCollectionTests(unittest.TestCase):
         self.assertAlmostEqual(out["880005"]["change_pct"], 2.0)
 
     def test_online_fallback_when_local_raises(self):
+        """本地 Reader 抛错 ⇒ 走在线兜底并**成功产出读数**。
+
+        ⚠️ 在线分支用 `df.iloc[-1]` + `last["datetime"]`，桩必须带 datetime 列 ——
+        不带的话在线分支 KeyError 落进错误记录路径，`out` 非空、调用次数也对，
+        断言照样全过而「兜底成功」从未发生（2026-08-11 评审抓到的实际形态）。
+        """
+        import pandas as pd
+        online = pd.DataFrame({"close": [100.0, 101.0],
+                               "datetime": ["2026-08-10", "2026-08-11"]})
         with mock.patch.object(chq, "_get_reader") as rd, \
              mock.patch.object(chq, "_client_call") as cc:
             rd.return_value.daily.side_effect = RuntimeError("TdxW 没开")
-            cc.return_value = self._frame([100.0, 101.0])
+            cc.return_value = online
             out = chq._collect_breadth()
-        self.assertTrue(out, "本地失败时应走在线兜底")
         self.assertEqual(len(cc.call_args_list), len(self.CODES))
+        for code in self.CODES:
+            self.assertEqual(out[code]["source"], "mootdx_online",
+                             f"{code} 应来自在线兜底：{out[code]}")
+            self.assertAlmostEqual(out[code]["change_pct"], 1.0)
+            self.assertEqual(out[code]["date"], "2026-08-11")
+            self.assertNotIn("error", out[code], "兜底成功时不该是错误记录")
 
     def test_single_bar_local_falls_through_to_online(self):
         """⚠️ 只有一根 K 线算不出环比 ⇒ 继续走在线兜底，

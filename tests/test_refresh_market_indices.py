@@ -47,6 +47,10 @@ def env(monkeypatch, tmp_path):
         if attr.isupper() and isinstance(v, pathlib.Path):
             monkeypatch.setattr(rmi, attr, tmp_path)
     monkeypatch.setattr(rmi, "BASE", tmp_path)
+    # ⚠️ main() 的 breadth 分支会经 resolve_total_stocks() 读**真实**的
+    # 01_data/.../a_share_universe.json（breadth_basis 的模块常量不在上面的
+    # patch 范围内）——只读但也有真实文件依赖，打桩断掉（2026-08-11 评审指出）。
+    monkeypatch.setattr(rmi, "resolve_total_stocks", lambda: (5538, "test_stub"))
     (tmp_path / "01_data" / "market").mkdir(parents=True, exist_ok=True)
     return tmp_path
 

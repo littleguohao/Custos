@@ -488,8 +488,21 @@ class TestMainEndToEnd:
               "data_quality": {"notes": []}}
 
     def test_weights_sum_to_100(self, monkeypatch, tmp_path):
+        """⚠️ 权重之和必须真的是 100 —— 从 `main()` 源码里把每个模块的权重字面量
+        抠出来求和，而不是只看报告里那行硬编码的「| 合计 | 100 |」
+        （那是 make_report 里的字面量，改掉任一模块权重它照样打印 100）。
+        """
+        import inspect
+        import re
+
+        src = inspect.getsource(ms.main)
+        weights = [int(w) for w in
+                   re.findall(r'\("[^"]+",\s*(\d+),\s*\*score_', src)]
+        assert len(weights) == 8, f"只抠到 {len(weights)} 个模块权重 —— 本测试已失效"
+        assert sum(weights) == 100, \
+            f"模块权重之和 = {sum(weights)}（{weights}）—— 「X/100」与档位切分都会失真"
         r = self._run(monkeypatch, tmp_path, dict(self.MARKET))
-        assert "| 合计 | 100 |" in r, "权重之和不是 100 —— 「X/100」与档位切分都会失真"
+        assert "| 合计 | 100 |" in r
 
     def test_all_seven_modules_appear(self, monkeypatch, tmp_path):
         r = self._run(monkeypatch, tmp_path, dict(self.MARKET))
