@@ -7,7 +7,7 @@
 更糟的是**同一文件被加载成两个模块**的老陷阱当场发作：
 测试用 `from research import backtest_factors as bt` 打桩 `bt._SHARE_IDX`，
 而 mcap 用扁平 `import backtest_factors` ⇒ 两个模块对象，patch 不互通、mcap 拿不到桩数据。
-（见 `00_governance/data/DATA_SOURCE_PRINCIPLE.md`「模块级常量 + 运行时替换 = 陷阱」变体①。）
+（见 `governance/data/DATA_SOURCE_PRINCIPLE.md`「模块级常量 + 运行时替换 = 陷阱」变体①。）
 
 ⇒ 移到因子层后：一个所有者、依赖方向朝下。
 
@@ -45,7 +45,7 @@ def events_to_idx(events) -> dict:
 
 
 def shares_idx() -> dict:
-    """股本事件索引 code → [(observed_on, total_shares)](01_data/fundamentals/share_changes.jsonl,
+    """股本事件索引 code → [(observed_on, total_shares)](data/fundamentals/share_changes.jsonl,
     东财 F10 全史回填,2018 前亦有;as-of 取值只可能 stale 不会 look-ahead)。加载失败 → {}。"""
     global _SHARE_IDX
     if _SHARE_IDX is None:

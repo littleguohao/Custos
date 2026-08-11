@@ -5,7 +5,7 @@ rem
 rem 启动（在 strategy_team 根目录下，PowerShell）：
 rem     Start-Process -WindowStyle Hidden -FilePath "07_tools\screening\run_m2_sweep.cmd"
 rem 看进度（**必须加 -Encoding UTF8**，见下方第 5 条）：
-rem     Get-Content -Wait -Tail 40 -Encoding UTF8 06_logs\m2_sweep\sweep_run.log
+rem     Get-Content -Wait -Tail 40 -Encoding UTF8 artifacts\logs\m2_sweep\sweep_run.log
 rem 想中止：
 rem     Get-Process python | Stop-Process        (会杀掉所有 python，注意别误伤)
 rem
@@ -54,10 +54,10 @@ set JOBS=6
 rem ---------------------------------------------------------------------------
 
 set SWEEP=07_tools/screening/m2_stop_sweep.py
-set LOG=06_logs\m2_sweep\sweep_run.log
+set LOG=artifacts\logs\m2_sweep\sweep_run.log
 set COMMON=--sample %SAMPLE% --window %WIN_START% %WIN_END% --pin-universe
 
-if not exist 06_logs\m2_sweep mkdir 06_logs\m2_sweep
+if not exist artifacts\logs\m2_sweep mkdir artifacts\logs\m2_sweep
 
 echo ============================================================>> "%LOG%" 2>&1
 echo [%DATE% %TIME%] START  sample=%SAMPLE%  window=%WIN_START%..%WIN_END%  jobs=%JOBS%>> "%LOG%" 2>&1

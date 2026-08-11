@@ -135,7 +135,7 @@ class TestWhoIsWrong:
     @pytest.fixture(autouse=True)
     def _no_xdxr_network(self, monkeypatch):
         # detail() 内部 `import adjust_factors` 取事件表：xdxr 缓存缺失时会走网络
-        # 取数并落盘到真实 01_data/market/xdxr/（干净环境下被 repo hygiene 测试抓到）。
+        # 取数并落盘到真实 data/market/xdxr/（干净环境下被 repo hygiene 测试抓到）。
         # 本类判据用的是合成数据，不需要真事件表。
         import adjust_factors
         monkeypatch.setattr(adjust_factors, "get_xdxr", lambda code, **kw: [])

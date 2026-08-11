@@ -8,7 +8,7 @@ produced same-day sector_state / risk_decision / refreshed EOD klines.
 All stages are best-effort: with TdxW off the chain degrades cleanly
 (status=unavailable) and still writes its run log. stdout is a
 machine-consumed protocol; observability goes to
-06_logs/{date}_1800_run_log.json.
+artifacts/logs/{date}_1800_run_log.json.
 """
 from __future__ import annotations
 

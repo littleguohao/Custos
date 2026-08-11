@@ -5,7 +5,7 @@
 current_positions.json 读取持仓/清仓数据，输出多维度复盘分析 Excel。
 
 用法:
-    uv run python 07_tools/research/analyze_trades.py              # 默认输出到 04_reviews/
+    uv run python 07_tools/research/analyze_trades.py              # 默认输出到 artifacts/reports/
     uv run python 07_tools/research/analyze_trades.py --preview    # 仅打印数据概览
     uv run python 07_tools/research/__main__.py analyze_trades     # 经统一研究入口
 """

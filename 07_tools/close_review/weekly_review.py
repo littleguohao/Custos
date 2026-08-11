@@ -6,8 +6,8 @@
 
 --date 默认今天，取其所在 ISO 周，周一~周五为复盘区间。
 输出：
-    04_reviews/weekly/{iso_year}W{iso_week:02d}_weekly_review.json
-    04_reviews/weekly/{iso_year}W{iso_week:02d}_weekly_review.md
+    artifacts/reports/weekly/{iso_year}W{iso_week:02d}_weekly_review.json
+    artifacts/reports/weekly/{iso_year}W{iso_week:02d}_weekly_review.md
 
 归因规则（全部确定性，阈值集中在本文件顶部常量）：
 - 计划外交易：成交日 D 的计划 = 最近一份早于 D 的 daily final_review 的
@@ -49,7 +49,7 @@
 本脚本产出的是**当周事实与规则化归因**，不含结论。把它变成结论、并追踪
 「是否已变成机制」的地方是：
 
-    05_strategy_versions/trade_lessons.md
+    trade_lessons.md
 
 写那份记录时直接引本脚本的产出（ISO 周 + `rule` 标签 + `facts` 里的量化指标），
 不要凭印象写。⚠️ 引的时候**必须带样本量** —— 实盘侧的样本量问题与研究侧一样致命
@@ -334,7 +334,7 @@ def find_plan_for_day(base: Path, day: str, cache: dict | None = None) -> tuple[
     for _ in range(PLAN_LOOKBACK_DAYS):
         key = cursor.isoformat()
         if key not in cache:
-            path = base / "04_reviews" / "daily" / f"{key}_final_review.json"
+            path = base / "artifacts/reports" / "daily" / f"{key}_final_review.json"
             cache[key] = load_json(path, None) if path.exists() else None
         review = cache[key]
         if isinstance(review, dict):
@@ -347,7 +347,7 @@ def find_plan_for_day(base: Path, day: str, cache: dict | None = None) -> tuple[
 
 def mfe_index(base: Path) -> list[tuple[str, Path]]:
     """holdings 目录里的 mfe_mae 文件索引 [(date, path), ...] 升序，只 glob 一次。"""
-    holdings_dir = base / "01_data" / "holdings"
+    holdings_dir = base / "data" / "holdings"
     if not holdings_dir.exists():
         return []
     return sorted((p.name.split("_")[0], p) for p in holdings_dir.glob("*_mfe_mae.json"))
@@ -376,7 +376,7 @@ def load_mfe_after(base: Path, sell_date: str, index: list | None = None,
 
 def load_holding_quote_closes(base: Path, day: str) -> dict[str, float] | None:
     """holding_quotes.json -> {code: close}；文件缺失返回 None。"""
-    data = load_json(base / "01_data" / "market" / f"{day}_holding_quotes.json", None)
+    data = load_json(base / "data" / "market" / f"{day}_holding_quotes.json", None)
     if not isinstance(data, dict):
         return None
     out = {}
@@ -397,7 +397,7 @@ def sse_daily_map(base: Path, start: str, end: str) -> dict[str, dict]:
     cursor = date.fromisoformat(start)
     last = date.fromisoformat(end)
     while cursor <= last:
-        data = load_json(base / "01_data" / "market" / f"{cursor.isoformat()}_market_timing_input.json", None)
+        data = load_json(base / "data" / "market" / f"{cursor.isoformat()}_market_timing_input.json", None)
         if isinstance(data, dict):
             sse = (data.get("a_share_indices") or {}).get("上证指数") or {}
             latest = str(sse.get("latest_date") or "")
@@ -455,12 +455,12 @@ def holding_week_performance(base: Path, days: list[str], daily_reviews: dict,
     codes = sorted({c for e in per_day.values() for c in e})
     if not codes:
         unavailable.append("持仓周度表现：本周无 revalued_positions 与 holding_quotes 数据")
-        if not any((base / "01_data" / "holdings" / f"{d}_b1_holding_state.json").exists() for d in days):
+        if not any((base / "data" / "holdings" / f"{d}_b1_holding_state.json").exists() for d in days):
             unavailable.append("B1 持仓状态：本周无 b1_holding_state 数据")
         return {"rows": [], "days_with_data": [], "b1_trajectory": {}}
     # 名称兜底：current_positions.json
     names = {}
-    for p in load_json(base / "01_data" / "trades" / "current_positions.json", []) or []:
+    for p in load_json(base / "data" / "trades" / "current_positions.json", []) or []:
         if p.get("代码"):
             names[str(p["代码"])] = p.get("名称")
     rows = []
@@ -488,7 +488,7 @@ def holding_week_performance(base: Path, days: list[str], daily_reviews: dict,
         })
     rows.sort(key=lambda r: (r["contribution_pp"] if r["contribution_pp"] is not None else 0))
     # B1 状态轨迹
-    b1_files = {d: load_json(base / "01_data" / "holdings" / f"{d}_b1_holding_state.json", None) for d in days}
+    b1_files = {d: load_json(base / "data" / "holdings" / f"{d}_b1_holding_state.json", None) for d in days}
     if not any(isinstance(v, list) for v in b1_files.values()):
         unavailable.append("B1 持仓状态：本周无 b1_holding_state 数据")
     trajectory = {}
@@ -582,7 +582,7 @@ def advice_review(base: Path, trading_days: list[str], sse_map: dict[str, dict],
     """
     rows = []
     for d in trading_days:
-        chief = load_json(base / "01_data" / "decisions" / f"{d}_chief_decision.json", None)
+        chief = load_json(base / "data" / "decisions" / f"{d}_chief_decision.json", None)
         if not isinstance(chief, dict):
             rows.append({"date": d, "available": False, "verdict": "unavailable"})
             continue
@@ -627,7 +627,7 @@ def _trading_days_and_reviews(base, days, unavailable):
     # --- 每日复盘覆盖 ---
     daily_reviews = {}
     for d in days:
-        path = base / "04_reviews" / "daily" / f"{d}_final_review.json"
+        path = base / "artifacts/reports" / "daily" / f"{d}_final_review.json"
         if path.exists():
             daily_reviews[d] = load_json(path, {})
     missing_reviews = [d for d in trading_days if d not in daily_reviews]
@@ -685,7 +685,7 @@ def _no_trade_confirmations(base, execution_issues, trading_days, unavailable, w
     ⚠️ 确认文件本身缺失 ≠ 全部未确认 —— 前者是**数据缺口**（记 unavailable），
     后者是**纪律问题**（记 execution_issues）。两者混淆会让缺文件看起来像违纪。
     """
-    confirm_path = base / "01_data" / "trades" / "position_confirmations.json"
+    confirm_path = base / "data" / "trades" / "position_confirmations.json"
     confirmations = load_json(confirm_path, None)
     traded_dates = {t["date"] for t in week_trades}
     no_trade_days = [d for d in trading_days if d not in traded_dates]
@@ -789,7 +789,7 @@ def _bear_regime_stats(base, losses, total_loss, trading_days, unavailable):
     ⚠️ 取不到 regime 台账时 `bear_loss_share` 留 None 而不是 0 ——
     「空头期没亏」与「不知道空头是哪几天」必须可区分。
     """
-    amv_path = base / "01_data" / "market" / "0amv_observations.jsonl"
+    amv_path = base / "data" / "market" / "0amv_observations.jsonl"
     regimes = load_amv_regimes(amv_path)
     bear_days: list[str] = []
     bear_loss_share = None
@@ -811,10 +811,10 @@ def _bear_regime_stats(base, losses, total_loss, trading_days, unavailable):
 
 def _risk_levels_of_week(base, days):
     """本周各日的风控等级（来自当日 risk_decision）。"""
-    risk_days = [d for d in days if (base / "01_data" / "risk" / f"{d}_risk_decision.json").exists()]
+    risk_days = [d for d in days if (base / "data" / "risk" / f"{d}_risk_decision.json").exists()]
     risk_levels = {}
     for d in risk_days:
-        risk_levels[d] = load_json(base / "01_data" / "risk" / f"{d}_risk_decision.json", {}).get("risk_level")
+        risk_levels[d] = load_json(base / "data" / "risk" / f"{d}_risk_decision.json", {}).get("risk_level")
     return risk_levels
 
 
@@ -826,7 +826,7 @@ def build_weekly_review(base: Path, day: str) -> dict:
     strategy_issues: list[dict] = []
 
     # --- 台账与周度交易统计 ---
-    ledger_path = base / "01_data" / "trades" / "master_trade_ledger.csv"
+    ledger_path = base / "data" / "trades" / "master_trade_ledger.csv"
     all_trades = parse_ledger(ledger_path)
     if all_trades is None:
         unavailable.append(f"成交台账缺失：{ledger_path}")
@@ -1241,7 +1241,7 @@ def main() -> None:
     base = Path(args.base)
 
     review = build_weekly_review(base, args.date)
-    out_dir = base / "04_reviews" / "weekly"
+    out_dir = base / "artifacts/reports" / "weekly"
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = f"{review['iso_year']}W{review['iso_week']:02d}_weekly_review"
     json_path = out_dir / f"{stem}.json"

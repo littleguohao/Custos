@@ -50,7 +50,7 @@ FACTOR: dict[str, Any] = {
     "name": "主升始发点（H4）",
     "kind": "pattern",
     "status": "untested",
-    "evidence": "00_governance/research/R8_hypothesis_H3_H4_pending.md",
+    "evidence": "governance/research/R8_hypothesis_H3_H4_pending.md",
     "note": "R8：已实现未跑；原文两处矛盾，两种 CROSS 口径都实现由回测判定",
     "min_bars": 60,
     "live_use": "evidence_only",  # signal_labels 出标签落候选表；该模块头部已声明「标注不是交易依据」

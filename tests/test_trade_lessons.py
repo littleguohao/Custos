@@ -1,4 +1,4 @@
-"""`05_strategy_versions/trade_lessons.md` 的可执行约束。
+"""`trade_lessons.md` 的可执行约束。
 
 这份文件记「从交易记录看到什么 → 所以改了什么 → 现在是否真的在执行」。
 它最容易退化成一堆看起来有道理的散文，所以有三条机械检查：
@@ -16,7 +16,7 @@ import pathlib
 import re
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-DOC = ROOT / "05_strategy_versions" / "trade_lessons.md"
+DOC = ROOT / "trade_lessons.md"
 STATUSES = {"已成机制", "仅人工约束", "待验证", "已推翻"}
 
 
@@ -80,7 +80,7 @@ def test_every_record_has_sample_size_or_explicit_unknown():
 def test_referenced_todo_items_exist():
     """引用的待办编号必须真实存在 —— 否则读者追不到后续。"""
     s = _text()
-    todo = (ROOT / "05_strategy_versions" / "TODO.md").read_text(encoding="utf-8")
+    todo = (ROOT / "TODO.md").read_text(encoding="utf-8")
     for num in set(re.findall(r"待办 #(\d+)", s)):
         assert re.search(rf"^\|\s*{num}\s*\|", todo, re.M), f"待办 #{num} 不存在"
 
@@ -90,7 +90,7 @@ def test_system_principles_points_here():
 
     否则读者会把那 6 条当成「系统已保证」—— 而实测其中 3 条没有任何代码在执行。
     """
-    sp = (ROOT / "00_governance" / "strategy" / "_shared"
+    sp = (ROOT / "governance" / "strategy" / "_shared"
           / "system_principles.md").read_text(encoding="utf-8")
     assert "trade_lessons.md" in sp
     assert "不要默认它们已经被系统保证" in sp

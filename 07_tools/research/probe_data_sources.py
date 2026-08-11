@@ -4,7 +4,7 @@
 
 ## 为什么需要它
 
-`00_governance/data/` 下的文档要写「现状」，但现状里的性能与稳定性**没有任何实测数据**：
+`governance/data/` 下的文档要写「现状」，但现状里的性能与稳定性**没有任何实测数据**：
 
 - `tests/test_tq_http.py` 150 行、**0 处 monkeypatch、0 处网络** —— 只测了纯函数，
   而 `tq_http` 定义的三种错误码（`tdxw_not_running` / `connection_failed` / `timeout`）
@@ -25,7 +25,7 @@
 
 ## 安全约束（硬编码，不是约定）
 
-- **只读**：不写任何业务数据，只写 `06_logs/data_probe/`。
+- **只读**：不写任何业务数据，只写 `artifacts/logs/data_probe/`。
 - **绝不 raise**：逐项独立，一个接口挂掉不影响其余（否则探针本身成了单点）。
 - **禁止危险接口**：`download_file` 的 `down_type` 1/5/6 实测可打挂 TdxW 服务，
   本脚本只探 4；`tq_http.call` 侧也已加代码级拦截。
@@ -401,7 +401,7 @@ def report(probes: list[Probe]) -> None:
         for p in fails:
             print(f"   {p.group}/{p.name}: {p.error}")
         print("   注意区分「环境没装」与「接口坏了」——前者在 Linux/CI 上是预期的。")
-    print("\n⇒ 这份报告用于回填 00_governance/data/ 的性能与稳定性栏。")
+    print("\n⇒ 这份报告用于回填 governance/data/ 的性能与稳定性栏。")
     print("   它**不是**单元测试：结果依赖宿主环境，不能作为断言。")
 
 
@@ -411,7 +411,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="数据源探针（实测可用性/耗时/返回形状）")
     ap.add_argument("--only", default="", help=f"只探某组：{'/'.join(GROUPS)}")
     ap.add_argument("--repeat", type=int, default=3, help="每项重复次数（默认 3，取中位）")
-    ap.add_argument("--out", default="", help="报告 JSON 路径（默认 06_logs/data_probe/）")
+    ap.add_argument("--out", default="", help="报告 JSON 路径（默认 artifacts/logs/data_probe/）")
     a = ap.parse_args()
 
     todo = {k: v for k, v in GROUPS.items() if not a.only or a.only == k}

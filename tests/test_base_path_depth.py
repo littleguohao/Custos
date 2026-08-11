@@ -11,7 +11,7 @@ class BasePathDepthTests(unittest.TestCase):
 
     def test_subdir_scripts_resolve_base_to_project_root(self):
         project_root = TOOLS.parent
-        markers = {"00_governance", "01_data", "07_tools"}
+        markers = {"governance", "data", "07_tools"}
         broken = []
         for p in sorted(TOOLS.rglob("*.py")):
             if p.name in ("__init__.py", "conftest.py", "paths.py"):
@@ -27,7 +27,7 @@ class BasePathDepthTests(unittest.TestCase):
 
     def test_project_root_has_expected_markers(self):
         root = TOOLS.parent
-        for marker in ["00_governance", "01_data", "07_tools", "tests"]:
+        for marker in ["governance", "data", "07_tools", "tests"]:
             self.assertTrue((root / marker).exists(), f"Missing project marker: {marker}/")
 
 
@@ -36,7 +36,7 @@ if __name__ == "__main__":
 
 
 class TestGovernanceLayout:
-    """00_governance 按生命周期分四类（2026-08-06 重构）——防回归。
+    """governance 按生命周期分四类（2026-08-06 重构）——防回归。
 
     ⚠️ 分开的理由是**改动风险不对等**：`contracts/` 下是代码直接依赖的运行时配置
     （`CN_TRADING_CALENDAR.json` 有 7 处引用，改错四个时点全挂），而 `strategy/`
@@ -66,7 +66,7 @@ class TestGovernanceLayout:
             assert p.is_file(), f"paths.{name} 指向不存在的文件: {p}"
 
     def test_modules_do_not_rebuild_governance_paths(self):
-        """模块不得自己拼 `"00_governance"` 字符串——必须走 paths 常量。
+        """模块不得自己拼 `"governance"` 字符串——必须走 paths 常量。
 
         搬这次目录时正是靠 grep 这个字符串才找齐引用点；一旦有人绕过 paths.py，
         下次搬动就会漏。paths.py 自身与测试的 tmp 目录构造除外。
@@ -78,7 +78,7 @@ class TestGovernanceLayout:
             if p.name == "paths.py":
                 continue
             for i, ln in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
-                if '"00_governance"' in ln or "'00_governance'" in ln:
+                if '"governance"' in ln or "'governance'" in ln:
                     offenders.append(f"{p.relative_to(root)}:{i}")
         assert not offenders, ("这些地方绕过了 paths.py 自己拼治理路径: "
                                + ", ".join(offenders))
@@ -102,7 +102,7 @@ class TestNoPatchingDefaultArgConstants:
     `None` 时才回落到模块默认 ⇒ 默认值在**调用时**才解析）。
 
     与「连接永不重连」（跨两天犯三次）同理：文档挡不住重犯，要靠可执行检查。
-    见 `00_governance/data/DATA_SOURCE_PRINCIPLE.md`「模块级常量 + 运行时替换 = 陷阱」。
+    见 `governance/data/DATA_SOURCE_PRINCIPLE.md`「模块级常量 + 运行时替换 = 陷阱」。
     """
 
     def _default_arg_constants(self, root):

@@ -101,7 +101,7 @@ def amplitude_pct(high, low, prev_close) -> float | None:
         振幅 = (最高价 − 最低价) / 前收盘价 × 100
 
     这是 A 股标准口径，也是治理文档的明文规定
-    （`00_governance/strategy/b1/01_swing_rules.md` §反转K：
+    （`governance/strategy/b1/01_swing_rules.md` §反转K：
     「当日振幅优先按 `(最高价 - 最低价) / 前收盘价` 计算」）。
 
     ## 为什么要有这个函数

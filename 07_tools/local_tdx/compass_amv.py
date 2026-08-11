@@ -14,7 +14,7 @@
   （日期合法、相邻记录日期严格单调、连续 >= 20 条、OHLC 合理），
   再按日期连续性把段拼接成完整系列链（段间允许字节间隔，
   日期首尾相接不重叠，间隙 <= 15 天；同期间隙并列时取字节距离最近者）。
-- 0AMV 识别：① 与真值台账 ``01_data/market/0amv_observations.jsonl``
+- 0AMV 识别：① 与真值台账 ``data/market/0amv_observations.jsonl``
   最近若干条 confirmed 记录（date→amv_change_pct）比对，
   匹配率 >= 90%（容差 ±0.05）的链；② 无真值可用或无链达标时，
   回退选"结束日期最新且总历史最长"的链。
@@ -318,7 +318,7 @@ def parse_amv_daily(since: str = "2024-01-01", root: Optional[str] = None,
                       "volume", "amount", "change_pct"}, ...]}
 
     仅含 date >= since 的记录；失败时附带 ``error`` 字段、records 为空。
-    ``truth_path`` 可覆盖真值台账路径（默认 01_data/market/0amv_observations.jsonl）。
+    ``truth_path`` 可覆盖真值台账路径（默认 data/market/0amv_observations.jsonl）。
     """
     path = _day_vdat_path(root)
     result: dict[str, Any] = {

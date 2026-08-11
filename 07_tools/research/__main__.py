@@ -56,7 +56,7 @@ BASE = HERE.parents[1]
 # ── 研究工具注册表。`status` 的含义：
 #     engine    核心引擎，其他工具驱动它
 #     driver    驱动引擎做批量/扫描
-#     study     独立研究，产出结论进 00_governance/research/
+#     study     独立研究，产出结论进 governance/research/
 #     diagnostic 诊断/对账工具，产出报告供治理文档填数
 #     stale     **存废待定**（覆盖率 0% 或长期未动），见待办 #44
 TOOLS: dict[str, tuple[str, str]] = {
@@ -107,7 +107,7 @@ def _listing() -> int:
                     print(f"   {'':<28}模式（{len(ms)}）: {', '.join(ms)}")
         print()
     print("提示：模式开关是**互斥的运行模式**，不是普通选项 —— 先看这里再看 --help。")
-    print("     `stale` 的三个存废待定，见 05_strategy_versions/TODO.md #44。")
+    print("     `stale` 的三个存废待定，见 TODO.md #44。")
     return 0
 
 

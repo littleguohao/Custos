@@ -24,7 +24,7 @@ FACTOR: dict[str, Any] = {
     "name": "前置拉升波分类（建仓/拉升/冲刺），冲刺波首个 B1 禁止买入",
     "kind": "pattern",
     "status": "active",
-    "evidence": "00_governance/research/R2_selection_price_volume.md",
+    "evidence": "governance/research/R2_selection_price_volume.md",
     "note": "前置拉升波分类（建仓/拉升/冲刺），冲刺波首个 B1 禁止买入",
     "min_bars": 1,
     "live_use": "gate",

@@ -69,7 +69,7 @@ _client = None  # lazy init: only connect when online access is actually needed
 # 凭据、不是密钥,所以留在源码里没有泄密问题;抽成常量只为不再散落魔法串。
 EM_QUOTE_UT = "bd1d9ddb04089700cf256c0c7f8fe813"
 EM_QUOTE_FIELDS = "f43,f44,f45,f46,f47,f48,f50,f57,f58,f60,f170"
-# 代码白名单:6 位纯数字。code 来自 01_data/trades/current_positions.json —— 一个
+# 代码白名单:6 位纯数字。code 来自 data/trades/current_positions.json —— 一个
 # 由外部导出/人工编辑的文件,内容不可信。直接插进 URL 的 `secid=0.{code}` 里,
 # 一个带 `&`/路径片段的脏值就能改写查询串(甚至换掉 secid 指向别的标的),
 # 拿回来的价格却会被当成这只持仓的价格写进快照。故下标前先做字符集校验。
@@ -104,7 +104,7 @@ def _get_client(force_new: bool = False):
 
     这是同一反模式在仓库里的**第三处**（`local_tdx_data._get_client` 与
     `market_timing/tdx_ext_quotes` 已分别修过）。见
-    `00_governance/data/DATA_SOURCE_PRINCIPLE.md`「连接管理要求」，
+    `governance/data/DATA_SOURCE_PRINCIPLE.md`「连接管理要求」，
     以及 `tests/test_tdx_connection_hygiene.py` 的自动检查。
     """
     global _client

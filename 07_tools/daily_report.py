@@ -17,7 +17,7 @@ from paths import BASE, DATA, PLANS, REVIEWS, cn_now
 from paths import read_json as load
 import report_audit
 # 2026-08-07 架构审查：这两个访问器已移到 `news/premarket_intel_schema`——
-# 它们读的是 `01_data/news/premarket/`，而 `news/postclose_news_digest`
+# 它们读的是 `data/news/premarket/`，而 `news/postclose_news_digest`
 # 也要用；放在本模块（根层报告生成器）里会让 news/（L1）反向依赖根层。
 from news.premarket_intel_schema import (  # noqa: E402
     load_premarket_intelligence, premarket_intelligence_path)

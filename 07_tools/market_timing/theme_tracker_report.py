@@ -2,13 +2,13 @@
 """Generate theme_tracker daily sector trend report.
 
 Reads:
-- 01_data/sectors/sector_code_map.json
-- 01_data/holdings/YYYY-MM-DD_holding_technical_summary.json
-- 03_daily_plans/YYYY-MM-DD_market_timing_score.md
+- data/sectors/sector_code_map.json
+- data/holdings/YYYY-MM-DD_holding_technical_summary.json
+- artifacts/reports/daily/YYYY-MM-DD_market_timing_score.md
 
 Writes:
-- 01_data/sectors/YYYY-MM-DD_sector_technical_summary.json
-- 03_daily_plans/YYYY-MM-DD_theme_tracker.md
+- data/sectors/YYYY-MM-DD_sector_technical_summary.json
+- artifacts/reports/daily/YYYY-MM-DD_theme_tracker.md
 """
 from __future__ import annotations
 

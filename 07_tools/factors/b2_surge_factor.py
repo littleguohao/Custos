@@ -56,7 +56,7 @@ FACTOR: dict[str, Any] = {
     "name": "B2 异动 / 底部异动",
     "kind": "pattern",
     "status": "needs_work",
-    "evidence": "00_governance/research/R7_hypothesis_H2_b1b2b3.md",
+    "evidence": "governance/research/R7_hypothesis_H2_b1b2b3.md",
     "note": "R7：全否决；B2 全中≡追高，surge_strict_then_b1 跨区间零信号",
     "min_bars": 12,
     "live_use": "evidence_only",  # signal_labels 出标签落候选表；该模块头部已声明「标注不是交易依据」

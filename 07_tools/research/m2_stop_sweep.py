@@ -58,7 +58,7 @@
 已落地的三条（互相叠加）：
 
   ① `--jobs N` 并行。方案之间无共享状态（各写自己的结果文件）⇒ 天然可并行。
-     ⚠️ 先用 `-j 1` 跑一个方案把 `01_data/market/xdxr/` 权息缓存焐热，再开并行：
+     ⚠️ 先用 `-j 1` 跑一个方案把 `data/market/xdxr/` 权息缓存焐热，再开并行：
      缓存冷时前复权要经通达信协议逐票取权息，N 个进程各开一条连接可能被限流。
      ⚠️ **并行会把内存乘 N**，见下方「OOM」。
   ② C 组 8 个方案只做 **1 次**真回测。它们的回测参数与 B 组 `pct_12`/`pct_12_amv`
@@ -105,7 +105,7 @@
 
 默认 `--data-source tdx` = 读**本地**通达信 vipdoc 的 `.day` 二进制（不是联网取行情）。
 但有两处仍会联网：① 某只票本地读不到时回退在线 bars；② 前复权要 xdxr 权息，
-`01_data/market/xdxr/` 缓存没有就经通达信协议取。
+`data/market/xdxr/` 缓存没有就经通达信协议取。
 
 | | tdx（默认） | qlib / csv（S_DATA） |
 |---|---|---|
@@ -558,7 +558,7 @@ def _run_all(todo: list[tuple[str, str, list[str]]], sample: int, cross: bool,
     彼此无共享状态 ⇒ 天然可并行。串行跑 25 个方案时 CPU 只用一核，而每个方案都要
     把 1000 只票重新读盘 + 重算前复权 + 逐 bar 评估。
 
-    ⚠️ **先用 `--jobs 1` 跑一遍把 xdxr 权息缓存焐热**（`01_data/market/xdxr/`）。
+    ⚠️ **先用 `--jobs 1` 跑一遍把 xdxr 权息缓存焐热**（`data/market/xdxr/`）。
     缓存冷时前复权要经通达信协议逐票取权息，8 个进程同时取会各开一条连接、
     可能被服务端限流甚至拒连——那时并行不会更快，只会一起失败。
 
@@ -830,7 +830,7 @@ def _collect(cross: bool, sample: Optional[int] = None,
         if legacy:
             print(f"[WARN] 发现 {len(legacy)} 个**无样本量指纹**的旧结果文件"
                   f"（第一版命名）。它们可能来自不同 --sample，混在一起比较无效。"
-                  f"建议删除 06_logs/m2_sweep 后重跑。")
+                  f"建议删除 artifacts/logs/m2_sweep 后重跑。")
         return {g: [] for g in GROUPS}
     if sample is None:
         sample = max(avail)
@@ -889,7 +889,7 @@ def _warn_if_mixed(group: str, rows: list[dict]) -> None:
         print(f"\n⚠️ **【{group}】笔数不一致，判定可能无效**：最多 {max(ns)} / 最少 {min(ns)}。")
         print(f"   偏少的方案：{'、'.join(lo)}")
         print("   同一 entry_filter 下信号数只由样本股票数决定，不由止损参数决定 ⇒")
-        print("   这些结果很可能来自不同 --sample。删除 06_logs/m2_sweep 后重跑。")
+        print("   这些结果很可能来自不同 --sample。删除 artifacts/logs/m2_sweep 后重跑。")
 
 
 def _print_trade_group(group: str, rows: list[dict]) -> None:

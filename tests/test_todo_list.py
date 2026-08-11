@@ -1,4 +1,4 @@
-"""`05_strategy_versions/TODO.md` 的结构与链接校验。
+"""`TODO.md` 的结构与链接校验。
 
 为什么值得一条测试：这份清单指向 20+ 个文件，而**目录重构正是链接断裂的时刻**
 （research/ 刚拆过一次，strategy/ 还要拆）。断了的链接让待办无法判断是否还成立，
@@ -16,7 +16,7 @@ import re
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-TODO = ROOT / "05_strategy_versions" / "TODO.md"
+TODO = ROOT / "TODO.md"
 
 
 def test_todo_exists():
@@ -61,7 +61,7 @@ def test_separated_from_version_log():
     owner 明确过：`strategy_version_log.md` 只记策略规则变化，
     不放研究结论/基建重构/待办。
     """
-    log = ROOT / "05_strategy_versions" / "strategy_version_log.md"
+    log = ROOT / "strategy_version_log.md"
     # ⚠️ 不 skip：`strategy_version_log.md` 是**入库文件**，缺失说明仓库出了问题，
     #    而 skip 会让这条测试静默通过。2026-08-07 清理 tests/ 时改为硬失败。
     assert log.exists(), f"版本日志缺失（入库文件）：{log}"

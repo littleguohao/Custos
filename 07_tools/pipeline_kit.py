@@ -14,7 +14,7 @@ runners. Behavior must match the sources exactly:
 - md_to_digest: markdown-to-plaintext digest conversion.
 - now_iso / log_stage / write_run_log: run-log observability shared by the
   one-shot runners (run_0850, run_0905); each run leaves
-  06_logs/{date}_{tag}_run_log.json with per-stage ok/returncode/timeout/
+  artifacts/logs/{date}_{tag}_run_log.json with per-stage ok/returncode/timeout/
   timings/stdout/stderr tails and an overall status.
 - warn: unified [WARN] output to stderr.
 """
@@ -322,7 +322,7 @@ def log_stage(name: str, r: dict, started_at: str, finished_at: str, duration_se
 
 def write_run_log(log_dir: Path, tag: str, target: str, status: str, started_at: str,
                   t0: float, stages: list[dict]) -> Path:
-    """Write 06_logs/{date}_{tag}_run_log.json; tag is the runner suffix
+    """Write artifacts/logs/{date}_{tag}_run_log.json; tag is the runner suffix
     ("0850", "0905", "1700", "1800"), which also determines the script field (run_{tag})."""
     log = {
         "date": target,

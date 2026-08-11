@@ -24,7 +24,7 @@ FACTOR: dict[str, Any] = {
     "name": "买弱指纹",
     "kind": "selector",
     "status": "needs_work",
-    "evidence": "00_governance/research/R2_selection_price_volume.md",
+    "evidence": "governance/research/R2_selection_price_volume.md",
     "note": "买弱指纹；R2：recall 100% 但期望 −0.42%/笔，劣于无差别进场 +0.96%",
     "min_bars": 1,
     "live_use": "evidence_only",  # R2：仅描述性，不作买入依据（落候选表供人看，不驱动分层/gate）

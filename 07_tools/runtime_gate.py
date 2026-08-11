@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""运行门控 CLI:写 01_data/quality/{date}_runtime_gate.json 并按开关决定退出码。
+"""运行门控 CLI:写 data/quality/{date}_runtime_gate.json 并按开关决定退出码。
 
 退出码(供 run_*.py / cron 判定,门控必须能真正阻断,而非只写 JSON):
   0 通过

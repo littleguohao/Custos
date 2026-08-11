@@ -4,7 +4,7 @@
 ## 为什么需要这个文件
 
 2026-08-04 我修了 `local_tdx_data._get_client()` 的「永不重连」问题（commit 503b77d），
-把它作为反模式写进 `00_governance/data/DATA_SOURCE_PRINCIPLE.md`，还在那里立了规范：
+把它作为反模式写进 `governance/data/DATA_SOURCE_PRINCIPLE.md`，还在那里立了规范：
 
 > 所有走 TDX 协议的调用**必须**经 `local_tdx_data._with_client_retry()`
 
@@ -146,7 +146,7 @@ class TestNoUnreconnectableSingletons:
                 f"看不懂的 \"'>' NoneType\"（mootdx 内部 `if counts > 0` 撞上 None）。\n"
                 f"修法：加 force_new 形参 + 连接时效，或直接委托 "
                 f"local_tdx_data._get_client(force_new=)。\n"
-                f"见 00_governance/data/DATA_SOURCE_PRINCIPLE.md「连接管理要求」。")
+                f"见 governance/data/DATA_SOURCE_PRINCIPLE.md「连接管理要求」。")
 
 
 class TestKnownFixesStayFixed:
@@ -174,14 +174,14 @@ class TestGovernanceDocStaysAligned:
     """文档与代码必须一致——否则规范就成了摆设（本文件存在的起因）。"""
 
     def test_principle_doc_states_requirement(self):
-        doc = (pathlib.Path(__file__).resolve().parents[1] / "00_governance" / "data"
+        doc = (pathlib.Path(__file__).resolve().parents[1] / "governance" / "data"
                / "DATA_SOURCE_PRINCIPLE.md").read_text(encoding="utf-8")
         assert "_with_client_retry" in doc
         assert "永不重连" in doc, "反模式的描述被删了"
 
     def test_doc_points_to_this_check(self):
         """文档应指向这份可执行检查，而不是只描述规范。"""
-        doc = (pathlib.Path(__file__).resolve().parents[1] / "00_governance" / "data"
+        doc = (pathlib.Path(__file__).resolve().parents[1] / "governance" / "data"
                / "DATA_SOURCE_PRINCIPLE.md").read_text(encoding="utf-8")
         assert "test_tdx_connection_hygiene" in doc, (
             "DATA_SOURCE_PRINCIPLE.md 应指向 tests/test_tdx_connection_hygiene.py——"

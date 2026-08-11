@@ -26,7 +26,7 @@ FACTOR: dict[str, Any] = {
     "name": "板块相位（MACD 相位择时）",
     "kind": "state",
     "status": "active",
-    "evidence": "00_governance/research/R4_timing_amv_sector.md",
+    "evidence": "governance/research/R4_timing_amv_sector.md",
     "note": "R4：0AMV 之后第二个 OOS 站得住的增强，熊市减亏 ~4-6pp",
     "min_bars": 60,
     "live_use": "gate",

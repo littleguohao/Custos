@@ -19,7 +19,7 @@ FACTOR: dict[str, Any] = {
     "name": "Alpha#6 类：价量负相关",
     "kind": "selector",
     "status": "untested",
-    "evidence": "00_governance/research/R2_selection_price_volume.md",
+    "evidence": "governance/research/R2_selection_price_volume.md",
     "note": "缺独立终审记录；按 R2 整体结论推定不可用",
     "min_bars": 10,
     "live_use": "none",

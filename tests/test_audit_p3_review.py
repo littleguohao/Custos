@@ -34,20 +34,20 @@ def write_json(path: Path, data) -> None:
 
 
 def make_base(tmp: Path) -> Path:
-    write_json(tmp / "00_governance" / "contracts" / "CN_TRADING_CALENDAR.json", CALENDAR)
+    write_json(tmp / "governance" / "contracts" / "CN_TRADING_CALENDAR.json", CALENDAR)
     return tmp
 
 
 def write_ledger(base: Path, rows: list[list]) -> None:
     lines = ["成交日期,成交时间,代码,名称,交易类别,成交数量,成交价格,成交金额,发生金额,费用,备注"]
     lines += [",".join(str(x) for x in r) for r in rows]
-    path = base / "01_data" / "trades" / "master_trade_ledger.csv"
+    path = base / "data" / "trades" / "master_trade_ledger.csv"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\ufeff" + "\n".join(lines), encoding="utf-8")
 
 
 def write_confirmations(base: Path, records: dict) -> None:
-    write_json(base / "01_data" / "trades" / "position_confirmations.json", records)
+    write_json(base / "data" / "trades" / "position_confirmations.json", records)
 
 
 def no_trade_records(days: list[str]) -> dict:
@@ -224,7 +224,7 @@ class TestNoTradeConfirmationSource:
         """_import_meta.json 的 no_trades_confirmed_dates 没有生产者，不得再被采信。"""
         with tempfile.TemporaryDirectory() as td:
             base = make_base(Path(td))
-            write_json(base / "01_data" / "trades" / "_import_meta.json",
+            write_json(base / "data" / "trades" / "_import_meta.json",
                        {"no_trades_confirmed_dates": {d: True for d in WEEK_DAYS}})
             review = wr.build_weekly_review(base, "2026-07-15")
             assert review["facts"]["no_trade_unconfirmed"] == WEEK_DAYS
@@ -250,24 +250,24 @@ class TestNoTradeConfirmationSource:
 class TestRun1700NoTradesFlag:
     def test_flag_from_position_confirmations(self, tmp_path, monkeypatch):
         monkeypatch.setattr(run_1700, "BASE", tmp_path)
-        monkeypatch.setattr(run_1700, "TRADES_DIR", tmp_path / "01_data" / "trades")
+        monkeypatch.setattr(run_1700, "TRADES_DIR", tmp_path / "data" / "trades")
         write_confirmations(tmp_path, no_trade_records(["2026-07-14"]))
         assert run_1700._no_trades_flag("2026-07-14") == ["--no-trades-confirmed"]
 
     def test_no_flag_when_not_confirmed(self, tmp_path, monkeypatch):
         monkeypatch.setattr(run_1700, "BASE", tmp_path)
-        monkeypatch.setattr(run_1700, "TRADES_DIR", tmp_path / "01_data" / "trades")
+        monkeypatch.setattr(run_1700, "TRADES_DIR", tmp_path / "data" / "trades")
         write_confirmations(tmp_path, no_trade_records(["2026-07-13"]))
         assert run_1700._no_trades_flag("2026-07-14") == []
 
     def test_no_flag_when_file_absent(self, tmp_path, monkeypatch):
         monkeypatch.setattr(run_1700, "BASE", tmp_path)
-        monkeypatch.setattr(run_1700, "TRADES_DIR", tmp_path / "01_data" / "trades")
+        monkeypatch.setattr(run_1700, "TRADES_DIR", tmp_path / "data" / "trades")
         assert run_1700._no_trades_flag("2026-07-14") == []
 
     def test_snapshot_only_entry_does_not_set_flag(self, tmp_path, monkeypatch):
         monkeypatch.setattr(run_1700, "BASE", tmp_path)
-        monkeypatch.setattr(run_1700, "TRADES_DIR", tmp_path / "01_data" / "trades")
+        monkeypatch.setattr(run_1700, "TRADES_DIR", tmp_path / "data" / "trades")
         write_confirmations(tmp_path, {"2026-07-14": {"confirmed_at": "x", "note": "y"}})
         assert run_1700._no_trades_flag("2026-07-14") == []
 

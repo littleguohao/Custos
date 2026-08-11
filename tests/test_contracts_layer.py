@@ -1,4 +1,4 @@
-"""`00_governance/contracts/` 的契约一致性。
+"""`governance/contracts/` 的契约一致性。
 
 ⚠️ **契约的第一属性是「真的被遵守」。** 契约说 X 而代码做 Y，契约就不是契约而是谎言 ——
 而读它的人不会知道。2026-08-06 逐字段核查查出 7 处失真，最严重的一条是
@@ -18,7 +18,7 @@ import re
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-CONTRACTS = ROOT / "00_governance" / "contracts"
+CONTRACTS = ROOT / "governance" / "contracts"
 DFC = CONTRACTS / "DATA_FLOW_CONTRACT.md"
 MW = CONTRACTS / "MASTER_WORKFLOW.md"
 INDEX = CONTRACTS / "README.md"
@@ -163,7 +163,7 @@ class TestWorkflowMatchesReality:
         heads = [l for l in MW.read_text(encoding="utf-8").splitlines()
                  if l.startswith("## ")]
         assert not any("当前需要调整的旧设计" in h for h in heads), \
-            "这一节原是 8 条待办，应移入 05_strategy_versions/TODO.md"
+            "这一节原是 8 条待办，应移入 TODO.md"
         assert any("已移出" in h or "已完成" in h for h in heads), \
             "该节标题应说明待办已移出"
 

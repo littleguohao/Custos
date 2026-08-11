@@ -2,7 +2,7 @@
 """One-shot 14:45 pipeline: calendar check -> runtime gate -> close review -> digest.
 
 stdout is a machine-consumed protocol (see the summary lines below) and is
-kept byte-compatible; observability goes to 06_logs/{date}_1445_run_log.json
+kept byte-compatible; observability goes to artifacts/logs/{date}_1445_run_log.json
 instead — every run (completed / closed / calendar_failed / failed) leaves
 one behind.
 """

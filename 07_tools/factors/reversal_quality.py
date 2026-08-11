@@ -41,7 +41,7 @@ FACTOR: dict[str, Any] = {
     "name": "反转K 成色分（0–4）",
     "kind": "selector",
     "status": "needs_work",
-    "evidence": "00_governance/research/R2_selection_price_volume.md",
+    "evidence": "governance/research/R2_selection_price_volume.md",
     "note": "稳健负预测；口径已与 live 默认值一致（对称 ±2%），但刻意不跟随 B1_REVK_* env",
     "min_bars": 21,
     "live_use": "none",

@@ -21,11 +21,11 @@ xlsx 必须含三个 sheet：`持仓数据` / `已清仓` / `交易记录`。
 灾备脚本不该猜输入文件 —— 猜错会用错误的 xlsx 覆盖持仓快照。故保持必填，删掉死分支。
 """
 # 输出（项目单一事实源）：
-#   01_data/trades/trades_all.csv         — 全量流水 (cleaned)
-#   01_data/trades/trades_stock.json      — 股票买卖明细
-#   01_data/trades/closed_positions.json  — 已清仓汇总
-#   01_data/trades/current_positions.json — 当前持仓快照
-#   01_data/trades/_import_meta.json      — 导入元数据 (源路径 + 时间 + 行数)
+#   data/trades/trades_all.csv         — 全量流水 (cleaned)
+#   data/trades/trades_stock.json      — 股票买卖明细
+#   data/trades/closed_positions.json  — 已清仓汇总
+#   data/trades/current_positions.json — 当前持仓快照
+#   data/trades/_import_meta.json      — 导入元数据 (源路径 + 时间 + 行数)
 from __future__ import annotations
 import argparse
 import json
@@ -52,7 +52,7 @@ OUT_DIR = TRADES_DIR
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(prog="standardize_trades", description="Import trade records from a user-provided xlsx into strategy_team 01_data/trades/. Every time you download a new xlsx, pass --src.")
+    ap = argparse.ArgumentParser(prog="standardize_trades", description="Import trade records from a user-provided xlsx into strategy_team data/trades/. Every time you download a new xlsx, pass --src.")
     ap.add_argument("--src", required=True, help="path to xlsx file, e.g. C:/Users/gh/Downloads/交易记录3.xlsx")
     args = ap.parse_args()
     src = Path(args.src)

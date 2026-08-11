@@ -23,7 +23,7 @@ FACTOR: dict[str, Any] = {
     "name": "反转成色**反向**选择器",
     "kind": "selector",
     "status": "needs_work",
-    "evidence": "00_governance/research/R2_selection_price_volume.md",
+    "evidence": "governance/research/R2_selection_price_volume.md",
     "note": "样本内大胜、含退市跨年翻转；归因未分离",
     "min_bars": 21,
     "live_use": "none",

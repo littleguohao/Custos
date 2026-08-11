@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Screening 链第 1 段：公式初筛（formula_screen）。
 
-对全 A 批量执行注册表（00_governance/contracts/SCREEN_FORMULA_REGISTRY.json）中 enabled
+对全 A 批量执行注册表（governance/contracts/SCREEN_FORMULA_REGISTRY.json）中 enabled
 的 TQ 选股公式（formula_process_mul_xg），汇总当日命中清单。
 
 降级规则（绝不 raise、绝不阻塞主链）：
@@ -13,7 +13,7 @@ CLI::
 
     uv run python 07_tools/screening/formula_screen.py --date YYYY-MM-DD
 
-输出 ``01_data/screening/{date}_formula_hits.json``，并打印一行 JSON 摘要。
+输出 ``data/screening/{date}_formula_hits.json``，并打印一行 JSON 摘要。
 """
 from __future__ import annotations
 

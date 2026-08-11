@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """Screening 链第 4 段：渲染备选表格（candidate_table）。
 
-读 ``01_data/stock_pool/{date}_stock_pool.json``，渲染
-``03_daily_plans/_supporting/{date}/{date}_candidate_table.md``，
+读 ``data/stock_pool/{date}_stock_pool.json``，渲染
+``artifacts/reports/daily/_supporting/{date}/{date}_candidate_table.md``，
 按 bucket 分组，供日报证据层引用。stock_pool 缺失时输出降级说明，
 绝不报错、绝不阻塞主链。
 
@@ -163,7 +163,7 @@ def _signal_labels_section(candidates: list[dict]) -> list[str]:
                      + "、".join(f"{sl.SIGNAL_META[k][0]} {v} 只" for k, v in top))
     lines.append("> 分母为**可评估数**；缩写见各行反引号。这些标注不改写分层/next_step。")
     lines.append("> ⚠️ **这些因子已在跨窗终审中被否决**（edge 仅存在于 2025-2026 单一 regime，"
-                 "详见 00_governance/research/README.md「跨窗终审总账」）："
+                 "详见 governance/research/README.md「跨窗终审总账」）："
                  "本区块是**观察记录，不是交易依据**，不得据命中数决定仓位。")
     lines.append("")
     return lines

@@ -13,7 +13,7 @@ down_count=None 会走 7.5 中性），绝不用一个来源不明的近似值�
 
 真值来源（按优先级）：
 1. 环境变量 ``A_SHARE_TOTAL_STOCKS`` —— 运维显式给定的可核对数字；
-2. ``01_data/market/a_share_universe.json`` 的 ``total`` 字段 —— 由外部流程写入。
+2. ``data/market/a_share_universe.json`` 的 ``total`` 字段 —— 由外部流程写入。
 
 两者都没有就返回 ``(None, reason)``。**不**拿本地 vipdoc 文件数当总数：那里含
 已退市标的，会把总数抬高、跌家数推得更多，正好加重要修的这个偏差。

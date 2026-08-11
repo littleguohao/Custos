@@ -51,7 +51,7 @@ def _is_trading_day(target: str) -> bool:
 
 
 class _RunLogRestore:
-    """runner 子进程走日历门时会把 run_log 落进**真实** 06_logs/（LOG_DIR 是模块级
+    """runner 子进程走日历门时会把 run_log 落进**真实** artifacts/logs/（LOG_DIR 是模块级
     常量，子进程打不了桩）。不处理的话：① 干净环境下被 repo hygiene 测试抓到；
     ② 目标机上若当天已有同名师手动日志会被覆盖。所以：跑前备份、跑后恢复/删除。
     """

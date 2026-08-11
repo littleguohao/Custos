@@ -26,7 +26,7 @@ FACTOR: dict[str, Any] = {
     "name": "主力出货五方式（顶部派发形态），用于清仓与选股规避",
     "kind": "pattern",
     "status": "active",
-    "evidence": "00_governance/research/R2_selection_price_volume.md",
+    "evidence": "governance/research/R2_selection_price_volume.md",
     "note": "主力出货五方式（顶部派发形态），用于清仓与选股规避",
     "min_bars": 1,
     "live_use": "gate",

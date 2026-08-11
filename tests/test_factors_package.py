@@ -7,7 +7,7 @@
     因子之间互相依赖  b1_dual→s_shape,platform_pullback；main_rally→rsi_state；
                      sector_phase→sector_mainstream
 
-⇒ 它是一个层，不是 screening 的内部细节。而 `00_governance/strategy/_factors/`
+⇒ 它是一个层，不是 screening 的内部细节。而 `governance/strategy/_factors/`
 （文档侧）早已存在，代码侧却没有对应位置 —— 文档与代码结构错位。
 
 ⚠️ **只做位置统一，不动接口。** 现存三套接口（`compute_*` / `detect_*` / `SCORERS` 的

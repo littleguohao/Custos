@@ -6,7 +6,7 @@
 
 - 不直接修改 `C:\new_tdx64\PYPlugins\user` 下原始脚本。
 - 将原始 TQ 能力封装成 strategy_team 可复用的数据层。
-- 所有输出统一写入 `strategy_team/01_data/`。
+- 所有输出统一写入 `strategy_team/data/`。
 
 当前可复用来源：
 

@@ -66,7 +66,7 @@ def replay_ledger(ledger_path: Path | None = None,
     """
     # ⚠️ 默认值在**调用时**解析，不写成 `ledger_path=LEDGER` —— 那样默认值在 def 执行时
     #    就绑定成具体 Path，测试 monkeypatch 模块常量对它无效。
-    #    见 00_governance/data/DATA_SOURCE_PRINCIPLE.md「模块级常量 + 运行时替换 = 陷阱」变体②。
+    #    见 governance/data/DATA_SOURCE_PRINCIPLE.md「模块级常量 + 运行时替换 = 陷阱」变体②。
     ledger_path = ledger_path or LEDGER
     if not ledger_path.exists():
         return {"ok": False, "positions": [], "error": "ledger_missing", "trade_rows": 0}
@@ -148,7 +148,7 @@ def main(argv=None) -> int:
     ap.add_argument("--strict", action="store_true",
                     help="数量不一致时 exit 1（默认只报告 —— 新校验先观察若干交易日再开硬闸，"
                          "见 2026-07-30 事故：门控与口径同时收紧导致整条链失败）")
-    ap.add_argument("--out", help="结果落盘路径（默认 01_data/quality/{date}_ledger_reconcile.json）")
+    ap.add_argument("--out", help="结果落盘路径（默认 data/quality/{date}_ledger_reconcile.json）")
     a = ap.parse_args(argv)
 
     baseline = json.loads(Path(a.baseline).read_text(encoding="utf-8")) if a.baseline else None

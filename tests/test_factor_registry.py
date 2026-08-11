@@ -64,7 +64,7 @@ class TestRegistry:
         """判「待优化」必须给出处 —— 否则下次有人会以为是拍脑袋否掉的。"""
         m = factors.registry()[fid]["meta"]
         if m["status"] == "needs_work":
-            assert m["evidence"].startswith("00_governance/research/"), \
+            assert m["evidence"].startswith("governance/research/"), \
                 f"{fid} 标 needs_work 但没给 research 出处"
             assert (ROOT / m["evidence"]).exists(), f"{fid} 的 evidence 路径不存在"
 

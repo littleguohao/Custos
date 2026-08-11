@@ -70,8 +70,8 @@ TQ数据接口初始化失败或已有同名策略运行
 
 ## 已生成测试文件
 
-- `01_data/local_tdx/test_600150_kline.csv`
-- `01_data/local_tdx/test_snapshot.json`
-- `01_data/local_tdx/test_stock_list.json`
-- `01_data/local_tdx/test_sector_list.json`
-- `01_data/local_tdx/test_sector_880081_members.json`
+- `data/local_tdx/test_600150_kline.csv`
+- `data/local_tdx/test_snapshot.json`
+- `data/local_tdx/test_stock_list.json`
+- `data/local_tdx/test_sector_list.json`
+- `data/local_tdx/test_sector_880081_members.json`

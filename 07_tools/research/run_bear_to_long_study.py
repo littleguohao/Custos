@@ -11,7 +11,7 @@
 用法(先看计划,不跑):
   uv run python 07_tools/research/run_bear_to_long_study.py --dry-run
 真跑:
-  uv run python 07_tools/research/run_bear_to_long_study.py --out-dir 06_logs/bear2long
+  uv run python 07_tools/research/run_bear_to_long_study.py --out-dir artifacts/logs/bear2long
 """
 from __future__ import annotations
 
@@ -550,7 +550,7 @@ def main(argv=None, runner=None) -> int:
                          "f_roe/f_gross_margin/f_ocf_ps/f_deduct_ratio/f_rev_yoy/f_np_yoy/"
                          "f_pit_lag_days。需先建 PIT 台账并 --verify 确认无缺期")
     ap.add_argument("--pit-ledger", default="",
-                    help="PIT 财务台账路径(缺省用 01_data/fundamentals/pit_financials.jsonl)")
+                    help="PIT 财务台账路径(缺省用 data/fundamentals/pit_financials.jsonl)")
     ap.add_argument("--pit-visible-same-day", action="store_true",
                     help="把公告当日算作可见(默认次日;公告多在盘后发布)")
     ap.add_argument("--data-source", choices=["qlib", "csv"], default="qlib")

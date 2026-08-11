@@ -24,7 +24,7 @@ def write_json(path: Path, data) -> None:
 
 
 def make_base(tmp_path: Path) -> Path:
-    write_json(tmp_path / "00_governance" / "contracts" / "CN_TRADING_CALENDAR.json", CALENDAR)
+    write_json(tmp_path / "governance" / "contracts" / "CN_TRADING_CALENDAR.json", CALENDAR)
     return tmp_path
 
 
@@ -32,22 +32,22 @@ def write_ledger(base: Path, rows: list[list]) -> None:
     lines = ["成交日期,成交时间,代码,名称,交易类别,成交数量,成交价格,成交金额,发生金额,费用,备注"]
     for r in rows:
         lines.append(",".join(str(x) for x in r))
-    path = base / "01_data" / "trades" / "master_trade_ledger.csv"
+    path = base / "data" / "trades" / "master_trade_ledger.csv"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\ufeff" + "\n".join(lines), encoding="utf-8")
 
 
 def write_review(base: Path, day: str, plan_codes: list[str] | None = None) -> None:
     review = {"date": day, "next_day_plan": {"holding_plans": [{"code": c} for c in (plan_codes or [])]}}
-    write_json(base / "04_reviews" / "daily" / f"{day}_final_review.json", review)
+    write_json(base / "artifacts/reports" / "daily" / f"{day}_final_review.json", review)
 
 
 def write_mfe(base: Path, day: str, holdings: list[dict]) -> None:
-    write_json(base / "01_data" / "holdings" / f"{day}_mfe_mae.json", {"date": day, "holdings": holdings})
+    write_json(base / "data" / "holdings" / f"{day}_mfe_mae.json", {"date": day, "holdings": holdings})
 
 
 def write_amv(base: Path, entries: list[tuple[str, float]]) -> None:
-    path = base / "01_data" / "market" / "0amv_observations.jsonl"
+    path = base / "data" / "market" / "0amv_observations.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         "\n".join(json.dumps({"date": d, "amv_change_pct": p}) for d, p in entries),
@@ -60,7 +60,7 @@ def write_meta(base: Path, confirmed: dict) -> None:
     落在 position_confirmations.json：{date: {confirmed_at, no_trades, note}}。"""
     records = {d: {"confirmed_at": f"{d}T17:30:00", "no_trades": True, "note": "测试确认"}
                for d, ok in confirmed.items() if ok}
-    write_json(base / "01_data" / "trades" / "position_confirmations.json", records)
+    write_json(base / "data" / "trades" / "position_confirmations.json", records)
 
 
 class IsoWeekRangeTests(unittest.TestCase):
@@ -94,7 +94,7 @@ class LedgerTests(unittest.TestCase):
                     ["2026-07-13", "10:00:00", "600000", "测试A", "买入", 100, 10.0, 1000.0, -1001.0, 1.0, ""],
                     ["2026-07-13", "10:01:00", "600000", "测试A", "转债转入", 3, 0, 0, 0, 0, ""],
                 ])
-                trades = wr.parse_ledger(base / "01_data" / "trades" / "master_trade_ledger.csv")
+                trades = wr.parse_ledger(base / "data" / "trades" / "master_trade_ledger.csv")
                 self.assertEqual(len(trades), 1)
                 self.assertEqual(trades[0]["code"], "600000")
                 self.assertEqual(trades[0]["qty"], 100.0)
@@ -285,8 +285,8 @@ class DegradationTests(unittest.TestCase):
             base = traded_base(Path(td))
             with patch("sys.argv", ["weekly_review.py", "--date", "2026-07-19", "--base", str(base)]):
                 wr.main()
-            json_path = base / "04_reviews" / "weekly" / "2026W29_weekly_review.json"
-            md_path = base / "04_reviews" / "weekly" / "2026W29_weekly_review.md"
+            json_path = base / "artifacts/reports" / "weekly" / "2026W29_weekly_review.json"
+            md_path = base / "artifacts/reports" / "weekly" / "2026W29_weekly_review.md"
             self.assertTrue(json_path.exists())
             self.assertTrue(md_path.exists())
             data = json.loads(json_path.read_text(encoding="utf-8"))
@@ -306,7 +306,7 @@ class DegradationTests(unittest.TestCase):
 # ------------------------------------------------- 新板块 fixture 辅助
 
 def write_full_review(base: Path, day: str, revalued: list[dict]) -> None:
-    write_json(base / "04_reviews" / "daily" / f"{day}_final_review.json",
+    write_json(base / "artifacts/reports" / "daily" / f"{day}_final_review.json",
                {"date": day, "revalued_positions": revalued})
 
 
@@ -316,19 +316,19 @@ def revalued(code: str, name: str, close: float, weight: float, mv: float, pnl: 
 
 
 def write_market_timing(base: Path, day: str, latest_date: str, close: float, chg: float | None) -> None:
-    write_json(base / "01_data" / "market" / f"{day}_market_timing_input.json",
+    write_json(base / "data" / "market" / f"{day}_market_timing_input.json",
                {"a_share_indices": {"上证指数": {"latest_date": latest_date, "latest_close": close,
                                                "daily_change_pct": chg}}})
 
 
 def write_chief(base: Path, day: str, state: str, permission: str) -> None:
-    write_json(base / "01_data" / "decisions" / f"{day}_chief_decision.json",
+    write_json(base / "data" / "decisions" / f"{day}_chief_decision.json",
                {"date": day, "market_state": state, "market_score": "40/100",
                 "total_position_range": "20%-40%", "new_position_permission": permission})
 
 
 def write_b1(base: Path, day: str, items: list[dict]) -> None:
-    write_json(base / "01_data" / "holdings" / f"{day}_b1_holding_state.json", items)
+    write_json(base / "data" / "holdings" / f"{day}_b1_holding_state.json", items)
 
 
 class HoldingPerformanceTests(unittest.TestCase):
@@ -357,10 +357,10 @@ class HoldingPerformanceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             base = make_base(Path(td))
             # 只有 holding_quotes，无 revalued：价格可取，权重 unavailable；名称由 current_positions 兜底
-            write_json(base / "01_data" / "market" / "2026-07-14_holding_quotes.json",
+            write_json(base / "data" / "market" / "2026-07-14_holding_quotes.json",
                        {"quotes": [{"code": "600000", "close": 10.0}]})
             write_full_review(base, "2026-07-17", [revalued("600000", "测试A", 11.0, 0.2, 20000.0, 0.1, 10.0)])
-            write_json(base / "01_data" / "trades" / "current_positions.json", [{"代码": "600000", "名称": "兜底名"}])
+            write_json(base / "data" / "trades" / "current_positions.json", [{"代码": "600000", "名称": "兜底名"}])
             review = wr.build_weekly_review(base, "2026-07-15")
             row = review["holding_performance"]["rows"][0]
             self.assertEqual(row["first_date"], "2026-07-14")

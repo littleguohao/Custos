@@ -27,7 +27,7 @@ from research import reconcile_qfq as R  # noqa: E402
 @pytest.fixture(autouse=True)
 def _no_xdxr_network(monkeypatch):
     # detect_convention / detail 内部 `import adjust_factors` 取事件表：xdxr 缓存
-    # 缺失时会走网络取数并落盘到真实 01_data/market/xdxr/（干净环境被 repo hygiene
+    # 缺失时会走网络取数并落盘到真实 data/market/xdxr/（干净环境被 repo hygiene
     # 抓到）。本文件全部用合成序列，事件表应为空（真实事件日会切段，这里只测单段判据）。
     import adjust_factors
     monkeypatch.setattr(adjust_factors, "get_xdxr", lambda code, **kw: [])

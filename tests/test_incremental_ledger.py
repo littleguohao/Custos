@@ -194,7 +194,7 @@ class TestConfirmNoTradesNeedsNoInputFile:
 
         # ⚠️ patch **全部** Path 常量，不能只挑想到的那几个 ——
         #    第一版漏了 `AUDIT`，测试把审计记录写进了真实
-        #    `01_data/trades/ledger_append_audit.jsonl`（被 repo-hygiene 守卫抓到）。
+        #    `data/trades/ledger_append_audit.jsonl`（被 repo-hygiene 守卫抓到）。
         #    同一教训在 2026-08-07 给 runner 写 harness 时踩过：漏了 `REVIEWS`。
         import pathlib as _pl
         for attr in dir(il):

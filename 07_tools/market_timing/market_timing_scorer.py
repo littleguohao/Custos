@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """market_timing scorer v1.
 
-Reads strategy_team/01_data/market/YYYY-MM-DD_market_timing_input.json
+Reads strategy_team/data/market/YYYY-MM-DD_market_timing_input.json
 and generates a markdown decision report.
 
 Scoring modules:

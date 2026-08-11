@@ -16,7 +16,7 @@ FACTOR: dict[str, Any] = {
     "name": "对照基线：任何 as-of 日都判「可买」",
     "kind": "control",
     "status": "active",
-    "evidence": "00_governance/research/R1_core_framework.md",
+    "evidence": "governance/research/R1_core_framework.md",
     "note": "所有进场信号的对照臂，必须保留",
     "min_bars": 1,
     "live_use": "none",

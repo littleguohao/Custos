@@ -2,7 +2,7 @@
 """09:05 one-shot premarket report pipeline.
 
 stdout is a machine-consumed protocol (see the summary lines below) and is
-kept byte-compatible; observability goes to 06_logs/{date}_0905_run_log.json
+kept byte-compatible; observability goes to artifacts/logs/{date}_0905_run_log.json
 instead — every run (completed / closed / calendar_failed / failed) leaves
 one behind.
 """

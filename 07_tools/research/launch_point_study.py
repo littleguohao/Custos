@@ -1578,7 +1578,7 @@ def main(argv=None, loader=None) -> int:
                          "f_pit_lag_days。全部按信号日**可见**的财报计算,同比取同口径上年同期的"
                          "**当时可见版本**(不是今天的最终版)")
     ap.add_argument("--pit-ledger", default=None,
-                    help="PIT 财务台账路径(默认 01_data/fundamentals/pit_financials.jsonl)")
+                    help="PIT 财务台账路径(默认 data/fundamentals/pit_financials.jsonl)")
     ap.add_argument("--pit-visible-same-day", action="store_true",
                     help="把公告当日算作可见(默认次日;公告多在盘后发布)")
     ap.add_argument("--style-features", action="store_true",

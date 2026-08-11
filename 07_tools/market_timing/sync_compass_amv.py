@@ -4,12 +4,12 @@
 两件事（均 best-effort，任何失败打印 WARN 并 exit 0，绝不中断管线）：
 
 1. **台账合并**：解析 day.vdat 日线主序列，把缺失日期的记录追加进
-   ``01_data/market/0amv_observations.jsonl``（已存在日期的记录——任何
+   ``data/market/0amv_observations.jsonl``（已存在日期的记录——任何
    source——跳过不重复）。默认只补最近 30 天，``--backfill-since``
    可指定更早起点做全量回填。
 2. **当日自动填充**：``--date``（默认今天）是交易日且 compass 最新日期
    == 该日时，把 ``amv_0day``（= 最新 change_pct）写入
-   ``01_data/market/{date}_market_timing_input.json``（文件存在才写；
+   ``data/market/{date}_market_timing_input.json``（文件存在才写；
    键已存在且 amv_0.quality=confirmed 则不覆盖）。
 
 指南针运行时独占锁 day.vdat（PermissionError），解析器返回 error 字段，

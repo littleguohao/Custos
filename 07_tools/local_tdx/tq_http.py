@@ -74,7 +74,7 @@ def _post(payload: dict, timeout: int, endpoint: Optional[str] = None) -> bytes:
     """发送 JSON-RPC POST，返回原始响应体（网络/HTTP 错误向上抛，由 call 兜底）。
 
     ``endpoint`` 默认取 `TQ_HTTP_URL`，但**在调用时解析**而不是写成默认参数
-    ——见 `00_governance/data/DATA_SOURCE_PRINCIPLE.md`「模块级常量 + 运行时替换 = 陷阱」。
+    ——见 `governance/data/DATA_SOURCE_PRINCIPLE.md`「模块级常量 + 运行时替换 = 陷阱」。
     """
     req = urllib.request.Request(
         endpoint or TQ_HTTP_URL,

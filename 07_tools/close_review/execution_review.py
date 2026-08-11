@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Deterministically reconcile premarket, 14:45 actions and actual trades.
 
-用户当日未执行原因补录位置：01_data/trades/position_confirmations.json 中
+用户当日未执行原因补录位置：data/trades/position_confirmations.json 中
 对应日期的 "execution_reason" 字段；未补录时字段留空并计入 missing。
 """
 from __future__ import annotations

@@ -35,7 +35,7 @@ FACTOR: dict[str, Any] = {
     "name": "RSI 状态因子（H3）",
     "kind": "state",
     "status": "untested",
-    "evidence": "00_governance/research/R8_hypothesis_H3_H4_pending.md",
+    "evidence": "governance/research/R8_hypothesis_H3_H4_pending.md",
     "note": "R8：已实现未跑；与 J 互补而非替代",
     "min_bars": 30,
     "live_use": "evidence_only",  # signal_labels 出标签落候选表；该模块头部已声明「标注不是交易依据」

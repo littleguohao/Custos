@@ -59,7 +59,7 @@ def validate_premarket_intelligence(data: Any) -> dict[str, Any]:
 
 # ══ 文件定位与加载（2026-08-07 从 `daily_report.py` 移来）
 #
-# 为什么移：它们读 `01_data/news/premarket/`，而 `news/postclose_news_digest`
+# 为什么移：它们读 `data/news/premarket/`，而 `news/postclose_news_digest`
 # 与 `daily_report` **都要用**。原先放在 `daily_report.py`（根层报告生成器）里，
 # 导致 `news/`（L1 数据/采集层）反向依赖根层编排 —— 分层反转。
 # 放这里则与它们加载的 schema 同处一个模块。

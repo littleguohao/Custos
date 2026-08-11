@@ -26,7 +26,7 @@ class TestCalcMfeMaeFieldNames:
     """
 
     def _positions(self, tmp_path: Path) -> Path:
-        path = tmp_path / "01_data" / "trades" / "current_positions.json"
+        path = tmp_path / "data" / "trades" / "current_positions.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps([{"代码": "600000", "名称": "测试股", "单位成本": 10.0,
                                      "持有数量": 1000}], ensure_ascii=False), encoding="utf-8")
@@ -37,7 +37,7 @@ class TestCalcMfeMaeFieldNames:
 
         pos = self._positions(tmp_path)
         monkeypatch.setattr(cm, "BASE", tmp_path)
-        monkeypatch.setattr(cm, "HOLDINGS_DIR", tmp_path / "01_data" / "holdings")
+        monkeypatch.setattr(cm, "HOLDINGS_DIR", tmp_path / "data" / "holdings")
         monkeypatch.setattr(cm, "POSITIONS", pos)
         monkeypatch.setattr(cm, "load_entry_dates",
                             lambda *a, **k: {"600000": {"entry_date": "2026-06-10"}})
@@ -65,7 +65,7 @@ class TestCalcMfeMaeFieldNames:
         monkeypatch.setitem(sys.modules, "mootdx.quotes", type(sys)("mootdx.quotes"))
         sys.modules["mootdx.quotes"].Quotes = _Quotes
         rc = cm.main(["--date", "2026-06-11"])
-        out = json.loads((tmp_path / "01_data" / "holdings" /
+        out = json.loads((tmp_path / "data" / "holdings" /
                           "2026-06-11_mfe_mae.json").read_text(encoding="utf-8"))
         return rc, out["holdings"][0]
 
@@ -133,11 +133,11 @@ class TestRun1700MfeStageEcho:
     def _run(self, tmp_path, monkeypatch, mfe_out, mfe_ok):
         import run_1700
 
-        review_dir = tmp_path / "04_reviews" / "daily"
+        review_dir = tmp_path / "artifacts/reports" / "daily"
         review_dir.mkdir(parents=True)
         (review_dir / "2026-07-17_final_review.md").write_text("# 复盘\n正文\n", encoding="utf-8")
         monkeypatch.setattr(run_1700, "REVIEWS", review_dir)
-        monkeypatch.setattr(run_1700, "LOG_DIR", tmp_path / "06_logs")
+        monkeypatch.setattr(run_1700, "LOG_DIR", tmp_path / "artifacts/logs")
         # 日历门控已抽进 pipeline_kit.calendar_gate，桩要打在它查日历的地方
         import pipeline_kit
         monkeypatch.setattr(pipeline_kit, "check_trading_day", lambda d: {"is_trading_day": True})
@@ -435,7 +435,7 @@ class TestAffairCache:
         df = ltd.get_financial_data("20260331")
         assert not df.empty
         downdir = Path(calls["downdir"])
-        # 不 resolve：01_data 在部分环境是指向项目外盘符的符号链接,resolve 后会"跑出"
+        # 不 resolve：data 在部分环境是指向项目外盘符的符号链接,resolve 后会"跑出"
         # 项目,但**配置路径**本身仍在项目内——本测试钉的是配置不写到 BASE/.. 项目外。
         assert downdir.is_relative_to(ltd.BASE)
         assert ".." not in downdir.parts
@@ -513,13 +513,13 @@ def _write_ledger(base: Path, rows: list[dict]) -> None:
             r["date"], r.get("time", "09:30:00"), r["code"], r.get("name", "测试股"),
             r["side"], str(r["qty"]), str(r["price"]), str(r["qty"] * r["price"]),
             str(r["qty"] * r["price"]), str(r["fee"]), ""]))
-    path = base / "01_data" / "trades" / "master_trade_ledger.csv"
+    path = base / "data" / "trades" / "master_trade_ledger.csv"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\ufeff" + "\n".join(lines), encoding="utf-8")
 
 
 def _week_base(tmp_path: Path) -> Path:
-    p = tmp_path / "00_governance" / "contracts" / "CN_TRADING_CALENDAR.json"
+    p = tmp_path / "governance" / "contracts" / "CN_TRADING_CALENDAR.json"
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(WEEK_CAL, ensure_ascii=False), encoding="utf-8")
     return tmp_path
@@ -632,11 +632,11 @@ class TestPendingPositionMissingFields:
         row = {"代码": "600000", "名称": "测试股", "持有数量": 1000.0, "单位成本": 10.0,
                "snapshot_status": "pending_close_revaluation",
                "snapshot_note": "数量/成本已按增量成交更新；市值、盈亏、仓位须用最新收盘价重估"}
-        pos_path = tmp_path / "01_data" / "trades" / "current_positions.json"
+        pos_path = tmp_path / "data" / "trades" / "current_positions.json"
         pos_path.parent.mkdir(parents=True, exist_ok=True)
         pos_path.write_text(json.dumps([row], ensure_ascii=False), encoding="utf-8")
         monkeypatch.setattr(cm, "BASE", tmp_path)
-        monkeypatch.setattr(cm, "HOLDINGS_DIR", tmp_path / "01_data" / "holdings")
+        monkeypatch.setattr(cm, "HOLDINGS_DIR", tmp_path / "data" / "holdings")
         monkeypatch.setattr(cm, "POSITIONS", pos_path)
         monkeypatch.setattr(cm, "load_entry_dates",
                             lambda *a, **k: {"600000": {"entry_date": "2026-06-10"}})
@@ -654,7 +654,7 @@ class TestPendingPositionMissingFields:
         monkeypatch.setitem(sys.modules, "mootdx.reader", type(sys)("mootdx.reader"))
         sys.modules["mootdx.reader"].Reader = _Reader
         cm.main(["--date", "2026-06-11"])
-        out = json.loads((tmp_path / "01_data" / "holdings" /
+        out = json.loads((tmp_path / "data" / "holdings" /
                           "2026-06-11_mfe_mae.json").read_text(encoding="utf-8"))
         got = out["holdings"][0]
         assert got["mfe_pct"] == 20.0                     # 有成本，MFE/MAE 照算
@@ -677,12 +677,12 @@ class TestPendingPositionMissingFields:
 
         import calc_mfe_mae as cm
 
-        pos_path = tmp_path / "01_data" / "trades" / "current_positions.json"
+        pos_path = tmp_path / "data" / "trades" / "current_positions.json"
         pos_path.parent.mkdir(parents=True, exist_ok=True)
         pos_path.write_text(json.dumps([{"代码": "600000", "名称": "A", "持有数量": 100}],
                                        ensure_ascii=False), encoding="utf-8")
         monkeypatch.setattr(cm, "BASE", tmp_path)
-        monkeypatch.setattr(cm, "HOLDINGS_DIR", tmp_path / "01_data" / "holdings")
+        monkeypatch.setattr(cm, "HOLDINGS_DIR", tmp_path / "data" / "holdings")
         monkeypatch.setattr(cm, "POSITIONS", pos_path)
         monkeypatch.setattr(cm, "load_entry_dates",
                             lambda *a, **k: {"600000": {"entry_date": "2026-06-10"}})
@@ -700,7 +700,7 @@ class TestPendingPositionMissingFields:
         monkeypatch.setitem(sys.modules, "mootdx.reader", type(sys)("mootdx.reader"))
         sys.modules["mootdx.reader"].Reader = _Reader
         cm.main(["--date", "2026-06-11"])
-        got = json.loads((tmp_path / "01_data" / "holdings" /
+        got = json.loads((tmp_path / "data" / "holdings" /
                           "2026-06-11_mfe_mae.json").read_text(encoding="utf-8"))["holdings"][0]
         assert got["mfe_pct"] is None and "单位成本" in got["unable_reason"]
 
@@ -728,7 +728,7 @@ class TestSellFlyCoverage:
             {"date": "2026-07-15", "code": "000001", "side": "卖出", "qty": 1000,
              "price": 21.0, "fee": 1.0},
         ])
-        p = base / "01_data" / "holdings" / "2026-07-16_mfe_mae.json"
+        p = base / "data" / "holdings" / "2026-07-16_mfe_mae.json"
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps({"date": "2026-07-16", "holdings": mfe_holdings},
                                 ensure_ascii=False), encoding="utf-8")
@@ -792,7 +792,7 @@ class TestWeeklyReviewIoReuse:
             rows.append({"date": "2026-07-14", "code": code, "side": "卖出", "qty": 1000,
                          "price": 11.0, "fee": 1.0})
         _write_ledger(base, rows)
-        p = base / "01_data" / "holdings" / "2026-07-16_mfe_mae.json"
+        p = base / "data" / "holdings" / "2026-07-16_mfe_mae.json"
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps({"date": "2026-07-16", "holdings": []}), encoding="utf-8")
 
@@ -816,7 +816,7 @@ class TestWeeklyReviewIoReuse:
             {"date": "2026-07-14", "code": "600519", "side": "买入", "qty": 100,
              "price": 10.0, "fee": 1.0},
         ])
-        rv = base / "04_reviews" / "daily" / "2026-07-13_final_review.json"
+        rv = base / "artifacts/reports" / "daily" / "2026-07-13_final_review.json"
         rv.parent.mkdir(parents=True, exist_ok=True)
         rv.write_text(json.dumps({"next_day_plan": {"holding_plans": [{"code": "600000"}]}}),
                       encoding="utf-8")
@@ -832,7 +832,7 @@ class TestWeeklyReviewIoReuse:
     def test_mfe_index_globs_once_and_is_reusable(self, tmp_path):
         from close_review import weekly_review as wr
 
-        holdings = tmp_path / "01_data" / "holdings"
+        holdings = tmp_path / "data" / "holdings"
         holdings.mkdir(parents=True)
         for day in ("2026-07-15", "2026-07-16"):
             (holdings / f"{day}_mfe_mae.json").write_text(
@@ -850,7 +850,7 @@ class TestWeeklyReviewIoReuse:
         """向后兼容:老调用方(不传 index/cache)行为不变。"""
         from close_review import weekly_review as wr
 
-        holdings = tmp_path / "01_data" / "holdings"
+        holdings = tmp_path / "data" / "holdings"
         holdings.mkdir(parents=True)
         (holdings / "2026-07-16_mfe_mae.json").write_text(
             json.dumps({"holdings": [{"code": "600000", "cost": 10.0, "mfe_pct": 5.0}]}),
@@ -932,7 +932,7 @@ class TestWeeklyReviewLocalDegradation:
         cfg = {"official_years": {"2026": {"closed_ranges": [
             {"name": "缺键"}, {"start": "2026-10-01"}, "字符串不是 dict",
             {"start": "2026-07-14", "end": "2026-07-14"}]}}}
-        p = tmp_path / "00_governance" / "contracts" / "CN_TRADING_CALENDAR.json"
+        p = tmp_path / "governance" / "contracts" / "CN_TRADING_CALENDAR.json"
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
         got = wr.trading_days_of_week(tmp_path, ["2026-07-13", "2026-07-14", "2026-07-18"])
@@ -950,7 +950,7 @@ class TestWeeklyReviewLocalDegradation:
             {"date": "2026-07-14", "code": "600000", "side": "卖出", "qty": 100,
              "price": 9.0, "fee": 1.0},
         ])
-        amv = base / "01_data" / "market" / "0amv_observations.jsonl"
+        amv = base / "data" / "market" / "0amv_observations.jsonl"
         amv.parent.mkdir(parents=True, exist_ok=True)
         amv.write_text(json.dumps({"date": "2026-07-14", "amv_change_pct": "bad"}) + "\n",
                        encoding="utf-8")

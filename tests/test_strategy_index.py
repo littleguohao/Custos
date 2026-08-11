@@ -1,4 +1,4 @@
-"""`00_governance/strategy/` 的结构、注册表与一致性约束。
+"""`governance/strategy/` 的结构、注册表与一致性约束。
 
 2026-08-06 重组：**一个策略 = 一个上下文目录**（`b1/` `cz/`），
 非策略用 `_` 前缀（`_factors/` 可复用因子、`_shared/` 跨策略规则）。
@@ -21,7 +21,7 @@ import re
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-STRATEGY = ROOT / "00_governance" / "strategy"
+STRATEGY = ROOT / "governance" / "strategy"
 INDEX = STRATEGY / "README.md"
 REGISTRY = STRATEGY / "STRATEGY_REGISTRY.json"
 
@@ -185,10 +185,10 @@ class TestReferencedPathsExist:
     `b1_holding_state.py`、`s_shape.py`、`reconcile_qfq.py` 都踩过。
     """
 
-    # 只收「形如路径」的 token：07_tools/ 或 00_governance/ 开头、以扩展名
+    # 只收「形如路径」的 token：07_tools/ 或 governance/ 开头、以扩展名
     # （文件）或 `/`（目录）结尾；容忍 `:行号` / `#锚点` 后缀。
     # `07_tools/pipeline_kit.propagate_gate_code` 这类「模块.符号」不算路径。
-    PATHISH = re.compile(r"^(?:07_tools|00_governance)/\S+?(\.[a-z0-9]+|/)$")
+    PATHISH = re.compile(r"^(?:07_tools|governance)/\S+?(\.[a-z0-9]+|/)$")
 
     @staticmethod
     def _strip_suffix(token):
@@ -213,9 +213,9 @@ class TestReferencedPathsExist:
         assert not bad, f"「代码依赖」里的路径不存在：{bad}"
 
     def test_contracts_backtick_paths_exist(self):
-        """contracts/*.md 里反引号包裹的 07_tools/** 与 00_governance/** 路径必须存在。"""
+        """contracts/*.md 里反引号包裹的 07_tools/** 与 governance/** 路径必须存在。"""
         bad = []
-        for doc in (ROOT / "00_governance" / "contracts").glob("*.md"):
+        for doc in (ROOT / "governance" / "contracts").glob("*.md"):
             for tok in re.findall(r"`([^`]+)`", doc.read_text(encoding="utf-8")):
                 path = self._strip_suffix(tok)
                 if not self.PATHISH.match(path):

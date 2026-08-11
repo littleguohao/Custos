@@ -14,7 +14,7 @@ CLI::
 
     uv run python 07_tools/local_tdx/tq_sector.py --date YYYY-MM-DD [--limit N] [--progress]
 
-输出 ``01_data/sectors/{date}_tq_sector_map.json``，并打印一行 JSON 摘要。
+输出 ``data/sectors/{date}_tq_sector_map.json``，并打印一行 JSON 摘要。
 """
 from __future__ import annotations
 

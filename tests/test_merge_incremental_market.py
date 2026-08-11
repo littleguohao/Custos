@@ -75,9 +75,9 @@ def test_require_systemexit_still_writes_failed_status(tmp_path, monkeypatch):
     import json
 
     monkeypatch.setattr(mim, "BASE", tmp_path)
-    monkeypatch.setattr(mim, "MARKET_DIR", tmp_path / "01_data" / "market")
-    monkeypatch.setattr(mim, "QUALITY_DIR", tmp_path / "01_data" / "quality")
-    mkt_dir = tmp_path / "01_data" / "market"
+    monkeypatch.setattr(mim, "MARKET_DIR", tmp_path / "data" / "market")
+    monkeypatch.setattr(mim, "QUALITY_DIR", tmp_path / "data" / "quality")
+    mkt_dir = tmp_path / "data" / "market"
     mkt_dir.mkdir(parents=True)
     (mkt_dir / f"{TARGET}_incremental_market.json").write_text(
         json.dumps(_inc(TARGET)), encoding="utf-8")
@@ -89,7 +89,7 @@ def test_require_systemexit_still_writes_failed_status(tmp_path, monkeypatch):
     monkeypatch.setattr(mim, "require", boom)
     rc = mim.main(["--date", TARGET])
     assert rc == 1, "退出码语义不变：契约失败仍是 1"
-    status = json.loads((tmp_path / "01_data" / "quality"
+    status = json.loads((tmp_path / "data" / "quality"
                          / f"{TARGET}_merge_incremental_status.json").read_text(encoding="utf-8"))
     assert status["status"] == "failed" and "SystemExit" in status["error"], \
         "require 硬失败也必须把 failed 状态落盘"

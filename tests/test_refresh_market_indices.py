@@ -47,19 +47,19 @@ def env(monkeypatch, tmp_path):
         if attr.isupper() and isinstance(v, pathlib.Path):
             monkeypatch.setattr(rmi, attr, tmp_path)
     monkeypatch.setattr(rmi, "BASE", tmp_path)
-    # MARKET_DIR 是 paths 常量（= BASE/01_data/market），打平 patch 成 tmp_path 后
-    # 与下面的 fixture 树（tmp/01_data/market）对不上，单独指到子目录。
-    monkeypatch.setattr(rmi, "MARKET_DIR", tmp_path / "01_data" / "market")
+    # MARKET_DIR 是 paths 常量（= BASE/data/market），打平 patch 成 tmp_path 后
+    # 与下面的 fixture 树（tmp/data/market）对不上，单独指到子目录。
+    monkeypatch.setattr(rmi, "MARKET_DIR", tmp_path / "data" / "market")
     # ⚠️ main() 的 breadth 分支会经 resolve_total_stocks() 读**真实**的
-    # 01_data/.../a_share_universe.json（breadth_basis 的模块常量不在上面的
+    # data/.../a_share_universe.json（breadth_basis 的模块常量不在上面的
     # patch 范围内）——只读但也有真实文件依赖，打桩断掉（2026-08-11 评审指出）。
     monkeypatch.setattr(rmi, "resolve_total_stocks", lambda: (5538, "test_stub"))
-    (tmp_path / "01_data" / "market").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "data" / "market").mkdir(parents=True, exist_ok=True)
     return tmp_path
 
 
 def _write_market(base, payload):
-    p = base / "01_data" / "market" / f"{DAY}_market_timing_input.json"
+    p = base / "data" / "market" / f"{DAY}_market_timing_input.json"
     p.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     return p
 
@@ -76,7 +76,7 @@ def _run(monkeypatch, base, bars_by_code=None, default=None):
     monkeypatch.setattr(rmi.ltd, "get_ohlcv_table", fake)
     monkeypatch.setattr(sys, "argv", ["x", "--date", DAY])
     rmi.main()
-    p = base / "01_data" / "market" / f"{DAY}_market_timing_input.json"
+    p = base / "data" / "market" / f"{DAY}_market_timing_input.json"
     return json.loads(p.read_text(encoding="utf-8")), calls
 
 

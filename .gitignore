@@ -9,37 +9,42 @@ __pycache__/
 # Generated strategy data. Keep Markdown templates and documentation.
 #
 # ⚠️ **必须带 `**/` 前缀**。含 `/` 的模式在 gitignore 里是**锚定仓库根**的，
-# 所以 `01_data/**` 拦不住 `<任意目录>/01_data/**`。2026-08-07 实际出过事：
+# 所以 `data/**` 拦不住 `<任意目录>/data/**`。2026-08-07 实际出过事：
 # 一个基线脚本把测试助手的 tmp_path 实参写成了字符串 "2026-07-16"，
-# 于是在**仓库根**建出 `2026-07-16/01_data/trades/master_trade_ledger.csv`
+# 于是在**仓库根**建出 `2026-07-16/data/trades/master_trade_ledger.csv`
 # 并被 `git add -A` 提交（那次是合成 fixture，没泄露真数据 —— 但同类事故
 # 若写的是真实台账就是账户数据外泄）。
-01_data/**
-**/01_data/**
-!01_data/**/
-!**/01_data/**/
-!01_data/**/*.md
-!**/01_data/**/*.md
+data/**
+**/data/**
+!data/**/
+!**/data/**/
+!data/**/*.md
+!**/data/**/*.md
+# `**/data/**` 会误伤 governance/data/（文档目录，2026-08-11 重组后与运行时 data/ 同名），
+# 显式放行。
+!governance/data/**
 
 # Generated review reports (may contain sensitive account data). Keep directories only.
-04_reviews/trade_review/**
-!04_reviews/trade_review/**/
-04_reviews/weekly/**
-!04_reviews/weekly/**/
+artifacts/reports/trade_review/**
+!artifacts/reports/trade_review/**/
+artifacts/reports/weekly/**
+!artifacts/reports/weekly/**/
 
 # Pipeline logs and transient output
-06_logs/
-03_daily_plans/_supporting/
-03_daily_plans/*_daily_report.md
-03_daily_plans/*_1445_review.md
-04_reviews/daily/*_final_review.json
-04_reviews/daily/*_final_review.md
+artifacts/logs/
+artifacts/reports/daily/_supporting/
+artifacts/reports/daily/*_daily_report.md
+artifacts/reports/daily/*_1445_review.md
+artifacts/reports/daily/*_final_review.json
+artifacts/reports/daily/*_final_review.md
+# 模板必须入库（上面 _supporting/ 等规则不覆盖它，这里显式保底）
+!artifacts/reports/daily/DAILY_PLAN_TEMPLATE.md
 # 同上：这些也要能拦住嵌套位置的误写
-**/04_reviews/daily/*_final_review.json
-**/04_reviews/daily/*_final_review.md
-**/03_daily_plans/*_daily_report.md
-**/03_daily_plans/*_1445_review.md
-**/06_logs/
+**/artifacts/reports/daily/*_final_review.json
+**/artifacts/reports/daily/*_final_review.md
+**/artifacts/reports/daily/*_daily_report.md
+**/artifacts/reports/daily/*_1445_review.md
+**/artifacts/logs/
 07_tools/_debug/
 *.log
 *.tmp

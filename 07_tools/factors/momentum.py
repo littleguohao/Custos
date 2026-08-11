@@ -17,7 +17,7 @@ FACTOR: dict[str, Any] = {
     "name": "动量因子（12-1 类）",
     "kind": "selector",
     "status": "untested",
-    "evidence": "00_governance/research/R2_selection_price_volume.md",
+    "evidence": "governance/research/R2_selection_price_volume.md",
     "note": "特征溢价类，未终审",
     "min_bars": 40,
     "live_use": "none",

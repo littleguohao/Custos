@@ -5,7 +5,7 @@
 原则:
 
 - 所有路径统一从 `paths.py` 导入,不硬编码。
-- 所有输出统一写入 `strategy_team/01_data/`(日志进 `06_logs/`)。
+- 所有输出统一写入 `strategy_team/data/`(日志进 `artifacts/logs/`)。
 - 五个时点 runner(`run_0850/0905/1445/1700/1800`)是唯一调度入口,共享行为收敛到 `pipeline_kit.py`。
 
 ## 目录结构
@@ -23,8 +23,8 @@
 ├── trading_calendar.py         # A 股交易日历刷新与查询
 ├── collect/                    # 数据采集脚本(报价/增量行情/资金流/在线行情)
 ├── market_timing/              # 市场择时与大盘技术分析
-├── screening/                  # 每日选股链(公式初筛→充实→打分→表格,见 00_governance/contracts/SCREENING_WORKFLOW.md)
-├── factors/                    # 可复用因子(选股/研究共用,见 00_governance/strategy/_factors/)
+├── screening/                  # 每日选股链(公式初筛→充实→打分→表格,见 governance/contracts/SCREENING_WORKFLOW.md)
+├── factors/                    # 可复用因子(选股/研究共用,见 governance/strategy/_factors/)
 ├── holdings/                   # 持仓侧:持仓状态机、持仓技术分析、组合复盘
 ├── close_review/               # 收盘复盘(14:45 链核心)
 ├── research/                   # 研究回测与分析(backtest_factors、复盘分析、对账探针,只读管线数据)

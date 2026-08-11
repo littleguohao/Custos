@@ -70,7 +70,7 @@ class TestDailyReportAuditBlock:
     """可审计块（待办 #29）：盘前日报头部必须带 report_id / 策略版本 / 数据截止 / 输入清单。"""
 
     def test_md_header_carries_audit(self, monkeypatch, tmp_path):
-        data = tmp_path / "01_data"
+        data = tmp_path / "data"
         (data / "decisions").mkdir(parents=True)
         (data / "decisions" / "2026-08-07_chief_decision.json").write_text(
             json.dumps({"market_state": "震荡", "market_quality": {},
@@ -79,7 +79,7 @@ class TestDailyReportAuditBlock:
                         "forbidden_actions": []}, ensure_ascii=False),
             encoding="utf-8")
         monkeypatch.setattr(daily_report, "DATA", data)
-        monkeypatch.setattr(daily_report, "PLAN", tmp_path / "03_daily_plans")
+        monkeypatch.setattr(daily_report, "PLAN", tmp_path / "artifacts/reports/daily")
         monkeypatch.setattr(daily_report, "BASE", tmp_path)   # previous_review 只扫 tmp
         # 盘前情报路径走模块自身常量，钉成「无」保证环境无关
         monkeypatch.setattr(daily_report, "premarket_intelligence_path", lambda day: None)
@@ -87,7 +87,7 @@ class TestDailyReportAuditBlock:
         import sys
         monkeypatch.setattr(sys, "argv", ["x", "--date", "2026-08-07"])
         daily_report.main()
-        body = (tmp_path / "03_daily_plans" / "2026-08-07_daily_report.md").read_text(
+        body = (tmp_path / "artifacts/reports/daily" / "2026-08-07_daily_report.md").read_text(
             encoding="utf-8")
         header = body.split("## 1.")[0]
         assert "report_id `2026-08-07_premarket_" in header

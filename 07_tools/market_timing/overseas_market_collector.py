@@ -2,7 +2,7 @@
 """overseas market collector v1.
 
 Fetches overseas indices / tech leaders from Yahoo Finance chart API and writes them
-into strategy_team/01_data/market/YYYY-MM-DD_market_timing_input.json.
+into strategy_team/data/market/YYYY-MM-DD_market_timing_input.json.
 
 No API key required. If a symbol fails, it is preserved as missing with an error note.
 """

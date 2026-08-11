@@ -371,7 +371,7 @@ def main():
     unavailable = list(dict.fromkeys((enrichment.get("unavailable") or []) + (news.get("missing") or []) + (execution.get("missing") or [])))
     lines += ["", "## 8. 数据时效、缺失项与风险提示", "", f"- 目标日行情完整：{quotes_current}；技术数据日：{','.join(technical_dates) or 'unavailable'}；目标日技术完整：{technical_current}。", "- 缺失项：" + ("、".join(unavailable) if unavailable else "无"), "- RSS仅用于事件发现；未确认候选不得直接形成交易授权。", "- 新闻、题材、技术信号均不得覆盖0AMV、运行质量门、RiskDecision和ChiefDecision。", "", "## 9. 数据来源", ""]
     lines += [f"- `{path}`" for path in paths.values()]
-    lines += ["- `01_data/trades/current_positions.json`", "- `01_data/trades/trades_stock.json`", "", "> 风险提示：本复盘用于策略纠偏，不构成收益承诺或无条件交易指令。"]
+    lines += ["- `data/trades/current_positions.json`", "- `data/trades/trades_stock.json`", "", "> 风险提示：本复盘用于策略纠偏，不构成收益承诺或无条件交易指令。"]
 
     out = REV / f"{day}_final_review.md"
     out.parent.mkdir(parents=True, exist_ok=True)

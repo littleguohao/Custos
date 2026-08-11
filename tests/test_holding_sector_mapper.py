@@ -134,7 +134,7 @@ class TestMainMapping:
         我第一版就这么写的，`main()` 仍去读真实的 `E:\new_tdx64/...` 而 FileNotFoundError；
         而且 `tests/test_base_path_depth.py::TestNoPatchingDefaultArgConstants`
         **当场把这个错法拦下来了**（它专门查「测试 patch 了被用作默认参数的常量」）。
-        见 `00_governance/data/DATA_SOURCE_PRINCIPLE.md`「模块级常量 + 运行时替换 = 陷阱」。
+        见 `governance/data/DATA_SOURCE_PRINCIPLE.md`「模块级常量 + 运行时替换 = 陷阱」。
 
         ⇒ 正确做法：patch `load_tdxhy` / `load_incon_sections` 本身。
         两个函数的**解析逻辑**由上面 `TestLoadTdxhy` / `TestLoadInconSections`

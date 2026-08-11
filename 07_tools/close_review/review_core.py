@@ -179,7 +179,7 @@ def build_delivery_digest(
         f"减仓执行{'允许' if position_gate.get('allow_position_reduction') else '禁止'}；"
         f"提高仓位{'允许' if position_gate.get('allow_position_increase') else '禁止'}。",
         "禁止动作：旧持仓价代替实时价、用历史技术或缺失0AMV放宽权限、空头区间补仓/追高、绕过风险否决。",
-        f"持仓说明：{snap.get('reason', '缺失')}；{snap.get('assumption', '14:45按当前行情评估持仓操作建议')}。完整报告：strategy_team/03_daily_plans/{target_date}_1445_review.md",
+        f"持仓说明：{snap.get('reason', '缺失')}；{snap.get('assumption', '14:45按当前行情评估持仓操作建议')}。完整报告：strategy_team/artifacts/reports/daily/{target_date}_1445_review.md",
     ]
     return "\n".join(lines)
 
@@ -331,7 +331,7 @@ def main() -> None:
     elif _evidence and _evidence != target_date:
         risk_date_note = (f"**{risk_src_date}**（文件为当日，但**证据日是 {_evidence}** —— "
                           f"盘前生成、依据前一交易日收盘；盘中动作以 14:45 实时行情"
-                          f"重算的 B1 为准，见 05_strategy_versions/TODO.md #50）")
+                          f"重算的 B1 为准，见 TODO.md #50）")
     elif not _evidence:
         risk_date_note = f"**{risk_src_date}**（当日；证据日未标注，无法确认依据新鲜度）"
     else:

@@ -35,7 +35,7 @@
 
 ## 已知的对账边界
 
-qlib bundle 有两个坑（见 `00_governance/data/QLIB_LOCAL_DATA.md`）：
+qlib bundle 有两个坑（见 `governance/data/QLIB_LOCAL_DATA.md`）：
   · 2020-09-28 → 2021-07-30 约 **10 个月缺口**
   · 数据到 **2026-02** 截止
 ⇒ 默认对账窗口取 2021-08-01 ~ 2026-02-01，落在第二个 bundle 内部，避开缺口与右端。
@@ -796,7 +796,7 @@ def report(rows: list[dict]) -> int:
             print(f"   {r['code']}: 比值离散 {r.get('ratio_spread', float('nan')):.4%}，"
                   f"最大日收益差 {r.get('worst_ret_diff', float('nan')):.4%}，"
                   f"分歧 {r.get('n_mismatch', '—')} 天，前 10 天 {r.get('mismatch_days', '—')}")
-        print("\n   ⇒ 拿其中一天去查 `01_data/market/xdxr/{code}.json` 里那天附近的事件，"
+        print("\n   ⇒ 拿其中一天去查 `data/market/xdxr/{code}.json` 里那天附近的事件，"
               "对照 `event_ratio()` 的公式。")
     if skip:
         print(f"\n跳过原因分布：")

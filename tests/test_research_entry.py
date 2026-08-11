@@ -70,7 +70,7 @@ class TestStaleIsVisible:
         got = {n for n, (k, _) in entry.TOOLS.items() if k == "stale"}
         assert got == self.STALE, (
             f"stale 集合变了：{got}\n"
-            "若某个已判定存废（删除或转正），请同步 05_strategy_versions/TODO.md #44")
+            "若某个已判定存废（删除或转正），请同步 TODO.md #44")
 
     def test_running_stale_tool_warns(self):
         """跑 stale 工具必须先打警告 —— 结论不该被直接采信。

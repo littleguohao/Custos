@@ -25,7 +25,7 @@ FACTOR: dict[str, Any] = {
     "name": "S 形态综合分（S**）",
     "kind": "selector",
     "status": "needs_work",
-    "evidence": "00_governance/research/R2_selection_price_volume.md",
+    "evidence": "governance/research/R2_selection_price_volume.md",
     "note": "R2：全市场阈值扫描无 lift；正向择优劣于随机",
     "min_bars": 60,
     # ⚠️⚠️ **已知矛盾（2026-08-06 因子层清点时查出，待 owner 定）**：

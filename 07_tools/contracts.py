@@ -18,7 +18,7 @@
     risk_map 的 str(None) → "None"   ⇒ 幽灵持仓键
     market_regime 只读 effective_state ⇒ 漏掉 amv_zone 那套词表
 
-`00_governance/contracts/DATA_FLOW_CONTRACT.md` 是文档，**不参与执行**，
+`governance/contracts/DATA_FLOW_CONTRACT.md` 是文档，**不参与执行**，
 所以会漂移 —— 那份文档里曾登记一个叫 `SkillEvidence` 的实体，
 实际上项目里从来没有任何产出同时具备它描述的 8 个字段。这就是文档型契约的下限。
 

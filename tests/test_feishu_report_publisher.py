@@ -11,7 +11,7 @@ from unittest import mock
 
 import feishu_report_publisher as frp
 
-# 结构取自 03_daily_plans/2026-07-20_daily_report.md(盘前日报)
+# 结构取自 artifacts/reports/daily/2026-07-20_daily_report.md(盘前日报)
 DAILY_REPORT = """# 每日投研简报｜2026年7月20日（星期一）
 
 > 生成时间：2026-07-20 22:59:58 Asia/Shanghai
@@ -41,7 +41,7 @@ DAILY_REPORT = """# 每日投研简报｜2026年7月20日（星期一）
 - **禁止**：绕过risk_control开仓
 """
 
-# 结构取自 03_daily_plans/2026-07-20_1445_review.md(无"核心结论"节)
+# 结构取自 artifacts/reports/daily/2026-07-20_1445_review.md(无"核心结论"节)
 REVIEW_1445 = """# 14:45 收盘前操作建议 — 2026-07-20
 
 > 生成时间：2026-07-20 22:22:45
@@ -71,7 +71,7 @@ REVIEW_1445 = """# 14:45 收盘前操作建议 — 2026-07-20
 - 提高仓位权限：禁止。
 """
 
-# 结构取自 04_reviews/daily/2026-07-20_final_review.md(盘后复盘)
+# 结构取自 artifacts/reports/daily/2026-07-20_final_review.md(盘后复盘)
 FINAL_REVIEW = """# 2026-07-20 最终盘后复盘
 
 > 生成时间：2026-07-20 22:59:59

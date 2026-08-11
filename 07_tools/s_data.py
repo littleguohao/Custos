@@ -220,7 +220,7 @@ def _warn_if_mixed_convention(code: str, hits: list[tuple[Path, str]]) -> None:
         desc = "; ".join(f"{k}={sorted(v)}" for k, v in sets.items())
         _warn(f"{code} 跨 bundle 拼接，但各 bundle **字段集不同** ⇒ 可能是不同价格口径，"
               f"接缝处收益率会失真：{desc}"
-              f" —— 详见 00_governance/data/QLIB_LOCAL_DATA.md「加法调整」")
+              f" —— 详见 governance/data/QLIB_LOCAL_DATA.md「加法调整」")
 
 
 _UNVERIFIED_SKIP_WARNED: set[str] = set()
@@ -244,7 +244,7 @@ def load_bars_qlib(codes: list[str], count: int, start: Optional[str] = None,
 
     ⇒ 不需要重做数据，只需要不用那一份。`allow_unverified=True` 可显式放行
     （比如只关心绝对价差、不算百分比收益的研究）。
-    详见 `00_governance/data/QLIB_LOCAL_DATA.md`。
+    详见 `governance/data/QLIB_LOCAL_DATA.md`。
     """
     bundles = list_bundles(root)
     if not allow_unverified:

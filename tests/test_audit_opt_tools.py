@@ -244,7 +244,7 @@ class TestFundFlowSectorFailure:
 
     def test_sector_failure_marked_not_silently_empty(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setattr(cff, "BASE", tmp_path)
-        monkeypatch.setattr(cff, "MARKET_DIR", tmp_path / "01_data" / "market")
+        monkeypatch.setattr(cff, "MARKET_DIR", tmp_path / "data" / "market")
 
         def fake_fetch(url):
             if "t:3+f:!50" in url:      # concept
@@ -257,7 +257,7 @@ class TestFundFlowSectorFailure:
         monkeypatch.setattr(cff.time, "sleep", lambda s: None)
         rc = cff.main(["--date", "2026-07-20"])
         assert rc == 0
-        out = json.loads((tmp_path / "01_data" / "market"
+        out = json.loads((tmp_path / "data" / "market"
                           / "2026-07-20_fund_flow_rank.json").read_text(encoding="utf-8"))
         # 向后兼容：sector_rank 仍是 {类型: list}
         assert isinstance(out["sector_rank"]["concept"], list)
@@ -271,13 +271,13 @@ class TestFundFlowSectorFailure:
 
     def test_all_ok_status_ok(self, tmp_path, monkeypatch):
         monkeypatch.setattr(cff, "BASE", tmp_path)
-        monkeypatch.setattr(cff, "MARKET_DIR", tmp_path / "01_data" / "market")
+        monkeypatch.setattr(cff, "MARKET_DIR", tmp_path / "data" / "market")
         monkeypatch.setattr(cff, "fetch_json",
                             lambda url: self._sector_payload() if "m:90" in url
                             else self._stock_payload())
         monkeypatch.setattr(cff.time, "sleep", lambda s: None)
         assert cff.main(["--date", "2026-07-20"]) == 0
-        out = json.loads((tmp_path / "01_data" / "market"
+        out = json.loads((tmp_path / "data" / "market"
                           / "2026-07-20_fund_flow_rank.json").read_text(encoding="utf-8"))
         assert out["status"] == "ok"
         assert {k: v["status"] for k, v in out["sector_rank_status"].items()} == {
@@ -488,7 +488,7 @@ def _mim():
 
 
 def _market_dir(tmp_path):
-    d = tmp_path / "01_data" / "market"
+    d = tmp_path / "data" / "market"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -497,8 +497,8 @@ class TestMergeAmvAsOf:
     def test_amv_0_gets_as_of_from_amv_0day(self, tmp_path, monkeypatch):
         mim = _mim()
         monkeypatch.setattr(mim, "BASE", tmp_path)
-        monkeypatch.setattr(mim, "MARKET_DIR", tmp_path / "01_data" / "market")
-        monkeypatch.setattr(mim, "QUALITY_DIR", tmp_path / "01_data" / "quality")
+        monkeypatch.setattr(mim, "MARKET_DIR", tmp_path / "data" / "market")
+        monkeypatch.setattr(mim, "QUALITY_DIR", tmp_path / "data" / "quality")
         md = _market_dir(tmp_path)
         (md / "2026-07-20_market_timing_input.json").write_text(
             json.dumps({"amv_0day": 5.1, "amv_0": {}}), encoding="utf-8")
@@ -510,8 +510,8 @@ class TestMergeAmvAsOf:
     def test_amv_0_as_of_from_observation_ledger(self, tmp_path, monkeypatch):
         mim = _mim()
         monkeypatch.setattr(mim, "BASE", tmp_path)
-        monkeypatch.setattr(mim, "MARKET_DIR", tmp_path / "01_data" / "market")
-        monkeypatch.setattr(mim, "QUALITY_DIR", tmp_path / "01_data" / "quality")
+        monkeypatch.setattr(mim, "MARKET_DIR", tmp_path / "data" / "market")
+        monkeypatch.setattr(mim, "QUALITY_DIR", tmp_path / "data" / "quality")
         md = _market_dir(tmp_path)
         (md / "2026-07-20_market_timing_input.json").write_text(
             json.dumps({"amv_0": {}}), encoding="utf-8")
@@ -527,8 +527,8 @@ class TestMergeAmvAsOf:
         """端到端不变量：merge 写完后门控不得把当日 0AMV 判成 stale。"""
         mim = _mim()
         monkeypatch.setattr(mim, "BASE", tmp_path)
-        monkeypatch.setattr(mim, "MARKET_DIR", tmp_path / "01_data" / "market")
-        monkeypatch.setattr(mim, "QUALITY_DIR", tmp_path / "01_data" / "quality")
+        monkeypatch.setattr(mim, "MARKET_DIR", tmp_path / "data" / "market")
+        monkeypatch.setattr(mim, "QUALITY_DIR", tmp_path / "data" / "quality")
         md = _market_dir(tmp_path)
         (md / "2026-07-20_market_timing_input.json").write_text(
             json.dumps({"amv_0day": 5.1, "amv_0": {}}), encoding="utf-8")
@@ -544,8 +544,8 @@ class TestMergeFailureLeavesTrace:
     def test_merge_exception_writes_status_and_nonzero(self, tmp_path, monkeypatch, capsys):
         mim = _mim()
         monkeypatch.setattr(mim, "BASE", tmp_path)
-        monkeypatch.setattr(mim, "MARKET_DIR", tmp_path / "01_data" / "market")
-        monkeypatch.setattr(mim, "QUALITY_DIR", tmp_path / "01_data" / "quality")
+        monkeypatch.setattr(mim, "MARKET_DIR", tmp_path / "data" / "market")
+        monkeypatch.setattr(mim, "QUALITY_DIR", tmp_path / "data" / "quality")
         md = _market_dir(tmp_path)
         (md / "2026-07-20_incremental_market.json").write_text("{}", encoding="utf-8")
         (md / "2026-07-20_market_timing_input.json").write_text("{}", encoding="utf-8")
@@ -553,7 +553,7 @@ class TestMergeFailureLeavesTrace:
                             lambda *a, **k: (_ for _ in ()).throw(RuntimeError("kaboom")))
         rc = mim.main(["--date", "2026-07-20"])
         assert rc != 0, "异常只打 WARN + exit 0 → stage log 看不到任何失败"
-        status = json.loads((tmp_path / "01_data" / "quality"
+        status = json.loads((tmp_path / "data" / "quality"
                              / "2026-07-20_merge_incremental_status.json").read_text(encoding="utf-8"))
         assert status["status"] == "failed"
         assert "kaboom" in status["error"]
@@ -561,15 +561,15 @@ class TestMergeFailureLeavesTrace:
     def test_success_writes_ok_status(self, tmp_path, monkeypatch):
         mim = _mim()
         monkeypatch.setattr(mim, "BASE", tmp_path)
-        monkeypatch.setattr(mim, "MARKET_DIR", tmp_path / "01_data" / "market")
-        monkeypatch.setattr(mim, "QUALITY_DIR", tmp_path / "01_data" / "quality")
+        monkeypatch.setattr(mim, "MARKET_DIR", tmp_path / "data" / "market")
+        monkeypatch.setattr(mim, "QUALITY_DIR", tmp_path / "data" / "quality")
         md = _market_dir(tmp_path)
         (md / "2026-07-20_incremental_market.json").write_text(json.dumps(
             {"breadth": {"880005": {"date": "2026-07-20", "up_count": 3000,
                                     "down_count": 1500}}}), encoding="utf-8")
         (md / "2026-07-20_market_timing_input.json").write_text("{}", encoding="utf-8")
         assert mim.main(["--date", "2026-07-20"]) == 0
-        status = json.loads((tmp_path / "01_data" / "quality"
+        status = json.loads((tmp_path / "data" / "quality"
                              / "2026-07-20_merge_incremental_status.json").read_text(encoding="utf-8"))
         assert status["status"] == "ok"
 

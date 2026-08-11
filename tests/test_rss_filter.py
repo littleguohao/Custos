@@ -43,8 +43,8 @@ REG = {"sources": [
 
 @pytest.fixture()
 def env(tmp_path, monkeypatch):
-    data = tmp_path / "01_data"
-    log = tmp_path / "06_logs" / "rss"
+    data = tmp_path / "data"
+    log = tmp_path / "artifacts/logs" / "rss"
     (data / "trades").mkdir(parents=True)
     monkeypatch.setattr(rf, "DATA", data)
     monkeypatch.setattr(rf, "LOG", log)
@@ -60,13 +60,13 @@ def env(tmp_path, monkeypatch):
 
 
 def _items(env, *items):
-    p = env / "01_data" / "news" / "rss" / "normalized" / "2026-08-07_rss_evidence.json"
+    p = env / "data" / "news" / "rss" / "normalized" / "2026-08-07_rss_evidence.json"
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(list(items), ensure_ascii=False), encoding="utf-8")
 
 
 def _positions(env, rows):
-    (env / "01_data" / "trades" / "current_positions.json").write_text(
+    (env / "data" / "trades" / "current_positions.json").write_text(
         json.dumps(rows, ensure_ascii=False), encoding="utf-8")
 
 
@@ -93,8 +93,8 @@ def _run(env, monkeypatch, session="premarket", as_of="2026-08-07T08:45:00+08:00
     monkeypatch.setattr(sys, "argv", ["x", "--date", "2026-08-07",
                                       "--session-type", session, "--as-of", as_of])
     rf.main()
-    out = env / "01_data" / "news" / "rss" / "filtered" / f"2026-08-07_{session}_rss_candidates.json"
-    rep = env / "06_logs" / "rss" / f"2026-08-07_{session}_filter_log.json"
+    out = env / "data" / "news" / "rss" / "filtered" / f"2026-08-07_{session}_rss_candidates.json"
+    rep = env / "artifacts/logs" / "rss" / f"2026-08-07_{session}_filter_log.json"
     return (json.loads(out.read_text(encoding="utf-8")),
             json.loads(rep.read_text(encoding="utf-8")))
 

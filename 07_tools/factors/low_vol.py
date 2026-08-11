@@ -16,7 +16,7 @@ FACTOR: dict[str, Any] = {
     "name": "低波动因子（low-vol anomaly）",
     "kind": "selector",
     "status": "untested",
-    "evidence": "00_governance/research/R2_selection_price_volume.md",
+    "evidence": "governance/research/R2_selection_price_volume.md",
     "note": "特征溢价类，未终审",
     "min_bars": 21,
     "live_use": "none",

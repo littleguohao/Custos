@@ -28,7 +28,7 @@ FACTOR: dict[str, Any] = {
     "name": "「完美 B1」指纹拟合度",
     "kind": "state",
     "status": "candidate",
-    "evidence": "00_governance/research/R2_selection_price_volume.md",
+    "evidence": "governance/research/R2_selection_price_volume.md",
     "note": "「完美 B1」指纹拟合度；⚠️ R2：作进场过滤有害（期望 −0.42%/笔），仅描述性",
     "min_bars": 1,
     "live_use": "evidence_only",  # R2：仅描述性，不作买入依据（落候选表供人看，不驱动分层/gate）

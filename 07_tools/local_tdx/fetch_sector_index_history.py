@@ -3,7 +3,7 @@
 
 需 TdxW(TQ-Local)运行。板块 MACD 相位只需收盘价,故只取 Close(格式已探明:index=日期,列=代码)。
 用法:
-    uv run python 07_tools/local_tdx/fetch_sector_index_history.py --out 01_data/market/sector_index --start 20180101
+    uv run python 07_tools/local_tdx/fetch_sector_index_history.py --out data/market/sector_index --start 20180101
 输出:每板块一份 {code}.csv(date,close)。只读 TQ、绝不改线上。
 """
 from __future__ import annotations
@@ -23,7 +23,7 @@ if str(Path(__file__).resolve().parent) not in sys.path:
 import tq_sector  # noqa: E402  复用其 TdxW 探测 + tqcenter 惰性导入
 from paths import MARKET_DIR  # noqa: E402
 
-# TQ 的周期串是 "1d"(探针 00_governance/data/TDX_LOCAL_INTERFACES.md「周期串是 1d」:缺省或写错报
+# TQ 的周期串是 "1d"(探针 governance/data/TDX_LOCAL_INTERFACES.md「周期串是 1d」:缺省或写错报
 # ErrorId=5 periodstr error)。此前默认 "day" → 400+ 板块逐个报错、日复一日刷不到数据。
 # 保留候选串按序探测,避免不同 TQ 版本命名差异再把整条链打死。
 PERIOD_CANDIDATES = ("1d", "day", "1day", "1440m")
@@ -263,7 +263,7 @@ def main(argv=None) -> int:
         if not period:
             # 快速失败:周期串不被接受时不再逐个板块重试(此前 --period day 会刷 400 条 WARN 后超时)
             print(f"[ERR] 无可用周期串(试过 {', '.join(PERIOD_CANDIDATES)}):{note}", file=sys.stderr)
-            print("[ERR] TQ 周期串约定见 00_governance/data/TDX_LOCAL_INTERFACES.md「周期串是 1d，不是 day」")
+            print("[ERR] TQ 周期串约定见 governance/data/TDX_LOCAL_INTERFACES.md「周期串是 1d，不是 day」")
             return 2
         print(f"[INFO] 使用周期 {period}{'(自动探测)' if not args.period else ''}"
               f"{'; 增量合并模式' if args.incremental else '; 全量重拉'}")

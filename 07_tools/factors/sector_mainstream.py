@@ -9,7 +9,7 @@
 输入为 trade-sim 的 --out JSON(含逐笔 trades,即不带 --summary-only)。纯分析,绝不 raise。
 
 用法::
-    uv run python 07_tools/factors/sector_mainstream.py --trades 06_logs/x.json [--top-k 10]
+    uv run python 07_tools/factors/sector_mainstream.py --trades artifacts/logs/x.json [--top-k 10]
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ FACTOR: dict[str, Any] = {
     "name": "主线板块族密度",
     "kind": "state",
     "status": "candidate",
-    "evidence": "00_governance/research/R2_selection_price_volume.md",
+    "evidence": "governance/research/R2_selection_price_volume.md",
     "note": "R2：板块族+密度是准确的「窗口主线指纹」（归因工具），但「跟随主流」机械规则不成立",
     "min_bars": 1,
     "live_use": "evidence_only",

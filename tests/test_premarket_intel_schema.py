@@ -108,7 +108,7 @@ class TestPremarketSchemaMarker:
 
 class TestMainDegradesOnInvalidSchema:
     def _setup_data(self, monkeypatch, tmp_path, intel):
-        data = tmp_path / "01_data"
+        data = tmp_path / "data"
         (data / "news" / "premarket").mkdir(parents=True)
         (data / "news" / "rss" / "filtered").mkdir(parents=True)
         (data / "decisions").mkdir(parents=True)

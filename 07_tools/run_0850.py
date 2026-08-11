@@ -2,7 +2,7 @@
 """08:50 one-shot premarket data collection (except wenda_notice_query which needs LLM tool).
 
 stdout is a machine-consumed protocol (see the summary lines below) and is
-kept byte-compatible; observability goes to 06_logs/{date}_0850_run_log.json
+kept byte-compatible; observability goes to artifacts/logs/{date}_0850_run_log.json
 instead — every run (completed / closed / calendar_failed) leaves one behind.
 """
 from __future__ import annotations

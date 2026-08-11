@@ -23,7 +23,7 @@ CLI::
 
     uv run python 07_tools/screening/enrich_candidates.py --date YYYY-MM-DD
 
-输出 ``01_data/screening/{date}_candidates_enriched.json``。
+输出 ``data/screening/{date}_candidates_enriched.json``。
 """
 from __future__ import annotations
 
@@ -154,7 +154,7 @@ THEME_MIN_MATCH = 1
 # --- B1/CZ 策略对齐参数 -------------------------------------------------
 # 以下阈值全部标注"待回测参数"：策略原文（B1 §四、CZ §九/§14.6/§十六）
 # 要求阈值可配置、实际值随候选落盘，不得静默使用；完成样本回测前不得
-# 视为已校准。口径出处见 00_governance/contracts/SCREENING_WORKFLOW.md "策略对齐"章。
+# 视为已校准。口径出处见 governance/contracts/SCREENING_WORKFLOW.md "策略对齐"章。
 
 NOW_MILD_VOL_BURST = 2.0            # 待回测参数：上涨段单日量/段均量上限（温和放量）
 NOW_BEAR_DROP_PCT = -3.0            # 待回测参数：放量大阴跌幅%
@@ -250,7 +250,7 @@ def load_holding_codes() -> set[str]:
 
 
 def latest_tq_sector_map() -> dict:
-    """加载最新的 01_data/sectors/*_tq_sector_map.json（880板块→成分股）。"""
+    """加载最新的 data/sectors/*_tq_sector_map.json（880板块→成分股）。"""
     files = sorted(glob.glob(str(SECTORS_DIR / "*_tq_sector_map.json")))
     if not files:
         return {}

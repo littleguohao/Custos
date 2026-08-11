@@ -119,7 +119,7 @@ def build_gate_cmd(date: str, session_type: str, strict_quality: bool = False) -
     2026-07-30 曾对 postclose 默认打开,同时又收紧了 as_of 陈旧判定,两者叠加导致
     17:00 盘后复盘直接失败。硬闸须等新的 stale 校准跑过若干交易日、确认 blocked 只在真正
     大面积缺数时出现,再由 `--strict-quality-gate` 显式开启。
-    门控结论无论是否开闸都会落盘到 01_data/quality/{date}_runtime_gate.json,并记进 stage note。
+    门控结论无论是否开闸都会落盘到 data/quality/{date}_runtime_gate.json,并记进 stage note。
     """
     cmd = [str(PY), str(TOOLS / "runtime_gate.py"), "--date", date,
            "--require-trading-day",

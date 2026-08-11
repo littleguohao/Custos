@@ -85,7 +85,7 @@ def pipeline(monkeypatch, tmp_path):
     import daily_pipeline as dp
 
     # ⚠️ **必须 patch 全部路径常量**。第一版漏了 `PLANS` / `SUPPORT_DIR`，
-    # 测试在**真实仓库**里建出了 `03_daily_plans/_supporting/2026-08-07/`
+    # 测试在**真实仓库**里建出了 `artifacts/reports/daily/_supporting/2026-08-07/`
     # （空目录、且被 gitignore，所以没污染 git —— 但这正是今天
     # `2026-07-16/` 那次事故的同一形态：脚本往仓库里写东西）。
     monkeypatch.setattr(dp, "BASE", tmp_path, raising=False)
@@ -248,7 +248,7 @@ def _run_runner(mod, monkeypatch, rec, tmp_path, argv=(), seed=None):
     monkeypatch.setattr(mod, "calendar_gate", lambda *a, **kw: gate, raising=False)
     # ⚠️ patch **全部大写的 Path 属性**，不能只挑名字带 DIR 的 ——
     # `run_1700` 的复盘目录叫 `REV`，第一版按 "DIR" 过滤就漏了它，
-    # 测试于是往**真实** `04_reviews/daily/` 里写。
+    # 测试于是往**真实** `artifacts/reports/daily/` 里写。
     # 唯一例外是 `TOOLS`：它必须指向真实 07_tools，否则拼出的 stage 命令没意义
     # （虽然 stage 被打桩不会真跑，但断言里要查命令内容）。
     for attr in dir(mod):

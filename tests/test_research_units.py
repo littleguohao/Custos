@@ -15,7 +15,7 @@ import re
 
 import pytest
 
-RESEARCH = pathlib.Path(__file__).resolve().parents[1] / "00_governance" / "research"
+RESEARCH = pathlib.Path(__file__).resolve().parents[1] / "governance" / "research"
 UNITS = sorted(p for p in RESEARCH.glob("R*.md") if p.name != "README.md")
 LEVELS = {"L0", "L1", "L2", "L3", "L4"}
 
@@ -202,8 +202,8 @@ class TestStrategyDocsFlagUnstableNumbers:
     `01_swing_rules.md` 写「含退市跨年 OOS」（对 2021-08 后的窗口不成立）。
     """
 
-    DOCS = ("00_governance/strategy/b1/90_research_summary.md",
-            "00_governance/strategy/b1/01_swing_rules.md")
+    DOCS = ("governance/strategy/b1/90_research_summary.md",
+            "governance/strategy/b1/01_swing_rules.md")
 
     @pytest.mark.parametrize("rel", DOCS)
     def test_points_to_rerun_list(self, rel):
@@ -235,7 +235,7 @@ class TestSummaryTracksRerunState:
     ⇒ 单元完成重跑后，凡在摘要页点名它「待重跑」的措辞都必须同步。
     """
 
-    SUMMARY = "00_governance/strategy/b1/90_research_summary.md"
+    SUMMARY = "governance/strategy/b1/90_research_summary.md"
 
     def _rerun_table(self) -> str:
         s = (RESEARCH / "README.md").read_text(encoding="utf-8")

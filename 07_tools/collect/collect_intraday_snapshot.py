@@ -2,7 +2,7 @@
 """14:45 盘中市场快照采集（TQ-Local HTTP get_market_snapshot）。
 
 抓取 999999.SH / 880005.SH / 880006.SH / 880001.SH 四个指数的实时快照，
-写入 ``01_data/market/{date}_intraday_snapshot.json`` 并打印一行 JSON 摘要。
+写入 ``data/market/{date}_intraday_snapshot.json`` 并打印一行 JSON 摘要。
 
 best-effort 语义：TdxW 未运行或任一指数失败都不会 raise、exit 恒为 0；
 失败体现在 error / quality 字段（quality=unavailable），绝不让 run_1445 挂。

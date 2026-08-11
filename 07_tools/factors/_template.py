@@ -23,7 +23,7 @@
                 needs_work  **按现有证据不可用，不得进 live**；但证据本身可能待重跑
                             （刻意不设 "falsified" 一档：不要随便证伪）
                 untested    实现了但没跑过
-    evidence    结论出处（`00_governance/research/RN_*.md`），needs_work 必填
+    evidence    结论出处（`governance/research/RN_*.md`），needs_work 必填
     note        一句话说清死法或用法
     min_bars    最少需要多少根 K 线；不足时 score/detect 返回 None
     live_use    **在 live 链里允许怎么用**（与 status 是两个维度）：
