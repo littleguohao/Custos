@@ -65,7 +65,8 @@ def to_float(x: Any):
         if s in ("", "--", "nan", "None"):
             return None
         v = float(s)
-        if math.isnan(v):
+        if not math.isfinite(v):
+            # NaN 与 ±inf 都不是有效读数（inf 会被下游阈值当成真实极大值）
             return None
         return v
     except Exception:

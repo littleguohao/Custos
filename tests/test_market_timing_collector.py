@@ -46,9 +46,16 @@ class TestToFloat:
     def test_nan_becomes_none(self):
         assert mtc.to_float(float("nan")) is None
 
-    def test_inf_is_not_silently_kept(self):
-        """inf 通过 float() 但不是有效读数 —— 记录当前行为以便发现变化。"""
-        assert mtc.to_float(float("inf")) in (None, float("inf"))
+    def test_inf_becomes_none(self):
+        """⚠️ ±inf 通过 float() 但不是有效读数 —— 必须变 None（与 NaN 同处理）。
+
+        此前 inf 被静默保留（`assert x in (None, inf)` 那条同义反复断言
+        如实记录了这个漏洞）：inf 会被下游阈值判定当成真实极大值，
+        与该模块「无数据不变 0.0」的 fail-closed 语义相悖，2026-08-11 修。
+        """
+        assert mtc.to_float(float("inf")) is None
+        assert mtc.to_float(float("-inf")) is None
+        assert mtc.to_float("inf") is None
 
 
 class TestAmvZone:
