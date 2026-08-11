@@ -214,7 +214,7 @@ def cmd_compare(sample: int, count: int, seed: int, s_data_root: str) -> int:
     codes = _universe(sample, seed)
     tdx = _load_tdx(codes, count)
     try:
-        adj = s_data.load_bars_qlib(root, list(tdx.keys()), count=count)
+        adj = s_data.load_bars_qlib(list(tdx.keys()), count=count, root=root)
     except Exception as e:                                     # noqa: BLE001
         print(f"[ERR] 读前复权失败: {e}")
         return 2
