@@ -262,3 +262,160 @@ class TestNumberCoercion:
         """端到端钉住上面那个后果：close 缺失时**不得**出结构破位信号。"""
         s = bh.evaluate(_row(close=None), "", price_date="2026-08-07")
         assert not ({"n_l1_breach", "n_l2_breach", "desc_n_confirmed"} & _names(s))
+
+
+class TestB1HoldingStateMain:
+    """`main()` 端到端 —— **落盘前 `require("b1_holding_state", ...)` 是硬校验**。
+
+    ⚠️ `final_priority` 会一路传到 RiskDecision 与 ChiefDecision
+    （P0 ⇒ 清仓、P1 ⇒ 减仓），标错就直接错在交易计划里 —— 所以它硬失败而非降级。
+    """
+
+    @staticmethod
+    def _env(monkeypatch, tmp_path):
+        import pathlib as _pl
+        import b1_holding_state as m
+        for attr in dir(m):
+            v = getattr(m, attr, None)
+            if attr.isupper() and isinstance(v, _pl.Path):
+                monkeypatch.setattr(m, attr, tmp_path)
+        (tmp_path / "holdings").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "market").mkdir(parents=True, exist_ok=True)
+        return m
+
+    ROW = {"code": "600000", "name": "浦发银行", "close": 10.0, "cost": 9.0,
+           "latest_date": "2026-08-11",
+           "bbi": {"signal": "上方", "available": True},
+           "n_structure": {"signal": "无", "available": True},
+           "price_volume": {}, "trend": {}, "box_20d": {}, "box_60d": {}}
+
+    def _run(self, monkeypatch, tmp_path, market, row=None, argv_extra=()):
+        import json
+        import sys as _s
+        m = self._env(monkeypatch, tmp_path)
+        (tmp_path / "holdings" / "2026-08-11_holding_technical_summary.json").write_text(
+            json.dumps([row or self.ROW], ensure_ascii=False), encoding="utf-8")
+        (tmp_path / "market" / "2026-08-11_market_timing_input.json").write_text(
+            json.dumps(market, ensure_ascii=False), encoding="utf-8")
+        monkeypatch.setattr(_s, "argv", ["x", "--date", "2026-08-11", *argv_extra])
+        m.main()
+        out = tmp_path / "holdings" / "2026-08-11_b1_holding_state.json"
+        assert out.exists(), "b1_holding_state 未落盘"
+        return json.loads(out.read_text(encoding="utf-8"))
+
+    def test_writes_state_with_priority(self, monkeypatch, tmp_path):
+        rows = self._run(monkeypatch, tmp_path,
+                         {"amv_0": {"effective_state": "中性"}})
+        assert len(rows) == 1
+        assert rows[0]["final_priority"] in ("P0", "P1", "P2", "P3", "P4", "无")
+
+    def test_amv_zone_trigger_wording_is_normalized(self, monkeypatch, tmp_path):
+        # ⚠️ 键名是 `market_regime` 不是 `regime`（第一版猜错，KeyError）——
+        #    「别猜名字，去读」，今天第三次了。
+        """⚠️ `amv_zone` 写的是「空头触发」，按 `== "空头"` 判会让 P1 减仓信号**不发**
+        （审计 B1 的原始事故）。这里确认归一化真的生效。"""
+        rows = self._run(monkeypatch, tmp_path,
+                         {"amv_0": {"amv_zone": "空头触发"}})
+        assert rows[0]["market_regime"] in ("空头",), f"未归一化：{rows[0].get('market_regime')}"
+
+    def test_effective_state_wins_over_amv_zone(self, monkeypatch, tmp_path):
+        rows = self._run(monkeypatch, tmp_path,
+                         {"amv_0": {"effective_state": "做多", "amv_zone": "空头触发"}})
+        assert rows[0]["market_regime"] == "做多"
+
+    def test_cli_regime_overrides_file(self, monkeypatch, tmp_path):
+        rows = self._run(monkeypatch, tmp_path,
+                         {"amv_0": {"effective_state": "中性"}},
+                         argv_extra=("--market-regime", "空头"))
+        assert rows[0]["market_regime"] == "空头"
+
+    def test_missing_amv_is_unknown_not_neutral(self, monkeypatch, tmp_path):
+        """⚠️ 0AMV 全缺时 regime 必须是「未知」而不是「中性」——
+        「中性」在加仓白名单里（v0.28 的漏洞形状）。"""
+        rows = self._run(monkeypatch, tmp_path, {})
+        assert rows[0]["market_regime"] == "未知"
+
+    def test_pre_checks_failure_does_not_break_main(self, monkeypatch, tmp_path):
+        """⚠️ 预检失败**不得**影响 B1 主流程 —— 它是附加证据，不是判定依据。
+        失败时如实写 `available: False` + error，而不是静默省略。"""
+        import b1_holding_state as m
+        monkeypatch.setattr(m, "build_pre_checks",
+                            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("TQ 挂了")))
+        rows = self._run(monkeypatch, tmp_path, {"amv_0": {"effective_state": "中性"}})
+        pc = rows[0]["pre_checks"]
+        assert pc["available"] is False
+        assert pc["error"]["code"] == "pre_checks_failed" and "TQ 挂了" in pc["error"]["detail"]
+
+
+class TestBatchHoldingTechnicalMain:
+    """`batch_holding_technical.main()` —— 它产的 `holding_technical_summary`
+    有 **11 个消费者，其中 8 处读 `latest_date` 做陈旧判定**（源码注释），
+    所以落盘前 `require(...)` 是硬校验。
+    """
+
+    @staticmethod
+    def _env(monkeypatch, tmp_path):
+        import pathlib as _pl
+        from holdings import batch_holding_technical as b
+        for attr in dir(b):
+            v = getattr(b, attr, None)
+            if attr.isupper() and isinstance(v, _pl.Path):
+                monkeypatch.setattr(b, attr, tmp_path / attr.lower())
+        monkeypatch.setattr(b, "HOLD", tmp_path)
+        monkeypatch.setattr(b, "TRADES", tmp_path / "current_positions.json")
+        # 打桩逐股分析：真跑要 vipdoc
+        # ⚠️ 真实签名是 `_analysis_for(code, name, date, use_subprocess)` —— 四个位置参数。
+        #    第一版按三个写，TypeError。桩的形状必须照着被替换者读，不能猜
+        #    （08-07 补编排测试时同一个坑让 4 条测试静默变 skip）。
+        monkeypatch.setattr(b, "_analysis_for",
+                            lambda code, name, date, use_subprocess=False: {
+                                "available": True, "latest_date": date,
+                                "bbi": {"signal": "上方", "available": True},
+                                "n_structure": {"signal": "无", "available": True},
+                                "price_volume": {}, "trend": {}})
+        return b
+
+    def test_prefers_enriched_mapping_over_positions(self, monkeypatch, tmp_path):
+        import json
+        b = self._env(monkeypatch, tmp_path)
+        (tmp_path / "2026-08-11_holding_sector_mapping_enriched.json").write_text(
+            json.dumps([{"code": "600000", "name": "浦发银行"}]), encoding="utf-8")
+        (tmp_path / "current_positions.json").write_text(
+            json.dumps([{"代码": "000001", "名称": "平安银行"}]), encoding="utf-8")
+        assert b.main(["--date", "2026-08-11"]) == 0
+        rows = json.loads((tmp_path / "2026-08-11_holding_technical_summary.json")
+                          .read_text(encoding="utf-8"))
+        assert [r["code"] for r in rows] == ["600000"], \
+            "有 enriched mapping 时应用它（它带板块等增强字段），而不是回落到持仓快照"
+
+    def test_falls_back_to_positions_when_mapping_absent(self, monkeypatch, tmp_path):
+        import json
+        b = self._env(monkeypatch, tmp_path)
+        (tmp_path / "current_positions.json").write_text(
+            json.dumps([{"代码": "000001", "名称": "平安银行"}]), encoding="utf-8")
+        assert b.main(["--date", "2026-08-11"]) == 0
+        rows = json.loads((tmp_path / "2026-08-11_holding_technical_summary.json")
+                          .read_text(encoding="utf-8"))
+        assert [r["code"] for r in rows] == ["000001"]
+
+    def test_no_holdings_exits_loudly(self, monkeypatch, tmp_path):
+        """⚠️ 无持仓且无映射时 `SystemExit` —— **不是**写一份空 summary。
+
+        空 summary 会让 11 个消费者以为「今天没持仓」，而真相可能是
+        「持仓文件没同步」。让它响亮地失败。
+        """
+        import pytest as _pt
+        b = self._env(monkeypatch, tmp_path)
+        with _pt.raises(SystemExit):
+            b.main(["--date", "2026-08-11"])
+
+    def test_explicit_mapping_path_is_honored(self, monkeypatch, tmp_path):
+        import json
+        b = self._env(monkeypatch, tmp_path)
+        alt = tmp_path / "alt.json"
+        alt.write_text(json.dumps([{"code": "600519", "name": "贵州茅台"}]),
+                       encoding="utf-8")
+        assert b.main(["--date", "2026-08-11", "--mapping", str(alt)]) == 0
+        rows = json.loads((tmp_path / "2026-08-11_holding_technical_summary.json")
+                          .read_text(encoding="utf-8"))
+        assert [r["code"] for r in rows] == ["600519"]
