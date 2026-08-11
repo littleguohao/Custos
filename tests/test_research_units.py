@@ -219,3 +219,84 @@ class TestStrategyDocsFlagUnstableNumbers:
             if "含退市" in ln and "⚠️" not in ln and "不成立" not in ln:
                 assert "1999" in ln or "老 bundle" in ln or "qlib" not in ln, \
                     f"{rel}:{i} 无限定地声称含退市：{ln.strip()[:80]!r}"
+
+
+class TestSummaryTracksRerunState:
+    """⚠️ 摘要页的「待重跑」标记必须与研究侧**重跑清单的实际状态**一致。
+
+    2026-08-11 实测到的漂移（两个方向都出现过）：
+
+    ① **说了已被证伪的事**：R4 把板块相位降级后，`90_research_summary` 与
+       `b1/README` 仍写「板块相位 稳定加值」、价值排序仍把它排在选股之前（08-10 修）。
+    ② **说「别信」而其实已经重新取得**：R1 量级 08-09 重取完成后，摘要页仍写
+       「量级数字待重跑 / 量级数字勿引用」，并指着一组**已经不在本页**的旧数字
+       （-46/-42/-31/-25 早已换成重跑口径）（08-11 修）。
+
+    ⇒ 单元完成重跑后，凡在摘要页点名它「待重跑」的措辞都必须同步。
+    """
+
+    SUMMARY = "00_governance/strategy/b1/90_research_summary.md"
+
+    def _rerun_table(self) -> str:
+        s = (RESEARCH / "README.md").read_text(encoding="utf-8")
+        i = s.index("## ⚠️ 重跑清单")
+        j = s.find("\n## ", i + 5)
+        return s[i:j] if j > 0 else s[i:]
+
+    def _done_units(self) -> set[str]:
+        """重跑清单里已划掉（`~~P?~~ ✅`）的单元号。"""
+        import re
+        out = set()
+        for ln in self._rerun_table().split("\n"):
+            if not ln.startswith("|") or "~~" not in ln:
+                continue
+            m = re.search(r'\[(R\d+)\]', ln)
+            if m:
+                out.add(m.group(1))
+        return out
+
+    def _pending_units(self) -> set[str]:
+        import re
+        out = set()
+        for ln in self._rerun_table().split("\n"):
+            if not ln.startswith("|") or "~~" in ln or ln.startswith("| 优先级") or ln.startswith("|---"):
+                continue
+            m = re.search(r'\[(R\d+)\]', ln)
+            if m:
+                out.add(m.group(1))
+        return out
+
+    def test_table_parses_into_both_buckets(self):
+        """⚠️ 守卫自证：两个桶都非空，否则下面的断言会**空转通过**。"""
+        done, pending = self._done_units(), self._pending_units()
+        assert done, "解析不出「已完成」单元 —— 重跑清单格式变了？"
+        assert pending, "解析不出「待重跑」单元 —— 全跑完了就把本条改成断言 done 全覆盖"
+        assert not (done & pending), f"同一单元既完成又待跑：{done & pending}"
+
+    def test_summary_does_not_say_dont_cite_when_r1_is_done(self):
+        """R1（量级）已重取时，摘要页不得再写「量级数字勿引用 / 量级待重跑」。
+
+        这句话的代价是实的：它会让读者放弃使用**已经重新取得**的量级，
+        转而去引用别处的旧数字。
+        """
+        if "R1" not in self._done_units():
+            pytest.skip("R1 仍在重跑清单待跑区 —— 「勿引用」是正确的")
+        s = (RESEARCH.parents[1] / self.SUMMARY).read_text(encoding="utf-8")
+        for bad in ("量级数字勿引用", "量级数字待重跑", "量级待重跑", "量级待重估"):
+            assert bad not in s, (
+                f"R1 量级已重取，但摘要页仍写「{bad}」—— 请同步（见 R1「量级」节）")
+
+    def test_summary_still_points_at_pending_units(self):
+        """⚠️ 仍有单元待重跑时，摘要页必须点名它们 —— 不能只说「见重跑清单」。
+
+        点名的理由：摘要页第三节「已证伪/无价值」正建立在 R2 上，
+        而 R2 是还没重跑的那个。读者要能在这一页看到「哪条结论还悬着」。
+        """
+        pending = self._pending_units()
+        if not pending:
+            pytest.skip("重跑清单已清空")
+        s = (RESEARCH.parents[1] / self.SUMMARY).read_text(encoding="utf-8")
+        missing = [u for u in pending if u not in s]
+        assert not missing, (
+            f"以下单元仍待重跑但摘要页未点名：{missing}；"
+            f"摘要页的结论若依赖它们，读者无从知道哪条还悬着")
