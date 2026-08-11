@@ -932,6 +932,11 @@ def summarize(records: list[dict[str, Any]], horizon: int = 10) -> dict[str, Any
                 comp_keys.append(k)     # 保持首次出现顺序，输出稳定可 diff
     by_component = {}
     for ck in comp_keys:
+        # 分项可能是**非数值**（如 rsi_state 的 c_regime="strong" 状态串）——
+        # 比大小会 TypeError。非数值分项按「有值/无值」统计 lift 无意义，跳过。
+        vals = [r.get(ck) for r in records if r.get(ck) is not None]
+        if not vals or not all(isinstance(v, (int, float)) for v in vals):
+            continue
         hit = [r for r in records if (r.get(ck) or 0) > 0]
         miss = [r for r in records if not (r.get(ck) or 0) > 0]
         by_component[ck] = {"hit": _stats(hit, horizon), "miss": _stats(miss, horizon)}

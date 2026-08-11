@@ -150,10 +150,10 @@ class TestRerunMarks:
 
         R4 于 2026-08-09 完成重跑（16 格 2×2 × 4 窗）后移出本集合——
         重取完成的单元应摘标记，而不是永久挂着。
-        R9/R10 同日完成（s3000 已实现口径全扫描）；R1 量级随前置闭环重写。
+        R9/R10 同日完成（s3000 已实现口径全扫描）；R1 量级随前置闭环重写；
+        R2 于 2026-08-11 完成翻转归因分离（宇宙主因/源次因）。
         """
         want = {
-            "R2_selection_price_volume.md",
             "R3_selection_discriminability_recall.md",
         }
         got = set(self._marked())
