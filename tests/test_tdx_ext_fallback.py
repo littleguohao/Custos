@@ -319,3 +319,88 @@ class TestOverseasAsOfDerivation:
         assert results["none"][0] == "candidate"
         assert results["fabricated"][1] == results["none"][1] == "pass", \
             f"overseas 降级改变了整体 status：{results}"
+
+
+class TestImpactSummary:
+    """⚠️ 外围影响摘要 —— 它直接写进盘前日报的「海外」段，是 owner 看到的判断。
+
+    分三链归因：美股 AI/半导体（sox/nvda/amd/tsm 平均）、港股科技、日韩。
+    """
+
+    # ⚠️ `omc` 在本文件里是**函数内局部导入**（其他测试类各自 import），
+    #    类级别用不到 —— 第一版直接写 `omc.impact_summary` 得 NameError。
+    @staticmethod
+    def _mod():
+        from market_timing import overseas_market_collector as omc
+        return omc
+
+    @staticmethod
+    def _d(**kw):
+        return {k: {"change_pct": v} for k, v in kw.items()}
+
+    def test_strong_tech_says_favorable(self):
+        out = self._mod().impact_summary(self._d(sox=2.0, nvda=3.0, amd=2.5, tsm=1.8))
+        assert "偏强" in out and "利于" in out
+
+    def test_weak_tech_says_lower_chase_permission(self):
+        """⚠️ 偏弱时说的是「追高**权限**应下降」而不是「应减仓」——
+        海外是情境证据，不是持仓指令（决策优先级：个股服从板块、板块服从大盘）。"""
+        out = self._mod().impact_summary(self._d(sox=-2.0, nvda=-3.0))
+        assert "偏弱" in out and "权限应下降" in out
+        assert "减仓" not in out
+
+    def test_mild_move_is_explicitly_neutral(self):
+        out = self._mod().impact_summary(self._d(sox=0.2, nvda=-0.3))
+        assert "中性" in out
+
+    def test_all_missing_does_not_fabricate_a_conclusion(self):
+        """⚠️⚠️ 全缺时**不得**编出「中性」这类结论 ——
+        「没数据」与「数据显示中性」是两件事，后者会让读者以为海外已核对过。
+        """
+        out = self._mod().impact_summary({})
+        assert "偏强" not in out and "偏弱" not in out
+        assert "AI/半导体链整体中性" not in out, \
+            "无数据时不该给出 AI 链的中性结论"
+
+    def test_partial_data_uses_only_what_exists(self):
+        """只有 sox 时也要能给结论 —— 平均是对**非 None** 的那些取的。"""
+        out = self._mod().impact_summary(self._d(sox=2.5))
+        assert "偏强" in out
+
+
+class TestA50Sanity:
+    """⚠️ A50 期货的 |change_pct| > 3% 通常是 `previous_close` 错位（换月/元数据滞后）。"""
+
+    def test_large_move_is_flagged_not_silently_dropped(self):
+        r = {"a50_futures": {"change_pct": 5.2}}
+        from collect import collect_incremental_market as cim
+        cim._a50_sanity(r)
+        a50 = r["a50_futures"]
+        assert a50["suspect"] is True
+        assert "人工核对" in a50["note"]
+
+    def test_value_is_not_modified(self):
+        """⚠️ **只标记不改值** —— 改值会让下游算出的数字与源不一致且无从追溯。"""
+        from collect import collect_incremental_market as cim
+        r = {"a50_futures": {"change_pct": -4.4}}
+        cim._a50_sanity(r)
+        assert r["a50_futures"]["change_pct"] == -4.4
+
+    def test_normal_move_is_not_flagged(self):
+        from collect import collect_incremental_market as cim
+        r = {"a50_futures": {"change_pct": 1.2}}
+        cim._a50_sanity(r)
+        assert "suspect" not in r["a50_futures"]
+
+    def test_non_numeric_does_not_crash(self):
+        from collect import collect_incremental_market as cim
+        for bad in (None, "N/A", ""):
+            r = {"a50_futures": {"change_pct": bad}}
+            cim._a50_sanity(r)
+            assert "suspect" not in r["a50_futures"]
+
+    def test_missing_section_does_not_crash(self):
+        from collect import collect_incremental_market as cim
+        r = {}
+        cim._a50_sanity(r)
+        assert r == {}

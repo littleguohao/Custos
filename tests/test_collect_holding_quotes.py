@@ -333,3 +333,108 @@ class CollectIndicesFallbackTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BreadthCollectionTests(unittest.TestCase):
+    """880 系列市场宽度：**本地 Reader 优先、在线兜底**。
+
+    ⚠️ 这五个代码的 `date` 会成为下游 `market_breadth.as_of` ——
+    而它决定 `market_timing_scorer.is_stale` 是否按满分计入。
+    `date` 落成空串时 merge 会标 `quality: raw_only`（v0.40 后算「不新鲜」）。
+    """
+
+    CODES = ("880001", "880005", "880006", "880390", "880863")
+
+    def _frame(self, closes, last_name=None):
+        import pandas as pd
+        idx = (pd.date_range("2026-08-10", periods=len(closes), freq="B")
+               if last_name is None else last_name)
+        return pd.DataFrame({"close": closes}, index=idx)
+
+    def test_local_reader_wins_and_no_online_call(self):
+        """本地可用时**不得**发起在线调用（在线要建 TCP、选 bestip）。"""
+        with mock.patch.object(chq, "_get_reader") as rd, \
+             mock.patch.object(chq, "_client_call",
+                               side_effect=AssertionError("本地成功时不该走在线")):
+            rd.return_value.daily.return_value = self._frame([100.0, 102.0])
+            out = chq._collect_breadth()
+        self.assertEqual(set(out), set(self.CODES))
+        self.assertEqual(out["880005"]["source"], "mootdx_reader")
+        self.assertAlmostEqual(out["880005"]["change_pct"], 2.0)
+
+    def test_online_fallback_when_local_raises(self):
+        with mock.patch.object(chq, "_get_reader") as rd, \
+             mock.patch.object(chq, "_client_call") as cc:
+            rd.return_value.daily.side_effect = RuntimeError("TdxW 没开")
+            cc.return_value = self._frame([100.0, 101.0])
+            out = chq._collect_breadth()
+        self.assertTrue(out, "本地失败时应走在线兜底")
+        self.assertEqual(len(cc.call_args_list), len(self.CODES))
+
+    def test_single_bar_local_falls_through_to_online(self):
+        """⚠️ 只有一根 K 线算不出环比 ⇒ 继续走在线兜底，
+        而不是写一个 `change_pct: None` 的半成品。
+
+        （在线那支用 `df.iloc[-1]` + `last["datetime"]`，所以桩要带 datetime 列。）
+        """
+        import pandas as pd
+        online = pd.DataFrame({"close": [100.0, 103.0],
+                               "datetime": ["2026-08-10", "2026-08-11"]})
+        with mock.patch.object(chq, "_get_reader") as rd, \
+             mock.patch.object(chq, "_client_call") as cc:
+            rd.return_value.daily.return_value = self._frame([100.0])
+            cc.return_value = online
+            out = chq._collect_breadth()
+        self.assertTrue(cc.called, "只有一根 K 线时必须走在线")
+        self.assertAlmostEqual(out["880001"]["change_pct"], 3.0)
+        self.assertEqual(out["880001"]["source"], "mootdx_online")
+
+
+    def test_both_sources_failing_records_the_error(self):
+        """⚠️ 两路都失败时写 `{name, error}` **显式错误记录** —— 我原以为会缺席，
+        实测是记录下来，而这更好：复盘时能看出「是采集失败」而不是「今天没这个指标」。
+
+        ⚠️ 顺带核实过一个**看着像 bug 其实不可达**的点：
+        `merge_incremental_market._usable()` 只看 `status` 字段，
+        对 `{name, error}` 返回 True ⇒ 若这份 breadth 流进 merge 会被当可用。
+        但它落在 **`{date}_holding_quotes.json`**（另一份产物），不经 merge；
+        merge 读的是 `collect_incremental_market`，那边显式写 `status: unavailable`。
+        ⇒ 两份产物用了**两套错误约定**，目前各自自洽；若哪天把本函数的输出接进 merge，
+        必须先统一约定。
+        """
+        with mock.patch.object(chq, "_get_reader") as rd, \
+             mock.patch.object(chq, "_client_call") as cc:
+            rd.return_value.daily.side_effect = RuntimeError("local down")
+            cc.side_effect = RuntimeError("online down")
+            out = chq._collect_breadth()
+        self.assertEqual(set(out), set(self.CODES))
+        for code in self.CODES:
+            self.assertIn("error", out[code], f"{code} 应记录失败原因")
+            self.assertNotIn("close", out[code], "失败时不得给出 close，否则是编数据")
+
+
+    def test_zero_prev_close_yields_none_not_div_by_zero(self):
+        """前收为 0（指数停牌/数据异常）时 `change_pct` 是 None，不得崩。"""
+        with mock.patch.object(chq, "_get_reader") as rd, \
+             mock.patch.object(chq, "_client_call", side_effect=AssertionError("no")):
+            rd.return_value.daily.return_value = self._frame([0.0, 100.0])
+            out = chq._collect_breadth()
+        self.assertIsNone(out["880001"]["change_pct"])
+
+    def test_non_datetime_index_yields_empty_date_string(self):
+        """⚠️ 索引不是日期时 `date` 落成**空串** —— 这正是
+        「mootdx Reader 返回 DatetimeIndex 而非列」那个坑的下游表现。
+
+        空串会让 `merge_incremental_market` 标 `quality: raw_only`
+        （v0.40 后被 `is_stale` 认作不新鲜）⇒ 宽度按中性 7.5 计而非满分 ——
+        **方向是安全的**，本条钉住这条链不要断。
+        """
+        with mock.patch.object(chq, "_get_reader") as rd, \
+             mock.patch.object(chq, "_client_call", side_effect=AssertionError("no")):
+            rd.return_value.daily.return_value = self._frame([100.0, 101.0],
+                                                             last_name=[0, 1])
+            out = chq._collect_breadth()
+        self.assertEqual(out["880001"]["date"], "")
+        import contracts as C
+        self.assertIn("raw_only", C.SECTION_NOT_FRESH,
+                      "空 date ⇒ raw_only ⇒ 必须被判不新鲜，这条链不能断")

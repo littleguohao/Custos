@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import sys
 
 import numpy as np
 import pandas as pd
@@ -650,3 +651,201 @@ class TestNormalizeAcceptsRawList:
         for x in (None, [], [{}]):
             assert af.normalize_xdxr(x) == []
             assert af.normalize_shares(x) == []
+
+
+class TestCacheAgeAndStaleness:
+    """权息缓存年龄 —— `stale_codes` 靠它决定 18:00 选股链要重取哪些票。"""
+
+    def _write(self, tmp_path, monkeypatch, code, payload):
+        import json
+        monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
+        p = tmp_path / f"{code}.json"
+        p.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        return p
+
+    def test_absent_cache_is_none(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
+        assert af.cache_age_days("600000") is None
+
+    def test_missing_fetched_at_is_none(self, tmp_path, monkeypatch):
+        """⚠️ 缓存存在但没有 `fetched_at` ⇒ 返回 None（**视为需要刷新**）。
+
+        返回 0 会让它看起来「刚取的」而永不刷新 —— 那才是危险的方向。
+        """
+        self._write(tmp_path, monkeypatch, "600000", {"events": []})
+        assert af.cache_age_days("600000") is None
+
+    def test_corrupt_json_is_none_not_crash(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
+        (tmp_path / "600000.json").write_text("{ not json", encoding="utf-8")
+        assert af.cache_age_days("600000") is None
+
+    def test_fresh_cache_age_near_zero(self, tmp_path, monkeypatch):
+        from paths import cn_now
+        self._write(tmp_path, monkeypatch, "600000",
+                    {"fetched_at": cn_now().isoformat(timespec="seconds")})
+        age = af.cache_age_days("600000")
+        assert age is not None and age < 0.01
+
+    def test_naive_timestamp_is_treated_as_local(self, tmp_path, monkeypatch):
+        """⚠️ 无时区的 `fetched_at` 按本地时区处理 —— 否则会算出 ±8 小时的偏差，
+        在 `max_age_days=7` 这种粒度上不致命，但会让「刚取的」显示成负年龄。"""
+        from datetime import timedelta
+
+        from paths import cn_now
+        naive = (cn_now() - timedelta(days=2)).replace(tzinfo=None).isoformat(timespec="seconds")
+        self._write(tmp_path, monkeypatch, "600000", {"fetched_at": naive})
+        age = af.cache_age_days("600000")
+        assert age is not None and 1.9 < age < 2.1, age
+
+    def test_stale_codes_picks_absent_and_old(self, tmp_path, monkeypatch):
+        from datetime import timedelta
+
+        from paths import cn_now
+        monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
+        self._write(tmp_path, monkeypatch, "600000",
+                    {"fetched_at": cn_now().isoformat(timespec="seconds")})
+        self._write(tmp_path, monkeypatch, "000001",
+                    {"fetched_at": (cn_now() - timedelta(days=30)).isoformat(timespec="seconds")})
+        out = af.stale_codes(["600000", "000001", "600519"], max_age_days=7.0)
+        assert "600000" not in out, "新缓存不该被重取"
+        assert "000001" in out and "600519" in out, f"旧缓存与无缓存都要重取：{out}"
+
+
+class TestGetXdxrCacheFirst:
+    """⚠️ 权息**默认优先缓存** —— 除权是历史事实，不会变。
+
+    这不是性能优化而已：`Quotes.factory()` 每次都要选 bestip + 建 TCP 连接，
+    18:00 选股链几百只候选逐只新建连接会把 <1s 拖成几分钟（源码注释）。
+    """
+
+    def test_cache_hit_does_not_touch_network(self, tmp_path, monkeypatch):
+        import json
+        monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
+        (tmp_path / "600000.json").write_text(json.dumps(
+            {"fetched_at": "2026-08-01T00:00:00+08:00",
+             "events": [{"date": "20260610", "category": 1, "songzhuangu": 0.0,
+                         "fenhong": 1.0, "peigu": 0.0, "peigujia": 0.0}]}),
+            encoding="utf-8")
+
+        def boom(*a, **k):
+            raise AssertionError("命中缓存时不该建连接")
+        monkeypatch.setattr(af, "_tdx_market", boom)
+        ev = af.get_xdxr("600000")
+        assert ev and ev[0]["date"] == "20260610"
+
+    def test_refresh_true_bypasses_cache(self, tmp_path, monkeypatch):
+        import json
+        monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
+        (tmp_path / "600000.json").write_text(json.dumps(
+            {"fetched_at": "2026-08-01T00:00:00+08:00", "events": []}),
+            encoding="utf-8")
+        called = {"n": 0}
+
+        def mark(c):
+            called["n"] += 1
+            raise RuntimeError("stop here")
+        monkeypatch.setattr(af, "_tdx_market", mark)
+        with pytest.raises(af.AdjustError):
+            af.get_xdxr("600000", refresh=True)
+        assert called["n"] == 1, "refresh=True 必须绕过缓存去取数"
+
+    def test_fetch_failure_raises_adjust_error_not_bare(self, tmp_path, monkeypatch):
+        """⚠️ 取数失败必须包成 `AdjustError` 并带代码 —— 裸异常在批量路径里
+        会丢掉「是哪只票」这个信息。"""
+        monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
+        monkeypatch.setattr(af, "_tdx_market",
+                            lambda c: (_ for _ in ()).throw(RuntimeError("net down")))
+        with pytest.raises(af.AdjustError) as e:
+            af.get_xdxr("600519")
+        assert "600519" in str(e.value)
+
+
+class TestSharesEventsCacheShared:
+    """股本事件与权息**共用一份缓存文件** —— 避免两次取数（源码注释）。"""
+
+    def test_shares_read_from_same_cache(self, tmp_path, monkeypatch):
+        import json
+        monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
+        (tmp_path / "600000.json").write_text(json.dumps(
+            {"fetched_at": "2026-08-01T00:00:00+08:00", "events": [],
+             "shares": [{"date": "20260610", "total": 1.0e10}]}),
+            encoding="utf-8")
+
+        def boom(*a, **k):
+            raise AssertionError("共用缓存时不该重新取数")
+        monkeypatch.setattr(af, "_tdx_market", boom)
+        sh = af.get_shares_events("600000")
+        assert sh and sh[0]["total"] == 1.0e10
+
+    def test_missing_shares_key_falls_through_to_fetch(self, tmp_path, monkeypatch):
+        """⚠️ 缓存里没有 `shares` 键时**必须去取**，不能返回空列表 ——
+        空列表会让 `total_shares_at` 算出 None 而市值静默变缺失
+        （`_shares` 曾因漏 `import json` 让 mcap 静默失效，同一类）。"""
+        import json
+        monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
+        (tmp_path / "600000.json").write_text(json.dumps(
+            {"fetched_at": "2026-08-01T00:00:00+08:00", "events": []}),
+            encoding="utf-8")
+        monkeypatch.setattr(af, "_tdx_market",
+                            lambda c: (_ for _ in ()).throw(RuntimeError("net")))
+        with pytest.raises(af.AdjustError):
+            af.get_shares_events("600000")
+
+
+class TestFetchBatchReusesConnection:
+    """批量取数**复用同一个连接** —— 这是它存在的唯一理由。"""
+
+    def test_single_factory_call_for_many_codes(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
+        factories = {"n": 0}
+
+        class FakeClient:
+            def get_xdxr_info(self, market, code):
+                return []
+
+        class FakeQuotes:
+            client = FakeClient()
+
+        class Factory:
+            @staticmethod
+            def factory(**kw):
+                factories["n"] += 1
+                return FakeQuotes()
+
+        import types
+        mod = types.ModuleType("mootdx.quotes")
+        mod.Quotes = Factory
+        monkeypatch.setitem(sys.modules, "mootdx.quotes", mod)
+        out = af.fetch_xdxr_batch(["600000", "000001", "600519"])
+        assert factories["n"] == 1, f"应只建一次连接，实际 {factories['n']}"
+        assert set(out) == {"600000", "000001", "600519"}
+
+    def test_empty_codes_returns_empty_without_connecting(self, monkeypatch):
+        def boom(**k):
+            raise AssertionError("空清单不该建连接")
+        import types
+        mod = types.ModuleType("mootdx.quotes")
+        mod.Quotes = type("Q", (), {"factory": staticmethod(boom)})
+        monkeypatch.setitem(sys.modules, "mootdx.quotes", mod)
+        assert af.fetch_xdxr_batch([]) == {}
+
+    def test_on_error_skip_continues(self, tmp_path, monkeypatch):
+        """⚠️ `on_error="skip"` 时单只失败跳过并计数 —— 一只票取不到
+        不该让几百只的批量全废。"""
+        monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
+
+        class FakeClient:
+            def get_xdxr_info(self, market, code):
+                if code == "000001":
+                    raise RuntimeError("that one fails")
+                return []
+
+        import types
+        mod = types.ModuleType("mootdx.quotes")
+        mod.Quotes = type("Q", (), {"factory": staticmethod(
+            lambda **k: type("Q2", (), {"client": FakeClient()})())})
+        monkeypatch.setitem(sys.modules, "mootdx.quotes", mod)
+        out = af.fetch_xdxr_batch(["600000", "000001", "600519"], on_error="skip")
+        assert "000001" not in out
+        assert set(out) == {"600000", "600519"}
