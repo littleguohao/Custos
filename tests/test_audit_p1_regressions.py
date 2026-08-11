@@ -5,6 +5,7 @@
 只是没被复用——regime 归一化写在 runtime_guards 却有五个模块各自用精确等值比较,
 涨跌停幅度推断承诺了"20% 前缀不得降 5%"却因为调用方不传 code 而失效。
 """
+
 from __future__ import annotations
 
 import os
@@ -31,6 +32,7 @@ def _strip_comments_and_strings(src: str) -> str:
     """
     import io
     import tokenize
+
     out = []
     try:
         for tok in tokenize.generate_tokens(io.StringIO(src).readline):
@@ -65,31 +67,42 @@ class TestRegimeNormalizationIsShared:
     def test_score_candidates_caps_on_every_bear_word(self, word):
         """空头封顶 B 必须对 amv_zone 的"空头触发"同样生效。"""
         from custos.pipeline.screening import score_candidates as sc
+
         assert sc.market_permission(word) == "观察"
 
     @pytest.mark.parametrize("word", LONG_WORDS)
     def test_score_candidates_allows_on_every_long_word(self, word):
         from custos.pipeline.screening import score_candidates as sc
+
         assert sc.market_permission(word) == "允许"
 
     def test_unknown_regime_is_not_permitted(self):
         from custos.pipeline.screening import score_candidates as sc
+
         assert sc.market_permission("") == "仅低吸"
 
     @pytest.mark.parametrize("word", BEAR_WORDS)
     def test_position_increase_denied_for_every_bear_word(self, word):
         mq = {"status": "pass", "amv_ok": True, "limitations": []}
-        d = rg.position_increase_decision({"amv_0": {"effective_state": word}},
-                                          reduction_ready=True, technical_current=True,
-                                          quotes_current=True, market_quality=mq)
+        d = rg.position_increase_decision(
+            {"amv_0": {"effective_state": word}},
+            reduction_ready=True,
+            technical_current=True,
+            quotes_current=True,
+            market_quality=mq,
+        )
         assert d["allow"] is False and d["regime"] == "空头"
 
     def test_amv_zone_fallback_is_honoured(self):
         """merge_incremental_market 用 amv_zone 兜底填 effective_state 的场景。"""
         mq = {"status": "pass", "amv_ok": True, "limitations": []}
-        d = rg.position_increase_decision({"amv_0": {"amv_zone": "空头触发"}},
-                                          reduction_ready=True, technical_current=True,
-                                          quotes_current=True, market_quality=mq)
+        d = rg.position_increase_decision(
+            {"amv_0": {"amv_zone": "空头触发"}},
+            reduction_ready=True,
+            technical_current=True,
+            quotes_current=True,
+            market_quality=mq,
+        )
         assert d["allow"] is False
 
 
@@ -104,8 +117,10 @@ class TestSectorIndexMarketMapping:
     def test_real_bj_codes_still_bj(self, code):
         assert code_utils.market_of(code) == "BJ"
 
-    @pytest.mark.parametrize("code,mkt", [("600000", "SH"), ("688111", "SH"),
-                                          ("000001", "SZ"), ("300750", "SZ")])
+    @pytest.mark.parametrize(
+        "code,mkt",
+        [("600000", "SH"), ("688111", "SH"), ("000001", "SZ"), ("300750", "SZ")],
+    )
     def test_ordinary_codes_unaffected(self, code, mkt):
         assert code_utils.market_of(code) == mkt
 
@@ -117,14 +132,23 @@ class TestPriceLimitInferenceGetsCode:
         """波动很小的 20+ 日窗口:会触发 _infer_price_limit 的 ST 降级分支。"""
         rows = []
         for i in range(n):
-            close = base + (i % 3) * 0.02          # 日波动 < 1%
-            rows.append({"date": pd.Timestamp("2026-06-01") + pd.Timedelta(days=i),
-                         "open": close, "high": close * 1.002, "low": close * 0.998,
-                         "close": close, "volume": 1e6, "amount": 1e7})
+            close = base + (i % 3) * 0.02  # 日波动 < 1%
+            rows.append(
+                {
+                    "date": pd.Timestamp("2026-06-01") + pd.Timedelta(days=i),
+                    "open": close,
+                    "high": close * 1.002,
+                    "low": close * 0.998,
+                    "close": close,
+                    "volume": 1e6,
+                    "amount": 1e7,
+                }
+            )
         return pd.DataFrame(rows)
 
     def test_chinext_not_demoted_to_five_percent(self):
         from custos.pipeline.market_timing import technical_monitor as tm
+
         assert tm._infer_price_limit("300750", self._quiet_df()) == 20
         assert tm._infer_price_limit("301029", self._quiet_df()) == 20
         assert tm._infer_price_limit("688111", self._quiet_df()) == 20
@@ -137,18 +161,23 @@ class TestPriceLimitInferenceGetsCode:
     def test_missing_code_is_what_broke_it(self):
         """留证:不传 code 时安静窗口会被判成 5%,这正是 analyze 旧行为。"""
         from custos.pipeline.market_timing import technical_monitor as tm
+
         assert tm._infer_price_limit("", self._quiet_df()) == 5
 
     def test_analyze_forwards_code_to_price_volume(self):
         from custos.pipeline.market_timing import technical_monitor as tm
+
         df = self._quiet_df(n=60)
         got = tm.analyze(df, "300750")
         assert got["available"] is True
-        assert got["price_volume"].get("price_limit") == 20, "analyze 必须把 code 透传下去"
+        assert got["price_volume"].get("price_limit") == 20, (
+            "analyze 必须把 code 透传下去"
+        )
 
     def test_analyze_without_code_still_runs(self):
         """向后兼容:老调用方不传 code 不能崩。"""
         from custos.pipeline.market_timing import technical_monitor as tm
+
         assert tm.analyze(self._quiet_df(n=60))["available"] is True
 
 
@@ -178,6 +207,7 @@ class TestMarketClockIsExchangeTime:
     def test_no_naive_now_calls_left_in_tools(self):
         """静态防线:src 下不得再出现裸 datetime.now()/date.today()。"""
         import pathlib
+
         offenders = []
         root = pathlib.Path(rg.__file__).resolve().parent
         for f in root.rglob("*.py"):
@@ -195,7 +225,11 @@ class TestQuoteDateVerification:
 
     def test_snapshot_sources_are_marked_unverified(self):
         import inspect
-        from custos.datasource.collect.collect_holding_quotes import _tq_snapshot_quote, _eastmoney_bj_quote
+        from custos.datasource.collect.collect_holding_quotes import (
+            _tq_snapshot_quote,
+            _eastmoney_bj_quote,
+        )
+
         for fn in (_tq_snapshot_quote, _eastmoney_bj_quote):
             src = inspect.getsource(fn)
             assert '"date_verified": False' in src, f"{fn.__name__} 必须标记日期未自证"
@@ -205,9 +239,17 @@ class TestQuoteDateVerification:
         from custos.datasource.collect import collect_holding_quotes as chq
 
         idx = pd.DatetimeIndex([pd.Timestamp("2026-08-02"), pd.Timestamp("2026-08-03")])
-        df = pd.DataFrame({"open": [10.0, 10.1], "high": [10.2, 10.3],
-                           "low": [9.9, 10.0], "close": [10.1, 10.2],
-                           "volume": [1e6, 1.1e6], "amount": [1e7, 1.1e7]}, index=idx)
+        df = pd.DataFrame(
+            {
+                "open": [10.0, 10.1],
+                "high": [10.2, 10.3],
+                "low": [9.9, 10.0],
+                "close": [10.1, 10.2],
+                "volume": [1e6, 1.1e6],
+                "amount": [1e7, 1.1e7],
+            },
+            index=idx,
+        )
 
         class _R:
             def daily(self, symbol):
@@ -226,10 +268,13 @@ class TestQuoteDateVerification:
         (tmp_path / "holdings").mkdir(parents=True, exist_ok=True)
         day = "2026-08-03"
         (tmp_path / "trades" / "current_positions.json").write_text(
-            '[{"代码": "600000"}]', encoding="utf-8")
+            '[{"代码": "600000"}]', encoding="utf-8"
+        )
         (tmp_path / "market" / f"{day}_holding_quotes.json").write_text(
             '{"quotes": [{"code": "600000", "price": 10.0, "date": "%s",'
-            ' "date_verified": false}]}' % day, encoding="utf-8")
+            ' "date_verified": false}]}' % day,
+            encoding="utf-8",
+        )
         r = rg.write_runtime_gate(day)
         pg = r["position_gate"]
         assert pg["quotes_date_unverified"] == ["600000"]
@@ -241,40 +286,56 @@ class TestOhlcvFreshness:
 
     def _df(self, last_day: str, n: int = 30):
         end = pd.Timestamp(last_day)
-        return pd.DataFrame({
-            "date": pd.date_range(end=end, periods=n, freq="D"),
-            "open": [10.0] * n, "high": [10.1] * n, "low": [9.9] * n,
-            "close": [10.0] * n, "volume": [1e6] * n,
-        })
+        return pd.DataFrame(
+            {
+                "date": pd.date_range(end=end, periods=n, freq="D"),
+                "open": [10.0] * n,
+                "high": [10.1] * n,
+                "low": [9.9] * n,
+                "close": [10.0] * n,
+                "volume": [1e6] * n,
+            }
+        )
 
     def test_stale_local_data_is_flagged(self, monkeypatch):
         from custos.datasource.local_tdx import local_tdx_data as ltd
+
         monkeypatch.setattr(ltd, "read_vipdoc_daily", lambda c: self._df("2026-07-30"))
         monkeypatch.setattr(ltd, "get_online_bars", lambda c, offset=0: pd.DataFrame())
-        df = ltd.get_ohlcv_table("600000", count=30, expect_last_date="2026-08-03", adjust="none")
+        df = ltd.get_ohlcv_table(
+            "600000", count=30, expect_last_date="2026-08-03", adjust="none"
+        )
         assert df.attrs["stale"] is True
         assert df.attrs["last_date"] == "2026-07-30"
         assert df.attrs["expected"] == "2026-08-03"
 
     def test_fresh_local_data_not_flagged(self, monkeypatch):
         from custos.datasource.local_tdx import local_tdx_data as ltd
+
         monkeypatch.setattr(ltd, "read_vipdoc_daily", lambda c: self._df("2026-08-03"))
-        df = ltd.get_ohlcv_table("600000", count=30, expect_last_date="2026-08-03", adjust="none")
+        df = ltd.get_ohlcv_table(
+            "600000", count=30, expect_last_date="2026-08-03", adjust="none"
+        )
         assert df.attrs["stale"] is False
 
     def test_online_refresh_wins_over_stale_local(self, monkeypatch):
         """本地陈旧时应尝试在线源,拿到更新的就用它。"""
         from custos.datasource.local_tdx import local_tdx_data as ltd
+
         monkeypatch.setattr(ltd, "read_vipdoc_daily", lambda c: self._df("2026-07-30"))
-        monkeypatch.setattr(ltd, "get_online_bars",
-                            lambda c, offset=0: self._df("2026-08-03"))
-        df = ltd.get_ohlcv_table("600000", count=30, expect_last_date="2026-08-03", adjust="none")
+        monkeypatch.setattr(
+            ltd, "get_online_bars", lambda c, offset=0: self._df("2026-08-03")
+        )
+        df = ltd.get_ohlcv_table(
+            "600000", count=30, expect_last_date="2026-08-03", adjust="none"
+        )
         assert df.attrs["stale"] is False and df.attrs["last_date"] == "2026-08-03"
 
     def test_without_expect_date_behaviour_unchanged(self):
         """不传 expect_last_date 时不做校验,老调用方行为不变。"""
         from custos.datasource.local_tdx import local_tdx_data as ltd
         import unittest.mock as m
+
         with m.patch.object(ltd, "read_vipdoc_daily", lambda c: self._df("2026-07-30")):
             df = ltd.get_ohlcv_table("600000", count=30, adjust="none")
         assert "stale" not in df.attrs
@@ -286,6 +347,7 @@ class TestChiefDecisionFailsClosed:
     def test_gate_is_mandatory_input(self):
         import inspect
         from custos.pipeline.market_timing import chief_decision_report as cdr
+
         src = inspect.getsource(cdr.main)
         assert "mandatory runtime_gate missing" in src
 
@@ -293,9 +355,13 @@ class TestChiefDecisionFailsClosed:
         """None(字段缺失)必须与 False 同等对待。"""
         import inspect
         from custos.pipeline.market_timing import chief_decision_report as cdr
+
         raw = inspect.getsource(cdr.main)
         code_only = _strip_comments_and_strings(raw)
         # `is False` 只在注释里出现(说明历史缺陷),真实代码里必须没有
         assert "is False" not in code_only, "不得用 `is False`:None 会绕过判定"
         # 真实代码里必须是真值判断
-        assert "not position_gate.get('allow_position_increase')" in raw
+        # ruff format 把字符串统一成双引号 —— 先规范化再比对（引号无关）
+        assert "not position_gate.get('allow_position_increase')" in raw.replace(
+            '"', "'"
+        )

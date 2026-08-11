@@ -36,6 +36,7 @@ owner 2026-08-07 问「总的回测和研究是否可以统一到一个入口」
 —— 项目原则是「不可用的东西要标记出来，且标记要代码级生效」，
 而 `TOOLS` 表就是那个代码级标记。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -60,34 +61,93 @@ BASE = HERE.parents[2]
 #     diagnostic 诊断/对账工具，产出报告供治理文档填数
 #     stale     **存废待定**（覆盖率 0% 或长期未动），见待办 #44
 TOOLS: dict[str, tuple[str, str]] = {
-    "backtest_factors":        ("engine", "S_shape 因子走查回测（walk-forward）；11 个模式开关"),
-    "launch_point_study":      ("engine", "起涨点 vs 0AMV regime 研究；**17 个模式开关**"),
-    "m2_stop_sweep":           ("driver", "M2 机制类改进扫描：分组跑对照并自动判定（subprocess 调 engine）"),
-    "run_bear_to_long_study":  ("driver", "空头段识别未来赢家：枚举窗口对 → Pass1 → 跨窗 Pass2"),
-    "backtest_0amv_bear_regime": ("study", "0AMV 空头区间「只卖不买 + 反弹减仓」历史回测"),
-    "analyze_winner_features": ("study", "赢家特征反向研究：MACD/KDJ/DMI 在信号当时的判别力"),
-    "scan_signals_ytd":        ("study", "年内信号扫描（reversal_k 事件 + 板块相位）"),
-    "analyze_trades":          ("study", "交易记录复盘分析（台账统计）"),
-    "adjust_diagnostic":       ("diagnostic", "复权口径诊断：量化未复权数据对回测与选股的影响"),
-    "reconcile_qfq":           ("diagnostic", "前复权对账：拿 qlib 序列给 tdx 自算结果做独立参照"),
-    "probe_data_sources":      ("diagnostic", "数据源探针：实测可用性/耗时/返回形状"),
+    "backtest_factors": (
+        "engine",
+        "S_shape 因子走查回测（walk-forward）；11 个模式开关",
+    ),
+    "launch_point_study": ("engine", "起涨点 vs 0AMV regime 研究；**17 个模式开关**"),
+    "m2_stop_sweep": (
+        "driver",
+        "M2 机制类改进扫描：分组跑对照并自动判定（subprocess 调 engine）",
+    ),
+    "run_bear_to_long_study": (
+        "driver",
+        "空头段识别未来赢家：枚举窗口对 → Pass1 → 跨窗 Pass2",
+    ),
+    "backtest_0amv_bear_regime": (
+        "study",
+        "0AMV 空头区间「只卖不买 + 反弹减仓」历史回测",
+    ),
+    "analyze_winner_features": (
+        "study",
+        "赢家特征反向研究：MACD/KDJ/DMI 在信号当时的判别力",
+    ),
+    "scan_signals_ytd": ("study", "年内信号扫描（reversal_k 事件 + 板块相位）"),
+    "analyze_trades": ("study", "交易记录复盘分析（台账统计）"),
+    "adjust_diagnostic": (
+        "diagnostic",
+        "复权口径诊断：量化未复权数据对回测与选股的影响",
+    ),
+    "reconcile_qfq": (
+        "diagnostic",
+        "前复权对账：拿 qlib 序列给 tdx 自算结果做独立参照",
+    ),
+    "probe_data_sources": ("diagnostic", "数据源探针：实测可用性/耗时/返回形状"),
     # ⚠️ 以下三个**覆盖率 0%**，存废待 owner 定（待办 #44）。
     #    留在表里而不是删掉，是因为「不确定」本身要可见 ——
     #    删了就没人记得曾有这些工具，而标 stale 会在每次列表时提醒。
-    "compare_signal_sets":     ("stale", "研究版 reversal_k vs live 版 j_low 信号对比（0% 覆盖）"),
-    "scan_signal_backtest":    ("stale", "⭐ 信号按 B1 买卖规则逐笔模拟（0% 覆盖）"),
-    "m2_migrate_fingerprint":  ("stale", "给无指纹的 m2_sweep 旧结果补样本量指纹（0% 覆盖，一次性迁移）"),
+    "compare_signal_sets": (
+        "stale",
+        "研究版 reversal_k vs live 版 j_low 信号对比（0% 覆盖）",
+    ),
+    "scan_signal_backtest": ("stale", "⭐ 信号按 B1 买卖规则逐笔模拟（0% 覆盖）"),
+    "m2_migrate_fingerprint": (
+        "stale",
+        "给无指纹的 m2_sweep 旧结果补样本量指纹（0% 覆盖，一次性迁移）",
+    ),
 }
 ORDER = ["engine", "driver", "study", "diagnostic", "stale"]
-LABEL = {"engine": "引擎", "driver": "驱动", "study": "研究",
-         "diagnostic": "诊断", "stale": "⚠️ 存废待定"}
+LABEL = {
+    "engine": "引擎",
+    "driver": "驱动",
+    "study": "研究",
+    "diagnostic": "诊断",
+    "stale": "⚠️ 存废待定",
+}
 
 
 def _modes(name: str) -> list[str]:
-    """从源码里抽出 `store_true` 开关 —— 它们是这个工具的**模式**。"""
-    src = (HERE / f"{name}.py").read_text(encoding="utf-8")
-    return sorted(set(re.findall(r'add_argument\("--([a-z][a-z0-9-]*)"[^)]*action="store_true"',
-                                 src)))
+    """从源码里抽出 `store_true` 开关 —— 它们是这个工具的**模式**。
+
+    ⚠️ 用 AST 而不是正则：正则 `[^)]*` 在格式化折行/嵌套括号下会漏匹配
+    （ruff format 统一排版后模式清单曾整段消失）。
+    """
+    import ast
+
+    tree = ast.parse((HERE / f"{name}.py").read_text(encoding="utf-8"))
+    out = set()
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "add_argument"
+        ):
+            continue
+        if not any(
+            kw.arg == "action"
+            and isinstance(kw.value, ast.Constant)
+            and kw.value.value == "store_true"
+            for kw in node.keywords
+        ):
+            continue
+        for a in node.args:
+            if (
+                isinstance(a, ast.Constant)
+                and isinstance(a.value, str)
+                and a.value.startswith("--")
+            ):
+                out.add(a.value.removeprefix("--"))
+    return sorted(out)
 
 
 def _listing() -> int:
@@ -125,12 +185,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"⛔ 注册表里有 {name} 但文件不存在: {script}", file=sys.stderr)
         return 2
     if TOOLS[name][0] == "stale":
-        print(f"⚠️ {name} 标记为**存废待定**（覆盖率 0%，见待办 #44）——"
-              f"结论不要直接采信。\n", file=sys.stderr)
+        print(
+            f"⚠️ {name} 标记为**存废待定**（覆盖率 0%，见待办 #44）——"
+            f"结论不要直接采信。\n",
+            file=sys.stderr,
+        )
     # ⚠️ 用 subprocess 而不是 import：保住 m2_stop_sweep / adjust_diagnostic
     # 依赖的**内存隔离**（那个回测常被 OOM Kill），也让一个工具的 import 错误
     # 不会波及其余工具。cwd 固定到仓库根 —— 研究脚本的相对路径都以它为基准。
-    return subprocess.run([sys.executable, str(script), *rest], cwd=str(BASE)).returncode
+    return subprocess.run(
+        [sys.executable, str(script), *rest], cwd=str(BASE)
+    ).returncode
 
 
 if __name__ == "__main__":

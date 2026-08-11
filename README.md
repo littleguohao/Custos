@@ -92,6 +92,9 @@ scripts\audit.ps1 -SkipMypy
 代表「有发现」，是正常输出而非脚本失败；vulture 的疑似死代码要人工甄别
 （`paths.py` 公共常量、`factors` 注册表元数据这类 API 面是已知误报）。
 
+代码风格由 `ruff format` 统一（audit 脚本第 0 项是 `ruff format --check`，
+不统一则退出）——提交前跑 `uv run --with ruff ruff format src/ tests/`。
+
 ## 数据源
 
 **本地优先**（通达信 vipdoc / TQ-Local），HTTP 只做补齐；

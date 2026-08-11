@@ -17,6 +17,7 @@
   ③ `news/postclose_news_digest` 从根层 `daily_report` 导入盘前情报访问器。
      已移到 `news/premarket_intel_schema`。
 """
+
 from __future__ import annotations
 
 import ast
@@ -32,24 +33,36 @@ TOOLS = ROOT / "src" / "custos"
 # ── 分层：数字越小越底层。同层互相依赖允许，下层依赖上层不允许。
 # 2026-08-11 归堆（src/{core,datasource,pipeline,research}）后 rel 带组前缀：
 # core 顶层文件名 ∈ BASE_MODULES 才是 L0；组内子目录用两级键查 LAYER_OF_DIR。
-BASE_MODULES = {"paths.py", "code_utils.py", "indicators.py", "fmt.py",
-                "net_retry.py", "pipeline_kit.py", "runtime_guards.py",
-                # `contracts.py` 是产物 schema 的唯一来源，被 L1~L3 的生产者调用。
-                # 它**只依赖 stdlib**（math + typing）—— 一条测试强制这一点，
-                # 因为契约层若依赖别的模块，就可能被它校验的对象反向依赖。
-                "contracts.py",
-                # `b1_thresholds.py` 是 B1 反转 K 判定阈值的唯一来源，被 L2/L3 读。
-                # 2026-08-07 建：同一组阈值原先散在 screening/market_timing/holdings
-                # 三个 **L3** 目录里（彼此不能互相 import），只能上提到 L0。
-                "b1_thresholds.py",
-                # `report_audit.py` 是报告可审计块（待办 #29）的唯一实现，被 L3
-                # （close_review/screening）与 L4（daily_report）的报告生成器共用。
-                # 只依赖 `paths`（L0）与 stdlib。
-                "report_audit.py"}
+BASE_MODULES = {
+    "paths.py",
+    "code_utils.py",
+    "indicators.py",
+    "fmt.py",
+    "net_retry.py",
+    "pipeline_kit.py",
+    "runtime_guards.py",
+    # `contracts.py` 是产物 schema 的唯一来源，被 L1~L3 的生产者调用。
+    # 它**只依赖 stdlib**（math + typing）—— 一条测试强制这一点，
+    # 因为契约层若依赖别的模块，就可能被它校验的对象反向依赖。
+    "contracts.py",
+    # `b1_thresholds.py` 是 B1 反转 K 判定阈值的唯一来源，被 L2/L3 读。
+    # 2026-08-07 建：同一组阈值原先散在 screening/market_timing/holdings
+    # 三个 **L3** 目录里（彼此不能互相 import），只能上提到 L0。
+    "b1_thresholds.py",
+    # `report_audit.py` 是报告可审计块（待办 #29）的唯一实现，被 L3
+    # （close_review/screening）与 L4（daily_report）的报告生成器共用。
+    # 只依赖 `paths`（L0）与 stdlib。
+    "report_audit.py",
+}
 LAYER_OF_DIR = {
-    "datasource/local_tdx": 1, "datasource/collect": 1, "datasource/news": 1,
-    "core/factors": 2, "core/trades": 2,
-    "pipeline/screening": 3, "pipeline/market_timing": 3, "pipeline/close_review": 3,
+    "datasource/local_tdx": 1,
+    "datasource/collect": 1,
+    "datasource/news": 1,
+    "core/factors": 2,
+    "core/trades": 2,
+    "pipeline/screening": 3,
+    "pipeline/market_timing": 3,
+    "pipeline/close_review": 3,
     # 2026-08-07：`holdings/` 从 market_timing 拆出 —— 持仓状态与择时是不同的事，
     # 读者找「持仓状态机」不会想到去 market_timing 找。
     # `analysis/` 同日删除（两个文件各归其位后空了）。
@@ -62,7 +75,7 @@ LAYER_OF_DIR = {
 # `s_data.py` 是 qlib/CSV 只读 loader（零内部依赖）；
 # `trading_calendar.py` 是 TDX 交易日历维护（只依赖 L0）。
 DATA_ADAPTERS = {"datasource/s_data.py", "datasource/trading_calendar.py"}
-ROOT_LAYER = 4   # pipeline 顶层：runner 与编排
+ROOT_LAYER = 4  # pipeline 顶层：runner 与编排
 
 
 def _layer(rel: str) -> int:
@@ -74,7 +87,7 @@ def _layer(rel: str) -> int:
     if parts[0] == "research":
         return LAYER_OF_DIR["research"]
     if parts[0] == "datasource" and len(parts) == 2:
-        return 1                       # datasource/__init__.py 等
+        return 1  # datasource/__init__.py 等
     return LAYER_OF_DIR.get("/".join(parts[:2]), ROOT_LAYER)
 
 
@@ -104,9 +117,13 @@ def _build_graph():
         except SyntaxError:
             continue
         # 排除 `if __name__ == "__main__":` 块
-        main_spans = [(n.lineno, n.end_lineno) for n in ast.walk(tree)
-                      if isinstance(n, ast.If) and ast.unparse(n.test).replace(" ", "")
-                      in ('__name__=="__main__"', "__name__=='__main__'")]
+        main_spans = [
+            (n.lineno, n.end_lineno)
+            for n in ast.walk(tree)
+            if isinstance(n, ast.If)
+            and ast.unparse(n.test).replace(" ", "")
+            in ('__name__=="__main__"', "__name__=='__main__'")
+        ]
 
         def in_main(node):
             return any(a <= node.lineno <= b for a, b in main_spans)
@@ -122,7 +139,7 @@ def _build_graph():
             if in_main(n):
                 continue
             for nm in names:
-                nm = nm.removeprefix("custos.")   # 包式化后剥包名走既有映射
+                nm = nm.removeprefix("custos.")  # 包式化后剥包名走既有映射
                 for cand in (nm, nm.split(".")[0]):
                     if cand in mods and mods[cand] != rel:
                         graph[rel].add(mods[cand])
@@ -162,8 +179,13 @@ class TestLayerDirection:
 
     def test_no_factor_imports_backtester(self):
         """单列一条：因子**绝不许** import 回测器（1959 行、连带 40+ 模块）。"""
-        bad = [f"{a} → {b}" for a, deps in GRAPH.items() if a.startswith("core/factors/")
-               for b in deps if "backtest_factors" in b]
+        bad = [
+            f"{a} → {b}"
+            for a, deps in GRAPH.items()
+            if a.startswith("core/factors/")
+            for b in deps
+            if "backtest_factors" in b
+        ]
         assert not bad, "\n  ".join(bad)
 
 
@@ -174,8 +196,14 @@ class TestNoCycles:
     """
 
     ALLOWED = {
-        ("datasource/local_tdx/adjust_factors.py", "datasource/local_tdx/local_tdx_data.py"),
-        ("pipeline/screening/enrich_candidates.py", "pipeline/screening/signal_labels.py"),
+        (
+            "datasource/local_tdx/adjust_factors.py",
+            "datasource/local_tdx/local_tdx_data.py",
+        ),
+        (
+            "pipeline/screening/enrich_candidates.py",
+            "pipeline/screening/signal_labels.py",
+        ),
     }
 
     def test_no_unexpected_cycles(self):
@@ -183,7 +211,7 @@ class TestNoCycles:
 
         def dfs(u):
             if u in stack:
-                found.add(tuple(sorted(set(stack[stack.index(u):]))))
+                found.add(tuple(sorted(set(stack[stack.index(u) :]))))
                 return
             if u in seen:
                 return
@@ -196,8 +224,9 @@ class TestNoCycles:
         for k in sorted(GRAPH):
             dfs(k)
         unexpected = {c for c in found if c not in self.ALLOWED}
-        assert not unexpected, ("新增循环依赖：\n  "
-                               + "\n  ".join(" ↔ ".join(c) for c in sorted(unexpected)))
+        assert not unexpected, "新增循环依赖：\n  " + "\n  ".join(
+            " ↔ ".join(c) for c in sorted(unexpected)
+        )
 
     def test_allowed_cycles_are_same_layer(self):
         """白名单里的环必须是同层的 —— 跨层环不得进白名单。"""
@@ -209,13 +238,28 @@ class TestNoCycles:
 class TestIndicatorLayer:
     def test_indicators_is_the_indicator_home(self):
         """指标函数集中在 `indicators.py`，`technical_monitor` 不得再定义它们。"""
-        moved = {"kdj", "macd", "ema", "resample", "bbi_state", "zhixing_state",
-                 "_infer_price_limit"}
-        tm = ast.parse((TOOLS / "pipeline" / "market_timing" / "technical_monitor.py")
-                       .read_text(encoding="utf-8"))
-        redefined = {n.name for n in tm.body
-                     if isinstance(n, ast.FunctionDef) and n.name in moved}
-        assert not redefined, f"这些已下移到 indicators，不得在 technical_monitor 重新定义：{redefined}"
+        moved = {
+            "kdj",
+            "macd",
+            "ema",
+            "resample",
+            "bbi_state",
+            "zhixing_state",
+            "_infer_price_limit",
+        }
+        tm = ast.parse(
+            (TOOLS / "pipeline" / "market_timing" / "technical_monitor.py").read_text(
+                encoding="utf-8"
+            )
+        )
+        redefined = {
+            n.name
+            for n in tm.body
+            if isinstance(n, ast.FunctionDef) and n.name in moved
+        }
+        assert not redefined, (
+            f"这些已下移到 indicators，不得在 technical_monitor 重新定义：{redefined}"
+        )
 
         ind = ast.parse((TOOLS / "core" / "indicators.py").read_text(encoding="utf-8"))
         have = {n.name for n in ind.body if isinstance(n, ast.FunctionDef)}
@@ -223,8 +267,9 @@ class TestIndicatorLayer:
 
     def test_indicators_has_no_upward_dependency(self):
         """`indicators.py` 是底层，只许依赖 `code_utils`（取涨跌幅前缀基准）。"""
-        assert GRAPH.get("core/indicators.py", set()) <= {"core/code_utils.py"}, \
+        assert GRAPH.get("core/indicators.py", set()) <= {"core/code_utils.py"}, (
             f"indicators 多出依赖：{GRAPH.get('core/indicators.py')}"
+        )
 
 
 class TestContractsLayer:
@@ -234,12 +279,14 @@ class TestContractsLayer:
         它是产物 schema 的唯一来源，被 L1~L3 的生产者在落盘前调用。
         若它依赖别的项目模块，就可能出现「校验层依赖被校验对象」的环。
         """
-        assert GRAPH.get("core/contracts.py", set()) == set(), \
+        assert GRAPH.get("core/contracts.py", set()) == set(), (
             f"contracts.py 不得依赖项目内模块，实际: {GRAPH.get('core/contracts.py')}"
+        )
 
     def test_money_path_producers_validate_before_write(self):
         """四个钱的路径产物的生产者必须在落盘前 `require(...)`。"""
         import re
+
         expect = {
             "core/runtime_guards.py": "runtime_gate",
             "pipeline/generate_risk_and_sectors.py": "risk_decision",
@@ -272,13 +319,18 @@ class TestContractsLayer:
         }
         for rel, artifact in expect.items():
             src = (TOOLS / rel).read_text(encoding="utf-8")
-            assert re.search(rf"require\(['\"]{artifact}['\"]", src), \
+            # `\s*` 吃掉折行：ruff format 会把长调用在 `require(` 后换行
+            assert re.search(rf"require\(\s*['\"]{artifact}['\"]", src), (
                 f"{rel} 未在落盘前校验 {artifact}"
+            )
 
     def test_sector_state_validated(self):
         import re
-        src = (TOOLS / "pipeline" / "generate_risk_and_sectors.py").read_text(encoding="utf-8")
-        assert re.search(r"require\(['\"]sector_state['\"]", src)
+
+        src = (TOOLS / "pipeline" / "generate_risk_and_sectors.py").read_text(
+            encoding="utf-8"
+        )
+        assert re.search(r"require\(\s*['\"]sector_state['\"]", src)  # \s*：防折行
 
 
 class TestResearchProductionSplit:
@@ -290,22 +342,41 @@ class TestResearchProductionSplit:
     """
 
     def test_production_never_imports_research(self):
-        bad = [f"{a} → {b}" for a, deps in GRAPH.items() if a.startswith("pipeline/screening/")
-               for b in deps if b.startswith("research/")]
-        assert not bad, ("生产选股链不得依赖研究脚本：\n  " + "\n  ".join(bad))
+        bad = [
+            f"{a} → {b}"
+            for a, deps in GRAPH.items()
+            if a.startswith("pipeline/screening/")
+            for b in deps
+            if b.startswith("research/")
+        ]
+        assert not bad, "生产选股链不得依赖研究脚本：\n  " + "\n  ".join(bad)
 
     def test_research_may_import_production(self):
         """反向是允许且实际存在的（`backtest_factors → enrich_candidates`）——
         这条测试确认拆分没把它切断（切断了说明研究脚本已经跑不起来）。"""
-        edges = [f"{a} → {b}" for a, deps in GRAPH.items() if a.startswith("research/")
-                 for b in deps if b.startswith("pipeline/screening/")]
+        edges = [
+            f"{a} → {b}"
+            for a, deps in GRAPH.items()
+            if a.startswith("research/")
+            for b in deps
+            if b.startswith("pipeline/screening/")
+        ]
         assert edges, "研究脚本应仍能依赖生产模块（回测要跑生产逻辑）"
 
     def test_screening_has_only_production_chain(self):
         """`screening/` 里只剩 18:00 生产链会用到的模块。"""
-        got = {p.stem for p in (TOOLS / "pipeline" / "screening").glob("*.py")} - {"__init__"}
-        assert got == {"formula_screen", "enrich_candidates", "score_candidates",
-                       "candidate_table", "manual_pools", "signal_labels", "financials"}, got
+        got = {p.stem for p in (TOOLS / "pipeline" / "screening").glob("*.py")} - {
+            "__init__"
+        }
+        assert got == {
+            "formula_screen",
+            "enrich_candidates",
+            "score_candidates",
+            "candidate_table",
+            "manual_pools",
+            "signal_labels",
+            "financials",
+        }, got
 
 
 class TestContractCoverageOfArtifacts:
@@ -323,10 +394,12 @@ class TestContractCoverageOfArtifacts:
 
     # 刻意不纳入，理由见 contracts.py「第五批」注释块
     EXEMPT = {
-        "daily_pipeline_log", "1445_review",          # 执行痕迹，非决策产物
-        "manual_position_updates",                     # 人工输入，形状由外部决定
-        "premarket_chief_decision",                    # chief_decision 的 copy2 副本
-        "holding_sector_mapping_enriched",             # 可选产物，缺失是设计好的路径
+        "daily_pipeline_log",
+        "1445_review",  # 执行痕迹，非决策产物
+        "collection_log",  # RSS 采集执行痕迹（rss_collector 每次运行落一份），非决策产物
+        "manual_position_updates",  # 人工输入，形状由外部决定
+        "premarket_chief_decision",  # chief_decision 的 copy2 副本
+        "holding_sector_mapping_enriched",  # 可选产物，缺失是设计好的路径
     }
 
     def test_every_dated_artifact_has_contract_or_exemption(self):
@@ -336,14 +409,19 @@ class TestContractCoverageOfArtifacts:
 
         found = set()
         for p in TOOLS.rglob("*.py"):
-            for m in re.finditer(r'f?"\{?[a-z_.]*date[a-z_]*\}?_([a-z0-9_]+)\.json"',
-                                 p.read_text(encoding="utf-8")):
+            for m in re.finditer(
+                # 引号无关：此前只认双引号，单引号写法会漏扫（ruff format
+                # 统一成双引号后 collection_log 才冒出来 —— 它一直都在）
+                r"f?[\"\']\{?[a-z_.]*date[a-z_]*\}?_([a-z0-9_]+)\.json[\"\']",
+                p.read_text(encoding="utf-8"),
+            ):
                 found.add(m.group(1))
         missing = sorted(found - set(contracts.SPECS) - self.EXEMPT)
         assert not missing, (
             f"这些按日期命名的产物既没有契约、也没登记豁免：{missing}\n"
             "要么在 contracts.SPECS 里建契约，"
-            "要么在 contracts.py「第五批」注释块 + 本测试的 EXEMPT 里写明理由")
+            "要么在 contracts.py「第五批」注释块 + 本测试的 EXEMPT 里写明理由"
+        )
 
 
 class TestNoStaleScriptPaths:
@@ -372,11 +450,12 @@ class TestNoStaleScriptPaths:
                 if (d, name) not in existing and not (ROOT / d / name).exists():
                     bad.append(f"{p.relative_to(TOOLS)}: {d}/{name}")
             # ② 字符串路径形式：src/.../name.py（任意层数）
-            for m in re.finditer(r'src/((?:[a-z_0-9]+/)+)([a-z_0-9]+\.py)', src):
+            for m in re.finditer(r"src/((?:[a-z_0-9]+/)+)([a-z_0-9]+\.py)", src):
                 if not (ROOT / "src" / m.group(1) / m.group(2)).exists():
                     bad.append(f"{p.relative_to(TOOLS)}: src/{m.group(1)}{m.group(2)}")
-        assert not bad, ("引用了不存在的脚本路径（移动文件时漏改）：\n  "
-                         + "\n  ".join(sorted(set(bad))))
+        assert not bad, "引用了不存在的脚本路径（移动文件时漏改）：\n  " + "\n  ".join(
+            sorted(set(bad))
+        )
 
 
 class TestNoDuplicateModuleNames:
@@ -404,5 +483,7 @@ class TestNoDuplicateModuleNames:
                 continue
             dup[p.name].append(str(p.relative_to(TOOLS)))
         bad = {k: v for k, v in dup.items() if len(v) > 1}
-        assert not bad, ("同名模块出现在多个目录（扁平 import 会拿到哪一个不确定）：\n  "
-                         + "\n  ".join(f"{k}: {v}" for k, v in sorted(bad.items())))
+        assert not bad, (
+            "同名模块出现在多个目录（扁平 import 会拿到哪一个不确定）：\n  "
+            + "\n  ".join(f"{k}: {v}" for k, v in sorted(bad.items()))
+        )

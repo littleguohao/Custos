@@ -12,6 +12,14 @@ mkdir -p reports
 SKIP_MYPY=0
 [ "${1:-}" = "--skip-mypy" ] && SKIP_MYPY=1
 
+echo "[0/6] ruff format --check（代码风格门槛）..."
+if ! uv run --with ruff ruff format src/ tests/ --check > reports/ruff_format.txt 2>&1; then
+    echo "      ✗ 格式不统一 —— 先跑 \`uv run --with ruff ruff format src/ tests/\`"
+    echo "      明细 → reports/ruff_format.txt"
+    exit 1
+fi
+echo "      ✓ 格式统一"
+
 echo "[1/6] pylint（W/E/design）..."
 uv run --with pylint pylint src/ --disable=C,R --enable=W,E,design --reports=y \
     > reports/pylint_design.txt 2>&1

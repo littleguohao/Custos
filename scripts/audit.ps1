@@ -9,6 +9,16 @@ param([switch]$SkipMypy)
 Set-Location (Split-Path $PSScriptRoot -Parent)
 New-Item -ItemType Directory -Force reports | Out-Null
 
+Write-Host "[0/6] ruff format --check（代码风格门槛）..."
+uv run --with ruff ruff format src/ tests/ --check 2>&1 |
+    Out-File -Encoding utf8 "reports\ruff_format.txt"
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "      ✗ 格式不统一 —— 先跑 ``uv run --with ruff ruff format src/ tests/``"
+    Write-Host "      明细 -> reports\ruff_format.txt"
+    exit 1
+}
+Write-Host "      ✓ 格式统一"
+
 function Invoke-Audit($name, $outfile, [scriptblock]$cmd) {
     Write-Host "$name ..."
     & $cmd 2>&1 | Out-File -Encoding utf8 $outfile
