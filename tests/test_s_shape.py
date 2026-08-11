@@ -5,8 +5,8 @@
 """
 import pandas as pd
 
-from factors import s_shape as ss
-from screening import score_candidates as sc
+from custos.core.factors import s_shape as ss
+from custos.pipeline.screening import score_candidates as sc
 
 
 def make_df(closes, vols=None, opens=None, highs=None, lows=None):

@@ -24,7 +24,7 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/pipeline/market_timing", "src/pipeline/close_review"):
+for _p in ("src", "src/custos/pipeline/market_timing", "src/custos/pipeline/close_review"):
     sys.path.insert(0, str(ROOT / _p))
 
 
@@ -32,7 +32,7 @@ for _p in ("src", "src/pipeline/market_timing", "src/pipeline/close_review"):
 
 @pytest.fixture()
 def prr_env(tmp_path, monkeypatch):
-    import portfolio_review_report as prr
+    from custos.pipeline.holdings import portfolio_review_report as prr
     (tmp_path / "holdings").mkdir()
     plans = tmp_path / "plans"
     plans.mkdir()
@@ -86,7 +86,7 @@ class TestPortfolioReviewClassify:
     """`classify` 是无 b1 状态时的**回退风控判据** —— 它决定「止损/减仓/持有」。"""
 
     def _c(self, **kw):
-        import portfolio_review_report as prr
+        from custos.pipeline.holdings import portfolio_review_report as prr
         return prr.classify(kw)
 
     def test_downtrend_and_breakdown_is_stop_loss(self):
@@ -148,7 +148,7 @@ class TestExecutionReviewStatuses:
 
     @pytest.fixture(autouse=True)
     def env(self, tmp_path, monkeypatch):
-        import execution_review as er
+        from custos.pipeline.close_review import execution_review as er
         (tmp_path / "decisions").mkdir()
         (tmp_path / "trades").mkdir()
         log = tmp_path / "logs"

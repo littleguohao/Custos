@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-import compass_amv
+from custos.datasource.local_tdx import compass_amv
 
 HEADER = b"\x00" * 16
 GAP = b"\x00" * 28  # 全零记录，用于打断两段序列

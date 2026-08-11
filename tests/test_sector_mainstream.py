@@ -2,7 +2,7 @@
 """sector_mainstream(板块族聚合:主流 vs 分散)测试。"""
 import json
 
-from factors import sector_mainstream as sm
+from custos.core.factors import sector_mainstream as sm
 
 
 def _members(tmp_path):
@@ -18,7 +18,7 @@ def _trade(code, ret):
 
 
 def test_load_code2secs_inverts_and_excludes_region(tmp_path, monkeypatch):
-    import tq_sector
+    from custos.datasource.local_tdx import tq_sector
     monkeypatch.setattr(tq_sector, "load_sector_names",
                         lambda path=None: {"880222": {"name": "江西板块", "tdx_type": "3"},
                                            "880201": {"name": "白酒", "tdx_type": "4"},
@@ -48,7 +48,7 @@ def test_aggregate_unclassified_excluded_from_off():
 
 
 def test_invert_members_norm_and_exclude():
-    from factors import sector_mainstream as sm
+    from custos.core.factors import sector_mainstream as sm
     members = {"880201.SH": ["600000", "600001"], "880300.SH": ["600000"], "地区X.SH": ["600000"]}
     name_map = {"880201": {"tdx_type": "2", "name": "锂电"}, "880300": {"tdx_type": "4", "name": "细分"},
                 "地区X": {"tdx_type": "3", "name": "江西板块"}}   # 3=地区,应剔除
@@ -58,7 +58,7 @@ def test_invert_members_norm_and_exclude():
 
 
 def test_mainline_fingerprint_density():
-    from factors import sector_mainstream as sm
+    from custos.core.factors import sector_mainstream as sm
     # 板块A规模10(候选4→密度0.4);板块B规模100(候选5→密度0.05);板块C规模3(候选3→过滤:太小)
     members = {"A": ["A%d" % i for i in range(10)], "B": ["B%d" % i for i in range(100)],
                "C": ["C0", "C1", "C2"]}

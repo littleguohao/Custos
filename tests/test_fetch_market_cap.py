@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 
-import fetch_market_cap as mc
+from custos.datasource.local_tdx import fetch_market_cap as mc
 
 
 def _row(code="600000", shares=1e10, close=10.0, name="测试股", free=None):

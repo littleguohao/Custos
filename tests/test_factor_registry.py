@@ -19,10 +19,10 @@ import pandas as pd
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/core/factors", "src/pipeline/screening"):
+for _p in ("src", "src/custos/core/factors", "src/custos/pipeline/screening"):
     sys.path.insert(0, str(ROOT / _p))
 
-import factors  # noqa: E402
+from custos.core import factors  # noqa: E402
 
 #: 从 `backtest_factors.SCORERS` 抽出的 9 个自包含 scorer
 EXTRACTED = ["baseline", "alpha101", "alpha_pvcorr", "low_vol", "momentum",
@@ -110,7 +110,7 @@ class TestNotForLive:
                 "pipeline/screening/candidate_table.py", "pipeline/screening/signal_labels.py"]
         bad = []
         for rel in live:
-            s = (ROOT / "src" / rel).read_text(encoding="utf-8")
+            s = (ROOT / "src" / "custos" / rel).read_text(encoding="utf-8")
             for fid, e in reg.items():
                 imported = f"import {fid}" in s or f"from {fid} import" in s
                 if not imported:
@@ -157,14 +157,14 @@ class TestNumericEquivalence:
 
     @pytest.mark.parametrize("fid", [f for f in EXTRACTED if f != "mcap"])
     def test_matches_scorers_entry(self, fid):
-        import backtest_factors as BF
+        from custos.research import backtest_factors as BF
         df = _bars()
         assert fid in BF.SCORERS, f"{fid} 不在 SCORERS 里"
         assert factors.registry()[fid]["score"](df, "600000") == BF.SCORERS[fid](df, "600000")
 
     def test_scorers_keys_unchanged(self):
         """SCORERS 的键集合不能因为重构而变 —— CLI `--scorer` 参数依赖它。"""
-        import backtest_factors as BF
+        from custos.research import backtest_factors as BF
         for fid in EXTRACTED:
             assert fid in BF.SCORERS
 
@@ -172,19 +172,19 @@ class TestNumericEquivalence:
 class TestSharedMutableStateImportRule:
     """持有**可变模块级状态**的模块必须包限定导入。
 
-    ⚠️ 2026-08-06 当场发作：`src` 与 `src/core/factors` 都在 sys.path 上 ⇒
+    ⚠️ 2026-08-06 当场发作：`src` 与 `src/custos/core/factors` 都在 sys.path 上 ⇒
     同一文件有两条可导路径（`_shares` / `factors._shares`），Python 建**两个模块对象**，
     而 `_shares` 持有可变缓存 `_SHARE_IDX` ⇒ 测试打桩一个、生产读另一个。
     """
 
     def test_shares_imported_package_qualified(self):
         for rel in ("core/factors/mcap.py", "research/backtest_factors.py"):
-            s = (ROOT / "src" / rel).read_text(encoding="utf-8")
-            assert "from factors._shares import" in s, f"{rel} 应包限定导入 _shares"
+            s = (ROOT / "src" / "custos" / rel).read_text(encoding="utf-8")
+            assert "from custos.core.factors._shares import" in s, f"{rel} 应包限定导入 _shares"
             assert "\nfrom _shares import" not in s, f"{rel} 有扁平导入 _shares（会产生两份状态）"
 
     def test_rule_documented(self):
-        s = (ROOT / "src" / "core" / "factors" / "_shares.py").read_text(encoding="utf-8")
+        s = (ROOT / "src" / "custos" / "core" / "factors" / "_shares.py").read_text(encoding="utf-8")
         assert "包限定" in s and "两个模块对象" in s
 
 
@@ -207,17 +207,17 @@ class TestInlineFactorsExtracted:
     @pytest.mark.parametrize("fid", INLINE_EXTRACTED)
     def test_not_in_scorers(self, fid):
         """它们是 pattern/state，不是横截面 scorer —— 不该混进 SCORERS。"""
-        import backtest_factors as BF
+        from custos.research import backtest_factors as BF
         assert fid not in BF.SCORERS
 
     @pytest.mark.parametrize("fid", INLINE_EXTRACTED)
     def test_module_file_exists(self, fid):
-        assert (ROOT / "src" / "core" / "factors" / f"{fid}.py").exists()
+        assert (ROOT / "src" / "custos" / "core" / "factors" / f"{fid}.py").exists()
 
     def test_enrich_no_longer_defines_them(self):
         """`enrich_candidates` 里不许再有本地定义 —— 那就成了第二份。"""
         import re
-        s = (ROOT / "src" / "pipeline" / "screening" / "enrich_candidates.py").read_text(encoding="utf-8")
+        s = (ROOT / "src" / "custos" / "pipeline" / "screening" / "enrich_candidates.py").read_text(encoding="utf-8")
         for fn in ("detect_wave_type", "compute_perfect_b1_fit",
                    "compute_b1_pullback_fit", "detect_distribution"):
             assert not re.search(rf"^def {fn}\(", s, re.M), f"enrich 又定义了本地 {fn}"
@@ -226,7 +226,7 @@ class TestInlineFactorsExtracted:
     def test_constants_moved_with_their_factor(self):
         """常量必须跟着因子走，`enrich_candidates` 里不该再有它们的定义。"""
         import re
-        s = (ROOT / "src" / "pipeline" / "screening" / "enrich_candidates.py").read_text(encoding="utf-8")
+        s = (ROOT / "src" / "custos" / "pipeline" / "screening" / "enrich_candidates.py").read_text(encoding="utf-8")
         for pfx in ("WAVE_", "FIT_", "B1PB_", "DIST_"):
             defs = re.findall(rf"^({pfx}[A-Z0-9_]+) *=", s, re.M)
             assert not defs, f"{pfx}* 常量应随因子迁走，enrich 里还剩：{defs}"
@@ -237,7 +237,7 @@ class TestInlineFactorsExtracted:
         pairs = [("wave_type", "WAVE_"), ("perfect_b1_fit", "FIT_"),
                  ("b1_pullback_fit", "B1PB_"), ("distribution", "DIST_")]
         for fid, pfx in pairs:
-            s = (ROOT / "src" / "core" / "factors" / f"{fid}.py").read_text(encoding="utf-8")
+            s = (ROOT / "src" / "custos" / "core" / "factors" / f"{fid}.py").read_text(encoding="utf-8")
             assert re.search(rf"^{pfx}[A-Z0-9_]+ *=", s, re.M), f"{fid} 缺 {pfx}* 常量"
 
 
@@ -260,7 +260,7 @@ class TestKnownConflicts:
 
     def test_conflict_documented_in_module(self):
         """矛盾也要写在因子模块自己的元数据里 —— 读那个文件的人才看得到。"""
-        s = (ROOT / "src" / "core" / "factors" / "s_shape.py").read_text(encoding="utf-8")
+        s = (ROOT / "src" / "custos" / "core" / "factors" / "s_shape.py").read_text(encoding="utf-8")
         assert "已知矛盾" in s and "score_candidates" in s
 
 
@@ -291,10 +291,10 @@ class TestStageMatchesReality:
 
     def _referenced(self) -> set[str]:
         import re
-        srcs = [(ROOT / "src" / f).read_text(encoding="utf-8") for f in self.LIVE_FILES]
+        srcs = [(ROOT / "src" / "custos" / f).read_text(encoding="utf-8") for f in self.LIVE_FILES]
         out = set()
         for fid in factors.registry():
-            if any(re.search(rf"\bfrom {fid} import|\bimport {fid}\b", s) for s in srcs):
+            if any(re.search(rf"\bfrom [\w.]*\.{fid} import|\bfrom {fid} import|\bimport [\w.]*\b{fid}\b", s) for s in srcs):
                 out.add(fid)
         return out
 

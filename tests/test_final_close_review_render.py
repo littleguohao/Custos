@@ -15,10 +15,10 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/pipeline/close_review"):
+for _p in ("src", "src/custos/pipeline/close_review"):
     sys.path.insert(0, str(ROOT / _p))
 
-from close_review import final_close_review as fcr  # noqa: E402
+from custos.pipeline.close_review import final_close_review as fcr  # noqa: E402
 
 
 class TestIndexName:

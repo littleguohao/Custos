@@ -19,10 +19,10 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/pipeline/market_timing"):
+for _p in ("src", "src/custos/pipeline/market_timing"):
     sys.path.insert(0, str(ROOT / _p))
 
-import theme_tracker_report as ttr  # noqa: E402
+from custos.pipeline.market_timing import theme_tracker_report as ttr  # noqa: E402
 
 
 def _an(trend=None, pos20=None, j=None, j_prev=None, macd_dir=None, weekly_hist=None,

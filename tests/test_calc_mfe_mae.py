@@ -10,7 +10,7 @@ from __future__ import annotations
 import csv
 import io
 
-import calc_mfe_mae as cm
+from custos.pipeline.close_review import calc_mfe_mae as cm
 
 
 def _t(day, side, qty, price=10.0, code="600000", name="测试股"):

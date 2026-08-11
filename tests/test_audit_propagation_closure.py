@@ -23,7 +23,7 @@ class TestCompassQualityReachesLedger:
         return [{"date": "2026-08-03", "change_pct": 4.5}]
 
     def test_unverified_is_written_as_unverified(self, tmp_path):
-        import sync_compass_amv as sca
+        from custos.datasource import sync_compass_amv as sca
         led = tmp_path / "0amv_observations.jsonl"
         added, _ = sca.merge_ledger(self._records(), led, quality="unverified")
         assert added == 1
@@ -31,14 +31,14 @@ class TestCompassQualityReachesLedger:
         assert rec["quality"] == "unverified", "fallback 选链不得冒充真值"
 
     def test_verified_still_confirmed(self, tmp_path):
-        import sync_compass_amv as sca
+        from custos.datasource import sync_compass_amv as sca
         led = tmp_path / "0amv_observations.jsonl"
         sca.merge_ledger(self._records(), led, quality="confirmed")
         rec = json.loads(led.read_text(encoding="utf-8").strip())
         assert rec["quality"] == "confirmed"
 
     def test_default_remains_confirmed_for_back_compat(self, tmp_path):
-        import sync_compass_amv as sca
+        from custos.datasource import sync_compass_amv as sca
         led = tmp_path / "0amv_observations.jsonl"
         sca.merge_ledger(self._records(), led)
         assert json.loads(led.read_text(encoding="utf-8").strip())["quality"] == "confirmed"
@@ -46,7 +46,7 @@ class TestCompassQualityReachesLedger:
     def test_main_downgrades_and_skips_autofill_when_unverified(self, tmp_path, monkeypatch,
                                                                capsys):
         """端到端:parse_amv_daily 报 unverified → 台账降级 + 不写 amv_0day。"""
-        import sync_compass_amv as sca
+        from custos.datasource import sync_compass_amv as sca
 
         led = tmp_path / "led.jsonl"
         market = tmp_path / "market"
@@ -73,7 +73,7 @@ class TestCompassQualityReachesLedger:
         assert "未经真值校验" in out.out
 
     def test_main_autofills_when_verified(self, tmp_path, monkeypatch):
-        import sync_compass_amv as sca
+        from custos.datasource import sync_compass_amv as sca
 
         led = tmp_path / "led.jsonl"
         market = tmp_path / "market"
@@ -99,7 +99,7 @@ class TestConceptTagStalenessReachesConsumer:
     """C6: 标签陈旧必须能被消费方看到,不能只落在文件里。"""
 
     def test_load_tags_meta_reports_staleness(self, tmp_path, monkeypatch):
-        from local_tdx import concept_tags
+        from custos.datasource.local_tdx import concept_tags
         out = tmp_path / "tags.json"
         out.write_text(json.dumps({"date": "2026-07-27", "stale": True,
                                    "requested_date": "2026-08-03",
@@ -111,7 +111,7 @@ class TestConceptTagStalenessReachesConsumer:
         assert meta["date"] == "2026-07-27" and meta["requested_date"] == "2026-08-03"
 
     def test_fresh_tags_not_marked_stale(self, tmp_path, monkeypatch):
-        from local_tdx import concept_tags
+        from custos.datasource.local_tdx import concept_tags
         out = tmp_path / "tags.json"
         out.write_text(json.dumps({"date": "2026-08-03", "tags": {"600000": ["银行"]}}),
                        encoding="utf-8")
@@ -120,7 +120,7 @@ class TestConceptTagStalenessReachesConsumer:
         assert meta["available"] is True and meta["stale"] is False
 
     def test_missing_file_is_distinguishable_from_stale(self, tmp_path, monkeypatch):
-        from local_tdx import concept_tags
+        from custos.datasource.local_tdx import concept_tags
         monkeypatch.setattr(concept_tags, "OUT_PATH", tmp_path / "nope.json")
         tags, meta = concept_tags.load_tags_meta()
         assert tags == {} and meta["available"] is False
@@ -128,7 +128,7 @@ class TestConceptTagStalenessReachesConsumer:
 
     def test_load_tags_still_returns_plain_dict(self, tmp_path, monkeypatch):
         """向后兼容:老调用方拿到的仍是 {code: [tags]}。"""
-        from local_tdx import concept_tags
+        from custos.datasource.local_tdx import concept_tags
         out = tmp_path / "tags.json"
         out.write_text(json.dumps({"date": "2026-08-03", "tags": {"600000": ["银行"]}}),
                        encoding="utf-8")
@@ -137,7 +137,7 @@ class TestConceptTagStalenessReachesConsumer:
 
     def test_enrich_warns_on_stale_tags(self, monkeypatch, capsys):
         """消费侧:陈旧标签必须产生告警,但标签本身仍要被使用(退化慢,可用性优先)。"""
-        import screening.enrich_candidates as ec
+        from custos.pipeline.screening import enrich_candidates as ec
 
         monkeypatch.setattr(ec.concept_tags, "load_tags",
                             lambda: {"600000": ["银行"]})
@@ -157,7 +157,7 @@ class TestConceptTagStalenessReachesConsumer:
         assert ok is True
 
     def test_enrich_silent_when_tags_fresh(self, monkeypatch, capsys):
-        import screening.enrich_candidates as ec
+        from custos.pipeline.screening import enrich_candidates as ec
 
         monkeypatch.setattr(ec.concept_tags, "load_tags", lambda: {"600000": ["银行"]})
         monkeypatch.setattr(ec.concept_tags, "load_tags_meta",
@@ -175,7 +175,7 @@ class TestReadmeContractMatchesCode:
     """D4 的文档面:README 不得再指向没有生产者的字段。"""
 
     def test_readme_points_at_real_confirmation_file(self):
-        from paths import BASE
+        from custos.core.paths import BASE
         readme = (BASE / "README.md").read_text(encoding="utf-8")
         assert "position_confirmations.json` — 交易日无交易确认标记" in readme
         assert "`_import_meta.json` — 交易日无交易确认标记" not in readme, \

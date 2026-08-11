@@ -17,10 +17,10 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-import analyze_trades as at
-import run_1700
-from close_review import final_close_review as fcr
-from close_review import weekly_review as wr
+from custos.research import analyze_trades as at
+from custos.pipeline import run_1700
+from custos.pipeline.close_review import final_close_review as fcr
+from custos.pipeline.close_review import weekly_review as wr
 
 WEEK_DAYS = ["2026-07-13", "2026-07-14", "2026-07-15", "2026-07-16", "2026-07-17"]
 CALENDAR = {"official_years": {"2026": {"closed_ranges": []}}}

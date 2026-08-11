@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 from unittest import mock
 
-import online_quotes as oq
+from custos.datasource.collect import online_quotes as oq
 
 
 def _resp(payload):

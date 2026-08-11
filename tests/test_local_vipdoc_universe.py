@@ -4,9 +4,9 @@ import sys
 from pathlib import Path
 
 TESTS_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(TESTS_DIR.parent / "src" / "datasource" / "local_tdx"))
+sys.path.insert(0, str(TESTS_DIR.parent / "src" / "custos" / "datasource" / "local_tdx"))
 
-import local_tdx_data as ltd
+from custos.datasource.local_tdx import local_tdx_data as ltd
 
 
 def _make(tmp_path, market, fname):

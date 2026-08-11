@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 from unittest import mock
 
-import collect_holding_quotes as chq
+from custos.datasource.collect import collect_holding_quotes as chq
 
 TARGET = "2026-07-19"
 
@@ -449,6 +449,6 @@ class BreadthCollectionTests(unittest.TestCase):
                                                              last_name=[0, 1])
             out = chq._collect_breadth()
         self.assertEqual(out["880001"]["date"], "")
-        import contracts as C
+        from custos.core import contracts as C
         self.assertIn("raw_only", C.SECTION_NOT_FRESH,
                       "空 date ⇒ raw_only ⇒ 必须被判不新鲜，这条链不能断")

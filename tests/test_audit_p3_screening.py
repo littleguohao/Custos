@@ -20,12 +20,12 @@ import pandas as pd
 import pytest
 
 TESTS_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(TESTS_DIR.parent / "src" / "pipeline" / "screening"))
+sys.path.insert(0, str(TESTS_DIR.parent / "src" / "custos" / "pipeline" / "screening"))
 
-import enrich_candidates as ec
-import formula_screen as fs
-import manual_pools
-import score_candidates as sc
+from custos.pipeline.screening import enrich_candidates as ec
+from custos.pipeline.screening import formula_screen as fs
+from custos.pipeline.screening import manual_pools
+from custos.pipeline.screening import score_candidates as sc
 
 
 # ---------------- 公共构件 ----------------

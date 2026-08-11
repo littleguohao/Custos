@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""审计【建议优化】批次 —— src/pipeline/screening 域回归测试。
+"""审计【建议优化】批次 —— src/custos/pipeline/screening 域回归测试。
 
 覆盖：边界与数值防御（NaN 绕过 J 门槛、未知模式名下标、天量阈值自旁路、
 板块 2 字前缀误配、list_days 被 tail 截断、窗内新上市污染、summarize 分项键
@@ -16,13 +16,13 @@ import math
 import pandas as pd
 import pytest
 
-from research import backtest_factors as bt
-from screening import candidate_table as ct
-from screening import enrich_candidates as ec
-from research import launch_point_study as lp
-from research import run_bear_to_long_study as bl
-from screening import score_candidates as sc
-from factors import s_shape as ss
+from custos.research import backtest_factors as bt
+from custos.pipeline.screening import candidate_table as ct
+from custos.pipeline.screening import enrich_candidates as ec
+from custos.research import launch_point_study as lp
+from custos.research import run_bear_to_long_study as bl
+from custos.pipeline.screening import score_candidates as sc
+from custos.core.factors import s_shape as ss
 
 
 # ---------------------------------------------------------------- helpers
@@ -355,8 +355,8 @@ def test_build_stock_theme_map_codes_no_tag_hit_keeps_concept_path(monkeypatch):
 
 def test_dks_single_definition_matches_zhixing_state():
     """DKS 曾有两份实现（technical_monitor.zhixing_state 与 perfect_b1_fit 内联）。"""
-    from indicators import dks_series
-    from technical_monitor import zhixing_state
+    from custos.core.indicators import dks_series
+    from custos.pipeline.market_timing.technical_monitor import zhixing_state
     df = _wavy(200)
     zx = zhixing_state(df)
     # 共享实现现在直取 `indicators.dks_series` —— 原先经 `enrich_candidates` 顶层
@@ -367,7 +367,7 @@ def test_dks_single_definition_matches_zhixing_state():
 
 
 def test_perfect_b1_fit_dks_uses_shared_series():
-    from indicators import dks_series
+    from custos.core.indicators import dks_series
     df = _wavy(200)
     fit = ec.compute_perfect_b1_fit(df, daily_j=5.0, zx={"available": False},
                                     pullback={"available": False})
@@ -377,7 +377,7 @@ def test_perfect_b1_fit_dks_uses_shared_series():
 
 def test_repair_signals_kdj_injection_identical():
     """复用已算好的 KDJ 不得改变结果（去重只省时间）。"""
-    from technical_monitor import kdj as _kdj
+    from custos.pipeline.market_timing.technical_monitor import kdj as _kdj
     df = _wavy(160)
     idx = _wavy(160)
     a = ec.check_repair_signals(df, idx)
@@ -401,7 +401,7 @@ def test_perfect_b1_fit_macd_injection_identical():
 
 def test_compute_metrics_computes_daily_kdj_once(monkeypatch):
     """日线 KDJ 曾被重复算：compute_metrics + check_repair_signals 各一次。"""
-    from technical_monitor import kdj as _kdj
+    from custos.pipeline.market_timing.technical_monitor import kdj as _kdj
     calls = []
 
     def counting(df, *a, **k):

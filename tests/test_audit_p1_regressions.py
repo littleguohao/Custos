@@ -13,9 +13,9 @@ from datetime import date, datetime
 import pandas as pd
 import pytest
 
-import code_utils
-import runtime_guards as rg
-from paths import CN_TZ, cn_now, cn_today
+from custos.core import code_utils
+from custos.core import runtime_guards as rg
+from custos.core.paths import CN_TZ, cn_now, cn_today
 
 # 三套并行词表的全部取值(amv_state / amv_zone / README 措辞),归一后必须落到同一档
 BEAR_WORDS = ["空头", "空头触发", "0AMV空头", "空头区间"]
@@ -64,16 +64,16 @@ class TestRegimeNormalizationIsShared:
     @pytest.mark.parametrize("word", BEAR_WORDS)
     def test_score_candidates_caps_on_every_bear_word(self, word):
         """空头封顶 B 必须对 amv_zone 的"空头触发"同样生效。"""
-        from screening import score_candidates as sc
+        from custos.pipeline.screening import score_candidates as sc
         assert sc.market_permission(word) == "观察"
 
     @pytest.mark.parametrize("word", LONG_WORDS)
     def test_score_candidates_allows_on_every_long_word(self, word):
-        from screening import score_candidates as sc
+        from custos.pipeline.screening import score_candidates as sc
         assert sc.market_permission(word) == "允许"
 
     def test_unknown_regime_is_not_permitted(self):
-        from screening import score_candidates as sc
+        from custos.pipeline.screening import score_candidates as sc
         assert sc.market_permission("") == "仅低吸"
 
     @pytest.mark.parametrize("word", BEAR_WORDS)
@@ -124,7 +124,7 @@ class TestPriceLimitInferenceGetsCode:
         return pd.DataFrame(rows)
 
     def test_chinext_not_demoted_to_five_percent(self):
-        from market_timing import technical_monitor as tm
+        from custos.pipeline.market_timing import technical_monitor as tm
         assert tm._infer_price_limit("300750", self._quiet_df()) == 20
         assert tm._infer_price_limit("301029", self._quiet_df()) == 20
         assert tm._infer_price_limit("688111", self._quiet_df()) == 20
@@ -136,11 +136,11 @@ class TestPriceLimitInferenceGetsCode:
 
     def test_missing_code_is_what_broke_it(self):
         """留证:不传 code 时安静窗口会被判成 5%,这正是 analyze 旧行为。"""
-        from market_timing import technical_monitor as tm
+        from custos.pipeline.market_timing import technical_monitor as tm
         assert tm._infer_price_limit("", self._quiet_df()) == 5
 
     def test_analyze_forwards_code_to_price_volume(self):
-        from market_timing import technical_monitor as tm
+        from custos.pipeline.market_timing import technical_monitor as tm
         df = self._quiet_df(n=60)
         got = tm.analyze(df, "300750")
         assert got["available"] is True
@@ -148,7 +148,7 @@ class TestPriceLimitInferenceGetsCode:
 
     def test_analyze_without_code_still_runs(self):
         """向后兼容:老调用方不传 code 不能崩。"""
-        from market_timing import technical_monitor as tm
+        from custos.pipeline.market_timing import technical_monitor as tm
         assert tm.analyze(self._quiet_df(n=60))["available"] is True
 
 
@@ -195,14 +195,14 @@ class TestQuoteDateVerification:
 
     def test_snapshot_sources_are_marked_unverified(self):
         import inspect
-        from collect_holding_quotes import _tq_snapshot_quote, _eastmoney_bj_quote
+        from custos.datasource.collect.collect_holding_quotes import _tq_snapshot_quote, _eastmoney_bj_quote
         for fn in (_tq_snapshot_quote, _eastmoney_bj_quote):
             src = inspect.getsource(fn)
             assert '"date_verified": False' in src, f"{fn.__name__} 必须标记日期未自证"
 
     def test_bars_source_is_marked_verified(self, monkeypatch):
         """行为断言:reader 源的日期来自 K 线索引,应标记为已自证。"""
-        import collect_holding_quotes as chq
+        from custos.datasource.collect import collect_holding_quotes as chq
 
         idx = pd.DatetimeIndex([pd.Timestamp("2026-08-02"), pd.Timestamp("2026-08-03")])
         df = pd.DataFrame({"open": [10.0, 10.1], "high": [10.2, 10.3],
@@ -248,7 +248,7 @@ class TestOhlcvFreshness:
         })
 
     def test_stale_local_data_is_flagged(self, monkeypatch):
-        from local_tdx import local_tdx_data as ltd
+        from custos.datasource.local_tdx import local_tdx_data as ltd
         monkeypatch.setattr(ltd, "read_vipdoc_daily", lambda c: self._df("2026-07-30"))
         monkeypatch.setattr(ltd, "get_online_bars", lambda c, offset=0: pd.DataFrame())
         df = ltd.get_ohlcv_table("600000", count=30, expect_last_date="2026-08-03", adjust="none")
@@ -257,14 +257,14 @@ class TestOhlcvFreshness:
         assert df.attrs["expected"] == "2026-08-03"
 
     def test_fresh_local_data_not_flagged(self, monkeypatch):
-        from local_tdx import local_tdx_data as ltd
+        from custos.datasource.local_tdx import local_tdx_data as ltd
         monkeypatch.setattr(ltd, "read_vipdoc_daily", lambda c: self._df("2026-08-03"))
         df = ltd.get_ohlcv_table("600000", count=30, expect_last_date="2026-08-03", adjust="none")
         assert df.attrs["stale"] is False
 
     def test_online_refresh_wins_over_stale_local(self, monkeypatch):
         """本地陈旧时应尝试在线源,拿到更新的就用它。"""
-        from local_tdx import local_tdx_data as ltd
+        from custos.datasource.local_tdx import local_tdx_data as ltd
         monkeypatch.setattr(ltd, "read_vipdoc_daily", lambda c: self._df("2026-07-30"))
         monkeypatch.setattr(ltd, "get_online_bars",
                             lambda c, offset=0: self._df("2026-08-03"))
@@ -273,7 +273,7 @@ class TestOhlcvFreshness:
 
     def test_without_expect_date_behaviour_unchanged(self):
         """不传 expect_last_date 时不做校验,老调用方行为不变。"""
-        from local_tdx import local_tdx_data as ltd
+        from custos.datasource.local_tdx import local_tdx_data as ltd
         import unittest.mock as m
         with m.patch.object(ltd, "read_vipdoc_daily", lambda c: self._df("2026-07-30")):
             df = ltd.get_ohlcv_table("600000", count=30, adjust="none")
@@ -285,14 +285,14 @@ class TestChiefDecisionFailsClosed:
 
     def test_gate_is_mandatory_input(self):
         import inspect
-        from market_timing import chief_decision_report as cdr
+        from custos.pipeline.market_timing import chief_decision_report as cdr
         src = inspect.getsource(cdr.main)
         assert "mandatory runtime_gate missing" in src
 
     def test_allow_increase_uses_truthiness_not_is_false(self):
         """None(字段缺失)必须与 False 同等对待。"""
         import inspect
-        from market_timing import chief_decision_report as cdr
+        from custos.pipeline.market_timing import chief_decision_report as cdr
         raw = inspect.getsource(cdr.main)
         code_only = _strip_comments_and_strings(raw)
         # `is False` 只在注释里出现(说明历史缺陷),真实代码里必须没有

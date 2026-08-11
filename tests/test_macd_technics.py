@@ -5,9 +5,9 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from screening import enrich_candidates as ec
-from screening import score_candidates as sc
-from screening import candidate_table as ct
+from custos.pipeline.screening import enrich_candidates as ec
+from custos.pipeline.screening import score_candidates as sc
+from custos.pipeline.screening import candidate_table as ct
 from test_enrich_b1cz import make_df
 
 

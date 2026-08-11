@@ -6,7 +6,7 @@
 import pandas as pd
 import pytest
 
-from screening import enrich_candidates as ec
+from custos.pipeline.screening import enrich_candidates as ec
 
 
 def make_df(closes, vols=None, highs=None, lows=None):
@@ -370,7 +370,7 @@ class TestReversalChangeSymmetric:
     """
 
     def test_bounds_are_asymmetric(self):
-        import enrich_candidates as ec
+        from custos.pipeline.screening import enrich_candidates as ec
         assert ec.REVERSAL_CHANGE_MIN_PCT == -2.0
         assert ec.REVERSAL_CHANGE_MAX_PCT == 2.0
 
@@ -401,7 +401,7 @@ class TestReversalChangeSymmetric:
         called = {_ast.unparse(n.func) for n in _ast.walk(tree) if isinstance(n, _ast.Call)}
         assert "change_in_range" in called, \
             f"必须调用 b1_thresholds.change_in_range，实际调用 {sorted(called)[:12]}"
-        assert ec.change_in_range is __import__("b1_thresholds").change_in_range, \
+        assert ec.change_in_range is __import__("custos.core.b1_thresholds", fromlist=["change_in_range"]).change_in_range, \
             "必须是同一个函数对象，不能本地再实现一份"
 
 
@@ -482,7 +482,7 @@ class TestReversalKBoundaryBehavior:
         无效，必须 reload。这条同时钉住「可配置」与「配置的时机」：
         改了环境变量却不 reload 就以为改了，是个真实的踩坑姿势。
         """
-        import b1_thresholds as bt
+        from custos.core import b1_thresholds as bt
 
         assert bt.REVERSAL_CHANGE_MAX_PCT == 2.0, "默认必须对称 ±2%"
 
@@ -567,7 +567,7 @@ class TestReversalKThresholdSingleSource:
         import importlib
         import os
 
-        from factors import reversal_quality as rq
+        from custos.core.factors import reversal_quality as rq
 
         assert rq.REVK_CHG_PCT == 2.0, "默认值必须与 live 一致（对称 ±2%）"
         os.environ["B1_REVK_CHG_PCT"] = "3.0"
@@ -637,7 +637,7 @@ class TestReversalKThresholdSingleSource:
         """
         mods = reversal_thresholds()
         thr = mods["b1_thresholds"]
-        import backtest_factors as bf
+        from custos.research import backtest_factors as bf
         assert bf.REVK_VOL_RATIO == thr.VOL_RATIO_MAX
         assert bf.REVK_VOL_PCTILE * 100 == thr.VOL_PCTILE_MAX, "单位：研究侧小数 vs live 百分数"
         assert bf.REVK_CHG_PCT == thr.REVERSAL_CHANGE_PCT
@@ -655,8 +655,8 @@ class TestReversalKThresholdSingleSource:
         """
         import importlib
 
-        import b1_dual_factor
-        import b2_surge_factor
+        from custos.core.factors import b1_dual_factor
+        from custos.core.factors import b2_surge_factor
         mods = reversal_thresholds()
         thr = mods["b1_thresholds"]
         d1 = importlib.reload(b1_dual_factor)

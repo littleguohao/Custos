@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 
-import fetch_pit_financials as fp
+from custos.datasource.local_tdx import fetch_pit_financials as fp
 
 
 def _row(code="600000", report="2024-03-31", notice="2024-04-29", stype="A股", **kw):
@@ -397,7 +397,7 @@ class TestVerifyLedger:
         err = capsys.readouterr()
         assert "2024-06-30" in err.out and "补拉命令" in err.err
         # 补拉命令必须可直接执行:从仓库根跑,路径要含目录前缀
-        assert "src/datasource/local_tdx/fetch_pit_financials.py" in err.err
+        assert "src/custos/datasource/local_tdx/fetch_pit_financials.py" in err.err
 
     def test_cli_verify_exit_0_when_clean(self, tmp_path, capsys):
         p = tmp_path / "pit.jsonl"

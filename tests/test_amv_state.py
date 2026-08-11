@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-import amv_state
+from custos.pipeline.market_timing import amv_state
 
 
 @pytest.fixture()

@@ -5,8 +5,8 @@
 """
 import pandas as pd
 
-from screening import enrich_candidates as ec
-from screening import score_candidates as sc
+from custos.pipeline.screening import enrich_candidates as ec
+from custos.pipeline.screening import score_candidates as sc
 
 
 def make_df(closes, vols=None, opens=None, highs=None, lows=None):

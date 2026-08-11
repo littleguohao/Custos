@@ -9,7 +9,7 @@ from unittest import mock
 
 import pytest
 
-import tq_http
+from custos.datasource.local_tdx import tq_http
 
 
 def _body(obj: dict) -> bytes:

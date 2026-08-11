@@ -16,8 +16,8 @@ from datetime import timedelta
 
 import pytest
 
-import stock_names as sn
-from paths import cn_today
+from custos.datasource.local_tdx import stock_names as sn
+from custos.core.paths import cn_today
 
 # conftest 有 autouse fixture 把网络层函数替换成"发请求即断言失败"的哨兵。本文件要测
 # 这些函数本身，所以在模块导入期（fixture 生效之前）先抓住真实实现。
@@ -465,7 +465,7 @@ class TestClistCoverageGuard:
         assert diag["name_map_source"] == "tq_local"
 
 
-import local_tdx_data  # noqa: E402
+from custos.datasource.local_tdx import local_tdx_data  # noqa: E402
 
 
 class TestGetStockListAShareFilter:

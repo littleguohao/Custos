@@ -22,11 +22,11 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-import compass_amv
-import concept_tags
-import fetch_market_cap as mc
-import fetch_pit_financials as pit
-import local_tdx_data as ltd
+from custos.datasource.local_tdx import compass_amv
+from custos.datasource.local_tdx import concept_tags
+from custos.datasource.local_tdx import fetch_market_cap as mc
+from custos.datasource.local_tdx import fetch_pit_financials as pit
+from custos.datasource.local_tdx import local_tdx_data as ltd
 
 
 # ===================== C3 get_snapshot 缺字段回落 0.0 =====================

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Tests for B1/CZ scoring rules in screening.score_candidates."""
-from screening import score_candidates as sc
+from custos.pipeline.screening import score_candidates as sc
 
 
 def _cand(**extra):

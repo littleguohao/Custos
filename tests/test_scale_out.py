@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import backtest_factors as bt
+from custos.research import backtest_factors as bt
 
 
 def _mk(rows, entry_idx=39, entry_low_frac=0.965):
@@ -201,8 +201,8 @@ class TestCliWiring:
     def test_scale_out_flag_exists(self):
         import subprocess
         import sys
-        from paths import BASE
-        r = subprocess.run([sys.executable, str(BASE / "src" / "research"
+        from custos.core.paths import BASE
+        r = subprocess.run([sys.executable, str(BASE / "src" / "custos" / "research"
                                                 / "backtest_factors.py"), "--help"],
                            capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=120)

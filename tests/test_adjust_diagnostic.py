@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from research.adjust_diagnostic import SPLIT_RATIOS, _risk_frac_stats, detect_gaps
+from custos.research.adjust_diagnostic import SPLIT_RATIOS, _risk_frac_stats, detect_gaps
 
 
 def _mk(rows):

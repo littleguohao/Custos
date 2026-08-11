@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import unittest
 
-import backtest_0amv_bear_regime as bt
+from custos.research import backtest_0amv_bear_regime as bt
 
 
 def _amv(pairs):

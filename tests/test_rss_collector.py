@@ -15,10 +15,10 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/datasource/news"):
+for _p in ("src", "src/custos/datasource/news"):
     sys.path.insert(0, str(ROOT / _p))
 
-from news import rss_collector as rc  # noqa: E402
+from custos.datasource.news import rss_collector as rc  # noqa: E402
 
 SRC = {"id": "s", "name": "源", "tier": "S", "category": "media",
        "url": "https://x.com/feed"}

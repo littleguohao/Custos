@@ -7,7 +7,7 @@ import re
 import unittest
 from datetime import datetime, timezone
 
-from news.rss_collector import parse_wscn_lives
+from custos.datasource.news.rss_collector import parse_wscn_lives
 
 SRC = {
     "id": "wscn_lives",

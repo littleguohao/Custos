@@ -15,9 +15,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import backtest_factors as bt
-import main_rally_factor as mr
-import rsi_state as rs
+from custos.research import backtest_factors as bt
+from custos.core.factors import main_rally_factor as mr
+from custos.core.factors import rsi_state as rs
 
 
 def _mk(closes, highs=None, lows=None, vols=None):
@@ -242,7 +242,7 @@ class TestMainRallyStart:
 
     def test_j_turn_matches_project_j(self):
         """原文 D11 就是本项目的 J 值，必须同口径。"""
-        from technical_monitor import kdj
+        from custos.pipeline.market_timing.technical_monitor import kdj
         df = self._oversold_turn()
         mine = float(mr._j_series(df).iloc[-1])
         assert mine == pytest.approx(float(kdj(df)["j"]), abs=1e-3)
@@ -292,7 +292,7 @@ class TestNotWiredIntoScreening:
     def test_score_candidates_untouched(self):
         import inspect
 
-        from screening import score_candidates as sc
+        from custos.pipeline.screening import score_candidates as sc
         src = inspect.getsource(sc)
         for name in ("rsi_state", "main_rally", "rsi_regime"):
             assert name not in src, "接入选股链前必须先有回测证据"

@@ -17,7 +17,7 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-import contracts as C  # noqa: E402
+from custos.core import contracts as C  # noqa: E402
 
 VALID_GATE = {
     "date": "2026-08-07",

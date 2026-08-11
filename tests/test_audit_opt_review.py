@@ -33,7 +33,7 @@ class TestCalcMfeMaeFieldNames:
         return path
 
     def _run(self, tmp_path, monkeypatch, reader_daily):
-        import calc_mfe_mae as cm
+        from custos.pipeline.close_review import calc_mfe_mae as cm
 
         pos = self._positions(tmp_path)
         monkeypatch.setattr(cm, "BASE", tmp_path)
@@ -102,7 +102,7 @@ class TestCalcMfeMaeCoverage:
     """出数覆盖率必须落盘 + 决定退出码,run_1700 才可能不报 [OK]。"""
 
     def test_coverage_summary_keys(self):
-        import calc_mfe_mae as cm
+        from custos.pipeline.close_review import calc_mfe_mae as cm
 
         rows = [{"code": "1", "mfe_pct": 1.0}, {"code": "2", "mfe_pct": None},
                 {"code": "3", "mfe_pct": None}]
@@ -112,13 +112,13 @@ class TestCalcMfeMaeCoverage:
         assert cov["status"] == "degraded"
 
     def test_zero_coverage_is_failed(self):
-        import calc_mfe_mae as cm
+        from custos.pipeline.close_review import calc_mfe_mae as cm
 
         cov = cm.coverage_summary([{"code": "1", "mfe_pct": None}])
         assert cov["status"] == "failed"
 
     def test_empty_positions_is_complete(self):
-        import calc_mfe_mae as cm
+        from custos.pipeline.close_review import calc_mfe_mae as cm
 
         assert cm.coverage_summary([])["status"] == "complete"
 
@@ -131,7 +131,7 @@ class TestRun1700MfeStageEcho:
     """
 
     def _run(self, tmp_path, monkeypatch, mfe_out, mfe_ok):
-        import run_1700
+        from custos.pipeline import run_1700
 
         review_dir = tmp_path / "artifacts/reports" / "daily"
         review_dir.mkdir(parents=True)
@@ -139,7 +139,7 @@ class TestRun1700MfeStageEcho:
         monkeypatch.setattr(run_1700, "REVIEWS", review_dir)
         monkeypatch.setattr(run_1700, "LOG_DIR", tmp_path / "artifacts/logs")
         # 日历门控已抽进 pipeline_kit.calendar_gate，桩要打在它查日历的地方
-        import pipeline_kit
+        from custos.core import pipeline_kit
         monkeypatch.setattr(pipeline_kit, "check_trading_day", lambda d: {"is_trading_day": True})
         monkeypatch.setattr(run_1700.os, "chdir", lambda p: None)
 
@@ -187,7 +187,7 @@ class TestSectorIndexAtomicWrite:
     """
 
     def test_tmp_name_derived_from_dest(self, tmp_path):
-        from local_tdx import fetch_sector_index_history as fs
+        from custos.datasource.local_tdx import fetch_sector_index_history as fs
 
         seen = {}
 
@@ -202,7 +202,7 @@ class TestSectorIndexAtomicWrite:
         assert dest.is_file() and not seen["path"].exists()
 
     def test_crash_leaves_tmp_next_to_dest(self, tmp_path):
-        from local_tdx import fetch_sector_index_history as fs
+        from custos.datasource.local_tdx import fetch_sector_index_history as fs
 
         class _Frame:
             def to_csv(self, path, index=False):
@@ -225,7 +225,7 @@ class TestSectorIndexSuccessRate:
     """
 
     def _install(self, monkeypatch, tq, sectors):
-        from local_tdx import fetch_sector_index_history as fs
+        from custos.datasource.local_tdx import fetch_sector_index_history as fs
 
         monkeypatch.setattr(fs.tq_sector, "is_tdxw_running", lambda: True)
         tq.initialize = lambda *a, **k: None
@@ -295,7 +295,7 @@ class _FakeTQ:
 
 
 def _session(monkeypatch, tq, name_map=None):
-    import tq_sector as ts
+    from custos.datasource.local_tdx import tq_sector as ts
 
     monkeypatch.setattr(ts, "is_tdxw_running", lambda: True)
     monkeypatch.setattr(ts, "_import_tq", lambda: tq)
@@ -320,7 +320,7 @@ class TestTqSectorSuccessRate:
         assert result["stock_total"] == 1
 
     def test_main_exits_nonzero_on_low_success_rate(self, monkeypatch, tmp_path):
-        import tq_sector as ts
+        from custos.datasource.local_tdx import tq_sector as ts
 
         tq = _FakeTQ([f"88{i:04d}" for i in range(1, 11)], ok_codes={"880001"})
         monkeypatch.setattr(ts, "is_tdxw_running", lambda: True)
@@ -333,7 +333,7 @@ class TestTqSectorSuccessRate:
         assert saved["quality"]["sector_success_rate"] == pytest.approx(0.1)
 
     def test_main_exits_zero_when_all_sectors_ok(self, monkeypatch, tmp_path):
-        import tq_sector as ts
+        from custos.datasource.local_tdx import tq_sector as ts
 
         tq = _FakeTQ(["880001", "880002"])
         monkeypatch.setattr(ts, "is_tdxw_running", lambda: True)
@@ -344,7 +344,7 @@ class TestTqSectorSuccessRate:
 
     def test_zero_stock_total_is_not_success(self, monkeypatch, tmp_path):
         """成分股全空(每个板块返回 [] 而不报错)也不算成功:映射空却 exit 0 是原缺陷。"""
-        import tq_sector as ts
+        from custos.datasource.local_tdx import tq_sector as ts
 
         class _EmptyTQ(_FakeTQ):
             def get_stock_list_in_sector(self, code):
@@ -362,7 +362,7 @@ class TestTqSectorRateLimitAndProgress:
     """串行保留，但要限速 + 有进度(400+ 次请求不能一口气打满 TdxW 且静默 5 分钟)。"""
 
     def test_sleep_between_sectors(self, monkeypatch):
-        import tq_sector as ts
+        from custos.datasource.local_tdx import tq_sector as ts
 
         slept: list[float] = []
         tq = _FakeTQ(["880001", "880002", "880003"])
@@ -372,7 +372,7 @@ class TestTqSectorRateLimitAndProgress:
         assert len(slept) == 3 and all(s == pytest.approx(0.02) for s in slept)
 
     def test_no_sleep_by_default(self, monkeypatch):
-        import tq_sector as ts
+        from custos.datasource.local_tdx import tq_sector as ts
 
         slept: list[float] = []
         tq = _FakeTQ(["880001", "880002"])
@@ -400,7 +400,7 @@ class TestAffairCache:
     """
 
     def _stub_affair(self, monkeypatch, files=None, fetch_exc=None, parse_ret=None):
-        import local_tdx_data as ltd
+        from custos.datasource.local_tdx import local_tdx_data as ltd
 
         calls = {}
 
@@ -477,7 +477,7 @@ class TestInheritedSnapshotMarkers:
     """
 
     def test_snapshot_state_propagates_inheritance(self, tmp_path, monkeypatch):
-        from close_review import review_core as rc
+        from custos.pipeline.close_review import review_core as rc
 
         gate = {"position_freshness": {"status": "confirmed", "inherited": True,
                                        "inherited_from": "2026-07-16",
@@ -492,7 +492,7 @@ class TestInheritedSnapshotMarkers:
         assert "2026-07-16" in snap["reason"]
 
     def test_missing_gate_reports_not_inherited(self, tmp_path, monkeypatch):
-        from close_review import review_core as rc
+        from custos.pipeline.close_review import review_core as rc
 
         monkeypatch.setattr(rc, "QUALITY", tmp_path)
         snap = rc.snapshot_state("2026-07-17")
@@ -537,7 +537,7 @@ class TestRealizedPnlFeeScope:
     """
 
     def _facts(self, tmp_path):
-        from close_review import weekly_review as wr
+        from custos.pipeline.close_review import weekly_review as wr
 
         base = _week_base(tmp_path)
         _write_ledger(base, [
@@ -565,7 +565,7 @@ class TestRealizedPnlFeeScope:
 
     def test_partial_lot_buy_fee_prorated(self, tmp_path):
         """只卖掉一半时，只有那一半对应的买单费用能进已实现盈亏。"""
-        from close_review import weekly_review as wr
+        from custos.pipeline.close_review import weekly_review as wr
 
         base = _week_base(tmp_path)
         _write_ledger(base, [
@@ -582,7 +582,7 @@ class TestRealizedPnlFeeScope:
 
     def test_carried_over_buy_fee_counts_when_closed_this_week(self, tmp_path):
         """上周买、本周卖:该买单费用属于这笔已平仓交易，必须扣(即便不在本周费用里)。"""
-        from close_review import weekly_review as wr
+        from custos.pipeline.close_review import weekly_review as wr
 
         base = _week_base(tmp_path)
         _write_ledger(base, [
@@ -597,7 +597,7 @@ class TestRealizedPnlFeeScope:
         assert f["net_pnl"] == 985.0
 
     def test_closing_row_exposes_fee_fields(self, tmp_path):
-        from close_review import weekly_review as wr
+        from custos.pipeline.close_review import weekly_review as wr
 
         rows = wr.fifo_pair([
             {"date": "2026-07-13", "time": "09:30", "code": "600000", "name": "A",
@@ -626,7 +626,7 @@ class TestPendingPositionMissingFields:
     def test_incremental_row_fields_are_none_not_zero(self, tmp_path, monkeypatch):
         import pandas as pd
 
-        import calc_mfe_mae as cm
+        from custos.pipeline.close_review import calc_mfe_mae as cm
 
         # incremental_ledger.compute_positions 的真实输出形态
         row = {"代码": "600000", "名称": "测试股", "持有数量": 1000.0, "单位成本": 10.0,
@@ -664,7 +664,7 @@ class TestPendingPositionMissingFields:
         assert got["snapshot_status"] == "pending_close_revaluation"   # 待重估状态透传
 
     def test_optional_float_rejects_missing_and_garbage(self):
-        import calc_mfe_mae as cm
+        from custos.pipeline.close_review import calc_mfe_mae as cm
 
         assert cm.optional_float({}, "最新价") is None
         assert cm.optional_float({"最新价": ""}, "最新价") is None
@@ -675,7 +675,7 @@ class TestPendingPositionMissingFields:
         """单位成本缺失时不得落 0%/-100%,必须 unable_reason。"""
         import pandas as pd
 
-        import calc_mfe_mae as cm
+        from custos.pipeline.close_review import calc_mfe_mae as cm
 
         pos_path = tmp_path / "data" / "trades" / "current_positions.json"
         pos_path.parent.mkdir(parents=True, exist_ok=True)
@@ -715,7 +715,7 @@ class TestSellFlyCoverage:
     """
 
     def _base_with_closings(self, tmp_path, mfe_holdings):
-        from close_review import weekly_review as wr
+        from custos.pipeline.close_review import weekly_review as wr
 
         base = _week_base(tmp_path)
         _write_ledger(base, [
@@ -782,7 +782,7 @@ class TestWeeklyReviewIoReuse:
     """`load_mfe_after` / `find_plan_for_day` 不得在循环里反复 glob + 重复解析同一文件。"""
 
     def test_mfe_json_parsed_once_across_closings(self, tmp_path, monkeypatch):
-        from close_review import weekly_review as wr
+        from custos.pipeline.close_review import weekly_review as wr
 
         base = _week_base(tmp_path)
         rows = []
@@ -805,7 +805,7 @@ class TestWeeklyReviewIoReuse:
         assert len(mfe_reads) == 1              # 3 张平仓单只解析一次
 
     def test_plan_review_read_once_per_date(self, tmp_path, monkeypatch):
-        from close_review import weekly_review as wr
+        from custos.pipeline.close_review import weekly_review as wr
 
         base = _week_base(tmp_path)
         _write_ledger(base, [
@@ -830,7 +830,7 @@ class TestWeeklyReviewIoReuse:
         assert len(plan_reads) == 1              # 3 笔成交共用一份计划，只读一次
 
     def test_mfe_index_globs_once_and_is_reusable(self, tmp_path):
-        from close_review import weekly_review as wr
+        from custos.pipeline.close_review import weekly_review as wr
 
         holdings = tmp_path / "data" / "holdings"
         holdings.mkdir(parents=True)
@@ -848,7 +848,7 @@ class TestWeeklyReviewIoReuse:
 
     def test_load_mfe_after_still_works_without_index(self, tmp_path):
         """向后兼容:老调用方(不传 index/cache)行为不变。"""
-        from close_review import weekly_review as wr
+        from custos.pipeline.close_review import weekly_review as wr
 
         holdings = tmp_path / "data" / "holdings"
         holdings.mkdir(parents=True)
@@ -870,13 +870,13 @@ class TestNewsClassifyPrecedence:
     """
 
     def test_policy_category_alone_is_policy(self):
-        import postclose_news_digest as pnd
+        from custos.datasource.news import postclose_news_digest as pnd
 
         assert pnd.classify({"category": "policy_official", "matched_themes": []}) == "政策"
         assert pnd.classify({"category": "policy_consultation", "matched_themes": []}) == "政策"
 
     def test_official_category_needs_macro_theme(self):
-        import postclose_news_digest as pnd
+        from custos.datasource.news import postclose_news_digest as pnd
 
         assert pnd.classify({"category": "macro_official",
                              "matched_themes": ["宏观政策"]}) == "政策"
@@ -886,18 +886,18 @@ class TestNewsClassifyPrecedence:
                              "matched_themes": ["半导体"]}) == "信息"
 
     def test_rule_note_documented(self):
-        import postclose_news_digest as pnd
+        from custos.datasource.news import postclose_news_digest as pnd
 
         assert "or" in pnd.POLICY_RULE_NOTE and "宏观政策" in pnd.POLICY_RULE_NOTE
 
     def test_market_keyword_wins_when_not_policy(self):
-        import postclose_news_digest as pnd
+        from custos.datasource.news import postclose_news_digest as pnd
 
         assert pnd.classify({"category": "cn_financial_media",
                              "matched_market_keywords": ["放量"]}) == "风向"
 
     def test_default_is_public_opinion(self):
-        import postclose_news_digest as pnd
+        from custos.datasource.news import postclose_news_digest as pnd
 
         assert pnd.classify({}) == "舆情"
 
@@ -912,7 +912,7 @@ class TestWeeklyReviewLocalDegradation:
     """
 
     def test_garbage_amv_value_skipped_not_raised(self, tmp_path):
-        from close_review import weekly_review as wr
+        from custos.pipeline.close_review import weekly_review as wr
 
         path = tmp_path / "0amv.jsonl"
         path.write_text("\n".join([
@@ -927,7 +927,7 @@ class TestWeeklyReviewLocalDegradation:
         assert got["2026-07-16"]["regime"] == "空头"
 
     def test_malformed_closed_range_does_not_raise(self, tmp_path):
-        from close_review import weekly_review as wr
+        from custos.pipeline.close_review import weekly_review as wr
 
         cfg = {"official_years": {"2026": {"closed_ranges": [
             {"name": "缺键"}, {"start": "2026-10-01"}, "字符串不是 dict",
@@ -941,7 +941,7 @@ class TestWeeklyReviewLocalDegradation:
         assert got["2026-07-18"] is False        # 周六
 
     def test_whole_review_survives_dirty_amv(self, tmp_path):
-        from close_review import weekly_review as wr
+        from custos.pipeline.close_review import weekly_review as wr
 
         base = _week_base(tmp_path)
         _write_ledger(base, [
@@ -965,13 +965,13 @@ class TestBearRatioZeroDivision:
     """0AMV 记录里没有 >=2020 的样本时 `bear_days / len(days_since_2020)` 直接 ZeroDivisionError。"""
 
     def test_ratio_none_when_no_days(self):
-        from research import backtest_0amv_bear_regime as bt
+        from custos.research import backtest_0amv_bear_regime as bt
 
         assert bt.safe_ratio_pct(0, 0) is None
         assert bt.safe_ratio_pct(3, 0) is None
 
     def test_ratio_computed_when_days_exist(self):
-        from research import backtest_0amv_bear_regime as bt
+        from custos.research import backtest_0amv_bear_regime as bt
 
         assert bt.safe_ratio_pct(1, 4) == 25.0
 
@@ -982,26 +982,26 @@ class TestFeishuRecipientResolution:
     """硬编码 open_id 兜底 = 环境没配就把报告发给写死的那个人。缺配置必须报错。"""
 
     def test_env_override_used(self):
-        import feishu_report_publisher as frp
+        from custos.pipeline import feishu_report_publisher as frp
 
         assert frp.resolve_to_open_id({"FEISHU_TO_OPEN_ID": "ou_env"}) == "ou_env"
 
     def test_missing_config_raises(self, tmp_path):
-        import feishu_report_publisher as frp
+        from custos.pipeline import feishu_report_publisher as frp
 
         with pytest.raises(frp.FeishuError) as exc:
             frp.resolve_to_open_id({"OPENCLAW_CONFIG": str(tmp_path / "nope.json")})
         assert "FEISHU_TO_OPEN_ID" in str(exc.value)
 
     def test_no_hardcoded_open_id_constant(self):
-        import feishu_report_publisher as frp
+        from custos.pipeline import feishu_report_publisher as frp
 
         source = Path(frp.__file__).read_text(encoding="utf-8")
         assert "ou_54ca3ea3b343e4d868b66b7084ed3be1" not in source
         assert not hasattr(frp, "DEFAULT_TO_OPEN_ID")
 
     def test_openclaw_config_recipient_used(self, tmp_path):
-        import feishu_report_publisher as frp
+        from custos.pipeline import feishu_report_publisher as frp
 
         cfg = tmp_path / "openclaw.json"
         cfg.write_text(json.dumps({"channels": {"feishu": {"accounts": {"default": {
@@ -1010,7 +1010,7 @@ class TestFeishuRecipientResolution:
         assert frp.resolve_to_open_id({"OPENCLAW_CONFIG": str(cfg)}) == "ou_cfg"
 
     def test_config_without_recipient_raises(self, tmp_path):
-        import feishu_report_publisher as frp
+        from custos.pipeline import feishu_report_publisher as frp
 
         cfg = tmp_path / "openclaw.json"
         cfg.write_text(json.dumps({"channels": {"feishu": {"accounts": {"default": {

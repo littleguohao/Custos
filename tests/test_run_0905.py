@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-import run_0905
+from custos.pipeline import run_0905
 
 
 class TestWriteRunLog:

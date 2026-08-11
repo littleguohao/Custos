@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from factors import sector_phase as sp
+from custos.core.factors import sector_phase as sp
 
 
 @pytest.fixture(autouse=True)
@@ -11,7 +11,7 @@ def _fixture_sector_names(monkeypatch):
     # 本文件用 880201/880900 做虚构板块;真实 tdxzs.cfg 里 880201="黑龙江"(地区,type3)
     # 会被"剔除地区/风格"口径排除 → 测试结果随机器环境漂移。统一注入名称表,
     # 把 fixture 板块标为概念(type4),剔除语义本身由 test_sector_mainstream 覆盖。
-    monkeypatch.setattr("tq_sector.load_sector_names",
+    monkeypatch.setattr("custos.datasource.local_tdx.tq_sector.load_sector_names",
                         lambda path=None: {"880201": {"name": "测试概念A", "tdx_type": "4"},
                                            "880900": {"name": "测试概念B", "tdx_type": "4"}})
 
@@ -116,7 +116,7 @@ def test_phase_dirty_input_no_raise():
 
 def test_fetcher_to_close_frame():
     import pandas as pd
-    from local_tdx import fetch_sector_index_history as fsh
+    from custos.datasource.local_tdx import fetch_sector_index_history as fsh
     df = pd.DataFrame({"Close": [1.0, 2.0]},
                       index=pd.to_datetime(["2022-01-03", "2022-01-04"]))
     out = fsh._to_close_frame({"880201.SH": df}, "880201.SH")

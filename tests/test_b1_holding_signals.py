@@ -20,10 +20,10 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/pipeline/market_timing"):
+for _p in ("src", "src/custos/pipeline/market_timing"):
     sys.path.insert(0, str(ROOT / _p))
 
-from holdings import b1_holding_state as bh  # noqa: E402
+from custos.pipeline.holdings import b1_holding_state as bh  # noqa: E402
 
 
 def _row(**kw):
@@ -274,7 +274,7 @@ class TestB1HoldingStateMain:
     @staticmethod
     def _env(monkeypatch, tmp_path):
         import pathlib as _pl
-        import b1_holding_state as m
+        from custos.pipeline.holdings import b1_holding_state as m
         for attr in dir(m):
             v = getattr(m, attr, None)
             if attr.isupper() and isinstance(v, _pl.Path):
@@ -338,7 +338,7 @@ class TestB1HoldingStateMain:
     def test_pre_checks_failure_does_not_break_main(self, monkeypatch, tmp_path):
         """⚠️ 预检失败**不得**影响 B1 主流程 —— 它是附加证据，不是判定依据。
         失败时如实写 `available: False` + error，而不是静默省略。"""
-        import b1_holding_state as m
+        from custos.pipeline.holdings import b1_holding_state as m
         monkeypatch.setattr(m, "build_pre_checks",
                             lambda *a, **k: (_ for _ in ()).throw(RuntimeError("TQ 挂了")))
         rows = self._run(monkeypatch, tmp_path, {"amv_0": {"effective_state": "中性"}})
@@ -356,7 +356,7 @@ class TestBatchHoldingTechnicalMain:
     @staticmethod
     def _env(monkeypatch, tmp_path):
         import pathlib as _pl
-        from holdings import batch_holding_technical as b
+        from custos.pipeline.holdings import batch_holding_technical as b
         for attr in dir(b):
             v = getattr(b, attr, None)
             if attr.isupper() and isinstance(v, _pl.Path):

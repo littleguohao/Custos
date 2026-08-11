@@ -39,7 +39,7 @@ import re
 
 import pytest
 
-TOOLS = pathlib.Path(__file__).resolve().parents[1] / "src"
+TOOLS = pathlib.Path(__file__).resolve().parents[1] / "src" / "custos"
 
 # 允许豁免的文件及理由（豁免必须写理由，不能空着）
 EXEMPT: dict[str, str] = {
@@ -323,13 +323,13 @@ class TestOnlineQuotesMarkedUnavailable:
         monkeypatch.delenv("TDX_ONLINE_QUOTES", raising=False)
 
     def test_disabled_by_default(self, monkeypatch):
-        import local_tdx_data as L
+        from custos.datasource.local_tdx import local_tdx_data as L
         self._fresh(monkeypatch)
         assert L._online_quotes_enabled() is False
 
     def test_bars_short_circuits_without_client(self, monkeypatch, capsys):
         """必须在 `_get_client()` 之前短路——建连本身就要花时间。"""
-        import local_tdx_data as L
+        from custos.datasource.local_tdx import local_tdx_data as L
         self._fresh(monkeypatch)
         monkeypatch.setattr(L, "_get_client",
                             lambda: pytest.fail("短路失败：仍去建了连接"))
@@ -337,14 +337,14 @@ class TestOnlineQuotesMarkedUnavailable:
         assert "标记为不可用" in capsys.readouterr().err
 
     def test_index_short_circuits(self, monkeypatch):
-        import local_tdx_data as L
+        from custos.datasource.local_tdx import local_tdx_data as L
         self._fresh(monkeypatch)
         monkeypatch.setattr(L, "_get_client",
                             lambda: pytest.fail("短路失败：仍去建了连接"))
         assert L.get_online_index("999999").empty
 
     def test_snapshot_short_circuits(self, monkeypatch):
-        import local_tdx_data as L
+        from custos.datasource.local_tdx import local_tdx_data as L
         self._fresh(monkeypatch)
         monkeypatch.setattr(L, "_get_client",
                             lambda: pytest.fail("短路失败：仍去建了连接"))
@@ -353,7 +353,7 @@ class TestOnlineQuotesMarkedUnavailable:
     @pytest.mark.parametrize("val", ["1", "true", "TRUE", "yes"])
     def test_env_override_reenables(self, val, monkeypatch):
         """换了网络环境或服务端恢复时要能重新启用，而不是把能力删掉。"""
-        import local_tdx_data as L
+        from custos.datasource.local_tdx import local_tdx_data as L
         monkeypatch.setenv("TDX_ONLINE_QUOTES", val)
         assert L._online_quotes_enabled() is True
 
@@ -361,7 +361,7 @@ class TestOnlineQuotesMarkedUnavailable:
         """只关 bars/quotes 两族——`client.stocks()` 实测可用，不能一起关掉。"""
         import pandas as pd
 
-        import local_tdx_data as L
+        from custos.datasource.local_tdx import local_tdx_data as L
         self._fresh(monkeypatch)
 
         class _C:

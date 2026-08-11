@@ -1,4 +1,4 @@
-"""因子层独立成包：`src/core/factors/`。
+"""因子层独立成包：`src/custos/core/factors/`。
 
 2026-08-06 依赖扫描显示 8 个因子模块其实是**live 选股链与研究回测器共同依赖的下层**：
 
@@ -22,7 +22,7 @@ import re
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-FACTORS_DIR = ROOT / "src" / "core" / "factors"
+FACTORS_DIR = ROOT / "src" / "custos" / "core" / "factors"
 MODULES = ["s_shape", "b1_dual_factor", "b2_surge_factor", "main_rally_factor",
            "platform_pullback", "rsi_state", "sector_phase", "sector_mainstream"]
 
@@ -41,7 +41,7 @@ def test_package_exists_with_doc():
 def test_module_moved(m):
     assert (FACTORS_DIR / f"{m}.py").exists(), f"{m} 未在 factors/"
     for d in ("screening", "research"):
-        assert not (ROOT / "src" / d / f"{m}.py").exists(), \
+        assert not (ROOT / "src" / "custos" / d / f"{m}.py").exists(), \
             f"{m} 仍留在 {d}/（重复文件）"
 
 
@@ -65,7 +65,7 @@ class TestConsumersCanResolve:
 
     @pytest.mark.parametrize("f", CONSUMERS)
     def test_has_factors_bootstrap(self, f):
-        s = (ROOT / "src" / f).read_text(encoding="utf-8")
+        s = (ROOT / "src" / "custos" / f).read_text(encoding="utf-8")
         assert "_FACTORS_DIR" in s, f"{f} 未把 factors/ 加进 sys.path"
 
     @pytest.mark.parametrize("f", CONSUMERS)
@@ -76,7 +76,7 @@ class TestConsumersCanResolve:
         而 `launch_point_study` / `run_bear_to_long_study` 在**函数内部**做懒引导，
         于是引导被插进函数体 ⇒ `IndentationError`。
         """
-        for ln in (ROOT / "src" / f).read_text(encoding="utf-8").splitlines():
+        for ln in (ROOT / "src" / "custos" / f).read_text(encoding="utf-8").splitlines():
             if "_FACTORS_DIR = str(" in ln:
                 assert not ln.startswith((" ", "\t")), f"{f} 的 factors 引导有缩进（在函数内）"
 

@@ -27,10 +27,10 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-import code_utils  # noqa: E402
-import fmt  # noqa: E402
-import indicators  # noqa: E402
-import paths  # noqa: E402
+from custos.core import code_utils  # noqa: E402
+from custos.core import fmt  # noqa: E402
+from custos.core import indicators  # noqa: E402
+from custos.core import paths  # noqa: E402
 
 
 class TestReadJson:
@@ -222,7 +222,7 @@ class TestNoRefork:
         for p in sorted((ROOT / "src").rglob("*.py")):
             # ⚠️ 必须 as_posix()：Windows 上 str() 产反斜杠，
             # 与 CANON 白名单（'close_review/review_core.py' 正斜杠）永不匹配 ⇒ 误报。
-            rel = p.relative_to(ROOT / "src").as_posix()
+            rel = p.relative_to(ROOT / "src" / "custos").as_posix()
             tree = ast.parse(p.read_text(encoding="utf-8"))
             for node in ast.walk(tree):
                 if isinstance(node, ast.FunctionDef) and node.name in self.CANON:
@@ -241,7 +241,7 @@ class TestNoRefork:
             tree = ast.parse(p.read_text(encoding="utf-8"))
             for node in tree.body:
                 if isinstance(node, ast.FunctionDef) and node.name == "finite":
-                    found.append(str(p.relative_to(ROOT / "src")))
+                    found.append(str(p.relative_to(ROOT / "src" / "custos")))
         assert found == ["core/code_utils.py"], f"finite 应只在 code_utils 定义，实际: {found}"
 
     def test_no_plain_utf8_json_read_helper(self):
@@ -253,7 +253,7 @@ class TestNoRefork:
                                  t, re.S | re.M):
                 body = m.group(0)
                 if "read_text" in body and "utf-8-sig" not in body:
-                    offenders.append(f'{p.relative_to(ROOT / "src")}: def {m.group(1)}')
+                    offenders.append(f'{p.relative_to(ROOT / "src" / "custos")}: def {m.group(1)}')
         assert not offenders, ("读 JSON 必须用 `utf-8-sig`（Windows 记事本会加 BOM），"
                               "或直接用 paths.read_json：\n  " + "\n  ".join(offenders))
 
@@ -271,14 +271,14 @@ class TestStreamWriterStaysSeparate:
     """
 
     def test_stream_writer_tolerates_nan(self, tmp_path):
-        sys.path.insert(0, str(ROOT / "src" / "pipeline" / "screening"))
-        import backtest_factors as bt
+        sys.path.insert(0, str(ROOT / "src" / "custos" / "pipeline" / "screening"))
+        from custos.research import backtest_factors as bt
 
         p = tmp_path / "r.json"
         bt.write_json_stream(p, {"sharpe": float("nan")})
         assert "NaN" in p.read_text(encoding="utf-8"), "研究产物允许 NaN"
 
     def test_old_name_is_gone(self):
-        import backtest_factors as bt
+        from custos.research import backtest_factors as bt
 
         assert not hasattr(bt, "write_json"), "旧名应已移除，避免与 paths.write_json 混用"

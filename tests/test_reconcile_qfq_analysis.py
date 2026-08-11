@@ -18,10 +18,10 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/datasource/local_tdx"):
+for _p in ("src", "src/custos/datasource/local_tdx"):
     sys.path.insert(0, str(ROOT / _p))
 
-from research import reconcile_qfq as R  # noqa: E402
+from custos.research import reconcile_qfq as R  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -29,7 +29,7 @@ def _no_xdxr_network(monkeypatch):
     # detect_convention / detail 内部 `import adjust_factors` 取事件表：xdxr 缓存
     # 缺失时会走网络取数并落盘到真实 data/market/xdxr/（干净环境被 repo hygiene
     # 抓到）。本文件全部用合成序列，事件表应为空（真实事件日会切段，这里只测单段判据）。
-    import adjust_factors
+    from custos.datasource.local_tdx import adjust_factors
     monkeypatch.setattr(adjust_factors, "get_xdxr", lambda code, **kw: [])
 
 
@@ -230,12 +230,12 @@ class TestNoBundleGuards:
     而不是当成「检验通过」。"""
 
     def test_qlib_fields_without_bundle(self, monkeypatch, capsys):
-        import s_data as Q
+        from custos.datasource import s_data as Q
         monkeypatch.setattr(Q, "list_bundles", lambda *a, **k: [])
         assert R.qlib_fields("600000") == 2
         assert "没有发现 bundle" in capsys.readouterr().out
 
     def test_qlib_selfcheck_without_bundle(self, monkeypatch, capsys):
-        import s_data as Q
+        from custos.datasource import s_data as Q
         monkeypatch.setattr(Q, "list_bundles", lambda *a, **k: [])
         assert R.qlib_selfcheck("600000") == 2

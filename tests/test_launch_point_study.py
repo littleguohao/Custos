@@ -4,14 +4,14 @@ import json
 import pandas as pd
 import pytest
 
-from research import launch_point_study as lp
+from custos.research import launch_point_study as lp
 
 
 @pytest.fixture(autouse=True)
 def _no_tdx_names(monkeypatch):
     # 本文件用虚构板块代码(880201 在真实 tdxzs.cfg 里是"黑龙江"=地区,会被板块族口径剔除);
     # 统一屏蔽名称表,剔除语义由 test_sector_mainstream 专门覆盖
-    monkeypatch.setattr("tq_sector.load_sector_names", lambda path=None: {})
+    monkeypatch.setattr("custos.datasource.local_tdx.tq_sector.load_sector_names", lambda path=None: {})
 
 
 def test_window_return():
@@ -109,7 +109,7 @@ def test_main_loads_with_buffered_start(tmp_path, monkeypatch):
     def fake_load(codes, count, start=None, end=None, root=None):
         captured["start"] = start
         return {}
-    monkeypatch.setattr("s_data.load_bars_qlib", fake_load)
+    monkeypatch.setattr("custos.datasource.s_data.load_bars_qlib", fake_load)
     monkeypatch.setattr(lp.bt, "load_amv_regime", lambda since="2015-01-01", root=None: {})
     # 本测试只验证加载起点,数据是空的 → 需 --allow-empty 才不被空结果护栏拦下(审计 E9)
     rc = lp.main(["--codes", "600000", "--start", "2025-01-01", "--end", "2025-06-30",
@@ -126,7 +126,7 @@ def test_load_margin_covers_gate_window(tmp_path, monkeypatch):
     def fake_load(codes, count, start=None, end=None, root=None):
         captured["start"] = start
         return {}
-    monkeypatch.setattr("s_data.load_bars_qlib", fake_load)
+    monkeypatch.setattr("custos.datasource.s_data.load_bars_qlib", fake_load)
     monkeypatch.setattr(lp.bt, "load_amv_regime", lambda since="2015-01-01", root=None: {})
     rc = lp.main(["--codes", "600000", "--start", "2025-01-01", "--end", "2025-06-30",
                   "--buffer-days", "60", "--gate-window", "120", "--allow-empty",

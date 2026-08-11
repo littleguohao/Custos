@@ -22,7 +22,7 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-import generate_risk_and_sectors as g  # noqa: E402
+from custos.pipeline import generate_risk_and_sectors as g  # noqa: E402
 
 
 @pytest.fixture()

@@ -30,7 +30,7 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/core/trades", "src/research"):
+for _p in ("src", "src/custos/core/trades", "src/research"):
     sys.path.insert(0, str(ROOT / _p))
 
 
@@ -74,8 +74,8 @@ class TestActualScenarioAgreesWithProductionReplay:
         差异的后果：反事实情景（no_bear_buys / rebound_reduce）都以 `actual`
         为基线做减法，基线错了三个数字全错，而 R4/R10 引用了这份回测。
         """
-        from incremental_ledger import compute_positions
-        from research import backtest_0amv_bear_regime as br
+        from custos.core.trades.incremental_ledger import compute_positions
+        from custos.research import backtest_0amv_bear_regime as br
 
         led = tmp_path / "master_trade_ledger.csv"
         _write_ledger(led, self.ROWS)
@@ -111,7 +111,7 @@ class TestActualScenarioAgreesWithProductionReplay:
         研究报告需要「重放 vs 台账」的完整对照，包括一致的那些
         （「一致」本身是结论，不是「无内容」）。
         """
-        from research import backtest_0amv_bear_regime as br
+        from custos.research import backtest_0amv_bear_regime as br
 
         pos = tmp_path / "current_positions.json"
         pos.write_text(json.dumps([{"代码": "600000", "持有数量": 700},
@@ -127,7 +127,7 @@ class TestActualScenarioAgreesWithProductionReplay:
     def test_check_positions_includes_codes_only_on_one_side(self, tmp_path):
         """只在一侧出现的代码必须出现（union，不是 intersection）——
         「台账有而持仓没有」正是要暴露的情况。"""
-        from research import backtest_0amv_bear_regime as br
+        from custos.research import backtest_0amv_bear_regime as br
 
         pos = tmp_path / "current_positions.json"
         pos.write_text(json.dumps([{"代码": "000001", "持有数量": 2000}]),
@@ -143,14 +143,14 @@ class TestWhyNotMerged:
 
     def test_reconcile_returns_only_diffs(self):
         """`diff_positions` 只返回差异 —— 与 `check_positions` 的全表契约不同。"""
-        from reconcile_positions import diff_positions
+        from custos.core.trades.reconcile_positions import diff_positions
 
         same = [{"代码": "600000", "持有数量": 700, "单位成本": 10.0}]
         assert diff_positions(same, same) == [], "一致时应返回空列表"
 
     def test_reconcile_also_compares_unit_cost(self):
         """它还比**单位成本** —— `check_positions` 不比，合并会引入新的失败面。"""
-        from reconcile_positions import diff_positions
+        from custos.core.trades.reconcile_positions import diff_positions
 
         a = [{"代码": "600000", "持有数量": 700, "单位成本": 10.0}]
         b = [{"代码": "600000", "持有数量": 700, "单位成本": 10.5}]
@@ -160,7 +160,7 @@ class TestWhyNotMerged:
     def test_research_scenarios_are_counterfactual(self):
         """⚠️ 研究脚本的三个情景里有两个是**反事实**的 ——
         忠实回放函数按定义做不到，所以不能替换。"""
-        from research import backtest_0amv_bear_regime as br
+        from custos.research import backtest_0amv_bear_regime as br
 
         assert set(br.SCENARIOS) >= {"actual", "no_bear_buys", "rebound_reduce"}, \
             f"情景集合变了：{br.SCENARIOS}"

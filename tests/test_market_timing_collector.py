@@ -18,10 +18,10 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/pipeline/market_timing"):
+for _p in ("src", "src/custos/pipeline/market_timing"):
     sys.path.insert(0, str(ROOT / _p))
 
-from market_timing import market_timing_collector as mtc  # noqa: E402
+from custos.pipeline.market_timing import market_timing_collector as mtc  # noqa: E402
 
 
 class TestToFloat:
@@ -141,6 +141,6 @@ class TestFreshnessLabeling:
         2026-08-10 之前**不是** —— `is_stale` 只认 `"stale"`，`degraded` 被当新鲜
         照满分计入（v0.40 修）。本条把两个模块的词表对上，防它再分叉。
         """
-        import contracts as C
+        from custos.core import contracts as C
         assert "degraded" in C.SECTION_NOT_FRESH, \
             "collector 会产出 degraded，它必须在「不新鲜」域里"

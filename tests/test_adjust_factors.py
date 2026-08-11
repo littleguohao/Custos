@@ -14,8 +14,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from code_utils import is_index
-from local_tdx import adjust_factors as af
+from custos.core.code_utils import is_index
+from custos.datasource.local_tdx import adjust_factors as af
 
 
 def _ev(date, *, fenhong=0.0, songzhuangu=0.0, peigu=0.0, peigujia=0.0, suogu=0.0):
@@ -281,7 +281,7 @@ class TestEntryPointDefault:
         """默认必须是 qfq——「统一前复权」就是要消除「哪个调用方记得传参」的不确定性。"""
         import inspect
 
-        from local_tdx.local_tdx_data import get_ohlcv_table
+        from custos.datasource.local_tdx.local_tdx_data import get_ohlcv_table
         assert inspect.signature(get_ohlcv_table).parameters["adjust"].default == "qfq"
 
     def test_qfq_failure_degrades_with_trace(self, monkeypatch):
@@ -386,10 +386,10 @@ class TestSharesEvents:
 class TestMarketCapFromTdx:
     def test_contract_matches_eastmoney_path(self, monkeypatch):
         """本地路径必须产出与东财路径同样的事件契约，否则下游 load_events 读不了。"""
-        from local_tdx import fetch_market_cap as fmc
+        from custos.datasource.local_tdx import fetch_market_cap as fmc
 
         monkeypatch.setattr(
-            "local_tdx.adjust_factors.get_shares_events",
+            "custos.datasource.local_tdx.adjust_factors.get_shares_events",
             lambda code, refresh=False: [
                 {"date": "2020-05-20", "total_shares": 1.13e10, "float_shares": 9.7e9},
                 {"date": "2023-06-30", "total_shares": 1.16e10, "float_shares": 9.71e9}])
@@ -404,9 +404,9 @@ class TestMarketCapFromTdx:
         assert evs[0]["source"] == "tdx_xdxr"
 
     def test_unchanged_shares_not_written(self, monkeypatch):
-        from local_tdx import fetch_market_cap as fmc
+        from custos.datasource.local_tdx import fetch_market_cap as fmc
         monkeypatch.setattr(
-            "local_tdx.adjust_factors.get_shares_events",
+            "custos.datasource.local_tdx.adjust_factors.get_shares_events",
             lambda code, refresh=False: [
                 {"date": "2020-05-20", "total_shares": 1.13e10, "float_shares": None},
                 {"date": "2021-05-20", "total_shares": 1.13e10, "float_shares": None}])
@@ -414,11 +414,11 @@ class TestMarketCapFromTdx:
         assert len(evs) == 1, "股本没变不该写事件"
 
     def test_failure_is_skipped_not_fatal(self, monkeypatch):
-        from local_tdx import fetch_market_cap as fmc
+        from custos.datasource.local_tdx import fetch_market_cap as fmc
 
         def boom(code, refresh=False):
             raise af.AdjustError("down")
-        monkeypatch.setattr("local_tdx.adjust_factors.get_shares_events", boom)
+        monkeypatch.setattr("custos.datasource.local_tdx.adjust_factors.get_shares_events", boom)
         assert fmc.build_from_tdx(["000002"], progress_every=0) == []
 
 
@@ -430,7 +430,7 @@ class TestClientReconnect:
     """
 
     def test_retry_rebuilds_connection(self, monkeypatch):
-        from local_tdx import local_tdx_data as ltd
+        from custos.datasource.local_tdx import local_tdx_data as ltd
         built = []
 
         class Good:
@@ -462,7 +462,7 @@ class TestClientReconnect:
         assert len(built) == 2, "第二次必须**重建**连接，用同一个死连接重试没意义"
 
     def test_raises_after_exhausting_tries(self, monkeypatch):
-        from local_tdx import local_tdx_data as ltd
+        from custos.datasource.local_tdx import local_tdx_data as ltd
 
         class Dead:
             def stocks(self, market=0):
@@ -480,7 +480,7 @@ class TestClientReconnect:
 
     def test_connection_expires_by_age(self, monkeypatch):
         """长跑进程（18:00 跑几百只票）中途连接会被服务器踢，靠时效主动重建。"""
-        from local_tdx import local_tdx_data as ltd
+        from custos.datasource.local_tdx import local_tdx_data as ltd
         built = []
 
         class C:
@@ -507,13 +507,13 @@ class TestCliFullMarketPath:
     """
 
     def test_referenced_lister_exists(self):
-        from local_tdx import local_tdx_data as ltd
+        from custos.datasource.local_tdx import local_tdx_data as ltd
         assert hasattr(ltd, "list_local_vipdoc_codes")
 
     @pytest.mark.parametrize("mod", [
-        "src/datasource/local_tdx/adjust_factors.py",
-        "src/datasource/local_tdx/fetch_market_cap.py",
-        "src/research/adjust_diagnostic.py",
+        "src/custos/datasource/local_tdx/adjust_factors.py",
+        "src/custos/datasource/local_tdx/fetch_market_cap.py",
+        "src/custos/research/adjust_diagnostic.py",
     ])
     def test_no_stale_function_name(self, mod):
         import pathlib
@@ -521,9 +521,9 @@ class TestCliFullMarketPath:
         assert "list_local_codes()" not in src, f"{mod} 用了不存在的 list_local_codes"
 
     @pytest.mark.parametrize("mod", [
-        "src/datasource/local_tdx/adjust_factors.py",
-        "src/datasource/local_tdx/fetch_market_cap.py",
-        "src/research/adjust_diagnostic.py",
+        "src/custos/datasource/local_tdx/adjust_factors.py",
+        "src/custos/datasource/local_tdx/fetch_market_cap.py",
+        "src/custos/research/adjust_diagnostic.py",
     ])
     def test_lister_attribute_resolvable(self, mod):
         """更强的检查：脚本里**调用**的 local_tdx_data.X() 都必须真实存在。
@@ -534,7 +534,7 @@ class TestCliFullMarketPath:
         import pathlib
         import re
 
-        from local_tdx import local_tdx_data as ltd
+        from custos.datasource.local_tdx import local_tdx_data as ltd
         src = pathlib.Path(mod).read_text(encoding="utf-8")
         called = set(re.findall(r"local_tdx_data\.([a-zA-Z_][a-zA-Z0-9_]*)\s*\(", src))
         assert called, f"{mod} 没有调用 local_tdx_data 的任何函数（测试假设失效）"
@@ -681,7 +681,7 @@ class TestCacheAgeAndStaleness:
         assert af.cache_age_days("600000") is None
 
     def test_fresh_cache_age_near_zero(self, tmp_path, monkeypatch):
-        from paths import cn_now
+        from custos.core.paths import cn_now
         self._write(tmp_path, monkeypatch, "600000",
                     {"fetched_at": cn_now().isoformat(timespec="seconds")})
         age = af.cache_age_days("600000")
@@ -692,7 +692,7 @@ class TestCacheAgeAndStaleness:
         在 `max_age_days=7` 这种粒度上不致命，但会让「刚取的」显示成负年龄。"""
         from datetime import timedelta
 
-        from paths import cn_now
+        from custos.core.paths import cn_now
         naive = (cn_now() - timedelta(days=2)).replace(tzinfo=None).isoformat(timespec="seconds")
         self._write(tmp_path, monkeypatch, "600000", {"fetched_at": naive})
         age = af.cache_age_days("600000")
@@ -701,7 +701,7 @@ class TestCacheAgeAndStaleness:
     def test_stale_codes_picks_absent_and_old(self, tmp_path, monkeypatch):
         from datetime import timedelta
 
-        from paths import cn_now
+        from custos.core.paths import cn_now
         monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
         self._write(tmp_path, monkeypatch, "600000",
                     {"fetched_at": cn_now().isoformat(timespec="seconds")})

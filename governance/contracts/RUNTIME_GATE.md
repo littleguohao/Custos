@@ -41,4 +41,4 @@
 
 - 退出码的传播实现：`src/pipeline_kit.propagate_gate_code`（只放行 3/4/5）
 - 判定纯函数：`runtime_guards.position_increase_decision` / `market_quality_gate`（可单测）
-- 产物契约：`src/core/contracts.py` 的 `runtime_gate`（三个 `allow_*` 布尔是权限本身）
+- 产物契约：`src/custos/core/contracts.py` 的 `runtime_gate`（三个 `allow_*` 布尔是权限本身）

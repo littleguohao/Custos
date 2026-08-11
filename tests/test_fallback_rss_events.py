@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-import daily_report
+from custos.pipeline import daily_report
 
 
 def _setup(monkeypatch, tmp_path, items):

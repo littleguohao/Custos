@@ -68,9 +68,9 @@ tests/        pytest
 周六 10:07 跑 `weekly_review.py` 周度复盘。手动执行同名脚本即可：
 
 ```bash
-uv run python src/pipeline/run_1445.py
-uv run python src/datasource/trading_calendar.py --check-date 20260717
-uv run python src/research/__main__.py        # 研究/回测统一入口
+uv run python src/custos/pipeline/run_1445.py
+uv run python src/custos/datasource/trading_calendar.py --check-date 20260717
+uv run python src/custos/research/__main__.py        # 研究/回测统一入口
 ```
 
 ## 数据源

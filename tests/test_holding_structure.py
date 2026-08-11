@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import unittest
 
-from holding_structure import n_structure_basis
+from custos.pipeline.close_review.holding_structure import n_structure_basis
 
 
 class HoldingStructureTests(unittest.TestCase):

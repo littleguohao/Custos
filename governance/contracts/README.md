@@ -19,7 +19,7 @@
 | [RSS_FILTER_CONFIG.json](RSS_FILTER_CONFIG.json) | 84 | 1 | ✅ | `news/rss_filter.py` |
 | [RSSHUB_PRIVATE_ROUTE_CANDIDATES.json](RSSHUB_PRIVATE_ROUTE_CANDIDATES.json) | 23 | 1 | ✅ | `news/` 私有路由候选 |
 
-⚠️ **配置路径只在 `src/core/paths.py` 定义一次**，模块不得自己拼 `"governance"`
+⚠️ **配置路径只在 `src/custos/core/paths.py` 定义一次**，模块不得自己拼 `"governance"`
 （由 `tests/test_base_path_depth.py` 强制）。
 
 ### ② 数据契约（描述产物形状）
@@ -79,7 +79,7 @@
 - `MASTER_WORKFLOW §十二` 原挂着 8 条「当前需要调整的旧设计」。**待办不该埋在契约文档里** ——
   找不到，也不会被跟踪。逐条核实后：7 条已完成、1 条部分（月度）。
   最后完成的第 8 条（`report_id` / 规则版本 / 数据截止 / 输入清单，关乎**可审计与可重跑**）
-  于 2026-08-09 落地：统一实现 `src/core/report_audit.py`，四份正式报告头部注入可审计块。
+  于 2026-08-09 落地：统一实现 `src/custos/core/report_audit.py`，四份正式报告头部注入可审计块。
 
 ## 写入规范
 
@@ -90,7 +90,7 @@
 - 配置类 JSON 的路径只在 `paths.py` 定义，不要在模块里拼。
 - 待办不要写进契约文档，写进 `TODO.md`。
 
-## 可执行契约（`src/core/contracts.py`）
+## 可执行契约（`src/custos/core/contracts.py`）
 
 ⚠️ **本目录的 `.md` 是文档，不参与执行，所以会漂移** —— 这份 README 自己就记着
 7 处契约失真的核查结论，而其中 `SkillEvidence` 那个实体**项目里从来没有过**
@@ -98,7 +98,7 @@
 
 2026-08-07 起，**钱的路径与硬失败链上的产物 schema 变成可执行代码**：
 
-    src/core/contracts.py     SPECS 是唯一来源；生产者落盘前 require(...)
+    src/custos/core/contracts.py     SPECS 是唯一来源；生产者落盘前 require(...)
     tests/test_contracts.py   每条校验规则标注它对应的**真实 bug**
     tests/test_architecture_layers.py::test_money_path_producers_validate_before_write
                               强制 11 个生产者都在落盘前校验

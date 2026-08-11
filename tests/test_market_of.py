@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import pytest
 
-import code_utils
-from code_utils import market_of
-from local_tdx.local_tdx_data import _is_bj_code, normalize_code
-from collect_holding_quotes import get_market
+from custos.core import code_utils
+from custos.core.code_utils import market_of
+from custos.datasource.local_tdx.local_tdx_data import _is_bj_code, normalize_code
+from custos.datasource.collect.collect_holding_quotes import get_market
 
 
 @pytest.mark.parametrize("code,expected", [

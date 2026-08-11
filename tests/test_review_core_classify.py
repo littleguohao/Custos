@@ -14,10 +14,10 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/pipeline/close_review"):
+for _p in ("src", "src/custos/pipeline/close_review"):
     sys.path.insert(0, str(ROOT / _p))
 
-from close_review import review_core as rc  # noqa: E402
+from custos.pipeline.close_review import review_core as rc  # noqa: E402
 
 POS = {"单位成本": 10.0, "名称": "测试", "持有数量": 100}
 DAY = "2026-08-07"

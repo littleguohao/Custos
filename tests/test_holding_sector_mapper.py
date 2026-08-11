@@ -24,10 +24,10 @@ import pandas as pd
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/pipeline/holdings"):
+for _p in ("src", "src/custos/pipeline/holdings"):
     sys.path.insert(0, str(ROOT / _p))
 
-from holdings import holding_sector_mapper as hsm  # noqa: E402
+from custos.pipeline.holdings import holding_sector_mapper as hsm  # noqa: E402
 
 
 class TestNormCode:
@@ -50,7 +50,7 @@ class TestNormCode:
         assert hsm.norm_code("汇总") == "汇总"
 
     def test_does_not_append_exchange_suffix(self):
-        from code_utils import norm_code as shared
+        from custos.core.code_utils import norm_code as shared
         assert hsm.norm_code("600000") == "600000"
         assert shared("600000") != hsm.norm_code("600000"), \
             "两者刻意不同；若哪天一致了，请回去读两边的 docstring 再决定是否合并"

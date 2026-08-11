@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 
-import daily_report
-from news import premarket_intel_schema as intel
+from custos.pipeline import daily_report
+from custos.datasource.news import premarket_intel_schema as intel
 
 
 def _setup(monkeypatch, tmp_path, filenames):

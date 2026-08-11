@@ -129,7 +129,7 @@ def test_no_scratch_files_in_code_tree():
 
     2026-08-10 拉取时发现两类，都是目标机 cron 的自动提交（`git add -A`）扫进来的：
 
-        src/core/trades/_no_trades_2026080{5,6,7}.json   2 字节 `{}`
+        src/custos/core/trades/_no_trades_2026080{5,6,7}.json   2 字节 `{}`
         _summ_m2.py                                      根目录一次性分析手稿
 
     前者的根因是 **CLI 设计逼出来的**：`incremental_ledger --confirm-no-trades`

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import unittest
 
-from final_review_validator import REQUIRED_SECTIONS, validate
+from custos.pipeline.close_review.final_review_validator import REQUIRED_SECTIONS, validate
 
 
 def valid_payload():

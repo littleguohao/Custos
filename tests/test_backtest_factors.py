@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 
-from research import backtest_factors as bt
+from custos.research import backtest_factors as bt
 
 
 def make_df(closes, highs=None, lows=None, vols=None):
@@ -461,8 +461,8 @@ def test_load_bars_local_prints_qfq_failure_summary(monkeypatch, capsys):
     所以这里也 monkeypatch 扁平模块（`local_tdx.local_tdx_data` 是另一个模块对象，
     计数互不可见——这是模块头注释声明的已知限制）。
     """
-    import adjust_factors as af_flat
-    import local_tdx_data as ltd_flat
+    from custos.datasource.local_tdx import adjust_factors as af_flat
+    from custos.datasource.local_tdx import local_tdx_data as ltd_flat
 
     def fake_qfq(code, df, strict=False):
         if code.startswith("600"):
@@ -489,8 +489,8 @@ def test_load_bars_local_prints_qfq_failure_summary(monkeypatch, capsys):
 
 def test_load_bars_local_no_summary_when_all_qfq_ok(monkeypatch, capsys):
     """全部复权成功时不打汇总行——0 失败告警本身就是噪声。"""
-    import adjust_factors as af_flat
-    import local_tdx_data as ltd_flat
+    from custos.datasource.local_tdx import adjust_factors as af_flat
+    from custos.datasource.local_tdx import local_tdx_data as ltd_flat
 
     def fake_qfq(code, df, strict=False):
         out = df.copy()

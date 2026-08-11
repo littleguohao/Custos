@@ -12,7 +12,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from local_tdx import fetch_sector_index_history as fs
+from custos.datasource.local_tdx import fetch_sector_index_history as fs
 
 
 class _TQ:

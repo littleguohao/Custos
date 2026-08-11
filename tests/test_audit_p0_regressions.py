@@ -13,10 +13,10 @@ from datetime import date
 import pandas as pd
 import pytest
 
-import runtime_guards as rg
-import trading_calendar as tc
-from news import rss_collector as rc
-from trades import incremental_ledger as il
+from custos.core import runtime_guards as rg
+from custos.datasource import trading_calendar as tc
+from custos.datasource.news import rss_collector as rc
+from custos.core.trades import incremental_ledger as il
 
 
 class TestCalendarRefreshDoesNotOverreach:

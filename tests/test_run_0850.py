@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-import run_0850
+from custos.pipeline import run_0850
 
 
 class TestRssSummaryFragments:
@@ -99,7 +99,7 @@ class TestCollectionStatus:
 
     def test_degraded_log_blocks_0905_reuse(self, tmp_path, monkeypatch, capsys):
         """端到端语义:0850 的 degraded 日志 → 0905 拒绝复用 discovery。"""
-        import run_0905
+        from custos.pipeline import run_0905
         self._run(tmp_path, monkeypatch, {"rss_filter"}, capsys)
         monkeypatch.setattr(run_0905, "LOG_DIR", tmp_path)
         reuse, note = run_0905._check_0850_status("2026-07-20")

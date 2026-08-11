@@ -28,9 +28,9 @@
       ],
       "configs": [],
       "code": [
-        "src/pipeline/screening/enrich_candidates.py",
-        "src/pipeline/holdings/b1_holding_state.py",
-        "src/research/backtest_factors.py"
+        "src/custos/pipeline/screening/enrich_candidates.py",
+        "src/custos/pipeline/holdings/b1_holding_state.py",
+        "src/custos/research/backtest_factors.py"
       ],
       "research": "00_governance/research/README.md",
       "known_issues": [
@@ -53,8 +53,8 @@
         "cz/CZ_SECTOR_PREFERENCE.json"
       ],
       "code": [
-        "src/pipeline/screening/enrich_candidates.py",
-        "src/pipeline/screening/score_candidates.py"
+        "src/custos/pipeline/screening/enrich_candidates.py",
+        "src/custos/pipeline/screening/score_candidates.py"
       ],
       "research": null,
       "known_issues": [

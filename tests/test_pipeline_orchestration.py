@@ -33,7 +33,7 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-TOOLS = ROOT / "src"
+TOOLS = ROOT / "src" / "custos"
 sys.path.insert(0, str(TOOLS))
 
 
@@ -82,7 +82,7 @@ class Recorder:
 
 @pytest.fixture()
 def pipeline(monkeypatch, tmp_path):
-    import daily_pipeline as dp
+    from custos.pipeline import daily_pipeline as dp
 
     # ⚠️ **必须 patch 全部路径常量**。第一版漏了 `PLANS` / `SUPPORT_DIR`，
     # 测试在**真实仓库**里建出了 `artifacts/reports/daily/_supporting/2026-08-07/`
@@ -237,7 +237,7 @@ def _run_runner(mod, monkeypatch, rec, tmp_path, argv=(), seed=None):
     """跑 runner 的 main()，绕过日历门、隔离所有路径、注入 stage recorder。"""
     monkeypatch.setattr(mod, "_stage", rec)
     # 绕过日历门：让它当交易日（返回 exit_code=None 表示继续）
-    import pipeline_kit
+    from custos.core import pipeline_kit
 
     # ⚠️ 桩必须带 `cal` 字段 —— runner 会读 `_cg.cal`（日历检查的解析结果）。
     # 第一版只给了 exit_code/stages ⇒ AttributeError，4 条测试静默变成 skip
@@ -284,7 +284,7 @@ class TestRun1700Order:
     """
 
     def test_sync_compass_precedes_merge(self, monkeypatch, tmp_path):
-        import run_1700
+        from custos.pipeline import run_1700
 
         rec = Recorder()
         _run_runner(run_1700, monkeypatch, rec, tmp_path)
@@ -295,7 +295,7 @@ class TestRun1700Order:
 
     def test_collect_precedes_mfe_and_review(self, monkeypatch, tmp_path):
         """行情采集要在 MFE/MAE 与复盘之前 —— 它们都读当日行情。"""
-        import run_1700
+        from custos.pipeline import run_1700
 
         rec = Recorder()
         _run_runner(run_1700, monkeypatch, rec, tmp_path)
@@ -310,7 +310,7 @@ class TestRun1700Order:
 
     def test_daily_pipeline_precedes_final_review(self, monkeypatch, tmp_path):
         """`final_close_review` 的 8 个强制输入全由 daily_pipeline 产出。"""
-        import run_1700
+        from custos.pipeline import run_1700
 
         rec = Recorder()
         _run_runner(run_1700, monkeypatch, rec, tmp_path)
@@ -325,7 +325,7 @@ class TestRun1445Order:
         顺序反了会让 `review_core` 拿不到当日行情 ⇒ 走「等待当日行情」分支，
         整份 14:45 报告失去意义（而不会报错）。
         """
-        import run_1445
+        from custos.pipeline import run_1445
 
         rec = Recorder()
         _run_runner(run_1445, monkeypatch, rec, tmp_path)
@@ -337,7 +337,7 @@ class TestRun1445Order:
 
     def test_gate_recorded_but_not_blocking(self, monkeypatch, tmp_path):
         """14:45 门控**只留痕不阻断**（0AMV 与宽度本就要等收盘）。"""
-        import run_1445
+        from custos.pipeline import run_1445
 
         rec = Recorder(gate_code=4)     # blocked
         rc = _run_runner(run_1445, monkeypatch, rec, tmp_path)
@@ -350,7 +350,7 @@ class TestRun1800Order:
 
     def test_names_refresh_precedes_screening(self, monkeypatch, tmp_path):
         """股票名称表刷新要在选股之前 —— 它是 **ST 硬排除的唯一依据**。"""
-        import run_1800
+        from custos.pipeline import run_1800
 
         rec = Recorder()
         _run_runner(run_1800, monkeypatch, rec, tmp_path)
@@ -360,7 +360,7 @@ class TestRun1800Order:
 
     def test_screening_chain_order(self, monkeypatch, tmp_path):
         """公式初筛 → 充实 → 打分 → 表格，每步消费上一步产物。"""
-        import run_1800
+        from custos.pipeline import run_1800
 
         rec = Recorder()
         _run_runner(run_1800, monkeypatch, rec, tmp_path)
@@ -376,7 +376,7 @@ class TestRun1800Order:
     def test_gate_blocked_does_not_stop_screening(self, monkeypatch, tmp_path):
         """⚠️ v0.29：18:00 门控 blocked 时**选股照跑** ——
         门控若改写分层，live 候选就无法与回测对照。"""
-        import run_1800
+        from custos.pipeline import run_1800
 
         rec = Recorder(gate_code=4)
         rc = _run_runner(run_1800, monkeypatch, rec, tmp_path)
@@ -441,7 +441,7 @@ class TestRun0905:
     """
 
     def test_runs_daily_pipeline_premarket(self, monkeypatch, tmp_path):
-        import run_0905
+        from custos.pipeline import run_0905
 
         rec = Recorder()
         _run_runner(run_0905, monkeypatch, rec, tmp_path)
@@ -457,7 +457,7 @@ class TestRun0905:
         `daily_pipeline` 失败时 run_0905 走 `propagate_gate_code(r)`，
         所以这里让那个 stage 带上门控码。
         """
-        import run_0905
+        from custos.pipeline import run_0905
 
         # ⚠️ 不能在调 `_run_runner` **之前**打桩 `_stage` —— 它会被 harness 覆盖。
         # 用一个「所有 stage 都带指定 returncode 失败」的 Recorder 子类。
@@ -474,7 +474,7 @@ class TestRun0905:
 
         这正是「没抛异常 ≠ 产出了东西」在 runner 层的形态。
         """
-        import run_0905
+        from custos.pipeline import run_0905
 
         rec = Recorder()
         _run_runner(run_0905, monkeypatch, rec, tmp_path)   # PLANS 是空的 tmp
@@ -497,7 +497,7 @@ class TestRun1800Degradation:
         这是「没抛异常 ≠ 拿到数据」在选股链的形态：公式初筛可能正常退出
         却因为宇宙残缺只筛了子集。只看 `r["ok"]` 会把它当成功。
         """
-        import run_1800
+        from custos.pipeline import run_1800
 
         rec = Recorder(stdout={"screening_formula_screen":
                                '{"status": "unavailable", "reason": "universe empty"}'})
@@ -513,7 +513,7 @@ class TestRun1800Degradation:
     def test_stage_failure_counts_as_degraded(self, monkeypatch, tmp_path):
         import json
 
-        import run_1800
+        from custos.pipeline import run_1800
 
         rec = Recorder(fail={"screening_score_candidates"})
         _run_runner(run_1800, monkeypatch, rec, tmp_path)
@@ -527,7 +527,7 @@ class TestRun1800Degradation:
         并**继续**（不崩、不阻断）—— 18:00 是独立链，它挂了不该影响别的。"""
         import json
 
-        import run_1800
+        from custos.pipeline import run_1800
 
         rec = Recorder()
         rc = _run_runner(run_1800, monkeypatch, rec, tmp_path)
@@ -555,7 +555,7 @@ class TestRun1700HardFailures:
     def test_hard_stage_failure_writes_failed(self, monkeypatch, tmp_path, stage):
         import json
 
-        import run_1700
+        from custos.pipeline import run_1700
 
         rec = Recorder(fail={stage})
         _run_runner(run_1700, monkeypatch, rec, tmp_path)
@@ -570,7 +570,7 @@ class TestRun1700HardFailures:
         """采集类失败是 best-effort ⇒ 不得记 failed（否则每次网络抖动都像事故）。"""
         import json
 
-        import run_1700
+        from custos.pipeline import run_1700
 
         rec = Recorder(fail={"collect_fund_flow", "refresh_eod_klines",
                              "collect_incremental_market"})

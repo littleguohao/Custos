@@ -27,11 +27,11 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/pipeline/screening", "src/pipeline/close_review",
-           "src/pipeline/market_timing", "src/core/factors"):
+for _p in ("src", "src/custos/pipeline/screening", "src/custos/pipeline/close_review",
+           "src/custos/pipeline/market_timing", "src/custos/core/factors"):
     sys.path.insert(0, str(ROOT / _p))
 
-from close_review import weekly_review as wr  # noqa: E402
+from custos.pipeline.close_review import weekly_review as wr  # noqa: E402
 
 
 class TestScoreCandidateUnits:
@@ -39,7 +39,7 @@ class TestScoreCandidateUnits:
 
     @staticmethod
     def _apply(cand, base_bucket="A", amv="中性", cz=None, sector_ok=True):
-        import score_candidates as sc
+        from custos.pipeline.screening import score_candidates as sc
         return sc.apply_risk_downgrades(
             amv_state=amv, base_bucket=base_bucket, cand=cand, cz_sector=cz,
             rules=sc.resolve_cap_rules(None), sector_score_available=sector_ok)
@@ -83,7 +83,7 @@ class TestScoreCandidateUnits:
         中文标签是给形态/信号用的 —— 保留原始 id 是为了让理由能回连到
         `SCREEN_FORMULA_REGISTRY.json` 的键。
         """
-        import score_candidates as sc
+        from custos.pipeline.screening import score_candidates as sc
         rs = sc.build_entry_reasons(
             cand={"formula_hits": ["bbi_above", "j_low"], "patterns": {},
                   "five_day_entry": {"hit": True}},
@@ -97,7 +97,7 @@ class TestScoreCandidateUnits:
         R2 的结论是「跟随主流」机械规则不成立，所以共振度不得反过来放宽权限 ——
         它只写进产物供复盘对账，不参与 bucket 或 next_step。
         """
-        import score_candidates as sc
+        from custos.pipeline.screening import score_candidates as sc
         fq, sp, legs, aligned, res = sc.four_leg_resonance(
             cand={"sector_phase": {"favorable": True}, "financials": {"tier": "you"}},
             permission="允许", tech_level="S")
@@ -194,7 +194,7 @@ class TestWeeklyReviewUnits:
 class TestRenderTableUnits:
     def test_bear_prints_ban_before_buy_list(self):
         """⚠️ 空头 regime 下先打禁买提示 —— 共振度**不能**在空头里放宽权限。"""
-        import candidate_table as ct
+        from custos.pipeline.screening import candidate_table as ct
         lines = []
         ct._signal_overview(lines, is_bear=True, watch=[])
         text = "\n".join(lines)
@@ -203,7 +203,7 @@ class TestRenderTableUnits:
 
     def test_sections_append_in_place(self):
         """沿用 `render_news(lines, ...)` 的既有约定：**就地追加**，lines 在首位。"""
-        import candidate_table as ct
+        from custos.pipeline.screening import candidate_table as ct
         import inspect
         for name in ("_signal_overview", "_fundamental_bulls", "_capped_but_resonant",
                      "_bear_outposts", "_top5", "_bucket_pools"):

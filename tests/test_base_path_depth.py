@@ -3,30 +3,30 @@
 import unittest
 from pathlib import Path
 
-TOOLS = Path(__file__).resolve().parent.parent / "src"
+TOOLS = Path(__file__).resolve().parent.parent / "src" / "custos"
 
 
 class BasePathDepthTests(unittest.TestCase):
     """Every script in src/<subdir>/ must resolve BASE to the project root."""
 
     def test_subdir_scripts_resolve_base_to_project_root(self):
-        project_root = TOOLS.parent
+        project_root = TOOLS.parents[1]
         markers = {"governance", "data", "src"}
         broken = []
         for p in sorted(TOOLS.rglob("*.py")):
             if p.name in ("__init__.py", "conftest.py", "paths.py"):
                 continue
             if p.parent == TOOLS:
-                continue  # src/*.py — parent.parent is correct
+                continue  # custos/*.py — 顶层文件不需要 __file__ 锚点
             text = p.read_text(encoding="utf-8")
-            if "parent.parent" in text and "parents[2]" not in text:
+            if "parent.parent" in text and "parents[3]" not in text:
                 # Check if it's actually a BASE definition
                 if "BASE" in text and "parent.parent" in text:
-                    broken.append(f"{p.relative_to(TOOLS)}: uses parent.parent (should be parents[2])")
+                    broken.append(f"{p.relative_to(TOOLS)}: uses parent.parent (should be parents[3])")
         self.assertEqual(broken, [], f"Scripts with wrong BASE depth:\n" + "\n".join(broken))
 
     def test_project_root_has_expected_markers(self):
-        root = TOOLS.parent
+        root = TOOLS.parents[1]
         for marker in ["governance", "data", "src", "tests"]:
             self.assertTrue((root / marker).exists(), f"Missing project marker: {marker}/")
 
@@ -44,21 +44,21 @@ class TestGovernanceLayout:
     """
 
     def test_four_subdirs_exist(self):
-        import paths
+        from custos.core import paths
         for d in (paths.STRATEGY_DIR, paths.DATA_DOCS_DIR,
                   paths.RESEARCH_DIR, paths.CONTRACTS_DIR):
             assert d.is_dir(), f"{d} 不存在"
 
     def test_no_loose_files_at_governance_root(self):
         """治理根目录下不应再有平铺文件——新增文档必须落到四个子目录之一。"""
-        import paths
+        from custos.core import paths
         loose = [p.name for p in paths.GOVERNANCE.iterdir()
                  if p.is_file() and not p.name.startswith(".")]
         assert not loose, f"这些文件没有归类: {loose}"
 
     def test_config_paths_resolve(self):
         """每个配置常量都必须指向真实存在的文件——搬目录最容易漏的就是这些。"""
-        import paths
+        from custos.core import paths
         for name in ("CALENDAR_FILE", "SCREEN_FORMULA_REGISTRY_FILE",
                      "RSS_SOURCE_REGISTRY_FILE", "RSS_FILTER_CONFIG_FILE",
                      "RSSHUB_ROUTES_FILE", "CZ_SECTOR_PREFERENCE_FILE"):
@@ -254,8 +254,8 @@ class SubprocessTargetTests(unittest.TestCase):
             if not hits:
                 continue
             try:
-                mod = importlib.import_module(f.stem if f.parent == TOOLS
-                                             else f"{f.parent.name}.{f.stem}")
+                mod = importlib.import_module(
+                    "custos." + f.relative_to(TOOLS).with_suffix("").as_posix().replace("/", "."))
             except Exception:
                 continue          # 导入失败由别的测试负责报告
             for lineno, const, segs in hits:
@@ -311,7 +311,7 @@ class LocalPathRedefinitionTests(unittest.TestCase):
         import ast
         import sys
         sys.path.insert(0, str(TOOLS))
-        import paths as paths_mod
+        from custos.core import paths as paths_mod
 
         # 只取 src 下的子目录常量
         known = {v: k for k, v in vars(paths_mod).items()
@@ -351,7 +351,7 @@ class LocalPathRedefinitionTests(unittest.TestCase):
                 try:
                     import importlib
                     mod = importlib.import_module(
-                        f.stem if f.parent == TOOLS else f"{f.parent.name}.{f.stem}")
+                        "custos." + f.relative_to(TOOLS).with_suffix("").as_posix().replace("/", "."))
                     val = getattr(mod, name, None)
                 except Exception:
                     continue

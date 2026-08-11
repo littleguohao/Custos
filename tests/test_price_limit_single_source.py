@@ -27,10 +27,10 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/pipeline/market_timing", "src/pipeline/screening", "src/datasource/local_tdx"):
+for _p in ("src", "src/custos/pipeline/market_timing", "src/custos/pipeline/screening", "src/custos/datasource/local_tdx"):
     sys.path.insert(0, str(ROOT / _p))
 
-from code_utils import price_limit_pct  # noqa: E402
+from custos.core.code_utils import price_limit_pct  # noqa: E402
 
 
 class TestCanonicalTable:
@@ -64,16 +64,16 @@ class TestDelegation:
     """四个调用方必须**委托**唯一实现，而不是各自内联前缀表。"""
 
     def test_backtest_factors(self):
-        import backtest_factors as bt
+        from custos.research import backtest_factors as bt
         assert bt._limit_pct("920808") == 30.0 and bt._limit_pct("689009") == 20.0
 
     def test_reconcile_qfq(self):
-        import reconcile_qfq as rq
+        from custos.research import reconcile_qfq as rq
         assert rq._limit_pct("920808") == 30.0 and rq._limit_pct("689009") == 20.0
 
     def test_technical_monitor_base(self):
         import pandas as pd
-        from market_timing import technical_monitor as tm
+        from custos.pipeline.market_timing import technical_monitor as tm
         quiet = pd.DataFrame({"close": [10.0 + (i % 2) * 0.01 for i in range(25)]})
         assert tm._infer_price_limit("920808", quiet) == 30
         assert tm._infer_price_limit("830799", quiet) == 30
@@ -82,7 +82,7 @@ class TestDelegation:
     def test_st_downgrade_still_only_for_ten_percent(self):
         """回归保护：安静窗口把 10% 品种降级 5%，但**不得**降级宽幅品种。"""
         import pandas as pd
-        from market_timing import technical_monitor as tm
+        from custos.pipeline.market_timing import technical_monitor as tm
         quiet = pd.DataFrame({"close": [10.0 + (i % 2) * 0.01 for i in range(25)]})
         assert tm._infer_price_limit("600000", quiet) == 5
         for code in ("300750", "688111", "920808"):
@@ -124,12 +124,12 @@ class TestMaFlag:
         显示成「下MA240」是一个未被支持的事实断言，且方向偏空 ——
         同 `fmt.pct_text` 那条教训：不能把「不知道」渲染成一个具体读数。
         """
-        from close_review import final_close_review as fcr
+        from custos.pipeline.close_review import final_close_review as fcr
         assert fcr.ma_flag(None) == "?"
         assert fcr.ma_flag(True) == "上" and fcr.ma_flag(False) == "下"
 
     def test_index_row_shows_question_for_missing_ma(self):
-        from close_review import final_close_review as fcr
+        from custos.pipeline.close_review import final_close_review as fcr
         row = {"name": "上证指数", "close": 3500.0, "change_pct": 0.5,
                "above_ma25": True, "above_ma60": False,
                "above_ma144": None, "above_ma240": None}
@@ -138,6 +138,6 @@ class TestMaFlag:
         assert "上MA25" in line and "下MA60" in line
 
     def test_index_row_missing_close_is_unavailable(self):
-        from close_review import final_close_review as fcr
+        from custos.pipeline.close_review import final_close_review as fcr
         line = fcr.render_index_row({"name": "x", "close": None, "change_pct": None})
         assert "unavailable" in line

@@ -16,8 +16,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import backtest_factors as bt
-import launch_point_study as lp
+from custos.research import backtest_factors as bt
+from custos.research import launch_point_study as lp
 
 
 def _bars(closes, highs=None, lows=None, vols=None, start="2026-01-05"):
@@ -187,7 +187,7 @@ class TestSplitConsistencyByDate:
     """E1: 半程一致性必须按日期切,且各半程独立定阈值。"""
 
     def test_cache_path_keyed_by_parameters(self):
-        import research.analyze_winner_features as awf
+        from custos.research import analyze_winner_features as awf
         p1 = awf._cache_path()
         orig = awf.FWD
         try:
@@ -212,7 +212,7 @@ class TestSplitConsistencyByDate:
 
     def test_source_sorts_rows_by_date(self):
         import inspect
-        import research.analyze_winner_features as awf
+        from custos.research import analyze_winner_features as awf
         src = inspect.getsource(awf.main)
         assert 'rows.sort(key=lambda x: x["date"])' in src
         assert "win_half" in src, "半程须用各自独立的标签阈值"

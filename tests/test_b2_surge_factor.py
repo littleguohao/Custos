@@ -16,9 +16,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import backtest_factors as bt
-import b2_surge_factor as bs
-from technical_monitor import kdj
+from custos.research import backtest_factors as bt
+from custos.core.factors import b2_surge_factor as bs
+from custos.pipeline.market_timing.technical_monitor import kdj
 
 
 def _mk(rows):
@@ -236,7 +236,7 @@ class TestNotWiredIntoScreening:
     def test_score_candidates_untouched(self):
         import inspect
 
-        from screening import score_candidates as sc
+        from custos.pipeline.screening import score_candidates as sc
         src = inspect.getsource(sc)
         for name in ("detect_b2", "bottom_surge", "b2_surge_factor"):
             assert name not in src, "接入选股链前必须先有回测证据"

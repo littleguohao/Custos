@@ -97,17 +97,17 @@ H1/H2 终审的全部数字都是在未复权数据上跑的（`--universe-local
 
 ### 诊断工具
 
-`src/research/adjust_diagnostic.py`：
+`src/custos/research/adjust_diagnostic.py`：
 
 ```bash
 # ① 分档统计 tdx 数据里的跳空（2%~5% / 5%~11% / 11%~25% / ≥25%），并对比 B1 止损空间
-uv run python src/research/adjust_diagnostic.py --scan --sample 300
+uv run python src/custos/research/adjust_diagnostic.py --scan --sample 300
 
 # ② 与前复权源逐日比对，精确区分「除权」与「一字跌停」
-uv run python src/research/adjust_diagnostic.py --compare --sample 100
+uv run python src/custos/research/adjust_diagnostic.py --compare --sample 100
 
 # ③ 同一批票同参数，两个口径各跑一遍回测，看结论差多少
-uv run python src/research/adjust_diagnostic.py --backtest-diff --sample 300
+uv run python src/custos/research/adjust_diagnostic.py --backtest-diff --sample 300
 ```
 
 ### ✅ 已解决：owner 2026-08-04 拍板「全链统一前复权」
@@ -118,7 +118,7 @@ uv run python src/research/adjust_diagnostic.py --backtest-diff --sample 300
 
 #### 实现：基于通达信权息数据（xdxr）本地计算
 
-`src/datasource/local_tdx/adjust_factors.py`。**不爬 HTTP 前复权 K 线**，理由：
+`src/custos/datasource/local_tdx/adjust_factors.py`。**不爬 HTTP 前复权 K 线**，理由：
 
 - `Quotes.xdxr()` 走通达信协议返回标准 gbbq（分红/送转/配股/缩股），
   每票几十条、**是历史事实不会变**，可长期缓存
@@ -160,13 +160,13 @@ ratio_d    = 除权参考价 / 前收盘
 
 ```bash
 # 全市场预热（首次必做；之后按 7 天增量刷新，run_1800 会自动跑）
-uv run python src/datasource/local_tdx/adjust_factors.py --warmup
+uv run python src/custos/datasource/local_tdx/adjust_factors.py --warmup
 
 # 查看某票的权息事件与缓存年龄
-uv run python src/datasource/local_tdx/adjust_factors.py --show 600519
+uv run python src/custos/datasource/local_tdx/adjust_factors.py --show 600519
 
 # 缓存统计
-uv run python src/datasource/local_tdx/adjust_factors.py --stats
+uv run python src/custos/datasource/local_tdx/adjust_factors.py --stats
 ```
 
 不预热的话，回测跑 1000 只票时每只都要走一次网络取权息。`fetch_xdxr_batch`

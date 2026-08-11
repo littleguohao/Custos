@@ -5,10 +5,10 @@ import json
 import pandas as pd
 import pytest
 
-from screening import enrich_candidates as ec
-from research import backtest_factors as bt
-from factors import _shares
-from screening import financials as fin
+from custos.pipeline.screening import enrich_candidates as ec
+from custos.research import backtest_factors as bt
+from custos.core.factors import _shares
+from custos.pipeline.screening import financials as fin
 
 
 # ---------- ② 资金流多日累计 ----------
@@ -165,7 +165,7 @@ def test_auto_colmap_revenue_skips_ratio_column():
 
 def test_enrich_financials_autotmap_does_not_clobber_candidates(monkeypatch):
     import pandas as pd
-    from screening import enrich_candidates as ec
+    from custos.pipeline.screening import enrich_candidates as ec
 
     date = "2026-07-23"
     # 注入 OHLCV：61 根、last_date==date（通过 no_today_bar / list_days 门槛）
@@ -227,7 +227,7 @@ def _synth_uptrend_pullback():
 
 
 def test_b1_pullback_fit_recognizes_fingerprint():
-    from screening import enrich_candidates as ec
+    from custos.pipeline.screening import enrich_candidates as ec
     r = ec.compute_b1_pullback_fit(_synth_uptrend_pullback())
     assert r["available"] and r["hit"] is True and r["score"] >= 6
     comp = r["components"]
@@ -235,7 +235,7 @@ def test_b1_pullback_fit_recognizes_fingerprint():
 
 
 def test_b1_pullback_fit_rejects_downtrend():
-    from screening import enrich_candidates as ec
+    from custos.pipeline.screening import enrich_candidates as ec
     closes = [20.0 - 10.0 * i / 69 for i in range(70)]        # 单边下跌
     dates = pd.date_range("2025-01-01", periods=70, freq="B")
     df = pd.DataFrame([{"date": dates[i], "open": c, "high": c * 1.01, "low": c * 0.99,
@@ -614,7 +614,7 @@ def test_shares_idx_smoke_with_real_data(monkeypatch):
     `_SHARE_IDX`，没人走真实加载路径 —— 这条专门走真实路径，防「静默全空」。
     无真实数据的环境（CI/新机）跳过，不 mock。
     """
-    from paths import DATA
+    from custos.core.paths import DATA
     if not (DATA / "fundamentals" / "share_changes.jsonl").is_file():
         pytest.skip("无 share_changes.jsonl（非真实数据环境）")
     monkeypatch.setattr(_shares, "_SHARE_IDX", None)   # 清掉前序测试的桩，强制真实加载

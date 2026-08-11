@@ -6,7 +6,7 @@ score/共振/trade_style）。风控/回避（无止损/空头/sprint/派发/MAC
 """
 import pytest
 
-from screening import score_candidates as sc
+from custos.pipeline.screening import score_candidates as sc
 
 
 def _mk(patterns=None, capital="weak", stop_price=10.0, code="600000", **extra):
@@ -224,6 +224,6 @@ def test_stock_pool_json_carries_audit_block(tmp_path, monkeypatch):
     audit = pool["audit"]
     assert audit["report_id"].startswith("2026-08-07_screening_")
     assert audit["strategy_version"] and audit["data_as_of"] and audit["inputs"]
-    from contracts import check
+    from custos.core.contracts import check
     result = check("stock_pool", pool)
     assert result["valid"], result["errors"]

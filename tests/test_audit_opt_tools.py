@@ -16,11 +16,11 @@ import requests
 TESTS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(TESTS_DIR))
 
-import net_retry  # noqa: E402
-import online_quotes as oq  # noqa: E402
-import collect_fund_flow as cff  # noqa: E402
-import collect_holding_quotes as chq  # noqa: E402
-import runtime_guards as rg  # noqa: E402
+from custos.core import net_retry  # noqa: E402
+from custos.datasource.collect import online_quotes as oq  # noqa: E402
+from custos.datasource.collect import collect_fund_flow as cff  # noqa: E402
+from custos.datasource.collect import collect_holding_quotes as chq  # noqa: E402
+from custos.core import runtime_guards as rg  # noqa: E402
 
 
 # ---------------------------------------------------------------- helpers ----
@@ -146,7 +146,7 @@ class TestNetRetryStatusAware:
 
 # ================================= 2/3. collect_incremental_market 解析 =====
 def _cim():
-    import collect_incremental_market as cim
+    from custos.datasource.collect import collect_incremental_market as cim
     return cim
 
 
@@ -483,7 +483,7 @@ class TestInheritedUsesExpectedDay:
 
 # ==================== 8/9. merge_incremental_market: amv as_of + 失败留痕 ===
 def _mim():
-    from market_timing import merge_incremental_market as mim
+    from custos.pipeline.market_timing import merge_incremental_market as mim
     return mim
 
 
@@ -584,7 +584,7 @@ class TestMergeFailureLeavesTrace:
 
 # ============================ 10. 硬编码总数推算跌家数 ====================
 def _mtc():
-    from market_timing import market_timing_collector as m
+    from custos.pipeline.market_timing import market_timing_collector as m
     return m
 
 
@@ -617,32 +617,32 @@ class TestBreadthRatioHonesty:
         assert breadth["total_stocks_source"] == "test_source"
 
     def test_scorer_treats_unavailable_ratio_as_neutral(self):
-        from market_timing import market_timing_scorer as sc
+        from custos.pipeline.market_timing import market_timing_scorer as sc
         s, note = sc.score_breadth({"market_breadth": {"up_count": 2000, "down_count": None,
                                                        "up_down_ratio_status": "unavailable"}})
         assert s == 7.5, "不可用必须走中性，不能吃一个偏低的估算比值"
 
     def test_resolve_total_stocks_env_override(self, monkeypatch):
-        import breadth_basis as bb
+        from custos.datasource import breadth_basis as bb
         monkeypatch.setenv("A_SHARE_TOTAL_STOCKS", "5401")
         total, src = bb.resolve_total_stocks()
         assert total == 5401 and "env" in src
 
     def test_resolve_total_stocks_rejects_garbage(self, monkeypatch):
-        import breadth_basis as bb
+        from custos.datasource import breadth_basis as bb
         monkeypatch.setenv("A_SHARE_TOTAL_STOCKS", "abc")
         total, src = bb.resolve_total_stocks()
         assert total is None
 
     def test_resolve_total_stocks_none_by_default(self, monkeypatch, tmp_path):
-        import breadth_basis as bb
+        from custos.datasource import breadth_basis as bb
         monkeypatch.delenv("A_SHARE_TOTAL_STOCKS", raising=False)
         monkeypatch.setattr(bb, "UNIVERSE_FILE", tmp_path / "nope.json")
         total, src = bb.resolve_total_stocks()
         assert total is None and src
 
     def test_resolve_total_stocks_from_universe_file(self, monkeypatch, tmp_path):
-        import breadth_basis as bb
+        from custos.datasource import breadth_basis as bb
         monkeypatch.delenv("A_SHARE_TOTAL_STOCKS", raising=False)
         p = tmp_path / "a_share_universe.json"
         p.write_text(json.dumps({"total": 5388, "as_of": "2026-07-20"}), encoding="utf-8")
@@ -687,7 +687,7 @@ class TestCalendarCache:
 
 class TestBatchHoldingTechnicalCache:
     def test_analysis_computed_in_process_and_cached(self, tmp_path, monkeypatch):
-        from holdings import batch_holding_technical as bht
+        from custos.pipeline.holdings import batch_holding_technical as bht
         bht.clear_analysis_cache()
         calls: list[str] = []
 
@@ -705,7 +705,7 @@ class TestBatchHoldingTechnicalCache:
         assert calls == ["600000", "000001"], "同一代码重复持仓不该重复计算"
 
     def test_no_subprocess_fork_per_holding(self, tmp_path, monkeypatch):
-        from holdings import batch_holding_technical as bht
+        from custos.pipeline.holdings import batch_holding_technical as bht
         bht.clear_analysis_cache()
         monkeypatch.setattr(bht.subprocess, "run",
                             lambda *a, **k: (_ for _ in ()).throw(
@@ -717,7 +717,7 @@ class TestBatchHoldingTechnicalCache:
         assert rows[0]["technical_available"] is True
 
     def test_analysis_error_degrades_per_code(self, tmp_path, monkeypatch):
-        from holdings import batch_holding_technical as bht
+        from custos.pipeline.holdings import batch_holding_technical as bht
         bht.clear_analysis_cache()
         monkeypatch.setattr(bht, "analyze_code",
                             lambda code, name: (_ for _ in ()).throw(RuntimeError("bad kline")))

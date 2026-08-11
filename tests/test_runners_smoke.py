@@ -25,8 +25,8 @@ TOOLS = Path(__file__).resolve().parent.parent / "src"
 BASE = TOOLS.parent
 
 sys.path.insert(0, str(TOOLS))
-from pipeline_kit import _extract_json
-from paths import LOGS
+from custos.core.pipeline_kit import _extract_json
+from custos.core.paths import LOGS
 
 RUNNERS = {
     "pipeline/run_0850.py": "休市",

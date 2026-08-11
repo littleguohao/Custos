@@ -117,15 +117,15 @@ class TestUnimplementedMechanismsFlagged:
         """
         import sys
         sys.path.insert(0, str(ROOT / "src"))
-        from close_review import loss_streak as ls
+        from custos.pipeline.close_review import loss_streak as ls
 
         assert callable(ls.loss_streaks) and callable(ls.format_lines)
-        src = (ROOT / "src" / "pipeline" / "close_review" / "loss_streak.py").read_text(encoding="utf-8")
+        src = (ROOT / "src" / "custos" / "pipeline" / "close_review" / "loss_streak.py").read_text(encoding="utf-8")
         for bad in ("return False", "raise SystemExit", "blocked", "forbid"):
             assert bad not in src, f"loss_streak 里出现 {bad!r} —— 它不该有拦截语义"
         # 两处复盘都要接入（少一处就等于「每日/每周都统计」没做到）
         for rel in ("pipeline/close_review/final_close_review.py", "pipeline/close_review/weekly_review.py"):
-            t = (ROOT / "src" / rel).read_text(encoding="utf-8")
+            t = (ROOT / "src" / "custos" / rel).read_text(encoding="utf-8")
             assert "loss_streak" in t, f"{rel} 未接入连亏检查"
 
 
@@ -179,7 +179,7 @@ class TestConfigsHavePathsConstants:
         "RSSHUB_PRIVATE_ROUTE_CANDIDATES.json",
     ])
     def test_has_constant(self, name):
-        pv = (ROOT / "src" / "core/paths.py").read_text(encoding="utf-8")
+        pv = (ROOT / "src" / "custos" / "core" / "paths.py").read_text(encoding="utf-8")
         assert name in pv, f"{name} 未在 paths.py 定义常量"
 
 

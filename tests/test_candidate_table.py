@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """candidate_table 渲染测试(重点:基本面牛股候选观察区 + 共振受限重点研究区)。"""
-from screening import candidate_table as ct
+from custos.pipeline.screening import candidate_table as ct
 
 
 def _cand(code, name, sector, bucket, tier, aligned, bull, tech=55.0, cap="中", stop=10.0,
@@ -63,7 +63,7 @@ def test_bull_mark_b_bucket_is_observe_not_buyable():
 
 def test_mainline_fingerprint_section(monkeypatch, tmp_path):
     """candidate_table 渲染当日主线指纹(best-effort);构造 members 并指向临时 market 目录。"""
-    from screening import candidate_table as ct
+    from custos.pipeline.screening import candidate_table as ct
     import json as _json
     market = tmp_path / "market"
     market.mkdir()

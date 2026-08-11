@@ -6,8 +6,8 @@ import math
 
 import pytest
 
-import code_utils
-import pipeline_kit
+from custos.core import code_utils
+from custos.core import pipeline_kit
 
 
 # ---------------------------------------------------------------------------

@@ -17,10 +17,10 @@ import pandas as pd
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/pipeline/market_timing", "src/datasource/local_tdx"):
+for _p in ("src", "src/custos/pipeline/market_timing", "src/custos/datasource/local_tdx"):
     sys.path.insert(0, str(ROOT / _p))
 
-import refresh_market_indices as rmi  # noqa: E402
+from custos.datasource import refresh_market_indices as rmi  # noqa: E402
 
 DAY = "2026-08-11"
 

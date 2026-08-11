@@ -18,7 +18,7 @@ import json
 
 import pytest
 
-import candidate_table as ct
+from custos.pipeline.screening import candidate_table as ct
 
 
 def _gate(status="degraded", amv_ok=False, limitations=None, allow_increase=False,
@@ -206,7 +206,7 @@ class TestRun1800GateStage:
     def test_stage_present_and_non_blocking(self):
         import inspect
 
-        import run_1800
+        from custos.pipeline import run_1800
         src = inspect.getsource(run_1800.main)
         assert "runtime_gate.py" in src, "18:00 链需落盘门控供候选表引用"
         gate_call = src[src.index("runtime_gate.py") - 400:src.index("runtime_gate.py") + 400]

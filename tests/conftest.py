@@ -26,7 +26,7 @@ def _block_name_resolution_network(monkeypatch):
     自行注入 ``name_resolver=``（screen_formulas 的注入点）或 monkeypatch 覆盖本替身。
     """
     try:
-        import stock_names
+        from custos.datasource.local_tdx import stock_names
     except ImportError:                      # 该模块不可用时无需阻断
         return
     monkeypatch.setattr(
@@ -73,8 +73,9 @@ def reversal_thresholds():
     import os
 
     # 依赖顺序：阈值 → 读它的三个 live 模块
-    names = ["b1_thresholds", "screening.enrich_candidates",
-             "market_timing.technical_monitor", "holdings.b1_holding_state"]
+    names = ["custos.core.b1_thresholds", "custos.pipeline.screening.enrich_candidates",
+             "custos.pipeline.market_timing.technical_monitor",
+             "custos.pipeline.holdings.b1_holding_state"]
     saved = {k: os.environ.get(k) for k in
              ("B1_REVK_CHG_PCT", "B1_REVK_CHG_MIN", "B1_REVK_CHG_MAX",
               "B1_REVK_AMP_PCT", "B1_J_LOW")}

@@ -21,8 +21,8 @@ from datetime import date
 import pandas as pd
 import pytest
 
-from screening import financials as fin
-from research import scan_signals_ytd as scan
+from custos.pipeline.screening import financials as fin
+from custos.research import scan_signals_ytd as scan
 
 # A 股法定披露截止日
 DISCLOSURE_DEADLINES = [
@@ -71,7 +71,7 @@ class TestThresholdDerivation:
         assert scan.REPORT_MAX_AGE_DAYS == fin.REPORT_MAX_AGE_DAYS
         import inspect
         src = inspect.getsource(scan)
-        assert "from financials import REPORT_MAX_AGE_DAYS" in src
+        assert "from custos.pipeline.screening.financials import REPORT_MAX_AGE_DAYS" in src
         assert "REPORT_MAX_AGE_DAYS = " not in src, "阈值不得在 scan 侧二次定义"
 
 

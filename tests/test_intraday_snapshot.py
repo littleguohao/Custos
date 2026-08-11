@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 from unittest import mock
 
-import collect_intraday_snapshot as cis
+from custos.datasource.collect import collect_intraday_snapshot as cis
 
 
 def _ok(value: dict) -> dict:

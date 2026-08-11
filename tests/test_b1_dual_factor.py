@@ -15,10 +15,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import backtest_factors as bt
-import b1_dual_factor as bd
-from s_shape import compute_s_reversal, compute_s_shape
-from technical_monitor import kdj, zhixing_state
+from custos.research import backtest_factors as bt
+from custos.core.factors import b1_dual_factor as bd
+from custos.core.factors.s_shape import compute_s_reversal, compute_s_shape
+from custos.pipeline.market_timing.technical_monitor import kdj, zhixing_state
 
 
 def _mk(rows):
@@ -100,7 +100,7 @@ class TestQsxDksMatchesZhixing:
         窗口从字面量变成了 `DKS_MA_WINDOWS` 常量 ⇒ 原来的 `"(14, 28, 57, 114)" in src`
         立刻假失败（值是对的、文本读不到）。**能读真值就别读源码。**
         """
-        import indicators
+        from custos.core import indicators
         assert indicators.DKS_MA_WINDOWS == (14, 28, 57, 114), \
             "参数必须与 good_b1 图上的知行趋势线一致"
         import inspect
@@ -236,7 +236,7 @@ class TestWeeklyResonance:
         所以它不暴露），而 detect_weekly_b1_resonance 加了兜底。这里把 date 转成
         datetime 再比，避免比的是"谁更能容错"而不是口径。
         """
-        from screening.enrich_candidates import weekly_j_state
+        from custos.pipeline.screening.enrich_candidates import weekly_j_state
         for df in resonance_shapes.values():
             dt = df.copy()
             dt["date"] = pd.to_datetime(dt["date"])
@@ -331,6 +331,6 @@ class TestNotYetWiredIntoScreening:
     def test_score_candidates_untouched(self):
         import inspect
 
-        from screening import score_candidates as sc
+        from custos.pipeline.screening import score_candidates as sc
         src = inspect.getsource(sc)
         assert "b1_dual" not in src, "接入选股链前必须先有回测证据"

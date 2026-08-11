@@ -11,7 +11,7 @@ import json
 import pandas as pd
 import pytest
 
-from trades import incremental_ledger as il
+from custos.core.trades import incremental_ledger as il
 
 
 def _df(rows):
@@ -152,7 +152,7 @@ class TestXlsxInputPath:
         return p
 
     def test_reads_xlsx(self, tmp_path):
-        import incremental_ledger as il
+        from custos.core.trades import incremental_ledger as il
         p = self._xlsx(tmp_path, [
             ["2026-08-03", "09:31:00", "600000", "浦发", "买入", 1000, 10.0, 10000, -10005, 5.0, ""]])
         df = il.read_input(p)
@@ -160,7 +160,7 @@ class TestXlsxInputPath:
 
     def test_xls_suffix_also_accepted(self, tmp_path):
         """`.xls` 也在白名单里；至少不能因为后缀被拒（老券商导出仍有 .xls）。"""
-        import incremental_ledger as il
+        from custos.core.trades import incremental_ledger as il
         import inspect
         src = inspect.getsource(il.read_input)
         assert "'.xls'" in src or '".xls"' in src
@@ -169,7 +169,7 @@ class TestXlsxInputPath:
         """未知后缀必须**明确报错**，不能静默返回空表 ——
         空表会让 select_new_rows 选出 0 行、审计写 appended_rows=0，
         看起来像「本来就没有新成交」。"""
-        import incremental_ledger as il
+        from custos.core.trades import incremental_ledger as il
         p = tmp_path / "x.txt"
         p.write_text("noop", encoding="utf-8")
         with pytest.raises(ValueError):
@@ -182,7 +182,7 @@ class TestConfirmNoTradesNeedsNoInputFile:
     此前 `--input` 是 `required=True`，而该模式又**要求输入为空**
     （`if a.confirm_no_trades and len(incoming): raise`）⇒ 操作者必须造一个
     只含 `{}` 的文件纯粹为了满足参数。那些文件留在 CWD 里被目标机的自动提交
-    扫进仓库：`src/core/trades/_no_trades_2026080{5,6,7}.json`（2026-08-10 清理）。
+    扫进仓库：`src/custos/core/trades/_no_trades_2026080{5,6,7}.json`（2026-08-10 清理）。
 
     **是 CLI 设计逼出来的垃圾，不是操作者不小心** —— 所以修的是 CLI。
     """
@@ -190,7 +190,7 @@ class TestConfirmNoTradesNeedsNoInputFile:
     def test_confirm_without_input_writes_confirmation(self, tmp_path, monkeypatch):
         import json
 
-        import incremental_ledger as il
+        from custos.core.trades import incremental_ledger as il
 
         # ⚠️ patch **全部** Path 常量，不能只挑想到的那几个 ——
         #    第一版漏了 `AUDIT`，测试把审计记录写进了真实
@@ -223,13 +223,13 @@ class TestConfirmNoTradesNeedsNoInputFile:
         """普通导入模式缺 `--input` 必须报错 —— 别把校验一起放松了。"""
         import pytest
 
-        import incremental_ledger as il
+        from custos.core.trades import incremental_ledger as il
 
         monkeypatch.setattr(il, "LEDGER", tmp_path / "l.csv", raising=False)
         with pytest.raises(SystemExit):
             il.main([])
 
     def test_read_input_none_is_empty_frame(self):
-        import incremental_ledger as il
+        from custos.core.trades import incremental_ledger as il
 
         assert len(il.read_input(None)) == 0

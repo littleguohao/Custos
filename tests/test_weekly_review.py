@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from close_review import weekly_review as wr
+from custos.pipeline.close_review import weekly_review as wr
 
 WEEK_DAYS = ["2026-07-13", "2026-07-14", "2026-07-15", "2026-07-16", "2026-07-17"]
 CALENDAR = {

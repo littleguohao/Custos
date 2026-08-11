@@ -4,8 +4,8 @@ from __future__ import annotations
 import math
 import unittest
 
-from close_review.review_core import build_delivery_digest, classify, json_safe, validate_quote_snapshot, validate_report
-from close_review import review_core as rc
+from custos.pipeline.close_review.review_core import build_delivery_digest, classify, json_safe, validate_quote_snapshot, validate_report
+from custos.pipeline.close_review import review_core as rc
 
 
 POSITIONS = [{"代码": "600000.SH", "名称": "测试股票"}]

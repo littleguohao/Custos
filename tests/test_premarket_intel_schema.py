@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 
-import daily_report
-from premarket_intel_schema import validate_premarket_intelligence
+from custos.pipeline import daily_report
+from custos.datasource.news.premarket_intel_schema import validate_premarket_intelligence
 
 STANDARD = {
     "date": "2026-07-16",
@@ -122,7 +122,7 @@ class TestMainDegradesOnInvalidSchema:
         }), encoding="utf-8")
         monkeypatch.setattr(daily_report, "DATA", data)
         # ⚠️ 盘前情报访问器已移到 `news/premarket_intel_schema`，需单独打桩它的 PREMARKET_DIR
-        from news import premarket_intel_schema as _intel
+        from custos.datasource.news import premarket_intel_schema as _intel
         monkeypatch.setattr(_intel, "PREMARKET_DIR", data / "news" / "premarket")
         monkeypatch.setattr(daily_report, "BASE", tmp_path)
         return data

@@ -16,10 +16,10 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/pipeline/screening", "src/datasource/local_tdx"):
+for _p in ("src", "src/custos/pipeline/screening", "src/custos/datasource/local_tdx"):
     sys.path.insert(0, str(ROOT / _p))
 
-from screening import financials as fin  # noqa: E402
+from custos.pipeline.screening import financials as fin  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -50,7 +50,7 @@ class TestLoadFinancialsBestEffort:
         real = builtins.__import__
 
         def blow(name, *a, **k):
-            if name == "local_tdx_data":
+            if "local_tdx" in name:
                 raise ImportError("no tdx here")
             return real(name, *a, **k)
         monkeypatch.setattr(builtins, "__import__", blow)
@@ -59,9 +59,10 @@ class TestLoadFinancialsBestEffort:
     def test_getter_exception_returns_none(self, monkeypatch):
         self._clear()
         import types
+        import custos.datasource.local_tdx as _ltd_pkg
         mod = types.ModuleType("local_tdx_data")
         mod.get_financial_data = lambda p: (_ for _ in ()).throw(RuntimeError("boom"))
-        monkeypatch.setitem(sys.modules, "local_tdx_data", mod)
+        monkeypatch.setattr(_ltd_pkg, "local_tdx_data", mod, raising=False)
         assert fin.load_financials("20260630") is None
 
     def test_result_is_cached_by_period(self, monkeypatch):
@@ -70,13 +71,14 @@ class TestLoadFinancialsBestEffort:
         calls = {"n": 0}
         import types
         import pandas as pd
+        import custos.datasource.local_tdx as _ltd_pkg
         mod = types.ModuleType("local_tdx_data")
 
         def get(period):
             calls["n"] += 1
             return pd.DataFrame({"x": [1]})
         mod.get_financial_data = get
-        monkeypatch.setitem(sys.modules, "local_tdx_data", mod)
+        monkeypatch.setattr(_ltd_pkg, "local_tdx_data", mod, raising=False)
         fin.load_financials("20260630")
         fin.load_financials("20260630")
         assert calls["n"] == 1, f"同一报告期应只读一次，实际 {calls['n']}"

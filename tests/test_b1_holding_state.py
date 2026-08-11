@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import unittest
 
-from b1_holding_state import evaluate
+from custos.pipeline.holdings.b1_holding_state import evaluate
 
 
 class B1HoldingStateTests(unittest.TestCase):

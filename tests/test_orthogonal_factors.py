@@ -2,8 +2,8 @@
 """方向A 正交因子测试：流动性(成交额底线) + 资金流向(个股/板块主力净流入)。"""
 import pandas as pd
 
-from screening import enrich_candidates as ec
-from screening import score_candidates as sc
+from custos.pipeline.screening import enrich_candidates as ec
+from custos.pipeline.screening import score_candidates as sc
 
 
 def _df(amount, n=30):

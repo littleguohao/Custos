@@ -5,9 +5,9 @@ from datetime import timedelta
 
 import pytest
 
-import formula_screen
-import stock_names
-from paths import cn_today
+from custos.pipeline.screening import formula_screen
+from custos.datasource.local_tdx import stock_names
+from custos.core.paths import cn_today
 
 
 def _registry(n=2):

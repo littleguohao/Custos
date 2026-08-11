@@ -19,7 +19,7 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-T = ROOT / "src"
+T = ROOT / "src" / "custos"
 RUNNERS = ["pipeline/run_0850.py", "pipeline/run_0905.py", "pipeline/run_1445.py",
            "pipeline/run_1700.py", "pipeline/run_1800.py"]
 
@@ -69,7 +69,7 @@ class TestSharedImplBehavior:
         """反向验证：真给一个带 BOM 的文件，必须读得出来。"""
         import sys
         sys.path.insert(0, str(T))
-        import paths
+        from custos.core import paths
         f = tmp_path / "bom.json"
         f.write_bytes("\ufeff{\"a\": 1}".encode("utf-8"))
         assert paths.read_json(f, None) == {"a": 1}
@@ -84,7 +84,7 @@ class TestSharedImplBehavior:
         """
         import sys
         sys.path.insert(0, str(T))
-        import code_utils
+        from custos.core import code_utils
         assert code_utils.fnum(None) is None
         assert code_utils.fnum("-") is None
         assert code_utils.fnum("0") == 0.0        # 0 是合法读数，不能变 None
@@ -95,7 +95,7 @@ class TestSharedImplBehavior:
         """静默是**协议要求**：runner 的 stdout 给机器消费，stage 回显会污染它。"""
         import sys
         sys.path.insert(0, str(T))
-        import pipeline_kit
+        from custos.core import pipeline_kit
 
         def fake(cmd, name, required=False):
             print("[RUN] 这行不该出现在 runner stdout 里")
@@ -134,7 +134,7 @@ class TestCalendarGate:
     def _kit(self):
         import sys
         sys.path.insert(0, str(T))
-        import pipeline_kit
+        from custos.core import pipeline_kit
         return pipeline_kit
 
     @pytest.mark.parametrize("runner", RUNNERS)
@@ -207,7 +207,7 @@ class TestMovedScriptsRunAsMain:
 
     ⚠️ **这是 import 型测试抓不到的一类断裂。** 2026-08-06 分包时实际发生：
     测试全绿（conftest 把 `src` 与各子目录都铺进了 `sys.path`），
-    但 `uv run python src/datasource/collect/collect_fund_flow.py --help` 直接
+    但 `uv run python src/custos/datasource/collect/collect_fund_flow.py --help` 直接
     `ModuleNotFoundError: net_retry` —— 因为作为脚本跑时 `sys.path[0]` 是**本目录**，
     不含 `src`。
 
@@ -319,9 +319,9 @@ class TestToolsPathSingleSource:
         这正是今天反复踩的「查字符串形式而非语义」。
         """
         import sys
-        tools = pathlib.Path(__file__).resolve().parent.parent / "src"
+        tools = pathlib.Path(__file__).resolve().parent.parent / "src" / "custos"
         sys.path.insert(0, str(tools))
-        import daily_pipeline as dp
+        from custos.pipeline import daily_pipeline as dp
 
         assert dp.TOOLS == tools, "TOOLS 必须指 src 本身"
         assert dp.MARKET_TIMING == tools / "pipeline" / "market_timing"
@@ -345,7 +345,7 @@ class TestGateCodePropagation:
 
     def _kit(self):
         sys.path.insert(0, str(T))
-        import pipeline_kit
+        from custos.core import pipeline_kit
         return pipeline_kit
 
     @pytest.mark.parametrize("rc,want", [(3, 3), (4, 4), (5, 5)])
@@ -446,9 +446,9 @@ class TestAmplitudeSingleImplementation:
         """三条 live 路径必须是**同一个函数对象**。"""
         import sys
         sys.path.insert(0, str(T))
-        import indicators
-        from market_timing import technical_monitor as tm
-        from screening import enrich_candidates as ec
+        from custos.core import indicators
+        from custos.pipeline.market_timing import technical_monitor as tm
+        from custos.pipeline.screening import enrich_candidates as ec
 
         assert ec.amplitude_pct_of is indicators.amplitude_pct
         assert tm.amplitude_pct_of is indicators.amplitude_pct
@@ -463,7 +463,7 @@ class TestAmplitudeSingleImplementation:
         """
         import sys
         sys.path.insert(0, str(T))
-        from indicators import amplitude_pct
+        from custos.core.indicators import amplitude_pct
 
         # 前收 10.0、低 9.00、高 9.65：规范 6.5%（入）；high/low = 7.22%（出）
         assert abs(amplitude_pct(9.65, 9.00, 10.0) - 6.5) < 1e-9
@@ -474,7 +474,7 @@ class TestAmplitudeSingleImplementation:
         把「算不出」显示成「符合条件」。"""
         import sys
         sys.path.insert(0, str(T))
-        from indicators import amplitude_pct
+        from custos.core.indicators import amplitude_pct
 
         assert amplitude_pct(10.0, 9.5, 0) is None
         assert amplitude_pct(10.0, 9.5, None) is None

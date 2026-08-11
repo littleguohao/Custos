@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Tests for src/datasource/local_tdx/tq_sector.py.
+"""Tests for src/custos/datasource/local_tdx/tq_sector.py.
 
 离线用例不依赖 TdxW；需要 TdxW 的用例用 skipUnless 守卫。
 """
@@ -10,10 +10,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src" / "datasource" / "local_tdx"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src" / "custos" / "datasource" / "local_tdx"))
 
-import tq_sector  # noqa: E402
-from tq_sector import TQSectorSession, classify_sector, is_tdxw_running, load_sector_names  # noqa: E402
+from custos.datasource.local_tdx import tq_sector  # noqa: E402
+from custos.datasource.local_tdx.tq_sector import TQSectorSession, classify_sector, is_tdxw_running, load_sector_names  # noqa: E402
 
 TDXW_UP = is_tdxw_running()
 

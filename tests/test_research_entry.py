@@ -1,4 +1,4 @@
-"""研究/回测的**统一入口** —— `src/research/__main__.py`。
+"""研究/回测的**统一入口** —— `src/custos/research/__main__.py`。
 
 owner 2026-08-07 问「总的回测和研究是否可以统一到一个入口」。
 实测 14 个脚本、9002 行，其中两个引擎各约 2000 行。结论是
@@ -20,10 +20,10 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-RESEARCH = ROOT / "src" / "research"
+RESEARCH = ROOT / "src" / "custos" / "research"
 sys.path.insert(0, str(ROOT / "src"))
 
-from research import __main__ as entry  # noqa: E402
+from custos.research import __main__ as entry  # noqa: E402
 
 # 入口与 backtest_factors 2026-08-08 起按项目惯例把 stdout/stderr reconfigure 成
 # **UTF-8**（GBK 控制台打不了 ⚠️/⇒ 会 UnicodeEncodeError 直接崩）。subprocess 侧

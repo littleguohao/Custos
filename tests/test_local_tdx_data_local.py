@@ -18,10 +18,10 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/datasource/local_tdx"):
+for _p in ("src", "src/custos/datasource/local_tdx"):
     sys.path.insert(0, str(ROOT / _p))
 
-from local_tdx import local_tdx_data as L  # noqa: E402
+from custos.datasource.local_tdx import local_tdx_data as L  # noqa: E402
 
 
 def _day_record(date_int, o, h, lo, c, amount, vol):
@@ -184,7 +184,7 @@ class TestQfqFailureStats:
         L.reset_qfq_failure_stats()
 
     def test_one_success_one_failure_counts_only_failure(self, monkeypatch, capsys):
-        from local_tdx import adjust_factors as af
+        from custos.datasource.local_tdx import adjust_factors as af
 
         monkeypatch.setattr(L, "read_vipdoc_daily", lambda code: self._bars())
 
@@ -217,7 +217,7 @@ class TestQfqFailureStats:
         assert L.qfq_failure_stats()["count"] == 0
 
     def test_reset_clears(self, monkeypatch):
-        from local_tdx import adjust_factors as af
+        from custos.datasource.local_tdx import adjust_factors as af
 
         monkeypatch.setattr(L, "read_vipdoc_daily", lambda code: self._bars())
 

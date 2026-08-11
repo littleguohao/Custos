@@ -18,10 +18,10 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/pipeline/market_timing"):
+for _p in ("src", "src/custos/pipeline/market_timing"):
     sys.path.insert(0, str(ROOT / _p))
 
-from market_timing import chief_decision_report as cdr  # noqa: E402
+from custos.pipeline.market_timing import chief_decision_report as cdr  # noqa: E402
 
 MT_MD = ("状态：**进攻**\n择时评分：**78**\n建议总仓位：**40%-60%**\n"
          "今日是否允许开新仓：**允许**\n")

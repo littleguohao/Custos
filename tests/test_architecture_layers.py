@@ -26,7 +26,7 @@ import pathlib
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-TOOLS = ROOT / "src"
+TOOLS = ROOT / "src" / "custos"
 
 # ── 分层：数字越小越底层。同层互相依赖允许，下层依赖上层不允许。
 # 2026-08-11 归堆（src/{core,datasource,pipeline,research}）后 rel 带组前缀：
@@ -114,12 +114,14 @@ def _build_graph():
             if isinstance(n, ast.Import):
                 names = [a.name for a in n.names]
             elif isinstance(n, ast.ImportFrom) and n.module:
-                names = [n.module]
+                # `from custos.core import paths` 与 `from custos.core.paths import X` 都要算
+                names = [n.module] + [n.module + "." + a.name for a in n.names]
             else:
                 continue
             if in_main(n):
                 continue
             for nm in names:
+                nm = nm.removeprefix("custos.")   # 包式化后剥包名走既有映射
                 for cand in (nm, nm.split(".")[0]):
                     if cand in mods and mods[cand] != rel:
                         graph[rel].add(mods[cand])
@@ -330,7 +332,7 @@ class TestContractCoverageOfArtifacts:
         import re
         import sys
         sys.path.insert(0, str(TOOLS))
-        import contracts
+        from custos.core import contracts
 
         found = set()
         for p in TOOLS.rglob("*.py"):
@@ -348,7 +350,7 @@ class TestNoStaleScriptPaths:
     """⚠️ 所有以 **Path 构造 / 字符串**形式引用的 `.py` 路径都必须真实存在。
 
     2026-08-07 实际漏过一次：把研究脚本从 `screening/` 移到 `research/` 时，
-    替换脚本只匹配字符串路径 `"src/pipeline/screening/x.py"`，漏了
+    替换脚本只匹配字符串路径 `"src/custos/pipeline/screening/x.py"`，漏了
     `TOOLS / "screening" / "launch_point_study.py"` 这种 **Path 构造形式**。
     `--help` 子进程冒烟也抓不到 —— 那个路径只在真正 spawn 子进程时才用到。
 

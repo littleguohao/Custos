@@ -12,7 +12,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from research import reconcile_qfq as R
+from custos.research import reconcile_qfq as R
 
 
 def _series(dates, closes):
@@ -137,7 +137,7 @@ class TestWhoIsWrong:
         # detail() 内部 `import adjust_factors` 取事件表：xdxr 缓存缺失时会走网络
         # 取数并落盘到真实 data/market/xdxr/（干净环境下被 repo hygiene 测试抓到）。
         # 本类判据用的是合成数据，不需要真事件表。
-        import adjust_factors
+        from custos.datasource.local_tdx import adjust_factors
         monkeypatch.setattr(adjust_factors, "get_xdxr", lambda code, **kw: [])
 
     def test_limit_pct_by_prefix(self):
@@ -277,7 +277,7 @@ class TestGapReport:
         # 新 bundle 全部在 vipdoc 里 ⇒ 去偏价值 0
         self._mk(root, "2021_2026", ["2021-08-02", "2026-02-06"],
                  ["SH600000"], ohlcv)
-        import local_tdx_data
+        from custos.datasource.local_tdx import local_tdx_data
         monkeypatch.setattr(local_tdx_data, "list_local_vipdoc_codes",
                             lambda *a, **k: ["600000"])
         monkeypatch.setattr(R, "WIN_START", "2021-08-02")

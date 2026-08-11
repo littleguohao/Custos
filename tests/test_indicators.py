@@ -25,10 +25,10 @@ import pandas as pd
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/pipeline/screening", "src/pipeline/market_timing"):
+for _p in ("src", "src/custos/pipeline/screening", "src/custos/pipeline/market_timing"):
     sys.path.insert(0, str(ROOT / _p))
 
-import indicators as I  # noqa: E402
+from custos.core import indicators as I  # noqa: E402
 
 
 def _bars(n=80, seed=11, flat_slice=None):
@@ -107,14 +107,14 @@ class TestNoLocalReimplementation:
 
     @pytest.mark.parametrize("rel,marker", CASES)
     def test_delegates_to_indicators(self, rel, marker):
-        s = (ROOT / "src" / rel).read_text(encoding="utf-8")
-        assert "from indicators import" in s, f"{rel} 未导入共享指标"
+        s = (ROOT / "src" / "custos" / rel).read_text(encoding="utf-8")
+        assert "from custos.core.indicators import" in s, f"{rel} 未导入共享指标"
         assert marker in s
 
     @pytest.mark.parametrize("rel", [c[0] for c in CASES])
     def test_no_inline_kdj_or_bbi_formula(self, rel):
         """源码里不许再出现 `3*k-2*d` 或 `(MA3+..+MA24)/4` 的内联算式。"""
-        s = (ROOT / "src" / rel).read_text(encoding="utf-8")
+        s = (ROOT / "src" / "custos" / rel).read_text(encoding="utf-8")
         assert not re.search(r"3 ?\* ?k ?- ?2 ?\* ?d", s), f"{rel} 又内联了 J 公式"
         assert not re.search(r"rolling\(n\)\.mean\(\) for n in \(3, 6, 12, 24\)", s), \
             f"{rel} 又内联了 BBI 公式"
@@ -129,7 +129,7 @@ class TestBehaviorPreserved:
         2026-08-08 死代码清理删掉了 enrich 的本地 `_j_series`（无调用方），
         它的 J 走共享 `kdj()`（内部 `kdj_series(..., fill_na=50.0)`）。
         """
-        import enrich_candidates as E
+        from custos.pipeline.screening import enrich_candidates as E
         assert not hasattr(E, "_j_series"), "enrich 又长出了本地 _j_series"
         assert E.kdj is I.kdj, "enrich 的 J 必须来自共享实现"
         # fill-50 语义本身：短序列按中性 50 填充（原 enrich 包装的行为）
@@ -137,16 +137,16 @@ class TestBehaviorPreserved:
 
     def test_b2_keeps_short_series_guard(self):
         """b2 的 n<12 守卫要留着：返回 None 让调用方知道「数据不足」而非「没信号」。"""
-        import b2_surge_factor as B
+        from custos.core.factors import b2_surge_factor as B
         assert B._j_series(_bars(11)) is None
         assert B._j_series(_bars(30)) is not None
 
     def test_main_rally_keeps_nan(self):
-        import main_rally_factor as M
+        from custos.core.factors import main_rally_factor as M
         assert pd.Series(M._j_series(_bars(6))).isna().all()
 
     def test_backtest_bbi_entrypoints_agree(self):
-        import backtest_factors as BT
+        from custos.research import backtest_factors as BT
         df = _bars(60)
         assert np.allclose(BT._bbi_series(df["close"]).to_numpy(),
                            BT._bbi_series_from(df), equal_nan=True)
@@ -184,7 +184,7 @@ class TestQsxMacdSeries:
         """zhixing_state 的 QSX/DKS 必须调共享序列函数（AST 查真实调用，不查注释）。"""
         import ast as _ast
 
-        src = (ROOT / "src" / "core/indicators.py").read_text(encoding="utf-8")
+        src = (ROOT / "src" / "custos" / "core" / "indicators.py").read_text(encoding="utf-8")
         node = next(n for n in _ast.parse(src).body
                     if isinstance(n, _ast.FunctionDef) and n.name == "zhixing_state")
         body = _ast.unparse(node)
@@ -203,8 +203,8 @@ class TestHoldingStateSharesJWithSelection:
     """
 
     def test_same_j_as_selection_chain(self):
-        import enrich_candidates as E
-        import technical_monitor as TM
+        from custos.pipeline.screening import enrich_candidates as E
+        from custos.pipeline.market_timing import technical_monitor as TM
         df = _bars(50, seed=3)
         r = TM.kdj(df)
         assert r.get("available") is not False
@@ -230,7 +230,7 @@ class TestHoldingStateSharesJWithSelection:
         """
         import ast as _ast
 
-        src = (ROOT / "src" / "core/indicators.py").read_text(encoding="utf-8")
+        src = (ROOT / "src" / "custos" / "core" / "indicators.py").read_text(encoding="utf-8")
         node = next(n for n in _ast.parse(src).body
                     if isinstance(n, _ast.FunctionDef) and n.name == "j_series")
         body = _ast.unparse(node)
@@ -238,5 +238,5 @@ class TestHoldingStateSharesJWithSelection:
         assert "ewm(" not in body, "j_series 又自己算了一遍 EWM"
 
     def test_short_series_guard_preserved(self):
-        import technical_monitor as TM
+        from custos.pipeline.market_timing import technical_monitor as TM
         assert TM.kdj(_bars(10)).get("available") is False

@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 from datetime import date
 
-import b1_holding_state as b1
+from custos.pipeline.holdings import b1_holding_state as b1
 
 
 def _ok(value) -> dict:

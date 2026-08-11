@@ -210,7 +210,7 @@ class TestReferencedPathsExist:
                         continue
                     # 归堆（src/{core,pipeline,...}）后文档保持「stage/文件.py」简写，
                     # 按相对路径后缀匹配
-                    if not (ROOT / "src" / path).exists() and not any(
+                    if not (ROOT / "src" / "custos" / path).exists() and not any(
                             str(p.relative_to(ROOT / "src")).endswith("/" + path)
                             for p in (ROOT / "src").rglob("*.py")):
                         bad.append(f"{doc.relative_to(STRATEGY).as_posix()}: {tok}")
@@ -246,7 +246,7 @@ class TestReversalKMatchesCode:
     }
 
     def _code(self):
-        return (ROOT / "src" / "pipeline" / "screening"
+        return (ROOT / "src" / "custos" / "pipeline" / "screening"
                 / "enrich_candidates.py").read_text(encoding="utf-8")
 
     @pytest.mark.parametrize("name,want", sorted(CONSTS.items()))
@@ -260,8 +260,8 @@ class TestReversalKMatchesCode:
         """
         import sys as _s
         _s.path.insert(0, str(ROOT / "src"))
-        _s.path.insert(0, str(ROOT / "src" / "pipeline" / "screening"))
-        import enrich_candidates as ec
+        _s.path.insert(0, str(ROOT / "src" / "custos" / "pipeline" / "screening"))
+        from custos.pipeline.screening import enrich_candidates as ec
         got = getattr(ec, name, None)
         assert got is not None, f"代码里找不到常量 {name}"
         assert float(got) == want, f"{name} 实际 {got}、索引记 {want} —— 必须一起改"
@@ -351,12 +351,12 @@ class TestPathsConstants:
     """新目录必须在 paths.py 有常量——模块不得自己拼 strategy 子目录。"""
 
     def test_constants_exist(self):
-        s = (ROOT / "src" / "core/paths.py").read_text(encoding="utf-8")
+        s = (ROOT / "src" / "custos" / "core" / "paths.py").read_text(encoding="utf-8")
         for c in ("B1_DIR", "CZ_DIR", "FACTORS_DIR", "STRATEGY_REGISTRY_FILE"):
             assert c in s, f"paths.py 缺 {c}"
 
     def test_cz_config_points_into_cz_dir(self):
-        s = (ROOT / "src" / "core/paths.py").read_text(encoding="utf-8")
+        s = (ROOT / "src" / "custos" / "core" / "paths.py").read_text(encoding="utf-8")
         assert 'CZ_SECTOR_PREFERENCE_FILE = CZ_DIR / "CZ_SECTOR_PREFERENCE.json"' in s
 
 

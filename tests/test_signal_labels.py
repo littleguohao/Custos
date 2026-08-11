@@ -18,8 +18,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import candidate_table as ct
-import signal_labels as sl
+from custos.pipeline.screening import candidate_table as ct
+from custos.pipeline.screening import signal_labels as sl
 
 
 def _mk(rows):
@@ -129,7 +129,7 @@ class TestReuseAvoidsRecompute:
 
 class TestEnrichIntegration:
     def test_compute_metrics_emits_signals(self):
-        from enrich_candidates import compute_metrics
+        from custos.pipeline.screening.enrich_candidates import compute_metrics
         rng = np.random.default_rng(7)
         p, c = 20.0, []
         for i in range(260):
@@ -273,7 +273,7 @@ class TestLabelsNeverAlterSelection:
         """
         import inspect
 
-        from screening import score_candidates as sc
+        from custos.pipeline.screening import score_candidates as sc
         src = inspect.getsource(sc)
         assert '"signals": cand.get("signals")' in src, "signals 必须透传，否则标注层失效"
 
@@ -287,7 +287,7 @@ class TestLabelsNeverAlterSelection:
         """
         import inspect
 
-        from screening import score_candidates as sc
+        from custos.pipeline.screening import score_candidates as sc
         src = inspect.getsource(sc)
         # 只查真正的依赖形式。不能搜字符串 "signal_labels"——
         # score_candidates 的注释里会提到 tests/test_signal_labels.py（本测试自己）。

@@ -13,9 +13,9 @@ import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-sys.path.insert(0, str(ROOT / "src" / "pipeline" / "close_review"))
+sys.path.insert(0, str(ROOT / "src" / "custos" / "pipeline" / "close_review"))
 
-from close_review import loss_streak as ls  # noqa: E402
+from custos.pipeline.close_review import loss_streak as ls  # noqa: E402
 
 
 def closing(code, sell_date, net_pnl, *, status="full", name="甲"):
@@ -135,7 +135,7 @@ class TestReusesFifoPair:
     """
 
     def test_no_local_fifo_implementation(self):
-        src = (ROOT / "src" / "pipeline" / "close_review" / "loss_streak.py").read_text(encoding="utf-8")
+        src = (ROOT / "src" / "custos" / "pipeline" / "close_review" / "loss_streak.py").read_text(encoding="utf-8")
         for bad in ("open_lots", "matched_qty", "'买入'", '"买入"'):
             assert bad not in src, f"loss_streak 里出现 {bad!r} —— 疑似自己实现了配平"
 
@@ -146,7 +146,7 @@ class TestReusesFifoPair:
         任一字段被 `fifo_pair` 改名，上面所有测试仍会通过（它们用的是手写字典），
         而生产会静默算不出连亏。
         """
-        from close_review import weekly_review as wr
+        from custos.pipeline.close_review import weekly_review as wr
 
         BUY, SELL = wr.BUY, wr.SELL
         # ⚠️ `amount`（成交金额）是 `fifo_pair` 的必需字段 —— 第一版漏了它，

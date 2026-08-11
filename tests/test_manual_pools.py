@@ -7,10 +7,10 @@ import sys
 from pathlib import Path
 
 TESTS_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(TESTS_DIR.parent / "src" / "pipeline" / "screening"))
+sys.path.insert(0, str(TESTS_DIR.parent / "src" / "custos" / "pipeline" / "screening"))
 
-import manual_pools
-import formula_screen as fs
+from custos.pipeline.screening import manual_pools
+from custos.pipeline.screening import formula_screen as fs
 
 
 def _make_block_dir(tmp_path):

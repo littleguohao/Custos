@@ -5,7 +5,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from market_timing.technical_monitor import _infer_price_limit
+from custos.pipeline.market_timing.technical_monitor import _infer_price_limit
 
 
 def _df(pct_changes, start=10.0):

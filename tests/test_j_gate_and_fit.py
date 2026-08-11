@@ -5,7 +5,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from screening import enrich_candidates as ec
+from custos.pipeline.screening import enrich_candidates as ec
 from test_enrich_b1cz import make_df
 
 

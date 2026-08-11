@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 
-import daily_pipeline as dp
+from custos.pipeline import daily_pipeline as dp
 
 
 class TestBuildGateCmd:

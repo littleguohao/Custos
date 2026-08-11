@@ -1,5 +1,5 @@
 [project]
-name = "strategy-team"
+name = "custos"
 version = "0.1.0"
 description = "确定性脚本驱动的 A 股交易策略系统"
 requires-python = ">=3.11"
@@ -9,6 +9,13 @@ dependencies = [
     "pandas>=2.2",
     "requests>=2.31",
 ]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/custos"]
 
 [project.optional-dependencies]
 dev = [
@@ -20,11 +27,13 @@ dev = [
 # Linux/Mac 仅可使用 online 模式
 
 [tool.pytest.ini_options]
-pythonpath = ["src", "src/core", "src/core/factors", "src/core/trades",
-              "src/datasource", "src/datasource/collect", "src/datasource/local_tdx",
-              "src/datasource/news",
-              "src/pipeline", "src/pipeline/screening", "src/pipeline/market_timing",
-              "src/pipeline/holdings", "src/pipeline/close_review", "src/research"]
+# 4a 过渡期保留：包已可编辑安装，列表在 4b 删除
+pythonpath = ["src", "src/custos/core", "src/custos/core/factors", "src/custos/core/trades",
+              "src/custos/datasource", "src/custos/datasource/collect",
+              "src/custos/datasource/local_tdx", "src/custos/datasource/news",
+              "src/custos/pipeline", "src/custos/pipeline/screening",
+              "src/custos/pipeline/market_timing", "src/custos/pipeline/holdings",
+              "src/custos/pipeline/close_review", "src/custos/research"]
 testpaths = ["tests"]
 
 [dependency-groups]

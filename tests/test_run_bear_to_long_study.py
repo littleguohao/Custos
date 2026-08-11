@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from research import run_bear_to_long_study as rb
+from custos.research import run_bear_to_long_study as rb
 
 
 def _pair(sig=("2022-03-01", "2022-06-01"), lab=("2022-06-02", "2022-07-22")):
@@ -138,7 +138,7 @@ class TestSurvivorshipReport:
     def test_gone_cohort_counted_per_window(self, tmp_path, monkeypatch):
         f = self._firings(tmp_path, "w1.json", ["600000", "000001", "900001"],
                           with_sig=("600000", "900001"))
-        import s_data
+        from custos.datasource import s_data
         monkeypatch.setattr(s_data, "list_universe",
                             lambda root, source="qlib": ["600000", "000001", "900001"])
         rep = rb.survivorship_report([f], "/tmp/sroot", today_codes={"600000", "000001"})
@@ -151,7 +151,7 @@ class TestSurvivorshipReport:
     def test_empty_gone_pool_flags_debias_invalid(self, tmp_path, monkeypatch):
         """宇宙里一只已摘牌股都没有 ⇒ 去偏无效,结论只能当乐观上界(§3 首条)。"""
         f = self._firings(tmp_path, "w1.json", ["600000"], with_sig=("600000",))
-        import s_data
+        from custos.datasource import s_data
         monkeypatch.setattr(s_data, "list_universe", lambda root, source="qlib": ["600000"])
         rep = rb.survivorship_report([f], "/tmp/sroot", today_codes={"600000"})
         assert rep["gone_pool"] == 0
@@ -160,7 +160,7 @@ class TestSurvivorshipReport:
     def test_window_without_gone_stock_flagged(self, tmp_path, monkeypatch):
         f1 = self._firings(tmp_path, "w1.json", ["600000", "900001"], with_sig=("900001",))
         f2 = self._firings(tmp_path, "w2.json", ["600000"], with_sig=("600000",))
-        import s_data
+        from custos.datasource import s_data
         monkeypatch.setattr(s_data, "list_universe",
                             lambda root, source="qlib": ["600000", "900001"])
         rep = rb.survivorship_report([f1, f2], "/tmp/sroot", today_codes={"600000"})
@@ -169,7 +169,7 @@ class TestSurvivorshipReport:
 
     def test_n_delisted_zero_is_explained_as_expected(self, tmp_path, monkeypatch):
         f = self._firings(tmp_path, "w1.json", ["600000", "900001"], with_sig=("900001",))
-        import s_data
+        from custos.datasource import s_data
         monkeypatch.setattr(s_data, "list_universe",
                             lambda root, source="qlib": ["600000", "900001"])
         rep = rb.survivorship_report([f], "/tmp/sroot", today_codes={"600000"})
@@ -178,7 +178,7 @@ class TestSurvivorshipReport:
     def test_unreadable_firings_reported_not_raised(self, tmp_path, monkeypatch):
         bad = tmp_path / "bad.json"
         bad.write_text("{not json", encoding="utf-8")
-        import s_data
+        from custos.datasource import s_data
         monkeypatch.setattr(s_data, "list_universe", lambda root, source="qlib": ["600000"])
         rep = rb.survivorship_report([bad], "/tmp/sroot", today_codes=set())
         assert rep["windows"][0].get("error") and "读取失败" in rep["text"]
@@ -436,7 +436,7 @@ class TestZeroRetDiagnosis:
         f = _firings_file(
             tmp_path, "w1.json", ["600000", "900001", "830001"],
             with_sig=("600000", "900001"), rets={"900001": 0.0, "830001": 0.0})
-        import s_data
+        from custos.datasource import s_data
         monkeypatch.setattr(s_data, "list_universe",
                             lambda root, source="qlib": ["600000", "900001", "830001"])
         rep = rb.survivorship_report([f], "/tmp/sroot", today_codes={"600000", "830001"})
@@ -449,7 +449,7 @@ class TestZeroRetDiagnosis:
     def test_zero_ret_without_gone_intersection_is_safe(self, tmp_path, monkeypatch):
         f = _firings_file(tmp_path, "w1.json", ["600000", "830001", "900001"],
                           with_sig=("600000",), rets={"830001": 0.0})
-        import s_data
+        from custos.datasource import s_data
         monkeypatch.setattr(s_data, "list_universe",
                             lambda root, source="qlib": ["600000", "830001", "900001"])
         rep = rb.survivorship_report([f], "/tmp/sroot", today_codes={"600000", "830001"})
@@ -461,7 +461,7 @@ class TestZeroRetDiagnosis:
         f1 = _firings_file(tmp_path, "w1.json", ["830001", "600000"], rets={"830001": 0.0})
         f2 = _firings_file(tmp_path, "w2.json", ["830002", "300001"],
                            rets={"830002": 0.0, "300001": 0.0})
-        import s_data
+        from custos.datasource import s_data
         monkeypatch.setattr(s_data, "list_universe",
                             lambda root, source="qlib": ["830001", "830002", "600000", "300001"])
         rep = rb.survivorship_report([f1, f2], "/tmp/sroot",

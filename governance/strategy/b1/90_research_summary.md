@@ -61,10 +61,10 @@
 
 ## 五、工具与数据
 
-> 注：本节历史路径 `src/pipeline/screening/sector_phase.py` 已迁至 `src/core/factors/`。
+> 注：本节历史路径 `src/custos/pipeline/screening/sector_phase.py` 已迁至 `src/custos/core/factors/`。
 
-- 回测器:`src/research/backtest_factors.py`(入场门槛/止损模式/0AMV/板块相位/组合/top-N/成本/流式;`--data-source qlib` 含退市(⚠️ **仅 1999-2020 老 bundle**,214 只;2021_2026 已弃用);`--start/--end` walk-forward)。
-- 板块相位:`src/pipeline/screening/sector_phase.py` + `src/datasource/local_tdx/fetch_sector_index_history.py`(TQ 板块指数 2021-08 起)。
+- 回测器:`src/custos/research/backtest_factors.py`(入场门槛/止损模式/0AMV/板块相位/组合/top-N/成本/流式;`--data-source qlib` 含退市(⚠️ **仅 1999-2020 老 bundle**,214 只;2021_2026 已弃用);`--start/--end` walk-forward)。
+- 板块相位:`src/custos/pipeline/screening/sector_phase.py` + `src/custos/datasource/local_tdx/fetch_sector_index_history.py`(TQ 板块指数 2021-08 起)。
 - 结论详档:`governance/research/README.md`(索引与主图)。
 
 ## 六、落地建议(单独立项,勿顺手改线上)

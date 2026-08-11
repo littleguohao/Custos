@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-import generate_risk_and_sectors as grs
+from custos.pipeline import generate_risk_and_sectors as grs
 
 
 def _write_market_input(tmp_path, date, effective_state):

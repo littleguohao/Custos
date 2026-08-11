@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Tests for _is_bj_code semantics in local_tdx_data."""
-from local_tdx.local_tdx_data import _is_bj_code
+from custos.datasource.local_tdx.local_tdx_data import _is_bj_code
 
 
 class TestIsBjCodeExplicitSuffix:

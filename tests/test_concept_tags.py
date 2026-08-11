@@ -9,11 +9,11 @@ from pathlib import Path
 import pytest
 
 TESTS_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(TESTS_DIR.parent / "src" / "datasource" / "local_tdx"))
-sys.path.insert(0, str(TESTS_DIR.parent / "src" / "pipeline" / "screening"))
+sys.path.insert(0, str(TESTS_DIR.parent / "src" / "custos" / "datasource" / "local_tdx"))
+sys.path.insert(0, str(TESTS_DIR.parent / "src" / "custos" / "pipeline" / "screening"))
 
-import concept_tags
-import enrich_candidates as ec
+from custos.datasource.local_tdx import concept_tags
+from custos.pipeline.screening import enrich_candidates as ec
 
 
 @pytest.fixture()

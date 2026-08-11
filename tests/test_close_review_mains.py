@@ -18,11 +18,11 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/pipeline/close_review", "src/pipeline/market_timing"):
+for _p in ("src", "src/custos/pipeline/close_review", "src/custos/pipeline/market_timing"):
     sys.path.insert(0, str(ROOT / _p))
 
-from close_review import final_close_review as fcr  # noqa: E402
-from close_review import review_core as rc  # noqa: E402
+from custos.pipeline.close_review import final_close_review as fcr  # noqa: E402
+from custos.pipeline.close_review import review_core as rc  # noqa: E402
 
 DAY = "2026-08-07"
 
@@ -200,12 +200,12 @@ class TestReportAuditBlock:
 
     def test_strategy_version_reads_latest_from_log(self):
         import re
-        import report_audit
+        from custos.core import report_audit
         version = report_audit.strategy_version()
         assert re.fullmatch(r"v\d+\.\d+", version), f"应取到版本日志最新版本号，得到 {version!r}"
 
     def test_build_fields_and_missing_input_marker(self, tmp_path):
-        import report_audit
+        from custos.core import report_audit
         present = tmp_path / "a.json"
         present.write_text("{}", encoding="utf-8")
         audit = report_audit.build("2026-08-07", "1445", [present, tmp_path / "gone.json"])
@@ -215,7 +215,7 @@ class TestReportAuditBlock:
 
     def test_same_inputs_same_report_id(self, tmp_path):
         """同一天同一份输入重跑 → 同一个 report_id（简单确定，不掺随机/时钟）。"""
-        import report_audit
+        from custos.core import report_audit
         present = tmp_path / "a.json"
         present.write_text("{}", encoding="utf-8")
         a1 = report_audit.build("2026-08-07", "1445", [present])
@@ -243,7 +243,7 @@ class TestReportAuditBlock:
         assert audit["report_id"].startswith(f"{DAY}_close_review_")
         assert audit["strategy_version"] and audit["data_as_of"] and audit["inputs"]
         # 契约把 audit 钉住：四件齐全且 data_as_of 可 null 但存在
-        from contracts import check
+        from custos.core.contracts import check
         result = check("final_review", payload)
         assert result["valid"], result["errors"]
 

@@ -2,7 +2,7 @@
 """fetch_sector_index_history._to_close_frame / _suffixed 补充测试(真实 TQ 返回形态)。"""
 import pandas as pd
 
-from local_tdx import fetch_sector_index_history as fsh
+from custos.datasource.local_tdx import fetch_sector_index_history as fsh
 
 
 def test_field_keyed_shape_real_tq():

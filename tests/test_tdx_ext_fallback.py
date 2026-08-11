@@ -12,7 +12,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-import tdx_ext_quotes as t
+from custos.datasource import tdx_ext_quotes as t
 
 
 class TestCoverage:
@@ -115,7 +115,7 @@ class TestReconnect:
 class TestCollectorIntegration:
     def test_fallback_marks_degraded_and_source(self, monkeypatch, tmp_path):
         """Yahoo 挂了走 ext 时，必须留下 degraded 与 fallback_source 供下游归因。"""
-        import overseas_market_collector as omc
+        from custos.datasource import overseas_market_collector as omc
 
         monkeypatch.setattr(omc, "SYMBOLS",
                             {"nvda": {"symbol": "NVDA", "name": "英伟达",
@@ -147,7 +147,7 @@ class TestCollectorIntegration:
         assert "fallback_source" in ov and "TDX ext" in ov["source"]
 
     def test_no_fallback_key_when_yahoo_works(self, monkeypatch, tmp_path):
-        import overseas_market_collector as omc
+        from custos.datasource import overseas_market_collector as omc
         monkeypatch.setattr(omc, "SYMBOLS",
                             {"nvda": {"symbol": "NVDA", "name": "英伟达",
                                       "group": "ai_leader"}})
@@ -184,7 +184,7 @@ class TestOverseasAsOfDerivation:
         import json
         import sys as _s
 
-        import overseas_market_collector as omc
+        from custos.datasource import overseas_market_collector as omc
         monkeypatch.setattr(omc, "SYMBOLS",
                             {"nvda": {"symbol": "NVDA", "name": "英伟达", "group": "ai_leader"},
                              "sox": {"symbol": "^SOX", "name": "费半", "group": "ai_leader"}})
@@ -257,7 +257,7 @@ class TestOverseasAsOfDerivation:
         这个区分是路子① 成立的前提：若降到 `missing` 就等于把「有数但不知何时」
         和「压根没数」混为一谈，那才是过度收紧。
         """
-        import runtime_guards as rg
+        from custos.core import runtime_guards as rg
 
         ov = self._run(monkeypatch, tmp_path, lambda symbol, region="": {"change_pct": 1.0})
         gate = rg.market_quality_gate(
@@ -274,7 +274,7 @@ class TestOverseasAsOfDerivation:
         """
         import inspect
 
-        import tdx_ext_quotes as tq
+        from custos.datasource import tdx_ext_quotes as tq
 
         src = inspect.getsource(tq.fetch_ext_change)
         assert "last_timestamp" not in src, \
@@ -292,7 +292,7 @@ class TestOverseasAsOfDerivation:
         **静默变成一个阻断源**，而 2026-07-30 正是「门控与 stale 判定同时收紧
         导致 17:00 整条链失败」。
         """
-        import runtime_guards as rg
+        from custos.core import runtime_guards as rg
 
         D = "2026-08-10"
         full = {
@@ -331,7 +331,7 @@ class TestImpactSummary:
     #    类级别用不到 —— 第一版直接写 `omc.impact_summary` 得 NameError。
     @staticmethod
     def _mod():
-        import overseas_market_collector as omc
+        from custos.datasource import overseas_market_collector as omc
         return omc
 
     @staticmethod
@@ -373,7 +373,7 @@ class TestA50Sanity:
 
     def test_large_move_is_flagged_not_silently_dropped(self):
         r = {"a50_futures": {"change_pct": 5.2}}
-        from collect import collect_incremental_market as cim
+        from custos.datasource.collect import collect_incremental_market as cim
         cim._a50_sanity(r)
         a50 = r["a50_futures"]
         assert a50["suspect"] is True
@@ -381,26 +381,26 @@ class TestA50Sanity:
 
     def test_value_is_not_modified(self):
         """⚠️ **只标记不改值** —— 改值会让下游算出的数字与源不一致且无从追溯。"""
-        from collect import collect_incremental_market as cim
+        from custos.datasource.collect import collect_incremental_market as cim
         r = {"a50_futures": {"change_pct": -4.4}}
         cim._a50_sanity(r)
         assert r["a50_futures"]["change_pct"] == -4.4
 
     def test_normal_move_is_not_flagged(self):
-        from collect import collect_incremental_market as cim
+        from custos.datasource.collect import collect_incremental_market as cim
         r = {"a50_futures": {"change_pct": 1.2}}
         cim._a50_sanity(r)
         assert "suspect" not in r["a50_futures"]
 
     def test_non_numeric_does_not_crash(self):
-        from collect import collect_incremental_market as cim
+        from custos.datasource.collect import collect_incremental_market as cim
         for bad in (None, "N/A", ""):
             r = {"a50_futures": {"change_pct": bad}}
             cim._a50_sanity(r)
             assert "suspect" not in r["a50_futures"]
 
     def test_missing_section_does_not_crash(self):
-        from collect import collect_incremental_market as cim
+        from custos.datasource.collect import collect_incremental_market as cim
         r = {}
         cim._a50_sanity(r)
         assert r == {}

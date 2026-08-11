@@ -19,11 +19,11 @@ import typing
 import pandas as pd
 import pytest
 
-import backtest_factors as bt
-import launch_point_study as lp
-import s_data
-from screening import financials as fin_mod
-from research import run_bear_to_long_study as rb
+from custos.research import backtest_factors as bt
+from custos.research import launch_point_study as lp
+from custos.datasource import s_data
+from custos.pipeline.screening import financials as fin_mod
+from custos.research import run_bear_to_long_study as rb
 
 
 def _bars(n=80, start="2024-01-02", base=10.0, step=0.1, vol=1e6):
@@ -49,7 +49,7 @@ class TestGateDependencyFailureNotSilent:
 
     def test_platform_pullback_dependency_missing_is_counted(self, monkeypatch):
         bt.reset_gate_stats()
-        monkeypatch.setitem(sys.modules, "platform_pullback", None)   # import 触发 ImportError
+        monkeypatch.setitem(sys.modules, "custos.core.factors.platform_pullback", None)   # import 触发 ImportError
         df = _bars(n=90)
         assert bt.platform_pullback_gate(df) is False
         st = bt.gate_stats().get("platform_pullback") or {}
@@ -62,7 +62,7 @@ class TestGateDependencyFailureNotSilent:
         def boom(*a, **k):
             raise RuntimeError("detector broken")
 
-        import platform_pullback as pp
+        from custos.core.factors import platform_pullback as pp
         monkeypatch.setattr(pp, "detect_platform_pullback", boom)
         assert bt.platform_pullback_gate(_bars(n=90)) is False
         st = bt.gate_stats().get("platform_pullback") or {}
@@ -83,7 +83,7 @@ class TestGateDependencyFailureNotSilent:
 
     def test_gate_stats_report_flags_broken_dependency(self, monkeypatch):
         bt.reset_gate_stats()
-        monkeypatch.setitem(sys.modules, "platform_pullback", None)
+        monkeypatch.setitem(sys.modules, "custos.core.factors.platform_pullback", None)
         for _ in range(3):
             bt.platform_pullback_gate(_bars(n=90))
         rep = bt.gate_stats_report()
@@ -99,7 +99,7 @@ class TestSectorFeatureBuildFailureNotSilent:
         """板块名称表(tdxzs.cfg)是宿主环境依赖：本机 880201=黑龙江(tdx_type=3 地区板块)
         会被 invert_members 剔除导致 sectors_requested 少 1,无 cfg 的机器则不过滤。
         注入空名称表把口径固定为"不过滤"(与无 cfg 环境一致),测试结果不随宿主漂移。"""
-        import tq_sector
+        from custos.datasource.local_tdx import tq_sector
         monkeypatch.setattr(tq_sector, "load_sector_names", lambda *a, **kw: {})
 
     def test_no_csv_reports_zero_sectors_loaded(self, tmp_path):
@@ -341,15 +341,15 @@ class TestTierYouVisibilitySemantics:
                            ("2026-04-20", "2026-03-31", 2.0, 0.6, 9.0)]}
 
     def test_announcement_day_itself_not_yet_visible(self):
-        from research import scan_signals_ytd as scan
+        from custos.research import scan_signals_ytd as scan
         assert scan._tier_you(self._idx(), "600000", "2026-01-10") is False
 
     def test_next_day_visible(self):
-        from research import scan_signals_ytd as scan
+        from custos.research import scan_signals_ytd as scan
         assert scan._tier_you(self._idx(), "600000", "2026-01-11") is True
 
     def test_unknown_code_false(self):
-        from research import scan_signals_ytd as scan
+        from custos.research import scan_signals_ytd as scan
         assert scan._tier_you(self._idx(), "999999", "2026-01-11") is False
 
 

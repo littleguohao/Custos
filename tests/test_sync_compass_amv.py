@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import sync_compass_amv as sync_mod
+from custos.datasource import sync_compass_amv as sync_mod
 
 
 def _records() -> list:

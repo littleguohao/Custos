@@ -2,7 +2,7 @@
 """merge_incremental_market 新鲜度测试——T-1 数据不得冒充当日(必须标 stale)。"""
 from __future__ import annotations
 
-from market_timing import merge_incremental_market as mim
+from custos.pipeline.market_timing import merge_incremental_market as mim
 
 TARGET = "2026-07-20"
 
