@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
 """研究/回测的**统一入口**。
 
-用法（沿用项目既有约定「按路径调脚本」，不需要设 PYTHONPATH）::
+用法（沿用项目既有约定「按路径调脚本」；custos 已可编辑安装，不需要设 PYTHONPATH）::
 
     uv run python src/custos/research/__main__.py                    # 列出全部工具与状态
     uv run python src/custos/research/__main__.py backtest_factors --help
     uv run python src/custos/research/__main__.py m2_stop_sweep --sample 300
 
-也支持包形式（需要 `src` 在 sys.path 上）::
+也支持包形式（等价）::
 
-    PYTHONPATH=src uv run python -m research
+    uv run python -m custos.research
 
 ## 为什么是「一个入口 + 分发」，而不是「合并成一个回测脚本」
 

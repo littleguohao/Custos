@@ -27,7 +27,6 @@
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any, Optional
 
@@ -36,10 +35,6 @@ import pandas as pd
 from custos.core.indicators import avedev, cci, rsi  # noqa: E402  指标唯一实现
 from numpy.lib.stride_tricks import sliding_window_view
 
-_TOOLS = Path(__file__).resolve().parents[1]
-for _bp in (_TOOLS, _TOOLS.parent / "core"):  # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))   # indicators 在 src 根
 # 原先的 screening/market_timing 两项已于 2026-08-08 删除：本模块只依赖
 # src 根与同目录（`from rsi_state import rsi`，扁平 import 惯例见 factors/__init__.py）。
 

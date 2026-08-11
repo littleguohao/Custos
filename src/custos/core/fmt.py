@@ -25,10 +25,9 @@ def num_text(value, digits: int = 2, missing: str = "待确认") -> str:
     """定点小数文本；缺失 / 非有限值渲染 `missing`。
 
     ⚠️ `close_review/holding_bbi.py` 与 `holding_structure.py` 里各有一份
-    逐字相同的 `_number()`，**故意没有合并到这里**：那两个文件是
-    「无 sys.path 引导、不导入任何本地模块」的纯库，为了省 5 行重复
-    而给它们加引导，等于用一个新的失败面（import 顺序 / 双模块对象）
-    换一点去重 —— 不划算。它们各自就地补了同样的有限性判定。
+    逐字相同的 `_number()`，**故意没有合并到这里**：那两个文件是不导入
+    任何本地模块的纯库，为省 5 行重复而给它们加一层依赖，
+    等于用一个新的耦合面换一点去重 —— 不划算。它们各自就地补了同样的有限性判定。
     """
     number = _finite_or_none(value)
     return missing if number is None else f"{number:.{digits}f}"

@@ -40,21 +40,13 @@ from pathlib import Path
 
 import pandas as pd
 
-_TOOLS = Path(__file__).resolve().parents[1]
-for _bp in (_TOOLS, _TOOLS.parent / "core"):  # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))
 
 from custos.core.paths import BASE, cn_now, QUALITY_DIR  # noqa: E402
 from custos.core.code_utils import clean_code, finite                          # noqa: E402
 
-_TRADES = Path(__file__).resolve().parent
-if str(_TRADES) not in sys.path:
-    sys.path.insert(0, str(_TRADES))
 
 from custos.core.trades.incremental_ledger import (LEDGER, POS, TRADE_CATEGORIES,     # noqa: E402
                                 compute_positions, norm)
-
 
 
 def replay_ledger(ledger_path: Path | None = None,

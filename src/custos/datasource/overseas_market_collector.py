@@ -19,10 +19,6 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-TOOLS_DIR = Path(__file__).resolve().parents[1]          # src/
-for _bp in (TOOLS_DIR / "core",):       # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))
 
 from custos.core.paths import BASE, cn_now, MARKET_DIR  # noqa: E402
 

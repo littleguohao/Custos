@@ -20,6 +20,7 @@ import urllib.request
 from typing import Any, Optional
 
 from custos.datasource.local_tdx.tq_sector import is_tdxw_running
+import sys
 
 TQ_HTTP_URL = "http://127.0.0.1:17709/"
 DEFAULT_TIMEOUT = 15

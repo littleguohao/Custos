@@ -13,7 +13,6 @@
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any, Optional
 
@@ -41,9 +40,6 @@ FACTOR: dict[str, Any] = {
 }
 
 
-_TOOLS = Path(__file__).resolve().parents[1]
-if str(_TOOLS) not in sys.path:
-    sys.path.insert(0, str(_TOOLS))   # code_utils / indicators 在 src/core
 # 原先的 market_timing 一项已于 2026-08-08 删除：本模块只依赖 src/core
 # 与同目录（因子层惯例：同目录扁平 import 的路径由消费方设置，见 factors/__init__.py）。
 

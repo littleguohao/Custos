@@ -27,13 +27,6 @@ dev = [
 # Linux/Mac 仅可使用 online 模式
 
 [tool.pytest.ini_options]
-# 4a 过渡期保留：包已可编辑安装，列表在 4b 删除
-pythonpath = ["src", "src/custos/core", "src/custos/core/factors", "src/custos/core/trades",
-              "src/custos/datasource", "src/custos/datasource/collect",
-              "src/custos/datasource/local_tdx", "src/custos/datasource/news",
-              "src/custos/pipeline", "src/custos/pipeline/screening",
-              "src/custos/pipeline/market_timing", "src/custos/pipeline/holdings",
-              "src/custos/pipeline/close_review", "src/custos/research"]
 testpaths = ["tests"]
 
 [dependency-groups]

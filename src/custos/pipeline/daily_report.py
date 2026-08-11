@@ -10,13 +10,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import sys
-from pathlib import Path
-
-_SRC = Path(__file__).resolve().parents[1]
-for _bp in (str(_SRC / "core"), str(_SRC / "datasource")):
-    if _bp not in sys.path:
-        sys.path.insert(0, _bp)
 
 from custos.pipeline.close_review.holding_structure import n_structure_basis
 from custos.datasource.news.premarket_intel_schema import validate_premarket_intelligence

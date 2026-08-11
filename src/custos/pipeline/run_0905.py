@@ -14,13 +14,8 @@ import os
 import sys
 import time
 
-import sys
 from pathlib import Path
 
-_SRC = Path(__file__).resolve().parents[1]
-for _bp in (str(_SRC / "core"),):          # core/: paths/pipeline_kit 等 L0 模块
-    if _bp not in sys.path:
-        sys.path.insert(0, _bp)
 
 from custos.core.paths import BASE, cn_today, TOOLS, LOGS, PLANS
 from custos.core.pipeline_kit import log_stage, md_to_digest, now_iso, warn, write_run_log, run_stage_quiet as _stage, calendar_gate, propagate_gate_code
@@ -34,8 +29,6 @@ _log_stage = log_stage
 
 def _write_run_log(target: str, status: str, started_at: str, t0: float, stages: list[dict]):
     return write_run_log(LOG_DIR, "0905", target, status, started_at, t0, stages)
-
-
 
 
 DISCOVERY_STAGES = ("overseas", "rss_collect", "rss_filter")

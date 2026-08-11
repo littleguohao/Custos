@@ -11,26 +11,15 @@ from __future__ import annotations
 import json
 import math
 import os
-import sys
 from pathlib import Path
 
-TOOLS_DIR = Path(__file__).resolve().parents[1]          # src/
-for _bp in (TOOLS_DIR / "core",):       # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))
 
 from custos.core.paths import BASE, MARKET_DIR  # noqa: E402
 from custos.core.indicators import pct_change as pct  # noqa: E402
 
-LOCAL_TDX_DIR = BASE / "src" / "datasource" / "local_tdx"
-if str(LOCAL_TDX_DIR) not in sys.path:
-    sys.path.insert(0, str(LOCAL_TDX_DIR))
 
 from custos.datasource.local_tdx import local_tdx_data as ltd  # type: ignore
 
-_MT_DIR = Path(__file__).resolve().parent
-if str(_MT_DIR) not in sys.path:
-    sys.path.insert(0, str(_MT_DIR))
 from custos.datasource.breadth_basis import breadth_counts, resolve_total_stocks  # noqa: E402
 
 INDICES = {
@@ -58,7 +47,6 @@ def to_float(x):
         return None if math.isnan(v) else v
     except Exception:
         return None
-
 
 
 def _is_stale(as_of, target_date) -> bool:

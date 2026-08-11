@@ -43,9 +43,7 @@ FACTOR: dict[str, Any] = {
 }
 
 
-# 本模块无任何项目内 import（只用 numpy/pandas）⇒ 不需要 sys.path 引导；
 # 原先残留的 _TOOLS/screening/market_timing 三行已于 2026-08-08 删除
-# （因子层惯例：sys.path 由消费方设置，见 factors/__init__.py）。
 
 # ---- Cardwell 区间边界（待回测）----
 BULL_RANGE_LOW = 40.0        # 牛市区间下沿：回调低点 ≥ 此值

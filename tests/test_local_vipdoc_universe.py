@@ -1,10 +1,8 @@
 # -*- coding: utf-8 -*-
 """list_local_vipdoc_codes：本地 vipdoc 枚举 universe（A股个股保留，指数/ETF/债券剔除）。"""
-import sys
 from pathlib import Path
 
 TESTS_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(TESTS_DIR.parent / "src" / "custos" / "datasource" / "local_tdx"))
 
 from custos.datasource.local_tdx import local_tdx_data as ltd
 

@@ -224,7 +224,6 @@ class SubprocessTargetTests(unittest.TestCase):
         import ast
         import importlib
         import sys
-        sys.path.insert(0, str(TOOLS))
         for f in sorted(TOOLS.rglob("*.py")):
             if f.name in ("__init__.py", "conftest.py"):
                 continue
@@ -310,7 +309,6 @@ class LocalPathRedefinitionTests(unittest.TestCase):
     def test_no_module_rebuilds_a_paths_constant(self):
         import ast
         import sys
-        sys.path.insert(0, str(TOOLS))
         from custos.core import paths as paths_mod
 
         # 只取 src 下的子目录常量
@@ -326,7 +324,6 @@ class LocalPathRedefinitionTests(unittest.TestCase):
             except SyntaxError:
                 continue
             # ⚠️ 豁免 bootstrap：有些模块既当包内模块 import、也被直接当脚本跑，
-            # 必须先本地算出 src 再塞进 sys.path，`paths` 那时还导不进来（鸡生蛋）。
             # 判据是「该赋值出现在 `from paths import` **之前**」—— 用行号比，
             # 不猜变量名（`adjust_factors` 叫 TOOLS_DIR，别的模块叫 _TOOLS_ROOT）。
             paths_import_line = min(

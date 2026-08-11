@@ -14,12 +14,6 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-TOOLS = Path(__file__).resolve().parents[1]
-for _bp in (TOOLS, TOOLS.parent / "core"):  # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))
-if str(Path(__file__).resolve().parent) not in sys.path:
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from custos.datasource.local_tdx import tq_sector  # noqa: E402  复用其 TdxW 探测 + tqcenter 惰性导入
 from custos.core.paths import MARKET_DIR  # noqa: E402

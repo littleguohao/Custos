@@ -51,10 +51,6 @@ from pathlib import Path
 
 import requests
 
-TOOLS = Path(__file__).resolve().parents[1]
-for _p in (str(TOOLS), str(TOOLS.parent / "core")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
 
 from custos.core.paths import BASE, cn_today, DATA  # noqa: E402
 
@@ -270,7 +266,6 @@ def build_from_tdx(codes: list[str], *, progress_every: int = 200,
       · `prev_sample` 为 None，`observed_on` 就是**精确的股本变动日**
         （比东财的月频采样区间更准）。
     """
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
     # ⚠️ 必须与调用方走同一条导入路径，否则同一个文件会被加载成两个模块
     # （`adjust_factors` 与 `local_tdx.adjust_factors`），`AdjustError` 就成了两个
     # 不同的类，下面的 except 静默失效、异常直接穿透上抛。

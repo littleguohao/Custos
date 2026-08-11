@@ -5,18 +5,11 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import sys
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
 TOOLS_DIR = Path(__file__).resolve().parents[1]
-for _bp in (TOOLS_DIR, TOOLS_DIR.parent / "core"):  # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))
-LOCAL_TDX_DIR = TOOLS_DIR.parent / "datasource" / "local_tdx"
-if str(LOCAL_TDX_DIR) not in sys.path:
-    sys.path.insert(0, str(LOCAL_TDX_DIR))
 
 from custos.core.runtime_guards import normalize_regime  # noqa: E402
 
@@ -30,7 +23,6 @@ from custos.core.contracts import require  # noqa: E402
 
 # 次新股前置排除阈值：上市日历天数 < 20 标记
 NEW_LISTING_DAYS = 20
-
 
 
 def action_rank(priority: str) -> int:

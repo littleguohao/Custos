@@ -6,6 +6,7 @@ import json
 
 from custos.pipeline import daily_report
 from custos.datasource.news import postclose_news_digest
+import sys
 
 
 def _run(monkeypatch, tmp_path, intel_filenames, day="2026-07-17"):

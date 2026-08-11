@@ -24,12 +24,6 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 TOOLS_DIR = Path(__file__).resolve().parents[1]
-for _bp in (TOOLS_DIR, TOOLS_DIR.parent / "core"):  # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))
-LOCAL_TDX_DIR = TOOLS_DIR / "local_tdx"
-if str(LOCAL_TDX_DIR) not in sys.path:
-    sys.path.insert(0, str(LOCAL_TDX_DIR))
 
 from custos.core.paths import MARKET_DIR  # noqa: E402
 from custos.core.contracts import require  # noqa: E402

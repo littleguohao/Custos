@@ -21,14 +21,6 @@ from typing import Any, Optional
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-TOOLS_DIR = Path(__file__).resolve().parents[1]
-for _bp in (TOOLS_DIR, TOOLS_DIR.parent / "core"):  # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))
-_FACTORS_DIR = str(Path(__file__).resolve().parents[2] / "core" / "factors")
-if _FACTORS_DIR not in sys.path:
-    sys.path.insert(0, _FACTORS_DIR)   # 因子层：见 factors/__init__.py
-
 
 from custos.core.paths import PLANS, QUALITY_DIR, STOCK_POOL_DIR  # noqa: E402
 from custos.core.runtime_guards import normalize_regime  # noqa: E402

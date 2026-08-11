@@ -19,13 +19,11 @@ from __future__ import annotations
 
 import json
 import pathlib
-import sys
 
 import pytest
+import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/custos/pipeline/market_timing", "src/custos/pipeline/close_review"):
-    sys.path.insert(0, str(ROOT / _p))
 
 
 # ─────────────────────────── portfolio_review_report ───────────────────────────

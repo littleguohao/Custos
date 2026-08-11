@@ -1019,9 +1019,3 @@ class TestFeishuRecipientResolution:
             frp.resolve_to_open_id({"OPENCLAW_CONFIG": str(cfg)})
 
 
-
-
-
-
-
-

@@ -28,8 +28,8 @@
     main_rally_factor → rsi_state
     sector_phase    → sector_mainstream
 
-⇒ 同目录内保持扁平 import；被外部消费时由消费方把本目录加进 `sys.path`
-（与 `screening/`、`market_timing/`、`local_tdx/` 同一惯例）。
+⇒ 同目录内保持包式绝对 import（`from custos.core.factors.xxx import ...`）；
+2026-08-11 包式化（阶段 4b）后不再有任何 sys.path 注入，custos 可编辑安装即可解析。
 """
 
 
@@ -93,7 +93,7 @@ def registry() -> dict[str, dict]:
         if m.name in _SKIP:
             continue
         try:
-            mod = _il.import_module(m.name)
+            mod = _il.import_module(f".{m.name}", package=__name__)
         except Exception as exc:              # noqa: BLE001 —— 单个因子坏了不该让注册表整体失效
             # ⚠️ 但**不得静默**：2026-08-06 `_shares` 漏 import json 就是这类 fail-open
             # 吞掉的 —— 空注册表和全员坏掉无法区分。失败照常跳过，但必须留痕到 stderr

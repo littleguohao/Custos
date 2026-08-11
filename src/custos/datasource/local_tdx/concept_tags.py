@@ -26,11 +26,6 @@ from typing import Any
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-SELF = Path(__file__).resolve()
-TOOLS_DIR = SELF.parents[1]
-for p in (str(TOOLS_DIR), str(TOOLS_DIR.parent / "core"), str(SELF.parent)):
-    if p not in sys.path:
-        sys.path.insert(0, p)
 
 from custos.core.paths import BASE, cn_now, SECTORS_DIR  # noqa: E402
 

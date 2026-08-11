@@ -20,6 +20,7 @@ import pathlib
 import re
 
 import pytest
+import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 FACTORS_DIR = ROOT / "src" / "custos" / "core" / "factors"
@@ -46,11 +47,11 @@ def test_module_moved(m):
 
 
 class TestConsumersCanResolve:
-    """消费方必须把 `factors/` 加进 sys.path —— 34 处扁平 import 才不用改。
+    """消费方经 custos 包解析 factors —— 不再需要 sys.path 引导。
 
-    仓库既有惯例就是「扁平 import + 各自把目录加进 sys.path」
-    （`screening/`、`market_timing/`、`local_tdx/` 都如此），
-    改成包限定 import 要动 34 处、其中还有多行 `from X import (a, b,` —— 风险更高。
+    2026-08-11 包式化（阶段 4b）前的惯例是「扁平 import + 各自把目录加进 sys.path」；
+    现在 `from custos.core.factors.xxx import ...` 在脚本与包两种模式下都能解析。
+    下面的断言防 sys.path 引导回流（它会复活「同一模块两份对象」那类缺陷）。
     """
 
     # ⚠️ 因子消费方**跨两个目录**：2026-08-07 研究脚本从 `screening/` 拆到 `research/`
@@ -64,33 +65,17 @@ class TestConsumersCanResolve:
                  "research/compare_signal_sets.py", "research/scan_signal_backtest.py"]
 
     @pytest.mark.parametrize("f", CONSUMERS)
-    def test_has_factors_bootstrap(self, f):
+    def test_no_factors_syspath_bootstrap(self, f):
         s = (ROOT / "src" / "custos" / f).read_text(encoding="utf-8")
-        assert "_FACTORS_DIR" in s, f"{f} 未把 factors/ 加进 sys.path"
-
-    @pytest.mark.parametrize("f", CONSUMERS)
-    def test_bootstrap_is_toplevel(self, f):
-        """⚠️ 引导必须在**顶层**（列 0）。
-
-        2026-08-06 实际踩到：脚本锚定「最后一处 sys.path.insert」，
-        而 `launch_point_study` / `run_bear_to_long_study` 在**函数内部**做懒引导，
-        于是引导被插进函数体 ⇒ `IndentationError`。
-        """
-        for ln in (ROOT / "src" / "custos" / f).read_text(encoding="utf-8").splitlines():
-            if "_FACTORS_DIR = str(" in ln:
-                assert not ln.startswith((" ", "\t")), f"{f} 的 factors 引导有缩进（在函数内）"
+        assert "_FACTORS_DIR" not in s and "sys.path" not in s, \
+            f"{f} 又出现了 factors/sys.path 引导（应靠 custos 包解析）"
 
 
 class TestImportsStillWork:
     @pytest.mark.parametrize("m", MODULES)
-    def test_flat_import(self, m):
-        """conftest 会把带 __init__.py 的子目录加进 sys.path ⇒ 扁平 import 仍可用。"""
-        __import__(m)
-
-    @pytest.mark.parametrize("m", MODULES)
     def test_package_qualified_import(self, m):
-        """包限定 import 也要可用（测试里有几处这么写）。"""
-        __import__(f"factors.{m}")
+        """包式绝对 import（包式化后唯一的消费形态）。"""
+        __import__(f"custos.core.factors.{m}")
 
     def test_no_stale_screening_qualified_refs(self):
         """不许再有 `from screening import <因子>` —— 那会 ImportError。"""

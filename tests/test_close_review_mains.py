@@ -18,8 +18,6 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/custos/pipeline/close_review", "src/custos/pipeline/market_timing"):
-    sys.path.insert(0, str(ROOT / _p))
 
 from custos.pipeline.close_review import final_close_review as fcr  # noqa: E402
 from custos.pipeline.close_review import review_core as rc  # noqa: E402

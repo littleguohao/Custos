@@ -13,13 +13,10 @@ from __future__ import annotations
 
 import math
 import pathlib
-import sys
 
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/custos/pipeline/market_timing"):
-    sys.path.insert(0, str(ROOT / _p))
 
 from custos.pipeline.market_timing import market_timing_collector as mtc  # noqa: E402
 

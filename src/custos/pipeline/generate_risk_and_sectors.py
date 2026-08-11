@@ -12,13 +12,6 @@ import json
 import re
 from pathlib import Path
 
-import sys
-from pathlib import Path
-
-_SRC = Path(__file__).resolve().parents[1]
-for _bp in (str(_SRC / "core"),):          # core/: paths/pipeline_kit 等 L0 模块
-    if _bp not in sys.path:
-        sys.path.insert(0, _bp)
 
 from custos.core.paths import BASE, DATA
 from custos.core.paths import read_json as load
@@ -26,10 +19,6 @@ from custos.core.paths import write_json as dump
 from custos.core.code_utils import bare_code as bare, fnum
 from custos.core.runtime_guards import normalize_regime
 from custos.core.contracts import require
-
-
-
-
 
 
 # ── Sector state normalization (from ThemeStageAdapter) ──

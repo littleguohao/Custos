@@ -44,7 +44,7 @@ def _discover_cli() -> list[tuple[pathlib.Path, str, bool]]:
                    if isinstance(n, ast.FunctionDef) and n.name == "main"), None)
         if mn is None:
             continue
-        modname = f.stem if f.parent == TOOLS else f"{f.parent.name}.{f.stem}"
+        modname = "custos." + f.relative_to(TOOLS / "custos").with_suffix("").as_posix().replace("/", ".")
         out.append((f, modname, bool(mn.args.args)))
     return out
 
@@ -113,7 +113,6 @@ def _unescaped_percents_in_help(src: str) -> list[str]:
         if "%" in text.replace("%%", ""):
             bad.append(text[:70])
     return bad
-
 
 
 @pytest.mark.parametrize("path,modname", ALL_CLI_FILES,

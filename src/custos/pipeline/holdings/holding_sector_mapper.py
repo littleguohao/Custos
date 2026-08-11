@@ -24,10 +24,6 @@ from pathlib import Path
 
 import pandas as pd
 
-TOOLS_DIR = Path(__file__).resolve().parents[1]
-for _bp in (TOOLS_DIR, TOOLS_DIR.parent / "core"):  # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))
 
 from custos.core.paths import BASE, TDX_ROOT, HOLDINGS_DIR, TRADES_DIR  # noqa: E402
 from custos.core.code_utils import suffix  # noqa: E402
@@ -99,7 +95,6 @@ def lookup_name(tree: dict, code: str) -> str:
 
 def init_tq():
     user_path = TDX_ROOT / "PYPlugins" / "user"
-    sys.path.insert(0, str(user_path))
     from tqcenter import tq  # type: ignore
     tq.initialize(__file__)
     return tq

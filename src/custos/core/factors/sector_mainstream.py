@@ -33,11 +33,6 @@ FACTOR: dict[str, Any] = {
 }
 
 
-TOOLS = Path(__file__).resolve().parents[1]
-for _p in (str(TOOLS), str(TOOLS.parent / "pipeline" / "screening"), str(TOOLS.parent / "datasource" / "local_tdx")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
 from custos.core.paths import MARKET_DIR  # noqa: E402
 
 EXCLUDE_TDX_TYPES = {"3", "5"}     # 地区/风格板块不进合集(江西板块、保险重仓之类无"主线"语义)

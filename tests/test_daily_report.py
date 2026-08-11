@@ -13,12 +13,10 @@ BBI 在 B1 规则里是**预警而非权威**（`01_swing_rules.md` 原话），
 from __future__ import annotations
 
 import pathlib
-import sys
 
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
 
 from custos.pipeline import daily_report as dr  # noqa: E402
 

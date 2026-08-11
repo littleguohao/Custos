@@ -15,14 +15,13 @@ from __future__ import annotations
 
 import json
 import pathlib
-import sys
 
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
 
 from custos.pipeline import generate_risk_and_sectors as g  # noqa: E402
+import sys
 
 
 @pytest.fixture()

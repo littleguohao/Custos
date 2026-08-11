@@ -7,10 +7,6 @@ import json
 import sys
 from pathlib import Path
 
-TOOLS_DIR = Path(__file__).resolve().parents[1]
-for _bp in (TOOLS_DIR, TOOLS_DIR.parent / "core"):  # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))
 
 from custos.core.paths import BASE, DATA  # noqa: E402
 from custos.core.paths import read_json as load  # noqa: E402
@@ -18,14 +14,10 @@ from custos.core.paths import write_json as dump  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
 # ⚠️ **必须包限定导入** `news.premarket_intel_schema`。它持有可变的模块级状态
 # （`PREMARKET_DIR`，测试要 monkeypatch）。`src` 与 `src/custos/datasource/news` 都在
-# sys.path 上，扁平写法 `from premarket_intel_schema import ...` 会建出
 # **第二个模块对象**，于是打桩打在另一个对象上、静默失效。
 from custos.datasource.news.premarket_intel_schema import (  # noqa: E402
     load_premarket_intelligence, premarket_intelligence_path,
     validate_premarket_intelligence)
-
-
-
 
 
 # 政策分类口径。`A or B and C` 在 Python 里是 `A or (B and C)` —— 原写法

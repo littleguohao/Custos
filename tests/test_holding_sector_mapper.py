@@ -18,16 +18,14 @@ from __future__ import annotations
 
 import json
 import pathlib
-import sys
 
 import pandas as pd
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/custos/pipeline/holdings"):
-    sys.path.insert(0, str(ROOT / _p))
 
 from custos.pipeline.holdings import holding_sector_mapper as hsm  # noqa: E402
+import sys
 
 
 class TestNormCode:

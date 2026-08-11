@@ -19,8 +19,6 @@ import pandas as pd
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/custos/core/factors", "src/custos/pipeline/screening"):
-    sys.path.insert(0, str(ROOT / _p))
 
 from custos.core import factors  # noqa: E402
 

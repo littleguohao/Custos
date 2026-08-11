@@ -26,17 +26,12 @@
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
 
-_TOOLS = Path(__file__).resolve().parents[1]
-for _bp in (_TOOLS, _TOOLS.parent / "core"):  # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))   # indicators 在 src 根
 # 原先的 screening/market_timing 两项已于 2026-08-08 删除：本模块只依赖
 # src 根与同目录（s_shape / platform_pullback，扁平 import 惯例见 factors/__init__.py）。
 
@@ -84,8 +79,6 @@ RESONANCE_BONUS_PTS = 12.0       # 待回测
 # （tests/test_enrich_b1cz.py::TestReversalKThresholdSingleSource）。
 
 DUAL_MIN_BARS = 120              # DKS 需要 MA114 → 至少 120 根
-
-
 
 
 def detect_launch_segment(df: pd.DataFrame, lookback: int = LAUNCH_LOOKBACK) -> dict[str, Any]:

@@ -28,13 +28,12 @@ runner 在日历门后立刻退出，所以它测的是那 5 行门检查，交�
 from __future__ import annotations
 
 import pathlib
-import sys
 
 import pytest
+import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "src" / "custos"
-sys.path.insert(0, str(TOOLS))
 
 
 class Recorder:
@@ -410,7 +409,7 @@ class TestRunnerNamesResolve:
         import ast as _ast
         import builtins
 
-        mod = __import__(name)
+        mod = __import__(f"custos.pipeline.{name}", fromlist=[name])
         src = (TOOLS / "pipeline" / f"{name}.py").read_text(encoding="utf-8")
         tree = _ast.parse(src)
         fn = next((n for n in tree.body

@@ -27,10 +27,6 @@ from typing import Any, Callable, Optional
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-TOOLS_DIR = Path(__file__).resolve().parents[1]
-for p in (TOOLS_DIR.parent / "core", TOOLS_DIR, TOOLS_DIR.parent / "datasource" / "local_tdx"):
-    if str(p) not in sys.path:
-        sys.path.insert(0, str(p))
 
 from custos.core.paths import DATA, SCREEN_FORMULA_REGISTRY_FILE  # noqa: E402
 from custos.core.contracts import require  # noqa: E402

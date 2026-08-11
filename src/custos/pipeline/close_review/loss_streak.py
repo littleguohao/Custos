@@ -28,14 +28,9 @@ owner 2026-08-10 定：**连亏冷却放在复盘环节，每日/每周都统计
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any
 
-TOOLS_DIR = Path(__file__).resolve().parents[1]
-for _bp in (TOOLS_DIR, TOOLS_DIR.parent / "core"):  # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))
 
 # 阈值：同股连续亏损达到几次算「连亏」。材料原文是 2 次 → 冷却 10 个交易日；
 # 冷却天数在本模块**不使用**（不拦交易，见模块 docstring），只保留次数阈值。
@@ -103,7 +98,6 @@ def loss_streaks(closings: list[dict], *, min_streak: int = LOSS_STREAK_MIN) -> 
                      key=lambda c: (-streaks[c]["count"], streaks[c]["last_sell_date"]))
     return {"streaks": streaks, "flagged": flagged,
             "excluded": excluded, "min_streak": min_streak}
-
 
 
 def format_lines(result: dict, *, title: str = "连亏检查") -> list[str]:

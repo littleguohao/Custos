@@ -21,7 +21,6 @@ import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 RESEARCH = ROOT / "src" / "custos" / "research"
-sys.path.insert(0, str(ROOT / "src"))
 
 from custos.research import __main__ as entry  # noqa: E402
 

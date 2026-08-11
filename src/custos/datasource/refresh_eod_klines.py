@@ -17,17 +17,10 @@ import sys
 import time
 from pathlib import Path
 
-TOOLS_DIR = Path(__file__).resolve().parents[1]          # src/
-for _bp in (TOOLS_DIR / "core",):       # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))
 
 from custos.core.paths import BASE, TRADES_DIR  # noqa: E402
 from custos.core.code_utils import norm_code  # noqa: E402
 
-LOCAL_TDX_DIR = BASE / "src" / "datasource" / "local_tdx"
-if str(LOCAL_TDX_DIR) not in sys.path:
-    sys.path.insert(0, str(LOCAL_TDX_DIR))
 
 from custos.datasource.local_tdx import local_tdx_data as ltd  # type: ignore  # noqa: E402
 from custos.datasource.local_tdx import tq_http  # type: ignore  # noqa: E402

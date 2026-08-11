@@ -28,15 +28,6 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
-# ⚠️ 本文件在 src 的**子目录**里：作为 __main__ 跑时 sys.path[0] 是本目录，
-# 必须把 src 自己加进 sys.path，否则本地模块导入会失败。
-# ⚠️ 必须放在**第一个本地模块导入之前** —— 放在 `from paths import` 前是不够的，
-#    若有更早的本地导入（如 net_retry）会先失败。
-_TOOLS = Path(__file__).resolve().parents[1]
-for _bp in (_TOOLS, _TOOLS / "core"):  # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))
-
 from custos.core.paths import BASE, REVIEWS, TRADES_DIR
 
 REVIEWS_DIR = REVIEWS / "trade_review"

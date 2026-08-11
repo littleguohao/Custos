@@ -42,12 +42,7 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
-_TOOLS = Path(__file__).resolve().parents[1]
-for _bp in (_TOOLS, _TOOLS.parent / "core"):  # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))   # indicators 在 src 根
 # 原先的 screening/market_timing 两项已于 2026-08-08 删除：本模块只依赖 src 根
-# （因子层惯例：sys.path 由消费方设置，见 factors/__init__.py）。
 
 from custos.core.indicators import j_series as _j_canonical  # noqa: E402
 from custos.core.b1_thresholds import J_LOW_THRESHOLD  # noqa: E402  L0 唯一来源；见 B2_J_LOW 注释
@@ -106,7 +101,6 @@ def _arr(df: pd.DataFrame):
             df["low"].astype(float).to_numpy(),
             df["volume"].astype(float).to_numpy(),
             df["open"].astype(float).to_numpy())
-
 
 
 def detect_b2(df: pd.DataFrame, code: str = "",

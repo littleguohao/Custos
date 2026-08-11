@@ -14,14 +14,9 @@ revenue_yoy、roe、total_shares(× 价格 → 市值)。
 from __future__ import annotations
 
 import datetime as _dt
-import sys
 from pathlib import Path
 from typing import Any, Optional
 
-_TOOLS = Path(__file__).resolve().parents[1]
-for _p in (str(_TOOLS.parent / "core"), str(_TOOLS), str(_TOOLS.parent / "datasource" / "local_tdx")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
 
 REQUIRED = ("code", "net_profit", "op_cashflow")   # 缺任一 → available=False
 DIXI_NET_PROFIT_YOY = 100.0                          # 待回测：业绩预增代理阈值（净利同比%）

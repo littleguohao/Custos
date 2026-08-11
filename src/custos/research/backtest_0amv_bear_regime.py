@@ -55,10 +55,6 @@ from typing import Any, Optional
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-TOOLS_DIR = Path(__file__).resolve().parents[1]
-for _p in (str(TOOLS_DIR / "core"), str(TOOLS_DIR / "datasource" / "local_tdx")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
 
 from custos.core.paths import BASE, cn_now, REVIEWS, TRADES_DIR  # noqa: E402
 

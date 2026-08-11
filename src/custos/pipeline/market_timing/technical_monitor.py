@@ -25,10 +25,6 @@ if hasattr(sys.stderr, "reconfigure"):
 
 import pandas as pd
 
-TOOLS_DIR = Path(__file__).resolve().parents[1]
-for _bp in (TOOLS_DIR, TOOLS_DIR.parent / "core"):  # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))
 
 # 2026-08-07 架构审查：以下 7 个纯指标函数已下移到 `indicators`（底层）——
 # 它们此前定义在本模块，却被 factors/（底层）与 screening/ 跨层调用，

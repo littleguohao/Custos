@@ -14,14 +14,11 @@ from pathlib import Path
 
 if hasattr(sys.stdout, "reconfigure"): sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-TOOLS_DIR = Path(__file__).resolve().parents[1]
-for _bp in (TOOLS_DIR, TOOLS_DIR.parent / "core"):  # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))
 
 from custos.core.paths import BASE, HOLDINGS_DIR, TRADES_DIR  # noqa: E402
 from custos.core.paths import read_json as load  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
+import sys
 
 PY=Path(sys.executable)
 TECH=BASE/'src'/'custos'/'pipeline'/'market_timing'/'technical_monitor.py'
@@ -35,7 +32,6 @@ _ANALYSIS_CACHE: dict[str, dict] = {}
 def clear_analysis_cache() -> None:
     """显式失效技术面分析缓存（测试 / 长驻进程用）。"""
     _ANALYSIS_CACHE.clear()
-
 
 
 def pos_to_row(p):

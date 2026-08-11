@@ -7,6 +7,7 @@ score/共振/trade_style）。风控/回避（无止损/空头/sprint/派发/MAC
 import pytest
 
 from custos.pipeline.screening import score_candidates as sc
+import sys
 
 
 def _mk(patterns=None, capital="weak", stop_price=10.0, code="600000", **extra):

@@ -42,13 +42,6 @@ import numpy as np
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-TOOLS_DIR = Path(__file__).resolve().parents[1]
-for p in (TOOLS_DIR.parent / "core", TOOLS_DIR, TOOLS_DIR.parent / "datasource" / "local_tdx", TOOLS_DIR / "market_timing", TOOLS_DIR / "screening"):
-    if str(p) not in sys.path:
-        sys.path.insert(0, str(p))
-_FACTORS_DIR = str(Path(__file__).resolve().parents[2] / "core" / "factors")
-if _FACTORS_DIR not in sys.path:
-    sys.path.insert(0, _FACTORS_DIR)   # 因子层：见 factors/__init__.py
 # 因子实现已抽到 factors/ 各自成模块（2026-08-06）——**全项目唯一一份**，
 # 本模块通过调用访问。常量随因子走（`WAVE_*` 在 wave_type、`DIST_*` 在 distribution…），
 # 需要它们的地方从对应因子模块导入，不要在这里再抄一份。
@@ -60,8 +53,6 @@ from custos.core.factors.wave_type import (WAVE_MIN_BARS, _find_rally_segment,  
 from custos.core.factors.perfect_b1_fit import compute_perfect_b1_fit  # noqa: E402
 from custos.core.factors.b1_pullback_fit import compute_b1_pullback_fit  # noqa: E402
 from custos.core.factors.distribution import detect_distribution  # noqa: E402
-
-
 
 
 from custos.core.paths import (DATA, RISK_DIR, SCREEN_FORMULA_REGISTRY_FILE, SECTORS_DIR,
@@ -408,11 +399,6 @@ def _close_ret_pct(df, n: int) -> Optional[float]:
 
 
 # ========== B1/CZ 策略对齐检测器（阈值均为待回测参数，实际值随候选落盘） ==========
-
-
-
-
-
 
 
 def weekly_j_state(df) -> dict[str, Any]:
@@ -818,15 +804,6 @@ def check_macd_technics(df) -> dict[str, Any]:
         "three_peaks": three_peaks,
         "overextended": overextended,
     }
-
-
-
-
-
-
-
-
-
 
 
 def check_liquidity(df, win: int = LIQUIDITY_WIN) -> dict[str, Any]:

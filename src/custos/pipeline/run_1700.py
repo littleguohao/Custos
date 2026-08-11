@@ -17,13 +17,8 @@ import os
 import sys
 import time
 
-import sys
 from pathlib import Path
 
-_SRC = Path(__file__).resolve().parents[1]
-for _bp in (str(_SRC / "core"),):          # core/: paths/pipeline_kit 等 L0 模块
-    if _bp not in sys.path:
-        sys.path.insert(0, _bp)
 
 from custos.core.paths import BASE, cn_today, TOOLS, LOGS, QUALITY_DIR, TRADES_DIR
 from custos.core.paths import REVIEWS as _REVIEWS_ROOT
@@ -68,8 +63,6 @@ def _last_line(text: str) -> str:
     """取 stage 输出的最后一行非空文本(脚本摘要行)。"""
     lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
     return lines[-1] if lines else ""
-
-
 
 
 def _reconcile_note(target: str) -> str:

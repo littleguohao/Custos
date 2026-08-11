@@ -14,14 +14,6 @@ warnings.filterwarnings("ignore")
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-# ⚠️ 本文件在 src 的**子目录**里：作为 __main__ 跑时 sys.path[0] 是本目录，
-# 必须把 src 自己加进 sys.path，否则本地模块导入会失败。
-# ⚠️ 必须放在**第一个本地模块导入之前** —— 放在 `from paths import` 前是不够的，
-#    若有更早的本地导入（如 net_retry）会先失败。
-_TOOLS = Path(__file__).resolve().parents[1]
-for _bp in (_TOOLS, _TOOLS.parent / "core"):  # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))
 
 from custos.core.code_utils import fnum as _fnum
 
@@ -30,12 +22,12 @@ from custos.core.paths import BASE, TDX_ROOT, cn_today, cn_now, MARKET_DIR
 import urllib.request, urllib.parse
 
 from custos.core.net_retry import retry_call
+import sys
 
 BREADTH_CODES = [("880001", "平均股价"), ("880005", "涨跌家数"), ("880006", "停板家数"),
                  ("880390", "融资融券"), ("880863", "北向资金")]
 NORTHBOUND_CODE = "880863"
 NORTHBOUND_MIN_ROWS = 5
-
 
 
 def parse_yahoo_payload(symbol: str, data: dict) -> dict:

@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 from custos.pipeline import feishu_report_publisher as frp
+import sys
 
 # 结构取自 artifacts/reports/daily/2026-07-20_daily_report.md(盘前日报)
 DAILY_REPORT = """# 每日投研简报｜2026年7月20日（星期一）

@@ -29,20 +29,12 @@ from typing import Any, Optional
 
 import pandas as pd
 
-TOOLS = Path(__file__).resolve().parents[1]
-for _p in (str(TOOLS / "core"), str(TOOLS / "pipeline" / "screening"), str(TOOLS / "datasource" / "local_tdx")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
 
 from custos.research import backtest_factors as bt  # noqa: E402  复用 ENTRY_GATES / load_amv_regime
-_FACTORS_DIR = str(Path(__file__).resolve().parents[1] / "core" / "factors")
-if _FACTORS_DIR not in sys.path:
-    sys.path.insert(0, _FACTORS_DIR)   # 因子层：见 factors/__init__.py
 
 # 股本事件索引构建的唯一所有者（包限定导入：该模块持可变缓存，见 _shares 模块头）。
 from custos.core.factors._shares import events_to_idx as _shares_events_to_idx  # noqa: E402
 from custos.core.paths import MARKET_DIR  # noqa: E402
-
 
 
 def window_return(dates: list, closes: list, start: str, end: str,
@@ -1861,7 +1853,6 @@ def main(argv=None, loader=None) -> int:
                   f"板块有数据(缺 CSV {_st['csv_missing']}, 解析失败 {_st['csv_error']}; "
                   f"dir={args.sector_index_dir})", file=sys.stderr)
         if args.pit_features:
-            sys.path.insert(0, str(TOOLS / "datasource" / "local_tdx"))
 
             from custos.datasource.local_tdx import fetch_pit_financials as _pit  # noqa: PLC0415
             pit_recs = _pit.load_ledger(args.pit_ledger) if args.pit_ledger \
@@ -2015,15 +2006,6 @@ def main(argv=None, loader=None) -> int:
     if args.out:
         _write_json_out(args.out, res)
     return 0
-
-# ── research/ 与 screening/ 分家（2026-08-07）后的路径引导。
-# 研究脚本要能同时导**自己的兄弟**（research/）与**生产链模块**（screening/）：
-# 方向是研究依赖生产（回测要跑生产的因子与打分），反向为 0 ——
-# 见 tests/test_architecture_layers.py。
-for _p in (str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[1] / "pipeline" / "screening")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
 
 
 if __name__ == "__main__":

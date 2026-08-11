@@ -8,12 +8,6 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-import sys
-
-_SRC = Path(__file__).resolve().parents[1]
-for _bp in (str(_SRC / "core"),):          # core/: paths/runtime_guards 等 L0 模块
-    if _bp not in sys.path:
-        sys.path.insert(0, _bp)
 
 from custos.core.runtime_guards import trading_day_status  # noqa: E402
 from custos.core.paths import BASE, CONTRACTS_DIR, TOOLS, cn_today, cn_now, MARKET_DIR
@@ -22,7 +16,6 @@ from custos.core.paths import read_json as load_json
 CONFIG = CONTRACTS_DIR / "CN_TRADING_CALENDAR.json"
 CACHE = MARKET_DIR / "CN_TRADING_CALENDAR_CACHE.json"
 DEFAULT_ENDPOINT = "http://127.0.0.1:17709/"
-
 
 
 def normalize_day(value: Any) -> str | None:
@@ -63,8 +56,6 @@ def rpc_trading_dates(endpoint: str, market: str, start: date, end: date, timeou
     """
     import sys as _sys
     d = str(TOOLS / "datasource" / "local_tdx")
-    if d not in _sys.path:
-        _sys.path.insert(0, d)
     from custos.datasource.local_tdx import tq_http  # 懒导入：不扩大本模块的导入面
     res = tq_http.call(
         "get_trading_dates",

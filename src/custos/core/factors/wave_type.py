@@ -7,17 +7,12 @@
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
 from custos.core.factors._util import ohlcv_arrays as _ohlcv_arrays
 
-_TOOLS = Path(__file__).resolve().parents[1]
-for _p in (str(_TOOLS), str(_TOOLS.parent / "pipeline" / "market_timing")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
 
 FACTOR: dict[str, Any] = {
     "id": "wave_type",

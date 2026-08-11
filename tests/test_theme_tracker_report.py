@@ -14,15 +14,13 @@ from __future__ import annotations
 
 import json
 import pathlib
-import sys
 
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/custos/pipeline/market_timing"):
-    sys.path.insert(0, str(ROOT / _p))
 
 from custos.pipeline.market_timing import theme_tracker_report as ttr  # noqa: E402
+import sys
 
 
 def _an(trend=None, pos20=None, j=None, j_prev=None, macd_dir=None, weekly_hist=None,

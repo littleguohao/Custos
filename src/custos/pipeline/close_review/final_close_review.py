@@ -5,12 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import sys
 from datetime import datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "core"))
 from custos.pipeline.holdings.b1_holding_state import evaluate as evaluate_b1_holding
 
 from custos.pipeline.close_review.holding_bbi import intraday_bbi_basis
@@ -36,10 +33,6 @@ from custos.core.fmt import pct_text  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
 
 REV = REVIEWS / "daily"
-
-
-
-
 
 
 def ma_flag(value) -> str:
@@ -68,7 +61,6 @@ def render_index_row(row: dict) -> str:
     return (f"| {row['name']} | {close_text} | {pct_text(row.get('change_pct'))} | "
             f"{ma_flag(row.get('above_ma25'))}MA25 / {ma_flag(row.get('above_ma60'))}MA60 / "
             f"{ma_flag(row.get('above_ma144'))}MA144 / {ma_flag(row.get('above_ma240'))}MA240 |")
-
 
 
 def index_name(code):

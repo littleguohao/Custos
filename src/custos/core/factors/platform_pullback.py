@@ -31,12 +31,7 @@ FACTOR: dict[str, Any] = {
 }
 
 
-_TOOLS = Path(__file__).resolve().parents[1]
-for _bp in (_TOOLS, _TOOLS.parent / "core"):  # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))   # indicators 在 src 根；__main__ 段还用 local_tdx
 # 原先的 screening 一项已于 2026-08-08 删除：本模块只依赖 src 根
-# （因子层惯例：sys.path 由消费方设置，见 factors/__init__.py）。
 
 
 from custos.core.indicators import j_series as _j_canonical  # noqa: E402
@@ -151,7 +146,6 @@ def detect_platform_pullback(df: pd.DataFrame,
 
 
 if __name__ == "__main__":
-    sys.path.insert(0, str(_TOOLS.parent / "datasource" / "local_tdx"))
     from custos.datasource.local_tdx import local_tdx_data  # noqa: E402
 
     df = local_tdx_data.get_ohlcv_table("002756", count=200)

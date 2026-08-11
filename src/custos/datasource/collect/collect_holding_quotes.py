@@ -38,19 +38,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 TOOLS_DIR = Path(__file__).resolve().parents[1]   # parents[1]=src（本文件已移入 collect/）
-LOCAL_TDX_DIR = TOOLS_DIR / "local_tdx"
-if str(LOCAL_TDX_DIR) not in sys.path:
-    sys.path.insert(0, str(LOCAL_TDX_DIR))
 
-
-# ⚠️ 本文件在 src 的**子目录**里：作为 __main__ 跑时 sys.path[0] 是本目录，
-# 必须把 src 自己加进 sys.path，否则本地模块导入会失败。
-# ⚠️ 必须放在**第一个本地模块导入之前** —— 放在 `from paths import` 前是不够的，
-#    若有更早的本地导入（如 net_retry）会先失败。
-_TOOLS = Path(__file__).resolve().parents[1]
-for _bp in (_TOOLS, _TOOLS.parent / "core"):  # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))
 
 from custos.core.paths import BASE, TDX_ROOT, cn_today, cn_now, MARKET_DIR, TRADES_DIR  # noqa: E402
 from custos.core.code_utils import norm_code, fnum as _fnum  # noqa: E402
@@ -138,7 +126,6 @@ def get_market(code: str) -> int:
 
 def _market_name(mkt: int) -> str:
     return "BJ" if mkt == 2 else ("SH" if mkt == 1 else "SZ")
-
 
 
 def _fmt_dt(dt) -> str:

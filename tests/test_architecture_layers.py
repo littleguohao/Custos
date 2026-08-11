@@ -24,6 +24,7 @@ import collections
 import pathlib
 
 import pytest
+import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "src" / "custos"
@@ -331,7 +332,6 @@ class TestContractCoverageOfArtifacts:
     def test_every_dated_artifact_has_contract_or_exemption(self):
         import re
         import sys
-        sys.path.insert(0, str(TOOLS))
         from custos.core import contracts
 
         found = set()

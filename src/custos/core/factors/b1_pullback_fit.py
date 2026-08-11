@@ -7,17 +7,12 @@
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
 from custos.core.indicators import j_series as _j_canonical
 
-_TOOLS = Path(__file__).resolve().parents[1]
-for _p in (str(_TOOLS), str(_TOOLS.parent / "pipeline" / "market_timing")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
 
 FACTOR: dict[str, Any] = {
     "id": "b1_pullback_fit",

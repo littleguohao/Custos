@@ -4,9 +4,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 from pathlib import Path
-import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 from custos.core import runtime_guards
 
 

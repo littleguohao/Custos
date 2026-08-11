@@ -29,10 +29,6 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-TOOLS_DIR = Path(__file__).resolve().parents[1]
-for _p in (TOOLS_DIR / "core", TOOLS_DIR / "datasource" / "local_tdx"):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")

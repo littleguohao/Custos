@@ -8,10 +8,6 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from custos.datasource.news.source_name_overrides import fix_source_name
 
-TOOLS_DIR = Path(__file__).resolve().parents[1]
-for _bp in (TOOLS_DIR, TOOLS_DIR.parent / "core"):  # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))
 
 from custos.core.paths import BASE, LOGS, NEWS_DIR, RSS_SOURCE_REGISTRY_FILE, cn_now  # noqa: E402
 from custos.core.contracts import require  # noqa: E402

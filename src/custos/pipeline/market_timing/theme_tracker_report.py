@@ -25,10 +25,6 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-_TOOLS_ROOT = Path(__file__).resolve().parents[1]
-for _bp in (_TOOLS_ROOT, _TOOLS_ROOT.parent / "core"):  # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))
 
 from custos.core.paths import BASE, MARKET_TIMING, HOLDINGS_DIR, MARKET_DIR, PLANS, SECTORS_DIR  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
@@ -36,10 +32,6 @@ from custos.core.contracts import require  # noqa: E402
 SECTOR_MAP = SECTORS_DIR / "sector_code_map.json"
 SECTOR_DIR = SECTORS_DIR
 OUT_DIR = PLANS
-TOOLS_DIR = MARKET_TIMING
-for _bp in (TOOLS_DIR, TOOLS_DIR.parent / "core"):  # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))
 
 from custos.pipeline.market_timing import technical_monitor as tm  # noqa: E402
 

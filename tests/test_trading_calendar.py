@@ -6,11 +6,10 @@ import pathlib
 import unittest
 from datetime import date, timedelta
 from pathlib import Path
-import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 from custos.datasource.trading_calendar import extract_dates, merge_range
 from custos.core.runtime_guards import previous_confirmed_trading_day, trading_day_status
+import sys
 
 
 class TradingCalendarTests(unittest.TestCase):
@@ -69,8 +68,6 @@ class TransportConvergenceTests(unittest.TestCase):
         import sys
         from custos.core.paths import TOOLS
         d = str(TOOLS / "local_tdx")
-        if d not in sys.path:
-            sys.path.insert(0, d)
         from custos.datasource.local_tdx import tq_http
         return tq_http
 

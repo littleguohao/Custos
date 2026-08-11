@@ -55,10 +55,6 @@ import pathlib
 import sys
 from typing import Any, Optional
 
-BASE = pathlib.Path(__file__).resolve().parents[3]
-for _p in ("src/custos/core", "src/custos/datasource/local_tdx", "src/custos/pipeline/screening"):
-    sys.path.insert(0, str(BASE / _p))
-
 
 from custos.core.code_utils import price_limit_pct  # noqa: E402
 from custos.core.paths import LOGS  # noqa: E402

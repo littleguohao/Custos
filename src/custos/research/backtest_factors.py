@@ -29,14 +29,6 @@ from typing import Any, Callable, Optional
 import numpy as np
 import pandas as pd
 
-_RESEARCH_DIR = Path(__file__).resolve().parent
-_TOOLS = _RESEARCH_DIR.parent
-for _p in (str(_TOOLS / "core"), str(_RESEARCH_DIR), str(_TOOLS / "datasource" / "local_tdx")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-_FACTORS_DIR = str(Path(__file__).resolve().parents[1] / "core" / "factors")
-if _FACTORS_DIR not in sys.path:
-    sys.path.insert(0, _FACTORS_DIR)   # 因子层：见 factors/__init__.py
 
 # GBK（cp936）终端/管道下 --help 与报告里的 ⇒/⚠️ 等符号会 UnicodeEncodeError
 # 直接崩掉。惯例同项目其他入口（hasattr 守卫：pytest 捕获替换过 stdout）。
@@ -44,14 +36,6 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-
-# ── research/ 与 screening/ 分家（2026-08-07）后的路径引导。
-# 研究脚本要能同时导**自己的兄弟**（research/）与**生产链模块**（screening/）：
-# 方向是研究依赖生产（回测要跑生产的因子与打分），反向为 0 ——
-# 见 tests/test_architecture_layers.py。
-for _p in (str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[1] / "pipeline" / "screening")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
 
 
 # 9 个自包含 scorer 已抽到 factors/ 各自成模块（2026-08-06），此处仅保留别名。
@@ -378,8 +362,6 @@ def _sc_b1_pullback(df: pd.DataFrame, code: str):
             "components": {k: (1.0 if v else 0.0) for k, v in (r.get("components") or {}).items()}}
 
 
-
-
 SCORERS = {"s_shape": _sc_s_shape, "s_reversal": _sc_s_reversal,
            "invert_s_shape": _sc_invert_s_shape, "b1_pullback": _sc_b1_pullback,
            "baseline": _sc_baseline}
@@ -389,10 +371,6 @@ SCORERS = {"s_shape": _sc_s_shape, "s_reversal": _sc_s_reversal,
 #     --top-n 做横截面择优。⚠️ 原论文 alpha 为 0.6~6.4 日超短持有的市场中性反转,与 B1(周级/单边/择时)
 #     不同源,是否加值必须回测验证；此处仅作可排序因子,suggestion 恒「可买」,靠 entry_gate 约束进场池。 ---
 # （2026-08-09：本处原有的死 `_ts_corr` 已删 —— 无调用方；唯一实现在 `factors/_util.ts_corr`。）
-
-
-
-
 
 
 SCORERS["alpha101"] = _sc_alpha101
@@ -405,17 +383,11 @@ SCORERS["alpha_pvcorr"] = _sc_alpha_pvcorr
 #     size/value/profitability 需股本/财务(见 financials.py),此处仅实现价格可算的 low-vol / momentum。---
 
 
-
-
 SCORERS["low_vol"] = _sc_low_vol
 SCORERS["momentum"] = _sc_momentum
 
 
-
-
 SCORERS["reversal_quality"] = _sc_reversal_quality
-
-
 
 
 SCORERS["reversal_quality_inv"] = _sc_reversal_quality_inv
@@ -425,13 +397,7 @@ SCORERS["reversal_quality_inv"] = _sc_reversal_quality_inv
 from custos.core.factors._shares import shares_idx as _shares_idx  # noqa: E402  ⚠️ 必须包限定
 
 
-
-
-
-
 SCORERS["mcap"] = _sc_mcap
-
-
 
 
 SCORERS["kdj_j"] = _sc_kdj_j
@@ -1028,7 +994,6 @@ def factor_lift(records: list[dict[str, Any]], field: str, horizon: int = 10,
 _R_RISK_FLOOR = 0.02   # R 计算的 risk_frac 地板(2%)：周线收盘贴低时防 ret/≈0 炸成极端 R
 
 
-
 def _limit_pct(code: str) -> float:
     """委托 `code_utils.price_limit_pct`（唯一来源）。这份原本是**对的**那两份之一。"""
     return price_limit_pct(code)
@@ -1097,7 +1062,6 @@ def _medium_large_bull_flags(df: pd.DataFrame, code: str = "") -> np.ndarray:
         body = np.where(open_ > 0, (close - open_) / open_ * 100, 0.0)
     is_bull = close > open_
     return is_bull & ((chg >= thr) | (body >= thr))
-
 
 
 _TICK = 0.01          # A股最小价格变动单位(元);材料的「向下 3-5 个价位」以此为单位

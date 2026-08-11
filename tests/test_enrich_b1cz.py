@@ -515,7 +515,6 @@ class TestReversalKBoundaryBehavior:
         assert cir(-3.6) is False and cir(0.5) is True
 
 
-
 class TestReversalKThresholdSingleSource:
     """⚠️ 反转 K 阈值的**唯一来源**边界：live 两链跟随配置，研究侧刻意钉死。
 

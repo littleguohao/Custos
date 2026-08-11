@@ -42,18 +42,6 @@ import sys
 from typing import Any, Optional
 
 BASE = pathlib.Path(__file__).resolve().parents[3]
-for _p in (BASE / "src" / "custos" / "core", BASE / "src" / "custos" / "datasource" / "local_tdx",
-           BASE / "src" / "custos" / "pipeline" / "screening"):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
-
-# ── research/ 与 screening/ 分家（2026-08-07）后的路径引导。
-# 研究脚本要能同时导**自己的兄弟**（research/）与**生产链模块**（screening/）：
-# 方向是研究依赖生产（回测要跑生产的因子与打分），反向为 0 ——
-# 见 tests/test_architecture_layers.py。
-for _p in (str(pathlib.Path(__file__).resolve().parent), str(pathlib.Path(__file__).resolve().parents[1] / "pipeline" / "screening")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
 
 
 import numpy as np                                            # noqa: E402

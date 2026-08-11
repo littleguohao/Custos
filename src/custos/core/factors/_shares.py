@@ -11,15 +11,14 @@
 
 ⇒ 移到因子层后：一个所有者、依赖方向朝下。
 
-## ⚠️ 本模块必须用**包限定**导入：`from factors._shares import ...`
+## ⚠️ 本模块必须用**包限定**导入：`from custos.core.factors._shares import ...`
 
-移过来之后陷阱换了个样子又发作一次：`src` 与 `src/custos/core/factors` **都在 sys.path 上**，
-所以同一文件有两条可导路径（`_shares` 与 `factors._shares`），Python 会建**两个模块对象**。
-而本模块持有**可变的模块级缓存** `_SHARE_IDX` ⇒ 两个对象各存一份，
-测试打桩其中一个、生产读另一个。
+教训（2026-08 扁平 import 时代）：同一文件有两条可导路径（`_shares` 与 `factors._shares`），
+Python 会建**两个模块对象**。而本模块持有**可变的模块级缓存** `_SHARE_IDX` ⇒ 两个对象各存一份，
+测试打桩其中一个、生产读另一个。包式化（阶段 4b）后扁平路径已不存在，
+但这条规则保留——它是「同一文件不得有两个身份」的一般形态。
 
 ⇒ **规则：持有可变模块级状态的模块，一律包限定导入。**
-无状态的纯函数模块（如 `_util`）用扁平 import 无妨。
 """
 from __future__ import annotations
 

@@ -24,17 +24,11 @@ from pathlib import Path
 from typing import Optional
 
 TOOLS = Path(__file__).resolve().parents[1]
-for _p in (str(TOOLS / "core"), str(TOOLS / "pipeline" / "screening")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
 
 from custos.core.paths import BASE, LOGS  # noqa: E402
 
 from custos.research import backtest_factors as bt  # noqa: E402
 from custos.research import launch_point_study as lp  # noqa: E402
-_FACTORS_DIR = str(Path(__file__).resolve().parents[1] / "core" / "factors")
-if _FACTORS_DIR not in sys.path:
-    sys.path.insert(0, _FACTORS_DIR)   # 因子层：见 factors/__init__.py
 
 
 # ⚠️ 2026-08-07 修：`launch_point_study` 已随研究脚本从 `screening/` 移到 `research/`，
@@ -46,7 +40,6 @@ QLIB_GAP = ("2020-09-28", "2021-07-30")     # 两 bundle 之间无数据
 QLIB_END = "2026-02-06"                     # qlib 数据末尾
 # 真市值/总股本的历史起点(fetch_market_cap 二分探明)。用市值类特征时须据此再剔窗口。
 try:
-    sys.path.insert(0, str(TOOLS / "datasource" / "local_tdx"))
     from custos.datasource.local_tdx.fetch_market_cap import MV_START  # noqa: E402
 except Exception:                            # noqa: BLE001  取数模块缺失不应拖垮研究链
     MV_START = "2018-01-02"
@@ -438,7 +431,6 @@ def survivorship_report(firings_files: list[Path], s_data_root: str,
     uni = set(_sd.list_universe(str(Path(s_data_root) / sub), source=data_source))
     if today_codes is None:
         try:
-            sys.path.insert(0, str(TOOLS / "datasource" / "local_tdx"))
 
             from custos.datasource.local_tdx import local_tdx_data as _ltd  # noqa: PLC0415
             today_codes = set(_ltd.list_local_vipdoc_codes(ashare_only=True))
@@ -512,15 +504,6 @@ def survivorship_report(firings_files: list[Path], s_data_root: str,
                      "剔除仅影响停牌/低流动性直线样本")
     out["text"] = "\n".join(lines)
     return out
-
-# ── research/ 与 screening/ 分家（2026-08-07）后的路径引导。
-# 研究脚本要能同时导**自己的兄弟**（research/）与**生产链模块**（screening/）：
-# 方向是研究依赖生产（回测要跑生产的因子与打分），反向为 0 ——
-# 见 tests/test_architecture_layers.py。
-for _p in (str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[1] / "pipeline" / "screening")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
 
 
 def main(argv=None, runner=None) -> int:

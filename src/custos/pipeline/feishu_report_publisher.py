@@ -25,10 +25,6 @@ import re
 import sys
 from pathlib import Path
 
-TOOLS_DIR = Path(__file__).resolve().parent
-for _bp in (TOOLS_DIR, TOOLS_DIR.parent / "core"):  # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))
 
 import requests  # noqa: E402
 

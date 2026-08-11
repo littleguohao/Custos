@@ -27,6 +27,7 @@ from custos.datasource.local_tdx import concept_tags
 from custos.datasource.local_tdx import fetch_market_cap as mc
 from custos.datasource.local_tdx import fetch_pit_financials as pit
 from custos.datasource.local_tdx import local_tdx_data as ltd
+import sys
 
 
 # ===================== C3 get_snapshot 缺字段回落 0.0 =====================

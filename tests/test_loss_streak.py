@@ -7,13 +7,10 @@ owner 2026-08-10 定：连亏冷却**放在复盘环节**，每日/每周统计�
 from __future__ import annotations
 
 import pathlib
-import sys
 
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
-sys.path.insert(0, str(ROOT / "src" / "custos" / "pipeline" / "close_review"))
 
 from custos.pipeline.close_review import loss_streak as ls  # noqa: E402
 

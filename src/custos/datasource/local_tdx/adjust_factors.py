@@ -35,13 +35,7 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
-BASE = pathlib.Path(__file__).resolve().parents[2]
-TOOLS_DIR = BASE / "src"
 # 与 local_tdx_data.py 同一套路径处理：本模块既被当包内模块 import，也被直接当脚本跑
-# （CLI 预热），后者 sys.path 只有脚本所在目录，拿不到 src 下的 paths/code_utils。
-for _bp in (TOOLS_DIR, TOOLS_DIR.parent / "core"):  # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))
 
 from custos.core.code_utils import market_of                               # noqa: E402
 from custos.core.paths import cn_now, MARKET_DIR  # noqa: E402

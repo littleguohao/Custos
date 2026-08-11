@@ -6,6 +6,7 @@ import json
 
 from custos.pipeline import daily_report
 from custos.datasource.news.premarket_intel_schema import validate_premarket_intelligence
+import sys
 
 STANDARD = {
     "date": "2026-07-16",

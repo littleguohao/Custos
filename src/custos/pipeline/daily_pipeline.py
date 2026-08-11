@@ -27,12 +27,7 @@ import shutil
 from pathlib import Path
 
 import sys
-from pathlib import Path
 
-_SRC = Path(__file__).resolve().parents[1]
-for _bp in (str(_SRC / "core"),):          # core/: paths/pipeline_kit 等 L0 模块
-    if _bp not in sys.path:
-        sys.path.insert(0, _bp)
 
 from custos.core.paths import BASE, DATA, HOLDINGS, HOLDINGS_DIR, LOGS, MARKET_DIR, MARKET_TIMING, PLANS, TOOLS
 from custos.core.pipeline_kit import run_stage

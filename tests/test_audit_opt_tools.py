@@ -14,7 +14,6 @@ import pytest
 import requests
 
 TESTS_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(TESTS_DIR))
 
 from custos.core import net_retry  # noqa: E402
 from custos.datasource.collect import online_quotes as oq  # noqa: E402

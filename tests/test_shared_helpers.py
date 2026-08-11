@@ -20,12 +20,10 @@ import json
 import math
 import pathlib
 import re
-import sys
 
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
 
 from custos.core import code_utils  # noqa: E402
 from custos.core import fmt  # noqa: E402
@@ -271,7 +269,6 @@ class TestStreamWriterStaysSeparate:
     """
 
     def test_stream_writer_tolerates_nan(self, tmp_path):
-        sys.path.insert(0, str(ROOT / "src" / "custos" / "pipeline" / "screening"))
         from custos.research import backtest_factors as bt
 
         p = tmp_path / "r.json"

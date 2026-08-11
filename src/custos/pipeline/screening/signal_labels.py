@@ -24,20 +24,11 @@ b1_dual 系、B2/异动系、`j_low_qsx_weekly` 的 edge 只存在于 2025-2026 
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
-
-_TOOLS = Path(__file__).resolve().parents[1]
-for _p in (str(_TOOLS.parent / "core"), str(_TOOLS), str(_TOOLS / "screening"), str(_TOOLS / "market_timing")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-_FACTORS_DIR = str(Path(__file__).resolve().parents[2] / "core" / "factors")
-if _FACTORS_DIR not in sys.path:
-    sys.path.insert(0, _FACTORS_DIR)   # 因子层：见 factors/__init__.py
 
 
 HIT, MISS, NA = "hit", "miss", "unavailable"

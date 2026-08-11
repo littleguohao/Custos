@@ -7,10 +7,6 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from zoneinfo import ZoneInfo
 
-TOOLS_DIR = Path(__file__).resolve().parents[1]
-for _bp in (TOOLS_DIR, TOOLS_DIR.parent / "core"):  # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))
 
 from custos.core.paths import BASE, DATA, LOGS, RSS_FILTER_CONFIG_FILE, RSS_SOURCE_REGISTRY_FILE  # noqa: E402
 from custos.core.paths import read_json as load  # noqa: E402
@@ -22,7 +18,6 @@ from custos.core.contracts import require  # noqa: E402
 LOG=LOGS/'rss'
 CFG=RSS_FILTER_CONFIG_FILE; REG=RSS_SOURCE_REGISTRY_FILE
 SH=ZoneInfo('Asia/Shanghai')
-
 
 
 def norm_text(s): return re.sub(r'[^0-9a-z\u4e00-\u9fff]+','',str(s or '').lower())

@@ -21,18 +21,11 @@ import argparse
 import json
 import math
 import os
-import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 TOOLS_DIR = Path(__file__).resolve().parents[1]
-for _bp in (TOOLS_DIR, TOOLS_DIR.parent / "core", TOOLS_DIR.parent / "datasource"):  # core/: L0；datasource/: breadth_basis
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))
-LOCAL_TDX_DIR = TOOLS_DIR.parent / "datasource" / "local_tdx"
-if str(LOCAL_TDX_DIR) not in sys.path:
-    sys.path.insert(0, str(LOCAL_TDX_DIR))
 
 from custos.datasource.local_tdx import local_tdx_data as ltd  # type: ignore
 from custos.core.paths import BASE, TDX_ROOT, cn_now, MARKET_DIR  # noqa: E402
@@ -96,7 +89,6 @@ def read_day(prefix: str, code: str) -> list[dict]:
             "volume": to_float(r.get("volume")),
         })
     return rows
-
 
 
 def trend(rows: list[dict]) -> dict:

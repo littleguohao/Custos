@@ -47,10 +47,6 @@ import time
 import traceback
 from typing import Any, Callable, Optional
 
-BASE = pathlib.Path(__file__).resolve().parents[3]
-for _p in ("src/custos/core", "src/custos/datasource/local_tdx", "src/custos/pipeline/screening",
-           "src/custos/pipeline/market_timing"):
-    sys.path.insert(0, str(BASE / _p))
 
 from custos.core.paths import LOGS  # noqa: E402
 

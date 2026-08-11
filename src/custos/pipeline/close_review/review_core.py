@@ -9,8 +9,6 @@ import sys
 from datetime import date, datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "core"))
 from custos.pipeline.holdings.b1_holding_state import evaluate as evaluate_b1_holding
 
 from custos.pipeline.close_review.holding_bbi import bbi_basis, intraday_bbi_basis
@@ -35,12 +33,9 @@ PLANS.mkdir(parents=True, exist_ok=True)
 LOGS.mkdir(parents=True, exist_ok=True)
 
 
-
 def latest(pattern: str, folder: Path) -> Path | None:
     files = sorted(folder.glob(pattern))
     return files[-1] if files else None
-
-
 
 
 def price_text(value, digits=2):
@@ -54,7 +49,6 @@ def pct_text(value, digits=2):
     收敛前这份自己判 `is None`，NaN 会渲染成 `+nan%`。
     """
     return _fmt_pct_text(value, digits, missing="缺失")
-
 
 
 def normalized_code(value) -> str:

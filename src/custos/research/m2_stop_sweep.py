@@ -131,8 +131,6 @@ import time
 from typing import Any, Optional
 
 BASE = pathlib.Path(__file__).resolve().parents[3]
-if str(BASE / "src" / "custos" / "core") not in sys.path:
-    sys.path.insert(0, str(BASE / "src" / "custos" / "core"))
 
 from custos.core.paths import LOGS  # noqa: E402
 

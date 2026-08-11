@@ -23,12 +23,9 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/custos/pipeline/market_timing"):
-    sys.path.insert(0, str(ROOT / _p))
 
 # ⚠️ **包限定导入**，与 `tests/test_audit_opt_tools.py:608` 保持一致。
 # 用扁平 `import market_timing_scorer` 会与它形成**同一文件的两个模块对象**
-# （conftest 把 src 与 src/custos/pipeline/market_timing 都铺进了 sys.path），
 # 实测会让这个文件的覆盖率读数在 15%/36%/48% 之间跳 —— **测量本身变得不可信**。
 # 这是 DATA_SOURCE_PRINCIPLE「模块级常量 + 运行时替换 = 陷阱」变体①的又一处后果。
 from custos.pipeline.market_timing import market_timing_scorer as ms  # noqa: E402

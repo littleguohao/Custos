@@ -18,8 +18,6 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/custos/datasource/local_tdx"):
-    sys.path.insert(0, str(ROOT / _p))
 
 from custos.datasource.local_tdx import local_tdx_data as L  # noqa: E402
 

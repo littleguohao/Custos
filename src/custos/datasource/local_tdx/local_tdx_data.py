@@ -28,10 +28,6 @@ warnings.filterwarnings("ignore")
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-TOOLS_DIR = Path(__file__).resolve().parents[1]
-for _bp in (TOOLS_DIR, TOOLS_DIR.parent / "core"):  # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))
 
 from custos.core.paths import BASE, TDX_ROOT, cn_today, CACHE_DIR  # noqa: E402
 from custos.core.code_utils import market_of, norm_code as _cu_norm_code  # noqa: E402
@@ -49,10 +45,9 @@ CLIENT_MAX_AGE_SEC = 600.0
 # 淹没在日志里，没人知道实际失败率。这里做模块级轻量计数（本项目单线程逐票
 # 处理，不加锁），批量加载方在收尾处读 `qfq_failure_stats()` 打汇总行。
 #
-# ⚠️ 已知限制（不做跨对象合并）：本模块可能以两种身份被导入——扁平
-# `local_tdx_data`（sys.path 直挂 src/custos/datasource/local_tdx）与包内
-# `local_tdx.local_tdx_data`——同进程里是**两个模块对象**，计数各自独立。
-# 读取方必须与写入方走**同一导入路径**，否则读到的是另一份恒为 0 的计数。
+# ⚠️ 读取方必须与写入方走**同一导入路径**（统一 `custos.datasource.local_tdx.
+# local_tdx_data`），否则读到的是另一份恒为 0 的计数 —— 扁平 import 时代
+# 同进程曾存在两个模块对象，各存一份计数；包式化后只剩一个身份，规则保留防回流。
 _qfq_failed_codes: list = []
 
 

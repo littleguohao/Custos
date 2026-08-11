@@ -5,12 +5,10 @@
 """
 from __future__ import annotations
 
-import sys
 import unittest
 from pathlib import Path
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src" / "custos" / "datasource" / "local_tdx"))
 
 from custos.datasource.local_tdx import tq_sector  # noqa: E402
 from custos.datasource.local_tdx.tq_sector import TQSectorSession, classify_sector, is_tdxw_running, load_sector_names  # noqa: E402

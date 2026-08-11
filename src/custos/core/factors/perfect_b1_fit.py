@@ -7,16 +7,11 @@
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any, Optional
 
 from custos.core.indicators import DKS_MA_WINDOWS, dks_series
 
-_TOOLS = Path(__file__).resolve().parents[1]
-for _p in (str(_TOOLS), str(_TOOLS.parent / "pipeline" / "market_timing")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
 
 from custos.core.indicators import macd # noqa: E402
 

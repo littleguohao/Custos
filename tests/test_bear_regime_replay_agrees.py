@@ -25,13 +25,10 @@ from __future__ import annotations
 import csv
 import json
 import pathlib
-import sys
 
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for _p in ("src", "src/custos/core/trades", "src/research"):
-    sys.path.insert(0, str(ROOT / _p))
 
 
 def _write_ledger(path: pathlib.Path, rows):

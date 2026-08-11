@@ -6,15 +6,12 @@ from pathlib import Path
 
 if hasattr(sys.stdout,'reconfigure'): sys.stdout.reconfigure(encoding='utf-8',errors='replace')
 
-TOOLS_DIR = Path(__file__).resolve().parents[1]
-for _bp in (TOOLS_DIR, TOOLS_DIR.parent / "core"):  # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))
 
 from custos.core.paths import BASE, DATA, PLANS  # noqa: E402
 from custos.core.paths import read_json as load  # noqa: E402
 from custos.core.code_utils import bare_code as bare  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
+import sys
 
 
 def extract(pattern,text,default):

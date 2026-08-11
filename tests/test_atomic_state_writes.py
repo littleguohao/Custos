@@ -19,12 +19,10 @@ from __future__ import annotations
 
 import json
 import pathlib
-import sys
 
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
 from custos.core import paths  # noqa: E402
 
 
@@ -208,7 +206,6 @@ class TestRegimeLockRespectedEverywhere:
 
     def test_unknown_not_in_increase_whitelist(self):
         """反面确认：「未知」确实拿不到加仓权（否则上面的 fail-closed 是空话）。"""
-        sys.path.insert(0, str(ROOT / "src"))
         from custos.core import runtime_guards as rg
         assert rg.normalize_regime("未知") == "未知"
         assert "未知" not in rg._REGIME_ALLOW_INCREASE

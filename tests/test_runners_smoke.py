@@ -16,7 +16,6 @@
 打桩测试抓不到的问题。**但不要把它当编排测试用。**
 """
 import subprocess
-import sys
 import unittest
 from datetime import date, timedelta
 from pathlib import Path
@@ -24,7 +23,6 @@ from pathlib import Path
 TOOLS = Path(__file__).resolve().parent.parent / "src"
 BASE = TOOLS.parent
 
-sys.path.insert(0, str(TOOLS))
 from custos.core.pipeline_kit import _extract_json
 from custos.core.paths import LOGS
 

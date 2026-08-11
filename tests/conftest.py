@@ -1,16 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Pytest configuration: make src packages importable from tests/."""
-import sys
-from pathlib import Path
-
+"""Pytest configuration：custos 包已可编辑安装，import 无需任何 sys.path 注入。"""
 import pytest
-
-SRC = Path(__file__).resolve().parent.parent / "src"
-sys.path.insert(0, str(SRC))
-# 「有 __init__.py 即入 path」：src 本身 + core/datasource/pipeline 分组层 +
-# 各 stage/包目录（2026-08-11 重组后子包深一层，改为递归发现）。
-for init in sorted(SRC.rglob("__init__.py")):
-    sys.path.insert(0, str(init.parent))
 
 
 @pytest.fixture(autouse=True)

@@ -13,13 +13,8 @@ import os
 import sys
 import time
 
-import sys
 from pathlib import Path
 
-_SRC = Path(__file__).resolve().parents[1]
-for _bp in (str(_SRC / "core"),):          # core/: paths/pipeline_kit 等 L0 模块
-    if _bp not in sys.path:
-        sys.path.insert(0, _bp)
 
 from custos.core.paths import BASE, TOOLS, cn_today, LOGS, QUALITY_DIR  # strategy_team/ 与 src/ 路径
 from custos.core.pipeline_kit import log_stage, now_iso, write_run_log, run_stage_quiet as _stage, calendar_gate
@@ -33,8 +28,6 @@ _log_stage = log_stage
 
 def _write_run_log(target: str, status: str, started_at: str, t0: float, stages: list[dict]):
     return write_run_log(LOG_DIR, "1445", target, status, started_at, t0, stages)
-
-
 
 
 def _gate_note(target: str) -> str:

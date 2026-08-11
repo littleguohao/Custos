@@ -13,16 +13,14 @@ from __future__ import annotations
 
 import json
 import pathlib
-import sys
 
 import pandas as pd
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
-sys.path.insert(0, str(ROOT / "src" / "custos" / "core" / "trades"))
 
 from custos.core.trades import standardize_trades as st  # noqa: E402
+import sys
 
 TRADE_COLS = ["成交日期", "成交时间", "代码", "名称", "交易类别",
               "成交数量", "成交价格", "成交金额", "发生金额", "费用", "备注"]

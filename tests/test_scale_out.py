@@ -15,6 +15,7 @@ import pandas as pd
 import pytest
 
 from custos.research import backtest_factors as bt
+import sys
 
 
 def _mk(rows, entry_idx=39, entry_low_frac=0.965):

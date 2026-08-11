@@ -8,6 +8,7 @@ import pytest
 
 from custos.core import code_utils
 from custos.core import pipeline_kit
+import sys
 
 
 # ---------------------------------------------------------------------------

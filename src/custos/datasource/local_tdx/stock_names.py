@@ -50,10 +50,6 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-_TOOLS = Path(__file__).resolve().parents[1]
-for _p in (str(_TOOLS), str(_TOOLS.parent / "core"), str(_TOOLS / "local_tdx")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
 
 # Windows 生产链（run_1800 起子进程）默认 GBK 控制台：本模块的 WARN 里有 "⇒" 等
 # 字符，不 reconfigure 会在**拒绝落盘那条最关键的路径**上抛 UnicodeEncodeError。

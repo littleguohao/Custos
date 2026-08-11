@@ -12,10 +12,6 @@ import argparse,json,sys
 from datetime import datetime
 from pathlib import Path
 
-TOOLS_DIR = Path(__file__).resolve().parents[1]
-for _bp in (TOOLS_DIR, TOOLS_DIR.parent / "core"):  # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))
 
 from custos.core.paths import BASE, cn_now, write_json_atomic, MARKET_DIR  # noqa: E402
 from custos.core.paths import read_json as load  # noqa: E402

@@ -116,7 +116,6 @@ class TestUnimplementedMechanismsFlagged:
         的断言仍然通过，而 owner 定的复盘统计悄悄消失了。
         """
         import sys
-        sys.path.insert(0, str(ROOT / "src"))
         from custos.pipeline.close_review import loss_streak as ls
 
         assert callable(ls.loss_streaks) and callable(ls.format_lines)

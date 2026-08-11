@@ -18,15 +18,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-TOOLS_DIR = Path(__file__).resolve().parents[1]
-for _bp in (TOOLS_DIR, TOOLS_DIR.parent / "core"):  # core/: paths 等 L0 模块
-    if str(_bp) not in sys.path:
-        sys.path.insert(0, str(_bp))
 
 from custos.core.paths import BASE, cn_now, MARKET_DIR, PLANS, QUALITY_DIR  # noqa: E402
 from custos.core.code_utils import fnum  # noqa: E402
@@ -35,7 +30,6 @@ from custos.core.runtime_guards import normalize_regime  # noqa: E402
 
 IN_DIR = MARKET_DIR
 OUT_DIR = PLANS
-
 
 
 def score_macro(d: dict) -> tuple[float, str]:
