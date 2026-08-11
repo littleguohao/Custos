@@ -128,7 +128,6 @@ stage 全部指向不存在的文件、整条链硬失败，而 3481 条测试�
 
 | 45 | ✅ **已按窄修法实现（2026-08-10 owner 拍板）**：`is_stale` 的判据由 `quality == "stale"` 改为 `quality in SECTION_NOT_FRESH`（见 v0.40）。查因过程中发现比原描述更根本的问题：**两个生产者用不同词表**（merge 出 `raw_only`、collector 出 `degraded`），而消费者只认 `"stale"` ⇒ 两个词都被当成新鲜。已在 `contracts.py` 立 `SECTION_QUALITY`/`SECTION_NOT_FRESH` 统一词表，并加一条**从生产者源码取字面量**的守卫：生产者新增未登记的 quality 值时当场报警（植入验证通过）。<br><br>**剩余未做（第二步，需 owner 定）**：把 `as_of` 补进 `market_breadth`/`sentiment`/`turnover` 的契约。⚠️ 本次**刻意没做**，因为那是更宽的 fail-closed —— 会把「合法但没写 as_of」的段也打成陈旧；且补契约前必须先确认所有走**全量** `require()` 的生产者都写了该键，否则当场硬失败（#52 就是先补骨架再补契约才没炸）。<br>⚠️ 另一个已知但未修的口子：`is_stale(sec, day=None)` 恒返回 False。三个调用点都传 `d.get("date")`，而 `date` 是契约必填字段 ⇒ 只有契约被违反时才可达，留作已知边界。 | ✅ 主体已完成；第二步待 owner |
 
-| 46 | ✅ **已定位（2026-08-09）**：覆盖率读数不稳（15%/36%/48%）根因 = ① `--cov` 单文件路径/点分模块两种写法在 pytest-cov 下行为异常（静默无数据/抢先 import 漏记模块级行），只有目录形式可靠；② 读数由「哪些测试文件跑了 scorer」决定；③ 各次全量的通过/跳过组合不同。⇒ **单文件覆盖率不做门禁只看趋势**；测量配方与旧读数订正见 `tests/test_market_timing_scorer.py` 头部 | 已收口 |
 
 | 47 | **硬失败 stage 覆盖收尾**：11 个里 **7 个已 ≥90%**（portfolio_review 96 / theme_tracker 94 / execution_review 97 / chief_decision 99 / review_enrichment 97 / generate_risk_and_sectors 99 / amv_state 92）。剩 4 个：`market_timing_scorer` 36%（159，读数不稳见 #46）、`b1_holding_state` 84%（24，剩 main 与 pre_checks 的 TQ 分支）、`batch_holding_technical` 61%（30）、`daily_report` 66%（66）| 待补 |
 
