@@ -67,4 +67,7 @@ coverage.xml
 htmlcov/
 
 # agent 遗留的临时标记文件（17:00 agent 习惯产物，非代码无读者）
-07_tools/trades/_no_trades_*.json
+src/custos/core/trades/_no_trades_*.json
+
+# Static analysis reports (generated)
+reports/

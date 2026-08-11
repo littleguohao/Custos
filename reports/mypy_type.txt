@@ -1,3 +1,0 @@
-Downloading mypy (14.4MiB)
-Downloading ast-serialize (1.2MiB)
- Downloaded ast-serialize
