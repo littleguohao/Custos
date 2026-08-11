@@ -33,16 +33,16 @@ data/         运行时数据（gitignore）
 artifacts/    产物三合一：reports/{daily,weekly,monthly}/ 日报·周报·复盘
               logs/ 运行日志与诊断输出（gitignore）
 TODO.md  strategy_version_log.md  trade_lessons.md   版本记录（实盘复盘→进化）
-src/        全部脚本
-tests/           pytest
+src/          全部脚本（core/ datasource/ pipeline/ research/，见 src/README.md）
+tests/        pytest
 ```
 
 `src/` 按依赖分层，下层不得依赖上层（有测试强制）：
-**L0** 基础（`paths` `code_utils` `indicators` `contracts` …）→
-**L1** 数据（`local_tdx/` `collect/` `news/`）→
-**L2** 因子（`factors/` `trades/`）→
-**L3** 决策（`screening/` `market_timing/` `holdings/` `close_review/`）→
-**L4** 编排（`run_*.py` `daily_pipeline.py`、`research/`）。
+**L0** 基础（`core/` 顶层：`paths` `code_utils` `indicators` `contracts` …）→
+**L1** 数据（`datasource/`：`collect/` `local_tdx/` `news/` + 数据刷新脚本）→
+**L2** 因子（`core/factors/` `core/trades/`）→
+**L3** 决策（`pipeline/` 的 `screening/` `market_timing/` `holdings/` `close_review/`）→
+**L4** 编排（`pipeline/` 顶层 `run_*.py` `daily_pipeline.py`，及 `research/`）。
 
 四条硬约束，都有测试守着：
 
