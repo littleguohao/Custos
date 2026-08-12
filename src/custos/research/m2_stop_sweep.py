@@ -50,6 +50,11 @@
     uv run python src/custos/research/m2_stop_sweep.py --report-only     # 只重出报表
     uv run python src/custos/research/m2_stop_sweep.py --cross-window    # 2022-2024 复核
 
+⚠️ **宇宙与 K 线窗口默认已钉死**（2026-08-12 #17，owner 拍板）：窗口默认
+`DEFAULT_WINDOW`（见常量注释），宇宙默认 `--dump-codes` 落表共用 ⇒ 默认跑出来的
+批次即可复现。要显式关闭用 `--no-window` / `--no-pin-universe`（报表会打
+「本批不可复现」警告）；历史未钉命令的行为变化是已接受的代价。
+
 ## 为什么慢，以及怎么快（2026-08-05）
 
 串行跑 25 个方案 = **25 次**「读 1000 只票的 vipdoc → 逐票算前复权 → 逐 bar 评估」。
@@ -138,6 +143,12 @@ SCRIPT = BASE / "src" / "custos" / "research" / "backtest_factors.py"
 OUTDIR = LOGS / "m2_sweep"
 
 DEFAULT_SAMPLE = 1000  # 样本股票数默认值（300 样本实测不可靠，见模块文档）
+# 默认钉死的 K 线窗口（2026-08-12 #17，owner 拍板默认开）：口径约定见
+# R13（governance/research/R13_meta_reproducibility.md）与 run_m2_sweep.cmd
+# 的 WIN_START/WIN_END —— 约 490 根 K 线，与旧 --count 500 的实际窗口基本等长，
+# 且与 s3000 可复现批次同口径。代码常量 ⇒ 钉死配置不会缺失；要换窗口必须显式
+# --window S E（进文件名指纹，不与旧批混），要漂移窗口必须显式 --no-window。
+DEFAULT_WINDOW = ("2024-08-01", "2026-08-05")
 # 单个方案子进程的内存预算（MB）。保守值：1000 只票流式加载 + 逐笔 list + 落盘。
 # 实测数字看 backtest_factors 每轮打的 `[MEM] 峰值 XXXMb`，据此调这个常量。
 # 这个数只用于**按可用内存收敛 --jobs**——OOM Kill 是这套回测的老问题。
@@ -1649,7 +1660,10 @@ def report(
             "#    通达信下载变动，长时间扫描里各方案的宇宙/K线窗口不同（实测 5535→5536、"
         )
         print(
-            "#    同参数笔数 1106/1092/1087）。可复现跑法：--window S E --pin-universe"
+            "#    同参数笔数 1106/1092/1087）。钉死自 2026-08-12 起是**默认**（#17），"
+        )
+        print(
+            "#    本批是被 --no-window/--no-pin-universe 显式关闭的；恢复：去掉这两个开关"
         )
     print("#" * 74)
     for g in ("A_stop_low", "B_stop_pct"):
@@ -1750,21 +1764,47 @@ def main() -> int:
         default=None,
         help="钉死 K 线窗口(YYYY-MM-DD YYYY-MM-DD)。⚠️ **必须两端都给**："
         "只给 --end 钉不住(get_ohlcv_table 先 tail(count) 再过滤 ⇒ "
-        "新 bar 到来时窗口缩水且滑动)。本项会自动放大 --count",
+        "新 bar 到来时窗口缩水且滑动)。本项会自动放大 --count。"
+        f"默认钉死 {DEFAULT_WINDOW[0]}~{DEFAULT_WINDOW[1]}（2026-08-12 #17 "
+        "owner 拍板默认开；换窗口显式给本项，要漂移窗口用 --no-window）",
+    )
+    ap.add_argument(
+        "--no-window",
+        action="store_true",
+        help="显式关闭窗口钉死（退回「从今天往前数 --count 根」的漂移窗口；"
+        "报表会打「本批不可复现」警告）",
     )
     ap.add_argument(
         "--pin-universe",
         action="store_true",
+        default=True,
         help="先落一份代码表供全部方案共用 ⇒ 钉死宇宙。"
         "vipdoc 目录会随下载变动(实测扫描中 5535→5536)，"
-        "seed 固定也没用——**被抽的池子变了**",
+        "seed 固定也没用——**被抽的池子变了**。"
+        "2026-08-12（#17）起**默认开**，显式关闭用 --no-pin-universe",
+    )
+    ap.add_argument(
+        "--no-pin-universe",
+        action="store_false",
+        dest="pin_universe",
+        help="显式关闭宇宙钉死（各方案各自抽样，可能漂移；"
+        "报表会打「本批不可复现」警告）",
     )
     a = ap.parse_args()
     sample = a.sample if a.sample else DEFAULT_SAMPLE
-    window = tuple(a.window) if a.window else None  # type: ignore[assignment]
-    if window and a.cross_window:
+    if a.window and a.no_window:
+        print("--window 与 --no-window 冲突（一个钉一个拆，不许猜）")
+        return 2
+    if a.window and a.cross_window:
         print("--window 与 --cross-window 冲突（后者已自带 2022-2024 窗口）")
         return 2
+    # 默认钉死（#17）：未显式给 --window 也未 --no-window 时用 DEFAULT_WINDOW；
+    # --cross-window 自带 2022-2024 窗口，默认钉死让位（显式 --window 则在上方报错）。
+    window = (
+        tuple(a.window)
+        if a.window
+        else (None if (a.no_window or a.cross_window) else DEFAULT_WINDOW)
+    )  # type: ignore[assignment]
     codes_file = None
 
     if not a.report_only:

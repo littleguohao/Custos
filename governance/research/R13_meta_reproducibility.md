@@ -1,6 +1,6 @@
 # R13 · 元：可复现性（宇宙与数据窗口漂移）
 
-> **家族**：元层　|　**证据等级**：L4　|　**状态**：⚠️ 已加开关，默认关 ⇒ 历史批次不可复现
+> **家族**：元层　|　**证据等级**：L4　|　**状态**：✅ 已加开关，**2026-08-12 起默认开**（#17 owner 拍板，v0.45）⇒ 默认跑出的批次即可复现；此前的历史批次不可复现
 > **依赖**：约束：R10 R11 的跨批次比较
 > 索引与主图见 [`README.md`](README.md)。证据等级定义同上。原始日志见 git 历史 `B1_BACKTEST_FINDINGS.md`。
 
@@ -19,7 +19,7 @@
 **① 只加 `--end` 钉不住** —— 加载顺序有坑。
 **② `--start/--end` 管不到宇宙那一半** —— 随机抽样每次抽到另一组票。
 
-已加两个开关（`--pin-universe` 等，**默认关，开了才可复现**）+ 可复现批次入口。
+已加两个开关（`--pin-universe` 等，**2026-08-12 起默认开**（#17 owner 拍板）：默认钉死窗口 = `m2_stop_sweep.DEFAULT_WINDOW`（即下方 2024-08-01~2026-08-05 约定口径）、默认 `--dump-codes` 落表钉宇宙；显式关闭用 `--no-window` / `--no-pin-universe`）+ 可复现批次入口。
 
 ⚠️ **推论：开关之前跑的所有批次都不严格可复现。** 这不影响同一批次内部的相对比较，但跨批次比较要当心。
 
@@ -81,12 +81,12 @@ universe 来自 `list_local_vipdoc_codes()` 的**目录列举**，跟日期无�
 5535→5536 会让 `sample_codes(base, 1000, seed=0)` 抽到**另一组** 1000 只——
 seed 固定没用，**被抽的池子变了**。
 
-### 两个开关（默认关，开了才可复现）
+### 两个开关（2026-08-12 起默认开，#17；此前默认关、开了才可复现）
 
 | 开关 | 作用 | 实现 |
 |---|---|---|
-| `--window START END` | 钉死 K 线窗口 | 传 `--start/--end` + `--count=WINDOW_COUNT` |
-| `--pin-universe` | 钉死宇宙 | 先跑一次 `backtest_factors --dump-codes` 落代码表，全部方案改用 `--codes-file` |
+| `--window START END`（默认 = `DEFAULT_WINDOW` 约定口径；`--no-window` 关） | 钉死 K 线窗口 | 传 `--start/--end` + `--count=WINDOW_COUNT` |
+| `--pin-universe`（默认开；`--no-pin-universe` 关） | 钉死宇宙 | 先跑一次 `backtest_factors --dump-codes` 落代码表，全部方案改用 `--codes-file` |
 
 `--dump-codes` 在 codes 解析完、**任何 K 线加载之前**就返回，所以只花一次目录列举的时间。
 不在扫描脚本里直接抽样，是因为那要 import `local_tdx_data`（依赖 TDX_ROOT）或 `s_data`

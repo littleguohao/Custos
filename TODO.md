@@ -6,7 +6,7 @@
 > 优先级按**「它阻塞了什么」**排，不按工作量：
 > P0 = 阻塞其他事或 live 正在依赖 ｜ P1 = 已有结论悬空 ｜ P2 = 新验证 ｜ P3 = 技术债
 >
-> 最后更新：2026-08-12（#48 RSS 代码命中加紧邻量词否定（方案 A）、#18 收口（load_bars_csv 加法口径告警 + R15 stale 行修正），两者完成删除，事实见 CHANGELOG v0.44；#56 保留项①–⑤ owner 拍板收口，判定精度全仓统一 round-2，口径变更见 CHANGELOG v0.43，#56 完成删除；#44 定案：三个 stale 研究脚本全部删除；#57 类型化五批收口；#53 例行核对落地）
+> 最后更新：2026-08-12（#17 宇宙/窗口钉死开关默认改开（--no-* 显式关），完成删除，见 CHANGELOG v0.45；#48 RSS 代码命中加紧邻量词否定（方案 A）、#18 收口（load_bars_csv 加法口径告警 + R15 stale 行修正），两者完成删除，事实见 CHANGELOG v0.44；#56 保留项①–⑤ owner 拍板收口，判定精度全仓统一 round-2，口径变更见 CHANGELOG v0.43，#56 完成删除；#44 定案：三个 stale 研究脚本全部删除；#57 类型化五批收口；#53 例行核对落地）
 
 ## P0 · 阻塞项
 
@@ -59,7 +59,6 @@ R10：可用 margin 只在含 0AMV 的方案（pct_05_amv +7.8pp / pct_12_amv_cz
 
 | # | 事项 | 出处 |
 |---|---|---|
-| 17 | 宇宙/窗口钉死开关**默认关** ⇒ 要不要改默认（改了会让历史命令行为变化） | [R13](governance/research/R13_meta_reproducibility.md) |
 | 20 | `tick_buffer` **参数本身设计有问题**：余量应按**风险单位**而非价位数，才能让不同价位的股票是同一个风险 | [R10](governance/research/R10_mechanism_M2_stops.md) |
 | 58 | **高复杂度函数拆分**：radon cc 检出 C 级以上函数 267 个，集中在研究侧引擎——`backtest_factors.main` F(75)、`m2_stop_sweep._print_trade_group` F(69)、`backtest_factors.simulate_b1_trade` F(54)、`reconcile_qfq.gap_report` E(35)、`compare_signal_sets.main` E(34)。原则：**下次因业务动这些文件时先拆**，不为拆分而拆分 | 2026-08-11 静态检查（`reports/radon_cc.txt`） |
 

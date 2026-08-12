@@ -83,7 +83,8 @@ bj: 43/83/87/88/920              ⚠️ 含北交所
 A 股个股约 5300 只，且不含 BJ。
 
 ⚠️ **宇宙会随通达信下载变动** —— 实测一轮扫描中 5535 → 5536，导致 `sample_codes(seed=0)`
-抽到另一组票。长时间回测要用 `--pin-universe` 钉死（见 `research/R13_meta_reproducibility.md`）。
+抽到另一组票。长时间回测要钉死宇宙：`m2_stop_sweep` 的 `--pin-universe` 2026-08-12 起
+**默认开**（#17；显式关闭用 `--no-pin-universe`，见 `research/R13_meta_reproducibility.md`）。
 
 ### 3. 板块分类 —— `tdxzs3.cfg` / `tdxzs.cfg` / `block.dat` / `incon.dat`
 

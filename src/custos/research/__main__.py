@@ -68,7 +68,8 @@ TOOLS: dict[str, tuple[str, str]] = {
     "launch_point_study": ("engine", "起涨点 vs 0AMV regime 研究；**17 个模式开关**"),
     "m2_stop_sweep": (
         "driver",
-        "M2 机制类改进扫描：分组跑对照并自动判定（subprocess 调 engine）",
+        "M2 机制类改进扫描：分组跑对照并自动判定（subprocess 调 engine）；"
+        "宇宙/窗口默认已钉死（#17，--no-* 显式关）",
     ),
     "run_bear_to_long_study": (
         "driver",

@@ -2008,7 +2008,12 @@ class TestReportUsesTheBatchJustRun:
         monkeypatch.setattr(m2, "_run_all", lambda *a, **k: None)
         _write(tmp_path, "A_stop_low", "00_baseline", fp="s300", n=409)
         _write(tmp_path, "A_stop_low", "00_baseline", fp="s2000", n=2600)
-        monkeypatch.setattr(sys, "argv", ["m2", "--sample", "300"])
+        # --no-window/--no-pin-universe（2026-08-12 #17 起钉死是默认）：本测试聚焦
+        # 「汇总刚跑的那批样本」，与钉死无关；不关默认钉死则会去找 s300_w*_u 指纹，
+        # 且 _prepare_universe 会真跑子进程。
+        monkeypatch.setattr(
+            sys, "argv", ["m2", "--sample", "300", "--no-window", "--no-pin-universe"]
+        )
         m2.main()
         out = capsys.readouterr().out
         assert "样本 300 只" in out, "应汇总刚跑的 s300，而非最大的 s2000"
@@ -2019,7 +2024,10 @@ class TestReportUsesTheBatchJustRun:
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
         _write(tmp_path, "A_stop_low", "00_baseline", fp="s300", n=409)
         _write(tmp_path, "A_stop_low", "00_baseline", fp="s2000", n=2600)
-        monkeypatch.setattr(sys, "argv", ["m2", "--report-only"])
+        # 同上：--no-* 退回旧默认（未钉死），本测试只验「--report-only 取最大批」。
+        monkeypatch.setattr(
+            sys, "argv", ["m2", "--report-only", "--no-window", "--no-pin-universe"]
+        )
         m2.main()
         assert "样本 2000 只" in capsys.readouterr().out
 
@@ -2185,6 +2193,62 @@ class TestPinnedWindowAndUniverse:
                 "--window",
                 "2024-01-01",
                 "2025-01-01",
+            ],
+        )
+        assert m2.main() == 2
+        assert "冲突" in capsys.readouterr().out
+
+    @staticmethod
+    def _capture_report(monkeypatch):
+        """把 main() 尾部的 report(...) 调用参数截下来（不真出报表）。"""
+        got: dict = {}
+        monkeypatch.setattr(
+            m2,
+            "report",
+            lambda cross, sample=None, data_source="tdx", window=None, pin_universe=False: (
+                got.update(cross=cross, window=window, pin_universe=pin_universe)
+            ),
+        )
+        return got
+
+    def test_defaults_pin_window_and_universe(self, monkeypatch):
+        """#17（2026-08-12 owner 拍板）：不给任何开关时，窗口钉 DEFAULT_WINDOW、宇宙钉死。"""
+        monkeypatch.setattr(m2, "_prepare_universe", lambda *a, **k: "/tmp/u.txt")
+        monkeypatch.setattr(m2, "_run_all", lambda *a, **k: None)
+        got = self._capture_report(monkeypatch)
+        monkeypatch.setattr(sys, "argv", ["m2", "--sample", "300"])
+        assert m2.main() == 0
+        assert got["window"] == m2.DEFAULT_WINDOW and got["pin_universe"] is True
+
+    def test_no_flags_restore_unpinned(self, monkeypatch):
+        """--no-window/--no-pin-universe 必须能显式关回旧默认（否则反向 flag 形同虚设）。"""
+        got = self._capture_report(monkeypatch)
+        monkeypatch.setattr(
+            sys, "argv", ["m2", "--report-only", "--no-window", "--no-pin-universe"]
+        )
+        assert m2.main() == 0
+        assert got["window"] is None and got["pin_universe"] is False
+
+    def test_cross_window_overrides_default_window(self, monkeypatch):
+        """--cross-window 自带 2022-2024 窗口 ⇒ 默认钉死让位，**不报错**；
+        只有显式 --window 与 --cross-window 同给才冲突（上方用例）。"""
+        got = self._capture_report(monkeypatch)
+        monkeypatch.setattr(sys, "argv", ["m2", "--report-only", "--cross-window"])
+        assert m2.main() == 0
+        assert got["cross"] is True and got["window"] is None
+
+    def test_no_window_conflicts_with_window(self, monkeypatch, capsys):
+        """--window 与 --no-window 同给 = 一个钉一个拆，fail-closed 报错而非猜。"""
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "m2",
+                "--report-only",
+                "--window",
+                "2024-01-01",
+                "2025-01-01",
+                "--no-window",
             ],
         )
         assert m2.main() == 2
