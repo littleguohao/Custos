@@ -247,6 +247,9 @@ def _warn_if_mixed_convention(code: str, hits: list[tuple[Path, str]]) -> None:
 
 _UNVERIFIED_SKIP_WARNED: set[str] = set()
 
+# load_bars_csv 的弃用口径告警同样只报一次（按 root 去重），避免逐票刷屏。
+_CSV_DEPRECATED_WARNED: set[str] = set()
+
 
 def load_bars_qlib(
     codes: list[str],
@@ -344,8 +347,23 @@ def load_bars_csv(
     end: Optional[str] = None,
     root: str | Path = DEFAULT_CSV_ROOT,
 ) -> dict[str, pd.DataFrame]:
-    """从单票 CSV 读日线({code6}.{EX}-all-latest.csv,列 Date,Code,Open..Amount)。"""
+    """从单票 CSV 读日线({code6}.{EX}-all-latest.csv,列 Date,Code,Open..Amount)。
+
+    ⚠️ **该源是已弃用加法口径 bundle（2021_2026）的副本**（2026-08-06 对账结论）：
+    价格=原始价−累计现金分红 ⇒ **百分比收益系统性放大 13~21%**，涨跌幅可超涨跌停。
+    每次加载出声告警（按 root 去重只报一次）；仅应用于诊断对照（如
+    `probe_data_sources` 的「CSV 冗余副本」探针），不得用于判定/回测结论。
+    详见 `governance/data/QLIB_LOCAL_DATA.md`。
+    """
     root = Path(root)
+    key = str(root)
+    if key not in _CSV_DEPRECATED_WARNED:
+        _CSV_DEPRECATED_WARNED.add(key)
+        _warn(
+            f"CSV_DATA（{key}）是**已弃用 bundle（2021_2026）的副本、加法口径**："
+            f"价格=原始价−累计现金分红 ⇒ 百分比收益系统性放大 13~21%，"
+            f"涨跌幅可超涨跌停。**仅应用于诊断对照**，判定/回测请用 qlib/tdx"
+        )
     out: dict[str, pd.DataFrame] = {}
     for c in codes:
         p = root / f"{c}.{_exchange(c)}-all-latest.csv"
