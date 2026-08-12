@@ -68,7 +68,7 @@ def _bad_stock_code(code: Any) -> Optional[str]:
 
 
 def _err(code: str, detail: Any = "") -> dict:
-    out = {"ok": False, "value": None, "error": {"code": code}}
+    out: dict[str, Any] = {"ok": False, "value": None, "error": {"code": code}}
     if detail:
         out["error"]["detail"] = str(detail)
     return out

@@ -58,7 +58,7 @@ DEFAULT_MIN_SUCCESS_RATE = 0.6  # 成分股取数成功率门槛，低于此值 
 DEFAULT_SLEEP_MS = 0  # 板块间限速（毫秒）；默认 0 保持既有节奏，生产可调
 
 
-def _err(code: str, detail: str = "", **extra: Any) -> dict:
+def _err(code: str, detail: Any = "", **extra: Any) -> dict:
     """结构化错误返回。"""
     out = {"error": code}
     if detail:
@@ -95,7 +95,7 @@ def load_sector_names(path: Optional[Path] = None) -> dict:
     文件缺失或不可解析时返回空 dict（调用方据此标注 names_unavailable）。
     """
     if path:
-        candidates = (Path(path),)
+        candidates: tuple[Path, ...] = (Path(path),)
     else:
         candidates = TDXZS_CFG_CANDIDATES
     for cfg in candidates:
@@ -163,7 +163,7 @@ class TQSectorSession:
     """TQ 板块会话：惰性 initialize + 显式 close，错误全部结构化返回。"""
 
     def __init__(self, name_map: Optional[dict] = None) -> None:
-        self._tq = None
+        self._tq: Any = None
         self._initialized = False
         self.error: Optional[dict] = None
         # 名称表（允许注入以便测试）；文件缺失时为空 dict → names_unavailable

@@ -43,6 +43,8 @@ PIT 性质:总股本是**当日事实**(某天就是那么多股),不存在财�
 
 from __future__ import annotations
 
+from typing import Any
+
 import argparse
 import json
 import sys
@@ -57,6 +59,10 @@ from custos.core.paths import cn_today, DATA  # noqa: E402
 
 API = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 UA = {"User-Agent": "Mozilla/5.0"}
+_NO_PROXIES: dict = {
+    "http": None,
+    "https": None,
+}  # None = 禁用环境代理（requests 允许的写法）
 OUT_DIR = DATA / "fundamentals"
 LEDGER = OUT_DIR / "share_changes.jsonl"
 SAMPLES = OUT_DIR / "share_change_samples.json"
@@ -136,7 +142,7 @@ def fetch_trade_date(
     for page in range(1, max_pages + 1):
         if page > 1 and sleep:
             time.sleep(sleep)
-        params = {
+        params: dict[str, Any] = {
             "sortColumns": "SECURITY_CODE",
             "sortTypes": "1",
             "pageSize": page_size,
@@ -153,7 +159,7 @@ def fetch_trade_date(
             params=params,
             headers=UA,
             timeout=30,
-            proxies={"http": None, "https": None},
+            proxies=_NO_PROXIES,
         )
         r.raise_for_status()
         payload = r.json() or {}
@@ -312,8 +318,8 @@ def build_from_tdx(
                 print(f"[WARN] {code} 股本取数失败: {e}", file=sys.stderr)
             continue
         prev = None
-        for e in evs:
-            ts = e.get("total_shares")
+        for row in evs:
+            ts = row.get("total_shares")
             if not ts or ts <= 0:
                 continue
             if prev is not None and abs(prev - ts) < 1e-6:
@@ -322,11 +328,11 @@ def build_from_tdx(
                 {
                     "code": code,
                     "name": "",  # xdxr 不含名称
-                    "observed_on": e["date"],  # 精确变动日
+                    "observed_on": row["date"],  # 精确变动日
                     "prev_sample": None,
                     "total_shares": float(ts),
                     "prev_shares": prev,
-                    "free_shares": e.get("float_shares"),
+                    "free_shares": row.get("float_shares"),
                     "close": None,  # xdxr 不含价格
                     "market_cap": None,
                     "kind": "first_seen" if prev is None else "change",
@@ -356,17 +362,18 @@ def fetch_equity_history(code: str, session=None, timeout: int = 15) -> list[dic
         rows: list[dict] = []
         page = 1
         while True:
+            params: dict[str, Any] = {
+                "reportName": "RPT_F10_EH_EQUITY",
+                "columns": "ALL",
+                "filter": f'(SECURITY_CODE="{code}")',
+                "pageNumber": page,
+                "pageSize": 100,
+                "sortTypes": 1,
+                "sortColumns": "END_DATE",
+            }
             r = s.get(
                 EM_F10_EQUITY_API,
-                params={
-                    "reportName": "RPT_F10_EH_EQUITY",
-                    "columns": "ALL",
-                    "filter": f'(SECURITY_CODE="{code}")',
-                    "pageNumber": page,
-                    "pageSize": 100,
-                    "sortTypes": 1,
-                    "sortColumns": "END_DATE",
-                },
+                params=params,
                 timeout=timeout,
                 headers={"User-Agent": "Mozilla/5.0"},
             )
@@ -538,7 +545,7 @@ def verify(events: list[dict], samples: list[str]) -> dict:
     firsts = [e for e in events if e.get("kind") == "first_seen"]
     changes = [e for e in events if e.get("kind") == "change"]
     early = [e for e in events if before_mv_start(e.get("observed_on") or "9999")]
-    obs = sorted({e.get("observed_on") for e in events if e.get("observed_on")})
+    obs = sorted({d for e in events if (d := e.get("observed_on")) is not None})
     out = {
         "ok": not early,
         "n_events": len(events),
@@ -695,10 +702,10 @@ def main(argv=None) -> int:
             return 2
         got = shares_as_of(events, args.as_of, code=args.code)
         print(f"截至 {args.as_of}:{len(got)} 只有股本记录")
-        for c, e in sorted(got.items())[:20]:
+        for c, row in sorted(got.items())[:20]:
             print(
-                f"  {c} {e.get('name', ''):<8} 总股本={e['total_shares'] / 1e8:.2f}亿股 "
-                f"(观测于 {e['observed_on']}, 上次采样 {e.get('prev_sample')})"
+                f"  {c} {row.get('name', ''):<8} 总股本={row['total_shares'] / 1e8:.2f}亿股 "
+                f"(观测于 {row['observed_on']}, 上次采样 {row.get('prev_sample')})"
             )
         if len(got) > 20:
             print(f"  ...(共 {len(got)} 只)")
@@ -716,9 +723,9 @@ def main(argv=None) -> int:
     # 以台账里已有的最后状态为起点,避免重复写事件
     events = load_events(out_path)
     prev: dict[str, float] = {}
-    for e in sorted(events, key=lambda r: r.get("observed_on") or ""):
-        if e.get("total_shares") is not None:
-            prev[e["code"]] = float(e["total_shares"])
+    for row in sorted(events, key=lambda r: r.get("observed_on") or ""):
+        if row.get("total_shares") is not None:
+            prev[row["code"]] = float(row["total_shares"])
     sp = _samples()
     sampled = sp["sampled"]
     known_empty = set(sp["empty"])
@@ -759,11 +766,11 @@ def main(argv=None) -> int:
         evs = diff_events(prev, rows, d, last_sample)
         res = merge_write(evs, out_path)
         total += res["added"]
-        for e in evs:
-            prev[e["code"]] = e["total_shares"]
+        for row in evs:
+            prev[row["code"]] = row["total_shares"]
         sampled.append(d)
         last_sample = d
-        n_new = sum(1 for e in evs if e["kind"] == "first_seen")
+        n_new = sum(1 for row in evs if row["kind"] == "first_seen")
         print(
             f"[OK] {d}: 全市场 {len(rows)} 只 → 事件 {len(evs)} 条"
             f"(首见 {n_new} / 变动 {len(evs) - n_new}), 台账 {res['after']} 条"

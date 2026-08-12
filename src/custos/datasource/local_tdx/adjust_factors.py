@@ -192,7 +192,7 @@ def normalize_xdxr(df: Any) -> list[dict[str, Any]]:
     rows = _to_records(df)
     if not rows:
         return []
-    out = []
+    out: list[dict[str, Any]] = []
     for r in rows:
         try:
             cat = int(r.get("category") or 0)
@@ -201,20 +201,21 @@ def normalize_xdxr(df: Any) -> list[dict[str, Any]]:
         if cat not in PRICE_AFFECTING_CATEGORY:
             continue
         try:
-            y, m, d = int(r.get("year")), int(r.get("month")), int(r.get("day"))
+            ymd: Any = r.get("year"), r.get("month"), r.get("day")
+            y, m, d = int(ymd[0]), int(ymd[1]), int(ymd[2])
             date = f"{y:04d}-{m:02d}-{d:02d}"
         except Exception:  # noqa: BLE001
             continue
 
         def _f(k: str) -> float:
-            v = r.get(k)
+            v: Any = r.get(k)
             try:
                 x = float(v)
             except (TypeError, ValueError):
                 return 0.0
             return 0.0 if x != x else x  # NaN → 0
 
-        ev = {
+        ev: dict[str, Any] = {
             "date": date,
             "fenhong": _f("fenhong"),
             "songzhuangu": _f("songzhuangu"),
@@ -250,15 +251,16 @@ def normalize_shares(df: Any) -> list[dict[str, Any]]:
     rows = _to_records(df)
     if not rows:
         return []
-    out = []
+    out: list[dict[str, Any]] = []
     for r in rows:
         try:
-            y, m, d = int(r.get("year")), int(r.get("month")), int(r.get("day"))
+            ymd2: Any = r.get("year"), r.get("month"), r.get("day")
+            y, m, d = int(ymd2[0]), int(ymd2[1]), int(ymd2[2])
         except Exception:  # noqa: BLE001
             continue
 
         def _f(k: str) -> float:
-            v = r.get(k)
+            v: Any = r.get(k)
             try:
                 x = float(v)
             except (TypeError, ValueError):
@@ -671,10 +673,10 @@ def main() -> int:
             print(f"[ERR] {e}")
             return 2
         print(f"{code} 共 {len(ev)} 个影响价格的权息事件：")
-        for e in ev:
+        for row in ev:
             print(
-                f"  {e['date']}  分红{e['fenhong']:>6.3f}  送转{e['songzhuangu']:>5.2f}  "
-                f"配股{e['peigu']:>5.2f}@{e['peigujia']:>6.2f}  缩股{e['suogu']:>5.2f}"
+                f"  {row['date']}  分红{row['fenhong']:>6.3f}  送转{row['songzhuangu']:>5.2f}  "
+                f"配股{row['peigu']:>5.2f}@{row['peigujia']:>6.2f}  缩股{row['suogu']:>5.2f}"
             )
         age = cache_age_days(code)
         print(f"缓存年龄：{'—' if age is None else f'{age:.1f} 天'}")

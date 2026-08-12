@@ -501,7 +501,7 @@ def resolve_names_for(codes, session=None) -> tuple[dict[str, str], dict[str, An
     return names, diag
 
 
-def save_cache(name_map: dict[str, str], source: str, path: Path = None) -> Path:
+def save_cache(name_map: dict[str, str], source: str, path: Path | None = None) -> Path:
     """原子落盘（含 generated_at / source / count），空表不落盘。"""
     if not name_map:
         raise ValueError("refuse to cache an empty name map")
@@ -519,7 +519,7 @@ def save_cache(name_map: dict[str, str], source: str, path: Path = None) -> Path
     return out
 
 
-def load_cache(path: Path = None) -> tuple[dict[str, str], dict[str, Any]]:
+def load_cache(path: Path | None = None) -> tuple[dict[str, str], dict[str, Any]]:
     """读缓存，返回 (names, meta)。新旧两种格式都认。
 
     meta: {available, generated_at, source, age_days, stale, reason}
@@ -566,7 +566,7 @@ def _age_days(generated_at: str) -> Optional[int]:
 
 
 def _refuses_overwrite(
-    new_map: dict, source: str, diag: dict, path: Path = None
+    new_map: dict, source: str, diag: dict, path: Path | None = None
 ) -> bool:
     """新表是否**过小以致不该覆盖**既有缓存。返回 True = 拒绝。
 

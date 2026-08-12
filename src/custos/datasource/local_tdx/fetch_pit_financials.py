@@ -31,6 +31,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import argparse
 import json
 import statistics
@@ -46,6 +48,10 @@ from custos.core.paths import cn_today, DATA  # noqa: E402
 
 API = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 UA = {"User-Agent": "Mozilla/5.0"}
+_NO_PROXIES: dict = {
+    "http": None,
+    "https": None,
+}  # None = 禁用环境代理（requests 允许的写法）
 OUT_DIR = DATA / "fundamentals"
 LEDGER = OUT_DIR / "pit_financials.jsonl"
 
@@ -146,7 +152,7 @@ def fetch_period(
     for page in range(1, max_pages + 1):
         if page > 1 and sleep:
             time.sleep(sleep)  # 主动限速：连打几十页必被静默限流
-        params = {
+        params: dict[str, Any] = {
             "sortColumns": "UPDATE_DATE,SECURITY_CODE",
             "sortTypes": "-1,-1",
             "pageSize": page_size,
@@ -160,7 +166,7 @@ def fetch_period(
             params=params,
             headers=UA,
             timeout=30,
-            proxies={"http": None, "https": None},
+            proxies=_NO_PROXIES,
         )
         r.raise_for_status()
         payload = r.json() or {}
@@ -211,18 +217,16 @@ def normalize(
     记录键 = (code, report_date, notice_date);notice_date 缺失或早于报告期的行**丢弃**
     (公告日不晚于报告期在现实中不可能,宁可不要也不能拿一条错的可见日进回测)。
     """
-    out, stats = (
-        [],
-        {
-            "raw": len(rows),
-            "dropped_type": 0,
-            "dropped_no_notice": 0,
-            "dropped_bad_lag": 0,
-            "kept": 0,
-            "bad_value": 0,
-            "types": {},
-        },
-    )
+    out: list = []
+    stats: dict[str, Any] = {
+        "raw": len(rows),
+        "dropped_type": 0,
+        "dropped_no_notice": 0,
+        "dropped_bad_lag": 0,
+        "kept": 0,
+        "bad_value": 0,
+        "types": {},
+    }
     rd = date.fromisoformat(report_date)
     for x in rows:
         stype = str(x.get("SECURITY_TYPE") or "")

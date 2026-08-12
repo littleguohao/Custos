@@ -28,7 +28,7 @@ import json
 import sys
 from datetime import timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -43,7 +43,7 @@ DEFAULT_WINDOW_DAYS = 30
 
 
 def _existing_dates(ledger_path: Path) -> set:
-    dates = set()
+    dates: set[str] = set()
     if not ledger_path.is_file():
         return dates
     for line in ledger_path.read_text(encoding="utf-8").splitlines():
@@ -139,7 +139,7 @@ def main(argv: Optional[list] = None) -> int:
     )
     args = ap.parse_args(argv)
 
-    summary = {
+    summary: dict[str, Any] = {
         "added": 0,
         "skipped_existing": 0,
         "amv_0day_filled": False,

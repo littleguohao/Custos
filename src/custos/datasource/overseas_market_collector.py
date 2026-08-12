@@ -133,9 +133,9 @@ def fetch_chart(symbol: str, region: str = "") -> dict[str, Any]:
 
 def classify(details: dict[str, Any]) -> str:
     vals = [
-        v.get("change_pct")
+        c
         for v in details.values()
-        if isinstance(v, dict) and v.get("change_pct") is not None
+        if isinstance(v, dict) and (c := v.get("change_pct")) is not None
     ]
     if not vals:
         return "缺失"

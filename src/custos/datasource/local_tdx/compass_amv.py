@@ -173,7 +173,7 @@ def _chain_segments(segments: list) -> list:
     返回 [ [(date_int, o, h, l, c, v, a), ...], ... ]，每链日期升序去重。
     """
     segs = sorted(segments, key=lambda s: (s[0][1], s[0][0]))
-    chains = []  # {"segs": [...], "last_date": int, "end_off": int}
+    chains: list[dict] = []  # {"segs": [...], "last_date": int, "end_off": int}
     for seg in segs:
         first_date = seg[0][1]
         start_off = min(r[0] for r in seg)
@@ -198,7 +198,7 @@ def _chain_segments(segments: list) -> list:
             best["end_off"] = end_off
     out = []
     for ch in chains:
-        recs = {}
+        recs: dict = {}
         for seg in ch["segs"]:
             for _off, date, o, h, l, c, v, a in seg:
                 recs.setdefault(date, (date, o, h, l, c, v, a))

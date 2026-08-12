@@ -704,7 +704,7 @@ def get_stock_list(pool_type: str = "5", ashare_only: bool = True) -> list[str]:
     """
     from mootdx.consts import MARKET_SH, MARKET_SZ
 
-    result = []
+    result: list = []
     for mkt in [MARKET_SH, MARKET_SZ]:
         try:
             stocks = _with_client_retry(
