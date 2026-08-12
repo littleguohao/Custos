@@ -6,7 +6,7 @@
 > 优先级按**「它阻塞了什么」**排，不按工作量：
 > P0 = 阻塞其他事或 live 正在依赖 ｜ P1 = 已有结论悬空 ｜ P2 = 新验证 ｜ P3 = 技术债
 >
-> 最后更新：2026-08-12（#20 tick_buffer 重设计已实现待对照（--stop-buffer pct/atr + m2 方案 low_pct_03/atr_02），见 CHANGELOG v0.46；#17 宇宙/窗口钉死开关默认改开（--no-* 显式关），完成删除，见 CHANGELOG v0.45；#48 RSS 代码命中加紧邻量词否定（方案 A）、#18 收口（load_bars_csv 加法口径告警 + R15 stale 行修正），两者完成删除，事实见 CHANGELOG v0.44；#56 保留项①–⑤ owner 拍板收口，判定精度全仓统一 round-2，口径变更见 CHANGELOG v0.43，#56 完成删除；#44 定案：三个 stale 研究脚本全部删除；#57 类型化五批收口；#53 例行核对落地）
+> 最后更新：2026-08-12（#20 对照完成：tick 模式保留，pct/atr 均否决——s3000 同宇宙下 atr_02 期望% -50%、low_pct_03 -62.5%，s300 的 atr 优势是小样本假象（R11 同型）；事实见 R10 与 CHANGELOG v0.46 对照节；#20 tick_buffer 重设计已实现待对照（--stop-buffer pct/atr + m2 方案 low_pct_03/atr_02），见 CHANGELOG v0.46；#17 宇宙/窗口钉死开关默认改开（--no-* 显式关），完成删除，见 CHANGELOG v0.45；#48 RSS 代码命中加紧邻量词否定（方案 A）、#18 收口（load_bars_csv 加法口径告警 + R15 stale 行修正），两者完成删除，事实见 CHANGELOG v0.44；#56 保留项①–⑤ owner 拍板收口，判定精度全仓统一 round-2，口径变更见 CHANGELOG v0.43，#56 完成删除；#44 定案：三个 stale 研究脚本全部删除；#57 类型化五批收口；#53 例行核对落地）
 
 ## P0 · 阻塞项
 
@@ -59,7 +59,6 @@ R10：可用 margin 只在含 0AMV 的方案（pct_05_amv +7.8pp / pct_12_amv_cz
 
 | # | 事项 | 出处 |
 |---|---|---|
-| 20 | `tick_buffer` 参数重设计：**已实现待对照**（2026-08-12，owner 拍板「两个都实现成可选 stop 模式，同批样本对照跑一轮再定取舍」）。`backtest_factors` 新增 `--stop-buffer {tick,pct,atr}`（默认 tick=旧行为逐位不变）+ `--stop-pct-buffer`（默认 0.3 ≈ 10 元股 tick_3）+ `--stop-atr-buffer`（默认 0.2×ATR(14)，Wilder `indicators.atr_series`）；m2 方案表 A 组加 `low_pct_03`/`atr_02`（已进 R_DENOM/EXIT_SIDE 分类，按期望%/margin 判）。**待跑（需目标机，本机无 vipdoc/S_DATA）**：① 小样冒烟 `uv run python src/custos/research/m2_stop_sweep.py --sample 300 --only A_stop_low -j 4`；② 正式对照按 run_m2_sweep.cmd 口径 `uv run python src/custos/research/m2_stop_sweep.py --sample 3000 --only A_stop_low -j 6`（#17 起窗口/宇宙默认已钉死 DEFAULT_WINDOW 口径，两轮的 tick_3/pct_03/atr_02 同批可比）。跑完按期望%/margin 定余量口径取舍，再决定是否 deprecate tick 模式 | [R10](governance/research/R10_mechanism_M2_stops.md) |
 | 58 | **高复杂度函数拆分**：radon cc 检出 C 级以上函数 267 个，集中在研究侧引擎——`backtest_factors.main` F(75)、`m2_stop_sweep._print_trade_group` F(69)、`backtest_factors.simulate_b1_trade` F(54)、`reconcile_qfq.gap_report` E(35)、`compare_signal_sets.main` E(34)。原则：**下次因业务动这些文件时先拆**，不为拆分而拆分 | 2026-08-11 静态检查（`reports/radon_cc.txt`） |
 
 ## ⚠️ 已失效的行动项（**别照着做**）
