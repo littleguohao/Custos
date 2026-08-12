@@ -209,6 +209,26 @@ def test_main_loads_with_buffered_start(tmp_path, monkeypatch):
     )  # 60 交易日×1.6+10 ≈ 106 日历日 ≈ 2024-09-16
 
 
+def test_list_windows_without_start_does_not_pass_none_since(monkeypatch, capsys):
+    """⚠️ `--list-long-windows` 不传 `--start` 时 since 不得是 None。
+
+    此前是 `args.start or None`：None 一路传进 `compass_amv.parse_amv_daily`
+    的 `date >= since` 比较 ⇒ TypeError，被 `load_amv_regime` 的 except 吞成 {}
+    ⇒ regime 静默为空、窗口枚举恒无结果 —— 研究方向性错误却无任何报错。
+    这类「吞掉后产出空结论」的缺陷最危险：输出看起来正常，只是没有内容。
+    """
+    captured = {}
+
+    def fake_regime(since="2015-01-01", root=None):
+        captured["since"] = since
+        return {"2024-01-02": "空头", "2024-01-03": "空头"}
+
+    monkeypatch.setattr(lp.bt, "load_amv_regime", fake_regime)
+    rc = lp.main(["--list-long-windows"])  # 不传 --start
+    assert rc == 0
+    assert captured["since"] is not None and captured["since"] != ""
+
+
 def test_load_margin_covers_gate_window(tmp_path, monkeypatch):
     """加载裕量必须 ≥ gate_window(默认120 > buffer 60):否则窗首 ~45 个交易日的信号
     KDJ 预热不足,且截断程度随信号位置变化。裕量 = max(buffer, gate)×1.6+10 日历日。"""

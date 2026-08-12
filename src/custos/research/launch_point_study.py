@@ -2285,7 +2285,11 @@ def main(argv=None, loader=None) -> int:
         return 0
 
     if args.list_long_windows or args.list_window_pairs:  # 只枚举区间,不加载任何 K 线
-        regime = bt.load_amv_regime(since=args.start or None)
+        # ⚠️ since 不能是 None：--start 缺省为 ""，None 会一路传进
+        # compass_amv.parse_amv_daily 的 `date >= since` 比较炸 TypeError，
+        # 被 load_amv_regime 的 except 吞成 {} ⇒ regime 静默为空、窗口枚举恒无结果。
+        # "1900-01-01" = 不过滤（同 compass_amv 里取全序列的惯例）。
+        regime = bt.load_amv_regime(since=args.start or "1900-01-01")
         if args.list_window_pairs:
             pairs = bear_to_long_pairs(
                 regime,
