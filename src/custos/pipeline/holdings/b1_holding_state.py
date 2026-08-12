@@ -208,11 +208,12 @@ def evaluate(
             "0AMV空头区间:降低仓位为最高优先级,任何反弹都是卖出机会;禁止加仓补仓",
         )
 
+    _pv_chg = fnum(pv.get("change_pct")) if price_volume_current else None
     if (
         price_volume_current
         and market_regime == "空头"
-        and fnum(pv.get("change_pct")) is not None
-        and fnum(pv.get("change_pct")) > 0
+        and _pv_chg is not None
+        and _pv_chg > 0
     ):
         add(
             "bear_rebound_reduce",

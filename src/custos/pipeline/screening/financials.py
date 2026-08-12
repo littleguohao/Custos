@@ -264,7 +264,9 @@ def financial_factor(
     )  # ① 扣非同比≥100% 代理
     np_pos = bool(net_profit is not None and net_profit > 0)  # ②a 净利为正
     ocf_available = op_cf is not None
-    ocf_pos = bool(ocf_available and op_cf > 0)  # ②b 经营现金流为正(缺失→未确认)
+    ocf_pos = bool(
+        op_cf is not None and op_cf > 0
+    )  # 与 ocf_available and ... 同值，显式判空便于收窄  # ②b 经营现金流为正(缺失→未确认)
     roe_positive = bool(roe is not None and roe > 0)
     # ②综合(CZ 真实盈利+现金流)：净利与现金流同为正才成立；现金流缺失(季报常见)时不冒充成立，
     # 但 net_profit_positive 仍独立可用 —— 优雅降级而非整项作废。
@@ -318,7 +320,7 @@ def main(argv=None) -> int:
         )
         return 0
     cm = auto_colmap(getattr(df, "columns", []))
-    override = {}
+    override: dict = {}
     try:
         from custos.core.paths import SCREEN_FORMULA_REGISTRY_FILE  # noqa: PLC0415
 

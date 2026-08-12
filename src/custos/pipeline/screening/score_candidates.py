@@ -208,7 +208,7 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
     返回 (score, level, factor_contrib)（factor_contrib 落盘可复盘）。
     """
     patterns = cand.get("patterns") or {}
-    contrib: dict[str, int] = {}
+    contrib: dict[str, Any] = {}
     score = 0
     # 优先用 S_shape v3.0 有界加权评分（借鉴 workflow v3.0 沙漏模型；阈值待回测）。
     # 无 s_shape 数据（单测/降级）时回退到下方旧的 patterns 加权累加。
@@ -635,7 +635,9 @@ def score_candidate(
     # 脏数据、必须在 risk_flags/degraded_reason 留痕，否则无从区分"板块真弱"和"数据坏"。
     sector_score_norm = normalize_sector_score(sector_score_raw, sector_score_max)
     sector_score_available = sector_score_norm is not None
-    sector_score = sector_score_norm if sector_score_available else 0.0
+    sector_score = (
+        sector_score_norm if sector_score_norm is not None else 0.0
+    )  # 同值（available 即 norm 非 None），显式判空便于收窄
 
     # 分层由个股（技术结构 × 资金意图）定夺；板块不封顶（降为提示，只进 score/共振/trade_style）
     base_bucket = RESONANCE_MATRIX[(tech_level, capital_level)]

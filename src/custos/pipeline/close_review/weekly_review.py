@@ -338,7 +338,7 @@ def trading_days_of_week(base: Path, days: list[str]) -> dict[str, bool | None]:
     cfg = load_json(base / CALENDAR_RELPATH, {})
     official = cfg.get("official_years") if isinstance(cfg, dict) else None
     official = official if isinstance(official, dict) else {}
-    result = {}
+    result: dict[str, bool | None] = {}
     for day in days:
         d = date.fromisoformat(day)
         if d.weekday() >= 5:

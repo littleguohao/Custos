@@ -117,8 +117,9 @@ def score_sector(a: dict[str, Any], priority: str) -> float:
             score -= 3
         elif j < 30 and kdj.get("j", 0) > kdj.get("j_prev", 0):
             score += 5
-    if weekly.get("hist") is not None:
-        score += 4 if weekly.get("hist") > 0 else -4
+    weekly_hist = weekly.get("hist")
+    if weekly_hist is not None:
+        score += 4 if weekly_hist > 0 else -4
     if priority == "high":
         score += 3
     return round(max(0, min(100, score)), 2)
@@ -303,7 +304,7 @@ def make_report(date: str, rows: list[dict[str, Any]]) -> str:
         reps = ", ".join(r.get("representative_stocks", [])[:4])
         risk_note = (
             "J值过热需防追高"
-            if isinstance(r.get("daily_j"), (int, float)) and r.get("daily_j") > 90
+            if isinstance((dj := r.get("daily_j")), (int, float)) and dj > 90
             else "大盘震荡偏弱，低吸优先"
         )
         lines.append(
@@ -350,12 +351,16 @@ def make_report(date: str, rows: list[dict[str, Any]]) -> str:
     lines.append(
         "- 强于大盘的板块："
         + (
-            "、".join([r.get("theme_name") for r in strong[:5]])
+            "、".join([n for r in strong[:5] if (n := r.get("theme_name")) is not None])
             if strong
             else "暂不明确"
         )
     )
-    weak_names = [r.get("theme_name") for r in risk[:5] if r.get("available")]
+    weak_names = [
+        n
+        for r in risk[:5]
+        if r.get("available") and (n := r.get("theme_name")) is not None
+    ]
     lines.append(
         "- 弱于大盘/需回避板块："
         + ("、".join(weak_names) if weak_names else "暂无明确退潮，但低分板块需谨慎")
@@ -365,7 +370,7 @@ def make_report(date: str, rows: list[dict[str, Any]]) -> str:
     )
 
     lines.append("## 6. 给总控的结论\n")
-    focus = [r.get("theme_name") for r in strong[:3]]
+    focus = [n for r in strong[:3] if (n := r.get("theme_name")) is not None]
     lines.append("- 可关注方向：" + ("、".join(focus) if focus else "无明确可进攻方向"))
     lines.append("- 禁止方向：下跌/低分板块、弱于板块的个股、箱体破位个股。")
     weak_holdings = [

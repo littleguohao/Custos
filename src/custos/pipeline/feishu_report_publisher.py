@@ -165,7 +165,7 @@ def build_exec_summary(md_text: str, title: str, date: str, limit: int = 800) ->
 
     core = _core_section(lines)
     used = {l.strip() for l in core} | set(actions)
-    permissions = []
+    permissions: list = []
     for key in ("禁止", "权限"):
         for line in lines:
             if len(permissions) >= 2:

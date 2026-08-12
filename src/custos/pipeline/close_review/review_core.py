@@ -216,8 +216,11 @@ def quote_map(target_date: str) -> tuple[dict[str, dict], dict]:
 def technical_map(target_date: str) -> dict[str, dict]:
     path = HOLDINGS / f"{target_date}_holding_technical_summary.json"
     if not path.exists():
-        path = latest("*_holding_technical_summary.json", HOLDINGS)
-    rows = load(path, []) if path else []
+        alt = latest("*_holding_technical_summary.json", HOLDINGS)
+        if alt is not None:
+            path = alt
+    # 找不到时 load 一个不存在的路径 → read_json 返回 default，与原先 path=None 同结果
+    rows = load(path, []) if path.exists() else []
     return {str(x.get("code")): x for x in rows}
 
 
@@ -242,10 +245,10 @@ def risk_source_date(target_date: str) -> tuple[Path | None, str]:
     path = RISK / f"{target_date}_risk_decision.json"
     if path.exists():
         return path, target_date
-    path = latest("*_risk_decision.json", RISK)
-    if not path:
+    alt = latest("*_risk_decision.json", RISK)
+    if alt is None:
         return None, ""
-    return path, path.name[:10]
+    return alt, alt.name[:10]
 
 
 def risk_map(target_date: str) -> dict[str, list[dict]]:
@@ -416,7 +419,7 @@ def main() -> None:
     total_assets = (
         sorted(asset_samples)[len(asset_samples) // 2] if asset_samples else 0
     )
-    revalued = []
+    revalued: list[dict] = []
     actions = []
     for p in positions:
         code = str(p.get("代码", "")).split(".")[0]

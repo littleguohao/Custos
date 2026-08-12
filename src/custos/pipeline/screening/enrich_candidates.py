@@ -378,7 +378,7 @@ def build_stock_theme_map(
 
     if tags_map:
         if codes is None:
-            stock_theme = _scan(tags_map.items())
+            stock_theme: dict | None = _scan(tags_map.items())
         else:
             stock_theme = _scan((c, tags_map[c]) for c in codes if c in tags_map)
         if stock_theme:
@@ -406,15 +406,15 @@ def build_stock_theme_map(
 
     stock_theme = {}
     for s in sector_map["sectors"]:
-        theme = code_to_theme.get(str(s.get("code", "")).upper())
-        if not theme:
+        theme_hit: dict | None = code_to_theme.get(str(s.get("code", "")).upper())
+        if not theme_hit:
             continue
         for raw in s.get("stocks") or []:
             code6 = str(raw).split(".")[0].zfill(6)
             stock_theme.setdefault(
                 code6,
                 {
-                    **theme,
+                    **theme_hit,
                     "matched_code": s.get("code", ""),
                     "sector_source": "tq_880_fallback",
                 },
@@ -938,7 +938,7 @@ def check_macd_technics(df) -> dict[str, Any]:
         and (close[i - f : i + f + 1] > close[i]).sum() >= 2 * f - 1
     ]
 
-    top_div = {"hit": False}
+    top_div: dict[str, Any] = {"hit": False}
     if len(swing_hi) >= 2:
         a, b = swing_hi[-2], swing_hi[-1]
         if close[b] > close[a] and (d[b] < d[a] or h[b] < h[a]):
@@ -953,7 +953,7 @@ def check_macd_technics(df) -> dict[str, Any]:
                 "hist_a": round(float(h[a]), 4),
                 "hist_b": round(float(h[b]), 4),
             }
-    three_peaks = {"hit": False}
+    three_peaks: dict[str, Any] = {"hit": False}
     if len(swing_hi) >= 3:
         p1, p2, p3 = swing_hi[-3], swing_hi[-2], swing_hi[-1]
         if close[p1] < close[p2] < close[p3] and d[p1] > d[p2] > d[p3]:
@@ -966,7 +966,7 @@ def check_macd_technics(df) -> dict[str, Any]:
                     round(float(d[p3]), 4),
                 ],
             }
-    bottom_div = {"hit": False}
+    bottom_div: dict[str, Any] = {"hit": False}
     if len(swing_lo) >= 2:
         a, b = swing_lo[-2], swing_lo[-1]
         if close[b] < close[a] and d[b] > d[a]:

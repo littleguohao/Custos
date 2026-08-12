@@ -144,7 +144,7 @@ def build_risk_decision(date: str) -> dict:
     ordered = sorted(
         unique.values(),
         key=lambda x: (
-            {"高": 0, "中": 1, "低": 2}.get(x.get("priority"), 9),
+            {"高": 0, "中": 1, "低": 2}.get(x.get("priority") or "", 9),
             x.get("code", ""),
         ),
     )

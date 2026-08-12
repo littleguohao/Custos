@@ -195,7 +195,7 @@ def derive_market_fields(target_date: str) -> tuple[dict, dict, dict, dict]:
     "auto" when fresh vs the trading calendar, "degraded" when vipdoc lags.
     """
     expected = previous_confirmed_trading_day(target_date)
-    quality = {
+    quality: dict[str, Any] = {
         "notes": [
             "market_breadth/sentiment/turnover 来自本地 vipdoc 880 系列前一交易日 EOD 数据；08:50 盘前无当日盘中数据。",
             "TQ 快照路径已移除（tqcenter 废弃）；指数盘中快照待盘中/盘后流程填充。",
@@ -204,7 +204,7 @@ def derive_market_fields(target_date: str) -> tuple[dict, dict, dict, dict]:
         "expected_data_date": expected,
     }
 
-    breadth = {
+    breadth: dict[str, Any] = {
         "up_count": None,
         "down_count": None,
         "up_down_ratio": None,
@@ -242,7 +242,7 @@ def derive_market_fields(target_date: str) -> tuple[dict, dict, dict, dict]:
     except Exception as e:
         quality["notes"].append(f"880005 涨跌家数读取失败: {e!r}")
 
-    sentiment = {
+    sentiment: dict[str, Any] = {
         "limit_up_count": None,
         "limit_down_count": None,
         "once_limit_up_count": None,
@@ -288,7 +288,7 @@ def derive_market_fields(target_date: str) -> tuple[dict, dict, dict, dict]:
     except Exception as e:
         quality["notes"].append(f"880006 涨跌停读取失败: {e!r}")
 
-    turnover = {
+    turnover: dict[str, Any] = {
         "total_turnover": None,
         "turnover_change_pct": None,
         "volume_summary": "",

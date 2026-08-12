@@ -44,7 +44,7 @@ def score_macro(d: dict) -> tuple[float, str]:
         ]
     ):
         return 7.5, "宏观政策未填，按中性半分处理；需人工补充货币/财政/信用/监管判断。"
-    score = 0
+    score: float = 0
     notes = []
     if mp.get("monetary_policy") == "宽松":
         score += 4
@@ -109,10 +109,10 @@ def score_overseas(d: dict) -> tuple[float, str]:
             "hstech_change_pct",
         ]
     ]
-    vals = [v for v in vals if v is not None]
-    if not vals:
+    known = [v for v in vals if v is not None]
+    if not known:
         return 5, "外围市场未填，按中性半分处理。"
-    avg = sum(vals) / len(vals)
+    avg = sum(known) / len(known)
     if avg >= 1.0:
         return 10, f"外围平均涨幅 {avg:.2f}%，利多风险偏好。"
     if avg >= 0.2:
@@ -136,7 +136,7 @@ def score_indices(d: dict) -> tuple[float, str]:
         above60 = x.get("above_ma60")
         above144 = x.get("above_ma144")
         above240 = x.get("above_ma240")
-        s = 0
+        s: float = 0
         if intraday is not None:
             if intraday > 1:
                 s += 1.5
@@ -221,7 +221,7 @@ def score_breadth(d: dict) -> tuple[float, str]:
         )
     ratio = up / down
     if ratio >= 2:
-        s = 15
+        s: float = 15
     elif ratio >= 1.2:
         s = 11
     elif ratio >= 0.8:

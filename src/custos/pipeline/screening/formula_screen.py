@@ -459,7 +459,7 @@ def _refresh_candidate_names(
     # 只在变差时改写：universe 阶段若已判 unavailable，这里 ok 也不该把它洗白到 ok，
     # 因为 universe 的名称缺失影响的是"哪些票进了初筛"，与候选名称是两件事。
     rank = {"ok": 0, "stale": 1, "partial": 2, "unavailable": 3}
-    result["st_filter"] = now if rank.get(now, 3) > rank.get(prev, 0) else prev
+    result["st_filter"] = now if rank.get(now, 3) > rank.get(prev or "", 0) else prev
     if now == "partial":
         pending_notes.append(
             f"st_filter_partial({diag.get('missing_count')}/{diag.get('requested')} "

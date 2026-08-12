@@ -553,7 +553,7 @@ def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
         reverse=True,
     )
     # 与 score_candidates 共用同一套归一,避免"报告说空头不买、A池却仍生成买入计划"的自相矛盾
-    is_bear = normalize_regime(pool.get("amv_state")) == "空头"
+    is_bear = normalize_regime(pool.get("amv_state") or "") == "空头"
     # 🚦 门控建议:独立区块,置于信号一览之前(先知道数据可不可信,再看信号)。
     # **不改任何分层/next_step** —— 18:00 是纯粹选股流程,详见 _gate_advisory_section。
     lines += _gate_advisory_section(date, gate)
