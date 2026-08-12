@@ -44,6 +44,21 @@ CFG = {
     "market_keywords": ["成交额", "北向"],
     "negative_spam_keywords": ["直播带货"],
     "policy_negative_keywords": ["人事任免", "会见"],
+    "code_unit_suffixes": [
+        "万元",
+        "亿元",
+        "元",
+        "万",
+        "亿",
+        "港元",
+        "美元",
+        "辆",
+        "台",
+        "家",
+        "吨",
+        "列",
+        "人次",
+    ],
 }
 REG = {
     "sources": [
@@ -211,6 +226,25 @@ class TestCodeMatching:
         _items(env, _item(title="浦发银行获批新业务"))
         sel, _ = _run(env, monkeypatch)
         assert sel[0]["matched_holdings_or_pool"]["names"] == ["浦发银行"]
+
+    @pytest.mark.parametrize(
+        "text,hit",
+        [
+            ("净利润600000元", False),  # 代码恰好等于一个独立金额
+            ("成交600000万元创年内新高", False),
+            ("全年交付600000辆", False),  # 计数量词
+            ("第600000列", False),  # 计数类
+            ("600000浦发银行：公告", True),  # 紧邻名称而非量词
+            ("浦发银行（600000）分红每10股派2元", True),  # 紧邻括号，真命中不误杀
+        ],
+    )
+    def test_unit_suffix_negation(self, env, monkeypatch, text, hit):
+        """⚠️ 回归（#48，2026-08-12 方案 A）：代码命中后紧邻金额/计数量词不计命中。"""
+        _positions(env, [{"代码": "600000", "名称": "浦发银行"}])
+        _items(env, _item(title=text))
+        sel, _ = _run(env, monkeypatch)
+        got = bool(sel and sel[0]["matched_holdings_or_pool"]["codes"])
+        assert got is hit, f"{text!r} 应{'命中' if hit else '不命中'}"
 
 
 class TestWindowing:

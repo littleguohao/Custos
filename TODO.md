@@ -81,7 +81,7 @@ R10：可用 margin 只在含 0AMV 的方案（pct_05_amv +7.8pp / pct_12_amv_cz
 
 | # | 事项 | 性质 |
 |---|---|---|
-| 26 | **持仓手册 §七 依赖一份零实现的文档**：`04_pullback_rotation.md` 要求的主题切换/主题内分化/大小票切换/高低位切换四项检查**全仓零实现** ⇒ 要么手册第七节是空条款，要么在靠 LLM 判断（**违反项目核心原则**）| 需定性后处理 |
+| 26 | **回调四项切换检查——已定性为「确实缺失的功能」（owner 2026-08-12）**：`04_pullback_rotation.md` 要求的主题切换/主题内分化/大小票切换/高低位切换四项检查全仓零实现，实际每日检查里也**没在做**（owner 确认）⇒ 不是空条款措辞问题，是缺失能力。**落地方向（owner 定）**：做成确定性脚本并在**每日复盘报告**里体现（每日的几份报告内容需随之调整）。原料大部分已有：`sector_phase`/`theme_tracker_report`（主题相位）、`fetch_market_cap`（市值层）、`holding_sector_mapper`（板块映射）、250 日高低点（高低位）。输出字段以 `04_pullback_rotation.md` §六 的字段表为准 | **待实现**（owner 已定性） |
 
 ## P5 · contracts 梳理查出的问题（2026-08-06）
 
@@ -125,7 +125,6 @@ stage 全部指向不存在的文件、整条链硬失败，而 3481 条测试�
 | # | 事项 | 当前 |
 |---|---|---|
 | 45 | ✅ **已按窄修法实现（2026-08-10 owner 拍板）**：`is_stale` 的判据由 `quality == "stale"` 改为 `quality in SECTION_NOT_FRESH`（见 v0.40）。查因过程中发现比原描述更根本的问题：**两个生产者用不同词表**（merge 出 `raw_only`、collector 出 `degraded`），而消费者只认 `"stale"` ⇒ 两个词都被当成新鲜。已在 `contracts.py` 立 `SECTION_QUALITY`/`SECTION_NOT_FRESH` 统一词表，并加一条**从生产者源码取字面量**的守卫：生产者新增未登记的 quality 值时当场报警（植入验证通过）。<br><br>**剩余未做（第二步，需 owner 定）**：把 `as_of` 补进 `market_breadth`/`sentiment`/`turnover` 的契约。⚠️ 本次**刻意没做**，因为那是更宽的 fail-closed —— 会把「合法但没写 as_of」的段也打成陈旧；且补契约前必须先确认所有走**全量** `require()` 的生产者都写了该键，否则当场硬失败（#52 就是先补骨架再补契约才没炸）。<br>⚠️ 另一个已知但未修的口子：`is_stale(sec, day=None)` 恒返回 False。三个调用点都传 `d.get("date")`，而 `date` 是契约必填字段 ⇒ 只有契约被违反时才可达，留作已知边界。 | ✅ 主体已完成；第二步待 owner |
-| 48 | **RSS 代码命中的残余误配**：`rss_filter` 已加数字边界（修掉「嵌在更长数字里」），但「`净利润600000元`」这种**代码恰好等于一个独立金额**仍会误配 +45 分并顶到候选首位。要分辨得看上下文（前后是否有「元/万元/亿」等量词，或要求邻近出现持仓名称）。收益 vs 复杂度待评估 | 待定 |
 | 49 | `rss_filter.entities(date)` 的 `date` **未被使用** —— `current_positions.json` 无历史版本，回填历史日期会用今天的持仓筛那天的新闻。等持仓快照有历史版本后接上 | ⏸ 依赖持仓历史 |
 | 53 | **端到端真跑 `daily_pipeline`** —— ✅ **首次真跑已完成（2026-08-08）**：目标机按 `--date 2026-08-07` 重跑全部五个 runner（证据：`artifacts/logs/2026-08-07_*_run_log.json`，started_at 为 08-08 深夜）。1800 选股链 11 stage 全 OK；0850 7/7、0905 3/3、1700 completed。且立刻抓到一个下周一就会发作的真 bug：`holding_quotes` 契约 spec 把 `indices` 误写为 dict（生产者是 list），被 1700 链契约校验报出 → 已修（commit `1f118b1`）。⚠️ **残余缺口**：① 1445 的盘中快照类 stage 无法用历史日期复现 fresh 校验（本次 `close_review` 因 `captured_at` 非目标日失败，属预期）；② `collect_fund_flow` 网络失败为 best-effort 不阻断。⇒ 例行核对已实现（2026-08-12，`pipeline/run_log_check.py`：缺日志/意外失败 exit 1，#53 记录的两类预期内失败不告警）；cron 条目待 owner 加（建议每交易日 18:30） | ✅ 已完成（cron 待加） |
 | 54 | **生产代码覆盖缺口（2026-08-11 大幅收口）**：总覆盖率 78.5% → **81.4%**；原清单十项里 **4 项已 ≥91%**（`market_timing_scorer` 36→95、`refresh_market_indices` 17→91、`holding_sector_mapper` 20→93、`daily_report` 65→84），`adjust_factors` 60→72、`collect_holding_quotes` 65→73、`financials` 70→78。<br><br>**剩三个 <70%，缺口全在网络/子进程边界**：`collect_incremental_market` 56%（缺 55，主要是 `main` 的 30 行编排 + yahoo 抓取）、`market_timing_collector` 69%（缺 48，`read_day`/`_vipdoc_rows`/`main` 需真 vipdoc）、`overseas_market_collector` 68%（缺 47，`fetch_chart` 的 28 行是 Yahoo HTTP 解析）。⚠️ 这三处的剩余部分**打桩收益递减**：桩越像真实响应，测的就越是桩本身；真正能验它们的是 #53 的端到端真跑。⇒ **建议就此停在 81%**，把余下的验证交给例行真跑而不是继续加桩。 | 主体已收口；剩余三项建议交端到端 |

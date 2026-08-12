@@ -168,9 +168,21 @@ def main():
     #   "成交额达0024156万元"  → 裸匹配命中 002415（嵌在更长数字里）
     #   "上证指数报3600000点"  → 裸匹配命中 600000
     # 数字边界修掉这两类，且不伤真命中（"浦发银行600000发布公告" / "（600000）" 仍命中）。
-    # 尚未解决："净利润600000元" 这种「代码恰好等于一个独立金额」需语义上下文，见待办 #48。
+    # 2026-08-12（#48，owner 拍板方案 A）：再加**紧邻量词否定** —— 命中数字后
+    # 0~2 个空白内紧跟金额/计数量词（元/万元/亿元/港元/美元/辆/台/家/吨/列/人次…）
+    # 时不计命中，修掉「净利润600000元」「第600000列」这类「代码恰好等于一个独立
+    # 金额/计数」的误配；「600000浦发银行」「（600000）分红每10股派2元」因紧邻的
+    # 是名称/括号而非量词，不受影响。量词表走 contracts 配置（同其他词表）。
+    unit_suffixes = [str(u) for u in cfg.get("code_unit_suffixes", []) if u]
+    unit_neg = ""
+    if unit_suffixes:
+        unit_neg = (
+            r"(?!\s{0,2}(?:" + "|".join(re.escape(u) for u in unit_suffixes) + "))"
+        )
     code_pats = {
-        c: re.compile(r"(?<!\d)" + re.escape(c) + r"(?!\d)") for c in codes if c
+        c: re.compile(r"(?<!\d)" + re.escape(c) + r"(?!\d)" + unit_neg)
+        for c in codes
+        if c
     }
     for x in raw:
         pub = parse_dt(x.get("published_at"))
