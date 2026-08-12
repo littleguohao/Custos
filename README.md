@@ -69,6 +69,8 @@ tests/        pytest
 
 - 周六 10:07：`weekly_review.py` 周度复盘
 - 每月 1 日上午：`monthly_review.py` 月度复盘（`--month YYYY-MM`，默认上个月）——需 owner 在 cron 里加一条
+- 每交易日盘后（建议 18:30）：`run_log_check.py` 核对当天五份 run log
+  （缺日志/意外失败 exit 非零，预期内失败不告警）——需 owner 在 cron 里加一条
 
 ```bash
 uv run python src/custos/pipeline/run_1445.py

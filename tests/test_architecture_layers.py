@@ -397,6 +397,7 @@ class TestContractCoverageOfArtifacts:
         "daily_pipeline_log",
         "1445_review",  # 执行痕迹，非决策产物
         "collection_log",  # RSS 采集执行痕迹（rss_collector 每次运行落一份），非决策产物
+        "run_log_check",  # run_log 例行核对的执行痕迹（run_log_check --json），非决策产物
         "manual_position_updates",  # 人工输入，形状由外部决定
         "premarket_chief_decision",  # chief_decision 的 copy2 副本
         "holding_sector_mapping_enriched",  # 可选产物，缺失是设计好的路径
