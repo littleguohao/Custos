@@ -139,7 +139,9 @@ def amplitude_pct(high, low, prev_close) -> float | None:
     return (h - lo) / pc * 100
 
 
-def dmi_arrays(high, low, close, n: int = 14):
+def dmi_arrays(
+    high, low, close, n: int = 14
+) -> tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None]:
     """Wilder DMI ⇒ `(pdi, mdi, adx)` 三个等长数组（**全项目唯一实现**）。
 
     2026-08-10 从两份**逐行相同**的实现收敛而来：
@@ -170,7 +172,7 @@ def dmi_arrays(high, low, close, n: int = 14):
         (l[:-1] - l[1:]) > (h[1:] - h[:-1]), np.maximum(l[:-1] - l[1:], 0), 0.0
     )
 
-    def _wilder(x):
+    def _wilder(x: np.ndarray) -> np.ndarray:
         out = np.zeros(len(x))
         out[n - 1] = x[:n].sum()
         for i in range(n, len(x)):
@@ -250,7 +252,7 @@ def cci(df: pd.DataFrame, n: int = 14) -> pd.Series:
     return out.replace([np.inf, -np.inf], np.nan)
 
 
-def pct_change(a, b, *, digits=4):
+def pct_change(a, b, *, digits: int = 4) -> float | None:
     """从 b 到 a 的涨跌幅（百分数，默认保留 4 位）；b 为 None/0 或 a 为 None 时返回 None。
 
     2026-08-07 从 `market_timing_collector` 与 `refresh_market_indices` 两份

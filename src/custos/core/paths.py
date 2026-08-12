@@ -10,6 +10,7 @@ Also the single source of truth for "what day is it" — see cn_now/cn_today.
 from __future__ import annotations
 import os
 from datetime import date, datetime
+from typing import Any
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -123,7 +124,7 @@ CALENDAR_FILE = CONTRACTS_DIR / "CN_TRADING_CALENDAR.json"
 CALENDAR_RELPATH = Path("governance") / "contracts" / "CN_TRADING_CALENDAR.json"
 
 
-def read_json(path, default):
+def read_json(path: Path, default: Any) -> Any:
     """读 JSON，文件不存在时返回 default。
 
     ⚠️ **编码必须是 `utf-8-sig`。** 2026-08-06 收敛 4 份重复实现时发现它们编码不一致：

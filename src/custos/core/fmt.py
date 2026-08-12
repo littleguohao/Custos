@@ -14,7 +14,7 @@ from __future__ import annotations
 import math
 
 
-def _finite_or_none(value):
+def _finite_or_none(value) -> float | None:
     try:
         x = float(value)
     except (TypeError, ValueError):

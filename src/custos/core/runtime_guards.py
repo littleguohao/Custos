@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from custos.core.paths import CN_TZ, CONTRACTS_DIR, cn_now, write_json_atomic, DATA
 from custos.core.paths import read_json as load_json
@@ -25,11 +25,16 @@ def clear_calendar_cache() -> None:
     _CALENDAR_JSON_CACHE.clear()
 
 
-def _load_calendar_json(path: Path, default: Any):
+def _load_calendar_json(path: Path, default: Any) -> Any:
     loader = load_json  # late-bound: 尊重调用方对 load_json 的 monkeypatch
     try:
         st = path.stat()
-        key = (str(path), st.st_mtime_ns, st.st_size, loader)
+        key: tuple[str, int | None, int | None, Callable[..., Any]] = (
+            str(path),
+            st.st_mtime_ns,
+            st.st_size,
+            loader,
+        )
     except OSError:
         # 文件缺失也缓存(mtime=None):日历缓存文件常常不存在,否则每次调用还要多一次
         # exists() + 分支。文件后来出现时 stat 成功 → key 不同 → 自动重新加载。
@@ -351,7 +356,7 @@ def market_quality_gate(
 ) -> dict[str, Any]:
     """expected_day:该 session 期望的数据日(盘前/盘中=T-1,盘后=T;缺省=day,保持既有行为)。"""
     exp = expected_day or day
-    checks = []
+    checks: list[dict[str, Any]] = []
     specs = [
         ("0AMV", "amv_0", "amv_change_pct"),
         ("market_breadth", "market_breadth", "up_count"),

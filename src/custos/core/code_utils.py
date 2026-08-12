@@ -14,7 +14,7 @@ from __future__ import annotations
 import math
 
 
-def clean_code(v):
+def clean_code(v) -> str:
     """Ledger semantics: normalize a trade code to a 6-digit zero-padded string.
 
     Baseline: incremental_ledger.clean_code (verbatim). Known behavior
@@ -189,7 +189,7 @@ def norm_code(code: str) -> str:
     return f"{s}.{market}" if market else s
 
 
-def split_code(tdx_code: str):
+def split_code(tdx_code: str) -> tuple[str, str]:
     """Split a tdx code into (lowercase exchange prefix, bare code).
 
     Verbatim from technical_monitor.split_code; relies on norm_code.
@@ -206,7 +206,7 @@ def suffix(code: str) -> str:
     return f".{market}" if market else ""
 
 
-def finite(v, d=0.0):
+def finite(v, d: float = 0.0) -> float:
     """转 float 并**保证结果有限**；失败 / NaN / ±inf 一律返回默认值 d。
 
     用于**参与计算**的场景。要区分「缺数」与「读数是 0」时用 `fnum()`。
@@ -225,7 +225,7 @@ def finite(v, d=0.0):
     return d if not math.isfinite(x) else x
 
 
-def fnum(v):
+def fnum(v) -> float | None:
     """转 float，失败返回 **None**。
 
     ⚠️ **与上面的 `finite()` 语义不同，两个都必须留**：

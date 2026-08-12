@@ -62,7 +62,7 @@ R10：可用 margin 只在含 0AMV 的方案（pct_05_amv +7.8pp / pct_12_amv_cz
 | 17 | 宇宙/窗口钉死开关**默认关** ⇒ 要不要改默认（改了会让历史命令行为变化） | [R13](governance/research/R13_meta_reproducibility.md) |
 | 18 | 跨 bundle 拼接**口径混合**（已加告警，未解决）| [R14](governance/research/R14_meta_data_foundation.md) |
 | 20 | `tick_buffer` **参数本身设计有问题**：余量应按**风险单位**而非价位数，才能让不同价位的股票是同一个风险 | [R10](governance/research/R10_mechanism_M2_stops.md) |
-| 57 | **mypy 渐进类型化**：2026-08-11 静态检查全量 277 条，Linux 压噪配置（`scripts/mypy.linux.ini`）后剩 **225 条可操作项**（union-attr 42 / assignment 40 / arg-type 28 / operator 24 / dict-item 24 等，多为无注解代码的推断噪音）。本轮已甄别并修掉其中 1 个真 bug（`launch_point_study` since=None 被吞成空 regime，commit `2b6abf4`）。收敛策略：**core 先行**（paths/contracts/indicators 先补注解），不追求清零、不用 `# type: ignore` 漫灌 | 2026-08-11 静态检查（`reports/mypy_type.txt`） |
+| 57 | **mypy 渐进类型化**：2026-08-11 静态检查全量 277 条，Linux 压噪（`scripts/mypy.linux.ini`）后 225 条可操作项。已甄别并修掉 1 个真 bug（`launch_point_study` since=None，commit `2b6abf4`）。**第一批（core 顶层 11 模块）已完成（2026-08-12）**：mypy 错误 5→0，公共函数/常量补齐注解（paths/contracts/indicators/code_utils/fmt/net_retry/pipeline_kit/runtime_guards/runtime_gate/b1_thresholds/report_audit）；无真 bug——5 条全是推断噪音（cache key 的 None 回退、异构 dict 值拉宽等），按签名级注解解决，未用 `# type: ignore`。**下一批**：`core/factors` + `core/trades`（52 条）| 2026-08-11 静态检查；core 顶层 done，factors/trades 待做 |
 | 58 | **高复杂度函数拆分**：radon cc 检出 C 级以上函数 267 个，集中在研究侧引擎——`backtest_factors.main` F(75)、`m2_stop_sweep._print_trade_group` F(69)、`backtest_factors.simulate_b1_trade` F(54)、`reconcile_qfq.gap_report` E(35)、`compare_signal_sets.main` E(34)。原则：**下次因业务动这些文件时先拆**，不为拆分而拆分 | 2026-08-11 静态检查（`reports/radon_cc.txt`） |
 
 ## ⚠️ 已失效的行动项（**别照着做**）
@@ -106,7 +106,6 @@ R10：可用 margin 只在含 0AMV 的方案（pct_05_amv +7.8pp / pct_12_amv_cz
 | 35 | `alpha_pvcorr` / `low_vol` / `momentum` 标 `untested` —— 实现了但没有独立的净值终审记录。按 R2 整体结论推定不可用，但**缺它们自己的证据**。要么补跑，要么明确降级为「不再研究」| 补证据或明确废弃 |
 | 37 | ⚠️⚠️ **研究说没用、live 却在用**：R2 结论「S_shape 无 alpha，全市场阈值扫描无 lift」，而 `score_candidates.technical_score` 的**主路径**就是它——`sstar_level(s_star)` 直接出技术层级、参与候选表 A/B/C/D 分层。已在 `factors/s_shape.py` 元数据与 `factors.KNOWN_STATUS_USE_CONFLICTS` 显式登记（不静默放过、也不擅自改分层）。**需 owner 定**：分层要不要换掉 s_shape，还是维持（README 说 StockPool 只是证据层、买入由 chief_decision 裁决，所以维持也讲得通）| **需 owner 拍板** <br><br>⚠️ **2026-08-10 补**：分层**不只是标签** —— `daily_report.py:239` 是 `[x for x in pool.get('candidates',[]) if x.get('bucket') in ('A','B')][:10]`，**C/D 档根本不进盘前日报**。所以若排序无 alpha，这个 top-10 就是任取的 10 个，而人是照着日报看的。⇒ 「改名为形态分档」能减少「把分层当 alpha 信号」的误读，但**不解决「A/B 过滤在事实上决定了你看见谁」**。需要一并定：日报要不要继续只展示 A/B。<br>⚠️ 与 #38（1800 评分系统待完善）是同一件事的两面，建议合并为一个「1800 评分与日报展示」决策。 |
 | 38 | **1800 评分系统待完善**（owner 2026-08-06 记）：`score_candidates` 的技术分/共振分/分层阈值整体还要打磨。与 #37（s_shape 是主路径但 R2 说无 alpha）同一片区域，宜一起做 | 后续迭代 |
-| 39 | **反转K 涨跌幅区间做验证**：已做成可配置（`B1_REVK_CHG_PCT` / `B1_REVK_CHG_MIN` / `B1_REVK_CHG_MAX`，默认对称 ±2%）。待跑不同区间的效果对比（±1.5 / ±2 / ±2.5 / 不对称 −2~+1.8），用同一批样本 + 已实现口径。⚠️ 覆盖值同时影响 live 与回测（两边读同一处，有意如此）| 待跑 |
 
 ## P8 · 测试覆盖率（2026-08-07 首次量化）
 

@@ -332,7 +332,7 @@ def md_to_digest(
     the "1."/"6." sections whole (see _truncate_digest).
     """
     lines = md_text.split("\n")
-    digest_lines = []
+    digest_lines: list[str] = []
     in_section = False
     for line in lines:
         # Skip empty lines at start
