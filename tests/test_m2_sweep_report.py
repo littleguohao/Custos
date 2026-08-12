@@ -255,7 +255,8 @@ class TestStopPctLowerBound:
             assert m2._same_r_denom("B_stop_pct", n, base) is False
 
     def test_real_backtest_count(self):
-        """35 个方案但只有 28 次真回测——C 组 7 个走 trades 复用。"""
+        """37 个方案但只有 30 次真回测——C 组 7 个走 trades 复用。
+        （2026-08-12 #20：35/28 → 37/30，A 组加 low_pct_03/atr_02 两格）"""
         total = sum(len(v["runs"]) for v in m2.GROUPS.values())
         real = sum(
             1
@@ -263,7 +264,7 @@ class TestStopPctLowerBound:
             for n in v["runs"]
             if n not in (v.get("reuse") or {})
         )
-        assert total == 35 and real == 28
+        assert total == 37 and real == 30
 
 
 class TestScaleOutHasControlArm:
@@ -696,6 +697,17 @@ class TestStopIsTooTightHypothesis:
             if "--stop-tick-buffer" in e and "--trail" not in e
         )
         assert buf == [3, 5, 8]
+
+    def test_buffer_unit_alternatives_present(self):
+        """#20（2026-08-12）：pct/atr 风险单位余量进 A 组对照表，默认档位即
+        对照口径（pct 0.3% ≈ 10 元股 tick_3；atr 0.2×ATR14）；两者改分母 ⇒ 不按 R 判。"""
+        runs = m2.GROUPS["A_stop_low"]["runs"]
+        assert runs["low_pct_03"] == ["--stop-buffer", "pct"]
+        assert runs["atr_02"] == ["--stop-buffer", "atr"]
+        base = m2.GROUPS["A_stop_low"]["baseline"]
+        for n in ("low_pct_03", "atr_02"):
+            assert m2._side_from_flags("A_stop_low", n, base) == "exit"
+            assert m2._same_r_denom("A_stop_low", n, base) is False
 
     def test_best_pct_tier_has_timing_variant(self):
         """最优档必须有择时变体——跨组表前三全是 amv，却都配 8%/12% 止损。"""

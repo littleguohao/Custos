@@ -268,3 +268,54 @@ class TestHoldingStateSharesJWithSelection:
         from custos.pipeline.market_timing import technical_monitor as TM
 
         assert TM.kdj(_bars(10)).get("available") is False
+
+
+class TestAtrSeries:
+    """Wilder ATR（2026-08-12 新增，TODO #20 的 ATR 止损余量用）。"""
+
+    def test_hand_computed_constant_range(self):
+        """每根 TR 恒 0.2 ⇒ ATR 恒 0.2（种子与平滑都不变）。"""
+        # (open, high, low, close)：high−low=0.2，与前收之差 0.1 ⇒ TR=0.2
+        n = 30
+        df = pd.DataFrame(
+            {
+                "open": [10.0] * n,
+                "high": [10.1] * n,
+                "low": [9.9] * n,
+                "close": [10.0] * n,
+            }
+        )
+        a = I.atr_series(df, n=14)
+        assert a.iloc[:13].isna().all(), "前 n−1 根历史不足，应为 NaN"
+        assert a.iloc[13] == pytest.approx(0.2)  # 种子 = 前 14 根 TR 算术平均
+        assert a.iloc[29] == pytest.approx(0.2)  # Wilder 平滑保持恒定
+
+    def test_hand_computed_seed_and_smoothing(self):
+        """种子=SMA(前 14 根 TR)，之后 ATR_t = (ATR_{t−1}×13 + TR_t)/14。"""
+        high = [10.0 + i * 0.01 for i in range(16)]
+        low = [h - 0.2 for h in high]  # high−low 恒 0.2
+        close = [h - 0.1 for h in high]
+        # TR：首根 0.2；之后 max(0.2, |high−prev_close|, |low−prev_close|)=0.2
+        df = pd.DataFrame({"high": high, "low": low, "close": close})
+        df.loc[15, "low"] = df.loc[15, "low"] - 0.5  # 第 15 根 TR=0.7
+        a = I.atr_series(df, n=14)
+        assert a.iloc[13] == pytest.approx(0.2)
+        # 第 14 根（index 14）TR=0.2：(0.2×13+0.2)/14 = 0.2；index 15 TR=0.7：
+        assert a.iloc[14] == pytest.approx(0.2)
+        assert a.iloc[15] == pytest.approx((0.2 * 13 + 0.7) / 14)
+
+    def test_gap_uses_prev_close(self):
+        """跳空必须进 TR：|high−prev_close| 与 |low−prev_close| 两个候选。"""
+        df = pd.DataFrame(
+            {
+                "high": [10.5, 11.5],  # 第二根跳空高开
+                "low": [10.0, 11.0],
+                "close": [10.2, 11.2],
+            }
+        )
+        a = I.atr_series(df, n=2)
+        # 首根 TR=0.5；第二根 TR=max(0.5, |11.5−10.2|, |11.0−10.2|)=1.3
+        assert a.iloc[1] == pytest.approx((0.5 + 1.3) / 2)
+
+    def test_short_series_all_nan(self):
+        assert I.atr_series(_bars(10), n=14).isna().all()

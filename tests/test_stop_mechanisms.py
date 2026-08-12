@@ -426,3 +426,68 @@ class TestCostZoneStop:
     def test_off_is_byte_identical(self):
         for bars in (self.FLAT, self.ABOVE_BBI, self.RISING, self.ESCAPED):
             assert _run(bars) == _run(bars, cost_zone_bars=0)
+
+
+# ---------------------------------------------------------------------------
+# #20（2026-08-12）：止损余量的风险单位 —— tick 固定金额（旧）vs pct / atr（新）
+# ---------------------------------------------------------------------------
+
+
+def _flat_bars(p: float, n: int = 32):
+    """p 元价位上的平盘 K 线（形状随价位等比缩放）：TR 恒 0.02p、ATR(14)=0.02p。"""
+    return [(p, p * 1.01, p * 0.99, p)] * n
+
+
+class TestStopBufferModes:
+    """R10 §tick_buffer 设计问题：固定金额把「价格水平」混进风险量
+    （3 tick 在 5 元股=0.6%、50 元股=0.06%）。pct/atr 是候选替代，
+    默认 tick、不传新参数时旧行为逐位一致。"""
+
+    def test_pct_buffer_stop_position(self):
+        """手算：entry=10、low=9.9，0.3% 余量 ⇒ stop=9.9×0.997=9.8703。"""
+        r = _run(_flat_bars(10.0), stop_buffer="pct")
+        assert r["risk_frac"] == pytest.approx((10 - 9.9 * 0.997) / 10)
+
+    def test_atr_buffer_stop_position(self):
+        """手算：ATR=0.2（TR 恒 0.2），0.2×ATR ⇒ stop=9.9−0.04=9.86。"""
+        r = _run(_flat_bars(10.0), stop_buffer="atr")
+        assert r["risk_frac"] == pytest.approx((10 - 9.86) / 10)
+
+    def test_atr_buffer_custom_k(self):
+        r = _run(_flat_bars(10.0), stop_buffer="atr", stop_atr_buffer=0.5)
+        assert r["risk_frac"] == pytest.approx((10 - (9.9 - 0.5 * 0.2)) / 10)
+
+    def test_default_is_tick_and_byte_identical(self):
+        """回归锚：不传新参数（或显式 tick）与旧行为逐位一致。"""
+        import inspect
+
+        ps = inspect.signature(simulate_b1_trade).parameters
+        assert ps["stop_buffer"].default == "tick"
+        assert ps["stop_pct_buffer"].default == 0.3  # ≈ 10 元股 tick_3
+        assert ps["stop_atr_buffer"].default == 0.2
+        bars = _flat_bars(10.0)
+        assert _run(bars) == _run(bars, stop_buffer="tick")
+        assert _run(bars, stop_tick_buffer=3)["risk_frac"] == pytest.approx(
+            (10 - 9.87) / 10
+        ), "tick 旧路径不许变"
+
+    def test_same_risk_unit_across_price_levels(self):
+        """核心对照：同一信号、K 线形状等比缩放时，pct/atr 的 risk_frac 与价位
+        无关（同一个风险单位），tick 的随价位漂（5 元 0.016 / 50 元 0.0106）。"""
+        rf = lambda p, **kw: _run(_flat_bars(p), **kw)["risk_frac"]  # noqa: E731
+        for p in (5.0, 10.0, 50.0):
+            assert rf(p, stop_buffer="pct") == pytest.approx(0.01297)
+            assert rf(p, stop_buffer="atr") == pytest.approx(0.014)
+        assert rf(10.0, stop_tick_buffer=3) == pytest.approx(0.013)  # ≈ pct_03
+        assert rf(5.0, stop_tick_buffer=3) == pytest.approx(0.016)  # 低价股余量更大
+        assert rf(50.0, stop_tick_buffer=3) == pytest.approx(0.0106)  # 高价股更小
+
+    def test_buffer_not_applied_in_pct_stop_mode(self):
+        """stop_mode=pct 下余量不生效（与 tick 的现状一致）。"""
+        bars = _flat_bars(10.0)
+        a = _run(bars, stop_mode="pct", stop_pct=8.0)
+        assert a["risk_frac"] == pytest.approx(0.08)
+        assert (
+            _run(bars, stop_mode="pct", stop_pct=8.0, stop_buffer="atr")["risk_frac"]
+            == a["risk_frac"]
+        )

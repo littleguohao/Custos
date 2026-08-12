@@ -54,6 +54,7 @@ from custos.core.factors.reversal_quality_inv import score as _sc_reversal_quali
 from custos.core.indicators import (
     bbi_series as _bbi_series,
     macd_series as _macd_series,
+    atr_series as _atr_series,
     pct_change,
 )  # noqa: E402
 from custos.core.indicators import dmi_arrays  # noqa: E402  DMI/ADX 唯一实现
@@ -1268,6 +1269,10 @@ def simulate_b1_trade(
     trail_pct: float = 0.0,
     stop_trigger: str = "close",
     stop_tick_buffer: int = 0,
+    stop_buffer: str = "tick",
+    stop_pct_buffer: float = 0.3,
+    stop_atr_buffer: float = 0.2,
+    atr: Optional[pd.Series] = None,
     cost_zone_bars: int = 0,
     cost_zone_pct: float = 3.0,
     cost_zone_grace: int = 1,
@@ -1300,6 +1305,21 @@ def simulate_b1_trade(
     ``stop_tick_buffer``：止损位再向下留几个**价位**（tick=0.01 元）。
     材料写「买入K线最低点**或向下 3-5 个价位**」——贴着最低点挂止损容易被一笔扫掉。
     默认 0 保持旧行为，建议 3。
+
+    ``stop_buffer``（2026-08-12，TODO #20）：止损余量的**风险单位**，三选一：
+
+        "tick"（默认）  固定金额 ``stop_tick_buffer × 0.01 元``（旧行为，逐位不变）。
+                        ⚠️ 已知设计缺陷（R10）：固定金额把「价格水平」混进风险量
+                        ——3 tick 在 5 元股是 0.6%、50 元股是 0.06%。
+        "pct"           百分比余量：``stop = 当日最低 × (1 − stop_pct_buffer/100)``。
+                        默认 0.3 ≈ 10 元股现行 tick_3 的余量。
+        "atr"           波动率余量：``stop = 当日最低 − stop_atr_buffer × ATR(14)``
+                        （Wilder，`indicators.atr_series`）。默认 0.2。
+                        ATR 历史不足（<14 根，仅小样本直调可见）时该笔不留余量。
+
+    三者**互斥**（`stop_buffer` 选择器决定用哪个值；`stop_mode="pct"` 下都不生效，
+    与现状一致）。``atr``：调用方按 code 预计算的 ATR 序列（同 ``bull_flags``
+    的复用模式）；None 且需要时在内部现算。
 
     ``cost_zone_bars``>0 启用**「不涨就拍」**（材料持股手册四种马 + 仓位实例）。
     进场后 ``cost_zone_bars + cost_zone_grace`` 根时检查，**三个维度都平淡才平仓**：
@@ -1338,8 +1358,18 @@ def simulate_b1_trade(
             if stop_mode == "pct"
             else float(low[entry_idx])
         )
-        if stop_mode != "pct" and stop_tick_buffer > 0:
-            stop -= stop_tick_buffer * _TICK  # 「或向下 3-5 个价位」
+        if stop_mode != "pct":
+            # 余量风险单位三选一（#20）：默认 tick 保持旧行为逐位不变；
+            # pct/atr 让余量在不同价位的票上是同一个风险单位（R10 §tick_buffer）。
+            if stop_buffer == "pct" and stop_pct_buffer > 0:
+                stop *= 1 - stop_pct_buffer / 100.0
+            elif stop_buffer == "atr" and stop_atr_buffer > 0:
+                a_series = atr if atr is not None else _atr_series(df)
+                a_v = float(a_series.iloc[entry_idx])
+                if a_v == a_v:  # ATR 历史不足(NaN)时该笔不留余量（见 docstring）
+                    stop -= stop_atr_buffer * a_v
+            elif stop_buffer == "tick" and stop_tick_buffer > 0:
+                stop -= stop_tick_buffer * _TICK  # 「或向下 3-5 个价位」
     risk_frac = (entry - stop) / entry if entry else 0.0
     bbi_v = bbi.values
     has_above = False
@@ -1540,6 +1570,9 @@ def evaluate_trades(
     trail_pct: float = 0.0,
     stop_trigger: str = "close",
     stop_tick_buffer: int = 0,
+    stop_buffer: str = "tick",
+    stop_pct_buffer: float = 0.3,
+    stop_atr_buffer: float = 0.2,
     cost_zone_bars: int = 0,
     cost_zone_pct: float = 3.0,
 ) -> list[dict[str, Any]]:
@@ -1584,6 +1617,8 @@ def evaluate_trades(
         buy_ok, sell_ok = tradable_flags(df, code) if tradability else (None, None)
         # 中大阳线标记(分批止盈用):逐股算一次,避免每个信号重算
         bull_flags = _medium_large_bull_flags(df, code) if scale_out_frac > 0 else None
+        # ATR(14)（止损余量 stop_buffer="atr" 用）:同样逐股算一次,循环内复用
+        atr = _atr_series(df) if stop_buffer == "atr" else None
         emitted = 0
         i = min_bars
         while i < n - 1:
@@ -1634,6 +1669,10 @@ def evaluate_trades(
                     trail_pct=trail_pct,
                     stop_trigger=stop_trigger,
                     stop_tick_buffer=stop_tick_buffer,
+                    stop_buffer=stop_buffer,
+                    stop_pct_buffer=stop_pct_buffer,
+                    stop_atr_buffer=stop_atr_buffer,
+                    atr=atr,
                     cost_zone_bars=cost_zone_bars,
                     cost_zone_pct=cost_zone_pct,
                 )
@@ -2230,6 +2269,9 @@ def trades_signature(args: Any, codes: list[str]) -> dict[str, Any]:
         "stop_pct": args.stop_pct,
         "stop_trigger": args.stop_trigger,
         "stop_tick_buffer": args.stop_tick_buffer,
+        "stop_buffer": args.stop_buffer,
+        "stop_pct_buffer": args.stop_pct_buffer,
+        "stop_atr_buffer": args.stop_atr_buffer,
         "scale_out": args.scale_out,
         "breakeven": args.breakeven,
         "trail": args.trail,
@@ -2639,7 +2681,30 @@ def main(
         type=int,
         default=0,
         help="止损位再向下留几个价位(1 价位=0.01 元)。材料「买入K线最低点"
-        "**或向下 3-5 个价位**」;贴着最低点容易被一笔扫掉。默认 0=旧行为",
+        "**或向下 3-5 个价位**」;贴着最低点容易被一笔扫掉。默认 0=旧行为。"
+        "⚠️ 已知设计缺陷(R10):固定金额把价格水平混进风险量"
+        "(3 tick 在 5 元股=0.6%%、50 元股=0.06%%)——候选替代见 --stop-buffer",
+    )
+    ap.add_argument(
+        "--stop-buffer",
+        choices=["tick", "pct", "atr"],
+        default="tick",
+        help="止损余量的风险单位(2026-08-12 #20):tick(默认)=固定金额"
+        "--stop-tick-buffer(旧行为逐位不变);pct=当日最低×(1−--stop-pct-buffer%%);"
+        "atr=当日最低−--stop-atr-buffer×ATR(14,Wilder)。"
+        "与 --stop-tick-buffer>0 互斥(同给报错,不猜)",
+    )
+    ap.add_argument(
+        "--stop-pct-buffer",
+        type=float,
+        default=0.3,
+        help="--stop-buffer pct 的余量%%(默认 0.3 ≈ 10 元股现行 tick_3)",
+    )
+    ap.add_argument(
+        "--stop-atr-buffer",
+        type=float,
+        default=0.2,
+        help="--stop-buffer atr 的余量系数 k(默认 0.2,即当日最低−0.2×ATR14)",
     )
     ap.add_argument(
         "--cost-zone-bars",
@@ -2695,6 +2760,12 @@ def main(
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
     reset_gate_stats()
+
+    if args.stop_buffer != "tick" and args.stop_tick_buffer > 0:
+        # fail-closed：两种余量单位同给 = 口径不明，报错而非任选一个（#20）
+        ap.error(
+            "--stop-buffer pct/atr 与 --stop-tick-buffer>0 互斥（余量单位只能选一个）"
+        )
 
     if args.codes_file:
         # 钉死宇宙：优先级最高，跳过所有抽样逻辑。
@@ -2872,6 +2943,9 @@ def main(
                     trail_pct=args.trail,
                     stop_trigger=args.stop_trigger,
                     stop_tick_buffer=args.stop_tick_buffer,
+                    stop_buffer=args.stop_buffer,
+                    stop_pct_buffer=args.stop_pct_buffer,
+                    stop_atr_buffer=args.stop_atr_buffer,
                     cost_zone_bars=args.cost_zone_bars,
                     cost_zone_pct=args.cost_zone_pct,
                 )
@@ -2956,6 +3030,12 @@ def main(
                 f"[OK] 写出 {out}（{len(trades)} 笔交易，scorer={args.scorer}, {'周线' if args.weekly else '日线'}, cost={args.cost_bps}bps, amv_long_only={bool(args.amv_long_only)}）"
             )
         stop_desc = "买入K最低" if args.stop_mode == "low" else f"pct {args.stop_pct}%"
+        if args.stop_mode != "pct" and args.stop_buffer != "tick":
+            stop_desc += (
+                f"−{args.stop_pct_buffer}%"
+                if args.stop_buffer == "pct"
+                else f"−{args.stop_atr_buffer}×ATR14"
+            )
         tstop_desc = f" / 时间止损{args.time_stop}根" if args.time_stop else ""
         print(
             f"\n=== B1 交易模拟（scorer={args.scorer}, {'周线' if args.weekly else '日线'}, "

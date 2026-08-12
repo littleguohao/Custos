@@ -187,6 +187,9 @@ EXIT_SIDE_FLAGS = {  # 只改**离场时点/仓位**：信号集不变
     "--stop-pct",
     "--stop-trigger",
     "--stop-tick-buffer",
+    "--stop-buffer",  # 以下三个 2026-08-12 #20：余量风险单位，只改初始止损位
+    "--stop-pct-buffer",
+    "--stop-atr-buffer",
     "--cost-zone-bars",
     "--cost-zone-pct",
     "--scale-out",
@@ -215,7 +218,15 @@ EXIT_SIDE_FLAGS = {  # 只改**离场时点/仓位**：信号集不变
 #
 # 相比之下 `--breakeven` / `--trail` / `--cost-zone-*` / `--stop-trigger` 只改**离场**，
 # risk_frac 在 1297 行就按**初始**止损算完了 ⇒ 分母不变，R 可比。
-R_DENOM_FLAGS = {"--stop-mode", "--stop-pct", "--stop-tick-buffer"}
+R_DENOM_FLAGS = {
+    "--stop-mode",
+    "--stop-pct",
+    "--stop-tick-buffer",
+    # 2026-08-12（#20）：百分比/ATR 余量同样改 risk_frac 分母 ⇒ 同样不按 R 判
+    "--stop-buffer",
+    "--stop-pct-buffer",
+    "--stop-atr-buffer",
+}
 
 # 每组共享的 stop 口径 → 组内 R 可比；跨组只比收益率
 GROUPS: dict[str, dict[str, Any]] = {
@@ -239,6 +250,14 @@ GROUPS: dict[str, dict[str, Any]] = {
             "tick_buffer_3": ["--stop-tick-buffer", "3"],
             "tick_buffer_5": ["--stop-tick-buffer", "5"],
             "tick_buffer_8": ["--stop-tick-buffer", "8"],
+            # 余量的风险单位对照（2026-08-12，#20，owner 拍板两口径都实现、
+            # 同一批样本对照跑一轮再定取舍）：tick 是固定金额，把「价格水平」混进
+            # 风险量（R10 §tick_buffer 设计问题：3 tick 在 5 元股=0.6%、
+            # 50 元股=0.06%）；pct/atr 让余量是同一个风险单位。
+            # 默认值即对照口径：pct 0.3% ≈ 10 元股 tick_3；atr 0.2×ATR(14)。
+            # ⚠️ 两者都改 risk_frac ⇒ 报表标 [出场·R口径变]，按期望%/margin 判。
+            "low_pct_03": ["--stop-buffer", "pct"],
+            "atr_02": ["--stop-buffer", "atr"],
             # 叠加：目前全是单变量扫描，而 trail_08(累计R +43.1%，最强出场) 与
             # tick_buffer_3(期望% +33.3%，最强初始止损余量) **机制正交**——一个改移动
             # 止盈、一个改初始止损位。正交不等于可叠加（可能互相抵消），必须实测。

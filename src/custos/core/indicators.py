@@ -340,6 +340,34 @@ def bbi_series(close: pd.Series) -> pd.Series:
     return sum(c.rolling(k).mean() for k in (3, 6, 12, 24)) / 4
 
 
+def atr_series(df: pd.DataFrame, *, n: int = 14) -> pd.Series:
+    """Wilder ATR（平均真实波幅）序列。
+
+    TR = max(high−low, |high−prev_close|, |low−prev_close|)（首根无前收，TR=high−low）；
+    首个 ATR 取**前 n 根 TR 的算术平均**（位于第 n−1 根，之前的为 NaN——历史不足
+    不调小窗口硬算），之后按 Wilder 平滑 `ATR_t = (ATR_{t−1}×(n−1) + TR_t) / n`。
+
+    2026-08-12 新增（TODO #20）：供 `backtest_factors` 的 ATR 止损余量用——
+    tick 固定金额余量把「价格水平」混进风险量（5 元股 3 tick=0.6%、50 元股
+    =0.06%，R10 §tick_buffer 设计问题），ATR 让余量在不同价位/波动率的票上
+    是同一个风险单位。
+    """
+    high = df["high"].astype(float)
+    low = df["low"].astype(float)
+    prev_close = df["close"].astype(float).shift(1)
+    tr = pd.concat(
+        [high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1
+    ).max(axis=1)
+    tr.iloc[0] = float(high.iloc[0] - low.iloc[0])  # 首根无前收
+    values = tr.to_numpy()
+    out = np.full(len(values), np.nan)
+    if len(values) >= n:
+        out[n - 1] = float(np.mean(values[:n]))  # Wilder 种子：前 n 根算术平均
+        for i in range(n, len(values)):
+            out[i] = (out[i - 1] * (n - 1) + values[i]) / n
+    return pd.Series(out, index=df.index)
+
+
 def dks_series(
     close: pd.Series, windows: tuple[int, ...] = DKS_MA_WINDOWS
 ) -> pd.Series:
