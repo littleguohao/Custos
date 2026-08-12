@@ -54,6 +54,7 @@ from custos.core.factors.reversal_quality_inv import score as _sc_reversal_quali
 from custos.core.indicators import (
     bbi_series as _bbi_series,
     macd_series as _macd_series,
+    pct_change,
 )  # noqa: E402
 from custos.core.indicators import dmi_arrays  # noqa: E402  DMI/ADX 唯一实现
 from custos.core.indicators import amplitude_pct as amplitude_pct_of  # noqa: E402  振幅唯一实现
@@ -1219,7 +1220,10 @@ def _medium_large_bull_flags(df: pd.DataFrame, code: str = "") -> np.ndarray:
     thr = _limit_pct(code) / 2.0
     prev = np.concatenate(([np.nan], close[:-1]))
     with np.errstate(divide="ignore", invalid="ignore"):
-        chg = (close / prev - 1) * 100
+        # 2026-08-11（#56 保留项③，owner 拍板）：判定路径对齐 live 的 round-2 ——
+        # chg 与 thr 比较属判定，np.round(x, 2) 与 L0 pct_change(digits=2) 同口径；
+        # body 是 K 线实体幅度（异量），保持 raw。
+        chg = np.round((close / prev - 1) * 100, 2)
         body = np.where(open_ > 0, (close - open_) / open_ * 100, 0.0)
     is_bull = close > open_
     return is_bull & ((chg >= thr) | (body >= thr))
@@ -1488,7 +1492,8 @@ def simulate_b1_trade(
             # （既不算站上也不算跌破）。
             above_bbi = bool(bj == bj and close[j] > bj)
             rising = _center_rising(close[entry_idx + 1 : j + 1])
-            escaped = (peak_close / entry - 1) >= cost_zone_pct / 100.0
+            # 2026-08-11（#56 保留项③）：判定路径 round-2，对齐 live（上方 `and entry` 已排除 0）。
+            escaped = (pct_change(peak_close, entry, digits=2) or 0) >= cost_zone_pct
             if not (above_bbi or rising or escaped):
                 return _exit(j, "cost_zone_stop", float(close[j]))
         if time_stop_bars and (j - entry_idx) >= time_stop_bars:  # ④ 无条件时间止损

@@ -37,6 +37,7 @@ from custos.core.indicators import (
     bbi_state,
     zhixing_state,
     _infer_price_limit,
+    pct_change,
 )
 from custos.core.indicators import ema  # noqa: E402  包 API 面：market_timing/__init__ re-export
 
@@ -140,7 +141,10 @@ def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
         if len(x) >= 21
         else float(x["volume"].iloc[:-1].tail(20).mean())
     )
-    change_pct = (close / previous_close - 1) * 100 if previous_close else None
+    # 2026-08-11（#56 保留项①，owner 拍板）：判定精度统一 round-2 ——
+    # 下游小阴/大阴/反转K 判定的区间归属在 ±0.005 尾差带内有方向变化
+    # （raw −2.0000000001 原在 [-2,0) 外，round-2 后 −2.0 在内），这是整改目的。
+    change_pct = pct_change(close, previous_close, digits=2)
     # ⚠️ 口径 2026-08-10 由 `(high/low - 1)` 改为 **`(high-low)/前收`**（owner 拍板）。
     #    前者分母是**当日最低价**，与治理文档明文（01_swing_rules §反转K）及另两处
     #    live 实现都不一致 ⇒ 同一支票在选股链与持仓链可能得出相反的反转K 结论。
@@ -154,7 +158,7 @@ def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
     def bull_metrics(i: int) -> dict[str, Any]:
         row = x.iloc[i]
         prev_close = float(x.iloc[i - 1]["close"])
-        day_change = (float(row["close"]) / prev_close - 1) * 100 if prev_close else 0
+        day_change = pct_change(float(row["close"]), prev_close, digits=2) or 0
         body = (
             (float(row["close"]) / float(row["open"]) - 1) * 100
             if float(row["open"])
@@ -162,7 +166,7 @@ def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
         )
         return {
             "bull": float(row["close"]) > float(row["open"]),
-            "change_pct": round(day_change, 4),
+            "change_pct": day_change,  # 已是 round-2（2026-08-11 口径统一）
             "body_pct": round(body, 4),
         }
 

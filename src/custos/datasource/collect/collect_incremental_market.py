@@ -65,7 +65,8 @@ def parse_yahoo_payload(symbol: str, data: dict) -> dict:
         prev = _fnum(meta.get("chartPreviousClose"))
     chg = _fnum(meta.get("regularMarketChangePercent"))
     if chg is None and price is not None and prev:
-        chg = (price / prev - 1) * 100
+        # 2026-08-11（#56 保留项⑤）：A50-CNH 显示精度统一 round-2。
+        chg = pct_change(price, prev, digits=2)
     mtime = meta.get("regularMarketTime")
     as_of = (
         datetime.fromtimestamp(mtime).astimezone().isoformat(timespec="seconds")

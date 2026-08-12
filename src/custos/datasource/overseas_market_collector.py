@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 
 
 from custos.core.paths import cn_now, MARKET_DIR  # noqa: E402
+from custos.core.indicators import pct_change  # noqa: E402  涨跌幅判定/显示统一 round-2
 
 
 from custos.core.net_retry import retry_call  # noqa: E402
@@ -100,10 +101,11 @@ def fetch_chart(symbol: str, region: str = "") -> dict[str, Any]:
         # chartPreviousClose is the close before the 5d range start, not the
         # previous session; prefer the last two real closes when available.
         close_vals = [float(c) for c in closes if c is not None]
+        # 2026-08-11（#56 保留项④，owner 拍板）：判定/显示精度全仓统一 round-2。
         if len(close_vals) >= 2 and close_vals[-2]:
-            change_pct = (close_vals[-1] / close_vals[-2] - 1) * 100
+            change_pct = pct_change(close_vals[-1], close_vals[-2], digits=2)
         elif prev:
-            change_pct = (price / prev - 1) * 100
+            change_pct = pct_change(price, prev, digits=2)
     last_ts = meta.get("regularMarketTime") or (timestamps[-1] if timestamps else None)
     local_now = datetime.now(ZoneInfo("Asia/Shanghai"))
     asia_live = region in {"jp", "kr"} and 8 <= local_now.hour < 15

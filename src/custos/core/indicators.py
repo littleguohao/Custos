@@ -267,13 +267,16 @@ def pct_change(a, b, *, digits: int = 4) -> float | None:
     round-4 或 raw 会让边界随价位漂（50.00→49.00 在 raw 下是 −2.0000000000000018）。
     默认 4 位只留给研究/显示场景。
 
-    ⚠️ **为什么不能把全仓内联实现机械统一成同一个 digits**：截至本改动，
-    `technical_monitor` 的小阴/大阴/中大阳判定用 raw 值比较、
-    `backtest_factors` 回测用 raw 值、`enrich_candidates._close_ret_pct`
-    的 20 日相对强度**不取整**（它自己有「刻意不收敛」注释）——把它们改成
-    round-2 会**移动判定阈值边界**（如 −2.0000000001% 的归属翻转），
-    属策略口径变更，必须 owner 拍板，不许借「形式统一」偷改
-    （同 `s_shape` VCP 豁免的教训：先确认是同量，再谈统一）。
+    统一口径记录（2026-08-11，TODO #56 保留项整改收口，owner 拍板）：
+    **判定路径 round-2 已全仓统一** —— `technical_monitor` 的小阴/大阴/反转K
+    判定链、`enrich_candidates._close_ret_pct` 的 20 日相对强度、海外双生产者
+    （`overseas_market_collector` / `tdx_ext_quotes`）、A50-CNH 显示
+    （`collect_incremental_market`）全部收口到 round-2；研究侧
+    `backtest_factors` 的判定路径（中大阳/大阴、成本区逃脱）对齐 live，
+    **统计路径（收益率、回撤、特征落盘）保持 raw** —— 判定要可比、统计要
+    保真，两者分离是有意原则。边界效应：判定边界在 ±0.005% 尾差带内移动
+    （如 raw −2.0000000001 原在 [-2,0) 半开区间外，round-2 后 −2.0 在内），
+    属口径变更，已记录于 CHANGELOG v0.43。
     """
     if b in (None, 0) or a is None:
         return None

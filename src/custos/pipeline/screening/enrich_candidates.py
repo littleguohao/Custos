@@ -423,18 +423,17 @@ def build_stock_theme_map(
 
 
 def _close_ret_pct(df, n: int) -> Optional[float]:
-    """n 日收盘收益率 %（`close[-1] / close[-n-1] - 1`），**不取整**。
+    """n 日收盘收益率 %（`close[-1] / close[-n-1] - 1`），round-2。
 
-    ⚠️ 原名 `_close_ret_pct` 与 L0 的 `indicators.pct_change` **撞名但不同义**，
-    2026-08-10 改名避让（守卫 `TestNamedIndicatorsLiveInL0` 会拦同名）：
+    2026-08-11 已按 owner 拍板统一 round-2（TODO #56 保留项②）：
+    原先「改调 L0 会引入 round-4」的顾虑因 `pct_change` 的 `digits` 参数
+    消除，本函数现内部直接调 L0。结果进 `relative_strength_20d_pp` 并与
+    `RS_STRONG_PP` 比较 —— 判定路径 round2∘round2 幂等（减法是精确值再
+    与阈值比），与 technical_monitor 的判定链口径一致。
 
-        indicators.pct_change(a, b)   两个**标量**，round-4
-        本函数(df, n)                 从 DataFrame 取 close[-n-1] 与 close[-1]，**不取整**
-
-    **刻意不收敛**：改调 L0 会引入 round-4，而本函数的结果进
-    `relative_strength_20d_pp` 并与 `RS_STRONG_PP` 比较 —— 精度口径的统一
-    是 TODO #56 未定的事（全仓有 round-2/round-3/不取整三种），
-    不该借「形式统一」偷偷改判定。
+    撞名避让历史（保留说明）：原名与 L0 的 `indicators.pct_change` 撞名，
+    2026-08-10 改名 `_close_ret_pct` 避让（守卫 `TestNamedIndicatorsLiveInL0`
+    会拦同名），故函数名不再改回。
     """
     if len(df) < n + 1:
         return None
@@ -442,7 +441,7 @@ def _close_ret_pct(df, n: int) -> Optional[float]:
     now = float(df["close"].iloc[-1])
     if prev == 0:
         return None
-    return (now / prev - 1) * 100
+    return pct_change(now, prev, digits=2)
 
 
 # ========== B1/CZ 策略对齐检测器（阈值均为待回测参数，实际值随候选落盘） ==========

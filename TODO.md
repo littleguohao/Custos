@@ -6,7 +6,7 @@
 > 优先级按**「它阻塞了什么」**排，不按工作量：
 > P0 = 阻塞其他事或 live 正在依赖 ｜ P1 = 已有结论悬空 ｜ P2 = 新验证 ｜ P3 = 技术债
 >
-> 最后更新：2026-08-12（#44 定案：三个 stale 研究脚本全部删除；#57 类型化五批收口；#53 例行核对落地）
+> 最后更新：2026-08-12（#56 保留项①–⑤ owner 拍板收口，判定精度全仓统一 round-2，口径变更见 CHANGELOG v0.43，#56 完成删除；#44 定案：三个 stale 研究脚本全部删除；#57 类型化五批收口；#53 例行核对落地）
 
 ## P0 · 阻塞项
 
@@ -101,7 +101,6 @@ R10：可用 margin 只在含 0AMV 的方案（pct_05_amv +7.8pp / pct_12_amv_cz
 
 | # | 事项 | 性质 |
 |---|---|---|
-| 56 | **涨跌幅内联实现已收敛，剩 5 处保留项需 owner 定**（2026-08-11 完成主体）：口径定为「参与判定一律 round-2」（v0.36「判定精度 = 显示精度」），`indicators.pct_change` 加 `digits` 参数，判定类传 `digits=2`。已收敛（数值恒等）：`collect_holding_quotes` ×11、`compass_amv` ×2、`weekly_review` ×2、`collect_incremental_market` ×2、`tdx_ext_quotes`、`merge_incremental_market`、`enrich_candidates` 反转K change_pct。**保留项**（收敛会移动判定边界）：① `technical_monitor` 小阴/大阴/中大阳判定链（raw 与 round-4 混用）；② `enrich_candidates._close_ret_pct`（不取整，喂 RS_STRONG_PP）；③ `backtest_factors` 回测 raw 值；④ 海外行情双生产者精度分歧（`overseas_market_collector` 不取整 vs `tdx_ext_quotes` round-3，同字段喂 `score_overseas`）；⑤ `collect_incremental_market` 的 A50/CNH（不取整，改精度变显示值）。理由详见 `indicators.pct_change` docstring | 主体完成；①–⑤需 owner 判定 |
 | 35 | `alpha_pvcorr` / `low_vol` / `momentum` 标 `untested` —— 实现了但没有独立的净值终审记录。按 R2 整体结论推定不可用，但**缺它们自己的证据**。要么补跑，要么明确降级为「不再研究」| 补证据或明确废弃 |
 | 37 | ⚠️⚠️ **研究说没用、live 却在用**：R2 结论「S_shape 无 alpha，全市场阈值扫描无 lift」，而 `score_candidates.technical_score` 的**主路径**就是它——`sstar_level(s_star)` 直接出技术层级、参与候选表 A/B/C/D 分层。已在 `factors/s_shape.py` 元数据与 `factors.KNOWN_STATUS_USE_CONFLICTS` 显式登记（不静默放过、也不擅自改分层）。**需 owner 定**：分层要不要换掉 s_shape，还是维持（README 说 StockPool 只是证据层、买入由 chief_decision 裁决，所以维持也讲得通）| **需 owner 拍板** <br><br>⚠️ **2026-08-10 补**：分层**不只是标签** —— `daily_report.py:239` 是 `[x for x in pool.get('candidates',[]) if x.get('bucket') in ('A','B')][:10]`，**C/D 档根本不进盘前日报**。所以若排序无 alpha，这个 top-10 就是任取的 10 个，而人是照着日报看的。⇒ 「改名为形态分档」能减少「把分层当 alpha 信号」的误读，但**不解决「A/B 过滤在事实上决定了你看见谁」**。需要一并定：日报要不要继续只展示 A/B。<br>⚠️ 与 #38（1800 评分系统待完善）是同一件事的两面，建议合并为一个「1800 评分与日报展示」决策。 |
 | 38 | **1800 评分系统待完善**（owner 2026-08-06 记）：`score_candidates` 的技术分/共振分/分层阈值整体还要打磨。与 #37（s_shape 是主路径但 R2 说无 alpha）同一片区域，宜一起做 | 后续迭代 |

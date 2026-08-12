@@ -118,7 +118,8 @@ def fetch_ext_change(symbol: str, *, timeout: int = 12) -> Optional[dict[str, An
         )
     last, prev = closes[-1], closes[-2]
     return {
-        "change_pct": pct_change(last, prev, digits=3),
+        # 2026-08-11（#56 保留项④）：digits 3→2，与 Yahoo 生产者（overseas_market_collector）同精度。
+        "change_pct": pct_change(last, prev, digits=2),
         "last_close": round(last, 4),
         "prev_close": round(prev, 4),
         "stale_bars_skipped": stale_bars_skipped,
