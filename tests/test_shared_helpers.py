@@ -267,7 +267,7 @@ class TestNoRefork:
             tree = ast.parse(p.read_text(encoding="utf-8"))
             for node in tree.body:
                 if isinstance(node, ast.FunctionDef) and node.name == "finite":
-                    found.append(str(p.relative_to(ROOT / "src" / "custos")))
+                    found.append(p.relative_to(ROOT / "src" / "custos").as_posix())
         assert found == ["core/code_utils.py"], (
             f"finite 应只在 code_utils 定义，实际: {found}"
         )

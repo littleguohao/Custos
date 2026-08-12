@@ -59,7 +59,7 @@ def test_mechanism_entries_cite_existing_code():
             s,
         )
     )
-    srcrels = [str(p.relative_to(ROOT / "src")) for p in (ROOT / "src").rglob("*.py")]
+    srcrels = [p.relative_to(ROOT / "src").as_posix() for p in (ROOT / "src").rglob("*.py")]
     missing = sorted(
         r for r in refs if not any(rel == r or rel.endswith("/" + r) for rel in srcrels)
     )

@@ -219,7 +219,7 @@ class TestReferencedPathsExist:
                     # 归堆（src/{core,pipeline,...}）后文档保持「stage/文件.py」简写，
                     # 按相对路径后缀匹配
                     if not (ROOT / "src" / "custos" / path).exists() and not any(
-                        str(p.relative_to(ROOT / "src")).endswith("/" + path)
+                        p.relative_to(ROOT / "src").as_posix().endswith("/" + path)
                         for p in (ROOT / "src").rglob("*.py")
                     ):
                         bad.append(f"{doc.relative_to(STRATEGY).as_posix()}: {tok}")
