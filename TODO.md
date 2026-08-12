@@ -62,7 +62,6 @@ R10：可用 margin 只在含 0AMV 的方案（pct_05_amv +7.8pp / pct_12_amv_cz
 | 17 | 宇宙/窗口钉死开关**默认关** ⇒ 要不要改默认（改了会让历史命令行为变化） | [R13](governance/research/R13_meta_reproducibility.md) |
 | 18 | 跨 bundle 拼接**口径混合**（已加告警，未解决）| [R14](governance/research/R14_meta_data_foundation.md) |
 | 20 | `tick_buffer` **参数本身设计有问题**：余量应按**风险单位**而非价位数，才能让不同价位的股票是同一个风险 | [R10](governance/research/R10_mechanism_M2_stops.md) |
-| 57 | **mypy 渐进类型化**：2026-08-11 静态检查全量 277 条，Linux 压噪（`scripts/mypy.linux.ini`）后 225 条可操作项。已修 1 个真 bug（`launch_point_study` since=None，commit `2b6abf4`）。**第一批（core 顶层 11 模块，2026-08-12）**：错误 5→0；**第二批（core/factors + core/trades，2026-08-12）**：52→0。至此 `src/custos/core/` 全目录 mypy 清零。第二批无真 bug：46 条集中在 sector_mainstream 的 dict 值类型拉宽（rows/out 两处变量注解全消），其余为 None 回退/fallback 的刻意设计（前置 Union 声明解决，未用 ignore 漫灌）。**下一批**：`datasource/`（57 条）→ `pipeline/`（68 条）→ `research/`（52 条，结合 #58 拆分再做）| core 全目录 done；剩 datasource/pipeline/research |
 | 58 | **高复杂度函数拆分**：radon cc 检出 C 级以上函数 267 个，集中在研究侧引擎——`backtest_factors.main` F(75)、`m2_stop_sweep._print_trade_group` F(69)、`backtest_factors.simulate_b1_trade` F(54)、`reconcile_qfq.gap_report` E(35)、`compare_signal_sets.main` E(34)。原则：**下次因业务动这些文件时先拆**，不为拆分而拆分 | 2026-08-11 静态检查（`reports/radon_cc.txt`） |
 
 ## ⚠️ 已失效的行动项（**别照着做**）
