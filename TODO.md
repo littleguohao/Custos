@@ -6,7 +6,7 @@
 > 优先级按**「它阻塞了什么」**排，不按工作量：
 > P0 = 阻塞其他事或 live 正在依赖 ｜ P1 = 已有结论悬空 ｜ P2 = 新验证 ｜ P3 = 技术债
 >
-> 最后更新：2026-08-09（#4 重跑完成；#16/#19/#21/#22/#27/#29/#36/#46 收口；#53 首跑记录）
+> 最后更新：2026-08-11（#57/#58 登记：静态检查发现的类型化与复杂度技术债；目录重组+包化完成）
 
 ## P0 · 阻塞项
 
@@ -62,6 +62,8 @@ R10：可用 margin 只在含 0AMV 的方案（pct_05_amv +7.8pp / pct_12_amv_cz
 | 17 | 宇宙/窗口钉死开关**默认关** ⇒ 要不要改默认（改了会让历史命令行为变化） | [R13](governance/research/R13_meta_reproducibility.md) |
 | 18 | 跨 bundle 拼接**口径混合**（已加告警，未解决）| [R14](governance/research/R14_meta_data_foundation.md) |
 | 20 | `tick_buffer` **参数本身设计有问题**：余量应按**风险单位**而非价位数，才能让不同价位的股票是同一个风险 | [R10](governance/research/R10_mechanism_M2_stops.md) |
+| 57 | **mypy 渐进类型化**：2026-08-11 静态检查全量 277 条，Linux 压噪配置（`scripts/mypy.linux.ini`）后剩 **225 条可操作项**（union-attr 42 / assignment 40 / arg-type 28 / operator 24 / dict-item 24 等，多为无注解代码的推断噪音）。本轮已甄别并修掉其中 1 个真 bug（`launch_point_study` since=None 被吞成空 regime，commit `2b6abf4`）。收敛策略：**core 先行**（paths/contracts/indicators 先补注解），不追求清零、不用 `# type: ignore` 漫灌 | 2026-08-11 静态检查（`reports/mypy_type.txt`） |
+| 58 | **高复杂度函数拆分**：radon cc 检出 C 级以上函数 267 个，集中在研究侧引擎——`backtest_factors.main` F(75)、`m2_stop_sweep._print_trade_group` F(69)、`backtest_factors.simulate_b1_trade` F(54)、`reconcile_qfq.gap_report` E(35)、`compare_signal_sets.main` E(34)。原则：**下次因业务动这些文件时先拆**，不为拆分而拆分 | 2026-08-11 静态检查（`reports/radon_cc.txt`） |
 
 ## ⚠️ 已失效的行动项（**别照着做**）
 
