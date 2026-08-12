@@ -27,6 +27,8 @@ from __future__ import annotations
 
 import sys
 import time
+
+from custos.core.indicators import pct_change
 from typing import Any, Optional
 
 # Yahoo symbol → (ext market, code, 是否为代理, 说明)
@@ -116,7 +118,7 @@ def fetch_ext_change(symbol: str, *, timeout: int = 12) -> Optional[dict[str, An
         )
     last, prev = closes[-1], closes[-2]
     return {
-        "change_pct": round((last / prev - 1) * 100, 3) if prev else None,
+        "change_pct": pct_change(last, prev, digits=3),
         "last_close": round(last, 4),
         "prev_close": round(prev, 4),
         "stale_bars_skipped": stale_bars_skipped,

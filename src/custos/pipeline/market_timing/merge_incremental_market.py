@@ -20,6 +20,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from custos.core.paths import cn_today, write_json_atomic, MARKET_DIR, QUALITY_DIR  # noqa: E402
+from custos.core.indicators import pct_change  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
 
 
@@ -93,7 +94,7 @@ def merge_incremental(inc: dict, mkt: dict, target: str) -> tuple[dict, list[str
         b1 = breadth["880001"]
         amt = b1.get("amount")
         prev_amt = b1.get("previous_amount")
-        chg_pct = round((amt / prev_amt - 1) * 100, 3) if amt and prev_amt else None
+        chg_pct = pct_change(amt, prev_amt, digits=3) if amt and prev_amt else None
         if amt:
             q1 = _q(b1.get("date", ""), "turnover")
             mkt.setdefault(

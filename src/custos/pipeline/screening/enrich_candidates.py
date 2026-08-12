@@ -78,6 +78,7 @@ from custos.core.factors import sector_phase as sector_phase_mod  # noqa: E402
 # 内部 fill_na=50，行为不变）；`macd` 导入同步删除（check_macd_technics 自己
 # 用 ema 算 DIF/DEA，从未调用它）。
 from custos.core.indicators import bbi_state, ema, kdj, resample, zhixing_state  # noqa: E402
+from custos.core.indicators import pct_change  # noqa: E402
 from custos.core.indicators import amplitude_pct as amplitude_pct_of  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
 
@@ -1160,7 +1161,7 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
     vol20 = vol.tail(20)
     vol_pctile = float((vol20 < vol_today).mean() * 100) if len(vol20) >= 20 else None
 
-    change_pct = ((float(last["close"]) / prev_close - 1) * 100) if prev_close else None
+    change_pct = pct_change(float(last["close"]), prev_close, digits=2)
     amplitude_pct = amplitude_pct_of(last["high"], last["low"], prev_close)
 
     stock_ret20 = _close_ret_pct(df, 20)

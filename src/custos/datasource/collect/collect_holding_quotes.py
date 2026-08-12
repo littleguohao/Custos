@@ -38,6 +38,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 from custos.core.paths import TDX_ROOT, cn_today, cn_now, MARKET_DIR, TRADES_DIR  # noqa: E402
+from custos.core.indicators import pct_change
 from custos.core.code_utils import norm_code, fnum as _fnum  # noqa: E402
 from custos.core.code_utils import market_of  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
@@ -158,7 +159,7 @@ def _tq_snapshot_quote(code, name, mkt, target):
     if now is None or now <= 0:
         return None
     prev_close = _fnum(v.get("LastClose")) or 0.0
-    chg = round((now / prev_close - 1) * 100, 2) if prev_close else None
+    chg = pct_change(now, prev_close, digits=2)
     return {
         "code": code,
         "name": name,
@@ -193,7 +194,7 @@ def _online_bars_quote(code, name, mkt):
     prev = df.iloc[-2] if len(df) > 1 else None
     prev_close = float(prev["close"]) if prev is not None else 0
     close = float(last["close"])
-    chg = round((close / prev_close - 1) * 100, 2) if prev_close else None
+    chg = pct_change(close, prev_close, digits=2)
     dt = last.get("datetime", "")
     return {
         "code": code,
@@ -222,7 +223,7 @@ def _online_daily_quote(code, name, mkt, target):
     last = bars[-1]
     prev_close = float(bars[-2]["close"]) if len(bars) > 1 else 0.0
     close = float(last["close"])
-    chg = round((close / prev_close - 1) * 100, 2) if prev_close else None
+    chg = pct_change(close, prev_close, digits=2)
     return {
         "code": code,
         "name": name,
@@ -252,7 +253,7 @@ def _reader_quote(code, name, mkt):
     prev = df.iloc[-2]
     prev_close = float(prev["close"])
     close = float(last["close"])
-    chg = round((close / prev_close - 1) * 100, 2) if prev_close else None
+    chg = pct_change(close, prev_close, digits=2)
     last_date = last.name if hasattr(last.name, "strftime") else ""
     return {
         "code": code,
@@ -293,7 +294,7 @@ def _eastmoney_bj_quote(code, name, target):
         return None
     close = float(_d["f43"])
     prev_close = float(_d.get("f60", 0))
-    chg = round((close / prev_close - 1) * 100, 2) if prev_close else None
+    chg = pct_change(close, prev_close, digits=2)
     return {
         "code": code,
         "name": name,
@@ -389,7 +390,7 @@ def _tq_snapshot_index_quote(code, name):
     if now is None or now <= 0:
         return None
     prev_close = _fnum(v.get("LastClose")) or 0.0
-    chg = round((now / prev_close - 1) * 100, 2) if prev_close else None
+    chg = pct_change(now, prev_close, digits=2)
     now_str = cn_now().strftime("%Y-%m-%d %H:%M:%S")
     return {
         "code": code,
@@ -429,9 +430,7 @@ def _collect_indices(session):
                     prev = df.iloc[-2] if len(df) > 1 else None
                     prev_close = float(prev["close"]) if prev is not None else 0
                     close = float(last["close"])
-                    chg = (
-                        round((close / prev_close - 1) * 100, 2) if prev_close else None
-                    )
+                    chg = pct_change(close, prev_close, digits=2)
                     dt = last.get("datetime", "")
                     idx = {
                         "code": code,
@@ -456,9 +455,7 @@ def _collect_indices(session):
                     prev = df.iloc[-2]
                     prev_close = float(prev["close"])
                     close = float(last["close"])
-                    chg = (
-                        round((close / prev_close - 1) * 100, 2) if prev_close else None
-                    )
+                    chg = pct_change(close, prev_close, digits=2)
                     last_date = (
                         str(last.name)[:19] if hasattr(last.name, "strftime") else ""
                     )
@@ -486,9 +483,7 @@ def _collect_indices(session):
                     last = bars[-1]
                     prev_close = float(bars[-2]["close"]) if len(bars) > 1 else 0.0
                     close = float(last["close"])
-                    chg = (
-                        round((close / prev_close - 1) * 100, 2) if prev_close else None
-                    )
+                    chg = pct_change(close, prev_close, digits=2)
                     idx = {
                         "code": code,
                         "name": name,
@@ -534,9 +529,7 @@ def _collect_breadth():
                     "name": name,
                     "close": close,
                     "previous_close": prev_close,
-                    "change_pct": round((close / prev_close - 1) * 100, 2)
-                    if prev_close
-                    else None,
+                    "change_pct": pct_change(close, prev_close, digits=2),
                     "date": str(last.name if hasattr(last.name, "strftime") else ""),
                     "source": "mootdx_reader",
                 }
@@ -560,9 +553,7 @@ def _collect_breadth():
                     "name": name,
                     "close": close,
                     "previous_close": prev_close,
-                    "change_pct": round((close / prev_close - 1) * 100, 2)
-                    if prev_close
-                    else None,
+                    "change_pct": pct_change(close, prev_close, digits=2),
                     "date": str(last["datetime"]),
                     "source": "mootdx_online",
                 }

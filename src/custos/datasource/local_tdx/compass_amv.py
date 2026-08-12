@@ -47,6 +47,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 from custos.core.paths import MARKET_DIR  # noqa: E402,F401  (照 src 惯例统一入口)
+from custos.core.indicators import pct_change  # noqa: E402
 
 DEFAULT_COMPASS_ROOT = Path(r"E:\Compass")
 DAY_VDAT_REL = Path("WavMain") / "ANALYSE" / "Data" / "ChinaStk" / "Z_SK" / "day.vdat"
@@ -236,7 +237,7 @@ def _change_pct_map(chain: list) -> dict:
     prev_close = None
     for date, _o, _h, _l, c, _v, _a in chain:
         iso = _int_to_date(date).isoformat()
-        m[iso] = round((c / prev_close - 1) * 100, 2) if prev_close else None
+        m[iso] = pct_change(c, prev_close, digits=2)
         prev_close = c
     return m
 
@@ -287,9 +288,7 @@ def _to_records(series: list) -> list:
     prev_close = None
     for date, o, h, l, c, v, a in series:
         d = _dt.date(date // 10000, (date // 100) % 100, date % 100).isoformat()
-        change_pct = None
-        if prev_close:
-            change_pct = round((c / prev_close - 1) * 100, 2)
+        change_pct = pct_change(c, prev_close, digits=2)
         out.append(
             {
                 "date": d,

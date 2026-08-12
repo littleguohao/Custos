@@ -16,6 +16,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 from custos.core.code_utils import fnum as _fnum
+from custos.core.indicators import pct_change
 
 from custos.core.paths import TDX_ROOT, cn_today, cn_now, MARKET_DIR
 
@@ -137,9 +138,7 @@ def derive_breadth(reader, reader_error: str | None) -> dict:
                 "status": "ok",
                 "close": close,
                 "previous_close": prev_close,
-                "change_pct": round((close / prev_close - 1) * 100, 2)
-                if prev_close
-                else None,
+                "change_pct": pct_change(close, prev_close, digits=2),
                 "amount": (
                     float(last["amount"])
                     if "amount" in df.columns and last["amount"] == last["amount"]
@@ -186,9 +185,7 @@ def derive_northbound(reader, reader_error: str | None) -> dict:
         return {
             "status": "ok",
             "latest_close": latest_close,
-            "last_5d_change": round((latest_close / first_close - 1) * 100, 2)
-            if first_close
-            else None,
+            "last_5d_change": pct_change(latest_close, first_close, digits=2),
             "trend": "up" if latest_close > first_close else "down",
         }
     except Exception as e:

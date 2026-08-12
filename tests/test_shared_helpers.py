@@ -146,6 +146,20 @@ class TestPctChange:
     def test_zero_change_is_zero_not_none(self):
         assert indicators.pct_change(10, 10) == 0.0
 
+    def test_digits_param(self):
+        """判定类调用方用 `digits=2`（「判定精度 = 显示精度」，v0.36）。
+
+        ⚠️ 默认值必须是 4 —— 它是既有研究/显示口径，改默认值会悄悄移动
+        所有未传 digits 调用方的输出精度。
+        """
+        assert indicators.pct_change(10.04, 10) == 0.4  # 默认 round-4
+        assert indicators.pct_change(10.04, 10, digits=2) == 0.4
+        # 能区分精度的用例：0.123456 → 4 位 0.1235 / 2 位 0.12
+        assert indicators.pct_change(10.0123456, 10) == 0.1235
+        assert indicators.pct_change(10.0123456, 10, digits=2) == 0.12
+        # 判定边界用例：raw 下 −2.0000000000000018 会漂出 ±2 区间，round-2 不漂
+        assert indicators.pct_change(49.0, 50.0, digits=2) == -2.0
+
 
 class TestNoRefork:
     """守卫：这些助手**不得再在别处重新定义**（标记要代码级生效）。

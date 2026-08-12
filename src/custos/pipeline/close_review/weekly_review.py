@@ -68,6 +68,7 @@ from pathlib import Path
 
 
 from custos.core.paths import BASE, CALENDAR_RELPATH, cn_today, cn_now  # noqa: E402
+from custos.core.indicators import pct_change  # noqa: E402
 from custos.pipeline.close_review.loss_streak import (
     format_lines as loss_streak_lines,  # noqa: E402
     loss_streaks,
@@ -468,7 +469,7 @@ def sse_change(sse_map: dict[str, dict], day: str) -> float | None:
     prev_close = sse_map[prior[-1]]["close"]
     if not prev_close:
         return None
-    return round((entry["close"] / prev_close - 1) * 100, 2)
+    return pct_change(entry["close"], prev_close, digits=2)
 
 
 def holding_week_performance(
@@ -528,11 +529,7 @@ def holding_week_performance(
         series = [(d, per_day[d][code]) for d in days if code in per_day.get(d, {})]
         first_d, first = series[0]
         last_d, last = series[-1]
-        change = (
-            round((last["close"] / first["close"] - 1) * 100, 2)
-            if first["close"]
-            else None
-        )
+        change = pct_change(last["close"], first["close"], digits=2)
         # 权重取各自首个/末个有权重值的日期（价格日期与权重日期可能不同，如周初仅有 quotes）
         weights = [(d, e["weight"]) for d, e in series if e.get("weight") is not None]
         w0 = round(weights[0][1] * 100, 2) if weights else None

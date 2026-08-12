@@ -250,18 +250,32 @@ def cci(df: pd.DataFrame, n: int = 14) -> pd.Series:
     return out.replace([np.inf, -np.inf], np.nan)
 
 
-def pct_change(a, b):
-    """从 b 到 a 的涨跌幅（百分数，保留 4 位）；b 为 None/0 或 a 为 None 时返回 None。
+def pct_change(a, b, *, digits=4):
+    """从 b 到 a 的涨跌幅（百分数，默认保留 4 位）；b 为 None/0 或 a 为 None 时返回 None。
 
     2026-08-07 从 `market_timing_collector` 与 `refresh_market_indices` 两份
     逐字相同的私有 `pct(a, b)` 收敛而来。
 
     返回 None 而不是 0：**「涨跌幅是 0」与「算不出涨跌幅」必须可区分**
     （同 `code_utils.fnum` 的理由）。
+
+    ⚠️ 精度口径（2026-08-11，TODO #56）：**参与判定（阈值比较/信号生成）的
+    调用方一律传 `digits=2`** —— 2026-08-07 已定「判定精度 = 显示精度」
+    （v0.36；`b1_thresholds.change_in_range` 内部也是 round-2），判定用
+    round-4 或 raw 会让边界随价位漂（50.00→49.00 在 raw 下是 −2.0000000000000018）。
+    默认 4 位只留给研究/显示场景。
+
+    ⚠️ **为什么不能把全仓内联实现机械统一成同一个 digits**：截至本改动，
+    `technical_monitor` 的小阴/大阴/中大阳判定用 raw 值比较、
+    `backtest_factors` 回测用 raw 值、`enrich_candidates._close_ret_pct`
+    的 20 日相对强度**不取整**（它自己有「刻意不收敛」注释）——把它们改成
+    round-2 会**移动判定阈值边界**（如 −2.0000000001% 的归属翻转），
+    属策略口径变更，必须 owner 拍板，不许借「形式统一」偷改
+    （同 `s_shape` VCP 豁免的教训：先确认是同量，再谈统一）。
     """
     if b in (None, 0) or a is None:
         return None
-    return round((a / b - 1) * 100, 4)
+    return round((a / b - 1) * 100, digits)
 
 
 def kdj_series(
