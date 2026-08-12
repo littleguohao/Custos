@@ -33,7 +33,7 @@ FACTOR: dict[str, Any] = {
 }
 
 
-def score(df: pd.DataFrame, code: str):
+def score(df: pd.DataFrame, code: str) -> dict | None:
     """小市值选择器：score=-log10(信号日总市值/亿元),越小越高分(风格终审跨窗共同点:小市值反弹更强)。
     真市值=as-of 股本(东财 F10 全史)× 信号日收盘。无股本数据 → None(不参与排序,不误标)。"""
     import bisect as _b

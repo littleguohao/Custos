@@ -25,7 +25,7 @@ FACTOR: dict[str, Any] = {
 }
 
 
-def score(df: pd.DataFrame, code: str):
+def score(df: pd.DataFrame, code: str) -> dict | None:
     """动量因子(12-1类)：score=[t-skip-lb, t-skip]区间收益(跳过最近20日避开短期反转)。中期强势择优。
     历史不足时自适应缩短回看窗口(≥40根即产出)。"""
     c = df["close"].astype(float).values

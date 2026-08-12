@@ -24,7 +24,7 @@ FACTOR: dict[str, Any] = {
 }
 
 
-def score(df: pd.DataFrame, code: str):
+def score(df: pd.DataFrame, code: str) -> dict | None:
     """基线打分器：任何 as-of 日都判「可买」。用于对照——同样的止损+BBI出场规则下，
     无差别进场能拿到多少期望/盈亏比；b1_pullback 需**显著优于**它，才证明进场信号本身有价值
     (否则 edge 全来自出场规则而非进场指纹)。"""

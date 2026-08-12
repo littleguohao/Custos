@@ -27,7 +27,7 @@ FACTOR: dict[str, Any] = {
 }
 
 
-def score(df: pd.DataFrame, code: str):
+def score(df: pd.DataFrame, code: str) -> dict | None:
     """当日 KDJ 的 J 值(纯特征,恒可买)——信号池内 J 的具体深度(J=2 vs J=12)可作判别子,
     门槛(J<13)会把这条信息"吃掉",故显式记录。kdj 不可用 → None。"""
     if len(df) < 12:

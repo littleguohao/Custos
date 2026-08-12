@@ -31,7 +31,7 @@ FACTOR: dict[str, Any] = {
 }
 
 
-def score(df: pd.DataFrame, code: str):
+def score(df: pd.DataFrame, code: str) -> dict | None:
     """反转质量**反向**选择器：归因显示 reversal_quality 是稳健负预测(越"教科书"越差),
     故取 4-分 反向——选"最不教科书"的丑陋 J<13 回踩。⚠️ 仅在同偏样本 train/test 一致,需真样本外验证。"""
     r = _rq_score(df, code)

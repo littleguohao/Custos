@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
 import pandas as pd
@@ -47,6 +47,8 @@ FACTOR: dict[str, Any] = {
 from custos.core.code_utils import price_limit_pct  # noqa: E402
 from custos.core.b1_thresholds import change_in_range  # noqa: E402  反转K涨跌幅判定（live 同口径，round-2）
 from custos.core.indicators import amplitude_pct as amplitude_pct_of  # noqa: E402  振幅唯一实现
+
+_kdj_fn: Callable[..., Any] | None  # 导入失败时退 None（调用点有守卫）
 
 try:
     from custos.core.indicators import _infer_price_limit, kdj as _kdj_fn  # noqa: E402

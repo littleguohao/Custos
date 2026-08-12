@@ -104,7 +104,7 @@ def diff_positions(
 ) -> list[dict]:
     """逐代码比对数量与单位成本。数量**不设容差**（整数股，float 精确）。"""
 
-    def index(rows):
+    def index(rows: list[dict]) -> dict:
         return {clean_code(r.get("代码")): r for r in rows}
 
     a, b = index(replayed), index(actual)

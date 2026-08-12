@@ -26,7 +26,7 @@ FACTOR: dict[str, Any] = {
 }
 
 
-def score(df: pd.DataFrame, code: str):
+def score(df: pd.DataFrame, code: str) -> dict | None:
     """Alpha#101 = (close-open)/((high-low)+.001)：进场K日内强度(收盘越靠上越强)。选强收盘的B1候选。"""
     if len(df) < 1:
         return None

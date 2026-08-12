@@ -82,7 +82,7 @@ def detect_distribution(df, code: str = "") -> dict[str, Any]:
     def chg(t: int) -> float:
         return (close[t] / close[t - 1] - 1) * 100 if t >= 1 and close[t - 1] else 0.0
 
-    def vr5(t: int):
+    def vr5(t: int) -> float | None:
         base = vol[max(0, t - 5) : t].mean()
         return float(vol[t] / base) if base else None
 
@@ -123,7 +123,8 @@ def detect_distribution(df, code: str = "") -> dict[str, Any]:
             continue
         c = chg(t)
         prev_new_high = high[t - 1] >= high[max(0, t - 21) : t - 1].max()
-        prev_shrink = vr5(t - 1) is not None and vr5(t - 1) <= DIST_SUBHIGH_SHRINK
+        v5 = vr5(t - 1)
+        prev_shrink = v5 is not None and v5 <= DIST_SUBHIGH_SHRINK
         huge = vol_ma20 and vol[t] >= vol_ma20 * DIST_HUGE_VOL_RATIO
         if (
             close[t] < open_[t]
@@ -131,11 +132,12 @@ def detect_distribution(df, code: str = "") -> dict[str, Any]:
             and huge
             and prev_new_high
             and prev_shrink
+            and v5 is not None  # prev_shrink 已蕴含；显式写出是为了类型收窄
         ):
             hit2 = {
                 "bars_ago": n - 1 - t,
                 "change_pct": round(c, 2),
-                "prev_vol_ratio5": round(float(vr5(t - 1)), 3),
+                "prev_vol_ratio5": round(float(v5), 3),
                 "vol_ratio_ma20": round(float(vol[t] / vol_ma20), 3),
             }
             break
@@ -159,7 +161,7 @@ def detect_distribution(df, code: str = "") -> dict[str, Any]:
                 cnt += 1
             else:
                 break
-        if broke and cnt >= DIST_STAIR_MIN_BARS:
+        if broke and vrt is not None and cnt >= DIST_STAIR_MIN_BARS:
             hit3 = {
                 "bars_ago": n - 1 - t,
                 "consecutive_vol_bears": cnt,

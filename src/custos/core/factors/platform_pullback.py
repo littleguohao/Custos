@@ -161,7 +161,7 @@ if __name__ == "__main__":
     df["date"] = df["date"].astype(str).str[:10]
     df = df.sort_values("date").reset_index(drop=True)
     # 逐日 as-of 扫描:哪些天命中
-    hits = []
+    hits: list[dict] = []
     for i in range(80, len(df)):
         r = detect_platform_pullback(df.iloc[: i + 1], stabilize=True)
         if r:

@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 import numpy as np
 import pandas as pd
 
@@ -143,7 +143,7 @@ def favorable_series(
 
 def load_sector_gate(
     index_dir, members: dict[str, list], lookback: int = PHASE_LOOKBACK
-):
+) -> Callable[[str, str], bool]:
     """构建板块相位 gate: gate(code6, date)->bool。
     index_dir: 板块指数 CSV 目录({sector}.csv, date/close)；members: {sector_code:[stock codes]}。
     未分类个股 → True(不过滤);已分类 → 其任一所属板块 as-of 有利即 True。绝不 raise。
@@ -196,15 +196,14 @@ def load_sector_gate(
 
     # 元数据:调用方据此防止"目录缺失→gate 静默退化为全放行"的假象,并提示 gate 有效起始日
     gate.n_sectors = len(fav_by_sec)  # type: ignore[attr-defined]
-    gate.effective_start = min(
-        (sd[0] for sd, _ in fav_by_sec.values() if sd), default=None
-    )  # type: ignore[attr-defined]
+    _eff_start = min((sd[0] for sd, _ in fav_by_sec.values() if sd), default=None)
+    gate.effective_start = _eff_start  # type: ignore[attr-defined]
     return gate
 
 
 def build_phase_resolver(
     index_dir, members: dict[str, list], lookback: int = PHASE_LOOKBACK
-):
+) -> Callable[[str], dict]:
     """LIVE 用:预计算各板块**当前**相位 + code→板块映射,返回 resolve(code6)->相位字典(hint,不封顶)。
     个股所属任一板块有利 → favorable=True;附代表相位标签。数据缺失 → available=False。绝不 raise。"""
     from pathlib import Path as _P

@@ -105,7 +105,7 @@ def aggregate(
     for t, secs in tagged:
         for s in secs:
             per_sec.setdefault(s, []).append(t["ret"])
-    rows = []
+    rows: list[dict[str, Any]] = []
     for s, rets in per_sec.items():
         wins = [r for r in rets if r > 0]
         rows.append(
@@ -141,7 +141,7 @@ def aggregate(
             "median": round(statistics.median(rets), 4),
         }
 
-    out = {
+    out: dict[str, Any] = {
         "n_trades": len(trades),
         "n_classified": classified,
         "distinct_sectors": len(rows),

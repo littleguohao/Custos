@@ -80,7 +80,7 @@ SNAPSHOT_PENDING = "pending_close_revaluation"
 SNAPSHOT_NOTE = "数量/成本已按增量成交更新；市值、盈亏、仓位须用最新收盘价重估"
 
 
-def norm(df):
+def norm(df: pd.DataFrame) -> pd.DataFrame:
     """Normalize a raw broker export into the canonical ledger schema."""
     df = df.copy()
     for f in FIELDS:
@@ -101,7 +101,7 @@ def norm(df):
     return df
 
 
-def fingerprint(row):
+def fingerprint(row) -> str:
     vals = []
     for k in KEY:
         v = row.get(k, "")
@@ -110,7 +110,7 @@ def fingerprint(row):
     return hashlib.sha256("|".join(vals).encode("utf-8")).hexdigest()[:20]
 
 
-def read_input(p):
+def read_input(p) -> pd.DataFrame:
     """读导入文件；`p is None` 视为空输入（仅 `--confirm-no-trades` 会走到）。
 
     ⚠️ 支持 None 是为了**不再逼操作者造空文件**：`--confirm-no-trades` 本就要求
@@ -129,7 +129,9 @@ def read_input(p):
     raise ValueError("仅支持 csv/xlsx/json")
 
 
-def select_new_rows(incoming, existing_fingerprints, *, force: bool = False):
+def select_new_rows(
+    incoming: pd.DataFrame, existing_fingerprints, *, force: bool = False
+) -> pd.DataFrame:
     """Pick the rows of ``incoming`` not yet represented in the ledger.
 
     Multiset semantics: the k-th occurrence of a fingerprint in ``incoming`` is
@@ -143,7 +145,7 @@ def select_new_rows(incoming, existing_fingerprints, *, force: bool = False):
     """
     if force:
         return incoming.copy()
-    remaining = defaultdict(int)
+    remaining: defaultdict[str, int] = defaultdict(int)
     for fp in existing_fingerprints:
         remaining[fp] += 1
     keep = []
@@ -155,7 +157,7 @@ def select_new_rows(incoming, existing_fingerprints, *, force: bool = False):
     return incoming.loc[keep].copy()
 
 
-def compute_positions(new, current_rows):
+def compute_positions(new: pd.DataFrame, current_rows: list[dict]) -> list[dict]:
     """Apply buy/sell rows onto a position snapshot **in memory**.
 
     Pure with respect to the filesystem so the caller can validate (oversell
@@ -203,7 +205,7 @@ def _read_positions():
     return json.loads(POS.read_text(encoding="utf-8")) if POS.exists() else []
 
 
-def apply_positions(new):
+def apply_positions(new: pd.DataFrame) -> list[dict]:
     """Read → compute → write the position snapshot (kept for direct callers)."""
     rows = compute_positions(new, _read_positions())
     _write_atomic(POS, json.dumps(rows, ensure_ascii=False, indent=2, default=str))
@@ -275,7 +277,7 @@ def _assign_transaction_ids(existing, new):
     return ids
 
 
-def main(argv=None):
+def main(argv=None) -> dict:
     ap = argparse.ArgumentParser()
     # ⚠️ `--confirm-no-trades` 模式下 `--input` 不再必需。
     #    此前 required=True，而该模式又**要求输入为空**（下面 `and len(incoming)` 会抛），

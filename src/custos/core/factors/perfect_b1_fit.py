@@ -98,7 +98,7 @@ def compute_perfect_b1_fit(
     comp["shrink_degree"] = {"points": shrink_pts, "pullback_vol_ratio": pull_ratio}
 
     # MACD 零轴上：DIF>0 → 1（图集多数案例 DIF 在零轴上方）
-    m = macd_state if (macd_state or {}).get("available") else macd(df)
+    m = macd_state if macd_state and macd_state.get("available") else macd(df)
     macd_pts = 0.0
     dif_val = None
     if m.get("available"):
