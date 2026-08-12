@@ -600,6 +600,7 @@ def portfolio_trajectory(
     daily_reviews: dict,
     sse_map: dict[str, dict],
     unavailable: list[str],
+    label: str = "本周",  # 月度复盘复用时传 "本月"（unavailable 文案要如实归属区间）
 ) -> dict:
     """板块2：组合与账户轨迹。
 
@@ -635,7 +636,7 @@ def portfolio_trajectory(
     complete = [pt for pt in daily if not pt["partial"]]
     if len(complete) < 2:
         unavailable.append(
-            "组合轨迹：本周完整 revalued_positions 不足两日，周收益与回撤 unavailable"
+            f"组合轨迹：{label}完整 revalued_positions 不足两日，区间收益与回撤 unavailable"
         )
     week_return = None
     max_drawdown = None
@@ -659,7 +660,7 @@ def portfolio_trajectory(
         bench_week = round((acc - 1) * 100, 2)
     bench_missing = [d for d, c in bench_changes.items() if c is None]
     if trading_days and not known:
-        unavailable.append("基准对照：本周上证指数数据缺失")
+        unavailable.append(f"基准对照：{label}上证指数数据缺失")
     return {
         "daily": daily,
         "week_return_pct": week_return,
@@ -991,7 +992,9 @@ def _loss_structure(losses, strategy_issues):
     return short_loss_share, total_loss
 
 
-def _bear_regime_stats(base, losses, total_loss, trading_days, unavailable):
+def _bear_regime_stats(
+    base, losses, total_loss, trading_days, unavailable, label: str = "本周"
+):
     """0AMV 空头日占比与空头期亏损占比。
 
     ⚠️ 取不到 regime 台账时 `bear_loss_share` 留 None 而不是 0 ——
@@ -1015,7 +1018,7 @@ def _bear_regime_stats(base, losses, total_loss, trading_days, unavailable):
                 round(bear_loss / total_loss * 100, 2) if total_loss else None
             )
         elif not observed:
-            unavailable.append("本周交易日无 0AMV 观测记录")
+            unavailable.append(f"{label}交易日无 0AMV 观测记录")
     bear_day_ratio = (
         round(
             len(bear_days)

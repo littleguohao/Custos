@@ -232,8 +232,10 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 
 ## 七、正式报告五：月度复盘
 
-> 🔴 **未实现（2026-08-06 核查）。** 全仓 `月度` / `month_review` 零命中；周度有 `weekly_review.py`，月度没有对应脚本或 cron。
-> 下面是**目标设计**，不是现行流程。
+> ✅ **已实现（2026-08-11）**：`src/custos/pipeline/close_review/monthly_review.py`，
+> 计算件复用 `weekly_review` / `loss_streak`（口径只有一份）。缺数据源的小节
+> （换手率资金基数、板块归因、版本归因等）按 fail-closed 惯例如实报 unavailable。
+> 调度需在 OpenClaw cron 加一条（建议每月 1 日上午复盘上月）。
 
 ### 时间范围
 

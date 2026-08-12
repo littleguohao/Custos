@@ -65,7 +65,7 @@ tests/        pytest
 | 17:00 | `run_1700.py` | 盘后复盘 |
 | 18:00 | `run_1800.py` | 每日选股独立链（与三份报告分离） |
 
-周六 10:07 跑 `weekly_review.py` 周度复盘。手动执行同名脚本即可：
+周六 10:07 跑 `weekly_review.py` 周度复盘；月度复盘 `monthly_review.py`已实现（`--month YYYY-MM`，默认上个月），cron 加一条每月 1 日上午触发即可。手动执行同名脚本即可：
 
 ```bash
 uv run python src/custos/pipeline/run_1445.py

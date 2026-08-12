@@ -33,7 +33,7 @@
 
 | 文件 | 行 | 状态 |
 |---|---|---|
-| [MASTER_WORKFLOW.md](MASTER_WORKFLOW.md) | ~370 | ⚠️ 含 1 个未实现的报告（月度复盘）|
+| [MASTER_WORKFLOW.md](MASTER_WORKFLOW.md) | ~370 | 五份正式报告全部有实现（月度复盘 2026-08-11 落地）|
 | [RUNTIME_GATE.md](RUNTIME_GATE.md) | 44 | ⚠️ **改门控判定前必读**。退出码被 cron 直接消费（3/4/5 穿透 `daily_pipeline`）、`--require-*` 会真的中断链路 ⇒ 算契约不是说明。含评分权重、`blocked` 覆盖率规则、加仓授权五条件、各时点策略、2026-07-30 硬闸事故记录。2026-08-07 从根 README 抽出 |
 | [SCREENING_WORKFLOW.md](SCREENING_WORKFLOW.md) | 291 | 18:00 选股链编排 |
 
@@ -72,10 +72,10 @@
 
 **改正方向一律「以代码为准」** —— 代码是实际在跑的，文档不是。
 
-### ⚠️ 一个未实现的报告 + 一份埋在契约里的待办
+### ✅ 月度复盘已实现 + 一份埋在契约里的待办（已清）
 
-- `MASTER_WORKFLOW §七` **月度复盘**：全仓 `月度`/`month_review` 零命中（周度有 `weekly_review.py`）
-  ⇒ 已标为「目标设计，不是现行流程」。
+- `MASTER_WORKFLOW §七` **月度复盘**：2026-08-11 实现
+  `src/custos/pipeline/close_review/monthly_review.py`（复用 `weekly_review`/`loss_streak` 计算件）。
 - `MASTER_WORKFLOW §十二` 原挂着 8 条「当前需要调整的旧设计」。**待办不该埋在契约文档里** ——
   找不到，也不会被跟踪。逐条核实后：7 条已完成、1 条部分（月度）。
   最后完成的第 8 条（`report_id` / 规则版本 / 数据截止 / 输入清单，关乎**可审计与可重跑**）

@@ -137,12 +137,13 @@ class TestUnimplementedMechanismsFlagged:
             t = (ROOT / "src" / "custos" / rel).read_text(encoding="utf-8")
             assert "loss_streak" in t, f"{rel} 未接入连亏检查"
 
-    def test_monthly_review_marked_unimplemented(self):
+    def test_monthly_review_implemented_and_marked(self):
+        """月度复盘 2026-08-11 已实现（TODO #30）——文档状态与代码互锁，防再漂移。"""
         code = _all_code()
-        assert "month_review" not in code
+        assert "monthly_review" in code, "monthly_review.py 被删了？"
         s = MW.read_text(encoding="utf-8")
         k = s.index("## 七、正式报告五：月度复盘")
-        assert "🔴" in s[k : k + 300] and "未实现" in s[k : k + 300]
+        assert "✅" in s[k : k + 300] and "已实现" in s[k : k + 300]
 
 
 class TestWorkflowMatchesReality:
