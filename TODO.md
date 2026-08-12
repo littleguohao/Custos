@@ -46,7 +46,7 @@ R10：可用 margin 只在含 0AMV 的方案（pct_05_amv +7.8pp / pct_12_amv_cz
 
 ✅ **P2 首轮已完成（2026-08-11）**：#10 H3 否决（rsi_strong 系跨窗翻负、div 系两窗方向不一致）；
 #11 H4 否决——两种 CROSS 口径 0 触发不是稀缺是**公式自相矛盾**（主升占比≥80% 与 RSI<20+CCI<−100
-互斥，flow∩超卖共现 0/4280 日，要救需改写条件组合=新假设）；（rsi_strong 系跨窗翻负、div 系两窗方向不一致）；
+互斥，flow∩超卖共现 0/4280 日，要救需改写条件组合=新假设）；
 #12 突破回踩否决（主窗 +2.1% 赢基准、跨窗 +0.08% 归零）；#14 满仓 2 只否决（满仓 2/3/5 只
 全部深亏 −35%/−37%/−22%）；#15 top-n 宽度无 edge（N=0/2/5 全小幅负、非单调）。
 ✅ **#39 反转K 区间验证完成**：±1.5/±2/±2.5/不对称四臂均未独立转正，更宽略优
@@ -102,10 +102,9 @@ R10：可用 margin 只在含 0AMV 的方案（pct_05_amv +7.8pp / pct_12_amv_cz
 
 | # | 事项 | 性质 |
 |---|---|---|
-| 56 | **涨跌幅内联实现已收敛，剩 4 处保留项需 owner 定**（2026-08-11 完成主体）：口径定为「参与判定一律 round-2」（v0.36「判定精度 = 显示精度」），`indicators.pct_change` 加 `digits` 参数，判定类传 `digits=2`。已收敛（数值恒等）：`collect_holding_quotes` ×11、`compass_amv` ×2、`weekly_review` ×2、`collect_incremental_market` ×2、`tdx_ext_quotes`、`merge_incremental_market`、`enrich_candidates` 反转K change_pct。**保留项**（收敛会移动判定边界）：① `technical_monitor` 小阴/大阴/中大阳判定链（raw 与 round-4 混用）；② `enrich_candidates._close_ret_pct`（不取整，喂 RS_STRONG_PP）；③ `backtest_factors` 回测 raw 值；④ 海外行情双生产者精度分歧（`overseas_market_collector` 不取整 vs `tdx_ext_quotes` round-3，同字段喂 `score_overseas`）；⑤ `collect_incremental_market` 的 A50/CNH（不取整，改精度变显示值）。理由详见 `indicators.pct_change` docstring | 主体完成；①–⑤需 owner 判定 |
+| 56 | **涨跌幅内联实现已收敛，剩 5 处保留项需 owner 定**（2026-08-11 完成主体）：口径定为「参与判定一律 round-2」（v0.36「判定精度 = 显示精度」），`indicators.pct_change` 加 `digits` 参数，判定类传 `digits=2`。已收敛（数值恒等）：`collect_holding_quotes` ×11、`compass_amv` ×2、`weekly_review` ×2、`collect_incremental_market` ×2、`tdx_ext_quotes`、`merge_incremental_market`、`enrich_candidates` 反转K change_pct。**保留项**（收敛会移动判定边界）：① `technical_monitor` 小阴/大阴/中大阳判定链（raw 与 round-4 混用）；② `enrich_candidates._close_ret_pct`（不取整，喂 RS_STRONG_PP）；③ `backtest_factors` 回测 raw 值；④ 海外行情双生产者精度分歧（`overseas_market_collector` 不取整 vs `tdx_ext_quotes` round-3，同字段喂 `score_overseas`）；⑤ `collect_incremental_market` 的 A50/CNH（不取整，改精度变显示值）。理由详见 `indicators.pct_change` docstring | 主体完成；①–⑤需 owner 判定 |
 | 35 | `alpha_pvcorr` / `low_vol` / `momentum` 标 `untested` —— 实现了但没有独立的净值终审记录。按 R2 整体结论推定不可用，但**缺它们自己的证据**。要么补跑，要么明确降级为「不再研究」| 补证据或明确废弃 |
 | 37 | ⚠️⚠️ **研究说没用、live 却在用**：R2 结论「S_shape 无 alpha，全市场阈值扫描无 lift」，而 `score_candidates.technical_score` 的**主路径**就是它——`sstar_level(s_star)` 直接出技术层级、参与候选表 A/B/C/D 分层。已在 `factors/s_shape.py` 元数据与 `factors.KNOWN_STATUS_USE_CONFLICTS` 显式登记（不静默放过、也不擅自改分层）。**需 owner 定**：分层要不要换掉 s_shape，还是维持（README 说 StockPool 只是证据层、买入由 chief_decision 裁决，所以维持也讲得通）| **需 owner 拍板** <br><br>⚠️ **2026-08-10 补**：分层**不只是标签** —— `daily_report.py:239` 是 `[x for x in pool.get('candidates',[]) if x.get('bucket') in ('A','B')][:10]`，**C/D 档根本不进盘前日报**。所以若排序无 alpha，这个 top-10 就是任取的 10 个，而人是照着日报看的。⇒ 「改名为形态分档」能减少「把分层当 alpha 信号」的误读，但**不解决「A/B 过滤在事实上决定了你看见谁」**。需要一并定：日报要不要继续只展示 A/B。<br>⚠️ 与 #38（1800 评分系统待完善）是同一件事的两面，建议合并为一个「1800 评分与日报展示」决策。 |
-
 | 38 | **1800 评分系统待完善**（owner 2026-08-06 记）：`score_candidates` 的技术分/共振分/分层阈值整体还要打磨。与 #37（s_shape 是主路径但 R2 说无 alpha）同一片区域，宜一起做 | 后续迭代 |
 | 39 | **反转K 涨跌幅区间做验证**：已做成可配置（`B1_REVK_CHG_PCT` / `B1_REVK_CHG_MIN` / `B1_REVK_CHG_MAX`，默认对称 ±2%）。待跑不同区间的效果对比（±1.5 / ±2 / ±2.5 / 不对称 −2~+1.8），用同一批样本 + 已实现口径。⚠️ 覆盖值同时影响 live 与回测（两边读同一处，有意如此）| 待跑 |
 
@@ -129,14 +128,9 @@ stage 全部指向不存在的文件、整条链硬失败，而 3481 条测试�
 | # | 事项 | 当前 |
 |---|---|---|
 | 44 | **研究脚本存废**（部分推进）：2026-08-07 建了统一入口 `src/custos/research/__main__.py` 与注册表，**3 个覆盖率 0% 的已标 `stale`** 并在运行时打警告：`compare_signal_sets` / `scan_signal_backtest` / `m2_migrate_fingerprint`（后者是一次性迁移脚本，大概率可删）。留在表里而不是删掉，是因为「不确定」本身要可见。⇒ **需 owner 逐个定：删 / 转正 / 继续留**。`tests/test_research_entry.py` 钉住了这三个的 stale 状态，定案后要同步 | 待 owner |
-
 | 45 | ✅ **已按窄修法实现（2026-08-10 owner 拍板）**：`is_stale` 的判据由 `quality == "stale"` 改为 `quality in SECTION_NOT_FRESH`（见 v0.40）。查因过程中发现比原描述更根本的问题：**两个生产者用不同词表**（merge 出 `raw_only`、collector 出 `degraded`），而消费者只认 `"stale"` ⇒ 两个词都被当成新鲜。已在 `contracts.py` 立 `SECTION_QUALITY`/`SECTION_NOT_FRESH` 统一词表，并加一条**从生产者源码取字面量**的守卫：生产者新增未登记的 quality 值时当场报警（植入验证通过）。<br><br>**剩余未做（第二步，需 owner 定）**：把 `as_of` 补进 `market_breadth`/`sentiment`/`turnover` 的契约。⚠️ 本次**刻意没做**，因为那是更宽的 fail-closed —— 会把「合法但没写 as_of」的段也打成陈旧；且补契约前必须先确认所有走**全量** `require()` 的生产者都写了该键，否则当场硬失败（#52 就是先补骨架再补契约才没炸）。<br>⚠️ 另一个已知但未修的口子：`is_stale(sec, day=None)` 恒返回 False。三个调用点都传 `d.get("date")`，而 `date` 是契约必填字段 ⇒ 只有契约被违反时才可达，留作已知边界。 | ✅ 主体已完成；第二步待 owner |
-
-
-
 | 48 | **RSS 代码命中的残余误配**：`rss_filter` 已加数字边界（修掉「嵌在更长数字里」），但「`净利润600000元`」这种**代码恰好等于一个独立金额**仍会误配 +45 分并顶到候选首位。要分辨得看上下文（前后是否有「元/万元/亿」等量词，或要求邻近出现持仓名称）。收益 vs 复杂度待评估 | 待定 |
 | 49 | `rss_filter.entities(date)` 的 `date` **未被使用** —— `current_positions.json` 无历史版本，回填历史日期会用今天的持仓筛那天的新闻。等持仓快照有历史版本后接上 | ⏸ 依赖持仓历史 |
-
 | 53 | **端到端真跑 `daily_pipeline`** —— ✅ **首次真跑已完成（2026-08-08）**：目标机按 `--date 2026-08-07` 重跑全部五个 runner（证据：`artifacts/logs/2026-08-07_*_run_log.json`，started_at 为 08-08 深夜）。1800 选股链 11 stage 全 OK；0850 7/7、0905 3/3、1700 completed。且立刻抓到一个下周一就会发作的真 bug：`holding_quotes` 契约 spec 把 `indices` 误写为 dict（生产者是 list），被 1700 链契约校验报出 → 已修（commit `1f118b1`）。⚠️ **残余缺口**：① 1445 的盘中快照类 stage 无法用历史日期复现 fresh 校验（本次 `close_review` 因 `captured_at` 非目标日失败，属预期）；② `collect_fund_flow` 网络失败为 best-effort 不阻断。⇒ 例行化缺口仍在：把「每交易日五个 runner 的 run_log status 检查」做成例行核对 | 已首跑，例行核对待做 |
 | 54 | **生产代码覆盖缺口（2026-08-11 大幅收口）**：总覆盖率 78.5% → **81.4%**；原清单十项里 **4 项已 ≥91%**（`market_timing_scorer` 36→95、`refresh_market_indices` 17→91、`holding_sector_mapper` 20→93、`daily_report` 65→84），`adjust_factors` 60→72、`collect_holding_quotes` 65→73、`financials` 70→78。<br><br>**剩三个 <70%，缺口全在网络/子进程边界**：`collect_incremental_market` 56%（缺 55，主要是 `main` 的 30 行编排 + yahoo 抓取）、`market_timing_collector` 69%（缺 48，`read_day`/`_vipdoc_rows`/`main` 需真 vipdoc）、`overseas_market_collector` 68%（缺 47，`fetch_chart` 的 28 行是 Yahoo HTTP 解析）。⚠️ 这三处的剩余部分**打桩收益递减**：桩越像真实响应，测的就越是桩本身；真正能验它们的是 #53 的端到端真跑。⇒ **建议就此停在 81%**，把余下的验证交给例行真跑而不是继续加桩。 | 主体已收口；剩余三项建议交端到端 |
 | 55 | **`audit_*` 测试家族按模块重组**：11 文件 4821 行（占测试 15%），按**审计轮次**（P0/P1/P2/P3/opt）组织而非按模块 —— 找「`technical_monitor` 的测试」要翻 9 个文件（含 4 个 audit）。⚠️ 2026-08-07 评估后**决定先不动**：搬 4800 行测试的风险大于可读性收益（同日搬迁脚本已两次出错：按行替换撞上分号连写、正则把注释当导入名）。若哪天要做，前置条件是先有一次真跑验收（#53） | 已评估，暂不动 |

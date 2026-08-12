@@ -10,7 +10,7 @@
 
 ```bash
 uv sync
-uv run pytest -q                    # 全量测试（3600+ 用例）
+uv run pytest -q                    # 全量测试（3800+ 用例）
 ```
 
 两个环境变量：
@@ -65,7 +65,10 @@ tests/        pytest
 | 17:00 | `run_1700.py` | 盘后复盘 |
 | 18:00 | `run_1800.py` | 每日选股独立链（与三份报告分离） |
 
-周六 10:07 跑 `weekly_review.py` 周度复盘；月度复盘 `monthly_review.py`已实现（`--month YYYY-MM`，默认上个月），cron 加一条每月 1 日上午触发即可。手动执行同名脚本即可：
+复盘链（同为 cron 触发；手动执行同名脚本即可）：
+
+- 周六 10:07：`weekly_review.py` 周度复盘
+- 每月 1 日上午：`monthly_review.py` 月度复盘（`--month YYYY-MM`，默认上个月）——需 owner 在 cron 里加一条
 
 ```bash
 uv run python src/custos/pipeline/run_1445.py
