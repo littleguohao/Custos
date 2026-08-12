@@ -41,6 +41,8 @@ Invoke-Audit "[4/6] vulture（疑似死代码，需人工甄别，paths 常量�
 if ($SkipMypy) {
     Write-Host "[5/6] mypy —— 跳过（-SkipMypy）"
 } else {
+    # ⚠️ 有意不带 --config-file：Windows 环境是全的（pandas-stubs/mootdx/tqcenter
+    # 都可用），全量不压；Linux 的噪音豁免在 scripts/mypy.linux.ini，仅 audit.sh 使用。
     Invoke-Audit "[5/6] mypy（类型检查，首次较慢）" "reports\mypy_type.txt" {
         uv run --with mypy mypy src/
     }

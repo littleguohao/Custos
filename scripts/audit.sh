@@ -36,8 +36,8 @@ uv run --with vulture vulture src > reports/vulture_deadcode.txt 2>&1
 echo "      exit=$?（3=有疑似项，需人工甄别，paths 常量等 API 面是误报）"
 
 if [ "$SKIP_MYPY" -eq 0 ]; then
-    echo "[5/6] mypy（类型检查，首次较慢）..."
-    uv run --with mypy mypy src/ > reports/mypy_type.txt 2>&1
+    echo "[5/6] mypy（类型检查，首次较慢；用 scripts/mypy.linux.ini 压 Linux 环境噪音，Windows 全量不压）..."
+    uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/ > reports/mypy_type.txt 2>&1
     echo "      exit=$? → reports/mypy_type.txt"
 else
     echo "[5/6] mypy —— 跳过（--skip-mypy）"
