@@ -171,7 +171,7 @@ def cmd_scan(sample: int, count: int, seed: int, thr: float = GAP_THRESHOLD) -> 
         (0.25, 1.00, "≥25%    送转(10送5 及以上)"),
     ]
     counts = {b[2]: 0 for b in bands}
-    codes_hit = {b[2]: set() for b in bands}
+    codes_hit: dict[str, set] = {b[2]: set() for b in bands}
     all_gaps = []
     for c, df in bars.items():
         for g in detect_gaps(df, thr=0.02):  # 低阈值全扫，再分档

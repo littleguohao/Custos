@@ -565,7 +565,7 @@ def _run(
         )
         t0 = time.time()
         if capture:
-            r = subprocess.run(
+            r: subprocess.CompletedProcess = subprocess.run(
                 cmd,
                 cwd=str(BASE),
                 stdout=subprocess.PIPE,
@@ -855,9 +855,9 @@ def _tail_split(trades: list) -> Optional[tuple[float, float]]:
     返回 None 表示逐笔里没有 r_multiple（`--summary-only` 时会这样）。
     """
     rs = [
-        (t.get("ret") or 0, t.get("r_multiple"))
+        (t.get("ret") or 0, rm)
         for t in trades
-        if isinstance(t, dict) and t.get("r_multiple") is not None
+        if isinstance(t, dict) and (rm := t.get("r_multiple")) is not None
     ]
     if not rs:
         return None

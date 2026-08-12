@@ -26,7 +26,7 @@ import statistics
 import sys
 from datetime import date as _date, timedelta as _td
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 import pandas as pd
 
@@ -164,7 +164,7 @@ def analyze(
         launches.append(rec)
 
     n = len(launches)
-    by_regime = {}
+    by_regime: dict = {}
     for L in launches:
         by_regime[L["regime"]] = by_regime.get(L["regime"], 0) + 1
     leads = [
@@ -172,7 +172,7 @@ def analyze(
         for L in launches
         if L["regime"] in ("空头", "中性") and L["lead_days_to_long"] is not None
     ]  # "未知"不计入分布
-    out = {
+    out: dict[str, Any] = {
         "n_winners": len(winners),
         "n_launches": n,
         "by_regime": by_regime,
@@ -477,7 +477,7 @@ def build_sector_features(index_dir, members, mom_days: int = 20):
         stats["emitted"] += 1
         return out
 
-    fn.stats = stats
+    fn.stats = stats  # type: ignore[attr-defined]  # 函数挂元数据是刻意的（同 sector_phase.gate）
     return fn
 
 
@@ -785,10 +785,10 @@ def long_regime_windows(
                 start = d
             prev = d
         elif start is not None:
-            segs.append((start, prev, idx[prev] - idx[start] + 1))
+            segs.append((start, cast(str, prev), idx[cast(str, prev)] - idx[start] + 1))
             start = prev = None
     if start is not None:
-        segs.append((start, prev, idx[prev] - idx[start] + 1))
+        segs.append((start, cast(str, prev), idx[cast(str, prev)] - idx[start] + 1))
     return [s for s in segs if s[2] >= min_days]
 
 
@@ -843,7 +843,7 @@ def bear_to_long_pairs(
             j = min(idx[l_start] + include_long_head_days - 1, idx[l_end])
             sig_end = dates[j]
         key = f"{l_start}~{l_end}"
-        cand = {
+        cand: dict[str, Any] = {
             "signal_start": sig_start,
             "signal_end": sig_end,
             "label_start": l_start,
@@ -979,7 +979,7 @@ def discriminate_at_signal(
             f" ({'绝对阈值' if win_thresh is not None else '全体前%.0f%%分位' % (win_top_q * 100)})"
         )
     base = sum(1 for x in rows if x["win"]) / len(rows)
-    by_day = {}
+    by_day: dict = {}
     for x in rows:
         by_day.setdefault(x["date"], []).append(x)
 
@@ -1046,8 +1046,8 @@ def discriminate_at_signal(
                 "median_lose": _median(neg),
                 "median_diff": (
                     None
-                    if _median(pos) is None or _median(neg) is None
-                    else round(_median(pos) - _median(neg), 4)
+                    if (mp := _median(pos)) is None or (mn := _median(neg)) is None
+                    else round(mp - mn, 4)
                 ),
                 "precision_at_daily_top": prec,
                 "precision_at_daily_bottom": prec_lo,
@@ -1224,7 +1224,7 @@ def aggregate_discriminate(
                 "degenerate_label": bool(wm.get("degenerate_label")),
             }
         )
-    out = []
+    out: list[dict[str, Any]] = []
     for f, lst in per.items():
         aucs = [x["auc"] for x in lst]
         med_auc = _median(aucs)
@@ -1234,7 +1234,7 @@ def aggregate_discriminate(
         med_lift = _median([x["lift_pp_effective"] for x in lst])
         med_edge = _median([abs(x["auc"] - 0.5) for x in lst])
         hit_ratio = round(same / len(lst), 3) if lst else 0.0
-        common = bool(
+        is_common = bool(
             len(lst) >= max(2, int(n_eligible * min_hit_ratio))
             and hit_ratio >= min_hit_ratio
             and (med_edge or 0) >= min_edge
@@ -1252,7 +1252,7 @@ def aggregate_discriminate(
                 "direction": "high" if major > 0 else "low",
                 "median_of_median_diff": _median([x["median_diff"] for x in lst]),
                 "overfit_excluded_windows": overfit.get(f, []),
-                "cross_window_common": common,
+                "cross_window_common": is_common,
                 "per_window": sorted(lst, key=lambda x: x["window"]),
             }
         )
@@ -1927,7 +1927,7 @@ def coverage_report(
     med_sim = _median([best[c]["ret"] for c in w_sig])
     med_win = _median([rets[c] for c in w_sig])
     capture = round(med_sim / med_win, 3) if med_sim is not None and med_win else None
-    out = {
+    out: dict[str, Any] = {
         "n_winners": len(winners),
         "n_winner_with_signal": len(w_sig),
         "n_winner_rule_profitable": len(w_pos),
@@ -2397,14 +2397,14 @@ def main(argv=None, loader=None) -> int:
                     label = f"{raw.get('start')}~{raw.get('end')}"
                 else:
                     label = Path(fp).stem
-                recs = raw if isinstance(raw, list) else (raw.get("records") or [])
-                n_all_recs += len(recs)
-                res = _dis(recs)
-                results[label] = res
+                wrecs = raw if isinstance(raw, list) else (raw.get("records") or [])
+                n_all_recs += len(wrecs)
+                wres = _dis(wrecs)
+                results[label] = wres
                 print(
                     f"\n=== [窗口 {label}] 信号当时判别力({args.label_basis} 口径) ==="
                 )
-                print(res["text"])
+                print(wres["text"])
             if (
                 not n_all_recs and not args.allow_empty
             ):  # 全空 firings → 不得产出"无共同点"结论

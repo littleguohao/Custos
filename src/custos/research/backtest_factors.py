@@ -73,6 +73,8 @@ from custos.core.factors.s_shape import (
     SSTAR_MID,
 )  # noqa: E402
 
+_kdj: Callable[..., Any] | None  # 导入失败退 None（调用点有守卫）
+
 try:
     from custos.core.indicators import kdj as _kdj  # noqa: E402
 except Exception:  # noqa: BLE001
@@ -460,6 +462,8 @@ SCORERS["kdj_j"] = _sc_kdj_j
 # owner 2026-08-03 裁定:B1 是单纯回调买入,故 s_shape 的突破式分项(pivot/pocket_pivot/
 # compression)不进技术轴;轴1 软加权。依据 other/good_b1.pptx 九例形态统计,详见
 # b1_dual_factor 模块 docstring。**先回测验证再谈接入选股链。**
+compute_b1_dual: Callable[..., Any] | None  # 导入失败退 None（缺依赖不阻断其它 scorer）
+
 try:
     from custos.core.factors.b1_dual_factor import (
         compute_b1_dual,
@@ -594,6 +598,8 @@ if compute_b1_dual is not None:
 
 
 # ---- B2 战法 + 底部异动（来源 other/B1.pdf；见 b2_surge_factor 模块 docstring）----
+detect_b2: Callable[..., Any] | None  # 导入失败退 None（缺依赖不阻断其它 scorer）
+
 try:
     from custos.core.factors.b2_surge_factor import (
         detect_b2,
@@ -697,6 +703,8 @@ if detect_b2 is not None:
 
 
 # ---- RSI 状态 + 主升始发点(来源:微信文章公式) ----
+rsi_state_score: Callable[..., Any] | None  # 导入失败退 None（缺依赖不阻断其它 scorer）
+
 try:
     from custos.core.factors.rsi_state import (
         rsi_divergence,
@@ -1551,7 +1559,7 @@ def evaluate_trades(
     amv_dates = sorted(amv_regime) if amv_regime else None
 
     def _amv_ok(date: str) -> bool:
-        if not amv_regime:
+        if not amv_regime or amv_dates is None:
             return True
         idx = bisect.bisect_right(amv_dates, date) - 1  # as-of：最近 ≤ date 的regime
         return idx >= 0 and amv_regime[amv_dates[idx]] == "做多"
@@ -1860,7 +1868,7 @@ def simulate_portfolio(
         cagr = equity ** (1 / years) - 1 if equity > 0 else None
     except Exception:  # noqa: BLE001
         pass
-    out = {
+    out: dict[str, Any] = {
         "n_taken": taken,
         "n_skipped": skipped,
         "final_equity": round(equity, 4),
@@ -1984,7 +1992,7 @@ def simulate_portfolio_topn(
     except Exception:  # noqa: BLE001
         pass
     ret_dd = round((equity - 1) / max_dd, 2) if max_dd > 0 else None
-    out = {
+    out: dict[str, Any] = {
         "mode": "topn",
         "top_n": top_n,
         "n_taken": taken,
@@ -2146,14 +2154,14 @@ def peak_rss_mb() -> Optional[float]:
                 dll = (
                     k32
                     if dll_name == "kernel32"
-                    else ctypes.WinDLL(dll_name, use_last_error=True)
-                )  # type: ignore[attr-defined]
+                    else ctypes.WinDLL(dll_name, use_last_error=True)  # type: ignore[attr-defined]
+                )
                 fn = getattr(dll, fn_name)
                 fn.argtypes = [wintypes.HANDLE, ctypes.POINTER(_PMC), wintypes.DWORD]
                 fn.restype = wintypes.BOOL
                 if fn(h, ctypes.byref(pmc), pmc.cb):
                     return pmc.PeakWorkingSetSize / (1024.0**2)
-                errs.append(f"{dll_name}.{fn_name}: err={ctypes.get_last_error()}")
+                errs.append(f"{dll_name}.{fn_name}: err={ctypes.get_last_error()}")  # type: ignore[attr-defined]
             except Exception as e:  # noqa: BLE001
                 errs.append(f"{dll_name}.{fn_name}: {e}")
     except Exception as e:  # noqa: BLE001

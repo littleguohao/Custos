@@ -271,10 +271,14 @@ def probe_qfq(repeat: int) -> list[Probe]:
         p = Probe("qfq", "import adjust_factors")
         p.error = f"{type(exc).__name__}: {exc}"
         return [p]
+
+    def _xdxr_probe(c):  # 具名闭包：lambda 的默认参数形态 mypy 推断不出
+        return lambda: A.get_xdxr(c)
+
     for code, tag in ((SAMPLE_SH, "SH"), (SAMPLE_CY, "创业板"), (SAMPLE_BJ, "BJ")):
         out.append(
             Probe("qfq", f"get_xdxr({tag})", "权息事件；缓存冷时要经 TDX 协议取").run(
-                lambda c=code: A.get_xdxr(c), repeat
+                _xdxr_probe(code), repeat
             )
         )
     out.append(

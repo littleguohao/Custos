@@ -22,7 +22,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 TOOLS = Path(__file__).resolve().parents[1]
 
@@ -379,7 +379,7 @@ def classify_zero_ret_bars(bars, start: str, end: str, few_bars: int = 5) -> dic
     vol = win["volume"].astype(float) if "volume" in win.columns else None
     n_zero = int((vol == 0).sum()) if vol is not None else 0
     closes = win["close"].astype(float)
-    out = {
+    out: dict[str, Any] = {
         "n_bars": n,
         "n_zero_vol": n_zero,
         "first_close": round(float(closes.iloc[0]), 4),
@@ -584,7 +584,7 @@ def survivorship_report(
             f"{(w['gone_share'] or 0):>6.1%} {w['n_gone_with_signal']:>12} "
             f"{w['n_delisted_flag']:>9} {w['n_zero_ret']:>7} {w['n_zero_gone']:>14}"
         )
-    zero = [
+    zero_windows = [  # 原名 zero 与循环内的集合同名（mypy 类型冲突），改名
         w for w in out["windows"] if not w.get("error") and w["n_gone_in_sample"] == 0
     ]
     if out["gone_pool"] == 0:
@@ -592,9 +592,9 @@ def survivorship_report(
             "  ⚠️ 已摘牌队列为 0 ⇒ qlib 宇宙实际只含幸存者,**去偏无效**,"
             "所有结论只能当乐观上界(§3 首条)"
         )
-    elif zero:
+    elif zero_windows:
         lines.append(
-            f"  ⚠️ {len(zero)} 个窗的样本里一只已摘牌股都没有 ⇒ 该窗去偏无效,单独标注"
+            f"  ⚠️ {len(zero_windows)} 个窗的样本里一只已摘牌股都没有 ⇒ 该窗去偏无效,单独标注"
         )
     else:
         lines.append(

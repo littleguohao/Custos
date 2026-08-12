@@ -62,7 +62,7 @@ def _adx_features(high, low, close, n: int = 14) -> dict:
     这里取 pdi/mdi/adx 与两个派生标志。
     """
     pdi, mdi, adx = dmi_arrays(high, low, close, n)
-    if adx is None:
+    if adx is None or pdi is None or mdi is None:  # 三者同生同灭，写全便于收窄
         return {}
     return {
         "dmi_adx": round(float(adx[-1]), 2),

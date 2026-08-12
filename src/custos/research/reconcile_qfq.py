@@ -842,7 +842,9 @@ def detect_convention(code: str) -> int:
         a = _spread(seg["close_tdx"] / seg["raw_close"])
         b = _spread(seg["raw_close"] - seg["close_qlib"])
         c = _spread(seg["close_qlib"] / seg["raw_close"])
-        tdx_mult.append(a), qlib_add.append(b), qlib_mult.append(c)
+        tdx_mult.append(a)
+        qlib_add.append(b)
+        qlib_mult.append(c)
         print(
             f"{k:<4}{seg['date'].iloc[0]:<12}{seg['date'].iloc[-1]:<12}{len(seg):>6}"
             f"{a:>19.5%}{b:>21.5%}{c:>19.5%}"

@@ -383,6 +383,8 @@ def run_scenario(
                 if entry is None or not is_rebound_day(entry, day):
                     continue
                 close = close_on_or_before(entry, day)
+                if close is None:
+                    continue  # 不变量：is_rebound_day 为真必有当日收盘；显式防护而非断言
                 qty = book.qty * REBOUND_SELL_PCT
                 amount = qty * close
                 proceeds = amount * (1 - sell_fee_rate)
