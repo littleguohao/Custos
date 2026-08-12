@@ -59,7 +59,7 @@ BASE = HERE.parents[2]
 #     driver    驱动引擎做批量/扫描
 #     study     独立研究，产出结论进 governance/research/
 #     diagnostic 诊断/对账工具，产出报告供治理文档填数
-#     stale     **存废待定**（覆盖率 0% 或长期未动），见待办 #44
+#     stale     **存废待定**（覆盖率 0% 或长期未动）——机制保留；首批三个已于 2026-08-12 按 #44 定案删除
 TOOLS: dict[str, tuple[str, str]] = {
     "backtest_factors": (
         "engine",
@@ -93,18 +93,9 @@ TOOLS: dict[str, tuple[str, str]] = {
         "前复权对账：拿 qlib 序列给 tdx 自算结果做独立参照",
     ),
     "probe_data_sources": ("diagnostic", "数据源探针：实测可用性/耗时/返回形状"),
-    # ⚠️ 以下三个**覆盖率 0%**，存废待 owner 定（待办 #44）。
-    #    留在表里而不是删掉，是因为「不确定」本身要可见 ——
-    #    删了就没人记得曾有这些工具，而标 stale 会在每次列表时提醒。
-    "compare_signal_sets": (
-        "stale",
-        "研究版 reversal_k vs live 版 j_low 信号对比（0% 覆盖）",
-    ),
-    "scan_signal_backtest": ("stale", "⭐ 信号按 B1 买卖规则逐笔模拟（0% 覆盖）"),
-    "m2_migrate_fingerprint": (
-        "stale",
-        "给无指纹的 m2_sweep 旧结果补样本量指纹（0% 覆盖，一次性迁移）",
-    ),
+    # ⚠️ stale 状态保留给未来用：首批三个（compare_signal_sets /
+    #    scan_signal_backtest / m2_migrate_fingerprint）2026-08-12 已按
+    #    待办 #44 owner 定案**删除**（机制保留：标 stale 会在列表与运行时提醒）。
 }
 ORDER = ["engine", "driver", "study", "diagnostic", "stale"]
 LABEL = {
@@ -167,7 +158,6 @@ def _listing() -> int:
                     print(f"   {'':<28}模式（{len(ms)}）: {', '.join(ms)}")
         print()
     print("提示：模式开关是**互斥的运行模式**，不是普通选项 —— 先看这里再看 --help。")
-    print("     `stale` 的三个存废待定，见 TODO.md #44。")
     return 0
 
 
@@ -186,7 +176,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if TOOLS[name][0] == "stale":
         print(
-            f"⚠️ {name} 标记为**存废待定**（覆盖率 0%，见待办 #44）——"
+            f"⚠️ {name} 标记为**存废待定**（覆盖率 0% 或长期未动）——"
             f"结论不要直接采信。\n",
             file=sys.stderr,
         )

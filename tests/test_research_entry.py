@@ -63,47 +63,34 @@ class TestRegistryMatchesDisk:
 class TestStaleIsVisible:
     """⚠️ 项目原则：**不可用的东西要标记出来，且标记要代码级生效**。
 
-    3 个覆盖率 0% 的脚本标 `stale`。它们**留在表里而不是删掉** ——
-    「不确定」本身要可见：删了就没人记得曾有这些工具，
-    而标 stale 会在每次列表时提醒，并在运行时打警告。
+    首批三个 stale 工具（compare_signal_sets / scan_signal_backtest /
+    m2_migrate_fingerprint）已于 2026-08-12 按待办 #44 owner 定案**删除**
+    ——定案后「留着可见」让位给「删掉干净」。本类只守 **stale 机制本身仍在**
+    （未来再有工具标 stale 时，列表分节与运行时警告要能用）。
     """
 
-    STALE = {"compare_signal_sets", "scan_signal_backtest", "m2_migrate_fingerprint"}
-
-    def test_the_three_zero_coverage_tools_are_stale(self):
+    def test_no_stale_tools_after_44(self):
+        """#44 定案后注册表不应再有 stale 条目；新增 stale 须同步更新本断言。"""
         got = {n for n, (k, _) in entry.TOOLS.items() if k == "stale"}
-        assert got == self.STALE, (
-            f"stale 集合变了：{got}\n若某个已判定存废（删除或转正），请同步 TODO.md #44"
-        )
+        assert not got, f"stale 集合变了：{got}"
 
-    def test_running_stale_tool_warns(self):
-        """跑 stale 工具必须先打警告 —— 结论不该被直接采信。
+    def test_stale_machinery_still_registered(self):
+        """机制保留：ORDER/LABEL 里 stale 还在，未来标 stale 的工具能渲染分节。"""
+        assert "stale" in entry.ORDER
+        assert any("存废待定" in v for v in entry.LABEL.values())
 
-        带 --help 走快速路径：compare_signal_sets 裸跑会做全量分析
-        （逐票 TDX 取数，分钟级），而断言目标只是入口的 stale 警告。
-        """
-        r = subprocess.run(
-            [
-                sys.executable,
-                str(RESEARCH / "__main__.py"),
-                "compare_signal_sets",
-                "--help",
-            ],
-            cwd=str(ROOT),
-            **_RUN,
-            timeout=120,
-        )
-        assert r.returncode == 0
-        assert "存废待定" in r.stderr
+    def test_stale_dispatch_warns(self, monkeypatch, capsys):
+        """stale 分发警告机制必须仍工作——临时把一个轻量工具标成 stale 验证。
 
-    def test_listing_marks_stale_section(self):
-        r = subprocess.run(
-            [sys.executable, str(RESEARCH / "__main__.py")],
-            cwd=str(ROOT),
-            **_RUN,
-            timeout=60,
+        ⚠️ 警告在**入口进程**里打印（分发子进程之前），所以必须进程内调
+        `entry.main`——起子进程跑 __main__ 读不到 monkeypatch 的注册表。
+        用 analyze_trades（argparse --help 即退，不真跑分析）。"""
+        monkeypatch.setitem(
+            entry.TOOLS, "analyze_trades", ("stale", "临时探针（测试注入）")
         )
-        assert "存废待定" in r.stdout
+        rc = entry.main(["analyze_trades", "--help"])
+        assert rc == 0
+        assert "存废待定" in capsys.readouterr().err
 
 
 class TestListingAndDispatch:

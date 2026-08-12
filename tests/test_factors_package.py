@@ -77,8 +77,7 @@ class TestConsumersCanResolve:
         "pipeline/screening/candidate_table.py",
         "research/scan_signals_ytd.py",
         "research/run_bear_to_long_study.py",
-        "research/compare_signal_sets.py",
-        "research/scan_signal_backtest.py",
+        # compare_signal_sets / scan_signal_backtest 已于 2026-08-12 按 #44 定案删除
     ]
 
     @pytest.mark.parametrize("f", CONSUMERS)
