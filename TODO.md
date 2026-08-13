@@ -130,7 +130,8 @@ stage 全部指向不存在的文件、整条链硬失败，而 3481 条测试�
 ## 需要 owner 拍板
 
 | # | 事项 | 出处 |
-|---|---|---|
+|---|---|
+| 25 | **M2 机制扫描是否继续**（R10 待跑 #25）。判定证据已齐（2026-08-11）：① s3000 全扫描里 margin>3pp 且已实现为正的方案**全部含 0AMV**（纯出场无一通过）；② cross-window 复核里纯出场改善**全部翻负**（trail_08 +0.122→−0.214R 等），只有 0AMV 系稳定；③ #20 余量口径对照 pct/atr 均否决。**我的建议**：纯出场维度的 M2 扫描**停止**（边际已空），保留现有 trail_08/scale_out_08 作为出场配置即可；若继续，只扫「0AMV × 出场」的组合维度 | [R10](governance/research/R10_mechanism_M2_stops.md) |---|
 | 51 | **两条「卖出风控硬规则」原为零实现**。<br><br>① **连亏冷却 —— ✅ 已按 owner 2026-08-10 的落点实现**：落在**复盘环节**（不是闸门）—— 新增 `close_review/loss_streak.py`，每日 `final_close_review` 与每周 `weekly_review` 各出一节「连亏检查（全台账）」。⚠️ **刻意不做成 gate**：`chief_decision_report` 的 `buy_actions` 是字面量空表（源码注释 `buy_actions always empty`）⇒ 自动链里没有买入决策可拦，闸门会挂在空处。口径：只用 `match_status="full"` 的平仓单（partial 系统性少算）、按 **`net_pnl`**（扣费后）判亏、**被任何一次盈利打断即归零**（「连续」的原意，不是历史累计亏损次数）；配平复用 `weekly_review.fifo_pair`，不另写 FIFO。被排除的单子数如实上报，台账缺失时报 `unavailable` 而非「无连亏」。<br><br>② **胜率降仓 —— 仍未实现，待 owner 定**：「当月短线胜率 < 35% → 降低短线仓位」。只有研究脚本算胜率，无任何 live 组件据此降仓。月度胜率样本量小、规则易被噪声触发，且同样面临「没有仓位决策可拦」的问题（仓位建议目前由 `chief_decision` 的 `total_position_range` 给，是文本不是执行）。<br>⚠️ `README.md:160`「买入计划由 `chief_decision` 统一裁决」与代码不符，待②定了一起改。 | ①已完成（2026-08-10）／②待 owner |
 
 ## 维护约定
