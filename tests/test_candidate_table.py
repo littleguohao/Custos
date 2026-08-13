@@ -228,6 +228,29 @@ def test_outside_gate_watchlist_empty_not_silent():
     assert "门槛外观察区" in md and "（今日无）" in md
 
 
+def test_top5_caption_states_uncalibrated_heuristic():
+    """v0.52（#37 阶段 C）：Top5 必须标注排序口径——未校准启发式、非 alpha 排序。"""
+    pool = {
+        "date": "2026-07-22",
+        "status": "ok",
+        "bucket_counts": {"C": 1},
+        "candidates": [
+            {
+                "code": "600000",
+                "name": "甲",
+                "bucket": "C",
+                "score_detail": {"total": 50, "technical_score": 50},
+                "formula_hits": [],
+                "risk_flags": [],
+            }
+        ],
+    }
+    md = ct.render_table(pool, "2026-07-22")
+    top = md.split("## 得分 Top 5")[1].split("## ")[0]
+    assert "未校准启发式" in top and "非 alpha 排序" in top
+    assert "总分=技术分" in top
+
+
 def test_evidence_columns_in_bucket_table():
     """v0.51：ADX25/S反转 进主表（证据列）。"""
     c = _cand("600000", "甲", "半导体", "A", "优", 4, True)

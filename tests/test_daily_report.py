@@ -140,3 +140,100 @@ class TestTechnicalRelation:
     def test_partial_data_only_reports_what_is_known(self):
         out = dr.technical_relation({"above_ma25": True, "above_ma240": None})
         assert "站上MA25" in out and "240" not in out
+
+
+# ---------------------------------------------------------------------------
+# v0.52（#37 阶段 C）：日报候选展示口径——全量 A/B + 证据列 + 过期警示
+# ---------------------------------------------------------------------------
+
+
+def _pool(day, rows, amv="做多"):
+    return {
+        "date": day,
+        "status": "ok",
+        "amv_state": amv,
+        "bucket_counts": {"A": 1, "B": 1, "C": 1, "D": 1},
+        "candidates": rows,
+    }
+
+
+def _cand(code_, bucket, **kw):
+    base = {
+        "code": code_,
+        "name": f"股{code_}",
+        "bucket": bucket,
+        "sector": "半导体",
+        "resonance": {"resonance_level": "强共振"},
+        "score": 66,
+        "next_step": "buy_review" if bucket == "A" else "observe_price",
+        "adx25": False,
+        "s_star": None,
+        "capital_intent": {"level": "中"},
+    }
+    base.update(kw)
+    return base
+
+
+class TestStockPoolSection:
+    def _put_pool(self, tmp_path, monkeypatch, day, pool):
+        import json as _json
+
+        d = tmp_path / "data" / "stock_pool"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{day}_stock_pool.json").write_text(
+            _json.dumps(pool, ensure_ascii=False), encoding="utf-8"
+        )
+        monkeypatch.setattr(dr, "DATA", tmp_path / "data")
+
+    def test_all_ab_rows_no_top10_truncation(self, tmp_path, monkeypatch):
+        """全量 A/B：12 只 A/B 全展示（原 [:10] 任取已删）；C/D 不进日报（照旧）。"""
+        rows = [_cand(f"6000{i:02d}", "A" if i % 2 == 0 else "B") for i in range(12)]
+        rows.append(_cand("300099", "C"))
+        self._put_pool(tmp_path, monkeypatch, "2026-08-13", _pool("2026-08-13", rows))
+        out = "\n".join(dr.stock_pool_section("2026-08-13"))
+        for i in range(12):
+            assert f"6000{i:02d}" in out, f"第 {i} 只 A/B 被截掉"
+        assert "300099" not in out, "C 档不应进日报"
+
+    def test_evidence_columns_present(self, tmp_path, monkeypatch):
+        rows = [
+            _cand(
+                "600000",
+                "A",
+                adx25=True,
+                s_star=71.5,
+                capital_intent={"level": "强"},
+            )
+        ]
+        self._put_pool(tmp_path, monkeypatch, "2026-08-13", _pool("2026-08-13", rows))
+        out = "\n".join(dr.stock_pool_section("2026-08-13"))
+        assert "ADX25" in out and "S**" in out and "资金意图" in out
+        assert "✅" in out and "71.5" in out and "强" in out
+        assert "0AMV：做多" in out
+
+    def test_unsorted_semantics_disclaimed(self, tmp_path, monkeypatch):
+        """排序语义必须如实标注——读者不得把表内顺序当 alpha 排序。"""
+        self._put_pool(
+            tmp_path,
+            monkeypatch,
+            "2026-08-13",
+            _pool("2026-08-13", [_cand("600000", "A")]),
+        )
+        out = "\n".join(dr.stock_pool_section("2026-08-13"))
+        assert "形态分层" in out and "未校准启发式" in out and "不是 alpha 排序" in out
+        assert "优质" not in out and "推荐" not in out, "分层不得被描述成推荐语义"
+
+    def test_stale_pool_warns(self, tmp_path, monkeypatch):
+        """回退到旧一期时必须打出过期警示（盘点报告第 9 条）。"""
+        self._put_pool(
+            tmp_path,
+            monkeypatch,
+            "2026-08-11",
+            _pool("2026-08-11", [_cand("600000", "A")]),
+        )
+        out = "\n".join(dr.stock_pool_section("2026-08-13"))
+        assert "候选池为 2026-08-11 的旧数据" in out
+
+    def test_no_pool_says_so(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(dr, "DATA", tmp_path / "data")
+        assert dr.stock_pool_section("2026-08-13") == ["未找到任何选股链产出。"]

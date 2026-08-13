@@ -408,7 +408,11 @@ def _bear_outposts(lines, _watch_key, candidates, is_bear, watch_all):
 
 
 def _top5(lines, candidates):
-    """得分 Top 5（与分层无关的纯排序视图）。"""
+    """得分 Top 5（与分层无关的纯排序视图）。
+
+    ⚠️ v0.52（#37 阶段 C）：标注排序口径——总分=技术分（v0.50 起板块分移出），
+    **未校准启发式，不是 alpha 排序**；S** 是 s_shape 展示列（v0.50 起不进分层）。
+    """
     top5 = sorted(
         candidates,
         key=lambda c: (c.get("score_detail") or {}).get("total") or 0,
@@ -416,6 +420,11 @@ def _top5(lines, candidates):
     )[:5]
     if top5:
         lines.append("## 得分 Top 5")
+        lines.append("")
+        lines.append(
+            "> 排序口径：总分=技术分（v0.50 起板块分不参与），**未校准启发式、非 alpha 排序**；"
+            "S**/建议为 s_shape 展示列（不进分层）。"
+        )
         lines.append("")
         lines.append(
             "| 排名 | 代码 | 名称 | 总分 | 技术分 | S** | 建议 | 分层 | 公式命中 | 风险标记 |"

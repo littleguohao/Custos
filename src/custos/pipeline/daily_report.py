@@ -226,6 +226,71 @@ def plan_adjustment(prior_action: str, event: dict[str, Any] | None) -> str:
     return "不调整：维持上次复盘计划"
 
 
+def stock_pool_section(day: str) -> list[str]:
+    """「公式选股备选池」节（v0.52，#37 阶段 C，owner 拍板）。
+
+    - **全量 A/B 展示**（原 `[:10]` 截断删除——C/D 不进日报已使「可见性=分层
+      过滤」，再截 10 只是任取 10 只）。
+    - 排序语义如实标注：分档=**形态分层**（v0.50 起 patterns 累加口径，
+      s_shape/板块分不驱动分层），表内顺序为**未校准启发式**——不是 alpha 排序。
+    - 读不到当日 stock_pool 时回退最近一期（选股链 18:00 独立运行），
+      但加**过期警示**（盘点报告第 9 条：旧数据必须看得出来是旧的）。
+    """
+    # 坏 JSON 跳过（不炸报告）；falsy（如 {}）继续找更老文件；全部失败才显示未找到。
+    pool = None
+    pool_day = ""
+    pool_dir = DATA / "stock_pool"
+    pool_candidates = [pool_dir / f"{day}_stock_pool.json"] + [
+        p
+        for p in sorted(pool_dir.glob("*_stock_pool.json"), reverse=True)
+        if p.name[:10] < day
+    ]
+    for p in pool_candidates:
+        try:
+            v = json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
+        except (OSError, ValueError):
+            v = None
+        if v:
+            pool = v
+            pool_day = p.name[:10]
+            break
+    if not pool:
+        return ["未找到任何选股链产出。"]
+    counts = pool.get("bucket_counts") or {}
+    lines = [
+        "> ⚠️ 分档=**形态分层**（patterns 累加口径，非 alpha 语义）；"
+        "表内顺序为**未校准启发式，不是 alpha 排序**；仅作证据层候选，"
+        "不生成买入计划、不改变新开仓权限。",
+        f"- 选股链状态：{pool.get('status', '未知')}；0AMV：{pool.get('amv_state', '未知')}；"
+        f"分层 A {counts.get('A', 0)} / B {counts.get('B', 0)} / C {counts.get('C', 0)} / D {counts.get('D', 0)}。",
+    ]
+    if pool_day != day:
+        lines.append(
+            f"- ⚠️ **候选池为 {pool_day} 的旧数据**（当日未跑选股链，回退最近一期）。"
+        )
+    pool_rows = [x for x in pool.get("candidates", []) if x.get("bucket") in ("A", "B")]
+    if pool_rows:
+        lines += [
+            "",
+            "| 分层 | 代码 | 名称 | 板块 | 共振 | 技术分 | ADX25 | S** | 资金意图 | 下一步 |",
+            "|---|---|---|---|---|---:|---|---|---|---|",
+        ]
+        for x in pool_rows:
+            lines.append(
+                f"| {x.get('bucket')} | {code(x.get('code'))} | {x.get('name')} "
+                f"| {clean(x.get('sector'))} "
+                f"| {clean((x.get('resonance') or {}).get('resonance_level'))} "
+                f"| {x.get('score', '-')} "
+                # v0.52 证据列：ADX25（R2 三窗全改善过滤）/ S**（s_shape 展示档）/
+                # 资金意图层级 —— 均为证据层，不进分层（v0.50/v0.51）
+                f"| {'✅' if x.get('adx25') else '-'} "
+                f"| {x.get('s_star') if x.get('s_star') is not None else '-'} "
+                f"| {(x.get('capital_intent') or {}).get('level', '-')} "
+                f"| {x.get('next_step', '-')} |"
+            )
+    return lines
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", required=True)
@@ -431,46 +496,7 @@ def main():
     if not chief.get("buy_actions"):
         lines.append("| - | - | 暂无可审核计划 | 禁止临时开仓 | - |")
     lines += ["", "### 公式选股备选池", ""]
-    # 选股链 18:00 独立运行，盘前/盘后报告回退到最近一期备选池。
-    # 坏 JSON 跳过（不炸报告）；falsy（如 {}）继续找更老文件；全部失败才显示未找到。
-    pool = None
-    pool_day = ""
-    pool_dir = DATA / "stock_pool"
-    pool_candidates = [pool_dir / f"{day}_stock_pool.json"] + [
-        p
-        for p in sorted(pool_dir.glob("*_stock_pool.json"), reverse=True)
-        if p.name[:10] < day
-    ]
-    for p in pool_candidates:
-        try:
-            v = json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
-        except (OSError, ValueError):
-            v = None
-        if v:
-            pool = v
-            pool_day = p.name[:10]
-            break
-    if not pool:
-        lines.append("未找到任何选股链产出。")
-    else:
-        counts = pool.get("bucket_counts") or {}
-        date_note = "" if pool_day == day else f"（最近一期：{pool_day}）"
-        lines.append(
-            f"- 选股链状态：{pool.get('status', '未知')}{date_note}；分层 A {counts.get('A', 0)} / B {counts.get('B', 0)} / C {counts.get('C', 0)} / D {counts.get('D', 0)}；仅作证据层候选，不生成买入计划、不改变新开仓权限。"
-        )
-        pool_rows = [
-            x for x in pool.get("candidates", []) if x.get("bucket") in ("A", "B")
-        ][:10]
-        if pool_rows:
-            lines += [
-                "",
-                "| 分层 | 代码 | 名称 | 板块 | 共振 | 评分 | 下一步 |",
-                "|---|---|---|---|---|---:|---|",
-            ]
-            for x in pool_rows:
-                lines.append(
-                    f"| {x.get('bucket')} | {code(x.get('code'))} | {x.get('name')} | {clean(x.get('sector'))} | {clean((x.get('resonance') or {}).get('resonance_level'))} | {x.get('score', '-')} | {x.get('next_step', '-')} |"
-                )
+    lines += stock_pool_section(day)
     lines += [
         "",
         "## 6. 当日行动建议",
