@@ -49,7 +49,7 @@
 |---|---|---|
 | **SkillEvidence** 实体 | Skill 架构遗留；且它描述的「**统一证据信封**」实际不存在 —— `as_of`/`facts`/`signals`/`status`/`risk_flags` 确实散落在各产出里，但**没有任何一份产出同时具备它们**（实测 `generate_risk_and_sectors.py` 只有 signals+risk_flags，`b1_holding_state.py` 只有 as_of+facts+signals）| 无独有内容 |
 | **BuyPlan** 实体 | `buy_strategy` 代码已移除，只剩 `next_step="generate_buy_plan"` 字符串标签 | **结论四档 / 买入方式五类 / 最大亏损比例**已抢救到 [`../strategy/b1/03_execution_discipline.md`](../strategy/b1/03_execution_discipline.md) |
-| **`RiskDecision.cooldown_list`** | 声明过但**从未实现**的风控机制（全仓 `cooldown`/`冷却`/`blacklist` 零命中）| 是否要真做见 TODO #31 |
+| **`RiskDecision.cooldown_list`** | 声明过但**从未实现**的风控机制（全仓 `cooldown`/`冷却`/`blacklist` 零命中）| 是否要真做见 TODO #51（2026-08-12 原 #31 已并入） |
 
 ⚠️ **删掉比标注更彻底**：契约里没有它，就不会有人以为它存在。
 删除记录留在 `DATA_FLOW_CONTRACT.md` 的实现状态表里 —— 否则下次有人会重新加回来。

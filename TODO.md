@@ -6,7 +6,7 @@
 > 优先级按**「它阻塞了什么」**排，不按工作量：
 > P0 = 阻塞其他事或 live 正在依赖 ｜ P1 = 已有结论悬空 ｜ P2 = 新验证 ｜ P3 = 技术债
 >
-> 最后更新：2026-08-12（去冗精简：有结论/已落地条目删除——#1~#7、#9~#12、#14、#15、#20、#39、#45 主体、#51①、#53~#55；事实归宿在 R 系列文档与 CHANGELOG（#20 对照结论见 R10 与 v0.46），P8 覆盖率收口结论并入该节引言）
+> 最后更新：2026-08-12（决策项裁决落盘：#25 定范围（只扫 0AMV×出场组合）移入 P2、#26 扩为板块信息整体优化、#31 并入 #51、#37/#38 合并为 1800 重构、#32 改「先梳理再 strict」、#13 补 gate 语义背景、#45② 暂不决但讲清 as_of 机制；前次：去冗精简，有结论/已落地条目删除，事实归宿在 R 系列文档与 CHANGELOG）
 
 ## P0 · 阻塞项
 
@@ -25,7 +25,8 @@
 
 | # | 事项 | 出处 | 备注 |
 |---|---|---|---|
-| 13 | 宽口径 `bottom_surge` 的 gate 语义修正后再议 | [R7](governance/research/R7_hypothesis_H2_b1b2b3.md) | 语义未修不必跑 |
+| 13 | 宽口径 `bottom_surge` 的 gate 语义修正后再议。语义问题（owner 2026-08-12 补背景）：**异动后 60 天持续为真 ⇒ 信号在异动后的非事件日持续触发**；修正方向=「只在异动当日 / 异动后首次 J<13 触发」（R7:141 原文），修正后才值得重跑 | [R7](governance/research/R7_hypothesis_H2_b1b2b3.md) | 语义未修不必跑 |
+| 25 | **M2 续扫仅限「0AMV × 出场」组合维度**（owner 2026-08-12 定）；纯出场维度停扫——margin>3pp 且已实现为正的方案全在 0AMV 系、纯出场改善跨窗全翻负（trail_08 +0.122→−0.214R）、#20 余量口径 pct/atr 均否决 | [R10](governance/research/R10_mechanism_M2_stops.md) | 待跑 |
 
 ⚠️ 教训（cross-window 复核，已归入 R10）：edge 集中在单一 regime 的方案首轮看起来都很好。
 
@@ -52,29 +53,26 @@
 
 | # | 事项 | 性质 |
 |---|---|---|
-| 26 | **回调四项切换检查——已定性为「确实缺失的功能」（owner 2026-08-12）**：`04_pullback_rotation.md` 要求的主题切换/主题内分化/大小票切换/高低位切换四项检查全仓零实现，实际每日检查里也**没在做**（owner 确认）⇒ 不是空条款措辞问题，是缺失能力。**落地方向（owner 定）**：做成确定性脚本并在**每日复盘报告**里体现（每日的几份报告内容需随之调整）。原料大部分已有：`sector_phase`/`theme_tracker_report`（主题相位）、`fetch_market_cap`（市值层）、`holding_sector_mapper`（板块映射）、250 日高低点（高低位）。输出字段以 `04_pullback_rotation.md` §六 的字段表为准 | **待实现**（owner 已定性） |
+| 26 | **板块信息利用整体优化**（owner 2026-08-12 扩展：「当前板块信息的处理还是很弱，没有利用好 TDX 的板块信息，后续需要整体优化」——TQ 板块数据利用不足）**+ 回调四项切换检查脚本化**（原定性保留）：主题切换/主题内分化/大小票/高低位四项检查做成确定性脚本并进**每日复盘报告**（每日几份报告内容随之调整）。原料大部分已有：`sector_phase`/`theme_tracker_report`（主题相位）、`fetch_market_cap`（市值层）、`holding_sector_mapper`（板块映射）、250 日高低点；输出字段以 `04_pullback_rotation.md` §六 的字段表为准 | **大 feature，待排期** |
 
 ## P5 · contracts 梳理查出的问题（2026-08-06）
 
 索引与核查结论见 [`contracts/README.md`](governance/contracts/README.md)。
 
-| # | 事项 | 性质 |
-|---|---|---|
-| 31 | **冷却机制未实现**：`RiskDecision.cooldown_list` 与 `risk_type` 的「冷却」枚举已从契约**删除**（不是标注——契约里没有它就不会有人依赖）。若确实需要「触发止损的票进冷却、不重复买入」，须单独立项 | 需 owner 判定是否要做 |
+（原 #31「冷却机制未实现」2026-08-12 并入 #51——同属冷却/降仓机制家族，见「需要 owner 拍板」区。）
 
 ## P6 · trades 梳理（2026-08-06）
 
 | # | 事项 | 性质 |
 |---|---|---|
-| 32 | **对账观察期**：`reconcile_positions` 已接入 17:00 链但**默认不阻断**。跑若干交易日、确认 `status=ok` 稳定后，再考虑 `--strict`（数量不一致 exit 1）。⚠️ 若台账非从零开始，须先准备 `--baseline` 期初持仓，否则会一直 `replay_failed` | 观察后决定 |
+| 32 | **reconcile_positions 需先优化梳理再谈转 strict**（owner 2026-08-12：「还需要优化和梳理」）——现状：已接 17:00 链、默认不阻断；⚠️ 台账非零起始须先备 `--baseline` 期初持仓，否则会一直 `replay_failed` | 先梳理，strict 后议 |
 
 ## P7 · 因子层抽取查出的问题（2026-08-06）
 
 | # | 事项 | 性质 |
 |---|---|---|
 | 35 | `alpha_pvcorr` / `low_vol` / `momentum` 标 `untested` —— 实现了但没有独立的净值终审记录。按 R2 整体结论推定不可用，但**缺它们自己的证据**。要么补跑，要么明确降级为「不再研究」| 补证据或明确废弃 |
-| 37 | ⚠️⚠️ **研究说没用、live 却在用**：R2 结论「S_shape 无 alpha，全市场阈值扫描无 lift」，而 `score_candidates.technical_score` 的**主路径**就是它——`sstar_level(s_star)` 直接出技术层级、参与候选表 A/B/C/D 分层。已在 `factors/s_shape.py` 元数据与 `factors.KNOWN_STATUS_USE_CONFLICTS` 显式登记（不静默放过、也不擅自改分层）。**需 owner 定**：分层要不要换掉 s_shape，还是维持（README 说 StockPool 只是证据层、买入由 chief_decision 裁决，所以维持也讲得通）| **需 owner 拍板** <br><br>⚠️ **2026-08-10 补**：分层**不只是标签** —— `daily_report.py:239` 是 `[x for x in pool.get('candidates',[]) if x.get('bucket') in ('A','B')][:10]`，**C/D 档根本不进盘前日报**。所以若排序无 alpha，这个 top-10 就是任取的 10 个，而人是照着日报看的。⇒ 「改名为形态分档」能减少「把分层当 alpha 信号」的误读，但**不解决「A/B 过滤在事实上决定了你看见谁」**。需要一并定：日报要不要继续只展示 A/B。<br>⚠️ 与 #38（1800 评分系统待完善）是同一件事的两面，建议合并为一个「1800 评分与日报展示」决策。 |
-| 38 | **1800 评分系统待完善**（owner 2026-08-06 记）：`score_candidates` 的技术分/共振分/分层阈值整体还要打磨。与 #37（s_shape 是主路径但 R2 说无 alpha）同一片区域，宜一起做 | 后续迭代 |
+| 37 | **重构 1800 选股流程（2026-08-12 合并原 #37/#38）**：`score_candidates` 的技术分/共振分/分层阈值整体重构，两个矛盾一并设计——① s_shape 是技术层级**主路径**（`sstar_level(s_star)` 直接出层级、参与 A/B/C/D 分层）vs R2 结论「S_shape 无 alpha、全市场阈值扫描无 lift」（已在 `factors/s_shape.py` 元数据与 `factors.KNOWN_STATUS_USE_CONFLICTS` 显式登记，不静默放过、也不擅自改分层）；② **C/D 档不进盘前日报**（`daily_report.py` 只取 A/B top-10）⇒ A/B 过滤事实上决定了人看见谁，若排序无 alpha 则 top-10 是任取的 10 个 | **待设计**（合并后的大项） |
 
 ## P8 · 测试覆盖率（2026-08-07 首次量化）
 
@@ -100,15 +98,14 @@ stage 全部指向不存在的文件、整条链硬失败，而 3481 条测试�
 
 | # | 事项 | 当前 |
 |---|---|---|
-| 45 | **鲜度判定第二步（需 owner 定）**：把 `as_of` 补进 `market_breadth`/`sentiment`/`turnover` 的契约。⚠️ 第一步刻意没做它：那是更宽的 fail-closed——会把「合法但没写 as_of」的段也打成陈旧；且补契约前必须先确认所有走**全量** `require()` 的生产者都写了该键，否则当场硬失败（#52 就是先补骨架再补契约才没炸）。<br>⚠️ 已知边界：`is_stale(sec, day=None)` 恒返回 False——三个调用点都传契约必填的 `date`，只有契约被违反时才可达。（第一步主体=统一 quality 词表 `SECTION_QUALITY`/`SECTION_NOT_FRESH`，已完成，见 CHANGELOG v0.40 与 `contracts.py`） | 第二步待 owner |
+| 45 | **鲜度判定第二步（暂不决；owner 2026-08-12 要求先讲清机制）**：`as_of` 是生产者在段落 JSON 里声明的「数据截至」时间戳；`is_stale` 目前按生产者声明的 quality 词表判（v0.40 收口），**不看 as_of**。第二步=把 as_of 补进 `market_breadth`/`sentiment`/`turnover` 的契约必填，让门控能按数据时间判陈旧——这是比 quality 声明更宽的 fail-closed。风险：合法但没写 as_of 的段会被打成陈旧 ⇒ 补契约前必须普查所有走全量 `require()` 的生产者都写了该键（#52 教训：先补骨架再补契约，否则当场硬失败）。as_of 允许 null 是刻意的——「编一个 as_of 等于给门控假新鲜度」。<br>⚠️ 已知边界：`is_stale(sec, day=None)` 恒返回 False——三个调用点都传契约必填的 `date`，只有契约被违反时才可达。（第一步主体=统一 quality 词表 `SECTION_QUALITY`/`SECTION_NOT_FRESH`，已完成，见 CHANGELOG v0.40 与 `contracts.py`） | 暂不决 |
 | 49 | `rss_filter.entities(date)` 的 `date` **未被使用** —— `current_positions.json` 无历史版本，回填历史日期会用今天的持仓筛那天的新闻。等持仓快照有历史版本后接上 | ⏸ 依赖持仓历史 |
 
 ## 需要 owner 拍板
 
 | # | 事项 | 出处 |
 |---|---|---|
-| 25 | **M2 机制扫描是否继续**（R10 待跑 #25）。判定证据已齐（2026-08-11）：① s3000 全扫描里 margin>3pp 且已实现为正的方案**全部含 0AMV**（纯出场无一通过）；② cross-window 复核里纯出场改善**全部翻负**（trail_08 +0.122→−0.214R 等），只有 0AMV 系稳定；③ #20 余量口径对照 pct/atr 均否决。**我的建议**：纯出场维度的 M2 扫描**停止**（边际已空），保留现有 trail_08/scale_out_08 作为出场配置即可；若继续，只扫「0AMV × 出场」的组合维度 | [R10](governance/research/R10_mechanism_M2_stops.md) |
-| 51 | ② **胜率降仓 —— 未实现，待 owner 定**：「当月短线胜率 < 35% → 降低短线仓位」。只有研究脚本算胜率，无任何 live 组件据此降仓。月度胜率样本量小、规则易被噪声触发，且同样面临「没有仓位决策可拦」的问题（仓位建议目前由 `chief_decision` 的 `total_position_range` 给，是文本不是执行）。<br>⚠️ `README.md:160`「买入计划由 `chief_decision` 统一裁决」与代码不符，待②定了一起改。<br>（① 连亏冷却已完成：`close_review/loss_streak.py`，每日 `final_close_review` 与每周 `weekly_review` 各出一节——刻意做成复盘节而非 gate：`buy_actions` 是字面量空表，闸门会挂在空处） | ②待 owner |
+| 51 | **冷却机制（2026-08-12 合并原 #31 + #51②）**：触发止损的票进冷却、不重复买入 + 当月短线胜率 < 35% 降仓提示——同一机制家族。落点=**复盘报告节**（参照 ① 连亏检查的落点 `close_review/loss_streak.py`：每日 `final_close_review` 与每周 `weekly_review` 各出一节），**只提示不拦截**——自动链没有仓位决策可拦（`buy_actions` 字面量空表；仓位建议由 `chief_decision` 的 `total_position_range` 给，是文本不是执行）。<br>⚠️ `README.md:160`「买入计划由 `chief_decision` 统一裁决」与代码不符，随本条落地一起改。<br>（① 连亏冷却已完成——刻意做成复盘节而非 gate，原因同上） | 方向已定，待实现 |
 
 ## 维护约定
 

@@ -101,7 +101,7 @@ class TestUnimplementedMechanismsFlagged:
 
         ⚠️ 为什么不做成闸门：`chief_decision_report` 的 `buy_actions` 是字面量空表
         （源码注释 `buy_actions always empty`）⇒ 自动链里没有买入决策可拦，
-        闸门会挂在空处。见 TODO #51 / #31。
+        闸门会挂在空处。见 TODO #51（2026-08-12 原 #31 已并入）。
         """
         code = _all_code()
         for kw in ("cooldown_list", "blacklist", "banned"):
