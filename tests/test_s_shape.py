@@ -235,10 +235,15 @@ def test_sstar_level_thresholds():
     assert ss.sstar_level(None) == "弱"
 
 
-# ---------- technical_score 两条路径 ----------
+# ---------- technical_score 单一路径（v0.50 #37 阶段 A：s_shape 移出分层）----------
 
 
-def test_technical_score_uses_s_shape_when_present():
+def test_s_shape_present_but_not_used_for_scoring():
+    """v0.50 定案（owner 拍板）：s_shape **不再驱动**技术分/分层——
+    R2 已证无 alpha。它在候选里只是展示/证据列（s_star 字段仍落盘）。
+
+    本条钉的是「即便 s_shape 可用且高分，技术分也只来自 patterns 累加」——
+    防有人把旧主路径加回来。"""
     cand = {
         "patterns": {},
         "s_shape": {
@@ -252,16 +257,17 @@ def test_technical_score_uses_s_shape_when_present():
         },
     }
     score, level, detail = sc.technical_score(cand)
-    assert score == 78 and level == "强"
-    assert detail["scorer"] == "s_shape_v3" and detail["s_star"] == 78.0
-    assert detail["sshape_compression"] == 18.0
+    assert score == 0 and level == "弱", (
+        "patterns 为空时技术分必须是 0/弱（s_shape 不得接管）"
+    )
+    assert detail.get("scorer") != "s_shape_v3" and "s_star" not in detail
 
 
-def test_technical_score_falls_back_without_s_shape():
+def test_technical_score_patterns_path_is_the_only_path():
     cand = {"patterns": {"bbi_above": True, "j_low": True, "volume_contraction": True}}
     score, level, detail = sc.technical_score(cand)
-    assert "scorer" not in detail  # 走旧加权路径
-    assert detail.get("bbi_above") == 25  # 旧因子贡献仍在
+    assert "scorer" not in detail
+    assert detail.get("bbi_above") == 25
     assert score == 60 and level == "强"
 
 

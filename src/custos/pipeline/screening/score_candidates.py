@@ -12,15 +12,15 @@
 | 中 | B | C | D |
 | 弱 | C | D | D |
 
-- 技术结构 = technical_score 分级。**两条路径两套阈值**（均待回测，见
-  technical_score docstring）：s_shape v3.0 可用时按 S** 走 65/40
-  （s_shape.SSTAR_STRONG/SSTAR_MID）；无 s_shape 数据回退 patterns 累加时走
-  60/30（TECH_STRONG_FALLBACK/TECH_MID_FALLBACK）。统一为一套需策略 owner 拍板。
+- 技术结构 = technical_score 分级（强>=60 / 中30-59 / 弱<30，patterns 累加
+  单一路径；**v0.50 起 s_shape 主路径已删**——R2 证无 alpha，owner 拍板
+  #37 阶段 A。s_shape 仅作展示/证据列落盘，不驱动分层）。
 - 资金意图 = capital_intent_strength（放量点火/龙头量/底部巨量/相对强度/知行多头/
   量能持续；命中派发或 MACD 顶背离则判资金流出=弱）。
 
-板块信息**降为提示**，不封顶，只体现在：
-- score：0.6×技术 + 0.4×板块分 + 共振调整（板块进 40% 权重与 ±5 共振）。
+板块信息**只作提示**（v0.24 起不封顶；v0.50 起不进总分），只体现在：
+- score：总分 = 技术分（原 0.6×技术+0.4×板块+共振±5 已废；板块分与共振
+  仍落盘展示）。
 - trade_style：主升/修复→波段；震荡/分歧→波段(谨慎)；退潮/未知→短线(交易性机会)。
 
 仍保留的**风控/回避硬否决**（与"板块弱"无关）：
@@ -61,7 +61,6 @@ from custos.core.paths import (
 )  # noqa: E402
 
 
-from custos.core.factors.s_shape import sstar_level  # noqa: E402
 from custos.core.runtime_guards import normalize_regime  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
 from custos.core import report_audit  # noqa: E402
@@ -89,17 +88,24 @@ RESONANCE_MATRIX = {
     ("弱", "未知"): "D",
 }
 
-# 板块状态 → (heat_level, pass_level, 封顶)
+# 板块状态 → (heat_level, pass_level)。
+# ⚠️ 板块**只作提示/展示，不封顶、不进总分**（v0.24 起不封顶；v0.50 #37 阶段 A
+# 起连 0.4 权重也移出总分）。v0.50 前曾有第三列「封顶 bucket」，早已无人消费
+# （score_candidate 里以 `_sector_cap` 丢弃）——死列已删。
 SECTOR_STATE_MAP = {
-    "主升": ("强", "allow_A", "A"),
-    "修复": ("强", "allow_A", "A"),
-    "震荡": ("中", "allow_B", "B"),
-    "分歧": ("中", "allow_B", "B"),
-    "退潮": ("弱", "observe_only", "C"),
+    "主升": ("强", "allow_A"),
+    "修复": ("强", "allow_A"),
+    "震荡": ("中", "allow_B"),
+    "分歧": ("中", "allow_B"),
+    "退潮": ("弱", "observe_only"),
 }
 
 NEXT_STEP = {
-    "A": "generate_buy_plan",
+    # ⚠️ v0.50（#37 阶段 A）：原值 "generate_buy_plan" 是**虚假承诺**——
+    # BuyPlan 契约已删、没有任何组件生成买入计划，该值零行动读者
+    # （只有 daily_report / candidate_table 的**展示**列读 next_step）。
+    # 改为如实的 "buy_review"（可买候选，人工复核）。
+    "A": "buy_review",
     "B": "observe_price",
     "C": "long_term_track",
     "D": "avoid",
@@ -107,11 +113,13 @@ NEXT_STEP = {
 
 WAVE_TYPE_LABELS = {"buildup": "建仓波", "rally": "拉升波", "sprint": "冲刺波"}
 
-# 回退打分路径（无 s_shape 数据时的 patterns 累加分）的技术分层阈值 —— 单一定义处。
-# ⚠️ 主路径（s_shape v3.0，S**）用的是 s_shape.SSTAR_STRONG/SSTAR_MID = 65/40，
-# **与这里的 60/30 不是同一套**：两条路径同一个 62 分会分别落到"中"和"强"。
-# 两套阈值都还标着"待回测"，谁对需策略 owner 拍板；在拍板前不动数值，只把它们
-# 各自收成命名常量（此前是散在 docstring 与内联字面量里的三处矛盾说法）。
+# 技术分层阈值 —— 单一定义处。
+# ⚠️ 2026-08-12（v0.50，#37 阶段 A，owner 拍板）：s_shape 主路径**已删除**
+# （R2：S_shape 无 alpha、全市场阈值扫描无 lift ⇒ 不得驱动分层），
+# 本路径（patterns 累加分）是唯一技术分口径；s_shape 降为展示/证据列
+# （s_star/s_shape 字段仍落盘，不驱动分层/排序/可见性）。
+# 历史上 s_shape 路径用 65/40（sstar_level）、回退路径用 60/30，同一个 62 分
+# 两路分别落"中"/"强" —— 现在只剩 60/30 一套。
 TECH_STRONG_FALLBACK = 60
 TECH_MID_FALLBACK = 30
 
@@ -194,13 +202,12 @@ def cap_bucket(bucket: str, cap: str) -> str:
 def technical_score(cand: dict) -> tuple[int, str, dict]:
     """技术分（0-100）与技术面层级（强/中/弱）。确定性加分。
 
-    ⚠️ **两条路径、两套阈值**（审计：此前 docstring 只写 60/30，与实际不符）：
-    - 主路径 s_shape v3.0 可用时 → 分数＝S**，层级＝``s_shape.sstar_level``，
-      阈值 **SSTAR_STRONG/SSTAR_MID = 65/40**；
-    - 回退路径（无 s_shape 数据，如单测/降级）→ 分数＝patterns 累加，层级阈值
-      **TECH_STRONG_FALLBACK/TECH_MID_FALLBACK = 60/30**。
-    两套都标"待回测"，同一个 62 分在两条路径上分别是"中"和"强"；统一成哪一套
-    需策略 owner 拍板（会改 A/B/C/D 分层），故此处只做单一定义、不改数值。
+    ⚠️ 2026-08-12（v0.50，#37 阶段 A，owner 拍板）：**s_shape 主路径已删除**。
+    此前 s_shape 可用时分数=S**、层级=sstar_level（阈值 65/40），与回退路径
+    （60/30）是两套口径、同一个 62 分两路落不同档。R2 已证 S_shape 无 alpha、
+    全市场阈值扫描无 lift ⇒ 它不得驱动分层；现统一为 patterns 累加路径，
+    阈值 TECH_STRONG_FALLBACK/TECH_MID_FALLBACK = 60/30。s_shape 的
+    s_star/suggestion 仍随候选落盘（展示/证据列），不进本函数。
 
     B1/CZ 对齐加分（阈值见 enrich_candidates 顶部"待回测参数"）：
     five_day_entry +8、leader_volume +6、bottom_volume +6、
@@ -210,22 +217,6 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
     patterns = cand.get("patterns") or {}
     contrib: dict[str, Any] = {}
     score = 0
-    # 优先用 S_shape v3.0 有界加权评分（借鉴 workflow v3.0 沙漏模型；阈值待回测）。
-    # 无 s_shape 数据（单测/降级）时回退到下方旧的 patterns 加权累加。
-    ss = cand.get("s_shape") or {}
-    if ss.get("available") and ss.get("s_star") is not None:
-        s_star = float(ss["s_star"])
-        detail: dict[str, Any] = {
-            "s_star": s_star,
-            "s_shape": ss.get("s_shape"),
-            "delta": ss.get("delta"),
-            "penalty": ss.get("penalty"),
-            "suggestion": ss.get("suggestion"),
-            "scorer": "s_shape_v3",
-        }
-        for _k, _v in (ss.get("components") or {}).items():
-            detail[f"sshape_{_k}"] = (_v or {}).get("points")
-        return int(round(s_star)), sstar_level(s_star), detail
     if patterns.get("bbi_above"):
         score += 25
         contrib["bbi_above"] = 25
@@ -268,14 +259,11 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
     if (cand.get("non_one_wave") or {}).get("status") == "confirmed":
         score += 5
         contrib["non_one_wave_confirmed"] = 5
-    # 完美 B1 图形贴合度（0-8 梯度：J深度/回踩贴线/缩量程度/MACD零轴/DKS上行）
-    # 审计：原来写 `if fit:` —— 贴合度 **0 分**是"算过、一项没中"，与"这只票没算贴合度"
-    # 是两件事，真值判断把两者混成一件，factor_contrib 里看不到 0 分项（备选表格的
-    # "贴合"列显示 "-"，复盘时无法区分"没算"和"算了是 0"）。
+    # 完美 B1 图形贴合度（0-8 梯度）：**evidence_only，不加分**（v0.50 #37 阶段 A；
+    # R2：仅描述性）。仍记录进 factor_contrib —— candidate_table 的「贴合」列
+    # 从 score_detail.factor_contrib 读它；且「算过是 0」与「没算」要可分（审计）。
     fit = (cand.get("perfect_b1_fit") or {}).get("score")
     if fit is not None:
-        if fit:  # 加 0 不改分，也不把 int 分数悄悄变成 float
-            score += fit
         contrib["perfect_b1_fit"] = fit
     # MACD 十大技术（正向）：第一区间强势扩张 +3；第一区间再启动（3/5浪买点）+5；
     # 底背离 +5（B1 修复确认）。负向顶背离/三打白骨精走封顶，不在此减分。
@@ -316,18 +304,22 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
     return score, level, contrib
 
 
-def sector_heat(sector_entry: Optional[dict]) -> tuple[str, str, str, str]:
-    """板块状态 → (heat_level, pass_level, 封顶bucket, reason)。"""
+def sector_heat(sector_entry: Optional[dict]) -> tuple[str, str, str]:
+    """板块状态 → (heat_level, pass_level, reason)。
+
+    ⚠️ 板块只作**提示**（v0.24 起不封顶；v0.50 起不进总分）——pass_level 的
+    allow/reject 字样是**展示层的历史词表**，不构成任何降档/封顶动作。
+    """
     if not sector_entry:
-        return "未知", "reject_A", "B", "板块未映射或无 sector_state，不进 A"
+        return "未知", "reject_A", "板块未映射或无 sector_state（仅提示，不影响分层）"
     state = str(sector_entry.get("state") or sector_entry.get("sector_state") or "")
-    heat, pass_level, cap = SECTOR_STATE_MAP.get(state, ("未知", "reject_A", "B"))
+    heat, pass_level = SECTOR_STATE_MAP.get(state, ("未知", "reject_A"))
     reason = {
-        "allow_A": f"板块{state}，可进 A/B",
-        "allow_B": f"板块{state}，最多 B",
-        "observe_only": f"板块{state}，原则 D 或 C 观察",
-    }.get(pass_level, f"板块状态{state or '未知'}，不进 A")
-    return heat, pass_level, cap, reason
+        "allow_A": f"板块{state}（仅提示，不影响分层）",
+        "allow_B": f"板块{state}（仅提示，不影响分层）",
+        "observe_only": f"板块{state}，偏弱（仅提示，不影响分层）",
+    }.get(pass_level, f"板块状态{state or '未知'}（仅提示，不影响分层）")
+    return heat, pass_level, reason
 
 
 def resonance_level(tech_level: str, heat_level: str) -> str:
@@ -590,6 +582,10 @@ def four_leg_resonance(cand, permission, tech_level):
     ⚠️ 这是**证据层描述**，不是 gate —— `aligned` 不参与 bucket 或 next_step，
     只写进产物供复盘对账。R2 的结论是「跟随主流」机械规则不成立，
     所以共振度不得反过来放宽权限。
+
+    ⚠️ v0.50（#37 阶段 A，owner 拍板）：`sector_phase.favorable`（板块相位）从
+    `bull_candidate` 定义中**移出**——「可买」判定不再含板块腿（板块相位降级为
+    情境标注列）；legs/aligned 仍保留四腿计数供展示。
     """
     fq = fundamental_quality(cand.get("financials"))
     sp_fav = bool((cand.get("sector_phase") or {}).get("favorable"))
@@ -605,7 +601,8 @@ def four_leg_resonance(cand, permission, tech_level):
         "aligned": aligned,
         "label": {4: "四面共振", 3: "三面共振", 2: "两面", 1: "单面", 0: "无"}[aligned],
         "bull_candidate": bool(
-            legs["market"] and sp_fav and fq.get("tier") == "优" and legs["technical"]
+            # v0.50：板块腿（sp_fav）移出——可买 = 市场允许 + 基本面优 + 技术强
+            legs["market"] and fq.get("tier") == "优" and legs["technical"]
         ),
     }
     return fq, sp_fav, legs, aligned, resonance_4leg
@@ -628,7 +625,7 @@ def score_candidate(
     rules = resolve_cap_rules(cap_rules)
     tech_score, tech_level, factor_contrib = technical_score(cand)
     capital_level, capital_score, capital_detail = capital_intent_strength(cand)
-    heat, pass_level, _sector_cap, reason = sector_heat(sector_entry)
+    heat, pass_level, reason = sector_heat(sector_entry)
     trade_style = trade_style_of(heat)
     sector_score_raw = (sector_entry or {}).get("score") if sector_entry else None
     # 板块分不可用（NaN/inf）与"无评分"（None）在**打分上**都按最弱 0 处理，但前者是
@@ -648,22 +645,19 @@ def score_candidate(
         amv_state, base_bucket, cand, cz_sector, rules, sector_score_available
     )
 
-    # 总分：技术 60% + 板块 40% + 共振调整，0-100
+    # 总分 = 技术分（v0.50 #37 阶段 A，owner 拍板：板块分 0.4 权重与共振 ±5
+    # **移出总分**——板块/共振继续落盘作展示列（sector_heat_filter / resonance /
+    # score_detail.resonance_adj），不驱动分层、排序与可见性）。
     resonance_adj = {"强共振": 5, "弱共振": 0, "无共振": 0, "反向": -5}[res_level]
-    total = round(0.6 * tech_score + 0.4 * sector_score + resonance_adj, 1)
-    total = max(0.0, min(100.0, total))
+    total = float(min(100, max(0, tech_score)))
 
     entry_reason = build_entry_reasons(cand, dist, wave_type)
 
     next_step = NEXT_STEP[bucket]
     if amv_state == "空头":
         next_step = "observe_price"
-    if (
-        wave_type == "sprint"
-        and rules["sprint_wave"]
-        and next_step == "generate_buy_plan"
-    ):
-        # 双保险：冲刺波后首个 B1 禁买，不得生成买入计划
+    if wave_type == "sprint" and rules["sprint_wave"] and next_step == "buy_review":
+        # 双保险：冲刺波后首个 B1 禁买，不得进可买候选
         next_step = "observe_price"
 
     # 四面共振(市场+板块+基本面+技术)——hint/优先级,不驱动分层。牛股=三/四面共振(cz理念)。

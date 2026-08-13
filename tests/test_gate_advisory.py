@@ -53,7 +53,7 @@ def _pool(amv_state="做多", status="ok"):
             "code": code,
             "name": f"股{code}",
             "bucket": bucket,
-            "next_step": "generate_buy_plan" if bucket == "A" else "observe_price",
+            "next_step": "buy_review" if bucket == "A" else "observe_price",
             "fundamental_quality": {"tier": "优"},
             "resonance_4leg": {
                 "sector": True,
@@ -221,7 +221,9 @@ class TestGateNeverAltersSelection:
         """⭐ 信号一览的三档内容不得因门控而变。"""
         monkeypatch.setattr(ct, "QUALITY_DIR", tmp_path)
         text = ct.render_table(_pool(), "2026-08-03", gate=gate)
-        assert "- **可买（A+四面共振）**：600000 股600000" in text
+        # v0.50（#37 阶段 A）：可买定义改为「A + 市场/基本面/技术三面共振」，
+        # 板块相位降为情境标注列（不再计入可买定义）。
+        assert "- **可买（A + 市场/基本面/技术三面共振）**：600000 股600000" in text
 
     @pytest.mark.parametrize("gate", GATES)
     def test_candidate_count_unchanged(self, gate, tmp_path, monkeypatch):

@@ -707,8 +707,14 @@ SPECS: dict[str, dict] = {
                 "required": True,
                 "items": {
                     "code": {"type": str, "required": True, "non_empty": True},
+                    # v0.50（#37 阶段 A）分层口径：技术（patterns 累加，60/30）×
+                    # 资金意图共振矩阵；s_shape 与板块分**不再驱动分层/总分**
+                    # （s_star/s_shape/sector_score 仍随条目落盘，纯展示列）。
                     "bucket": {"type": str, "required": True, "choices": BUCKETS},
                     # ⚠️ `next_step` 是「这只票下一步能做什么」，A/B/C/D 分层的落点。
+                    #    v0.50（#37 阶段 A）：A 档值由 "generate_buy_plan" 改名
+                    #    "buy_review"（BuyPlan 契约已删，无组件生成买入计划，
+                    #    旧名是虚假承诺）。展示读者：daily_report / candidate_table。
                     "next_step": {"type": str, "required": True, "non_empty": True},
                     "risk_flags": {"type": list, "required": True},
                     "entry_reason": {"type": list, "required": True},

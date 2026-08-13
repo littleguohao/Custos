@@ -77,7 +77,11 @@ def test_individual_grid(patterns, capital, expected):
 
 
 def test_sector_does_not_cap_bucket_only_sets_trade_style():
-    """同一强势个股在强/中/弱/无板块中 bucket 不变，只有 trade_style 变。"""
+    """同一强势个股在强/中/弱/无板块中 bucket 不变，只有 trade_style 变。
+
+    v0.50（#37 阶段 A）：板块分**移出总分**——score 现在就是技术分，
+    强弱板块下相等（板块信息仍落盘展示：sector_heat_filter / sector_score）。
+    """
     cand = _mk(TECH_STRONG, capital="strong")
     a_strong = sc.score_candidate(cand, SECTOR_STRONG, "做多")
     a_weak = sc.score_candidate(cand, SECTOR_WEAK, "做多")
@@ -86,8 +90,9 @@ def test_sector_does_not_cap_bucket_only_sets_trade_style():
     assert a_strong["trade_style"] == "波段"
     assert a_weak["trade_style"] == "短线(交易性)"
     assert a_none["trade_style"] == "短线(交易性)"
-    # 板块仍进 score：强板块总分应高于弱板块
-    assert a_strong["score"] > a_weak["score"]
+    assert a_strong["score"] == a_weak["score"], "v0.50：总分=技术分，板块不进总分"
+    # 板块信息仍以展示列落盘（可读、可复盘），只是不驱动分层/总分
+    assert a_strong["sector_heat_filter"]["sector_score"] is not None
 
 
 def test_bear_market_caps_pool_at_b_and_observe():
@@ -145,7 +150,9 @@ def test_bucket_next_step_mapping():
         _mk(TECH_STRONG, capital="strong"), SECTOR_STRONG, "做多"
     )
     assert scored["bucket"] == "A"
-    assert scored["next_step"] == "generate_buy_plan"
+    # v0.50（#37 阶段 A）：原 "generate_buy_plan" 是虚假承诺（BuyPlan 契约已删、
+    # 无组件生成买入计划），改为如实的 "buy_review"
+    assert scored["next_step"] == "buy_review"
 
 
 def test_score_all_missing_sector_state_partial():

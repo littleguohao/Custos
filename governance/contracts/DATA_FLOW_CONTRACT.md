@@ -26,7 +26,7 @@
 | 实体 | 为什么删 | 独有内容去哪了 |
 |---|---|---|
 | **SkillEvidence** | Skill 架构遗留（`build_skill_contracts.py` + `skill_adapters.py` 已被 `generate_risk_and_sectors.py` 取代）。而且它描述的「**统一证据信封**」实际并不存在 —— `as_of`/`facts`/`signals`/`status`/`risk_flags` 这些字段确实散落在各产出里，但**没有任何一份产出同时具备它们** | 无独有内容 |
-| **BuyPlan** | `buy_strategy` 代码已移除，代码里只剩 `next_step="generate_buy_plan"` 这个字符串标签 | **结论四档 / 买入方式五类 / 最大亏损比例**已抢救到 [`../strategy/b1/03_execution_discipline.md`](../strategy/b1/03_execution_discipline.md) |
+| **BuyPlan** | `buy_strategy` 代码已移除；残留的 `next_step="generate_buy_plan"` 标签也于 v0.50 改名 `buy_review` | **结论四档 / 买入方式五类 / 最大亏损比例**已抢救到 [`../strategy/b1/03_execution_discipline.md`](../strategy/b1/03_execution_discipline.md) |
 
 ⚠️ 另删掉 `RiskDecision.cooldown_list`：**声明过但从未实现**的风控机制
 （全仓 `cooldown_list`/`blacklist` 零命中）。冷却 2026-08-12 已实现为复盘提示节（只提示不拦截），见 `close_review/cooldowns.py` 与 CHANGELOG v0.48。
@@ -100,7 +100,7 @@
   "bucket": "A|B|C|D",
   "entry_reason": [],
   "risk_flags": [],
-  "next_step": "generate_buy_plan|observe_price|long_term_track|avoid"
+  "next_step": "buy_review|observe_price|long_term_track|avoid"
 }
 ```
 

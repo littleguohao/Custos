@@ -811,7 +811,7 @@ class TestFourthBatch:
                 {
                     "code": "600000",
                     "bucket": "A",
-                    "next_step": "generate_buy_plan",
+                    "next_step": "buy_review",
                     "risk_flags": [],
                     "entry_reason": [],
                 }

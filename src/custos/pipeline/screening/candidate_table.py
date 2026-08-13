@@ -276,14 +276,16 @@ def _signal_overview(lines, is_bear, watch):
             "📡 前哨/🔍 受限区为研究观察对象，待 0AMV 转多后看升级。"
         )
         lines.append("")
+    # v0.50（#37 阶段 A）：板块相位（sector_phase.favorable）移出「可买」定义——
+    # 可买 = A + 市场/基本面/技术三面共振；「四面共振」降为情境标注列（4面共振列）。
     lines.append(
-        f"- **可买（A+四面共振）**：{('、'.join(_nm(c) for c in _buy)) or '无'}"
+        f"- **可买（A + 市场/基本面/技术三面共振）**：{('、'.join(_nm(c) for c in _buy)) or '无'}"
     )
     lines.append(
-        f"- **观察价位（B+四面共振）**：{('、'.join(_nm(c) for c in _obs)) or '无'}"
+        f"- **观察价位（B + 三面共振）**：{('、'.join(_nm(c) for c in _obs)) or '无'}"
     )
     lines.append(
-        f"- **待0AMV做多（三面已共振）**：{('、'.join(_nm(c) for c in _wait)) or '无'}"
+        f"- **待0AMV做多（基本面+技术已共振）**：{('、'.join(_nm(c) for c in _wait)) or '无'}"
     )
     lines.append("")
 
@@ -293,7 +295,7 @@ def _fundamental_bulls(lines, watch):
     lines.append("## 🐂 基本面牛股候选（共振观察区）")
     lines.append("")
     lines.append(
-        "> 基本面优 + 板块相位有利 + 技术强 = 三面已共振；再叠 0AMV做多即为可买牛股候选（🐂）。单独列出供持续观察（基本面为当前快照、非回测验证，仅辅助）。"
+        "> 基本面优 + 技术强（板块相位 v0.50 起仅作情境标注、不再计入）；再叠 0AMV做多即为可买牛股候选（🐂）。单独列出供持续观察（基本面为当前快照、非回测验证，仅辅助）。"
     )
     lines.append("")
     if not watch:

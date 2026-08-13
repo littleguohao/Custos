@@ -55,7 +55,6 @@ from custos.core.factors.wave_type import (
 #   ↑ `WAVE_MIN_BARS` / `_find_rally_segment` 在本模块**别处也被用到**（不只 detect_wave_type），
 #     所以一并导入。常量与助手跟着因子走、由因子模块拥有，这里只引用。
 from custos.core.factors.perfect_b1_fit import compute_perfect_b1_fit  # noqa: E402
-from custos.core.factors.b1_pullback_fit import compute_b1_pullback_fit  # noqa: E402
 from custos.core.factors.distribution import detect_distribution  # noqa: E402
 
 
@@ -1288,18 +1287,18 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
         "perfect_b1_fit": compute_perfect_b1_fit(
             df, daily_j, zx, pullback_shrink, macd_state=macd_technics
         ),
-        # TODO(策略口径,需 owner 拍板 —— 审计【建议优化】14):这两条是**对称的两笔浪费**,
-        # 但都涉及选股行为,本批只留痕不改:
-        #   ① b1_pullback_fit 已被全市场回测**证伪**(见 compute_b1_pullback_fit docstring:
-        #      作进场过滤期望 -0.42%/笔 < baseline +0.96%/笔),仅作描述性证据落盘、不驱动
-        #      分层,却仍逐票计算(7 个分项 + 一条自建 J 序列)。若确认不再需要这份证据,
-        #      去掉即可省掉每票一次全序列 KDJ；一旦删除,落盘契约少一个字段,下游报告
-        #      与历史候选 JSON 的可比性会断,故必须由 owner 决定。
-        #   ② compute_s_reversal(买弱/反转分,s_shape.py)**根本没算**——它才是与 B1
-        #      "回调买入"同向的打分器(compute_s_shape 是突破式买强),backtest_factors 里
-        #      作为 --scorer s_reversal 已在跑,但候选落盘里没有它,分层拿不到这维证据。
-        #      要不要加进 compute_metrics(以及是否进 technical_score)同样是策略口径决定。
-        "b1_pullback_fit": compute_b1_pullback_fit(df),
+        # v0.50（#37 阶段 A，owner 拍板）：b1_pullback_fit 已被全市场回测**证伪**
+        # （作进场过滤期望 -0.42%/笔 < baseline +0.96%/笔）⇒ 停止逐票计算
+        # （原每笔一条自建 J 序列 + 7 个分项），落盘字段保留为不可用标记
+        # （历史候选 JSON 的该字段是旧口径；研究侧 backtest_factors 仍可直接
+        # 调因子模块）。
+        # TODO #37 阶段 B 待办：compute_s_reversal（买弱/反转分，s_shape.py）
+        # 是否进 compute_metrics/technical_score —— 与 B1「回调买入」同向，
+        # 阶段 A 不动。
+        "b1_pullback_fit": {
+            "available": False,
+            "note": "已证伪，v0.50 起停止逐票计算（#37 阶段 A）",
+        },
         "s_shape": s_shape_mod.compute_s_shape(df, code),
         "liquidity": check_liquidity(df),
     }

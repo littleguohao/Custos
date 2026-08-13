@@ -209,7 +209,11 @@ def test_daily_signal_summary_section():
     }
     md = ct.render_table(pool, "2026-07-30")
     sec = md.split("## ⭐ 今日信号一览")[1].split("\n## ")[0]
-    buy_line = next(l for l in sec.splitlines() if "可买（A+四面共振）" in l)
+    # v0.50（#37 阶段 A）：可买 = A + 市场/基本面/技术三面共振（板块相位移出，
+    # 降为「4面共振」情境标注列）。
+    buy_line = next(
+        l for l in sec.splitlines() if "可买（A + 市场/基本面/技术三面共振）" in l
+    )
     obs_line = next(l for l in sec.splitlines() if "观察价位" in l)
     wait_line = next(l for l in sec.splitlines() if "待0AMV做多" in l)
     assert "600000" in buy_line and "600007" not in buy_line

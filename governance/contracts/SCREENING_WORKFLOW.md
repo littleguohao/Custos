@@ -14,7 +14,7 @@
   → [3] 板块过滤+打分  src/custos/pipeline/screening/score_candidates.py
         sector_state + 0AMV 共振矩阵打分分层 A/B/C/D → data/stock_pool/{date}_stock_pool.json
   → [4] 渲染备选表格  src/custos/pipeline/screening/candidate_table.py
-        → artifacts/reports/daily/_supporting/{date}/{date}_candidate_table.md（日报证据层）
+        → artifacts/reports/daily/{date}/{date}_candidate_table.md（日报证据层；2026-08-12 起按日期目录归档）
 ```
 
 运行时点：18:00 独立链 `run_1800.py`，与三份报告（0905/1445/1700）完全分离。
@@ -90,21 +90,20 @@ base bucket ＝ 技术结构 × 资金意图（均为个股维度）：
 | 中 | B | C | D |
 | 弱 | C | D | D |
 
-- 技术结构 = `technical_score` 分级（强>=65 / 中40-64 / 弱<40，阈值待回测）。
-  **`technical_score` 优先用 S_shape v3.0 有界加权评分**（借鉴 workflow.pptx「常规量化选股工作流」
-  v3.0 沙漏模型；无 s_shape 数据时回退旧 patterns 加权）：
+- 技术结构 = `technical_score` 分级（强>=60 / 中30-59 / 弱<30，阈值待回测）。
+
+  ⚠️ **v0.50（2026-08-13，#37 阶段 A，owner 拍板）：s_shape 已移出分层**。
+  此前 `technical_score` 主路径是 S**（阈值 65/40，与 patterns 路径的 60/30 两套
+  口径并存）；R2 已证 S_shape 无 alpha（见下「2026-07-23 全市场回测结论」）
+  ⇒ 现统一为 patterns 累加单一路径（60/30）。s_shape 降为**展示/证据列**：
+  s_star/suggestion 仍随候选落盘、candidate_table 有 S** 列，但不驱动分层/
+  排序/可见性。s_shape.py 的因子实现与校准说明保留备查（见下），定性为
+  描述性排序辅助。
 
   > `S_shape(0-100)` = 压缩/收敛(0-20) + 枢轴邻近/突破(0-15) + 量(20/60日&斜率)(0-20)
   > + 口袋妖怪(0-15) + 上方套牢供给(0-10) + 均线结构(0-10) + 事件风险(0-10，个股新闻未接入→中性占位)；
-  > `S**` = clamp(S_shape + Δ催化(0-10) − P惩罚(放量阴线 −15/−10/−5，前高近则减半), 0, 100)；
-  > 建议：S**≥70 可买 / 60-69 观望 / <60 不买。
-
-  分项封顶天然有界（解决旧 technical_score 无界累加饱和问题），实现见
-  `src/custos/core/factors/s_shape.py`；**幻灯片部分阈值被遮挡，相关常量取合理猜测并标注"待回测"**，
-  校准前不视为定型，各分项实际值随候选落盘可复盘。
-  **校准工具**：`src/custos/research/backtest_factors.py`（纯分析、只读本地日线、as-of 切片无未来函数）
-  走查历史 S** → 前向 MFE/MAE/胜率，按 S** 档/建议/分项分组，验证"可买(≥70)"是否显著优于"不买(<60)"、
-  各分项 hit 是否有正向 lift，据此重估 s_shape.py 顶部的待回测阈值与权重。
+  > `S**` = clamp(S_shape + Δ催化(0-10) − P惩罚(放量阴线 −15/−10/−5，前高近则减半), 0, 100)。
+  > （v0.50 起仅为展示列口径，不再参与分层。）
 
   > **2026-07-23 全市场回测结论**：`--universe-local` 全市场样本(覆盖率~100%)下，突破式 S_shape 及其
   > 反转(invert)在 J<13 短周期**均无稳定 alpha**(门槛扫描平坦、胜率~47%)；小样本的"60-70甜点区/invert胜出"
@@ -131,9 +130,11 @@ base bucket ＝ 技术结构 × 资金意图（均为个股维度）：
   20日相对强度强 +2、龙头量能 +2、底部巨量 +2、量能持续=主线确认 +2、点火 +1、
   反转K +1；≥5 强 / ≥2 中 / 否则 弱）。仅正向计"资金在进"，派发/顶背离由风控 cap 否决。
 
-**板块降为提示**（不封顶）：
+**板块降为提示**（不封顶、不进总分）：
 
-- 进 score：总分 = 0.6×技术 + 0.4×板块分 + 共振调整（强共振+5/反向−5）。
+- v0.50（#37 阶段 A）：总分 = 技术分（原 0.6×技术 + 0.4×板块分 + 共振调整的
+  混合公式已废）；板块分与共振度仍落盘展示（sector_heat_filter / resonance /
+  score_detail），不驱动分层、排序、可见性。
 - 定 trade_style：主升/修复→`波段`；震荡/分歧→`波段(谨慎)`；退潮/未知→`短线(交易性)`。
 
 **仍保留的风控/回避硬否决**（与"板块弱"无关）：
@@ -143,13 +144,14 @@ base bucket ＝ 技术结构 × 资金意图（均为个股维度）：
 - 主力出货五方式 high→D/watch→C；MACD 顶背离/三打白骨精 → 封顶 C；CZ 回避名单 → D。
 - 以上封顶开关见 `scoring.cap_rules`（默认全开）。
 
-next_step：A→generate_buy_plan，B→observe_price，C→long_term_track，D→avoid
+next_step：A→buy_review（v0.50：原 generate_buy_plan 是虚假承诺，BuyPlan 契约已删、
+无组件生成买入计划），B→observe_price，C→long_term_track，D→avoid
 （0AMV 空头一律 observe_price）。打分明细（score_detail，含 capital_intent_level）
 与 trade_style 随 StockPool 落盘可复盘。
 
 ### [4] 备选表格 + 日报
 
-- `candidate_table.py` 渲染分组表格进 `artifacts/reports/daily/_supporting/{date}/`，
+- `candidate_table.py` 渲染分组表格进 `artifacts/reports/daily/{date}/`，
   表头下带**得分 Top 5** 榜单（按总分降序跨分层，含总分/技术分/分层/风险标记）。
 - `daily_report.py` 在"主线、机会与风险"节内追加"公式选股备选池"小节，
   只读 stock_pool.json；文件缺失显示"当日未运行选股链"，不影响报告生成。
@@ -215,7 +217,7 @@ stock_pool.json 的 `cz_sector_status`/`degraded_reason` 注明。
   non_one_wave=confirmed +5。
 - 降档/否决（cap 只降不升）：
   - wave_type=sprint → 最高 B（B1 §四.0：冲刺波后首个 B1 禁买），
-    next_step 不得 generate_buy_plan；
+    next_step 不得 buy_review；
   - volume_sustain=retreat → 最高 C（CZ §14.6：主力撤退）；
   - cz_sector=avoid → D（CZ §七）；
   - non_one_wave=revoked → 最高 C（B1 §四：撤销条件）。
@@ -249,9 +251,10 @@ stock_pool.json 的 `cz_sector_status`/`degraded_reason` 注明。
   `risk_flags` 记录 `<rule>_detected_cap_disabled`，并把生效开关写入
   `score_detail.cap_rules`，便于前后对比。
 - **`scoring.sector_score_max`（默认 100）**：`sector_state.score` 的量纲上界。
-  打分用 `0.6*技术分 + 0.4*板块分` 混合，板块分经 `normalize_sector_score` 归一化到
-  0–100 并 clamp（越界/缺失/负值都被兜底），`score_detail` 同时落盘归一化值与
-  `sector_score_raw`。若上游 generator 改量纲，只需改此值一处。
+  板块分经 `normalize_sector_score` 归一化到 0–100 并 clamp（越界/缺失/负值都被
+  兜底），`score_detail` 同时落盘归一化值与 `sector_score_raw`。⚠️ v0.50 起板块分
+  **只作展示**（总分=技术分），该配置暂不影响总分；若上游 generator 改量纲，
+  只需改此值一处。
 - **`theme_mapping.min_match`（默认 1）**：概念标签命中主题所需的最小语义标签数。
   提高到 2+ 要求更强证据、降低子串过度匹配；候选落盘 `match_count` 可复盘。
 

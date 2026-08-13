@@ -247,7 +247,8 @@ class TestB7IndexFreshness:
 
 class TestB8SectorScoreNaN:
     """`float("nan")` 不会抛异常，`min(100.0, nan)` 按 IEEE 754 返回 100 →
-    板块分白送满分（占总分 40%），把无评分板块的票推进 A 池。"""
+    板块分白送满分（当时占总分 40%），把无评分板块的票推进 A 池。
+    （v0.50 起板块分移出总分，本条改为钉「留痕 + 展示列如实」语义。）"""
 
     def test_nan_returns_none_not_full_score(self):
         assert sc.normalize_sector_score(float("nan")) is None
@@ -262,8 +263,11 @@ class TestB8SectorScoreNaN:
         good_entry = {"sector": "船舶", "state": "主升", "score": 100.0}
         nan_res = sc.score_candidate(cand, nan_entry, "中性")
         good_res = sc.score_candidate(cand, good_entry, "中性")
-        assert nan_res["score"] < good_res["score"], "NaN 板块分不得等同满分"
+        # v0.50（#37 阶段 A）：板块分移出总分 ⇒ 两者总分都等于技术分（相等）。
+        # 本条守的「NaN 不得白送满分/留痕」语义不变，改为钉留痕与展示值：
+        assert nan_res["score"] == good_res["score"], "总分=技术分，板块分不参与"
         assert nan_res["score_detail"]["sector_score"] == 0.0
+        assert good_res["score_detail"]["sector_score"] == 100.0, "展示列如实落盘"
         assert "sector_score_unavailable" in nan_res["risk_flags"]
 
     def test_score_all_flags_nan_sector_score(self):

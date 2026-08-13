@@ -674,10 +674,9 @@ def test_weekly_j_state_available_flag_is_namespaced(monkeypatch):
 
 
 def test_technical_level_thresholds_single_definition():
-    """两条打分路径各有一套阈值，必须都来自命名常量、可一处改。"""
+    """v0.50（#37 阶段 A）：s_shape 主路径已删，技术分层只剩 60/30 一套阈值。"""
     assert sc.TECH_STRONG_FALLBACK == 60 and sc.TECH_MID_FALLBACK == 30
 
-    # 回退路径（无 s_shape）：60/30
     def _cand(total_patterns):
         return {"code": "600000", "patterns": total_patterns}
 
@@ -685,7 +684,7 @@ def test_technical_level_thresholds_single_definition():
     assert lo[1] == "弱"
     mid = sc.technical_score(_cand({"bbi_above": True, "j_low": True}))  # 45 分
     assert mid[1] == "中"
-    # s_shape 路径：65/40（sstar_level 单一定义）
+    # s_shape 模块的 sstar_level 仍存在（展示列用），但不再被 score_candidates 消费
     assert ss.sstar_level(64.9) == "中" and ss.sstar_level(65.0) == "强"
     assert ss.sstar_level(39.9) == "弱" and ss.sstar_level(40.0) == "中"
     out = sc.technical_score(
@@ -700,7 +699,7 @@ def test_technical_level_thresholds_single_definition():
             },
         }
     )
-    assert out[1] == "中"  # 62 在 s_shape 路径是"中"，在回退路径会是"强"
+    assert out[1] == "弱", "v0.50：s_shape 可用也不接管——patterns 空 ⇒ 0 分/弱"
 
 
 def test_build_stock_industry_map_only_sub_industry(monkeypatch):

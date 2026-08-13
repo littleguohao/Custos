@@ -37,7 +37,7 @@ def test_sprint_wave_caps_at_b_and_no_buy_plan():
         _cand(wave={"wave_type": "sprint", "available": True}), SECTOR_STRONG, "做多"
     )
     assert scored["bucket"] == "B"
-    assert scored["next_step"] != "generate_buy_plan"
+    assert scored["next_step"] != "buy_review"
     assert "sprint_wave_first_b1_forbidden" in scored["risk_flags"]
 
 
@@ -80,7 +80,7 @@ def test_no_new_rules_keeps_a():
         cz_sector="favored",
     )
     assert scored["bucket"] == "A"
-    assert scored["next_step"] == "generate_buy_plan"
+    assert scored["next_step"] == "buy_review"
 
 
 def test_bonus_factor_contrib_recorded():
@@ -170,7 +170,7 @@ def test_cap_rule_disabled_sprint_keeps_a():
         cap_rules={"sprint_wave": False},
     )
     assert scored["bucket"] == "A"  # 不再降档
-    assert scored["next_step"] == "generate_buy_plan"  # 双保险也随开关关闭
+    assert scored["next_step"] == "buy_review"  # 双保险也随开关关闭
     assert "sprint_wave_detected_cap_disabled" in scored["risk_flags"]
     assert "sprint_wave_first_b1_forbidden" not in scored["risk_flags"]
 

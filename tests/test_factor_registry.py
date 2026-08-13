@@ -166,15 +166,17 @@ class TestNotForLive:
                 )
 
     def test_evidence_only_factors_are_the_documented_ones(self):
-        """`evidence_only` 集合当前只有 R2 明确说「仅描述性」的那两个。
+        """`evidence_only` 集合的每次变动都必须是有意识的决定。
 
-        若这个集合变大，说明有人把新因子塞进了「计算但不决策」的灰区 —— 要有意识地做。
+        v0.50（#37 阶段 A）：+ s_shape（定案：移出分层、降为展示/证据列）
+        + sector_phase（live 侧本就只是 enrich hint，live_use="gate" 自 v0.25
+        起名不副实，随可买定义移出订正）；− b1_pullback_fit（证伪下线，
+        转 debug/none）。
         """
         got = set(factors.live_evidence_only())
         assert got == {
             # R2 明确说「仅描述性，不作买入依据」的
             "perfect_b1_fit",
-            "b1_pullback_fit",
             "platform_pullback",
             # signal_labels 出标签落候选表；该模块头部已声明「标注不是交易依据，
             # 尤其不得据标注数决定仓位」
@@ -185,6 +187,9 @@ class TestNotForLive:
             # 板块族密度：R2 说它是准确的「窗口主线指纹」（归因工具），
             # 但「跟随主流」机械规则不成立 ⇒ 只作情境感知，不作 gate
             "sector_mainstream",
+            # v0.50（#37 阶段 A）定案，见各自模块 FACTOR 注释
+            "s_shape",
+            "sector_phase",
         }, f"evidence_only 集合变了：{got}"
 
 
@@ -271,11 +276,15 @@ class TestInlineFactorsExtracted:
         for fn in (
             "detect_wave_type",
             "compute_perfect_b1_fit",
-            "compute_b1_pullback_fit",
             "detect_distribution",
+            # compute_b1_pullback_fit 已于 v0.50（#37 阶段 A）随证伪下线移出 live 链，
+            # 不在本清单（enrich 里应**不再出现**它——由下方断言保证）
         ):
             assert not re.search(rf"^def {fn}\(", s, re.M), f"enrich 又定义了本地 {fn}"
             assert fn in s, f"enrich 应通过导入访问 {fn}"
+        assert "compute_b1_pullback_fit" not in s, (
+            "v0.50：证伪因子不得留在 live 链（连 import 都不该有）"
+        )
 
     def test_constants_moved_with_their_factor(self):
         """常量必须跟着因子走，`enrich_candidates` 里不该再有它们的定义。"""
@@ -308,27 +317,24 @@ class TestInlineFactorsExtracted:
 class TestKnownConflicts:
     """已知矛盾必须**显式登记**，不许静默放过、也不许悄悄变多。
 
-    当前只有一个：`s_shape` —— R2 说它无 alpha，而 live 的
-    `score_candidates.technical_score` **主路径**就是它（出技术层级、参与 A/B/C/D 分层）。
-    不擅自改（改分层是策略决策），但也不能让这个矛盾隐形。
+    v0.50（2026-08-12，#37 阶段 A，owner 拍板）：原唯一登记项 `s_shape`
+    （R2 说无 alpha，而 live 的 `score_candidates.technical_score` 主路径是它）
+    已定案消解——s_shape 移出分层、降为展示/证据列。**集合当前必须为空**；
+    新矛盾出现时连带原因登记进来（本类就是拦「悄悄变多」的 ratchet）。
     """
 
-    def test_conflict_set_is_the_known_one(self):
-        assert set(factors.KNOWN_STATUS_USE_CONFLICTS) == {"s_shape"}, (
-            "已知矛盾集合变了 —— 新增的必须是有意识的决定，并写清原因"
+    def test_conflict_set_is_empty_after_v050(self):
+        assert set(factors.KNOWN_STATUS_USE_CONFLICTS) == set(), (
+            "已知矛盾集合应随 v0.50 定案清空——新出现的矛盾必须是有意识的决定，"
+            "并在 KNOWN_STATUS_USE_CONFLICTS 里写清原因"
         )
 
-    def test_each_conflict_has_a_reason(self):
-        for fid, why in factors.KNOWN_STATUS_USE_CONFLICTS.items():
-            assert len(why) > 30, f"{fid} 的矛盾说明太短，写不清就等于没登记"
-            assert fid in factors.registry(), f"{fid} 不在注册表里"
-
     def test_conflict_documented_in_module(self):
-        """矛盾也要写在因子模块自己的元数据里 —— 读那个文件的人才看得到。"""
+        """定案记录写在因子模块自己的元数据里 —— 读那个文件的人才看得到。"""
         s = (ROOT / "src" / "custos" / "core" / "factors" / "s_shape.py").read_text(
             encoding="utf-8"
         )
-        assert "已知矛盾" in s and "score_candidates" in s
+        assert "定案" in s and "v0.50" in s and "score_candidates" in s
 
 
 class TestStageMatchesReality:
@@ -405,10 +411,13 @@ class TestStageMatchesReality:
         ]
         assert not bad, f"标了 debug 却在 live 链里：{bad}"
 
-    def test_release_set_is_the_known_twelve(self):
-        """已上线集合当前 12 个。变动必须是有意识的 —— 上线/下线都该被看见。"""
+    def test_release_set_is_the_known_eleven(self):
+        """已上线集合当前 11 个。变动必须是有意识的 —— 上线/下线都该被看见。
+
+        （v0.50：12 → 11，b1_pullback_fit 证伪下线转 debug。）
+        """
         got = set(factors.released())
-        assert len(got) == 12, f"已上线因子数变了（{len(got)}）：{sorted(got)}"
+        assert len(got) == 11, f"已上线因子数变了（{len(got)}）：{sorted(got)}"
 
     def test_debug_factors_are_research_only(self):
         """未上线的因子 live_use 应为 none —— 既没上线又声明可用是自相矛盾。"""

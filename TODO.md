@@ -72,7 +72,7 @@
 | # | 事项 | 性质 |
 |---|---|---|
 | 35 | `alpha_pvcorr` / `low_vol` / `momentum` 标 `untested` —— 实现了但没有独立的净值终审记录。按 R2 整体结论推定不可用，但**缺它们自己的证据**。要么补跑，要么明确降级为「不再研究」| 补证据或明确废弃 |
-| 37 | **重构 1800 选股流程（2026-08-12 合并原 #37/#38）**：`score_candidates` 的技术分/共振分/分层阈值整体重构，两个矛盾一并设计——① s_shape 是技术层级**主路径**（`sstar_level(s_star)` 直接出层级、参与 A/B/C/D 分层）vs R2 结论「S_shape 无 alpha、全市场阈值扫描无 lift」（已在 `factors/s_shape.py` 元数据与 `factors.KNOWN_STATUS_USE_CONFLICTS` 显式登记，不静默放过、也不擅自改分层）；② **C/D 档不进盘前日报**（`daily_report.py` 只取 A/B top-10）⇒ A/B 过滤事实上决定了人看见谁，若排序无 alpha 则 top-10 是任取的 10 个 | **待设计**（合并后的大项） |
+| 37 | **重构 1800 选股流程（2026-08-12 合并原 #37/#38）**：✅ **阶段 A（止血）已完成**（2026-08-13，v0.50，owner 四项定案全按推荐项）：s_shape 移出分层降为展示/证据列（`KNOWN_STATUS_USE_CONFLICTS` 随之清空）、板块分移出总分（总分=技术分）、`sector_phase.favorable` 移出「可买」定义（四面共振降级为情境标注列）、证伪因子下线（perfect_b1_fit 停加分 / b1_pullback_fit 停算转 debug）、`generate_buy_plan` 改名 `buy_review`、SECTOR_STATE_MAP 死列与 sector_heat 文案修正。**待做：阶段 B**（adx25/s_reversal/观察区——enrich 里 s_reversal 是否进技术分的待办原注在 `enrich_candidates.compute_metrics` 的 b1_pullback_fit 标记处）与**阶段 C**（日报展示口径：C/D 档不进盘前日报 ⇒ A/B 过滤事实上决定可见性，待设计） | 阶段 A ✅／B/C 待做 |
 
 ## P8 · 测试覆盖率（2026-08-07 首次量化）
 

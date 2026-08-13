@@ -22,9 +22,13 @@ FACTOR: dict[str, Any] = {
     "kind": "state",
     "status": "active",
     "evidence": "governance/research/R4_timing_amv_sector.md",
-    "note": "R4：0AMV 之后第二个 OOS 站得住的增强，熊市减亏 ~4-6pp",
+    "note": "R4 初测：0AMV 之后第二个 OOS 站得住的增强（熊市减亏 ~4-6pp）；"
+    "⚠️ 2026-08-09 R4 重跑**未复现**（四窗两正两负）⇒ 降为 L2「方向不稳」；"
+    "v0.50（#37 阶段 A）起从「可买」定义移出，仅作情境标注列",
     "min_bars": 60,
-    "live_use": "gate",
+    # v0.50：live 侧只是 enrich 的 hint（证据层，不封顶不进门）——live_use="gate"
+    # 自 v0.25「仅作 hint」起就名不副实，本次随可买定义移出一并订正。
+    "live_use": "evidence_only",
     "stage": "release",
 }
 

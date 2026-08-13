@@ -27,15 +27,13 @@ FACTOR: dict[str, Any] = {
     "evidence": "governance/research/R2_selection_price_volume.md",
     "note": "R2：全市场阈值扫描无 lift；正向择优劣于随机",
     "min_bars": 60,
-    # ⚠️⚠️ **已知矛盾（2026-08-06 因子层清点时查出，待 owner 定）**：
-    #   R2 的结论是「S_shape 无 alpha，全市场阈值扫描无 lift」（status=needs_work），
-    #   但 live 侧 `score_candidates.technical_score` 的**主路径**就是它 ——
-    #   `return int(round(s_star)), sstar_level(s_star), detail`，
-    #   直接产出技术层级并参与候选表 A/B/C/D 分层。
-    #   ⇒ **研究说它没用，live 却用它排序。**
-    #   不擅自改（改分层是策略决策，且 README 明确 StockPool 只是证据层、
-    #   买入由 chief_decision 裁决），已登记 TODO 待拍板。
-    "live_use": "scorer",  # ⚠️ 见下「已知矛盾」
+    # ✅ **定案记录（2026-08-12，v0.50，#37 阶段 A，owner 拍板）**：
+    #   原「已知矛盾」（R2 说无 alpha、live 主路径却用它分层）已按 R2 结论消解——
+    #   `score_candidates.technical_score` 的 s_shape 主路径**已删除**，技术分层
+    #   统一为 patterns 累加路径（60/30）。本因子降为**展示/证据列**
+    #   （s_star/s_shape 仍随候选落盘、candidate_table 有 S** 列），
+    #   不驱动分层/排序/可见性。
+    "live_use": "evidence_only",  # v0.50 定案：展示/证据列，见上方定案记录
     "stage": "release",
 }
 

@@ -21,8 +21,8 @@ FACTOR: dict[str, Any] = {
     "evidence": "governance/research/R2_selection_price_volume.md",
     "note": "买弱指纹；R2：recall 100% 但期望 −0.42%/笔，劣于无差别进场 +0.96%",
     "min_bars": 1,
-    "live_use": "evidence_only",  # R2：仅描述性，不作买入依据（落候选表供人看，不驱动分层/gate）
-    "stage": "release",
+    "live_use": "none",  # v0.50（#37 阶段 A）：已证伪，live 停止逐票计算（原 evidence_only 落盘也下线）
+    "stage": "debug",  # v0.50：live 链不再引用（enrich 停算）；研究侧 backtest_factors 仍可直接调
 }
 
 B1PB_TREND_MA = 60  # 趋势未破：收盘 > MA60（-1% 容差）

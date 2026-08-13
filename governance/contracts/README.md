@@ -48,7 +48,7 @@
 | 删除项 | 为什么可删 | 独有内容去哪了 |
 |---|---|---|
 | **SkillEvidence** 实体 | Skill 架构遗留；且它描述的「**统一证据信封**」实际不存在 —— `as_of`/`facts`/`signals`/`status`/`risk_flags` 确实散落在各产出里，但**没有任何一份产出同时具备它们**（实测 `generate_risk_and_sectors.py` 只有 signals+risk_flags，`b1_holding_state.py` 只有 as_of+facts+signals）| 无独有内容 |
-| **BuyPlan** 实体 | `buy_strategy` 代码已移除，只剩 `next_step="generate_buy_plan"` 字符串标签 | **结论四档 / 买入方式五类 / 最大亏损比例**已抢救到 [`../strategy/b1/03_execution_discipline.md`](../strategy/b1/03_execution_discipline.md) |
+| **BuyPlan** 实体 | `buy_strategy` 代码已移除；残留的 `next_step="generate_buy_plan"` 字符串标签也于 v0.50（2026-08-13，#37 阶段 A）改名为如实的 `buy_review` | **结论四档 / 买入方式五类 / 最大亏损比例**已抢救到 [`../strategy/b1/03_execution_discipline.md`](../strategy/b1/03_execution_discipline.md) |
 | **`RiskDecision.cooldown_list`** | 声明过但**从未实现**的风控机制（全仓 `cooldown`/`blacklist`/`banned` 零命中）| 2026-08-12 已实现为复盘提示节（只提示不拦截），见 `close_review/cooldowns.py` 与 CHANGELOG v0.48 |
 
 ⚠️ **删掉比标注更彻底**：契约里没有它，就不会有人以为它存在。

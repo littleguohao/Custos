@@ -384,16 +384,19 @@ def _synth_uptrend_pullback():
 
 
 def test_b1_pullback_fit_recognizes_fingerprint():
-    from custos.pipeline.screening import enrich_candidates as ec
+    # v0.50（#37 阶段 A）：live 链（enrich）已停算该证伪因子；因子模块本体保留
+    # （研究侧 backtest_factors 直接调），测试改从因子模块导入。
+    from custos.core.factors.b1_pullback_fit import compute_b1_pullback_fit
 
-    r = ec.compute_b1_pullback_fit(_synth_uptrend_pullback())
+    r = compute_b1_pullback_fit(_synth_uptrend_pullback())
     assert r["available"] and r["hit"] is True and r["score"] >= 6
     comp = r["components"]
     assert comp["trend_intact"] and comp["pullback_below_ma10"] and comp["volume_dryup"]
 
 
 def test_b1_pullback_fit_rejects_downtrend():
-    from custos.pipeline.screening import enrich_candidates as ec
+    # 同上：v0.50 起从因子模块导入（live 链已停算）。
+    from custos.core.factors.b1_pullback_fit import compute_b1_pullback_fit
 
     closes = [20.0 - 10.0 * i / 69 for i in range(70)]  # 单边下跌
     dates = pd.date_range("2025-01-01", periods=70, freq="B")
@@ -411,7 +414,7 @@ def test_b1_pullback_fit_rejects_downtrend():
             for i, c in enumerate(closes)
         ]
     )
-    r = ec.compute_b1_pullback_fit(df)
+    r = compute_b1_pullback_fit(df)
     assert r["available"] and r["hit"] is False  # 趋势破 + 无前涨幅 → 不命中
 
 

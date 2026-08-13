@@ -57,7 +57,7 @@ def _cand(code, name, bucket="A", **kw):
         "code": code,
         "name": name,
         "bucket": bucket,
-        "next_step": "generate_buy_plan" if bucket == "A" else "observe_price",
+        "next_step": "buy_review" if bucket == "A" else "observe_price",
         "fundamental_quality": {"tier": "优"},
         "resonance_4leg": {
             "sector": True,
@@ -336,7 +336,7 @@ class TestLabelsNeverAlterSelection:
             if len(cells) != 20:
                 continue
             assert cells[17] == "A", f"分层被改写: {cells[17]}"
-            assert cells[19] == "generate_buy_plan", f"next_step 被改写: {cells[19]}"
+            assert cells[19] == "buy_review", f"next_step 被改写: {cells[19]}"
             checked += 1
         assert checked >= 1, "未找到 A 池主表行（20 列）"
 

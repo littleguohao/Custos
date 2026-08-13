@@ -69,10 +69,10 @@ STAGES = ("release", "debug")
 #: **已知矛盾的显式白名单**：`status` 说证据不够，而 live 确实拿它驱动决策。
 #: 不静默放过、也不擅自改 live —— 改分层是策略决策。列在这里是为了
 #: ①矛盾可见 ②新出现的矛盾会被测试挡住（ratchet）。
-KNOWN_STATUS_USE_CONFLICTS = {
-    "s_shape": "R2 说无 alpha，但 score_candidates.technical_score 主路径用它出技术层级"
-    "（参与 A/B/C/D 分层）。待 owner 定，见 TODO。",
-}
+#: 2026-08-12（v0.50，#37 阶段 A）：原唯一登记项 s_shape 已定案消解
+#: （移出分层、降为展示/证据列，见 s_shape.py 元数据）——集合必须保持为空；
+#: 新矛盾出现时连带原因登记进来，测试会拦。
+KNOWN_STATUS_USE_CONFLICTS: dict[str, str] = {}
 
 #: `status` 在这个集合里的因子**不得进入 live 选股链**。
 #: 拦的理由是「**未通过验证**」，不是「已被证伪」—— 两者对 live 的后果相同
