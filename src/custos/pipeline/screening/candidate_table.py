@@ -447,10 +447,10 @@ def _bucket_pools(lines, candidates, counts):
             lines.append("")
             continue
         lines.append(
-            "| 代码 | 名称 | 公式命中 | 模式标签 | 波浪 | CZ标签 | 技术分 | 贴合 | 资金意图 | 板块 | 板块状态 | 交易属性 | 共振 | 基本面 | 4面共振 | 平台回踩 | 标注 | 分层 | 建议止损位 | next_step |"
+            "| 代码 | 名称 | 公式命中 | 模式标签 | 波浪 | CZ标签 | 技术分 | 贴合 | ADX25 | S反转 | 资金意图 | 板块 | 板块状态 | 交易属性 | 共振 | 基本面 | 4面共振 | 平台回踩 | 标注 | 分层 | 建议止损位 | next_step |"
         )
         lines.append(
-            "|---|---|---|---|---|---|---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|"
+            "|---|---|---|---|---|---|---:|---:|---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|"
         )
         for c in rows:
             # 未知 patterns 键（上游新增标签/脏数据）不得 KeyError 打挂整张表：
@@ -494,6 +494,9 @@ def _bucket_pools(lines, candidates, counts):
                 f" | {_cz_tags(c)}"
                 f" | {_fmt(detail.get('technical_score'))}"
                 f" | {_fmt(fit)}"
+                # v0.51（#37 阶段 B）：adx25/S反转 证据列（严格证据层，不进分层）
+                f" | {'✅' if c.get('adx25') else '-'}"
+                f" | {_fmt((c.get('s_reversal') or {}).get('s_reversal'))}"
                 f" | {cap_intent}"
                 f" | {c.get('industry') or c.get('sector', '未知')}"
                 f" | {shf.get('sector_state', '未知')}"
@@ -571,10 +574,51 @@ def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
     # 治理文档结论#11)——空头里板块/市场腿天然未到位(滞后),严格四面共振永远不会在空头触发,
     # 故空头期单列"基本面优+技术强"的提前埋伏观察对象,跟踪其板块/市场腿何时补齐。
     _bear_outposts(lines, _watch_key, candidates, is_bear, watch_all)
+    # 👀 门槛外观察区（v0.51，#37 阶段 B）：被 J<13 硬门槛挡掉但异动强的票
+    lines += _outside_gate_section(pool.get("watchlist_outside_gate") or [])
     # 得分 Top5：按总分降序（跨分层），供快速浏览当日最强候选
     _top5(lines, candidates)
     _bucket_pools(lines, candidates, counts)
     return "\n".join(lines)
+
+
+def _outside_gate_section(watchlist: list) -> list[str]:
+    """门槛外观察区：被 J<13 硬门槛（R1 框架，不动）挡掉、但**异动强**
+    （底部巨量或放量点火——初版判据，见 enrich_candidates J 门槛分支注释）的票。
+
+    只展示，不进 stock_pool 主池、不进分层——先观察一季再谈是否值一个正式通道。
+    """
+    out = [
+        "## 👀 门槛外观察区（J≥13 但异动强）",
+        "",
+        "> 被 J<13 硬门槛挡掉、但出现底部巨量/放量点火的票。**只观察**——不进主池、"
+        "不分层；J 回落到 13 以下时会自然进入正式候选。",
+        "",
+    ]
+    if not watchlist:
+        out.append("（今日无）")
+        out.append("")
+        return out
+    out.append("| 代码 | 名称 | 日J | 涨跌幅 | 异动判据 | 公式命中 |")
+    out.append("|---|---|---:|---:|---|---|")
+    for w in watchlist:
+        triggers = "、".join(
+            t
+            for t, hit in (
+                ("底部巨量", (w.get("bottom_volume") or {}).get("hit")),
+                ("放量点火", (w.get("ignition") or {}).get("hit")),
+            )
+            if hit
+        )
+        out.append(
+            f"| {w.get('code')} | {w.get('name')}"
+            f" | {_fmt(w.get('daily_j'))}"
+            f" | {_fmt(w.get('change_pct'))}"
+            f" | {triggers or '-'}"
+            f" | {'、'.join(w.get('formula_hits') or []) or '-'} |"
+        )
+    out.append("")
+    return out
 
 
 def main(argv: Optional[list] = None) -> int:

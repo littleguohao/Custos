@@ -223,6 +223,20 @@ stock_pool.json 的 `cz_sector_status`/`degraded_reason` 注明。
   - non_one_wave=revoked → 最高 C（B1 §四：撤销条件）。
 - 0AMV 空头最高 B、无止损位禁 A、共振矩阵等既有规则不变。
 
+### 证据列（v0.51，#37 阶段 B——只落盘+展示，不进技术分/分层/gate）
+
+- **`adx25`**：R2:67-72「J<13 且 ADX≥25」是研究链首个跨牛熊一致改善的入场过滤
+  （三窗全改善），R2 裁决「以证据层接入观察一季，勿直接进 live gate」。
+  ADX 用 `indicators.dmi_arrays`（Wilder 唯一实现），J 阈同 j_low；候选带
+  `adx`（数值）与 `adx25`（布尔），candidate_table 主表有 ADX25 列。
+- **`s_reversal`**：`s_shape.compute_s_reversal`（买弱/反转分，与 B1「回调买入」
+  同向）此前存在但 live 从不调用 ⇒ 接进证据列（候选带 `s_reversal` 字典，
+  主表 S反转 列）。成本与 compute_s_shape 同阶（纯内存 O(n)），不设开关。
+- **门槛外观察区**（`watchlist_outside_gate`）：J<13 硬门槛（R1 框架）**不动**；
+  被挡但**异动强**的票（初版判据：底部巨量 `bottom_volume.hit` 或放量点火
+  `ignition.hit`）落观察区，candidate_table 单列「👀 门槛外观察区」一节。
+  不进主池、不进分层；J 回落到 13 以下时自然进入正式候选。
+
 ### 知行量价 + 出货识别（B1 §四.5 / §七.3）
 
 来源：优质 B1 图集 + 主力出货五方式图集，落地为确定性因子（阈值待回测、实际值随候选落盘）。知行趋势线严格对齐通达信 ZSDKX。

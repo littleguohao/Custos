@@ -195,6 +195,52 @@ def test_no_outpost_section_in_bull_regime():
     assert "📡 空头前哨" not in ct.render_table(pool, "2026-07-30")
 
 
+def test_outside_gate_watchlist_section():
+    """v0.51（#37 阶段 B）：门槛外观察区——被 J<13 挡掉但异动强的票单列一节。"""
+    pool = {
+        "status": "ok",
+        "amv_state": "做多",
+        "candidates": [_cand("600000", "甲", "半导体", "A", "优", 4, True)],
+        "watchlist_outside_gate": [
+            {
+                "code": "600100",
+                "name": "观察",
+                "daily_j": 45.2,
+                "change_pct": 6.1,
+                "bottom_volume": {"hit": True},
+                "ignition": {"hit": False},
+                "formula_hits": ["POOL_X"],
+                "gate_reason": "j_not_low:j=45.2",
+            }
+        ],
+    }
+    md = ct.render_table(pool, "2026-07-30")
+    sec = md.split("## 👀 门槛外观察区")[1].split("\n## ")[0]
+    assert "600100" in sec and "底部巨量" in sec and "只观察" in sec
+    # 观察区不进主表（主表只画 candidates）
+    assert "600100" not in md.split("## A 池")[1]
+
+
+def test_outside_gate_watchlist_empty_not_silent():
+    """无观察对象也出一节（「（今日无）」）——节消失分不清「没查」与「查了没有」。"""
+    pool = {"status": "ok", "amv_state": "做多", "candidates": []}
+    md = ct.render_table(pool, "2026-07-30")
+    assert "门槛外观察区" in md and "（今日无）" in md
+
+
+def test_evidence_columns_in_bucket_table():
+    """v0.51：ADX25/S反转 进主表（证据列）。"""
+    c = _cand("600000", "甲", "半导体", "A", "优", 4, True)
+    c["adx25"] = True
+    c["s_reversal"] = {"available": True, "s_reversal": 66.5}
+    pool = {"status": "ok", "amv_state": "做多", "candidates": [c]}
+    md = ct.render_table(pool, "2026-07-30")
+    assert "ADX25" in md and "S反转" in md
+    sec = md.split("## A 池")[1]  # 牛股候选表也含同名行，会撞——只看 A 池主表
+    row = next(ln for ln in sec.split("\n") if ln.startswith("| 600000"))
+    assert "✅" in row and "66.5" in row
+
+
 def test_daily_signal_summary_section():
     # 置顶 ⭐ 一览:三档各归其位,一眼看清今日真信号
     pool = {

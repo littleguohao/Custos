@@ -319,3 +319,36 @@ class TestAtrSeries:
 
     def test_short_series_all_nan(self):
         assert I.atr_series(_bars(10), n=14).isna().all()
+
+
+class TestDmiArrays:
+    """Wilder DMI/ADX（`dmi_arrays`，全项目唯一实现）的语义钉。
+
+    v0.51（#37 阶段 B）：adx25 证据列（J<13 且 ADX≥25）建立在它上面——
+    此前只有注册表钉、没有数值语义钉。
+    """
+
+    def test_monotone_uptrend_adx_near_100(self):
+        """单调上涨：−DM 恒 0 ⇒ MDI=0 ⇒ DX=100 ⇒ ADX→100。
+        （PDI 不是 100：TR 含跳空段（|high−前收|），PDI=100×+DM/TR≈83.3。）"""
+        n = 60
+        close = np.arange(10.0, 10.0 + 0.1 * n, 0.1)
+        high = close + 0.02
+        low = close - 0.02
+        pdi, mdi, adx = I.dmi_arrays(high, low, close)
+        assert pdi is not None and adx is not None
+        assert mdi[-1] == pytest.approx(0.0, abs=1e-6)
+        assert pdi[-1] == pytest.approx(83.333, abs=0.01)  # 0.1/0.12
+        assert adx[-1] > 90, f"单调趋势 ADX 应逼近 100，实得 {adx[-1]}"
+
+    def test_flat_series_adx_zero(self):
+        """一字平盘：TR=0 ⇒ ATR=0 ⇒ PDI/MDI=0 ⇒ DX=0 ⇒ ADX=0。"""
+        n = 60
+        pdi, mdi, adx = I.dmi_arrays(
+            np.full(n, 10.0), np.full(n, 10.0), np.full(n, 10.0)
+        )
+        assert adx is not None and adx[-1] == pytest.approx(0.0)
+
+    def test_short_series_returns_none_triplet(self):
+        """长度不足 2n+2 ⇒ (None, None, None)（调用方决定怎么降级）。"""
+        assert I.dmi_arrays([1.0] * 20, [1.0] * 20, [1.0] * 20) == (None, None, None)

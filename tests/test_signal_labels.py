@@ -301,8 +301,9 @@ class TestLabelsNeverAlterSelection:
                     continue
             if line.startswith("| 600000") or line.startswith("| 000001"):
                 cells = line.split("|")
-                if len(cells) > 18:
-                    del cells[17]  # 抹掉标注列
+                # v0.51：主表加 ADX25/S反转 两列 ⇒ 标注列 raw index 17→19
+                if len(cells) > 20:
+                    del cells[19]  # 抹掉标注列
                     line = "|".join(cells)
             out.append(line)
         return "\n".join(out)
@@ -326,19 +327,19 @@ class TestLabelsNeverAlterSelection:
 
     @pytest.mark.parametrize("signals", VARIANTS)
     def test_bucket_and_next_step_unchanged(self, signals):
-        """只看 A/B 池主表（20 列）——报告里还有 10 列的「牛股候选」表，会撞列号。"""
+        """只看 A/B 池主表（22 列——v0.51 加了 ADX25/S反转 两列证据列）——报告里还有 10 列的「牛股候选」表，会撞列号。"""
         txt = ct.render_table(self._pool_with(signals), "2026-08-04")
         checked = 0
         for ln in txt.split("\n"):
             if not ln.startswith("| 600000"):
                 continue
             cells = [c.strip() for c in ln.split("|")[1:-1]]
-            if len(cells) != 20:
+            if len(cells) != 22:
                 continue
-            assert cells[17] == "A", f"分层被改写: {cells[17]}"
-            assert cells[19] == "buy_review", f"next_step 被改写: {cells[19]}"
+            assert cells[19] == "A", f"分层被改写: {cells[19]}"
+            assert cells[21] == "buy_review", f"next_step 被改写: {cells[21]}"
             checked += 1
-        assert checked >= 1, "未找到 A 池主表行（20 列）"
+        assert checked >= 1, "未找到 A 池主表行（22 列）"
 
     def test_score_candidates_passes_signals_through(self):
         """必须**透传** signals——它是显式字段白名单，不加就会被丢掉。

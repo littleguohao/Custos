@@ -79,6 +79,7 @@ from custos.core.factors import sector_phase as sector_phase_mod  # noqa: E402
 from custos.core.indicators import bbi_state, ema, kdj, resample, zhixing_state  # noqa: E402
 from custos.core.indicators import pct_change  # noqa: E402
 from custos.core.indicators import amplitude_pct as amplitude_pct_of  # noqa: E402
+from custos.core.indicators import dmi_arrays  # noqa: E402  DMI/ADX 唯一实现（v0.51 adx25 证据列）
 from custos.core.contracts import require  # noqa: E402
 
 SCREENING_DIR = DATA / "screening"
@@ -1239,6 +1240,16 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
         platform_pullback=_plat,
     )
 
+    # --- 证据层新列（v0.51，#37 阶段 B，owner 批准；严格证据层：不进技术分/
+    #     分层/gate，只落盘 + 展示）---
+    # adx25：R2:67-72「J<13 且 ADX≥25」是研究链首个跨牛熊一致改善的入场过滤
+    # （三窗全改善），R2 裁决「以证据层接入观察一季，勿直接进 live gate」。
+    # ADX 用 indicators.dmi_arrays（全项目唯一实现，Wilder 口径）；J 阈与
+    # j_low 同口径（b1_thresholds.J_LOW_THRESHOLD）。
+    _pdi, _mdi, _adx = dmi_arrays(df["high"], df["low"], df["close"])
+    adx_last = round(float(_adx[-1]), 2) if _adx is not None and len(_adx) else None
+    adx25 = bool(j_low and adx_last is not None and adx_last >= 25)
+
     return {
         "close": round(float(last["close"]), 4),
         "change_pct": round(change_pct, 2) if change_pct is not None else None,
@@ -1292,14 +1303,21 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
         # （原每笔一条自建 J 序列 + 7 个分项），落盘字段保留为不可用标记
         # （历史候选 JSON 的该字段是旧口径；研究侧 backtest_factors 仍可直接
         # 调因子模块）。
-        # TODO #37 阶段 B 待办：compute_s_reversal（买弱/反转分，s_shape.py）
-        # 是否进 compute_metrics/technical_score —— 与 B1「回调买入」同向，
-        # 阶段 A 不动。
         "b1_pullback_fit": {
             "available": False,
             "note": "已证伪，v0.50 起停止逐票计算（#37 阶段 A）",
         },
         "s_shape": s_shape_mod.compute_s_shape(df, code),
+        # v0.51（#37 阶段 B，TODO ② 闭环）：s_reversal（买弱/反转分，与 B1
+        # 「回调买入」同向）此前存在但 live 从不调用 ⇒ 接进证据列。
+        # 成本：与 compute_s_shape 同阶（对已加载 df 的一次 O(n) 纯计算，
+        # 无网络/IO），18:00 链每票 +1 次评分调用，可忽略 ⇒ 不设开关。
+        # 严格证据层：不进技术分/分层/gate。
+        "s_reversal": s_shape_mod.compute_s_reversal(df, code),
+        # v0.51（#37 阶段 B）：adx25 证据列（R2 三窗全改善的入场过滤，
+        # 证据层观察一季）。adx 数值一并落盘供展示。
+        "adx": adx_last,
+        "adx25": adx25,
         "liquidity": check_liquidity(df),
     }
 
@@ -1326,6 +1344,9 @@ def enrich(
         "degraded_reason": "",
         "candidates": [],
         "excluded": [],
+        # v0.51（#37 阶段 B）：门槛外观察区——被 J<13 硬门槛挡掉但异动强的票
+        # （只展示，不进主池/分层）。见下方 J 门槛分支。
+        "watchlist_outside_gate": [],
     }
 
     if not hits_data or hits_data.get("status") == "unavailable":
@@ -1545,6 +1566,25 @@ def enrich(
         if cfg.get("j_low_required", J_GATE_REQUIRED_DEFAULT):
             dj = cand.get("daily_j")
             if not j_below_threshold(dj):
+                # 门槛外观察区（v0.51，#37 阶段 B，owner 批准）：J<13 硬门槛**不动**
+                # （R1 框架），被挡但**异动强**的票落观察区展示。初版判据 =
+                # 底部巨量（bottom_volume.hit）或放量点火（ignition.hit）——
+                # 两个已算好的现成字段，不求完备，先观察一季再校准。
+                if (cand.get("bottom_volume") or {}).get("hit") or (
+                    cand.get("ignition") or {}
+                ).get("hit"):
+                    result["watchlist_outside_gate"].append(
+                        {
+                            "code": code6,
+                            "name": name,
+                            "daily_j": dj,
+                            "change_pct": cand.get("change_pct"),
+                            "bottom_volume": cand.get("bottom_volume"),
+                            "ignition": cand.get("ignition"),
+                            "formula_hits": cand.get("formula_hits"),
+                            "gate_reason": f"j_not_low:j={dj}",
+                        }
+                    )
                 exclude(f"j_not_low:j={dj}")
                 continue
         theme = stock_theme.get(code6)

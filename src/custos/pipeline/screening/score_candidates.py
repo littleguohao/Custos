@@ -749,9 +749,14 @@ def score_candidate(
         # 变成 B 类（改分层），必须先过回测——见 tests/test_signal_labels.py。
         "signals": cand.get("signals") or {},
         # S_shape v3.0 有界评分（借鉴 workflow 沙漏模型）
+        # v0.50：s_shape 移出分层（仅展示）；v0.51：s_reversal/adx25 同为
+        # 严格证据列（#37 阶段 B）——只透传，不进技术分/分层/gate。
         "s_shape": cand.get("s_shape") or {},
         "s_star": (cand.get("s_shape") or {}).get("s_star"),
         "suggestion": (cand.get("s_shape") or {}).get("suggestion"),
+        "s_reversal": cand.get("s_reversal") or {},
+        "adx": cand.get("adx"),
+        "adx25": bool(cand.get("adx25")),
         # 正交因子（方向A）：流动性 + 资金流向
         "liquidity": cand.get("liquidity") or {},
         "fund_flow": cand.get("fund_flow") or {},
@@ -851,6 +856,9 @@ def score_all(
         "sector_score_max": float(sector_score_max),
         "bucket_counts": {"A": 0, "B": 0, "C": 0, "D": 0},
         "candidates": [],
+        # v0.51（#37 阶段 B）：门槛外观察区透传（不进 candidates 主池、不进分层；
+        # candidate_table 新增一节展示）。
+        "watchlist_outside_gate": (enriched or {}).get("watchlist_outside_gate") or [],
     }
 
     if not enriched or enriched.get("status") == "unavailable":

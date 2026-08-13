@@ -718,8 +718,16 @@ SPECS: dict[str, dict] = {
                     "next_step": {"type": str, "required": True, "non_empty": True},
                     "risk_flags": {"type": list, "required": True},
                     "entry_reason": {"type": list, "required": True},
+                    # v0.51（#37 阶段 B）：严格证据列（只落盘+展示，不进分层/总分/
+                    # gate）——required=False 跟随「证据字段不入必填」的既有惯例
+                    # （spec 只钉 5 个核心键）。
+                    "adx25": {"type": bool, "required": False},
+                    "s_reversal": {"type": dict, "required": False},
                 },
             },
+            # v0.51：门槛外观察区（被 J<13 挡掉但异动强的票；不进主池/分层，
+            # candidate_table 单列一节展示）。enrich 缺席时为空数组。
+            "watchlist_outside_gate": {"type": list, "required": False},
             "bucket_counts": {"type": dict, "required": True},
             "audit": _AUDIT_FIELD,
         },
