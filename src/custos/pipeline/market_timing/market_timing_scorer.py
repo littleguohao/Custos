@@ -185,7 +185,12 @@ def is_stale(section: dict, day: Optional[str] = None) -> bool:
     否则 TdxW 没刷新时 T-1 的涨跌比/成交额会照样给出高分,报告看起来完全正常。
 
     两种判据:① quality 已被门控/合并标为 stale;② 传入 day 时,section.as_of 与 day 不符
-    (生产数据的实际形态:collector 取上一根 K 线,quality=auto,as_of=T-1——仅看 quality 会漏)。"""
+    (生产数据的实际形态:collector 取上一根 K 线,quality=auto,as_of=T-1——仅看 quality 会漏)。
+
+    已知边界（2026-08-12 #45② 收口时确认，刻意不修）:`day=None` 时判据②恒不触发
+    （返回只看 quality）——三个调用点都传 `d.get("date")`，而 `date` 是契约必填字段，
+    只有契约被违反时才可达。as_of 为 None（允许，见 contracts）时判据②同样不触发，
+    退回 quality 判定——「没声明数据日」不等于「陈旧」。"""
     # ⚠️ 2026-08-10：判据从 `== "stale"` 改为 `in SECTION_NOT_FRESH`。
     #    原来只认 `"stale"` 一个词，而两个生产者用的是**不同词表**：
     #        merge_incremental_market  → auto / stale / **raw_only**（无数据日）

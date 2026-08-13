@@ -172,3 +172,16 @@ class TestFreshnessLabeling:
         assert "degraded" in C.SECTION_NOT_FRESH, (
             "collector 会产出 degraded，它必须在「不新鲜」域里"
         )
+
+
+class TestSectionSkeletonCarriesAsOf:
+    """契约钉（2026-08-12 #45②）：collector 的三段骨架必须带 `as_of` 键
+    （初值 None——「编一个 as_of 等于给门控假新鲜度」）。
+
+    本机无 vipdoc ⇒ 走「读取失败/无数据」分支，恰是校验**骨架初值**的路径。
+    """
+
+    def test_three_sections_have_as_of_key(self):
+        breadth, sentiment, turnover, _q = mtc.derive_market_fields("2026-08-12")
+        for sec in (breadth, sentiment, turnover):
+            assert "as_of" in sec, "三段骨架缺 as_of 键 ⇒ 契约必填会硬失败"

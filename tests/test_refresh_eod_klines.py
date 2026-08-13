@@ -150,3 +150,30 @@ class TestMarketIndicesStaleness:
         assert rmi._is_stale("2026-07-20", "2026-07-20") is False
         assert rmi._is_stale(None, "2026-07-20") is True
         assert rmi._is_stale("", "2026-07-20") is True
+
+    def test_section_rebuilds_write_as_of(self):
+        """契约钉（2026-08-12 #45②）：refresh 重建三段时必须写 as_of 键
+        （AST 取 `mkt["<section>"] = {...}` 字面量核对，不依赖 vipdoc）。"""
+        import ast
+        import pathlib
+
+        import custos.datasource.refresh_market_indices as rmi
+
+        tree = ast.parse(pathlib.Path(rmi.__file__).read_text(encoding="utf-8-sig"))
+        written = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign):
+                continue
+            t = node.targets[0]
+            if (
+                isinstance(t, ast.Subscript)
+                and isinstance(t.value, ast.Name)
+                and t.value.id == "mkt"
+                and isinstance(t.slice, ast.Constant)
+                and isinstance(node.value, ast.Dict)
+            ):
+                keys = {k.value for k in node.value.keys if isinstance(k, ast.Constant)}
+                if t.slice.value in ("market_breadth", "sentiment", "turnover"):
+                    assert "as_of" in keys, f"{t.slice.value} 重建缺 as_of"
+                    written.add(t.slice.value)
+        assert written == {"market_breadth", "sentiment", "turnover"}

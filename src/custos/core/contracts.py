@@ -129,8 +129,10 @@ FRESHNESS = {"confirmed", "stale", "missing", "candidate", "auto"}
 #      —— 读报告的人无从知道这个分数建立在「不知道是哪天的数据」上。
 SECTION_QUALITY = {"auto", "stale", "raw_only", "degraded", "missing"}
 # 「不可按当日满分计入」的那些：**生产者已经声明过不新鲜/不可证**，消费者必须听。
-# ⚠️ 判据是**生产者声明**，不是「有没有 as_of」—— 后者是更宽的 fail-closed，
-#    会把「合法但没写 as_of」的段也打成陈旧，超出本次修复范围（见 TODO #45）。
+# ⚠️ 判据是**生产者声明**，不是「有没有 as_of」—— 后者是更宽的 fail-closed。
+#    2026-08-12（#45②，v0.47）三段（market_breadth/sentiment/turnover）的 as_of
+#    已补进契约必填（nullable），scorer 的 is_stale 判据②按 as_of≠当日 判陈旧；
+#    其余段仍只按本词表判。
 SECTION_NOT_FRESH = {"stale", "raw_only", "degraded", "missing"}
 
 # ── 已知的 new_position_permission 取值。它是**从 markdown 报告正则抽出来的**
@@ -389,9 +391,34 @@ SPECS: dict[str, dict] = {
                 },
             },
             "a_share_indices": {"type": dict, "required": True},
-            "market_breadth": {"type": dict, "required": True},
-            "sentiment": {"type": dict, "required": True},
-            "turnover": {"type": dict, "required": True},
+            # 2026-08-12（TODO #45②，owner 拍板）：三段补 `as_of` 必填（nullable），
+            # 与 `overseas_market.as_of`/`amv_0.as_of` 同形——键必须在、值允许 None
+            # （「编一个 as_of 等于给门控假新鲜度」）。前置普查：三个生产者
+            # （collector 的 derive_market_fields 初值 None、merge_incremental、
+            # refresh_market_indices）本就键恒在 ⇒ 补契约不会硬失败（#52 教训：
+            # 先补生产者再补契约）。补契约后 is_stale 的 as_of 分支（scorer :200）
+            # 才真正可靠——此前段里没这键时它静默落空。
+            "market_breadth": {
+                "type": dict,
+                "required": True,
+                "fields": {
+                    "as_of": {"type": str, "required": True, "nullable": True},
+                },
+            },
+            "sentiment": {
+                "type": dict,
+                "required": True,
+                "fields": {
+                    "as_of": {"type": str, "required": True, "nullable": True},
+                },
+            },
+            "turnover": {
+                "type": dict,
+                "required": True,
+                "fields": {
+                    "as_of": {"type": str, "required": True, "nullable": True},
+                },
+            },
             "theme": {"type": dict, "required": True},
             "macro_policy": {"type": dict, "required": True},
             "data_quality": {"type": dict, "required": True},

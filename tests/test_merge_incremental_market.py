@@ -41,6 +41,15 @@ def test_current_day_data_marked_auto():
     assert mkt["turnover"]["turnover_change_pct"] == 20.0
 
 
+def test_merged_sections_always_carry_as_of():
+    """契约钉（2026-08-12 #45②）：merge 建的三段必须带 as_of 键——
+    契约已把它列为必填（nullable），生产者漏写会在 require 处硬失败。"""
+    mkt, _ = mim.merge_incremental(_inc(TARGET), {}, TARGET)
+    for sec in ("market_breadth", "sentiment", "turnover"):
+        assert "as_of" in mkt[sec], f"{sec} 缺 as_of 键"
+        assert mkt[sec]["as_of"] == TARGET
+
+
 def test_prior_day_data_marked_stale_and_reported():
     """核心回归:TdxW 未刷新时 collect 取到上一根 K 线,以前会写 quality=auto 满分通过。"""
     mkt, stale = mim.merge_incremental(_inc("2026-07-17"), {}, TARGET)

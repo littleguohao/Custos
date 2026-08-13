@@ -346,9 +346,11 @@ VALID_MTI = {
         "overseas_summary": "",
     },
     "a_share_indices": {},
-    "market_breadth": {},
-    "sentiment": {},
-    "turnover": {},
+    # ⚠️ 三段的 `as_of` 键恒在、缺数据时为 None（2026-08-12 #45② 起契约必填）。
+    #    核对过真实产出：collector 初值 None、merge/refresh 写入时必带该键。
+    "market_breadth": {"as_of": None},
+    "sentiment": {"as_of": None},
+    "turnover": {"as_of": None},
     "theme": {},
     "macro_policy": {},
     "data_quality": {},
@@ -409,6 +411,43 @@ class TestProgressiveFillArtifact:
             "amv_0": {**VALID_MTI["amv_0"], "effective_state": "空头触发"},
         }
         assert not C.check("market_timing_input", bad)["valid"], "未归一的词表必须拒收"
+
+
+class TestSectionAsOfRequired:
+    """2026-08-12（TODO #45②，owner 拍板）：market_breadth/sentiment/turnover
+    三段的 `as_of` 补进契约必填（nullable）——与 overseas_market/amv_0 同形。
+
+    键必须在：scorer 的 `is_stale` 早有 as_of 分支，但段里没这键时它静默落空
+    （`bool(day and as_of)` 为 False ⇒ 只按 quality 判）。值允许 None：
+    「编一个 as_of 等于给门控假新鲜度」。"""
+
+    SECTIONS = ("market_breadth", "sentiment", "turnover")
+
+    @pytest.mark.parametrize("section", SECTIONS)
+    def test_missing_as_of_rejected(self, section):
+        bad = {**VALID_MTI, section: {"up_count": 1}}  # 有内容但没 as_of 键
+        r = C.check("market_timing_input", bad)
+        assert not r["valid"] and any(f"{section}.as_of" in e for e in r["errors"])
+
+    @pytest.mark.parametrize("section", SECTIONS)
+    def test_null_as_of_allowed(self, section):
+        assert C.check("market_timing_input", VALID_MTI)["valid"]
+
+    @pytest.mark.parametrize("section", SECTIONS)
+    def test_real_date_as_of_valid(self, section):
+        good = {**VALID_MTI, section: {"as_of": "2026-08-11"}}
+        assert C.check("market_timing_input", good)["valid"]
+
+    @pytest.mark.parametrize("section", SECTIONS)
+    def test_partial_require_also_enforces_when_section_present(self, section):
+        """merge 的部分校验（only=三段）：段**存在**时 as_of 缺失同样要拦
+        （only 只去掉顶层 required，不收窄段内字段）。"""
+        r = C.check(
+            "market_timing_input",
+            {section: {"up_count": 1}},
+            only=("market_breadth", "sentiment", "turnover"),
+        )
+        assert not r["valid"] and any(f"{section}.as_of" in e for e in r["errors"])
 
 
 class TestOnlyScoping:
