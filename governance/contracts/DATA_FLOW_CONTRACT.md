@@ -29,7 +29,7 @@
 | **BuyPlan** | `buy_strategy` 代码已移除，代码里只剩 `next_step="generate_buy_plan"` 这个字符串标签 | **结论四档 / 买入方式五类 / 最大亏损比例**已抢救到 [`../strategy/b1/03_execution_discipline.md`](../strategy/b1/03_execution_discipline.md) |
 
 ⚠️ 另删掉 `RiskDecision.cooldown_list`：**声明过但从未实现**的风控机制
-（全仓 `cooldown`/`冷却`/`blacklist` 零命中）。是否要真做冷却见 `TODO.md` #51（2026-08-12 原 #31 已并入）。
+（全仓 `cooldown_list`/`blacklist` 零命中）。冷却 2026-08-12 已实现为复盘提示节（只提示不拦截），见 `close_review/cooldowns.py` 与 CHANGELOG v0.48。
 删掉字段本身就是最好的标记 —— 契约里没有它，就不会有人以为它存在。
 
 ## 核心实体

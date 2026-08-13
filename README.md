@@ -121,6 +121,9 @@ scripts\audit.ps1 -SkipMypy
 
 **决策优先级**：个股服从板块，板块服从大盘；风控优先于买入；候选池仅为证据层，
 `chief_decision` 是最终输出层；所有计划必须可复盘。
+⚠️ 自动链**没有买入执行决策**（`buy_actions` 是字面量空表）：连亏/止损冷却/胜率降仓
+这类规则落**复盘报告节、只提示不拦截**（2026-08-12 #51，见 `close_review/loss_streak.py`
+与 `close_review/cooldowns.py`）。
 ⚠️ 同一事实的多个读数按**证据新鲜度**取（14:45 以实时价重算的 B1 为准）——
 见 [`_shared/decision_priority.md`](governance/strategy/_shared/decision_priority.md)。
 

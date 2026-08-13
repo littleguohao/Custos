@@ -73,6 +73,10 @@ from custos.pipeline.close_review.loss_streak import (
     format_lines as loss_streak_lines,  # noqa: E402
     loss_streaks,
 )
+from custos.pipeline.close_review.cooldowns import (  # noqa: E402
+    format_cooldown_lines,
+    stop_cooldowns,
+)
 
 # 规则阈值
 STOP_LOSS_PCT = -7.0  # b1 短线止损线：已实现亏损超过该值 = 止损偏慢
@@ -1287,8 +1291,12 @@ def build_weekly_review(base: Path, day: str) -> dict:
     # 连亏检查用 **closings_all（全台账）** 而不是本周切片 —— 连亏是跨周的事实，
     # 只喂本周的单子会把上周那次亏损截断，两次连亏被看成一次。
     loss_streak = loss_streaks(closings_all)
+    # 止损冷却名单同理（#51，2026-08-12）：冷却是跨周窗口，必须用全台账；
+    # as_of=周末日期 ⇒ 本周复盘时仍在冷却期的票。
+    cooldown = stop_cooldowns(closings_all, as_of=week["end"])
     return {
         "loss_streak": loss_streak,
+        "cooldown": cooldown,
         "iso_year": week["iso_year"],
         "iso_week": week["iso_week"],
         "range": {"start": week["start"], "end": week["end"]},
@@ -1474,6 +1482,10 @@ def render_markdown(review: dict) -> str:
     # 那里才有 `closings_all`（全台账配平结果）。
     if review.get("loss_streak") is not None:
         lines += loss_streak_lines(review["loss_streak"], title="连亏检查（全台账）")
+    if review.get("cooldown") is not None:
+        lines += format_cooldown_lines(
+            review["cooldown"], title="止损冷却名单（全台账）"
+        )
     unmatched = f.get("unmatched_closings") or []
     if unmatched:
         lines += [

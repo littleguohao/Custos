@@ -39,6 +39,12 @@ from typing import Any
 from custos.core.paths import BASE, cn_now, cn_today
 from custos.pipeline.close_review.loss_streak import format_lines as loss_streak_lines
 from custos.pipeline.close_review.loss_streak import loss_streaks
+from custos.pipeline.close_review.cooldowns import (  # noqa: E402
+    format_cooldown_lines,
+    format_win_rate_lines,
+    stop_cooldowns,
+    win_rate_check,
+)
 from custos.pipeline.close_review.weekly_review import (
     BUY,
     SELL,
@@ -219,6 +225,10 @@ def build_monthly_review(base: Path, month: str | None) -> dict[str, Any]:
 
     # --- 连亏（全台账口径，跨月不打断）---
     streak_result = loss_streaks(closings_all)
+    # --- 止损冷却名单（#51，2026-08-12：同连亏落点，全台账口径；as_of=月末）---
+    cooldown_result = stop_cooldowns(closings_all, as_of=rng["end"])
+    # --- 胜率降仓提示（#51② owner 2026-08-12 定：正式一节，只提示不拦截）---
+    win_rate_hint = win_rate_check(win_rate)
 
     # --- 期末组合集中度（成本口径；current_positions 是当前快照，
     #     只有复盘「刚结束的当月」时它才约等于期末持仓——更早月份标 unavailable）---
@@ -261,7 +271,7 @@ def build_monthly_review(base: Path, month: str | None) -> dict[str, Any]:
         )
     if win_rate is not None and win_rate < 35:
         notes.append(
-            f"月胜率 {win_rate}% 低于 35%（待办 #51② 的降仓阈值）——是否降仓待 owner 定，此处只提示。"
+            f"月胜率 {win_rate}% 低于 35% 降仓阈值——见「胜率降仓提示」节（只提示，降仓由人裁决）。"
         )
     if max_dd is not None and max_dd <= -10:
         notes.append(f"月内最大回撤 {max_dd}% —— 复核止损执行节与仓位上限。")
@@ -336,6 +346,8 @@ def build_monthly_review(base: Path, month: str | None) -> dict[str, Any]:
             "bear_loss_share_pct": bear_loss_share,
         },
         "loss_streaks": streak_result,
+        "cooldown": cooldown_result,
+        "win_rate_hint": win_rate_hint,
         "concentration": concentration,
         "execution_issues": execution_issues,
         "strategy_issues": strategy_issues,
@@ -440,6 +452,8 @@ def render_markdown(review: dict) -> str:
         "",
     ]
     L += loss_streak_lines(review["loss_streaks"], title="连亏检查（全台账）")
+    L += format_cooldown_lines(review["cooldown"], title="止损冷却名单（全台账）")
+    L += format_win_rate_lines(review["win_rate_hint"])
     bear = review["bear_context"]
     L += [
         f"- 空头日 {bear['bear_days']} 天（占 {_fmt(bear['bear_day_ratio_pct'], '%')}）；"

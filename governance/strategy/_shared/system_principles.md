@@ -30,7 +30,8 @@
 ⚠️ **每条的来源、样本量与「是否已成机制」见
 [`TRADE_LESSONS.md`](../../../TRADE_LESSONS.md)。**
 那份表里如实标出：这 6 条**没有一条记了统计区间与样本量**，
-且第 1/2/4 条**没有任何代码在执行**（第 4 条「连亏冷却」是零实现，见待办 #51）。
+且第 1/2 条**没有任何代码在执行**；第 4 条「连亏冷却」2026-08-12 起实现为
+**复盘提示节**（`close_review/loss_streak.py` + `cooldowns.py`，只提示不拦截，v0.48）。
 读到这一节时不要默认它们已经被系统保证。
 
 1. 用户优势更偏**中周期主线交易**，而不是高频短线。
@@ -52,10 +53,11 @@
 | 短线止损 **−5%** 档 | ⛔ **不存在** | 只有 −7% 一档 |
 | **P0 优先级不可覆盖** | ✅ 已实现 | `b1_holding_state` 的 `permissions.allow_signal_override_hard_risk = False` |
 | **0AMV 空头区间减仓最高优先**（任何反弹都是卖出机会、禁止加仓补仓） | ✅ 已实现 | `b1_holding_state` 的 `bear_regime_reduce_top_priority`（P1）+ `generate_risk_and_sectors` 的 `regime_directive` |
-| **连亏冷却**：同股连续亏损 2 次 → 冷却 10 个交易日 | ⛔ **零实现** | 见待办 #51。同一件事今天还出现过一次：`contracts/DATA_FLOW_CONTRACT.md` 里的 `RiskDecision.cooldown_list` 也是**声明过但从未实现**，已删 |
-| **胜率降仓**：当月短线胜率 < 35% → 降低短线仓位 | ⛔ **零 live 实现** | 见待办 #51。只有研究脚本算胜率（`research/` 与 `weekly_review`），没有任何 live 组件据此降仓 |
+| **连亏冷却**：同股连续亏损 2 次 → 冷却 10 个交易日 | ✅ 已实现（**复盘提示**，2026-08-12，v0.48） | `close_review/loss_streak.py`（连亏名单）+ `close_review/cooldowns.py`（止损冷却名单），日/周/月报各出一节。**只提示不拦截**——自动链没有买入决策可拦（`buy_actions` 空表）。`contracts/DATA_FLOW_CONTRACT.md` 里的 `RiskDecision.cooldown_list` 是**声明过但从未实现**，已删 |
+| **胜率降仓**：当月短线胜率 < 35% → 降低短线仓位 | ✅ 已实现（**月报提示节**，2026-08-12，v0.48） | `monthly_review`「胜率降仓提示」节（`cooldowns.win_rate_check`，阈值 35%）。**只提示**：降仓由人裁决执行，没有仓位决策可拦 |
 
-⇒ 前 4 条可以当防线依赖；**后 2 条不能** —— 它们是**意图**，不是机制。
+⇒ 前 4 条可以当防线依赖；后 2 条是**复盘提示**（2026-08-12 起有代码在跑），
+**不是闸门**——「检测到 ≠ 会被阻止」，拦截在自动链里没有挂载点。
 
 ## 相关文档
 

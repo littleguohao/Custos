@@ -96,12 +96,13 @@ class TestUnimplementedMechanismsFlagged:
         ① `RiskDecision` 契约里**没有** `cooldown_list`（没有它就不会有人依赖它）；
         ② 全仓**没有任何 gate/拦截**语义的冷却实现 —— 判据是不出现
            `cooldown_list` / `blacklist` / `banned` 这类「名单式拦截」的名字。
-           （「冷却」二字现在合法出现在 `loss_streak` 与两处复盘的注释里，
-           因为那是在解释「为什么只统计不拦」。）
+           （「冷却」二字现在合法出现在 `loss_streak`、`cooldowns` 与复盘报告的
+           注释里，因为那是在解释「为什么只提示不拦」。）
 
         ⚠️ 为什么不做成闸门：`chief_decision_report` 的 `buy_actions` 是字面量空表
         （源码注释 `buy_actions always empty`）⇒ 自动链里没有买入决策可拦，
-        闸门会挂在空处。见 TODO #51（2026-08-12 原 #31 已并入）。
+        闸门会挂在空处。2026-08-12（#51，v0.48）止损冷却名单与胜率降仓提示
+        落地为复盘节（`close_review/cooldowns.py`），同为只提示不拦截。
         """
         code = _all_code()
         for kw in ("cooldown_list", "blacklist", "banned"):
@@ -136,6 +137,28 @@ class TestUnimplementedMechanismsFlagged:
         ):
             t = (ROOT / "src" / "custos" / rel).read_text(encoding="utf-8")
             assert "loss_streak" in t, f"{rel} 未接入连亏检查"
+
+    def test_cooldowns_exist_and_do_not_gate(self):
+        """⚠️ #51（2026-08-12，v0.48）：止损冷却名单 + 胜率降仓提示必须存在，
+        且**不得**参与任何拦截（同 loss_streak 的守卫理由：存在性也要测，
+        否则只剩「没有闸门」的断言，提示节悄悄消失也发现不了）。"""
+        from custos.pipeline.close_review import cooldowns as cd
+
+        assert callable(cd.stop_cooldowns) and callable(cd.format_cooldown_lines)
+        assert callable(cd.win_rate_check) and callable(cd.format_win_rate_lines)
+        src = (
+            ROOT / "src" / "custos" / "pipeline" / "close_review" / "cooldowns.py"
+        ).read_text(encoding="utf-8")
+        for bad in ("return False", "raise SystemExit", "blocked", "forbid"):
+            assert bad not in src, f"cooldowns 里出现 {bad!r} —— 它不该有拦截语义"
+        # 冷却名单进日/周/月三处复盘；胜率降仓提示在月报（当月口径）
+        for rel, kw in (
+            ("pipeline/close_review/final_close_review.py", "stop_cooldowns"),
+            ("pipeline/close_review/weekly_review.py", "stop_cooldowns"),
+            ("pipeline/close_review/monthly_review.py", "win_rate_check"),
+        ):
+            t = (ROOT / "src" / "custos" / rel).read_text(encoding="utf-8")
+            assert kw in t, f"{rel} 未接入 {kw}"
 
     def test_monthly_review_implemented_and_marked(self):
         """月度复盘 2026-08-11 已实现（TODO #30）——文档状态与代码互锁，防再漂移。"""

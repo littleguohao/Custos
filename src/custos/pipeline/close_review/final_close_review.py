@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from typing import Optional
 
 from custos.pipeline.holdings.b1_holding_state import evaluate as evaluate_b1_holding
 
@@ -14,6 +15,10 @@ from custos.pipeline.close_review.holding_structure import n_structure_basis
 from custos.core.paths import cn_now, DATA, REVIEWS  # noqa: E402
 from custos.pipeline.close_review.loss_streak import format_lines as loss_streak_lines  # noqa: E402
 from custos.pipeline.close_review.loss_streak import loss_streaks  # noqa: E402
+from custos.pipeline.close_review.cooldowns import (  # noqa: E402
+    format_cooldown_lines,
+    stop_cooldowns,
+)
 
 # ⚠️ 台账解析与 FIFO 配平的唯一实现在 `weekly_review` —— 这里**单向**依赖它。
 #    曾想把「加载→配平→连亏」包进 `loss_streak.from_ledger()` 做统一入口，
@@ -261,7 +266,7 @@ def render_themes(lines, enrichment):
         )
 
 
-def render_holdings(lines, enrichment, revalued):
+def render_holdings(lines, enrichment, revalued, day):
     """§5 持仓逐只诊断与仓位审计。"""
     lines += [
         "",
@@ -310,6 +315,31 @@ def render_holdings(lines, enrichment, revalued):
     #    没有买入决策可拦；作用是让复盘看见「这只票已连亏 N 次」。
     lines += loss_streak_lines(_loss_streak_today())
 
+    # 止损冷却名单（owner 2026-08-12 #51：与连亏检查同落点、同「只提示不拦截」）。
+    #    watch=当日在持 ⇒ 冷却期内的票还在持仓里会被点名提示。
+    lines += format_cooldown_lines(
+        _cooldown_today(day, watch={r["code"]: "当日在持" for r in revalued})
+    )
+
+
+def _load_closings() -> tuple[Optional[list], Optional[str]]:
+    """读主台账 → FIFO 配平；失败返回 (None, 原因)。连亏/冷却两节共用。"""
+    ledger = DATA / "trades" / "master_trade_ledger.csv"
+    if not ledger.exists():
+        return None, f"主台账不存在：{ledger}"
+    trades = parse_ledger(ledger)
+    if trades is None:
+        return None, f"主台账解析失败：{ledger}"
+    return fifo_pair(trades), None
+
+
+def _cooldown_today(day: str, watch: Optional[dict] = None) -> dict:
+    """当日止损冷却名单。台账缺失/解析失败时 available=False（不编「无冷却」）。"""
+    closings, err = _load_closings()
+    if err:
+        return {"available": False, "reason": err}
+    return stop_cooldowns(closings or [], as_of=day)
+
 
 def _loss_streak_today() -> dict:
     """当日连亏检查：读主台账 → FIFO 配平 → 连亏聚合。
@@ -317,13 +347,10 @@ def _loss_streak_today() -> dict:
     台账缺失/解析失败时返回 `available=False` 并说明原因 ——
     **不返回「无连亏」**，那会把「没查」显示成「查了没有」。
     """
-    ledger = DATA / "trades" / "master_trade_ledger.csv"
-    if not ledger.exists():
-        return {"available": False, "reason": f"主台账不存在：{ledger}"}
-    trades = parse_ledger(ledger)
-    if trades is None:
-        return {"available": False, "reason": f"主台账解析失败：{ledger}"}
-    out = loss_streaks(fifo_pair(trades))
+    closings, err = _load_closings()
+    if err:
+        return {"available": False, "reason": err}
+    out = loss_streaks(closings or [])
     out["available"] = True
     return out
 
@@ -507,7 +534,7 @@ def main():
 
     render_themes(lines, enrichment)
 
-    render_holdings(lines, enrichment, revalued)
+    render_holdings(lines, enrichment, revalued, day)
 
     next_plan = render_next_day(lines, enrichment)
 
