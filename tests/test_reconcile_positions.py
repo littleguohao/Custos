@@ -203,6 +203,74 @@ class TestReconcileStatus:
         assert r["status"] == "replay_failed"
 
 
+class TestDiagnosability:
+    """#32（2026-08-12 owner「还需要优化和梳理」）：失败不能只给一个状态串。"""
+
+    def test_oversell_error_names_the_diverging_trade(self, tmp_path):
+        """超卖报错必须带分叉点：哪只票、哪天哪笔、卖多少、当时持仓多少。"""
+        led = _ledger(
+            tmp_path,
+            [
+                _row("2026-08-03", "09:31:00", "600000", "买入", 100, 10.0),
+                _row("2026-08-05", "14:00:00", "600000", "卖出", 300, 11.0),
+            ],
+        )
+        r = rp.replay_ledger(led, baseline=[])
+        assert r["ok"] is False
+        for frag in ("600000", "2026-08-05", "300", "100"):
+            assert frag in r["error"], f"报错缺分叉点信息 {frag!r}：{r['error']}"
+
+    def test_oversell_without_baseline_teaches_baseline(self, tmp_path):
+        """未给 baseline 时超卖报错要直接教 --baseline（格式示例）。"""
+        led = _ledger(
+            tmp_path, [_row("2026-08-03", "09:31:00", "600000", "卖出", 100, 10.0)]
+        )
+        r = rp.replay_ledger(led)  # baseline=None
+        assert "--baseline" in r["error"] and "持有数量" in r["error"]
+        r2 = rp.replay_ledger(led, baseline=[])
+        assert "--baseline" not in r2["error"], "给了 baseline 就别再教一遍"
+
+
+class TestBaselineLoading:
+    def _main(self, tmp_path, monkeypatch, baseline_path):
+        led = _ledger(
+            tmp_path, [_row("2026-08-03", "09:31:00", "600000", "买入", 100, 10.0)]
+        )
+        monkeypatch.setattr(rp, "LEDGER", led)
+        monkeypatch.setattr(rp, "POS", _pos(tmp_path, []))
+        monkeypatch.setattr(rp, "QUALITY_DIR", tmp_path)
+        return rp.main(["--date", "2026-08-03", "--baseline", str(baseline_path)])
+
+    def test_missing_file_exits_with_format_guidance(self, tmp_path, monkeypatch):
+        with pytest.raises(SystemExit) as e:
+            self._main(tmp_path, monkeypatch, tmp_path / "nope.json")
+        assert "持有数量" in str(e.value), "报错必须附 baseline 格式引导"
+
+    def test_malformed_json_exits_with_guidance(self, tmp_path, monkeypatch):
+        bad = tmp_path / "bad.json"
+        bad.write_text("{not json", encoding="utf-8")
+        with pytest.raises(SystemExit) as e:
+            self._main(tmp_path, monkeypatch, bad)
+        assert "持有数量" in str(e.value)
+
+    def test_row_missing_required_keys_rejected(self, tmp_path, monkeypatch):
+        bad = tmp_path / "bad.json"
+        bad.write_text(json.dumps([{"代码": "600000"}]), encoding="utf-8")
+        with pytest.raises(SystemExit) as e:
+            self._main(tmp_path, monkeypatch, bad)
+        assert "持有数量" in str(e.value)
+
+    def test_valid_baseline_accepted(self, tmp_path, monkeypatch):
+        good = tmp_path / "baseline.json"
+        good.write_text(
+            json.dumps(
+                [{"代码": "600000", "名称": "测试", "持有数量": 50.0, "单位成本": 9.0}]
+            ),
+            encoding="utf-8",
+        )
+        assert self._main(tmp_path, monkeypatch, good) == 0
+
+
 class TestReusesSingleSourceOfTruth:
     def test_replay_uses_incremental_ledger_compute_positions(self):
         """回放必须复用 `incremental_ledger.compute_positions`。
@@ -332,3 +400,11 @@ class TestWiredIntoDailyChain:
     def test_note_helper_degrades_loudly(self):
         """读不到对账结果时要明确说「读不到」，不能返回空串装作正常。"""
         assert "reconcile_json_unreadable" in self.SRC
+
+    def test_abnormal_status_warns_on_stderr(self):
+        """#32（2026-08-12）：非阻断 ≠ 静默——mismatch/replay_failed 时
+        退出码仍是 0，失败信号必须同时在 stderr 可见，不能只躺在 run log。"""
+        i = self.SRC.index('"ledger_reconcile"')
+        seg = self.SRC[i : i + 1200]
+        assert "status=mismatch" in seg and "status=replay_failed" in seg
+        assert "台账对账异常" in seg

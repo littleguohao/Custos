@@ -191,7 +191,13 @@ def compute_positions(new: pd.DataFrame, current_rows: list[dict]) -> list[dict]
             pos["名称"] = t["名称"] or pos.get("名称")
         else:
             if pos is None or finite(pos.get("持有数量")) < qty:
-                raise ValueError(f"{code}卖出数量超过台账持仓")
+                # 2026-08-12（#32）：报错带分叉点上下文——哪笔、哪天、当时持仓多少，
+                # 否则对账侧只能拿到一个状态串，排错要从头回放。
+                held = 0.0 if pos is None else finite(pos.get("持有数量"))
+                raise ValueError(
+                    f"{code}卖出数量超过台账持仓"
+                    f"（{t['成交日期']} {t['成交时间']} 卖 {qty:g} 股，当时持仓 {held:g} 股）"
+                )
             pos["持有数量"] = finite(pos.get("持有数量")) - qty
             if pos["持有数量"] <= 0:
                 del by[code]

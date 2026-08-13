@@ -54,6 +54,12 @@ from custos.core.trades.incremental_ledger import (
     norm,
 )
 
+BASELINE_FORMAT = (
+    '--baseline 期初持仓 JSON 格式：[{"代码": "600000", "名称": "浦发银行", '
+    '"持有数量": 1000, "单位成本": 10.50}, ...]'
+    "（台账第一笔记账日**之前**的持仓快照；单位成本缺失按 0 计）"
+)
+
 
 def replay_ledger(
     ledger_path: Path | None = None, baseline: list[dict] | None = None
@@ -90,10 +96,13 @@ def replay_ledger(
     try:
         pos = compute_positions(trades, list(baseline or []))
     except ValueError as e:  # 超卖 = 诊断结论，不是故障
+        # 2026-08-12（#32）：未给 baseline 时直接把修法写进报错——超卖的头号成因
+        # 就是台账非从零开始，别让读者自己去猜 --baseline 的存在与格式。
+        hint = "" if baseline is not None else f" ⇒ 若台账非从零开始：{BASELINE_FORMAT}"
         return {
             "ok": False,
             "positions": [],
-            "error": f"replay_oversell: {e}",
+            "error": f"replay_oversell: {e}{hint}",
             "trade_rows": len(trades),
         }
     return {"ok": True, "positions": pos, "error": None, "trade_rows": len(trades)}
@@ -189,10 +198,34 @@ def reconcile(
     }
 
 
+def _load_baseline(path_str: str) -> list[dict]:
+    """读并校验期初持仓文件；问题一律 SystemExit 并附格式引导（不抛裸 traceback）。"""
+    p = Path(path_str)
+    if not p.is_file():
+        raise SystemExit(f"--baseline 文件不存在：{p}\n{BASELINE_FORMAT}")
+    try:
+        rows = json.loads(p.read_text(encoding="utf-8"))
+    except ValueError as e:
+        raise SystemExit(f"--baseline 不是合法 JSON：{p}（{e}）\n{BASELINE_FORMAT}")
+    if not isinstance(rows, list):
+        raise SystemExit(f"--baseline 顶层必须是数组：{p}\n{BASELINE_FORMAT}")
+    for i, r in enumerate(rows):
+        missing = {"代码", "持有数量"} - set(r) if isinstance(r, dict) else {"代码"}
+        if missing:
+            raise SystemExit(
+                f"--baseline 第 {i} 行缺字段 {sorted(missing)}：{p}\n{BASELINE_FORMAT}"
+            )
+    return rows
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="台账↔持仓对账（默认只报告，不阻断）")
     ap.add_argument("--date", help="仅用于落盘文件名，不影响比对")
-    ap.add_argument("--baseline", help="期初持仓 JSON（台账非从零开始时必须提供）")
+    ap.add_argument(
+        "--baseline",
+        help="期初持仓 JSON（台账非从零开始时必须提供）。"
+        + BASELINE_FORMAT.replace("--baseline 期初持仓 JSON 格式：", "格式："),
+    )
     ap.add_argument("--cost-tol", type=float, default=1e-6, help="单位成本相对容差")
     ap.add_argument(
         "--strict",
@@ -205,9 +238,7 @@ def main(argv=None) -> int:
     )
     a = ap.parse_args(argv)
 
-    baseline = (
-        json.loads(Path(a.baseline).read_text(encoding="utf-8")) if a.baseline else None
-    )
+    baseline = _load_baseline(a.baseline) if a.baseline else None
     r = reconcile(baseline=baseline, cost_tol=a.cost_tol)
 
     day = a.date or cn_now().strftime("%Y-%m-%d")

@@ -217,6 +217,15 @@ def main(argv=None) -> int:
     stages_log[-1]["note"] = _reconcile_note(target)
     if not r["ok"]:
         print(f"[WARN] ledger_reconcile 未成功（不阻断）：{r['out'][:200]}")
+    # 2026-08-12（#32）：mismatch/replay_failed 时 stage 退出码仍是 0（非阻断），
+    # 失败信号若只躺在 run log 的 note 里就是**静默**——stderr 也要可见。
+    _note = stages_log[-1]["note"]
+    if (
+        "status=mismatch" in _note
+        or "status=replay_failed" in _note
+        or "unreadable" in _note
+    ):
+        print(f"[WARN] 台账对账异常（不阻断）：{_note}", file=sys.stderr)
 
     # 3c. Collect fund flow rank (eastmoney direct API)
     r = _run_stage(
