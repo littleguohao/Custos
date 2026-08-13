@@ -662,6 +662,35 @@ def surge_strict_then_b1_gate(df_slice: pd.DataFrame) -> bool:
         return False
 
 
+def bottom_surge_j13_gate(df_slice: pd.DataFrame) -> bool:
+    """#13 修正口径（2026-08-12 owner 裁决）：异动后 60 天窗口内**每次 J<13 都触发**
+    （不限首次——「不一定是首次，可以多关注几次」）。
+
+    旧 `bottom_surge` 的语义缺陷（R7:141）：异动发生后 gate 在 60 天窗口内**持续为真**，
+    非事件日也天天触发（首轮 107,831 条、几乎无选择性 ⇒ 否决）。修正 = 叠加当日
+    J<13（`b1_thresholds.J_LOW_THRESHOLD`，与 j_low 同口径）。语义与
+    `surge_then_b1`（宽口径异动 + 当日 J<13）一致——保留独立命名位是为旧口径对照
+    与 R7 命令槽位（`--entry-filter bottom_surge_j13`）。旧 gate 原样保留。
+    """
+    if detect_b2 is None:
+        return False
+    try:
+        return bool(detect_surge_then_b1(df_slice).get("hit"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def bottom_surge_strict_j13_gate(df_slice: pd.DataFrame) -> bool:
+    """#13 修正口径的严变体：严异动（量维持 + 穿 60 日线 + 9 个月新高）后窗口内
+    每次 J<13 触发。语义同 `surge_strict_then_b1`，命名位理由同上。"""
+    if detect_b2 is None:
+        return False
+    try:
+        return bool(detect_surge_then_b1(df_slice, strict_surge=True).get("hit"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _sc_b2(df: pd.DataFrame, code: str):
     """B2 打分:四条硬条件命中数 ×20 + 无上影线 +20（0-100，待回测）。
 
@@ -702,6 +731,8 @@ if detect_b2 is not None:
     ENTRY_GATES["bottom_surge_strict"] = bottom_surge_strict_gate
     ENTRY_GATES["surge_then_b1"] = surge_then_b1_gate
     ENTRY_GATES["surge_strict_then_b1"] = surge_strict_then_b1_gate
+    ENTRY_GATES["bottom_surge_j13"] = bottom_surge_j13_gate
+    ENTRY_GATES["bottom_surge_strict_j13"] = bottom_surge_strict_j13_gate
 
 
 # ---- RSI 状态 + 主升始发点(来源:微信文章公式) ----

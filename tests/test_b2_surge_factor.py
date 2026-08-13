@@ -222,6 +222,8 @@ class TestRegistration:
             "bottom_surge_strict",
             "surge_then_b1",
             "surge_strict_then_b1",
+            "bottom_surge_j13",
+            "bottom_surge_strict_j13",
         ],
     )
     def test_gate_registered(self, name):
@@ -235,6 +237,8 @@ class TestRegistration:
             "bottom_surge_strict",
             "surge_then_b1",
             "surge_strict_then_b1",
+            "bottom_surge_j13",
+            "bottom_surge_strict_j13",
         ],
     )
     def test_gates_never_raise(self, name):
@@ -267,3 +271,100 @@ class TestNotWiredIntoScreening:
         src = inspect.getsource(sc)
         for name in ("detect_b2", "bottom_surge", "b2_surge_factor"):
             assert name not in src, "接入选股链前必须先有回测证据"
+
+
+def _surge_then_decline(extra_decline: int = 0) -> pd.DataFrame:
+    """构造「200 根平缓基线 + 巨量点火（四条件全中）+ 量维持 4 天 + 缓涨 6 天
+    + 缩量回调 9 天（J 落低位）」的序列；``extra_decline`` 再追加缩量阴跌
+    （把异动挤出 60 天窗口用）。"""
+    base = [(10.0 + 0.15 * np.sin(i / 4), 4.0e5) for i in range(200)]
+    p = base[-1][0]
+    rows = list(base) + [(p * 1.09, 1.4e6)]  # 巨量点火 +9%、3.5×量
+    for _ in range(4):
+        rows.append((rows[-1][0] * 1.02, 9.0e5))  # 后4天量 > 巨量一半
+    for _ in range(6):
+        rows.append((rows[-1][0] * 1.012, 7.0e5))
+    q = rows[-1][0]
+    for _ in range(9 + extra_decline):  # 缩量回调 → J 落低位
+        q *= 0.978
+        rows.append((q, 2.6e5))
+    return _mk(rows)
+
+
+def _j13_indices(df: pd.DataFrame) -> list[int]:
+    """60 天窗口内 J<13 的索引（测试驱动断言用，与 gate 同口径）。"""
+    j = bs._j_series(df)
+    n = len(df)
+    return [
+        i
+        for i in range(max(0, n - bs.SURGE_LOOKBACK), n)
+        if j[i] == j[i] and j[i] < bs.B2_J_LOW
+    ]
+
+
+class TestBottomSurgeJ13:
+    """#13 修正口径（2026-08-12 owner 裁决）：异动后 60 天窗口内**每次 J<13 都
+    触发**（不限首次）。旧 `bottom_surge`（窗口内持续为真）原样保留作对照。"""
+
+    def test_surge_day_itself_not_triggered(self):
+        """异动当日 J 不低 ⇒ 新 gate 不触发（旧 gate 在当日就触发——对照差异）。"""
+        df = _surge_then_decline().iloc[:201]  # 截到点火当日
+        j = bs._j_series(df)
+        assert j[-1] >= bs.B2_J_LOW, "夹具前提：点火日 J 应在高位"
+        assert bt.ENTRY_GATES["bottom_surge"](df) is True  # 旧口径当日即真
+        assert bt.ENTRY_GATES["bottom_surge_j13"](df) is False
+
+    def test_every_j13_dip_in_window_triggers(self):
+        """窗口内每次 J<13 都触发，不限首次（owner：可以多关注几次）。"""
+        df = _surge_then_decline()
+        dips = _j13_indices(df)
+        assert len(dips) >= 2, f"夹具前提：窗口内应有多次 J<13，实有 {dips}"
+        for i in dips:
+            assert bt.ENTRY_GATES["bottom_surge_j13"](df.iloc[: i + 1]) is True, (
+                f"第 {i} 根 J<13 却未触发"
+            )
+
+    def test_no_trigger_without_j13(self):
+        """窗口内但当日 J 不低 ⇒ 不触发（这正是对旧口径的修正点）。"""
+        df = _surge_then_decline()
+        j = bs._j_series(df)
+        n = len(df)
+        high_j = [
+            i
+            for i in range(n - bs.SURGE_LOOKBACK, n)
+            if j[i] == j[i] and j[i] >= bs.B2_J_LOW
+        ]
+        assert high_j, "夹具前提：窗口内应有 J 不低的日子"
+        for i in high_j:
+            assert bt.ENTRY_GATES["bottom_surge_j13"](df.iloc[: i + 1]) is False
+
+    def test_outside_window_not_triggered(self):
+        """异动被挤出 60 天窗口后，即使当日 J<13 也不触发。"""
+        df = _surge_then_decline(extra_decline=61)
+        assert bs.detect_bottom_surge(df)["hit"] is False, "夹具前提：异动已在窗口外"
+        j = bs._j_series(df)
+        assert j[-1] < bs.B2_J_LOW, "夹具前提：末日 J<13"
+        assert bt.ENTRY_GATES["bottom_surge_j13"](df) is False
+
+    def test_strict_variant_requires_strict_surge(self):
+        """严变体：四条件全中的异动 ⇒ 触发；宽口径异动（缺 9 个月新高）⇒ 不触发。"""
+        df = _surge_then_decline()
+        dips = _j13_indices(df)
+        assert dips
+        assert bt.ENTRY_GATES["bottom_surge_strict_j13"](df.iloc[: dips[-1] + 1])
+
+        # 一路阴跌后的放量反弹：量随价升（宽口径中）但绝非 9 个月新高（严口径缺）
+        rows = [(22.0 * (0.997**i), 3.0e5) for i in range(210)]
+        rows.append((rows[-1][0] * 1.09, 1.4e6))
+        q = rows[-1][0]
+        for _ in range(15):
+            q *= 0.978
+            rows.append((q, 2.6e5))
+        df2 = _mk(rows)
+        r = bs.detect_bottom_surge(df2)
+        assert r["hit"] is True and r["strict_hit"] is False, "夹具前提：宽中严缺"
+        dips2 = _j13_indices(df2)
+        assert dips2, "夹具前提：回调后应有 J<13"
+        sl = df2.iloc[: dips2[-1] + 1]
+        assert bt.ENTRY_GATES["bottom_surge_j13"](sl) is True
+        assert bt.ENTRY_GATES["bottom_surge_strict_j13"](sl) is False

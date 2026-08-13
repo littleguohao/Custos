@@ -139,6 +139,11 @@ n=133、召回 0.14%（全市场日均 ~0.13 个信号），单 seed 单区间�
 uv run python src/custos/research/backtest_factors.py --entry-filter surge_strict_then_b1 --universe-local --universe-sample 1000 --seed 1 --horizons 5,10,20,60
 uv run python src/custos/research/backtest_factors.py --entry-filter surge_strict_then_b1 --universe-local --universe-sample 1000 --start 2022-01-01 --end 2024-12-31 --horizons 5,10,20,60
 # 宽口径 bottom_surge 的 gate 语义修正(异动后 60 天持续为真 → 只在异动当日/异动后首次 J<13 触发)后再议
+# ⇒ 已实现（2026-08-12，#13，owner 裁决「异动后的 J<13 触发，不一定是首次，可以多关注几次」）：
+#   新 gate bottom_surge_j13 / bottom_surge_strict_j13 = 异动后 60 天窗口内每次 J<13 都触发；
+#   旧 gate 原样保留作对照。**待回测**（目标机）：
+uv run python src/custos/research/backtest_factors.py --entry-filter bottom_surge_j13        --universe-local --universe-sample 1000
+uv run python src/custos/research/backtest_factors.py --entry-filter bottom_surge_strict_j13 --universe-local --universe-sample 1000
 ```
 
 ### 已明确不做

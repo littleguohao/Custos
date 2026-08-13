@@ -6,7 +6,7 @@
 > 优先级按**「它阻塞了什么」**排，不按工作量：
 > P0 = 阻塞其他事或 live 正在依赖 ｜ P1 = 已有结论悬空 ｜ P2 = 新验证 ｜ P3 = 技术债
 >
-> 最后更新：2026-08-12（#45② 落地：as_of 补进三段契约（v0.47），完成删除；决策项裁决落盘：#25 定范围（只扫 0AMV×出场组合）移入 P2、#26 扩为板块信息整体优化、#31 并入 #51、#37/#38 合并为 1800 重构、#32 改「先梳理再 strict」；前次：去冗精简，有结论/已落地条目删除，事实归宿在 R 系列文档与 CHANGELOG）
+> 最后更新：2026-08-12（#45② 落地：as_of 补进三段契约（v0.47），完成删除；#13 gate 语义修正：新 gate bottom_surge_j13 / bottom_surge_strict_j13，待目标机回测（v0.47）；决策项裁决落盘：#25 定范围（只扫 0AMV×出场组合）移入 P2、#26 扩为板块信息整体优化、#31 并入 #51、#37/#38 合并为 1800 重构、#32 改「先梳理再 strict」；前次：去冗精简，有结论/已落地条目删除，事实归宿在 R 系列文档与 CHANGELOG）
 
 ## P0 · 阻塞项
 
@@ -25,7 +25,7 @@
 
 | # | 事项 | 出处 | 备注 |
 |---|---|---|---|
-| 13 | 宽口径 `bottom_surge` 的 gate 语义修正后再议。语义问题（owner 2026-08-12 补背景）：**异动后 60 天持续为真 ⇒ 信号在异动后的非事件日持续触发**；修正方向=「只在异动当日 / 异动后首次 J<13 触发」（R7:141 原文），修正后才值得重跑 | [R7](governance/research/R7_hypothesis_H2_b1b2b3.md) | 语义未修不必跑 |
+| 13 | 宽口径 `bottom_surge` 的 gate 语义**已修正（2026-08-12，owner 裁决「异动后的 J<13 触发，不一定是首次，可以多关注几次」）**：新 gate `bottom_surge_j13` / `bottom_surge_strict_j13` = 异动后 60 天窗口内每次 J<13 都触发（J 阈取 `b1_thresholds`，与 j_low 同口径）；旧 gate 原样保留作对照。**待回测（目标机）**：`uv run python src/custos/research/backtest_factors.py --entry-filter bottom_surge_j13 --universe-local --universe-sample 1000`（strict 变体同理换名；命令模板见 R7:141 附近） | [R7](governance/research/R7_hypothesis_H2_b1b2b3.md) | 语义已修，待回测 |
 | 25 | **M2 续扫仅限「0AMV × 出场」组合维度**（owner 2026-08-12 定）；纯出场维度停扫——margin>3pp 且已实现为正的方案全在 0AMV 系、纯出场改善跨窗全翻负（trail_08 +0.122→−0.214R）、#20 余量口径 pct/atr 均否决 | [R10](governance/research/R10_mechanism_M2_stops.md) | 待跑 |
 
 ⚠️ 教训（cross-window 复核，已归入 R10）：edge 集中在单一 regime 的方案首轮看起来都很好。
