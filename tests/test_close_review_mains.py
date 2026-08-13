@@ -111,13 +111,13 @@ class TestFinalCloseReviewInputContract:
         """
         _run_fcr(monkeypatch)
         body = (
-            fcr_env / "artifacts/reports" / "daily" / f"{DAY}_final_review.md"
+            fcr_env / "artifacts/reports" / "daily" / DAY / f"{DAY}_final_review.md"
         ).read_text(encoding="utf-8")
         assert "新闻数据缺失" in body and "postclose_news_digest" in body
 
     def test_writes_md_and_json(self, fcr_env, monkeypatch):
         _run_fcr(monkeypatch)
-        rev = fcr_env / "artifacts/reports" / "daily"
+        rev = fcr_env / "artifacts/reports" / "daily" / DAY
         assert (rev / f"{DAY}_final_review.md").exists()
         assert (rev / f"{DAY}_final_review.json").exists()
 
@@ -125,7 +125,7 @@ class TestFinalCloseReviewInputContract:
         """产物必须是合法 JSON（NaN/Infinity 都不是）—— 下游要能解析。"""
         _run_fcr(monkeypatch)
         raw = (
-            fcr_env / "artifacts/reports" / "daily" / f"{DAY}_final_review.json"
+            fcr_env / "artifacts/reports" / "daily" / DAY / f"{DAY}_final_review.json"
         ).read_text(encoding="utf-8")
         assert "NaN" not in raw and "Infinity" not in raw
         json.loads(raw)
@@ -135,10 +135,10 @@ class TestFinalCloseReviewInputContract:
         否则「没有成交记录」与「没导入成交」分不开。"""
         _run_fcr(monkeypatch, extra=["--no-trades-confirmed"])
         body = (
-            fcr_env / "artifacts/reports" / "daily" / f"{DAY}_final_review.md"
+            fcr_env / "artifacts/reports" / "daily" / DAY / f"{DAY}_final_review.md"
         ).read_text(encoding="utf-8")
         plain = (
-            fcr_env / "artifacts/reports" / "daily" / f"{DAY}_final_review.json"
+            fcr_env / "artifacts/reports" / "daily" / DAY / f"{DAY}_final_review.json"
         ).read_text(encoding="utf-8")
         assert "无交易" in body or "no_trades" in plain
 
@@ -207,7 +207,7 @@ def _run_rc(monkeypatch, extra=()):
 class TestReviewCoreMain:
     def test_writes_report(self, rc_env, monkeypatch):
         _run_rc(monkeypatch)
-        assert list((rc_env / "artifacts/reports/daily").glob("*.md")), (
+        assert list((rc_env / "artifacts/reports/daily").glob("*/*.md")), (
             "应产出 14:45 报告"
         )
 
@@ -215,7 +215,7 @@ class TestReviewCoreMain:
         """⚠️ 无 risk_decision 时不崩，但报告里必须写明「按无风控依据处理」——
         14:45 常态就是当日 risk_decision 还没产出（它 17:00 才跑）。"""
         _run_rc(monkeypatch)
-        body = next((rc_env / "artifacts/reports/daily").glob("*.md")).read_text(
+        body = next((rc_env / "artifacts/reports/daily").glob("*/*.md")).read_text(
             encoding="utf-8"
         )
         assert "风控依据数据日" in body
@@ -229,7 +229,7 @@ class TestReviewCoreMain:
             {"date": "2026-08-05", "stock_risks": []},
         )
         _run_rc(monkeypatch)
-        body = next((rc_env / "artifacts/reports/daily").glob("*.md")).read_text(
+        body = next((rc_env / "artifacts/reports/daily").glob("*/*.md")).read_text(
             encoding="utf-8"
         )
         assert "2026-08-05" in body and "非当日" in body
@@ -250,7 +250,7 @@ class TestReviewCoreMain:
         """⚠️ 当日行情缺失时，持仓动作必须是「等待当日行情」而非用旧价算出的动作。"""
         (rc_env / "data" / "market" / f"{DAY}_holding_quotes.json").unlink()
         _run_rc(monkeypatch)
-        body = next((rc_env / "artifacts/reports/daily").glob("*.md")).read_text(
+        body = next((rc_env / "artifacts/reports/daily").glob("*/*.md")).read_text(
             encoding="utf-8"
         )
         assert "等待当日行情" in body
@@ -301,7 +301,7 @@ class TestReportAuditBlock:
 
     def test_1445_md_and_log_json_carry_audit(self, rc_env, monkeypatch):
         _run_rc(monkeypatch)
-        body = next((rc_env / "artifacts/reports/daily").glob("*.md")).read_text(
+        body = next((rc_env / "artifacts/reports/daily").glob("*/*.md")).read_text(
             encoding="utf-8"
         )
         assert "report_id" in body and "策略版本" in body and "输入清单" in body
@@ -316,7 +316,7 @@ class TestReportAuditBlock:
 
     def test_final_review_md_and_json_carry_audit(self, fcr_env, monkeypatch):
         _run_fcr(monkeypatch)
-        rev = fcr_env / "artifacts/reports" / "daily"
+        rev = fcr_env / "artifacts/reports" / "daily" / DAY
         body = (rev / f"{DAY}_final_review.md").read_text(encoding="utf-8")
         assert "report_id" in body and "策略版本" in body and "输入清单" in body
         payload = json.loads(
@@ -383,5 +383,5 @@ class TestZeroAmvGate:
     def test_confirmed_amv_passes(self, fcr_env, monkeypatch):
         _run_fcr(monkeypatch)
         assert (
-            fcr_env / "artifacts/reports" / "daily" / f"{DAY}_final_review.md"
+            fcr_env / "artifacts/reports" / "daily" / DAY / f"{DAY}_final_review.md"
         ).exists()

@@ -32,14 +32,22 @@ artifacts/reports/weekly/**
 
 # Pipeline logs and transient output
 artifacts/logs/
+# 日报按日期目录归档（2026-08-12 起，废除 _supporting 双套结构）：
+# 日期目录的**内容**不入库、目录本身保留（同 weekly/ 的「keep directories only」）；
+# 旧平铺命名（迁移期残留/旧代码产物）同样不入库。
+artifacts/reports/daily/*/**
+!artifacts/reports/daily/*/**/
 artifacts/reports/daily/_supporting/
 artifacts/reports/daily/*_daily_report.md
 artifacts/reports/daily/*_1445_review.md
 artifacts/reports/daily/*_final_review.json
 artifacts/reports/daily/*_final_review.md
-# 模板必须入库（上面 _supporting/ 等规则不覆盖它，这里显式保底）
+# 模板必须入库（上面的规则都不覆盖根级模板文件，这里显式保底）
 !artifacts/reports/daily/DAILY_PLAN_TEMPLATE.md
 # 同上：这些也要能拦住嵌套位置的误写
+**/artifacts/reports/daily/*/**
+!**/artifacts/reports/daily/*/**/
+!**/artifacts/reports/daily/DAILY_PLAN_TEMPLATE.md
 **/artifacts/reports/daily/*_final_review.json
 **/artifacts/reports/daily/*_final_review.md
 **/artifacts/reports/daily/*_daily_report.md

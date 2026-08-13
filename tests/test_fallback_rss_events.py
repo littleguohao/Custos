@@ -108,7 +108,10 @@ class TestDailyReportAuditBlock:
         monkeypatch.setattr(sys, "argv", ["x", "--date", "2026-08-07"])
         daily_report.main()
         body = (
-            tmp_path / "artifacts/reports/daily" / "2026-08-07_daily_report.md"
+            tmp_path
+            / "artifacts/reports/daily"
+            / "2026-08-07"
+            / "2026-08-07_daily_report.md"
         ).read_text(encoding="utf-8")
         header = body.split("## 1.")[0]
         assert "report_id `2026-08-07_premarket_" in header

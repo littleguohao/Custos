@@ -357,6 +357,20 @@ def trading_days_of_week(base: Path, days: list[str]) -> dict[str, bool | None]:
     return result
 
 
+def _load_daily_review_json(base: Path, day: str):
+    """读某日的 final_review.json：新结构 `daily/{day}/` 优先，旧平铺回退
+    （2026-08-12 目录重构的迁移期兼容——历史日期的产物仍是旧布局）。
+    文件不存在返回 None。"""
+    daily = base / "artifacts/reports" / "daily"
+    for path in (
+        daily / day / f"{day}_final_review.json",
+        daily / f"{day}_final_review.json",
+    ):
+        if path.exists():
+            return load_json(path, None)
+    return None
+
+
 def find_plan_for_day(
     base: Path, day: str, cache: dict | None = None
 ) -> tuple[dict | None, str | None]:
@@ -373,8 +387,7 @@ def find_plan_for_day(
     for _ in range(PLAN_LOOKBACK_DAYS):
         key = cursor.isoformat()
         if key not in cache:
-            path = base / "artifacts/reports" / "daily" / f"{key}_final_review.json"
-            cache[key] = load_json(path, None) if path.exists() else None
+            cache[key] = _load_daily_review_json(base, key)
         review = cache[key]
         if isinstance(review, dict):
             plan = (review.get("next_day_plan") or {}).get("holding_plans")
@@ -757,9 +770,9 @@ def _trading_days_and_reviews(base, days, unavailable):
     # --- 每日复盘覆盖 ---
     daily_reviews = {}
     for d in days:
-        path = base / "artifacts/reports" / "daily" / f"{d}_final_review.json"
-        if path.exists():
-            daily_reviews[d] = load_json(path, {})
+        review = _load_daily_review_json(base, d)
+        if review is not None:
+            daily_reviews[d] = review
     missing_reviews = [d for d in trading_days if d not in daily_reviews]
     if missing_reviews:
         unavailable.append(f"缺少每日复盘：{', '.join(missing_reviews)}")

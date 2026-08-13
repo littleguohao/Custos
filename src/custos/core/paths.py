@@ -55,6 +55,23 @@ PLANS = DAILY_REPORTS
 REVIEWS = REPORTS
 LOGS = ARTIFACT_LOGS
 
+
+def daily_report_dir(day: str, base: Path | None = None) -> Path:
+    """单日报告目录：``{base}/{day}/``（``base`` 默认 ``DAILY_REPORTS``）。
+
+    2026-08-12 起废除 `_supporting/` 双套结构：当天的全部报告（日报/择时评分/
+    题材/1445/盘后复盘/候选表…）都归这一天目录；模板 `DAILY_PLAN_TEMPLATE.md`
+    留在根。文件名保留 `{day}_` 前缀（测试与外部模式匹配面大，不动名只动目录）。
+
+    ⚠️ 调用方传**自己模块的路径常量**作 ``base``（如 `daily_report_dir(date, PLANS)`
+    ——注意传的是调用方模块 globals 里的那个名字）：测试靠 monkeypatch 模块常量
+    改道 tmp（见 test_pipeline_orchestration「必须 patch 全部路径常量」的事故
+    注释），直接读这里的 DAILY_REPORTS 会绕过改道、写进真实仓库。
+    本函数只拼路径不建目录；写方负责 `mkdir(parents=True, exist_ok=True)`。
+    """
+    return (base if base is not None else DAILY_REPORTS) / str(day)
+
+
 # src/custos/pipeline/ 下的 stage 子目录 —— 编排层用它拼 subprocess 命令。
 # ⚠️ 必须在这里定义：`daily_pipeline` 曾自己拼 `TOOLS / "market_timing"`，
 #    2026-08-07 把 holdings/ 从 market_timing/ 拆出时它没跟着改，

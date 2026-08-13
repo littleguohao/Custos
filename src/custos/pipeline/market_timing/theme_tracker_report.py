@@ -4,11 +4,11 @@
 Reads:
 - data/sectors/sector_code_map.json
 - data/holdings/YYYY-MM-DD_holding_technical_summary.json
-- artifacts/reports/daily/YYYY-MM-DD_market_timing_score.md
+- artifacts/reports/daily/YYYY-MM-DD/YYYY-MM-DD_market_timing_score.md
 
 Writes:
 - data/sectors/YYYY-MM-DD_sector_technical_summary.json
-- artifacts/reports/daily/YYYY-MM-DD_theme_tracker.md
+- artifacts/reports/daily/YYYY-MM-DD/YYYY-MM-DD_theme_tracker.md
 """
 
 from __future__ import annotations
@@ -27,7 +27,13 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
-from custos.core.paths import HOLDINGS_DIR, MARKET_DIR, PLANS, SECTORS_DIR  # noqa: E402
+from custos.core.paths import (
+    HOLDINGS_DIR,
+    MARKET_DIR,
+    PLANS,
+    SECTORS_DIR,
+    daily_report_dir,
+)  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
 
 SECTOR_MAP = SECTORS_DIR / "sector_code_map.json"
@@ -399,9 +405,10 @@ def main() -> None:
     args = ap.parse_args()
     rows = build_sector_summary(args.date)
     SECTOR_DIR.mkdir(parents=True, exist_ok=True)
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    out_dir = daily_report_dir(args.date, OUT_DIR)
+    out_dir.mkdir(parents=True, exist_ok=True)
     summary_path = SECTOR_DIR / f"{args.date}_sector_technical_summary.json"
-    report_path = OUT_DIR / f"{args.date}_theme_tracker.md"
+    report_path = out_dir / f"{args.date}_theme_tracker.md"
     # ⚠️ 落盘前校验：3 个消费者、⛔硬失败链。消费端有 **96 处 `.get("available")`**
     # —— 那个布尔是全项目最常被读的分支键，必须保证它是真布尔。
     require("sector_technical_summary", rows)

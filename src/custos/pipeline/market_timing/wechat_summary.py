@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 
 
-from custos.core.paths import DATA, PLANS  # noqa: E402
+from custos.core.paths import DATA, PLANS, daily_report_dir  # noqa: E402
 from custos.core.paths import read_json as load  # noqa: E402
 
 OUT = PLANS
@@ -42,7 +42,9 @@ def main():
         f"- {x}" for x in (d.get("tomorrow_validation") or ["市场与主线状态"])
     ]
     lines.append("仅供策略辅助，不构成交易指令。")
-    out = OUT / f"{a.date}_wechat_summary.txt"
+    out_dir = daily_report_dir(a.date, OUT)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"{a.date}_wechat_summary.txt"
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(out)
     print("\n".join(lines))

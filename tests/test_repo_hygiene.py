@@ -26,7 +26,9 @@ import time
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 # 运行时数据目录：只允许 .md（模板/文档）入库
-RUNTIME_DIRS = ("data", "artifacts/logs", "artifacts/reports/daily/_supporting")
+# 2026-08-12：_supporting 废除、daily 改按日期目录归档 ⇒ 整个 daily/ 都按运行时算
+# （唯二的入库例外是 DAILY_PLAN_TEMPLATE.md 等 .md，规则本来就是「只放行 .md」）。
+RUNTIME_DIRS = ("data", "artifacts/logs", "artifacts/reports/daily")
 # 敏感文件名片段：这些一旦出现在 git 里就是事故
 SENSITIVE = (
     "master_trade_ledger",

@@ -52,7 +52,10 @@ def _write_prr_inputs(
         json.dumps(b1, ensure_ascii=False), encoding="utf-8"
     )
     if mt is not None:
-        (plans / f"{day}_market_timing_score.md").write_text(mt, encoding="utf-8")
+        # 2026-08-12 起按日期目录归档：{day}/{day}_market_timing_score.md
+        d = plans / day
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{day}_market_timing_score.md").write_text(mt, encoding="utf-8")
 
 
 class TestPortfolioReviewStateShadowing:
@@ -89,7 +92,7 @@ class TestPortfolioReviewStateShadowing:
         )
         monkeypatch.setattr(sys, "argv", ["x", "--date", day])
         prr.main()
-        md = (plans / f"{day}_portfolio_review.md").read_text(encoding="utf-8")
+        md = (plans / day / f"{day}_portfolio_review.md").read_text(encoding="utf-8")
         line = next(l for l in md.splitlines() if "market_timing" in l)
         assert line.strip() == "- market_timing：**进攻**", line
         assert "final_" not in line and "{" not in line, "state 又被字典覆盖了"
@@ -100,7 +103,7 @@ class TestPortfolioReviewStateShadowing:
         _write_prr_inputs(tmp, plans, day, [], [])
         monkeypatch.setattr(sys, "argv", ["x", "--date", day])
         prr.main()
-        md = (plans / f"{day}_portfolio_review.md").read_text(encoding="utf-8")
+        md = (plans / day / f"{day}_portfolio_review.md").read_text(encoding="utf-8")
         assert "- 建议总仓位：**40%-60%**" in md
 
 
@@ -145,7 +148,7 @@ class TestPortfolioReviewClassify:
         _write_prr_inputs(tmp, plans, day, [], [], mt=None)
         monkeypatch.setattr(sys, "argv", ["x", "--date", day])
         prr.main()
-        md = (plans / f"{day}_portfolio_review.md").read_text(encoding="utf-8")
+        md = (plans / day / f"{day}_portfolio_review.md").read_text(encoding="utf-8")
         assert "- market_timing：**未知**" in md
         assert "- 建议总仓位：**待确认**" in md
 
@@ -156,7 +159,7 @@ class TestPortfolioReviewClassify:
         _write_prr_inputs(tmp, plans, day, [], [])
         monkeypatch.setattr(sys, "argv", ["x", "--date", day])
         prr.main()
-        md = (plans / f"{day}_portfolio_review.md").read_text(encoding="utf-8")
+        md = (plans / day / f"{day}_portfolio_review.md").read_text(encoding="utf-8")
         assert "## 3. 风控触发项" in md and "- 暂无。" in md
         assert (
             json.loads(

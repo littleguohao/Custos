@@ -6,7 +6,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
-from custos.core.paths import DATA, PLANS  # noqa: E402
+from custos.core.paths import DATA, PLANS, daily_report_dir  # noqa: E402
 from custos.core.paths import read_json as load  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
 import sys
@@ -59,11 +59,8 @@ def main():
     tech = load(DATA / "holdings" / f"{a.date}_holding_technical_summary.json", [])
     b1_rows = load(DATA / "holdings" / f"{a.date}_b1_holding_state.json", [])
     b1 = {str(x.get("code")): x for x in b1_rows}
-    mt = (
-        (PLANS / f"{a.date}_market_timing_score.md").read_text(encoding="utf-8")
-        if (PLANS / f"{a.date}_market_timing_score.md").exists()
-        else ""
-    )
+    mt_file = daily_report_dir(a.date, PLANS) / f"{a.date}_market_timing_score.md"
+    mt = mt_file.read_text(encoding="utf-8") if mt_file.exists() else ""
     # ⚠️ 这两个是**大盘择时**的读数，下面循环里**不得复用 `state` 这个名字** ——
     #    2026-08-07 实测：循环内 `state=b1.get(...)` 覆盖了它，于是报告的
     #    「- market_timing：**{state}**」打印的是**最后一只票的 b1 状态字典**。
@@ -138,7 +135,9 @@ def main():
         f"- 结构化输出：`{out_json}`",
         "- 本报告是策略辅助，不构成收益承诺。",
     ]
-    out = PLANS / f"{a.date}_portfolio_review.md"
+    out_dir = daily_report_dir(a.date, PLANS)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"{a.date}_portfolio_review.md"
     out.write_text("\n".join(lines), encoding="utf-8")
     print(out)
     print(out_json)

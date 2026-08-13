@@ -8,7 +8,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
-from custos.core.paths import DATA, PLANS  # noqa: E402
+from custos.core.paths import DATA, PLANS, daily_report_dir  # noqa: E402
 from custos.core.paths import read_json as load  # noqa: E402
 from custos.core.code_utils import bare_code as bare  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
@@ -28,9 +28,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", required=True)
     a = ap.parse_args()
-    mt_path = PLANS / f"{a.date}_market_timing_score.md"
-    if not mt_path.exists():
-        mt_path = PLANS / "_supporting" / a.date / f"{a.date}_market_timing_score.md"
+    mt_path = daily_report_dir(a.date, PLANS) / f"{a.date}_market_timing_score.md"
     risk_path = DATA / "risk" / f"{a.date}_risk_decision.json"
     gate_path = DATA / "quality" / f"{a.date}_runtime_gate.json"
     if not risk_path.exists():
@@ -227,7 +225,9 @@ def main():
             "- 本计划是策略辅助，不构成收益承诺。",
         ]
     )
-    out = PLANS / f"{a.date}_chief_decision.md"
+    out_dir = daily_report_dir(a.date, PLANS)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"{a.date}_chief_decision.md"
     out.write_text("\n".join(lines), encoding="utf-8")
     print(out)
     print(out_json)

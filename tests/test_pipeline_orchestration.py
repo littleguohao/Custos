@@ -98,8 +98,10 @@ def pipeline(monkeypatch, tmp_path):
     # 测试在**真实仓库**里建出了 `artifacts/reports/daily/_supporting/2026-08-07/`
     # （空目录、且被 gitignore，所以没污染 git —— 但这正是今天
     # `2026-07-16/` 那次事故的同一形态：脚本往仓库里写东西）。
+    # 2026-08-12：SUPPORT_DIR 随 _supporting 结构废除而删除；报告落盘走
+    # `daily_report_dir(date, PLANS)`（paths.py），patch PLANS 即可改道。
     monkeypatch.setattr(dp, "BASE", tmp_path, raising=False)
-    for attr in ("DATA", "MARKET_DIR", "HOLDINGS_DIR", "PLANS", "SUPPORT_DIR", "LOGS"):
+    for attr in ("DATA", "MARKET_DIR", "HOLDINGS_DIR", "PLANS", "LOGS"):
         assert hasattr(dp, attr), f"daily_pipeline 少了路径常量 {attr}（改名了？）"
         d = tmp_path / attr.lower()
         d.mkdir(parents=True, exist_ok=True)
@@ -672,6 +674,8 @@ class TestRun1700HardFailures:
             # 教训与今天反复出现的一样：**别猜名字，去读**。
             rev = getattr(mod, "REVIEWS", None)
             assert isinstance(rev, pathlib.Path), "run_1700 的复盘目录常量改名了？"
+            # 2026-08-12 起按日期目录归档：{day}/{day}_final_review.md
+            rev = rev / "2026-08-07"
             rev.mkdir(parents=True, exist_ok=True)
             (rev / "2026-08-07_final_review.md").write_text("# x", encoding="utf-8")
 

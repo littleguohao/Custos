@@ -17,7 +17,7 @@ from custos.datasource.news.premarket_intel_schema import (
     validate_premarket_intelligence,
 )
 
-from custos.core.paths import DATA, PLANS, REVIEWS, cn_now
+from custos.core.paths import DATA, PLANS, REVIEWS, cn_now, daily_report_dir
 from custos.core.paths import read_json as load
 from custos.core import report_audit
 
@@ -105,7 +105,11 @@ def premarket_schema_marker(check: dict[str, Any]) -> str:
 def previous_review(day: str) -> dict[str, Any]:
     review_dir = REVIEWS / "daily"
     candidates = []
-    for path in review_dir.glob("*_final_review.json"):
+    # 新结构 {day}/{day}_final_review.json + 旧平铺 *_final_review.json（迁移期兼容，
+    # 读历史日前一批是旧布局）——同一文件会被两种模式各命中一次的形态不存在，放心并集。
+    for path in list(review_dir.glob("*/*_final_review.json")) + list(
+        review_dir.glob("*_final_review.json")
+    ):
         file_day = path.name[:10]
         if file_day < day:
             candidates.append((file_day, path))
@@ -488,7 +492,11 @@ def main():
         "- 本报告仅渲染 ChiefDecision 的最终动作，不以消息、技术指标或上游技能覆盖风险否决。",
         "- 本简报用于策略辅助，不构成收益承诺或无条件交易指令。",
     ]
-    out = Path(a.output) if a.output else PLAN / f"{a.date}_daily_report.md"
+    out = (
+        Path(a.output)
+        if a.output
+        else daily_report_dir(a.date, PLAN) / f"{a.date}_daily_report.md"
+    )
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(out)

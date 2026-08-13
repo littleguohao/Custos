@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Optional
 
 
-from custos.core.paths import cn_now, MARKET_DIR, PLANS, QUALITY_DIR  # noqa: E402
+from custos.core.paths import cn_now, MARKET_DIR, PLANS, QUALITY_DIR, daily_report_dir  # noqa: E402
 from custos.core.code_utils import fnum  # noqa: E402
 from custos.core.contracts import SECTION_NOT_FRESH  # noqa: E402  section.quality 的「不新鲜」域
 from custos.core.runtime_guards import normalize_regime  # noqa: E402
@@ -419,8 +419,9 @@ def main():
         json.loads(gate_path.read_text(encoding="utf-8")) if gate_path.exists() else {}
     )
     report = make_report(d, modules, quality_gate)
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    out = OUT_DIR / f"{d.get('date')}_market_timing_score.md"
+    out_dir = daily_report_dir(str(d.get("date")), OUT_DIR)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"{d.get('date')}_market_timing_score.md"
     out.write_text(report, encoding="utf-8")
     print(out)
     print(report)

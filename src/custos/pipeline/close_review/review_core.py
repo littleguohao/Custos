@@ -27,6 +27,7 @@ from custos.core.paths import (
     QUALITY_DIR,
     RISK_DIR,
     TRADES_DIR,
+    daily_report_dir,
 )  # noqa: E402
 from custos.core.paths import read_json as load  # noqa: E402
 from custos.core import report_audit  # noqa: E402
@@ -189,7 +190,7 @@ def build_delivery_digest(
         f"减仓执行{'允许' if position_gate.get('allow_position_reduction') else '禁止'}；"
         f"提高仓位{'允许' if position_gate.get('allow_position_increase') else '禁止'}。",
         "禁止动作：旧持仓价代替实时价、用历史技术或缺失0AMV放宽权限、空头区间补仓/追高、绕过风险否决。",
-        f"持仓说明：{snap.get('reason', '缺失')}；{snap.get('assumption', '14:45按当前行情评估持仓操作建议')}。完整报告：strategy_team/artifacts/reports/daily/{target_date}_1445_review.md",
+        f"持仓说明：{snap.get('reason', '缺失')}；{snap.get('assumption', '14:45按当前行情评估持仓操作建议')}。完整报告：strategy_team/artifacts/reports/daily/{target_date}/{target_date}_1445_review.md",
     ]
     return "\n".join(lines)
 
@@ -594,7 +595,9 @@ def main() -> None:
             "[close_review] strict report validation failed:\n- "
             + "\n- ".join(report_errors)
         )
-    out = PLANS / f"{target_date}_1445_review.md"
+    out_dir = daily_report_dir(target_date, PLANS)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"{target_date}_1445_review.md"
     out.write_text(report, encoding="utf-8")
     log = {
         "date": target_date,

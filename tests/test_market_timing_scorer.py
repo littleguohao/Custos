@@ -593,7 +593,11 @@ class TestMainEndToEnd:
             _s, "argv", ["x", "--date", market["date"], "--input", str(inp)]
         )
         ms.main()
-        out = ms.OUT_DIR / f"{market['date']}_market_timing_score.md"
+        out = (
+            ms.OUT_DIR
+            / str(market["date"])
+            / f"{market['date']}_market_timing_score.md"
+        )
         assert out.exists(), "报告未落盘"
         return out.read_text(encoding="utf-8")
 

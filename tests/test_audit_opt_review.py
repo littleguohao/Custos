@@ -156,12 +156,14 @@ class TestRun1700MfeStageEcho:
     def _run(self, tmp_path, monkeypatch, mfe_out, mfe_ok):
         from custos.pipeline import run_1700
 
-        review_dir = tmp_path / "artifacts/reports" / "daily"
+        review_dir = tmp_path / "artifacts/reports" / "daily" / "2026-07-17"
         review_dir.mkdir(parents=True)
         (review_dir / "2026-07-17_final_review.md").write_text(
             "# 复盘\n正文\n", encoding="utf-8"
         )
-        monkeypatch.setattr(run_1700, "REVIEWS", review_dir)
+        monkeypatch.setattr(
+            run_1700, "REVIEWS", tmp_path / "artifacts/reports" / "daily"
+        )
         monkeypatch.setattr(run_1700, "LOG_DIR", tmp_path / "artifacts/logs")
         # 日历门控已抽进 pipeline_kit.calendar_gate，桩要打在它查日历的地方
         from custos.core import pipeline_kit

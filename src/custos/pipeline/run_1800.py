@@ -20,7 +20,16 @@ import sys
 import time
 
 
-from custos.core.paths import BASE, SCREENING, TOOLS, cn_today, LOGS, MARKET_DIR, PLANS
+from custos.core.paths import (
+    BASE,
+    SCREENING,
+    TOOLS,
+    cn_today,
+    LOGS,
+    MARKET_DIR,
+    PLANS,
+    daily_report_dir,
+)
 from custos.core.pipeline_kit import (
     log_stage,
     md_to_digest,
@@ -31,7 +40,6 @@ from custos.core.pipeline_kit import (
 )
 
 SCREEN_DIR = SCREENING
-TABLE_DIR = PLANS / "_supporting"
 LOG_DIR = LOGS
 
 _now_iso = now_iso
@@ -249,7 +257,7 @@ def main(argv=None) -> int:
             print(f"[OK] {r['out'].splitlines()[-1] if r['out'] else name}")
 
     # 6. Digest of the candidate table (may be absent when the chain degraded early)
-    table_path = TABLE_DIR / target / f"{target}_candidate_table.md"
+    table_path = daily_report_dir(target, PLANS) / f"{target}_candidate_table.md"
     if table_path.exists():
         stages_log.append(
             _log_stage(

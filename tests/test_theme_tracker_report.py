@@ -365,7 +365,7 @@ class TestBuildAndReport:
         )
         monkeypatch.setattr(sys, "argv", ["x", "--date", "2026-08-07"])
         ttr.main()
-        md = ttr.OUT_DIR / "2026-08-07_theme_tracker.md"
+        md = ttr.OUT_DIR / "2026-08-07" / "2026-08-07_theme_tracker.md"
         js = ttr.SECTOR_DIR / "2026-08-07_sector_technical_summary.json"
         assert md.exists() and js.exists()
         text = md.read_text(encoding="utf-8")
@@ -377,5 +377,7 @@ class TestBuildAndReport:
         ttr.SECTOR_MAP.write_text(json.dumps({"themes": []}), encoding="utf-8")
         monkeypatch.setattr(sys, "argv", ["x", "--date", "2026-08-07"])
         ttr.main()
-        text = (ttr.OUT_DIR / "2026-08-07_theme_tracker.md").read_text(encoding="utf-8")
+        text = (ttr.OUT_DIR / "2026-08-07" / "2026-08-07_theme_tracker.md").read_text(
+            encoding="utf-8"
+        )
         assert "主线方向：**未定**" in text

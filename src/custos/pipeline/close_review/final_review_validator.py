@@ -7,7 +7,7 @@ import argparse
 import json
 
 
-from custos.core.paths import REVIEWS  # noqa: E402
+from custos.core.paths import REVIEWS, daily_report_dir  # noqa: E402
 
 REV = REVIEWS / "daily"
 REQUIRED_SECTIONS = [
@@ -68,8 +68,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", required=True)
     args = ap.parse_args()
-    md_path = REV / f"{args.date}_final_review.md"
-    json_path = REV / f"{args.date}_final_review.json"
+    md_path = daily_report_dir(args.date, REV) / f"{args.date}_final_review.md"
+    json_path = daily_report_dir(args.date, REV) / f"{args.date}_final_review.json"
     if not md_path.exists() or not json_path.exists():
         raise SystemExit("final review artifact missing")
     markdown = md_path.read_text(encoding="utf-8")

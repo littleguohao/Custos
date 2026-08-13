@@ -72,7 +72,10 @@ def _write(
             json.dumps(sectors, ensure_ascii=False), encoding="utf-8"
         )
     if mt is not None:
-        (plans / f"{day}_market_timing_score.md").write_text(mt, encoding="utf-8")
+        # 2026-08-12 起按日期目录归档：{day}/{day}_market_timing_score.md
+        d = plans / day
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{day}_market_timing_score.md").write_text(mt, encoding="utf-8")
 
 
 def _run(data, plans, day, monkeypatch, **kw):
@@ -513,7 +516,9 @@ class TestWatchlistAndForbidden:
             b1=[],
             sectors=[],
         )
-        md = (plans / "2026-08-07_chief_decision.md").read_text(encoding="utf-8")
+        md = (plans / "2026-08-07" / "2026-08-07_chief_decision.md").read_text(
+            encoding="utf-8"
+        )
         assert "# chief_decision 每日总控交易计划" in md
         assert "| - | 暂无 | - | - | - |" in md, "无买入计划时应有占位行"
         assert "RiskDecision为强制输入" not in md

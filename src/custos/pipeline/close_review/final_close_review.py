@@ -12,7 +12,7 @@ from custos.pipeline.holdings.b1_holding_state import evaluate as evaluate_b1_ho
 from custos.pipeline.close_review.holding_bbi import intraday_bbi_basis
 from custos.pipeline.close_review.holding_structure import n_structure_basis
 
-from custos.core.paths import cn_now, DATA, REVIEWS  # noqa: E402
+from custos.core.paths import cn_now, DATA, REVIEWS, daily_report_dir  # noqa: E402
 from custos.pipeline.close_review.loss_streak import format_lines as loss_streak_lines  # noqa: E402
 from custos.pipeline.close_review.loss_streak import loss_streaks  # noqa: E402
 from custos.pipeline.close_review.cooldowns import (  # noqa: E402
@@ -567,7 +567,7 @@ def main():
         "> 风险提示：本复盘用于策略纠偏，不构成收益承诺或无条件交易指令。",
     ]
 
-    out = REV / f"{day}_final_review.md"
+    out = daily_report_dir(day, REV) / f"{day}_final_review.md"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     payload = {
@@ -594,7 +594,7 @@ def main():
         ),
         "output": str(out),
     }
-    json_out = REV / f"{day}_final_review.json"
+    json_out = daily_report_dir(day, REV) / f"{day}_final_review.json"
     require("final_review", payload)
     json_out.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False),
