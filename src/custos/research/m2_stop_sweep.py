@@ -306,6 +306,25 @@ GROUPS: dict[str, dict[str, Any]] = {
             # 「可执行的止损(5%) × 最强移动止盈(trail 8%)」：trail_08 在 A 组累计R +43.1%，
             # 但 A 组止损(risk_frac 中位 0.65%)实盘执行不了；换到 5% 固定止损上才有意义。
             "pct_05_trail_08": ["--stop-pct", "5", "--trail", "0.08"],
+            # 全栈（2026-08-13，TODO #25，owner 定「续扫仅限 0AMV × 出场组合维度」）：
+            # R10:375 —— pct_05_amv（margin +7.8pp）与 pct_05_trail_08 都过了，
+            # 下一步就是三机制同叠，看单独叠加的改善会不会互相抵消。
+            "pct_05_amv_trail_08": [
+                "--stop-pct",
+                "5",
+                "--amv-long-only",
+                "--trail",
+                "0.08",
+            ],
+            # cost_zone_stop 是择时上下文里唯一的真信号（pct_12_amv_cz3：触发 40%、
+            # 把均收 -14.23% 的大亏截成 -4.40%）⇒ 搬到最优止损档 5% 上验证。
+            "pct_05_amv_cz3": [
+                "--stop-pct",
+                "5",
+                "--amv-long-only",
+                "--cost-zone-bars",
+                "3",
+            ],
             "pct_08": ["--stop-pct", "8"],
             "pct_12": ["--stop-pct", "12"],
             "pct_12_amv": ["--stop-pct", "12", "--amv-long-only"],

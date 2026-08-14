@@ -255,8 +255,9 @@ class TestStopPctLowerBound:
             assert m2._same_r_denom("B_stop_pct", n, base) is False
 
     def test_real_backtest_count(self):
-        """37 个方案但只有 30 次真回测——C 组 7 个走 trades 复用。
-        （2026-08-12 #20：35/28 → 37/30，A 组加 low_pct_03/atr_02 两格）"""
+        """39 个方案但只有 32 次真回测——C 组 7 个走 trades 复用。
+        （2026-08-12 #20：35/28 → 37/30，A 组加 low_pct_03/atr_02 两格；
+        2026-08-13 #25：37/30 → 39/32，B 组加 pct_05_amv_trail_08/pct_05_amv_cz3 两格）"""
         total = sum(len(v["runs"]) for v in m2.GROUPS.values())
         real = sum(
             1
@@ -264,7 +265,7 @@ class TestStopPctLowerBound:
             for n in v["runs"]
             if n not in (v.get("reuse") or {})
         )
-        assert total == 37 and real == 30
+        assert total == 39 and real == 32
 
 
 class TestScaleOutHasControlArm:

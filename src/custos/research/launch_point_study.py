@@ -2019,6 +2019,13 @@ def main(argv=None, loader=None) -> int:
     )
     ap.add_argument("--universe-sdata", action="store_true")
     ap.add_argument("--codes", default="")
+    ap.add_argument(
+        "--codes-file",
+        default="",
+        help="从文件读宇宙（每行/逗号/空白分隔的 6 位代码）。全市场 tdx 宇宙"
+        "（~5500 只）超 Windows 命令行长度上限，--codes 塞不下（2026-08-13，TODO #8"
+        " R3 受影响窗 tdx 重跑引入：vipdoc 全宇宙 + 前复权，替代已弃用的加法 bundle）",
+    )
     ap.add_argument("--start", default="")
     ap.add_argument("--end", default="")
     ap.add_argument(
@@ -2485,10 +2492,18 @@ def main(argv=None, loader=None) -> int:
         codes = s_data.list_universe(
             str(Path(args.s_data_root) / sub), source=args.data_source
         )
+    elif args.codes_file:
+        import re as _re
+
+        codes = [
+            c
+            for c in _re.split(r"[\s,]+", Path(args.codes_file).read_text(encoding="utf-8"))
+            if c.strip()
+        ]
     else:
         codes = [c.strip() for c in args.codes.split(",") if c.strip()]
     if not codes:
-        ap.error("需 --universe-sdata 或 --codes")
+        ap.error("需 --universe-sdata 或 --codes 或 --codes-file")
 
     # 数据/regime 起点必须比 --start 再早 buffer 段(起涨点要在 [start-buffer, end] 内回溯),
     # 否则 buffer 被加载窗口截为 0(此前真实运行从未真正回溯,结论有偏)。捕捉研究也靠它提供 min_bars 回溯。
@@ -2769,7 +2784,11 @@ def main(argv=None, loader=None) -> int:
                     "n_signal_days": n_signal_days,
                     **({"empty_ok": True} if not n_signal_days else {}),
                     "feature_scores": args.feature_scores,
-                    "universe": "sdata" if args.universe_sdata else "codes",
+                    "universe": (
+                        "sdata"
+                        if args.universe_sdata
+                        else ("codes_file" if args.codes_file else "codes")
+                    ),
                     # 特征开关必须落盘:否则驱动脚本的续跑校验看不出"这份 firings 是否带
                     # 基本面/风格/板块特征",会把旧参数的结果当新参数复用,结论静默失真。
                     "sector_features": bool(args.sector_features),
