@@ -144,8 +144,7 @@ OUTDIR = LOGS / "m2_sweep"
 
 DEFAULT_SAMPLE = 1000  # 样本股票数默认值（300 样本实测不可靠，见模块文档）
 # 默认钉死的 K 线窗口（2026-08-12 #17，owner 拍板默认开）：口径约定见
-# R13（governance/research/R13_meta_reproducibility.md）与 run_m2_sweep.cmd
-# 的 WIN_START/WIN_END —— 约 490 根 K 线，与旧 --count 500 的实际窗口基本等长，
+# R13（governance/research/R13_meta_reproducibility.md）—— 约 490 根 K 线，与旧 --count 500 的实际窗口基本等长，
 # 且与 s3000 可复现批次同口径。代码常量 ⇒ 钉死配置不会缺失；要换窗口必须显式
 # --window S E（进文件名指纹，不与旧批混），要漂移窗口必须显式 --no-window。
 DEFAULT_WINDOW = ("2024-08-01", "2026-08-05")

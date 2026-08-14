@@ -231,8 +231,10 @@ def test_cmd_scripts_reference_existing_paths():
 
     2026-08-13：`run_m2_sweep.cmd` 的 `set SWEEP=src/research/m2_stop_sweep.py`
     在包化（src/custos/）后腐烂失效——该文件不是 .py，所有源码守卫都扫不到它。
-    这已是它第二次因目录搬迁腐烂（上次是 03/06 目录合并）。cmd 里按 `set X=<路径>`
-    与 `FilePath "<路径>"` 两种形态抽取项目相对路径并核对存在性。
+    这已是它第二次因目录搬迁腐烂（上次是 03/06 目录合并）⇒ owner 拍板删除该脚本
+    （R13 已改为直接命令），本守卫保留：未来新增任何 .cmd 都要过这道引用检查。
+    cmd 里按 `set X=<路径>` 与 `FilePath "<路径>"` 两种形态抽取项目相对路径并核对存在性。
+    当前仓库无 .cmd 文件时本测试自然通过（守卫防的是「再出现」）。
     """
     for cmd in ROOT.rglob("*.cmd"):
         if ".git" in cmd.parts:

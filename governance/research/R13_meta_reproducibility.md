@@ -105,26 +105,30 @@ uv run python src/custos/research/m2_stop_sweep.py \
 
 ---
 
-## 可复现批次的跑批入口（2026-08-05 夜）
+## 可复现批次的跑批方式（2026-08-05 夜起）
 
-`src/custos/pipeline/screening/run_m2_sweep.cmd` —— Windows 后台跑批。
+~~Windows 后台跑批脚本 `run_m2_sweep.cmd`~~（2026-08-13 已删除：目录搬迁两次腐烂，
+维护成本高于价值——直接跑命令即可）。后台跑批直接两条命令：
 
 ```powershell
-Start-Process -WindowStyle Hidden -FilePath "src\pipeline\screening\run_m2_sweep.cmd"
-Get-Content -Wait -Tail 40 artifacts/logs\m2_sweep\sweep_run.log     # 看进度
+# STEP1：单进程焐热 xdxr 缓存 + baseline（约 1 小时，覆盖钉宇宙/钉窗口/落盘/报表全链路，
+#        配置写错 1 小时内暴露而不是整夜白跑）
+uv run python src/custos/research/m2_stop_sweep.py --sample 3000 --only 00_baseline -j 1
+# STEP2：全方案并行
+uv run python src/custos/research/m2_stop_sweep.py --sample 3000 -j 6
 ```
 
-四个设计点（每条都对应踩过的坑）：
+要后台独立进程（Windows 没有 nohup，关 PowerShell 会给同控制台子进程发
+`CTRL_CLOSE_EVENT` 把扫描带走）：用 `Start-Process` 起独立进程，
+`-RedirectStandardOutput` 与 `-RedirectStandardError` 指到**同一个**日志文件
+（`[TIME]`/`[MEM]`/`[INFO] universe=`/`[WARN]` 全走 stderr，丢了就没法判断
+加载占比/内存峰值/宇宙有没有变）。
 
-1. **Windows 没有 nohup**，而关掉 PowerShell 会给同控制台的子进程发 `CTRL_CLOSE_EVENT`
-   ⇒ 扫描被一起带走。`Start-Process` 起独立进程才能活下来。
-2. **stdout 与 stderr 必须合并**（`>> log 2>&1`）：`[TIME]`/`[MEM]`/`[INFO] universe=`/
-   `[WARN]` 全走 stderr，只重定向 stdout 会把判断依据全丢掉。
-3. **第一步 `-j 1` 单进程焐热 xdxr**：`--sample 3000` 里约 2000 只是上一轮（抽 1000 只）
+要点（每条都对应踩过的坑）：
+
+1. **第一步 `-j 1` 单进程焐热 xdxr**：`--sample 3000` 里约 2000 只是上一轮（抽 1000 只）
    没碰过的，权息缓存全冷；一上来就并行会 N 条连接同时取权息，可能被限流甚至拒连。
-4. **`&&` 串联 = 免费冒烟测试**：第一步（约 1 小时）已覆盖钉宇宙
-   (`--dump-codes` → `--codes-file`)、钉窗口、落盘、报表全链路。配置写错 1 小时内暴露，
-   而不是 6 小时后发现整夜白跑。
+2. **两步串联 = 免费冒烟测试**：第一步跑通再跑第二步。
 
 参数：`--sample 3000 --window 2024-08-01 2026-08-05 --pin-universe -j 6`。
 窗口约 490 根 K 线，与此前 `--count 500` 的实际窗口基本等长，便于与 s1000 批次对读趋势
