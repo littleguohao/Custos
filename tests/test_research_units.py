@@ -22,8 +22,9 @@ LEVELS = {"L0", "L1", "L2", "L3", "L4"}
 
 
 def test_units_exist():
-    assert len(UNITS) == 17, (
-        f"预期 17 个研究单元，实际 {len(UNITS)}：{[p.name for p in UNITS]}"
+    # 2026-08-13：+R18（优秀 B1 指纹证据层）
+    assert len(UNITS) == 18, (
+        f"预期 18 个研究单元，实际 {len(UNITS)}：{[p.name for p in UNITS]}"
     )
 
 

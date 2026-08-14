@@ -96,6 +96,7 @@ flowchart TB
 | [R15](R15_meta_bias_and_limits.md) | 偏差与边界 | 六类偏差 + PIT/市值特性 | L4 | ✅ 常驻 |
 | [R16](R16_input_material_corrections.md) | 材料纠偏 | 8 条，4 已实现 | L1 | ⚠️ 待排优先级 |
 | [R17](R17_infra_tooling.md) | 工程与规范 | 瓶颈是评估不是加载 | L4 | ✅ |
+| [R18](R18_b1_fingerprint_evidence.md) | 优秀 B1 指纹（正例样本） | 合成标签召回 2/10；单项腿召回尚可；命中集中样本末端 | L1 | ✅（正例口径，边界明示） |
 
 ## 当前一句话结论
 

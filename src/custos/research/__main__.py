@@ -87,6 +87,10 @@ TOOLS: dict[str, tuple[str, str]] = {
     ),
     "scan_signals_ytd": ("study", "年内信号扫描（reversal_k 事件 + 板块相位）"),
     "analyze_trades": ("study", "交易记录复盘分析（台账统计）"),
+    "b1_fingerprint_study": (
+        "study",
+        "优秀 B1 指纹证据层回测（B1_DATA 正例召回与后续收益；R18）",
+    ),
     "adjust_diagnostic": (
         "diagnostic",
         "复权口径诊断：量化未复权数据对回测与选股的影响",
