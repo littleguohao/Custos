@@ -513,6 +513,8 @@ def main() -> None:
     lines = [
         f"# 14:45 收盘前操作建议 — {target_date}",
         "",
+        "> 角色（v0.57 owner 定版）：**盘中14:45=按规则的交易提醒** ｜ "
+        "盘前=信息处理+预案确认 ｜ 盘后=复盘纠错+条件化预案主产地。",
         f"> 生成时间：{cn_now().strftime('%Y-%m-%d %H:%M:%S')}",
         *report_audit.render_md(audit),
         f"> 持仓状态：**{snap['status']}**｜{snap['reason']}",

@@ -94,32 +94,42 @@ def sector_for(code, sectors):
     return {}
 
 
-def render_news(lines, news):
-    lines += ["", "## 2. 新闻、政策、风向与舆情", ""]
+def render_news(lines, news, hold_codes=None, hold_sectors=None):
+    """§2（v0.57 角色定版）：盘后=复盘纠错+预案主产地 ⇒ 新闻节压缩为
+    「与今日操作相关的事实核对」——只留与当日持仓/当日成交有交集的事实
+    （matched_holdings 命中代码 或 matched_themes 命中持仓板块），
+    信息流式的全量罗列去掉。缺数据照常如实报（不静默）。"""
+    lines += [
+        "",
+        "## 2. 与今日操作相关的事实核对",
+        "",
+        "> 复盘视角：本节只核对**与今日持仓/操作有交集**的新闻事实；"
+        "信息流全量罗列已压缩（角色定版 v0.57）。",
+        "",
+    ]
     sections = news.get("sections") or {}
+    hold_codes = set(hold_codes or [])
+    hold_sectors = set(hold_sectors or [])
+    rows = []
     for name in ("信息", "政策", "风向", "舆情"):
+        for row in sections.get(name) or []:
+            mh = set(row.get("matched_holdings") or [])
+            mt = set(row.get("matched_themes") or [])
+            if (mh & hold_codes) or (mt & hold_sectors):
+                rows.append((name, mh & hold_codes, mt & hold_sectors, row))
+    if not sections:
+        lines.append("- `unavailable`：当前窗口没有通过时效和来源质量门的证据。")
+    elif not rows:
+        lines.append("- 窗口内证据无与今日持仓/操作的交集（无需核对）。")
+    else:
         lines += [
-            f"### 2.{['信息', '政策', '风向', '舆情'].index(name) + 1} {name}",
-            "",
+            "| 类别 | 时间 | 事件 | 来源/质量 | 与今日操作的交集 | 交易含义 |",
+            "|---|---|---|---|---|---|",
         ]
-        rows = sections.get(name) or []
-        if not rows:
-            lines.append("- `unavailable`：当前窗口没有通过时效和来源质量门的证据。")
-            continue
-        lines += [
-            "| 时间 | 事件 | 来源/质量 | 影响对象 | 交易含义 |",
-            "|---|---|---|---|---|",
-        ]
-        for row in rows[:5]:
-            affected = (
-                "、".join(
-                    (row.get("matched_holdings") or [])
-                    + (row.get("matched_themes") or [])
-                )
-                or "待确认"
-            )
+        for name, codes_hit, themes_hit, row in rows[:8]:  # 有界：最多 8 条
+            intersection = "、".join(sorted(codes_hit) + sorted(themes_hit))
             lines.append(
-                f"| {row.get('published_at')} | {row.get('title')} | {row.get('source_name')}/{row.get('fact_status')} | {affected} | {row.get('trade_meaning')} |"
+                f"| {name} | {row.get('published_at')} | {row.get('title')} | {row.get('source_name')}/{row.get('fact_status')} | {intersection} | {row.get('trade_meaning')} |"
             )
     if news.get("missing"):
         lines.append("\n- 新闻数据缺失：" + "、".join(news["missing"]))
@@ -252,15 +262,18 @@ def render_market(lines, checks, chief, indices):
 
 
 def render_themes(lines, enrichment):
-    """§4 主线、题材生命周期与持续性。"""
+    """§4 主线、题材生命周期与持续性（v0.57：压缩 + 标注待重设计）。"""
     lines += [
         "",
-        "## 4. 主线、题材生命周期与持续性",
+        "## 4. 主线、题材生命周期与持续性（⚠️ 判定口径待重设计，#26）",
+        "",
+        "> ⚠️ owner 2026-08-13：主线题材「目前不准，需要重新调整」——本节压缩为"
+        "观察参考（最多 5 行），判定口径重设计归入 TODO #26（板块信息利用整体优化）。",
         "",
         "| 方向 | 生命周期 | 技术阶段 | 分数 | 事件证据 | 资金/龙头证据 | 持续性 | 次日验证 |",
         "|---|---|---|---:|---:|---|---|---|",
     ]
-    for row in enrichment.get("theme_lifecycles") or []:
+    for row in (enrichment.get("theme_lifecycles") or [])[:5]:
         lines.append(
             f"| {row.get('theme_name')} | {row.get('phase')} | {row.get('technical_stage')} | {row.get('score')} | {row.get('event_evidence_count')} | {row.get('fund_flow_evidence')}/{row.get('leader_structure')} | {row.get('continuity')} | {row.get('validation')} |"
         )
@@ -356,11 +369,16 @@ def _loss_streak_today() -> dict:
 
 
 def render_next_day(lines, enrichment):
-    """§6 下一交易日条件化交易计划；返回 `next_plan`（§8 还要用）。"""
+    """§6 下一交易日条件化交易计划；返回 `next_plan`（§8 还要用）。
+
+    v0.57 角色定版：本节是**预案主产地**——明日预案以本节为准，
+    盘前日报只做确认与信息刷新。"""
     next_plan = enrichment.get("next_day_plan") or {}
     lines += [
         "",
-        "## 6. 下一交易日条件化交易计划",
+        "## 6. 下一交易日条件化交易计划（预案主产地）",
+        "",
+        "> 明日预案以本节为准；盘前日报只做**确认与信息刷新**（角色定版 v0.57）。",
         "",
         f"- 总仓位目标：**{next_plan.get('total_position_range')}**；新开仓权限：**{next_plan.get('new_position_permission')}**。",
         "",
@@ -512,6 +530,8 @@ def main():
     lines = [
         f"# {day} 最终盘后复盘",
         "",
+        "> 角色（v0.57 owner 定版）：**盘后=复盘纠错 + 条件化预案主产地** ｜ "
+        "盘前=信息处理+预案确认 ｜ 盘中14:45=按规则的交易提醒。",
         f"> 生成时间：{cn_now().strftime('%Y-%m-%d %H:%M:%S')}",
         *report_audit.render_md(audit),
         f"> 报告质量：**{'complete' if not enrichment.get('unavailable') and news.get('status') == 'complete' else 'degraded'}**",
@@ -528,7 +548,18 @@ def main():
         "|---|---|---|---|---|---|",
     ]
     render_execution_rows(lines, execution)
-    render_news(lines, news)
+    # §2 事实核对需要「与今日操作的交集」：持仓代码 ∪ 当日成交代码，
+    # 外加这些票所属板块名（matched_themes 命中持仓板块也算交集）。
+    _hold_codes = set(pmap) | {bare(x.get("代码")) for x in today}
+    _hold_sectors = {
+        s
+        for c in _hold_codes
+        for s in (
+            sector_for(c, sectors).get("sector") or sector_for(c, sectors).get("name"),
+        )
+        if s
+    }
+    render_news(lines, news, hold_codes=_hold_codes, hold_sectors=_hold_sectors)
 
     render_market(lines, checks, chief, indices)
 

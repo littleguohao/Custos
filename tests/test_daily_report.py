@@ -237,3 +237,84 @@ class TestStockPoolSection:
     def test_no_pool_says_so(self, tmp_path, monkeypatch):
         monkeypatch.setattr(dr, "DATA", tmp_path / "data")
         assert dr.stock_pool_section("2026-08-13") == ["未找到任何选股链产出。"]
+
+
+# ---------------------------------------------------------------------------
+# v0.57：三份报告角色对齐（盘前=信息处理+预案确认，盘后=复盘纠错+预案主产地）
+# ---------------------------------------------------------------------------
+
+
+class TestPlanConfirmationSection:
+    """盘前 §6 预案确认：读前一交易日盘后复盘的 next_day_plan，逐条确认/标变化。"""
+
+    _PRIOR = {
+        "date": "2026-08-12",
+        "next_day_plan": {
+            "total_position_range": "40%-60%",
+            "new_position_permission": "允许",
+            "holding_plans": [
+                {
+                    "code": "600000.SH",
+                    "name": "浦发银行",
+                    "priority": "P1",
+                    "direction": "减仓",
+                    "trigger": "跌破BBI",
+                    "invalidation": "收复",
+                }
+            ],
+        },
+    }
+
+    _CHIEF = {
+        "market_state": "防守",
+        "risk_level": "普通",
+        "total_position_range": "40%-60%",
+        "new_position_permission": "允许",
+        "allowed_actions": ["仅观察"],
+        "tomorrow_validation": ["量能确认"],
+        "holding_actions": [{"code": "600000.SH", "priority": "P1", "action": "减仓"}],
+    }
+
+    def test_reads_prior_plan_and_confirms(self):
+        lines = dr.plan_confirmation_section("2026-08-13", self._CHIEF, self._PRIOR)
+        text = "\n".join(lines)
+        assert "预案来源：**2026-08-12** 盘后复盘" in text
+        assert "✅ 确认（一致）" in text  # 总仓位/新开仓与盘前值一致
+        assert "600000 浦发银行" in text and "跌破BBI" in text
+        assert "✅ 确认（盘前动作：P1 减仓）" in text
+
+    def test_divergence_marked(self):
+        chief = {**self._CHIEF, "new_position_permission": "禁止"}
+        text = "\n".join(dr.plan_confirmation_section("2026-08-13", chief, self._PRIOR))
+        assert "⚠️ 变化：盘前为 禁止" in text, "盘后计划与盘前刷新值不一致必须标出来"
+
+    def test_missing_plan_says_so_not_fabricated(self):
+        """盘后预案缺失 ⇒ 如实报「无预案可确认」（fail-closed：不编一份）。"""
+        text = "\n".join(dr.plan_confirmation_section("2026-08-13", self._CHIEF, {}))
+        assert "预案**缺失**" in text and "无预案可确认" in text
+        assert "盘前信息刷新" in text, "缺失时仍给刷新值"
+
+    def test_holding_plan_without_today_action_flagged(self):
+        chief = {**self._CHIEF, "holding_actions": []}
+        text = "\n".join(dr.plan_confirmation_section("2026-08-13", chief, self._PRIOR))
+        assert "盘前无该票动作条目" in text
+
+    def test_role_line_distinguishes_three_reports(self):
+        """三份报告的角色一眼可辨（标题区角色行）。"""
+        import inspect
+
+        daily_src = inspect.getsource(dr.main)
+        assert "盘前=信息处理 + 预案确认" in daily_src
+        from custos.pipeline.close_review import final_close_review as fcr
+
+        assert "盘后=复盘纠错 + 条件化预案主产地" in inspect.getsource(fcr.main)
+        from custos.pipeline.close_review import review_core as rc
+
+        assert "盘中14:45=按规则的交易提醒" in inspect.getsource(rc)
+
+    def test_theme_section_marks_redesign_pending(self):
+        """§5 主线题材必须标注「判定口径待重设计（#26）」（owner：目前不准）。"""
+        import inspect
+
+        src = inspect.getsource(dr.main)
+        assert "待重设计" in src and "#26" in src

@@ -92,14 +92,12 @@ class TestSectorFor:
 
 
 class TestRenderNews:
-    def test_four_fixed_sections_always_present(self):
-        """四节（信息/政策/风向/舆情）**恒定出现** ——
-        缺节会让读者以为报告残缺，而空节能明确表达「这个窗口没有证据」。"""
+    """v0.57 角色定版：盘后 §2 从信息流压缩为「与今日操作相关的事实核对」。"""
+
+    def test_section_title_is_fact_check(self):
         lines = []
         fcr.render_news(lines, {})
-        text = "\n".join(lines)
-        for i, name in enumerate(["信息", "政策", "风向", "舆情"], 1):
-            assert f"### 2.{i} {name}" in text
+        assert "## 2. 与今日操作相关的事实核对" in "\n".join(lines)
 
     def test_empty_section_says_unavailable_not_blank(self):
         """⚠️ 空节写 `unavailable` 并说明原因（没过时效/来源质量门），
@@ -108,8 +106,8 @@ class TestRenderNews:
         fcr.render_news(lines, {"sections": {}})
         assert any("`unavailable`" in x and "时效和来源质量门" in x for x in lines)
 
-    def test_rows_rendered_with_source_and_fact_status(self):
-        """每条都带**来源/质量** —— 读者要能判断这条能不能当既成事实。"""
+    def test_only_operation_relevant_facts_kept(self):
+        """核心断言：无交集的行不进表（信息流压缩），有交集的进。"""
         lines = []
         fcr.render_news(
             lines,
@@ -121,31 +119,68 @@ class TestRenderNews:
                             "title": "国常会部署",
                             "source_name": "gov.cn",
                             "fact_status": "confirmed",
-                            "matched_themes": ["宏观政策"],
+                            "matched_themes": ["半导体"],
                             "trade_meaning": "利多",
-                        }
+                        },
+                        {
+                            "published_at": "2026-08-07T10:00",
+                            "title": "无关国际新闻",
+                            "source_name": "x",
+                            "fact_status": "confirmed",
+                            "matched_themes": ["地缘"],
+                        },
                     ]
                 }
             },
+            hold_sectors={"半导体"},
         )
-        row = [x for x in lines if "国常会部署" in x][0]
-        assert "gov.cn/confirmed" in row and "宏观政策" in row and "利多" in row
+        text = "\n".join(lines)
+        assert "国常会部署" in text and "半导体" in text and "gov.cn/confirmed" in text
+        assert "无关国际新闻" not in text, "无交集的信息流条目必须被压缩掉"
 
-    def test_affected_defaults_to_pending(self):
-        lines = []
-        fcr.render_news(lines, {"sections": {"信息": [{"title": "t"}]}})
-        assert any("待确认" in x for x in lines if "t" in x)
-
-    def test_caps_at_five_rows_per_section(self):
-        """每节最多 5 条 —— 报告要有界，否则一节几十条没人读。"""
+    def test_no_intersection_says_so(self):
+        """有证据但无交集 ⇒ 如实说「无交集」，不是静默空节。"""
         lines = []
         fcr.render_news(
-            lines, {"sections": {"信息": [{"title": f"第{i}条"} for i in range(9)]}}
+            lines,
+            {"sections": {"信息": [{"title": "t", "matched_themes": ["宏观政策"]}]}},
+            hold_sectors={"半导体"},
         )
-        assert sum(1 for x in lines if "第" in x and "条" in x) == 5
+        assert any("无与今日持仓/操作的交集" in x for x in lines)
+
+    def test_holding_code_match_counts(self):
+        """matched_holdings 命中持仓代码也算交集。"""
+        lines = []
+        fcr.render_news(
+            lines,
+            {
+                "sections": {
+                    "信息": [{"title": "浦发银行公告", "matched_holdings": ["600000"]}]
+                }
+            },
+            hold_codes={"600000"},
+        )
+        assert any("浦发银行公告" in x for x in lines)
+
+    def test_caps_at_eight_rows(self):
+        """有界：最多 8 条 —— 报告要有界，否则一节几十条没人读。"""
+        lines = []
+        fcr.render_news(
+            lines,
+            {
+                "sections": {
+                    "信息": [
+                        {"title": f"第{i}条", "matched_holdings": ["600000"]}
+                        for i in range(12)
+                    ]
+                }
+            },
+            hold_codes={"600000"},
+        )
+        assert sum(1 for x in lines if "第" in x and "条" in x) == 8
 
     def test_missing_sources_listed(self):
-        """缺哪些新闻源要写出来 —— 否则「政策节为空」无法归因。"""
+        """缺哪些新闻源要写出来 —— 否则「节为空」无法归因。"""
         lines = []
         fcr.render_news(lines, {"missing": ["rss_filter", "postclose_digest"]})
         assert any("新闻数据缺失" in x and "rss_filter" in x for x in lines)

@@ -291,6 +291,86 @@ def stock_pool_section(day: str) -> list[str]:
     return lines
 
 
+def plan_confirmation_section(day: str, chief: dict, prior: dict) -> list[str]:
+    """§6 预案确认（v0.57 角色定版：盘前=信息处理 + 预案确认；
+    条件化预案的主产地在盘后复盘 §6）。
+
+    数据流：读**前一交易日**盘后复盘产物（final_review）的 `next_day_plan`
+    （由 previous_review 读入；旧布局/日期目录两口径它都认）——盘前信息刷新
+    （chief 的当日市场状态/风控/权限值）后逐条确认或标注变化；盘后预案缺失时
+    如实报（fail-closed 惯例：不编一份预案）。
+    """
+    plan = (prior or {}).get("next_day_plan") or {}
+    prior_day = (prior or {}).get("date") or "缺失"
+    actions_by_code = {
+        code(x.get("code")): x for x in (chief.get("holding_actions") or [])
+    }
+    lines = [
+        "## 6. 预案确认（盘后预案 + 盘前信息刷新）",
+        "",
+        "> 角色定版（v0.57）：盘前=信息处理 + 预案确认；**明日预案的主产地在"
+        "盘后复盘 §6**。本节目的是确认预案在隔夜信息后是否仍成立，不是新出预案。",
+        "",
+    ]
+    if not plan:
+        lines.append(
+            "- ⚠️ 盘后条件化预案**缺失**（上一交易日 final_review 无 next_day_plan）"
+            "——本节无预案可确认；以下为盘前信息刷新值。"
+        )
+    else:
+        lines.append(f"- 预案来源：**{prior_day}** 盘后复盘 §6。")
+        lines += [
+            "",
+            "| 预案项 | 盘后计划 | 盘前确认 |",
+            "|---|---|---|",
+        ]
+        for label, pv, cv in (
+            (
+                "总仓位目标",
+                plan.get("total_position_range"),
+                chief.get("total_position_range"),
+            ),
+            (
+                "新开仓权限",
+                plan.get("new_position_permission"),
+                chief.get("new_position_permission"),
+            ),
+        ):
+            if not pv:
+                state = "盘后缺值"
+            elif str(pv) == str(cv):
+                state = "✅ 确认（一致）"
+            else:
+                state = f"⚠️ 变化：盘前为 {cv}"
+            lines.append(f"| {label} | {pv or '缺失'} | {state} |")
+        for row in plan.get("holding_plans") or []:
+            c = code(row.get("code"))
+            cur = actions_by_code.get(c)
+            state = (
+                f"✅ 确认（盘前动作：{cur.get('priority', 'P3')} "
+                f"{cur.get('action', '观察')}）"
+                if cur
+                else "⚠️ 盘前无该票动作条目"
+            )
+            lines.append(
+                f"| {c} {row.get('name')}：{row.get('priority')} {row.get('direction')} "
+                f"| 触发：{row.get('trigger')}；无效：{row.get('invalidation')} | {state} |"
+            )
+    # 盘前信息刷新（隔夜信息后的当前执行规则）：
+    lines += [
+        "",
+        "- 盘前信息刷新："
+        f"风控优先={'；'.join(chief.get('allowed_actions') or ['仅观察'])}"
+        f"；新开仓={chief.get('new_position_permission', '禁止')}"
+        f"；仓位管理=建议 {chief.get('total_position_range', '待确认')}"
+        "（持仓快照、目标日行情或市场质量未全部通过时只给方向，不给精确数量）",
+        f"- 开盘验证：先验证隔夜利好/利空是否被价格与成交确认，再决定是否收紧计划；"
+        "利好不得自动放宽权限。",
+        f"- 下一验证点：{'；'.join(chief.get('tomorrow_validation') or []) or '无'}",
+    ]
+    return lines
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", required=True)
@@ -344,6 +424,8 @@ def main():
         f"# 每日投研简报｜{dt.year}年{dt.month}月{dt.day}日（星期{WEEKDAY[dt.weekday()]}）"
         + (f"｜{a.session}" if a.session else ""),
         "",
+        "> 角色（v0.57 owner 定版）：**盘前=信息处理 + 预案确认** ｜ "
+        "盘中14:45=按规则的交易提醒 ｜ 盘后=复盘纠错 + 条件化预案主产地。",
         f"> 信息窗口：{window_start} 至 {window_end}（Asia/Shanghai）  ",
         f"> 生成时间：{cn_now().strftime('%Y-%m-%d %H:%M:%S')} Asia/Shanghai",
         *report_audit.render_md(audit),
@@ -454,6 +536,9 @@ def main():
         "",
         "## 5. 主线、机会与风险",
         "",
+        "> ⚠️ 主线题材判定口径**待重设计**（owner 2026-08-13「目前不准，需要重新调整」"
+        "——归入 TODO #26）：本节内容仅作观察参考。",
+        "",
         "| 方向 | 阶段 | 交易许可 | 理由 |",
         "|---|---|---|---|",
     ]
@@ -497,18 +582,8 @@ def main():
         lines.append("| - | - | 暂无可审核计划 | 禁止临时开仓 | - |")
     lines += ["", "### 公式选股备选池", ""]
     lines += stock_pool_section(day)
+    lines += ["", *plan_confirmation_section(day, chief, prior), ""]
     lines += [
-        "",
-        "## 6. 当日行动建议",
-        "",
-        "| 决策项 | 执行规则 |",
-        "|---|---|",
-        f"| 风控优先 | {'；'.join(chief.get('allowed_actions') or ['仅观察'])} |",
-        f"| 新开仓 | {chief.get('new_position_permission', '禁止')} |",
-        f"| 仓位管理 | 建议 {chief.get('total_position_range', '待确认')}；持仓快照、目标日行情或市场质量未全部通过时只给方向，不给精确数量 |",
-        "| 开盘验证 | 先验证隔夜利好/利空是否被价格与成交确认，再决定是否收紧计划；利好不得自动放宽权限 |",
-        f"| 下一验证点 | {'；'.join(chief.get('tomorrow_validation') or [])} |",
-        "",
         "## 7. 数据时效与声明",
         "",
         f"- ChiefDecision：`{chief_path}`",
