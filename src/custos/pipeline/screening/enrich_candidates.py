@@ -60,6 +60,10 @@ from custos.core.factors.distribution import (  # noqa: E402
     detect_distribution,
     detect_top_windmill,
 )
+from custos.core.factors.bottom_patterns import (  # noqa: E402  v0.56 底部侧（25chuhuo）
+    detect_red_fat_green_thin,
+    detect_w_bottom,
+)
 
 
 from custos.core.paths import (
@@ -1223,6 +1227,10 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
     # 次日确认豁免层（2026-08-13，25chuhuo 覆盖度缺口）：①/② 的换庄/假出货豁免 +
     # 顶部大风车。证据层（复用已算的 det，不重算），不驱动分层。
     distribution_confirm = confirm_distribution(df, code, det=distribution)
+    # 底部侧形态（2026-08-13，v0.56，25chuhuo 底部镜像）：W 底（双底+底部放量+
+    # MACD 底背离合成）与红肥绿瘦（数量+面积两维）。证据层，不进技术分/分层/gate。
+    w_bottom = detect_w_bottom(df, code)
+    red_fat_green_thin = detect_red_fat_green_thin(df, code)
     # 指标去重：日线 KDJ 与 MACD 各只算一次，再喂给下游检测器（审计：kdj×4/macd×3）。
     macd_technics = check_macd_technics(df)
 
@@ -1302,6 +1310,9 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
         },
         "distribution": distribution,
         "distribution_confirm": distribution_confirm,
+        # v0.56 底部侧证据列（25chuhuo）：W 底 / 红肥绿瘦——只落盘展示，不进分层
+        "w_bottom": w_bottom,
+        "red_fat_green_thin": red_fat_green_thin,
         "macd_technics": macd_technics,
         "perfect_b1_fit": compute_perfect_b1_fit(
             df, daily_j, zx, pullback_shrink, macd_state=macd_technics

@@ -190,6 +190,8 @@ class TestNotForLive:
             # v0.50（#37 阶段 A）定案，见各自模块 FACTOR 注释
             "s_shape",
             "sector_phase",
+            # v0.56：底部形态（W底/红肥绿瘦，25chuhuo 底部镜像）——证据层
+            "bottom_patterns",
         }, f"evidence_only 集合变了：{got}"
 
 
@@ -411,13 +413,14 @@ class TestStageMatchesReality:
         ]
         assert not bad, f"标了 debug 却在 live 链里：{bad}"
 
-    def test_release_set_is_the_known_eleven(self):
-        """已上线集合当前 11 个。变动必须是有意识的 —— 上线/下线都该被看见。
+    def test_release_set_is_the_known_twelve(self):
+        """已上线集合当前 12 个。变动必须是有意识的 —— 上线/下线都该被看见。
 
-        （v0.50：12 → 11，b1_pullback_fit 证伪下线转 debug。）
+        （v0.50：12 → 11，b1_pullback_fit 证伪下线转 debug；
+        v0.56：11 → 12，bottom_patterns 证据层进 live 链。）
         """
         got = set(factors.released())
-        assert len(got) == 11, f"已上线因子数变了（{len(got)}）：{sorted(got)}"
+        assert len(got) == 12, f"已上线因子数变了（{len(got)}）：{sorted(got)}"
 
     def test_debug_factors_are_research_only(self):
         """未上线的因子 live_use 应为 none —— 既没上线又声明可用是自相矛盾。"""

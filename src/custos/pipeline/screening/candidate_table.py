@@ -456,10 +456,10 @@ def _bucket_pools(lines, candidates, counts):
             lines.append("")
             continue
         lines.append(
-            "| 代码 | 名称 | 公式命中 | 模式标签 | 波浪 | CZ标签 | 技术分 | 贴合 | ADX25 | S反转 | 资金意图 | 板块 | 板块状态 | 交易属性 | 共振 | 基本面 | 4面共振 | 平台回踩 | 标注 | 分层 | 建议止损位 | next_step |"
+            "| 代码 | 名称 | 公式命中 | 模式标签 | 波浪 | CZ标签 | 技术分 | 贴合 | ADX25 | S反转 | W底 | 红肥绿瘦 | 资金意图 | 板块 | 板块状态 | 交易属性 | 共振 | 基本面 | 4面共振 | 平台回踩 | 标注 | 分层 | 建议止损位 | next_step |"
         )
         lines.append(
-            "|---|---|---|---|---|---|---:|---:|---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|"
+            "|---|---|---|---|---|---|---:|---:|---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
         )
         for c in rows:
             # 未知 patterns 键（上游新增标签/脏数据）不得 KeyError 打挂整张表：
@@ -506,6 +506,9 @@ def _bucket_pools(lines, candidates, counts):
                 # v0.51（#37 阶段 B）：adx25/S反转 证据列（严格证据层，不进分层）
                 f" | {'✅' if c.get('adx25') else '-'}"
                 f" | {_fmt((c.get('s_reversal') or {}).get('s_reversal'))}"
+                # v0.56：W底/红肥绿瘦 底部侧证据列（25chuhuo 底部镜像，不进分层）
+                f" | {'✅' if (c.get('w_bottom') or {}).get('hit') else '-'}"
+                f" | {'✅' if (c.get('red_fat_green_thin') or {}).get('hit') else '-'}"
                 f" | {cap_intent}"
                 f" | {c.get('industry') or c.get('sector', '未知')}"
                 f" | {shf.get('sector_state', '未知')}"
