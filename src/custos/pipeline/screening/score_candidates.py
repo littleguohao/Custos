@@ -742,6 +742,8 @@ def score_candidate(
         "ride_above_fast": bool(cand.get("ride_above_fast")),
         "b1_ignition": cand.get("b1_ignition") or {},
         "distribution": cand.get("distribution") or {},
+        # 次日确认豁免层（2026-08-13，25chuhuo 缺口）——证据层透传，不进分层
+        "distribution_confirm": cand.get("distribution_confirm") or {},
         # 信号标注层（A 类改动）：**只透传，不参与打分**。
         # 本函数是显式字段白名单，enrich 落盘的 signals 不加在这里就会被丢掉——
         # 2026-08-04 实盘即因此出现「157 只候选、信号标注区块全空」。

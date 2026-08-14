@@ -4,15 +4,22 @@
 2026-08-06 从 `screening/enrich_candidates.py` 抽出（**零行为变化**，逐字搬）。
 抽出的动因：因子实现必须**全项目唯一一份**，其他模块通过调用访问 ——
 内联在 1723 行的选股链主流程里，既无法单独回测，也无法防止别处再写一份。
+
+2026-08-13（25chuhuo 讲义覆盖度缺口，owner 批准）补全三项：
+①/② 次日确认豁免层（`confirm_distribution`：pending/confirmed/revoked，
+不换庄假出货不计真派发；不改既有命中语义）、③ 阶梯跌破补全（平量阴计数 +
+DKS 黄线跌破）、顶部大风车（`detect_top_windmill`，高位+长上影/宽幅+次日
+不反包确认，自带 T+1 状态机）。
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 from custos.core.factors._util import ohlcv_arrays as _ohlcv_arrays
 
 
-from custos.core.indicators import _infer_price_limit, qsx_series  # noqa: E402
+from custos.core.indicators import _infer_price_limit, qsx_series, dks_series  # noqa: E402
+from custos.core.indicators import amplitude_pct as amplitude_pct_of  # noqa: E402  振幅唯一实现
 
 FACTOR: dict[str, Any] = {
     "id": "distribution",
@@ -20,7 +27,7 @@ FACTOR: dict[str, Any] = {
     "kind": "pattern",
     "status": "active",
     "evidence": "governance/research/R2_selection_price_volume.md",
-    "note": "主力出货五方式（顶部派发形态），用于清仓与选股规避",
+    "note": "主力出货五方式（顶部派发形态），用于清仓与选股规避；2026-08-13 补全：次日确认豁免层（confirm_distribution）+ ③平量阴/DKS 跌破 + 顶部大风车（25chuhuo 覆盖度缺口）",
     "min_bars": 1,
     "live_use": "gate",
     "stage": "release",
@@ -39,6 +46,18 @@ DIST_TOP_WINDOW = 10  # 待回测：顶部区间（绿肥红瘦/双头）窗口
 DIST_DOUBLE_TOP_TOL = 3.0  # 待回测：双头两顶相近容差%
 DIST_SUBHIGH_SHRINK = 0.9  # 待回测：次高前一日缩量量比上限
 DIST_MIN_VOL_MA20_FRAC = 0.05  # 待回测：vol_ma20 低于全序列均量×此比例时视为近零（派发检测器 available=False）
+
+# ---- 25chuhuo 讲义覆盖度缺口补全（2026-08-13，owner 批准）----
+# 依据：中国中铁 14.12.22（无加速段的放量=试盘非顶）、15.6.8（天量长阴后次日
+# 反包涨停=换庄）；01_swing_rules §七.2 的 T+1 收盘后判定条款（文档早有、
+# 代码未实现，顺势落进代码）。①/② 的既有命中语义**不动**——豁免在
+# confirm_distribution 一层表达（状态机：pending/confirmed/revoked），
+# ③ 的口径补全（平量阴计数 + DKS 跌破）是直接放宽命中条件。
+DIST_WINDMILL_SHADOW_BODY = 1.0  # 待回测：大风车长上影=上影 ≥ 实体×此值
+DIST_WINDMILL_RANGE_PCT = 7.0  # 待回测：宽幅震荡 K=振幅（高−低）/前收 ≥ 此值%
+DIST_WINDMILL_TOP_FRAC = (
+    0.98  # 待回测：高位=近 DIST_TOP_WINDOW 根最高 ≥ 近60根最高×此值（同⑤口径）
+)
 
 
 def detect_distribution(df, code: str = "") -> dict[str, Any]:
@@ -78,6 +97,7 @@ def detect_distribution(df, code: str = "") -> dict[str, Any]:
     qsx = qsx_series(
         df["close"]
     ).to_numpy()  # 2026-08-09 起走 indicators 唯一实现（原内联 EMA×2 同式）
+    dks = dks_series(df["close"]).to_numpy()  # 黄线（③ 的 DKS 跌破补判，2026-08-13）
 
     def chg(t: int) -> float:
         return (close[t] / close[t - 1] - 1) * 100 if t >= 1 and close[t - 1] else 0.0
@@ -143,30 +163,36 @@ def detect_distribution(df, code: str = "") -> dict[str, Any]:
             break
     sig["subhigh_vol_bear"] = {"hit": hit2 is not None, "detail": hit2}
 
-    # ③ 阶梯放量跌破QSX：近DIST_RECENT根内收盘放量跌破QSX，且此前连续≥3根放量阴
+    # ③ 阶梯放量跌破趋势线：近DIST_RECENT根内收盘放量跌破 QSX（白线）**或跌破
+    #    DKS（黄线，平量也判）**，且此前连续≥3根阴线。
+    #    2026-08-13 补全（25chuhuo 讲师口径）：「平量阴线也算」⇒ 连续阴计数不再
+    #    要求量能递增（放量/平量分拆计数供回测消融）；「跌破黄线（DKS）也要判」
+    #    ⇒ 新增 DKS 跌破路径（DKS 是更慢的中期趋势线，跌破它量未必放大）。
     hit3 = None
     for t in range(n - DIST_RECENT, n):
         if t < DIST_STAIR_MIN_BARS + 6:
             continue
         vrt = vr5(t)
-        broke = close[t] < qsx[t] and vrt is not None and vrt >= DIST_STAIR_BREAK_VR
+        broke_qsx = close[t] < qsx[t] and vrt is not None and vrt >= DIST_STAIR_BREAK_VR
+        broke_dks = bool(dks[t] == dks[t] and close[t] < dks[t])  # 黄线跌破（平量也判）
+        # 连续阴线计数（平量阴也算），并拆放量/平量供回测消融
         cnt = 0
+        cnt_vol_up = 0
         for k in range(t, max(0, t - 8), -1):
-            vrk = vr5(k)
-            if (
-                close[k] < open_[k]
-                and vrk is not None
-                and (vol[k] >= vol[k - 1] or vrk >= 1.0)
-            ):
+            if close[k] < open_[k]:
                 cnt += 1
+                vrk = vr5(k)
+                if vol[k] >= vol[k - 1] or (vrk is not None and vrk >= 1.0):
+                    cnt_vol_up += 1
             else:
                 break
-        if broke and vrt is not None and cnt >= DIST_STAIR_MIN_BARS:
+        if (broke_qsx or broke_dks) and cnt >= DIST_STAIR_MIN_BARS:
             hit3 = {
                 "bars_ago": n - 1 - t,
-                "consecutive_vol_bears": cnt,
-                "vol_ratio5": round(vrt, 3),
-                "below_qsx": True,
+                "consecutive_bears": cnt,
+                "of_which_vol_up": cnt_vol_up,
+                "vol_ratio5": round(vrt, 3) if vrt is not None else None,
+                "below": "qsx" if broke_qsx else "dks",
             }
             break
     sig["stairstep_vol_decline"] = {"hit": hit3 is not None, "detail": hit3}
@@ -253,3 +279,135 @@ def detect_distribution(df, code: str = "") -> dict[str, Any]:
         "risk_level": risk,
         "price_limit": limit,
     }
+
+
+# ============================================================================
+# 25chuhuo 覆盖度缺口补全（2026-08-13，owner 批准）
+# ============================================================================
+
+
+def detect_top_windmill(df, code: str = "") -> dict[str, Any]:
+    """顶部大风车（25chuhuo 讲义）：**高位 + 长上影/宽幅震荡 K + 次日不反包确认**。
+
+    讲义口径：「不确定是否见顶 → 卖一半；次日必须反包否则全卖」——
+    代码只产信号与状态，仓位动作归文档/人。绝不 raise。
+
+    - 高位：信号 K 的最高价 ≥ 近 60 根最高 × ``DIST_WINDMILL_TOP_FRAC``（同⑤口径）；
+    - 大风车 K：长上影（上影 ≥ 实体 × ``DIST_WINDMILL_SHADOW_BODY``）或
+      宽幅震荡（振幅（高−低）/前收 ≥ ``DIST_WINDMILL_RANGE_PCT``%）；
+    - T+1 状态机（01_swing_rules §七.2 的 T+1 收盘后判定条款）：
+      信号 K 是最后一根 → ``pending``（次日未收盘）；
+      次日收盘 ≥ 信号 K 实体上沿（反包）→ ``revoked``（豁免，不计出货）；
+      否则 → ``confirmed``。
+    """
+    try:
+        close, high, low, _vol = _ohlcv_arrays(df)
+        open_ = df["open"].astype(float).to_numpy()
+        n = len(df)
+        if n < 30:
+            return {
+                "available": False,
+                "hit": False,
+                "status": None,
+                "reason": f"少于30根K线（{n}）",
+            }
+        top60 = float(high[-60:].max()) if n >= 60 else float(high.max())
+        hit = None
+        for t in range(n - 1, max(0, n - DIST_RECENT) - 1, -1):  # 取最近一根
+            body = abs(close[t] - open_[t])
+            upper = high[t] - max(close[t], open_[t])
+            # 振幅走 indicators.amplitude_pct（唯一实现，分母=前收）——不写内联
+            # (high-low)/x（有单实现守卫）。
+            amp = amplitude_pct_of(high[t], low[t], close[t - 1] if t >= 1 else None)
+            rng_pct = amp if amp is not None else 0.0
+            windmill = (body > 0 and upper >= body * DIST_WINDMILL_SHADOW_BODY) or (
+                rng_pct >= DIST_WINDMILL_RANGE_PCT
+            )
+            near_top = high[t] >= top60 * DIST_WINDMILL_TOP_FRAC
+            if windmill and near_top:
+                if t + 1 >= n:
+                    status = "pending"
+                elif close[t + 1] >= max(open_[t], close[t]):
+                    status = "revoked"  # 次日反包 ⇒ 豁免（讲义：次日必须反包）
+                else:
+                    status = "confirmed"  # 次日不反包 ⇒ 确认
+                hit = {
+                    "bars_ago": n - 1 - t,
+                    "upper_shadow_frac": round(upper / body, 3) if body > 0 else None,
+                    "range_pct": round(rng_pct, 2),
+                    "status": status,
+                }
+                break
+        return {
+            "available": True,
+            "hit": hit is not None,
+            "status": hit["status"] if hit else None,
+            "detail": hit,
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "available": False,
+            "hit": False,
+            "status": None,
+            "error": f"{type(exc).__name__}:{str(exc)[:80]}",
+        }
+
+
+def confirm_distribution(
+    df, code: str = "", det: Optional[dict] = None
+) -> dict[str, Any]:
+    """次日确认豁免层（换庄/假出货，25chuhuo 讲义；T+1 收盘后判定）。
+
+    对 ``detect_distribution`` 命中的 ① 顶部天量大阴 / ② 次高点巨量长阴：
+
+        信号 K 的**次日**未破信号 K 低点，**或**反包（收盘收复信号 K 实体上沿）
+        ⇒ ``revoked``（豁免：试盘/换庄，非真派发 —— 中国中铁 14.12.22/15.6.8）；
+        信号 K 是最后一根（T+1 未收盘）⇒ ``pending``（待确认，次日再判）；
+        否则 ⇒ ``confirmed``。
+
+    ⚠️ **不改 detect_distribution 的既有命中语义**：hits/risk_level 照旧；
+    豁免只在本层表达。``revoked`` 的 ①/② 不应再当「已派发」用——下游展示
+    「待确认/已撤销」状态（同项目 degraded/best-effort 惯例：状态如实可见）。
+
+    顺带聚合顶部大风车（``detect_top_windmill``，自带 T+1 状态机）。
+    ``det`` 可传已算好的 detect_distribution 结果避免重算（enrich 如此）。
+    """
+    out_na = {
+        "available": False,
+        "confirmations": {},
+        "revoked": [],
+        "top_windmill": {"available": False, "hit": False, "status": None},
+    }
+    try:
+        det = detect_distribution(df, code) if det is None else det
+        if not det.get("available"):
+            return out_na
+        close, _high, low, _vol = _ohlcv_arrays(df)
+        open_ = df["open"].astype(float).to_numpy()
+        n = len(df)
+
+        conf: dict[str, Any] = {}
+        revoked: list[str] = []
+        for key in ("top_huge_vol_bear", "subhigh_vol_bear"):
+            s = (det.get("signals") or {}).get(key) or {}
+            if not s.get("hit"):
+                conf[key] = None
+                continue
+            t = n - 1 - int(s["detail"]["bars_ago"])
+            if t + 1 >= n:
+                st = "pending"
+            else:
+                held = low[t + 1] >= low[t]  # 次日未破信号 K 低点
+                recovered = close[t + 1] >= max(open_[t], close[t])  # 反包
+                st = "revoked" if (held or recovered) else "confirmed"
+            conf[key] = st
+            if st == "revoked":
+                revoked.append(key)
+        return {
+            "available": True,
+            "confirmations": conf,
+            "revoked": revoked,
+            "top_windmill": detect_top_windmill(df, code),
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {**out_na, "error": f"{type(exc).__name__}:{str(exc)[:80]}"}

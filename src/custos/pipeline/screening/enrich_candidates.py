@@ -55,7 +55,11 @@ from custos.core.factors.wave_type import (
 #   ↑ `WAVE_MIN_BARS` / `_find_rally_segment` 在本模块**别处也被用到**（不只 detect_wave_type），
 #     所以一并导入。常量与助手跟着因子走、由因子模块拥有，这里只引用。
 from custos.core.factors.perfect_b1_fit import compute_perfect_b1_fit  # noqa: E402
-from custos.core.factors.distribution import detect_distribution  # noqa: E402
+from custos.core.factors.distribution import (  # noqa: E402
+    confirm_distribution,
+    detect_distribution,
+    detect_top_windmill,
+)
 
 
 from custos.core.paths import (
@@ -1216,6 +1220,9 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
         and (zx_recent_gold or ignition.get("hit"))
     )
     distribution = detect_distribution(df, code)
+    # 次日确认豁免层（2026-08-13，25chuhuo 覆盖度缺口）：①/② 的换庄/假出货豁免 +
+    # 顶部大风车。证据层（复用已算的 det，不重算），不驱动分层。
+    distribution_confirm = confirm_distribution(df, code, det=distribution)
     # 指标去重：日线 KDJ 与 MACD 各只算一次，再喂给下游检测器（审计：kdj×4/macd×3）。
     macd_technics = check_macd_technics(df)
 
@@ -1294,6 +1301,7 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
             "zhixing_recent_golden": zx_recent_gold,
         },
         "distribution": distribution,
+        "distribution_confirm": distribution_confirm,
         "macd_technics": macd_technics,
         "perfect_b1_fit": compute_perfect_b1_fit(
             df, daily_j, zx, pullback_shrink, macd_state=macd_technics
