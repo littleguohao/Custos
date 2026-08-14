@@ -329,7 +329,7 @@ def main():
     window = intel.get("window") or {}
     window_start = window.get("start") or f"{prior_day} 15:00"
     window_end = window.get("end") or f"{a.date} 09:00"
-    # 可审计块（待办 #29）：本报告实际读过的输入；盘前情报缺失时也登记为缺失项
+    # 可审计块（原待办 #29，已实现）：本报告实际读过的输入；盘前情报缺失时也登记为缺失项
     audit_inputs = [
         chief_path,
         DATA / "market" / f"{day}_market_timing_input.json",

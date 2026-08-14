@@ -943,7 +943,7 @@ def main(argv: Optional[list] = None) -> int:
 
     result = score_all(args.date)
 
-    # 可审计块（待办 #29）：登记选股链实际读过的输入，出问题时可定位规则版本与数据时点
+    # 可审计块（原待办 #29，已实现）：登记选股链实际读过的输入，出问题时可定位规则版本与数据时点
     result["audit"] = report_audit.build(
         args.date,
         "screening",

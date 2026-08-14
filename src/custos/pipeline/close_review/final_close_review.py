@@ -497,7 +497,7 @@ def main():
 
     quality = chief.get("market_quality") or {}
     checks = {x.get("field"): x for x in quality.get("checks") or []}
-    # 可审计块（待办 #29）：8 个强制输入 + 持仓/台账 + 可选输入（缺失者留「缺失」标记）
+    # 可审计块（原待办 #29，已实现）：8 个强制输入 + 持仓/台账 + 可选输入（缺失者留「缺失」标记）
     audit = report_audit.build(
         day,
         "close_review",

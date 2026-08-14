@@ -1,7 +1,7 @@
 """`market_timing_scorer` —— **0AMV 择时的评分器**，`daily_pipeline` 硬失败 stage。
 
 覆盖率清点（2026-08-09 订正）：35% 基线（244 语句/165 未覆盖）。
-⚠️ 单文件覆盖率读数不稳（曾读出 15%/36%/48%）——根因已定位（TODO #46）：
+⚠️ 单文件覆盖率读数不稳（曾读出 15%/36%/48%）——根因已定位（原 TODO #46，已闭环）：
 ① `--cov` 单文件路径与点分模块两种写法在 pytest-cov 下行为异常（静默无数据/
 抢先 import 漏记模块级行），只有目录形式 `--cov=src/custos/pipeline/market_timing` 可靠；
 ② 读数由「哪些测试文件跑了 scorer」决定（本文件 + test_audit_opt_tools 两处）；

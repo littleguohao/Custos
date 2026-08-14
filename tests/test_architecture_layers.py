@@ -49,7 +49,7 @@ BASE_MODULES = {
     # 2026-08-07 建：同一组阈值原先散在 screening/market_timing/holdings
     # 三个 **L3** 目录里（彼此不能互相 import），只能上提到 L0。
     "b1_thresholds.py",
-    # `report_audit.py` 是报告可审计块（待办 #29）的唯一实现，被 L3
+    # `report_audit.py` 是报告可审计块（原待办 #29，已实现）的唯一实现，被 L3
     # （close_review/screening）与 L4（daily_report）的报告生成器共用。
     # 只依赖 `paths`（L0）与 stdlib。
     "report_audit.py",

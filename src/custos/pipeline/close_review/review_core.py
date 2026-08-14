@@ -299,8 +299,9 @@ def classify(
         # 「尾盘跌破BBI待收盘确认」。修前该行显示 P2 且止损理由消失。
         #
         # 只补理由、**不动优先级**：B1 用的是 14:45 实时价、RiskDecision 可能来自
-        # 前一日 17:00，谁该压过谁是决策优先级问题（README 写「risk_control 拥有
-        # 否决权」，但那条没区分依据的新鲜度），交 owner 定案 —— 见待办 #50。
+        # 前一日 17:00 —— 谁压过谁已定案（v0.35，owner 拍板）：盘中以**证据新鲜度**
+        # 为准，14:45 实时行情重算的 B1 压过同日期标签的 RiskDecision
+        # （README 写「risk_control 拥有否决权」，那条没区分依据新鲜度，v0.35 补上）。
         reason = b1_state["final_reason"]
         if high_risk:
             outstanding = "；".join(
@@ -393,7 +394,7 @@ def main() -> None:
         risk_date_note = (
             f"**{risk_src_date}**（文件为当日，但**证据日是 {_evidence}** —— "
             f"盘前生成、依据前一交易日收盘；盘中动作以 14:45 实时行情"
-            f"重算的 B1 为准，见 TODO.md #50）"
+            f"重算的 B1 为准（v0.35 已定案：盘中风控依据按证据新鲜度取））"
         )
     elif not _evidence:
         risk_date_note = (
@@ -492,7 +493,7 @@ def main() -> None:
         for x in indices
     ] or ["| 缺失 | 缺失 | 缺失 | 缺失 |"]
 
-    # 可审计块（待办 #29）：本报告实际读过的输入；风控依据回退旧文件时按实际来源登记
+    # 可审计块（原待办 #29，已实现）：本报告实际读过的输入；风控依据回退旧文件时按实际来源登记
     audit = report_audit.build(
         target_date,
         "1445",

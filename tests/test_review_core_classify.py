@@ -159,7 +159,8 @@ class TestB1Precedence:
         而「所有计划必须可复盘」。
 
         ⚠️ **优先级顺序本身未动**（B1 的 P2 仍压过风控的 P1）：B1 用 14:45 实时价、
-        RiskDecision 可能来自前一日 17:00，谁该优先是决策问题，见待办 #50。
+        RiskDecision 可能来自前一日 17:00 —— 谁该优先已定案（v0.35：按证据新鲜度，
+        14:45 实时重算的 B1 压过同日期标签的 RiskDecision）。
         """
         p, a, r = rc.classify(
             POS,

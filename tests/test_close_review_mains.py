@@ -257,7 +257,7 @@ class TestReviewCoreMain:
 
 
 class TestReportAuditBlock:
-    """可审计块（待办 #29）：`report_id` / 策略版本 / 数据截止 / 输入清单。
+    """可审计块（原待办 #29，已实现）：`report_id` / 策略版本 / 数据截止 / 输入清单。
 
     原 MASTER_WORKFLOW §十二 第 8 条全仓零实现；出问题时无法定位
     「当时用的哪版规则、哪天的数据」（研究侧 R13 同类问题）。

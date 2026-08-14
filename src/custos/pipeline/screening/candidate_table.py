@@ -523,7 +523,7 @@ def _bucket_pools(lines, candidates, counts):
 
 
 def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
-    # 可审计块（待办 #29）：本表实际读过的输入（stock_pool 本体 + 门控结论）
+    # 可审计块（原待办 #29，已实现）：本表实际读过的输入（stock_pool 本体 + 门控结论）
     audit = report_audit.build(
         date,
         "candidate_table",

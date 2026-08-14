@@ -76,7 +76,7 @@ class TestFallbackRssEvents:
 
 
 class TestDailyReportAuditBlock:
-    """可审计块（待办 #29）：盘前日报头部必须带 report_id / 策略版本 / 数据截止 / 输入清单。"""
+    """可审计块（原待办 #29，已实现）：盘前日报头部必须带 report_id / 策略版本 / 数据截止 / 输入清单。"""
 
     def test_md_header_carries_audit(self, monkeypatch, tmp_path):
         data = tmp_path / "data"

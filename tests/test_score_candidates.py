@@ -303,7 +303,7 @@ def test_resonance_four_leg():
 
 
 def test_stock_pool_json_carries_audit_block(tmp_path, monkeypatch):
-    """可审计块（待办 #29）：stock_pool.json 落盘前注入 audit 四件，
+    """可审计块（原待办 #29，已实现）：stock_pool.json 落盘前注入 audit 四件，
     且过 stock_pool 契约（audit 为可选字段，出现时四件必须齐）。"""
     import json
     import sys

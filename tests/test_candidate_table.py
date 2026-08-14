@@ -345,7 +345,7 @@ def test_industry_preferred_over_theme_sector_in_table():
 
 
 def test_render_table_carries_audit_block(tmp_path, monkeypatch):
-    """可审计块（待办 #29）：选股表头部必须带 report_id / 策略版本 / 输入清单。
+    """可审计块（原待办 #29，已实现）：选股表头部必须带 report_id / 策略版本 / 输入清单。
 
     出问题时靠它定位「当时用的哪版规则、哪天的数据」；
     输入文件缺失时登记「缺失」标记而不是不产出。

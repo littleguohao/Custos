@@ -235,7 +235,7 @@ _GATE_BLOCK = {
     "status": {"type": str, "required": True, "choices": GATE_STATUS},
 }
 
-# 报告可审计块（待办 #29，report_audit.build 的输出）。**可选字段**：
+# 报告可审计块（原待办 #29，已实现；report_audit.build 的输出）。**可选字段**：
 # 出现时四件必须齐（report_id / 策略版本 / 数据截止 / 输入清单），
 # 不出现不判畸形 —— 旧产物没有它，而契约管的是「写了的东西对不对」。
 # `data_as_of` 允许 null：全部输入缺失时没的可报（与「编一个假新鲜度」同理）。
