@@ -149,18 +149,41 @@ class TestRenderNews:
         assert any("无与今日持仓/操作的交集" in x for x in lines)
 
     def test_holding_code_match_counts(self):
-        """matched_holdings 命中持仓代码也算交集。"""
+        """matched_codes 命中持仓代码算交集（生产者形状：matched_codes=代码、
+        matched_holdings=名称——2026-08-14 前错用 matched_holdings 相交，
+        生产上恒为空）。"""
         lines = []
         fcr.render_news(
             lines,
             {
                 "sections": {
-                    "信息": [{"title": "浦发银行公告", "matched_holdings": ["600000"]}]
+                    "信息": [
+                        {
+                            "title": "浦发银行公告",
+                            "matched_holdings": ["浦发银行"],
+                            "matched_codes": ["600000"],
+                        }
+                    ]
                 }
             },
             hold_codes={"600000"},
         )
         assert any("浦发银行公告" in x for x in lines)
+
+    def test_holding_names_alone_do_not_match_codes(self):
+        """名称键（matched_holdings）不得当成代码用——名称与代码永不相交，
+        若错用它做代码交集，生产数据（只有名称）会静默漏报。"""
+        lines = []
+        fcr.render_news(
+            lines,
+            {
+                "sections": {
+                    "信息": [{"title": "t", "matched_holdings": ["浦发银行"]}]
+                }
+            },
+            hold_codes={"600000"},
+        )
+        assert any("无与今日持仓/操作的交集" in x for x in lines)
 
     def test_caps_at_eight_rows(self):
         """有界：最多 8 条 —— 报告要有界，否则一节几十条没人读。"""
@@ -170,7 +193,7 @@ class TestRenderNews:
             {
                 "sections": {
                     "信息": [
-                        {"title": f"第{i}条", "matched_holdings": ["600000"]}
+                        {"title": f"第{i}条", "matched_codes": ["600000"]}
                         for i in range(12)
                     ]
                 }

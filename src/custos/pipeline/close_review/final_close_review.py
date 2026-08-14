@@ -97,8 +97,14 @@ def sector_for(code, sectors):
 def render_news(lines, news, hold_codes=None, hold_sectors=None):
     """§2（v0.57 角色定版）：盘后=复盘纠错+预案主产地 ⇒ 新闻节压缩为
     「与今日操作相关的事实核对」——只留与当日持仓/当日成交有交集的事实
-    （matched_holdings 命中代码 或 matched_themes 命中持仓板块），
-    信息流式的全量罗列去掉。缺数据照常如实报（不静默）。"""
+    （matched_codes 命中代码 或 matched_themes 命中持仓板块），
+    信息流式的全量罗列去掉。缺数据照常如实报（不静默）。
+
+    ⚠️ 键的形状（2026-08-14 修）：生产者 postclose_news_digest 落的是
+    `matched_holdings`=股票**名称**、`matched_codes`=**代码**——代码交集必须
+    用 `matched_codes`（此前错用 matched_holdings 跟持仓代码相交，生产上恒为空，
+    等于只剩主题一条腿、按代码命中的新闻被静默漏报）。fallback 到
+    matched_holdings 只为兼容「直接装代码」的旧形状/手工构造输入。"""
     lines += [
         "",
         "## 2. 与今日操作相关的事实核对",
@@ -113,10 +119,10 @@ def render_news(lines, news, hold_codes=None, hold_sectors=None):
     rows = []
     for name in ("信息", "政策", "风向", "舆情"):
         for row in sections.get(name) or []:
-            mh = set(row.get("matched_holdings") or [])
+            mc = set(row.get("matched_codes") or row.get("matched_holdings") or [])
             mt = set(row.get("matched_themes") or [])
-            if (mh & hold_codes) or (mt & hold_sectors):
-                rows.append((name, mh & hold_codes, mt & hold_sectors, row))
+            if (mc & hold_codes) or (mt & hold_sectors):
+                rows.append((name, mc & hold_codes, mt & hold_sectors, row))
     if not sections:
         lines.append("- `unavailable`：当前窗口没有通过时效和来源质量门的证据。")
     elif not rows:
