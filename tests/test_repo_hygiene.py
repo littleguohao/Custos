@@ -224,3 +224,23 @@ def test_scratch_guard_catches_the_2026_08_10_shapes():
         "__init__.py",
     ):
         assert not SCRATCH.search(name), f"守卫误报：{name}"
+
+
+def test_cmd_scripts_reference_existing_paths():
+    """Windows 批处理脚本引用的项目路径必须真实存在。
+
+    2026-08-13：`run_m2_sweep.cmd` 的 `set SWEEP=src/research/m2_stop_sweep.py`
+    在包化（src/custos/）后腐烂失效——该文件不是 .py，所有源码守卫都扫不到它。
+    这已是它第二次因目录搬迁腐烂（上次是 03/06 目录合并）。cmd 里按 `set X=<路径>`
+    与 `FilePath "<路径>"` 两种形态抽取项目相对路径并核对存在性。
+    """
+    for cmd in ROOT.rglob("*.cmd"):
+        if ".git" in cmd.parts:
+            continue
+        text = cmd.read_text(encoding="utf-8")
+        refs = re.findall(r"(?m)^\s*set\s+\w+=(src[\\/][\w./\\-]+)", text)
+        refs += re.findall(r'FilePath\s+"([^"]+)"', text)
+        assert refs, f"{cmd} 未抽到任何路径引用——守卫形同虚设，检查正则"
+        for ref in refs:
+            p = ROOT / ref.replace("\\", "/")
+            assert p.exists(), f"{cmd.name} 引用了不存在的路径：{ref}"
