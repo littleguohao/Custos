@@ -7,6 +7,8 @@ owner 2026-08-12 定：冷却机制（原 #31 + #51②）落复盘报告节，**
 
 from __future__ import annotations
 
+import pathlib
+
 import pytest
 
 from custos.pipeline.close_review import cooldowns as cd
@@ -68,7 +70,12 @@ class TestCooldownMembership:
             "2026-08-05",
         )
         assert r["active"] == []
-        assert r["excluded"] == {"partial": 1, "none": 1, "no_pnl_pct": 1}
+        # v0.53 起 excluded 增 nan_pnl/bad_date 两键（目标机 review 实测缺陷）
+        assert {k: r["excluded"][k] for k in ("partial", "none", "no_pnl_pct")} == {
+            "partial": 1,
+            "none": 1,
+            "no_pnl_pct": 1,
+        }
 
     def test_latest_stop_determines_cooldown(self):
         """同一票多次止损，冷却期从**最近一次**止损平仓日起算。"""
@@ -159,3 +166,51 @@ class TestWinRateCheck:
         assert r["available"] is False
         lines = cd.format_win_rate_lines(r)
         assert any("unavailable" in ln for ln in lines)
+
+
+class TestBadLedgerRows:
+    """目标机 review 实测（2026-08-13）：台账坏行不得炸掉三份复盘报告，
+    也不得静默吞——跳过并计数上报。"""
+
+    def test_non_iso_date_skipped_and_counted(self):
+        """非 ISO 日期（如「2026/08/03」或空串）以前会把 _cooldown_until 的
+        fromisoformat 直接打炸 ⇒ 三份复盘全挂。"""
+        r = run(
+            [
+                closing("600000", "2026-08-03", -8.0),
+                closing("000001", "2026/08/04", -9.0),  # 非 ISO
+                closing("300750", "", -9.0),  # 空日期
+            ],
+            "2026-08-05",
+        )
+        assert r["active"] == ["600000"], "正常行不受影响"
+        assert r["excluded"]["bad_date"] == 2
+        lines = cd.format_cooldown_lines(r)
+        assert any("日期无法解析 2" in ln for ln in lines), "跳过必须计数上报"
+
+    def test_nan_pnl_not_in_cooldown_list(self):
+        """NaN 比较恒 False ⇒ 不写防御会误入冷却名单（-7 判定挡不住它）。"""
+        r = run(
+            [
+                closing("600000", "2026-08-03", float("nan")),
+                closing("000001", "2026-08-03", "not-a-number"),
+            ],
+            "2026-08-05",
+        )
+        assert r["active"] == [] and r["stops"] == {}
+        assert r["excluded"]["nan_pnl"] == 2
+        lines = cd.format_cooldown_lines(r)
+        assert any("pnl 非法(NaN) 2" in ln for ln in lines), "排除必须如实报"
+
+
+class TestWinRateThresholdSingleSource:
+    def test_monthly_review_uses_the_constant(self):
+        """降仓阈值必须同源（同 STOP_LOSS_PCT 的钉法）——monthly_review 的
+        「低于 35%」字面量已改引 cooldowns.WIN_RATE_REDUCE_THRESHOLD_PCT。"""
+        src = (
+            pathlib.Path(cd.__file__)
+            .parent.joinpath("monthly_review.py")
+            .read_text(encoding="utf-8")
+        )
+        assert "WIN_RATE_REDUCE_THRESHOLD_PCT" in src
+        assert "win_rate < 35" not in src, "字面量 35 回潮了——改成引用常量"

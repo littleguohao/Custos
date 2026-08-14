@@ -85,7 +85,7 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 
 ### 正式产物
 
-`artifacts/reports/daily/YYYY-MM-DD_daily_report.md`
+`artifacts/reports/daily/YYYY-MM-DD/YYYY-MM-DD_daily_report.md`
 
 ---
 
@@ -130,7 +130,7 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 
 ### 正式产物
 
-`artifacts/reports/daily/YYYY-MM-DD_1445_review.md`
+`artifacts/reports/daily/YYYY-MM-DD/YYYY-MM-DD_1445_review.md`
 
 ---
 
@@ -180,8 +180,8 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 
 ### 正式产物
 
-- `artifacts/reports/daily/YYYY-MM-DD_final_review.md`
-- `artifacts/reports/daily/YYYY-MM-DD_final_review.json`
+- `artifacts/reports/daily/YYYY-MM-DD/YYYY-MM-DD_final_review.md`
+- `artifacts/reports/daily/YYYY-MM-DD/YYYY-MM-DD_final_review.json`
 
 下一交易日候选池和条件计划属于该复盘的派生结构化产物，不单独作为第六份核心报告。
 

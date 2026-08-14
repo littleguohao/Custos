@@ -40,6 +40,7 @@ from custos.core.paths import BASE, cn_now, cn_today
 from custos.pipeline.close_review.loss_streak import format_lines as loss_streak_lines
 from custos.pipeline.close_review.loss_streak import loss_streaks
 from custos.pipeline.close_review.cooldowns import (  # noqa: E402
+    WIN_RATE_REDUCE_THRESHOLD_PCT,
     format_cooldown_lines,
     format_win_rate_lines,
     stop_cooldowns,
@@ -269,9 +270,10 @@ def build_monthly_review(base: Path, month: str | None) -> dict[str, Any]:
             + "、".join(streak_result["flagged"])
             + "（下月考虑这些票之前先看连亏节）"
         )
-    if win_rate is not None and win_rate < 35:
+    if win_rate is not None and win_rate < WIN_RATE_REDUCE_THRESHOLD_PCT:
         notes.append(
-            f"月胜率 {win_rate}% 低于 35% 降仓阈值——见「胜率降仓提示」节（只提示，降仓由人裁决）。"
+            f"月胜率 {win_rate}% 低于 {WIN_RATE_REDUCE_THRESHOLD_PCT:g}% 降仓阈值——"
+            "见「胜率降仓提示」节（只提示，降仓由人裁决）。"
         )
     if max_dd is not None and max_dd <= -10:
         notes.append(f"月内最大回撤 {max_dd}% —— 复核止损执行节与仓位上限。")

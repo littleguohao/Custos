@@ -79,10 +79,12 @@ def stop_cooldowns(
          "stops": {code: {"name","last_stop_date","pnl_pct","cooldown_until",
                           "cooldown_until_unknown","active"}},
          "active": [code, ...],        # as_of 仍在冷却期内的票
-         "excluded": {"partial": n, "none": n, "no_pnl_pct": n},
+         "excluded": {"partial": n, "none": n, "no_pnl_pct": n,
+                      "nan_pnl": n, "bad_date": n},   # 后两个：2026-08-13 目标机
+                                                    # review 实测踩到（坏行不炸报告）
          "threshold_pct": ..., "cooldown_trading_days": ..., "as_of": as_of}
     """
-    excluded = {"partial": 0, "none": 0, "no_pnl_pct": 0}
+    excluded = {"partial": 0, "none": 0, "no_pnl_pct": 0, "nan_pnl": 0, "bad_date": 0}
     stops: dict[str, Any] = {}
     for c in closings or []:
         st = str(c.get("match_status") or "")
@@ -92,14 +94,27 @@ def stop_cooldowns(
         if st == "none":
             excluded["none"] += 1
             continue
-        if c.get("pnl_pct") is None:
+        raw_pnl = c.get("pnl_pct")
+        if raw_pnl is None:
             excluded["no_pnl_pct"] += 1
             continue
-        if float(c["pnl_pct"]) > threshold_pct:
+        try:
+            pnl = float(raw_pnl)
+        except (TypeError, ValueError):
+            pnl = float("nan")
+        if pnl != pnl:  # NaN/非法值：NaN 比较恒 False ⇒ 不写防御会**误入**冷却名单
+            excluded["nan_pnl"] += 1  # 目标机 review 实测踩到（2026-08-13）
+            continue
+        if pnl > threshold_pct:
             continue  # 非止损平仓（含盈利与浅亏），不进冷却
         code = str(c.get("code") or "")
         sell_date = str(c.get("sell_date") or "")
-        if not code or not sell_date:
+        if not code:
+            continue
+        try:
+            date.fromisoformat(sell_date)  # 台账一行坏日期不该炸掉三份复盘报告
+        except ValueError:
+            excluded["bad_date"] += 1  # 目标机 review 实测踩到（2026-08-13）
             continue
         prev = stops.get(code)
         if prev is None or sell_date > prev["last_stop_date"]:
@@ -201,7 +216,8 @@ def format_cooldown_lines(
         lines.append(
             f"- ⚠️ 有 {n_ex} 笔平仓单未计入"
             f"（部分配平 {ex.get('partial', 0)} / 无成本基准 {ex.get('none', 0)} / "
-            f"缺收益率 {ex.get('no_pnl_pct', 0)}）⇒ 以上基于**残缺台账**。"
+            f"缺收益率 {ex.get('no_pnl_pct', 0)} / pnl 非法(NaN) {ex.get('nan_pnl', 0)} / "
+            f"日期无法解析 {ex.get('bad_date', 0)}）⇒ 以上基于**残缺台账**。"
         )
     lines.append("")
     return lines

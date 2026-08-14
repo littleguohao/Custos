@@ -182,8 +182,8 @@
 - `data/stock_pool/YYYY-MM-DD_stock_pool.json`
 - `data/buy_strategy/YYYY-MM-DD_buy_plan.json`
 - `data/holdings/YYYY-MM-DD_holding_technical_summary.json`
-- `artifacts/reports/daily/YYYY-MM-DD_chief_decision.md`
-- `artifacts/reports/daily/YYYY-MM-DD_review.md`
+- `artifacts/reports/daily/YYYY-MM-DD/YYYY-MM-DD_chief_decision.md`
+- `artifacts/reports/daily/YYYY-MM-DD/YYYY-MM-DD_review.md`
 
 ## 质量检查
 
