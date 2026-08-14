@@ -146,6 +146,20 @@ uv run python src/custos/research/backtest_factors.py --entry-filter bottom_surg
 uv run python src/custos/research/backtest_factors.py --entry-filter bottom_surge_strict_j13 --universe-local --universe-sample 1000
 ```
 
+### #13 修正口径首轮回测（2026-08-13，s1000 vipdoc 宇宙）
+
+| gate | n | 判读 |
+|---|---:|---|
+| `bottom_surge_j13`（宽） | 25,123 | 选择性仍弱：无 A/B 档（全 C），胜率 51.8%/均收 +1.06%——修正后量级与旧宽口径同阶，**不采信** |
+| `bottom_surge_strict_j13`（严） | **110** | **方向上有戏**：H10 胜率 61.9%、均收 +1.64%、H20 +2.43%、median +1.97%；样本小，**复核后才采信** |
+
+复核待跑（目标机，同 surge_strict_then_b1 的稳健性套路）：
+
+```bash
+uv run python src/custos/research/backtest_factors.py --entry-filter bottom_surge_strict_j13 --universe-local --universe-sample 1000 --seed 1
+uv run python src/custos/research/backtest_factors.py --entry-filter bottom_surge_strict_j13 --universe-local --universe-sample 1000 --start 2022-01-01 --end 2024-12-31
+```
+
 ### 已明确不做
 
 - **三线/四线归零买（含"白线下20买"）**：owner 裁定它是**跟随策略，不属于 B1**，本项目不实现。

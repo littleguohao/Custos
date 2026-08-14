@@ -6,7 +6,7 @@
 > 优先级按**「它阻塞了什么」**排，不按工作量：
 > P0 = 阻塞其他事或 live 正在依赖 ｜ P1 = 已有结论悬空 ｜ P2 = 新验证 ｜ P3 = 技术债
 >
-> 最后更新：2026-08-13（#37 三阶段全完成、整项删除：A 止血（v0.50）/B 证据层（v0.51）/C 展示口径（v0.52），事实见 CHANGELOG 三条；#32 reconcile_positions 可诊断性梳理（v0.49），保留「观察后转 strict」；#51 冷却机制落地（v0.48）完成删除；#45② 落地（v0.47）完成删除；#13 gate 语义修正待目标机回测（v0.47）；前次：决策项裁决落盘与去冗精简）
+> 最后更新：2026-08-13（目标机 review 缺陷修复 + 跑批落档（v0.53）：cooldowns 防御×2/阈值同源/文档路径残留清理；#8 R3 召回重算完成（行删除，−37.5% 作废）；#13 首轮已跑（严变体有戏）、复核待跑；#25 组合两案已跑、跨窗复核待跑；#37 三阶段全完成整项删除（v0.50/51/52）；#32 保留「观察后转 strict」）
 
 ## P0 · 阻塞项
 
@@ -19,14 +19,15 @@
 
 | # | 单元 | 重跑什么 | 前置 |
 |---|---|---|---|
-| 8 | [R3](governance/research/R3_selection_discriminability_recall.md) | 只重算受影响窗的 `recall_by_band` 与净增益（「≥100% 带 −37.5%」这个被反复引用的数字）| — |
+
+（当前无。原 #8 已于 2026-08-13 重算完成，见 R3「召回重算」节与 CHANGELOG v0.53。）
 
 ## P2 · 待跑（新验证）
 
 | # | 事项 | 出处 | 备注 |
 |---|---|---|---|
-| 13 | 宽口径 `bottom_surge` 的 gate 语义**已修正（2026-08-12，owner 裁决「异动后的 J<13 触发，不一定是首次，可以多关注几次」）**：新 gate `bottom_surge_j13` / `bottom_surge_strict_j13` = 异动后 60 天窗口内每次 J<13 都触发（J 阈取 `b1_thresholds`，与 j_low 同口径）；旧 gate 原样保留作对照。**待回测（目标机）**：`uv run python src/custos/research/backtest_factors.py --entry-filter bottom_surge_j13 --universe-local --universe-sample 1000`（strict 变体同理换名；命令模板见 R7:141 附近） | [R7](governance/research/R7_hypothesis_H2_b1b2b3.md) | 语义已修，待回测 |
-| 25 | **M2 续扫仅限「0AMV × 出场」组合维度**（owner 2026-08-12 定）；纯出场维度停扫——margin>3pp 且已实现为正的方案全在 0AMV 系、纯出场改善跨窗全翻负（trail_08 +0.122→−0.214R）、#20 余量口径 pct/atr 均否决 | [R10](governance/research/R10_mechanism_M2_stops.md) | 待跑 |
+| 13 | 宽口径 `bottom_surge` 的 gate 语义已修正（新 gate `bottom_surge_j13`/`bottom_surge_strict_j13`，60 天窗口内每次 J<13 触发）且**首轮已跑**（2026-08-13，s1000）：宽变体选择性仍弱（25,123 条、无 A/B 档）不采信；**严变体方向上有戏**（110 条，H10 胜率 61.9%、H20 均收 +2.43%），样本小 ⇒ **复核待跑**：`--seed 1` 与 `--start 2022-01-01 --end 2024-12-31`（命令见 R7「#13 修正口径首轮回测」节，目标机） | [R7](governance/research/R7_hypothesis_H2_b1b2b3.md) | 首轮已跑，复核待跑 |
+| 25 | **M2 续扫仅限「0AMV × 出场」组合维度**（owner 2026-08-12 定）：首批两案已跑（2026-08-13，s3000 钉死宇宙同窗）——`pct_05_amv_cz3`（margin +10.5pp、已实现 +0.287R）优于 `pct_05_amv`（+7.8pp/+0.209R），5% 档首选换位；`pct_05_amv_trail_08` 与 pct_05_amv 持平（trail_08 叠 amv 无协同）。**剩余**：`--cross-window`（2022-2024）复核待跑（目标机） | [R10](governance/research/R10_mechanism_M2_stops.md) | 首批已跑，跨窗复核待跑 |
 
 ⚠️ 教训（cross-window 复核，已归入 R10）：edge 集中在单一 regime 的方案首轮看起来都很好。
 
