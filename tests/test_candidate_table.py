@@ -228,6 +228,83 @@ def test_outside_gate_watchlist_empty_not_silent():
     assert "门槛外观察区" in md and "（今日无）" in md
 
 
+def test_outside_gate_sorted_by_daily_j_asc():
+    """2026-08-14（owner）：门槛外观察区按日 J 从小到大——J 越小越接近
+    J<13 硬门槛、越可能先回到正式候选；无 J 值的排最后。"""
+    pool = {
+        "status": "ok",
+        "amv_state": "做多",
+        "candidates": [_cand("600000", "甲", "半导体", "A", "优", 4, True)],
+        "watchlist_outside_gate": [
+            {"code": "600101", "name": "高J", "daily_j": 88.0, "change_pct": 1.0},
+            {"code": "600102", "name": "低J", "daily_j": 15.3, "change_pct": -2.0},
+            {"code": "600103", "name": "无J"},
+        ],
+    }
+    md = ct.render_table(pool, "2026-07-30")
+    sec = md.split("## 👀 门槛外观察区")[1].split("\n## ")[0]
+    assert sec.index("600102") < sec.index("600101") < sec.index("600103")
+
+
+def test_mainline_fingerprint_excludes_custom_groups_and_sorts_by_count(
+    monkeypatch, tmp_path
+):
+    """2026-08-14（owner）：① 剔除通达信自定义分组（通达信88/ST板块/含H股 等，
+    与主营/新概念无关、无主线语义）；② 榜单按候选数从多到少（原按密度）。"""
+    from custos.datasource.local_tdx import tq_sector
+    import json as _json
+
+    market = tmp_path / "market"
+    market.mkdir()
+    members = {
+        # 自定义垃圾组：8 只候选全在其中——不剔除则密度 1.0 霸榜
+        "880515.SH": [f"6000{i:02d}" for i in range(8)],
+        # 行业甲：3 只候选 / 8 只规模（密度高、候选数少）
+        "880201.SH": ["600000", "600001", "600002"]
+        + [f"6001{i:02d}" for i in range(5)],
+        # 行业乙：5 只候选 / 120 只规模（密度低、候选数多）⇒ 按候选数应排行业甲前
+        "880300.SH": ["600000", "600003", "600004", "600005", "600006"]
+        + [f"000{i:03d}" for i in range(115)],
+    }
+    (market / "sector_members.json").write_text(_json.dumps(members), encoding="utf-8")
+    monkeypatch.setattr(ct, "STOCK_POOL_DIR", tmp_path / "stock_pool")
+    monkeypatch.setattr(
+        tq_sector,
+        "load_sector_names",
+        lambda: {
+            "880515": {"name": "通达信88", "tdx_type": "4"},
+            "880201": {"name": "行业甲", "tdx_type": "12"},
+            "880300": {"name": "行业乙", "tdx_type": "12"},
+        },
+    )
+    cands = [{"code": f"6000{i:02d}"} for i in range(8)]
+    section = ct._mainline_fingerprint_section(cands)
+    text = "\n".join(section)
+    assert "| 通达信88 |" not in text, "自定义分组必须被剔除（不出现在表行）"
+    rows = [ln for ln in section if ln.startswith("| 行业")]
+    assert len(rows) == 2
+    assert rows[0].startswith("| 行业乙") and rows[1].startswith("| 行业甲"), (
+        "必须按候选数从多到少（行业乙 5 只 > 行业甲 3 只，尽管密度相反）"
+    )
+
+
+def test_signal_labels_sg_merged_into_sb():
+    """2026-08-14（owner 反馈 SG/SB 两名单每次完全相同）：SG 不单列——
+    SB = SG ∧ 当日 J<13，本池已过 J<13 硬门槛 ⇒ 池内两名单恒重合，单列是噪声。
+    （两者算法不同，见 b2_surge_factor；重合是本池结构使然，须在图注说明。）"""
+    cand = _cand("600000", "甲", "半导体", "A", "优", 4, True)
+    cand["signals"] = {
+        "bottom_surge": {"state": "hit"},
+        "surge_then_b1": {"state": "hit"},
+    }
+    pool = {"status": "ok", "amv_state": "做多", "candidates": [cand]}
+    md = ct.render_table(pool, "2026-07-30")
+    sec = md.split("## 🏷️ 信号标注一览")[1].split("\n## ")[0]
+    assert "异动后的B1" in sec
+    assert "- **底部异动" not in sec, "SG 行必须并入 SB，不再单列"
+    assert "恒重合" in sec, "图注必须说明 SG 为何不单列"
+
+
 def test_top5_caption_states_uncalibrated_heuristic():
     """v0.52（#37 阶段 C）：Top5 必须标注排序口径——未校准启发式、非 alpha 排序。"""
     pool = {

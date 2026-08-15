@@ -41,6 +41,19 @@ EXCLUDE_TDX_TYPES = {
     "5",
 }  # 地区/风格板块不进合集(江西板块、保险重仓之类无"主线"语义)
 
+# 通达信自定义分组（type=4 概念类里的**非概念**项）：股权结构/状态/自定义名单，
+# 与主营业务、新概念题材都无关（2026-08-14 owner 指示，主线指纹榜剔除）。
+# 按名匹配（tdxzs.cfg 的名称稳定）；新出的同类垃圾组在此补名即可。
+EXCLUDE_CUSTOM_NAMES = {
+    "含B股",
+    "含GDR",
+    "含H股",
+    "含可转债",
+    "ST板块",
+    "次新股",
+    "通达信88",
+}
+
 
 def invert_members(
     members: dict,
@@ -218,9 +231,12 @@ def mainline_fingerprint(
     top_k: int = 8,
     min_size: int = 8,
     name_map: Optional[dict] = None,
+    sort_by: str = "density",
 ) -> dict[str, Any]:
-    """当日候选/交易的板块族**密度榜(主线指纹)**:按密度(命中数/板块规模)排序,过滤过小板块防噪。
-    density 归一避免大板块仅因体量占榜首;show 命中数供直觉。纯统计、绝不 raise。"""
+    """当日候选/交易的板块族**密度榜(主线指纹)**:默认按密度(命中数/板块规模)排序,
+    过滤过小板块防噪。density 归一避免大板块仅因体量占榜首;show 命中数供直觉。
+    sort_by="n" 改按候选数排序（2026-08-14 owner：候选表主线指纹按候选数从多到少）。
+    纯统计、绝不 raise。"""
     per_sec: dict[str, int] = {}
     for code in codes:
         for s in code2secs.get(str(code)[:6], []):
@@ -244,13 +260,16 @@ def mainline_fingerprint(
                 "share": round(n / total_attr, 4),
             }
         )
-    rows.sort(
-        key=lambda r: (
-            r["density"] if r["density"] is not None else r["n"] / 1e9,
-            r["n"],
-        ),
-        reverse=True,
-    )
+    if sort_by == "n":
+        rows.sort(key=lambda r: (r["n"], r["density"] or 0), reverse=True)
+    else:
+        rows.sort(
+            key=lambda r: (
+                r["density"] if r["density"] is not None else r["n"] / 1e9,
+                r["n"],
+            ),
+            reverse=True,
+        )
     top = rows[:top_k]
     top5c = sorted(rows, key=lambda x: x["n"], reverse=True)[:5]
     top5_share = (
