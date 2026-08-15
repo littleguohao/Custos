@@ -143,7 +143,7 @@ def test_macd_positive_scores():
     )
     c = s["score_detail"]["factor_contrib"]
     assert c["macd_zone1"] == 3 and c["macd_zone1_restart"] == 5
-    assert c["macd_bottom_divergence"] == 5
+    assert c["macd_bottom_divergence"] == 8  # v0.60：5→8（owner）
 
 
 def test_macd_top_divergence_caps_c():

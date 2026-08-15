@@ -328,7 +328,7 @@ def test_perfect_b1_fit_zero_score_recorded_in_contrib():
     score, level, contrib = sc.technical_score(cand)
     assert "perfect_b1_fit" in contrib
     assert contrib["perfect_b1_fit"] == 0.0
-    assert score == 25  # 分值不变（0 分就是不加分）
+    assert score == 5  # 分值不变（0 分就是不加分）；bbi_above 为 v0.58 后的 5 分
 
 
 def test_perfect_b1_fit_missing_not_recorded():
@@ -680,9 +680,11 @@ def test_technical_level_thresholds_single_definition():
     def _cand(total_patterns):
         return {"code": "600000", "patterns": total_patterns}
 
-    lo = sc.technical_score(_cand({"bbi_above": True}))  # 25 分
+    lo = sc.technical_score(_cand({"bbi_above": True}))  # 5 分（v0.58：bbi 25→5）
     assert lo[1] == "弱"
-    mid = sc.technical_score(_cand({"bbi_above": True, "j_low": True}))  # 45 分
+    mid = sc.technical_score(
+        _cand({"j_low": True, "volume_contraction": True})
+    )  # 35 分
     assert mid[1] == "中"
     # s_shape 模块的 sstar_level 仍存在（展示列用），但不再被 score_candidates 消费
     assert ss.sstar_level(64.9) == "中" and ss.sstar_level(65.0) == "强"

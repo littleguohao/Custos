@@ -61,6 +61,7 @@ from custos.core.factors.distribution import (  # noqa: E402
     detect_top_windmill,
 )
 from custos.core.factors.bottom_patterns import (  # noqa: E402  v0.56 底部侧（25chuhuo）
+    bull_bear_volume,
     detect_red_fat_green_thin,
     detect_w_bottom,
 )
@@ -115,6 +116,40 @@ from custos.core.b1_thresholds import (
 # 加载器内部 `df.tail(count)`，所以 len(df)==OHLCV_LOAD_BARS 只说明"至少这么多根"，
 # 不是真实上市日数（审计：CZ 的 250 日窗口在 260 根里只剩 10 根余量）。
 OHLCV_LOAD_BARS = 260
+
+# v0.59（2026-08-14，owner ⑧）：公司「地位」证据——东财 F10 公司概况关键词台账
+# （fetch_company_profile.py 产 data/fundamentals/company_profile.jsonl）。
+# 严格证据层：只透传落盘，不进技术分/分层/gate。⚠️ 非 PIT（简介可被公司随时改），
+# 只可用于 live/近端，禁止用作历史回测特征。
+_COMPANY_POSITION_CACHE: "dict | None" = None
+
+
+def _load_company_positions() -> dict:
+    """读公司地位台账（进程内一次）。台账缺失/损坏 → {}（证据缺席，不炸链）。"""
+    global _COMPANY_POSITION_CACHE
+    if _COMPANY_POSITION_CACHE is None:
+        try:
+            from custos.datasource.local_tdx import (  # noqa: PLC0415
+                fetch_company_profile as fcp,
+            )
+
+            _COMPANY_POSITION_CACHE = fcp.load_ledger()
+        except Exception:  # noqa: BLE001
+            _COMPANY_POSITION_CACHE = {}
+    return _COMPANY_POSITION_CACHE
+
+
+def company_position_of(code: str) -> dict:
+    """候选的公司地位证据：{available, keywords, snippet, industry_em}。"""
+    rec = _load_company_positions().get(str(code or "")[:6])
+    if not rec or not rec.get("available"):
+        return {"available": False}
+    return {
+        "available": True,
+        "keywords": rec.get("keywords") or [],
+        "snippet": rec.get("snippet") or "",
+        "industry_em": rec.get("industry_em") or "",
+    }
 
 
 def j_below_threshold(j: Any, threshold: float = J_LOW_THRESHOLD) -> bool:
@@ -1002,10 +1037,33 @@ def check_macd_technics(df) -> dict[str, Any]:
         "dif_abs_percentile": round(pctl, 3) if pctl is not None else None,
     }
 
+    # v0.60（2026-08-14，owner）：MACD 位置/柱体加分项的判定字段。
+    # above_water=白黄线水上（DIF>0 且 DEA>0，即 zone≠0 的条件）；bar_grow=
+    # 日线红柱增长（hist>0 且大于昨值）；wm_bar_grow=周线与月线红柱都在增长。
+    def _hist_growing(dfx) -> bool:
+        """重采样序列的 MACD 红柱是否增长（柱>0 且大于上一根）。历史不足→False。"""
+        try:
+            if dfx is None or len(dfx) < 40:  # EMA26 需 ~35 根才稳定
+                return False
+            c = dfx["close"].astype(float).reset_index(drop=True)
+            dif2 = ema(c, 12) - ema(c, 26)
+            h2 = (dif2 - ema(dif2, 9)) * 2
+            return bool(h2.iloc[-1] > 0 and h2.iloc[-1] > h2.iloc[-2])
+        except Exception:  # noqa: BLE001
+            return False
+
+    wm_bar_grow = _hist_growing(resample(df, "W-FRI")) and _hist_growing(
+        resample(df, "ME")
+    )
+
     return {
         "available": True,
         "zone": zone,
         "zone1_restart": zone1_restart,
+        "above_water": bool(dif_last > 0 and dea_last > 0),
+        "bar_red": bool(h0 > 0),
+        "bar_grow": bool(h0 > 0 and h0 > h1),
+        "wm_bar_grow": bool(wm_bar_grow),
         "dif": round(dif_last, 4),
         "dea": round(dea_last, 4),
         "hist": round(h0, 4),
@@ -1337,7 +1395,12 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
         # 证据层观察一季）。adx 数值一并落盘供展示。
         "adx": adx_last,
         "adx25": adx25,
+        # v0.58（2026-08-14，owner）：近 10 日阳量/阴量总量对比——技术分的
+        # 加/减分项（阳量>阴量 +5 / 阴量>阳量 −5）。中性窗口，不带底部位置语义。
+        "volume_yy": bull_bear_volume(df),
         "liquidity": check_liquidity(df),
+        # v0.59（owner ⑧）：公司地位证据（东财 F10 简介关键词，evidence_only 透传）
+        "company_position": company_position_of(code),
     }
 
 

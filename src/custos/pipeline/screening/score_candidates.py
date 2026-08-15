@@ -129,7 +129,9 @@ TECH_MID_FALLBACK = 30
 # 覆盖，见 governance/contracts/SCREENING_WORKFLOW.md「可配置项」。
 DEFAULT_CAP_RULES = {
     "sprint_wave": True,  # 冲刺波后首个 B1 禁买 → 封顶 B（检测阈值待回测）
-    "volume_retreat": True,  # 量能持续性=主力撤退 → 封顶 C（CZ §14.6，部分阈值待回测）
+    # v0.60（2026-08-14，owner）：量能撤退封顶去掉——与「缩量回调是 B1 健康形态」
+    # 语义冲突（同一缩量事实一边加分一边封顶）。检出仍记录（cap_disabled 证据 flag）。
+    "volume_retreat": False,  # 量能持续性=主力撤退 → 原封顶 C（CZ §14.6）
     "non_one_wave_revoked": True,  # 非一波流撤销 → 封顶 C（待回测）
     "cz_avoid_sector": True,  # CZ 回避方向板块 → D（治理名单驱动）
     "distribution_cap": True,  # 主力出货五方式命中 → high 封 D / watch 封 C（B1 §七.3，待回测）
@@ -200,7 +202,7 @@ def cap_bucket(bucket: str, cap: str) -> str:
 
 
 def technical_score(cand: dict) -> tuple[int, str, dict]:
-    """技术分（0-100）与技术面层级（强/中/弱）。确定性加分。
+    """技术分（0-100）与技术面层级（强/中/弱）。确定性加减分。
 
     ⚠️ 2026-08-12（v0.50，#37 阶段 A，owner 拍板）：**s_shape 主路径已删除**。
     此前 s_shape 可用时分数=S**、层级=sstar_level（阈值 65/40），与回退路径
@@ -209,34 +211,37 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
     阈值 TECH_STRONG_FALLBACK/TECH_MID_FALLBACK = 60/30。s_shape 的
     s_star/suggestion 仍随候选落盘（展示/证据列），不进本函数。
 
-    B1/CZ 对齐加分（阈值见 enrich_candidates 顶部"待回测参数"）：
-    five_day_entry +8、leader_volume +6、bottom_volume +6、
-    repair_signals 每项 +3（上限 +6）、non_one_wave=confirmed +5。
-    返回 (score, level, factor_contrib)（factor_contrib 落盘可复盘）。
+    ⚠️ 2026-08-14（v0.58，owner 逐条定权重）：bbi_above 25→**5**、反转K 25→**4**
+    且**不再取代** j_low/缩量子项（R18：优秀 B1 里反转K 仅 4/10，非必要条件；
+    J<13 常伴短暂破 BBI，+25 惩罚的正是 B1 形态）；底部巨量 6→10（缩量维持 15，
+    owner 复核后不改）；删 j_mid 死分支（主池恒 J<13，13≤J<50 永远走不到）。新增：周线 J<13（周日
+    共振）+5、ADX>60 +5、知行位置三态（多头 QSX>DKS +6 不变；骑线 C≥QSX +4；
+    回踩区 QSX>C≥DKS +2）、近 10 日阳量>阴量 +5 / 阴量>阳量 **−5**（首个负分项）、
+    出货形态分数层减分（watch −10 / high −20；**封顶规则不动**，见
+    apply_risk_downgrades）。
+
+    其余 B1/CZ 对齐加分（阈值见 enrich_candidates 顶部"待回测参数"）：
+    five_day_entry +8、leader_volume +6、repair_signals 每项 +3（上限 +6）、
+    non_one_wave=confirmed +5。返回 (score, level, factor_contrib)（factor_contrib
+    落盘可复盘）。仍是未校准启发式——排序无 alpha（R2），分值只管分层与展示序。
     """
     patterns = cand.get("patterns") or {}
     contrib: dict[str, Any] = {}
     score = 0
     if patterns.get("bbi_above"):
-        score += 25
-        contrib["bbi_above"] = 25
+        score += 5
+        contrib["bbi_above"] = 5
     if patterns.get("reversal_k_candidate"):
-        # 反转K为复合信号：命中时其子项（j_low、volume_contraction）不再单独加分，
-        # 由 composite 分取代（未命中时子项照常计分）。
-        score += 25
-        contrib["reversal_k_candidate"] = 25
-        contrib["reversal_k_replaces"] = "j_low+volume_contraction"
-    else:
-        daily_j = cand.get("daily_j")
-        if patterns.get("j_low"):
-            score += 20
-            contrib["j_low"] = 20
-        elif daily_j is not None and 13 <= daily_j < 50:
-            score += 10
-            contrib["j_mid"] = 10
-        if patterns.get("volume_contraction"):
-            score += 15
-            contrib["volume_contraction"] = 15
+        # v0.58：复合信号不再取代子项（j_low/volume_contraction 照常独算）——
+        # R18 实测反转K 在优秀 B1 里仅 4/10，不是必要条件，不值取代价。
+        score += 4
+        contrib["reversal_k_candidate"] = 4
+    if patterns.get("j_low"):
+        score += 20
+        contrib["j_low"] = 20
+    if patterns.get("volume_contraction"):
+        score += 15
+        contrib["volume_contraction"] = 15
     if patterns.get("relative_strength_strong"):
         score += 15
         contrib["relative_strength_strong"] = 15
@@ -249,8 +254,8 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
         contrib["leader_volume"] = 6
     bottom = cand.get("bottom_volume") or {}
     if bottom.get("available") and bottom.get("hit"):
-        score += 6
-        contrib["bottom_volume"] = 6
+        score += 10
+        contrib["bottom_volume"] = 10
     repair_hits = (cand.get("repair_signals") or {}).get("signals") or []
     if repair_hits:
         pts = min(len(repair_hits) * 3, 6)
@@ -266,7 +271,8 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
     if fit is not None:
         contrib["perfect_b1_fit"] = fit
     # MACD 十大技术（正向）：第一区间强势扩张 +3；第一区间再启动（3/5浪买点）+5；
-    # 底背离 +5（B1 修复确认）。负向顶背离/三打白骨精走封顶，不在此减分。
+    # 底背离 +8（v0.60 从 5 上调，owner）。负向顶背离/三打白骨精走封顶，不在此减分。
+    # v0.60（owner）：水上（DIF>0 且 DEA>0）+5、日线红柱增长 +5、周月红柱同增 +5。
     mt = cand.get("macd_technics") or {}
     if mt.get("available"):
         if mt.get("zone") == 1:
@@ -276,16 +282,33 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
             score += 5
             contrib["macd_zone1_restart"] = 5
         if (mt.get("bottom_divergence") or {}).get("hit"):
+            score += 8
+            contrib["macd_bottom_divergence"] = 8
+        if mt.get("above_water"):
             score += 5
-            contrib["macd_bottom_divergence"] = 5
+            contrib["macd_above_water"] = 5
+        if mt.get("bar_grow"):
+            score += 5
+            contrib["macd_bar_grow"] = 5
+        if mt.get("wm_bar_grow"):
+            score += 5
+            contrib["macd_wm_bar_grow"] = 5
     # 知行量价（good_b1）：多头趋势线 + 点火 + 缩量企稳 + 复合确认。
     # 注意：b1_ignition 是复合信号（含 ignition/pullback_shrink 条件），此处
     # 子项与复合项有意叠加计分，待回测校准（与 reversal_k 的"复合取代子项"
     # 口径不同，属已知不一致，回测后统一）。
     zx = cand.get("zhixing") or {}
-    if zx.get("available") and zx.get("qsx_gt_dks"):
-        score += 6
-        contrib["zhixing_bull"] = 6
+    if zx.get("available"):
+        if zx.get("qsx_gt_dks"):
+            score += 6
+            contrib["zhixing_bull"] = 6
+        # v0.58（owner ②）：位置三态——骑线（C≥QSX）+4；回踩区（QSX>C≥DKS）+2。
+        if zx.get("close_above_qsx"):
+            score += 4
+            contrib["zhixing_close_above_qsx"] = 4
+        elif zx.get("qsx_gt_dks") and zx.get("close_above_dks"):
+            score += 2
+            contrib["zhixing_in_qsx_dks_band"] = 2
     if (cand.get("ignition") or {}).get("hit"):
         score += 4
         contrib["ignition"] = 4
@@ -295,6 +318,31 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
     if (cand.get("b1_ignition") or {}).get("hit"):
         score += 8
         contrib["b1_ignition"] = 8
+    # v0.58（owner ③⑥）：周日共振（周线 J<13）+5；ADX>60（强趋势）+5。
+    if cand.get("weekly_j_low"):
+        score += 5
+        contrib["weekly_j_low"] = 5
+    adx = cand.get("adx")
+    if adx is not None and adx > 60:
+        score += 5
+        contrib["adx_gt_60"] = 5
+    # v0.58（owner ④）：近 10 日阳量>阴量 +5 / 阴量>阳量 −5（首个负分项）。
+    vy = cand.get("volume_yy") or {}
+    if vy.get("available"):
+        if vy.get("bull_gt_bear"):
+            score += 5
+            contrib["volume_yy_bull"] = 5
+        else:
+            score -= 5
+            contrib["volume_yy_bear"] = -5
+    # v0.58（owner ④）：出货形态在分数层也减分（封顶规则不动）——watch −10 / high −20。
+    dist_level = (cand.get("distribution") or {}).get("risk_level")
+    if dist_level == "watch":
+        score -= 10
+        contrib["distribution_watch"] = -10
+    elif dist_level == "high":
+        score -= 20
+        contrib["distribution_high"] = -20
     score = min(score, 100)
     level = (
         "强"
@@ -735,6 +783,8 @@ def score_candidate(
         "leader_volume": cand.get("leader_volume") or {},
         "three_lows": cand.get("three_lows") or {},
         "bottom_volume": cand.get("bottom_volume") or {},
+        # v0.58 阴阳量（近 10 日阳量/阴量对比）——技术分加减分输入，落盘供复盘
+        "volume_yy": cand.get("volume_yy") or {},
         # 知行量价 + 出货识别（good_b1 / 出货五方式）
         "zhixing": cand.get("zhixing") or {},
         "ignition": cand.get("ignition") or {},
@@ -747,6 +797,8 @@ def score_candidate(
         # v0.56 底部侧（25chuhuo 底部镜像）——同为证据层透传
         "w_bottom": cand.get("w_bottom") or {},
         "red_fat_green_thin": cand.get("red_fat_green_thin") or {},
+        # v0.59（owner ⑧）：公司地位证据（东财 F10 简介关键词）——证据层透传
+        "company_position": cand.get("company_position") or {},
         # 信号标注层（A 类改动）：**只透传，不参与打分**。
         # 本函数是显式字段白名单，enrich 落盘的 signals 不加在这里就会被丢掉——
         # 2026-08-04 实盘即因此出现「157 只候选、信号标注区块全空」。

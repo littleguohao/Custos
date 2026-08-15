@@ -19,6 +19,7 @@ def _mk(patterns=None, capital="weak", stop_price=10.0, code="600000", **extra):
     capital=weak:   无 → 资金意图 弱(0)
     （量能持续主线只加资金意图分、不加技术分，便于把两轴解耦。）
     """
+    is_strong = patterns is TECH_STRONG  # v0.58：注入非 patterns 加分凑够技术强
     patterns = dict(patterns or {})
     cand = {
         "code": code,
@@ -42,13 +43,26 @@ def _mk(patterns=None, capital="weak", stop_price=10.0, code="600000", **extra):
         }  # 资金意图 +2, 技术 +0
     elif capital == "mid":
         cand["volume_sustain"] = {"status": "mainline_confirmed"}  # 资金意图 +2
+    if is_strong:
+        cand.update(TECH_STRONG_EXTRA)
     cand.update(extra)
     return cand
 
 
 # 技术结构层级（纯技术、不污染资金意图轴）：
-TECH_STRONG = {"bbi_above": True, "j_low": True, "volume_contraction": True}  # 60 → 强
-TECH_MID = {"bbi_above": True, "j_low": True}  # 45 → 中
+# ⚠️ v0.58 权重下 patterns 全中也只有 59 分（bbi5+反转K4+j_low20+缩量15+强RS15）
+# ——技术强（≥60）必须再叠非 patterns 因子，这是调权的直接后果。TECH_STRONG 由
+# _mk 注入 TECH_STRONG_EXTRA 凑够 60+；EXTRA 全部选**资金意图轴不认**的项
+# （bottom_volume/强RS 会往资金轴 +2，污染 capital=weak 的网格行）。
+TECH_STRONG = {"bbi_above": True, "j_low": True, "volume_contraction": True}  # 40
+TECH_STRONG_EXTRA = {
+    "five_day_entry": {"hit": True},  # +8
+    "weekly_j_low": True,  # +5
+    "adx": 61.0,  # +5
+    "macd_technics": {"available": True, "zone1_restart": True},  # +5
+    "non_one_wave": {"status": "confirmed"},  # +5
+}  # 40 + 28 = 68 → 强
+TECH_MID = {"j_low": True, "volume_contraction": True}  # 35 → 中
 TECH_WEAK: dict = {}  # 0  → 弱
 
 SECTOR_STRONG = {"state": "主升", "score": 80, "sector": "半导体/芯片/存储/封测"}

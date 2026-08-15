@@ -575,6 +575,9 @@ def zhixing_state(
         "golden_cross_today": bool(cross_up.iloc[-1]),
         "days_since_golden_cross": days_since,
         "close_above_qsx": bool(c >= qsx_last),
+        # 2026-08-14（v0.58）：补上「股价 vs DKS」——配合 qsx_gt_dks/close_above_qsx
+        # 可区分知行三态：骑线（C≥QSX>DKS）/ 回踩区（QSX>C≥DKS）/ 破位（C<DKS）。
+        "close_above_dks": bool(c >= dks_last),
         "ma1_ma60": round(ma1, 4) if ma1 is not None else None,
         "ma2_ema13": round(ma2, 4),
         "params": {"m1": m1, "m2": m2, "m3": m3, "m4": m4},

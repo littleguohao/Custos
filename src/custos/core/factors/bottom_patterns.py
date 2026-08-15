@@ -224,3 +224,35 @@ def detect_red_fat_green_thin(df, code: str = "") -> dict[str, Any]:
             "hit": False,
             "error": f"{type(exc).__name__}:{str(exc)[:80]}",
         }
+
+
+def bull_bear_volume(df, window: int = 10) -> dict[str, Any]:
+    """近 ``window`` 根 K 线的阳量/阴量总量对比（2026-08-14，v0.58，owner）。
+
+    与红肥绿瘦（``detect_red_fat_green_thin``）的区别：那里是**底部区间**语义
+    （near_bottom 门槛 + 数量/面积两维合成），这里是**中性窗口**的纯量能对比——
+    不看位置、不看实体，只回答「最近 10 根里买量还是卖量占上风」，供技术分
+    加/减分用（阳量>阴量 +5 / 阴量>阳量 −5）。平盘（收=开）两边都不计。绝不 raise。
+    """
+    try:
+        close, _, _, vol = _ohlcv_arrays(df)
+        open_ = df["open"].astype(float).to_numpy()
+        n = len(df)
+        if n < window:
+            return {
+                "available": False,
+                "reason": f"少于{window}根K线（{n}）",
+            }
+        bull_vol = sum(vol[t] for t in range(n - window, n) if close[t] > open_[t])
+        bear_vol = sum(vol[t] for t in range(n - window, n) if close[t] < open_[t])
+        if bull_vol == 0 and bear_vol == 0:
+            return {"available": False, "reason": "窗口内全平盘/无量"}
+        return {
+            "available": True,
+            "window": window,
+            "bull_vol": round(float(bull_vol), 2),
+            "bear_vol": round(float(bear_vol), 2),
+            "bull_gt_bear": bool(bull_vol > bear_vol),
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"available": False, "error": f"{type(exc).__name__}:{str(exc)[:80]}"}

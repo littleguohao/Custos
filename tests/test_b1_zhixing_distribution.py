@@ -261,8 +261,10 @@ def test_distribution_cap_disabled_keeps_a():
         "做多",
         cap_rules={"distribution_cap": False},
     )
+    # v0.58：cap_rules 只关**封顶**这条通道；分数层的出货减分（high −20）是
+    # 独立通道、不受 cap_rules 影响 ⇒ 62−20=42 落「中」，中×强 = B（不再是 A）。
     assert (
-        s["bucket"] == "A" and "distribution_detected_cap_disabled" in s["risk_flags"]
+        s["bucket"] == "B" and "distribution_detected_cap_disabled" in s["risk_flags"]
     )
 
 
