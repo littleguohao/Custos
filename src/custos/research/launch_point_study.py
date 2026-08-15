@@ -2497,7 +2497,9 @@ def main(argv=None, loader=None) -> int:
 
         codes = [
             c
-            for c in _re.split(r"[\s,]+", Path(args.codes_file).read_text(encoding="utf-8"))
+            for c in _re.split(
+                r"[\s,]+", Path(args.codes_file).read_text(encoding="utf-8")
+            )
             if c.strip()
         ]
     else:

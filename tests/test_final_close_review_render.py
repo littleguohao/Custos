@@ -176,11 +176,7 @@ class TestRenderNews:
         lines = []
         fcr.render_news(
             lines,
-            {
-                "sections": {
-                    "信息": [{"title": "t", "matched_holdings": ["浦发银行"]}]
-                }
-            },
+            {"sections": {"信息": [{"title": "t", "matched_holdings": ["浦发银行"]}]}},
             hold_codes={"600000"},
         )
         assert any("无与今日持仓/操作的交集" in x for x in lines)
