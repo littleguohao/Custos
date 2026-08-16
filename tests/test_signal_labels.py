@@ -241,7 +241,8 @@ class TestTableRendering:
     def test_denominator_is_evaluable_count(self):
         txt = ct.render_table(self._pool(), "2026-08-04")
         # qsx_gt_dks: 3 只命中 / 3 只可评估（新票 unavailable 被排除）
-        assert "`QD`（3/3）" in txt
+        # v0.65：列表改三列表后，命中/可评在表格单元格里（`QD` | 3/3 |）
+        assert "`QD` | 3/3 |" in txt
 
     def test_carries_terminal_review_disclaimer(self):
         """必须写明这些因子已被跨窗终审否决——否则读者会把标注当交易依据。

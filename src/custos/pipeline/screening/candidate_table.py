@@ -75,7 +75,7 @@ def _mainline_fingerprint_section(candidates: list[dict]) -> list[str]:
         junk = {
             sec
             for sec, v in (name_map or {}).items()
-            if v.get("name") in sm.EXCLUDE_CUSTOM_NAMES
+            if v.get("name") in sm.EXCLUDE_MAINLINE_JUNK
         }
         if junk:
             members = {
@@ -100,7 +100,7 @@ def _mainline_fingerprint_section(candidates: list[dict]) -> list[str]:
         "",
         f"> 当日候选 {fp['n']} 只（有板块 {fp['n_classified']}）；前5板块占归属 "
         f"{(fp.get('top5_count_share') or 0) * 100:.0f}%。按**候选数**从多到少排序（密度列"
-        "供归一参考）；已剔除通达信自定义分组（含H股/ST板块/通达信88 等，无主线语义）。"
+        "供归一参考）；已剔除通达信自定义分组与**抽象概念**（一带一路/MSCI/重仓类/次新送转类等，与主营业务无关，2026-08-16 owner）。"
         "**密度榜=情境感知**（看清当前主线在哪、"
         "共振候选是否踩在主线上），**非进场过滤**——回测已证「跟随主流」非机械 edge，仅辅助主观研判。",
         "",
@@ -155,7 +155,12 @@ def _signal_labels_section(candidates: list[dict]) -> list[str]:
     def nm(c):
         return f"{c.get('code')} {c.get('name') or ''}".strip()
 
-    lines = ["## 🏷️ 信号标注一览（研究因子·只标注，不影响上方分层）", ""]
+    lines = [
+        "## 🏷️ 信号标注一览（研究因子·只标注，不影响上方分层）",
+        "",
+        "| 因子 | 命中/可评 | 命中候选（按技术分降序，前12；括号内为技术分） |",
+        "|---|---:|---|",
+    ]
     for key, (label, abbr, direction) in sl.SIGNAL_META.items():
         # SG（底部异动）不单列（2026-08-14 owner 反馈两行名单每次完全相同）：
         # SB = SG ∧ 当日 J<13，而本池已过 J<13 硬门槛 ⇒ 池内 SG 与 SB 恒重合，
@@ -172,11 +177,16 @@ def _signal_labels_section(candidates: list[dict]) -> list[str]:
         if not evaluable and not hits:
             continue
         mark = "⚠️ " if direction < 0 else ""
-        names = "、".join(nm(c) for c in hits[:12])
+        # 2026-08-16（owner）：改表格 + 标技术分--命中名单按技术分降序取前 12，
+        # 括号内是该票当日技术分（总分=技术分），一眼看出「命中的是强票还是弱票」。
+        top_hits = sorted(
+            hits, key=lambda c: (-(c.get("score") or 0), str(c.get("code")))
+        )
+        names = "、".join(f"{nm(c)}({int(c.get('score') or 0)})" for c in top_hits[:12])
         if len(hits) > 12:
             names += f" 等 {len(hits)} 只"
         lines.append(
-            f"- {mark}**{label}** `{abbr}`（{len(hits)}/{evaluable}）：{names or '无'}"
+            f"| {mark}**{label}** `{abbr}` | {len(hits)}/{evaluable} | {names or '无'} |"
         )
     na_counts: dict[str, int] = {}
     for c in with_sig:
