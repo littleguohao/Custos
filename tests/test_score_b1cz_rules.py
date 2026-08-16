@@ -52,8 +52,9 @@ def test_volume_sustain_retreat_no_longer_caps():
     )
     assert "main_force_retreat" not in scored["risk_flags"]
     assert "main_force_retreat_cap_disabled" in scored["risk_flags"]
-    # base 中×中 = C（矩阵自然落，不是封顶压的）
-    assert scored["bucket"] == "C"
+    # v0.61 后 base patterns 技术分 72（强）× 资金 retreat 后 3 分（中）-> 矩阵自然落 B
+    # （v0.58 时 base 59 是中×中=C；矩阵自然落，不是封顶压的）
+    assert scored["bucket"] == "B"
 
 
 def test_cz_avoid_sector_forces_d():
@@ -102,16 +103,16 @@ def test_bonus_factor_contrib_recorded():
     scored = sc.score_candidate(cand, SECTOR_STRONG, "做多")
     contrib = scored["score_detail"]["factor_contrib"]
     # v0.58：反转K 不再取代子项——j_low / volume_contraction 照常独算
-    assert contrib["j_low"] == 20 and contrib["volume_contraction"] == 15
+    assert contrib["j_low"] == 24 and contrib["volume_contraction"] == 15
     assert contrib["reversal_k_candidate"] == 4
     assert "reversal_k_replaces" not in contrib
     assert contrib["five_day_entry"] == 8
     assert contrib["leader_volume"] == 6
     assert contrib["bottom_volume"] == 10  # v0.58：6→10
-    assert contrib["repair_signals"] == 6  # 每项+3，上限+6
+    assert contrib["repair_signals"] == 8  # 每项+4，上限+8（v0.61：3/6 -> 4/8）
     assert contrib["non_one_wave_confirmed"] == 5
-    # bbi5 + 反转K4 + j_low20 + 缩量15 + 强RS15 + 8+6+10+6+5 = 94（v0.58 权重）
-    assert scored["score_detail"]["technical_score"] == 94
+    # bbi5 + 反转K4 + j_low24 + 缩量15 + 强RS15 + 8+6+10+8+5 = 100 恰好（v0.63）
+    assert scored["score_detail"]["technical_score"] == 100
 
 
 def test_v058_new_score_items():
@@ -129,10 +130,10 @@ def test_v058_new_score_items():
     s, _, _ = sc.technical_score({"code": "600000", "adx": 60.0})
     assert s == 0
 
-    # 知行三态：多头+6；骑线再 +4；回踩区（QSX>C≥DKS）+2 且与骑线互斥
+    # 知行三态：多头+9（v0.61）；骑线再 +5；回踩区（QSX>C≥DKS）+5 且与骑线互斥
     zx = {"available": True, "qsx_gt_dks": True, "close_above_qsx": True}
     s, _, c = sc.technical_score({"code": "600000", "zhixing": zx})
-    assert s == 10 and c["zhixing_bull"] == 6 and c["zhixing_close_above_qsx"] == 4
+    assert s == 14 and c["zhixing_bull"] == 9 and c["zhixing_close_above_qsx"] == 5
     zx_band = {
         "available": True,
         "qsx_gt_dks": True,
@@ -140,13 +141,13 @@ def test_v058_new_score_items():
         "close_above_dks": True,
     }
     s, _, c = sc.technical_score({"code": "600000", "zhixing": zx_band})
-    assert s == 8 and c["zhixing_in_qsx_dks_band"] == 2
+    assert s == 14 and c["zhixing_in_qsx_dks_band"] == 5
 
     # 阴阳量：阳量>阴量 +5；阴量>阳量 −5（负分不截断到 0 以下另说，这里只钉加减）
     s, _, c = sc.technical_score(
         {"code": "600000", "volume_yy": {"available": True, "bull_gt_bear": True}}
     )
-    assert s == 5 and c["volume_yy_bull"] == 5
+    assert s == 7 and c["volume_yy_bull"] == 7
     s, _, c = sc.technical_score(
         {
             "code": "600000",
@@ -154,7 +155,7 @@ def test_v058_new_score_items():
             "volume_yy": {"available": True, "bull_gt_bear": False},
         }
     )
-    assert s == 15 and c["volume_yy_bear"] == -5  # 20 − 5
+    assert s == 19 and c["volume_yy_bear"] == -5  # 24 − 5（v0.63：j_low 24）
 
     # 出货形态分数层减分（封顶规则不在这里）：watch −10 / high −20
     s, _, c = sc.technical_score(
@@ -164,7 +165,7 @@ def test_v058_new_score_items():
             "distribution": {"risk_level": "watch"},
         }
     )
-    assert s == 10 and c["distribution_watch"] == -10  # 20 − 10
+    assert s == 14 and c["distribution_watch"] == -10  # 24 − 10
     s, _, c = sc.technical_score(
         {
             "code": "600000",
@@ -172,7 +173,7 @@ def test_v058_new_score_items():
             "distribution": {"risk_level": "high"},
         }
     )
-    assert s == 0 and c["distribution_high"] == -20  # 20 − 20
+    assert s == 4 and c["distribution_high"] == -20  # 24 − 20
 
 
 def test_v060_macd_score_items():
@@ -184,20 +185,48 @@ def test_v060_macd_score_items():
         "wm_bar_grow": True,
     }
     s, _, c = sc.technical_score({"code": "600000", "macd_technics": mt})
-    assert s == 15
-    assert c["macd_above_water"] == 5
+    assert s == 17  # v0.61：水上 7 + 红柱 5 + 周月 5
+    assert c["macd_above_water"] == 7
     assert c["macd_bar_grow"] == 5
     assert c["macd_wm_bar_grow"] == 5
     # 部分命中只加部分分
     s, _, c = sc.technical_score(
         {"code": "600000", "macd_technics": {"available": True, "above_water": True}}
     )
-    assert s == 5 and "macd_bar_grow" not in c
+    assert s == 7 and "macd_bar_grow" not in c
     # available=False 一律不加
     s, _, _ = sc.technical_score(
         {"code": "600000", "macd_technics": mt | {"available": False}}
     )
     assert s == 0
+
+
+def test_v064_healthy_pullback_pack_bonus():
+    """v0.64（owner 定向）：J低位∧缩量回调∧知行多头 三腿齐 -> 组合奖 +9；缺一腿不发。
+
+    离线模拟依据：8 只正例 7/8 三腿齐（全回 ≥70），08-14 池仅 ~1/3 命中
+    --组合只奖励完整 B1 健康回调结构，避免 v0.61 式单因子普涨。
+    """
+    base = {
+        "code": "600000",
+        "patterns": {"j_low": True},
+        "pullback_shrink": {"hit": True},
+        "zhixing": {"available": True, "qsx_gt_dks": True},
+    }
+    s, _, c = sc.technical_score(base)
+    # j_low 24 + 缩量回调 5 + 知行多头 9 + 组合包 9 = 47
+    assert s == 47 and c["b1_healthy_pullback_pack"] == 9
+    # 缺缩量回调腿：j 24 + 知行 9 = 33，无包
+    s2, _, c2 = sc.technical_score({**base, "pullback_shrink": {"hit": False}})
+    assert s2 == 33 and "b1_healthy_pullback_pack" not in c2
+    # 缺知行多头腿：j 24 + 缩量 5 = 29，无包
+    s3, _, c3 = sc.technical_score(
+        {**base, "zhixing": {"available": True, "qsx_gt_dks": False}}
+    )
+    assert s3 == 29 and "b1_healthy_pullback_pack" not in c3
+    # 缺 J 低位腿（主池不会出现，防御性钉住）：知行 9 + 缩量 5 = 14，无包
+    s4, _, c4 = sc.technical_score({**base, "patterns": {}})
+    assert s4 == 14 and "b1_healthy_pullback_pack" not in c4
 
 
 def test_cz_sector_of_matching():

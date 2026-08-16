@@ -268,7 +268,7 @@ def test_technical_score_patterns_path_is_the_only_path():
     score, level, detail = sc.technical_score(cand)
     assert "scorer" not in detail
     assert detail.get("bbi_above") == 5  # v0.58：bbi 25→5
-    assert score == 40 and level == "中"  # v0.58：patterns 全中到不了 60（强需叠非 patterns 因子）
+    assert score == 44 and level == "中"  # v0.63：5+24+15（j_low 33->24）
 
 
 # ---------- S_reversal 买弱/反转分 ----------

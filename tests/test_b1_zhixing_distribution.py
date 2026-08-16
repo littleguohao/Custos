@@ -211,8 +211,12 @@ def test_score_positive_zhixing_and_ignition_add():
         "做多",
     )
     c = s1["score_detail"]["factor_contrib"]
-    assert c.get("zhixing_bull") == 6 and c.get("b1_ignition") == 8
-    assert c.get("ignition") == 4 and c.get("pullback_shrink") == 3
+    assert (
+        c.get("zhixing_bull") == 9 and c.get("b1_ignition") == 8
+    )  # v0.61：知行多头 6->9
+    assert (
+        c.get("ignition") == 4 and c.get("pullback_shrink") == 5
+    )  # v0.61：回调缩量 3->5
     assert (
         s1["score_detail"]["technical_score"] >= s0["score_detail"]["technical_score"]
     )
@@ -262,7 +266,8 @@ def test_distribution_cap_disabled_keeps_a():
         cap_rules={"distribution_cap": False},
     )
     # v0.58：cap_rules 只关**封顶**这条通道；分数层的出货减分（high −20）是
-    # 独立通道、不受 cap_rules 影响 ⇒ 62−20=42 落「中」，中×强 = B（不再是 A）。
+    # 独立通道、不受 cap_rules 影响。v0.63 权重下 base 71−20=51 落「中」，
+    # 中×强 = B（v0.61 时 80−20=60 恰「强」为 A；v0.58 时 62−20=42 为 B）。
     assert (
         s["bucket"] == "B" and "distribution_detected_cap_disabled" in s["risk_flags"]
     )
@@ -380,24 +385,31 @@ class TestStairstepCompleted:
 
 
 class TestTopWindmill:
-    """顶部大风车：高位 + 长上影/宽幅震荡 K + 次日不反包确认。"""
+    """顶部大风车：高位 + 长上影/宽幅震荡 K + 天量 + 次日不反包确认。
 
-    def _windmill_df(self, next_close=None):
+    v0.62：高位阈值 0.98->0.93（次高位计入）+ 新增天量腿（量 ≥ 前20中位量×1.5）。
+    """
+
+    def _windmill_df(self, next_close=None, vol_spike=3000.0):
         # 60 根上行到 16，最后一根大风车 K：开 16.3 收 16.2（实体 0.1）高 16.8（上影 0.6）
+        # v0.62：大风车 K 放量（默认 3000 vs 常态 1000 = 3×中位量）--天量腿
         closes = [10.0 + i * 0.1 for i in range(60)]
         opens = list(closes)
         highs = [c * 1.01 for c in closes]
         lows = [c * 0.99 for c in closes]
+        vols = [1000.0] * 60
         closes.append(16.2)
         opens.append(16.3)
         highs.append(16.8)
         lows.append(16.1)
+        vols.append(vol_spike)
         if next_close is not None:
             closes.append(next_close)
             opens.append(next_close)
             highs.append(next_close * 1.01)
             lows.append(next_close * 0.99)
-        return make_df(closes, opens=opens, highs=highs, lows=lows)
+            vols.append(1000.0)
+        return make_df(closes, vols=vols, opens=opens, highs=highs, lows=lows)
 
     def test_last_bar_windmill_is_pending(self):
         r = ec.detect_top_windmill(self._windmill_df(), code="600000")
@@ -412,19 +424,73 @@ class TestTopWindmill:
         assert r["hit"] is True and r["status"] == "revoked"
 
     def test_not_near_top_no_hit(self):
-        # 同样的大风车 K 但出现在下跌途中（非高位）⇒ 不命中
+        # 同样的大风车 K（放量）但出现在下跌途中（非高位）⇒ 不命中
         closes = [20.0 - i * 0.1 for i in range(60)]
         opens = list(closes)
         highs = [c * 1.01 for c in closes]
         lows = [c * 0.99 for c in closes]
+        vols = [1000.0] * 60
         closes.append(14.2)
         opens.append(14.3)
         highs.append(14.8)
         lows.append(14.1)
+        vols.append(3000.0)
         r = ec.detect_top_windmill(
-            make_df(closes, opens=opens, highs=highs, lows=lows), code="600000"
+            make_df(closes, vols=vols, opens=opens, highs=highs, lows=lows),
+            code="600000",
         )
         assert r["hit"] is False
+
+    def test_subhigh_windmill_hits_v062(self):
+        """v0.62（owner 定向）：次高位大风车计入--北方铜业 2026-08-10 复刻。
+
+        60 根上行到 16.0 顶，回调 4 根到 ~15.1（94.4% 高位比），大风车 K
+        上影 1.5×实体 + 天量 2×，次日不反包 -> confirmed。
+        （v0.58 口径 0.98 会把 94.4% 的次高位全部漏掉。）
+        """
+        closes = [10.0 + i * 0.1 for i in range(60)]  # 到 15.9
+        closes += [15.9, 15.5, 15.2, 15.05]  # 顶 16.0 附近冲高回落
+        opens = list(closes)
+        highs = [c * 1.01 for c in closes]
+        lows = [c * 0.99 for c in closes]
+        vols = [1000.0] * len(closes)
+        # 大风车 K：开 15.10 收 15.08（实体 0.02）高 15.15（上影 0.05=2.5×实体）
+        closes.append(15.08)
+        opens.append(15.10)
+        highs.append(15.15)
+        lows.append(15.00)
+        vols.append(2500.0)
+        # 次日不反包（收 < 15.10 实体上沿）
+        closes.append(14.80)
+        opens.append(14.90)
+        highs.append(14.95)
+        lows.append(14.70)
+        vols.append(1000.0)
+        r = ec.detect_top_windmill(
+            make_df(closes, vols=vols, opens=opens, highs=highs, lows=lows),
+            code="600000",
+        )
+        assert r["hit"] is True and r["status"] == "confirmed"
+
+    def test_no_volume_spike_no_hit_v062(self):
+        """v0.62 天量腿：形态与位置都满足但量能常态（1×中位量）⇒ 不命中。"""
+        r = ec.detect_top_windmill(
+            self._windmill_df(next_close=15.8, vol_spike=1000.0), code="600000"
+        )
+        assert r["hit"] is False
+
+    def test_detect_distribution_includes_confirmed_windmill_v062(self):
+        """v0.62 接线：confirmed 大风车进出货信号（watch 级）。"""
+        r = ec.detect_distribution(self._windmill_df(next_close=15.8), code="600000")
+        assert r["signals"]["top_windmill"]["hit"] is True
+        assert "top_windmill" in r["hits"]
+        assert r["risk_level"] == "watch"
+
+    def test_detect_distribution_pending_windmill_not_counted_v062(self):
+        """pending（信号 K 为最后一根，T+1 未收盘）不计 hit--T+1 纪律。"""
+        r = ec.detect_distribution(self._windmill_df(), code="600000")
+        assert r["signals"]["top_windmill"]["hit"] is False
+        assert "top_windmill" not in r["hits"]
 
     def test_confirm_aggregates_windmill(self):
         r = ec.confirm_distribution(self._windmill_df(), code="600000")

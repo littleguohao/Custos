@@ -237,8 +237,13 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
         score += 4
         contrib["reversal_k_candidate"] = 4
     if patterns.get("j_low"):
-        score += 20
-        contrib["j_low"] = 20
+        # v0.61（owner 定向）：20 -> 33；v0.63（owner 定向回调，2026-08-16）：33 -> 24。
+        # v0.61 的 33 使 08-14 池 70+ 达 67 只（915 池 7.3%，owner 判定膨胀）；
+        # 单项回调到 24 后离线模拟 70+ 降到 ~26 只，且 8 只正例的技术档全部
+        # 仍 ≥60（「强」）⇒ A/B 桶位一只不丢（002074=61/B、600184=66/A、
+        # 600601=64/B）。「不被埋没」由分层承担，70+ 分数线回归稀缺。
+        score += 24
+        contrib["j_low"] = 24
     if patterns.get("volume_contraction"):
         score += 15
         contrib["volume_contraction"] = 15
@@ -258,7 +263,9 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
         contrib["bottom_volume"] = 10
     repair_hits = (cand.get("repair_signals") or {}).get("signals") or []
     if repair_hits:
-        pts = min(len(repair_hits) * 3, 6)
+        # v0.61（owner 定向）：每项 3 -> 4、上限 6 -> 8（正例里 J 拐头/缩量止跌
+        # 常作为唯一修复证据，原分值过低）。
+        pts = min(len(repair_hits) * 4, 8)
         score += pts
         contrib["repair_signals"] = pts
     if (cand.get("non_one_wave") or {}).get("status") == "confirmed":
@@ -285,14 +292,22 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
             score += 8
             contrib["macd_bottom_divergence"] = 8
         if mt.get("above_water"):
-            score += 5
-            contrib["macd_above_water"] = 5
+            # v0.61（owner 定向）：5 -> 7（正例 8/8 命中，零轴上是趋势票基础证据）。
+            score += 7
+            contrib["macd_above_water"] = 7
         if mt.get("bar_grow"):
             score += 5
             contrib["macd_bar_grow"] = 5
         if mt.get("wm_bar_grow"):
             score += 5
             contrib["macd_wm_bar_grow"] = 5
+        # v0.61（owner 定向）：MACD 顶背离**单独出现**（无三打白骨精）由封顶 C 改为
+        # 分数层减分 −8--正例 301076 顶背离命中但后续走强，封顶直接把它压出 A/B，
+        # 与 v0.60「量能撤退去封顶留减分」同一口径：检出留痕、降序但不一票否决。
+        # 三打白骨精（K线三高+MACD三低）仍走 apply_risk_downgrades 封顶 C。
+        if (mt.get("top_divergence") or {}).get("hit"):
+            score -= 8
+            contrib["macd_top_divergence"] = -8
     # 知行量价（good_b1）：多头趋势线 + 点火 + 缩量企稳 + 复合确认。
     # 注意：b1_ignition 是复合信号（含 ignition/pullback_shrink 条件），此处
     # 子项与复合项有意叠加计分，待回测校准（与 reversal_k 的"复合取代子项"
@@ -300,24 +315,39 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
     zx = cand.get("zhixing") or {}
     if zx.get("available"):
         if zx.get("qsx_gt_dks"):
-            score += 6
-            contrib["zhixing_bull"] = 6
+            score += 9
+            contrib["zhixing_bull"] = 9
         # v0.58（owner ②）：位置三态——骑线（C≥QSX）+4；回踩区（QSX>C≥DKS）+2。
         if zx.get("close_above_qsx"):
-            score += 4
-            contrib["zhixing_close_above_qsx"] = 4
+            score += 5
+            contrib["zhixing_close_above_qsx"] = 5
         elif zx.get("qsx_gt_dks") and zx.get("close_above_dks"):
-            score += 2
-            contrib["zhixing_in_qsx_dks_band"] = 2
+            score += 5
+            contrib["zhixing_in_qsx_dks_band"] = 5
     if (cand.get("ignition") or {}).get("hit"):
         score += 4
         contrib["ignition"] = 4
     if (cand.get("pullback_shrink") or {}).get("hit"):
-        score += 3
-        contrib["pullback_shrink"] = 3
+        # v0.61（owner 定向）：3 -> 5（回调缩量+持 DKS 是 B1 健康回调核心证据）。
+        score += 5
+        contrib["pullback_shrink"] = 5
     if (cand.get("b1_ignition") or {}).get("hit"):
         score += 8
         contrib["b1_ignition"] = 8
+    # v0.64（owner 定向，2026-08-16）：**B1 健康回调组合包** +9--J 低位 ∧ 缩量
+    # 回调持 DKS（pullback_shrink）∧ 知行多头（QSX>DKS）三腿齐备的组合奖。
+    # 为什么用组合而不是单因子提权：v0.61 教训--单因子普涨使 08-14 池 70+ 达
+    # 67 只（j_low 33 一项占 1/3）；组合只奖励**完整结构**：8 只正例 7/8 三腿齐
+    # （002812 无缩量回调不吃包、73 分已够），08-14 池仅约 1/3 命中--离线模拟
+    # 70+ 26->38（比 v0.61 的 67 少 43%），正例 8/8 回到 ≥70。
+    if (
+        patterns.get("j_low")
+        and (cand.get("pullback_shrink") or {}).get("hit")
+        and (cand.get("zhixing") or {}).get("available")
+        and (cand.get("zhixing") or {}).get("qsx_gt_dks")
+    ):
+        score += 9
+        contrib["b1_healthy_pullback_pack"] = 9
     # v0.58（owner ③⑥）：周日共振（周线 J<13）+5；ADX>60（强趋势）+5。
     if cand.get("weekly_j_low"):
         score += 5
@@ -330,8 +360,10 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
     vy = cand.get("volume_yy") or {}
     if vy.get("available"):
         if vy.get("bull_gt_bear"):
-            score += 5
-            contrib["volume_yy_bull"] = 5
+            # v0.61（owner 定向）：+5 -> +7（正例 5/8 命中；负向 −5 维持不变--
+            # 正向证据强于负向惩罚是 owner 定向选择：不埋没正例优先于惩罚疑点）。
+            score += 7
+            contrib["volume_yy_bull"] = 7
         else:
             score -= 5
             contrib["volume_yy_bear"] = -5
@@ -427,6 +459,14 @@ def capital_intent_strength(cand: dict) -> tuple[str, int, dict]:
     )
     add("ignition", (cand.get("ignition") or {}).get("hit"), 1)
     add("reversal_k", (cand.get("patterns") or {}).get("reversal_k_candidate"), 1)
+    # v0.61（owner 定向）：回调缩量计资金证据 +2--缩量回调=抛压衰竭、主力未撤
+    # （与「量能撤退封顶去除」v0.60 同一语义的正向面）；正例 002074 资金意图
+    # 原为 0 分（其余证据均未命中）被分层压到 D，此证据让它回到「中」。
+    add(
+        "pullback_shrink",
+        (cand.get("pullback_shrink") or {}).get("hit"),
+        2,
+    )
     # 资金流向（正交于量价）：个股在主力净流入榜且净流入，或所属板块净流入
     ff = cand.get("fund_flow") or {}
     add(
@@ -557,7 +597,9 @@ def apply_risk_downgrades(
                 risk_flags.append("macd_top_divergence")
             if three_peaks_hit:
                 risk_flags.append("macd_three_peaks")
-            bucket = cap_bucket(bucket, "C")
+                # v0.61（owner 定向）：仅三打白骨精封顶 C；顶背离单独出现不再封顶，
+                # 改分数层减分 -8（见 technical_score），risk_flag 仍留痕。
+                bucket = cap_bucket(bucket, "C")
         else:
             risk_flags.append("macd_divergence_detected_cap_disabled")
     if mt_cap.get("available") and (mt_cap.get("overextended") or {}).get("hit"):

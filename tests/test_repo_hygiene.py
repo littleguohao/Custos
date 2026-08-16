@@ -237,7 +237,12 @@ def test_cmd_scripts_reference_existing_paths():
     当前仓库无 .cmd 文件时本测试自然通过（守卫防的是「再出现」）。
     """
     for cmd in ROOT.rglob("*.cmd"):
-        if ".git" in cmd.parts:
+        # 2026-08-15：跳过第三方工具缓存目录（.kilo/ 等根级点开头目录、任意层级的
+        # node_modules）--本守卫的对象是**项目自己写的** .cmd；编辑器插件装的
+        # node_modules/.bin/*.cmd shim 既非项目脚本、也不受 git 跟踪（.kilo/.gitignore
+        # 已忽略），实测会让下方「未抽到任何路径引用」断言误伤挂绿链。
+        rel_parts = cmd.relative_to(ROOT).parts
+        if rel_parts[0].startswith(".") or "node_modules" in rel_parts:
             continue
         text = cmd.read_text(encoding="utf-8")
         refs = re.findall(r"(?m)^\s*set\s+\w+=(src[\\/][\w./\\-]+)", text)

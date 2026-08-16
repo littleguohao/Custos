@@ -133,5 +133,5 @@ def test_score_candidate_passthrough_evidence_only():
     }
     scored = sc.score_candidate(cand, None, "做多")
     assert scored["company_position"]["keywords"] == ["唯一"]
-    # 证据层：技术分只含 j_low 的 20 分，company_position 不加分
-    assert scored["score_detail"]["technical_score"] == 20
+    # 证据层：技术分只含 j_low 的 24 分（v0.63），company_position 不加分
+    assert scored["score_detail"]["technical_score"] == 24

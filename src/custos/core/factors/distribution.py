@@ -14,6 +14,7 @@ DKS 黄线跌破）、顶部大风车（`detect_top_windmill`，高位+长上影
 
 from __future__ import annotations
 
+from statistics import median as _median
 from typing import Any, Optional
 from custos.core.factors._util import ohlcv_arrays as _ohlcv_arrays
 
@@ -56,8 +57,14 @@ DIST_MIN_VOL_MA20_FRAC = 0.05  # 待回测：vol_ma20 低于全序列均量×此
 DIST_WINDMILL_SHADOW_BODY = 1.0  # 待回测：大风车长上影=上影 ≥ 实体×此值
 DIST_WINDMILL_RANGE_PCT = 7.0  # 待回测：宽幅震荡 K=振幅（高−低）/前收 ≥ 此值%
 DIST_WINDMILL_TOP_FRAC = (
-    0.98  # 待回测：高位=近 DIST_TOP_WINDOW 根最高 ≥ 近60根最高×此值（同⑤口径）
+    0.93  # v0.62（owner 定向，2026-08-15）：0.98 -> 0.93。高位=近60根最高×此值
 )
+# --北方铜业 000737@2026-08-10 的天量双长影大风车出现在**次高位**（信号 K 最高
+#   15.54 顶后反弹到 94.07%），0.98 只认「贴着最高点」，把次高位大风车全部漏掉。
+# v0.62（owner 定向，2026-08-15）新增天量腿：大风车=高位+长影/宽幅+**天量**
+# （owner：「长上影和长下影的历史天量大风车」--讲义口径里量能是形态组成部分，
+# 主力对倒出货的量能证据）。北方铜业 08-10 实测 1.565×MA20。
+DIST_WINDMILL_VOL_RATIO = 1.5  # 待回测：天量=信号 K 量 ≥ 前20日均量×此值
 
 
 def detect_distribution(df, code: str = "") -> dict[str, Any]:
@@ -267,6 +274,20 @@ def detect_distribution(df, code: str = "") -> dict[str, Any]:
         else None,
     }
 
+    # ⑥ 顶部大风车（v0.62 接线，owner 定向 2026-08-15）：高位+长影/宽幅+天量+T+1
+    #    不反包确认。此前仅落 confirm_distribution 证据层（v0.54），不进出货信号--
+    #    北方铜业 000737@2026-08-10 的天量双长影大风车（次高位 94.07%、量 1.565×MA20）
+    #    在 QD 多头名单里无任何出货标志，owner 拍板接线。
+    #    仅 **confirmed** 计 hit（pending 待确认/revoked 反包豁免不计--T+1 纪律）；
+    #    单独命中 -> watch（与③④⑤同级），hits≥2 -> high 的既有规则自然覆盖。
+    wm = detect_top_windmill(df, code)
+    sig["top_windmill"] = {
+        "hit": bool(
+            wm.get("available") and wm.get("hit") and wm.get("status") == "confirmed"
+        ),
+        "detail": wm.get("detail"),
+    }
+
     hits = [k for k, v in sig.items() if v["hit"]]
     severe = sig["top_huge_vol_bear"]["hit"] or sig["subhigh_vol_bear"]["hit"]
     risk = "high" if (severe or len(hits) >= 2) else ("watch" if hits else "none")
@@ -292,16 +313,19 @@ def detect_top_windmill(df, code: str = "") -> dict[str, Any]:
     讲义口径：「不确定是否见顶 → 卖一半；次日必须反包否则全卖」——
     代码只产信号与状态，仓位动作归文档/人。绝不 raise。
 
-    - 高位：信号 K 的最高价 ≥ 近 60 根最高 × ``DIST_WINDMILL_TOP_FRAC``（同⑤口径）；
+    - 高位：信号 K 的最高价 ≥ 近 60 根最高 × ``DIST_WINDMILL_TOP_FRAC``
+      （v0.62：0.98 -> 0.93，次高位大风车计入--北方铜业 2026-08-10 案例）；
     - 大风车 K：长上影（上影 ≥ 实体 × ``DIST_WINDMILL_SHADOW_BODY``）或
       宽幅震荡（振幅（高−低）/前收 ≥ ``DIST_WINDMILL_RANGE_PCT``%）；
+    - 天量（v0.62 新增）：信号 K 量 ≥ 前 20 均量 × ``DIST_WINDMILL_VOL_RATIO``
+      --owner 口径「长上影和长下影的历史天量大风车」，量能是对倒出货的证据腿；
     - T+1 状态机（01_swing_rules §七.2 的 T+1 收盘后判定条款）：
       信号 K 是最后一根 → ``pending``（次日未收盘）；
       次日收盘 ≥ 信号 K 实体上沿（反包）→ ``revoked``（豁免，不计出货）；
       否则 → ``confirmed``。
     """
     try:
-        close, high, low, _vol = _ohlcv_arrays(df)
+        close, high, low, vol = _ohlcv_arrays(df)
         open_ = df["open"].astype(float).to_numpy()
         n = len(df)
         if n < 30:
@@ -324,7 +348,13 @@ def detect_top_windmill(df, code: str = "") -> dict[str, Any]:
                 rng_pct >= DIST_WINDMILL_RANGE_PCT
             )
             near_top = high[t] >= top60 * DIST_WINDMILL_TOP_FRAC
-            if windmill and near_top:
+            # v0.62 天量腿：前 20 根**中位量**（不含信号 K 自身）。用中位数而非
+            # 均值：信号 K 之前的拉升段常有放量（北方铜业 08-05/08-07 式），均值
+            # 基线被抬高会把真天量错判为平量（08-10 实测：均值比 1.477 vs 中位
+            # 数比 1.691）。「天量=显著高于常态量能」，中位数才是常态。
+            vol_base = float(_median(vol[max(0, t - DIST_HUGE_VOL_WIN) : t]))
+            huge_vol = bool(vol_base) and vol[t] >= vol_base * DIST_WINDMILL_VOL_RATIO
+            if windmill and near_top and huge_vol:
                 if t + 1 >= n:
                     status = "pending"
                 elif close[t + 1] >= max(open_[t], close[t]):
@@ -335,6 +365,9 @@ def detect_top_windmill(df, code: str = "") -> dict[str, Any]:
                     "bars_ago": n - 1 - t,
                     "upper_shadow_frac": round(upper / body, 3) if body > 0 else None,
                     "range_pct": round(rng_pct, 2),
+                    "vol_ratio_ma20": round(float(vol[t] / vol_base), 3)
+                    if vol_base
+                    else None,
                     "status": status,
                 }
                 break
