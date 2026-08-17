@@ -153,12 +153,28 @@ uv run python src/custos/research/backtest_factors.py --entry-filter bottom_surg
 | `bottom_surge_j13`（宽） | 25,123 | 选择性仍弱：无 A/B 档（全 C），胜率 51.8%/均收 +1.06%——修正后量级与旧宽口径同阶，**不采信** |
 | `bottom_surge_strict_j13`（严） | **110** | **方向上有戏**：H10 胜率 61.9%、均收 +1.64%、H20 +2.43%、median +1.97%；样本小，**复核后才采信** |
 
-复核待跑（目标机，同 surge_strict_then_b1 的稳健性套路）：
+复核已于 2026-08-17 跑完（目标机，同 surge_strict_then_b1 的稳健性套路；跨窗命令补 `--count 1500`--
+首轮清单里漏写，不加则窗口只覆盖尾部，见 R6:283-285 / R13 的教训）：
 
 ```bash
-uv run python src/custos/research/backtest_factors.py --entry-filter bottom_surge_strict_j13 --universe-local --universe-sample 1000 --seed 1
-uv run python src/custos/research/backtest_factors.py --entry-filter bottom_surge_strict_j13 --universe-local --universe-sample 1000 --start 2022-01-01 --end 2024-12-31
+uv run python src/custos/research/backtest_factors.py --entry-filter bottom_surge_strict_j13 --universe-local --universe-sample 1000 --seed 1 --horizons 5,10,20,60
+uv run python src/custos/research/backtest_factors.py --entry-filter bottom_surge_strict_j13 --universe-local --universe-sample 1000 --start 2022-01-01 --end 2024-12-31 --count 1500 --horizons 5,10,20,60
 ```
+
+### #13 复核结果（2026-08-17）：两窗均未过 ⇒ 严变体终审否决，#13 整项关闭
+
+胜率取 D 档网格（122 条中 121 条 / 118 条中 117 条，即全体减个别 C 档）；对照基准：主窗无条件
+（R6 seed0）H5 49.40 / H10 50.17 / H20 49.97 / H60 50.10，2022-2024 无条件（R6:296）H5 46.54 / H20 46.95 / H60 45.27：
+
+| 复核 | n | H5 | H10 | H20 | H60 | 判读 |
+|---|---:|---|---|---|---|---|
+| `--seed 1`（主窗） | 122 | 47.1% / +0.68% | **51.2% / +2.10%**（全体口径 50.8%） | 62.0% / +5.19% | 67.9% / +14.57% | 首轮 H10 61.9% **回落到基准**（+1.0pp）；H20 +12pp、H60 +17.8pp 仍强 |
+| 2022-2024 跨窗（`--count 1500`） | 118 | 49.6% / −0.46% | **44.4% / +0.30%** | 49.6% / +0.87% | 47.0% / −0.02% | **跨窗优势收窄至 +2~3pp**（H20 49.6 vs 46.95、H60 47.0 vs 45.27），n=118 下 z<1 不显著；H10 跌破 50% |
+
+⇒ 「edge 集中在 2025-2026 单一 regime」模式再次出现：主窗 H20/H60 跨 seed 稳住，但跨窗全部收窄到
+基准 +3pp 以内，H10 跨 seed 即回落。按本单元终审惯例（surge_strict_then_b1 同一死法），
+**严变体 `bottom_surge_strict_j13` 不采信、不接入选股链**；宽变体首轮已弱（无 A/B 档），#13 关闭。
+数据：`artifacts/logs/backtest_h2_bottom_surge_strict_j13_{seed1,2022_2024}.json`（含同名 .out.txt 报告）。
 
 ### 已明确不做
 
