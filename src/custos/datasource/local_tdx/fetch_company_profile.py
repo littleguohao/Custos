@@ -17,7 +17,7 @@ BUSINESS_SCOPE），按行业地位关键词（唯一/龙头/最大/第一/领�
 实测（2026-08-14）：`PageAjax?code=SH600519` 返回 jbzl[0].ORG_PROFILE / BUSINESS_SCOPE。
 
 用法：
-  # 全市场增量拉取（已在台账的跳过；~5500 只约 15-25 分钟）
+  # 全市场增量拉取（已在台账且成功的跳过；失败记录自动重试；~5500 只约 15-25 分钟）
   uv run python src/custos/datasource/local_tdx/fetch_company_profile.py
   # 只扫关键词不联网（台账文本变了/词表改了之后重扫）
   uv run python src/custos/datasource/local_tdx/fetch_company_profile.py --rescan
@@ -195,7 +195,9 @@ def main(argv: Optional[list] = None) -> int:
 
         codes = local_tdx_data.list_local_vipdoc_codes()
     if not args.force:
-        codes = [c for c in codes if c not in ledger]
+        # 2026-08-16 review 修复：available=False 的记录（网络抖动/限流留下的占位）
+        # 重新入列——此前失败一次就永久缺席，只能 --force 全量重拉 5500 只。
+        codes = [c for c in codes if not ledger.get(c, {}).get("available")]
     if args.limit:
         codes = codes[: args.limit]
     if not codes:

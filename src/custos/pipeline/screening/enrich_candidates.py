@@ -117,6 +117,11 @@ from custos.core.b1_thresholds import (
 # 不是真实上市日数（审计：CZ 的 250 日窗口在 260 根里只剩 10 根余量）。
 OHLCV_LOAD_BARS = 260
 
+# 周/月 MACD 红柱腿的长历史加载根数（v0.60 修复，2026-08-16 review 发现）：
+# 月线 EMA26 需 ≥40 根月线 ⇒ ~800 根日线起，1200 ≈ 5 年（~58 根月线）有余量。
+# 仅 live 链逐票多加载一次（研究/注入路径不传，wm_available 如实标 False）。
+OHLCV_LOAD_BARS_LONG = 1200
+
 # v0.59（2026-08-14，owner ⑧）：公司「地位」证据——东财 F10 公司概况关键词台账
 # （fetch_company_profile.py 产 data/fundamentals/company_profile.jsonl）。
 # 严格证据层：只透传落盘，不进技术分/分层/gate。⚠️ 非 PIT（简介可被公司随时改），
@@ -134,7 +139,14 @@ def _load_company_positions() -> dict:
             )
 
             _COMPANY_POSITION_CACHE = fcp.load_ledger()
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            # 2026-08-16 review 修复：瞬时读错不再静默缓存成 {}（本进程证据全灭
+            # 而无任何痕迹）——降级可以，必须留一行 WARN。
+            print(
+                f"[WARN] company_position 台账加载失败（{type(exc).__name__}: {exc}），"
+                "本进程该证据字段全部缺席",
+                file=sys.stderr,
+            )
             _COMPANY_POSITION_CACHE = {}
     return _COMPANY_POSITION_CACHE
 
@@ -930,7 +942,7 @@ def check_pullback_shrink(df, dks_last: Optional[float] = None) -> dict[str, Any
     }
 
 
-def check_macd_technics(df) -> dict[str, Any]:
+def check_macd_technics(df, df_long=None) -> dict[str, Any]:
     """MACD 十大技术（macd十大技术精讲）→ 确定性因子。
 
     - zone：三区间动能状态机。做多口径：DIF/DEA 在零轴上且红柱扩张=第一区间
@@ -942,6 +954,13 @@ def check_macd_technics(df) -> dict[str, Any]:
       或 hist_B<hist_A。
     - three_peaks 三打白骨精：连续 3 个摆高递增 + DIF 连续 3 峰递减。
     - overextended 开口/空间拐离：|DIF| 处于近 120 日 90%+ 分位且柱体仍在。
+
+    ``df_long``（v0.60 修复，2026-08-16 review 发现）：周/月红柱（wm_bar_grow）
+    的 EMA26 需要 ≥40 根月线 ⇒ ~800 根日线，而生产 df 恒为 260 根（~13 根月线）
+    ⇒ 不给长历史时月线腿**结构性恒 False**（死字段）。live 链传 df_long
+    （count=1200）；研究/注入路径不传则退回用 df 自身——此时若月线根数不足，
+    ``wm_available=False`` 如实标注（与「红柱没增长」区分）。⚠️ 周/月末 bin 是
+    半成品 K 线（当月柱会随月内新数据翻转），与 weekly_j 同口径、有意接受。
     """
     close_s = df["close"].astype(float).reset_index(drop=True)
     n = len(df)
@@ -1043,21 +1062,31 @@ def check_macd_technics(df) -> dict[str, Any]:
     # v0.60（2026-08-14，owner）：MACD 位置/柱体加分项的判定字段。
     # above_water=白黄线水上（DIF>0 且 DEA>0，即 zone≠0 的条件）；bar_grow=
     # 日线红柱增长（hist>0 且大于昨值）；wm_bar_grow=周线与月线红柱都在增长。
-    def _hist_growing(dfx) -> bool:
-        """重采样序列的 MACD 红柱是否增长（柱>0 且大于上一根）。历史不足→False。"""
+    def _hist_growing(dfx) -> "bool | None":
+        """重采样序列的 MACD 红柱是否增长（柱>0 且大于上一根）。
+        历史不足/计算失败 → None（算不出，与「没增长」区分）。"""
         try:
             if dfx is None or len(dfx) < 40:  # EMA26 需 ~35 根才稳定
-                return False
+                return None
             c = dfx["close"].astype(float).reset_index(drop=True)
             dif2 = ema(c, 12) - ema(c, 26)
             h2 = (dif2 - ema(dif2, 9)) * 2
             return bool(h2.iloc[-1] > 0 and h2.iloc[-1] > h2.iloc[-2])
         except Exception:  # noqa: BLE001
-            return False
+            return None
 
-    wm_bar_grow = _hist_growing(resample(df, "W-FRI")) and _hist_growing(
-        resample(df, "ME")
-    )
+    # 周/月腿用 df_long（live 传 1200 根）；没有则退回 df 自身（研究注入路径）。
+    # resample 也包进 try：df 缺 date 列等坏输入不得炸出（本模块绝不 raise 惯例）。
+    wm_available = False
+    wm_bar_grow = False
+    try:
+        dfl = df_long if df_long is not None else df
+        wg = _hist_growing(resample(dfl, "W-FRI"))
+        mg = _hist_growing(resample(dfl, "ME"))
+        wm_available = wg is not None and mg is not None
+        wm_bar_grow = bool(wm_available and wg and mg)
+    except Exception:  # noqa: BLE001
+        pass
 
     return {
         "available": True,
@@ -1067,6 +1096,7 @@ def check_macd_technics(df) -> dict[str, Any]:
         "bar_red": bool(h0 > 0),
         "bar_grow": bool(h0 > 0 and h0 > h1),
         "wm_bar_grow": bool(wm_bar_grow),
+        "wm_available": bool(wm_available),  # 周/月历史不足时 False（≠红柱没增长）
         "dif": round(dif_last, 4),
         "dea": round(dea_last, 4),
         "hist": round(h0, 4),
@@ -1214,8 +1244,13 @@ def fund_flow_of(code6: str, sector_name: str, ff: dict) -> dict[str, Any]:
     }
 
 
-def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
-    """对单股日线 DataFrame 计算全部指标与模式标签（确定性）。"""
+def compute_metrics(df, index_df, code: str = "", df_long=None) -> dict[str, Any]:
+    """对单股日线 DataFrame 计算全部指标与模式标签（确定性）。
+
+    ``df_long``（可选）：更长历史的日线（live 链传 count=1200），仅供
+    check_macd_technics 的周/月红柱腿（EMA26 需 ≥40 根月线，260 根日线不够）。
+    不传则用 df 自身，月线根数不足时 wm_available=False 如实标注。
+    """
     close = df["close"]
     bbi = bbi_state(df)
     j = kdj(df)
@@ -1293,7 +1328,7 @@ def compute_metrics(df, index_df, code: str = "") -> dict[str, Any]:
     w_bottom = detect_w_bottom(df, code)
     red_fat_green_thin = detect_red_fat_green_thin(df, code)
     # 指标去重：日线 KDJ 与 MACD 各只算一次，再喂给下游检测器（审计：kdj×4/macd×3）。
-    macd_technics = check_macd_technics(df)
+    macd_technics = check_macd_technics(df, df_long=df_long)
 
     # 研究因子的**信号标注**（三态 hit/miss/unavailable）。只标注、不参与打分分层——
     # 这些因子还没跑过真实回测，而结论#15 的教训是"识别有术、盈利无效"。
@@ -1623,8 +1658,28 @@ def enrich(
             exclude(f"list_days<{min_list_days}")
             continue
 
+        # 周/月 MACD 腿的长历史（仅 live 默认加载路径；注入 loader 的测试/研究
+        # 路径不加载，check_macd_technics 退回 df 自身并如实标 wm_available）。
+        df_long = None
+        if ohlcv_loader is None:
+            try:
+                df_long = local_tdx_data.get_ohlcv_table(
+                    code6, count=OHLCV_LOAD_BARS_LONG
+                )
+                if df_long is not None and not df_long.empty:
+                    df_long = df_long.sort_values("date").reset_index(drop=True)
+                else:
+                    df_long = None
+            except Exception:  # noqa: BLE001 —— 长历史加载失败不阻塞（月线腿降级）
+                df_long = None
+
         try:
-            metrics = compute_metrics(df, index_df, code=code6)
+            # df_long 为 None 时不传参——旧签名调用（测试/研究对 compute_metrics
+            # 的 monkeypatch 替身没有 df_long 形参，多传会 TypeError 误杀候选）
+            if df_long is not None:
+                metrics = compute_metrics(df, index_df, code=code6, df_long=df_long)
+            else:
+                metrics = compute_metrics(df, index_df, code=code6)
         except Exception as exc:  # noqa: BLE001 —— 单股坏数据不中断批次
             exclude(f"metrics_error:{type(exc).__name__}:{str(exc)[:80]}")
             continue

@@ -206,3 +206,32 @@ def test_top5_sorted_by_total_desc():
     ]
     assert len(rows) == 5
     assert "600006" in rows[0] and "600005" in rows[1]  # 总分降序
+
+
+# ---------- v0.60 周/月红柱腿长历史（2026-08-16 review 修复）----------
+
+
+def _kick(n=1200, kick_at=1100):
+    """温和上行 + 末端加速：周/月 MACD 柱在末端均为正且扩张
+    （匀速/指数上行会被 EMA 收敛压平，测不出「增长」——必须末端加速）。"""
+    out = []
+    for i in range(n):
+        v = 10.0 + i * 0.01
+        if i >= kick_at:
+            v += (i - kick_at) ** 2 * 0.002
+        out.append(v)
+    return out
+
+
+def test_wm_bar_grow_needs_long_history():
+    """260 根日线 ⇒ 月线 ~13 根 < EMA26 稳定门槛 ⇒ wm_available 必须如实标 False
+    （此前直接判 False 还不留痕，+5 是死字段）；传 1200 根长历史才真正计算。"""
+    short = make_df(_kick(260, 160))
+    r = ec.check_macd_technics(short)
+    assert r["available"] and r["wm_available"] is False
+    assert r["wm_bar_grow"] is False
+
+    long_df = make_df(_kick(1200))
+    r2 = ec.check_macd_technics(short, df_long=long_df)
+    assert r2["wm_available"] is True
+    assert r2["wm_bar_grow"] is True  # 末端加速：周/月柱均在增长

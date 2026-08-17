@@ -2009,6 +2009,36 @@ def _empty_firings_guard(n_records: int, n_signal_days: int, allow_empty: bool) 
     return 2
 
 
+def _read_codes_file(path_str: str, err=None) -> list:
+    """--codes-file 解析（2026-08-16 review 加固，对齐 backtest_factors 约定）：
+
+    存在性检查（不再裸 traceback）、utf-8-sig（Windows 记事本默认 BOM，否则首个
+    token 变 BOM 前缀代码静默漏票）、跳过 # 注释、只收 6 位数字（表头/
+    600519.SH 之类脏内容剔除并出声）。err 传 argparse 的 ap.error（exit 2）。
+    """
+    import re as _re
+
+    p = Path(path_str)
+    if not p.is_file():
+        if err:
+            err(f"--codes-file 不存在: {p}")
+        raise FileNotFoundError(p)
+    codes: list = []
+    rejected: list = []
+    for tok in _re.split(r"[\s,]+", p.read_text(encoding="utf-8-sig")):
+        tok = tok.strip()
+        if not tok or tok.startswith("#"):
+            continue
+        (codes if tok.isdigit() and len(tok) == 6 else rejected).append(tok)
+    if rejected:
+        print(
+            f"[WARN] --codes-file 剔除 {len(rejected)} 个非 6 位代码 token"
+            f"（如 {rejected[:3]}）",
+            file=sys.stderr,
+        )
+    return codes
+
+
 def main(argv=None, loader=None) -> int:
     ap = argparse.ArgumentParser(description="起涨点 vs 0AMV regime 研究")
     ap.add_argument("--data-source", choices=["tdx", "qlib", "csv"], default="qlib")
@@ -2282,6 +2312,19 @@ def main(argv=None, loader=None) -> int:
     )
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
+    # 2026-08-16 review 修复：宇宙来源互斥——此前 --codes 与 --codes-file 同给时
+    # 后者静默赢（--universe-sdata 同给更乱），静默选边违背「不静默」惯例。
+    _uni_given = [
+        flag
+        for flag, v in (
+            ("--universe-sdata", args.universe_sdata),
+            ("--codes-file", args.codes_file),
+            ("--codes", args.codes),
+        )
+        if v
+    ]
+    if len(_uni_given) > 1:
+        ap.error(f"宇宙来源互斥，只给一个：{'、'.join(_uni_given)}")
 
     if args.explain_agg:  # 纯读 JSON,不加载数据、不算指标
         import json as _je
@@ -2493,15 +2536,7 @@ def main(argv=None, loader=None) -> int:
             str(Path(args.s_data_root) / sub), source=args.data_source
         )
     elif args.codes_file:
-        import re as _re
-
-        codes = [
-            c
-            for c in _re.split(
-                r"[\s,]+", Path(args.codes_file).read_text(encoding="utf-8")
-            )
-            if c.strip()
-        ]
+        codes = _read_codes_file(args.codes_file, err=ap.error)
     else:
         codes = [c.strip() for c in args.codes.split(",") if c.strip()]
     if not codes:

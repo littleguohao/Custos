@@ -59,6 +59,9 @@ def detect_w_bottom(df, code: str = "") -> dict[str, Any]:
     """W 底：双底 + 底部区域 + 底部放量 + MACD 底背离 四腿合成。绝不 raise。
 
     四腿单独落 detail（供回测消融）；hit=四腿全中。
+    ⚠️ 「250 日」窗口在 n<250 时按全部已加载根数近似，detail 落 window_bars
+    如实标注（2026-08-16 review 修复）；需要严格 250 日口径的调用方请先保证
+    输入 ≥250 根。
     """
     try:
         close, high, low, vol = _ohlcv_arrays(df)
@@ -84,7 +87,12 @@ def detect_w_bottom(df, code: str = "") -> dict[str, Any]:
         b1 = b2 = None
         if len(troughs) >= 2:
             b2 = troughs[-1]
-            b1 = max(troughs[:-1], key=lambda i: low[i], default=None)
+            # 2026-08-16 review 修复：b1 取「与 b2 价位最接近」的前谷（双底配对的
+            # 本义），此前取 max(low)=此前**最浅**的谷——教科书 W 底（左深右浅/
+            # 等深）会跳过一个无关紧要的小谷去比容差，3% 容差腿系统性假阴性。
+            b1 = min(
+                troughs[:-1], key=lambda i: abs(low[i] / low[b2] - 1), default=None
+            )
             if b1 is not None and b2 - b1 >= WBOT_MIN_GAP:
                 gap_pct = abs(low[b1] / low[b2] - 1) * 100 if low[b2] else 999.0
                 leg_double = {
@@ -95,11 +103,16 @@ def detect_w_bottom(df, code: str = "") -> dict[str, Any]:
                 }
 
         # 腿② 底部区域：距 250 日高点回撤 ≥ WBOT_DRAWDOWN_PCT（同底部巨量 low_price 口径）
+        # ⚠️ 2026-08-16 review 修复（口径如实标注）：n<250 时 high[-250:]/vol[-250:]
+        # 实际取的是**全部已加载根数**——detail 落 window_bars 供判读，不再让
+        # 60 根均量冒充「250 日均量」而不留痕。
+        window_bars = min(n, 250)
         high_250 = float(high[-250:].max()) if n else 0.0
         dd = (1 - close[-1] / high_250) * 100 if high_250 else 0.0
         leg_zone = {
             "hit": bool(dd >= WBOT_DRAWDOWN_PCT),
             "drawdown_from_250d_high_pct": round(dd, 2),
+            "window_bars": window_bars,
         }
 
         # 腿③ 底部放量：最近 WBOT_VOL_WIN 根内存在「量 ≥ 250日均量×WBOT_VOL_RATIO
@@ -120,6 +133,7 @@ def detect_w_bottom(df, code: str = "") -> dict[str, Any]:
             "hit": bool(vol_hits),
             "hits": vol_hits,
             "vol_ma250": round(vol_ma250, 1) if vol_ma250 else None,
+            "window_bars": window_bars,  # <250 时该均量是全部已加载根数的近似
         }
 
         # 腿④ MACD 底背离：两个收盘摆低 L2<L1（分型口径同①），DIF 低点抬高
@@ -175,6 +189,10 @@ def detect_red_fat_green_thin(df, code: str = "") -> dict[str, Any]:
     ①数量：窗口内阳线数 > 阴线数；②面积：阳实体均值 > 阴实体均值 且
     阳量均值 > 阴量均值。底部=窗口最低 ≤ 近 60 根最低 × ``RF_BOTTOM_FRAC``
     （镜像顶部的 near_top 0.98 口径）。绝不 raise。
+
+    ⚠️ 短样本口径（2026-08-16 review 标注）：本函数 n≥30 即 available（FACTOR
+    元数据的 min_bars=60 是 W 底的门槛）；n<60 时 near_bottom 恒 True（底部
+    位置判据空转），detail 落 near_bottom_degenerated 如实标注。
     """
     try:
         close, high, low, vol = _ohlcv_arrays(df)
@@ -205,6 +223,7 @@ def detect_red_fat_green_thin(df, code: str = "") -> dict[str, Any]:
             "available": True,
             "hit": bool(near_bottom and count_hit and area_hit),
             "near_bottom": bool(near_bottom),
+            "near_bottom_degenerated": bool(n < 60),  # 短样本时底部判据空转，如实标注
             "detail": {
                 "bull_count": len(bulls),
                 "bear_count": len(bears),

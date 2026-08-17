@@ -51,6 +51,20 @@ def _block_name_resolution_network(monkeypatch):
     monkeypatch.setattr(stock_names, "fetch_from_mootdx", _no_net, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _pin_company_position_cache_empty(monkeypatch):
+    """把 enrich_candidates 的公司地位台账缓存钉成 {}（2026-08-16 review 修复）。
+
+    compute_metrics 会读真实的 data/fundamentals/company_profile.jsonl——该文件
+    只在有 F10 台账的机器上存在、未被 git 跟踪 ⇒ 不钉的话，任何对
+    compute_metrics 输出的精确断言都变成机器相关。需要真实台账行为的用例自行
+    设置 ``enrich_candidates._COMPANY_POSITION_CACHE``（见 test_company_profile.py）。
+    """
+    from custos.pipeline.screening import enrich_candidates
+
+    monkeypatch.setattr(enrich_candidates, "_COMPANY_POSITION_CACHE", {})
+
+
 @pytest.fixture
 def reversal_thresholds():
     """按依赖顺序重载 B1 反转 K 阈值链，并在退出时**完整还原**。

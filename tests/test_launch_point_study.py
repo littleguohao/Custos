@@ -2041,3 +2041,22 @@ def test_f_mcap_real_market_cap_feature():
     code2 = next(c for c in bars if c != code)
     rec2 = next(r for r in recs if r["code"] == code2)
     assert all("f_mcap" not in d[2] for d in rec2["days"])
+
+
+def test_read_codes_file_hardened(tmp_path):
+    """2026-08-16 review 加固：BOM / 注释 / 脏 token / 缺失文件。"""
+    p = tmp_path / "u.txt"
+    # 带 BOM（Windows 记事本默认）+ 注释 + 脏内容
+    p.write_text(
+        "﻿600519,000001\n# 注释行\n600519.SH\n代码表头\n300750 600000\n",
+        encoding="utf-8",
+    )
+    codes = lp._read_codes_file(str(p))
+    assert codes == ["600519", "000001", "300750", "600000"]
+
+
+def test_read_codes_file_missing(tmp_path):
+    import pytest as _pt
+
+    with _pt.raises(FileNotFoundError):
+        lp._read_codes_file(str(tmp_path / "nope.txt"))

@@ -23,6 +23,7 @@ CLI::
 from __future__ import annotations
 
 import argparse
+import statistics
 import json
 import sys
 from pathlib import Path
@@ -89,7 +90,7 @@ def scan_code(df: pd.DataFrame, code: str) -> dict[str, Any]:
         fwd_stats[f"fwd{h}"] = {
             "n": len(vals),
             "mean": round(sum(vals) / len(vals), 2) if vals else None,
-            "median": round(sorted(vals)[len(vals) // 2], 2) if vals else None,
+            "median": round(statistics.median(vals), 2) if vals else None,
             "win_rate": round(sum(1 for v in vals if v > 0) / len(vals) * 100, 1)
             if vals
             else None,
@@ -131,7 +132,7 @@ def summarize(per_code: list[dict[str, Any]]) -> dict[str, Any]:
         pooled_fwd[f"fwd{h}"] = {
             "n": len(vals),
             "mean": round(sum(vals) / len(vals), 2) if vals else None,
-            "median": round(sorted(vals)[len(vals) // 2], 2) if vals else None,
+            "median": round(statistics.median(vals), 2) if vals else None,
             "win_rate": round(sum(1 for v in vals if v > 0) / len(vals) * 100, 1)
             if vals
             else None,
@@ -215,7 +216,11 @@ def main(argv: Optional[list] = None) -> int:
     per_code = []
     for f in files:
         df = load_b1_csv(f)
-        code = str(df["code"].iloc[-1]) if "code" in df else f.stem.split("-")[0]
+        code = (
+            str(df["code"].iloc[-1]).split(".")[0].zfill(6)
+            if "code" in df
+            else f.stem.split("-")[0]
+        )
         per_code.append(scan_code(df, code))
     summary = summarize(per_code)
     print(render_md(summary, per_code))

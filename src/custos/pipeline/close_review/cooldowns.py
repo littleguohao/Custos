@@ -28,6 +28,7 @@ owner 2026-08-12 定：冷却机制（原 #31「触发止损的票进冷却不�
 
 from __future__ import annotations
 
+import re
 from datetime import date, timedelta
 from typing import Any, Callable, Optional
 
@@ -112,6 +113,11 @@ def stop_cooldowns(
         if not code:
             continue
         try:
+            # 2026-08-16 review 修复：Python 3.11+ 的 fromisoformat 还接受基本格式
+            # "20260805"——这类行能过校验，随后与 "2026-08-05" 做字符串比较时两种
+            # 格式混排结果错误 ⇒ 先锁死扩展格式（带连字符）再解析。
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", sell_date):
+                raise ValueError(f"非 YYYY-MM-DD 格式: {sell_date!r}")
             date.fromisoformat(sell_date)  # 台账一行坏日期不该炸掉三份复盘报告
         except ValueError:
             excluded["bad_date"] += 1  # 目标机 review 实测踩到（2026-08-13）

@@ -143,26 +143,44 @@ def test_v058_new_score_items():
     s, _, c = sc.technical_score({"code": "600000", "zhixing": zx_band})
     assert s == 14 and c["zhixing_in_qsx_dks_band"] == 5
 
-    # 阴阳量：阳量>阴量 +5；阴量>阳量 −5（负分不截断到 0 以下另说，这里只钉加减）
+    # 2026-08-16 review 修复：空头排列（QSX<DKS）下价站 QSX 不算骑线，不加 +5
+    zx_bear = {"available": True, "qsx_gt_dks": False, "close_above_qsx": True}
+    s, _, c = sc.technical_score({"code": "600000", "zhixing": zx_bear})
+    assert s == 0 and "zhixing_close_above_qsx" not in c
+
+    # 阴阳量：阳量>阴量 +7；阴量>阳量 −5；平局不加不减（2026-08-16 review 修复，
+    # 此前平局被 bull_gt_bear=False 当空方 −5）
     s, _, c = sc.technical_score(
-        {"code": "600000", "volume_yy": {"available": True, "bull_gt_bear": True}}
+        {
+            "code": "600000",
+            "volume_yy": {"available": True, "bull_vol": 120.0, "bear_vol": 100.0},
+        }
     )
     assert s == 7 and c["volume_yy_bull"] == 7
     s, _, c = sc.technical_score(
         {
             "code": "600000",
             "patterns": {"j_low": True},
-            "volume_yy": {"available": True, "bull_gt_bear": False},
+            "volume_yy": {"available": True, "bull_vol": 90.0, "bear_vol": 100.0},
         }
     )
     assert s == 19 and c["volume_yy_bear"] == -5  # 24 − 5（v0.63：j_low 24）
-
-    # 出货形态分数层减分（封顶规则不在这里）：watch −10 / high −20
     s, _, c = sc.technical_score(
         {
             "code": "600000",
             "patterns": {"j_low": True},
-            "distribution": {"risk_level": "watch"},
+            "volume_yy": {"available": True, "bull_vol": 100.0, "bear_vol": 100.0},
+        }
+    )
+    assert s == 24 and "volume_yy_bear" not in c  # 平局中性
+
+    # 出货形态分数层减分（封顶规则不在这里）：watch −10 / high −20；
+    # available 守卫（2026-08-16 review 修复）：未评估的残留 risk_level 不减分
+    s, _, c = sc.technical_score(
+        {
+            "code": "600000",
+            "patterns": {"j_low": True},
+            "distribution": {"available": True, "risk_level": "watch"},
         }
     )
     assert s == 14 and c["distribution_watch"] == -10  # 24 − 10
@@ -170,10 +188,28 @@ def test_v058_new_score_items():
         {
             "code": "600000",
             "patterns": {"j_low": True},
-            "distribution": {"risk_level": "high"},
+            "distribution": {"available": True, "risk_level": "high"},
         }
     )
     assert s == 4 and c["distribution_high"] == -20  # 24 − 20
+    s, _, c = sc.technical_score(
+        {
+            "code": "600000",
+            "patterns": {"j_low": True},
+            "distribution": {"risk_level": "high"},  # 无 available ⇒ 未评估
+        }
+    )
+    assert s == 24 and "distribution_high" not in c
+
+    # 负分下限截断（2026-08-16 review 修复）：纯负分组合展示分不跌破 0
+    s, _, c = sc.technical_score(
+        {
+            "code": "600000",
+            "distribution": {"available": True, "risk_level": "high"},
+            "volume_yy": {"available": True, "bull_vol": 1.0, "bear_vol": 2.0},
+        }
+    )
+    assert s == 0 and c["distribution_high"] == -20 and c["volume_yy_bear"] == -5
 
 
 def test_v060_macd_score_items():

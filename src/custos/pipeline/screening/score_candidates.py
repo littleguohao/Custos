@@ -278,7 +278,8 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
     if fit is not None:
         contrib["perfect_b1_fit"] = fit
     # MACD 十大技术（正向）：第一区间强势扩张 +3；第一区间再启动（3/5浪买点）+5；
-    # 底背离 +8（v0.60 从 5 上调，owner）。负向顶背离/三打白骨精走封顶，不在此减分。
+    # 底背离 +8（v0.60 从 5 上调，owner）。负向：顶背离单独出现 −8（v0.61，
+    # 见下方减分支），三打白骨精仍走 apply_risk_downgrades 封顶 C。
     # v0.60（owner）：水上（DIF>0 且 DEA>0）+5、日线红柱增长 +5、周月红柱同增 +5。
     mt = cand.get("macd_technics") or {}
     if mt.get("available"):
@@ -317,8 +318,10 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
         if zx.get("qsx_gt_dks"):
             score += 9
             contrib["zhixing_bull"] = 9
-        # v0.58（owner ②）：位置三态——骑线（C≥QSX）+4；回踩区（QSX>C≥DKS）+2。
-        if zx.get("close_above_qsx"):
+        # v0.58（owner ②）：位置三态——骑线（多头且 C≥QSX）+5；回踩区（QSX>C≥DKS）+5。
+        # 2026-08-16 review 修复：骑线腿补 qsx_gt_dks 前提——空头排列（QSX<DKS）下
+        # 价站 QSX 不算「骑趋势线上」，此前与回踩区腿条件不对称。
+        if zx.get("qsx_gt_dks") and zx.get("close_above_qsx"):
             score += 5
             contrib["zhixing_close_above_qsx"] = 5
         elif zx.get("qsx_gt_dks") and zx.get("close_above_dks"):
@@ -356,26 +359,38 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
     if adx is not None and adx > 60:
         score += 5
         contrib["adx_gt_60"] = 5
-    # v0.58（owner ④）：近 10 日阳量>阴量 +5 / 阴量>阳量 −5（首个负分项）。
+    # v0.58（owner ④）：近 10 日阳量>阴量 +7（v0.61 从 5 上调）/ 阴量>阳量 −5。
+    # 2026-08-16 review 修复：按总量比较，平局（阳量=阴量）不加不减——
+    # 此前用 bull_gt_bear 单布尔，平局被当空方 −5。
     vy = cand.get("volume_yy") or {}
     if vy.get("available"):
-        if vy.get("bull_gt_bear"):
-            # v0.61（owner 定向）：+5 -> +7（正例 5/8 命中；负向 −5 维持不变--
-            # 正向证据强于负向惩罚是 owner 定向选择：不埋没正例优先于惩罚疑点）。
+        bull_v, bear_v = vy.get("bull_vol"), vy.get("bear_vol")
+        if bull_v is not None and bear_v is not None:
+            if bull_v > bear_v:
+                # v0.61（owner 定向）：+5 -> +7（正例 5/8 命中；负向 −5 维持不变--
+                # 正向证据强于负向惩罚是 owner 定向选择：不埋没正例优先于惩罚疑点）。
+                score += 7
+                contrib["volume_yy_bull"] = 7
+            elif bear_v > bull_v:
+                score -= 5
+                contrib["volume_yy_bear"] = -5
+        elif vy.get("bull_gt_bear"):  # 旧形状（无总量键）兜底
             score += 7
             contrib["volume_yy_bull"] = 7
-        else:
-            score -= 5
-            contrib["volume_yy_bear"] = -5
     # v0.58（owner ④）：出货形态在分数层也减分（封顶规则不动）——watch −10 / high −20。
-    dist_level = (cand.get("distribution") or {}).get("risk_level")
+    # 2026-08-16 review 修复：available 守卫——检测器未评估（旧落盘/手工构造
+    # 残留 risk_level）时不得无证据减分。
+    dist = cand.get("distribution") or {}
+    dist_level = dist.get("risk_level") if dist.get("available") else None
     if dist_level == "watch":
         score -= 10
         contrib["distribution_watch"] = -10
     elif dist_level == "high":
         score -= 20
         contrib["distribution_high"] = -20
-    score = min(score, 100)
+    # 2026-08-16 review 修复：负分项引入后补下限——口径恢复为 0-100
+    # （负分信息在 factor_contrib 里仍可见，展示分不跌破 0）。
+    score = min(max(score, 0), 100)
     level = (
         "强"
         if score >= TECH_STRONG_FALLBACK
@@ -591,7 +606,8 @@ def apply_risk_downgrades(
     top_div_hit = (mt_cap.get("top_divergence") or {}).get("hit")
     three_peaks_hit = (mt_cap.get("three_peaks") or {}).get("hit")
     if mt_cap.get("available") and (top_div_hit or three_peaks_hit):
-        # MACD 十大技术：顶背离 / 三打白骨精（K线三高+MACD三低）→ 封顶 C
+        # MACD 十大技术：三打白骨精（K线三高+MACD三低）→ 封顶 C；
+        # 顶背离单独出现 v0.61 起只减分（technical_score −8），不再封顶。
         if rules["macd_divergence"]:
             if top_div_hit:
                 risk_flags.append("macd_top_divergence")

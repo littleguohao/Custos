@@ -2218,7 +2218,11 @@ class TestPinnedWindowAndUniverse:
         monkeypatch.setattr(
             m2,
             "report",
-            lambda cross, sample=None, data_source="tdx", window=None, pin_universe=False: (
+            lambda cross,
+            sample=None,
+            data_source="tdx",
+            window=None,
+            pin_universe=False: (
                 got.update(cross=cross, window=window, pin_universe=pin_universe)
             ),
         )

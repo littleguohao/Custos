@@ -188,6 +188,20 @@ class TestBadLedgerRows:
         lines = cd.format_cooldown_lines(r)
         assert any("日期无法解析 2" in ln for ln in lines), "跳过必须计数上报"
 
+    def test_basic_format_date_rejected(self):
+        """2026-08-16 review 修复：3.11+ 的 fromisoformat 接受基本格式
+        「20260803」——它能过解析但会与「2026-08-03」字符串比较时混排 ⇒
+        必须按扩展格式（带连字符）拒绝。"""
+        r = run(
+            [
+                closing("600000", "2026-08-03", -8.0),
+                closing("000001", "20260804", -9.0),  # 基本格式，非 YYYY-MM-DD
+            ],
+            "2026-08-05",
+        )
+        assert r["active"] == ["600000"]
+        assert r["excluded"]["bad_date"] == 1
+
     def test_nan_pnl_not_in_cooldown_list(self):
         """NaN 比较恒 False ⇒ 不写防御会误入冷却名单（-7 判定挡不住它）。"""
         r = run(

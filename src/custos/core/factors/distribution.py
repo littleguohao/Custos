@@ -64,7 +64,7 @@ DIST_WINDMILL_TOP_FRAC = (
 # v0.62（owner 定向，2026-08-15）新增天量腿：大风车=高位+长影/宽幅+**天量**
 # （owner：「长上影和长下影的历史天量大风车」--讲义口径里量能是形态组成部分，
 # 主力对倒出货的量能证据）。北方铜业 08-10 实测 1.565×MA20。
-DIST_WINDMILL_VOL_RATIO = 1.5  # 待回测：天量=信号 K 量 ≥ 前20日均量×此值
+DIST_WINDMILL_VOL_RATIO = 1.5  # 待回测：天量=信号 K 量 ≥ 前20日量**中位数**×此值（v0.62 起中位数，见 :351 附近注释——偶发天量不把基准顶飞）
 
 
 def detect_distribution(df, code: str = "") -> dict[str, Any]:
@@ -317,7 +317,7 @@ def detect_top_windmill(df, code: str = "") -> dict[str, Any]:
       （v0.62：0.98 -> 0.93，次高位大风车计入--北方铜业 2026-08-10 案例）；
     - 大风车 K：长上影（上影 ≥ 实体 × ``DIST_WINDMILL_SHADOW_BODY``）或
       宽幅震荡（振幅（高−低）/前收 ≥ ``DIST_WINDMILL_RANGE_PCT``%）；
-    - 天量（v0.62 新增）：信号 K 量 ≥ 前 20 均量 × ``DIST_WINDMILL_VOL_RATIO``
+    - 天量（v0.62 新增）：信号 K 量 ≥ 前 20 根量**中位数** × ``DIST_WINDMILL_VOL_RATIO``
       --owner 口径「长上影和长下影的历史天量大风车」，量能是对倒出货的证据腿；
     - T+1 状态机（01_swing_rules §七.2 的 T+1 收盘后判定条款）：
       信号 K 是最后一根 → ``pending``（次日未收盘）；
