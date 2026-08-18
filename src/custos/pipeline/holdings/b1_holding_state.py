@@ -51,38 +51,16 @@ SIGNAL_ORDER = {
 }
 
 
-def evaluate(
-    row: dict[str, Any],
-    market_regime: str = "未知",
-    price: Any = None,
-    price_date: str | None = None,
-) -> dict[str, Any]:
-    current = fnum(price)
-    if current is None:
-        current = fnum(row.get("close"))
-    pnl = fnum(row.get("holding_pnl_pct"))
-    trend = str(row.get("trend_state") or "未知")
-    box = str(row.get("box20_position") or "未知")
-    pv = row.get("price_volume") or {}
-    technical_date = str(row.get("latest_date") or "") or None
-    price_volume_current = (
-        not price_date or not technical_date or price_date == technical_date
-    )
-    structure = row.get("n_structure") or {}
-    desc_structure = row.get("descending_n_structure") or {}
-    signals: list[dict[str, Any]] = []
-    unavailable: list[str] = []
-
-    def add(signal: str, priority: str, action: str, reason: str) -> None:
-        signals.append(
-            {"signal": signal, "priority": priority, "action": action, "reason": reason}
-        )
-
+def _pnl_signals(pnl: float | None, add: Any) -> None:
     if pnl is not None and pnl <= -0.10:
         add("hard_loss", "P0", "止损/清仓评估", f"持有盈亏{pnl:.2%}达到-10%硬风控阈值")
     elif pnl is not None and pnl <= -0.07:
         add("loss_reduction", "P1", "减仓评估", f"持有盈亏{pnl:.2%}低于-7%")
 
+
+def _n_structure_signals(
+    structure: dict, current: float | None, add: Any, unavailable: list[str]
+) -> None:
     l1 = fnum(structure.get("prior_low"))
     l2 = fnum(structure.get("pullback_low"))
     if structure.get("available") and current is not None and l1 is not None:
@@ -106,6 +84,10 @@ def evaluate(
     else:
         unavailable.append("n_structure")
 
+
+def _desc_n_signals(
+    desc_structure: dict, current: float | None, add: Any, unavailable: list[str]
+) -> None:
     # Descending N-structure: H1 -> L1 -> lower H2 -> close below L1
     if desc_structure.get("available") and current is not None:
         structural_low = fnum(desc_structure.get("structural_low"))
@@ -121,7 +103,8 @@ def evaluate(
     elif not desc_structure.get("available"):
         unavailable.append("descending_n_structure")
 
-    below_days = int(fnum(row.get("consecutive_closes_below_bbi")) or 0)
+
+def _bbi_signals(row: dict[str, Any], below_days: int, add: Any) -> None:
     if row.get("above_bbi") is False:
         if below_days >= 2:
             add(
@@ -138,11 +121,17 @@ def evaluate(
                 "首日收盘跌破BBI，等待次日收复确认",
             )
 
+
+def _trend_box_signals(trend: str, box: str, add: Any) -> None:
     if trend == "下跌" and "破位" in box:
         add("trend_box_break", "P0", "趋势破位退出评估", "下跌趋势且跌破20日箱体")
     elif trend == "下跌":
         add("downtrend", "P1", "反弹减仓", "日线处于下跌趋势")
 
+
+def _price_volume_signals(
+    row: dict[str, Any], pv: dict, price_volume_current: bool, add: Any
+) -> None:
     if price_volume_current and pv.get("heavy_large_bear"):
         add(
             "heavy_large_bear",
@@ -168,12 +157,16 @@ def evaluate(
             "分批止盈",
             "BBI上方连续两根中大阳，按B1保护利润",
         )
+
+
+def _kdj_signals(
+    row: dict[str, Any], pv: dict, price_volume_current: bool, j: float | None, add: Any
+) -> None:
     if row.get("daily_kdj_death_cross"):
         add(
             "kdj_death_cross", "P2", "动能转弱观察", "日线KDJ死叉，需结合趋势和结构确认"
         )
 
-    j = fnum(row.get("daily_j"))
     # ⚠️ `13` 原为硬编码 —— 与 `enrich_candidates.J_LOW_THRESHOLD` 是同一个门槛。
     #    改一处不改另一处会让选股与持仓对同一支票给出不同的反转 K 结论。
     reversal = bool(
@@ -200,6 +193,10 @@ def evaluate(
             "仍需后续修复确认",
         )
 
+
+def _regime_signals(
+    market_regime: str, pv: dict, price_volume_current: bool, add: Any
+) -> None:
     if market_regime == "空头":
         add(
             "bear_regime_reduce_top_priority",
@@ -222,6 +219,9 @@ def evaluate(
             "0AMV空头区间出现反弹，优先降低风险敞口",
         )
 
+
+def _collect_unavailable(pv: dict, price_volume_current: bool) -> list[str]:
+    unavailable: list[str] = []
     if not pv.get("available"):
         unavailable.append("price_volume")
     if not price_volume_current:
@@ -234,6 +234,48 @@ def evaluate(
         "trade_execution_feedback",
         "max_favorable_excursion",
     ]
+    return unavailable
+
+
+def evaluate(
+    row: dict[str, Any],
+    market_regime: str = "未知",
+    price: Any = None,
+    price_date: str | None = None,
+) -> dict[str, Any]:
+    current = fnum(price)
+    if current is None:
+        current = fnum(row.get("close"))
+    pnl = fnum(row.get("holding_pnl_pct"))
+    trend = str(row.get("trend_state") or "未知")
+    box = str(row.get("box20_position") or "未知")
+    pv = row.get("price_volume") or {}
+    technical_date = str(row.get("latest_date") or "") or None
+    price_volume_current = (
+        not price_date or not technical_date or price_date == technical_date
+    )
+    structure = row.get("n_structure") or {}
+    desc_structure = row.get("descending_n_structure") or {}
+    below_days = int(fnum(row.get("consecutive_closes_below_bbi")) or 0)
+    j = fnum(row.get("daily_j"))
+    signals: list[dict[str, Any]] = []
+
+    def add(signal: str, priority: str, action: str, reason: str) -> None:
+        signals.append(
+            {"signal": signal, "priority": priority, "action": action, "reason": reason}
+        )
+
+    unavailable: list[str] = []
+    _pnl_signals(pnl, add)
+    _n_structure_signals(structure, current, add, unavailable)
+    _desc_n_signals(desc_structure, current, add, unavailable)
+    _bbi_signals(row, below_days, add)
+    _trend_box_signals(trend, box, add)
+    _price_volume_signals(row, pv, price_volume_current, add)
+    _kdj_signals(row, pv, price_volume_current, j, add)
+    _regime_signals(market_regime, pv, price_volume_current, add)
+    unavailable += _collect_unavailable(pv, price_volume_current)
+
     signals.sort(
         key=lambda item: (
             action_rank(item["priority"]),

@@ -371,19 +371,13 @@ def plan_confirmation_section(day: str, chief: dict, prior: dict) -> list[str]:
     return lines
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--date", required=True)
-    ap.add_argument("--data-date")
-    ap.add_argument("--session", default="")
-    ap.add_argument("--output")
-    a = ap.parse_args()
-    day = a.data_date or a.date
-    dt = datetime.strptime(a.date, "%Y-%m-%d")
-    chief_path = DATA / "decisions" / f"{day}_chief_decision.json"
-    if not chief_path.exists():
-        raise SystemExit(f"mandatory ChiefDecision missing: {chief_path}")
-    chief = load(chief_path, {})
+def _gather_inputs(a, day: str) -> dict[str, Any]:
+    """输入装载段：ChiefDecision/市场/板块/技术/前次复盘/盘前情报。
+
+    模块级常量 DATA/REVIEWS 与被 monkeypatch 的访问器一律**运行时**读取，
+    不得在函数默认值里捕获。
+    """
+    chief = load(DATA / "decisions" / f"{day}_chief_decision.json", {})
     market = load(DATA / "market" / f"{day}_market_timing_input.json", {})
     sectors = load(DATA / "sectors" / f"{day}_sector_state.json", [])
     technical = load(DATA / "holdings" / f"{day}_holding_technical_summary.json", [])
@@ -403,15 +397,12 @@ def main():
     market_events = intel.get("market_events") or fallback_rss_events(day)
     holding_events = intel.get("holding_events") or []
     holding_event_map = {code(x.get("code")): x for x in holding_events}
-    quality = chief.get("market_quality", {})
-    freshness = chief.get("position_freshness", {})
-    pgate = chief.get("position_gate", {})
     window = intel.get("window") or {}
     window_start = window.get("start") or f"{prior_day} 15:00"
     window_end = window.get("end") or f"{a.date} 09:00"
     # 可审计块（原待办 #29，已实现）：本报告实际读过的输入；盘前情报缺失时也登记为缺失项
     audit_inputs = [
-        chief_path,
+        DATA / "decisions" / f"{day}_chief_decision.json",
         DATA / "market" / f"{day}_market_timing_input.json",
         DATA / "trades" / "current_positions.json",
         DATA / "sectors" / f"{day}_sector_state.json",
@@ -419,26 +410,35 @@ def main():
         intel_path
         or (DATA / "news" / "premarket" / f"{day}_premarket_intelligence.json"),
     ]
-    audit = report_audit.build(a.date, a.session or "premarket", audit_inputs)
+    return {
+        "chief": chief,
+        "market": market,
+        "sectors": sectors,
+        "tech": tech,
+        "prior": prior,
+        "prior_day": prior_day,
+        "prior_actions": prior_actions,
+        "intel_path": intel_path,
+        "intel_check": intel_check,
+        "market_events": market_events,
+        "holding_events": holding_events,
+        "holding_event_map": holding_event_map,
+        "quality": chief.get("market_quality", {}),
+        "freshness": chief.get("position_freshness", {}),
+        "pgate": chief.get("position_gate", {}),
+        "window_start": window_start,
+        "window_end": window_end,
+        "audit_inputs": audit_inputs,
+    }
+
+
+def _section_overnight_news(
+    market_events: list[dict[str, Any]],
+    holding_events: list[dict[str, Any]],
+    intel_check: dict[str, Any],
+) -> list[str]:
+    """§2 隔夜重大消息与持仓公告。"""
     lines = [
-        f"# 每日投研简报｜{dt.year}年{dt.month}月{dt.day}日（星期{WEEKDAY[dt.weekday()]}）"
-        + (f"｜{a.session}" if a.session else ""),
-        "",
-        "> 角色（v0.57 owner 定版）：**盘前=信息处理 + 预案确认** ｜ "
-        "盘中14:45=按规则的交易提醒 ｜ 盘后=复盘纠错 + 条件化预案主产地。",
-        f"> 信息窗口：{window_start} 至 {window_end}（Asia/Shanghai）  ",
-        f"> 生成时间：{cn_now().strftime('%Y-%m-%d %H:%M:%S')} Asia/Shanghai",
-        *report_audit.render_md(audit),
-        "",
-        "## 1. 今日核心结论",
-        "",
-        f"**{chief.get('market_state', '未知')}，总仓位建议 {chief.get('total_position_range', '待确认')}；新开仓权限：{chief.get('new_position_permission', '禁止')}。**",
-        "",
-        f"- 择时评分：{chief.get('market_score', '待确认')}",
-        f"- 风控等级：{chief.get('risk_level', '提高')}",
-        f"- 市场数据质量：{quality.get('status', '未知')}（{quality.get('quality_score', 'NA')}）",
-        f"- 持仓快照：{freshness.get('status', '未知')}——{freshness.get('reason', '')}",
-        f"- 精确数量权限：{'允许' if pgate.get('allow_precise_quantity') else '禁止'}",
         "",
         "## 2. 隔夜重大消息与持仓公告",
         "",
@@ -448,7 +448,6 @@ def main():
     schema_note = premarket_schema_note(intel_check)
     if schema_note:
         lines += [schema_note, ""]
-    overseas = market.get("overseas_market", {})
     lines += [
         "| 时间 | 事件 | 方向 | 对A股/持仓的影响 | 来源/质量 |",
         "|---|---|---|---|---|",
@@ -476,7 +475,12 @@ def main():
         lines.append(
             "| 全部持仓 | - | 信息窗口内未检索到持仓相关公告或高相关消息 | 中性 | 维持上次复盘计划 | 公告检索完成 |"
         )
-    lines += [
+    return lines
+
+
+def _section_overseas(overseas: dict[str, Any]) -> list[str]:
+    """§3 美国、日本、韩国市场。"""
+    lines = [
         "",
         "## 3. 美国、日本、韩国市场",
         "",
@@ -500,7 +504,18 @@ def main():
         f"- 外围综合判断：**{clean(overseas.get('overall_signal'))}**。{clean(overseas.get('overseas_summary'))}",
         "- 美国已收盘数据与日韩开盘后最新数据必须分开标注；缺值不得用历史数据替代。",
     ]
-    lines += [
+    return lines
+
+
+def _section_holdings(
+    chief: dict[str, Any],
+    tech: dict[str, dict[str, Any]],
+    prior_actions: dict[str, dict[str, Any]],
+    holding_event_map: dict[str, dict[str, Any]],
+    prior_day: str,
+) -> list[str]:
+    """§4 持仓状态与上次计划调整。"""
+    lines = [
         "",
         f"## 4. 持仓状态与上次计划调整（上次复盘：{prior_day}）",
         "",
@@ -513,7 +528,8 @@ def main():
         p = prior_actions.get(c, {})
         event = holding_event_map.get(c)
         prior_action = ACTION_LABELS.get(
-            p.get("action"), clean(p.get("action") or p.get("direction"), "无可用计划")
+            p.get("action") or "",
+            clean(p.get("action") or p.get("direction"), "无可用计划"),
         )
         tech_state = f"{clean(t.get('latest_date'))} 收{num(t.get('close'))}；{clean(t.get('trend_state'))}；仓位{ratio(t.get('position_pct'))}"
         ma_j = f"{technical_relation(t)}；日J={num(t.get('daily_j'), 1)}"
@@ -532,16 +548,14 @@ def main():
         lines.append(
             "| - | 持仓数据缺失 | - | BBI/N型前低待确认 | 不提高交易权限 | - | - |"
         )
-    lines += [
-        "",
-        "## 5. 主线、机会与风险",
-        "",
-        "> ⚠️ 主线题材判定口径**待重设计**（owner 2026-08-13「目前不准，需要重新调整」"
-        "——归入 TODO #26）：本节内容仅作观察参考。",
-        "",
-        "| 方向 | 阶段 | 交易许可 | 理由 |",
-        "|---|---|---|---|",
-    ]
+    return lines
+
+
+def _section_mainline_rows(
+    sectors: list[dict[str, Any]], market_events: list[dict[str, Any]]
+) -> list[str]:
+    """§5 主线表行 + 风险提示小节头（§5 节头留在 main —— 源码守卫钉着 #26 标注）。"""
+    lines = []
     supported = [x for x in sectors if x.get("trade_permission") == "支持"]
     for x in supported[:5]:
         evidence_count = sum(
@@ -562,11 +576,16 @@ def main():
         "### 风险提示",
         "",
     ]
+    return lines
+
+
+def _section_forbidden_and_candidates(chief: dict[str, Any]) -> list[str]:
+    """§5 后半：禁止动作 + 候选审核。"""
+    lines = []
     for x in chief.get("forbidden_actions", []):
         lines.append(f"- **禁止**：{x}")
     if not chief.get("forbidden_actions"):
         lines.append("- 无新增禁止项；仍须遵守基础风控。")
-    snapshot_date = freshness.get("snapshot_date") or "未知"
     lines += [
         "",
         "### 候选审核",
@@ -580,10 +599,20 @@ def main():
         )
     if not chief.get("buy_actions"):
         lines.append("| - | - | 暂无可审核计划 | 禁止临时开仓 | - |")
-    lines += ["", "### 公式选股备选池", ""]
-    lines += stock_pool_section(day)
-    lines += ["", *plan_confirmation_section(day, chief, prior), ""]
-    lines += [
+    return lines
+
+
+def _section_data_freshness(
+    day: str,
+    chief_path: Path,
+    freshness: dict[str, Any],
+    quality: dict[str, Any],
+    intel_path: Any,
+    intel_check: dict[str, Any],
+) -> list[str]:
+    """§7 数据时效与声明。"""
+    snapshot_date = freshness.get("snapshot_date") or "未知"
+    return [
         "## 7. 数据时效与声明",
         "",
         f"- ChiefDecision：`{chief_path}`",
@@ -593,6 +622,76 @@ def main():
         "- 本报告仅渲染 ChiefDecision 的最终动作，不以消息、技术指标或上游技能覆盖风险否决。",
         "- 本简报用于策略辅助，不构成收益承诺或无条件交易指令。",
     ]
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--date", required=True)
+    ap.add_argument("--data-date")
+    ap.add_argument("--session", default="")
+    ap.add_argument("--output")
+    a = ap.parse_args()
+    day = a.data_date or a.date
+    dt = datetime.strptime(a.date, "%Y-%m-%d")
+    chief_path = DATA / "decisions" / f"{day}_chief_decision.json"
+    if not chief_path.exists():
+        raise SystemExit(f"mandatory ChiefDecision missing: {chief_path}")
+    inp = _gather_inputs(a, day)
+    chief = inp["chief"]
+    quality = inp["quality"]
+    freshness = inp["freshness"]
+    pgate = inp["pgate"]
+    audit = report_audit.build(a.date, a.session or "premarket", inp["audit_inputs"])
+    lines = [
+        f"# 每日投研简报｜{dt.year}年{dt.month}月{dt.day}日（星期{WEEKDAY[dt.weekday()]}）"
+        + (f"｜{a.session}" if a.session else ""),
+        "",
+        "> 角色（v0.57 owner 定版）：**盘前=信息处理 + 预案确认** ｜ "
+        "盘中14:45=按规则的交易提醒 ｜ 盘后=复盘纠错 + 条件化预案主产地。",
+        f"> 信息窗口：{inp['window_start']} 至 {inp['window_end']}（Asia/Shanghai）  ",
+        f"> 生成时间：{cn_now().strftime('%Y-%m-%d %H:%M:%S')} Asia/Shanghai",
+        *report_audit.render_md(audit),
+        "",
+        "## 1. 今日核心结论",
+        "",
+        f"**{chief.get('market_state', '未知')}，总仓位建议 {chief.get('total_position_range', '待确认')}；新开仓权限：{chief.get('new_position_permission', '禁止')}。**",
+        "",
+        f"- 择时评分：{chief.get('market_score', '待确认')}",
+        f"- 风控等级：{chief.get('risk_level', '提高')}",
+        f"- 市场数据质量：{quality.get('status', '未知')}（{quality.get('quality_score', 'NA')}）",
+        f"- 持仓快照：{freshness.get('status', '未知')}——{freshness.get('reason', '')}",
+        f"- 精确数量权限：{'允许' if pgate.get('allow_precise_quantity') else '禁止'}",
+    ]
+    lines += _section_overnight_news(
+        inp["market_events"], inp["holding_events"], inp["intel_check"]
+    )
+    lines += _section_overseas(inp["market"].get("overseas_market", {}))
+    lines += _section_holdings(
+        chief,
+        inp["tech"],
+        inp["prior_actions"],
+        inp["holding_event_map"],
+        inp["prior_day"],
+    )
+    # ⚠️ §5 节头不得移出 main：源码守卫（test_daily_report）钉着「待重设计 #26」标注。
+    lines += [
+        "",
+        "## 5. 主线、机会与风险",
+        "",
+        "> ⚠️ 主线题材判定口径**待重设计**（owner 2026-08-13「目前不准，需要重新调整」"
+        "——归入 TODO #26）：本节内容仅作观察参考。",
+        "",
+        "| 方向 | 阶段 | 交易许可 | 理由 |",
+        "|---|---|---|---|",
+    ]
+    lines += _section_mainline_rows(inp["sectors"], inp["market_events"])
+    lines += _section_forbidden_and_candidates(chief)
+    lines += ["", "### 公式选股备选池", ""]
+    lines += stock_pool_section(day)
+    lines += ["", *plan_confirmation_section(day, chief, inp["prior"]), ""]
+    lines += _section_data_freshness(
+        day, chief_path, freshness, quality, inp["intel_path"], inp["intel_check"]
+    )
     out = (
         Path(a.output)
         if a.output

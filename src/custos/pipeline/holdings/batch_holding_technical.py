@@ -118,6 +118,91 @@ def _analysis_for(code: str, name: str, date: str, use_subprocess: bool) -> dict
     return an
 
 
+def _trend_fields(an: dict) -> dict:
+    trend = an.get("trend") or {}
+    return {
+        "latest_date": an.get("latest_date"),
+        "trend_state": trend.get("state"),
+        "close": trend.get("close"),
+        "ma25": trend.get("ma25"),
+        "ma60": trend.get("ma60"),
+        "ma144": trend.get("ma144"),
+        "ma240": trend.get("ma240"),
+        "above_ma25": trend.get("above_ma25"),
+        "above_ma60": trend.get("above_ma60"),
+        "above_ma144": trend.get("above_ma144"),
+        "above_ma240": trend.get("above_ma240"),
+    }
+
+
+def _bbi_fields(an: dict) -> dict:
+    bbi = an.get("bbi") or {}
+    return {
+        "bbi": bbi.get("value"),
+        "above_bbi": bbi.get("close_above"),
+        "bbi_distance_pct": bbi.get("distance_pct"),
+        "consecutive_closes_below_bbi": bbi.get("consecutive_closes_below"),
+    }
+
+
+def _n_structure_fields(an: dict) -> dict:
+    ns = an.get("n_structure") or {}
+    return {
+        "n_structure": an.get("n_structure") or {"available": False},
+        "descending_n_structure": an.get("descending_n_structure")
+        or {"available": False},
+        "n_structure_prior_low": ns.get("prior_low"),
+        "n_structure_prior_low_date": ns.get("prior_low_date"),
+        "n_structure_origin_extreme_low": ns.get("origin_extreme_low"),
+        "n_structure_pullback_low": ns.get("pullback_low"),
+        "n_structure_pullback_low_date": ns.get("pullback_low_date"),
+        "n_structure_breakout_level": ns.get("breakout_level"),
+        "n_structure_confirmed_date": ns.get("confirmed_date"),
+    }
+
+
+def _box_fields(an: dict) -> dict:
+    box20 = an.get("box_20d") or {}
+    box60 = an.get("box_60d") or {}
+    return {
+        "box20_upper": box20.get("upper"),
+        "box20_lower": box20.get("lower"),
+        "box20_mid": box20.get("mid"),
+        "box20_position": box20.get("position"),
+        "box60_upper": box60.get("upper"),
+        "box60_lower": box60.get("lower"),
+        "box60_mid": box60.get("mid"),
+        "box60_position": box60.get("position"),
+    }
+
+
+def _oscillator_fields(an: dict) -> dict:
+    daily_kdj = (an.get("daily") or {}).get("kdj") or {}
+    daily_macd = (an.get("daily") or {}).get("macd") or {}
+    weekly_kdj = (an.get("weekly") or {}).get("kdj") or {}
+    weekly_macd = (an.get("weekly") or {}).get("macd") or {}
+    monthly_kdj = (an.get("monthly") or {}).get("kdj") or {}
+    monthly_macd = (an.get("monthly") or {}).get("macd") or {}
+    return {
+        "daily_j": daily_kdj.get("j"),
+        "daily_kdj_golden_cross": daily_kdj.get("golden_cross"),
+        "daily_kdj_death_cross": daily_kdj.get("death_cross"),
+        "daily_kdj_state": daily_kdj.get("state"),
+        "daily_macd_hist": daily_macd.get("hist"),
+        "daily_macd_hist_direction": daily_macd.get("hist_direction"),
+        "daily_macd_golden_cross": daily_macd.get("golden_cross"),
+        "daily_macd_death_cross": daily_macd.get("death_cross"),
+        "weekly_j": weekly_kdj.get("j"),
+        "weekly_kdj_state": weekly_kdj.get("state"),
+        "weekly_macd_hist": weekly_macd.get("hist"),
+        "weekly_macd_hist_direction": weekly_macd.get("hist_direction"),
+        "monthly_j": monthly_kdj.get("j"),
+        "monthly_kdj_state": monthly_kdj.get("state"),
+        "monthly_macd_hist": monthly_macd.get("hist"),
+        "monthly_macd_hist_direction": monthly_macd.get("hist_direction"),
+    }
+
+
 def _row_from_analysis(it: dict, code: str, an: dict) -> dict:
     if not an.get("available"):
         return {
@@ -130,85 +215,11 @@ def _row_from_analysis(it: dict, code: str, an: dict) -> dict:
         **it,
         "code": code,
         "technical_available": True,
-        "latest_date": an.get("latest_date"),
-        "trend_state": (an.get("trend") or {}).get("state"),
-        "close": (an.get("trend") or {}).get("close"),
-        "ma25": (an.get("trend") or {}).get("ma25"),
-        "ma60": (an.get("trend") or {}).get("ma60"),
-        "ma144": (an.get("trend") or {}).get("ma144"),
-        "ma240": (an.get("trend") or {}).get("ma240"),
-        "above_ma25": (an.get("trend") or {}).get("above_ma25"),
-        "above_ma60": (an.get("trend") or {}).get("above_ma60"),
-        "above_ma144": (an.get("trend") or {}).get("above_ma144"),
-        "above_ma240": (an.get("trend") or {}).get("above_ma240"),
-        "bbi": (an.get("bbi") or {}).get("value"),
-        "above_bbi": (an.get("bbi") or {}).get("close_above"),
-        "bbi_distance_pct": (an.get("bbi") or {}).get("distance_pct"),
-        "consecutive_closes_below_bbi": (an.get("bbi") or {}).get(
-            "consecutive_closes_below"
-        ),
-        "n_structure": an.get("n_structure") or {"available": False},
-        "descending_n_structure": an.get("descending_n_structure")
-        or {"available": False},
-        "n_structure_prior_low": (an.get("n_structure") or {}).get("prior_low"),
-        "n_structure_prior_low_date": (an.get("n_structure") or {}).get(
-            "prior_low_date"
-        ),
-        "n_structure_origin_extreme_low": (an.get("n_structure") or {}).get(
-            "origin_extreme_low"
-        ),
-        "n_structure_pullback_low": (an.get("n_structure") or {}).get("pullback_low"),
-        "n_structure_pullback_low_date": (an.get("n_structure") or {}).get(
-            "pullback_low_date"
-        ),
-        "n_structure_breakout_level": (an.get("n_structure") or {}).get(
-            "breakout_level"
-        ),
-        "n_structure_confirmed_date": (an.get("n_structure") or {}).get(
-            "confirmed_date"
-        ),
-        "box20_upper": (an.get("box_20d") or {}).get("upper"),
-        "box20_lower": (an.get("box_20d") or {}).get("lower"),
-        "box20_mid": (an.get("box_20d") or {}).get("mid"),
-        "box20_position": (an.get("box_20d") or {}).get("position"),
-        "box60_upper": (an.get("box_60d") or {}).get("upper"),
-        "box60_lower": (an.get("box_60d") or {}).get("lower"),
-        "box60_mid": (an.get("box_60d") or {}).get("mid"),
-        "box60_position": (an.get("box_60d") or {}).get("position"),
-        "daily_j": (((an.get("daily") or {}).get("kdj") or {}).get("j")),
-        "daily_kdj_golden_cross": (
-            ((an.get("daily") or {}).get("kdj") or {}).get("golden_cross")
-        ),
-        "daily_kdj_death_cross": (
-            ((an.get("daily") or {}).get("kdj") or {}).get("death_cross")
-        ),
-        "daily_kdj_state": (((an.get("daily") or {}).get("kdj") or {}).get("state")),
-        "daily_macd_hist": (((an.get("daily") or {}).get("macd") or {}).get("hist")),
-        "daily_macd_hist_direction": (
-            ((an.get("daily") or {}).get("macd") or {}).get("hist_direction")
-        ),
-        "daily_macd_golden_cross": (
-            ((an.get("daily") or {}).get("macd") or {}).get("golden_cross")
-        ),
-        "daily_macd_death_cross": (
-            ((an.get("daily") or {}).get("macd") or {}).get("death_cross")
-        ),
-        "weekly_j": (((an.get("weekly") or {}).get("kdj") or {}).get("j")),
-        "weekly_kdj_state": (((an.get("weekly") or {}).get("kdj") or {}).get("state")),
-        "weekly_macd_hist": (((an.get("weekly") or {}).get("macd") or {}).get("hist")),
-        "weekly_macd_hist_direction": (
-            ((an.get("weekly") or {}).get("macd") or {}).get("hist_direction")
-        ),
-        "monthly_j": (((an.get("monthly") or {}).get("kdj") or {}).get("j")),
-        "monthly_kdj_state": (
-            ((an.get("monthly") or {}).get("kdj") or {}).get("state")
-        ),
-        "monthly_macd_hist": (
-            ((an.get("monthly") or {}).get("macd") or {}).get("hist")
-        ),
-        "monthly_macd_hist_direction": (
-            ((an.get("monthly") or {}).get("macd") or {}).get("hist_direction")
-        ),
+        **_trend_fields(an),
+        **_bbi_fields(an),
+        **_n_structure_fields(an),
+        **_box_fields(an),
+        **_oscillator_fields(an),
         "price_volume": an.get("price_volume") or {"available": False},
     }
 

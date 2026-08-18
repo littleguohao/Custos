@@ -224,7 +224,38 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
     five_day_entry +8、leader_volume +6、repair_signals 每项 +3（上限 +6）、
     non_one_wave=confirmed +5。返回 (score, level, factor_contrib)（factor_contrib
     落盘可复盘）。仍是未校准启发式——排序无 alpha（R2），分值只管分层与展示序。
+
+    2026-08-18（#58 收尾）：函数体按逻辑块拆成 `_pattern_score` 等私有段，
+    本函数只做「取数 → 逐段评分 → 汇总分级」；分值、contrib 键与键序均未变。
     """
+    contrib: dict[str, Any] = {}
+    score = 0
+    # 段顺序＝历史上 factor_contrib 的键序，勿动（落盘明细供复盘对照）。
+    for pts, part in (
+        _pattern_score(cand),
+        _b1_bonus_score(cand),
+        _macd_score(cand),
+        _zhixing_score(cand),
+        _ignition_score(cand),
+        _trend_score(cand),
+        _volume_yy_score(cand),
+        _distribution_score(cand),
+    ):
+        score += pts
+        contrib.update(part)
+    # 2026-08-16 review 修复：负分项引入后补下限——口径恢复为 0-100
+    # （负分信息在 factor_contrib 里仍可见，展示分不跌破 0）。
+    score = min(max(score, 0), 100)
+    level = (
+        "强"
+        if score >= TECH_STRONG_FALLBACK
+        else ("中" if score >= TECH_MID_FALLBACK else "弱")
+    )
+    return score, level, contrib
+
+
+def _pattern_score(cand: dict) -> tuple[int, dict]:
+    """patterns 五单项：bbi/反转K/J低位/极致缩量/20日相对强度。"""
     patterns = cand.get("patterns") or {}
     contrib: dict[str, Any] = {}
     score = 0
@@ -250,6 +281,13 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
     if patterns.get("relative_strength_strong"):
         score += 15
         contrib["relative_strength_strong"] = 15
+    return score, contrib
+
+
+def _b1_bonus_score(cand: dict) -> tuple[int, dict]:
+    """B1/CZ 对齐加分：五日战法/龙头量/底部巨量/修复信号/非一波流（+贴合度证据列）。"""
+    contrib: dict[str, Any] = {}
+    score = 0
     if (cand.get("five_day_entry") or {}).get("hit"):
         score += 8
         contrib["five_day_entry"] = 8
@@ -277,11 +315,18 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
     fit = (cand.get("perfect_b1_fit") or {}).get("score")
     if fit is not None:
         contrib["perfect_b1_fit"] = fit
-    # MACD 十大技术（正向）：第一区间强势扩张 +3；第一区间再启动（3/5浪买点）+5；
-    # 底背离 +8（v0.60 从 5 上调，owner）。负向：顶背离单独出现 −8（v0.61，
-    # 见下方减分支），三打白骨精仍走 apply_risk_downgrades 封顶 C。
-    # v0.60（owner）：水上（DIF>0 且 DEA>0）+5、日线红柱增长 +5、周月红柱同增 +5。
+    return score, contrib
+
+
+def _macd_score(cand: dict) -> tuple[int, dict]:
+    """MACD 十大技术（正向）：第一区间强势扩张 +3；第一区间再启动（3/5浪买点）+5；
+    底背离 +8（v0.60 从 5 上调，owner）。负向：顶背离单独出现 −8（v0.61，
+    见下方减分支），三打白骨精仍走 apply_risk_downgrades 封顶 C。
+    v0.60（owner）：水上（DIF>0 且 DEA>0）+5、日线红柱增长 +5、周月红柱同增 +5。
+    """
     mt = cand.get("macd_technics") or {}
+    contrib: dict[str, Any] = {}
+    score = 0
     if mt.get("available"):
         if mt.get("zone") == 1:
             score += 3
@@ -309,11 +354,14 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
         if (mt.get("top_divergence") or {}).get("hit"):
             score -= 8
             contrib["macd_top_divergence"] = -8
-    # 知行量价（good_b1）：多头趋势线 + 点火 + 缩量企稳 + 复合确认。
-    # 注意：b1_ignition 是复合信号（含 ignition/pullback_shrink 条件），此处
-    # 子项与复合项有意叠加计分，待回测校准（与 reversal_k 的"复合取代子项"
-    # 口径不同，属已知不一致，回测后统一）。
+    return score, contrib
+
+
+def _zhixing_score(cand: dict) -> tuple[int, dict]:
+    """知行量价（good_b1）位置三态：多头 +9；骑线/回踩区 +5（互斥）。"""
     zx = cand.get("zhixing") or {}
+    contrib: dict[str, Any] = {}
+    score = 0
     if zx.get("available"):
         if zx.get("qsx_gt_dks"):
             score += 9
@@ -327,6 +375,18 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
         elif zx.get("qsx_gt_dks") and zx.get("close_above_dks"):
             score += 5
             contrib["zhixing_in_qsx_dks_band"] = 5
+    return score, contrib
+
+
+def _ignition_score(cand: dict) -> tuple[int, dict]:
+    """点火/缩量企稳/复合确认 + B1 健康回调组合包。
+
+    注意：b1_ignition 是复合信号（含 ignition/pullback_shrink 条件），此处
+    子项与复合项有意叠加计分，待回测校准（与 reversal_k 的"复合取代子项"
+    口径不同，属已知不一致，回测后统一）。
+    """
+    contrib: dict[str, Any] = {}
+    score = 0
     if (cand.get("ignition") or {}).get("hit"):
         score += 4
         contrib["ignition"] = 4
@@ -344,14 +404,20 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
     # （002812 无缩量回调不吃包、73 分已够），08-14 池仅约 1/3 命中--离线模拟
     # 70+ 26->38（比 v0.61 的 67 少 43%），正例 8/8 回到 ≥70。
     if (
-        patterns.get("j_low")
+        (cand.get("patterns") or {}).get("j_low")
         and (cand.get("pullback_shrink") or {}).get("hit")
         and (cand.get("zhixing") or {}).get("available")
         and (cand.get("zhixing") or {}).get("qsx_gt_dks")
     ):
         score += 9
         contrib["b1_healthy_pullback_pack"] = 9
-    # v0.58（owner ③⑥）：周日共振（周线 J<13）+5；ADX>60（强趋势）+5。
+    return score, contrib
+
+
+def _trend_score(cand: dict) -> tuple[int, dict]:
+    """v0.58（owner ③⑥）：周日共振（周线 J<13）+5；ADX>60（强趋势）+5。"""
+    contrib: dict[str, Any] = {}
+    score = 0
     if cand.get("weekly_j_low"):
         score += 5
         contrib["weekly_j_low"] = 5
@@ -359,10 +425,18 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
     if adx is not None and adx > 60:
         score += 5
         contrib["adx_gt_60"] = 5
-    # v0.58（owner ④）：近 10 日阳量>阴量 +7（v0.61 从 5 上调）/ 阴量>阳量 −5。
-    # 2026-08-16 review 修复：按总量比较，平局（阳量=阴量）不加不减——
-    # 此前用 bull_gt_bear 单布尔，平局被当空方 −5。
+    return score, contrib
+
+
+def _volume_yy_score(cand: dict) -> tuple[int, dict]:
+    """v0.58（owner ④）：近 10 日阳量>阴量 +7（v0.61 从 5 上调）/ 阴量>阳量 −5。
+
+    2026-08-16 review 修复：按总量比较，平局（阳量=阴量）不加不减——
+    此前用 bull_gt_bear 单布尔，平局被当空方 −5。
+    """
     vy = cand.get("volume_yy") or {}
+    contrib: dict[str, Any] = {}
+    score = 0
     if vy.get("available"):
         bull_v, bear_v = vy.get("bull_vol"), vy.get("bear_vol")
         if bull_v is not None and bear_v is not None:
@@ -377,26 +451,22 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
         elif vy.get("bull_gt_bear"):  # 旧形状（无总量键）兜底
             score += 7
             contrib["volume_yy_bull"] = 7
-    # v0.58（owner ④）：出货形态在分数层也减分（封顶规则不动）——watch −10 / high −20。
-    # 2026-08-16 review 修复：available 守卫——检测器未评估（旧落盘/手工构造
-    # 残留 risk_level）时不得无证据减分。
+    return score, contrib
+
+
+def _distribution_score(cand: dict) -> tuple[int, dict]:
+    """v0.58（owner ④）：出货形态在分数层也减分（封顶规则不动）——watch −10 / high −20。
+
+    2026-08-16 review 修复：available 守卫——检测器未评估（旧落盘/手工构造
+    残留 risk_level）时不得无证据减分。
+    """
     dist = cand.get("distribution") or {}
     dist_level = dist.get("risk_level") if dist.get("available") else None
     if dist_level == "watch":
-        score -= 10
-        contrib["distribution_watch"] = -10
-    elif dist_level == "high":
-        score -= 20
-        contrib["distribution_high"] = -20
-    # 2026-08-16 review 修复：负分项引入后补下限——口径恢复为 0-100
-    # （负分信息在 factor_contrib 里仍可见，展示分不跌破 0）。
-    score = min(max(score, 0), 100)
-    level = (
-        "强"
-        if score >= TECH_STRONG_FALLBACK
-        else ("中" if score >= TECH_MID_FALLBACK else "弱")
-    )
-    return score, level, contrib
+        return -10, {"distribution_watch": -10}
+    if dist_level == "high":
+        return -20, {"distribution_high": -20}
+    return 0, {}
 
 
 def sector_heat(sector_entry: Optional[dict]) -> tuple[str, str, str]:
@@ -733,14 +803,11 @@ def score_candidate(
     capital_level, capital_score, capital_detail = capital_intent_strength(cand)
     heat, pass_level, reason = sector_heat(sector_entry)
     trade_style = trade_style_of(heat)
-    sector_score_raw = (sector_entry or {}).get("score") if sector_entry else None
     # 板块分不可用（NaN/inf）与"无评分"（None）在**打分上**都按最弱 0 处理，但前者是
     # 脏数据、必须在 risk_flags/degraded_reason 留痕，否则无从区分"板块真弱"和"数据坏"。
-    sector_score_norm = normalize_sector_score(sector_score_raw, sector_score_max)
-    sector_score_available = sector_score_norm is not None
-    sector_score = (
-        sector_score_norm if sector_score_norm is not None else 0.0
-    )  # 同值（available 即 norm 非 None），显式判空便于收窄
+    sector_score_raw, sector_score, sector_score_available = _sector_score_parts(
+        sector_entry, sector_score_max
+    )
 
     # 分层由个股（技术结构 × 资金意图）定夺；板块不封顶（降为提示，只进 score/共振/trade_style）
     base_bucket = RESONANCE_MATRIX[(tech_level, capital_level)]
@@ -759,12 +826,7 @@ def score_candidate(
 
     entry_reason = build_entry_reasons(cand, dist, wave_type)
 
-    next_step = NEXT_STEP[bucket]
-    if amv_state == "空头":
-        next_step = "observe_price"
-    if wave_type == "sprint" and rules["sprint_wave"] and next_step == "buy_review":
-        # 双保险：冲刺波后首个 B1 禁买，不得进可买候选
-        next_step = "observe_price"
+    next_step = _next_step(bucket, amv_state, wave_type, rules)
 
     # 四面共振(市场+板块+基本面+技术)——hint/优先级,不驱动分层。牛股=三/四面共振(cz理念)。
     fq, _sp_fav, _legs, _aligned, resonance_4leg = four_leg_resonance(
@@ -829,7 +891,39 @@ def score_candidate(
         "daily_j": cand.get("daily_j"),
         "stop_loss_ref": cand.get("stop_loss_ref"),
         "is_holding": bool(cand.get("is_holding")),
-        # B1/CZ 策略对齐落盘字段
+        # 证据层透传段（顺序＝历史落盘字段顺序）：B1/CZ → 信号标注 → 指标/正交因子
+        **_b1cz_passthrough(cand, cz_sector),
+        **_signal_evidence_passthrough(cand),
+        **_indicator_passthrough(cand),
+        "fundamental_quality": fq,
+        "resonance_4leg": resonance_4leg,
+    }
+
+
+def _sector_score_parts(
+    sector_entry: Optional[dict], sector_score_max: float
+) -> tuple[Any, float, bool]:
+    """板块分三件：raw 原值 / 归一化分（不可用按 0）/ 是否可用（NaN/inf → False）。"""
+    raw = (sector_entry or {}).get("score") if sector_entry else None
+    norm = normalize_sector_score(raw, sector_score_max)
+    # 同值（available 即 norm 非 None），显式判空便于收窄
+    return raw, (norm if norm is not None else 0.0), norm is not None
+
+
+def _next_step(bucket: str, amv_state: str, wave_type: Any, rules: dict) -> str:
+    """bucket → next_step；空头与冲刺波首个 B1（双保险）一律 observe_price。"""
+    step = NEXT_STEP[bucket]
+    if amv_state == "空头":
+        step = "observe_price"
+    if wave_type == "sprint" and rules["sprint_wave"] and step == "buy_review":
+        # 双保险：冲刺波后首个 B1 禁买，不得进可买候选
+        step = "observe_price"
+    return step
+
+
+def _b1cz_passthrough(cand: dict, cz_sector: str) -> dict:
+    """B1/CZ 策略对齐落盘字段（证据层透传，不参与打分）。"""
+    return {
         "cz_sector": cz_sector,
         "wave": cand.get("wave") or {},
         "weekly_j": cand.get("weekly_j"),
@@ -841,6 +935,16 @@ def score_candidate(
         "leader_volume": cand.get("leader_volume") or {},
         "three_lows": cand.get("three_lows") or {},
         "bottom_volume": cand.get("bottom_volume") or {},
+    }
+
+
+def _signal_evidence_passthrough(cand: dict) -> dict:
+    """知行量价/出货识别/底部侧/公司地位 + 信号标注层（纯透传，不参与打分）。
+
+    ⚠️ signals 只允许出现在这里（纯映射）。一旦被读进打分逻辑，就从 A 类（纯标注）
+    变成 B 类（改分层），必须先过回测——见 tests/test_signal_labels.py。
+    """
+    return {
         # v0.58 阴阳量（近 10 日阳量/阴量对比）——技术分加减分输入，落盘供复盘
         "volume_yy": cand.get("volume_yy") or {},
         # 知行量价 + 出货识别（good_b1 / 出货五方式）
@@ -858,17 +962,22 @@ def score_candidate(
         # v0.59（owner ⑧）：公司地位证据（东财 F10 简介关键词）——证据层透传
         "company_position": cand.get("company_position") or {},
         # 信号标注层（A 类改动）：**只透传，不参与打分**。
-        # 本函数是显式字段白名单，enrich 落盘的 signals 不加在这里就会被丢掉——
-        # 2026-08-04 实盘即因此出现「157 只候选、信号标注区块全空」。
-        # ⚠️ 只允许出现在这一行（纯映射）。一旦被读进打分逻辑，就从 A 类（纯标注）
-        # 变成 B 类（改分层），必须先过回测——见 tests/test_signal_labels.py。
+        # score_candidate 是显式字段白名单，enrich 落盘的 signals 不加在这里就会被
+        # 丢掉——2026-08-04 实盘即因此出现「157 只候选、信号标注区块全空」。
         "signals": cand.get("signals") or {},
+    }
+
+
+def _indicator_passthrough(cand: dict) -> dict:
+    """S_shape/ADX 等严格证据列 + 正交因子（流动性/资金流/基本面/板块相位）透传。"""
+    s_shape = cand.get("s_shape") or {}
+    return {
         # S_shape v3.0 有界评分（借鉴 workflow 沙漏模型）
         # v0.50：s_shape 移出分层（仅展示）；v0.51：s_reversal/adx25 同为
         # 严格证据列（#37 阶段 B）——只透传，不进技术分/分层/gate。
-        "s_shape": cand.get("s_shape") or {},
-        "s_star": (cand.get("s_shape") or {}).get("s_star"),
-        "suggestion": (cand.get("s_shape") or {}).get("suggestion"),
+        "s_shape": s_shape,
+        "s_star": s_shape.get("s_star"),
+        "suggestion": s_shape.get("suggestion"),
         "s_reversal": cand.get("s_reversal") or {},
         "adx": cand.get("adx"),
         "adx25": bool(cand.get("adx25")),
@@ -877,8 +986,6 @@ def score_candidate(
         "fund_flow": cand.get("fund_flow") or {},
         "financials": cand.get("financials") or {},
         "sector_phase": cand.get("sector_phase") or {},
-        "fundamental_quality": fq,
-        "resonance_4leg": resonance_4leg,
     }
 
 

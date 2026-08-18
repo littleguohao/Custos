@@ -67,6 +67,204 @@ DIST_WINDMILL_TOP_FRAC = (
 DIST_WINDMILL_VOL_RATIO = 1.5  # 待回测：天量=信号 K 量 ≥ 前20日量**中位数**×此值（v0.62 起中位数，见 :351 附近注释——偶发天量不把基准顶飞）
 
 
+# ============================================================================
+# 逐腿检测器（2026-08-18 从 detect_distribution 内联体抽纯函数，零行为变化；
+# hit/detail 的键与取值逐字保留原逻辑，主函数只剩「逐腿检测 → 汇总 → 组装」）
+# ============================================================================
+
+
+def _pct_chg(close, t: int) -> float:
+    """t 日涨跌幅%（t=0 或前收为 0 → 0.0）。"""
+    return (close[t] / close[t - 1] - 1) * 100 if t >= 1 and close[t - 1] else 0.0
+
+
+def _vol_ratio5(vol, t: int) -> float | None:
+    """量比 = t 日量 / 前 5 日均量（基线为 0 → None）。"""
+    base = vol[max(0, t - 5) : t].mean()
+    return float(vol[t] / base) if base else None
+
+
+def _leg_top_huge_vol_bear(
+    close, open_, vol, n: int, vol_ma20: float, big_bear: float
+) -> dict[str, Any]:
+    """① 顶部天量大阴：近DIST_RECENT根内 大阴 + 天量 + 阴线前加速。"""
+    hit = None
+    for t in range(n - DIST_RECENT, n):
+        if t < DIST_ACCEL_WIN + 1:
+            continue
+        c = _pct_chg(close, t)
+        # 「天量」＝ 量 ≥ 20日均量×DIST_HUGE_VOL_RATIO（与②同一口径，见顶部常量）。
+        # 审计：原先还 or 了 `vol[t] >= vol[t-20:t+1].max()`——该切片**含 t 自身**，
+        # 于是它恒等于"当日是窗口最大量"，即 20 日量新高，完全旁路了 2×MA20 阈值：
+        # 一只均量平稳的票只要今天量比昨天高一点点就算"天量"，配上大阴+加速就被判出货。
+        huge = bool(vol_ma20) and vol[t] >= vol_ma20 * DIST_HUGE_VOL_RATIO
+        accel = (
+            (close[t - 1] / close[t - DIST_ACCEL_WIN] - 1) * 100
+            if close[t - DIST_ACCEL_WIN]
+            else 0.0
+        )
+        if close[t] < open_[t] and c <= -big_bear and huge and accel >= DIST_ACCEL_GAIN:
+            hit = {
+                "bars_ago": n - 1 - t,
+                "change_pct": round(c, 2),
+                "vol_ratio_ma20": round(float(vol[t] / vol_ma20), 3)
+                if vol_ma20
+                else None,
+                "accel_pct": round(accel, 2),
+            }
+            break
+    return {"hit": hit is not None, "detail": hit}
+
+
+def _leg_subhigh_vol_bear(
+    close, high, open_, vol, n: int, vol_ma20: float, long_bear: float
+) -> dict[str, Any]:
+    """② 次高点巨量长阴：前一日缩量创新高/次高 + 当日巨量长阴。"""
+    hit = None
+    for t in range(n - DIST_RECENT, n):
+        if t < 25:
+            continue
+        c = _pct_chg(close, t)
+        prev_new_high = high[t - 1] >= high[max(0, t - 21) : t - 1].max()
+        v5 = _vol_ratio5(vol, t - 1)
+        prev_shrink = v5 is not None and v5 <= DIST_SUBHIGH_SHRINK
+        huge = vol_ma20 and vol[t] >= vol_ma20 * DIST_HUGE_VOL_RATIO
+        if (
+            close[t] < open_[t]
+            and c <= -long_bear
+            and huge
+            and prev_new_high
+            and prev_shrink
+            and v5 is not None  # prev_shrink 已蕴含；显式写出是为了类型收窄
+        ):
+            hit = {
+                "bars_ago": n - 1 - t,
+                "change_pct": round(c, 2),
+                "prev_vol_ratio5": round(float(v5), 3),
+                "vol_ratio_ma20": round(float(vol[t] / vol_ma20), 3),
+            }
+            break
+    return {"hit": hit is not None, "detail": hit}
+
+
+def _leg_stairstep_vol_decline(close, open_, vol, qsx, dks, n: int) -> dict[str, Any]:
+    """③ 阶梯放量跌破趋势线：近DIST_RECENT根内收盘放量跌破 QSX（白线）**或跌破
+    DKS（黄线，平量也判）**，且此前连续≥3根阴线。
+    2026-08-13 补全（25chuhuo 讲师口径）：「平量阴线也算」⇒ 连续阴计数不再
+    要求量能递增（放量/平量分拆计数供回测消融）；「跌破黄线（DKS）也要判」
+    ⇒ 新增 DKS 跌破路径（DKS 是更慢的中期趋势线，跌破它量未必放大）。"""
+    hit = None
+    for t in range(n - DIST_RECENT, n):
+        if t < DIST_STAIR_MIN_BARS + 6:
+            continue
+        vrt = _vol_ratio5(vol, t)
+        broke_qsx = close[t] < qsx[t] and vrt is not None and vrt >= DIST_STAIR_BREAK_VR
+        broke_dks = bool(dks[t] == dks[t] and close[t] < dks[t])  # 黄线跌破（平量也判）
+        # 连续阴线计数（平量阴也算），并拆放量/平量供回测消融
+        cnt = 0
+        cnt_vol_up = 0
+        for k in range(t, max(0, t - 8), -1):
+            if close[k] < open_[k]:
+                cnt += 1
+                vrk = _vol_ratio5(vol, k)
+                if vol[k] >= vol[k - 1] or (vrk is not None and vrk >= 1.0):
+                    cnt_vol_up += 1
+            else:
+                break
+        if (broke_qsx or broke_dks) and cnt >= DIST_STAIR_MIN_BARS:
+            hit = {
+                "bars_ago": n - 1 - t,
+                "consecutive_bears": cnt,
+                "of_which_vol_up": cnt_vol_up,
+                "vol_ratio5": round(vrt, 3) if vrt is not None else None,
+                "below": "qsx" if broke_qsx else "dks",
+            }
+            break
+    return {"hit": hit is not None, "detail": hit}
+
+
+def _leg_double_top_vol_bear(close, high, open_, vol, n: int) -> dict[str, Any]:
+    """④ 双头双巨阴：近窗口内两个相近高点，各自其后≤2根内出现放量阴。"""
+    hit = None
+    w0 = max(0, n - DIST_TOP_WINDOW * 2)
+    peaks = [
+        i
+        for i in range(w0 + 2, n - 2)
+        if high[i] == high[i - 2 : i + 3].max()
+        and float((high[i - 2 : i + 3] == high[i]).sum()) == 1
+    ]
+    if len(peaks) >= 2:
+        p2 = peaks[-1]
+        p1 = max((p for p in peaks[:-1]), key=lambda i: high[i], default=None)
+        if p1 is not None and p2 - p1 >= 3:
+            close_tops = abs(high[p1] / high[p2] - 1) * 100 <= DIST_DOUBLE_TOP_TOL
+
+            def bear_vol_after(p: int) -> bool:
+                for t in range(p + 1, min(n, p + 3)):
+                    vrt = _vol_ratio5(vol, t)
+                    if close[t] < open_[t] and vrt is not None and vrt >= 1.5:
+                        return True
+                return False
+
+            if close_tops and bear_vol_after(p1) and bear_vol_after(p2):
+                hit = {
+                    "peak1_bars_ago": n - 1 - p1,
+                    "peak2_bars_ago": n - 1 - p2,
+                    "tops_gap_pct": round(abs(high[p1] / high[p2] - 1) * 100, 2),
+                }
+    return {"hit": hit is not None, "detail": hit}
+
+
+def _top_seg_stats(close, open_, vol, n: int) -> tuple[list, list, list, list]:
+    """⑤ 的顶部区间分段统计：(阴实体%列表, 阳实体%列表, 阴量列表, 阳量列表)。"""
+    seg = range(n - DIST_TOP_WINDOW, n)
+    bear_bodies = [
+        abs(close[t] / open_[t] - 1) * 100
+        for t in seg
+        if close[t] < open_[t] and open_[t]
+    ]
+    bull_bodies = [
+        abs(close[t] / open_[t] - 1) * 100
+        for t in seg
+        if close[t] > open_[t] and open_[t]
+    ]
+    bear_vols = [vol[t] for t in seg if close[t] < open_[t]]
+    bull_vols = [vol[t] for t in seg if close[t] > open_[t]]
+    return bear_bodies, bull_bodies, bear_vols, bull_vols
+
+
+def _leg_top_green_heavy_red_light(close, high, open_, vol, n: int) -> dict[str, Any]:
+    """⑤ 顶部绿肥红瘦：顶部区间阴线实体均值 > 阳线实体均值 且 阴量 > 阳量。"""
+    near_top = (
+        True if n < 60 else high[-DIST_TOP_WINDOW:].max() >= high[-60:].max() * 0.98
+    )
+    bear_bodies, bull_bodies, bear_vols, bull_vols = _top_seg_stats(
+        close, open_, vol, n
+    )
+    hit = bool(
+        near_top
+        and bear_bodies
+        and bull_bodies
+        and (sum(bear_bodies) / len(bear_bodies) > sum(bull_bodies) / len(bull_bodies))
+        and bear_vols
+        and bull_vols
+        and (sum(bear_vols) / len(bear_vols) > sum(bull_vols) / len(bull_vols))
+    )
+    return {
+        "hit": hit,
+        "detail": {
+            "bear_body_mean_pct": round(sum(bear_bodies) / len(bear_bodies), 3)
+            if bear_bodies
+            else None,
+            "bull_body_mean_pct": round(sum(bull_bodies) / len(bull_bodies), 3)
+            if bull_bodies
+            else None,
+        }
+        if near_top
+        else None,
+    }
+
+
 def detect_distribution(df, code: str = "") -> dict[str, Any]:
     """主力出货五方式（顶部派发，B1 §七.3）：负向因子，用于选股规避/降档。
 
@@ -106,173 +304,22 @@ def detect_distribution(df, code: str = "") -> dict[str, Any]:
     ).to_numpy()  # 2026-08-09 起走 indicators 唯一实现（原内联 EMA×2 同式）
     dks = dks_series(df["close"]).to_numpy()  # 黄线（③ 的 DKS 跌破补判，2026-08-13）
 
-    def chg(t: int) -> float:
-        return (close[t] / close[t - 1] - 1) * 100 if t >= 1 and close[t - 1] else 0.0
-
-    def vr5(t: int) -> float | None:
-        base = vol[max(0, t - 5) : t].mean()
-        return float(vol[t] / base) if base else None
-
+    # 逐腿检测（腿①-⑤为纯函数，同模块上方；⑥ 大风车走 detect_top_windmill 接线）。
+    # 各腿 hit/detail 键值与原内联实现逐字一致。
     sig: dict[str, Any] = {}
-
-    # ① 顶部天量大阴：近DIST_RECENT根内 大阴 + 天量 + 阴线前加速
-    hit1 = None
-    for t in range(n - DIST_RECENT, n):
-        if t < DIST_ACCEL_WIN + 1:
-            continue
-        c = chg(t)
-        # 「天量」＝ 量 ≥ 20日均量×DIST_HUGE_VOL_RATIO（与②同一口径，见顶部常量）。
-        # 审计：原先还 or 了 `vol[t] >= vol[t-20:t+1].max()`——该切片**含 t 自身**，
-        # 于是它恒等于"当日是窗口最大量"，即 20 日量新高，完全旁路了 2×MA20 阈值：
-        # 一只均量平稳的票只要今天量比昨天高一点点就算"天量"，配上大阴+加速就被判出货。
-        huge = bool(vol_ma20) and vol[t] >= vol_ma20 * DIST_HUGE_VOL_RATIO
-        accel = (
-            (close[t - 1] / close[t - DIST_ACCEL_WIN] - 1) * 100
-            if close[t - DIST_ACCEL_WIN]
-            else 0.0
-        )
-        if close[t] < open_[t] and c <= -big_bear and huge and accel >= DIST_ACCEL_GAIN:
-            hit1 = {
-                "bars_ago": n - 1 - t,
-                "change_pct": round(c, 2),
-                "vol_ratio_ma20": round(float(vol[t] / vol_ma20), 3)
-                if vol_ma20
-                else None,
-                "accel_pct": round(accel, 2),
-            }
-            break
-    sig["top_huge_vol_bear"] = {"hit": hit1 is not None, "detail": hit1}
-
-    # ② 次高点巨量长阴：前一日缩量创新高/次高 + 当日巨量长阴
-    hit2 = None
-    for t in range(n - DIST_RECENT, n):
-        if t < 25:
-            continue
-        c = chg(t)
-        prev_new_high = high[t - 1] >= high[max(0, t - 21) : t - 1].max()
-        v5 = vr5(t - 1)
-        prev_shrink = v5 is not None and v5 <= DIST_SUBHIGH_SHRINK
-        huge = vol_ma20 and vol[t] >= vol_ma20 * DIST_HUGE_VOL_RATIO
-        if (
-            close[t] < open_[t]
-            and c <= -long_bear
-            and huge
-            and prev_new_high
-            and prev_shrink
-            and v5 is not None  # prev_shrink 已蕴含；显式写出是为了类型收窄
-        ):
-            hit2 = {
-                "bars_ago": n - 1 - t,
-                "change_pct": round(c, 2),
-                "prev_vol_ratio5": round(float(v5), 3),
-                "vol_ratio_ma20": round(float(vol[t] / vol_ma20), 3),
-            }
-            break
-    sig["subhigh_vol_bear"] = {"hit": hit2 is not None, "detail": hit2}
-
-    # ③ 阶梯放量跌破趋势线：近DIST_RECENT根内收盘放量跌破 QSX（白线）**或跌破
-    #    DKS（黄线，平量也判）**，且此前连续≥3根阴线。
-    #    2026-08-13 补全（25chuhuo 讲师口径）：「平量阴线也算」⇒ 连续阴计数不再
-    #    要求量能递增（放量/平量分拆计数供回测消融）；「跌破黄线（DKS）也要判」
-    #    ⇒ 新增 DKS 跌破路径（DKS 是更慢的中期趋势线，跌破它量未必放大）。
-    hit3 = None
-    for t in range(n - DIST_RECENT, n):
-        if t < DIST_STAIR_MIN_BARS + 6:
-            continue
-        vrt = vr5(t)
-        broke_qsx = close[t] < qsx[t] and vrt is not None and vrt >= DIST_STAIR_BREAK_VR
-        broke_dks = bool(dks[t] == dks[t] and close[t] < dks[t])  # 黄线跌破（平量也判）
-        # 连续阴线计数（平量阴也算），并拆放量/平量供回测消融
-        cnt = 0
-        cnt_vol_up = 0
-        for k in range(t, max(0, t - 8), -1):
-            if close[k] < open_[k]:
-                cnt += 1
-                vrk = vr5(k)
-                if vol[k] >= vol[k - 1] or (vrk is not None and vrk >= 1.0):
-                    cnt_vol_up += 1
-            else:
-                break
-        if (broke_qsx or broke_dks) and cnt >= DIST_STAIR_MIN_BARS:
-            hit3 = {
-                "bars_ago": n - 1 - t,
-                "consecutive_bears": cnt,
-                "of_which_vol_up": cnt_vol_up,
-                "vol_ratio5": round(vrt, 3) if vrt is not None else None,
-                "below": "qsx" if broke_qsx else "dks",
-            }
-            break
-    sig["stairstep_vol_decline"] = {"hit": hit3 is not None, "detail": hit3}
-
-    # ④ 双头双巨阴：近窗口内两个相近高点，各自其后≤2根内出现放量阴
-    hit4 = None
-    w0 = max(0, n - DIST_TOP_WINDOW * 2)
-    peaks = [
-        i
-        for i in range(w0 + 2, n - 2)
-        if high[i] == high[i - 2 : i + 3].max()
-        and float((high[i - 2 : i + 3] == high[i]).sum()) == 1
-    ]
-    if len(peaks) >= 2:
-        p2 = peaks[-1]
-        p1 = max((p for p in peaks[:-1]), key=lambda i: high[i], default=None)
-        if p1 is not None and p2 - p1 >= 3:
-            close_tops = abs(high[p1] / high[p2] - 1) * 100 <= DIST_DOUBLE_TOP_TOL
-
-            def bear_vol_after(p: int) -> bool:
-                for t in range(p + 1, min(n, p + 3)):
-                    vrt = vr5(t)
-                    if close[t] < open_[t] and vrt is not None and vrt >= 1.5:
-                        return True
-                return False
-
-            if close_tops and bear_vol_after(p1) and bear_vol_after(p2):
-                hit4 = {
-                    "peak1_bars_ago": n - 1 - p1,
-                    "peak2_bars_ago": n - 1 - p2,
-                    "tops_gap_pct": round(abs(high[p1] / high[p2] - 1) * 100, 2),
-                }
-    sig["double_top_vol_bear"] = {"hit": hit4 is not None, "detail": hit4}
-
-    # ⑤ 顶部绿肥红瘦：顶部区间阴线实体均值 > 阳线实体均值 且 阴量 > 阳量
-    seg = range(n - DIST_TOP_WINDOW, n)
-    near_top = (
-        True if n < 60 else high[-DIST_TOP_WINDOW:].max() >= high[-60:].max() * 0.98
+    sig["top_huge_vol_bear"] = _leg_top_huge_vol_bear(
+        close, open_, vol, n, vol_ma20, big_bear
     )
-    bear_bodies = [
-        abs(close[t] / open_[t] - 1) * 100
-        for t in seg
-        if close[t] < open_[t] and open_[t]
-    ]
-    bull_bodies = [
-        abs(close[t] / open_[t] - 1) * 100
-        for t in seg
-        if close[t] > open_[t] and open_[t]
-    ]
-    bear_vols = [vol[t] for t in seg if close[t] < open_[t]]
-    bull_vols = [vol[t] for t in seg if close[t] > open_[t]]
-    hit5 = bool(
-        near_top
-        and bear_bodies
-        and bull_bodies
-        and (sum(bear_bodies) / len(bear_bodies) > sum(bull_bodies) / len(bull_bodies))
-        and bear_vols
-        and bull_vols
-        and (sum(bear_vols) / len(bear_vols) > sum(bull_vols) / len(bull_vols))
+    sig["subhigh_vol_bear"] = _leg_subhigh_vol_bear(
+        close, high, open_, vol, n, vol_ma20, long_bear
     )
-    sig["top_green_heavy_red_light"] = {
-        "hit": hit5,
-        "detail": {
-            "bear_body_mean_pct": round(sum(bear_bodies) / len(bear_bodies), 3)
-            if bear_bodies
-            else None,
-            "bull_body_mean_pct": round(sum(bull_bodies) / len(bull_bodies), 3)
-            if bull_bodies
-            else None,
-        }
-        if near_top
-        else None,
-    }
+    sig["stairstep_vol_decline"] = _leg_stairstep_vol_decline(
+        close, open_, vol, qsx, dks, n
+    )
+    sig["double_top_vol_bear"] = _leg_double_top_vol_bear(close, high, open_, vol, n)
+    sig["top_green_heavy_red_light"] = _leg_top_green_heavy_red_light(
+        close, high, open_, vol, n
+    )
 
     # ⑥ 顶部大风车（v0.62 接线，owner 定向 2026-08-15）：高位+长影/宽幅+天量+T+1
     #    不反包确认。此前仅落 confirm_distribution 证据层（v0.54），不进出货信号--

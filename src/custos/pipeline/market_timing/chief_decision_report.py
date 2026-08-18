@@ -24,31 +24,26 @@ def dedupe(xs):
     return list(dict.fromkeys(x for x in xs if x))
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--date", required=True)
-    a = ap.parse_args()
-    mt_path = daily_report_dir(a.date, PLANS) / f"{a.date}_market_timing_score.md"
-    risk_path = DATA / "risk" / f"{a.date}_risk_decision.json"
-    gate_path = DATA / "quality" / f"{a.date}_runtime_gate.json"
-    if not risk_path.exists():
-        raise SystemExit(f"mandatory RiskDecision missing: {risk_path}")
-    mt = mt_path.read_text(encoding="utf-8") if mt_path.exists() else ""
-    risk = load(risk_path, {})
-    holdings = load(DATA / "holdings" / f"{a.date}_holding_review.json", [])
-    sectors = load(DATA / "sectors" / f"{a.date}_sector_state.json", [])
-    gate = load(gate_path, {})
-    # 门控与 RiskDecision 同为强制输入。此前缺失时兜底成 {} ⇒ status=None、
-    # allow_position_increase=None,两个 `== 'blocked'` / `is False` 判定全部落空,
-    # 于是**没有门控的情况下照样输出"允许开新仓"的计划**(审计 A3)。
-    if not isinstance(gate, dict) or not gate:
-        raise SystemExit(f"mandatory runtime_gate missing/corrupt: {gate_path}")
-    b1_rows = load(DATA / "holdings" / f"{a.date}_b1_holding_state.json", [])
+def _load_inputs(date):
+    """读取全部输入文件（强制校验留在 main —— 源码守卫钉在 main 上）。
+
+    模块级常量 DATA/PLANS 必须**运行时**读取（monkeypatch 通道），
+    不得在函数默认值里捕获。
+    """
+    mt_path = daily_report_dir(date, PLANS) / f"{date}_market_timing_score.md"
+    return {
+        "mt": mt_path.read_text(encoding="utf-8") if mt_path.exists() else "",
+        "risk": load(DATA / "risk" / f"{date}_risk_decision.json", {}),
+        "holdings": load(DATA / "holdings" / f"{date}_holding_review.json", []),
+        "sectors": load(DATA / "sectors" / f"{date}_sector_state.json", []),
+        "gate": load(DATA / "quality" / f"{date}_runtime_gate.json", {}),
+        "b1_rows": load(DATA / "holdings" / f"{date}_b1_holding_state.json", []),
+    }
+
+
+def _resolve_holding_actions(holdings, risk, b1_rows, gate):
+    """持仓处置裁决段：B1 基线 + 高优先风险覆盖 + 技术陈旧挂起，按优先级排序。"""
     b1_by_code = {bare(x.get("code")): x for x in b1_rows}
-    state = extract(r"状态：\*\*(.*?)\*\*", mt, "未知")
-    score = extract(r"择时评分：\*\*(.*?)\*\*", mt, "待确认")
-    position = extract(r"建议总仓位：\*\*(.*?)\*\*", mt, "待确认")
-    permission = extract(r"今日是否允许开新仓：\*\*(.*?)\*\*", mt, "原则不允许")
     risk_by_code = {}
     for x in risk.get("stock_risks", []):
         risk_by_code.setdefault(bare(x.get("code")), []).append(x)
@@ -104,40 +99,27 @@ def main():
             }
         )
     holding_actions.sort(key=lambda x: (x["priority"], x["code"]))
-    buy_actions = []
-    # Candidate discovery disabled in pure-script mode; buy_actions always empty
-    market_quality_status = gate.get("market_quality", {}).get("status")
-    position_gate = gate.get("position_gate", {})
-    effective_risk = risk.get("risk_level", "提高")
-    # 未知状态(None/拼错)按 blocked 处理:门控读不出结论时不得给出开仓权限
-    if risk.get("risk_level") == "强风控" or market_quality_status not in {
-        "pass",
-        "degraded",
-    }:
-        permission = "禁止"
-        effective_risk = "强风控"
-    elif market_quality_status == "degraded" and effective_risk == "普通":
-        effective_risk = "提高"
-    # 真值判断:None(字段缺失/门控未算出)必须与 False 同等对待——未获授权 ≠ 已获授权
-    if not position_gate.get("allow_position_increase"):
-        permission = "禁止" if permission == "禁止" else "仅观察，不得加仓"
-    allowed = ["处理P1/P2风险持仓", "观察支持交易的主线和A/B池条件"]
-    forbidden = dedupe(
-        risk.get("forbidden_actions", [])
-        + ["无计划追高", "因J值低直接补仓", "绕过risk_control开仓"]
-    )
-    if market_quality_status not in {"pass", "degraded"}:
-        forbidden.append(f"市场数据质量={market_quality_status!r} 时新开仓")
-    if not position_gate.get("allow_position_increase"):
-        forbidden.append(
-            "持仓快照、目标日技术行情或市场质量未全部通过时加仓或输出精确交易数量"
-        )
-    deterministic_sectors = [
-        x.get("sector") for x in sectors if x.get("trade_permission") == "支持"
-    ]
-    main_sectors = dedupe(deterministic_sectors)[:3]
-    decision = {
-        "date": a.date,
+    return holding_actions
+
+
+def _build_decision(
+    date,
+    state,
+    score,
+    position,
+    permission,
+    effective_risk,
+    gate,
+    position_gate,
+    allowed,
+    forbidden,
+    holding_actions,
+    buy_actions,
+    main_sectors,
+):
+    """组装 ChiefDecision JSON（键集合被消费方钉住，不得增删改名）。"""
+    return {
+        "date": date,
         "market_state": state,
         "market_score": score,
         "total_position_range": position,
@@ -158,24 +140,29 @@ def main():
         ],
         "risk_notice": "RiskDecision为强制输入；B1持仓状态只可在硬风险优先级下裁决；任何上游证据均不得提高交易权限或覆盖风险否决。",
         "sources": {
-            "risk_decision": str(risk_path),
+            "risk_decision": str(DATA / "risk" / f"{date}_risk_decision.json"),
             "b1_holding_state": str(
-                DATA / "holdings" / f"{a.date}_b1_holding_state.json"
+                DATA / "holdings" / f"{date}_b1_holding_state.json"
             ),
-            "runtime_gate": str(DATA / "quality" / f"{a.date}_runtime_gate.json"),
+            "runtime_gate": str(DATA / "quality" / f"{date}_runtime_gate.json"),
         },
     }
-    # ⚠️ 落盘前强制校验：这是**最终交易计划**，开仓权限与持仓处理优先级在此定稿。
-    require("chief_decision", decision)
-    out_json = DATA / "decisions" / f"{a.date}_chief_decision.json"
-    out_json.parent.mkdir(parents=True, exist_ok=True)
-    out_json.write_text(
-        json.dumps(decision, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+
+
+def _render_markdown(date, decision, holding_actions, out_json):
+    """渲染节段：8 节结构与措辞被消费方钉住。"""
+    state = decision["market_state"]
+    score = decision["market_score"]
+    position = decision["total_position_range"]
+    permission = decision["new_position_permission"]
+    allowed = decision["allowed_actions"]
+    forbidden = decision["forbidden_actions"]
+    buy_actions = decision["buy_actions"]
+    main_sectors = decision["watchlist"]
     lines = [
         "# chief_decision 每日总控交易计划",
         "",
-        f"日期：{a.date}",
+        f"日期：{date}",
         "",
         "## 1. 总控结论",
         "",
@@ -225,10 +212,94 @@ def main():
             "- 本计划是策略辅助，不构成收益承诺。",
         ]
     )
+    return "\n".join(lines)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--date", required=True)
+    a = ap.parse_args()
+    risk_path = DATA / "risk" / f"{a.date}_risk_decision.json"
+    gate_path = DATA / "quality" / f"{a.date}_runtime_gate.json"
+    if not risk_path.exists():
+        raise SystemExit(f"mandatory RiskDecision missing: {risk_path}")
+    inputs = _load_inputs(a.date)
+    mt = inputs["mt"]
+    risk = inputs["risk"]
+    sectors = inputs["sectors"]
+    gate = inputs["gate"]
+    # 门控与 RiskDecision 同为强制输入。此前缺失时兜底成 {} ⇒ status=None、
+    # allow_position_increase=None,两个 `== 'blocked'` / `is False` 判定全部落空,
+    # 于是**没有门控的情况下照样输出"允许开新仓"的计划**(审计 A3)。
+    if not isinstance(gate, dict) or not gate:
+        raise SystemExit(f"mandatory runtime_gate missing/corrupt: {gate_path}")
+    state = extract(r"状态：\*\*(.*?)\*\*", mt, "未知")
+    score = extract(r"择时评分：\*\*(.*?)\*\*", mt, "待确认")
+    position = extract(r"建议总仓位：\*\*(.*?)\*\*", mt, "待确认")
+    permission = extract(r"今日是否允许开新仓：\*\*(.*?)\*\*", mt, "原则不允许")
+    holding_actions = _resolve_holding_actions(
+        inputs["holdings"], risk, inputs["b1_rows"], gate
+    )
+    buy_actions = []
+    # Candidate discovery disabled in pure-script mode; buy_actions always empty
+    market_quality_status = gate.get("market_quality", {}).get("status")
+    position_gate = gate.get("position_gate", {})
+    effective_risk = risk.get("risk_level", "提高")
+    # 未知状态(None/拼错)按 blocked 处理:门控读不出结论时不得给出开仓权限
+    if risk.get("risk_level") == "强风控" or market_quality_status not in {
+        "pass",
+        "degraded",
+    }:
+        permission = "禁止"
+        effective_risk = "强风控"
+    elif market_quality_status == "degraded" and effective_risk == "普通":
+        effective_risk = "提高"
+    # 真值判断:None(字段缺失/门控未算出)必须与 False 同等对待——未获授权 ≠ 已获授权
+    if not position_gate.get("allow_position_increase"):
+        permission = "禁止" if permission == "禁止" else "仅观察，不得加仓"
+    allowed = ["处理P1/P2风险持仓", "观察支持交易的主线和A/B池条件"]
+    forbidden = dedupe(
+        risk.get("forbidden_actions", [])
+        + ["无计划追高", "因J值低直接补仓", "绕过risk_control开仓"]
+    )
+    if market_quality_status not in {"pass", "degraded"}:
+        forbidden.append(f"市场数据质量={market_quality_status!r} 时新开仓")
+    if not position_gate.get("allow_position_increase"):
+        forbidden.append(
+            "持仓快照、目标日技术行情或市场质量未全部通过时加仓或输出精确交易数量"
+        )
+    deterministic_sectors = [
+        x.get("sector") for x in sectors if x.get("trade_permission") == "支持"
+    ]
+    main_sectors = dedupe(deterministic_sectors)[:3]
+    decision = _build_decision(
+        a.date,
+        state,
+        score,
+        position,
+        permission,
+        effective_risk,
+        gate,
+        position_gate,
+        allowed,
+        forbidden,
+        holding_actions,
+        buy_actions,
+        main_sectors,
+    )
+    # ⚠️ 落盘前强制校验：这是**最终交易计划**，开仓权限与持仓处理优先级在此定稿。
+    require("chief_decision", decision)
+    out_json = DATA / "decisions" / f"{a.date}_chief_decision.json"
+    out_json.parent.mkdir(parents=True, exist_ok=True)
+    out_json.write_text(
+        json.dumps(decision, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     out_dir = daily_report_dir(a.date, PLANS)
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"{a.date}_chief_decision.md"
-    out.write_text("\n".join(lines), encoding="utf-8")
+    out.write_text(
+        _render_markdown(a.date, decision, holding_actions, out_json), encoding="utf-8"
+    )
     print(out)
     print(out_json)
 

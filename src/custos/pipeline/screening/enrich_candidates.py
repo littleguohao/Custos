@@ -1244,13 +1244,8 @@ def fund_flow_of(code6: str, sector_name: str, ff: dict) -> dict[str, Any]:
     }
 
 
-def compute_metrics(df, index_df, code: str = "", df_long=None) -> dict[str, Any]:
-    """对单股日线 DataFrame 计算全部指标与模式标签（确定性）。
-
-    ``df_long``（可选）：更长历史的日线（live 链传 count=1200），仅供
-    check_macd_technics 的周/月红柱腿（EMA26 需 ≥40 根月线，260 根日线不够）。
-    不传则用 df 自身，月线根数不足时 wm_available=False 如实标注。
-    """
+def _base_scalars(df, index_df) -> dict[str, Any]:
+    """基础标量块：价/涨跌/振幅/BBI/日J/量能/20日相对强度/止损位及派生布尔。"""
     close = df["close"]
     bbi = bbi_state(df)
     j = kdj(df)
@@ -1298,7 +1293,36 @@ def compute_metrics(df, index_df, code: str = "", df_long=None) -> dict[str, Any
         and amplitude_pct is not None
         and amplitude_pct <= REVERSAL_AMPLITUDE_PCT
     )
-    rs_strong = rs_20d is not None and rs_20d >= RS_STRONG_PP
+    return {
+        "last": last,
+        "bbi": bbi,
+        "j": j,
+        "change_pct": change_pct,
+        "amplitude_pct": amplitude_pct,
+        "daily_j": daily_j,
+        "j_low": j_low,
+        "vol_ratio": vol_ratio,
+        "vol_pctile": vol_pctile,
+        "vol_contraction": vol_contraction,
+        "reversal_k": reversal_k,
+        "stock_ret20": stock_ret20,
+        "index_ret20": index_ret20,
+        "rs_20d": rs_20d,
+        "rs_strong": rs_20d is not None and rs_20d >= RS_STRONG_PP,
+        "stop_ref": stop_ref,
+    }
+
+
+def _evidence_states(
+    df, index_df, code: str, df_long, base: dict[str, Any]
+) -> dict[str, Any]:
+    """证据块：知行量价/出货与底部形态/MACD 十大技术/信号标注/ADX。
+
+    只计算、不组装；返回的中间态由 _assemble_metrics 摊进候选字段。
+    """
+    daily_j = base["daily_j"]
+    j_low = base["j_low"]
+    reversal_k = base["reversal_k"]
 
     # --- 知行量价（good_b1）与出货识别（出货五方式）---
     zx = zhixing_state(df)
@@ -1362,6 +1386,44 @@ def compute_metrics(df, index_df, code: str = "", df_long=None) -> dict[str, Any
     adx25 = bool(j_low and adx_last is not None and adx_last >= 25)
 
     return {
+        "zx": zx,
+        "ignition": ignition,
+        "pullback_shrink": pullback_shrink,
+        "ride_above_fast": ride_above_fast,
+        "zx_recent_gold": zx_recent_gold,
+        "b1_ignition_hit": b1_ignition_hit,
+        "distribution": distribution,
+        "distribution_confirm": distribution_confirm,
+        "w_bottom": w_bottom,
+        "red_fat_green_thin": red_fat_green_thin,
+        "macd_technics": macd_technics,
+        "weekly": _wk,
+        "signals": signals,
+        "adx_last": adx_last,
+        "adx25": adx25,
+    }
+
+
+def _assemble_metrics(
+    df, index_df, code: str, base: dict[str, Any], ev: dict[str, Any]
+) -> dict[str, Any]:
+    """组装 compute_metrics 的返回 dict（键集合/顺序为落盘契约，勿动）。"""
+    last = base["last"]
+    bbi = base["bbi"]
+    daily_j = base["daily_j"]
+    change_pct = base["change_pct"]
+    amplitude_pct = base["amplitude_pct"]
+    vol_ratio = base["vol_ratio"]
+    vol_pctile = base["vol_pctile"]
+    stock_ret20 = base["stock_ret20"]
+    index_ret20 = base["index_ret20"]
+    rs_20d = base["rs_20d"]
+    stop_ref = base["stop_ref"]
+    zx = ev["zx"]
+    pullback_shrink = ev["pullback_shrink"]
+    macd_technics = ev["macd_technics"]
+    _wk = ev["weekly"]
+    return {
         "close": round(float(last["close"]), 4),
         "change_pct": round(change_pct, 2) if change_pct is not None else None,
         "amplitude_pct": round(amplitude_pct, 2) if amplitude_pct is not None else None,
@@ -1378,18 +1440,18 @@ def compute_metrics(df, index_df, code: str = "", df_long=None) -> dict[str, Any
         else None,
         "patterns": {
             "bbi_above": bool(bbi.get("available") and bbi.get("close_above")),
-            "j_low": bool(j_low),
-            "volume_contraction": bool(vol_contraction),
-            "reversal_k_candidate": reversal_k,
-            "relative_strength_strong": bool(rs_strong),
+            "j_low": bool(base["j_low"]),
+            "volume_contraction": bool(base["vol_contraction"]),
+            "reversal_k_candidate": base["reversal_k"],
+            "relative_strength_strong": bool(base["rs_strong"]),
         },
         # --- B1/CZ 策略对齐（阈值均为待回测参数，实际值随候选落盘） ---
         "wave": detect_wave_type(df),
         # 只摊 weekly_ 前缀键：裸 available 会落到候选顶层被误读成"候选可用"（审计）
         **{k: v for k, v in _wk.items() if k.startswith("weekly_")},
-        "signals": signals,
+        "signals": ev["signals"],
         "non_one_wave": check_non_one_wave(df),
-        "repair_signals": check_repair_signals(df, index_df, kdj_state=j),
+        "repair_signals": check_repair_signals(df, index_df, kdj_state=base["j"]),
         "five_day_entry": check_five_day_entry(df),
         "volume_sustain": check_volume_sustain(df),
         "leader_volume": check_leader_volume(df),
@@ -1397,18 +1459,18 @@ def compute_metrics(df, index_df, code: str = "", df_long=None) -> dict[str, Any
         "bottom_volume": check_bottom_volume(df),
         # --- 知行量价 + 出货识别（good_b1 / 出货五方式，阈值待回测，实际值落盘） ---
         "zhixing": zx,
-        "ignition": ignition,
+        "ignition": ev["ignition"],
         "pullback_shrink": pullback_shrink,
-        "ride_above_fast": ride_above_fast,
+        "ride_above_fast": ev["ride_above_fast"],
         "b1_ignition": {
-            "hit": b1_ignition_hit,
-            "zhixing_recent_golden": zx_recent_gold,
+            "hit": ev["b1_ignition_hit"],
+            "zhixing_recent_golden": ev["zx_recent_gold"],
         },
-        "distribution": distribution,
-        "distribution_confirm": distribution_confirm,
+        "distribution": ev["distribution"],
+        "distribution_confirm": ev["distribution_confirm"],
         # v0.56 底部侧证据列（25chuhuo）：W 底 / 红肥绿瘦——只落盘展示，不进分层
-        "w_bottom": w_bottom,
-        "red_fat_green_thin": red_fat_green_thin,
+        "w_bottom": ev["w_bottom"],
+        "red_fat_green_thin": ev["red_fat_green_thin"],
         "macd_technics": macd_technics,
         "perfect_b1_fit": compute_perfect_b1_fit(
             df, daily_j, zx, pullback_shrink, macd_state=macd_technics
@@ -1431,8 +1493,8 @@ def compute_metrics(df, index_df, code: str = "", df_long=None) -> dict[str, Any
         "s_reversal": s_shape_mod.compute_s_reversal(df, code),
         # v0.51（#37 阶段 B）：adx25 证据列（R2 三窗全改善的入场过滤，
         # 证据层观察一季）。adx 数值一并落盘供展示。
-        "adx": adx_last,
-        "adx25": adx25,
+        "adx": ev["adx_last"],
+        "adx25": ev["adx25"],
         # v0.58（2026-08-14，owner）：近 10 日阳量/阴量总量对比——技术分的
         # 加/减分项（阳量>阴量 +5 / 阴量>阳量 −5）。中性窗口，不带底部位置语义。
         "volume_yy": bull_bear_volume(df),
@@ -1442,22 +1504,29 @@ def compute_metrics(df, index_df, code: str = "", df_long=None) -> dict[str, Any
     }
 
 
-def enrich(
-    date: str,
-    hits_data: Optional[dict] = None,
-    ohlcv_loader=None,
-    index_loader=None,
-    universe_cfg: Optional[dict] = None,
-    theme_min_match: Optional[int] = None,
-    fund_flow_days: int = 1,
-    financials_cfg: Optional[dict] = None,
-    sector_phase_cfg: Optional[dict] = None,
-) -> dict:
-    """充实命中股。loader 可注入以便测试；所有失败结构化落盘，绝不 raise。"""
-    hits_data = hits_data if hits_data is not None else load_hits(date)
-    cfg = universe_cfg or {}
-    min_list_days = int(cfg.get("min_list_days", 60))
+def compute_metrics(df, index_df, code: str = "", df_long=None) -> dict[str, Any]:
+    """对单股日线 DataFrame 计算全部指标与模式标签（确定性）。
 
+    ``df_long``（可选）：更长历史的日线（live 链传 count=1200），仅供
+    check_macd_technics 的周/月红柱腿（EMA26 需 ≥40 根月线，260 根日线不够）。
+    不传则用 df 自身，月线根数不足时 wm_available=False 如实标注。
+
+    实现分三段：``_base_scalars``（基础标量）→ ``_evidence_states``（证据块）
+    → ``_assemble_metrics``（组装落盘 dict）。
+    """
+    base = _base_scalars(df, index_df)
+    ev = _evidence_states(df, index_df, code, df_long, base)
+    return _assemble_metrics(df, index_df, code, base, ev)
+
+
+def _init_enrich_result(
+    date: str, hits_data: dict, cfg: dict
+) -> tuple[dict, bool, bool, bool]:
+    """初始化 result 骨架 + hits 可用性/日期一致性/ST 过滤门控。
+
+    返回 (result, ready, exclude_st, st_filter_broken)；ready=False 时
+    enrich 直接返回 result（命中清单不可用）。
+    """
     result: dict[str, Any] = {
         "date": date,
         "status": "ok",
@@ -1474,7 +1543,7 @@ def enrich(
         result["degraded_reason"] = (
             f"formula_hits_unavailable:{(hits_data or {}).get('degraded_reason', 'missing')}"
         )
-        return result
+        return result, False, False, False
 
     # 数据源当日一致性：formula_hits（TQ 在线公式评估）与本段（本地 vipdoc 日线）是两个
     # 独立来源。若命中清单不是当日产出（喂了旧文件/TQ 落后），标注 partial；无论如何，
@@ -1506,8 +1575,11 @@ def enrich(
             result["degraded_reason"],
             f"st_filter_unavailable:{st_filter}(名称表不可用 → 无名候选按 st_unverified 剔除)",
         )
+    return result, True, exclude_st, st_filter_broken
 
-    # 去重合并：code → {name, formula_ids}
+
+def _merge_hits(hits_data: dict) -> dict[str, dict]:
+    """去重合并：code → {name, formula_ids}。"""
     merged: dict[str, dict] = {}
     for f in hits_data.get("formulas", []):
         for h in f.get("hits", []):
@@ -1521,10 +1593,27 @@ def enrich(
                 entry["name"] = h["name"]
             if f.get("id") and f["id"] not in entry["formula_hits"]:
                 entry["formula_hits"].append(f["id"])
+    return merged
 
-    risk_high = load_risk_high_codes(date)
-    holding = load_holding_codes()
-    fund_flow = load_fund_flow(date, cumulative_days=fund_flow_days)
+
+def _load_enrich_context(
+    date: str,
+    merged: dict,
+    result: dict,
+    theme_min_match: Optional[int],
+    fund_flow_days: int,
+    financials_cfg: Optional[dict],
+    sector_phase_cfg: Optional[dict],
+) -> dict[str, Any]:
+    """批次级上下文：风险名单/持仓/资金流/财务/板块相位/主题图/行业图。
+
+    主题图不可用时把 result 降级 partial 并留痕（就地改 result）。
+    """
+    ctx: dict[str, Any] = {
+        "risk_high": load_risk_high_codes(date),
+        "holding": load_holding_codes(),
+        "fund_flow": load_fund_flow(date, cumulative_days=fund_flow_days),
+    }
     fin_cfg = financials_cfg or {}
     fin_enabled = bool(fin_cfg.get("enabled"))
     fin_df = (
@@ -1537,6 +1626,9 @@ def enrich(
         _cm = financials_mod.auto_colmap(getattr(fin_df, "columns", []))
         _cm.update(fin_colmap)  # 显式 registry.columns 按字段覆盖自动识别
         fin_colmap = _cm
+    ctx["fin_enabled"] = fin_enabled
+    ctx["fin_df"] = fin_df
+    ctx["fin_colmap"] = fin_colmap
     # 板块相位(hint,不封顶)：best-effort 构建 resolver；数据缺失则跳过
     sp_cfg = sector_phase_cfg or {}
     sp_resolve = None
@@ -1552,6 +1644,7 @@ def enrich(
                     sp_resolve = sector_phase_mod.build_phase_resolver(idir, members)
         except Exception:  # noqa: BLE001
             sp_resolve = None
+    ctx["sp_resolve"] = sp_resolve
     # 只为本批候选建主题图（全市场四层子串匹配纯浪费，见 build_stock_theme_map）。
     # codes 关键字用 signature 探测后再传：既有测试把 build_stock_theme_map
     # monkeypatch 成 `lambda min_match=None: ...`，硬传会 TypeError 打挂整段。
@@ -1569,25 +1662,29 @@ def enrich(
         result["degraded_reason"] = _append_reason(
             result["degraded_reason"], "sector_map_unavailable"
         )
+    ctx["stock_theme"] = stock_theme
     # 每股官方细分行业（881xxx，展示层「板块」列；与主题族聚合层并存，取不到全"未知"）
-    stock_industry = build_stock_industry_map()
+    ctx["stock_industry"] = build_stock_industry_map()
+    return ctx
 
-    load_ohlcv = ohlcv_loader or (
-        lambda c: local_tdx_data.get_ohlcv_table(c, count=OHLCV_LOAD_BARS)
-    )
+
+def _load_index_frame(index_loader, date: str, result: dict):
+    """加载并校验上证指数日线（就地写 result 的 index_status/index_code/降级痕迹）。
+
+    指数序列与个股同等对待：**必须排序 + 必须当日**（审计 B7）。
+    此前指数只有一个裸 try/except：
+      1) 加载失败 → index_df=None，rs_20d/rs_turn 整列静默变 None/False，
+         relative_strength_strong 一律不命中，报告里看不出"相对强度这维今天是废的"；
+      2) 无 last_date==date 校验 → 指数停在 T-1（vipdoc 未更新/节前抓的旧文件）时，
+         拿 T-1 的指数 20 日涨幅去减当日个股 20 日涨幅＝**错窗口相减**，rs 偏差直接
+         喂给 rs_strong 与 capital_intent，比没有更危险；
+      3) 无 sort_values → mootdx Reader 不保证顺序，iloc[-1] 可能取到中间某天。
+    现在：坏/旧的指数一律降级为"不可用"（rs 置 None，不做错窗口相减），并把原因写进
+    index_status + degraded_reason，让下游能归因。
+    """
     load_index = index_loader or (
         lambda: local_tdx_data.get_ohlcv_table(INDEX_CODE, count=OHLCV_LOAD_BARS)
     )
-    # 指数序列与个股同等对待：**必须排序 + 必须当日**（审计 B7）。
-    # 此前指数只有一个裸 try/except：
-    #   1) 加载失败 → index_df=None，rs_20d/rs_turn 整列静默变 None/False，
-    #      relative_strength_strong 一律不命中，报告里看不出"相对强度这维今天是废的"；
-    #   2) 无 last_date==date 校验 → 指数停在 T-1（vipdoc 未更新/节前抓的旧文件）时，
-    #      拿 T-1 的指数 20 日涨幅去减当日个股 20 日涨幅＝**错窗口相减**，rs 偏差直接
-    #      喂给 rs_strong 与 capital_intent，比没有更危险；
-    #   3) 无 sort_values → mootdx Reader 不保证顺序，iloc[-1] 可能取到中间某天。
-    # 现在：坏/旧的指数一律降级为"不可用"（rs 置 None，不做错窗口相减），并把原因写进
-    # index_status + degraded_reason，让下游能归因。
     index_status = "ok"
     try:
         index_df = load_index()
@@ -1614,80 +1711,222 @@ def enrich(
             result["degraded_reason"],
             f"{index_status}(上证指数不可用/非当日 → 20日相对强度整列置空，不做错窗口相减)",
         )
+    return index_df
+
+
+def _precheck_exclusion(
+    code6: str,
+    name: str,
+    cfg: dict,
+    exclude_st: bool,
+    st_filter_broken: bool,
+    risk_high: set,
+) -> Optional[str]:
+    """加载 K 线前的硬排除（BJ/A股白名单/ST/风险名单）；返回剔除原因或 None。"""
+    if code6.startswith(_BJ_PREFIX):
+        # BJ 有独立开关（可配置放开），单列一类，不与 not_a_share 混同
+        if cfg.get("exclude_bj", True):
+            return "exclude_bj"
+    elif not _A_SHARE_RE.match(code6):
+        return "not_a_share"  # ETF/可转债/B股/指数：不是可买个股（审计 B10）
+    if exclude_st:
+        if "ST" in name.upper():
+            return "st_stock"
+        if st_filter_broken and not name.strip():
+            # fail-closed：名称表挂了就无法证明这只票不是 ST，宁可漏也不能错放（审计 B5）
+            return "st_unverified:name_map_unavailable"
+    if code6 in risk_high:
+        return "risk_high_priority"
+    return None
+
+
+def _load_stock_frames(
+    code6: str, date: str, min_list_days: int, load_ohlcv, live_long: bool
+) -> tuple[Any, Any, Optional[str], Optional[str]]:
+    """加载并校验个股日线（+live 长历史）。返回 (df, df_long, last_date, 剔除原因)。
+
+    需剔除时前三者为 None；否则剔除原因为 None。
+    """
+    try:
+        df = load_ohlcv(code6)
+    except Exception:  # noqa: BLE001
+        df = None
+    if df is None or df.empty:
+        return None, None, None, "no_local_kline"
+    df = df.sort_values("date").reset_index(drop=True)
+    last_date = str(df["date"].iloc[-1])[:10]
+    if last_date != date:
+        return (
+            None,
+            None,
+            None,
+            f"no_today_bar:last={last_date}",
+        )  # 停牌或本地数据未更新
+    if len(df) < min_list_days:
+        return None, None, None, f"list_days<{min_list_days}"
+
+    # 周/月 MACD 腿的长历史（仅 live 默认加载路径；注入 loader 的测试/研究
+    # 路径不加载，check_macd_technics 退回 df 自身并如实标 wm_available）。
+    df_long = None
+    if live_long:
+        try:
+            df_long = local_tdx_data.get_ohlcv_table(code6, count=OHLCV_LOAD_BARS_LONG)
+            if df_long is not None and not df_long.empty:
+                df_long = df_long.sort_values("date").reset_index(drop=True)
+            else:
+                df_long = None
+        except Exception:  # noqa: BLE001 —— 长历史加载失败不阻塞（月线腿降级）
+            df_long = None
+    return df, df_long, last_date, None
+
+
+def _compute_one_metrics(code6: str, df, index_df, df_long):
+    """单股指标计算；单股坏数据不中断批次。返回 (metrics, 剔除原因)。"""
+    try:
+        # df_long 为 None 时不传参——旧签名调用（测试/研究对 compute_metrics
+        # 的 monkeypatch 替身没有 df_long 形参，多传会 TypeError 误杀候选）
+        if df_long is not None:
+            return compute_metrics(df, index_df, code=code6, df_long=df_long), None
+        return compute_metrics(df, index_df, code=code6), None
+    except Exception as exc:  # noqa: BLE001
+        return None, f"metrics_error:{type(exc).__name__}:{str(exc)[:80]}"
+
+
+def _apply_j_gate(cand: dict, result: dict, cfg: dict) -> bool:
+    """J<13 硬门槛（2026-07-22 用户决策）：全通道候选（公式与自选池一视同仁）
+    必须先满足日 J<13，再谈完美图形贴合度；J 不可计算视同不满足。
+
+    被挡时写 excluded（异动强的先入 watchlist_outside_gate）并返回 True。
+    """
+    if not cfg.get("j_low_required", J_GATE_REQUIRED_DEFAULT):
+        return False
+    dj = cand.get("daily_j")
+    if j_below_threshold(dj):
+        return False
+    # 门槛外观察区（v0.51，#37 阶段 B，owner 批准）：J<13 硬门槛**不动**
+    # （R1 框架），被挡但**异动强**的票落观察区展示。初版判据 =
+    # 底部巨量（bottom_volume.hit）或放量点火（ignition.hit）——
+    # 两个已算好的现成字段，不求完备，先观察一季再校准。
+    if (cand.get("bottom_volume") or {}).get("hit") or (cand.get("ignition") or {}).get(
+        "hit"
+    ):
+        result["watchlist_outside_gate"].append(
+            {
+                "code": cand["code"],
+                "name": cand["name"],
+                "daily_j": dj,
+                "change_pct": cand.get("change_pct"),
+                "bottom_volume": cand.get("bottom_volume"),
+                "ignition": cand.get("ignition"),
+                "formula_hits": cand.get("formula_hits"),
+                "gate_reason": f"j_not_low:j={dj}",
+            }
+        )
+    result["excluded"].append(
+        {"code": cand["code"], "name": cand["name"], "reason": f"j_not_low:j={dj}"}
+    )
+    return True
+
+
+def _apply_post_metrics(cand: dict, code6: str, df, ctx: dict) -> None:
+    """主题/行业/资金流/板块相位/平台回踩/财务 充实字段（就地写入 cand）。"""
+    theme = ctx["stock_theme"].get(code6)
+    if theme:
+        cand["theme_id"] = theme["theme_id"]
+        cand["sector"] = theme["sector"]
+        cand["sector_source"] = theme.get("sector_source", "")
+    else:
+        cand["theme_id"] = ""
+        cand["sector"] = "未知"
+        cand["sector_source"] = ""
+    cand["industry"] = ctx["stock_industry"].get(code6, "未知")
+    cand["fund_flow"] = fund_flow_of(code6, cand["sector"], ctx["fund_flow"])
+    sp_resolve = ctx["sp_resolve"]
+    if sp_resolve is not None:
+        cand["sector_phase"] = sp_resolve(code6)  # 板块相位 hint(不封顶,证据层)
+    try:  # 平台突破回踩形态(证据层,不驱动分层)
+        from custos.core.factors.platform_pullback import detect_platform_pullback  # noqa: PLC0415
+
+        pp = detect_platform_pullback(df)
+        if pp:
+            cand["platform_pullback"] = (
+                pp  # {platform_high, breakout_date, pullback_low, ...}
+            )
+    except Exception:  # noqa: BLE001
+        pass
+    if ctx["fin_enabled"] and ctx["fin_colmap"]:
+        # 财务维度(CZ抄底代理)：最佳努力落盘证据层，不驱动分层
+        cand["financials"] = financials_mod.financial_factor(
+            code6, ctx["fin_df"], ctx["fin_colmap"], price=cand.get("close")
+        )
+
+
+def enrich(
+    date: str,
+    hits_data: Optional[dict] = None,
+    ohlcv_loader=None,
+    index_loader=None,
+    universe_cfg: Optional[dict] = None,
+    theme_min_match: Optional[int] = None,
+    fund_flow_days: int = 1,
+    financials_cfg: Optional[dict] = None,
+    sector_phase_cfg: Optional[dict] = None,
+) -> dict:
+    """充实命中股。loader 可注入以便测试；所有失败结构化落盘，绝不 raise。
+
+    流程：``_init_enrich_result``（门控）→ ``_merge_hits``（去重）→
+    ``_load_enrich_context``（批次上下文）→ ``_load_index_frame``（指数）→
+    逐票（``_precheck_exclusion`` → ``_load_stock_frames`` →
+    ``_compute_one_metrics`` → ``_apply_j_gate`` → ``_apply_post_metrics``）。
+    """
+    hits_data = hits_data if hits_data is not None else load_hits(date)
+    cfg = universe_cfg or {}
+    min_list_days = int(cfg.get("min_list_days", 60))
+
+    result, ready, exclude_st, st_filter_broken = _init_enrich_result(
+        date, hits_data, cfg
+    )
+    if not ready:
+        return result
+
+    merged = _merge_hits(hits_data)
+    ctx = _load_enrich_context(
+        date,
+        merged,
+        result,
+        theme_min_match,
+        fund_flow_days,
+        financials_cfg,
+        sector_phase_cfg,
+    )
+
+    load_ohlcv = ohlcv_loader or (
+        lambda c: local_tdx_data.get_ohlcv_table(c, count=OHLCV_LOAD_BARS)
+    )
+    index_df = _load_index_frame(index_loader, date, result)
 
     for code6 in sorted(merged):
         item = merged[code6]
         name = item["name"]
 
-        def exclude(reason: str) -> None:
+        reason = _precheck_exclusion(
+            code6, name, cfg, exclude_st, st_filter_broken, ctx["risk_high"]
+        )
+        if reason is None:
+            df, df_long, last_date, reason = _load_stock_frames(
+                code6, date, min_list_days, load_ohlcv, live_long=ohlcv_loader is None
+            )
+        if reason is None:
+            metrics, reason = _compute_one_metrics(code6, df, index_df, df_long)
+        if reason is not None:
             result["excluded"].append({"code": code6, "name": name, "reason": reason})
-
-        if code6.startswith(_BJ_PREFIX):
-            # BJ 有独立开关（可配置放开），单列一类，不与 not_a_share 混同
-            if cfg.get("exclude_bj", True):
-                exclude("exclude_bj")
-                continue
-        elif not _A_SHARE_RE.match(code6):
-            exclude("not_a_share")  # ETF/可转债/B股/指数：不是可买个股（审计 B10）
-            continue
-        if exclude_st:
-            if "ST" in name.upper():
-                exclude("st_stock")
-                continue
-            if st_filter_broken and not name.strip():
-                # fail-closed：名称表挂了就无法证明这只票不是 ST，宁可漏也不能错放（审计 B5）
-                exclude("st_unverified:name_map_unavailable")
-                continue
-        if code6 in risk_high:
-            exclude("risk_high_priority")
             continue
 
-        try:
-            df = load_ohlcv(code6)
-        except Exception:  # noqa: BLE001
-            df = None
-        if df is None or df.empty:
-            exclude("no_local_kline")
-            continue
-        df = df.sort_values("date").reset_index(drop=True)
-        last_date = str(df["date"].iloc[-1])[:10]
-        if last_date != date:
-            exclude(f"no_today_bar:last={last_date}")  # 停牌或本地数据未更新
-            continue
-        if len(df) < min_list_days:
-            exclude(f"list_days<{min_list_days}")
-            continue
-
-        # 周/月 MACD 腿的长历史（仅 live 默认加载路径；注入 loader 的测试/研究
-        # 路径不加载，check_macd_technics 退回 df 自身并如实标 wm_available）。
-        df_long = None
-        if ohlcv_loader is None:
-            try:
-                df_long = local_tdx_data.get_ohlcv_table(
-                    code6, count=OHLCV_LOAD_BARS_LONG
-                )
-                if df_long is not None and not df_long.empty:
-                    df_long = df_long.sort_values("date").reset_index(drop=True)
-                else:
-                    df_long = None
-            except Exception:  # noqa: BLE001 —— 长历史加载失败不阻塞（月线腿降级）
-                df_long = None
-
-        try:
-            # df_long 为 None 时不传参——旧签名调用（测试/研究对 compute_metrics
-            # 的 monkeypatch 替身没有 df_long 形参，多传会 TypeError 误杀候选）
-            if df_long is not None:
-                metrics = compute_metrics(df, index_df, code=code6, df_long=df_long)
-            else:
-                metrics = compute_metrics(df, index_df, code=code6)
-        except Exception as exc:  # noqa: BLE001 —— 单股坏数据不中断批次
-            exclude(f"metrics_error:{type(exc).__name__}:{str(exc)[:80]}")
-            continue
         cand = {
             "code": code6,
             "name": name,
             "formula_hits": item["formula_hits"],
-            "is_holding": code6 in holding,
+            "is_holding": code6 in ctx["holding"],
             # list_days 是**加载到的 K 线根数**，不是真实上市日数：默认加载器
             # `get_ohlcv_table(count=OHLCV_LOAD_BARS)` 内部 tail(count) 截断，
             # 所以取到上界时它只代表"≥260 个交易日"。硬排除（<min_list_days，默认60）
@@ -1701,60 +1940,9 @@ def enrich(
             "signal_date": last_date,
             **metrics,
         }
-        # J<13 硬门槛（2026-07-22 用户决策）：全通道候选（公式与自选池一视同仁）
-        # 必须先满足日 J<13，再谈完美图形贴合度；J 不可计算视同不满足。
-        if cfg.get("j_low_required", J_GATE_REQUIRED_DEFAULT):
-            dj = cand.get("daily_j")
-            if not j_below_threshold(dj):
-                # 门槛外观察区（v0.51，#37 阶段 B，owner 批准）：J<13 硬门槛**不动**
-                # （R1 框架），被挡但**异动强**的票落观察区展示。初版判据 =
-                # 底部巨量（bottom_volume.hit）或放量点火（ignition.hit）——
-                # 两个已算好的现成字段，不求完备，先观察一季再校准。
-                if (cand.get("bottom_volume") or {}).get("hit") or (
-                    cand.get("ignition") or {}
-                ).get("hit"):
-                    result["watchlist_outside_gate"].append(
-                        {
-                            "code": code6,
-                            "name": name,
-                            "daily_j": dj,
-                            "change_pct": cand.get("change_pct"),
-                            "bottom_volume": cand.get("bottom_volume"),
-                            "ignition": cand.get("ignition"),
-                            "formula_hits": cand.get("formula_hits"),
-                            "gate_reason": f"j_not_low:j={dj}",
-                        }
-                    )
-                exclude(f"j_not_low:j={dj}")
-                continue
-        theme = stock_theme.get(code6)
-        if theme:
-            cand["theme_id"] = theme["theme_id"]
-            cand["sector"] = theme["sector"]
-            cand["sector_source"] = theme.get("sector_source", "")
-        else:
-            cand["theme_id"] = ""
-            cand["sector"] = "未知"
-            cand["sector_source"] = ""
-        cand["industry"] = stock_industry.get(code6, "未知")
-        cand["fund_flow"] = fund_flow_of(code6, cand["sector"], fund_flow)
-        if sp_resolve is not None:
-            cand["sector_phase"] = sp_resolve(code6)  # 板块相位 hint(不封顶,证据层)
-        try:  # 平台突破回踩形态(证据层,不驱动分层)
-            from custos.core.factors.platform_pullback import detect_platform_pullback  # noqa: PLC0415
-
-            pp = detect_platform_pullback(df)
-            if pp:
-                cand["platform_pullback"] = (
-                    pp  # {platform_high, breakout_date, pullback_low, ...}
-                )
-        except Exception:  # noqa: BLE001
-            pass
-        if fin_enabled and fin_colmap:
-            # 财务维度(CZ抄底代理)：最佳努力落盘证据层，不驱动分层
-            cand["financials"] = financials_mod.financial_factor(
-                code6, fin_df, fin_colmap, price=cand.get("close")
-            )
+        if _apply_j_gate(cand, result, cfg):
+            continue
+        _apply_post_metrics(cand, code6, df, ctx)
         result["candidates"].append(cand)
 
     # 名称表挂掉导致"筛完 0 只"必须报 unavailable 而不是 partial：score_candidates 只对

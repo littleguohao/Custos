@@ -273,19 +273,8 @@ def compare_holding_to_theme(
     return "同步", f"个股与板块均为{ht}/{tt}，箱体位置 {hp}/{tp}。"
 
 
-def make_report(date: str, rows: list[dict[str, Any]]) -> str:
-    holdings = latest_holding_summary(date)
-    market_status = "震荡偏弱"
-    strong = [r for r in rows if r.get("available") and (r.get("score") or 0) >= 65]
-    risk = [
-        r
-        for r in rows
-        if (not r.get("available"))
-        or "退潮" in str(r.get("stage"))
-        or (r.get("score") or 0) < 45
-    ]
-    top = rows[0] if rows else {}
-
+def _section_mainline(date: str, top: dict[str, Any]) -> list[str]:
+    """§1 今日主线（含报告头）。"""
     lines = []
     lines.append("# theme_tracker 主线与板块跟踪\n")
     lines.append(f"日期：{date}\n")
@@ -302,7 +291,12 @@ def make_report(date: str, rows: list[dict[str, Any]]) -> str:
     lines.append(
         "- 市场约束：market_timing 仍为震荡偏弱，允许低吸核心主线，但不支持追高和高频试错。\n"
     )
+    return lines
 
+
+def _section_strong(strong: list[dict[str, Any]]) -> list[str]:
+    """§2 强势/可关注板块。"""
+    lines = []
     lines.append("## 2. 强势/可关注板块\n")
     lines.append("| 板块 | 代码 | 状态 | 分数 | 代表股票 | 证据 | 风险 |")
     lines.append("|---|---|---|---:|---|---|---|")
@@ -319,7 +313,12 @@ def make_report(date: str, rows: list[dict[str, Any]]) -> str:
     if not strong:
         lines.append("| 无 | - | - | - | - | 当前无分数>=65的板块 | - |")
     lines.append("")
+    return lines
 
+
+def _section_risk(risk: list[dict[str, Any]]) -> list[str]:
+    """§3 退潮/风险板块。"""
+    lines = []
     lines.append("## 3. 退潮/风险板块\n")
     lines.append("| 板块 | 代码 | 风险状态 | 分数 | 风险原因 |")
     lines.append("|---|---|---|---:|---|")
@@ -330,7 +329,14 @@ def make_report(date: str, rows: list[dict[str, Any]]) -> str:
     if not risk:
         lines.append("| 无明显 | - | - | - | - |")
     lines.append("")
+    return lines
 
+
+def _section_holdings(
+    holdings: list[dict[str, Any]], rows: list[dict[str, Any]]
+) -> list[str]:
+    """§4 持仓板块跟踪。"""
+    lines = []
     lines.append("## 4. 持仓板块跟踪\n")
     lines.append(
         "| 代码 | 名称 | 最相关主线 | 板块状态 | 板块分数 | 个股相对板块 | 操作倾向 |"
@@ -347,7 +353,17 @@ def make_report(date: str, rows: list[dict[str, Any]]) -> str:
             f"| {code} | {h.get('name')} | {theme.get('theme_name', '未定')} | {theme.get('stage', '未定')} | {theme.get('score', 0)} | {rel}：{rel_reason} | {action} |"
         )
     lines.append("")
+    return lines
 
+
+def _section_market_consistency(
+    date: str,
+    market_status: str,
+    strong: list[dict[str, Any]],
+    risk: list[dict[str, Any]],
+) -> list[str]:
+    """§5 板块-大盘一致性。"""
+    lines = []
     lines.append("## 5. 板块-大盘一致性\n")
     market = load_json(MARKET_DIR / f"{date}_market_timing_input.json", {}) or {}
     amv = market.get("amv_0", {})
@@ -374,7 +390,16 @@ def make_report(date: str, rows: list[dict[str, Any]]) -> str:
     lines.append(
         "- 结构性机会仅来自上表中强于市场且获得交易许可的板块；低分或退潮方向不因长期逻辑直接加仓。\n"
     )
+    return lines
 
+
+def _section_chief_conclusion(
+    strong: list[dict[str, Any]],
+    holdings: list[dict[str, Any]],
+    rows: list[dict[str, Any]],
+) -> list[str]:
+    """§6 给总控的结论。"""
+    lines = []
     lines.append("## 6. 给总控的结论\n")
     focus = [n for r in strong[:3] if (n := r.get("theme_name")) is not None]
     lines.append("- 可关注方向：" + ("、".join(focus) if focus else "无明确可进攻方向"))
@@ -395,6 +420,29 @@ def make_report(date: str, rows: list[dict[str, Any]]) -> str:
     lines.append("- 是否允许新开相关方向：仅允许核心主线小仓低吸观察；禁止追高接力。\n")
     lines.append(
         "> 风险提示：板块强弱是交易过滤器，不是直接买入信号；真实交易仍需 stock_pool、buy_strategy、risk_control、chief_decision 全链路确认。"
+    )
+    return lines
+
+
+def make_report(date: str, rows: list[dict[str, Any]]) -> str:
+    holdings = latest_holding_summary(date)
+    market_status = "震荡偏弱"
+    strong = [r for r in rows if r.get("available") and (r.get("score") or 0) >= 65]
+    risk = [
+        r
+        for r in rows
+        if (not r.get("available"))
+        or "退潮" in str(r.get("stage"))
+        or (r.get("score") or 0) < 45
+    ]
+    top = rows[0] if rows else {}
+    lines = (
+        _section_mainline(date, top)
+        + _section_strong(strong)
+        + _section_risk(risk)
+        + _section_holdings(holdings, rows)
+        + _section_market_consistency(date, market_status, strong, risk)
+        + _section_chief_conclusion(strong, holdings, rows)
     )
     return "\n".join(lines)
 

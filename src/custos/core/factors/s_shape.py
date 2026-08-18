@@ -442,6 +442,95 @@ def sstar_level(s_star: Optional[float]) -> str:
 REV_MIN_BARS = SSHAPE_MIN_BARS
 
 
+# ---------- S_reversal 三段评分（2026-08-18 从 compute_s_reversal 内联体抽纯函数，
+# 零行为变化；points 与各中间量逐字保留原逻辑，主函数只剩「逐段评分 → 汇总 → 组装」）----------
+
+
+def _rev_oversold(close, high, n: int, j) -> dict[str, Any]:
+    """超跌深度 0-40：J 深度 + 250日回撤 + 低于均线乖离。"""
+    j_pts = (
+        16.0
+        if (j is not None and j < 0)
+        else (
+            10.0
+            if (j is not None and j < 7)
+            else (6.0 if (j is not None and j < 13) else 0.0)
+        )
+    )
+    win = min(250, n)
+    high_w = float(high[-win:].max())
+    dd = (1 - close[-1] / high_w) * 100 if high_w else 0.0
+    dd_pts = 12.0 if dd >= 40 else (7.0 if dd >= 25 else (3.0 if dd >= 15 else 0.0))
+    ma20 = float(close[-20:].mean())
+    dev = (close[-1] / ma20 - 1) * 100 if ma20 else 0.0
+    below_pts = (
+        12.0 if dev <= -8 else (7.0 if dev <= -4 else (3.0 if dev <= -1 else 0.0))
+    )
+    return {"points": min(40.0, j_pts + dd_pts + below_pts), "dd": dd, "dev": dev}
+
+
+def _rev_contraction_stabilize(close, low, vol, n: int) -> dict[str, Any]:
+    """缩量企稳 0-30：极致缩量 + 回调段缩量 + 守近20日低。"""
+    vol_ma5_prev = float(vol[-6:-1].mean()) if n >= 6 else None
+    vr = (vol[-1] / vol_ma5_prev) if vol_ma5_prev else None
+    vol20 = vol[-20:]
+    pctile = float((vol20 < vol[-1]).mean() * 100) if len(vol20) >= 20 else None
+    extreme = bool(vr is not None and vr <= 0.5 and pctile is not None and pctile <= 10)
+    shrink_pts = 15.0 if extreme else (8.0 if (vr is not None and vr <= 0.8) else 0.0)
+    pull_pts = 10.0 if (n >= 11 and vol[-5:].mean() < vol[-10:-5].mean()) else 0.0
+    low20 = float(low[-20:].min()) if n >= 20 else float(low.min())
+    hold_pts = 5.0 if (low20 and close[-1] > low20) else 0.0
+    return {
+        "points": min(30.0, shrink_pts + pull_pts + hold_pts),
+        "vr": vr,
+        "extreme": extreme,
+        "low20": low20,
+    }
+
+
+def _is_reversal_k(close, high, low, n: int, j, extreme: bool) -> bool:
+    """反转K：J<13 + 极致缩量 + round-2 涨跌幅命中 + 振幅≤7。
+
+    2026-08-09 对齐 live 口径（enrich_candidates 经 b1_thresholds）：
+    振幅分母 low→prev_close，涨跌幅判定改 round-2（change_in_range，2026-08-07 owner 拍板）。
+    """
+    chg = (close[-1] / close[-2] - 1) * 100 if n >= 2 and close[-2] else 0.0
+    # ⚠️ 收敛到 `indicators.amplitude_pct`（全项目唯一实现，2026-08-10）。
+    #    算不出时它返回 **None** 而非 0.0 —— 0.0 会被 `<= 7` 判成「振幅很小」，
+    #    把「算不出」显示成「符合条件」。本因子下游按数值比较，故保留 0.0 兜底，
+    #    但那是**沿用旧行为**，不是说 0.0 语义正确。
+    _amp = amplitude_pct_of(high[-1], low[-1], close[-2]) if n >= 2 else None
+    amp = _amp if _amp is not None else 0.0
+    return bool(
+        (j is not None and j < 13) and extreme and change_in_range(chg) and amp <= 7
+    )
+
+
+def _rev_reversal_confirm(
+    close, high, low, vol, open_, n: int, j, j_prev, extreme: bool, low20, dd: float
+) -> dict[str, Any]:
+    """反转确认 0-30：反转K + J拐头 + 低位反包 + 底部巨量。"""
+    reversal_k = _is_reversal_k(close, high, low, n, j, extreme)
+    rk_pts = 10.0 if reversal_k else 0.0
+    jturn_pts = (
+        6.0
+        if (j is not None and j_prev is not None and j > j_prev and j_prev < 20)
+        else 0.0
+    )
+    prev_bear = bool(n >= 2 and close[-2] < open_[-2])
+    engulf = bool(close[-1] > open_[-1] and prev_bear and close[-1] >= open_[-2])
+    at_low = bool(low20 and close[-1] <= low20 * 1.15)
+    eng_pts = 7.0 if (engulf and at_low) else 0.0
+    win = min(250, n)
+    vol_ma_w = float(vol[-win:].mean())
+    botvol_pts = 7.0 if (dd >= 40 and vol_ma_w and vol[-1] >= vol_ma_w * 2) else 0.0
+    return {
+        "points": min(30.0, rk_pts + jturn_pts + eng_pts + botvol_pts),
+        "reversal_k": reversal_k,
+        "j_turn_up": bool(jturn_pts),
+    }
+
+
 def compute_s_reversal(df, code: str = "") -> dict[str, Any]:
     """买弱/反转评分（0-100）：超跌深度(0-40) + 缩量企稳(0-30) + 反转确认(0-30)。
 
@@ -458,71 +547,24 @@ def compute_s_reversal(df, code: str = "") -> dict[str, Any]:
         n = len(df)
         j, j_prev = _kdj_jvals(df)
 
-        # --- 超跌深度 0-40：J 深度 + 250日回撤 + 低于均线乖离 ---
-        j_pts = (
-            16.0
-            if (j is not None and j < 0)
-            else (
-                10.0
-                if (j is not None and j < 7)
-                else (6.0 if (j is not None and j < 13) else 0.0)
-            )
+        # 三段评分各为纯函数（同模块上方 _rev_*）；汇总与组装口径不变
+        ovs = _rev_oversold(close, high, n, j)
+        con = _rev_contraction_stabilize(close, low, vol, n)
+        rev = _rev_reversal_confirm(
+            close,
+            high,
+            low,
+            vol,
+            open_,
+            n,
+            j,
+            j_prev,
+            con["extreme"],
+            con["low20"],
+            ovs["dd"],
         )
-        win = min(250, n)
-        high_w = float(high[-win:].max())
-        dd = (1 - close[-1] / high_w) * 100 if high_w else 0.0
-        dd_pts = 12.0 if dd >= 40 else (7.0 if dd >= 25 else (3.0 if dd >= 15 else 0.0))
-        ma20 = float(close[-20:].mean())
-        dev = (close[-1] / ma20 - 1) * 100 if ma20 else 0.0
-        below_pts = (
-            12.0 if dev <= -8 else (7.0 if dev <= -4 else (3.0 if dev <= -1 else 0.0))
-        )
-        oversold = min(40.0, j_pts + dd_pts + below_pts)
 
-        # --- 缩量企稳 0-30：极致缩量 + 回调段缩量 + 守近20日低 ---
-        vol_ma5_prev = float(vol[-6:-1].mean()) if n >= 6 else None
-        vr = (vol[-1] / vol_ma5_prev) if vol_ma5_prev else None
-        vol20 = vol[-20:]
-        pctile = float((vol20 < vol[-1]).mean() * 100) if len(vol20) >= 20 else None
-        extreme = bool(
-            vr is not None and vr <= 0.5 and pctile is not None and pctile <= 10
-        )
-        shrink_pts = (
-            15.0 if extreme else (8.0 if (vr is not None and vr <= 0.8) else 0.0)
-        )
-        pull_pts = 10.0 if (n >= 11 and vol[-5:].mean() < vol[-10:-5].mean()) else 0.0
-        low20 = float(low[-20:].min()) if n >= 20 else float(low.min())
-        hold_pts = 5.0 if (low20 and close[-1] > low20) else 0.0
-        contraction = min(30.0, shrink_pts + pull_pts + hold_pts)
-
-        # --- 反转确认 0-30：反转K + J拐头 + 低位反包 + 底部巨量 ---
-        # 2026-08-09 对齐 live 口径（enrich_candidates 经 b1_thresholds）：
-        # 振幅分母 low→prev_close，涨跌幅判定改 round-2（change_in_range，2026-08-07 owner 拍板）。
-        chg = (close[-1] / close[-2] - 1) * 100 if n >= 2 and close[-2] else 0.0
-        # ⚠️ 收敛到 `indicators.amplitude_pct`（全项目唯一实现，2026-08-10）。
-        #    算不出时它返回 **None** 而非 0.0 —— 0.0 会被 `<= 7` 判成「振幅很小」，
-        #    把「算不出」显示成「符合条件」。本因子下游按数值比较，故保留 0.0 兜底，
-        #    但那是**沿用旧行为**，不是说 0.0 语义正确。
-        _amp = amplitude_pct_of(high[-1], low[-1], close[-2]) if n >= 2 else None
-        amp = _amp if _amp is not None else 0.0
-        reversal_k = bool(
-            (j is not None and j < 13) and extreme and change_in_range(chg) and amp <= 7
-        )
-        rk_pts = 10.0 if reversal_k else 0.0
-        jturn_pts = (
-            6.0
-            if (j is not None and j_prev is not None and j > j_prev and j_prev < 20)
-            else 0.0
-        )
-        prev_bear = bool(n >= 2 and close[-2] < open_[-2])
-        engulf = bool(close[-1] > open_[-1] and prev_bear and close[-1] >= open_[-2])
-        at_low = bool(low20 and close[-1] <= low20 * 1.15)
-        eng_pts = 7.0 if (engulf and at_low) else 0.0
-        vol_ma_w = float(vol[-win:].mean())
-        botvol_pts = 7.0 if (dd >= 40 and vol_ma_w and vol[-1] >= vol_ma_w * 2) else 0.0
-        reversal_confirm = min(30.0, rk_pts + jturn_pts + eng_pts + botvol_pts)
-
-        s_rev = round(min(100.0, oversold + contraction + reversal_confirm), 1)
+        s_rev = round(min(100.0, ovs["points"] + con["points"] + rev["points"]), 1)
         suggestion = "强反转候选" if s_rev >= 70 else ("观察" if s_rev >= 60 else "弱")
         return {
             "available": True,
@@ -531,19 +573,21 @@ def compute_s_reversal(df, code: str = "") -> dict[str, Any]:
             "max_score": 100,
             "components": {
                 "oversold": {
-                    "points": round(oversold, 1),
+                    "points": round(ovs["points"], 1),
                     "j": j,
-                    "drawdown_pct": round(dd, 2),
-                    "ma20_dev_pct": round(dev, 2),
+                    "drawdown_pct": round(ovs["dd"], 2),
+                    "ma20_dev_pct": round(ovs["dev"], 2),
                 },
                 "contraction_stabilize": {
-                    "points": round(contraction, 1),
-                    "vol_ratio5": round(vr, 3) if vr is not None else None,
+                    "points": round(con["points"], 1),
+                    "vol_ratio5": round(con["vr"], 3)
+                    if con["vr"] is not None
+                    else None,
                 },
                 "reversal_confirm": {
-                    "points": round(reversal_confirm, 1),
-                    "reversal_k": reversal_k,
-                    "j_turn_up": bool(jturn_pts),
+                    "points": round(rev["points"], 1),
+                    "reversal_k": rev["reversal_k"],
+                    "j_turn_up": rev["j_turn_up"],
                 },
             },
         }

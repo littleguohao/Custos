@@ -421,13 +421,9 @@ def render_discipline(lines, enrichment, execution):
     return rules
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--date", required=True)
-    ap.add_argument("--no-trades-confirmed", action="store_true")
-    args = ap.parse_args()
-    day = args.date
-    paths = {
+def _input_paths(day: str) -> dict:
+    """8 个强制输入 + 1 个可选新闻输入的落点。"""
+    return {
         "chief": DATA / "decisions" / f"{day}_chief_decision.json",
         "market": DATA / "market" / f"{day}_market_timing_input.json",
         "gate": DATA / "quality" / f"{day}_runtime_gate.json",
@@ -438,6 +434,10 @@ def main():
         "execution": DATA / "review_steps" / f"{day}_execution_review.json",
         "enrichment": DATA / "review_steps" / f"{day}_review_enrichment.json",
     }
+
+
+def _check_mandatory(paths: dict) -> None:
+    """⚠️ 8 个强制输入缺任一即硬失败 —— 产出「看起来完整但少了一节」的报告更危险。"""
     for key in (
         "chief",
         "market",
@@ -450,6 +450,10 @@ def main():
     ):
         if not paths[key].exists():
             raise SystemExit(f"mandatory close-review input missing: {paths[key]}")
+
+
+def _load_inputs(paths: dict):
+    """按 `paths` 全量加载；新闻是**可选**输入，缺失降级并留「missing」痕。"""
     chief = load(paths["chief"], {})
     market = load(paths["market"], {})
     gate = load(paths["gate"], {})
@@ -462,17 +466,32 @@ def main():
     )
     execution = load(paths["execution"], {})
     enrichment = load(paths["enrichment"], {})
-    positions = load(DATA / "trades" / "current_positions.json", [])
-    trades = load(DATA / "trades" / "trades_stock.json", [])
-    today = [x for x in trades if str(x.get("成交日期", "")).startswith(day)]
-    amv = market.get("amv_0", {})
+    return (
+        chief,
+        market,
+        gate,
+        tech,
+        sectors,
+        quote_snapshot,
+        news,
+        execution,
+        enrichment,
+    )
+
+
+def _check_amv_gate(amv: dict, args, today: list):
+    """⚠️ 盘后硬闸：0AMV 必须 confirmed + 有 regime + 有数值（v0.22 口径，语义级第 9 条强制）。"""
     value = amv.get("amv_change_pct")
     regime = amv.get("effective_state")
     if value is None or amv.get("quality") != "confirmed" or not regime:
         raise SystemExit("confirmed close 0AMV/regime missing")
     if args.no_trades_confirmed and today:
         raise SystemExit("no-trades confirmation conflicts with ledger")
+    return value, regime
 
+
+def _code_maps(tech: list, positions: list, quote_snapshot: dict):
+    """技术面/持仓/当日行情三个按裸代码索引的字典（行情只收 available 的）。"""
     tmap = {bare(x.get("code")): x for x in tech}
     pmap = {bare(x.get("代码")): x for x in positions}
     qmap = {
@@ -480,6 +499,11 @@ def main():
         for x in quote_snapshot.get("quotes", [])
         if x.get("available")
     }
+    return tmap, pmap, qmap
+
+
+def _side_maps(day: str):
+    """可选旁路输入：MFE/MAE 与资金流排名（缺失即空表，不硬失败）。"""
     # Load MFE/MAE data
     mfe_path = DATA / "holdings" / f"{day}_mfe_mae.json"
     mfe_map = {}
@@ -492,98 +516,43 @@ def main():
     if ff_path.exists():
         ff_data = json.loads(ff_path.read_text(encoding="utf-8"))
         ff_map = {x["code"]: x for x in ff_data.get("stock_rank", []) if "code" in x}
-    freshness = gate.get("position_freshness", {})
-    technical_dates = sorted(
-        {str(x.get("latest_date")) for x in tech if x.get("latest_date")}
-    )
-    technical_current = technical_dates == [day]
+    return mfe_map, ff_map, mfe_path, ff_path
+
+
+def _total_assets(positions: list) -> float:
+    """用「持有金额/仓位占比」样本的中位数估计总资产。"""
     asset_samples = [
         finite(x.get("持有金额")) / finite(x.get("仓位占比"))
         for x in positions
         if finite(x.get("仓位占比")) > 0
     ]
-    total_assets = (
-        sorted(asset_samples)[len(asset_samples) // 2] if asset_samples else 0
-    )
-    revalued = revalue_positions(
-        day, ff_map, mfe_map, pmap, qmap, regime, sectors, tmap, total_assets
-    )
-    quotes_current = bool(revalued) and all(
-        x["close"] is not None and x["price_date"] == day for x in revalued
-    )
-    actual_position = (
-        sum(x["position_pct"] for x in revalued if x["position_pct"] is not None)
-        if quotes_current
-        else None
-    )
-    position_text = "缺失" if actual_position is None else f"{actual_position:.1%}"
-    indices = index_rows(market)
+    return sorted(asset_samples)[len(asset_samples) // 2] if asset_samples else 0
 
-    quality = chief.get("market_quality") or {}
-    checks = {x.get("field"): x for x in quality.get("checks") or []}
-    # 可审计块（原待办 #29，已实现）：8 个强制输入 + 持仓/台账 + 可选输入（缺失者留「缺失」标记）
-    audit = report_audit.build(
-        day,
-        "close_review",
-        [
-            *paths.values(),
-            DATA / "trades" / "current_positions.json",
-            DATA / "trades" / "trades_stock.json",
-            mfe_path,
-            ff_path,
-        ],
-    )
-    lines = [
-        f"# {day} 最终盘后复盘",
-        "",
-        "> 角色（v0.57 owner 定版）：**盘后=复盘纠错 + 条件化预案主产地** ｜ "
-        "盘前=信息处理+预案确认 ｜ 盘中14:45=按规则的交易提醒。",
-        f"> 生成时间：{cn_now().strftime('%Y-%m-%d %H:%M:%S')}",
-        *report_audit.render_md(audit),
-        f"> 报告质量：**{'complete' if not enrichment.get('unavailable') and news.get('status') == 'complete' else 'degraded'}**",
-        f"> 0AMV当日变动：**{float(value):+.2f}%**；有效状态：**{regime}**",
-        f"> 今日实际交易：**{'无交易动作' if not today else str(len(today)) + '笔'}**",
-        f"> 持仓确认：**{freshness.get('status')}** — {freshness.get('reason')}",
-        "",
-        "## 1. 今日计划、14:45建议与实际执行",
-        "",
-        f"- 市场状态：**{chief.get('market_state')}**，建议仓位 **{chief.get('total_position_range')}**，收盘重估仓位 **{position_text}**。",
-        f"- 执行对账质量：**{execution.get('status', 'unavailable')}**；成交记录 {execution.get('recorded_trade_count', 0)} 笔。",
-        "",
-        "| 代码 | 名称 | 盘前动作 | 14:45动作 | 实际动作 | 对账结论 |",
-        "|---|---|---|---|---|---|",
-    ]
-    render_execution_rows(lines, execution)
-    # §2 事实核对需要「与今日操作的交集」：持仓代码 ∪ 当日成交代码，
-    # 外加这些票所属板块名（matched_themes 命中持仓板块也算交集）。
-    _hold_codes = set(pmap) | {bare(x.get("代码")) for x in today}
-    _hold_sectors = {
+
+def _news_interest(pmap: dict, today: list, sectors: list):
+    """§2 事实核对的交集面：持仓代码 ∪ 当日成交代码，外加这些票所属板块名
+    （matched_themes 命中持仓板块也算交集）。"""
+    hold_codes = set(pmap) | {bare(x.get("代码")) for x in today}
+    hold_sectors = {
         s
-        for c in _hold_codes
+        for c in hold_codes
         for s in (
             sector_for(c, sectors).get("sector") or sector_for(c, sectors).get("name"),
         )
         if s
     }
-    render_news(lines, news, hold_codes=_hold_codes, hold_sectors=_hold_sectors)
+    return hold_codes, hold_sectors
 
-    render_market(lines, checks, chief, indices)
 
-    render_themes(lines, enrichment)
-
-    render_holdings(lines, enrichment, revalued, day)
-
-    next_plan = render_next_day(lines, enrichment)
-
-    rules = render_discipline(lines, enrichment, execution)
-
-    unavailable = list(
-        dict.fromkeys(
-            (enrichment.get("unavailable") or [])
-            + (news.get("missing") or [])
-            + (execution.get("missing") or [])
-        )
-    )
+def _render_tail(
+    lines,
+    quotes_current: bool,
+    technical_dates: list,
+    technical_current: bool,
+    unavailable: list,
+    paths: dict,
+) -> None:
+    """§8 数据时效、缺失项与风险提示 + §9 数据来源。"""
     lines += [
         "",
         "## 8. 数据时效、缺失项与风险提示",
@@ -604,10 +573,44 @@ def main():
         "> 风险提示：本复盘用于策略纠偏，不构成收益承诺或无条件交易指令。",
     ]
 
-    out = daily_report_dir(day, REV) / f"{day}_final_review.md"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    payload = {
+
+def _position_summary(revalued: list, day: str):
+    """收盘重估仓位：当日全持仓行情完整（日期对齐）才有总仓位，否则「缺失」。"""
+    quotes_current = bool(revalued) and all(
+        x["close"] is not None and x["price_date"] == day for x in revalued
+    )
+    actual_position = (
+        sum(x["position_pct"] for x in revalued if x["position_pct"] is not None)
+        if quotes_current
+        else None
+    )
+    position_text = "缺失" if actual_position is None else f"{actual_position:.1%}"
+    return quotes_current, actual_position, position_text
+
+
+def build_payload(
+    day: str,
+    audit: dict,
+    unavailable: list,
+    amv: dict,
+    news: dict,
+    execution: dict,
+    enrichment: dict,
+    indices: list,
+    quality: dict,
+    revalued: list,
+    next_plan: dict,
+    rules: dict,
+    today: list,
+    actual_position,
+    quotes_current: bool,
+    technical_dates: list,
+    technical_current: bool,
+    gate: dict,
+    out,
+) -> dict:
+    """落盘 JSON payload（`require("final_review")` 校验的形状）。"""
+    return {
         "date": day,
         "audit": audit,
         "report_quality": "degraded" if unavailable else "complete",
@@ -631,6 +634,123 @@ def main():
         ),
         "output": str(out),
     }
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--date", required=True)
+    ap.add_argument("--no-trades-confirmed", action="store_true")
+    args = ap.parse_args()
+    day = args.date
+    paths = _input_paths(day)
+    _check_mandatory(paths)
+    chief, market, gate, tech, sectors, quote_snapshot, news, execution, enrichment = (
+        _load_inputs(paths)
+    )
+    positions = load(DATA / "trades" / "current_positions.json", [])
+    trades = load(DATA / "trades" / "trades_stock.json", [])
+    today = [x for x in trades if str(x.get("成交日期", "")).startswith(day)]
+    amv = market.get("amv_0", {})
+    value, regime = _check_amv_gate(amv, args, today)
+
+    tmap, pmap, qmap = _code_maps(tech, positions, quote_snapshot)
+    mfe_map, ff_map, mfe_path, ff_path = _side_maps(day)
+    freshness = gate.get("position_freshness", {})
+    technical_dates = sorted(
+        {str(x.get("latest_date")) for x in tech if x.get("latest_date")}
+    )
+    technical_current = technical_dates == [day]
+    total_assets = _total_assets(positions)
+    revalued = revalue_positions(
+        day, ff_map, mfe_map, pmap, qmap, regime, sectors, tmap, total_assets
+    )
+    quotes_current, actual_position, position_text = _position_summary(revalued, day)
+    indices = index_rows(market)
+
+    quality = chief.get("market_quality") or {}
+    checks = {x.get("field"): x for x in quality.get("checks") or []}
+    # 可审计块（原待办 #29，已实现）：8 个强制输入 + 持仓/台账 + 可选输入（缺失者留「缺失」标记）
+    audit = report_audit.build(
+        day,
+        "close_review",
+        [
+            *paths.values(),
+            DATA / "trades" / "current_positions.json",
+            DATA / "trades" / "trades_stock.json",
+            mfe_path,
+            ff_path,
+        ],
+    )
+    # ⚠️ 标题区角色行必须留在 main 本体：test_daily_report 用 inspect.getsource(main) 钉住它。
+    lines = [
+        f"# {day} 最终盘后复盘",
+        "",
+        "> 角色（v0.57 owner 定版）：**盘后=复盘纠错 + 条件化预案主产地** ｜ "
+        "盘前=信息处理+预案确认 ｜ 盘中14:45=按规则的交易提醒。",
+        f"> 生成时间：{cn_now().strftime('%Y-%m-%d %H:%M:%S')}",
+        *report_audit.render_md(audit),
+        f"> 报告质量：**{'complete' if not enrichment.get('unavailable') and news.get('status') == 'complete' else 'degraded'}**",
+        f"> 0AMV当日变动：**{float(value):+.2f}%**；有效状态：**{regime}**",
+        f"> 今日实际交易：**{'无交易动作' if not today else str(len(today)) + '笔'}**",
+        f"> 持仓确认：**{freshness.get('status')}** — {freshness.get('reason')}",
+        "",
+        "## 1. 今日计划、14:45建议与实际执行",
+        "",
+        f"- 市场状态：**{chief.get('market_state')}**，建议仓位 **{chief.get('total_position_range')}**，收盘重估仓位 **{position_text}**。",
+        f"- 执行对账质量：**{execution.get('status', 'unavailable')}**；成交记录 {execution.get('recorded_trade_count', 0)} 笔。",
+        "",
+        "| 代码 | 名称 | 盘前动作 | 14:45动作 | 实际动作 | 对账结论 |",
+        "|---|---|---|---|---|---|",
+    ]
+    render_execution_rows(lines, execution)
+    hold_codes, hold_sectors = _news_interest(pmap, today, sectors)
+    render_news(lines, news, hold_codes=hold_codes, hold_sectors=hold_sectors)
+
+    render_market(lines, checks, chief, indices)
+
+    render_themes(lines, enrichment)
+
+    render_holdings(lines, enrichment, revalued, day)
+
+    next_plan = render_next_day(lines, enrichment)
+
+    rules = render_discipline(lines, enrichment, execution)
+
+    unavailable = list(
+        dict.fromkeys(
+            (enrichment.get("unavailable") or [])
+            + (news.get("missing") or [])
+            + (execution.get("missing") or [])
+        )
+    )
+    _render_tail(
+        lines, quotes_current, technical_dates, technical_current, unavailable, paths
+    )
+
+    out = daily_report_dir(day, REV) / f"{day}_final_review.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    payload = build_payload(
+        day,
+        audit,
+        unavailable,
+        amv,
+        news,
+        execution,
+        enrichment,
+        indices,
+        quality,
+        revalued,
+        next_plan,
+        rules,
+        today,
+        actual_position,
+        quotes_current,
+        technical_dates,
+        technical_current,
+        gate,
+        out,
+    )
     json_out = daily_report_dir(day, REV) / f"{day}_final_review.json"
     require("final_review", payload)
     json_out.write_text(

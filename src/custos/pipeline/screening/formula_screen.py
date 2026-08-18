@@ -216,21 +216,18 @@ def _load_manual_pools(
     return entries, hit_total, errors
 
 
-def screen_formulas(
+def _prepare_universe(
     date: str,
-    registry: Optional[dict] = None,
-    stock_list: Optional[list[str]] = None,
-    name_map: Optional[dict[str, str]] = None,
-    name_resolver=None,
-    call: Optional[Callable[..., dict]] = None,
-    running_check: Optional[Callable[[], bool]] = None,
-    timeout: int = FORMULA_TIMEOUT,
-) -> dict:
-    """逐公式对全 A 批跑并汇总命中。所有失败都结构化落盘，绝不 raise。"""
-    registry = registry if registry is not None else load_registry()
-    call_fn = call if call is not None else tq_http.call
-    is_running = running_check if running_check is not None else is_tdxw_running
+    registry: dict,
+    stock_list: Optional[list[str]],
+    name_map: Optional[dict[str, str]],
+) -> tuple[dict, list[str], dict[str, str], list[str]]:
+    """建 universe/名称表并初始化 result 骨架与 pending_notes。
 
+    先建 universe/名称表（本地 vipdoc，不依赖 TQ），后续再加载自选池（本地文件），
+    最后才做 TQ 门控：TdxW 关闭时池内候选仍可进入充实段，且池内股票有名。
+    返回 (result, stock_list, name_map, pending_notes)。
+    """
     result: dict[str, Any] = {
         "date": date,
         "status": "ok",
@@ -239,8 +236,6 @@ def screen_formulas(
         "formulas": [],
     }
 
-    # 先建 universe/名称表（本地 vipdoc，不依赖 TQ），再加载自选池（本地文件），
-    # 最后才做 TQ 门控：TdxW 关闭时池内候选仍可进入充实段，且池内股票有名。
     diag: dict[str, Any] = {}
     if stock_list is None:
         stock_list, name_map = build_universe(registry.get("universe"), diag=diag)
@@ -253,16 +248,6 @@ def screen_formulas(
     # 降级备注在**所有** return 路径上统一追加：早退分支（TdxW 关闭 / universe 空）用 `=`
     # 覆盖 degraded_reason，若在分支之前直接写就会被冲掉。
     pending_notes: list[str] = []
-
-    def _finalize(res: dict) -> dict:
-        for note in pending_notes:
-            if res["status"] == "ok":
-                res["status"] = "partial"
-            res["degraded_reason"] = (
-                f"{res['degraded_reason']};{note}" if res["degraded_reason"] else note
-            )
-        return res
-
     if result["st_filter"] != "ok":
         # 名称表是 ST 硬排除的唯一依据；它挂了这批命中就**不能声称筛选正常**（审计 B5）。
         # 下游 enrich 读 st_filter 走 fail-closed（无名候选按 st_unverified 剔除）。
@@ -270,7 +255,13 @@ def screen_formulas(
             "st_filter_unavailable(名称表在线+缓存均不可用 → ST 硬排除失效,"
             "下游按 st_unverified 剔除无名候选)"
         )
+    return result, stock_list, name_map, pending_notes
 
+
+def _load_pool_stage(
+    result: dict, pending_notes: list[str], registry: dict, date: str, name_map: dict
+) -> int:
+    """加载自选池并入 result["formulas"]，写 manual_pool_status；返回池命中数。"""
     pool_entries, pool_hits, pool_errors = _load_manual_pools(registry, date, name_map)
     result["formulas"].extend(pool_entries)
     enabled_pools = [e for e in pool_entries if e.get("enabled")]
@@ -287,36 +278,36 @@ def screen_formulas(
             f"manual_pool_{result['manual_pool_status']}:{','.join(pool_errors)}"
             "(自选池通道读取失败,候选缺口不代表池内无票)"
         )
+    return pool_hits
 
-    if not is_running():
-        result["status"] = "partial" if pool_hits else "unavailable"
-        result["degraded_reason"] = "tdxw_not_running"
-        for f in registry.get("formulas", []):
-            result["formulas"].append(
-                {
-                    "id": f.get("id", ""),
-                    "tq_name": f.get("tq_name", ""),
-                    "enabled": bool(f.get("enabled")),
-                    "hits": [],
-                    "error": "tdxw_not_running" if f.get("enabled") else None,
-                }
-            )
-        return _finalize(result)
 
-    if not stock_list:
-        result["status"] = "partial" if pool_hits else "unavailable"
-        result["degraded_reason"] = (
-            "universe_unavailable(本地 vipdoc 与在线全代码表均为空 → "
-            "**全市场公式初筛整段跳过**,当日命中仅来自自选池,不代表市场无标的)"
+def _offline_result(result: dict, registry: dict, pool_hits: int) -> dict:
+    """TdxW 未运行的早退分支：公式全部挂起，池命中仍保留。"""
+    result["status"] = "partial" if pool_hits else "unavailable"
+    result["degraded_reason"] = "tdxw_not_running"
+    for f in registry.get("formulas", []):
+        result["formulas"].append(
+            {
+                "id": f.get("id", ""),
+                "tq_name": f.get("tq_name", ""),
+                "enabled": bool(f.get("enabled")),
+                "hits": [],
+                "error": "tdxw_not_running" if f.get("enabled") else None,
+            }
         )
-        print(
-            "[WARN] universe 为空:本次未扫全市场,只有自选池命中。检查 TDX_ROOT/vipdoc 是否可读",
-            file=sys.stderr,
-        )
-        return _finalize(result)
+    return result
 
-    tq_codes = [local_tdx_data.normalize_code(c) for c in stock_list]
 
+def _run_formula_batches(
+    result: dict,
+    registry: dict,
+    tq_codes: list[str],
+    call_fn: Callable[..., dict],
+    timeout: int,
+    name_map: dict[str, str],
+    date: str,
+) -> tuple[int, int]:
+    """逐公式分批跑 formula_process_mul_xg（含连续失败熔断）。返回 (attempted, succeeded)。"""
     consecutive_failures = 0
     attempted = succeeded = 0
     for f in registry.get("formulas", []):
@@ -379,7 +370,19 @@ def screen_formulas(
             entry["error"] = last_err.get("code", "unknown")
             if last_err.get("detail"):
                 entry["error_detail"] = str(last_err["detail"])[:200]
+    return attempted, succeeded
 
+
+def _settle_screen_status(
+    result: dict, attempted: int, succeeded: int, pool_hits: int
+) -> None:
+    """按公式尝试/成功数定 status 与 degraded_reason（就地改 result）。
+
+    注：any() 之所以排除 manual_pool，是因为自选池失败有自己的 manual_pool_status
+    与专门的降级备注（见 _finalize/pending_notes），不与"公式失败"混同；但它**必须**
+    同样让 status 脱离 ok —— 原实现只做了排除、没做替代，于是自选池整条通道归零
+    仍报 ok（审计 B6）。
+    """
     if attempted == 0:
         result["status"] = "partial" if pool_hits else "unavailable"
         result["degraded_reason"] = "no_enabled_formula" + (
@@ -397,9 +400,58 @@ def screen_formulas(
     ):
         result["status"] = "partial"
         result["degraded_reason"] = "some_formulas_failed"
-    # 注：上面这个 any() 之所以排除 manual_pool，是因为自选池失败有自己的 manual_pool_status
-    # 与专门的降级备注（见 _finalize/pending_notes），不与"公式失败"混同；但它**必须**同样
-    # 让 status 脱离 ok —— 原实现只做了排除、没做替代，于是自选池整条通道归零仍报 ok（审计 B6）。
+
+
+def screen_formulas(
+    date: str,
+    registry: Optional[dict] = None,
+    stock_list: Optional[list[str]] = None,
+    name_map: Optional[dict[str, str]] = None,
+    name_resolver=None,
+    call: Optional[Callable[..., dict]] = None,
+    running_check: Optional[Callable[[], bool]] = None,
+    timeout: int = FORMULA_TIMEOUT,
+) -> dict:
+    """逐公式对全 A 批跑并汇总命中。所有失败都结构化落盘，绝不 raise。"""
+    registry = registry if registry is not None else load_registry()
+    call_fn = call if call is not None else tq_http.call
+    is_running = running_check if running_check is not None else is_tdxw_running
+
+    result, stock_list, name_map, pending_notes = _prepare_universe(
+        date, registry, stock_list, name_map
+    )
+
+    def _finalize(res: dict) -> dict:
+        for note in pending_notes:
+            if res["status"] == "ok":
+                res["status"] = "partial"
+            res["degraded_reason"] = (
+                f"{res['degraded_reason']};{note}" if res["degraded_reason"] else note
+            )
+        return res
+
+    pool_hits = _load_pool_stage(result, pending_notes, registry, date, name_map)
+
+    if not is_running():
+        return _finalize(_offline_result(result, registry, pool_hits))
+
+    if not stock_list:
+        result["status"] = "partial" if pool_hits else "unavailable"
+        result["degraded_reason"] = (
+            "universe_unavailable(本地 vipdoc 与在线全代码表均为空 → "
+            "**全市场公式初筛整段跳过**,当日命中仅来自自选池,不代表市场无标的)"
+        )
+        print(
+            "[WARN] universe 为空:本次未扫全市场,只有自选池命中。检查 TDX_ROOT/vipdoc 是否可读",
+            file=sys.stderr,
+        )
+        return _finalize(result)
+
+    tq_codes = [local_tdx_data.normalize_code(c) for c in stock_list]
+    attempted, succeeded = _run_formula_batches(
+        result, registry, tq_codes, call_fn, timeout, name_map, date
+    )
+    _settle_screen_status(result, attempted, succeeded, pool_hits)
 
     # 候选名称按需刷新（东财 ulist 批量 → TQ → 缓存）。
     # 为什么放在这里而不是 universe 阶段：ST 判定只需要知道**候选股**是不是 ST，候选池

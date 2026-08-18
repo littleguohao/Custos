@@ -349,78 +349,53 @@ def classify(
     return "P3", "持有观察", f"趋势{trend}、位置{box}、盈亏{pnl:+.1%}；{bbi_reason}"
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--date", default=cn_today().strftime("%Y-%m-%d"))
-    ap.add_argument(
-        "--strict",
-        action="store_true",
-        help="fail instead of publishing when required quote/report fields are invalid",
-    )
-    ap.add_argument(
-        "--emit-report",
-        action="store_true",
-        help="print the validated report body for cron delivery",
-    )
-    ap.add_argument(
-        "--emit-digest",
-        action="store_true",
-        help="print a bounded delivery digest containing all execution-critical fields",
-    )
-    args = ap.parse_args()
-    target_date = args.date
-    positions = load(TRADES / "current_positions.json", [])
-    if not positions:
-        raise SystemExit("[close_review] no positions found")
+def risk_date_note(target_date: str, risk_src_date: str, risk_obj: dict) -> str:
+    """风控依据数据日的报告措辞。
 
-    snap = snapshot_state(target_date)
-    tech = technical_map(target_date)
-    risks = risk_map(target_date)
-    _risk_path, risk_src_date = risk_source_date(target_date)
-    # ⚠️ 同时看**文件日**与**证据日**。2026-08-07 修：此前只按文件日判，
-    # 于是 09:05 盘前产出的 risk_decision（文件日=当日、依据=前一交易日收盘）
-    # 在 14:45 报告里被标成「当日」—— 读者会以为风控依据是今天的。
-    # `evidence_date` 由 `generate_risk_and_sectors` 从技术面 `latest_date` 取得。
-    _risk_obj = load(_risk_path, {}) if _risk_path else {}
-    _evidence = str(_risk_obj.get("evidence_date") or "")
+    ⚠️ 同时看**文件日**与**证据日**。2026-08-07 修：此前只按文件日判，
+    于是 09:05 盘前产出的 risk_decision（文件日=当日、依据=前一交易日收盘）
+    在 14:45 报告里被标成「当日」—— 读者会以为风控依据是今天的。
+    `evidence_date` 由 `generate_risk_and_sectors` 从技术面 `latest_date` 取得。
+    """
+    _evidence = str(risk_obj.get("evidence_date") or "")
     if not risk_src_date:
-        risk_date_note = "缺失（无 risk_decision，按无风控依据处理）"
-    elif risk_src_date != target_date:
-        risk_date_note = (
+        return "缺失（无 risk_decision，按无风控依据处理）"
+    if risk_src_date != target_date:
+        return (
             f"**{risk_src_date}**（⚠️非当日，当日 risk_decision 缺失，"
             f"已回退最近一份，不得据此放宽任何权限）"
         )
-    elif _evidence and _evidence != target_date:
-        risk_date_note = (
+    if _evidence and _evidence != target_date:
+        return (
             f"**{risk_src_date}**（文件为当日，但**证据日是 {_evidence}** —— "
             f"盘前生成、依据前一交易日收盘；盘中动作以 14:45 实时行情"
             f"重算的 B1 为准（v0.35 已定案：盘中风控依据按证据新鲜度取））"
         )
-    elif not _evidence:
-        risk_date_note = (
-            f"**{risk_src_date}**（当日；证据日未标注，无法确认依据新鲜度）"
-        )
-    else:
-        risk_date_note = f"**{risk_src_date}**（当日，证据日同为当日）"
-    quotes, quote_snapshot = quote_map(target_date)
-    gate = load(QUALITY / f"{target_date}_runtime_gate.json", {})
-    input_errors = validate_quote_snapshot(target_date, positions, quote_snapshot)
-    if args.strict and input_errors:
-        raise SystemExit(
-            "[close_review] strict input validation failed:\n- "
-            + "\n- ".join(input_errors)
-        )
-    market = load(MARKET / f"{target_date}_market_timing_input.json", {})
-    regime = market.get("amv_0", {}).get("effective_state") or "未知"
-    amv_value = market.get("amv_0", {}).get("amv_change_pct")
+    if not _evidence:
+        return f"**{risk_src_date}**（当日；证据日未标注，无法确认依据新鲜度）"
+    return f"**{risk_src_date}**（当日，证据日同为当日）"
+
+
+def estimate_total_assets(positions: list[dict]) -> float:
+    """用「持有金额/仓位占比」样本的中位数估计总资产。"""
     asset_samples = [
         finite(x.get("持有金额")) / finite(x.get("仓位占比"))
         for x in positions
         if finite(x.get("仓位占比")) > 0
     ]
-    total_assets = (
-        sorted(asset_samples)[len(asset_samples) // 2] if asset_samples else 0
-    )
+    return sorted(asset_samples)[len(asset_samples) // 2] if asset_samples else 0
+
+
+def revalue_and_plan(
+    target_date: str,
+    positions: list[dict],
+    tech: dict[str, dict],
+    risks: dict[str, list[dict]],
+    quotes: dict[str, dict],
+    regime: str,
+    total_assets: float,
+) -> tuple[list[dict], list[dict]]:
+    """按 14:45 实时行情逐票重估并分类出优先级动作（§1/§2 的数据源）。"""
     revalued: list[dict] = []
     actions = []
     for p in positions:
@@ -475,42 +450,21 @@ def main() -> None:
             }
         )
     actions.sort(key=lambda x: (x["priority"], x["code"]))
-    revalued_map = {x["code"]: x for x in revalued}
-    total_position = (
-        sum(x["position_pct"] for x in revalued if x["position_pct"] is not None)
-        if all(x["position_pct"] is not None for x in revalued)
-        else None
-    )
-    market_quality = gate.get("market_quality", {})
-    indices = (
-        quote_snapshot.get("indices", []) if isinstance(quote_snapshot, dict) else []
-    )
-    amv_numeric = optional_finite(amv_value)
-    amv_display = "缺失" if amv_numeric is None else f"{amv_numeric:+.2f}%"
-    advice_line = regime_advice(regime)
-    index_lines = [
-        f"| {x.get('name', x.get('code', '未知'))} | {price_text(optional_finite(x.get('price')), 2)} | {pct_text(optional_finite(x.get('change_pct')))} | {x.get('date', '缺失')} {x.get('time', '缺失')} |"
-        for x in indices
-    ] or ["| 缺失 | 缺失 | 缺失 | 缺失 |"]
+    return revalued, actions
 
-    # 可审计块（原待办 #29，已实现）：本报告实际读过的输入；风控依据回退旧文件时按实际来源登记
-    audit = report_audit.build(
-        target_date,
-        "1445",
-        [
-            p
-            for p in [
-                TRADES / "current_positions.json",
-                MARKET / f"{target_date}_holding_quotes.json",
-                HOLDINGS / f"{target_date}_holding_technical_summary.json",
-                _risk_path,
-                QUALITY / f"{target_date}_runtime_gate.json",
-                MARKET / f"{target_date}_market_timing_input.json",
-            ]
-            if p is not None
-        ],
-    )
-    lines = [
+
+def render_header(
+    lines: list[str],
+    target_date: str,
+    audit: dict,
+    snap: dict,
+    quote_snapshot: dict,
+    amv_display: str,
+    regime: str,
+    market_quality: dict,
+) -> None:
+    """报告头：角色定版、生成时间、可审计块与行情/状态摘要。"""
+    lines += [
         f"# 14:45 收盘前操作建议 — {target_date}",
         "",
         "> 角色（v0.57 owner 定版）：**盘中14:45=按规则的交易提醒** ｜ "
@@ -523,12 +477,34 @@ def main() -> None:
         "> 口径说明：持仓价格使用上述行情快照；BBI与其他技术指标单独标注最近确认数据日，不把历史技术状态冒充当日收盘事实。",
         f"> 0AMV当日变动：**{amv_display}**｜有效状态：**{regime}**；盘中市场质量：**{market_quality.get('status', '未知')}**（{market_quality.get('quality_score', 'NA')}）",
         "",
+    ]
+
+
+def render_indices(lines: list[str], indices: list[dict]) -> None:
+    """§0 主要指数快照。"""
+    index_lines = [
+        f"| {x.get('name', x.get('code', '未知'))} | {price_text(optional_finite(x.get('price')), 2)} | {pct_text(optional_finite(x.get('change_pct')))} | {x.get('date', '缺失')} {x.get('time', '缺失')} |"
+        for x in indices
+    ] or ["| 缺失 | 缺失 | 缺失 | 缺失 |"]
+    lines += [
         "## 0. 主要指数快照",
         "",
         "| 指数 | 点位 | 涨跌幅 | 行情时间 |",
         "|---|---:|---:|---|",
         *index_lines,
         "",
+    ]
+
+
+def render_revalued(
+    lines: list[str],
+    positions: list[dict],
+    revalued_map: dict[str, dict],
+    quotes: dict[str, dict],
+    total_position: float | None,
+) -> None:
+    """§1 当日行情重估持仓（含重估总仓位行）。"""
+    lines += [
         "## 1. 当日行情重估持仓",
         "",
         "| 代码 | 名称 | 数量 | 成本 | 当日价格 | 持有盈亏 | 重估仓位 | 当日涨跌 | BBI状态 | N型前低清仓点 |",
@@ -554,6 +530,12 @@ def main() -> None:
         "",
         f"- 当日行情重估总仓位：**{total_position_display}**",
         "",
+    ]
+
+
+def render_actions(lines: list[str], actions: list[dict]) -> None:
+    """§2 动态持仓优先级。"""
+    lines += [
         "## 2. 动态持仓优先级",
         "",
         "| 优先级 | 代码 | 名称 | 操作倾向 | 依据 |",
@@ -563,15 +545,32 @@ def main() -> None:
         lines.append(
             f"| {x['priority']} | {x['code']} | {x['name']} | {x['action']} | {x['reason']} |"
         )
+    lines.append("")
+
+
+def render_market_state(
+    lines: list[str],
+    amv_display: str,
+    regime: str,
+    market_quality: dict,
+    tech: dict[str, dict],
+    risk_note: str,
+) -> None:
+    """§3 市场状态与数据日期。"""
     lines += [
-        "",
         "## 3. 市场状态与数据日期",
         "",
         f"- 0AMV：当日 **{amv_display}**；缺值时只延续上一确认状态，不把缺失格式化为0。当前有效状态为 **{regime}**。",
         f"- 盘中市场质量：{market_quality.get('status', '未知')}；盘中缺失项按最近有效交易日继承并在门控中逐项标注。",
         f"- 个股技术数据日：{', '.join(sorted({str(x.get('latest_date')) for x in tech.values() if x.get('latest_date')})) or '缺失'}；仅作技术参考，不冒充当日行情。",
-        f"- 风控依据数据日：{risk_date_note}",
+        f"- 风控依据数据日：{risk_note}",
         "",
+    ]
+
+
+def render_advice(lines: list[str], advice_line: str) -> None:
+    """§4 操作建议。"""
+    lines += [
         "## 4. 操作建议",
         "",
         f"- {advice_line}",
@@ -581,6 +580,12 @@ def main() -> None:
         "- 精确减仓数量：B1默认盘中不交易，持仓基线确认且当日全持仓行情齐全时允许评估；若用户告知或成交台账出现目标日成交，立即改用最新持仓。",
         "- 加仓/新开仓：继续禁止；需0AMV退出空头且大盘、板块、个股结构修复，并通过完整市场质量门。",
         "",
+    ]
+
+
+def render_permissions(lines: list[str], gate: dict) -> None:
+    """§5 运行权限 + 文末风险提示。"""
+    lines += [
         "## 5. 运行权限",
         "",
         f"- 精确数量权限：{'允许' if gate.get('position_gate', {}).get('allow_precise_quantity') else '禁止'}。",
@@ -591,35 +596,41 @@ def main() -> None:
         "",
     ]
 
-    report = "\n".join(lines)
-    report_errors = validate_report(target_date, positions, report, gate)
-    if args.strict and report_errors:
+
+def _strict_check(strict: bool, errors: list[str], what: str) -> None:
+    """--strict 模式下校验失败即硬失败（不发布带病报告）。"""
+    if strict and errors:
         raise SystemExit(
-            "[close_review] strict report validation failed:\n- "
-            + "\n- ".join(report_errors)
+            f"[close_review] strict {what} validation failed:\n- " + "\n- ".join(errors)
         )
-    out_dir = daily_report_dir(target_date, PLANS)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out = out_dir / f"{target_date}_1445_review.md"
-    out.write_text(report, encoding="utf-8")
-    log = {
-        "date": target_date,
-        "generated_at": cn_now().isoformat(timespec="seconds"),
-        "audit": audit,
-        "position_snapshot": snap,
-        "total_position": total_position,
-        "positions": positions,
-        "revalued_positions": revalued,
-        "actions": actions,
-        "quote_snapshot": quote_snapshot,
-        "live_quotes_pending": not all(x["price"] is not None for x in revalued),
-        "position_gate": gate.get("position_gate", {}),
-    }
-    (LOGS / f"{target_date}_1445_review.json").write_text(
-        json.dumps(json_safe(log), ensure_ascii=False, indent=2, allow_nan=False),
-        encoding="utf-8",
+
+
+def _total_position(revalued: list[dict]) -> float | None:
+    """重估总仓位：任一持仓缺当日行情则为 None（报「缺失」而非部分求和）。"""
+    return (
+        sum(x["position_pct"] for x in revalued if x["position_pct"] is not None)
+        if all(x["position_pct"] is not None for x in revalued)
+        else None
     )
-    print(out)
+
+
+def emit_output(
+    args,
+    target_date: str,
+    report: str,
+    snap: dict,
+    gate: dict,
+    quote_snapshot: dict,
+    indices: list[dict],
+    positions: list[dict],
+    revalued_map: dict[str, dict],
+    quotes: dict[str, dict],
+    actions: list[dict],
+    total_position: float | None,
+    amv_display: str,
+    regime: str,
+) -> None:
+    """stdout 投递三种形态：--emit-digest 有界摘要 / --emit-report 报告正文 / 默认 JSON 摘要。"""
     if args.emit_digest:
         digest = build_delivery_digest(
             target_date,
@@ -656,6 +667,135 @@ def main() -> None:
                 allow_nan=False,
             )
         )
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--date", default=cn_today().strftime("%Y-%m-%d"))
+    ap.add_argument(
+        "--strict",
+        action="store_true",
+        help="fail instead of publishing when required quote/report fields are invalid",
+    )
+    ap.add_argument(
+        "--emit-report",
+        action="store_true",
+        help="print the validated report body for cron delivery",
+    )
+    ap.add_argument(
+        "--emit-digest",
+        action="store_true",
+        help="print a bounded delivery digest containing all execution-critical fields",
+    )
+    args = ap.parse_args()
+    target_date = args.date
+    positions = load(TRADES / "current_positions.json", [])
+    if not positions:
+        raise SystemExit("[close_review] no positions found")
+
+    snap = snapshot_state(target_date)
+    tech = technical_map(target_date)
+    risks = risk_map(target_date)
+    _risk_path, risk_src_date = risk_source_date(target_date)
+    _risk_obj = load(_risk_path, {}) if _risk_path else {}
+    risk_note = risk_date_note(target_date, risk_src_date, _risk_obj)
+    quotes, quote_snapshot = quote_map(target_date)
+    gate = load(QUALITY / f"{target_date}_runtime_gate.json", {})
+    input_errors = validate_quote_snapshot(target_date, positions, quote_snapshot)
+    _strict_check(args.strict, input_errors, "input")
+    market = load(MARKET / f"{target_date}_market_timing_input.json", {})
+    regime = market.get("amv_0", {}).get("effective_state") or "未知"
+    amv_value = market.get("amv_0", {}).get("amv_change_pct")
+    total_assets = estimate_total_assets(positions)
+    revalued, actions = revalue_and_plan(
+        target_date, positions, tech, risks, quotes, regime, total_assets
+    )
+    revalued_map = {x["code"]: x for x in revalued}
+    total_position = _total_position(revalued)
+    market_quality = gate.get("market_quality", {})
+    indices = (
+        quote_snapshot.get("indices", []) if isinstance(quote_snapshot, dict) else []
+    )
+    amv_numeric = optional_finite(amv_value)
+    amv_display = "缺失" if amv_numeric is None else f"{amv_numeric:+.2f}%"
+    advice_line = regime_advice(regime)
+
+    # 可审计块（原待办 #29，已实现）：本报告实际读过的输入；风控依据回退旧文件时按实际来源登记
+    audit = report_audit.build(
+        target_date,
+        "1445",
+        [
+            p
+            for p in [
+                TRADES / "current_positions.json",
+                MARKET / f"{target_date}_holding_quotes.json",
+                HOLDINGS / f"{target_date}_holding_technical_summary.json",
+                _risk_path,
+                QUALITY / f"{target_date}_runtime_gate.json",
+                MARKET / f"{target_date}_market_timing_input.json",
+            ]
+            if p is not None
+        ],
+    )
+    lines: list[str] = []
+    render_header(
+        lines,
+        target_date,
+        audit,
+        snap,
+        quote_snapshot,
+        amv_display,
+        regime,
+        market_quality,
+    )
+    render_indices(lines, indices)
+    render_revalued(lines, positions, revalued_map, quotes, total_position)
+    render_actions(lines, actions)
+    render_market_state(lines, amv_display, regime, market_quality, tech, risk_note)
+    render_advice(lines, advice_line)
+    render_permissions(lines, gate)
+
+    report = "\n".join(lines)
+    report_errors = validate_report(target_date, positions, report, gate)
+    _strict_check(args.strict, report_errors, "report")
+    out_dir = daily_report_dir(target_date, PLANS)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"{target_date}_1445_review.md"
+    out.write_text(report, encoding="utf-8")
+    log = {
+        "date": target_date,
+        "generated_at": cn_now().isoformat(timespec="seconds"),
+        "audit": audit,
+        "position_snapshot": snap,
+        "total_position": total_position,
+        "positions": positions,
+        "revalued_positions": revalued,
+        "actions": actions,
+        "quote_snapshot": quote_snapshot,
+        "live_quotes_pending": not all(x["price"] is not None for x in revalued),
+        "position_gate": gate.get("position_gate", {}),
+    }
+    (LOGS / f"{target_date}_1445_review.json").write_text(
+        json.dumps(json_safe(log), ensure_ascii=False, indent=2, allow_nan=False),
+        encoding="utf-8",
+    )
+    print(out)
+    emit_output(
+        args,
+        target_date,
+        report,
+        snap,
+        gate,
+        quote_snapshot,
+        indices,
+        positions,
+        revalued_map,
+        quotes,
+        actions,
+        total_position,
+        amv_display,
+        regime,
+    )
 
 
 if __name__ == "__main__":

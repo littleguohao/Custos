@@ -581,7 +581,7 @@ def verify(events: list[dict], samples: list[str]) -> dict:
     return out
 
 
-def main(argv=None) -> int:
+def _parse_args(argv=None):
     ap = argparse.ArgumentParser(
         description="真市值/总股本:按交易日取数,压成股本变动事件"
     )
@@ -615,102 +615,105 @@ def main(argv=None) -> int:
     ap.add_argument(
         "--codes", default="", help="配合 --from-tdx:逗号分隔;留空=本地全市场"
     )
-    args = ap.parse_args(argv)
+    return ap, ap.parse_args(argv)
 
-    if args.from_tdx:
-        if args.codes:
-            codes = [c.strip()[:6] for c in args.codes.split(",") if c.strip()]
-        else:
-            try:
-                from custos.datasource.local_tdx import local_tdx_data
 
-                codes = sorted(local_tdx_data.list_local_vipdoc_codes())
-            except Exception as e:  # noqa: BLE001
-                print(f"[ERR] 读不到本地代码表: {e}", file=sys.stderr)
-                return 2
+def _run_from_tdx(args) -> int:
+    if args.codes:
+        codes = [c.strip()[:6] for c in args.codes.split(",") if c.strip()]
+    else:
         try:
-            from custos.core.code_utils import is_index
+            from custos.datasource.local_tdx import local_tdx_data
 
-            codes = [c for c in codes if not is_index(c)]  # 指数没有股本
-        except Exception:  # noqa: BLE001, S110
-            pass
-        if args.limit:
-            codes = codes[: args.limit]
-        evs = build_from_tdx(codes)
-        res = merge_write(evs, args.out) if evs else {"added": 0}
-        print(
-            json.dumps(
-                {"source": "tdx_xdxr", "codes": len(codes), "events": len(evs), **res},
-                ensure_ascii=False,
-            )
+            codes = sorted(local_tdx_data.list_local_vipdoc_codes())
+        except Exception as e:  # noqa: BLE001
+            print(f"[ERR] 读不到本地代码表: {e}", file=sys.stderr)
+            return 2
+    try:
+        from custos.core.code_utils import is_index
+
+        codes = [c for c in codes if not is_index(c)]  # 指数没有股本
+    except Exception:  # noqa: BLE001, S110
+        pass
+    if args.limit:
+        codes = codes[: args.limit]
+    evs = build_from_tdx(codes)
+    res = merge_write(evs, args.out) if evs else {"added": 0}
+    print(
+        json.dumps(
+            {"source": "tdx_xdxr", "codes": len(codes), "events": len(evs), **res},
+            ensure_ascii=False,
         )
-        return 0
+    )
+    return 0
 
-    out_path, sp_path = Path(args.out), Path(args.samples_out)
 
-    if args.backfill_history:
-        from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
+def _run_backfill(args, out_path: Path) -> int:
+    from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
 
-        codes = local_tdx_data.list_local_vipdoc_codes()
+    codes = local_tdx_data.list_local_vipdoc_codes()
+    print(
+        f"[INFO] 回填 {MV_START} 前股本史: universe {len(codes)} 只",
+        file=sys.stderr,
+    )
+    res = backfill_equity_history(
+        codes, before=MV_START, out_path=out_path, limit=args.limit
+    )
+    print(f"[OK] 回填完成: +{res['added']} 事件(失败 {res['failed']} 只) → {out_path}")
+    return 0 if res["added"] or res["failed"] == 0 else 2
+
+
+def _load_samples(sp_path: Path) -> dict:
+    """采样台账:{"sampled": 有数据的日期, "empty": 已知无数据(非交易日)的日期}。
+    两类都跳过重复请求 —— 空日期不重打,避免每次重跑空转。"""
+    if sp_path.exists():
+        try:
+            data = json.loads(sp_path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return {
+                    "sampled": data.get("sampled") or [],
+                    "empty": data.get("empty") or [],
+                }
+        except ValueError:
+            pass
+    return {"sampled": [], "empty": []}
+
+
+def _run_verify(out_path: Path, sp_path: Path) -> int:
+    events = load_events(out_path)
+    if not events:
+        print(f"[ERR] 股本事件台账为空: {out_path}", file=sys.stderr)
+        return 2
+    rep = verify(events, _load_samples(sp_path)["sampled"])
+    print("\n=== 股本/市值台账自检 ===")
+    print(rep["text"])
+    return 0 if rep["ok"] else 1
+
+
+def _run_as_of(args, out_path: Path) -> int:
+    events = load_events(out_path)
+    if not events:
+        print(f"[ERR] 股本事件台账为空: {out_path}", file=sys.stderr)
+        return 2
+    if before_mv_start(args.as_of):
         print(
-            f"[INFO] 回填 {MV_START} 前股本史: universe {len(codes)} 只",
+            f"[ERR] {args.as_of} 早于市值数据起点 {MV_START},无数据",
             file=sys.stderr,
         )
-        res = backfill_equity_history(
-            codes, before=MV_START, out_path=out_path, limit=args.limit
-        )
+        return 2
+    got = shares_as_of(events, args.as_of, code=args.code)
+    print(f"截至 {args.as_of}:{len(got)} 只有股本记录")
+    for c, row in sorted(got.items())[:20]:
         print(
-            f"[OK] 回填完成: +{res['added']} 事件(失败 {res['failed']} 只) → {out_path}"
+            f"  {c} {row.get('name', ''):<8} 总股本={row['total_shares'] / 1e8:.2f}亿股 "
+            f"(观测于 {row['observed_on']}, 上次采样 {row.get('prev_sample')})"
         )
-        return 0 if res["added"] or res["failed"] == 0 else 2
+    if len(got) > 20:
+        print(f"  ...(共 {len(got)} 只)")
+    return 0
 
-    def _samples() -> dict:
-        """采样台账:{"sampled": 有数据的日期, "empty": 已知无数据(非交易日)的日期}。
-        两类都跳过重复请求 —— 空日期不重打,避免每次重跑空转。"""
-        if sp_path.exists():
-            try:
-                data = json.loads(sp_path.read_text(encoding="utf-8"))
-                if isinstance(data, dict):
-                    return {
-                        "sampled": data.get("sampled") or [],
-                        "empty": data.get("empty") or [],
-                    }
-            except ValueError:
-                pass
-        return {"sampled": [], "empty": []}
 
-    if args.verify:
-        events = load_events(out_path)
-        if not events:
-            print(f"[ERR] 股本事件台账为空: {out_path}", file=sys.stderr)
-            return 2
-        rep = verify(events, _samples()["sampled"])
-        print("\n=== 股本/市值台账自检 ===")
-        print(rep["text"])
-        return 0 if rep["ok"] else 1
-
-    if args.as_of:
-        events = load_events(out_path)
-        if not events:
-            print(f"[ERR] 股本事件台账为空: {out_path}", file=sys.stderr)
-            return 2
-        if before_mv_start(args.as_of):
-            print(
-                f"[ERR] {args.as_of} 早于市值数据起点 {MV_START},无数据",
-                file=sys.stderr,
-            )
-            return 2
-        got = shares_as_of(events, args.as_of, code=args.code)
-        print(f"截至 {args.as_of}:{len(got)} 只有股本记录")
-        for c, row in sorted(got.items())[:20]:
-            print(
-                f"  {c} {row.get('name', ''):<8} 总股本={row['total_shares'] / 1e8:.2f}亿股 "
-                f"(观测于 {row['observed_on']}, 上次采样 {row.get('prev_sample')})"
-            )
-        if len(got) > 20:
-            print(f"  ...(共 {len(got)} 只)")
-        return 0
-
+def _resolve_dates(args, ap) -> list[str]:
     dates = list(args.dates or [])
     if args.since:
         dates += sample_dates(args.since, freq=args.freq)
@@ -719,14 +722,19 @@ def main(argv=None) -> int:
         ap.error(
             f"需提供 --dates 或 --since(且不早于 {MV_START}),或用 --as-of / --verify"
         )
+    return dates
 
+
+def _sample_dates_loop(
+    dates: list[str], out_path: Path, sp_path: Path, freq: str
+) -> int:
     # 以台账里已有的最后状态为起点,避免重复写事件
     events = load_events(out_path)
     prev: dict[str, float] = {}
     for row in sorted(events, key=lambda r: r.get("observed_on") or ""):
         if row.get("total_shares") is not None:
             prev[row["code"]] = float(row["total_shares"])
-    sp = _samples()
+    sp = _load_samples(sp_path)
     sampled = sp["sampled"]
     known_empty = set(sp["empty"])
     last_sample = sampled[-1] if sampled else None
@@ -782,7 +790,7 @@ def main(argv=None) -> int:
             {
                 "sampled": sorted(set(sampled)),
                 "empty": sorted(known_empty),
-                "freq": args.freq,
+                "freq": freq,
                 "mv_start": MV_START,
             },
             ensure_ascii=False,
@@ -798,6 +806,27 @@ def main(argv=None) -> int:
         "提示:市值请用 market_cap()(股本 × 查询日收盘价),勿直接用事件里采样日的 market_cap 字段"
     )
     return 0
+
+
+def main(argv=None) -> int:
+    ap, args = _parse_args(argv)
+
+    if args.from_tdx:
+        return _run_from_tdx(args)
+
+    out_path, sp_path = Path(args.out), Path(args.samples_out)
+
+    if args.backfill_history:
+        return _run_backfill(args, out_path)
+
+    if args.verify:
+        return _run_verify(out_path, sp_path)
+
+    if args.as_of:
+        return _run_as_of(args, out_path)
+
+    dates = _resolve_dates(args, ap)
+    return _sample_dates_loop(dates, out_path, sp_path, args.freq)
 
 
 if __name__ == "__main__":

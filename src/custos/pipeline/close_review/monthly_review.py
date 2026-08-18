@@ -98,14 +98,8 @@ def month_dates(rng: dict) -> list[str]:
     return [(start + timedelta(days=i)).isoformat() for i in range(n + 1)]
 
 
-def build_monthly_review(base: Path, month: str | None) -> dict[str, Any]:
-    rng = month_range(month)
-    days = month_dates(rng)
-    unavailable: list[str] = []
-    execution_issues: list[dict] = []
-    strategy_issues: list[dict] = []
-
-    # --- 台账与月度交易统计（复用 weekly_review 的解析与 FIFO，口径只有一份）---
+def _month_trade_stats(base: Path, rng: dict, unavailable: list[str]) -> dict:
+    """台账加载与本月成交统计（复用 weekly_review 的解析，口径只有一份）。"""
     ledger_path = base / "data" / "trades" / "master_trade_ledger.csv"
     all_trades = parse_ledger(ledger_path)
     if all_trades is None:
@@ -114,17 +108,36 @@ def build_monthly_review(base: Path, month: str | None) -> dict[str, Any]:
     month_trades = [t for t in all_trades if rng["start"] <= t["date"] <= rng["end"]]
     buys = [t for t in month_trades if t["side"] == BUY]
     sells = [t for t in month_trades if t["side"] == SELL]
-    fee_total = round(sum(t["fee"] for t in month_trades), 2)
-    amount_total = round(sum(t["amount"] for t in month_trades), 2)
+    return {
+        "all_trades": all_trades,
+        "month_trades": month_trades,
+        "buys": buys,
+        "sells": sells,
+        "fee_total": round(sum(t["fee"] for t in month_trades), 2),
+        "amount_total": round(sum(t["amount"] for t in month_trades), 2),
+    }
 
-    # --- FIFO 盈亏（只信 match_status == "full"，其余如实报 unavailable）---
+
+def _month_pnl_stats(all_trades: list[dict], rng: dict, unavailable: list[str]) -> dict:
+    """FIFO 盈亏（只信 match_status == "full"，其余如实报 unavailable）。"""
     closings_all = fifo_pair(all_trades)
     closings = [c for c in closings_all if rng["start"] <= c["sell_date"] <= rng["end"]]
+    _report_month_unmatched(closings, unavailable)
     valued = [
         c
         for c in closings
         if c["gross_pnl"] is not None and c["match_status"] == "full"
     ]
+    return {
+        "closings_all": closings_all,
+        "closings": closings,
+        "valued": valued,
+        **_month_pnl_totals(valued),
+    }
+
+
+def _report_month_unmatched(closings: list[dict], unavailable: list[str]) -> None:
+    """部分/零配平单如实 unavailable 报告，排除出盈亏与胜率统计。"""
     for c in closings:
         if c["match_status"] == "partial":
             unavailable.append(
@@ -135,6 +148,10 @@ def build_monthly_review(base: Path, month: str | None) -> dict[str, Any]:
             unavailable.append(
                 f"{c['sell_date']} {c['code']} 平仓单无买入来源，已排除出盈亏与胜率统计"
             )
+
+
+def _month_pnl_totals(valued: list[dict]) -> dict:
+    """毛/净盈亏、胜率/盈亏比、期望值、平均持有天数（只信 full 配平单）。"""
     gross_total = round(sum(c["gross_pnl"] for c in valued), 2)
     matched_buy_fee = round(sum(c["matched_buy_fee"] for c in valued), 2)
     closed_fee = round(matched_buy_fee + sum(c["sell_fee"] for c in valued), 2)
@@ -146,15 +163,24 @@ def build_monthly_review(base: Path, month: str | None) -> dict[str, Any]:
     avg_loss = (
         abs(sum(c["gross_pnl"] for c in losses)) / len(losses) if losses else None
     )
-    pl_ratio = round(avg_win / avg_loss, 2) if (avg_win and avg_loss) else None
-    # 期望值（金额口径）= 平均每笔已实现净盈亏。⚠️ 不是 R 倍数口径：
-    # 台账没有逐笔止损位，算不出 R —— 缺什么说什么，不拿金额冒充 R。
-    expectancy = round(net_total / len(valued), 2) if valued else None
     hold_vals = [c["hold_days"] for c in valued if c["hold_days"] is not None]
-    avg_hold = round(sum(hold_vals) / len(hold_vals), 1) if hold_vals else None
+    return {
+        "losses": losses,
+        "gross_total": gross_total,
+        "closed_fee": closed_fee,
+        "net_total": net_total,
+        "win_rate": win_rate,
+        "pl_ratio": round(avg_win / avg_loss, 2) if (avg_win and avg_loss) else None,
+        # 期望值（金额口径）= 平均每笔已实现净盈亏。⚠️ 不是 R 倍数口径：
+        # 台账没有逐笔止损位，算不出 R —— 缺什么说什么，不拿金额冒充 R。
+        "expectancy": round(net_total / len(valued), 2) if valued else None,
+        "avg_hold": (round(sum(hold_vals) / len(hold_vals), 1) if hold_vals else None),
+    }
 
-    # 个股归因（按净盈亏汇总）。板块归因 unavailable：板块映射只有当前快照，
-    # 拿今天的板块去归上月的因是后视偏差。
+
+def _stock_attribution(valued: list[dict]) -> list[dict]:
+    """个股归因（按净盈亏汇总，升序）。板块归因 unavailable：板块映射只有当前快照，
+    拿今天的板块去归上月的因是后视偏差。"""
     by_stock: dict[str, dict] = {}
     for c in valued:
         e = by_stock.setdefault(
@@ -163,15 +189,16 @@ def build_monthly_review(base: Path, month: str | None) -> dict[str, Any]:
         )
         e["n"] += 1
         e["net_pnl"] = round(e["net_pnl"] + (c["gross_pnl"] or 0), 2)
-    stock_attrib = sorted(
+    return sorted(
         ({"code": k, **v} for k, v in by_stock.items()),
         key=lambda x: x["net_pnl"],
     )
 
-    # --- 交易日历与日报 ---
-    trading_days, daily_reviews = _trading_days_and_reviews(base, days, unavailable)
 
-    # --- 板块 1：市场环境（0AMV regime 分布 + 基准）---
+def _month_environment(
+    base: Path, trading_days: list[str], unavailable: list[str]
+) -> dict:
+    """板块 1：市场环境（0AMV regime 分布）。"""
     amv_path = base / "data" / "market" / "0amv_observations.jsonl"
     regimes = load_amv_regimes(amv_path)
     if regimes is None:
@@ -182,11 +209,11 @@ def build_monthly_review(base: Path, month: str | None) -> dict[str, Any]:
         r = regimes.get(d)
         if r:
             regime_counts[r["regime"]] = regime_counts.get(r["regime"], 0) + 1
+    return regime_counts
 
-    sse_map = sse_daily_map(base, rng["start"], rng["end"])
-    traj = portfolio_trajectory(
-        days, trading_days, daily_reviews, sse_map, unavailable, label="本月"
-    )
+
+def _month_performance_stats(traj: dict) -> dict:
+    """区间收益/回撤/收益回撤比/波动率/平均仓位（由组合轨迹推导）。"""
     month_return = traj["week_return_pct"]
     max_dd = traj["max_drawdown_pct"]
     rd_ratio = (
@@ -205,9 +232,29 @@ def build_monthly_review(base: Path, month: str | None) -> dict[str, Any]:
         if len(rets) >= 2:
             vol = round(statistics.pstdev(rets) * 100, 2)
     pos_vals = [pt["total_position_pct"] for pt in traj["daily"] if not pt["partial"]]
-    avg_pos = round(sum(pos_vals) / len(pos_vals), 2) if pos_vals else None
+    return {
+        "month_return_pct": month_return,
+        "max_drawdown_pct": max_dd,
+        "return_drawdown_ratio": rd_ratio,
+        "volatility_daily_pct": vol,
+        "avg_position_pct": (
+            round(sum(pos_vals) / len(pos_vals), 2) if pos_vals else None
+        ),
+    }
 
-    # --- 执行与纪律维度（复用周度实现，月窗口）---
+
+def _month_discipline(
+    base: Path,
+    days: list[str],
+    trading_days: list[str],
+    daily_reviews: dict,
+    month_trades: list[dict],
+    losses: list[dict],
+    unavailable: list[str],
+    execution_issues: list[dict],
+    strategy_issues: list[dict],
+) -> dict:
+    """执行与纪律维度（复用周度实现，月窗口）。"""
     plan_checks, unplanned_ratio = _plan_adherence(
         base, daily_reviews, execution_issues, unavailable, month_trades
     )
@@ -223,46 +270,63 @@ def build_monthly_review(base: Path, month: str | None) -> dict[str, Any]:
     risk_counts: dict[str, int] = {}
     for lv in risk_levels.values():
         risk_counts[lv] = risk_counts.get(lv, 0) + 1
+    return {
+        "plan_checks": plan_checks,
+        "unplanned_ratio_pct": unplanned_ratio,
+        "slow_stops": slow_stops,
+        "short_loss_share_pct": short_loss_share,
+        "no_trade_days": no_trade_days,
+        "unconfirmed_no_trade_days": unconfirmed,
+        "risk_level_counts": risk_counts,
+        "bear_context": {
+            "bear_days": bear_days,
+            "bear_day_ratio_pct": bear_day_ratio,
+            "bear_loss_share_pct": bear_loss_share,
+        },
+    }
 
-    # --- 连亏（全台账口径，跨月不打断）---
-    streak_result = loss_streaks(closings_all)
-    # --- 止损冷却名单（#51，2026-08-12：同连亏落点，全台账口径；as_of=月末）---
-    cooldown_result = stop_cooldowns(closings_all, as_of=rng["end"])
-    # --- 胜率降仓提示（#51② owner 2026-08-12 定：正式一节，只提示不拦截）---
-    win_rate_hint = win_rate_check(win_rate)
 
-    # --- 期末组合集中度（成本口径；current_positions 是当前快照，
-    #     只有复盘「刚结束的当月」时它才约等于期末持仓——更早月份标 unavailable）---
-    concentration = None
+def _month_concentration(base: Path, rng: dict, unavailable: list[str]) -> dict | None:
+    """期末组合集中度（成本口径；current_positions 是当前快照，
+    只有复盘「刚结束的当月」时它才约等于期末持仓——更早月份标 unavailable）。"""
     pos_path = base / "data" / "trades" / "current_positions.json"
     if rng["label"] != month_range(None)["label"]:
         unavailable.append(
             "组合集中度：current_positions 是当前快照，仅复盘上个月时可用"
         )
-    elif pos_path.exists():
-        from custos.core.paths import read_json as _rj
-
-        positions = _rj(pos_path, []) or []
-        costs = sorted(
-            (
-                float(p.get("持有数量") or 0) * float(p.get("单位成本") or 0)
-                for p in positions
-            ),
-            reverse=True,
-        )
-        costs = [c for c in costs if c > 0]
-        total_cost = sum(costs)
-        if total_cost > 0:
-            concentration = {
-                "basis": "成本口径",
-                "n_positions": len(costs),
-                "top1_pct": round(costs[0] / total_cost * 100, 2),
-                "top3_pct": round(sum(costs[:3]) / total_cost * 100, 2),
-            }
-    else:
+        return None
+    if not pos_path.exists():
         unavailable.append(f"组合集中度：{pos_path} 缺失")
+        return None
+    from custos.core.paths import read_json as _rj
 
-    # --- 下月观察方向：只从已算出的**事实**生成机械提示，不做策略判断 ---
+    positions = _rj(pos_path, []) or []
+    costs = sorted(
+        (
+            float(p.get("持有数量") or 0) * float(p.get("单位成本") or 0)
+            for p in positions
+        ),
+        reverse=True,
+    )
+    costs = [c for c in costs if c > 0]
+    total_cost = sum(costs)
+    if total_cost <= 0:
+        return None
+    return {
+        "basis": "成本口径",
+        "n_positions": len(costs),
+        "top1_pct": round(costs[0] / total_cost * 100, 2),
+        "top3_pct": round(sum(costs[:3]) / total_cost * 100, 2),
+    }
+
+
+def _next_month_notes(
+    streak_result: dict,
+    win_rate,
+    max_dd,
+    unplanned_ratio,
+) -> list[str]:
+    """下月观察方向：只从已算出的**事实**生成机械提示，不做策略判断。"""
     notes: list[str] = []
     if streak_result.get("flagged"):
         notes.append(
@@ -281,7 +345,11 @@ def build_monthly_review(base: Path, month: str | None) -> dict[str, Any]:
         notes.append(f"存在计划外交易（占比 {unplanned_ratio}%）——见「行为偏差」节。")
     if not notes:
         notes.append("无机械触发的观察项；按 §七 应由人复核本报告后填写下月方向。")
+    return notes
 
+
+def _append_known_gaps(unavailable: list[str]) -> None:
+    """刻意 unavailable 的项（不编数据，见模块 docstring「刻意 unavailable 的部分」）。"""
     for key in ("换手率", "板块归因", "行业集中度与相关性暴露", "规则/策略版本贡献"):
         unavailable.append(
             {
@@ -291,6 +359,63 @@ def build_monthly_review(base: Path, month: str | None) -> dict[str, Any]:
                 "规则/策略版本贡献": "规则版本贡献：CHANGELOG 版本记录与成交台账无关联键，无法按版本归因",
             }[key]
         )
+
+
+def build_monthly_review(base: Path, month: str | None) -> dict[str, Any]:
+    rng = month_range(month)
+    days = month_dates(rng)
+    unavailable: list[str] = []
+    execution_issues: list[dict] = []
+    strategy_issues: list[dict] = []
+
+    # --- 台账与月度交易统计 + FIFO 盈亏（复用 weekly_review 的解析与 FIFO，口径只有一份）---
+    trade = _month_trade_stats(base, rng, unavailable)
+    pnl = _month_pnl_stats(trade["all_trades"], rng, unavailable)
+    stock_attrib = _stock_attribution(pnl["valued"])
+
+    # --- 交易日历与日报 ---
+    trading_days, daily_reviews = _trading_days_and_reviews(base, days, unavailable)
+
+    # --- 板块 1：市场环境（0AMV regime 分布 + 基准）---
+    regime_counts = _month_environment(base, trading_days, unavailable)
+
+    sse_map = sse_daily_map(base, rng["start"], rng["end"])
+    traj = portfolio_trajectory(
+        days, trading_days, daily_reviews, sse_map, unavailable, label="本月"
+    )
+    perf = _month_performance_stats(traj)
+
+    # --- 执行与纪律维度（复用周度实现，月窗口）---
+    disc = _month_discipline(
+        base,
+        days,
+        trading_days,
+        daily_reviews,
+        trade["month_trades"],
+        pnl["losses"],
+        unavailable,
+        execution_issues,
+        strategy_issues,
+    )
+
+    # --- 连亏（全台账口径，跨月不打断）---
+    streak_result = loss_streaks(pnl["closings_all"])
+    # --- 止损冷却名单（#51，2026-08-12：同连亏落点，全台账口径；as_of=月末）---
+    cooldown_result = stop_cooldowns(pnl["closings_all"], as_of=rng["end"])
+    # --- 胜率降仓提示（#51② owner 2026-08-12 定：正式一节，只提示不拦截）---
+    win_rate_hint = win_rate_check(pnl["win_rate"])
+
+    # --- 期末组合集中度 ---
+    concentration = _month_concentration(base, rng, unavailable)
+
+    # --- 下月观察方向 + 刻意 unavailable 的项 ---
+    notes = _next_month_notes(
+        streak_result,
+        pnl["win_rate"],
+        perf["max_drawdown_pct"],
+        disc["unplanned_ratio_pct"],
+    )
+    _append_known_gaps(unavailable)
 
     return {
         "month": rng["label"],
@@ -306,47 +431,43 @@ def build_monthly_review(base: Path, month: str | None) -> dict[str, Any]:
             "benchmark_month_pct": traj["benchmark_week_pct"],
         },
         "performance": {
-            "month_return_pct": month_return,
-            "max_drawdown_pct": max_dd,
-            "return_drawdown_ratio": rd_ratio,
-            "volatility_daily_pct": vol,
-            "avg_position_pct": avg_pos,
+            "month_return_pct": perf["month_return_pct"],
+            "max_drawdown_pct": perf["max_drawdown_pct"],
+            "return_drawdown_ratio": perf["return_drawdown_ratio"],
+            "volatility_daily_pct": perf["volatility_daily_pct"],
+            "avg_position_pct": perf["avg_position_pct"],
             "benchmark_month_pct": traj["benchmark_week_pct"],
             "trajectory": traj["daily"],
             "partial_notes": traj["partial_notes"],
         },
         "realized": {
-            "n_trades": len(month_trades),
-            "n_buys": len(buys),
-            "n_sells": len(sells),
-            "amount_total": amount_total,
-            "fee_total": fee_total,
+            "n_trades": len(trade["month_trades"]),
+            "n_buys": len(trade["buys"]),
+            "n_sells": len(trade["sells"]),
+            "amount_total": trade["amount_total"],
+            "fee_total": trade["fee_total"],
             "turnover_rate_pct": None,  # 缺平均权益基数，见 unavailable
-            "n_closings": len(closings),
-            "n_valued": len(valued),
-            "gross_total": gross_total,
-            "closed_fee_total": closed_fee,
-            "net_total": net_total,
-            "win_rate_pct": win_rate,
-            "pl_ratio": pl_ratio,
-            "expectancy_per_trade": expectancy,
-            "avg_hold_days": avg_hold,
+            "n_closings": len(pnl["closings"]),
+            "n_valued": len(pnl["valued"]),
+            "gross_total": pnl["gross_total"],
+            "closed_fee_total": pnl["closed_fee"],
+            "net_total": pnl["net_total"],
+            "win_rate_pct": pnl["win_rate"],
+            "pl_ratio": pnl["pl_ratio"],
+            "expectancy_per_trade": pnl["expectancy"],
+            "avg_hold_days": pnl["avg_hold"],
             "stock_attribution": stock_attrib,
         },
         "discipline": {
-            "plan_checks": plan_checks,
-            "unplanned_ratio_pct": unplanned_ratio,
-            "slow_stops": slow_stops,
-            "short_loss_share_pct": short_loss_share,
-            "no_trade_days": no_trade_days,
-            "unconfirmed_no_trade_days": unconfirmed,
-            "risk_level_counts": risk_counts,
+            "plan_checks": disc["plan_checks"],
+            "unplanned_ratio_pct": disc["unplanned_ratio_pct"],
+            "slow_stops": disc["slow_stops"],
+            "short_loss_share_pct": disc["short_loss_share_pct"],
+            "no_trade_days": disc["no_trade_days"],
+            "unconfirmed_no_trade_days": disc["unconfirmed_no_trade_days"],
+            "risk_level_counts": disc["risk_level_counts"],
         },
-        "bear_context": {
-            "bear_days": bear_days,
-            "bear_day_ratio_pct": bear_day_ratio,
-            "bear_loss_share_pct": bear_loss_share,
-        },
+        "bear_context": disc["bear_context"],
         "loss_streaks": streak_result,
         "cooldown": cooldown_result,
         "win_rate_hint": win_rate_hint,

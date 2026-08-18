@@ -122,11 +122,8 @@ def slope(vals: pd.Series, n: int) -> float | None:
     return (now / prev - 1) * 100
 
 
-def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
-    """Compute deterministic B1 holding signals from completed daily bars."""
-    if len(df) < 20:
-        return {"available": False, "reason": "少于20根K线"}
-    x = df.reset_index(drop=True)
+def _pv_snapshot(x: pd.DataFrame) -> dict[str, Any]:
+    """最新两根 K 线的量价快照（price_volume_state 的输入段）。"""
     current = x.iloc[-1]
     previous = x.iloc[-2]
     close = float(current["close"])
@@ -154,23 +151,43 @@ def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
     volume_ratio_5 = volume / volume_ma5 if volume_ma5 else None
     volume_ratio_20 = volume / volume_ma20 if volume_ma20 else None
     volume_rank20 = float((x["volume"].tail(20) <= volume).sum()) / 20
+    return {
+        "date": current["date"].strftime("%Y-%m-%d"),
+        "close": close,
+        "previous_close": previous_close,
+        "open": open_,
+        "change_pct": change_pct,
+        "amplitude_pct": amplitude_pct,
+        "body_pct": body_pct,
+        "volume_ratio_5": volume_ratio_5,
+        "volume_ratio_20": volume_ratio_20,
+        "volume_rank20": volume_rank20,
+    }
 
-    def bull_metrics(i: int) -> dict[str, Any]:
-        row = x.iloc[i]
-        prev_close = float(x.iloc[i - 1]["close"])
-        day_change = pct_change(float(row["close"]), prev_close, digits=2) or 0
-        body = (
-            (float(row["close"]) / float(row["open"]) - 1) * 100
-            if float(row["open"])
-            else 0
-        )
-        return {
-            "bull": float(row["close"]) > float(row["open"]),
-            "change_pct": day_change,  # 已是 round-2（2026-08-11 口径统一）
-            "body_pct": round(body, 4),
-        }
 
-    latest_bulls = [bull_metrics(-2), bull_metrics(-1)]
+def _bull_metrics(x: pd.DataFrame, i: int) -> dict[str, Any]:
+    row = x.iloc[i]
+    prev_close = float(x.iloc[i - 1]["close"])
+    day_change = pct_change(float(row["close"]), prev_close, digits=2) or 0
+    body = (
+        (float(row["close"]) / float(row["open"]) - 1) * 100
+        if float(row["open"])
+        else 0
+    )
+    return {
+        "bull": float(row["close"]) > float(row["open"]),
+        "change_pct": day_change,  # 已是 round-2（2026-08-11 口径统一）
+        "body_pct": round(body, 4),
+    }
+
+
+def _pv_bear_flags(snap: dict[str, Any]) -> dict[str, Any]:
+    """阴线类判定段：小阴/缩量小阴/大阴/放巨量阴。"""
+    close = snap["close"]
+    open_ = snap["open"]
+    change_pct = snap["change_pct"]
+    body_pct = snap["body_pct"]
+    volume_ratio_5 = snap["volume_ratio_5"]
     small_bear = (
         close < open_
         and change_pct is not None
@@ -185,6 +202,19 @@ def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
     heavy_large_bear = bool(
         large_bear and volume_ratio_5 is not None and volume_ratio_5 >= 1.5
     )
+    return {
+        "shrink_small_bear": shrink_small_bear,
+        "large_bear": large_bear,
+        "heavy_large_bear": heavy_large_bear,
+    }
+
+
+def _pv_shrink_reversal_flags(snap: dict[str, Any]) -> dict[str, Any]:
+    """极端缩量与反转K候选判定段（阈值一律取 `b1_thresholds`，运行时读取）。"""
+    volume_ratio_5 = snap["volume_ratio_5"]
+    volume_rank20 = snap["volume_rank20"]
+    change_pct = snap["change_pct"]
+    amplitude_pct = snap["amplitude_pct"]
     # `volume_rank20` 是 0~1 的比例，`VOL_PCTILE_MAX` 的单位是 %（10.0）—— 故 /100。
     extreme_shrink = bool(
         volume_ratio_5 is not None
@@ -199,8 +229,20 @@ def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
         and amplitude_pct is not None
         and amplitude_pct <= REVERSAL_AMPLITUDE_PCT
     )
+    return {
+        "extreme_shrink": extreme_shrink,
+        "reversal_k_candidate": reversal_k_candidate,
+    }
 
-    # BBI上方连续两根中大阳线判断 (B1第五层止盈)
+
+def _pv_two_medium_large_bull(
+    df: pd.DataFrame,
+    x: pd.DataFrame,
+    code: str,
+    close: float,
+    latest_bulls: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """BBI上方连续两根中大阳线判断 (B1第五层止盈)。"""
     price_limit = _infer_price_limit(code, df)
     medium_large_threshold = price_limit / 2  # 半个涨停幅度
     bbi_val = bbi_series(df["close"])
@@ -238,8 +280,49 @@ def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
     else:
         two_medium_large_bull_reason = "BBI数据不足，无法判断连续中大阳"
     return {
+        "two_medium_large_bull": two_medium_large_bull,
+        "two_medium_large_bull_reason": two_medium_large_bull_reason,
+        "price_limit": price_limit,
+        "medium_large_threshold": medium_large_threshold,
+    }
+
+
+def _pv_thresholds_block() -> dict[str, Any]:
+    return {
+        "medium_large_bull_rule": "单日涨幅或阳线实体幅度达到当日涨跌幅限制的一半",
+        "small_bear_change_pct": [-2.0, 0.0],
+        "shrink_volume_ratio_5_max": 0.8,
+        "heavy_volume_ratio_5_min": 1.5,
+        # ⚠️ 上报**实际生效值**而非字面量 —— 原先写死 [-2.0, 2.0]，
+        #    环境变量一改它就在谎报自己的阈值。
+        "reversal_volume_ratio_5_max": VOL_RATIO_MAX,
+        "reversal_volume_rank20_pct_max": VOL_PCTILE_MAX,
+        "reversal_close_change_pct": [
+            REVERSAL_CHANGE_MIN_PCT,
+            REVERSAL_CHANGE_MAX_PCT,
+        ],
+        "reversal_amplitude_pct_max": REVERSAL_AMPLITUDE_PCT,
+    }
+
+
+def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
+    """Compute deterministic B1 holding signals from completed daily bars."""
+    if len(df) < 20:
+        return {"available": False, "reason": "少于20根K线"}
+    x = df.reset_index(drop=True)
+    snap = _pv_snapshot(x)
+    latest_bulls = [_bull_metrics(x, -2), _bull_metrics(x, -1)]
+    bears = _pv_bear_flags(snap)
+    shrinks = _pv_shrink_reversal_flags(snap)
+    bbi_part = _pv_two_medium_large_bull(df, x, code, snap["close"], latest_bulls)
+    change_pct = snap["change_pct"]
+    amplitude_pct = snap["amplitude_pct"]
+    body_pct = snap["body_pct"]
+    volume_ratio_5 = snap["volume_ratio_5"]
+    volume_ratio_20 = snap["volume_ratio_20"]
+    return {
         "available": True,
-        "date": current["date"].strftime("%Y-%m-%d"),
+        "date": snap["date"],
         "change_pct": round(change_pct, 4) if change_pct is not None else None,
         "amplitude_pct": round(amplitude_pct, 4) if amplitude_pct is not None else None,
         "body_pct": round(body_pct, 4) if body_pct is not None else None,
@@ -249,33 +332,20 @@ def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
         "volume_ratio_20": round(volume_ratio_20, 4)
         if volume_ratio_20 is not None
         else None,
-        "volume_rank20_pct": round(volume_rank20 * 100, 4),
-        "close_raised": bool(close > previous_close),
-        "shrink_small_bear": shrink_small_bear,
-        "large_bear": large_bear,
-        "heavy_large_bear": heavy_large_bear,
+        "volume_rank20_pct": round(snap["volume_rank20"] * 100, 4),
+        "close_raised": bool(snap["close"] > snap["previous_close"]),
+        "shrink_small_bear": bears["shrink_small_bear"],
+        "large_bear": bears["large_bear"],
+        "heavy_large_bear": bears["heavy_large_bear"],
         "last_two_bull_metrics": latest_bulls,
-        "two_medium_large_bull": two_medium_large_bull,
-        "two_medium_large_bull_reason": two_medium_large_bull_reason or "未计算",
-        "price_limit": price_limit,
-        "medium_large_bull_threshold": round(medium_large_threshold, 2),
-        "extreme_shrink": extreme_shrink,
-        "reversal_k_candidate_without_j": reversal_k_candidate,
-        "thresholds": {
-            "medium_large_bull_rule": "单日涨幅或阳线实体幅度达到当日涨跌幅限制的一半",
-            "small_bear_change_pct": [-2.0, 0.0],
-            "shrink_volume_ratio_5_max": 0.8,
-            "heavy_volume_ratio_5_min": 1.5,
-            # ⚠️ 上报**实际生效值**而非字面量 —— 原先写死 [-2.0, 2.0]，
-            #    环境变量一改它就在谎报自己的阈值。
-            "reversal_volume_ratio_5_max": VOL_RATIO_MAX,
-            "reversal_volume_rank20_pct_max": VOL_PCTILE_MAX,
-            "reversal_close_change_pct": [
-                REVERSAL_CHANGE_MIN_PCT,
-                REVERSAL_CHANGE_MAX_PCT,
-            ],
-            "reversal_amplitude_pct_max": REVERSAL_AMPLITUDE_PCT,
-        },
+        "two_medium_large_bull": bbi_part["two_medium_large_bull"],
+        "two_medium_large_bull_reason": bbi_part["two_medium_large_bull_reason"]
+        or "未计算",
+        "price_limit": bbi_part["price_limit"],
+        "medium_large_bull_threshold": round(bbi_part["medium_large_threshold"], 2),
+        "extreme_shrink": shrinks["extreme_shrink"],
+        "reversal_k_candidate_without_j": shrinks["reversal_k_candidate"],
+        "thresholds": _pv_thresholds_block(),
     }
 
 

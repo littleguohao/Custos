@@ -471,14 +471,35 @@ class TestReversalChangeSymmetric:
         —— 常量名出现在**注释**里也算通过，而且它验不了「可配置」（owner 明确要求）。
         2026-08-07 阈值收敛到 `b1_thresholds` 后判定式变成 `change_in_range(...)`，
         那条断言直接假失败 —— 语义完全没变。改为 AST 查真实调用。
+        2026-08-18（TODO #58）：compute_metrics 拆出 `_base_scalars`（反转K判定所在
+        特征块），AST 检查改为沿 compute_metrics 的调用目标递归找 `change_in_range`。
         """
         import ast as _ast
         import inspect
 
-        tree = _ast.parse(inspect.getsource(ec.compute_metrics))
-        called = {
-            _ast.unparse(n.func) for n in _ast.walk(tree) if isinstance(n, _ast.Call)
-        }
+        def _calls_of(fn) -> set:
+            tree = _ast.parse(inspect.getsource(fn))
+            return {
+                _ast.unparse(n.func)
+                for n in _ast.walk(tree)
+                if isinstance(n, _ast.Call)
+            }
+
+        # 沿 compute_metrics 的内部调用链（_base_scalars/_evidence_states/...）
+        # 递归收集真实调用，判定块挪到哪里都拦得住本地重写。
+        seen: set = set()
+        frontier = [ec.compute_metrics]
+        called: set = set()
+        while frontier:
+            fn = frontier.pop()
+            if fn.__name__ in seen:
+                continue
+            seen.add(fn.__name__)
+            for name in _calls_of(fn):
+                called.add(name)
+                nxt = getattr(ec, name, None)
+                if callable(nxt) and getattr(nxt, "__module__", "") == ec.__name__:
+                    frontier.append(nxt)
         assert "change_in_range" in called, (
             f"必须调用 b1_thresholds.change_in_range，实际调用 {sorted(called)[:12]}"
         )

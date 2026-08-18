@@ -54,12 +54,11 @@ def _is_stale(as_of, target_date) -> bool:
     return s < target_date.replace("-", "")
 
 
-def compute_index(code: str) -> dict:
-    """Compute index trend from vipdoc K-line data."""
+def _index_rows(code: str) -> list[dict]:
+    """从 vipdoc 读 K 线并压成按日期升序的 {date, close, amount, volume} 行。"""
     df = ltd.get_ohlcv_table(code, count=260, prefer="vipdoc")
     if df.empty:
-        return {"available": False, "source": "vipdoc_day"}
-
+        return []
     rows = []
     for _, r in df.iterrows():
         dt = r.get("date")
@@ -71,7 +70,34 @@ def compute_index(code: str) -> dict:
                 "volume": to_float(r.get("volume")),
             }
         )
-    rows = sorted(rows, key=lambda x: x["date"])
+    return sorted(rows, key=lambda x: x["date"])
+
+
+def _ma_fields(closes: list, latest_close: float) -> dict:
+    """MA25/60/144/240 与 above_maX 标志。
+
+    ⚠️ 数据不够长时必须给 None 而不是 False：False 会被 market_timing_scorer
+    当成「跌破 MA」扣分，把「算不出」当「跌破」方向偏空。
+    """
+    ma25 = sum(closes[-25:]) / 25 if len(closes) >= 25 else None
+    ma60 = sum(closes[-60:]) / 60 if len(closes) >= 60 else None
+    ma144 = sum(closes[-144:]) / 144 if len(closes) >= 144 else None
+    ma240 = sum(closes[-240:]) / 240 if len(closes) >= 240 else None
+    return {
+        "ma25": round(ma25, 4) if ma25 else None,
+        "ma60": round(ma60, 4) if ma60 else None,
+        "ma144": round(ma144, 4) if ma144 else None,
+        "ma240": round(ma240, 4) if ma240 else None,
+        "above_ma25": bool(latest_close > ma25) if ma25 else None,
+        "above_ma60": bool(latest_close > ma60) if ma60 else None,
+        "above_ma144": bool(latest_close > ma144) if ma144 else None,
+        "above_ma240": bool(latest_close > ma240) if ma240 else None,
+    }
+
+
+def compute_index(code: str) -> dict:
+    """Compute index trend from vipdoc K-line data."""
+    rows = _index_rows(code)
     if not rows:
         return {"available": False, "source": "vipdoc_day"}
 
@@ -87,11 +113,6 @@ def compute_index(code: str) -> dict:
     def close_n(n):
         return closes[-1 - n] if len(closes) > n else None
 
-    ma25 = sum(closes[-25:]) / 25 if len(closes) >= 25 else None
-    ma60 = sum(closes[-60:]) / 60 if len(closes) >= 60 else None
-    ma144 = sum(closes[-144:]) / 144 if len(closes) >= 144 else None
-    ma240 = sum(closes[-240:]) / 240 if len(closes) >= 240 else None
-
     latest_date = rows[-1]["date"]
     latest_amount = amounts[-1] if amounts else None
 
@@ -104,31 +125,13 @@ def compute_index(code: str) -> dict:
         "change_5d_pct": pct(latest_close, close_n(5)),
         "change_20d_pct": pct(latest_close, close_n(20)),
         "change_60d_pct": pct(latest_close, close_n(60)),
-        "ma25": round(ma25, 4) if ma25 else None,
-        "ma60": round(ma60, 4) if ma60 else None,
-        "ma144": round(ma144, 4) if ma144 else None,
-        "ma240": round(ma240, 4) if ma240 else None,
-        "above_ma25": bool(latest_close > ma25) if ma25 else None,
-        "above_ma60": bool(latest_close > ma60) if ma60 else None,
-        "above_ma144": bool(latest_close > ma144) if ma144 else None,
-        "above_ma240": bool(latest_close > ma240) if ma240 else None,
+        **_ma_fields(closes, latest_close),
         "daily_amount": latest_amount,
     }
 
 
-def main():
-    import argparse
-
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--date", required=True)
-    args = ap.parse_args()
-
-    market_path = MARKET_DIR / f"{args.date}_market_timing_input.json"
-    if not market_path.exists():
-        print(f"[SKIP] market_timing_input.json not found for {args.date}")
-        return
-
-    mkt = json.loads(market_path.read_text(encoding="utf-8"))
+def _refresh_indices(mkt: dict, date: str) -> tuple[bool, int]:
+    """刷新 a_share_indices 里缺失/陈旧的指数。返回 (是否改写, 刷了几只)。"""
     existing = mkt.get("a_share_indices", {})
     updated = False
     indices_fixed = 0
@@ -140,7 +143,7 @@ def main():
         if (
             cur.get("available")
             and cur.get("daily_change_pct") is not None
-            and not _is_stale(cur.get("latest_date"), args.date)
+            and not _is_stale(cur.get("latest_date"), date)
         ):
             continue
         fresh = compute_index(code)
@@ -157,11 +160,14 @@ def main():
 
     if updated:
         mkt["a_share_indices"] = existing
+    return updated, indices_fixed
 
-    # Compute turnover from 上证指数 daily_amount if turnover is missing
+
+def _refresh_turnover_from_index(mkt: dict) -> bool:
+    """Compute turnover from 上证指数 daily_amount if turnover is missing."""
     turnover = mkt.get("turnover", {})
     if not turnover or turnover.get("quality") in (None, "missing", ""):
-        sh = existing.get("上证指数", {})
+        sh = mkt.get("a_share_indices", {}).get("上证指数", {})
         daily_amount = sh.get("daily_amount")
         if daily_amount:
             mkt["turnover"] = {
@@ -172,54 +178,61 @@ def main():
                 "note": "上证指数当日成交额(元)，全市场口径需另采880001",
             }
             mkt.setdefault("market_turnover", mkt["turnover"])
-            updated = True
             print(f"[OK] turnover: {daily_amount} (from 上证指数)")
+            return True
+    return False
 
-    # Also try 880001 for full-market turnover and turnover_change_pct
+
+def _refresh_turnover_full_market(mkt: dict, date: str) -> bool:
+    """Also try 880001 for full-market turnover and turnover_change_pct."""
     turnover_needs_fix = (
         not mkt.get("turnover")
         or mkt.get("turnover", {}).get("turnover_change_pct") is None
-        or _is_stale(mkt.get("turnover", {}).get("as_of"), args.date)
+        or _is_stale(mkt.get("turnover", {}).get("as_of"), date)
     )
-    if turnover_needs_fix:
-        try:
-            df_880001 = ltd.get_ohlcv_table("880001.SH", count=5, prefer="vipdoc")
-            if not df_880001.empty:
-                last_row = df_880001.iloc[-1]
-                amt = to_float(last_row.get("amount"))
-                dt = str(last_row.get("date", ""))
-                # Calculate change pct from previous day
-                prev_amt = None
-                if len(df_880001) >= 2:
-                    prev_amt = to_float(df_880001.iloc[-2].get("amount"))
-                chg_pct = pct(amt, prev_amt) if amt and prev_amt else None
-                if amt:
-                    mkt["turnover"] = {
-                        "total_turnover": amt,
-                        "turnover_change_pct": chg_pct,
-                        "quality": "auto",
-                        "as_of": dt,
-                        "source": "vipdoc_880001_amount",
-                        "note": "全市场成交额(元)及环比变化率，来自880001.SH vipdoc",
-                    }
-                    mkt["market_turnover"] = {
-                        "quality": "auto",
-                        "as_of": dt,
-                        "value": amt,
-                        "source": "vipdoc_880001_amount",
-                    }
-                    updated = True
-                    print(f"[OK] turnover: {amt} (from 880001), change_pct={chg_pct}")
-        except Exception as e:
-            print(f"[WARN] 880001 fetch failed: {e}")
+    if not turnover_needs_fix:
+        return False
+    try:
+        df_880001 = ltd.get_ohlcv_table("880001.SH", count=5, prefer="vipdoc")
+        if not df_880001.empty:
+            last_row = df_880001.iloc[-1]
+            amt = to_float(last_row.get("amount"))
+            dt = str(last_row.get("date", ""))
+            # Calculate change pct from previous day
+            prev_amt = None
+            if len(df_880001) >= 2:
+                prev_amt = to_float(df_880001.iloc[-2].get("amount"))
+            chg_pct = pct(amt, prev_amt) if amt and prev_amt else None
+            if amt:
+                mkt["turnover"] = {
+                    "total_turnover": amt,
+                    "turnover_change_pct": chg_pct,
+                    "quality": "auto",
+                    "as_of": dt,
+                    "source": "vipdoc_880001_amount",
+                    "note": "全市场成交额(元)及环比变化率，来自880001.SH vipdoc",
+                }
+                mkt["market_turnover"] = {
+                    "quality": "auto",
+                    "as_of": dt,
+                    "value": amt,
+                    "source": "vipdoc_880001_amount",
+                }
+                print(f"[OK] turnover: {amt} (from 880001), change_pct={chg_pct}")
+                return True
+    except Exception as e:
+        print(f"[WARN] 880001 fetch failed: {e}")
+    return False
 
-    # Refresh market breadth (涨跌家数) from 880005.SH
+
+def _refresh_breadth(mkt: dict, date: str) -> bool:
+    """Refresh market breadth (涨跌家数) from 880005.SH."""
     breadth = mkt.get("market_breadth", {})
     if (
         not breadth
         or breadth.get("quality") in (None, "missing", "")
         or breadth.get("up_count") is None
-        or _is_stale(breadth.get("as_of"), args.date)
+        or _is_stale(breadth.get("as_of"), date)
     ):
         try:
             df_bd = ltd.get_ohlcv_table(BREADTH_CODE, count=3, prefer="vipdoc")
@@ -246,22 +259,25 @@ def main():
                     "quality": "auto",
                     "as_of": bd_date[:10] if bd_date else "",
                 }
-                updated = True
                 print(
                     f"[OK] market_breadth: up={int(up_count) if up_count else 'N/A'}, "
                     f"down={counts['down_count'] if counts['down_count'] is not None else 'unavailable'} "
                     f"(from 880005, ratio={counts['up_down_ratio_status']})"
                 )
+                return True
         except Exception as e:
             print(f"[WARN] 880005 breadth fetch failed: {e}")
+    return False
 
-    # Refresh sentiment (涨跌停) from 880006.SH
+
+def _refresh_sentiment(mkt: dict, date: str) -> bool:
+    """Refresh sentiment (涨跌停) from 880006.SH."""
     sentiment = mkt.get("sentiment", {})
     if (
         not sentiment
         or sentiment.get("quality") in (None, "missing", "")
         or sentiment.get("limit_up_count") is None
-        or _is_stale(sentiment.get("as_of"), args.date)
+        or _is_stale(sentiment.get("as_of"), date)
     ):
         try:
             df_st = ltd.get_ohlcv_table(SENTIMENT_CODE, count=3, prefer="vipdoc")
@@ -288,12 +304,39 @@ def main():
                     "quality": "auto",
                     "as_of": st_date[:10] if st_date else "",
                 }
-                updated = True
                 print(
                     f"[OK] sentiment: limit_up={int(limit_up_close) if limit_up_close else 'N/A'}, once_up={int(once_up) if once_up else 'N/A'}, limit_down={int(limit_down_max) if limit_down_max else 'N/A'} (from 880006)"
                 )
+                return True
         except Exception as e:
             print(f"[WARN] 880006 sentiment fetch failed: {e}")
+    return False
+
+
+def main():
+    import argparse
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--date", required=True)
+    args = ap.parse_args()
+
+    market_path = MARKET_DIR / f"{args.date}_market_timing_input.json"
+    if not market_path.exists():
+        print(f"[SKIP] market_timing_input.json not found for {args.date}")
+        return
+
+    mkt = json.loads(market_path.read_text(encoding="utf-8"))
+
+    updated, indices_fixed = _refresh_indices(mkt, args.date)
+    # 顺序敏感：先上证窄口径兜底，再由 880001 全市场口径覆盖（两段填同一个键）
+    if _refresh_turnover_from_index(mkt):
+        updated = True
+    if _refresh_turnover_full_market(mkt, args.date):
+        updated = True
+    if _refresh_breadth(mkt, args.date):
+        updated = True
+    if _refresh_sentiment(mkt, args.date):
+        updated = True
 
     if updated:
         market_path.write_text(
