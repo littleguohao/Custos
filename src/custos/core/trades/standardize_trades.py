@@ -26,6 +26,7 @@ xlsx 必须含三个 sheet：`持仓数据` / `已清仓` / `交易记录`。
 #   data/trades/trades_stock.json      — 股票买卖明细
 #   data/trades/closed_positions.json  — 已清仓汇总
 #   data/trades/current_positions.json — 当前持仓快照
+#   data/trades/positions_history/{date}.json — 当日持仓快照归档（#49）
 #   data/trades/_import_meta.json      — 导入元数据 (源路径 + 时间 + 行数)
 from __future__ import annotations
 import argparse
@@ -44,6 +45,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
 from custos.core.paths import cn_now, TRADES_DIR  # noqa: E402
 from custos.core.code_utils import clean_code  # noqa: E402
+from custos.core import positions_history  # noqa: E402
 
 OUT_DIR = TRADES_DIR
 
@@ -125,6 +127,8 @@ def main() -> None:
         encoding="utf-8",
     )
     print(f"[trades] current_positions.json: {len(pos_rows)} holdings")
+    # #49：同步归档当日快照，供 entities(date) 历史回填
+    positions_history.archive_snapshot(pos_rows, cn_now().date().isoformat())
 
     # ── 4. 导入元数据 ──
     meta = {

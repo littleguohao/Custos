@@ -13,6 +13,7 @@ import pandas as pd
 import pytest
 
 from custos.core.trades import incremental_ledger as il
+from custos.core import positions_history
 
 
 def _df(rows):
@@ -87,6 +88,9 @@ class TestApplyPositions:
     def _tmp_pos(self, tmp_path, monkeypatch):
         self.pos = tmp_path / "current_positions.json"
         monkeypatch.setattr(il, "POS", self.pos)
+        # ⚠️ apply_positions 现在同步归档快照（#49），不写进真实 data/trades/
+        self.hist = tmp_path / "hist"
+        monkeypatch.setattr(positions_history, "HISTORY_DIR", self.hist)
 
     def _read(self):
         return {x["代码"]: x for x in json.loads(self.pos.read_text(encoding="utf-8"))}
@@ -114,6 +118,28 @@ class TestApplyPositions:
         assert p["持有数量"] == 100
         assert p["单位成本"] == pytest.approx((100 * 10.0 + 5.0) / 100)  # 费用摊入成本
         assert p["snapshot_status"] == "pending_close_revaluation"
+
+    def test_apply_positions_archives_snapshot(self):
+        """#49：直接调用方路径也要归档当日快照（entities(date) 历史回填依赖）。"""
+        il.apply_positions(
+            self._trades(
+                [
+                    {
+                        "成交日期": "2026-07-20",
+                        "代码": "000001",
+                        "名称": "平安",
+                        "交易类别": "买入",
+                        "成交数量": 100,
+                        "成交价格": 10.0,
+                        "费用": 0.0,
+                    }
+                ]
+            )
+        )
+        archived = list(self.hist.glob("*.json"))
+        assert len(archived) == 1, "应归档恰好一份当日快照"
+        rows = json.loads(archived[0].read_text(encoding="utf-8"))
+        assert rows[0]["代码"] == "000001"
 
     def test_second_buy_averages_cost(self):
         rows = [
@@ -381,6 +407,10 @@ class TestConfirmNoTradesNeedsNoInputFile:
                 tmp_path if v.suffix == "" else tmp_path / v.name,
                 raising=False,
             )
+        # ⚠️ #49 快照归档写在另一个模块的常量里，漏打桩会写进真实 data/trades/
+        monkeypatch.setattr(
+            positions_history, "HISTORY_DIR", tmp_path / "hist", raising=False
+        )
 
         # ⚠️ `main()` 返回**审计记录 dict**，不是退出码（第一版断言 `rc in (0, None)` 就挂了）
         rec = il.main(["--confirm-no-trades", "--date", "2026-08-10"])
@@ -388,12 +418,16 @@ class TestConfirmNoTradesNeedsNoInputFile:
         assert rec["source"] == "(无输入文件：--confirm-no-trades)", (
             f'src 为 None 时不得落成字符串 "None"，实际 {rec["source"]!r}'
         )
-        # 确认文件落盘（路径常量名可能不同，扫 tmp_path 下的 json）
-        found = [p for p in tmp_path.rglob("*.json")]
+        # 确认文件落盘（路径常量名可能不同，扫 tmp_path 下的 json；
+        # 排除 #49 快照归档目录 hist/ —— 它也是 .json，但不是确认文件）
+        found = [p for p in tmp_path.rglob("*.json") if "hist" not in p.parts]
         assert found, "应写出无交易确认"
         data = json.loads(found[0].read_text(encoding="utf-8"))
         assert "2026-08-10" in data
         assert data["2026-08-10"].get("no_trades") is True
+        # #49：无交易确认日也要归档当日快照（持仓不变，历史回填仍查得到）
+        archived = list((tmp_path / "hist").glob("*.json"))
+        assert [p.name for p in archived] == ["2026-08-10.json"]
 
     def test_missing_input_without_confirm_still_errors(self, tmp_path, monkeypatch):
         """普通导入模式缺 `--input` 必须报错 —— 别把校验一起放松了。"""

@@ -40,6 +40,7 @@ import pandas as pd
 
 from custos.core.paths import cn_now, TRADES_DIR  # noqa: E402
 from custos.core.code_utils import clean_code, finite  # noqa: E402
+from custos.core import positions_history  # noqa: E402
 
 TD = TRADES_DIR
 LEDGER = TD / "master_trade_ledger.csv"
@@ -215,6 +216,8 @@ def apply_positions(new: pd.DataFrame) -> list[dict]:
     """Read → compute → write the position snapshot (kept for direct callers)."""
     rows = compute_positions(new, _read_positions())
     _write_atomic(POS, json.dumps(rows, ensure_ascii=False, indent=2, default=str))
+    # #49：同步归档当日快照，供 entities(date) 历史回填
+    positions_history.archive_snapshot(rows, cn_now().date().isoformat())
     return rows
 
 
@@ -365,6 +368,12 @@ def main(argv=None) -> dict:
             ),
         ]
         _commit(staged)
+
+    # #49：每次运行结束归档当日持仓快照（含 --confirm-no-trades/空增量——
+    # 持仓不变的日子归档同样内容，历史回填才查得到「那天的持仓」）。
+    positions_history.archive_snapshot(
+        _read_positions(), a.date or cn_now().date().isoformat()
+    )
 
     audit = {
         "appended_at": cn_now().isoformat(timespec="seconds"),

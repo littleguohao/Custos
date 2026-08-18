@@ -21,6 +21,7 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 from custos.core.trades import standardize_trades as st  # noqa: E402
+from custos.core import positions_history  # noqa: E402
 import sys
 
 TRADE_COLS = [
@@ -125,6 +126,8 @@ def _xlsx(tmp_path, trades=None, closed=None, pos=None):
 def out_dir(tmp_path, monkeypatch):
     d = tmp_path / "out"
     monkeypatch.setattr(st, "OUT_DIR", d)
+    # ⚠️ 快照归档写在另一个模块的常量里，漏打桩会写进真实 data/trades/
+    monkeypatch.setattr(positions_history, "HISTORY_DIR", tmp_path / "hist")
     return d
 
 
@@ -256,6 +259,16 @@ class TestFullImport:
         st.main()
         df = pd.read_csv(out_dir / "trades_all.csv")
         assert list(df["交易类别"]) == ["买入", "卖出"]
+
+    def test_positions_snapshot_archived(self, tmp_path, out_dir, monkeypatch):
+        """#49：全量导入后当日持仓快照必须归档，供 entities(date) 历史回填。"""
+        src = _xlsx(tmp_path)
+        monkeypatch.setattr(sys, "argv", ["x", "--src", str(src)])
+        st.main()
+        archived = list(positions_history.HISTORY_DIR.glob("*.json"))
+        assert len(archived) == 1, "应归档恰好一份当日快照"
+        rows = json.loads(archived[0].read_text(encoding="utf-8"))
+        assert [r["代码"] for r in rows] == ["600000"]
 
 
 class TestGuards:

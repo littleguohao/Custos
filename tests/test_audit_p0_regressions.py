@@ -18,6 +18,7 @@ from custos.core import runtime_guards as rg
 from custos.datasource import trading_calendar as tc
 from custos.datasource.news import rss_collector as rc
 from custos.core.trades import incremental_ledger as il
+from custos.core import positions_history
 
 
 class TestCalendarRefreshDoesNotOverreach:
@@ -197,6 +198,10 @@ class TestLedgerAtomicity:
         monkeypatch.setattr(il, "LEDGER", self.ledger)
         monkeypatch.setattr(il, "AUDIT", self.audit)
         monkeypatch.setattr(il, "STOCK_JSON", self.stock)
+        # ⚠️ #49 快照归档写在另一个模块的常量里，漏打桩会写进真实 data/trades/
+        monkeypatch.setattr(
+            positions_history, "HISTORY_DIR", tmp_path / "hist", raising=False
+        )
 
     def _write_input(self, rows):
         self.src.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")

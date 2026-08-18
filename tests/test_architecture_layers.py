@@ -53,6 +53,10 @@ BASE_MODULES = {
     # （close_review/screening）与 L4（daily_report）的报告生成器共用。
     # 只依赖 `paths`（L0）与 stdlib。
     "report_audit.py",
+    # `positions_history.py` 是持仓快照历史归档（#49）的唯一实现：写方在 L2
+    # （core/trades 两个导入器），读方在 L1（news/rss_filter.entities）——
+    # 放 L2 会构成 L1→L2 分层反转，只能上提到 L0。只依赖 `paths`（L0）与 stdlib。
+    "positions_history.py",
 }
 LAYER_OF_DIR = {
     "datasource/local_tdx": 1,

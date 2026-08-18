@@ -19,6 +19,7 @@ from custos.core.paths import write_json as dump  # noqa: E402
 from custos.core.code_utils import bare_code as bare  # noqa: E402
 from custos.core.runtime_guards import previous_confirmed_trading_day  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
+from custos.core import positions_history  # noqa: E402
 
 LOG = LOGS / "rss"
 CFG = RSS_FILTER_CONFIG_FILE
@@ -78,22 +79,32 @@ def premarket_window(day, asof, fallback_hours):
 def entities(date):
     """持仓的名称与代码集合，用于相关性加分。
 
-    ⚠️ `date` **未被使用**：`current_positions.json` 是**当前快照**、没有历史版本，
-    所以给任何日期都返回同一份。日常当日运行没问题；但**回填历史日期时
-    会用今天的持仓去筛那天的新闻**，结论不可复现。保留参数是为了让调用点
-    显式表达「这是按日期筛」的意图，等持仓有了历史版本可直接接上。
+    2026-08-18（#49）：`date` **生效了** —— 优先读 `positions_history` 里
+    ≤ date 的最近一份归档（持仓不变的日子不产生归档，所以是「最近一份」
+    而非精确日期）；归档尚未积累或查询早于首份归档时回退当前快照
+    `current_positions.json`——此时回填历史日期仍不可复现，调用方把实际
+    用的来源落痕到报告（`positions_source`）里以便审计。
+
+    返回 ``(names, codes, positions_source)``。
     """
-    positions = load(DATA / "trades" / "current_positions.json", [])
+    rows, resolved = positions_history.load_snapshot(date)
+    if rows is None:
+        rows = load(DATA / "trades" / "current_positions.json", [])
+        source = "current_snapshot"
+    elif resolved == date:
+        source = f"history:{resolved}"
+    else:
+        source = f"history:{resolved}(≤{date})"
     names = set()
     codes = set()
-    for x in positions:
+    for x in rows:
         code = x.get("代码") or x.get("code")
         name = x.get("名称") or x.get("name")
         if code:
             codes.add(bare(code))
         if name:
             names.add(str(name))
-    return names, codes
+    return names, codes, source
 
 
 def dedupe(items):
@@ -160,7 +171,7 @@ def main():
         cutoff, previous_close_date = premarket_window(a.date, asof, hours)
     limit = cfg["limits"][a.session_type]
     per_source_limit = cfg.get("per_source_limits", {}).get(a.session_type, limit)
-    names, codes = entities(a.date)
+    names, codes, positions_source = entities(a.date)
     scored = []
     excluded = {}
     # ⚠️ 代码命中必须要求**数字边界**，不能裸子串匹配。持仓命中值 +45 分（单项最大）
@@ -282,6 +293,7 @@ def main():
         "date": a.date,
         "session_type": a.session_type,
         "as_of": asof.isoformat(),
+        "positions_source": positions_source,
         "window_start": cutoff.isoformat(),
         "previous_close_date": previous_close_date,
         "window_hours_actual": round((asof - cutoff).total_seconds() / 3600, 2),

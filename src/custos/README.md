@@ -20,6 +20,7 @@ src/
 │   ├── contracts.py       # 产物 schema 唯一来源（零内部依赖）
 │   ├── runtime_guards.py / runtime_gate.py   # P0 运行时守卫 + 门控 CLI
 │   ├── b1_thresholds.py / report_audit.py
+│   ├── positions_history.py  # 持仓快照历史归档（#49；写方在 trades/，读方在 news/rss_filter）
 │   ├── factors/           # L2 可复用因子（选股/研究共用,见 governance/strategy/_factors/）
 │   └── trades/            # L2 交易台账同步与标准化、增量台账、持仓对账
 ├── datasource/            # L1 数据采集与刷新（只许依赖 L0/L1）
@@ -50,7 +51,8 @@ src/
 强制，AST 依赖图 + 无环 + 同名唯一性）。
 
 - **L0** `core/` 顶层：`paths` `code_utils` `indicators` `contracts` `pipeline_kit`
-  `runtime_guards` `runtime_gate` `b1_thresholds` `report_audit` `fmt` `net_retry`
+  `runtime_guards` `runtime_gate` `b1_thresholds` `report_audit` `positions_history`
+  `fmt` `net_retry`
 - **L1** `datasource/`：采集与数据刷新。L2/L3 不得被它 import
 - **L2** `core/factors/` `core/trades/`：因子实现全项目唯一一份（因子 + 注册表）
 - **L3** `pipeline/` 四个 stage 包：`screening/` `market_timing/` `holdings/` `close_review/`

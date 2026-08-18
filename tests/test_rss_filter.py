@@ -18,6 +18,7 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 from custos.datasource.news import rss_filter as rf  # noqa: E402
+from custos.core import positions_history  # noqa: E402
 import sys
 
 CFG = {
@@ -83,6 +84,9 @@ def env(tmp_path, monkeypatch):
     reg.write_text(json.dumps(REG), encoding="utf-8")
     monkeypatch.setattr(rf, "CFG", cfg)
     monkeypatch.setattr(rf, "REG", reg)
+    # ⚠️ #49：entities(date) 会读 positions_history.HISTORY_DIR（另一个模块的常量），
+    #    不打桩会读真实仓库的归档目录，测试不密闭
+    monkeypatch.setattr(positions_history, "HISTORY_DIR", data / "trades" / "hist")
     # 交易日历不确定时 premarket_window 会走 fallback，这里固定成确定值
     monkeypatch.setattr(rf, "previous_confirmed_trading_day", lambda d: "2026-08-06")
     return tmp_path
@@ -145,6 +149,41 @@ def _run(env, monkeypatch, session="premarket", as_of="2026-08-07T08:45:00+08:00
         json.loads(out.read_text(encoding="utf-8")),
         json.loads(rep.read_text(encoding="utf-8")),
     )
+
+
+class TestEntitiesHistory:
+    """#49（2026-08-18）：`entities(date)` 优先读持仓历史归档，不再无视 date。"""
+
+    def _history(self, env, date, rows):
+        d = env / "data" / "trades" / "hist"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{date}.json").write_text(
+            json.dumps(rows, ensure_ascii=False), encoding="utf-8"
+        )
+
+    def test_historical_date_uses_archived_snapshot(self, env, monkeypatch):
+        """回填历史日期必须用**那天**的持仓：归档里持有的票命中，当前快照里的不命中。"""
+        # 当前快照持有平安银行；但 2026-08-05 归档（≤ 查询日 08-07 的最近一份）持有浦发银行
+        _positions(env, [{"代码": "000001", "名称": "平安银行"}])
+        self._history(env, "2026-08-05", [{"代码": "600000", "名称": "浦发银行"}])
+        _items(
+            env,
+            _item(title="浦发银行获批新业务", source_url="https://x.com/h1"),
+            _item(title="平安银行发布中报", source_url="https://x.com/h2"),
+        )
+        sel, rep = _run(env, monkeypatch)
+        by_title = {x["title"]: x for x in sel}
+        assert by_title["浦发银行获批新业务"]["matched_holdings_or_pool"]["names"]
+        assert not by_title["平安银行发布中报"]["matched_holdings_or_pool"]["names"]
+        assert rep["positions_source"] == "history:2026-08-05(≤2026-08-07)"
+
+    def test_no_history_falls_back_to_current_snapshot(self, env, monkeypatch):
+        """归档尚未积累时回退当前快照，并在报告落痕 —— 让审计看得出用了哪份。"""
+        _positions(env, [{"代码": "600000", "名称": "浦发银行"}])
+        _items(env, _item(title="浦发银行获批新业务"))
+        sel, rep = _run(env, monkeypatch)
+        assert sel[0]["matched_holdings_or_pool"]["names"] == ["浦发银行"]
+        assert rep["positions_source"] == "current_snapshot"
 
 
 class TestHelpers:
