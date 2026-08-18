@@ -55,7 +55,9 @@ from custos.core.indicators import (
     bbi_series as _bbi_series,
     macd_series as _macd_series,
     atr_series as _atr_series,
+    kdj_series as _kdj_series,
     pct_change,
+    J_N as _KDJ_N,
 )  # noqa: E402
 from custos.core.indicators import dmi_arrays  # noqa: E402  DMI/ADX 唯一实现
 from custos.core.indicators import amplitude_pct as amplitude_pct_of  # noqa: E402  振幅唯一实现
@@ -91,15 +93,69 @@ J_LOW_THRESHOLD = 13.0
 # tests/test_audit_opt_screening.py::test_evaluate_gate_window_matches_full_prefix。
 GATE_WINDOW_SAFE = 260
 
+_KDJ_MIN_BARS = _KDJ_N + 3  # 与 indicators.kdj 的 `len(df) < n + 3` 守卫同口径
 
-def j_low_gate(df_slice: pd.DataFrame) -> bool:
-    """as-of 切片当日 KDJ 的 J<13（B1 买点区）。kdj 不可用时视为不通过。"""
+
+def _precompute_gate_series(df: pd.DataFrame) -> Optional[dict[str, Any]]:
+    """逐股**一次性**预计算 entry_gate 用的递归指标序列（evaluate_trades 的 O(n²)→O(n) 优化）。
+
+    等价性依据：KDJ（RSV→EWM→EWM，fill_na=50）、MACD（ewm adjust=False）、
+    Wilder ADX（dmi_arrays）都从第 0 根开始递归，prefix ``df.iloc[:i+1]`` 上算出的
+    末点与全序列第 i 点是**同一串浮点运算**，逐位相同（gate 内的 len 守卫另行保留，
+    见各 gate）。等价性由 tests/test_gate_precompute_equivalence.py 逐 bar 钉住。
+
+    ⚠️ 只对「从第 0 根开始的前缀切片」有效（evaluate_trades 的切片恒如此）；
+    ``evaluate(gate_window>0)`` 的切片起点 lo>0、递归种子不同，**不得**传这个。
+    返回 None（依赖缺失/异常）时 gate 走原逐切片路径，行为与旧版逐位一致。
+
+    键：kdj_j（与 df 等长）；macd_dif/macd_dea（等长）；
+    adx（⚠️ dmi_arrays 的数组比 df **短 1**——TR 用 [1:]——bar i 在 adx[i-1]）。
+    """
+    if _kdj is None:
+        return None
+    try:
+        j = _kdj_series(df, fill_na=50.0)[2].to_numpy()  # 与 indicators.kdj 同口径
+        dif, dea, _hist_x2 = _macd_series(df["close"])
+        _, _, adx = dmi_arrays(df["high"], df["low"], df["close"])
+        return {
+            "kdj_j": j,
+            "macd_dif": dif.to_numpy(),
+            "macd_dea": dea.to_numpy(),
+            "adx": adx,
+        }
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _j_low_hit(df_slice: pd.DataFrame, precomputed: Optional[dict] = None) -> bool:
+    """「当日 J<13」判定：给了预计算序列就取对应点，否则现算（两路逐位一致）。
+
+    ⚠️ precomputed 路隐含 ``len(df_slice) - 1 == 全序列中的 bar 序号``——
+    只对从第 0 根开始的前缀切片成立（见 _precompute_gate_series docstring）。
+    """
     if _kdj is None:
         return False
+    if precomputed is not None:
+        i = len(df_slice) - 1
+        if i + 1 < _KDJ_MIN_BARS:
+            return False
+        # indicators.kdj 落盘的是 round(j, 4)，这里逐点复刻同一取整再比较
+        return bool(round(float(precomputed["kdj_j"][i]), 4) < J_LOW_THRESHOLD)
     r = _kdj(df_slice)
     return bool(
         r.get("available") and r.get("j") is not None and r["j"] < J_LOW_THRESHOLD
     )
+
+
+def j_low_gate(df_slice: pd.DataFrame, precomputed: Optional[dict] = None) -> bool:
+    """as-of 切片当日 KDJ 的 J<13（B1 买点区）。kdj 不可用时视为不通过。
+
+    ``precomputed``：evaluate_trades 逐股预计算的递归序列（见 _precompute_gate_series），
+    只对从第 0 根开始的前缀切片有效；不传（默认）走原逐切片路径，两路逐位一致。
+    本模块 ENTRY_GATES 统一双形态签名 ``(df_slice, precomputed=None)``——
+    用不到预计算的 gate 接受并忽略它（黑盒 detector 不是递归序列口径，不能旁路）。
+    """
+    return _j_low_hit(df_slice, precomputed)
 
 
 # 完整 B1 反转K：J<13 + 缩量(量比≤50%) + 20日量底10% + 收盘变动±2% + 振幅≤7%（企稳，非落刀）
@@ -113,7 +169,7 @@ REVK_CHG_PCT = 2.0
 REVK_AMP_PCT = 7.0
 
 
-def reversal_k_gate(df_slice: pd.DataFrame) -> bool:
+def reversal_k_gate(df_slice: pd.DataFrame, precomputed: Optional[dict] = None) -> bool:
     """B1 反转K 完整买点：J<13 且缩量企稳(小实体/小振幅)——排除收盘贴低的落刀。绝不 raise。
 
     2026-08-09 对齐 live（`enrich_candidates.compute_metrics` 经 `b1_thresholds`）：
@@ -123,10 +179,7 @@ def reversal_k_gate(df_slice: pd.DataFrame) -> bool:
     if _kdj is None or len(df_slice) < 21:
         return False
     try:
-        r = _kdj(df_slice)
-        if not (
-            r.get("available") and r.get("j") is not None and r["j"] < J_LOW_THRESHOLD
-        ):
+        if not _j_low_hit(df_slice, precomputed):
             return False
         close = df_slice["close"].astype(float).values
         high = df_slice["high"].astype(float).values
@@ -176,16 +229,20 @@ def _macd_hist(close: pd.Series) -> pd.Series:
     return dif - dea
 
 
-def j_low_macd_turn_gate(df_slice: pd.DataFrame) -> bool:
+def j_low_macd_turn_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
     """B1×MACD：J<13 且 MACD 柱上行(绿柱缩短/红柱变长=动量拐头向上)。等待动量拐头,避开落刀。绝不 raise。"""
     if _kdj is None or len(df_slice) < 35:
         return False
     try:
-        r = _kdj(df_slice)
-        if not (
-            r.get("available") and r.get("j") is not None and r["j"] < J_LOW_THRESHOLD
-        ):
+        if not _j_low_hit(df_slice, precomputed):
             return False
+        if precomputed is not None:
+            # 柱 = dif − dea（×1 口径，同 _macd_hist）；逐点相减与 Series 相减同浮点序列
+            i = len(df_slice) - 1
+            dif, dea = precomputed["macd_dif"], precomputed["macd_dea"]
+            return bool(dif[i] - dea[i] > dif[i - 1] - dea[i - 1])  # 柱上行(拐头)
         h = _macd_hist(df_slice["close"])
         return bool(len(h) >= 2 and h.iloc[-1] > h.iloc[-2])  # 柱上行(拐头)
     except Exception:  # noqa: BLE001
@@ -200,17 +257,18 @@ def _macd_dif_series(close: pd.Series) -> pd.Series:
     return _macd_series(close)[0]
 
 
-def j_low_dif_pos_gate(df_slice: pd.DataFrame) -> bool:
+def j_low_dif_pos_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
     """J<13 且 DIF>0——『强势里的回踩』(赢家特征研究:mac_dif_pos 日内AUC 0.548/+3.3pp/半程一致)。
     超卖但中期趋势未破零轴,区别于下跌途中的新低。绝不 raise。"""
     if _kdj is None or len(df_slice) < 35:
         return False
     try:
-        r = _kdj(df_slice)
-        if not (
-            r.get("available") and r.get("j") is not None and r["j"] < J_LOW_THRESHOLD
-        ):
+        if not _j_low_hit(df_slice, precomputed):
             return False
+        if precomputed is not None:
+            return bool(precomputed["macd_dif"][len(df_slice) - 1] > 0)
         return bool(_macd_dif_series(df_slice["close"]).iloc[-1] > 0)
     except Exception:  # noqa: BLE001
         return False
@@ -229,31 +287,38 @@ def _adx_last(df_slice: pd.DataFrame, n: int = 14) -> float:
     return float(adx[-1])
 
 
-def _j_low_adx_gate(df_slice: pd.DataFrame, thr: float) -> bool:
+def _j_low_adx_gate(
+    df_slice: pd.DataFrame, thr: float, precomputed: Optional[dict] = None
+) -> bool:
     if _kdj is None or len(df_slice) < 35:
         return False
     try:
-        r = _kdj(df_slice)
-        if not (
-            r.get("available") and r.get("j") is not None and r["j"] < J_LOW_THRESHOLD
-        ):
+        if not _j_low_hit(df_slice, precomputed):
             return False
-        a = _adx_last(df_slice)
+        if precomputed is not None and precomputed["adx"] is not None:
+            # dmi_arrays 的数组比 df 短 1（TR 用 [1:]）：bar i 的 ADX 在 adx[i-1]
+            a = float(precomputed["adx"][len(df_slice) - 2])
+        else:
+            a = _adx_last(df_slice)
         return bool(a == a and a >= thr)
     except Exception:  # noqa: BLE001
         return False
 
 
-def j_low_adx25_gate(df_slice: pd.DataFrame) -> bool:
+def j_low_adx25_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
     """J<13 且 ADX≥25——前段趋势决绝(赢家特征研究:dmi_adx 日内AUC 0.544/+13.7pp/半程一致)。
     超卖池里 ADX 高=跌透/趋势明确,反弹更有力。绝不 raise。"""
-    return _j_low_adx_gate(df_slice, 25)
+    return _j_low_adx_gate(df_slice, 25, precomputed)
 
 
-def j_low_adx60_gate(df_slice: pd.DataFrame) -> bool:
+def j_low_adx60_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
     """J<13 且 ADX≥60——极端趋势强度(分档:赢占比 18.1%→21.7%→25.4%→33.5% 单调上行,
     但样本仅 0.2%,须净值终审)。绝不 raise。"""
-    return _j_low_adx_gate(df_slice, 60)
+    return _j_low_adx_gate(df_slice, 60, precomputed)
 
 
 ENTRY_GATES["j_low_dif_pos"] = j_low_dif_pos_gate
@@ -318,7 +383,9 @@ def gate_stats_report() -> dict[str, Any]:
     }
 
 
-def platform_pullback_gate(df_slice: pd.DataFrame) -> bool:
+def platform_pullback_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
     """平台突破回踩(回踩不破前期平台高点):三段式——平台(≥2触上沿)→有效突破→
     回落至平台高附近但未破。止损天然=平台高×0.98(--stop-mode platform)。绝不 raise。
     依赖缺失/检测器异常与"真的不命中"分开计数(见 gate_stats_report)。"""
@@ -538,7 +605,9 @@ if compute_b1_dual is not None:
     SCORERS["b1_dual_no_res"] = _sc_b1_dual_no_resonance
 
 
-def weekly_j_low_gate(df_slice: pd.DataFrame) -> bool:
+def weekly_j_low_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
     """周线 J<13(更大周期回调也到位)。绝不 raise。"""
     if compute_b1_dual is None:
         return False
@@ -549,7 +618,9 @@ def weekly_j_low_gate(df_slice: pd.DataFrame) -> bool:
         return False
 
 
-def j_low_weekly_resonance_gate(df_slice: pd.DataFrame) -> bool:
+def j_low_weekly_resonance_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
     """日周线 B1 共振:日线 J<13 **且** 周线 J<13(owner 2026-08-03 提出的加分项)。"""
     if compute_b1_dual is None:
         return False
@@ -559,12 +630,14 @@ def j_low_weekly_resonance_gate(df_slice: pd.DataFrame) -> bool:
         return False
 
 
-def j_low_qsx_weekly_gate(df_slice: pd.DataFrame) -> bool:
+def j_low_qsx_weekly_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
     """good_b1 全条件组合:J<13 + QSX>DKS + 周线 J<13。最严一档,用于看召回代价。"""
     return bool(j_low_weekly_resonance_gate(df_slice) and qsx_gt_dks_gate(df_slice))
 
 
-def qsx_gt_dks_gate(df_slice: pd.DataFrame) -> bool:
+def qsx_gt_dks_gate(df_slice: pd.DataFrame, precomputed: Optional[dict] = None) -> bool:
     """长期多头结构:QSX>DKS(good_b1 8/9)。绝不 raise。"""
     if compute_b1_dual is None:
         return False
@@ -575,12 +648,16 @@ def qsx_gt_dks_gate(df_slice: pd.DataFrame) -> bool:
         return False
 
 
-def j_low_qsx_gt_dks_gate(df_slice: pd.DataFrame) -> bool:
+def j_low_qsx_gt_dks_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
     """B1 核心组合:J<13 且 QSX>DKS —— "长期向上的票上买短期回调点"。"""
-    return bool(j_low_gate(df_slice) and qsx_gt_dks_gate(df_slice))
+    return bool(j_low_gate(df_slice, precomputed) and qsx_gt_dks_gate(df_slice))
 
 
-def breakout_pullback_b1_gate(df_slice: pd.DataFrame) -> bool:
+def breakout_pullback_b1_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
     """突破回踩型 B1:平台突破回踩不破 + J<13 + 收盘不低于平台高。"""
     if compute_b1_dual is None:
         return False
@@ -612,7 +689,7 @@ except Exception:  # noqa: BLE001
     detect_b2 = None
 
 
-def b2_gate(df_slice: pd.DataFrame) -> bool:
+def b2_gate(df_slice: pd.DataFrame, precomputed: Optional[dict] = None) -> bool:
     """B2:B1 之后 + 涨幅>4% + 比前一交易日放量 + J<55(原文 B1.pdf p16)。"""
     if detect_b2 is None:
         return False
@@ -622,7 +699,9 @@ def b2_gate(df_slice: pd.DataFrame) -> bool:
         return False
 
 
-def bottom_surge_gate(df_slice: pd.DataFrame) -> bool:
+def bottom_surge_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
     """底部异动(巨量点火 + 量随价升)——宽口径。"""
     if detect_b2 is None:
         return False
@@ -632,7 +711,9 @@ def bottom_surge_gate(df_slice: pd.DataFrame) -> bool:
         return False
 
 
-def bottom_surge_strict_gate(df_slice: pd.DataFrame) -> bool:
+def bottom_surge_strict_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
     """底部异动严口径:再加 量能维持4天 + 穿越60日线 + 9个月新高 三条。"""
     if detect_b2 is None:
         return False
@@ -642,7 +723,9 @@ def bottom_surge_strict_gate(df_slice: pd.DataFrame) -> bool:
         return False
 
 
-def surge_then_b1_gate(df_slice: pd.DataFrame) -> bool:
+def surge_then_b1_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
     """原文第③条「找异动之后的 B1」:回看窗内有异动 且 当日 J<13。"""
     if detect_b2 is None:
         return False
@@ -652,7 +735,9 @@ def surge_then_b1_gate(df_slice: pd.DataFrame) -> bool:
         return False
 
 
-def surge_strict_then_b1_gate(df_slice: pd.DataFrame) -> bool:
+def surge_strict_then_b1_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
     """异动严口径 + B1。"""
     if detect_b2 is None:
         return False
@@ -662,7 +747,9 @@ def surge_strict_then_b1_gate(df_slice: pd.DataFrame) -> bool:
         return False
 
 
-def bottom_surge_j13_gate(df_slice: pd.DataFrame) -> bool:
+def bottom_surge_j13_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
     """#13 修正口径（2026-08-12 owner 裁决）：异动后 60 天窗口内**每次 J<13 都触发**
     （不限首次——「不一定是首次，可以多关注几次」）。
 
@@ -680,7 +767,9 @@ def bottom_surge_j13_gate(df_slice: pd.DataFrame) -> bool:
         return False
 
 
-def bottom_surge_strict_j13_gate(df_slice: pd.DataFrame) -> bool:
+def bottom_surge_strict_j13_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
     """#13 修正口径的严变体：严异动（量维持 + 穿 60 日线 + 9 个月新高）后窗口内
     每次 J<13 触发。语义同 `surge_strict_then_b1`，命名位理由同上。"""
     if detect_b2 is None:
@@ -786,7 +875,9 @@ def _sc_main_rally(df: pd.DataFrame, code: str):
     }
 
 
-def rsi_strong_regime_gate(df_slice: pd.DataFrame) -> bool:
+def rsi_strong_regime_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
     """RSI 处于牛市区间(回调低点≥40 且曾>70)——健康回调而非下跌中继。"""
     if rsi_state_score is None:
         return False
@@ -796,7 +887,9 @@ def rsi_strong_regime_gate(df_slice: pd.DataFrame) -> bool:
         return False
 
 
-def rsi_bullish_divergence_gate(df_slice: pd.DataFrame) -> bool:
+def rsi_bullish_divergence_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
     """RSI 底背离:价格创新低而 RSI 不创新低(卖压衰竭)。"""
     if rsi_state_score is None:
         return False
@@ -806,14 +899,20 @@ def rsi_bullish_divergence_gate(df_slice: pd.DataFrame) -> bool:
         return False
 
 
-def j_low_rsi_strong_gate(df_slice: pd.DataFrame) -> bool:
+def j_low_rsi_strong_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
     """B1 核心组合的 RSI 版:J<13 且 RSI 处于牛市区间。"""
-    return bool(j_low_gate(df_slice) and rsi_strong_regime_gate(df_slice))
+    return bool(j_low_gate(df_slice, precomputed) and rsi_strong_regime_gate(df_slice))
 
 
-def j_low_rsi_div_gate(df_slice: pd.DataFrame) -> bool:
+def j_low_rsi_div_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
     """J<13 且 RSI 底背离——超卖**且**动能衰竭,比单纯 J<13 强。"""
-    return bool(j_low_gate(df_slice) and rsi_bullish_divergence_gate(df_slice))
+    return bool(
+        j_low_gate(df_slice, precomputed) and rsi_bullish_divergence_gate(df_slice)
+    )
 
 
 def _main_rally_gate(df_slice: pd.DataFrame, mode: str) -> bool:
@@ -825,12 +924,16 @@ def _main_rally_gate(df_slice: pd.DataFrame, mode: str) -> bool:
         return False
 
 
-def main_rally_below_gate(df_slice: pd.DataFrame) -> bool:
+def main_rally_below_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
     """主升始发点(**源码口径**:主升占比跌破 0.8)。"""
     return _main_rally_gate(df_slice, "below")
 
 
-def main_rally_above_gate(df_slice: pd.DataFrame) -> bool:
+def main_rally_above_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
     """主升始发点(**文字口径**:主升占比突破 0.8)——与源码相反,两者都测。"""
     return _main_rally_gate(df_slice, "above")
 
@@ -1282,6 +1385,181 @@ def _center_rising(closes: np.ndarray) -> bool:
     return back > front
 
 
+def _initial_stop(
+    df: pd.DataFrame,
+    low: np.ndarray,
+    entry_idx: int,
+    entry: float,
+    *,
+    stop_mode: str,
+    stop_pct: float,
+    stop_override: Optional[float],
+    stop_buffer: str,
+    stop_tick_buffer: int,
+    stop_pct_buffer: float,
+    stop_atr_buffer: float,
+    atr: Optional[pd.Series],
+) -> float:
+    """初始止损位：stop_override 显式指定(如平台高×0.98)优先；否则 stop_mode
+    'pct'=entry×(1-stop_pct%)（固定空间）/ 'low'=买入当日最低价；
+    low 模式下余量风险单位三选一（tick/pct/atr，#20）。"""
+    if stop_override is not None and stop_override < entry:  # 显式止损位(如平台高×0.98)
+        stop = float(stop_override)
+    else:
+        stop = (
+            entry * (1 - stop_pct / 100.0)
+            if stop_mode == "pct"
+            else float(low[entry_idx])
+        )
+        if stop_mode != "pct":
+            # 余量风险单位三选一（#20）：默认 tick 保持旧行为逐位不变；
+            # pct/atr 让余量在不同价位的票上是同一个风险单位（R10 §tick_buffer）。
+            if stop_buffer == "pct" and stop_pct_buffer > 0:
+                stop *= 1 - stop_pct_buffer / 100.0
+            elif stop_buffer == "atr" and stop_atr_buffer > 0:
+                a_series = atr if atr is not None else _atr_series(df)
+                a_v = float(a_series.iloc[entry_idx])
+                if (
+                    a_v == a_v
+                ):  # ATR 历史不足(NaN)时该笔不留余量（见 simulate_b1_trade docstring）
+                    stop -= stop_atr_buffer * a_v
+            elif stop_buffer == "tick" and stop_tick_buffer > 0:
+                stop -= stop_tick_buffer * _TICK  # 「或向下 3-5 个价位」
+    return stop
+
+
+def _update_dynamic_stop(
+    stop_cur: float,
+    peak: float,
+    entry: float,
+    be_armed: bool,
+    be_level: float,
+    trail_armed: bool,
+    trail_level: float,
+    breakeven_trigger: float,
+    trail_pct: float,
+) -> tuple[float, bool, float, bool, float]:
+    """⓪ 用**截至 j-1** 的 peak 更新止损位（只上移，不下移；防未来函数——
+    日线数据无法知道盘中顺序，用当日 high 更新再判当日触发等于假设"先冲高后回落"）。
+    返回更新后的 ``(stop_cur, be_armed, be_level, trail_armed, trail_level)``。"""
+    if breakeven_trigger > 0 and entry and peak / entry - 1 >= breakeven_trigger:
+        be_level = entry
+        if entry > stop_cur:
+            stop_cur = entry
+            be_armed = True
+    if trail_pct > 0:
+        trail_level = peak * (1 - trail_pct)
+        if trail_level > stop_cur:
+            stop_cur = trail_level
+            trail_armed = True
+    return stop_cur, be_armed, be_level, trail_armed, trail_level
+
+
+def _stop_hit(
+    j: int,
+    stop: float,
+    stop_cur: float,
+    by_close: bool,
+    be_armed: bool,
+    be_level: float,
+    trail_armed: bool,
+    trail_level: float,
+    open_: np.ndarray,
+    low: np.ndarray,
+    close: np.ndarray,
+) -> Optional[tuple[str, float]]:
+    """① 破止损判定：命中返回 ``(reason, fill)``，否则 None。
+
+    **两套触发口径**：
+      · 保本止损盘中判定（材料：「马上回到成本价，拍掉！(盘中关注)」）
+      · 其余按 stop_trigger，默认收盘（材料：「看收盘价」「收盘时」「忽略盘中冲高回落」）
+    保本必须**先判且独立判**：它盘中就成交了，之后当日跌到哪里都与它无关。
+    若等到收盘再一起判，会把「盘中触及成本价出场」错记成「收盘破位出场」，
+    成交价从成本价滑到收盘价（实测差 1.2pp）。
+    reason 按**实际决定当前止损位**的机制归因（依赖 be_armed/trail_armed 的当前状态），
+    而非按启用顺序。
+    """
+    if be_armed and be_level >= stop_cur and low[j] <= be_level:
+        fill = float(open_[j]) if open_[j] < be_level else float(be_level)
+        return "breakeven_stop", fill
+    # 移动止损位若已高于保本位，则由它接管（按 stop_trigger 口径；材料没有这条机制，
+    # 沿用常规止损的保守口径）
+    ref = close[j] if by_close else low[j]
+    if ref <= stop_cur:
+        if by_close:
+            # 收盘破位 ⇒ 收盘价成交（材料的执行方式就是「收盘时拍掉」）
+            fill = float(close[j])
+        else:
+            fill = float(open_[j]) if open_[j] < stop_cur else stop_cur
+        if (
+            trail_armed
+            and trail_level >= max(be_level, stop)
+            and trail_level >= stop_cur
+        ):
+            reason = "trail_stop"
+        elif be_armed and be_level >= stop_cur:
+            reason = "breakeven_stop"
+        else:
+            reason = "stop"
+        return reason, fill
+    return None
+
+
+def _scale_out_triggered(
+    j: int,
+    close: np.ndarray,
+    bbi_v: np.ndarray,
+    bulls: Optional[np.ndarray],
+    can_sell: Optional[np.ndarray],
+    scale: float,
+    scaled_at: Optional[int],
+) -> bool:
+    """②a 分批止盈触发：BBI 上方**连续两根**中大阳线（首次触发，且此前未减仓，
+    当日可卖）。只在 ``b == b``（BBI 非 NaN）分支内调用。"""
+    return bool(
+        scale > 0
+        and scaled_at is None
+        and bulls is not None
+        and j >= 1
+        and bulls[j]
+        and bulls[j - 1]
+        and close[j] >= bbi_v[j]
+        and bbi_v[j - 1] == bbi_v[j - 1]
+        and close[j - 1] >= bbi_v[j - 1]
+        and (can_sell is None or can_sell[j])
+    )
+
+
+def _cost_zone_flat(
+    j: int,
+    entry_idx: int,
+    entry: float,
+    close: np.ndarray,
+    bbi_v: np.ndarray,
+    peak_close: float,
+    cost_zone_pct: float,
+) -> bool:
+    """③ 「不涨就拍」的三维判定（材料持股手册四种马 + 仓位实例）：**三个维度都平淡**才算 flat。
+
+    · 未站上 BBI      —— 「不温不火，**没上BBI**，又没到止损。收盘前全拍！」
+    · 收盘价重心未上升 —— 「一等马（**收盘价重心上升**为主）⇒ 拿住不动」
+                         「看每天的收盘价是否还在提高！只要还在提高就不要怕！」
+    · 未脱离成本区     —— 「三个交易日还没**脱离成本区**，又没打止损，多等一天」
+    任一维度显示还在涨就留着。第一版只看「未脱离成本区 3%」这一条，
+    实测胜率 38.5%（全场最高）但均盈 9.76%（全场最低）——典型「砍掉慢热单」，
+    因为一个已站上 BBI、重心上行、只是涨幅还没到 3% 的票会被误杀。
+    """
+    bj = bbi_v[j]
+    # 严格 `>`：贴着 BBI 横盘正是材料说的「不温不火，没上BBI」，
+    # 用 `>=` 会把横盘误判成「站上」而永不触发（实测场景①因此没被拍掉）。
+    # 也与 BBI 退出逻辑一致——那里对「相等」同样按中性处理（既不算站上也不算跌破）。
+    above_bbi = bool(bj == bj and close[j] > bj)
+    rising = _center_rising(close[entry_idx + 1 : j + 1])
+    # 2026-08-11（#56 保留项③）：判定路径 round-2，对齐 live（调用方已用 `and entry` 排除 0）。
+    escaped = (pct_change(peak_close, entry, digits=2) or 0) >= cost_zone_pct
+    return not (above_bbi or rising or escaped)
+
+
 def simulate_b1_trade(
     df: pd.DataFrame,
     entry_idx: int,
@@ -1381,26 +1659,20 @@ def simulate_b1_trade(
     open_ = df["open"].astype(float).values
     n = len(close)
     entry = float(close[entry_idx])
-    if stop_override is not None and stop_override < entry:  # 显式止损位(如平台高×0.98)
-        stop = float(stop_override)
-    else:
-        stop = (
-            entry * (1 - stop_pct / 100.0)
-            if stop_mode == "pct"
-            else float(low[entry_idx])
-        )
-        if stop_mode != "pct":
-            # 余量风险单位三选一（#20）：默认 tick 保持旧行为逐位不变；
-            # pct/atr 让余量在不同价位的票上是同一个风险单位（R10 §tick_buffer）。
-            if stop_buffer == "pct" and stop_pct_buffer > 0:
-                stop *= 1 - stop_pct_buffer / 100.0
-            elif stop_buffer == "atr" and stop_atr_buffer > 0:
-                a_series = atr if atr is not None else _atr_series(df)
-                a_v = float(a_series.iloc[entry_idx])
-                if a_v == a_v:  # ATR 历史不足(NaN)时该笔不留余量（见 docstring）
-                    stop -= stop_atr_buffer * a_v
-            elif stop_buffer == "tick" and stop_tick_buffer > 0:
-                stop -= stop_tick_buffer * _TICK  # 「或向下 3-5 个价位」
+    stop = _initial_stop(
+        df,
+        low,
+        entry_idx,
+        entry,
+        stop_mode=stop_mode,
+        stop_pct=stop_pct,
+        stop_override=stop_override,
+        stop_buffer=stop_buffer,
+        stop_tick_buffer=stop_tick_buffer,
+        stop_pct_buffer=stop_pct_buffer,
+        stop_atr_buffer=stop_atr_buffer,
+        atr=atr,
+    )
     risk_frac = (entry - stop) / entry if entry else 0.0
     bbi_v = bbi.values
     has_above = False
@@ -1465,62 +1737,38 @@ def simulate_b1_trade(
 
     for j in range(entry_idx + 1, n):
         # ⓪ 用截至 j-1 的 peak 更新止损位（只上移，不下移）
-        if breakeven_trigger > 0 and entry and peak / entry - 1 >= breakeven_trigger:
-            be_level = entry
-            if entry > stop_cur:
-                stop_cur = entry
-                be_armed = True
-        if trail_pct > 0:
-            trail_level = peak * (1 - trail_pct)
-            if trail_level > stop_cur:
-                stop_cur = trail_level
-                trail_armed = True
+        stop_cur, be_armed, be_level, trail_armed, trail_level = _update_dynamic_stop(
+            stop_cur,
+            peak,
+            entry,
+            be_armed,
+            be_level,
+            trail_armed,
+            trail_level,
+            breakeven_trigger,
+            trail_pct,
+        )
 
-        # ① 破止损。**两套触发口径**：
-        #    · 保本止损盘中判定（材料：「马上回到成本价，拍掉！(盘中关注)」）
-        #    · 其余按 stop_trigger，默认收盘（材料：「看收盘价」「收盘时」「忽略盘中冲高回落」）
-        # 保本必须**先判且独立判**：它盘中就成交了，之后当日跌到哪里都与它无关。
-        # 若等到收盘再一起判，会把「盘中触及成本价出场」错记成「收盘破位出场」，
-        # 成交价从成本价滑到收盘价（实测差 1.2pp）。
-        if be_armed and be_level >= stop_cur and low[j] <= be_level:
-            fill = float(open_[j]) if open_[j] < be_level else float(be_level)
-            return _exit(j, "breakeven_stop", fill)
-        # 移动止损位若已高于保本位，则由它接管（按 stop_trigger 口径；材料没有这条机制，
-        # 沿用常规止损的保守口径）
-        ref = close[j] if by_close else low[j]
-        if ref <= stop_cur:
-            if by_close:
-                # 收盘破位 ⇒ 收盘价成交（材料的执行方式就是「收盘时拍掉」）
-                fill = float(close[j])
-            else:
-                fill = float(open_[j]) if open_[j] < stop_cur else stop_cur
-            # 按**实际决定当前止损位**的机制归因，而非按启用顺序
-            if (
-                trail_armed
-                and trail_level >= max(be_level, stop)
-                and trail_level >= stop_cur
-            ):
-                reason = "trail_stop"
-            elif be_armed and be_level >= stop_cur:
-                reason = "breakeven_stop"
-            else:
-                reason = "stop"
-            return _exit(j, reason, fill)
+        # ① 破止损（保本先判且始终盘中；其余按 stop_trigger；reason 按实际决定止损位的机制归因）
+        hit = _stop_hit(
+            j,
+            stop,
+            stop_cur,
+            by_close,
+            be_armed,
+            be_level,
+            trail_armed,
+            trail_level,
+            open_,
+            low,
+            close,
+        )
+        if hit is not None:
+            return _exit(j, hit[0], hit[1])
         b = bbi_v[j]
         if b == b:  # ② 收盘 BBI 退出（b==b 排除 NaN）
             # ②a 分批止盈:BBI 上方连续两根中大阳线（首次触发，且此前未减仓）
-            if (
-                scale > 0
-                and scaled_at is None
-                and bulls is not None
-                and j >= 1
-                and bulls[j]
-                and bulls[j - 1]
-                and close[j] >= b
-                and bbi_v[j - 1] == bbi_v[j - 1]
-                and close[j - 1] >= bbi_v[j - 1]
-                and (can_sell is None or can_sell[j])
-            ):
+            if _scale_out_triggered(j, close, bbi_v, bulls, can_sell, scale, scaled_at):
                 scaled_at = j
                 scaled_ret = float(close[j]) / entry - 1
             if close[j] > b:
@@ -1533,29 +1781,15 @@ def simulate_b1_trade(
                         return _exit(j, "bbi_exit", float(close[j]))
             else:
                 consec_below = 0
-        # ③ 「不涨就拍」（材料持股手册的四种马 + 仓位实例）。**三个维度都平淡才砍**：
-        #      · 未站上 BBI      —— 「不温不火，**没上BBI**，又没到止损。收盘前全拍！」
-        #      · 收盘价重心未上升 —— 「一等马（**收盘价重心上升**为主）⇒ 拿住不动」
-        #                            「看每天的收盘价是否还在提高！只要还在提高就不要怕！」
-        #      · 未脱离成本区     —— 「三个交易日还没**脱离成本区**，又没打止损，多等一天」
-        #    任一维度显示还在涨就留着。第一版只看「未脱离成本区 3%」这一条，
-        #    实测胜率 38.5%（全场最高）但均盈 9.76%（全场最低）——典型「砍掉慢热单」，
-        #    因为一个已站上 BBI、重心上行、只是涨幅还没到 3% 的票会被误杀。
+        # ③ 「不涨就拍」：三个维度都平淡才砍（判定细节见 _cost_zone_flat docstring）
         if (
             cost_zone_bars
             and entry
             and (j - entry_idx) >= cost_zone_bars + max(0, cost_zone_grace)
         ):
-            bj = bbi_v[j]
-            # 严格 `>`：贴着 BBI 横盘正是材料说的「不温不火，没上BBI」，
-            # 用 `>=` 会把横盘误判成「站上」而永不触发（实测场景①因此没被拍掉）。
-            # 也与下方 BBI 退出逻辑一致——那里对「相等」同样按中性处理
-            # （既不算站上也不算跌破）。
-            above_bbi = bool(bj == bj and close[j] > bj)
-            rising = _center_rising(close[entry_idx + 1 : j + 1])
-            # 2026-08-11（#56 保留项③）：判定路径 round-2，对齐 live（上方 `and entry` 已排除 0）。
-            escaped = (pct_change(peak_close, entry, digits=2) or 0) >= cost_zone_pct
-            if not (above_bbi or rising or escaped):
+            if _cost_zone_flat(
+                j, entry_idx, entry, close, bbi_v, peak_close, cost_zone_pct
+            ):
                 return _exit(j, "cost_zone_stop", float(close[j]))
         if time_stop_bars and (j - entry_idx) >= time_stop_bars:  # ④ 无条件时间止损
             return _exit(j, "time_stop", float(close[j]))
@@ -1575,6 +1809,110 @@ def _to_weekly(df: pd.DataFrame) -> pd.DataFrame:
     if "amount" in d.columns:
         agg["amount"] = "sum"
     return d.resample("W-FRI").agg(agg).dropna(subset=["close"]).reset_index()
+
+
+def _dual_form_gate(entry_gate: Callable) -> Callable:
+    """把 entry_gate 统一成 ``(df_slice, precomputed)`` 双形态调用面。
+
+    本模块 ENTRY_GATES 的 gate 原生双形态（≥2 参数）直接透传；外部注入的
+    单参 callable（如 tests/旧代码的 ``lambda df: ...``）包一层、忽略预计算——
+    它们拿不到旁路加速，但行为与旧版逐位一致。
+    """
+    import inspect  # noqa: PLC0415
+
+    try:
+        if len(inspect.signature(entry_gate).parameters) >= 2:
+            return entry_gate
+    except Exception:  # noqa: BLE001
+        pass
+    return lambda df_slice, _pre=None: entry_gate(df_slice)  # 单参自定义 gate
+
+
+def _prepare_stock(
+    raw: pd.DataFrame,
+    weekly: bool,
+    min_bars: int,
+    code: str,
+    tradability: bool,
+    scale_out_frac: float,
+    stop_buffer: str,
+    entry_gate: Optional[Callable] = None,
+) -> Optional[dict[str, Any]]:
+    """evaluate_trades 的逐股准备：sort/weekly/min_bars/BBI/可成交性/中大阳线/ATR/gate 预计算。
+
+    返回 None = 该股跳过（空数据或根数不足）。各序列**逐股算一次**，主循环内复用；
+    gate_pre 见 `_precompute_gate_series`（entry_gate 为 None 时不算）。
+    """
+    if raw is None or len(raw) == 0:
+        return None
+    df = raw.sort_values("date").reset_index(drop=True)
+    if weekly:
+        df = _to_weekly(df)
+    n = len(df)
+    if n < min_bars + 2:
+        return None
+    # 可成交性:涨停/停牌不可买,跌停/停牌不可卖(逐股算一次,循环内复用)
+    buy_ok, sell_ok = tradable_flags(df, code) if tradability else (None, None)
+    return {
+        "df": df,
+        "n": n,
+        "bbi": _bbi_series(df["close"]),
+        "buy_ok": buy_ok,
+        "sell_ok": sell_ok,
+        # 中大阳线标记(分批止盈用):逐股算一次,避免每个信号重算
+        "bull_flags": _medium_large_bull_flags(df, code)
+        if scale_out_frac > 0
+        else None,
+        # ATR(14)（止损余量 stop_buffer="atr" 用）:同样逐股算一次,循环内复用
+        "atr": _atr_series(df) if stop_buffer == "atr" else None,
+        "gate_pre": _precompute_gate_series(df) if entry_gate is not None else None,
+    }
+
+
+def _platform_stop_override(slice_df: pd.DataFrame, stop_mode: str) -> Optional[float]:
+    """平台高止损:形态自带止损位(平台高×0.98)。检测器异常/未检出 ⇒ None（按无覆盖位处理）。"""
+    if stop_mode != "platform":
+        return None
+    try:
+        from custos.core.factors.platform_pullback import (
+            detect_platform_pullback,
+        )  # noqa: PLC0415
+
+        det = detect_platform_pullback(slice_df)
+        return det["platform_high"] * 0.98 if det else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _trade_record(
+    tr: dict[str, Any],
+    ret_net: float,
+    code: str,
+    entry_date: str,
+    df: pd.DataFrame,
+    i: int,
+    score: Any,
+) -> dict[str, Any]:
+    """单笔模拟结果 → 交易记录（含 R 倍数；risk_frac 设 _R_RISK_FLOOR 地板——
+    周线收盘贴低时 risk_frac≈0 会把 R 炸成极端值）。"""
+    rf = tr.get("risk_frac") or 0.0
+    rf_eff = max(rf, _R_RISK_FLOOR)
+    rec: dict[str, Any] = {
+        "code": code,
+        "entry_date": entry_date,
+        "exit_date": str(df["date"].iloc[tr["exit_idx"]])[:10],
+        "score": score,
+        "ret": round(ret_net, 4),
+        "risk_frac": round(rf, 4),
+        "r_multiple": round(ret_net / rf_eff, 3) if rf > 0 else None,
+        "holding": tr["holding"],
+        "reason": tr["reason"],
+    }
+    if tr.get("scale_out_idx") is not None:
+        rec["scale_out_ret"] = tr.get("scale_out_ret")
+        rec["rest_ret"] = tr.get("rest_ret")
+        rec["scale_out_bars"] = tr["scale_out_idx"] - i
+    return rec
 
 
 def evaluate_trades(
@@ -1614,6 +1952,9 @@ def evaluate_trades(
     bbi_exit_consec/time_stop_bars：出场规则参数(可扫描)。每笔记录 r_multiple=净收益/风险敞口，供风险定额仓位。
     collect_all=True：不做单股非重叠去重，返回**每个**可买as-of日的候选(含 score)，供组合级 top-N 横截面择优。
     entry_gate(df_slice)->bool：进场硬门槛(如 j_low_gate=当日 J<13，B1 核心买点)；不满足则不进场。
+      本模块 ENTRY_GATES 的 gate 是双形态 ``(df_slice, precomputed=None)``——逐股预计算的
+      KDJ-J/MACD/ADX 递归序列会喂给它（O(n²)→O(n)，逐位等价见
+      tests/test_gate_precompute_equivalence.py）；外部注入的单参 callable 自动包一层，零改动。
     scale_out_frac>0：启用**分批止盈**（B1 §六 第五层「BBI 上方两根中大阳线分批减仓」/
       B1.pdf「止盈 BBI 之上两根中阳线，放飞一半」→ 取 0.5）。此前回测完全没有这一层，
       盈利单必须等 BBI 跌破才离场（已回撤过），系统性低估 avg_win 与盈亏比。
@@ -1633,29 +1974,35 @@ def evaluate_trades(
         idx = bisect.bisect_right(amv_dates, date) - 1  # as-of：最近 ≤ date 的regime
         return idx >= 0 and amv_regime[amv_dates[idx]] == "做多"
 
+    gate_call = _dual_form_gate(entry_gate) if entry_gate is not None else None
+
     trades: list[dict[str, Any]] = []
     for code, raw in bars_by_code.items():
-        if raw is None or len(raw) == 0:
+        prep = _prepare_stock(
+            raw,
+            weekly,
+            min_bars,
+            code,
+            tradability,
+            scale_out_frac,
+            stop_buffer,
+            entry_gate,
+        )
+        if prep is None:
             continue
-        df = raw.sort_values("date").reset_index(drop=True)
-        if weekly:
-            df = _to_weekly(df)
-        n = len(df)
-        if n < min_bars + 2:
-            continue
-        bbi = _bbi_series(df["close"])
-        # 可成交性:涨停/停牌不可买,跌停/停牌不可卖(逐股算一次,循环内复用)
-        buy_ok, sell_ok = tradable_flags(df, code) if tradability else (None, None)
-        # 中大阳线标记(分批止盈用):逐股算一次,避免每个信号重算
-        bull_flags = _medium_large_bull_flags(df, code) if scale_out_frac > 0 else None
-        # ATR(14)（止损余量 stop_buffer="atr" 用）:同样逐股算一次,循环内复用
-        atr = _atr_series(df) if stop_buffer == "atr" else None
+        df = prep["df"]
+        n = prep["n"]
+        bbi = prep["bbi"]
+        buy_ok, sell_ok = prep["buy_ok"], prep["sell_ok"]
+        bull_flags = prep["bull_flags"]
+        atr = prep["atr"]
+        gate_pre = prep["gate_pre"]
         emitted = 0
         i = min_bars
         while i < n - 1:
             entry_date = str(df["date"].iloc[i])[:10]
             slice_df = df.iloc[: i + 1]
-            if entry_gate is not None and not entry_gate(slice_df):
+            if gate_call is not None and not gate_call(slice_df, gate_pre):
                 i += max(1, step)
                 continue
             if sector_gate is not None and not sector_gate(
@@ -1670,18 +2017,7 @@ def evaluate_trades(
                 and _amv_ok(entry_date)
                 and (buy_ok is None or buy_ok[i])
             ):  # 涨停/停牌当日买不到
-                stop_ov = None
-                if stop_mode == "platform":  # 平台高止损:形态自带止损位
-                    try:
-                        from custos.core.factors.platform_pullback import (
-                            detect_platform_pullback,
-                        )  # noqa: PLC0415
-
-                        det = detect_platform_pullback(slice_df)
-                        if det:
-                            stop_ov = det["platform_high"] * 0.98
-                    except Exception:  # noqa: BLE001
-                        stop_ov = None
+                stop_ov = _platform_stop_override(slice_df, stop_mode)
                 tr = simulate_b1_trade(
                     df,
                     i,
@@ -1708,25 +2044,9 @@ def evaluate_trades(
                     cost_zone_pct=cost_zone_pct,
                 )
                 ret_net = tr["ret"] - cost
-                rf = tr.get("risk_frac") or 0.0
-                rf_eff = max(
-                    rf, _R_RISK_FLOOR
-                )  # 地板：周线收盘贴低时 risk_frac≈0 会把 R 炸成极端值
-                rec = {
-                    "code": code,
-                    "entry_date": entry_date,
-                    "exit_date": str(df["date"].iloc[tr["exit_idx"]])[:10],
-                    "score": res.get("score"),
-                    "ret": round(ret_net, 4),
-                    "risk_frac": round(rf, 4),
-                    "r_multiple": round(ret_net / rf_eff, 3) if rf > 0 else None,
-                    "holding": tr["holding"],
-                    "reason": tr["reason"],
-                }
-                if tr.get("scale_out_idx") is not None:
-                    rec["scale_out_ret"] = tr.get("scale_out_ret")
-                    rec["rest_ret"] = tr.get("rest_ret")
-                    rec["scale_out_bars"] = tr["scale_out_idx"] - i
+                rec = _trade_record(
+                    tr, ret_net, code, entry_date, df, i, res.get("score")
+                )
                 if feature_panel:
                     rec["features"] = _feature_panel(slice_df)
                 trades.append(rec)
@@ -1871,6 +2191,55 @@ def load_amv_regime(
         return {}
 
 
+def _close_positions_until(
+    open_heap: list,
+    date: str,
+    equity: float,
+    peak: float,
+    max_dd: float,
+    gross: float,
+    curve: list[dict[str, Any]],
+    held: Optional[set] = None,
+) -> tuple[float, float, float, float]:
+    """平掉所有 exit_date <= date 的持仓，更新权益/峰值/回撤/敞口并记资金曲线。
+    返回 ``(equity, peak, max_dd, gross)``。
+
+    simulate_portfolio 与 simulate_portfolio_topn 共享（topn 的 heap 元组多一个 code，
+    给 ``held`` 就同步移除已平仓代码）。回撤口径见两函数的 docstring。
+    """
+    import heapq
+
+    while open_heap and open_heap[0][0] <= date:
+        item = heapq.heappop(open_heap)
+        ed, alloc_cap, ret = item[0], item[2], item[3]
+        equity += alloc_cap * ret
+        gross -= alloc_cap
+        if held is not None:
+            held.discard(item[4])
+        peak = max(peak, equity)
+        dd = (peak - equity) / peak if peak > 0 else 0.0
+        max_dd = max(max_dd, dd)
+        curve.append({"date": ed, "equity": round(equity, 5)})
+    return equity, peak, max_dd, gross
+
+
+def _curve_cagr(
+    start_date: str, curve: list[dict[str, Any]], equity: float
+) -> tuple[Optional[float], Optional[float]]:
+    """资金曲线的 ``(years, cagr)``；日期解析失败退 ``(None, None)``。
+    simulate_portfolio / simulate_portfolio_topn 共享（「绝不 raise」口径的一部分）。"""
+    years = None
+    cagr = None
+    try:
+        d0 = _dt.date.fromisoformat(start_date)
+        d1 = _dt.date.fromisoformat(curve[-1]["date"]) if curve else d0
+        years = max((d1 - d0).days / 365.25, 1e-9)
+        cagr = equity ** (1 / years) - 1 if equity > 0 else None
+    except Exception:  # noqa: BLE001
+        pass
+    return years, cagr
+
+
 def simulate_portfolio(
     trades: list[dict[str, Any]],
     risk_pct: float = 0.01,
@@ -1910,19 +2279,10 @@ def simulate_portfolio(
     skipped = 0
     seq = 0
 
-    def _close_until(date: str) -> None:
-        nonlocal equity, peak, max_dd, gross
-        while open_heap and open_heap[0][0] <= date:
-            ed, _, alloc_cap, ret = heapq.heappop(open_heap)
-            equity += alloc_cap * ret
-            gross -= alloc_cap
-            peak = max(peak, equity)
-            dd = (peak - equity) / peak if peak > 0 else 0.0
-            max_dd = max(max_dd, dd)
-            curve.append({"date": ed, "equity": round(equity, 5)})
-
     for t in entries:
-        _close_until(t["entry_date"])
+        equity, peak, max_dd, gross = _close_positions_until(
+            open_heap, t["entry_date"], equity, peak, max_dd, gross, curve
+        )
         alloc_frac = min(risk_pct / max(t["risk_frac"], _R_RISK_FLOOR), max_pos_frac)
         alloc_cap = alloc_frac * equity
         if len(open_heap) >= max_concurrent or (gross + alloc_cap) > max_gross * equity:
@@ -1932,17 +2292,11 @@ def simulate_portfolio(
         seq += 1
         gross += alloc_cap
         taken += 1
-    _close_until("9999-99-99")
+    equity, peak, max_dd, gross = _close_positions_until(
+        open_heap, "9999-99-99", equity, peak, max_dd, gross, curve
+    )
 
-    years = None
-    cagr = None
-    try:
-        d0 = _dt.date.fromisoformat(entries[0]["entry_date"])
-        d1 = _dt.date.fromisoformat(curve[-1]["date"]) if curve else d0
-        years = max((d1 - d0).days / 365.25, 1e-9)
-        cagr = equity ** (1 / years) - 1 if equity > 0 else None
-    except Exception:  # noqa: BLE001
-        pass
+    years, cagr = _curve_cagr(entries[0]["entry_date"], curve, equity)
     out: dict[str, Any] = {
         "n_taken": taken,
         "n_skipped": skipped,
@@ -1965,6 +2319,65 @@ def simulate_portfolio(
         f"收益/回撤 {ret_dd}  (期约 {out['years']} 年; 回撤=已实现权益口径,不含浮亏,真实更大)"
     )
     return out
+
+
+def _open_topn_for_date(
+    day: list,
+    held: set,
+    open_heap: list,
+    *,
+    top_n: int,
+    max_concurrent: int,
+    risk_pct: float,
+    max_pos_frac: float,
+    max_gross: float,
+    equity: float,
+    gross: float,
+    seq: int,
+) -> tuple[int, int, float, int, list[float]]:
+    """topn 特有的横截面择优块：当日候选按 score 降序，在并发/top_n/总敞口上限内开仓。
+
+    返回 ``(taken, skipped, gross, seq, taken_rets)``（本日增量；open_heap/held 就地更新）。
+    """
+    import heapq
+
+    taken = 0
+    skipped = 0
+    taken_rets: list[float] = []
+    ranked = sorted(
+        (t for t in day if t["code"] not in held),
+        key=lambda t: t.get("score") or 0,
+        reverse=True,
+    )
+    opened = 0
+    for t in ranked:
+        if opened >= top_n or len(open_heap) >= max_concurrent:
+            skipped += 1
+            continue
+        alloc_cap = (
+            min(risk_pct / max(t["risk_frac"], _R_RISK_FLOOR), max_pos_frac) * equity
+        )
+        if (gross + alloc_cap) > max_gross * equity:
+            skipped += 1
+            continue
+        heapq.heappush(open_heap, (t["exit_date"], seq, alloc_cap, t["ret"], t["code"]))
+        seq += 1
+        gross += alloc_cap
+        held.add(t["code"])
+        taken += 1
+        taken_rets.append(t["ret"])
+        opened += 1
+    return taken, skipped, gross, seq, taken_rets
+
+
+def _selected_stats(
+    taken_rets: list[float],
+) -> tuple[int, Optional[float], Optional[float]]:
+    """被选中(实际持有)子集的 (n, 胜率, 期望) —— top-N 模式下真正代表策略,而非全候选池。"""
+    sel_n = len(taken_rets)
+    sel_win = round(sum(1 for r in taken_rets if r > 0) / sel_n, 4) if sel_n else None
+    sel_exp = round(sum(taken_rets) / sel_n, 4) if sel_n else None
+    return sel_n, sel_win, sel_exp
 
 
 def simulate_portfolio_topn(
@@ -2008,64 +2421,38 @@ def simulate_portfolio_topn(
     seq = 0
     taken_rets: list[float] = []
 
-    def _close_until(date: str) -> None:
-        nonlocal equity, peak, max_dd, gross
-        while open_heap and open_heap[0][0] <= date:
-            ed, _, alloc_cap, ret, code = heapq.heappop(open_heap)
-            equity += alloc_cap * ret
-            gross -= alloc_cap
-            held.discard(code)
-            peak = max(peak, equity)
-            max_dd = max(max_dd, (peak - equity) / peak if peak > 0 else 0.0)
-            curve.append({"date": ed, "equity": round(equity, 5)})
-
     for date in dates:
-        _close_until(date)
+        equity, peak, max_dd, gross = _close_positions_until(
+            open_heap, date, equity, peak, max_dd, gross, curve, held
+        )
         slots = max_concurrent - len(open_heap)
         if slots <= 0:
             skipped += sum(1 for t in by_date[date] if t["code"] not in held)
             continue
-        ranked = sorted(
-            (t for t in by_date[date] if t["code"] not in held),
-            key=lambda t: t.get("score") or 0,
-            reverse=True,
+        tk, sk, gross, seq, rets = _open_topn_for_date(
+            by_date[date],
+            held,
+            open_heap,
+            top_n=top_n,
+            max_concurrent=max_concurrent,
+            risk_pct=risk_pct,
+            max_pos_frac=max_pos_frac,
+            max_gross=max_gross,
+            equity=equity,
+            gross=gross,
+            seq=seq,
         )
-        opened = 0
-        for t in ranked:
-            if opened >= top_n or len(open_heap) >= max_concurrent:
-                skipped += 1
-                continue
-            alloc_cap = (
-                min(risk_pct / max(t["risk_frac"], _R_RISK_FLOOR), max_pos_frac)
-                * equity
-            )
-            if (gross + alloc_cap) > max_gross * equity:
-                skipped += 1
-                continue
-            heapq.heappush(
-                open_heap, (t["exit_date"], seq, alloc_cap, t["ret"], t["code"])
-            )
-            seq += 1
-            gross += alloc_cap
-            held.add(t["code"])
-            taken += 1
-            taken_rets.append(t["ret"])
-            opened += 1
-    _close_until("9999-99-99")
+        taken += tk
+        skipped += sk
+        taken_rets.extend(rets)
+    equity, peak, max_dd, gross = _close_positions_until(
+        open_heap, "9999-99-99", equity, peak, max_dd, gross, curve, held
+    )
 
     # 被选中(实际持有)子集的统计 —— top-N 模式下真正代表策略,而非全候选池
-    sel_n = len(taken_rets)
-    sel_win = round(sum(1 for r in taken_rets if r > 0) / sel_n, 4) if sel_n else None
-    sel_exp = round(sum(taken_rets) / sel_n, 4) if sel_n else None
+    sel_n, sel_win, sel_exp = _selected_stats(taken_rets)
 
-    years = cagr = None
-    try:
-        d0 = _dt.date.fromisoformat(dates[0])
-        d1 = _dt.date.fromisoformat(curve[-1]["date"]) if curve else d0
-        years = max((d1 - d0).days / 365.25, 1e-9)
-        cagr = equity ** (1 / years) - 1 if equity > 0 else None
-    except Exception:  # noqa: BLE001
-        pass
+    years, cagr = _curve_cagr(dates[0], curve, equity)
     ret_dd = round((equity - 1) / max_dd, 2) if max_dd > 0 else None
     out: dict[str, Any] = {
         "mode": "topn",
@@ -2505,10 +2892,13 @@ def _empty_result_guard(n_loaded: int, n_out: int, unit: str, allow_empty: bool)
     return 2
 
 
-def main(
-    argv: Optional[list] = None,
-    loader: Optional[Callable[[list[str], int], dict]] = None,
-) -> int:
+def _build_parser() -> argparse.ArgumentParser:
+    """全部 CLI 参数定义（返回未解析的 parser）。
+
+    ⚠️ add_argument 定义必须留在**本文件**内：`research/__main__.py._modes()`
+    用 AST 解析本文件找 store_true 开关生成模式清单。互斥校验在 main 里
+    parse 之后做（fail-closed，见 main）。
+    """
     ap = argparse.ArgumentParser(
         description="S_shape 因子走查回测校准（纯分析，只读本地日线）"
     )
@@ -2789,15 +3179,13 @@ def main(
         help="允许空结果(0 K线/0 信号)仍 exit 0 并落盘;默认拒绝——空结果会被误读成'因子无效'",
     )
     ap.add_argument("--out", default="")
-    args = ap.parse_args(argv)
-    reset_gate_stats()
+    return ap
 
-    if args.stop_buffer != "tick" and args.stop_tick_buffer > 0:
-        # fail-closed：两种余量单位同给 = 口径不明，报错而非任选一个（#20）
-        ap.error(
-            "--stop-buffer pct/atr 与 --stop-tick-buffer>0 互斥（余量单位只能选一个）"
-        )
 
+def _resolve_universe(args: Any, ap: argparse.ArgumentParser) -> list[str]:
+    """解析股票宇宙：--codes-file（钉死，优先级最高）> --universe-sdata >
+    --universe-local/--universe-sample > --codes。为空 fail-closed（ap.error）。
+    stderr 的 [INFO] 行是 m2_stop_sweep 等扫描脚本的解析面，逐字保留。"""
     if args.codes_file:
         # 钉死宇宙：优先级最高，跳过所有抽样逻辑。
         # ⚠️ 为什么需要它：universe 来自 vipdoc 目录列举，会随通达信下载变动
@@ -2856,28 +3244,24 @@ def main(
         ap.error(
             "需提供 --codes / --universe-sample N / --universe-local / --universe-sdata"
         )
-    if args.dump_codes:
-        # 只解析宇宙就退出——让一轮扫描先落一份代码表，后续所有方案用 --codes-file 读它。
-        # 放在这里(codes 已解析、任何数据加载之前)是为了快：只做一次目录列举。
-        out = Path(args.dump_codes)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text("\n".join(codes) + "\n", encoding="utf-8")
-        print(
-            f"[OK] 宇宙已落盘 {out}（{len(codes)} 只）；"
-            f"后续用 --codes-file 复用即可钉死宇宙"
-        )
-        return 0
+    return codes
+
+
+def _make_loader(
+    args: Any, loader: Optional[Callable[[list[str], int], dict]]
+) -> tuple[tuple[int, ...], Callable]:
+    """horizons 解析 + 加载器选择：注入 loader 优先，否则按 data-source 选
+    tdx（本地通达信）/ s_data（csv/qlib）。返回 ``(horizons, load)``。"""
     horizons = tuple(int(h) for h in args.horizons.split(",") if h.strip())
     if loader is not None:
-        load = loader
-    elif args.data_source == "tdx":
-        import functools
+        return horizons, loader
+    import functools
 
+    if args.data_source == "tdx":
         load = functools.partial(
             _load_bars_local, start=args.start or None, end=args.end or None
         )
     else:
-        import functools
         from custos.datasource import s_data  # noqa: PLC0415
 
         fn = (
@@ -2890,200 +3274,299 @@ def main(
             end=args.end or None,
             root=str(Path(args.s_data_root) / sub),
         )
+    return horizons, load
 
+
+def _load_amv_gate(args: Any, ap: argparse.ArgumentParser) -> Optional[dict]:
+    """--amv-long-only：加载 0AMV regime（指南针 compass_amv）。未启用返回 None；
+    启用但读不到数据 fail-closed（ap.error），不静默退化为全 regime。"""
+    if not args.amv_long_only:
+        return None
+    amv_regime = load_amv_regime(
+        since=args.start or "2015-01-01"
+    )  # regime 起点跟随回测起点
+    if not amv_regime:
+        ap.error(
+            "--amv-long-only 需要指南针 0AMV 数据(compass_amv)，未读到；请在有指南针的机器运行"
+        )
+    print(
+        f"[INFO] 0AMV regime 覆盖 {len(amv_regime)} 个交易日，仅在『做多』区间进场",
+        file=sys.stderr,
+    )
+    return amv_regime
+
+
+def _load_sector_gate(args: Any, ap: argparse.ArgumentParser) -> Optional[Callable]:
+    """--sector-filter：板块相位择时 gate。成员表/板块指数数据缺失都 fail-closed
+    （ap.error）——否则 gate 会静默退化为全放行。未启用返回 None。"""
+    if not args.sector_filter:
+        return None
+    from custos.core.factors import sector_phase  # noqa: PLC0415
+
+    mpath = Path(args.sector_members)
+    members = json.loads(mpath.read_text(encoding="utf-8")) if mpath.is_file() else {}
+    if not members:
+        ap.error(
+            "--sector-filter 需 sector_members.json(先跑 fetch_sector_index_history.py --members)"
+        )
+    sector_gate = sector_phase.load_sector_gate(args.sector_index_dir, members)
+    n_loaded = getattr(sector_gate, "n_sectors", 0)
+    if not n_loaded:
+        ap.error(
+            f"--sector-filter 无任何板块指数数据(dir={args.sector_index_dir});"
+            f"先跑 fetch_sector_index_history.py,否则 gate 会静默退化为全放行"
+        )
+    eff = getattr(sector_gate, "effective_start", None)
+    print(
+        f"[INFO] 板块相位 gate: {n_loaded}/{len(members)} 板块有数据, 有效起始 {eff}"
+        f" (dir={args.sector_index_dir})",
+        file=sys.stderr,
+    )
+    if args.start and eff and args.start < eff:
+        print(
+            f"[WARN] --start {args.start} 早于板块数据起始 {eff}:该日前已分类个股一律被 gate 拦截,"
+            f"样本期与不带 filter 的 baseline 不可比",
+            file=sys.stderr,
+        )
+    return sector_gate
+
+
+def main(
+    argv: Optional[list] = None,
+    loader: Optional[Callable[[list[str], int], dict]] = None,
+) -> int:
+    ap = _build_parser()
+    args = ap.parse_args(argv)
+    reset_gate_stats()
+
+    if args.stop_buffer != "tick" and args.stop_tick_buffer > 0:
+        # fail-closed：两种余量单位同给 = 口径不明，报错而非任选一个（#20）
+        ap.error(
+            "--stop-buffer pct/atr 与 --stop-tick-buffer>0 互斥（余量单位只能选一个）"
+        )
+
+    codes = _resolve_universe(args, ap)
+    if args.dump_codes:
+        # 只解析宇宙就退出——让一轮扫描先落一份代码表，后续所有方案用 --codes-file 读它。
+        # 放在这里(codes 已解析、任何数据加载之前)是为了快：只做一次目录列举。
+        out = Path(args.dump_codes)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text("\n".join(codes) + "\n", encoding="utf-8")
+        print(
+            f"[OK] 宇宙已落盘 {out}（{len(codes)} 只）；"
+            f"后续用 --codes-file 复用即可钉死宇宙"
+        )
+        return 0
+    horizons, load = _make_loader(args, loader)
     if args.trade_sim:
         if args.from_trades:
             # 放在 amv_regime 加载**之前**：复用时不需要指南针数据在本机可读
             return _portfolio_from_trades(args, codes)
-        amv_regime = None
-        if args.amv_long_only:
-            amv_regime = load_amv_regime(
-                since=args.start or "2015-01-01"
-            )  # regime 起点跟随回测起点
-            if not amv_regime:
-                ap.error(
-                    "--amv-long-only 需要指南针 0AMV 数据(compass_amv)，未读到；请在有指南针的机器运行"
-                )
-            print(
-                f"[INFO] 0AMV regime 覆盖 {len(amv_regime)} 个交易日，仅在『做多』区间进场",
-                file=sys.stderr,
-            )
-        sector_gate = None
-        if args.sector_filter:
-            from custos.core.factors import sector_phase  # noqa: PLC0415
+        return _run_trade_sim(args, codes, load, ap)
+    return _run_signal_scan(args, codes, load, horizons)
 
-            mpath = Path(args.sector_members)
-            members = (
-                json.loads(mpath.read_text(encoding="utf-8")) if mpath.is_file() else {}
-            )
-            if not members:
-                ap.error(
-                    "--sector-filter 需 sector_members.json(先跑 fetch_sector_index_history.py --members)"
-                )
-            sector_gate = sector_phase.load_sector_gate(args.sector_index_dir, members)
-            n_loaded = getattr(sector_gate, "n_sectors", 0)
-            if not n_loaded:
-                ap.error(
-                    f"--sector-filter 无任何板块指数数据(dir={args.sector_index_dir});"
-                    f"先跑 fetch_sector_index_history.py,否则 gate 会静默退化为全放行"
-                )
-            eff = getattr(sector_gate, "effective_start", None)
-            print(
-                f"[INFO] 板块相位 gate: {n_loaded}/{len(members)} 板块有数据, 有效起始 {eff}"
-                f" (dir={args.sector_index_dir})",
-                file=sys.stderr,
-            )
-            if args.start and eff and args.start < eff:
-                print(
-                    f"[WARN] --start {args.start} 早于板块数据起始 {eff}:该日前已分类个股一律被 gate 拦截,"
-                    f"样本期与不带 filter 的 baseline 不可比",
-                    file=sys.stderr,
-                )
-        trades: list[dict[str, Any]] = []
-        import gc
-        import time as _time
 
-        n_loaded = 0
-        t_load = 0.0  # 读盘 + 前复权累计秒数
-        t_eval = 0.0  # 逐 bar 评估累计秒数
-        for k, c in enumerate(codes):  # 流式：逐股加载→评估→释放，避免全量载入 OOM
+def _stream_trades(
+    args: Any,
+    codes: list[str],
+    load: Callable,
+    amv_regime: Optional[dict],
+    sector_gate: Optional[Callable],
+) -> tuple[list[dict[str, Any]], int, float, float]:
+    """逐股流式主循环：加载→评估→释放，避免全量载入 OOM。
+    返回 ``(trades, n_loaded, t_load, t_eval)``（耗时拆分供 [TIME] 行）。"""
+    trades: list[dict[str, Any]] = []
+    import gc
+    import time as _time
+
+    n_loaded = 0
+    t_load = 0.0  # 读盘 + 前复权累计秒数
+    t_eval = 0.0  # 逐 bar 评估累计秒数
+    for k, c in enumerate(codes):  # 流式：逐股加载→评估→释放，避免全量载入 OOM
+        _t0 = _time.time()
+        d = load([c], args.count)
+        t_load += _time.time() - _t0
+        if d:
+            n_loaded += len(d)
             _t0 = _time.time()
-            d = load([c], args.count)
-            t_load += _time.time() - _t0
-            if d:
-                n_loaded += len(d)
-                _t0 = _time.time()
-                trades += evaluate_trades(
-                    d,
-                    scorer=SCORERS[args.scorer],
-                    step=args.step,
-                    weekly=args.weekly,
-                    cost_bps=args.cost_bps,
-                    amv_regime=amv_regime,
-                    bbi_exit_consec=args.bbi_consec,
-                    time_stop_bars=args.time_stop,
-                    collect_all=bool(args.top_n > 0),
-                    entry_gate=ENTRY_GATES[args.entry_filter],
-                    stop_mode=args.stop_mode,
-                    stop_pct=args.stop_pct,
-                    max_signals_per_code=(args.max_signals_per_code or None),
-                    feature_panel=bool(args.attribution),
-                    sector_gate=sector_gate,
-                    scale_out_frac=args.scale_out,
-                    breakeven_trigger=args.breakeven,
-                    trail_pct=args.trail,
-                    stop_trigger=args.stop_trigger,
-                    stop_tick_buffer=args.stop_tick_buffer,
-                    stop_buffer=args.stop_buffer,
-                    stop_pct_buffer=args.stop_pct_buffer,
-                    stop_atr_buffer=args.stop_atr_buffer,
-                    cost_zone_bars=args.cost_zone_bars,
-                    cost_zone_pct=args.cost_zone_pct,
-                )
-                t_eval += _time.time() - _t0
-            del d
-            if (k + 1) % 500 == 0:
-                gc.collect()
-                print(
-                    f"[INFO] 已处理 {k + 1}/{len(codes)} 只，累计 {len(trades)} 笔候选",
-                    file=sys.stderr,
-                )
-        # 加载(含前复权)与评估的耗时拆分。加载结果对**所有扫描方案都相同**，
-        # 若加载占比高，则「方案外循环」改「股票外循环」可省掉 (N-1)/N 的加载时间
-        # ——m2_stop_sweep 模块文档第 ③ 条要的就是这个数。
-        # 峰值 RSS 同时打出来：OOM Kill 是这套回测的老问题，而 `--jobs N` 并行会把
-        # 内存乘 N ⇒ 必须有实测数字才能定安全路数。
-        _rss = peak_rss_mb()
-        _mem = f"{_rss:.0f}MB" if _rss else f"未知({_RSS_FAIL or '无原因'})"
-        print(
-            f"[TIME] 加载(含前复权) {t_load:.0f}s / 评估 {t_eval:.0f}s"
-            f"（加载占 {t_load / max(t_load + t_eval, 1e-9):.0%}，"
-            f"{len(codes)} 只票）"
-            f"  [MEM] 峰值 {_mem} / {len(trades)} 笔"
-            f"{'（collect_all 全候选）' if args.top_n > 0 else ''}",
-            file=sys.stderr,
-        )
-        _report_gates()
-        rc_empty = _empty_result_guard(
-            n_loaded, len(trades), "笔交易", args.allow_empty
-        )
-        if rc_empty:
-            return rc_empty
-        tsum = summarize_trades(trades)
-        payload = {
-            "mode": "trade_sim",
-            "scorer": args.scorer,
-            "weekly": args.weekly,
-            "data_source": args.data_source,
-            "start": args.start or None,
-            "end": args.end or None,
-            "cost_bps": args.cost_bps,
-            "amv_long_only": bool(args.amv_long_only),
-            "entry_filter": args.entry_filter,
-            "top_n": args.top_n,
-            "bbi_consec": args.bbi_consec,
-            "time_stop": args.time_stop,
-            "stop_mode": args.stop_mode,
-            "stop_pct": args.stop_pct,
-            # 被 M2 扫描的那几个参数原先**没有落盘** ⇒ 结果文件不自述身份，
-            # 事后无法确认某个文件是哪套参数跑的。指纹见 trades_signature。
-            "trades_signature": trades_signature(args, codes),
-            "codes": codes,
-            "count": args.count,
-            "trade_summary": tsum,
-            "trades": trades,
-        }
-        if args.top_n > 0:
-            payload["portfolio"] = simulate_portfolio_topn(
-                trades,
-                top_n=args.top_n,
-                risk_pct=args.risk_pct / 100.0,
-                max_concurrent=args.max_concurrent,
-                max_pos_frac=args.max_pos / 100.0,
+            trades += evaluate_trades(
+                d,
+                scorer=SCORERS[args.scorer],
+                step=args.step,
+                weekly=args.weekly,
+                cost_bps=args.cost_bps,
+                amv_regime=amv_regime,
+                bbi_exit_consec=args.bbi_consec,
+                time_stop_bars=args.time_stop,
+                collect_all=bool(args.top_n > 0),
+                entry_gate=ENTRY_GATES[args.entry_filter],
+                stop_mode=args.stop_mode,
+                stop_pct=args.stop_pct,
+                max_signals_per_code=(args.max_signals_per_code or None),
+                feature_panel=bool(args.attribution),
+                sector_gate=sector_gate,
+                scale_out_frac=args.scale_out,
+                breakeven_trigger=args.breakeven,
+                trail_pct=args.trail,
+                stop_trigger=args.stop_trigger,
+                stop_tick_buffer=args.stop_tick_buffer,
+                stop_buffer=args.stop_buffer,
+                stop_pct_buffer=args.stop_pct_buffer,
+                stop_atr_buffer=args.stop_atr_buffer,
+                cost_zone_bars=args.cost_zone_bars,
+                cost_zone_pct=args.cost_zone_pct,
             )
-        elif args.portfolio:
-            payload["portfolio"] = simulate_portfolio(
-                trades,
-                risk_pct=args.risk_pct / 100.0,
-                max_concurrent=args.max_concurrent,
-                max_pos_frac=args.max_pos / 100.0,
-            )
-        if args.attribution:  # 先算归因,保证 --out JSON 里也带 attribution
-            payload["attribution"] = attribution_report(trades)
-        if args.out:
-            out = Path(args.out)
-            if args.summary_only:
-                payload = {k: v for k, v in payload.items() if k != "trades"}
-            # 流式写：`write_text(json.dumps(...))` 会先拼出整个字符串（indent=2 再放大
-            # 1.36 倍），逐笔上万条时白送一次内存峰值——这个回测本来就常被 OOM Kill。
-            write_json_stream(out, payload, big=len(trades) > 20000)
+            t_eval += _time.time() - _t0
+        del d
+        if (k + 1) % 500 == 0:
+            gc.collect()
             print(
-                f"[OK] 写出 {out}（{len(trades)} 笔交易，scorer={args.scorer}, {'周线' if args.weekly else '日线'}, cost={args.cost_bps}bps, amv_long_only={bool(args.amv_long_only)}）"
+                f"[INFO] 已处理 {k + 1}/{len(codes)} 只，累计 {len(trades)} 笔候选",
+                file=sys.stderr,
             )
-        stop_desc = "买入K最低" if args.stop_mode == "low" else f"pct {args.stop_pct}%"
-        if args.stop_mode != "pct" and args.stop_buffer != "tick":
-            stop_desc += (
-                f"−{args.stop_pct_buffer}%"
-                if args.stop_buffer == "pct"
-                else f"−{args.stop_atr_buffer}×ATR14"
-            )
-        tstop_desc = f" / 时间止损{args.time_stop}根" if args.time_stop else ""
-        print(
-            f"\n=== B1 交易模拟（scorer={args.scorer}, {'周线' if args.weekly else '日线'}, "
-            f"数据源={args.data_source}"
-            f"{(' ' + (args.start or '…') + '~' + (args.end or '…')) if (args.start or args.end) else ''}, "
-            f"入场门槛={args.entry_filter}, cost={args.cost_bps}bps, "
-            f"{'仅0AMV做多' if args.amv_long_only else '全regime'}, "
-            f"止损={stop_desc} / 站上BBI后连破{args.bbi_consec}日卖出{tstop_desc}）==="
-        )
-        print(tsum["text"])
-        if payload.get("portfolio"):
-            print("\n" + payload["portfolio"]["text"])
-        if args.attribution:
-            print("\n=== 特征归因(train/test 前向lift,检验赢家共性可否泛化) ===")
-            print(payload["attribution"]["text"])
-        return 0
+    return trades, n_loaded, t_load, t_eval
 
+
+def _report_stream_stats(
+    args: Any,
+    codes: list[str],
+    trades: list[dict[str, Any]],
+    t_load: float,
+    t_eval: float,
+) -> None:
+    """加载(含前复权)与评估的耗时拆分 + 峰值 RSS（[TIME]/[MEM] 行是 m2_stop_sweep 的解析面）。
+
+    加载结果对**所有扫描方案都相同**，若加载占比高，则「方案外循环」改「股票外循环」
+    可省掉 (N-1)/N 的加载时间——m2_stop_sweep 模块文档第 ③ 条要的就是这个数。
+    峰值 RSS 同时打出来：OOM Kill 是这套回测的老问题，而 `--jobs N` 并行会把
+    内存乘 N ⇒ 必须有实测数字才能定安全路数。
+    """
+    _rss = peak_rss_mb()
+    _mem = f"{_rss:.0f}MB" if _rss else f"未知({_RSS_FAIL or '无原因'})"
+    print(
+        f"[TIME] 加载(含前复权) {t_load:.0f}s / 评估 {t_eval:.0f}s"
+        f"（加载占 {t_load / max(t_load + t_eval, 1e-9):.0%}，"
+        f"{len(codes)} 只票）"
+        f"  [MEM] 峰值 {_mem} / {len(trades)} 笔"
+        f"{'（collect_all 全候选）' if args.top_n > 0 else ''}",
+        file=sys.stderr,
+    )
+
+
+def _attach_portfolio_reports(
+    args: Any, payload: dict[str, Any], trades: list[dict[str, Any]]
+) -> None:
+    """组合层分支（--top-n 横截面择优 / --portfolio 固定风险）+ 特征归因。"""
+    if args.top_n > 0:
+        payload["portfolio"] = simulate_portfolio_topn(
+            trades,
+            top_n=args.top_n,
+            risk_pct=args.risk_pct / 100.0,
+            max_concurrent=args.max_concurrent,
+            max_pos_frac=args.max_pos / 100.0,
+        )
+    elif args.portfolio:
+        payload["portfolio"] = simulate_portfolio(
+            trades,
+            risk_pct=args.risk_pct / 100.0,
+            max_concurrent=args.max_concurrent,
+            max_pos_frac=args.max_pos / 100.0,
+        )
+    if args.attribution:  # 先算归因,保证 --out JSON 里也带 attribution
+        payload["attribution"] = attribution_report(trades)
+
+
+def _write_trade_result(
+    args: Any, payload: dict[str, Any], trades: list[dict[str, Any]]
+) -> None:
+    """落盘（--summary-only 去掉逐笔 trades 省内存）。"""
+    out = Path(args.out)
+    if args.summary_only:
+        payload = {k: v for k, v in payload.items() if k != "trades"}
+    # 流式写：`write_text(json.dumps(...))` 会先拼出整个字符串（indent=2 再放大
+    # 1.36 倍），逐笔上万条时白送一次内存峰值——这个回测本来就常被 OOM Kill。
+    write_json_stream(out, payload, big=len(trades) > 20000)
+    print(
+        f"[OK] 写出 {out}（{len(trades)} 笔交易，scorer={args.scorer}, {'周线' if args.weekly else '日线'}, cost={args.cost_bps}bps, amv_long_only={bool(args.amv_long_only)}）"
+    )
+
+
+def _print_trade_report(args: Any, payload: dict[str, Any], tsum: dict) -> None:
+    """控制台报告：参数头行 + 逐笔汇总 + 组合/归因段。"""
+    stop_desc = "买入K最低" if args.stop_mode == "low" else f"pct {args.stop_pct}%"
+    if args.stop_mode != "pct" and args.stop_buffer != "tick":
+        stop_desc += (
+            f"−{args.stop_pct_buffer}%"
+            if args.stop_buffer == "pct"
+            else f"−{args.stop_atr_buffer}×ATR14"
+        )
+    tstop_desc = f" / 时间止损{args.time_stop}根" if args.time_stop else ""
+    print(
+        f"\n=== B1 交易模拟（scorer={args.scorer}, {'周线' if args.weekly else '日线'}, "
+        f"数据源={args.data_source}"
+        f"{(' ' + (args.start or '…') + '~' + (args.end or '…')) if (args.start or args.end) else ''}, "
+        f"入场门槛={args.entry_filter}, cost={args.cost_bps}bps, "
+        f"{'仅0AMV做多' if args.amv_long_only else '全regime'}, "
+        f"止损={stop_desc} / 站上BBI后连破{args.bbi_consec}日卖出{tstop_desc}）==="
+    )
+    print(tsum["text"])
+    if payload.get("portfolio"):
+        print("\n" + payload["portfolio"]["text"])
+    if args.attribution:
+        print("\n=== 特征归因(train/test 前向lift,检验赢家共性可否泛化) ===")
+        print(payload["attribution"]["text"])
+
+
+def _run_trade_sim(
+    args: Any, codes: list[str], load: Callable, ap: argparse.ArgumentParser
+) -> int:
+    """--trade-sim 分支：amv/板块 gate 加载（fail-closed）→ 流式逐股回测 →
+    耗时/内存汇报 → 空结果护栏 → payload 组装 → 组合层 → 落盘/控制台报告。"""
+    amv_regime = _load_amv_gate(args, ap)
+    sector_gate = _load_sector_gate(args, ap)
+    trades, n_loaded, t_load, t_eval = _stream_trades(
+        args, codes, load, amv_regime, sector_gate
+    )
+    _report_stream_stats(args, codes, trades, t_load, t_eval)
+    _report_gates()
+    rc_empty = _empty_result_guard(n_loaded, len(trades), "笔交易", args.allow_empty)
+    if rc_empty:
+        return rc_empty
+    tsum = summarize_trades(trades)
+    payload: dict[str, Any] = {
+        "mode": "trade_sim",
+        "scorer": args.scorer,
+        "weekly": args.weekly,
+        "data_source": args.data_source,
+        "start": args.start or None,
+        "end": args.end or None,
+        "cost_bps": args.cost_bps,
+        "amv_long_only": bool(args.amv_long_only),
+        "entry_filter": args.entry_filter,
+        "top_n": args.top_n,
+        "bbi_consec": args.bbi_consec,
+        "time_stop": args.time_stop,
+        "stop_mode": args.stop_mode,
+        "stop_pct": args.stop_pct,
+        # 被 M2 扫描的那几个参数原先**没有落盘** ⇒ 结果文件不自述身份，
+        # 事后无法确认某个文件是哪套参数跑的。指纹见 trades_signature。
+        "trades_signature": trades_signature(args, codes),
+        "codes": codes,
+        "count": args.count,
+        "trade_summary": tsum,
+        "trades": trades,
+    }
+    _attach_portfolio_reports(args, payload, trades)
+    if args.out:
+        _write_trade_result(args, payload, trades)
+    _print_trade_report(args, payload, tsum)
+    return 0
+
+
+def _run_signal_scan(
+    args: Any, codes: list[str], load: Callable, horizons: tuple[int, ...]
+) -> int:
+    """非 trade-sim 分支：整批加载 → evaluate 走查 → 分档矩阵/门槛扫描/因子 lift。"""
     bars = load(codes, args.count)
     records = evaluate(
         bars,
@@ -3102,7 +3585,7 @@ def main(
     summary = summarize(records, horizon=args.summary_horizon)
     matrix = horizon_band_matrix(records, horizons)
 
-    payload = {
+    payload: dict[str, Any] = {
         "codes": codes,
         "count": args.count,
         "horizons": list(horizons),

@@ -1141,18 +1141,23 @@ def _warn_if_mixed(group: str, rows: list[dict]) -> None:
         )
 
 
-def _print_trade_group(group: str, rows: list[dict]) -> None:
-    meta = GROUPS[group]
+def _banner(title: str, hdr: str) -> None:
+    """横幅 + 表头，宽度随 ``hdr``。三个打印函数逐字重复的同一模式。"""
+    print("\n" + "=" * len(hdr))
+    print(title)
+    print("=" * len(hdr))
+    print(hdr)
+    print("-" * len(hdr))
+
+
+def _print_summary_table(title: str, srt: list[dict]) -> None:
+    """组内概要表（每笔数/胜率/期望 等逐方案一行）。"""
     hdr = (
         f"{'组':<20}{'笔数':>7}{'胜率':>8}{'期望%':>8}{'期望R':>8}"
         f"{'累计R':>9}{'盈亏比':>8}{'均盈%':>8}{'大赢家':>7}"
     )
-    print("\n" + "=" * len(hdr))
-    print(f"【{group}】{meta['desc']}")
-    print("=" * len(hdr))
-    print(hdr)
-    print("-" * len(hdr))
-    for r in sorted(rows, key=lambda x: x["name"]):
+    _banner(title, hdr)
+    for r in srt:
         print(
             f"{r['name']:<20}{r['n'] or 0:>7}{(r['win'] or 0) * 100:>7.1f}%"
             f"{(r['exp'] or 0) * 100:>+8.2f}{r['expR'] or 0:>8.3f}"
@@ -1160,10 +1165,9 @@ def _print_trade_group(group: str, rows: list[dict]) -> None:
             f"{(r['avg_win'] or 0) * 100:>+8.2f}{r['big']:>7}"
         )
 
-    base_name = meta.get("baseline")
-    base = next((r for r in rows if r["name"] == base_name), None)
-    if not base:
-        return
+
+def _print_judge_rules(group: str, base_name: Optional[str]) -> None:
+    """组内判定的规则文案（纯静态文字；B 组参数扫描有特例段）。"""
     print(f"\n组内判定（基准 = {base_name}；**R 仅在 risk_frac 相同的方案之间可比**）")
     print("  出场类（改离场时点：trail/breakeven/stop-pct/cost-zone…）：")
     print(
@@ -1194,133 +1198,221 @@ def _print_trade_group(group: str, rows: list[dict]) -> None:
         )
         print("     不代表绝对优劣。⚠️ **别拿本组的累计R 排序**——各档 risk_frac 不同，")
         print("     累计R 之间差着分母；绝对排序看 期望% 与跨组表的 margin。")
-    b_expR, b_aw = base["expR"] or 0, base["avg_win"] or 0
-    b_totR = base["totR"] or 0
-    b_big, b_n = base["big"], base["n"] or 1
-    b_rate = b_big / b_n
-    b_split = base.get("tail_split")
-    if b_split:
-        tail, non = b_split
+
+
+def _baseline_stats(base: dict) -> dict:
+    """取基准各口径（供 `_judge_row` 逐方案判定），并打印基准收益结构。"""
+    b = {
+        "expR": base["expR"] or 0,
+        "aw": base["avg_win"] or 0,
+        "totR": base["totR"] or 0,
+        "big": base["big"],
+        "n": base["n"] or 1,
+    }
+    b["rate"] = b["big"] / b["n"]
+    b["split"] = base.get("tail_split")
+    if b["split"]:
+        tail, non = b["split"]
         print(
-            f"  基准收益结构：尾部R {tail:+.0f}（大赢家 {b_big} 笔，ret>20%）"
+            f"  基准收益结构：尾部R {tail:+.0f}（大赢家 {b['big']} 笔，ret>20%）"
             f" / 非尾部R {non:+.0f} / 合计 {tail + non:+.0f}"
         )
         if non < 0:
             print(
-                f"     ⚠️ **非尾部整体亏损**：全部收益来自 {b_big / b_n:.1%} 的大赢家，"
-                f"其余 {1 - b_big / b_n:.1%} 交易净亏 {abs(non):.0f}R。"
+                f"     ⚠️ **非尾部整体亏损**：全部收益来自 {b['rate']:.1%} 的大赢家，"
+                f"其余 {1 - b['rate']:.1%} 交易净亏 {abs(non):.0f}R。"
             )
             print("        ⇒ 任何「提高胜率」的改动都要先看它有没有动到尾部；")
             print("          也意味着漏掉几只大赢家就足以让整个策略转负。")
+    return b
+
+
+def _print_baseline_realized(base: dict) -> None:
+    """基准已实现口径：剔除末持(open_end) 未实现浮盈后的累计R。"""
     b_fam = _family_stats(base.get("_trades_ref") or [])
-    if b_fam:
-        n_open = b_fam.get("末持", {}).get("n", 0.0)
-        r_open = b_fam.get("末持", {}).get("sum_r", 0.0)
-        r_all = sum(d["sum_r"] for f, d in b_fam.items() if f != "scaled")
-        if n_open and r_all:
-            print(
-                f"  基准已实现口径：累计R {r_all:+.0f} → 剔除末持(open_end) "
-                f"{n_open:.0f} 笔的 {r_open:+.0f}R ⇒ **{r_all - r_open:+.0f}R**"
+    if not b_fam:
+        return
+    n_open = b_fam.get("末持", {}).get("n", 0.0)
+    r_open = b_fam.get("末持", {}).get("sum_r", 0.0)
+    r_all = sum(d["sum_r"] for f, d in b_fam.items() if f != "scaled")
+    if n_open and r_all:
+        print(
+            f"  基准已实现口径：累计R {r_all:+.0f} → 剔除末持(open_end) "
+            f"{n_open:.0f} 笔的 {r_open:+.0f}R ⇒ **{r_all - r_open:+.0f}R**"
+        )
+        if r_all > 0 >= r_all - r_open:
+            print("     ⚠️ **基准的正期望完全来自未平仓浮盈**（期末仍持仓、按最后一根")
+            print("        收盘价标记）⇒ 已实现口径为负。在这个基准上比出来的「改进」")
+            print("        要格外小心：相对提升再大，绝对水平仍可能是负的。")
+
+
+def _judge_diff_denom(
+    d: dict,
+    exit_side: bool,
+    mg: Optional[float],
+    b_mg: Optional[float],
+    b: dict,
+    rate: float,
+    exp_pct: float,
+    b_exp_pct: float,
+    expR: float,
+) -> tuple[bool, str, list[str], list[str]]:
+    """异口径分支（期望% / margin 判）。
+
+    ⚠️ 止损距离变了 ⇒ risk_frac(=R 分母)变了 ⇒ **R 一律不能用**。
+    改用收益率口径：期望% 提升 >2%；出场类附加 margin 不降、
+    入场类附加 大赢家占比不降。
+    """
+    why, notes = [], []
+    ok = d["exp_pct"] > MIN_EXPECTANCY_GAIN
+    if d["exp_pct"] <= MIN_EXPECTANCY_GAIN:
+        why.append(f"期望% {d['exp_pct']:+.1%} 未达 +2%")
+    if exit_side:
+        if mg is not None and b_mg is not None:
+            if mg < b_mg - 0.002:  # margin 掉超过 0.2pp
+                ok = False
+                why.append(f"margin {b_mg * 100:+.1f}→{mg * 100:+.1f}pp 变薄")
+    elif d["rate"] <= -MAX_AVG_WIN_DROP:
+        ok = False
+        why.append(f"大赢家占比 {b['rate']:.2%}→{rate:.2%}")
+    main_txt = (
+        f"期望% {b_exp_pct * 100:+.2f}→{exp_pct * 100:+.2f}"
+        f"（{d['exp_pct']:+6.1%}）"
+        f"  margin {(b_mg or 0) * 100:+.1f}→{(mg or 0) * 100:+.1f}pp"
+    )
+    notes.append(
+        f"**R 口径不同**（止损距离变了 ⇒ risk_frac 变了）："
+        f"期望R {b['expR']:.3f}→{expR:.3f} 的差异含纯分母变化，故不用 R 判"
+    )
+    return ok, main_txt, why, notes
+
+
+def _judge_exit(
+    d: dict, r: dict, b: dict, rate: float
+) -> tuple[bool, str, list[str], list[str]]:
+    """出场同口径分支：累计R 判 + 尾部警示。"""
+    why, notes = [], []
+    ok = d["tot"] > MIN_EXPECTANCY_GAIN and d["exp"] >= 0
+    if d["tot"] <= MIN_EXPECTANCY_GAIN:
+        why.append(f"累计R {d['tot']:+.1%} 未达 +2%")
+    if d["exp"] < 0:
+        why.append(
+            f"期望R {d['exp']:+.1%} 下降（累计R 靠笔数 {d['n']:+.1%} 摊薄，非质量提升）"
+        )
+    split = r.get("tail_split")
+    b_split = b["split"]
+    if split and b_split:
+        d_tail = (split[0] - b_split[0]) / abs(b_split[0]) if b_split[0] else 0.0
+        d_non = split[1] - b_split[1]
+        if d_tail < -0.30:
+            # 只在**尾部R 绝对量**明显缩水时警示——那是真的「削大赢家」。
+            # 非尾部同时改善多少一并打出来，供人判断净效果。
+            notes.append(
+                f"尾部R {b_split[0]:.0f}→{split[0]:.0f}"
+                f"（{d_tail:+.0%}，大赢家贡献显著缩水；"
+                f"非尾部R {b_split[1]:.0f}→{split[1]:.0f}，{d_non:+.0f}R）"
             )
-            if r_all > 0 >= r_all - r_open:
-                print(
-                    "     ⚠️ **基准的正期望完全来自未平仓浮盈**（期末仍持仓、按最后一根"
-                )
-                print(
-                    "        收盘价标记）⇒ 已实现口径为负。在这个基准上比出来的「改进」"
-                )
-                print("        要格外小心：相对提升再大，绝对水平仍可能是负的。")
-    for r in sorted(rows, key=lambda x: x["name"]):
+    if d["aw"] <= -MAX_AVG_WIN_DROP:
+        notes.append(f"均盈 {d['aw']:+.1%}")
+    if d["rate"] <= -MAX_AVG_WIN_DROP:
+        notes.append(f"大赢家占比 {b['rate']:.2%}→{rate:.2%}")
+    main_txt = f"累计R {d['tot']:+6.1%}  期望R {d['exp']:+6.1%}  笔数 {d['n']:+5.1%}"
+    return ok, main_txt, why, notes
+
+
+def _judge_entry(
+    d: dict, b: dict, rate: float
+) -> tuple[bool, str, list[str], list[str]]:
+    """入场同口径分支：期望R + 削大赢家判。"""
+    why = []
+    ok = (
+        d["exp"] > MIN_EXPECTANCY_GAIN
+        and d["aw"] > -MAX_AVG_WIN_DROP
+        and d["rate"] > -MAX_AVG_WIN_DROP
+    )
+    if d["exp"] <= MIN_EXPECTANCY_GAIN:
+        why.append(f"期望R {d['exp']:+.1%}")
+    if d["aw"] <= -MAX_AVG_WIN_DROP:
+        why.append(f"均盈 {d['aw']:+.1%} 削大赢家")
+    if d["rate"] <= -MAX_AVG_WIN_DROP:
+        why.append(f"大赢家占比 {b['rate']:.2%}→{rate:.2%}")
+    main_txt = f"期望R {d['exp']:+6.1%}  均盈 {d['aw']:+6.1%}"
+    return ok, main_txt, why, []
+
+
+def _judge_row(
+    group: str,
+    r: dict,
+    base: dict,
+    base_name: Optional[str],
+    b: dict,
+    b_mg: Optional[float],
+) -> dict:
+    """单个方案相对基准的逐行判定——**纯计算不打印**，文案由调用方组装。
+
+    ``b`` 是 `_baseline_stats` 取的基准口径；``b_mg`` 由调用方在循环外算好
+    （原来每行重算一次 `_margin(base)`，是纯浪费）。三个判定分支分别在
+    `_judge_diff_denom` / `_judge_exit` / `_judge_entry`。
+    """
+    expR, aw, totR = r["expR"] or 0, r["avg_win"] or 0, r["totR"] or 0
+    n = r["n"] or 1
+    rate = r["big"] / n
+    d = {
+        "exp": (expR - b["expR"]) / abs(b["expR"]) if b["expR"] else 0.0,
+        "tot": (totR - b["totR"]) / abs(b["totR"]) if b["totR"] else 0.0,
+        "aw": (aw - b["aw"]) / b["aw"] if b["aw"] else 0.0,
+        "rate": (rate - b["rate"]) / b["rate"] if b["rate"] else 0.0,
+        "n": (n - b["n"]) / b["n"] if b["n"] else 0.0,
+    }
+    exp_pct, b_exp_pct = r["exp"] or 0.0, base["exp"] or 0.0
+    d["exp_pct"] = (exp_pct - b_exp_pct) / abs(b_exp_pct) if b_exp_pct else 0.0
+    mg = _margin(r)
+    exit_side = _side_of(group, r, base, base_name) == "exit"
+    same_denom = _same_r_denom(group, r["name"], base_name)
+    if not same_denom:
+        ok, main_txt, why, notes = _judge_diff_denom(
+            d, exit_side, mg, b_mg, b, rate, exp_pct, b_exp_pct, expR
+        )
+    elif exit_side:
+        ok, main_txt, why, notes = _judge_exit(d, r, b, rate)
+    else:
+        ok, main_txt, why, notes = _judge_entry(d, b, rate)
+    tag = ("出场" if exit_side else "入场") + ("" if same_denom else "·R口径变")
+    return {
+        "ok": ok,
+        "tag": tag,
+        # 原局部变量名 main 会遮蔽模块级 main()，抽出时改名
+        "main_txt": main_txt,
+        "rate": rate,
+        "why": why,
+        "notes": notes,
+    }
+
+
+def _print_trade_group(group: str, rows: list[dict]) -> None:
+    meta = GROUPS[group]
+    srt = sorted(rows, key=lambda x: x["name"])
+    _print_summary_table(f"【{group}】{meta['desc']}", srt)
+    base_name = meta.get("baseline")
+    base = next((r for r in rows if r["name"] == base_name), None)
+    if not base:
+        return
+    _print_judge_rules(group, base_name)
+    b = _baseline_stats(base)
+    _print_baseline_realized(base)
+    b_mg = _margin(base)
+    for r in srt:
         if r["name"] == base_name:
             continue
-        expR, aw, totR = r["expR"] or 0, r["avg_win"] or 0, r["totR"] or 0
-        n = r["n"] or 1
-        rate = r["big"] / n
-        d_exp = (expR - b_expR) / abs(b_expR) if b_expR else 0.0
-        d_tot = (totR - b_totR) / abs(b_totR) if b_totR else 0.0
-        d_aw = (aw - b_aw) / b_aw if b_aw else 0.0
-        d_rate = (rate - b_rate) / b_rate if b_rate else 0.0
-        d_n = (n - b_n) / b_n if b_n else 0.0
-        exp_pct, b_exp_pct = r["exp"] or 0.0, base["exp"] or 0.0
-        d_exp_pct = (exp_pct - b_exp_pct) / abs(b_exp_pct) if b_exp_pct else 0.0
-        mg = _margin(r)
-        b_mg = _margin(base)
-        exit_side = _side_of(group, r, base, base_name) == "exit"
-        same_denom = _same_r_denom(group, r["name"], base_name)
-        why, notes = [], []
-        if not same_denom:
-            # ⚠️ 止损距离变了 ⇒ risk_frac(=R 分母)变了 ⇒ **R 一律不能用**。
-            # 改用收益率口径：期望% 提升 >2%；出场类附加 margin 不降、
-            # 入场类附加 大赢家占比不降。
-            ok = d_exp_pct > MIN_EXPECTANCY_GAIN
-            if d_exp_pct <= MIN_EXPECTANCY_GAIN:
-                why.append(f"期望% {d_exp_pct:+.1%} 未达 +2%")
-            if exit_side:
-                if mg is not None and b_mg is not None:
-                    if mg < b_mg - 0.002:  # margin 掉超过 0.2pp
-                        ok = False
-                        why.append(f"margin {b_mg * 100:+.1f}→{mg * 100:+.1f}pp 变薄")
-            elif d_rate <= -MAX_AVG_WIN_DROP:
-                ok = False
-                why.append(f"大赢家占比 {b_rate:.2%}→{rate:.2%}")
-            main = (
-                f"期望% {b_exp_pct * 100:+.2f}→{exp_pct * 100:+.2f}"
-                f"（{d_exp_pct:+6.1%}）"
-                f"  margin {(b_mg or 0) * 100:+.1f}→{(mg or 0) * 100:+.1f}pp"
-            )
-            notes.append(
-                f"**R 口径不同**（止损距离变了 ⇒ risk_frac 变了）："
-                f"期望R {b_expR:.3f}→{expR:.3f} 的差异含纯分母变化，故不用 R 判"
-            )
-        elif exit_side:
-            ok = d_tot > MIN_EXPECTANCY_GAIN and d_exp >= 0
-            if d_tot <= MIN_EXPECTANCY_GAIN:
-                why.append(f"累计R {d_tot:+.1%} 未达 +2%")
-            if d_exp < 0:
-                why.append(
-                    f"期望R {d_exp:+.1%} 下降（累计R 靠笔数 {d_n:+.1%} 摊薄，非质量提升）"
-                )
-            split = r.get("tail_split")
-            if split and b_split:
-                d_tail = (
-                    (split[0] - b_split[0]) / abs(b_split[0]) if b_split[0] else 0.0
-                )
-                d_non = split[1] - b_split[1]
-                if d_tail < -0.30:
-                    # 只在**尾部R 绝对量**明显缩水时警示——那是真的「削大赢家」。
-                    # 非尾部同时改善多少一并打出来，供人判断净效果。
-                    notes.append(
-                        f"尾部R {b_split[0]:.0f}→{split[0]:.0f}"
-                        f"（{d_tail:+.0%}，大赢家贡献显著缩水；"
-                        f"非尾部R {b_split[1]:.0f}→{split[1]:.0f}，{d_non:+.0f}R）"
-                    )
-            if d_aw <= -MAX_AVG_WIN_DROP:
-                notes.append(f"均盈 {d_aw:+.1%}")
-            if d_rate <= -MAX_AVG_WIN_DROP:
-                notes.append(f"大赢家占比 {b_rate:.2%}→{rate:.2%}")
-            main = f"累计R {d_tot:+6.1%}  期望R {d_exp:+6.1%}  笔数 {d_n:+5.1%}"
-        else:
-            ok = (
-                d_exp > MIN_EXPECTANCY_GAIN
-                and d_aw > -MAX_AVG_WIN_DROP
-                and d_rate > -MAX_AVG_WIN_DROP
-            )
-            if d_exp <= MIN_EXPECTANCY_GAIN:
-                why.append(f"期望R {d_exp:+.1%}")
-            if d_aw <= -MAX_AVG_WIN_DROP:
-                why.append(f"均盈 {d_aw:+.1%} 削大赢家")
-            if d_rate <= -MAX_AVG_WIN_DROP:
-                why.append(f"大赢家占比 {b_rate:.2%}→{rate:.2%}")
-            main = f"期望R {d_exp:+6.1%}  均盈 {d_aw:+6.1%}"
-        tag = ("出场" if exit_side else "入场") + ("" if same_denom else "·R口径变")
+        j = _judge_row(group, r, base, base_name, b, b_mg)
         line = (
-            f"  {r['name']:<20}{'✅ 通过' if ok else '❌ 否决'} [{tag}]  {main}"
-            f"  大赢家 {b_rate:.2%}→{rate:.2%}"
+            f"  {r['name']:<20}{'✅ 通过' if j['ok'] else '❌ 否决'} [{j['tag']}]"
+            f"  {j['main_txt']}  大赢家 {b['rate']:.2%}→{j['rate']:.2%}"
         )
-        if why:
-            line += "  ｜" + "；".join(why)
+        if j["why"]:
+            line += "  ｜" + "；".join(j["why"])
         print(line)
-        for nt in notes:
+        for nt in j["notes"]:
             print(f"      ⚠️ {nt}")
 
 
@@ -1374,19 +1466,10 @@ def _family_stats(trades: list) -> dict[str, dict[str, float]]:
     return out
 
 
-def _print_exit_structure(
-    group: str, rows: list[dict], base_name: Optional[str]
-) -> None:
-    """**跨方案**的出场结构对比矩阵。
-
-    为什么必须是矩阵而不是单方案的原因表：每个方案单看都是「`bbi_exit+scaled` 均收最高」
-    ——那是恒等式（见 `_reason_stats`）。有判别力的是**方案之间的差异**：
-    某个机制有没有把交易从 `stop` 桶**搬走**、R 的来源有没有换地方。
-
-    打两张表而不是一张宽表：
-      ① 笔数占比 —— 看**交易去哪了**（分布迁移）
-      ② R 贡献占比 —— 看**钱从哪来**（可加；均收不可加，不能用来加总）
-    """
+def _exit_matrix(
+    rows: list[dict], base_name: Optional[str]
+) -> Optional[tuple[dict, list[str], list[str]]]:
+    """出场结构矩阵的取数：``{方案: {族: {n, sum_r}}}``、列、行序（基准排第一）。"""
     stats = {
         r["name"]: _family_stats(r.get("_trades_ref") or [])
         for r in rows
@@ -1394,20 +1477,21 @@ def _print_exit_structure(
     }
     stats = {k: v for k, v in stats.items() if v}
     if len(stats) < 2:  # 单方案没有可比性，矩阵没意义
-        return
+        return None
     fams = [f for f in _FAMILY_ORDER if any(f in v for v in stats.values())]
     cols = fams + ["scaled"]
     order = ([base_name] if base_name in stats else []) + sorted(
         k for k in stats if k != base_name
     )
+    return stats, cols, order
+
+
+def _print_share_table(stats: dict, cols: list[str], order: list[str]) -> None:
+    """① 笔数占比 —— 看**交易去哪了**（分布迁移）。"""
 
     def _row_head(name: str) -> str:
         return "    " + f"{name:<20}"
 
-    print(
-        f"\n  【出场结构对比】{group}"
-        f"（scaled 是**叠加标记**，与 bbi/末持重叠，不计入合计）"
-    )
     print("\n  ① 笔数占比%（看**交易去哪了**）")
     print("    " + f"{'方案':<20}" + "".join(f"{c:>8}" for c in cols))
     for name in order:
@@ -1418,7 +1502,10 @@ def _print_exit_structure(
         ]
         print(_row_head(name) + "".join(cells))
 
-    # ② 用**每笔 R 贡献**而不是「占总R 的百分比」：后者的分母是 total_R，
+
+def _print_r_contrib_table(stats: dict, cols: list[str], order: list[str]) -> None:
+    """② 每笔 R 贡献 —— 看**钱从哪来**（可加；均收不可加，不能用来加总）。"""
+    # 用**每笔 R 贡献**而不是「占总R 的百分比」：后者的分母是 total_R，
     #    而 total_R 可以很小（pct_12 只有 58R，而 bbi 桶 +383R / stop 桶 -335R）
     #    ⇒ 占比会炸到 660% / -578%，跨方案还不可比。
     #    每笔 R 贡献的好处：**行合计恰好等于期望R**，一眼看出「期望从哪来、在哪漏掉」。
@@ -1468,6 +1555,31 @@ def _print_exit_structure(
                 f"（占 {n_open / n_tot:.1%}）贡献 {v.get('末持', {}).get('sum_r', 0):+.0f}R，"
                 f"剔掉后已实现期望 {r_closed:+.3f}R/笔 ⇒ **没兑现的边际不是边际**"
             )
+
+
+def _print_exit_structure(
+    group: str, rows: list[dict], base_name: Optional[str]
+) -> None:
+    """**跨方案**的出场结构对比矩阵。
+
+    为什么必须是矩阵而不是单方案的原因表：每个方案单看都是「`bbi_exit+scaled` 均收最高」
+    ——那是恒等式（见 `_reason_stats`）。有判别力的是**方案之间的差异**：
+    某个机制有没有把交易从 `stop` 桶**搬走**、R 的来源有没有换地方。
+
+    打两张表而不是一张宽表：
+      ① 笔数占比 —— 看**交易去哪了**（分布迁移）
+      ② R 贡献占比 —— 看**钱从哪来**（可加；均收不可加，不能用来加总）
+    """
+    matrix = _exit_matrix(rows, base_name)
+    if matrix is None:
+        return
+    stats, cols, order = matrix
+    print(
+        f"\n  【出场结构对比】{group}"
+        f"（scaled 是**叠加标记**，与 bbi/末持重叠，不计入合计）"
+    )
+    _print_share_table(stats, cols, order)
+    _print_r_contrib_table(stats, cols, order)
     print(
         "    ⚠️ 「已实现」= 剔除 `末持`(open_end，期末仍持仓、按最后收盘价标记的未实现"
         "盈亏)，"
@@ -1562,14 +1674,10 @@ def _print_cross_group(groups: dict[str, list[dict]]) -> None:
         f"{'组/方案':<32}{'笔数':>7}{'胜率':>8}{'期望%':>9}{'盈亏比':>8}"
         f"{'平衡胜率':>9}{'margin':>8}"
     )
-    print("\n" + "=" * len(hdr))
-    print("跨组比较（**不同 stop_mode 之间 R 不可比，这里只看收益率**）")
-    print("=" * len(hdr))
-    print(hdr)
-    print("-" * len(hdr))
+    _banner("跨组比较（**不同 stop_mode 之间 R 不可比，这里只看收益率**）", hdr)
     for g, r in sorted(rows, key=lambda x: -(x[1]["exp"] or -9)):
         be = _breakeven_wr(r["payoff"])
-        margin = (r["win"] - be) if (be is not None and r["win"] is not None) else None
+        margin = _margin(r)
         print(
             f"{g + '/' + r['name']:<32}{r['n'] or 0:>7}"
             f"{(r['win'] or 0) * 100:>7.1f}%{(r['exp'] or 0) * 100:>+9.2f}"
@@ -1608,11 +1716,7 @@ def _print_portfolio(rows: list[dict]) -> None:
         f"{'方案':<24}{'总收益':>9}{'CAGR':>8}{'最大回撤':>9}{'收益/回撤':>10}"
         f"{'成交':>7}{'被限':>7}{'执行率':>8}"
     )
-    print("\n" + "=" * len(hdr))
-    print("【C_portfolio】组合级（R 完全不适用；逐笔正期望 ≠ 组合能赚）")
-    print("=" * len(hdr))
-    print(hdr)
-    print("-" * len(hdr))
+    _banner("【C_portfolio】组合级（R 完全不适用；逐笔正期望 ≠ 组合能赚）", hdr)
     # 按 收益/回撤 降序（None 垫底）——不用总收益，理由见 _ret_over_dd
     for r in sorted(
         rows,

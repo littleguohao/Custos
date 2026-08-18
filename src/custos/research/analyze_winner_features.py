@@ -102,64 +102,59 @@ def _features(df, i: int) -> dict:
     return feats
 
 
-def main() -> None:
-    cache = _cache_path()
-    if cache.is_file():
-        rows = json.loads(cache.read_text(encoding="utf-8"))
-        print(f"复用样本缓存 {cache.name}（{len(rows)} 样本）", file=sys.stderr)
-    else:
-        rows = []
-        payload = json.loads(FIRINGS.read_text(encoding="utf-8"))
-        recs = payload.get("records") or []
-        print(
-            f"信号池 {sum(len(r.get('days') or []) for r in recs)} 个(j_low 全年),逐信号算特征+标签…",
-            file=sys.stderr,
-        )
-        bars_cache: dict = {}
-        for n, r in enumerate(recs):
-            code = r["code"]
-            if code not in bars_cache:
-                try:
-                    df = local_tdx_data.get_ohlcv_table(code, count=2000)
-                    if df is not None and len(df):
-                        df = df.copy()
-                        df["date"] = df["date"].astype(str).str[:10]
-                        bars_cache[code] = df.sort_values("date").reset_index(drop=True)
-                    else:
-                        bars_cache[code] = None
-                except Exception:  # noqa: BLE001
+def _build_rows(cache: Path) -> list:
+    """读 FIRINGS 信号池,逐股取 K 线、逐信号算 as-of 特征+前向收益标签,写缓存。"""
+    rows = []
+    payload = json.loads(FIRINGS.read_text(encoding="utf-8"))
+    recs = payload.get("records") or []
+    print(
+        f"信号池 {sum(len(r.get('days') or []) for r in recs)} 个(j_low 全年),逐信号算特征+标签…",
+        file=sys.stderr,
+    )
+    bars_cache: dict = {}
+    for n, r in enumerate(recs):
+        code = r["code"]
+        if code not in bars_cache:
+            try:
+                df = local_tdx_data.get_ohlcv_table(code, count=2000)
+                if df is not None and len(df):
+                    df = df.copy()
+                    df["date"] = df["date"].astype(str).str[:10]
+                    bars_cache[code] = df.sort_values("date").reset_index(drop=True)
+                else:
                     bars_cache[code] = None
-            df = bars_cache[code]
-            if df is None:
+            except Exception:  # noqa: BLE001
+                bars_cache[code] = None
+        df = bars_cache[code]
+        if df is None:
+            continue
+        closes = df["close"].astype(float).values
+        for d in r.get("days") or []:
+            idx = df.index[df["date"] == d[0]]
+            if not len(idx):
                 continue
-            closes = df["close"].astype(float).values
-            for d in r.get("days") or []:
-                idx = df.index[df["date"] == d[0]]
-                if not len(idx):
-                    continue
-                i = int(idx[0])
-                if i + FWD >= len(closes) or not closes[i]:
-                    continue
-                fwd = closes[i + FWD] / closes[i] - 1
-                try:
-                    feats = _features(df, i)
-                except Exception:  # noqa: BLE001
-                    continue
-                rows.append({"date": d[0], "y": fwd, "feats": feats})
-            if (n + 1) % 500 == 0:
-                print(
-                    f"  {n + 1}/{len(recs)} 股 | {len(rows)} 样本",
-                    file=sys.stderr,
-                    flush=True,
-                )
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        cache.write_text(json.dumps(rows), encoding="utf-8")
+            i = int(idx[0])
+            if i + FWD >= len(closes) or not closes[i]:
+                continue
+            fwd = closes[i + FWD] / closes[i] - 1
+            try:
+                feats = _features(df, i)
+            except Exception:  # noqa: BLE001
+                continue
+            rows.append({"date": d[0], "y": fwd, "feats": feats})
+        if (n + 1) % 500 == 0:
+            print(
+                f"  {n + 1}/{len(recs)} 股 | {len(rows)} 样本",
+                file=sys.stderr,
+                flush=True,
+            )
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(json.dumps(rows), encoding="utf-8")
+    return rows
 
-    if not rows:
-        # 空样本走下去会在 ys[...] 上 IndexError,或(有缓存时)把空结论写进研究产物
-        raise SystemExit("no usable samples: check FIRINGS pool and local bar coverage")
 
-    print(f"\n有效样本 {len(rows)} 个 | 标签:前向{FWD}日收益 前{int(WIN_Q * 100)}%为赢")
+def _label_and_group(rows: list) -> tuple:
+    """全局 win 标签(全体前 WIN_Q 分位)+ 基准率 + 按交易日分组。"""
     ys = sorted((x["y"] for x in rows), reverse=True)
     thr = ys[int(len(ys) * WIN_Q) - 1]
     for x in rows:
@@ -168,6 +163,105 @@ def main() -> None:
     by_day: dict = defaultdict(list)
     for x in rows:
         by_day[x["date"]].append(x)
+    return thr, base, by_day
+
+
+def _split_halves(rows: list, by_day: dict) -> tuple:
+    """按日期中点切前后半程(调用前 rows 必须已按 date 排序)。"""
+    dates = sorted(by_day)
+    split_date = dates[len(dates) // 2] if dates else ""
+    first_half = [x for x in rows if x["date"] < split_date]
+    second_half = [x for x in rows if x["date"] >= split_date]
+    return split_date, first_half, second_half
+
+
+def _half_win_threshold(half: list) -> float:
+    """半程自己的 win 阈值(不能用全样本分位,否则标签泄漏)。"""
+    hy = sorted((x["y"] for x in half), reverse=True)
+    return hy[max(0, int(len(hy) * WIN_Q) - 1)]
+
+
+def _intraday_stats(by_day: dict, vf) -> tuple:
+    """日内分层 AUC(按 pos*neg 加权聚合)+ 每日 top-PICKS 精确率 vs 公平随机基线。"""
+    num = den = 0.0
+    hit = tot = 0
+    fair = 0.0
+    for _day, lst in by_day.items():
+        cand = [x for x in lst if vf(x) is not None]
+        if not cand:
+            continue
+        pos = [vf(x) for x in cand if x["win"]]
+        neg = [vf(x) for x in cand if not x["win"]]
+        a = _auc(pos, neg)
+        if a is not None:
+            num += a * len(pos) * len(neg)
+            den += len(pos) * len(neg)
+        k = min(PICKS, len(cand))
+        wr = sum(1 for x in cand if x["win"]) / len(cand)
+        fair += k * wr
+        cand.sort(key=vf, reverse=True)
+        for x in cand[:k]:
+            tot += 1
+            hit += int(x["win"])
+    auc = num / den if den else None
+    prec = hit / tot if tot else None
+    fair_p = fair / tot if tot else None
+    return auc, prec, fair_p
+
+
+def _half_gap(samples: list, vf):
+    """半程内 AUC-0.5(用该半程自己的 win_half 标签)。"""
+    p = [vf(x) for x in samples if x.get("win_half") and vf(x) is not None]
+    q = [vf(x) for x in samples if not x.get("win_half") and vf(x) is not None]
+    a = _auc(p, q)
+    return a - 0.5 if a is not None else None
+
+
+def _eval_feature(f: str, by_day: dict, first_half: list, second_half: list) -> dict:
+    """单特征三重指标:日内 AUC、top-PICKS 精确率/净增益、前后半程同号。"""
+    vf = lambda x: x["feats"].get(f)
+    auc, prec, fair_p = _intraday_stats(by_day, vf)
+    # 前后半程同号(按日期切分,各半程用自己的 win_half 标签)
+    h1, h2 = _half_gap(first_half, vf), _half_gap(second_half, vf)
+    consistent = h1 is not None and h2 is not None and (h1 > 0) == (h2 > 0)
+    return {
+        "f": f,
+        "auc": auc,
+        "prec": prec,
+        "fair": fair_p,
+        "lift": (prec - fair_p) if prec and fair_p else None,
+        "h1": h1,
+        "h2": h2,
+        "consistent": consistent,
+    }
+
+
+def _select_strong(results: list) -> list:
+    """三重门槛筛选:日内AUC≥0.53 + 净增益≥2pp + 半程同号。"""
+    return [
+        r
+        for r in results
+        if r["auc"]
+        and r["auc"] - 0.5 >= 0.03
+        and (r["lift"] or 0) >= 0.02
+        and r["consistent"]
+    ]
+
+
+def main() -> None:
+    cache = _cache_path()
+    if cache.is_file():
+        rows = json.loads(cache.read_text(encoding="utf-8"))
+        print(f"复用样本缓存 {cache.name}（{len(rows)} 样本）", file=sys.stderr)
+    else:
+        rows = _build_rows(cache)
+
+    if not rows:
+        # 空样本走下去会在 ys[...] 上 IndexError,或(有缓存时)把空结论写进研究产物
+        raise SystemExit("no usable samples: check FIRINGS pool and local bar coverage")
+
+    print(f"\n有效样本 {len(rows)} 个 | 标签:前向{FWD}日收益 前{int(WIN_Q * 100)}%为赢")
+    thr, base, by_day = _label_and_group(rows)
 
     # 半程切分**必须按日期**。rows 是外层遍历股票、内层遍历该股信号日 append 出来的,
     # 所以 rows[:mid] / rows[mid:] 切出来的是「前一半股票的全部年份」vs「后一半股票的
@@ -175,17 +269,13 @@ def main() -> None:
     # 门槛因此恒通过。三个已上线/曾上线的 gate(j_low_dif_pos / j_low_adx25 /
     # j_low_adx60)都把"半程一致"写进了采纳依据。
     rows.sort(key=lambda x: x["date"])
-    dates = sorted(by_day)
-    split_date = dates[len(dates) // 2] if dates else ""
-    first_half = [x for x in rows if x["date"] < split_date]
-    second_half = [x for x in rows if x["date"] >= split_date]
+    split_date, first_half, second_half = _split_halves(rows, by_day)
     # 每半程各自定 win 阈值:用全样本分位再切半程会把另一半的分布信息带进来(标签泄漏),
     # 而 consistent 直接决定特征是否被采纳。
     for half in (first_half, second_half):
         if not half:
             continue
-        hy = sorted((x["y"] for x in half), reverse=True)
-        hthr = hy[max(0, int(len(hy) * WIN_Q) - 1)]
+        hthr = _half_win_threshold(half)
         for x in half:
             x["win_half"] = x["y"] >= hthr
     print(
@@ -199,67 +289,16 @@ def main() -> None:
     )
     results = []
     for f in feat_names:
-        vf = lambda x: x["feats"].get(f)
-        # 日内 AUC
-        num = den = 0.0
-        hit = tot = 0
-        fair = 0.0
-        for _day, lst in by_day.items():
-            cand = [x for x in lst if vf(x) is not None]
-            if not cand:
-                continue
-            pos = [vf(x) for x in cand if x["win"]]
-            neg = [vf(x) for x in cand if not x["win"]]
-            a = _auc(pos, neg)
-            if a is not None:
-                num += a * len(pos) * len(neg)
-                den += len(pos) * len(neg)
-            k = min(PICKS, len(cand))
-            wr = sum(1 for x in cand if x["win"]) / len(cand)
-            fair += k * wr
-            cand.sort(key=vf, reverse=True)
-            for x in cand[:k]:
-                tot += 1
-                hit += int(x["win"])
-        auc = num / den if den else None
-        prec = hit / tot if tot else None
-        fair_p = fair / tot if tot else None
-
-        # 前后半程同号(按日期切分,各半程用自己的 win_half 标签)
-        def _h(samples):
-            p = [vf(x) for x in samples if x.get("win_half") and vf(x) is not None]
-            q = [vf(x) for x in samples if not x.get("win_half") and vf(x) is not None]
-            a = _auc(p, q)
-            return a - 0.5 if a is not None else None
-
-        h1, h2 = _h(first_half), _h(second_half)
-        consistent = h1 is not None and h2 is not None and (h1 > 0) == (h2 > 0)
-        results.append(
-            {
-                "f": f,
-                "auc": auc,
-                "prec": prec,
-                "fair": fair_p,
-                "lift": (prec - fair_p) if prec and fair_p else None,
-                "h1": h1,
-                "h2": h2,
-                "consistent": consistent,
-            }
-        )
+        r = _eval_feature(f, by_day, first_half, second_half)
+        results.append(r)
+        auc, prec, fair_p, consistent = r["auc"], r["prec"], r["fair"], r["consistent"]
         print(
             f"{'':2}{f:<18}{(f'{auc:.4f}' if auc else '-'):>8}{(f'{prec:.1%}' if prec else '-'):>8}"
             f"{(f'{fair_p:.1%}' if fair_p else '-'):>8}"
             f"{(f'{(prec - fair_p) * 100:+.1f}pp' if prec and fair_p else '-'):>8}"
             f"  {'✓' if consistent else '✗'}"
         )
-    strong = [
-        r
-        for r in results
-        if r["auc"]
-        and r["auc"] - 0.5 >= 0.03
-        and (r["lift"] or 0) >= 0.02
-        and r["consistent"]
-    ]
+    strong = _select_strong(results)
     print(
         f"\n过三重门槛(日内AUC≥0.53 + 净增益≥2pp + 半程同号): "
         f"{[r['f'] for r in strong] or '无'}"

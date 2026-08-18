@@ -6,7 +6,7 @@
 > 优先级按**「它阻塞了什么」**排，不按工作量：
 > P0 = 阻塞其他事或 live 正在依赖 ｜ P1 = 已有结论悬空 ｜ P2 = 新验证 ｜ P3 = 技术债
 >
-> 最后更新：2026-08-18（#49 持仓快照历史归档落地：`entities(date)` 生效，见 CHANGELOG v0.67。其余：#13 复核两案跑完 ⇒ 严变体终审否决（R7「#13 复核结果」节）；#25 跨窗复核跑完 ⇒ 两案过线但「cz3 首选换位」跨窗不成立（R10「#25 跨窗复核结果」节）；P2 待跑表已空）
+> 最后更新：2026-08-18（#49 持仓快照历史归档落地、`entities(date)` 生效（CHANGELOG v0.67）；#58 研究侧高复杂度函数主动拆完 + entry_gate 逐股预计算提速（CHANGELOG v0.68），live 链 F 级恢复原原则。其余：#13 复核两案跑完 ⇒ 严变体终审否决（R7「#13 复核结果」节）；#25 跨窗复核跑完 ⇒ 两案过线但「cz3 首选换位」跨窗不成立（R10「#25 跨窗复核结果」节）；P2 待跑表已空）
 
 ## P0 · 阻塞项
 
@@ -35,7 +35,7 @@
 
 | # | 事项 | 出处 |
 |---|---|---|
-| 58 | **高复杂度函数拆分**：radon cc 检出 C 级以上函数 267 个，集中在研究侧引擎——`backtest_factors.main` F(75)、`m2_stop_sweep._print_trade_group` F(69)、`backtest_factors.simulate_b1_trade` F(54)、`reconcile_qfq.gap_report` E(35)、`compare_signal_sets.main` E(34)。原则：**下次因业务动这些文件时先拆**，不为拆分而拆分 | 2026-08-11 静态检查（`reports/radon_cc.txt`） |
+| 58 | **高复杂度函数拆分**：~~radon cc 检出 C 级以上函数 267 个~~（2026-08-18 实测 279 个）。**研究侧头部已于 2026-08-18 主动拆完**（owner 指示，覆盖原「不为拆分而拆分」原则）：`launch_point_study` 8 个 F/E 级（main 125→B6、discriminate_at_signal 105→C12 等）、`backtest_factors` 4 个（main 80→B6、simulate_b1_trade 62→C18、evaluate_trades 31→C20、simulate_portfolio_topn 31→C17）、`m2_stop_sweep._print_trade_group` 69→B9、`reconcile_qfq` 4 个 E/D 级全 ≤B7、`analyze_winner_features.main` 69→C17。附带逐位等价效率优化：evaluate_trades 的 entry_gate 指标逐股预计算（O(n²)→O(n)，实测 19.7×，等价性由 `test_gate_precompute_equivalence.py` 106 例 + 新旧版逐笔 `==` 比对钉住）、extract_firings BBI 逐股预计算、若干报表微优化。**剩余**：live 链 F 级函数（`enrich` F86、`detect_distribution` F77、`technical_score` F69 等约 20 个）未动，恢复原原则——**下次因业务动这些文件时先拆**。⚠️ 原文点名的 `compare_signal_sets.main` 系 8-11 旧快照，该文件已按 #44 删除 | 2026-08-18 收口（`reports/radon_cc.txt` 当日已重生成） |
 
 ## ⚠️ 已失效的行动项（**别照着做**）
 

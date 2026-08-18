@@ -110,6 +110,77 @@ def regime_at_and_lead(regime: dict[str, str], launch_date: str) -> dict[str, An
     return {"regime": cur, "lead_days_to_long": lead}
 
 
+def _analyze_stats(launches: list, winners: list, winner_rets: dict) -> dict[str, Any]:
+    """analyze 的统计块:regime 计数 / lead-days 分布 / 起涨点 J 值分布。"""
+    n = len(launches)
+    by_regime: dict = {}
+    for L in launches:
+        by_regime[L["regime"]] = by_regime.get(L["regime"], 0) + 1
+    leads = [
+        L["lead_days_to_long"]
+        for L in launches
+        if L["regime"] in ("空头", "中性") and L["lead_days_to_long"] is not None
+    ]  # "未知"不计入分布
+    out: dict[str, Any] = {
+        "n_winners": len(winners),
+        "n_launches": n,
+        "by_regime": by_regime,
+        "winners": winners,
+        "winner_rets": winner_rets,
+        "launches": launches,
+    }
+    if leads:
+        leads.sort()
+        out["lead_days"] = {
+            "n": len(leads),
+            "median": statistics.median(leads),
+            "p25": leads[len(leads) // 4],
+            "p75": leads[3 * len(leads) // 4],
+            "min": leads[0],
+            "max": leads[-1],
+            "mean": round(statistics.mean(leads), 1),
+        }
+    js = sorted(L["j_at_launch"] for L in launches if L.get("j_at_launch") is not None)
+    if js:
+        out["j_at_launch_stats"] = {
+            "n": len(js),
+            "min": js[0],
+            "p25": js[len(js) // 4],
+            "median": statistics.median(js),
+            "p75": js[3 * len(js) // 4],
+            "max": js[-1],
+            "share_neg": round(sum(1 for v in js if v < 0) / len(js), 3),
+            "share_lt5": round(sum(1 for v in js if v < 5) / len(js), 3),
+        }
+    return out
+
+
+def _render_analyze(out: dict) -> str:
+    """analyze 的文本渲染块(输入为 _analyze_stats 的产物)。"""
+    n = out["n_launches"]
+    by_regime = out["by_regime"]
+    long_share = round(by_regime.get("做多", 0) / n, 3) if n else None
+    ld = out.get("lead_days")
+    lead_txt = (
+        f"空头起涨→领先做多 中位 {ld['median']} / p25 {ld['p25']} / "
+        f"p75 {ld['p75']} / max {ld['max']} 交易日 (n={ld['n']})"
+        if ld
+        else "无空头起涨样本"
+    )
+    st = out.get("j_at_launch_stats")
+    j_txt = ""
+    if st:
+        j_txt = (
+            f"\n  起涨点 J 值: 中位 {st['median']} (p25 {st['p25']} / p75 {st['p75']}), "
+            f"范围 {st['min']}~{st['max']}; J<0 占 {st['share_neg'] * 100:.0f}%、J<5 占 {st['share_lt5'] * 100:.0f}%"
+            f" (n={st['n']}; 门槛 J<13 已限定上界,看池内深度分布)"
+        )
+    return (
+        f"赢家 {out['n_winners']} 只 / 起涨点 {n} 个; 落做多 {by_regime.get('做多', 0)}"
+        f"({(long_share or 0) * 100:.0f}%)、空头 {by_regime.get('空头', 0)}、中性 {by_regime.get('中性', 0)}。\n  {lead_txt}{j_txt}"
+    )
+
+
 def analyze(
     bars_by_code: dict,
     regime: dict[str, str],
@@ -163,64 +234,8 @@ def analyze(
             rec["j_at_launch"] = jv
         launches.append(rec)
 
-    n = len(launches)
-    by_regime: dict = {}
-    for L in launches:
-        by_regime[L["regime"]] = by_regime.get(L["regime"], 0) + 1
-    leads = [
-        L["lead_days_to_long"]
-        for L in launches
-        if L["regime"] in ("空头", "中性") and L["lead_days_to_long"] is not None
-    ]  # "未知"不计入分布
-    out: dict[str, Any] = {
-        "n_winners": len(winners),
-        "n_launches": n,
-        "by_regime": by_regime,
-        "winners": winners,
-        "winner_rets": {c: round(r, 4) for c, r in rets[:n_top]},
-        "launches": launches,
-    }
-    if leads:
-        leads.sort()
-        out["lead_days"] = {
-            "n": len(leads),
-            "median": statistics.median(leads),
-            "p25": leads[len(leads) // 4],
-            "p75": leads[3 * len(leads) // 4],
-            "min": leads[0],
-            "max": leads[-1],
-            "mean": round(statistics.mean(leads), 1),
-        }
-    long_share = round(by_regime.get("做多", 0) / n, 3) if n else None
-    lead_txt = (
-        f"空头起涨→领先做多 中位 {out['lead_days']['median']} / p25 {out['lead_days']['p25']} / "
-        f"p75 {out['lead_days']['p75']} / max {out['lead_days']['max']} 交易日 (n={out['lead_days']['n']})"
-        if leads
-        else "无空头起涨样本"
-    )
-    js = sorted(L["j_at_launch"] for L in launches if L.get("j_at_launch") is not None)
-    j_txt = ""
-    if js:
-        out["j_at_launch_stats"] = {
-            "n": len(js),
-            "min": js[0],
-            "p25": js[len(js) // 4],
-            "median": statistics.median(js),
-            "p75": js[3 * len(js) // 4],
-            "max": js[-1],
-            "share_neg": round(sum(1 for v in js if v < 0) / len(js), 3),
-            "share_lt5": round(sum(1 for v in js if v < 5) / len(js), 3),
-        }
-        st = out["j_at_launch_stats"]
-        j_txt = (
-            f"\n  起涨点 J 值: 中位 {st['median']} (p25 {st['p25']} / p75 {st['p75']}), "
-            f"范围 {st['min']}~{st['max']}; J<0 占 {st['share_neg'] * 100:.0f}%、J<5 占 {st['share_lt5'] * 100:.0f}%"
-            f" (n={st['n']}; 门槛 J<13 已限定上界,看池内深度分布)"
-        )
-    out["text"] = (
-        f"赢家 {len(winners)} 只 / 起涨点 {n} 个; 落做多 {by_regime.get('做多', 0)}"
-        f"({(long_share or 0) * 100:.0f}%)、空头 {by_regime.get('空头', 0)}、中性 {by_regime.get('中性', 0)}。\n  {lead_txt}{j_txt}"
-    )
+    out = _analyze_stats(launches, winners, {c: round(r, 4) for c, r in rets[:n_top]})
+    out["text"] = _render_analyze(out)
     return out
 
 
@@ -265,19 +280,14 @@ def _pick_winners(
     return winners, meta
 
 
-def _summarize_capture(
-    rets: list,
+def _capture_accumulate(
     winners: set,
     win_fire: dict,
     rank_of: dict,
-    top_pct: float,
     surface_top_n: int,
-    day_winners: Optional[dict] = None,
-    wmeta: Optional[dict] = None,
+    day_winners: Optional[dict],
 ) -> dict[str, Any]:
-    """捕捉率/排名质量的共享汇总(流式与两趟分片模式同口径)。
-    day_winners:{date: 当日池中赢家数} → 据此算 **oracle(完美排序上限)**:
-    完美排序把赢家排在最前,则当日赢家数 ≤ top_n 时该赢家必浮出。区分"排序不行"与"展示位不够"。"""
+    """_summarize_capture 的逐赢家累加块:best_rank / 每日池 / oracle / 随机基线。"""
     captured = surfaced = buried = 0
     oracle = 0
     best_ranks: list[int] = []
@@ -309,6 +319,86 @@ def _summarize_capture(
         for _, pl in cand:  # 随机排名下"至少一天进 top_n"的概率
             p_miss *= (1 - min(1.0, surface_top_n / pl)) if pl else 1.0
         rand_p.append(1 - p_miss)
+    return {
+        "captured": captured,
+        "surfaced": surfaced,
+        "buried": buried,
+        "oracle": oracle,
+        "best_ranks": best_ranks,
+        "best_pcts": best_pcts,
+        "pools": pools,
+        "rand_p": rand_p,
+        "wpools": wpools,
+    }
+
+
+def _render_capture(out: dict) -> str:
+    """_summarize_capture 的文本渲染块(输入为已填好统计字段的 out)。"""
+    nw = out["n_winners"]
+    captured = out["captured"]
+    buried = out["buried_selected_not_found"]
+    top_pct = out["top_pct"]
+    surface_top_n = out["surface_top_n"]
+    miss = round(buried / captured, 3) if captured else None
+    edge = (out["surfaced_rate_of_captured"] or 0) - (
+        out["random_surfaced_rate_of_captured"] or 0
+    )
+    text = (
+        (
+            f"全域 {out['n_universe']} 只(盈利 {out.get('n_profitable', '-')} 只), "
+            f"赢家口径={out.get('winner_basis', 'universe')}"
+            + (
+                f"→盈利股内前{top_pct:.0f}%"
+                if out.get("winner_basis") == "profitable"
+                else f"→全域前{top_pct:.0f}%"
+            )
+            + (
+                f", 且≥{(out['min_winner_ret'] or 0) * 100:.0f}%"
+                if out.get("min_winner_ret")
+                else ""
+            )
+            + f", 收益切点 {out.get('winner_ret_cutoff')}"
+        )
+        + f"; 赢家 {nw} 只; **捕捉率(recall) {(out['recall'] or 0) * 100:.0f}%**"
+        f"({captured}/{nw})。捕捉到者中: 进 top{surface_top_n} = **surfaced {(out['surfaced_rate_of_captured'] or 0) * 100:.0f}%**, "
+        f"'选出来但没发现'(埋没) {(miss or 0) * 100:.0f}%。\n  "
+        f"当日信号池 中位 {out.get('daily_pool', {}).get('median', '-')} / max {out.get('daily_pool', {}).get('max', '-')}; "
+        f"赢家最佳排名 中位 {out.get('best_rank', {}).get('median', '-')} (百分位中位 {out.get('best_rank_pct_median', '-')}, 0.5≈随机)。\n  "
+        f"排序增益: 我们 surfaced {(out['surfaced_rate_of_captured'] or 0) * 100:.0f}% vs 随机 "
+        f"{(out['random_surfaced_rate_of_captured'] or 0) * 100:.0f}% → {'排序有效(+%.0fpp)' % (edge * 100) if edge > 0.02 else '排序≈随机(无surfacing增益)' if abs(edge) <= 0.02 else '排序反而更差(%.0fpp)' % (edge * 100)}。"
+    )
+    if out.get("oracle_surfaced_rate_of_captured") is not None:
+        orc = out["oracle_surfaced_rate_of_captured"]
+        text += (
+            f"\n  **完美排序上限(oracle) {orc * 100:.0f}%**(池中赢家数中位 {out['winners_in_pool_median']:.0f} "
+            f"vs 展示位 top{surface_top_n})——"
+            + (
+                "上限已高 → 瓶颈在**排序能力**(有提升空间)"
+                if orc >= 0.9
+                else "上限本身就低 → 瓶颈是**展示位不够/赢家口径过宽**(结构),排序再好也救不回"
+            )
+            + "。"
+        )
+    return text
+
+
+def _summarize_capture(
+    rets: list,
+    winners: set,
+    win_fire: dict,
+    rank_of: dict,
+    top_pct: float,
+    surface_top_n: int,
+    day_winners: Optional[dict] = None,
+    wmeta: Optional[dict] = None,
+) -> dict[str, Any]:
+    """捕捉率/排名质量的共享汇总(流式与两趟分片模式同口径)。
+    day_winners:{date: 当日池中赢家数} → 据此算 **oracle(完美排序上限)**:
+    完美排序把赢家排在最前,则当日赢家数 ≤ top_n 时该赢家必浮出。区分"排序不行"与"展示位不够"。"""
+    acc = _capture_accumulate(winners, win_fire, rank_of, surface_top_n, day_winners)
+    captured, surfaced, buried = acc["captured"], acc["surfaced"], acc["buried"]
+    best_ranks, best_pcts, pools = acc["best_ranks"], acc["best_pcts"], acc["pools"]
+    rand_p, wpools, oracle = acc["rand_p"], acc["wpools"], acc["oracle"]
 
     nw = len(winners)
     out: dict[str, Any] = {
@@ -346,46 +436,7 @@ def _summarize_capture(
         out["best_rank_pct_median"] = statistics.median(pc_s)  # 0=最强,0.5≈随机,1=最弱
     if wmeta:
         out.update(wmeta)
-    miss = round(buried / captured, 3) if captured else None
-    edge = (out["surfaced_rate_of_captured"] or 0) - (
-        out["random_surfaced_rate_of_captured"] or 0
-    )
-    out["text"] = (
-        (
-            f"全域 {len(rets)} 只(盈利 {out.get('n_profitable', '-')} 只), "
-            f"赢家口径={out.get('winner_basis', 'universe')}"
-            + (
-                f"→盈利股内前{top_pct:.0f}%"
-                if out.get("winner_basis") == "profitable"
-                else f"→全域前{top_pct:.0f}%"
-            )
-            + (
-                f", 且≥{(out['min_winner_ret'] or 0) * 100:.0f}%"
-                if out.get("min_winner_ret")
-                else ""
-            )
-            + f", 收益切点 {out.get('winner_ret_cutoff')}"
-        )
-        + f"; 赢家 {nw} 只; **捕捉率(recall) {(out['recall'] or 0) * 100:.0f}%**"
-        f"({captured}/{nw})。捕捉到者中: 进 top{surface_top_n} = **surfaced {(out['surfaced_rate_of_captured'] or 0) * 100:.0f}%**, "
-        f"'选出来但没发现'(埋没) {(miss or 0) * 100:.0f}%。\n  "
-        f"当日信号池 中位 {out.get('daily_pool', {}).get('median', '-')} / max {out.get('daily_pool', {}).get('max', '-')}; "
-        f"赢家最佳排名 中位 {out.get('best_rank', {}).get('median', '-')} (百分位中位 {out.get('best_rank_pct_median', '-')}, 0.5≈随机)。\n  "
-        f"排序增益: 我们 surfaced {(out['surfaced_rate_of_captured'] or 0) * 100:.0f}% vs 随机 "
-        f"{(out['random_surfaced_rate_of_captured'] or 0) * 100:.0f}% → {'排序有效(+%.0fpp)' % (edge * 100) if edge > 0.02 else '排序≈随机(无surfacing增益)' if abs(edge) <= 0.02 else '排序反而更差(%.0fpp)' % (edge * 100)}。"
-    )
-    if out.get("oracle_surfaced_rate_of_captured") is not None:
-        orc = out["oracle_surfaced_rate_of_captured"]
-        out["text"] += (
-            f"\n  **完美排序上限(oracle) {orc * 100:.0f}%**(池中赢家数中位 {out['winners_in_pool_median']:.0f} "
-            f"vs 展示位 top{surface_top_n})——"
-            + (
-                "上限已高 → 瓶颈在**排序能力**(有提升空间)"
-                if orc >= 0.9
-                else "上限本身就低 → 瓶颈是**展示位不够/赢家口径过宽**(结构),排序再好也救不回"
-            )
-            + "。"
-        )
+    out["text"] = _render_capture(out)
     return out
 
 
@@ -504,6 +555,275 @@ def _scorer_value(scorer, sub, code):
     return float(val), True
 
 
+def _horizon_extras(closes: list, i: int, horizons: tuple) -> dict:
+    """因果前向收益块:只用信号日之后的数据(fwd{h}=期末收益, mfe{h}=区间最大涨幅)。"""
+    extra: dict = {}
+    for h in horizons:
+        j = i + int(h)
+        if j < len(closes) and closes[i]:
+            extra[f"fwd{h}"] = round(closes[j] / closes[i] - 1, 4)
+            seg = closes[i + 1 : j + 1]
+            if seg:
+                extra[f"mfe{h}"] = round(max(seg) / closes[i] - 1, 4)
+    return extra
+
+
+def _feature_scorer_extras(sub, code, feature_scorers: Optional[dict], stats) -> dict:
+    """特征打分器块:逐 scorer 记 f_{name};异常计数防静默(恒失败的特征不得无声消失)。"""
+    extra: dict = {}
+    for fname, fsc in (feature_scorers or {}).items():
+        try:
+            fr = fsc(sub, code)
+            v = (fr or {}).get("score") if isinstance(fr, dict) else fr
+            if v is not None:
+                extra[f"f_{fname}"] = round(float(v), 6)
+        except Exception:  # noqa: BLE001
+            if stats is not None:
+                ff = stats.setdefault("feature_failures", {})
+                ff[fname] = ff.get(fname, 0) + 1
+    return extra
+
+
+def _extra_fn_values(code, date: str, extra_feature_fn, stats) -> dict:
+    """as-of 附加特征块(板块相位/动量等);异常计数防静默。"""
+    try:
+        return dict(extra_feature_fn(code, date))
+    except Exception:  # noqa: BLE001
+        if stats is not None:
+            ff = stats.setdefault("feature_failures", {})
+            ff["_extra"] = ff.get("_extra", 0) + 1
+        return {}
+
+
+def _style_extras(df, i: int, closes: list, code) -> dict:
+    """风格特征块:上市板序数(免数据) + 20日均成交额(log10,市值代理)。"""
+    extra: dict = {
+        "f_board_code": float(
+            next(
+                (k for k, (nm, _) in enumerate(BOARDS) if nm == board_of(code)),
+                len(BOARDS),
+            )
+        )
+    }
+    lo20 = max(0, i - 19)
+    amt = [closes[j] * float(df["volume"].iloc[j]) for j in range(lo20, i + 1)]
+    amt = [a for a in amt if a > 0]
+    if amt:
+        extra["f_amount20"] = round(math.log10(sum(amt) / len(amt)), 4)
+    return extra
+
+
+def _trade_sim_extra(df, i: int, bbi, bbi_consec: int, stop_pct: float, stats) -> dict:
+    """本策略买卖规则下的实际一笔(simulate_b1_trade);异常计数防静默。"""
+    try:
+        sub_full = df.iloc[:]  # 规则需向后走,故用全量 df
+        sim = bt.simulate_b1_trade(
+            sub_full,
+            i,
+            bbi,
+            bbi_exit_consec=bbi_consec,
+            stop_mode="pct",
+            stop_pct=stop_pct,
+        )
+        return {
+            "sim_ret": round(float(sim["ret"]), 4),
+            "sim_reason": sim["reason"],
+            "sim_holding": sim["holding"],
+        }
+    except Exception:  # noqa: BLE001
+        if stats is not None:
+            ff = stats.setdefault("feature_failures", {})
+            ff["_trade_sim"] = ff.get("_trade_sim", 0) + 1
+        return {}
+
+
+def _signal_extras(
+    df,
+    i: int,
+    ds: list,
+    closes: list,
+    sub,
+    code,
+    *,
+    horizons: tuple,
+    feature_scorers: Optional[dict],
+    extra_feature_fn,
+    style_features: bool,
+    shares_idx: Optional[dict],
+    trade_sim: bool,
+    bbi,
+    stop_pct: float,
+    bbi_consec: int,
+    stats: Optional[dict],
+) -> dict:
+    """extract_firings 的单信号特征块:fwd/mfe、f_ 特征、as-of 附加特征、风格、市值、trade_sim。
+
+    bbi 由调用方**逐股预计算一次全序列**传入:BBI 是因果滑动均值(rolling mean),
+    前缀第 i 根 == 全序列第 i 根,与"每个信号对 sub_full 重算"逐位等价(原实现 O(n²))。
+    """
+    extra: dict = {}
+    extra.update(_horizon_extras(closes, i, horizons))
+    extra.update(_feature_scorer_extras(sub, code, feature_scorers, stats))
+    if extra_feature_fn is not None:  # as-of 附加特征(板块相位/动量)
+        extra.update(_extra_fn_values(code, ds[i], extra_feature_fn, stats))
+    if style_features:  # 风格:上市板 + 成交额(市值代理)
+        extra.update(_style_extras(df, i, closes, code))
+    if shares_idx is not None:  # 真市值:as-of 股本×信号日收盘
+        evs = shares_idx.get(code)
+        if evs:
+            k2 = bisect.bisect_right(evs, (ds[i], float("inf"))) - 1
+            if k2 >= 0 and evs[k2][1] and closes[i]:
+                extra["f_mcap"] = round(
+                    math.log10(evs[k2][1] * closes[i] / 1e8), 4
+                )  # 亿元
+    if trade_sim:  # 本策略买卖规则下的实际一笔
+        extra.update(_trade_sim_extra(df, i, bbi, bbi_consec, stop_pct, stats))
+    return extra
+
+
+def _extract_signals(
+    df,
+    ds: list,
+    closes: list,
+    code,
+    start: str,
+    end: str,
+    entry_gate,
+    scorer,
+    min_bars: int,
+    gate_window: int,
+    horizons: tuple,
+    feature_scorers: Optional[dict],
+    stats: Optional[dict],
+    extra_feature_fn,
+    trade_sim: bool,
+    bbi,
+    stop_pct: float,
+    bbi_consec: int,
+    style_features: bool,
+    shares_idx: Optional[dict],
+) -> tuple:
+    """单股信号扫描块 → (days=[[date,score(,extra)]...], 无打分跳过数)。"""
+    days: list = []
+    skipped_no_score = 0
+    for i in range(min_bars, len(df)):
+        if not (start <= ds[i] <= end):
+            continue
+        lo = max(0, i + 1 - gate_window) if gate_window else 0
+        sub = df.iloc[lo : i + 1]
+        if not entry_gate(sub):
+            continue
+        sc, sc_ok = _scorer_value(scorer, sub, code)
+        if not sc_ok:
+            skipped_no_score += 1  # 打分不出来的信号不参与排名
+            continue
+        rec: list = [ds[i], float(sc)]
+        if (
+            horizons
+            or feature_scorers
+            or extra_feature_fn
+            or style_features
+            or trade_sim
+            or shares_idx is not None
+        ):
+            rec.append(
+                _signal_extras(
+                    df,
+                    i,
+                    ds,
+                    closes,
+                    sub,
+                    code,
+                    horizons=horizons,
+                    feature_scorers=feature_scorers,
+                    extra_feature_fn=extra_feature_fn,
+                    style_features=style_features,
+                    shares_idx=shares_idx,
+                    trade_sim=trade_sim,
+                    bbi=bbi,
+                    stop_pct=stop_pct,
+                    bbi_consec=bbi_consec,
+                    stats=stats,
+                )
+            )
+        days.append(rec)
+    return days, skipped_no_score
+
+
+def _extract_stock(
+    code,
+    raw,
+    start: str,
+    end: str,
+    entry_gate,
+    scorer,
+    min_bars: int,
+    gate_window: int,
+    horizons: tuple,
+    feature_scorers: Optional[dict],
+    stats: Optional[dict],
+    extra_feature_fn,
+    ret_start: Optional[str],
+    ret_end: Optional[str],
+    delisted_ret: Optional[float],
+    trade_sim: bool,
+    stop_pct: float,
+    bbi_consec: int,
+    style_features: bool,
+    shares_idx: Optional[dict],
+) -> tuple:
+    """extract_firings 的单股处理块 → (rec_out 或 None, 本股因无打分被跳过的信号数)。"""
+    if raw is None or not len(raw):
+        return None, 0
+    skipped_no_score = 0
+    df = raw.sort_values("date").reset_index(drop=True)
+    ds = [str(d)[:10] for d in df["date"]]
+    closes = df["close"].astype(float).tolist()
+    # BBI 逐股预计算一次全序列:bbi_series 是因果 rolling 均值,前缀第 i 根 == 全序列
+    # 第 i 根,与"每个信号对 sub_full 重算"(原实现,每信号 O(n))逐位等价 → 每股 O(n)。
+    bbi = (
+        bt._bbi_series(df["close"].astype(float))
+        if trade_sim and len(df) >= min_bars
+        else None
+    )
+    r = window_return(ds, closes, ret_start or start, ret_end or end)
+    days: list = []
+    if len(df) >= min_bars:
+        days, skipped_no_score = _extract_signals(
+            df,
+            ds,
+            closes,
+            code,
+            start,
+            end,
+            entry_gate,
+            scorer,
+            min_bars,
+            gate_window,
+            horizons,
+            feature_scorers,
+            stats,
+            extra_feature_fn,
+            trade_sim,
+            bbi,
+            stop_pct,
+            bbi_consec,
+            style_features,
+            shares_idx,
+        )
+    delisted = False
+    if r is None and days and delisted_ret is not None:
+        # 有信号但 label 窗口无价格 = 空头段内退市/长停 → 按大亏计入非赢家(去幸存者偏差)
+        r, delisted = float(delisted_ret), True
+    rec_out: Optional[dict] = None
+    if r is not None or days:
+        rec_out = {"code": code, "ret": r, "days": days}
+        if delisted:
+            rec_out["delisted"] = True
+    del df, ds, closes
+    return rec_out, skipped_no_score
+
+
 def extract_firings(
     bars,
     start: str,
@@ -569,127 +889,31 @@ def extract_firings(
     n = 0
     for code, raw in items:
         n += 1
-        if raw is not None and len(raw):
-            df = raw.sort_values("date").reset_index(drop=True)
-            ds = [str(d)[:10] for d in df["date"]]
-            closes = df["close"].astype(float).tolist()
-            r = window_return(ds, closes, ret_start or start, ret_end or end)
-            days: list = []
-            if len(df) >= min_bars:
-                for i in range(min_bars, len(df)):
-                    if not (start <= ds[i] <= end):
-                        continue
-                    lo = max(0, i + 1 - gate_window) if gate_window else 0
-                    sub = df.iloc[lo : i + 1]
-                    if not entry_gate(sub):
-                        continue
-                    sc, sc_ok = _scorer_value(scorer, sub, code)
-                    if not sc_ok:
-                        skipped_no_score += 1  # 打分不出来的信号不参与排名
-                        continue
-                    rec: list = [ds[i], float(sc)]
-                    if (
-                        horizons
-                        or feature_scorers
-                        or extra_feature_fn
-                        or style_features
-                        or trade_sim
-                        or shares_idx is not None
-                    ):
-                        extra: dict = {}
-                        for h in horizons:  # 因果前向:只用信号日之后的数据
-                            j = i + int(h)
-                            if j < len(closes) and closes[i]:
-                                extra[f"fwd{h}"] = round(closes[j] / closes[i] - 1, 4)
-                                seg = closes[i + 1 : j + 1]
-                                if seg:
-                                    extra[f"mfe{h}"] = round(
-                                        max(seg) / closes[i] - 1, 4
-                                    )
-                        for fname, fsc in (feature_scorers or {}).items():
-                            try:
-                                fr = fsc(sub, code)
-                                v = (
-                                    (fr or {}).get("score")
-                                    if isinstance(fr, dict)
-                                    else fr
-                                )
-                                if v is not None:
-                                    extra[f"f_{fname}"] = round(float(v), 6)
-                            except Exception:  # noqa: BLE001
-                                if (
-                                    stats is not None
-                                ):  # 计数防静默:恒失败的特征不得无声消失
-                                    ff = stats.setdefault("feature_failures", {})
-                                    ff[fname] = ff.get(fname, 0) + 1
-                        if (
-                            extra_feature_fn is not None
-                        ):  # as-of 附加特征(板块相位/动量)
-                            try:
-                                extra.update(extra_feature_fn(code, ds[i]))
-                            except Exception:  # noqa: BLE001
-                                if stats is not None:
-                                    ff = stats.setdefault("feature_failures", {})
-                                    ff["_extra"] = ff.get("_extra", 0) + 1
-                        if style_features:  # 风格:上市板 + 成交额(市值代理)
-                            extra["f_board_code"] = float(
-                                next(
-                                    (
-                                        k
-                                        for k, (nm, _) in enumerate(BOARDS)
-                                        if nm == board_of(code)
-                                    ),
-                                    len(BOARDS),
-                                )
-                            )
-                            lo20 = max(0, i - 19)
-                            amt = [
-                                closes[j] * float(df["volume"].iloc[j])
-                                for j in range(lo20, i + 1)
-                            ]
-                            amt = [a for a in amt if a > 0]
-                            if amt:
-                                extra["f_amount20"] = round(
-                                    math.log10(sum(amt) / len(amt)), 4
-                                )
-                        if shares_idx is not None:  # 真市值:as-of 股本×信号日收盘
-                            evs = shares_idx.get(code)
-                            if evs:
-                                k2 = bisect.bisect_right(evs, (ds[i], float("inf"))) - 1
-                                if k2 >= 0 and evs[k2][1] and closes[i]:
-                                    extra["f_mcap"] = round(
-                                        math.log10(evs[k2][1] * closes[i] / 1e8), 4
-                                    )  # 亿元
-                        if trade_sim:  # 本策略买卖规则下的实际一笔
-                            try:
-                                sub_full = df.iloc[:]  # 规则需向后走,故用全量 df
-                                sim = bt.simulate_b1_trade(
-                                    sub_full,
-                                    i,
-                                    bt._bbi_series(sub_full["close"].astype(float)),
-                                    bbi_exit_consec=bbi_consec,
-                                    stop_mode="pct",
-                                    stop_pct=stop_pct,
-                                )
-                                extra["sim_ret"] = round(float(sim["ret"]), 4)
-                                extra["sim_reason"] = sim["reason"]
-                                extra["sim_holding"] = sim["holding"]
-                            except Exception:  # noqa: BLE001
-                                if stats is not None:
-                                    ff = stats.setdefault("feature_failures", {})
-                                    ff["_trade_sim"] = ff.get("_trade_sim", 0) + 1
-                        rec.append(extra)
-                    days.append(rec)
-            delisted = False
-            if r is None and days and delisted_ret is not None:
-                # 有信号但 label 窗口无价格 = 空头段内退市/长停 → 按大亏计入非赢家(去幸存者偏差)
-                r, delisted = float(delisted_ret), True
-            if r is not None or days:
-                rec_out: dict = {"code": code, "ret": r, "days": days}
-                if delisted:
-                    rec_out["delisted"] = True
-                out.append(rec_out)
-            del df, ds, closes
+        rec_out, skipped = _extract_stock(
+            code,
+            raw,
+            start,
+            end,
+            entry_gate,
+            scorer,
+            min_bars,
+            gate_window,
+            horizons,
+            feature_scorers,
+            stats,
+            extra_feature_fn,
+            ret_start,
+            ret_end,
+            delisted_ret,
+            trade_sim,
+            stop_pct,
+            bbi_consec,
+            style_features,
+            shares_idx,
+        )
+        skipped_no_score += skipped
+        if rec_out is not None:
+            out.append(rec_out)
         if progress and n % progress == 0:
             print(
                 f"[pass1] {n} 股 | RSS={_rss_mb():.0f}MB", file=sys.stderr, flush=True
@@ -864,34 +1088,11 @@ def _median(vals: list) -> Optional[float]:
     return round(statistics.median(v), 4) if v else None
 
 
-def discriminate_at_signal(
-    records: list,
-    horizon: int = 20,
-    win_thresh: Optional[float] = None,
-    win_top_q: float = 0.2,
-    use_mfe: bool = False,
-    picks_per_day: int = 3,
-    label_basis: str = "forward",
-    winner_top_pct: float = 50.0,
-    winner_basis: str = "profitable",
-    min_winner_ret: Optional[float] = None,
-    exclude_zero_ret: bool = False,
-) -> dict:
-    """**信号当时能否明确选出会跑的票?** 对每个信号(特征全部 as-of、无未来函数)。
-
-    label_basis:
-      - "forward"(默认):label = 信号后 fwd{h}/mfe{h} 是否跑出来(绝对阈值 win_thresh 或前 win_top_q 分位)
-        —— 问"这个买点后面 h 天涨不涨";
-      - "winner":label = **该股在本区间是否属于赢家**(窗口收益口径,默认 profitable 内前 winner_top_pct%)
-        —— 问"这个买点属不属于本区间最终跑出来的那批票",即"反向分析赢家在买点当时长什么样"。
-        用 winner 口径时 Pass1 不必带 --horizons(records 里的 ret 即窗口收益)。
-    度量:每特征算 日内AUC(同日内比较,去日期效应) + 每日按该特征选 picks_per_day 只的精确率
-    vs **每日随机选同样只数的公平期望**;并给出赢家/非赢家的特征中位数对比(共同点画像)。
-    方向:AUC<0.5 = 反向预测子(取反即可用),判定用 |AUC-0.5| 与有效方向净增益。
-    稳健性:另算前/后半程日内AUC,要求与全样本同号(split_consistent)才计入"弱可用",否则标为疑过拟合。
-    """
+def _build_rows(
+    records: list, key: str, label_basis: str, exclude_zero_ret: bool
+) -> tuple[list, int, int, dict]:
+    """discriminate 的行构建 + 右删失块 → (rows, n_censored, n_zero_excluded, rets)。"""
     rows = []
-    key = f"{'mfe' if use_mfe else 'fwd'}{horizon}"
     n_zero_excluded = 0
     if exclude_zero_ret:  # 僵尸样本(赢家窗收益恰好为0)不进分母/不出信号
         records, n_zero_excluded = drop_zero_ret(records)
@@ -922,17 +1123,24 @@ def discriminate_at_signal(
                     "feats": {k[2:]: v for k, v in ex.items() if k.startswith("f_")},
                 }
             )
-    if not rows:
-        return {
-            "n": 0,
-            "n_censored": n_censored,
-            "text": (
-                "无窗口收益(Pass1 未记 ret)"
-                if label_basis == "winner"
-                else f"无前向数据(Pass1 需带 --horizons 含 {horizon})"
-            ),
-        }
+    return rows, n_censored, n_zero_excluded, rets
 
+
+def _assign_labels(
+    rows: list,
+    rets: dict,
+    *,
+    label_basis: str,
+    winner_top_pct: float,
+    min_winner_ret: Optional[float],
+    winner_basis: str,
+    win_thresh: Optional[float],
+    win_top_q: float,
+    use_mfe: bool,
+    horizon: int,
+    n_zero_excluded: int,
+) -> tuple[float, dict, str]:
+    """赢家标注块:**就地**给 rows 写 "win",返回 (thr, wmeta, label_txt)。"""
     wmeta: dict = {}
     if label_basis == "winner":
         pairs = sorted(rets.items(), key=lambda kv: kv[1], reverse=True)
@@ -978,92 +1186,106 @@ def discriminate_at_signal(
             f"{'MFE' if use_mfe else '前向收益'}{horizon}日 >= {thr:+.2%}"
             f" ({'绝对阈值' if win_thresh is not None else '全体前%.0f%%分位' % (win_top_q * 100)})"
         )
-    base = sum(1 for x in rows if x["win"]) / len(rows)
-    by_day: dict = {}
-    for x in rows:
-        by_day.setdefault(x["date"], []).append(x)
+    return thr, wmeta, label_txt
 
-    def _val(x, f):
+
+def _daily_topk(by_day: dict, vf, picks_per_day: int, constant: bool) -> dict:
+    """每日按特征选 top-k 的精确率 vs 每日随机选同样只数的公平期望(两个方向都算)。"""
+    hit_hi = hit_lo = tot = 0
+    fair_num = 0.0  # 每日随机选k的期望命中(公平基线,与特征方向无关)
+    for _d, lst in by_day.items():
+        cand = [x for x in lst if vf(x) is not None]
+        if not cand:
+            continue
+        k = min(picks_per_day, len(cand))
+        wr = sum(1 for x in cand if x["win"]) / len(cand)
+        fair_num += k * wr  # 随机选k的期望命中数(与特征无关)
+        cand.sort(key=vf, reverse=True)
+        tot += k
+        hit_hi += sum(int(x["win"]) for x in cand[:k])  # 取特征最大的 k 只
+        hit_lo += sum(int(x["win"]) for x in cand[-k:])  # 取特征最小的 k 只
+    fair = round(fair_num / tot, 4) if tot else None  # ← 正确的对照(非全局基准率)
+    prec = prec_lo = lift = lift_lo = None
+    if tot and not constant:  # 恒定特征的"精确率/增益"纯为并列排序假象,不出数
+        prec, prec_lo = round(hit_hi / tot, 4), round(hit_lo / tot, 4)
+        if fair is not None:
+            lift = round((prec - fair) * 100, 2)
+            lift_lo = round((prec_lo - fair) * 100, 2)
+    return {
+        "fair": fair,
+        "prec": prec,
+        "prec_lo": prec_lo,
+        "lift": lift,
+        "lift_lo": lift_lo,
+        "tot": tot,
+    }
+
+
+def _feature_halves_auc(constant: bool, auc, halves: tuple, vf) -> tuple:
+    """前/后半程日内AUC + 同号一致性(样本内挑特征极易过拟合,须半程同号才计)。"""
+    h1 = None if constant else _auc_within_day(halves[0], vf)
+    h2 = None if constant else _auc_within_day(halves[1], vf)
+    consistent = bool(
+        auc is not None
+        and h1 is not None
+        and h2 is not None
+        and (h1 - 0.5) * (auc - 0.5) > 0
+        and (h2 - 0.5) * (auc - 0.5) > 0
+    )
+    return h1, h2, consistent
+
+
+def _eval_feature(
+    f: str, rows: list, by_day: dict, halves: tuple, picks_per_day: int
+) -> dict:
+    """单特征度量块(判别循环的主体):日内AUC + 每日top-k精确率 + 半程一致性。"""
+
+    def vf(x):
         return x["base_score"] if f == "base_score" else x["feats"].get(f)
 
-    halves = _split_days_in_half(by_day)  # 分段一致性(前/后半程各自重算 AUC)
-    feat_names = sorted({k for x in rows for k in x["feats"]}) + ["base_score"]
-    out_feats = []
-    for f in feat_names:
-        vf = lambda x, _f=f: _val(x, _f)
-        pos = [v for v in (vf(x) for x in rows if x["win"]) if v is not None]
-        neg = [v for v in (vf(x) for x in rows if not x["win"]) if v is not None]
-        allv = [v for v in (vf(x) for x in rows) if v is not None]
-        constant = (
-            len(set(allv)) <= 1
-        )  # 零方差(如 reversal_k 内的 reversal_quality 恒=4)
-        auc = None if constant else _auc_within_day(by_day, vf)
-        # 方向:AUC<0.5 表示"特征越小越会跑"= 反向预测子(取反即可用,如 reversal_quality_inv 的由来),
-        # 故两个方向的 top-k 精确率都算,判定按 |AUC-0.5| 与**有效方向**的净增益,避免误杀反向信号。
-        hit_hi = hit_lo = tot = 0
-        fair_num = 0.0  # 每日随机选k的期望命中(公平基线,与特征方向无关)
-        for _d, lst in by_day.items():
-            cand = [x for x in lst if vf(x) is not None]
-            if not cand:
-                continue
-            k = min(picks_per_day, len(cand))
-            wr = sum(1 for x in cand if x["win"]) / len(cand)
-            fair_num += k * wr  # 随机选k的期望命中数(与特征无关)
-            cand.sort(key=vf, reverse=True)
-            tot += k
-            hit_hi += sum(int(x["win"]) for x in cand[:k])  # 取特征最大的 k 只
-            hit_lo += sum(int(x["win"]) for x in cand[-k:])  # 取特征最小的 k 只
-        fair = round(fair_num / tot, 4) if tot else None  # ← 正确的对照(非全局基准率)
-        prec = prec_lo = lift = lift_lo = None
-        if tot and not constant:  # 恒定特征的"精确率/增益"纯为并列排序假象,不出数
-            prec, prec_lo = round(hit_hi / tot, 4), round(hit_lo / tot, 4)
-            if fair is not None:
-                lift = round((prec - fair) * 100, 2)
-                lift_lo = round((prec_lo - fair) * 100, 2)
-        direction = None if auc is None else ("high" if auc >= 0.5 else "low")
-        edge = None if auc is None else round(abs(auc - 0.5), 4)
-        lift_eff = lift if direction != "low" else lift_lo
-        h1 = None if constant else _auc_within_day(halves[0], vf)
-        h2 = None if constant else _auc_within_day(halves[1], vf)
-        consistent = bool(
-            auc is not None
-            and h1 is not None
-            and h2 is not None
-            and (h1 - 0.5) * (auc - 0.5) > 0
-            and (h2 - 0.5) * (auc - 0.5) > 0
-        )
-        out_feats.append(
-            {
-                "feature": f,
-                "auc_pooled": _auc(pos, neg),
-                "auc": auc,
-                "auc_edge": edge,
-                "direction": direction,
-                "constant": constant,
-                "n_pos": len(pos),
-                "n_neg": len(neg),
-                "median_win": _median(pos),
-                "median_lose": _median(neg),
-                "median_diff": (
-                    None
-                    if (mp := _median(pos)) is None or (mn := _median(neg)) is None
-                    else round(mp - mn, 4)
-                ),
-                "precision_at_daily_top": prec,
-                "precision_at_daily_bottom": prec_lo,
-                "fair_random_precision": fair,
-                "picks": tot,
-                "lift_pp": lift,
-                "lift_pp_inverted": lift_lo,
-                "lift_pp_effective": lift_eff,
-                "auc_first_half": h1,
-                "auc_second_half": h2,
-                "split_consistent": consistent,
-            }
-        )
-    out_feats.sort(
-        key=lambda r: r["auc_edge"] if r["auc_edge"] is not None else -1, reverse=True
-    )
+    pos = [v for v in (vf(x) for x in rows if x["win"]) if v is not None]
+    neg = [v for v in (vf(x) for x in rows if not x["win"]) if v is not None]
+    allv = [v for v in (vf(x) for x in rows) if v is not None]
+    constant = len(set(allv)) <= 1  # 零方差(如 reversal_k 内的 reversal_quality 恒=4)
+    auc = None if constant else _auc_within_day(by_day, vf)
+    # 方向:AUC<0.5 表示"特征越小越会跑"= 反向预测子(取反即可用,如 reversal_quality_inv 的由来),
+    # 故两个方向的 top-k 精确率都算,判定按 |AUC-0.5| 与**有效方向**的净增益,避免误杀反向信号。
+    tk = _daily_topk(by_day, vf, picks_per_day, constant)
+    direction = None if auc is None else ("high" if auc >= 0.5 else "low")
+    edge = None if auc is None else round(abs(auc - 0.5), 4)
+    lift_eff = tk["lift"] if direction != "low" else tk["lift_lo"]
+    h1, h2, consistent = _feature_halves_auc(constant, auc, halves, vf)
+    return {
+        "feature": f,
+        "auc_pooled": _auc(pos, neg),
+        "auc": auc,
+        "auc_edge": edge,
+        "direction": direction,
+        "constant": constant,
+        "n_pos": len(pos),
+        "n_neg": len(neg),
+        "median_win": _median(pos),
+        "median_lose": _median(neg),
+        "median_diff": (
+            None
+            if (mp := _median(pos)) is None or (mn := _median(neg)) is None
+            else round(mp - mn, 4)
+        ),
+        "precision_at_daily_top": tk["prec"],
+        "precision_at_daily_bottom": tk["prec_lo"],
+        "fair_random_precision": tk["fair"],
+        "picks": tk["tot"],
+        "lift_pp": tk["lift"],
+        "lift_pp_inverted": tk["lift_lo"],
+        "lift_pp_effective": lift_eff,
+        "auc_first_half": h1,
+        "auc_second_half": h2,
+        "split_consistent": consistent,
+    }
+
+
+def _split_usable(out_feats: list) -> tuple[list, list]:
+    """特征表 → (弱可用候选, 前后半程不同号的疑过拟合) 两个子集。"""
     usable = [
         r
         for r in out_feats
@@ -1083,6 +1305,21 @@ def discriminate_at_signal(
         and (r["lift_pp_effective"] or 0) >= 2
         and not r["split_consistent"]
     ]
+    return usable, unstable
+
+
+def _render_discrimination(
+    n_rows: int,
+    label_basis: str,
+    label_txt: str,
+    base: float,
+    n_censored: int,
+    picks_per_day: int,
+    out_feats: list,
+    usable: list,
+    unstable: list,
+) -> str:
+    """判别力研究的文本渲染块(特征表 + verdict)。"""
 
     def _dtxt(r):
         return "取反(越小越会跑)" if r["direction"] == "low" else "同向(越大越会跑)"
@@ -1104,12 +1341,12 @@ def discriminate_at_signal(
             for r in unstable
         )
     lines = [
-        f"信号 {len(rows)} 个 | 标签口径[{label_basis}]:{label_txt}"
+        f"信号 {n_rows} 个 | 标签口径[{label_basis}]:{label_txt}"
         f" (信号级基准率 {base:.1%})",
         f"  右删失(无标签被剔除) {n_censored} 个"
         + (
             " —— ⚠️占比高时样本偏早期信号,结论可能失真"
-            if n_censored > len(rows) * 0.2
+            if n_censored > n_rows * 0.2
             else ""
         ),
     ]
@@ -1147,6 +1384,77 @@ def discriminate_at_signal(
             f"{_fmt_num(r['median_win'])}/{_fmt_num(r['median_lose'])}{tag}"
         )
     lines.append(f"  -> {verdict}")
+    return "\n".join(lines)
+
+
+def discriminate_at_signal(
+    records: list,
+    horizon: int = 20,
+    win_thresh: Optional[float] = None,
+    win_top_q: float = 0.2,
+    use_mfe: bool = False,
+    picks_per_day: int = 3,
+    label_basis: str = "forward",
+    winner_top_pct: float = 50.0,
+    winner_basis: str = "profitable",
+    min_winner_ret: Optional[float] = None,
+    exclude_zero_ret: bool = False,
+) -> dict:
+    """**信号当时能否明确选出会跑的票?** 对每个信号(特征全部 as-of、无未来函数)。
+
+    label_basis:
+      - "forward"(默认):label = 信号后 fwd{h}/mfe{h} 是否跑出来(绝对阈值 win_thresh 或前 win_top_q 分位)
+        —— 问"这个买点后面 h 天涨不涨";
+      - "winner":label = **该股在本区间是否属于赢家**(窗口收益口径,默认 profitable 内前 winner_top_pct%)
+        —— 问"这个买点属不属于本区间最终跑出来的那批票",即"反向分析赢家在买点当时长什么样"。
+        用 winner 口径时 Pass1 不必带 --horizons(records 里的 ret 即窗口收益)。
+    度量:每特征算 日内AUC(同日内比较,去日期效应) + 每日按该特征选 picks_per_day 只的精确率
+    vs **每日随机选同样只数的公平期望**;并给出赢家/非赢家的特征中位数对比(共同点画像)。
+    方向:AUC<0.5 = 反向预测子(取反即可用),判定用 |AUC-0.5| 与有效方向净增益。
+    稳健性:另算前/后半程日内AUC,要求与全样本同号(split_consistent)才计入"弱可用",否则标为疑过拟合。
+    """
+    key = f"{'mfe' if use_mfe else 'fwd'}{horizon}"
+    rows, n_censored, n_zero_excluded, rets = _build_rows(
+        records, key, label_basis, exclude_zero_ret
+    )
+    if not rows:
+        return {
+            "n": 0,
+            "n_censored": n_censored,
+            "text": (
+                "无窗口收益(Pass1 未记 ret)"
+                if label_basis == "winner"
+                else f"无前向数据(Pass1 需带 --horizons 含 {horizon})"
+            ),
+        }
+
+    thr, wmeta, label_txt = _assign_labels(
+        rows,
+        rets,
+        label_basis=label_basis,
+        winner_top_pct=winner_top_pct,
+        min_winner_ret=min_winner_ret,
+        winner_basis=winner_basis,
+        win_thresh=win_thresh,
+        win_top_q=win_top_q,
+        use_mfe=use_mfe,
+        horizon=horizon,
+        n_zero_excluded=n_zero_excluded,
+    )
+    base = sum(1 for x in rows if x["win"]) / len(rows)
+    by_day: dict = {}
+    for x in rows:
+        by_day.setdefault(x["date"], []).append(x)
+
+    halves = _split_days_in_half(by_day)  # 分段一致性(前/后半程各自重算 AUC)
+    feat_names = sorted({k for x in rows for k in x["feats"]}) + ["base_score"]
+    out_feats = [
+        _eval_feature(f, rows, by_day, halves, picks_per_day) for f in feat_names
+    ]
+    out_feats.sort(
+        key=lambda r: r["auc_edge"] if r["auc_edge"] is not None else -1, reverse=True
+    )
+    usable, unstable = _split_usable(out_feats)
     return {
         "n": len(rows),
         "n_censored": n_censored,
@@ -1158,35 +1466,35 @@ def discriminate_at_signal(
         "base_rate": round(base, 4),
         "features": out_feats,
         "usable": [r["feature"] for r in usable],
-        "text": "\n".join(lines),
+        "text": _render_discrimination(
+            len(rows),
+            label_basis,
+            label_txt,
+            base,
+            n_censored,
+            picks_per_day,
+            out_feats,
+            usable,
+            unstable,
+        ),
     }
 
 
-def aggregate_discriminate(
-    results: dict[str, dict],
-    min_edge: float = 0.03,
-    min_lift_pp: float = 2.0,
-    min_hit_ratio: float = 0.75,
-) -> dict:
-    """跨**多个多头区间**汇总判别力 → 回答"赢家在买点当时的共同点是什么"。
-
-    单窗成立不算共同点(结论#8:reversal_quality_inv 单窗大胜、换窗翻转)。判定要求:
-      ①在 ≥min_hit_ratio 的窗里方向同号;②各窗 |日内AUC-0.5| 中位 ≥min_edge;
-      ③有效方向净增益中位 ≥min_lift_pp。三者齐备才算"跨窗共同点"。
-    计票口径(两道剔除,防把噪声/beta 当共同点):
-      - 单窗被判**疑过拟合**(split_consistent=False,前后半程不同号)的特征在该窗不计票
-        (单窗都不作结论,跨窗汇总自然也不能收),被剔除的 (特征,窗) 在文本中列名;
-      - **普涨窗**(degenerate_label,上涨占比≥80%)不计入 hit_ratio 分子分母——其"前 top%"
-        已退化为中位数以上,增益多为 beta;普涨窗在文本中列名说明已排除。
-    results: {窗口标签: discriminate_at_signal 输出}
-    """
-    # 普涨窗先从计票池剔除(文本中仍列环境摘要并点名)
+def _degenerate_windows(results: dict) -> tuple[list, set]:
+    """普涨窗识别:先从计票池剔除(文本中仍列环境摘要并点名)。"""
     degen = sorted(
         label
         for label, res in results.items()
         if (res.get("winner_meta") or {}).get("degenerate_label")
     )
-    degen_set = set(degen)
+    return degen, set(degen)
+
+
+def _collect_votes(results: dict, degen_set: set) -> tuple[dict, dict]:
+    """跨窗计票收集 → (per={特征:[窗度量]}, overfit={特征:[被剔窗]})。
+
+    两道剔除:单窗被判疑过拟合(split_consistent=False)的特征在该窗不计票;
+    普涨窗(degenerate_label)分子分母都不含。"""
     per: dict[str, list] = {}
     overfit: dict[str, list] = {}  # 特征 -> [被判疑过拟合而不计票的窗]
     for label, res in results.items():
@@ -1208,9 +1516,11 @@ def aggregate_discriminate(
                     "n_pos": r.get("n_pos"),
                 }
             )
-    n_win = len(results)
-    n_eligible = n_win - len(degen)  # 计票分母:剔除普涨窗
-    # 各窗环境摘要:上涨股占比差异大 ⇒ 同一 top_pct 在各窗含义不同,跨窗计票的可比前提被削弱。
+    return per, overfit
+
+
+def _windows_meta(results: dict) -> list:
+    """各窗环境摘要:上涨股占比差异大 ⇒ 同一 top_pct 在各窗含义不同,跨窗计票的可比前提被削弱。"""
     wins_meta = []
     for label, res in sorted(results.items()):
         wm = res.get("winner_meta") or {}
@@ -1224,45 +1534,93 @@ def aggregate_discriminate(
                 "degenerate_label": bool(wm.get("degenerate_label")),
             }
         )
-    out: list[dict[str, Any]] = []
-    for f, lst in per.items():
-        aucs = [x["auc"] for x in lst]
-        med_auc = _median(aucs)
-        dirs = [1 if x["auc"] >= 0.5 else -1 for x in lst]
-        major = 1 if sum(dirs) >= 0 else -1
-        same = sum(1 for d in dirs if d == major)
-        med_lift = _median([x["lift_pp_effective"] for x in lst])
-        med_edge = _median([abs(x["auc"] - 0.5) for x in lst])
-        hit_ratio = round(same / len(lst), 3) if lst else 0.0
-        is_common = bool(
-            len(lst) >= max(2, int(n_eligible * min_hit_ratio))
-            and hit_ratio >= min_hit_ratio
-            and (med_edge or 0) >= min_edge
-            and (med_lift or 0) >= min_lift_pp
-        )
-        out.append(
-            {
-                "feature": f,
-                "n_windows": len(lst),
-                "same_direction_windows": same,
-                "hit_ratio": hit_ratio,
-                "median_auc": med_auc,
-                "median_edge": med_edge,
-                "median_lift_pp": med_lift,
-                "direction": "high" if major > 0 else "low",
-                "median_of_median_diff": _median([x["median_diff"] for x in lst]),
-                "overfit_excluded_windows": overfit.get(f, []),
-                "cross_window_common": is_common,
-                "per_window": sorted(lst, key=lambda x: x["window"]),
-            }
-        )
-    out.sort(
-        key=lambda r: (
-            (r["median_edge"] or 0) * (1 if r["cross_window_common"] else 0.5)
-        ),
-        reverse=True,
+    return wins_meta
+
+
+def _aggregate_feature(
+    f: str,
+    lst: list,
+    overfit: dict,
+    n_eligible: int,
+    min_hit_ratio: float,
+    min_edge: float,
+    min_lift_pp: float,
+) -> dict[str, Any]:
+    """单特征跨窗汇总:同号率/中位AUC/中位增益 → 是否"跨窗共同点"。"""
+    aucs = [x["auc"] for x in lst]
+    med_auc = _median(aucs)
+    dirs = [1 if x["auc"] >= 0.5 else -1 for x in lst]
+    major = 1 if sum(dirs) >= 0 else -1
+    same = sum(1 for d in dirs if d == major)
+    med_lift = _median([x["lift_pp_effective"] for x in lst])
+    med_edge = _median([abs(x["auc"] - 0.5) for x in lst])
+    hit_ratio = round(same / len(lst), 3) if lst else 0.0
+    is_common = bool(
+        len(lst) >= max(2, int(n_eligible * min_hit_ratio))
+        and hit_ratio >= min_hit_ratio
+        and (med_edge or 0) >= min_edge
+        and (med_lift or 0) >= min_lift_pp
     )
-    common = [r for r in out if r["cross_window_common"]]
+    return {
+        "feature": f,
+        "n_windows": len(lst),
+        "same_direction_windows": same,
+        "hit_ratio": hit_ratio,
+        "median_auc": med_auc,
+        "median_edge": med_edge,
+        "median_lift_pp": med_lift,
+        "direction": "high" if major > 0 else "low",
+        "median_of_median_diff": _median([x["median_diff"] for x in lst]),
+        "overfit_excluded_windows": overfit.get(f, []),
+        "cross_window_common": is_common,
+        "per_window": sorted(lst, key=lambda x: x["window"]),
+    }
+
+
+def _agg_verdict(
+    n_eligible: int, n_win: int, degen: list, out: list, common: list
+) -> str:
+    """三种"没有共同点"必须分开说:①一个窗都没参与计票 ②有窗但没有任何特征拿到有效计票
+    ③真的算过了但没特征过线。①②是**未能检验**(不构成结论),只有③才是"判别不出来"。"""
+    if n_eligible <= 0:
+        return (
+            f"**未能检验**:{n_win} 个窗全部被剔除(普涨窗 {len(degen)} 个)⇒ 无有效计票窗,"
+            "本次不构成任何结论;需换赢家口径(如 --min-winner-ret 收紧)或补非普涨窗后重跑"
+        )
+    if not out:
+        return (
+            f"**未能检验**:{n_eligible} 个计票窗里没有任何特征拿到有效计票"
+            "(全被判恒定/疑过拟合)⇒ 不构成'判别不出来'的结论"
+        )
+    if not common:
+        return (
+            "**无跨窗共同点**:没有任何 as-of 特征在多数多头区间里稳定把赢家分出来 "
+            "⇒ 买点当时无法精确识别(与结论#8/#13 一致)"
+        )
+    return (
+        "跨窗共同点候选(**仍为样本内,须 walk-forward 复现才可进 live**): "
+        + ", ".join(
+            f"{r['feature']}[{'取反' if r['direction'] == 'low' else '同向'}]"
+            f"(中位AUC {r['median_auc']}, {r['median_lift_pp']:+.1f}pp, "
+            f"{r['same_direction_windows']}/{r['n_windows']} 窗同号)"
+            for r in common
+        )
+    )
+
+
+def _render_aggregate(
+    wins_meta: list,
+    degen: list,
+    n_win: int,
+    n_eligible: int,
+    overfit: dict,
+    out: list,
+    min_hit_ratio: float,
+    min_edge: float,
+    min_lift_pp: float,
+    verdict: str,
+) -> str:
+    """跨窗汇总的文本渲染块(各窗环境表 + 特征表 + verdict)。"""
     lines = []
     if wins_meta and any(w["up_ratio"] is not None for w in wins_meta):
         lines.append(
@@ -1306,34 +1664,47 @@ def aggregate_discriminate(
             f"{('取反' if r['direction'] == 'low' else '同向'):>6} "
             f"{'✅' if r['cross_window_common'] else '—':>6}"
         )
-    # 三种"没有共同点"必须分开说:①一个窗都没参与计票 ②有窗但没有任何特征拿到有效计票
-    # ③真的算过了但没特征过线。①②是**未能检验**(不构成结论),只有③才是"判别不出来"。
-    if n_eligible <= 0:
-        verdict = (
-            f"**未能检验**:{n_win} 个窗全部被剔除(普涨窗 {len(degen)} 个)⇒ 无有效计票窗,"
-            "本次不构成任何结论;需换赢家口径(如 --min-winner-ret 收紧)或补非普涨窗后重跑"
-        )
-    elif not out:
-        verdict = (
-            f"**未能检验**:{n_eligible} 个计票窗里没有任何特征拿到有效计票"
-            "(全被判恒定/疑过拟合)⇒ 不构成'判别不出来'的结论"
-        )
-    elif not common:
-        verdict = (
-            "**无跨窗共同点**:没有任何 as-of 特征在多数多头区间里稳定把赢家分出来 "
-            "⇒ 买点当时无法精确识别(与结论#8/#13 一致)"
-        )
-    else:
-        verdict = (
-            "跨窗共同点候选(**仍为样本内,须 walk-forward 复现才可进 live**): "
-            + ", ".join(
-                f"{r['feature']}[{'取反' if r['direction'] == 'low' else '同向'}]"
-                f"(中位AUC {r['median_auc']}, {r['median_lift_pp']:+.1f}pp, "
-                f"{r['same_direction_windows']}/{r['n_windows']} 窗同号)"
-                for r in common
-            )
-        )
     lines.append(f"  -> {verdict}")
+    return "\n".join(lines)
+
+
+def aggregate_discriminate(
+    results: dict[str, dict],
+    min_edge: float = 0.03,
+    min_lift_pp: float = 2.0,
+    min_hit_ratio: float = 0.75,
+) -> dict:
+    """跨**多个多头区间**汇总判别力 → 回答"赢家在买点当时的共同点是什么"。
+
+    单窗成立不算共同点(结论#8:reversal_quality_inv 单窗大胜、换窗翻转)。判定要求:
+      ①在 ≥min_hit_ratio 的窗里方向同号;②各窗 |日内AUC-0.5| 中位 ≥min_edge;
+      ③有效方向净增益中位 ≥min_lift_pp。三者齐备才算"跨窗共同点"。
+    计票口径(两道剔除,防把噪声/beta 当共同点):
+      - 单窗被判**疑过拟合**(split_consistent=False,前后半程不同号)的特征在该窗不计票
+        (单窗都不作结论,跨窗汇总自然也不能收),被剔除的 (特征,窗) 在文本中列名;
+      - **普涨窗**(degenerate_label,上涨占比≥80%)不计入 hit_ratio 分子分母——其"前 top%"
+        已退化为中位数以上,增益多为 beta;普涨窗在文本中列名说明已排除。
+    results: {窗口标签: discriminate_at_signal 输出}
+    """
+    degen, degen_set = _degenerate_windows(results)
+    per, overfit = _collect_votes(results, degen_set)
+    n_win = len(results)
+    n_eligible = n_win - len(degen)  # 计票分母:剔除普涨窗
+    wins_meta = _windows_meta(results)
+    out: list[dict[str, Any]] = [
+        _aggregate_feature(
+            f, lst, overfit, n_eligible, min_hit_ratio, min_edge, min_lift_pp
+        )
+        for f, lst in per.items()
+    ]
+    out.sort(
+        key=lambda r: (
+            (r["median_edge"] or 0) * (1 if r["cross_window_common"] else 0.5)
+        ),
+        reverse=True,
+    )
+    common = [r for r in out if r["cross_window_common"]]
+    verdict = _agg_verdict(n_eligible, n_win, degen, out, common)
     return {
         "n_windows": n_win,
         "features": out,
@@ -1347,7 +1718,18 @@ def aggregate_discriminate(
         "windows": wins_meta,
         "degenerate_windows": degen,
         "overfit_excluded": {f: ws for f, ws in sorted(overfit.items())},
-        "text": "\n".join(lines),
+        "text": _render_aggregate(
+            wins_meta,
+            degen,
+            n_win,
+            n_eligible,
+            overfit,
+            out,
+            min_hit_ratio,
+            min_edge,
+            min_lift_pp,
+            verdict,
+        ),
     }
 
 
@@ -1710,72 +2092,39 @@ def drop_zero_ret(records: list[dict]) -> tuple[list[dict], int]:
     return keep, len(records) - len(keep)
 
 
-def distribution_report(
-    records: list[dict],
-    bands=(0.0, 0.1, 0.2, 0.3, 0.5, 1.0),
-    exclude_zero_ret: bool = False,
-) -> dict:
-    """赢家窗收益的**分布画像** + 按上市板分组(纯 Pass2,不重跑 Pass1)。
+def _dist_subset_stats(sub: list[dict], bands: tuple) -> dict:
+    """distribution_report 的子集统计块:分位/上涨率/涨幅带。"""
+    rets = [x["ret"] for x in sub]
+    pos = [x for x in sub if x["ret"] > 0]
+    zero = [x for x in sub if x["ret"] == 0]
+    n = len(rets)
+    return {
+        "n": len(sub),
+        "n_up": len(pos),
+        "n_zero": len(zero),
+        "up_ratio": round(len(pos) / n, 4) if n else None,
+        "zero_ratio": round(len(zero) / n, 4) if n else None,
+        "median": _median(rets),
+        "p10": _pct(rets, 0.10),
+        "p25": _pct(rets, 0.25),
+        "p75": _pct(rets, 0.75),
+        "p90": _pct(rets, 0.90),
+        "p99": _pct(rets, 0.99),
+        # n=0 时(如全无信号)不得除零 —— 空子集是合法输入
+        "bands": {
+            f">={b:.0%}": {
+                "n": sum(1 for x in rets if x >= b),
+                "share": (round(sum(1 for x in rets if x >= b) / n, 4) if n else None),
+            }
+            for b in bands
+        },
+    }
 
-    回答"涨幅怎么分布、赢家集中在哪个板":
-      - 全域/有信号子集各自的分位(p10..p99)与中位;
-      - 各涨幅带(>0/≥10%/≥20%/≥30%/≥50%/≥100%)的只数与占比 —— 看"真牛股"有多稀;
-      - 按上市板(主板/创业/科创/北证)分组的只数、上涨率、中位收益、≥30% 占比 ——
-        看"赢家有无板块规律";同时给**有信号子集**的同口径,以便对比"我们能看到的池子"是否有偏。
-    ⚠️ 收益口径是 window_return(赢家窗首根→末根收盘,买入持有),**不是**我们的买卖规则;
-       规则口径需 Pass1 带 --trade-sim,再看 coverage_report。
-    """
-    rows = [
-        {
-            "code": r["code"],
-            "ret": float(r["ret"]),
-            "board": board_of(r["code"]),
-            "has_signal": bool(r.get("days")),
-        }
-        for r in records
-        if r.get("ret") is not None
-    ]
-    n_zero_excluded = 0
-    if exclude_zero_ret:
-        before = len(rows)
-        rows = [x for x in rows if x["ret"] != 0.0]
-        n_zero_excluded = before - len(rows)
-    if not rows:
-        return {"n": 0, "text": "无收益数据"}
 
-    def _stats(sub: list[dict]) -> dict:
-        rets = [x["ret"] for x in sub]
-        pos = [x for x in sub if x["ret"] > 0]
-        zero = [x for x in sub if x["ret"] == 0]
-        n = len(rets)
-        return {
-            "n": len(sub),
-            "n_up": len(pos),
-            "n_zero": len(zero),
-            "up_ratio": round(len(pos) / n, 4) if n else None,
-            "zero_ratio": round(len(zero) / n, 4) if n else None,
-            "median": _median(rets),
-            "p10": _pct(rets, 0.10),
-            "p25": _pct(rets, 0.25),
-            "p75": _pct(rets, 0.75),
-            "p90": _pct(rets, 0.90),
-            "p99": _pct(rets, 0.99),
-            # n=0 时(如全无信号)不得除零 —— 空子集是合法输入
-            "bands": {
-                f">={b:.0%}": {
-                    "n": sum(1 for x in rets if x >= b),
-                    "share": (
-                        round(sum(1 for x in rets if x >= b) / n, 4) if n else None
-                    ),
-                }
-                for b in bands
-            },
-        }
-
-    all_stats, sig_stats = _stats(rows), _stats([x for x in rows if x["has_signal"]])
-    # **按涨幅带的召回率**:各带里"我们曾触发过信号"的比例。这是比"信号池收益分布"更直接的问题——
-    # 若召回率随涨幅单调下降,说明入场门槛对大牛股是**负选择**(压根没进池子),
-    # 瓶颈在召回而非排序(与结论#2"买弱指纹排除做多区间突破赢家"同源)。
+def _recall_by_band(all_stats: dict, sig_stats: dict, bands: tuple) -> tuple:
+    """**按涨幅带的召回率**:各带里"我们曾触发过信号"的比例。这是比"信号池收益分布"更直接的问题——
+    若召回率随涨幅单调下降,说明入场门槛对大牛股是**负选择**(压根没进池子),
+    瓶颈在召回而非排序(与结论#2"买弱指纹排除做多区间突破赢家"同源)。"""
     base_recall = (sig_stats["n"] / all_stats["n"]) if all_stats["n"] else None
     recall_by_band = {}
     for b in bands:
@@ -1789,23 +2138,29 @@ def distribution_report(
                 round((sig / tot) / base_recall - 1, 4) if tot and base_recall else None
             ),
         }
+    return base_recall, recall_by_band
+
+
+def _dist_by_board(rows: list, bands: tuple) -> dict:
+    """按上市板分组的统计块。"""
     by_board = {}
     for name, _ in BOARDS + (("其他", ()),):
         sub = [x for x in rows if x["board"] == name]
         if sub:
-            s = _stats(sub)
+            s = _dist_subset_stats(sub, bands)
             s["share_of_universe"] = round(len(sub) / len(rows), 4)
             s["n_with_signal"] = sum(1 for x in sub if x["has_signal"])
             by_board[name] = s
-    out = {
-        "n": len(rows),
-        "all": all_stats,
-        "with_signal": sig_stats,
-        "by_board": by_board,
-        "base_recall": (round(base_recall, 4) if base_recall else None),
-        "recall_by_band": recall_by_band,
-        "n_zero_excluded": n_zero_excluded,
-    }
+    return by_board
+
+
+def _render_distribution(out: dict, bands: tuple) -> str:
+    """distribution_report 的文本渲染块。"""
+    all_stats, sig_stats = out["all"], out["with_signal"]
+    by_board = out["by_board"]
+    base_recall = out["base_recall"]
+    recall_by_band = out["recall_by_band"]
+    n_zero_excluded = out["n_zero_excluded"]
     lines = [
         f"赢家窗收益分布(口径=区间买入持有,非本策略买卖规则):全域 {all_stats['n']} 只 / "
         f"有信号 {sig_stats['n']} 只"
@@ -1868,8 +2223,121 @@ def distribution_report(
         "  注:板间差异要与'占宇宙比例'一起看——创业板/科创板波动天然更大,"
         "中位更高不等于'可选出来',判别力仍看 --discriminate。"
     )
-    out["text"] = "\n".join(lines)
+    return "\n".join(lines)
+
+
+def distribution_report(
+    records: list[dict],
+    bands=(0.0, 0.1, 0.2, 0.3, 0.5, 1.0),
+    exclude_zero_ret: bool = False,
+) -> dict:
+    """赢家窗收益的**分布画像** + 按上市板分组(纯 Pass2,不重跑 Pass1)。
+
+    回答"涨幅怎么分布、赢家集中在哪个板":
+      - 全域/有信号子集各自的分位(p10..p99)与中位;
+      - 各涨幅带(>0/≥10%/≥20%/≥30%/≥50%/≥100%)的只数与占比 —— 看"真牛股"有多稀;
+      - 按上市板(主板/创业/科创/北证)分组的只数、上涨率、中位收益、≥30% 占比 ——
+        看"赢家有无板块规律";同时给**有信号子集**的同口径,以便对比"我们能看到的池子"是否有偏。
+    ⚠️ 收益口径是 window_return(赢家窗首根→末根收盘,买入持有),**不是**我们的买卖规则;
+       规则口径需 Pass1 带 --trade-sim,再看 coverage_report。
+    """
+    rows = [
+        {
+            "code": r["code"],
+            "ret": float(r["ret"]),
+            "board": board_of(r["code"]),
+            "has_signal": bool(r.get("days")),
+        }
+        for r in records
+        if r.get("ret") is not None
+    ]
+    n_zero_excluded = 0
+    if exclude_zero_ret:
+        before = len(rows)
+        rows = [x for x in rows if x["ret"] != 0.0]
+        n_zero_excluded = before - len(rows)
+    if not rows:
+        return {"n": 0, "text": "无收益数据"}
+
+    all_stats = _dist_subset_stats(rows, bands)
+    sig_stats = _dist_subset_stats([x for x in rows if x["has_signal"]], bands)
+    base_recall, recall_by_band = _recall_by_band(all_stats, sig_stats, bands)
+    by_board = _dist_by_board(rows, bands)
+    out = {
+        "n": len(rows),
+        "all": all_stats,
+        "with_signal": sig_stats,
+        "by_board": by_board,
+        "base_recall": (round(base_recall, 4) if base_recall else None),
+        "recall_by_band": recall_by_band,
+        "n_zero_excluded": n_zero_excluded,
+    }
+    out["text"] = _render_distribution(out, bands)
     return out
+
+
+def _coverage_stats(best: dict, winners: set, rets: dict) -> tuple:
+    """coverage_report 的赢家侧统计块:有信号赢家/规则盈利赢家/退出原因/中位对照/捕获率。"""
+    w_sig = [c for c in winners if c in best]
+    w_pos = [c for c in w_sig if best[c]["ret"] > 0]
+    reasons: dict[str, int] = {}
+    for c in w_sig:
+        k = best[c]["reason"] or "unknown"
+        reasons[k] = reasons.get(k, 0) + 1
+    med_sim = _median([best[c]["ret"] for c in w_sig])
+    med_win = _median([rets[c] for c in w_sig])
+    capture = round(med_sim / med_win, 3) if med_sim is not None and med_win else None
+    return w_sig, w_pos, reasons, med_sim, med_win, capture
+
+
+def _collect_sim_trades(records: list[dict]) -> dict[str, list[dict]]:
+    """coverage_report 的累加块:从 firings 收集每股每笔规则模拟交易 → {code: [trade]}。"""
+    per_code: dict[str, list[dict]] = {}
+    for r in records:
+        for d in r.get("days") or []:
+            ex = d[2] if len(d) >= 3 and isinstance(d[2], dict) else {}
+            if "sim_ret" in ex:
+                per_code.setdefault(r["code"], []).append(
+                    {
+                        "date": d[0],
+                        "ret": float(ex["sim_ret"]),
+                        "reason": ex.get("sim_reason", ""),
+                        "holding": ex.get("sim_holding"),
+                    }
+                )
+    return per_code
+
+
+def _render_coverage(
+    out: dict,
+    n_w_sig: int,
+    n_w_pos: int,
+    reasons: dict,
+    med_sim: Optional[float],
+    med_win: Optional[float],
+    capture: Optional[float],
+) -> str:
+    """coverage_report 的文本渲染块。"""
+    lines = [
+        f"赢家 {out['n_winners']} 只(区间涨幅口径),其中有信号 {n_w_sig} 只;",
+        f"  **覆盖度(规则下赚钱的赢家占比) {(out['coverage'] or 0):.0%}** "
+        f"({n_w_pos}/{n_w_sig});每只取其最好一笔(最乐观口径)",
+        f"  中位:规则收益 {_fmt_pct(med_sim)} vs 区间涨幅 {_fmt_pct(med_win)} → "
+        f"**捕获率 {capture if capture is not None else '-'}**",
+        "  赢家的退出原因分布: "
+        + ", ".join(f"{k}={v}" for k, v in sorted(reasons.items())),
+    ]
+    stop_share = reasons.get("stop", 0) / n_w_sig if n_w_sig else 0
+    if stop_share >= 0.5:
+        lines.append(
+            f"  → **{stop_share:.0%} 的赢家在规则下以止损离场**:选对了也拿不住 ⇒ "
+            "瓶颈在交易管理(止损空间/退出规则),不在选股(与结论#3/#5 一致)"
+        )
+    elif (out["coverage"] or 0) >= 0.7:
+        lines.append(
+            "  → 规则能吃到大部分赢家 ⇒ 瓶颈不在交易管理,而在**事前选不出**(与判别力结论一致)"
+        )
+    return "\n".join(lines)
 
 
 def coverage_report(
@@ -1897,19 +2365,7 @@ def coverage_report(
         return {"n_winners": 0, "text": "无收益数据"}
     pairs = sorted(rets.items(), key=lambda kv: kv[1], reverse=True)
     winners, wmeta = _pick_winners(pairs, winner_top_pct, min_winner_ret, winner_basis)
-    per_code: dict[str, list[dict]] = {}
-    for r in records:
-        for d in r.get("days") or []:
-            ex = d[2] if len(d) >= 3 and isinstance(d[2], dict) else {}
-            if "sim_ret" in ex:
-                per_code.setdefault(r["code"], []).append(
-                    {
-                        "date": d[0],
-                        "ret": float(ex["sim_ret"]),
-                        "reason": ex.get("sim_reason", ""),
-                        "holding": ex.get("sim_holding"),
-                    }
-                )
+    per_code = _collect_sim_trades(records)
     if not per_code:
         return {
             "n_winners": len(winners),
@@ -1918,15 +2374,9 @@ def coverage_report(
     best: dict[str, dict] = {
         c: max(v, key=lambda x: x["ret"]) for c, v in per_code.items()
     }
-    w_sig = [c for c in winners if c in best]
-    w_pos = [c for c in w_sig if best[c]["ret"] > 0]
-    reasons: dict[str, int] = {}
-    for c in w_sig:
-        k = best[c]["reason"] or "unknown"
-        reasons[k] = reasons.get(k, 0) + 1
-    med_sim = _median([best[c]["ret"] for c in w_sig])
-    med_win = _median([rets[c] for c in w_sig])
-    capture = round(med_sim / med_win, 3) if med_sim is not None and med_win else None
+    w_sig, w_pos, reasons, med_sim, med_win, capture = _coverage_stats(
+        best, winners, rets
+    )
     out: dict[str, Any] = {
         "n_winners": len(winners),
         "n_winner_with_signal": len(w_sig),
@@ -1939,26 +2389,9 @@ def coverage_report(
         "winner_meta": wmeta,
         "all_signals_median_sim_ret": _median([b["ret"] for b in best.values()]),
     }
-    lines = [
-        f"赢家 {len(winners)} 只(区间涨幅口径),其中有信号 {len(w_sig)} 只;",
-        f"  **覆盖度(规则下赚钱的赢家占比) {(out['coverage'] or 0):.0%}** "
-        f"({len(w_pos)}/{len(w_sig)});每只取其最好一笔(最乐观口径)",
-        f"  中位:规则收益 {_fmt_pct(med_sim)} vs 区间涨幅 {_fmt_pct(med_win)} → "
-        f"**捕获率 {capture if capture is not None else '-'}**",
-        "  赢家的退出原因分布: "
-        + ", ".join(f"{k}={v}" for k, v in sorted(reasons.items())),
-    ]
-    stop_share = reasons.get("stop", 0) / len(w_sig) if w_sig else 0
-    if stop_share >= 0.5:
-        lines.append(
-            f"  → **{stop_share:.0%} 的赢家在规则下以止损离场**:选对了也拿不住 ⇒ "
-            "瓶颈在交易管理(止损空间/退出规则),不在选股(与结论#3/#5 一致)"
-        )
-    elif (out["coverage"] or 0) >= 0.7:
-        lines.append(
-            "  → 规则能吃到大部分赢家 ⇒ 瓶颈不在交易管理,而在**事前选不出**(与判别力结论一致)"
-        )
-    out["text"] = "\n".join(lines)
+    out["text"] = _render_coverage(
+        out, len(w_sig), len(w_pos), reasons, med_sim, med_win, capture
+    )
     return out
 
 
@@ -2039,7 +2472,12 @@ def _read_codes_file(path_str: str, err=None) -> list:
     return codes
 
 
-def main(argv=None, loader=None) -> int:
+def _build_parser() -> argparse.ArgumentParser:
+    """CLI 参数定义。
+
+    ⚠️ add_argument 调用必须留在**本文件**内:research/__main__._modes() 用 AST
+    解析本文件收集 store_true 模式开关,挪出文件会让模式清单静默消失。
+    """
     ap = argparse.ArgumentParser(description="起涨点 vs 0AMV regime 研究")
     ap.add_argument("--data-source", choices=["tdx", "qlib", "csv"], default="qlib")
     ap.add_argument(
@@ -2311,9 +2749,12 @@ def main(argv=None, loader=None) -> int:
         "默认拒绝——空产物会被当成'已完成'复用,并被误读为'无判别力'",
     )
     ap.add_argument("--out", default="")
-    args = ap.parse_args(argv)
-    # 2026-08-16 review 修复：宇宙来源互斥——此前 --codes 与 --codes-file 同给时
-    # 后者静默赢（--universe-sdata 同给更乱），静默选边违背「不静默」惯例。
+    return ap
+
+
+def _validate_universe_args(args, ap) -> None:
+    """宇宙来源互斥校验(2026-08-16 review 修复:此前 --codes 与 --codes-file 同给时
+    后者静默赢(--universe-sdata 同给更乱),静默选边违背「不静默」惯例)。"""
     _uni_given = [
         flag
         for flag, v in (
@@ -2326,73 +2767,72 @@ def main(argv=None, loader=None) -> int:
     if len(_uni_given) > 1:
         ap.error(f"宇宙来源互斥，只给一个：{'、'.join(_uni_given)}")
 
-    if args.explain_agg:  # 纯读 JSON,不加载数据、不算指标
-        import json as _je
 
-        raw = _je.loads(Path(args.explain_agg).read_text(encoding="utf-8"))
-        agg = raw.get("aggregate") or raw
-        print(explain_aggregate(agg, feature=args.explain_feature))
-        return 0
+def _mode_explain_agg(args) -> int:
+    import json as _je
 
-    if args.list_long_windows or args.list_window_pairs:  # 只枚举区间,不加载任何 K 线
-        # ⚠️ since 不能是 None：--start 缺省为 ""，None 会一路传进
-        # compass_amv.parse_amv_daily 的 `date >= since` 比较炸 TypeError，
-        # 被 load_amv_regime 的 except 吞成 {} ⇒ regime 静默为空、窗口枚举恒无结果。
-        # "1900-01-01" = 不过滤（同 compass_amv 里取全序列的惯例）。
-        regime = bt.load_amv_regime(since=args.start or "1900-01-01")
-        if args.list_window_pairs:
-            pairs = bear_to_long_pairs(
-                regime,
-                min_bear_days=args.min_bear_days,
-                min_long_days=args.min_window_days,
-                include_long_head_days=args.include_long_head_days,
-                signal_span=args.signal_span,
-            )
-            print(
-                f"\n=== 空头(信号窗) → 紧邻做多段(赢家窗) 配对，共 {len(pairs)} 对（每个赢家窗只留一对）==="
-            )
-            print(
-                "   建仓点多在空头(结论#11:73%),故信号在空头段采;'涨得好'发生在随后多头段,故赢家按多头段收益定。"
-            )
-            print(
-                f"   信号窗口径 signal_span={args.signal_span}"
-                + (
-                    "(空头段本身)"
-                    if args.signal_span == "adjacent"
-                    else "(上一段做多结束后至空头段末)"
-                )
-            )
-            if args.include_long_head_days:
-                print(
-                    f"   ⚠️ 已纳入做多段头部 {args.include_long_head_days} 日:这些信号的 label 含信号之前"
-                    "已发生的涨幅,对动量类特征顺向污染 → 主结论请用 0,本次仅作敏感性对照"
-                )
-            for p in pairs:
-                print(
-                    f"  信号 {p['signal_start']} ~ {p['signal_end']} ({p['signal_days']}日"
-                    f"; 空头段 {p['bear_days']}日)  →  赢家窗 {p['label_start']} ~ {p['label_end']}"
-                    f" ({p['long_days']}日)"
-                )
-            if args.out:
-                _write_json_out(args.out, {"window_pairs": pairs})
-            return 0
-        segs = long_regime_windows(regime, min_days=args.min_window_days)
-        print(
-            f"\n=== 0AMV 做多区间(≥{args.min_window_days} 交易日, 共 {len(segs)} 段) ==="
+    raw = _je.loads(Path(args.explain_agg).read_text(encoding="utf-8"))
+    agg = raw.get("aggregate") or raw
+    print(explain_aggregate(agg, feature=args.explain_feature))
+    return 0
+
+
+def _mode_list_windows(args) -> int:
+    # ⚠️ since 不能是 None：--start 缺省为 ""，None 会一路传进
+    # compass_amv.parse_amv_daily 的 `date >= since` 比较炸 TypeError，
+    # 被 load_amv_regime 的 except 吞成 {} ⇒ regime 静默为空、窗口枚举恒无结果。
+    # "1900-01-01" = 不过滤（同 compass_amv 里取全序列的惯例）。
+    regime = bt.load_amv_regime(since=args.start or "1900-01-01")
+    if args.list_window_pairs:
+        pairs = bear_to_long_pairs(
+            regime,
+            min_bear_days=args.min_bear_days,
+            min_long_days=args.min_window_days,
+            include_long_head_days=args.include_long_head_days,
+            signal_span=args.signal_span,
         )
-        for a, b, n in segs:
-            print(f"  {a} ~ {b}  ({n} 交易日)")
-        if args.out:
-            _write_json_out(
-                args.out,
-                {
-                    "long_windows": [
-                        {"start": a, "end": b, "days": n} for a, b, n in segs
-                    ]
-                },
+        print(
+            f"\n=== 空头(信号窗) → 紧邻做多段(赢家窗) 配对，共 {len(pairs)} 对（每个赢家窗只留一对）==="
+        )
+        print(
+            "   建仓点多在空头(结论#11:73%),故信号在空头段采;'涨得好'发生在随后多头段,故赢家按多头段收益定。"
+        )
+        print(
+            f"   信号窗口径 signal_span={args.signal_span}"
+            + (
+                "(空头段本身)"
+                if args.signal_span == "adjacent"
+                else "(上一段做多结束后至空头段末)"
             )
+        )
+        if args.include_long_head_days:
+            print(
+                f"   ⚠️ 已纳入做多段头部 {args.include_long_head_days} 日:这些信号的 label 含信号之前"
+                "已发生的涨幅,对动量类特征顺向污染 → 主结论请用 0,本次仅作敏感性对照"
+            )
+        for p in pairs:
+            print(
+                f"  信号 {p['signal_start']} ~ {p['signal_end']} ({p['signal_days']}日"
+                f"; 空头段 {p['bear_days']}日)  →  赢家窗 {p['label_start']} ~ {p['label_end']}"
+                f" ({p['long_days']}日)"
+            )
+        if args.out:
+            _write_json_out(args.out, {"window_pairs": pairs})
         return 0
+    segs = long_regime_windows(regime, min_days=args.min_window_days)
+    print(f"\n=== 0AMV 做多区间(≥{args.min_window_days} 交易日, 共 {len(segs)} 段) ===")
+    for a, b, n in segs:
+        print(f"  {a} ~ {b}  ({n} 交易日)")
+    if args.out:
+        _write_json_out(
+            args.out,
+            {"long_windows": [{"start": a, "end": b, "days": n} for a, b, n in segs]},
+        )
+    return 0
 
+
+def _warn_zero_ret_and_require_dates(args, ap) -> None:
+    """zero-ret 前提证伪警告 + start/end 必填校验。"""
     if args.exclude_zero_ret:
         print(
             "[WARN] --exclude-zero-ret 的前提已被实测证伪(2026-07-31,--zero-ret-report 抽样 177 只"
@@ -2405,129 +2845,148 @@ def main(argv=None, loader=None) -> int:
     if not args.from_firings and (not args.start or not args.end):
         ap.error("需提供 --start 和 --end(--from-firings 模式除外)")
 
-    # Pass2:仅合并 Pass1 产物算排名(不加载任何K线,内存极小)
-    if args.from_firings:
-        import json as _j
 
-        files = [x.strip() for x in args.from_firings.split(",") if x.strip()]
+def _load_firings(fp: str) -> list[dict]:
+    import json as _j
 
-        def _load(fp: str) -> list[dict]:
-            d = _j.loads(Path(fp).read_text(encoding="utf-8"))
-            return d if isinstance(d, list) else (d.get("records") or [])
+    d = _j.loads(Path(fp).read_text(encoding="utf-8"))
+    return d if isinstance(d, list) else (d.get("records") or [])
 
-        def _dis(recs: list[dict]) -> dict:
-            return discriminate_at_signal(
-                recs,
-                horizon=args.horizon,
-                win_thresh=args.win_thresh,
-                win_top_q=args.win_top_q,
-                use_mfe=args.use_mfe,
-                picks_per_day=args.picks_per_day,
-                label_basis=args.label_basis,
-                winner_top_pct=args.capture_top_pct,
-                winner_basis=args.winner_basis,
-                min_winner_ret=args.min_winner_ret,
-                exclude_zero_ret=args.exclude_zero_ret,
-            )
 
-        if (
-            args.discriminate and args.per_window
-        ):  # 每文件=一个多头区间,分窗跑 + 跨窗汇总
-            results: dict[str, dict] = {}
-            n_all_recs = 0
-            for fp in files:
-                raw = _j.loads(Path(fp).read_text(encoding="utf-8"))
-                if (
-                    isinstance(raw, dict)
-                    and raw.get("ret_start")
-                    and raw.get("ret_start") != raw.get("start")
-                ):
-                    label = f"信号{raw['start']}~{raw['end']}→赢家{raw['ret_start']}~{raw['ret_end']}"
-                elif isinstance(raw, dict) and raw.get("start"):
-                    label = f"{raw.get('start')}~{raw.get('end')}"
-                else:
-                    label = Path(fp).stem
-                wrecs = raw if isinstance(raw, list) else (raw.get("records") or [])
-                n_all_recs += len(wrecs)
-                wres = _dis(wrecs)
-                results[label] = wres
-                print(
-                    f"\n=== [窗口 {label}] 信号当时判别力({args.label_basis} 口径) ==="
-                )
-                print(wres["text"])
-            if (
-                not n_all_recs and not args.allow_empty
-            ):  # 全空 firings → 不得产出"无共同点"结论
-                print(
-                    f"[ERR] Pass2 读到 {len(files)} 份 firings 但记录总数为 0"
-                    "(Pass1 全空/文件对不上?);拒绝输出——'分不出赢家'与'根本没数据'不是一回事。"
-                    "确需空结果请显式加 --allow-empty",
-                    file=sys.stderr,
-                )
-                return 2
-            agg = aggregate_discriminate(results)
-            print("\n=== 跨多头区间:赢家在买点当时的共同点 ===")
-            print(agg["text"])
-            if args.out:
-                _write_json_out(args.out, {"per_window": results, "aggregate": agg})
-            return 0
+def _run_discriminate(args, recs: list[dict]) -> dict:
+    return discriminate_at_signal(
+        recs,
+        horizon=args.horizon,
+        win_thresh=args.win_thresh,
+        win_top_q=args.win_top_q,
+        use_mfe=args.use_mfe,
+        picks_per_day=args.picks_per_day,
+        label_basis=args.label_basis,
+        winner_top_pct=args.capture_top_pct,
+        winner_basis=args.winner_basis,
+        min_winner_ret=args.min_winner_ret,
+        exclude_zero_ret=args.exclude_zero_ret,
+    )
 
-        recs: list[dict] = []
-        for fp in files:
-            recs.extend(_load(fp))
-        if not recs and not args.allow_empty:
-            print(
-                f"[ERR] Pass2 读到 {len(files)} 份 firings 但记录总数为 0(Pass1 全空/文件对不上?);"
-                "拒绝输出——空结果会被误读成'无判别力'。确需空结果请显式加 --allow-empty",
-                file=sys.stderr,
-            )
-            return 2
-        if args.distribution or args.coverage:
-            res_out: dict = {}
-            if args.distribution:
-                dist = distribution_report(recs, exclude_zero_ret=args.exclude_zero_ret)
-                print("\n=== 赢家窗收益分布 + 上市板分组(口径=区间买入持有) ===")
-                print(dist["text"])
-                res_out["distribution"] = dist
-            if args.coverage:
-                cov = coverage_report(
-                    recs,
-                    winner_top_pct=args.capture_top_pct,
-                    winner_basis=args.winner_basis,
-                    min_winner_ret=args.min_winner_ret,
-                    exclude_zero_ret=args.exclude_zero_ret,
-                )
-                print("\n=== 双口径对比:赢家在本策略买卖规则下的覆盖度 ===")
-                print(cov["text"])
-                res_out["coverage"] = cov
-            if args.out:
-                _write_json_out(args.out, res_out)
-            return 0
-        if args.discriminate:
-            dis = _dis(recs)
-            print(
-                f"\n=== 信号当时判别力:能否明确选出会跑的票({args.label_basis} 口径) ==="
-            )
-            print(dis["text"])
-            if args.out:
-                _write_json_out(args.out, {"discriminate": dis})
-            return 0
-        cap = rank_from_firings(
-            recs,
-            top_pct=args.capture_top_pct,
-            surface_top_n=args.surface_top_n,
-            min_winner_ret=args.min_winner_ret,
-            winner_basis=args.winner_basis,
+
+def _firings_label(raw, fp: str) -> str:
+    """per-window 模式的窗口标签:两窗解耦 > 单窗 > 文件名。"""
+    if (
+        isinstance(raw, dict)
+        and raw.get("ret_start")
+        and raw.get("ret_start") != raw.get("start")
+    ):
+        return (
+            f"信号{raw['start']}~{raw['end']}→赢家{raw['ret_start']}~{raw['ret_end']}"
         )
+    if isinstance(raw, dict) and raw.get("start"):
+        return f"{raw.get('start')}~{raw.get('end')}"
+    return Path(fp).stem
+
+
+def _mode_per_window(args, files: list) -> int:
+    """每文件=一个多头区间,分窗跑判别 + 跨窗汇总。"""
+    import json as _j
+
+    results: dict[str, dict] = {}
+    n_all_recs = 0
+    for fp in files:
+        raw = _j.loads(Path(fp).read_text(encoding="utf-8"))
+        label = _firings_label(raw, fp)
+        wrecs = raw if isinstance(raw, list) else (raw.get("records") or [])
+        n_all_recs += len(wrecs)
+        wres = _run_discriminate(args, wrecs)
+        results[label] = wres
+        print(f"\n=== [窗口 {label}] 信号当时判别力({args.label_basis} 口径) ===")
+        print(wres["text"])
+    if not n_all_recs and not args.allow_empty:  # 全空 firings → 不得产出"无共同点"结论
         print(
-            f"\n=== 赢家捕捉率 + 排名质量（合并 {len(recs)} 股记录, top{args.capture_top_pct:.0f}%赢家, "
-            f"展示top{args.surface_top_n}）==="
+            f"[ERR] Pass2 读到 {len(files)} 份 firings 但记录总数为 0"
+            "(Pass1 全空/文件对不上?);拒绝输出——'分不出赢家'与'根本没数据'不是一回事。"
+            "确需空结果请显式加 --allow-empty",
+            file=sys.stderr,
         )
-        print(cap["text"])
-        if args.out:
-            _write_json_out(args.out, {"capture_rank": cap})
-        return 0
+        return 2
+    agg = aggregate_discriminate(results)
+    print("\n=== 跨多头区间:赢家在买点当时的共同点 ===")
+    print(agg["text"])
+    if args.out:
+        _write_json_out(args.out, {"per_window": results, "aggregate": agg})
+    return 0
 
+
+def _mode_dist_coverage(args, recs: list) -> int:
+    res_out: dict = {}
+    if args.distribution:
+        dist = distribution_report(recs, exclude_zero_ret=args.exclude_zero_ret)
+        print("\n=== 赢家窗收益分布 + 上市板分组(口径=区间买入持有) ===")
+        print(dist["text"])
+        res_out["distribution"] = dist
+    if args.coverage:
+        cov = coverage_report(
+            recs,
+            winner_top_pct=args.capture_top_pct,
+            winner_basis=args.winner_basis,
+            min_winner_ret=args.min_winner_ret,
+            exclude_zero_ret=args.exclude_zero_ret,
+        )
+        print("\n=== 双口径对比:赢家在本策略买卖规则下的覆盖度 ===")
+        print(cov["text"])
+        res_out["coverage"] = cov
+    if args.out:
+        _write_json_out(args.out, res_out)
+    return 0
+
+
+def _mode_single_discriminate(args, recs: list) -> int:
+    dis = _run_discriminate(args, recs)
+    print(f"\n=== 信号当时判别力:能否明确选出会跑的票({args.label_basis} 口径) ===")
+    print(dis["text"])
+    if args.out:
+        _write_json_out(args.out, {"discriminate": dis})
+    return 0
+
+
+def _mode_rank(args, recs: list) -> int:
+    cap = rank_from_firings(
+        recs,
+        top_pct=args.capture_top_pct,
+        surface_top_n=args.surface_top_n,
+        min_winner_ret=args.min_winner_ret,
+        winner_basis=args.winner_basis,
+    )
+    print(
+        f"\n=== 赢家捕捉率 + 排名质量（合并 {len(recs)} 股记录, top{args.capture_top_pct:.0f}%赢家, "
+        f"展示top{args.surface_top_n}）==="
+    )
+    print(cap["text"])
+    if args.out:
+        _write_json_out(args.out, {"capture_rank": cap})
+    return 0
+
+
+def _mode_from_firings(args) -> int:
+    files = [x.strip() for x in args.from_firings.split(",") if x.strip()]
+    if args.discriminate and args.per_window:  # 每文件=一个多头区间,分窗跑 + 跨窗汇总
+        return _mode_per_window(args, files)
+    recs: list[dict] = []
+    for fp in files:
+        recs.extend(_load_firings(fp))
+    if not recs and not args.allow_empty:
+        print(
+            f"[ERR] Pass2 读到 {len(files)} 份 firings 但记录总数为 0(Pass1 全空/文件对不上?);"
+            "拒绝输出——空结果会被误读成'无判别力'。确需空结果请显式加 --allow-empty",
+            file=sys.stderr,
+        )
+        return 2
+    if args.distribution or args.coverage:
+        return _mode_dist_coverage(args, recs)
+    if args.discriminate:
+        return _mode_single_discriminate(args, recs)
+    return _mode_rank(args, recs)
+
+
+def _resolve_codes(args, ap) -> list:
     if args.universe_sdata:
         from custos.datasource import s_data  # noqa: PLC0415
 
@@ -2541,9 +3000,12 @@ def main(argv=None, loader=None) -> int:
         codes = [c.strip() for c in args.codes.split(",") if c.strip()]
     if not codes:
         ap.error("需 --universe-sdata 或 --codes 或 --codes-file")
+    return codes
 
-    # 数据/regime 起点必须比 --start 再早 buffer 段(起涨点要在 [start-buffer, end] 内回溯),
-    # 否则 buffer 被加载窗口截为 0(此前真实运行从未真正回溯,结论有偏)。捕捉研究也靠它提供 min_bars 回溯。
+
+def _load_start(args) -> str:
+    """数据/regime 起点必须比 --start 再早 buffer 段(起涨点要在 [start-buffer, end] 内回溯),
+    否则 buffer 被加载窗口截为 0(此前真实运行从未真正回溯,结论有偏)。捕捉研究也靠它提供 min_bars 回溯。"""
     load_start = args.start
     # 裕量必须同时盖住 buffer_days 与 gate_window:gate_window(默认120)是 gate/scorer 的尾窗长度,
     # 只按 buffer_days(默认60)留裕量会让信号窗开头 ~gate_window-buffer 根 K 线预热不足,
@@ -2553,6 +3015,11 @@ def main(argv=None, loader=None) -> int:
         load_start = (
             _date.fromisoformat(args.start) - _td(days=int(margin * 1.6) + 10)
         ).isoformat()  # 交易日→日历日留裕量
+    return load_start
+
+
+def _make_chunk_iter(codes: list, args, load_start: str, loader):
+    """返回流式 (code, df) 生成器函数(捕获 codes/args/load_start/loader 四个外层变量)。"""
 
     def _chunked_items(chunk: int):
         """流式产出 (code, df):逐块加载→逐股产出→释放该块,capture 研究据此避免全量载入 OOM。
@@ -2620,264 +3087,309 @@ def main(argv=None, loader=None) -> int:
             d.clear()
             gc.collect()  # 每块显式回收,内存只留一块 + 轻量累加器
 
-    res: dict[str, Any] = {}
-    # Pass1:只抽信号→小 JSON(可分片,多进程各自内存全新)
-    if args.emit_firings:
-        if args.shard:
-            try:  # 非法分片必须 ap.error(exit 2),不能崩栈
-                parts = [int(x) for x in args.shard.split("/")]
-            except ValueError:
-                parts = []
-            if len(parts) != 2 or parts[1] < 1 or not (1 <= parts[0] <= parts[1]):
-                ap.error(
-                    f"--shard 格式须为 i/n 且 1<=i<=n(如 1/3..3/3),收到 {args.shard!r}"
-                )
-            i, n = parts
-            codes = [c for k, c in enumerate(codes) if k % n == (i - 1) % n]
-            if not codes:
-                ap.error(
-                    f"--shard {args.shard} 分到 0 只代码(宇宙不足 {n} 只?);"
-                    "空分片会写出空 firings 并被续跑校验当成已完成"
-                )
-            print(f"[pass1] 分片 {args.shard}: {len(codes)} 只", file=sys.stderr)
-        scorer = None if args.rank_score == "none" else bt.SCORERS.get(args.rank_score)
-        hz = (
-            tuple(int(x) for x in args.horizons.split(",") if x.strip())
-            if args.horizons
-            else ()
+    return _chunked_items
+
+
+def _apply_shard(args, ap, codes: list) -> list:
+    """--shard i/N 分片:非法分片必须 ap.error(exit 2),不能崩栈。"""
+    try:
+        parts = [int(x) for x in args.shard.split("/")]
+    except ValueError:
+        parts = []
+    if len(parts) != 2 or parts[1] < 1 or not (1 <= parts[0] <= parts[1]):
+        ap.error(f"--shard 格式须为 i/n 且 1<=i<=n(如 1/3..3/3),收到 {args.shard!r}")
+    i, n = parts
+    codes = [c for k, c in enumerate(codes) if k % n == (i - 1) % n]
+    if not codes:
+        ap.error(
+            f"--shard {args.shard} 分到 0 只代码(宇宙不足 {n} 只?);"
+            "空分片会写出空 firings 并被续跑校验当成已完成"
         )
-        fsc = {}
-        for nm in [x.strip() for x in args.feature_scores.split(",") if x.strip()]:
-            if nm in bt.SCORERS:
-                fsc[nm] = bt.SCORERS[nm]
-            else:
-                print(
-                    f"[WARN] 未知特征打分器 {nm}(可选: {','.join(sorted(bt.SCORERS))})",
-                    file=sys.stderr,
-                )
-        fstats: dict = {}
-        xfns = []
-        pit_ledger_n = 0
-        if args.sector_features:
-            import json as _jm
+    print(f"[pass1] 分片 {args.shard}: {len(codes)} 只", file=sys.stderr)
+    return codes
 
-            mpath = Path(args.sector_members)
-            members = (
-                _jm.loads(mpath.read_text(encoding="utf-8")) if mpath.is_file() else {}
-            )
-            if not members:
-                ap.error(
-                    "--sector-features 需 sector_members.json(先跑 fetch_sector_index_history.py --members)"
-                )
-            _xf_sector = build_sector_features(args.sector_index_dir, members)
-            _st = getattr(_xf_sector, "stats", {})
-            if _st.get("build_error"):
-                ap.error(
-                    f"--sector-features 构建失败({_st['build_error']});板块特征会全程缺省,"
-                    "结论会被误读为'板块相位无判别力'"
-                )
-            if not _st.get("sectors_loaded"):
-                ap.error(
-                    f"--sector-features 无任何板块指数数据(dir={args.sector_index_dir};"
-                    f"需 {_st.get('sectors_requested', 0)} 个板块,缺 CSV "
-                    f"{_st.get('csv_missing', 0)},解析失败 {_st.get('csv_error', 0)});"
-                    "先跑 fetch_sector_index_history.py,否则 f_sector_* 全程缺省,"
-                    "'板块无判别力'的结论不成立"
-                )
-            xfns.append(_xf_sector)
+
+def _sector_xfn(args, ap):
+    """--sector-features:板块 as-of 特征 fn(构建失败/无数据 → ap.error 硬失败,审计 E8)。"""
+    import json as _jm
+
+    mpath = Path(args.sector_members)
+    members = _jm.loads(mpath.read_text(encoding="utf-8")) if mpath.is_file() else {}
+    if not members:
+        ap.error(
+            "--sector-features 需 sector_members.json(先跑 fetch_sector_index_history.py --members)"
+        )
+    xf = build_sector_features(args.sector_index_dir, members)
+    _st = getattr(xf, "stats", {})
+    if _st.get("build_error"):
+        ap.error(
+            f"--sector-features 构建失败({_st['build_error']});板块特征会全程缺省,"
+            "结论会被误读为'板块相位无判别力'"
+        )
+    if not _st.get("sectors_loaded"):
+        ap.error(
+            f"--sector-features 无任何板块指数数据(dir={args.sector_index_dir};"
+            f"需 {_st.get('sectors_requested', 0)} 个板块,缺 CSV "
+            f"{_st.get('csv_missing', 0)},解析失败 {_st.get('csv_error', 0)});"
+            "先跑 fetch_sector_index_history.py,否则 f_sector_* 全程缺省,"
+            "'板块无判别力'的结论不成立"
+        )
+    print(
+        f"[pass1] 板块特征已启用: {_st['sectors_loaded']}/{_st['sectors_requested']} "
+        f"板块有数据(缺 CSV {_st['csv_missing']}, 解析失败 {_st['csv_error']}; "
+        f"dir={args.sector_index_dir})",
+        file=sys.stderr,
+    )
+    return xf
+
+
+def _pit_xfn(args, ap) -> tuple:
+    """--pit-features:PIT 基本面特征 fn → (fn, 台账条数);无台账 → ap.error。"""
+    from custos.datasource.local_tdx import fetch_pit_financials as _pit  # noqa: PLC0415
+
+    pit_recs = (
+        _pit.load_ledger(args.pit_ledger) if args.pit_ledger else _pit.load_ledger()
+    )
+    if not pit_recs:
+        ap.error(
+            "--pit-features 需 PIT 财务台账(先跑 local_tdx/fetch_pit_financials.py "
+            "--since 2015,并用 --verify 确认无缺期)"
+        )
+    fn = _pit.build_pit_feature_fn(
+        pit_recs, visible_next_day=not args.pit_visible_same_day
+    )
+    print(
+        f"[pass1] PIT 基本面特征已启用 ({len(pit_recs)} 条台账;"
+        f"{'公告当日即可见' if args.pit_visible_same_day else '公告次日起可见'})",
+        file=sys.stderr,
+    )
+    return fn, len(pit_recs)
+
+
+def _load_shares_events(args) -> Optional[list]:
+    """--style-features:真市值股本事件(fetch_market_cap 台账,已 F10 全史回填);
+    台账空/加载失败 → f_mcap 特征缺省并告警(不硬失败)。"""
+    try:
+        from custos.datasource.local_tdx.fetch_market_cap import (
+            load_events,
+            LEDGER,
+        )  # noqa: PLC0415
+
+        shares_ev = load_events(LEDGER) or None
+        if not shares_ev:
             print(
-                f"[pass1] 板块特征已启用: {_st['sectors_loaded']}/{_st['sectors_requested']} "
-                f"板块有数据(缺 CSV {_st['csv_missing']}, 解析失败 {_st['csv_error']}; "
-                f"dir={args.sector_index_dir})",
+                "[WARN] 市值台账为空/缺失,f_mcap 特征缺省(先跑 fetch_market_cap.py)",
                 file=sys.stderr,
             )
-        if args.pit_features:
-            from custos.datasource.local_tdx import fetch_pit_financials as _pit  # noqa: PLC0415
+        return shares_ev
+    except Exception as _exc:  # noqa: BLE001
+        print(f"[WARN] 市值台账加载失败,f_mcap 特征缺省: {_exc}", file=sys.stderr)
+        return None
 
-            pit_recs = (
-                _pit.load_ledger(args.pit_ledger)
-                if args.pit_ledger
-                else _pit.load_ledger()
-            )
-            if not pit_recs:
-                ap.error(
-                    "--pit-features 需 PIT 财务台账(先跑 local_tdx/fetch_pit_financials.py "
-                    "--since 2015,并用 --verify 确认无缺期)"
-                )
-            xfns.append(
-                _pit.build_pit_feature_fn(
-                    pit_recs, visible_next_day=not args.pit_visible_same_day
-                )
-            )
-            pit_ledger_n = len(pit_recs)
-            print(
-                f"[pass1] PIT 基本面特征已启用 ({len(pit_recs)} 条台账;"
-                f"{'公告当日即可见' if args.pit_visible_same_day else '公告次日起可见'})",
-                file=sys.stderr,
-            )
-        if not xfns:
-            xfn = None
-        elif len(xfns) == 1:
-            xfn = xfns[0]
+
+def _build_pass1_features(args, ap) -> tuple:
+    """Pass1 特征栈装配(独立纯块):rank scorer / horizons / 特征打分器 /
+    板块 as-of / PIT 基本面 / 风格(市值事件)。返回 (scorer, hz, fsc, fstats, xfn,
+    shares_ev, pit_ledger_n, xf_sector)——xf_sector 供事后统计汇报(stats 挂在 fn 上)。"""
+    scorer = None if args.rank_score == "none" else bt.SCORERS.get(args.rank_score)
+    hz = (
+        tuple(int(x) for x in args.horizons.split(",") if x.strip())
+        if args.horizons
+        else ()
+    )
+    fsc = {}
+    for nm in [x.strip() for x in args.feature_scores.split(",") if x.strip()]:
+        if nm in bt.SCORERS:
+            fsc[nm] = bt.SCORERS[nm]
         else:
-
-            def xfn(code, day, _fns=tuple(xfns)):  # 多组 as-of 特征合并
-                merged: dict = {}
-                for f in _fns:
-                    try:
-                        merged.update(f(code, day) or {})
-                    except Exception:  # noqa: BLE001 单组失败不拖垮其余
-                        continue
-                return merged
-
-        shares_ev = None
-        if args.style_features:  # 真市值事件(fetch_market_cap 台账,已 F10 全史回填)
-            try:
-                from custos.datasource.local_tdx.fetch_market_cap import (
-                    load_events,
-                    LEDGER,
-                )  # noqa: PLC0415
-
-                shares_ev = load_events(LEDGER) or None
-                if not shares_ev:
-                    print(
-                        "[WARN] 市值台账为空/缺失,f_mcap 特征缺省(先跑 fetch_market_cap.py)",
-                        file=sys.stderr,
-                    )
-            except Exception as _exc:  # noqa: BLE001
-                print(
-                    f"[WARN] 市值台账加载失败,f_mcap 特征缺省: {_exc}", file=sys.stderr
-                )
-        recs = extract_firings(
-            _chunked_items(args.chunk_size),
-            args.start,
-            args.end,
-            bt.ENTRY_GATES[args.entry_filter],
-            scorer=scorer,
-            gate_window=args.gate_window,
-            progress=args.progress,
-            horizons=hz,
-            feature_scorers=fsc,
-            stats=fstats,
-            extra_feature_fn=xfn,
-            ret_start=args.ret_start or None,
-            ret_end=args.ret_end or None,
-            delisted_ret=args.delisted_ret,
-            trade_sim=args.trade_sim,
-            stop_pct=args.stop_pct,
-            bbi_consec=args.bbi_consec,
-            style_features=args.style_features,
-            shares_events=shares_ev,
-        )
-        if fstats.get("feature_failures"):
             print(
-                f"[WARN] 特征打分器异常(特征可能缺失): {fstats['feature_failures']}",
+                f"[WARN] 未知特征打分器 {nm}(可选: {','.join(sorted(bt.SCORERS))})",
                 file=sys.stderr,
             )
-        if args.sector_features:  # 板块特征"生成了几个"必须可见(审计 E8)
-            _st = getattr(_xf_sector, "stats", {})
-            print(
-                f"[pass1] 板块特征产出: {_st.get('emitted', 0)}/{_st.get('queries', 0)} 个信号带值"
-                f"(未分类 {_st.get('unclassified', 0)}, 信号日早于板块数据 "
-                f"{_st.get('no_asof_close', 0)})",
-                file=sys.stderr,
-            )
-            if not _st.get("emitted"):
-                print(
-                    "[WARN] 一个信号都没拿到板块特征:f_sector_* 全缺省,"
-                    "**不得**据本轮结果判定板块相位无判别力(先补板块指数/成员映射)",
-                    file=sys.stderr,
-                )
-        n_signal_days = sum(len(r.get("days") or []) for r in recs)
-        rc_empty = _empty_firings_guard(len(recs), n_signal_days, args.allow_empty)
-        if rc_empty:
-            return rc_empty
-        n_delisted = sum(1 for r in recs if r.get("delisted"))
-        if args.ret_end and args.delisted_ret is None:
-            print(
-                "[WARN] 两窗解耦但未设 --delisted-ret:赢家窗无价格的票(空头内退市/长停)被丢弃,"
-                "会重新引入幸存者偏差(§3 首条)。建议 --delisted-ret -1.0",
-                file=sys.stderr,
-            )
-        import json as _j
+    fstats: dict = {}
+    xfns = []
+    pit_ledger_n = 0
+    xf_sector = None
+    if args.sector_features:
+        xf_sector = _sector_xfn(args, ap)
+        xfns.append(xf_sector)
+    if args.pit_features:
+        _pf, pit_ledger_n = _pit_xfn(args, ap)
+        xfns.append(_pf)
+    if not xfns:
+        xfn = None
+    elif len(xfns) == 1:
+        xfn = xfns[0]
+    else:
 
-        firings_path = Path(args.emit_firings)
-        if firings_path.parent and not firings_path.parent.exists():
-            firings_path.parent.mkdir(
-                parents=True, exist_ok=True
-            )  # 深路径不再 FileNotFoundError
-        tmp_firings = firings_path.with_name(firings_path.name + ".tmp")
-        tmp_firings.write_text(
-            _j.dumps(
-                {
-                    "start": args.start,
-                    "end": args.end,
-                    "ret_start": args.ret_start or args.start,
-                    "ret_end": args.ret_end or args.end,
-                    "entry_filter": args.entry_filter,
-                    "delisted_ret": args.delisted_ret,
-                    "n_delisted": n_delisted,
-                    # 空产物必须自带标记:续跑校验据此拒绝复用(审计 E9)
-                    "n_signal_days": n_signal_days,
-                    **({"empty_ok": True} if not n_signal_days else {}),
-                    "feature_scores": args.feature_scores,
-                    "universe": (
-                        "sdata"
-                        if args.universe_sdata
-                        else ("codes_file" if args.codes_file else "codes")
-                    ),
-                    # 特征开关必须落盘:否则驱动脚本的续跑校验看不出"这份 firings 是否带
-                    # 基本面/风格/板块特征",会把旧参数的结果当新参数复用,结论静默失真。
-                    "sector_features": bool(args.sector_features),
-                    "style_features": bool(args.style_features),
-                    "trade_sim": bool(args.trade_sim),
-                    "pit_features": bool(args.pit_features),
-                    "pit_visible_same_day": bool(args.pit_visible_same_day),
-                    # 复用指纹字段:台账路径(换台账必须重跑)与 trade-sim 出场参数
-                    "pit_ledger": args.pit_ledger or "",
-                    "stop_pct": args.stop_pct,
-                    "bbi_consec": args.bbi_consec,
-                    # 仅供追溯,**不进复用指纹**:台账每季都会增长,若进指纹会导致每次补数后
-                    # 全部窗口强制重跑;需要按新台账重算时显式 --force。
-                    "pit_ledger_n": pit_ledger_n,
-                    "rank_score": args.rank_score,
-                    "shard": args.shard,
-                    "records": recs,
-                },
-                ensure_ascii=False,
-            ),
-            encoding="utf-8",
-        )
-        tmp_firings.replace(
-            firings_path
-        )  # 原子落盘:中断不留半截 JSON(断点续跑会把半截文件当已完成)
+        def xfn(code, day, _fns=tuple(xfns)):  # 多组 as-of 特征合并
+            merged: dict = {}
+            for f in _fns:
+                try:
+                    merged.update(f(code, day) or {})
+                except Exception:  # noqa: BLE001 单组失败不拖垮其余
+                    continue
+            return merged
+
+    shares_ev = _load_shares_events(args) if args.style_features else None
+    return scorer, hz, fsc, fstats, xfn, shares_ev, pit_ledger_n, xf_sector
+
+
+def _report_pass1_stats(args, fstats: dict, xf_sector) -> None:
+    """Pass1 事后统计汇报:特征打分器异常 + 板块特征产出可见性(审计 E8)。"""
+    if fstats.get("feature_failures"):
         print(
-            f"[pass1] 写出 {len(recs)} 股记录(信号日合计 {n_signal_days} 个;"
-            f"其中赢家窗无价格按大亏计入 {n_delisted} 只) "
-            f"→ {args.emit_firings} (RSS={_rss_mb():.0f}MB)",
+            f"[WARN] 特征打分器异常(特征可能缺失): {fstats['feature_failures']}",
             file=sys.stderr,
         )
-        return 0
+    if args.sector_features:  # 板块特征"生成了几个"必须可见(审计 E8)
+        _st = getattr(xf_sector, "stats", {})
+        print(
+            f"[pass1] 板块特征产出: {_st.get('emitted', 0)}/{_st.get('queries', 0)} 个信号带值"
+            f"(未分类 {_st.get('unclassified', 0)}, 信号日早于板块数据 "
+            f"{_st.get('no_asof_close', 0)})",
+            file=sys.stderr,
+        )
+        if not _st.get("emitted"):
+            print(
+                "[WARN] 一个信号都没拿到板块特征:f_sector_* 全缺省,"
+                "**不得**据本轮结果判定板块相位无判别力(先补板块指数/成员映射)",
+                file=sys.stderr,
+            )
 
+
+def _write_firings(
+    args, recs: list, n_signal_days: int, n_delisted: int, pit_ledger_n: int
+) -> None:
+    """firings 原子落盘。⚠️ JSON 头字段(start/end/ret_start/ret_end/entry_filter/
+    delisted_ret/feature_scores/各开关/rank_score/shard/records)是
+    run_bear_to_long_study 的 firings_reusable 契约——逐字不动。"""
+    import json as _j
+
+    firings_path = Path(args.emit_firings)
+    if firings_path.parent and not firings_path.parent.exists():
+        firings_path.parent.mkdir(
+            parents=True, exist_ok=True
+        )  # 深路径不再 FileNotFoundError
+    tmp_firings = firings_path.with_name(firings_path.name + ".tmp")
+    tmp_firings.write_text(
+        _j.dumps(
+            {
+                "start": args.start,
+                "end": args.end,
+                "ret_start": args.ret_start or args.start,
+                "ret_end": args.ret_end or args.end,
+                "entry_filter": args.entry_filter,
+                "delisted_ret": args.delisted_ret,
+                "n_delisted": n_delisted,
+                # 空产物必须自带标记:续跑校验据此拒绝复用(审计 E9)
+                "n_signal_days": n_signal_days,
+                **({"empty_ok": True} if not n_signal_days else {}),
+                "feature_scores": args.feature_scores,
+                "universe": (
+                    "sdata"
+                    if args.universe_sdata
+                    else ("codes_file" if args.codes_file else "codes")
+                ),
+                # 特征开关必须落盘:否则驱动脚本的续跑校验看不出"这份 firings 是否带
+                # 基本面/风格/板块特征",会把旧参数的结果当新参数复用,结论静默失真。
+                "sector_features": bool(args.sector_features),
+                "style_features": bool(args.style_features),
+                "trade_sim": bool(args.trade_sim),
+                "pit_features": bool(args.pit_features),
+                "pit_visible_same_day": bool(args.pit_visible_same_day),
+                # 复用指纹字段:台账路径(换台账必须重跑)与 trade-sim 出场参数
+                "pit_ledger": args.pit_ledger or "",
+                "stop_pct": args.stop_pct,
+                "bbi_consec": args.bbi_consec,
+                # 仅供追溯,**不进复用指纹**:台账每季都会增长,若进指纹会导致每次补数后
+                # 全部窗口强制重跑;需要按新台账重算时显式 --force。
+                "pit_ledger_n": pit_ledger_n,
+                "rank_score": args.rank_score,
+                "shard": args.shard,
+                "records": recs,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    tmp_firings.replace(
+        firings_path
+    )  # 原子落盘:中断不留半截 JSON(断点续跑会把半截文件当已完成)
+    print(
+        f"[pass1] 写出 {len(recs)} 股记录(信号日合计 {n_signal_days} 个;"
+        f"其中赢家窗无价格按大亏计入 {n_delisted} 只) "
+        f"→ {args.emit_firings} (RSS={_rss_mb():.0f}MB)",
+        file=sys.stderr,
+    )
+
+
+def _mode_emit_firings(args, ap, codes: list, load_start: str, loader) -> int:
+    """Pass1 模式:抽信号→小 JSON(可分片,多进程各自内存全新)。"""
+    if args.shard:
+        codes = _apply_shard(args, ap, codes)
+    scorer, hz, fsc, fstats, xfn, shares_ev, pit_ledger_n, xf_sector = (
+        _build_pass1_features(args, ap)
+    )
+    recs = extract_firings(
+        _make_chunk_iter(codes, args, load_start, loader)(args.chunk_size),
+        args.start,
+        args.end,
+        bt.ENTRY_GATES[args.entry_filter],
+        scorer=scorer,
+        gate_window=args.gate_window,
+        progress=args.progress,
+        horizons=hz,
+        feature_scorers=fsc,
+        stats=fstats,
+        extra_feature_fn=xfn,
+        ret_start=args.ret_start or None,
+        ret_end=args.ret_end or None,
+        delisted_ret=args.delisted_ret,
+        trade_sim=args.trade_sim,
+        stop_pct=args.stop_pct,
+        bbi_consec=args.bbi_consec,
+        style_features=args.style_features,
+        shares_events=shares_ev,
+    )
+    _report_pass1_stats(args, fstats, xf_sector)
+    n_signal_days = sum(len(r.get("days") or []) for r in recs)
+    rc_empty = _empty_firings_guard(len(recs), n_signal_days, args.allow_empty)
+    if rc_empty:
+        return rc_empty
+    n_delisted = sum(1 for r in recs if r.get("delisted"))
+    if args.ret_end and args.delisted_ret is None:
+        print(
+            "[WARN] 两窗解耦但未设 --delisted-ret:赢家窗无价格的票(空头内退市/长停)被丢弃,"
+            "会重新引入幸存者偏差(§3 首条)。建议 --delisted-ret -1.0",
+            file=sys.stderr,
+        )
+    _write_firings(args, recs, n_signal_days, n_delisted, pit_ledger_n)
+    return 0
+
+
+def _load_bars(args, codes: list, load_start: str, loader) -> dict:
+    if loader is not None:
+        return loader(codes, 0)
+    from custos.datasource import s_data  # noqa: PLC0415
+
+    sub = "CSV_DATA" if args.data_source == "csv" else "Q_DATA"
+    fn = s_data.load_bars_csv if args.data_source == "csv" else s_data.load_bars_qlib
+    return fn(
+        codes,
+        0,
+        start=load_start,
+        end=None,
+        root=str(Path(args.s_data_root) / sub),
+    )
+
+
+def _run_analyze(args, codes: list, load_start: str, loader) -> int:
+    """默认路径:起涨点分析 + 捕捉率 + 板块集中度。"""
+    res: dict[str, Any] = {}
+    bars = None
     if not args.capture_only:  # 起涨点分析:需全量在内存(与既有行为一致)
-        if loader is not None:
-            bars = loader(codes, 0)
-        else:
-            from custos.datasource import s_data  # noqa: PLC0415
-
-            sub = "CSV_DATA" if args.data_source == "csv" else "Q_DATA"
-            fn = (
-                s_data.load_bars_csv
-                if args.data_source == "csv"
-                else s_data.load_bars_qlib
-            )
-            bars = fn(
-                codes,
-                0,
-                start=load_start,
-                end=None,
-                root=str(Path(args.s_data_root) / sub),
-            )
+        bars = _load_bars(args, codes, load_start, loader)
         regime = bt.load_amv_regime(
             since=load_start
         )  # regime 起点跟随数据起点(早前窗口)
@@ -2915,7 +3427,11 @@ def main(argv=None, loader=None) -> int:
     # 赢家捕捉率 + 排名质量(recall/surfaced/'选出来但没发现')。流式:capture-only 用分块加载,省内存
     if args.capture_rank or args.capture_only:
         scorer = None if args.rank_score == "none" else bt.SCORERS.get(args.rank_score)
-        src = _chunked_items(args.chunk_size) if args.capture_only else bars
+        src = (
+            _make_chunk_iter(codes, args, load_start, loader)(args.chunk_size)
+            if args.capture_only
+            else bars
+        )
         cap = capture_rank_study(
             src,
             args.start,
@@ -2955,6 +3471,33 @@ def main(argv=None, loader=None) -> int:
     if args.out:
         _write_json_out(args.out, res)
     return 0
+
+
+def main(argv=None, loader=None) -> int:
+    ap = _build_parser()
+    args = ap.parse_args(argv)
+    _validate_universe_args(args, ap)
+
+    if args.explain_agg:  # 纯读 JSON,不加载数据、不算指标
+        return _mode_explain_agg(args)
+
+    if args.list_long_windows or args.list_window_pairs:  # 只枚举区间,不加载任何 K 线
+        return _mode_list_windows(args)
+
+    # ⚠️ 顺序是行为契约:zero-ret 警告与 start/end 必填**不能**提前到 explain/list 模式之前
+    _warn_zero_ret_and_require_dates(args, ap)
+
+    # Pass2:仅合并 Pass1 产物算排名(不加载任何K线,内存极小)
+    if args.from_firings:
+        return _mode_from_firings(args)
+
+    codes = _resolve_codes(args, ap)
+    load_start = _load_start(args)
+
+    # Pass1:只抽信号→小 JSON(可分片,多进程各自内存全新)
+    if args.emit_firings:
+        return _mode_emit_firings(args, ap, codes, load_start, loader)
+    return _run_analyze(args, codes, load_start, loader)
 
 
 if __name__ == "__main__":
