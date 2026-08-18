@@ -28,6 +28,7 @@
 | mcap / roe / pit_lag（风格腿） | 判别层过线，净值终审 2025 窗惨败 −9.3% |
 | platform_pullback（平台回踩） | 识别有术、盈利无效，与选股模型无协同 |
 | dmi_adx | 三窗全改善 ⇒ **唯一例外**，以证据层接入观察 |
+| alpha_pvcorr / low_vol / momentum（特征溢价/量价相关选择器） | 钉死宇宙三窗 top-5 对照：各自只在单一窗口跑赢 baseline，**无跨窗口稳健性** ⇒ 降级「不再研究」（2026-08-18，owner 拍板） |
 
 ⇒ **随机/等权 ≥ 一切价量选择器。**
 
@@ -85,3 +86,14 @@
     候选表「平台回踩」列 ✓@平台高=自然止损位),不再追加条件化研究。教训:**形态类信号先问
     "是否赢过无条件基准";富集类比较必须同窗口同口径**。
    - Fama-French 3/5：**风险/归因模型非信号**；A股应用 CH-3/CH-4(壳调整size+EP+换手)；可借=归因严谨性(alpha vs beta) + 特征溢价选择器(low_vol/momentum)。
+16. **alpha_pvcorr / low_vol / momentum 三因子终审（2026-08-18，TODO #35，owner 拍板降级「不再研究」）**：
+    钉死同一宇宙（vipdoc 5543 只 seed=0 抽 300，`artifacts/logs/w35_universe.txt`），
+    3 窗口（rally22 2022-05~12 / bull2425 2024-01~2025-12 / ytd26 2026-01~08）× 4 打分器
+    （baseline 对照 + 三因子），j_low 入场、top-5 横截面择优、成本 25bps，
+    JSON 证据 `artifacts/logs/w35_<窗口>_<scorer>.json`。结果（总收益，baseline 在前）：
+    - **rally22**：baseline +3.8% ｜ alpha_pvcorr −6.9% ｜ low_vol −12.6% ｜ momentum −14.8% —— 三因子全输；
+    - **bull2425**：baseline −1.4% ｜ alpha_pvcorr **+42.8%**（收益/回撤 2.02）｜ low_vol +14.0% ｜ momentum −23.6%；
+    - **ytd26**：baseline −20.0% ｜ alpha_pvcorr −26.3% ｜ low_vol −21.9% ｜ momentum **−7.3%**（全员亏损，momentum 相对最好）。
+    全候选池交易统计各 scorer 一致 ⇒ 差异全在 **top-N 排序能力**；而排序 edge 各因子只出现在单一 regime
+    （alpha_pvcorr 只在 bull2425、momentum 只在 ytd26），重蹈 cross-window 教训（R10）。
+    **结论：三者均无跨窗口稳健性，`status` 由 untested 降 needs_work，不再追加研究。**

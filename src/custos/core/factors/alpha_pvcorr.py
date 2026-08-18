@@ -3,9 +3,10 @@
 
 `-correlation(open, volume, 10)` —— 量价负相关高 ⇒ 筹码沉淀。
 
-⚠️ **未单独终审**：与 alpha101 同批引入（Kakushadze 2016 的思想），
-但 findings 里没有它的净值对照记录。按 R2 的整体结论
-「无任何价量特征通过验证」推定不可用，**但缺它自己的证据**。
+⚠️ **已降级「不再研究」（2026-08-18，owner 拍板）**：钉死宇宙 300 只
+三窗口 × top-5 择优对照（j_low、25bps）——仅 bull2425 跑赢 baseline
+（+42.8% vs -1.4%），rally22 / ytd26 均跑输，**无跨窗口稳健性**。
+证据见 R2 第 16 条、`artifacts/logs/w35_*_alpha_pvcorr.json`。
 """
 
 from __future__ import annotations
@@ -19,9 +20,9 @@ FACTOR: dict[str, Any] = {
     "id": "alpha_pvcorr",
     "name": "Alpha#6 类：价量负相关",
     "kind": "selector",
-    "status": "untested",
+    "status": "needs_work",
     "evidence": "governance/research/R2_selection_price_volume.md",
-    "note": "缺独立终审记录；按 R2 整体结论推定不可用",
+    "note": "三窗对照仅 bull2425 跑赢、无跨窗稳健性 ⇒ 降级不再研究(2026-08-18)",
     "min_bars": 10,
     "live_use": "none",
     "stage": "debug",
