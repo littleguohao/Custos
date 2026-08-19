@@ -21,6 +21,14 @@ from custos.core.b1_thresholds import (
 )
 from custos.core.code_utils import fnum  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
+from custos.core.exit_rules import (  # noqa: E402  L0，止盈止损规则唯一来源
+    HARD_LOSS_ENABLED,
+    HARD_LOSS_PCT,
+    LOSS_REDUCTION_ENABLED,
+    LOSS_REDUCTION_PCT,
+    REDUCTION_PCT_OF_HOLDING,
+    SCALE_OUT_TWO_BULL_ENABLED,
+)
 
 
 # 次新股前置排除阈值：上市日历天数 < 20 标记
@@ -52,10 +60,22 @@ SIGNAL_ORDER = {
 
 
 def _pnl_signals(pnl: float | None, add: Any) -> None:
-    if pnl is not None and pnl <= -0.10:
-        add("hard_loss", "P0", "止损/清仓评估", f"持有盈亏{pnl:.2%}达到-10%硬风控阈值")
-    elif pnl is not None and pnl <= -0.07:
-        add("loss_reduction", "P1", "减仓评估", f"持有盈亏{pnl:.2%}低于-7%")
+    # 阈值与开关唯一来源 = core/exit_rules（原硬编码 -0.10/-0.07，2026-08-19 收敛）；
+    # 文案随配置动态拼，否则配置一改理由就在谎报（同 b1_thresholds 的教训）。
+    if HARD_LOSS_ENABLED and pnl is not None and pnl <= HARD_LOSS_PCT:
+        add(
+            "hard_loss",
+            "P0",
+            "止损/清仓评估",
+            f"持有盈亏{pnl:.2%}达到{HARD_LOSS_PCT:.0%}硬风控阈值",
+        )
+    elif LOSS_REDUCTION_ENABLED and pnl is not None and pnl <= LOSS_REDUCTION_PCT:
+        add(
+            "loss_reduction",
+            "P1",
+            "减仓评估",
+            f"持有盈亏{pnl:.2%}低于{LOSS_REDUCTION_PCT:.0%}",
+        )
 
 
 def _n_structure_signals(
@@ -147,7 +167,8 @@ def _price_volume_signals(
             "缩量小阴，未触发硬风险时观察次日修复",
         )
     if (
-        price_volume_current
+        SCALE_OUT_TWO_BULL_ENABLED
+        and price_volume_current
         and pv.get("two_medium_large_bull")
         and row.get("above_bbi") is True
     ):
@@ -290,9 +311,9 @@ def evaluate(
             "action": "条件持有",
             "reason": "未触发B1减仓、止损或止盈信号",
         }
-    reduction_range = {"P0": [100, 100], "P1": [10, 25], "P2": [10, 20]}.get(
-        final["priority"], [0, 0]
-    )
+    # 减仓幅度表唯一来源 = core/exit_rules.REDUCTION_PCT_OF_HOLDING
+    # （原内联字面量 {"P0": [100, 100], "P1": [10, 25], "P2": [10, 20]}，2026-08-19 收敛）
+    reduction_range = REDUCTION_PCT_OF_HOLDING.get(final["priority"], [0, 0])
     return {
         "version": "B1-holding-v1",
         "code": str(row.get("code") or "").split(".")[0],

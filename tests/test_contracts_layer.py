@@ -218,6 +218,7 @@ class TestConfigsHavePathsConstants:
             "RSS_SOURCE_REGISTRY.json",
             "RSS_FILTER_CONFIG.json",
             "RSSHUB_PRIVATE_ROUTE_CANDIDATES.json",
+            "EXIT_RULES.json",
         ],
     )
     def test_has_constant(self, name):

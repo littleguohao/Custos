@@ -1,0 +1,57 @@
+{
+  "version": "v1",
+  "date": "2026-08-19",
+  "purpose": "止盈/止损规则目录的可配覆盖层（v0.81）。代码默认值在 src/custos/core/exit_rules.py（L0，live 唯一来源），本文件与其一致；改任一方案参数即覆盖 live 三处判定点（b1_holding_state / review_core / portfolio_review_report，模块导入时求值）。未知方案/参数键被忽略。enabled=false 的方案（breakeven_stop/trailing_stop/cost_zone_flat/time_stop）现网本就不跑，仅供研究侧对照与后续 Phase B/C/E 接线；params 键名与 research/backtest_factors.simulate_b1_trade 形参一致（研究→live 回流通道）。",
+  "stop_rules": {
+    "hard_loss": {
+      "rule_id": "hard_loss",
+      "enabled": true,
+      "params": {"pnl_pct": -0.10},
+      "_note": "持有盈亏 <= -10% 硬风控清仓（P0）"
+    },
+    "loss_reduction": {
+      "rule_id": "loss_reduction",
+      "enabled": true,
+      "params": {"pnl_pct": -0.07},
+      "_note": "持有盈亏 <= -7% 减仓（P1）"
+    },
+    "breakeven_stop": {
+      "rule_id": "breakeven_stop",
+      "enabled": false,
+      "params": {"breakeven_trigger": 0.0},
+      "_note": "保本止损：峰值涨幅 >= trigger 后回落到成本价即出（仅研究侧，live 不跑）"
+    },
+    "trailing_stop": {
+      "rule_id": "trailing_stop",
+      "enabled": false,
+      "params": {"trail_pct": 0.0},
+      "_note": "移动止损：止损位跟随持仓期最高价回撤该比例（仅研究侧，live 不跑）"
+    },
+    "time_stop": {
+      "rule_id": "time_stop",
+      "enabled": false,
+      "params": {"time_stop_bars": 0},
+      "_note": "时间止损：持有超过 N 根无条件平仓（仅研究侧，live 不跑）"
+    }
+  },
+  "take_profit_rules": {
+    "scale_out_two_bull": {
+      "rule_id": "scale_out_two_bull",
+      "enabled": true,
+      "params": {"consecutive_bull_bars": 2, "require_above_bbi": true},
+      "_note": "BBI 上方连续两根中大阳分批止盈（P2），live two_bull_profit_take"
+    },
+    "cost_zone_flat": {
+      "rule_id": "cost_zone_flat",
+      "enabled": false,
+      "params": {"cost_zone_bars": 0, "cost_zone_pct": 3.0, "cost_zone_grace": 1},
+      "_note": "成本区「不涨就拍」：未上 BBI 且重心未升且未脱离成本区才平（仅研究侧，live 不跑）"
+    }
+  },
+  "reduction_pct_of_holding": {
+    "P0": [100, 100],
+    "P1": [10, 25],
+    "P2": [10, 20],
+    "_note": "各优先级的建议减仓幅度（占持仓 %）；P0 全清"
+  }
+}

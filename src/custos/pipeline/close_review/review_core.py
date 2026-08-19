@@ -34,6 +34,10 @@ from custos.core import report_audit  # noqa: E402
 from custos.core.code_utils import finite  # noqa: E402
 from custos.core.code_utils import fnum as optional_finite  # noqa: E402
 from custos.core.fmt import pct_text as _fmt_pct_text  # noqa: E402
+from custos.core.exit_rules import (  # noqa: E402  L0，止盈止损规则唯一来源
+    LOSS_REDUCTION_ENABLED,
+    LOSS_REDUCTION_PCT,
+)
 
 TRADES = TRADES_DIR
 HOLDINGS = HOLDINGS_DIR
@@ -325,7 +329,12 @@ def _hard_risk_signal(
     trend: str,
     bbi_reason: str,
 ) -> tuple[str, str, str] | None:
-    if not (high_risk or "破位" in box or pnl <= -0.07):
+    # -7% 减仓阈值唯一来源 = core/exit_rules（原硬编码 pnl <= -0.07，2026-08-19 收敛）
+    if not (
+        high_risk
+        or "破位" in box
+        or (LOSS_REDUCTION_ENABLED and pnl <= LOSS_REDUCTION_PCT)
+    ):
         return None
     reasons = [
         str(x.get("reason") or x.get("risk_type"))

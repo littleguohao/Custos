@@ -9,6 +9,13 @@ if hasattr(sys.stdout, "reconfigure"):
 from custos.core.paths import DATA, PLANS, daily_report_dir  # noqa: E402
 from custos.core.paths import read_json as load  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
+from custos.core.b1_thresholds import J_LOW_THRESHOLD  # noqa: E402
+from custos.core.exit_rules import (  # noqa: E402  L0，止盈止损规则唯一来源
+    HARD_LOSS_ENABLED,
+    HARD_LOSS_PCT,
+    LOSS_REDUCTION_ENABLED,
+    LOSS_REDUCTION_PCT,
+)
 import sys
 
 
@@ -25,22 +32,29 @@ def classify(r):
     macd = r.get("daily_macd_hist_direction")
     reasons = []
     action = "观察"
+    # 止损/减仓阈值唯一来源 = core/exit_rules（原硬编码 -0.10/-0.07，2026-08-19 收敛）
     if trend == "下跌" and "破位" in pos:
         action = "止损"
         reasons.append("下跌趋势且处于破位区")
-    elif isinstance(pnl, (int, float)) and pnl <= -0.10:
+    elif HARD_LOSS_ENABLED and isinstance(pnl, (int, float)) and pnl <= HARD_LOSS_PCT:
         action = "止损"
         reasons.append("浮亏达到强制风控阈值")
-    elif isinstance(pnl, (int, float)) and pnl <= -0.07:
+    elif (
+        LOSS_REDUCTION_ENABLED
+        and isinstance(pnl, (int, float))
+        and pnl <= LOSS_REDUCTION_PCT
+    ):
         action = "减仓"
-        reasons.append("浮亏超过-7%")
+        reasons.append(f"浮亏超过{LOSS_REDUCTION_PCT:.0%}")
     elif trend == "下跌":
         action = "减仓"
         reasons.append("下跌趋势")
     elif trend == "横盘震荡" and "上半区" in pos:
         action = "持有"
         reasons.append("横盘上半区，保护利润且不追高")
-    if isinstance(j, (int, float)) and j < 12:
+    # ⚠️ J 阈值原硬编码 12，与全仓其余判定点（13）不一致 —— 2026-08-19 修正为
+    #    同源 b1_thresholds.J_LOW_THRESHOLD（v0.81，本 Phase 唯一有意行为修正）
+    if isinstance(j, (int, float)) and j < J_LOW_THRESHOLD:
         reasons.append("J值低仅作观察，不构成加仓理由")
     if macd == "收缩":
         reasons.append("MACD动能收缩")

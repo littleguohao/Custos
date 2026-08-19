@@ -57,6 +57,10 @@ BASE_MODULES = {
     # （core/trades 两个导入器），读方在 L1（news/rss_filter.entities）——
     # 放 L2 会构成 L1→L2 分层反转，只能上提到 L0。只依赖 `paths`（L0）与 stdlib。
     "positions_history.py",
+    # `exit_rules.py` 是止盈/止损规则目录的唯一来源（v0.81），被三个 L3 目录
+    # （holdings / close_review）的 live 判定点读 —— 与 b1_thresholds 同理，
+    # 只能放 L0。只依赖 `paths`（L0）与 stdlib。
+    "exit_rules.py",
 }
 LAYER_OF_DIR = {
     "datasource/local_tdx": 1,
