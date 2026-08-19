@@ -97,7 +97,7 @@ class TestRenderNews:
     def test_section_title_is_fact_check(self):
         lines = []
         fcr.render_news(lines, {})
-        assert "## 2. 与今日操作相关的事实核对" in "\n".join(lines)
+        assert "## 2. 新闻、政策、风向与舆情（与今日操作相关的事实核对）" in "\n".join(lines)
 
     def test_empty_section_says_unavailable_not_blank(self):
         """⚠️ 空节写 `unavailable` 并说明原因（没过时效/来源质量门），

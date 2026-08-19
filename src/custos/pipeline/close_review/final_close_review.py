@@ -107,7 +107,7 @@ def render_news(lines, news, hold_codes=None, hold_sectors=None):
     matched_holdings 只为兼容「直接装代码」的旧形状/手工构造输入。"""
     lines += [
         "",
-        "## 2. 与今日操作相关的事实核对",
+        "## 2. 新闻、政策、风向与舆情（与今日操作相关的事实核对）",
         "",
         "> 复盘视角：本节只核对**与今日持仓/操作有交集**的新闻事实；"
         "信息流全量罗列已压缩（角色定版 v0.57）。",
@@ -763,3 +763,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
