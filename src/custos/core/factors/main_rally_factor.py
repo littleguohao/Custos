@@ -78,6 +78,98 @@ def flow_ratio(df: pd.DataFrame, win: int = FLOW_WIN) -> pd.Series:
     return d1 / tot.replace(0, np.nan)
 
 
+def _flow_cross_state(
+    df: pd.DataFrame, n: int, cross_mode: str, flow_threshold: float
+) -> dict[str, Any] | None:
+    """① 资金流入占比穿越状态；占比不可用返回 None。"""
+    fr = flow_ratio(df, FLOW_WIN)
+    cur_f = fr.iloc[-1]
+    prev_f = fr.iloc[-2] if n >= 2 else np.nan
+    if cur_f != cur_f or prev_f != prev_f:
+        return None
+    cur_f, prev_f = float(cur_f), float(prev_f)
+    cross_below = bool(prev_f >= flow_threshold > cur_f)  # 主升跌破（源码口径）
+    cross_above = bool(prev_f <= flow_threshold < cur_f)  # 主升突破（文字口径）
+    flow_ok = {
+        "below": cross_below,
+        "above": cross_above,
+        "either": cross_below or cross_above,
+    }.get(cross_mode, cross_below)
+    return {
+        "cur": cur_f,
+        "prev": prev_f,
+        "cross_below": cross_below,
+        "cross_above": cross_above,
+        "ok": flow_ok,
+    }
+
+
+def _rsi_oversold_state(df: pd.DataFrame, rsi_oversold: float) -> dict[str, Any] | None:
+    """② 超卖区金叉：前一日 RSI7 < rsi_oversold 且今日上行；RSI 不可用返回 None。"""
+    r = rsi(df["close"], RSI_N)
+    cur_r, prev_r = r.iloc[-1], r.iloc[-2]
+    if cur_r != cur_r or prev_r != prev_r:
+        return None
+    cur_r, prev_r = float(cur_r), float(prev_r)
+    return {
+        "cur": cur_r,
+        "prev": prev_r,
+        "ok": bool(prev_r < rsi_oversold and cur_r > prev_r),
+    }
+
+
+def _t1_state(df: pd.DataFrame, n: int, cci_extreme: float) -> dict[str, Any] | None:
+    """③ CCI 极度偏离 + 上行；J 拐头向上（原文 T1 的核心两项）；CCI 不可用返回 None。"""
+    cc = cci(df, CCI_N)
+    cur_c, prev_c = cc.iloc[-1], cc.iloc[-2]
+    if cur_c != cur_c or prev_c != prev_c:
+        return None
+    cur_c, prev_c = float(cur_c), float(prev_c)
+    cci_ok = bool(cur_c < cci_extreme and cur_c > prev_c)
+    j = _j_series(df)
+    j0, j1, j2 = j.iloc[-1], j.iloc[-2], j.iloc[-3] if n >= 3 else np.nan
+    j_turn = bool(j0 == j0 and j1 == j1 and j2 == j2 and j0 > j1 and j1 < j2)
+    return {
+        "cur": cur_c,
+        "prev": prev_c,
+        "cci_ok": cci_ok,
+        "j0": j0,
+        "j_turn": j_turn,
+        "ok": bool(cci_ok and j_turn),
+    }
+
+
+def _main_rally_report(
+    cross_mode: str,
+    flow: dict[str, Any],
+    rsi_st: dict[str, Any],
+    t1: dict[str, Any],
+) -> dict[str, Any]:
+    """汇总三条件为可用报告（字段与键序同原内联实现）。"""
+    hit = bool(flow["ok"] and rsi_st["ok"] and t1["ok"])
+    j0 = t1["j0"]
+    return {
+        "available": True,
+        "hit": hit,
+        "cross_mode": cross_mode,
+        "flow_ratio": round(flow["cur"], 4),
+        "flow_ratio_prev": round(flow["prev"], 4),
+        "flow_cross_below": flow["cross_below"],
+        "flow_cross_above": flow["cross_above"],
+        "flow_ok": flow["ok"],
+        "rsi7": round(rsi_st["cur"], 2),
+        "rsi7_prev": round(rsi_st["prev"], 2),
+        "rsi_ok": rsi_st["ok"],
+        "cci": round(t1["cur"], 2),
+        "cci_prev": round(t1["prev"], 2),
+        "cci_ok": t1["cci_ok"],
+        "j": round(float(j0), 2) if j0 == j0 else None,
+        "j_turn_up": t1["j_turn"],
+        "t1_ok": t1["ok"],
+        "conditions_met": int(flow["ok"]) + int(rsi_st["ok"]) + int(t1["ok"]),
+    }
+
+
 def detect_main_rally_start(
     df: pd.DataFrame,
     code: str = "",
@@ -103,62 +195,18 @@ def detect_main_rally_start(
                 "reason": f"少于{MAIN_RALLY_MIN_BARS}根K线（原文 BARSCOUNT>60）",
             }
         # ① 资金流入占比穿越
-        fr = flow_ratio(df, FLOW_WIN)
-        cur_f = fr.iloc[-1]
-        prev_f = fr.iloc[-2] if n >= 2 else np.nan
-        if cur_f != cur_f or prev_f != prev_f:
+        flow = _flow_cross_state(df, n, cross_mode, flow_threshold)
+        if flow is None:
             return {"available": False, "hit": False, "reason": "flow_ratio 不可用"}
-        cur_f, prev_f = float(cur_f), float(prev_f)
-        cross_below = bool(prev_f >= flow_threshold > cur_f)  # 主升跌破（源码口径）
-        cross_above = bool(prev_f <= flow_threshold < cur_f)  # 主升突破（文字口径）
-        flow_ok = {
-            "below": cross_below,
-            "above": cross_above,
-            "either": cross_below or cross_above,
-        }.get(cross_mode, cross_below)
-
         # ② 超卖区金叉：前一日 RSI7 < 20 且今日上行
-        r = rsi(df["close"], RSI_N)
-        cur_r, prev_r = r.iloc[-1], r.iloc[-2]
-        if cur_r != cur_r or prev_r != prev_r:
+        rsi_st = _rsi_oversold_state(df, rsi_oversold)
+        if rsi_st is None:
             return {"available": False, "hit": False, "reason": "RSI 不可用"}
-        cur_r, prev_r = float(cur_r), float(prev_r)
-        rsi_ok = bool(prev_r < rsi_oversold and cur_r > prev_r)
-
         # ③ CCI 极度偏离 + 上行；J 拐头向上（原文 T1 的核心两项）
-        cc = cci(df, CCI_N)
-        cur_c, prev_c = cc.iloc[-1], cc.iloc[-2]
-        if cur_c != cur_c or prev_c != prev_c:
+        t1 = _t1_state(df, n, cci_extreme)
+        if t1 is None:
             return {"available": False, "hit": False, "reason": "CCI 不可用"}
-        cur_c, prev_c = float(cur_c), float(prev_c)
-        cci_ok = bool(cur_c < cci_extreme and cur_c > prev_c)
-
-        j = _j_series(df)
-        j0, j1, j2 = j.iloc[-1], j.iloc[-2], j.iloc[-3] if n >= 3 else np.nan
-        j_turn = bool(j0 == j0 and j1 == j1 and j2 == j2 and j0 > j1 and j1 < j2)
-
-        t1_ok = bool(cci_ok and j_turn)
-        hit = bool(flow_ok and rsi_ok and t1_ok)
-        return {
-            "available": True,
-            "hit": hit,
-            "cross_mode": cross_mode,
-            "flow_ratio": round(cur_f, 4),
-            "flow_ratio_prev": round(prev_f, 4),
-            "flow_cross_below": cross_below,
-            "flow_cross_above": cross_above,
-            "flow_ok": flow_ok,
-            "rsi7": round(cur_r, 2),
-            "rsi7_prev": round(prev_r, 2),
-            "rsi_ok": rsi_ok,
-            "cci": round(cur_c, 2),
-            "cci_prev": round(prev_c, 2),
-            "cci_ok": cci_ok,
-            "j": round(float(j0), 2) if j0 == j0 else None,
-            "j_turn_up": j_turn,
-            "t1_ok": t1_ok,
-            "conditions_met": int(flow_ok) + int(rsi_ok) + int(t1_ok),
-        }
+        return _main_rally_report(cross_mode, flow, rsi_st, t1)
     except Exception as exc:  # noqa: BLE001
         return {
             "available": False,
