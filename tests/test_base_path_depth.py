@@ -82,7 +82,6 @@ class TestGovernanceLayout:
             "RSS_SOURCE_REGISTRY_FILE",
             "RSS_FILTER_CONFIG_FILE",
             "RSSHUB_ROUTES_FILE",
-            "CZ_SECTOR_PREFERENCE_FILE",
         ):
             p = getattr(paths, name)
             assert p.is_file(), f"paths.{name} 指向不存在的文件: {p}"

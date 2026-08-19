@@ -291,7 +291,6 @@ class TestB8SectorScoreNaN:
             enriched=enriched,
             sector_states=states,
             amv_state="中性",
-            cz_preference={},
         )
         assert r["status"] == "partial"
         assert "sector_score_unavailable" in r["degraded_reason"]

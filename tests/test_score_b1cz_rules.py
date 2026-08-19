@@ -29,7 +29,6 @@ def _cand(**extra):
 
 
 SECTOR_STRONG = {"state": "主升", "score": 80, "sector": "半导体/芯片/存储/封测"}
-PREF = {"favored": ["半导体", "芯片"], "avoid": ["稀土", "白酒"]}
 
 
 def test_sprint_wave_caps_at_b_and_no_buy_plan():
@@ -57,13 +56,6 @@ def test_volume_sustain_retreat_no_longer_caps():
     assert scored["bucket"] == "B"
 
 
-def test_cz_avoid_sector_forces_d():
-    scored = sc.score_candidate(_cand(), SECTOR_STRONG, "做多", cz_sector="avoid")
-    assert scored["bucket"] == "D"
-    assert scored["next_step"] == "avoid"
-    assert "cz_avoid_sector" in scored["risk_flags"]
-
-
 def test_non_one_wave_revoked_caps_at_c():
     scored = sc.score_candidate(
         _cand(non_one_wave={"status": "revoked", "available": True}),
@@ -86,7 +78,6 @@ def test_no_new_rules_keeps_a():
         ),
         SECTOR_STRONG,
         "做多",
-        cz_sector="favored",
     )
     assert scored["bucket"] == "A"
     assert scored["next_step"] == "buy_review"
@@ -265,50 +256,6 @@ def test_v064_healthy_pullback_pack_bonus():
     assert s4 == 14 and "b1_healthy_pullback_pack" not in c4
 
 
-def test_cz_sector_of_matching():
-    assert sc.cz_sector_of("半导体/芯片/存储/封测", PREF) == "favored"
-    assert sc.cz_sector_of("稀土", PREF) == "avoid"
-    assert sc.cz_sector_of("证券/券商/金融风险偏好", PREF) == "neutral"
-    assert sc.cz_sector_of("未知", PREF) == "neutral"
-    assert sc.cz_sector_of("半导体", None) == "neutral"
-    # avoid 优先（保守）：同时含白/黑关键词时判 avoid
-    assert sc.cz_sector_of("稀土半导体", PREF) == "avoid"
-
-
-def test_score_all_preference_missing_degrades():
-    enriched = {"status": "ok", "candidates": [_cand()]}
-    states = [{**SECTOR_STRONG, "theme_id": "semiconductor_chip_memory_packaging"}]
-    result = sc.score_all(
-        "2026-07-21",
-        enriched=enriched,
-        sector_states=states,
-        amv_state="做多",
-        cz_preference={},
-    )
-    assert result["cz_sector_status"] == "missing"
-    assert result["status"] == "partial"
-    assert "cz_sector_preference_missing" in result["degraded_reason"]
-    assert result["candidates"][0]["cz_sector"] == "neutral"
-
-
-def test_score_all_avoid_theme_goes_d():
-    cand = _cand(sector="稀土", theme_id="rare_earth")
-    enriched = {"status": "ok", "candidates": [cand]}
-    states = [
-        {"state": "主升", "score": 80, "sector": "稀土", "theme_id": "rare_earth"}
-    ]
-    result = sc.score_all(
-        "2026-07-21",
-        enriched=enriched,
-        sector_states=states,
-        amv_state="做多",
-        cz_preference=PREF,
-    )
-    assert result["candidates"][0]["cz_sector"] == "avoid"
-    assert result["candidates"][0]["bucket"] == "D"
-    assert result["bucket_counts"]["D"] == 1
-
-
 # ---------- P1: 待回测封顶规则可配置化（默认全开＝历史行为） ----------
 
 
@@ -339,7 +286,7 @@ def test_cap_rule_disabled_sprint_keeps_a():
     assert "sprint_wave_first_b1_forbidden" not in scored["risk_flags"]
 
 
-def test_cap_rules_disabled_retreat_revoked_avoid_keep_a():
+def test_cap_rules_disabled_retreat_revoked_keep_a():
     scored = sc.score_candidate(
         _cand(
             volume_sustain={"status": "retreat", "available": True},
@@ -348,17 +295,14 @@ def test_cap_rules_disabled_retreat_revoked_avoid_keep_a():
         ),
         SECTOR_STRONG,
         "做多",
-        cz_sector="avoid",
         cap_rules={
             "volume_retreat": False,
             "non_one_wave_revoked": False,
-            "cz_avoid_sector": False,
         },
     )
-    assert scored["bucket"] == "A"  # 三条降档全关 + 资金意图强 → 保持基础 强×强＝A
+    assert scored["bucket"] == "A"  # 两条降档全关 + 资金意图强 → 保持基础 强×强＝A
     assert "main_force_retreat_cap_disabled" in scored["risk_flags"]
     assert "non_one_wave_revoked_cap_disabled" in scored["risk_flags"]
-    assert "cz_avoid_sector_cap_disabled" in scored["risk_flags"]
 
 
 def test_score_detail_records_effective_cap_rules():

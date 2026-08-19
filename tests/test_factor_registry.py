@@ -184,9 +184,6 @@ class TestNotForLive:
             "b2_surge_factor",
             "main_rally_factor",
             "rsi_state",
-            # 板块族密度：R2 说它是准确的「窗口主线指纹」（归因工具），
-            # 但「跟随主流」机械规则不成立 ⇒ 只作情境感知，不作 gate
-            "sector_mainstream",
             # v0.50（#37 阶段 A）定案，见各自模块 FACTOR 注释
             "s_shape",
             "sector_phase",
@@ -414,13 +411,14 @@ class TestStageMatchesReality:
         assert not bad, f"标了 debug 却在 live 链里：{bad}"
 
     def test_release_set_is_the_known_twelve(self):
-        """已上线集合当前 12 个。变动必须是有意识的 —— 上线/下线都该被看见。
+        """已上线集合当前 11 个。变动必须是有意识的 —— 上线/下线都该被看见。
 
         （v0.50：12 → 11，b1_pullback_fit 证伪下线转 debug；
-        v0.56：11 → 12，bottom_patterns 证据层进 live 链。）
+        v0.56：11 → 12，bottom_patterns 证据层进 live 链；
+        v0.79：12 → 11，sector_mainstream 主线指纹节删除转 debug。）
         """
         got = set(factors.released())
-        assert len(got) == 12, f"已上线因子数变了（{len(got)}）：{sorted(got)}"
+        assert len(got) == 11, f"已上线因子数变了（{len(got)}）：{sorted(got)}"
 
     def test_debug_factors_are_research_only(self):
         """未上线的因子 live_use 应为 none —— 既没上线又声明可用是自相矛盾。"""

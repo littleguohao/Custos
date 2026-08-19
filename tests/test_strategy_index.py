@@ -369,10 +369,6 @@ class TestPathsConstants:
         for c in ("B1_DIR", "CZ_DIR", "FACTORS_DIR", "STRATEGY_REGISTRY_FILE"):
             assert c in s, f"paths.py 缺 {c}"
 
-    def test_cz_config_points_into_cz_dir(self):
-        s = (ROOT / "src" / "custos" / "core" / "paths.py").read_text(encoding="utf-8")
-        assert 'CZ_SECTOR_PREFERENCE_FILE = CZ_DIR / "CZ_SECTOR_PREFERENCE.json"' in s
-
 
 class TestSalvagedBuyPlanChecklist:
     """删 `99_deprecated_buy_integration.md` 时抢救的规则，不许再丢。

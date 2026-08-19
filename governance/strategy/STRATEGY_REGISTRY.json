@@ -49,9 +49,7 @@
       "docs": [
         "cz/01_cognition_framework.md"
       ],
-      "configs": [
-        "cz/CZ_SECTOR_PREFERENCE.json"
-      ],
+      "configs": [],
       "code": [
         "src/custos/pipeline/screening/enrich_candidates.py",
         "src/custos/pipeline/screening/score_candidates.py"
@@ -59,7 +57,7 @@
       "research": null,
       "known_issues": [
         "「强制止损体系」15%/20% 仅适用 CZ 长期持有语境（owner 2026-08-06 定案）；B1 仓位按 B1 规则止损，不存在跨策略统一止损线",
-        "933 行里代码只用了 §14.6 量能规则与 §七 板块偏好，其余为人读的认知输入"
+        "933 行里代码只用了 §14.6 量能规则（§七 板块偏好已随 v0.80 移除），其余为人读的认知输入"
       ]
     }
   ],

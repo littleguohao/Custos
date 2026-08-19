@@ -207,14 +207,6 @@ next_step：A→buy_review（v0.50：原 generate_buy_plan 是虚假承诺，Buy
 背离用左右各 2 根收盘分型定位摆点（右确认，无未来函数）；浪形（3/5 浪精确计数）
 与面积背离未确定性化，暂不实现。
 
-### 板块白/黑名单（CZ §七）
-`governance/strategy/cz/CZ_SECTOR_PREFERENCE.json`（cz-sector-v1）。作用于候选股经
-`sector_code_map.json` 映射后的**主题名子串匹配**：命中 favored →
-cz_sector=favored，命中 avoid → cz_sector=avoid（avoid 优先，保守），否则
-neutral。**注意：现有 sector_code_map 覆盖粗糙，匹配不上即 neutral，宁缺
-毋滥，不要猜。** 名单文件缺失时该机制整体不起作用（全 neutral），并在
-stock_pool.json 的 `cz_sector_status`/`degraded_reason` 注明。
-
 ### 打分与分层整合（score_candidates.py）
 
 - 加分（计入技术分，factor_contrib 逐项落盘）：five_day_entry +8、
@@ -224,7 +216,6 @@ stock_pool.json 的 `cz_sector_status`/`degraded_reason` 注明。
   - wave_type=sprint → 最高 B（B1 §四.0：冲刺波后首个 B1 禁买），
     next_step 不得 buy_review；
   - volume_sustain=retreat → 最高 C（CZ §14.6：主力撤退）；
-  - cz_sector=avoid → D（CZ §七）；
   - non_one_wave=revoked → 最高 C（B1 §四：撤销条件）。
 - 0AMV 空头最高 B、无止损位禁 A、共振矩阵等既有规则不变。
 
@@ -265,7 +256,8 @@ stock_pool.json 的 `cz_sector_status`/`degraded_reason` 注明。
 改动前同样遵循「先回测」原则。
 
 - **`scoring.cap_rules`（封顶规则开关，默认全开）**：`sprint_wave` / `volume_retreat`
-  / `non_one_wave_revoked` / `cz_avoid_sector` 四条**待回测启发式**驱动的降档规则。
+  / `non_one_wave_revoked` 三条**待回测启发式**驱动的降档规则（`cz_avoid_sector`
+  已随 v0.80 板块名单机制一并移除）。
   样本回测校准前若只想「观察不降档」，可逐条置 `false`；关闭后不再降档，但仍在候选
   `risk_flags` 记录 `<rule>_detected_cap_disabled`，并把生效开关写入
   `score_detail.cap_rules`，便于前后对比。

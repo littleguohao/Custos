@@ -28,7 +28,7 @@
 - 无可定义止损位 → 封顶 B。
 - 冲刺波首个B1 → 封顶 B；非一波流撤销 → 封顶 C；量能撤退 → 封顶 C。
 - 主力出货五方式 high→D/watch→C；MACD 顶背离/三打白骨精 → 封顶 C。
-- CZ 回避方向名单 → D（主动黑名单，非"弱"）。
+  （v0.80：CZ 回避方向名单 → D 已随板块名单机制一并移除。）
 
 CLI::
 
@@ -52,7 +52,6 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 from custos.core.paths import (
-    CZ_SECTOR_PREFERENCE_FILE,
     DATA,
     MARKET_DIR,
     SCREEN_FORMULA_REGISTRY_FILE,
@@ -66,7 +65,6 @@ from custos.core.contracts import require  # noqa: E402
 from custos.core import report_audit  # noqa: E402
 
 SCREENING_DIR = DATA / "screening"
-CZ_SECTOR_PREF_PATH = CZ_SECTOR_PREFERENCE_FILE
 REGISTRY_PATH = SCREEN_FORMULA_REGISTRY_FILE
 
 BUCKET_ORDER = ["A", "B", "C", "D"]
@@ -133,7 +131,6 @@ DEFAULT_CAP_RULES = {
     # 语义冲突（同一缩量事实一边加分一边封顶）。检出仍记录（cap_disabled 证据 flag）。
     "volume_retreat": False,  # 量能持续性=主力撤退 → 原封顶 C（CZ §14.6）
     "non_one_wave_revoked": True,  # 非一波流撤销 → 封顶 C（待回测）
-    "cz_avoid_sector": True,  # CZ 回避方向板块 → D（治理名单驱动）
     "distribution_cap": True,  # 主力出货五方式命中 → high 封 D / watch 封 C（B1 §七.3，待回测）
     "macd_divergence": True,  # MACD 顶背离/三打白骨精 → 封顶 C（macd十大技术，待回测）
     "liquidity_floor": False,  # 流动性(近20日均成交额)低于底线 → 封顶 C（默认关，仅flag；待回测后开）
@@ -596,14 +593,18 @@ def _capital_intent_volume_evidence(cand: dict) -> tuple[int, dict]:
 
 
 def _capital_intent_fund_flow_evidence(cand: dict) -> tuple[int, dict]:
-    """资金流向（正交于量价）：个股在主力净流入榜且净流入，或所属板块净流入 +2。"""
+    """资金流向（正交于量价）：个股在主力净流入榜且净流入 +2。
+
+    v0.80（owner 拍板）：板块净流入 OR 分支移除——板块净流入是成员加总、蹭标签
+    拿分，且「个股与板块资金流同源」假设 v0.79 已被板块证据证伪。enrich 落盘的
+    sector_inflow_positive 等展示字段保留，不再参与打分。
+    """
     detail: dict[str, Any] = {}
     ff = cand.get("fund_flow") or {}
     score = _capital_intent_add(
         detail,
         "fund_flow_inflow",
-        ff.get("available")
-        and (ff.get("in_rank_positive") or ff.get("sector_inflow_positive")),
+        ff.get("available") and ff.get("in_rank_positive"),
         2,
     )
     return score, detail
@@ -649,9 +650,7 @@ def fundamental_quality(fin: Optional[dict]) -> dict:
     }
 
 
-def apply_risk_downgrades(
-    amv_state, base_bucket, cand, cz_sector, rules, sector_score_available
-):
+def apply_risk_downgrades(amv_state, base_bucket, cand, rules, sector_score_available):
     """风险标记与 bucket 降级 —— **只降不升**的一串判据。
 
     2026-08-07 从 `score_candidate`（原 258 行）抽出。这是整个打分里最该单独看的一段：
@@ -661,8 +660,10 @@ def apply_risk_downgrades(
     返回 `(risk_flags, bucket, wave_type, dist)` —— 后三个下游还要用
     （`wave_type` 决定 next_step、`dist` 进 entry_reason、`bucket` 是分层结论）。
 
-    2026-08-19（#58 收尾）：13 条判据按主题拆成 `_cap_*` 段落函数，本函数只做
+    2026-08-19（#58 收尾）：判据按主题拆成 `_cap_*` 段落函数，本函数只做
     「取数 → 逐段封顶 → 汇总返回」；flag 追加顺序与封顶语义逐条未变。
+    v0.80（owner 拍板）：`_cap_cz_sector`（CZ 回避方向板块 → D）整段删除——
+    板块证据链 v0.79 证伪，全仓唯一真实板块否决随 CZ_SECTOR_PREFERENCE 名单一并移除。
     """
     risk_flags: list[str] = []
     if cand.get("is_holding"):
@@ -674,7 +675,6 @@ def apply_risk_downgrades(
     # 风控/回避硬否决（cap 只降不升；与"板块弱"无关，故板块不在此列）
     bucket = _cap_stop_loss_and_bear(risk_flags, base_bucket, cand, amv_state)
     bucket, wave_type = _cap_wave_rules(risk_flags, bucket, cand, rules)
-    bucket = _cap_cz_sector(risk_flags, bucket, cz_sector, rules)
     dist = cand.get("distribution") or {}
     bucket = _cap_distribution(risk_flags, bucket, dist, rules)
     bucket = _cap_macd_risks(risk_flags, bucket, cand, rules)
@@ -719,17 +719,6 @@ def _cap_wave_rules(risk_flags: list, bucket: str, cand: dict, rules: dict):
         else:
             risk_flags.append("non_one_wave_revoked_cap_disabled")
     return bucket, wave_type
-
-
-def _cap_cz_sector(risk_flags: list, bucket: str, cz_sector: str, rules: dict) -> str:
-    """CZ §七：回避方向板块 → D。"""
-    if cz_sector == "avoid":
-        if rules["cz_avoid_sector"]:
-            risk_flags.append("cz_avoid_sector")
-            bucket = "D"
-        else:
-            risk_flags.append("cz_avoid_sector_cap_disabled")
-    return bucket
 
 
 def _cap_distribution(risk_flags: list, bucket: str, dist: dict, rules: dict) -> str:
@@ -897,7 +886,6 @@ def score_candidate(
     cand: dict,
     sector_entry: Optional[dict],
     amv_state: str,
-    cz_sector: str = "neutral",
     cap_rules: Optional[dict] = None,
     sector_score_max: float = SECTOR_SCORE_MAX,
 ) -> dict:
@@ -924,7 +912,7 @@ def score_candidate(
     permission = market_permission(amv_state)
 
     risk_flags, bucket, wave_type, dist = apply_risk_downgrades(
-        amv_state, base_bucket, cand, cz_sector, rules, sector_score_available
+        amv_state, base_bucket, cand, rules, sector_score_available
     )
 
     # 总分 = 技术分（v0.50 #37 阶段 A，owner 拍板：板块分 0.4 权重与共振 ±5
@@ -1001,7 +989,7 @@ def score_candidate(
         "stop_loss_ref": cand.get("stop_loss_ref"),
         "is_holding": bool(cand.get("is_holding")),
         # 证据层透传段（顺序＝历史落盘字段顺序）：B1/CZ → 信号标注 → 指标/正交因子
-        **_b1cz_passthrough(cand, cz_sector),
+        **_b1cz_passthrough(cand),
         **_signal_evidence_passthrough(cand),
         **_indicator_passthrough(cand),
         "fundamental_quality": fq,
@@ -1030,10 +1018,9 @@ def _next_step(bucket: str, amv_state: str, wave_type: Any, rules: dict) -> str:
     return step
 
 
-def _b1cz_passthrough(cand: dict, cz_sector: str) -> dict:
+def _b1cz_passthrough(cand: dict) -> dict:
     """B1/CZ 策略对齐落盘字段（证据层透传，不参与打分）。"""
     return {
-        "cz_sector": cz_sector,
         "wave": cand.get("wave") or {},
         "weekly_j": cand.get("weekly_j"),
         "weekly_j_low": bool(cand.get("weekly_j_low")),
@@ -1098,32 +1085,6 @@ def _indicator_passthrough(cand: dict) -> dict:
     }
 
 
-def load_cz_sector_preference(path: Optional[Path] = None) -> Optional[dict]:
-    """加载 CZ 板块白/黑名单；文件缺失/损坏返回 None（调用方降级为 neutral）。"""
-    p = Path(path) if path else CZ_SECTOR_PREF_PATH
-    data = _load_json(p, None)
-    if not isinstance(data, dict):
-        return None
-    if not isinstance(data.get("favored"), list) or not isinstance(
-        data.get("avoid"), list
-    ):
-        return None
-    return data
-
-
-def cz_sector_of(sector_name: str, preference: Optional[dict]) -> str:
-    """主题名子串匹配白/黑名单（avoid 优先，保守）；无匹配或名单缺失 → neutral。"""
-    if not preference or not sector_name or sector_name == "未知":
-        return "neutral"
-    for kw in preference.get("avoid") or []:
-        if kw and kw in sector_name:
-            return "avoid"
-    for kw in preference.get("favored") or []:
-        if kw and kw in sector_name:
-            return "favored"
-    return "neutral"
-
-
 def _load_scoring_config(path: Optional[Path] = None) -> dict:
     """读 SCREEN_FORMULA_REGISTRY.json 的 "scoring" 段（cap_rules / sector_score_max）；
     缺失/损坏返回 {}（调用方回退默认，行为不变）。"""
@@ -1138,32 +1099,30 @@ def score_all(
     enriched: Optional[dict] = None,
     sector_states: Optional[list] = None,
     amv_state: Optional[str] = None,
-    cz_preference: Optional[dict] = None,
     cap_rules: Optional[dict] = None,
     sector_score_max: Optional[float] = None,
 ) -> dict:
     """整池打分。输入缺失时干净降级，绝不 raise。
 
-    cz_preference 传 None 时从 governance/strategy/cz/CZ_SECTOR_PREFERENCE.json 加载；
-    显式传 {} 表示"已加载但不可用"（测试降级路径用）。
     cap_rules / sector_score_max 传 None 时从 registry "scoring" 段加载，缺失回退
     默认（全开 + 0-100），行为与历史一致。
 
     2026-08-19（#58 收尾）：按阶段拆成 `_resolve_*` / `_score_all_shell` /
     `_score_pool` 段落函数，本函数只做调度；status/degraded_reason 语义与
     candidates 排序键均未变。
+    v0.80（owner 拍板）：cz_preference 输入与 cz_sector_status/cz_sector_preference_missing
+    降级分支随 CZ 板块名单机制一并移除。
     """
-    enriched, sector_states, amv_state, cz_preference = _resolve_score_all_inputs(
-        date, enriched, sector_states, amv_state, cz_preference
+    enriched, sector_states, amv_state = _resolve_score_all_inputs(
+        date, enriched, sector_states, amv_state
     )
-    cz_status = "ok" if cz_preference else "missing"
 
     cap_rules, sector_score_max, effective_caps = _resolve_scoring_settings(
         cap_rules, sector_score_max
     )
 
     result = _score_all_shell(
-        date, amv_state, cz_status, effective_caps, sector_score_max, enriched
+        date, amv_state, effective_caps, sector_score_max, enriched
     )
 
     if not enriched or enriched.get("status") == "unavailable":
@@ -1175,9 +1134,6 @@ def score_all(
     if not sector_states:
         result["status"] = "partial"
         result["degraded_reason"] = "sector_state_missing"
-    if cz_status == "missing":
-        # 名单缺失：cz_sector 一律 neutral（不起作用），在 status/degraded_reason 注明
-        _mark_partial(result, "cz_sector_preference_missing")
     if not amv_state:
         # market_timing 缺失：按保守处理（不放宽任何 cap，视同仅低吸），
         # 但必须显式标注，不得静默。
@@ -1190,7 +1146,6 @@ def score_all(
         by_theme,
         by_name,
         amv_state,
-        cz_preference,
         cap_rules,
         sector_score_max,
     )
@@ -1219,9 +1174,8 @@ def _resolve_score_all_inputs(
     enriched: Optional[dict],
     sector_states: Optional[list],
     amv_state: Optional[str],
-    cz_preference: Optional[dict],
 ) -> tuple:
-    """四路输入的落盘加载与归一化（显式传入优先，None 才读盘）。"""
+    """三路输入的落盘加载与归一化（显式传入优先，None 才读盘）。"""
     if enriched is None:
         enriched = _load_json(SCREENING_DIR / f"{date}_candidates_enriched.json", {})
     if sector_states is None:
@@ -1236,9 +1190,7 @@ def _resolve_score_all_inputs(
         )
     else:
         amv_state = normalize_regime(amv_state)
-    if cz_preference is None:
-        cz_preference = load_cz_sector_preference() or {}
-    return enriched, sector_states, amv_state, cz_preference
+    return enriched, sector_states, amv_state
 
 
 def _resolve_scoring_settings(
@@ -1257,7 +1209,6 @@ def _resolve_scoring_settings(
 def _score_all_shell(
     date: str,
     amv_state: str,
-    cz_status: str,
     effective_caps: dict,
     sector_score_max: float,
     enriched: Optional[dict],
@@ -1270,7 +1221,6 @@ def _score_all_shell(
         "source": "screening_chain_v1",
         "amv_state": amv_state or "未知",
         "market_permission": market_permission(amv_state),
-        "cz_sector_status": cz_status,
         "cap_rules": effective_caps,
         "sector_score_max": float(sector_score_max),
         "bucket_counts": {"A": 0, "B": 0, "C": 0, "D": 0},
@@ -1308,7 +1258,6 @@ def _score_pool(
     by_theme: dict,
     by_name: dict,
     amv_state: str,
-    cz_preference: dict,
     cap_rules: Optional[dict],
     sector_score_max: float,
 ) -> None:
@@ -1317,12 +1266,10 @@ def _score_pool(
         entry = by_theme.get(cand.get("theme_id", "")) or by_name.get(
             cand.get("sector", "")
         )
-        cz_sector = cz_sector_of(cand.get("sector", ""), cz_preference)
         scored = score_candidate(
             cand,
             entry,
             amv_state,
-            cz_sector=cz_sector,
             cap_rules=cap_rules,
             sector_score_max=sector_score_max,
         )

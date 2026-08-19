@@ -121,40 +121,6 @@ def test_bull_mark_b_bucket_is_observe_not_buyable():
     assert "🐂观察价位(B)" in sec and "🐂可买" not in sec
 
 
-def test_mainline_fingerprint_section(monkeypatch, tmp_path):
-    """candidate_table 渲染当日主线指纹(best-effort);构造 members 并指向临时 market 目录。"""
-    from custos.pipeline.screening import candidate_table as ct
-    import json as _json
-
-    market = tmp_path / "market"
-    market.mkdir()
-    members = {
-        "880201.SH": [
-            "600000",
-            "600001",
-            "600002",
-            "600003",
-            "600004",
-            "600005",
-            "600006",
-            "600007",
-        ],
-        "880300.SH": ["000%03d" % i for i in range(120)],
-    }
-    (market / "sector_members.json").write_text(_json.dumps(members), encoding="utf-8")
-    # 把 STOCK_POOL_DIR.parent 指到 tmp_path,使 helper 找到 market/sector_members.json
-    monkeypatch.setattr(ct, "STOCK_POOL_DIR", tmp_path / "stock_pool")
-    cands = [
-        {"code": "600000"},
-        {"code": "600001"},
-        {"code": "600002"},
-        {"code": "000001"},
-    ]
-    section = ct._mainline_fingerprint_section(cands)
-    assert any("当日主线指纹" in ln for ln in section)
-    assert any("非进场过滤" in ln for ln in section)
-
-
 def test_bear_market_outpost_section():
     # 空头期:基本面优+技术强但板块腿未到位 → 进 📡 前哨区(非可买);已在🐂/🔍区的不重复列
     outpost = _cand("600100", "哨", "半导体", "D", "优", 3, False)
@@ -244,48 +210,6 @@ def test_outside_gate_sorted_by_daily_j_asc():
     md = ct.render_table(pool, "2026-07-30")
     sec = md.split("## 👀 门槛外观察区")[1].split("\n## ")[0]
     assert sec.index("600102") < sec.index("600101") < sec.index("600103")
-
-
-def test_mainline_fingerprint_excludes_custom_groups_and_sorts_by_count(
-    monkeypatch, tmp_path
-):
-    """2026-08-14（owner）：① 剔除通达信自定义分组（通达信88/ST板块/含H股 等，
-    与主营/新概念无关、无主线语义）；② 榜单按候选数从多到少（原按密度）。"""
-    from custos.datasource.local_tdx import tq_sector
-    import json as _json
-
-    market = tmp_path / "market"
-    market.mkdir()
-    members = {
-        # 自定义垃圾组：8 只候选全在其中——不剔除则密度 1.0 霸榜
-        "880515.SH": [f"6000{i:02d}" for i in range(8)],
-        # 行业甲：3 只候选 / 8 只规模（密度高、候选数少）
-        "880201.SH": ["600000", "600001", "600002"]
-        + [f"6001{i:02d}" for i in range(5)],
-        # 行业乙：5 只候选 / 120 只规模（密度低、候选数多）⇒ 按候选数应排行业甲前
-        "880300.SH": ["600000", "600003", "600004", "600005", "600006"]
-        + [f"000{i:03d}" for i in range(115)],
-    }
-    (market / "sector_members.json").write_text(_json.dumps(members), encoding="utf-8")
-    monkeypatch.setattr(ct, "STOCK_POOL_DIR", tmp_path / "stock_pool")
-    monkeypatch.setattr(
-        tq_sector,
-        "load_sector_names",
-        lambda: {
-            "880515": {"name": "通达信88", "tdx_type": "4"},
-            "880201": {"name": "行业甲", "tdx_type": "12"},
-            "880300": {"name": "行业乙", "tdx_type": "12"},
-        },
-    )
-    cands = [{"code": f"6000{i:02d}"} for i in range(8)]
-    section = ct._mainline_fingerprint_section(cands)
-    text = "\n".join(section)
-    assert "| 通达信88 |" not in text, "自定义分组必须被剔除（不出现在表行）"
-    rows = [ln for ln in section if ln.startswith("| 行业")]
-    assert len(rows) == 2
-    assert rows[0].startswith("| 行业乙") and rows[1].startswith("| 行业甲"), (
-        "必须按候选数从多到少（行业乙 5 只 > 行业甲 3 只，尽管密度相反）"
-    )
 
 
 def test_signal_labels_sg_merged_into_sb():

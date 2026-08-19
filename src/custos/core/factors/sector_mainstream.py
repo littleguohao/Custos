@@ -29,8 +29,8 @@ FACTOR: dict[str, Any] = {
     "evidence": "governance/research/R2_selection_price_volume.md",
     "note": "R2：板块族+密度是准确的「窗口主线指纹」（归因工具），但「跟随主流」机械规则不成立",
     "min_bars": 1,
-    "live_use": "evidence_only",
-    "stage": "release",
+    "live_use": "none",  # v0.79：候选表主线指纹节删除（板块证据两次不稳+一次证伪），live 链不再引用
+    "stage": "debug",  # v0.79：同 b1_pullback_fit 先例；研究侧 aggregate/CLI 仍可直接调
 }
 
 
@@ -40,77 +40,6 @@ EXCLUDE_TDX_TYPES = {
     "3",
     "5",
 }  # 地区/风格板块不进合集(江西板块、保险重仓之类无"主线"语义)
-
-# 通达信自定义分组（type=4 概念类里的**非概念**项）：股权结构/状态/自定义名单，
-# 与主营业务、新概念题材都无关（2026-08-14 owner 指示，主线指纹榜剔除）。
-# 按名匹配（tdxzs.cfg 的名称稳定）；新出的同类垃圾组在此补名即可。
-EXCLUDE_CUSTOM_NAMES = {
-    "含B股",
-    "含GDR",
-    "含H股",
-    "含可转债",
-    "ST板块",
-    "次新股",
-    "通达信88",
-}
-
-# 抽象概念（owner 2026-08-16 指示剔除「一带一路这类和主营业务无关的抽象概念」）：
-# 三类--① 政策/区域叙事（一带一路/雄安/自贸/乡村振兴，公司没有这门「业务」）；
-# ② 指数成分/外资通道/机构持仓（MSCI/QFII/北上/各类重仓，是**谁持有**不是**做什么**）；
-# ③ 股价/股本结构与公司行为（低价/破净/送转/次新/回购/增减持/并购重组）。
-# 判据：板块名描述的**不是公司经营的产品或服务**。按名匹配，新出的同类在此补名。
-# 注意「网络规划设计」是通信设计行业概念（保留）--抽象≠带「规划」字样都剔。
-EXCLUDE_ABSTRACT_CONCEPTS = {
-    # ① 政策/区域叙事
-    "一带一路",
-    "上海自贸",
-    "海南自贸",
-    "雄安新区",
-    "乡村振兴",
-    "军民融合",
-    "粤港澳",
-    # ② 指数/外资/持仓
-    "MSCI中盘",
-    "MSCI成份",
-    "QFII新进",
-    "QFII重仓",
-    "北上重仓",
-    "陆股通重仓",
-    "保险重仓",
-    "信托重仓",
-    "养老金持股",
-    "券商重仓",
-    "基金重仓",
-    "社保重仓",
-    "私募重仓",
-    "被举牌",
-    # ③ 股价/股本结构与公司行为
-    "低价股",
-    "百元股",
-    "破净资产",
-    "次新超跌",
-    "次新预增",
-    "科创板次新",
-    "近端次新",
-    "壳资源",
-    "已高送转",
-    "预高送转",
-    "送转潜力",
-    "送转超跌",
-    "活跃小盘国企",
-    "回购计划",
-    "拟减持",
-    "拟增持",
-    "股东减持",
-    "股东增持",
-    "股权激励",
-    "员工持股",
-    "并购重组股",
-    "并购重组预案",
-}
-
-#: 主线指纹榜的合并剔除集（自定义分组 + 抽象概念）。
-EXCLUDE_MAINLINE_JUNK = EXCLUDE_CUSTOM_NAMES | EXCLUDE_ABSTRACT_CONCEPTS
 
 
 def invert_members(
@@ -313,125 +242,6 @@ def aggregate(
     out["mainstream_lift"] = round(lift, 4) if lift is not None else None
     out["text"] = _render_text(out, trades, classified, rows, mainstream, lift)
     return out
-
-
-def sector_sizes(members: dict) -> dict[str, int]:
-    """{sector:[codes]} → {sector: 成员数}(用于密度归一)。"""
-    return {s: len(v or []) for s, v in (members or {}).items()}
-
-
-def _count_sector_hits(
-    codes: list[str], code2secs: dict[str, list[str]]
-) -> tuple[dict[str, int], int]:
-    """单趟统计:板块命中计数 per_sec + 有归属候选数 n_cls(避免第二趟重复查表)。"""
-    per_sec: dict[str, int] = {}
-    n_cls = 0
-    for code in codes:
-        secs = code2secs.get(str(code)[:6], [])
-        if secs:
-            n_cls += 1
-        for s in secs:
-            per_sec[s] = per_sec.get(s, 0) + 1
-    return per_sec, n_cls
-
-
-def _load_sector_name_map() -> dict:
-    """经 tq_sector 加载板块名称表;失败返回 {}(与 sector_name 的兜底一致)。"""
-    try:
-        from custos.datasource.local_tdx import tq_sector  # noqa: PLC0415
-
-        return tq_sector.load_sector_names()
-    except Exception:  # noqa: BLE001
-        return {}
-
-
-def _density_rows(
-    per_sec: dict[str, int],
-    sizes: Optional[dict],
-    min_size: int,
-    name_map: Optional[dict],
-    total_attr: int,
-) -> list[dict[str, Any]]:
-    """板块维度行(密度/份额),过滤过小板块防噪。
-    name_map=None 时名称表只在首个幸存行加载一次(hoist 出循环,避免逐板块重复读盘);
-    全部被过滤时一行不剩,与原实现一样完全不触发加载。"""
-    rows: list[dict[str, Any]] = []
-    resolved = name_map
-    for s, n in per_sec.items():
-        sz = (sizes or {}).get(s, 0)
-        if sz and sz < min_size:
-            continue  # 过小板块(如3只)密度虚高→过滤
-        if resolved is None:
-            resolved = _load_sector_name_map()
-        rows.append(
-            {
-                "sector": s,
-                "name": sector_name(s, resolved),
-                "n": n,
-                "size": sz,
-                "density": (round(n / sz, 4) if sz else None),
-                "share": round(n / total_attr, 4),
-            }
-        )
-    return rows
-
-
-def _sort_fingerprint_rows(rows: list[dict[str, Any]], sort_by: str) -> None:
-    """原地排序:density(默认;None 以 n/1e9 兜底排尾) 或按候选数 n。"""
-    if sort_by == "n":
-        rows.sort(key=lambda r: (r["n"], r["density"] or 0), reverse=True)
-    else:
-        rows.sort(
-            key=lambda r: (
-                r["density"] if r["density"] is not None else r["n"] / 1e9,
-                r["n"],
-            ),
-            reverse=True,
-        )
-
-
-def _fingerprint_text(top: list[dict[str, Any]]) -> str:
-    """主线指纹榜的一行文本(键序/文案逐位保持原样)。"""
-    if not top:
-        return "无"
-    return "主线指纹(密度榜): " + "; ".join(
-        f"{r['name']}({r['n']}只{('/' + str(r['size'])) if r['size'] else ''})"
-        for r in top[:6]
-    )
-
-
-def mainline_fingerprint(
-    codes: list[str],
-    code2secs: dict[str, list[str]],
-    sizes: Optional[dict] = None,
-    top_k: int = 8,
-    min_size: int = 8,
-    name_map: Optional[dict] = None,
-    sort_by: str = "density",
-) -> dict[str, Any]:
-    """当日候选/交易的板块族**密度榜(主线指纹)**:默认按密度(命中数/板块规模)排序,
-    过滤过小板块防噪。density 归一避免大板块仅因体量占榜首;show 命中数供直觉。
-    sort_by="n" 改按候选数排序（2026-08-14 owner：候选表主线指纹按候选数从多到少）。
-    纯统计、绝不 raise。"""
-    per_sec, n_cls = _count_sector_hits(codes, code2secs)
-    if not per_sec:
-        return {"n": len(codes), "n_classified": 0, "top": [], "text": "无板块映射"}
-    total_attr = sum(per_sec.values())
-    rows = _density_rows(per_sec, sizes, min_size, name_map, total_attr)
-    _sort_fingerprint_rows(rows, sort_by)
-    top = rows[:top_k]
-    top5c = sorted(rows, key=lambda x: x["n"], reverse=True)[:5]
-    top5_share = (
-        round(sum(r["n"] for r in top5c) / total_attr, 3) if total_attr else None
-    )
-    return {
-        "n": len(codes),
-        "n_classified": n_cls,
-        "distinct_sectors": len(rows),
-        "top5_count_share": top5_share,
-        "top": top,
-        "text": _fingerprint_text(top),
-    }
 
 
 def main(argv: Optional[list] = None) -> int:

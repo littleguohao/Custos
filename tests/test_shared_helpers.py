@@ -226,7 +226,6 @@ class TestNoRefork:
         "detect_platform_pullback": {"core/factors/platform_pullback.py"},
         "compute_sector_phase": {"core/factors/sector_phase.py"},
         "favorable_series": {"core/factors/sector_phase.py"},
-        "mainline_fingerprint": {"core/factors/sector_mainstream.py"},
         # 注册表接口名（约定：每个 selector 各一份），但不得再长出新文件
         "score": {
             "core/factors/_template.py",

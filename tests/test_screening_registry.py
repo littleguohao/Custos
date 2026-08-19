@@ -57,7 +57,6 @@ def test_scoring_and_theme_mapping_sections():
         "sprint_wave",
         "volume_retreat",
         "non_one_wave_revoked",
-        "cz_avoid_sector",
     ):
         assert isinstance(caps[key], bool)
     assert int(data["theme_mapping"]["min_match"]) >= 1

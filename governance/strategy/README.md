@@ -33,7 +33,7 @@ strategy/
 | 规则文档 | `NN_lower_snake.md`，NN 给**阅读顺序** | `01_swing_rules.md` |
 | 附录 / 摘要 | `90+` | `90_research_summary.md` |
 | 已废 | `99_deprecated_*` —— **废弃状态写在文件名里** | （当前无）|
-| 代码消费的配置 | `UPPER_SNAKE.json`（与 `contracts/` 一致）| `CZ_SECTOR_PREFERENCE.json` |
+| 代码消费的配置 | `UPPER_SNAKE.json`（与 `contracts/` 一致）| （当前无，`CZ_SECTOR_PREFERENCE.json` 已随 v0.80 移除）|
 
 ⇒ 策略名不再进文件名（目录已经是上下文），所以 `b1_swing_strategy.md` → `b1/01_swing_rules.md`。
 

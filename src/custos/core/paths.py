@@ -125,7 +125,6 @@ B1_DIR = STRATEGY_DIR / "b1"  # B1 主策略上下文
 CZ_DIR = STRATEGY_DIR / "cz"  # CZ 辅策略上下文
 FACTORS_DIR = STRATEGY_DIR / "_factors"  # 跨策略可复用因子
 STRATEGY_REGISTRY_FILE = STRATEGY_DIR / "STRATEGY_REGISTRY.json"
-CZ_SECTOR_PREFERENCE_FILE = CZ_DIR / "CZ_SECTOR_PREFERENCE.json"
 
 # TongDaXin installation root (overridable via env)
 TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"E:\new_tdx64"))

@@ -16,16 +16,19 @@
 | 文件 | 类型 | 说明 |
 |---|---|---|
 | [01_cognition_framework.md](01_cognition_framework.md) | 认知框架（933 行）| §一~§十七 + Patreon 认知训练 18.1–18.22 |
-| [CZ_SECTOR_PREFERENCE.json](CZ_SECTOR_PREFERENCE.json) | **代码消费的配置** | 板块白/黑名单，走 `paths.CZ_SECTOR_PREFERENCE_FILE` |
+
+~~CZ_SECTOR_PREFERENCE.json~~（板块白/黑名单，走 `paths.CZ_SECTOR_PREFERENCE_FILE`）已随
+v0.80 移除：板块证据链 v0.79 证伪，全仓唯一真实板块否决（`cz_sector=avoid` → 封 D）一并删除。
 
 ## 代码依赖
 
-933 行里**代码只用了两处**：
+933 行里**代码只用了一处**：
 
 | 代码 | 用了什么 |
 |---|---|
 | `screening/enrich_candidates.py:670` | §14.6 量能规则（峰值日后逐日量 ≥ 峰值×55%）|
-| `screening/score_candidates.py` | `CZ_SECTOR_PREFERENCE.json` 板块偏好加减分 |
+
+（原 `screening/score_candidates.py` 对板块偏好名单的消费已随 v0.80 移除。）
 
 **其余部分是给人读的认知输入。**
 

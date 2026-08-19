@@ -74,8 +74,8 @@ def refresh(date: str, call_fn=None) -> dict[str, Any]:
     新鲜度判定（只看 TQ 返回 ok 是不够的）：
     ``download_file`` 返回 ok 只代表**请求被接受**，TQ 是异步落盘的；若 TdxW 卡住、
     下载失败或磁盘上是上周的残留，miscinfo.json 根本没被重写。原实现照样解析、
-    照样盖上今天的 ``date`` 落盘 —— 18:00 主线指纹于是拿一周前的概念标签当当日
-    板块族密度算，脏数据完全看不出来。
+    照样盖上今天的 ``date`` 落盘 —— 18:00 板块聚合（相位/资金流）于是拿一周前的
+    概念标签当当日算，脏数据完全看不出来。
     故比对**调用前后的 mtime**：文件被重写、或 mtime 本就是目标日（当日已下过、
     TQ 不重复写盘）才算新鲜；否则 ``status="stale"``，且落盘的 ``date`` 用
     **文件自己的日期**而非请求日期，绝不给过期标签盖今日戳。
@@ -146,7 +146,7 @@ def load_tags() -> dict[str, list[str]]:
 
     只给标签、不给新鲜度。需要判断标签是否陈旧的调用方请用 :func:`load_tags_meta`
     —— refresh() 会在 TQ 未真正重写 miscinfo 时落 ``stale: true``,若消费方不读它,
-    过期概念标签照样进主线指纹(审计 C6 的传导链终点)。
+    过期概念标签照样进板块聚合(审计 C6 的传导链终点)。
     """
     return load_tags_meta()[0]
 
@@ -181,7 +181,7 @@ def main() -> int:
     r = refresh(args.date)
     print(json.dumps({k: v for k, v in r.items() if k != "tags"}, ensure_ascii=False))
     # 降级必须让调用方（run_1800 的 stage log）看得见：只打印 JSON 的话，
-    # best-effort 的 stage 会一律记 ok，脏标签就此静默进入主线指纹。
+    # best-effort 的 stage 会一律记 ok，脏标签就此静默进入板块聚合。
     return 0 if r.get("status") == "ok" else 1
 
 

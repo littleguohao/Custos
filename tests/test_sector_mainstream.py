@@ -98,36 +98,3 @@ def test_invert_members_norm_and_exclude():
     )
     assert "地区X.SH" not in c2s.get("600000", [])  # 地区板块被剔除
     assert set(c2s["600000"]) == {"880201.SH", "880300.SH"}
-
-
-def test_mainline_fingerprint_density():
-    from custos.core.factors import sector_mainstream as sm
-
-    # 板块A规模10(候选4→密度0.4);板块B规模100(候选5→密度0.05);板块C规模3(候选3→过滤:太小)
-    members = {
-        "A": ["A%d" % i for i in range(10)],
-        "B": ["B%d" % i for i in range(100)],
-        "C": ["C0", "C1", "C2"],
-    }
-    code2secs = {
-        "A0": ["A"],
-        "A1": ["A"],
-        "A2": ["A"],
-        "A3": ["A"],
-        "B0": ["B"],
-        "B1": ["B"],
-        "B2": ["B"],
-        "B3": ["B"],
-        "B4": ["B"],
-        "C0": ["C"],
-        "C1": ["C"],
-        "C2": ["C"],
-    }
-    codes = ["A0", "A1", "A2", "A3", "B0", "B1", "B2", "B3", "B4", "C0", "C1", "C2"]
-    fp = sm.mainline_fingerprint(
-        codes, code2secs, sizes=sm.sector_sizes(members), top_k=5, min_size=8
-    )
-    secs = [r["sector"] for r in fp["top"]]
-    assert secs[0] == "A"  # 密度归一:A(0.4) > B(0.05)
-    assert "C" not in secs  # 过小板块被过滤
-    assert fp["n"] == 12 and fp["n_classified"] == 12

@@ -58,64 +58,6 @@ def _fmt(v: Any, suffix: str = "") -> str:
     return f"{v}{suffix}"
 
 
-def _mainline_fingerprint_section(candidates: list[dict]) -> list[str]:
-    """🧭 当日主线指纹:候选池板块族密度榜(情境感知,**不做进场过滤**)。best-effort,数据缺失则整段跳过。"""
-    codes = [str(c.get("code", "")) for c in candidates if c.get("code")]
-    if not codes:
-        return []
-    try:
-        from custos.core.factors import sector_mainstream as sm  # noqa: PLC0415,E402
-        from custos.datasource.local_tdx import tq_sector  # noqa: PLC0415
-
-        mpath = STOCK_POOL_DIR.parent / "market" / "sector_members.json"
-        members = json.loads(mpath.read_text(encoding="utf-8"))
-        name_map = tq_sector.load_sector_names()
-        # 2026-08-14（owner）：剔除通达信自定义分组（含H股/ST板块/通达信88 之类，
-        # 与主营业务、新概念都无关）——它们没有「主线」语义，上榜只会稀释信号。
-        junk = {
-            sec
-            for sec, v in (name_map or {}).items()
-            if v.get("name") in sm.EXCLUDE_MAINLINE_JUNK
-        }
-        if junk:
-            members = {
-                s: cs for s, cs in members.items() if str(s).split(".")[0] not in junk
-            }
-        code2secs = sm.invert_members(members, exclude_types=True, name_map=name_map)
-        fp = sm.mainline_fingerprint(
-            codes,
-            code2secs,
-            sizes=sm.sector_sizes(members),
-            top_k=8,
-            name_map=name_map,
-            sort_by="n",
-        )
-    except Exception:  # noqa: BLE001
-        return []
-    top = fp.get("top") or []
-    if not top:
-        return []
-    out = [
-        "## 🧭 当日主线指纹（候选池板块族密度榜）",
-        "",
-        f"> 当日候选 {fp['n']} 只（有板块 {fp['n_classified']}）；前5板块占归属 "
-        f"{(fp.get('top5_count_share') or 0) * 100:.0f}%。按**候选数**从多到少排序（密度列"
-        "供归一参考）；已剔除通达信自定义分组与**抽象概念**（一带一路/MSCI/重仓类/次新送转类等，与主营业务无关，2026-08-16 owner）。"
-        "**密度榜=情境感知**（看清当前主线在哪、"
-        "共振候选是否踩在主线上），**非进场过滤**——回测已证「跟随主流」非机械 edge，仅辅助主观研判。",
-        "",
-        "| 板块 | 候选数 | 板块规模 | 密度(候选/规模) | 占归属 |",
-        "|---|---:|---:|---:|---:|",
-    ]
-    for r in top:
-        out.append(
-            f"| {r['name']} | {r['n']} | {r.get('size') or '-'} "
-            f"| {_fmt(r.get('density'))} | {_fmt(round((r.get('share') or 0) * 100, 1), '%')} |"
-        )
-    out.append("")
-    return out
-
-
 def _load_json(path, default):
     """读 JSON，缺失/损坏返回 default（门控提示是补强信息，不得让渲染失败）。"""
     try:
@@ -695,8 +637,6 @@ def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
     lines += _gate_advisory_section(date, gate)
     # ⭐ 置顶:今日信号一览——可买/观察价位/待0AMV做多 三档,一眼看清"今天哪些是真信号"
     _signal_overview(lines, is_bear, watch)
-    # 🧭 当日主线指纹:候选池板块族密度榜(情境感知,非进场 gate)——置于最前,先看当前主线全貌
-    lines += _mainline_fingerprint_section(candidates)
     lines += _signal_labels_section(candidates)
     _fundamental_bulls(lines, watch)
     _capped_but_resonant(lines, watch_capped)

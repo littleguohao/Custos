@@ -32,17 +32,16 @@ from custos.pipeline.close_review import weekly_review as wr  # noqa: E402
 
 
 class TestScoreCandidateUnits:
-    """`score_candidate` 拆出的三段。最要紧的是风险降级 —— 13 条判据、**只降不升**。"""
+    """`score_candidate` 拆出的三段。最要紧的是风险降级 —— 一串判据、**只降不升**。"""
 
     @staticmethod
-    def _apply(cand, base_bucket="A", amv="中性", cz=None, sector_ok=True):
+    def _apply(cand, base_bucket="A", amv="中性", sector_ok=True):
         from custos.pipeline.screening import score_candidates as sc
 
         return sc.apply_risk_downgrades(
             amv_state=amv,
             base_bucket=base_bucket,
             cand=cand,
-            cz_sector=cz,
             rules=sc.resolve_cap_rules(None),
             sector_score_available=sector_ok,
         )
@@ -66,10 +65,6 @@ class TestScoreCandidateUnits:
             {"stop_loss_ref": {"price": 9.0}, "wave": {"wave_type": "sprint"}}
         )
         assert wt == "sprint" and bucket != "A"
-
-    def test_cz_avoid_downgrades(self):
-        _f, bucket, _w, _d = self._apply({"stop_loss_ref": {"price": 9.0}}, cz="avoid")
-        assert bucket != "A"
 
     def test_downgrades_never_upgrade(self):
         """⚠️ 这一段**只降不升**：从 D 开始，任何判据都不该把它抬上去。"""

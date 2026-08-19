@@ -326,7 +326,6 @@ def test_stock_pool_json_carries_audit_block(tmp_path, monkeypatch):
     monkeypatch.setattr(sc, "SECTORS_DIR", tmp_path / "sectors")
     monkeypatch.setattr(sc, "MARKET_DIR", tmp_path / "market")
     monkeypatch.setattr(sc, "STOCK_POOL_DIR", tmp_path / "stock_pool")
-    monkeypatch.setattr(sc, "CZ_SECTOR_PREF_PATH", tmp_path / "cz.json")
     monkeypatch.setattr(sc, "REGISTRY_PATH", tmp_path / "registry.json")
     (tmp_path / "screening").mkdir()
     (tmp_path / "screening" / "2026-08-07_candidates_enriched.json").write_text(

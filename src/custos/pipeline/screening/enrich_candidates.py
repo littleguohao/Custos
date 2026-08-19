@@ -344,7 +344,7 @@ def build_stock_industry_map() -> dict[str, str]:
 
     这是**权威的每股行业归属**（建设银行→全国性银行、牧原股份→养殖业、
     共进股份→通信设备），与 9 大主题族（``sector``/``theme_id``，聚合层）是两个口径：
-    行业是展示层（候选表「板块」列），主题族是聚合层（主线指纹/相位/资金流）。
+    行业是展示层（候选表「板块」列），主题族是聚合层（相位/资金流）。
     数据来自最新 ``*_tq_sector_map.json``；取不到返回 {}（调用方按"未知"降级，不 raise）。
     """
     out: dict[str, str] = {}
@@ -391,10 +391,10 @@ def _theme_map_via_concept_tags(
     )
     if tags_meta.get("stale"):
         # 概念标签退化慢,陈旧仍可用,但必须留痕:不能让"上周的标签"以当日身份
-        # 进入主线指纹,否则板块族密度榜会指向一条已经冷掉的主线(审计 C6)。
+        # 进入板块聚合(相位/资金流),否则会指向一条已经冷掉的主线(审计 C6)。
         print(
             f"[WARN] 概念标签陈旧(date={tags_meta.get('date')}, "
-            f"requested={tags_meta.get('requested_date')})：主线指纹据此生成,"
+            f"requested={tags_meta.get('requested_date')})：板块聚合据此生成,"
             f"仅作情境参考",
             file=sys.stderr,
         )

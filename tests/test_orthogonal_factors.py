@@ -77,6 +77,25 @@ def test_capital_intent_includes_fund_flow():
     )
 
 
+def test_fund_flow_sector_leg_alone_no_longer_scores():
+    """v0.80（owner 拍板）：板块净流入 OR 分支移除——成员加总蹭标签拿分，
+    且同源假设 v0.79 已证伪。只有个股腿（在榜且净流入）计分。"""
+    lvl, score, detail = sc.capital_intent_strength(
+        {
+            "patterns": {},
+            "fund_flow": {
+                "available": True,
+                "in_rank_positive": False,
+                "sector_inflow_positive": True,
+            },
+        }
+    )
+    assert (
+        detail["fund_flow_inflow"]["hit"] is False
+        and detail["fund_flow_inflow"]["points"] == 0
+    )
+
+
 # ---------- 流动性底线 flag / 可配封顶 ----------
 
 
