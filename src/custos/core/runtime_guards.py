@@ -550,12 +550,10 @@ def position_increase_decision(
     }
 
 
-def write_runtime_gate(day: str, expected_day: str | None = None) -> dict[str, Any]:
-    market_path = DATA / "market" / f"{day}_market_timing_input.json"
-    market = load_json(market_path, {})
-    positions = load_json(DATA / "trades" / "current_positions.json", [])
-    freshness = position_freshness_with_confirmation(day)
-    market_quality = market_quality_gate(market, day, expected_day=expected_day)
+def _quote_gate_inputs(
+    day: str, positions: list[dict[str, Any]]
+) -> tuple[Path, Any, bool, list[str]]:
+    """读取当日持仓行情快照并判定覆盖性与日期自证情况。"""
     quote_path = DATA / "market" / f"{day}_holding_quotes.json"
     quote_snapshot = load_json(quote_path, {})
     quotes = (
@@ -579,6 +577,11 @@ def write_runtime_gate(day: str, expected_day: str | None = None) -> dict[str, A
             if x.get("date") == day and x.get("date_verified") is False
         }
     )
+    return quote_path, quote_snapshot, quotes_current, unverified
+
+
+def _technical_freshness(day: str) -> tuple[bool, dict[str, Any]]:
+    """持仓技术指标是否已更新至目标日，及其 freshness 段。"""
     technical = load_json(
         DATA / "holdings" / f"{day}_holding_technical_summary.json", []
     )
@@ -586,7 +589,7 @@ def write_runtime_gate(day: str, expected_day: str | None = None) -> dict[str, A
         {str(x.get("latest_date")) for x in technical if x.get("latest_date")}
     )
     technical_current = bool(technical_dates) and technical_dates == [day]
-    technical_freshness = {
+    freshness = {
         "status": "confirmed"
         if technical_current
         else ("stale" if technical_dates else "missing"),
@@ -596,23 +599,28 @@ def write_runtime_gate(day: str, expected_day: str | None = None) -> dict[str, A
         if technical_current
         else "持仓技术指标未更新至目标日，不得据此提高仓位；精确减仓数量另由当日行情快照授权",
     }
-    reduction_ready = freshness.get("status") == "confirmed" and quotes_current
-    decision = position_increase_decision(
-        market,
-        reduction_ready=reduction_ready,
-        technical_current=technical_current,
-        quotes_current=quotes_current,
-        market_quality=market_quality,
-    )
+    return technical_current, freshness
+
+
+def _position_gate(
+    positions: list[dict[str, Any]],
+    decision: dict[str, Any],
+    *,
+    reduction_ready: bool,
+    quotes_current: bool,
+    quote_path: Path,
+    quote_snapshot: Any,
+    unverified: list[str],
+) -> dict[str, Any]:
+    """汇总加仓决策与行情覆盖情况，产出 position_gate 段。"""
     increase_ready = decision["allow"]
-    market_regime, regime_raw = decision["regime"], decision["regime_raw"]
-    regime_ok, gate_limits = decision["regime_ok"], decision["limitations"]
+    gate_limits = decision["limitations"]
     if unverified:
         gate_limits = gate_limits + [
             f"行情日期未经数据自证(快照源无日期字段)：{'、'.join(unverified)}"
             f"——postclose 时若 TdxW 未刷新可能实为 T-1 价"
         ]
-    position_gate = {
+    return {
         "status": "pass"
         if increase_ready
         else ("degraded" if reduction_ready else "blocked"),
@@ -626,12 +634,41 @@ def write_runtime_gate(day: str, expected_day: str | None = None) -> dict[str, A
         else None,
         "quotes_current": quotes_current,
         "quotes_date_unverified": unverified,
-        "market_regime": market_regime,
-        "market_regime_raw": regime_raw,
-        "regime_allows_increase": regime_ok,
+        "market_regime": decision["regime"],
+        "market_regime_raw": decision["regime_raw"],
+        "regime_allows_increase": decision["regime_ok"],
         "limitations": gate_limits,
         "rule": "B1默认盘中不交易；最近确认无交易后的收盘持仓可作为14:45尾盘建议基线。持仓基线+当日全持仓行情可授予精确减仓数量权限；加仓另需当日技术、市场质量 pass、0AMV 新鲜且 regime 属白名单（做多/中性）——regime 未知一律不放行",
     }
+
+
+def write_runtime_gate(day: str, expected_day: str | None = None) -> dict[str, Any]:
+    market_path = DATA / "market" / f"{day}_market_timing_input.json"
+    market = load_json(market_path, {})
+    positions = load_json(DATA / "trades" / "current_positions.json", [])
+    freshness = position_freshness_with_confirmation(day)
+    market_quality = market_quality_gate(market, day, expected_day=expected_day)
+    quote_path, quote_snapshot, quotes_current, unverified = _quote_gate_inputs(
+        day, positions
+    )
+    technical_current, technical_freshness = _technical_freshness(day)
+    reduction_ready = freshness.get("status") == "confirmed" and quotes_current
+    decision = position_increase_decision(
+        market,
+        reduction_ready=reduction_ready,
+        technical_current=technical_current,
+        quotes_current=quotes_current,
+        market_quality=market_quality,
+    )
+    position_gate = _position_gate(
+        positions,
+        decision,
+        reduction_ready=reduction_ready,
+        quotes_current=quotes_current,
+        quote_path=quote_path,
+        quote_snapshot=quote_snapshot,
+        unverified=unverified,
+    )
     result = {
         "date": day,
         "calendar": trading_day_status(day),

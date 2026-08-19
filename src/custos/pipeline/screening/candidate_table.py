@@ -197,54 +197,22 @@ def _signal_labels_section(candidates: list[dict]) -> list[str]:
     if not with_sig:
         return []
 
-    def nm(c):
-        return f"{c.get('code')} {c.get('name') or ''}".strip()
-
     lines = [
         "## 🏷️ 信号标注一览（研究因子·只标注，不影响上方分层）",
         "",
         "| 因子 | 命中/可评 | 命中候选（按技术分降序，前12；括号内为技术分） |",
         "|---|---:|---|",
     ]
-    for key, (label, abbr, direction) in sl.SIGNAL_META.items():
+    for key, meta in sl.SIGNAL_META.items():
         # SG（底部异动）不单列（2026-08-14 owner 反馈两行名单每次完全相同）：
         # SB = SG ∧ 当日 J<13，而本池已过 J<13 硬门槛 ⇒ 池内 SG 与 SB 恒重合，
         # 单列只是噪声。两者算法**不同**（见 b2_surge_factor），重合是本池结构使然。
         if key == "bottom_surge":
             continue
-        hits, evaluable = [], 0
-        for c in with_sig:
-            st = (c["signals"].get(key) or {}).get("state")
-            if st in ("hit", "miss"):
-                evaluable += 1
-            if st == "hit":
-                hits.append(c)
-        if not evaluable and not hits:
-            continue
-        mark = "⚠️ " if direction < 0 else ""
-        # 2026-08-16（owner）：改表格 + 标技术分--命中名单按技术分降序取前 12，
-        # 括号内是该票当日技术分（总分=技术分），一眼看出「命中的是强票还是弱票」。
-        top_hits = sorted(
-            hits, key=lambda c: (-(c.get("score") or 0), str(c.get("code")))
-        )
-        names = "、".join(f"{nm(c)}({int(c.get('score') or 0)})" for c in top_hits[:12])
-        if len(hits) > 12:
-            names += f" 等 {len(hits)} 只"
-        lines.append(
-            f"| {mark}**{label}** `{abbr}` | {len(hits)}/{evaluable} | {names or '无'} |"
-        )
-    na_counts: dict[str, int] = {}
-    for c in with_sig:
-        for key in sl.SIGNAL_META:
-            if (c["signals"].get(key) or {}).get("state") == "unavailable":
-                na_counts[key] = na_counts.get(key, 0) + 1
-    if na_counts:
-        top = sorted(na_counts.items(), key=lambda x: -x[1])[:4]
-        lines.append("")
-        lines.append(
-            "> 数据不足（算不出来，**不等于不符合条件**）："
-            + "、".join(f"{sl.SIGNAL_META[k][0]} {v} 只" for k, v in top)
-        )
+        row = _signal_label_row(key, meta, with_sig)
+        if row is not None:
+            lines.append(row)
+    lines += _signal_labels_unavailable_note(sl, with_sig)
     lines.append(
         "> 分母为**可评估数**；缩写见各行反引号。这些标注不改写分层/next_step。"
         "`SG`（底部异动）不单列：`SB`＝SG ∧ 当日 J<13，本池已过 J<13 硬门槛，两名单恒重合。"

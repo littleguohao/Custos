@@ -373,29 +373,13 @@ def _match_theme_tags(stock_tags: list[str], semantic_tags: list[str]) -> list[s
     return matched
 
 
-def build_stock_theme_map(
-    min_match: int = THEME_MIN_MATCH, codes: Optional[set] = None
-) -> tuple[dict[str, dict], bool]:
-    """股 → 主题方向（theme_id/sector 名）。
+def _theme_map_via_concept_tags(
+    themes: list, min_match: int, codes: Optional[set]
+) -> Optional[tuple[dict[str, dict], bool]]:
+    """概念标签路径建图：miscinfo 概念标签（每股官方概念）匹配各主题 semantic_tags。
 
-    优先用 miscinfo 概念标签（concept_tags，每股官方概念）匹配
-    sector_code_map.json 各主题的 semantic_tags——准确度远高于 880 反查；
-    标签文件缺失时回退 tq_sector_map 成分股反查（v1，已知存在错配）。
-    min_match：概念路径下命中主题所需的最小语义标签数（默认 1；提高可降低过度匹配）。
-    codes：只为这批代码建图（通常几十只候选）。默认 None＝全市场（向后兼容）。
-      审计：调用方只用 `stock_theme.get(code6)` 查几十只票，却让「全市场 5000 股 ×
-      主题数 × 语义标签 × 个股标签」四层子串匹配跑满——把候选集传进来即可省掉两个量级。
-    返回 ({code6: {"theme_id","sector",...}}, map_available)。
+    返回 None = 概念路径不可用（调用方回退 880 反查）。
     """
-    try:
-        min_match = max(1, int(min_match))
-    except (TypeError, ValueError):
-        min_match = THEME_MIN_MATCH
-    code_map = _load_json(SECTOR_CODE_MAP, {})
-    themes = code_map.get("themes") or []
-    if not themes:
-        return {}, False
-
     # 标签仍走 load_tags():它是既有的注入点,改成只调 load_tags_meta 会让所有
     # monkeypatch(load_tags) 的测试静默走到 fallback 分支。元数据另取一次,
     # 拿不到就当"无元数据"处理(不告警),行为与改动前一致。
@@ -434,19 +418,24 @@ def build_stock_theme_map(
                 }
         return out
 
-    if tags_map:
-        if codes is None:
-            stock_theme: dict | None = _scan(tags_map.items())
-        else:
-            stock_theme = _scan((c, tags_map[c]) for c in codes if c in tags_map)
-        if stock_theme:
-            return stock_theme, True
-        if codes is not None and _scan(tags_map.items()):
-            # 这批候选一个都没匹配上，但概念路径本身是可用的（全市场能建出图）→
-            # 不得偷偷回退 880 反查（那条路只在"概念标签不可用"时才走，错配已知）。
-            # 全市场重扫只在这个退化分支发生，正常路径不付这个代价。
-            return {}, True
+    if not tags_map:
+        return None
+    if codes is None:
+        stock_theme: dict | None = _scan(tags_map.items())
+    else:
+        stock_theme = _scan((c, tags_map[c]) for c in codes if c in tags_map)
+    if stock_theme:
+        return stock_theme, True
+    if codes is not None and _scan(tags_map.items()):
+        # 这批候选一个都没匹配上，但概念路径本身是可用的（全市场能建出图）→
+        # 不得偷偷回退 880 反查（那条路只在"概念标签不可用"时才走，错配已知）。
+        # 全市场重扫只在这个退化分支发生，正常路径不付这个代价。
+        return {}, True
+    return None
 
+
+def _theme_map_via_tq_880(themes: list) -> tuple[dict[str, dict], bool]:
+    """880 反查路径（fallback）：tq_sector_map 成分股反查主题（v1，已知存在错配）。"""
     sector_map = latest_tq_sector_map()
     if not sector_map.get("sectors"):
         return {}, False
@@ -462,7 +451,7 @@ def build_stock_theme_map(
         for c in t.get("primary_sector_codes") or []:
             code_to_theme[str(c).upper()] = theme
 
-    stock_theme = {}
+    stock_theme: dict[str, dict] = {}
     for s in sector_map["sectors"]:
         theme_hit: dict | None = code_to_theme.get(str(s.get("code", "")).upper())
         if not theme_hit:
@@ -478,6 +467,35 @@ def build_stock_theme_map(
                 },
             )
     return stock_theme, True
+
+
+def build_stock_theme_map(
+    min_match: int = THEME_MIN_MATCH, codes: Optional[set] = None
+) -> tuple[dict[str, dict], bool]:
+    """股 → 主题方向（theme_id/sector 名）。
+
+    优先用 miscinfo 概念标签（concept_tags，每股官方概念）匹配
+    sector_code_map.json 各主题的 semantic_tags——准确度远高于 880 反查；
+    标签文件缺失时回退 tq_sector_map 成分股反查（v1，已知存在错配）。
+    min_match：概念路径下命中主题所需的最小语义标签数（默认 1；提高可降低过度匹配）。
+    codes：只为这批代码建图（通常几十只候选）。默认 None＝全市场（向后兼容）。
+      审计：调用方只用 `stock_theme.get(code6)` 查几十只票，却让「全市场 5000 股 ×
+      主题数 × 语义标签 × 个股标签」四层子串匹配跑满——把候选集传进来即可省掉两个量级。
+    返回 ({code6: {"theme_id","sector",...}}, map_available)。
+    """
+    try:
+        min_match = max(1, int(min_match))
+    except (TypeError, ValueError):
+        min_match = THEME_MIN_MATCH
+    code_map = _load_json(SECTOR_CODE_MAP, {})
+    themes = code_map.get("themes") or []
+    if not themes:
+        return {}, False
+
+    via_tags = _theme_map_via_concept_tags(themes, min_match, codes)
+    if via_tags is not None:
+        return via_tags
+    return _theme_map_via_tq_880(themes)
 
 
 def _close_ret_pct(df, n: int) -> Optional[float]:
@@ -650,6 +668,49 @@ def check_non_one_wave(df) -> dict[str, Any]:
     }
 
 
+def _repair_j_turn_up(j: dict) -> tuple[bool, Any, Any]:
+    """修复信号①：J 拐头向上（今日 J > 昨日 J 且昨日 J < REPAIR_J_PREV_MAX）。"""
+    j_now = j.get("j") if j.get("available") else None
+    j_prev = j.get("j_prev") if j.get("available") else None
+    hit = bool(
+        j_now is not None
+        and j_prev is not None
+        and j_now > j_prev
+        and j_prev < REPAIR_J_PREV_MAX
+    )
+    return hit, j_now, j_prev
+
+
+def _repair_shrink_stop(
+    close, vol, n: int
+) -> tuple[bool, Optional[float], Optional[float]]:
+    """修复信号②：缩量止跌（量比 <= REPAIR_VOL_SHRINK 且涨跌幅在 ±REPAIR_CHANGE_PCT 内）。"""
+    vol_ma5_prev = float(vol[-6:-1].mean()) if n >= 6 else None
+    vol_ratio = float(vol[-1] / vol_ma5_prev) if vol_ma5_prev else None
+    change = (close[-1] / close[-2] - 1) * 100 if n >= 2 and close[-2] else None
+    hit = bool(
+        vol_ratio is not None
+        and vol_ratio <= REPAIR_VOL_SHRINK
+        and change is not None
+        and abs(change) <= REPAIR_CHANGE_PCT
+    )
+    return hit, vol_ratio, change
+
+
+def _repair_rs_turn(
+    close, n: int, index_df
+) -> tuple[bool, Optional[float], Optional[float]]:
+    """修复信号③：5日相对强度由负转正（对上证指数）。"""
+    rs_turn = False
+    rs5_now = rs5_prev = None
+    if index_df is not None and not index_df.empty and n >= 7 and len(index_df) >= 7:
+        ic = index_df["close"].astype(float).to_numpy()
+        rs5_now = (close[-1] / close[-6] - 1) * 100 - (ic[-1] / ic[-6] - 1) * 100
+        rs5_prev = (close[-2] / close[-7] - 1) * 100 - (ic[-2] / ic[-7] - 1) * 100
+        rs_turn = bool(rs5_now >= 0 > rs5_prev)
+    return rs_turn, rs5_now, rs5_prev
+
+
 def check_repair_signals(
     df, index_df, kdj_state: Optional[dict] = None
 ) -> dict[str, Any]:
@@ -661,33 +722,9 @@ def check_repair_signals(
     close, _, _, vol = _ohlcv_arrays(df)
     n = len(df)
     j = kdj_state if kdj_state is not None else kdj(df)
-    j_now = j.get("j") if j.get("available") else None
-    j_prev = j.get("j_prev") if j.get("available") else None
-
-    j_turn_up = bool(
-        j_now is not None
-        and j_prev is not None
-        and j_now > j_prev
-        and j_prev < REPAIR_J_PREV_MAX
-    )
-
-    vol_ma5_prev = float(vol[-6:-1].mean()) if n >= 6 else None
-    vol_ratio = float(vol[-1] / vol_ma5_prev) if vol_ma5_prev else None
-    change = (close[-1] / close[-2] - 1) * 100 if n >= 2 and close[-2] else None
-    shrink_stop = bool(
-        vol_ratio is not None
-        and vol_ratio <= REPAIR_VOL_SHRINK
-        and change is not None
-        and abs(change) <= REPAIR_CHANGE_PCT
-    )
-
-    rs_turn = False
-    rs5_now = rs5_prev = None
-    if index_df is not None and not index_df.empty and n >= 7 and len(index_df) >= 7:
-        ic = index_df["close"].astype(float).to_numpy()
-        rs5_now = (close[-1] / close[-6] - 1) * 100 - (ic[-1] / ic[-6] - 1) * 100
-        rs5_prev = (close[-2] / close[-7] - 1) * 100 - (ic[-2] / ic[-7] - 1) * 100
-        rs_turn = bool(rs5_now >= 0 > rs5_prev)
+    j_turn_up, j_now, j_prev = _repair_j_turn_up(j)
+    shrink_stop, vol_ratio, change = _repair_shrink_stop(close, vol, n)
+    rs_turn, rs5_now, rs5_prev = _repair_rs_turn(close, n, index_df)
 
     signals = []
     if j_turn_up:
@@ -1197,34 +1234,29 @@ def check_liquidity(df, win: int = LIQUIDITY_WIN) -> dict[str, Any]:
     }
 
 
-def load_fund_flow(
-    date: str, cumulative_days: int = 1, market_dir=None
-) -> dict[str, Any]:
-    """读 collect_fund_flow 落盘的每日资金流快照（东财）。
-
-    cumulative_days<=1：仅读 {date}_fund_flow_rank.json（现状）。
-    cumulative_days>1：累加 <=date 的最近 N 个每日快照的主力净流入（按 code/板块名聚合）——
-    单日快照噪声大，多日累计更稳（资金流本身无历史存档，只能就已落盘的每日文件累积）。
-    market_dir 可注入以便测试。缺失干净降级。
-    """
-    mdir = Path(market_dir) if market_dir else (DATA / "market")
+def _fund_flow_snapshots(
+    mdir: Path, date: str, cumulative_days: int
+) -> tuple[list, list, list]:
+    """读取单日或累计 N 日的资金流快照，返回 (stock_ranks, sector_maps, files_used)。"""
     if cumulative_days <= 1:
         data = _load_json(mdir / f"{date}_fund_flow_rank.json", {})
         stock_ranks = [data.get("stock_rank") or []]
         sector_maps = [data.get("sector_rank") or {}]
         files_used = [date] if data else []
-    else:
-        allf = sorted(
-            p for p in mdir.glob("*_fund_flow_rank.json") if p.name[:10] <= date
-        )
-        use = allf[-cumulative_days:]
-        files_used = [p.name[:10] for p in use]
-        stock_ranks, sector_maps = [], []
-        for p in use:
-            d = _load_json(p, {})
-            stock_ranks.append(d.get("stock_rank") or [])
-            sector_maps.append(d.get("sector_rank") or {})
+        return stock_ranks, sector_maps, files_used
+    allf = sorted(p for p in mdir.glob("*_fund_flow_rank.json") if p.name[:10] <= date)
+    use = allf[-cumulative_days:]
+    files_used = [p.name[:10] for p in use]
+    stock_ranks, sector_maps = [], []
+    for p in use:
+        d = _load_json(p, {})
+        stock_ranks.append(d.get("stock_rank") or [])
+        sector_maps.append(d.get("sector_rank") or {})
+    return stock_ranks, sector_maps, files_used
 
+
+def _agg_stock_fund_flow(stock_ranks: list, cumulative_days: int) -> dict[str, dict]:
+    """按 code 聚合主力净流入（多日累加；日内占比仅单日快照有意义）。"""
     by_code: dict[str, dict] = {}
     for sr in stock_ranks:
         for s in sr:
@@ -1248,6 +1280,11 @@ def load_fund_flow(
             if isinstance(v, (int, float)):
                 e["main_net_inflow"] += v
             e["days"] += 1
+    return by_code
+
+
+def _agg_sector_fund_flow(sector_maps: list) -> dict[str, dict]:
+    """按板块名聚合主力净流入（concept + industry 同名合并，多日累加）。"""
     sec_agg: dict[str, dict] = {}
     for sm in sector_maps:
         for item in (sm.get("concept") or []) + (sm.get("industry") or []):
@@ -1258,6 +1295,25 @@ def load_fund_flow(
             v = item.get("main_net_inflow")
             if isinstance(v, (int, float)):
                 e["main_net_inflow"] += v
+    return sec_agg
+
+
+def load_fund_flow(
+    date: str, cumulative_days: int = 1, market_dir=None
+) -> dict[str, Any]:
+    """读 collect_fund_flow 落盘的每日资金流快照（东财）。
+
+    cumulative_days<=1：仅读 {date}_fund_flow_rank.json（现状）。
+    cumulative_days>1：累加 <=date 的最近 N 个每日快照的主力净流入（按 code/板块名聚合）——
+    单日快照噪声大，多日累计更稳（资金流本身无历史存档，只能就已落盘的每日文件累积）。
+    market_dir 可注入以便测试。缺失干净降级。
+    """
+    mdir = Path(market_dir) if market_dir else (DATA / "market")
+    stock_ranks, sector_maps, files_used = _fund_flow_snapshots(
+        mdir, date, cumulative_days
+    )
+    by_code = _agg_stock_fund_flow(stock_ranks, cumulative_days)
+    sec_agg = _agg_sector_fund_flow(sector_maps)
     return {
         "available": bool(by_code or sec_agg),
         "by_code": by_code,
@@ -1284,40 +1340,54 @@ def sector_name_matches(
     return nm in sn or sn in nm
 
 
+def _ff_best_sector_match(sector_name: str, sectors: list) -> Optional[dict]:
+    """资金流板块聚合里与候选主题整名匹配、净流入最高的板块（无则 None）。"""
+    sec_match = None
+    for s in sectors:
+        nm = str(s.get("name") or "")
+        if not sector_name_matches(nm, sector_name):
+            continue
+        if sec_match is None or (s.get("main_net_inflow") or 0) > (
+            sec_match.get("main_net_inflow") or 0
+        ):
+            sec_match = s
+    return sec_match
+
+
+def _fund_flow_result(
+    entry: Optional[dict], sec_match: Optional[dict]
+) -> dict[str, Any]:
+    """组装 fund_flow_of 的输出 dict（字段与键序即契约，勿动）。"""
+    main_inflow = entry.get("main_net_inflow") if entry else None
+    sector_inflow = (sec_match or {}).get("main_net_inflow")
+    return {
+        "available": True,
+        "in_rank": entry is not None,
+        "main_net_inflow": main_inflow,
+        "main_net_pct": (entry or {}).get("main_net_pct") if entry else None,
+        "in_rank_positive": bool(
+            entry is not None
+            and isinstance(main_inflow, (int, float))
+            and main_inflow > 0
+        ),
+        "sector_matched": (sec_match or {}).get("name"),
+        "sector_main_net_inflow": sector_inflow,
+        "sector_inflow_positive": bool(
+            isinstance(sector_inflow, (int, float)) and sector_inflow > 0
+        ),
+    }
+
+
 def fund_flow_of(code6: str, sector_name: str, ff: dict) -> dict[str, Any]:
     """个股 + 板块资金流（正交于量价）：个股是否在主力净流入榜且为净流入、
     所属主题板块是否净流入。榜/文件缺失时干净降级。"""
     if not ff or not ff.get("available"):
         return {"available": False}
     entry = (ff.get("by_code") or {}).get(code6)
-    main_inflow = entry.get("main_net_inflow") if entry else None
-    in_rank_positive = bool(
-        entry is not None and isinstance(main_inflow, (int, float)) and main_inflow > 0
-    )
     sec_match = None
     if sector_name and sector_name != "未知":
-        for s in ff.get("sectors") or []:
-            nm = str(s.get("name") or "")
-            if not sector_name_matches(nm, sector_name):
-                continue
-            if sec_match is None or (s.get("main_net_inflow") or 0) > (
-                sec_match.get("main_net_inflow") or 0
-            ):
-                sec_match = s
-    sector_inflow = (sec_match or {}).get("main_net_inflow")
-    sector_inflow_positive = bool(
-        isinstance(sector_inflow, (int, float)) and sector_inflow > 0
-    )
-    return {
-        "available": True,
-        "in_rank": entry is not None,
-        "main_net_inflow": main_inflow,
-        "main_net_pct": (entry or {}).get("main_net_pct") if entry else None,
-        "in_rank_positive": in_rank_positive,
-        "sector_matched": (sec_match or {}).get("name"),
-        "sector_main_net_inflow": sector_inflow,
-        "sector_inflow_positive": sector_inflow_positive,
-    }
+        sec_match = _ff_best_sector_match(sector_name, ff.get("sectors") or [])
+    return _fund_flow_result(entry, sec_match)
 
 
 def _base_scalars(df, index_df) -> dict[str, Any]:

@@ -144,6 +144,166 @@ def _write_status(target: str, payload: dict) -> Path:
     return out
 
 
+def _merge_incremental_step(
+    target: str, incremental_path: Path, market_path: Path, status: dict
+) -> int | None:
+    """步骤 1:把增量数据并入 market_timing_input.json。
+
+    返回 None 表示继续后续步骤;返回退出码表示 main 应立即返回。
+    """
+    if not (incremental_path.exists() and market_path.exists()):
+        return None
+    try:
+        inc = json.loads(incremental_path.read_text(encoding="utf-8"))
+        mkt = json.loads(market_path.read_text(encoding="utf-8"))
+        mkt, stale = merge_incremental(inc, mkt, target)
+        # ⚠️ 落盘前校验：这一步合并的是**宽度/情绪/成交额/海外**几节，
+        # 责任范围就是它们（`setdefault` 的「只增不毁」语义 ⇒ 只会新增节）。
+        # **不校验 amv_0** —— 这一步根本不碰它，替 collector 背责是错的
+        # （第一版这么写，既有测试的最小 fixture 立刻硬失败）。见 contracts._narrow。
+        require(
+            "market_timing_input",
+            mkt,
+            only=("market_breadth", "sentiment", "turnover", "overseas_market"),
+        )
+        write_json_atomic(market_path, mkt)  # 读-改-写的共享文件
+        print("[OK] incremental data merged into market_timing_input.json")
+        status.update({"status": "ok", "merged": True, "stale": stale})
+        if stale:
+            print(
+                f"[WARN] 以下指标数据日非目标日 {target},已标记 stale(不得当作当日数据): {', '.join(stale)}"
+            )
+    except SystemExit as e:
+        # ⚠️ require() 失败抛的是 **SystemExit**，不是 Exception 子类 ——
+        # 只捕 Exception 会让它直接穿出 main()：退出码虽仍是失败（1），
+        # 但 _write_status 不执行、status JSON 留旧值，「合并没生效」
+        # 在事后复盘里完全没有痕迹（这正是 _write_status 存在的理由）。
+        print(f"[WARN] merge incremental failed: {e}", file=sys.stderr)
+        status.update({"status": "failed", "error": f"SystemExit: {e}"})
+        _write_status(target, status)
+        return 1
+    except Exception as e:
+        print(f"[WARN] merge incremental failed: {e}", file=sys.stderr)
+        status.update({"status": "failed", "error": f"{type(e).__name__}: {e}"})
+        _write_status(target, status)
+        return 1
+    return None
+
+
+def _ledger_amv_observation(target: str) -> tuple | None:
+    """回退人工观测台账(用户 15:15 告知的值由 LLM 写入 0amv_observations.jsonl)。
+
+    返回 (amv_change_pct, as_of);无可用观测返回 None。同日多条时取最后出现的(最新)。
+    """
+    ledger_path = MARKET_DIR / "0amv_observations.jsonl"
+    if not ledger_path.exists():
+        return None
+    result = None
+    for line in ledger_path.read_text(encoding="utf-8").splitlines():
+        try:
+            obs = json.loads(line)
+        except ValueError:
+            continue
+        if (
+            obs.get("date") == target
+            and obs.get("quality") == "confirmed"
+            and obs.get("amv_change_pct") is not None
+        ):
+            result = (
+                obs["amv_change_pct"],
+                str(obs.get("as_of") or obs.get("date") or target)[:10],
+            )
+    return result
+
+
+def _placeholder_effective_state(amv_day: float, prior_effective_state: str) -> str:
+    """只有跨阈值才敢给方向,否则延续已知锁定前态;前态未知就留「未知」fail-closed。"""
+    if amv_day < -2.3:
+        return "空头"
+    if amv_day > 4:
+        return "做多"
+    if prior_effective_state in ("空头", "做多"):
+        return prior_effective_state
+    return "未知"
+
+
+def _autofix_amv_quality(target: str, market_path: Path, status: dict) -> int | None:
+    """步骤 2:amv_0day 已写但 quality 缺失时自动置 confirmed。
+
+    返回 None 表示继续;返回退出码表示 main 应立即返回。
+    """
+    if not market_path.exists():
+        return None
+    try:
+        mkt = json.loads(market_path.read_text(encoding="utf-8"))
+        amv = mkt.get("amv_0", {})
+        amv_day = mkt.get("amv_0day")
+        amv_source = "amv_0day"
+        # as_of 默认取目标日:amv_0day 只在 compass 最新日期 == target 时才写入,
+        # 台账观测也带自己的 as_of,两条路径的数据日都是 target。
+        amv_as_of = target
+        if amv_day is None:
+            ledger_obs = _ledger_amv_observation(target)
+            if ledger_obs is not None:
+                amv_day, amv_as_of = ledger_obs
+                amv_source = "0amv_observations"
+        if amv_day is not None and amv.get("quality") != "confirmed":
+            amv["amv_change_pct"] = amv_day
+            amv["quality"] = "confirmed"
+            # as_of 必须写:0AMV 是门控里权重 35 的块,没有 as_of 就无法做陈旧校验
+            # (market_quality_gate 的 stale_as_of 只在 as_of 存在时才生效,
+            # 于是一个"确认过但其实是上周的"0AMV 会拿满分并授予加仓权)。
+            amv["as_of"] = amv_as_of
+            if not amv.get("effective_state"):
+                # ⚠️ 这是 amv_state 跑之前的**临时占位**，必须尊重状态机的锁定语义：
+                # 「进入空头后须有 confirmed 的 >+4% 才能出来，**阈值之间的读数不得把
+                #   regime 重置为中性**」（见 amv_state 模块 docstring）。
+                # 原实现在阈值之间直接写「中性」，把锁定的空头重置了 ——
+                # 而「中性」在加仓白名单 {做多, 中性} 里 ⇒ 空头期可能被授予加仓权。
+                # 这里改为：只有跨阈值才敢给方向，否则**延续已知锁定前态**，
+                # 前态未知就留「未知」让下游 fail-closed（风控优先于买入）。
+                prior = str(amv.get("prior_effective_state") or "")
+                amv["effective_state"] = _placeholder_effective_state(amv_day, prior)
+            mkt["amv_0"] = amv
+            # ⚠️ 落盘前校验：这一步把 amv_0 的 quality 置 confirmed 并写
+            # effective_state / as_of ——**只校验这三个它自己写的字段**。
+            # `effective_state` 的枚举域正是审计 B1 的所在：写成「空头触发」这种
+            # 未归一的值，会让下游精确等值比较落空、`allow_add=False` 漏置。
+            # `amv_zone` 是 collector 派生的，不该由 merge 背责。
+            require(
+                "market_timing_input",
+                mkt,
+                only=("amv_0.quality", "amv_0.effective_state", "amv_0.as_of"),
+            )
+            write_json_atomic(market_path, mkt)  # 读-改-写的共享文件
+            print(
+                f"[OK] 0AMV quality auto-set to confirmed (value={amv_day}%, as_of={amv_as_of}, "
+                f"regime={amv['effective_state']}, source={amv_source})"
+            )
+            status.update(
+                {
+                    "amv_confirmed": True,
+                    "amv_as_of": amv_as_of,
+                    "amv_source": amv_source,
+                }
+            )
+        if status["status"] == "skipped":
+            status["status"] = "ok"
+    except SystemExit as e:
+        # ⚠️ 同上：require() 抛 SystemExit（非 Exception 子类），
+        # 必须显式捕获才能保证失败状态落盘。
+        print(f"[WARN] 0AMV quality auto-fix failed: {e}", file=sys.stderr)
+        status.update({"status": "failed", "error": f"SystemExit: {e}"})
+        _write_status(target, status)
+        return 1
+    except Exception as e:
+        print(f"[WARN] 0AMV quality auto-fix failed: {e}", file=sys.stderr)
+        status.update({"status": "failed", "error": f"{type(e).__name__}: {e}"})
+        _write_status(target, status)
+        return 1
+    return None
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description="Merge incremental market data into market_timing_input.json"
@@ -165,134 +325,16 @@ def main(argv=None) -> int:
     }
 
     # 1. Merge incremental data into market_timing_input.json
-    if incremental_path.exists() and market_path.exists():
-        try:
-            inc = json.loads(incremental_path.read_text(encoding="utf-8"))
-            mkt = json.loads(market_path.read_text(encoding="utf-8"))
-            mkt, stale = merge_incremental(inc, mkt, target)
-            # ⚠️ 落盘前校验：这一步合并的是**宽度/情绪/成交额/海外**几节，
-            # 责任范围就是它们（`setdefault` 的「只增不毁」语义 ⇒ 只会新增节）。
-            # **不校验 amv_0** —— 这一步根本不碰它，替 collector 背责是错的
-            # （第一版这么写，既有测试的最小 fixture 立刻硬失败）。见 contracts._narrow。
-            require(
-                "market_timing_input",
-                mkt,
-                only=("market_breadth", "sentiment", "turnover", "overseas_market"),
-            )
-            write_json_atomic(market_path, mkt)  # 读-改-写的共享文件
-            print("[OK] incremental data merged into market_timing_input.json")
-            status.update({"status": "ok", "merged": True, "stale": stale})
-            if stale:
-                print(
-                    f"[WARN] 以下指标数据日非目标日 {target},已标记 stale(不得当作当日数据): {', '.join(stale)}"
-                )
-        except SystemExit as e:
-            # ⚠️ require() 失败抛的是 **SystemExit**，不是 Exception 子类 ——
-            # 只捕 Exception 会让它直接穿出 main()：退出码虽仍是失败（1），
-            # 但 _write_status 不执行、status JSON 留旧值，「合并没生效」
-            # 在事后复盘里完全没有痕迹（这正是 _write_status 存在的理由）。
-            print(f"[WARN] merge incremental failed: {e}", file=sys.stderr)
-            status.update({"status": "failed", "error": f"SystemExit: {e}"})
-            _write_status(target, status)
-            return 1
-        except Exception as e:
-            print(f"[WARN] merge incremental failed: {e}", file=sys.stderr)
-            status.update({"status": "failed", "error": f"{type(e).__name__}: {e}"})
-            _write_status(target, status)
-            return 1
+    code = _merge_incremental_step(target, incremental_path, market_path, status)
+    if code is not None:
+        return code
 
     # 2. Auto-fix 0AMV quality if amv_0day is set but quality missing.
     #    amv_0day 缺失时回退到人工观测台账(用户 15:15 告知的值由 LLM 写入 0amv_observations.jsonl)
-    if market_path.exists():
-        try:
-            mkt = json.loads(market_path.read_text(encoding="utf-8"))
-            amv = mkt.get("amv_0", {})
-            amv_day = mkt.get("amv_0day")
-            amv_source = "amv_0day"
-            # as_of 默认取目标日:amv_0day 只在 compass 最新日期 == target 时才写入,
-            # 台账观测也带自己的 as_of,两条路径的数据日都是 target。
-            amv_as_of = target
-            if amv_day is None:
-                ledger_path = MARKET_DIR / "0amv_observations.jsonl"
-                if ledger_path.exists():
-                    for line in ledger_path.read_text(encoding="utf-8").splitlines():
-                        try:
-                            obs = json.loads(line)
-                        except ValueError:
-                            continue
-                        if (
-                            obs.get("date") == target
-                            and obs.get("quality") == "confirmed"
-                            and obs.get("amv_change_pct") is not None
-                        ):
-                            amv_day = obs[
-                                "amv_change_pct"
-                            ]  # 同日多条时取最后出现的(最新)
-                            amv_source = "0amv_observations"
-                            amv_as_of = str(
-                                obs.get("as_of") or obs.get("date") or target
-                            )[:10]
-            if amv_day is not None and amv.get("quality") != "confirmed":
-                amv["amv_change_pct"] = amv_day
-                amv["quality"] = "confirmed"
-                # as_of 必须写:0AMV 是门控里权重 35 的块,没有 as_of 就无法做陈旧校验
-                # (market_quality_gate 的 stale_as_of 只在 as_of 存在时才生效,
-                # 于是一个"确认过但其实是上周的"0AMV 会拿满分并授予加仓权)。
-                amv["as_of"] = amv_as_of
-                if not amv.get("effective_state"):
-                    # ⚠️ 这是 amv_state 跑之前的**临时占位**，必须尊重状态机的锁定语义：
-                    # 「进入空头后须有 confirmed 的 >+4% 才能出来，**阈值之间的读数不得把
-                    #   regime 重置为中性**」（见 amv_state 模块 docstring）。
-                    # 原实现在阈值之间直接写「中性」，把锁定的空头重置了 ——
-                    # 而「中性」在加仓白名单 {做多, 中性} 里 ⇒ 空头期可能被授予加仓权。
-                    # 这里改为：只有跨阈值才敢给方向，否则**延续已知锁定前态**，
-                    # 前态未知就留「未知」让下游 fail-closed（风控优先于买入）。
-                    prior = str(amv.get("prior_effective_state") or "")
-                    if amv_day < -2.3:
-                        amv["effective_state"] = "空头"
-                    elif amv_day > 4:
-                        amv["effective_state"] = "做多"
-                    elif prior in ("空头", "做多"):
-                        amv["effective_state"] = prior
-                    else:
-                        amv["effective_state"] = "未知"
-                mkt["amv_0"] = amv
-                # ⚠️ 落盘前校验：这一步把 amv_0 的 quality 置 confirmed 并写
-                # effective_state / as_of ——**只校验这三个它自己写的字段**。
-                # `effective_state` 的枚举域正是审计 B1 的所在：写成「空头触发」这种
-                # 未归一的值，会让下游精确等值比较落空、`allow_add=False` 漏置。
-                # `amv_zone` 是 collector 派生的，不该由 merge 背责。
-                require(
-                    "market_timing_input",
-                    mkt,
-                    only=("amv_0.quality", "amv_0.effective_state", "amv_0.as_of"),
-                )
-                write_json_atomic(market_path, mkt)  # 读-改-写的共享文件
-                print(
-                    f"[OK] 0AMV quality auto-set to confirmed (value={amv_day}%, as_of={amv_as_of}, "
-                    f"regime={amv['effective_state']}, source={amv_source})"
-                )
-                status.update(
-                    {
-                        "amv_confirmed": True,
-                        "amv_as_of": amv_as_of,
-                        "amv_source": amv_source,
-                    }
-                )
-            if status["status"] == "skipped":
-                status["status"] = "ok"
-        except SystemExit as e:
-            # ⚠️ 同上：require() 抛 SystemExit（非 Exception 子类），
-            # 必须显式捕获才能保证失败状态落盘。
-            print(f"[WARN] 0AMV quality auto-fix failed: {e}", file=sys.stderr)
-            status.update({"status": "failed", "error": f"SystemExit: {e}"})
-            _write_status(target, status)
-            return 1
-        except Exception as e:
-            print(f"[WARN] 0AMV quality auto-fix failed: {e}", file=sys.stderr)
-            status.update({"status": "failed", "error": f"{type(e).__name__}: {e}"})
-            _write_status(target, status)
-            return 1
+    code = _autofix_amv_quality(target, market_path, status)
+    if code is not None:
+        return code
+
     _write_status(target, status)
     return 0
 

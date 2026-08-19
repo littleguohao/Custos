@@ -184,7 +184,7 @@ def _write_pipeline_log(date: str, stages: list[dict]) -> Path:
     return log
 
 
-def main():
+def _parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", required=True)
     ap.add_argument(
@@ -214,10 +214,11 @@ def main():
         help="postclose 时 market_quality=blocked 则整条链硬失败(exit 4)。"
         "默认关闭:门控只落盘+留痕,不阻断报告生成",
     )
-    args = ap.parse_args()
+    return ap.parse_args()
 
-    LOGS.mkdir(parents=True, exist_ok=True)
-    stages = []
+
+def _collect_market_stages(args: argparse.Namespace, stages: list[dict]) -> None:
+    """1-3. 市场输入底座 → 人工市场参数 → 海外/RSS 发现采集。"""
     market_input = MARKET_DIR / f"{args.date}_market_timing_input.json"
 
     # 1. Market input base
@@ -312,6 +313,9 @@ def main():
             )
         )
 
+
+def _run_gate_and_scorer(args: argparse.Namespace, stages: list[dict]) -> None:
+    """4. amv_state → runtime_gate(可硬阻断) → market_timing_scorer。"""
     # 4. Resolve persistent 0AMV regime before scoring. A locked bearish
     # regime remains bearish until a confirmed daily change is > +4%.
     stages.append(
@@ -348,6 +352,9 @@ def main():
         )
     )
 
+
+def _collect_holdings_mapping(args: argparse.Namespace, stages: list[dict]) -> None:
+    """5. 持仓映射刷新(可选)。"""
     # 5. Holdings mapping refresh optional
     enriched = HOLDINGS_DIR / f"{args.date}_holding_sector_mapping_enriched.json"
     if args.refresh_holdings or not enriched.exists():
@@ -382,6 +389,9 @@ def main():
             }
         )
 
+
+def _run_decision_chain(args: argparse.Namespace, stages: list[dict]) -> None:
+    """6. 持仓与决策链:技术面 → B1 状态 → 持仓复盘 → 主题 → 风控/板块 → 总控。"""
     # 6. Holding and decision chain. batch_holding_technical falls back to
     # current_positions.json when an enriched mapping is unavailable, so a new
     # trade date must never skip the entire holding/risk/chief chain.
@@ -449,6 +459,10 @@ def main():
             "chief_decision_report",
         )
     )
+
+
+def _run_session_stages(args: argparse.Namespace, stages: list[dict]) -> None:
+    """session 专属 stage:premarket 快照 chief 决策;postclose 跑盘后新闻与执行复盘。"""
     if args.session_type == "premarket":
         chief_source = DATA / "decisions" / f"{args.date}_chief_decision.json"
         chief_snapshot = (
@@ -506,6 +520,10 @@ def main():
                 "review_enrichment",
             )
         )
+
+
+def _run_report_stages(args: argparse.Namespace, stages: list[dict]) -> None:
+    """7. 日报与微信摘要。"""
     stages.append(
         run_stage(
             [str(PY), str(TOOLS / "pipeline" / "daily_report.py"), "--date", args.date],
@@ -523,6 +541,9 @@ def main():
     # 2026-08-12：archive_supporting_reports stage 已废——写方直接落
     # daily_report_dir（日期目录），没有「先写根再归档」的双套结构要收拾。
 
+
+def _dedupe_data_quality(args: argparse.Namespace, stages: list[dict]) -> None:
+    """去除重复 daily run 累积的 data_quality notes/sources。"""
     # De-duplicate repeated data_quality notes/sources produced by repeated daily runs.
     market_file = MARKET_DIR / f"{args.date}_market_timing_input.json"
     if market_file.exists():
@@ -543,6 +564,21 @@ def main():
             stages.append(
                 {"stage": "dedupe_data_quality", "ok": False, "error": repr(e)}
             )
+
+
+def main():
+    args = _parse_args()
+
+    LOGS.mkdir(parents=True, exist_ok=True)
+    stages: list[dict] = []
+
+    _collect_market_stages(args, stages)
+    _run_gate_and_scorer(args, stages)
+    _collect_holdings_mapping(args, stages)
+    _run_decision_chain(args, stages)
+    _run_session_stages(args, stages)
+    _run_report_stages(args, stages)
+    _dedupe_data_quality(args, stages)
 
     log = _write_pipeline_log(args.date, stages)
     print(f"\n[DONE] daily pipeline log: {log}")

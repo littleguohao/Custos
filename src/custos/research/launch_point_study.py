@@ -1779,6 +1779,110 @@ def rank_from_firings(
     )
 
 
+def _capture_scan_stock(
+    code,
+    raw,
+    start: str,
+    end: str,
+    entry_gate,
+    scorer,
+    min_bars: int,
+    gate_window: int,
+    day_fire: dict,
+) -> tuple[Optional[float], list[str]]:
+    """capture_rank_study 的单股扫描块 → (窗口收益, 信号日列表);信号池就地追加进 day_fire。
+    raw 用完即释放(del);打分不出来的信号不参与排名(直接跳过,不得当 0 分)。"""
+    df = raw.sort_values("date").reset_index(drop=True)
+    ds = [str(d)[:10] for d in df["date"]]
+    closes = df["close"].astype(float).tolist()
+    r = window_return(ds, closes, start, end)
+    fired: list[str] = []
+    if len(df) >= min_bars:
+        for i in range(min_bars, len(df)):
+            if not (start <= ds[i] <= end):
+                continue
+            lo = max(0, i + 1 - gate_window) if gate_window else 0  # 尾窗口:省时省内存
+            sub = df.iloc[lo : i + 1]
+            if not entry_gate(sub):
+                continue
+            sc, sc_ok = _scorer_value(scorer, sub, code)
+            if not sc_ok:
+                continue  # 打分不出来的信号不参与排名
+            day_fire.setdefault(ds[i], []).append((code, float(sc)))
+            fired.append(ds[i])
+    del df, ds, closes
+    return r, fired
+
+
+def _capture_scan(
+    items,
+    start: str,
+    end: str,
+    entry_gate,
+    scorer,
+    min_bars: int,
+    gate_window: int,
+    progress: int,
+) -> tuple[list, dict, dict]:
+    """capture_rank_study 的流式扫描块 → (rets, day_fire, stock_days)。
+    每股只加载一次,raw 用完即释放;progress>0 时每 progress 只股打印进度 + RSS 探针。"""
+    import gc  # noqa: PLC0415
+
+    rets: list[tuple] = []
+    day_fire: dict[str, list] = {}  # date -> [(code, score)]  当日全域信号池(轻量)
+    stock_days: dict[str, list] = {}  # code -> [dates] 该股信号日(用于赢家过滤)
+    n_seen = 0
+    for code, raw in items:  # 流式:raw 用完即释放
+        n_seen += 1
+        if raw is not None and len(raw):
+            r, fired = _capture_scan_stock(
+                code,
+                raw,
+                start,
+                end,
+                entry_gate,
+                scorer,
+                min_bars,
+                gate_window,
+                day_fire,
+            )
+            if r is not None:
+                rets.append((code, r))
+            if fired:
+                stock_days[code] = fired
+        if progress and n_seen % progress == 0:
+            print(
+                f"[capture] {n_seen} 股 | firings={sum(len(v) for v in day_fire.values())} "
+                f"| RSS={_rss_mb():.0f}MB",
+                file=sys.stderr,
+                flush=True,
+            )
+            gc.collect()
+    return rets, day_fire, stock_days
+
+
+def _count_day_winners(win_fire: dict) -> dict[str, int]:
+    """{date: 当日池中赢家信号数}(oracle 完美排序上限的口径)。"""
+    day_winners: dict[str, int] = {}
+    for days in win_fire.values():
+        for d in days:
+            day_winners[d] = day_winners.get(d, 0) + 1
+    return day_winners
+
+
+def _rank_of_winners(day_fire: dict, winners: set) -> dict[tuple, tuple]:
+    """(date,code) -> (rank, pool);只需赢家的排名(省内存)。"""
+    rank_of: dict[tuple, tuple] = {}
+    for d, lst in day_fire.items():
+        pool = len(lst)
+        for rk, (code, _) in enumerate(
+            sorted(lst, key=lambda x: x[1], reverse=True), 1
+        ):
+            if code in winners:  # 只需赢家的排名,省内存
+                rank_of[(d, code)] = (rk, pool)
+    return rank_of
+
+
 def capture_rank_study(
     bars,
     start: str,
@@ -1802,70 +1906,18 @@ def capture_rank_study(
     gate_window>0:只把**最近 gate_window 根**传给 gate/scorer(而非整段前缀)——避免每根K线重算全历史
     (O(n²) 时间 + 大量临时对象,是 OOM/慢的主因)。KDJ 等递归指标需足够预热,建议 ≥120。
     progress>0:每处理 progress 只股打印进度 + RSS(MB) 探针,便于定位内存增长。"""
-    import gc  # noqa: PLC0415
-
     items = bars.items() if isinstance(bars, dict) else bars
-    rets: list[tuple] = []
-    skipped_no_score = 0  # 打分器无数据 → 跳过的信号数(不得当 0 分参与排名)
-    day_fire: dict[str, list] = {}  # date -> [(code, score)]  当日全域信号池(轻量)
-    stock_days: dict[str, list] = {}  # code -> [dates] 该股信号日(用于赢家过滤)
-    n_seen = 0
-    for code, raw in items:  # 流式:raw 用完即释放
-        n_seen += 1
-        if raw is not None and len(raw):
-            df = raw.sort_values("date").reset_index(drop=True)
-            ds = [str(d)[:10] for d in df["date"]]
-            closes = df["close"].astype(float).tolist()
-            r = window_return(ds, closes, start, end)
-            if r is not None:
-                rets.append((code, r))
-            if len(df) >= min_bars:
-                fired: list[str] = []
-                for i in range(min_bars, len(df)):
-                    if not (start <= ds[i] <= end):
-                        continue
-                    lo = (
-                        max(0, i + 1 - gate_window) if gate_window else 0
-                    )  # 尾窗口:省时省内存
-                    sub = df.iloc[lo : i + 1]
-                    if not entry_gate(sub):
-                        continue
-                    sc, sc_ok = _scorer_value(scorer, sub, code)
-                    if not sc_ok:
-                        skipped_no_score += 1  # 打分不出来的信号不参与排名
-                        continue
-                    day_fire.setdefault(ds[i], []).append((code, float(sc)))
-                    fired.append(ds[i])
-                if fired:
-                    stock_days[code] = fired
-            del df, ds, closes
-        if progress and n_seen % progress == 0:
-            print(
-                f"[capture] {n_seen} 股 | firings={sum(len(v) for v in day_fire.values())} "
-                f"| RSS={_rss_mb():.0f}MB",
-                file=sys.stderr,
-                flush=True,
-            )
-            gc.collect()
+    rets, day_fire, stock_days = _capture_scan(
+        items, start, end, entry_gate, scorer, min_bars, gate_window, progress
+    )
     if not rets:
         return {"n_winners": 0, "text": "无数据"}
     rets.sort(key=lambda x: x[1], reverse=True)
     winners, wmeta = _pick_winners(rets, top_pct, min_winner_ret, winner_basis)
     win_fire = {c: stock_days[c] for c in winners if c in stock_days}  # 赢家的信号日
     stock_days.clear()
-    day_winners: dict[str, int] = {}
-    for _c, _ds in win_fire.items():
-        for _d in _ds:
-            day_winners[_d] = day_winners.get(_d, 0) + 1
-
-    rank_of: dict[tuple, tuple] = {}  # (date,code) -> (rank, pool)
-    for d, lst in day_fire.items():
-        pool = len(lst)
-        for rk, (code, _) in enumerate(
-            sorted(lst, key=lambda x: x[1], reverse=True), 1
-        ):
-            if code in winners:  # 只需赢家的排名,省内存
-                rank_of[(d, code)] = (rk, pool)
+    day_winners = _count_day_winners(win_fire)
+    rank_of = _rank_of_winners(day_fire, winners)
     day_fire.clear()
 
     return _summarize_capture(
@@ -1877,6 +1929,99 @@ def capture_rank_study(
         surface_top_n,
         day_winners=day_winners,
         wmeta=wmeta,
+    )
+
+
+def _sector_index_returns(
+    members: dict, index_dir, start: str, end: str
+) -> dict[str, float]:
+    """全成员板块(含零赢家板块)的同窗口指数收益;读盘失败/无数据的板块缺省。"""
+    idx = Path(index_dir)
+    sec_ret: dict[str, float] = {}
+    for sec in members:  # 全成员板块都算收益(含零赢家板块,供相关性用全样本)
+        p = idx / f"{sec}.csv"
+        if p.is_file():
+            try:
+                df = pd.read_csv(p)
+                r = window_return(
+                    df["date"].tolist(), df["close"].astype(float).tolist(), start, end
+                )
+                if r is not None:
+                    sec_ret[sec] = r
+            except Exception:  # noqa: BLE001
+                pass
+    return sec_ret
+
+
+def _winner_count_corr(n_by_sec: dict, sec_ret: dict) -> tuple[Optional[float], int]:
+    """赢家数 vs 板块指数收益相关性 → (corr, n);零赢家板块计入(不左截断),n<3 → None。"""
+    pairs = [
+        (n_by_sec.get(s, 0), sec_ret[s]) for s in sec_ret
+    ]  # 零赢家板块计入(不左截断)
+    corr = None
+    if len(pairs) >= 3:
+        try:
+            corr = round(
+                statistics.correlation([a for a, _ in pairs], [b for _, b in pairs]), 3
+            )
+        except Exception:  # noqa: BLE001
+            corr = None
+    return corr, len(pairs)
+
+
+def _sector_top_rows(agg: dict, members: dict, sec_ret: dict) -> list:
+    """主流板块行:赢家数/赢家密度(纠大板块偏差)/板块名/同窗口指数收益。"""
+    from custos.core.factors import sector_mainstream as sm  # noqa: PLC0415
+
+    top_rows = []
+    for r in agg["top_sectors"]:
+        sec = r["sector"]
+        top_rows.append(
+            {
+                **r,
+                "n_winners": r["n"],
+                "density": round(r["n"] / max(len(members.get(sec) or [1]), 1), 3),
+                "name": sm.sector_name(sec),
+                "sector_return": (round(sec_ret[sec], 4) if sec in sec_ret else None),
+            }
+        )
+    return top_rows
+
+
+def _render_concentration(
+    winners: list,
+    agg: dict,
+    top_k: int,
+    corr: Optional[float],
+    n_pairs: int,
+    top_rows: list,
+    by_density: list,
+) -> str:
+    """sector_concentration 的文本渲染块。"""
+    conc = (
+        "集中"
+        if (agg["top5_share"] or 0) >= 0.5
+        else ("偏分散" if (agg["top5_share"] or 0) < 0.3 else "中等")
+    )
+    im, om = agg["in_mainstream"], agg["off_mainstream"]
+    return (
+        f"赢家 {len(winners)} 只(有板块归属 {agg['n_classified']}), 覆盖 {agg['distinct_sectors']} 个板块; "
+        f"前5板块占归属次数 {(agg['top5_share'] or 0) * 100:.0f}%({conc};分母=归属次数,一股多板块重复计), "
+        f"HHI {agg['hhi']};\n"
+        f"  主流(top{top_k})内赢家: n={im.get('n')} 均收 {(im.get('expectancy') or 0) * 100:+.1f}% vs "
+        f"分散: n={om.get('n')} 均收 {(om.get('expectancy') or 0) * 100:+.1f}% "
+        f"(差 {((agg['mainstream_lift'] or 0) * 100):+.1f}pp);\n"
+        f"  赢家数 vs 板块指数收益 相关 {corr} (n={n_pairs},含零赢家板块;⚠️含机械成分,仅描述)。\n"
+        "  归属数 Top: "
+        + "; ".join(
+            f"{r['name']}({r['n']},{(r['expectancy'] or 0) * 100:+.0f}%)"
+            for r in top_rows[:6]
+        )
+        + "\n"
+        "  密度 Top(纠大板块偏差): "
+        + "; ".join(
+            f"{r['name']}({r['density'] * 100:.0f}%×{r['n']})" for r in by_density[:6]
+        )
     )
 
 
@@ -1905,44 +2050,10 @@ def sector_concentration(
     agg = sm.aggregate(trades, code2secs, top_k=top_k)
     if not agg["rows"]:
         return {"n_winners": len(winners), "n_classified": 0, "text": "无板块成员映射"}
-    idx = Path(index_dir)
-    sec_ret: dict[str, float] = {}
-    for sec in members:  # 全成员板块都算收益(含零赢家板块,供相关性用全样本)
-        p = idx / f"{sec}.csv"
-        if p.is_file():
-            try:
-                df = pd.read_csv(p)
-                r = window_return(
-                    df["date"].tolist(), df["close"].astype(float).tolist(), start, end
-                )
-                if r is not None:
-                    sec_ret[sec] = r
-            except Exception:  # noqa: BLE001
-                pass
+    sec_ret = _sector_index_returns(members, index_dir, start, end)
     n_by_sec = {r["sector"]: r["n"] for r in agg["rows"]}
-    pairs = [
-        (n_by_sec.get(s, 0), sec_ret[s]) for s in sec_ret
-    ]  # 零赢家板块计入(不左截断)
-    corr = None
-    if len(pairs) >= 3:
-        try:
-            corr = round(
-                statistics.correlation([a for a, _ in pairs], [b for _, b in pairs]), 3
-            )
-        except Exception:  # noqa: BLE001
-            corr = None
-    top_rows = []
-    for r in agg["top_sectors"]:
-        sec = r["sector"]
-        top_rows.append(
-            {
-                **r,
-                "n_winners": r["n"],
-                "density": round(r["n"] / max(len(members.get(sec) or [1]), 1), 3),
-                "name": sm.sector_name(sec),
-                "sector_return": (round(sec_ret[sec], 4) if sec in sec_ret else None),
-            }
-        )
+    corr, n_pairs = _winner_count_corr(n_by_sec, sec_ret)
+    top_rows = _sector_top_rows(agg, members, sec_ret)
     by_density = sorted(top_rows, key=lambda r: r["density"], reverse=True)
     out = {
         "n_winners": len(winners),
@@ -1951,7 +2062,7 @@ def sector_concentration(
         "top5_winner_share": agg["top5_share"],
         "herfindahl": agg["hhi"],
         "corr_wincount_vs_sectorret": corr,
-        "corr_n": len(pairs),
+        "corr_n": n_pairs,
         "top_sectors": top_rows,
         "top_by_density": by_density[:top_k],
         "mainstream": {
@@ -1961,32 +2072,63 @@ def sector_concentration(
             "lift": agg["mainstream_lift"],
         },
     }
-    conc = (
-        "集中"
-        if (agg["top5_share"] or 0) >= 0.5
-        else ("偏分散" if (agg["top5_share"] or 0) < 0.3 else "中等")
-    )
-    im, om = agg["in_mainstream"], agg["off_mainstream"]
-    out["text"] = (
-        f"赢家 {len(winners)} 只(有板块归属 {agg['n_classified']}), 覆盖 {agg['distinct_sectors']} 个板块; "
-        f"前5板块占归属次数 {(agg['top5_share'] or 0) * 100:.0f}%({conc};分母=归属次数,一股多板块重复计), "
-        f"HHI {agg['hhi']};\n"
-        f"  主流(top{top_k})内赢家: n={im.get('n')} 均收 {(im.get('expectancy') or 0) * 100:+.1f}% vs "
-        f"分散: n={om.get('n')} 均收 {(om.get('expectancy') or 0) * 100:+.1f}% "
-        f"(差 {((agg['mainstream_lift'] or 0) * 100):+.1f}pp);\n"
-        f"  赢家数 vs 板块指数收益 相关 {corr} (n={len(pairs)},含零赢家板块;⚠️含机械成分,仅描述)。\n"
-        "  归属数 Top: "
-        + "; ".join(
-            f"{r['name']}({r['n']},{(r['expectancy'] or 0) * 100:+.0f}%)"
-            for r in top_rows[:6]
-        )
-        + "\n"
-        "  密度 Top(纠大板块偏差): "
-        + "; ".join(
-            f"{r['name']}({r['density'] * 100:.0f}%×{r['n']})" for r in by_density[:6]
-        )
+    out["text"] = _render_concentration(
+        winners, agg, top_k, corr, n_pairs, top_rows, by_density
     )
     return out
+
+
+def _explain_inputs(
+    agg: dict, feature: str, min_hit_ratio: float
+) -> tuple[int, int, set, list]:
+    """explain_aggregate 的前置口径 → (计票窗数, 覆盖门槛, 全部非普涨窗, 待解读特征列表)。"""
+    n_elig = agg.get("n_eligible_windows") or agg.get("n_windows") or 0
+    need = max(2, int(n_elig * min_hit_ratio))
+    all_w = {
+        w["window"] for w in (agg.get("windows") or []) if not w.get("degenerate_label")
+    }
+    feats = [
+        f for f in (agg.get("features") or []) if not feature or f["feature"] == feature
+    ]
+    return n_elig, need, all_w, feats
+
+
+def _explain_window_rows(per: dict, overfit: list, absent: list) -> list:
+    """单特征的逐窗行:计票(证据)/疑过拟合剔除(反面证据)/未出现(既非支持也非反对)。"""
+    lines = []
+    for w in sorted(per):
+        x = per[w]
+        lines.append(
+            f"    计票  {w:<44} AUC {_fmt_num(x.get('auc'))} "
+            f"{_fmt_pp(x.get('lift_pp_effective'))} "
+            f"{'取反' if x.get('direction') == 'low' else '同向'}"
+        )
+    for w in sorted(overfit):
+        lines.append(f"    剔除  {w:<44} 疑过拟合(前后半程不同号)= **反面证据**")
+    for w in absent:
+        lines.append(f"    未测  {w:<44} 恒定/特征缺失(既非支持也非反对)")
+    return lines
+
+
+def _explain_feature_lines(f: dict, all_w: set, need: int) -> tuple[float, list]:
+    """explain_aggregate 的单特征块 → (纯噪声下 100% 同号概率, 该特征的行列表)。"""
+    per = {x["window"]: x for x in (f.get("per_window") or [])}
+    overfit = list(f.get("overfit_excluded_windows") or [])
+    absent = sorted(all_w - set(per) - set(overfit))
+    n = len(per)
+    p_noise = 0.5 ** (n - 1) if n >= 1 else 1.0
+    lines = [
+        "",
+        (
+            f"[{f['feature']}] 计票 {n} 窗 / 同号 {f.get('same_direction_windows')} "
+            f"({(f.get('hit_ratio') or 0):.0%}) / 中位AUC {_fmt_num(f.get('median_auc'))} "
+            f"/ 中位增益 {_fmt_pp(f.get('median_lift_pp'))} / "
+            f"{'覆盖达标' if n >= need else f'⚠️覆盖不足({n}<{need})'} / "
+            f"纯噪声下 100% 同号概率 {p_noise:.3f}"
+        ),
+    ]
+    lines.extend(_explain_window_rows(per, overfit, absent))
+    return p_noise, lines
 
 
 def explain_aggregate(agg: dict, feature: str = "", min_hit_ratio: float = 0.75) -> str:
@@ -1996,45 +2138,16 @@ def explain_aggregate(agg: dict, feature: str = "", min_hit_ratio: float = 0.75)
     三类窗必须分开看:计票窗(per_window)、疑过拟合被剔(overfit_excluded_windows)、
     未出现(恒定/特征缺失)。前者是证据,第二类是反面证据,第三类只是没测到。
     """
-    n_elig = agg.get("n_eligible_windows") or agg.get("n_windows") or 0
-    need = max(2, int(n_elig * min_hit_ratio))
-    all_w = {
-        w["window"] for w in (agg.get("windows") or []) if not w.get("degenerate_label")
-    }
-    feats = [
-        f for f in (agg.get("features") or []) if not feature or f["feature"] == feature
-    ]
+    n_elig, need, all_w, feats = _explain_inputs(agg, feature, min_hit_ratio)
     lines = [
         f"计票窗 {n_elig} 个(普涨窗已排除 {len(agg.get('degenerate_windows') or [])} 个);"
         f"覆盖门槛 = {need} 窗"
     ]
     exp_total = 0.0
     for f in sorted(feats, key=lambda r: -(r.get("median_edge") or 0)):
-        per = {x["window"]: x for x in (f.get("per_window") or [])}
-        overfit = list(f.get("overfit_excluded_windows") or [])
-        absent = sorted(all_w - set(per) - set(overfit))
-        n = len(per)
-        p_noise = 0.5 ** (n - 1) if n >= 1 else 1.0
+        p_noise, flines = _explain_feature_lines(f, all_w, need)
         exp_total += p_noise
-        lines.append("")
-        lines.append(
-            f"[{f['feature']}] 计票 {n} 窗 / 同号 {f.get('same_direction_windows')} "
-            f"({(f.get('hit_ratio') or 0):.0%}) / 中位AUC {_fmt_num(f.get('median_auc'))} "
-            f"/ 中位增益 {_fmt_pp(f.get('median_lift_pp'))} / "
-            f"{'覆盖达标' if n >= need else f'⚠️覆盖不足({n}<{need})'} / "
-            f"纯噪声下 100% 同号概率 {p_noise:.3f}"
-        )
-        for w in sorted(per):
-            x = per[w]
-            lines.append(
-                f"    计票  {w:<44} AUC {_fmt_num(x.get('auc'))} "
-                f"{_fmt_pp(x.get('lift_pp_effective'))} "
-                f"{'取反' if x.get('direction') == 'low' else '同向'}"
-            )
-        for w in sorted(overfit):
-            lines.append(f"    剔除  {w:<44} 疑过拟合(前后半程不同号)= **反面证据**")
-        for w in absent:
-            lines.append(f"    未测  {w:<44} 恒定/特征缺失(既非支持也非反对)")
+        lines.extend(flines)
     if len(feats) > 1:
         lines.append("")
         lines.append(

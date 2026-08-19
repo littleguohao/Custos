@@ -36,6 +36,17 @@ def resolve_open_entry_dates(trades: list[dict]) -> dict[str, dict]:
     返回 {code: {entry_date, avg_buy_date, open_qty, open_lots}}。
     卖出多于买入(台账不完整)时该股按无未平仓处理,不返回 —— 宁可不出数也不给错窗口。
     """
+    lots = _replay_lots_fifo(trades)
+    out: dict[str, dict] = {}
+    for code, book in lots.items():
+        summary = _summarize_open_book(book)
+        if summary is not None:
+            out[code] = summary
+    return out
+
+
+def _replay_lots_fifo(trades: list[dict]) -> dict[str, list[list]]:
+    """FIFO 回放台账成 lot 簿:买入压栈、卖出先进先出消耗,返回 {code: [[qty, price, date], ...]}。"""
     lots: dict[str, list[list]] = {}  # code -> [[qty, price, date], ...]
     for t in sorted(
         trades,
@@ -53,28 +64,35 @@ def resolve_open_entry_dates(trades: list[dict]) -> dict[str, dict]:
                 [qty, float(t.get("price") or 0), t.get("date") or ""]
             )
             continue
-        remaining, book = qty, lots.setdefault(code, [])
-        while remaining > 1e-9 and book:
-            take = min(remaining, book[0][0])
-            book[0][0] -= take
-            remaining -= take
-            if book[0][0] <= 1e-9:
-                book.pop(0)
-    out: dict[str, dict] = {}
-    for code, book in lots.items():
-        book = [x for x in book if x[0] > 1e-9 and x[2]]
-        if not book:
-            continue
-        total = sum(x[0] for x in book)
-        # 数量加权平均买入日只作参考;窗口左端一律用最老未平 lot(最保守、不漏浮亏)
-        avg_ord = sum(date.fromisoformat(x[2]).toordinal() * x[0] for x in book) / total
-        out[code] = {
-            "entry_date": min(x[2] for x in book),
-            "avg_buy_date": date.fromordinal(round(avg_ord)).isoformat(),
-            "open_qty": round(total, 4),
-            "open_lots": len(book),
-        }
-    return out
+        _consume_lots_fifo(lots.setdefault(code, []), qty)
+    return lots
+
+
+def _consume_lots_fifo(book: list[list], qty: float) -> None:
+    """卖出按 FIFO 消耗 book 头部的 lot;卖出多于买入时只消耗到空(台账不完整)。"""
+    remaining = qty
+    while remaining > 1e-9 and book:
+        take = min(remaining, book[0][0])
+        book[0][0] -= take
+        remaining -= take
+        if book[0][0] <= 1e-9:
+            book.pop(0)
+
+
+def _summarize_open_book(book: list[list]) -> dict | None:
+    """把单只股票的剩余 lot 簿汇总成建仓记录;无有效未平 lot 返回 None(不出数)。"""
+    book = [x for x in book if x[0] > 1e-9 and x[2]]
+    if not book:
+        return None
+    total = sum(x[0] for x in book)
+    # 数量加权平均买入日只作参考;窗口左端一律用最老未平 lot(最保守、不漏浮亏)
+    avg_ord = sum(date.fromisoformat(x[2]).toordinal() * x[0] for x in book) / total
+    return {
+        "entry_date": min(x[2] for x in book),
+        "avg_buy_date": date.fromordinal(round(avg_ord)).isoformat(),
+        "open_qty": round(total, 4),
+        "open_lots": len(book),
+    }
 
 
 def normalize_date_col(df):

@@ -6,7 +6,7 @@
 > 优先级按**「它阻塞了什么」**排，不按工作量：
 > P0 = 阻塞其他事或 live 正在依赖 ｜ P1 = 已有结论悬空 ｜ P2 = 新验证 ｜ P3 = 技术债
 >
-> 最后更新：2026-08-19（#58 尾巴收口——radon E 级 19 个全部拆分清零、同批 D 级 53→26，过程中修复前轮拆分遗留的 `main_rally` 静默零产出回归（CHANGELOG v0.71）。此前：#49 持仓快照历史归档落地、`entities(date)` 生效（CHANGELOG v0.67）；#58 高复杂度函数拆分——研究侧 + live 链 F 级全拆完（CHANGELOG v0.68/v0.69）；#35 三因子补跑完成 ⇒ 均无跨窗口稳健性，owner 拍板降级「不再研究」（R2 第 16 条、CHANGELOG v0.70）。其余：#13 复核两案跑完 ⇒ 严变体终审否决（R7「#13 复核结果」节）；#25 跨窗复核跑完 ⇒ 两案过线但「cz3 首选换位」跨窗不成立（R10「#25 跨窗复核结果」节）；P2 待跑表已空）
+> 最后更新：2026-08-19（#58 收口——radon D/E/F 清零：E 级 19 个（v0.71）+ D 级 26 个（v0.72）全部拆完，过程中修复前轮拆分遗留的 `main_rally` 静默零产出回归。此前：#49 持仓快照历史归档落地、`entities(date)` 生效（CHANGELOG v0.67）；#58 F 级清零（CHANGELOG v0.68/v0.69）；#35 三因子补跑完成 ⇒ 均无跨窗口稳健性，owner 拍板降级「不再研究」（R2 第 16 条、CHANGELOG v0.70）。其余：#13 复核两案跑完 ⇒ 严变体终审否决（R7「#13 复核结果」节）；#25 跨窗复核跑完 ⇒ 两案过线但「cz3 首选换位」跨窗不成立（R10「#25 跨窗复核结果」节）；P2 待跑表已空）
 
 ## P0 · 阻塞项
 
@@ -35,7 +35,7 @@
 
 | # | 事项 | 出处 |
 |---|---|---|
-| 58 | **高复杂度函数拆分**：✅ **E 级及以上全部拆完（2026-08-19，owner 拍板范围=只拆 E 级）**。F 级 2026-08-18 清零（v0.68/v0.69）；E 级 19 个 2026-08-19 清零（v0.71，明细见该条）——选股链 `apply_risk_downgrades`/`score_all`/`build_entry_reasons`/`check_macd_technics`/`check_non_one_wave`/`_bucket_pools`、因子/基建 `detect_wave_type`/`sector_mainstream.aggregate`/`market_quality_gate`/`load_bars_qlib`、复盘/持仓 `review_core.classify`/`review_enrichment.main`/`calc_mfe_mae.main`/`holding_sector_mapper.main`/`market_timing_scorer.score_indices`、研究侧 `run_bear_to_long_study` 两函数；同批 D 级 53→26。⚠️ 本轮修一个真回归：前轮拆分在 `main_rally_factor` 留下 4 个未定义 helper 被 except 吞掉 ⇒ `main_rally` scorer 静默零产出（v0.71）。等价验证：全量 4147 passed、周报/月报逐字节比对 MATCH、audit 套件通过。**剩余原则恢复**：D 级 26 / C 级 276（如 `n_structure_state` D28、`sector_concentration` D28）**下次因业务动这些文件时先拆** | 2026-08-19 收口（`reports/radon_cc.txt` 当日重生成，E/F 清零） |
+| 58 | **高复杂度函数拆分**：✅ **D 级及以上全部拆完（2026-08-19，radon D/E/F 清零）**。F 级 2026-08-18 清零（v0.68/v0.69）；E 级 19 个同日清零（v0.71）；D 级 26 个同日清零（v0.72，owner 指示「继续 D 级别的清零」，明细见该条）——研究侧 6 个、编排层 `run_1700`/`run_1800`/`daily_pipeline` 三 main、选股链 6 个、择时 4 个、数据层 4 个、复盘 2 个、基建 `write_runtime_gate`。⚠️ 两轮各修一个拆分事故形态：E 级轮修「helper 调用了但从未定义」（`main_rally_factor` 静默零产出）；D 级轮发现「helper 定义了却没被调用」（`_signal_labels_section` 接到悬空的 `_signal_label_row` 上）。等价验证：全量 4147 passed、周报/月报 md+json 四件逐字节比对 MATCH、audit 套件通过（ruff format ✓ / mypy 0 errors）。**剩余原则**：全仓仅剩 C 级 287 个（含拆出的新 helper），**下次因业务动这些文件时先拆** | 2026-08-19 收口（`reports/radon_cc.txt` 当日重生成，D/E/F 清零） |
 
 ## ⚠️ 已失效的行动项（**别照着做**）
 

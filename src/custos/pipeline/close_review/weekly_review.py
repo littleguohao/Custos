@@ -647,20 +647,10 @@ def holding_week_performance(
     }
 
 
-def portfolio_trajectory(
-    days: list[str],
-    trading_days: list[str],
-    daily_reviews: dict,
-    sse_map: dict[str, dict],
-    unavailable: list[str],
-    label: str = "本周",  # 月度复盘复用时传 "本月"（unavailable 文案要如实归属区间）
-) -> dict:
-    """板块2：组合与账户轨迹。
-
-    口径：总仓位/持仓市值 = 当日 revalued_positions 合计（权重分母为当日估算总权益）；
-    当日有持仓缺报价（market_value 为空）时标记 partial，周收益与回撤只用完整日计算，
-    避免缺报价造成的虚假跳水；基准为上证指数每日涨跌幅复利累计。
-    """
+def _portfolio_daily_points(
+    days: list[str], daily_reviews: dict
+) -> tuple[list[dict], list[str]]:
+    """逐日总仓位/持仓市值序列；缺报价日记 partial 并生成说明文案。"""
     daily = []
     partial_notes = []
     for d in days:
@@ -686,11 +676,13 @@ def portfolio_trajectory(
                 "unpriced_codes": unpriced,
             }
         )
-    complete = [pt for pt in daily if not pt["partial"]]
-    if len(complete) < 2:
-        unavailable.append(
-            f"组合轨迹：{label}完整 revalued_positions 不足两日，区间收益与回撤 unavailable"
-        )
+    return daily, partial_notes
+
+
+def _portfolio_return_drawdown(
+    complete: list[dict],
+) -> tuple[float | None, float | None]:
+    """区间收益 = 首尾市值比；最大回撤按日市值序列。不足两日返回 (None, None)。"""
     week_return = None
     max_drawdown = None
     if len(complete) >= 2 and complete[0]["market_value"]:
@@ -703,6 +695,13 @@ def portfolio_trajectory(
             peak = max(peak, pt["market_value"])
             dd = min(dd, pt["market_value"] / peak - 1)
         max_drawdown = round(dd * 100, 2)
+    return week_return, max_drawdown
+
+
+def _benchmark_week(
+    trading_days: list[str], sse_map: dict[str, dict]
+) -> tuple[dict, float | None, list[str]]:
+    """基准（上证）每日涨跌幅与复利累计周收益。"""
     bench_changes = {d: sse_change(sse_map, d) for d in trading_days}
     known = [c for c in bench_changes.values() if c is not None]
     bench_week = None
@@ -712,7 +711,32 @@ def portfolio_trajectory(
             acc *= 1 + c / 100
         bench_week = round((acc - 1) * 100, 2)
     bench_missing = [d for d, c in bench_changes.items() if c is None]
-    if trading_days and not known:
+    return bench_changes, bench_week, bench_missing
+
+
+def portfolio_trajectory(
+    days: list[str],
+    trading_days: list[str],
+    daily_reviews: dict,
+    sse_map: dict[str, dict],
+    unavailable: list[str],
+    label: str = "本周",  # 月度复盘复用时传 "本月"（unavailable 文案要如实归属区间）
+) -> dict:
+    """板块2：组合与账户轨迹。
+
+    口径：总仓位/持仓市值 = 当日 revalued_positions 合计（权重分母为当日估算总权益）；
+    当日有持仓缺报价（market_value 为空）时标记 partial，周收益与回撤只用完整日计算，
+    避免缺报价造成的虚假跳水；基准为上证指数每日涨跌幅复利累计。
+    """
+    daily, partial_notes = _portfolio_daily_points(days, daily_reviews)
+    complete = [pt for pt in daily if not pt["partial"]]
+    if len(complete) < 2:
+        unavailable.append(
+            f"组合轨迹：{label}完整 revalued_positions 不足两日，区间收益与回撤 unavailable"
+        )
+    week_return, max_drawdown = _portfolio_return_drawdown(complete)
+    bench_changes, bench_week, bench_missing = _benchmark_week(trading_days, sse_map)
+    if trading_days and not any(c is not None for c in bench_changes.values()):
         unavailable.append(f"基准对照：{label}上证指数数据缺失")
     return {
         "daily": daily,

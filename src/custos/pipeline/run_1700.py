@@ -90,46 +90,22 @@ def _reconcile_note(target: str) -> str:
     )
 
 
-def main(argv=None) -> int:
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--date", default=cn_today().strftime("%Y-%m-%d"))
-    args = ap.parse_args(argv)
-    target = args.date
-
-    # Subprocesses rely on project discovery (uv run) from the repo root.
-    os.chdir(BASE)
-
-    run_started = _now_iso()
-    t0 = time.time()
-    stages_log: list[dict] = []
-
-    def _run_stage(cmd: list[str], name: str, note: str = "") -> dict:
-        s_started = _now_iso()
-        s_t0 = time.time()
-        r = _stage(cmd, name)
-        stages_log.append(
-            _log_stage(name, r, s_started, _now_iso(), time.time() - s_t0, note=note)
-        )
-        return r
-
-    # 1. Trading calendar
-    _cg = calendar_gate(
-        target,
-        log_dir=LOG_DIR,
-        session="1700",
-        run_started=run_started,
-        t0=t0,
-        stages_log=stages_log,
-        fail_msg="【盘后复盘失败｜{target}】日历检查失败：{err}",
-        closed_msg="今日休市，盘后复盘不生成（{target}）",
+def _run_stage(
+    stages_log: list[dict], cmd: list[str], name: str, note: str = ""
+) -> dict:
+    s_started = _now_iso()
+    s_t0 = time.time()
+    r = _stage(cmd, name)
+    stages_log.append(
+        _log_stage(name, r, s_started, _now_iso(), time.time() - s_t0, note=note)
     )
-    if _cg.exit_code is not None:
-        return _cg.exit_code
+    return r
 
+
+def _collect_market_data(target: str, stages_log: list[dict]) -> None:
     # 2. Collect postclose holding quotes via mootdx (online bars for today's close)
     r = _run_stage(
+        stages_log,
         [
             "uv",
             "run",
@@ -152,6 +128,7 @@ def main(argv=None) -> int:
 
     # 3. Collect incremental market data (breadth/turnover/limit via mootdx + A50/CNH via Yahoo)
     r = _run_stage(
+        stages_log,
         [
             "uv",
             "run",
@@ -170,11 +147,14 @@ def main(argv=None) -> int:
             f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'incremental market collected'}"
         )
 
+
+def _calc_mfe_mae(target: str, stages_log: list[dict]) -> None:
     # 3b. Calculate MFE/MAE for holdings
     #     不能无条件报 [OK]:脚本对每只持仓 fail-closed(台账无未平仓记录/K线未覆盖入场日
     #     都不出数),全员不出数时它退 2 并把摘要行以 [WARN] 开头。这里回显该摘要行,
     #     否则"0/5 出数"在 runner 输出里长得和"5/5 出数"一模一样。
     r = _run_stage(
+        stages_log,
         [
             "uv",
             "run",
@@ -194,6 +174,8 @@ def main(argv=None) -> int:
     else:
         print(f"[OK] {tail or 'MFE/MAE calculated'}")
 
+
+def _ledger_reconcile(target: str, stages_log: list[dict]) -> None:
     # 3b2. 台账↔持仓对账（**只报告，不阻断**）。
     #      incremental_ledger 刻意选择「ledger 先落、positions 后落」，理由是
     #      崩在两次 os.replace 之间留下的「已记录成交但持仓未更新」**可检测、可修复**。
@@ -205,6 +187,7 @@ def main(argv=None) -> int:
     #      ⚠️ note 必须在 stage **跑完之后**算：`note=` 作为实参会在子进程启动前求值，
     #      那时今天的对账 JSON 还没写，读到的是上一次的结果（或读不到）。
     r = _run_stage(
+        stages_log,
         [
             "uv",
             "run",
@@ -228,8 +211,11 @@ def main(argv=None) -> int:
     ):
         print(f"[WARN] 台账对账异常（不阻断）：{_note}", file=sys.stderr)
 
+
+def _collect_aux_data(target: str, stages_log: list[dict]) -> None:
     # 3c. Collect fund flow rank (eastmoney direct API)
     r = _run_stage(
+        stages_log,
         [
             "uv",
             "run",
@@ -249,6 +235,7 @@ def main(argv=None) -> int:
     # 3c2. Refresh EOD daily K-lines into vipdoc via TQ-Local (needs TdxW running;
     #      best-effort so the pipeline still works when TdxW is off)
     r = _run_stage(
+        stages_log,
         [
             "uv",
             "run",
@@ -269,6 +256,7 @@ def main(argv=None) -> int:
 
     # 3d. Refresh market indices from vipdoc (ensure a_share_indices + turnover are populated)
     r = _run_stage(
+        stages_log,
         [
             "uv",
             "run",
@@ -287,12 +275,15 @@ def main(argv=None) -> int:
             f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'market indices refreshed'}"
         )
 
+
+def _sync_and_merge_amv(target: str, stages_log: list[dict]) -> None:
     # 3b. 同步指南针 0AMV → 写 confirmed 观测 + 填 amv_0day（best-effort）。
     #     必须在 merge_incremental_market 之前：merge 据 amv_0day/confirmed观测 自动把
     #     amv_0.quality 置 confirmed，随后 daily_pipeline 的 amv_state 才能据真值切换 regime
     #     （单日 >+4% 自动进多头 / <-2.3% 进空头，无需人工确认）。此前该脚本未接线，
     #     导致 0AMV 长期停留 candidate、regime 被锁定。
     r = _run_stage(
+        stages_log,
         [
             "uv",
             "run",
@@ -313,6 +304,7 @@ def main(argv=None) -> int:
     #    (best-effort: the script prints the [OK]/[WARN] lines, echoed here verbatim;
     #    a hard failure of the script itself only warns and never aborts the pipeline)
     r = _run_stage(
+        stages_log,
         [
             "uv",
             "run",
@@ -329,8 +321,14 @@ def main(argv=None) -> int:
     elif r["stdout"]:
         sys.stdout.write(r["stdout"])
 
+
+def _run_hard_stages(
+    target: str, run_started: str, t0: float, stages_log: list[dict]
+) -> int | None:
+    """硬失败 stage 链：任一失败即写 failed run log 并返回退出码，全过返回 None。"""
     # 5. Daily pipeline (postclose)
     r = _run_stage(
+        stages_log,
         [
             "uv",
             "run",
@@ -352,6 +350,7 @@ def main(argv=None) -> int:
     no_trades_flag = _no_trades_flag(target)
 
     r = _run_stage(
+        stages_log,
         [
             "uv",
             "run",
@@ -370,6 +369,7 @@ def main(argv=None) -> int:
 
     # 7. Validator
     r = _run_stage(
+        stages_log,
         [
             "uv",
             "run",
@@ -384,7 +384,12 @@ def main(argv=None) -> int:
         _write_run_log(target, "failed", run_started, t0, stages_log)
         print(f"【盘后复盘失败｜{target}】验证未通过：{r['out'][:500]}")
         return 1
+    return None
 
+
+def _emit_review_digest(
+    target: str, run_started: str, t0: float, stages_log: list[dict]
+) -> int:
     # 8. Read generated review and convert to text digest
     review_path = daily_report_dir(target, REVIEWS) / f"{target}_final_review.md"
     if not review_path.exists():
@@ -421,6 +426,48 @@ def main(argv=None) -> int:
     print(f"【盘后复盘｜{target}】")
     print(digest)
     return 0
+
+
+def main(argv=None) -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--date", default=cn_today().strftime("%Y-%m-%d"))
+    args = ap.parse_args(argv)
+    target = args.date
+
+    # Subprocesses rely on project discovery (uv run) from the repo root.
+    os.chdir(BASE)
+
+    run_started = _now_iso()
+    t0 = time.time()
+    stages_log: list[dict] = []
+
+    # 1. Trading calendar
+    _cg = calendar_gate(
+        target,
+        log_dir=LOG_DIR,
+        session="1700",
+        run_started=run_started,
+        t0=t0,
+        stages_log=stages_log,
+        fail_msg="【盘后复盘失败｜{target}】日历检查失败：{err}",
+        closed_msg="今日休市，盘后复盘不生成（{target}）",
+    )
+    if _cg.exit_code is not None:
+        return _cg.exit_code
+
+    _collect_market_data(target, stages_log)
+    _calc_mfe_mae(target, stages_log)
+    _ledger_reconcile(target, stages_log)
+    _collect_aux_data(target, stages_log)
+    _sync_and_merge_amv(target, stages_log)
+
+    rc = _run_hard_stages(target, run_started, t0, stages_log)
+    if rc is not None:
+        return rc
+
+    return _emit_review_digest(target, run_started, t0, stages_log)
 
 
 if __name__ == "__main__":

@@ -261,7 +261,7 @@ def write_fetch_status(
     return payload
 
 
-def main(argv=None) -> int:
+def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         description="抓取通达信板块指数(880xxx)收盘历史→CSV缓存"
     )
@@ -300,7 +300,140 @@ def main(argv=None) -> int:
         help=f"每个板块之间的限速(毫秒,默认 {DEFAULT_SLEEP_MS};400+ 板块串行请求，"
         "不限速会把 TdxW 打满)",
     )
-    args = ap.parse_args(argv)
+    return ap
+
+
+def _fetch_close_frame(tq, code_q: str, period: str, start: str):
+    """refresh + 取数 → [date,close] frame;空数据时稍候重试一次(refresh 是异步 run_id)。"""
+    import time as _t
+
+    tq.refresh_kline([code_q], period=period)
+    d = tq.get_market_data(
+        field_list=["Close"],
+        stock_list=[code_q],
+        period=period,
+        start_time=start,
+        count=-1,
+    )
+    frame = _to_close_frame(d, code_q)
+    if frame is None:
+        _t.sleep(2.0)
+        d = tq.get_market_data(
+            field_list=["Close"],
+            stock_list=[code_q],
+            period=period,
+            start_time=start,
+            count=-1,
+        )
+        frame = _to_close_frame(d, code_q)
+    return frame
+
+
+def _fetch_members(tq, code: str, members: dict) -> None:
+    """抓板块成员(get_stock_list_in_sector)写入 members(板块相位 gate 需要)。"""
+    try:
+        mem = tq.get_stock_list_in_sector(code) or []
+        members[code] = [str(x).split(".")[0][-6:].zfill(6) for x in mem]
+    except Exception as mexc:  # noqa: BLE001
+        print(f"[WARN] members {code}: {mexc}", file=sys.stderr)
+
+
+def _fetch_sectors(
+    tq,
+    sectors: list,
+    args: argparse.Namespace,
+    outdir: Path,
+    period: str,
+    members: dict,
+) -> tuple[int, list[str]]:
+    """逐板块抓取落盘 → (ok, failed)。串行不改(不引入并发复杂度)，但要限速。"""
+    import time as _t
+
+    ok = 0
+    total = len(sectors)
+    failed: list[str] = []
+    for i, code in enumerate(sectors):
+        code_q = _suffixed(code)  # refresh_kline 必须带市场后缀，否则 Codestr Error
+        try:
+            dest = outdir / f"{code_q}.csv"
+            start = (
+                incremental_start(dest, args.start) if args.incremental else args.start
+            )
+            frame = _fetch_close_frame(tq, code_q, period, start)
+            if args.incremental:
+                frame = merge_close_frame(dest, frame)
+            if frame is not None:
+                atomic_write_csv(frame, dest)
+                ok += 1
+            else:
+                failed.append(code_q)
+                print(f"[WARN] {code_q}: 解析不出收盘序列", file=sys.stderr)
+            if args.members:
+                _fetch_members(tq, code, members)
+        except Exception as exc:  # noqa: BLE001
+            failed.append(code_q)
+            print(f"[WARN] {code}: {exc}", file=sys.stderr)
+        if args.sleep_ms > 0:
+            _t.sleep(args.sleep_ms / 1000.0)
+        if (i + 1) % 50 == 0:
+            print(
+                f"[INFO] {i + 1}/{total}  已落盘 {ok}  失败 {len(failed)}",
+                file=sys.stderr,
+            )
+    return ok, failed
+
+
+def _fetch_all(tq, args: argparse.Namespace, outdir: Path) -> int:
+    """板块列表 + 周期探测 + 逐板块抓取 + 成员/状态落盘 → 退出码。"""
+    sectors = tq.get_sector_list() or []
+    if args.limit:
+        sectors = sectors[: args.limit]
+    total = len(sectors)
+    print(f"[INFO] 板块数: {total}")
+    if not sectors:
+        print("[ERR] TQ 未返回板块列表")
+        return 2
+    period, note = resolve_period(tq, sectors[0], args.start, args.period)
+    if not period:
+        # 快速失败:周期串不被接受时不再逐个板块重试(此前 --period day 会刷 400 条 WARN 后超时)
+        print(
+            f"[ERR] 无可用周期串(试过 {', '.join(PERIOD_CANDIDATES)}):{note}",
+            file=sys.stderr,
+        )
+        print(
+            "[ERR] TQ 周期串约定见 governance/data/TDX_LOCAL_INTERFACES.md「周期串是 1d，不是 day」"
+        )
+        return 2
+    print(
+        f"[INFO] 使用周期 {period}{'(自动探测)' if not args.period else ''}"
+        f"{'; 增量合并模式' if args.incremental else '; 全量重拉'}"
+    )
+    members: dict = {}
+    ok, failed = _fetch_sectors(tq, sectors, args, outdir, period, members)
+    if args.members:
+        mpath = outdir.parent / "sector_members.json"
+        mpath.write_text(json.dumps(members, ensure_ascii=False), encoding="utf-8")
+        print(f"[OK] 成员映射 {len(members)} 板块 → {mpath}")
+    st = write_fetch_status(
+        outdir,
+        total,
+        ok,
+        failed,
+        args.min_success_rate,
+        period=period,
+        incremental=args.incremental,
+    )
+    # 摘要行必须自带成功率:上游 runner 只回显最后一行，"3/430" 不写出来就等于无声失败
+    tag = "[OK]" if st["status"] == "ok" else "[WARN]"
+    print(
+        f"{tag} 板块指数落盘 {ok}/{total}（成功率 {st['success_rate']:.1%}，"
+        f"门槛 {args.min_success_rate:.0%}，status={st['status']}）→ {outdir}"
+    )
+    return 0 if st.get("status") == "ok" else 2
+
+
+def main(argv=None) -> int:
+    args = _build_parser().parse_args(argv)
     outdir = Path(args.out)
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -309,113 +442,10 @@ def main(argv=None) -> int:
         return 1
     tq = tq_sector._import_tq()
     tq.initialize(str(Path(__file__).resolve()))
-    ok = 0
-    total = 0
-    members: dict = {}
-    st: dict = {}
     try:
-        sectors = tq.get_sector_list() or []
-        if args.limit:
-            sectors = sectors[: args.limit]
-        total = len(sectors)
-        print(f"[INFO] 板块数: {total}")
-        if not sectors:
-            print("[ERR] TQ 未返回板块列表")
-            return 2
-        period, note = resolve_period(tq, sectors[0], args.start, args.period)
-        if not period:
-            # 快速失败:周期串不被接受时不再逐个板块重试(此前 --period day 会刷 400 条 WARN 后超时)
-            print(
-                f"[ERR] 无可用周期串(试过 {', '.join(PERIOD_CANDIDATES)}):{note}",
-                file=sys.stderr,
-            )
-            print(
-                "[ERR] TQ 周期串约定见 governance/data/TDX_LOCAL_INTERFACES.md「周期串是 1d，不是 day」"
-            )
-            return 2
-        print(
-            f"[INFO] 使用周期 {period}{'(自动探测)' if not args.period else ''}"
-            f"{'; 增量合并模式' if args.incremental else '; 全量重拉'}"
-        )
-        import time as _t
-
-        failed: list[str] = []
-        for i, code in enumerate(sectors):
-            code_q = _suffixed(code)  # refresh_kline 必须带市场后缀，否则 Codestr Error
-            try:
-                dest = outdir / f"{code_q}.csv"
-                start = (
-                    incremental_start(dest, args.start)
-                    if args.incremental
-                    else args.start
-                )
-                tq.refresh_kline([code_q], period=period)
-                d = tq.get_market_data(
-                    field_list=["Close"],
-                    stock_list=[code_q],
-                    period=period,
-                    start_time=start,
-                    count=-1,
-                )
-                frame = _to_close_frame(d, code_q)
-                if frame is None:  # refresh 异步(run_id)，空数据时稍候重试一次
-                    _t.sleep(2.0)
-                    d = tq.get_market_data(
-                        field_list=["Close"],
-                        stock_list=[code_q],
-                        period=period,
-                        start_time=start,
-                        count=-1,
-                    )
-                    frame = _to_close_frame(d, code_q)
-                if args.incremental:
-                    frame = merge_close_frame(dest, frame)
-                if frame is not None:
-                    atomic_write_csv(frame, dest)
-                    ok += 1
-                else:
-                    failed.append(code_q)
-                    print(f"[WARN] {code_q}: 解析不出收盘序列", file=sys.stderr)
-                if args.members:
-                    try:
-                        mem = tq.get_stock_list_in_sector(code) or []
-                        members[code] = [
-                            str(x).split(".")[0][-6:].zfill(6) for x in mem
-                        ]
-                    except Exception as mexc:  # noqa: BLE001
-                        print(f"[WARN] members {code}: {mexc}", file=sys.stderr)
-            except Exception as exc:  # noqa: BLE001
-                failed.append(code_q)
-                print(f"[WARN] {code}: {exc}", file=sys.stderr)
-            if args.sleep_ms > 0:  # 串行不改(不引入并发复杂度)，但要限速
-                _t.sleep(args.sleep_ms / 1000.0)
-            if (i + 1) % 50 == 0:
-                print(
-                    f"[INFO] {i + 1}/{total}  已落盘 {ok}  失败 {len(failed)}",
-                    file=sys.stderr,
-                )
-        if args.members:
-            mpath = outdir.parent / "sector_members.json"
-            mpath.write_text(json.dumps(members, ensure_ascii=False), encoding="utf-8")
-            print(f"[OK] 成员映射 {len(members)} 板块 → {mpath}")
-        st = write_fetch_status(
-            outdir,
-            total,
-            ok,
-            failed,
-            args.min_success_rate,
-            period=period,
-            incremental=args.incremental,
-        )
-        # 摘要行必须自带成功率:上游 runner 只回显最后一行，"3/430" 不写出来就等于无声失败
-        tag = "[OK]" if st["status"] == "ok" else "[WARN]"
-        print(
-            f"{tag} 板块指数落盘 {ok}/{total}（成功率 {st['success_rate']:.1%}，"
-            f"门槛 {args.min_success_rate:.0%}，status={st['status']}）→ {outdir}"
-        )
+        return _fetch_all(tq, args, outdir)
     finally:
         tq.close()
-    return 0 if st.get("status") == "ok" else 2
 
 
 if __name__ == "__main__":

@@ -349,6 +349,76 @@ def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
     }
 
 
+def _closing_pivots(
+    x: pd.DataFrame, left: int, right: int, lookback: int
+) -> tuple[list[int], list[int]]:
+    """近端 lookback 根内的收盘确认分型（窗口内唯一极值）→ (pivot_lows, pivot_highs)。"""
+    pivot_lows: list[int] = []
+    pivot_highs: list[int] = []
+    search_start = max(left, len(x) - max(lookback, left + right + 8))
+    for i in range(search_start, len(x) - right):
+        close_window = x["close"].iloc[i - left : i + right + 1]
+        close = float(x.at[i, "close"])
+        if (
+            close == float(close_window.min())
+            and int((close_window == close).sum()) == 1
+        ):
+            pivot_lows.append(i)
+        if (
+            close == float(close_window.max())
+            and int((close_window == close).sum()) == 1
+        ):
+            pivot_highs.append(i)
+    return pivot_lows, pivot_highs
+
+
+def _breach_freshness(
+    x: pd.DataFrame,
+    anchor: int,
+    level: float,
+    current_close: float,
+    stale_breach_bars: int,
+) -> tuple[int | None, int | None, bool, bool]:
+    """anchor 之后首次收盘跌破 level 的新鲜度。
+
+    → (first_breach, breach_bars_ago, currently_breached, stale)；
+    破位过久(> stale_breach_bars)视为陈旧结构，不应再当作新鲜的 P0 清仓触发。
+    """
+    breach_rows = x.index[(x.index > anchor) & (x["close"] < level)]
+    first_breach = int(breach_rows[0]) if len(breach_rows) else None
+    breach_bars_ago = (len(x) - 1 - first_breach) if first_breach is not None else None
+    currently_breached = current_close < level
+    stale = bool(
+        currently_breached
+        and breach_bars_ago is not None
+        and breach_bars_ago > stale_breach_bars
+    )
+    return first_breach, breach_bars_ago, currently_breached, stale
+
+
+def _latest_rising_n(
+    x: pd.DataFrame, pivot_lows: list[int], pivot_highs: list[int]
+) -> tuple[int, int, int, int | None] | None:
+    """最新上升N (l1, h1, l2, breakout)；无已确认分型结构则 None。"""
+    for l2 in reversed(pivot_lows):
+        prior_lows = [i for i in pivot_lows if i < l2]
+        if not prior_lows:
+            continue
+        l1 = prior_lows[-1]
+        highs = [i for i in pivot_highs if l1 < i < l2]
+        if not highs:
+            continue
+        h1 = max(highs, key=lambda i: float(x.at[i, "close"]))
+        if float(x.at[l2, "close"]) <= float(x.at[l1, "close"]):
+            continue
+        breakout_rows = x.index[
+            (x.index > l2) & (x["close"] > float(x.at[h1, "close"]))
+        ]
+        breakout = int(breakout_rows[0]) if len(breakout_rows) else None
+        return (l1, h1, l2, breakout)
+    return None
+
+
 def n_structure_state(
     df: pd.DataFrame,
     left: int = 3,
@@ -369,42 +439,8 @@ def n_structure_state(
     if len(df) < left + right + 8:
         return {"available": False, "reason": "K线数量不足以确认N型结构"}
     x = df.reset_index(drop=True)
-    pivot_lows: list[int] = []
-    pivot_highs: list[int] = []
-    search_start = max(left, len(x) - max(lookback, left + right + 8))
-    for i in range(search_start, len(x) - right):
-        close_window = x["close"].iloc[i - left : i + right + 1]
-        close = float(x.at[i, "close"])
-        if (
-            close == float(close_window.min())
-            and int((close_window == close).sum()) == 1
-        ):
-            pivot_lows.append(i)
-        if (
-            close == float(close_window.max())
-            and int((close_window == close).sum()) == 1
-        ):
-            pivot_highs.append(i)
-
-    latest = None
-    for l2 in reversed(pivot_lows):
-        prior_lows = [i for i in pivot_lows if i < l2]
-        if not prior_lows:
-            continue
-        l1 = prior_lows[-1]
-        highs = [i for i in pivot_highs if l1 < i < l2]
-        if not highs:
-            continue
-        h1 = max(highs, key=lambda i: float(x.at[i, "close"]))
-        if float(x.at[l2, "close"]) <= float(x.at[l1, "close"]):
-            continue
-        breakout_rows = x.index[
-            (x.index > l2) & (x["close"] > float(x.at[h1, "close"]))
-        ]
-        breakout = int(breakout_rows[0]) if len(breakout_rows) else None
-        latest = (l1, h1, l2, breakout)
-        break
-
+    pivot_lows, pivot_highs = _closing_pivots(x, left, right, lookback)
+    latest = _latest_rising_n(x, pivot_lows, pivot_highs)
     if latest is None:
         return {"available": False, "reason": "未发现已确认分型的上升N型结构"}
     l1, h1, l2, breakout = latest
@@ -417,14 +453,8 @@ def n_structure_state(
     )
     distance_pct = (current_close / origin_low - 1) * 100 if origin_low else None
     # 破位新鲜度：L2 之后首次收盘跌破 L1 的位置；破位过久(> stale_breach_bars)视为陈旧结构
-    breach_rows = x.index[(x.index > l2) & (x["close"] < origin_low)]
-    first_breach = int(breach_rows[0]) if len(breach_rows) else None
-    breach_bars_ago = (len(x) - 1 - first_breach) if first_breach is not None else None
-    currently_breached = current_close < origin_low
-    stale = bool(
-        currently_breached
-        and breach_bars_ago is not None
-        and breach_bars_ago > stale_breach_bars
+    first_breach, breach_bars_ago, currently_breached, stale = _breach_freshness(
+        x, l2, origin_low, current_close, stale_breach_bars
     )
     return {
         "available": True,
@@ -456,6 +486,28 @@ def n_structure_state(
     }
 
 
+def _latest_descending_n(
+    x: pd.DataFrame, pivot_lows: list[int], pivot_highs: list[int]
+) -> tuple[int, int, int, bool] | None:
+    """最新下降N (h1, l1, h2, confirmed)；无已确认分型结构则 None。"""
+    current_close = float(x["close"].iloc[-1])
+    for h2 in reversed(pivot_highs):
+        prior_highs = [i for i in pivot_highs if i < h2]
+        if not prior_highs:
+            continue
+        h1 = prior_highs[-1]
+        if float(x.at[h2, "close"]) >= float(x.at[h1, "close"]):
+            continue  # H2 must be lower than H1
+        lows_between = [i for i in pivot_lows if h1 < i < h2]
+        if not lows_between:
+            continue
+        l1 = min(lows_between, key=lambda i: float(x.at[i, "close"]))
+        # Check if current close is below L1 (confirmation)
+        confirmed = current_close < float(x.at[l1, "close"])
+        return (h1, l1, h2, confirmed)
+    return None
+
+
 def descending_n_structure_state(
     df: pd.DataFrame,
     left: int = 3,
@@ -478,41 +530,8 @@ def descending_n_structure_state(
     if len(df) < left + right + 8:
         return {"available": False, "reason": "K线数量不足以确认下降N型结构"}
     x = df.reset_index(drop=True)
-    pivot_lows: list[int] = []
-    pivot_highs: list[int] = []
-    search_start = max(left, len(x) - max(lookback, left + right + 8))
-    for i in range(search_start, len(x) - right):
-        close_window = x["close"].iloc[i - left : i + right + 1]
-        close = float(x.at[i, "close"])
-        if (
-            close == float(close_window.min())
-            and int((close_window == close).sum()) == 1
-        ):
-            pivot_lows.append(i)
-        if (
-            close == float(close_window.max())
-            and int((close_window == close).sum()) == 1
-        ):
-            pivot_highs.append(i)
-
-    latest = None
-    for h2 in reversed(pivot_highs):
-        prior_highs = [i for i in pivot_highs if i < h2]
-        if not prior_highs:
-            continue
-        h1 = prior_highs[-1]
-        if float(x.at[h2, "close"]) >= float(x.at[h1, "close"]):
-            continue  # H2 must be lower than H1
-        lows_between = [i for i in pivot_lows if h1 < i < h2]
-        if not lows_between:
-            continue
-        l1 = min(lows_between, key=lambda i: float(x.at[i, "close"]))
-        # Check if current close is below L1 (confirmation)
-        current_close = float(x["close"].iloc[-1])
-        confirmed = current_close < float(x.at[l1, "close"])
-        latest = (h1, l1, h2, confirmed)
-        break
-
+    pivot_lows, pivot_highs = _closing_pivots(x, left, right, lookback)
+    latest = _latest_descending_n(x, pivot_lows, pivot_highs)
     if latest is None:
         return {"available": False, "reason": "未发现已确认分型的下降N型结构"}
     h1, l1, h2, confirmed = latest
@@ -524,13 +543,8 @@ def descending_n_structure_state(
         x["high"].iloc[max(0, h1 - left) : min(len(x), h1 + right + 1)].max()
     )
     distance_pct = (current_close / pullback_low - 1) * 100 if pullback_low else None
-    breach_rows = x.index[(x.index > h2) & (x["close"] < pullback_low)]
-    first_breach = int(breach_rows[0]) if len(breach_rows) else None
-    breach_bars_ago = (len(x) - 1 - first_breach) if first_breach is not None else None
-    stale = bool(
-        confirmed
-        and breach_bars_ago is not None
-        and breach_bars_ago > stale_breach_bars
+    first_breach, breach_bars_ago, _currently_breached, stale = _breach_freshness(
+        x, h2, pullback_low, current_close, stale_breach_bars
     )
     return {
         "available": True,
@@ -558,43 +572,69 @@ def descending_n_structure_state(
     }
 
 
-def trend_state(df: pd.DataFrame) -> dict[str, Any]:
-    if len(df) < 60:
-        return {"state": "数据不足", "reason": "少于60根K线"}
+def _trend_metrics(df: pd.DataFrame) -> dict[str, Any]:
+    """趋势判定的原始输入：均线值/斜率与 20 日高低点。"""
     close = df["close"]
     ma25 = close.rolling(25).mean()
     ma60 = close.rolling(60).mean()
     ma144 = close.rolling(144).mean()
     ma240 = close.rolling(240).mean()
-    c = float(close.iloc[-1])
-    ma25v, ma60v = float(ma25.iloc[-1]), float(ma60.iloc[-1])
-    ma144v = float(ma144.iloc[-1]) if pd.notna(ma144.iloc[-1]) else None
-    ma240v = float(ma240.iloc[-1]) if pd.notna(ma240.iloc[-1]) else None
-    ma25_slope = slope(ma25.dropna(), 5)
-    ma60_slope = slope(ma60.dropna(), 10)
-    ma144_slope = slope(ma144.dropna(), 20)
-    ma240_slope = slope(ma240.dropna(), 20)
     high20_now = float(df["high"].tail(20).max())
-    high20_prev = float(df["high"].iloc[-40:-20].max()) if len(df) >= 40 else high20_now
     low20_now = float(df["low"].tail(20).min())
-    low20_prev = float(df["low"].iloc[-40:-20].min()) if len(df) >= 40 else low20_now
+    return {
+        "c": float(close.iloc[-1]),
+        "ma25v": float(ma25.iloc[-1]),
+        "ma60v": float(ma60.iloc[-1]),
+        "ma144v": float(ma144.iloc[-1]) if pd.notna(ma144.iloc[-1]) else None,
+        "ma240v": float(ma240.iloc[-1]) if pd.notna(ma240.iloc[-1]) else None,
+        "ma25_slope": slope(ma25.dropna(), 5),
+        "ma60_slope": slope(ma60.dropna(), 10),
+        "ma144_slope": slope(ma144.dropna(), 20),
+        "ma240_slope": slope(ma240.dropna(), 20),
+        "high20_now": high20_now,
+        "high20_prev": float(df["high"].iloc[-40:-20].max())
+        if len(df) >= 40
+        else high20_now,
+        "low20_now": low20_now,
+        "low20_prev": float(df["low"].iloc[-40:-20].min())
+        if len(df) >= 40
+        else low20_now,
+    }
 
+
+def _trend_classify(m: dict[str, Any]) -> str:
+    """上涨/下跌/横盘震荡 三态判定。"""
     if (
-        c > ma25v > ma60v
-        and (ma25_slope or 0) > 0
-        and high20_now >= high20_prev
-        and low20_now >= low20_prev
+        m["c"] > m["ma25v"] > m["ma60v"]
+        and (m["ma25_slope"] or 0) > 0
+        and m["high20_now"] >= m["high20_prev"]
+        and m["low20_now"] >= m["low20_prev"]
     ):
-        state = "上涨"
-    elif (
-        c < ma25v < ma60v
-        and (ma25_slope or 0) < 0
-        and high20_now <= high20_prev
-        and low20_now <= low20_prev
+        return "上涨"
+    if (
+        m["c"] < m["ma25v"] < m["ma60v"]
+        and (m["ma25_slope"] or 0) < 0
+        and m["high20_now"] <= m["high20_prev"]
+        and m["low20_now"] <= m["low20_prev"]
     ):
-        state = "下跌"
-    else:
-        state = "横盘震荡"
+        return "下跌"
+    return "横盘震荡"
+
+
+def trend_state(df: pd.DataFrame) -> dict[str, Any]:
+    if len(df) < 60:
+        return {"state": "数据不足", "reason": "少于60根K线"}
+    m = _trend_metrics(df)
+    c = m["c"]
+    ma25v, ma60v = m["ma25v"], m["ma60v"]
+    ma144v, ma240v = m["ma144v"], m["ma240v"]
+    ma25_slope = m["ma25_slope"]
+    ma60_slope = m["ma60_slope"]
+    ma144_slope = m["ma144_slope"]
+    ma240_slope = m["ma240_slope"]
+    high20_now, high20_prev = m["high20_now"], m["high20_prev"]
+    low20_now, low20_prev = m["low20_now"], m["low20_prev"]
+    state = _trend_classify(m)
     return {
         "state": state,
         "close": round(c, 4),

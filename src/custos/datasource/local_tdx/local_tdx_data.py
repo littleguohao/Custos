@@ -870,6 +870,20 @@ def get_ohlcv_table(
 
     结果带 `attrs["adjust"]`（"qfq"/"none"）与 `raw_close` 列（未复权收盘）。
     """
+    df = _fetch_ohlcv(code, count, prefer, expect_last_date)
+    if not df.empty and len(df) > count:
+        df = df.tail(count).reset_index(drop=True)
+    _mark_freshness(code, df, expect_last_date)
+    return _apply_adjust(code, df, adjust)
+
+
+def _fetch_ohlcv(
+    code: str,
+    count: int,
+    prefer: str,
+    expect_last_date: str | None,
+) -> pd.DataFrame:
+    """本地 vipdoc 优先、在线回退、stale 刷新的取数段。"""
     df = pd.DataFrame()
     if prefer == "vipdoc":
         try:
@@ -913,8 +927,15 @@ def get_ohlcv_table(
             )
             else stale_local
         )
-    if not df.empty and len(df) > count:
-        df = df.tail(count).reset_index(drop=True)
+    return df
+
+
+def _mark_freshness(
+    code: str,
+    df: pd.DataFrame,
+    expect_last_date: str | None,
+) -> None:
+    """按 expect_last_date 在 attrs 里标注末根日期与陈旧状态。"""
     if expect_last_date and not df.empty:
         last = _last_bar_date(df)
         df.attrs["last_date"] = last
@@ -925,6 +946,10 @@ def get_ohlcv_table(
                 f"[WARN] {code} 数据陈旧: 末根 K 线 {last} < 期望 {expect_last_date}",
                 file=sys.stderr,
             )
+
+
+def _apply_adjust(code: str, df: pd.DataFrame, adjust: str) -> pd.DataFrame:
+    """按 adjust 口径做复权（默认全链前复权），失败按未复权留痕。"""
     if adjust == "qfq" and not df.empty:
         # owner 2026-08-04 拍板：全链统一前复权。未复权数据会把除权跳空当成真实暴跌
         # ⇒ 假止损、假 J<13 信号、假跌停（详见 research/R14_meta_data_foundation.md）。

@@ -741,37 +741,42 @@ def build_report(result: dict[str, Any]) -> str:
 # ---------------------------------------------------------------- 主流程
 
 
-def run_backtest(start: str, end: str) -> dict[str, Any]:
+def _load_regime_data() -> tuple[dict, dict[str, str], list[str]]:
+    """解析 0AMV 日线并构造 regime map；解析失败直接 RuntimeError。"""
     from custos.datasource.local_tdx.compass_amv import parse_amv_daily
 
-    trades = load_ledger()
     parsed = parse_amv_daily(since="1990-01-01")
     if parsed.get("error"):
         raise RuntimeError(f"0AMV 解析失败: {parsed['error']}")
     records = parsed["records"]
-    regime_map = build_regime_map(records)
-    amv_days = [r["date"] for r in records]
+    return parsed, build_regime_map(records), [r["date"] for r in records]
 
-    trade_codes = [
-        t["code"]
-        for t in trades
-        if t["category"] in ("买入", "卖出", "转债转入", "拆股")
-    ]
-    prices, missing = load_price_data(trade_codes)
-    sell_fee_rate = avg_sell_fee_rate(trades)
 
-    scenarios = {
+def _run_all_scenarios(
+    trades: list[dict],
+    regime_map: dict[str, str],
+    amv_days: list[str],
+    prices: dict[str, dict],
+    sell_fee_rate: float,
+    start: str,
+    end: str,
+) -> dict[str, Any]:
+    """按 SCENARIOS 顺序重放全部场景。"""
+    return {
         name: run_scenario(
             trades, regime_map, amv_days, prices, name, sell_fee_rate, start, end
         )
         for name in SCENARIOS
     }
 
+
+def _regime_stats(regime_map: dict[str, str], amv_days: list[str]) -> dict[str, Any]:
+    """2020 以来的空头/多头/neutral 天数与空头连续区间统计。"""
     days_since_2020 = [d for d in amv_days if d >= "2020-01-01"]
     bear_segs = regime_segments(regime_map, "bear", since="2020-01-01")
     bull_days = sum(1 for d in days_since_2020 if regime_map[d] == "bull")
     bear_days = sum(1 for d in days_since_2020 if regime_map[d] == "bear")
-    regime_stats = {
+    return {
         "bear_count": len(bear_segs),
         "bear_days": bear_days,
         "bull_days": bull_days,
@@ -783,7 +788,15 @@ def run_backtest(start: str, end: str) -> dict[str, Any]:
         "bear_segments": bear_segs,
     }
 
-    act = scenarios["actual"]
+
+def _bear_buy_review(
+    trades: list[dict],
+    regime_map: dict[str, str],
+    act: dict[str, Any],
+    start: str,
+    end: str,
+) -> dict[str, Any]:
+    """空头区买入复盘：笔数/金额/已实现+浮动盈亏/占 actual 总盈亏比例。"""
     bear_buys = [
         t
         for t in trades
@@ -794,7 +807,7 @@ def run_backtest(start: str, end: str) -> dict[str, Any]:
     bear_total = round(
         act["bear_buys_pnl_realized"] + act["bear_buys_pnl_unrealized"], 2
     )
-    bear_review = {
+    return {
         "count": len(bear_buys),
         "amount": round(sum(t["amount"] for t in bear_buys), 2),
         "realized_pnl": act["bear_buys_pnl_realized"],
@@ -805,6 +818,9 @@ def run_backtest(start: str, end: str) -> dict[str, Any]:
         ),
     }
 
+
+def _position_check(act: dict[str, Any]) -> tuple[list[dict], str]:
+    """actual 期末持仓对账，返回 (对照表, 说明文案)。"""
     pos_check = check_positions(act["positions_end"])
     bad = [r for r in pos_check if abs(r["diff"]) > 1e-6]
     pos_note = (
@@ -812,7 +828,28 @@ def run_backtest(start: str, end: str) -> dict[str, Any]:
         if not bad
         else f"{len(bad)} 只存在差值（可能源于分红送转/手工调整/台账外操作），见上表。"
     )
+    return pos_check, pos_note
 
+
+def run_backtest(start: str, end: str) -> dict[str, Any]:
+    trades = load_ledger()
+    parsed, regime_map, amv_days = _load_regime_data()
+    records = parsed["records"]
+
+    trade_codes = [
+        t["code"]
+        for t in trades
+        if t["category"] in ("买入", "卖出", "转债转入", "拆股")
+    ]
+    prices, missing = load_price_data(trade_codes)
+    sell_fee_rate = avg_sell_fee_rate(trades)
+
+    scenarios = _run_all_scenarios(
+        trades, regime_map, amv_days, prices, sell_fee_rate, start, end
+    )
+    regime_stats = _regime_stats(regime_map, amv_days)
+    bear_review = _bear_buy_review(trades, regime_map, scenarios["actual"], start, end)
+    pos_check, pos_note = _position_check(scenarios["actual"])
     all_shortfalls = {name: sc["shortfalls"] for name, sc in scenarios.items()}
 
     result = {

@@ -90,19 +90,10 @@ def _post(payload: dict, timeout: int, endpoint: Optional[str] = None) -> bytes:
         return resp.read()
 
 
-def call(
-    method: str,
-    params: Optional[dict] = None,
-    timeout: int = DEFAULT_TIMEOUT,
-    allow_unsafe_download: bool = False,
-    endpoint: Optional[str] = None,
-) -> dict:
-    """调用 TQ-Local 接口，统一返回 {"ok", "value", "error"}，绝不 raise。
-
-    ``allow_unsafe_download``：放行非白名单的 `download_file` down_type。
-    默认拦截 —— 见 `SAFE_DOWN_TYPES` 上方注释（1/5/6 实测可打挂 TdxW 服务，
-    而它一挂，选股链与持仓行情一起没了）。
-    """
+def _preflight(
+    method: str, params: Optional[dict], allow_unsafe_download: bool
+) -> Optional[dict]:
+    """请求前检查：返回结构化错误 dict，放行返回 None。"""
     if method == "download_file" and not allow_unsafe_download:
         dt = (params or {}).get("down_type")
         if dt not in SAFE_DOWN_TYPES:
@@ -118,34 +109,73 @@ def call(
             return _err("bad_stock_code", why)
     if not is_tdxw_running():
         return _err("tdxw_not_running", "TdxW.exe 未运行，TQ-Local 服务不可用")
-    payload = {"id": 1, "method": method, "params": params or {}}
+    return None
+
+
+def _fetch(payload: dict, timeout: int, endpoint: Optional[str]) -> tuple:
+    """发请求并兜底所有异常：成功返回 (raw, None)，失败返回 (None, err dict)。"""
     try:
         raw = _post(payload, timeout, endpoint)
     except urllib.error.URLError as exc:
-        return _err("connection_failed", exc.reason if hasattr(exc, "reason") else exc)
+        return None, _err(
+            "connection_failed", exc.reason if hasattr(exc, "reason") else exc
+        )
     except TimeoutError as exc:
-        return _err("timeout", exc)
+        return None, _err("timeout", exc)
     except Exception as exc:  # noqa: BLE001 —— 绝不 raise 到调用方
-        return _err("request_failed", exc)
+        return None, _err("request_failed", exc)
+    return raw, None
+
+
+def _parse_response(raw: bytes, method: str) -> tuple:
+    """解析响应体：成功返回 (value, None)，失败返回 (None, err dict)。"""
     try:
         body = json.loads(raw.decode("utf-8"))
     except (ValueError, UnicodeDecodeError) as exc:
-        return _err("invalid_response", exc)
+        return None, _err("invalid_response", exc)
     if not isinstance(body, dict):
-        return _err("invalid_response", f"unexpected body type: {type(body).__name__}")
+        return None, _err(
+            "invalid_response", f"unexpected body type: {type(body).__name__}"
+        )
     if body.get("error"):
-        return _err("jsonrpc_error", body["error"])
+        return None, _err("jsonrpc_error", body["error"])
     result = body.get("result")
     if not isinstance(result, dict):
-        return _err("invalid_response", "missing result object")
+        return None, _err("invalid_response", "missing result object")
     error_id = str(result.get("ErrorId", "0"))
     if error_id != "0":
-        return _err("tq_error", f"ErrorId={error_id} method={method}")
+        return None, _err("tq_error", f"ErrorId={error_id} method={method}")
     # 两种响应形态：Value 形态取 Value；字段直挂 result 形态去掉 ErrorId 取本体
     if "Value" in result:
         value = result["Value"]
     else:
         value = {k: v for k, v in result.items() if k != "ErrorId"}
+    return value, None
+
+
+def call(
+    method: str,
+    params: Optional[dict] = None,
+    timeout: int = DEFAULT_TIMEOUT,
+    allow_unsafe_download: bool = False,
+    endpoint: Optional[str] = None,
+) -> dict:
+    """调用 TQ-Local 接口，统一返回 {"ok", "value", "error"}，绝不 raise。
+
+    ``allow_unsafe_download``：放行非白名单的 `download_file` down_type。
+    默认拦截 —— 见 `SAFE_DOWN_TYPES` 上方注释（1/5/6 实测可打挂 TdxW 服务，
+    而它一挂，选股链与持仓行情一起没了）。
+    """
+    preflight_err = _preflight(method, params, allow_unsafe_download)
+    if preflight_err is not None:
+        return preflight_err
+    payload = {"id": 1, "method": method, "params": params or {}}
+    raw, fetch_err = _fetch(payload, timeout, endpoint)
+    if fetch_err is not None:
+        return fetch_err
+    value, parse_err = _parse_response(raw, method)
+    if parse_err is not None:
+        return parse_err
     return {"ok": True, "value": value, "error": None}
 
 

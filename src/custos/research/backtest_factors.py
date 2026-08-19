@@ -1137,34 +1137,41 @@ def _stats(rows: list[dict[str, Any]], horizon: int) -> dict[str, Any]:
     }
 
 
-def summarize(records: list[dict[str, Any]], horizon: int = 10) -> dict[str, Any]:
-    """按 S** 档 / 建议 / 分项命中分组统计，输出校准视图。
+_SSTAR_BANDS = [
+    ("A_可买(>=70)", 70.0, 1e9),
+    ("B_观望(60-70)", 60.0, 70.0),
+    ("C_中(40-60)", 40.0, 60.0),
+    ("D_弱(<40)", -1e9, 40.0),
+]
 
-    关键校准问题：'可买(S**≥70)' 的前向胜率/收益是否显著高于 '不买(<60)'？
-    某分项(如 pocket_pivot/pivot)命中 vs 未命中是否有正向 lift？
-    """
-    bands = [
-        ("A_可买(>=70)", 70.0, 1e9),
-        ("B_观望(60-70)", 60.0, 70.0),
-        ("C_中(40-60)", 40.0, 60.0),
-        ("D_弱(<40)", -1e9, 40.0),
-    ]
+
+def _band_stats(records: list[dict[str, Any]], horizon: int) -> list[dict[str, Any]]:
+    """按 S** 分档统计（summarize 的第一段）。"""
     by_band = []
-    for label, lo, hi in bands:
+    for label, lo, hi in _SSTAR_BANDS:
         rows = [
             r for r in records if r.get("s_star") is not None and lo <= r["s_star"] < hi
         ]
         by_band.append({"band": label, **_stats(rows, horizon)})
+    return by_band
 
+
+def _suggestion_stats(records: list[dict[str, Any]], horizon: int) -> dict[str, Any]:
+    """按建议档统计（summarize 的第二段）。"""
     by_suggestion = {}
     for sug in ("可买", "观望", "不买"):
         rows = [r for r in records if r.get("suggestion") == sug]
         by_suggestion[sug] = _stats(rows, horizon)
+    return by_suggestion
 
-    # 分项命中 lift：分项得分 > 0 视为命中，比较命中/未命中两组。
-    # 审计：键集原来只取 records[0]——第一条记录恰好缺某个 c_* 分项（打分器降级、
-    # 分项 available=False、或混跑了两个打分器）时，后面所有记录的该分项被静默丢掉，
-    # 报告里"没有这一项"和"这一项没 lift"长得一模一样。改成全量取并集。
+
+def _component_hit_stats(records: list[dict[str, Any]], horizon: int) -> dict[str, Any]:
+    """分项命中 lift（summarize 的第三段）：分项得分 > 0 视为命中，比较命中/未命中两组。
+
+    审计：键集原来只取 records[0]——第一条记录恰好缺某个 c_* 分项（打分器降级、
+    分项 available=False、或混跑了两个打分器）时，后面所有记录的该分项被静默丢掉，
+    报告里"没有这一项"和"这一项没 lift"长得一模一样。改成全量取并集。
+    """
     comp_keys: list[str] = []
     seen: set[str] = set()
     for r in records:
@@ -1182,6 +1189,18 @@ def summarize(records: list[dict[str, Any]], horizon: int = 10) -> dict[str, Any
         hit = [r for r in records if (r.get(ck) or 0) > 0]
         miss = [r for r in records if not (r.get(ck) or 0) > 0]
         by_component[ck] = {"hit": _stats(hit, horizon), "miss": _stats(miss, horizon)}
+    return by_component
+
+
+def summarize(records: list[dict[str, Any]], horizon: int = 10) -> dict[str, Any]:
+    """按 S** 档 / 建议 / 分项命中分组统计，输出校准视图。
+
+    关键校准问题：'可买(S**≥70)' 的前向胜率/收益是否显著高于 '不买(<60)'？
+    某分项(如 pocket_pivot/pivot)命中 vs 未命中是否有正向 lift？
+    """
+    by_band = _band_stats(records, horizon)
+    by_suggestion = _suggestion_stats(records, horizon)
+    by_component = _component_hit_stats(records, horizon)
 
     return {
         "horizon": horizon,
@@ -2077,10 +2096,8 @@ def evaluate_trades(
     return trades
 
 
-def summarize_trades(trades: list[dict[str, Any]]) -> dict[str, Any]:
-    """交易级汇总：胜率、每笔期望、盈亏比、均持仓、按出场原因分解。"""
-    if not trades:
-        return {"n": 0, "text": "无交易"}
+def _trade_base_stats(trades: list[dict[str, Any]]) -> dict[str, Any]:
+    """基础统计（summarize_trades 的第一段）：胜率/期望/中位/盈亏比/均持/按出场原因分解。"""
     import collections
 
     rets = [t["ret"] for t in trades]
@@ -2093,7 +2110,7 @@ def summarize_trades(trades: list[dict[str, Any]]) -> dict[str, Any]:
     for rs in collections.Counter(t["reason"] for t in trades):
         rr = [t["ret"] for t in trades if t["reason"] == rs]
         by_reason[rs] = {"n": len(rr), "avg_return": round(statistics.mean(rr), 4)}
-    d = {
+    return {
         "n": len(trades),
         "win_rate": round(len(wins) / len(rets), 4),
         "expectancy": round(statistics.mean(rets), 4),
@@ -2104,18 +2121,36 @@ def summarize_trades(trades: list[dict[str, Any]]) -> dict[str, Any]:
         "avg_holding": round(statistics.mean([t["holding"] for t in trades]), 1),
         "exit_reasons": by_reason,
     }
-    # R 倍数视角（风险定额仓位）：R=净收益/单笔风险敞口；期望R×每笔风险% ≈ 每笔账户增长
+
+
+def _r_multiple_stats(
+    trades: list[dict[str, Any]],
+) -> tuple[list[float], dict[str, Any]]:
+    """R 倍数统计（summarize_trades 的第二段）。无 R 数据时返回 ``([], {})``。
+
+    R 倍数视角（风险定额仓位）：R=净收益/单笔风险敞口；期望R×每笔风险% ≈ 每笔账户增长
+    """
     rmults = [t["r_multiple"] for t in trades if t.get("r_multiple") is not None]
-    if rmults:
-        rwin = [r for r in rmults if r > 0]
-        rloss = [-r for r in rmults if r < 0]
-        d["expectancy_R"] = round(
+    if not rmults:
+        return rmults, {}
+    rwin = [r for r in rmults if r > 0]
+    rloss = [-r for r in rmults if r < 0]
+    r_stats = {
+        "expectancy_R": round(
             statistics.mean(rmults), 3
-        )  # 每笔期望R(已对 risk_frac 设地板)
-        d["median_R"] = round(statistics.median(rmults), 3)  # 中位R(抗极端值,更稳)
-        d["avg_win_R"] = round(statistics.mean(rwin), 3) if rwin else 0.0
-        d["avg_loss_R"] = round(statistics.mean(rloss), 3) if rloss else 0.0
-        d["total_R"] = round(sum(rmults), 1)  # 累计R(样本期总盈亏,以R计)
+        ),  # 每笔期望R(已对 risk_frac 设地板)
+        "median_R": round(statistics.median(rmults), 3),  # 中位R(抗极端值,更稳)
+        "avg_win_R": round(statistics.mean(rwin), 3) if rwin else 0.0,
+        "avg_loss_R": round(statistics.mean(rloss), 3) if rloss else 0.0,
+        "total_R": round(sum(rmults), 1),  # 累计R(样本期总盈亏,以R计)
+    }
+    return rmults, r_stats
+
+
+def _trades_summary_lines(
+    d: dict[str, Any], rmults: list[float], by_reason: dict[str, Any]
+) -> list[str]:
+    """组装 human-readable 汇总行（summarize_trades 的第三段，text 字段）。"""
     lines = [
         f"交易 {d['n']} 笔  胜率 {d['win_rate'] * 100:.1f}%  期望(均) {d['expectancy'] * 100:+.2f}%/笔  "
         f"中位 {d['median_return'] * 100:+.2f}%  盈亏比 {d['payoff_ratio']}  均持 {d['avg_holding']} 根",
@@ -2129,7 +2164,18 @@ def summarize_trades(trades: list[dict[str, Any]]) -> dict[str, Any]:
         )
     for rs, s in by_reason.items():
         lines.append(f"  出场[{rs}] {s['n']} 笔  均收 {s['avg_return'] * 100:+.2f}%")
-    d["text"] = "\n".join(lines)
+    return lines
+
+
+def summarize_trades(trades: list[dict[str, Any]]) -> dict[str, Any]:
+    """交易级汇总：胜率、每笔期望、盈亏比、均持仓、按出场原因分解。"""
+    if not trades:
+        return {"n": 0, "text": "无交易"}
+
+    d = _trade_base_stats(trades)
+    rmults, r_stats = _r_multiple_stats(trades)
+    d.update(r_stats)
+    d["text"] = "\n".join(_trades_summary_lines(d, rmults, d["exit_reasons"]))
     return d
 
 

@@ -187,27 +187,9 @@ def report_age_days(report_date, as_of=None) -> Optional[int]:
     return (ref - d).days
 
 
-def financial_factor(
-    code: str,
-    fin_df,
-    colmap: dict,
-    price: Optional[float] = None,
-    as_of=None,
-    max_age_days: int = REPORT_MAX_AGE_DAYS,
-) -> dict[str, Any]:
-    """CZ 抄底三条件代理（①②）。colmap 不全、数据缺失或定位不到 → available=False。绝不 raise。
-
-    时效上限（审计 E11）：报告期距 `as_of`（缺省=今天）超过 `max_age_days` → available=False
-    且 reason="report_stale" —— 陈旧财报不得无限期视为有效。`max_age_days=0` 关闭该检查。
-    colmap 里没有 report_date 时**不假定新鲜**：report_stale=None + stale_check="no_report_date"，
-    由调用方决定是否采信（下游 fundamental_quality 对 available=False 归"未知"，非"差"）。
-    """
-    if not colmap or fin_df is None or getattr(fin_df, "empty", True):
-        return {"available": False, "reason": "no_financials_or_colmap"}
-    if any(colmap.get(f) is None for f in REQUIRED):
-        return {"available": False, "reason": "required_cols_unmapped"}
+def _locate_row(fin_df, colmap: dict, code6: str):
+    """按 6 位代码定位财务行；返回 (row, None)，失败返回 (None, 失败结果dict)。绝不 raise。"""
     code_col = colmap.get("code")
-    code6 = str(code).split(".")[0].zfill(6)
     try:
         if code_col == "__index__":
             idx = fin_df.index.astype(str).str.split(".").str[0].str.zfill(6)
@@ -217,38 +199,33 @@ def financial_factor(
                 fin_df[code_col].astype(str).str.split(".").str[0].str.zfill(6) == code6
             ]
         else:
-            return {"available": False, "reason": "code_col_missing"}
+            return None, {"available": False, "reason": "code_col_missing"}
         if sub.empty:
-            return {"available": False, "reason": "code_not_found"}
-        row = sub.iloc[0]
+            return None, {"available": False, "reason": "code_not_found"}
+        return sub.iloc[0], None
     except Exception:  # noqa: BLE001
-        return {"available": False, "reason": "lookup_failed"}
+        return None, {"available": False, "reason": "lookup_failed"}
 
-    net_profit = _cell(row, colmap, "net_profit")
-    # 时效先判:陈旧财报直接不可用,免得下面的代理条件在三年前的数据上"成立"
-    rpt_date = _cell_text(row, colmap, "report_date")
-    age = report_age_days(rpt_date, as_of) if rpt_date else None
+
+def _stale_status(
+    rpt_date: str, age: Optional[int], max_age_days: int
+) -> tuple[Optional[bool], str]:
+    """时效判定：返回 (stale, stale_check)。`max_age_days=0` 关闭该检查。"""
     if not max_age_days:
-        stale, stale_check = None, "disabled"
-    elif not rpt_date:
-        stale, stale_check = None, "no_report_date"
-    elif age is None:
-        stale, stale_check = None, "unparsable_report_date"
-    else:
-        stale = age > max_age_days
-        stale_check = "stale" if stale else "ok"
-    if stale:
-        return {
-            "available": False,
-            "reason": "report_stale",
-            "report_date": rpt_date,
-            "report_age_days": age,
-            "report_stale": True,
-            "stale_check": stale_check,
-            "max_age_days": max_age_days,
-        }
-    op_cf = _cell(row, colmap, "op_cashflow")
+        return None, "disabled"
+    if not rpt_date:
+        return None, "no_report_date"
+    if age is None:
+        return None, "unparsable_report_date"
+    stale = age > max_age_days
+    return stale, ("stale" if stale else "ok")
 
+
+def _dixi_metrics(
+    row, colmap: dict, net_profit: Optional[float], price: Optional[float]
+) -> dict[str, Any]:
+    """提取其余财务指标并计算 CZ ①② 代理；返回指标 dict。"""
+    op_cf = _cell(row, colmap, "op_cashflow")
     revenue = _cell(row, colmap, "revenue")
     np_yoy = _cell(row, colmap, "net_profit_yoy")
     rev_yoy = _cell(row, colmap, "revenue_yoy")
@@ -279,14 +256,7 @@ def financial_factor(
         "roe_positive": roe_positive,
     }
     return {
-        "available": True,
         "cashflow_available": ocf_available,
-        "report_date": rpt_date or None,
-        "report_age_days": age,
-        "report_stale": stale,
-        "stale_check": stale_check,
-        "max_age_days": max_age_days,
-        "net_profit": net_profit,
         "op_cashflow": op_cf,
         "revenue": revenue,
         "net_profit_yoy": np_yoy,
@@ -296,6 +266,67 @@ def financial_factor(
         "market_cap_yi": mkt_cap_yi,
         "dixi_proxy": proxy,
         "hits": [k for k, v in proxy.items() if v is True],
+    }
+
+
+def financial_factor(
+    code: str,
+    fin_df,
+    colmap: dict,
+    price: Optional[float] = None,
+    as_of=None,
+    max_age_days: int = REPORT_MAX_AGE_DAYS,
+) -> dict[str, Any]:
+    """CZ 抄底三条件代理（①②）。colmap 不全、数据缺失或定位不到 → available=False。绝不 raise。
+
+    时效上限（审计 E11）：报告期距 `as_of`（缺省=今天）超过 `max_age_days` → available=False
+    且 reason="report_stale" —— 陈旧财报不得无限期视为有效。`max_age_days=0` 关闭该检查。
+    colmap 里没有 report_date 时**不假定新鲜**：report_stale=None + stale_check="no_report_date"，
+    由调用方决定是否采信（下游 fundamental_quality 对 available=False 归"未知"，非"差"）。
+    """
+    if not colmap or fin_df is None or getattr(fin_df, "empty", True):
+        return {"available": False, "reason": "no_financials_or_colmap"}
+    if any(colmap.get(f) is None for f in REQUIRED):
+        return {"available": False, "reason": "required_cols_unmapped"}
+    code6 = str(code).split(".")[0].zfill(6)
+    row, fail = _locate_row(fin_df, colmap, code6)
+    if fail is not None:
+        return fail
+
+    net_profit = _cell(row, colmap, "net_profit")
+    # 时效先判:陈旧财报直接不可用,免得下面的代理条件在三年前的数据上"成立"
+    rpt_date = _cell_text(row, colmap, "report_date")
+    age = report_age_days(rpt_date, as_of) if rpt_date else None
+    stale, stale_check = _stale_status(rpt_date, age, max_age_days)
+    if stale:
+        return {
+            "available": False,
+            "reason": "report_stale",
+            "report_date": rpt_date,
+            "report_age_days": age,
+            "report_stale": True,
+            "stale_check": stale_check,
+            "max_age_days": max_age_days,
+        }
+    m = _dixi_metrics(row, colmap, net_profit, price)
+    return {
+        "available": True,
+        "cashflow_available": m["cashflow_available"],
+        "report_date": rpt_date or None,
+        "report_age_days": age,
+        "report_stale": stale,
+        "stale_check": stale_check,
+        "max_age_days": max_age_days,
+        "net_profit": net_profit,
+        "op_cashflow": m["op_cashflow"],
+        "revenue": m["revenue"],
+        "net_profit_yoy": m["net_profit_yoy"],
+        "revenue_yoy": m["revenue_yoy"],
+        "roe": m["roe"],
+        "market_cap": m["market_cap"],
+        "market_cap_yi": m["market_cap_yi"],
+        "dixi_proxy": m["dixi_proxy"],
+        "hits": m["hits"],
     }
 
 

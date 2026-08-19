@@ -18,6 +18,7 @@ import json
 import os
 import sys
 import time
+from collections.abc import Callable
 
 
 from custos.core.paths import (
@@ -76,6 +77,174 @@ def stage_json_status(stdout: str) -> str:
     return str(obj.get("status", "") or "")
 
 
+def _run_refresh_stock_names(run_stage: Callable[..., dict]) -> None:
+    """Refresh stock name cache —— ST 硬排除的唯一依据，必须滚动更新。
+
+    此前只有 mootdx 一个在线源且它 2026-07 起持续失败，缓存靠手动跑脚本、无 cron、
+    读取时也不校验时效 ⇒ 一份永不更新的名称表长期在用，新被 ST 的票名字还是正常的，
+    照样通过硬排除，而 st_filter 仍报 ok（审计 B5 的延伸）。
+    best-effort：失败不中断，选股链内部还有"候选名称按需刷新 + 缓存时效判定"两道防线。
+    """
+    r = run_stage(
+        [
+            "uv",
+            "run",
+            "python",
+            str(TOOLS / "datasource" / "local_tdx" / "stock_names.py"),
+            "--source",
+            "auto",
+        ],
+        "refresh_stock_names",
+        note="best-effort，失败不中断；ST 硬排除依赖它",
+    )
+    if not r["ok"]:
+        print(f"[WARN] refresh_stock_names failed: {r['out'][:200]}")
+    else:
+        print(
+            f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'stock names refreshed'}"
+        )
+
+
+def _run_refresh_xdxr(run_stage: Callable[..., dict]) -> None:
+    """Refresh ex-dividend (权息) cache —— 前复权的依据（owner 2026-08-04 拍板全链前复权）。
+
+    未复权数据会把除权跳空当成真实暴跌：假止损、假 J<13 信号、假跌停
+    （实测同一段真实上涨走势 −42.50% vs +25.00%，差 67.5pp）。
+    除权事件是历史事实不会变，所以只按 --max-age 增量刷新；分红送转有 >2 周
+    预案公告期，7 天上限足以在除权日前拿到新事件。
+    best-effort：权息拿不到时 get_ohlcv_table 按未复权返回并在 attrs 留痕，
+    不该让整条选股链停摆。
+    """
+    r = run_stage(
+        [
+            "uv",
+            "run",
+            "python",
+            str(TOOLS / "datasource" / "local_tdx" / "adjust_factors.py"),
+            "--warmup",
+            "--max-age",
+            "7",
+        ],
+        "refresh_xdxr",
+        note="前复权依据，best-effort；缺失时按未复权并在 attrs 留痕",
+    )
+    if not r["ok"]:
+        print(f"[WARN] refresh_xdxr failed: {r['out'][:200]}")
+    else:
+        print(f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'xdxr refreshed'}")
+
+
+def _run_refresh_concept_tags(target: str, run_stage: Callable[..., dict]) -> None:
+    """Refresh concept tags (miscinfo) so sector mapping uses the accurate source."""
+    r = run_stage(
+        [
+            "uv",
+            "run",
+            "python",
+            str(TOOLS / "datasource" / "local_tdx" / "concept_tags.py"),
+            "--date",
+            target,
+        ],
+        "refresh_concept_tags",
+        note="best-effort，失败不中断",
+    )
+    if not r["ok"]:
+        print(f"[WARN] refresh_concept_tags failed: {r['out'][:200]}")
+    else:
+        print(
+            f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'concept tags refreshed'}"
+        )
+
+
+def _run_refresh_sector_index(run_stage: Callable[..., dict]) -> None:
+    """Refresh 板块指数缓存(供 enrich 的 sector_phase hint 用当日相位;best-effort,需 TdxW)。
+
+    **增量合并**:只拉各板块缓存末日期前 30 天起的新数据并 merge 进已有 CSV。
+    此前每天全量重拉 20180101 起的 400+ 板块 → 600s stage 超时;
+    且 --period day 是错的周期串(TQ 要 1d,见 TDX_LOCAL_INTERFACES.md),现由脚本自动探测。
+    """
+    r = run_stage(
+        [
+            "uv",
+            "run",
+            "python",
+            str(TOOLS / "datasource" / "local_tdx" / "fetch_sector_index_history.py"),
+            "--out",
+            str(MARKET_DIR / "sector_index"),
+            "--start",
+            "20180101",
+            "--incremental",
+        ],
+        "refresh_sector_index",
+        note="best-effort，失败不中断(仅影响板块相位 hint)",
+    )
+    tail = _last_line(r["out"])
+    if not r["ok"]:
+        # 摘要行自带 "x/y 成功率"：低成功率(3/430)时脚本退 2，这里必须把该行透出，
+        # 否则 [WARN] 只打前 200 字（"[INFO] 板块数: 430"），看不出这批基本全失败。
+        print(f"[WARN] refresh_sector_index failed: {tail or r['out'][:200]}")
+    elif tail.startswith("[WARN]"):
+        print(tail)
+    else:
+        print(f"[OK] {tail or 'sector index refreshed'}")
+
+
+def _run_screening_chain(target: str, run_stage: Callable[..., dict]) -> list[str]:
+    """Screening chain (each stage propagates degradation downstream)."""
+    degraded = []
+    for script, name in [
+        ("formula_screen.py", "screening_formula_screen"),
+        ("enrich_candidates.py", "screening_enrich_candidates"),
+        ("score_candidates.py", "screening_score_candidates"),
+        ("candidate_table.py", "screening_candidate_table"),
+    ]:
+        r = run_stage(
+            ["uv", "run", "python", str(SCREEN_DIR / script), "--date", target],
+            name,
+            note="best-effort，失败不中断",
+        )
+        stage_status = stage_json_status(r.get("stdout") or "")
+        if not r["ok"]:
+            degraded.append(name)
+            print(f"[WARN] {name} failed: {r['out'][:200]}")
+        else:
+            if stage_status in ("unavailable", "partial"):
+                degraded.append(name)
+            print(f"[OK] {r['out'].splitlines()[-1] if r['out'] else name}")
+    return degraded
+
+
+def _append_candidate_digest(target: str, stages_log: list[dict]) -> str:
+    """Digest of the candidate table (may be absent when the chain degraded early)."""
+    table_path = daily_report_dir(target, PLANS) / f"{target}_candidate_table.md"
+    if table_path.exists():
+        stages_log.append(
+            _log_stage(
+                "candidate_digest",
+                {"ok": True, "returncode": 0, "timeout": False},
+                _now_iso(),
+                _now_iso(),
+                0.0,
+                note=f"table={table_path.name}",
+            )
+        )
+        return md_to_digest(
+            table_path.read_text(encoding="utf-8"),
+            truncate_note="...(完整备选表见文件)",
+        )
+    stages_log.append(
+        _log_stage(
+            "candidate_digest",
+            {"ok": False, "returncode": None, "timeout": False},
+            _now_iso(),
+            _now_iso(),
+            0.0,
+            note=f"备选表未生成：{table_path}",
+        )
+    )
+    return "备选表未生成（选股链降级，详见 run log）"
+
+
 def main(argv=None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -119,6 +288,8 @@ def main(argv=None) -> int:
     #    保持与回测同口径、可复现，"策略本身选出了什么"始终可回溯。
     #    不传任何 --require-* 开关：非交易日已在上面的 calendar 检查里返回，
     #    质量/持仓 blocked 不该让选股链失败（失败等于连诊断产物都没有）。
+    #    ⚠️ 钉板：test_gate_advisory.py 用 inspect.getsource(main) 断言本段
+    #    "runtime_gate.py" 调用在 main 源码内，不得抽成 helper。
     r = _run_stage(
         [
             "uv",
@@ -137,154 +308,22 @@ def main(argv=None) -> int:
         print(f"[WARN] runtime_gate failed: {r['out'][:200]}")
 
     # 3. Refresh stock name cache —— ST 硬排除的唯一依据，必须滚动更新。
-    #    此前只有 mootdx 一个在线源且它 2026-07 起持续失败，缓存靠手动跑脚本、无 cron、
-    #    读取时也不校验时效 ⇒ 一份永不更新的名称表长期在用，新被 ST 的票名字还是正常的，
-    #    照样通过硬排除，而 st_filter 仍报 ok（审计 B5 的延伸）。
-    #    best-effort：失败不中断，选股链内部还有"候选名称按需刷新 + 缓存时效判定"两道防线。
-    r = _run_stage(
-        [
-            "uv",
-            "run",
-            "python",
-            str(TOOLS / "datasource" / "local_tdx" / "stock_names.py"),
-            "--source",
-            "auto",
-        ],
-        "refresh_stock_names",
-        note="best-effort，失败不中断；ST 硬排除依赖它",
-    )
-    if not r["ok"]:
-        print(f"[WARN] refresh_stock_names failed: {r['out'][:200]}")
-    else:
-        print(
-            f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'stock names refreshed'}"
-        )
+    _run_refresh_stock_names(_run_stage)
 
-    # 3b. Refresh ex-dividend (权息) cache —— 前复权的依据（owner 2026-08-04 拍板全链前复权）。
-    #     未复权数据会把除权跳空当成真实暴跌：假止损、假 J<13 信号、假跌停
-    #     （实测同一段真实上涨走势 −42.50% vs +25.00%，差 67.5pp）。
-    #     除权事件是历史事实不会变，所以只按 --max-age 增量刷新；分红送转有 >2 周
-    #     预案公告期，7 天上限足以在除权日前拿到新事件。
-    #     best-effort：权息拿不到时 get_ohlcv_table 按未复权返回并在 attrs 留痕，
-    #     不该让整条选股链停摆。
-    r = _run_stage(
-        [
-            "uv",
-            "run",
-            "python",
-            str(TOOLS / "datasource" / "local_tdx" / "adjust_factors.py"),
-            "--warmup",
-            "--max-age",
-            "7",
-        ],
-        "refresh_xdxr",
-        note="前复权依据，best-effort；缺失时按未复权并在 attrs 留痕",
-    )
-    if not r["ok"]:
-        print(f"[WARN] refresh_xdxr failed: {r['out'][:200]}")
-    else:
-        print(f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'xdxr refreshed'}")
+    # 3b. Refresh ex-dividend (权息) cache —— 前复权的依据。
+    _run_refresh_xdxr(_run_stage)
 
     # 4. Refresh concept tags (miscinfo) so sector mapping uses the accurate source
-    r = _run_stage(
-        [
-            "uv",
-            "run",
-            "python",
-            str(TOOLS / "datasource" / "local_tdx" / "concept_tags.py"),
-            "--date",
-            target,
-        ],
-        "refresh_concept_tags",
-        note="best-effort，失败不中断",
-    )
-    if not r["ok"]:
-        print(f"[WARN] refresh_concept_tags failed: {r['out'][:200]}")
-    else:
-        print(
-            f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'concept tags refreshed'}"
-        )
+    _run_refresh_concept_tags(target, _run_stage)
 
-    # 4b. Refresh 板块指数缓存(供 enrich 的 sector_phase hint 用当日相位;best-effort,需 TdxW)。
-    #     **增量合并**:只拉各板块缓存末日期前 30 天起的新数据并 merge 进已有 CSV。
-    #     此前每天全量重拉 20180101 起的 400+ 板块 → 600s stage 超时;
-    #     且 --period day 是错的周期串(TQ 要 1d,见 TDX_LOCAL_INTERFACES.md),现由脚本自动探测。
-    r = _run_stage(
-        [
-            "uv",
-            "run",
-            "python",
-            str(TOOLS / "datasource" / "local_tdx" / "fetch_sector_index_history.py"),
-            "--out",
-            str(MARKET_DIR / "sector_index"),
-            "--start",
-            "20180101",
-            "--incremental",
-        ],
-        "refresh_sector_index",
-        note="best-effort，失败不中断(仅影响板块相位 hint)",
-    )
-    tail = _last_line(r["out"])
-    if not r["ok"]:
-        # 摘要行自带 "x/y 成功率"：低成功率(3/430)时脚本退 2，这里必须把该行透出，
-        # 否则 [WARN] 只打前 200 字（"[INFO] 板块数: 430"），看不出这批基本全失败。
-        print(f"[WARN] refresh_sector_index failed: {tail or r['out'][:200]}")
-    elif tail.startswith("[WARN]"):
-        print(tail)
-    else:
-        print(f"[OK] {tail or 'sector index refreshed'}")
+    # 4b. Refresh 板块指数缓存(供 enrich 的 sector_phase hint 用当日相位)。
+    _run_refresh_sector_index(_run_stage)
 
     # 5. Screening chain (each stage propagates degradation downstream)
-    degraded = []
-    for script, name in [
-        ("formula_screen.py", "screening_formula_screen"),
-        ("enrich_candidates.py", "screening_enrich_candidates"),
-        ("score_candidates.py", "screening_score_candidates"),
-        ("candidate_table.py", "screening_candidate_table"),
-    ]:
-        r = _run_stage(
-            ["uv", "run", "python", str(SCREEN_DIR / script), "--date", target],
-            name,
-            note="best-effort，失败不中断",
-        )
-        stage_status = stage_json_status(r.get("stdout") or "")
-        if not r["ok"]:
-            degraded.append(name)
-            print(f"[WARN] {name} failed: {r['out'][:200]}")
-        else:
-            if stage_status in ("unavailable", "partial"):
-                degraded.append(name)
-            print(f"[OK] {r['out'].splitlines()[-1] if r['out'] else name}")
+    degraded = _run_screening_chain(target, _run_stage)
 
     # 6. Digest of the candidate table (may be absent when the chain degraded early)
-    table_path = daily_report_dir(target, PLANS) / f"{target}_candidate_table.md"
-    if table_path.exists():
-        stages_log.append(
-            _log_stage(
-                "candidate_digest",
-                {"ok": True, "returncode": 0, "timeout": False},
-                _now_iso(),
-                _now_iso(),
-                0.0,
-                note=f"table={table_path.name}",
-            )
-        )
-        digest = md_to_digest(
-            table_path.read_text(encoding="utf-8"),
-            truncate_note="...(完整备选表见文件)",
-        )
-    else:
-        stages_log.append(
-            _log_stage(
-                "candidate_digest",
-                {"ok": False, "returncode": None, "timeout": False},
-                _now_iso(),
-                _now_iso(),
-                0.0,
-                note=f"备选表未生成：{table_path}",
-            )
-        )
-        digest = "备选表未生成（选股链降级，详见 run log）"
+    digest = _append_candidate_digest(target, stages_log)
 
     status = "completed" if not degraded else "degraded"
     _write_run_log(target, status, run_started, t0, stages_log)
