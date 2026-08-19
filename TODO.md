@@ -6,7 +6,7 @@
 > 优先级按**「它阻塞了什么」**排，不按工作量：
 > P0 = 阻塞其他事或 live 正在依赖 ｜ P1 = 已有结论悬空 ｜ P2 = 新验证 ｜ P3 = 技术债
 >
-> 最后更新：2026-08-19（#59 ①② 落地（v0.74）——scorer 双形态框架 + 三 scorer 接线（3.3×/10.0×/6.3×）、RSI 两 gate precomputed 接线（3.2-11×），回测热路径 O(n²)→O(n)；③ pit_financials 台账 IO 待 owner 拍板。#58 全批收口——radon C19 以上清零（v0.71/v0.72/v0.73）。此前：#49 持仓快照历史归档（v0.67）；#35 三因子降级「不再研究」（v0.70）；#13 复核 ⇒ 严变体终审否决；#25 跨窗复核 ⇒ 「cz3 首选换位」跨窗不成立；P2 待跑表已空）
+> 最后更新：2026-08-19（#59 收口——①② 落地（v0.74）：scorer 双形态框架 + 三 scorer 接线（3.3×/10.0×/6.3×）、RSI 两 gate precomputed 接线（3.2-11×）；③ pit_financials 台账 IO owner 拍板不动、④ 东财分页并发否决，均入「已失效」表。#58 全批收口——radon C19 以上清零（v0.71/v0.72/v0.73）。此前：#49 持仓快照历史归档（v0.67）；#35 三因子降级「不再研究」（v0.70）；#13 复核 ⇒ 严变体终审否决；#25 跨窗复核 ⇒ 「cz3 首选换位」跨窗不成立；P2 待跑表已空）
 
 ## P0 · 阻塞项
 
@@ -36,7 +36,7 @@
 | # | 事项 | 出处 |
 |---|---|---|
 | 58 | **高复杂度函数拆分**：✅ **C19 以上全部拆完（2026-08-19）**。F 级（v0.68/v0.69）→ E 级 19 个（v0.71）→ D 级 26 个（v0.72）→ C19-20 共 29 个（v0.73，含五项逐位等价性能优化：`mainline_fingerprint` 69.8×、`scan_signals_ytd` 15.7×、`simulate_b1_trade` OHLC hoist 2.7×/3.3× 等，明细见 CHANGELOG）。⚠️ 三轮各修/发现过拆分事故形态：helper 调用了但未定义（`main_rally_factor` 静默零产出）；helper 定义了却没被调用（`_signal_labels_section`）；钉板兼容（`run_1800` runtime_gate 段、`merge_incremental` 参数命名）。等价验证：全量 4183 passed、周报/月报 md+json 四件逐字节 MATCH、audit 套件通过。**剩余原则**：全仓最高 C19（`simulate_b1_trade`，ohlc 分支 +1 换 2.7-3.3× 提速），C 级一律**下次因业务动这些文件时先拆** | 2026-08-19 收口（`reports/radon_cc.txt` 当日重生成） |
-| 59 | **性能机会清单（v0.73 审查出）**：① scorer 每 bar 全前缀重算——✅ 2026-08-19 落地（v0.74）：scorer 双形态框架 + `_sc_b1_pullback` 3.3×/`_sc_kdj_j` 10.0×/`_sc_rsi_state` 6.3× 接线。**剩余可接线**：s_shape 系（值得但改造面大，待排）、alpha101/pvcorr/low_vol/momentum/reversal_quality/mcap（中等优先）；b1_dual/long_structure/b2/main_rally 黑盒 detector 不适合；② RSI 两 gate `precomputed` 未接线——✅ 同日落地（v0.74，3.2-11×）；③ `fetch_pit_financials._run_fetch_periods` 逐期全量台账读写（P 期 = P 次全台账 IO，~97% 可省，但逐期落盘是刻意的容错语义且影响 stdout 数值，**要 owner 拍板口径**）；④ 东财分页并发——改限流特征，不安全，已否决（勿再做） | v0.73 审查 / v0.74 落地 |
+| 59 | **性能机会清单（v0.73 审查出）**：① scorer 每 bar 全前缀重算——✅ 2026-08-19 落地（v0.74）：scorer 双形态框架 + `_sc_b1_pullback` 3.3×/`_sc_kdj_j` 10.0×/`_sc_rsi_state` 6.3× 接线。**剩余可接线**：s_shape 系（值得但改造面大，待排）、alpha101/pvcorr/low_vol/momentum/reversal_quality/mcap（中等优先）；b1_dual/long_structure/b2/main_rally 黑盒 detector 不适合；② RSI 两 gate `precomputed` 未接线——✅ 同日落地（v0.74，3.2-11×）；③④ 已拍板不动/否决，见「已失效」表 | v0.73 审查 / v0.74 落地 |
 
 ## ⚠️ 已失效的行动项（**别照着做**）
 
@@ -44,6 +44,8 @@
 
 | 原行动项 | 出处 | 为什么失效 |
 |---|---|---|
+| 「`fetch_pit_financials` 逐期全量台账读写改批量写（~97% IO）」 | #59③ | **owner 2026-08-19 拍板不动（选 C）**：批量补拉是低频运维操作，IO 浪费可接受；逐期落盘的容错语义（一期失败不丢已完成期）与 stdout 逐期数值口径保留 |
+| 「东财分页并发拉取」 | #59④ | 改请求时序与限流特征（东财连打会被静默限流，正是 `FetchIncomplete` 防的场景），无法逐位等价钉住，已否决 |
 | 「去幸存者偏差：`--data-source qlib`」 | R10 待跑 #3 | **2021 年后一只退市股都没有**，且 `2021_2026` bundle 已弃用（加法调整）⇒ 照做只会引入放大 13~21% 的收益，去偏一点没做到。近期窗口**目前无法去偏** |
 | 「补探止损下界 `pct_03`/`pct_04`」 | R10 待跑 #4 | ✅ 已完成 —— **5% 是崖不是坡**（5%→4% 掉 42%）|
 | 「`--exclude-zero-ret` 复跑」 | R3 | ❌ 已证是**错误的修正**（删的是合法样本），已标注勿用 |
