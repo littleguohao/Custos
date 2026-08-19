@@ -69,7 +69,7 @@
 
 | # | 事项 | 性质 |
 |---|---|---|
-| 32 | **reconcile_positions 已梳理（2026-08-12，owner「还需要优化和梳理」）**：① 超卖报错带分叉点（哪只票/哪笔/卖多少/当时持仓）；② 未给 baseline 时超卖报错直接附 `--baseline` 格式示例，baseline 文件缺失/非法/缺字段均 SystemExit + 格式引导（不再抛裸 traceback）；③ 17:00 链 mismatch/replay_failed 时 stderr 打 `[WARN]`（此前只躺 run log note，等于静默）。**观察期首日（2026-08-19 目标机）即抓到根因**：replay_failed = 股份入账类（转债转入/拆股）被 `TRADE_CATEGORIES` 过滤、回放只见卖出不见来源 ⇒ 假超卖——已修（v0.75，`SHARE_CREDIT_CATEGORIES` 参与持仓推导，live 导入同受益）。**剩余**：目标机拉取 v0.75 后重跑对账确认转 `ok`，自该日起重新观察若干交易日、稳定后再考虑 `--strict` 转硬闸 | 已梳理，修复后重新观察 |
+| 32 | **reconcile_positions 已梳理（2026-08-12，owner「还需要优化和梳理」）**：① 超卖报错带分叉点（哪只票/哪笔/卖多少/当时持仓）；② 未给 baseline 时超卖报错直接附 `--baseline` 格式示例，baseline 文件缺失/非法/缺字段均 SystemExit + 格式引导（不再抛裸 traceback）；③ 17:00 链 mismatch/replay_failed 时 stderr 打 `[WARN]`（此前只躺 run log note，等于静默）。**观察期首日（2026-08-19 目标机）即抓到根因**：replay_failed = 股份入账类（转债转入/拆股）被 `TRADE_CATEGORIES` 过滤、回放只见卖出不见来源 ⇒ 假超卖——已修（v0.75，`SHARE_CREDIT_CATEGORIES` 参与持仓推导，live 导入同受益）。**观察期（2026-08-19 目标机）**：首日 replay_failed 抓到根因——股份入账类（转债转入/拆股）被 `TRADE_CATEGORIES` 过滤、回放只见卖出不见来源 ⇒ 假超卖，已修（v0.75，`SHARE_CREDIT_CATEGORIES` 参与持仓推导，live 导入同受益）；修复后当日重跑 `replay_ok=true`、**数量 6 对 6 零误差**，4 只 `cost_only_diff` 已逐笔核算定性为**券商摊薄/保本成本 vs 回放移动平均成本的口径差**（含预估卖出佣金 ~0.03%、按回合重置；另 2 只为快照 3 位小数舍入），非缺陷，定性已写入 reconcile_positions docstring。**剩余**：继续观察若干交易日数量持续零 mismatch 后，`--strict` 转硬闸（strict 只看 `qty_mismatch_count`，成本差异不构成阻塞） | 已梳理，观察期进行中（口径差已定性） |
 
 ## P7 · 因子层抽取查出的问题（2026-08-06）
 
