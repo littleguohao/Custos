@@ -49,6 +49,7 @@ from custos.core.code_utils import clean_code, finite  # noqa: E402
 from custos.core.trades.incremental_ledger import (
     LEDGER,
     POS,
+    SHARE_CREDIT_CATEGORIES,
     TRADE_CATEGORIES,  # noqa: E402
     compute_positions,
     norm,
@@ -82,7 +83,9 @@ def replay_ledger(
             "trade_rows": 0,
         }
     df = pd.read_csv(ledger_path, dtype={"代码": str})
-    trades = df[df["交易类别"].isin(TRADE_CATEGORIES)].copy() if len(df) else df
+    # 股份入账类（转债转入/拆股）必须参与回放：只见卖出不见来源会假超卖（#32）。
+    cats = TRADE_CATEGORIES | SHARE_CREDIT_CATEGORIES
+    trades = df[df["交易类别"].isin(cats)].copy() if len(df) else df
     if not len(trades):
         return {
             "ok": True,

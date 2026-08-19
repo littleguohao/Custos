@@ -295,6 +295,79 @@ class TestApplyPositions:
         )
         assert self._read() == {}
 
+    def test_bond_conversion_credit_adds_position(self):
+        """转债转入是股份入账：数量按买入同构累加、成本按转股价（#32 台账实测形态）。
+
+        回放/增量若只见卖出不见转入 ⇒ 假超卖（2026-08-19 目标机 replay_failed）。
+        """
+        self.pos.write_text("[]", encoding="utf-8")
+        il.apply_positions(
+            self._trades(
+                [
+                    {
+                        "成交日期": "2022-05-13",
+                        "代码": "000938",
+                        "名称": "中芯",
+                        "交易类别": "转债转入",
+                        "成交数量": 3,
+                        "成交价格": 17.93,
+                        "费用": 0.0,
+                    }
+                ]
+            )
+        )
+        p = self._read()["000938"]
+        assert p["持有数量"] == 3 and p["单位成本"] == pytest.approx(17.93)
+        # 转入后的卖出不再超卖
+        il.apply_positions(
+            self._trades(
+                [
+                    {
+                        "成交日期": "2022-06-06",
+                        "代码": "000938",
+                        "名称": "中芯",
+                        "交易类别": "卖出",
+                        "成交数量": 3,
+                        "成交价格": 18.17,
+                    }
+                ]
+            )
+        )
+        assert self._read() == {}
+
+    def test_split_credit_dilutes_unit_cost(self):
+        """拆股按 0 成本入账：数量翻倍、单位成本摊薄（台账实测形态 603606 +600）。"""
+        self.pos.write_text(
+            json.dumps(
+                [
+                    {
+                        "代码": "603606",
+                        "名称": "东方",
+                        "持有数量": 100.0,
+                        "单位成本": 11.0,
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        il.apply_positions(
+            self._trades(
+                [
+                    {
+                        "成交日期": "2023-04-01",
+                        "代码": "603606",
+                        "名称": "东方",
+                        "交易类别": "拆股",
+                        "成交数量": 100,
+                        "成交价格": 0,
+                        "费用": 0.0,
+                    }
+                ]
+            )
+        )
+        p = self._read()["603606"]
+        assert p["持有数量"] == 200 and p["单位成本"] == pytest.approx(5.5)
+
 
 class TestXlsxInputPath:
     """`.xlsx` 输入分支 —— **日常导入路径**（券商导出就是 xlsx）。

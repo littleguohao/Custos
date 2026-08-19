@@ -115,6 +115,35 @@ class TestReplay:
         r = rp.replay_ledger(tmp_path / "nope.csv")
         assert r["ok"] is False and r["error"] == "ledger_missing"
 
+    def test_share_credit_categories_replayed(self, tmp_path):
+        """转债转入/拆股是股份来源，回放必须认（#32 目标机 replay_failed 根因）。
+
+        2026-08-19 实测台账：000938「2022-05-13 转债转入 3 股 → 2022-06-06 卖出 3 股」，
+        转入被类别过滤 ⇒ 回放只见卖出 ⇒ 假超卖。
+        """
+        led = _ledger(
+            tmp_path,
+            [
+                _row("2022-05-13", "00:00:00", "000938", "转债转入", 3, 17.93),
+                _row("2022-06-06", "13:00:03", "000938", "卖出", 3, 18.17),
+            ],
+        )
+        r = rp.replay_ledger(led)
+        assert r["ok"], f"股份入账类被回放漏掉：{r['error']}"
+        assert r["positions"] == []
+
+    def test_unrelated_categories_still_ignored(self, tmp_path):
+        """股份入账类以外的非买卖类别（银行转证券等）仍不参与回放。"""
+        led = _ledger(
+            tmp_path,
+            [
+                _row("2026-08-03", "09:31:00", "600000", "银行转证券", 0, 0),
+                _row("2026-08-04", "09:31:00", "600000", "买入", 100, 10.0),
+            ],
+        )
+        r = rp.replay_ledger(led)
+        assert r["ok"] and r["positions"][0]["持有数量"] == 100
+
 
 class TestDiff:
     def test_identical_is_clean(self):

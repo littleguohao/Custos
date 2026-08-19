@@ -76,6 +76,14 @@ KEY = [
 ]
 NUMERIC = ["成交数量", "成交价格", "成交金额", "发生金额", "费用"]
 TRADE_CATEGORIES = {"买入", "卖出"}
+# 非买卖类的股份入账（台账实测形态：000938 转债转入 2022-05-13、603606 拆股、
+# 159938 零成本转债转入——口径参照 backtest_0amv_bear_regime 的入库规则）。
+# 持仓推导必须认它们，否则回放只见卖出不见来源 ⇒ 假超卖（#32 观察期发现）。
+# 数量按买入同构累加、成本按记录价格加权：转债转入的价格是转股价（可得的最优
+# 成本近似）；拆股/零成本入账价格为 0 ⇒ 摊薄单位成本。
+# ⚠️ 刻意不进 TRADE_CATEGORIES：周/月报 FIFO、trades_stock.json 只认真实买卖，
+# 那是有意口径（weekly_review.parse_ledger docstring、test_calc_mfe_mae 钉住），勿合并。
+SHARE_CREDIT_CATEGORIES = {"转债转入", "拆股"}
 
 SNAPSHOT_PENDING = "pending_close_revaluation"
 SNAPSHOT_NOTE = "数量/成本已按增量成交更新；市值、盈亏、仓位须用最新收盘价重估"
@@ -166,14 +174,15 @@ def compute_positions(new: pd.DataFrame, current_rows: list[dict]) -> list[dict]
     """
     by = {clean_code(x.get("代码")): dict(x) for x in current_rows}
     for _, t in new.iterrows():
-        if t["交易类别"] not in TRADE_CATEGORIES:
+        cat = t["交易类别"]
+        if cat not in TRADE_CATEGORIES | SHARE_CREDIT_CATEGORIES:
             continue
         code = clean_code(t["代码"])
         qty = finite(t["成交数量"])
         price = finite(t["成交价格"])
         fee = finite(t["费用"])
         pos = by.get(code)
-        if t["交易类别"] == "买入":
+        if cat == "买入" or cat in SHARE_CREDIT_CATEGORIES:
             if pos is None:
                 pos = {
                     "代码": code,
