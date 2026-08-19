@@ -45,6 +45,101 @@ NEAR_TOL = 0.06  # 回踩低点距平台高的"附近"上界
 BREAK_TOL = 0.02  # 允许刺破深度(不破=不低于 ×(1-2%))
 
 
+def _platform_window(
+    high: Any,
+    close: Any,
+    n: int,
+    lookback: int,
+    breakout_within: int,
+    touch_tol: float,
+    touch_min: int,
+    zone_ratio: float,
+) -> Optional[tuple[float, int, int]]:
+    """① 平台:回看窗上沿;返回 (平台高, 平台高索引, 触碰次数) 或 None。"""
+    p_lo = max(0, n - lookback - breakout_within)
+    p_hi = n - breakout_within
+    if p_hi - p_lo < 10:
+        return None
+    ph = float(high[p_lo:p_hi].max())  # 平台高
+    ph_idx = p_lo + int(high[p_lo:p_hi].argmax())
+    touches = int((high[p_lo:p_hi] >= ph * (1 - touch_tol)).sum())
+    if touches < touch_min:  # 上沿触碰次数(1=单高点即可)
+        return None
+    zone_min = float(close[p_lo:p_hi].min())
+    if zone_min <= 0 or ph / zone_min > zone_ratio:  # 非震荡(单边趋势区不算平台)
+        return None
+    return ph, ph_idx, touches
+
+
+def _find_breakout(close: Any, ph: float, b_lo: int, n: int) -> Optional[int]:
+    """② 突破:近 breakout_within 日内某日收盘站上 ph×(1+buf),且其后最高收盘 ≥ ph×(1+LEAVE_MIN)。"""
+    # ⚠️ BREAKOUT_BUF / LEAVE_MIN 运行时读模块全局(测试 monkeypatch 通道),禁捕获为默认参数
+    brk_idx = None
+    for j in range(b_lo, n):
+        if close[j] > ph * (1 + BREAKOUT_BUF):
+            brk_idx = j
+            break
+    if brk_idx is None:
+        return None
+    if float(close[brk_idx:].max()) < ph * (1 + LEAVE_MIN):
+        return None  # 没有真离开,只是擦边
+    return brk_idx
+
+
+def _pullback_low(
+    low: Any,
+    close: Any,
+    ph: float,
+    brk_idx: int,
+    n: int,
+    pullback_within: int,
+    near_tol: float,
+    break_tol: float,
+) -> Optional[float]:
+    """③ 回踩:突破后曾离开,最近 pullback_within 日低点回到平台附近但未破;返回回踩低点或 None。"""
+    q_lo = max(brk_idx + 1, n - pullback_within)
+    if q_lo >= n:
+        return None
+    pb_low = float(low[q_lo:].min())
+    if not (ph * (1 - break_tol) <= pb_low <= ph * (1 + near_tol)):
+        return None
+    if close[-1] < ph * (1 - break_tol):  # 当日收盘必须守在平台高上
+        return None
+    return pb_low
+
+
+def _is_top_volume_exhaustion(
+    close: Any, vol: Any, brk_idx: int, top_vol_mult: float
+) -> bool:
+    """③b 顶部放量出货过滤:突破后最高收盘日若放天量(≥top_vol_mult×20日均量)。
+
+    天量见天价=主力借突破出货的假突破,排除;永兴材料式缩量/平量上涨才保留。
+    """
+    top_i = brk_idx + int(close[brk_idx:].argmax())
+    vma20 = vol[max(brk_idx, top_i - 20) : top_i].mean() if top_i > brk_idx else 0.0
+    return bool(vma20 > 0 and vol[top_i] / vma20 >= top_vol_mult)
+
+
+def _apply_stabilize(out: dict[str, Any], df: pd.DataFrame, vol: Any) -> None:
+    """可选企稳过滤:就地给 out 追加 vol_shrink / j / stabilized 三键(键序契约)。"""
+    vma5 = vol[-6:-1].mean() if len(vol) >= 6 else 0.0
+    out["vol_shrink"] = bool(vma5 > 0 and vol[-1] / vma5 <= 0.7)
+    # ⚠️ 2026-08-07 破环：这里原本惰性 `import backtest_factors as bt`
+    # 只为拿 `bt._kdj` —— 而 `bt._kdj` 就是 `technical_monitor.kdj`
+    # （backtest_factors:64 `from technical_monitor import kdj as _kdj`）。
+    # 代价是 import 一个 1959 行、连带 40+ 模块的回测器，且构成
+    # `factors/ → screening/ → factors/` 的环。
+    # 这里只需要 J 的**数值**，直接用底层 `indicators.j_series`
+    # （与 b1_pullback_fit / main_rally_factor / b2_surge_factor 同一路径）。
+    j_series_ = _j_canonical(df)
+    j_val = None
+    if j_series_ is not None and len(j_series_):
+        last = j_series_.iloc[-1]
+        j_val = float(last) if last == last else None
+    out["j"] = j_val
+    out["stabilized"] = bool(out["vol_shrink"] or (j_val is not None and j_val < 20))
+
+
 def detect_platform_pullback(
     df: pd.DataFrame,
     lookback: int = PLATFORM_LOOKBACK,
@@ -75,49 +170,30 @@ def detect_platform_pullback(
         vol = df["volume"].astype(float).values
 
         # ① 平台:回看 [n-lookback-breakout_within, n-breakout_within) 的上沿
-        p_lo = max(0, n - lookback - breakout_within)
-        p_hi = n - breakout_within
-        if p_hi - p_lo < 10:
+        win = _platform_window(
+            high, close, n, lookback, breakout_within, touch_tol, touch_min, zone_ratio
+        )
+        if win is None:
             return None
-        ph = float(high[p_lo:p_hi].max())  # 平台高
-        ph_idx = p_lo + int(high[p_lo:p_hi].argmax())
-        touches = int((high[p_lo:p_hi] >= ph * (1 - touch_tol)).sum())
-        if touches < touch_min:  # 上沿触碰次数(1=单高点即可)
-            return None
-        zone_min = float(close[p_lo:p_hi].min())
-        if zone_min <= 0 or ph / zone_min > zone_ratio:  # 非震荡(单边趋势区不算平台)
-            return None
+        ph, ph_idx, touches = win
 
         # ② 突破:近 breakout_within 日内某日收盘站上 ph×(1+buf),且其后最高收盘 ≥ ph×(1+LEAVE_MIN)
-        b_lo = p_hi
-        brk_idx = None
-        for j in range(b_lo, n):
-            if close[j] > ph * (1 + BREAKOUT_BUF):
-                brk_idx = j
-                break
+        brk_idx = _find_breakout(close, ph, n - breakout_within, n)
         if brk_idx is None:
             return None
-        if float(close[brk_idx:].max()) < ph * (1 + LEAVE_MIN):
-            return None  # 没有真离开,只是擦边
 
         # ③ 回踩:突破后曾离开,最近 pullback_within 日低点回到平台附近但未破
-        q_lo = max(brk_idx + 1, n - pullback_within)
-        if q_lo >= n:
-            return None
-        pb_low = float(low[q_lo:].min())
-        if not (ph * (1 - break_tol) <= pb_low <= ph * (1 + near_tol)):
-            return None
-        if close[-1] < ph * (1 - break_tol):  # 当日收盘必须守在平台高上
+        pb_low = _pullback_low(
+            low, close, ph, brk_idx, n, pullback_within, near_tol, break_tol
+        )
+        if pb_low is None:
             return None
         # ③b 顶部放量出货过滤(可选):突破后最高收盘日若放天量(≥top_vol_mult×20日均量)
         # ——天量见天价=主力借突破出货的假突破,排除;永兴材料式缩量/平量上涨才保留
-        if top_vol_mult > 0:
-            top_i = brk_idx + int(close[brk_idx:].argmax())
-            vma20 = (
-                vol[max(brk_idx, top_i - 20) : top_i].mean() if top_i > brk_idx else 0.0
-            )
-            if vma20 > 0 and vol[top_i] / vma20 >= top_vol_mult:
-                return None
+        if top_vol_mult > 0 and _is_top_volume_exhaustion(
+            close, vol, brk_idx, top_vol_mult
+        ):
+            return None
         # 回踩须真的"回过高位附近"(当前离平台高不远,否则形态已走样)
         if close[-1] > ph * 1.5:
             return None
@@ -131,24 +207,7 @@ def detect_platform_pullback(
             "ph_date": str(df["date"].iloc[ph_idx])[:10],
         }
         if stabilize:  # 可选企稳过滤
-            vma5 = vol[-6:-1].mean() if len(vol) >= 6 else 0.0
-            out["vol_shrink"] = bool(vma5 > 0 and vol[-1] / vma5 <= 0.7)
-            # ⚠️ 2026-08-07 破环：这里原本惰性 `import backtest_factors as bt`
-            # 只为拿 `bt._kdj` —— 而 `bt._kdj` 就是 `technical_monitor.kdj`
-            # （backtest_factors:64 `from technical_monitor import kdj as _kdj`）。
-            # 代价是 import 一个 1959 行、连带 40+ 模块的回测器，且构成
-            # `factors/ → screening/ → factors/` 的环。
-            # 这里只需要 J 的**数值**，直接用底层 `indicators.j_series`
-            # （与 b1_pullback_fit / main_rally_factor / b2_surge_factor 同一路径）。
-            j_series_ = _j_canonical(df)
-            j_val = None
-            if j_series_ is not None and len(j_series_):
-                last = j_series_.iloc[-1]
-                j_val = float(last) if last == last else None
-            out["j"] = j_val
-            out["stabilized"] = bool(
-                out["vol_shrink"] or (j_val is not None and j_val < 20)
-            )
+            _apply_stabilize(out, df, vol)
         return out
     except Exception:  # noqa: BLE001
         return None

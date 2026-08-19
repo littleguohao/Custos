@@ -54,9 +54,9 @@ def latest_holding_summary(date: str) -> list[dict[str, Any]]:
     return load_json(p, []) or []
 
 
-def classify_stage(a: dict[str, Any]) -> tuple[str, str]:
-    if not a.get("available"):
-        return "数据不足", a.get("error", "无K线数据")
+def _stage_inputs(
+    a: dict[str, Any],
+) -> tuple[Any, Any, Any, Any, Any]:
     trend = (a.get("trend") or {}).get("state")
     box20 = a.get("box_20d") or {}
     daily_kdj = (a.get("daily") or {}).get("kdj") or {}
@@ -66,7 +66,10 @@ def classify_stage(a: dict[str, Any]) -> tuple[str, str]:
     j = daily_kdj.get("j")
     macd_dir = daily_macd.get("hist_direction")
     weekly_hist = weekly_macd.get("hist")
+    return trend, pos20, j, macd_dir, weekly_hist
 
+
+def _classify_by_trend(trend: Any, pos20: Any, macd_dir: Any) -> tuple[str, str] | None:
     if trend == "上涨" and pos20 == "上沿/突破区" and macd_dir == "扩张":
         return "主升/加速", "趋势上涨、处于20日箱体上沿/突破区，日线MACD扩张。"
     if trend == "上涨":
@@ -81,11 +84,70 @@ def classify_stage(a: dict[str, Any]) -> tuple[str, str]:
         return "分歧/弱震荡", "横盘震荡但位于箱体下沿，若跌破需转入风控。"
     if trend == "下跌":
         return "退潮/下跌", "趋势下跌，板块不支持加仓。"
+    return None
+
+
+def classify_stage(a: dict[str, Any]) -> tuple[str, str]:
+    if not a.get("available"):
+        return "数据不足", a.get("error", "无K线数据")
+    trend, pos20, j, macd_dir, weekly_hist = _stage_inputs(a)
+    by_trend = _classify_by_trend(trend, pos20, macd_dir)
+    if by_trend is not None:
+        return by_trend
     if isinstance(j, (int, float)) and j > 90:
         return "高位分歧观察", "日线J值高位过热，追高风险上升。"
     if weekly_hist is not None and weekly_hist < 0:
         return "震荡", "日线信号一般，周线动能仍偏弱。"
     return "震荡", "趋势未形成明确主升或退潮，按震荡处理。"
+
+
+def _trend_delta(state: Any) -> float:
+    if state == "上涨":
+        return 18
+    if state == "下跌":
+        return -20
+    if state == "横盘震荡":
+        return 0
+    return 0
+
+
+def _box_delta(position: Any) -> float:
+    if position == "上沿/突破区":
+        return 12
+    if position == "箱体上半区":
+        return 6
+    if position == "下沿/破位区":
+        return -12
+    return 0
+
+
+def _macd_delta(hist_direction: Any) -> float:
+    if hist_direction == "扩张":
+        return 8
+    if hist_direction == "收缩":
+        return -3
+    return 0
+
+
+def _kdj_delta(kdj: dict[str, Any]) -> float:
+    j = kdj.get("j")
+    if not isinstance(j, (int, float)):
+        return 0
+    if j > 95:
+        return -5
+    if j > 80:
+        return 2
+    if j < 12:
+        return -3
+    if j < 30 and kdj.get("j", 0) > kdj.get("j_prev", 0):
+        return 5
+    return 0
+
+
+def _weekly_delta(hist: Any) -> float:
+    if hist is None:
+        return 0
+    return 4 if hist > 0 else -4
 
 
 def score_sector(a: dict[str, Any], priority: str) -> float:
@@ -97,35 +159,11 @@ def score_sector(a: dict[str, Any], priority: str) -> float:
     kdj = (a.get("daily") or {}).get("kdj") or {}
     macd = (a.get("daily") or {}).get("macd") or {}
     weekly = (a.get("weekly") or {}).get("macd") or {}
-    if trend.get("state") == "上涨":
-        score += 18
-    elif trend.get("state") == "下跌":
-        score -= 20
-    elif trend.get("state") == "横盘震荡":
-        score += 0
-    if box20.get("position") == "上沿/突破区":
-        score += 12
-    elif box20.get("position") == "箱体上半区":
-        score += 6
-    elif box20.get("position") == "下沿/破位区":
-        score -= 12
-    if macd.get("hist_direction") == "扩张":
-        score += 8
-    elif macd.get("hist_direction") == "收缩":
-        score -= 3
-    j = kdj.get("j")
-    if isinstance(j, (int, float)):
-        if j > 95:
-            score -= 5
-        elif j > 80:
-            score += 2
-        elif j < 12:
-            score -= 3
-        elif j < 30 and kdj.get("j", 0) > kdj.get("j_prev", 0):
-            score += 5
-    weekly_hist = weekly.get("hist")
-    if weekly_hist is not None:
-        score += 4 if weekly_hist > 0 else -4
+    score += _trend_delta(trend.get("state"))
+    score += _box_delta(box20.get("position"))
+    score += _macd_delta(macd.get("hist_direction"))
+    score += _kdj_delta(kdj)
+    score += _weekly_delta(weekly.get("hist"))
     if priority == "high":
         score += 3
     return round(max(0, min(100, score)), 2)
@@ -210,11 +248,9 @@ def build_sector_summary(date: str) -> list[dict[str, Any]]:
     return rows
 
 
-def match_holding_theme(
-    holding: dict[str, Any], rows: list[dict[str, Any]]
-) -> dict[str, Any]:
-    """Match by explicit holding/representative code first, then semantic tags."""
-    code = str(holding.get("code") or "").split(".")[0]
+def _match_by_linked_code(
+    code: str, rows: list[dict[str, Any]]
+) -> dict[str, Any] | None:
     for row in rows:
         linked = [
             str(x).split(".")[0]
@@ -223,30 +259,45 @@ def match_holding_theme(
         ]
         if code and code in linked:
             return row
+    return None
+
+
+def _holding_tokens(holding: dict[str, Any]) -> set[str]:
     tokens = set(holding.get("primary_themes") or [])
     industry = holding.get("industry")
     if industry and str(industry).lower() != "nan":
         tokens.add(str(industry))
+    return tokens
+
+
+def _token_matches(token: Any, hay: str) -> bool:
+    return token in hay or any(
+        part and part in hay for part in str(token).replace("/", "|").split("|")
+    )
+
+
+def _semantic_score(row: dict[str, Any], tokens: set[str]) -> int:
+    hay = "|".join(
+        [
+            str(row.get("theme_name") or ""),
+            *[str(x) for x in row.get("semantic_tags", [])],
+        ]
+    )
+    return sum(1 for token in tokens if token and _token_matches(token, hay))
+
+
+def match_holding_theme(
+    holding: dict[str, Any], rows: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Match by explicit holding/representative code first, then semantic tags."""
+    code = str(holding.get("code") or "").split(".")[0]
+    by_code = _match_by_linked_code(code, rows)
+    if by_code is not None:
+        return by_code
+    tokens = _holding_tokens(holding)
     best: tuple[int, dict[str, Any]] = (0, {})
     for row in rows:
-        hay = "|".join(
-            [
-                str(row.get("theme_name") or ""),
-                *[str(x) for x in row.get("semantic_tags", [])],
-            ]
-        )
-        score = sum(
-            1
-            for token in tokens
-            if token
-            and (
-                token in hay
-                or any(
-                    part and part in hay
-                    for part in str(token).replace("/", "|").split("|")
-                )
-            )
-        )
+        score = _semantic_score(row, tokens)
         if score > best[0]:
             best = (score, row)
     return best[1]

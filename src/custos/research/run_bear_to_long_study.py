@@ -398,63 +398,61 @@ def classify_zero_ret_bars(bars, start: str, end: str, few_bars: int = 5) -> dic
     return out
 
 
-def zero_ret_diagnose(
-    firings_files: list[Path], loader, few_bars: int = 5, max_codes: int = 0
-) -> dict:
-    """逐窗诊断零收益样本成因。loader(codes, start, end) → {code: DataFrame}。
-
-    只重载 ret==0 的那些票(实跑最大一窗约 800 只),不重跑 Pass1。
-    结论行按占比给判决:traded_flat 占多数说明不是停牌所致,`--exclude-zero-ret` 剔错了对象。
-    """
+def _zero_ret_window(
+    fp: Path, loader, few_bars: int, max_codes: int, out: dict
+) -> None:
+    """单窗诊断:结果追加进 out["windows"],并按 kind 累计 out["kind_total"]。"""
     import json as _j
 
-    out: dict = {"windows": [], "kind_total": {}}
-    for fp in firings_files:
-        try:
-            raw = _j.loads(Path(fp).read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:
-            out["windows"].append({"file": Path(fp).name, "error": str(exc)})
-            continue
-        recs = raw if isinstance(raw, list) else (raw.get("records") or [])
-        codes = sorted(zero_ret_codes(recs))
-        if max_codes:
-            codes = codes[:max_codes]
-        rs = raw.get("ret_start") if isinstance(raw, dict) else None
-        re_ = raw.get("ret_end") if isinstance(raw, dict) else None
-        w: dict = {
-            "file": Path(fp).name,
-            "label": f"{rs}~{re_}",
-            "n_zero_ret": len(codes),
-            "kinds": {},
-            "samples": {},
-        }
-        if not codes:
-            w["error"] = "无零收益样本"
-            out["windows"].append(w)
-            continue
-        if not (rs and re_):
-            # 缺 ret_start/ret_end 时**不得**回退信号窗(会把信号窗当赢家窗诊断,整窗错位且无提示)
-            w["error"] = (
-                "firings 缺 ret_start/ret_end(旧格式?),无法定位赢家窗,请重跑该窗 Pass1"
-            )
-            out["windows"].append(w)
-            continue
-        try:
-            bars = loader(codes, rs, re_) or {}
-        except Exception as exc:  # noqa: BLE001
-            w["error"] = f"重载 K 线失败: {exc}"
-            out["windows"].append(w)
-            continue
-        for c in codes:
-            info = classify_zero_ret_bars(bars.get(c), rs, re_, few_bars=few_bars)
-            kind = info["kind"]
-            w["kinds"][kind] = w["kinds"].get(kind, 0) + 1
-            out["kind_total"][kind] = out["kind_total"].get(kind, 0) + 1
-            w["samples"].setdefault(kind, []).append({"code": c, **info})
-        for k in w["samples"]:
-            w["samples"][k] = w["samples"][k][:3]  # 每类留 3 个样例便于人工核
-        w["board_mix"] = board_mix(codes)
+    try:
+        raw = _j.loads(Path(fp).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        out["windows"].append({"file": Path(fp).name, "error": str(exc)})
+        return
+    recs = raw if isinstance(raw, list) else (raw.get("records") or [])
+    codes = sorted(zero_ret_codes(recs))
+    if max_codes:
+        codes = codes[:max_codes]
+    rs = raw.get("ret_start") if isinstance(raw, dict) else None
+    re_ = raw.get("ret_end") if isinstance(raw, dict) else None
+    w: dict = {
+        "file": Path(fp).name,
+        "label": f"{rs}~{re_}",
+        "n_zero_ret": len(codes),
+        "kinds": {},
+        "samples": {},
+    }
+    if not codes:
+        w["error"] = "无零收益样本"
         out["windows"].append(w)
+        return
+    if not (rs and re_):
+        # 缺 ret_start/ret_end 时**不得**回退信号窗(会把信号窗当赢家窗诊断,整窗错位且无提示)
+        w["error"] = (
+            "firings 缺 ret_start/ret_end(旧格式?),无法定位赢家窗,请重跑该窗 Pass1"
+        )
+        out["windows"].append(w)
+        return
+    try:
+        bars = loader(codes, rs, re_) or {}
+    except Exception as exc:  # noqa: BLE001
+        w["error"] = f"重载 K 线失败: {exc}"
+        out["windows"].append(w)
+        return
+    for c in codes:
+        info = classify_zero_ret_bars(bars.get(c), rs, re_, few_bars=few_bars)
+        kind = info["kind"]
+        w["kinds"][kind] = w["kinds"].get(kind, 0) + 1
+        out["kind_total"][kind] = out["kind_total"].get(kind, 0) + 1
+        w["samples"].setdefault(kind, []).append({"code": c, **info})
+    for k in w["samples"]:
+        w["samples"][k] = w["samples"][k][:3]  # 每类留 3 个样例便于人工核
+    w["board_mix"] = board_mix(codes)
+    out["windows"].append(w)
+
+
+def _zero_ret_render(out: dict) -> None:
+    """按各窗结果渲染诊断文本,并写入 out["n_total"] / out["text"]。"""
     lines = [
         f"    {'窗口':<28} {'零收益':>7} {'全程停牌':>9} {'断续停牌':>9} "
         f"{'K线过少':>9} {'有量收平':>9}"
@@ -500,6 +498,20 @@ def zero_ret_diagnose(
     else:
         lines.append("  无零收益样本可诊断")
     out["text"] = "\n".join(lines)
+
+
+def zero_ret_diagnose(
+    firings_files: list[Path], loader, few_bars: int = 5, max_codes: int = 0
+) -> dict:
+    """逐窗诊断零收益样本成因。loader(codes, start, end) → {code: DataFrame}。
+
+    只重载 ret==0 的那些票(实跑最大一窗约 800 只),不重跑 Pass1。
+    结论行按占比给判决:traded_flat 占多数说明不是停牌所致,`--exclude-zero-ret` 剔错了对象。
+    """
+    out: dict = {"windows": [], "kind_total": {}}
+    for fp in firings_files:
+        _zero_ret_window(fp, loader, few_bars, max_codes, out)
+    _zero_ret_render(out)
     return out
 
 
@@ -517,7 +529,6 @@ def survivorship_report(
     真正的判据是:qlib 宇宙(instruments/all.txt 并集,含退市股)减去**今天本地 vipdoc 实有**的票
     = 已摘牌队列;再看各窗 firings 的样本里落了多少只。落 0 才说明去偏失效(§3 首条)。
     """
-    import json as _j
     from custos.datasource import s_data as _sd  # noqa: PLC0415
 
     sub = "CSV_DATA" if data_source == "csv" else "Q_DATA"
@@ -537,37 +548,45 @@ def survivorship_report(
         "windows": [],
     }
     for fp in firings_files:
-        try:
-            raw = _j.loads(Path(fp).read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:
-            out["windows"].append({"file": Path(fp).name, "error": str(exc)})
-            continue
-        recs = raw if isinstance(raw, list) else (raw.get("records") or [])
-        codes = {r.get("code") for r in recs if r.get("code")}
-        with_sig = {r.get("code") for r in recs if (r.get("days") or [])}
-        hit = codes & gone
-        zero = zero_ret_codes(recs)
-        out["windows"].append(
-            {
-                "file": Path(fp).name,
-                "label": (
-                    f"{raw.get('start')}~{raw.get('end')}"
-                    if isinstance(raw, dict)
-                    else ""
-                ),
-                "n_codes": len(codes),
-                "n_with_signal": len(with_sig),
-                "n_gone_in_sample": len(hit),
-                "gone_share": round(len(hit) / len(codes), 4) if codes else None,
-                "n_gone_with_signal": len(with_sig & gone),
-                "n_delisted_flag": sum(1 for r in recs if r.get("delisted")),
-                "n_zero_ret": len(zero),
-                "n_zero_gone": len(
-                    zero & gone
-                ),  # 已摘牌又恰好零收益 = --exclude-zero-ret 会删掉的真飞刀
-                "zero_by_board": board_mix(zero),
-            }
-        )
+        out["windows"].append(_survivorship_window(fp, gone))
+    _survivorship_render(out)
+    return out
+
+
+def _survivorship_window(fp: Path, gone: set) -> dict:
+    """单窗统计:样本里落了几只已摘牌股(读取失败返回 {"file", "error"} 不抛出)。"""
+    import json as _j
+
+    try:
+        raw = _j.loads(Path(fp).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return {"file": Path(fp).name, "error": str(exc)}
+    recs = raw if isinstance(raw, list) else (raw.get("records") or [])
+    codes = {r.get("code") for r in recs if r.get("code")}
+    with_sig = {r.get("code") for r in recs if (r.get("days") or [])}
+    hit = codes & gone
+    zero = zero_ret_codes(recs)
+    return {
+        "file": Path(fp).name,
+        "label": (
+            f"{raw.get('start')}~{raw.get('end')}" if isinstance(raw, dict) else ""
+        ),
+        "n_codes": len(codes),
+        "n_with_signal": len(with_sig),
+        "n_gone_in_sample": len(hit),
+        "gone_share": round(len(hit) / len(codes), 4) if codes else None,
+        "n_gone_with_signal": len(with_sig & gone),
+        "n_delisted_flag": sum(1 for r in recs if r.get("delisted")),
+        "n_zero_ret": len(zero),
+        "n_zero_gone": len(
+            zero & gone
+        ),  # 已摘牌又恰好零收益 = --exclude-zero-ret 会删掉的真飞刀
+        "zero_by_board": board_mix(zero),
+    }
+
+
+def _survivorship_render(out: dict) -> None:
+    """渲染体检文本(写入 out["text"]),并补齐合计键。"""
     lines = [
         f"qlib 宇宙 {out['universe']} 只;今日本地实有 {out['today']} 只;"
         f"**已摘牌队列 {out['gone_pool']} 只**(宇宙有、今天没有)",
@@ -584,6 +603,13 @@ def survivorship_report(
             f"{(w['gone_share'] or 0):>6.1%} {w['n_gone_with_signal']:>12} "
             f"{w['n_delisted_flag']:>9} {w['n_zero_ret']:>7} {w['n_zero_gone']:>14}"
         )
+    _survivorship_verdict_lines(out, lines)
+    _survivorship_zero_totals(out, lines)
+    out["text"] = "\n".join(lines)
+
+
+def _survivorship_verdict_lines(out: dict, lines: list) -> None:
+    """按已摘牌队列给去偏判决(§3 首条),并附'窗内消失'口径注记。"""
     zero_windows = [  # 原名 zero 与循环内的集合同名（mypy 类型冲突），改名
         w for w in out["windows"] if not w.get("error") and w["n_gone_in_sample"] == 0
     ]
@@ -604,6 +630,10 @@ def survivorship_report(
         "  注:'窗内消失'=赢家窗完全无价格而按 --delisted-ret 计入的只数,"
         "短窗内本就稀有,0 不代表去偏失效"
     )
+
+
+def _survivorship_zero_totals(out: dict, lines: list) -> None:
+    """零收益×已摘牌交叉合计:写入 n_zero_gone_total / zero_by_board_total 并追加结论行。"""
     ok = [w for w in out["windows"] if not w.get("error")]
     out["n_zero_gone_total"] = sum(w["n_zero_gone"] for w in ok)
     mix: dict[str, int] = {}
@@ -628,11 +658,9 @@ def survivorship_report(
             "  ✅ 零收益样本与已摘牌队列无交集 ⇒ `--exclude-zero-ret` 未删到真飞刀,"
             "剔除仅影响停牌/低流动性直线样本"
         )
-    out["text"] = "\n".join(lines)
-    return out
 
 
-def main(argv=None, runner=None) -> int:
+def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         description="空头段识别未来赢家:窗口枚举 → Pass1 逐对 → Pass2 汇总"
     )
@@ -742,37 +770,31 @@ def main(argv=None, runner=None) -> int:
         default=0,
         help="每窗最多诊断多少只零收益样本(0=全量;大窗先抽样时用)",
     )
-    args = ap.parse_args(argv)
-    run = runner or (lambda cmd: subprocess.run(cmd, check=False).returncode)
+    return ap
 
-    out_dir = Path(args.out_dir)
-    if not out_dir.is_absolute():
-        out_dir = BASE / out_dir
+
+def _load_pairs(args) -> Optional[list]:
+    """取窗口对:--pairs-file 复用现成 JSON,否则从 0AMV regime 现算;regime 空返回 None。"""
     if args.pairs_file:
-        pairs = json.loads(Path(args.pairs_file).read_text(encoding="utf-8"))[
+        return json.loads(Path(args.pairs_file).read_text(encoding="utf-8"))[
             "window_pairs"
         ]
-    else:
-        regime = bt.load_amv_regime(since=args.regime_since)
-        if not regime:
-            print(
-                "[ERR] 0AMV regime 为空(指南针数据不可用),无法枚举窗口", file=sys.stderr
-            )
-            return 2
-        pairs = lp.bear_to_long_pairs(
-            regime,
-            min_bear_days=args.min_bear_days,
-            min_long_days=args.min_long_days,
-            include_long_head_days=args.include_long_head_days,
-            signal_span=args.signal_span,
-        )
-    keep, drop = usable_pairs(
-        pairs, qlib_end=args.qlib_end, require_market_cap=args.require_market_cap
+    regime = bt.load_amv_regime(since=args.regime_since)
+    if not regime:
+        print("[ERR] 0AMV regime 为空(指南针数据不可用),无法枚举窗口", file=sys.stderr)
+        return None
+    return lp.bear_to_long_pairs(
+        regime,
+        min_bear_days=args.min_bear_days,
+        min_long_days=args.min_long_days,
+        include_long_head_days=args.include_long_head_days,
+        signal_span=args.signal_span,
     )
 
-    print(
-        f"=== 窗口对:{len(pairs)} 对枚举 → {len(keep)} 对可用 / {len(drop)} 对剔除 ==="
-    )
+
+def _print_plan(n_pairs: int, keep: list[dict], drop: list[dict]) -> None:
+    """打印窗口计划:可用对逐条 [跑],剔除对逐条 [剔] 并附原因。"""
+    print(f"=== 窗口对:{n_pairs} 对枚举 → {len(keep)} 对可用 / {len(drop)} 对剔除 ===")
     for p in keep:
         print(
             f"  [跑] 信号 {p['signal_start']}~{p['signal_end']} ({p.get('signal_days', '?')}日)"
@@ -783,51 +805,54 @@ def main(argv=None, runner=None) -> int:
             f"  [剔] 信号 {p['signal_start']}~{p['signal_end']} → 赢家 "
             f"{p['label_start']}~{p['label_end']}  ({p['reason']})"
         )
-    if not keep:
-        print("[ERR] 无可用窗口对", file=sys.stderr)
+
+
+def _existing_firings(out_dir: Path, keep: list[dict]) -> list[Path]:
+    """按窗口对拼 firings 路径并筛出已存在的(诊断/体检分支共用)。"""
+    existing = [out_dir / f"firings_{tag_of(p)}.json" for p in keep]
+    return [f for f in existing if f.exists()]
+
+
+def _zero_ret_report_cli(args, out_dir: Path, keep: list[dict]) -> int:
+    """--zero-ret-report 分支:只诊断零收益成因,不跑 Pass1/Pass2。"""
+    existing = _existing_firings(out_dir, keep)
+    if not existing:
+        print("[ERR] 没有可诊断的 firings(先跑 Pass1)", file=sys.stderr)
         return 2
-    if len(keep) < 4:
-        print(
-            f"[WARN] 仅 {len(keep)} 个独立窗口,跨窗一致性判定统计力很弱(结论只能当探索)",
-            file=sys.stderr,
-        )
+    from custos.datasource import s_data as _sd  # noqa: PLC0415
 
-    if not args.dry_run:
-        out_dir.mkdir(parents=True, exist_ok=True)  # dry-run 只看计划,不落任何目录/文件
-    files: list[Path] = []
-    if args.zero_ret_report:  # 只诊断零收益成因,不跑 Pass1/Pass2
-        existing = [out_dir / f"firings_{tag_of(p)}.json" for p in keep]
-        existing = [f for f in existing if f.exists()]
-        if not existing:
-            print("[ERR] 没有可诊断的 firings(先跑 Pass1)", file=sys.stderr)
-            return 2
-        from custos.datasource import s_data as _sd  # noqa: PLC0415
+    sub = "CSV_DATA" if args.data_source == "csv" else "Q_DATA"
+    fn = _sd.load_bars_csv if args.data_source == "csv" else _sd.load_bars_qlib
+    root = str(Path(args.s_data_root) / sub)
 
-        sub = "CSV_DATA" if args.data_source == "csv" else "Q_DATA"
-        fn = _sd.load_bars_csv if args.data_source == "csv" else _sd.load_bars_qlib
-        root = str(Path(args.s_data_root) / sub)
+    def _load(codes, start, end):
+        return fn(codes, 0, start=start, end=end, root=root)
 
-        def _load(codes, start, end):
-            return fn(codes, 0, start=start, end=end, root=root)
+    rep = zero_ret_diagnose(existing, _load, max_codes=args.zero_ret_max_codes)
+    print("\n=== 零收益样本成因诊断(按 volume 判停牌,ret==0 只是症状) ===")
+    print(rep["text"])
+    return 0
 
-        rep = zero_ret_diagnose(existing, _load, max_codes=args.zero_ret_max_codes)
-        print("\n=== 零收益样本成因诊断(按 volume 判停牌,ret==0 只是症状) ===")
-        print(rep["text"])
-        return 0
-    if args.survivorship_report:  # 只体检,不跑 Pass1/Pass2
-        existing = [out_dir / f"firings_{tag_of(p)}.json" for p in keep]
-        existing = [f for f in existing if f.exists()]
-        if not existing:
-            print("[ERR] 没有可体检的 firings(先跑 Pass1)", file=sys.stderr)
-            return 2
-        rep = survivorship_report(existing, args.s_data_root, args.data_source)
-        if rep.get("error"):
-            print(f"[ERR] {rep['error']}", file=sys.stderr)
-            return 2
-        print("\n=== 幸存者偏差体检(样本里有多少'当时在、今天已摘牌'的票) ===")
-        print(rep["text"])
-        return 0
+
+def _survivorship_report_cli(args, out_dir: Path, keep: list[dict]) -> int:
+    """--survivorship-report 分支:只体检,不跑 Pass1/Pass2。"""
+    existing = _existing_firings(out_dir, keep)
+    if not existing:
+        print("[ERR] 没有可体检的 firings(先跑 Pass1)", file=sys.stderr)
+        return 2
+    rep = survivorship_report(existing, args.s_data_root, args.data_source)
+    if rep.get("error"):
+        print(f"[ERR] {rep['error']}", file=sys.stderr)
+        return 2
+    print("\n=== 幸存者偏差体检(样本里有多少'当时在、今天已摘牌'的票) ===")
+    print(rep["text"])
+    return 0
+
+
+def _run_pass1(args, run, out_dir: Path, keep: list[dict]) -> tuple[list[Path], int]:
+    """Pass1 逐窗:断点续跑(可复用则跳过);返回 (候选 firings 列表, 累计失败码)。"""
     rc_all = 0
+    files: list[Path] = []
     for p in keep:
         f = out_dir / f"firings_{tag_of(p)}.json"
         files.append(f)
@@ -848,7 +873,12 @@ def main(argv=None, runner=None) -> int:
             )
             rc_all = 1
             files.pop()
+    return files, rc_all
 
+
+def _run_passes(args, run, out_dir: Path, keep: list[dict]) -> int:
+    """Pass1 逐窗 → Pass2 跨窗汇总。"""
+    files, rc_all = _run_pass1(args, run, out_dir, keep)
     ready = [f for f in files if f.exists() or args.dry_run]
     if not ready:
         print("[ERR] 无可用 firings,跳过 Pass2", file=sys.stderr)
@@ -861,6 +891,38 @@ def main(argv=None, runner=None) -> int:
     rc2 = run(cmd2)
     print(f"\n汇总输出:{agg_out}")
     return rc_all or rc2
+
+
+def main(argv=None, runner=None) -> int:
+    args = _build_parser().parse_args(argv)
+    run = runner or (lambda cmd: subprocess.run(cmd, check=False).returncode)
+
+    out_dir = Path(args.out_dir)
+    if not out_dir.is_absolute():
+        out_dir = BASE / out_dir
+    pairs = _load_pairs(args)
+    if pairs is None:
+        return 2
+    keep, drop = usable_pairs(
+        pairs, qlib_end=args.qlib_end, require_market_cap=args.require_market_cap
+    )
+    _print_plan(len(pairs), keep, drop)
+    if not keep:
+        print("[ERR] 无可用窗口对", file=sys.stderr)
+        return 2
+    if len(keep) < 4:
+        print(
+            f"[WARN] 仅 {len(keep)} 个独立窗口,跨窗一致性判定统计力很弱(结论只能当探索)",
+            file=sys.stderr,
+        )
+
+    if not args.dry_run:
+        out_dir.mkdir(parents=True, exist_ok=True)  # dry-run 只看计划,不落任何目录/文件
+    if args.zero_ret_report:  # 只诊断零收益成因,不跑 Pass1/Pass2
+        return _zero_ret_report_cli(args, out_dir, keep)
+    if args.survivorship_report:  # 只体检,不跑 Pass1/Pass2
+        return _survivorship_report_cli(args, out_dir, keep)
+    return _run_passes(args, run, out_dir, keep)
 
 
 if __name__ == "__main__":

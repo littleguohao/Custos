@@ -150,6 +150,105 @@ def parse_ledger(path: Path) -> list[dict] | None:
     return rows
 
 
+def _fifo_match_lots(lots: list[list], qty: float) -> tuple[float, float, float, list]:
+    """从 FIFO 队头逐笔吃掉 open lots。
+
+    返回 (matched_cost, matched_qty, matched_fee, buy_dates)；就地消耗 lots。
+    """
+    remaining = qty
+    matched_cost = 0.0
+    matched_qty = 0.0
+    matched_fee = 0.0
+    buy_dates: list[tuple[str, float]] = []
+    while remaining > 1e-9 and lots:
+        lot = lots[0]
+        take = min(remaining, lot[0])
+        matched_cost += take * lot[1]
+        matched_qty += take
+        matched_fee += take * lot[3]
+        buy_dates.append((lot[2], take))
+        lot[0] -= take
+        remaining -= take
+        if lot[0] <= 1e-9:
+            lots.pop(0)
+    return matched_cost, matched_qty, matched_fee, buy_dates
+
+
+def _fifo_sell_bucket(sells_by_key: dict, order: list, t: dict) -> dict:
+    """按 (代码, 卖出日) 取/建卖出聚合桶（新建时登记出现顺序）。"""
+    key = (t["code"], t["date"])
+    if key not in sells_by_key:
+        sells_by_key[key] = {
+            "code": t["code"],
+            "name": t["name"],
+            "sell_date": t["date"],
+            "sell_qty": 0.0,
+            "sell_amount": 0.0,
+            "sell_fee": 0.0,
+            "matched_cost": 0.0,
+            "matched_qty": 0.0,
+            "matched_fee": 0.0,
+            "buy_dates": [],
+        }
+        order.append(key)
+    return sells_by_key[key]
+
+
+def _closing_from_bucket(agg: dict) -> dict:
+    """单个 (代码, 卖出日) 聚合桶 -> 平仓单 dict（均价/持有天数/盈亏/配平状态）。"""
+    qty = agg["sell_qty"]
+    mqty = agg["matched_qty"]
+    avg_sell = agg["sell_amount"] / qty if qty else 0.0
+    avg_cost = agg["matched_cost"] / mqty if mqty else None
+    sell_d = date.fromisoformat(agg["sell_date"])
+    if agg["buy_dates"]:
+        total = sum(q for _, q in agg["buy_dates"])
+        avg_buy_ordinal = (
+            sum(date.fromisoformat(d).toordinal() * q for d, q in agg["buy_dates"])
+            / total
+        )
+        hold_days = sell_d.toordinal() - round(avg_buy_ordinal)
+        first_buy = min(d for d, _ in agg["buy_dates"])
+    else:
+        hold_days = None
+        first_buy = None
+    gross = (avg_sell * mqty - agg["matched_cost"]) if mqty else None
+    pnl_pct = (
+        (gross / agg["matched_cost"] * 100)
+        if (gross is not None and agg["matched_cost"])
+        else None
+    )
+    unmatched = round(qty - mqty, 4)
+    if mqty <= 1e-9:
+        status = "none"
+    elif unmatched > 1e-9:
+        status = "partial"
+    else:
+        status = "full"
+    return {
+        "code": agg["code"],
+        "name": agg["name"],
+        "sell_date": agg["sell_date"],
+        "sell_qty": qty,
+        "avg_sell_price": round(avg_sell, 4),
+        "avg_buy_cost": round(avg_cost, 4) if avg_cost is not None else None,
+        "first_buy_date": first_buy,
+        "hold_days": hold_days,
+        "gross_pnl": round(gross, 2) if gross is not None else None,
+        "pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None,
+        "matched_qty": round(mqty, 4),
+        "unmatched_qty": unmatched,
+        "match_status": status,
+        "sell_fee": round(agg["sell_fee"], 2),
+        "matched_buy_fee": round(agg["matched_fee"], 2),
+        "net_pnl": (
+            round(gross - agg["sell_fee"] - agg["matched_fee"], 2)
+            if gross is not None
+            else None
+        ),
+    }
+
+
 def fifo_pair(trades: list[dict]) -> list[dict]:
     """全台账 FIFO 配对，返回平仓单列表（按 (代码, 卖出日) 聚合）。
 
@@ -181,38 +280,10 @@ def fifo_pair(trades: list[dict]) -> list[dict]:
             )
             continue
         lots = open_lots.setdefault(t["code"], [])
-        remaining = t["qty"]
-        matched_cost = 0.0
-        matched_qty = 0.0
-        matched_fee = 0.0
-        buy_dates: list[tuple[str, float]] = []
-        while remaining > 1e-9 and lots:
-            lot = lots[0]
-            take = min(remaining, lot[0])
-            matched_cost += take * lot[1]
-            matched_qty += take
-            matched_fee += take * lot[3]
-            buy_dates.append((lot[2], take))
-            lot[0] -= take
-            remaining -= take
-            if lot[0] <= 1e-9:
-                lots.pop(0)
-        key = (t["code"], t["date"])
-        if key not in sells_by_key:
-            sells_by_key[key] = {
-                "code": t["code"],
-                "name": t["name"],
-                "sell_date": t["date"],
-                "sell_qty": 0.0,
-                "sell_amount": 0.0,
-                "sell_fee": 0.0,
-                "matched_cost": 0.0,
-                "matched_qty": 0.0,
-                "matched_fee": 0.0,
-                "buy_dates": [],
-            }
-            order.append(key)
-        agg = sells_by_key[key]
+        matched_cost, matched_qty, matched_fee, buy_dates = _fifo_match_lots(
+            lots, t["qty"]
+        )
+        agg = _fifo_sell_bucket(sells_by_key, order, t)
         agg["sell_qty"] += t["qty"]
         agg["sell_amount"] += t["amount"]
         agg["sell_fee"] += t["fee"]
@@ -220,63 +291,7 @@ def fifo_pair(trades: list[dict]) -> list[dict]:
         agg["matched_qty"] += matched_qty
         agg["matched_fee"] += matched_fee
         agg["buy_dates"].extend(buy_dates)
-    closings = []
-    for key in order:
-        agg = sells_by_key[key]
-        qty = agg["sell_qty"]
-        mqty = agg["matched_qty"]
-        avg_sell = agg["sell_amount"] / qty if qty else 0.0
-        avg_cost = agg["matched_cost"] / mqty if mqty else None
-        sell_d = date.fromisoformat(agg["sell_date"])
-        if agg["buy_dates"]:
-            total = sum(q for _, q in agg["buy_dates"])
-            avg_buy_ordinal = (
-                sum(date.fromisoformat(d).toordinal() * q for d, q in agg["buy_dates"])
-                / total
-            )
-            hold_days = sell_d.toordinal() - round(avg_buy_ordinal)
-            first_buy = min(d for d, _ in agg["buy_dates"])
-        else:
-            hold_days = None
-            first_buy = None
-        gross = (avg_sell * mqty - agg["matched_cost"]) if mqty else None
-        pnl_pct = (
-            (gross / agg["matched_cost"] * 100)
-            if (gross is not None and agg["matched_cost"])
-            else None
-        )
-        unmatched = round(qty - mqty, 4)
-        if mqty <= 1e-9:
-            status = "none"
-        elif unmatched > 1e-9:
-            status = "partial"
-        else:
-            status = "full"
-        closings.append(
-            {
-                "code": agg["code"],
-                "name": agg["name"],
-                "sell_date": agg["sell_date"],
-                "sell_qty": qty,
-                "avg_sell_price": round(avg_sell, 4),
-                "avg_buy_cost": round(avg_cost, 4) if avg_cost is not None else None,
-                "first_buy_date": first_buy,
-                "hold_days": hold_days,
-                "gross_pnl": round(gross, 2) if gross is not None else None,
-                "pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None,
-                "matched_qty": round(mqty, 4),
-                "unmatched_qty": unmatched,
-                "match_status": status,
-                "sell_fee": round(agg["sell_fee"], 2),
-                "matched_buy_fee": round(agg["matched_fee"], 2),
-                "net_pnl": (
-                    round(gross - agg["sell_fee"] - agg["matched_fee"], 2)
-                    if gross is not None
-                    else None
-                ),
-            }
-        )
-    return closings
+    return [_closing_from_bucket(sells_by_key[key]) for key in order]
 
 
 def load_amv_regimes(path: Path) -> dict[str, dict] | None:

@@ -104,6 +104,37 @@ def _arr(df: pd.DataFrame):
     )
 
 
+def _prior_b1(j, t: int, b1_within: int):
+    """① B1 之后:近 b1_within 根(不含当日)出现过 J<13 → (b1_before, b1_bars_ago)。"""
+    lo = max(0, t - b1_within)
+    prior_j = [x for x in j[lo:t] if x == x]  # 剔除 NaN
+    b1_before = bool(any(x < B2_J_LOW for x in prior_j))
+    b1_bars_ago = None
+    for k_ in range(t - 1, lo - 1, -1):
+        if j[k_] == j[k_] and j[k_] < B2_J_LOW:
+            b1_bars_ago = t - k_
+            break
+    return b1_before, b1_bars_ago
+
+
+def _b2_core_conditions(close, vol, j, t: int):
+    """② 涨幅 > 4% / ③ 比前一交易日放量 / ④ J < 55。"""
+    gain = float((close[t] / close[t - 1] - 1) * 100)
+    gain_ok = bool(gain > B2_GAIN_PCT)
+    vol_up = bool(vol[t] > vol[t - 1])
+    j_now = float(j[t]) if j[t] == j[t] else None
+    j_ok = bool(j_now is not None and j_now < B2_J_MAX)
+    return gain, gain_ok, vol_up, j_now, j_ok
+
+
+def _b2_upper_shadow(close, high, open_, t: int):
+    """⑤ 无上影线最好（加分项,不作硬条件）→ (body, upper, no_upper)。"""
+    body = float(abs(close[t] - open_[t]))
+    upper = float(high[t] - max(close[t], open_[t]))
+    no_upper = bool(body > 0 and upper <= body * B2_NO_UPPER_SHADOW_FRAC)
+    return body, upper, no_upper
+
+
 def detect_b2(
     df: pd.DataFrame,
     code: str = "",
@@ -130,31 +161,9 @@ def detect_b2(
         if not close[t - 1] or not vol[t - 1]:
             return {"available": False, "hit": False, "reason": "bad_prev_bar"}
 
-        # ① B1 之后:近 b1_within 根(不含当日)出现过 J<13
-        lo = max(0, t - b1_within)
-        prior_j = [x for x in j[lo:t] if x == x]  # 剔除 NaN
-        b1_before = bool(any(x < B2_J_LOW for x in prior_j))
-        b1_bars_ago = None
-        for k_ in range(t - 1, lo - 1, -1):
-            if j[k_] == j[k_] and j[k_] < B2_J_LOW:
-                b1_bars_ago = t - k_
-                break
-
-        # ② 涨幅 > 4%
-        gain = float((close[t] / close[t - 1] - 1) * 100)
-        gain_ok = bool(gain > B2_GAIN_PCT)
-
-        # ③ 比前一交易日放量
-        vol_up = bool(vol[t] > vol[t - 1])
-
-        # ④ J < 55
-        j_now = float(j[t]) if j[t] == j[t] else None
-        j_ok = bool(j_now is not None and j_now < B2_J_MAX)
-
-        # ⑤ 无上影线最好（加分项,不作硬条件）
-        body = float(abs(close[t] - open_[t]))
-        upper = float(high[t] - max(close[t], open_[t]))
-        no_upper = bool(body > 0 and upper <= body * B2_NO_UPPER_SHADOW_FRAC)
+        b1_before, b1_bars_ago = _prior_b1(j, t, b1_within)
+        gain, gain_ok, vol_up, j_now, j_ok = _b2_core_conditions(close, vol, j, t)
+        body, upper, no_upper = _b2_upper_shadow(close, high, open_, t)
 
         hit = bool(b1_before and gain_ok and vol_up and j_ok)
         return {

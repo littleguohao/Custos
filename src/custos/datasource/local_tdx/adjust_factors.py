@@ -639,12 +639,7 @@ __all__ = [
 ]
 
 
-def main() -> int:
-    """CLI：预热/刷新权息缓存。
-
-    首次必须预热——否则回测跑 1000 只票时每只都要走一次网络取权息。
-    预热后是纯本地 json 读取；权息只需按 --max-age 增量刷新。
-    """
+def _parse_args() -> tuple[Any, Any]:
     import argparse
 
     ap = argparse.ArgumentParser(description="前复权权息缓存管理")
@@ -663,53 +658,54 @@ def main() -> int:
     ap.add_argument("--force", action="store_true", help="忽略缓存年龄，全部重取")
     ap.add_argument("--show", default="", help="打印某只票的权息事件与因子")
     ap.add_argument("--stats", action="store_true", help="缓存统计")
-    a = ap.parse_args()
+    return ap, ap.parse_args()
 
-    if a.show:
-        code = a.show[:6]
+
+def _cmd_show(show: str) -> int:
+    code = show[:6]
+    try:
+        ev = get_xdxr(code)
+    except AdjustError as e:
+        print(f"[ERR] {e}")
+        return 2
+    print(f"{code} 共 {len(ev)} 个影响价格的权息事件：")
+    for row in ev:
+        print(
+            f"  {row['date']}  分红{row['fenhong']:>6.3f}  送转{row['songzhuangu']:>5.2f}  "
+            f"配股{row['peigu']:>5.2f}@{row['peigujia']:>6.2f}  缩股{row['suogu']:>5.2f}"
+        )
+    age = cache_age_days(code)
+    print(f"缓存年龄：{'—' if age is None else f'{age:.1f} 天'}")
+    return 0
+
+
+def _cmd_stats(max_age: float) -> int:
+    if not CACHE_DIR.exists():
+        print("缓存目录不存在，先跑 --warmup")
+        return 1
+    files = sorted(CACHE_DIR.glob("*.json"))
+    ages = [x for x in (cache_age_days(p.stem) for p in files) if x is not None]
+    n_ev = 0
+    for p in files:
         try:
-            ev = get_xdxr(code)
-        except AdjustError as e:
-            print(f"[ERR] {e}")
-            return 2
-        print(f"{code} 共 {len(ev)} 个影响价格的权息事件：")
-        for row in ev:
-            print(
-                f"  {row['date']}  分红{row['fenhong']:>6.3f}  送转{row['songzhuangu']:>5.2f}  "
-                f"配股{row['peigu']:>5.2f}@{row['peigujia']:>6.2f}  缩股{row['suogu']:>5.2f}"
-            )
-        age = cache_age_days(code)
-        print(f"缓存年龄：{'—' if age is None else f'{age:.1f} 天'}")
-        return 0
+            n_ev += int(json.loads(p.read_text(encoding="utf-8")).get("n") or 0)
+        except Exception:  # noqa: BLE001
+            pass
+    print(f"缓存 {len(files)} 只，累计 {n_ev} 个权息事件")
+    if ages:
+        print(
+            f"缓存年龄：中位 {sorted(ages)[len(ages) // 2]:.1f} 天  "
+            f"最旧 {max(ages):.1f} 天"
+        )
+        stale = sum(1 for x in ages if x > max_age)
+        print(f"超过 {max_age} 天需刷新：{stale} 只")
+    return 0
 
-    if a.stats:
-        if not CACHE_DIR.exists():
-            print("缓存目录不存在，先跑 --warmup")
-            return 1
-        files = sorted(CACHE_DIR.glob("*.json"))
-        ages = [x for x in (cache_age_days(p.stem) for p in files) if x is not None]
-        n_ev = 0
-        for p in files:
-            try:
-                n_ev += int(json.loads(p.read_text(encoding="utf-8")).get("n") or 0)
-            except Exception:  # noqa: BLE001
-                pass
-        print(f"缓存 {len(files)} 只，累计 {n_ev} 个权息事件")
-        if ages:
-            print(
-                f"缓存年龄：中位 {sorted(ages)[len(ages) // 2]:.1f} 天  "
-                f"最旧 {max(ages):.1f} 天"
-            )
-            stale = sum(1 for x in ages if x > a.max_age)
-            print(f"超过 {a.max_age} 天需刷新：{stale} 只")
-        return 0
 
-    if not a.warmup:
-        ap.print_help()
-        return 0
-
-    if a.codes:
-        codes = [c.strip()[:6] for c in a.codes.split(",") if c.strip()]
+def _resolve_codes(codes_arg: str) -> Optional[list[str]]:
+    """--codes 逗号列表，或本地全市场代码表；读不到代码表时打印错误并返回 None。"""
+    if codes_arg:
+        codes = [c.strip()[:6] for c in codes_arg.split(",") if c.strip()]
     else:
         try:
             from custos.datasource.local_tdx import local_tdx_data
@@ -717,7 +713,7 @@ def main() -> int:
             codes = sorted(local_tdx_data.list_local_vipdoc_codes())
         except Exception as e:  # noqa: BLE001
             print(f"[ERR] 读不到本地代码表: {e}")
-            return 2
+            return None
     # 指数不除权，跳过（880/881 光细分行业就有 467 个）
     try:
         from custos.core.code_utils import is_index
@@ -725,6 +721,13 @@ def main() -> int:
         codes = [c for c in codes if not is_index(c)]
     except Exception:  # noqa: BLE001
         pass
+    return codes
+
+
+def _cmd_warmup(a: Any) -> int:
+    codes = _resolve_codes(a.codes)
+    if codes is None:
+        return 2
     todo = codes if a.force else stale_codes(codes, a.max_age)
     print(
         f"共 {len(codes)} 只，需要取数 {len(todo)} 只"
@@ -744,6 +747,27 @@ def main() -> int:
         f"（无事件的票也缓存，避免反复重试）"
     )
     return 0
+
+
+def main() -> int:
+    """CLI：预热/刷新权息缓存。
+
+    首次必须预热——否则回测跑 1000 只票时每只都要走一次网络取权息。
+    预热后是纯本地 json 读取；权息只需按 --max-age 增量刷新。
+    """
+    ap, a = _parse_args()
+
+    if a.show:
+        return _cmd_show(a.show)
+
+    if a.stats:
+        return _cmd_stats(a.max_age)
+
+    if not a.warmup:
+        ap.print_help()
+        return 0
+
+    return _cmd_warmup(a)
 
 
 if __name__ == "__main__":

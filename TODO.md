@@ -6,7 +6,7 @@
 > 优先级按**「它阻塞了什么」**排，不按工作量：
 > P0 = 阻塞其他事或 live 正在依赖 ｜ P1 = 已有结论悬空 ｜ P2 = 新验证 ｜ P3 = 技术债
 >
-> 最后更新：2026-08-18（#49 持仓快照历史归档落地、`entities(date)` 生效（CHANGELOG v0.67）；#58 高复杂度函数拆分收口——研究侧 + live 链 F 级全拆完（CHANGELOG v0.68/v0.69），D/C 级恢复原原则；#35 三因子补跑完成 ⇒ 均无跨窗口稳健性，owner 拍板降级「不再研究」（R2 第 16 条、CHANGELOG v0.70）。其余：#13 复核两案跑完 ⇒ 严变体终审否决（R7「#13 复核结果」节）；#25 跨窗复核跑完 ⇒ 两案过线但「cz3 首选换位」跨窗不成立（R10「#25 跨窗复核结果」节）；P2 待跑表已空）
+> 最后更新：2026-08-19（#58 尾巴收口——radon E 级 19 个全部拆分清零、同批 D 级 53→26，过程中修复前轮拆分遗留的 `main_rally` 静默零产出回归（CHANGELOG v0.71）。此前：#49 持仓快照历史归档落地、`entities(date)` 生效（CHANGELOG v0.67）；#58 高复杂度函数拆分——研究侧 + live 链 F 级全拆完（CHANGELOG v0.68/v0.69）；#35 三因子补跑完成 ⇒ 均无跨窗口稳健性，owner 拍板降级「不再研究」（R2 第 16 条、CHANGELOG v0.70）。其余：#13 复核两案跑完 ⇒ 严变体终审否决（R7「#13 复核结果」节）；#25 跨窗复核跑完 ⇒ 两案过线但「cz3 首选换位」跨窗不成立（R10「#25 跨窗复核结果」节）；P2 待跑表已空）
 
 ## P0 · 阻塞项
 
@@ -35,7 +35,7 @@
 
 | # | 事项 | 出处 |
 |---|---|---|
-| 58 | **高复杂度函数拆分**：✅ **F 级已全部拆完（2026-08-18，owner 两次指示，覆盖原「不为拆分而拆分」原则）**。研究侧：`launch_point_study` 8 个 F/E 级（main 125→B6 等）、`backtest_factors` 4 个（main 80→B6、simulate_b1_trade 62→C18、evaluate_trades 31→C20、simulate_portfolio_topn 31→C17）、`m2_stop_sweep._print_trade_group` 69→B9、`reconcile_qfq` 4 个 ≤B7、`analyze_winner_features.main` 69→C17。live 链 23 个 F 级同日拆完全 ≤C：`enrich` 86→C15、`detect_distribution` 77→C13、`build_monthly_review` 74→A1、`technical_score` 69→A4、`_row_from_analysis` 66→A3、`b1_holding_state.evaluate` 61→C17、`compute_s_reversal` 57→B7、`build_weekly_review` 57→A3 等（明细见 CHANGELOG v0.69）。附带逐位等价效率优化：entry_gate 指标逐股预计算（O(n²)→O(n)，实测 19.7×，106 例等价钉测 + 新旧版逐笔 `==`）、extract_firings BBI 逐股预计算、周报/月报 SHA-256 基线逐字节比对。⚠️ 过程中发现三个 `inspect.getsource` 源码字面钉板（`analyze_winner_features.main`、`final_close_review.main`、`chief_decision_report.main`/`daily_report.main`），相关行留在 main 壳。**剩余原则恢复**：D/C 级函数（如 `n_structure_state` D28、`sector_concentration` D28）**下次因业务动这些文件时先拆** | 2026-08-18 收口（`reports/radon_cc.txt` 当日重生成） |
+| 58 | **高复杂度函数拆分**：✅ **E 级及以上全部拆完（2026-08-19，owner 拍板范围=只拆 E 级）**。F 级 2026-08-18 清零（v0.68/v0.69）；E 级 19 个 2026-08-19 清零（v0.71，明细见该条）——选股链 `apply_risk_downgrades`/`score_all`/`build_entry_reasons`/`check_macd_technics`/`check_non_one_wave`/`_bucket_pools`、因子/基建 `detect_wave_type`/`sector_mainstream.aggregate`/`market_quality_gate`/`load_bars_qlib`、复盘/持仓 `review_core.classify`/`review_enrichment.main`/`calc_mfe_mae.main`/`holding_sector_mapper.main`/`market_timing_scorer.score_indices`、研究侧 `run_bear_to_long_study` 两函数；同批 D 级 53→26。⚠️ 本轮修一个真回归：前轮拆分在 `main_rally_factor` 留下 4 个未定义 helper 被 except 吞掉 ⇒ `main_rally` scorer 静默零产出（v0.71）。等价验证：全量 4147 passed、周报/月报逐字节比对 MATCH、audit 套件通过。**剩余原则恢复**：D 级 26 / C 级 276（如 `n_structure_state` D28、`sector_concentration` D28）**下次因业务动这些文件时先拆** | 2026-08-19 收口（`reports/radon_cc.txt` 当日重生成，E/F 清零） |
 
 ## ⚠️ 已失效的行动项（**别照着做**）
 

@@ -251,6 +251,81 @@ _UNVERIFIED_SKIP_WARNED: set[str] = set()
 _CSV_DEPRECATED_WARNED: set[str] = set()
 
 
+def _filter_usable_bundles(
+    bundles: list[dict[str, Any]], allow_unverified: bool
+) -> list[dict[str, Any]]:
+    """默认剔除「口径无法验证」的 bundle（缺 factor），并出声一次（按 bundle 组合去重）。
+
+    实测缺 factor 的 2021_2026 是加法调整 ⇒ 百分比收益被系统性放大；
+    `allow_unverified=True` 显式放行（见 `load_bars_qlib` docstring）。"""
+    if allow_unverified:
+        return bundles
+    unver = [b for b in bundles if b.get("convention") == "unverified"]
+    if unver:
+        key = ",".join(sorted(b["dir"].name for b in unver))
+        if key not in _UNVERIFIED_SKIP_WARNED:
+            _UNVERIFIED_SKIP_WARNED.add(key)
+            _warn(
+                f"跳过**口径无法验证**的 bundle {key}（缺 factor 字段）。"
+                f"实测缺 factor 的 2021_2026 是**加法调整**（价格=原始价−累计现金"
+                f"分红 ⇒ 百分比收益放大 13~21%，涨跌幅可超涨跌停）。"
+                f"该时段改用 tdx vipdoc；确需放行传 allow_unverified=True"
+            )
+        bundles = [b for b in bundles if b.get("convention") != "unverified"]
+    return bundles
+
+
+def _warn_if_window_disjoint(
+    bundles: list[dict[str, Any]], start: Optional[str], end: Optional[str]
+) -> None:
+    """⚠️ 请求窗口与可用 bundle **完全不相交**时必须出声。
+
+    弃用 2021_2026 之后 qlib 只覆盖 1999-2020，而 `--cross-window` 用的
+    2022-01~2024-12 落在其外 ⇒ 会返回空。若只靠"0 行"，又会被读成"因子无判别力"
+    （审计 E9 那个失效模式）。这里直接说清「请求的窗口没有数据」。"""
+    if not (start or end):
+        return
+    cov = [(b["start"], b["end"]) for b in bundles]
+    w0, w1 = start or "0000-00-00", end or "9999-99-99"
+    if not any(not (w1 < s0 or w0 > s1) for s0, s1 in cov):
+        _warn(
+            f"请求窗口 {w0}~{w1} 与可用 bundle 区间**完全不相交**"
+            f"（可用：{'; '.join(f'{a}~{b}' for a, b in cov)}）⇒ 必然返回空。"
+            f"该时段请改用 tdx vipdoc（--data-source tdx）"
+        )
+
+
+def _load_one_code_qlib(
+    bundles: list[dict[str, Any]],
+    by_dir: dict[Path, dict],
+    c: str,
+    start: Optional[str],
+    end: Optional[str],
+    count: int,
+) -> Optional[pd.DataFrame]:
+    """单只票：跨 bundle 定位 → 逐段加载 → 拼接去重 → start/end/count 截窗。
+    拿不到任何段时返回 None。"""
+    hits = code_to_qlib_dir(c, bundles)
+    _warn_if_mixed_convention(c, hits)
+    segs = [_load_one_qlib(by_dir, bd, inst) for bd, inst in hits]
+    segs = [s for s in segs if s is not None and len(s)]
+    if not segs:
+        return None
+    df = (
+        pd.concat(segs)
+        .drop_duplicates(subset=["date"])
+        .sort_values("date")
+        .reset_index(drop=True)
+    )
+    if start:
+        df = df[df["date"] >= start]
+    if end:
+        df = df[df["date"] <= end]
+    if count:
+        df = df.tail(count).reset_index(drop=True)
+    return df
+
+
 def load_bars_qlib(
     codes: list[str],
     count: int,
@@ -276,20 +351,7 @@ def load_bars_qlib(
     （比如只关心绝对价差、不算百分比收益的研究）。
     详见 `governance/data/QLIB_LOCAL_DATA.md`。
     """
-    bundles = list_bundles(root)
-    if not allow_unverified:
-        unver = [b for b in bundles if b.get("convention") == "unverified"]
-        if unver:
-            key = ",".join(sorted(b["dir"].name for b in unver))
-            if key not in _UNVERIFIED_SKIP_WARNED:
-                _UNVERIFIED_SKIP_WARNED.add(key)
-                _warn(
-                    f"跳过**口径无法验证**的 bundle {key}（缺 factor 字段）。"
-                    f"实测缺 factor 的 2021_2026 是**加法调整**（价格=原始价−累计现金"
-                    f"分红 ⇒ 百分比收益放大 13~21%，涨跌幅可超涨跌停）。"
-                    f"该时段改用 tdx vipdoc；确需放行传 allow_unverified=True"
-                )
-            bundles = [b for b in bundles if b.get("convention") != "unverified"]
+    bundles = _filter_usable_bundles(list_bundles(root), allow_unverified)
     if not bundles:
         _warn("没有可用 bundle（可能全被判为口径无法验证而跳过）")
         # ⚠️ 必须走同一条空结果护栏（审计 E9）：静默 return {} 会让"0 只票→0 条信号
@@ -297,45 +359,17 @@ def load_bars_qlib(
         # 由 test_audit_p3_research::test_s_data_warns_when_nothing_loaded 抓到。
         _warn_if_nothing_loaded({}, codes, "qlib", root)
         return {}
-    # ⚠️ 请求窗口与可用 bundle **完全不相交**时必须出声。
-    # 弃用 2021_2026 之后 qlib 只覆盖 1999-2020，而 `--cross-window` 用的
-    # 2022-01~2024-12 落在其外 ⇒ 会返回空。若只靠"0 行"，又会被读成"因子无判别力"
-    # （审计 E9 那个失效模式）。这里直接说清「请求的窗口没有数据」。
-    if start or end:
-        cov = [(b["start"], b["end"]) for b in bundles]
-        w0, w1 = start or "0000-00-00", end or "9999-99-99"
-        if not any(not (w1 < s0 or w0 > s1) for s0, s1 in cov):
-            _warn(
-                f"请求窗口 {w0}~{w1} 与可用 bundle 区间**完全不相交**"
-                f"（可用：{'; '.join(f'{a}~{b}' for a, b in cov)}）⇒ 必然返回空。"
-                f"该时段请改用 tdx vipdoc（--data-source tdx）"
-            )
+    _warn_if_window_disjoint(bundles, start, end)
     by_dir = {b["dir"]: b for b in bundles}
     out: dict[str, pd.DataFrame] = {}
     for c in codes:
         try:
-            hits = code_to_qlib_dir(c, bundles)
-            _warn_if_mixed_convention(c, hits)
-            segs = [_load_one_qlib(by_dir, bd, inst) for bd, inst in hits]
-            segs = [s for s in segs if s is not None and len(s)]
-            if not segs:
-                continue
-            df = (
-                pd.concat(segs)
-                .drop_duplicates(subset=["date"])
-                .sort_values("date")
-                .reset_index(drop=True)
-            )
-            if start:
-                df = df[df["date"] >= start]
-            if end:
-                df = df[df["date"] <= end]
-            if count:
-                df = df.tail(count).reset_index(drop=True)
-            if len(df):
-                out[c] = df
+            df = _load_one_code_qlib(bundles, by_dir, c, start, end, count)
         except Exception as exc:  # noqa: BLE001
             _warn(f"加载 {c} 失败(qlib): {exc}")
+            continue
+        if df is not None and len(df):
+            out[c] = df
     _warn_if_nothing_loaded(out, codes, "qlib", root)
     return out
 

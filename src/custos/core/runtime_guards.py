@@ -351,11 +351,22 @@ def normalize_regime(raw: str) -> str:
     return "未知"
 
 
-def market_quality_gate(
-    market: dict[str, Any], day: str, expected_day: str | None = None
-) -> dict[str, Any]:
-    """expected_day:该 session 期望的数据日(盘前/盘中=T-1,盘后=T;缺省=day,保持既有行为)。"""
-    exp = expected_day or day
+_QUALITY_RANK = {
+    "confirmed": 1.0,
+    "auto": 1.0,
+    "candidate": 0.5,
+    "partial": 0.4,
+    "degraded": 0.4,
+    "raw_only": 0.0,
+    "stale": 0.0,
+    "missing": 0.0,
+}
+
+
+def _core_quality_checks(
+    market: dict[str, Any], day: str, exp: str
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """四个核心块的逐段检查：缺失继承、quality 归一、陈旧判定。"""
     checks: list[dict[str, Any]] = []
     specs = [
         ("0AMV", "amv_0", "amv_change_pct"),
@@ -402,6 +413,10 @@ def market_quality_gate(
                 "stale_as_of": stale_as_of,
             }
         )
+    return checks, inherited
+
+
+def _overseas_check(market: dict[str, Any]) -> dict[str, Any]:
     overseas = market.get("overseas_market", {})
     overseas_values = [
         overseas.get(k)
@@ -414,34 +429,18 @@ def market_quality_gate(
             "hstech_change_pct",
         )
     ]
-    checks.append(
-        {
-            "field": "overseas",
-            "quality": "confirmed"
-            if any(v is not None for v in overseas_values) and overseas.get("as_of")
-            else (
-                "candidate"
-                if any(v is not None for v in overseas_values)
-                else "missing"
-            ),
-            "as_of": overseas.get("as_of"),
-        }
-    )
-    rank = {
-        "confirmed": 1.0,
-        "auto": 1.0,
-        "candidate": 0.5,
-        "partial": 0.4,
-        "degraded": 0.4,
-        "raw_only": 0.0,
-        "stale": 0.0,
-        "missing": 0.0,
+    return {
+        "field": "overseas",
+        "quality": "confirmed"
+        if any(v is not None for v in overseas_values) and overseas.get("as_of")
+        else (
+            "candidate" if any(v is not None for v in overseas_values) else "missing"
+        ),
+        "as_of": overseas.get("as_of"),
     }
-    weights = {
-        x["field"]: _CHECK_WEIGHT.get(x["field"], _DEFAULT_WEIGHT) for x in checks
-    }
-    total_w = sum(weights.values()) or 1
-    score = sum(rank[x["quality"]] * weights[x["field"]] for x in checks) / total_w
+
+
+def _gate_status(checks: list[dict[str, Any]], score: float) -> str:
     # blocked 用**显式覆盖率规则**而不是分数阈值:加权会让"只剩一个次要块新鲜"的场景掉到
     # 0.4 以下,凭空多出 24 种阻断场景(实测)。而 blocked 会经 --require-quality /
     # --require-gate 真正中断链路——README 门控节记着 2026-07-30 悄悄收紧硬闸导致 17:00
@@ -449,22 +448,46 @@ def market_quality_gate(
     core = [x for x in checks if x["field"] != "overseas"]
     core_bad = [x for x in core if x["quality"] in {"stale", "missing", "raw_only"}]
     if core and len(core_bad) == len(core):
-        status = "blocked"
-    else:
-        status = "pass" if score >= 0.8 else "degraded"
+        return "blocked"
+    return "pass" if score >= 0.8 else "degraded"
+
+
+def _gate_limitations(
+    checks: list[dict[str, Any]], amv_ok: bool, amv_quality: str
+) -> list[str]:
+    limitations: list[str] = []
+    if not amv_ok:
+        limitations.append(f"0AMV={amv_quality}：regime 未知，不得据此加仓")
+    for x in checks:
+        if x["quality"] in {"stale", "missing", "raw_only"} and x["field"] != "0AMV":
+            limitations.append(f"{x['field']}={x['quality']}(as_of={x.get('as_of')})")
+    return limitations
+
+
+def market_quality_gate(
+    market: dict[str, Any], day: str, expected_day: str | None = None
+) -> dict[str, Any]:
+    """expected_day:该 session 期望的数据日(盘前/盘中=T-1,盘后=T;缺省=day,保持既有行为)。"""
+    exp = expected_day or day
+    checks, inherited = _core_quality_checks(market, day, exp)
+    checks.append(_overseas_check(market))
+    weights = {
+        x["field"]: _CHECK_WEIGHT.get(x["field"], _DEFAULT_WEIGHT) for x in checks
+    }
+    total_w = sum(weights.values()) or 1
+    score = (
+        sum(_QUALITY_RANK[x["quality"]] * weights[x["field"]] for x in checks) / total_w
+    )
+    status = _gate_status(checks, score)
     amv_chk = next((x for x in checks if x["field"] == "0AMV"), None)
     amv_quality = amv_chk["quality"] if amv_chk else "missing"
     amv_ok = amv_quality in {"confirmed", "auto"}
-    limitations: list[str] = []
     if not amv_ok:
         # regime 未知就不该给"数据齐全"的结论。只把 pass 降到 degraded,**不新增阻断场景**
         # (blocked 会经 --require-quality / --require-gate 真正中断链路,详见 README 门控节)。
         if status == "pass":
             status = "degraded"
-        limitations.append(f"0AMV={amv_quality}：regime 未知，不得据此加仓")
-    for x in checks:
-        if x["quality"] in {"stale", "missing", "raw_only"} and x["field"] != "0AMV":
-            limitations.append(f"{x['field']}={x['quality']}(as_of={x.get('as_of')})")
+    limitations = _gate_limitations(checks, amv_ok, amv_quality)
     return {
         "date": day,
         "expected_day": exp,

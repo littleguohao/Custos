@@ -55,6 +55,100 @@ RF_WINDOW = 10  # 待回测：底部区间窗口（镜像 DIST_TOP_WINDOW）
 RF_BOTTOM_FRAC = 1.02  # 待回测：底部=窗口最低 ≤ 近60根最低×此值（镜像 near_top 0.98）
 
 
+def _wbot_leg_double_bottom(low, n: int, w0: int, f: int) -> dict[str, Any]:
+    """腿① 双底：镜像 double_top 的分型结构——窗口内摆动低点（WBOT_FRACTAL 左右
+    确认的局部最低，且窗口内唯一），取最近两个，容差 WBOT_TOL_PCT、间隔 ≥ WBOT_MIN_GAP"""
+    troughs = [
+        i
+        for i in range(w0 + f, n - f)
+        if low[i] == low[i - f : i + f + 1].min()
+        and float((low[i - f : i + f + 1] == low[i]).sum()) == 1
+    ]
+    leg_double: dict[str, Any] = {"hit": False}
+    b1 = b2 = None
+    if len(troughs) >= 2:
+        b2 = troughs[-1]
+        # 2026-08-16 review 修复：b1 取「与 b2 价位最接近」的前谷（双底配对的
+        # 本义），此前取 max(low)=此前**最浅**的谷——教科书 W 底（左深右浅/
+        # 等深）会跳过一个无关紧要的小谷去比容差，3% 容差腿系统性假阴性。
+        b1 = min(troughs[:-1], key=lambda i: abs(low[i] / low[b2] - 1), default=None)
+        if b1 is not None and b2 - b1 >= WBOT_MIN_GAP:
+            gap_pct = abs(low[b1] / low[b2] - 1) * 100 if low[b2] else 999.0
+            leg_double = {
+                "hit": bool(gap_pct <= WBOT_TOL_PCT),
+                "bottom1_bars_ago": n - 1 - b1,
+                "bottom2_bars_ago": n - 1 - b2,
+                "bottoms_gap_pct": round(gap_pct, 2),
+            }
+    return leg_double
+
+
+def _wbot_leg_bottom_zone(close, high, n: int) -> dict[str, Any]:
+    """腿② 底部区域：距 250 日高点回撤 ≥ WBOT_DRAWDOWN_PCT（同底部巨量 low_price 口径）
+
+    ⚠️ 2026-08-16 review 修复（口径如实标注）：n<250 时 high[-250:]/vol[-250:]
+    实际取的是**全部已加载根数**——detail 落 window_bars 供判读，不再让
+    60 根均量冒充「250 日均量」而不留痕。
+    """
+    window_bars = min(n, 250)
+    high_250 = float(high[-250:].max()) if n else 0.0
+    dd = (1 - close[-1] / high_250) * 100 if high_250 else 0.0
+    return {
+        "hit": bool(dd >= WBOT_DRAWDOWN_PCT),
+        "drawdown_from_250d_high_pct": round(dd, 2),
+        "window_bars": window_bars,
+    }
+
+
+def _wbot_leg_bottom_volume(low, vol, n: int, window_bars: int) -> dict[str, Any]:
+    """腿③ 底部放量：最近 WBOT_VOL_WIN 根内存在「量 ≥ 250日均量×WBOT_VOL_RATIO
+    且不创新低（当日最低 ≥ 此前 20 日最低）」的 K（同 check_bottom_volume 阈值）"""
+    vol_ma250 = float(vol[-250:].mean()) if n else 0.0
+    vol_hits = []
+    for t in range(max(21, n - WBOT_VOL_WIN), n):
+        huge = bool(vol_ma250) and vol[t] >= vol_ma250 * WBOT_VOL_RATIO
+        low20 = float(low[t - 20 : t].min())
+        if huge and low[t] >= low20:
+            vol_hits.append(
+                {
+                    "bars_ago": n - 1 - t,
+                    "vol_ratio_vs_ma250": round(float(vol[t] / vol_ma250), 3),
+                }
+            )
+    return {
+        "hit": bool(vol_hits),
+        "hits": vol_hits,
+        "vol_ma250": round(vol_ma250, 1) if vol_ma250 else None,
+        "window_bars": window_bars,  # <250 时该均量是全部已加载根数的近似
+    }
+
+
+def _wbot_leg_macd_divergence(df, close, n: int, w0: int, f: int) -> dict[str, Any]:
+    """腿④ MACD 底背离：两个收盘摆低 L2<L1（分型口径同①），DIF 低点抬高
+    （口径同 enrich.check_macd_technics 的 bottom_divergence；本模块用 L0 的
+    macd_series 自重算——factors 不得 import pipeline/screening）。"""
+    leg_div: dict[str, Any] = {"hit": False}
+    dif, _dea, _h = macd_series(df["close"])
+    d = dif.to_numpy()
+    swing_lo = [
+        i
+        for i in range(w0 + f, n - f)
+        if close[i] == close[i - f : i + f + 1].min()
+        and (close[i - f : i + f + 1] > close[i]).sum() >= 2 * f - 1
+    ]
+    if len(swing_lo) >= 2:
+        a, b = swing_lo[-2], swing_lo[-1]
+        if close[b] < close[a] and d[b] > d[a]:
+            leg_div = {
+                "hit": True,
+                "close_a": round(float(close[a]), 4),
+                "close_b": round(float(close[b]), 4),
+                "dif_a": round(float(d[a]), 4),
+                "dif_b": round(float(d[b]), 4),
+            }
+    return leg_div
+
+
 def detect_w_bottom(df, code: str = "") -> dict[str, Any]:
     """W 底：双底 + 底部区域 + 底部放量 + MACD 底背离 四腿合成。绝不 raise。
 
@@ -73,91 +167,12 @@ def detect_w_bottom(df, code: str = "") -> dict[str, Any]:
                 "reason": f"少于60根K线（{n}）",
             }
 
-        # 腿① 双底：镜像 double_top 的分型结构——窗口内摆动低点（WBOT_FRACTAL 左右
-        # 确认的局部最低，且窗口内唯一），取最近两个，容差 WBOT_TOL_PCT、间隔 ≥ WBOT_MIN_GAP
         w0 = max(0, n - WBOT_WINDOW * 2)
         f = WBOT_FRACTAL
-        troughs = [
-            i
-            for i in range(w0 + f, n - f)
-            if low[i] == low[i - f : i + f + 1].min()
-            and float((low[i - f : i + f + 1] == low[i]).sum()) == 1
-        ]
-        leg_double: dict[str, Any] = {"hit": False}
-        b1 = b2 = None
-        if len(troughs) >= 2:
-            b2 = troughs[-1]
-            # 2026-08-16 review 修复：b1 取「与 b2 价位最接近」的前谷（双底配对的
-            # 本义），此前取 max(low)=此前**最浅**的谷——教科书 W 底（左深右浅/
-            # 等深）会跳过一个无关紧要的小谷去比容差，3% 容差腿系统性假阴性。
-            b1 = min(
-                troughs[:-1], key=lambda i: abs(low[i] / low[b2] - 1), default=None
-            )
-            if b1 is not None and b2 - b1 >= WBOT_MIN_GAP:
-                gap_pct = abs(low[b1] / low[b2] - 1) * 100 if low[b2] else 999.0
-                leg_double = {
-                    "hit": bool(gap_pct <= WBOT_TOL_PCT),
-                    "bottom1_bars_ago": n - 1 - b1,
-                    "bottom2_bars_ago": n - 1 - b2,
-                    "bottoms_gap_pct": round(gap_pct, 2),
-                }
-
-        # 腿② 底部区域：距 250 日高点回撤 ≥ WBOT_DRAWDOWN_PCT（同底部巨量 low_price 口径）
-        # ⚠️ 2026-08-16 review 修复（口径如实标注）：n<250 时 high[-250:]/vol[-250:]
-        # 实际取的是**全部已加载根数**——detail 落 window_bars 供判读，不再让
-        # 60 根均量冒充「250 日均量」而不留痕。
-        window_bars = min(n, 250)
-        high_250 = float(high[-250:].max()) if n else 0.0
-        dd = (1 - close[-1] / high_250) * 100 if high_250 else 0.0
-        leg_zone = {
-            "hit": bool(dd >= WBOT_DRAWDOWN_PCT),
-            "drawdown_from_250d_high_pct": round(dd, 2),
-            "window_bars": window_bars,
-        }
-
-        # 腿③ 底部放量：最近 WBOT_VOL_WIN 根内存在「量 ≥ 250日均量×WBOT_VOL_RATIO
-        # 且不创新低（当日最低 ≥ 此前 20 日最低）」的 K（同 check_bottom_volume 阈值）
-        vol_ma250 = float(vol[-250:].mean()) if n else 0.0
-        vol_hits = []
-        for t in range(max(21, n - WBOT_VOL_WIN), n):
-            huge = bool(vol_ma250) and vol[t] >= vol_ma250 * WBOT_VOL_RATIO
-            low20 = float(low[t - 20 : t].min())
-            if huge and low[t] >= low20:
-                vol_hits.append(
-                    {
-                        "bars_ago": n - 1 - t,
-                        "vol_ratio_vs_ma250": round(float(vol[t] / vol_ma250), 3),
-                    }
-                )
-        leg_volume: dict[str, Any] = {
-            "hit": bool(vol_hits),
-            "hits": vol_hits,
-            "vol_ma250": round(vol_ma250, 1) if vol_ma250 else None,
-            "window_bars": window_bars,  # <250 时该均量是全部已加载根数的近似
-        }
-
-        # 腿④ MACD 底背离：两个收盘摆低 L2<L1（分型口径同①），DIF 低点抬高
-        # （口径同 enrich.check_macd_technics 的 bottom_divergence；本模块用 L0 的
-        # macd_series 自重算——factors 不得 import pipeline/screening）。
-        leg_div: dict[str, Any] = {"hit": False}
-        dif, _dea, _h = macd_series(df["close"])
-        d = dif.to_numpy()
-        swing_lo = [
-            i
-            for i in range(w0 + f, n - f)
-            if close[i] == close[i - f : i + f + 1].min()
-            and (close[i - f : i + f + 1] > close[i]).sum() >= 2 * f - 1
-        ]
-        if len(swing_lo) >= 2:
-            a, b = swing_lo[-2], swing_lo[-1]
-            if close[b] < close[a] and d[b] > d[a]:
-                leg_div = {
-                    "hit": True,
-                    "close_a": round(float(close[a]), 4),
-                    "close_b": round(float(close[b]), 4),
-                    "dif_a": round(float(d[a]), 4),
-                    "dif_b": round(float(d[b]), 4),
-                }
+        leg_double = _wbot_leg_double_bottom(low, n, w0, f)
+        leg_zone = _wbot_leg_bottom_zone(close, high, n)
+        leg_volume = _wbot_leg_bottom_volume(low, vol, n, leg_zone["window_bars"])
+        leg_div = _wbot_leg_macd_divergence(df, close, n, w0, f)
 
         hit = bool(
             leg_double["hit"]
@@ -183,6 +198,31 @@ def detect_w_bottom(df, code: str = "") -> dict[str, Any]:
         }
 
 
+def _rf_count_area(close, open_, vol, seg) -> dict[str, Any]:
+    """红肥绿瘦窗口内的数量/面积两维统计：①数量（阳多阴少）②面积（阳实体/
+    阳量均值 > 阴实体/阴量均值）。"""
+    bulls = [t for t in seg if close[t] > open_[t]]
+    bears = [t for t in seg if close[t] < open_[t]]
+    bull_bodies = [abs(close[t] / open_[t] - 1) * 100 for t in bulls if open_[t]]
+    bear_bodies = [abs(close[t] / open_[t] - 1) * 100 for t in bears if open_[t]]
+    count_hit = bool(bulls and bears and len(bulls) > len(bears))
+    area_hit = bool(
+        bull_bodies
+        and bear_bodies
+        and sum(bull_bodies) / len(bull_bodies) > sum(bear_bodies) / len(bear_bodies)
+        and sum(vol[t] for t in bulls) / len(bulls)
+        > sum(vol[t] for t in bears) / len(bears)
+    )
+    return {
+        "bulls": bulls,
+        "bears": bears,
+        "bull_bodies": bull_bodies,
+        "bear_bodies": bear_bodies,
+        "count_hit": count_hit,
+        "area_hit": area_hit,
+    }
+
+
 def detect_red_fat_green_thin(df, code: str = "") -> dict[str, Any]:
     """红肥绿瘦（底部镜像绿肥红瘦）：底部区间阳线占优——数量与面积**两维都要**。
 
@@ -206,19 +246,13 @@ def detect_red_fat_green_thin(df, code: str = "") -> dict[str, Any]:
             if n < 60
             else low[-RF_WINDOW:].min() <= low[-60:].min() * RF_BOTTOM_FRAC
         )
-        bulls = [t for t in seg if close[t] > open_[t]]
-        bears = [t for t in seg if close[t] < open_[t]]
-        bull_bodies = [abs(close[t] / open_[t] - 1) * 100 for t in bulls if open_[t]]
-        bear_bodies = [abs(close[t] / open_[t] - 1) * 100 for t in bears if open_[t]]
-        count_hit = bool(bulls and bears and len(bulls) > len(bears))
-        area_hit = bool(
-            bull_bodies
-            and bear_bodies
-            and sum(bull_bodies) / len(bull_bodies)
-            > sum(bear_bodies) / len(bear_bodies)
-            and sum(vol[t] for t in bulls) / len(bulls)
-            > sum(vol[t] for t in bears) / len(bears)
-        )
+        st = _rf_count_area(close, open_, vol, seg)
+        bulls = st["bulls"]
+        bears = st["bears"]
+        bull_bodies = st["bull_bodies"]
+        bear_bodies = st["bear_bodies"]
+        count_hit = st["count_hit"]
+        area_hit = st["area_hit"]
         return {
             "available": True,
             "hit": bool(near_bottom and count_hit and area_hit),

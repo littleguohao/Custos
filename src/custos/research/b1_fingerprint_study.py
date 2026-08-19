@@ -54,36 +54,35 @@ def load_b1_csv(path: Path) -> pd.DataFrame:
     return df
 
 
-def scan_code(df: pd.DataFrame, code: str) -> dict[str, Any]:
-    """逐日滑窗：每天的指纹要素与 b1_ignition 命中、命中日的后续收益。"""
-    days: list[dict[str, Any]] = []
-    n = len(df)
-    for t in range(MIN_SLICE_BARS, n):
-        sl = df.iloc[: t + 1]
-        m = ec.compute_metrics(sl, None, code=code)
-        b1i = m.get("b1_ignition") or {}
-        hit = bool(b1i.get("hit"))
-        rec: dict[str, Any] = {
-            "date": str(df["date"].iloc[t])[:10],
-            "daily_j": m.get("daily_j"),
-            "j_low": bool((m.get("patterns") or {}).get("j_low")),
-            "reversal_k": bool((m.get("patterns") or {}).get("reversal_k_candidate")),
-            "pullback_shrink": bool((m.get("pullback_shrink") or {}).get("hit")),
-            "ignition": bool((m.get("ignition") or {}).get("hit")),
-            "zx_recent_gold": bool(b1i.get("zhixing_recent_golden")),
-            "b1_ignition": hit,
+def _scan_day(df: pd.DataFrame, t: int, n: int, code: str) -> dict[str, Any]:
+    """单窗口：as-of 切片的指纹要素记录，命中时附后续收益。"""
+    sl = df.iloc[: t + 1]
+    m = ec.compute_metrics(sl, None, code=code)
+    b1i = m.get("b1_ignition") or {}
+    hit = bool(b1i.get("hit"))
+    rec: dict[str, Any] = {
+        "date": str(df["date"].iloc[t])[:10],
+        "daily_j": m.get("daily_j"),
+        "j_low": bool((m.get("patterns") or {}).get("j_low")),
+        "reversal_k": bool((m.get("patterns") or {}).get("reversal_k_candidate")),
+        "pullback_shrink": bool((m.get("pullback_shrink") or {}).get("hit")),
+        "ignition": bool((m.get("ignition") or {}).get("hit")),
+        "zx_recent_gold": bool(b1i.get("zhixing_recent_golden")),
+        "b1_ignition": hit,
+    }
+    if hit:
+        c0 = float(df["close"].iloc[t])
+        rec["fwd"] = {
+            h: round((float(df["close"].iloc[t + h]) / c0 - 1) * 100, 2)
+            if t + h < n and c0
+            else None
+            for h in FORWARD_HORIZONS
         }
-        if hit:
-            c0 = float(df["close"].iloc[t])
-            rec["fwd"] = {
-                h: round((float(df["close"].iloc[t + h]) / c0 - 1) * 100, 2)
-                if t + h < n and c0
-                else None
-                for h in FORWARD_HORIZONS
-            }
-        days.append(rec)
-    hits = [d for d in days if d["b1_ignition"]]
-    first = hits[0] if hits else None
+    return rec
+
+
+def _fwd_stats(hits: list[dict[str, Any]]) -> dict[str, Any]:
+    """命中日的后续收益统计（fwd5/10/20 各 n/mean/median/win_rate）。"""
     fwd_stats: dict[str, Any] = {}
     for h in FORWARD_HORIZONS:
         vals = [d["fwd"][h] for d in hits if d.get("fwd", {}).get(h) is not None]
@@ -95,7 +94,12 @@ def scan_code(df: pd.DataFrame, code: str) -> dict[str, Any]:
             if vals
             else None,
         }
-    leg_hits = {
+    return fwd_stats
+
+
+def _leg_hit_days(days: list[dict[str, Any]]) -> dict[str, int]:
+    """各驱动腿的全样本命中天数。"""
+    return {
         leg: sum(1 for d in days if d[leg])
         for leg in (
             "j_low",
@@ -105,6 +109,14 @@ def scan_code(df: pd.DataFrame, code: str) -> dict[str, Any]:
             "zx_recent_gold",
         )
     }
+
+
+def scan_code(df: pd.DataFrame, code: str) -> dict[str, Any]:
+    """逐日滑窗：每天的指纹要素与 b1_ignition 命中、命中日的后续收益。"""
+    n = len(df)
+    days = [_scan_day(df, t, n, code) for t in range(MIN_SLICE_BARS, n)]
+    hits = [d for d in days if d["b1_ignition"]]
+    first = hits[0] if hits else None
     return {
         "code": code,
         "bars": n,
@@ -112,8 +124,8 @@ def scan_code(df: pd.DataFrame, code: str) -> dict[str, Any]:
         "n_hits": len(hits),
         "first_hit": first,
         "hit_days": hits,
-        "leg_hit_days": leg_hits,
-        "fwd": fwd_stats,
+        "leg_hit_days": _leg_hit_days(days),
+        "fwd": _fwd_stats(hits),
     }
 
 

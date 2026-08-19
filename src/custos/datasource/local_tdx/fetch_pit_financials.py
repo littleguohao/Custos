@@ -355,6 +355,75 @@ def as_of(
     return best
 
 
+def _expect_periods(
+    have: list[str], since_year: int | None, until: str | None
+) -> tuple[int, str, list[str]]:
+    """应有报告期清单 + 起始年 + 自检终点。
+
+    since_year 缺省时按台账最早报告期的年份推断,且**只从台账实际首期起对齐检查**
+    (台账从年中起步时不误报年初各期);until 缺省 = **今天**,不是台账最后一期。
+    """
+    y0 = since_year or int(have[0][:4])
+    stop = until or cn_today().isoformat()
+    expect = quarter_ends(y0, until=stop)
+    if since_year is None:  # 按实际首期对齐:年中起步不误报
+        expect = [p for p in expect if p >= have[0]]
+    return y0, stop, expect
+
+
+def _thin_periods(have: list[str], counts: dict[str, int], low_ratio: float) -> list:
+    """行数低于**相邻 2~4 期中位数** low_ratio 倍即告警(全期中位会被 A 股扩容带偏,
+    早期各期天然只数少,不算残缺)。"""
+    thin = []
+    for i, p in enumerate(have):  # 邻期中位数:相邻 2~4 期(不含自身)
+        neigh = [counts[q] for j, q in enumerate(have) if j != i and abs(j - i) <= 2]
+        if not neigh:
+            continue
+        med = int(statistics.median(neigh))
+        if med and counts[p] < med * low_ratio:
+            thin.append({"period": p, "n_codes": counts[p], "neighbor_median": med})
+    return thin
+
+
+def _missing_lines(missing: list[str], tail_missing: list[str], last: str) -> list[str]:
+    if not missing:
+        return ["  ✅ 报告期无缺口"]
+    lines = [f"  ⚠️ **缺 {len(missing)} 期**: {', '.join(missing)}"]
+    if tail_missing:
+        lines.append(
+            f"     其中**台账末({last})至今**缺 {len(tail_missing)} 期: "
+            f"{', '.join(tail_missing)} —— 台账疑似停更,必须补拉到最新"
+        )
+    lines.append(
+        "     缺期不会让 as_of() 报错,只会静默返回上一期 ⇒ 回测会用陈旧财报,必须补拉"
+    )
+    return lines
+
+
+def _thin_lines(thin: list, low_ratio: float) -> list[str]:
+    if not thin:
+        return ["  ✅ 各期行数无异常偏少"]
+    return [
+        f"  ⚠️ **{len(thin)} 期行数异常偏少**(低于相邻 2~4 期中位的 {low_ratio:.0%}): "
+        + ", ".join(
+            f"{t['period']}={t['n_codes']}(邻期中位 {t['neighbor_median']})"
+            for t in thin
+        ),
+        "     多为分页中断/接口限流导致该期样本残缺,建议 --periods 单独重拉",
+    ]
+
+
+def _runway_lines(runway_missing: list[str], first: str, y0: int) -> list[str]:
+    if not runway_missing:
+        return [f"  ✅ 一年跑道充足({y0 - 1} 年各期在台账中)"]
+    return [
+        f"  ⚠️ **一年跑道缺失**: 最早期 {first} 的上一年度({y0 - 1})缺 "
+        f"{len(runway_missing)} 期: {', '.join(runway_missing)}",
+        f"     若信号窗口从 {y0} 年起,其同比特征需要 {y0 - 1} 各期的当时可见版本"
+        f"(补拉:--since {y0 - 1} --all-quarters)",
+    ]
+
+
 def verify_ledger(
     records: list[dict],
     since_year: int | None = None,
@@ -385,23 +454,12 @@ def verify_ledger(
     have = sorted(by_period)
     if not have:
         return {"ok": False, "error": "台账为空", "missing": [], "periods": []}
-    y0 = since_year or int(have[0][:4])
-    stop = until or cn_today().isoformat()
-    expect = quarter_ends(y0, until=stop)
-    if since_year is None:  # 按实际首期对齐:年中起步不误报
-        expect = [p for p in expect if p >= have[0]]
+    y0, stop, expect = _expect_periods(have, since_year, until)
     missing = [p for p in expect if p not in by_period]
     tail_missing = [p for p in missing if p > have[-1]]  # 台账末至今的缺期(停更信号)
     counts = {p: len(by_period[p]) for p in have}
     med_all = int(statistics.median(counts.values())) if counts else 0
-    thin = []
-    for i, p in enumerate(have):  # 邻期中位数:相邻 2~4 期(不含自身)
-        neigh = [counts[q] for j, q in enumerate(have) if j != i and abs(j - i) <= 2]
-        if not neigh:
-            continue
-        med = int(statistics.median(neigh))
-        if med and counts[p] < med * low_ratio:
-            thin.append({"period": p, "n_codes": counts[p], "neighbor_median": med})
+    thin = _thin_periods(have, counts, low_ratio)
     runway = [f"{y0 - 1}-{mmdd}" for mmdd in ("03-31", "06-30", "09-30", "12-31")]
     runway_missing = [p for p in runway if p not in by_period]
     out = {
@@ -423,42 +481,9 @@ def verify_ledger(
         f"台账 {len(records)} 条;报告期 实有 {len(have)} / 应有 {len(expect)} "
         f"({have[0]} ~ {have[-1]},自检终点 {stop});每期去重代码全期中位 {med_all}"
     ]
-    if missing:
-        lines.append(f"  ⚠️ **缺 {len(missing)} 期**: {', '.join(missing)}")
-        if tail_missing:
-            lines.append(
-                f"     其中**台账末({have[-1]})至今**缺 {len(tail_missing)} 期: "
-                f"{', '.join(tail_missing)} —— 台账疑似停更,必须补拉到最新"
-            )
-        lines.append(
-            "     缺期不会让 as_of() 报错,只会静默返回上一期 ⇒ 回测会用陈旧财报,必须补拉"
-        )
-    else:
-        lines.append("  ✅ 报告期无缺口")
-    if thin:
-        lines.append(
-            f"  ⚠️ **{len(thin)} 期行数异常偏少**(低于相邻 2~4 期中位的 {low_ratio:.0%}): "
-            + ", ".join(
-                f"{t['period']}={t['n_codes']}(邻期中位 {t['neighbor_median']})"
-                for t in thin
-            )
-        )
-        lines.append(
-            "     多为分页中断/接口限流导致该期样本残缺,建议 --periods 单独重拉"
-        )
-    else:
-        lines.append("  ✅ 各期行数无异常偏少")
-    if runway_missing:
-        lines.append(
-            f"  ⚠️ **一年跑道缺失**: 最早期 {have[0]} 的上一年度({y0 - 1})缺 "
-            f"{len(runway_missing)} 期: {', '.join(runway_missing)}"
-        )
-        lines.append(
-            f"     若信号窗口从 {y0} 年起,其同比特征需要 {y0 - 1} 各期的当时可见版本"
-            f"(补拉:--since {y0 - 1} --all-quarters)"
-        )
-    else:
-        lines.append(f"  ✅ 一年跑道充足({y0 - 1} 年各期在台账中)")
+    lines += _missing_lines(missing, tail_missing, have[-1])
+    lines += _thin_lines(thin, low_ratio)
+    lines += _runway_lines(runway_missing, have[0], y0)
     out["text"] = "\n".join(lines)
     return out
 
@@ -600,7 +625,7 @@ def build_pit_feature_fn(records: list[dict], visible_next_day: bool = True):
     return fn
 
 
-def main(argv=None) -> int:
+def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="PIT 财务:按报告期拉取,以公告日为可见日")
     ap.add_argument("--periods", nargs="*", help="报告期,如 2024-03-31(可多个)")
     ap.add_argument(
@@ -637,62 +662,58 @@ def main(argv=None) -> int:
         "--verify-until",
         help="--verify 的自检终点(缺省=今天:台账停更两季也会在尾部报出缺期)",
     )
-    args = ap.parse_args(argv)
-    out_path = Path(args.out)
+    return ap
 
-    if args.verify:
-        if args.periods or args.since or args.as_of:
+
+def _run_verify(args, out_path: Path) -> int:
+    if args.periods or args.since or args.as_of:
+        print(
+            "[WARN] --verify 为纯自检模式,--periods/--since/--as-of 被忽略;"
+            "补拉请先不带 --verify 运行",
+            file=sys.stderr,
+        )
+    recs = load_ledger(out_path)
+    if not recs:
+        print(f"[ERR] 台账为空: {out_path}", file=sys.stderr)
+        return 2
+    rep = verify_ledger(recs, since_year=args.verify_since, until=args.verify_until)
+    print("\n=== PIT 台账完整性自检 ===")
+    print(rep["text"])
+    if not rep["ok"]:
+        missing = rep.get("missing") or []
+        if missing:
             print(
-                "[WARN] --verify 为纯自检模式,--periods/--since/--as-of 被忽略;"
-                "补拉请先不带 --verify 运行",
+                f"\n补拉命令:\n  uv run python src/custos/datasource/local_tdx/{Path(__file__).name} "
+                f"--periods {' '.join(missing)}",
                 file=sys.stderr,
             )
-        recs = load_ledger(out_path)
-        if not recs:
-            print(f"[ERR] 台账为空: {out_path}", file=sys.stderr)
-            return 2
-        rep = verify_ledger(recs, since_year=args.verify_since, until=args.verify_until)
-        print("\n=== PIT 台账完整性自检 ===")
-        print(rep["text"])
-        if not rep["ok"]:
-            missing = rep.get("missing") or []
-            if missing:
-                print(
-                    f"\n补拉命令:\n  uv run python src/custos/datasource/local_tdx/{Path(__file__).name} "
-                    f"--periods {' '.join(missing)}",
-                    file=sys.stderr,
-                )
-            return 1
-        return 0
+        return 1
+    return 0
 
-    if args.as_of:
-        recs = load_ledger(out_path)
-        if not recs:
-            print(f"[ERR] 台账为空: {out_path}(先拉取)", file=sys.stderr)
-            return 2
-        got = as_of(
-            recs, args.as_of, code=args.code, visible_next_day=not args.visible_same_day
-        )
+
+def _run_as_of(args, out_path: Path) -> int:
+    recs = load_ledger(out_path)
+    if not recs:
+        print(f"[ERR] 台账为空: {out_path}(先拉取)", file=sys.stderr)
+        return 2
+    got = as_of(
+        recs, args.as_of, code=args.code, visible_next_day=not args.visible_same_day
+    )
+    print(
+        f"截至 {args.as_of} 可见:{len(got)} 只"
+        f"({'公告当日即可见' if args.visible_same_day else '公告次日起可见'})"
+    )
+    for c, r in sorted(got.items())[:20]:
         print(
-            f"截至 {args.as_of} 可见:{len(got)} 只"
-            f"({'公告当日即可见' if args.visible_same_day else '公告次日起可见'})"
+            f"  {c} {r['name']:<8} 报告期={r['report_date']} 公告={r['notice_date']}"
+            f"(滞后{r['lag_days']}天) eps={r.get('eps')} roe={r.get('roe_waa')}"
         )
-        for c, r in sorted(got.items())[:20]:
-            print(
-                f"  {c} {r['name']:<8} 报告期={r['report_date']} 公告={r['notice_date']}"
-                f"(滞后{r['lag_days']}天) eps={r.get('eps')} roe={r.get('roe_waa')}"
-            )
-        if len(got) > 20:
-            print(f"  ...(共 {len(got)} 只)")
-        return 0
+    if len(got) > 20:
+        print(f"  ...(共 {len(got)} 只)")
+    return 0
 
-    periods = list(args.periods or [])
-    if args.since:
-        periods += quarter_ends(args.since)
-    periods = sorted(set(periods))
-    if not periods:
-        ap.error("需提供 --periods 或 --since,或用 --as-of 查询")
 
+def _run_fetch_periods(periods: list[str], args, out_path: Path) -> int:
     session = requests.Session()
     total = 0
     for p in periods:
@@ -731,6 +752,27 @@ def main(argv=None) -> int:
         "提示:同比请用上年同期绝对值自行计算,勿用接口的 YSTZ/SJLTZ(次年同期发布时会被重算)"
     )
     return 0
+
+
+def main(argv=None) -> int:
+    ap = _build_parser()
+    args = ap.parse_args(argv)
+    out_path = Path(args.out)
+
+    if args.verify:
+        return _run_verify(args, out_path)
+
+    if args.as_of:
+        return _run_as_of(args, out_path)
+
+    periods = list(args.periods or [])
+    if args.since:
+        periods += quarter_ends(args.since)
+    periods = sorted(set(periods))
+    if not periods:
+        ap.error("需提供 --periods 或 --since,或用 --as-of 查询")
+
+    return _run_fetch_periods(periods, args, out_path)
 
 
 if __name__ == "__main__":

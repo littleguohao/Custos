@@ -42,94 +42,116 @@ def lifecycle(row: dict, event_count: int) -> dict:
     }
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--date", required=True)
-    args = ap.parse_args()
-    day = args.date
-    chief = load(DATA / "decisions" / f"{day}_chief_decision.json", {})
-    sectors = load(DATA / "sectors" / f"{day}_sector_state.json", [])
-    tech = load(DATA / "holdings" / f"{day}_holding_technical_summary.json", [])
-    execution = load(DATA / "review_steps" / f"{day}_execution_review.json", {})
-    news = load(DATA / "news" / "postclose" / f"{day}_postclose_news_digest.json", {})
-    event_counts = {}
+def _event_counts(news: dict) -> dict:
+    counts: dict[str, int] = {}
     for values in (news.get("sections") or {}).values():
         for event in values:
             for theme in event.get("matched_themes") or []:
-                event_counts[theme] = event_counts.get(theme, 0) + 1
-    lifecycles = [
-        lifecycle(x, event_counts.get(str(x.get("sector") or "").split("/")[0], 0))
+                counts[theme] = counts.get(theme, 0) + 1
+    return counts
+
+
+def _theme_lifecycles(sectors: list, news: dict) -> list:
+    counts = _event_counts(news)
+    return [
+        lifecycle(x, counts.get(str(x.get("sector") or "").split("/")[0], 0))
         for x in sectors
     ]
-    exec_by_code = {bare(x.get("code")): x for x in execution.get("rows") or []}
-    action_by_code = {
-        bare(x.get("code")): x for x in chief.get("holding_actions") or []
+
+
+def _holding_context(row: dict, action_by_code: dict, exec_by_code: dict) -> tuple:
+    code = bare(row.get("code"))
+    action = action_by_code.get(code, {})
+    b1 = action.get("b1_holding_state") or row.get("b1_holding_state") or {}
+    facts = b1.get("facts") or {}
+    n = facts.get("n_structure") or {}
+    exec_row = exec_by_code.get(code, {})
+    return code, action, b1, facts, n, exec_row
+
+
+def _diagnosis_dict(
+    code: str, row: dict, action: dict, b1: dict, facts: dict, n: dict, exec_row: dict
+) -> dict:
+    return {
+        "code": code,
+        "name": row.get("name"),
+        "original_holding_logic": "unavailable",
+        "trend": facts.get("trend_state") or row.get("trend_state"),
+        "box": facts.get("box20_position") or row.get("box20_position"),
+        "relative_to_sector": row.get("relative_to_sector") or "unavailable",
+        "b1_priority": b1.get("final_priority") or action.get("priority"),
+        "b1_action": b1.get("final_action")
+        or action.get("b1_reference_action")
+        or action.get("action"),
+        "b1_reason": b1.get("final_reason") or ";".join(action.get("reasons") or []),
+        "n_l1": n.get("prior_low"),
+        "n_l2": n.get("pullback_low"),
+        "execution_status": exec_row.get("execution_status") or "unavailable",
+        "max_favorable_excursion": "unavailable",
+        "trade_feedback": "unavailable"
+        if not exec_row.get("actual_trades")
+        else "recorded",
+        "risk_flags": list(
+            dict.fromkeys(
+                [x.get("signal") for x in b1.get("signals") or [] if x.get("signal")]
+            )
+        ),
     }
-    diagnoses = []
-    plans = []
-    for row in tech:
-        code = bare(row.get("code"))
-        action = action_by_code.get(code, {})
-        b1 = action.get("b1_holding_state") or row.get("b1_holding_state") or {}
-        facts = b1.get("facts") or {}
-        n = facts.get("n_structure") or {}
-        exec_row = exec_by_code.get(code, {})
-        diagnosis = {
-            "code": code,
-            "name": row.get("name"),
-            "original_holding_logic": "unavailable",
-            "trend": facts.get("trend_state") or row.get("trend_state"),
-            "box": facts.get("box20_position") or row.get("box20_position"),
-            "relative_to_sector": row.get("relative_to_sector") or "unavailable",
-            "b1_priority": b1.get("final_priority") or action.get("priority"),
-            "b1_action": b1.get("final_action")
-            or action.get("b1_reference_action")
-            or action.get("action"),
-            "b1_reason": b1.get("final_reason")
-            or ";".join(action.get("reasons") or []),
-            "n_l1": n.get("prior_low"),
-            "n_l2": n.get("pullback_low"),
-            "execution_status": exec_row.get("execution_status") or "unavailable",
-            "max_favorable_excursion": "unavailable",
-            "trade_feedback": "unavailable"
-            if not exec_row.get("actual_trades")
-            else "recorded",
-            "risk_flags": list(
-                dict.fromkeys(
-                    [
-                        x.get("signal")
-                        for x in b1.get("signals") or []
-                        if x.get("signal")
-                    ]
-                )
-            ),
-        }
-        diagnoses.append(diagnosis)
-        action_plan = b1.get("action_plan") or {}
-        plans.append(
-            {
-                "code": code,
-                "name": row.get("name"),
-                "direction": diagnosis["b1_action"] or "观察",
-                "priority": diagnosis["b1_priority"] or "P3",
-                "reduction_pct_of_holding": action_plan.get(
-                    "suggested_reduction_pct_of_holding"
-                ),
-                "exact_quantity": None,
-                "trigger": diagnosis["b1_reason"] or "等待目标日技术确认",
-                "invalidation": "若目标日收盘重新修复关键结构，则重新评估；不得由单一低位指标放宽权限",
-                "open_scenario": "仅观察，不因集合竞价或单条消息直接执行",
-                "intraday_scenario": "监控硬止损、重大风险和异常流动性；普通波段动作等待14:45确认",
-                "tail_scenario": "按目标日行情重算B1并服从RiskDecision/ChiefDecision",
-            }
-        )
+
+
+def _plan_dict(code: str, row: dict, b1: dict, diagnosis: dict) -> dict:
+    action_plan = b1.get("action_plan") or {}
+    return {
+        "code": code,
+        "name": row.get("name"),
+        "direction": diagnosis["b1_action"] or "观察",
+        "priority": diagnosis["b1_priority"] or "P3",
+        "reduction_pct_of_holding": action_plan.get(
+            "suggested_reduction_pct_of_holding"
+        ),
+        "exact_quantity": None,
+        "trigger": diagnosis["b1_reason"] or "等待目标日技术确认",
+        "invalidation": "若目标日收盘重新修复关键结构，则重新评估；不得由单一低位指标放宽权限",
+        "open_scenario": "仅观察，不因集合竞价或单条消息直接执行",
+        "intraday_scenario": "监控硬止损、重大风险和异常流动性；普通波段动作等待14:45确认",
+        "tail_scenario": "按目标日行情重算B1并服从RiskDecision/ChiefDecision",
+    }
+
+
+def _diagnose_holding(row: dict, action_by_code: dict, exec_by_code: dict) -> tuple:
+    code, action, b1, facts, n, exec_row = _holding_context(
+        row, action_by_code, exec_by_code
+    )
+    diagnosis = _diagnosis_dict(code, row, action, b1, facts, n, exec_row)
+    plan = _plan_dict(code, row, b1, diagnosis)
+    return diagnosis, plan
+
+
+def _unavailable_fields(chief: dict) -> list:
     market_quality = chief.get("market_quality") or {}
     unavailable = [
         x.get("field")
         for x in market_quality.get("checks") or []
         if x.get("quality") in {"missing", "candidate", "stale"}
     ]
-    result = {
+    return list(
+        dict.fromkeys(
+            unavailable
+            + [
+                "market_turnover",
+                "current_market_sentiment",
+                "fund_flow_rank",
+                "original_holding_logic",
+                "max_favorable_excursion",
+            ]
+        )
+    )
+
+
+def _build_result(
+    day: str, chief: dict, lifecycles: list, diagnoses: list, plans: list
+) -> dict:
+    return {
         "date": day,
         "theme_lifecycles": lifecycles,
         "holding_diagnoses": diagnoses,
@@ -152,20 +174,33 @@ def main():
                 "计划未执行原因需用户确认",
             ],
         },
-        "unavailable": list(
-            dict.fromkeys(
-                unavailable
-                + [
-                    "market_turnover",
-                    "current_market_sentiment",
-                    "fund_flow_rank",
-                    "original_holding_logic",
-                    "max_favorable_excursion",
-                ]
-            )
-        ),
+        "unavailable": _unavailable_fields(chief),
         "permission_rule": "enrichment cannot override RiskDecision or ChiefDecision",
     }
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--date", required=True)
+    args = ap.parse_args()
+    day = args.date
+    chief = load(DATA / "decisions" / f"{day}_chief_decision.json", {})
+    sectors = load(DATA / "sectors" / f"{day}_sector_state.json", [])
+    tech = load(DATA / "holdings" / f"{day}_holding_technical_summary.json", [])
+    execution = load(DATA / "review_steps" / f"{day}_execution_review.json", {})
+    news = load(DATA / "news" / "postclose" / f"{day}_postclose_news_digest.json", {})
+    lifecycles = _theme_lifecycles(sectors, news)
+    exec_by_code = {bare(x.get("code")): x for x in execution.get("rows") or []}
+    action_by_code = {
+        bare(x.get("code")): x for x in chief.get("holding_actions") or []
+    }
+    diagnoses = []
+    plans = []
+    for row in tech:
+        diagnosis, plan = _diagnose_holding(row, action_by_code, exec_by_code)
+        diagnoses.append(diagnosis)
+        plans.append(plan)
+    result = _build_result(day, chief, lifecycles, diagnoses, plans)
     out = DATA / "review_steps" / f"{day}_review_enrichment.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     # ⚠️ 落盘前校验：⛔硬失败链。钉两条：`exact_quantity` **恒为 None**

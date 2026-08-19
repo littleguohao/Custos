@@ -86,8 +86,7 @@ def build_sector_state(date: str) -> list[dict]:
 # ── Risk decision (from RiskFlagAdapter + holding risk extraction) ──
 
 
-def build_risk_decision(date: str) -> dict:
-    holding_reviews = load(DATA / "holdings" / f"{date}_holding_review.json", [])
+def _evidence_date(date: str) -> str:
     # ⚠️ **证据日 ≠ 运行日。** 09:05 盘前也会跑这条链（`daily_pipeline` 里
     # `generate_risk_and_sectors` 不受 session_type 限制），那时当日 K 线还不存在，
     # 所以盘前产出的 risk_decision 打着当日日期、依据却是**前一交易日收盘**。
@@ -97,41 +96,38 @@ def build_risk_decision(date: str) -> dict:
     _tech_dates = sorted(
         {str(x.get("latest_date")) for x in _tech if x.get("latest_date")}
     )
-    evidence_date = _tech_dates[-1] if _tech_dates else ""
-    risks = []
-    for h in holding_reviews:
-        action = h.get("action")
-        b1 = h.get("b1_holding_state") or {}
-        b1_priority = b1.get("final_priority")
-        if action in {"减仓", "止损", "清仓"} or b1_priority in {"P0", "P1"}:
-            normalized_action = (
-                action
-                if action in {"减仓", "止损", "清仓"}
-                else ("清仓" if b1_priority == "P0" else "减仓")
-            )
-            risks.append(
-                {
-                    "code": h.get("code"),
-                    "name": h.get("name", ""),
-                    "risk_type": "B1持仓结构"
-                    if b1_priority
-                    else (
-                        "破位" if "破位" in str(h.get("box_position")) else "亏损扩大"
-                    ),
-                    "action": normalized_action,
-                    "priority": "高"
-                    if b1_priority == "P0" or normalized_action in {"止损", "清仓"}
-                    else "中",
-                    "reason": "；".join(
-                        h.get("reason") or ["portfolio_review触发风控"]
-                    ),
-                    "evidence_ref": str(
-                        DATA / "holdings" / f"{date}_holding_review.json"
-                    ),
-                    "b1_signal_refs": [x.get("signal") for x in b1.get("signals", [])],
-                }
-            )
+    return _tech_dates[-1] if _tech_dates else ""
 
+
+def _holding_risk_entry(h: dict, date: str) -> dict | None:
+    """单条 holding_review → 风险条目；不构成风险的返回 None。"""
+    action = h.get("action")
+    b1 = h.get("b1_holding_state") or {}
+    b1_priority = b1.get("final_priority")
+    if action not in {"减仓", "止损", "清仓"} and b1_priority not in {"P0", "P1"}:
+        return None
+    normalized_action = (
+        action
+        if action in {"减仓", "止损", "清仓"}
+        else ("清仓" if b1_priority == "P0" else "减仓")
+    )
+    return {
+        "code": h.get("code"),
+        "name": h.get("name", ""),
+        "risk_type": "B1持仓结构"
+        if b1_priority
+        else ("破位" if "破位" in str(h.get("box_position")) else "亏损扩大"),
+        "action": normalized_action,
+        "priority": "高"
+        if b1_priority == "P0" or normalized_action in {"止损", "清仓"}
+        else "中",
+        "reason": "；".join(h.get("reason") or ["portfolio_review触发风控"]),
+        "evidence_ref": str(DATA / "holdings" / f"{date}_holding_review.json"),
+        "b1_signal_refs": [x.get("signal") for x in b1.get("signals", [])],
+    }
+
+
+def _dedupe_and_sort_risks(risks: list[dict]) -> list[dict]:
     # Dedupe by (code, risk_type, reason)
     unique: dict[tuple, dict] = {}
     for risk in risks:
@@ -141,7 +137,7 @@ def build_risk_decision(date: str) -> dict:
             str(risk.get("reason")),
         )
         unique[key] = {**risk, "code": key[0]}
-    ordered = sorted(
+    return sorted(
         unique.values(),
         key=lambda x: (
             {"高": 0, "中": 1, "低": 2}.get(x.get("priority") or "", 9),
@@ -149,12 +145,17 @@ def build_risk_decision(date: str) -> dict:
         ),
     )
 
-    level = (
+
+def _risk_level(ordered: list[dict]) -> str:
+    return (
         "强风控"
         if any(x.get("priority") == "高" for x in ordered)
         else ("提高" if ordered else "普通")
     )
-    forbidden = list(
+
+
+def _forbidden_actions(ordered: list[dict]) -> list:
+    return list(
         dict.fromkeys(
             x.get("action")
             for x in ordered
@@ -162,29 +163,45 @@ def build_risk_decision(date: str) -> dict:
         )
     )
 
+
+def _market_regime(date: str) -> str:
     market = load(DATA / "market" / f"{date}_market_timing_input.json", {})
     # 补 amv_zone 兜底并归一:此前只读 effective_state 且精确等值,
     # "空头触发"会让 risk_decision 漏置 allow_add=False(审计 B1)
     _amv = market.get("amv_0") or {}
-    market_regime = normalize_regime(
+    return normalize_regime(
         _amv.get("effective_state") or _amv.get("amv_zone") or "未知"
     )
+
+
+def _regime_directive(market_regime: str) -> dict:
     if market_regime == "空头":
-        regime_directive = {
+        return {
             "reduce_top_priority": True,
             "allow_add": False,
             "note": "0AMV空头区间:降低仓位为最高优先级,任何反弹都是卖出机会",
         }
-    else:
-        regime_directive = {"reduce_top_priority": False}
+    return {"reduce_top_priority": False}
+
+
+def build_risk_decision(date: str) -> dict:
+    holding_reviews = load(DATA / "holdings" / f"{date}_holding_review.json", [])
+    evidence_date = _evidence_date(date)
+    risks = []
+    for h in holding_reviews:
+        entry = _holding_risk_entry(h, date)
+        if entry is not None:
+            risks.append(entry)
+    ordered = _dedupe_and_sort_risks(risks)
+    market_regime = _market_regime(date)
 
     return {
         "date": date,
         "evidence_date": evidence_date,
         "market_regime": market_regime,
-        "regime_directive": regime_directive,
-        "risk_level": level,
-        "forbidden_actions": forbidden,
+        "regime_directive": _regime_directive(market_regime),
+        "risk_level": _risk_level(ordered),
+        "forbidden_actions": _forbidden_actions(ordered),
         "stock_risks": ordered,
     }
 

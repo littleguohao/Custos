@@ -252,6 +252,58 @@ class FifoBook:
 SCENARIOS = ("actual", "no_bear_buys", "rebound_reduce")
 
 
+def _apply_trade(
+    t: dict, day: str, regime: str, books: dict[str, "FifoBook"], do_sell
+) -> tuple[float, float]:
+    """按交易类别应用一笔台账成交（买入/转债转入/拆股入库，卖出走 do_sell）。
+
+    返回 (cash_delta, other_cf_delta)，由调用方累加进现金与其他现金流。
+    """
+    cat = t["category"]
+    if cat == "买入":
+        unit_cost = (t["amount"] + t["fee"]) / t["qty"] if t["qty"] else 0.0
+        tag = "bear" if regime == "bear" else "other"
+        books[t["code"]].add(t["qty"], unit_cost, tag)
+        return t["cash"], 0.0
+    if cat == "卖出":
+        do_sell(t["code"], t["qty"], t["cash"], day, "ledger", t["price"])
+        return 0.0, 0.0  # 卖出的现金变化在 do_sell 内按实际撮合计入
+    if cat == "转债转入":
+        cost_total = -t["cash"] if t["cash"] < 0 else 0.0
+        books[t["code"]].add(t["qty"], cost_total / t["qty"] if t["qty"] else 0.0)
+        return t["cash"], 0.0
+    if cat == "拆股":
+        # 拆股/送转股：0 成本批次入库（发生金额为 0，不影响现金）
+        books[t["code"]].add(t["qty"], 0.0)
+        return t["cash"], 0.0
+    # CASH_ONLY_CATEGORIES 与未知类别：保守按现金流处理
+    return t["cash"], t["cash"]
+
+
+def _rebound_sell_day(
+    books: dict[str, "FifoBook"],
+    prices: dict[str, dict],
+    day: str,
+    sell_fee_rate: float,
+    do_sell,
+) -> None:
+    """rebound_reduce：空头区反弹日对每只持仓按收盘价卖出持仓量的 20%。"""
+    for code in sorted(books):
+        book = books[code]
+        if book.qty <= 1e-9:
+            continue
+        entry = prices.get(code)
+        if entry is None or not is_rebound_day(entry, day):
+            continue
+        close = close_on_or_before(entry, day)
+        if close is None:
+            continue  # 不变量：is_rebound_day 为真必有当日收盘；显式防护而非断言
+        qty = book.qty * REBOUND_SELL_PCT
+        amount = qty * close
+        proceeds = amount * (1 - sell_fee_rate)
+        do_sell(code, qty, proceeds, day, "rebound", close)
+
+
 def run_scenario(
     trades: list[dict],
     regime_map: dict[str, str],
@@ -346,49 +398,21 @@ def run_scenario(
     for day in days:
         regime = regime_map.get(day, "neutral")
         for t in trades_by_date.get(day, []):
-            cat = t["category"]
-            if cat == "买入":
-                if scenario in ("no_bear_buys", "rebound_reduce") and regime == "bear":
-                    skipped_buys.append(t)
-                    continue
-                unit_cost = (t["amount"] + t["fee"]) / t["qty"] if t["qty"] else 0.0
-                tag = "bear" if regime == "bear" else "other"
-                books[t["code"]].add(t["qty"], unit_cost, tag)
-                cash += t["cash"]
-            elif cat == "卖出":
-                do_sell(t["code"], t["qty"], t["cash"], day, "ledger", t["price"])
-            elif cat == "转债转入":
-                cost_total = -t["cash"] if t["cash"] < 0 else 0.0
-                books[t["code"]].add(
-                    t["qty"], cost_total / t["qty"] if t["qty"] else 0.0
-                )
-                cash += t["cash"]
-            elif cat == "拆股":
-                # 拆股/送转股：0 成本批次入库（发生金额为 0，不影响现金）
-                books[t["code"]].add(t["qty"], 0.0)
-                cash += t["cash"]
-            elif cat in CASH_ONLY_CATEGORIES:
-                cash += t["cash"]
-                other_cf += t["cash"]
-            else:  # 未知类别：保守按现金流处理
-                cash += t["cash"]
-                other_cf += t["cash"]
+            # 反事实场景（no_bear_buys / rebound_reduce）：空头区买单全部跳过。
+            # 该行被 test_bear_regime_replay_agrees 以源码字面断言，须留在本函数内。
+            if (
+                t["category"] == "买入"
+                and scenario in ("no_bear_buys", "rebound_reduce")
+                and regime == "bear"
+            ):
+                skipped_buys.append(t)
+                continue
+            dc, doc = _apply_trade(t, day, regime, books, do_sell)
+            cash += dc
+            other_cf += doc
 
         if scenario == "rebound_reduce" and regime == "bear":
-            for code in sorted(books):
-                book = books[code]
-                if book.qty <= 1e-9:
-                    continue
-                entry = prices.get(code)
-                if entry is None or not is_rebound_day(entry, day):
-                    continue
-                close = close_on_or_before(entry, day)
-                if close is None:
-                    continue  # 不变量：is_rebound_day 为真必有当日收盘；显式防护而非断言
-                qty = book.qty * REBOUND_SELL_PCT
-                amount = qty * close
-                proceeds = amount * (1 - sell_fee_rate)
-                do_sell(code, qty, proceeds, day, "rebound", close)
+            _rebound_sell_day(books, prices, day, sell_fee_rate, do_sell)
 
         mv, _, _ = market_value(day)
         equity_curve.append(

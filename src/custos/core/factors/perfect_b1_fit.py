@@ -49,7 +49,17 @@ def compute_perfect_b1_fit(
     12/26/9 三条 EMA 算两遍）；不传或不可用时照旧自己算 macd(df)，结果完全一致。
     """
     comp: dict[str, Any] = {}
+    comp["j_depth"] = _j_depth_component(daily_j)
+    comp["near_line"] = _near_line_component(df, zx)
+    comp["shrink_degree"] = _shrink_degree_component(pullback)
+    comp["macd_above_zero"] = _macd_above_zero_component(df, macd_state)
+    comp["dks_rising"] = _dks_rising_component(df)
 
+    total = round(sum(c["points"] for c in comp.values()), 2)
+    return {"score": total, "max_score": 8, "components": comp}
+
+
+def _j_depth_component(daily_j) -> dict[str, Any]:
     # J 深度：J<0 → 2；J<7 → 1.5；J<13 → 1（图集案例 J 全在 13 以下，多为负）
     if daily_j is None:
         j_pts = 0.0
@@ -61,8 +71,10 @@ def compute_perfect_b1_fit(
         j_pts = 1.0
     else:
         j_pts = 0.0
-    comp["j_depth"] = {"points": j_pts, "daily_j": daily_j}
+    return {"points": j_pts, "daily_j": daily_j}
 
+
+def _near_line_component(df, zx: dict) -> dict[str, Any]:
     # 回踩贴线：收盘距 QSX 或 DKS 的最近偏离 ≤3% → 2；≤6% → 1
     near_pts = 0.0
     line_dist = None
@@ -80,8 +92,10 @@ def compute_perfect_b1_fit(
                 if line_dist <= FIT_NEAR_LINE_PCT
                 else (1.0 if line_dist <= FIT_NEAR_LINE_MAX_PCT else 0.0)
             )
-    comp["near_line"] = {"points": near_pts, "min_line_distance_pct": line_dist}
+    return {"points": near_pts, "min_line_distance_pct": line_dist}
 
+
+def _shrink_degree_component(pullback: dict) -> dict[str, Any]:
     # 缩量程度：回调段/上涨段均量 ≤0.5 → 2；≤0.8 → 1
     pull_ratio = (
         (pullback.get("detail") or {}).get("pullback_vol_ratio")
@@ -95,8 +109,10 @@ def compute_perfect_b1_fit(
             if pull_ratio <= FIT_SHRINK_DEEP
             else (1.0 if pull_ratio <= FIT_SHRINK_MID else 0.0)
         )
-    comp["shrink_degree"] = {"points": shrink_pts, "pullback_vol_ratio": pull_ratio}
+    return {"points": shrink_pts, "pullback_vol_ratio": pull_ratio}
 
+
+def _macd_above_zero_component(df, macd_state: Optional[dict] = None) -> dict[str, Any]:
     # MACD 零轴上：DIF>0 → 1（图集多数案例 DIF 在零轴上方）
     m = macd_state if macd_state and macd_state.get("available") else macd(df)
     macd_pts = 0.0
@@ -104,8 +120,10 @@ def compute_perfect_b1_fit(
     if m.get("available"):
         dif_val = m.get("dif")
         macd_pts = 1.0 if (dif_val is not None and dif_val > 0) else 0.0
-    comp["macd_above_zero"] = {"points": macd_pts, "dif": dif_val}
+    return {"points": macd_pts, "dif": dif_val}
 
+
+def _dks_rising_component(df) -> dict[str, Any]:
     # DKS 上行：DKS[t] > DKS[t-5] → 1（慢线本身走升）
     dks_pts = 0.0
     dks_now = dks_prev = None
@@ -115,7 +133,4 @@ def compute_perfect_b1_fit(
         dks_now = float(dks.iloc[-1])
         dks_prev = float(dks.iloc[-1 - FIT_DKS_SLOPE_DAYS])
         dks_pts = 1.0 if dks_now > dks_prev else 0.0
-    comp["dks_rising"] = {"points": dks_pts, "dks": dks_now, "dks_prev": dks_prev}
-
-    total = round(sum(c["points"] for c in comp.values()), 2)
-    return {"score": total, "max_score": 8, "components": comp}
+    return {"points": dks_pts, "dks": dks_now, "dks_prev": dks_prev}

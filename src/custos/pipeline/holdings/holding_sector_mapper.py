@@ -110,7 +110,7 @@ def tq_relation(tq, tcode: str) -> list:
         return []
 
 
-def main():
+def _parse_args():
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--input",
@@ -123,8 +123,10 @@ def main():
         action="store_true",
         help="opt-in: query tqcenter when local industry lookup misses (default off)",
     )
-    args = ap.parse_args()
-    source = Path(args.input)
+    return ap.parse_args()
+
+
+def _load_holdings(source: Path) -> pd.DataFrame:
     if source.suffix.lower() == ".json":
         hold = pd.DataFrame(json.loads(source.read_text(encoding="utf-8")))
     else:
@@ -134,102 +136,96 @@ def main():
     hold = hold[
         hold["代码"].ne("") & hold["名称"].notna() & hold["代码"].ne("汇总")
     ].copy()
+    return hold
 
-    tdxhy = load_tdxhy()
-    incon = load_incon_sections()
-    tdx_names = incon.get("TDXNHY", {})
-    sw_names = incon.get("TDXRSHY", {})
 
-    tq = None
-    rows = []
-    try:
-        for _, r in hold.iterrows():
-            code = r["代码"]
-            tcode = code + suffix(code)
-            entry = tdxhy.get(code)
-            rel = []
-            err = None
-            if entry:
-                tdx_ind = lookup_name(tdx_names, entry["tdx"])
-                sw_ind = lookup_name(sw_names, entry["sw"])
-                if tdx_ind:
-                    rel.append(
-                        {
-                            "BlockCode": entry["tdx"],
-                            "BlockName": tdx_ind,
-                            "BlockType": "行业",
-                            "Source": "tdxhy.cfg",
-                        }
-                    )
-                if sw_ind:
-                    rel.append(
-                        {
-                            "BlockCode": entry["sw"],
-                            "BlockName": sw_ind,
-                            "BlockType": "申万行业",
-                            "Source": "tdxhy.cfg",
-                        }
-                    )
-            if not rel:
-                if args.use_tq_fallback:
-                    if tq is None:
-                        tq = init_tq()
-                    rel = tq_relation(tq, tcode)
-                    if rel:
-                        src = "tq"
-                    else:
-                        src = LOCAL_SOURCE
-                        err = "local tdxhy.cfg miss; tq fallback returned nothing"
-                else:
-                    src = LOCAL_SOURCE
-                    market = "北交所" if code.startswith(("4", "8", "92")) else "A股"
-                    err = f"{market}股票未在本地 tdxhy.cfg 中找到行业记录"
-            else:
-                src = LOCAL_SOURCE
-            industries = [x for x in rel if x.get("BlockType") == "行业"]
-            concepts = [x for x in rel if x.get("BlockType") == "概念"]
-            styles = [x for x in rel if x.get("BlockType") == "风格"]
-            indices = [x for x in rel if x.get("BlockType") == "指数"]
-            rows.append(
+def _resolve_relation(
+    code: str, tcode: str, entry, tdx_names: dict, sw_names: dict, args, tq_holder: list
+):
+    """Resolve block relations for one holding -> (rel, src, err).
+
+    ``tq_holder`` is a one-slot mutable cell so the TQ plugin is initialized
+    at most once across rows and ``main`` can close it in its ``finally``.
+    """
+    rel = []
+    err = None
+    if entry:
+        tdx_ind = lookup_name(tdx_names, entry["tdx"])
+        sw_ind = lookup_name(sw_names, entry["sw"])
+        if tdx_ind:
+            rel.append(
                 {
-                    "code": code,
-                    "name": r.get("名称"),
-                    "tdx_code": tcode,
-                    "holding_amount": r.get("持有金额"),
-                    "holding_pnl": r.get("持有盈亏"),
-                    "holding_pnl_pct": r.get("持有盈亏率"),
-                    "position_pct": r.get("仓位占比"),
-                    "holding_days": r.get("持仓天数"),
-                    "industry": industries[0].get("BlockName") if industries else "",
-                    "industry_code": industries[0].get("BlockCode")
-                    if industries
-                    else "",
-                    "concepts": [x.get("BlockName") for x in concepts],
-                    "concept_codes": [x.get("BlockCode") for x in concepts],
-                    "styles": [x.get("BlockName") for x in styles],
-                    "indices": [x.get("BlockName") for x in indices],
-                    "relation_error": err,
-                    "raw_relation": rel,
-                    "source": src,
-                    "quality": {
-                        "covered": ["行业"] if industries else [],
-                        "not_covered": NOT_COVERED_DIMS if src == LOCAL_SOURCE else [],
-                        "note": (
-                            "本地板块文件(tdxhy.cfg+incon.dat)仅覆盖行业维度;"
-                            "概念/风格/指数/地区需TQ或在线数据源"
-                            if src == LOCAL_SOURCE
-                            else "TQ get_relation 全量维度"
-                        ),
-                    },
+                    "BlockCode": entry["tdx"],
+                    "BlockName": tdx_ind,
+                    "BlockType": "行业",
+                    "Source": "tdxhy.cfg",
                 }
             )
-    finally:
-        if tq is not None:
-            try:
-                tq.close()
-            except Exception as e:
-                print(f"[WARN] tq.close() failed: {e}", file=sys.stderr)
+        if sw_ind:
+            rel.append(
+                {
+                    "BlockCode": entry["sw"],
+                    "BlockName": sw_ind,
+                    "BlockType": "申万行业",
+                    "Source": "tdxhy.cfg",
+                }
+            )
+    if not rel:
+        if args.use_tq_fallback:
+            if tq_holder[0] is None:
+                tq_holder[0] = init_tq()
+            rel = tq_relation(tq_holder[0], tcode)
+            if rel:
+                src = "tq"
+            else:
+                src = LOCAL_SOURCE
+                err = "local tdxhy.cfg miss; tq fallback returned nothing"
+        else:
+            src = LOCAL_SOURCE
+            market = "北交所" if code.startswith(("4", "8", "92")) else "A股"
+            err = f"{market}股票未在本地 tdxhy.cfg 中找到行业记录"
+    else:
+        src = LOCAL_SOURCE
+    return rel, src, err
 
+
+def _build_row(r, code: str, tcode: str, rel: list, err, src: str) -> dict:
+    industries = [x for x in rel if x.get("BlockType") == "行业"]
+    concepts = [x for x in rel if x.get("BlockType") == "概念"]
+    styles = [x for x in rel if x.get("BlockType") == "风格"]
+    indices = [x for x in rel if x.get("BlockType") == "指数"]
+    return {
+        "code": code,
+        "name": r.get("名称"),
+        "tdx_code": tcode,
+        "holding_amount": r.get("持有金额"),
+        "holding_pnl": r.get("持有盈亏"),
+        "holding_pnl_pct": r.get("持有盈亏率"),
+        "position_pct": r.get("仓位占比"),
+        "holding_days": r.get("持仓天数"),
+        "industry": industries[0].get("BlockName") if industries else "",
+        "industry_code": industries[0].get("BlockCode") if industries else "",
+        "concepts": [x.get("BlockName") for x in concepts],
+        "concept_codes": [x.get("BlockCode") for x in concepts],
+        "styles": [x.get("BlockName") for x in styles],
+        "indices": [x.get("BlockName") for x in indices],
+        "relation_error": err,
+        "raw_relation": rel,
+        "source": src,
+        "quality": {
+            "covered": ["行业"] if industries else [],
+            "not_covered": NOT_COVERED_DIMS if src == LOCAL_SOURCE else [],
+            "note": (
+                "本地板块文件(tdxhy.cfg+incon.dat)仅覆盖行业维度;"
+                "概念/风格/指数/地区需TQ或在线数据源"
+                if src == LOCAL_SOURCE
+                else "TQ get_relation 全量维度"
+            ),
+        },
+    }
+
+
+def _write_outputs(args, rows: list) -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     date = args.date or pd.Timestamp.now().strftime("%Y-%m-%d")
     out_json = OUT_DIR / f"{date}_holding_sector_mapping.json"
@@ -248,6 +244,36 @@ def main():
             ["code", "name", "industry", "concepts", "position_pct", "holding_pnl_pct"]
         ].to_string(index=False)
     )
+
+
+def main():
+    args = _parse_args()
+    hold = _load_holdings(Path(args.input))
+
+    tdxhy = load_tdxhy()
+    incon = load_incon_sections()
+    tdx_names = incon.get("TDXNHY", {})
+    sw_names = incon.get("TDXRSHY", {})
+
+    tq_holder = [None]
+    rows = []
+    try:
+        for _, r in hold.iterrows():
+            code = r["代码"]
+            tcode = code + suffix(code)
+            entry = tdxhy.get(code)
+            rel, src, err = _resolve_relation(
+                code, tcode, entry, tdx_names, sw_names, args, tq_holder
+            )
+            rows.append(_build_row(r, code, tcode, rel, err, src))
+    finally:
+        if tq_holder[0] is not None:
+            try:
+                tq_holder[0].close()
+            except Exception as e:
+                print(f"[WARN] tq.close() failed: {e}", file=sys.stderr)
+
+    _write_outputs(args, rows)
 
 
 if __name__ == "__main__":

@@ -56,6 +56,39 @@ def loss_streaks(
     ⚠️ `excluded` 必须如实给出：被排除的单子数不为 0 时，`streaks` 是**在残缺台账上**
     算出来的，读复盘的人有权知道（同 `weekly_review` 对 partial 的处理）。
     """
+    excluded, usable = _split_usable(closings)
+
+    by_code: dict[str, list[dict]] = {}
+    for c in usable:
+        by_code.setdefault(str(c.get("code") or ""), []).append(c)
+
+    streaks: dict[str, Any] = {}
+    for code, rows in by_code.items():
+        if not code:
+            continue
+        streak = _current_streak(rows)
+        if not streak:
+            continue
+        streaks[code] = _streak_summary(streak)
+
+    flagged = sorted(
+        [c for c, v in streaks.items() if v["count"] >= min_streak],
+        key=lambda c: (-streaks[c]["count"], streaks[c]["last_sell_date"]),
+    )
+    return {
+        "streaks": streaks,
+        "flagged": flagged,
+        "excluded": excluded,
+        "min_streak": min_streak,
+    }
+
+
+def _split_usable(closings: list[dict] | None) -> tuple[dict[str, int], list[dict]]:
+    """按口径剔除不可判盈亏的平仓单，并如实计数。
+
+    只用 `match_status == "full"` 的单：`partial` 系统性少算、`none` 无成本基准；
+    `net_pnl` 缺失不计入（不猜）。剔除原因各自计数返回。
+    """
     excluded = {"partial": 0, "none": 0, "no_net_pnl": 0}
     usable: list[dict] = []
     for c in closings or []:
@@ -70,42 +103,30 @@ def loss_streaks(
             excluded["no_net_pnl"] += 1
             continue
         usable.append(c)
+    return excluded, usable
 
-    by_code: dict[str, list[dict]] = {}
-    for c in usable:
-        by_code.setdefault(str(c.get("code") or ""), []).append(c)
 
-    streaks: dict[str, Any] = {}
-    for code, rows in by_code.items():
-        if not code:
-            continue
-        # 按卖出日升序；同日多单按出现顺序（fifo_pair 已按 (代码, 卖出日) 聚合）
-        rows = sorted(rows, key=lambda x: str(x.get("sell_date") or ""))
-        streak: list[dict] = []
-        for r in rows:
-            if float(r["net_pnl"]) < 0:
-                streak.append(r)
-            else:
-                streak = []  # 被一次盈利打断即归零 —— 「连续」的原意
-        if not streak:
-            continue
-        streaks[code] = {
-            "name": streak[-1].get("name") or "",
-            "count": len(streak),
-            "last_sell_date": str(streak[-1].get("sell_date") or ""),
-            "total_net_pnl": round(sum(float(r["net_pnl"]) for r in streak), 2),
-            "sell_dates": [str(r.get("sell_date") or "") for r in streak],
-        }
+def _current_streak(rows: list[dict]) -> list[dict]:
+    """单票平仓单里**最近一段**连续亏损（被任何一次盈利打断即归零）。"""
+    # 按卖出日升序；同日多单按出现顺序（fifo_pair 已按 (代码, 卖出日) 聚合）
+    rows = sorted(rows, key=lambda x: str(x.get("sell_date") or ""))
+    streak: list[dict] = []
+    for r in rows:
+        if float(r["net_pnl"]) < 0:
+            streak.append(r)
+        else:
+            streak = []  # 被一次盈利打断即归零 —— 「连续」的原意
+    return streak
 
-    flagged = sorted(
-        [c for c, v in streaks.items() if v["count"] >= min_streak],
-        key=lambda c: (-streaks[c]["count"], streaks[c]["last_sell_date"]),
-    )
+
+def _streak_summary(streak: list[dict]) -> dict[str, Any]:
+    """把一段连续亏损平仓单汇总成 streaks[code] 的事实字典。"""
     return {
-        "streaks": streaks,
-        "flagged": flagged,
-        "excluded": excluded,
-        "min_streak": min_streak,
+        "name": streak[-1].get("name") or "",
+        "count": len(streak),
+        "last_sell_date": str(streak[-1].get("sell_date") or ""),
+        "total_net_pnl": round(sum(float(r["net_pnl"]) for r in streak), 2),
+        "sell_dates": [str(r.get("sell_date") or "") for r in streak],
     }
 
 

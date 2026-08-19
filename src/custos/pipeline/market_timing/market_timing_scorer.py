@@ -124,52 +124,79 @@ def score_overseas(d: dict) -> tuple[float, str]:
     return 5, f"外围平均 {avg:.2f}%，中性。"
 
 
+def _intraday_pts(intraday: Optional[float]) -> float:
+    if intraday is None:
+        return 0.0
+    if intraday > 1:
+        return 1.5
+    if intraday > 0:
+        return 1.0
+    if intraday < -1:
+        return -1.0
+    return 0.0
+
+
+def _trend_20d_pts(ch20: Optional[float]) -> float:
+    if ch20 is None:
+        return 0.0
+    if ch20 > 3:
+        return 1.5
+    if ch20 > 0:
+        return 1.0
+    if ch20 < -3:
+        return -1.5
+    if ch20 < 0:
+        return -0.8
+    return 0.0
+
+
+def _ma_position_pts(above25, above60, above144, above240) -> float:
+    pts = 0.0
+    if above25 is True:
+        pts += 0.8
+    elif above25 is False:
+        pts -= 0.6
+    if above60 is True:
+        pts += 1
+    elif above60 is False:
+        pts -= 0.8
+    if above144 is True:
+        pts += 0.6
+    elif above144 is False:
+        pts -= 0.5
+    if above240 is True:
+        pts += 0.6
+    elif above240 is False:
+        pts -= 0.5
+    return pts
+
+
+def _score_one_index(
+    x: dict,
+) -> tuple[float, Optional[float], Optional[float], object, object, object, object]:
+    """单指数打分 + 透传原始字段（供 strong/weak 归因）。
+
+    累加顺序保持 盘中 → 20日 → MA25/60/144/240，与拆分前逐位一致。"""
+    intraday: Optional[float] = (x.get("intraday") or {}).get("intraday_change_pct")
+    ch20 = fnum(x.get("change_20d_pct"))
+    above25 = x.get("above_ma25")
+    above60 = x.get("above_ma60")
+    above144 = x.get("above_ma144")
+    above240 = x.get("above_ma240")
+    s: float = 0
+    s += _intraday_pts(intraday)
+    s += _trend_20d_pts(ch20)
+    s += _ma_position_pts(above25, above60, above144, above240)
+    return (s, intraday, ch20, above25, above60, above144, above240)
+
+
 def score_indices(d: dict) -> tuple[float, str]:
     idx = d.get("a_share_indices", {})
     items = []
     for name, x in idx.items():
         if not x.get("available"):
             continue
-        intraday = (x.get("intraday") or {}).get("intraday_change_pct")
-        ch20 = fnum(x.get("change_20d_pct"))
-        above25 = x.get("above_ma25")
-        above60 = x.get("above_ma60")
-        above144 = x.get("above_ma144")
-        above240 = x.get("above_ma240")
-        s: float = 0
-        if intraday is not None:
-            if intraday > 1:
-                s += 1.5
-            elif intraday > 0:
-                s += 1
-            elif intraday < -1:
-                s -= 1
-        if ch20 is not None:
-            if ch20 > 3:
-                s += 1.5
-            elif ch20 > 0:
-                s += 1
-            elif ch20 < -3:
-                s -= 1.5
-            elif ch20 < 0:
-                s -= 0.8
-        if above25 is True:
-            s += 0.8
-        elif above25 is False:
-            s -= 0.6
-        if above60 is True:
-            s += 1
-        elif above60 is False:
-            s -= 0.8
-        if above144 is True:
-            s += 0.6
-        elif above144 is False:
-            s -= 0.5
-        if above240 is True:
-            s += 0.6
-        elif above240 is False:
-            s -= 0.5
-        items.append((name, s, intraday, ch20, above25, above60, above144, above240))
+        items.append((name, *_score_one_index(x)))
     if not items:
         return 7.5, "指数数据缺失，按中性处理。"
     raw = sum(x[1] for x in items) / (len(items) * 6)  # approx -1~1
@@ -241,6 +268,42 @@ def score_breadth(d: dict) -> tuple[float, str]:
     return s, f"涨跌比 {ratio:.2f}。"
 
 
+def _limit_count_pts(lu: float, ld: float) -> float:
+    pts = 0.0
+    if lu >= 80:
+        pts += 4
+    elif lu >= 50:
+        pts += 2
+    elif lu < 30:
+        pts -= 1.5
+    if ld >= 40:
+        pts -= 4
+    elif ld >= 20:
+        pts -= 2
+    elif ld <= 5:
+        pts += 1
+    return pts
+
+
+def _sentiment_detail_pts(blow: Optional[float], height: Optional[float]) -> float:
+    pts = 0.0
+    if blow is not None:
+        if blow > 0.45:
+            pts -= 2.5
+        elif blow > 0.3:
+            pts -= 1.5
+        elif blow < 0.15:
+            pts += 1
+    if height is not None:
+        if height >= 5:
+            pts += 2
+        elif height >= 3:
+            pts += 1
+        elif height <= 2:
+            pts -= 1
+    return pts
+
+
 def score_sentiment(d: dict) -> tuple[float, str]:
     snt = d.get("sentiment", {})
     lu = fnum(snt.get("limit_up_count"))
@@ -254,33 +317,10 @@ def score_sentiment(d: dict) -> tuple[float, str]:
             7.5,
             f"情绪数据日 {snt.get('as_of') or '未知'} 非当日（stale），按中性处理。",
         )
+    # 累加顺序保持 7.5 → 涨跌停 → 炸板率/高度，与拆分前逐位一致。
     score = 7.5
-    if lu >= 80:
-        score += 4
-    elif lu >= 50:
-        score += 2
-    elif lu < 30:
-        score -= 1.5
-    if ld >= 40:
-        score -= 4
-    elif ld >= 20:
-        score -= 2
-    elif ld <= 5:
-        score += 1
-    if blow is not None:
-        if blow > 0.45:
-            score -= 2.5
-        elif blow > 0.3:
-            score -= 1.5
-        elif blow < 0.15:
-            score += 1
-    if height is not None:
-        if height >= 5:
-            score += 2
-        elif height >= 3:
-            score += 1
-        elif height <= 2:
-            score -= 1
+    score += _limit_count_pts(lu, ld)
+    score += _sentiment_detail_pts(blow, height)
     score = max(0, min(15, score))
     return (
         round(score, 2),

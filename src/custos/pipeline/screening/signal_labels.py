@@ -55,6 +55,216 @@ def _state(available: bool, hit: bool) -> str:
     return (HIT if hit else MISS) if available else NA
 
 
+def _put(out: dict[str, Any], key: str, available: bool, hit: bool, **detail):
+    out[key] = {"state": _state(available, hit), **detail}
+
+
+# ---- 复用型（零增量成本）----
+def _signal_qsx_gt_dks(out: dict[str, Any], df: pd.DataFrame, zx: Optional[dict]):
+    if zx is not None:
+        _put(
+            out,
+            "qsx_gt_dks",
+            bool(zx.get("available")),
+            bool(zx.get("qsx_gt_dks")),
+            qsx=zx.get("qsx"),
+            dks=zx.get("dks"),
+        )
+    else:
+        try:
+            from custos.core.indicators import zhixing_state
+
+            z = zhixing_state(df)
+            _put(
+                out,
+                "qsx_gt_dks",
+                bool(z.get("available")),
+                bool(z.get("qsx_gt_dks")),
+            )
+        except Exception:  # noqa: BLE001
+            _put(out, "qsx_gt_dks", False, False, reason="zhixing_unavailable")
+
+
+def _signal_weekly_j_low(
+    out: dict[str, Any],
+    df: pd.DataFrame,
+    weekly_j_low: Optional[bool],
+    weekly_j_available: Optional[bool],
+):
+    if weekly_j_low is not None:
+        avail = weekly_j_available if weekly_j_available is not None else True
+        _put(out, "weekly_j_low", bool(avail), bool(weekly_j_low))
+    else:
+        try:
+            from custos.pipeline.screening.enrich_candidates import weekly_j_state
+
+            w = weekly_j_state(df)
+            _put(
+                out,
+                "weekly_j_low",
+                bool(w.get("weekly_j_available")),
+                bool(w.get("weekly_j_low")),
+                weekly_j=w.get("weekly_j"),
+            )
+        except Exception:  # noqa: BLE001
+            _put(out, "weekly_j_low", False, False, reason="weekly_unavailable")
+
+
+def _signal_distribution_risk(out: dict[str, Any], distribution: Optional[dict]):
+    if distribution is not None:
+        lvl = str(distribution.get("risk_level") or "none")
+        _put(
+            out,
+            "distribution_risk",
+            bool(distribution.get("available")),
+            lvl in ("high", "watch"),
+            risk_level=lvl,
+            hits=distribution.get("hits"),
+        )
+    else:
+        _put(out, "distribution_risk", False, False, reason="not_provided")
+
+
+# ---- RSI 三项（新增计算，约 1.9ms/票）----
+def _signal_rsi(out: dict[str, Any], df: pd.DataFrame):
+    try:
+        from custos.core.factors.rsi_state import rsi_divergence, rsi_regime
+
+        reg = rsi_regime(df)
+        avail = bool(reg.get("available"))
+        _put(
+            out,
+            "rsi_strong",
+            avail,
+            reg.get("state") == "strong",
+            regime=reg.get("state"),
+            rsi=reg.get("rsi"),
+        )
+        _put(
+            out,
+            "rsi_deep_oversold",
+            avail,
+            bool(reg.get("deep_oversold")),
+            rsi=reg.get("rsi"),
+        )
+        _put(
+            out,
+            "rsi_ideal_b1",
+            avail,
+            bool(reg.get("state") == "strong" and reg.get("deep_oversold")),
+        )
+        div = rsi_divergence(df)
+        _put(
+            out,
+            "rsi_bull_div",
+            bool(div.get("available")),
+            bool(div.get("bullish")),
+            cur_rsi=div.get("cur_rsi"),
+            prior_rsi=div.get("prior_rsi"),
+        )
+    except Exception as exc:  # noqa: BLE001
+        for k in ("rsi_strong", "rsi_deep_oversold", "rsi_ideal_b1", "rsi_bull_div"):
+            _put(out, k, False, False, reason=f"rsi_error:{type(exc).__name__}")
+
+
+# ---- B2 / 底部异动（新增计算，约 2.0ms/票）----
+def _signal_surge(out: dict[str, Any], df: pd.DataFrame, code: str):
+    try:
+        from custos.core.factors.b2_surge_factor import (
+            _j_series,
+            detect_b2,
+            detect_bottom_surge,
+            detect_surge_then_b1,
+        )
+
+        js = _j_series(df)
+        b2 = detect_b2(df, code, j_series=js)
+        _put(
+            out,
+            "b2",
+            bool(b2.get("available")),
+            bool(b2.get("hit")),
+            gain_pct=b2.get("gain_pct"),
+            b1_bars_ago=b2.get("b1_bars_ago"),
+        )
+        sg = detect_bottom_surge(df, code)
+        _put(
+            out,
+            "bottom_surge",
+            bool(sg.get("available")),
+            bool(sg.get("hit")),
+            vol_ratio=sg.get("vol_ratio_ma20"),
+            bars_ago=sg.get("bars_ago"),
+            strict=sg.get("strict_hit"),
+        )
+        sb = detect_surge_then_b1(df, code)
+        _put(out, "surge_then_b1", bool(sb.get("available")), bool(sb.get("hit")))
+    except Exception as exc:  # noqa: BLE001
+        for k in ("b2", "bottom_surge", "surge_then_b1"):
+            _put(out, k, False, False, reason=f"surge_error:{type(exc).__name__}")
+
+
+# ---- 突破回踩型 B1（复用 platform_pullback + daily_j）----
+def _signal_breakout_pullback_b1(
+    out: dict[str, Any],
+    df: pd.DataFrame,
+    code: str,
+    platform_pullback: Optional[dict],
+    daily_j: Optional[float],
+):
+    try:
+        from custos.core.factors.b1_dual_factor import detect_breakout_pullback_b1
+
+        if platform_pullback is not None and daily_j is not None:
+            ph = float(platform_pullback.get("platform_high") or 0.0)
+            close = float(df["close"].astype(float).iloc[-1])
+            hit = bool(ph and close >= ph * 0.98 and daily_j < 13.0)
+            _put(out, "breakout_pullback_b1", True, hit, platform_high=ph or None)
+        else:
+            r = detect_breakout_pullback_b1(df, code)
+            _put(
+                out,
+                "breakout_pullback_b1",
+                bool(r.get("available")),
+                bool(r.get("hit")),
+                platform_high=r.get("platform_high"),
+            )
+    except Exception as exc:  # noqa: BLE001
+        _put(
+            out,
+            "breakout_pullback_b1",
+            False,
+            False,
+            reason=f"platform_error:{type(exc).__name__}",
+        )
+
+
+# ---- 主升始发点（新增计算，约 3.8ms/票）----
+def _signal_main_rally(out: dict[str, Any], df: pd.DataFrame, code: str):
+    try:
+        from custos.core.factors.main_rally_factor import detect_main_rally_start
+
+        mrr = detect_main_rally_start(df, code)
+        _put(
+            out,
+            "main_rally",
+            bool(mrr.get("available")),
+            bool(mrr.get("hit")),
+            flow_ratio=mrr.get("flow_ratio"),
+            rsi7=mrr.get("rsi7"),
+            cci=mrr.get("cci"),
+            conditions_met=mrr.get("conditions_met"),
+        )
+    except Exception as exc:  # noqa: BLE001
+        _put(
+            out,
+            "main_rally",
+            False,
+            False,
+            reason=f"main_rally_error:{type(exc).__name__}",
+        )
+
+
 def compute_signals(
     df: pd.DataFrame,
     code: str = "",
@@ -75,166 +285,13 @@ def compute_signals(
     """
     out: dict[str, Any] = {}
 
-    def put(key: str, available: bool, hit: bool, **detail):
-        out[key] = {"state": _state(available, hit), **detail}
-
-    # ---- 复用型（零增量成本）----
-    if zx is not None:
-        put(
-            "qsx_gt_dks",
-            bool(zx.get("available")),
-            bool(zx.get("qsx_gt_dks")),
-            qsx=zx.get("qsx"),
-            dks=zx.get("dks"),
-        )
-    else:
-        try:
-            from custos.core.indicators import zhixing_state
-
-            z = zhixing_state(df)
-            put("qsx_gt_dks", bool(z.get("available")), bool(z.get("qsx_gt_dks")))
-        except Exception:  # noqa: BLE001
-            put("qsx_gt_dks", False, False, reason="zhixing_unavailable")
-
-    if weekly_j_low is not None:
-        avail = weekly_j_available if weekly_j_available is not None else True
-        put("weekly_j_low", bool(avail), bool(weekly_j_low))
-    else:
-        try:
-            from custos.pipeline.screening.enrich_candidates import weekly_j_state
-
-            w = weekly_j_state(df)
-            put(
-                "weekly_j_low",
-                bool(w.get("weekly_j_available")),
-                bool(w.get("weekly_j_low")),
-                weekly_j=w.get("weekly_j"),
-            )
-        except Exception:  # noqa: BLE001
-            put("weekly_j_low", False, False, reason="weekly_unavailable")
-
-    if distribution is not None:
-        lvl = str(distribution.get("risk_level") or "none")
-        put(
-            "distribution_risk",
-            bool(distribution.get("available")),
-            lvl in ("high", "watch"),
-            risk_level=lvl,
-            hits=distribution.get("hits"),
-        )
-    else:
-        put("distribution_risk", False, False, reason="not_provided")
-
-    # ---- RSI 三项（新增计算，约 1.9ms/票）----
-    try:
-        from custos.core.factors.rsi_state import rsi_divergence, rsi_regime
-
-        reg = rsi_regime(df)
-        avail = bool(reg.get("available"))
-        put(
-            "rsi_strong",
-            avail,
-            reg.get("state") == "strong",
-            regime=reg.get("state"),
-            rsi=reg.get("rsi"),
-        )
-        put(
-            "rsi_deep_oversold",
-            avail,
-            bool(reg.get("deep_oversold")),
-            rsi=reg.get("rsi"),
-        )
-        put(
-            "rsi_ideal_b1",
-            avail,
-            bool(reg.get("state") == "strong" and reg.get("deep_oversold")),
-        )
-        div = rsi_divergence(df)
-        put(
-            "rsi_bull_div",
-            bool(div.get("available")),
-            bool(div.get("bullish")),
-            cur_rsi=div.get("cur_rsi"),
-            prior_rsi=div.get("prior_rsi"),
-        )
-    except Exception as exc:  # noqa: BLE001
-        for k in ("rsi_strong", "rsi_deep_oversold", "rsi_ideal_b1", "rsi_bull_div"):
-            put(k, False, False, reason=f"rsi_error:{type(exc).__name__}")
-
-    # ---- B2 / 底部异动（新增计算，约 2.0ms/票）----
-    try:
-        from custos.core.factors.b2_surge_factor import (
-            _j_series,
-            detect_b2,
-            detect_bottom_surge,
-            detect_surge_then_b1,
-        )
-
-        js = _j_series(df)
-        b2 = detect_b2(df, code, j_series=js)
-        put(
-            "b2",
-            bool(b2.get("available")),
-            bool(b2.get("hit")),
-            gain_pct=b2.get("gain_pct"),
-            b1_bars_ago=b2.get("b1_bars_ago"),
-        )
-        sg = detect_bottom_surge(df, code)
-        put(
-            "bottom_surge",
-            bool(sg.get("available")),
-            bool(sg.get("hit")),
-            vol_ratio=sg.get("vol_ratio_ma20"),
-            bars_ago=sg.get("bars_ago"),
-            strict=sg.get("strict_hit"),
-        )
-        sb = detect_surge_then_b1(df, code)
-        put("surge_then_b1", bool(sb.get("available")), bool(sb.get("hit")))
-    except Exception as exc:  # noqa: BLE001
-        for k in ("b2", "bottom_surge", "surge_then_b1"):
-            put(k, False, False, reason=f"surge_error:{type(exc).__name__}")
-
-    # ---- 突破回踩型 B1（复用 platform_pullback + daily_j）----
-    try:
-        from custos.core.factors.b1_dual_factor import detect_breakout_pullback_b1
-
-        if platform_pullback is not None and daily_j is not None:
-            ph = float(platform_pullback.get("platform_high") or 0.0)
-            close = float(df["close"].astype(float).iloc[-1])
-            hit = bool(ph and close >= ph * 0.98 and daily_j < 13.0)
-            put("breakout_pullback_b1", True, hit, platform_high=ph or None)
-        else:
-            r = detect_breakout_pullback_b1(df, code)
-            put(
-                "breakout_pullback_b1",
-                bool(r.get("available")),
-                bool(r.get("hit")),
-                platform_high=r.get("platform_high"),
-            )
-    except Exception as exc:  # noqa: BLE001
-        put(
-            "breakout_pullback_b1",
-            False,
-            False,
-            reason=f"platform_error:{type(exc).__name__}",
-        )
-
-    # ---- 主升始发点（新增计算，约 3.8ms/票）----
-    try:
-        from custos.core.factors.main_rally_factor import detect_main_rally_start
-
-        mrr = detect_main_rally_start(df, code)
-        put(
-            "main_rally",
-            bool(mrr.get("available")),
-            bool(mrr.get("hit")),
-            flow_ratio=mrr.get("flow_ratio"),
-            rsi7=mrr.get("rsi7"),
-            cci=mrr.get("cci"),
-            conditions_met=mrr.get("conditions_met"),
-        )
-    except Exception as exc:  # noqa: BLE001
-        put("main_rally", False, False, reason=f"main_rally_error:{type(exc).__name__}")
+    _signal_qsx_gt_dks(out, df, zx)
+    _signal_weekly_j_low(out, df, weekly_j_low, weekly_j_available)
+    _signal_distribution_risk(out, distribution)
+    _signal_rsi(out, df)
+    _signal_surge(out, df, code)
+    _signal_breakout_pullback_b1(out, df, code, platform_pullback, daily_j)
+    _signal_main_rally(out, df, code)
 
     return {**out, "summary": summarize_signals(out)}
 

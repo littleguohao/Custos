@@ -124,6 +124,51 @@ def _load_json(path, default):
         return default
 
 
+def _sig_nm(c: dict) -> str:
+    return f"{c.get('code')} {c.get('name') or ''}".strip()
+
+
+def _signal_label_row(key: str, meta: tuple, with_sig: list[dict]) -> Optional[str]:
+    """单因子行：命中/可评 + 命中名单（按技术分降序前12）。无可评估且无命中返回 None。"""
+    label, abbr, direction = meta
+    hits, evaluable = [], 0
+    for c in with_sig:
+        st = (c["signals"].get(key) or {}).get("state")
+        if st in ("hit", "miss"):
+            evaluable += 1
+        if st == "hit":
+            hits.append(c)
+    if not evaluable and not hits:
+        return None
+    mark = "⚠️ " if direction < 0 else ""
+    # 2026-08-16（owner）：改表格 + 标技术分--命中名单按技术分降序取前 12，
+    # 括号内是该票当日技术分（总分=技术分），一眼看出「命中的是强票还是弱票」。
+    top_hits = sorted(hits, key=lambda c: (-(c.get("score") or 0), str(c.get("code"))))
+    names = "、".join(
+        f"{_sig_nm(c)}({int(c.get('score') or 0)})" for c in top_hits[:12]
+    )
+    if len(hits) > 12:
+        names += f" 等 {len(hits)} 只"
+    return f"| {mark}**{label}** `{abbr}` | {len(hits)}/{evaluable} | {names or '无'} |"
+
+
+def _signal_labels_unavailable_note(sl, with_sig: list[dict]) -> list[str]:
+    """「数据不足」补注行：unavailable 计数 top4；无则返回空。"""
+    na_counts: dict[str, int] = {}
+    for c in with_sig:
+        for key in sl.SIGNAL_META:
+            if (c["signals"].get(key) or {}).get("state") == "unavailable":
+                na_counts[key] = na_counts.get(key, 0) + 1
+    if not na_counts:
+        return []
+    top = sorted(na_counts.items(), key=lambda x: -x[1])[:4]
+    return [
+        "",
+        "> 数据不足（算不出来，**不等于不符合条件**）："
+        + "、".join(f"{sl.SIGNAL_META[k][0]} {v} 只" for k, v in top),
+    ]
+
+
 def _signal_labels_section(candidates: list[dict]) -> list[str]:
     """信号标注一览：**逐个标注列出命中的票**（而不是只报几只）。
 
@@ -481,84 +526,114 @@ def _top5(lines, candidates):
         lines.append("")
 
 
+def _pool_tags(c):
+    # 未知 patterns 键（上游新增标签/脏数据）不得 KeyError 打挂整张表：
+    # 用 .get 兜底并把原始键名留在表里，好让"多了个没登记的标签"看得见（审计）。
+    return (
+        "、".join(
+            PATTERN_LABELS.get(t, str(t))
+            for t, hit in (c.get("patterns") or {}).items()
+            if hit
+        )
+        or "-"
+    )
+
+
+def _mark(value):
+    """证据列命中标记：✅ 或 -。"""
+    return "✅" if value else "-"
+
+
+def _fq_disp(c):
+    fq = c.get("fundamental_quality") or {}
+    return (fq.get("tier", "-") or "-") + ("⚠三无" if fq.get("sanwu") else "")
+
+
+def _r4_disp(c):
+    r4 = c.get("resonance_4leg") or {}
+    return (r4.get("label", "-") or "-") + ("🐂" if r4.get("bull_candidate") else "")
+
+
+def _pp_disp(c):
+    pp = c.get("platform_pullback") or {}
+    return f"✓@{_fmt(pp.get('platform_high'))}" if pp.get("platform_high") else "-"
+
+
+def _pool_row_evidence(c):
+    return (
+        # v0.51（#37 阶段 B）：adx25/S反转 证据列（严格证据层，不进分层）
+        f" | {_mark(c.get('adx25'))}"
+        f" | {_fmt((c.get('s_reversal') or {}).get('s_reversal'))}"
+        # v0.56：W底/红肥绿瘦 底部侧证据列（25chuhuo 底部镜像，不进分层）
+        f" | {_mark((c.get('w_bottom') or {}).get('hit'))}"
+        f" | {_mark((c.get('red_fat_green_thin') or {}).get('hit'))}"
+    )
+
+
+def _pool_row_quality(c):
+    return (
+        f" | {c.get('trade_style', '-')}"
+        f" | {(c.get('resonance') or {}).get('resonance_level', '-')}"
+        f" | {_fq_disp(c)}"
+        f" | {_r4_disp(c)}"
+        f" | {_pp_disp(c)}"
+    )
+
+
+def _bucket_pool_row(c, bucket):
+    """分层池明细表中单只候选的一行。"""
+    detail = c.get("score_detail") or {}
+    stop = (c.get("stop_loss_ref") or {}).get("price")
+    fit = detail.get("factor_contrib", {}).get("perfect_b1_fit")
+    return (
+        (
+            f"| {c.get('code')} | {c.get('name')}"
+            f" | {'、'.join(c.get('formula_hits') or []) or '-'}"
+            f" | {_pool_tags(c)}"
+            f" | {WAVE_LABELS.get((c.get('wave') or {}).get('wave_type'), '-')}"
+            f" | {_cz_tags(c)}"
+            f" | {_fmt(detail.get('technical_score'))}"
+            f" | {_fmt(fit)}"
+        )
+        + _pool_row_evidence(c)
+        + (
+            f" | {(c.get('capital_intent') or {}).get('level', '-')}"
+            f" | {c.get('industry') or c.get('sector', '未知')}"
+            f" | {(c.get('sector_heat_filter') or {}).get('sector_state', '未知')}"
+        )
+        + _pool_row_quality(c)
+        + (
+            f" | {_signal_cell(c)}"
+            f" | {bucket}"
+            f" | {_fmt(stop)}"
+            f" | {c.get('next_step', '-')} |"
+        )
+    )
+
+
+def _bucket_pool_section(lines, bucket, rows, counts):
+    lines.append(f"## {bucket} 池（{counts.get(bucket, 0)} 只）")
+    lines.append("")
+    if not rows:
+        lines.append("（空）")
+        lines.append("")
+        return
+    lines.append(
+        "| 代码 | 名称 | 公式命中 | 模式标签 | 波浪 | CZ标签 | 技术分 | 贴合 | ADX25 | S反转 | W底 | 红肥绿瘦 | 资金意图 | 板块 | 板块状态 | 交易属性 | 共振 | 基本面 | 4面共振 | 平台回踩 | 标注 | 分层 | 建议止损位 | next_step |"
+    )
+    lines.append(
+        "|---|---|---|---|---|---|---:|---:|---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+    )
+    for c in rows:
+        lines.append(_bucket_pool_row(c, bucket))
+    lines.append("")
+
+
 def _bucket_pools(lines, candidates, counts):
     """A/B/C/D 四个分层池的明细表。"""
     for bucket in ("A", "B", "C", "D"):
         rows = [c for c in candidates if c.get("bucket") == bucket]
-        lines.append(f"## {bucket} 池（{counts.get(bucket, 0)} 只）")
-        lines.append("")
-        if not rows:
-            lines.append("（空）")
-            lines.append("")
-            continue
-        lines.append(
-            "| 代码 | 名称 | 公式命中 | 模式标签 | 波浪 | CZ标签 | 技术分 | 贴合 | ADX25 | S反转 | W底 | 红肥绿瘦 | 资金意图 | 板块 | 板块状态 | 交易属性 | 共振 | 基本面 | 4面共振 | 平台回踩 | 标注 | 分层 | 建议止损位 | next_step |"
-        )
-        lines.append(
-            "|---|---|---|---|---|---|---:|---:|---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
-        )
-        for c in rows:
-            # 未知 patterns 键（上游新增标签/脏数据）不得 KeyError 打挂整张表：
-            # 用 .get 兜底并把原始键名留在表里，好让"多了个没登记的标签"看得见（审计）。
-            tags = (
-                "、".join(
-                    PATTERN_LABELS.get(t, str(t))
-                    for t, hit in (c.get("patterns") or {}).items()
-                    if hit
-                )
-                or "-"
-            )
-            wave = WAVE_LABELS.get((c.get("wave") or {}).get("wave_type"), "-")
-            shf = c.get("sector_heat_filter") or {}
-            res = c.get("resonance") or {}
-            detail = c.get("score_detail") or {}
-            stop = (c.get("stop_loss_ref") or {}).get("price")
-            fit = (
-                (c.get("score_detail") or {})
-                .get("factor_contrib", {})
-                .get("perfect_b1_fit")
-            )
-            cap_intent = (c.get("capital_intent") or {}).get("level", "-")
-            fq = c.get("fundamental_quality") or {}
-            fq_disp = (fq.get("tier", "-") or "-") + (
-                "⚠三无" if fq.get("sanwu") else ""
-            )
-            r4 = c.get("resonance_4leg") or {}
-            r4_disp = (r4.get("label", "-") or "-") + (
-                "🐂" if r4.get("bull_candidate") else ""
-            )
-            pp = c.get("platform_pullback") or {}
-            pp_disp = (
-                f"✓@{_fmt(pp.get('platform_high'))}" if pp.get("platform_high") else "-"
-            )
-            lines.append(
-                f"| {c.get('code')} | {c.get('name')}"
-                f" | {'、'.join(c.get('formula_hits') or []) or '-'}"
-                f" | {tags}"
-                f" | {wave}"
-                f" | {_cz_tags(c)}"
-                f" | {_fmt(detail.get('technical_score'))}"
-                f" | {_fmt(fit)}"
-                # v0.51（#37 阶段 B）：adx25/S反转 证据列（严格证据层，不进分层）
-                f" | {'✅' if c.get('adx25') else '-'}"
-                f" | {_fmt((c.get('s_reversal') or {}).get('s_reversal'))}"
-                # v0.56：W底/红肥绿瘦 底部侧证据列（25chuhuo 底部镜像，不进分层）
-                f" | {'✅' if (c.get('w_bottom') or {}).get('hit') else '-'}"
-                f" | {'✅' if (c.get('red_fat_green_thin') or {}).get('hit') else '-'}"
-                f" | {cap_intent}"
-                f" | {c.get('industry') or c.get('sector', '未知')}"
-                f" | {shf.get('sector_state', '未知')}"
-                f" | {c.get('trade_style', '-')}"
-                f" | {res.get('resonance_level', '-')}"
-                f" | {fq_disp}"
-                f" | {r4_disp}"
-                f" | {pp_disp}"
-                f" | {_signal_cell(c)}"
-                f" | {bucket}"
-                f" | {_fmt(stop)}"
-                f" | {c.get('next_step', '-')} |"
-            )
-        lines.append("")
+        _bucket_pool_section(lines, bucket, rows, counts)
 
 
 def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:

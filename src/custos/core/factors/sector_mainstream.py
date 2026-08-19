@@ -166,12 +166,17 @@ def sector_name(sec: str, name_map: Optional[dict] = None) -> str:
     return name_map.get(str(sec).split(".")[0], {}).get("name", sec)
 
 
-def aggregate(
-    trades: list[dict], code2secs: dict[str, list[str]], top_k: int = 10
-) -> dict[str, Any]:
-    """交易板块族聚合:板块维度信号数/胜率/期望 + 集中度 + 主流(top_k) vs 分散 对照。"""
+def _tagged_trades(
+    trades: list[dict], code2secs: dict[str, list[str]]
+) -> tuple[list[tuple[dict, list[str]]], int]:
+    """逐笔交易贴上板块族;返回 (tagged, 有归属笔数)。"""
     tagged = [(t, code2secs.get(str(t.get("code", ""))[:6], [])) for t in trades]
     classified = sum(1 for _, secs in tagged if secs)
+    return tagged, classified
+
+
+def _per_sector_rows(tagged: list[tuple[dict, list[str]]]) -> list[dict[str, Any]]:
+    """板块维度聚合:信号数/胜率/期望/合计收益,按信号数降序。"""
     per_sec: dict[str, list[float]] = {}
     for t, secs in tagged:
         for s in secs:
@@ -189,48 +194,41 @@ def aggregate(
             }
         )
     rows.sort(key=lambda r: r["n"], reverse=True)
-    total_attr = sum(r["n"] for r in rows)  # 归属次数(一股多板块重复计)
-    top5_share = (
-        round(sum(r["n"] for r in rows[:5]) / total_attr, 3) if total_attr else None
-    )
-    hhi = (
-        round(sum((r["n"] / total_attr) ** 2 for r in rows), 4) if total_attr else None
-    )
+    return rows
 
-    mainstream = {r["sector"] for r in rows[:top_k]}
+
+def _stat(rets: list[float]) -> dict[str, Any]:
+    """一组收益的基础统计(主流/分散对照用);空组只给 {"n": 0}。"""
+    if not rets:
+        return {"n": 0}
+    wins = [r for r in rets if r > 0]
+    return {
+        "n": len(rets),
+        "win_rate": round(len(wins) / len(rets), 3),
+        "expectancy": round(statistics.mean(rets), 4),
+        "median": round(statistics.median(rets), 4),
+    }
+
+
+def _mainstream_split(
+    tagged: list[tuple[dict, list[str]]], mainstream: set
+) -> tuple[list[float], list[float]]:
+    """按是否含主流板块归属,把交易收益分成 主流内/分散 两组。"""
     in_main = [t["ret"] for t, secs in tagged if mainstream & set(secs)]
     out_main = [t["ret"] for t, secs in tagged if secs and not (mainstream & set(secs))]
+    return in_main, out_main
 
-    def _stat(rets: list[float]) -> dict[str, Any]:
-        if not rets:
-            return {"n": 0}
-        wins = [r for r in rets if r > 0]
-        return {
-            "n": len(rets),
-            "win_rate": round(len(wins) / len(rets), 3),
-            "expectancy": round(statistics.mean(rets), 4),
-            "median": round(statistics.median(rets), 4),
-        }
 
-    out: dict[str, Any] = {
-        "n_trades": len(trades),
-        "n_classified": classified,
-        "distinct_sectors": len(rows),
-        "attr_total": total_attr,
-        "top5_share": top5_share,
-        "hhi": hhi,
-        "top_k": top_k,
-        "mainstream_sectors": sorted(mainstream),
-        "in_mainstream": _stat(in_main),
-        "off_mainstream": _stat(out_main),
-        "top_sectors": rows[:top_k],
-        "rows": rows,
-        "top_by_expectancy": sorted(
-            (r for r in rows if r["n"] >= 20),
-            key=lambda r: r["expectancy"],
-            reverse=True,
-        )[:top_k],
-    }
+def _render_text(
+    out: dict[str, Any],
+    trades: list[dict],
+    classified: int,
+    rows: list[dict[str, Any]],
+    mainstream: set,
+    lift: Optional[float],
+) -> str:
+    """渲染 aggregate 结果的 text 报告(键序/文案逐位保持原样)。"""
+    top5_share, hhi, top_k = out["top5_share"], out["hhi"], out["top_k"]
     conc = (
         "集中"
         if (top5_share or 0) >= 0.5
@@ -239,12 +237,6 @@ def aggregate(
         else "中等"
     )
     im, om = out["in_mainstream"], out["off_mainstream"]
-    lift = (
-        (im.get("expectancy", 0) - om.get("expectancy", 0))
-        if im.get("n") and om.get("n")
-        else None
-    )
-    out["mainstream_lift"] = round(lift, 4) if lift is not None else None
     lines = [
         f"交易 {len(trades)} 笔(有板块归属 {classified}), 覆盖 {len(rows)} 个板块; "
         f"前5板块占归属次数 {(top5_share or 0) * 100:.0f}%({conc}), HHI {hhi}",
@@ -273,7 +265,53 @@ def aggregate(
             or "无"
         )
     )
-    out["text"] = "\n".join(lines)
+    return "\n".join(lines)
+
+
+def aggregate(
+    trades: list[dict], code2secs: dict[str, list[str]], top_k: int = 10
+) -> dict[str, Any]:
+    """交易板块族聚合:板块维度信号数/胜率/期望 + 集中度 + 主流(top_k) vs 分散 对照。"""
+    tagged, classified = _tagged_trades(trades, code2secs)
+    rows = _per_sector_rows(tagged)
+    total_attr = sum(r["n"] for r in rows)  # 归属次数(一股多板块重复计)
+    top5_share = (
+        round(sum(r["n"] for r in rows[:5]) / total_attr, 3) if total_attr else None
+    )
+    hhi = (
+        round(sum((r["n"] / total_attr) ** 2 for r in rows), 4) if total_attr else None
+    )
+
+    mainstream = {r["sector"] for r in rows[:top_k]}
+    in_main, out_main = _mainstream_split(tagged, mainstream)
+
+    out: dict[str, Any] = {
+        "n_trades": len(trades),
+        "n_classified": classified,
+        "distinct_sectors": len(rows),
+        "attr_total": total_attr,
+        "top5_share": top5_share,
+        "hhi": hhi,
+        "top_k": top_k,
+        "mainstream_sectors": sorted(mainstream),
+        "in_mainstream": _stat(in_main),
+        "off_mainstream": _stat(out_main),
+        "top_sectors": rows[:top_k],
+        "rows": rows,
+        "top_by_expectancy": sorted(
+            (r for r in rows if r["n"] >= 20),
+            key=lambda r: r["expectancy"],
+            reverse=True,
+        )[:top_k],
+    }
+    im, om = out["in_mainstream"], out["off_mainstream"]
+    lift = (
+        (im.get("expectancy", 0) - om.get("expectancy", 0))
+        if im.get("n") and om.get("n")
+        else None
+    )
+    out["mainstream_lift"] = round(lift, 4) if lift is not None else None
+    out["text"] = _render_text(out, trades, classified, rows, mainstream, lift)
     return out
 
 

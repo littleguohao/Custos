@@ -1861,11 +1861,12 @@ def _prepare_universe(
     return str(path)
 
 
-def main() -> int:
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(
-            encoding="utf-8", errors="replace"
-        )  # GBK 终端打不了 ⚠️ 等符号
+def _build_parser() -> argparse.ArgumentParser:
+    """命令行参数定义（从 main 抽出以降圈复杂度；纯参数表，无行为）。
+
+    ⚠️ help 文案里的 ``DEFAULT_WINDOW`` 是**调用时**插值的模块全局，
+    勿捕获成默认参数——那是测试的 monkeypatch 通道。
+    """
     ap = argparse.ArgumentParser(description="M2 机制类改进扫描（分组）")
     # default=None 而非 1000：区分「用户显式指定了批次」与「没指定」。
     # 前者报表就看那一批；后者实跑看刚跑的那批、--report-only 自动取最大批。
@@ -1931,14 +1932,20 @@ def main() -> int:
         help="显式关闭宇宙钉死（各方案各自抽样，可能漂移；"
         "报表会打「本批不可复现」警告）",
     )
-    a = ap.parse_args()
-    sample = a.sample if a.sample else DEFAULT_SAMPLE
+    return ap
+
+
+def _resolve_window(
+    a: argparse.Namespace,
+) -> tuple[Optional[tuple[str, str]], Optional[str]]:
+    """窗口钉死的冲突检查与默认值解析。
+
+    返回 ``(window, None)``；冲突时返回 ``(None, 错误文案)``，由 main 打印并退出 2。
+    """
     if a.window and a.no_window:
-        print("--window 与 --no-window 冲突（一个钉一个拆，不许猜）")
-        return 2
+        return None, "--window 与 --no-window 冲突（一个钉一个拆，不许猜）"
     if a.window and a.cross_window:
-        print("--window 与 --cross-window 冲突（后者已自带 2022-2024 窗口）")
-        return 2
+        return None, "--window 与 --cross-window 冲突（后者已自带 2022-2024 窗口）"
     # 默认钉死（#17）：未显式给 --window 也未 --no-window 时用 DEFAULT_WINDOW；
     # --cross-window 自带 2022-2024 窗口，默认钉死让位（显式 --window 则在上方报错）。
     window = (
@@ -1946,39 +1953,61 @@ def main() -> int:
         if a.window
         else (None if (a.no_window or a.cross_window) else DEFAULT_WINDOW)
     )  # type: ignore[assignment]
-    codes_file = None
+    return window, None
 
+
+def _run_schemes(
+    a: argparse.Namespace, sample: int, window: Optional[tuple[str, str]]
+) -> tuple[int, Optional[str]]:
+    """实跑分支：筛方案 →（可选）钉宇宙 → 执行。返回 ``(退出码, codes_file)``。"""
+    todo = [
+        (g, n, e)
+        for g, meta in GROUPS.items()
+        for n, e in meta["runs"].items()
+        if not a.only or a.only in g or a.only in n
+    ]
+    if not todo:
+        print(f"--only {a.only} 没匹配到任何组/方案")
+        return 2, None
+    codes_file = None
+    if a.pin_universe:
+        codes_file = _prepare_universe(sample, a.cross_window, a.data_source, window)
+    print(
+        f"将跑 {len(todo)} 个方案，样本 {sample} 只，数据源 {a.data_source}"
+        f"{'，区间 2022-2024' if a.cross_window else ''}"
+        f"{f'，窗口 {window[0]}~{window[1]}' if window else ''}"
+        f"{'，宇宙已钉死' if codes_file else ''}"
+        f"{f'，并行 {a.jobs} 进程' if a.jobs > 1 else ''}"
+    )
+    _run_all(
+        todo,
+        sample,
+        a.cross_window,
+        a.force,
+        max(1, a.jobs),
+        a.data_source,
+        window,
+        codes_file,
+    )
+    return 0, codes_file
+
+
+def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(
+            encoding="utf-8", errors="replace"
+        )  # GBK 终端打不了 ⚠️ 等符号
+    a = _build_parser().parse_args()
+    sample = a.sample if a.sample else DEFAULT_SAMPLE
+    window, err = _resolve_window(a)
+    if err:
+        print(err)
+        return 2
+    codes_file = None
     if not a.report_only:
-        todo = [
-            (g, n, e)
-            for g, meta in GROUPS.items()
-            for n, e in meta["runs"].items()
-            if not a.only or a.only in g or a.only in n
-        ]
-        if not todo:
-            print(f"--only {a.only} 没匹配到任何组/方案")
-            return 2
-        if a.pin_universe:
-            codes_file = _prepare_universe(
-                sample, a.cross_window, a.data_source, window
-            )
-        print(
-            f"将跑 {len(todo)} 个方案，样本 {sample} 只，数据源 {a.data_source}"
-            f"{'，区间 2022-2024' if a.cross_window else ''}"
-            f"{f'，窗口 {window[0]}~{window[1]}' if window else ''}"
-            f"{'，宇宙已钉死' if codes_file else ''}"
-            f"{f'，并行 {a.jobs} 进程' if a.jobs > 1 else ''}"
-        )
-        _run_all(
-            todo,
-            sample,
-            a.cross_window,
-            a.force,
-            max(1, a.jobs),
-            a.data_source,
-            window,
-            codes_file,
-        )
+        rc, codes_file = _run_schemes(a, sample, window)
+        if rc:
+            return rc
     # ⚠️ 实跑时必须传**刚跑的那批**。原先这里传 None ⇒ 汇总「最大样本量」那批：
     #    跑 --sample 300 试跑，报表却显示 s1000 的旧结果，看起来像新结果。
     report(

@@ -214,6 +214,47 @@ def fetch_names_for(codes, session=None, batch: int = EM_BATCH) -> dict[str, str
     return out
 
 
+def _clist_params(page: int) -> dict[str, Any]:
+    """clist 单页请求参数（除页码外固定）。"""
+    return {
+        "pn": page,
+        "pz": EM_CLIST_PAGE_SIZE,
+        "po": 0,
+        "np": 1,
+        "fltt": 2,
+        "invt": 2,
+        "fid": "f12",
+        "fs": EM_FS,
+        "fields": "f12,f14",
+    }
+
+
+def _merge_clist_rows(out: dict[str, str], rows) -> None:
+    """把一页 clist 行并入名称表（非法 code / 空名跳过）。"""
+    for x in rows:
+        code = str(x.get("f12") or "").strip()
+        name = str(x.get("f14") or "").strip()
+        if len(code) == 6 and code.isdigit() and name:
+            out[code] = name
+
+
+def _check_clist_result(out: dict[str, str], total: int, min_coverage: float) -> None:
+    """收尾校验：一条没取到 / 覆盖率门槛 / 受限流只取到部分时的 WARN。"""
+    if not out:
+        raise NameFetchIncomplete("clist 一条未取到")
+    if total and len(out) < total * min_coverage:
+        raise NameFetchIncomplete(
+            f"clist 覆盖率不足: {len(out)}/{total} (<{min_coverage:.0%})，"
+            "拒绝当全量表落盘（全量构建请用 --source auto，TDX 协议为第一顺位）"
+        )
+    if total and len(out) < total:
+        print(
+            f"[WARN] clist 受限流只取到 {len(out)}/{total} 条"
+            f"（全量构建请用 --source auto，TDX 协议为第一顺位）",
+            file=sys.stderr,
+        )
+
+
 def fetch_all_from_clist(
     session=None, max_pages: int = EM_MAX_PAGES, min_coverage: float = 0.0
 ) -> dict[str, str]:
@@ -233,21 +274,7 @@ def fetch_all_from_clist(
     total = 0
     for page in range(1, max_pages + 1):
         try:
-            data = _em_get(
-                s,
-                EM_CLIST_PATH,
-                {
-                    "pn": page,
-                    "pz": EM_CLIST_PAGE_SIZE,
-                    "po": 0,
-                    "np": 1,
-                    "fltt": 2,
-                    "invt": 2,
-                    "fid": "f12",
-                    "fs": EM_FS,
-                    "fields": "f12,f14",
-                },
-            )
+            data = _em_get(s, EM_CLIST_PATH, _clist_params(page))
         except NameFetchIncomplete:
             break  # 被限流断连:保留已取部分
         if not isinstance(data, dict):
@@ -256,27 +283,11 @@ def fetch_all_from_clist(
         rows = data.get("diff") or []
         if not rows:
             break
-        for x in rows:
-            code = str(x.get("f12") or "").strip()
-            name = str(x.get("f14") or "").strip()
-            if len(code) == 6 and code.isdigit() and name:
-                out[code] = name
+        _merge_clist_rows(out, rows)
         if total and len(out) >= total:
             break
         time.sleep(EM_PAGE_SLEEP)
-    if not out:
-        raise NameFetchIncomplete("clist 一条未取到")
-    if total and len(out) < total * min_coverage:
-        raise NameFetchIncomplete(
-            f"clist 覆盖率不足: {len(out)}/{total} (<{min_coverage:.0%})，"
-            "拒绝当全量表落盘（全量构建请用 --source auto，TDX 协议为第一顺位）"
-        )
-    if total and len(out) < total:
-        print(
-            f"[WARN] clist 受限流只取到 {len(out)}/{total} 条"
-            f"（全量构建请用 --source auto，TDX 协议为第一顺位）",
-            file=sys.stderr,
-        )
+    _check_clist_result(out, total, min_coverage)
     return out
 
 
@@ -385,6 +396,119 @@ def fetch_name_map(session=None) -> tuple[dict[str, str], str]:
     return {}, "unavailable"
 
 
+def _merge_source(
+    names: dict[str, str], source: str, new: dict[str, str], tag: str
+) -> str:
+    """并入一个名称源并更新 source 标签（首个有效源直接用 tag，其后追加 ``+tag``）。"""
+    names.update(new)
+    return f"{source}+{tag}" if source != "unavailable" else tag
+
+
+def _fill_from_tdx_protocol(wanted: list[str], names: dict[str, str]) -> str:
+    """① TDX 协议（主路径）：一次拿全市场再本地筛，沪深全覆盖。"""
+    try:
+        full = fetch_from_tdx_protocol()
+        hit = {c: full[c] for c in wanted if c in full}
+        if hit:
+            names.update(hit)
+            return "tdx_protocol"
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"[WARN] TDX 协议名称源失败（回退 HTTP）: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+    return "unavailable"
+
+
+def _fill_from_eastmoney(
+    wanted: list[str], names: dict[str, str], source: str, session
+) -> tuple[list[str], str]:
+    """② 东财 ulist：只补 TDX 拿不到的（主要是北交所——TDX 服务器不提供 BJ）。"""
+    missing = [c for c in wanted if c not in names]
+    if not missing:
+        return missing, source
+    try:
+        em = fetch_names_for(missing, session=session)
+        if em:
+            source = _merge_source(names, source, em, "eastmoney_ulist")
+            missing = [c for c in wanted if c not in names]
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"[WARN] 东财批量名称失败（回退 TQ-Local）: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+    return missing, source
+
+
+def _fill_from_tq(
+    wanted: list[str], names: dict[str, str], source: str, missing: list[str]
+) -> tuple[list[str], str]:
+    """③ TQ-Local：需 TdxW.exe 运行，只补仍缺的票。"""
+    if not missing:
+        return missing, source
+    tq = fetch_from_tq(missing, progress_every=0)
+    if tq:
+        source = _merge_source(names, source, tq, "tq_local")
+        missing = [c for c in wanted if c not in names]
+    return missing, source
+
+
+def _fill_from_cache(
+    wanted: list[str], names: dict[str, str], source: str, missing: list[str]
+) -> tuple[list[str], str, dict[str, Any]]:
+    """④ 本地缓存：兜底，读取时判时效（meta 透传给调用方判 stale）。"""
+    cache_meta: dict[str, Any] = {}
+    if not missing:
+        return missing, source, cache_meta
+    cached, cache_meta = load_cache()
+    filled = {c: cached[c] for c in missing if c in cached}
+    if filled:
+        source = _merge_source(names, source, filled, "cache")
+        missing = [c for c in wanted if c not in names]
+    return missing, source, cache_meta
+
+
+def _finalize_diag(
+    diag: dict[str, Any],
+    wanted: list[str],
+    names: dict[str, str],
+    missing: list[str],
+    source: str,
+    cache_meta: dict[str, Any],
+) -> None:
+    """按取数结果给出 st_filter 四态结论并打 WARN（diag 键序是契约，勿动）。"""
+    diag.update(
+        name_map_source=source,
+        name_map_size=len(names),
+        missing_count=len(missing),
+        missing_codes=missing[:20],
+    )
+    if not names:
+        diag["st_filter"] = "unavailable"
+        print(
+            f"[WARN] 候选名称全部取不到（{len(wanted)} 只）：ST 硬排除失效",
+            file=sys.stderr,
+        )
+    elif missing:
+        diag["st_filter"] = "partial"
+        print(
+            f"[WARN] {len(missing)}/{len(wanted)} 只候选取不到名称："
+            f"这些票的 ST 状态未知（{'、'.join(missing[:8])}）",
+            file=sys.stderr,
+        )
+    elif source == "cache" and cache_meta.get("stale"):
+        diag["st_filter"] = "stale"
+        diag["name_map_generated_at"] = cache_meta.get("generated_at")
+        diag["name_map_age_days"] = cache_meta.get("age_days")
+        print(
+            f"[WARN] 候选名称全部来自陈旧缓存（age="
+            f"{cache_meta.get('age_days')}天）：新被 ST 的票可能不在表内",
+            file=sys.stderr,
+        )
+    else:
+        diag["st_filter"] = "ok"
+
+
 def resolve_names_for(codes, session=None) -> tuple[dict[str, str], dict[str, Any]]:
     """**按需**取候选股名称并如实报告 ST 判定可信度。这是选股链该用的入口。
 
@@ -418,86 +542,11 @@ def resolve_names_for(codes, session=None) -> tuple[dict[str, str], dict[str, An
         return {}, diag
 
     names: dict[str, str] = {}
-    source = "unavailable"
-
-    # ① TDX 协议（主路径）：一次拿全市场再本地筛，沪深全覆盖
-    try:
-        full = fetch_from_tdx_protocol()
-        hit = {c: full[c] for c in wanted if c in full}
-        if hit:
-            names.update(hit)
-            source = "tdx_protocol"
-    except Exception as exc:  # noqa: BLE001
-        print(
-            f"[WARN] TDX 协议名称源失败（回退 HTTP）: {type(exc).__name__}: {exc}",
-            file=sys.stderr,
-        )
-
-    # ② 东财 ulist：只补 TDX 拿不到的（主要是北交所——TDX 服务器不提供 BJ）
-    missing = [c for c in wanted if c not in names]
-    if missing:
-        try:
-            em = fetch_names_for(missing, session=session)
-            if em:
-                names.update(em)
-                source = (
-                    f"{source}+eastmoney_ulist"
-                    if source != "unavailable"
-                    else "eastmoney_ulist"
-                )
-                missing = [c for c in wanted if c not in names]
-        except Exception as exc:  # noqa: BLE001
-            print(
-                f"[WARN] 东财批量名称失败（回退 TQ-Local）: {type(exc).__name__}: {exc}",
-                file=sys.stderr,
-            )
-
-    if missing:
-        tq = fetch_from_tq(missing, progress_every=0)
-        if tq:
-            names.update(tq)
-            source = f"{source}+tq_local" if source != "unavailable" else "tq_local"
-            missing = [c for c in wanted if c not in names]
-
-    cache_meta: dict[str, Any] = {}
-    if missing:
-        cached, cache_meta = load_cache()
-        filled = {c: cached[c] for c in missing if c in cached}
-        if filled:
-            names.update(filled)
-            source = f"{source}+cache" if source != "unavailable" else "cache"
-            missing = [c for c in wanted if c not in names]
-
-    diag.update(
-        name_map_source=source,
-        name_map_size=len(names),
-        missing_count=len(missing),
-        missing_codes=missing[:20],
-    )
-    if not names:
-        diag["st_filter"] = "unavailable"
-        print(
-            f"[WARN] 候选名称全部取不到（{len(wanted)} 只）：ST 硬排除失效",
-            file=sys.stderr,
-        )
-    elif missing:
-        diag["st_filter"] = "partial"
-        print(
-            f"[WARN] {len(missing)}/{len(wanted)} 只候选取不到名称："
-            f"这些票的 ST 状态未知（{'、'.join(missing[:8])}）",
-            file=sys.stderr,
-        )
-    elif source == "cache" and cache_meta.get("stale"):
-        diag["st_filter"] = "stale"
-        diag["name_map_generated_at"] = cache_meta.get("generated_at")
-        diag["name_map_age_days"] = cache_meta.get("age_days")
-        print(
-            f"[WARN] 候选名称全部来自陈旧缓存（age="
-            f"{cache_meta.get('age_days')}天）：新被 ST 的票可能不在表内",
-            file=sys.stderr,
-        )
-    else:
-        diag["st_filter"] = "ok"
+    source = _fill_from_tdx_protocol(wanted, names)
+    missing, source = _fill_from_eastmoney(wanted, names, source, session)
+    missing, source = _fill_from_tq(wanted, names, source, missing)
+    missing, source, cache_meta = _fill_from_cache(wanted, names, source, missing)
+    _finalize_diag(diag, wanted, names, missing, source, cache_meta)
     return names, diag
 
 

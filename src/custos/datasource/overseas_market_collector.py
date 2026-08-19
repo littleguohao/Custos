@@ -72,7 +72,7 @@ FIELD_MAP = {
 }
 
 
-def fetch_chart(symbol: str, region: str = "") -> dict[str, Any]:
+def _fetch_chart_json(symbol: str) -> dict[str, Any]:
     encoded = urllib.parse.quote(symbol, safe="")
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{encoded}?range=5d&interval=1d&includePrePost=false"
     req = urllib.request.Request(
@@ -84,19 +84,12 @@ def fetch_chart(symbol: str, region: str = "") -> dict[str, Any]:
     )
     with retry_call(lambda: urllib.request.urlopen(req, timeout=20)) as resp:
         raw = resp.read().decode("utf-8")
-    data = json.loads(raw)
-    result = (data.get("chart") or {}).get("result") or []
-    if not result:
-        err = (data.get("chart") or {}).get("error")
-        raise RuntimeError(f"empty chart result: {err}")
-    r = result[0]
-    meta = r.get("meta") or {}
-    price = meta.get("regularMarketPrice")
-    prev = meta.get("previousClose") or meta.get("chartPreviousClose")
-    change_pct = meta.get("regularMarketChangePercent")
-    timestamps = r.get("timestamp") or []
-    quote = ((r.get("indicators") or {}).get("quote") or [{}])[0]
-    closes = quote.get("close") or []
+    return json.loads(raw)
+
+
+def _derive_change_pct(
+    closes: list[Any], price: Any, prev: Any, change_pct: Any
+) -> Any:
     if change_pct is None and price is not None:
         # chartPreviousClose is the close before the 5d range start, not the
         # previous session; prefer the last two real closes when available.
@@ -106,9 +99,19 @@ def fetch_chart(symbol: str, region: str = "") -> dict[str, Any]:
             change_pct = pct_change(close_vals[-1], close_vals[-2], digits=2)
         elif prev:
             change_pct = pct_change(price, prev, digits=2)
-    last_ts = meta.get("regularMarketTime") or (timestamps[-1] if timestamps else None)
-    local_now = datetime.now(ZoneInfo("Asia/Shanghai"))
-    asia_live = region in {"jp", "kr"} and 8 <= local_now.hour < 15
+    return change_pct
+
+
+def _chart_result_dict(
+    symbol: str,
+    meta: dict[str, Any],
+    price: Any,
+    prev: Any,
+    change_pct: Any,
+    last_ts: Any,
+    closes: list[Any],
+    asia_live: bool,
+) -> dict[str, Any]:
     return {
         "symbol": symbol,
         "price": round(float(price), 4) if price is not None else None,
@@ -131,6 +134,29 @@ def fetch_chart(symbol: str, region: str = "") -> dict[str, Any]:
         ],
         "source": "Yahoo Finance chart API",
     }
+
+
+def fetch_chart(symbol: str, region: str = "") -> dict[str, Any]:
+    data = _fetch_chart_json(symbol)
+    result = (data.get("chart") or {}).get("result") or []
+    if not result:
+        err = (data.get("chart") or {}).get("error")
+        raise RuntimeError(f"empty chart result: {err}")
+    r = result[0]
+    meta = r.get("meta") or {}
+    price = meta.get("regularMarketPrice")
+    prev = meta.get("previousClose") or meta.get("chartPreviousClose")
+    change_pct = meta.get("regularMarketChangePercent")
+    timestamps = r.get("timestamp") or []
+    quote = ((r.get("indicators") or {}).get("quote") or [{}])[0]
+    closes = quote.get("close") or []
+    change_pct = _derive_change_pct(closes, price, prev, change_pct)
+    last_ts = meta.get("regularMarketTime") or (timestamps[-1] if timestamps else None)
+    local_now = datetime.now(ZoneInfo("Asia/Shanghai"))
+    asia_live = region in {"jp", "kr"} and 8 <= local_now.hour < 15
+    return _chart_result_dict(
+        symbol, meta, price, prev, change_pct, last_ts, closes, asia_live
+    )
 
 
 def classify(details: dict[str, Any]) -> str:

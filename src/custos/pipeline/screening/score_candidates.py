@@ -616,6 +616,9 @@ def apply_risk_downgrades(
 
     返回 `(risk_flags, bucket, wave_type, dist)` —— 后三个下游还要用
     （`wave_type` 决定 next_step、`dist` 进 entry_reason、`bucket` 是分层结论）。
+
+    2026-08-19（#58 收尾）：13 条判据按主题拆成 `_cap_*` 段落函数，本函数只做
+    「取数 → 逐段封顶 → 汇总返回」；flag 追加顺序与封顶语义逐条未变。
     """
     risk_flags: list[str] = []
     if cand.get("is_holding"):
@@ -625,12 +628,30 @@ def apply_risk_downgrades(
         risk_flags.append("sector_score_unavailable")
 
     # 风控/回避硬否决（cap 只降不升；与"板块弱"无关，故板块不在此列）
-    bucket = base_bucket
+    bucket = _cap_stop_loss_and_bear(risk_flags, base_bucket, cand, amv_state)
+    bucket, wave_type = _cap_wave_rules(risk_flags, bucket, cand, rules)
+    bucket = _cap_cz_sector(risk_flags, bucket, cz_sector, rules)
+    dist = cand.get("distribution") or {}
+    bucket = _cap_distribution(risk_flags, bucket, dist, rules)
+    bucket = _cap_macd_risks(risk_flags, bucket, cand, rules)
+    bucket = _cap_liquidity(risk_flags, bucket, cand, rules)
+    return risk_flags, bucket, wave_type, dist
+
+
+def _cap_stop_loss_and_bear(
+    risk_flags: list, bucket: str, cand: dict, amv_state
+) -> str:
+    """止损位缺失 → 封顶 B；0AMV 空头 → 封顶 B（均无 rules 开关的硬否决）。"""
     if not (cand.get("stop_loss_ref") or {}).get("price"):
         risk_flags.append("no_stop_loss_ref")
         bucket = cap_bucket(bucket, "B")
     if amv_state == "空头":
         bucket = cap_bucket(bucket, "B")
+    return bucket
+
+
+def _cap_wave_rules(risk_flags: list, bucket: str, cand: dict, rules: dict):
+    """波浪/量能/一波流三条：冲刺波首个 B1 → 封顶 B；量能撤退、非一波流撤销 → 封顶 C。"""
     wave_type = (cand.get("wave") or {}).get("wave_type")
     if wave_type == "sprint":
         # B1 §四.0：冲刺波后首个 B1 禁止买入 → 最高 B
@@ -653,16 +674,23 @@ def apply_risk_downgrades(
             bucket = cap_bucket(bucket, "C")
         else:
             risk_flags.append("non_one_wave_revoked_cap_disabled")
+    return bucket, wave_type
+
+
+def _cap_cz_sector(risk_flags: list, bucket: str, cz_sector: str, rules: dict) -> str:
+    """CZ §七：回避方向板块 → D。"""
     if cz_sector == "avoid":
-        # CZ §七：回避方向板块 → D
         if rules["cz_avoid_sector"]:
             risk_flags.append("cz_avoid_sector")
             bucket = "D"
         else:
             risk_flags.append("cz_avoid_sector_cap_disabled")
-    dist = cand.get("distribution") or {}
+    return bucket
+
+
+def _cap_distribution(risk_flags: list, bucket: str, dist: dict, rules: dict) -> str:
+    """B1 §七.3：主力出货五方式命中 → 顶部派发规避（high 封 D / 其余封顶 C）。"""
     if dist.get("available") and dist.get("hits"):
-        # B1 §七.3：主力出货五方式命中 → 顶部派发规避
         if rules["distribution_cap"]:
             if dist.get("risk_level") == "high":
                 risk_flags.append("distribution_high")
@@ -672,6 +700,11 @@ def apply_risk_downgrades(
                 bucket = cap_bucket(bucket, "C")
         else:
             risk_flags.append("distribution_detected_cap_disabled")
+    return bucket
+
+
+def _cap_macd_risks(risk_flags: list, bucket: str, cand: dict, rules: dict) -> str:
+    """MACD 十大技术风险：三打白骨精 → 封顶 C；顶背离仅留痕；overextended 仅记录。"""
     mt_cap = cand.get("macd_technics") or {}
     top_div_hit = (mt_cap.get("top_divergence") or {}).get("hit")
     three_peaks_hit = (mt_cap.get("three_peaks") or {}).get("hit")
@@ -690,17 +723,21 @@ def apply_risk_downgrades(
             risk_flags.append("macd_divergence_detected_cap_disabled")
     if mt_cap.get("available") and (mt_cap.get("overextended") or {}).get("hit"):
         risk_flags.append("macd_overextended")  # 开口/空间拐离：仅记录，不降档
+    return bucket
+
+
+def _cap_liquidity(risk_flags: list, bucket: str, cand: dict, rules: dict) -> str:
+    """流动性底线（近20日均成交额），默认仅 flag；registry cap_rules.liquidity_floor=true 才封顶 C。"""
     liq = cand.get("liquidity") or {}
     if (
         liq.get("available")
         and liq.get("avg_amount_yi") is not None
         and liq["avg_amount_yi"] < LIQUIDITY_FLOOR_YI
     ):
-        # 流动性底线（近20日均成交额），默认仅 flag；registry cap_rules.liquidity_floor=true 才封顶 C
         risk_flags.append("low_liquidity")
         if rules.get("liquidity_floor"):
             bucket = cap_bucket(bucket, "C")
-    return risk_flags, bucket, wave_type, dist
+    return bucket
 
 
 def build_entry_reasons(cand, dist, wave_type):
@@ -708,10 +745,27 @@ def build_entry_reasons(cand, dist, wave_type):
 
     2026-08-07 从 `score_candidate` 抽出。它只做**措辞**，不参与任何判定 ——
     与上面的 `apply_risk_downgrades`（判定）分开，改文案时不必担心动到分层。
+
+    2026-08-19（#58 收尾）：按信号来源拆成 `_reason_*` 段落函数，本函数只做
+    调度；文案与追加顺序逐条未变。
     """
     entry_reason: list[str] = []
+    _reason_formula_hits(cand, entry_reason)
+    _reason_patterns(cand, entry_reason)
+    _reason_b1cz_signals(cand, entry_reason)
+    _reason_wave_and_zhixing(cand, wave_type, entry_reason)
+    _reason_dist_and_macd(cand, dist, entry_reason)
+    return entry_reason
+
+
+def _reason_formula_hits(cand: dict, entry_reason: list) -> None:
+    """公式命中清单。"""
     for fid in cand.get("formula_hits") or []:
         entry_reason.append(f"公式命中:{fid}")
+
+
+def _reason_patterns(cand: dict, entry_reason: list) -> None:
+    """patterns 五单项的中文标签。"""
     label = {
         "bbi_above": "收盘站上BBI",
         "j_low": "日J低位(<13)",
@@ -722,6 +776,10 @@ def build_entry_reasons(cand, dist, wave_type):
     for tag, hit in (cand.get("patterns") or {}).items():
         if hit:
             entry_reason.append(label.get(tag, tag))
+
+
+def _reason_b1cz_signals(cand: dict, entry_reason: list) -> None:
+    """B1/CZ 对齐信号：五日战法/龙头量/底部巨量/修复信号/非一波流。"""
     if (cand.get("five_day_entry") or {}).get("hit"):
         entry_reason.append("五日战法入场")
     if (cand.get("leader_volume") or {}).get("hit"):
@@ -732,6 +790,10 @@ def build_entry_reasons(cand, dist, wave_type):
         entry_reason.append(f"修复信号:{sig}")
     if (cand.get("non_one_wave") or {}).get("status") == "confirmed":
         entry_reason.append("非一波流确认")
+
+
+def _reason_wave_and_zhixing(cand: dict, wave_type, entry_reason: list) -> None:
+    """波浪类型 + 知行 B1 点火/多头（互斥二选一）。"""
     if wave_type and wave_type != "unknown":
         # 未登记的 wave_type 不得 KeyError 打挂整只票的打分：.get 兜底并留原值（审计）
         entry_reason.append(f"波浪:{WAVE_TYPE_LABELS.get(wave_type, wave_type)}")
@@ -741,6 +803,10 @@ def build_entry_reasons(cand, dist, wave_type):
         cand.get("zhixing") or {}
     ).get("qsx_gt_dks"):
         entry_reason.append("知行多头(QSX>DKS)")
+
+
+def _reason_dist_and_macd(cand: dict, dist: dict, entry_reason: list) -> None:
+    """出货信号清单 + MACD 正向信号（第一区间再启动/底背离）。"""
     for _dk in dist.get("hits") or []:
         entry_reason.append(f"出货信号:{_dk}")
     _mt = cand.get("macd_technics") or {}
@@ -749,7 +815,6 @@ def build_entry_reasons(cand, dist, wave_type):
             entry_reason.append("MACD第一区间再启动")
         if (_mt.get("bottom_divergence") or {}).get("hit"):
             entry_reason.append("MACD底背离")
-    return entry_reason
 
 
 def four_leg_resonance(cand, permission, tech_level):
@@ -1039,7 +1104,80 @@ def score_all(
     显式传 {} 表示"已加载但不可用"（测试降级路径用）。
     cap_rules / sector_score_max 传 None 时从 registry "scoring" 段加载，缺失回退
     默认（全开 + 0-100），行为与历史一致。
+
+    2026-08-19（#58 收尾）：按阶段拆成 `_resolve_*` / `_score_all_shell` /
+    `_score_pool` 段落函数，本函数只做调度；status/degraded_reason 语义与
+    candidates 排序键均未变。
     """
+    enriched, sector_states, amv_state, cz_preference = _resolve_score_all_inputs(
+        date, enriched, sector_states, amv_state, cz_preference
+    )
+    cz_status = "ok" if cz_preference else "missing"
+
+    cap_rules, sector_score_max, effective_caps = _resolve_scoring_settings(
+        cap_rules, sector_score_max
+    )
+
+    result = _score_all_shell(
+        date, amv_state, cz_status, effective_caps, sector_score_max, enriched
+    )
+
+    if not enriched or enriched.get("status") == "unavailable":
+        result["status"] = "unavailable"
+        result["degraded_reason"] = (
+            f"enriched_unavailable:{(enriched or {}).get('degraded_reason', 'missing')}"
+        )
+        return result
+    if not sector_states:
+        result["status"] = "partial"
+        result["degraded_reason"] = "sector_state_missing"
+    if cz_status == "missing":
+        # 名单缺失：cz_sector 一律 neutral（不起作用），在 status/degraded_reason 注明
+        _mark_partial(result, "cz_sector_preference_missing")
+    if not amv_state:
+        # market_timing 缺失：按保守处理（不放宽任何 cap，视同仅低吸），
+        # 但必须显式标注，不得静默。
+        _mark_partial(result, "market_timing_missing")
+
+    by_theme, by_name = _sector_state_index(sector_states)
+    _score_pool(
+        result,
+        enriched,
+        by_theme,
+        by_name,
+        amv_state,
+        cz_preference,
+        cap_rules,
+        sector_score_max,
+    )
+
+    # 板块分脏（NaN/inf）必须整池留痕：单票 risk_flags 只有细看明细才发现，
+    # 而 status/degraded_reason 是报告与门控真正会读的字段（审计 B8）。
+    dirty_sector = [
+        c["code"]
+        for c in result["candidates"]
+        if "sector_score_unavailable" in (c.get("risk_flags") or [])
+    ]
+    if dirty_sector:
+        _mark_partial(
+            result,
+            f"sector_score_unavailable:{len(dirty_sector)}只(板块分NaN/inf,按0计入)",
+        )
+
+    result["candidates"].sort(
+        key=lambda x: (BUCKET_ORDER.index(x["bucket"]), -x["score"], x["code"])
+    )
+    return result
+
+
+def _resolve_score_all_inputs(
+    date: str,
+    enriched: Optional[dict],
+    sector_states: Optional[list],
+    amv_state: Optional[str],
+    cz_preference: Optional[dict],
+) -> tuple:
+    """四路输入的落盘加载与归一化（显式传入优先，None 才读盘）。"""
     if enriched is None:
         enriched = _load_json(SCREENING_DIR / f"{date}_candidates_enriched.json", {})
     if sector_states is None:
@@ -1056,17 +1194,32 @@ def score_all(
         amv_state = normalize_regime(amv_state)
     if cz_preference is None:
         cz_preference = load_cz_sector_preference() or {}
-    cz_status = "ok" if cz_preference else "missing"
+    return enriched, sector_states, amv_state, cz_preference
 
+
+def _resolve_scoring_settings(
+    cap_rules: Optional[dict], sector_score_max: Optional[float]
+) -> tuple:
+    """cap_rules / sector_score_max 的 registry 兜底 + 有效开关合并。"""
     if cap_rules is None or sector_score_max is None:
         scoring_cfg = _load_scoring_config()
         if cap_rules is None:
             cap_rules = scoring_cfg.get("cap_rules")
         if sector_score_max is None:
             sector_score_max = scoring_cfg.get("sector_score_max", SECTOR_SCORE_MAX)
-    effective_caps = resolve_cap_rules(cap_rules)
+    return cap_rules, sector_score_max, resolve_cap_rules(cap_rules)
 
-    result: dict[str, Any] = {
+
+def _score_all_shell(
+    date: str,
+    amv_state: str,
+    cz_status: str,
+    effective_caps: dict,
+    sector_score_max: float,
+    enriched: Optional[dict],
+) -> dict:
+    """整池结果的初始壳（键序＝历史落盘字段顺序，勿动）。"""
+    return {
         "date": date,
         "status": "ok",
         "degraded_reason": "",
@@ -1083,34 +1236,18 @@ def score_all(
         "watchlist_outside_gate": (enriched or {}).get("watchlist_outside_gate") or [],
     }
 
-    if not enriched or enriched.get("status") == "unavailable":
-        result["status"] = "unavailable"
-        result["degraded_reason"] = (
-            f"enriched_unavailable:{(enriched or {}).get('degraded_reason', 'missing')}"
-        )
-        return result
-    if not sector_states:
-        result["status"] = "partial"
-        result["degraded_reason"] = "sector_state_missing"
-    if cz_status == "missing":
-        # 名单缺失：cz_sector 一律 neutral（不起作用），在 status/degraded_reason 注明
-        if result["status"] == "ok":
-            result["status"] = "partial"
-        note = "cz_sector_preference_missing"
-        result["degraded_reason"] = (
-            f"{result['degraded_reason']};{note}" if result["degraded_reason"] else note
-        )
-    if not amv_state:
-        # market_timing 缺失：按保守处理（不放宽任何 cap，视同仅低吸），
-        # 但必须显式标注，不得静默。
-        if result["status"] == "ok":
-            result["status"] = "partial"
-        note = "market_timing_missing"
-        result["degraded_reason"] = (
-            f"{result['degraded_reason']};{note}" if result["degraded_reason"] else note
-        )
 
-    # theme_id / sector 名 → sector_state 条目
+def _mark_partial(result: dict, note: str) -> None:
+    """status ok→partial（只降不升），并把降级原因追加进 degraded_reason。"""
+    if result["status"] == "ok":
+        result["status"] = "partial"
+    result["degraded_reason"] = (
+        f"{result['degraded_reason']};{note}" if result["degraded_reason"] else note
+    )
+
+
+def _sector_state_index(sector_states) -> tuple[dict, dict]:
+    """theme_id / sector 名 → sector_state 条目（双索引）。"""
     by_theme: dict[str, dict] = {}
     by_name: dict[str, dict] = {}
     for s in sector_states if isinstance(sector_states, list) else []:
@@ -1118,7 +1255,20 @@ def score_all(
             by_theme[str(s["theme_id"])] = s
         if s.get("sector"):
             by_name[str(s["sector"])] = s
+    return by_theme, by_name
 
+
+def _score_pool(
+    result: dict,
+    enriched: dict,
+    by_theme: dict,
+    by_name: dict,
+    amv_state: str,
+    cz_preference: dict,
+    cap_rules: Optional[dict],
+    sector_score_max: float,
+) -> None:
+    """逐票打分并累计 bucket 计数（结果就地写进 result）。"""
     for cand in enriched.get("candidates", []):
         entry = by_theme.get(cand.get("theme_id", "")) or by_name.get(
             cand.get("sector", "")
@@ -1134,26 +1284,6 @@ def score_all(
         )
         result["candidates"].append(scored)
         result["bucket_counts"][scored["bucket"]] += 1
-
-    # 板块分脏（NaN/inf）必须整池留痕：单票 risk_flags 只有细看明细才发现，
-    # 而 status/degraded_reason 是报告与门控真正会读的字段（审计 B8）。
-    dirty_sector = [
-        c["code"]
-        for c in result["candidates"]
-        if "sector_score_unavailable" in (c.get("risk_flags") or [])
-    ]
-    if dirty_sector:
-        if result["status"] == "ok":
-            result["status"] = "partial"
-        note = f"sector_score_unavailable:{len(dirty_sector)}只(板块分NaN/inf,按0计入)"
-        result["degraded_reason"] = (
-            f"{result['degraded_reason']};{note}" if result["degraded_reason"] else note
-        )
-
-    result["candidates"].sort(
-        key=lambda x: (BUCKET_ORDER.index(x["bucket"]), -x["score"], x["code"])
-    )
-    return result
 
 
 def main(argv: Optional[list] = None) -> int:

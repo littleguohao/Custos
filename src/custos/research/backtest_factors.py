@@ -1086,14 +1086,10 @@ def evaluate(
     return records
 
 
-def _stats(rows: list[dict[str, Any]], horizon: int) -> dict[str, Any]:
-    """一组记录在给定 horizon 上的胜率/均值收益/中位 MFE-MAE。"""
-    rk, mk, ak = f"ret{horizon}", f"mfe{horizon}", f"mae{horizon}"
-    rets = [r[rk] for r in rows if r.get(rk) is not None]
-    mfes = [r[mk] for r in rows if r.get(mk) is not None]
-    maes = [r[ak] for r in rows if r.get(ak) is not None]
-    if not rets:
-        return {"n": 0}
+def _win_loss_payoff(
+    rets: list[float],
+) -> tuple[int, float, float, Optional[float]]:
+    """胜场数/均盈/均亏/盈亏比（均盈÷均亏；无亏损单时盈亏比 None）。"""
     wins = sum(1 for x in rets if x > 0)
     gains = [x for x in rets if x > 0]
     losses = [-x for x in rets if x < 0]
@@ -1102,11 +1098,31 @@ def _stats(rows: list[dict[str, Any]], horizon: int) -> dict[str, Any]:
     payoff = (
         round(avg_win / avg_loss, 3) if avg_loss > 0 else None
     )  # 盈亏比：均盈/均亏(核心目标)
+    return wins, avg_win, avg_loss, payoff
+
+
+def _median_mfe_mae(
+    mfes: list[float], maes: list[float]
+) -> tuple[Optional[float], Optional[float], Optional[float]]:
+    """中位 MFE / 中位 MAE / 中位 MFE÷|MAE|（潜在盈亏比；缺样本为 None）。"""
     med_mfe = statistics.median(mfes) if mfes else None
     med_mae = statistics.median(maes) if maes else None
     mfe_mae = (
         round(med_mfe / abs(med_mae), 3) if (med_mfe is not None and med_mae) else None
     )
+    return med_mfe, med_mae, mfe_mae
+
+
+def _stats(rows: list[dict[str, Any]], horizon: int) -> dict[str, Any]:
+    """一组记录在给定 horizon 上的胜率/均值收益/中位 MFE-MAE。"""
+    rk, mk, ak = f"ret{horizon}", f"mfe{horizon}", f"mae{horizon}"
+    rets = [r[rk] for r in rows if r.get(rk) is not None]
+    mfes = [r[mk] for r in rows if r.get(mk) is not None]
+    maes = [r[ak] for r in rows if r.get(ak) is not None]
+    if not rets:
+        return {"n": 0}
+    wins, avg_win, avg_loss, payoff = _win_loss_payoff(rets)
+    med_mfe, med_mae, mfe_mae = _median_mfe_mae(mfes, maes)
     return {
         "n": len(rets),
         "win_rate": round(wins / len(rets), 4),

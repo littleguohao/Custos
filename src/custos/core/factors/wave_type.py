@@ -64,6 +64,112 @@ def _find_rally_segment(
     return start, i_low, i_high, n
 
 
+def _limit_up_days(close, n: int) -> list[int]:
+    """近20日涨停/接近涨停的 bar 位置（全 df 口径；prev close<=0 的脏数据 bar 不计涨停）。"""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        chg = close[1:] / close[:-1] * 100 - 100
+    return [
+        i + 1
+        for i in range(max(0, n - WAVE_SPRINT_WINDOW - 1), n - 1)
+        if close[i] > 0 and chg[i] >= WAVE_LIMIT_UP_PCT
+    ]
+
+
+def _accel_10d_gain(close, i_low: int, i_high: int) -> Optional[float]:
+    """高斜率加速：拉升段（i_low→i_high）内最大 10 日涨幅。
+
+    以今天为终点会在 B1 回调时点必然失效，必须在段上计算（code review 修复）。
+    """
+    if i_high - i_low < 10:
+        return None
+    return max(
+        (float(close[t] / close[t - 10] - 1) * 100)
+        for t in range(i_low + 10, i_high + 1)
+        if close[t - 10] > 0
+    )
+
+
+def _top_vol_ratio(vol, i_high: int) -> Optional[float]:
+    """顶部放量：阶段高点日量 / 其前5日均量"""
+    top_vol_ratio = None
+    if i_high >= 1:
+        base = vol[max(0, i_high - 5) : i_high].mean() if i_high >= 1 else 0
+        top_vol_ratio = float(vol[i_high] / base) if base else None
+    return top_vol_ratio
+
+
+def _start_bull_candle(close, vol, i_low: int, n: int) -> bool:
+    """启动段放量长阳：启动低点后5日内存在涨幅>=5%且量>=前5日均量1.5倍"""
+    for t in range(i_low + 1, min(i_low + 6, n)):
+        base = vol[max(0, t - 5) : t].mean()
+        # close[t-1] 守卫与上方 accel_10d（close[t-10] > 0）同款：prev close<=0 的脏数据
+        # bar 直接跳过，不算启动长阳（此前缺这个守卫会 RuntimeWarning: divide by zero）。
+        if (
+            base
+            and close[t - 1] > 0
+            and close[t] / close[t - 1] - 1 >= WAVE_START_CANDLE_PCT / 100
+            and vol[t] >= base * WAVE_START_CANDLE_VOL
+        ):
+            return True
+    return False
+
+
+def _second_start_swing(
+    high, low, start: int, i_low: int
+) -> tuple[bool, Optional[float]]:
+    """二次启动：启动低点之前的窗口段已存在 >=15% 摆动（前一段拉升）。
+
+    返回 (second_start, prior_swing)；窗口不足 5 根时 prior_swing 为 None。
+    """
+    if i_low - start >= 5:
+        prior_swing = (
+            float(high[start:i_low].max()) / float(low[start:i_low].min()) - 1
+        ) * 100
+        return prior_swing >= WAVE_SECOND_START_GAIN, prior_swing
+    return False, None
+
+
+def _classify_wave(
+    seg_gain: float,
+    limit_ups: list[int],
+    accel_10d: Optional[float],
+    top_vol_ratio: Optional[float],
+    start_bull: bool,
+    second_start: bool,
+) -> str:
+    """三分类判定：sprint > rally > buildup，冲突取保守（优先级短路）。"""
+    accel_ok = accel_10d is not None and accel_10d >= WAVE_ACCEL_10D_GAIN
+    top_vol_ok = top_vol_ratio is not None and top_vol_ratio >= WAVE_TOP_VOL_RATIO
+    if len(limit_ups) >= WAVE_SPRINT_MIN_LIMIT_UPS and accel_ok and top_vol_ok:
+        return "sprint"
+    if second_start and WAVE_RALLY_GAIN[0] <= seg_gain <= WAVE_RALLY_GAIN[1]:
+        return "rally"
+    if WAVE_BUILDUP_GAIN[0] <= seg_gain <= WAVE_BUILDUP_GAIN[1] and start_bull:
+        return "buildup"
+    return "unknown"
+
+
+def _wave_detail(
+    seg_gain: float,
+    limit_ups: list[int],
+    accel_10d: Optional[float],
+    top_vol_ratio: Optional[float],
+    start_bull: bool,
+    second_start: bool,
+    prior_swing: Optional[float],
+) -> dict[str, Any]:
+    """detail 字段组装（键与键序为下游契约，勿动）。"""
+    return {
+        "seg_gain_pct": round(seg_gain, 2),
+        "limit_up_count_20d": len(limit_ups),
+        "accel_10d_gain_pct": round(accel_10d, 2) if accel_10d is not None else None,
+        "top_vol_ratio": round(top_vol_ratio, 3) if top_vol_ratio is not None else None,
+        "start_bull_candle": start_bull,
+        "second_start": second_start,
+        "prior_swing_pct": round(prior_swing, 2) if prior_swing is not None else None,
+    }
+
+
 def detect_wave_type(df) -> dict[str, Any]:
     """拉升波三分类（B1 §四.0）：sprint > rally > buildup，冲突取保守。
 
@@ -72,7 +178,6 @@ def detect_wave_type(df) -> dict[str, Any]:
     """
     close, high, low, vol = _ohlcv_arrays(df)
     n = len(df)
-    detail: dict[str, Any] = {}
     if n < WAVE_MIN_BARS:
         return {
             "wave_type": "unknown",
@@ -91,70 +196,21 @@ def detect_wave_type(df) -> dict[str, Any]:
     seg_gain = (
         (float(high[i_high]) / float(close[i_low]) - 1) * 100 if close[i_low] else 0.0
     )
-    # 近20日涨停/接近涨停计数（全 df 口径；prev close<=0 的脏数据 bar 不计涨停）
-    with np.errstate(divide="ignore", invalid="ignore"):
-        chg = close[1:] / close[:-1] * 100 - 100
-    limit_ups = [
-        i + 1
-        for i in range(max(0, n - WAVE_SPRINT_WINDOW - 1), n - 1)
-        if close[i] > 0 and chg[i] >= WAVE_LIMIT_UP_PCT
-    ]
-    # 高斜率加速：拉升段（i_low→i_high）内最大 10 日涨幅。
-    # 以今天为终点会在 B1 回调时点必然失效，必须在段上计算（code review 修复）。
-    accel_10d = None
-    if i_high - i_low >= 10:
-        accel_10d = max(
-            (float(close[t] / close[t - 10] - 1) * 100)
-            for t in range(i_low + 10, i_high + 1)
-            if close[t - 10] > 0
-        )
-    # 顶部放量：阶段高点日量 / 其前5日均量
-    top_vol_ratio = None
-    if i_high >= 1:
-        base = vol[max(0, i_high - 5) : i_high].mean() if i_high >= 1 else 0
-        top_vol_ratio = float(vol[i_high] / base) if base else None
-    # 启动段放量长阳：启动低点后5日内存在涨幅>=5%且量>=前5日均量1.5倍
-    start_bull = False
-    for t in range(i_low + 1, min(i_low + 6, n)):
-        base = vol[max(0, t - 5) : t].mean()
-        # close[t-1] 守卫与上方 accel_10d（close[t-10] > 0）同款：prev close<=0 的脏数据
-        # bar 直接跳过，不算启动长阳（此前缺这个守卫会 RuntimeWarning: divide by zero）。
-        if (
-            base
-            and close[t - 1] > 0
-            and close[t] / close[t - 1] - 1 >= WAVE_START_CANDLE_PCT / 100
-            and vol[t] >= base * WAVE_START_CANDLE_VOL
-        ):
-            start_bull = True
-            break
-    # 二次启动：启动低点之前的窗口段已存在 >=15% 摆动（前一段拉升）
-    second_start = False
-    if i_low - start >= 5:
-        prior_swing = (
-            float(high[start:i_low].max()) / float(low[start:i_low].min()) - 1
-        ) * 100
-        second_start = prior_swing >= WAVE_SECOND_START_GAIN
-    else:
-        prior_swing = None
-
-    accel_ok = accel_10d is not None and accel_10d >= WAVE_ACCEL_10D_GAIN
-    top_vol_ok = top_vol_ratio is not None and top_vol_ratio >= WAVE_TOP_VOL_RATIO
-    if len(limit_ups) >= WAVE_SPRINT_MIN_LIMIT_UPS and accel_ok and top_vol_ok:
-        wave = "sprint"
-    elif second_start and WAVE_RALLY_GAIN[0] <= seg_gain <= WAVE_RALLY_GAIN[1]:
-        wave = "rally"
-    elif WAVE_BUILDUP_GAIN[0] <= seg_gain <= WAVE_BUILDUP_GAIN[1] and start_bull:
-        wave = "buildup"
-    else:
-        wave = "unknown"
-
-    detail = {
-        "seg_gain_pct": round(seg_gain, 2),
-        "limit_up_count_20d": len(limit_ups),
-        "accel_10d_gain_pct": round(accel_10d, 2) if accel_10d is not None else None,
-        "top_vol_ratio": round(top_vol_ratio, 3) if top_vol_ratio is not None else None,
-        "start_bull_candle": start_bull,
-        "second_start": second_start,
-        "prior_swing_pct": round(prior_swing, 2) if prior_swing is not None else None,
-    }
+    limit_ups = _limit_up_days(close, n)
+    accel_10d = _accel_10d_gain(close, i_low, i_high)
+    top_vol_ratio = _top_vol_ratio(vol, i_high)
+    start_bull = _start_bull_candle(close, vol, i_low, n)
+    second_start, prior_swing = _second_start_swing(high, low, start, i_low)
+    wave = _classify_wave(
+        seg_gain, limit_ups, accel_10d, top_vol_ratio, start_bull, second_start
+    )
+    detail = _wave_detail(
+        seg_gain,
+        limit_ups,
+        accel_10d,
+        top_vol_ratio,
+        start_bull,
+        second_start,
+        prior_swing,
+    )
     return {"wave_type": wave, "available": True, "detail": detail}

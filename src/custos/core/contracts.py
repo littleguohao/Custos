@@ -164,6 +164,16 @@ def _type_name(t) -> str:
 def _check_field(
     path: str, value: Any, spec: dict, errors: list, warnings: list
 ) -> None:
+    if _check_null(path, value, spec, errors):
+        return
+    if not _check_type(path, value, spec, errors):
+        return
+    _check_value_rules(path, value, spec, errors, warnings)
+    _check_nested(path, value, spec, errors, warnings)
+
+
+def _check_null(path: str, value: Any, spec: dict, errors: list) -> bool:
+    """处理 `value is None`。返回 True 表示该字段已处理完毕（不再走后续检查）。"""
     if value is None:
         if spec.get("nullable"):
             # ⚠️ `nullable` 只给**渐进填充产物**里「刻意留 None」的字段用，
@@ -171,23 +181,35 @@ def _check_field(
             # 刻意的 —— 08:50 手工填的 0AMV 属哪个数据日无法自证，
             # 「编一个 as_of 等于给门控一个假的新鲜度」（源码原话）。
             # 不要拿它当「懒得填」的出口：null 与缺失在下游会走不同分支。
-            return
+            return True
         errors.append(
             f"{path}: 值为 null（字段存在但没有内容 —— "
             f"`.get(k, 默认值)` 在这种情况下返回 None 而不是默认值）"
         )
-        return
+        return True
+    return False
+
+
+def _check_type(path: str, value: Any, spec: dict, errors: list) -> bool:
+    """类型检查。返回 False 表示类型不合（已记 error，不再走后续检查）。"""
     want = spec.get("type")
     if want is not None:
         # bool 是 int 的子类，数字校验要排除它，否则 True 会被当成 1 通过
         if want == (int, float) and isinstance(value, bool):
             errors.append(f"{path}: 期望数字，得到布尔")
-            return
+            return False
         if not isinstance(value, want):
             errors.append(
                 f"{path}: 期望{_type_name(want)}，得到 {type(value).__name__}"
             )
-            return
+            return False
+    return True
+
+
+def _check_value_rules(
+    path: str, value: Any, spec: dict, errors: list, warnings: list
+) -> None:
+    """标量值规则：non_empty / finite / choices / known。"""
     if spec.get("non_empty") and not str(value).strip():
         errors.append(f"{path}: 不得为空串")
     if (
@@ -205,6 +227,12 @@ def _check_field(
     known = spec.get("known")
     if known and value not in known:
         warnings.append(f"{path}: 取值 {value!r} 不在已知集合内（上游措辞可能变了）")
+
+
+def _check_nested(
+    path: str, value: Any, spec: dict, errors: list, warnings: list
+) -> None:
+    """嵌套结构递归：子对象（fields）与数组条目（items）。"""
     if spec.get("fields") and isinstance(value, dict):
         _check_obj(path, value, spec["fields"], errors, warnings)
     if spec.get("items") and isinstance(value, list):

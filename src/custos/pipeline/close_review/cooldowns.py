@@ -64,27 +64,11 @@ def _cooldown_until(
     return None
 
 
-def stop_cooldowns(
-    closings: list[dict],
-    *,
-    as_of: str,
-    threshold_pct: float = STOP_COOLDOWN_THRESHOLD_PCT,
-    cooldown_trading_days: int = COOLDOWN_TRADING_DAYS,
-    day_status: Callable[[str], dict[str, Any]] = trading_day_status,
-) -> dict[str, Any]:
-    """从平仓单列表（`weekly_review.fifo_pair` 输出，全台账）算**当前冷却名单**。
-
-    返回::
-
-        {"available": True,
-         "stops": {code: {"name","last_stop_date","pnl_pct","cooldown_until",
-                          "cooldown_until_unknown","active"}},
-         "active": [code, ...],        # as_of 仍在冷却期内的票
-         "excluded": {"partial": n, "none": n, "no_pnl_pct": n,
-                      "nan_pnl": n, "bad_date": n},   # 后两个：2026-08-13 目标机
-                                                    # review 实测踩到（坏行不炸报告）
-         "threshold_pct": ..., "cooldown_trading_days": ..., "as_of": as_of}
-    """
+def _latest_stops(
+    closings: Optional[list[dict]],
+    threshold_pct: float,
+) -> tuple[dict[str, int], dict[str, Any]]:
+    """从平仓单里筛出止损行并保留每票**最近一次**止损；坏行跳过并按类计数。"""
     excluded = {"partial": 0, "none": 0, "no_pnl_pct": 0, "nan_pnl": 0, "bad_date": 0}
     stops: dict[str, Any] = {}
     for c in closings or []:
@@ -129,6 +113,16 @@ def stop_cooldowns(
                 "last_stop_date": sell_date,
                 "pnl_pct": c["pnl_pct"],
             }
+    return excluded, stops
+
+
+def _active_codes(
+    stops: dict[str, Any],
+    as_of: str,
+    cooldown_trading_days: int,
+    day_status: Callable[[str], dict[str, Any]],
+) -> list[str]:
+    """给每条止损记录补冷却截止日与 active 标记，返回按最近止损日倒序的名单。"""
     active: list[str] = []
     for code, v in stops.items():
         until = _cooldown_until(v["last_stop_date"], cooldown_trading_days, day_status)
@@ -139,6 +133,32 @@ def stop_cooldowns(
         if v["active"]:
             active.append(code)
     active.sort(key=lambda c: stops[c]["last_stop_date"], reverse=True)
+    return active
+
+
+def stop_cooldowns(
+    closings: list[dict],
+    *,
+    as_of: str,
+    threshold_pct: float = STOP_COOLDOWN_THRESHOLD_PCT,
+    cooldown_trading_days: int = COOLDOWN_TRADING_DAYS,
+    day_status: Callable[[str], dict[str, Any]] = trading_day_status,
+) -> dict[str, Any]:
+    """从平仓单列表（`weekly_review.fifo_pair` 输出，全台账）算**当前冷却名单**。
+
+    返回::
+
+        {"available": True,
+         "stops": {code: {"name","last_stop_date","pnl_pct","cooldown_until",
+                          "cooldown_until_unknown","active"}},
+         "active": [code, ...],        # as_of 仍在冷却期内的票
+         "excluded": {"partial": n, "none": n, "no_pnl_pct": n,
+                      "nan_pnl": n, "bad_date": n},   # 后两个：2026-08-13 目标机
+                                                    # review 实测踩到（坏行不炸报告）
+         "threshold_pct": ..., "cooldown_trading_days": ..., "as_of": as_of}
+    """
+    excluded, stops = _latest_stops(closings, threshold_pct)
+    active = _active_codes(stops, as_of, cooldown_trading_days, day_status)
     return {
         "available": True,
         "stops": stops,

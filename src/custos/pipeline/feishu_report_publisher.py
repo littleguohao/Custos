@@ -143,28 +143,28 @@ def _core_section(lines: list[str]) -> list[str]:
     return []
 
 
-def build_exec_summary(md_text: str, title: str, date: str, limit: int = 800) -> str:
-    """确定性提取执行摘要: 标题行 + 核心结论节 + 逐股行动行 + 权限行。
-
-    只提取报告中已存在的内容, 不编造; 超过 limit 截断并标注附件提示。
-    """
-    lines = md_text.splitlines()
-    report_title = ""
+def _report_title(lines: list[str]) -> str:
+    """首个一级标题文本, 没有则空串。"""
     for line in lines:
         if line.lstrip().startswith("# "):
-            report_title = line.lstrip()[2:].strip()
-            break
+            return line.lstrip()[2:].strip()
+    return ""
 
+
+def _action_lines(lines: list[str], max_n: int = 6) -> list[str]:
+    """逐股行动行: 以 "- " 开头且含 6 位代码或 P0/P1/P2 的行, 最多 max_n 条。"""
     actions = []
     for line in lines:
         s = line.strip()
         if s.startswith("- ") and (_CODE_RE.search(s) or _PRIORITY_RE.search(s)):
             actions.append(s)
-            if len(actions) >= 6:
+            if len(actions) >= max_n:
                 break
+    return actions
 
-    core = _core_section(lines)
-    used = {l.strip() for l in core} | set(actions)
+
+def _permission_lines(lines: list[str], used: set) -> list:
+    """权限行: 含"禁止"/"权限"且未被前文使用的正文行, 最多 2 条。"""
     permissions: list = []
     for key in ("禁止", "权限"):
         for line in lines:
@@ -175,6 +175,20 @@ def build_exec_summary(md_text: str, title: str, date: str, limit: int = 800) ->
                 continue
             if key in s and s not in permissions:
                 permissions.append(s)
+    return permissions
+
+
+def build_exec_summary(md_text: str, title: str, date: str, limit: int = 800) -> str:
+    """确定性提取执行摘要: 标题行 + 核心结论节 + 逐股行动行 + 权限行。
+
+    只提取报告中已存在的内容, 不编造; 超过 limit 截断并标注附件提示。
+    """
+    lines = md_text.splitlines()
+    report_title = _report_title(lines)
+    actions = _action_lines(lines)
+    core = _core_section(lines)
+    used = {l.strip() for l in core} | set(actions)
+    permissions = _permission_lines(lines, used)
 
     parts = [f"【{title}】{date}"]
     if report_title:

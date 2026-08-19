@@ -76,10 +76,9 @@ def json_safe(value):
     return value
 
 
-def validate_quote_snapshot(
-    target_date: str, positions: list[dict], snapshot: dict
-) -> list[str]:
-    errors: list[str] = []
+def _validate_snapshot_meta(
+    target_date: str, snapshot: dict, errors: list[str]
+) -> None:
     if snapshot.get("as_of_date") != target_date:
         errors.append(
             f"snapshot_date={snapshot.get('as_of_date')!r}, expected={target_date}"
@@ -90,6 +89,10 @@ def validate_quote_snapshot(
     if str(snapshot.get("source") or "").lower() in {"", "missing", "缺失"}:
         errors.append("quote source missing")
 
+
+def _validate_holding_quotes(
+    target_date: str, positions: list[dict], snapshot: dict, errors: list[str]
+) -> None:
     quotes = {normalized_code(x.get("code")): x for x in snapshot.get("quotes", [])}
     for position in positions:
         code = normalized_code(position.get("代码"))
@@ -105,6 +108,8 @@ def validate_quote_snapshot(
             if optional_finite(quote.get(field)) is None:
                 errors.append(f"holding quote {field} missing: {code}")
 
+
+def _validate_index_quotes(target_date: str, snapshot: dict, errors: list[str]) -> None:
     indices = {normalized_code(x.get("code")): x for x in snapshot.get("indices", [])}
     for code in ("000001", "399001", "399006"):
         quote = indices.get(code)
@@ -118,6 +123,15 @@ def validate_quote_snapshot(
         for field in ("price", "change_pct"):
             if optional_finite(quote.get(field)) is None:
                 errors.append(f"index quote {field} missing: {code}")
+
+
+def validate_quote_snapshot(
+    target_date: str, positions: list[dict], snapshot: dict
+) -> list[str]:
+    errors: list[str] = []
+    _validate_snapshot_meta(target_date, snapshot, errors)
+    _validate_holding_quotes(target_date, positions, snapshot, errors)
+    _validate_index_quotes(target_date, snapshot, errors)
     return errors
 
 
@@ -266,6 +280,102 @@ def risk_map(target_date: str) -> dict[str, list[dict]]:
     return out
 
 
+def _b1_short_circuit(
+    b1_state: dict | None, high_risk: bool, risks: list[dict]
+) -> tuple[str, str, str] | None:
+    if not (b1_state and b1_state.get("final_priority") in {"P0", "P1", "P2"}):
+        return None
+    # ⚠️ B1 状态短路在 high_risk 判定**之前**，所以要在这里把高优先风险的理由
+    # 补回来，否则它在整份 14:45 报告里**一个字都看不到**（`risks` 只经由
+    # `classify` 影响输出，别处不渲染）——而「所有计划必须可复盘」。
+    #
+    # 举例：RiskDecision 说「已触发止损线」（高），而 B1 按实时价重算只判 P2
+    # 「尾盘跌破BBI待收盘确认」。修前该行显示 P2 且止损理由消失。
+    #
+    # 只补理由、**不动优先级**：B1 用的是 14:45 实时价、RiskDecision 可能来自
+    # 前一日 17:00 —— 谁压过谁已定案（v0.35，owner 拍板）：盘中以**证据新鲜度**
+    # 为准，14:45 实时行情重算的 B1 压过同日期标签的 RiskDecision
+    # （README 写「risk_control 拥有否决权」，那条没区分依据新鲜度，v0.35 补上）。
+    reason = b1_state["final_reason"]
+    if high_risk:
+        outstanding = "；".join(
+            str(x.get("reason") or x.get("risk_type"))
+            for x in risks
+            if x.get("priority") == "高"
+        )
+        reason = f"{reason}；⚠️未消化的高优先风控依据：{outstanding}"
+    return b1_state["final_priority"], b1_state["final_action"], reason
+
+
+def _structure_signal(
+    structure: dict, structure_reason: str
+) -> tuple[str, str, str] | None:
+    if structure.get("signal") == "structural_clear":
+        return "P0", "N型前低清仓评估", structure_reason
+    if structure.get("signal") == "pullback_failure":
+        return "P1", "N型回踩低点失守评估", structure_reason
+    return None
+
+
+def _hard_risk_signal(
+    high_risk: bool,
+    box: str,
+    pnl: float,
+    risks: list[dict],
+    trend: str,
+    bbi_reason: str,
+) -> tuple[str, str, str] | None:
+    if not (high_risk or "破位" in box or pnl <= -0.07):
+        return None
+    reasons = [
+        str(x.get("reason") or x.get("risk_type"))
+        for x in risks
+        if x.get("priority") == "高"
+    ]
+    return (
+        "P1",
+        "减仓/止损评估",
+        ("；".join(reasons) or f"趋势{trend}、位置{box}、盈亏{pnl:+.1%}")
+        + f"；{bbi_reason}",
+    )
+
+
+def _bbi_signal(bbi: dict, bbi_reason: str) -> tuple[str, str, str] | None:
+    if bbi.get("signal") == "clear_review" and bbi.get("current_above") is not True:
+        return "P1", "BBI清仓评估", bbi_reason
+    if bbi.get("signal") == "intraday_break_watch":
+        return "P2", "尾盘跌破BBI待收盘确认", bbi_reason
+    if bbi.get("signal") == "reclaim_in_progress":
+        return "P2", "BBI修复待收盘确认", bbi_reason
+    return None
+
+
+def _bearish_rebound(
+    bearish_regime: bool, quote: dict, bbi_reason: str
+) -> tuple[str, str, str] | None:
+    if bearish_regime and finite(quote.get("change_pct")) > 0:
+        priority = "P1" if finite(quote.get("change_pct")) >= 5 else "P2"
+        return (
+            priority,
+            "反弹减仓评估",
+            f"0AMV空头区间，当日反弹{finite(quote.get('change_pct')):+.2f}%优先用于降低仓位；{bbi_reason}",
+        )
+    return None
+
+
+def _classify_context(
+    position: dict, tech: dict, price: float
+) -> tuple[float, str, str, dict, dict]:
+    """price 已确认非 None 后的公共输入：盈亏、趋势/箱体口径、BBI 与 N型结构。"""
+    cost = finite(position.get("单位成本"))
+    pnl = price / cost - 1 if cost else finite(position.get("持有盈亏率"), 0)
+    trend = str(tech.get("trend_state") or "待确认")
+    box = str(tech.get("box20_position") or "待确认")
+    bbi = intraday_bbi_basis(tech, price, str(tech.get("latest_date") or "") or None)
+    structure = n_structure_basis(tech, price)
+    return pnl, trend, box, bbi, structure
+
+
 def classify(
     position: dict,
     tech: dict,
@@ -281,65 +391,21 @@ def classify(
             "等待当日行情/仅风险收缩",
             "当日实时行情缺失；禁止使用持仓快照旧价生成尾盘动作",
         )
-    cost = finite(position.get("单位成本"))
-    pnl = price / cost - 1 if cost else finite(position.get("持有盈亏率"), 0)
-    trend = str(tech.get("trend_state") or "待确认")
-    box = str(tech.get("box20_position") or "待确认")
-    bbi = intraday_bbi_basis(tech, price, str(tech.get("latest_date") or "") or None)
+    pnl, trend, box, bbi, structure = _classify_context(position, tech, price)
     bbi_reason = f"{bbi['state']}；{bbi['reminder']}"
-    structure = n_structure_basis(tech, price)
     structure_reason = f"{structure['state']}；{structure['reminder']}"
     high_risk = any(x.get("priority") == "高" for x in risks)
-    if b1_state and b1_state.get("final_priority") in {"P0", "P1", "P2"}:
-        # ⚠️ B1 状态短路在 high_risk 判定**之前**，所以要在这里把高优先风险的理由
-        # 补回来，否则它在整份 14:45 报告里**一个字都看不到**（`risks` 只经由
-        # 本函数影响输出，别处不渲染）——而「所有计划必须可复盘」。
-        #
-        # 举例：RiskDecision 说「已触发止损线」（高），而 B1 按实时价重算只判 P2
-        # 「尾盘跌破BBI待收盘确认」。修前该行显示 P2 且止损理由消失。
-        #
-        # 只补理由、**不动优先级**：B1 用的是 14:45 实时价、RiskDecision 可能来自
-        # 前一日 17:00 —— 谁压过谁已定案（v0.35，owner 拍板）：盘中以**证据新鲜度**
-        # 为准，14:45 实时行情重算的 B1 压过同日期标签的 RiskDecision
-        # （README 写「risk_control 拥有否决权」，那条没区分依据新鲜度，v0.35 补上）。
-        reason = b1_state["final_reason"]
-        if high_risk:
-            outstanding = "；".join(
-                str(x.get("reason") or x.get("risk_type"))
-                for x in risks
-                if x.get("priority") == "高"
-            )
-            reason = f"{reason}；⚠️未消化的高优先风控依据：{outstanding}"
-        return b1_state["final_priority"], b1_state["final_action"], reason
-    if structure.get("signal") == "structural_clear":
-        return "P0", "N型前低清仓评估", structure_reason
-    if structure.get("signal") == "pullback_failure":
-        return "P1", "N型回踩低点失守评估", structure_reason
-    if high_risk or "破位" in box or pnl <= -0.07:
-        reasons = [
-            str(x.get("reason") or x.get("risk_type"))
-            for x in risks
-            if x.get("priority") == "高"
-        ]
-        return (
-            "P1",
-            "减仓/止损评估",
-            ("；".join(reasons) or f"趋势{trend}、位置{box}、盈亏{pnl:+.1%}")
-            + f"；{bbi_reason}",
-        )
-    if bbi.get("signal") == "clear_review" and bbi.get("current_above") is not True:
-        return "P1", "BBI清仓评估", bbi_reason
-    if bbi.get("signal") == "intraday_break_watch":
-        return "P2", "尾盘跌破BBI待收盘确认", bbi_reason
-    if bbi.get("signal") == "reclaim_in_progress":
-        return "P2", "BBI修复待收盘确认", bbi_reason
-    if bearish_regime and finite(quote.get("change_pct")) > 0:
-        priority = "P1" if finite(quote.get("change_pct")) >= 5 else "P2"
-        return (
-            priority,
-            "反弹减仓评估",
-            f"0AMV空头区间，当日反弹{finite(quote.get('change_pct')):+.2f}%优先用于降低仓位；{bbi_reason}",
-        )
+    # 分支顺序即判定优先级，不得调整：B1 短路 → N型结构 → 硬风险 →
+    # BBI 信号 → 空头反弹减仓（各 helper 未命中时返回 None 继续往下）。
+    for decision in (
+        _b1_short_circuit(b1_state, high_risk, risks),
+        _structure_signal(structure, structure_reason),
+        _hard_risk_signal(high_risk, box, pnl, risks, trend, bbi_reason),
+        _bbi_signal(bbi, bbi_reason),
+        _bearish_rebound(bearish_regime, quote, bbi_reason),
+    ):
+        if decision is not None:
+            return decision
     if trend == "下跌" or pnl < 0:
         return (
             "P2",
