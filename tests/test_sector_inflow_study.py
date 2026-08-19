@@ -284,3 +284,37 @@ class TestRegimeFilter:
         assert none_res["regime_filter"]["days_filtered"] == len(TRADE_DAYS)
         # 不过滤 ⇒ regime_filter 为 None，与现状口径一致
         assert base["regime_filter"] is None
+
+    def test_reconstructed_regime_hist(self, monkeypatch):
+        """reconstructed：0AMV 日线按同一阈值（-2.3/+4）重建并译为 live 词表。"""
+        from custos.datasource.local_tdx import compass_amv
+
+        records = [
+            {"date": "2026-01-05", "change_pct": 5.0},  # ≥+4 → 做多
+            {"date": "2026-01-06", "change_pct": 1.0},  # 延续做多
+            {"date": "2026-01-07", "change_pct": -3.0},  # ≤-2.3 → 空头
+            {"date": "2026-01-08", "change_pct": 0.0},  # 延续空头
+            {"date": "2026-01-09", "change_pct": None},  # 无值延续
+        ]
+        monkeypatch.setattr(
+            compass_amv,
+            "parse_amv_daily",
+            lambda since="1990-01-01": {"records": records},
+        )
+        hist = sis._load_regime_hist("reconstructed")
+        got = {d: hist[d]["effective_state"] for d in sorted(hist)}
+        assert got == {
+            "2026-01-05": "做多",
+            "2026-01-06": "做多",
+            "2026-01-07": "空头",
+            "2026-01-08": "空头",
+            "2026-01-09": "空头",
+        }
+        # 序列不可用 ⇒ fail-closed
+        monkeypatch.setattr(
+            compass_amv,
+            "parse_amv_daily",
+            lambda since="1990-01-01": {"records": [], "error": "no file"},
+        )
+        with pytest.raises(SystemExit):
+            sis._load_regime_hist("reconstructed")

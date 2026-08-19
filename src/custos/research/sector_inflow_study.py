@@ -26,9 +26,12 @@ t → t+H 的 forward 收益是否显著优于 J<13 池内未命中的股票。
 - **跨窗稳定性**：按 t 把研究窗口切成前/后两半各算一遍（R10 教训：edge 集中在单一
   regime 的方案不算数）。
 - **regime 过滤（可选）**：`--amv-regimes 做多,中性` 只统计指定 0AMV regime 的交易日
-  （live 状态机口径，`data/market/0amv_regime_history.json`，as-of 取 ≤ 当日最近一条
-  `effective_state`；无前置记录记「未知」且必被过滤）。活跃板块的形成不区分 regime，
-  过滤只作用于统计日；前/后两半仍按全日历位置划分（被过滤日不贡献样本）。
+  （as-of 取 ≤ 当日最近一条 `effective_state`；无前置记录记「未知」且必被过滤）。
+  `--amv-source`：`live`=`0amv_regime_history.json`（live 状态机，部署期起）；
+  `reconstructed`=0AMV 日线全历史按同一状态机阈值（-2.3%/+4%）向前重建
+  （复用 `backtest_0amv_bear_regime.build_regime_map` 口径）——研究窗口超出部署期时用后者。
+  活跃板块的形成不区分 regime，过滤只作用于统计日；前/后两半仍按全日历位置划分
+  （被过滤日不贡献样本）。
 
 ## 无未来函数
 
@@ -426,24 +429,59 @@ def _render_text(result: dict[str, Any], horizons: list[int]) -> str:
 
 
 def _regime_filter_from_args(
-    raw: str, trade_days: list[str]
+    raw: str, trade_days: list[str], source: str = "live"
 ) -> tuple[Optional[dict[str, str]], Optional[set[str]]]:
-    """解析 --amv-regimes：空 → (None, None)（不过滤）；否则读 live regime 历史
-    as-of 解析各交易日 regime。文件缺失 fail-closed（SystemExit）。"""
+    """解析 --amv-regimes：空 → (None, None)（不过滤）；否则按 source 取 regime 历史。
+
+    source=live：`data/market/0amv_regime_history.json`（live 状态机口径，部署期起）。
+    source=reconstructed：0AMV 日线全历史按同一状态机阈值（-2.3%/+4%）向前重建
+    （`backtest_0amv_bear_regime.build_regime_map` 既有口径，bear/bull/neutral
+    译为 空头/做多/中性）——live 历史只覆盖部署期，研究窗口超出时必须用这份。
+    两者都 as-of 取 ≤ 当日最近一条。文件/序列缺失 fail-closed（SystemExit）。
+    """
     if not raw.strip():
         return None, None
     allow = {x.strip() for x in raw.split(",") if x.strip()}
-    hist_path = MARKET_DIR / "0amv_regime_history.json"
-    if not hist_path.is_file():
-        raise SystemExit(f"[ERR] --amv-regimes 需要 {hist_path}（live regime 历史）")
-    hist = json.loads(hist_path.read_text(encoding="utf-8"))
+    hist = _load_regime_hist(source)
     day_regime = _resolve_day_regimes(trade_days, hist)
     used = sum(1 for d in trade_days if day_regime[d] in allow)
     print(
-        f"[INFO] regime 过滤 {sorted(allow)}：{used}/{len(trade_days)} 交易日入样",
+        f"[INFO] regime 过滤 {sorted(allow)}（source={source}）："
+        f"{used}/{len(trade_days)} 交易日入样",
         file=sys.stderr,
     )
     return day_regime, allow
+
+
+def _load_regime_hist(source: str) -> dict[str, Any]:
+    """按来源加载 {date: {"effective_state": ...}}；失败 SystemExit。"""
+    if source == "live":
+        hist_path = MARKET_DIR / "0amv_regime_history.json"
+        if not hist_path.is_file():
+            raise SystemExit(
+                f"[ERR] --amv-regimes 需要 {hist_path}（live regime 历史）"
+            )
+        return json.loads(hist_path.read_text(encoding="utf-8"))
+    if source == "reconstructed":
+        from custos.datasource.local_tdx.compass_amv import (  # noqa: PLC0415
+            parse_amv_daily,
+        )
+        from custos.research.backtest_0amv_bear_regime import (  # noqa: PLC0415
+            build_regime_map,
+        )
+
+        parsed = parse_amv_daily(since="1990-01-01")
+        records = parsed.get("records") or []
+        if not records:
+            raise SystemExit(
+                f"[ERR] 0AMV 日线序列不可用（{parsed.get('error') or 'records 为空'}）"
+            )
+        zh = {"bull": "做多", "bear": "空头", "neutral": "中性"}
+        return {
+            d: {"effective_state": zh.get(s, "未知")}
+            for d, s in build_regime_map(records).items()
+        }
+    raise SystemExit(f"[ERR] 未知 --amv-source：{source!r}（live|reconstructed）")
 
 
 def main(argv: Optional[list] = None) -> int:
@@ -469,8 +507,14 @@ def main(argv: Optional[list] = None) -> int:
         "--amv-regimes",
         default="",
         help="只统计指定 0AMV regime 的交易日（逗号分隔，如 做多,中性）；"
-        "默认不过滤。regime 取 data/market/0amv_regime_history.json"
-        "（live 状态机口径，as-of），文件缺失 fail-closed",
+        "默认不过滤。regime as-of 取 ≤ 当日最近一条，来源缺失 fail-closed",
+    )
+    ap.add_argument(
+        "--amv-source",
+        default="live",
+        choices=["live", "reconstructed"],
+        help="regime 来源：live=0amv_regime_history.json（部署期起）；"
+        "reconstructed=0AMV 日线全历史按同一阈值重建（研究窗口超出部署期时用）",
     )
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
@@ -496,7 +540,9 @@ def main(argv: Optional[list] = None) -> int:
         print("[ERR] 研究窗口为空", file=sys.stderr)
         return 1
 
-    day_regime, regime_allow = _regime_filter_from_args(args.amv_regimes, trade_days)
+    day_regime, regime_allow = _regime_filter_from_args(
+        args.amv_regimes, trade_days, source=args.amv_source
+    )
 
     rank_by_date = load_rank_files(Path(args.rank_dir))
     print(
@@ -531,6 +577,7 @@ def main(argv: Optional[list] = None) -> int:
             "horizons": horizons,
             "j_threshold": args.j_threshold,
             "amv_regimes": args.amv_regimes.strip() or None,
+            "amv_source": args.amv_source if args.amv_regimes.strip() else None,
             "adjust": "qfq",
             "universe": (
                 f"codes_file({Path(args.codes_file).name})"
