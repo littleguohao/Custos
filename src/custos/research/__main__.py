@@ -91,6 +91,10 @@ TOOLS: dict[str, tuple[str, str]] = {
         "study",
         "优秀 B1 指纹证据层回测（B1_DATA 正例召回与后续收益；R18）",
     ),
+    "sector_inflow_study": (
+        "study",
+        "#26 活跃板块（多次上榜）× J<13 池：命中 vs 未命中 forward 收益对照",
+    ),
     "adjust_diagnostic": (
         "diagnostic",
         "复权口径诊断：量化未复权数据对回测与选股的影响",

@@ -88,6 +88,10 @@ NEWS_DIR = DATA / "news"
 QUALITY_DIR = DATA / "quality"
 TRADES_DIR = DATA / "trades"
 SECTORS_DIR = DATA / "sectors"
+# 板块指数日线 CSV（fetch_sector_index_history 落盘，{code}.csv 或 {code}.SH.csv）
+SECTOR_INDEX_DIR = MARKET_DIR / "sector_index"
+# 板块 → 成员股票映射（fetch_sector_index_history --members 落盘）
+SECTOR_MEMBERS_FILE = MARKET_DIR / "sector_members.json"
 DECISIONS_DIR = DATA / "decisions"
 RISK_DIR = DATA / "risk"
 STOCK_POOL_DIR = DATA / "stock_pool"
