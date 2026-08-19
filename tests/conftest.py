@@ -65,6 +65,21 @@ def _pin_company_position_cache_empty(monkeypatch):
     monkeypatch.setattr(enrich_candidates, "_COMPANY_POSITION_CACHE", {})
 
 
+@pytest.fixture(autouse=True)
+def _redirect_position_plans_tmp(monkeypatch, tmp_path):
+    """把持仓计划文件改道 tmp（v0.82）。
+
+    ``incremental_ledger.apply_positions`` / ``main`` 现在会同步写
+    ``data/trades/position_plans.json``（并读 ``data/stock_pool/`` 找候选止损价）。
+    不钉的话，任何走这两处的测试都会写真实仓库数据、且断言依赖本机候选池内容。
+    需要真实路径行为的用例自行 monkeypatch 覆盖（见 test_position_plans.py）。
+    """
+    from custos.core.trades import position_plans
+
+    monkeypatch.setattr(position_plans, "PLANS_FILE", tmp_path / "position_plans.json")
+    monkeypatch.setattr(position_plans, "POOL_DIR", tmp_path / "stock_pool")
+
+
 @pytest.fixture
 def reversal_thresholds():
     """按依赖顺序重载 B1 反转 K 阈值链，并在退出时**完整还原**。

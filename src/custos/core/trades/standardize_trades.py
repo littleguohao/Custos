@@ -118,6 +118,10 @@ def main() -> None:
     print(f"[trades] closed_positions.json: {len(cls_rows)} entries")
 
     # ── 3. 当前持仓 ──
+    # ⚠️ 本路径直接覆写 current_positions.json，**不经过** incremental_ledger.apply_positions，
+    #    因此不重建 position_plans.json（v0.82）：这里没有逐笔成交上下文（entry_date/
+    #    买入类别判定都缺），且灾备重建后的持仓与既有计划可能脱节 ⇒ 计划保留原样，
+    #    重建后需人工复核（计划是派生数据，可由台账+候选池重建）。
     pos = pd.read_excel(src, sheet_name="持仓数据", dtype={"代码": str})
     pos = pos[pos["代码"].notna() & (pos["代码"] != "汇总")].copy()
     pos["代码"] = pos["代码"].apply(clean_code)

@@ -41,6 +41,7 @@ import pandas as pd
 from custos.core.paths import cn_now, TRADES_DIR  # noqa: E402
 from custos.core.code_utils import clean_code, finite  # noqa: E402
 from custos.core import positions_history  # noqa: E402
+from custos.core.trades import position_plans  # noqa: E402
 
 TD = TRADES_DIR
 LEDGER = TD / "master_trade_ledger.csv"
@@ -223,10 +224,13 @@ def _read_positions():
 
 def apply_positions(new: pd.DataFrame) -> list[dict]:
     """Read → compute → write the position snapshot (kept for direct callers)."""
-    rows = compute_positions(new, _read_positions())
+    before = _read_positions()
+    rows = compute_positions(new, before)
     _write_atomic(POS, json.dumps(rows, ensure_ascii=False, indent=2, default=str))
     # #49：同步归档当日快照，供 entities(date) 历史回填
     positions_history.archive_snapshot(rows, cn_now().date().isoformat())
+    # v0.82：同步持仓止盈/止损计划（新建仓生成/补仓摊薄/清仓归档，派生数据）
+    position_plans.sync_plans(new, before, rows)
     return rows
 
 
@@ -341,7 +345,8 @@ def main(argv=None) -> dict:
 
     if len(new):
         # Compute positions first: an oversell must abort with both files intact.
-        positions = compute_positions(new, _read_positions())
+        before = _read_positions()
+        positions = compute_positions(new, before)
         merged = pd.concat([existing, new], ignore_index=True)
         merged = merged.sort_values(["成交日期", "成交时间", "transaction_id"])
         stock = merged[merged["交易类别"].isin(TRADE_CATEGORIES)].copy()
@@ -377,6 +382,10 @@ def main(argv=None) -> dict:
             ),
         ]
         _commit(staged)
+        # v0.82：台账+持仓落盘成功后同步持仓计划（position_plans.json）。
+        # 刻意放在 _commit 之后、不进 staged：计划是派生数据（可从台账+候选池
+        # 重建），crash 窗口内落后一拍可检测可修复；台账/持仓的一致性语义不变。
+        position_plans.sync_plans(new, before, positions)
 
     # #49：每次运行结束归档当日持仓快照（含 --confirm-no-trades/空增量——
     # 持仓不变的日子归档同样内容，历史回填才查得到「那天的持仓」）。
