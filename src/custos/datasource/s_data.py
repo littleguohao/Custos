@@ -449,49 +449,79 @@ def list_universe(
     """
     root = Path(root)
     codes: set[str] = set()
-    n_lines = 0
-    rejected: list[str] = []
     try:
         if source == "csv":
-            for p in root.glob("*-all-latest.csv"):
-                head = p.name.split("-")[0]  # 000001.SZ
-                codes.add(head.split(".")[0])
+            codes = _universe_csv_codes(root)
         else:
-            bundles = list_bundles(root)
-            if not allow_unverified:
-                skipped = [
-                    b["dir"].name
-                    for b in bundles
-                    if b.get("convention") == "unverified"
-                ]
-                if skipped:
-                    _warn(
-                        f"宇宙也跳过口径无法验证的 bundle {','.join(skipped)}"
-                        f"（与 load_bars_qlib 保持同一口径；否则宇宙里会有拿不到"
-                        f"价格的票）"
-                    )
-                bundles = [b for b in bundles if b.get("convention") != "unverified"]
-            for b in bundles:
-                inst = b["dir"] / "instruments" / "all.txt"
-                if not inst.is_file():
-                    continue
-                for ln in inst.read_text(encoding="utf-8").splitlines():
-                    ln = ln.strip()
-                    if not ln:
-                        continue
-                    n_lines += 1
-                    tok = ln.split()[0]  # SH600000 / 600000.SH / 600000
-                    digits = "".join(ch for ch in tok if ch.isdigit())
-                    if len(digits) == 6:
-                        codes.add(digits)
-                    else:
-                        if len(rejected) < 5:
-                            rejected.append(ln[:40])
-            if n_lines and len(rejected) / n_lines > 0.05:
-                _warn(
-                    f"instruments/all.txt 有 {len(rejected)}/{n_lines} 行取不出 6 位代码"
-                    f"（样例 {rejected}）—— bundle 格式可能变了，宇宙不可信"
-                )
+            bundles = _universe_usable_bundles(root, allow_unverified)
+            codes, n_lines, rejected = _collect_qlib_codes(bundles)
+            _warn_if_universe_reject_rate_high(n_lines, rejected)
     except Exception as exc:  # noqa: BLE001
         _warn(f"列 universe 失败: {exc}")
     return sorted(codes)
+
+
+def _universe_csv_codes(root: Path) -> set[str]:
+    """csv 口径宇宙：列 `{code6}.{EX}-all-latest.csv` 文件名取 6 位代码。"""
+    codes: set[str] = set()
+    for p in root.glob("*-all-latest.csv"):
+        head = p.name.split("-")[0]  # 000001.SZ
+        codes.add(head.split(".")[0])
+    return codes
+
+
+def _universe_usable_bundles(
+    root: Path, allow_unverified: bool
+) -> list[dict[str, Any]]:
+    """qlib 宇宙用的 bundle 列表：与 `load_bars_qlib` 同一套 unverified 过滤。"""
+    bundles = list_bundles(root)
+    if allow_unverified:
+        return bundles
+    skipped = [b["dir"].name for b in bundles if b.get("convention") == "unverified"]
+    if skipped:
+        _warn(
+            f"宇宙也跳过口径无法验证的 bundle {','.join(skipped)}"
+            f"（与 load_bars_qlib 保持同一口径；否则宇宙里会有拿不到"
+            f"价格的票）"
+        )
+    return [b for b in bundles if b.get("convention") != "unverified"]
+
+
+def _parse_instrument_line(ln: str) -> Optional[str]:
+    """`instruments/all.txt` 一行 → 6 位数字代码；取不出返回 None。"""
+    tok = ln.split()[0]  # SH600000 / 600000.SH / 600000
+    digits = "".join(ch for ch in tok if ch.isdigit())
+    return digits if len(digits) == 6 else None
+
+
+def _collect_qlib_codes(
+    bundles: list[dict[str, Any]],
+) -> tuple[set[str], int, list[str]]:
+    """逐 bundle 读 instruments/all.txt，返回 (代码集, 有效行数, 拒绝样例[≤5 条])。"""
+    codes: set[str] = set()
+    n_lines = 0
+    rejected: list[str] = []
+    for b in bundles:
+        inst = b["dir"] / "instruments" / "all.txt"
+        if not inst.is_file():
+            continue
+        for ln in inst.read_text(encoding="utf-8").splitlines():
+            ln = ln.strip()
+            if not ln:
+                continue
+            n_lines += 1
+            digits = _parse_instrument_line(ln)
+            if digits is not None:
+                codes.add(digits)
+            elif len(rejected) < 5:
+                rejected.append(ln[:40])
+    return codes, n_lines, rejected
+
+
+def _warn_if_universe_reject_rate_high(n_lines: int, rejected: list[str]) -> None:
+    """剔除率超 5% 时大声告警：bundle 格式可能变了，宇宙不可信。"""
+    if n_lines and len(rejected) / n_lines > 0.05:
+        _warn(
+            f"instruments/all.txt 有 {len(rejected)}/{n_lines} 行取不出 6 位代码"
+            f"（样例 {rejected}）—— bundle 格式可能变了，宇宙不可信"
+        )

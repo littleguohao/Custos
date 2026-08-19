@@ -41,63 +41,96 @@ def _load_inputs(date):
     }
 
 
-def _resolve_holding_actions(holdings, risk, b1_rows, gate):
-    """持仓处置裁决段：B1 基线 + 高优先风险覆盖 + 技术陈旧挂起，按优先级排序。"""
-    b1_by_code = {bare(x.get("code")): x for x in b1_rows}
-    risk_by_code = {}
+def _index_b1_rows(b1_rows: list) -> dict:
+    """B1 基线按裸码索引。"""
+    return {bare(x.get("code")): x for x in b1_rows}
+
+
+def _index_stock_risks(risk: dict) -> dict:
+    """stock_risks 按裸码聚合成有序列表（保持原出现顺序）。"""
+    risk_by_code: dict = {}
     for x in risk.get("stock_risks", []):
         risk_by_code.setdefault(bare(x.get("code")), []).append(x)
-    holding_actions = []
+    return risk_by_code
+
+
+def _baseline_action_reasons(h: dict, b1: dict) -> tuple:
+    """B1 基线：final_* 缺失时回落到持仓复核自身的 action/priority/reason。"""
+    action = b1.get("final_action") or h.get("action", "观察")
+    priority = b1.get("final_priority") or h.get("priority", "P3")
+    reasons = (
+        [b1.get("final_reason")]
+        if b1.get("final_reason")
+        else list(h.get("reason") or [])
+    )
+    return action, priority, reasons
+
+
+def _apply_high_risk_override(
+    action: str, priority: str, reasons: list, high: list
+) -> tuple:
+    """高优先风险覆盖：按严重度取最重动作，理由追加风险依据。"""
+    # ⚠️ 高优先风险**至少**升到 P1，但**不得把已经更紧急的 P0 降下来**。
+    # 2026-08-07 修：原写法是无条件 `priority='P1'`，于是
+    #   甲(b1=P0 + 高风险止损) → P1，在处置表里排到
+    #   乙(b1=P0、无风险)      → P0 的**后面**
+    # 即「多一条高优先风控依据反而降了优先级」。而 holding_actions 是按
+    # priority 排序的「先动手处理哪个」清单 —— 增加风险绝不该降低紧急度。
+    priority = "P0" if priority == "P0" else "P1"
+    actions = [x.get("action") for x in high]
+    if "清仓" in actions:
+        action = "清仓"
+    elif "止损" in actions:
+        action = "止损"
+    elif "减仓" in actions:
+        action = "减仓"
+    else:
+        action = "禁止加仓"
+    reasons += [str(x.get("reason") or x.get("risk_type")) for x in high]
+    return action, priority, reasons
+
+
+def _resolve_one_holding(
+    h: dict, b1_by_code: dict, risk_by_code: dict, technical_status: str
+) -> dict:
+    """单只持仓裁决：B1 基线 + 高优先风险覆盖 + 技术陈旧挂起。"""
+    code = bare(h.get("code"))
+    rlist = risk_by_code.get(code, [])
+    high = [x for x in rlist if x.get("priority") == "高"]
+    b1 = b1_by_code.get(code, {})
+    action, priority, reasons = _baseline_action_reasons(h, b1)
+    if high:
+        action, priority, reasons = _apply_high_risk_override(
+            action, priority, reasons, high
+        )
+    elif technical_status != "confirmed":
+        action = "等待行情更新"
+        reasons = ["目标日持仓技术行情未确认，不沿用旧技术动作"]
+    return {
+        "priority": priority,
+        "code": code,
+        "name": h.get("name", ""),
+        "action": action,
+        "reasons": dedupe(reasons),
+        "risk_refs": rlist,
+        "b1_holding_state": b1,
+        "b1_reference_action": b1.get("final_action"),
+        "b1_reference_priority": b1.get("final_priority"),
+        "execution_status": "current"
+        if technical_status == "confirmed"
+        else "waiting_for_current_technical",
+    }
+
+
+def _resolve_holding_actions(holdings, risk, b1_rows, gate):
+    """持仓处置裁决段：B1 基线 + 高优先风险覆盖 + 技术陈旧挂起，按优先级排序。"""
+    b1_by_code = _index_b1_rows(b1_rows)
+    risk_by_code = _index_stock_risks(risk)
     technical_status = gate.get("technical_freshness", {}).get("status", "missing")
-    for h in holdings:
-        code = bare(h.get("code"))
-        rlist = risk_by_code.get(code, [])
-        high = [x for x in rlist if x.get("priority") == "高"]
-        b1 = b1_by_code.get(code, {})
-        action = b1.get("final_action") or h.get("action", "观察")
-        priority = b1.get("final_priority") or h.get("priority", "P3")
-        reasons = (
-            [b1.get("final_reason")]
-            if b1.get("final_reason")
-            else list(h.get("reason") or [])
-        )
-        if high:
-            # ⚠️ 高优先风险**至少**升到 P1，但**不得把已经更紧急的 P0 降下来**。
-            # 2026-08-07 修：原写法是无条件 `priority='P1'`，于是
-            #   甲(b1=P0 + 高风险止损) → P1，在处置表里排到
-            #   乙(b1=P0、无风险)      → P0 的**后面**
-            # 即「多一条高优先风控依据反而降了优先级」。而 holding_actions 是按
-            # priority 排序的「先动手处理哪个」清单 —— 增加风险绝不该降低紧急度。
-            priority = "P0" if priority == "P0" else "P1"
-            actions = [x.get("action") for x in high]
-            if "清仓" in actions:
-                action = "清仓"
-            elif "止损" in actions:
-                action = "止损"
-            elif "减仓" in actions:
-                action = "减仓"
-            else:
-                action = "禁止加仓"
-            reasons += [str(x.get("reason") or x.get("risk_type")) for x in high]
-        elif technical_status != "confirmed":
-            action = "等待行情更新"
-            reasons = ["目标日持仓技术行情未确认，不沿用旧技术动作"]
-        holding_actions.append(
-            {
-                "priority": priority,
-                "code": code,
-                "name": h.get("name", ""),
-                "action": action,
-                "reasons": dedupe(reasons),
-                "risk_refs": rlist,
-                "b1_holding_state": b1,
-                "b1_reference_action": b1.get("final_action"),
-                "b1_reference_priority": b1.get("final_priority"),
-                "execution_status": "current"
-                if technical_status == "confirmed"
-                else "waiting_for_current_technical",
-            }
-        )
+    holding_actions = [
+        _resolve_one_holding(h, b1_by_code, risk_by_code, technical_status)
+        for h in holdings
+    ]
     holding_actions.sort(key=lambda x: (x["priority"], x["code"]))
     return holding_actions
 

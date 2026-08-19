@@ -320,6 +320,86 @@ def sector_sizes(members: dict) -> dict[str, int]:
     return {s: len(v or []) for s, v in (members or {}).items()}
 
 
+def _count_sector_hits(
+    codes: list[str], code2secs: dict[str, list[str]]
+) -> tuple[dict[str, int], int]:
+    """单趟统计:板块命中计数 per_sec + 有归属候选数 n_cls(避免第二趟重复查表)。"""
+    per_sec: dict[str, int] = {}
+    n_cls = 0
+    for code in codes:
+        secs = code2secs.get(str(code)[:6], [])
+        if secs:
+            n_cls += 1
+        for s in secs:
+            per_sec[s] = per_sec.get(s, 0) + 1
+    return per_sec, n_cls
+
+
+def _load_sector_name_map() -> dict:
+    """经 tq_sector 加载板块名称表;失败返回 {}(与 sector_name 的兜底一致)。"""
+    try:
+        from custos.datasource.local_tdx import tq_sector  # noqa: PLC0415
+
+        return tq_sector.load_sector_names()
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _density_rows(
+    per_sec: dict[str, int],
+    sizes: Optional[dict],
+    min_size: int,
+    name_map: Optional[dict],
+    total_attr: int,
+) -> list[dict[str, Any]]:
+    """板块维度行(密度/份额),过滤过小板块防噪。
+    name_map=None 时名称表只在首个幸存行加载一次(hoist 出循环,避免逐板块重复读盘);
+    全部被过滤时一行不剩,与原实现一样完全不触发加载。"""
+    rows: list[dict[str, Any]] = []
+    resolved = name_map
+    for s, n in per_sec.items():
+        sz = (sizes or {}).get(s, 0)
+        if sz and sz < min_size:
+            continue  # 过小板块(如3只)密度虚高→过滤
+        if resolved is None:
+            resolved = _load_sector_name_map()
+        rows.append(
+            {
+                "sector": s,
+                "name": sector_name(s, resolved),
+                "n": n,
+                "size": sz,
+                "density": (round(n / sz, 4) if sz else None),
+                "share": round(n / total_attr, 4),
+            }
+        )
+    return rows
+
+
+def _sort_fingerprint_rows(rows: list[dict[str, Any]], sort_by: str) -> None:
+    """原地排序:density(默认;None 以 n/1e9 兜底排尾) 或按候选数 n。"""
+    if sort_by == "n":
+        rows.sort(key=lambda r: (r["n"], r["density"] or 0), reverse=True)
+    else:
+        rows.sort(
+            key=lambda r: (
+                r["density"] if r["density"] is not None else r["n"] / 1e9,
+                r["n"],
+            ),
+            reverse=True,
+        )
+
+
+def _fingerprint_text(top: list[dict[str, Any]]) -> str:
+    """主线指纹榜的一行文本(键序/文案逐位保持原样)。"""
+    if not top:
+        return "无"
+    return "主线指纹(密度榜): " + "; ".join(
+        f"{r['name']}({r['n']}只{('/' + str(r['size'])) if r['size'] else ''})"
+        for r in top[:6]
+    )
+
+
 def mainline_fingerprint(
     codes: list[str],
     code2secs: dict[str, list[str]],
@@ -333,54 +413,16 @@ def mainline_fingerprint(
     过滤过小板块防噪。density 归一避免大板块仅因体量占榜首;show 命中数供直觉。
     sort_by="n" 改按候选数排序（2026-08-14 owner：候选表主线指纹按候选数从多到少）。
     纯统计、绝不 raise。"""
-    per_sec: dict[str, int] = {}
-    for code in codes:
-        for s in code2secs.get(str(code)[:6], []):
-            per_sec[s] = per_sec.get(s, 0) + 1
-    n_cls = sum(1 for c in codes if code2secs.get(str(c)[:6]))
+    per_sec, n_cls = _count_sector_hits(codes, code2secs)
     if not per_sec:
         return {"n": len(codes), "n_classified": 0, "top": [], "text": "无板块映射"}
     total_attr = sum(per_sec.values())
-    rows = []
-    for s, n in per_sec.items():
-        sz = (sizes or {}).get(s, 0)
-        if sz and sz < min_size:
-            continue  # 过小板块(如3只)密度虚高→过滤
-        rows.append(
-            {
-                "sector": s,
-                "name": sector_name(s, name_map),
-                "n": n,
-                "size": sz,
-                "density": (round(n / sz, 4) if sz else None),
-                "share": round(n / total_attr, 4),
-            }
-        )
-    if sort_by == "n":
-        rows.sort(key=lambda r: (r["n"], r["density"] or 0), reverse=True)
-    else:
-        rows.sort(
-            key=lambda r: (
-                r["density"] if r["density"] is not None else r["n"] / 1e9,
-                r["n"],
-            ),
-            reverse=True,
-        )
+    rows = _density_rows(per_sec, sizes, min_size, name_map, total_attr)
+    _sort_fingerprint_rows(rows, sort_by)
     top = rows[:top_k]
     top5c = sorted(rows, key=lambda x: x["n"], reverse=True)[:5]
     top5_share = (
         round(sum(r["n"] for r in top5c) / total_attr, 3) if total_attr else None
-    )
-    txt = (
-        (
-            "主线指纹(密度榜): "
-            + "; ".join(
-                f"{r['name']}({r['n']}只{('/' + str(r['size'])) if r['size'] else ''})"
-                for r in top[:6]
-            )
-        )
-        if top
-        else "无"
     )
     return {
         "n": len(codes),
@@ -388,7 +430,7 @@ def mainline_fingerprint(
         "distinct_sectors": len(rows),
         "top5_count_share": top5_share,
         "top": top,
-        "text": txt,
+        "text": _fingerprint_text(top),
     }
 
 

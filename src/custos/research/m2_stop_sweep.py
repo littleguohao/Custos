@@ -1035,6 +1035,83 @@ def _breakeven_wr(payoff: Optional[float]) -> Optional[float]:
     return 1.0 / (1.0 + payoff)
 
 
+def _available_samples(suffix: str) -> dict[int, int]:
+    """扫描 OUTDIR，返回 ``{样本量: 方案文件数}``——只数**当前指纹后缀**的。"""
+    # 后缀精确匹配（而非逐个正则分组）：加新开关时这里不用改，改漏就会重演混批事故
+    pat = re.compile(r"__s(\d+)" + re.escape(suffix) + r"\.json$")
+    avail: dict[int, int] = {}
+    for p in OUTDIR.glob("*__*__s*.json"):
+        m = pat.search(p.name)
+        if m:
+            n = int(m.group(1))
+            avail[n] = avail.get(n, 0) + 1
+    return avail
+
+
+def _resolve_sample(avail: dict[int, int], sample: Optional[int]) -> Optional[int]:
+    """在已扫到的批次里选定样本量。没有结果文件时打印旧文件告警并返回 None。
+
+    ``sample=None`` 时取**最大样本量**那一批；显式给了就直接用（哪怕没扫到，
+    保持原行为：后续 glob 自然为空）。
+    """
+    if not avail:
+        # 兼容第一版无指纹的文件名，但明确告警
+        legacy = list(OUTDIR.glob("*__*.json"))
+        if legacy:
+            print(
+                f"[WARN] 发现 {len(legacy)} 个**无样本量指纹**的旧结果文件"
+                f"（第一版命名）。它们可能来自不同 --sample，混在一起比较无效。"
+                f"建议删除 artifacts/logs/m2_sweep 后重跑。"
+            )
+        return None
+    if sample is None:
+        sample = max(avail)
+        if len(avail) > 1:
+            print(
+                f"[INFO] 检测到多个样本量 {sorted(avail)}，"
+                f"只汇总最大的 s{sample}（{avail[sample]} 个方案）。"
+                f"用 --sample 指定其它批次。"
+            )
+    return sample
+
+
+def _collect_row(group: str, name: str, s: dict, sample: int) -> dict:
+    """把 ``_load`` 读出的一个结果文件组装成汇总行（dict 字段与键序固定）。
+
+    ``trades`` 只取一次：三个统计函数（`_big_wins`/`_reason_stats`/`_tail_split`）
+    各自全扫一遍逐笔，原来 ``s.get("_trades") or []`` 重复求值三次；`s` 在循环内
+    不被改动，hoist 成局部变量逐位等价（`_trades_ref` 仍是同一个 list 对象，不复制）。
+    """
+    trades = s.get("_trades") or []
+    return {
+        "name": name,
+        "n": s.get("n"),
+        "win": s.get("win_rate"),
+        "exp": s.get("expectancy"),
+        "expR": s.get("expectancy_R"),
+        "totR": s.get("total_R"),
+        "payoff": s.get("payoff_ratio"),
+        "avg_win": s.get("avg_win"),
+        "avg_loss": s.get("avg_loss"),
+        "hold": s.get("avg_holding"),
+        "big": _big_wins(trades),
+        "reasons": s.get("exit_reasons") or {},
+        "pf": s.get("_portfolio"),
+        # exit_reasons 只有 {n, avg_return}，没有 R ⇒ 从逐笔自算，
+        # 因为可加的是 sum_r 而非均收（见 _reason_stats）
+        "reasons_calc": _reason_stats(trades),
+        # 出场结构矩阵要按族重算，留一份逐笔引用（不复制，同一个 list 对象）
+        "_trades_ref": trades,
+        "tail_split": _tail_split(trades),
+        "sample": sample,
+        # `--top-n` 走 evaluate_trades(collect_all=True)，逐笔是**重叠未去重的全候选**
+        # （backtest_factors.py:2133）⇒ 它的 trade_summary 与其它方案不同口径，
+        # 只有 portfolio 块可用。标记出来，逐笔类表格一律排除。
+        "topn": "--top-n"
+        in _flag_set((GROUPS.get(group, {}).get("runs") or {}).get(name, [])),
+    }
+
+
 def _collect(
     cross: bool,
     sample: Optional[int] = None,
@@ -1048,32 +1125,9 @@ def _collect(
     （见 `_fingerprint` 注释）。
     """
     suffix = _fp_suffix(cross, data_source, window, pin_universe)
-    # 后缀精确匹配（而非逐个正则分组）：加新开关时这里不用改，改漏就会重演混批事故
-    pat = re.compile(r"__s(\d+)" + re.escape(suffix) + r"\.json$")
-    avail: dict[int, int] = {}
-    for p in OUTDIR.glob("*__*__s*.json"):
-        m = pat.search(p.name)
-        if not m:
-            continue
-        avail[int(m.group(1))] = avail.get(int(m.group(1)), 0) + 1
-    if not avail:
-        # 兼容第一版无指纹的文件名，但明确告警
-        legacy = list(OUTDIR.glob("*__*.json"))
-        if legacy:
-            print(
-                f"[WARN] 发现 {len(legacy)} 个**无样本量指纹**的旧结果文件"
-                f"（第一版命名）。它们可能来自不同 --sample，混在一起比较无效。"
-                f"建议删除 artifacts/logs/m2_sweep 后重跑。"
-            )
-        return {g: [] for g in GROUPS}
+    sample = _resolve_sample(_available_samples(suffix), sample)
     if sample is None:
-        sample = max(avail)
-        if len(avail) > 1:
-            print(
-                f"[INFO] 检测到多个样本量 {sorted(avail)}，"
-                f"只汇总最大的 s{sample}（{avail[sample]} 个方案）。"
-                f"用 --sample 指定其它批次。"
-            )
+        return {g: [] for g in GROUPS}
     want = f"__s{sample}{suffix}.json"
 
     out: dict[str, list[dict]] = {g: [] for g in GROUPS}
@@ -1087,35 +1141,7 @@ def _collect(
         s = _load(p)
         if not s:
             continue
-        out[group].append(
-            {
-                "name": name,
-                "n": s.get("n"),
-                "win": s.get("win_rate"),
-                "exp": s.get("expectancy"),
-                "expR": s.get("expectancy_R"),
-                "totR": s.get("total_R"),
-                "payoff": s.get("payoff_ratio"),
-                "avg_win": s.get("avg_win"),
-                "avg_loss": s.get("avg_loss"),
-                "hold": s.get("avg_holding"),
-                "big": _big_wins(s.get("_trades") or []),
-                "reasons": s.get("exit_reasons") or {},
-                "pf": s.get("_portfolio"),
-                # exit_reasons 只有 {n, avg_return}，没有 R ⇒ 从逐笔自算，
-                # 因为可加的是 sum_r 而非均收（见 _reason_stats）
-                "reasons_calc": _reason_stats(s.get("_trades") or []),
-                # 出场结构矩阵要按族重算，留一份逐笔引用（不复制，同一个 list 对象）
-                "_trades_ref": s.get("_trades") or [],
-                "tail_split": _tail_split(s.get("_trades") or []),
-                "sample": sample,
-                # `--top-n` 走 evaluate_trades(collect_all=True)，逐笔是**重叠未去重的全候选**
-                # （backtest_factors.py:2133）⇒ 它的 trade_summary 与其它方案不同口径，
-                # 只有 portfolio 块可用。标记出来，逐笔类表格一律排除。
-                "topn": "--top-n"
-                in _flag_set((GROUPS.get(group, {}).get("runs") or {}).get(name, [])),
-            }
-        )
+        out[group].append(_collect_row(group, name, s, sample))
     return out
 
 

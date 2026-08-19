@@ -14,6 +14,7 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 
 from custos.datasource.local_tdx import tq_sector  # noqa: E402  复用其 TdxW 探测 + tqcenter 惰性导入
@@ -35,6 +36,50 @@ def _suffixed(code: str) -> str:
     return c if "." in c else f"{c}.SH"
 
 
+def _pick_payload(d: Any, code: str) -> Any:
+    """从 get_market_data 返回里挑出收盘序列载体:优先代码键,其次 Close/close 字段键。"""
+    if not isinstance(d, dict):
+        return d
+    obj = d.get(code)
+    if obj is None:  # 字段键形态:{Close: df}
+        obj = d.get("Close")
+    if obj is None:
+        obj = d.get("close")
+    return obj
+
+
+def _payload_to_df(obj: Any, pd: Any) -> Any:
+    """Series → to_frame;其余按 DataFrame 构造。"""
+    return (
+        obj.to_frame()
+        if hasattr(obj, "to_frame") and not hasattr(obj, "columns")
+        else pd.DataFrame(obj)
+    )
+
+
+def _pick_close_col(cols: list, code: str) -> Any:
+    """收盘价列:优先代码列(带/不带市场后缀),其次 close 字段,单列时兜底;多列皆不匹配 → None。"""
+    c6 = str(code).split(".")[0]
+    return next(
+        (c for c in cols if c == str(code) or c.split(".")[0] == c6),
+        next(
+            (c for c in cols if c.lower() == "close"),
+            cols[0] if len(cols) == 1 else None,
+        ),
+    )
+
+
+def _date_strings(df: Any, cols: list, pd: Any) -> Any:
+    """日期字符串序列:DatetimeIndex 用 index;否则取首列解析,数值"日期"列拒收(返回 None)。"""
+    if isinstance(df.index, pd.DatetimeIndex):  # 形态①②:日期在 index
+        return df.index.strftime("%Y-%m-%d")
+    date_col = cols[0]  # 形态③:日期在首列(数值列拒收)
+    if pd.api.types.is_numeric_dtype(df[date_col]):
+        return None
+    dates = pd.to_datetime(df[date_col], errors="coerce")
+    return dates.dt.strftime("%Y-%m-%d")
+
+
 def _to_close_frame(d, code):
     """get_market_data 返回归一为 [date, close]。
 
@@ -43,44 +88,20 @@ def _to_close_frame(d, code):
     RangeIndex 等数值"日期"拒绝静默落盘。"""
     import pandas as pd
 
-    obj = None
-    if isinstance(d, dict):
-        obj = d.get(code)
-        if obj is None:  # 字段键形态:{Close: df}
-            obj = d.get("Close")
-        if obj is None:
-            obj = d.get("close")
-    else:
-        obj = d
+    obj = _pick_payload(d, code)
     if obj is None:
         return None
-    df = (
-        obj.to_frame()
-        if hasattr(obj, "to_frame") and not hasattr(obj, "columns")
-        else pd.DataFrame(obj)
-    )
+    df = _payload_to_df(obj, pd)
     if not len(df):
         return None
     df.columns = [str(c) for c in df.columns]
     cols = list(df.columns)
-    c6 = str(code).split(".")[0]
-    close_col = next(
-        (c for c in cols if c == str(code) or c.split(".")[0] == c6),
-        next(
-            (c for c in cols if c.lower() == "close"),
-            cols[0] if len(cols) == 1 else None,
-        ),
-    )
+    close_col = _pick_close_col(cols, code)
     if close_col is None:
         return None
-    if isinstance(df.index, pd.DatetimeIndex):  # 形态①②:日期在 index
-        dstr = df.index.strftime("%Y-%m-%d")
-    else:  # 形态③:日期在首列(数值列拒收)
-        date_col = cols[0]
-        if pd.api.types.is_numeric_dtype(df[date_col]):
-            return None
-        dates = pd.to_datetime(df[date_col], errors="coerce")
-        dstr = dates.dt.strftime("%Y-%m-%d")
+    dstr = _date_strings(df, cols, pd)
+    if dstr is None:
+        return None
     out = pd.DataFrame(
         {"date": dstr, "close": pd.to_numeric(df[close_col], errors="coerce").values}
     ).dropna()

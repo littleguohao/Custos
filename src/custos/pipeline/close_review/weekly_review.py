@@ -538,51 +538,75 @@ def _holding_daily_prices(
     return per_day
 
 
+def _holding_name_fallbacks(base: Path) -> dict[str, str | None]:
+    """名称兜底：current_positions.json 的 {代码: 名称}。"""
+    names: dict[str, str | None] = {}
+    for p in load_json(base / "data" / "trades" / "current_positions.json", []) or []:
+        if p.get("代码"):
+            names[str(p["代码"])] = p.get("名称")
+    return names
+
+
+def _weight_stats(
+    weights: list[tuple[str, float]], change: float | None
+) -> tuple[float | None, float | None, str | None, str | None, float | None]:
+    """首/末权重（百分数）、对应日期与贡献估算；无权重数据时各项为 None。"""
+    if not weights:
+        return None, None, None, None, None
+    contribution = round(weights[0][1] * change, 2) if change is not None else None
+    return (
+        round(weights[0][1] * 100, 2),
+        round(weights[-1][1] * 100, 2),
+        weights[0][0],
+        weights[-1][0],
+        contribution,
+    )
+
+
+def _holding_row(
+    code: str, series: list[tuple[str, dict]], names: dict[str, str | None]
+) -> dict:
+    """单只持仓的一行周度表现。"""
+    first_d, first = series[0]
+    last_d, last = series[-1]
+    change = pct_change(last["close"], first["close"], digits=2)
+    # 权重取各自首个/末个有权重值的日期（价格日期与权重日期可能不同，如周初仅有 quotes）
+    weights = [(d, e["weight"]) for d, e in series if e.get("weight") is not None]
+    w0, w1, w0_date, w1_date, contribution = _weight_stats(weights, change)
+    float_pnl = (
+        round(last["pnl_pct"] * 100, 2) if last.get("pnl_pct") is not None else None
+    )
+    name = last.get("name") or first.get("name") or names.get(code)
+    return {
+        "code": code,
+        "name": name,
+        "first_date": first_d,
+        "first_close": first["close"],
+        "last_date": last_d,
+        "last_close": last["close"],
+        "week_change_pct": change,
+        "first_weight_pct": w0,
+        "last_weight_pct": w1,
+        "first_weight_date": w0_date,
+        "last_weight_date": w1_date,
+        "float_pnl_pct": float_pnl,
+        "contribution_pp": contribution,
+    }
+
+
 def _holding_rows(
     base: Path, days: list[str], per_day: dict[str, dict[str, dict]], codes: list[str]
 ) -> list[dict]:
     """每只持仓一行的周度表现（按贡献估算升序）。"""
-    # 名称兜底：current_positions.json
-    names = {}
-    for p in load_json(base / "data" / "trades" / "current_positions.json", []) or []:
-        if p.get("代码"):
-            names[str(p["代码"])] = p.get("名称")
-    rows = []
-    for code in codes:
-        series = [(d, per_day[d][code]) for d in days if code in per_day.get(d, {})]
-        first_d, first = series[0]
-        last_d, last = series[-1]
-        change = pct_change(last["close"], first["close"], digits=2)
-        # 权重取各自首个/末个有权重值的日期（价格日期与权重日期可能不同，如周初仅有 quotes）
-        weights = [(d, e["weight"]) for d, e in series if e.get("weight") is not None]
-        w0 = round(weights[0][1] * 100, 2) if weights else None
-        w1 = round(weights[-1][1] * 100, 2) if weights else None
-        contribution = (
-            round(weights[0][1] * change, 2)
-            if (weights and change is not None)
-            else None
+    names = _holding_name_fallbacks(base)
+    rows = [
+        _holding_row(
+            code,
+            [(d, per_day[d][code]) for d in days if code in per_day.get(d, {})],
+            names,
         )
-        float_pnl = (
-            round(last["pnl_pct"] * 100, 2) if last.get("pnl_pct") is not None else None
-        )
-        name = last.get("name") or first.get("name") or names.get(code)
-        rows.append(
-            {
-                "code": code,
-                "name": name,
-                "first_date": first_d,
-                "first_close": first["close"],
-                "last_date": last_d,
-                "last_close": last["close"],
-                "week_change_pct": change,
-                "first_weight_pct": w0,
-                "last_weight_pct": w1,
-                "first_weight_date": weights[0][0] if weights else None,
-                "last_weight_date": weights[-1][0] if weights else None,
-                "float_pnl_pct": float_pnl,
-                "contribution_pp": contribution,
-            }
-        )
+        for code in codes
+    ]
     rows.sort(
         key=lambda r: r["contribution_pp"] if r["contribution_pp"] is not None else 0
     )
@@ -1069,6 +1093,23 @@ def _loss_structure(losses, strategy_issues):
     return short_loss_share, total_loss
 
 
+def _bear_loss_share(
+    regimes: dict[str, dict],
+    losses: list[dict],
+    observed: list[str],
+    total_loss: float,
+) -> float | None:
+    """空头期平仓亏损占总亏损比；无平仓或无观测覆盖时为 None。"""
+    if not (losses and observed):
+        return None
+    bear_loss = sum(
+        c["gross_pnl"]
+        for c in losses
+        if regimes.get(c["sell_date"], {}).get("regime") == "空头"
+    )
+    return round(bear_loss / total_loss * 100, 2) if total_loss else None
+
+
 def _bear_regime_stats(
     base, losses, total_loss, trading_days, unavailable, label: str = "本周"
 ):
@@ -1079,32 +1120,16 @@ def _bear_regime_stats(
     """
     amv_path = base / "data" / "market" / "0amv_observations.jsonl"
     regimes = load_amv_regimes(amv_path)
-    bear_days: list[str] = []
-    bear_loss_share = None
     if regimes is None:
         unavailable.append(f"0AMV 历史缺失：{amv_path}")
-    else:
-        observed = [d for d in trading_days if d in regimes]
-        bear_days = [d for d in observed if regimes[d]["regime"] == "空头"]
-        bear_closings = [
-            c for c in losses if regimes.get(c["sell_date"], {}).get("regime") == "空头"
-        ]
-        if losses and observed:
-            bear_loss = sum(c["gross_pnl"] for c in bear_closings)
-            bear_loss_share = (
-                round(bear_loss / total_loss * 100, 2) if total_loss else None
-            )
-        elif not observed:
-            unavailable.append(f"{label}交易日无 0AMV 观测记录")
+        return [], None, None
+    observed = [d for d in trading_days if d in regimes]
+    bear_days = [d for d in observed if regimes[d]["regime"] == "空头"]
+    bear_loss_share = _bear_loss_share(regimes, losses, observed, total_loss)
+    if not observed:
+        unavailable.append(f"{label}交易日无 0AMV 观测记录")
     bear_day_ratio = (
-        round(
-            len(bear_days)
-            / len([d for d in trading_days if regimes and d in regimes])
-            * 100,
-            2,
-        )
-        if regimes and any(d in regimes for d in trading_days)
-        else None
+        round(len(bear_days) / len(observed) * 100, 2) if observed else None
     )
     return bear_days, bear_loss_share, bear_day_ratio
 

@@ -150,31 +150,55 @@ def _report_month_unmatched(closings: list[dict], unavailable: list[str]) -> Non
             )
 
 
+def _win_loss_partition(valued: list[dict]) -> tuple[list[dict], list[dict]]:
+    """按毛盈亏拆盈利单 / 亏损单（打平单两边都不算）。"""
+    wins = [c for c in valued if c["gross_pnl"] > 0]
+    losses = [c for c in valued if c["gross_pnl"] < 0]
+    return wins, losses
+
+
+def _avg_win_loss(
+    wins: list[dict], losses: list[dict]
+) -> tuple[float | None, float | None]:
+    """平均盈利 / 平均亏损（绝对值）；无样本时 None。"""
+    avg_win = sum(c["gross_pnl"] for c in wins) / len(wins) if wins else None
+    avg_loss = (
+        abs(sum(c["gross_pnl"] for c in losses)) / len(losses) if losses else None
+    )
+    return avg_win, avg_loss
+
+
+def _pl_ratio(avg_win: float | None, avg_loss: float | None) -> float | None:
+    """盈亏比；任一侧缺失（含 avg_loss 为 0）时 None。"""
+    return round(avg_win / avg_loss, 2) if (avg_win and avg_loss) else None
+
+
+def _avg_hold_days(valued: list[dict]) -> float | None:
+    """平均持有天数（只统计 hold_days 非 None 的单）。"""
+    hold_vals = [c["hold_days"] for c in valued if c["hold_days"] is not None]
+    return round(sum(hold_vals) / len(hold_vals), 1) if hold_vals else None
+
+
 def _month_pnl_totals(valued: list[dict]) -> dict:
     """毛/净盈亏、胜率/盈亏比、期望值、平均持有天数（只信 full 配平单）。"""
     gross_total = round(sum(c["gross_pnl"] for c in valued), 2)
     matched_buy_fee = round(sum(c["matched_buy_fee"] for c in valued), 2)
     closed_fee = round(matched_buy_fee + sum(c["sell_fee"] for c in valued), 2)
     net_total = round(gross_total - closed_fee, 2)
-    wins = [c for c in valued if c["gross_pnl"] > 0]
-    losses = [c for c in valued if c["gross_pnl"] < 0]
+    wins, losses = _win_loss_partition(valued)
     win_rate = round(len(wins) / len(valued) * 100, 2) if valued else None
-    avg_win = sum(c["gross_pnl"] for c in wins) / len(wins) if wins else None
-    avg_loss = (
-        abs(sum(c["gross_pnl"] for c in losses)) / len(losses) if losses else None
-    )
-    hold_vals = [c["hold_days"] for c in valued if c["hold_days"] is not None]
+    avg_win, avg_loss = _avg_win_loss(wins, losses)
     return {
         "losses": losses,
         "gross_total": gross_total,
         "closed_fee": closed_fee,
         "net_total": net_total,
         "win_rate": win_rate,
-        "pl_ratio": round(avg_win / avg_loss, 2) if (avg_win and avg_loss) else None,
+        "pl_ratio": _pl_ratio(avg_win, avg_loss),
         # 期望值（金额口径）= 平均每笔已实现净盈亏。⚠️ 不是 R 倍数口径：
         # 台账没有逐笔止损位，算不出 R —— 缺什么说什么，不拿金额冒充 R。
         "expectancy": round(net_total / len(valued), 2) if valued else None,
-        "avg_hold": (round(sum(hold_vals) / len(hold_vals), 1) if hold_vals else None),
+        "avg_hold": _avg_hold_days(valued),
     }
 
 

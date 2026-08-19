@@ -510,59 +510,103 @@ def capital_intent_strength(cand: dict) -> tuple[str, int, dict]:
     仅正向计"资金在进"证据；资金流出/派发风险（出货五方式、MACD 顶背离/三打白骨精）
     由 score_candidate 的风控 cap 层单独否决，不在此重复扣减，避免双计。
     返回 (level, score, detail)。
+
+    2026-08-19（#58 收尾）：证据项按主题拆成 `_capital_intent_*_evidence` 段落函数，
+    本函数只做「逐段汇总 → 分级」；分值、detail 键与键序均未变。
     """
     detail: dict[str, Any] = {}
     score = 0
+    # 段顺序＝历史上 detail 的键序，勿动（落盘明细供复盘对照）。
+    for pts, part in (
+        _capital_intent_zhixing_evidence(cand),
+        _capital_intent_volume_evidence(cand),
+        _capital_intent_fund_flow_evidence(cand),
+    ):
+        score += pts
+        detail.update(part)
+    level = "强" if score >= CAP_STRONG else ("中" if score >= CAP_MID else "弱")
+    return level, score, detail
 
-    def add(key: str, cond: Any, pts: int) -> None:
-        nonlocal score
-        hit = bool(cond)
-        detail[key] = {"hit": hit, "points": pts if hit else 0}
-        if hit:
-            score += pts
 
+def _capital_intent_add(detail: dict, key: str, cond: Any, pts: int) -> int:
+    """记录一条资金证据（hit 布尔化 + 命中才计分），返回本条得分。"""
+    hit = bool(cond)
+    detail[key] = {"hit": hit, "points": pts if hit else 0}
+    return pts if hit else 0
+
+
+def _capital_intent_zhixing_evidence(cand: dict) -> tuple[int, dict]:
+    """知行/形态证据：B1 点火 +3、知行多头骑线 +2、20日相对强度强 +2。"""
+    detail: dict[str, Any] = {}
     zx = cand.get("zhixing") or {}
-    leader = cand.get("leader_volume") or {}
-    bottom = cand.get("bottom_volume") or {}
-    add("b1_ignition", (cand.get("b1_ignition") or {}).get("hit"), 3)
-    add(
+    score = _capital_intent_add(
+        detail, "b1_ignition", (cand.get("b1_ignition") or {}).get("hit"), 3
+    )
+    score += _capital_intent_add(
+        detail,
         "zhixing_ride",
         zx.get("available") and zx.get("qsx_gt_dks") and zx.get("close_above_qsx"),
         2,
     )
-    add(
+    score += _capital_intent_add(
+        detail,
         "relative_strength_strong",
         (cand.get("patterns") or {}).get("relative_strength_strong"),
         2,
     )
-    add("leader_volume", leader.get("available") and leader.get("hit"), 2)
-    add("bottom_volume", bottom.get("available") and bottom.get("hit"), 2)
-    add(
+    return score, detail
+
+
+def _capital_intent_volume_evidence(cand: dict) -> tuple[int, dict]:
+    """量能证据：龙头量/底部巨量/量能持续主线 +2，放量点火/反转K +1，回调缩量 +2。"""
+    detail: dict[str, Any] = {}
+    leader = cand.get("leader_volume") or {}
+    bottom = cand.get("bottom_volume") or {}
+    score = _capital_intent_add(
+        detail, "leader_volume", leader.get("available") and leader.get("hit"), 2
+    )
+    score += _capital_intent_add(
+        detail, "bottom_volume", bottom.get("available") and bottom.get("hit"), 2
+    )
+    score += _capital_intent_add(
+        detail,
         "volume_sustain_mainline",
         (cand.get("volume_sustain") or {}).get("status") == "mainline_confirmed",
         2,
     )
-    add("ignition", (cand.get("ignition") or {}).get("hit"), 1)
-    add("reversal_k", (cand.get("patterns") or {}).get("reversal_k_candidate"), 1)
+    score += _capital_intent_add(
+        detail, "ignition", (cand.get("ignition") or {}).get("hit"), 1
+    )
+    score += _capital_intent_add(
+        detail,
+        "reversal_k",
+        (cand.get("patterns") or {}).get("reversal_k_candidate"),
+        1,
+    )
     # v0.61（owner 定向）：回调缩量计资金证据 +2--缩量回调=抛压衰竭、主力未撤
     # （与「量能撤退封顶去除」v0.60 同一语义的正向面）；正例 002074 资金意图
     # 原为 0 分（其余证据均未命中）被分层压到 D，此证据让它回到「中」。
-    add(
+    score += _capital_intent_add(
+        detail,
         "pullback_shrink",
         (cand.get("pullback_shrink") or {}).get("hit"),
         2,
     )
-    # 资金流向（正交于量价）：个股在主力净流入榜且净流入，或所属板块净流入
+    return score, detail
+
+
+def _capital_intent_fund_flow_evidence(cand: dict) -> tuple[int, dict]:
+    """资金流向（正交于量价）：个股在主力净流入榜且净流入，或所属板块净流入 +2。"""
+    detail: dict[str, Any] = {}
     ff = cand.get("fund_flow") or {}
-    add(
+    score = _capital_intent_add(
+        detail,
         "fund_flow_inflow",
         ff.get("available")
         and (ff.get("in_rank_positive") or ff.get("sector_inflow_positive")),
         2,
     )
-
-    level = "强" if score >= CAP_STRONG else ("中" if score >= CAP_MID else "弱")
-    return level, score, detail
+    return score, detail
 
 
 def trade_style_of(heat_level: str) -> str:

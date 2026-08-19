@@ -1620,6 +1620,7 @@ def simulate_b1_trade(
     cost_zone_bars: int = 0,
     cost_zone_pct: float = 3.0,
     cost_zone_grace: int = 1,
+    ohlc: Optional[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = None,
 ) -> dict[str, Any]:
     """B1 交易规则模拟：买入当日收盘进场。
 
@@ -1687,11 +1688,18 @@ def simulate_b1_trade(
     ``trail_pct``>0 启用**移动止损**：止损位跟随持仓期最高价，回撤该比例即出场。
     ⚠️ 移动止损与保本止损都只用**截至 j-1** 的最高价更新止损位——日线数据无法知道
     盘中顺序，若用当日 high 更新再用当日价判触发，等于假设"先冲高后回落"。
+
+    ``ohlc``：调用方按 code 预计算的 ``(close, low, high, open)`` float 数组
+    （同 ``bull_flags``/``atr`` 的复用模式，evaluate_trades 每笔一次→逐股一次）；
+    None 时内部现算，逐位等价。
     """
-    close = df["close"].astype(float).values
-    low = df["low"].astype(float).values
-    high = df["high"].astype(float).values
-    open_ = df["open"].astype(float).values
+    if ohlc is not None:
+        close, low, high, open_ = ohlc
+    else:
+        close = df["close"].astype(float).values
+        low = df["low"].astype(float).values
+        high = df["high"].astype(float).values
+        open_ = df["open"].astype(float).values
     n = len(close)
     entry = float(close[entry_idx])
     stop = _initial_stop(
@@ -1901,6 +1909,10 @@ def _prepare_stock(
         # ATR(14)（止损余量 stop_buffer="atr" 用）:同样逐股算一次,循环内复用
         "atr": _atr_series(df) if stop_buffer == "atr" else None,
         "gate_pre": _precompute_gate_series(df) if entry_gate is not None else None,
+        # OHLC float 数组(simulate_b1_trade 用):逐股算一次,避免每笔重复 astype
+        "ohlc": tuple(
+            df[c].astype(float).values for c in ("close", "low", "high", "open")
+        ),
     }
 
 
@@ -1948,6 +1960,55 @@ def _trade_record(
         rec["rest_ret"] = tr.get("rest_ret")
         rec["scale_out_bars"] = tr["scale_out_idx"] - i
     return rec
+
+
+def _amv_checker(amv_regime: Optional[dict]) -> Callable[[str], bool]:
+    """date→bool：as-of 最近 ≤ date 的 regime 为「做多」才放行；无 regime 映射时恒真。"""
+    import bisect  # noqa: PLC0415
+
+    amv_dates = sorted(amv_regime) if amv_regime else None
+
+    def _amv_ok(date: str) -> bool:
+        if not amv_regime or amv_dates is None:
+            return True
+        idx = bisect.bisect_right(amv_dates, date) - 1  # as-of：最近 ≤ date 的regime
+        return idx >= 0 and amv_regime[amv_dates[idx]] == "做多"
+
+    return _amv_ok
+
+
+def _entry_signal(
+    slice_df: pd.DataFrame,
+    code: str,
+    i: int,
+    entry_date: str,
+    *,
+    gate_call: Optional[Callable],
+    gate_pre: Any,
+    sector_gate: Optional[Callable[[str, str], bool]],
+    scorer: Callable[[pd.DataFrame, str], Optional[dict]],
+    amv_ok: Callable[[str], bool],
+    buy_ok: Optional[np.ndarray],
+) -> Optional[dict]:
+    """单 bar 进场判定：gate→板块相位→scorer→regime/可成交性，任一不过返回 None。"""
+    if gate_call is not None and not gate_call(slice_df, gate_pre):
+        return None
+    if sector_gate is not None and not sector_gate(code, entry_date):  # 板块相位择时
+        return None
+    res = scorer(slice_df, code)
+    if (
+        res is not None
+        and res.get("suggestion") == "可买"
+        and amv_ok(entry_date)
+        and (buy_ok is None or buy_ok[i])
+    ):  # 涨停/停牌当日买不到
+        return res
+    return None
+
+
+def _advance_i(i: int, step: int, tr: dict[str, Any], collect_all: bool) -> int:
+    """下一根扫描起点：collect_all=每根都扫(收集全部候选)；否则跳到出场后(非重叠)。"""
+    return (i + max(1, step)) if collect_all else (tr["exit_idx"] + 1)
 
 
 def evaluate_trades(
@@ -1999,16 +2060,7 @@ def evaluate_trades(
     """
     scorer = scorer or _sc_b1_pullback
     cost = cost_bps / 1e4
-    import bisect
-
-    amv_dates = sorted(amv_regime) if amv_regime else None
-
-    def _amv_ok(date: str) -> bool:
-        if not amv_regime or amv_dates is None:
-            return True
-        idx = bisect.bisect_right(amv_dates, date) - 1  # as-of：最近 ≤ date 的regime
-        return idx >= 0 and amv_regime[amv_dates[idx]] == "做多"
-
+    _amv_ok = _amv_checker(amv_regime)
     gate_call = _dual_form_gate(entry_gate) if entry_gate is not None else None
 
     trades: list[dict[str, Any]] = []
@@ -2037,62 +2089,57 @@ def evaluate_trades(
         while i < n - 1:
             entry_date = str(df["date"].iloc[i])[:10]
             slice_df = df.iloc[: i + 1]
-            if gate_call is not None and not gate_call(slice_df, gate_pre):
+            res = _entry_signal(
+                slice_df,
+                code,
+                i,
+                entry_date,
+                gate_call=gate_call,
+                gate_pre=gate_pre,
+                sector_gate=sector_gate,
+                scorer=scorer,
+                amv_ok=_amv_ok,
+                buy_ok=buy_ok,
+            )
+            if res is None:
                 i += max(1, step)
                 continue
-            if sector_gate is not None and not sector_gate(
-                code, entry_date
-            ):  # 板块相位择时
-                i += max(1, step)
-                continue
-            res = scorer(slice_df, code)
-            if (
-                res is not None
-                and res.get("suggestion") == "可买"
-                and _amv_ok(entry_date)
-                and (buy_ok is None or buy_ok[i])
-            ):  # 涨停/停牌当日买不到
-                stop_ov = _platform_stop_override(slice_df, stop_mode)
-                tr = simulate_b1_trade(
-                    df,
-                    i,
-                    bbi,
-                    bbi_exit_consec=bbi_exit_consec,
-                    time_stop_bars=time_stop_bars,
-                    stop_mode=stop_mode,
-                    stop_pct=stop_pct,
-                    stop_override=stop_ov,
-                    can_sell=sell_ok,
-                    max_exit_delay=max_exit_delay,
-                    scale_out_frac=scale_out_frac,
-                    code=code,
-                    bull_flags=bull_flags,
-                    breakeven_trigger=breakeven_trigger,
-                    trail_pct=trail_pct,
-                    stop_trigger=stop_trigger,
-                    stop_tick_buffer=stop_tick_buffer,
-                    stop_buffer=stop_buffer,
-                    stop_pct_buffer=stop_pct_buffer,
-                    stop_atr_buffer=stop_atr_buffer,
-                    atr=atr,
-                    cost_zone_bars=cost_zone_bars,
-                    cost_zone_pct=cost_zone_pct,
-                )
-                ret_net = tr["ret"] - cost
-                rec = _trade_record(
-                    tr, ret_net, code, entry_date, df, i, res.get("score")
-                )
-                if feature_panel:
-                    rec["features"] = _feature_panel(slice_df)
-                trades.append(rec)
-                emitted += 1
-                if max_signals_per_code and emitted >= max_signals_per_code:
-                    break
-                i = (
-                    (i + max(1, step)) if collect_all else (tr["exit_idx"] + 1)
-                )  # 收集全部候选 / 或非重叠
-            else:
-                i += max(1, step)
+            stop_ov = _platform_stop_override(slice_df, stop_mode)
+            tr = simulate_b1_trade(
+                df,
+                i,
+                bbi,
+                bbi_exit_consec=bbi_exit_consec,
+                time_stop_bars=time_stop_bars,
+                stop_mode=stop_mode,
+                stop_pct=stop_pct,
+                stop_override=stop_ov,
+                can_sell=sell_ok,
+                max_exit_delay=max_exit_delay,
+                scale_out_frac=scale_out_frac,
+                code=code,
+                bull_flags=bull_flags,
+                breakeven_trigger=breakeven_trigger,
+                trail_pct=trail_pct,
+                stop_trigger=stop_trigger,
+                stop_tick_buffer=stop_tick_buffer,
+                stop_buffer=stop_buffer,
+                stop_pct_buffer=stop_pct_buffer,
+                stop_atr_buffer=stop_atr_buffer,
+                atr=atr,
+                cost_zone_bars=cost_zone_bars,
+                cost_zone_pct=cost_zone_pct,
+                ohlc=prep["ohlc"],
+            )
+            ret_net = tr["ret"] - cost
+            rec = _trade_record(tr, ret_net, code, entry_date, df, i, res.get("score"))
+            if feature_panel:
+                rec["features"] = _feature_panel(slice_df)
+            trades.append(rec)
+            emitted += 1
+            if max_signals_per_code and emitted >= max_signals_per_code:
+                break
+            i = _advance_i(i, step, tr, collect_all)
     return trades
 
 

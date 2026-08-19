@@ -27,10 +27,27 @@ from custos.core.paths import DATA, LOGS  # noqa: E402
 from custos.pipeline.screening.financials import REPORT_MAX_AGE_DAYS, _parse_day  # noqa: E402
 
 
+_parse_day_cache: dict = {}
+
+
+def _parse_day_cached(s):
+    """``_parse_day`` 的逐位等价备忘：同一输入串解析结果不变(纯函数),扫描循环里
+    报告期/信号日高度重复(报告期只有季末少数几个值),缓存把每条的 strptime 降到一次查表。
+    不可哈希输入回退直调,行为与未缓存完全一致。"""
+    try:
+        if s in _parse_day_cache:
+            return _parse_day_cache[s]
+    except TypeError:
+        return _parse_day(s)
+    v = _parse_day(s)
+    _parse_day_cache[s] = v
+    return v
+
+
 def _report_age_days(report_date, as_of) -> int | None:
     """报告期距信号日的天数;任一侧无法解析 → None(交调用方按保守处理)。"""
-    d = _parse_day(report_date)
-    ref = _parse_day(as_of)
+    d = _parse_day_cached(report_date)
+    ref = _parse_day_cached(as_of)
     if d is None or ref is None:
         return None
     return (ref - d).days
@@ -110,12 +127,21 @@ def _tier_you(idx, code, day, max_age_days: int = REPORT_MAX_AGE_DAYS) -> bool:
     )
 
 
-def main() -> None:
-    payload = json.loads(FIRINGS.read_text(encoding="utf-8"))
-    recs = payload.get("records") or []
-    pit = _pit_index(PIT)
-    regime = bt.load_amv_regime(since="2024-01-01")  # 状态机粘滞,起点须远早于扫描窗
+def _bucket_for(sec_fav: bool, fq: bool, reg: str | None) -> str | None:
+    """单条信号日的分类桶(None=三面都不齐,不进任何明细桶)。分支口径与 ⭐ 定义一一对应。"""
+    if fq and sec_fav and reg == "做多":
+        return "可买候选"
+    if fq and sec_fav and reg != "做多":
+        return "待0AMV做多"
+    if fq and reg == "空头" and not sec_fav:
+        return "前哨"
+    return None
 
+
+def _classify_firings(
+    recs: list, pit: dict[str, list], regime: dict[str, str]
+) -> dict[str, dict]:
+    """全部 firings 按信号日聚类:day → {可买候选/待0AMV做多/前哨: [code...], total: n}。"""
     per_day: dict[str, dict] = defaultdict(
         lambda: {"可买候选": [], "待0AMV做多": [], "前哨": [], "total": 0}
     )
@@ -123,20 +149,18 @@ def main() -> None:
         for d in r.get("days") or []:
             day = d[0]
             extra = d[2] if len(d) > 2 and isinstance(d[2], dict) else {}
-            sec_fav = bool(extra.get("f_sector_favorable"))
+            reg = regime.get(day)
             fq = _tier_you(pit, r["code"], day)
-            mkt = regime.get(day) == "做多"
-            bear = regime.get(day) == "空头"
             pd_ = per_day[day]
             pd_["total"] += 1
-            if fq and sec_fav and mkt:
-                pd_["可买候选"].append(r["code"])
-            elif fq and sec_fav and not mkt:
-                pd_["待0AMV做多"].append(r["code"])
-            elif fq and bear and not sec_fav:
-                pd_["前哨"].append(r["code"])
+            bucket = _bucket_for(bool(extra.get("f_sector_favorable")), fq, reg)
+            if bucket:
+                pd_[bucket].append(r["code"])
+    return per_day
 
-    print(f"扫描 {len(recs)} 股 | 信号日 {len(per_day)} 天")
+
+def _print_report(per_day: dict[str, dict], n_recs: int) -> None:
+    print(f"扫描 {n_recs} 股 | 信号日 {len(per_day)} 天")
     print(
         f"{'日期':<12}{'reversal_k':>10}{'可买候选':>10}{'待0AMV做多':>12}{'📡前哨':>10}  明细"
     )
@@ -149,6 +173,14 @@ def main() -> None:
         print(
             f"{day:<12}{pd_['total']:<10}{len(pd_['可买候选']):<10}{len(pd_['待0AMV做多']):<12}{len(pd_['前哨']):<10}{detail}"
         )
+
+
+def main() -> None:
+    payload = json.loads(FIRINGS.read_text(encoding="utf-8"))
+    recs = payload.get("records") or []
+    pit = _pit_index(PIT)
+    regime = bt.load_amv_regime(since="2024-01-01")  # 状态机粘滞,起点须远早于扫描窗
+    _print_report(_classify_firings(recs, pit, regime), len(recs))
 
 
 if __name__ == "__main__":

@@ -54,6 +54,45 @@ def append_observation(day: str, amv: dict):
     return record
 
 
+def _prior_state(hist: dict, day: str, initial: str | None, amv: dict) -> str:
+    prior_dates = sorted(k for k in hist if k < day)
+    return (
+        hist[prior_dates[-1]]["effective_state"]
+        if prior_dates
+        else (initial or amv.get("prior_effective_state") or "未知")
+    )
+
+
+def _resolve_state(prior: str, value, quality: str, confirmed: bool) -> tuple[str, str]:
+    if value is None:
+        return prior, "缺值，延续前态"
+    if float(value) > 4:
+        if confirmed:
+            return "做多", "单日涨幅>4%（confirmed），切换/维持做多"
+        return (
+            prior if prior in ("空头", "做多") else "中性"
+        ), f"单日涨幅>4%但读数未确认（quality={quality}），不驱动状态转移"
+    if float(value) < -2.3:
+        if confirmed:
+            return "空头", "单日跌幅<-2.3%（confirmed），切换/维持空头"
+        return (
+            prior if prior in ("空头", "做多") else "中性"
+        ), f"单日跌幅<-2.3%但读数未确认（quality={quality}），不驱动状态转移"
+    if prior == "空头":
+        return "空头", "空头锁定；未达到>4%，继续空头"
+    if prior == "做多":
+        return "做多", "做多延续；未触发空头阈值"
+    return "中性", "无已知锁定前态，处于阈值之间"
+
+
+def _daily_zone(value) -> str:
+    if value is not None and float(value) > 4:
+        return "做多触发"
+    if value is not None and float(value) < -2.3:
+        return "空头触发"
+    return "阈值内"
+
+
 def compute(day: str, initial: str | None = None):
     hist = load(STATE, {})
     market_path = MARKET / f"{day}_market_timing_input.json"
@@ -61,42 +100,10 @@ def compute(day: str, initial: str | None = None):
     amv = d.setdefault("amv_0", {})
     value = amv.get("amv_change_pct")
     append_observation(day, amv)
-    prior_dates = sorted(k for k in hist if k < day)
-    prior = (
-        hist[prior_dates[-1]]["effective_state"]
-        if prior_dates
-        else (initial or amv.get("prior_effective_state") or "未知")
-    )
+    prior = _prior_state(hist, day, initial, amv)
     quality = amv.get("quality") or "candidate"
     confirmed = quality == "confirmed"
-    if value is None:
-        state = prior
-        transition = "缺值，延续前态"
-    elif float(value) > 4:
-        if confirmed:
-            state = "做多"
-            transition = "单日涨幅>4%（confirmed），切换/维持做多"
-        else:
-            state = prior if prior in ("空头", "做多") else "中性"
-            transition = f"单日涨幅>4%但读数未确认（quality={quality}），不驱动状态转移"
-    elif float(value) < -2.3:
-        if confirmed:
-            state = "空头"
-            transition = "单日跌幅<-2.3%（confirmed），切换/维持空头"
-        else:
-            state = prior if prior in ("空头", "做多") else "中性"
-            transition = (
-                f"单日跌幅<-2.3%但读数未确认（quality={quality}），不驱动状态转移"
-            )
-    elif prior == "空头":
-        state = "空头"
-        transition = "空头锁定；未达到>4%，继续空头"
-    elif prior == "做多":
-        state = "做多"
-        transition = "做多延续；未触发空头阈值"
-    else:
-        state = "中性"
-        transition = "无已知锁定前态，处于阈值之间"
+    state, transition = _resolve_state(prior, value, quality, confirmed)
     rec = {
         "date": day,
         "daily_change_pct": value,
@@ -110,11 +117,7 @@ def compute(day: str, initial: str | None = None):
     write_json_atomic(STATE, hist)
     amv.update(
         {
-            "daily_zone": "做多触发"
-            if value is not None and float(value) > 4
-            else (
-                "空头触发" if value is not None and float(value) < -2.3 else "阈值内"
-            ),
+            "daily_zone": _daily_zone(value),
             "prior_effective_state": prior,
             "effective_state": state,
             "state_transition_reason": transition,

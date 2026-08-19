@@ -470,6 +470,47 @@ GROUPS: dict[str, Callable[[int], list[Probe]]] = {
 }
 
 
+def _probe_row_line(d: dict[str, Any]) -> str:
+    """单个探针的一行表格文本（wired / 成功率 / 空返回 / 耗时 / 形状）。"""
+    wired = "✓" if d["wired"] else "—"
+    rate = f"{d['ok']}/{d['attempts']}"
+    shape = d["shape"] if d["shape"] is not None else (d["error"] or "")
+    return (
+        f"{d['group']:<10}{d['name']:<32}{wired:>5}{rate:>7}"
+        f"{d['empty'] or '':>7}"
+        f"{d['ms_p50'] if d['ms_p50'] is not None else '—':>8}"
+        f"{d['ms_max'] if d['ms_max'] is not None else '—':>8}  {str(shape)[:56]}"
+    )
+
+
+def _print_probe_rows(probes: list[Probe]) -> None:
+    for p in probes:
+        d = p.as_dict()
+        print(_probe_row_line(d))
+        if d["error"] and d["ok"]:
+            print(f"{'':>70}  ⚠️ 部分失败: {d['error'][:70]}")
+
+
+def _print_empty_section(probes: list[Probe]) -> None:
+    """没抛异常但返回空的探针单独成节 —— 比报错更危险：调用方看不出。"""
+    empties = [p for p in probes if p.empty_count and not p.error]
+    if not empties:
+        return
+    print(f"\n⚠️ **{len(empties)} 项没抛异常但返回空**（比报错更危险：调用方看不出）：")
+    for p in empties:
+        print(f"   {p.group}/{p.name}: {p.shape}")
+
+
+def _print_fail_section(probes: list[Probe]) -> None:
+    fails = [p for p in probes if p.ok_count == 0]
+    if not fails:
+        return
+    print(f"\n⚠️ **{len(fails)} 项完全失败**：")
+    for p in fails:
+        print(f"   {p.group}/{p.name}: {p.error}")
+    print("   注意区分「环境没装」与「接口坏了」——前者在 Linux/CI 上是预期的。")
+
+
 def report(probes: list[Probe]) -> None:
     hdr = (
         f"{'组':<10}{'接口':<32}{'接入':>5}{'成功':>7}{'空返回':>7}"
@@ -480,32 +521,9 @@ def report(probes: list[Probe]) -> None:
     print("=" * 118)
     print(hdr)
     print("-" * 118)
-    for p in probes:
-        d = p.as_dict()
-        wired = "✓" if d["wired"] else "—"
-        rate = f"{d['ok']}/{d['attempts']}"
-        shape = d["shape"] if d["shape"] is not None else (d["error"] or "")
-        print(
-            f"{d['group']:<10}{d['name']:<32}{wired:>5}{rate:>7}"
-            f"{d['empty'] or '':>7}"
-            f"{d['ms_p50'] if d['ms_p50'] is not None else '—':>8}"
-            f"{d['ms_max'] if d['ms_max'] is not None else '—':>8}  {str(shape)[:56]}"
-        )
-        if d["error"] and d["ok"]:
-            print(f"{'':>70}  ⚠️ 部分失败: {d['error'][:70]}")
-    empties = [p for p in probes if p.empty_count and not p.error]
-    if empties:
-        print(
-            f"\n⚠️ **{len(empties)} 项没抛异常但返回空**（比报错更危险：调用方看不出）："
-        )
-        for p in empties:
-            print(f"   {p.group}/{p.name}: {p.shape}")
-    fails = [p for p in probes if p.ok_count == 0]
-    if fails:
-        print(f"\n⚠️ **{len(fails)} 项完全失败**：")
-        for p in fails:
-            print(f"   {p.group}/{p.name}: {p.error}")
-        print("   注意区分「环境没装」与「接口坏了」——前者在 Linux/CI 上是预期的。")
+    _print_probe_rows(probes)
+    _print_empty_section(probes)
+    _print_fail_section(probes)
     print("\n⇒ 这份报告用于回填 governance/data/ 的性能与稳定性栏。")
     print("   它**不是**单元测试：结果依赖宿主环境，不能作为断言。")
 

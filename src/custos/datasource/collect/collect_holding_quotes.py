@@ -407,6 +407,108 @@ def _tq_snapshot_index_quote(code, name):
     }
 
 
+def _online_index_quote(code: str, name: str, mkt: int) -> dict | None:
+    """mootdx 在线 index() 最后一根构造指数 quote；无数据返回 None。"""
+    df = _client_call(
+        lambda c: c.index(frequency=9, market=mkt, symbol=code, start=0, offset=2),
+        what=f"index({code})",
+    )
+    if df is None or len(df) < 1:
+        return None
+    last = df.iloc[-1]
+    prev = df.iloc[-2] if len(df) > 1 else None
+    prev_close = float(prev["close"]) if prev is not None else 0
+    close = float(last["close"])
+    chg = pct_change(close, prev_close, digits=2)
+    dt = last.get("datetime", "")
+    return {
+        "code": code,
+        "name": name,
+        "date": str(dt)[:10],
+        "time": str(dt)[:19] if dt else "",
+        "close": close,
+        "price": close,
+        "previous_close": prev_close,
+        "change_pct": chg,
+        "volume": float(last["volume"]),
+        "source": "mootdx_online_index",
+    }
+
+
+def _reader_index_quote(code: str, name: str) -> dict | None:
+    """本地 reader 指数日 K（用正确 TDX 代码，避免 000001 取到平安银行）。"""
+    df = _get_reader().daily(symbol=INDEX_READER_SYMBOLS[code])
+    if df is None or len(df) < 2:
+        return None
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+    prev_close = float(prev["close"])
+    close = float(last["close"])
+    chg = pct_change(close, prev_close, digits=2)
+    last_date = str(last.name)[:19] if hasattr(last.name, "strftime") else ""
+    return {
+        "code": code,
+        "name": name,
+        "date": last_date[:10],
+        "time": last_date,
+        "close": close,
+        "price": close,
+        "previous_close": prev_close,
+        "change_pct": chg,
+        "volume": float(last["volume"]),
+        "source": "mootdx_reader",
+    }
+
+
+def _online_daily_index_quote(code: str, name: str) -> dict | None:
+    """域 B 最后兜底：腾讯/新浪指数日 K（独立在线源，不依赖 TDX 链路）。"""
+    bars, source = online_quotes.fetch_online_daily(INDEX_ONLINE_SYMBOLS[code], count=3)
+    if not bars:
+        return None
+    last = bars[-1]
+    prev_close = float(bars[-2]["close"]) if len(bars) > 1 else 0.0
+    close = float(last["close"])
+    chg = pct_change(close, prev_close, digits=2)
+    return {
+        "code": code,
+        "name": name,
+        "date": str(last["date"])[:10],
+        "time": str(last["date"])[:10],
+        "close": close,
+        "price": close,
+        "previous_close": prev_close,
+        "change_pct": chg,
+        "volume": float(last["volume"]),
+        "source": source,
+    }
+
+
+def _collect_one_index(code: str, name: str, mkt: int) -> dict:
+    """按数据源优先级采集单个指数报价，全部失败标 unavailable。"""
+    idx = _tq_snapshot_index_quote(code, name)
+    # mootdx 在线 index()
+    if idx is None:
+        try:
+            idx = _online_index_quote(code, name, mkt)
+        except Exception as e:
+            print(f"[WARN] {e}", file=sys.stderr)
+    # fallback: local reader
+    if idx is None:
+        try:
+            idx = _reader_index_quote(code, name)
+        except Exception as e:
+            print(f"[WARN] {e}", file=sys.stderr)
+    # 域 B 最后兜底
+    if idx is None:
+        try:
+            idx = _online_daily_index_quote(code, name)
+        except Exception as e:
+            print(f"[WARN] {e}", file=sys.stderr)
+    if idx is None:
+        return {"code": code, "name": name, "available": False, "reason": "no data"}
+    return idx
+
+
 def _collect_indices(session):
     """Collect indices: tq_http 快照 → mootdx 在线 index() → reader 本地（三种 session 统一）。"""
     indices = []
@@ -415,95 +517,7 @@ def _collect_indices(session):
         ("399001", "深证成指", MARKET_SZ),
         ("399006", "创业板指", MARKET_SZ),
     ]:
-        idx = _tq_snapshot_index_quote(code, name)
-        # mootdx 在线 index()
-        if idx is None:
-            try:
-                df = _client_call(
-                    lambda c: c.index(
-                        frequency=9, market=mkt, symbol=code, start=0, offset=2
-                    ),
-                    what=f"index({code})",
-                )
-                if df is not None and len(df) >= 1:
-                    last = df.iloc[-1]
-                    prev = df.iloc[-2] if len(df) > 1 else None
-                    prev_close = float(prev["close"]) if prev is not None else 0
-                    close = float(last["close"])
-                    chg = pct_change(close, prev_close, digits=2)
-                    dt = last.get("datetime", "")
-                    idx = {
-                        "code": code,
-                        "name": name,
-                        "date": str(dt)[:10],
-                        "time": str(dt)[:19] if dt else "",
-                        "close": close,
-                        "price": close,
-                        "previous_close": prev_close,
-                        "change_pct": chg,
-                        "volume": float(last["volume"]),
-                        "source": "mootdx_online_index",
-                    }
-            except Exception as e:
-                print(f"[WARN] {e}", file=sys.stderr)
-        # fallback: local reader（用正确 TDX 代码，避免 000001 取到平安银行）
-        if idx is None:
-            try:
-                df = _get_reader().daily(symbol=INDEX_READER_SYMBOLS[code])
-                if df is not None and len(df) >= 2:
-                    last = df.iloc[-1]
-                    prev = df.iloc[-2]
-                    prev_close = float(prev["close"])
-                    close = float(last["close"])
-                    chg = pct_change(close, prev_close, digits=2)
-                    last_date = (
-                        str(last.name)[:19] if hasattr(last.name, "strftime") else ""
-                    )
-                    idx = {
-                        "code": code,
-                        "name": name,
-                        "date": last_date[:10],
-                        "time": last_date,
-                        "close": close,
-                        "price": close,
-                        "previous_close": prev_close,
-                        "change_pct": chg,
-                        "volume": float(last["volume"]),
-                        "source": "mootdx_reader",
-                    }
-            except Exception as e:
-                print(f"[WARN] {e}", file=sys.stderr)
-        # 域 B 最后兜底：腾讯/新浪日 K（独立在线源，不依赖 TDX 链路）
-        if idx is None:
-            try:
-                bars, source = online_quotes.fetch_online_daily(
-                    INDEX_ONLINE_SYMBOLS[code], count=3
-                )
-                if bars:
-                    last = bars[-1]
-                    prev_close = float(bars[-2]["close"]) if len(bars) > 1 else 0.0
-                    close = float(last["close"])
-                    chg = pct_change(close, prev_close, digits=2)
-                    idx = {
-                        "code": code,
-                        "name": name,
-                        "date": str(last["date"])[:10],
-                        "time": str(last["date"])[:10],
-                        "close": close,
-                        "price": close,
-                        "previous_close": prev_close,
-                        "change_pct": chg,
-                        "volume": float(last["volume"]),
-                        "source": source,
-                    }
-            except Exception as e:
-                print(f"[WARN] {e}", file=sys.stderr)
-        if idx is None:
-            indices.append(
-                {"code": code, "name": name, "available": False, "reason": "no data"}
-            )
-        else:
-            indices.append(idx)
+        indices.append(_collect_one_index(code, name, mkt))
     return indices
 
 

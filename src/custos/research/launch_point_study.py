@@ -26,7 +26,7 @@ import statistics
 import sys
 from datetime import date as _date, timedelta as _td
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, Callable, Optional, cast
 
 import pandas as pd
 
@@ -956,8 +956,10 @@ def _auc_within_day(by_day: dict, valfn, picks_key: str = "win") -> Optional[flo
     (全局池 AUC 会被日期效应污染,可能与'每日选top-k精确率'方向相反 = Simpson 悖论。)"""
     num = den = 0.0
     for _d, lst in by_day.items():
-        pos = [valfn(x) for x in lst if x[picks_key] and valfn(x) is not None]
-        neg = [valfn(x) for x in lst if not x[picks_key] and valfn(x) is not None]
+        # 每行只取一次特征值(旧写法在值与判空两处各调一次 valfn,逐位等价但调用减半)
+        vals = [(x[picks_key], valfn(x)) for x in lst]
+        pos = [v for w, v in vals if w and v is not None]
+        neg = [v for w, v in vals if not w and v is not None]
         if not pos or not neg:
             continue
         a = _auc(pos, neg)
@@ -1235,26 +1237,48 @@ def _feature_halves_auc(constant: bool, auc, halves: tuple, vf) -> tuple:
     return h1, h2, consistent
 
 
-def _eval_feature(
-    f: str, rows: list, by_day: dict, halves: tuple, picks_per_day: int
-) -> dict:
-    """单特征度量块(判别循环的主体):日内AUC + 每日top-k精确率 + 半程一致性。"""
+def _feature_vf(f: str) -> Callable[[dict], Any]:
+    """特征取值闭包:base_score 走行顶层字段,其余走 feats dict(缺失 → None,不参与比较)。"""
 
-    def vf(x):
+    def vf(x: dict) -> Any:
         return x["base_score"] if f == "base_score" else x["feats"].get(f)
 
-    pos = [v for v in (vf(x) for x in rows if x["win"]) if v is not None]
-    neg = [v for v in (vf(x) for x in rows if not x["win"]) if v is not None]
-    allv = [v for v in (vf(x) for x in rows) if v is not None]
-    constant = len(set(allv)) <= 1  # 零方差(如 reversal_k 内的 reversal_quality 恒=4)
-    auc = None if constant else _auc_within_day(by_day, vf)
-    # 方向:AUC<0.5 表示"特征越小越会跑"= 反向预测子(取反即可用,如 reversal_quality_inv 的由来),
-    # 故两个方向的 top-k 精确率都算,判定按 |AUC-0.5| 与**有效方向**的净增益,避免误杀反向信号。
-    tk = _daily_topk(by_day, vf, picks_per_day, constant)
+    return vf
+
+
+def _feature_partitions(
+    vf: Callable[[dict], Any], rows: list
+) -> tuple[list, list, list]:
+    """一趟扫描拆出 (赢家值, 非赢家值, 全部非空值)——逐位等价于旧的三遍过滤,但每行只取一次值。"""
+    pos: list = []
+    neg: list = []
+    allv: list = []
+    for x in rows:
+        v = vf(x)
+        if v is None:
+            continue
+        allv.append(v)
+        (pos if x["win"] else neg).append(v)
+    return pos, neg, allv
+
+
+def _feature_metric_row(
+    f: str,
+    pos: list,
+    neg: list,
+    auc: Optional[float],
+    constant: bool,
+    tk: dict,
+    h1: Optional[float],
+    h2: Optional[float],
+    consistent: bool,
+) -> dict:
+    """组装单特征度量 dict(字段与键序即报告/下游消费口径,勿动)。"""
     direction = None if auc is None else ("high" if auc >= 0.5 else "low")
     edge = None if auc is None else round(abs(auc - 0.5), 4)
     lift_eff = tk["lift"] if direction != "low" else tk["lift_lo"]
-    h1, h2, consistent = _feature_halves_auc(constant, auc, halves, vf)
+    mp = _median(pos)
+    mn = _median(neg)
     return {
         "feature": f,
         "auc_pooled": _auc(pos, neg),
@@ -1264,13 +1288,9 @@ def _eval_feature(
         "constant": constant,
         "n_pos": len(pos),
         "n_neg": len(neg),
-        "median_win": _median(pos),
-        "median_lose": _median(neg),
-        "median_diff": (
-            None
-            if (mp := _median(pos)) is None or (mn := _median(neg)) is None
-            else round(mp - mn, 4)
-        ),
+        "median_win": mp,
+        "median_lose": mn,
+        "median_diff": None if mp is None or mn is None else round(mp - mn, 4),
         "precision_at_daily_top": tk["prec"],
         "precision_at_daily_bottom": tk["prec_lo"],
         "fair_random_precision": tk["fair"],
@@ -1282,6 +1302,21 @@ def _eval_feature(
         "auc_second_half": h2,
         "split_consistent": consistent,
     }
+
+
+def _eval_feature(
+    f: str, rows: list, by_day: dict, halves: tuple, picks_per_day: int
+) -> dict:
+    """单特征度量块(判别循环的主体):日内AUC + 每日top-k精确率 + 半程一致性。"""
+    vf = _feature_vf(f)
+    pos, neg, allv = _feature_partitions(vf, rows)
+    constant = len(set(allv)) <= 1  # 零方差(如 reversal_k 内的 reversal_quality 恒=4)
+    auc = None if constant else _auc_within_day(by_day, vf)
+    # 方向:AUC<0.5 表示"特征越小越会跑"= 反向预测子(取反即可用,如 reversal_quality_inv 的由来),
+    # 故两个方向的 top-k 精确率都算,判定按 |AUC-0.5| 与**有效方向**的净增益,避免误杀反向信号。
+    tk = _daily_topk(by_day, vf, picks_per_day, constant)
+    h1, h2, consistent = _feature_halves_auc(constant, auc, halves, vf)
+    return _feature_metric_row(f, pos, neg, auc, constant, tk, h1, h2, consistent)
 
 
 def _split_usable(out_feats: list) -> tuple[list, list]:

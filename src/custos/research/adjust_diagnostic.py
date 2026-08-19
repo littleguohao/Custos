@@ -152,6 +152,72 @@ def _risk_frac_stats(bars: dict[str, pd.DataFrame]) -> tuple[float, float]:
     )
 
 
+# 分档统计：小幅除息同样有害，不能只看 ≥11% 的送转
+GapBand = tuple[float, float, str]
+
+
+def _collect_gap_stats(
+    bars: dict[str, pd.DataFrame], bands: list[GapBand]
+) -> tuple[list[dict[str, Any]], dict[str, int], dict[str, set[str]]]:
+    """低阈值（2%）全扫所有跳空，再按幅度档归类计数。"""
+    counts = {b[2]: 0 for b in bands}
+    codes_hit: dict[str, set[str]] = {b[2]: set() for b in bands}
+    all_gaps: list[dict[str, Any]] = []
+    for c, df in bars.items():
+        for g in detect_gaps(df, thr=0.02):  # 低阈值全扫，再分档
+            g["code"] = c
+            all_gaps.append(g)
+            a = abs(g["gap"])
+            for lo_, hi_, label in bands:
+                if lo_ <= a < hi_:
+                    counts[label] += 1
+                    codes_hit[label].add(c)
+                    break
+    return all_gaps, counts, codes_hit
+
+
+def _print_band_table(
+    bands: list[GapBand],
+    counts: dict[str, int],
+    codes_hit: dict[str, set[str]],
+    n: int,
+) -> None:
+    print(f"{'幅度档':<30}{'次数':>7}{'涉及股票':>10}{'占样本':>9}")
+    print("-" * 58)
+    for _, _, label in bands:
+        k, s = counts[label], len(codes_hit[label])
+        print(f"{label:<30}{k:>7}{s:>10}{s / n:>8.1%}")
+
+
+def _print_stop_room_warning(med_rf: float, q25_rf: float, danger: int) -> None:
+    print("\nB1 实际止损空间（stop_mode=low ⇒ (close−low)/close）：")
+    print(f"  中位 {med_rf:.2%}   下四分位 {q25_rf:.2%}")
+    print(f"\n⚠️ **止损空间中位仅 {med_rf:.2%}，而检出的 {danger} 次跳空全部 ≥2%**")
+    print("   ⇒ 每一次都足以在未复权回测里触发假止损。送转跳空(-20%~-50%)一眼可见，")
+    print("     但**现金分红除息(2%~5%)数量更多、更隐蔽**——分红股远多于送转股。")
+
+
+def _print_split_like(all_gaps: list[dict[str, Any]]) -> None:
+    split_like = [g for g in all_gaps if g["split_match"]]
+    if split_like:
+        print(f"\n其中 {len(split_like)} 次幅度吻合典型送转比例 ⇒ 几乎确定是除权：")
+        for x in sorted(split_like, key=lambda v: v["gap"])[:10]:
+            print(
+                f"  {x['code']} {x['date']} {x['gap']:+.1%} "
+                f"({x['prev_close']}→{x['open']})  ← 吻合 {x['split_match']}"
+            )
+
+
+def _print_deep_gaps(all_gaps: list[dict[str, Any]], thr: float) -> None:
+    big = [g for g in all_gaps if abs(g["gap"]) >= thr]
+    if big:
+        gs = sorted(x["gap"] for x in big)
+        print(
+            f"\n≥{thr:.0%} 的深跳空：{len(big)} 次，中位 {statistics.median(gs):.1%}，"
+            f"最深 {gs[0]:.1%}"
+        )
+
+
 def cmd_scan(sample: int, count: int, seed: int, thr: float = GAP_THRESHOLD) -> int:
     codes = _universe(sample, seed)
     if not codes:
@@ -163,61 +229,86 @@ def cmd_scan(sample: int, count: int, seed: int, thr: float = GAP_THRESHOLD) -> 
         return 2
     n = len(bars)
 
-    # 分档统计：小幅除息同样有害，不能只看 ≥11% 的送转
-    bands = [
+    bands: list[GapBand] = [
         (0.02, 0.05, "2%~5%   现金分红除息为主"),
         (0.05, 0.11, "5%~11%  大额分红/小比例送转"),
         (0.11, 0.25, "11%~25% 送转(10送2~10送3)"),
         (0.25, 1.00, "≥25%    送转(10送5 及以上)"),
     ]
-    counts = {b[2]: 0 for b in bands}
-    codes_hit: dict[str, set] = {b[2]: set() for b in bands}
-    all_gaps = []
-    for c, df in bars.items():
-        for g in detect_gaps(df, thr=0.02):  # 低阈值全扫，再分档
-            g["code"] = c
-            all_gaps.append(g)
-            a = abs(g["gap"])
-            for lo_, hi_, label in bands:
-                if lo_ <= a < hi_:
-                    counts[label] += 1
-                    codes_hit[label].add(c)
-                    break
+    all_gaps, counts, codes_hit = _collect_gap_stats(bars, bands)
 
     med_rf, q25_rf = _risk_frac_stats(bars)
     print(f"读到 {n} 只，共检出 {len(all_gaps)} 次向下跳空（阈值 2%）\n")
-    print(f"{'幅度档':<30}{'次数':>7}{'涉及股票':>10}{'占样本':>9}")
-    print("-" * 58)
-    for _, _, label in bands:
-        k, s = counts[label], len(codes_hit[label])
-        print(f"{label:<30}{k:>7}{s:>10}{s / n:>8.1%}")
-
-    print("\nB1 实际止损空间（stop_mode=low ⇒ (close−low)/close）：")
-    print(f"  中位 {med_rf:.2%}   下四分位 {q25_rf:.2%}")
+    _print_band_table(bands, counts, codes_hit, n)
     danger = sum(counts[label] for lo_, _, label in bands if lo_ >= 0.02)
-    print(f"\n⚠️ **止损空间中位仅 {med_rf:.2%}，而检出的 {danger} 次跳空全部 ≥2%**")
-    print("   ⇒ 每一次都足以在未复权回测里触发假止损。送转跳空(-20%~-50%)一眼可见，")
-    print("     但**现金分红除息(2%~5%)数量更多、更隐蔽**——分红股远多于送转股。")
-
-    split_like = [g for g in all_gaps if g["split_match"]]
-    if split_like:
-        print(f"\n其中 {len(split_like)} 次幅度吻合典型送转比例 ⇒ 几乎确定是除权：")
-        for x in sorted(split_like, key=lambda v: v["gap"])[:10]:
-            print(
-                f"  {x['code']} {x['date']} {x['gap']:+.1%} "
-                f"({x['prev_close']}→{x['open']})  ← 吻合 {x['split_match']}"
-            )
-
-    big = [g for g in all_gaps if abs(g["gap"]) >= thr]
-    if big:
-        gs = sorted(x["gap"] for x in big)
-        print(
-            f"\n≥{thr:.0%} 的深跳空：{len(big)} 次，中位 {statistics.median(gs):.1%}，"
-            f"最深 {gs[0]:.1%}"
-        )
+    _print_stop_room_warning(med_rf, q25_rf, danger)
+    _print_split_like(all_gaps)
+    _print_deep_gaps(all_gaps, thr)
     print("\n⚠️ 局限：本扫描按跳空幅度判定，无法区分「除权」与「一字跌停/科创板深跌」。")
     print("   要精确区分，跑 --compare 与前复权源逐日比对。")
     return 0
+
+
+CompareRow = tuple[str, str, Any, Any, Any]
+
+
+def _adjusted_lookup(
+    a: pd.DataFrame,
+) -> tuple[dict[str, tuple[Any, Any]], np.ndarray, dict[str, int]]:
+    """前复权参照索引：日期 → (open, close)、close 序列、日期 → 位置。"""
+    am = {
+        str(d)[:10]: (o, cl)
+        for d, o, cl in zip(
+            a["date"].astype(str), a["open"].astype(float), a["close"].astype(float)
+        )
+    }
+    ac = a["close"].astype(float).to_numpy()
+    ad = [str(x)[:10] for x in a["date"].astype(str)]
+    pos = {d: i for i, d in enumerate(ad)}
+    return am, ac, pos
+
+
+def _classify_gaps(
+    c: str, gaps: list[dict[str, Any]], a: pd.DataFrame
+) -> tuple[list[CompareRow], int, int]:
+    """对一只票：用前复权参照把疑似跳空分成「除权确认 / 真实下跌 / 无参照」。"""
+    am, ac, pos = _adjusted_lookup(a)
+    rows: list[CompareRow] = []
+    false_pos = no_ref = 0
+    for g in gaps:
+        i = pos.get(g["date"])
+        if i is None or i == 0:
+            no_ref += 1
+            continue
+        adj_gap = am[g["date"]][0] / ac[i - 1] - 1 if ac[i - 1] > 0 else 0.0
+        # 未复权大跳空、前复权几乎没跌 ⇒ 除权确认
+        if adj_gap > g["gap"] + 0.05:
+            rows.append((c, g["date"], g["gap"], adj_gap, g["split_match"]))
+        else:
+            false_pos += 1
+    return rows, false_pos, no_ref
+
+
+def _print_compare_summary(confirmed: int, false_pos: int, no_ref: int) -> None:
+    tot = confirmed + false_pos + no_ref
+    print(f"疑似跳空 {tot} 次：")
+    print(f"  ✓ 除权确认   {confirmed} 次（未复权大跌、前复权没跌）")
+    print(f"  · 真实下跌   {false_pos} 次（两个口径都跌 ⇒ 一字跌停等）")
+    print(f"  ? 无参照     {no_ref} 次（前复权源缺该票/该日）")
+
+
+def _print_confirmed_samples(
+    rows: list[CompareRow], confirmed: int, false_pos: int
+) -> None:
+    if confirmed:
+        print(
+            f"\n⇒ **{confirmed / max(confirmed + false_pos, 1):.0%} 的大跳空是除权**，"
+            f"未复权回测把它们全当成了真实暴跌\n"
+        )
+        print("样例（代码 日期 未复权跳空 → 前复权实际）：")
+        for c, d, ug, ag, sm in sorted(rows, key=lambda r: r[2])[:12]:
+            tag = f"  ← {sm}" if sm else ""
+            print(f"  {c} {d}  {ug:+.1%} → {ag:+.1%}{tag}")
 
 
 def cmd_compare(sample: int, count: int, seed: int, s_data_root: str) -> int:
@@ -239,8 +330,8 @@ def cmd_compare(sample: int, count: int, seed: int, s_data_root: str) -> int:
         print(f"[ERR] 读前复权失败: {e}")
         return 2
     print(f"逐日对比 {len(tdx)} 只未复权 vs {len(adj)} 只前复权\n")
-    confirmed, false_pos, no_ref = 0, 0, 0
-    rows = []
+    false_pos, no_ref = 0, 0
+    rows: list[CompareRow] = []
     for c, df in tdx.items():
         a = adj.get(c)
         gaps = detect_gaps(df)
@@ -249,41 +340,13 @@ def cmd_compare(sample: int, count: int, seed: int, s_data_root: str) -> int:
         if a is None or a.empty:
             no_ref += len(gaps)
             continue
-        am = {
-            str(d)[:10]: (o, cl)
-            for d, o, cl in zip(
-                a["date"].astype(str), a["open"].astype(float), a["close"].astype(float)
-            )
-        }
-        ac = a["close"].astype(float).to_numpy()
-        ad = [str(x)[:10] for x in a["date"].astype(str)]
-        pos = {d: i for i, d in enumerate(ad)}
-        for g in gaps:
-            i = pos.get(g["date"])
-            if i is None or i == 0:
-                no_ref += 1
-                continue
-            adj_gap = am[g["date"]][0] / ac[i - 1] - 1 if ac[i - 1] > 0 else 0.0
-            # 未复权大跳空、前复权几乎没跌 ⇒ 除权确认
-            if adj_gap > g["gap"] + 0.05:
-                confirmed += 1
-                rows.append((c, g["date"], g["gap"], adj_gap, g["split_match"]))
-            else:
-                false_pos += 1
-    tot = confirmed + false_pos + no_ref
-    print(f"疑似跳空 {tot} 次：")
-    print(f"  ✓ 除权确认   {confirmed} 次（未复权大跌、前复权没跌）")
-    print(f"  · 真实下跌   {false_pos} 次（两个口径都跌 ⇒ 一字跌停等）")
-    print(f"  ? 无参照     {no_ref} 次（前复权源缺该票/该日）")
-    if confirmed:
-        print(
-            f"\n⇒ **{confirmed / max(confirmed + false_pos, 1):.0%} 的大跳空是除权**，"
-            f"未复权回测把它们全当成了真实暴跌\n"
-        )
-        print("样例（代码 日期 未复权跳空 → 前复权实际）：")
-        for c, d, ug, ag, sm in sorted(rows, key=lambda r: r[2])[:12]:
-            tag = f"  ← {sm}" if sm else ""
-            print(f"  {c} {d}  {ug:+.1%} → {ag:+.1%}{tag}")
+        r, fp, nr = _classify_gaps(c, gaps, a)
+        rows.extend(r)
+        false_pos += fp
+        no_ref += nr
+    confirmed = len(rows)
+    _print_compare_summary(confirmed, false_pos, no_ref)
+    _print_confirmed_samples(rows, confirmed, false_pos)
     return 0
 
 

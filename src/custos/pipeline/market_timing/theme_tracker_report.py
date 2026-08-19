@@ -181,69 +181,79 @@ def action_bias(stage: str, score: float, market_status: str = "震荡偏弱") -
     return "谨慎观察"
 
 
+def _no_code_row(th: dict[str, Any]) -> dict[str, Any]:
+    """主题没有主板块代码时的 unavailable 行（不能悄悄跳过该主题）。"""
+    return {
+        "theme_id": th.get("theme_id"),
+        "theme_name": th.get("theme_name"),
+        "priority": th.get("priority"),
+        "available": False,
+        "reason": "no primary sector code",
+        "representative_stocks": th.get("representative_stocks", []),
+        "semantic_tags": th.get("semantic_tags", []),
+    }
+
+
+def _analysis_row(
+    th: dict[str, Any],
+    code: Any,
+    analysis: dict[str, Any],
+    stage: str,
+    reason: str,
+    score: float,
+) -> dict[str, Any]:
+    """主板块代码可用的主题行：摊平 analysis 关键字段 + 阶段/分数/操作倾向。"""
+    trend = analysis.get("trend") or {}
+    box20 = analysis.get("box_20d") or {}
+    daily = analysis.get("daily") or {}
+    weekly = analysis.get("weekly") or {}
+    kdj = daily.get("kdj") or {}
+    macd = daily.get("macd") or {}
+    weekly_macd = weekly.get("macd") or {}
+    return {
+        "theme_id": th.get("theme_id"),
+        "theme_name": th.get("theme_name"),
+        "priority": th.get("priority"),
+        "primary_code": code,
+        "candidate_codes": th.get("candidate_sector_codes", []),
+        "representative_stocks": th.get("representative_stocks", []),
+        "holding_related": th.get("holding_related", []),
+        "semantic_tags": th.get("semantic_tags", []),
+        "confidence": th.get("confidence"),
+        "available": bool(analysis.get("available")),
+        "latest_date": analysis.get("latest_date"),
+        "trend_state": trend.get("state"),
+        "close": trend.get("close"),
+        "box20_position": box20.get("position"),
+        "box20_upper": box20.get("upper"),
+        "box20_lower": box20.get("lower"),
+        "daily_j": kdj.get("j"),
+        "daily_kdj_state": kdj.get("state"),
+        "daily_macd_hist": macd.get("hist"),
+        "daily_macd_direction": macd.get("hist_direction"),
+        "weekly_macd_hist": weekly_macd.get("hist"),
+        "stage": stage,
+        "stage_reason": reason,
+        "score": score,
+        "action_bias": action_bias(stage, score),
+        "analysis": analysis,
+    }
+
+
 def build_sector_summary(date: str) -> list[dict[str, Any]]:
     m = load_json(SECTOR_MAP, {})
     rows = []
     for th in m.get("themes", []):
         codes = th.get("primary_sector_codes") or []
         if not codes:
-            rows.append(
-                {
-                    "theme_id": th.get("theme_id"),
-                    "theme_name": th.get("theme_name"),
-                    "priority": th.get("priority"),
-                    "available": False,
-                    "reason": "no primary sector code",
-                    "representative_stocks": th.get("representative_stocks", []),
-                    "semantic_tags": th.get("semantic_tags", []),
-                }
-            )
+            rows.append(_no_code_row(th))
             continue
         code = codes[0]
         df = tm.read_vipdoc(code)
         analysis = tm.analyze(df, code)
         stage, reason = classify_stage(analysis)
         score = score_sector(analysis, th.get("priority", ""))
-        rows.append(
-            {
-                "theme_id": th.get("theme_id"),
-                "theme_name": th.get("theme_name"),
-                "priority": th.get("priority"),
-                "primary_code": code,
-                "candidate_codes": th.get("candidate_sector_codes", []),
-                "representative_stocks": th.get("representative_stocks", []),
-                "holding_related": th.get("holding_related", []),
-                "semantic_tags": th.get("semantic_tags", []),
-                "confidence": th.get("confidence"),
-                "available": bool(analysis.get("available")),
-                "latest_date": analysis.get("latest_date"),
-                "trend_state": (analysis.get("trend") or {}).get("state"),
-                "close": (analysis.get("trend") or {}).get("close"),
-                "box20_position": (analysis.get("box_20d") or {}).get("position"),
-                "box20_upper": (analysis.get("box_20d") or {}).get("upper"),
-                "box20_lower": (analysis.get("box_20d") or {}).get("lower"),
-                "daily_j": (((analysis.get("daily") or {}).get("kdj") or {}).get("j")),
-                "daily_kdj_state": (
-                    ((analysis.get("daily") or {}).get("kdj") or {}).get("state")
-                ),
-                "daily_macd_hist": (
-                    ((analysis.get("daily") or {}).get("macd") or {}).get("hist")
-                ),
-                "daily_macd_direction": (
-                    ((analysis.get("daily") or {}).get("macd") or {}).get(
-                        "hist_direction"
-                    )
-                ),
-                "weekly_macd_hist": (
-                    ((analysis.get("weekly") or {}).get("macd") or {}).get("hist")
-                ),
-                "stage": stage,
-                "stage_reason": reason,
-                "score": score,
-                "action_bias": action_bias(stage, score),
-                "analysis": analysis,
-            }
-        )
+        rows.append(_analysis_row(th, code, analysis, stage, reason, score))
     rows.sort(key=lambda r: (r.get("available") is not True, -(r.get("score") or 0)))
     return rows
 

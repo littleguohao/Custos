@@ -67,6 +67,34 @@ DIV_MIN_GAP = 5  # 两个低点之间至少间隔的根数
 RSI_MIN_BARS = 40
 
 
+def _hist_segment(seg_all: pd.Series, exclude_recent: int) -> pd.Series:
+    """区间行为用"历史段"（排除最近 exclude_recent 根）。
+
+    否则当前这次回调本身会把窗口低点打穿 40，使"上涨中的深度回调"永远判不出
+    牛市区间——而那恰是要找的形态。历史段太短（不够排除后还剩 10 根）时退回全段。
+    """
+    if exclude_recent and len(seg_all) > exclude_recent + 10:
+        return seg_all.iloc[:-exclude_recent]
+    return seg_all
+
+
+def _lower_highs(hist: pd.Series) -> bool:
+    """反弹高点是否递降（下跌中继的特征）：把历史段分两半比高点。"""
+    half = len(hist) // 2
+    hi_first = float(hist.iloc[:half].max()) if half >= 3 else None
+    hi_second = float(hist.iloc[half:].max()) if len(hist) - half >= 3 else None
+    return bool(hi_first is not None and hi_second is not None and hi_second < hi_first)
+
+
+def _classify_regime(lo: float, hi: float, lower_highs: bool) -> str:
+    """按 Cardwell 区间边界把 (lo, hi) 归为四态之一。"""
+    if lo >= BULL_RANGE_LOW and hi > BULL_RANGE_CONFIRM:
+        return "strong"
+    if lo < BEAR_RANGE_LOW and hi <= BEAR_RANGE_HIGH:
+        return "decline_continuation" if lower_highs else "weak_rebound"
+    return "neutral"
+
+
 def rsi_regime(
     df: pd.DataFrame,
     n: int = RSI_MID,
@@ -105,28 +133,10 @@ def rsi_regime(
         cur = float(r.iloc[-1]) if r.iloc[-1] == r.iloc[-1] else None
         if cur is None:
             return {"available": False, "state": None, "reason": "RSI 末值不可用"}
-        # 区间行为用"历史段"（排除最近 exclude_recent 根）
-        hist = (
-            seg_all.iloc[:-exclude_recent]
-            if (exclude_recent and len(seg_all) > exclude_recent + 10)
-            else seg_all
-        )
+        hist = _hist_segment(seg_all, exclude_recent)
         lo, hi = float(hist.min()), float(hist.max())
-
-        # 反弹高点是否递降（下跌中继的特征）：把历史段分两半比高点
-        half = len(hist) // 2
-        hi_first = float(hist.iloc[:half].max()) if half >= 3 else None
-        hi_second = float(hist.iloc[half:].max()) if len(hist) - half >= 3 else None
-        lower_highs = bool(
-            hi_first is not None and hi_second is not None and hi_second < hi_first
-        )
-
-        if lo >= BULL_RANGE_LOW and hi > BULL_RANGE_CONFIRM:
-            state = "strong"
-        elif lo < BEAR_RANGE_LOW and hi <= BEAR_RANGE_HIGH:
-            state = "decline_continuation" if lower_highs else "weak_rebound"
-        else:
-            state = "neutral"
+        lower_highs = _lower_highs(hist)
+        state = _classify_regime(lo, hi, lower_highs)
         return {
             "available": True,
             "state": state,

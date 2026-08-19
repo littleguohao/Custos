@@ -792,12 +792,10 @@ def check_five_day_entry(df) -> dict[str, Any]:
     }
 
 
-def check_volume_sustain(df) -> dict[str, Any]:
-    """量能持续性（CZ §14.6）：mainline_confirmed / retreat / neutral。"""
-    _, _, _, vol = _ohlcv_arrays(df)
-    n = len(df)
-    if n < VOLUME_SUSTAIN_WINDOW + 1:
-        return {"status": "neutral", "available": False}
+def _vs_peak_and_post(
+    df, vol: np.ndarray, n: int
+) -> tuple[np.ndarray, float, int, str, np.ndarray]:
+    """窗口内峰值定位：返回 (win, peak, days_since, peak_date, post)。"""
     win = vol[-VOLUME_SUSTAIN_WINDOW:]
     peak_rel = int(win.argmax())
     peak = float(win[peak_rel])
@@ -805,39 +803,72 @@ def check_volume_sustain(df) -> dict[str, Any]:
     peak_pos = n - VOLUME_SUSTAIN_WINDOW + peak_rel
     peak_date = str(df["date"].iloc[peak_pos])[:10]
     post = vol[peak_pos + 1 :]
-    post_mean_ratio = float(post.mean() / peak) if len(post) and peak else None
-    post_min_ratio = float(post.min() / peak) if len(post) and peak else None
-    ratios_last13 = [round(float(v / peak), 3) if peak else None for v in win]
-    retreat = bool(
+    return win, peak, days_since, peak_date, post
+
+
+def _vs_retreat(vol: np.ndarray, peak: float, days_since: int) -> bool:
+    """撤退判定：峰值日起连续 N 日量 < 峰值×55%。"""
+    return bool(
         days_since >= VOLUME_SUSTAIN_RETREAT_DAYS
         and peak
         and all(
             v < peak * VOLUME_SUSTAIN_RATIO for v in vol[-VOLUME_SUSTAIN_RETREAT_DAYS:]
         )
     )
-    # 与 01_cognition_framework.md §14.6 一致：峰值日后窗口内"逐日"量都必须 ≥ 峰值×55%
-    # （均值达标但有单日跌破不算主线确认）。
-    confirmed = bool(
+
+
+def _vs_confirmed(
+    post: np.ndarray, peak: float, days_since: int, retreat: bool
+) -> bool:
+    """主线确认判定。
+
+    与 01_cognition_framework.md §14.6 一致：峰值日后窗口内"逐日"量都必须 ≥ 峰值×55%
+    （均值达标但有单日跌破不算主线确认）。
+    """
+    return bool(
         not retreat
         and days_since >= VOLUME_SUSTAIN_MIN_POST_DAYS
         and len(post)
         and peak
         and all(v >= peak * VOLUME_SUSTAIN_RATIO for v in post)
     )
+
+
+def _vs_ratios(
+    win: np.ndarray, post: np.ndarray, peak: float
+) -> tuple[Optional[float], Optional[float], list]:
+    """峰后均值/最低量比 + 窗口逐日量比（落盘证据列）。"""
+    post_mean_ratio = float(post.mean() / peak) if len(post) and peak else None
+    post_min_ratio = float(post.min() / peak) if len(post) and peak else None
+    ratios_last13 = [round(float(v / peak), 3) if peak else None for v in win]
+    return post_mean_ratio, post_min_ratio, ratios_last13
+
+
+def _round3_or_none(v: Optional[float]) -> Optional[float]:
+    """round(v, 3)，None 透传。"""
+    return round(v, 3) if v is not None else None
+
+
+def check_volume_sustain(df) -> dict[str, Any]:
+    """量能持续性（CZ §14.6）：mainline_confirmed / retreat / neutral。"""
+    _, _, _, vol = _ohlcv_arrays(df)
+    n = len(df)
+    if n < VOLUME_SUSTAIN_WINDOW + 1:
+        return {"status": "neutral", "available": False}
+    win, peak, days_since, peak_date, post = _vs_peak_and_post(df, vol, n)
+    retreat = _vs_retreat(vol, peak, days_since)
+    confirmed = _vs_confirmed(post, peak, days_since, retreat)
     status = (
         "retreat" if retreat else ("mainline_confirmed" if confirmed else "neutral")
     )
+    post_mean_ratio, post_min_ratio, ratios_last13 = _vs_ratios(win, post, peak)
     return {
         "status": status,
         "available": True,
         "peak_date": peak_date,
         "days_since_peak": days_since,
-        "post_mean_ratio": round(post_mean_ratio, 3)
-        if post_mean_ratio is not None
-        else None,
-        "post_min_ratio": round(post_min_ratio, 3)
-        if post_min_ratio is not None
-        else None,
+        "post_mean_ratio": _round3_or_none(post_mean_ratio),
+        "post_min_ratio": _round3_or_none(post_min_ratio),
         "vol_ratios_last13": ratios_last13,
     }
 
@@ -1390,24 +1421,21 @@ def fund_flow_of(code6: str, sector_name: str, ff: dict) -> dict[str, Any]:
     return _fund_flow_result(entry, sec_match)
 
 
-def _base_scalars(df, index_df) -> dict[str, Any]:
-    """基础标量块：价/涨跌/振幅/BBI/日J/量能/20日相对强度/止损位及派生布尔。"""
-    close = df["close"]
-    bbi = bbi_state(df)
-    j = kdj(df)
-    last = df.iloc[-1]
-    prev_close = float(close.iloc[-2]) if len(df) >= 2 else None
-
+def _volume_stats(df) -> tuple[Optional[float], Optional[float]]:
+    """量比（当日量/前5日均量）与 20 日量分位。"""
     vol = df["volume"].astype(float)
     vol_today = float(vol.iloc[-1])
     vol_ma5_prev = float(vol.iloc[-6:-1].mean()) if len(df) >= 6 else None
     vol_ratio = (vol_today / vol_ma5_prev) if vol_ma5_prev else None
     vol20 = vol.tail(20)
     vol_pctile = float((vol20 < vol_today).mean() * 100) if len(vol20) >= 20 else None
+    return vol_ratio, vol_pctile
 
-    change_pct = pct_change(float(last["close"]), prev_close, digits=2)
-    amplitude_pct = amplitude_pct_of(last["high"], last["low"], prev_close)
 
+def _rs_20d_stats(
+    df, index_df
+) -> tuple[Optional[float], Optional[float], Optional[float]]:
+    """20 日相对强度：个股 20 日涨幅 − 上证指数 20 日涨幅（百分点）。"""
     stock_ret20 = _close_ret_pct(df, 20)
     index_ret20 = (
         _close_ret_pct(index_df, 20)
@@ -1419,12 +1447,24 @@ def _base_scalars(df, index_df) -> dict[str, Any]:
         if (stock_ret20 is not None and index_ret20 is not None)
         else None
     )
+    return stock_ret20, index_ret20, rs_20d
 
-    stop_ref = None
-    if len(df) >= STOP_LOOKBACK:
-        stop_ref = round(float(df["low"].tail(STOP_LOOKBACK).min()), 4)
 
-    daily_j = j.get("j") if j.get("available") else None
+def _stop_ref(df) -> Optional[float]:
+    """建议止损位：近 STOP_LOOKBACK 日最低价（根数不足 → None）。"""
+    if len(df) < STOP_LOOKBACK:
+        return None
+    return round(float(df["low"].tail(STOP_LOOKBACK).min()), 4)
+
+
+def _reversal_flags(
+    daily_j: Any,
+    vol_ratio: Optional[float],
+    vol_pctile: Optional[float],
+    change_pct: Optional[float],
+    amplitude_pct: Optional[float],
+) -> tuple[bool, bool, bool]:
+    """j_low / volume_contraction / reversal_k_candidate 三个派生布尔。"""
     j_low = daily_j is not None and daily_j < J_LOW_THRESHOLD
     vol_contraction = (
         vol_ratio is not None
@@ -1438,6 +1478,27 @@ def _base_scalars(df, index_df) -> dict[str, Any]:
         and change_in_range(change_pct)
         and amplitude_pct is not None
         and amplitude_pct <= REVERSAL_AMPLITUDE_PCT
+    )
+    return j_low, vol_contraction, reversal_k
+
+
+def _base_scalars(df, index_df) -> dict[str, Any]:
+    """基础标量块：价/涨跌/振幅/BBI/日J/量能/20日相对强度/止损位及派生布尔。"""
+    close = df["close"]
+    bbi = bbi_state(df)
+    j = kdj(df)
+    last = df.iloc[-1]
+    prev_close = float(close.iloc[-2]) if len(df) >= 2 else None
+
+    vol_ratio, vol_pctile = _volume_stats(df)
+    change_pct = pct_change(float(last["close"]), prev_close, digits=2)
+    amplitude_pct = amplitude_pct_of(last["high"], last["low"], prev_close)
+    stock_ret20, index_ret20, rs_20d = _rs_20d_stats(df, index_df)
+    stop_ref = _stop_ref(df)
+
+    daily_j = j.get("j") if j.get("available") else None
+    j_low, vol_contraction, reversal_k = _reversal_flags(
+        daily_j, vol_ratio, vol_pctile, change_pct, amplitude_pct
     )
     return {
         "last": last,
@@ -1742,6 +1803,66 @@ def _merge_hits(hits_data: dict) -> dict[str, dict]:
     return merged
 
 
+def _load_financials_ctx(
+    financials_cfg: Optional[dict],
+) -> tuple[bool, Any, dict]:
+    """财务台账（CZ 抄底代理证据层）：返回 (fin_enabled, fin_df, fin_colmap)。"""
+    fin_cfg = financials_cfg or {}
+    fin_enabled = bool(fin_cfg.get("enabled"))
+    fin_df = (
+        financials_mod.load_financials(fin_cfg.get("report_period", ""))
+        if fin_enabled
+        else None
+    )
+    fin_colmap = dict(fin_cfg.get("columns") or {})
+    if fin_enabled and fin_df is not None and fin_cfg.get("auto_map", True):
+        _cm = financials_mod.auto_colmap(getattr(fin_df, "columns", []))
+        _cm.update(fin_colmap)  # 显式 registry.columns 按字段覆盖自动识别
+        fin_colmap = _cm
+    return fin_enabled, fin_df, fin_colmap
+
+
+def _load_sector_phase_resolver(sector_phase_cfg: Optional[dict]) -> Any:
+    """板块相位（hint，不封顶）：best-effort 构建 resolver；数据缺失/异常则跳过。"""
+    sp_cfg = sector_phase_cfg or {}
+    sp_resolve = None
+    if sp_cfg.get("enabled", True):
+        try:
+            mpath = Path(
+                sp_cfg.get("members_path") or (DATA / "market" / "sector_members.json")
+            )
+            idir = Path(sp_cfg.get("index_dir") or (DATA / "market" / "sector_index"))
+            if mpath.is_file() and idir.is_dir():
+                members = _load_json(mpath, {})
+                if members:
+                    sp_resolve = sector_phase_mod.build_phase_resolver(idir, members)
+        except Exception:  # noqa: BLE001
+            sp_resolve = None
+    return sp_resolve
+
+
+def _load_theme_map(merged: dict, result: dict, theme_min_match: Optional[int]) -> dict:
+    """本批候选的主题图；不可用时就地把 result 降级 partial 并留痕。"""
+    # 只为本批候选建主题图（全市场四层子串匹配纯浪费，见 build_stock_theme_map）。
+    # codes 关键字用 signature 探测后再传：既有测试把 build_stock_theme_map
+    # monkeypatch 成 `lambda min_match=None: ...`，硬传会 TypeError 打挂整段。
+    _bstm_kwargs: dict[str, Any] = {
+        "min_match": theme_min_match if theme_min_match is not None else THEME_MIN_MATCH
+    }
+    try:
+        if "codes" in inspect.signature(build_stock_theme_map).parameters:
+            _bstm_kwargs["codes"] = set(merged)
+    except (TypeError, ValueError):  # 无法取签名（C 实现/内建）→ 退回全市场
+        pass
+    stock_theme, theme_map_available = build_stock_theme_map(**_bstm_kwargs)
+    if not theme_map_available:
+        result["status"] = "partial"
+        result["degraded_reason"] = _append_reason(
+            result["degraded_reason"], "sector_map_unavailable"
+        )
+    return stock_theme
+
+
 def _load_enrich_context(
     date: str,
     merged: dict,
@@ -1760,55 +1881,12 @@ def _load_enrich_context(
         "holding": load_holding_codes(),
         "fund_flow": load_fund_flow(date, cumulative_days=fund_flow_days),
     }
-    fin_cfg = financials_cfg or {}
-    fin_enabled = bool(fin_cfg.get("enabled"))
-    fin_df = (
-        financials_mod.load_financials(fin_cfg.get("report_period", ""))
-        if fin_enabled
-        else None
-    )
-    fin_colmap = dict(fin_cfg.get("columns") or {})
-    if fin_enabled and fin_df is not None and fin_cfg.get("auto_map", True):
-        _cm = financials_mod.auto_colmap(getattr(fin_df, "columns", []))
-        _cm.update(fin_colmap)  # 显式 registry.columns 按字段覆盖自动识别
-        fin_colmap = _cm
+    fin_enabled, fin_df, fin_colmap = _load_financials_ctx(financials_cfg)
     ctx["fin_enabled"] = fin_enabled
     ctx["fin_df"] = fin_df
     ctx["fin_colmap"] = fin_colmap
-    # 板块相位(hint,不封顶)：best-effort 构建 resolver；数据缺失则跳过
-    sp_cfg = sector_phase_cfg or {}
-    sp_resolve = None
-    if sp_cfg.get("enabled", True):
-        try:
-            mpath = Path(
-                sp_cfg.get("members_path") or (DATA / "market" / "sector_members.json")
-            )
-            idir = Path(sp_cfg.get("index_dir") or (DATA / "market" / "sector_index"))
-            if mpath.is_file() and idir.is_dir():
-                members = _load_json(mpath, {})
-                if members:
-                    sp_resolve = sector_phase_mod.build_phase_resolver(idir, members)
-        except Exception:  # noqa: BLE001
-            sp_resolve = None
-    ctx["sp_resolve"] = sp_resolve
-    # 只为本批候选建主题图（全市场四层子串匹配纯浪费，见 build_stock_theme_map）。
-    # codes 关键字用 signature 探测后再传：既有测试把 build_stock_theme_map
-    # monkeypatch 成 `lambda min_match=None: ...`，硬传会 TypeError 打挂整段。
-    _bstm_kwargs: dict[str, Any] = {
-        "min_match": theme_min_match if theme_min_match is not None else THEME_MIN_MATCH
-    }
-    try:
-        if "codes" in inspect.signature(build_stock_theme_map).parameters:
-            _bstm_kwargs["codes"] = set(merged)
-    except (TypeError, ValueError):  # 无法取签名（C 实现/内建）→ 退回全市场
-        pass
-    stock_theme, theme_map_available = build_stock_theme_map(**_bstm_kwargs)
-    if not theme_map_available:
-        result["status"] = "partial"
-        result["degraded_reason"] = _append_reason(
-            result["degraded_reason"], "sector_map_unavailable"
-        )
-    ctx["stock_theme"] = stock_theme
+    ctx["sp_resolve"] = _load_sector_phase_resolver(sector_phase_cfg)
+    ctx["stock_theme"] = _load_theme_map(merged, result, theme_min_match)
     # 每股官方细分行业（881xxx，展示层「板块」列；与主题族聚合层并存，取不到全"未知"）
     ctx["stock_industry"] = build_stock_industry_map()
     return ctx

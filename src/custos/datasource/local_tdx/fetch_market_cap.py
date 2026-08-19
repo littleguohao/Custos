@@ -117,6 +117,79 @@ def _f(v):
     return None if v is None else float(v)
 
 
+def _page_params(trade_date: str, page: int, page_size: int) -> dict[str, Any]:
+    """单页请求参数（东财 RPT_VALUEANALYSIS_DET 全市场估值分析表）。"""
+    return {
+        "sortColumns": "SECURITY_CODE",
+        "sortTypes": "1",
+        "pageSize": page_size,
+        "pageNumber": page,
+        "reportName": "RPT_VALUEANALYSIS_DET",
+        "columns": (
+            "SECURITY_CODE,SECURITY_NAME_ABBR,TRADE_DATE,CLOSE_PRICE,"
+            "TOTAL_SHARES,FREE_SHARES_A,TOTAL_MARKET_CAP,NOTLIMITED_MARKETCAP_A"
+        ),
+        "filter": f"(TRADE_DATE='{trade_date}')",
+    }
+
+
+def _fetch_page(s, trade_date: str, page: int, page_size: int) -> dict:
+    """拉单页并做 HTTP 层校验，返回 payload dict。"""
+    r = s.get(
+        API,
+        params=_page_params(trade_date, page, page_size),
+        headers=UA,
+        timeout=30,
+        proxies=_NO_PROXIES,
+    )
+    r.raise_for_status()
+    return r.json() or {}
+
+
+def _result_or_empty(payload: dict, trade_date: str, page: int, rows: list[dict]):
+    """取 result 段；缺失时 page1 且空合法 ⇒ None（非交易日整日空），否则抛 FetchIncomplete。"""
+    result = payload.get("result")
+    if isinstance(result, dict):
+        return result
+    if page == 1 and _is_empty_ok(payload):
+        return None  # 非交易日
+    raise FetchIncomplete(
+        f"{trade_date} 第 {page} 页无 result 段（限流/异常响应），"
+        f"已拿 {len(rows)} 行: {_brief(payload)}"
+    )
+
+
+def _empty_page(
+    trade_date: str, page: int, pages, count, rows: list[dict]
+) -> list[dict]:
+    """data 为空：page1 且无 count ⇒ 非交易日返回 []；否则是限流伪装成翻完，抛。"""
+    if page == 1 and not count:
+        return []  # 非交易日
+    raise FetchIncomplete(
+        f"{trade_date} 第 {page} 页空响应，但接口声明 pages={pages} count={count}"
+        f"（已拿 {len(rows)} 行）—— 疑似限流，不是翻完了"
+    )
+
+
+def _page_done(trade_date: str, page: int, pages, count, rows: list[dict]) -> bool:
+    """按接口自报的 pages/count 判断是否翻完；两者都缺无法判断 ⇒ 抛 FetchIncomplete。"""
+    if pages is not None:
+        return page >= pages
+    if count is not None and len(rows) >= count:
+        return True
+    raise FetchIncomplete(
+        f"{trade_date} 第 {page} 页未给 pages/count，无法判断是否翻完"
+    )
+
+
+def _check_complete(trade_date: str, rows: list[dict], count) -> None:
+    """翻完后按 count 复核总行数，残缺不进 diff。"""
+    if count is not None and len(rows) < count:
+        raise FetchIncomplete(
+            f"{trade_date} 只拿到 {len(rows)}/{count} 行，样本残缺不进 diff"
+        )
+
+
 def fetch_trade_date(
     trade_date: str,
     page_size: int = 500,
@@ -142,62 +215,22 @@ def fetch_trade_date(
     for page in range(1, max_pages + 1):
         if page > 1 and sleep:
             time.sleep(sleep)
-        params: dict[str, Any] = {
-            "sortColumns": "SECURITY_CODE",
-            "sortTypes": "1",
-            "pageSize": page_size,
-            "pageNumber": page,
-            "reportName": "RPT_VALUEANALYSIS_DET",
-            "columns": (
-                "SECURITY_CODE,SECURITY_NAME_ABBR,TRADE_DATE,CLOSE_PRICE,"
-                "TOTAL_SHARES,FREE_SHARES_A,TOTAL_MARKET_CAP,NOTLIMITED_MARKETCAP_A"
-            ),
-            "filter": f"(TRADE_DATE='{trade_date}')",
-        }
-        r = s.get(
-            API,
-            params=params,
-            headers=UA,
-            timeout=30,
-            proxies=_NO_PROXIES,
-        )
-        r.raise_for_status()
-        payload = r.json() or {}
-        result = payload.get("result")
-        if not isinstance(result, dict):
-            if page == 1 and _is_empty_ok(payload):
-                return []  # 非交易日
-            raise FetchIncomplete(
-                f"{trade_date} 第 {page} 页无 result 段（限流/异常响应），"
-                f"已拿 {len(rows)} 行: {_brief(payload)}"
-            )
+        payload = _fetch_page(s, trade_date, page, page_size)
+        result = _result_or_empty(payload, trade_date, page, rows)
+        if result is None:
+            return []  # 非交易日
         data = result.get("data") or []
         pages, count = _as_int(result.get("pages")), _as_int(result.get("count"))
         if not data:
-            if page == 1 and not count:
-                return []  # 非交易日
-            raise FetchIncomplete(
-                f"{trade_date} 第 {page} 页空响应，但接口声明 pages={pages} count={count}"
-                f"（已拿 {len(rows)} 行）—— 疑似限流，不是翻完了"
-            )
+            return _empty_page(trade_date, page, pages, count, rows)
         rows.extend(data)
-        if pages is not None:
-            if page >= pages:
-                break
-        elif count is not None and len(rows) >= count:
+        if _page_done(trade_date, page, pages, count, rows):
             break
-        else:
-            raise FetchIncomplete(
-                f"{trade_date} 第 {page} 页未给 pages/count，无法判断是否翻完"
-            )
     else:
         raise FetchIncomplete(
             f"{trade_date} 翻到 max_pages={max_pages} 仍未结束（声明 pages={pages}）"
         )
-    if count is not None and len(rows) < count:
-        raise FetchIncomplete(
-            f"{trade_date} 只拿到 {len(rows)}/{count} 行，样本残缺不进 diff"
-        )
+    _check_complete(trade_date, rows, count)
     return rows
 
 

@@ -131,6 +131,68 @@ def quarter_ends(since_year: int, until: str | None = None) -> list[str]:
     return out
 
 
+def _request_page(s, report_date: str, page: int, page_size: int) -> dict:
+    """请求一页并返回 payload。HTTP 错误由 raise_for_status 抛出（原语义）。"""
+    params: dict[str, Any] = {
+        "sortColumns": "UPDATE_DATE,SECURITY_CODE",
+        "sortTypes": "-1,-1",
+        "pageSize": page_size,
+        "pageNumber": page,
+        "reportName": "RPT_LICO_FN_CPD",
+        "columns": "ALL",
+        "filter": f"(REPORTDATE='{report_date}')",
+    }
+    r = s.get(
+        API,
+        params=params,
+        headers=UA,
+        timeout=30,
+        proxies=_NO_PROXIES,
+    )
+    r.raise_for_status()
+    return r.json() or {}
+
+
+def _extract_page(
+    payload: dict, report_date: str, page: int, n_rows: int
+) -> tuple[list, Any, Any] | None:
+    """校验并解析一页响应 → (data, pages, count)；合法空期返回 None，残缺抛 FetchIncomplete。
+
+    「空但正常」只允许出现在第 1 页（未披露期）；翻页中途的空响应一律按限流报残缺。
+    """
+    result = payload.get("result")
+    if not isinstance(result, dict):
+        if page == 1 and _is_empty_ok(payload):
+            return None  # 该报告期确实还没有数据（未到披露期）
+        raise FetchIncomplete(
+            f"{report_date} 第 {page} 页无 result 段（限流/异常响应），"
+            f"已拿 {n_rows} 行: {_brief(payload)}"
+        )
+    data = result.get("data") or []
+    pages, count = _as_int(result.get("pages")), _as_int(result.get("count"))
+    if not data:
+        if page == 1 and not count:
+            return None  # 真的没有这一期
+        raise FetchIncomplete(
+            f"{report_date} 第 {page} 页空响应，但接口声明 pages={pages} count={count}"
+            f"（已拿 {n_rows} 行）—— 疑似限流，不是翻完了"
+        )
+    return data, pages, count
+
+
+def _page_done(
+    pages: Any, count: Any, page: int, rows: list[dict], report_date: str
+) -> bool:
+    """是否翻完：接口自报 pages 优先；没给 pages 用 count 兜底；都没有 → 报残缺。"""
+    if pages is not None:
+        return page >= pages
+    if count is not None and len(rows) >= count:
+        return True  # 没给 pages 但行数已够
+    raise FetchIncomplete(
+        f"{report_date} 第 {page} 页未给 pages/count，无法判断是否翻完"
+    )
+
+
 def fetch_period(
     report_date: str,
     page_size: int = 500,
@@ -152,51 +214,14 @@ def fetch_period(
     for page in range(1, max_pages + 1):
         if page > 1 and sleep:
             time.sleep(sleep)  # 主动限速：连打几十页必被静默限流
-        params: dict[str, Any] = {
-            "sortColumns": "UPDATE_DATE,SECURITY_CODE",
-            "sortTypes": "-1,-1",
-            "pageSize": page_size,
-            "pageNumber": page,
-            "reportName": "RPT_LICO_FN_CPD",
-            "columns": "ALL",
-            "filter": f"(REPORTDATE='{report_date}')",
-        }
-        r = s.get(
-            API,
-            params=params,
-            headers=UA,
-            timeout=30,
-            proxies=_NO_PROXIES,
-        )
-        r.raise_for_status()
-        payload = r.json() or {}
-        result = payload.get("result")
-        if not isinstance(result, dict):
-            if page == 1 and _is_empty_ok(payload):
-                return []  # 该报告期确实还没有数据（未到披露期）
-            raise FetchIncomplete(
-                f"{report_date} 第 {page} 页无 result 段（限流/异常响应），"
-                f"已拿 {len(rows)} 行: {_brief(payload)}"
-            )
-        data = result.get("data") or []
-        pages, count = _as_int(result.get("pages")), _as_int(result.get("count"))
-        if not data:
-            if page == 1 and not count:
-                return []  # 真的没有这一期
-            raise FetchIncomplete(
-                f"{report_date} 第 {page} 页空响应，但接口声明 pages={pages} count={count}"
-                f"（已拿 {len(rows)} 行）—— 疑似限流，不是翻完了"
-            )
+        payload = _request_page(s, report_date, page, page_size)
+        got = _extract_page(payload, report_date, page, len(rows))
+        if got is None:
+            return []  # 该报告期确实还没有数据（未到披露期/真的没有这一期）
+        data, pages, count = got
         rows.extend(data)
-        if pages is not None:
-            if page >= pages:
-                break
-        elif count is not None and len(rows) >= count:
-            break  # 没给 pages 但行数已够
-        else:
-            raise FetchIncomplete(
-                f"{report_date} 第 {page} 页未给 pages/count，无法判断是否翻完"
-            )
+        if _page_done(pages, count, page, rows, report_date):
+            break
     else:
         raise FetchIncomplete(
             f"{report_date} 翻到 max_pages={max_pages} 仍未结束（声明 pages={pages}），"

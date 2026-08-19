@@ -240,30 +240,27 @@ def _signal_cell(cand: dict) -> str:
     return " ".join(parts)
 
 
-def _gate_advisory_section(date: str, gate: Optional[dict] = None) -> list[str]:
-    """运行门控**建议**区块（独立于选股结果）。
+def _gate_missing_notice() -> list[str]:
+    """门控结论缺失时的降级提示行。"""
+    return [
+        "> ⚠️ 运行门控结论缺失（未跑 runtime_gate）：无法评估当日数据可信度，"
+        "本表候选仍为策略选股结果，请自行核实行情与 0AMV 新鲜度。",
+        "",
+    ]
 
-    设计边界（2026-08-03 定）：18:00 是纯粹的选股流程，门控**不得影响选股结果**——
-    不改 bucket、不改 next_step、不改分层、不筛掉任何候选，只在表里单独给出建议。
 
-    这样定的三个理由：
-      ① 选股结果保持与回测同口径。若门控改写分层，live 选出的候选就无法与回测结果
-         对照，"策略本身选出了什么"变得不可回溯。
-      ② 职责分离：选股逻辑不混入运行时数据质量判断。
-      ③ 可复现：同一天重跑，候选表不因数据新鲜度而变。
+def _position_gate_note(pg: dict) -> list[str]:
+    """加仓授权提示：未授权时一行；已授权/无 position_gate 时为空。"""
+    if pg and not pg.get("allow_position_increase"):
+        reason = (
+            "；".join(str(x) for x in (pg.get("limitations") or [])) or "门控未授权"
+        )
+        return [f"> 加仓授权：**未授予**（{reason}）"]
+    return []
 
-    门控通过时不占版面（返回空），只在有受限项时提示。
-    """
-    if gate is None:
-        gate = _load_json(QUALITY_DIR / f"{date}_runtime_gate.json", {})
-    if not isinstance(gate, dict) or not gate:
-        return [
-            "> ⚠️ 运行门控结论缺失（未跑 runtime_gate）：无法评估当日数据可信度，"
-            "本表候选仍为策略选股结果，请自行核实行情与 0AMV 新鲜度。",
-            "",
-        ]
-    mq = gate.get("market_quality") or {}
-    pg = gate.get("position_gate") or {}
+
+def _gate_advisory_lines(mq: dict, pg: dict) -> list[str]:
+    """门控有受限项时的提示区块主体；数据齐全（pass 且无受限项）返回空。"""
     status = mq.get("status")
     limitations = list(mq.get("limitations") or [])
     if status in {"pass"} and not limitations:
@@ -282,11 +279,7 @@ def _gate_advisory_section(date: str, gate: Optional[dict] = None) -> list[str]:
         )
     if limitations:
         lines.append("> 受限项：" + "；".join(str(x) for x in limitations))
-    if pg and not pg.get("allow_position_increase"):
-        reason = (
-            "；".join(str(x) for x in (pg.get("limitations") or [])) or "门控未授权"
-        )
-        lines.append(f"> 加仓授权：**未授予**（{reason}）")
+    lines += _position_gate_note(pg)
     lines.append(
         "> 本区块只作提示：候选池的分层、next_step 与信号一览均为选股链原始输出，"
         "未被门控改写；执行力度请结合本提示自行裁量。"
@@ -295,28 +288,60 @@ def _gate_advisory_section(date: str, gate: Optional[dict] = None) -> list[str]:
     return lines
 
 
+def _gate_advisory_section(date: str, gate: Optional[dict] = None) -> list[str]:
+    """运行门控**建议**区块（独立于选股结果）。
+
+    设计边界（2026-08-03 定）：18:00 是纯粹的选股流程，门控**不得影响选股结果**——
+    不改 bucket、不改 next_step、不改分层、不筛掉任何候选，只在表里单独给出建议。
+
+    这样定的三个理由：
+      ① 选股结果保持与回测同口径。若门控改写分层，live 选出的候选就无法与回测结果
+         对照，"策略本身选出了什么"变得不可回溯。
+      ② 职责分离：选股逻辑不混入运行时数据质量判断。
+      ③ 可复现：同一天重跑，候选表不因数据新鲜度而变。
+
+    门控通过时不占版面（返回空），只在有受限项时提示。
+    """
+    if gate is None:
+        gate = _load_json(QUALITY_DIR / f"{date}_runtime_gate.json", {})
+    if not isinstance(gate, dict) or not gate:
+        return _gate_missing_notice()
+    return _gate_advisory_lines(
+        gate.get("market_quality") or {}, gate.get("position_gate") or {}
+    )
+
+
+def _bull_legs(watch: list[dict], bucket: str) -> list[dict]:
+    """watch 中三面共振（bull_candidate）且分层为 bucket 的候选。"""
+    return [
+        c
+        for c in watch
+        if (c.get("resonance_4leg") or {}).get("bull_candidate")
+        and c.get("bucket") == bucket
+    ]
+
+
+def _awaiting_bull(watch: list[dict]) -> list[dict]:
+    """watch 中基本面+技术已共振、但尚未 bull_candidate 的候选。"""
+    return [
+        c for c in watch if not (c.get("resonance_4leg") or {}).get("bull_candidate")
+    ]
+
+
+def _names_or_none(cands: list[dict]) -> str:
+    """「代码 名称」顿号串联，空列表显示「无」。"""
+    return "、".join(_sig_nm(c) for c in cands) or "无"
+
+
 def _signal_overview(lines, is_bear, watch):
     """⭐ 今日信号一览：按四面共振把候选分成可买 / 观察价位 / 待 0AMV 做多。
 
     2026-08-07 从 `render_table`（原 211 行）抽出。
     ⚠️ 空头 regime 下会先打一条禁买提示 —— 共振度**不能**在空头里放宽权限。
     """
-    _buy = [
-        c
-        for c in watch
-        if (c.get("resonance_4leg") or {}).get("bull_candidate")
-        and c.get("bucket") == "A"
-    ]
-    _obs = [
-        c
-        for c in watch
-        if (c.get("resonance_4leg") or {}).get("bull_candidate")
-        and c.get("bucket") == "B"
-    ]
-    _wait = [
-        c for c in watch if not (c.get("resonance_4leg") or {}).get("bull_candidate")
-    ]
-    _nm = lambda c: f"{c.get('code')} {c.get('name') or ''}".strip()
+    _buy = _bull_legs(watch, "A")
+    _obs = _bull_legs(watch, "B")
+    _wait = _awaiting_bull(watch)
     lines.append("## ⭐ 今日信号一览")
     lines.append("")
     if is_bear:
@@ -327,15 +352,9 @@ def _signal_overview(lines, is_bear, watch):
         lines.append("")
     # v0.50（#37 阶段 A）：板块相位（sector_phase.favorable）移出「可买」定义——
     # 可买 = A + 市场/基本面/技术三面共振；「四面共振」降为情境标注列（4面共振列）。
-    lines.append(
-        f"- **可买（A + 市场/基本面/技术三面共振）**：{('、'.join(_nm(c) for c in _buy)) or '无'}"
-    )
-    lines.append(
-        f"- **观察价位（B + 三面共振）**：{('、'.join(_nm(c) for c in _obs)) or '无'}"
-    )
-    lines.append(
-        f"- **待0AMV做多（基本面+技术已共振）**：{('、'.join(_nm(c) for c in _wait)) or '无'}"
-    )
+    lines.append(f"- **可买（A + 市场/基本面/技术三面共振）**：{_names_or_none(_buy)}")
+    lines.append(f"- **观察价位（B + 三面共振）**：{_names_or_none(_obs)}")
+    lines.append(f"- **待0AMV做多（基本面+技术已共振）**：{_names_or_none(_wait)}")
     lines.append("")
 
 
@@ -604,7 +623,8 @@ def _bucket_pools(lines, candidates, counts):
         _bucket_pool_section(lines, bucket, rows, counts)
 
 
-def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
+def _header_lines(pool: dict, date: str) -> list[str]:
+    """表头 + 可审计块 + 选股链状态行。"""
     # 可审计块（原待办 #29，已实现）：本表实际读过的输入（stock_pool 本体 + 门控结论）
     audit = report_audit.build(
         date,
@@ -614,7 +634,7 @@ def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
             QUALITY_DIR / f"{date}_runtime_gate.json",
         ],
     )
-    lines: list[str] = [
+    return [
         f"# 公式选股备选池｜{date}",
         "",
         *report_audit.render_md(audit),
@@ -625,20 +645,29 @@ def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
         "> 「平台回踩」列：✓@平台高 = 平台突破回踩形态命中（回踩不破前期平台高点）；平台高即自然止损位（证据层，非进场条件）。",
         "",
     ]
-    counts = pool.get("bucket_counts") or {}
-    candidates = pool.get("candidates") or []
-    # 先看全景分组(供置顶信号一览 + 后续各区复用)
-    watch_all = [
+
+
+def _watch_key(c: dict) -> tuple:
+    """共振观察区排序键：先按对齐腿数、再按总分，均降序。"""
+    return (
+        (c.get("resonance_4leg") or {}).get("aligned", 0),
+        (c.get("score_detail") or {}).get("total") or 0,
+    )
+
+
+def _resonant_watch(candidates: list[dict]) -> list[dict]:
+    """全景分组：基本面优 + 板块腿 + 技术腿到位的候选（供置顶信号一览 + 后续各区复用）。"""
+    return [
         c
         for c in candidates
         if (c.get("fundamental_quality") or {}).get("tier") == "优"
         and (c.get("resonance_4leg") or {}).get("sector")
         and (c.get("resonance_4leg") or {}).get("technical")
     ]
-    _watch_key = lambda c: (
-        (c.get("resonance_4leg") or {}).get("aligned", 0),
-        (c.get("score_detail") or {}).get("total") or 0,
-    )
+
+
+def _split_watch(watch_all: list[dict]) -> tuple[list[dict], list[dict]]:
+    """全景分组按分层切成（A/B 观察区, C/D 受限区），各按 _watch_key 降序。"""
     watch = sorted(
         (c for c in watch_all if c.get("bucket") in ("A", "B")),
         key=_watch_key,
@@ -649,6 +678,16 @@ def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
         key=_watch_key,
         reverse=True,
     )
+    return watch, watch_capped
+
+
+def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
+    lines = _header_lines(pool, date)
+    counts = pool.get("bucket_counts") or {}
+    candidates = pool.get("candidates") or []
+    # 先看全景分组(供置顶信号一览 + 后续各区复用)
+    watch_all = _resonant_watch(candidates)
+    watch, watch_capped = _split_watch(watch_all)
     # 与 score_candidates 共用同一套归一,避免"报告说空头不买、A池却仍生成买入计划"的自相矛盾
     is_bear = normalize_regime(pool.get("amv_state") or "") == "空头"
     # 🚦 门控建议:独立区块,置于信号一览之前(先知道数据可不可信,再看信号)。

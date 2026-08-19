@@ -1043,7 +1043,8 @@ def _print_additive_amounts(m, bounds: list[int]) -> None:
         prev = c
 
 
-def report(rows: list[dict]) -> int:
+def _print_report_header() -> None:
+    """表头：分隔线 + 标题 + 列名。"""
     hdr = (
         f"{'代码':<10}{'状态':>8}{'重叠根数':>9}{'比值离散':>10}"
         f"{'最大日收益差':>13}{'分歧日数':>9}  备注"
@@ -1053,6 +1054,10 @@ def report(rows: list[dict]) -> int:
     print("=" * 100)
     print(hdr)
     print("-" * 100)
+
+
+def _print_report_rows(rows: list[dict]) -> None:
+    """逐行表格：缺 ratio_spread/worst_ret_diff 的行显示「—」。"""
     for r in rows:
         spread = f"{r['ratio_spread']:.4%}" if "ratio_spread" in r else "—"
         worst = f"{r['worst_ret_diff']:.4%}" if "worst_ret_diff" in r else "—"
@@ -1061,11 +1066,24 @@ def report(rows: list[dict]) -> int:
             f"{spread:>10}{worst:>13}{r.get('n_mismatch', '—'):>9}"
             f"  {r.get('note', '')[:30]}"
         )
+
+
+def _tally_report_rows(
+    rows: list[dict],
+) -> tuple[list[dict], list[dict], list[dict], list[dict]]:
+    """按状态分组，返回 (ok, bad, skip, vacuous)。"""
     ok = [r for r in rows if r["status"] == "ok"]
     bad = [r for r in rows if r["status"] == "mismatch"]
     skip = [r for r in rows if r["status"] in ("skip", "error")]
     # ⚠️ adjust_events=0 的"一致"是**零信息量**：因子恒为 1，两边比的其实是未复权价
     vacuous = [r for r in ok if "adjust_events=0" in (r.get("note") or "")]
+    return ok, bad, skip, vacuous
+
+
+def _print_report_summary(
+    ok: list[dict], bad: list[dict], skip: list[dict], vacuous: list[dict]
+) -> None:
+    """计数汇总 + 零信息量「一致」的剔除说明。"""
     print(
         f"\n一致 {len(ok)} / 分歧 {len(bad)} / 跳过 {len(skip)}"
         f"（阈值：比值离散 ≤{RATIO_TOL:.1%}，日收益差 ≤{RET_TOL:.1%}）"
@@ -1079,27 +1097,41 @@ def report(rows: list[dict]) -> int:
             f"   有效样本 = {len(ok) - len(vacuous)} 一致 + {len(bad)} 分歧"
             f" = {len(ok) - len(vacuous) + len(bad)} 只"
         )
-    if bad:
-        print("\n⚠️ **分歧明细**（比值跳变的日子就是两边对某个事件处理不同的日子）：")
-        for r in bad:
-            # ⚠️ 用 .get：`reconcile` 总是成对设置 mismatch_days/n_mismatch，但
-            # **一份诊断报告的全部价值就是被打出来** —— 少一个键就 KeyError 崩在
-            # **打印中途**（前面几行已输出，读者以为看全了），比显示「—」糟得多。
-            print(
-                f"   {r['code']}: 比值离散 {r.get('ratio_spread', float('nan')):.4%}，"
-                f"最大日收益差 {r.get('worst_ret_diff', float('nan')):.4%}，"
-                f"分歧 {r.get('n_mismatch', '—')} 天，前 10 天 {r.get('mismatch_days', '—')}"
-            )
-        print(
-            "\n   ⇒ 拿其中一天去查 `data/market/xdxr/{code}.json` 里那天附近的事件，"
-            "对照 `event_ratio()` 的公式。"
-        )
-    if skip:
-        print("\n跳过原因分布：")
-        from collections import Counter
 
-        for k, v in Counter(r.get("note", "")[:40] for r in skip).most_common():
-            print(f"   {v:>3} 只  {k}")
+
+def _print_mismatch_detail(bad: list[dict]) -> None:
+    """分歧明细：逐只列出比值离散/最大日收益差/前 10 个分歧日。"""
+    if not bad:
+        return
+    print("\n⚠️ **分歧明细**（比值跳变的日子就是两边对某个事件处理不同的日子）：")
+    for r in bad:
+        # ⚠️ 用 .get：`reconcile` 总是成对设置 mismatch_days/n_mismatch，但
+        # **一份诊断报告的全部价值就是被打出来** —— 少一个键就 KeyError 崩在
+        # **打印中途**（前面几行已输出，读者以为看全了），比显示「—」糟得多。
+        print(
+            f"   {r['code']}: 比值离散 {r.get('ratio_spread', float('nan')):.4%}，"
+            f"最大日收益差 {r.get('worst_ret_diff', float('nan')):.4%}，"
+            f"分歧 {r.get('n_mismatch', '—')} 天，前 10 天 {r.get('mismatch_days', '—')}"
+        )
+    print(
+        "\n   ⇒ 拿其中一天去查 `data/market/xdxr/{code}.json` 里那天附近的事件，"
+        "对照 `event_ratio()` 的公式。"
+    )
+
+
+def _print_skip_notes(skip: list[dict]) -> None:
+    """跳过原因分布（note 前 40 字符聚类计数）。"""
+    if not skip:
+        return
+    print("\n跳过原因分布：")
+    from collections import Counter
+
+    for k, v in Counter(r.get("note", "")[:40] for r in skip).most_common():
+        print(f"   {v:>3} 只  {k}")
+
+
+def _print_report_footnotes() -> None:
+    """尾部说明：只比 close 的原因、窗口为什么落在 bundle 内部。"""
     print(
         "\n⚠️ 只比 close：成交量的复权处理两边未必一致，比它会引入与价格正确性无关的噪声。"
     )
@@ -1107,6 +1139,17 @@ def report(rows: list[dict]) -> int:
         "⚠️ 对账窗口刻意落在 2021_2026 bundle 内部 —— qlib 有 2020-09~2021-07 缺口、"
         "数据到 2026-02 截止。"
     )
+
+
+def report(rows: list[dict]) -> int:
+    """对账汇总报告：表格 + 计数 + 分歧明细 + 跳过原因；有分歧退出码非 0。"""
+    _print_report_header()
+    _print_report_rows(rows)
+    ok, bad, skip, vacuous = _tally_report_rows(rows)
+    _print_report_summary(ok, bad, skip, vacuous)
+    _print_mismatch_detail(bad)
+    _print_skip_notes(skip)
+    _print_report_footnotes()
     return 1 if bad else 0
 
 
