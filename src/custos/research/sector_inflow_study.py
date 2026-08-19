@@ -25,6 +25,10 @@ t → t+H 的 forward 收益是否显著优于 J<13 池内未命中的股票。
   ∩ 活跃集非空 → **命中组**；其余 → **未命中组**；全池 = 两者合并。
 - **跨窗稳定性**：按 t 把研究窗口切成前/后两半各算一遍（R10 教训：edge 集中在单一
   regime 的方案不算数）。
+- **regime 过滤（可选）**：`--amv-regimes 做多,中性` 只统计指定 0AMV regime 的交易日
+  （live 状态机口径，`data/market/0amv_regime_history.json`，as-of 取 ≤ 当日最近一条
+  `effective_state`；无前置记录记「未知」且必被过滤）。活跃板块的形成不区分 regime，
+  过滤只作用于统计日；前/后两半仍按全日历位置划分（被过滤日不贡献样本）。
 
 ## 无未来函数
 
@@ -41,6 +45,7 @@ forward 收益是 t 之后的价格，仅作标签不参与分组。
 from __future__ import annotations
 
 import argparse
+import bisect
 import json
 import sys
 from collections import deque
@@ -236,6 +241,21 @@ def _process_day(
     return day_n, day_hit
 
 
+def _resolve_day_regimes(trade_days: list[str], hist: dict[str, Any]) -> dict[str, str]:
+    """逐交易日 as-of 解析 0AMV regime（`0amv_regime_history.json`，live 状态机口径）。
+
+    取 ≤ 当日最近一条记录的 `effective_state`；无任何前置记录 → "未知"。
+    """
+    dates = sorted(hist)
+    out: dict[str, str] = {}
+    for d in trade_days:
+        i = bisect.bisect_right(dates, d) - 1
+        out[d] = (
+            str(hist[dates[i]].get("effective_state") or "未知") if i >= 0 else "未知"
+        )
+    return out
+
+
 def run_study(
     bars: dict[str, pd.DataFrame],
     rank_by_date: dict[str, set[str]],
@@ -245,11 +265,15 @@ def run_study(
     window: int = 40,
     min_hits: int = 2,
     j_threshold: float = J_LOW_THRESHOLD,
+    day_regime: Optional[dict[str, str]] = None,
+    regime_allow: Optional[set[str]] = None,
 ) -> dict[str, Any]:
     """主研究（纯函数，数据全部注入；测试走合成 fixture 不经 IO）。
 
     bars: {code6: df[date,high,low,close,...]}（已按目标复权口径，升序与否均可）。
     trade_days: 研究窗口交易日（升序）。返回样本计数/尾部剔除/总体与前后两半统计。
+    regime_allow 非 None 时只统计 `day_regime[t] ∈ regime_allow` 的交易日
+    （活跃板块形成不受过滤影响；两半仍按全日历位置划分，被过滤日不贡献样本）。
     """
     horizons = sorted(int(h) for h in horizons)
     max_h = max(horizons) if horizons else 0
@@ -265,8 +289,15 @@ def run_study(
     per_day: dict[str, dict[str, Any]] = {}
     n_pool_samples = 0
     prepared = _prepare_bars(bars)
+    regime_filtered = 0
 
     for t, active in iter_active_sets(trade_days, rank_by_date, window, min_hits):
+        if (
+            regime_allow is not None
+            and (day_regime or {}).get(t, "未知") not in regime_allow
+        ):
+            regime_filtered += 1
+            continue
         day_n, day_hit = _process_day(
             t,
             active,
@@ -290,6 +321,11 @@ def run_study(
         "n_pool_samples": n_pool_samples,
         "tail_excluded": tail_excluded,
         "max_horizon": max_h,
+        "regime_filter": (
+            {"allow": sorted(regime_allow), "days_filtered": regime_filtered}
+            if regime_allow is not None
+            else None
+        ),
         "per_day": per_day,
         "overall": _summarize_acc(acc["overall"]),
         "first_half": _summarize_acc(acc["first_half"]),
@@ -389,6 +425,27 @@ def _render_text(result: dict[str, Any], horizons: list[int]) -> str:
     return "\n".join(lines)
 
 
+def _regime_filter_from_args(
+    raw: str, trade_days: list[str]
+) -> tuple[Optional[dict[str, str]], Optional[set[str]]]:
+    """解析 --amv-regimes：空 → (None, None)（不过滤）；否则读 live regime 历史
+    as-of 解析各交易日 regime。文件缺失 fail-closed（SystemExit）。"""
+    if not raw.strip():
+        return None, None
+    allow = {x.strip() for x in raw.split(",") if x.strip()}
+    hist_path = MARKET_DIR / "0amv_regime_history.json"
+    if not hist_path.is_file():
+        raise SystemExit(f"[ERR] --amv-regimes 需要 {hist_path}（live regime 历史）")
+    hist = json.loads(hist_path.read_text(encoding="utf-8"))
+    day_regime = _resolve_day_regimes(trade_days, hist)
+    used = sum(1 for d in trade_days if day_regime[d] in allow)
+    print(
+        f"[INFO] regime 过滤 {sorted(allow)}：{used}/{len(trade_days)} 交易日入样",
+        file=sys.stderr,
+    )
+    return day_regime, allow
+
+
 def main(argv: Optional[list] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else "")
     ap.add_argument("--days", type=int, default=120, help="研究窗口（交易日数）")
@@ -407,6 +464,13 @@ def main(argv: Optional[list] = None) -> int:
         type=float,
         default=J_LOW_THRESHOLD,
         help="J 池门槛（默认 b1_thresholds.J_LOW_THRESHOLD=13）",
+    )
+    ap.add_argument(
+        "--amv-regimes",
+        default="",
+        help="只统计指定 0AMV regime 的交易日（逗号分隔，如 做多,中性）；"
+        "默认不过滤。regime 取 data/market/0amv_regime_history.json"
+        "（live 状态机口径，as-of），文件缺失 fail-closed",
     )
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
@@ -432,6 +496,8 @@ def main(argv: Optional[list] = None) -> int:
         print("[ERR] 研究窗口为空", file=sys.stderr)
         return 1
 
+    day_regime, regime_allow = _regime_filter_from_args(args.amv_regimes, trade_days)
+
     rank_by_date = load_rank_files(Path(args.rank_dir))
     print(
         f"[INFO] daily_rank 文件 {len(rank_by_date)} 份"
@@ -449,6 +515,8 @@ def main(argv: Optional[list] = None) -> int:
         window=args.window,
         min_hits=args.min_hits,
         j_threshold=args.j_threshold,
+        day_regime=day_regime,
+        regime_allow=regime_allow,
     )
     result["window"] = {"start": trade_days[0], "end": trade_days[-1]}
 
@@ -462,6 +530,7 @@ def main(argv: Optional[list] = None) -> int:
             "min_hits": args.min_hits,
             "horizons": horizons,
             "j_threshold": args.j_threshold,
+            "amv_regimes": args.amv_regimes.strip() or None,
             "adjust": "qfq",
             "universe": (
                 f"codes_file({Path(args.codes_file).name})"

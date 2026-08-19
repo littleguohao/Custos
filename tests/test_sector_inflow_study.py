@@ -228,3 +228,59 @@ class TestLoadRankFiles:
         got = sis.load_rank_files(d)
         assert got == {"2026-01-05": {"880545", "880546"}}  # losers 不计、代码归一
         assert sis.load_rank_files(tmp_path / "不存在") == {}
+
+
+class TestRegimeFilter:
+    def test_resolve_day_regimes_asof(self):
+        """as-of 取 ≤ 当日最近一条 effective_state；无前置记录 → 未知。"""
+        hist = {
+            TRADE_DAYS[0]: {"effective_state": "做多"},
+            TRADE_DAYS[4]: {"effective_state": "空头"},
+        }
+        got = sis._resolve_day_regimes(["2025-12-31"] + TRADE_DAYS, hist)
+        assert got["2025-12-31"] == "未知"
+        assert got[TRADE_DAYS[0]] == "做多"
+        assert got[TRADE_DAYS[3]] == "做多"  # 延续
+        assert got[TRADE_DAYS[4]] == "空头"
+        assert got[TRADE_DAYS[-1]] == "空头"  # 延续到末尾
+
+    def test_filter_excludes_disallowed_days(self):
+        """只统计 regime 命中的交易日；活跃集形成不受过滤影响。"""
+        base = _run()
+        allow_days = set(TRADE_DAYS[6:])  # 后 6 天入样
+        day_regime = {d: ("做多" if d in allow_days else "空头") for d in TRADE_DAYS}
+        res = sis.run_study(
+            BARS,
+            RANK,
+            _code2secs(),
+            TRADE_DAYS,
+            HORIZONS,
+            window=WINDOW,
+            min_hits=MIN_HITS,
+            j_threshold=13.0,
+            day_regime=day_regime,
+            regime_allow={"做多"},
+        )
+        assert res["regime_filter"] == {"allow": ["做多"], "days_filtered": 6}
+        assert set(res["per_day"]) == allow_days
+        # 入样日的样本数与未过滤跑出的对应日一致
+        assert res["n_pool_samples"] == sum(
+            base["per_day"][d]["n_pool"] for d in allow_days
+        )
+        # 全过滤 ⇒ 零样本
+        none_res = sis.run_study(
+            BARS,
+            RANK,
+            _code2secs(),
+            TRADE_DAYS,
+            HORIZONS,
+            window=WINDOW,
+            min_hits=MIN_HITS,
+            j_threshold=13.0,
+            day_regime={d: "空头" for d in TRADE_DAYS},
+            regime_allow={"做多"},
+        )
+        assert none_res["n_pool_samples"] == 0
+        assert none_res["regime_filter"]["days_filtered"] == len(TRADE_DAYS)
+        # 不过滤 ⇒ regime_filter 为 None，与现状口径一致
+        assert base["regime_filter"] is None
