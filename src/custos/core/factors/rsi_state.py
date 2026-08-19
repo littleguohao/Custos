@@ -100,8 +100,15 @@ def rsi_regime(
     n: int = RSI_MID,
     lookback: int = REGIME_LOOKBACK,
     exclude_recent: int = REGIME_EXCLUDE_RECENT,
+    rsi_series: pd.Series | None = None,
 ) -> dict[str, Any]:
     """RSI 区间状态 + 当前深度，**两个维度分开报告**。绝不 raise。
+
+    ``rsi_series``：预计算的 RSI 全序列（``rsi(close, n)``，与 df 同 index、
+    从第 0 根开始递归）。传入时取 ``rsi_series.iloc[:len(df)]`` 替代现算——
+    Wilder RSI（ewm adjust=False）从第 0 根递归，前缀末点与全序列同位点是
+    同一串浮点运算，两路逐位相同。⚠️ 只对「从第 0 根开始的前缀切片」有效；
+    不传（默认）走原现算路径。
 
     ``state`` 描述**长期结构**（这只票过去的回调行为模式）::
 
@@ -126,7 +133,7 @@ def rsi_regime(
                 "state": None,
                 "reason": f"少于{RSI_MIN_BARS}根K线",
             }
-        r = rsi(df["close"], n)
+        r = rsi(df["close"], n) if rsi_series is None else rsi_series.iloc[: len(df)]
         seg_all = r.iloc[-lookback:].dropna()
         if len(seg_all) < 10:
             return {"available": False, "state": None, "reason": "RSI 有效样本不足"}
@@ -163,11 +170,15 @@ def rsi_divergence(
     n: int = RSI_MID,
     lookback: int = DIV_LOOKBACK,
     min_gap: int = DIV_MIN_GAP,
+    rsi_series: pd.Series | None = None,
 ) -> dict[str, Any]:
     """RSI 底背离：价格创新低而 RSI 不创新低（卖压衰竭）。绝不 raise。
 
     系统已有 MACD 底背离但没有 RSI 的，而 RSI 更敏感、通常更早。
     对 B1 的意义：`J<13 + RSI 底背离` = 超卖**且**动能衰竭，比单纯 J<13 强。
+
+    ``rsi_series``：预计算的 RSI 全序列（同 ``rsi_regime`` 的双形态约定——
+    只对从第 0 根开始的前缀切片有效，两路逐位相同）；不传走原现算路径。
     """
     try:
         if df is None or len(df) < RSI_MIN_BARS:
@@ -176,7 +187,7 @@ def rsi_divergence(
                 "bullish": False,
                 "reason": f"少于{RSI_MIN_BARS}根K线",
             }
-        r = rsi(df["close"], n)
+        r = rsi(df["close"], n) if rsi_series is None else rsi_series.iloc[: len(df)]
         low = df["low"].astype(float)
         seg_r = r.iloc[-lookback:]
         seg_l = low.iloc[-lookback:]
@@ -219,7 +230,9 @@ def rsi_divergence(
         }
 
 
-def rsi_multi(df: pd.DataFrame) -> dict[str, Any]:
+def rsi_multi(
+    df: pd.DataFrame, rsi_series_map: dict[int, pd.Series] | None = None
+) -> dict[str, Any]:
     """多周期 RSI(6/14/24) 关系。绝不 raise。
 
     与 B1.pdf「四线归零买」同源（多周期同时超卖），但 owner 已裁定那是跟随策略、
@@ -227,12 +240,25 @@ def rsi_multi(df: pd.DataFrame) -> dict[str, Any]:
 
     ``all_low``：三个周期同时 < 阈值（深度超卖）；``fast_cross_mid``：RSI6 上穿 RSI14
     （短期动能反转，类似 J 拐头但更平滑）。
+
+    ``rsi_series_map``：预计算的 RSI 全序列映射（键 6/14/24 → ``rsi(close, n)`` 全序列，
+    与 df 同 index、从第 0 根开始递归）。传入时各周期取 ``iloc[:len(df)]`` 替代现算——
+    与 ``rsi_regime`` 的双形态约定相同，两路逐位相同；缺键的周期仍现算。
+    ⚠️ 只对「从第 0 根开始的前缀切片」有效；不传（默认）走原现算路径。
     """
     try:
         if df is None or len(df) < RSI_MIN_BARS:
             return {"available": False, "reason": f"少于{RSI_MIN_BARS}根K线"}
         c = df["close"]
-        rf, rm, rs = rsi(c, RSI_FAST), rsi(c, RSI_MID), rsi(c, RSI_SLOW)
+        smap = rsi_series_map or {}
+        rf_pre, rm_pre, rs_pre = (
+            smap.get(RSI_FAST),
+            smap.get(RSI_MID),
+            smap.get(RSI_SLOW),
+        )
+        rf = rf_pre.iloc[: len(df)] if rf_pre is not None else rsi(c, RSI_FAST)
+        rm = rm_pre.iloc[: len(df)] if rm_pre is not None else rsi(c, RSI_MID)
+        rs = rs_pre.iloc[: len(df)] if rs_pre is not None else rsi(c, RSI_SLOW)
         vals = [rf.iloc[-1], rm.iloc[-1], rs.iloc[-1]]
         if any(v != v for v in vals):
             return {"available": False, "reason": "RSI 末值含 NaN"}
@@ -259,16 +285,25 @@ def rsi_multi(df: pd.DataFrame) -> dict[str, Any]:
         return {"available": False, "error": f"{type(exc).__name__}:{str(exc)[:80]}"}
 
 
-def rsi_state_score(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
+def rsi_state_score(
+    df: pd.DataFrame,
+    code: str = "",
+    rsi_series_map: dict[int, pd.Series] | None = None,
+) -> dict[str, Any]:
     """把三部分合成 0-100 的 RSI 状态分（**仅用于回测排序**，权重待校准）。
 
     权重按"最少假设"分配：区间状态 50（判别健康回调 vs 下跌中继，信息量最大）、
     底背离 30（卖压衰竭的直接证据）、多周期 20（辅助确认）。
+
+    ``rsi_series_map``：预计算的 RSI 全序列映射（键 6/14/24），透传给已双形态的
+    ``rsi_regime``/``rsi_divergence``（用 14 周期）与 ``rsi_multi``（三周期）——
+    两路逐位相同；不传（默认）走原现算路径，其余调用方零改动。
     """
     try:
-        reg = rsi_regime(df, lookback=REGIME_LOOKBACK)
-        div = rsi_divergence(df)
-        mul = rsi_multi(df)
+        rs14 = rsi_series_map.get(RSI_MID) if rsi_series_map else None
+        reg = rsi_regime(df, lookback=REGIME_LOOKBACK, rsi_series=rs14)
+        div = rsi_divergence(df, rsi_series=rs14)
+        mul = rsi_multi(df, rsi_series_map=rsi_series_map)
         if not reg.get("available"):
             return {"available": False, "score": None, "reason": reg.get("reason")}
         # 长期结构（区间行为）0-50 —— 权重最高：它决定"这票值不值得等回调"

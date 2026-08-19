@@ -109,7 +109,9 @@ def _precompute_gate_series(df: pd.DataFrame) -> Optional[dict[str, Any]]:
     返回 None（依赖缺失/异常）时 gate 走原逐切片路径，行为与旧版逐位一致。
 
     键：kdj_j（与 df 等长）；macd_dif/macd_dea（等长）；
-    adx（⚠️ dmi_arrays 的数组比 df **短 1**——TR 用 [1:]——bar i 在 adx[i-1]）。
+    adx（⚠️ dmi_arrays 的数组比 df **短 1**——TR 用 [1:]——bar i 在 adx[i-1]）；
+    rsi14（等长 pd.Series，Wilder RSI 与 indicators.rsi 同口径——ewm adjust=False
+    从第 0 根递归，前缀末点与全序列同位点逐位相同；导入失败时缺该键，gate 走旧路径）。
     """
     if _kdj is None:
         return None
@@ -117,12 +119,15 @@ def _precompute_gate_series(df: pd.DataFrame) -> Optional[dict[str, Any]]:
         j = _kdj_series(df, fill_na=50.0)[2].to_numpy()  # 与 indicators.kdj 同口径
         dif, dea, _hist_x2 = _macd_series(df["close"])
         _, _, adx = dmi_arrays(df["high"], df["low"], df["close"])
-        return {
+        out: dict[str, Any] = {
             "kdj_j": j,
             "macd_dif": dif.to_numpy(),
             "macd_dea": dea.to_numpy(),
             "adx": adx,
         }
+        if _rsi is not None:
+            out["rsi14"] = _rsi(df["close"], RSI_MID)
+        return out
     except Exception:  # noqa: BLE001
         return None
 
@@ -464,13 +469,17 @@ def _sc_invert_s_shape(df: pd.DataFrame, code: str):
 
 
 # 可选打分器：同一批信号可跑三方对比（突破式 vs 买弱式 vs 反转突破分）
-def _sc_b1_pullback(df: pd.DataFrame, code: str):
-    """完美B1 缩量回踩买弱指纹（0-7 → 归一 0-100）。10只赢家反标，precision 待本回测确认。"""
+def _sc_b1_pullback(df: pd.DataFrame, code: str, precomputed: Optional[dict] = None):
+    """完美B1 缩量回踩买弱指纹（0-7 → 归一 0-100）。10只赢家反标，precision 待本回测确认。
+
+    ``precomputed``：evaluate_trades 逐股预计算的全序列（见 _precompute_b1_pullback_series），
+    只对从第 0 根开始的前缀切片有效；不传（默认）走原逐切片路径，两路逐位一致。
+    """
     # 函数本体在因子层 `factors/b1_pullback_fit.py`；此前从 `enrich_candidates`
     # 导入只是蹭它顶层的偶然再导出（2026-08-08 订正）。保持 lazy：避免重导入开销。
     from custos.core.factors.b1_pullback_fit import compute_b1_pullback_fit  # noqa: PLC0415
 
-    r = compute_b1_pullback_fit(df)
+    r = compute_b1_pullback_fit(df, precomputed)
     if not r.get("available"):
         return None
     return {
@@ -481,6 +490,77 @@ def _sc_b1_pullback(df: pd.DataFrame, code: str):
             k: (1.0 if v else 0.0) for k, v in (r.get("components") or {}).items()
         },
     }
+
+
+def _precompute_b1_pullback_series(df: pd.DataFrame) -> Optional[dict[str, Any]]:
+    """逐股**一次性**预计算 _sc_b1_pullback 用的全序列（evaluate_trades 的 O(n²)→O(n) 优化）。
+
+    等价性依据与 `_precompute_gate_series` 相同：rolling().mean() 与 J 序列
+    （RSV→EWM→EWM 递归，fill_na=50）都从第 0 根开始算，prefix ``df.iloc[:i+1]`` 上的
+    末点与全序列第 i 点是**同一串浮点运算**；尾部 ≤45 根的窗口统计（argmax/min/均值）
+    仍每 bar 现算（O(45)，与前缀长度无关）。等价性由
+    tests/test_scorer_precompute_equivalence.py 逐 bar 钉住。
+
+    ⚠️ 只对「从第 0 根开始的前缀切片」有效（evaluate_trades 的切片恒如此）；
+    ``evaluate(gate_window>0)`` 的切片起点 lo>0，**不得**传这个。
+    返回 None（异常）时 scorer 走原逐切片路径，行为与旧版逐位一致。
+
+    键：c/op/v（等长 pd.Series，RangeIndex）；ma5/ma10/ma60（等长 np 数组）；
+    j（等长 pd.Series）。
+    """
+    try:
+        from custos.core.factors.b1_pullback_fit import (  # noqa: PLC0415
+            B1PB_TREND_MA,  # 窗口常量单一来源（因子层）
+        )
+
+        c = df["close"].astype(float).reset_index(drop=True)
+        return {
+            "c": c,
+            "op": df["open"].astype(float).reset_index(drop=True),
+            "v": df["volume"].astype(float).reset_index(drop=True),
+            "ma5": c.rolling(5).mean().to_numpy(),
+            "ma10": c.rolling(10).mean().to_numpy(),
+            "ma60": c.rolling(B1PB_TREND_MA).mean().to_numpy(),
+            "j": _kdj_series(df, fill_na=50.0)[2],  # 与 indicators.j_series 同口径
+        }
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _precompute_kdj_j_series(df: pd.DataFrame) -> Optional[dict[str, Any]]:
+    """逐股**一次性**预计算 _sc_kdj_j 用的 KDJ 全序列（evaluate_trades 的 O(n²)→O(n) 优化）。
+
+    等价性依据与 `_precompute_gate_series` 相同：KDJ（RSV→EWM→EWM，fill_na=50）
+    从第 0 根开始递归，prefix ``df.iloc[:i+1]`` 上算出的末点与全序列第 i 点是
+    **同一串浮点运算**，逐位相同；J 口径与 gate 侧相同（kdj_series fill_na=50.0）。
+    等价性由 tests/test_scorer_precompute_equivalence.py 逐 bar 钉住。
+
+    ⚠️ 只对「从第 0 根开始的前缀切片」有效（evaluate_trades 的切片恒如此）；
+    ``evaluate(gate_window>0)`` 的切片起点 lo>0，**不得**传这个。
+    返回 None（异常）时 scorer 走原逐切片路径，行为与旧版逐位一致。
+
+    键：kdj_k/kdj_d/kdj_j（与 df 等长的 np 数组，scorer 按 ``len(slice)-1`` 取点）。
+    """
+    try:
+        k, d, j = _kdj_series(df, fill_na=50.0)
+        return {
+            "kdj_k": k.to_numpy(),
+            "kdj_d": d.to_numpy(),
+            "kdj_j": j.to_numpy(),
+        }
+    except Exception:  # noqa: BLE001
+        return None
+
+
+# scorer → 逐股预计算函数 注册表：evaluate_trades 按 scorer **身份**查表，
+# 查得到就逐股算一次全序列喂给 scorer 第三参；查不到 ⇒ 传 None ⇒ scorer 走旧路径
+# （其余 scorer 零改动零风险）。等价性钉测：tests/test_scorer_precompute_equivalence.py。
+_SCORER_PRECOMPUTE: dict[
+    Callable, Callable[[pd.DataFrame], Optional[dict[Any, Any]]]
+] = {
+    _sc_b1_pullback: _precompute_b1_pullback_series,
+    _sc_kdj_j: _precompute_kdj_j_series,
+}
 
 
 SCORERS = {
@@ -826,26 +906,65 @@ if detect_b2 is not None:
 
 # ---- RSI 状态 + 主升始发点(来源:微信文章公式) ----
 rsi_state_score: Callable[..., Any] | None  # 导入失败退 None（缺依赖不阻断其它 scorer）
+_rsi: Callable[..., Any] | None  # 同上（_precompute_gate_series 的 rsi14 预计算用）
 
 try:
     from custos.core.factors.rsi_state import (
+        RSI_FAST,
+        RSI_MID,
+        RSI_SLOW,
         rsi_divergence,
         rsi_regime,
         rsi_state_score,
     )
+    from custos.core.indicators import rsi as _rsi  # Wilder RSI 唯一实现（预计算用）
     from custos.core.factors.main_rally_factor import (
         detect_main_rally_start,
         main_rally_score,
     )
 except Exception:  # noqa: BLE001
     rsi_state_score = None
+    _rsi = None
 
 
-def _sc_rsi_state(df: pd.DataFrame, code: str):
-    """RSI 状态分:区间四态 50 + 底背离 30 + 多周期 20(权重待回测)。"""
+def _precompute_rsi_state_series(df: pd.DataFrame) -> Optional[dict[int, Any]]:
+    """逐股**一次性**预计算 _sc_rsi_state 用的三周期 RSI 全序列（O(n²)→O(n) 优化）。
+
+    等价性依据与 `_precompute_gate_series` 相同：Wilder RSI（ewm adjust=False）
+    从第 0 根开始递归，prefix ``df.iloc[:i+1]`` 上算出的末点与全序列第 i 点是
+    **同一串浮点运算**，逐位相同（`indicators.rsi` 唯一实现）。
+    等价性由 tests/test_scorer_precompute_equivalence.py 逐 bar 钉住。
+
+    ⚠️ 只对「从第 0 根开始的前缀切片」有效（evaluate_trades 的切片恒如此）；
+    ``evaluate(gate_window>0)`` 的切片起点 lo>0，**不得**传这个。
+    返回 None（依赖缺失/异常）时 scorer 走原逐切片路径，行为与旧版逐位一致。
+
+    键：RSI_FAST/RSI_MID/RSI_SLOW（6/14/24）→ 等长 pd.Series（scorer 侧
+    按 ``iloc[:len(slice)]`` 切片取点，见 rsi_state 的双形态约定）。
+    """
+    if _rsi is None:
+        return None
+    try:
+        c = df["close"]
+        return {
+            RSI_FAST: _rsi(c, RSI_FAST),
+            RSI_MID: _rsi(c, RSI_MID),
+            RSI_SLOW: _rsi(c, RSI_SLOW),
+        }
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _sc_rsi_state(df: pd.DataFrame, code: str, precomputed: Optional[dict] = None):
+    """RSI 状态分:区间四态 50 + 底背离 30 + 多周期 20(权重待回测)。
+
+    ``precomputed``：evaluate_trades 逐股预计算的三周期 RSI 全序列映射
+    （见 _precompute_rsi_state_series），只对从第 0 根开始的前缀切片有效；
+    不传（默认）走原逐切片路径，两路逐位一致。
+    """
     if rsi_state_score is None:
         return None
-    r = rsi_state_score(df, code)
+    r = rsi_state_score(df, code, rsi_series_map=precomputed)
     if not r.get("available"):
         return None
     return {
@@ -882,7 +1001,8 @@ def rsi_strong_regime_gate(
     if rsi_state_score is None:
         return False
     try:
-        return bool(rsi_regime(df_slice).get("state") == "strong")
+        rs = precomputed.get("rsi14") if precomputed is not None else None
+        return bool(rsi_regime(df_slice, rsi_series=rs).get("state") == "strong")
     except Exception:  # noqa: BLE001
         return False
 
@@ -894,7 +1014,8 @@ def rsi_bullish_divergence_gate(
     if rsi_state_score is None:
         return False
     try:
-        return bool(rsi_divergence(df_slice).get("bullish"))
+        rs = precomputed.get("rsi14") if precomputed is not None else None
+        return bool(rsi_divergence(df_slice, rsi_series=rs).get("bullish"))
     except Exception:  # noqa: BLE001
         return False
 
@@ -903,7 +1024,10 @@ def j_low_rsi_strong_gate(
     df_slice: pd.DataFrame, precomputed: Optional[dict] = None
 ) -> bool:
     """B1 核心组合的 RSI 版:J<13 且 RSI 处于牛市区间。"""
-    return bool(j_low_gate(df_slice, precomputed) and rsi_strong_regime_gate(df_slice))
+    return bool(
+        j_low_gate(df_slice, precomputed)
+        and rsi_strong_regime_gate(df_slice, precomputed)
+    )
 
 
 def j_low_rsi_div_gate(
@@ -911,7 +1035,8 @@ def j_low_rsi_div_gate(
 ) -> bool:
     """J<13 且 RSI 底背离——超卖**且**动能衰竭,比单纯 J<13 强。"""
     return bool(
-        j_low_gate(df_slice, precomputed) and rsi_bullish_divergence_gate(df_slice)
+        j_low_gate(df_slice, precomputed)
+        and rsi_bullish_divergence_gate(df_slice, precomputed)
     )
 
 
@@ -940,6 +1065,7 @@ def main_rally_above_gate(
 
 if rsi_state_score is not None:
     SCORERS["rsi_state"] = _sc_rsi_state
+    _SCORER_PRECOMPUTE[_sc_rsi_state] = _precompute_rsi_state_series
     SCORERS["main_rally"] = _sc_main_rally
     ENTRY_GATES["rsi_strong"] = rsi_strong_regime_gate
     ENTRY_GATES["rsi_bull_div"] = rsi_bullish_divergence_gate
@@ -1871,6 +1997,23 @@ def _dual_form_gate(entry_gate: Callable) -> Callable:
     return lambda df_slice, _pre=None: entry_gate(df_slice)  # 单参自定义 gate
 
 
+def _dual_form_scorer(scorer: Callable) -> Callable:
+    """把 scorer 统一成 ``(df_slice, code, precomputed)`` 三参调用面。
+
+    原生三参 scorer（如 _sc_b1_pullback）直接透传；其余两参 scorer（SCORERS 里
+    另外 16 个、外部注入的 ``lambda df, code: ...``）包一层、忽略预计算——
+    它们拿不到旁路加速（`_SCORER_PRECOMPUTE` 查不到 ⇒ 传 None），行为与旧版逐位一致。
+    """
+    import inspect  # noqa: PLC0415
+
+    try:
+        if len(inspect.signature(scorer).parameters) >= 3:
+            return scorer
+    except Exception:  # noqa: BLE001
+        pass
+    return lambda df_slice, code, _pre=None: scorer(df_slice, code)  # 两参 scorer
+
+
 def _prepare_stock(
     raw: pd.DataFrame,
     weekly: bool,
@@ -1880,11 +2023,13 @@ def _prepare_stock(
     scale_out_frac: float,
     stop_buffer: str,
     entry_gate: Optional[Callable] = None,
+    scorer: Optional[Callable] = None,
 ) -> Optional[dict[str, Any]]:
-    """evaluate_trades 的逐股准备：sort/weekly/min_bars/BBI/可成交性/中大阳线/ATR/gate 预计算。
+    """evaluate_trades 的逐股准备：sort/weekly/min_bars/BBI/可成交性/中大阳线/ATR/gate/scorer 预计算。
 
     返回 None = 该股跳过（空数据或根数不足）。各序列**逐股算一次**，主循环内复用；
-    gate_pre 见 `_precompute_gate_series`（entry_gate 为 None 时不算）。
+    gate_pre 见 `_precompute_gate_series`（entry_gate 为 None 时不算）；
+    scorer_pre 见 `_SCORER_PRECOMPUTE`（按 scorer 身份查表，查不到 ⇒ None ⇒ 旧路径）。
     """
     if raw is None or len(raw) == 0:
         return None
@@ -1896,6 +2041,7 @@ def _prepare_stock(
         return None
     # 可成交性:涨停/停牌不可买,跌停/停牌不可卖(逐股算一次,循环内复用)
     buy_ok, sell_ok = tradable_flags(df, code) if tradability else (None, None)
+    scorer_pre_fn = _SCORER_PRECOMPUTE.get(scorer) if scorer is not None else None
     return {
         "df": df,
         "n": n,
@@ -1909,6 +2055,8 @@ def _prepare_stock(
         # ATR(14)（止损余量 stop_buffer="atr" 用）:同样逐股算一次,循环内复用
         "atr": _atr_series(df) if stop_buffer == "atr" else None,
         "gate_pre": _precompute_gate_series(df) if entry_gate is not None else None,
+        # scorer 预计算全序列（_sc_b1_pullback 用）:逐股算一次,循环内点查询复用
+        "scorer_pre": scorer_pre_fn(df) if scorer_pre_fn is not None else None,
         # OHLC float 数组(simulate_b1_trade 用):逐股算一次,避免每笔重复 astype
         "ohlc": tuple(
             df[c].astype(float).values for c in ("close", "low", "high", "open")
@@ -1986,7 +2134,8 @@ def _entry_signal(
     gate_call: Optional[Callable],
     gate_pre: Any,
     sector_gate: Optional[Callable[[str, str], bool]],
-    scorer: Callable[[pd.DataFrame, str], Optional[dict]],
+    scorer: Callable[[pd.DataFrame, str, Any], Optional[dict]],
+    scorer_pre: Any,
     amv_ok: Callable[[str], bool],
     buy_ok: Optional[np.ndarray],
 ) -> Optional[dict]:
@@ -1995,7 +2144,9 @@ def _entry_signal(
         return None
     if sector_gate is not None and not sector_gate(code, entry_date):  # 板块相位择时
         return None
-    res = scorer(slice_df, code)
+    # scorer 已统一成三参调用面（_dual_form_scorer）；scorer_pre 非 None 仅在
+    # _SCORER_PRECOMPUTE 查到此 scorer 时（两参 scorer 被包一层、忽略它）。
+    res = scorer(slice_df, code, scorer_pre)
     if (
         res is not None
         and res.get("suggestion") == "可买"
@@ -2051,6 +2202,10 @@ def evaluate_trades(
       本模块 ENTRY_GATES 的 gate 是双形态 ``(df_slice, precomputed=None)``——逐股预计算的
       KDJ-J/MACD/ADX 递归序列会喂给它（O(n²)→O(n)，逐位等价见
       tests/test_gate_precompute_equivalence.py）；外部注入的单参 callable 自动包一层，零改动。
+    scorer(df_slice, code)->dict：进场打分器（默认 _sc_b1_pullback）。注册进 `_SCORER_PRECOMPUTE`
+      的 scorer 是三参双形态 ``(df_slice, code, precomputed=None)``——逐股预计算的 MA/J 全序列
+      会喂给第三参（O(n²)→O(n)，逐位等价见 tests/test_scorer_precompute_equivalence.py）；
+      其余两参 scorer 自动包一层、传 None 走旧路径，零改动。
     scale_out_frac>0：启用**分批止盈**（B1 §六 第五层「BBI 上方两根中大阳线分批减仓」/
       B1.pdf「止盈 BBI 之上两根中阳线，放飞一半」→ 取 0.5）。此前回测完全没有这一层，
       盈利单必须等 BBI 跌破才离场（已回撤过），系统性低估 avg_win 与盈亏比。
@@ -2062,6 +2217,7 @@ def evaluate_trades(
     cost = cost_bps / 1e4
     _amv_ok = _amv_checker(amv_regime)
     gate_call = _dual_form_gate(entry_gate) if entry_gate is not None else None
+    scorer_call = _dual_form_scorer(scorer)
 
     trades: list[dict[str, Any]] = []
     for code, raw in bars_by_code.items():
@@ -2074,6 +2230,7 @@ def evaluate_trades(
             scale_out_frac,
             stop_buffer,
             entry_gate,
+            scorer=scorer,
         )
         if prep is None:
             continue
@@ -2084,6 +2241,7 @@ def evaluate_trades(
         bull_flags = prep["bull_flags"]
         atr = prep["atr"]
         gate_pre = prep["gate_pre"]
+        scorer_pre = prep["scorer_pre"]
         emitted = 0
         i = min_bars
         while i < n - 1:
@@ -2097,7 +2255,8 @@ def evaluate_trades(
                 gate_call=gate_call,
                 gate_pre=gate_pre,
                 sector_gate=sector_gate,
-                scorer=scorer,
+                scorer=scorer_call,
+                scorer_pre=scorer_pre,
                 amv_ok=_amv_ok,
                 buy_ok=buy_ok,
             )

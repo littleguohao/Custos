@@ -57,7 +57,7 @@ def _always_buy(df: pd.DataFrame, code: str) -> dict:
     return {"score": 50.0, "suggestion": "可买", "aux": {}, "components": {}}
 
 
-# 消费预计算序列的 gate（KDJ/MACD/ADX 系及其组合）；其余为黑盒 detector gate。
+# 消费预计算序列的 gate（KDJ/MACD/ADX/RSI 系及其组合）；其余为黑盒 detector gate。
 _FAST_GATES = {
     "j_low",
     "reversal_k",
@@ -66,6 +66,8 @@ _FAST_GATES = {
     "j_low_adx25",
     "j_low_adx60",
     "j_low_qsx_gt_dks",
+    "rsi_strong",
+    "rsi_bull_div",
     "j_low_rsi_strong",
     "j_low_rsi_div",
 }
@@ -139,3 +141,102 @@ def test_precompute_equivalence_not_vacuous():
         collect_all=True,
     )
     assert len(t) > 0, "合成数据上 j_low 一笔都没出，等价测试形同空转"
+
+
+# ---- TODO #59②：rsi_regime/rsi_divergence 双形态（rsi_series=）逐点等价 ----
+
+
+def _shaped_bars(kind: str, n: int = 120, seed: int = 3) -> pd.DataFrame:
+    """不同形态的合成日线，覆盖 RSI gate 的边界路径。"""
+    rng = np.random.default_rng(seed)
+    if kind == "strong_trend":  # 强趋势：单调上行 → 牛市区间
+        close = 10 + np.cumsum(np.abs(rng.normal(0.12, 0.05, n)))
+    elif kind == "oscillating":  # 震荡：正弦 + 噪声
+        close = 10 + 1.5 * np.sin(np.arange(n) / 6.0) + rng.normal(0, 0.05, n)
+    elif kind == "nan_prefix":  # 含 NaN 前缀（停牌段）
+        close = np.maximum(10 + np.cumsum(rng.normal(0, 0.15, n)), 1.0)
+        close[:5] = np.nan
+    else:  # random_walk
+        close = np.maximum(10 + np.cumsum(rng.normal(0, 0.15, n)), 1.0)
+    high = close + np.abs(rng.normal(0, 0.08, n))
+    low = close - np.abs(rng.normal(0, 0.08, n))
+    open_ = low + (high - low) * rng.random(n)
+    vol = np.abs(rng.normal(1e6, 2e5, n))
+    return pd.DataFrame(
+        {
+            "date": pd.date_range("2024-01-01", periods=n, freq="B").astype(str),
+            "open": open_,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": vol,
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "kind,n",
+    [
+        ("random_walk", 120),
+        ("strong_trend", 120),
+        ("oscillating", 120),
+        ("nan_prefix", 120),
+        ("random_walk", 40),  # 刚好 RSI_MIN_BARS
+        ("random_walk", 41),  # RSI_MIN_BARS + 1
+    ],
+)
+def test_rsi_state_dual_form_pointwise_equal(kind, n):
+    """rsi_regime/rsi_divergence：全序列预计算 vs 逐前缀现算，每个采样点 dict 完全相等。
+
+    等价依据：indicators.rsi 是 ewm(alpha=1/n, adjust=False)，从第 0 根递归，
+    prefix 末点与全序列同位点是同一串浮点运算（含 NaN 处理、min_bars 守卫、
+    四态分类边界、摆动点 idxmin 取值，全部作用在同值同 index 的序列上）。
+    """
+    from custos.core.factors.rsi_state import rsi_divergence, rsi_regime
+    from custos.core.indicators import rsi
+
+    df = _shaped_bars(kind, n=n)
+    full = rsi(df["close"], 14)
+    for i in list(range(0, n, 3)) + [n - 2, n - 1]:
+        sl = df.iloc[: i + 1]
+        assert rsi_regime(sl, rsi_series=full) == rsi_regime(sl), (
+            f"rsi_regime {kind} n={n} 在 i={i} 两路不一致"
+        )
+        assert rsi_divergence(sl, rsi_series=full) == rsi_divergence(sl), (
+            f"rsi_divergence {kind} n={n} 在 i={i} 两路不一致"
+        )
+
+
+def test_rsi_state_dual_form_not_vacuous():
+    """防"空==空"假绿：两路都必须真的判出 strong / 底背离至少一次。"""
+    from custos.core.factors.rsi_state import rsi_divergence, rsi_regime
+    from custos.core.indicators import rsi
+
+    df = _shaped_bars("strong_trend", n=160, seed=5)
+    full = rsi(df["close"], 14)
+    strong_hits = sum(
+        rsi_regime(df.iloc[: i + 1], rsi_series=full).get("state") == "strong"
+        for i in range(len(df))
+    )
+    assert strong_hits > 0, "强趋势合成数据上 strong 一次都没判出，等价测试形同空转"
+    # 底背离：先跌出两个低点再企稳回升的 V 形
+    n = 120
+    down = 20 - np.cumsum(np.abs(np.random.default_rng(9).normal(0.3, 0.05, n // 2)))
+    up = down[-1] + np.cumsum(
+        np.abs(np.random.default_rng(10).normal(0.1, 0.03, n - n // 2))
+    )
+    close = np.concatenate([down, up])
+    v = pd.DataFrame(
+        {
+            "open": close,
+            "high": close + 0.05,
+            "low": close - 0.05,
+            "close": close,
+            "volume": np.full(n, 1e6),
+        }
+    )
+    full_v = rsi(v["close"], 14)
+    div_out = rsi_divergence(v, rsi_series=full_v)
+    assert div_out == rsi_divergence(v) and div_out.get("available"), (
+        "V 形合成数据上 divergence 两路不一致或不可用"
+    )

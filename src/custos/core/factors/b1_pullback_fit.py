@@ -38,7 +38,7 @@ B1PB_BODY_MAX = 4.5  # 小实体企稳：B1日实体 ≤4.5%
 B1PB_HIT_MIN = 6  # 命中门槛：7项中 ≥6 项
 
 
-def compute_b1_pullback_fit(df) -> dict[str, Any]:
+def compute_b1_pullback_fit(df, precomputed=None) -> dict[str, Any]:
     """完美B1「缩量回踩超卖企稳」买弱指纹评分（0-7）。来源：10只确认赢家(后续大涨)反标。
 
     与 technical_score(买强) 正交——专抓「上升趋势中缩量回踩到均线、J超卖、企稳」的买弱点。
@@ -46,17 +46,41 @@ def compute_b1_pullback_fit(df) -> dict[str, Any]:
     baseline 的 +0.96%/笔 —— **作进场过滤有害**(排除了做多区间的突破赢家)。仅作描述性证据落盘、
     **绝不作买入依据**、不驱动分层。真正的 edge 在「0AMV择时 + 止损/BBI移动止盈」,不在此形态。
     绝不 raise。
+
+    ``precomputed``：evaluate_trades 逐股预计算的全序列（见
+    ``research/backtest_factors._precompute_b1_pullback_series``），给了就做点查询
+    （O(n²)→O(n)），None（默认）走原逐切片路径。两路逐位一致：rolling().mean() 与
+    J 序列（RSV→EWM→EWM 递归）从第 0 根起算，前缀末点与全序列同位点是同一串浮点运算；
+    ⚠️ 只对「从第 0 根开始的前缀切片」有效。逐位等价由
+    tests/test_scorer_precompute_equivalence.py 逐 bar 钉住。
     """
     try:
-        c = df["close"].astype(float).reset_index(drop=True)
-        v = df["volume"].astype(float).reset_index(drop=True)
-        op = df["open"].astype(float).reset_index(drop=True)
-        n = len(c)
+        n = len(df)
         if n < 20:
             return {"available": False, "score": 0, "max_score": 7, "hit": False}
-        ma5 = c.rolling(5).mean()
-        ma10 = c.rolling(10).mean()
-        ma60 = c.rolling(min(B1PB_TREND_MA, n)).mean()
+        if precomputed is not None:
+            i = n - 1
+            c = precomputed["c"].iloc[:n]
+            v = precomputed["v"].iloc[:n]
+            op = precomputed["op"].iloc[:n]
+            ma5_last = precomputed["ma5"][i]
+            ma10_last = precomputed["ma10"][i]
+            # n<60 时旧路径窗口是 min(60, n)（=全量均值），全序列 rolling(60) 同位点是 NaN
+            # ⇒ 按旧表达式在 ≤59 根前缀上现算（O(60)，每股最多前 59 根触发一次）。
+            ma60_last = (
+                precomputed["ma60"][i]
+                if n >= B1PB_TREND_MA
+                else c.rolling(min(B1PB_TREND_MA, n)).mean().iloc[-1]
+            )
+            jser = precomputed["j"].iloc[:n]
+        else:
+            c = df["close"].astype(float).reset_index(drop=True)
+            v = df["volume"].astype(float).reset_index(drop=True)
+            op = df["open"].astype(float).reset_index(drop=True)
+            ma5_last = c.rolling(5).mean().iloc[-1]
+            ma10_last = c.rolling(10).mean().iloc[-1]
+            ma60_last = c.rolling(min(B1PB_TREND_MA, n)).mean().iloc[-1]
+            jser = _j_canonical(df, fill_na=50.0)
         look = min(45, n)
         hi_i = int(c.iloc[-look:].values.argmax()) + (n - look)  # 波段高点
         up_win = c.iloc[max(0, hi_i - 40) : hi_i + 1]
@@ -68,7 +92,6 @@ def compute_b1_pullback_fit(df) -> dict[str, Any]:
             if c.iloc[hi_i]
             else 0.0
         )
-        jser = _j_canonical(df, fill_na=50.0)
         j_min = (
             float(jser.iloc[-(pull_days + 1) :].min())
             if pull_days > 0
@@ -82,18 +105,18 @@ def compute_b1_pullback_fit(df) -> dict[str, Any]:
             else 9.0
         )
         d_ma5 = (
-            (float(c.iloc[-1]) / float(ma5.iloc[-1]) - 1) * 100
-            if not np.isnan(ma5.iloc[-1])
+            (float(c.iloc[-1]) / float(ma5_last) - 1) * 100
+            if not np.isnan(ma5_last)
             else 99.0
         )
         d_ma10 = (
-            (float(c.iloc[-1]) / float(ma10.iloc[-1]) - 1) * 100
-            if not np.isnan(ma10.iloc[-1])
+            (float(c.iloc[-1]) / float(ma10_last) - 1) * 100
+            if not np.isnan(ma10_last)
             else 99.0
         )
         d_ma60 = (
-            (float(c.iloc[-1]) / float(ma60.iloc[-1]) - 1) * 100
-            if not np.isnan(ma60.iloc[-1])
+            (float(c.iloc[-1]) / float(ma60_last) - 1) * 100
+            if not np.isnan(ma60_last)
             else -99.0
         )
         comp = {
