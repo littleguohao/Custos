@@ -86,6 +86,13 @@
       "doc": "_shared/system_principles.md",
       "status": "live",
       "note": "2026-08-07 从根目录 TEAM_BLUEPRINT.md 抢救（该文件已删）。含核心原则 5 条 + 用户画像 6 条 + 卖出风控规则的「声称 vs 实测」核对表。原文档把 6 条规则一律写成「不可被总控决策覆盖」，逐条核实后 2 条零实现（连亏冷却、胜率降仓）——2026-08-12 两条已实现为复盘提示节（close_review/loss_streak.py + cooldowns.py，只提示不拦截），见 CHANGELOG v0.48。跨策略，不属于任何单一策略"
+    },
+    {
+      "id": "factor_exit_catalog",
+      "name": "因子·止损·止盈总览",
+      "doc": "_shared/factor_exit_catalog.md",
+      "status": "live",
+      "note": "2026-08-20 首版（v0.88）：注册表全量 31 因子按角色三组 + 止损/止盈方案目录 + 减仓幅度表 + 研究→live 回流通道。人读索引，字段级真相以代码为准（factors 注册表 / exit_rules.py / EXIT_RULES.json / scoring.weights）。跨策略，不属于任何单一策略"
     }
   ]
 }
