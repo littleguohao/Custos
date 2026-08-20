@@ -4,13 +4,31 @@
 
 **核心原则：数据采集与判断全部由 Python 脚本完成，LLM 只做格式化与摘要，不参与策略判断。**
 
+## 核心思想与架构原则
+
+**核心思想（owner 2026-08-19 定案）**：不追求胜率，追求「一定胜率基础上的更高盈亏比」，
+通过优化**止盈止损与仓位管理**达成持续盈利——评价任何信号看期望/盈亏比（胜率只是底线），
+改进杠杆优先加在出场与仓位而非入场精度（研究口径与此一致：选股无 alpha，
+出场侧是少数反复过线的地方）。全文见
+[`strategy/_shared/system_principles.md`](governance/strategy/_shared/system_principles.md) 核心原则第 0 条。
+
+**架构主线：因子 + 止损策略 + 止盈策略**（v0.81-v0.85，Phase A-E）：
+
+- **因子**——实现全项目唯一一份（`core/factors/` + 注册表强制登记），权重外置
+  `SCREEN_FORMULA_REGISTRY.json` 的 `scoring.weights`（调参不改代码，调前先回测）
+- **止损/止盈**——规则唯一来源 `core/exit_rules.py` + `contracts/EXIT_RULES.json`
+  覆盖层；买入时计划点位持久化 `data/trades/position_plans.json`（选股 stop_loss_ref
+  不再断链），14:45/17:00 报告影子双跑对照（TODO #60 观察后定正式并入）
+- **研究→live 回流**——`research/strategy_grid.py` 因子×出场联合寻优，
+  优胜配置的键名与 live `EXIT_RULES.json` 一致可直接拷入；**调任何分值/阈值先回测**
+
 ## 快速开始
 
 需要 Python 3.11+（用 [uv](https://github.com/astral-sh/uv) 管理）、通达信客户端（本地日线源）。
 
 ```bash
 uv sync
-uv run pytest -q                    # 全量测试（3800+ 用例）
+uv run pytest -q                    # 全量测试（4300+ 用例）
 ```
 
 两个环境变量：

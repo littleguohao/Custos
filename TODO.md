@@ -6,7 +6,7 @@
 > 优先级按**「它阻塞了什么」**排，不按工作量：
 > P0 = 阻塞其他事或 live 正在依赖 ｜ P1 = 已有结论悬空 ｜ P2 = 新验证 ｜ P3 = 技术债
 >
-> 最后更新：2026-08-20（v0.81-v0.85（因子×止盈×止损架构 Phase A-E，另一会话昨晚合入）经三轮 review：无 blocker，1 major（strategy_grid 签名不钉窗口/宇宙）+ 9 minor 全部修复（v0.86）；新增 #60 判读注记（两报告口径差 + default 计划 −7% 噪音）、#61 capital_intent 校准回测、#62 技术分轴因子化缺口。此前（2026-08-19）：#26 方向转清理（v0.79 证伪 + v0.80 清理第一批）；#32 观察期进行中（v0.75 修复 + v0.76 口径定性）；#59 收口（v0.74）；#58 清零（v0.71-v0.73）；核心思想落档（v0.78））
+> 最后更新：2026-08-20（清理已完成项：#58/#59①②/#8/#13/#25/#31/#35/#49 等事实均已入 CHANGELOG，本表只留未做的事。当前活跃：#60 影子观察（需 owner 拍板）、#61/#62 因子化与校准、#32 观察期、#26 剩余子项挂起）
 
 ## P0 · 阻塞项
 
@@ -20,14 +20,14 @@
 | # | 单元 | 重跑什么 | 前置 |
 |---|---|---|---|
 
-（当前无。原 #8 已于 2026-08-13 重算完成，见 R3「召回重算」节与 CHANGELOG v0.53。）
+（当前无。）
 
 ## P2 · 待跑（新验证）
 
 | # | 事项 | 出处 | 备注 |
 |---|---|---|---|
 
-（当前无。原 #13 / #25 已于 2026-08-17 跑完并关闭：#13 严变体复核否决见 R7「#13 复核结果」节，#25 跨窗复核两案过线见 R10「#25 跨窗复核结果」节。）
+（当前无。）
 
 ⚠️ 教训（cross-window 复核，已归入 R10）：edge 集中在单一 regime 的方案首轮看起来都很好。
 
@@ -35,8 +35,8 @@
 
 | # | 事项 | 出处 |
 |---|---|---|
-| 58 | **高复杂度函数拆分**：✅ **C19 以上全部拆完（2026-08-19）**。F 级（v0.68/v0.69）→ E 级 19 个（v0.71）→ D 级 26 个（v0.72）→ C19-20 共 29 个（v0.73，含五项逐位等价性能优化：`mainline_fingerprint` 69.8×、`scan_signals_ytd` 15.7×、`simulate_b1_trade` OHLC hoist 2.7×/3.3× 等，明细见 CHANGELOG）。⚠️ 三轮各修/发现过拆分事故形态：helper 调用了但未定义（`main_rally_factor` 静默零产出）；helper 定义了却没被调用（`_signal_labels_section`）；钉板兼容（`run_1800` runtime_gate 段、`merge_incremental` 参数命名）。等价验证：全量 4183 passed、周报/月报 md+json 四件逐字节 MATCH、audit 套件通过。**剩余原则**：全仓最高 C19（`simulate_b1_trade`，ohlc 分支 +1 换 2.7-3.3× 提速），C 级一律**下次因业务动这些文件时先拆** | 2026-08-19 收口（`reports/radon_cc.txt` 当日重生成） |
-| 59 | **性能机会清单（v0.73 审查出）**：① scorer 每 bar 全前缀重算——✅ 2026-08-19 落地（v0.74）：scorer 双形态框架 + `_sc_b1_pullback` 3.3×/`_sc_kdj_j` 10.0×/`_sc_rsi_state` 6.3× 接线。**剩余可接线**：s_shape 系（值得但改造面大，待排）、alpha101/pvcorr/low_vol/momentum/reversal_quality/mcap（中等优先）；b1_dual/long_structure/b2/main_rally 黑盒 detector 不适合；② RSI 两 gate `precomputed` 未接线——✅ 同日落地（v0.74，3.2-11×）；③④ 已拍板不动/否决，见「已失效」表 | v0.73 审查 / v0.74 落地 |
+| 58 | **高复杂度函数拆分原则（存量约定）**：C19 以上已全部拆完（v0.68-v0.73 收口，明细见 CHANGELOG；v0.86 顺带拆回 `rsi_multi` D21→C16）。**现行原则**：C 级函数**下次因业务动这些文件时先拆**；新写/新改函数不得回潮 C19+ | 2026-08-19 收口；原则长期有效 |
+| 59 | **性能机会剩余项（v0.73 审查出，①②已落地 v0.74，③④ 见已失效表）**：还可接线的 scorer 双形态——s_shape 系（值得但改造面大）、alpha101/pvcorr/low_vol/momentum/reversal_quality/mcap（中等优先）；b1_dual/long_structure/b2/main_rally 黑盒 detector 不适合。优先级低，随回测批次顺带做 | v0.73 审查 |
 
 ## ⚠️ 已失效的行动项（**别照着做**）
 
@@ -54,7 +54,6 @@
 ## P4 · strategy 梳理查出的问题（2026-08-06）
 
 索引与分类见 [`strategy/README.md`](governance/strategy/README.md)。
-（原「两份文档入口不可达」已由 2026-08-06 重组解决：`STRATEGY_REGISTRY.json` + 各级 README + 测试强制登记。）
 
 | # | 事项 | 性质 |
 |---|---|---|
@@ -64,22 +63,20 @@
 
 索引与核查结论见 [`contracts/README.md`](governance/contracts/README.md)。
 
-（原 #31「冷却机制未实现」2026-08-12 并入 #51，同日随 #51 落地——见 CHANGELOG v0.48 与 `close_review/cooldowns.py`。）
+（当前无。）
 
 ## P6 · trades 梳理（2026-08-06）
 
 | # | 事项 | 性质 |
 |---|---|---|
-| 32 | **reconcile_positions 已梳理（2026-08-12，owner「还需要优化和梳理」）**：① 超卖报错带分叉点（哪只票/哪笔/卖多少/当时持仓）；② 未给 baseline 时超卖报错直接附 `--baseline` 格式示例，baseline 文件缺失/非法/缺字段均 SystemExit + 格式引导（不再抛裸 traceback）；③ 17:00 链 mismatch/replay_failed 时 stderr 打 `[WARN]`（此前只躺 run log note，等于静默）。**观察期首日（2026-08-19 目标机）即抓到根因**：replay_failed = 股份入账类（转债转入/拆股）被 `TRADE_CATEGORIES` 过滤、回放只见卖出不见来源 ⇒ 假超卖——已修（v0.75，`SHARE_CREDIT_CATEGORIES` 参与持仓推导，live 导入同受益）。**观察期（2026-08-19 目标机）**：首日 replay_failed 抓到根因——股份入账类（转债转入/拆股）被 `TRADE_CATEGORIES` 过滤、回放只见卖出不见来源 ⇒ 假超卖，已修（v0.75，`SHARE_CREDIT_CATEGORIES` 参与持仓推导，live 导入同受益）；修复后当日重跑 `replay_ok=true`、**数量 6 对 6 零误差**，4 只 `cost_only_diff` 已逐笔核算定性为**券商摊薄/保本成本 vs 回放移动平均成本的口径差**（含预估卖出佣金 ~0.03%、按回合重置；另 2 只为快照 3 位小数舍入），非缺陷，定性已写入 reconcile_positions docstring。**剩余**：继续观察若干交易日数量持续零 mismatch 后，`--strict` 转硬闸（strict 只看 `qty_mismatch_count`，成本差异不构成阻塞） | 已梳理，观察期进行中（口径差已定性） |
+| 32 | **reconcile_positions 观察期**：已梳理（2026-08-12，v0.49：超卖报错带分叉点、baseline 格式引导、17:00 链 stderr WARN）。观察期首日（2026-08-19 目标机）抓到根因——股份入账类（转债转入/拆股）被类别过滤 ⇒ 假超卖，已修（v0.75）；修复后当日重跑数量 6 对 6 零误差，4 只 `cost_only_diff` 逐笔核算定性为**券商摊薄/保本成本 vs 回放移动平均成本的口径差**（v0.76，非缺陷，定性已写入 docstring）。**剩余**：继续观察若干交易日数量持续零 mismatch 后，`--strict` 转硬闸（strict 只看 `qty_mismatch_count`，成本差异不构成阻塞） | 观察期进行中 |
 
 ## P7 · 因子层抽取查出的问题（2026-08-06）
 
 | # | 事项 | 性质 |
 |---|---|---|
 | 61 | **capital_intent 分值校准回测（status candidate → active 的前提）**：v0.84 因子化迁入时定档 candidate——它实际驱动分层第二轴（live_use=scorer），但各证据分值（ci_*）与 CAP_STRONG=5/CAP_MID=2 从未独立回测。用 Phase E `strategy_grid` 的因子轴把 capital_intent 纳入组合寻优，出证据后再议 status 升级与分值调整；调 `scoring.weights` 一律先回测（同 cap_rules 纪律） | 待回测 |
-| 62 | **技术分轴因子化缺口（2026-08-20 审计）**：v0.84 因子化覆盖了资金意图与基本面两轴，但**技术分轴**仍是「L0 指标原语 + enrich 内联检测器 + score 内联组合器」——判定逻辑未进 FACTOR 注册表、无法单独回测。缺口按严重度：**高**=MACD 检测器（`enrich.check_macd_technics`，7 条打分腿+2 条 cap）、patterns 五单项复合布尔（`_reversal_flags`，j_low +24 是最大单项）、B1/CZ 检测器族（bottom_volume/leader_volume/five_day_entry/repair_signals/non_one_wave/volume_sustain）、点火族（ignition/pullback_shrink/b1_ignition 复合）；**中**=technical_score 八段组合器+RESONANCE_MATRIX、cap 编排（apply_risk_downgrades）、J<13 gate/weekly_j_state（L0 唯一实现但无 FACTOR 登记）、`bottom_patterns` 元数据不符（volume_yy 实为打分腿，v0.86 已补记 note）；**低**=adx>60 腿、stop_loss_ref、check_liquidity。⚠️ 因子化≠改分值：搬迁保持行为零变化（v0.84 先例），是否进分由回测证据决定 | 待排期（与 #61 同批回测） |
-
-（原 #35 三因子补跑 2026-08-18 完成：均无跨窗口稳健性，owner 拍板降级「不再研究」——`status` untested→needs_work，证据见 R2 第 16 条与 CHANGELOG v0.70。）
+| 62 | **技术分轴因子化缺口（2026-08-20 审计）**：v0.84 因子化覆盖了资金意图与基本面两轴，但**技术分轴**仍是「L0 指标原语 + enrich 内联检测器 + score 内联组合器」——判定逻辑未进 FACTOR 注册表、无法单独回测。缺口按严重度：**高**=MACD 检测器（`enrich.check_macd_technics`，7 条打分腿+2 条 cap）、patterns 五单项复合布尔（`_reversal_flags`，j_low +24 是最大单项）、B1/CZ 检测器族（bottom_volume/leader_volume/five_day_entry/repair_signals/non_one_wave/volume_sustain）、点火族（ignition/pullback_shrink/b1_ignition 复合）；**中**=technical_score 八段组合器+RESONANCE_MATRIX、cap 编排（apply_risk_downgrades）、J<13 gate/weekly_j_state（L0 唯一实现但无 FACTOR 登记）、`bottom_patterns` 元数据不符（volume_yy 实为打分腿，v0.86 已补记 note）；**低**=adx>60 腿、stop_loss_ref、check_liquidity。⚠️ 因子化≠改分值：搬迁保持行为零变化（v0.84 先例），是否进分由回测证据决定 | **进行中（2026-08-20 owner 拍板「该因子化的都因子化」）** |
 
 ## P8 · 测试覆盖率（2026-08-07 首次量化）
 
@@ -102,9 +99,6 @@ stage 全部指向不存在的文件、整条链硬失败，而 3481 条测试�
 ⚠️ **补测试前先问「这段代码该不该存在」** —— 首轮清点就删掉一个 0% 的死文件
 （`sync_trades.py`：零调用 + 依赖的 config 不存在 + 3 个真 bug），
 给该删的代码写测试是浪费。
-
-（原 #49「`rss_filter.entities(date)` 依赖持仓历史快照」已于 2026-08-18 落地：
-`core/positions_history.py` 归档机制 + `entities(date)` 生效，见 CHANGELOG v0.67。）
 
 ## 需要 owner 拍板
 
