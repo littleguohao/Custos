@@ -753,9 +753,8 @@ SPECS: dict[str, dict] = {
                     "s_reversal": {"type": dict, "required": False},
                 },
             },
-            # v0.51：门槛外观察区（被 J<13 挡掉但异动强的票；不进主池/分层，
-            # candidate_table 单列一节展示）。enrich 缺席时为空数组。
-            "watchlist_outside_gate": {"type": list, "required": False},
+            # v0.89：门槛外观察区（watchlist_outside_gate）已移除——门外异动票
+            # 只进 excluded 留痕；报告侧改列池内门内提醒（candidate_table）。
             "bucket_counts": {"type": dict, "required": True},
             "audit": _AUDIT_FIELD,
         },

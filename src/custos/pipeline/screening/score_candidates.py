@@ -1210,9 +1210,6 @@ def _score_all_shell(
         "sector_score_max": float(sector_score_max),
         "bucket_counts": {"A": 0, "B": 0, "C": 0, "D": 0},
         "candidates": [],
-        # v0.51（#37 阶段 B）：门槛外观察区透传（不进 candidates 主池、不进分层；
-        # candidate_table 新增一节展示）。
-        "watchlist_outside_gate": (enriched or {}).get("watchlist_outside_gate") or [],
         # v0.84 修复（code review 审计缺口）：生效权重落盘——registry 改权重后
         # stock_pool.json 有记录可查。新键加在末尾（上方历史键序勿动）；
         # 两组默认表键不相交（ci_* 前缀），合并即为完整生效表。

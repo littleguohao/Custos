@@ -1009,9 +1009,6 @@ def _init_enrich_result(
         "degraded_reason": "",
         "candidates": [],
         "excluded": [],
-        # v0.51（#37 阶段 B）：门槛外观察区——被 J<13 硬门槛挡掉但异动强的票
-        # （只展示，不进主池/分层）。见下方 J 门槛分支。
-        "watchlist_outside_gate": [],
     }
 
     if not hits_data or hits_data.get("status") == "unavailable":
@@ -1289,7 +1286,7 @@ def _apply_j_gate(cand: dict, result: dict, cfg: dict) -> bool:
     """J<13 硬门槛（2026-07-22 用户决策）：全通道候选（公式与自选池一视同仁）
     必须先满足日 J<13，再谈完美图形贴合度；J 不可计算视同不满足。
 
-    被挡时写 excluded（异动强的先入 watchlist_outside_gate）并返回 True。
+    被挡时写 excluded 并返回 True（v0.89 起门外异动票不再单列观察区）。
     """
     if not cfg.get("j_low_required", J_GATE_REQUIRED_DEFAULT):
         return False
@@ -1298,25 +1295,8 @@ def _apply_j_gate(cand: dict, result: dict, cfg: dict) -> bool:
     # （判定本体仍是 weekly_j.j_below_threshold，上方 re-export 通道不变）。
     if j_low_gate_hit(dj):
         return False
-    # 门槛外观察区（v0.51，#37 阶段 B，owner 批准）：J<13 硬门槛**不动**
-    # （R1 框架），被挡但**异动强**的票落观察区展示。初版判据 =
-    # 底部巨量（bottom_volume.hit）或放量点火（ignition.hit）——
-    # 两个已算好的现成字段，不求完备，先观察一季再校准。
-    if (cand.get("bottom_volume") or {}).get("hit") or (cand.get("ignition") or {}).get(
-        "hit"
-    ):
-        result["watchlist_outside_gate"].append(
-            {
-                "code": cand["code"],
-                "name": cand["name"],
-                "daily_j": dj,
-                "change_pct": cand.get("change_pct"),
-                "bottom_volume": cand.get("bottom_volume"),
-                "ignition": cand.get("ignition"),
-                "formula_hits": cand.get("formula_hits"),
-                "gate_reason": f"j_not_low:j={dj}",
-            }
-        )
+    # 被挡时写 excluded 并返回 True（v0.89 起门外异动票不再单列观察区，
+    # 报告侧改为池内门内提醒，见 candidate_table._in_gate_reminder_section）。
     result["excluded"].append(
         {"code": cand["code"], "name": cand["name"], "reason": f"j_not_low:j={dj}"}
     )

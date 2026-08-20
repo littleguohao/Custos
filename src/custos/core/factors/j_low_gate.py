@@ -10,8 +10,8 @@
 （gate vs scorer），各自登记才能让 live_use 维度如实。
 
 **执行点不在本模块**：18:00 进池硬门槛的编排在
-`pipeline/screening/enrich_candidates._apply_j_gate`（被挡写 excluded /
-异动强先入 watchlist_outside_gate），本函数只是判定入口（2026-07-22 用户
+`pipeline/screening/enrich_candidates._apply_j_gate`（被挡写 excluded），
+本函数只是判定入口（2026-07-22 用户
 决策：全通道候选——公式与自选池一视同仁——必须先满足日 J<13，J 不可计算
 视同不满足）。
 
@@ -58,7 +58,7 @@ def j_low_gate_hit(daily_j: Any, threshold: float = J_LOW_THRESHOLD) -> bool:
 
     判定本体即 `weekly_j.j_below_threshold`（NaN/±inf/None 判否的审计说明见
     该函数）；这里只做 gate 语义的因子化入口，门槛外的落盘编排
-    （excluded / watchlist_outside_gate）留在 enrich `_apply_j_gate`。
+    （excluded）留在 enrich `_apply_j_gate`。
 
     撞名避让：研究侧 `research/backtest_factors.j_low_gate(df_slice, precomputed)`
     是同一门槛的 as-of 回测适配器（ENTRY_GATES 双形态签名），故本函数命名

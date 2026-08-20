@@ -644,53 +644,73 @@ def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
     # 治理文档结论#11)——空头里板块/市场腿天然未到位(滞后),严格四面共振永远不会在空头触发,
     # 故空头期单列"基本面优+技术强"的提前埋伏观察对象,跟踪其板块/市场腿何时补齐。
     _bear_outposts(lines, _watch_key, candidates, is_bear, watch_all)
-    # 👀 门槛外观察区（v0.51，#37 阶段 B）：被 J<13 硬门槛挡掉但异动强的票
-    lines += _outside_gate_section(pool.get("watchlist_outside_gate") or [])
+    # 📌 门内提醒（v0.89，owner）：池内（已过 J<13 硬门槛）且异动强的票——
+    # 取代 v0.51 的门槛外观察区（J≥13 票不再单列，只进 excluded 留痕）。
+    lines += _in_gate_reminder_section(candidates)
     # 得分 Top5：按总分降序（跨分层），供快速浏览当日最强候选
     _top5(lines, candidates)
     _bucket_pools(lines, candidates, counts)
     return "\n".join(lines)
 
 
-def _outside_gate_section(watchlist: list) -> list[str]:
-    """门槛外观察区：被 J<13 硬门槛（R1 框架，不动）挡掉、但**异动强**
-    （底部巨量或放量点火——初版判据，见 enrich_candidates J 门槛分支注释）的票。
+# 门内提醒单行上限：异动强命中在池内可能有数百只，只列总分最高的前 N 只
+_IN_GATE_REMINDER_TOP_N = 20
 
-    只展示，不进 stock_pool 主池、不进分层——先观察一季再谈是否值一个正式通道。
+
+def _in_gate_reminder_section(candidates: list) -> list[str]:
+    """门内提醒（v0.89，owner）：池内 J≤13 且**异动强**
+    （底部巨量或放量点火——沿用 v0.51 门槛外观察区的初版判据）的票。
+
+    替代 v0.51 的「门槛外观察区」（J≥13 但异动强）：门外票不再单列展示，
+    只进 excluded 留痕；提醒对象改为**已在池内**的异动票，按总分降序取前
+    _IN_GATE_REMINDER_TOP_N 只。只展示提醒，不改分层/排序。
     """
     out = [
-        "## 👀 门槛外观察区（J≥13 但异动强）",
+        "## 📌 门内提醒（J≤13 且异动强）",
         "",
-        "> 被 J<13 硬门槛挡掉、但出现底部巨量/放量点火的票。**只观察**——不进主池、"
-        "不分层；J 回落到 13 以下时会自然进入正式候选。",
+        "> 已在候选池内（J<13 硬门槛已通过）、且出现底部巨量/放量点火的票。"
+        "**仅提醒**，不改变分层与排序；按总分降序最多列前 "
+        f"{_IN_GATE_REMINDER_TOP_N} 只。",
         "",
     ]
-    if not watchlist:
+    hits = [
+        c
+        for c in candidates
+        if (c.get("daily_j") is not None and c.get("daily_j") <= 13)
+        and (
+            (c.get("bottom_volume") or {}).get("hit")
+            or (c.get("ignition") or {}).get("hit")
+        )
+    ]
+    if not hits:
         out.append("（今日无）")
         out.append("")
         return out
-    out.append("| 代码 | 名称 | 日J | 涨跌幅 | 异动判据 | 公式命中 |")
-    out.append("|---|---|---:|---:|---|---|")
-    # 按日 J 从小到大排（2026-08-14 owner）：J 越小越接近硬门槛，越可能先回到正式候选。
-    for w in sorted(
-        watchlist,
-        key=lambda x: (x.get("daily_j") is None, x.get("daily_j") or 0),
-    ):
+    out.append("| 代码 | 名称 | 日J | 涨跌幅 | 异动判据 | 分层 | 技术分 |")
+    out.append("|---|---|---:|---:|---|---|---:|")
+    hits.sort(
+        key=lambda c: (c.get("score_detail") or {}).get("technical_score") or 0,
+        reverse=True,
+    )
+    for c in hits[:_IN_GATE_REMINDER_TOP_N]:
         triggers = "、".join(
             t
             for t, hit in (
-                ("底部巨量", (w.get("bottom_volume") or {}).get("hit")),
-                ("放量点火", (w.get("ignition") or {}).get("hit")),
+                ("底部巨量", (c.get("bottom_volume") or {}).get("hit")),
+                ("放量点火", (c.get("ignition") or {}).get("hit")),
             )
             if hit
         )
         out.append(
-            f"| {w.get('code')} | {w.get('name')}"
-            f" | {_fmt(w.get('daily_j'))}"
-            f" | {_fmt(w.get('change_pct'))}"
+            f"| {c.get('code')} | {c.get('name')}"
+            f" | {_fmt(c.get('daily_j'))}"
+            f" | {_fmt(c.get('change_pct'))}"
             f" | {triggers or '-'}"
-            f" | {'、'.join(w.get('formula_hits') or []) or '-'} |"
+            f" | {c.get('bucket') or '-'}"
+            f" | {_fmt((c.get('score_detail') or {}).get('technical_score'))} |"
         )
+    if len(hits) > _IN_GATE_REMINDER_TOP_N:
+        out.append(f"\n> 共 {len(hits)} 只命中，仅列前 {_IN_GATE_REMINDER_TOP_N} 只。")
     out.append("")
     return out
 

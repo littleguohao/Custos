@@ -519,7 +519,7 @@ class TestStageMatchesReality:
         liquidity 仅 flag）、weekly_j（scorer，weekly_j_low +5 腿）自
         enrich_candidates 迁入，零行为变化；
         v0.86：17 → 20，因子化批 C——ignition（scorer，ignition/pullback_shrink/
-        b1_ignition 3 条技术分腿 + capital_intent 证据 + J 门槛外观察区判据）、
+        b1_ignition 3 条技术分腿 + capital_intent 证据 + 门内提醒判据）、
         entry_patterns（scorer，patterns 五单项 5 条技术分腿 + capital_intent
         证据）、j_low_gate（gate，18:00 进池硬门槛登记，判定本体复用
         weekly_j.j_below_threshold，执行点在 enrich _apply_j_gate）自

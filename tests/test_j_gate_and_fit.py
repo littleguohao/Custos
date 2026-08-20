@@ -109,7 +109,7 @@ def test_fit_handles_missing_inputs():
 
 
 # ---------------------------------------------------------------------------
-# v0.51（#37 阶段 B）：adx25 证据列 + 门槛外观察区
+# v0.51（#37 阶段 B）：adx25 证据列（门槛外观察区 v0.89 起移除，改门内提醒）
 # ---------------------------------------------------------------------------
 
 
@@ -164,8 +164,10 @@ class TestAdx25EvidenceColumn:
         assert a["bucket"] == b["bucket"] and a["score"] == b["score"]
 
 
-class TestOutsideGateWatchlist:
-    """门槛外观察区：J<13 挡掉但异动强（底部巨量/放量点火）的票，只展示。"""
+class TestJGateExcludedOnly:
+    """v0.89（owner）：门槛外观察区（watchlist_outside_gate）移除——
+    被 J<13 挡掉的票（含异动强的）一律只进 excluded 留痕，不再单列观察区；
+    报告侧改为池内门内提醒（candidate_table._in_gate_reminder_section）。"""
 
     def _run(self, monkeypatch, j, bottom_hit=False, ignition_hit=False):
         monkeypatch.setattr(ec, "kdj", lambda df: {"available": True, "j": j})
@@ -181,30 +183,20 @@ class TestOutsideGateWatchlist:
             monkeypatch, {"600000": _flat_df()}, {"j_low_required": True}
         )
 
-    def test_blocked_with_strong_move_lands_in_watchlist(self, monkeypatch):
+    def test_blocked_with_strong_move_only_excluded(self, monkeypatch):
         r = self._run(monkeypatch, 50.0, bottom_hit=True)
         assert r["candidates"] == []
         assert r["excluded"][0]["reason"].startswith("j_not_low"), "门槛行为不变"
-        w = r["watchlist_outside_gate"]
-        assert len(w) == 1 and w[0]["code"] == "600000"
-        assert w[0]["gate_reason"].startswith("j_not_low")
+        assert "watchlist_outside_gate" not in r
 
-    def test_blocked_without_move_stays_out(self, monkeypatch):
+    def test_blocked_without_move_only_excluded(self, monkeypatch):
         r = self._run(monkeypatch, 50.0)
-        assert r["watchlist_outside_gate"] == []
+        assert r["excluded"][0]["reason"].startswith("j_not_low")
+        assert "watchlist_outside_gate" not in r
 
-    def test_ignition_hit_also_qualifies(self, monkeypatch):
-        r = self._run(monkeypatch, 50.0, ignition_hit=True)
-        assert len(r["watchlist_outside_gate"]) == 1
-
-    def test_passing_candidate_not_in_watchlist(self, monkeypatch):
+    def test_passing_candidate_unaffected(self, monkeypatch):
         r = self._run(monkeypatch, 5.0, bottom_hit=True)
-        assert len(r["candidates"]) == 1 and r["watchlist_outside_gate"] == []
-
-    def test_key_always_present(self, monkeypatch):
-        """无观察对象时键也必须在（空数组）——缺键与「今天没有」分不开。"""
-        r = self._run(monkeypatch, 5.0)
-        assert r["watchlist_outside_gate"] == []
+        assert len(r["candidates"]) == 1 and "watchlist_outside_gate" not in r
 
 
 class TestSreversalEvidenceColumn:

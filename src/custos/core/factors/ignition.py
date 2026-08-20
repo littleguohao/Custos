@@ -16,8 +16,8 @@ test_j_gate_and_fit.TestOutsideGateWatchlist）。
 - `live_use=scorer` / `stage=release` 是**事实**：ignition / pullback_shrink /
   b1_ignition 是技术分 3 条打分腿（+4/+5/+8，score_candidates._ignition_score）
   的唯一生产者，并喂资金意图证据（capital_intent 的 ci_b1_ignition +3 /
-  ci_ignition +1）；ignition.hit 还是 J<13 门槛外观察区（watchlist_outside_gate）
-  的两条判据之一。
+  ci_ignition +1）；ignition.hit 还是候选表「门内提醒」（J≤13 且异动强，
+  v0.89 起，取代门槛外观察区 watchlist_outside_gate）的两条判据之一。
 - `NOT_FOR_LIVE={needs_work, untested}` 由
   `tests/test_factor_registry.py::test_needs_work_cannot_be_gate_or_scorer`
   机械禁止与 scorer 共存 ⇒ 合规候选只剩 active / candidate。
@@ -42,7 +42,7 @@ FACTOR: dict[str, Any] = {
     "evidence": "",
     "note": "v0.86 自 enrich_candidates 迁入（零行为变化）；ignition/pullback_shrink/"
     "b1_ignition 喂技术分 3 条打分腿（+4/+5/+8）+ 资金意图证据（ci_b1_ignition +3/"
-    "ci_ignition +1）+ J<13 门槛外观察区判据，参数待回测校准",
+    "ci_ignition +1）+ 门内提醒判据（v0.89 起，原门槛外观察区判据），参数待回测校准",
     "min_bars": 25,
     "live_use": "scorer",
     "stage": "release",

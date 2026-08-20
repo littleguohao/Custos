@@ -154,7 +154,7 @@ next_step：A→buy_review（v0.50：原 generate_buy_plan 是虚假承诺，Buy
 - `candidate_table.py` 渲染分组表格进 `artifacts/reports/daily/{date}/`，
   表头下带**得分 Top 5** 榜单（按总分降序跨分层；v0.52 起标注排序口径：
   总分=技术分、未校准启发式、非 alpha 排序）。v0.51 起主表带 ADX25/S反转
-  证据列，另有「👀 门槛外观察区」节（J<13 挡掉的异动票）。
+  证据列；v0.89 起「门槛外观察区」改为「📌 门内提醒」节（池内 J≤13 且异动强的票）。
 - `daily_report.py` 在"主线、机会与风险"节内追加"公式选股备选池"小节，
   只读 stock_pool.json；文件缺失显示"当日未运行选股链"，不影响报告生成。
   v0.52（#37 阶段 C）：**全量 A/B 展示**（原 top-10 截断删除）+ 证据列
@@ -228,10 +228,11 @@ next_step：A→buy_review（v0.50：原 generate_buy_plan 是虚假承诺，Buy
 - **`s_reversal`**：`s_shape.compute_s_reversal`（买弱/反转分，与 B1「回调买入」
   同向）此前存在但 live 从不调用 ⇒ 接进证据列（候选带 `s_reversal` 字典，
   主表 S反转 列）。成本与 compute_s_shape 同阶（纯内存 O(n)），不设开关。
-- **门槛外观察区**（`watchlist_outside_gate`）：J<13 硬门槛（R1 框架）**不动**；
-  被挡但**异动强**的票（初版判据：底部巨量 `bottom_volume.hit` 或放量点火
-  `ignition.hit`）落观察区，candidate_table 单列「👀 门槛外观察区」一节。
-  不进主池、不进分层；J 回落到 13 以下时自然进入正式候选。
+- **门内提醒**（v0.89，owner；取代 v0.51 的门槛外观察区）：J<13 硬门槛
+  （R1 框架）**不动**；被挡的票只进 `excluded` 留痕、不再单列。候选表
+  「📌 门内提醒（J≤13 且异动强）」一节改列**池内**票：日 J≤13 且异动强
+  （底部巨量 `bottom_volume.hit` 或放量点火 `ignition.hit`），按技术分
+  降序最多前 20 只——仅提醒，不改分层/排序。
 
 ### 知行量价 + 出货识别（B1 §四.5 / §七.3）
 

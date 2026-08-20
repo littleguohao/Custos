@@ -33,7 +33,7 @@
 | `macd_technics` | MACD 十大技术 | scorer | 技术分：底背离 +8、水上 +7、zone1_restart +5、红柱增长 +5、周月红柱 +5、zone1 +3、**顶背离 −8**；cap：三打白骨精封顶 C |
 | `volume_detectors` | 量能三件套 | scorer | 技术分：bottom_volume +10、leader_volume +6；资金意图证据；volume_sustain 主线确认（retreat 留痕，v0.60 起不封顶） |
 | `b1_structure` | B1 结构检测器族 | scorer | 技术分：five_day_entry +8、repair 每项 +4（上限 +8）、non_one_wave confirmed +5；cap：non_one_wave revoked 封顶 C；liquidity 仅 flag；止损参考位 `_stop_ref` |
-| `ignition` | 点火族 | scorer | 技术分：b1_ignition +8、pullback_shrink +5、ignition +4；资金意图证据；J 门槛外观察区判据 |
+| `ignition` | 点火族 | scorer | 技术分：b1_ignition +8、pullback_shrink +5、ignition +4；资金意图证据；门内提醒判据（v0.89 起） |
 | `weekly_j` | 周线 J 状态 | scorer | 技术分：weekly_j_low +5（周日共振） |
 | `capital_intent` | 资金意图强度 | scorer | **分层第二轴**：9 条正向证据（ci_* 分值见 registry），≥5 强 / ≥2 中 / 否则弱 |
 | `distribution` | 主力出货五方式 | gate | 技术分：watch **−10** / high **−20**；hits≥2 封 high；与 wave_type 同为 active 唯二 |

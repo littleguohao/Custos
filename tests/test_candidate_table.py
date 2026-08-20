@@ -161,55 +161,73 @@ def test_no_outpost_section_in_bull_regime():
     assert "📡 空头前哨" not in ct.render_table(pool, "2026-07-30")
 
 
-def test_outside_gate_watchlist_section():
-    """v0.51（#37 阶段 B）：门槛外观察区——被 J<13 挡掉但异动强的票单列一节。"""
+def _move_cand(code, name, *, j=5.0, tech=55.0, bucket="B", bottom=False, ign=False):
+    """门内提醒测试用候选：池内票（默认 J<13）+ 异动字段。"""
+    c = _cand(code, name, "半导体", bucket, "优", 4, True, tech=tech)
+    c.update(
+        {
+            "daily_j": j,
+            "change_pct": 3.0,
+            "bottom_volume": {"hit": bottom},
+            "ignition": {"hit": ign},
+        }
+    )
+    return c
+
+
+def test_in_gate_reminder_section():
+    """v0.89（owner）：门内提醒——池内 J≤13 且异动强（底部巨量/放量点火）的票单列一节。"""
     pool = {
         "status": "ok",
         "amv_state": "做多",
-        "candidates": [_cand("600000", "甲", "半导体", "A", "优", 4, True)],
-        "watchlist_outside_gate": [
-            {
-                "code": "600100",
-                "name": "观察",
-                "daily_j": 45.2,
-                "change_pct": 6.1,
-                "bottom_volume": {"hit": True},
-                "ignition": {"hit": False},
-                "formula_hits": ["POOL_X"],
-                "gate_reason": "j_not_low:j=45.2",
-            }
+        "candidates": [
+            _move_cand("600100", "甲", bottom=True),
+            _move_cand("600101", "乙", ign=True),
+            _move_cand("600102", "丙"),  # 无异动 → 不进提醒
         ],
     }
-    md = ct.render_table(pool, "2026-07-30")
-    sec = md.split("## 👀 门槛外观察区")[1].split("\n## ")[0]
-    assert "600100" in sec and "底部巨量" in sec and "只观察" in sec
-    # 观察区不进主表（主表只画 candidates）
-    assert "600100" not in md.split("## A 池")[1]
+    md = ct.render_table(pool, "2026-08-20")
+    sec = md.split("## 📌 门内提醒")[1].split("\n## ")[0]
+    assert "600100" in sec and "底部巨量" in sec
+    assert "600101" in sec and "放量点火" in sec
+    assert "600102" not in sec
+    assert "仅提醒" in sec
 
 
-def test_outside_gate_watchlist_empty_not_silent():
-    """无观察对象也出一节（「（今日无）」）——节消失分不清「没查」与「查了没有」。"""
+def test_in_gate_reminder_excludes_j_above_13():
+    """v0.89：只列 J≤13——J>13 的票即便异动强也不进提醒（门外票只进 excluded）。"""
+    pool = {
+        "status": "ok",
+        "amv_state": "做多",
+        "candidates": [
+            _move_cand("600100", "甲", j=45.2, bottom=True),
+            _move_cand("600101", "乙", j=12.9, bottom=True),
+        ],
+    }
+    md = ct.render_table(pool, "2026-08-20")
+    sec = md.split("## 📌 门内提醒")[1].split("\n## ")[0]
+    assert "600100" not in sec and "600101" in sec
+
+
+def test_in_gate_reminder_empty_not_silent():
+    """无提醒对象也出一节（「（今日无）」）——节消失分不清「没查」与「查了没有」。"""
     pool = {"status": "ok", "amv_state": "做多", "candidates": []}
-    md = ct.render_table(pool, "2026-07-30")
-    assert "门槛外观察区" in md and "（今日无）" in md
+    md = ct.render_table(pool, "2026-08-20")
+    assert "门内提醒" in md and "（今日无）" in md
 
 
-def test_outside_gate_sorted_by_daily_j_asc():
-    """2026-08-14（owner）：门槛外观察区按日 J 从小到大——J 越小越接近
-    J<13 硬门槛、越可能先回到正式候选；无 J 值的排最后。"""
-    pool = {
-        "status": "ok",
-        "amv_state": "做多",
-        "candidates": [_cand("600000", "甲", "半导体", "A", "优", 4, True)],
-        "watchlist_outside_gate": [
-            {"code": "600101", "name": "高J", "daily_j": 88.0, "change_pct": 1.0},
-            {"code": "600102", "name": "低J", "daily_j": 15.3, "change_pct": -2.0},
-            {"code": "600103", "name": "无J"},
-        ],
-    }
-    md = ct.render_table(pool, "2026-07-30")
-    sec = md.split("## 👀 门槛外观察区")[1].split("\n## ")[0]
-    assert sec.index("600102") < sec.index("600101") < sec.index("600103")
+def test_in_gate_reminder_sorted_by_tech_desc_and_capped():
+    """按技术分降序；命中超过 _IN_GATE_REMINDER_TOP_N 时截断并注明总数。"""
+    cands = [
+        _move_cand(f"60{i:04d}", f"票{i}", tech=float(i), bottom=True)
+        for i in range(25)
+    ]
+    pool = {"status": "ok", "amv_state": "做多", "candidates": cands}
+    md = ct.render_table(pool, "2026-08-20")
+    sec = md.split("## 📌 门内提醒")[1].split("\n## ")[0]
+    assert sec.index("600024") < sec.index("600023")  # 技术分高者在前
+    assert "600000" not in sec  # 截断：最低分掉出前 20
+    assert "共 25 只命中" in sec
 
 
 def test_signal_labels_sg_merged_into_sb():
