@@ -8,6 +8,7 @@ import json
 from typing import Optional
 
 from custos.pipeline.holdings.b1_holding_state import evaluate as evaluate_b1_holding
+from custos.pipeline.holdings.b1_holding_state import shadow_compare_line
 
 from custos.pipeline.close_review.holding_bbi import intraday_bbi_basis
 from custos.pipeline.close_review.holding_structure import n_structure_basis
@@ -35,6 +36,7 @@ from custos.core.code_utils import finite  # noqa: E402
 from custos.core.code_utils import fnum as optional_finite  # noqa: E402
 from custos.core.fmt import pct_text  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
+from custos.core.trades.position_plans import load_plans  # noqa: E402  L2，持仓计划影子读取
 
 REV = REVIEWS / "daily"
 
@@ -142,13 +144,17 @@ def render_news(lines, news, hold_codes=None, hold_sectors=None):
 
 
 def revalue_positions(
-    day, ff_map, mfe_map, pmap, qmap, regime, sectors, tmap, total_assets
+    day, ff_map, mfe_map, pmap, qmap, regime, sectors, tmap, total_assets, plans=None
 ):
     """按当日行情重估每只持仓，返回逐票字典列表。
 
     2026-08-07 从 `main`（原 210 行）抽出。抽的是**数据计算**，与下面的
     `render_*` 分开 —— 重估逻辑因此可以单测，不必先铺一整份报告的上游产物。
+
+    ``plans`` 是 position_plans 的 positions 节（{代码: 计划}），只喂给
+    ``evaluate`` 的影子判定 —— 不影响 close/pnl/任何既有字段。
     """
+    plans = plans or {}
     revalued = []
     for code, position in pmap.items():
         technical = tmap.get(code, {})
@@ -164,6 +170,7 @@ def revalue_positions(
             regime,
             close,
             quote.get("date") or day,
+            plan=plans.get(code),
         )
         revalued.append(
             {
@@ -328,6 +335,21 @@ def render_holdings(lines, enrichment, revalued, day):
             if x["position_pct"] is not None
         )
     )
+
+    # 持仓计划影子对比（v0.83 Phase C，观察期：只展示不生效）——
+    # 计划判定 vs 现行 B1 判定，不一致行内标注；无计划（早于机制落地）如实呈现。
+    lines += ["", "- 持仓计划影子对比（影子期：不影响判定与权限）："]
+    for row in revalued:
+        b1 = row["b1_holding_state"]
+        lines.append(
+            shadow_compare_line(
+                row["code"],
+                row["name"],
+                b1["final_priority"],
+                f"{b1['final_priority']} {b1['final_action']}",
+                b1.get("shadow"),
+            )
+        )
 
     # 连亏检查（owner 2026-08-10：连亏冷却落在复盘环节，每日/每周都要统计并判断）。
     # ⚠️ 只报事实、不拦交易 —— 自动链里 `chief_decision.buy_actions` 恒为空表，
@@ -661,8 +683,19 @@ def main():
     )
     technical_current = technical_dates == [day]
     total_assets = _total_assets(positions)
+    # 持仓计划（v0.83 Phase C）：只喂影子判定与 §5 影子对比渲染，不进任何既有字段。
+    plan_positions = load_plans().get("positions", {})
     revalued = revalue_positions(
-        day, ff_map, mfe_map, pmap, qmap, regime, sectors, tmap, total_assets
+        day,
+        ff_map,
+        mfe_map,
+        pmap,
+        qmap,
+        regime,
+        sectors,
+        tmap,
+        total_assets,
+        plans=plan_positions,
     )
     quotes_current, actual_position, position_text = _position_summary(revalued, day)
     indices = index_rows(market)

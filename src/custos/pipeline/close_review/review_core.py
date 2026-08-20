@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 from custos.pipeline.holdings.b1_holding_state import evaluate as evaluate_b1_holding
+from custos.pipeline.holdings.b1_holding_state import shadow_compare_line
 
 from custos.pipeline.close_review.holding_bbi import intraday_bbi_basis
 from custos.pipeline.close_review.holding_structure import n_structure_basis
@@ -34,6 +35,7 @@ from custos.core import report_audit  # noqa: E402
 from custos.core.code_utils import finite  # noqa: E402
 from custos.core.code_utils import fnum as optional_finite  # noqa: E402
 from custos.core.fmt import pct_text as _fmt_pct_text  # noqa: E402
+from custos.core.trades.position_plans import load_plans  # noqa: E402  L2，持仓计划影子读取
 from custos.core.exit_rules import (  # noqa: E402  L0，止盈止损规则唯一来源
     LOSS_REDUCTION_ENABLED,
     LOSS_REDUCTION_PCT,
@@ -469,8 +471,14 @@ def revalue_and_plan(
     quotes: dict[str, dict],
     regime: str,
     total_assets: float,
+    plans: dict | None = None,
 ) -> tuple[list[dict], list[dict]]:
-    """按 14:45 实时行情逐票重估并分类出优先级动作（§1/§2 的数据源）。"""
+    """按 14:45 实时行情逐票重估并分类出优先级动作（§1/§2 的数据源）。
+
+    ``plans`` 是 position_plans 的 positions 节（{代码: 计划}），只喂给
+    ``evaluate`` 的影子判定 —— 不影响 priority/action/reason 任何既有字段。
+    """
+    plans = plans or {}
     revalued: list[dict] = []
     actions = []
     for p in positions:
@@ -488,7 +496,11 @@ def revalue_and_plan(
         )
         b1_input = {**tech.get(code, {}), "holding_pnl_pct": pnl_pct}
         b1_state = evaluate_b1_holding(
-            b1_input, regime, price, str(quote.get("date") or target_date)
+            b1_input,
+            regime,
+            price,
+            str(quote.get("date") or target_date),
+            plan=plans.get(code),
         )
         revalued.append(
             {
@@ -619,6 +631,26 @@ def render_actions(lines: list[str], actions: list[dict]) -> None:
     for x in actions:
         lines.append(
             f"| {x['priority']} | {x['code']} | {x['name']} | {x['action']} | {x['reason']} |"
+        )
+    lines.append("")
+
+
+def render_shadow_comparison(lines: list[str], actions: list[dict]) -> None:
+    """§2 旁：持仓计划影子判定 vs 现行判定（v0.83 Phase C，观察期只展示不生效）。"""
+    lines += [
+        "### 2.1 持仓计划影子对比（影子期：不影响判定与权限）",
+        "",
+    ]
+    for x in actions:
+        shadow = (x.get("b1_holding_state") or {}).get("shadow") or {}
+        lines.append(
+            shadow_compare_line(
+                x["code"],
+                x["name"],
+                x["priority"],
+                f"{x['priority']} {x['action']}",
+                shadow,
+            )
         )
     lines.append("")
 
@@ -782,8 +814,17 @@ def main() -> None:
     regime = market.get("amv_0", {}).get("effective_state") or "未知"
     amv_value = market.get("amv_0", {}).get("amv_change_pct")
     total_assets = estimate_total_assets(positions)
+    # 持仓计划（v0.83 Phase C）：只喂影子判定与 §2.1 对比渲染，不进任何既有字段。
+    plan_positions = load_plans().get("positions", {})
     revalued, actions = revalue_and_plan(
-        target_date, positions, tech, risks, quotes, regime, total_assets
+        target_date,
+        positions,
+        tech,
+        risks,
+        quotes,
+        regime,
+        total_assets,
+        plans=plan_positions,
     )
     revalued_map = {x["code"]: x for x in revalued}
     total_position = _total_position(revalued)
@@ -826,6 +867,7 @@ def main() -> None:
     render_indices(lines, indices)
     render_revalued(lines, positions, revalued_map, quotes, total_position)
     render_actions(lines, actions)
+    render_shadow_comparison(lines, actions)
     render_market_state(lines, amv_display, regime, market_quality, tech, risk_note)
     render_advice(lines, advice_line)
     render_permissions(lines, gate)

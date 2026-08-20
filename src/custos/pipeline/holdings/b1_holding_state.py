@@ -241,6 +241,100 @@ def _regime_signals(
         )
 
 
+def _plan_shadow(
+    plan: Any,
+    current: float | None,
+    pv: dict,
+    price_volume_current: bool,
+    above_bbi: Any,
+) -> dict[str, Any]:
+    """持仓计划（position_plans）影子判定 —— **只展示不生效**（v0.83 Phase C）。
+
+    铁律：plan 信号不进 SIGNAL_ORDER、不进 final_priority/bucket/权限，只落盘
+    与渲染。无计划（当前持仓全部早于 position_plans 机制落地，属常态）如实标
+    ``plan_missing``，不报错。连续 5 交易日影子对比 + owner 拍板后才谈并入
+    （见 TODO 观察期条目）。
+    """
+    if not isinstance(plan, dict):
+        return {
+            "reason": "plan_missing",
+            "plan_source": None,
+            "plan_based_priority": None,
+            "plan_based_action": None,
+            "signals": [],
+        }
+    signals: list[dict[str, Any]] = []
+    stop_raw = plan.get("stop")
+    stop = stop_raw if isinstance(stop_raw, dict) else {}
+    stop_price = fnum(stop.get("price"))
+    if current is not None and stop_price is not None and current <= stop_price:
+        signals.append(
+            {
+                "signal": "plan_stop_breach",
+                "priority": "P0",
+                "action": "计划止损位清仓评估",
+                "reason": f"现价{current:.2f}跌破计划止损价{stop_price:.2f}"
+                f"（{stop.get('rule_id')}：{stop.get('basis')}）",
+            }
+        )
+    tp_raw = plan.get("take_profit")
+    tp = tp_raw if isinstance(tp_raw, dict) else {}
+    two_bull = tp.get("scale_out_two_bull")
+    if isinstance(two_bull, dict):
+        # 快照只收 enabled 方案（position_plans._take_profit_snapshot）；命中判定
+        # 复用现行 two_bull_profit_take 的量价证据（BBI 上方连续两根中大阳）。
+        # 快照参数 require_above_bbi 之外的键（如 consecutive_bull_bars!=2）
+        # 现网没有对应判定件，按默认口径评。
+        need_bbi = bool((two_bull.get("params") or {}).get("require_above_bbi", True))
+        if (
+            price_volume_current
+            and pv.get("two_medium_large_bull")
+            and (above_bbi is True or not need_bbi)
+        ):
+            signals.append(
+                {
+                    "signal": "plan_tp_scale_out",
+                    "priority": "P2",
+                    "action": "计划分批止盈评估",
+                    "reason": "计划止盈方案 scale_out_two_bull 命中："
+                    "BBI上方连续两根中大阳，按计划分批止盈",
+                }
+            )
+    signals.sort(key=lambda item: action_rank(item["priority"]))
+    if signals:
+        top = signals[0]
+        priority, action = top["priority"], top["action"]
+    else:
+        priority, action = "P3", "条件持有（计划信号未触发）"
+    return {
+        "reason": "ok",
+        "plan_source": plan.get("source"),
+        "plan_based_priority": priority,
+        "plan_based_action": action,
+        "signals": signals,
+    }
+
+
+def shadow_compare_line(
+    code: Any, name: Any, current_priority: str, current_label: str, shadow: Any
+) -> str:
+    """影子对比行（14:45/17:00 两份报告共用的行格式，口径单源）。
+
+    无计划持仓（早于机制落地，影子期常态）如实标注；计划判定与现行判定优先级
+    不一致时行内标「⚠️影子不一致」。
+    """
+    shadow = shadow if isinstance(shadow, dict) else {}
+    if shadow.get("reason") == "plan_missing" or not shadow.get("plan_based_priority"):
+        return f"- {code} {name}：无计划（早于机制落地）"
+    plan_label = (
+        f"{shadow.get('plan_based_priority')} {shadow.get('plan_based_action')}"
+    )
+    flag = (
+        "" if shadow.get("plan_based_priority") == current_priority else " ⚠️影子不一致"
+    )
+    return f"- {code} {name}：计划判定 {plan_label} ｜ 现行判定 {current_label}{flag}"
+
+
 def _collect_unavailable(pv: dict, price_volume_current: bool) -> list[str]:
     unavailable: list[str] = []
     if not pv.get("available"):
@@ -263,6 +357,7 @@ def evaluate(
     market_regime: str = "未知",
     price: Any = None,
     price_date: str | None = None,
+    plan: Any = None,
 ) -> dict[str, Any]:
     current = fnum(price)
     if current is None:
@@ -346,6 +441,11 @@ def evaluate(
             "allow_signal_override_hard_risk": False,
         },
         "unavailable": sorted(set(unavailable)),
+        # 持仓计划影子判定（v0.83 Phase C）：只落盘与展示，不进 final_priority/
+        # bucket/权限/任何既有字段。无计划（早于机制落地的存量持仓）如实标 plan_missing。
+        "shadow": _plan_shadow(
+            plan, current, pv, price_volume_current, row.get("above_bbi")
+        ),
     }
 
 
