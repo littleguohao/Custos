@@ -473,6 +473,10 @@ class TestReversalChangeSymmetric:
         那条断言直接假失败 —— 语义完全没变。改为 AST 查真实调用。
         2026-08-18（TODO #58）：compute_metrics 拆出 `_base_scalars`（反转K判定所在
         特征块），AST 检查改为沿 compute_metrics 的调用目标递归找 `change_in_range`。
+        2026-08-20（v0.86，因子化批 C）：判定本体迁入 `factors/entry_patterns.py`
+        （`reversal_flags`），递归跟随范围从「仅 enrich 本模块」放宽到
+        「enrich + factors 包」——因子层与 enrich 同属 live 判定链，判定式挪到
+        因子模块同样拦得住本地重写。
         """
         import ast as _ast
         import inspect
@@ -498,7 +502,10 @@ class TestReversalChangeSymmetric:
             for name in _calls_of(fn):
                 called.add(name)
                 nxt = getattr(ec, name, None)
-                if callable(nxt) and getattr(nxt, "__module__", "") == ec.__name__:
+                mod = getattr(nxt, "__module__", "") or ""
+                if callable(nxt) and (
+                    mod == ec.__name__ or mod.startswith("custos.core.factors.")
+                ):
                     frontier.append(nxt)
         assert "change_in_range" in called, (
             f"必须调用 b1_thresholds.change_in_range，实际调用 {sorted(called)[:12]}"

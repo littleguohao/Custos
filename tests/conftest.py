@@ -104,9 +104,19 @@ def reversal_thresholds():
     import importlib
     import os
 
-    # 依赖顺序：阈值 → 读它的三个 live 模块
+    # 依赖顺序：阈值 → 读它的 live/因子模块
     names = [
         "custos.core.b1_thresholds",
+        # v0.86（因子化批 B）：j_below_threshold 迁入 weekly_j——它的默认参数
+        # threshold=J_LOW_THRESHOLD 在 def 时绑定，必须在 enrich 之前一并 reload，
+        # 否则 ec.j_below_threshold 仍按旧阈值判（test_j_vol_thresholds_also_single_source）。
+        "custos.core.factors.weekly_j",
+        # v0.86（因子化批 C）：patterns 五单项判定迁入 entry_patterns（读
+        # J_LOW/VOL_* /REVERSAL_* 阈值）、J<13 门槛登记为 j_low_gate（默认参数
+        # 同样在 def 时绑定）——都须在 enrich 之前 reload，否则选股链判定
+        # 仍按旧阈值。
+        "custos.core.factors.entry_patterns",
+        "custos.core.factors.j_low_gate",
         "custos.pipeline.screening.enrich_candidates",
         "custos.pipeline.market_timing.technical_monitor",
         "custos.pipeline.holdings.b1_holding_state",

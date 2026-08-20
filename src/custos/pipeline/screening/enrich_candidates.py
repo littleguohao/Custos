@@ -37,8 +37,6 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
-import numpy as np
-
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
@@ -46,14 +44,10 @@ if hasattr(sys.stdout, "reconfigure"):
 # 本模块通过调用访问。常量随因子走（`WAVE_*` 在 wave_type、`DIST_*` 在 distribution…），
 # 需要它们的地方从对应因子模块导入，不要在这里再抄一份。
 from custos.core.factors._util import ohlcv_arrays as _ohlcv_arrays  # noqa: E402
-from custos.core.factors.wave_type import (
-    WAVE_MIN_BARS,
-    _find_rally_segment,  # noqa: E402
-    detect_wave_type,
-)
+from custos.core.factors.wave_type import detect_wave_type  # noqa: E402
 
-#   ↑ `WAVE_MIN_BARS` / `_find_rally_segment` 在本模块**别处也被用到**（不只 detect_wave_type），
-#     所以一并导入。常量与助手跟着因子走、由因子模块拥有，这里只引用。
+#   ↑ v0.86（因子化批 B）前这里还导 `WAVE_MIN_BARS` / `_find_rally_segment`
+#     （check_non_one_wave 用）——它们已随结构族迁入 factors/b1_structure.py。
 from custos.core.factors.perfect_b1_fit import compute_perfect_b1_fit  # noqa: E402
 from custos.core.factors.distribution import (  # noqa: E402
     confirm_distribution,
@@ -65,6 +59,63 @@ from custos.core.factors.bottom_patterns import (  # noqa: E402  v0.56 底部侧
     detect_red_fat_green_thin,
     detect_w_bottom,
 )
+from custos.core.factors.macd_technics import check_macd_technics  # noqa: E402
+
+#   ↑ v0.86（因子化批 A）：check_macd_technics 及全部 _macd_* helper 与 MACD_* 常量
+#     迁入 factors/macd_technics.py（零行为变化）。此处保名 re-export——
+#     `enrich_candidates.check_macd_technics` 是 tests 的既有调用/monkeypatch 通道，
+#     内部调用点（macd_technics = check_macd_technics(df, df_long=df_long)）不用改。
+from custos.core.factors.weekly_j import (  # noqa: E402
+    j_below_threshold,
+    weekly_j_state,
+)
+from custos.core.factors.volume_detectors import (  # noqa: E402
+    CZ_MIN_BARS,
+    THREE_LOWS_DRAWDOWN_PCT,
+    _drawdown_250d,
+    check_bottom_volume,
+    check_leader_volume,
+    check_volume_sustain,
+)
+from custos.core.factors.b1_structure import (  # noqa: E402
+    STOP_LOOKBACK,
+    _stop_ref,
+    check_five_day_entry,
+    check_liquidity,
+    check_non_one_wave,
+    check_repair_signals,
+)
+
+#   ↑ v0.86（因子化批 B）：weekly_j_state/j_below_threshold、量能三检测器
+#     （check_volume_sustain/check_leader_volume/check_bottom_volume 及 _vs_* 族、
+#     _round3_or_none、VOLUME_SUSTAIN_*/LEADER_VOL_*/BOTTOM_* 常量）、结构族
+#     （check_non_one_wave/_now_*、check_repair_signals/_repair_*、
+#     check_five_day_entry、check_liquidity、_stop_ref 及 NOW_*/REPAIR_*/
+#     FIVE_DAY_*/LIQUIDITY_WIN/STOP_LOOKBACK 常量）迁入 factors/ 三个新模块
+#     （零行为变化）。此处保名 re-export——`enrich_candidates.check_*` 是 tests 的
+#     既有调用/monkeypatch 通道，内部调用点不用改。
+#     `_drawdown_250d`/`CZ_MIN_BARS`/`THREE_LOWS_DRAWDOWN_PCT` 被留在本模块的
+#     check_three_lows 共用（L2 不得 import L3 ⇒ 共享件随因子下移、这里回导）。
+from custos.core.factors.ignition import (  # noqa: E402
+    b1_ignition_hit,
+    check_ignition,
+    check_pullback_shrink,
+    zx_recent_golden,
+)
+from custos.core.factors.entry_patterns import (  # noqa: E402
+    bbi_above,
+    relative_strength_strong,
+    reversal_flags,
+)
+from custos.core.factors.j_low_gate import j_low_gate_hit  # noqa: E402
+#   ↑ v0.86（因子化批 C）：点火族（check_ignition/check_pullback_shrink +
+#     b1_ignition_hit/zx_recent_golden 复合判定 + ZX_CROSS_RECENT/IGNITION_*/
+#     PULLBACK_* 常量）迁入 factors/ignition.py；patterns 五单项判定
+#     （reversal_flags=原 _reversal_flags、bbi_above、relative_strength_strong +
+#     RS_STRONG_PP 常量）迁入 factors/entry_patterns.py；J<13 进池硬门槛登记为
+#     factors/j_low_gate.py（判定本体复用 weekly_j.j_below_threshold，上方
+#     re-export 保留）。全部零行为变化，此处保名 re-export——
+#     `enrich_candidates.check_ignition` 是 tests 的既有 monkeypatch 通道。
 
 
 from custos.core.paths import (
@@ -84,8 +135,8 @@ from custos.core.factors import sector_phase as sector_phase_mod  # noqa: E402
 # 死代码清理（2026-08-08）：本地 `_j_series` 包装已删 —— 唯一调用方早已搬走
 # （全项目 grep 确认无引用），本模块的 J 走下方 `kdj`（indicators 共享实现，
 # 内部 fill_na=50，行为不变）；`macd` 导入同步删除（check_macd_technics 自己
-# 用 ema 算 DIF/DEA，从未调用它）。
-from custos.core.indicators import bbi_state, ema, kdj, resample, zhixing_state  # noqa: E402
+# 用 ema 算 DIF/DEA，从未调用它；v0.86 起 check_macd_technics 迁入 factors/macd_technics.py）。
+from custos.core.indicators import bbi_state, kdj, zhixing_state  # noqa: E402
 from custos.core.indicators import pct_change  # noqa: E402
 from custos.core.indicators import amplitude_pct as amplitude_pct_of  # noqa: E402
 from custos.core.indicators import dmi_arrays  # noqa: E402  DMI/ADX 唯一实现（v0.51 adx25 证据列）
@@ -106,6 +157,8 @@ _BJ_PREFIX = ("4", "8", "920")
 # ⚠️ 这里原先本地硬编码同名常量（J_LOW_THRESHOLD=13.0 / VOL_RATIO_MAX=0.5 /
 # VOL_PCTILE_MAX=10.0）：REVERSAL_* 收敛后这三个仍留在本地，设 B1_J_LOW 只改到
 # 持仓链、选股链不动 —— 2026-08-07 补收敛。默认值见 b1_thresholds。
+# v0.86（因子化批 C）：判定（原 _reversal_flags）迁入 factors/entry_patterns.py；
+# 本模块保留 import 作阈值转出通道（tests 钉 `ec.J_LOW_THRESHOLD` 等与 L0 同源）。
 from custos.core.b1_thresholds import (
     J_LOW_THRESHOLD,
     VOL_PCTILE_MAX,  # noqa: E402
@@ -164,27 +217,8 @@ def company_position_of(code: str) -> dict:
     }
 
 
-def j_below_threshold(j: Any, threshold: float = J_LOW_THRESHOLD) -> bool:
-    """J 是否满足 `J < threshold` 的硬门槛。**NaN/None/非数值一律不满足**。
-
-    审计：原判否写作 `dj is None or dj >= J_LOW_THRESHOLD`。IEEE 754 下
-    `float("nan") >= 13` 为 False，`nan is None` 也为 False —— 于是"J 算不出来"
-    被当成"J<13 满足买点"直接放行，坏数据成了最好的数据。KDJ 目前走
-    `rsv.fillna(50)` 不易产出 NaN，但 daily_j 也可能来自落盘 JSON / 别的口径，
-    这道门槛是全通道硬门槛，不能依赖上游恰好不脏。
-    """
-    if j is None or isinstance(j, bool):
-        return False
-    try:
-        v = float(j)
-    except (TypeError, ValueError):
-        return False
-    if not np.isfinite(v):  # NaN / ±inf 均视为不可用
-        return False
-    return v < threshold
-
-
-RS_STRONG_PP = 3.0  # 20日相对强度 >= +3pp
+# v0.86（因子化批 C）：RS_STRONG_PP 随 patterns 五单项判定迁入
+# factors/entry_patterns.py（常量跟因子走）。
 # 反转K的收盘涨幅区间：**不对称**（B1_w.pdf「分歧转一致的反转K」与「如何筛选最强壮的
 # B1宝宝」两处都明确写「涨幅为 -2% 到 1.8%」）。此前实现与治理文档都写成对称 ±2%，
 # 上界宽了 0.2pp。不是刻意收紧门槛，是按材料原文纠偏。
@@ -217,7 +251,6 @@ __all__ = [
     "REVERSAL_CHANGE_MAX_PCT",
     "REVERSAL_CHANGE_MIN_PCT",
 ]  # 阈值转出声明（测试钉这两个值）
-STOP_LOOKBACK = 10  # 建议止损位：近10日最低价
 
 # 概念标签命中主题所需的最小标签数。默认 1＝历史行为（命中1个语义标签即归入该主题）；
 # 提高到 2+ 可要求更强证据、降低子串过度匹配，可经 registry.theme_mapping.min_match 覆盖。
@@ -227,42 +260,15 @@ THEME_MIN_MATCH = 1
 # 以下阈值全部标注"待回测参数"：策略原文（B1 §四、CZ §九/§14.6/§十六）
 # 要求阈值可配置、实际值随候选落盘，不得静默使用；完成样本回测前不得
 # 视为已校准。口径出处见 governance/contracts/SCREENING_WORKFLOW.md "策略对齐"章。
+# v0.86（因子化批 B）：NOW_*/REPAIR_*/FIVE_DAY_* 随结构族迁入 factors/b1_structure.py，
+# VOLUME_SUSTAIN_*/LEADER_VOL_*/BOTTOM_*/CZ_MIN_BARS/THREE_LOWS_DRAWDOWN_PCT 随量能族
+# 迁入 factors/volume_detectors.py（常量跟因子走）。
 
-NOW_MILD_VOL_BURST = 2.0  # 待回测参数：上涨段单日量/段均量上限（温和放量）
-NOW_BEAR_DROP_PCT = -3.0  # 待回测参数：放量大阴跌幅%
-NOW_BEAR_VOL_RATIO = 1.5  # 待回测参数：放量大阴量比（量/前5日均量）
-NOW_PULLBACK_VOL_RATIO = 0.7  # 待回测参数：回调段均量/上涨段均量上限
-NOW_TOP_ZONE = 3  # 待回测参数：阶段高点观察区±N日
-
-REPAIR_J_PREV_MAX = 20.0  # 待回测参数：J拐头向上（昨日J上限）
-REPAIR_VOL_SHRINK = 0.7  # 待回测参数：缩量止跌量比上限
-REPAIR_CHANGE_PCT = 2.0  # 待回测参数：止跌涨跌幅区间±%
-
-FIVE_DAY_SPIKE_RATIO = 1.45  # 五日战法：近7日巨量倍数（CZ §十六）。原文"前一交易日均量"存歧义，按前一交易日单日量实现（vol[t]/vol[t-1]），待策略 owner 确认
-FIVE_DAY_SPIKE_WINDOW = 7  # 五日战法：巨量观察窗口（CZ §十六）
-VOLUME_SUSTAIN_WINDOW = 13  # 量能持续性窗口（CZ §14.6：7-13日）
-VOLUME_SUSTAIN_MIN_POST_DAYS = 7  # 待回测参数：峰值日后确认主线最少观察日数
-VOLUME_SUSTAIN_RATIO = 0.55  # 峰值55%（CZ §14.6）
-VOLUME_SUSTAIN_RETREAT_DAYS = 3  # 连续N日<峰值55%判撤退（CZ §14.6）
-LEADER_VOL_BASE_DAYS = 20  # 龙头量能基准窗口（CZ §九）
-LEADER_VOL_RATIO = 1.7  # 地量1.7倍（CZ §九）
-THREE_LOWS_DRAWDOWN_PCT = 40.0  # 待回测参数：三低之低价格（自250日高点回撤%）
 THREE_LOWS_VOL_RATIO = 0.3  # 待回测参数：三低之低量（<250日均量×30%）
-BOTTOM_VOL_RATIO = 2.0  # 待回测参数：底部巨量（≥250日均量×2，CZ §14.6）
-BOTTOM_NO_NEW_LOW_DAYS = 20  # 待回测参数：不再创新低观察窗口
-CZ_MIN_BARS = 250  # CZ 三低/底部巨量最少K线数（不足→available=false）
 
 # --- 知行量价（good_b1 图集）与出货五方式 待回测参数 ---
-ZX_CROSS_RECENT = 10  # 待回测：知行金叉"近N日"窗口
-IGNITION_WINDOW = 10  # 待回测：放量点火扫描窗口（日）
-IGNITION_VOL_RATIO = 1.5  # 待回测：点火量比（当日量/前5日均量）
-IGNITION_MIN_GAIN = 3.0  # 待回测：点火单日涨幅%下限
-PULLBACK_LOOKBACK = 20  # 待回测：回调缩量企稳观察窗口（日）
-PULLBACK_MIN_DROP = 3.0  # 待回测：距窗口高点回撤%下限
-PULLBACK_VOL_RATIO = 0.85  # 待回测：回调段/上涨段均量上限
-# v0.61（owner 定向，2026-08-15）：0.8 -> 0.85。正例 002074@2025-08-01 的
-# 回调量比 0.849 被原阈值挡在门外（drop 7.73%、持 DKS 均满足）--B1 健康回调
-# 的「缩量」不必苛求 <0.8。⚠️ 放宽会扩大命中面（全市场影响待复盘观察）。
+# v0.86（因子化批 C）：ZX_CROSS_RECENT/IGNITION_*/PULLBACK_* 随点火族迁入
+# factors/ignition.py（常量跟因子走）。
 
 
 # --- 完美 B1 图形贴合度（good_b1 图集共性特征的梯度评分）待回测参数 ---
@@ -284,14 +290,12 @@ DKS_MA_WINDOWS = (
 # 排除了做多区间的突破赢家)。故仅作**描述性证据**落盘、绝不作买入依据、不驱动分层。参数下方保留。
 
 # --- MACD 十大技术（macd十大技术精讲）待回测参数 ---
-MACD_SWING_FRACTAL = 2  # 摆动高/低点分型：左右各 N 根确认
-MACD_DIV_LOOKBACK = 60  # 背离观察窗口（日）
-MACD_OVEREXT_PCTL = 0.9  # 开口/空间拐离：|DIF| 近 120 日分位上限
-MACD_OVEREXT_WIN = 120  # 拐离分位窗口（日）
+# v0.86（因子化批 A）：MACD_SWING_FRACTAL / MACD_DIV_LOOKBACK / MACD_OVEREXT_PCTL /
+# MACD_OVEREXT_WIN 随 check_macd_technics 迁入 factors/macd_technics.py（常量跟因子走）。
 
 # --- 正交因子（非量价形态）待回测参数 ---
 # 方向A(2026-07-23)：全市场回测证实突破式打分非短周期 alpha，转接正交维度。
-LIQUIDITY_WIN = 20  # 待回测：近N日均成交额窗口
+# v0.86（因子化批 B）：LIQUIDITY_WIN 随 check_liquidity 迁入 factors/b1_structure.py。
 LIQUIDITY_FLOOR_YI = 0.5  # 待回测：均成交额底线(亿元)，低于→low_liquidity(默认仅flag)
 FUND_FLOW_SECTOR_MIN_NAME = 2  # 板块名整名匹配所需最小长度（短于此视为不可判，不给分）
 
@@ -521,381 +525,13 @@ def _close_ret_pct(df, n: int) -> Optional[float]:
 
 
 # ========== B1/CZ 策略对齐检测器（阈值均为待回测参数，实际值随候选落盘） ==========
-
-
-def weekly_j_state(df) -> dict[str, Any]:
-    """周线 J（B1 §四.1 主线口径：周线 J<13 为周线 B1 候选）。
-
-    ``weekly_j_available`` 与 ``available`` 同值：本 dict 会被 `**weekly_j_state(df)`
-    摊进 compute_metrics 的返回值，一个裸 ``available`` 键直接落到**候选顶层**、
-    读起来像"这个候选可用"（审计）。compute_metrics 只摊 weekly_ 前缀的键；
-    ``available`` 保留给直接调用方（既有测试/脚本）。
-    weekly_j / weekly_j_low 本来就在候选顶层，下游 score_candidates 读得到。
-    """
-    weekly = resample(df, "W-FRI")
-    w = kdj(weekly)
-    if not w.get("available"):
-        return {
-            "available": False,
-            "weekly_j_available": False,
-            "weekly_j": None,
-            "weekly_j_low": False,
-        }
-    return {
-        "available": True,
-        "weekly_j_available": True,
-        "weekly_j": w["j"],
-        "weekly_j_low": j_below_threshold(w["j"]),
-    }
-
-
-def _now_top_zone_scan(close, vol, i_high: int, n: int):
-    """(b) 阶段高点±NOW_TOP_ZONE 日扫描：最差跌幅 / 最大量比 / 是否放量大阴。"""
-    worst_drop = None
-    worst_vol_ratio = None
-    big_bear = False
-    for t in range(max(1, i_high - NOW_TOP_ZONE), min(n, i_high + NOW_TOP_ZONE + 1)):
-        drop = (close[t] / close[t - 1] - 1) * 100
-        base = vol[max(0, t - 5) : t].mean()
-        vr = float(vol[t] / base) if base else None
-        if worst_drop is None or drop < worst_drop:
-            worst_drop = drop
-        if vr is not None and (worst_vol_ratio is None or vr > worst_vol_ratio):
-            worst_vol_ratio = vr
-        if drop <= NOW_BEAR_DROP_PCT and vr is not None and vr >= NOW_BEAR_VOL_RATIO:
-            big_bear = True
-    return worst_drop, worst_vol_ratio, big_bear
-
-
-def _now_break_with_volume(
-    close, vol, i_low: int, i_high: int, n: int, up_vol_mean: float
-) -> bool:
-    """撤销：回调放量破位（跌回启动位且量>=上涨段均量）。"""
-    return bool(
-        len(vol[i_high + 1 :])
-        and up_vol_mean
-        and any(
-            close[t] < close[i_low] and vol[t] >= up_vol_mean
-            for t in range(i_high + 1, n)
-        )
-    )
-
-
-def _now_status(big_bear: bool, break_with_vol: bool, mild, no_big_bear, shrink) -> str:
-    if big_bear or break_with_vol:
-        return "revoked"
-    if mild and no_big_bear and shrink:
-        return "confirmed"
-    return "insufficient"
-
-
-def _now_conditions(
-    mild,
-    max_burst,
-    no_big_bear,
-    worst_drop,
-    worst_vol_ratio,
-    shrink,
-    pull_ratio,
-) -> dict[str, Any]:
-    return {
-        "mild_volume": {
-            "hit": bool(mild),
-            "max_vol_burst": round(max_burst, 3) if max_burst is not None else None,
-        },
-        "no_top_big_bear": {
-            "hit": bool(no_big_bear),
-            "worst_drop_pct": round(worst_drop, 2) if worst_drop is not None else None,
-            "worst_vol_ratio": round(worst_vol_ratio, 3)
-            if worst_vol_ratio is not None
-            else None,
-        },
-        "pullback_shrink": {
-            "hit": bool(shrink),
-            "pullback_vol_ratio": round(pull_ratio, 3)
-            if pull_ratio is not None
-            else None,
-        },
-    }
-
-
-def check_non_one_wave(df) -> dict[str, Any]:
-    """非一波流确认（B1 §四）：三条件各自布尔+实际值。
-
-    confirmed=三全；revoked=顶部放量大阴或回调放量破位；其余 insufficient。
-    """
-    close, _, _, vol = _ohlcv_arrays(df)
-    n = len(df)
-    seg = _find_rally_segment(df)
-    if seg is None or n < WAVE_MIN_BARS or seg[2] >= n - 2:
-        return {
-            "status": "insufficient",
-            "available": False,
-            "conditions": {},
-            "reason": "无完整上涨段+回调段",
-        }
-    _, i_low, i_high, _ = seg
-
-    up_vol = vol[i_low : i_high + 1]
-    up_vol_mean = float(up_vol.mean()) if len(up_vol) else 0.0
-    # (a) 上涨段温和放量：无单日爆量（单日量/段均量 < 2）
-    max_burst = float(up_vol.max() / up_vol_mean) if up_vol_mean else None
-    mild = max_burst is not None and max_burst < NOW_MILD_VOL_BURST
-    # (b) 阶段高点±3日内无放量大阴（跌幅>3% 且 量/前5日均量>1.5）
-    worst_drop, worst_vol_ratio, big_bear = _now_top_zone_scan(close, vol, i_high, n)
-    no_big_bear = not big_bear
-    # (c) 回调段缩量：回调段均量/上涨段均量 < 0.7
-    pull_vol = vol[i_high + 1 :]
-    pull_ratio = (
-        float(pull_vol.mean() / up_vol_mean) if len(pull_vol) and up_vol_mean else None
-    )
-    shrink = pull_ratio is not None and pull_ratio < NOW_PULLBACK_VOL_RATIO
-    break_with_vol = _now_break_with_volume(close, vol, i_low, i_high, n, up_vol_mean)
-    status = _now_status(big_bear, break_with_vol, mild, no_big_bear, shrink)
-    return {
-        "status": status,
-        "available": True,
-        "conditions": _now_conditions(
-            mild,
-            max_burst,
-            no_big_bear,
-            worst_drop,
-            worst_vol_ratio,
-            shrink,
-            pull_ratio,
-        ),
-        "break_with_volume": break_with_vol,
-    }
-
-
-def _repair_j_turn_up(j: dict) -> tuple[bool, Any, Any]:
-    """修复信号①：J 拐头向上（今日 J > 昨日 J 且昨日 J < REPAIR_J_PREV_MAX）。"""
-    j_now = j.get("j") if j.get("available") else None
-    j_prev = j.get("j_prev") if j.get("available") else None
-    hit = bool(
-        j_now is not None
-        and j_prev is not None
-        and j_now > j_prev
-        and j_prev < REPAIR_J_PREV_MAX
-    )
-    return hit, j_now, j_prev
-
-
-def _repair_shrink_stop(
-    close, vol, n: int
-) -> tuple[bool, Optional[float], Optional[float]]:
-    """修复信号②：缩量止跌（量比 <= REPAIR_VOL_SHRINK 且涨跌幅在 ±REPAIR_CHANGE_PCT 内）。"""
-    vol_ma5_prev = float(vol[-6:-1].mean()) if n >= 6 else None
-    vol_ratio = float(vol[-1] / vol_ma5_prev) if vol_ma5_prev else None
-    change = (close[-1] / close[-2] - 1) * 100 if n >= 2 and close[-2] else None
-    hit = bool(
-        vol_ratio is not None
-        and vol_ratio <= REPAIR_VOL_SHRINK
-        and change is not None
-        and abs(change) <= REPAIR_CHANGE_PCT
-    )
-    return hit, vol_ratio, change
-
-
-def _repair_rs_turn(
-    close, n: int, index_df
-) -> tuple[bool, Optional[float], Optional[float]]:
-    """修复信号③：5日相对强度由负转正（对上证指数）。"""
-    rs_turn = False
-    rs5_now = rs5_prev = None
-    if index_df is not None and not index_df.empty and n >= 7 and len(index_df) >= 7:
-        ic = index_df["close"].astype(float).to_numpy()
-        rs5_now = (close[-1] / close[-6] - 1) * 100 - (ic[-1] / ic[-6] - 1) * 100
-        rs5_prev = (close[-2] / close[-7] - 1) * 100 - (ic[-2] / ic[-7] - 1) * 100
-        rs_turn = bool(rs5_now >= 0 > rs5_prev)
-    return rs_turn, rs5_now, rs5_prev
-
-
-def check_repair_signals(
-    df, index_df, kdj_state: Optional[dict] = None
-) -> dict[str, Any]:
-    """B1 修复信号（B1 §四.2）：输出命中数组+各信号实际值。
-
-    kdj_state 可传调用方已算好的 kdj(df)（compute_metrics 就有一份），避免同一只票
-    把日线 KDJ 算两遍；不传则自己算，结果一致。
-    """
-    close, _, _, vol = _ohlcv_arrays(df)
-    n = len(df)
-    j = kdj_state if kdj_state is not None else kdj(df)
-    j_turn_up, j_now, j_prev = _repair_j_turn_up(j)
-    shrink_stop, vol_ratio, change = _repair_shrink_stop(close, vol, n)
-    rs_turn, rs5_now, rs5_prev = _repair_rs_turn(close, n, index_df)
-
-    signals = []
-    if j_turn_up:
-        signals.append("j_turn_up")
-    if shrink_stop:
-        signals.append("volume_shrink_stop_fall")
-    if rs_turn:
-        signals.append("rs_turn_strong")
-    return {
-        "signals": signals,
-        "detail": {
-            "j_turn_up": {"hit": j_turn_up, "j": j_now, "j_prev": j_prev},
-            "volume_shrink_stop_fall": {
-                "hit": shrink_stop,
-                "vol_ratio": round(vol_ratio, 3) if vol_ratio is not None else None,
-                "change_pct": round(change, 2) if change is not None else None,
-            },
-            "rs_turn_strong": {
-                "hit": rs_turn,
-                "rs5_now_pp": round(rs5_now, 2) if rs5_now is not None else None,
-                "rs5_prev_pp": round(rs5_prev, 2) if rs5_prev is not None else None,
-            },
-        },
-    }
-
-
-def check_five_day_entry(df) -> dict[str, Any]:
-    """五日战法入场三条件（CZ §十六，缺一不可）。"""
-    close, _, _, vol = _ohlcv_arrays(df)
-    n = len(df)
-    if n < 21:
-        return {"hit": False, "available": False, "conditions": {}}
-    ma5 = float(close[-5:].mean())
-    cond1 = bool(close[-1] > ma5)
-    vol_ma20 = float(vol[-20:].mean())
-    cond2 = bool((vol[-1] > vol[-2] > vol[-3]) or all(v >= vol_ma20 for v in vol[-3:]))
-    spike_ratios = [
-        float(vol[t] / vol[t - 1])
-        for t in range(max(1, n - FIVE_DAY_SPIKE_WINDOW), n)
-        if vol[t - 1]
-    ]
-    max_spike = max(spike_ratios) if spike_ratios else None
-    cond3 = bool(max_spike is not None and max_spike >= FIVE_DAY_SPIKE_RATIO)
-    return {
-        "hit": bool(cond1 and cond2 and cond3),
-        "available": True,
-        "conditions": {
-            "close_above_ma5": {
-                "hit": cond1,
-                "close": round(float(close[-1]), 4),
-                "ma5": round(ma5, 4),
-            },
-            "three_day_volume_up": {
-                "hit": cond2,
-                "vols_last3": [float(v) for v in vol[-3:]],
-                "vol_ma20": round(vol_ma20, 2),
-            },
-            "spike_within_7d": {
-                "hit": cond3,
-                "max_spike_ratio": round(max_spike, 3)
-                if max_spike is not None
-                else None,
-            },
-        },
-    }
-
-
-def _vs_peak_and_post(
-    df, vol: np.ndarray, n: int
-) -> tuple[np.ndarray, float, int, str, np.ndarray]:
-    """窗口内峰值定位：返回 (win, peak, days_since, peak_date, post)。"""
-    win = vol[-VOLUME_SUSTAIN_WINDOW:]
-    peak_rel = int(win.argmax())
-    peak = float(win[peak_rel])
-    days_since = VOLUME_SUSTAIN_WINDOW - 1 - peak_rel
-    peak_pos = n - VOLUME_SUSTAIN_WINDOW + peak_rel
-    peak_date = str(df["date"].iloc[peak_pos])[:10]
-    post = vol[peak_pos + 1 :]
-    return win, peak, days_since, peak_date, post
-
-
-def _vs_retreat(vol: np.ndarray, peak: float, days_since: int) -> bool:
-    """撤退判定：峰值日起连续 N 日量 < 峰值×55%。"""
-    return bool(
-        days_since >= VOLUME_SUSTAIN_RETREAT_DAYS
-        and peak
-        and all(
-            v < peak * VOLUME_SUSTAIN_RATIO for v in vol[-VOLUME_SUSTAIN_RETREAT_DAYS:]
-        )
-    )
-
-
-def _vs_confirmed(
-    post: np.ndarray, peak: float, days_since: int, retreat: bool
-) -> bool:
-    """主线确认判定。
-
-    与 01_cognition_framework.md §14.6 一致：峰值日后窗口内"逐日"量都必须 ≥ 峰值×55%
-    （均值达标但有单日跌破不算主线确认）。
-    """
-    return bool(
-        not retreat
-        and days_since >= VOLUME_SUSTAIN_MIN_POST_DAYS
-        and len(post)
-        and peak
-        and all(v >= peak * VOLUME_SUSTAIN_RATIO for v in post)
-    )
-
-
-def _vs_ratios(
-    win: np.ndarray, post: np.ndarray, peak: float
-) -> tuple[Optional[float], Optional[float], list]:
-    """峰后均值/最低量比 + 窗口逐日量比（落盘证据列）。"""
-    post_mean_ratio = float(post.mean() / peak) if len(post) and peak else None
-    post_min_ratio = float(post.min() / peak) if len(post) and peak else None
-    ratios_last13 = [round(float(v / peak), 3) if peak else None for v in win]
-    return post_mean_ratio, post_min_ratio, ratios_last13
-
-
-def _round3_or_none(v: Optional[float]) -> Optional[float]:
-    """round(v, 3)，None 透传。"""
-    return round(v, 3) if v is not None else None
-
-
-def check_volume_sustain(df) -> dict[str, Any]:
-    """量能持续性（CZ §14.6）：mainline_confirmed / retreat / neutral。"""
-    _, _, _, vol = _ohlcv_arrays(df)
-    n = len(df)
-    if n < VOLUME_SUSTAIN_WINDOW + 1:
-        return {"status": "neutral", "available": False}
-    win, peak, days_since, peak_date, post = _vs_peak_and_post(df, vol, n)
-    retreat = _vs_retreat(vol, peak, days_since)
-    confirmed = _vs_confirmed(post, peak, days_since, retreat)
-    status = (
-        "retreat" if retreat else ("mainline_confirmed" if confirmed else "neutral")
-    )
-    post_mean_ratio, post_min_ratio, ratios_last13 = _vs_ratios(win, post, peak)
-    return {
-        "status": status,
-        "available": True,
-        "peak_date": peak_date,
-        "days_since_peak": days_since,
-        "post_mean_ratio": _round3_or_none(post_mean_ratio),
-        "post_min_ratio": _round3_or_none(post_min_ratio),
-        "vol_ratios_last13": ratios_last13,
-    }
-
-
-def check_leader_volume(df) -> dict[str, Any]:
-    """龙头量能（CZ §九）：连续3日量 >= 前20日最低日量×1.7。"""
-    _, _, _, vol = _ohlcv_arrays(df)
-    n = len(df)
-    if n < LEADER_VOL_BASE_DAYS + 3:
-        return {"hit": False, "available": False}
-    base = float(vol[-(LEADER_VOL_BASE_DAYS + 3) : -3].min())
-    ratios = [float(v / base) if base else None for v in vol[-3:]]
-    hit = bool(base and all(v >= base * LEADER_VOL_RATIO for v in vol[-3:]))
-    return {
-        "hit": hit,
-        "available": True,
-        "base_vol": base,
-        "vol_ratios_last3": [round(r, 3) if r is not None else None for r in ratios],
-    }
-
-
-def _drawdown_250d(close, high) -> tuple[Optional[float], Optional[float]]:
-    if len(close) < CZ_MIN_BARS:
-        return None, None
-    high250 = float(high[-CZ_MIN_BARS:].max())
-    dd = (1 - float(close[-1]) / high250) * 100 if high250 else None
-    return high250, dd
+# v0.86（因子化批 B）：weekly_j_state / 非一波流(_now_*) / 修复信号(_repair_*) /
+# 五日战法 / 量能持续(_vs_*) / 龙头量能 / 底部巨量 / 流动性 / _stop_ref 已迁入
+# factors/weekly_j.py、volume_detectors.py、b1_structure.py（零行为变化，
+# 上方 import 保名 re-export）。
+# v0.86（因子化批 C）：check_ignition / check_pullback_shrink（及 b1 点火复合
+# 判定）已迁入 factors/ignition.py（零行为变化，上方 import 保名 re-export）。
+# 留在本模块的：check_three_lows（CZ 三低，非点火族）。
 
 
 def check_three_lows(df) -> dict[str, Any]:
@@ -927,341 +563,6 @@ def check_three_lows(df) -> dict[str, Any]:
                 else None,
             },
         },
-    }
-
-
-def check_bottom_volume(df) -> dict[str, Any]:
-    """底部巨量（CZ §14.6）：回撤>=40% + 当日量>=250日均量×2 + 不再创新低。
-
-    不再创新低 = 今日最低未跌破"此前"20 日最低（不含当日；含当日则恒真）。
-    """
-    close, high, low, vol = _ohlcv_arrays(df)
-    _, dd = _drawdown_250d(close, high)
-    if dd is None or len(close) < BOTTOM_NO_NEW_LOW_DAYS + 1:
-        return {"hit": False, "available": False}
-    vol_ma250 = float(vol[-CZ_MIN_BARS:].mean())
-    huge_vol = bool(vol_ma250 and vol[-1] >= vol_ma250 * BOTTOM_VOL_RATIO)
-    low20 = float(low[-(BOTTOM_NO_NEW_LOW_DAYS + 1) : -1].min())
-    no_new_low = bool(low[-1] >= low20)
-    return {
-        "hit": bool(dd >= THREE_LOWS_DRAWDOWN_PCT and huge_vol and no_new_low),
-        "available": True,
-        "conditions": {
-            "deep_drawdown": {
-                "hit": bool(dd >= THREE_LOWS_DRAWDOWN_PCT),
-                "drawdown_from_250d_high_pct": round(dd, 2),
-            },
-            "huge_volume": {
-                "hit": huge_vol,
-                "vol_ratio_vs_ma250": round(float(vol[-1] / vol_ma250), 3)
-                if vol_ma250
-                else None,
-            },
-            "no_new_low": {
-                "hit": no_new_low,
-                "low_today": float(low[-1]),
-                "low_20d": low20,
-            },
-        },
-    }
-
-
-def check_ignition(df) -> dict[str, Any]:
-    """放量点火（good_b1 启动长阳）：前段缩量后出现放量收阳的启动K。
-
-    命中条件（近 IGNITION_WINDOW 根内任一根 t）：量比(vol[t]/前5日均量) >= 1.5、
-    收阳(close>open)、单日涨幅 >= IGNITION_MIN_GAIN，且启动前处于缩量
-    （前5日均量 <= 更前5日均量）。
-    """
-    close, _, _, vol = _ohlcv_arrays(df)
-    open_ = df["open"].astype(float).to_numpy()
-    n = len(df)
-    if n < 12:
-        return {"hit": False, "available": False}
-    hit_detail = None
-    for t in range(max(11, n - IGNITION_WINDOW), n):
-        base5 = vol[t - 5 : t].mean()
-        if not base5:
-            continue
-        vr = float(vol[t] / base5)
-        chg = (close[t] / close[t - 1] - 1) * 100 if close[t - 1] else 0.0
-        is_bull = close[t] > open_[t]
-        prev5 = vol[t - 10 : t - 5].mean()
-        pre_contracted = (prev5 == 0) or (base5 <= prev5)
-        if (
-            vr >= IGNITION_VOL_RATIO
-            and is_bull
-            and chg >= IGNITION_MIN_GAIN
-            and pre_contracted
-        ):
-            hit_detail = {
-                "bars_ago": n - 1 - t,
-                "vol_ratio5": round(vr, 3),
-                "change_pct": round(chg, 2),
-                "pre_contracted": bool(pre_contracted),
-            }
-            break
-    return {"hit": hit_detail is not None, "available": True, "detail": hit_detail}
-
-
-def check_pullback_shrink(df, dks_last: Optional[float] = None) -> dict[str, Any]:
-    """回调缩量企稳（good_b1 回调段）：自窗口高点回撤 + 回调段缩量 + 收盘守多空线。
-
-    窗口 PULLBACK_LOOKBACK 内：距最高收盘回撤 >= PULLBACK_MIN_DROP%，回调段均量 /
-    上涨段均量 < PULLBACK_VOL_RATIO，且（无 DKS 时忽略）收盘 >= DKS。
-    """
-    close, _, _, vol = _ohlcv_arrays(df)
-    n = len(df)
-    if n < PULLBACK_LOOKBACK + 5:
-        return {"hit": False, "available": False}
-    seg_close = close[-PULLBACK_LOOKBACK:]
-    hi_rel = int(seg_close.argmax())
-    hi_pos = n - PULLBACK_LOOKBACK + hi_rel
-    high = float(close[hi_pos])
-    drop_pct = (1 - close[-1] / high) * 100 if high else 0.0
-    run_vol = vol[n - PULLBACK_LOOKBACK : hi_pos + 1]
-    pull_vol = vol[hi_pos + 1 :]
-    run_mean = float(run_vol.mean()) if len(run_vol) else 0.0
-    pull_ratio = (
-        (float(pull_vol.mean()) / run_mean)
-        if (len(pull_vol) >= 2 and run_mean)
-        else None
-    )
-    shrink = pull_ratio is not None and pull_ratio < PULLBACK_VOL_RATIO
-    hold_dks = (dks_last is None) or (close[-1] >= dks_last)
-    hit = bool(drop_pct >= PULLBACK_MIN_DROP and shrink and hold_dks)
-    return {
-        "hit": hit,
-        "available": True,
-        "detail": {
-            "drop_from_high_pct": round(drop_pct, 2),
-            "pullback_vol_ratio": round(pull_ratio, 3)
-            if pull_ratio is not None
-            else None,
-            "hold_dks": bool(hold_dks),
-        },
-    }
-
-
-def _macd_zone_state(dif_last: float, dea_last: float, h0: float, h1: float):
-    """三区间动能状态机 + zone1_restart（回调后再启动的强信号）。"""
-    if dif_last > 0 and dea_last > 0:
-        if h0 > 0:
-            zone = 1 if h0 >= h1 else 2  # 扩张=第一区间；收缩（脱离DIF）=第二区间
-        else:
-            zone = 3  # 柱体脱离 DEA（≤0）=第三区间
-    else:
-        zone = 0  # 零轴下方，不做多区间分级
-    zone1_restart = bool(dif_last > 0 and h0 > 0 and h0 > h1 and h1 <= 0)
-    return zone, zone1_restart
-
-
-def _macd_swings(close, n: int):
-    """摆动高/低点（左右各 MACD_SWING_FRACTAL 根分型，右确认避免未来函数）。
-
-    唯一或近唯一峰/谷：窗口内其余 2f 根中至少 2f-1 根严格更低/更高
-    （允许至多 1 根等值，兼容双顶平台；>=2f-1 而非 <=，写反会导致唯一峰永不被检出）。
-    """
-    f = MACD_SWING_FRACTAL
-    w0 = max(f, n - MACD_DIV_LOOKBACK)
-    swing_hi = [
-        i
-        for i in range(w0, n - f)
-        if close[i] == close[i - f : i + f + 1].max()
-        and (close[i - f : i + f + 1] < close[i]).sum() >= 2 * f - 1
-    ]
-    swing_lo = [
-        i
-        for i in range(w0, n - f)
-        if close[i] == close[i - f : i + f + 1].min()
-        and (close[i - f : i + f + 1] > close[i]).sum() >= 2 * f - 1
-    ]
-    return swing_hi, swing_lo
-
-
-def _macd_top_divergence(close, d, h, swing_hi, n: int) -> dict[str, Any]:
-    """顶背离（高度/线型）：两个收盘摆高 B>A，但 DIF_B<DIF_A 或 hist_B<hist_A。"""
-    top_div: dict[str, Any] = {"hit": False}
-    if len(swing_hi) >= 2:
-        a, b = swing_hi[-2], swing_hi[-1]
-        if close[b] > close[a] and (d[b] < d[a] or h[b] < h[a]):
-            top_div = {
-                "hit": True,
-                "a_bars_ago": n - 1 - a,
-                "b_bars_ago": n - 1 - b,
-                "close_a": round(float(close[a]), 4),
-                "close_b": round(float(close[b]), 4),
-                "dif_a": round(float(d[a]), 4),
-                "dif_b": round(float(d[b]), 4),
-                "hist_a": round(float(h[a]), 4),
-                "hist_b": round(float(h[b]), 4),
-            }
-    return top_div
-
-
-def _macd_three_peaks(close, d, swing_hi, n: int) -> dict[str, Any]:
-    """三打白骨精：连续 3 个摆高递增 + DIF 连续 3 峰递减。"""
-    three_peaks: dict[str, Any] = {"hit": False}
-    if len(swing_hi) >= 3:
-        p1, p2, p3 = swing_hi[-3], swing_hi[-2], swing_hi[-1]
-        if close[p1] < close[p2] < close[p3] and d[p1] > d[p2] > d[p3]:
-            three_peaks = {
-                "hit": True,
-                "peaks_bars_ago": [n - 1 - p1, n - 1 - p2, n - 1 - p3],
-                "dif_peaks": [
-                    round(float(d[p1]), 4),
-                    round(float(d[p2]), 4),
-                    round(float(d[p3]), 4),
-                ],
-            }
-    return three_peaks
-
-
-def _macd_bottom_divergence(close, d, swing_lo, n: int) -> dict[str, Any]:
-    """底背离：窗口内两个收盘价摆低 L2<L1，但 DIF 低点抬高。"""
-    bottom_div: dict[str, Any] = {"hit": False}
-    if len(swing_lo) >= 2:
-        a, b = swing_lo[-2], swing_lo[-1]
-        if close[b] < close[a] and d[b] > d[a]:
-            bottom_div = {
-                "hit": True,
-                "a_bars_ago": n - 1 - a,
-                "b_bars_ago": n - 1 - b,
-                "close_a": round(float(close[a]), 4),
-                "close_b": round(float(close[b]), 4),
-                "dif_a": round(float(d[a]), 4),
-                "dif_b": round(float(d[b]), 4),
-            }
-    return bottom_div
-
-
-def _macd_overextended(d, n: int, h0: float, dif_last: float) -> dict[str, Any]:
-    """开口/空间拐离：|DIF| 分位 + 柱体仍在。"""
-    win = min(MACD_OVEREXT_WIN, n)
-    abs_dif = [abs(float(x)) for x in d[-win:]]
-    pctl = (
-        float(sum(1 for x in abs_dif if x <= abs_dif[-1]) / len(abs_dif))
-        if win >= 20
-        else None
-    )
-    return {
-        "hit": bool(
-            pctl is not None and pctl >= MACD_OVEREXT_PCTL and h0 * dif_last > 0
-        ),  # “下面还有柱体”＝柱体与 DIF 同号
-        "dif_abs_percentile": round(pctl, 3) if pctl is not None else None,
-    }
-
-
-def _hist_growing(dfx) -> "bool | None":
-    """重采样序列的 MACD 红柱是否增长（柱>0 且大于上一根）。
-    历史不足/计算失败 → None（算不出，与「没增长」区分）。"""
-    try:
-        if dfx is None or len(dfx) < 40:  # EMA26 需 ~35 根才稳定
-            return None
-        c = dfx["close"].astype(float).reset_index(drop=True)
-        dif2 = ema(c, 12) - ema(c, 26)
-        h2 = (dif2 - ema(dif2, 9)) * 2
-        return bool(h2.iloc[-1] > 0 and h2.iloc[-1] > h2.iloc[-2])
-    except Exception:  # noqa: BLE001
-        return None
-
-
-def _macd_wm_bar_grow(df, df_long):
-    """周/月红柱增长 (wm_available, wm_bar_grow)。
-
-    周/月腿用 df_long（live 传 1200 根）；没有则退回 df 自身（研究注入路径）。
-    resample 也包进 try：df 缺 date 列等坏输入不得炸出（本模块绝不 raise 惯例）。
-    """
-    try:
-        dfl = df_long if df_long is not None else df
-        wg = _hist_growing(resample(dfl, "W-FRI"))
-        mg = _hist_growing(resample(dfl, "ME"))
-        wm_available = wg is not None and mg is not None
-        return wm_available, bool(wm_available and wg and mg)
-    except Exception:  # noqa: BLE001
-        return False, False
-
-
-def check_macd_technics(df, df_long=None) -> dict[str, Any]:
-    """MACD 十大技术（macd十大技术精讲）→ 确定性因子。
-
-    - zone：三区间动能状态机。做多口径：DIF/DEA 在零轴上且红柱扩张=第一区间
-      （强势）；红柱脱离 DIF（收缩）=第二区间；红柱脱离 DEA（≤0）=第三区间。
-      zone1_restart：昨日 hist≤0（或收缩后）今日重新扩张且 DIF>0——"3浪/5浪
-      的第一区间"，回调后再启动的强信号。
-    - bottom_divergence 底背离：窗口内两个收盘价摆低 L2<L1，但 DIF 低点抬高。
-    - top_divergence 顶背离（高度/线型）：两个收盘摆高 B>A，但 DIF_B<DIF_A
-      或 hist_B<hist_A。
-    - three_peaks 三打白骨精：连续 3 个摆高递增 + DIF 连续 3 峰递减。
-    - overextended 开口/空间拐离：|DIF| 处于近 120 日 90%+ 分位且柱体仍在。
-
-    ``df_long``（v0.60 修复，2026-08-16 review 发现）：周/月红柱（wm_bar_grow）
-    的 EMA26 需要 ≥40 根月线 ⇒ ~800 根日线，而生产 df 恒为 260 根（~13 根月线）
-    ⇒ 不给长历史时月线腿**结构性恒 False**（死字段）。live 链传 df_long
-    （count=1200）；研究/注入路径不传则退回用 df 自身——此时若月线根数不足，
-    ``wm_available=False`` 如实标注（与「红柱没增长」区分）。⚠️ 周/月末 bin 是
-    半成品 K 线（当月柱会随月内新数据翻转），与 weekly_j 同口径、有意接受。
-    """
-    close_s = df["close"].astype(float).reset_index(drop=True)
-    n = len(df)
-    if n < 40:
-        return {"available": False}
-    dif = ema(close_s, 12) - ema(close_s, 26)
-    dea = ema(dif, 9)
-    hist = (dif - dea) * 2
-    d, h = dif.to_numpy(), hist.to_numpy()
-    close = close_s.to_numpy()
-
-    # 区间状态机
-    dif_last, dea_last = float(dif.iloc[-1]), float(dea.iloc[-1])
-    h0, h1 = float(h[-1]), float(h[-2])
-    zone, zone1_restart = _macd_zone_state(dif_last, dea_last, h0, h1)
-
-    # 摆动高/低点
-    swing_hi, swing_lo = _macd_swings(close, n)
-
-    top_div = _macd_top_divergence(close, d, h, swing_hi, n)
-    three_peaks = _macd_three_peaks(close, d, swing_hi, n)
-    bottom_div = _macd_bottom_divergence(close, d, swing_lo, n)
-
-    # 开口/空间拐离：|DIF| 分位 + 柱体仍在
-    overextended = _macd_overextended(d, n, h0, dif_last)
-
-    # v0.60（2026-08-14，owner）：MACD 位置/柱体加分项的判定字段。
-    # above_water=白黄线水上（DIF>0 且 DEA>0，即 zone≠0 的条件）；bar_grow=
-    # 日线红柱增长（hist>0 且大于昨值）；wm_bar_grow=周线与月线红柱都在增长。
-    wm_available, wm_bar_grow = _macd_wm_bar_grow(df, df_long)
-
-    return {
-        "available": True,
-        "zone": zone,
-        "zone1_restart": zone1_restart,
-        "above_water": bool(dif_last > 0 and dea_last > 0),
-        "bar_red": bool(h0 > 0),
-        "bar_grow": bool(h0 > 0 and h0 > h1),
-        "wm_bar_grow": bool(wm_bar_grow),
-        "wm_available": bool(wm_available),  # 周/月历史不足时 False（≠红柱没增长）
-        "dif": round(dif_last, 4),
-        "dea": round(dea_last, 4),
-        "hist": round(h0, 4),
-        "bottom_divergence": bottom_div,
-        "top_divergence": top_div,
-        "three_peaks": three_peaks,
-        "overextended": overextended,
-    }
-
-
-def check_liquidity(df, win: int = LIQUIDITY_WIN) -> dict[str, Any]:
-    """流动性：近 win 日均成交额（亿元）。仅计算值，底线判定在 score 层（可配）。"""
-    if "amount" not in df.columns or len(df) < 5:
-        return {"available": False}
-    amt = df["amount"].astype(float).to_numpy()
-    avg = float(amt[-win:].mean())
-    return {
-        "available": bool(avg > 0),
-        "avg_amount_yi": round(avg / 1e8, 4),
-        "avg_amount": round(avg, 0),
-        "window": win,
     }
 
 
@@ -1450,40 +751,13 @@ def _rs_20d_stats(
     return stock_ret20, index_ret20, rs_20d
 
 
-def _stop_ref(df) -> Optional[float]:
-    """建议止损位：近 STOP_LOOKBACK 日最低价（根数不足 → None）。"""
-    if len(df) < STOP_LOOKBACK:
-        return None
-    return round(float(df["low"].tail(STOP_LOOKBACK).min()), 4)
-
-
-def _reversal_flags(
-    daily_j: Any,
-    vol_ratio: Optional[float],
-    vol_pctile: Optional[float],
-    change_pct: Optional[float],
-    amplitude_pct: Optional[float],
-) -> tuple[bool, bool, bool]:
-    """j_low / volume_contraction / reversal_k_candidate 三个派生布尔。"""
-    j_low = daily_j is not None and daily_j < J_LOW_THRESHOLD
-    vol_contraction = (
-        vol_ratio is not None
-        and vol_ratio <= VOL_RATIO_MAX
-        and vol_pctile is not None
-        and vol_pctile <= VOL_PCTILE_MAX
-    )
-    reversal_k = bool(
-        j_low
-        and vol_contraction
-        and change_in_range(change_pct)
-        and amplitude_pct is not None
-        and amplitude_pct <= REVERSAL_AMPLITUDE_PCT
-    )
-    return j_low, vol_contraction, reversal_k
-
-
 def _base_scalars(df, index_df) -> dict[str, Any]:
-    """基础标量块：价/涨跌/振幅/BBI/日J/量能/20日相对强度/止损位及派生布尔。"""
+    """基础标量块：价/涨跌/振幅/BBI/日J/量能/20日相对强度/止损位及派生布尔。
+
+    v0.86（因子化批 C）：patterns 五单项的**判定**迁入 factors/entry_patterns.py
+    （reversal_flags / relative_strength_strong）；中间量（bbi/j/量比/相对强度）
+    仍在这里各算一次、喂落盘字段与证据块——单次计算语义不变。
+    """
     close = df["close"]
     bbi = bbi_state(df)
     j = kdj(df)
@@ -1497,7 +771,7 @@ def _base_scalars(df, index_df) -> dict[str, Any]:
     stop_ref = _stop_ref(df)
 
     daily_j = j.get("j") if j.get("available") else None
-    j_low, vol_contraction, reversal_k = _reversal_flags(
+    j_low, vol_contraction, reversal_k = reversal_flags(
         daily_j, vol_ratio, vol_pctile, change_pct, amplitude_pct
     )
     return {
@@ -1515,7 +789,7 @@ def _base_scalars(df, index_df) -> dict[str, Any]:
         "stock_ret20": stock_ret20,
         "index_ret20": index_ret20,
         "rs_20d": rs_20d,
-        "rs_strong": rs_20d is not None and rs_20d >= RS_STRONG_PP,
+        "rs_strong": relative_strength_strong(rs_20d),
         "stop_ref": stop_ref,
     }
 
@@ -1539,16 +813,11 @@ def _evidence_states(
     ride_above_fast = bool(
         zx.get("available") and zx.get("close_above_qsx") and zx.get("qsx_gt_dks")
     )
-    zx_recent_gold = bool(
-        zx.get("available")
-        and zx.get("qsx_gt_dks")
-        and zx.get("days_since_golden_cross") is not None
-        and zx["days_since_golden_cross"] <= ZX_CROSS_RECENT
-    )
-    b1_ignition_hit = bool(
-        (j_low or reversal_k)
-        and pullback_shrink.get("hit")
-        and (zx_recent_gold or ignition.get("hit"))
+    # v0.86（因子化批 C）：近金叉与 b1_ignition 复合判定迁入 factors/ignition.py
+    # （纯判定函数，输入全是本块已算好的中间态，不重算）。
+    zx_recent_gold = zx_recent_golden(zx)
+    b1_ignition_flag = b1_ignition_hit(
+        j_low, reversal_k, pullback_shrink, zx_recent_gold, ignition
     )
     distribution = detect_distribution(df, code)
     # 次日确认豁免层（2026-08-13，25chuhuo 覆盖度缺口）：①/② 的换庄/假出货豁免 +
@@ -1598,7 +867,7 @@ def _evidence_states(
         "pullback_shrink": pullback_shrink,
         "ride_above_fast": ride_above_fast,
         "zx_recent_gold": zx_recent_gold,
-        "b1_ignition_hit": b1_ignition_hit,
+        "b1_ignition_hit": b1_ignition_flag,
         "distribution": distribution,
         "distribution_confirm": distribution_confirm,
         "w_bottom": w_bottom,
@@ -1646,7 +915,7 @@ def _assemble_metrics(
         if stop_ref
         else None,
         "patterns": {
-            "bbi_above": bool(bbi.get("available") and bbi.get("close_above")),
+            "bbi_above": bbi_above(bbi),
             "j_low": bool(base["j_low"]),
             "volume_contraction": bool(base["vol_contraction"]),
             "reversal_k_candidate": base["reversal_k"],
@@ -2025,7 +1294,9 @@ def _apply_j_gate(cand: dict, result: dict, cfg: dict) -> bool:
     if not cfg.get("j_low_required", J_GATE_REQUIRED_DEFAULT):
         return False
     dj = cand.get("daily_j")
-    if j_below_threshold(dj):
+    # v0.86（因子化批 C）：门槛判定改走 factors/j_low_gate.py 的因子化入口
+    # （判定本体仍是 weekly_j.j_below_threshold，上方 re-export 通道不变）。
+    if j_low_gate_hit(dj):
         return False
     # 门槛外观察区（v0.51，#37 阶段 B，owner 批准）：J<13 硬门槛**不动**
     # （R1 框架），被挡但**异动强**的票落观察区展示。初版判据 =

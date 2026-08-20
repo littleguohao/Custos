@@ -36,8 +36,28 @@ EXTRACTED = [
     "kdj_j",
 ]
 
-#: 从 `enrich_candidates` 抽出的 4 个内联因子（pattern/state，**不在 SCORERS 里**）
-INLINE_EXTRACTED = ["wave_type", "perfect_b1_fit", "b1_pullback_fit", "distribution"]
+#: 从 `enrich_candidates` 抽出的 11 个内联因子（pattern/state，**不在 SCORERS 里**）
+INLINE_EXTRACTED = [
+    "wave_type",
+    "perfect_b1_fit",
+    "b1_pullback_fit",
+    "distribution",
+    # v0.86（因子化批 A）：check_macd_technics 及 _macd_* 族迁入 factors/，
+    # enrich 保留同名 re-export（tests 的 monkeypatch 通道）。
+    "macd_technics",
+    # v0.86（因子化批 B）：量能族（volume_sustain/leader/bottom）+ 结构族
+    # （non_one_wave/repair/five_day/liquidity/_stop_ref）+ 周线 J 迁入 factors/，
+    # enrich 保留同名 re-export。
+    "volume_detectors",
+    "b1_structure",
+    "weekly_j",
+    # v0.86（因子化批 C）：点火族（ignition/pullback_shrink/b1_ignition 复合）、
+    # patterns 五单项判定、J<13 进池硬门槛（gate 登记）迁入 factors/，
+    # enrich 保留同名 re-export。
+    "ignition",
+    "entry_patterns",
+    "j_low_gate",
+]
 
 
 def _bars(n=80, seed=5):
@@ -244,7 +264,7 @@ class TestSharedMutableStateImportRule:
 
 
 class TestInlineFactorsExtracted:
-    """从 `enrich_candidates`（1723 行）抽出的 4 个内联因子。
+    """从 `enrich_candidates` 抽出的 11 个内联因子。
 
     抽出的动因（owner 2026-08-06）：**因子实现必须全项目唯一一份，其他模块通过调用访问。**
     内联在选股链主流程里，既无法单独回测，也无法防止别处再写一份 ——
@@ -281,6 +301,32 @@ class TestInlineFactorsExtracted:
             "detect_wave_type",
             "compute_perfect_b1_fit",
             "detect_distribution",
+            # v0.86（因子化批 A）：check_macd_technics 迁入 factors/macd_technics.py，
+            # enrich 只保 import re-export
+            "check_macd_technics",
+            # v0.86（因子化批 B）：量能/结构族 + 周线 J 迁入 factors/
+            # volume_detectors.py / b1_structure.py / weekly_j.py，enrich 只保 re-export
+            "weekly_j_state",
+            "j_below_threshold",
+            "check_volume_sustain",
+            "check_leader_volume",
+            "check_bottom_volume",
+            "check_non_one_wave",
+            "check_repair_signals",
+            "check_five_day_entry",
+            "check_liquidity",
+            "_stop_ref",
+            # v0.86（因子化批 C）：点火族 / patterns 五单项判定 / J<13 门槛入口
+            # 迁入 factors/ignition.py、entry_patterns.py、j_low_gate.py，
+            # enrich 只保 import re-export
+            "check_ignition",
+            "check_pullback_shrink",
+            "zx_recent_golden",
+            "b1_ignition_hit",
+            "reversal_flags",
+            "bbi_above",
+            "relative_strength_strong",
+            "j_low_gate_hit",
             # compute_b1_pullback_fit 已于 v0.50（#37 阶段 A）随证伪下线移出 live 链，
             # 不在本清单（enrich 里应**不再出现**它——由下方断言保证）
         ):
@@ -297,9 +343,35 @@ class TestInlineFactorsExtracted:
         s = (
             ROOT / "src" / "custos" / "pipeline" / "screening" / "enrich_candidates.py"
         ).read_text(encoding="utf-8")
-        for pfx in ("WAVE_", "FIT_", "B1PB_", "DIST_"):
+        for pfx in (
+            "WAVE_",
+            "FIT_",
+            "B1PB_",
+            "DIST_",
+            "MACD_",
+            # v0.86（因子化批 B）：常量随因子迁走
+            "NOW_",
+            "REPAIR_",
+            "FIVE_DAY_",
+            "VOLUME_SUSTAIN_",
+            "LEADER_VOL_",
+            "BOTTOM_",
+            "CZ_",
+            "STOP_",
+            # v0.86（因子化批 C）：常量随因子迁走
+            "ZX_",
+            "IGNITION_",
+            "PULLBACK_",
+            "RS_",
+        ):
             defs = re.findall(rf"^({pfx}[A-Z0-9_]+) *=", s, re.M)
             assert not defs, f"{pfx}* 常量应随因子迁走，enrich 里还剩：{defs}"
+        # 同前缀只有部分常量迁走的，按名单钉（THREE_LOWS_VOL_RATIO /
+        # LIQUIDITY_FLOOR_YI 只被留在 enrich 的检测器/score 层用，留在本地）。
+        for name in ("THREE_LOWS_DRAWDOWN_PCT", "LIQUIDITY_WIN"):
+            assert not re.search(rf"^{name} *=", s, re.M), (
+                f"{name} 应随因子迁走，enrich 里还有定义"
+            )
 
     def test_factors_own_their_constants(self):
         """反面：常量确实在因子模块里。"""
@@ -310,6 +382,22 @@ class TestInlineFactorsExtracted:
             ("perfect_b1_fit", "FIT_"),
             ("b1_pullback_fit", "B1PB_"),
             ("distribution", "DIST_"),
+            ("macd_technics", "MACD_"),
+            # v0.86（因子化批 B）
+            ("volume_detectors", "VOLUME_SUSTAIN_"),
+            ("volume_detectors", "LEADER_VOL_"),
+            ("volume_detectors", "BOTTOM_"),
+            ("volume_detectors", "CZ_"),
+            ("b1_structure", "NOW_"),
+            ("b1_structure", "REPAIR_"),
+            ("b1_structure", "FIVE_DAY_"),
+            ("b1_structure", "LIQUIDITY_"),
+            ("b1_structure", "STOP_"),
+            # v0.86（因子化批 C）
+            ("ignition", "ZX_"),
+            ("ignition", "IGNITION_"),
+            ("ignition", "PULLBACK_"),
+            ("entry_patterns", "RS_"),
         ]
         for fid, pfx in pairs:
             s = (ROOT / "src" / "custos" / "core" / "factors" / f"{fid}.py").read_text(
@@ -415,17 +503,30 @@ class TestStageMatchesReality:
         ]
         assert not bad, f"标了 debug 却在 live 链里：{bad}"
 
-    def test_release_set_is_the_known_thirteen(self):
-        """已上线集合当前 13 个。变动必须是有意识的 —— 上线/下线都该被看见。
+    def test_release_set_is_the_known_twenty(self):
+        """已上线集合当前 20 个。变动必须是有意识的 —— 上线/下线都该被看见。
 
         （v0.50：12 → 11，b1_pullback_fit 证伪下线转 debug；
         v0.56：11 → 12，bottom_patterns 证据层进 live 链；
         v0.79：12 → 11，sector_mainstream 主线指纹节删除转 debug；
         v0.84：11 → 13，Phase D 因子化——capital_intent（scorer，分层第二轴，
-        score_candidates 迁入）与 fundamentals（evidence_only，展示/共振腿）登记。）
+        score_candidates 迁入）与 fundamentals（evidence_only，展示/共振腿）登记；
+        v0.86：13 → 14，因子化批 A——macd_technics（scorer，7 条技术分腿 +
+        2 条 cap 判定的唯一生产者，enrich_candidates 迁入，零行为变化）；
+        v0.86：14 → 17，因子化批 B——volume_detectors（scorer，bottom/leader
+        打分腿 + capital_intent 证据，sustain 另喂 retreat cap）、b1_structure
+        （scorer，five_day/repair/non_one_wave 打分腿 + revoked 封顶 C cap，
+        liquidity 仅 flag）、weekly_j（scorer，weekly_j_low +5 腿）自
+        enrich_candidates 迁入，零行为变化；
+        v0.86：17 → 20，因子化批 C——ignition（scorer，ignition/pullback_shrink/
+        b1_ignition 3 条技术分腿 + capital_intent 证据 + J 门槛外观察区判据）、
+        entry_patterns（scorer，patterns 五单项 5 条技术分腿 + capital_intent
+        证据）、j_low_gate（gate，18:00 进池硬门槛登记，判定本体复用
+        weekly_j.j_below_threshold，执行点在 enrich _apply_j_gate）自
+        enrich_candidates 迁入/补登记，零行为变化。）
         """
         got = set(factors.released())
-        assert len(got) == 13, f"已上线因子数变了（{len(got)}）：{sorted(got)}"
+        assert len(got) == 20, f"已上线因子数变了（{len(got)}）：{sorted(got)}"
 
     def test_debug_factors_are_research_only(self):
         """未上线的因子 live_use 应为 none —— 既没上线又声明可用是自相矛盾。"""

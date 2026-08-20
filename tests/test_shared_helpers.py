@@ -226,6 +226,30 @@ class TestNoRefork:
         "detect_platform_pullback": {"core/factors/platform_pullback.py"},
         "compute_sector_phase": {"core/factors/sector_phase.py"},
         "favorable_series": {"core/factors/sector_phase.py"},
+        # v0.86（因子化批 A）：MACD 十大技术族唯一实现迁入 factors/
+        # （enrich_candidates 仅保 import re-export，不得再长出本地定义）
+        "check_macd_technics": {"core/factors/macd_technics.py"},
+        # v0.86（因子化批 B）：量能/结构检测器族 + 周线 J 唯一实现迁入 factors/
+        # （enrich_candidates 仅保 import re-export）
+        "weekly_j_state": {"core/factors/weekly_j.py"},
+        "j_below_threshold": {"core/factors/weekly_j.py"},
+        "check_volume_sustain": {"core/factors/volume_detectors.py"},
+        "check_leader_volume": {"core/factors/volume_detectors.py"},
+        "check_bottom_volume": {"core/factors/volume_detectors.py"},
+        "check_non_one_wave": {"core/factors/b1_structure.py"},
+        "check_repair_signals": {"core/factors/b1_structure.py"},
+        "check_five_day_entry": {"core/factors/b1_structure.py"},
+        "check_liquidity": {"core/factors/b1_structure.py"},
+        # v0.86（因子化批 C）：点火族 / patterns 五单项判定 / J<13 门槛入口
+        # 唯一实现迁入 factors/（enrich_candidates 仅保 import re-export）
+        "check_ignition": {"core/factors/ignition.py"},
+        "check_pullback_shrink": {"core/factors/ignition.py"},
+        "zx_recent_golden": {"core/factors/ignition.py"},
+        "b1_ignition_hit": {"core/factors/ignition.py"},
+        "reversal_flags": {"core/factors/entry_patterns.py"},
+        "bbi_above": {"core/factors/entry_patterns.py"},
+        "relative_strength_strong": {"core/factors/entry_patterns.py"},
+        "j_low_gate_hit": {"core/factors/j_low_gate.py"},
         # 注册表接口名（约定：每个 selector 各一份），但不得再长出新文件
         "score": {
             "core/factors/_template.py",

@@ -76,7 +76,7 @@
 | # | 事项 | 性质 |
 |---|---|---|
 | 61 | **capital_intent 分值校准回测（status candidate → active 的前提）**：v0.84 因子化迁入时定档 candidate——它实际驱动分层第二轴（live_use=scorer），但各证据分值（ci_*）与 CAP_STRONG=5/CAP_MID=2 从未独立回测。用 Phase E `strategy_grid` 的因子轴把 capital_intent 纳入组合寻优，出证据后再议 status 升级与分值调整；调 `scoring.weights` 一律先回测（同 cap_rules 纪律） | 待回测 |
-| 62 | **技术分轴因子化缺口（2026-08-20 审计）**：v0.84 因子化覆盖了资金意图与基本面两轴，但**技术分轴**仍是「L0 指标原语 + enrich 内联检测器 + score 内联组合器」——判定逻辑未进 FACTOR 注册表、无法单独回测。缺口按严重度：**高**=MACD 检测器（`enrich.check_macd_technics`，7 条打分腿+2 条 cap）、patterns 五单项复合布尔（`_reversal_flags`，j_low +24 是最大单项）、B1/CZ 检测器族（bottom_volume/leader_volume/five_day_entry/repair_signals/non_one_wave/volume_sustain）、点火族（ignition/pullback_shrink/b1_ignition 复合）；**中**=technical_score 八段组合器+RESONANCE_MATRIX、cap 编排（apply_risk_downgrades）、J<13 gate/weekly_j_state（L0 唯一实现但无 FACTOR 登记）、`bottom_patterns` 元数据不符（volume_yy 实为打分腿，v0.86 已补记 note）；**低**=adx>60 腿、stop_loss_ref、check_liquidity。⚠️ 因子化≠改分值：搬迁保持行为零变化（v0.84 先例），是否进分由回测证据决定 | **进行中（2026-08-20 owner 拍板「该因子化的都因子化」）** |
+| 62 | **技术分轴因子化（2026-08-20 审计缺口 → 同日 owner 拍板收口，v0.87）**：✅ 三批搬迁完成——`macd_technics`/`volume_detectors`/`b1_structure`/`weekly_j`/`ignition`/`entry_patterns`/`j_low_gate` 进 `core/factors/` 并 FACTOR 注册（status=candidate、stage=release，live_use 按消费分 scorer/gate），行为零变化（各批逐位 == 抽查 + 全量 4400 passed）。判定逻辑自此可被 backtest_factors 单独引用回测。**剩余**：技术分组合器/RESONANCE_MATRIX/cap 编排刻意留 score_candidates（scorer 的家，权重已外置 registry）；各新因子 status 升级（candidate→active）与 #61 同批回测后议 | 主体收口；status 升级随 #61 |
 
 ## P8 · 测试覆盖率（2026-08-07 首次量化）
 
