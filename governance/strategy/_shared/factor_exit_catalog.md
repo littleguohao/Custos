@@ -61,10 +61,19 @@
 
 ### C. 对照 / 研究调试（不进 live）
 
-`baseline`（对照基线，active/none/debug）；`kdj_j`、`low_vol`、`mcap`、`momentum`、
-`alpha101`、`alpha_pvcorr`、`reversal_quality`/`_inv`、`b1_pullback_fit`（needs_work，
-2026-08-18 三因子补跑均无跨窗稳健性 ⇒ 不再研究，v0.70）；`sector_mainstream`
-（candidate/none/debug，主线指纹已随 v0.80 删除，研究侧 `aggregate` 保留）。
+| id | 名称 | status | 为什么不在 live（证据出处） |
+|---|---|---|---|
+| `baseline` | 对照基线：任何 as-of 日都判「可买」 | active | **必须保留**——所有进场信号的对照臂（R1） |
+| `kdj_j` | 当日 KDJ 的 J 值（纯特征） | needs_work | 同号率仅 50%，不稳定（R3） |
+| `low_vol` | 低波动因子（low-vol anomaly） | needs_work | 三窗对照 rally22/ytd26 跑输、无跨窗稳健性 ⇒ 不再研究（R2 第 16 条，v0.70） |
+| `momentum` | 动量因子（12-1 类） | needs_work | 三窗对照 rally22/bull2425 垫底、无跨窗稳健性 ⇒ 不再研究（R2 第 16 条，v0.70） |
+| `alpha_pvcorr` | Alpha#6 类：价量负相关 | needs_work | 三窗对照仅 bull2425 跑赢、无跨窗稳健性 ⇒ 不再研究（R2 第 16 条，v0.70） |
+| `alpha101` | Alpha#101：进场 K 日内实体强度 | needs_work | 判别层过线但净值终审未过；2025 窗明确输（R2） |
+| `mcap` | 小市值选择器 | needs_work | 判别层过线、净值终审惨败；止损把下跌端对称兑现（R2） |
+| `reversal_quality` | 反转K 成色分（0–4） | needs_work | 稳健负预测；口径已与 live 默认值一致（对称 ±2%），刻意不跟随 env（R2） |
+| `reversal_quality_inv` | 反转成色**反向**选择器 | needs_work | 样本内大胜、含退市跨年翻转；归因未分离（R2） |
+| `b1_pullback_fit` | 买弱指纹 | needs_work | recall 100% 但期望 −0.42%/笔，劣于无差别进场 +0.96%（R2） |
+| `sector_mainstream` | 主线板块族密度 | candidate | 准确的「窗口主线指纹」（归因工具），但「跟随主流」机械规则不成立（R2）；主线指纹节 v0.80 删除后 live 无引用，研究侧 `aggregate` 保留 |
 
 ⚠️ 没有 "falsified" 这一档是刻意的（owner：不要随便证伪）——needs_work = 「按现有证据
 不可用，但证据本身待重跑」。
