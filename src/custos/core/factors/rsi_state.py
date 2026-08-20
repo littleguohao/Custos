@@ -230,6 +230,23 @@ def rsi_divergence(
         }
 
 
+def _resolve_rsi_series(
+    c: pd.Series, smap: dict[int, pd.Series], df_len: int
+) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """三周期 RSI 序列：预计算映射有就切片（双形态前缀等价），缺键现算。"""
+    out = []
+    for n in (RSI_FAST, RSI_MID, RSI_SLOW):
+        pre = smap.get(n)
+        out.append(pre.iloc[:df_len] if pre is not None else rsi(c, n))
+    return out[0], out[1], out[2]
+
+
+def _prev_or_none(s: pd.Series) -> float | None:
+    """倒数第二根的值；NaN → None。"""
+    v = s.iloc[-2]
+    return float(v) if v == v else None
+
+
 def rsi_multi(
     df: pd.DataFrame, rsi_series_map: dict[int, pd.Series] | None = None
 ) -> dict[str, Any]:
@@ -250,21 +267,13 @@ def rsi_multi(
         if df is None or len(df) < RSI_MIN_BARS:
             return {"available": False, "reason": f"少于{RSI_MIN_BARS}根K线"}
         c = df["close"]
-        smap = rsi_series_map or {}
-        rf_pre, rm_pre, rs_pre = (
-            smap.get(RSI_FAST),
-            smap.get(RSI_MID),
-            smap.get(RSI_SLOW),
-        )
-        rf = rf_pre.iloc[: len(df)] if rf_pre is not None else rsi(c, RSI_FAST)
-        rm = rm_pre.iloc[: len(df)] if rm_pre is not None else rsi(c, RSI_MID)
-        rs = rs_pre.iloc[: len(df)] if rs_pre is not None else rsi(c, RSI_SLOW)
+        rf, rm, rs = _resolve_rsi_series(c, rsi_series_map or {}, len(df))
         vals = [rf.iloc[-1], rm.iloc[-1], rs.iloc[-1]]
         if any(v != v for v in vals):
             return {"available": False, "reason": "RSI 末值含 NaN"}
         f, m, s = (float(x) for x in vals)
-        f_prev = float(rf.iloc[-2]) if rf.iloc[-2] == rf.iloc[-2] else None
-        m_prev = float(rm.iloc[-2]) if rm.iloc[-2] == rm.iloc[-2] else None
+        f_prev = _prev_or_none(rf)
+        m_prev = _prev_or_none(rm)
         cross = bool(
             f_prev is not None and m_prev is not None and f_prev <= m_prev and f > m
         )

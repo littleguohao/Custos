@@ -33,10 +33,10 @@ FACTOR: dict[str, Any] = {
     "kind": "pattern",
     "status": "untested",  # 新实现未回测（25chuhuo 讲义口径 + 合成用例）
     "evidence": "governance/research/R2_selection_price_volume.md",
-    "note": "W 底（双底+底部放量+MACD 底背离合成）与红肥绿瘦（数量+面积两维）——25chuhuo 讲义底部侧，distribution 的底部镜像；证据层",
+    "note": "W 底（双底+底部放量+MACD 底背离合成）与红肥绿瘦（数量+面积两维）——25chuhuo 讲义底部侧，distribution 的底部镜像；证据层。⚠️ 2026-08-20 审计补记：同模块 `bull_bear_volume` 的产出 volume_yy 是技术分打分腿（阳量>阴量 +7 / 阴量>阳量 −5，v0.58/v0.61 owner 定向），live_use=evidence_only 仅覆盖 W 底/红肥绿瘦两检测器——注册表粒度是模块级，打分腿的准确状态见 #62 因子化缺口",
     "min_bars": 60,
-    "live_use": "evidence_only",  # 证据层（阶段 A/B 定案口径）：只落盘展示
-    "stage": "release",  # enrich 引用（证据字段）
+    "live_use": "evidence_only",  # 证据层（阶段 A/B 定案口径）：W 底/红肥绿瘦只落盘展示；⚠️ volume_yy 例外（打分腿，见 note）
+    "stage": "release",  # enrich 引用（证据字段 + volume_yy 打分腿）
 }
 
 # ---- W 底（待回测参数；镜像出货侧同义常量的取值口径）----

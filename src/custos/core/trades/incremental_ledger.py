@@ -32,6 +32,7 @@ import argparse
 import hashlib
 import json
 import os
+import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -230,8 +231,21 @@ def apply_positions(new: pd.DataFrame) -> list[dict]:
     # #49：同步归档当日快照，供 entities(date) 历史回填
     positions_history.archive_snapshot(rows, cn_now().date().isoformat())
     # v0.82：同步持仓止盈/止损计划（新建仓生成/补仓摊薄/清仓归档，派生数据）
-    position_plans.sync_plans(new, before, rows)
+    _sync_plans_best_effort(new, before, rows)
     return rows
+
+
+def _sync_plans_best_effort(new, before: list[dict], rows: list[dict]) -> None:
+    """持仓计划同步是 best-effort 派生：失败打 WARN 到 stderr，不影响导入本身。
+
+    计划（position_plans.json）可从台账+候选池重建，台账才是事实源；若同步崩在
+    导入成功之后，进程报错但台账已提交——重跑幂等选不出新行，计划会永久落后。
+    故宽捕隔离：失败有 WARN 可见，语义上属派生数据的尽力而为，不是静默吞错。
+    """
+    try:
+        position_plans.sync_plans(new, before, rows)
+    except Exception as e:  # noqa: BLE001 —— 刻意宽捕，见 docstring
+        print(f"[WARN] position_plans 同步失败（不影响导入）: {e!r}", file=sys.stderr)
 
 
 def _write_atomic(path: Path, text: str) -> None:
@@ -383,9 +397,11 @@ def main(argv=None) -> dict:
         ]
         _commit(staged)
         # v0.82：台账+持仓落盘成功后同步持仓计划（position_plans.json）。
-        # 刻意放在 _commit 之后、不进 staged：计划是派生数据（可从台账+候选池
-        # 重建），crash 窗口内落后一拍可检测可修复；台账/持仓的一致性语义不变。
-        position_plans.sync_plans(new, before, positions)
+        # 刻意放在 _commit 之后、不进 staged：计划是派生数据，台账/持仓的一致性
+        # 语义不变。落后一拍的检测手段只有报告侧「无计划」行（只能发现缺计划；
+        # 孤儿条目会被同代码再次买入覆盖，不自愈），修复靠重跑/人工，无自动
+        # rebuild 机制；同步失败只 WARN 不阻断导入（best-effort 派生）。
+        _sync_plans_best_effort(new, before, positions)
 
     # #49：每次运行结束归档当日持仓快照（含 --confirm-no-trades/空增量——
     # 持仓不变的日子归档同样内容，历史回填才查得到「那天的持仓」）。

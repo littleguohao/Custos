@@ -182,16 +182,38 @@ DEFAULT_TECH_WEIGHTS: dict[str, Any] = {
 }
 
 
+def _is_numeric_weight(val: Any) -> bool:
+    """权重覆盖值必须是 int/float；bool 是 int 子类，显式排除。"""
+    return isinstance(val, (int, float)) and not isinstance(val, bool)
+
+
+# 非数值覆盖值的 WARN 去重记录（每键每进程一次）：整池逐票打分都会 resolve，
+# 不去重同一坏键会刷屏。
+_WARNED_BAD_WEIGHT_KEYS: set = set()
+
+
 def resolve_tech_weights(overrides: Optional[dict]) -> dict:
     """把外部（registry scoring.weights）传入的技术分权重并入默认表；未知键忽略。
 
     覆盖模式仿 `resolve_cap_rules`：默认表兜底，只认已知键。
+    覆盖值必须是 int/float——字符串/None/bool 等忽略并用默认兜底 +
+    stderr [WARN] 一次（绝不 raise：误写配置不能炸掉整池打分）。
     """
     w = dict(DEFAULT_TECH_WEIGHTS)
     if isinstance(overrides, dict):
         for key, val in overrides.items():
-            if key in w:
-                w[key] = val
+            if key not in w:
+                continue
+            if not _is_numeric_weight(val):
+                if key not in _WARNED_BAD_WEIGHT_KEYS:
+                    _WARNED_BAD_WEIGHT_KEYS.add(key)
+                    print(
+                        f"[WARN] scoring.weights[{key}]={val!r} 非数值，"
+                        f"忽略并按默认 {w[key]} 计",
+                        file=sys.stderr,
+                    )
+                continue
+            w[key] = val
     return w
 
 
@@ -1067,7 +1089,8 @@ def score_all(
     v0.80（owner 拍板）：cz_preference 输入与 cz_sector_status/cz_sector_preference_missing
     降级分支随 CZ 板块名单机制一并移除。
     v0.84：weights（scoring.weights，技术分/资金意图分值覆盖）自 registry 加载
-    并透传到 score_candidate；默认值 == 现值 ⇒ 缺省输出逐字节不变。
+    并透传到 score_candidate；默认值 == 现值 ⇒ 缺省打分结果不变。生效权重随
+    结果壳的 `weights` 键落盘（审计：registry 改权重后 stock_pool.json 有记录）。
     """
     enriched, sector_states, amv_state = _resolve_score_all_inputs(
         date, enriched, sector_states, amv_state
@@ -1078,7 +1101,7 @@ def score_all(
     )
 
     result = _score_all_shell(
-        date, amv_state, effective_caps, sector_score_max, enriched
+        date, amv_state, effective_caps, sector_score_max, enriched, weights
     )
 
     if not enriched or enriched.get("status") == "unavailable":
@@ -1173,6 +1196,7 @@ def _score_all_shell(
     effective_caps: dict,
     sector_score_max: float,
     enriched: Optional[dict],
+    weights: Optional[dict] = None,
 ) -> dict:
     """整池结果的初始壳（键序＝历史落盘字段顺序，勿动）。"""
     return {
@@ -1189,6 +1213,13 @@ def _score_all_shell(
         # v0.51（#37 阶段 B）：门槛外观察区透传（不进 candidates 主池、不进分层；
         # candidate_table 新增一节展示）。
         "watchlist_outside_gate": (enriched or {}).get("watchlist_outside_gate") or [],
+        # v0.84 修复（code review 审计缺口）：生效权重落盘——registry 改权重后
+        # stock_pool.json 有记录可查。新键加在末尾（上方历史键序勿动）；
+        # 两组默认表键不相交（ci_* 前缀），合并即为完整生效表。
+        "weights": {
+            **resolve_tech_weights(weights),
+            **resolve_capital_weights(weights),
+        },
     }
 
 

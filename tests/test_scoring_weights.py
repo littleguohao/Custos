@@ -79,3 +79,85 @@ class TestWeightsOverrideSemantics:
         c2 = {"patterns": {"reversal_k_candidate": True}}
         assert ci.capital_intent_strength(c2)[0] == "弱"
         assert ci.capital_intent_strength(c2, {"cap_mid": 1})[0] == "中"
+
+
+class TestWeightValueTypeValidation:
+    """code review（v0.84）修复：registry 误写非数值覆盖值不得生效——
+
+    字符串/None/bool 忽略并用默认兜底 + stderr [WARN] 一次（绝不 raise：
+    误写配置不能在 `score += w[...]` 抛 TypeError 炸掉整池打分）；
+    float/int 覆盖正常生效。bool 是 int 子类，显式排除。
+    """
+
+    def test_tech_bad_values_ignored_and_warned_once(self, capsys):
+        sc._WARNED_BAD_WEIGHT_KEYS.clear()
+        w = sc.resolve_tech_weights({"j_low": "24", "five_day_entry": None})
+        assert w["j_low"] == sc.DEFAULT_TECH_WEIGHTS["j_low"]
+        assert w["five_day_entry"] == sc.DEFAULT_TECH_WEIGHTS["five_day_entry"]
+        # 同键再 resolve 不再重复 WARN（整池逐票调用，不去重会刷屏）
+        sc.resolve_tech_weights({"j_low": "24", "five_day_entry": None})
+        assert capsys.readouterr().err.count("[WARN]") == 2
+
+    def test_tech_bool_value_ignored(self, capsys):
+        sc._WARNED_BAD_WEIGHT_KEYS.clear()
+        w = sc.resolve_tech_weights({"leader_volume": True})
+        assert w["leader_volume"] == sc.DEFAULT_TECH_WEIGHTS["leader_volume"]
+        assert "[WARN]" in capsys.readouterr().err
+
+    def test_tech_float_and_int_values_apply(self, capsys):
+        w = sc.resolve_tech_weights({"j_low": 12.5, "adx_gt_60": 9})
+        assert w["j_low"] == 12.5 and w["adx_gt_60"] == 9
+        assert "[WARN]" not in capsys.readouterr().err
+
+    def test_tech_bad_value_does_not_raise_in_scoring(self, capsys):
+        """误写字符串时 technical_score 仍出分（默认兜底），不抛 TypeError。"""
+        sc._WARNED_BAD_WEIGHT_KEYS.clear()
+        cand = {"patterns": {"j_low": True}}
+        got, _, _ = sc.technical_score(cand, {"j_low": "junk"})
+        base, _, _ = sc.technical_score(cand)
+        assert got == base
+
+    def test_capital_bad_values_ignored_and_warned_once(self, capsys):
+        ci._WARNED_BAD_WEIGHT_KEYS.clear()
+        w = ci.resolve_capital_weights(
+            {"ci_b1_ignition": "3", "cap_strong": None, "ci_ignition": False}
+        )
+        assert w["ci_b1_ignition"] == ci.DEFAULT_EVIDENCE_WEIGHTS["ci_b1_ignition"]
+        assert w["cap_strong"] == ci.DEFAULT_EVIDENCE_WEIGHTS["cap_strong"]
+        assert w["ci_ignition"] == ci.DEFAULT_EVIDENCE_WEIGHTS["ci_ignition"]
+        ci.resolve_capital_weights({"ci_b1_ignition": "3"})
+        assert capsys.readouterr().err.count("[WARN]") == 3
+
+    def test_capital_float_and_int_values_apply(self, capsys):
+        w = ci.resolve_capital_weights({"ci_b1_ignition": 2.5, "cap_mid": 1})
+        assert w["ci_b1_ignition"] == 2.5 and w["cap_mid"] == 1
+        assert "[WARN]" not in capsys.readouterr().err
+
+
+class TestEffectiveWeightsPersisted:
+    """code review（v0.84）修复：生效权重随 stock_pool 结果壳落盘（审计缺口）。"""
+
+    def test_score_all_result_carries_effective_weights(self):
+        result = sc.score_all(
+            "2026-07-21",
+            enriched={"status": "ok", "candidates": []},
+            sector_states=[],
+            amv_state="做多",
+            weights={"j_low": 12.5},
+        )
+        w = result["weights"]
+        # 覆盖生效 + 未覆盖键默认兜底；技术分与资金意图两组键同表可查
+        assert w["j_low"] == 12.5
+        assert w["adx_gt_60"] == sc.DEFAULT_TECH_WEIGHTS["adx_gt_60"]
+        assert w["ci_b1_ignition"] == ci.DEFAULT_EVIDENCE_WEIGHTS["ci_b1_ignition"]
+        assert w["cap_strong"] == ci.DEFAULT_EVIDENCE_WEIGHTS["cap_strong"]
+
+    def test_weights_key_defaults_to_registry_values(self):
+        result = sc.score_all(
+            "2026-07-21",
+            enriched={"status": "ok", "candidates": []},
+            sector_states=[],
+            amv_state="做多",
+        )
+        for k, v in sc.DEFAULT_TECH_WEIGHTS.items():
+            assert result["weights"][k] == v

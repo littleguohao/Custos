@@ -6,7 +6,7 @@
 > 优先级按**「它阻塞了什么」**排，不按工作量：
 > P0 = 阻塞其他事或 live 正在依赖 ｜ P1 = 已有结论悬空 ｜ P2 = 新验证 ｜ P3 = 技术债
 >
-> 最后更新：2026-08-19（#26 方向转清理——三轮研究证伪「活跃板块∩J<13」（v0.79）；owner 全盘点后拍板清理第一批：主线指纹节/cz 板块否决/资金意图板块腿已删（v0.80），其余展示层与契约链保留，剩余子项挂起。#32 观察期进行中：股份入账类根因已修（v0.75）、成本差异定性为口径差（v0.76），数量零 mismatch 后 --strict 可转硬闸。#59 收口（v0.74）。#58 清零（v0.71-v0.73）。核心思想落档（v0.78）：追求盈亏比而非胜率，盈利靠止盈止损与仓位管理）
+> 最后更新：2026-08-20（v0.81-v0.85（因子×止盈×止损架构 Phase A-E，另一会话昨晚合入）经三轮 review：无 blocker，1 major（strategy_grid 签名不钉窗口/宇宙）+ 9 minor 全部修复（v0.86）；新增 #60 判读注记（两报告口径差 + default 计划 −7% 噪音）、#61 capital_intent 校准回测、#62 技术分轴因子化缺口。此前（2026-08-19）：#26 方向转清理（v0.79 证伪 + v0.80 清理第一批）；#32 观察期进行中（v0.75 修复 + v0.76 口径定性）；#59 收口（v0.74）；#58 清零（v0.71-v0.73）；核心思想落档（v0.78））
 
 ## P0 · 阻塞项
 
@@ -77,6 +77,7 @@
 | # | 事项 | 性质 |
 |---|---|---|
 | 61 | **capital_intent 分值校准回测（status candidate → active 的前提）**：v0.84 因子化迁入时定档 candidate——它实际驱动分层第二轴（live_use=scorer），但各证据分值（ci_*）与 CAP_STRONG=5/CAP_MID=2 从未独立回测。用 Phase E `strategy_grid` 的因子轴把 capital_intent 纳入组合寻优，出证据后再议 status 升级与分值调整；调 `scoring.weights` 一律先回测（同 cap_rules 纪律） | 待回测 |
+| 62 | **技术分轴因子化缺口（2026-08-20 审计）**：v0.84 因子化覆盖了资金意图与基本面两轴，但**技术分轴**仍是「L0 指标原语 + enrich 内联检测器 + score 内联组合器」——判定逻辑未进 FACTOR 注册表、无法单独回测。缺口按严重度：**高**=MACD 检测器（`enrich.check_macd_technics`，7 条打分腿+2 条 cap）、patterns 五单项复合布尔（`_reversal_flags`，j_low +24 是最大单项）、B1/CZ 检测器族（bottom_volume/leader_volume/five_day_entry/repair_signals/non_one_wave/volume_sustain）、点火族（ignition/pullback_shrink/b1_ignition 复合）；**中**=technical_score 八段组合器+RESONANCE_MATRIX、cap 编排（apply_risk_downgrades）、J<13 gate/weekly_j_state（L0 唯一实现但无 FACTOR 登记）、`bottom_patterns` 元数据不符（volume_yy 实为打分腿，v0.86 已补记 note）；**低**=adx>60 腿、stop_loss_ref、check_liquidity。⚠️ 因子化≠改分值：搬迁保持行为零变化（v0.84 先例），是否进分由回测证据决定 | 待排期（与 #61 同批回测） |
 
 （原 #35 三因子补跑 2026-08-18 完成：均无跨窗口稳健性，owner 拍板降级「不再研究」——`status` untested→needs_work，证据见 R2 第 16 条与 CHANGELOG v0.70。）
 
@@ -109,7 +110,7 @@ stage 全部指向不存在的文件、整条链硬失败，而 3481 条测试�
 
 | # | 事项 | 出处 |
 |---|---|---|
-| 60 | **plan 信号并入 SIGNAL_ORDER 与否**：v0.83 影子期观察——14:45/盘后两份报告每日输出「计划判定 vs 现行判定」对比（⚠️影子不一致标注）。**连续 5 个交易日**影子对比后 owner 拍板是否把 plan 信号（plan_stop_breach/plan_tp_scale_out）并入 `b1_holding_state.SIGNAL_ORDER` 转正式判定；切换本身是**独立提交**，不动其他字段。注意：影子期存量持仓多数无计划（早于机制落地），对比样本只含新建仓票 | 「因子×止盈×止损」架构计划 Phase C（v0.83） |
+| 60 | **plan 信号并入 SIGNAL_ORDER 与否**：v0.83 影子期观察——14:45/盘后两份报告每日输出「计划判定 vs 现行判定」对比（⚠️影子不一致标注）。**连续 5 个交易日**影子对比后 owner 拍板是否把 plan 信号（plan_stop_breach/plan_tp_scale_out）并入 `b1_holding_state.SIGNAL_ORDER` 转正式判定；切换本身是**独立提交**，不动其他字段。注意：影子期存量持仓多数无计划（早于机制落地），对比样本只含新建仓票。**判读注记（v0.86 review 发现的两个结构性事实）**：① 两份报告的「现行判定」列口径不同——review_core §2.1 比 `classify()` 输出（含 B1 短路/硬风险层），final_close_review §5 比 `b1 final_priority`，同一持仓可能一边「一致」一边「⚠️」，对照时以各自口径为准；② `source=default` 的计划止损=entry×0.93，恰与 live −7% P1 减仓线重合而影子判 P0 ⇒ 每张 default 计划到 −7% **必然**亮「⚠️影子不一致」——这是设计使然的噪音不是信号，统计一致性时应剔除 | 「因子×止盈×止损」架构计划 Phase C（v0.83） |
 
 ## 维护约定
 

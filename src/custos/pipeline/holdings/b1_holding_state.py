@@ -273,7 +273,7 @@ def _plan_shadow(
                 "signal": "plan_stop_breach",
                 "priority": "P0",
                 "action": "计划止损位清仓评估",
-                "reason": f"现价{current:.2f}跌破计划止损价{stop_price:.2f}"
+                "reason": f"现价{current:.2f}触及/跌破计划止损价{stop_price:.2f}"
                 f"（{stop.get('rule_id')}：{stop.get('basis')}）",
             }
         )

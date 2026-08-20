@@ -21,6 +21,8 @@
       "source":       "candidate:{date}" | "default",
       "created_at":   ISO 时间戳,
       "rules_version": exit_rules 生效配置的短哈希（改配置后新旧计划可区分）,
+      # 可选标记：averaged（真补仓摊薄过）、rebuilt（计划丢失后补建，非摊薄）、
+      # closed_at（archive 内：实际卖出日，无卖出记录退导入日）
     }
 
 ## 止损价来源（source）
@@ -35,7 +37,10 @@
 - **新建仓**（新出现的代码且本批有「买入」行）→ 生成计划。
 - **补仓**（已有代码加买）→ 不重建计划；``entry_price`` 随摊薄成本更新并标
   ``averaged: true``，止损价不动（最初的计划点位不因补仓改写）。
-- **清仓**（代码从快照消失）→ 条目移入 ``archive``（带 ``closed_at``，可追溯）。
+- **丢失后补建**（持仓在、计划不在——文件丢失或历史持仓早于机制落地）→ 按新建
+  补一份并标 ``rebuilt: true``；``averaged`` 只标真补仓摊薄，两种情形不混。
+- **清仓**（代码从快照消失）→ 条目移入 ``archive``（``closed_at`` 记本批最后一笔
+  卖出成交日期，本批无卖出行才退导入日，可追溯）。
 - **转债转入/拆股**（SHARE_CREDIT_CATEGORIES）→ 不触发计划生成（没有买入决策，
   自然没有选股侧止损参考）。
 
@@ -43,6 +48,14 @@
 current_positions.json），因此不重建计划——那里没有逐笔成交上下文，且灾备重建
 后的持仓与既有计划可能脱节，需人工复核；本文件是派生数据，随时可从台账+候选池
 重建，不作为台账一致性的一部分。
+
+## 落后/不一致的检测与修复（如实口径）
+
+- **检测**：唯一自动手段是 Phase C 影子报告对无计划持仓标「无计划」行——只能发现
+  **缺计划**。孤儿条目（清仓残留/计划与持仓脱节）没有自动检测，也不自愈：同代码
+  再次买入时旧条目被新计划覆盖（archive 只增不改，历史仍可追）。
+- **修复**：没有自动 rebuild 机制——靠重跑导入或人工编辑 JSON。台账才是事实源，
+  本文件永不为对账依据。
 
 分层：core/trades 属 L2，只依赖 L0（paths / exit_rules / code_utils）与 stdlib。
 """
@@ -114,7 +127,9 @@ def _find_candidate_stop(
             data = json.loads(p.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue  # 单份池文件损坏不阻塞：继续找更早的
-        for cand in (data or {}).get("candidates") or []:
+        if not isinstance(data, dict):
+            continue  # 顶层非 dict（坏形状，如 list）：按损坏处理，继续找更早的
+        for cand in data.get("candidates") or []:
             if clean_code(cand.get("code")) != code:
                 continue
             ref = cand.get("stop_loss_ref") or {}
@@ -203,14 +218,18 @@ def sync_plans(
     before = {clean_code(r.get("代码")) for r in before_rows}
     after_by = {clean_code(r.get("代码")): r for r in after_rows}
 
-    # 本批各代码的买入行（首笔日期 + 是否含真实买入）
+    # 本批各代码的买入行（首笔日期 + 是否含真实买入）与卖出行（最后一笔日期，
+    # 清仓归档的 closed_at 用实际卖出日，拿不到才退导入日）
     buys: dict[str, str] = {}
+    sells: dict[str, str] = {}
     for _, t in trades.iterrows():
-        if t.get("交易类别") != "买入":
-            continue
+        cat = t.get("交易类别")
         code = clean_code(t.get("代码"))
         day = str(t.get("成交日期") or today)
-        buys[code] = min(day, buys[code]) if code in buys else day
+        if cat == "买入":
+            buys[code] = min(day, buys[code]) if code in buys else day
+        elif cat == "卖出":
+            sells[code] = max(day, sells[code]) if code in sells else day
 
     for code, row in after_by.items():
         unit_cost = finite(row.get("单位成本"))
@@ -221,9 +240,10 @@ def sync_plans(
         elif code in buys:
             plan = positions.get(code)
             if plan is None:
-                # 计划文件丢了/历史持仓从未有计划：按新建补一份（source 正常判定）
+                # 计划文件丢了/历史持仓从未有计划：按新建补一份（source 正常判定）。
+                # 标 rebuilt 而非 averaged——这不是真补仓摊薄，标 averaged 会谎报。
                 positions[code] = _new_plan(code, buys[code], unit_cost, rules, pool)
-                positions[code]["averaged"] = True
+                positions[code]["rebuilt"] = True
                 continue
             # 补仓：不重建计划、不动止损价；entry_price 随摊薄成本更新。
             # 用摊薄单位成本而不是该笔成交价：live 三处判定点的 pnl 口径都是
@@ -236,7 +256,8 @@ def sync_plans(
     for code in before - set(after_by):
         plan = positions.pop(code, None)
         if plan is not None:
-            plan["closed_at"] = today
+            # closed_at 记实际卖出日（本批最后一笔卖出成交日期），拿不到才退导入日
+            plan["closed_at"] = sells.get(code) or today
             archive.setdefault(code, []).append(plan)
 
     save_plans(plans, path)

@@ -344,7 +344,7 @@ def render_holdings(lines, enrichment, revalued, day):
         lines.append(
             shadow_compare_line(
                 row["code"],
-                row["name"],
+                row["name"] or row["code"],
                 b1["final_priority"],
                 f"{b1['final_priority']} {b1['final_action']}",
                 b1.get("shadow"),

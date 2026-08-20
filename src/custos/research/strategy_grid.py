@@ -3,7 +3,8 @@
 """因子 × 出场 联合寻优驱动器（因子×止盈×止损架构 Phase E，v0.85）。
 
 网格 = 因子轴 ``{scorer × entry_gate}`` × 出场轴
-``{stop_mode / stop_pct / trail / breakeven / scale_out / cost_zone}``，
+``{stop_mode / stop_pct / trail / breakeven / scale_out / cost_zone /
+time_stop / bbi_consec}``，
 每个格子是一次 ``backtest_factors --trade-sim`` 子进程（驱动模式复用
 ``m2_stop_sweep``：串行子进程 + 结果文件落盘 + 签名复用跳过）。
 
@@ -17,9 +18,18 @@ EXIT_RULES.json`` 的 params 键名**三者一致**（``breakeven_trigger`` /
 
 ## 复用机制
 
-结果文件名带 ``cell_signature``（该格子**完整 CLI 参数**的 sha1 短哈希）——
-CLI 参数相同 ⇒ 逐笔口径相同 ⇒ 已存在的结果文件直接复用跳过（m2 的
-``trades_signature`` 思路，提升到驱动层：连组合层参数也进哈希，更保守）。
+结果文件名带 ``cell_signature``——该格子**完整 CLI 参数 + 宇宙摘要**的
+sha1 短哈希。CLI 参数相同 ⇒ 逐笔口径相同 ⇒ 已存在的结果文件直接复用跳过
+（m2 的 ``trades_signature`` 思路，提升到驱动层：连组合层参数也进哈希，更保守）。
+
+⚠️ **隐式窗口/宇宙转显式**（m2 文档化过三次的「同签名静默混口径」事故类）：
+默认 ``--count 500`` 是滚动窗口，随新 K 线每天漂移；``--universe-sample``
+抽样基数随新票上市漂移。所以未显式给 ``--start/--end`` 时，驱动先按数据最后
+交易日把窗口**换算成具体日期**再进 CLI 与签名；未给 ``--codes-file`` 时跑一次
+``--dump-codes`` 探针，把宇宙 codes 的 sha1 短哈希（口径同 backtest_factors
+的 ``codes_digest``）混进签名。⇒ 隔天数据漂移 ⇒ 签名变 ⇒ 旧格不被误复用。
+解析失败（无数据环境）降级为不钉 + 报告 ``data_quality`` 明示警告，不拦着实跑。
+
 ``--force`` 强制重跑。
 
 ## 剪枝
@@ -37,6 +47,7 @@ CLI 参数相同 ⇒ 逐笔口径相同 ⇒ 已存在的结果文件直接复用
 （权重 ``--obj-weights``，默认 1,1,0.05）。margin = 胜率 − 盈亏平衡胜率
 ``1/(1+payoff)``，复用 m2 的 ``_margin``/``_breakeven_wr`` 口径；
 return/maxdd 复用 m2 的 ``_ret_over_dd``（每格带 ``--portfolio`` 跑出组合块）。
+三项任一缺失 ⇒ objective=None **垫底**（缺失按 0 会把缺失格排在真实负值之上）。
 ⚠️ 三项量纲不同，objective 是**排序启发式**，不是经济含义明确的指标。
 
 ⚠️ **scorer 轴只在 ``--top-n > 0`` 时有区分度**：非 collect_all 的 trade-sim
@@ -59,6 +70,7 @@ import copy
 import hashlib
 import json
 import pathlib
+import re
 import subprocess
 import sys
 import time
@@ -131,6 +143,10 @@ DEFAULT_EXIT_GRID: list[dict[str, Any]] = [
 
 DEFAULT_OBJ_WEIGHTS = (1.0, 1.0, 0.05)  # margin / expectancy_R / return_over_maxdd
 
+CELL_TIMEOUT_S = 1800  # 单格子进程超时（秒）；--timeout 可调，超时计 failed
+# 隐式窗口换算的交易日历参照票：长历史、几乎不停牌（读本地 vipdoc，纯文件解析不联网）
+CAL_REF_CODE = "600000"
+
 # 报告头部固定标注（R11，见 governance/research/README.md：
 # 「在 R11 的问题解决前，任何 CAGR/期望数字都不应被引用」）。
 R11_WARNING = (
@@ -140,7 +156,7 @@ R11_WARNING = (
     "**可信度受限，仅用于相对排序参考，不得引用绝对量级**（CAGR/期望数字）。"
 )
 
-SCHEMA_VERSION = "v1"
+SCHEMA_VERSION = "v2"  # v2：新增 data_quality 块（窗口/宇宙口径 + 警告）
 
 
 # ---------- 网格展开与出场参数 ----------
@@ -149,18 +165,12 @@ SCHEMA_VERSION = "v1"
 def expand_grid(
     scorers: list[str], gates: list[str], exits: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """网格 = 因子轴 × 出场轴的笛卡尔积（组合数 = 三轴长度相乘）。"""
-    return [
-        {
-            "scorer": s,
-            "gate": g,
-            "exit": e["name"],
-            "params": dict(e.get("params") or {}),
-        }
-        for s in scorers
-        for g in gates
-        for e in exits
-    ]
+    """网格 = 因子轴 × 出场轴的笛卡尔积（组合数 = 三轴长度相乘）。
+
+    实现收敛在 ``_cells_for``（两阶段调度也用它），这里只是全组合的便捷封装——
+    展开逻辑只此一份，避免改一漏一。
+    """
+    return _cells_for(_factor_combos(scorers, gates), exits)
 
 
 def validate_exit_grid(exits: list[Any]) -> Optional[str]:
@@ -275,20 +285,180 @@ def _cell_args(a: argparse.Namespace, cell: dict[str, Any]) -> list[str]:
     return args
 
 
-def cell_signature(cli_args: list[str]) -> str:
-    """格子签名 = 完整 CLI 参数的 sha1 短哈希。
+def _udigest(a: argparse.Namespace) -> str:
+    """main 解析出的宇宙摘要（未解析 ⇒ 空串，签名退化为纯 CLI 口径 + 报告警告）。"""
+    return str(getattr(a, "universe_digest", "") or "")
+
+
+def cell_signature(cli_args: list[str], universe_digest: str = "") -> str:
+    """格子签名 = （完整 CLI 参数 + 宇宙摘要）的 sha1 短哈希。
 
     CLI 参数相同 ⇒ ``trades_signature`` 必然相同（前者是后者的超集，连组合层
-    参数也在内）⇒ 已落盘的结果可直接复用。比 m2 的指纹更保守，但不需要
-    解析 universe 就能算（m2 的 codes_digest 要拿到代码表才算得出）。
+    参数也在内）⇒ 已落盘的结果可直接复用。比 m2 的指纹更保守。
+    ⚠️ 隐式窗口必须在进来**之前**已由 ``_pin_context`` 换算成显式 ``--start/--end``
+    （否则 ``--count`` 滚动窗口隔天漂移而签名不变，旧口径结果被静默复用）；
+    宇宙摘要同理（抽样基数随新票上市漂移）。
     """
-    return hashlib.sha1("\0".join(cli_args).encode("utf-8")).hexdigest()[:12]
+    material = list(cli_args)
+    if universe_digest:
+        material += ["#universe", universe_digest]
+    return hashlib.sha1("\0".join(material).encode("utf-8")).hexdigest()[:12]
+
+
+_NAME_SAFE = re.compile(r"[^0-9A-Za-z._-]+")
+
+
+def _safe_name(s: Any) -> str:
+    """出场档名等进文件名前清洗（``/``、空格等非法字符替换为 ``_``）。
+
+    只影响**文件名**——签名从 CLI 参数算，用的仍是原名/原参数。
+    """
+    return _NAME_SAFE.sub("_", str(s)).strip("_") or "_"
 
 
 def cell_out_path(
     out_dir: pathlib.Path, cell: dict[str, Any], sig: str
 ) -> pathlib.Path:
-    return out_dir / f"{cell['scorer']}__{cell['gate']}__{cell['exit']}__{sig}.json"
+    parts = [_safe_name(cell[k]) for k in ("scorer", "gate", "exit")]
+    return out_dir / f"{parts[0]}__{parts[1]}__{parts[2]}__{sig}.json"
+
+
+def _resolve_data_dates(a: argparse.Namespace) -> Optional[tuple[str, str]]:
+    """按数据最后交易日把隐式窗口换算成具体日期，返回 ``(start, end)``。
+
+    end = 参照票（``CAL_REF_CODE``）最后交易日（显式 ``--end`` 已给则以它截断），
+    start = 往前 ``--count`` 根 K 线的日期——与子进程 ``tail(count)`` 的实际窗口
+    基本等长（m2 DEFAULT_WINDOW 的口径约定）。读本地 vipdoc 日线，纯文件解析不联网。
+    sdata 宇宙没有等价的轻量直读接口、无数据环境读不到 ⇒ 返回 None，
+    由调用方降级为「不钉窗口 + 报告警告」（m2 的「本轮不钉宇宙」口径）。
+    """
+    if a.universe == "sdata":
+        return None  # sdata 请显式 --start/--end 钉死（其 bundle 覆盖区间固定）
+    try:
+        from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
+
+        df = local_tdx_data.read_vipdoc_daily(CAL_REF_CODE)
+    except Exception:  # noqa: BLE001 —— 无 TDX_ROOT/数据环境：降级，不炸驱动
+        return None
+    if df is None or df.empty:
+        return None
+    dates = [str(d)[:10] for d in df["date"].tolist()]
+    if a.end:
+        dates = [d for d in dates if d <= a.end]
+    if not dates:
+        return None
+    win = dates[-a.count :] if a.count and len(dates) > a.count else dates
+    return win[0], dates[-1]
+
+
+def _resolve_universe_digest(
+    a: argparse.Namespace, out_dir: pathlib.Path
+) -> tuple[Optional[str], Optional[int]]:
+    """解析宇宙 codes 摘要（sha1 短哈希，口径同 backtest_factors 的 codes_digest）。
+
+    ``--codes-file`` 直接读文件；否则跑一次 ``--dump-codes`` 探针（只解析 universe
+    做目录列举，不加载 K 线，很快——m2 ``_prepare_universe`` 的思路；不在本进程
+    import 数据源，无数据的机器也能跑到降级分支）。失败 ⇒ ``(None, None)``。
+    """
+    codes: list[str] = []
+    if a.codes_file:
+        try:
+            codes = [
+                ln.strip()
+                for ln in pathlib.Path(a.codes_file)
+                .read_text(encoding="utf-8")
+                .splitlines()
+                if ln.strip() and not ln.strip().startswith("#")
+            ]
+        except OSError:
+            return None, None
+    else:
+        path = out_dir / "_universe_probe.txt"
+        probe = (
+            [sys.executable, str(SCRIPT), "--trade-sim"]
+            + _universe_args(a)
+            + ["--dump-codes", str(path)]
+        )
+        try:
+            r = subprocess.run(probe, cwd=str(BASE), timeout=a.timeout)
+        except Exception:  # noqa: BLE001 —— 探针失败降级，不拦着实跑
+            return None, None
+        if r.returncode != 0 or not path.is_file():
+            return None, None
+        codes = [
+            ln.strip()
+            for ln in path.read_text(encoding="utf-8").splitlines()
+            if ln.strip()
+        ]
+    if not codes:
+        return None, None
+    digest = hashlib.sha1(",".join(codes).encode("utf-8")).hexdigest()[:12]
+    return digest, len(codes)
+
+
+def _pin_context(a: argparse.Namespace, out_dir: pathlib.Path) -> None:
+    """隐式窗口/宇宙转显式并固化进签名上下文（结果写回 ``a`` 的扩展属性）。
+
+    隔天数据漂移 ⇒ 解析结果变 ⇒ 签名变 ⇒ 旧格不被静默误复用（m2 三次事故类）。
+    解析失败降级为「不钉 + ``data_quality`` 警告」，绝不拦着实跑。
+    """
+    warnings: list[str] = []
+    if a.date and a.end:
+        print(
+            f"[WARN] --date {a.date} 与 --end {a.end} 同给：--date 被忽略"
+            "（以 --end 为准）",
+            file=sys.stderr,
+        )
+    elif a.date:
+        a.end = a.date
+    window_source = "explicit"
+    if not (a.start and a.end):
+        resolved = _resolve_data_dates(a)
+        if resolved is not None:
+            a.start = a.start or resolved[0]
+            a.end = a.end or resolved[1]
+            window_source = "resolved"
+        elif a.end:
+            # --end 钉死 + --count 定长 ⇒ 窗口已确定（tail(count) 到 end 为止）
+            window_source = "explicit_end"
+        else:
+            window_source = "unpinned"
+            warnings.append(
+                "窗口未钉死（--count 滚动窗口随新 K 线漂移，且本机解析数据日历失败）："
+                "本批结果隔天不可复现，且签名不含窗口 ⇒ 隔天续跑会同签名静默误复用"
+                "旧格（口径已漂移）。显式 --start/--end 可钉死"
+            )
+    a.window_source = window_source
+    a.universe_digest, a.universe_n = _resolve_universe_digest(a, out_dir)
+    if a.universe_digest is None:
+        warnings.append(
+            "宇宙摘要解析失败 ⇒ 本批签名不含宇宙口径：新票上市导致抽样宇宙漂移时"
+            "同签名旧格会被误复用（m2 文档化过的事故类）。显式 --codes-file 可钉死"
+        )
+    a.dq_warnings = warnings
+    print(
+        f"[INFO] 窗口 {a.start or '(隐式)'}~{a.end or '(隐式)'}[{window_source}]，"
+        f"宇宙 digest={a.universe_digest or '未解析'}（{a.universe_n or '?'} 只）"
+    )
+
+
+def _result_complete(path: pathlib.Path) -> bool:
+    """结果 JSON 完整性检查：可解析且含交易摘要块（口径同 m2 ``_load`` 主路径）。
+
+    rc=0 但输出空/残缺是 m2 的「静默失效 ⇒ 报表少行」事故类——必须判 failed，
+    不能当 ran 留一行全 None 进榜单。
+    """
+    try:
+        d = json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception:  # noqa: BLE001
+        return False
+    if not isinstance(d, dict):
+        return False
+    for k in ("trade_summary", "trade_sim", "summary", "trade_simulation"):
+        blk = d.get(k)
+        if isinstance(blk, dict) and ("expectancy" in blk or "n" in blk):
+            return True
+    return "expectancy" in d
 
 
 def run_cell(
@@ -298,17 +468,27 @@ def run_cell(
 ) -> tuple[str, Optional[pathlib.Path]]:
     """跑一个格子。返回 ``(状态, 结果文件)``，状态 ∈ ran/reused/failed。"""
     cli = _cell_args(a, cell)
-    out = cell_out_path(out_dir, cell, cell_signature(cli))
+    out = cell_out_path(out_dir, cell, cell_signature(cli, _udigest(a)))
+    tag = f"{cell['scorer']}/{cell['gate']}/{cell['exit']}"
     if out.exists() and not a.force:
         print(f"[SKIP] {out.name}（签名一致，复用）")
         return "reused", out
     cmd = [sys.executable, str(SCRIPT)] + cli + ["--out", str(out)]
+    timeout = getattr(a, "timeout", 0) or CELL_TIMEOUT_S
     t0 = time.time()
-    r = subprocess.run(cmd, cwd=str(BASE))
+    try:
+        r = subprocess.run(cmd, cwd=str(BASE), timeout=timeout)
+    except subprocess.TimeoutExpired:
+        print(f"[FAIL] {tag} 超时（>{timeout}s，--timeout 可调）")
+        return "failed", None
     dt = time.time() - t0
-    tag = f"{cell['scorer']}/{cell['gate']}/{cell['exit']}"
     if r.returncode != 0 or not out.exists():
         print(f"[FAIL] {tag} exit={r.returncode} ({dt:.0f}s)")
+        return "failed", None
+    if not _result_complete(out):
+        # 删掉毒文件：留着下轮会被「签名一致」复用，残缺口径就永远洗不掉
+        print(f"[FAIL] {tag} rc=0 但结果 JSON 残缺/无交易摘要 ({dt:.0f}s)")
+        out.unlink(missing_ok=True)
         return "failed", None
     print(f"[DONE] {tag} {dt:.0f}s")
     return "ran", out
@@ -349,15 +529,14 @@ def objective_of(
 ) -> Optional[float]:
     """目标函数 = w_margin·margin + w_expR·expectancy_R + w_rdd·return/maxdd。
 
-    margin 或 expectancy_R 缺失 ⇒ None（该格不参与排名）。ret_over_dd 缺失按 0。
+    margin / expectancy_R / ret_over_dd **任一缺失 ⇒ None**（该格不参与排名、垫底）。
+    ⚠️ ret_over_dd 缺失不能按 0：0 排在真实负值之上，等于奖励了缺数据的格子。
     ⚠️ 三项量纲不同，这是排序启发式；且 R11 未决，读数可信度受限。
     """
-    m, e = row.get("margin"), row.get("expectancy_R")
-    if m is None or e is None:
+    m, e, rdd = row.get("margin"), row.get("expectancy_R"), row.get("ret_over_dd")
+    if m is None or e is None or rdd is None:
         return None
-    return (
-        weights[0] * m + weights[1] * e + weights[2] * (row.get("ret_over_dd") or 0.0)
-    )
+    return weights[0] * m + weights[1] * e + weights[2] * rdd
 
 
 def rank_rows(
@@ -425,10 +604,13 @@ class _Runner:
             done.add(key)
             tag = f"{cell['scorer']}/{cell['gate']}/{cell['exit']}"
             cli = _cell_args(self.a, cell)
-            out = cell_out_path(self.out_dir, cell, cell_signature(cli))
+            out = cell_out_path(
+                self.out_dir, cell, cell_signature(cli, _udigest(self.a))
+            )
             status: str
             path: Optional[pathlib.Path]
             if out.exists() and not self.a.force:
+                print(f"[SKIP] {out.name}（签名一致，复用）")
                 status, path = "reused", out
             elif self.budget > 0:
                 self.budget -= 1
@@ -483,6 +665,24 @@ def _obj_weights(a: argparse.Namespace) -> tuple[float, float, float]:
     return parts[0], parts[1], parts[2]
 
 
+def _data_quality_block(a: argparse.Namespace) -> dict[str, Any]:
+    """窗口/宇宙口径注记（``_pin_context`` 写入的扩展属性；缺省 = 未钉死）。"""
+    digest = getattr(a, "universe_digest", None)
+    return {
+        "window": {
+            "start": a.start or None,
+            "end": a.end or None,
+            "source": getattr(a, "window_source", "explicit"),
+        },
+        "universe": {
+            "digest": digest,
+            "n_codes": getattr(a, "universe_n", None),
+            "pinned": bool(digest),
+        },
+        "warnings": list(getattr(a, "dq_warnings", None) or []),
+    }
+
+
 def build_json(
     a: argparse.Namespace,
     scorers: list[str],
@@ -496,6 +696,7 @@ def build_json(
         "version": SCHEMA_VERSION,
         "tag": a.tag,
         "r11_warning": R11_WARNING,
+        "data_quality": _data_quality_block(a),
         "grid": {
             "scorers": scorers,
             "gates": gates,
@@ -550,13 +751,33 @@ def _md_config_details(ranked: list[dict[str, Any]]) -> list[str]:
         lines.append("```json")
         lines.append(json.dumps(r["exit_rules"], ensure_ascii=False, indent=2))
         lines.append("```")
+        ro = r["exit_rules"].get("research_only")
+        if ro:
+            lines.append(
+                "⚠️ 本配置含 live 无法表达的研究侧参数 "
+                f"（research_only: {json.dumps(ro, ensure_ascii=False)}）——"
+                "拷入 EXIT_RULES.json 后这些参数**不生效**（live schema 无对应节），"
+                "需 live 侧先支持才有意义"
+            )
     return lines
 
 
+_WINDOW_SOURCE_LABEL = {
+    "explicit": "显式钉死",
+    "explicit_end": "显式 --end 钉死（--count 定长）",
+    "resolved": "隐式窗口已转显式（按数据最后交易日换算）",
+    "unpinned": "**未钉死，随数据漂移**",
+}
+
+
 def build_markdown(payload: dict[str, Any]) -> str:
-    """markdown 报告：R11 固定标注 + 预算行 + 排名表 + 每组配置明细。"""
+    """markdown 报告：R11 固定标注 + 口径注记 + 预算行 + 排名表 + 每组配置明细。"""
     b = payload["budget"]
     g = payload["grid"]
+    dq = payload.get("data_quality") or {}
+    win = dq.get("window") or {}
+    uni = dq.get("universe") or {}
+    src = _WINDOW_SOURCE_LABEL.get(win.get("source") or "", win.get("source") or "?")
     lines = [
         f"# 策略联合寻优报告（因子 × 出场）  tag={payload['tag']}",
         "",
@@ -564,10 +785,15 @@ def build_markdown(payload: dict[str, Any]) -> str:
         "",
         f"- 网格：{len(g['scorers'])} scorer × {len(g['gates'])} gate × "
         f"{len(g['exits'])} 出场档 = {g['n_cells']} 格",
+        f"- 窗口：{win.get('start') or '?'} ~ {win.get('end') or '?'}（{src}）；"
+        f"宇宙：{uni.get('n_codes') or '?'} 只，"
+        f"digest={uni.get('digest') or '未解析'}",
         f"- 预算：max-runs {b['max_runs']}，实际跑 {b['ran']}，"
         f"复用跳过 {b['reused']}，失败 {b['failed']}，被截断 {b['truncated']}"
         f"（top-k={b['top_k']}，obj 权重 {payload['obj_weights']}）",
     ]
+    for w in dq.get("warnings") or []:
+        lines.append(f"- ⚠️ {w}")
     if b["truncated"]:
         lines.append(
             f"- ⚠️ **网格超出预算，{b['truncated']} 格被截断未跑**："
@@ -652,6 +878,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     # ---- 驱动控制 ----
     ap.add_argument("--force", action="store_true", help="忽略已落盘结果重跑")
+    ap.add_argument(
+        "--timeout",
+        type=int,
+        default=CELL_TIMEOUT_S,
+        help=f"单格子进程超时秒数（默认 {CELL_TIMEOUT_S}=30 分钟；超时计 failed）",
+    )
     ap.add_argument("--tag", default="", help="批次标签（默认时间戳），进报告文件名")
     ap.add_argument("--out-dir", default="", help=f"结果目录（默认 {OUTDIR}）")
     return ap
@@ -677,8 +909,6 @@ def main(argv: Optional[list[str]] = None) -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # GBK 终端
     ap = _build_parser()
     a = ap.parse_args(argv)
-    if a.date and not a.end:
-        a.end = a.date
     scorers = [s.strip() for s in a.scorers.split(",") if s.strip()]
     gates = [g.strip() for g in a.gates.split(",") if g.strip()]
     try:
@@ -699,6 +929,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         a.tag = time.strftime("%Y%m%d_%H%M%S")
     out_dir = pathlib.Path(a.out_dir) if a.out_dir else OUTDIR
     out_dir.mkdir(parents=True, exist_ok=True)
+    _pin_context(a, out_dir)  # 隐式窗口/宇宙转显式，固化进签名与 data_quality
     runner = run_grid(a, scorers, gates, exits, out_dir)
     ranked = rank_rows(runner.rows, _obj_weights(a))
     payload = build_json(a, scorers, gates, exits, ranked, runner)

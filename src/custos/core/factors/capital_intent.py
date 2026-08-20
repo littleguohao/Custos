@@ -29,6 +29,7 @@
 
 from __future__ import annotations
 
+import sys
 from typing import Any, Optional
 
 FACTOR: dict[str, Any] = {
@@ -66,22 +67,44 @@ DEFAULT_EVIDENCE_WEIGHTS: dict[str, int] = {
 }
 
 
+def _is_numeric_weight(val: Any) -> bool:
+    """权重覆盖值必须是 int/float；bool 是 int 子类，显式排除。"""
+    return isinstance(val, (int, float)) and not isinstance(val, bool)
+
+
+# 非数值覆盖值的 WARN 去重记录（每键每进程一次）：整池逐票打分都会 resolve，
+# 不去重同一坏键会刷屏。
+_WARNED_BAD_WEIGHT_KEYS: set = set()
+
+
 def resolve_capital_weights(overrides: Optional[dict]) -> dict:
     """把外部（registry scoring.weights）传入的权重并入默认表；未知键忽略。
 
     覆盖模式仿 `score_candidates.resolve_cap_rules`：默认表兜底，只认已知键。
+    覆盖值必须是 int/float——字符串/None/bool 等忽略并用默认兜底 +
+    stderr [WARN] 一次（绝不 raise：误写配置不能炸掉整池打分）。
     """
     w = dict(DEFAULT_EVIDENCE_WEIGHTS)
     if isinstance(overrides, dict):
         for key, val in overrides.items():
-            if key in w:
-                w[key] = val
+            if key not in w:
+                continue
+            if not _is_numeric_weight(val):
+                if key not in _WARNED_BAD_WEIGHT_KEYS:
+                    _WARNED_BAD_WEIGHT_KEYS.add(key)
+                    print(
+                        f"[WARN] scoring.weights[{key}]={val!r} 非数值，"
+                        f"忽略并按默认 {w[key]} 计",
+                        file=sys.stderr,
+                    )
+                continue
+            w[key] = val
     return w
 
 
 def capital_intent_strength(
     cand: dict, weights: Optional[dict] = None
-) -> tuple[str, int, dict]:
+) -> tuple[str, int | float, dict]:
     """资金意图强度（量价证明资金在进）→ 分层第二轴。确定性加分，落盘明细。
 
     证据（待回测权重）：b1_ignition +3、知行多头且沿短线上行 +2、20日相对强度强 +2、
@@ -97,7 +120,7 @@ def capital_intent_strength(
     """
     w = resolve_capital_weights(weights)
     detail: dict[str, Any] = {}
-    score = 0
+    score: int | float = 0
     # 段顺序＝历史上 detail 的键序，勿动（落盘明细供复盘对照）。
     for pts, part in (
         _capital_intent_zhixing_evidence(cand, w),
@@ -112,14 +135,16 @@ def capital_intent_strength(
     return level, score, detail
 
 
-def _capital_intent_add(detail: dict, key: str, cond: Any, pts: int) -> int:
+def _capital_intent_add(
+    detail: dict, key: str, cond: Any, pts: int | float
+) -> int | float:
     """记录一条资金证据（hit 布尔化 + 命中才计分），返回本条得分。"""
     hit = bool(cond)
     detail[key] = {"hit": hit, "points": pts if hit else 0}
     return pts if hit else 0
 
 
-def _capital_intent_zhixing_evidence(cand: dict, w: dict) -> tuple[int, dict]:
+def _capital_intent_zhixing_evidence(cand: dict, w: dict) -> tuple[int | float, dict]:
     """知行/形态证据：B1 点火 +3、知行多头骑线 +2、20日相对强度强 +2。"""
     detail: dict[str, Any] = {}
     zx = cand.get("zhixing") or {}
@@ -144,7 +169,7 @@ def _capital_intent_zhixing_evidence(cand: dict, w: dict) -> tuple[int, dict]:
     return score, detail
 
 
-def _capital_intent_volume_evidence(cand: dict, w: dict) -> tuple[int, dict]:
+def _capital_intent_volume_evidence(cand: dict, w: dict) -> tuple[int | float, dict]:
     """量能证据：龙头量/底部巨量/量能持续主线 +2，放量点火/反转K +1，回调缩量 +2。"""
     detail: dict[str, Any] = {}
     leader = cand.get("leader_volume") or {}
@@ -191,7 +216,7 @@ def _capital_intent_volume_evidence(cand: dict, w: dict) -> tuple[int, dict]:
     return score, detail
 
 
-def _capital_intent_fund_flow_evidence(cand: dict, w: dict) -> tuple[int, dict]:
+def _capital_intent_fund_flow_evidence(cand: dict, w: dict) -> tuple[int | float, dict]:
     """资金流向（正交于量价）：个股在主力净流入榜且净流入 +2。
 
     v0.80（owner 拍板）：板块净流入 OR 分支移除——板块净流入是成员加总、蹭标签

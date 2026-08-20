@@ -415,7 +415,7 @@ class TestStageMatchesReality:
         ]
         assert not bad, f"标了 debug 却在 live 链里：{bad}"
 
-    def test_release_set_is_the_known_twelve(self):
+    def test_release_set_is_the_known_thirteen(self):
         """已上线集合当前 13 个。变动必须是有意识的 —— 上线/下线都该被看见。
 
         （v0.50：12 → 11，b1_pullback_fit 证伪下线转 debug；

@@ -89,6 +89,18 @@ class TestShadowSignals:
         # 铁律：现行判定仍是现行判定（-8% ⇒ loss_reduction P1，不被影子抬成 P0）
         assert state["final_priority"] == "P1"
 
+    def test_stop_breach_wording_covers_equality(self):
+        """判定含等号（current <= stop）：恰好相等也触发，文案写「触及/跌破」。"""
+        state = evaluate(
+            _row(),
+            "做多",
+            price=9.5,
+            price_date="2026-08-20",
+            plan=_plan(stop_price=9.5),
+        )
+        reason = state["shadow"]["signals"][0]["reason"]
+        assert "触及/跌破" in reason  # 不是只写「跌破」（等号情形名不符实）
+
     def test_stop_not_breached_no_signal(self):
         state = evaluate(
             _row(),
