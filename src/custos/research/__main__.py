@@ -77,6 +77,12 @@ TOOLS: dict[str, tuple[str, str]] = {
         "driver",
         "空头段识别未来赢家：枚举窗口对 → Pass1 → 跨窗 Pass2",
     ),
+    "strategy_grid": (
+        "driver",
+        "因子 × 出场联合寻优：网格 = {scorer × entry_gate} × 出场轴，"
+        "两阶段 top-k + --max-runs 预算（subprocess 调 engine；"
+        "出场参数与 EXIT_RULES.json 同 schema，优胜配置可拷回 live）",
+    ),
     "backtest_0amv_bear_regime": (
         "study",
         "0AMV 空头区间「只卖不买 + 反弹减仓」历史回测",
