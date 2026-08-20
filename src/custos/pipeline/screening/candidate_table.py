@@ -653,30 +653,37 @@ def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
     return "\n".join(lines)
 
 
-# 门内提醒单行上限：异动强命中在池内可能有数百只，只列总分最高的前 N 只
+# 门内提醒单行上限：异动强命中在池内可能有数百只，只列日 J 最低的前 N 只
 _IN_GATE_REMINDER_TOP_N = 20
 
 
 def _in_gate_reminder_section(candidates: list) -> list[str]:
-    """门内提醒（v0.89，owner）：池内 J≤13 且**异动强**
+    """门内提醒（v0.89，owner）：震荡池（POOL_ZHENDANG）内 J≤13 且**异动强**
     （底部巨量或放量点火——沿用 v0.51 门槛外观察区的初版判据）的票。
 
     替代 v0.51 的「门槛外观察区」（J≥13 但异动强）：门外票不再单列展示，
-    只进 excluded 留痕；提醒对象改为**已在池内**的异动票，按总分降序取前
-    _IN_GATE_REMINDER_TOP_N 只。只展示提醒，不改分层/排序。
+    只进 excluded 留痕；提醒对象改为**门内**的异动票，按日 J 从小到大
+    取前 _IN_GATE_REMINDER_TOP_N 只（v0.90，owner：J 越小越接近超卖极值）。
+    只展示提醒，不改分层/排序。
+
+    v0.91（owner）：作用域收回了**震荡池**——旧观察区虽未写死 POOL_ZHENDANG
+    过滤，但 KDJ_J_LOW 公式命中自带 J<13 几乎不会被挡，门外票实际全是震荡池
+    成员（2026-08-19 实测 26/26）；改门内后作用域扩到全池（1758 只）把这一
+    事实口径弄丢了，故显式补回 formula_hits 过滤。
     """
     out = [
-        "## 📌 门内提醒（J≤13 且异动强）",
+        "## 📌 门内提醒（震荡池 · J≤13 且异动强）",
         "",
-        "> 已在候选池内（J<13 硬门槛已通过）、且出现底部巨量/放量点火的票。"
-        "**仅提醒**，不改变分层与排序；按总分降序最多列前 "
+        "> 震荡池（POOL_ZHENDANG）内、J≤13、且出现底部巨量/放量点火的票。"
+        "**仅提醒**，不改变分层与排序；按日 J 从小到大最多列前 "
         f"{_IN_GATE_REMINDER_TOP_N} 只。",
         "",
     ]
     hits = [
         c
         for c in candidates
-        if (c.get("daily_j") is not None and c.get("daily_j") <= 13)
+        if "POOL_ZHENDANG" in (c.get("formula_hits") or [])
+        and (c.get("daily_j") is not None and c.get("daily_j") <= 13)
         and (
             (c.get("bottom_volume") or {}).get("hit")
             or (c.get("ignition") or {}).get("hit")
@@ -688,10 +695,7 @@ def _in_gate_reminder_section(candidates: list) -> list[str]:
         return out
     out.append("| 代码 | 名称 | 日J | 涨跌幅 | 异动判据 | 分层 | 技术分 |")
     out.append("|---|---|---:|---:|---|---|---:|")
-    hits.sort(
-        key=lambda c: (c.get("score_detail") or {}).get("technical_score") or 0,
-        reverse=True,
-    )
+    hits.sort(key=lambda c: c.get("daily_j"))
     for c in hits[:_IN_GATE_REMINDER_TOP_N]:
         triggers = "、".join(
             t

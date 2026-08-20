@@ -161,13 +161,16 @@ def test_no_outpost_section_in_bull_regime():
     assert "📡 空头前哨" not in ct.render_table(pool, "2026-07-30")
 
 
-def _move_cand(code, name, *, j=5.0, tech=55.0, bucket="B", bottom=False, ign=False):
-    """门内提醒测试用候选：池内票（默认 J<13）+ 异动字段。"""
+def _move_cand(
+    code, name, *, j=5.0, tech=55.0, bucket="B", bottom=False, ign=False, zd=True
+):
+    """门内提醒测试用候选：震荡池成员（默认）+ 池内票（默认 J<13）+ 异动字段。"""
     c = _cand(code, name, "半导体", bucket, "优", 4, True, tech=tech)
     c.update(
         {
             "daily_j": j,
             "change_pct": 3.0,
+            "formula_hits": ["POOL_ZHENDANG"] if zd else ["KDJ_J_LOW"],
             "bottom_volume": {"hit": bottom},
             "ignition": {"hit": ign},
         }
@@ -176,7 +179,7 @@ def _move_cand(code, name, *, j=5.0, tech=55.0, bucket="B", bottom=False, ign=Fa
 
 
 def test_in_gate_reminder_section():
-    """v0.89（owner）：门内提醒——池内 J≤13 且异动强（底部巨量/放量点火）的票单列一节。"""
+    """v0.89（owner）：门内提醒——震荡池内 J≤13 且异动强（底部巨量/放量点火）的票单列一节。"""
     pool = {
         "status": "ok",
         "amv_state": "做多",
@@ -192,6 +195,24 @@ def test_in_gate_reminder_section():
     assert "600101" in sec and "放量点火" in sec
     assert "600102" not in sec
     assert "仅提醒" in sec
+
+
+def test_in_gate_reminder_only_zhendang_pool():
+    """v0.91（owner）：只列震荡池（POOL_ZHENDANG）——旧观察区的事实口径
+    （KDJ_J_LOW 公式命中自带 J<13 几乎不会被挡，门外票实际全是震荡池成员），
+    改门内后显式补回；纯公式命中票即便 J≤13 且异动强也不进提醒。"""
+    pool = {
+        "status": "ok",
+        "amv_state": "做多",
+        "candidates": [
+            _move_cand("600100", "甲", bottom=True, zd=False),  # 纯 KDJ_J_LOW
+            _move_cand("600101", "乙", bottom=True),  # 震荡池
+        ],
+    }
+    md = ct.render_table(pool, "2026-08-20")
+    sec = md.split("## 📌 门内提醒")[1].split("\n## ")[0]
+    assert "600100" not in sec and "600101" in sec
+    assert "震荡池" in sec
 
 
 def test_in_gate_reminder_excludes_j_above_13():
@@ -216,17 +237,18 @@ def test_in_gate_reminder_empty_not_silent():
     assert "门内提醒" in md and "（今日无）" in md
 
 
-def test_in_gate_reminder_sorted_by_tech_desc_and_capped():
-    """按技术分降序；命中超过 _IN_GATE_REMINDER_TOP_N 时截断并注明总数。"""
+def test_in_gate_reminder_sorted_by_j_asc_and_capped():
+    """v0.90（owner）：按日 J 从小到大——J 越小越接近超卖极值；
+    命中超过 _IN_GATE_REMINDER_TOP_N 时截断并注明总数。"""
     cands = [
-        _move_cand(f"60{i:04d}", f"票{i}", tech=float(i), bottom=True)
+        _move_cand(f"60{i:04d}", f"票{i}", j=float(25 - i) / 2, bottom=True)
         for i in range(25)
     ]
     pool = {"status": "ok", "amv_state": "做多", "candidates": cands}
     md = ct.render_table(pool, "2026-08-20")
     sec = md.split("## 📌 门内提醒")[1].split("\n## ")[0]
-    assert sec.index("600024") < sec.index("600023")  # 技术分高者在前
-    assert "600000" not in sec  # 截断：最低分掉出前 20
+    assert sec.index("600024") < sec.index("600023")  # J 最小者在前
+    assert "600000" not in sec  # 截断：J 最大者掉出前 20
     assert "共 25 只命中" in sec
 
 
