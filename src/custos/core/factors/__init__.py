@@ -30,6 +30,14 @@
 
 ⇒ 同目录内保持包式绝对 import（`from custos.core.factors.xxx import ...`）；
 2026-08-11 包式化（阶段 4b）后不再有任何 sys.path 注入，custos 可编辑安装即可解析。
+
+## 维度覆盖与已知缺口（2026-08-20，v0.84）
+
+    技术维度    score_candidates 八段技术分（patterns/MACD/知行/点火/趋势/阴阳量/出货减分）
+    资金维度    capital_intent（v0.84 自 score_candidates 迁入，live_use=scorer）
+    基本面维度  fundamentals（v0.84，financial_factor + fundamental_quality；evidence_only）
+    情绪维度    ⚠️ **无数据源，未建因子**——舆情/情绪数据链路不存在，
+                不得以价格行为代理冒充情绪维度。
 """
 
 

@@ -172,6 +172,9 @@ class TestNotForLive:
         + sector_phase（live 侧本就只是 enrich hint，live_use="gate" 自 v0.25
         起名不副实，随可买定义移出订正）；− b1_pullback_fit（证伪下线，
         转 debug/none）。
+        v0.84（Phase D 因子化）：+ fundamentals（基本面 CZ 抄底代理 +
+        fundamental_quality 品质档——只进 🐂 展示与四面共振基本面腿，
+        不进分不驱动分层，行为不变）。
         """
         got = set(factors.live_evidence_only())
         assert got == {
@@ -189,6 +192,8 @@ class TestNotForLive:
             "sector_phase",
             # v0.56：底部形态（W底/红肥绿瘦，25chuhuo 底部镜像）——证据层
             "bottom_patterns",
+            # v0.84：基本面因子化（evidence_only，不进分，行为不变）
+            "fundamentals",
         }, f"evidence_only 集合变了：{got}"
 
 
@@ -411,14 +416,16 @@ class TestStageMatchesReality:
         assert not bad, f"标了 debug 却在 live 链里：{bad}"
 
     def test_release_set_is_the_known_twelve(self):
-        """已上线集合当前 11 个。变动必须是有意识的 —— 上线/下线都该被看见。
+        """已上线集合当前 13 个。变动必须是有意识的 —— 上线/下线都该被看见。
 
         （v0.50：12 → 11，b1_pullback_fit 证伪下线转 debug；
         v0.56：11 → 12，bottom_patterns 证据层进 live 链；
-        v0.79：12 → 11，sector_mainstream 主线指纹节删除转 debug。）
+        v0.79：12 → 11，sector_mainstream 主线指纹节删除转 debug；
+        v0.84：11 → 13，Phase D 因子化——capital_intent（scorer，分层第二轴，
+        score_candidates 迁入）与 fundamentals（evidence_only，展示/共振腿）登记。）
         """
         got = set(factors.released())
-        assert len(got) == 11, f"已上线因子数变了（{len(got)}）：{sorted(got)}"
+        assert len(got) == 13, f"已上线因子数变了（{len(got)}）：{sorted(got)}"
 
     def test_debug_factors_are_research_only(self):
         """未上线的因子 live_use 应为 none —— 既没上线又声明可用是自相矛盾。"""

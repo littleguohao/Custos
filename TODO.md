@@ -76,8 +76,9 @@
 
 | # | 事项 | 性质 |
 |---|---|---|
+| 61 | **capital_intent 分值校准回测（status candidate → active 的前提）**：v0.84 因子化迁入时定档 candidate——它实际驱动分层第二轴（live_use=scorer），但各证据分值（ci_*）与 CAP_STRONG=5/CAP_MID=2 从未独立回测。用 Phase E `strategy_grid` 的因子轴把 capital_intent 纳入组合寻优，出证据后再议 status 升级与分值调整；调 `scoring.weights` 一律先回测（同 cap_rules 纪律） | 待回测 |
 
-（当前无。原 #35 三因子补跑 2026-08-18 完成：均无跨窗口稳健性，owner 拍板降级「不再研究」——`status` untested→needs_work，证据见 R2 第 16 条与 CHANGELOG v0.70。）
+（原 #35 三因子补跑 2026-08-18 完成：均无跨窗口稳健性，owner 拍板降级「不再研究」——`status` untested→needs_work，证据见 R2 第 16 条与 CHANGELOG v0.70。）
 
 ## P8 · 测试覆盖率（2026-08-07 首次量化）
 

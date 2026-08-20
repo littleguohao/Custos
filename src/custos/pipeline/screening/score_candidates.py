@@ -64,6 +64,18 @@ from custos.core.runtime_guards import normalize_regime  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
 from custos.core import report_audit  # noqa: E402
 
+# 2026-08-20（v0.84，Phase D 因子化）：资金意图强度迁入因子注册表
+# （core/factors/capital_intent.py），本模块 import 调用——`sc.capital_intent_strength`
+# 仍是同一函数对象，判定逻辑零变化。
+from custos.core.factors.capital_intent import (  # noqa: E402,F401
+    capital_intent_strength,
+    resolve_capital_weights,
+)
+
+# 基本面因子化（v0.84）：fundamental_quality 实现在 core/factors/fundamentals.py，
+# 此处 re-export（four_leg_resonance 与既有测试 `sc.fundamental_quality` 不变）。
+from custos.core.factors.fundamentals import fundamental_quality  # noqa: E402
+
 SCREENING_DIR = DATA / "screening"
 REGISTRY_PATH = SCREEN_FORMULA_REGISTRY_FILE
 
@@ -120,6 +132,68 @@ WAVE_TYPE_LABELS = {"buildup": "建仓波", "rally": "拉升波", "sprint": "冲
 # 两路分别落"中"/"强" —— 现在只剩 60/30 一套。
 TECH_STRONG_FALLBACK = 60
 TECH_MID_FALLBACK = 30
+
+# 技术分八段分值 + 分层阈值默认表 == 现值（v0.84 权重外置）。
+# 可经 SCREEN_FORMULA_REGISTRY.json 的 "scoring".weights 覆盖（仿 resolve_cap_rules：
+# 未知键忽略、默认表兜底；默认值==现值 ⇒ 缺省行为逐字节不变）。
+# 资金意图证据分值在同表（ci_* 键），由 factors/capital_intent.resolve_capital_weights 解析。
+DEFAULT_TECH_WEIGHTS: dict[str, Any] = {
+    "tech_strong_fallback": TECH_STRONG_FALLBACK,
+    "tech_mid_fallback": TECH_MID_FALLBACK,
+    # patterns 五单项
+    "bbi_above": 5,
+    "reversal_k_candidate": 4,
+    "j_low": 24,  # v0.63 owner 定向回调：20→33→24
+    "volume_contraction": 15,
+    "relative_strength_strong": 15,
+    # B1/CZ 对齐加分
+    "five_day_entry": 8,
+    "leader_volume": 6,
+    "bottom_volume": 10,
+    "repair_signals_each": 4,  # v0.61：每项 3→4
+    "repair_signals_cap": 8,  # v0.61：上限 6→8
+    "non_one_wave_confirmed": 5,
+    # MACD 十大技术
+    "macd_zone1": 3,
+    "macd_zone1_restart": 5,
+    "macd_bottom_divergence": 8,  # v0.60：5→8
+    "macd_above_water": 7,  # v0.61：5→7
+    "macd_bar_grow": 5,
+    "macd_wm_bar_grow": 5,
+    "macd_top_divergence": -8,  # v0.61：单独出现改分数层减分
+    # 知行量价位置三态
+    "zhixing_bull": 9,
+    "zhixing_close_above_qsx": 5,
+    "zhixing_in_qsx_dks_band": 5,
+    # 点火/缩量企稳/复合确认 + B1 健康回调组合包
+    "ignition": 4,
+    "pullback_shrink": 5,  # v0.61：3→5
+    "b1_ignition": 8,
+    "b1_healthy_pullback_pack": 9,  # v0.64 组合奖
+    # 趋势（周日共振 / ADX）
+    "weekly_j_low": 5,
+    "adx_gt_60": 5,
+    # 近 10 日阴阳量
+    "volume_yy_bull": 7,  # v0.61：5→7
+    "volume_yy_bear": -5,
+    # 出货形态分数层减分（封顶规则不动）
+    "distribution_watch": -10,
+    "distribution_high": -20,
+}
+
+
+def resolve_tech_weights(overrides: Optional[dict]) -> dict:
+    """把外部（registry scoring.weights）传入的技术分权重并入默认表；未知键忽略。
+
+    覆盖模式仿 `resolve_cap_rules`：默认表兜底，只认已知键。
+    """
+    w = dict(DEFAULT_TECH_WEIGHTS)
+    if isinstance(overrides, dict):
+        for key, val in overrides.items():
+            if key in w:
+                w[key] = val
+    return w
+
 
 # 待回测启发式驱动的封顶规则开关。默认全开＝保持历史行为；关闭某项后不再据此
 # 降档，改在 risk_flags 记录 "<rule>_detected_cap_disabled"（仍随候选落盘，便于
@@ -198,7 +272,9 @@ def cap_bucket(bucket: str, cap: str) -> str:
     return bucket if BUCKET_ORDER.index(bucket) >= BUCKET_ORDER.index(cap) else cap
 
 
-def technical_score(cand: dict) -> tuple[int, str, dict]:
+def technical_score(
+    cand: dict, weights: Optional[dict] = None
+) -> tuple[int, str, dict]:
     """技术分（0-100）与技术面层级（强/中/弱）。确定性加减分。
 
     ⚠️ 2026-08-12（v0.50，#37 阶段 A，owner 拍板）：**s_shape 主路径已删除**。
@@ -224,19 +300,22 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
 
     2026-08-18（#58 收尾）：函数体按逻辑块拆成 `_pattern_score` 等私有段，
     本函数只做「取数 → 逐段评分 → 汇总分级」；分值、contrib 键与键序均未变。
+    2026-08-20（v0.84）：分值/分层阈值改走 `resolve_tech_weights(weights)`
+    （registry scoring.weights 覆盖），`weights=None` 时全默认 == 现值。
     """
+    w = resolve_tech_weights(weights)
     contrib: dict[str, Any] = {}
     score = 0
     # 段顺序＝历史上 factor_contrib 的键序，勿动（落盘明细供复盘对照）。
     for pts, part in (
-        _pattern_score(cand),
-        _b1_bonus_score(cand),
-        _macd_score(cand),
-        _zhixing_score(cand),
-        _ignition_score(cand),
-        _trend_score(cand),
-        _volume_yy_score(cand),
-        _distribution_score(cand),
+        _pattern_score(cand, w),
+        _b1_bonus_score(cand, w),
+        _macd_score(cand, w),
+        _zhixing_score(cand, w),
+        _ignition_score(cand, w),
+        _trend_score(cand, w),
+        _volume_yy_score(cand, w),
+        _distribution_score(cand, w),
     ):
         score += pts
         contrib.update(part)
@@ -245,67 +324,67 @@ def technical_score(cand: dict) -> tuple[int, str, dict]:
     score = min(max(score, 0), 100)
     level = (
         "强"
-        if score >= TECH_STRONG_FALLBACK
-        else ("中" if score >= TECH_MID_FALLBACK else "弱")
+        if score >= w["tech_strong_fallback"]
+        else ("中" if score >= w["tech_mid_fallback"] else "弱")
     )
     return score, level, contrib
 
 
-def _pattern_score(cand: dict) -> tuple[int, dict]:
+def _pattern_score(cand: dict, w: dict) -> tuple[int, dict]:
     """patterns 五单项：bbi/反转K/J低位/极致缩量/20日相对强度。"""
     patterns = cand.get("patterns") or {}
     contrib: dict[str, Any] = {}
     score = 0
     if patterns.get("bbi_above"):
-        score += 5
-        contrib["bbi_above"] = 5
+        score += w["bbi_above"]
+        contrib["bbi_above"] = w["bbi_above"]
     if patterns.get("reversal_k_candidate"):
         # v0.58：复合信号不再取代子项（j_low/volume_contraction 照常独算）——
         # R18 实测反转K 在优秀 B1 里仅 4/10，不是必要条件，不值取代价。
-        score += 4
-        contrib["reversal_k_candidate"] = 4
+        score += w["reversal_k_candidate"]
+        contrib["reversal_k_candidate"] = w["reversal_k_candidate"]
     if patterns.get("j_low"):
         # v0.61（owner 定向）：20 -> 33；v0.63（owner 定向回调，2026-08-16）：33 -> 24。
         # v0.61 的 33 使 08-14 池 70+ 达 67 只（915 池 7.3%，owner 判定膨胀）；
         # 单项回调到 24 后离线模拟 70+ 降到 ~26 只，且 8 只正例的技术档全部
         # 仍 ≥60（「强」）⇒ A/B 桶位一只不丢（002074=61/B、600184=66/A、
         # 600601=64/B）。「不被埋没」由分层承担，70+ 分数线回归稀缺。
-        score += 24
-        contrib["j_low"] = 24
+        score += w["j_low"]
+        contrib["j_low"] = w["j_low"]
     if patterns.get("volume_contraction"):
-        score += 15
-        contrib["volume_contraction"] = 15
+        score += w["volume_contraction"]
+        contrib["volume_contraction"] = w["volume_contraction"]
     if patterns.get("relative_strength_strong"):
-        score += 15
-        contrib["relative_strength_strong"] = 15
+        score += w["relative_strength_strong"]
+        contrib["relative_strength_strong"] = w["relative_strength_strong"]
     return score, contrib
 
 
-def _b1_bonus_score(cand: dict) -> tuple[int, dict]:
+def _b1_bonus_score(cand: dict, w: dict) -> tuple[int, dict]:
     """B1/CZ 对齐加分：五日战法/龙头量/底部巨量/修复信号/非一波流（+贴合度证据列）。"""
     contrib: dict[str, Any] = {}
     score = 0
     if (cand.get("five_day_entry") or {}).get("hit"):
-        score += 8
-        contrib["five_day_entry"] = 8
+        score += w["five_day_entry"]
+        contrib["five_day_entry"] = w["five_day_entry"]
     leader = cand.get("leader_volume") or {}
     if leader.get("available") and leader.get("hit"):
-        score += 6
-        contrib["leader_volume"] = 6
+        score += w["leader_volume"]
+        contrib["leader_volume"] = w["leader_volume"]
     bottom = cand.get("bottom_volume") or {}
     if bottom.get("available") and bottom.get("hit"):
-        score += 10
-        contrib["bottom_volume"] = 10
+        score += w["bottom_volume"]
+        contrib["bottom_volume"] = w["bottom_volume"]
     repair_hits = (cand.get("repair_signals") or {}).get("signals") or []
     if repair_hits:
         # v0.61（owner 定向）：每项 3 -> 4、上限 6 -> 8（正例里 J 拐头/缩量止跌
         # 常作为唯一修复证据，原分值过低）。
-        pts = min(len(repair_hits) * 4, 8)
+        pts = min(len(repair_hits) * w["repair_signals_each"], w["repair_signals_cap"])
         score += pts
         contrib["repair_signals"] = pts
     if (cand.get("non_one_wave") or {}).get("status") == "confirmed":
-        score += 5
-        contrib["non_one_wave_confirmed"] = 5
+        score += w["non_one_wave_confirmed"]
+        contrib["non_one_wave_confirmed"] = w["non_one_wave_confirmed"]
     # 完美 B1 图形贴合度（0-8 梯度）：**evidence_only，不加分**（v0.50 #37 阶段 A；
     # R2：仅描述性）。仍记录进 factor_contrib —— candidate_table 的「贴合」列
     # 从 score_detail.factor_contrib 读它；且「算过是 0」与「没算」要可分（审计）。
@@ -315,7 +394,7 @@ def _b1_bonus_score(cand: dict) -> tuple[int, dict]:
     return score, contrib
 
 
-def _macd_score(cand: dict) -> tuple[int, dict]:
+def _macd_score(cand: dict, w: dict) -> tuple[int, dict]:
     """MACD 十大技术（正向）：第一区间强势扩张 +3；第一区间再启动（3/5浪买点）+5；
     底背离 +8（v0.60 从 5 上调，owner）。负向：顶背离单独出现 −8（v0.61，
     见下方减分支），三打白骨精仍走 apply_risk_downgrades 封顶 C。
@@ -326,56 +405,56 @@ def _macd_score(cand: dict) -> tuple[int, dict]:
     score = 0
     if mt.get("available"):
         if mt.get("zone") == 1:
-            score += 3
-            contrib["macd_zone1"] = 3
+            score += w["macd_zone1"]
+            contrib["macd_zone1"] = w["macd_zone1"]
         if mt.get("zone1_restart"):
-            score += 5
-            contrib["macd_zone1_restart"] = 5
+            score += w["macd_zone1_restart"]
+            contrib["macd_zone1_restart"] = w["macd_zone1_restart"]
         if (mt.get("bottom_divergence") or {}).get("hit"):
-            score += 8
-            contrib["macd_bottom_divergence"] = 8
+            score += w["macd_bottom_divergence"]
+            contrib["macd_bottom_divergence"] = w["macd_bottom_divergence"]
         if mt.get("above_water"):
             # v0.61（owner 定向）：5 -> 7（正例 8/8 命中，零轴上是趋势票基础证据）。
-            score += 7
-            contrib["macd_above_water"] = 7
+            score += w["macd_above_water"]
+            contrib["macd_above_water"] = w["macd_above_water"]
         if mt.get("bar_grow"):
-            score += 5
-            contrib["macd_bar_grow"] = 5
+            score += w["macd_bar_grow"]
+            contrib["macd_bar_grow"] = w["macd_bar_grow"]
         if mt.get("wm_bar_grow"):
-            score += 5
-            contrib["macd_wm_bar_grow"] = 5
+            score += w["macd_wm_bar_grow"]
+            contrib["macd_wm_bar_grow"] = w["macd_wm_bar_grow"]
         # v0.61（owner 定向）：MACD 顶背离**单独出现**（无三打白骨精）由封顶 C 改为
         # 分数层减分 −8--正例 301076 顶背离命中但后续走强，封顶直接把它压出 A/B，
         # 与 v0.60「量能撤退去封顶留减分」同一口径：检出留痕、降序但不一票否决。
         # 三打白骨精（K线三高+MACD三低）仍走 apply_risk_downgrades 封顶 C。
         if (mt.get("top_divergence") or {}).get("hit"):
-            score -= 8
-            contrib["macd_top_divergence"] = -8
+            score += w["macd_top_divergence"]
+            contrib["macd_top_divergence"] = w["macd_top_divergence"]
     return score, contrib
 
 
-def _zhixing_score(cand: dict) -> tuple[int, dict]:
+def _zhixing_score(cand: dict, w: dict) -> tuple[int, dict]:
     """知行量价（good_b1）位置三态：多头 +9；骑线/回踩区 +5（互斥）。"""
     zx = cand.get("zhixing") or {}
     contrib: dict[str, Any] = {}
     score = 0
     if zx.get("available"):
         if zx.get("qsx_gt_dks"):
-            score += 9
-            contrib["zhixing_bull"] = 9
+            score += w["zhixing_bull"]
+            contrib["zhixing_bull"] = w["zhixing_bull"]
         # v0.58（owner ②）：位置三态——骑线（多头且 C≥QSX）+5；回踩区（QSX>C≥DKS）+5。
         # 2026-08-16 review 修复：骑线腿补 qsx_gt_dks 前提——空头排列（QSX<DKS）下
         # 价站 QSX 不算「骑趋势线上」，此前与回踩区腿条件不对称。
         if zx.get("qsx_gt_dks") and zx.get("close_above_qsx"):
-            score += 5
-            contrib["zhixing_close_above_qsx"] = 5
+            score += w["zhixing_close_above_qsx"]
+            contrib["zhixing_close_above_qsx"] = w["zhixing_close_above_qsx"]
         elif zx.get("qsx_gt_dks") and zx.get("close_above_dks"):
-            score += 5
-            contrib["zhixing_in_qsx_dks_band"] = 5
+            score += w["zhixing_in_qsx_dks_band"]
+            contrib["zhixing_in_qsx_dks_band"] = w["zhixing_in_qsx_dks_band"]
     return score, contrib
 
 
-def _ignition_score(cand: dict) -> tuple[int, dict]:
+def _ignition_score(cand: dict, w: dict) -> tuple[int, dict]:
     """点火/缩量企稳/复合确认 + B1 健康回调组合包。
 
     注意：b1_ignition 是复合信号（含 ignition/pullback_shrink 条件），此处
@@ -385,15 +464,15 @@ def _ignition_score(cand: dict) -> tuple[int, dict]:
     contrib: dict[str, Any] = {}
     score = 0
     if (cand.get("ignition") or {}).get("hit"):
-        score += 4
-        contrib["ignition"] = 4
+        score += w["ignition"]
+        contrib["ignition"] = w["ignition"]
     if (cand.get("pullback_shrink") or {}).get("hit"):
         # v0.61（owner 定向）：3 -> 5（回调缩量+持 DKS 是 B1 健康回调核心证据）。
-        score += 5
-        contrib["pullback_shrink"] = 5
+        score += w["pullback_shrink"]
+        contrib["pullback_shrink"] = w["pullback_shrink"]
     if (cand.get("b1_ignition") or {}).get("hit"):
-        score += 8
-        contrib["b1_ignition"] = 8
+        score += w["b1_ignition"]
+        contrib["b1_ignition"] = w["b1_ignition"]
     # v0.64（owner 定向，2026-08-16）：**B1 健康回调组合包** +9--J 低位 ∧ 缩量
     # 回调持 DKS（pullback_shrink）∧ 知行多头（QSX>DKS）三腿齐备的组合奖。
     # 为什么用组合而不是单因子提权：v0.61 教训--单因子普涨使 08-14 池 70+ 达
@@ -406,26 +485,26 @@ def _ignition_score(cand: dict) -> tuple[int, dict]:
         and (cand.get("zhixing") or {}).get("available")
         and (cand.get("zhixing") or {}).get("qsx_gt_dks")
     ):
-        score += 9
-        contrib["b1_healthy_pullback_pack"] = 9
+        score += w["b1_healthy_pullback_pack"]
+        contrib["b1_healthy_pullback_pack"] = w["b1_healthy_pullback_pack"]
     return score, contrib
 
 
-def _trend_score(cand: dict) -> tuple[int, dict]:
+def _trend_score(cand: dict, w: dict) -> tuple[int, dict]:
     """v0.58（owner ③⑥）：周日共振（周线 J<13）+5；ADX>60（强趋势）+5。"""
     contrib: dict[str, Any] = {}
     score = 0
     if cand.get("weekly_j_low"):
-        score += 5
-        contrib["weekly_j_low"] = 5
+        score += w["weekly_j_low"]
+        contrib["weekly_j_low"] = w["weekly_j_low"]
     adx = cand.get("adx")
     if adx is not None and adx > 60:
-        score += 5
-        contrib["adx_gt_60"] = 5
+        score += w["adx_gt_60"]
+        contrib["adx_gt_60"] = w["adx_gt_60"]
     return score, contrib
 
 
-def _volume_yy_score(cand: dict) -> tuple[int, dict]:
+def _volume_yy_score(cand: dict, w: dict) -> tuple[int, dict]:
     """v0.58（owner ④）：近 10 日阳量>阴量 +7（v0.61 从 5 上调）/ 阴量>阳量 −5。
 
     2026-08-16 review 修复：按总量比较，平局（阳量=阴量）不加不减——
@@ -440,18 +519,18 @@ def _volume_yy_score(cand: dict) -> tuple[int, dict]:
             if bull_v > bear_v:
                 # v0.61（owner 定向）：+5 -> +7（正例 5/8 命中；负向 −5 维持不变--
                 # 正向证据强于负向惩罚是 owner 定向选择：不埋没正例优先于惩罚疑点）。
-                score += 7
-                contrib["volume_yy_bull"] = 7
+                score += w["volume_yy_bull"]
+                contrib["volume_yy_bull"] = w["volume_yy_bull"]
             elif bear_v > bull_v:
-                score -= 5
-                contrib["volume_yy_bear"] = -5
+                score += w["volume_yy_bear"]
+                contrib["volume_yy_bear"] = w["volume_yy_bear"]
         elif vy.get("bull_gt_bear"):  # 旧形状（无总量键）兜底
-            score += 7
-            contrib["volume_yy_bull"] = 7
+            score += w["volume_yy_bull"]
+            contrib["volume_yy_bull"] = w["volume_yy_bull"]
     return score, contrib
 
 
-def _distribution_score(cand: dict) -> tuple[int, dict]:
+def _distribution_score(cand: dict, w: dict) -> tuple[int, dict]:
     """v0.58（owner ④）：出货形态在分数层也减分（封顶规则不动）——watch −10 / high −20。
 
     2026-08-16 review 修复：available 守卫——检测器未评估（旧落盘/手工构造
@@ -460,9 +539,9 @@ def _distribution_score(cand: dict) -> tuple[int, dict]:
     dist = cand.get("distribution") or {}
     dist_level = dist.get("risk_level") if dist.get("available") else None
     if dist_level == "watch":
-        return -10, {"distribution_watch": -10}
+        return w["distribution_watch"], {"distribution_watch": w["distribution_watch"]}
     if dist_level == "high":
-        return -20, {"distribution_high": -20}
+        return w["distribution_high"], {"distribution_high": w["distribution_high"]}
     return 0, {}
 
 
@@ -494,120 +573,10 @@ def resonance_level(tech_level: str, heat_level: str) -> str:
     return "无共振"
 
 
-# 资金意图强度阈值（待回测）：>=CAP_STRONG 强 / >=CAP_MID 中 / 否则 弱
-CAP_STRONG = 5
-CAP_MID = 2
-
-
-def capital_intent_strength(cand: dict) -> tuple[str, int, dict]:
-    """资金意图强度（量价证明资金在进）→ 分层第二轴。确定性加分，落盘明细。
-
-    证据（待回测权重）：b1_ignition +3、知行多头且沿短线上行 +2、20日相对强度强 +2、
-    龙头量能 +2、底部巨量 +2、量能持续=主线确认 +2、放量点火 +1、反转K +1。
-    仅正向计"资金在进"证据；资金流出/派发风险（出货五方式、MACD 顶背离/三打白骨精）
-    由 score_candidate 的风控 cap 层单独否决，不在此重复扣减，避免双计。
-    返回 (level, score, detail)。
-
-    2026-08-19（#58 收尾）：证据项按主题拆成 `_capital_intent_*_evidence` 段落函数，
-    本函数只做「逐段汇总 → 分级」；分值、detail 键与键序均未变。
-    """
-    detail: dict[str, Any] = {}
-    score = 0
-    # 段顺序＝历史上 detail 的键序，勿动（落盘明细供复盘对照）。
-    for pts, part in (
-        _capital_intent_zhixing_evidence(cand),
-        _capital_intent_volume_evidence(cand),
-        _capital_intent_fund_flow_evidence(cand),
-    ):
-        score += pts
-        detail.update(part)
-    level = "强" if score >= CAP_STRONG else ("中" if score >= CAP_MID else "弱")
-    return level, score, detail
-
-
-def _capital_intent_add(detail: dict, key: str, cond: Any, pts: int) -> int:
-    """记录一条资金证据（hit 布尔化 + 命中才计分），返回本条得分。"""
-    hit = bool(cond)
-    detail[key] = {"hit": hit, "points": pts if hit else 0}
-    return pts if hit else 0
-
-
-def _capital_intent_zhixing_evidence(cand: dict) -> tuple[int, dict]:
-    """知行/形态证据：B1 点火 +3、知行多头骑线 +2、20日相对强度强 +2。"""
-    detail: dict[str, Any] = {}
-    zx = cand.get("zhixing") or {}
-    score = _capital_intent_add(
-        detail, "b1_ignition", (cand.get("b1_ignition") or {}).get("hit"), 3
-    )
-    score += _capital_intent_add(
-        detail,
-        "zhixing_ride",
-        zx.get("available") and zx.get("qsx_gt_dks") and zx.get("close_above_qsx"),
-        2,
-    )
-    score += _capital_intent_add(
-        detail,
-        "relative_strength_strong",
-        (cand.get("patterns") or {}).get("relative_strength_strong"),
-        2,
-    )
-    return score, detail
-
-
-def _capital_intent_volume_evidence(cand: dict) -> tuple[int, dict]:
-    """量能证据：龙头量/底部巨量/量能持续主线 +2，放量点火/反转K +1，回调缩量 +2。"""
-    detail: dict[str, Any] = {}
-    leader = cand.get("leader_volume") or {}
-    bottom = cand.get("bottom_volume") or {}
-    score = _capital_intent_add(
-        detail, "leader_volume", leader.get("available") and leader.get("hit"), 2
-    )
-    score += _capital_intent_add(
-        detail, "bottom_volume", bottom.get("available") and bottom.get("hit"), 2
-    )
-    score += _capital_intent_add(
-        detail,
-        "volume_sustain_mainline",
-        (cand.get("volume_sustain") or {}).get("status") == "mainline_confirmed",
-        2,
-    )
-    score += _capital_intent_add(
-        detail, "ignition", (cand.get("ignition") or {}).get("hit"), 1
-    )
-    score += _capital_intent_add(
-        detail,
-        "reversal_k",
-        (cand.get("patterns") or {}).get("reversal_k_candidate"),
-        1,
-    )
-    # v0.61（owner 定向）：回调缩量计资金证据 +2--缩量回调=抛压衰竭、主力未撤
-    # （与「量能撤退封顶去除」v0.60 同一语义的正向面）；正例 002074 资金意图
-    # 原为 0 分（其余证据均未命中）被分层压到 D，此证据让它回到「中」。
-    score += _capital_intent_add(
-        detail,
-        "pullback_shrink",
-        (cand.get("pullback_shrink") or {}).get("hit"),
-        2,
-    )
-    return score, detail
-
-
-def _capital_intent_fund_flow_evidence(cand: dict) -> tuple[int, dict]:
-    """资金流向（正交于量价）：个股在主力净流入榜且净流入 +2。
-
-    v0.80（owner 拍板）：板块净流入 OR 分支移除——板块净流入是成员加总、蹭标签
-    拿分，且「个股与板块资金流同源」假设 v0.79 已被板块证据证伪。enrich 落盘的
-    sector_inflow_positive 等展示字段保留，不再参与打分。
-    """
-    detail: dict[str, Any] = {}
-    ff = cand.get("fund_flow") or {}
-    score = _capital_intent_add(
-        detail,
-        "fund_flow_inflow",
-        ff.get("available") and ff.get("in_rank_positive"),
-        2,
-    )
-    return score, detail
+# 资金意图强度（分层第二轴）已迁入因子注册表 core/factors/capital_intent.py
+# （v0.84，Phase D 因子化，零行为变化）；阈值 CAP_STRONG/CAP_MID 与证据分值
+# 的默认表也在那里，可经 registry "scoring".weights 覆盖（ci_* 键）。
+# 本模块顶部 import 同一函数对象，`sc.capital_intent_strength` 调用方不变。
 
 
 def trade_style_of(heat_level: str) -> str:
@@ -624,30 +593,9 @@ def market_permission(amv_state: str) -> str:
     return {"做多": "允许", "空头": "观察"}.get(normalize_regime(amv_state), "仅低吸")
 
 
-def fundamental_quality(fin: Optional[dict]) -> dict:
-    """基于 financials(CZ抄底代理)判公司品质档 + 三无标记(cz:无主业/无业绩/无现金流→回避)。
-    优=真业绩+现金流+ROE;中=净利为正(现金流缺/未确认);差=净利非正。三无需净利非正**且现金流确认为负**(保守)。
-    ⚠️ live 用(当前快照,无未来函数)干净;**历史回测不可用**(Affair=最新快照→look-ahead)。"""
-    f = fin or {}
-    if not f.get("available"):
-        return {"tier": "未知", "sanwu": False, "available": False}
-    dp = f.get("dixi_proxy") or {}
-    np_pos = bool(dp.get("net_profit_positive"))
-    ocf_pos = dp.get("op_cashflow_positive")  # True/False/None(未确认)
-    roe_pos = bool(dp.get("roe_positive"))
-    real = bool(dp.get("real_earnings_cashflow"))  # 净利+现金流双正
-    tier = "优" if (real and roe_pos) else ("中" if np_pos else "差")
-    sanwu = bool(
-        (not np_pos) and (ocf_pos is False)
-    )  # 净利非正 且 现金流确认为负 → 三无
-    return {
-        "tier": tier,
-        "sanwu": sanwu,
-        "available": True,
-        "net_profit_positive": np_pos,
-        "cashflow_positive": ocf_pos,
-        "roe_positive": roe_pos,
-    }
+# fundamental_quality（公司品质档/三无标记）已迁入因子注册表
+# core/factors/fundamentals.py（v0.84，Phase D 因子化，零行为变化），
+# 本模块顶部 re-export 同一函数对象，`sc.fundamental_quality` 调用方不变。
 
 
 def apply_risk_downgrades(amv_state, base_bucket, cand, rules, sector_score_available):
@@ -888,16 +836,21 @@ def score_candidate(
     amv_state: str,
     cap_rules: Optional[dict] = None,
     sector_score_max: float = SECTOR_SCORE_MAX,
+    weights: Optional[dict] = None,
 ) -> dict:
     """对单只充实候选打分分层，输出 StockPool 契约条目（含打分明细）。
 
     cap_rules 传 None 时用 DEFAULT_CAP_RULES（全开＝历史行为）；显式传部分键可
     单独关闭某条待回测封顶规则（关闭后仅在 risk_flags 记录检出、不降档）。
     sector_score_max 指定 sector_state.score 的量纲上界，用于归一化到 0-100。
+    weights（v0.84）为技术分/资金意图分值覆盖表（registry scoring.weights），
+    None 时全默认 == 现值。
     """
     rules = resolve_cap_rules(cap_rules)
-    tech_score, tech_level, factor_contrib = technical_score(cand)
-    capital_level, capital_score, capital_detail = capital_intent_strength(cand)
+    tech_score, tech_level, factor_contrib = technical_score(cand, weights)
+    capital_level, capital_score, capital_detail = capital_intent_strength(
+        cand, weights
+    )
     heat, pass_level, reason = sector_heat(sector_entry)
     trade_style = trade_style_of(heat)
     # 板块分不可用（NaN/inf）与"无评分"（None）在**打分上**都按最弱 0 处理，但前者是
@@ -1086,8 +1039,8 @@ def _indicator_passthrough(cand: dict) -> dict:
 
 
 def _load_scoring_config(path: Optional[Path] = None) -> dict:
-    """读 SCREEN_FORMULA_REGISTRY.json 的 "scoring" 段（cap_rules / sector_score_max）；
-    缺失/损坏返回 {}（调用方回退默认，行为不变）。"""
+    """读 SCREEN_FORMULA_REGISTRY.json 的 "scoring" 段（cap_rules / sector_score_max
+    / weights）；缺失/损坏返回 {}（调用方回退默认，行为不变）。"""
     p = Path(path) if path else REGISTRY_PATH
     data = _load_json(p, {})
     scoring = data.get("scoring") if isinstance(data, dict) else None
@@ -1101,24 +1054,27 @@ def score_all(
     amv_state: Optional[str] = None,
     cap_rules: Optional[dict] = None,
     sector_score_max: Optional[float] = None,
+    weights: Optional[dict] = None,
 ) -> dict:
     """整池打分。输入缺失时干净降级，绝不 raise。
 
-    cap_rules / sector_score_max 传 None 时从 registry "scoring" 段加载，缺失回退
-    默认（全开 + 0-100），行为与历史一致。
+    cap_rules / sector_score_max / weights 传 None 时从 registry "scoring" 段加载，
+    缺失回退默认（全开 + 0-100 + 现值权重），行为与历史一致。
 
     2026-08-19（#58 收尾）：按阶段拆成 `_resolve_*` / `_score_all_shell` /
     `_score_pool` 段落函数，本函数只做调度；status/degraded_reason 语义与
     candidates 排序键均未变。
     v0.80（owner 拍板）：cz_preference 输入与 cz_sector_status/cz_sector_preference_missing
     降级分支随 CZ 板块名单机制一并移除。
+    v0.84：weights（scoring.weights，技术分/资金意图分值覆盖）自 registry 加载
+    并透传到 score_candidate；默认值 == 现值 ⇒ 缺省输出逐字节不变。
     """
     enriched, sector_states, amv_state = _resolve_score_all_inputs(
         date, enriched, sector_states, amv_state
     )
 
-    cap_rules, sector_score_max, effective_caps = _resolve_scoring_settings(
-        cap_rules, sector_score_max
+    cap_rules, sector_score_max, effective_caps, weights = _resolve_scoring_settings(
+        cap_rules, sector_score_max, weights
     )
 
     result = _score_all_shell(
@@ -1148,6 +1104,7 @@ def score_all(
         amv_state,
         cap_rules,
         sector_score_max,
+        weights,
     )
 
     # 板块分脏（NaN/inf）必须整池留痕：单票 risk_flags 只有细看明细才发现，
@@ -1194,16 +1151,20 @@ def _resolve_score_all_inputs(
 
 
 def _resolve_scoring_settings(
-    cap_rules: Optional[dict], sector_score_max: Optional[float]
+    cap_rules: Optional[dict],
+    sector_score_max: Optional[float],
+    weights: Optional[dict] = None,
 ) -> tuple:
-    """cap_rules / sector_score_max 的 registry 兜底 + 有效开关合并。"""
-    if cap_rules is None or sector_score_max is None:
+    """cap_rules / sector_score_max / weights 的 registry 兜底 + 有效开关合并。"""
+    if cap_rules is None or sector_score_max is None or weights is None:
         scoring_cfg = _load_scoring_config()
         if cap_rules is None:
             cap_rules = scoring_cfg.get("cap_rules")
         if sector_score_max is None:
             sector_score_max = scoring_cfg.get("sector_score_max", SECTOR_SCORE_MAX)
-    return cap_rules, sector_score_max, resolve_cap_rules(cap_rules)
+        if weights is None:
+            weights = scoring_cfg.get("weights")
+    return cap_rules, sector_score_max, resolve_cap_rules(cap_rules), weights
 
 
 def _score_all_shell(
@@ -1260,6 +1221,7 @@ def _score_pool(
     amv_state: str,
     cap_rules: Optional[dict],
     sector_score_max: float,
+    weights: Optional[dict] = None,
 ) -> None:
     """逐票打分并累计 bucket 计数（结果就地写进 result）。"""
     for cand in enriched.get("candidates", []):
@@ -1272,6 +1234,7 @@ def _score_pool(
             amv_state,
             cap_rules=cap_rules,
             sector_score_max=sector_score_max,
+            weights=weights,
         )
         result["candidates"].append(scored)
         result["bucket_counts"][scored["bucket"]] += 1

@@ -266,6 +266,15 @@ next_step：A→buy_review（v0.50：原 generate_buy_plan 是虚假承诺，Buy
   兜底），`score_detail` 同时落盘归一化值与 `sector_score_raw`。⚠️ v0.50 起板块分
   **只作展示**（总分=技术分），该配置暂不影响总分；若上游 generator 改量纲，
   只需改此值一处。
+- **`scoring.weights`（v0.84，权重外置）**：技术分八段分值与分层阈值
+  （`tech_strong_fallback`=60 / `tech_mid_fallback`=30）、资金意图证据分值与
+  档位阈值（`ci_*` 前缀 + `cap_strong`=5 / `cap_mid`=2）的覆盖层。
+  默认值 == 现值 ⇒ 缺省行为逐字节不变；未知键忽略、默认表兜底
+  （解析同 `cap_rules`，见 `score_candidates.resolve_tech_weights` 与
+  `core/factors/capital_intent.resolve_capital_weights`）。
+  ⚠️ 改分值 = 改分层结果，**必须先回测**（同 cap_rules 纪律）。
+- **维度缺口声明**：情绪维度**无数据源，未建因子**（v0.84 起显式标注，
+  见 `core/factors/__init__.py` 维度覆盖节）——不得以价格行为代理冒充。
 - **`theme_mapping.min_match`（默认 1）**：概念标签命中主题所需的最小语义标签数。
   提高到 2+ 要求更强证据、降低子串过度匹配；候选落盘 `match_count` 可复盘。
 
