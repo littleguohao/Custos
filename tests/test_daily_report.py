@@ -143,109 +143,13 @@ class TestTechnicalRelation:
 
 
 # ---------------------------------------------------------------------------
-# v0.52（#37 阶段 C）：日报候选展示口径——全量 A/B + 证据列 + 过期警示
-# ---------------------------------------------------------------------------
-
-
-def _pool(day, rows, amv="做多"):
-    return {
-        "date": day,
-        "status": "ok",
-        "amv_state": amv,
-        "bucket_counts": {"A": 1, "B": 1, "C": 1, "D": 1},
-        "candidates": rows,
-    }
-
-
-def _cand(code_, bucket, **kw):
-    base = {
-        "code": code_,
-        "name": f"股{code_}",
-        "bucket": bucket,
-        "sector": "半导体",
-        "resonance": {"resonance_level": "强共振"},
-        "score": 66,
-        "next_step": "buy_review" if bucket == "A" else "observe_price",
-        "adx25": False,
-        "s_star": None,
-        "capital_intent": {"level": "中"},
-    }
-    base.update(kw)
-    return base
-
-
-class TestStockPoolSection:
-    def _put_pool(self, tmp_path, monkeypatch, day, pool):
-        import json as _json
-
-        d = tmp_path / "data" / "stock_pool"
-        d.mkdir(parents=True, exist_ok=True)
-        (d / f"{day}_stock_pool.json").write_text(
-            _json.dumps(pool, ensure_ascii=False), encoding="utf-8"
-        )
-        monkeypatch.setattr(dr, "DATA", tmp_path / "data")
-
-    def test_all_ab_rows_no_top10_truncation(self, tmp_path, monkeypatch):
-        """全量 A/B：12 只 A/B 全展示（原 [:10] 任取已删）；C/D 不进日报（照旧）。"""
-        rows = [_cand(f"6000{i:02d}", "A" if i % 2 == 0 else "B") for i in range(12)]
-        rows.append(_cand("300099", "C"))
-        self._put_pool(tmp_path, monkeypatch, "2026-08-13", _pool("2026-08-13", rows))
-        out = "\n".join(dr.stock_pool_section("2026-08-13"))
-        for i in range(12):
-            assert f"6000{i:02d}" in out, f"第 {i} 只 A/B 被截掉"
-        assert "300099" not in out, "C 档不应进日报"
-
-    def test_evidence_columns_present(self, tmp_path, monkeypatch):
-        rows = [
-            _cand(
-                "600000",
-                "A",
-                adx25=True,
-                s_star=71.5,
-                capital_intent={"level": "强"},
-            )
-        ]
-        self._put_pool(tmp_path, monkeypatch, "2026-08-13", _pool("2026-08-13", rows))
-        out = "\n".join(dr.stock_pool_section("2026-08-13"))
-        assert "ADX25" in out and "S**" in out and "资金意图" in out
-        assert "✅" in out and "71.5" in out and "强" in out
-        assert "0AMV：做多" in out
-
-    def test_unsorted_semantics_disclaimed(self, tmp_path, monkeypatch):
-        """排序语义必须如实标注——读者不得把表内顺序当 alpha 排序。"""
-        self._put_pool(
-            tmp_path,
-            monkeypatch,
-            "2026-08-13",
-            _pool("2026-08-13", [_cand("600000", "A")]),
-        )
-        out = "\n".join(dr.stock_pool_section("2026-08-13"))
-        assert "形态分层" in out and "未校准启发式" in out and "不是 alpha 排序" in out
-        assert "优质" not in out and "推荐" not in out, "分层不得被描述成推荐语义"
-
-    def test_stale_pool_warns(self, tmp_path, monkeypatch):
-        """回退到旧一期时必须打出过期警示（盘点报告第 9 条）。"""
-        self._put_pool(
-            tmp_path,
-            monkeypatch,
-            "2026-08-11",
-            _pool("2026-08-11", [_cand("600000", "A")]),
-        )
-        out = "\n".join(dr.stock_pool_section("2026-08-13"))
-        assert "候选池为 2026-08-11 的旧数据" in out
-
-    def test_no_pool_says_so(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(dr, "DATA", tmp_path / "data")
-        assert dr.stock_pool_section("2026-08-13") == ["未找到任何选股链产出。"]
-
-
-# ---------------------------------------------------------------------------
 # v0.57：三份报告角色对齐（盘前=信息处理+预案确认，盘后=复盘纠错+预案主产地）
 # ---------------------------------------------------------------------------
 
 
-class TestPlanConfirmationSection:
-    """盘前 §6 预案确认：读前一交易日盘后复盘的 next_day_plan，逐条确认/标变化。"""
+class TestHoldingsPlanSection:
+    """v0.100（owner）：盘前 §4 合并节「持仓与预案确认」——原 §4 持仓状态与
+    §6 预案确认本是同一份「盘后计划 vs 盘前动作」对照，拆开必重复。"""
 
     _PRIOR = {
         "date": "2026-08-12",
@@ -275,28 +179,40 @@ class TestPlanConfirmationSection:
         "holding_actions": [{"code": "600000.SH", "priority": "P1", "action": "减仓"}],
     }
 
+    def _render(self, chief=None, prior=None):
+        return "\n".join(
+            dr.holdings_plan_section(
+                chief if chief is not None else self._CHIEF,
+                {},
+                {},
+                {},
+                prior if prior is not None else self._PRIOR,
+                "2026-08-12",
+            )
+        )
+
     def test_reads_prior_plan_and_confirms(self):
-        lines = dr.plan_confirmation_section("2026-08-13", self._CHIEF, self._PRIOR)
-        text = "\n".join(lines)
+        text = self._render()
+        assert "持仓与预案确认" in text
         assert "预案来源：**2026-08-12** 盘后复盘" in text
         assert "✅ 确认（一致）" in text  # 总仓位/新开仓与盘前值一致
         assert "600000 浦发银行" in text and "跌破BBI" in text
-        assert "✅ 确认（盘前动作：P1 减仓）" in text
+        assert "✅ 确认（盘前动作在列）" in text
 
     def test_divergence_marked(self):
         chief = {**self._CHIEF, "new_position_permission": "禁止"}
-        text = "\n".join(dr.plan_confirmation_section("2026-08-13", chief, self._PRIOR))
+        text = self._render(chief=chief)
         assert "⚠️ 变化：盘前为 禁止" in text, "盘后计划与盘前刷新值不一致必须标出来"
 
     def test_missing_plan_says_so_not_fabricated(self):
         """盘后预案缺失 ⇒ 如实报「无预案可确认」（fail-closed：不编一份）。"""
-        text = "\n".join(dr.plan_confirmation_section("2026-08-13", self._CHIEF, {}))
+        text = self._render(prior={})
         assert "预案**缺失**" in text and "无预案可确认" in text
         assert "盘前信息刷新" in text, "缺失时仍给刷新值"
 
     def test_holding_plan_without_today_action_flagged(self):
         chief = {**self._CHIEF, "holding_actions": []}
-        text = "\n".join(dr.plan_confirmation_section("2026-08-13", chief, self._PRIOR))
+        text = self._render(chief=chief)
         assert "盘前无该票动作条目" in text
 
     def test_role_line_distinguishes_three_reports(self):
@@ -312,9 +228,11 @@ class TestPlanConfirmationSection:
 
         assert "盘中14:45=按规则的交易提醒" in inspect.getsource(rc)
 
-    def test_theme_section_marks_redesign_pending(self):
-        """§5 主线题材必须标注「判定口径待重设计（#26）」（owner：目前不准）。"""
+    def test_mainline_section_removed(self):
+        """v0.100：§5「主线、机会与风险」整节下线（口径 TODO #26 待重设计，
+        挂着「仅观察参考」不下决策的节是噪声）——main 里不得再渲染。"""
         import inspect
 
         src = inspect.getsource(dr.main)
-        assert "待重设计" in src and "#26" in src
+        assert "主线、机会与风险" not in src
+        assert "stock_pool_section" not in src, "公式选股备选池随 §5 一并下线"
