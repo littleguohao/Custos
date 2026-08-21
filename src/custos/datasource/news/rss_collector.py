@@ -514,7 +514,15 @@ def main():
                 },
             )
             with retry_call(
-                lambda: urllib.request.urlopen(req, timeout=a.timeout, context=ctx)
+                lambda: urllib.request.urlopen(req, timeout=a.timeout, context=ctx),
+                # 2026-08-21（v0.99）：gov_cn/统计局源的 SSL CERTIFICATE_VERIFY_FAILED
+                # 实测是 CDN 边缘节点间歇返回坏证书链（同一 URL 直连 200，隔几分钟
+                # 恢复）——默认 tries=3/backoff=2s/jitter=0 的三连重试在几秒内打满，
+                # 全撞同一坏节点 ⇒ 加长退避 + jitter 拉开重试时点，给路由换节点的
+                # 机会。代价仅是失败源多等 ~15s（best-effort stage，可接受）。
+                tries=4,
+                backoff=2.0,
+                jitter=0.5,
             ) as r:
                 raw = _read_limited(r)
                 row.update(

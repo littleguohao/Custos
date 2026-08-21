@@ -250,3 +250,83 @@ class TestHelpers:
         """
         out = rc._redact("https://user:pw@example.com/feed")
         assert "pw@example.com" in out, "当前实现不脱敏 userinfo（已知边界）"
+
+
+class TestTransientSslRetry:
+    """v0.99：gov_cn/统计局源的 SSL CERTIFICATE_VERIFY_FAILED 实测是 CDN 边缘节点
+    间歇返回坏证书链（直连 200、隔几分钟恢复）——RSS GET 改加长退避重试
+    （tries=4 + jitter），瞬时失败不应把源判 failed。"""
+
+    def _fake_resp(self):
+        feed = (
+            b'<?xml version="1.0"?><rss version="2.0"><channel>'
+            b"<title>t</title><item><title>x</title>"
+            b"<pubDate>Fri, 21 Aug 2026 08:00:00 +0800</pubDate></item>"
+            b"</channel></rss>"
+        )
+
+        class R:
+            status = 200
+            headers = {"content-type": "application/rss+xml"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self, n=-1):
+                return feed
+
+            def geturl(self):
+                return "https://x.com/feed"
+
+        return R()
+
+    def test_transient_ssl_failure_retried_to_ok(self, monkeypatch, tmp_path):
+        import json
+        import urllib.error
+        import ssl
+
+        reg = tmp_path / "reg.json"
+        reg.write_text(
+            json.dumps({"sources": [dict(SRC, enabled=True)]}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(rc, "REG", reg)
+        monkeypatch.setattr(rc, "DATA", tmp_path / "d")
+        monkeypatch.setattr(rc, "LOG", tmp_path / "l")
+        monkeypatch.setattr("custos.core.net_retry.time.sleep", lambda s: None)
+
+        calls = {"n": 0}
+        real_urlopen = rc.urllib.request.urlopen
+
+        def flaky(req, timeout=None, context=None):
+            calls["n"] += 1
+            if calls["n"] <= 2:
+                raise urllib.error.URLError(
+                    ssl.SSLCertVerificationError("certificate verify failed")
+                )
+            return self._fake_resp()
+
+        monkeypatch.setattr(rc.urllib.request, "urlopen", flaky)
+        seen_kwargs = {}
+        real_retry = rc.retry_call
+
+        def spy(func, **kw):
+            seen_kwargs.update(kw)
+            return real_retry(func, **kw)
+
+        monkeypatch.setattr(rc, "retry_call", spy)
+        monkeypatch.setattr(
+            "sys.argv", ["rss_collector", "--date", "2026-08-21", "--timeout", "1"]
+        )
+        rc.main()
+        log = json.loads(
+            (tmp_path / "l" / "2026-08-21_collection_log.json").read_text("utf-8")
+        )
+        row = log["sources"][0]
+        assert row["status"] == "ok" and row["items"] == 1
+        assert calls["n"] == 3, "两次瞬时 SSL 失败后第三次成功"
+        # 加长退避参数钉住：退化成默认 3 连快重试会重新撞坏节点
+        assert seen_kwargs.get("tries") == 4 and seen_kwargs.get("jitter") == 0.5
