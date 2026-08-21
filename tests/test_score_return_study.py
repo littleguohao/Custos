@@ -121,6 +121,59 @@ class TestCorrelations:
         assert srs.correlations([{"tech_score": 1, "ret": 0.1}])["spearman"] is None
 
 
+class TestRetStats:
+    def test_basic(self):
+        trades = [{"ret": 0.10}, {"ret": -0.05}, {"ret": 0.20}, {"ret": -0.10}]
+        st = srs.ret_stats(trades)
+        assert st["n"] == 4
+        assert st["avg_ret"] == pytest.approx(0.0375)
+        assert st["win_rate"] == pytest.approx(0.5)
+        # 均盈 0.15 / 均亏 0.075 = 2.0
+        assert st["payoff_ratio"] == pytest.approx(2.0)
+
+    def test_all_wins_payoff_none(self):
+        assert srs.ret_stats([{"ret": 0.1}, {"ret": 0.2}])["payoff_ratio"] is None
+
+    def test_empty(self):
+        assert srs.ret_stats([]) == {"n": 0}
+
+
+class TestExitReasonDist:
+    def test_counts_frac_avg(self):
+        trades = [
+            {"reason": "bbi_exit", "ret": 0.10},
+            {"reason": "bbi_exit", "ret": 0.20},
+            {"reason": "stop", "ret": -0.05},
+            {"reason": "cost_zone_stop", "ret": -0.01},
+        ]
+        d = srs.exit_reason_dist(trades)
+        assert d["bbi_exit"]["n"] == 2
+        assert d["bbi_exit"]["frac"] == pytest.approx(0.5)
+        assert d["bbi_exit"]["avg_ret"] == pytest.approx(0.15)
+        assert d["stop"]["n"] == 1
+        assert d["stop"]["frac"] == pytest.approx(0.25)
+        assert d["cost_zone_stop"]["avg_ret"] == pytest.approx(-0.01)
+        # 排序输出（bbi < cost_zone < stop），对照表可读性依赖稳定顺序
+        assert list(d) == ["bbi_exit", "cost_zone_stop", "stop"]
+
+
+class TestCliStopParams:
+    """止损/成本区参数进 CLI：默认 5%（R10 下沿最优档），cost_zone 默认关。"""
+
+    def test_defaults(self):
+        args = srs._build_parser().parse_args([])
+        assert args.stop_pct == pytest.approx(5.0)
+        assert args.cost_zone_bars == 0
+        assert args.cost_zone_pct == pytest.approx(3.0)
+
+    def test_explicit(self):
+        args = srs._build_parser().parse_args(
+            ["--stop-pct", "50", "--cost-zone-bars", "3"]
+        )
+        assert args.stop_pct == pytest.approx(50.0)
+        assert args.cost_zone_bars == 3
+
+
 class TestAsofNoLookahead:
     """as-of 截断：compute_metrics 收到的 df 必须只含 ≤ 信号日的数据。"""
 

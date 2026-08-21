@@ -17,10 +17,10 @@
 - **区间过滤**：只在 0AMV「做多」regime 进场 —— `backtest_factors.load_amv_regime`
   （指南针 compass_amv 日线 + 人工台账 → 状态机 >4% 做多 / <-2.3% 空头 / 之间粘滞）。
 - **出场**：`backtest_factors.simulate_b1_trade`，bbi_exit_consec=2（站上 BBI 后
-  连续 2 日收盘跌破清仓）；**关掉**其他出场（scale_out=0 / cost_zone=0 /
-  time_stop=0 / breakeven=0 / trail=0）。初始止损**无法完全关闭**（simulate_b1_trade
-  必经 _initial_stop），按任务约定设 ``--stop-mode pct --stop-pct 50``
-  （entry×50%，近似「不触发」；仍被 50% 止损出场的笔会如实留在样本里，报告注明）。
+  连续 2 日收盘跌破清仓）；scale_out=0 / time_stop=0 / breakeven=0 / trail=0 全关。
+  初始止损 ``--stop-pct``（pct 固定空间）：**默认 5%**（R10「5% 是崖」下沿；
+  昨晚基线臂用 50 宽设 ≈ 无止损，``STOP_PCT_WIDE`` 保留以复现该口径）。
+  ``--cost-zone-bars 3`` 可叠加「不涨就拍」（R10 冠军组合 pct_05_amv_cz3 的出场侧）。
 - **技术分**：信号日的 **live technical_score**——截断到信号日的 df（tail 260，
   同 live ``OHLCV_LOAD_BARS``）+ df_long（tail 1200，周/月 MACD 红柱腿用，
   同 live ``OHLCV_LOAD_BARS_LONG``）喂 `enrich_candidates.compute_metrics`，
@@ -63,9 +63,14 @@ from custos.pipeline.screening import enrich_candidates as ec  # noqa: E402
 from custos.pipeline.screening import score_candidates as sc  # noqa: E402
 from custos.research import backtest_factors as bf  # noqa: E402
 
-# 纯 BBI 跌破 2 根出场的固定口径（见模块 docstring；初始止损无法关闭 ⇒ 50% 宽止损）
+# 出场固定口径：BBI 止盈（连破 2 根）+ pct 初始止损。
+# 昨晚基线（score_return_study_s0_n400.json）用 STOP_PCT_WIDE=50 宽设占位（≈无止损，
+# 实测 stop 系仅 21/14469 笔）；owner 2026-08-21 要求带真止损重跑 ⇒ 默认改为
+# STOP_PCT_DEFAULT=5（R10 验证过的止损下界最优档「5% 是崖」的下沿），
+# 并可叠加 cost_zone_bars=3（R10 冠军组合 pct_05_amv_cz3 的出场侧）。
 STOP_MODE = "pct"
-STOP_PCT_WIDE = 50.0
+STOP_PCT_DEFAULT = 5.0
+STOP_PCT_WIDE = 50.0  # 仅用于复现「≈无止损」基线口径
 COST_BPS = 25.0
 INDEX_CODE = "999999"  # 上证指数（compute_metrics 的 20 日相对强度用，同 enrich）
 
@@ -174,6 +179,40 @@ def band_stats(trades: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return out
 
 
+def ret_stats(trades: list[dict[str, Any]]) -> dict[str, Any]:
+    """整体收益指标：n / 均收 / 中位收 / 胜率 / 盈亏比（band_stats 的全样本版）。"""
+    if not trades:
+        return {"n": 0}
+    rets = [t["ret"] for t in trades]
+    wins = [r for r in rets if r > 0]
+    losses = [-r for r in rets if r < 0]
+    avg_win = statistics.mean(wins) if wins else 0.0
+    avg_loss = statistics.mean(losses) if losses else 0.0
+    return {
+        "n": len(rets),
+        "avg_ret": round(statistics.mean(rets), 4),
+        "median_ret": round(statistics.median(rets), 4),
+        "win_rate": round(len(wins) / len(rets), 4),
+        "payoff_ratio": round(avg_win / avg_loss, 3) if avg_loss > 0 else None,
+    }
+
+
+def exit_reason_dist(trades: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """出场原因分布：笔数 / 占比 / 该原因均收（对照止损臂与无止损基线的结构变化）。"""
+    import collections
+
+    out: dict[str, dict[str, Any]] = {}
+    n = len(trades)
+    for reason in sorted(collections.Counter(str(t["reason"]) for t in trades)):
+        rr = [t["ret"] for t in trades if str(t["reason"]) == reason]
+        out[reason] = {
+            "n": len(rr),
+            "frac": round(len(rr) / n, 4) if n else None,
+            "avg_ret": round(statistics.mean(rr), 4),
+        }
+    return out
+
+
 def correlations(trades: list[dict[str, Any]]) -> dict[str, Any]:
     """技术分 vs 净收益的 Spearman（主）+ Pearson（辅）。n<3 返回 None。
 
@@ -271,10 +310,12 @@ def run_study(
     index_df: pd.DataFrame,
     *,
     cost_bps: float = COST_BPS,
-    stop_pct: float = STOP_PCT_WIDE,
+    stop_pct: float = STOP_PCT_DEFAULT,
+    cost_zone_bars: int = 0,
+    cost_zone_pct: float = 3.0,
 ) -> list[dict[str, Any]]:
     """逐股流式：加载全历史 → evaluate_trades（j_low gate + baseline scorer +
-    仅做多区间 + 纯 BBI 跌破2根出场）→ 每笔信号日 as-of 技术分。"""
+    仅做多区间 + BBI 跌破2根止盈 + pct 初始止损 [+ cost_zone]）→ 信号日 as-of 技术分。"""
     from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
 
     trades: list[dict[str, Any]] = []
@@ -297,14 +338,15 @@ def run_study(
             entry_gate=bf.j_low_gate,  # 信号 = 日 KDJ 的 J<13
             amv_regime=regime,  # 只在 0AMV 做多区间进场
             bbi_exit_consec=2,  # BBI 止盈：站上后连破 2 根收盘清仓
-            stop_mode=STOP_MODE,  # 初始止损无法关 ⇒ 50% 宽止损（报告注明）
+            stop_mode=STOP_MODE,  # pct 固定空间止损（昨晚基线=50 宽设≈无止损）
             stop_pct=stop_pct,
             cost_bps=cost_bps,
             time_stop_bars=0,
             scale_out_frac=0.0,
             breakeven_trigger=0.0,
             trail_pct=0.0,
-            cost_zone_bars=0,
+            cost_zone_bars=cost_zone_bars,  # 「不涨就拍」（R10 冠军组合 pct_05_amv_cz3 的出场侧）
+            cost_zone_pct=cost_zone_pct,
         )
         if not code_trades:
             continue
@@ -389,6 +431,9 @@ def build_report(
         "n_open_end": len(trades) - len(realized),
         "intervals": [[s, e] for s, e in intervals],
         "per_interval": per_interval,
+        "overall_stats": ret_stats(trades),
+        "realized_stats": ret_stats(realized),
+        "exit_reasons": exit_reason_dist(trades),
         "overall_corr": correlations(trades),
         "realized_corr": correlations(realized),
         "half_window": half_window_check(trades),
@@ -400,6 +445,14 @@ def build_report(
         },
         "band_stats_all": band_stats(trades),
         "band_stats_realized": band_stats(realized),
+        "top_bottom_overall": {
+            "top50_score_dist": dist_stats(
+                [t["tech_score"] for t in split_top_half(trades)[0]]
+            ),
+            "bottom50_score_dist": dist_stats(
+                [t["tech_score"] for t in split_top_half(trades)[1]]
+            ),
+        },
         "score_dist_all": dist_stats([t["tech_score"] for t in trades]),
     }
 
@@ -413,6 +466,19 @@ def print_report(rep: dict[str, Any]) -> None:
     print(
         f"\n样本：{rep['n_trades']} 笔（已实现 {rep['n_realized']} / "
         f"open_end {rep['n_open_end']}），覆盖 {len(rep['intervals'])} 个做多区间"
+    )
+    os_, rs_ = rep["overall_stats"], rep["realized_stats"]
+    print(
+        f"整体收益：均收 {os_['avg_ret'] * 100:.2f}% / 胜率 {os_['win_rate'] * 100:.1f}% / "
+        f"盈亏比 {os_['payoff_ratio']}（已实现：均收 {rs_['avg_ret'] * 100:.2f}% / "
+        f"胜率 {rs_['win_rate'] * 100:.1f}% / 盈亏比 {rs_['payoff_ratio']}）"
+    )
+    print(
+        "出场原因分布："
+        + "，".join(
+            f"{k} {v['n']}笔({v['frac'] * 100:.1f}%,均收{v['avg_ret'] * 100:.2f}%)"
+            for k, v in rep["exit_reasons"].items()
+        )
     )
     oc, rc = rep["overall_corr"], rep["realized_corr"]
     print(
@@ -444,6 +510,11 @@ def print_report(rep: dict[str, Any]) -> None:
                 f"{st['win_rate'] * 100:>5.1f}% | {st['payoff_ratio']} | {st['avg_score']}"
             )
     print("\n── 分区间 top-50%（收益最好一半）vs bottom-50% 的技术分分布")
+    tb = rep["top_bottom_overall"]
+    print(
+        f"  全体切半：top50 均分 {tb['top50_score_dist'].get('mean')} / "
+        f"bottom50 均分 {tb['bottom50_score_dist'].get('mean')}"
+    )
     print("区间 | n | Spearman | top50 均分/中位 | bottom50 均分/中位")
     for iv in rep["per_interval"]:
         s, e = iv["interval"]
@@ -526,8 +597,22 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--stop-pct",
         type=float,
-        default=STOP_PCT_WIDE,
-        help="初始止损 %%（simulate_b1_trade 无法完全关闭初始止损 ⇒ 宽设 50 近似不触发）",
+        default=STOP_PCT_DEFAULT,
+        help="初始止损 %%（pct 固定空间；默认 5 = R10「5%%是崖」下沿最优档；"
+        "50 ≈ 无止损，仅用于复现昨晚基线口径）",
+    )
+    ap.add_argument(
+        "--cost-zone-bars",
+        type=int,
+        default=0,
+        help="「不涨就拍」：进场 N+1 根仍三维度平淡则平仓（默认 0=关；"
+        "3 = R10 冠军组合 pct_05_amv_cz3 的出场侧）",
+    )
+    ap.add_argument(
+        "--cost-zone-pct",
+        type=float,
+        default=3.0,
+        help="脱离成本区的涨幅阈值 %%（默认 3，同引擎默认）",
     )
     ap.add_argument(
         "--out",
@@ -570,7 +655,13 @@ def main(argv: Optional[list] = None) -> int:
     )
 
     trades = run_study(
-        codes, regime, index_df, cost_bps=args.cost_bps, stop_pct=args.stop_pct
+        codes,
+        regime,
+        index_df,
+        cost_bps=args.cost_bps,
+        stop_pct=args.stop_pct,
+        cost_zone_bars=args.cost_zone_bars,
+        cost_zone_pct=args.cost_zone_pct,
     )
     if not trades:
         print("⛔ 0 笔交易——检查 regime 数据与宇宙", file=sys.stderr)
@@ -580,8 +671,10 @@ def main(argv: Optional[list] = None) -> int:
     rep["config"] = {
         "signal": "日KDJ J<13（j_low_gate，J_LOW_THRESHOLD=13.0）",
         "regime": "仅 0AMV 做多区间（compass_amv 状态机 >4%/-2.3% 粘滞）",
-        "exit": "BBI 止盈：站上后连破 2 根收盘清仓；scale_out/cost_zone/time_stop/breakeven/trail 全关",
-        "initial_stop": f"pct {args.stop_pct}%（simulate_b1_trade 无法关闭初始止损，宽设近似不触发）",
+        "exit": "BBI 止盈：站上后连破 2 根收盘清仓；scale_out/time_stop/breakeven/trail 全关",
+        "initial_stop": f"pct {args.stop_pct}%（50 ≈ 无止损基线口径）",
+        "cost_zone_bars": args.cost_zone_bars,
+        "cost_zone_pct": args.cost_zone_pct,
         "cost_bps": args.cost_bps,
         "scorer": "baseline（恒可买；进场只由 j_low gate 决定）",
         "tech_score": "live technical_score（DEFAULT_TECH_WEIGHTS，as-of 截断，已与 enrich 落盘对拍）",
@@ -592,12 +685,15 @@ def main(argv: Optional[list] = None) -> int:
     }
     rep["trades"] = trades
 
+    # 文件名带止损/成本区参数标签，与昨晚无止损基线（..._s0_n400.json）区分
+    stop_tag = f"_stop{args.stop_pct:g}"
+    cz_tag = f"_cz{args.cost_zone_bars}" if args.cost_zone_bars else ""
     out = (
         Path(args.out)
         if args.out
         else (
             Path("artifacts/logs/score_return_study")
-            / f"score_return_study_s{args.seed}_n{len(codes)}.json"
+            / f"score_return_study_s{args.seed}_n{len(codes)}{stop_tag}{cz_tag}.json"
         )
     )
     out.parent.mkdir(parents=True, exist_ok=True)
