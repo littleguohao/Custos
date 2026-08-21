@@ -86,9 +86,9 @@ tests/        pytest
 复盘链（同为 cron 触发；手动执行同名脚本即可）：
 
 - 周六 10:07：`weekly_review.py` 周度复盘
-- 每月 1 日上午：`monthly_review.py` 月度复盘（`--month YYYY-MM`，默认上个月）——需 owner 在 cron 里加一条
-- 每交易日盘后（建议 18:30）：`run_log_check.py` 核对当天五份 run log
-  （缺日志/意外失败 exit 非零，预期内失败不告警）——需 owner 在 cron 里加一条
+- 每月 1 日 09:00：`monthly_review.py` 月度复盘（`--month YYYY-MM`，默认上个月）——cron 已加（`df1edd2d`，2026-08-21）
+- 每交易日 18:30：`run_log_check.py` 核对当天五份 run log
+  （缺日志/意外失败 exit 非零，预期内失败不告警）——cron 已加（`9410947f`，2026-08-21）
 
 ```bash
 uv run python src/custos/pipeline/run_1445.py
