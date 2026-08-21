@@ -15,7 +15,7 @@
 |---|---|---|---|---|
 | [CN_TRADING_CALENDAR.json](CN_TRADING_CALENDAR.json) | 38 | **11** | `CALENDAR_FILE` | `trading_calendar.py` 及五个 runner 的交易日判定 |
 | [SCREEN_FORMULA_REGISTRY.json](SCREEN_FORMULA_REGISTRY.json) | 103 | 6 | ✅ | `screening/formula_screen.py` 公式初筛 |
-| [RSS_SOURCE_REGISTRY.json](RSS_SOURCE_REGISTRY.json) | 91 | 1 | ✅ | `news/rss_collector.py` |
+| [RSS_SOURCE_REGISTRY.json](RSS_SOURCE_REGISTRY.json) | 102 | 1 | ✅ | `news/rss_collector.py` |
 | [RSS_FILTER_CONFIG.json](RSS_FILTER_CONFIG.json) | 84 | 1 | ✅ | `news/rss_filter.py` |
 | [RSSHUB_PRIVATE_ROUTE_CANDIDATES.json](RSSHUB_PRIVATE_ROUTE_CANDIDATES.json) | 23 | 1 | ✅ | `news/` 私有路由候选 |
 | [EXIT_RULES.json](EXIT_RULES.json) | 57 | 1 | ✅ | `core/exit_rules.py`（止盈/止损规则目录的参数覆盖层，v0.81；默认值==代码默认表） |

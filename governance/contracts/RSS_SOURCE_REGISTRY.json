@@ -1,6 +1,6 @@
 {
-  "version": "2.1",
-  "updated_at": "2026-07-19T10:30:00+08:00",
+  "version": "2.2",
+  "updated_at": "2026-08-21T17:30:00+08:00",
   "policy": {
     "purpose": "RSS用于事件发现；官方原文/独立来源用于确认；不得直接扩大交易权限。",
     "tiers": {
@@ -85,6 +85,18 @@
       "audit": "200_json",
       "policy_stage": "confirmed_2",
       "note": "华尔街见闻7x24快讯A股频道,免key公开JSON API;B级专业财经媒体,需2个独立来源确认"
+    },
+    {
+      "id": "jin10_flash",
+      "name": "金十数据-快讯",
+      "category": "cn_financial_media",
+      "url": "https://mcp.jin10.com/mcp",
+      "tier": "B",
+      "enabled": true,
+      "type": "jin10_mcp",
+      "audit": "200_json",
+      "policy_stage": "confirmed_2",
+      "note": "金十数据7x24快讯,MCP(JSON-RPC over SSE)接口,tools/call list_flash;Bearer token 走环境变量 JIN10_MCP_TOKEN、不入库;B级专业财经媒体,需2个独立来源确认"
     }
   ]
 }

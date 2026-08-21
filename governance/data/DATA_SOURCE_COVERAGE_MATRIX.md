@@ -87,6 +87,7 @@
 | 持仓公告 | ⚠️ | `wenda_notice_query` | **cron LLM 调用**（不在 py 里） | 08:50 job 的 toolsAllow 含它；脚本链无此能力 |
 | 宏观 / 财经要闻 | ✅ | RSS | `rss_collector.py` + `rss_filter.py` | 源与过滤规则在 `contracts/RSS_*.json` |
 | 华尔街见闻快讯 | ✅ | wscn 直连 | `rss_collector.py`（wscn_lives 适配器） | 3f01e3a |
+| 金十数据快讯 | ✅ | jin10 MCP 直连 | `rss_collector.py`（jin10_mcp 适配器） | v0.95；token 走 env `JIN10_MCP_TOKEN`，缺席该源标 failed 不炸链路 |
 | 研报评级 | ❌ | ~~wenda_report_query~~ | — | **0 处代码** |
 
 ## 七、财务数据

@@ -2,7 +2,7 @@
 """Deterministic RSS/Atom collector with strict JSON and source-quality metadata."""
 
 from __future__ import annotations
-import argparse, hashlib, html, json, re, ssl, urllib.request
+import argparse, hashlib, html, json, os, re, ssl, urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -201,6 +201,199 @@ def parse_feed(raw, src, fetched, transport_verified=True):
     return items
 
 
+# ---------------------------------------------------------------------------
+# 金十数据快讯（jin10_mcp）：MCP = JSON-RPC 2.0 over HTTP POST，响应是 SSE
+# （data: 行包 JSON-RPC 消息）。握手 initialize（响应头给 mcp-session-id，
+# 后续请求必须带）→ notifications/initialized → tools/call list_flash，
+# 分页 data.next_cursor / has_more（2026-08-21 冒烟实测；样例文档里分页键
+# 写作 next_offset，两个键都认）。Bearer token 走环境变量 JIN10_MCP_TOKEN，
+# 不写进 registry（那是入库的治理文件）。
+# ---------------------------------------------------------------------------
+JIN10_TOKEN_ENV = "JIN10_MCP_TOKEN"
+JIN10_PROTOCOL_VERSION = "2025-11-25"
+# 每页 20 条，5 页 ≈ 100 条 —— 对齐 wscn limit=100 的盘前覆盖量级；
+# 限流 1500 次/工具/天，08:50 每天一轮（1 握手 + ≤5 页）可忽略。
+JIN10_MAX_PAGES = 5
+
+
+def _sse_data_messages(raw: bytes) -> list[dict]:
+    """拆 SSE 响应里的 JSON-RPC 消息（data: 行）；非 SSE 则按整体 JSON 兜底。"""
+    msgs = []
+    for line in raw.decode("utf-8", errors="replace").splitlines():
+        if line.startswith("data:"):
+            payload = line[5:].strip()
+            if payload:
+                msgs.append(json.loads(payload))
+    if not msgs:
+        msgs.append(json.loads(raw.decode("utf-8", errors="replace")))
+    return msgs
+
+
+def _jin10_rpc(url, token, ctx, timeout, payload, session_id=None):
+    """单次 JSON-RPC POST → (最后一条消息 dict 或 None, mcp-session-id 或 None)。
+
+    token 只进 Authorization 头，不进 URL ⇒ 异常信息（_redact 处理 query string）
+    不含凭据。通知（notifications/*）响应 202 无 body，返回消息为 None。
+    """
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "Authorization": f"Bearer {token}",
+        "User-Agent": "Mozilla/5.0 TdxClawRSS/1.0",
+    }
+    if session_id:
+        headers["Mcp-Session-Id"] = session_id
+    req = urllib.request.Request(
+        url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
+    )
+    with retry_call(
+        lambda: urllib.request.urlopen(req, timeout=timeout, context=ctx)
+    ) as r:
+        raw = _read_limited(r)
+        sid = r.headers.get("mcp-session-id")
+    msgs = _sse_data_messages(raw) if raw.strip() else []
+    return (msgs[-1] if msgs else None), sid
+
+
+def _jin10_extract_data(msg) -> dict:
+    """tools/call 消息 → data 块。优先 result.structuredContent.data（机器解析
+    主来源），result.content[0].text（内嵌 JSON 字符串）只做兜底；JSON-RPC
+    error 与 isError=true 都按失败抛出。"""
+    if not isinstance(msg, dict):
+        raise ValueError("jin10 空响应（tools/call 无消息）")
+    if msg.get("error"):
+        raise ValueError(f"jin10 JSON-RPC error: {msg['error']!r}")
+    result = msg.get("result") or {}
+    if result.get("isError"):
+        texts = [
+            c.get("text", "")
+            for c in result.get("content") or []
+            if isinstance(c, dict)
+        ]
+        raise ValueError(f"jin10 工具业务错误(isError): {';'.join(texts)[:200]}")
+    sc = result.get("structuredContent")
+    if isinstance(sc, dict) and isinstance(sc.get("data"), dict):
+        return sc["data"]
+    for c in result.get("content") or []:
+        if isinstance(c, dict) and c.get("type") == "text" and c.get("text"):
+            data = json.loads(c["text"]).get("data")
+            if isinstance(data, dict):
+                return data
+    raise ValueError("jin10 响应缺 structuredContent.data 且 content 兜底失败")
+
+
+def fetch_jin10_flash(url, token, ctx, timeout, max_pages=JIN10_MAX_PAGES):
+    """握手 + 翻页抓 list_flash，返回原始条目 list（content/time/url[/id/title]）。"""
+    init, sid = _jin10_rpc(
+        url,
+        token,
+        ctx,
+        timeout,
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": JIN10_PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "custos-rss", "version": "1.0"},
+            },
+        },
+    )
+    if not isinstance(init, dict) or "result" not in init:
+        raise ValueError("jin10 initialize 握手失败")
+    _jin10_rpc(
+        url,
+        token,
+        ctx,
+        timeout,
+        {"jsonrpc": "2.0", "method": "notifications/initialized"},
+        session_id=sid,
+    )
+    entries: list[dict] = []
+    cursor = None
+    for page in range(max_pages):
+        args = {"cursor": cursor} if cursor else {}
+        msg, _ = _jin10_rpc(
+            url,
+            token,
+            ctx,
+            timeout,
+            {
+                "jsonrpc": "2.0",
+                "id": 100 + page,
+                "method": "tools/call",
+                "params": {"name": "list_flash", "arguments": args},
+            },
+            session_id=sid,
+        )
+        data = _jin10_extract_data(msg)
+        entries.extend(e for e in data.get("items") or [] if isinstance(e, dict))
+        cursor = data.get("next_cursor") or data.get("next_offset")
+        if not data.get("has_more") or not cursor:
+            break
+    return entries
+
+
+def parse_jin10_flash(entries, src, fetched, transport_verified=True):
+    """金十快讯条目 → rss_evidence 归一化（字段映射对齐 parse_wscn_lives）。
+
+    实测（2026-08-21 冒烟）：content/time/url 必有；id/title 可能缺省——
+    id 缺时从 url 末段推导（flash.jin10.com/detail/{id}），title 空取
+    content 前 50 字（与 wscn 一致）。
+    """
+    items = []
+    for e in entries:
+        content = clean(e.get("content"))
+        if not content:
+            continue
+        url = str(e.get("url") or "")
+        eid = str(e.get("id") or "") or url.rstrip("/").rsplit("/", 1)[-1]
+        try:
+            published = (
+                datetime.fromisoformat(str(e.get("time")).replace("Z", "+00:00"))
+                .astimezone(timezone.utc)
+                .isoformat()
+            )
+        except (TypeError, ValueError):
+            published = None
+        norm = re.sub(r"\W+", "", content.lower())[:300]
+        item_id = hashlib.sha256(
+            (src["id"] + "|" + (eid or norm)).encode()
+        ).hexdigest()[:24]
+        dup = hashlib.sha256(norm.encode()).hexdigest()[:20] if norm else item_id
+        corrected_name = fix_source_name(src["id"], src["name"])
+        title = clean(e.get("title")) or content[:50]
+        items.append(
+            {
+                "item_id": item_id,
+                "published_at": published,
+                "fetched_at": fetched,
+                "source_id": src["id"],
+                "source_name": corrected_name,
+                "source_tier": src["tier"],
+                "category": src["category"],
+                "title": title,
+                "summary": content[:2000],
+                "source_url": url
+                or (f"https://flash.jin10.com/detail/{eid}" if eid else ""),
+                "feed_url": src["url"],
+                "affected_entities": [],
+                "affected_sectors": [],
+                "direction": "uncertain",
+                "impact_horizon": "unknown",
+                "fact": title,
+                "inference": "",
+                "validation_condition": [],
+                "quality": _tier_quality(src["tier"], transport_verified),
+                "confirmed": src["tier"] in {"S", "A"} and transport_verified,
+                "transport_verified": transport_verified,
+                "duplicate_group_id": dup,
+            }
+        )
+    return items
+
+
 def parse_wscn_lives(raw, src, fetched, transport_verified=True):
     # WallstreetCN lives JSON API: {"code":20000,"data":{"items":[{id,content,display_time,uri,...}]}}
     data = json.loads(raw.decode("utf-8", errors="replace"))
@@ -287,6 +480,32 @@ def main():
                 raise ValueError(
                     f"unsafe source id {src.get('id')!r}: 会拼进落盘文件名"
                 )
+            ctx, verified = build_ssl_context(src)
+            row["transport_verified"] = verified
+            if src.get("type") == "jin10_mcp":
+                # 金十 MCP（JSON-RPC POST + SSE），与上方 RSS/JSON GET 不同路；
+                # token 走环境变量，缺席时该源标 failed 留痕、不炸链路（与其他源一致）。
+                token = os.environ.get(JIN10_TOKEN_ENV, "").strip()
+                if not token:
+                    raise ValueError(
+                        f"{JIN10_TOKEN_ENV} 未设置（Bearer token 不入库，走环境变量）"
+                    )
+                entries = fetch_jin10_flash(src["url"], token, ctx, a.timeout)
+                raw = json.dumps(entries, ensure_ascii=False).encode("utf-8")
+                row.update(
+                    http_status=200,
+                    final_url=src["url"],
+                    content_type="application/json",
+                    bytes=len(raw),
+                )
+                (day / f"{src['id']}.json").write_bytes(raw)
+                items = parse_jin10_flash(entries, src, fetched, verified)[
+                    : a.limit_per_feed
+                ]
+                normalized.extend(items)
+                row.update(status="ok", items=len(items))
+                log.append(row)
+                continue
             req = urllib.request.Request(
                 src["url"],
                 headers={
@@ -294,8 +513,6 @@ def main():
                     "Accept": "application/rss+xml,application/atom+xml,application/xml,text/xml",
                 },
             )
-            ctx, verified = build_ssl_context(src)
-            row["transport_verified"] = verified
             with retry_call(
                 lambda: urllib.request.urlopen(req, timeout=a.timeout, context=ctx)
             ) as r:
