@@ -75,7 +75,7 @@
 
 | # | 事项 | 性质 |
 |---|---|---|
-| 61 | **capital_intent 分值校准回测（status candidate → active 的前提）**：v0.84 因子化迁入时定档 candidate——它实际驱动分层第二轴（live_use=scorer），但各证据分值（ci_*）与 CAP_STRONG=5/CAP_MID=2 从未独立回测。用 Phase E `strategy_grid` 的因子轴把 capital_intent 纳入组合寻优，出证据后再议 status 升级与分值调整；调 `scoring.weights` 一律先回测（同 cap_rules 纪律） | 待回测 |
+| 61 | **capital_intent 分值校准回测（status candidate → active 的前提）**：v0.84 因子化迁入时定档 candidate——它实际驱动分层第二轴（live_use=scorer），但各证据分值（ci_*）与 CAP_STRONG=5/CAP_MID=2 从未独立回测。用 Phase E `strategy_grid` 的因子轴把 capital_intent 纳入组合寻优，出证据后再议 status 升级与分值调整；调 `scoring.weights` 一律先回测（同 cap_rules 纪律）。⚠️ R19（2026-08-21）后重新定位：技术分总量对涨幅无预测力 ⇒ 校准的目标函数**不能**是「预测涨幅」，应是「分层行动语义下的盈亏比/胜率组合」；优先级降 P7 观察，实跑排在 R11 之后 | 待回测（目标函数待 R19 后重定义） |
 | 62 | **技术分轴因子化（2026-08-20 审计缺口 → 同日 owner 拍板收口，v0.87）**：✅ 三批搬迁完成——`macd_technics`/`volume_detectors`/`b1_structure`/`weekly_j`/`ignition`/`entry_patterns`/`j_low_gate` 进 `core/factors/` 并 FACTOR 注册（status=candidate、stage=release，live_use 按消费分 scorer/gate），行为零变化（各批逐位 == 抽查 + 全量 4400 passed）。判定逻辑自此可被 backtest_factors 单独引用回测。**剩余**：技术分组合器/RESONANCE_MATRIX/cap 编排刻意留 score_candidates（scorer 的家，权重已外置 registry）；各新因子 status 升级（candidate→active）与 #61 同批回测后议 | 主体收口；status 升级随 #61 |
 
 ## P8 · 测试覆盖率（2026-08-07 首次量化）
