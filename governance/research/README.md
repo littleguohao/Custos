@@ -213,3 +213,8 @@ R2 那次翻转**同时换了宇宙和数据源**。当时把翻转全部归因�
   全部翻负，可用 margin 只在 0AMV 系出现）。工程载体：
   `research/strategy_grid.py`（因子轴 scorer×entry_gate × 出场轴
   stop/tp 网格，出场 schema 与 live `EXIT_RULES.json` 一致可回流）。
+- **默认研究基底（owner 2026-08-21 定，v0.93）**：**0AMV 做多区间 + J<13
+  是默认研究因子，钉死、不作扫描变量**；扫描/优化的是叠加在基底之上的
+  其他因子（j_low ∧ X 组合 gate、scorer）与止损止盈参数。strategy_grid
+  已默认每格带 `--amv-long-only`、gate 轴默认只含 j_low 系叠加变体
+  （`--no-amv-pin` 仅对照实验用）。

@@ -169,6 +169,35 @@ class TestGridExpansion:
         assert sg.validate_exit_grid(sg.DEFAULT_EXIT_GRID) is None
 
 
+class TestDefaultResearchBase:
+    """v0.93（owner）：0AMV 做多区间 + J<13 是默认研究基底，钉死不作扫描变量。"""
+
+    def test_amv_pin_in_every_cell_by_default(self):
+        a = sg._build_parser().parse_args([])
+        cell = {"scorer": "s", "gate": "g", "exit": "e", "params": {}}
+        assert "--amv-long-only" in sg._cell_args(a, cell)
+
+    def test_no_amv_pin_escape_hatch(self):
+        """--no-amv-pin 仅对照实验用：显式解除基底钉。"""
+        a = sg._build_parser().parse_args(["--no-amv-pin"])
+        cell = {"scorer": "s", "gate": "g", "exit": "e", "params": {}}
+        assert "--amv-long-only" not in sg._cell_args(a, cell)
+
+    def test_amv_pin_part_of_signature(self):
+        """基底钉进签名：解除钉 ⇒ 签名变 ⇒ 不会误复用异口径结果。"""
+        c = {"scorer": "s", "gate": "g", "exit": "e", "params": {}}
+        a1 = sg._build_parser().parse_args([])
+        a2 = sg._build_parser().parse_args(["--no-amv-pin"])
+        assert sg.cell_signature(sg._cell_args(a1, c)) != sg.cell_signature(
+            sg._cell_args(a2, c)
+        )
+
+    def test_default_gates_all_j_low_based(self):
+        """gate 轴默认只含 j_low（基底行）及「J<13 ∧ 其他因子」叠加变体。"""
+        assert sg.DEFAULT_GATES[0] == "j_low"
+        assert all(g.startswith("j_low") for g in sg.DEFAULT_GATES)
+
+
 class TestSignatureReuse:
     def test_same_signature_skips_subprocess(self, tmp_path, fake_run):
         assert sg.main(_argv(tmp_path)) == 0

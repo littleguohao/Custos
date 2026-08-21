@@ -2,6 +2,14 @@
 # -*- coding: utf-8 -*-
 """因子 × 出场 联合寻优驱动器（因子×止盈×止损架构 Phase E，v0.85）。
 
+## 默认研究基底（owner 2026-08-21 定，v0.93）
+
+**0AMV 做多区间 + J<13 是默认研究因子，钉死、不再作为扫描变量**：
+每个格子默认带 ``--amv-long-only``（``--no-amv-pin`` 可显式解除，仅用于
+对照实验），gate 轴默认只含 ``j_low`` 及其**叠加变体**（j_low_adx25 /
+j_low_rsi_strong 等「J<13 ∧ 其他因子」组合）——扫描的是基底之上的其他
+因子 × 止损 × 止盈搭配，不是基底本身。
+
 网格 = 因子轴 ``{scorer × entry_gate}`` × 出场轴
 ``{stop_mode / stop_pct / trail / breakeven / scale_out / cost_zone /
 time_stop / bbi_consec}``，
@@ -90,7 +98,9 @@ OUTDIR = LOGS / "strategy_grid"
 
 DEFAULT_SAMPLE = 300  # 联合寻优是格子 × 单次回测，默认样本比 m2（1000）小
 DEFAULT_SCORERS = ["b1_dual", "kdj_j"]
-DEFAULT_GATES = ["j_low", "j_macd_turn"]
+# v0.93（owner）：J<13 是默认研究基底 ⇒ gate 轴 = j_low（基底行）+「J<13 ∧
+# 其他因子」叠加变体（其他因子的优化对象）；不再扫非 j_low 系 gate。
+DEFAULT_GATES = ["j_low", "j_low_adx25", "j_low_rsi_strong"]
 
 # 出场轴可扫参数：键名 == simulate_b1_trade 形参 == EXIT_RULES.json params 键名。
 # 值 = 对应 backtest_factors CLI flag。
@@ -272,6 +282,10 @@ def _cell_args(a: argparse.Namespace, cell: dict[str, Any]) -> list[str]:
         "--cost-bps",
         str(a.cost_bps),
     ]
+    # v0.93（owner）：0AMV 做多区间是默认研究基底，钉死进每个格子；
+    # --no-amv-pin 仅用于对照实验时显式解除。
+    if not a.no_amv_pin:
+        args += ["--amv-long-only"]
     args += _universe_args(a)
     if a.start:
         args += ["--start", a.start]
@@ -877,6 +891,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="横截面择优（透传 --top-n）。⚠️ scorer 轴只在 top-n>0 时有区分度",
     )
     # ---- 驱动控制 ----
+    ap.add_argument(
+        "--no-amv-pin",
+        action="store_true",
+        help="解除默认研究基底的 0AMV 做多钉（v0.93 起默认每格带 --amv-long-only；"
+        "仅对照实验用）",
+    )
     ap.add_argument("--force", action="store_true", help="忽略已落盘结果重跑")
     ap.add_argument(
         "--timeout",
