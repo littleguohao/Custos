@@ -101,6 +101,11 @@ TOOLS: dict[str, tuple[str, str]] = {
         "study",
         "#26 活跃板块（多次上榜）× J<13 池：命中 vs 未命中 forward 收益对照",
     ),
+    "score_return_study": (
+        "study",
+        "0AMV做多区间 J<13 信号：live技术分 vs BBI止盈收益相关性"
+        "（⚠️ R11：读数仅供相对排序）",
+    ),
     "adjust_diagnostic": (
         "diagnostic",
         "复权口径诊断：量化未复权数据对回测与选股的影响",

@@ -1,0 +1,172 @@
+# -*- coding: utf-8 -*-
+"""score_return_study 钉测：分档统计 / top-50% 切分 / 无未来函数（as-of 截断）。"""
+
+from __future__ import annotations
+
+import pandas as pd
+import pytest
+
+from custos.pipeline.screening import enrich_candidates as ec
+from custos.pipeline.screening import score_candidates as sc
+from custos.research import score_return_study as srs
+
+
+def _mk_df(n: int = 400, start: str = "2024-01-01") -> pd.DataFrame:
+    """合成日线：n 根连续工作日，close 线性上行（指标只需形状，不看数值真实性）。"""
+    dates = pd.bdate_range(start, periods=n).strftime("%Y-%m-%d")
+    close = [10.0 + i * 0.01 for i in range(n)]
+    return pd.DataFrame(
+        {
+            "date": dates,
+            "open": close,
+            "high": [c * 1.01 for c in close],
+            "low": [c * 0.99 for c in close],
+            "close": close,
+            "volume": [1000.0] * n,
+            "amount": [10000.0] * n,
+        }
+    )
+
+
+class TestLongIntervals:
+    def test_runs_and_gaps(self):
+        regime = {
+            "2026-01-05": "做多",
+            "2026-01-06": "做多",
+            "2026-01-07": "空头",
+            "2026-01-08": "做多",
+            "2026-01-09": "中性",
+            "2026-01-12": "做多",
+        }
+        assert srs.long_intervals(regime) == [
+            ("2026-01-05", "2026-01-06"),
+            ("2026-01-08", "2026-01-08"),
+            ("2026-01-12", "2026-01-12"),
+        ]
+
+    def test_empty_and_tail_run(self):
+        assert srs.long_intervals({}) == []
+        assert srs.long_intervals({"2026-01-05": "做多"}) == [
+            ("2026-01-05", "2026-01-05")
+        ]
+
+
+class TestIntervalOf:
+    def test_membership(self):
+        ivs = [("2026-01-05", "2026-01-06"), ("2026-01-12", "2026-01-20")]
+        assert srs.interval_of("2026-01-05", ivs) == 0
+        assert srs.interval_of("2026-01-15", ivs) == 1
+        assert srs.interval_of("2026-01-08", ivs) is None  # 区间之间的空头日
+        assert srs.interval_of("2025-12-31", ivs) is None
+
+
+class TestSplitTopHalf:
+    def test_even_split(self):
+        trades = [{"ret": r} for r in (1, 4, 2, 3)]
+        top, bottom = srs.split_top_half(trades)
+        assert [t["ret"] for t in top] == [4, 3]
+        assert [t["ret"] for t in bottom] == [2, 1]
+
+    def test_odd_split_top_gets_extra(self):
+        trades = [{"ret": r} for r in (5, 1, 4, 2, 3)]
+        top, bottom = srs.split_top_half(trades)
+        assert [t["ret"] for t in top] == [5, 4, 3]  # (5+1)//2 = 3
+        assert [t["ret"] for t in bottom] == [2, 1]
+
+    def test_empty(self):
+        assert srs.split_top_half([]) == ([], [])
+
+
+class TestBandStats:
+    def test_bands_and_stats(self):
+        trades = [
+            {"tech_score": 10, "ret": -0.05},  # <30 弱
+            {"tech_score": 20, "ret": 0.10},  # <30 弱
+            {"tech_score": 30, "ret": 0.06},  # 30-59 中（含边界 30）
+            {"tech_score": 59, "ret": 0.02},  # 30-59 中
+            {"tech_score": 60, "ret": 0.20},  # >=60 强（含边界 60）
+            {"tech_score": 80, "ret": 0.10},  # >=60 强
+        ]
+        st = srs.band_stats(trades)
+        assert st["<30"]["n"] == 2
+        assert st["30-59"]["n"] == 2
+        assert st[">=60"]["n"] == 2
+        # 弱档：一胜一负，均收 (-0.05+0.10)/2 = 0.025
+        assert st["<30"]["avg_ret"] == pytest.approx(0.025)
+        assert st["<30"]["win_rate"] == pytest.approx(0.5)
+        assert st["<30"]["payoff_ratio"] == pytest.approx(2.0)  # 0.10/0.05
+        # 强档：全胜，无亏损 ⇒ 盈亏比 None
+        assert st[">=60"]["payoff_ratio"] is None
+        assert st[">=60"]["win_rate"] == pytest.approx(1.0)
+        assert st[">=60"]["avg_ret"] == pytest.approx(0.15)
+
+    def test_band_of_boundaries(self):
+        assert srs.band_of(29.9) == "<30"
+        assert srs.band_of(30) == "30-59"
+        assert srs.band_of(59.9) == "30-59"
+        assert srs.band_of(60) == ">=60"
+
+
+class TestCorrelations:
+    def test_monotonic_positive(self):
+        trades = [
+            {"tech_score": s, "ret": r}
+            for s, r in ((10, 0.01), (20, 0.02), (30, 0.03), (40, 0.04))
+        ]
+        c = srs.correlations(trades)
+        assert c["spearman"] == pytest.approx(1.0)
+        assert c["pearson"] == pytest.approx(1.0)
+
+    def test_too_few(self):
+        assert srs.correlations([{"tech_score": 1, "ret": 0.1}])["spearman"] is None
+
+
+class TestAsofNoLookahead:
+    """as-of 截断：compute_metrics 收到的 df 必须只含 ≤ 信号日的数据。"""
+
+    def test_truncation(self, monkeypatch):
+        n = 1500  # 超过 df_long 的 1200，验证两层 tail 都生效
+        df = _mk_df(n)
+        index_df = _mk_df(n)
+        i = n - 200  # 信号日不在末端：其后还有 199 根未来K线
+        entry_date = df["date"].iloc[i]
+
+        captured = {}
+
+        def fake_compute_metrics(df_arg, index_arg, code="", df_long=None):
+            captured["df"] = df_arg
+            captured["index"] = index_arg
+            captured["df_long"] = df_long
+            return {}
+
+        monkeypatch.setattr(ec, "compute_metrics", fake_compute_metrics)
+        monkeypatch.setattr(sc, "technical_score", lambda cand, w=None: (42, "中", {}))
+
+        score, level, _ = srs.asof_technical_score(df, index_df, i, "000001")
+        assert score == 42 and level == "中"
+
+        got = captured["df"]
+        # ① 无未来函数：最后一根 == 信号日，绝无其后的数据
+        assert got["date"].iloc[-1] == entry_date
+        assert (got["date"] <= entry_date).all()
+        # ② 截断长度 = live 口径（260 / 1200）
+        assert len(got) == ec.OHLCV_LOAD_BARS
+        assert len(captured["df_long"]) == ec.OHLCV_LOAD_BARS_LONG
+        assert (captured["df_long"]["date"] <= entry_date).all()
+        assert (captured["index"]["date"] <= entry_date).all()
+
+    def test_short_history_uses_all(self, monkeypatch):
+        n = 100  # 不足 260：整段前缀（不补不造）
+        df = _mk_df(n)
+        index_df = _mk_df(n)
+        captured = {}
+        monkeypatch.setattr(
+            ec,
+            "compute_metrics",
+            lambda d, ix, code="", df_long=None: captured.update(df=d, df_long=df_long)
+            or {},
+        )
+        monkeypatch.setattr(sc, "technical_score", lambda cand, w=None: (0, "弱", {}))
+        srs.asof_technical_score(df, index_df, n - 1, "000001")
+        assert len(captured["df"]) == n
+        assert len(captured["df_long"]) == n
