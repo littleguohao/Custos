@@ -159,6 +159,16 @@ def test_contract_required_fields():
     assert scored["bucket"] in ("A", "B", "C", "D")
 
 
+def test_change_pct_passthrough():
+    """v0.94 修复：change_pct 透传进落盘字典——门内提醒（candidate_table，
+    v0.89）的涨跌幅列读 candidates；score_candidate 是显式白名单，不透传
+    则实盘该列恒为「-」（旧观察区由 enrich 侧显式携带，无此问题）。"""
+    scored = sc.score_candidate(
+        _mk(TECH_MID, capital="mid", change_pct=3.25), SECTOR_STRONG, "做多"
+    )
+    assert scored["change_pct"] == 3.25
+
+
 def test_bucket_next_step_mapping():
     scored = sc.score_candidate(
         _mk(TECH_STRONG, capital="strong"), SECTOR_STRONG, "做多"

@@ -961,6 +961,10 @@ def score_candidate(
         "next_step": next_step,
         "patterns": cand.get("patterns") or {},
         "daily_j": cand.get("daily_j"),
+        # v0.94 修复：门内提醒（candidate_table，v0.89）读候选的涨跌幅列，
+        # 但本字典是显式白名单、此前不透传 ⇒ 实盘该列恒为「-」（旧观察区
+        # watchlist_outside_gate 由 enrich 侧显式带 change_pct，无此问题）。
+        "change_pct": cand.get("change_pct"),
         "stop_loss_ref": cand.get("stop_loss_ref"),
         "is_holding": bool(cand.get("is_holding")),
         # 证据层透传段（顺序＝历史落盘字段顺序）：B1/CZ → 信号标注 → 指标/正交因子
