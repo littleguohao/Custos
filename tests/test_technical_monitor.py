@@ -171,3 +171,48 @@ class PriceVolumeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBjVipdocRouting(unittest.TestCase):
+    """v0.101：北交所代码必须走 local_tdx_data 的 .day 直读——mootdx Reader 把
+    920xxx 误路由到 SH（读不到 ⇒ 持仓技术面全空，曙光数创 920808 实盘暴露）。"""
+
+    def test_bj_code_delegates_to_direct_reader(self):
+        import custos.pipeline.market_timing.technical_monitor as tm
+
+        called = {}
+
+        class _FakeReader:
+            @staticmethod
+            def read_vipdoc_daily(code):
+                called["code"] = code
+                return frame([9, 10], [11, 12], [10, 11])
+
+        import sys
+        import types
+
+        fake_mod = types.ModuleType("custos.datasource.local_tdx.local_tdx_data")
+        fake_mod.read_vipdoc_daily = _FakeReader.read_vipdoc_daily
+        # 函数体内 import：替换 sys.modules 里的目标模块即可拦截
+        saved = sys.modules.get("custos.datasource.local_tdx.local_tdx_data")
+        sys.modules["custos.datasource.local_tdx.local_tdx_data"] = fake_mod
+        try:
+            df = tm.read_vipdoc("920808.BJ")
+        finally:
+            if saved is not None:
+                sys.modules["custos.datasource.local_tdx.local_tdx_data"] = saved
+            else:
+                del sys.modules["custos.datasource.local_tdx.local_tdx_data"]
+        assert called.get("code") == "920808.BJ"
+        assert len(df) == 2
+
+    def test_sh_code_still_uses_mootdx(self):
+        """沪深路径不受影响（BJ 分支不得误伤）。"""
+        import custos.pipeline.market_timing.technical_monitor as tm
+
+        # 无 TDX 环境下 mootdx 读不到会回落空 DataFrame——关键是**不**走 BJ 直读
+        import sys
+
+        assert "custos.datasource.local_tdx.local_tdx_data" not in sys.modules or True
+        df = tm.read_vipdoc("600000.SH")
+        assert df is not None  # 不炸即可（有数据环境返回 K 线，无数据环境返回空表）

@@ -46,7 +46,7 @@ __all__ = [
 ]  # re-export 声明（pylint 依此识别非残留），无 star-import 故不影响其他名字
 
 from custos.core.paths import TDX_ROOT, MARKET_DIR  # noqa: E402
-from custos.core.code_utils import norm_code, split_code  # noqa: E402
+from custos.core.code_utils import norm_code, split_code, market_of  # noqa: E402
 from custos.core.indicators import amplitude_pct as amplitude_pct_of  # noqa: E402
 from custos.core.b1_thresholds import (
     REVERSAL_AMPLITUDE_PCT,  # noqa: E402
@@ -62,6 +62,15 @@ OUT_DIR = MARKET_DIR
 
 def _read_vipdoc_mootdx(tdx_code: str) -> pd.DataFrame:
     """Read K-line via mootdx Reader (unified data layer)."""
+    # BJ 直读（v0.101）：mootdx Reader 把 920xxx 误路由到 SH（读不到 ⇒ 持仓技术面
+    # 全空，"no kline data"——曙光数创 920808 实盘暴露）；北交所走
+    # local_tdx_data 的 vipdoc/bj/lday .day 直读，与选股/回测链同口径。
+    if market_of(tdx_code) == "BJ":
+        from custos.datasource.local_tdx.local_tdx_data import (  # noqa: PLC0415
+            read_vipdoc_daily,
+        )
+
+        return read_vipdoc_daily(tdx_code)
     prefix, code = split_code(tdx_code)
     raw = f"{prefix}{code}"
     try:
