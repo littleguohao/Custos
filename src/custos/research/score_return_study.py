@@ -268,22 +268,18 @@ def half_window_check(trades: list[dict[str, Any]]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def asof_technical_score(
-    df_full: pd.DataFrame,
-    index_full: pd.DataFrame,
-    i: int,
-    code: str,
-) -> tuple[int, str, dict]:
-    """信号日（df_full 第 i 根）的 live 技术分（as-of 口径）。
-
-    截断规则与 live 1800 链逐位对齐（已对拍验证，见 --spot-check）：
+def asof_frames(
+    df_full: pd.DataFrame, index_full: pd.DataFrame, i: int
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """信号日（df_full 第 i 根）的三层 as-of 截断（**无未来函数**：只取 ≤ 信号日）。
 
     - ``df``      = df_full.iloc[:i+1].tail(ec.OHLCV_LOAD_BARS)      （260 根）
     - ``df_long`` = df_full.iloc[:i+1].tail(ec.OHLCV_LOAD_BARS_LONG) （1200 根，
       仅供 check_macd_technics 周/月红柱腿；不足时 wm_available=False 如实标注）
     - ``index``   = 上证指数 ≤ 信号日 tail 260（20 日相对强度用）
 
-    返回 (score, level, factor_contrib)，权重 = DEFAULT_TECH_WEIGHTS。
+    截断规则与 live 1800 链逐位对齐（已对拍验证，见 --spot-check）。
+    winner_factor_study 的因子面板复用同一截断（保证两套研究口径一致）。
     """
     pre = df_full.iloc[: i + 1]
     df = pre.tail(ec.OHLCV_LOAD_BARS).reset_index(drop=True)
@@ -295,6 +291,20 @@ def asof_technical_score(
         .tail(ec.OHLCV_LOAD_BARS)
         .reset_index(drop=True)
     )
+    return df, df_long, index_asof
+
+
+def asof_technical_score(
+    df_full: pd.DataFrame,
+    index_full: pd.DataFrame,
+    i: int,
+    code: str,
+) -> tuple[int, str, dict]:
+    """信号日（df_full 第 i 根）的 live 技术分（as-of 口径，截断见 asof_frames）。
+
+    返回 (score, level, factor_contrib)，权重 = DEFAULT_TECH_WEIGHTS。
+    """
+    df, df_long, index_asof = asof_frames(df_full, index_full, i)
     cand = ec.compute_metrics(df, index_asof, code=code, df_long=df_long)
     return sc.technical_score(cand, None)
 
@@ -313,9 +323,15 @@ def run_study(
     stop_pct: float = STOP_PCT_DEFAULT,
     cost_zone_bars: int = 0,
     cost_zone_pct: float = 3.0,
+    trade_hook: Optional[Any] = None,
 ) -> list[dict[str, Any]]:
     """逐股流式：加载全历史 → evaluate_trades（j_low gate + baseline scorer +
-    仅做多区间 + BBI 跌破2根止盈 + pct 初始止损 [+ cost_zone]）→ 信号日 as-of 技术分。"""
+    仅做多区间 + BBI 跌破2根止盈 + pct 初始止损 [+ cost_zone]）→ 信号日 as-of 技术分。
+
+    ``trade_hook``（可选）：``hook(df, index_df, i, code) -> dict``，返回键并入该笔
+    记录（替代默认的 tech_score/tech_level/factor_contrib 三键）——
+    winner_factor_study 用它注入因子面板，回测引擎/截断口径零重复。
+    """
     from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
 
     trades: list[dict[str, Any]] = []
@@ -357,21 +373,22 @@ def run_study(
             if i is None:
                 continue
             try:
-                score, level, contrib = asof_technical_score(df, index_df, i, code)
+                if trade_hook is not None:
+                    extra = trade_hook(df, index_df, i, code)
+                else:
+                    score, level, contrib = asof_technical_score(df, index_df, i, code)
+                    extra = {
+                        "tech_score": score,
+                        "tech_level": level,
+                        "factor_contrib": contrib,
+                    }
             except Exception as exc:  # noqa: BLE001
                 print(
                     f"[WARN] {code} {tr['entry_date']} 技术分计算失败: {exc}",
                     file=sys.stderr,
                 )
                 continue
-            trades.append(
-                {
-                    **tr,
-                    "tech_score": score,
-                    "tech_level": level,
-                    "factor_contrib": contrib,
-                }
-            )
+            trades.append({**tr, **extra})
         if (k + 1) % 25 == 0:
             print(
                 f"[INFO] 已处理 {k + 1}/{len(codes)} 只，累计 {len(trades)} 笔，"

@@ -42,7 +42,6 @@ owner 2026-08-07 问「总的回测和研究是否可以统一到一个入口」
 from __future__ import annotations
 
 import pathlib
-import re
 import subprocess
 import sys
 
@@ -105,6 +104,11 @@ TOOLS: dict[str, tuple[str, str]] = {
         "study",
         "0AMV做多区间 J<13 信号：live技术分 vs BBI止盈收益相关性"
         "（⚠️ R11：读数仅供相对排序）",
+    ),
+    "winner_factor_study": (
+        "study",
+        "赢家半场因子富集：top-50% 票的 J<13 信号日单因子命中面板"
+        "（复用 score_return_study 基建；⚠️ R3 纪律：须过半窗一致性）",
     ),
     "adjust_diagnostic": (
         "diagnostic",
