@@ -176,12 +176,13 @@ def _calc_mfe_mae(target: str, stages_log: list[dict]) -> None:
 
 
 def _ledger_reconcile(target: str, stages_log: list[dict]) -> None:
-    # 3b2. 台账↔持仓对账（**只报告，不阻断**）。
-    #      incremental_ledger 刻意选择「ledger 先落、positions 后落」，理由是
-    #      崩在两次 os.replace 之间留下的「已记录成交但持仓未更新」**可检测、可修复**。
-    #      但 2026-08-06 review 发现没有任何常规检查在检测它 —— 唯一的对账逻辑埋在
-    #      backtest_0amv_bear_regime.py（研究脚本）里。这一 stage 就是把「可检测」变成真的每天检测。
-    #      默认不阻断：新校验先观察若干交易日（2026-07-30 的教训是别同时收紧多个闸）。
+    # 3b2. 台账↔持仓对账（**hard-fail 信号，不中断主链**）。
+    #      v0.103（owner 拍板，观察期 5 个交易日零数量误差后转硬闸）：stage 带
+    #      `--strict`——数量不一致时 reconcile_positions 退出码 1 ⇒ stage 失败 ⇒
+    #      18:30 run_log_check 把它当**意外 stage 失败**捕获并推送告警（该 stage
+    #      不带 best-effort note）。仍**不中断主链**：对账发现脱节时恰恰最需要
+    #      盘后复盘照常产出（报告里带上对账异常），中断等于在最需要报告的那天
+    #      没有报告。成本口径差（cost_only_diff）不触发（--strict 只看数量）。
     #      注：_run_stage 内部已 append 到 stages_log，且底层 run_stage_quiet 就是
     #      required=False，所以「非阻断」不需要额外传参 —— 只是这里不检查 r["ok"] 中断。
     #      ⚠️ note 必须在 stage **跑完之后**算：`note=` 作为实参会在子进程启动前求值，
@@ -195,12 +196,18 @@ def _ledger_reconcile(target: str, stages_log: list[dict]) -> None:
             str(TOOLS / "core" / "trades" / "reconcile_positions.py"),
             "--date",
             target,
+            "--strict",
         ],
         "ledger_reconcile",
     )
     stages_log[-1]["note"] = _reconcile_note(target)
     if not r["ok"]:
-        print(f"[WARN] ledger_reconcile 未成功（不阻断）：{r['out'][:200]}")
+        # v0.103 硬闸：--strict 下数量不一致 ⇒ stage 失败 ⇒ 18:30 run_log_check
+        # 捕获并推送告警；这里 stderr 再亮一次（17:00 链本身不中断，见上方注释）。
+        print(
+            f"[ALARM] 台账对账硬闸触发/执行失败（盘后链不中断，18:30 例行核对会推送告警）：{r['out'][:200]}",
+            file=sys.stderr,
+        )
     # 2026-08-12（#32）：mismatch/replay_failed 时 stage 退出码仍是 0（非阻断），
     # 失败信号若只躺在 run log 的 note 里就是**静默**——stderr 也要可见。
     _note = stages_log[-1]["note"]

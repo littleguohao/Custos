@@ -393,8 +393,10 @@ class TestDefaultIsAdvisory:
 class TestWiredIntoDailyChain:
     """对账必须真的每天跑 —— 否则「可检测」还是停在设计上。
 
-    接在 17:00 链（`run_1700`）里，**非阻断**：新校验先观察若干交易日再考虑开硬闸
-    （2026-07-30 的教训是别同时收紧多个闸）。
+    接在 17:00 链（`run_1700`）里。**v0.103 转硬闸**（owner 拍板，观察期
+    2026-08-19 起 5 个交易日数量零误差后）：stage 带 `--strict`，数量不一致
+    ⇒ 脚本退出码 1 ⇒ stage 失败 ⇒ 18:30 run_log_check 捕获推送告警。
+    主链仍**不中断**：对账发现脱节时恰恰最需要盘后复盘照常产出。
     """
 
     SRC = (ROOT / "src" / "custos" / "pipeline" / "run_1700.py").read_text(
@@ -405,11 +407,17 @@ class TestWiredIntoDailyChain:
         assert "reconcile_positions.py" in self.SRC, "17:00 链未接入对账"
         assert '"ledger_reconcile"' in self.SRC
 
-    def test_not_blocking(self):
-        """失败只打 WARN，不 return 1 —— 对账挂了不该让整条盘后链失败。"""
+    def test_strict_flagged(self):
+        """v0.103：stage 命令必须带 --strict（硬闸），成本差异不触发（脚本内只看数量）。"""
         i = self.SRC.index('"ledger_reconcile"')
-        seg = self.SRC[i : i + 400]
-        assert "不阻断" in seg
+        seg = self.SRC[max(0, i - 500) : i]
+        assert '"--strict"' in seg, "硬闸没开：stage 缺 --strict"
+
+    def test_not_blocking(self):
+        """stage 失败只告警、不 return 1 —— 对账挂了不该让整条盘后链失败。"""
+        i = self.SRC.index('"ledger_reconcile"')
+        seg = self.SRC[i : i + 600]
+        assert "不中断" in seg
         assert "return 1" not in seg, "对账失败不该中断盘后链"
 
     def test_note_computed_after_stage_runs(self):
