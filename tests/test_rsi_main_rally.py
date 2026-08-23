@@ -300,6 +300,8 @@ class TestRegistration:
             "rsi_bull_div",
             "j_low_rsi_strong",
             "j_low_rsi_div",
+            "rsi_deep",
+            "j_low_rsi_deep",
             "main_rally",
             "main_rally_above",
         ],
@@ -314,6 +316,8 @@ class TestRegistration:
             "rsi_bull_div",
             "j_low_rsi_strong",
             "j_low_rsi_div",
+            "rsi_deep",
+            "j_low_rsi_deep",
             "main_rally",
             "main_rally_above",
         ],
@@ -336,9 +340,28 @@ class TestRegistration:
         for name, part in (
             ("j_low_rsi_strong", "rsi_strong"),
             ("j_low_rsi_div", "rsi_bull_div"),
+            ("j_low_rsi_deep", "rsi_deep"),
         ):
             expect = bt.ENTRY_GATES["j_low"](df) and bt.ENTRY_GATES[part](df)
             assert bt.ENTRY_GATES[name](df) is bool(expect)
+
+
+class TestRsiDeepGate:
+    """j_low_rsi_deep（R20 画像 ⇒ gate 化，2026-08-23）：深水判定与 rsi_regime 同口径。"""
+
+    def test_deep_oversold_semantics(self):
+        from custos.core.factors.rsi_state import DEEP_OVERSOLD, rsi_regime
+
+        down = _mk(np.linspace(30, 10, 150))  # 单边阴跌 ⇒ RSI14 趋 0 ⇒ 深水
+        up = _mk(np.linspace(10, 30, 150))  # 单边上行 ⇒ RSI14 趋 100 ⇒ 非深水
+        assert bt.ENTRY_GATES["rsi_deep"](down) is True
+        assert bt.ENTRY_GATES["rsi_deep"](up) is False
+        # 与 rsi_regime 的 deep_oversold 逐点一致（复用判定，不是重写）
+        for df in (down, up, _mk(np.linspace(20, 15, 150))):
+            assert bt.ENTRY_GATES["rsi_deep"](df) is bool(
+                rsi_regime(df).get("deep_oversold")
+            )
+        assert DEEP_OVERSOLD == 25.0  # 阈值钉死（面板同口径）
 
 
 class TestNotWiredIntoScreening:

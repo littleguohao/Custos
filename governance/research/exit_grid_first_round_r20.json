@@ -1,0 +1,17 @@
+[
+  { "name": "base_low", "params": {} },
+  { "name": "pct5", "params": { "stop_mode": "pct", "stop_pct": 5 } },
+  { "name": "pct12", "params": { "stop_mode": "pct", "stop_pct": 12 } },
+  {
+    "name": "pct5_cz3",
+    "params": { "stop_mode": "pct", "stop_pct": 5, "cost_zone_bars": 3 }
+  },
+  {
+    "name": "pct12_cz3",
+    "params": { "stop_mode": "pct", "stop_pct": 12, "cost_zone_bars": 3 }
+  },
+  {
+    "name": "pct5_be05",
+    "params": { "stop_mode": "pct", "stop_pct": 5, "breakeven_trigger": 0.05 }
+  }
+]

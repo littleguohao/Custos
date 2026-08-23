@@ -70,6 +70,8 @@ _FAST_GATES = {
     "rsi_bull_div",
     "j_low_rsi_strong",
     "j_low_rsi_div",
+    "rsi_deep",
+    "j_low_rsi_deep",
 }
 
 _ALL_GATES = sorted(k for k, g in bt.ENTRY_GATES.items() if g is not None)

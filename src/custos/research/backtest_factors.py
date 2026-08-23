@@ -1040,6 +1040,34 @@ def j_low_rsi_div_gate(
     )
 
 
+def rsi_deep_oversold_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
+    """RSI 深水区（RSI14 < 25）——超卖极值。
+
+    判定**复用** `core/factors/rsi_state.rsi_regime` 的 ``deep_oversold``
+    （不重写）：与 winner_factor_study 因子面板的 ``rsi_deep_oversold``
+    逐位同口径（R20：赢家组唯一四臂全稳的正向富集因子，lift 4.8~6.2）。
+    """
+    if rsi_state_score is None:
+        return False
+    try:
+        rs = precomputed.get("rsi14") if precomputed is not None else None
+        return bool(rsi_regime(df_slice, rsi_series=rs).get("deep_oversold"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def j_low_rsi_deep_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
+    """B1 核心组合的深水版（R20 画像 ⇒ gate 化）：J<13 且 RSI 深水区。"""
+    return bool(
+        j_low_gate(df_slice, precomputed)
+        and rsi_deep_oversold_gate(df_slice, precomputed)
+    )
+
+
 def _main_rally_gate(df_slice: pd.DataFrame, mode: str) -> bool:
     if rsi_state_score is None:
         return False
@@ -1071,6 +1099,8 @@ if rsi_state_score is not None:
     ENTRY_GATES["rsi_bull_div"] = rsi_bullish_divergence_gate
     ENTRY_GATES["j_low_rsi_strong"] = j_low_rsi_strong_gate
     ENTRY_GATES["j_low_rsi_div"] = j_low_rsi_div_gate
+    ENTRY_GATES["rsi_deep"] = rsi_deep_oversold_gate
+    ENTRY_GATES["j_low_rsi_deep"] = j_low_rsi_deep_gate
     ENTRY_GATES["main_rally"] = main_rally_below_gate
     ENTRY_GATES["main_rally_above"] = main_rally_above_gate
 
