@@ -20,17 +20,21 @@
 区间级 lift>1 占比。
 
 主臂 = 无止损基线（--stop-pct 50，样本最大）；稳健臂 = pct5（--stop-pct 5），
-top 因子复算方向是否保持。
+top 因子复算方向是否保持。``--top-frac``（默认 0.5）把赢家组收紧到前 N%
+（0.10=TOP10% 赢家 vs 90% 对照，v0.105 owner 要求；分母/lift/支撑标注同步，
+MIN_HIT_SUPPORT 不随 frac 放水——top 组变薄后小样本如实标不足）。
 
 CLI::
 
     uv run python src/custos/research/winner_factor_study.py            # 主臂（基线）
     uv run python src/custos/research/winner_factor_study.py --stop-pct 5  # 稳健臂
+    uv run python src/custos/research/winner_factor_study.py --top-frac 0.10 --stop-pct 12
 """
 
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -216,6 +220,19 @@ def panel_hook(
 # ---------------------------------------------------------------------------
 
 
+def split_top_frac(
+    trades: list[dict[str, Any]], frac: float = 0.5, key: str = "ret"
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """按 key 降序切「前 frac 赢家组 / 其余对照组」（n_top=ceil(n×frac)，至少 1）。
+
+    frac=0.5 时与 ``score_return_study.split_top_half`` 逐位一致
+    （ceil(n/2)==(n+1)//2），旧行为不变；0.10 = 每区间收益前 10% 为赢家组。
+    """
+    ordered = sorted(trades, key=lambda t: t[key], reverse=True)
+    n_top = max(1, math.ceil(len(ordered) * frac)) if ordered else 0
+    return ordered[:n_top], ordered[n_top:]
+
+
 def hit_stats(trades: list[dict[str, Any]], key: str) -> dict[str, Any]:
     """单侧命中率：分母只含可评估（panel 值非 None）的样本。"""
     vals = [(t.get("panel") or {}).get(key) for t in trades]
@@ -240,12 +257,18 @@ def factor_enrichment(
     trades: list[dict[str, Any]],
     intervals: list[tuple[str, str]],
     key: str,
+    top_frac: float = 0.5,
 ) -> dict[str, Any]:
-    """单因子富集全景：overall lift + 命中支撑 + 前后半窗一致性 + 区间级方向一致性。"""
+    """单因子富集全景：overall lift + 命中支撑 + 前后半窗一致性 + 区间级方向一致性。
+
+    ``top_frac``：赢家组占比（0.5=旧行为 top50%；0.10=TOP10% 赢家 vs 90% 对照）。
+    口径同步：命中率分母始终是各组**可评估**样本数（与组大小无关）；top 组收紧后
+    命中数支撑自然变薄，support 标注如实反映（MIN_HIT_SUPPORT 不随 frac 放水）。
+    """
     for t in trades:
         if "interval_idx" not in t:
             t["interval_idx"] = srs.interval_of(t["entry_date"], intervals)
-    top, bottom = srs.split_top_half(trades)
+    top, bottom = split_top_frac(trades, top_frac)
     ts, bs = hit_stats(top, key), hit_stats(bottom, key)
     support_ok = ts["n_hit"] >= MIN_HIT_SUPPORT and bs["n_hit"] >= MIN_HIT_SUPPORT
 
@@ -257,7 +280,7 @@ def factor_enrichment(
         ("first", [t for t in trades if t["entry_date"] <= mid]),
         ("second", [t for t in trades if t["entry_date"] > mid]),
     ):
-        htop, hbot = srs.split_top_half(subset)
+        htop, hbot = split_top_frac(subset, top_frac)
         ht, hb = hit_stats(htop, key), hit_stats(hbot, key)
         halves[name] = {
             "top_rate": ht["rate"],
@@ -280,7 +303,7 @@ def factor_enrichment(
         sub = [t for t in trades if t["interval_idx"] == idx]
         if len(sub) < MIN_INTERVAL_TRADES:
             continue
-        itop, ibot = srs.split_top_half(sub)
+        itop, ibot = split_top_frac(sub, top_frac)
         it, ib = hit_stats(itop, key), hit_stats(ibot, key)
         if it["n_hit"] < MIN_INTERVAL_SIDE_HIT or ib["n_hit"] < MIN_INTERVAL_SIDE_HIT:
             continue
@@ -291,7 +314,8 @@ def factor_enrichment(
 
     return {
         "factor": key,
-        "top50": ts,
+        "top_frac": top_frac,
+        "top50": ts,  # 键名沿用（昨晚 JSON 的消费脚本在读）；top_frac 字段标真实口径
         "bottom50": bs,
         "lift": _lift(ts, bs),
         "support": "ok"
@@ -341,17 +365,20 @@ def verdict_of(en: dict[str, Any]) -> str:
 
 
 def build_report(
-    trades: list[dict[str, Any]], intervals: list[tuple[str, str]]
+    trades: list[dict[str, Any]],
+    intervals: list[tuple[str, str]],
+    top_frac: float = 0.5,
 ) -> dict[str, Any]:
     """逐笔（带 panel）→ 全因子富集报告。"""
     for t in trades:
         t["interval_idx"] = srs.interval_of(t["entry_date"], intervals)
-    factors = [factor_enrichment(trades, intervals, k) for k in PANEL_KEYS]
+    factors = [factor_enrichment(trades, intervals, k, top_frac) for k in PANEL_KEYS]
     # 展示序：lift 降序（None 排尾），组内键序见 PANEL_KEYS
     factors.sort(key=lambda e: -(e["lift"] or 0))
     return {
         "r11_r3_warning": R11_R3_WARNING,
         "n_trades": len(trades),
+        "top_frac": top_frac,
         "intervals": [[s, e] for s, e in intervals],
         "overall_stats": srs.ret_stats(trades),
         "panel_keys": PANEL_KEYS,
@@ -364,8 +391,10 @@ def build_report(
 
 def print_report(rep: dict[str, Any]) -> None:
     """stdout 中文摘要。"""
+    top_pct = round(rep.get("top_frac", 0.5) * 100)
+    bot_pct = 100 - top_pct
     print("\n" + "=" * 76)
-    print("0AMV 做多区间 J<13 信号：赢家半场（top-50%）因子富集分析")
+    print(f"0AMV 做多区间 J<13 信号：赢家组（top-{top_pct}%）因子富集分析")
     print("=" * 76)
     print(rep["r11_r3_warning"])
     os_ = rep["overall_stats"]
@@ -374,10 +403,12 @@ def print_report(rep: dict[str, Any]) -> None:
         f"全体均收 {os_['avg_ret'] * 100:.2f}% / 胜率 {os_['win_rate'] * 100:.1f}%"
     )
     print(
-        f"\n── 因子富集（lift=top50命中率/bottom50命中率；样本阈值 "
+        f"\n── 因子富集（lift=top{top_pct}%命中率/bottom{bot_pct}%命中率；样本阈值 "
         f"{rep['min_hit_support']}；区间级最小 {rep['min_interval_trades']} 笔）"
     )
-    print("因子 | top50% | bottom50% | lift | 半窗一致 | 区间lift>1占比 | 判定")
+    print(
+        f"因子 | top{top_pct}% | bottom{bot_pct}% | lift | 半窗一致 | 区间lift>1占比 | 判定"
+    )
     for en in rep["factors"]:
         t, b = en["top50"], en["bottom50"]
         hw = en["half_window"]
@@ -423,6 +454,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=0,
         help="「不涨就拍」（默认 0=关；两臂都不用，cz3 出场侧见 R10）",
     )
+    ap.add_argument(
+        "--top-frac",
+        type=float,
+        default=0.5,
+        help="赢家组占比（默认 0.5=旧行为 top50%%；0.10=每区间收益前 10%% 为赢家组）",
+    )
     ap.add_argument("--out", default="", help="结果 JSON 路径")
     return ap
 
@@ -430,6 +467,8 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[list] = None) -> int:
     ap = _build_parser()
     args = ap.parse_args(argv)
+    if not 0 < args.top_frac < 1:
+        ap.error("--top-frac 必须在 (0, 1) 开区间（0.5=top50%，0.10=top10%）")
 
     regime = bf.load_amv_regime(since=args.start)
     if not regime:
@@ -468,13 +507,14 @@ def main(argv: Optional[list] = None) -> int:
         print("⛔ 0 笔交易——检查 regime 数据与宇宙", file=sys.stderr)
         return 1
 
-    rep = build_report(trades, intervals)
+    rep = build_report(trades, intervals, args.top_frac)
     rep["config"] = {
         "signal": "日KDJ J<13（j_low_gate）",
         "regime": "仅 0AMV 做多区间",
         "exit": f"BBI 止盈（连破2根）+ pct {args.stop_pct}% 初始止损"
         + (f" + cost_zone {args.cost_zone_bars}" if args.cost_zone_bars else ""),
         "cost_bps": args.cost_bps,
+        "top_frac": args.top_frac,
         "panel": f"{len(PANEL_KEYS)} 个单因子命中（as-of 截断，unavailable=None）",
         "max_stocks": args.max_stocks,
         "seed": args.seed,
@@ -483,6 +523,9 @@ def main(argv: Optional[list] = None) -> int:
     }
     rep["trades"] = trades
 
+    top_tag = (
+        f"_top{round(args.top_frac * 100):g}" if args.top_frac != 0.5 else ""
+    )  # 旧默认不加标签（文件名与 v0.104 两臂兼容）
     stop_tag = f"_stop{args.stop_pct:g}"
     cz_tag = f"_cz{args.cost_zone_bars}" if args.cost_zone_bars else ""
     out = (
@@ -490,7 +533,7 @@ def main(argv: Optional[list] = None) -> int:
         if args.out
         else (
             Path("artifacts/logs/winner_factor_study")
-            / f"winner_factor_study_s{args.seed}_n{len(codes)}{stop_tag}{cz_tag}.json"
+            / f"winner_factor_study_s{args.seed}_n{len(codes)}{top_tag}{stop_tag}{cz_tag}.json"
         )
     )
     out.parent.mkdir(parents=True, exist_ok=True)

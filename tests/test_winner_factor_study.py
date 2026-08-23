@@ -156,6 +156,32 @@ class TestHitStatsAndLift:
         en = wfs.factor_enrichment(trades, [], "f")
         assert en["lift"] is None  # bottom 命中率 0 ⇒ lift 无定义
 
+    def test_top_frac_tightens_winner_group(self):
+        """top_frac=0.10：10 笔里 top 组只有 1 笔，lift 按新分母算。"""
+        top = [{"ret": 0.50, "entry_date": "2026-01-05", "panel": {"f": True}}]
+        bot = [
+            {
+                "ret": 0.10 - i * 0.01,
+                "entry_date": f"2026-01-{i + 6:02d}",
+                "panel": {"f": v},
+            }
+            for i, v in enumerate(
+                [True, False, False, False, False, False, False, False, False]
+            )
+        ]
+        en = wfs.factor_enrichment(top + bot, [], "f", top_frac=0.10)
+        assert en["top_frac"] == 0.10
+        assert en["top50"]["n_eval"] == 1  # ceil(10×0.10)=1
+        assert en["bottom50"]["n_eval"] == 9
+        assert en["lift"] == pytest.approx(1.0 / (1 / 9), abs=1e-3)  # 1.0 / 0.111 = 9.0
+
+    def test_support_thin_after_tightening(self):
+        """top 组收紧 5 倍后命中支撑变薄 ⇒ 如实标不足（阈值不放水）。"""
+        trades = self._trades([True, True], [True] * 40)
+        en = wfs.factor_enrichment(trades, [], "f", top_frac=0.10)
+        # 42 笔 × 0.10 ⇒ top 组 5 笔（含 bottom 混入的高 ret），命中数 ≪ 30
+        assert en["support"].startswith("不足")
+
     def test_support_flag(self):
         trades = self._trades([True, True], [True, False])
         en = wfs.factor_enrichment(trades, [], "f")
@@ -167,6 +193,38 @@ class TestHitStatsAndLift:
         top, bot = srs.split_top_half(trades)
         assert all(t["ret"] > 0 for t in top) and all(t["ret"] < 0 for t in bot)
         assert len(top) == 3 and len(bot) == 2  # 奇数 top 多拿一笔
+
+
+class TestSplitTopFrac:
+    def test_default_matches_split_top_half(self):
+        """frac=0.5 与 score_return_study.split_top_half 逐位一致（旧行为不变）。"""
+        for n in (0, 1, 2, 5, 10, 11):
+            trades = [{"ret": float(r)} for r in range(n)]
+            a = wfs.split_top_frac(trades, 0.5)
+            b = srs.split_top_half(trades)
+            assert [t["ret"] for t in a[0]] == [t["ret"] for t in b[0]]
+            assert [t["ret"] for t in a[1]] == [t["ret"] for t in b[1]]
+
+    def test_top10(self):
+        trades = [{"ret": float(r)} for r in range(20)]  # 0..19
+        top, bottom = wfs.split_top_frac(trades, 0.10)
+        assert [t["ret"] for t in top] == [19.0, 18.0]  # ceil(20×0.10)=2
+        assert len(bottom) == 18
+
+    def test_small_group_min_one(self):
+        top, bottom = wfs.split_top_frac([{"ret": 0.1}], 0.10)
+        assert len(top) == 1 and bottom == []
+        assert wfs.split_top_frac([], 0.10) == ([], [])
+
+
+class TestCliTopFrac:
+    def test_default_half(self):
+        args = wfs._build_parser().parse_args([])
+        assert args.top_frac == pytest.approx(0.5)
+
+    def test_explicit(self):
+        args = wfs._build_parser().parse_args(["--top-frac", "0.10"])
+        assert args.top_frac == pytest.approx(0.10)
 
 
 class TestHalfWindowConsistency:
