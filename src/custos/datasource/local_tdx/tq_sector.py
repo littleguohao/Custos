@@ -218,6 +218,27 @@ class TQSectorSession:
             )
         return list(codes)
 
+    def get_relation(self, tcode: str) -> Any:
+        """返回个股板块关系列表（tq.get_relation 的薄封装）；失败返回结构化错误 dict。
+
+        供 pipeline 层（如 holding_sector_mapper 的 --use-tq-fallback）使用 ——
+        tqcenter 只允许在本模块（datasource 层）惰性导入，调用方不得直接 import。
+        """
+        init_err = self._ensure_initialized()
+        if init_err is not None:
+            return init_err
+        try:
+            rel = self._tq.get_relation(tcode)
+        except Exception as exc:  # noqa: BLE001
+            return _err("relation_failed", exc, tcode=tcode)
+        if not isinstance(rel, list):
+            return _err(
+                "relation_failed",
+                f"unexpected result: {type(rel).__name__}",
+                tcode=tcode,
+            )
+        return rel
+
     def get_sector_stocks(self, sector_code: str) -> Any:
         """返回单板块成分股列表；失败返回结构化错误 dict（标注板块）。"""
         init_err = self._ensure_initialized()

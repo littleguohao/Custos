@@ -248,6 +248,13 @@ def check_trading_day(date_str: str) -> dict:
     raises RuntimeError) and extracts the first JSON object printed on
     stdout. Returns {} when no JSON object is found; non-trading-day /
     failure semantics are decided by the caller (e.g. cal.get("is_trading_day")).
+
+    ⚠️ 分层说明（2026-08-24 解耦审计登记）：这里存在一条 **L0→L1 的向上依赖**
+    —— 本模块（core/pipeline_kit，L0）调 `datasource/trading_calendar.py`（L1，
+    登记在 DATA_ADAPTERS）。这条边走 **subprocess**（脚本路径 + `run_stage`），
+    所以在 `test_architecture_layers._build_graph` 的 import 依赖图里不可见，
+    不构成 import 分层反转；trading_calendar 登记在 DATA_ADAPTERS 是有意安排
+    （它是 TDX 交易日历维护脚本，只依赖 L0），此处保留 subprocess 调用。
     """
     r = run_stage(
         [

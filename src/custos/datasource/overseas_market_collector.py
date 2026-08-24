@@ -21,7 +21,8 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 
-from custos.core.paths import cn_now, MARKET_DIR  # noqa: E402
+from custos.core.paths import cn_now, write_json_atomic, MARKET_DIR  # noqa: E402
+from custos.core.contracts import require  # noqa: E402
 from custos.core.indicators import pct_change  # noqa: E402  涨跌幅判定/显示统一 round-2
 
 
@@ -333,7 +334,11 @@ def main():
         )
 
     MARKET_DIR.mkdir(parents=True, exist_ok=True)
-    inp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    # ⚠️ 落盘前校验：本采集器只负责 overseas_market / data_quality 两节，
+    # 不为 collector/amv_state 写的其他节背责（only 语义见 contracts._narrow）。
+    require("market_timing_input", data, only=("overseas_market", "data_quality"))
+    # 读-改-写的共享文件：collector → merge → amv_state 依次改写同一份 ⇒ 原子写
+    write_json_atomic(inp, data)
     print(inp)
     print(
         json.dumps(

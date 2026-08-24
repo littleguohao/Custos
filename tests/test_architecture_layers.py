@@ -61,6 +61,9 @@ BASE_MODULES = {
     # （holdings / close_review）的 live 判定点读 —— 与 b1_thresholds 同理，
     # 只能放 L0。只依赖 `paths`（L0）与 stdlib。
     "exit_rules.py",
+    # `runtime_gate.py` 是运行时门控判定模块（src/custos/README.md 本就把它
+    # 列为 core 基础模块）；2026-08-24 解耦审计补登记，对齐分层映射。
+    "runtime_gate.py",
 }
 LAYER_OF_DIR = {
     "datasource/local_tdx": 1,
@@ -506,13 +509,16 @@ class TestVendorLibsOnlyInDatasource:
     `market_timing_collector._get_mkt_reader` 的 global 缓存 reader、
     `calc_mfe_mae` 的在线/本地兜底）。数据层**内部**用这些库是合法实现
     （local_tdx_data 自己、collect_* 等），不在此限。
+    同日晚些时候的解耦审计又抓到一处：`holding_sector_mapper.init_tq`
+    直 import `tqcenter` —— 已收敛到 `datasource/local_tdx/tq_sector.py`
+    的 `TQSectorSession`，清单同步补上 `tqcenter`。
 
     与 `_build_graph` 不同，这里**函数体内的惰性 import 也算违规** ——
     三处已修违规全是函数体内 import，只扫顶层会全漏。
     `if __name__ == "__main__"` 块按本文件既有惯例豁免（演示/探针不算模块依赖）。
     """
 
-    VENDOR_LIBS = {"mootdx", "akshare", "efinance", "tushare", "qlib"}
+    VENDOR_LIBS = {"mootdx", "akshare", "efinance", "tushare", "qlib", "tqcenter"}
 
     # 豁免必须写明理由（格式参照 test_tdx_connection_hygiene.py 的 EXEMPT）。
     # 解耦落地后应为空集 —— 新增豁免等于重新开口子，必须在理由里说服 reviewer。
@@ -570,3 +576,181 @@ class TestVendorLibsOnlyInDatasource:
         """`__main__` 演示块不算模块依赖（与本文件 `_build_graph` 同口径）。"""
         src = 'import pandas as pd\n\nif __name__ == "__main__":\n    import mootdx\n'
         assert self._vendor_imports(src) == []
+
+
+class TestMarketTimingInputWriters:
+    """⚠️ `{date}_market_timing_input.json` 写方**反向扫描**（2026-08-24 解耦审计）。
+
+    该产物是全项目扇出最大的渐进填充文档（19 个消费者），曾被多处裸
+    `write_text` 就地改写（overseas_market_collector / refresh_market_indices /
+    daily_pipeline._dedupe_data_quality / sync_compass_amv 都是审计抓出来的）。
+    正向硬编码清单（`test_money_path_producers_validate_before_write`）只能
+    管住**已登记**的生产者 —— 新增一个绕过点它不会红。这里反过来：
+
+      ① 全仓扫出**所有**写该产物的文件，必须 ∈ 下面的登记表（不多不少）；
+      ② 每个写方源码必须同时出现**原子写**（`write_json_atomic`）与
+         **`require("market_timing_input", ...)`**（责任范围用 `only=` 划清）。
+
+    读方（load/read_text/glob/打印输出清单）不算写方，不得误伤。
+    """
+
+    # 登记表：写方 rel → 它负责校验的字段（only 的责任范围，仅注释用途）
+    REGISTERED_WRITERS = {
+        # 创建者：整份文档
+        "pipeline/market_timing/market_timing_collector.py",
+        # 增量合并：breadth/sentiment/turnover/overseas + amv_0 quality 自动确认
+        "pipeline/market_timing/merge_incremental_market.py",
+        # 0AMV regime 状态机：写 amv_0 的 state 字段
+        "pipeline/market_timing/amv_state.py",
+        # 指南针 0AMV 同步：填 amv_0day
+        "datasource/sync_compass_amv.py",
+        # 外围市场采集：写 overseas_market / data_quality
+        "datasource/overseas_market_collector.py",
+        # 盘后指数/成交额兜底刷新：a_share_indices/turnover/breadth/sentiment
+        "datasource/refresh_market_indices.py",
+        # 每日管线收尾：data_quality 去重
+        "pipeline/daily_pipeline.py",
+    }
+
+    # 变量绑定正则：`x = MARKET_DIR / f"{d}_market_timing_input.json"`，
+    # 以及括号折行形式 `x = (\n  Path(...) if ... else DIR / f"..."\n)`。
+    # 顺序敏感：先试不跨行（允许行内括号，如 Path("x")）；
+    # 跨行分支必须锚定 `=` 后紧跟的 `(`，否则会从前一条普通赋值
+    # （`hist = load(...)`) 跨行吞到产物字符串，把真写方吃掉。
+    _ASSIGN_RE = (
+        r"(?m)^\s*(\w+)\s*=\s*"
+        r"(?:[^\n]{0,200}?|\([\s\S]{0,300}?)"
+        r"_market_timing_input\.json"
+    )
+
+    @staticmethod
+    def _discover_writers() -> dict[str, str]:
+        """扫出所有写 `{date}_market_timing_input.json` 的文件 → {rel: src}。
+
+        判据：文件里把该产物路径绑给变量（单行或括号折行的赋值都算），
+        且同一变量被用于写调用（`write_text` / `write_json*` / `open("w")`）；
+        或把路径表达式**内联**直接传给 `write_json*`。
+        """
+        import re
+
+        writers: dict[str, str] = {}
+        for p in sorted(TOOLS.rglob("*.py")):
+            if "__pycache__" in str(p):
+                continue
+            src = p.read_text(encoding="utf-8")
+            if "_market_timing_input.json" not in src:
+                continue
+            vars_ = set(re.findall(TestMarketTimingInputWriters._ASSIGN_RE, src))
+            is_writer = any(
+                re.search(rf"\b{v}\.write_text\(", src)
+                or re.search(rf"\bwrite_json(?:_atomic)?\(\s*{v}\b", src)
+                or re.search(rf"\b{v}\.open\(\s*['\"]w", src)
+                for v in vars_
+            )
+            # 内联形式：write_json_atomic(MARKET_DIR / f"{d}_market_timing_input.json", ...)
+            if re.search(
+                r"write_json(?:_atomic)?\(\s*[\w.]+\s*/\s*f['\"][^'\"]*"
+                r"_market_timing_input\.json",
+                src,
+            ):
+                is_writer = True
+            if is_writer:
+                writers[p.relative_to(TOOLS).as_posix()] = src
+        return writers
+
+    def test_all_writers_are_registered(self):
+        found = self._discover_writers()
+        extra = sorted(set(found) - self.REGISTERED_WRITERS)
+        stale = sorted(self.REGISTERED_WRITERS - set(found))
+        assert not extra and not stale, (
+            f"market_timing_input 写方与登记表不符：\n"
+            f"  未登记的新写方（先修成原子写+require 再登记）：{extra}\n"
+            f"  登记表里的沉余项（已不再是写方）：{stale}"
+        )
+
+    def test_every_writer_is_atomic_and_validated(self):
+        import re
+
+        for rel, src in self._discover_writers().items():
+            assert "write_json_atomic(" in src, f"{rel} 未用原子写"
+            assert re.search(r"require\(\s*['\"]market_timing_input['\"]", src), (
+                f"{rel} 落盘前未 require('market_timing_input', ...)"
+            )
+
+    def test_scanner_catches_unregistered_writer(self, tmp_path):
+        """反向验证：一个新的裸写写方必须被抓到（检查器自身不能失效）。"""
+        import re
+
+        evil = tmp_path / "evil_writer.py"
+        evil.write_text(
+            "from pathlib import Path\n"
+            "def f(d):\n"
+            '    market_path = Path("x") / f"{d}_market_timing_input.json"\n'
+            '    market_path.write_text("{}", encoding="utf-8")\n',
+            encoding="utf-8",
+        )
+        # 直接对单文件源码跑与 _discover_writers 相同的判据
+        src = evil.read_text(encoding="utf-8")
+        vars_ = set(re.findall(TestMarketTimingInputWriters._ASSIGN_RE, src))
+        assert vars_ == {"market_path"} and re.search(
+            r"\bmarket_path\.write_text\(", src
+        ), "裸写写方漏检，反向扫描失效"
+
+    def test_scanner_ignores_readers(self):
+        """反向验证②：纯读方（load/read_text/glob）不得被判成写方。"""
+        found = self._discover_writers()
+        for reader in (
+            "pipeline/daily_report.py",
+            "pipeline/generate_risk_and_sectors.py",
+            "pipeline/screening/score_candidates.py",
+            "pipeline/market_timing/market_timing_scorer.py",
+            "pipeline/holdings/b1_holding_state.py",
+            "core/runtime_guards.py",
+        ):
+            assert reader not in found, f"读方 {reader} 被误判为写方"
+
+
+class TestReadExcelOnlyInTradesAndDatasource:
+    """⚠️ `pd.read_excel` 只允许出现在 `core/trades/` 与 `datasource/`。
+
+    第三方 xlsx 导出格式（通达信台账「持仓数据/交易记录/已清仓」sheet）的解析
+    只有一份实现：`core/trades/standardize_trades.py`（+ `incremental_ledger`）。
+    `holding_sector_mapper._load_holdings` 曾自带 `pd.read_excel(source,
+    sheet_name="持仓数据")` 分支重复解析同一格式、绕过 standardize 的清洗
+    （2026-08-24 解耦审计 V3，已删分支：--input 只接受 standardize 产物）。
+    """
+
+    ALLOWED_PREFIXES = ("core/trades/", "datasource/")
+
+    def test_no_read_excel_outside_allowed_dirs(self):
+        bad = []
+        for p in sorted(TOOLS.rglob("*.py")):
+            if "__pycache__" in str(p):
+                continue
+            rel = p.relative_to(TOOLS).as_posix()
+            if rel.startswith(self.ALLOWED_PREFIXES):
+                continue
+            src = p.read_text(encoding="utf-8")
+            tree = ast.parse(src)
+            for n in ast.walk(tree):
+                # pd.read_excel(...) / 任意对象的 .read_excel(...) 属性调用
+                if (
+                    isinstance(n, ast.Attribute)
+                    and n.attr == "read_excel"
+                    and isinstance(n.ctx, ast.Load)
+                ):
+                    bad.append(f"{rel}:L{n.lineno}")
+        assert not bad, (
+            "core/trades/ 与 datasource/ 之外出现 read_excel —— xlsx 导出格式"
+            "的解析应收敛到 standardize_trades：\n  " + "\n  ".join(bad)
+        )
+
+    def test_checker_catches_read_excel_call(self):
+        """反向验证：`pd.read_excel(...)` 调用必须被抓到。"""
+        tree = ast.parse("import pandas as pd\npd.read_excel('x.xlsx')\n")
+        hits = [
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Attribute) and n.attr == "read_excel"
+        ]
+        assert hits, "read_excel 调用漏检，检查失效"

@@ -11,9 +11,11 @@ Data source (local_block):
 The classic ``block_gn.dat``/``block_hy.dat`` membership files (what
 mootdx ``reader.block`` parses) do not exist in this TDX install, so
 concept/style/index/region dimensions are NOT covered locally and are
-reported as empty lists with a per-stock ``quality`` note. The old
-tqcenter (TQ plugin) path is removed; an opt-in ``--use-tq-fallback``
-flag can still query TQ when the local industry lookup misses.
+reported as empty lists with a per-stock ``quality`` note. tqcenter
+(TQ plugin) is only lazily imported inside the datasource layer
+(``datasource/local_tdx/tq_sector.py``); the opt-in
+``--use-tq-fallback`` flag queries TQ through ``TQSectorSession``
+when the local industry lookup misses.
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ import pandas as pd
 from custos.core.paths import TDX_ROOT, HOLDINGS_DIR, TRADES_DIR  # noqa: E402
 from custos.core.code_utils import suffix  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
+from custos.datasource.local_tdx.tq_sector import TQSectorSession  # noqa: E402
 
 OUT_DIR = HOLDINGS_DIR
 DEFAULT_POSITIONS = TRADES_DIR / "current_positions.json"
@@ -96,18 +99,23 @@ def lookup_name(tree: dict, code: str) -> str:
     return ""
 
 
-def init_tq():
-    from tqcenter import tq  # type: ignore
+def init_tq() -> TQSectorSession:
+    """创建 TQ 会话。
 
-    tq.initialize(__file__)
-    return tq
+    ⚠️ tqcenter 的唯一入口在 datasource 层（``tq_sector._import_tq``，
+    含 sys.path 注入 PYPlugins）—— 本模块（pipeline 层）不得直接 import
+    tqcenter，只通过 ``TQSectorSession`` 的结构化接口查询。
+    """
+    return TQSectorSession()
 
 
-def tq_relation(tq, tcode: str) -> list:
+def tq_relation(session: TQSectorSession, tcode: str) -> list:
+    """查询个股板块关系；结构化错误 dict 与异常都吞成 []（TQ 挂了不该让 stage 失败）。"""
     try:
-        return tq.get_relation(tcode)
+        rel = session.get_relation(tcode)
     except Exception:
         return []
+    return rel if isinstance(rel, list) else []
 
 
 def _parse_args():
@@ -115,7 +123,7 @@ def _parse_args():
     ap.add_argument(
         "--input",
         default=str(DEFAULT_POSITIONS),
-        help="standardized current_positions.json",
+        help="standardized current_positions.json（xlsx 导出需先经 standardize_trades）",
     )
     ap.add_argument("--date", default="")
     ap.add_argument(
@@ -127,10 +135,11 @@ def _parse_args():
 
 
 def _load_holdings(source: Path) -> pd.DataFrame:
-    if source.suffix.lower() == ".json":
-        hold = pd.DataFrame(json.loads(source.read_text(encoding="utf-8")))
-    else:
-        hold = pd.read_excel(source, sheet_name="持仓数据")
+    # ⚠️ 只接受 standardize 产物（current_positions.json）。
+    # 第三方 xlsx 导出的解析只有一份实现：core/trades/standardize_trades.py ——
+    # 这里曾有 xlsx 直读分支（sheet_name="持仓数据"）与它重复解析同一格式
+    # （绕过 standardize 的清洗），2026-08-24 解耦审计后删除。
+    hold = pd.DataFrame(json.loads(source.read_text(encoding="utf-8")))
     hold.columns = [str(c).strip() for c in hold.columns]
     hold["代码"] = hold["代码"].map(norm_code)
     hold = hold[

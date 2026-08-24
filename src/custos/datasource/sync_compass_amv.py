@@ -34,7 +34,8 @@ from typing import Any, Optional
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from custos.core.paths import cn_today, cn_now, MARKET_DIR  # noqa: E402
+from custos.core.paths import cn_today, cn_now, write_json_atomic, MARKET_DIR  # noqa: E402
+from custos.core.contracts import require  # noqa: E402
 from custos.datasource.local_tdx import compass_amv  # noqa: E402
 from custos.core.runtime_guards import trading_day_status  # noqa: E402
 
@@ -119,7 +120,10 @@ def fill_amv_0day(target: str, change_pct: float, market_dir: Path) -> bool:
     ):
         return False
     mkt["amv_0day"] = change_pct
-    path.write_text(json.dumps(mkt, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 落盘前校验：本函数只写 amv_0day 一个字段（only 语义见 contracts._narrow）
+    require("market_timing_input", mkt, only=("amv_0day",))
+    # 读-改-写的共享文件 ⇒ 原子写
+    write_json_atomic(path, mkt)
     return True
 
 
@@ -183,9 +187,16 @@ def main(argv: Optional[list] = None) -> int:
         if is_trading and verified and parsed["latest_date"] == target:
             latest_pct = parsed["records"][-1]["change_pct"]
             if latest_pct is not None:
-                summary["amv_0day_filled"] = fill_amv_0day(
-                    target, latest_pct, MARKET_DIR
-                )
+                try:
+                    summary["amv_0day_filled"] = fill_amv_0day(
+                        target, latest_pct, MARKET_DIR
+                    )
+                except SystemExit as exc:
+                    # ⚠️ fill_amv_0day 落盘前的 require() 失败抛 SystemExit
+                    # （非 Exception 子类，外层 best-effort 捕获漏它）——
+                    # 本脚本承诺「绝不中断管线」，这里显式降级为 WARN。
+                    print(f"[WARN] amv_0day 落盘前契约校验失败: {exc}")
+                    summary["amv_0day_filled"] = False
                 if summary["amv_0day_filled"]:
                     print(
                         f"[OK] amv_0day 已写入 {target}_market_timing_input.json (value={latest_pct}%)"

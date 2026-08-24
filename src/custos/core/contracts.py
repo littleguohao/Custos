@@ -405,6 +405,15 @@ SPECS: dict[str, dict] = {
                     },
                 },
             },
+            # `amv_0day` 由 sync_compass_amv 填充（指南针 0AMV 当日值），
+            # merge_incremental_market 据此把 amv_0.quality 自动置 confirmed。
+            # 盘前无值 ⇒ 不设 required。
+            "amv_0day": {
+                "type": (int, float),
+                "required": False,
+                "nullable": True,
+                "finite": True,
+            },
             "overseas_market": {
                 "type": dict,
                 "required": True,

@@ -19,14 +19,13 @@ python market_timing_collector.py --date 2026-07-09 --amv 1.2
 from __future__ import annotations
 
 import argparse
-import json
 import math
 from pathlib import Path
 from typing import Any
 
 
 from custos.datasource.local_tdx import local_tdx_data as ltd  # type: ignore
-from custos.core.paths import cn_now, MARKET_DIR  # noqa: E402
+from custos.core.paths import cn_now, write_json_atomic, MARKET_DIR  # noqa: E402
 from custos.core.indicators import pct_change as pct  # noqa: E402
 from custos.core.runtime_guards import previous_confirmed_trading_day  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
@@ -382,7 +381,8 @@ def main():
     # ⚠️ 落盘前校验：这是全项目扇出最大的产物（19 个消费者，12 个读 amv_0）。
     # 它是渐进填充文档，契约只管结构 —— 见 contracts.py。
     require("market_timing_input", data)
-    out.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 与其他写方（merge/amv_state/refresh/…）同一份读-改-写共享文件 ⇒ 原子写
+    write_json_atomic(out, data)
     print(out)
 
 

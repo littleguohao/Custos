@@ -40,7 +40,9 @@ from custos.core.paths import (
     PLANS,
     TOOLS,
     daily_report_dir,
+    write_json_atomic,
 )
+from custos.core.contracts import require
 from custos.core.pipeline_kit import run_stage
 
 PY = sys.executable
@@ -557,9 +559,10 @@ def _dedupe_data_quality(args: argparse.Namespace, stages: list[dict]) -> None:
                         if item not in seen:
                             seen.append(item)
                     dq[key] = seen
-            market_file.write_text(
-                json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
+            # 落盘前校验：本步只动 data_quality 一节（only 语义见 contracts._narrow）；
+            # 读-改-写的共享文件 ⇒ 原子写
+            require("market_timing_input", d, only=("data_quality",))
+            write_json_atomic(market_file, d)
         except Exception as e:
             stages.append(
                 {"stage": "dedupe_data_quality", "ok": False, "error": repr(e)}

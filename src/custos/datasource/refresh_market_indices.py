@@ -13,7 +13,8 @@ import json
 import math
 
 
-from custos.core.paths import MARKET_DIR  # noqa: E402
+from custos.core.paths import MARKET_DIR, write_json_atomic  # noqa: E402
+from custos.core.contracts import require  # noqa: E402
 from custos.core.indicators import pct_change as pct  # noqa: E402
 
 
@@ -339,9 +340,16 @@ def main():
         updated = True
 
     if updated:
-        market_path.write_text(
-            json.dumps(mkt, ensure_ascii=False, indent=2), encoding="utf-8"
+        # ⚠️ 落盘前校验：本 stage 只刷新 a_share_indices/turnover/breadth/sentiment
+        # 四节，责任范围就限它们（only 语义见 contracts._narrow）；
+        # 四节的 as_of 键本模块恒写（契约「补 as_of 必填」前置普查的结论）。
+        require(
+            "market_timing_input",
+            mkt,
+            only=("a_share_indices", "turnover", "market_breadth", "sentiment"),
         )
+        # 读-改-写的共享文件 ⇒ 原子写
+        write_json_atomic(market_path, mkt)
         print(
             f"[DONE] {indices_fixed} indices refreshed, market_timing_input.json updated"
         )

@@ -14,6 +14,7 @@ import argparse, json
 
 from custos.core.paths import cn_now, write_json_atomic, MARKET_DIR  # noqa: E402
 from custos.core.paths import read_json as load  # noqa: E402
+from custos.core.contracts import require  # noqa: E402
 
 MARKET = MARKET_DIR
 STATE = MARKET / "0amv_regime_history.json"
@@ -124,6 +125,9 @@ def compute(day: str, initial: str | None = None):
         }
     )
     # 读-改-写的共享文件：collector → merge → amv_state 依次改写同一份
+    # 落盘前校验：本模块只写 amv_0 的 state 字段，其中 effective_state 的
+    # 枚举域是审计 B1 的所在（见 merge_incremental_market 同款校验）。
+    require("market_timing_input", d, only=("amv_0.effective_state",))
     write_json_atomic(market_path, d)
     return rec
 
