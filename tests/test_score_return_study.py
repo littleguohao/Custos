@@ -216,8 +216,9 @@ class TestAsofNoLookahead:
         monkeypatch.setattr(
             ec,
             "compute_metrics",
-            lambda d, ix, code="", df_long=None: captured.update(df=d, df_long=df_long)
-            or {},
+            lambda d, ix, code="", df_long=None: (
+                captured.update(df=d, df_long=df_long) or {}
+            ),
         )
         monkeypatch.setattr(sc, "technical_score", lambda cand, w=None: (0, "弱", {}))
         srs.asof_technical_score(df, index_df, n - 1, "000001")

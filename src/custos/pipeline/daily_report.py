@@ -351,14 +351,13 @@ def holdings_plan_section(
 
 
 def _gather_inputs(a, day: str) -> dict[str, Any]:
-    """输入装载段：ChiefDecision/市场/板块/技术/前次复盘/盘前情报。
+    """输入装载段：ChiefDecision/市场/技术/前次复盘/盘前情报。
 
     模块级常量 DATA/REVIEWS 与被 monkeypatch 的访问器一律**运行时**读取，
     不得在函数默认值里捕获。
     """
     chief = load(DATA / "decisions" / f"{day}_chief_decision.json", {})
     market = load(DATA / "market" / f"{day}_market_timing_input.json", {})
-    sectors = load(DATA / "sectors" / f"{day}_sector_state.json", [])
     technical = load(DATA / "holdings" / f"{day}_holding_technical_summary.json", [])
     tech = {code(x.get("code")): x for x in technical}
     prior = previous_review(day)
@@ -384,7 +383,6 @@ def _gather_inputs(a, day: str) -> dict[str, Any]:
         DATA / "decisions" / f"{day}_chief_decision.json",
         DATA / "market" / f"{day}_market_timing_input.json",
         DATA / "trades" / "current_positions.json",
-        DATA / "sectors" / f"{day}_sector_state.json",
         DATA / "holdings" / f"{day}_holding_technical_summary.json",
         intel_path
         or (DATA / "news" / "premarket" / f"{day}_premarket_intelligence.json"),
@@ -392,7 +390,6 @@ def _gather_inputs(a, day: str) -> dict[str, Any]:
     return {
         "chief": chief,
         "market": market,
-        "sectors": sectors,
         "tech": tech,
         "prior": prior,
         "prior_day": prior_day,
