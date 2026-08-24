@@ -82,6 +82,7 @@
 | # | 事项 | 出处 |
 |---|---|---|
 | 60 | **plan 信号并入 SIGNAL_ORDER 与否**：v0.83 影子期观察——14:45/盘后两份报告每日输出「计划判定 vs 现行判定」对比（⚠️影子不一致标注）。**连续 5 个交易日**影子对比后 owner 拍板是否把 plan 信号（plan_stop_breach/plan_tp_scale_out）并入 `b1_holding_state.SIGNAL_ORDER` 转正式判定；切换本身是**独立提交**，不动其他字段。注意：影子期存量持仓多数无计划（早于机制落地），对比样本只含新建仓票。**判读注记（v0.86 review 发现的两个结构性事实）**：① 两份报告的「现行判定」列口径不同——review_core §2.1 比 `classify()` 输出（含 B1 短路/硬风险层），final_close_review §5 比 `b1 final_priority`，同一持仓可能一边「一致」一边「⚠️」，对照时以各自口径为准；② `source=default` 的计划止损=entry×0.93，恰与 live −7% P1 减仓线重合而影子判 P0 ⇒ 每张 default 计划到 −7% **必然**亮「⚠️影子不一致」——这是设计使然的噪音不是信号，统计一致性时应剔除 | 「因子×止盈×止损」架构计划 Phase C（v0.83） |
+| 64 | **rsi_deep（RSI 深水）进 live 与否**：R21 证据已齐——画像富集四臂全稳（R20）+ 进场 gate 跨窗通过（四档出场压基底，margin +26~+42pp，Wilson 与基底不重叠）。拍板点：① `rsi_state` 因子 status 升级（untested→candidate/active）；② 1800 接线方式——RD 标注升级进分层/门内提醒/还是新 gate 过滤；③ 若进，止损档位联动（跨窗显示 deep 配 12% 宽止损最优，与 live 现行 −7%/−10% 口径不同，需走 EXIT_RULES 配置而非硬编码） | R20/R21（v0.104-v0.111） |
 
 ## 维护约定
 
