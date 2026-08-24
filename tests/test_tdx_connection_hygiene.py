@@ -42,11 +42,10 @@ import pytest
 
 TOOLS = pathlib.Path(__file__).resolve().parents[1] / "src" / "custos"
 
-# 允许豁免的文件及理由（豁免必须写理由，不能空着）
-EXEMPT: dict[str, str] = {
-    # 每次新建局部客户端（非单例），不存在"连接死了不重建"的问题
-    "calc_mfe_mae.py": "两处都是函数内局部 client，用完即弃",
-}
+# 允许豁免的文件及理由（豁免必须写理由，不能空着）。
+# 2026-08-24 数据层解耦后为空：原豁免的 calc_mfe_mae.py 已不再自建 mootdx
+# client（在线/本地兜底都改走 local_tdx_data），豁免随违规一并清除。
+EXEMPT: dict[str, str] = {}
 
 # 认可的重连机制标志（任一即可）
 RECONNECT_MARKERS = (

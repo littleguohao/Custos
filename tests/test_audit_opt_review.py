@@ -46,7 +46,8 @@ class TestCalcMfeMaeFieldNames:
         )
         return path
 
-    def _run(self, tmp_path, monkeypatch, reader_daily):
+    def _run(self, tmp_path, monkeypatch, ohlcv):
+        from custos.datasource.local_tdx import local_tdx_data as ltd
         from custos.pipeline.close_review import calc_mfe_mae as cm
 
         pos = self._positions(tmp_path)
@@ -57,28 +58,12 @@ class TestCalcMfeMaeFieldNames:
             "load_entry_dates",
             lambda *a, **k: {"600000": {"entry_date": "2026-06-10"}},
         )
-
-        class _Reader:
-            @staticmethod
-            def factory(**kwargs):
-                return _Reader()
-
-            def daily(self, symbol=""):
-                return reader_daily()
-
-        monkeypatch.setitem(sys.modules, "mootdx.reader", type(sys)("mootdx.reader"))
-        sys.modules["mootdx.reader"].Reader = _Reader
-
-        class _Quotes:  # 兜底路径也必须离线,测试不得发真实网络请求
-            @staticmethod
-            def factory(**kwargs):
-                return _Quotes()
-
-            def bars(self, **kwargs):
-                return None
-
-        monkeypatch.setitem(sys.modules, "mootdx.quotes", type(sys)("mootdx.quotes"))
-        sys.modules["mootdx.quotes"].Quotes = _Quotes
+        # 2026-08-24 数据层解耦后 stub 数据层接口（calc_mfe_mae 不再自建 mootdx
+        # client）；在线兜底同样打桩——测试不得发真实网络请求。
+        monkeypatch.setattr(
+            ltd, "get_ohlcv_table", lambda code, count=260, adjust="qfq": ohlcv()
+        )
+        monkeypatch.setattr(ltd, "get_online_bars", lambda *a, **k: None)
         rc = cm.main(["--date", "2026-06-11"])
         out = json.loads(
             (tmp_path / "data" / "holdings" / "2026-06-11_mfe_mae.json").read_text(
@@ -109,9 +94,13 @@ class TestCalcMfeMaeFieldNames:
     def test_success_path_returns_zero_and_pct_keys(self, tmp_path, monkeypatch):
         import pandas as pd
 
+        # 数据层接口（get_ohlcv_table）返回 date 成列的表
         bars = pd.DataFrame(
-            {"high": [12.0, 13.0], "low": [9.5, 9.8]},
-            index=pd.to_datetime(["2026-06-10", "2026-06-11"]),
+            {
+                "date": pd.to_datetime(["2026-06-10", "2026-06-11"]),
+                "high": [12.0, 13.0],
+                "low": [9.5, 9.8],
+            }
         )
         rc, row = self._run(tmp_path, monkeypatch, lambda: bars)
         assert rc == 0
@@ -821,20 +810,16 @@ class TestPendingPositionMissingFields:
             "load_entry_dates",
             lambda *a, **k: {"600000": {"entry_date": "2026-06-10"}},
         )
+        # 数据层接口（get_ohlcv_table）返回 date 成列的表；2026-08-24 解耦后
+        # calc_mfe_mae 不再自建 mootdx client，stub 数据层接口即可
+        from custos.datasource.local_tdx import local_tdx_data as ltd
+
         bars = pd.DataFrame(
-            {"high": [12.0], "low": [9.5]}, index=pd.to_datetime(["2026-06-10"])
+            {"date": pd.to_datetime(["2026-06-10"]), "high": [12.0], "low": [9.5]}
         )
-
-        class _Reader:
-            @staticmethod
-            def factory(**kwargs):
-                return _Reader()
-
-            def daily(self, symbol=""):
-                return bars
-
-        monkeypatch.setitem(sys.modules, "mootdx.reader", type(sys)("mootdx.reader"))
-        sys.modules["mootdx.reader"].Reader = _Reader
+        monkeypatch.setattr(
+            ltd, "get_ohlcv_table", lambda code, count=260, adjust="qfq": bars
+        )
         cm.main(["--date", "2026-06-11"])
         out = json.loads(
             (tmp_path / "data" / "holdings" / "2026-06-11_mfe_mae.json").read_text(
@@ -879,20 +864,16 @@ class TestPendingPositionMissingFields:
             "load_entry_dates",
             lambda *a, **k: {"600000": {"entry_date": "2026-06-10"}},
         )
+        # 数据层接口（get_ohlcv_table）返回 date 成列的表；2026-08-24 解耦后
+        # calc_mfe_mae 不再自建 mootdx client，stub 数据层接口即可
+        from custos.datasource.local_tdx import local_tdx_data as ltd
+
         bars = pd.DataFrame(
-            {"high": [12.0], "low": [9.5]}, index=pd.to_datetime(["2026-06-10"])
+            {"date": pd.to_datetime(["2026-06-10"]), "high": [12.0], "low": [9.5]}
         )
-
-        class _Reader:
-            @staticmethod
-            def factory(**kwargs):
-                return _Reader()
-
-            def daily(self, symbol=""):
-                return bars
-
-        monkeypatch.setitem(sys.modules, "mootdx.reader", type(sys)("mootdx.reader"))
-        sys.modules["mootdx.reader"].Reader = _Reader
+        monkeypatch.setattr(
+            ltd, "get_ohlcv_table", lambda code, count=260, adjust="qfq": bars
+        )
         cm.main(["--date", "2026-06-11"])
         got = json.loads(
             (tmp_path / "data" / "holdings" / "2026-06-11_mfe_mae.json").read_text(

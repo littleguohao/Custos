@@ -2972,7 +2972,6 @@ def trades_signature(args: Any, codes: list[str]) -> dict[str, Any]:
 
     digest = hashlib.sha1(",".join(codes).encode("utf-8")).hexdigest()[:12]
     return {
-        "data_source": args.data_source,
         "scorer": args.scorer,
         "weekly": bool(args.weekly),
         "step": args.step,
@@ -3058,7 +3057,6 @@ def _portfolio_from_trades(args: Any, codes: list[str]) -> int:
         "mode": "trade_sim",
         "scorer": args.scorer,
         "weekly": args.weekly,
-        "data_source": args.data_source,
         "start": args.start or None,
         "end": args.end or None,
         "cost_bps": args.cost_bps,
@@ -3228,29 +3226,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="universe 用本地 vipdoc 实有文件（推荐：覆盖率~100%%、不依赖在线代码表；否则用在线 get_stock_list）",
     )
     ap.add_argument(
-        "--data-source",
-        choices=["tdx", "qlib", "csv"],
-        default="tdx",
-        help="行情数据源:tdx=本地通达信(默认,**已前复权** owner 2026-08-04 拍板;\n"
-        "首次须跑 local_tdx/adjust_factors.py --warmup 预热权息);"
-        "qlib/csv=E:\\S_DATA(含退市股,前复权,1999~2026-02)",
-    )
-    ap.add_argument(
-        "--s-data-root",
-        default=os.environ.get("S_DATA_ROOT") or r"E:\S_DATA",
-        help=r"s_data 根目录(含 Q_DATA/CSV_DATA);可用环境变量 S_DATA_ROOT 覆盖,默认 E:\S_DATA",
-    )
-    ap.add_argument(
         "--start",
         default="",
         help="回测起点 YYYY-MM-DD(在 --count 之前应用;配合 walk-forward)",
     )
     ap.add_argument("--end", default="", help="回测终点 YYYY-MM-DD(默认不限)")
-    ap.add_argument(
-        "--universe-sdata",
-        action="store_true",
-        help="universe 用 s_data 全市场(含退市股;替代 --universe-local 的 tdx 文件列表)",
-    )
     ap.add_argument("--seed", type=int, default=0, help="随机抽样种子（可复现）")
     ap.add_argument("--count", type=int, default=500, help="每股回溯 K 线根数")
     ap.add_argument("--horizons", default="5,10,20", help="前向窗口(日)，逗号分隔")
@@ -3481,7 +3461,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _resolve_universe(args: Any, ap: argparse.ArgumentParser) -> list[str]:
-    """解析股票宇宙：--codes-file（钉死，优先级最高）> --universe-sdata >
+    """解析股票宇宙：--codes-file（钉死，优先级最高）>
     --universe-local/--universe-sample > --codes。为空 fail-closed（ap.error）。
     stderr 的 [INFO] 行是 m2_stop_sweep 等扫描脚本的解析面，逐字保留。"""
     if args.codes_file:
@@ -3500,22 +3480,6 @@ def _resolve_universe(args: Any, ap: argparse.ArgumentParser) -> list[str]:
         ]
         print(
             f"[INFO] universe=codes_file({p.name}) {len(codes)} 只（**已钉死**）",
-            file=sys.stderr,
-        )
-    elif args.universe_sdata:
-        from custos.datasource import s_data  # noqa: PLC0415
-
-        src_root = Path(args.s_data_root) / (
-            "CSV_DATA" if args.data_source == "csv" else "Q_DATA"
-        )
-        base = s_data.list_universe(src_root, source=args.data_source)
-        codes = (
-            sample_codes(base, args.universe_sample, args.seed)
-            if args.universe_sample > 0
-            else list(base)
-        )
-        print(
-            f"[INFO] universe=s_data({args.data_source}) 共 {len(base)} 只，取 {len(codes)} 只（seed={args.seed}）",
             file=sys.stderr,
         )
     elif args.universe_local or args.universe_sample > 0:
@@ -3539,39 +3503,24 @@ def _resolve_universe(args: Any, ap: argparse.ArgumentParser) -> list[str]:
     else:
         codes = [c.strip() for c in args.codes.split(",") if c.strip()]
     if not codes:
-        ap.error(
-            "需提供 --codes / --universe-sample N / --universe-local / --universe-sdata"
-        )
+        ap.error("需提供 --codes / --universe-sample N / --universe-local")
     return codes
 
 
 def _make_loader(
     args: Any, loader: Optional[Callable[[list[str], int], dict]]
 ) -> tuple[tuple[int, ...], Callable]:
-    """horizons 解析 + 加载器选择：注入 loader 优先，否则按 data-source 选
-    tdx（本地通达信）/ s_data（csv/qlib）。返回 ``(horizons, load)``。"""
+    """horizons 解析 + 加载器选择：注入 loader 优先，否则用 tdx（本地通达信，
+    **已前复权**；首次须跑 local_tdx/adjust_factors.py --warmup 预热权息）。
+    返回 ``(horizons, load)``。"""
     horizons = tuple(int(h) for h in args.horizons.split(",") if h.strip())
     if loader is not None:
         return horizons, loader
     import functools
 
-    if args.data_source == "tdx":
-        load = functools.partial(
-            _load_bars_local, start=args.start or None, end=args.end or None
-        )
-    else:
-        from custos.datasource import s_data  # noqa: PLC0415
-
-        fn = (
-            s_data.load_bars_csv if args.data_source == "csv" else s_data.load_bars_qlib
-        )
-        sub = "CSV_DATA" if args.data_source == "csv" else "Q_DATA"
-        load = functools.partial(
-            fn,
-            start=args.start or None,
-            end=args.end or None,
-            root=str(Path(args.s_data_root) / sub),
-        )
+    load = functools.partial(
+        _load_bars_local, start=args.start or None, end=args.end or None
+    )
     return horizons, load
 
 
@@ -3800,8 +3749,7 @@ def _print_trade_report(args: Any, payload: dict[str, Any], tsum: dict) -> None:
         )
     tstop_desc = f" / 时间止损{args.time_stop}根" if args.time_stop else ""
     print(
-        f"\n=== B1 交易模拟（scorer={args.scorer}, {'周线' if args.weekly else '日线'}, "
-        f"数据源={args.data_source}"
+        f"\n=== B1 交易模拟（scorer={args.scorer}, {'周线' if args.weekly else '日线'}"
         f"{(' ' + (args.start or '…') + '~' + (args.end or '…')) if (args.start or args.end) else ''}, "
         f"入场门槛={args.entry_filter}, cost={args.cost_bps}bps, "
         f"{'仅0AMV做多' if args.amv_long_only else '全regime'}, "
@@ -3835,7 +3783,6 @@ def _run_trade_sim(
         "mode": "trade_sim",
         "scorer": args.scorer,
         "weekly": args.weekly,
-        "data_source": args.data_source,
         "start": args.start or None,
         "end": args.end or None,
         "cost_bps": args.cost_bps,

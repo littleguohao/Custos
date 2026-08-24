@@ -585,7 +585,7 @@ def _firings_payload(n_days=3, extra=None):
         "entry_filter": "j_low",
         "feature_scores": "none",
         "delisted_ret": -1.0,
-        "universe": "sdata",
+        "universe": "local",
         "sector_features": False,
         "style_features": False,
         "trade_sim": True,

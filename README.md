@@ -31,10 +31,9 @@ uv sync
 uv run pytest -q                    # 全量测试（4300+ 用例）
 ```
 
-两个环境变量：
+一个环境变量：
 
 - `TDX_ROOT` —— 通达信安装目录（默认 `E:\new_tdx64`）
-- `S_DATA_ROOT` —— 回测数据根，含 `Q_DATA/CSV_DATA`（默认 `E:\S_DATA`）
 
 持仓数据放 `data/trades/`：`master_trade_ledger.csv`（主台账）、
 `current_positions.json`（持仓快照）、

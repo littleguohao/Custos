@@ -72,9 +72,8 @@
      复用前核对 `trades_signature`，口径不一致直接非零退出，失败自动退回全量回测。
      只剩 `--top-n` 那条必须自己跑（collect_all，逐笔是未去重全候选）。
      **整轮 25 次回测 → 18 次**。
-  ③ `--data-source qlib` 可跳过前复权。tdx 路径要逐票读 xdxr 权息、自算因子；
-     S_DATA 的 qlib bundle **已是前复权**，纯文件读取。它同时**含退市股**
-     （point-in-time 宇宙）⇒ 顺带去掉幸存者偏差。代价见下方「数据源」。
+  ③ ~~`--data-source qlib` 可跳过前复权~~ —— qlib/s_data 接口已于 2026-08-24
+     整删（改用 tdx 自算前复权），本条作废，仅留档说明当时为什么没走这条路。
 ~~还没做、需要改 backtest_factors 主循环的一条（收益最大）：④ 把「方案外循环 /
 股票内循环」翻过来~~ —— **已被实测否掉**：
 
@@ -87,7 +86,7 @@
 - 第 ④ 条「股票外循环」**彻底作废**——把加载从 17 次降到 1 次，总共只省 8 秒。
   我原先以为「重复加载 25 遍」是主因，实测证明那是错的。
 - 第 ③ 条切 qlib 的**加速**价值也随之归零（它省的是前复权，也在那 8 秒里）；
-  切 qlib 的理由回到**去幸存者偏差**这一个。
+  qlib/s_data 接口已于 2026-08-24 整删。
 - 真正有效的只剩两条：
   · **`--jobs N` 并行** —— 99% CPU-bound ⇒ 近线性加速。单方案 ~1247s，
     `-j 6` 可把 35 个方案从约 12 小时压到 2 小时上下。**这是目前唯一的实用加速手段。**
@@ -106,21 +105,16 @@
   · `backtest_factors` 每轮打 `[MEM] 峰值 XXXMb / N 笔`，据此校准 `MEM_PER_JOB_MB`；
     落盘改流式（`write_json_stream`，不再先拼出整个 JSON 字符串），复用路径不重写逐笔
 
-## 数据源：tdx vs qlib（2026-08-05）
+## 数据源：只有 tdx（2026-08-24 起）
 
-默认 `--data-source tdx` = 读**本地**通达信 vipdoc 的 `.day` 二进制（不是联网取行情）。
-但有两处仍会联网：① 某只票本地读不到时回退在线 bars；② 前复权要 xdxr 权息，
-`data/market/xdxr/` 缓存没有就经通达信协议取。
+`--data-source` 已随 s_data 整删移除。唯一数据源 = 读**本地**通达信 vipdoc 的
+`.day` 二进制（不是联网取行情）。但有两处仍会联网：① 某只票本地读不到时回退
+在线 bars；② 前复权要 xdxr 权息，`data/market/xdxr/` 缓存没有就经通达信协议取。
 
-| | tdx（默认） | qlib / csv（S_DATA） |
-|---|---|---|
-| 来源 | 本地 vipdoc `.day` | Q_DATA/CSV_DATA bundle |
-| 宇宙 | **只含当前挂牌股** ⇒ 有幸存者偏差 | **含退市股**（point-in-time）⇒ 可去偏 |
-| 复权 | 逐票算前复权（最慢且唯一要联网的环节） | **已是前复权** ⇒ 完全跳过 |
-| 覆盖 | 到最新交易日 | 1999-11→**2026-02**，且 2020-09-28→2021-07-30 缺约 10 个月 |
-
-⚠️ 换数据源=换宇宙，结果与之前几轮**不可比**，所以数据源已进文件名指纹
-（`_fingerprint`），两批结果不会被混着汇总。要换就整轮换。
+⚠️ tdx 宇宙**只含当前挂牌股** ⇒ 有幸存者偏差；曾用 S_DATA 的 qlib/csv bundle
+（含退市股、已前复权）做去偏对照，该接口 2026-08-24 整删（覆盖缺口 2020-09→
+2021-07 约 10 个月、数据止于 2026-02，维护不动）。文件名指纹不再含数据源后缀，
+tdx 无后缀的旧结果文件名保持兼容。
 """
 
 from __future__ import annotations
@@ -446,7 +440,6 @@ WINDOW_COUNT = 1500  # 钉窗口时的 --count：必须**大于窗口内的 K �
 def _base_args(
     sample: int,
     cross: bool,
-    data_source: str = "tdx",
     window: Optional[tuple[str, str]] = None,
     codes_file: Optional[str] = None,
 ) -> list[str]:
@@ -466,22 +459,10 @@ def _base_args(
         # （实测一轮扫描中 5535→5536）；seed 固定没用，**被抽的池子变了**
         # ⇒ sample_codes 抽到另一组 1000 只，各方案宇宙不同。
         a += ["--codes-file", codes_file]
-    elif data_source == "tdx":
+    else:
         # 本地通达信 vipdoc（.day 二进制）。⚠️ 只含**当前挂牌**的票 ⇒ 有幸存者偏差；
         # 且要逐票算前复权（xdxr 权息，缓存冷时还要联网）——全链最慢的一环。
         a += ["--universe-local", "--universe-sample", str(sample)]
-    else:
-        # S_DATA 的 qlib/csv bundle：**含退市股**(point-in-time)、**已是前复权**
-        # ⇒ 去幸存者偏差 + 完全跳过 xdxr。代价：2020-09-28→2021-07-30 有约 10 个月
-        # 缺口，且数据到 2026-02 截止。换数据源会改 trades_signature ⇒
-        # **与之前几轮结果不可比**，要换就整轮换。
-        a += [
-            "--data-source",
-            data_source,
-            "--universe-sdata",
-            "--universe-sample",
-            str(sample),
-        ]
     if cross:
         # ⚠️ --count 必须加大：默认 500 根从今天往前数，加 --start/--end 只覆盖窗口尾部
         a += [
@@ -507,7 +488,6 @@ def _base_args(
 
 def _fp_suffix(
     cross: bool,
-    data_source: str = "tdx",
     window: Optional[tuple[str, str]] = None,
     pin_universe: bool = False,
 ) -> str:
@@ -516,7 +496,7 @@ def _fp_suffix(
     拼装式而不是一串正则分组，是为了以后加开关时 `_collect` 不用同步改正则
     （改漏了就会重演混批事故）。
     """
-    s = "" if data_source == "tdx" else f"_{data_source}"
+    s = ""
     if window:
         s += "_w" + window[0].replace("-", "") + "-" + window[1].replace("-", "")
     if pin_universe:
@@ -529,7 +509,6 @@ def _fp_suffix(
 def _fingerprint(
     sample: int,
     cross: bool,
-    data_source: str = "tdx",
     window: Optional[tuple[str, str]] = None,
     pin_universe: bool = False,
 ) -> str:
@@ -539,14 +518,13 @@ def _fingerprint(
     再跑 1000 样本时，300 的旧文件被 `[SKIP]` 直接复用 ⇒ 汇总表里 ~400 笔的方案与
     ~1300 笔的基准混在一起比，A 组一半方案的判定全部无效。
 
-    ⚠️ **也必须含数据源**：tdx（本地 vipdoc，只有当前挂牌股）与 qlib（S_DATA，含退市股、
-    已前复权）是**两个不同的宇宙**，笔数与收益都不可比。
-
     ⚠️ **窗口与宇宙钉死也要进来**：钉了窗口/宇宙的批次与没钉的不是同一件事
     （前者可复现、后者随通达信下载漂移），混着汇总同样无效。
-    `tdx` / 未钉 不加后缀，保持已有文件名不失效。
+    未钉 不加后缀，保持已有文件名不失效。
+    （数据源后缀曾用于区分 tdx 与 qlib 两批结果；qlib 已整删，tdx 本就无后缀，
+    旧文件名不受影响。）
     """
-    return f"s{sample}" + _fp_suffix(cross, data_source, window, pin_universe)
+    return f"s{sample}" + _fp_suffix(cross, window, pin_universe)
 
 
 def _run(
@@ -557,7 +535,6 @@ def _run(
     cross: bool,
     force: bool,
     capture: bool = False,
-    data_source: str = "tdx",
     window: Optional[tuple[str, str]] = None,
     codes_file: Optional[str] = None,
 ) -> tuple[str, Optional[pathlib.Path], str]:
@@ -568,7 +545,7 @@ def _run(
     """
     tag = f"{group}/{name}"
     OUTDIR.mkdir(parents=True, exist_ok=True)
-    fp = _fingerprint(sample, cross, data_source, window, bool(codes_file))
+    fp = _fingerprint(sample, cross, window, bool(codes_file))
     out = OUTDIR / f"{group}__{name}__{fp}.json"
     if out.exists() and not force:
         return tag, out, f"[SKIP] {out.name}"
@@ -606,7 +583,7 @@ def _run(
     def _exec(args: list[str]) -> tuple[int, float]:
         cmd = (
             [sys.executable, str(SCRIPT)]
-            + _base_args(sample, cross, data_source, window, codes_file)
+            + _base_args(sample, cross, window, codes_file)
             + GROUPS[group]["common"]
             + args
             + ["--out", str(out)]
@@ -741,7 +718,6 @@ def _run_all(
     cross: bool,
     force: bool,
     jobs: int,
-    data_source: str = "tdx",
     window: Optional[tuple[str, str]] = None,
     codes_file: Optional[str] = None,
 ) -> None:
@@ -779,7 +755,6 @@ def _run_all(
                     cross,
                     force,
                     False,
-                    data_source,
                     window,
                     codes_file,
                 )
@@ -802,7 +777,6 @@ def _run_all(
                     cross,
                     force,
                     True,
-                    data_source,
                     window,
                     codes_file,
                 ): f"{g}/{n}"
@@ -1115,16 +1089,15 @@ def _collect_row(group: str, name: str, s: dict, sample: int) -> dict:
 def _collect(
     cross: bool,
     sample: Optional[int] = None,
-    data_source: str = "tdx",
     window: Optional[tuple[str, str]] = None,
     pin_universe: bool = False,
 ) -> dict[str, list[dict]]:
     """按指纹收集结果。``sample=None`` 时自动取**最大样本量**那一批。
 
-    只汇总同一指纹的文件——混合样本量、混合数据源、混合窗口比较都是无意义的
+    只汇总同一指纹的文件——混合样本量、混合窗口比较都是无意义的
     （见 `_fingerprint` 注释）。
     """
-    suffix = _fp_suffix(cross, data_source, window, pin_universe)
+    suffix = _fp_suffix(cross, window, pin_universe)
     sample = _resolve_sample(_available_samples(suffix), sample)
     if sample is None:
         return {g: [] for g in GROUPS}
@@ -1804,19 +1777,18 @@ def _warn_missing(groups: dict[str, list[dict]]) -> None:
 def report(
     cross: bool,
     sample: Optional[int] = None,
-    data_source: str = "tdx",
     window: Optional[tuple[str, str]] = None,
     pin_universe: bool = False,
 ) -> None:
-    groups = _collect(cross, sample, data_source, window, pin_universe)
+    groups = _collect(cross, sample, window, pin_universe)
     if not any(groups.values()):
         print("没有结果文件，先跑扫描")
         return
     n_sample = next((r["sample"] for rs in groups.values() for r in rs), None)
     print("\n" + "#" * 74)
     print(
-        f"# M2 机制扫描  样本 {n_sample} 只  数据源 {data_source}"
-        f"{'（含退市股/已前复权）' if data_source != 'tdx' else '（本地 vipdoc，仅当前挂牌）'}"
+        f"# M2 机制扫描  样本 {n_sample} 只  数据源 tdx"
+        f"（本地 vipdoc，仅当前挂牌）"
         f"{'  区间 2022-2024（跨窗复核）' if cross else ''}"
         f"{f'  窗口 {window[0]}~{window[1]}(已钉死)' if window else ''}"
         f"{'  宇宙已钉死' if pin_universe else ''}"
@@ -1847,17 +1819,17 @@ def report(
 
 
 def _prepare_universe(
-    sample: int, cross: bool, data_source: str, window: Optional[tuple[str, str]]
+    sample: int, cross: bool, window: Optional[tuple[str, str]]
 ) -> Optional[str]:
     """先跑一次 `--dump-codes` 落一份代码表，供全部方案共用 ⇒ **钉死宇宙**。
 
-    为什么不在本脚本里直接抽样：universe 解析要 import `local_tdx_data`（依赖 TDX_ROOT）
-    或 `s_data`（依赖 S_DATA_ROOT），在没有这些数据的机器上会直接失败。
+    为什么不在本脚本里直接抽样：universe 解析要 import `local_tdx_data`（依赖
+    TDX_ROOT），在没有这些数据的机器上会直接失败。
     交给 `backtest_factors --dump-codes` 复用它已有的 universe 逻辑，只做一次目录列举，
     很快（不加载任何 K 线）。
     """
     OUTDIR.mkdir(parents=True, exist_ok=True)
-    fp = _fingerprint(sample, cross, data_source, window, True)
+    fp = _fingerprint(sample, cross, window, True)
     path = OUTDIR / f"_universe__{fp}.txt"
     if path.is_file() and path.stat().st_size > 0:
         n = sum(1 for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip())
@@ -1865,16 +1837,7 @@ def _prepare_universe(
         return str(path)
     # 只要 universe 选择相关的参数，不要窗口/回测参数
     probe = ["--trade-sim"]
-    if data_source == "tdx":
-        probe += ["--universe-local", "--universe-sample", str(sample)]
-    else:
-        probe += [
-            "--data-source",
-            data_source,
-            "--universe-sdata",
-            "--universe-sample",
-            str(sample),
-        ]
+    probe += ["--universe-local", "--universe-sample", str(sample)]
     probe += ["--dump-codes", str(path)]
     print(f"[PREP] 落一份宇宙到 {path.name} 供全部方案共用")
     r = subprocess.run([sys.executable, str(SCRIPT)] + probe, cwd=str(BASE))
@@ -1915,15 +1878,6 @@ def _build_parser() -> argparse.ArgumentParser:
         default=1,
         help="并行进程数（各方案相互独立；默认 1=串行）。见模块开头「为什么慢」。"
         "⚠️ 内存乘 N，会按可用内存自动收敛",
-    )
-    ap.add_argument(
-        "--data-source",
-        choices=["tdx", "qlib", "csv"],
-        default="tdx",
-        help="tdx(默认)=本地通达信 vipdoc,只含当前挂牌股(有幸存者偏差)、"
-        "要逐票算前复权; qlib/csv=S_DATA bundle,含退市股且已前复权"
-        "(去偏且更快,但 2020-09~2021-07 有缺口、数据到 2026-02)。"
-        "⚠️ 换数据源=换宇宙,结果与之前几轮不可比,已进文件名指纹",
     )
     ap.add_argument(
         "--window",
@@ -1997,9 +1951,9 @@ def _run_schemes(
         return 2, None
     codes_file = None
     if a.pin_universe:
-        codes_file = _prepare_universe(sample, a.cross_window, a.data_source, window)
+        codes_file = _prepare_universe(sample, a.cross_window, window)
     print(
-        f"将跑 {len(todo)} 个方案，样本 {sample} 只，数据源 {a.data_source}"
+        f"将跑 {len(todo)} 个方案，样本 {sample} 只"
         f"{'，区间 2022-2024' if a.cross_window else ''}"
         f"{f'，窗口 {window[0]}~{window[1]}' if window else ''}"
         f"{'，宇宙已钉死' if codes_file else ''}"
@@ -2011,7 +1965,6 @@ def _run_schemes(
         a.cross_window,
         a.force,
         max(1, a.jobs),
-        a.data_source,
         window,
         codes_file,
     )
@@ -2039,7 +1992,6 @@ def main() -> int:
     report(
         a.cross_window,
         sample if not a.report_only else a.sample,
-        a.data_source,
         window,
         bool(codes_file) or (a.report_only and a.pin_universe),
     )

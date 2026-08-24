@@ -10,7 +10,8 @@
 
 > 其余内容都是**现状**：各数据源当前状态、已知问题、实测数据。
 > 数据需求与获取方式的全景见 `DATA_SOURCE_COVERAGE_MATRIX.md`；
-> 接口用法见 `TDX_LOCAL_INTERFACES.md` / `MOOTDX_INTERFACES.md` / `QLIB_LOCAL_DATA.md`。
+> 接口用法见 `TDX_LOCAL_INTERFACES.md` / `MOOTDX_INTERFACES.md`
+> （`QLIB_LOCAL_DATA.md` 对应接口已于 2026-08-24 v0.109 整体删除，仅存作历史档案）。
 > 2026-08-06 重写：此前这份文档是「原则 + 教训 + 清单 + 查证结论」混编。
 
 ---
@@ -217,7 +218,8 @@ def list_bundles(root=DEFAULT_Q_ROOT):   # ← DEFAULT_Q_ROOT 在 def 执行时�
 ```
 
 之后 `monkeypatch.setattr(s_data, "DEFAULT_Q_ROOT", tmp)` **对这个默认值毫无影响**，
-因为它早已是一个具体的 Path 对象。实际案例：`gap_report` 调 `Q.list_bundles()`
+因为它早已是一个具体的 Path 对象。实际案例（历史案例——`s_data.py` 已随 qlib 接口
+于 v0.109 整体删除，教训本身仍然成立）：`gap_report` 调 `Q.list_bundles()`
 不传 root，测试怎么 patch 都读的是 `E:\S_DATA`。
 
 ### ③ 从常量派生的常量

@@ -45,8 +45,8 @@ __all__ = [
     "ema"
 ]  # re-export 声明（pylint 依此识别非残留），无 star-import 故不影响其他名字
 
-from custos.core.paths import TDX_ROOT, MARKET_DIR  # noqa: E402
-from custos.core.code_utils import norm_code, split_code, market_of  # noqa: E402
+from custos.core.paths import MARKET_DIR  # noqa: E402
+from custos.core.code_utils import norm_code, split_code  # noqa: E402  split_code: 包 API re-export
 from custos.core.indicators import amplitude_pct as amplitude_pct_of  # noqa: E402
 from custos.core.b1_thresholds import (
     REVERSAL_AMPLITUDE_PCT,  # noqa: E402
@@ -60,37 +60,37 @@ from custos.core.b1_thresholds import (
 OUT_DIR = MARKET_DIR
 
 
-def _read_vipdoc_mootdx(tdx_code: str) -> pd.DataFrame:
-    """Read K-line via mootdx Reader (unified data layer)."""
-    # BJ 直读（v0.101）：mootdx Reader 把 920xxx 误路由到 SH（读不到 ⇒ 持仓技术面
-    # 全空，"no kline data"——曙光数创 920808 实盘暴露）；北交所走
-    # local_tdx_data 的 vipdoc/bj/lday .day 直读，与选股/回测链同口径。
-    if market_of(tdx_code) == "BJ":
+def _read_vipdoc_daily(tdx_code: str) -> pd.DataFrame:
+    """统一走数据层 `local_tdx_data.read_vipdoc_daily` 读本地 vipdoc 日线。
+
+    2026-08-24 数据层解耦：此前非 BJ 分支在本模块直调
+    `mootdx Reader.factory(tdxdir=TDX_ROOT).daily()`，绕过 datasource 层
+    （pipeline 不得直 import 第三方行情包）。等价性已用合成 .day 文件核对：
+    read_vipdoc_daily 的沪深路径就是同一个 mootdx Reader（index.name="date" 后
+    reset_index），date/open/high/low/close/amount/volume 逐值一致、同为升序、
+    单位相同（amount=元，volume=手）；仅多出 code/source 两个信息列，
+    消费方（analyze/box/kdj…）不读，无影响。BJ 分支本就走它的 .day 直读
+    （mootdx Reader 把 920xxx 误路由到 SH，曙光数创 920808 实盘暴露），不变。
+    """
+    try:
         from custos.datasource.local_tdx.local_tdx_data import (  # noqa: PLC0415
             read_vipdoc_daily,
         )
 
         return read_vipdoc_daily(tdx_code)
-    prefix, code = split_code(tdx_code)
-    raw = f"{prefix}{code}"
-    try:
-        from mootdx.reader import Reader
-
-        reader = Reader.factory(market="std", tdxdir=str(TDX_ROOT))
-        df = reader.daily(symbol=raw)
-        if df is None or len(df) == 0:
-            return pd.DataFrame()
-        df = df.reset_index()
-        if "datetime" in df.columns:
-            df = df.rename(columns={"datetime": "date"})
-        return df
-    except Exception:
+    except Exception as exc:
+        # 外部契约不变：失败返回空 DF（消费方按 "no kline data" 处理），
+        # 但不再静默 —— governance/data/DATA_SOURCE_PRINCIPLE.md 原则二。
+        print(
+            f"[WARN] read_vipdoc({tdx_code}) 读取失败，返回空表: {exc}",
+            file=sys.stderr,
+        )
         return pd.DataFrame()
 
 
 def read_vipdoc(tdx_code: str) -> pd.DataFrame:
-    """Read K-line via unified mootdx data layer (replaces struct.unpack binary parsing)."""
-    return _read_vipdoc_mootdx(tdx_code)
+    """Read K-line via the datasource layer (replaces struct.unpack binary parsing)."""
+    return _read_vipdoc_daily(tdx_code)
 
 
 def box(df: pd.DataFrame, n: int) -> dict[str, Any]:

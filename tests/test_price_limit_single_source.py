@@ -69,17 +69,15 @@ class TestCanonicalTable:
 
 
 class TestDelegation:
-    """四个调用方必须**委托**唯一实现，而不是各自内联前缀表。"""
+    """调用方必须**委托**唯一实现，而不是各自内联前缀表。
+
+    （历史上是四份实现收敛；reconcile_qfq 已随 qlib 接口整删于 2026-08-24 移除。）
+    """
 
     def test_backtest_factors(self):
         from custos.research import backtest_factors as bt
 
         assert bt._limit_pct("920808") == 30.0 and bt._limit_pct("689009") == 20.0
-
-    def test_reconcile_qfq(self):
-        from custos.research import reconcile_qfq as rq
-
-        assert rq._limit_pct("920808") == 30.0 and rq._limit_pct("689009") == 20.0
 
     def test_technical_monitor_base(self):
         import pandas as pd

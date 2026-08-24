@@ -8,7 +8,8 @@
 > 标记：✅ 已接入实测可用 / ⚠️ 有已知问题 / 🚫 不可用 / ❌ 未接入。
 >
 > ⚠️ 本文只写**通达信生态**（本地文件 + TQ-Local + TDX 协议）。
-> mootdx 库的 API 面见 `MOOTDX_INTERFACES.md`；qlib 见 `QLIB_LOCAL_DATA.md`。
+> mootdx 库的 API 面见 `MOOTDX_INTERFACES.md`（qlib 接口已于 2026-08-24 v0.109
+> 整体删除，历史档案见 `QLIB_LOCAL_DATA.md`）。
 
 ## 通达信生态的四条访问路径
 

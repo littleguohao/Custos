@@ -179,11 +179,11 @@ def test_main_loads_with_buffered_start(tmp_path, monkeypatch):
     # buffer 修复兜底:真实加载路径的数据起点必须早于 --start(此前 buffer 被加载窗口截为 0)
     captured = {}
 
-    def fake_load(codes, count, start=None, end=None, root=None):
+    def fake_load(codes, count, start=None, end=None):
         captured["start"] = start
         return {}
 
-    monkeypatch.setattr("custos.datasource.s_data.load_bars_qlib", fake_load)
+    monkeypatch.setattr(lp.bt, "_load_bars_local", fake_load)
     monkeypatch.setattr(
         lp.bt, "load_amv_regime", lambda since="2015-01-01", root=None: {}
     )
@@ -234,11 +234,11 @@ def test_load_margin_covers_gate_window(tmp_path, monkeypatch):
     KDJ 预热不足,且截断程度随信号位置变化。裕量 = max(buffer, gate)×1.6+10 日历日。"""
     captured = {}
 
-    def fake_load(codes, count, start=None, end=None, root=None):
+    def fake_load(codes, count, start=None, end=None):
         captured["start"] = start
         return {}
 
-    monkeypatch.setattr("custos.datasource.s_data.load_bars_qlib", fake_load)
+    monkeypatch.setattr(lp.bt, "_load_bars_local", fake_load)
     monkeypatch.setattr(
         lp.bt, "load_amv_regime", lambda since="2015-01-01", root=None: {}
     )

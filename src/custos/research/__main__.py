@@ -21,7 +21,7 @@ owner 2026-08-07 问「总的回测和研究是否可以统一到一个入口」
   ② `m2_stop_sweep` 与 `adjust_diagnostic` 是**故意用 subprocess** 调
      `backtest_factors` 的（内存隔离 —— 那个回测本来就常被 OOM Kill，
      见 `m2_stop_sweep` 的 `MEM_PER_JOB_MB` 注释）。合进一个进程会毁掉这层隔离。
-  ③ 单进程入口要 import 全部依赖（pandas/numpy/qlib loader/factors 全套），
+  ③ 单进程入口要 import 全部依赖（pandas/numpy/factors 全套），
      启动变慢，且一个脚本的 import 错误会让**所有**研究工具用不了。
 
 所以真正的痛点不是「入口太多」，而是：
@@ -113,10 +113,6 @@ TOOLS: dict[str, tuple[str, str]] = {
     "adjust_diagnostic": (
         "diagnostic",
         "复权口径诊断：量化未复权数据对回测与选股的影响",
-    ),
-    "reconcile_qfq": (
-        "diagnostic",
-        "前复权对账：拿 qlib 序列给 tdx 自算结果做独立参照",
     ),
     "probe_data_sources": ("diagnostic", "数据源探针：实测可用性/耗时/返回形状"),
     # ⚠️ stale 状态保留给未来用：首批三个（compare_signal_sets /

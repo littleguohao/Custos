@@ -24,7 +24,6 @@ src/
 │   ├── factors/           # L2 可复用因子（选股/研究共用,见 governance/strategy/_factors/）
 │   └── trades/            # L2 交易台账同步与标准化、增量台账、持仓对账
 ├── datasource/            # L1 数据采集与刷新（只许依赖 L0/L1）
-│   ├── s_data.py          # qlib/CSV 只读 loader
 │   ├── trading_calendar.py  # A 股交易日历刷新与查询（TDX JSON-RPC）
 │   ├── collect/           # 采集:持仓/指数报价、增量行情、资金流、在线行情
 │   ├── local_tdx/         # 本地通达信数据封装（见 local_tdx/README.md）
@@ -77,7 +76,7 @@ src/
 - `pipeline/screening/` — 每日选股链:`formula_screen`(TQ 公式初筛)、`enrich_candidates`(模式识别)、`score_candidates`(共振打分分层)、`candidate_table`(备选表格);18:00 独立链(run_1800.py)运行,与三份报告分离,TdxW 未运行时干净降级。
 - `pipeline/holdings/` — `b1_holding_state`(持仓状态机)、持仓技术分析、组合复盘报告。
 - `pipeline/close_review/` — 14:45 收盘复盘:执行复盘、终审、周复盘、持仓 BBI/结构分析、`calc_mfe_mae`(持仓 MFE/MAE)。
-- `research/` — `backtest_factors`(研究回测器)、`analyze_trades`(交易复盘,手动运行)、`reconcile_qfq`(复权对账)等;统一入口 `research/__main__.py`。
+- `research/` — `backtest_factors`(研究回测器)、`analyze_trades`(交易复盘,手动运行)等;统一入口 `research/__main__.py`。
 - `core/factors/` — 可复用因子(S 形/反转K质量/板块相位/RSI 状态/主升浪等),选股链与研究回测共用。
 - `core/trades/` — 交易台账同步与标准化、增量台账、持仓对账。
 

@@ -287,7 +287,6 @@ import types as _types  # noqa: E402
 
 def _args(**kw):
     base = dict(
-        data_source="tdx",
         scorer="b1_dual",
         weekly=False,
         step=1,

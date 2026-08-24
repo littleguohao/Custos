@@ -1,5 +1,12 @@
 # Qlib 本地数据（S_DATA）接口使用方式
 
+> ⚠️ **【历史档案】该数据源接口已于 2026-08-24（v0.109）整体删除（owner 拍板）。**
+> 代码侧 `src/custos/datasource/s_data.py` / `src/custos/research/reconcile_qfq.py` 已整删，
+> `--data-source qlib/csv`、`--s-data-root`、`--universe-sdata` 等入口 flag 已不存在。
+> 本文不再描述任何可用接口——正文原样保留，仅作为「加法调整」发现（对账证明
+> tdx 自算前复权正确、qlib 侧价格口径有问题）与去幸存者偏差证伪过程的**历史证据档案**，
+> 供 R14、research/README 根因记录等历史档案的引用解析。请勿照本文执行任何操作。
+
 > 🚫 **`2021_2026` bundle 已弃用（owner 2026-08-06 决定）** —— 价格是加法调整（百分比收益
 > 放大 13~21%）、去偏价值≈0、覆盖期还短于 vipdoc。该时段一律用 `--data-source tdx`。
 > 代码已默认跳过（`load_bars_qlib` / `list_universe` 同口径），`allow_unverified=True` 可放行。

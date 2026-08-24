@@ -26,7 +26,7 @@ from typing import Any
 
 
 from custos.datasource.local_tdx import local_tdx_data as ltd  # type: ignore
-from custos.core.paths import TDX_ROOT, cn_now, MARKET_DIR  # noqa: E402
+from custos.core.paths import cn_now, MARKET_DIR  # noqa: E402
 from custos.core.indicators import pct_change as pct  # noqa: E402
 from custos.core.runtime_guards import previous_confirmed_trading_day  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
@@ -137,37 +137,26 @@ def amv_zone(v):
     return "中性"
 
 
-_mkt_reader = None
-
-
-def _get_mkt_reader():
-    """mootdx Reader for vipdoc 880-series.
-
-    Note: ltd.read_vipdoc_daily also works for suffix-carrying 880xxx.SH
-    codes (_is_bj_code respects explicit suffixes), but this module keeps
-    its own direct mootdx Reader — the same pattern as
-    collect_incremental_market.py.
-    """
-    global _mkt_reader
-    if _mkt_reader is None:
-        from mootdx.reader import Reader
-
-        _mkt_reader = Reader.factory(market="std", tdxdir=str(TDX_ROOT))
-    return _mkt_reader
-
-
 def _vipdoc_rows(code: str, count: int = 5) -> list[dict]:
-    raw = code.split(".")[0]
-    df = _get_mkt_reader().daily(symbol=raw)
+    """读 vipdoc 880 系列末 N 根——统一走 local_tdx_data 数据层（2026-08-24 解耦）。
+
+    此前本模块自己缓存一个 `mootdx Reader.factory(tdxdir=TDX_ROOT)` 直读，
+    绕过 datasource 层（且 global 缓存 reader 是连接卫生盲区）。列语义核对：
+    read_vipdoc_daily 对 880xxx.SH 与旧直调是**同一个 mootdx Reader**
+    （_is_bj_code 尊重显式后缀，880 系列不会误入 BJ 直读），high/low/close/amount
+    同名同单位；差别只是 date 从 DatetimeIndex 变成 Timestamp 列，下面取值已对齐。
+    """
+    df = ltd.read_vipdoc_daily(code)
     if df is None or df.empty:
         return []
     rows = []
-    for idx, r in df.tail(count).iterrows():
+    for _, r in df.tail(count).iterrows():
+        dt = r.get("date")
         rows.append(
             {
-                "date": idx.strftime("%Y-%m-%d")
-                if hasattr(idx, "strftime")
-                else str(idx)[:10],
+                "date": dt.strftime("%Y-%m-%d")
+                if hasattr(dt, "strftime")
+                else str(dt)[:10],
                 "high": to_float(r.get("high")),
                 "low": to_float(r.get("low")),
                 "close": to_float(r.get("close")),

@@ -80,9 +80,8 @@ LAYER_OF_DIR = {
     "research": 4,
 }
 # datasource/ 顶层文件是**数据适配器**：性质是 L1，不是编排层。
-# `s_data.py` 是 qlib/CSV 只读 loader（零内部依赖）；
 # `trading_calendar.py` 是 TDX 交易日历维护（只依赖 L0）。
-DATA_ADAPTERS = {"datasource/s_data.py", "datasource/trading_calendar.py"}
+DATA_ADAPTERS = {"datasource/trading_calendar.py"}
 ROOT_LAYER = 4  # pipeline 顶层：runner 与编排
 
 
@@ -496,3 +495,78 @@ class TestNoDuplicateModuleNames:
             "同名模块出现在多个目录（扁平 import 会拿到哪一个不确定）：\n  "
             + "\n  ".join(f"{k}: {v}" for k, v in sorted(bad.items()))
         )
+
+
+class TestVendorLibsOnlyInDatasource:
+    """⚠️ 第三方行情库只许 `datasource/` 层 import —— pipeline/research/core 必须
+    走数据层接口（`local_tdx_data` 等），不得直调 mootdx/akshare/efinance/tushare/qlib。
+
+    2026-08-24 数据层解耦修复的起因：pipeline 层三处绕过 datasource 直调 mootdx
+    （`technical_monitor._read_vipdoc_mootdx` 的非 BJ 分支、
+    `market_timing_collector._get_mkt_reader` 的 global 缓存 reader、
+    `calc_mfe_mae` 的在线/本地兜底）。数据层**内部**用这些库是合法实现
+    （local_tdx_data 自己、collect_* 等），不在此限。
+
+    与 `_build_graph` 不同，这里**函数体内的惰性 import 也算违规** ——
+    三处已修违规全是函数体内 import，只扫顶层会全漏。
+    `if __name__ == "__main__"` 块按本文件既有惯例豁免（演示/探针不算模块依赖）。
+    """
+
+    VENDOR_LIBS = {"mootdx", "akshare", "efinance", "tushare", "qlib"}
+
+    # 豁免必须写明理由（格式参照 test_tdx_connection_hygiene.py 的 EXEMPT）。
+    # 解耦落地后应为空集 —— 新增豁免等于重新开口子，必须在理由里说服 reviewer。
+    EXEMPT: dict[str, str] = {}
+
+    def _vendor_imports(self, src: str) -> list[str]:
+        """返回源码中（`__main__` 块除外）对第三方行情库的 import 列表。"""
+        tree = ast.parse(src)  # 故意不捕获 SyntaxError：文件坏了就是要报的问题
+        main_spans = [
+            (n.lineno, n.end_lineno)
+            for n in ast.walk(tree)
+            if isinstance(n, ast.If)
+            and ast.unparse(n.test).replace(" ", "")
+            in ('__name__=="__main__"', "__name__=='__main__'")
+        ]
+        out = []
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Import):
+                names = [a.name for a in n.names]
+            elif isinstance(n, ast.ImportFrom) and n.module:
+                names = [n.module]
+            else:
+                continue
+            if any(a <= n.lineno <= b for a, b in main_spans):
+                continue
+            for nm in names:
+                if nm.split(".")[0] in self.VENDOR_LIBS:
+                    out.append(f"L{n.lineno}: import {nm}")
+        return out
+
+    def test_no_vendor_imports_outside_datasource(self):
+        bad = []
+        for p in sorted(TOOLS.rglob("*.py")):
+            if "__pycache__" in str(p):
+                continue
+            rel = p.relative_to(TOOLS).as_posix()
+            if rel.startswith("datasource/"):
+                continue  # 数据层内部用第三方行情库是合法实现
+            if rel in self.EXEMPT:
+                assert self.EXEMPT[rel].strip(), f"{rel} 的豁免必须写明理由"
+                continue
+            for hit in self._vendor_imports(p.read_text(encoding="utf-8")):
+                bad.append(f"{rel}:{hit}")
+        assert not bad, (
+            "datasource/ 之外直接 import 了第三方行情库（应改走 local_tdx_data 等"
+            "数据层接口）：\n  " + "\n  ".join(bad)
+        )
+
+    def test_checker_catches_lazy_import(self):
+        """反向验证：函数体内的惰性 import 必须被抓到（三处违规全是这种形态）。"""
+        bad_src = "def f():\n    from mootdx.reader import Reader\n    return Reader\n"
+        assert self._vendor_imports(bad_src), "惰性 import 漏检，检查失效"
+
+    def test_checker_ignores_main_block(self):
+        """`__main__` 演示块不算模块依赖（与本文件 `_build_graph` 同口径）。"""
+        src = 'import pandas as pd\n\nif __name__ == "__main__":\n    import mootdx\n'
+        assert self._vendor_imports(src) == []

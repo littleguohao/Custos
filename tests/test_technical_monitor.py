@@ -4,6 +4,7 @@ from __future__ import annotations
 import unittest
 
 import pandas as pd
+import pytest
 
 from custos.pipeline.market_timing.technical_monitor import (
     n_structure_state,
@@ -175,44 +176,147 @@ if __name__ == "__main__":
 
 class TestBjVipdocRouting(unittest.TestCase):
     """v0.101：北交所代码必须走 local_tdx_data 的 .day 直读——mootdx Reader 把
-    920xxx 误路由到 SH（读不到 ⇒ 持仓技术面全空，曙光数创 920808 实盘暴露）。"""
+    920xxx 误路由到 SH（读不到 ⇒ 持仓技术面全空，曙光数创 920808 实盘暴露）。
+
+    2026-08-24 数据层解耦后，沪深与 BJ **都**委托 local_tdx_data.read_vipdoc_daily
+    （BJ 路由由数据层内部处理），本组测试钉住这个委托关系。"""
+
+    def _intercept_ltd(self):
+        """替换 sys.modules 里的 local_tdx_data，拦截函数体内的惰性 import。"""
+        import sys
+        import types
+
+        called = {}
+
+        def fake_read_vipdoc_daily(code):
+            called["code"] = code
+            return frame([9, 10], [11, 12], [10, 11])
+
+        fake_mod = types.ModuleType("custos.datasource.local_tdx.local_tdx_data")
+        fake_mod.read_vipdoc_daily = fake_read_vipdoc_daily
+        saved = sys.modules.get("custos.datasource.local_tdx.local_tdx_data")
+        sys.modules["custos.datasource.local_tdx.local_tdx_data"] = fake_mod
+        return called, saved
+
+    def _restore_ltd(self, saved):
+        import sys
+
+        if saved is not None:
+            sys.modules["custos.datasource.local_tdx.local_tdx_data"] = saved
+        else:
+            del sys.modules["custos.datasource.local_tdx.local_tdx_data"]
 
     def test_bj_code_delegates_to_direct_reader(self):
         import custos.pipeline.market_timing.technical_monitor as tm
 
-        called = {}
-
-        class _FakeReader:
-            @staticmethod
-            def read_vipdoc_daily(code):
-                called["code"] = code
-                return frame([9, 10], [11, 12], [10, 11])
-
-        import sys
-        import types
-
-        fake_mod = types.ModuleType("custos.datasource.local_tdx.local_tdx_data")
-        fake_mod.read_vipdoc_daily = _FakeReader.read_vipdoc_daily
-        # 函数体内 import：替换 sys.modules 里的目标模块即可拦截
-        saved = sys.modules.get("custos.datasource.local_tdx.local_tdx_data")
-        sys.modules["custos.datasource.local_tdx.local_tdx_data"] = fake_mod
+        called, saved = self._intercept_ltd()
         try:
             df = tm.read_vipdoc("920808.BJ")
         finally:
-            if saved is not None:
-                sys.modules["custos.datasource.local_tdx.local_tdx_data"] = saved
-            else:
-                del sys.modules["custos.datasource.local_tdx.local_tdx_data"]
+            self._restore_ltd(saved)
         assert called.get("code") == "920808.BJ"
         assert len(df) == 2
 
-    def test_sh_code_still_uses_mootdx(self):
-        """沪深路径不受影响（BJ 分支不得误伤）。"""
+    def test_sh_code_also_delegates_to_datasource(self):
+        """2026-08-24 解耦：沪深不再直调 mootdx Reader，同样走数据层接口。"""
         import custos.pipeline.market_timing.technical_monitor as tm
 
-        # 无 TDX 环境下 mootdx 读不到会回落空 DataFrame——关键是**不**走 BJ 直读
-        import sys
+        called, saved = self._intercept_ltd()
+        try:
+            df = tm.read_vipdoc("600000.SH")
+        finally:
+            self._restore_ltd(saved)
+        assert called.get("code") == "600000.SH"
+        assert len(df) == 2
 
-        assert "custos.datasource.local_tdx.local_tdx_data" not in sys.modules or True
+
+def _write_day(path, recs):
+    """写合成 TDX .day 文件（32 字节/记录：date,o,h,l,c(int 0.01元),amount(float),vol,reserved）。"""
+    import struct
+
+    with open(path, "wb") as f:
+        for r in recs:
+            f.write(struct.pack("<IIIIIfII", *r))
+
+
+def _isolate_tdx_root(monkeypatch, tmp_path):
+    """把 local_tdx_data 的 TDX_ROOT 指到合成 vipdoc，并清掉 reader/校验缓存。"""
+    from custos.datasource.local_tdx import local_tdx_data as ltd
+
+    monkeypatch.setattr(ltd, "TDX_ROOT", tmp_path)
+    monkeypatch.setattr(ltd, "_reader", None)
+    monkeypatch.setattr(ltd, "_tdx_root_verified", set())
+    return ltd
+
+
+RECS = [
+    (20260819, 1000, 1050, 990, 1020, 123456.0, 78900, 0),
+    (20260820, 1020, 1060, 1000, 1040, 223456.0, 88900, 0),
+    (20260821, 1040, 1080, 1030, 1070, 323456.0, 98900, 0),
+]
+
+
+class TestReadVipdocEquivalence:
+    """read_vipdoc 改走 local_tdx_data 后的等价性钉测（合成 .day，真读数据层）。
+
+    与旧「直调 mootdx Reader.daily + reset_index」路径逐值核对过：
+    date（升序、成列）/open/high/low/close/amount/volume 完全一致，
+    仅多出 code/source 信息列（消费方不读）。
+    """
+
+    def test_sh_columns_values_and_order(self, monkeypatch, tmp_path):
+        import custos.pipeline.market_timing.technical_monitor as tm
+
+        d = tmp_path / "vipdoc" / "sh" / "lday"
+        d.mkdir(parents=True)
+        _write_day(d / "sh600000.day", RECS)
+        _isolate_tdx_root(monkeypatch, tmp_path)
+
         df = tm.read_vipdoc("600000.SH")
-        assert df is not None  # 不炸即可（有数据环境返回 K 线，无数据环境返回空表）
+        assert "date" in df.columns, "analyze() 直接取 df['date']，date 必须成列"
+        assert [str(x)[:10] for x in df["date"]] == [
+            "2026-08-19",
+            "2026-08-20",
+            "2026-08-21",
+        ], "必须升序（消费方 iloc[-1] 取最新）"
+        # mootdx 系数乘法有浮点尾差（10.2000...1），与旧路径同一 Reader、同一份误差
+        assert list(df["close"]) == pytest.approx([10.2, 10.4, 10.7])
+        assert list(df["amount"]) == [123456.0, 223456.0, 323456.0]  # 元，不变
+        # volume 经 mootdx 证券类型系数换算（SH_A_STOCK=手）：与旧路径同一 Reader，口径不变
+        assert list(df["volume"]) == [789.0, 889.0, 989.0]
+
+    def test_bj_direct_read_still_works(self, monkeypatch, tmp_path):
+        import custos.pipeline.market_timing.technical_monitor as tm
+
+        d = tmp_path / "vipdoc" / "bj" / "lday"
+        d.mkdir(parents=True)
+        _write_day(d / "bj920808.day", RECS)
+        _isolate_tdx_root(monkeypatch, tmp_path)
+
+        df = tm.read_vipdoc("920808.BJ")
+        assert list(df["close"]) == [10.2, 10.4, 10.7]
+        assert df["source"].iloc[0] == "vipdoc_bj_direct"
+        # 既有口径差异（本次未改，如实钉住）：BJ 直读的 volume 是原始股数，
+        # 不经 mootdx 系数换算（沪深路径是「手」）——消费方只用 volume 做相对比较
+        assert list(df["volume"]) == [78900, 88900, 98900]
+
+    def test_missing_file_returns_empty_not_raise(self, monkeypatch, tmp_path):
+        import custos.pipeline.market_timing.technical_monitor as tm
+
+        (tmp_path / "vipdoc").mkdir(parents=True)
+        _isolate_tdx_root(monkeypatch, tmp_path)
+        assert tm.read_vipdoc("600000.SH").empty
+
+    def test_failure_returns_empty_but_warns(self, monkeypatch, capsys):
+        """外部契约不变（失败返回空表），但不得静默——必须有 [WARN] 留痕
+        （governance/data/DATA_SOURCE_PRINCIPLE.md 原则二：静默返回空是反模式）。"""
+        import custos.pipeline.market_timing.technical_monitor as tm
+        from custos.datasource.local_tdx import local_tdx_data as ltd
+
+        def boom(code):
+            raise RuntimeError("TDX_ROOT 未配置")
+
+        monkeypatch.setattr(ltd, "read_vipdoc_daily", boom)
+        df = tm.read_vipdoc("600000.SH")
+        assert df.empty
+        assert "[WARN]" in capsys.readouterr().err

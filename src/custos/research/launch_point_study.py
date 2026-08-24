@@ -12,7 +12,7 @@
 ⚠️ 幸存者偏差(赢家=现存赢家)+ 起涨点后视 → 结论是"规律观察",不是可交易策略。
 ⚠️ 右删失:起涨点靠近 end 时此后可能再无做多日,lead=None 的样本被丢弃,lead 分布偏"较快转多"。
 ⚠️ 板块共振相关含机械成分:赢家本身贡献板块指数收益,corr>0 部分是恒真的,仅作描述。
-用法(用户机):uv run python src/custos/research/launch_point_study.py --data-source qlib --universe-sdata \
+用法(用户机):uv run python src/custos/research/launch_point_study.py --universe-local \
   --start 2024-09-01 --end 2025-06-30 --entry-filter reversal_k --top-pct 10 --buffer-days 60
 """
 
@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 import bisect
 import math
-import os
 import statistics
 import sys
 from datetime import date as _date, timedelta as _td
@@ -867,7 +866,7 @@ def extract_firings(
     BBI 连破止盈)算一笔实际收益 → sim_ret/sim_reason/sim_holding。与区间涨幅口径对比即可回答
     "赢家我们到底吃到了几成"(coverage_report)。⚠️ 收益受加载窗口右端截断(reason=open_end)。
     style_features:追加风格特征 f_board_code(上市板序数,免数据)与 f_amount20
-    (log10 20日均 close×volume ≈ 成交额,**市值代理**——qlib bundle 无总股本)。
+    (log10 20日均 close×volume ≈ 成交额,**市值代理**)。
     shares_events:fetch_market_cap 的股本变动事件(load_events 产物)——提供时追加
     f_mcap = log10(信号日总股本×信号日收盘 / 1e8)(**真市值,亿元**;股本按 observed_on≤信号日
     取最近事件,只可能 stale 不会 look-ahead;早于最早事件的信号日 → 特征缺省)。
@@ -2203,7 +2202,7 @@ BOARDS = (
 
 def board_of(code6: str) -> str:
     """6 位代码 → 上市板(免数据、无未来函数)。
-    注:真市值改由 local_tdx/fetch_market_cap.py 提供(qlib bundle 本身无总股本)。"""
+    注:真市值由 local_tdx/fetch_market_cap.py 提供(本地行情数据本身无总股本)。"""
     c = str(code6 or "").strip()
     if not c.isdigit():  # 空/非数字不得 zfill 成 "000000" 误判为深主板
         return "其他"
@@ -2627,13 +2626,9 @@ def _build_parser() -> argparse.ArgumentParser:
     解析本文件收集 store_true 模式开关,挪出文件会让模式清单静默消失。
     """
     ap = argparse.ArgumentParser(description="起涨点 vs 0AMV regime 研究")
-    ap.add_argument("--data-source", choices=["tdx", "qlib", "csv"], default="qlib")
     ap.add_argument(
-        "--s-data-root",
-        default=os.environ.get("S_DATA_ROOT") or r"E:\S_DATA",
-        help=r"s_data 根目录;可用环境变量 S_DATA_ROOT 覆盖,默认 E:\S_DATA",
+        "--universe-local", action="store_true", help="宇宙=本地 vipdoc 全宇宙"
     )
-    ap.add_argument("--universe-sdata", action="store_true")
     ap.add_argument("--codes", default="")
     ap.add_argument(
         "--codes-file",
@@ -2902,11 +2897,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _validate_universe_args(args, ap) -> None:
     """宇宙来源互斥校验(2026-08-16 review 修复:此前 --codes 与 --codes-file 同给时
-    后者静默赢(--universe-sdata 同给更乱),静默选边违背「不静默」惯例)。"""
+    后者静默赢(--universe-local 同给更乱),静默选边违背「不静默」惯例)。"""
     _uni_given = [
         flag
         for flag, v in (
-            ("--universe-sdata", args.universe_sdata),
+            ("--universe-local", args.universe_local),
             ("--codes-file", args.codes_file),
             ("--codes", args.codes),
         )
@@ -3135,19 +3130,16 @@ def _mode_from_firings(args) -> int:
 
 
 def _resolve_codes(args, ap) -> list:
-    if args.universe_sdata:
-        from custos.datasource import s_data  # noqa: PLC0415
+    if args.universe_local:
+        from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
 
-        sub = "CSV_DATA" if args.data_source == "csv" else "Q_DATA"
-        codes = s_data.list_universe(
-            str(Path(args.s_data_root) / sub), source=args.data_source
-        )
+        codes = local_tdx_data.list_local_vipdoc_codes(ashare_only=True)
     elif args.codes_file:
         codes = _read_codes_file(args.codes_file, err=ap.error)
     else:
         codes = [c.strip() for c in args.codes.split(",") if c.strip()]
     if not codes:
-        ap.error("需 --universe-sdata 或 --codes 或 --codes-file")
+        ap.error("需 --universe-local 或 --codes 或 --codes-file")
     return codes
 
 
@@ -3179,38 +3171,31 @@ def _make_chunk_iter(codes: list, args, load_start: str, loader):
             for c, df in loader(codes, 0).items():
                 yield c, df
             return
-        from custos.datasource import s_data  # noqa: PLC0415
 
-        sub2 = "CSV_DATA" if args.data_source == "csv" else "Q_DATA"
-        fn2 = (
-            s_data.load_bars_csv if args.data_source == "csv" else s_data.load_bars_qlib
-        )
-        root2 = str(Path(args.s_data_root) / sub2)
-        if (
-            args.data_source == "tdx"
-        ):  # 本地通达信 vipdoc(近端数据;qlib 止于 2026-02-06)
-            from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
+        # 本地通达信 vipdoc(qfq 前复权)。⚠️ count 必须传大:get_ohlcv_table 读完 .day
+        # 后 .tail(count),count=2000 只到 ~2018,会静默截断全历史回溯。
+        from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
 
-            def fn2(codes, count, start=None, end=None, root=None):  # noqa: F811
-                out: dict = {}
-                for c in codes:
-                    try:
-                        df = local_tdx_data.get_ohlcv_table(c, count=2000)
-                        if df is None or not len(df):
-                            continue
-                        df = df.copy()
-                        df["date"] = df["date"].astype(str).str[:10]
-                        if start:
-                            df = df[df["date"] >= start]
-                        if end:
-                            df = df[df["date"] <= end]
-                        if count:
-                            df = df.tail(count)
-                        if len(df):
-                            out[c] = df.reset_index(drop=True)
-                    except Exception:  # noqa: BLE001
+        def fn(codes, count, start=None, end=None):
+            out: dict = {}
+            for c in codes:
+                try:
+                    df = local_tdx_data.get_ohlcv_table(c, count=100000)
+                    if df is None or not len(df):
                         continue
-                return out
+                    df = df.copy()
+                    df["date"] = df["date"].astype(str).str[:10]
+                    if start:
+                        df = df[df["date"] >= start]
+                    if end:
+                        df = df[df["date"] <= end]
+                    if count:
+                        df = df.tail(count)
+                    if len(df):
+                        out[c] = df.reset_index(drop=True)
+                except Exception:  # noqa: BLE001
+                    continue
+            return out
 
         # 加载终点要比 --end 多带 max(horizons) 根,否则区间尾部的信号拿不到前向标签被静默右删失
         load_end = args.end
@@ -3224,7 +3209,7 @@ def _make_chunk_iter(codes: list, args, load_start: str, loader):
         ):  # 赢家窗晚于信号窗 → 必须load到赢家窗末
             load_end = args.ret_end
         for k in range(0, len(codes), chunk):
-            d = fn2(codes[k : k + chunk], 0, start=load_start, end=load_end, root=root2)
+            d = fn(codes[k : k + chunk], 0, start=load_start, end=load_end)
             for c in list(d):
                 df = d.pop(c)  # 取出即从 dict 移除
                 try:
@@ -3435,8 +3420,8 @@ def _write_firings(
                 **({"empty_ok": True} if not n_signal_days else {}),
                 "feature_scores": args.feature_scores,
                 "universe": (
-                    "sdata"
-                    if args.universe_sdata
+                    "local"
+                    if args.universe_local
                     else ("codes_file" if args.codes_file else "codes")
                 ),
                 # 特征开关必须落盘:否则驱动脚本的续跑校验看不出"这份 firings 是否带
@@ -3519,17 +3504,8 @@ def _mode_emit_firings(args, ap, codes: list, load_start: str, loader) -> int:
 def _load_bars(args, codes: list, load_start: str, loader) -> dict:
     if loader is not None:
         return loader(codes, 0)
-    from custos.datasource import s_data  # noqa: PLC0415
-
-    sub = "CSV_DATA" if args.data_source == "csv" else "Q_DATA"
-    fn = s_data.load_bars_csv if args.data_source == "csv" else s_data.load_bars_qlib
-    return fn(
-        codes,
-        0,
-        start=load_start,
-        end=None,
-        root=str(Path(args.s_data_root) / sub),
-    )
+    # 本地 vipdoc(qfq 前复权);count 传大防 .tail 截断(见 _make_chunk_iter 同注)。
+    return bt._load_bars_local(codes, 100000, start=load_start, end=None)
 
 
 def _run_analyze(args, codes: list, load_start: str, loader) -> int:

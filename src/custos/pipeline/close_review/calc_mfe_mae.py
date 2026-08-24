@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Calculate MFE/MAE for current holdings using mootdx Reader daily bars.
+"""Calculate MFE/MAE for current holdings using daily bars from the datasource layer.
 
 ⚠️ 窗口口径(2026-07-31 修正):MFE/MAE 必须按**入场日**锚定。
 此前用券商导出的「持仓天数」(自然日)当 `df.tail(n)` 的 K 线行数——365 自然日只有约 250
@@ -18,7 +18,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
-from custos.core.paths import TDX_ROOT, cn_today, HOLDINGS_DIR, TRADES_DIR  # noqa: E402
+from custos.core.paths import cn_today, HOLDINGS_DIR, TRADES_DIR  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
 import sys
 
@@ -98,9 +98,10 @@ def _summarize_open_book(book: list[list]) -> dict | None:
 def normalize_date_col(df):
     """把各数据源的日期列统一成 `date`,取不到时返回 None(由调用方 fail-closed)。
 
-    三个来源列名不一致:local_tdx.read_vipdoc_daily → `date`;mootdx Quotes.bars → `datetime`;
-    mootdx Reader.daily() 是 DatetimeIndex,reset_index() 后列名随 index.name 变化(可能是
-    `date`/`datetime`/`index`)。这里逐一试,**不能**因为列名不同就把持仓判成"无数据"。
+    2026-08-24 解耦后数据源统一为 local_tdx_data（get_ohlcv_table / get_online_bars
+    都已保证 `date` 列）；保留多候选名归一是防御性的——历史数据源列名不一致
+    （`datetime`/Reader 未命名 DatetimeIndex reset 后的 `index`）曾让持仓被误判
+    "无数据",**不能**因为列名不同就把持仓判成"无数据"。
     """
     if df is None or len(df) == 0:
         return None
@@ -180,47 +181,27 @@ def load_entry_dates(ledger_path: Path = LEDGER) -> dict[str, dict]:
     return resolve_open_entry_dates(rows or [])
 
 
-def market_symbol(code: str) -> tuple[str, bool]:
-    """Determine market:返回 (symbol, is_bj)。"""
-    is_bj = code.startswith("920") or code.startswith("8") or code.startswith("4")
-    if code.startswith("6"):
-        return f"sh{code}", is_bj
-    if is_bj:
-        return f"bj{code}", is_bj
-    return f"sz{code}", is_bj
+def fetch_bars(code: str, bars_needed: int):
+    """取 K 线：统一走数据层 local_tdx_data（2026-08-24 解耦，不再直调 mootdx）。
 
+    主路径 `get_ohlcv_table(adjust="qfq")`：本地 vipdoc 优先、内部已含在线回退
+    （前复权：MFE/MAE 是持仓期最大浮盈/浮亏，未复权的除权跳空会造出一个根本不
+    存在的巨额 MAE——owner 2026-08-04 拍板全链前复权）。BJ 与沪深同口径
+    （mootdx Reader 误路由 920xxx 的问题由数据层内部处理）。
+    在线兜底 `get_online_bars`：⚠️ 默认被 `_online_quotes_enabled()` 短路返回空
+    （实测在线行情不可用，约 10~13s 返回空；设 TDX_ONLINE_QUOTES=1 才启用）——
+    与主路径内部的在线回退是同一开关。取不到返回 None/空表，调用方 fail-closed。
 
-def fetch_bars(code: str, symbol: str, is_bj: bool, bars_needed: int, reader):
-    """取 K 线:本地 vipdoc(前复权)优先,BJ/沪深各有在线兜底。取不到返回 None/空表。
-
-    All stocks: try local_tdx vipdoc first (supports BJ)
-    前复权:MFE/MAE 是持仓期最大浮盈/浮亏,未复权的除权跳空会造出
-    一个根本不存在的巨额 MAE(owner 2026-08-04 拍板全链前复权)。
-    沪深与 BJ 统一走 get_ohlcv_table(adjust="qfq")——此前只切了 BJ 分支,
-    沪深仍走 reader.daily 未复权,除权跳空造假 MAE 的问题依然存在。
+    口径变化说明：旧代码在线兜底传 `count=bars_needed`，而 mootdx
+    `client.bars()` 没有 count 形参（落入 **kwargs 被静默忽略，实际恒取默认
+    800 根）；get_online_bars 的 `offset` 是真生效的（mootdx 上限 800）。
     """
     from custos.datasource.local_tdx import local_tdx_data as ltd
 
     df = ltd.get_ohlcv_table(code, count=2000, adjust="qfq")
     if df is not None and len(df) > 0:
         return df.reset_index(drop=True)
-    if is_bj:
-        # BJ fallback: online bars (mootdx Reader misroutes 920xxx)
-        from mootdx.quotes import Quotes
-
-        client = Quotes.factory(market="std", quiet=True)
-        df = client.bars(symbol=code, frequency=9, count=bars_needed)
-        if df is not None and len(df) > 0:
-            df = df.reset_index()
-        return df
-    df = reader.daily(symbol=symbol)
-    if df is not None and len(df) > 0:
-        return df.reset_index()
-    # Fallback to online bars for any stock
-    from mootdx.quotes import Quotes
-
-    client = Quotes.factory(market="std", quiet=True)
-    df = client.bars(symbol=code, frequency=9, count=bars_needed)
+    df = ltd.get_online_bars(code, frequency=9, offset=bars_needed)
     if df is not None and len(df) > 0:
         df = df.reset_index()
     return df
@@ -315,7 +296,7 @@ def calc_window_row(df, pos: dict, entry: dict, entry_date: str, target: str) ->
     return row
 
 
-def process_position(pos: dict, entries: dict[str, dict], reader, target: str) -> dict:
+def process_position(pos: dict, entries: dict[str, dict], target: str) -> dict:
     """单只持仓全流程:锚定入场日 → 取 K 线 → 算 MFE/MAE;失败一律落 unable_row。"""
     code = str(pos["代码"])
     name = pos["名称"]
@@ -337,10 +318,9 @@ def process_position(pos: dict, entries: dict[str, dict], reader, target: str) -
         (date.fromisoformat(target) - date.fromisoformat(entry_date)).days, 0
     )
     bars_needed = span_days + 30
-    symbol, is_bj = market_symbol(code)
 
     try:
-        df = fetch_bars(code, symbol, is_bj, bars_needed, reader)
+        df = fetch_bars(code, bars_needed)
         return calc_window_row(df, pos, entry, entry_date, target)
     except Exception as e:
         print(f"[WARN] {code} {name}: {e}")
@@ -358,9 +338,6 @@ def main(argv=None):
     target = args.date
     OUT = HOLDINGS_DIR / f"{target}_mfe_mae.json"
 
-    from mootdx.reader import Reader
-
-    reader = Reader.factory(market="std", tdxdir=str(TDX_ROOT))
     positions = json.loads(POSITIONS.read_text(encoding="utf-8"))
     entries = load_entry_dates()
     if not entries:
@@ -368,7 +345,7 @@ def main(argv=None):
             "[WARN] 台账未解析出任何未平仓建仓日 —— 所有持仓将不出 MFE/MAE(fail-closed)"
         )
 
-    results = [process_position(pos, entries, reader, target) for pos in positions]
+    results = [process_position(pos, entries, target) for pos in positions]
 
     coverage = coverage_summary(results)
     OUT.parent.mkdir(parents=True, exist_ok=True)

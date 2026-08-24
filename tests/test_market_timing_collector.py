@@ -185,3 +185,64 @@ class TestSectionSkeletonCarriesAsOf:
         breadth, sentiment, turnover, _q = mtc.derive_market_fields("2026-08-12")
         for sec in (breadth, sentiment, turnover):
             assert "as_of" in sec, "三段骨架缺 as_of 键 ⇒ 契约必填会硬失败"
+
+
+def _write_day(path, recs):
+    """写合成 TDX .day 文件（32 字节/记录：date,o,h,l,c(int 0.01元),amount(float),vol,reserved）。"""
+    import struct
+
+    with open(path, "wb") as f:
+        for r in recs:
+            f.write(struct.pack("<IIIIIfII", *r))
+
+
+def _isolate_tdx_root(monkeypatch, tmp_path):
+    """把 local_tdx_data 的 TDX_ROOT 指到合成 vipdoc，并清掉 reader/校验缓存。"""
+    monkeypatch.setattr(mtc.ltd, "TDX_ROOT", tmp_path)
+    monkeypatch.setattr(mtc.ltd, "_reader", None)
+    monkeypatch.setattr(mtc.ltd, "_tdx_root_verified", set())
+
+
+class TestVipdocRows:
+    """`_vipdoc_rows` 改走 `ltd.read_vipdoc_daily`（2026-08-24 数据层解耦）后的
+    行为钉测：合成 880 系列 .day，真读数据层（不是打桩字符串）。
+
+    与旧「自备 mootdx Reader + DatetimeIndex」路径核对过：date 从 index 变列、
+    格式同为 %Y-%m-%d，high/low/close/amount 同名同单位，结果按日期升序。
+    """
+
+    RECS = [
+        (20260817, 1000, 1050, 990, 1020, 111111.0, 100, 0),
+        (20260818, 1020, 1060, 1000, 1040, 222222.0, 100, 0),
+        (20260819, 1040, 1080, 1030, 1070, 333333.0, 100, 0),
+        (20260820, 1070, 1090, 1050, 1080, 444444.0, 100, 0),
+        (20260821, 1080, 1100, 1060, 1090, 555555.0, 100, 0),
+        (20260824, 1090, 1110, 1070, 1100, 666666.0, 100, 0),
+    ]
+
+    def _mk880(self, tmp_path):
+        d = tmp_path / "vipdoc" / "sh" / "lday"
+        d.mkdir(parents=True)
+        _write_day(d / "sh880005.day", self.RECS)
+
+    def test_tail_count_sorted_with_iso_dates(self, monkeypatch, tmp_path):
+        self._mk880(tmp_path)
+        _isolate_tdx_root(monkeypatch, tmp_path)
+        rows = mtc._vipdoc_rows("880005.SH", count=3)
+        assert [r["date"] for r in rows] == ["2026-08-20", "2026-08-21", "2026-08-24"]
+        last = rows[-1]
+        # 880 系列按 SH_INDEX 系数：价格 /100，amount 原样（元）——与旧路径同一 Reader
+        assert last["close"] == 11.0
+        assert last["high"] == pytest.approx(11.1)  # mootdx 系数乘法的浮点尾差
+        assert last["low"] == pytest.approx(10.7)
+        assert last["amount"] == 666666.0
+
+    def test_default_count_is_five(self, monkeypatch, tmp_path):
+        self._mk880(tmp_path)
+        _isolate_tdx_root(monkeypatch, tmp_path)
+        assert len(mtc._vipdoc_rows("880005.SH")) == 5
+
+    def test_missing_code_returns_empty(self, monkeypatch, tmp_path):
+        (tmp_path / "vipdoc").mkdir(parents=True)
+        _isolate_tdx_root(monkeypatch, tmp_path)
+        assert mtc._vipdoc_rows("880099.SH") == []

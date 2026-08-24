@@ -257,17 +257,9 @@ def exit_params_to_rules(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def _universe_args(a: argparse.Namespace) -> list[str]:
-    """宇宙参数透传（--codes-file 钉死优先 > --universe sdata > 默认 local）。"""
+    """宇宙参数透传（--codes-file 钉死优先 > 默认 local vipdoc）。"""
     if a.codes_file:
         return ["--codes-file", a.codes_file]
-    if a.universe == "sdata":
-        return [
-            "--data-source",
-            a.data_source,
-            "--universe-sdata",
-            "--universe-sample",
-            str(a.sample),
-        ]
     return ["--universe-local", "--universe-sample", str(a.sample)]
 
 
@@ -343,11 +335,9 @@ def _resolve_data_dates(a: argparse.Namespace) -> Optional[tuple[str, str]]:
     end = 参照票（``CAL_REF_CODE``）最后交易日（显式 ``--end`` 已给则以它截断），
     start = 往前 ``--count`` 根 K 线的日期——与子进程 ``tail(count)`` 的实际窗口
     基本等长（m2 DEFAULT_WINDOW 的口径约定）。读本地 vipdoc 日线，纯文件解析不联网。
-    sdata 宇宙没有等价的轻量直读接口、无数据环境读不到 ⇒ 返回 None，
-    由调用方降级为「不钉窗口 + 报告警告」（m2 的「本轮不钉宇宙」口径）。
+    无数据环境读不到 ⇒ 返回 None，由调用方降级为「不钉窗口 + 报告警告」
+    （m2 的「本轮不钉宇宙」口径）。
     """
-    if a.universe == "sdata":
-        return None  # sdata 请显式 --start/--end 钉死（其 bundle 覆盖区间固定）
     try:
         from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
 
@@ -871,15 +861,8 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--end", default="", help="回测终点 YYYY-MM-DD（透传 --end）")
     ap.add_argument("--date", default="", help="单日口径便捷项：等价于 --end")
     ap.add_argument(
-        "--universe",
-        choices=["local", "sdata"],
-        default="local",
-        help="local=本地 vipdoc（默认）；sdata=S_DATA 全市场含退市股（需 --data-source）",
-    )
-    ap.add_argument(
         "--codes-file", default="", help="钉死宇宙（透传 --codes-file，优先级最高）"
     )
-    ap.add_argument("--data-source", choices=["tdx", "qlib", "csv"], default="tdx")
     ap.add_argument("--count", type=int, default=500, help="每股回溯 K 线根数（透传）")
     ap.add_argument(
         "--cost-bps", type=float, default=25.0, help="往返成本基点（默认 25）"

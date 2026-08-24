@@ -22,7 +22,6 @@ import pytest
 
 from custos.research import backtest_factors as bt
 from custos.research import launch_point_study as lp
-from custos.datasource import s_data
 from custos.pipeline.screening import financials as fin_mod
 from custos.research import run_bear_to_long_study as rb
 
@@ -389,7 +388,7 @@ class TestEmptyResultMustFail:
             "rank_score": "none",
             "feature_scores": rb.DEFAULT_FEATURES,
             "delisted_ret": -1.0,
-            "universe": "sdata",
+            "universe": "local",
             "records": [],
         }
         f.write_text(json.dumps(head), encoding="utf-8")
@@ -402,21 +401,11 @@ class TestEmptyResultMustFail:
             "rank_score": "none",
             "feature_scores": rb.DEFAULT_FEATURES,
             "delisted_ret": -1.0,
-            "universe": "sdata",
+            "universe": "local",
             "records": [{"code": "600000", "ret": 0.1, "days": [["2022-06-01", 0.0]]}],
         }
         f.write_text(json.dumps(head), encoding="utf-8")
         assert rb.firings_reusable(f, _rb_args()) is True
-
-    def test_s_data_warns_when_root_has_no_bundle(self, tmp_path, capsys):
-        (tmp_path / "not_a_bundle").mkdir()
-        assert s_data.list_bundles(tmp_path) == []
-        assert "WARN" in capsys.readouterr().err, "目录在但一个 bundle 都没有,必须告警"
-
-    def test_s_data_warns_when_nothing_loaded(self, tmp_path, capsys):
-        assert s_data.load_bars_qlib(["600000", "000001"], 0, root=tmp_path) == {}
-        err = capsys.readouterr().err
-        assert "WARN" in err and "0/2" in err
 
 
 def _rb_args():
@@ -645,4 +634,4 @@ class TestCliGuards:
 # -------------------------------------------------------------------------- O13
 def test_run_bear_to_long_annotations_resolve():
     """O13: 缺 Optional 导入 → get_type_hints 解析注解直接 NameError。"""
-    typing.get_type_hints(rb.survivorship_report)
+    typing.get_type_hints(rb._firings_head)

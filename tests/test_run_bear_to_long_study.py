@@ -39,55 +39,14 @@ def _firings_text(**over):
         "rank_score": "none",
         "feature_scores": rb.DEFAULT_FEATURES,
         "delisted_ret": -1.0,
-        "universe": "sdata",
+        "universe": "local",
         "records": list(_RECS),
     }
     head.update(over)
     return json.dumps(head, ensure_ascii=False)
 
 
-def _firings_file(tmp_path, name, codes, with_sig=(), delisted=(), rets=None):
-    """写一份最小 firings(默认 ret=0.1;rets 可给单只指定收益,如 0.0 造僵尸样本)。"""
-    recs = [
-        {
-            "code": c,
-            "ret": (rets or {}).get(c, 0.1),
-            "days": [["2022-06-01", 0.0, {"f_x": 1.0}]] if c in with_sig else [],
-            **({"delisted": True} if c in delisted else {}),
-        }
-        for c in codes
-    ]
-    p = tmp_path / name
-    p.write_text(
-        json.dumps(
-            {"start": "2022-05-06", "end": "2022-06-02", "records": recs},
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-    return p
-
-
 class TestGapGuards:
-    def test_overlaps_gap_boundaries(self):
-        assert rb.overlaps_gap("2020-09-01", "2020-09-28") is True  # 触到缺口起点
-        assert rb.overlaps_gap("2021-07-30", "2021-08-10") is True  # 触到缺口终点
-        assert rb.overlaps_gap("2020-01-01", "2020-09-27") is False
-        assert rb.overlaps_gap("2021-07-31", "2021-12-31") is False
-        assert rb.overlaps_gap("2020-01-01", "2022-01-01") is True  # 完全跨越
-
-    def test_signal_window_in_gap_dropped(self):
-        keep, drop = rb.usable_pairs(
-            [_pair(sig=("2020-07-16", "2020-11-20"), lab=("2020-11-23", "2021-01-25"))]
-        )
-        assert keep == [] and "缺口" in drop[0]["reason"]
-
-    def test_label_window_beyond_data_end_dropped(self):
-        keep, drop = rb.usable_pairs(
-            [_pair(sig=("2026-02-02", "2026-04-21"), lab=("2026-04-22", "2026-06-05"))]
-        )
-        assert keep == [] and "数据末尾" in drop[0]["reason"]
-
     def test_clean_pair_kept(self):
         keep, drop = rb.usable_pairs([_pair()])
         assert len(keep) == 1 and drop == []
@@ -118,12 +77,6 @@ class TestGapGuards:
         keep, _ = rb.usable_pairs([p], require_market_cap=True)
         assert len(keep) == 1
 
-    def test_gap_reason_takes_precedence_over_market_cap(self):
-        """跨 qlib 缺口的窗口对应报缺口原因,不该被市值原因掩盖。"""
-        p = _pair(sig=("2020-08-01", "2020-10-01"), lab=("2020-10-02", "2020-12-01"))
-        _, drop = rb.usable_pairs([p], require_market_cap=True)
-        assert "qlib 缺口" in drop[0]["reason"]
-
 
 class TestCommands:
     def test_pass1_decouples_windows_and_keeps_delisted(
@@ -139,7 +92,7 @@ class TestCommands:
         assert "--start 2022-03-01 --end 2022-06-01" in out  # 信号窗
         assert "--ret-start 2022-06-02 --ret-end 2022-07-22" in out  # 赢家窗(解耦)
         assert "--delisted-ret -1.0" in out  # 去幸存者偏差
-        assert "--universe-sdata" in out  # §5 含退市宇宙准入门槛
+        assert "--universe-local" in out  # §5 含退市宇宙准入门槛
         assert "--label-basis winner" in out and "--per-window" in out
 
     def test_empty_regime_exits_2(self, monkeypatch, capsys):
@@ -163,104 +116,11 @@ class TestCommands:
         assert "统计力很弱" in capsys.readouterr().err
 
 
-class TestSurvivorshipReport:
-    """去偏体检:判据是"样本里有多少当时在、今天已摘牌的票",**不是** n_delisted。
-
-    n_delisted 只统计赢家窗内彻底没价格的票;A 股退市是慢流程,正好死在 20~70 交易日窗口内本就
-    稀有 ⇒ 2019 年后各窗 n_delisted=0 是预期行为,不能推出"退市股被剔除"。
-    """
-
-    def _firings(self, tmp_path, name, codes, with_sig=(), delisted=(), rets=None):
-        return _firings_file(tmp_path, name, codes, with_sig, delisted, rets)
-
-    def test_gone_cohort_counted_per_window(self, tmp_path, monkeypatch):
-        f = self._firings(
-            tmp_path,
-            "w1.json",
-            ["600000", "000001", "900001"],
-            with_sig=("600000", "900001"),
-        )
-        from custos.datasource import s_data
-
-        monkeypatch.setattr(
-            s_data,
-            "list_universe",
-            lambda root, source="qlib": ["600000", "000001", "900001"],
-        )
-        rep = rb.survivorship_report(
-            [f], "/tmp/sroot", today_codes={"600000", "000001"}
-        )
-        assert rep["gone_pool"] == 1  # 900001 今天已没有
-        w = rep["windows"][0]
-        assert w["n_codes"] == 3 and w["n_gone_in_sample"] == 1
-        assert w["n_gone_with_signal"] == 1 and w["n_delisted_flag"] == 0
-        assert "✅" in rep["text"] and "飞刀留在样本内" in rep["text"]
-
-    def test_empty_gone_pool_flags_debias_invalid(self, tmp_path, monkeypatch):
-        """宇宙里一只已摘牌股都没有 ⇒ 去偏无效,结论只能当乐观上界(§3 首条)。"""
-        f = self._firings(tmp_path, "w1.json", ["600000"], with_sig=("600000",))
-        from custos.datasource import s_data
-
-        monkeypatch.setattr(
-            s_data, "list_universe", lambda root, source="qlib": ["600000"]
-        )
-        rep = rb.survivorship_report([f], "/tmp/sroot", today_codes={"600000"})
-        assert rep["gone_pool"] == 0
-        assert "去偏无效" in rep["text"] and "乐观上界" in rep["text"]
-
-    def test_window_without_gone_stock_flagged(self, tmp_path, monkeypatch):
-        f1 = self._firings(
-            tmp_path, "w1.json", ["600000", "900001"], with_sig=("900001",)
-        )
-        f2 = self._firings(tmp_path, "w2.json", ["600000"], with_sig=("600000",))
-        from custos.datasource import s_data
-
-        monkeypatch.setattr(
-            s_data, "list_universe", lambda root, source="qlib": ["600000", "900001"]
-        )
-        rep = rb.survivorship_report([f1, f2], "/tmp/sroot", today_codes={"600000"})
-        assert [w["n_gone_in_sample"] for w in rep["windows"]] == [1, 0]
-        assert "1 个窗的样本里一只已摘牌股都没有" in rep["text"]
-
-    def test_n_delisted_zero_is_explained_as_expected(self, tmp_path, monkeypatch):
-        f = self._firings(
-            tmp_path, "w1.json", ["600000", "900001"], with_sig=("900001",)
-        )
-        from custos.datasource import s_data
-
-        monkeypatch.setattr(
-            s_data, "list_universe", lambda root, source="qlib": ["600000", "900001"]
-        )
-        rep = rb.survivorship_report([f], "/tmp/sroot", today_codes={"600000"})
-        assert "0 不代表去偏失效" in rep["text"]
-
-    def test_unreadable_firings_reported_not_raised(self, tmp_path, monkeypatch):
-        bad = tmp_path / "bad.json"
-        bad.write_text("{not json", encoding="utf-8")
-        from custos.datasource import s_data
-
-        monkeypatch.setattr(
-            s_data, "list_universe", lambda root, source="qlib": ["600000"]
-        )
-        rep = rb.survivorship_report([bad], "/tmp/sroot", today_codes=set())
-        assert rep["windows"][0].get("error") and "读取失败" in rep["text"]
-
-    def test_cli_requires_existing_firings(self, tmp_path, monkeypatch, capsys):
-        monkeypatch.setattr(
-            rb.bt, "load_amv_regime", lambda since=None: {"2022-01-03": "空头"}
-        )
-        monkeypatch.setattr(rb.lp, "bear_to_long_pairs", lambda *a, **k: [_pair()])
-        rc = rb.main(["--out-dir", str(tmp_path), "--survivorship-report"])
-        assert rc == 2 and "没有可体检的 firings" in capsys.readouterr().err
-
-
 class TestFeaturePassthrough:
     """Pass1 特征开关必须透传到子命令 —— 否则驱动跑一遍等于没开(2026-07-31 踩过)。"""
 
     def _args(self, **over):
         base = dict(
-            data_source="qlib",
-            s_data_root="/x",
             entry_filter="reversal_k",
             delisted_ret=-1.0,
             buffer_days=60,
@@ -336,7 +196,7 @@ class TestFingerprintLegacySafe:
                     "rank_score": "none",
                     "feature_scores": rb.DEFAULT_FEATURES,
                     "delisted_ret": -1.0,
-                    "universe": "sdata",
+                    "universe": "local",
                     "records": _RECS,
                 },
                 ensure_ascii=False,
@@ -366,7 +226,7 @@ class TestFingerprintLegacySafe:
                     "rank_score": "none",
                     "feature_scores": rb.DEFAULT_FEATURES,
                     "delisted_ret": -1.0,
-                    "universe": "sdata",
+                    "universe": "local",
                     "pit_features": True,
                     "records": _RECS,
                 }
@@ -384,7 +244,7 @@ class TestFingerprintLegacySafe:
                     "rank_score": "none",
                     "feature_scores": rb.DEFAULT_FEATURES,
                     "delisted_ret": -1.0,
-                    "universe": "sdata",
+                    "universe": "local",
                     "pit_features": True,
                     "pit_visible_same_day": False,
                     "records": _RECS,
@@ -404,7 +264,7 @@ class TestFingerprintLegacySafe:
 
 
 class TestZeroRetVolumeDiagnosis:
-    """按 volume 判零收益成因。s_data loader 只按 close 过滤,volume 加载了却没用上,
+    """按 volume 判零收益成因。tdx loader 只按收盘价有效性过滤,volume 加载了却没用上,
     停牌日只要 bundle 记了前收价就会留在 frame 里 ⇒ ret 恰好 0。"""
 
     def _bars(self, dates, closes, volumes):
@@ -612,7 +472,7 @@ class TestZeroRetVolumeDiagnosis:
 
 
 class TestZeroRetDiagnosis:
-    """零收益僵尸样本的成因诊断:是停牌直线,还是被误删的真飞刀。"""
+    """零收益样本识别(zero_ret_codes)与上市板分布(board_mix)的纯函数测试。"""
 
     def test_only_exact_zero_counted(self):
         """-1.0(退市按大亏计入)与 None(无收益)都不是零收益样本。"""
@@ -629,82 +489,6 @@ class TestZeroRetDiagnosis:
     def test_board_mix_sorted_desc(self):
         mix = rb.board_mix(["830001", "430002", "920003", "600000"])
         assert list(mix)[0] == "北交所" and mix["北交所"] == 3 and mix["沪主板"] == 1
-
-    def test_gone_and_zero_ret_warns_about_deleting_real_knives(
-        self, tmp_path, monkeypatch
-    ):
-        """已摘牌又恰好零收益 ⇒ --exclude-zero-ret 会删掉真飞刀,必须告警。
-
-        这类记录 window_return 算得 0.0(窗内有价格、首末同价),走不进 `ret is None` 的
-        --delisted-ret 分支,所以不带 delisted 标记,只能靠\"已摘牌队列 ∩ 零收益\"抓出来。
-        """
-        f = _firings_file(
-            tmp_path,
-            "w1.json",
-            ["600000", "900001", "830001"],
-            with_sig=("600000", "900001"),
-            rets={"900001": 0.0, "830001": 0.0},
-        )
-        from custos.datasource import s_data
-
-        monkeypatch.setattr(
-            s_data,
-            "list_universe",
-            lambda root, source="qlib": ["600000", "900001", "830001"],
-        )
-        rep = rb.survivorship_report(
-            [f], "/tmp/sroot", today_codes={"600000", "830001"}
-        )
-        w = rep["windows"][0]
-        assert w["n_zero_ret"] == 2 and w["n_zero_gone"] == 1  # 900001 已摘牌且零收益
-        assert rep["n_zero_gone_total"] == 1
-        assert "真飞刀" in rep["text"] and "重新引入幸存者偏差" in rep["text"]
-        assert "北交所 1 只" in rep["text"]  # 830001 计入上市板分布
-
-    def test_zero_ret_without_gone_intersection_is_safe(self, tmp_path, monkeypatch):
-        f = _firings_file(
-            tmp_path,
-            "w1.json",
-            ["600000", "830001", "900001"],
-            with_sig=("600000",),
-            rets={"830001": 0.0},
-        )
-        from custos.datasource import s_data
-
-        monkeypatch.setattr(
-            s_data,
-            "list_universe",
-            lambda root, source="qlib": ["600000", "830001", "900001"],
-        )
-        rep = rb.survivorship_report(
-            [f], "/tmp/sroot", today_codes={"600000", "830001"}
-        )
-        assert rep["n_zero_gone_total"] == 0
-        assert "未删到真飞刀" in rep["text"] and "真飞刀,一并删掉" not in rep["text"]
-
-    def test_board_distribution_aggregated_across_windows(self, tmp_path, monkeypatch):
-        """跨窗合计的上市板分布 —— 判定\"零收益是否集中在北交所\"的直接证据。"""
-        f1 = _firings_file(
-            tmp_path, "w1.json", ["830001", "600000"], rets={"830001": 0.0}
-        )
-        f2 = _firings_file(
-            tmp_path,
-            "w2.json",
-            ["830002", "300001"],
-            rets={"830002": 0.0, "300001": 0.0},
-        )
-        from custos.datasource import s_data
-
-        monkeypatch.setattr(
-            s_data,
-            "list_universe",
-            lambda root, source="qlib": ["830001", "830002", "600000", "300001"],
-        )
-        rep = rb.survivorship_report(
-            [f1, f2], "/tmp/sroot", today_codes={"830001", "830002", "600000", "300001"}
-        )
-        assert rep["zero_by_board_total"] == {"北交所": 2, "创业板": 1}
-        assert "零收益样本上市板分布" in rep["text"]
 
 
 class TestResumeAndPass2:
@@ -860,8 +644,6 @@ class TestResumeAndPass2:
 class TestStopPctBbiAndLedgerFingerprint:
     def _args(self, **over):
         base = dict(
-            data_source="qlib",
-            s_data_root="/x",
             entry_filter="reversal_k",
             delisted_ret=-1.0,
             buffer_days=60,

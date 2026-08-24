@@ -2117,7 +2117,7 @@ class TestPinnedWindowAndUniverse:
     """
 
     def test_window_sets_both_bounds_and_big_count(self):
-        a = m2._base_args(1000, False, "tdx", ("2024-08-01", "2026-08-05"))
+        a = m2._base_args(1000, False, ("2024-08-01", "2026-08-05"))
         assert a[a.index("--start") + 1] == "2024-08-01"
         assert a[a.index("--end") + 1] == "2026-08-05"
         assert int(a[a.index("--count") + 1]) == m2.WINDOW_COUNT
@@ -2126,20 +2126,20 @@ class TestPinnedWindowAndUniverse:
         )
 
     def test_no_window_keeps_default_count(self):
-        a = m2._base_args(1000, False, "tdx")
+        a = m2._base_args(1000, False)
         assert "--start" not in a and a[a.index("--count") + 1] == "500"
 
     def test_codes_file_replaces_universe_sampling(self):
         """钉宇宙时不能再传 --universe-sample，否则又去抽一次（池子可能已变）。"""
-        a = m2._base_args(1000, False, "tdx", None, "/tmp/u.txt")
+        a = m2._base_args(1000, False, None, "/tmp/u.txt")
         assert a[a.index("--codes-file") + 1] == "/tmp/u.txt"
         assert "--universe-local" not in a and "--universe-sample" not in a
 
     def test_fingerprint_separates_pinned_batches(self):
         """钉过的批次与没钉的不是同一件事（前者可复现）⇒ 不能混着汇总。"""
         plain = m2._fingerprint(1000, False)
-        win = m2._fingerprint(1000, False, "tdx", ("2024-08-01", "2026-08-05"))
-        both = m2._fingerprint(1000, False, "tdx", ("2024-08-01", "2026-08-05"), True)
+        win = m2._fingerprint(1000, False, ("2024-08-01", "2026-08-05"))
+        both = m2._fingerprint(1000, False, ("2024-08-01", "2026-08-05"), True)
         assert plain == "s1000"
         assert win == "s1000_w20240801-20260805"
         assert both == "s1000_w20240801-20260805_u"
@@ -2176,14 +2176,14 @@ class TestPinnedWindowAndUniverse:
 
     def test_prepare_universe_reuses_existing(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        fp = m2._fingerprint(1000, False, "tdx", None, True)
+        fp = m2._fingerprint(1000, False, None, True)
         (tmp_path / f"_universe__{fp}.txt").write_text(
             "600000\n000001\n", encoding="utf-8"
         )
         monkeypatch.setattr(
             m2.subprocess, "run", lambda *a, **k: pytest.fail("已有代码表不该再跑一次")
         )
-        got = m2._prepare_universe(1000, False, "tdx", None)
+        got = m2._prepare_universe(1000, False, None)
         assert got and "2 只" in capsys.readouterr().out
 
     def test_prepare_universe_degrades_on_failure(self, tmp_path, monkeypatch, capsys):
@@ -2192,7 +2192,7 @@ class TestPinnedWindowAndUniverse:
         monkeypatch.setattr(
             m2.subprocess, "run", lambda *a, **k: type("R", (), {"returncode": 1})()
         )
-        assert m2._prepare_universe(1000, False, "tdx", None) is None
+        assert m2._prepare_universe(1000, False, None) is None
         assert "本轮不钉宇宙" in capsys.readouterr().out
 
     def test_window_conflicts_with_cross_window(self, monkeypatch, capsys):
@@ -2218,8 +2218,8 @@ class TestPinnedWindowAndUniverse:
         monkeypatch.setattr(
             m2,
             "report",
-            lambda cross, sample=None, data_source="tdx", window=None, pin_universe=False: (
-                got.update(cross=cross, window=window, pin_universe=pin_universe)
+            lambda cross, sample=None, window=None, pin_universe=False: got.update(
+                cross=cross, window=window, pin_universe=pin_universe
             ),
         )
         return got
@@ -2266,53 +2266,3 @@ class TestPinnedWindowAndUniverse:
         )
         assert m2.main() == 2
         assert "冲突" in capsys.readouterr().out
-
-
-class TestDataSourceIsolation:
-    """tdx（本地 vipdoc，只有当前挂牌股）与 qlib（S_DATA，含退市股、已前复权）
-    是**两个不同的宇宙**，笔数与收益都不可比 ⇒ 必须进文件名指纹，
-    否则重演「混批」事故（见 TestSampleFingerprint）。"""
-
-    def test_fingerprint_includes_data_source(self):
-        assert m2._fingerprint(1000, False) == "s1000"  # tdx 不加后缀
-        assert m2._fingerprint(1000, False, "tdx") == "s1000"
-        assert m2._fingerprint(1000, False, "qlib") == "s1000_qlib"
-        assert m2._fingerprint(1000, True, "qlib") == "s1000_qlib_cw"
-        assert m2._fingerprint(1000, False, "csv") == "s1000_csv"
-
-    def test_collect_separates_data_sources(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write(tmp_path, "A_stop_low", "00_baseline", fp="s1000", n=1294)
-        _write(tmp_path, "A_stop_low", "trail_08", fp="s1000_qlib", n=1600)
-        assert [r["name"] for r in m2._collect(cross=False)["A_stop_low"]] == [
-            "00_baseline"
-        ]
-        assert [
-            r["name"]
-            for r in m2._collect(cross=False, data_source="qlib")["A_stop_low"]
-        ] == ["trail_08"]
-
-    def test_qlib_cross_window_separate(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write(tmp_path, "A_stop_low", "00_baseline", fp="s1000_qlib", n=1600)
-        _write(tmp_path, "A_stop_low", "00_baseline", fp="s1000_qlib_cw", n=900)
-        assert len(m2._collect(cross=False, data_source="qlib")["A_stop_low"]) == 1
-        assert len(m2._collect(cross=True, data_source="qlib")["A_stop_low"]) == 1
-
-    def test_base_args_tdx_uses_local_vipdoc(self):
-        a = m2._base_args(1000, False, "tdx")
-        assert "--universe-local" in a and "--data-source" not in a
-
-    def test_base_args_qlib_uses_sdata_universe(self):
-        """qlib 必须配 --universe-sdata：那才是含退市股的 point-in-time 宇宙，
-        用 --universe-local 会退回通达信目录 ⇒ 幸存者偏差照旧。"""
-        a = m2._base_args(1000, False, "qlib")
-        assert "--universe-sdata" in a and "--universe-local" not in a
-        assert a[a.index("--data-source") + 1] == "qlib"
-
-    def test_report_header_states_data_source(self, tmp_path, monkeypatch, capsys):
-        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write(tmp_path, "A_stop_low", "00_baseline", fp="s1000_qlib", n=1600)
-        m2.report(cross=False, data_source="qlib")
-        out = capsys.readouterr().out
-        assert "数据源 qlib" in out and "含退市股" in out

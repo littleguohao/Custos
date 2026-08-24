@@ -9,7 +9,6 @@
 - `tests/test_tq_http.py` 150 行、**0 处 monkeypatch、0 处网络** —— 只测了纯函数，
   而 `tq_http` 定义的三种错误码（`tdxw_not_running` / `connection_failed` / `timeout`）
   产生路径一条都没测。
-- `tests/test_s_data.py` 107 行，同样 0/0。
 - 全仓没有任何测试断言过接口耗时。
 
 ⇒ 「哪个接口慢、哪个不稳」全靠印象。而这三周的判断已经被印象坑过一次
@@ -262,7 +261,8 @@ def probe_qfq(repeat: int) -> list[Probe]:
     ⚠️ **自算前复权从未与任何独立序列对账过**（grep 整个 adjust_factors.py 与其测试，
     无对账代码），而它 08-04 起成了全链默认口径、决定所有价格，且出过两个 bug
     （BJ 分支写反、`out[:500]` 截断保留最旧的权息事件）。
-    这里只量可用性与耗时；**正确性对账是另一件事**（可拿 qlib 的前复权序列作独立参照）。
+    这里只量可用性与耗时；**正确性对账是另一件事**（原先可拿 qlib 的前复权序列
+    作独立参照——qlib/s_data 接口已于 2026-08-24 整删，暂无替代参照）。
     """
     out: list[Probe] = []
     try:
@@ -382,47 +382,6 @@ def probe_tq(repeat: int) -> list[Probe]:
     return out
 
 
-def probe_qlib(repeat: int) -> list[Probe]:
-    """S_DATA 的 qlib bundle —— 只服务研究链，live 不用。
-
-    两个已知坑目前只写在 `s_data.py` 的 docstring 里、治理文档一字未提，
-    而这三周所有「跨年 walk-forward」结论都依赖它：
-      · 2020-09-28 → 2021-07-30 约 10 个月**缺口**
-      · 数据到 **2026-02** 截止
-    它同时是**含退市股**（point-in-time）+ **已前复权** ⇒ 可作 tdx 自算前复权的独立参照。
-    """
-    out: list[Probe] = []
-    try:
-        from custos.datasource import s_data as Q
-    except Exception as exc:  # noqa: BLE001
-        p = Probe("qlib", "import s_data")
-        p.error = f"{type(exc).__name__}: {exc}"
-        return [p]
-    out.append(
-        Probe("qlib", "list_bundles()", "bundle 发现（含区间）").run(
-            lambda: Q.list_bundles(), repeat
-        )
-    )
-    out.append(
-        Probe(
-            "qlib",
-            "list_universe(qlib)",
-            "point-in-time 宇宙，**含退市股** ⇒ 可去幸存者偏差",
-        ).run(lambda: Q.list_universe(), repeat)
-    )
-    out.append(
-        Probe(
-            "qlib", "load_bars_qlib(SH)", "已前复权 ⇒ 可作 tdx 自算 qfq 的独立参照"
-        ).run(lambda: Q.load_bars_qlib([SAMPLE_SH], 500), repeat)
-    )
-    out.append(
-        Probe("qlib", "load_bars_csv(SH)", "CSV 冗余副本").run(
-            lambda: Q.load_bars_csv([SAMPLE_SH], 500), repeat
-        )
-    )
-    return out
-
-
 def probe_eastmoney(repeat: int) -> list[Probe]:
     """东财：三项无法本地化的依赖（PIT 财务 / 真市值 / BJ 行情与资金流）。"""
     out: list[Probe] = []
@@ -465,7 +424,6 @@ GROUPS: dict[str, Callable[[int], list[Probe]]] = {
     "mootdx": probe_mootdx,
     "qfq": probe_qfq,
     "tq": probe_tq,
-    "qlib": probe_qlib,
     "eastmoney": probe_eastmoney,
 }
 

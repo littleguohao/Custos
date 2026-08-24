@@ -262,3 +262,67 @@ class TestLedgerIntegration:
         )
         got = cm.load_entry_dates(p)
         assert got["600000"]["entry_date"] == "2026-06-10"
+
+
+class TestFetchBars:
+    """fetch_bars 改走数据层（2026-08-24 解耦）后的取数顺序钉测：
+    主路径 get_ohlcv_table(adjust="qfq") → 空则 get_online_bars 兜底。
+    不再直建 mootdx client（钉测见 test_architecture_layers 的第三方库检查）。
+    """
+
+    def _ltd(self):
+        from custos.datasource.local_tdx import local_tdx_data as ltd
+
+        return ltd
+
+    def test_primary_qfq_path_short_circuits(self, monkeypatch):
+        import pandas as pd
+
+        calls = {}
+
+        def fake_ohlcv(code, count=260, adjust="qfq"):
+            calls["ohlcv"] = (code, count, adjust)
+            return pd.DataFrame({"date": ["2026-06-10"], "high": [1.0], "low": [1.0]})
+
+        monkeypatch.setattr(self._ltd(), "get_ohlcv_table", fake_ohlcv)
+        monkeypatch.setattr(
+            self._ltd(),
+            "get_online_bars",
+            lambda *a, **kw: (_ for _ in ()).throw(AssertionError("不应走到在线兜底")),
+        )
+        df = cm.fetch_bars("600000", 100)
+        assert calls["ohlcv"] == ("600000", 2000, "qfq")
+        assert len(df) == 1
+
+    def test_empty_local_falls_back_to_online_bars(self, monkeypatch):
+        import pandas as pd
+
+        calls = {}
+        monkeypatch.setattr(
+            self._ltd(), "get_ohlcv_table", lambda *a, **kw: pd.DataFrame()
+        )
+
+        def fake_online(code, frequency=9, offset=120, adjust=""):
+            calls["online"] = (code, frequency, offset)
+            return pd.DataFrame({"date": ["2026-06-10"], "high": [2.0], "low": [2.0]})
+
+        monkeypatch.setattr(self._ltd(), "get_online_bars", fake_online)
+        df = cm.fetch_bars("920808", 100)
+        # BJ 与沪深同一兜底；bars_needed 以 offset 传入（旧代码的 count= 会被
+        # mootdx 静默忽略，这是本次顺带修掉的口径 bug）
+        assert calls["online"] == ("920808", 9, 100)
+        assert len(df) == 1
+
+    def test_both_empty_returns_empty(self, monkeypatch):
+        import pandas as pd
+
+        monkeypatch.setattr(
+            self._ltd(), "get_ohlcv_table", lambda *a, **kw: pd.DataFrame()
+        )
+        monkeypatch.setattr(
+            self._ltd(), "get_online_bars", lambda *a, **kw: pd.DataFrame()
+        )
+        df = cm.fetch_bars("600000", 100)
+        assert (
+            df is None or len(df) == 0
+        )  # 调用方 calc_window_row 按"无数据" fail-closed
