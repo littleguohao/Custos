@@ -110,6 +110,11 @@ TOOLS: dict[str, tuple[str, str]] = {
         "赢家半场因子富集：top-50% 票的 J<13 信号日单因子命中面板"
         "（复用 score_return_study 基建；⚠️ R3 纪律：须过半窗一致性）",
     ),
+    "score_variants_study": (
+        "study",
+        "打分重构：V0~V3 变体（反向腿取反/证据重构/负向证据）× 预注册判据"
+        "——TOP20% 赢家能否在得分上浮现（⚠️ R21：以篮子实测为准）",
+    ),
     "adjust_diagnostic": (
         "diagnostic",
         "复权口径诊断：量化未复权数据对回测与选股的影响",

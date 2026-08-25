@@ -1,0 +1,393 @@
+# -*- coding: utf-8 -*-
+"""研究：打分重构——让 TOP20% 赢家在得分上浮现（owner 2026-08-25 批准）。
+
+> ⚠️ **R11 警示**：基准已实现口径为负、vipdoc 宇宙带幸存者偏差——读数仅供
+> 相对排序。**R3 纪律**：单窗正 = 不作数，须前后半窗 + 跨窗一致。
+> **R21 警示**：画像层富集 ≠ 可交易（rsi_div gate 证伪在先）——变体是否
+> 「能选出赢家」以篮子实测为准，不以相关性推断。
+
+## 变体（全部 cand→score 确定性函数，权重 = 简单整数，可回流 scoring.weights 形态）
+
+- **V0** = 现行 live 技术分（对照；由 factor_contrib 重建，与落盘分逐位一致，钉测钉住）
+- **V1** = 反向腿取反：R20 反向腿清单的贡献分值变号（macd_top_divergence 现行
+  −8 随之变 +8），其余不动，clamp 0-100
+- **V2** = 证据重构：只留 R20 正向腿——rsi_deep_oversold **40** / weekly_j_low 20 /
+  rsi_bull_div 20 / macd_bottom_divergence 20（上限 100；j_low 是基底恒真不计）
+- **V3** = V2 + 反向腿当负向证据：11 条反向腿每条命中 **−5**，clamp 0-100
+
+## 判据（**预注册**，跑前定死，不许事后凑数）
+
+- **C1**：变体分 vs 收益 Spearman > 0（全体）且前后半窗同正
+- **C2**：收益 TOP20% 赢家组的变体均分 > bottom-80% 均分
+- **C3**：按变体分选 top20% 篮子的**胜率 > V0 篮子胜率**，且**盈亏比 ≥ V0 篮子**
+  （「浮现出来」的直接度量：胜率升、盈亏比不塌）
+- **C4**：跨窗（2022-2024，s1000）C1 符号保持
+判定：C1–C3 全过 ⇒ 候选；C4 再过 ⇒ 跨窗确认。C1–C3 任一不过 ⇒ 该变体淘汰。
+
+多比较纪律：变体 ≤4、权重简单整数、一轮数据采集（panel+contrib 一次算好，
+变体离线求值——交易集与打分无关，baseline scorer 进场只由 j_low gate 决定）。
+出场与 v0.118 臂完全一致：stop12 + 保本 0.05 + 分批止盈 0.5 + BBI 连破 2 根 + 25bps。
+
+CLI::
+
+    uv run python src/custos/research/score_variants_study.py                      # 主臂（全历史 400 只）
+    uv run python src/custos/research/score_variants_study.py --start 2022-01-01 \\
+        --end 2024-12-31 --max-stocks 1000 --tag cw                               # 跨窗臂
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+from typing import Any, Optional
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+from custos.research import backtest_factors as bf  # noqa: E402
+from custos.research import score_return_study as srs  # noqa: E402
+from custos.research import winner_factor_study as wfs  # noqa: E402
+
+# 出场口径 = v0.118 臂（owner 指定，不再作为扫描变量）
+ARM_STOP_PCT = 12.0
+ARM_BREAKEVEN = 0.05
+ARM_SCALE_OUT = 0.5
+TOP_FRAC = 0.20  # 赢家组分位（与 v0.118 一致）
+
+# factor_contrib 里的**证据键**（不计分——technical_score 的 evidence_only 列）：
+# 重建 V0 时必须排除，否则比落盘分多出 perfect_b1_fit 的分值。
+_EVIDENCE_ONLY_CONTRIB = {"perfect_b1_fit"}
+
+# R20 反向腿（稳定富集在输家侧，lift 0.6~0.9）→ 映射到 contrib 键。
+# ⚠️ macd_top_divergence 现行已是 −8（负腿），「变号」对它意味着 +8。
+_REVERSE_CONTRIB_KEYS = (
+    "bbi_above",
+    "reversal_k_candidate",
+    "volume_contraction",
+    "relative_strength_strong",
+    "macd_above_water",
+    "macd_wm_bar_grow",
+    "macd_top_divergence",
+    "pullback_shrink",
+    "b1_ignition",
+)
+# 同一清单的 panel 键版（V3 负向证据用；panel 覆盖 contrib 之外的 rsi_strong /
+# platform_pullback_b1 两条腿）
+_REVERSE_PANEL_KEYS = (
+    "bbi_above",
+    "reversal_k_candidate",
+    "volume_contraction",
+    "relative_strength_strong",
+    "macd_above_water",
+    "macd_wm_bar_grow",
+    "macd_top_divergence",
+    "pullback_shrink",
+    "b1_ignition",
+    "rsi_strong",
+    "platform_pullback_b1",
+)
+
+# V2 正向腿权重（简单整数，上限 100；R20 四臂证据：深水 RSI 最强给大权重）
+_V2_WEIGHTS = {
+    "rsi_deep_oversold": 40,
+    "weekly_j_low": 20,
+    "rsi_bull_div": 20,
+    "macd_bottom_divergence": 20,
+}
+_V3_REVERSE_PENALTY = 5  # V3：每条反向腿命中 −5（简单整数）
+
+
+# ---------------------------------------------------------------------------
+# 变体打分（纯函数：只读 trade 的 factor_contrib / panel，无任何行情访问）
+# ---------------------------------------------------------------------------
+
+
+def _clamp(score: float) -> int:
+    return int(min(100, max(0, round(score))))
+
+
+def v0_score(trade: dict[str, Any]) -> int:
+    """V0 现行技术分：contrib 求和（排除证据键）clamp——与落盘 tech_score 逐位一致。"""
+    contrib = trade.get("factor_contrib") or {}
+    return _clamp(
+        sum(
+            float(v)
+            for k, v in contrib.items()
+            if k not in _EVIDENCE_ONLY_CONTRIB and isinstance(v, (int, float))
+        )
+    )
+
+
+def v1_score(trade: dict[str, Any]) -> int:
+    """V1 反向腿取反：V0_raw − 2×（反向腿贡献之和）⇒ 反向腿分值变号。"""
+    contrib = trade.get("factor_contrib") or {}
+    base = sum(
+        float(v)
+        for k, v in contrib.items()
+        if k not in _EVIDENCE_ONLY_CONTRIB and isinstance(v, (int, float))
+    )
+    reverse = sum(float(contrib[k]) for k in _REVERSE_CONTRIB_KEYS if k in contrib)
+    return _clamp(base - 2 * reverse)
+
+
+def v2_score(trade: dict[str, Any]) -> int:
+    """V2 证据重构：只留 R20 正向腿（unavailable=None 按不命中=0 分，不惩罚数据缺失）。"""
+    panel = trade.get("panel") or {}
+    return _clamp(sum(w for k, w in _V2_WEIGHTS.items() if panel.get(k) is True))
+
+
+def v3_score(trade: dict[str, Any]) -> int:
+    """V3 = V2 + 反向腿负向证据（每条命中 −5）。"""
+    panel = trade.get("panel") or {}
+    penalty = _V3_REVERSE_PENALTY * sum(
+        1 for k in _REVERSE_PANEL_KEYS if panel.get(k) is True
+    )
+    return _clamp(v2_score(trade) - penalty)
+
+
+VARIANTS = {"V0": v0_score, "V1": v1_score, "V2": v2_score, "V3": v3_score}
+
+
+# ---------------------------------------------------------------------------
+# 评估
+# ---------------------------------------------------------------------------
+
+
+def _remap(trades: list[dict[str, Any]], score_fn) -> list[dict[str, Any]]:
+    """把变体分塞进 tech_score 键，复用 srs 的全部统计函数（口径零重复）。"""
+    return [{**t, "tech_score": score_fn(t)} for t in trades]
+
+
+def basket_stats(trades: list[dict[str, Any]], score_fn, frac: float) -> dict[str, Any]:
+    """按变体分选 top-frac 篮子（得分降序）→ 胜率/盈亏比/均收（「浮现」直接度量）。"""
+    ordered = sorted(trades, key=lambda t: score_fn(t), reverse=True)
+    import math
+
+    n_top = max(1, math.ceil(len(ordered) * frac)) if ordered else 0
+    basket = ordered[:n_top]
+    return {**srs.ret_stats(basket), "n": len(basket)}
+
+
+def evaluate_variant(
+    trades: list[dict[str, Any]], name: str, score_fn
+) -> dict[str, Any]:
+    """单变体全景：C1 相关性 / C2 赢家组得分 / C3 篮子 / 分档收益表。"""
+    remapped = _remap(trades, score_fn)
+    top, bottom = srs.split_top_frac(trades, TOP_FRAC)  # 按**收益**切赢家组
+    top_scores = [score_fn(t) for t in top]
+    bottom_scores = [score_fn(t) for t in bottom]
+    return {
+        "variant": name,
+        "corr": srs.correlations(remapped),  # C1 全体
+        "half_window": srs.half_window_check(remapped),  # C1 半窗
+        "winner_top20_dist": srs.dist_stats(top_scores),  # C2
+        "bottom80_dist": srs.dist_stats(bottom_scores),  # C2
+        "basket_top20_by_variant": basket_stats(trades, score_fn, TOP_FRAC),  # C3
+        "band_stats": srs.band_stats(remapped),  # 分档收益表（live 30/60 阈）
+    }
+
+
+def judge(rep: dict[str, Any], v0_basket: dict[str, Any]) -> dict[str, Any]:
+    """按预注册判据 C1–C3 裁决（C4 跨窗在报告层人工对照，不进本函数）。"""
+    sp = rep["corr"].get("spearman")
+    hw = rep["half_window"]
+    c1 = (
+        sp is not None
+        and sp > 0
+        and hw.get("consistent") is True
+        and (hw.get("first_half") or {}).get("spearman") is not None
+        and hw["first_half"]["spearman"] > 0
+    )
+    c2 = (rep["winner_top20_dist"].get("mean") or 0) > (
+        rep["bottom80_dist"].get("mean") or 0
+    )
+    b = rep["basket_top20_by_variant"]
+    c3 = b["win_rate"] > v0_basket["win_rate"] and (b["payoff_ratio"] or 0) >= (
+        v0_basket["payoff_ratio"] or 0
+    )
+    return {
+        "C1_spearman_positive": c1,
+        "C2_winner_scores_higher": c2,
+        "C3_basket_wr_up_payoff_kept": c3,
+        "candidate": c1 and c2 and c3,
+    }
+
+
+def build_report(trades: list[dict[str, Any]]) -> dict[str, Any]:
+    """四变体评估 + 预注册判据裁决。"""
+    variants = {
+        name: evaluate_variant(trades, name, fn) for name, fn in VARIANTS.items()
+    }
+    v0_basket = variants["V0"]["basket_top20_by_variant"]
+    verdicts = {
+        name: judge(rep, v0_basket) if name != "V0" else {"note": "对照臂"}
+        for name, rep in variants.items()
+    }
+    return {
+        "r11_r3_warning": (
+            "⚠️ R11：量级不作数；R3：单窗正不作数（须 C4 跨窗）；"
+            "R21：画像富集≠可交易，以篮子实测为准。"
+        ),
+        "preregistered_criteria": {
+            "C1": "Spearman>0 且前后半窗同正",
+            "C2": "TOP20% 赢家组变体均分 > bottom-80% 均分",
+            "C3": "变体 top20% 篮子胜率 > V0 且盈亏比 ≥ V0",
+            "C4": "跨窗（2022-2024）C1 符号保持",
+        },
+        "n_trades": len(trades),
+        "overall_stats": srs.ret_stats(trades),
+        "exit_reasons": srs.exit_reason_dist(trades),
+        "variants": variants,
+        "verdicts": verdicts,
+    }
+
+
+def print_report(rep: dict[str, Any]) -> None:
+    """stdout 中文摘要。"""
+    print("\n" + "=" * 76)
+    print("打分重构研究：哪个变体让 TOP20% 赢家浮现（出场=v0.118 臂 stop12+be05+so05）")
+    print("=" * 76)
+    print(rep["r11_r3_warning"])
+    os_ = rep["overall_stats"]
+    print(
+        f"\n样本：{rep['n_trades']} 笔；全体均收 {os_['avg_ret'] * 100:.2f}% / "
+        f"胜率 {os_['win_rate'] * 100:.1f}% / 盈亏比 {os_['payoff_ratio']}"
+    )
+    print(
+        "\n── 变体对照：Spearman(半窗) | 赢家top20均分 vs 对照组 | "
+        "变体篮子(胜率/盈亏比/均收/n) | C1/C2/C3"
+    )
+    for name, v in rep["variants"].items():
+        hw = v["half_window"]
+        sp = v["corr"].get("spearman")
+        h1 = (hw.get("first_half") or {}).get("spearman")
+        h2 = (hw.get("second_half") or {}).get("spearman")
+        b = v["basket_top20_by_variant"]
+        vd = rep["verdicts"].get(name, {})
+        tags = (
+            "对照"
+            if name == "V0"
+            else f"{'✓' if vd.get('C1_spearman_positive') else '✗'}"
+            f"{'✓' if vd.get('C2_winner_scores_higher') else '✗'}"
+            f"{'✓' if vd.get('C3_basket_wr_up_payoff_kept') else '✗'}"
+            f" ⇒ {'候选' if vd.get('candidate') else '淘汰'}"
+        )
+        print(
+            f"  {name} | {sp}({h1}/{h2}{'' if hw.get('consistent') else ' ⚠️翻'}) | "
+            f"{v['winner_top20_dist'].get('mean')} vs {v['bottom80_dist'].get('mean')} | "
+            f"{b['win_rate'] * 100:.1f}%/{b['payoff_ratio']}/{b['avg_ret'] * 100:.2f}%/n={b['n']} | "
+            f"{tags}"
+        )
+    print("\n── 分档收益表（live 30/60 阈；变体分档）")
+    for name, v in rep["variants"].items():
+        row = [name]
+        for band in ("<30", "30-59", ">=60"):
+            st = v["band_stats"].get(band) or {}
+            if st.get("n"):
+                row.append(
+                    f"{band}: {st['avg_ret'] * 100:+.2f}%/{st['win_rate'] * 100:.0f}%/"
+                    f"{st['payoff_ratio']}(n={st['n']})"
+                )
+            else:
+                row.append(f"{band}: —")
+        print("  " + " | ".join(row))
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--max-stocks", type=int, default=400, help="宇宙抽样只数")
+    ap.add_argument("--seed", type=int, default=0, help="抽样种子")
+    ap.add_argument("--start", default="2010-01-01", help="0AMV regime 起点")
+    ap.add_argument("--end", default="", help="K线终点（跨窗用；默认全历史）")
+    ap.add_argument("--cost-bps", type=float, default=srs.COST_BPS)
+    ap.add_argument("--tag", default="", help="落盘文件名标签（如 cw）")
+    ap.add_argument("--out", default="")
+    return ap
+
+
+def main(argv: Optional[list] = None) -> int:
+    ap = _build_parser()
+    args = ap.parse_args(argv)
+
+    regime = bf.load_amv_regime(since=args.start)
+    if not regime:
+        ap.error("读不到指南针 0AMV 数据（compass_amv）")
+    print(
+        f"[INFO] 0AMV regime {len(regime)} 个交易日，做多区间 "
+        f"{len(srs.long_intervals(regime))} 段",
+        file=sys.stderr,
+    )
+
+    from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
+
+    base = local_tdx_data.list_local_vipdoc_codes()
+    codes = bf.sample_codes(base, args.max_stocks, args.seed)
+    print(
+        f"[INFO] universe=local_vipdoc 共 {len(base)} 只，取 {len(codes)} 只（seed={args.seed}）",
+        file=sys.stderr,
+    )
+    index_df = (
+        local_tdx_data.get_ohlcv_table(srs.INDEX_CODE, count=100000)
+        .sort_values("date")
+        .reset_index(drop=True)
+    )
+
+    # 一轮采集：panel_hook 同时产出 factor_contrib + panel，四个变体离线求值
+    trades = srs.run_study(
+        codes,
+        regime,
+        index_df,
+        cost_bps=args.cost_bps,
+        stop_pct=ARM_STOP_PCT,
+        breakeven_trigger=ARM_BREAKEVEN,
+        scale_out_frac=ARM_SCALE_OUT,
+        end=args.end or None,
+        trade_hook=wfs.panel_hook,
+    )
+    if not trades:
+        print("⛔ 0 笔交易", file=sys.stderr)
+        return 1
+
+    rep = build_report(trades)
+    rep["config"] = {
+        "signal": "日KDJ J<13 + 0AMV 做多（固定基底）",
+        "exit": f"stop{ARM_STOP_PCT} + breakeven {ARM_BREAKEVEN} + scale_out {ARM_SCALE_OUT} + BBI连破2根（=v0.118 臂）",
+        "cost_bps": args.cost_bps,
+        "top_frac": TOP_FRAC,
+        "variants": list(VARIANTS),
+        "v2_weights": _V2_WEIGHTS,
+        "v3_reverse_penalty": _V3_REVERSE_PENALTY,
+        "max_stocks": args.max_stocks,
+        "seed": args.seed,
+        "start": args.start,
+        "end": args.end or None,
+        "n_codes": len(codes),
+    }
+    rep["trades"] = trades
+
+    tag = f"_{args.tag}" if args.tag else ""
+    out = (
+        Path(args.out)
+        if args.out
+        else (
+            Path("artifacts/logs/score_variants_study")
+            / f"score_variants_study_s{args.seed}_n{len(codes)}{tag}.json"
+        )
+    )
+    out.parent.mkdir(parents=True, exist_ok=True)
+    bf.write_json_stream(out, rep, big=len(trades) > 20000)
+    print(f"[OK] 写出 {out}（{len(trades)} 笔）")
+    print_report(rep)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -340,6 +340,7 @@ def run_study(
     cost_zone_pct: float = 3.0,
     breakeven_trigger: float = 0.0,
     scale_out_frac: float = 0.0,
+    end: Optional[str] = None,
     trade_hook: Optional[Any] = None,
 ) -> list[dict[str, Any]]:
     """逐股流式：加载全历史 → evaluate_trades（j_low gate + baseline scorer +
@@ -348,6 +349,7 @@ def run_study(
 
     ``breakeven_trigger``/``scale_out_frac``（v0.118）：保本止损触发浮盈 /
     BBI 上方双中大阳分批止盈比例，0=关（旧行为逐位不变）。
+    ``end``（可选，YYYY-MM-DD）：K 线截到该日（跨窗复核用；None=全历史）。
     ``trade_hook``（可选）：``hook(df, index_df, i, code) -> dict``，返回键并入该笔
     记录（替代默认的 tech_score/tech_level/factor_contrib 三键）——
     winner_factor_study 用它注入因子面板，回测引擎/截断口径零重复。
@@ -368,6 +370,10 @@ def run_study(
         # 依赖 datetime64 的 date 列，转 str 会炸（冒烟实测）。日期串比较一律
         # 用 astype(str).str[:10] 现算，不改列本体。
         df = raw.sort_values("date").reset_index(drop=True)
+        if end:
+            df = df[df["date"].astype(str).str[:10] <= end].reset_index(drop=True)
+            if not len(df):
+                continue
         code_trades = bf.evaluate_trades(
             {code: df},
             scorer=bf.SCORERS["baseline"],  # 恒「可买」——进场只由 j_low gate 决定
