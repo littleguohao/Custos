@@ -33,7 +33,7 @@ FACTOR: dict[str, Any] = {
 }
 
 
-MACD_FAST, MACD_SLOW, MACD_SIGNAL = 12, 26, 9
+MACD_SLOW, MACD_SIGNAL = 26, 9  # fast 走 indicators 唯一实现默认参数，不单独定义
 PHASE_LOOKBACK = 60  # 顶背离/三打回看窗口(交易日)
 PHASE_FRACTAL = 2  # 摆动高点左右确认根数
 

@@ -68,51 +68,6 @@ class TestBbiHoldingReminder:
         assert state == "BBI待确认"
 
 
-class TestAdjustmentWithBbi:
-    """⚠️ **结构风控优先于 BBI** —— N 型前低失守时不看 BBI 说什么。"""
-
-    def test_structural_clear_outranks_bbi(self, monkeypatch):
-        monkeypatch.setattr(
-            dr, "n_structure_basis", lambda row, close: {"signal": "structural_clear"}
-        )
-        out = dr.adjustment_with_bbi({"above_bbi": True}, None)
-        assert "结构失效" in out and "优先级高于BBI" in out, (
-            "N 型前低是硬结构位，BBI 只是动态趋势预警（v0.17/v0.18 的定案）"
-        )
-
-    def test_pullback_failure_is_not_structural_clear(self, monkeypatch):
-        """L2（更高回踩低点）失守 ≠ L1（主结构前低）失守 ——
-        v0.18 明确区分：前者进减仓/清仓评估，后者才是结构失效。"""
-        monkeypatch.setattr(
-            dr, "n_structure_basis", lambda row, close: {"signal": "pullback_failure"}
-        )
-        out = dr.adjustment_with_bbi({}, None)
-        assert "主结构前低未破" in out
-
-    def test_two_days_below_bbi_tightens(self, monkeypatch):
-        monkeypatch.setattr(dr, "n_structure_basis", lambda row, close: {"signal": ""})
-        out = dr.adjustment_with_bbi(
-            {"above_bbi": False, "consecutive_closes_below_bbi": 3}, None
-        )
-        assert "清仓评估" in out
-
-    def test_bbi_derived_advice_always_defers_to_chief(self, monkeypatch):
-        """⚠️ 任何 BBI 派生建议都要写「最终动作服从总控」——
-        `chief_decision` 是唯一输出层，日报是证据层。"""
-        monkeypatch.setattr(dr, "n_structure_basis", lambda row, close: {"signal": ""})
-        for row in (
-            {"above_bbi": False, "consecutive_closes_below_bbi": 2},
-            {"above_bbi": False},
-        ):
-            assert "服从总控" in dr.adjustment_with_bbi(row, None)
-
-    def test_above_bbi_falls_back_to_base_plan(self, monkeypatch):
-        """站上 BBI 且结构无恙时不额外加戏，回落到基础计划。"""
-        monkeypatch.setattr(dr, "n_structure_basis", lambda row, close: {"signal": ""})
-        out = dr.adjustment_with_bbi({"above_bbi": True}, None)
-        assert "跌破BBI" not in out
-
-
 class TestTechnicalRelation:
     def test_lists_above_and_below_separately(self):
         out = dr.technical_relation(

@@ -366,8 +366,8 @@ class TestInlineFactorsExtracted:
         ):
             defs = re.findall(rf"^({pfx}[A-Z0-9_]+) *=", s, re.M)
             assert not defs, f"{pfx}* 常量应随因子迁走，enrich 里还剩：{defs}"
-        # 同前缀只有部分常量迁走的，按名单钉（THREE_LOWS_VOL_RATIO /
-        # LIQUIDITY_FLOOR_YI 只被留在 enrich 的检测器/score 层用，留在本地）。
+        # 同前缀只有部分常量迁走的，按名单钉（THREE_LOWS_VOL_RATIO
+        # 只被留在 enrich 的检测器/score 层用，留在本地）。
         for name in ("THREE_LOWS_DRAWDOWN_PCT", "LIQUIDITY_WIN"):
             assert not re.search(rf"^{name} *=", s, re.M), (
                 f"{name} 应随因子迁走，enrich 里还有定义"

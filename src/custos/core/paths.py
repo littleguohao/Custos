@@ -2,7 +2,7 @@
 """Centralized path configuration for strategy_team.
 
 All modules should import from here instead of hardcoding paths.
-TDX_ROOT and PYTHON can be overridden via environment variables.
+TDX_ROOT can be overridden via environment variables.
 
 Also the single source of truth for "what day is it" — see cn_now/cn_today.
 """
@@ -47,8 +47,6 @@ TOOLS = BASE / "src" / "custos"
 ARTIFACTS = BASE / "artifacts"
 REPORTS = ARTIFACTS / "reports"
 DAILY_REPORTS = REPORTS / "daily"  # 每日计划与日报
-WEEKLY_REPORTS = REPORTS / "weekly"  # 周报
-MONTHLY_REPORTS = REPORTS / "monthly"  # 月报
 ARTIFACT_LOGS = ARTIFACTS / "logs"  # 运行日志与诊断输出
 
 PLANS = DAILY_REPORTS
@@ -79,7 +77,6 @@ def daily_report_dir(day: str, base: Path | None = None) -> Path:
 MARKET_TIMING = TOOLS / "pipeline" / "market_timing"
 HOLDINGS = TOOLS / "pipeline" / "holdings"  # 工具目录；持仓**数据**目录是 HOLDINGS_DIR
 SCREENING = TOOLS / "pipeline" / "screening"
-CLOSE_REVIEW = TOOLS / "pipeline" / "close_review"
 
 # Subdirectories under data/
 HOLDINGS_DIR = DATA / "holdings"
@@ -95,10 +92,8 @@ SECTORS_DIR = DATA / "sectors"
 SECTOR_INDEX_DIR = MARKET_DIR / "sector_index"
 # 板块 → 成员股票映射（fetch_sector_index_history --members 落盘）
 SECTOR_MEMBERS_FILE = MARKET_DIR / "sector_members.json"
-DECISIONS_DIR = DATA / "decisions"
 RISK_DIR = DATA / "risk"
 STOCK_POOL_DIR = DATA / "stock_pool"
-REVIEW_STEPS_DIR = DATA / "review_steps"  # 复盘链各 step 的中间产物
 CACHE_DIR = DATA / "cache"  # 采集缓存（如 tdx_affair 权息缓存）
 
 # ---------------------------------------------------------------------------
@@ -136,9 +131,6 @@ TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"E:\new_tdx64"))
 # TDX sub-paths
 TDX_VIPDOC = TDX_ROOT / "vipdoc"
 TDX_PYPLUGINS = TDX_ROOT / "PYPlugins" / "user"
-
-# Python executable (overridable via env, defaults to sys.executable)
-PYTHON = os.environ.get("STRATEGY_PYTHON", None)
 
 # Calendar
 CALENDAR_FILE = CONTRACTS_DIR / "CN_TRADING_CALENDAR.json"

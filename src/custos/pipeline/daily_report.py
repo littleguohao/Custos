@@ -160,28 +160,6 @@ def bbi_holding_reminder(row: dict[str, Any]) -> tuple[str, str]:
     return state, reminder
 
 
-def adjustment_with_bbi(row: dict[str, Any], event: dict[str, Any] | None) -> str:
-    base = plan_adjustment("", event)
-    structure = n_structure_basis(row, row.get("close"))
-    if structure.get("signal") == "structural_clear":
-        return "结构风控：收盘失守N型前低，结构失效，进入清仓/退出评估；优先级高于BBI"
-    if structure.get("signal") == "pullback_failure":
-        return (
-            "结构收紧：更高回踩低点失守，N型尝试失败；主结构前低未破，进入减仓/清仓评估"
-        )
-    above = row.get("above_bbi")
-    below_days = row.get("consecutive_closes_below_bbi")
-    try:
-        days = int(below_days or 0)
-    except (TypeError, ValueError):
-        days = 0
-    if above is False and days >= 2:
-        return f"技术提醒收紧：连续{days}日收盘跌破BBI，进入清仓评估；最终动作服从总控"
-    if above is False:
-        return "新增观察：首日跌破BBI，验证次日能否快速收回；最终动作服从总控"
-    return base
-
-
 def direction_label(v: Any) -> str:
     s = str(v or "").lower()
     if s in {"positive", "bullish", "利好"}:
@@ -215,15 +193,6 @@ def fallback_rss_events(day: str) -> list[dict[str, Any]]:
                 }
             )
     return selected[:3]
-
-
-def plan_adjustment(prior_action: str, event: dict[str, Any] | None) -> str:
-    direction = direction_label((event or {}).get("direction"))
-    if direction == "利空":
-        return "收紧：提高开盘风险复核优先级；不得放宽原计划"
-    if direction == "利好":
-        return "不放宽：观察利好兑现强度，原风控计划继续有效"
-    return "不调整：维持上次复盘计划"
 
 
 def holdings_plan_section(

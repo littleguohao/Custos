@@ -67,7 +67,6 @@ LEDGER_PATH = TRADES_DIR / "master_trade_ledger.csv"
 POSITIONS_PATH = TRADES_DIR / "current_positions.json"
 REPORT_DIR = REVIEWS / "trade_review"
 
-CASH_ONLY_CATEGORIES = ("除权除息", "组合费用", "融券", "融券购回")
 # 代码为 000000 的组合费用、131810/204001 逆回购等无个股行情的类别
 NON_SECURITY_CODES = {"000000", "131810", "204001"}
 
@@ -276,7 +275,7 @@ def _apply_trade(
         # 拆股/送转股：0 成本批次入库（发生金额为 0，不影响现金）
         books[t["code"]].add(t["qty"], 0.0)
         return t["cash"], 0.0
-    # CASH_ONLY_CATEGORIES 与未知类别：保守按现金流处理
+    # 无个股行情的类别与未知类别：保守按现金流处理
     return t["cash"], t["cash"]
 
 

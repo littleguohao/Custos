@@ -27,9 +27,6 @@ from custos.core.paths import LOGS  # noqa: E402
 from custos.datasource.local_tdx import local_tdx_data  # noqa: E402
 from custos.research.launch_point_study import _auc  # noqa: E402  Mann-Whitney 正确实现(本文件曾用错公式)
 
-# 历史缓存路径(无参数指纹)。保留仅为兼容,实际读写走 _cache_path()。
-ROWS_CACHE = LOGS / "walkforward" / "winner_feature_rows.json"
-
 FIRINGS = LOGS / "walkforward" / "firings_jlow_2026H1_tdx.json"
 FWD = 20
 WIN_Q = 0.2  # 全体前 20% 算"跑出来"

@@ -277,12 +277,6 @@ THREE_LOWS_VOL_RATIO = 0.3  # 待回测参数：三低之低量（<250日均量�
 J_GATE_REQUIRED_DEFAULT = (
     True  # J<13 硬门槛默认开（registry universe.j_low_required 可覆盖）
 )
-DKS_MA_WINDOWS = (
-    14,
-    28,
-    57,
-    114,
-)  # DKS=(MA14+MA28+MA57+MA114)/4，与 technical_monitor.zhixing_state 同参
 
 # --- 完美B1「缩量回踩超卖企稳」买弱指纹（10只确认赢家反标，见 worklog）---
 # recall 达标(10/10)，但全市场回测证伪：周线交易模拟(止损+BBI出场)加0AMV做多+25bps成本后
@@ -295,8 +289,8 @@ DKS_MA_WINDOWS = (
 
 # --- 正交因子（非量价形态）待回测参数 ---
 # 方向A(2026-07-23)：全市场回测证实突破式打分非短周期 alpha，转接正交维度。
-# v0.86（因子化批 B）：LIQUIDITY_WIN 随 check_liquidity 迁入 factors/b1_structure.py。
-LIQUIDITY_FLOOR_YI = 0.5  # 待回测：均成交额底线(亿元)，低于→low_liquidity(默认仅flag)
+# v0.86（因子化批 B）：LIQUIDITY_WIN 随 check_liquidity 迁入 factors/b1_structure.py
+# （LIQUIDITY_FLOOR_YI 正主在 score_candidates——low_liquidity flag 的打分层用）。
 FUND_FLOW_SECTOR_MIN_NAME = 2  # 板块名整名匹配所需最小长度（短于此视为不可判，不给分）
 
 
