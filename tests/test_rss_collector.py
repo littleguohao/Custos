@@ -330,3 +330,32 @@ class TestTransientSslRetry:
         assert calls["n"] == 3, "两次瞬时 SSL 失败后第三次成功"
         # 加长退避参数钉住：退化成默认 3 连快重试会重新撞坏节点
         assert seen_kwargs.get("tries") == 4 and seen_kwargs.get("jitter") == 0.5
+
+
+class TestJin10TokenResolution:
+    """v0.113：token 解析顺序——env 优先、用户 secrets 文件兜底、全缺报错。
+    兜底存在是因为 Windows 下 OpenClaw 网关进程的环境继承不可靠
+    （setx 后启动者 env 快照不刷新）。"""
+
+    def test_env_wins(self, monkeypatch):
+        monkeypatch.setenv("JIN10_MCP_TOKEN", "env-token")
+        assert rc._jin10_token() == "env-token"
+
+    def test_file_fallback_when_env_missing(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("JIN10_MCP_TOKEN", raising=False)
+        f = tmp_path / "jin10_mcp_token"
+        f.write_text("  file-token\n", encoding="utf-8")
+        monkeypatch.setattr(rc, "JIN10_TOKEN_FALLBACK", f)
+        assert rc._jin10_token() == "file-token"
+
+    def test_env_beats_file(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("JIN10_MCP_TOKEN", "env-token")
+        f = tmp_path / "jin10_mcp_token"
+        f.write_text("file-token", encoding="utf-8")
+        monkeypatch.setattr(rc, "JIN10_TOKEN_FALLBACK", f)
+        assert rc._jin10_token() == "env-token"
+
+    def test_all_missing_returns_empty(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("JIN10_MCP_TOKEN", raising=False)
+        monkeypatch.setattr(rc, "JIN10_TOKEN_FALLBACK", tmp_path / "nonexistent")
+        assert rc._jin10_token() == ""

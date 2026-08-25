@@ -2,7 +2,7 @@
 """Deterministic RSS/Atom collector with strict JSON and source-quality metadata."""
 
 from __future__ import annotations
-import argparse, hashlib, html, json, os, re, ssl, urllib.request
+import argparse, hashlib, html, json, os, pathlib, re, ssl, urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -24,6 +24,32 @@ MAX_FEED_BYTES = 16 * 1024 * 1024
 MAX_DTD_SCAN_BYTES = 64 * 1024
 # source_id 会直接拼进落盘文件名,必须白名单,否则 registry 里一个 "../../x" 就能写到库外。
 SAFE_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+JIN10_TOKEN_FALLBACK = (
+    pathlib.Path.home() / ".openclaw-tdxclaw" / "secrets" / "jin10_mcp_token"
+)
+
+
+def _jin10_token() -> str:
+    """金十 Bearer token 解析：① 环境变量 `JIN10_MCP_TOKEN`（v0.95 主通道）；
+    ② 兜底文件 `JIN10_TOKEN_FALLBACK`（v0.113）。
+
+    为什么加兜底：OpenClaw 网关（TdxClaw.exe）的环境继承自其启动者，Windows 上
+    `setx` 后新进程未必拿到新变量（启动者 env 快照是旧的）——实测网关有
+    TDX_MCP_URL 却没有后设的 JIN10_MCP_TOKEN，cron 任务反复「token 未设置」。
+    兜底文件仍在**仓库外**（用户 home 下），token 不入库的安全性质不变。
+    异常信息不 echo token 本体。
+    """
+    tok = os.environ.get(JIN10_TOKEN_ENV, "").strip()
+    if tok:
+        return tok
+    try:
+        if JIN10_TOKEN_FALLBACK.exists():
+            return JIN10_TOKEN_FALLBACK.read_text(encoding="utf-8").strip()
+    except OSError:
+        pass
+    return ""
 
 
 def _redact(text: str) -> str:
@@ -484,11 +510,13 @@ def main():
             row["transport_verified"] = verified
             if src.get("type") == "jin10_mcp":
                 # 金十 MCP（JSON-RPC POST + SSE），与上方 RSS/JSON GET 不同路；
-                # token 走环境变量，缺席时该源标 failed 留痕、不炸链路（与其他源一致）。
-                token = os.environ.get(JIN10_TOKEN_ENV, "").strip()
+                # token 走环境变量（v0.113 起兜底用户 secrets 文件），缺席时
+                # 该源标 failed 留痕、不炸链路（与其他源一致）。
+                token = _jin10_token()
                 if not token:
                     raise ValueError(
-                        f"{JIN10_TOKEN_ENV} 未设置（Bearer token 不入库，走环境变量）"
+                        f"{JIN10_TOKEN_ENV} 未设置（Bearer token 不入库，"
+                        "走环境变量或 ~/.openclaw-tdxclaw/secrets/jin10_mcp_token）"
                     )
                 entries = fetch_jin10_flash(src["url"], token, ctx, a.timeout)
                 raw = json.dumps(entries, ensure_ascii=False).encode("utf-8")
