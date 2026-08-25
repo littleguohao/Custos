@@ -31,7 +31,11 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 from custos.core.paths import TDX_ROOT, cn_today, CACHE_DIR  # noqa: E402
-from custos.core.code_utils import market_of, norm_code as _cu_norm_code  # noqa: E402
+from custos.core.code_utils import (
+    SH_INDEX_BARE,
+    market_of,
+    norm_code as _cu_norm_code,
+)  # noqa: E402
 
 # --- mootdx lazy initialization ---
 _reader = None
@@ -246,6 +250,55 @@ def _read_bj_vipdoc_daily(code: str) -> "pd.DataFrame":
 # ========== K-line data ==========
 
 
+def _read_sh_index_vipdoc_daily(code: str) -> "pd.DataFrame":
+    """Read SH index vipdoc .day directly (mootdx Reader misroutes 000xxx to SZ).
+
+    000688/000300/000905 等沪市指数与深市 000xxx 个股同形，mootdx ``Reader.daily`` 默认按
+    代码前缀走深市，会读到 sz000688.day（国城矿业）而非 sh000688.day（科创50）。直读沪市
+    文件绕开这个错误路由（与 ``_read_bj_vipdoc_daily`` 同构）。
+    """
+    import struct
+
+    raw = _strip_suffix(code)
+    path = TDX_ROOT / "vipdoc" / "sh" / "lday" / f"sh{raw}.day"
+    if not path.exists():
+        return _empty_with_reason(f"file_not_found: {path}")
+    records = []
+    with open(path, "rb") as f:
+        while True:
+            buf = f.read(32)
+            if len(buf) < 32:
+                break
+            date_int, o, h, l, c, amt, vol, _ = struct.unpack("<IIIIIfII", buf[:32])
+            if date_int == 0:
+                continue
+            dt = pd.Timestamp(
+                year=date_int // 10000,
+                month=(date_int // 100) % 100,
+                day=date_int % 100,
+            )
+            records.append(
+                {
+                    "date": dt,
+                    "open": o / 100.0,
+                    "high": h / 100.0,
+                    "low": l / 100.0,
+                    "close": c / 100.0,
+                    "amount": amt,
+                    "volume": vol,
+                }
+            )
+    if not records:
+        return _empty_with_reason(f"empty_file: {path}")
+    return pd.DataFrame(records)
+
+
+def _is_sh_index(code: str) -> bool:
+    """无歧义的沪市指数（白名单 SH_INDEX_BARE 单一定义在 code_utils；排除 000001 歧义）。"""
+    bare = _strip_suffix(code)
+    return market_of(code) == "SH" and bare in SH_INDEX_BARE
+
+
 def read_vipdoc_daily(code: str, strict: bool = False) -> pd.DataFrame:
     """Read local vipdoc daily K-line via mootdx Reader.
 
@@ -270,6 +323,31 @@ def read_vipdoc_daily(code: str, strict: bool = False) -> pd.DataFrame:
             return df
         df["code"] = normalize_code(code)
         df["source"] = "vipdoc_bj_direct"
+        return df[
+            [
+                "date",
+                "code",
+                "open",
+                "high",
+                "low",
+                "close",
+                "amount",
+                "volume",
+                "source",
+            ]
+        ]
+
+    # SH 指数（000688 等）：mootdx Reader 把 000xxx 默认路由到深市，直读 sh 文件
+    if _is_sh_index(code):
+        df = _read_sh_index_vipdoc_daily(code)
+        if df.empty:
+            if strict:
+                raise LocalTdxError(
+                    f"read_vipdoc_daily({code}) 无数据: {df.attrs.get('missing_reason')}"
+                )
+            return df
+        df["code"] = normalize_code(code)
+        df["source"] = "vipdoc_sh_index_direct"
         return df[
             [
                 "date",
