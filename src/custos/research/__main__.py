@@ -115,6 +115,11 @@ TOOLS: dict[str, tuple[str, str]] = {
         "打分重构：V0~V3 变体（反向腿取反/证据重构/负向证据）× 预注册判据"
         "——TOP20% 赢家能否在得分上浮现（⚠️ R21：以篮子实测为准）",
     ),
+    "qsx_resonance_study": (
+        "study",
+        "QSX/DKX 两层过滤三臂：①QSX>DKS 多头 ②「跌线就反弹」共振"
+        "（出场=stop12+保本05+双中大阳分批+跌破QSX清仓，不用 BBI 清仓；⚠️ R11）",
+    ),
     "adjust_diagnostic": (
         "diagnostic",
         "复权口径诊断：量化未复权数据对回测与选股的影响",

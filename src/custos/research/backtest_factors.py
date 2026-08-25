@@ -56,6 +56,7 @@ from custos.core.indicators import (
     macd_series as _macd_series,
     atr_series as _atr_series,
     kdj_series as _kdj_series,
+    qsx_series as _qsx_series,
     pct_change,
     J_N as _KDJ_N,
 )  # noqa: E402
@@ -1777,14 +1778,24 @@ def simulate_b1_trade(
     cost_zone_pct: float = 3.0,
     cost_zone_grace: int = 1,
     ohlc: Optional[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = None,
+    qsx: Optional[pd.Series] = None,
+    qsx_exit_consec: int = 0,
 ) -> dict[str, Any]:
     """B1 交易规则模拟：买入当日收盘进场。
 
     止损位：stop_override 显式指定(如平台高×0.98)优先;否则 stop_mode='low'=买入当日最低价
     (B1.pdf「B1- 买入K线最低点或向下3-5个价位」,余量见 ``stop_tick_buffer``)；
     'pct'=entry×(1-stop_pct%)(固定空间)。
-    站上 BBI 后若连续 bbi_exit_consec 日收盘跌破 BBI 则止盈卖出。
+    站上 BBI 后若连续 bbi_exit_consec 日收盘跌破 BBI 则止盈卖出（``bbi_exit_consec<=0``
+    时该通道整体关闭——如 v0.120 QSX 共振研究：止盈只留「双中大阳分批 + 跌破QSX清仓」）。
+    ``qsx``/``qsx_exit_consec``（v0.120）：QSX 跌破清仓——连续 ``qsx_exit_consec`` 日
+    收盘 < QSX（当日线值）⇒ **次日开盘**清仓（owner 口径；reason=``qsx_exit``）。
+    与 BBI 连破清仓同通道（线值不同、无「先站上」前提），0=关（默认，旧行为逐位不变）。
     跳空低开按开盘价成交。返回 {exit_idx, reason, ret, holding, risk_frac}。
+
+    出场判定优先级（同一根 bar 内）：⓪ 动态止损位更新 → ① 止损系（保本始终盘中、
+    其余按 stop_trigger）→ ②a 双中大阳分批止盈（只减仓不退出）→ ②b BBI 连破清仓
+    （可关）→ ②c QSX 跌破清仓（可关）→ ③ 成本区「不涨就拍」→ ④ 时间止损。
 
     ``stop_trigger``（**2026-08-04 按 B1_w.pdf 修正**）：
 
@@ -1874,8 +1885,10 @@ def simulate_b1_trade(
     )
     risk_frac = (entry - stop) / entry if entry else 0.0
     bbi_v = bbi.values
+    qsx_v = qsx.values if qsx is not None else None  # QSX 跌破清仓线（v0.120）
     has_above = False
     consec_below = 0
+    qsx_consec_below = 0
     by_close = str(stop_trigger).lower() != "intraday"
 
     # 动态止损状态
@@ -1976,10 +1989,24 @@ def simulate_b1_trade(
             elif close[j] < b:
                 if has_above:
                     consec_below += 1
-                    if consec_below >= bbi_exit_consec:
+                    if bbi_exit_consec > 0 and consec_below >= bbi_exit_consec:
                         return _exit(j, "bbi_exit", float(close[j]))
             else:
                 consec_below = 0
+        # ②c QSX 跌破清仓（v0.120）：收盘 < QSX 连续 qsx_exit_consec 日 ⇒ 次日开盘清。
+        # 与 BBI 连破同通道但无「先站上」前提；触发日之后的止损/其他出场不再判定
+        # （次日开盘价已包含隔夜跳空，同 BBI 通道「信号日定、次日成交」语义）。
+        if qsx_v is not None and qsx_exit_consec > 0:
+            q = qsx_v[j]
+            if q == q:  # NaN 守卫（DKS/QSX 早期不足根数）
+                if close[j] < q:
+                    qsx_consec_below += 1
+                    if qsx_consec_below >= qsx_exit_consec:
+                        if j + 1 < n:
+                            return _exit(j + 1, "qsx_exit", float(open_[j + 1]))
+                        return _settle(n - 1, "qsx_exit", float(close[-1]))
+                else:
+                    qsx_consec_below = 0
         # ③ 「不涨就拍」：三个维度都平淡才砍（判定细节见 _cost_zone_flat docstring）
         if (
             cost_zone_bars
@@ -2054,12 +2081,14 @@ def _prepare_stock(
     stop_buffer: str,
     entry_gate: Optional[Callable] = None,
     scorer: Optional[Callable] = None,
+    qsx_exit_consec: int = 0,
 ) -> Optional[dict[str, Any]]:
     """evaluate_trades 的逐股准备：sort/weekly/min_bars/BBI/可成交性/中大阳线/ATR/gate/scorer 预计算。
 
     返回 None = 该股跳过（空数据或根数不足）。各序列**逐股算一次**，主循环内复用；
     gate_pre 见 `_precompute_gate_series`（entry_gate 为 None 时不算）；
     scorer_pre 见 `_SCORER_PRECOMPUTE`（按 scorer 身份查表，查不到 ⇒ None ⇒ 旧路径）。
+    ``qsx``：QSX 跌破清仓线（qsx_exit_consec>0 时算一次，v0.120）。
     """
     if raw is None or len(raw) == 0:
         return None
@@ -2076,6 +2105,8 @@ def _prepare_stock(
         "df": df,
         "n": n,
         "bbi": _bbi_series(df["close"]),
+        # QSX 知行短期趋势线（跌破清仓用，v0.120）:逐股算一次,循环内复用
+        "qsx": _qsx_series(df["close"]) if qsx_exit_consec > 0 else None,
         "buy_ok": buy_ok,
         "sell_ok": sell_ok,
         # 中大阳线标记(分批止盈用):逐股算一次,避免每个信号重算
@@ -2221,6 +2252,7 @@ def evaluate_trades(
     stop_atr_buffer: float = 0.2,
     cost_zone_bars: int = 0,
     cost_zone_pct: float = 3.0,
+    qsx_exit_consec: int = 0,
 ) -> list[dict[str, Any]]:
     """在 scorer 判「可买」的 as-of 日进场，按 B1 规则(止损+BBI)模拟到出场；非重叠(平仓后再找)。
 
@@ -2228,6 +2260,9 @@ def evaluate_trades(
     amv_regime：date→regime 映射(如 load_amv_regime)。提供时只在「做多」区间进场(as-of最近≤进场日的regime)。
     bbi_exit_consec/time_stop_bars：出场规则参数(可扫描)。每笔记录 r_multiple=净收益/风险敞口，供风险定额仓位。
     collect_all=True：不做单股非重叠去重，返回**每个**可买as-of日的候选(含 score)，供组合级 top-N 横截面择优。
+    qsx_exit_consec>0（v0.120）：启用「跌破 QSX 清仓」——连续该数根收盘 < QSX ⇒ 次日开盘清，
+      逐股 QSX 序列在 _prepare_stock 算一次复用；0=关（默认，旧行为逐位不变）。
+      配 ``bbi_exit_consec=0`` 即「止盈=双中大阳分批+跌破QSX清仓、无 BBI 清仓」口径。
     entry_gate(df_slice)->bool：进场硬门槛(如 j_low_gate=当日 J<13，B1 核心买点)；不满足则不进场。
       本模块 ENTRY_GATES 的 gate 是双形态 ``(df_slice, precomputed=None)``——逐股预计算的
       KDJ-J/MACD/ADX 递归序列会喂给它（O(n²)→O(n)，逐位等价见
@@ -2261,6 +2296,7 @@ def evaluate_trades(
             stop_buffer,
             entry_gate,
             scorer=scorer,
+            qsx_exit_consec=qsx_exit_consec,
         )
         if prep is None:
             continue
@@ -2319,6 +2355,8 @@ def evaluate_trades(
                 cost_zone_bars=cost_zone_bars,
                 cost_zone_pct=cost_zone_pct,
                 ohlc=prep["ohlc"],
+                qsx=prep["qsx"],
+                qsx_exit_consec=qsx_exit_consec,
             )
             ret_net = tr["ret"] - cost
             rec = _trade_record(tr, ret_net, code, entry_date, df, i, res.get("score"))
