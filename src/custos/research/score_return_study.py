@@ -17,10 +17,12 @@
 - **区间过滤**：只在 0AMV「做多」regime 进场 —— `backtest_factors.load_amv_regime`
   （指南针 compass_amv 日线 + 人工台账 → 状态机 >4% 做多 / <-2.3% 空头 / 之间粘滞）。
 - **出场**：`backtest_factors.simulate_b1_trade`，bbi_exit_consec=2（站上 BBI 后
-  连续 2 日收盘跌破清仓）；scale_out=0 / time_stop=0 / breakeven=0 / trail=0 全关。
+  连续 2 日收盘跌破清仓）；time_stop=0 / trail=0 全关。
   初始止损 ``--stop-pct``（pct 固定空间）：**默认 5%**（R10「5% 是崖」下沿；
-  昨晚基线臂用 50 宽设 ≈ 无止损，``STOP_PCT_WIDE`` 保留以复现该口径）。
+  50 ≈ 无止损基线口径，``STOP_PCT_WIDE`` 保留以复现）。
   ``--cost-zone-bars 3`` 可叠加「不涨就拍」（R10 冠军组合 pct_05_amv_cz3 的出场侧）。
+  v0.118 起 ``--breakeven``（保本止损触发浮盈）/ ``--scale-out``（BBI 上方双中大阳
+  分批止盈，R9 档 0.5）/ ``--top-frac``（赢家组分位，默认 0.5）可配。
 - **技术分**：信号日的 **live technical_score**——截断到信号日的 df（tail 260，
   同 live ``OHLCV_LOAD_BARS``）+ df_long（tail 1200，周/月 MACD 红柱腿用，
   同 live ``OHLCV_LOAD_BARS_LONG``）喂 `enrich_candidates.compute_metrics`，
@@ -126,6 +128,19 @@ def split_top_half(
     """按 key 降序排序后切 top-50% / bottom-50%（奇数时 top 多拿一笔：(n+1)//2）。"""
     ordered = sorted(trades, key=lambda t: t[key], reverse=True)
     n_top = (len(ordered) + 1) // 2
+    return ordered[:n_top], ordered[n_top:]
+
+
+def split_top_frac(
+    trades: list[dict[str, Any]], frac: float = 0.5, key: str = "ret"
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """按 key 降序切「前 frac 赢家组 / 其余对照组」（n_top=ceil(n×frac)，至少 1）。
+
+    frac=0.5 时与 ``split_top_half`` 逐位一致（ceil(n/2)==(n+1)//2）——
+    与 winner_factor_study.split_top_frac 同规则（两处各自钉测钉住，防漂移）。
+    """
+    ordered = sorted(trades, key=lambda t: t[key], reverse=True)
+    n_top = max(1, math.ceil(len(ordered) * frac)) if ordered else 0
     return ordered[:n_top], ordered[n_top:]
 
 
@@ -323,11 +338,16 @@ def run_study(
     stop_pct: float = STOP_PCT_DEFAULT,
     cost_zone_bars: int = 0,
     cost_zone_pct: float = 3.0,
+    breakeven_trigger: float = 0.0,
+    scale_out_frac: float = 0.0,
     trade_hook: Optional[Any] = None,
 ) -> list[dict[str, Any]]:
     """逐股流式：加载全历史 → evaluate_trades（j_low gate + baseline scorer +
-    仅做多区间 + BBI 跌破2根止盈 + pct 初始止损 [+ cost_zone]）→ 信号日 as-of 技术分。
+    仅做多区间 + BBI 跌破2根止盈 + pct 初始止损 [+ cost_zone] [+ 保本/分批止盈]）
+    → 信号日 as-of 技术分。
 
+    ``breakeven_trigger``/``scale_out_frac``（v0.118）：保本止损触发浮盈 /
+    BBI 上方双中大阳分批止盈比例，0=关（旧行为逐位不变）。
     ``trade_hook``（可选）：``hook(df, index_df, i, code) -> dict``，返回键并入该笔
     记录（替代默认的 tech_score/tech_level/factor_contrib 三键）——
     winner_factor_study 用它注入因子面板，回测引擎/截断口径零重复。
@@ -358,8 +378,8 @@ def run_study(
             stop_pct=stop_pct,
             cost_bps=cost_bps,
             time_stop_bars=0,
-            scale_out_frac=0.0,
-            breakeven_trigger=0.0,
+            scale_out_frac=scale_out_frac,  # BBI 上方双中大阳分批止盈（R9 档 0.5）
+            breakeven_trigger=breakeven_trigger,  # 盈转亏保本止损（本轮 0.05）
             trail_pct=0.0,
             cost_zone_bars=cost_zone_bars,  # 「不涨就拍」（R10 冠军组合 pct_05_amv_cz3 的出场侧）
             cost_zone_pct=cost_zone_pct,
@@ -404,9 +424,14 @@ def run_study(
 
 
 def build_report(
-    trades: list[dict[str, Any]], intervals: list[tuple[str, str]]
+    trades: list[dict[str, Any]],
+    intervals: list[tuple[str, str]],
+    top_frac: float = 0.5,
 ) -> dict[str, Any]:
-    """逐笔 → 全量统计：分区间 top/bottom-50% 分布 + 相关性 + 分档 + 半窗核对。"""
+    """逐笔 → 全量统计：分区间 top/bottom 分布 + 相关性 + 分档 + 半窗核对。
+
+    ``top_frac``（v0.118）：赢家组分位（0.5=旧行为 top50%；0.20=TOP20%）。
+    """
     for t in trades:
         t["interval_idx"] = interval_of(t["entry_date"], intervals)
 
@@ -415,7 +440,7 @@ def build_report(
         ts = [t for t in trades if t["interval_idx"] == idx]
         if not ts:
             continue
-        top, bottom = split_top_half(ts)
+        top, bottom = split_top_frac(ts, top_frac)
         per_interval.append(
             {
                 "interval": [s, e],
@@ -462,12 +487,13 @@ def build_report(
         },
         "band_stats_all": band_stats(trades),
         "band_stats_realized": band_stats(realized),
+        "top_frac": top_frac,
         "top_bottom_overall": {
             "top50_score_dist": dist_stats(
-                [t["tech_score"] for t in split_top_half(trades)[0]]
+                [t["tech_score"] for t in split_top_frac(trades, top_frac)[0]]
             ),
             "bottom50_score_dist": dist_stats(
-                [t["tech_score"] for t in split_top_half(trades)[1]]
+                [t["tech_score"] for t in split_top_frac(trades, top_frac)[1]]
             ),
         },
         "score_dist_all": dist_stats([t["tech_score"] for t in trades]),
@@ -526,13 +552,17 @@ def print_report(rep: dict[str, Any]) -> None:
                 f"  {label} {b:>6} | {st['n']:>5} | {st['avg_ret'] * 100:>8.2f} | "
                 f"{st['win_rate'] * 100:>5.1f}% | {st['payoff_ratio']} | {st['avg_score']}"
             )
-    print("\n── 分区间 top-50%（收益最好一半）vs bottom-50% 的技术分分布")
+    top_pct = round(rep.get("top_frac", 0.5) * 100)
+    bot_pct = 100 - top_pct
+    print(
+        f"\n── 分区间 top-{top_pct}%（收益最好一组）vs bottom-{bot_pct}% 的技术分分布"
+    )
     tb = rep["top_bottom_overall"]
     print(
-        f"  全体切半：top50 均分 {tb['top50_score_dist'].get('mean')} / "
-        f"bottom50 均分 {tb['bottom50_score_dist'].get('mean')}"
+        f"  全体切分：top{top_pct}% 均分 {tb['top50_score_dist'].get('mean')} / "
+        f"bottom{bot_pct}% 均分 {tb['bottom50_score_dist'].get('mean')}"
     )
-    print("区间 | n | Spearman | top50 均分/中位 | bottom50 均分/中位")
+    print(f"区间 | n | Spearman | top{top_pct}% 均分/中位 | bottom{bot_pct}% 均分/中位")
     for iv in rep["per_interval"]:
         s, e = iv["interval"]
         td, bd = iv["top50_score_dist"], iv["bottom50_score_dist"]
@@ -632,6 +662,26 @@ def _build_parser() -> argparse.ArgumentParser:
         help="脱离成本区的涨幅阈值 %%（默认 3，同引擎默认）",
     )
     ap.add_argument(
+        "--breakeven",
+        type=float,
+        default=0.0,
+        help="保本止损：浮盈达该比例后止损上移到成本价（breakeven_trigger；"
+        "默认 0=关；本轮 0.05，v0.118）",
+    )
+    ap.add_argument(
+        "--scale-out",
+        type=float,
+        default=0.0,
+        help="分批止盈比例：BBI 上方连续两根中大阳线减仓比例（scale_out_frac；"
+        "默认 0=关；R9 档 0.5）",
+    )
+    ap.add_argument(
+        "--top-frac",
+        type=float,
+        default=0.5,
+        help="赢家组分位（默认 0.5=旧行为 top50%%；本轮 0.20=TOP20%%，v0.118）",
+    )
+    ap.add_argument(
         "--out",
         default="",
         help="结果 JSON 路径（默认 artifacts/logs/score_return_study/）",
@@ -644,6 +694,8 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[list] = None) -> int:
     ap = _build_parser()
     args = ap.parse_args(argv)
+    if not 0 < args.top_frac < 1:
+        ap.error("--top-frac 必须在 (0, 1) 开区间（0.5=top50%，0.20=top20%）")
 
     if args.spot_check:
         return spot_check(args.spot_check, args.n)
@@ -679,20 +731,25 @@ def main(argv: Optional[list] = None) -> int:
         stop_pct=args.stop_pct,
         cost_zone_bars=args.cost_zone_bars,
         cost_zone_pct=args.cost_zone_pct,
+        breakeven_trigger=args.breakeven,
+        scale_out_frac=args.scale_out,
     )
     if not trades:
         print("⛔ 0 笔交易——检查 regime 数据与宇宙", file=sys.stderr)
         return 1
 
-    rep = build_report(trades, intervals)
+    rep = build_report(trades, intervals, args.top_frac)
     rep["config"] = {
         "signal": "日KDJ J<13（j_low_gate，J_LOW_THRESHOLD=13.0）",
         "regime": "仅 0AMV 做多区间（compass_amv 状态机 >4%/-2.3% 粘滞）",
-        "exit": "BBI 止盈：站上后连破 2 根收盘清仓；scale_out/time_stop/breakeven/trail 全关",
+        "exit": "BBI 止盈：站上后连破 2 根收盘清仓；time_stop/trail 全关",
         "initial_stop": f"pct {args.stop_pct}%（50 ≈ 无止损基线口径）",
+        "breakeven_trigger": args.breakeven,
+        "scale_out_frac": args.scale_out,
         "cost_zone_bars": args.cost_zone_bars,
         "cost_zone_pct": args.cost_zone_pct,
         "cost_bps": args.cost_bps,
+        "top_frac": args.top_frac,
         "scorer": "baseline（恒可买；进场只由 j_low gate 决定）",
         "tech_score": "live technical_score（DEFAULT_TECH_WEIGHTS，as-of 截断，已与 enrich 落盘对拍）",
         "max_stocks": args.max_stocks,
@@ -702,15 +759,19 @@ def main(argv: Optional[list] = None) -> int:
     }
     rep["trades"] = trades
 
-    # 文件名带止损/成本区参数标签，与昨晚无止损基线（..._s0_n400.json）区分
+    # 文件名带出场/赢家组参数标签，与历史臂（..._s0_n400*.json）区分
     stop_tag = f"_stop{args.stop_pct:g}"
     cz_tag = f"_cz{args.cost_zone_bars}" if args.cost_zone_bars else ""
+    be_tag = f"_be{args.breakeven:g}" if args.breakeven else ""
+    so_tag = f"_so{args.scale_out:g}" if args.scale_out else ""
+    top_tag = f"_top{round(args.top_frac * 100):g}" if args.top_frac != 0.5 else ""
     out = (
         Path(args.out)
         if args.out
         else (
             Path("artifacts/logs/score_return_study")
-            / f"score_return_study_s{args.seed}_n{len(codes)}{stop_tag}{cz_tag}.json"
+            / f"score_return_study_s{args.seed}_n{len(codes)}"
+            f"{stop_tag}{cz_tag}{be_tag}{so_tag}{top_tag}.json"
         )
     )
     out.parent.mkdir(parents=True, exist_ok=True)

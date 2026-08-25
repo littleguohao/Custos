@@ -224,3 +224,95 @@ class TestAsofNoLookahead:
         srs.asof_technical_score(df, index_df, n - 1, "000001")
         assert len(captured["df"]) == n
         assert len(captured["df_long"]) == n
+
+
+class TestSplitTopFrac:
+    def test_half_equivalence(self):
+        """frac=0.5 与 split_top_half 逐位一致（旧行为不变）。"""
+        for n in (0, 1, 2, 5, 10, 11):
+            trades = [{"ret": float(r)} for r in range(n)]
+            a = srs.split_top_frac(trades, 0.5)
+            b = srs.split_top_half(trades)
+            assert [t["ret"] for t in a[0]] == [t["ret"] for t in b[0]]
+            assert [t["ret"] for t in a[1]] == [t["ret"] for t in b[1]]
+
+    def test_top20(self):
+        trades = [{"ret": float(r)} for r in range(20)]  # 0..19
+        top, bottom = srs.split_top_frac(trades, 0.20)
+        assert [t["ret"] for t in top] == [19.0, 18.0, 17.0, 16.0]  # ceil(20×0.2)=4
+        assert len(bottom) == 16
+
+    def test_min_one_and_empty(self):
+        top, bottom = srs.split_top_frac([{"ret": 0.1}], 0.20)
+        assert len(top) == 1 and bottom == []
+        assert srs.split_top_frac([], 0.20) == ([], [])
+
+
+class TestCliV0118Params:
+    """v0.118 新增 CLI：--breakeven / --scale-out / --top-frac（默认全关/0.5=旧行为）。"""
+
+    def test_defaults_unchanged(self):
+        args = srs._build_parser().parse_args([])
+        assert args.breakeven == pytest.approx(0.0)
+        assert args.scale_out == pytest.approx(0.0)
+        assert args.top_frac == pytest.approx(0.5)
+
+    def test_explicit(self):
+        args = srs._build_parser().parse_args(
+            [
+                "--stop-pct",
+                "12",
+                "--breakeven",
+                "0.05",
+                "--scale-out",
+                "0.5",
+                "--top-frac",
+                "0.20",
+            ]
+        )
+        assert args.stop_pct == pytest.approx(12.0)
+        assert args.breakeven == pytest.approx(0.05)
+        assert args.scale_out == pytest.approx(0.5)
+        assert args.top_frac == pytest.approx(0.20)
+
+
+class TestRunStudyPassthrough:
+    """run_study 把 breakeven/scale_out 透传进 evaluate_trades（形参名钉死）。"""
+
+    def test_exit_params_forwarded(self, monkeypatch):
+        captured = {}
+
+        def fake_evaluate(bars_by_code, **kw):
+            captured.update(kw)
+            return [
+                {
+                    "code": "000001",
+                    "entry_date": "2024-01-03",
+                    "exit_date": "2024-01-10",
+                    "ret": 0.01,
+                    "reason": "bbi_exit",
+                    "holding": 5,
+                }
+            ]
+
+        monkeypatch.setattr(srs.bf, "evaluate_trades", fake_evaluate)
+        from custos.datasource.local_tdx import local_tdx_data
+
+        df = _mk_df(60)
+        monkeypatch.setattr(local_tdx_data, "get_ohlcv_table", lambda c, count: df)
+        monkeypatch.setattr(
+            srs, "asof_technical_score", lambda d, ix, i, code: (50, "中", {})
+        )
+        trades = srs.run_study(
+            ["000001"],
+            {"2024-01-03": "做多"},
+            _mk_df(60),
+            stop_pct=12,
+            breakeven_trigger=0.05,
+            scale_out_frac=0.5,
+        )
+        assert captured["stop_pct"] == 12
+        assert captured["breakeven_trigger"] == 0.05
+        assert captured["scale_out_frac"] == 0.5
+        assert captured["bbi_exit_consec"] == 2
+        assert trades and trades[0]["tech_score"] == 50
