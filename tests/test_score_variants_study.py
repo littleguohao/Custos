@@ -179,3 +179,78 @@ class TestJudge:
         assert not svs.judge(self._rep(0.1, 0.08, 0.05, 50, 40, 0.50, 1.5), v0)[
             "candidate"
         ]
+
+
+class TestRelaxedC3AndFromTrades:
+    """v0.121（owner 2026-08-26 拍板放宽线）：C3_relaxed = 胜率 > V0 且盈亏比 ≥ 2.4
+    绝对下限；预注册 C3 保留不变（并列展示，不 retroactive 改写）。"""
+
+    def _rep(self, wr, payoff, v0_wr=0.27, v0_payoff=2.81, sp=0.1):
+        return {
+            "corr": {"spearman": sp},
+            "half_window": {
+                "consistent": True,
+                "first_half": {"spearman": sp},
+                "second_half": {"spearman": sp},
+            },
+            "winner_top20_dist": {"mean": 20.0},
+            "bottom80_dist": {"mean": 10.0},
+            "basket_top20_by_variant": {"win_rate": wr, "payoff_ratio": payoff},
+        }
+
+    def test_relaxed_passes_when_payoff_above_floor(self):
+        from custos.research import score_variants_study as svs
+
+        v0 = {"win_rate": 0.27, "payoff_ratio": 2.81}
+        vd = svs.judge(self._rep(0.47, 2.41), v0)
+        assert vd["C3_basket_wr_up_payoff_kept"] is False  # 预注册仍判不过
+        assert vd["C3_relaxed_wr_up_payoff_floor"] is True
+        assert vd["candidate"] is False and vd["candidate_relaxed"] is True
+
+    def test_relaxed_fails_below_floor(self):
+        from custos.research import score_variants_study as svs
+
+        v0 = {"win_rate": 0.27, "payoff_ratio": 2.81}
+        vd = svs.judge(self._rep(0.47, 2.39), v0)
+        assert vd["candidate_relaxed"] is False
+
+    def test_relaxed_fails_when_wr_not_up(self):
+        from custos.research import score_variants_study as svs
+
+        v0 = {"win_rate": 0.47, "payoff_ratio": 2.0}
+        vd = svs.judge(self._rep(0.46, 3.0), v0)
+        assert vd["candidate_relaxed"] is False
+
+    def test_from_trades_offline_rejudge(self, tmp_path):
+        """--from-trades 离线重判：不重跑回测也能出 verdicts。"""
+        import json as _json
+
+        from custos.research import score_variants_study as svs
+
+        trades = [
+            {
+                "ret": 0.1,
+                "interval_idx": 0,
+                "tech_score": 10,
+                "reason": "bbi_exit",
+                "factor_contrib": {},
+                "panel": {"rsi_deep_oversold": True},
+            },
+            {
+                "ret": -0.1,
+                "interval_idx": 0,
+                "tech_score": 90,
+                "reason": "bbi_exit",
+                "factor_contrib": {},
+                "panel": {},
+            },
+        ]
+        f = tmp_path / "study.json"
+        f.write_text(
+            _json.dumps({"trades": trades, "config": {"tag": "t"}}),
+            encoding="utf-8",
+        )
+        out = tmp_path / "rejudged.json"
+        assert svs.main(["--from-trades", str(f), "--out", str(out)]) == 0
+        rep = _json.loads(out.read_text(encoding="utf-8"))
+        assert "candidate_relaxed" in rep["verdicts"]["V2"]

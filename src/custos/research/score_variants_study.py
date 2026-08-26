@@ -38,6 +38,7 @@ CLI::
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -98,6 +99,13 @@ _V2_WEIGHTS = {
     "macd_bottom_divergence": 20,
 }
 _V3_REVERSE_PENALTY = 5  # V3：每条反向腿命中 −5（简单整数）
+
+# C3 放宽线（owner 2026-08-26 拍板）：预注册 C3 要求「篮子盈亏比 ≥ V0」不动
+# （候选判定仍以预注册为准）；放宽线 = 篮子胜率 > V0 **且** 盈亏比 ≥ 2.4 绝对
+# 下限——胜率大幅提升（V2/V3 主窗 27%→47%、跨窗 29%→54%）下允许盈亏比小幅
+# 回落（2.81→2.41）。⚠️ 这是**事后**判据，与预注册并列展示，不 retroactive
+# 改写；放宽候选进下一步（strategy_grid / live 提案）前仍须独立窗口复核。
+PAYOFF_FLOOR_RELAXED = 2.4
 
 
 # ---------------------------------------------------------------------------
@@ -208,11 +216,18 @@ def judge(rep: dict[str, Any], v0_basket: dict[str, Any]) -> dict[str, Any]:
     c3 = b["win_rate"] > v0_basket["win_rate"] and (b["payoff_ratio"] or 0) >= (
         v0_basket["payoff_ratio"] or 0
     )
+    # owner 放宽线（2026-08-26）：与预注册 C3 并列，不替代
+    c3_relaxed = (
+        b["win_rate"] > v0_basket["win_rate"]
+        and (b["payoff_ratio"] or 0) >= PAYOFF_FLOOR_RELAXED
+    )
     return {
         "C1_spearman_positive": c1,
         "C2_winner_scores_higher": c2,
         "C3_basket_wr_up_payoff_kept": c3,
+        "C3_relaxed_wr_up_payoff_floor": c3_relaxed,
         "candidate": c1 and c2 and c3,
+        "candidate_relaxed": c1 and c2 and c3_relaxed,
     }
 
 
@@ -310,12 +325,39 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--cost-bps", type=float, default=srs.COST_BPS)
     ap.add_argument("--tag", default="", help="落盘文件名标签（如 cw）")
     ap.add_argument("--out", default="")
+    ap.add_argument(
+        "--from-trades",
+        default="",
+        help="复用已落盘的研究 JSON（含 trades 键）离线重算变体/判据，不重跑回测",
+    )
     return ap
 
 
 def main(argv: Optional[list] = None) -> int:
     ap = _build_parser()
     args = ap.parse_args(argv)
+
+    if args.from_trades:
+        stored = json.loads(Path(args.from_trades).read_text(encoding="utf-8"))
+        trades = stored.get("trades") or []
+        if not trades:
+            print("⛔ 复用文件无 trades", file=sys.stderr)
+            return 1
+        print(f"[INFO] 复用 {args.from_trades}（{len(trades)} 笔）", file=sys.stderr)
+        rep = build_report(trades)
+        rep["config"] = stored.get("config") or {}
+        rep["config"]["rejudged_from"] = str(args.from_trades)
+        rep["trades"] = trades
+        out = (
+            Path(args.out)
+            if args.out
+            else Path(args.from_trades).with_suffix(".rejudged.json")
+        )
+        out.parent.mkdir(parents=True, exist_ok=True)
+        bf.write_json_stream(out, rep, big=len(trades) > 20000)
+        print(f"[OK] 写出 {out}（离线重判，{len(trades)} 笔）")
+        print_report(rep)
+        return 0
 
     regime = bf.load_amv_regime(since=args.start)
     if not regime:
