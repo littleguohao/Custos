@@ -39,12 +39,39 @@ TOP20% 赢家 vs 其余的技术分分布、前后半窗一致性；``--compare`
 （B−A = 过滤①的值，C−B = 过滤②的值）与共振命中率（信号级 n_C/n_B、票级 codes 比）。
 过滤后笔数缩，Wilson 区间如实标。
 
+## v2 口径（owner 2026-08-26 逐条定稿，第二轮；v1 因命中率 99.2%≈无过滤被证伪）
+
+**成立条件**（近 60 根内 ≥2 次「干净的跌线反弹」），一次干净反弹 =
+`qsx_dks_resonance_v2` 逐条判定：
+
+1. 碰线：当日最低价 ≤ QSX 或 DKX（**真碰线**，不是 ±1% 贴近），且前一日收盘在在线
+   （从上往下碰，线下运行不算）；
+2. 线下收盘 ≤1 根：碰线日收破线 ⇒ 次日必须收回（收盘 > 线），连破 2 根即出局；
+3. 收回：收盘 > 该线（reclaim_bar，碰线当日收在线上即当日收回）；
+4. 反弹幅度：自触线最低点（min low[触线..收回]）起，随后 N=5 根内（窗 [触线, 触线+5]）
+   最高价反弹 ≥3%；
+5. 缩量：触线日成交量 < 前 5 日均量。
+
+confirm_bar = max（收回根, 反弹达标根）——之前不可见，严格因果。
+
+**排除条件**（优先级高于成立条件）：信号日处于「跌破 QSX 或 DKX 后未收复」状态
+（碰线且收在线下 ⇒ 进入，收盘 > 线 ⇒ 解除；两线任一则排除）。
+owner 原话：「触线后没有站上反而继续下跌，说明 QSX/DKX 空头有效，需要排除」。
+
+**臂**（出场不变）：A 基底 / B +QSX>DKS / C +QSX>DKS+共振v2 / C'（=Cp）j_low+共振v2
+（拆共振脱离结构过滤的独立贡献）。A/B 复用第一轮产物（宇宙 5549→抽样 400 逐码核对
+一致，配置逐位相同）。
+
+**预注册判据**（写在跑数之前）：C/B 或 C'/A 胜率提升 >3pp 且盈亏比不降 + 半窗一致；
+命中率报告（v2 应显著低于 v1 的 99.2%）。
+
 CLI::
 
     uv run python src/custos/research/qsx_resonance_study.py --arm A --max-stocks 400 --seed 0
     uv run python src/custos/research/qsx_resonance_study.py --arm B --max-stocks 400 --seed 0
     uv run python src/custos/research/qsx_resonance_study.py --arm C --max-stocks 400 --seed 0
-    uv run python src/custos/research/qsx_resonance_study.py --compare armA.json armB.json armC.json
+    uv run python src/custos/research/qsx_resonance_study.py --arm Cp --max-stocks 400 --seed 0
+    uv run python src/custos/research/qsx_resonance_study.py --compare armA.json armB.json armC.json armCp.json
 """
 
 from __future__ import annotations
@@ -76,6 +103,18 @@ TOUCH_TOL = 0.01
 RECLAIM_BARS = 5
 MIN_EVENTS = 2
 
+# v2 口径默认参数（owner 2026-08-26 定稿）：反弹窗 5 根、反弹幅度 ≥3%、缩量 = 触线日量
+# < 前 5 日均量、近 60 根内 ≥2 次干净反弹；排除 = 跌破未收复状态
+BOUNCE_BARS = 5
+BOUNCE_PCT = 0.03
+VOL_MA = 5
+
+# 预注册判据（写在跑数之前，compare 报告头部照原文展示）
+PREREG_CRITERIA = (
+    "预注册判据：C/B 或 C'/A 胜率提升 >3pp 且盈亏比不降 + 半窗一致；"
+    "命中率报告（v2 应显著低于 v1 的 99.2%）"
+)
+
 # 出场固定口径（owner 本轮）：止损 −12% + 保本 0.05 + 双中大阳分批 0.5 + 跌破 QSX 清仓
 STOP_PCT = 12.0
 BREAKEVEN = 0.05
@@ -84,11 +123,12 @@ QSX_EXIT_CONSEC = 1
 COST_BPS = 25.0
 TOP_FRAC = 0.2
 
-ARMS = ("A", "B", "C")
+ARMS = ("A", "B", "C", "Cp")
 ARM_DESC = {
     "A": "j_low 基底（0AMV做多 ∧ J<13，无两层过滤）",
     "B": "j_low ∧ qsx_gt_dks（过滤① 知行多头结构）",
     "C": "j_low ∧ qsx_gt_dks ∧ 共振（过滤①+② 全过滤）",
+    "Cp": "C' = j_low ∧ 共振（过滤② 独立贡献，不要求 QSX>DKS）",
 }
 
 
@@ -175,6 +215,131 @@ def qsx_dks_resonance(
     return cnt >= min_events
 
 
+# ---------------------------------------------------------------------------
+# v2 口径（owner 2026-08-26 逐条定稿；v1 因 99.2% 命中≈无过滤被证伪，保留复现）
+# ---------------------------------------------------------------------------
+
+
+def _line_episodes_v2(
+    low: np.ndarray,
+    close: np.ndarray,
+    high: np.ndarray,
+    volume: np.ndarray,
+    line: np.ndarray,
+    bounce_bars: int,
+    bounce_pct: float,
+    vol_ma: int,
+) -> list[tuple[int, int]]:
+    """单条线的「干净的跌线反弹」事件列表 [(t_touch, confirm_bar), ...]（v2 口径）。
+
+    五要素逐条（owner 定稿，不许自由改动）：
+    ① 碰线 ``low[t] ≤ line[t]`` 且前一日收盘在在线（从上往下碰，线下运行不算）；
+    ② 线下收盘 ≤1 根：``close[t] ≤ line[t]`` 则必须 ``close[t+1] > line[t+1]``
+       （reclaim=t+1），连破 2 根即无效；碰线当日收在线上即当日收回（reclaim=t）；
+    ③ 收回 = reclaim_bar（收盘 > 线，严格大于）；
+    ④ 反弹幅度：``min_low = min(low[t..reclaim])``，窗 ``[t, t+bounce_bars]`` 内
+       首个 ``high[u] ≥ min_low × (1+bounce_pct)`` ⇒ bounce_bar；缺 ⇒ 无效；
+    ⑤ 缩量：``volume[t] < mean(volume[t-vol_ma..t-1])``（t < vol_ma 无前窗 ⇒ 无效）。
+    confirm_bar = max(reclaim_bar, bounce_bar)——之前不可见，严格因果。
+    """
+    n = len(close)
+    events: list[tuple[int, int]] = []
+    for t in range(max(1, vol_ma), n):  # ①要前一日收盘、⑤要前 vol_ma 根量
+        lv = line[t]
+        if lv != lv or not (low[t] <= lv):  # ① 碰线（真碰，无容差）
+            continue
+        prev = line[t - 1]
+        if prev != prev or close[t - 1] <= prev:  # 前一日须收在在线（从上往下）
+            continue
+        if not volume[t] < float(np.mean(volume[t - vol_ma : t])):  # ⑤ 缩量
+            continue
+        if close[t] > lv:  # ③ 当日收回（线下收盘 0 根）
+            reclaim = t
+        elif t + 1 < n and line[t + 1] == line[t + 1] and close[t + 1] > line[t + 1]:
+            reclaim = t + 1  # ② 线下收盘恰好 1 根后收回
+        else:
+            continue  # 连破 ≥2 根 ⇒ 不是干净反弹
+        min_low = float(np.min(low[t : reclaim + 1]))  # 触线最低点
+        bounce_bar = None
+        for u in range(t, min(t + bounce_bars, n - 1) + 1):  # ④ 随后 N 根内
+            if high[u] >= min_low * (1 + bounce_pct):
+                bounce_bar = u
+                break
+        if bounce_bar is None:
+            continue
+        events.append((t, max(reclaim, bounce_bar)))
+    return events
+
+
+def _unrecovered_line(
+    low: np.ndarray, close: np.ndarray, line: np.ndarray
+) -> np.ndarray:
+    """逐 bar「跌破未收复」状态（v2 排除条件）：碰线且收在线下 ⇒ 进入；收盘 > 线 ⇒ 解除。
+
+    owner 原话：「触线后没有站上反而继续下跌，说明 QSX/DKX 空头有效，需要排除」。
+    线未成形（NaN）根不判。
+    """
+    n = len(close)
+    out = np.zeros(n, dtype=bool)
+    broken = False
+    for i in range(n):
+        lv = line[i]
+        if lv != lv:  # NaN 守卫
+            continue
+        if close[i] > lv:
+            broken = False
+        elif low[i] <= lv:
+            broken = True
+        out[i] = broken
+    return out
+
+
+def qsx_dks_resonance_v2(
+    close: pd.Series,
+    low: pd.Series,
+    high: pd.Series,
+    volume: pd.Series,
+    qsx: pd.Series,
+    dks: pd.Series,
+    lookback: int = LOOKBACK,
+    bounce_bars: int = BOUNCE_BARS,
+    bounce_pct: float = BOUNCE_PCT,
+    vol_ma: int = VOL_MA,
+    min_events: int = MIN_EVENTS,
+) -> tuple[np.ndarray, np.ndarray]:
+    """过滤② v2「干净共振」：返回 ``(hit, excluded)`` 两个布尔序列（as-of 无未来函数）。
+
+    - ``hit[i]``：近 ``lookback`` 根内（触线根 ≥ i−lookback+1）已确认
+      （confirm_bar ≤ i）的干净跌线反弹事件 ≥ ``min_events``；
+      两线事件按触线段重叠去重（同一次下跌碰两线只算一次）。
+    - ``excluded[i]``：QSX 或 DKS 任一处于「跌破未收复」状态。
+    进场用 ``hit & ~excluded``（排除条件优先级高于成立条件，owner 定）。
+    """
+    c = close.astype(float).to_numpy()
+    lo = low.astype(float).to_numpy()
+    hi = high.astype(float).to_numpy()
+    vol = volume.astype(float).to_numpy()
+    qs = qsx.astype(float).to_numpy()
+    dk = dks.astype(float).to_numpy()
+    ev = _line_episodes_v2(lo, c, hi, vol, qs, bounce_bars, bounce_pct, vol_ma)
+    ev += _line_episodes_v2(lo, c, hi, vol, dk, bounce_bars, bounce_pct, vol_ma)
+    ev.sort(key=lambda e: (e[0], e[1]))
+    dedup: list[tuple[int, int]] = []
+    for e in ev:
+        if dedup and e[0] <= dedup[-1][0]:  # 同一根触线碰两线 ⇒ 同一次下跌
+            continue
+        dedup.append(e)
+    n = len(c)
+    cnt = np.zeros(n, dtype=int)
+    for t_touch, confirm in dedup:
+        hi_i = min(t_touch + lookback - 1, n - 1)  # 事件对 [confirm, t+lookback-1] 可见
+        if confirm <= hi_i:
+            cnt[confirm : hi_i + 1] += 1
+    hit = cnt >= min_events
+    excluded = _unrecovered_line(lo, c, qs) | _unrecovered_line(lo, c, dk)
+    return hit, excluded
+
+
 def wilson_ci(
     wins: int, n: int, z: float = 1.96
 ) -> tuple[Optional[float], Optional[float]]:
@@ -218,7 +383,10 @@ def half_window_ret(trades: list[dict[str, Any]]) -> dict[str, Any]:
         "split_date": mid,
         "first_half": s1,
         "second_half": s2,
-        "consistent": (s1.get("avg_ret") or 0) > 0 == (s2.get("avg_ret") or 0) > 0,
+        # ⚠️ 必须加括号：不加会被 Python 链式比较解析成
+        # ``a > 0 and 0 == b and b > 0``（v0.120 曾因此把「同号」误报成翻转，
+        # 该轮三臂「半窗翻转」结论以 v0.124 修正重算为准）。
+        "consistent": ((s1.get("avg_ret") or 0) > 0) == ((s2.get("avg_ret") or 0) > 0),
     }
 
 
@@ -250,13 +418,19 @@ def build_arm_report(
 
 
 def compare_arms(reps: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    """三臂对照：边际贡献（B−A=过滤①，C−B=过滤②）+ 共振命中率。"""
-    out: dict[str, Any] = {"r11_warning": srs.R11_WARNING, "arms": {}}
+    """四臂对照：边际贡献（B−A=过滤①，C−B=过滤②，Cp−A=共振独立）+ 命中率 + 预注册判读。"""
+    out: dict[str, Any] = {
+        "r11_warning": srs.R11_WARNING,
+        "preregistered": PREREG_CRITERIA,
+        "arms": {},
+    }
     for arm in ARMS:
         rep = reps.get(arm)
         if rep is None:
             continue
         st = rep["overall_stats"]
+        # 半窗优先用逐笔重算（v0.120 落盘的 consistent 受链式比较 bug 污染，见 v0.124 勘误）
+        hw = half_window_ret(rep["trades"]) if rep.get("trades") else rep["half_window"]
         out["arms"][arm] = {
             "desc": rep["arm_desc"],
             "n_trades": rep["n_trades"],
@@ -267,33 +441,59 @@ def compare_arms(reps: dict[str, dict[str, Any]]) -> dict[str, Any]:
             "avg_ret": st.get("avg_ret"),
             "expectancy_R": st.get("expectancy_R"),
             "exit_reasons": rep["exit_reasons"],
-            "half_window_consistent": rep["half_window"].get("consistent"),
+            "half_window_consistent": hw.get("consistent"),
         }
-    a, b, c = (out["arms"].get(x) for x in ARMS)
+    a, b, c, cp = (out["arms"].get(x) for x in ARMS)
 
     def _delta(x: Optional[dict], y: Optional[dict], key: str) -> Optional[float]:
         if not x or not y or x.get(key) is None or y.get(key) is None:
             return None
         return round(x[key] - y[key], 4)
 
+    def _marginal(x: Optional[dict], y: Optional[dict]) -> dict[str, Any]:
+        return {
+            k: _delta(x, y, k)
+            for k in ("win_rate", "payoff_ratio", "avg_ret", "expectancy_R")
+        }
+
+    def _rate(x: Optional[dict], y: Optional[dict]) -> dict[str, Any]:
+        return {
+            "signal_rate": (
+                round(x["n_trades"] / y["n_trades"], 4) if y["n_trades"] else None
+            ),
+            "code_rate": (
+                round(x["n_codes"] / y["n_codes"], 4) if y["n_codes"] else None
+            ),
+        }
+
+    def _prereg(x: Optional[dict], y: Optional[dict]) -> Optional[dict[str, Any]]:
+        """预注册判读：胜率提升 >3pp 且盈亏比不降 + 半窗一致。"""
+        if not x or not y:
+            return None
+        wr_d = _delta(x, y, "win_rate")
+        pf_d = _delta(x, y, "payoff_ratio")
+        checks = {
+            "win_rate_+3pp": wr_d is not None and wr_d > 0.03,
+            "payoff_not_worse": pf_d is not None and pf_d >= 0,
+            "half_window_consistent": x.get("half_window_consistent") is True,
+        }
+        return {
+            **checks,
+            "win_rate_delta": wr_d,
+            "payoff_delta": pf_d,
+            "pass": all(checks.values()),
+        }
+
     if b and a:
-        out["marginal_filter1_B_minus_A"] = {
-            k: _delta(b, a, k)
-            for k in ("win_rate", "payoff_ratio", "avg_ret", "expectancy_R")
-        }
+        out["marginal_filter1_B_minus_A"] = _marginal(b, a)
     if c and b:
-        out["marginal_filter2_C_minus_B"] = {
-            k: _delta(c, b, k)
-            for k in ("win_rate", "payoff_ratio", "avg_ret", "expectancy_R")
-        }
-        out["resonance_hit"] = {
-            "signal_rate_C_over_B": (
-                round(c["n_trades"] / b["n_trades"], 4) if b["n_trades"] else None
-            ),
-            "code_rate_C_over_B": (
-                round(c["n_codes"] / b["n_codes"], 4) if b["n_codes"] else None
-            ),
-        }
+        out["marginal_filter2_C_minus_B"] = _marginal(c, b)
+        out["resonance_hit_C_over_B"] = _rate(c, b)
+        out["prereg_C_over_B"] = _prereg(c, b)
+    if cp and a:
+        out["marginal_resonance_only_Cp_minus_A"] = _marginal(cp, a)
+        out["resonance_hit_Cp_over_A"] = _rate(cp, a)
+        out["prereg_Cp_over_A"] = _prereg(cp, a)
     return out
 
 
@@ -308,9 +508,18 @@ def _zhixing_arrays(
     tol: float,
     reclaim_bars: int,
     min_events: int,
-) -> tuple[np.ndarray, np.ndarray]:
-    """逐股预计算 (qsx_gt_dks, resonance) 两个全序列布尔数组（各算一次，gate 点查询）。
+    resonance_version: str = "v2",
+    bounce_bars: int = BOUNCE_BARS,
+    bounce_pct: float = BOUNCE_PCT,
+    vol_ma: int = VOL_MA,
+    no_exclusion: bool = False,
+) -> dict[str, np.ndarray]:
+    """逐股预计算知行数组（各算一次，gate 点查询；切片是前缀 ⇒ 下标对齐）。
 
+    返回 ``{"gt", "res", "hit", "excluded"}``：
+    ``gt`` = QSX>DKS；``res`` = 共振进场判定（v2 = hit & ~excluded，排除优先；
+    ``no_exclusion=True`` 时 res = hit——仅用于「排除项贡献」对照臂）；
+    ``hit``/``excluded`` 仅 v2 有实值（v1 下分别为 res 与全 False），供逐笔记录。
     EMA/rolling 与共振检测器都严格因果（bar i 只用 ≤i 的数据）⇒ 全序列预计算
     与逐切片重算逐位一致，无未来函数。
     """
@@ -318,24 +527,46 @@ def _zhixing_arrays(
     qsx = ind.qsx_series(close)  # 序列级唯一实现
     dks = ind.dks_series(close)  # 同上
     gt = ((qsx > dks) & qsx.notna() & dks.notna()).to_numpy()
-    res = qsx_dks_resonance(
+    if resonance_version == "v1":
+        res = qsx_dks_resonance(
+            close,
+            df["low"].astype(float),
+            qsx,
+            dks,
+            lookback=lookback,
+            tol=tol,
+            reclaim_bars=reclaim_bars,
+            min_events=min_events,
+        )
+        return {"gt": gt, "res": res, "hit": res, "excluded": np.zeros(len(df), bool)}
+    hit, excluded = qsx_dks_resonance_v2(
         close,
         df["low"].astype(float),
+        df["high"].astype(float),
+        df["volume"].astype(float),
         qsx,
         dks,
         lookback=lookback,
-        tol=tol,
-        reclaim_bars=reclaim_bars,
+        bounce_bars=bounce_bars,
+        bounce_pct=bounce_pct,
+        vol_ma=vol_ma,
         min_events=min_events,
     )
-    return gt, res
+    return {
+        "gt": gt,
+        "res": hit if no_exclusion else hit & ~excluded,
+        "hit": hit,
+        "excluded": excluded,
+    }
 
 
-def _make_gate(arm: str, gt: np.ndarray, res: np.ndarray) -> Any:
-    """三臂进场 gate（双形态 ``(df_slice, precomputed)``；切片是前缀 ⇒ i=末根下标）。
+def _make_gate(arm: str, zx: dict[str, np.ndarray]) -> Any:
+    """四臂进场 gate（双形态 ``(df_slice, precomputed)``；切片是前缀 ⇒ i=末根下标）。
 
-    A = j_low；B = j_low ∧ qsx_gt_dks；C = j_low ∧ qsx_gt_dks ∧ 共振。
+    A = j_low；B = j_low ∧ qsx_gt_dks；C = j_low ∧ qsx_gt_dks ∧ 共振；
+    Cp（=C'）= j_low ∧ 共振（共振独立贡献，不要求 qsx_gt_dks）。
     """
+    gt, res = zx["gt"], zx["res"]
 
     def _gate(df_slice: pd.DataFrame, pre: Optional[dict] = None) -> bool:
         if not bf.j_low_gate(df_slice, pre):
@@ -343,11 +574,13 @@ def _make_gate(arm: str, gt: np.ndarray, res: np.ndarray) -> Any:
         if arm == "A":
             return True
         i = len(df_slice) - 1
+        if arm == "Cp":
+            return bool(res[i])  # 过滤②独立臂：不要求过滤①
         if not bool(gt[i]):  # 过滤①：QSX > DKS（DKS 未成形=NaN 时 False 不放行）
             return False
         if arm == "B":
             return True
-        return bool(res[i])  # 过滤②：共振
+        return bool(res[i])  # 过滤②：共振（v2 = hit & ~excluded）
 
     return _gate
 
@@ -367,9 +600,16 @@ def run_arm(
     tol: float = TOUCH_TOL,
     reclaim_bars: int = RECLAIM_BARS,
     min_events: int = MIN_EVENTS,
+    resonance_version: str = "v2",
+    bounce_bars: int = BOUNCE_BARS,
+    bounce_pct: float = BOUNCE_PCT,
+    vol_ma: int = VOL_MA,
+    no_exclusion: bool = False,
 ) -> list[dict[str, Any]]:
     """逐股流式：加载全历史 → 预计算知行数组 → evaluate_trades（本臂 gate +
-    owner 出场口径）→ 信号日 as-of 技术分。出场配置三臂完全一致（过滤可拆）。"""
+    owner 出场口径）→ 信号日 as-of 技术分。出场配置各臂完全一致（过滤可拆）。
+    ``resonance_version``：v2（默认，owner 2026-08-26 定稿六要素）/ v1（第一轮口径，
+    仅复现用）。``no_exclusion``：共振判定不减排除态（仅「排除项贡献」对照用）。"""
     from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
 
     trades: list[dict[str, Any]] = []
@@ -384,11 +624,22 @@ def run_arm(
             continue
         # ⚠️ date 列不得转字符串（同 score_return_study 注释：enrich 检测器依赖 datetime64）
         df = raw.sort_values("date").reset_index(drop=True)
-        gt, res = _zhixing_arrays(df, lookback, tol, reclaim_bars, min_events)
+        zx = _zhixing_arrays(
+            df,
+            lookback,
+            tol,
+            reclaim_bars,
+            min_events,
+            resonance_version,
+            bounce_bars,
+            bounce_pct,
+            vol_ma,
+            no_exclusion,
+        )
         code_trades = bf.evaluate_trades(
             {code: df},
             scorer=bf.SCORERS["baseline"],  # 恒「可买」——进场只由 gate 决定
-            entry_gate=_make_gate(arm, gt, res),
+            entry_gate=_make_gate(arm, zx),
             amv_regime=regime,  # 只在 0AMV 做多区间进场
             bbi_exit_consec=0,  # BBI 连破清仓本轮关闭（owner 口径）
             stop_mode="pct",
@@ -423,8 +674,10 @@ def run_arm(
                     "tech_score": score,
                     "tech_level": level,
                     "factor_contrib": contrib,
-                    "qsx_gt_dks": bool(gt[i]),
-                    "resonance": bool(res[i]),
+                    "qsx_gt_dks": bool(zx["gt"][i]),
+                    "resonance": bool(zx["res"][i]),
+                    "resonance_hit": bool(zx["hit"][i]),  # v2：成立条件（未减排除）
+                    "excluded": bool(zx["excluded"][i]),  # v2：排除态（跌破未收复）
                 }
             )
         if (k + 1) % 25 == 0:
@@ -484,11 +737,12 @@ def print_arm_report(rep: dict[str, Any]) -> None:
 
 
 def print_compare(cmp: dict[str, Any]) -> None:
-    """stdout 中文摘要（三臂对照）。"""
+    """stdout 中文摘要（四臂对照 + 预注册判读）。"""
     print("\n" + "=" * 72)
-    print("QSX/DKX 两层过滤研究 —— 三臂对照（B−A=过滤①边际，C−B=过滤②边际）")
+    print("QSX/DKX 两层过滤研究 —— 四臂对照（B−A=过滤①，C−B=过滤②，C'−A=共振独立）")
     print("=" * 72)
     print(cmp["r11_warning"])
+    print(cmp.get("preregistered", ""))
     print("\n臂 | 笔数 | 只数 | 胜率(Wilson95) | 盈亏比 | 均收 | 期望R | 半窗")
     for arm in ARMS:
         a = cmp["arms"].get(arm)
@@ -505,6 +759,7 @@ def print_compare(cmp: dict[str, Any]) -> None:
     for key, label in (
         ("marginal_filter1_B_minus_A", "过滤①（QSX>DKS）边际 B−A"),
         ("marginal_filter2_C_minus_B", "过滤②（共振）边际 C−B"),
+        ("marginal_resonance_only_Cp_minus_A", "共振独立边际 C'−A"),
     ):
         m = cmp.get(key)
         if m:
@@ -513,12 +768,29 @@ def print_compare(cmp: dict[str, Any]) -> None:
                 f"{fmt_delta(m.get('payoff_ratio'))} / 均收 {fmt_pp(m.get('avg_ret'))} / "
                 f"期望R {fmt_delta(m.get('expectancy_R'))}"
             )
-    hit = cmp.get("resonance_hit")
-    if hit:
-        print(
-            f"\n共振命中率：信号级 n_C/n_B = {hit.get('signal_rate_C_over_B')}，"
-            f"票级 codes_C/codes_B = {hit.get('code_rate_C_over_B')}"
-        )
+    for key, label in (
+        ("resonance_hit_C_over_B", "共振命中率 C/B"),
+        ("resonance_hit_Cp_over_A", "共振命中率 C'/A"),
+    ):
+        hit = cmp.get(key)
+        if hit:
+            print(
+                f"{label}：信号级 {hit.get('signal_rate')}，票级 {hit.get('code_rate')}"
+            )
+    for key, label in (
+        ("prereg_C_over_B", "预注册判读 C/B"),
+        ("prereg_Cp_over_A", "预注册判读 C'/A"),
+    ):
+        p = cmp.get(key)
+        if p:
+            print(
+                f"{label}：胜率 {fmt_pp(p.get('win_rate_delta'))}（>3pp? "
+                f"{'✅' if p['win_rate_+3pp'] else '❌'}）/ 盈亏比 "
+                f"{fmt_delta(p.get('payoff_delta'))}（不降? "
+                f"{'✅' if p['payoff_not_worse'] else '❌'}）/ 半窗"
+                f"{'✅' if p['half_window_consistent'] else '❌'} ⇒ "
+                f"{'✅ 过线' if p['pass'] else '❌ 不过线'}"
+            )
 
 
 def fmt_pp(x: Optional[float]) -> str:
@@ -536,7 +808,7 @@ def fmt_delta(x: Optional[float]) -> str:
 
 def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--arm", choices=ARMS, default="", help="跑哪一臂（A/B/C）")
+    ap.add_argument("--arm", choices=ARMS, default="", help="跑哪一臂（A/B/C/Cp=C'）")
     ap.add_argument(
         "--max-stocks", type=int, default=400, help="宇宙抽样只数（0=全市场）"
     )
@@ -559,10 +831,30 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--qsx-exit-consec", type=int, default=QSX_EXIT_CONSEC, help="跌破 QSX 连破根数"
     )
-    ap.add_argument("--lookback", type=int, default=LOOKBACK, help="共振回看根数")
-    ap.add_argument("--tol", type=float, default=TOUCH_TOL, help="贴线容差（±比例）")
     ap.add_argument(
-        "--reclaim-bars", type=int, default=RECLAIM_BARS, help="站回窗口根数"
+        "--resonance-version",
+        choices=("v1", "v2"),
+        default="v2",
+        help="共振口径（默认 v2 = owner 2026-08-26 六要素定稿；v1 仅复现第一轮）",
+    )
+    ap.add_argument("--lookback", type=int, default=LOOKBACK, help="共振回看根数")
+    ap.add_argument(
+        "--tol", type=float, default=TOUCH_TOL, help="贴线容差（±比例，仅 v1）"
+    )
+    ap.add_argument(
+        "--reclaim-bars", type=int, default=RECLAIM_BARS, help="站回窗口根数（仅 v1）"
+    )
+    ap.add_argument(
+        "--bounce-bars", type=int, default=BOUNCE_BARS, help="v2 反弹窗口根数"
+    )
+    ap.add_argument(
+        "--bounce-pct", type=float, default=BOUNCE_PCT, help="v2 反弹幅度阈值（比例）"
+    )
+    ap.add_argument("--vol-ma", type=int, default=VOL_MA, help="v2 缩量均量前窗根数")
+    ap.add_argument(
+        "--no-exclusion",
+        action="store_true",
+        help="共振判定不减「跌破未收复」排除态（仅排除项贡献对照臂用）",
     )
     ap.add_argument("--min-events", type=int, default=MIN_EVENTS, help="共振最少事件数")
     ap.add_argument(
@@ -575,18 +867,21 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument(
         "--compare",
-        nargs=3,
-        metavar=("ARM_A_JSON", "ARM_B_JSON", "ARM_C_JSON"),
-        help="对照模式：读三臂结果 JSON 出边际贡献汇总",
+        nargs="+",
+        metavar="ARM_JSON",
+        help="对照模式：读各臂结果 JSON（臂名取自文件内 arm 字段）出边际贡献+预注册判读",
     )
     return ap
 
 
 def _default_out(arm: str, seed: int, n_codes: int, args: argparse.Namespace) -> Path:
+    rv = f"_r{args.resonance_version}" if arm in ("C", "Cp") else ""
+    if args.no_exclusion:
+        rv += "_noexcl"
     tag = (
         f"qsx_resonance_study_arm{arm}_s{seed}_n{n_codes}"
         f"_stop{args.stop_pct:g}_be{args.breakeven:g}_so{args.scale_out:g}"
-        f"_qx{args.qsx_exit_consec}"
+        f"_qx{args.qsx_exit_consec}{rv}"
     )
     return Path("artifacts/logs/qsx_resonance_study") / f"{tag}.json"
 
@@ -597,8 +892,12 @@ def main(argv: Optional[list] = None) -> int:
 
     if args.compare:
         reps = {}
-        for arm, path in zip(ARMS, args.compare):
-            reps[arm] = json.loads(Path(path).read_text(encoding="utf-8"))
+        for path in args.compare:
+            rep = json.loads(Path(path).read_text(encoding="utf-8"))
+            arm = rep.get("arm") or (rep.get("config") or {}).get("arm")
+            if arm not in ARMS:
+                ap.error(f"{path} 里读不到臂名（arm 字段）")
+            reps[arm] = rep
         cmp = compare_arms(reps)
         if args.out:
             out = Path(args.out)
@@ -611,7 +910,7 @@ def main(argv: Optional[list] = None) -> int:
         return 0
 
     if not args.arm:
-        ap.error("必须给 --arm A/B/C（或 --compare 三份结果 JSON）")
+        ap.error("必须给 --arm A/B/C/Cp（或 --compare 各臂结果 JSON）")
 
     regime = bf.load_amv_regime(since=args.start)
     if not regime:
@@ -645,6 +944,11 @@ def main(argv: Optional[list] = None) -> int:
         tol=args.tol,
         reclaim_bars=args.reclaim_bars,
         min_events=args.min_events,
+        resonance_version=args.resonance_version,
+        bounce_bars=args.bounce_bars,
+        bounce_pct=args.bounce_pct,
+        vol_ma=args.vol_ma,
+        no_exclusion=args.no_exclusion,
     )
     if not trades:
         print(f"⛔ 臂 {args.arm} 0 笔交易——检查 regime 数据与宇宙", file=sys.stderr)
@@ -657,12 +961,18 @@ def main(argv: Optional[list] = None) -> int:
         "regime": "仅 0AMV 做多区间（compass_amv 状态机 >4%/-2.3% 粘滞）",
         "filter1_qsx_gt_dks": args.arm in ("B", "C"),
         "filter2_resonance": {
-            "enabled": args.arm == "C",
+            "enabled": args.arm in ("C", "Cp"),
+            "version": args.resonance_version,
             "lookback": args.lookback,
             "tol": args.tol,
             "reclaim_bars": args.reclaim_bars,
+            "bounce_bars": args.bounce_bars,
+            "bounce_pct": args.bounce_pct,
+            "vol_ma": args.vol_ma,
             "min_events": args.min_events,
+            "no_exclusion": bool(args.no_exclusion),
         },
+        "preregistered": PREREG_CRITERIA,
         "exit": (
             f"pct 初始止损 {args.stop_pct}%（收盘判）+ 保本 {args.breakeven}（盘中判）+ "
             f"双中大阳分批止盈 {args.scale_out}（BBI 上方）+ 跌破 QSX 清仓"

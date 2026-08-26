@@ -177,6 +177,190 @@ class TestResonance:
 
 
 # ---------------------------------------------------------------------------
+# 共振检测器 v2（owner 2026-08-26 六要素定稿）
+# ---------------------------------------------------------------------------
+
+
+class TestResonanceV2:
+    """线恒 10；默认 lookback=60/bounce_bars=5/bounce_pct=3%/vol_ma=5/min_events=2。
+    基准「干净事件」模具：low 9.95 真碰线、当日收 10.5 收回、high 10.6
+    （9.95×1.03=10.2485 ⇒ 达标）、量 800 < 前5均 1000。"""
+
+    KW = {
+        "lookback": 60,
+        "bounce_bars": 5,
+        "bounce_pct": 0.03,
+        "vol_ma": 5,
+        "min_events": 2,
+    }
+    N = 80
+
+    def _base(self):
+        close = [11.0] * self.N
+        low = [10.8] * self.N
+        high = [11.1] * self.N
+        vol = [1000.0] * self.N
+        return close, low, high, vol
+
+    def _dip(self, close, low, high, vol, t, **kw):
+        """在 t 处放一个干净跌线反弹（可用 kw 逐要素破坏）。"""
+        low[t] = kw.get("low_t", 9.95)
+        close[t] = kw.get("close_t", 10.5)
+        high[t] = kw.get("high_t", 10.6)
+        vol[t] = kw.get("vol_t", 800.0)
+        if "close_t1" in kw:
+            close[t + 1] = kw["close_t1"]
+        if "highs" in kw:  # 后续根的 high 序列（从 t 起）
+            for k, h in enumerate(kw["highs"]):
+                high[t + k] = h
+
+    def _run(self, close, low, high, vol, line=10.0, **kw):
+        s = lambda a: pd.Series(np.asarray(a, dtype=float))  # noqa: E731
+        ln = s(np.full(len(close), line))
+        return qrs.qsx_dks_resonance_v2(
+            s(close), s(low), s(high), s(vol), ln, ln, **{**self.KW, **kw}
+        )
+
+    def test_clean_two_events_hit(self):
+        """两次干净反弹 ⇒ confirm 后起 hit=True。"""
+        close, low, high, vol = self._base()
+        self._dip(close, low, high, vol, 8)
+        self._dip(close, low, high, vol, 16)
+        hit, excluded = self._run(close, low, high, vol)
+        assert not hit[:16].any()
+        assert hit[16]
+        assert not excluded.any()
+
+    def test_near_miss_without_touch_not_counted(self):
+        """① 碰线须真碰：low=10.08（贴近但没碰）不算事件。"""
+        close, low, high, vol = self._base()
+        self._dip(close, low, high, vol, 8, low_t=10.08)
+        self._dip(close, low, high, vol, 16, low_t=10.08)
+        hit, _ = self._run(close, low, high, vol)
+        assert not hit.any()
+
+    def test_two_closes_below_invalid(self):
+        """② 线下收盘 ≤1 根：连破 2 根 ⇒ 事件无效。"""
+        close, low, high, vol = self._base()
+        # 有效事件 ×1
+        self._dip(close, low, high, vol, 8)
+        # 无效事件：t=16 收破（9.7），t+1 仍破（9.8）⇒ 连破 2 根
+        low[16] = 9.95
+        close[16] = 9.7
+        high[16] = 10.6
+        vol[16] = 800.0
+        close[17] = 9.8
+        low[17] = 9.6
+        hit, _ = self._run(close, low, high, vol)
+        assert not hit.any()  # 只剩 1 次有效 < min_events
+
+    def test_one_close_below_then_reclaim_valid(self):
+        """②③ 线下收盘恰好 1 根后收回 ⇒ 有效；confirm=收回根。"""
+        close, low, high, vol = self._base()
+        self._dip(close, low, high, vol, 8)
+        low[16] = 9.95
+        close[16] = 9.7  # 收破（第 1 根线下）
+        high[16] = 10.6  # 反弹达标（min_low=9.95）
+        vol[16] = 800.0
+        close[17] = 10.3  # 次日收回
+        hit, _ = self._run(close, low, high, vol)
+        assert not hit[16]  # 尚未收回 ⇒ 第二次事件不可见
+        assert hit[17]  # confirm=17（reclaim=17、bounce=16）
+
+    def test_close_exactly_on_line_not_reclaim(self):
+        """③ 收回是严格 >：收盘压线（==）不算收回，连压 2 根 ⇒ 无效。"""
+        close, low, high, vol = self._base()
+        self._dip(close, low, high, vol, 8)
+        low[16] = 9.95
+        close[16] = 10.0  # == 线，不算收回（线下收盘第 1 根）
+        high[16] = 10.6
+        vol[16] = 800.0
+        close[17] = 10.0  # 仍 == 线 ⇒ 线下收盘第 2 根 ⇒ 无效
+        low[17] = 9.9
+        hit, _ = self._run(close, low, high, vol)
+        assert not hit.any()
+
+    def test_bounce_threshold(self):
+        """④ 反弹 ≥3%：只弹 2% ⇒ 无效；弹过线 ⇒ 有效。"""
+        close, low, high, vol = self._base()
+        self._dip(close, low, high, vol, 8)
+        # 触线最低 9.9（收破），随后 high 最高 10.15 < 9.9×1.03=10.197 ⇒ 无效
+        low[16] = 9.9
+        close[16] = 9.75
+        vol[16] = 800.0
+        close[17] = 10.1  # 收回
+        for u in range(16, 22):  # 覆盖反弹窗 [16, 21]，防基准 high=11.1 污染
+            high[u] = 10.15
+        hit, _ = self._run(close, low, high, vol)
+        assert not hit.any()
+        # 同款但 high 到 10.2 ≥ 10.197 ⇒ 有效
+        close, low, high, vol = self._base()
+        self._dip(close, low, high, vol, 8)
+        low[16] = 9.9
+        close[16] = 9.75
+        vol[16] = 800.0
+        close[17] = 10.1
+        high[16] = 10.05
+        high[17] = 10.1
+        high[18] = 10.2
+        hit, _ = self._run(close, low, high, vol)
+        assert not hit[17]  # 收回但反弹未达标 ⇒ 尚不可见
+        assert hit[18]  # confirm=max(reclaim=17, bounce=18)=18
+
+    def test_volume_not_dry_invalid(self):
+        """⑤ 缩量：触线日量 ≥ 前 5 日均量 ⇒ 无效。"""
+        close, low, high, vol = self._base()
+        self._dip(close, low, high, vol, 8)
+        self._dip(close, low, high, vol, 16, vol_t=1200.0)  # 放量碰线
+        hit, _ = self._run(close, low, high, vol)
+        assert not hit.any()
+
+    def test_exclusion_priority(self):
+        """⑥ 排除态优先：≥2 次干净反弹在手，但当前跌破未收复 ⇒ pass=False；
+        收复后排除解除 ⇒ pass 恢复。"""
+        close, low, high, vol = self._base()
+        self._dip(close, low, high, vol, 8)
+        self._dip(close, low, high, vol, 16)
+        # bar 20 起跌破不收复
+        low[20] = 9.9
+        close[20] = 9.7
+        close[21] = 9.6
+        low[21] = 9.5
+        close[22] = 10.3  # 收复
+        hit, excluded = self._run(close, low, high, vol)
+        assert hit[20]  # 成立条件仍满足（两事件在 60 根窗内）
+        assert excluded[20] and excluded[21]  # 跌破未收复
+        assert not (hit & ~excluded)[20]  # 排除优先 ⇒ 不放行
+        assert not excluded[22]  # 收复解除
+        assert (hit & ~excluded)[22]
+
+    def test_below_line_run_from_above_required(self):
+        """① 线下运行不算「跌到线」：段前收盘已在线下的碰线不计事件。"""
+        close, low, high, vol = self._base()
+        self._dip(close, low, high, vol, 8)
+        # bar 16 破线后一路线下：low 天天碰线但都不是「从上往下」
+        close[16] = 9.7
+        low[16] = 9.9
+        for t in range(17, 25):
+            close[t] = 9.6
+            low[t] = 9.5
+            high[t] = 10.6
+            vol[t] = 800.0
+        hit, _ = self._run(close, low, high, vol)
+        assert not hit[17:25].any()  # 只有 1 次有效事件
+
+    def test_dedup_same_dip_two_lines(self):
+        """双线去重：QSX/DKS 同值时同一次碰线只算一次（min_events=3 不成立）。"""
+        close, low, high, vol = self._base()
+        self._dip(close, low, high, vol, 8)
+        self._dip(close, low, high, vol, 16)
+        hit3, _ = self._run(close, low, high, vol, min_events=3)
+        assert not hit3.any()  # 若不去重会有 4 次
+        hit2, _ = self._run(close, low, high, vol, min_events=2)
+        assert hit2[16]
+
+
+# ---------------------------------------------------------------------------
 # QSX 跌破清仓（simulate_b1_trade 新通道）
 # ---------------------------------------------------------------------------
 
@@ -340,11 +524,21 @@ class TestGates:
     N = 20
     PRE = {"kdj_j": np.full(N, 5.0)}
 
+    def _zx(self, gt, res):
+        return {
+            "gt": np.asarray(gt, dtype=bool),
+            "res": np.asarray(res, dtype=bool),
+            "hit": np.asarray(res, dtype=bool),
+            "excluded": np.zeros(self.N, dtype=bool),
+        }
+
     def _slice(self, i: int) -> pd.DataFrame:
         return _mk_df([10.0] * (i + 1))  # 长度 i+1 ⇒ 末根下标 i
 
     def test_arm_a_only_j_low(self):
-        gate = qrs._make_gate("A", np.zeros(self.N, bool), np.zeros(self.N, bool))
+        gate = qrs._make_gate(
+            "A", self._zx(np.zeros(self.N, bool), np.zeros(self.N, bool))
+        )
         assert gate(self._slice(15), self.PRE)  # J<13 即放行
         bad_pre = {"kdj_j": np.full(self.N, 50.0)}
         assert not gate(self._slice(15), bad_pre)  # J 不低 ⇒ 拒
@@ -352,7 +546,7 @@ class TestGates:
     def test_arm_b_requires_qsx_gt_dks(self):
         gt = np.zeros(self.N, bool)
         gt[15] = True
-        gate = qrs._make_gate("B", gt, np.zeros(self.N, bool))
+        gate = qrs._make_gate("B", self._zx(gt, np.zeros(self.N, bool)))
         assert gate(self._slice(15), self.PRE)
         assert not gate(self._slice(14), self.PRE)  # gt[14]=False ⇒ 拒
 
@@ -360,9 +554,27 @@ class TestGates:
         gt = np.ones(self.N, bool)
         res = np.zeros(self.N, bool)
         res[15] = True
-        gate = qrs._make_gate("C", gt, res)
+        gate = qrs._make_gate("C", self._zx(gt, res))
         assert gate(self._slice(15), self.PRE)
         assert not gate(self._slice(14), self.PRE)  # 共振不满足 ⇒ 拒
+
+    def test_arm_cp_resonance_without_structure(self):
+        """C' 臂：共振即可，不要求 qsx_gt_dks（gt 全 False 也放行）。"""
+        res = np.zeros(self.N, bool)
+        res[15] = True
+        gate = qrs._make_gate("Cp", self._zx(np.zeros(self.N, bool), res))
+        assert gate(self._slice(15), self.PRE)
+        assert not gate(self._slice(14), self.PRE)
+
+    def test_no_exclusion_switch(self):
+        """no_exclusion=True ⇒ res == hit（不减排除态）；False ⇒ res == hit & ~excluded。"""
+        n = 60
+        df = _mk_df([10.0 + 0.05 * i for i in range(n)])
+        on = qrs._zhixing_arrays(df, 60, 0.01, 5, 2, "v2", 5, 0.03, 5, False)
+        off = qrs._zhixing_arrays(df, 60, 0.01, 5, 2, "v2", 5, 0.03, 5, True)
+        assert (on["res"] == (on["hit"] & ~on["excluded"])).all()
+        assert (off["res"] == off["hit"]).all()
+        assert (on["hit"] == off["hit"]).all()  # 开关只改 res，不改检测
 
 
 # ---------------------------------------------------------------------------
@@ -411,25 +623,55 @@ class TestStats:
         assert qrs.half_window_ret(trades[:4])["skipped"]  # 样本不足如实标
 
     def test_compare_arms_marginal(self):
-        def rep(arm, n_win, n_lose, code):
-            trades = [_trade(0.1, code=code) for _ in range(n_win)] + [
-                _trade(-0.1, code=code) for _ in range(n_lose)
-            ]
+        def rep(arm, win_mod, code):
+            # 100 笔、日期递增、输赢交错（每 5 根前 win_mod 根赢）⇒ 两半窗同构
+            trades = []
+            for i in range(100):
+                win = (i % 5) < win_mod
+                trades.append(
+                    _trade(
+                        0.1 if win else -0.1,
+                        code=code,
+                        entry=f"2024-{i // 28 + 1:02d}-{i % 28 + 1:02d}",
+                    )
+                )
             return qrs.build_arm_report(trades, arm)
 
         reps = {
-            "A": rep("A", 40, 60, "a"),
-            "B": rep("B", 50, 50, "b"),
-            "C": rep("C", 30, 20, "c"),
+            "A": rep("A", 2, "a"),  # 胜率 0.4
+            "B": rep("B", 2, "b"),  # 0.4
+            "C": rep("C", 3, "c"),  # 0.6
         }
         cmp = qrs.compare_arms(reps)
         m1 = cmp["marginal_filter1_B_minus_A"]
-        assert m1["win_rate"] == pytest.approx(0.5 - 0.4, abs=1e-4)
+        assert m1["win_rate"] == pytest.approx(0.0, abs=1e-4)
         m2 = cmp["marginal_filter2_C_minus_B"]
-        assert m2["win_rate"] == pytest.approx(0.6 - 0.5, abs=1e-4)
-        hit = cmp["resonance_hit"]
-        assert hit["signal_rate_C_over_B"] == pytest.approx(50 / 100, abs=1e-4)
-        assert hit["code_rate_C_over_B"] == pytest.approx(1.0, abs=1e-4)
+        assert m2["win_rate"] == pytest.approx(0.2, abs=1e-4)
+        hit = cmp["resonance_hit_C_over_B"]
+        assert hit["signal_rate"] == pytest.approx(1.0, abs=1e-4)
+        assert hit["code_rate"] == pytest.approx(1.0, abs=1e-4)
+        # 预注册判读：胜率 +20pp >3pp、盈亏比不降（同 1.0）、半窗一致 ⇒ 过线
+        p = cmp["prereg_C_over_B"]
+        assert p["win_rate_+3pp"] and p["payoff_not_worse"] and p["pass"]
+
+    def test_prereg_fail_when_half_window_flips(self):
+        """预注册：半窗翻转 ⇒ 不过线（即使胜率/盈亏比达标）。"""
+        # 前半全亏后半全赢 ⇒ consistent=False（亏损笔数须 > 半数，否则首根二月赢单落进前半）
+        trades_a = [_trade(0.05, entry=f"2024-01-{i + 1:02d}") for i in range(2)] + [
+            _trade(-0.05, entry=f"2024-01-{i + 1:02d}") for i in range(2, 10)
+        ]  # 胜率 0.2、盈亏比 1.0
+        trades_b = [_trade(-0.05, entry=f"2024-01-{i + 1:02d}") for i in range(8)] + [
+            _trade(0.5, entry=f"2024-02-{i + 1:02d}") for i in range(4)
+        ]  # 胜率 1/3、盈亏比 10、半窗翻转
+        reps = {
+            "A": qrs.build_arm_report(trades_a, "A"),
+            "Cp": qrs.build_arm_report(trades_b, "Cp"),
+        }
+        cmp = qrs.compare_arms(reps)
+        p = cmp["prereg_Cp_over_A"]
+        assert p["win_rate_+3pp"] and p["payoff_not_worse"]
+        assert not p["half_window_consistent"]
+        assert not p["pass"]
 
     def test_build_arm_report_top_frac(self):
         trades = [
