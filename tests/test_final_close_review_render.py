@@ -371,3 +371,183 @@ class TestExtractedUnits:
         )
         assert rules["effective"] == ["e1"]
         assert any("### 7.2" in x for x in lines)
+
+
+def _revalued_row(code, b1):
+    """「今日纪律检查」钉测用的最小 revalued 行（只带新节读取的字段）。"""
+    return {"code": code, "name": f"测试{code}", "b1_holding_state": b1}
+
+
+def _b1(priority="P3", action="条件持有", signals=None, shadow_signals=None):
+    return {
+        "final_priority": priority,
+        "final_action": action,
+        "final_reason": "x",
+        "signals": signals or [],
+        "shadow": {"signals": shadow_signals or []},
+    }
+
+
+class TestHabitCheck:
+    """§1 延伸小节「今日纪律检查」（v0.127 owner 定稿）：止损/止盈旧习惯当日复发点名。
+
+    钉的是判读口径本身：信号出现**且当日无该票卖出成交**才点名；已卖出不算复发；
+    execution_review 缺 `rows` 时 fail-closed 降级（「没查」≠「查了没有」）。
+    """
+
+    def test_stop_signal_without_sell_is_called_out(self):
+        """扛单不止损：B1 P0 止损/清仓级信号 + 当日无卖出 ⇒ 点名。"""
+        lines = []
+        fcr.render_habit_check(
+            lines,
+            [
+                _revalued_row(
+                    "600000",
+                    _b1(
+                        "P0",
+                        "止损/清仓评估",
+                        [{"signal": "hard_loss", "priority": "P0"}],
+                    ),
+                )
+            ],
+            {"rows": [{"code": "600000", "actual_trades": []}]},
+        )
+        text = "\n".join(lines)
+        assert (
+            "扛单不止损" in text and "600000" in text and "当日无该票卖出成交" in text
+        )
+
+    def test_stop_signal_with_sell_is_not_called_out(self):
+        """当日已有该票卖出成交 ⇒ 不算扛单，报「今日无复发」。"""
+        lines = []
+        fcr.render_habit_check(
+            lines,
+            [
+                _revalued_row(
+                    "600000",
+                    _b1(
+                        "P0",
+                        "止损/清仓评估",
+                        [{"signal": "hard_loss", "priority": "P0"}],
+                    ),
+                )
+            ],
+            {
+                "rows": [
+                    {
+                        "code": "600000",
+                        "actual_trades": [{"交易类别": "卖出", "成交数量": 100}],
+                    }
+                ]
+            },
+        )
+        text = "\n".join(lines)
+        assert "扛单不止损" not in text and "今日无复发" in text
+
+    def test_tail_p0p1_without_sell_is_called_out(self):
+        """14:45 P0/P1 动作 + 当日无卖出 ⇒ 同样按扛单不止损点名（owner 口径）。"""
+        lines = []
+        fcr.render_habit_check(
+            lines,
+            [_revalued_row("920808", _b1())],
+            {
+                "rows": [
+                    {
+                        "code": "920808",
+                        "tail_priority": "P0",
+                        "tail_action": "止损/清仓评估",
+                        "actual_trades": [],
+                    }
+                ]
+            },
+        )
+        text = "\n".join(lines)
+        assert "扛单不止损" in text and "920808" in text and "14:45 P0" in text
+
+    def test_buy_trade_does_not_count_as_sell(self):
+        """当日只有**买入**成交不算卖出 —— 止损信号下买入正是「扛单还加仓」。"""
+        lines = []
+        fcr.render_habit_check(
+            lines,
+            [
+                _revalued_row(
+                    "600000",
+                    _b1(
+                        "P0",
+                        "止损/清仓评估",
+                        [{"signal": "hard_loss", "priority": "P0"}],
+                    ),
+                )
+            ],
+            {
+                "rows": [
+                    {
+                        "code": "600000",
+                        "actual_trades": [{"交易类别": "买入", "成交数量": 100}],
+                    }
+                ]
+            },
+        )
+        assert any("扛单不止损" in x for x in lines)
+
+    def test_profit_take_signal_without_sell_is_called_out(self):
+        """不止盈：two_bull_profit_take / 影子 plan_tp_scale_out + 无卖出 ⇒ 点名。"""
+        lines = []
+        fcr.render_habit_check(
+            lines,
+            [
+                _revalued_row(
+                    "600000",
+                    _b1(
+                        "P2",
+                        "分批止盈",
+                        [{"signal": "two_bull_profit_take", "priority": "P2"}],
+                    ),
+                ),
+                _revalued_row(
+                    "688111",
+                    _b1(
+                        shadow_signals=[
+                            {"signal": "plan_tp_scale_out", "priority": "P2"}
+                        ]
+                    ),
+                ),
+            ],
+            {"rows": []},
+        )
+        text = "\n".join(lines)
+        assert text.count("不止盈") >= 2 and "600000" in text and "688111" in text
+
+    def test_no_signal_says_no_relapse(self):
+        """无信号 ⇒ 如实写「今日无复发」（查了没有，不是没查）。"""
+        lines = []
+        fcr.render_habit_check(lines, [_revalued_row("600000", _b1())], {"rows": []})
+        assert any("今日无复发" in x for x in lines)
+
+    def test_missing_rows_degrades_fail_closed(self):
+        """⚠️ execution_review 缺 `rows` ⇒ 降级如实报「未执行检查」，
+        **不得**写成「今日无复发」—— 那会把「没查」显示成「查了没有」。"""
+        lines = []
+        fcr.render_habit_check(lines, [_revalued_row("600000", _b1())], {})
+        text = "\n".join(lines)
+        assert "unavailable" in text and "未执行检查" in text
+        assert "今日无复发" not in text
+
+    def test_only_stop_and_profit_habits_judged(self):
+        """判读口径钉死：本节只判止损/止盈两类习惯（减仓类 P1 信号不算扛单）。"""
+        lines = []
+        fcr.render_habit_check(
+            lines,
+            [
+                _revalued_row(
+                    "600000",
+                    _b1(
+                        "P1",
+                        "减仓评估",
+                        [{"signal": "loss_reduction", "priority": "P1"}],
+                    ),
+                )
+            ],
+            {"rows": [{"code": "600000", "actual_trades": []}]},
+        )
+        assert any("今日无复发" in x for x in lines)

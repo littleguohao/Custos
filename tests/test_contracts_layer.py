@@ -88,7 +88,8 @@ class TestUnimplementedMechanismsFlagged:
         原状态是「完全不存在，字段已从契约删除」。2026-08-10 owner 定了落点：
         **连亏冷却放在复盘环节，每日/每周统计并判断是否有连亏行为** ——
         于是新增 `close_review/loss_streak.py`（每日 `final_close_review` +
-        每周 `weekly_review` 各出一节）。
+        每周 `weekly_review` 各出一节；2026-08-27 v0.127 owner 定稿：周期性检查
+        归周报/月报，日报侧两节撤下、改挂「今日纪律检查」习惯复发点名）。
 
         本测试随之改判据，但**要守的东西没变**：读契约的人不能以为
         「触发止损的票会自动进冷却、不会被重复买入」。所以仍然断言：
@@ -120,6 +121,9 @@ class TestUnimplementedMechanismsFlagged:
 
         「存在」这一半同样要测 —— 否则哪天它被删掉，只剩上面那条「没有闸门」
         的断言仍然通过，而 owner 定的复盘统计悄悄消失了。
+
+        ⚠️ 2026-08-27（v0.127，owner 定稿）：连亏是**周期性**行为检查，日报侧撤下、
+        归周报/月报 —— 钉测随之从「日/周都接入」改为「周报接入 + 日报不再接入」。
         """
         import sys
         from custos.pipeline.close_review import loss_streak as ls
@@ -130,13 +134,15 @@ class TestUnimplementedMechanismsFlagged:
         ).read_text(encoding="utf-8")
         for bad in ("return False", "raise SystemExit", "blocked", "forbid"):
             assert bad not in src, f"loss_streak 里出现 {bad!r} —— 它不该有拦截语义"
-        # 两处复盘都要接入（少一处就等于「每日/每周都统计」没做到）
-        for rel in (
-            "pipeline/close_review/final_close_review.py",
-            "pipeline/close_review/weekly_review.py",
-        ):
-            t = (ROOT / "src" / "custos" / rel).read_text(encoding="utf-8")
-            assert "loss_streak" in t, f"{rel} 未接入连亏检查"
+        # 周报必须接入（周期性检查的归口）；日报侧 v0.127 起不再渲染。
+        t = (
+            ROOT / "src" / "custos" / "pipeline/close_review/weekly_review.py"
+        ).read_text(encoding="utf-8")
+        assert "loss_streak" in t, "weekly_review 未接入连亏检查"
+        daily = (
+            ROOT / "src" / "custos" / "pipeline/close_review/final_close_review.py"
+        ).read_text(encoding="utf-8")
+        assert "loss_streak" not in daily, "日报侧连亏检查已撤下（v0.127），不应再接入"
 
     def test_cooldowns_exist_and_do_not_gate(self):
         """⚠️ #51（2026-08-12，v0.48）：止损冷却名单 + 胜率降仓提示必须存在，
@@ -151,14 +157,20 @@ class TestUnimplementedMechanismsFlagged:
         ).read_text(encoding="utf-8")
         for bad in ("return False", "raise SystemExit", "blocked", "forbid"):
             assert bad not in src, f"cooldowns 里出现 {bad!r} —— 它不该有拦截语义"
-        # 冷却名单进日/周/月三处复盘；胜率降仓提示在月报（当月口径）
+        # 冷却名单进周/月两处复盘（胜率降仓提示在月报，当月口径）；
+        # 日报侧 2026-08-27（v0.127，owner 定稿）撤下 —— 周期性检查归周报/月报。
         for rel, kw in (
-            ("pipeline/close_review/final_close_review.py", "stop_cooldowns"),
             ("pipeline/close_review/weekly_review.py", "stop_cooldowns"),
             ("pipeline/close_review/monthly_review.py", "win_rate_check"),
         ):
             t = (ROOT / "src" / "custos" / rel).read_text(encoding="utf-8")
             assert kw in t, f"{rel} 未接入 {kw}"
+        daily = (
+            ROOT / "src" / "custos" / "pipeline/close_review/final_close_review.py"
+        ).read_text(encoding="utf-8")
+        assert "stop_cooldowns" not in daily, (
+            "日报侧冷却名单已撤下（v0.127），不应再接入"
+        )
 
     def test_monthly_review_implemented_and_marked(self):
         """月度复盘 2026-08-11 已实现（TODO #30）——文档状态与代码互锁，防再漂移。"""

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-from typing import Optional
 
 from custos.pipeline.holdings.b1_holding_state import evaluate as evaluate_b1_holding
 from custos.pipeline.holdings.b1_holding_state import shadow_compare_line
@@ -14,20 +13,6 @@ from custos.pipeline.close_review.holding_bbi import intraday_bbi_basis
 from custos.pipeline.close_review.holding_structure import n_structure_basis
 
 from custos.core.paths import cn_now, DATA, REVIEWS, daily_report_dir  # noqa: E402
-from custos.pipeline.close_review.loss_streak import format_lines as loss_streak_lines  # noqa: E402
-from custos.pipeline.close_review.loss_streak import loss_streaks  # noqa: E402
-from custos.pipeline.close_review.cooldowns import (  # noqa: E402
-    format_cooldown_lines,
-    stop_cooldowns,
-)
-
-# ⚠️ 台账解析与 FIFO 配平的唯一实现在 `weekly_review` —— 这里**单向**依赖它。
-#    曾想把「加载→配平→连亏」包进 `loss_streak.from_ledger()` 做统一入口，
-#    但 `weekly_review` 已经导入 `loss_streak` ⇒ 那会造成
-#    `loss_streak ↔ weekly_review` 循环（`test_no_unexpected_cycles` 当场拦下）。
-#    改成各调用方自己加载：这里两行、周报本来就有 `closings_all`，
-#    共享的是 `parse_ledger`/`fifo_pair`/`loss_streaks` 三个函数，没有重复实现。
-from custos.pipeline.close_review.weekly_review import fifo_pair, parse_ledger  # noqa: E402
 from custos.core import report_audit  # noqa: E402
 from custos.core.code_utils import market_of  # noqa: E402
 from custos.core.paths import read_json as load  # noqa: E402
@@ -351,49 +336,114 @@ def render_holdings(lines, enrichment, revalued, day):
             )
         )
 
-    # 连亏检查（owner 2026-08-10：连亏冷却落在复盘环节，每日/每周都要统计并判断）。
-    # ⚠️ 只报事实、不拦交易 —— 自动链里 `chief_decision.buy_actions` 恒为空表，
-    #    没有买入决策可拦；作用是让复盘看见「这只票已连亏 N 次」。
-    lines += loss_streak_lines(_loss_streak_today())
 
-    # 止损冷却名单（owner 2026-08-12 #51：与连亏检查同落点、同「只提示不拦截」）。
-    #    watch=当日在持 ⇒ 冷却期内的票还在持仓里会被点名提示。
-    lines += format_cooldown_lines(
-        _cooldown_today(day, watch={r["code"]: "当日在持" for r in revalued})
-    )
-
-
-def _load_closings() -> tuple[Optional[list], Optional[str]]:
-    """读主台账 → FIFO 配平；失败返回 (None, 原因)。连亏/冷却两节共用。"""
-    ledger = DATA / "trades" / "master_trade_ledger.csv"
-    if not ledger.exists():
-        return None, f"主台账不存在：{ledger}"
-    trades = parse_ledger(ledger)
-    if trades is None:
-        return None, f"主台账解析失败：{ledger}"
-    return fifo_pair(trades), None
+# 止损/清仓级 B1 信号（「今日纪律检查」扛单不止损的判读口径）：按**信号名**判，
+# 不按动作文案 —— 「趋势破位退出评估」等文案不含「止损/清仓」字样，按文案会漏判。
+STOP_SIGNALS = {
+    "hard_loss",
+    "n_l1_breach",
+    "desc_n_confirmed",
+    "trend_box_break",
+    "bbi_two_close_breach",
+    "heavy_large_bear",
+}
 
 
-def _cooldown_today(day: str, watch: Optional[dict] = None) -> dict:
-    """当日止损冷却名单。台账缺失/解析失败时 available=False（不编「无冷却」）。"""
-    closings, err = _load_closings()
-    if err:
-        return {"available": False, "reason": err}
-    return stop_cooldowns(closings or [], as_of=day)
+def _sold_codes(execution: dict):
+    """当日有**卖出**成交的裸代码集合；`rows` 缺失返回 None —— fail-closed：
+    「没核对」与「核对了没有卖出」必须分得开（同 §2 unavailable 的教训）。"""
+    rows = execution.get("rows")
+    if not isinstance(rows, list):
+        return None
+    return {
+        bare(row.get("code"))
+        for row in rows
+        for t in row.get("actual_trades") or []
+        if t.get("交易类别") == "卖出"
+    }
 
 
-def _loss_streak_today() -> dict:
-    """当日连亏检查：读主台账 → FIFO 配平 → 连亏聚合。
+def _stop_basis(row: dict, tail_row: dict) -> list:
+    """扛单不止损依据：B1 final P0/P1 止损/清仓级信号，或 14:45 P0/P1 动作。"""
+    b1 = row["b1_holding_state"]
+    signals = b1.get("signals") or []
+    reasons = []
+    if (
+        b1.get("final_priority") in {"P0", "P1"}
+        and signals
+        and signals[0].get("signal") in STOP_SIGNALS
+    ):
+        reasons.append(f"B1 {b1['final_priority']} {b1['final_action']}")
+    if tail_row.get("tail_priority") in {"P0", "P1"}:
+        reasons.append(
+            f"14:45 {tail_row['tail_priority']} {tail_row.get('tail_action')}"
+        )
+    return reasons
 
-    台账缺失/解析失败时返回 `available=False` 并说明原因 ——
-    **不返回「无连亏」**，那会把「没查」显示成「查了没有」。
+
+def _tp_basis(row: dict) -> list:
+    """不止盈依据：双中大阳分批止盈（two_bull_profit_take）或影子计划分批止盈。"""
+    b1 = row["b1_holding_state"]
+    reasons = []
+    if any(s.get("signal") == "two_bull_profit_take" for s in b1.get("signals") or []):
+        reasons.append("双中大阳分批止盈（two_bull_profit_take）")
+    shadow = b1.get("shadow") or {}
+    if any(s.get("signal") == "plan_tp_scale_out" for s in shadow.get("signals") or []):
+        reasons.append("影子计划分批止盈（plan_tp_scale_out）")
+    return reasons
+
+
+def _habit_hits(revalued: list, execution: dict, sold: set):
+    """逐票判两类旧习惯复发，返回 (扛单不止损名单, 不止盈名单) 两条 (code, name, 依据)。"""
+    tail = {bare(r.get("code")): r for r in execution.get("rows") or []}
+    stop_hits, tp_hits = [], []
+    for row in revalued:
+        if row["code"] in sold:
+            continue  # 当日已卖 ⇒ 不算扛单/不止盈
+        name = row["name"] or row["code"]
+        stop = _stop_basis(row, tail.get(row["code"]) or {})
+        if stop:
+            stop_hits.append((row["code"], name, "；".join(stop)))
+        tp = _tp_basis(row)
+        if tp:
+            tp_hits.append((row["code"], name, "；".join(tp)))
+    return stop_hits, tp_hits
+
+
+def render_habit_check(lines, revalued, execution):
+    """§1 延伸小节「今日纪律检查」（owner 2026-08-27 定稿）：旧错误习惯当日复发点名。
+
+    判读口径：只判**止损/止盈**两类习惯 —— 信号出现但当日无该票卖出成交即点名；
+    计划外交易等执行对账归 §1 表（execution_review），本节不重复判定。
+    周期性行为检查（连亏/止损冷却名单）归周报/月报，日报侧 v0.127 起撤下。
     """
-    closings, err = _load_closings()
-    if err:
-        return {"available": False, "reason": err}
-    out = loss_streaks(closings or [])
-    out["available"] = True
-    return out
+    lines += [
+        "",
+        "### 今日纪律检查（旧错误习惯当日复发点名）",
+        "",
+        "> 判读口径：只判止损/止盈两类旧习惯的当日复发（出现信号但当日无该票卖出成交）；"
+        "计划外交易等执行对账归上表，本节不重复。周期性检查（连亏/冷却名单）归周报/月报。",
+        "",
+    ]
+    sold = _sold_codes(execution)
+    if sold is None:
+        lines.append(
+            "- `unavailable`：execution_review 缺 `rows`，无法核对当日卖出成交"
+            " —— 本节未执行检查（不等于无复发）。"
+        )
+        return
+    stop_hits, tp_hits = _habit_hits(revalued, execution, sold)
+    if not stop_hits and not tp_hits:
+        lines.append("- 今日无复发：无「信号出现但当日未卖出」的持仓。")
+        return
+    for code, name, basis in stop_hits:
+        lines.append(
+            f"- ⚠️ **扛单不止损**：{code} {name} —— {basis}，但当日无该票卖出成交。"
+        )
+    for code, name, basis in tp_hits:
+        lines.append(
+            f"- ⚠️ **不止盈**：{code} {name} —— 出现{basis}信号，但当日无该票卖出成交。"
+        )
 
 
 def render_next_day(lines, enrichment):
@@ -736,6 +786,8 @@ def main():
         "|---|---|---|---|---|---|",
     ]
     render_execution_rows(lines, execution)
+    # §1 延伸小节「今日纪律检查」（v0.127）：止损/止盈两类旧习惯的当日复发点名。
+    render_habit_check(lines, revalued, execution)
     hold_codes, hold_sectors = _news_interest(pmap, today, sectors)
     render_news(lines, news, hold_codes=hold_codes, hold_sectors=hold_sectors)
 
