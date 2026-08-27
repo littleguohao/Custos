@@ -16,6 +16,7 @@
 | 文件 | 类型 | 说明 |
 |---|---|---|
 | [01_cognition_framework.md](01_cognition_framework.md) | 认知框架（933 行）| §一~§十七 + Patreon 认知训练 18.1–18.22 |
+| [02_swing_tactics.md](02_swing_tactics.md) | 波段战法（口述沉淀）| 超级波段体系：温度公式/三大共振/3570 建仓/3221 减仓（v0.126，数字未验证） |
 
 ~~CZ_SECTOR_PREFERENCE.json~~（板块白/黑名单，走 `paths.CZ_SECTOR_PREFERENCE_FILE`）已随
 v0.80 移除：板块证据链 v0.79 证伪，全仓唯一真实板块否决（`cz_sector=avoid` → 封 D）一并删除。
