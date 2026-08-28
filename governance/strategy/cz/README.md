@@ -15,21 +15,27 @@
 
 | 文件 | 类型 | 说明 |
 |---|---|---|
-| [01_cognition_framework.md](01_cognition_framework.md) | 认知框架（933 行）| §一~§十七 + Patreon 认知训练 18.1–18.22 |
+| [01_cognition_framework.md](01_cognition_framework.md) | 核心认知 | 定位 / 真伪科技 / 操作纪律 / 估值 / 时代主线 / 哲学 8.1–8.5 / 止损定案（15%/20% 仅 CZ 语境） |
 | [02_swing_tactics.md](02_swing_tactics.md) | 波段战法（口述沉淀）| 超级波段体系：温度公式/三大共振/3570 建仓/3221 减仓（v0.126，数字未验证） |
+| [03_entry_methods.md](03_entry_methods.md) | 买入方法集 | 抄底条件 / 五步交易法 / 三低买入法 / 事件蛛丝马迹 / 35710 建仓 / 五日战法 |
+| [04_position_and_flow.md](04_position_and_flow.md) | 仓位·温度·资金流 | 大盘温度计 / 滚动复利法 / 资金流向（**唯一有代码消费的节**） |
+| [90_patreon_training.md](90_patreon_training.md) | 附录 | Patreon 认知训练提炼 18.1–18.22（阅读材料，非规则） |
+
+（2026-08-27 v0.130 拆分重组：原 01 单文档 933 行按主题拆成 01/03/04/90 四份，内容逐字保留。）
 
 ~~CZ_SECTOR_PREFERENCE.json~~（板块白/黑名单，走 `paths.CZ_SECTOR_PREFERENCE_FILE`）已随
 v0.80 移除：板块证据链 v0.79 证伪，全仓唯一真实板块否决（`cz_sector=avoid` → 封 D）一并删除。
 
 ## 代码依赖
 
-933 行里**代码只用了一处**：
+全部内容里**代码只用了一处**：
 
 | 代码 | 用了什么 |
 |---|---|
-| `screening/enrich_candidates.py:670` | §14.6 量能规则（峰值日后逐日量 ≥ 峰值×55%）|
+| `core/factors/volume_detectors.py`（`_vs_confirmed`） | `04` §三 量能规则（峰值日后逐日量 ≥ 峰值×55%）|
 
-（原 `screening/score_candidates.py` 对板块偏好名单的消费已随 v0.80 移除。）
+（原引用写作 `screening/enrich_candidates.py:670`，因子化迁移后实为 volume_detectors；
+原 `screening/score_candidates.py` 对板块偏好名单的消费已随 v0.80 移除。）
 
 **其余部分是给人读的认知输入。**
 

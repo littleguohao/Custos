@@ -48,7 +48,10 @@
       "rule_doc": null,
       "docs": [
         "cz/01_cognition_framework.md",
-        "cz/02_swing_tactics.md"
+        "cz/02_swing_tactics.md",
+        "cz/03_entry_methods.md",
+        "cz/04_position_and_flow.md",
+        "cz/90_patreon_training.md"
       ],
       "configs": [],
       "code": [

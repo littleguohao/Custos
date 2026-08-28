@@ -101,7 +101,7 @@ def _vs_confirmed(
 ) -> bool:
     """主线确认判定。
 
-    与 01_cognition_framework.md §14.6 一致：峰值日后窗口内"逐日"量都必须 ≥ 峰值×55%
+    与 cz/04_position_and_flow.md §三「资金流向 = 主线密码」一致：峰值日后窗口内"逐日"量都必须 ≥ 峰值×55%
     （均值达标但有单日跌破不算主线确认）。
     """
     return bool(
