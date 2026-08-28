@@ -83,6 +83,319 @@ PANEL_ONLY_LEG_KEYS: list[str] = [
 # 池内命中率 > 此值 ⇒ 标「无区分度」（R23 共振 v1 命中率 99.2% ≈ 无过滤的教训）
 NO_DISCRIMINATION_HIT_RATE = 0.90
 
+# ---------------------------------------------------------------------------
+# Phase 2：候选方案构造（预注册规则，见 R24 Phase 2 节 / 本文件 Phase2 docstring）
+# ---------------------------------------------------------------------------
+#
+# 构造依据（Phase 1 三窗 ablation 证据，2026-08-28 跑数）：
+# ① 池内命中率 >90% ⇒ 归零/移除：j_low（100% 命中、+24 保底分——地板效应主因，
+#    **门槛保留、分值归零**）；
+# ② add-one margin 三窗一致为正 ⇒ 保留/加权（括号内为主窗/跨窗/pre2019）：
+#    rsi_deep_oversold（+33.0/+37.2/+6.3）、weekly_j_low（+8.0/+9.8/+2.5）、
+#    macd_bottom_divergence（+2.1/+3.2/+3.4）、rsi_bull_div（+3.0/+3.1/+6.9）；
+# ③ add-one margin 三窗一致为负 ⇒ 移除或取负：
+#    rsi_strong（−8.8/−14.2/−5.3）、b1_ignition（−7.7/−15.6/−3.4）、
+#    volume_contraction（−8.8/−7.6/−3.0）、relative_strength_strong（−3.1/−3.6/−3.3）、
+#    macd_top_divergence（−3.8/−6.7/−0.8）、ignition（−1.9/−2.3/−3.5）；
+# ④ 三窗翻号的腿不用（zhixing 系/pullback_shrink/platform_pullback_b1/
+#    b1_healthy_pullback_pack/macd_above_water 等——pre2019 变号）。
+# ⚠️ pre2019 列仅引用 owner 转述的 Phase 1 数字；Phase 2 调参/评估只用主窗+跨窗
+#    （CLI 对 pre2019 输入硬拒绝，反过拟合纪律第 5 条代码化）。
+PHASE2_NEG_LEGS = (
+    "rsi_strong",
+    "b1_ignition",
+    "volume_contraction",
+    "relative_strength_strong",
+    "macd_top_divergence",
+    "ignition",
+)
+
+# 候选方案（≤4，权重简单整数；multiplier 语义见 make_candidate_score）
+PHASE2_CANDIDATES: dict[str, dict[str, Any]] = {
+    "P0_min_change": {
+        "desc": "最小改动臂（对照）：现行分只去负腿/归零地板——j_low 24→0，"
+        "contrib 内 5 条三窗负腿归零（rsi_strong 不在 V0 分，本臂无影响）",
+        "contrib_mult": {
+            "j_low": 0.0,
+            "b1_ignition": 0.0,
+            "volume_contraction": 0.0,
+            "relative_strength_strong": 0.0,
+            "macd_top_divergence": 0.0,
+            "ignition": 0.0,
+        },
+        "panel_weights": {},
+    },
+    "P1_rebuild": {
+        "desc": "证据重构：只留三窗一致正腿（=R22 V2 形态的 R24 复验）",
+        "contrib_mult": {},  # 空 = 全部现行腿归零（见 make_candidate_score 语义）
+        "panel_weights": {
+            "rsi_deep_oversold": 40,
+            "weekly_j_low": 20,
+            "rsi_bull_div": 20,
+            "macd_bottom_divergence": 20,
+        },
+    },
+    "P2_rebuild_neg": {
+        "desc": "P1 + 三窗负腿取负（每条 −5，=R22 V3 形态的 R24 复验）",
+        "contrib_mult": {},
+        "panel_weights": {
+            "rsi_deep_oversold": 40,
+            "weekly_j_low": 20,
+            "rsi_bull_div": 20,
+            "macd_bottom_divergence": 20,
+            **{k: -5 for k in PHASE2_NEG_LEGS},
+        },
+    },
+    "P3_rebuild_leader": {
+        "desc": "P1 + leader_volume 20（同样满足规则②：add-one +3.6/+9.0/+1.7 三窗正；"
+        "⚠️ 其 LOO 三窗皆负（−0.3/−0.3/−1.2），证据互斥，单列一臂检验）",
+        "contrib_mult": {},
+        "panel_weights": {
+            "rsi_deep_oversold": 40,
+            "weekly_j_low": 20,
+            "rsi_bull_div": 20,
+            "macd_bottom_divergence": 20,
+            "leader_volume": 20,
+        },
+    },
+}
+
+# C5 候选数约束（预注册）：强档（≥60）占当日池 ≤15%、A 桶 ≤5%。
+# ⚠️ A 桶需要资金意图轴（capital_intent），离线产物没有 ⇒ 只评强档占比一半，
+#    A 桶如实标「离线不可算」。
+C5_STRONG_FRAC_MAX = 0.15
+
+
+def make_candidate_score(
+    contrib_mult: dict[str, float], panel_weights: dict[str, float]
+):
+    """候选打分（纯函数 trade→score，与 score_variants_study 变体机制兼容）。
+
+    - contrib 腿：默认按现行分值计入（multiplier 缺省 = 1）；``contrib_mult``
+      里的键按倍率缩放（0 = 归零/移除）。
+      ⚠️ 特例：**给了 panel_weights 且 contrib_mult 为空 dict** ⇒ 现行腿全部
+      不计（证据重构形态——P1/P2/P3 从零搭，不继承任何现行腿）。
+    - panel 腿：命中（True）即加对应整数权重（负权重 = 负向证据）；
+      unavailable（None）按不命中 = 0 分（不惩罚数据缺失，同 R22 口径）。
+    """
+
+    def score(trade: dict[str, Any]) -> int:
+        contrib = trade.get("factor_contrib") or {}
+        panel = trade.get("panel") or {}
+        total = 0.0
+        if contrib_mult or not panel_weights:
+            for k, v in contrib.items():
+                if (
+                    k in CONTRIB_LEG_KEYS
+                    and k not in svs._EVIDENCE_ONLY_CONTRIB
+                    and isinstance(v, (int, float))
+                ):
+                    total += float(v) * contrib_mult.get(k, 1.0)
+        for k, w in panel_weights.items():
+            if panel.get(k) is True:
+                total += w
+        return svs._clamp(total)
+
+    return score
+
+
+def c5_strong_frac(band_stats: dict[str, Any], n_trades: int) -> dict[str, Any]:
+    """C5 的可算一半：强档（≥60）占样本比例 ≤ 15%（A 桶离线不可算，如实标注）。"""
+    n_strong = (band_stats.get(">=60") or {}).get("n") or 0
+    frac = round(n_strong / n_trades, 4) if n_trades else None
+    return {
+        "strong_frac": frac,
+        "pass": (frac is not None and frac <= C5_STRONG_FRAC_MAX),
+        "a_bucket": "离线不可算（需资金意图轴；仅评强档占比一半）",
+    }
+
+
+def _universe_stats_of(trades: list[dict[str, Any]]) -> dict[str, Any]:
+    return {**srs.ret_stats(trades), "n_win": sum(1 for t in trades if t["ret"] > 0)}
+
+
+def eval_candidate(trades: list[dict[str, Any]], name: str, score_fn) -> dict[str, Any]:
+    """单候选单窗口：C1/C2/C3★（全样本天然基准）/C5 + 篮子指标。"""
+    rep = svs.evaluate_variant(trades, name, score_fn)
+    v0_basket = svs.basket_stats(trades, svs.v0_score, svs.TOP_FRAC)
+    vd = svs.judge(rep, v0_basket, _universe_stats_of(trades))
+    c5 = c5_strong_frac(rep["band_stats"], len(trades))
+    b = rep["basket_top20_by_variant"]
+    return {
+        "candidate": name,
+        "n_trades": len(trades),
+        "corr": rep["corr"],
+        "half_window": rep["half_window"],
+        "winner_top20_mean": rep["winner_top20_dist"].get("mean"),
+        "bottom80_mean": rep["bottom80_dist"].get("mean"),
+        "basket": b,
+        "basket_margin": vd.get("basket_margin"),
+        "universe_margin": vd.get("universe_margin"),
+        "C1": vd["C1_spearman_positive"],
+        "C2": vd["C2_winner_scores_higher"],
+        "C3_star": vd["C3_natural_vs_universe"],
+        "C3_star_wilson_overlap": vd.get("wilson_overlap_universe"),
+        "C5": c5,
+        "pass_all": bool(
+            vd["C1_spearman_positive"]
+            and vd["C2_winner_scores_higher"]
+            and vd["C3_natural_vs_universe"]
+            and c5["pass"]
+        ),
+    }
+
+
+def sensitivity_scan(
+    trades_by_window: dict[str, list[dict[str, Any]]],
+    name: str,
+    spec: dict[str, Any],
+) -> dict[str, Any]:
+    """入选方案每腿权重 ±50% 扰动（归零腿单侧恢复 50%），逐窗查 C3★ 是否翻转。
+
+    翻转（基线过 ⇒ 扰动后不过，或反向）即标「参数敏感」（R24 纪律第 3 条）。
+    判定对象 = C3★（margin > 全样本 margin；Wilson 重叠仅注记）。
+    """
+    perturbations: list[tuple[str, str, float]] = []  # (kind, leg, new_value)
+    for leg, mult in spec["contrib_mult"].items():
+        if mult == 0.0:
+            perturbations.append(("contrib", leg, 0.5))  # 归零腿恢复一半
+        else:
+            perturbations += [
+                ("contrib", leg, mult * 0.5),
+                ("contrib", leg, mult * 1.5),
+            ]
+    for leg, w in spec["panel_weights"].items():
+        perturbations += [("panel", leg, w * 0.5), ("panel", leg, w * 1.5)]
+
+    flips: list[dict[str, Any]] = []
+    n_checks = 0
+    # 先定基线（未扰动方案在每窗的 C3★）——翻转 = 扰动后与基线**不一致**；
+    # 基线本就不过的窗里扰动失败不算翻转（那是「本来就不行」，不是敏感）。
+    base_fn = make_candidate_score(spec["contrib_mult"], spec["panel_weights"])
+    base_c3: dict[str, bool] = {}
+    for label, trades in trades_by_window.items():
+        rep = svs.evaluate_variant(trades, name, base_fn)
+        vd = svs.judge(
+            rep,
+            svs.basket_stats(trades, svs.v0_score, svs.TOP_FRAC),
+            _universe_stats_of(trades),
+        )
+        base_c3[label] = bool(vd["C3_natural_vs_universe"])
+    for kind, leg, val in perturbations:
+        cm = dict(spec["contrib_mult"])
+        pw = dict(spec["panel_weights"])
+        if kind == "contrib":
+            cm[leg] = val
+        else:
+            pw[leg] = round(val, 2)
+        fn = make_candidate_score(cm, pw)
+        for label, trades in trades_by_window.items():
+            rep = svs.evaluate_variant(trades, name, fn)
+            vd = svs.judge(
+                rep,
+                svs.basket_stats(trades, svs.v0_score, svs.TOP_FRAC),
+                _universe_stats_of(trades),
+            )
+            n_checks += 1
+            if bool(vd["C3_natural_vs_universe"]) != base_c3[label]:
+                flips.append(
+                    {
+                        "leg": leg,
+                        "kind": kind,
+                        "perturbed_to": val,
+                        "window": label,
+                        "base_c3star": base_c3[label],
+                        "basket_margin": vd.get("basket_margin"),
+                        "universe_margin": vd.get("universe_margin"),
+                    }
+                )
+    return {
+        "candidate": name,
+        "n_perturbations": len(perturbations),
+        "n_checks": n_checks,
+        "base_c3star_by_window": base_c3,
+        "n_c3star_flip": len(flips),
+        "parameter_sensitive": bool(flips),
+        "flips": flips,
+    }
+
+
+def phase2_report(trades_by_window: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    """Phase 2 总报告：候选评估（逐窗）+ 灵敏度扫描 + 推荐名单。"""
+    candidates: dict[str, Any] = {}
+    for name, spec in PHASE2_CANDIDATES.items():
+        fn = make_candidate_score(spec["contrib_mult"], spec["panel_weights"])
+        per_window = {
+            label: eval_candidate(trades, name, fn)
+            for label, trades in trades_by_window.items()
+        }
+        sens = sensitivity_scan(trades_by_window, name, spec)
+        pass_all_windows = all(w["pass_all"] for w in per_window.values())
+        candidates[name] = {
+            "desc": spec["desc"],
+            "per_window": per_window,
+            "pass_all_windows": pass_all_windows,
+            "sensitivity": sens,
+            "recommended_for_phase3": bool(
+                pass_all_windows and not sens["parameter_sensitive"]
+            ),
+        }
+    return {
+        "r24_phase": "Phase 2（候选构造 + 灵敏度；调参只用主窗+跨窗，pre2019 终审前不许碰）",
+        "criteria": (
+            "C1 Spearman>0且半窗同正 / C2 赢家均分反超 / C3★ 篮子margin>全样本margin"
+            "（Wilson重叠仅注记）/ C5 强档占比≤15%（A桶离线不可算）"
+        ),
+        "windows": list(trades_by_window),
+        "c5_strong_frac_max": C5_STRONG_FRAC_MAX,
+        "candidates": candidates,
+        "recommended": [
+            n for n, c in candidates.items() if c["recommended_for_phase3"]
+        ],
+    }
+
+
+def print_phase2(rep: dict[str, Any]) -> None:
+    """stdout 中文摘要：候选表 + 灵敏度 + 推荐。"""
+    print("\n" + "=" * 78)
+    print("R24 Phase 2：候选打分方案评估（判据：C1/C2/C3★/C5，调参窗 = 主窗+跨窗）")
+    print("=" * 78)
+    print(
+        "⚠️ R11：量级不作数。⚠️ 纪律：pre2019 终审前不许碰（本表不含）；"
+        "判据只许预注册的；变体 ≤4。"
+    )
+    for name, c in rep["candidates"].items():
+        print(f"\n── {name}：{c['desc']}")
+        for label, w in c["per_window"].items():
+            b = w["basket"]
+            print(
+                f"  [{label}] C1{'✓' if w['C1'] else '✗'} C2{'✓' if w['C2'] else '✗'} "
+                f"C3★{'✓' if w['C3_star'] else '✗'}"
+                f"{'(Wilson重叠)' if w['C3_star_wilson_overlap'] else ''} "
+                f"C5{'✓' if w['C5']['pass'] else '✗'}(强档 {w['C5']['strong_frac']}) | "
+                f"Spearman={w['corr'].get('spearman')} | "
+                f"赢家均分 {w['winner_top20_mean']} vs {w['bottom80_mean']} | "
+                f"篮子 {b['win_rate'] * 100:.1f}%/{b['payoff_ratio']}/"
+                f"margin {w['basket_margin'] * 100:+.1f}pp vs 全样本 "
+                f"{w['universe_margin'] * 100:+.1f}pp"
+            )
+        s = c["sensitivity"]
+        print(
+            f"  灵敏度：{s['n_perturbations']} 扰动 × {len(rep['windows'])} 窗，"
+            f"C3★ 翻转 {s['n_c3star_flip']} 次 ⇒ "
+            f"{'⚠️ 参数敏感' if s['parameter_sensitive'] else '稳'}"
+        )
+        for f in s["flips"][:6]:
+            print(
+                f"    翻转：{f['leg']}({f['kind']})→{f['perturbed_to']} "
+                f"[{f['window']}] margin {f['basket_margin'] * 100:+.1f}pp"
+                f" vs {f['universe_margin'] * 100:+.1f}pp"
+            )
+        print(
+            f"  ⇒ {'✅ 推荐进 Phase 3（pre2019 终审）' if c['recommended_for_phase3'] else '❌ 不推荐'}"
+        )
+    print(f"\n推荐名单：{rep['recommended'] or '（空——全不可行，如实上报）'}")
+
 
 # ---------------------------------------------------------------------------
 # 腿命中判定（纯函数：只读 factor_contrib / panel）
@@ -270,7 +583,13 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--ablation",
         action="store_true",
-        help="逐腿边际分析模式（当前唯一模式）：读 trades JSON 离线求值，零回测",
+        help="逐腿边际分析模式（Phase 1）：读 trades JSON 离线求值，零回测",
+    )
+    ap.add_argument(
+        "--phase2",
+        action="store_true",
+        help="候选方案评估 + 灵敏度扫描（Phase 2）：只用主窗+跨窗"
+        "（pre2019 输入**硬拒绝**——终审前不许碰，纪律代码化）",
     )
     ap.add_argument(
         "--from-trades",
@@ -287,10 +606,14 @@ def _build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def _load_trades(path: str) -> list[dict[str, Any]]:
+    stored = json.loads(Path(path).read_text(encoding="utf-8"))
+    return stored.get("trades") or []
+
+
 def _ablation_one(path: str, tag: str = "") -> dict[str, Any]:
     """离线跑单份落盘 JSON 的 ablation → 落 <文件>.ablation.json，返回报告。"""
-    stored = json.loads(Path(path).read_text(encoding="utf-8"))
-    trades = stored.get("trades") or []
+    trades = _load_trades(path)
     if not trades:
         print(f"⛔ 复用文件无 trades: {path}", file=sys.stderr)
         return {}
@@ -304,11 +627,51 @@ def _ablation_one(path: str, tag: str = "") -> dict[str, Any]:
     return rep
 
 
+def _phase2_main(paths: list[str]) -> int:
+    """Phase 2 驱动：两窗离线评估（pre2019 硬拒绝）→ 落盘 + stdout。"""
+    trades_by_window: dict[str, list[dict[str, Any]]] = {}
+    for p in paths:
+        if "pre2019" in Path(p).name:
+            print(
+                f"⛔ 反过拟合纪律：Phase 2 调参不许碰 pre2019（{p}）——"
+                "它是 untouched 终审窗（R24 Phase 3）",
+                file=sys.stderr,
+            )
+            return 2
+        trades = _load_trades(p)
+        if not trades:
+            print(f"⛔ 复用文件无 trades: {p}", file=sys.stderr)
+            return 1
+        label = (
+            "主窗"
+            if "n400" in Path(p).name
+            else ("跨窗" if "cw" in Path(p).name else Path(p).stem)
+        )
+        trades_by_window[label] = trades
+        print(f"[INFO] 复用 {p}（{len(trades)} 笔，标签={label}）", file=sys.stderr)
+    rep = phase2_report(trades_by_window)
+    out = (
+        Path("artifacts/logs/score_variants_study")
+        / f"phase2_{'_'.join(sorted(trades_by_window))}.json"
+    )
+    out.parent.mkdir(parents=True, exist_ok=True)
+    bf.write_json_stream(out, rep, big=False)
+    print(f"[OK] 写出 {out}")
+    print_phase2(rep)
+    return 0
+
+
 def main(argv: Optional[list] = None) -> int:
     ap = _build_parser()
     args = ap.parse_args(argv)
+    if args.phase2:
+        if not args.from_trades:
+            ap.error("--phase2 需要 --from-trades <主窗json> <跨窗json>")
+        return _phase2_main(args.from_trades)
     if not args.ablation or not args.from_trades:
-        ap.error("本工具当前唯一模式：--ablation --from-trades <json...>")
+        ap.error(
+            "本工具两个模式：--ablation（Phase 1）/ --phase2（Phase 2），均需 --from-trades"
+        )
     reps = [_ablation_one(f, args.tag) for f in args.from_trades]
     return 0 if any(reps) else 1
 

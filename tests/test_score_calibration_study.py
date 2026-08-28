@@ -235,3 +235,138 @@ class TestCliAblation:
         self._write(f, [])
         assert scs.main(["--ablation", "--from-trades", str(f)]) == 1
         assert not f.with_suffix(".ablation.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# Phase 2：候选方案 / 灵敏度 / C5 / pre2019 硬拒绝
+# ---------------------------------------------------------------------------
+
+
+class TestPhase2Candidates:
+    def test_p0_is_v0_minus_floor_and_neg_legs(self):
+        """P0 手算：V0_raw − j_low(24) − 5 条 contrib 负腿贡献（含 macd_top_div −8 变 +8）。"""
+        contrib = {
+            "j_low": 24,
+            "bbi_above": 5,  # 保留腿
+            "volume_contraction": 15,  # 负腿归零
+            "relative_strength_strong": 15,  # 负腿归零
+            "b1_ignition": 8,  # 负腿归零
+            "ignition": 4,  # 负腿归零
+            "macd_top_divergence": -8,  # 负腿归零（移除 −8 ⇒ +8 回加）
+            "macd_bottom_divergence": 8,  # 保留腿
+        }
+        t = _trade(contrib=contrib, panel={})
+        v0 = svs.v0_score(t)  # 24+5+15+15+8+4−8+8 = 71
+        assert v0 == 71
+        p0 = scs.make_candidate_score(
+            scs.PHASE2_CANDIDATES["P0_min_change"]["contrib_mult"],
+            scs.PHASE2_CANDIDATES["P0_min_change"]["panel_weights"],
+        )
+        # P0 = 5+8 = 13（只剩 bbi_above + macd_bottom_divergence）
+        assert p0(t) == 13
+
+    def test_p1_rebuild_ignores_contrib(self):
+        """P1：contrib 全归零（即使 V0 分项很高），只算 panel 正向腿。"""
+        t = _trade(
+            contrib={"j_low": 24, "leader_volume": 6},
+            panel={"rsi_deep_oversold": True, "weekly_j_low": True},
+        )
+        p1 = scs.make_candidate_score(
+            scs.PHASE2_CANDIDATES["P1_rebuild"]["contrib_mult"],
+            scs.PHASE2_CANDIDATES["P1_rebuild"]["panel_weights"],
+        )
+        assert p1(t) == 60  # 40 + 20，contrib 不计
+
+    def test_p2_negative_legs(self):
+        t = _trade(
+            panel={
+                "rsi_deep_oversold": True,  # +40
+                "rsi_strong": True,  # −5
+                "ignition": True,  # −5
+                "b1_ignition": None,  # unavailable = 0
+            }
+        )
+        p2 = scs.make_candidate_score(
+            scs.PHASE2_CANDIDATES["P2_rebuild_neg"]["contrib_mult"],
+            scs.PHASE2_CANDIDATES["P2_rebuild_neg"]["panel_weights"],
+        )
+        assert p2(t) == 30
+
+    def test_p3_adds_leader_volume(self):
+        p3 = scs.make_candidate_score(
+            scs.PHASE2_CANDIDATES["P3_rebuild_leader"]["contrib_mult"],
+            scs.PHASE2_CANDIDATES["P3_rebuild_leader"]["panel_weights"],
+        )
+        assert p3(_trade(panel={"leader_volume": True})) == 20
+        assert (
+            p3(_trade(panel={"rsi_deep_oversold": True, "leader_volume": True})) == 60
+        )
+
+    def test_candidate_count_and_simple_int_weights(self):
+        """纪律：候选 ≤4；panel 权重全是简单整数。"""
+        assert len(scs.PHASE2_CANDIDATES) <= 4
+        for spec in scs.PHASE2_CANDIDATES.values():
+            for w in spec["panel_weights"].values():
+                assert isinstance(w, int)
+
+
+class TestPhase2C5:
+    def test_strong_frac(self):
+        band = {">=60": {"n": 100}, "<30": {"n": 900}}
+        c5 = scs.c5_strong_frac(band, 1000)
+        assert c5["strong_frac"] == pytest.approx(0.10)
+        assert c5["pass"] is True
+        assert c5["a_bucket"]  # A 桶不可算如实标注
+        band2 = {">=60": {"n": 200}, "<30": {"n": 800}}
+        assert scs.c5_strong_frac(band2, 1000)["pass"] is False
+
+
+class TestPhase2Sensitivity:
+    def _trending_trades(self, n=80):
+        """合成样本：深水 RSI 命中的票整体更强，但两组都带亏单
+        （margin 可定义——篮子无亏单时 payoff=None ⇒ margin=None，m2 口径）。"""
+        trades = []
+        for i in range(n):
+            hit = i % 2 == 0
+            if hit:
+                ret = 0.05 if i % 4 == 0 else -0.01  # 命中组 3 胜 1 亏
+            else:
+                ret = 0.02 if i % 8 == 1 else -0.02  # 未中组 1 胜 3 亏
+            trades.append(
+                _trade(
+                    panel={"rsi_deep_oversold": hit},
+                    ret=ret,
+                    entry_date=f"2026-01-{i % 28 + 1:02d}",
+                )
+            )
+        return trades
+
+    def test_stable_candidate_not_flagged(self):
+        trades = self._trending_trades()
+        windows = {"w1": trades}
+        spec = scs.PHASE2_CANDIDATES["P1_rebuild"]
+        s = scs.sensitivity_scan(windows, "P1_rebuild", spec)
+        # 强信号下 ±50% 扰动不应翻转 C3★
+        assert s["n_perturbations"] == 8  # 4 腿 × 2 向
+        assert s["parameter_sensitive"] is False
+
+    def test_zero_mult_leg_restored_one_sided(self):
+        """P0 的归零腿扰动 = 单侧恢复 0.5（×0.5 of 0 还是 0，无意义）。"""
+        windows = {"w1": self._trending_trades()}
+        spec = scs.PHASE2_CANDIDATES["P0_min_change"]
+        s = scs.sensitivity_scan(windows, "P0_min_change", spec)
+        # 6 条归零腿 × 单侧恢复 = 6 次扰动 × 1 窗 = 6 次检查
+        assert s["n_perturbations"] == 6
+        assert s["n_checks"] == 6
+
+
+class TestPhase2Pre2019Guard:
+    def test_pre2019_rejected(self, tmp_path):
+        f = tmp_path / "x_pre2019.json"
+        f.write_text(json.dumps({"trades": [{"ret": 0.1}]}), encoding="utf-8")
+        assert scs._phase2_main([str(f)]) == 2
+
+    def test_empty_trades_rejected(self, tmp_path):
+        f = tmp_path / "x_n400.json"
+        f.write_text(json.dumps({"trades": []}), encoding="utf-8")
+        assert scs._phase2_main([str(f)]) == 1
