@@ -1,15 +1,19 @@
 # R24 · 1800 打分体系严谨重建（score_calibration_study，预注册）
 
 > **家族**：选股方向（打分重构第二轮——R22 翻车后的「最严谨路线」重来）　|
-> **证据等级**：L0（预注册落档 + Phase 0 基建；跑数未开始）　|
-> **状态**：🔄 预注册进行中（2026-08-28 owner 拍板「走最严谨的路线重新构建研究」；
-> Phase 0 基建已完成，Phase 1-3 跑数待生产机执行）
+> **证据等级**：L3（三窗预注册终审；vipdoc 幸存者宇宙）　|
+> **状态**：❌ **证伪（2026-08-28，Phase 3 终审）**——P1/P2/P3 三候选在 pre2019
+> untouched 窗 C1 全部半窗翻转（判别 edge 属近 regime 富集，与 R22 同死因）；
+> 按预注册退路退回「分位数分层」止血方案。Phase 4（live 落地）不启动
 > **依赖**：上游：R19（技术分不预测涨幅）R20（逐腿 lift 证据）R22（V2/V3 pre2019
-> 翻车——本研究的直接起因）R23（共振 99.2%≈无过滤——命中率>90% 无区分度的判例）
-> ｜判据：R12（预注册纪律）｜口径：R11（量级不作数）R14（幸存者宇宙）R3（半窗纪律）
+> 翻车——本研究的直接起因，终审同点翻车）R23（共振 99.2%≈无过滤——命中率>90%
+> 无区分度的判例）｜判据：R12（预注册纪律）｜口径：R11（量级不作数）R14
+> （幸存者宇宙）R3（半窗纪律）
 > 索引与主图见 [`README.md`](README.md)。脚本
-> `research/score_calibration_study.py`（逐腿 ablation，离线纯函数）、
-> `research/score_variants_study.py`（判据层第四列 C3=全样本天然基准）。
+> `research/score_calibration_study.py`（ablation + Phase 2/3）、
+> `research/score_variants_study.py`（判据层 C3★=全样本天然基准）。
+> 产物：`artifacts/logs/score_variants_study/*.ablation.json`（Phase 1）、
+> `phase2_主窗_跨窗.json`（Phase 2）、`phase3_pre2019.json`（Phase 3 终审）。
 
 ## 主题
 
@@ -24,15 +28,52 @@ pre2019 untouched 窗终审一票否决。
 
 ## 结论
 
-**尚无结论——预注册进行中。** Phase 0（基建）已落地：判据层加全样本
-margin 基准列（`C3_natural_vs_universe`，与既有三列 C3 并列互不覆盖）、
-逐腿 ablation 工具（池内命中率 / add-one / LOO margin，离线纯函数零回测）、
-本预注册文档落档。Phase 1-3（生产机跑数：逐腿证据表 → ≤4 个候选方案 →
-pre2019 终审）未执行，任何结论在终审前都不得进 live。
+**❌ 证伪（Phase 3 终审，2026-08-28）。** Phase 1 逐腿证据查明结构（j_low
+100% 命中 +24 保底 = 地板效应主因；rsi_deep_oversold/weekly_j_low/rsi_bull_div/
+macd_bottom_divergence add-one margin 三窗一致正；11 条腿三窗一致负）；
+Phase 2 构造的 4 个候选里 P1/P2/P3 在主窗+跨窗四判据（C1/C2/C3★/C5）全过、
+±50% 灵敏度零翻转，P0「只去地板/去负腿」两窗全灭（证明修权重无效、必须换
+骨架）；**但 Phase 3 终审三候选在 pre2019 全部 C1 半窗翻转**（P1 −0.018/+0.090、
+P2 −0.015/+0.093、P3 −0.009/+0.082——2010-2016 段为负），终审线一票否决。
+C3★（篮子 margin 领先全样本）在 pre2019 其实保持（+5.7~+8.6pp vs +2.1pp），
+但量级缩到近窗的 1/3 且相关性方向不稳——判别 edge 属近 regime 富集，
+**与 R22 同一死因、同一窗口段（2010-2016）**，预注册纪律判负。
+按既定退路退回**分位数分层**止血方案（强=当日池 top15%，治标解决偏高/分层多）；
+Phase 4（权重回流 live）不启动，任何方案不进 live。
 
 ---
 
 ## 证据与过程
+
+### Phase 3 终审（2026-08-28，`phase3_pre2019.json`，14068 笔）
+
+| 方案 | C1 | C2 | C3★ | C5 | 篮子胜率/盈亏比/margin vs 全样本 | 判定 |
+|---|---|---|---|---|---|---|
+| P1_rebuild | ✗ 翻（−0.018/+0.090） | ✓ | ✓ | ✓ 2.7% | 39.4%/1.97/+5.7pp vs +2.1pp | ❌ |
+| P2_rebuild_neg | ✗ 翻（−0.015/+0.093） | ✓ | ✓ | ✓ 2.3% | 41.1%/1.99/+7.7pp vs +2.1pp | ❌ |
+| P3_rebuild_leader | ✗ 翻（−0.009/+0.082） | ✓ | ✓ | ✓ 4.9% | 40.9%/2.09/+8.6pp vs +2.1pp | ❌ |
+
+三窗并排（篮子 margin pp vs 全样本 pp / Spearman）：
+
+| 方案 | 主窗 | 跨窗 | pre2019 |
+|---|---|---|---|
+| P1 | +17.2/+6.9, 0.091 | +27.2/+14.0, 0.136 | +5.7/+2.1, 0.037（半窗翻） |
+| P2 | +17.5/+6.9, 0.093 | +27.5/+14.0, 0.138 | +7.7/+2.1, 0.040（半窗翻） |
+| P3 | +19.4/+6.9, 0.088 | +29.2/+14.0, 0.154 | +8.6/+2.1, 0.034（半窗翻） |
+
+### Phase 1-2（2026-08-28，证据留痕）
+
+- **Phase 1（三窗 ablation）**：j_low 池内命中率 100%（⚠️ 无区分度，+24 保底
+  = 地板效应主因）；add-one margin 三窗一致正 = rsi_deep_oversold
+  （+33/+37/+6.3）、weekly_j_low（+8/+9.8/+2.5）、macd_bottom_divergence
+  （+2.1/+3.2/+3.4）、rsi_bull_div（+3.0/+3.1/+6.9）；三窗一致负 =
+  rsi_strong/b1_ignition/volume_contraction/relative_strength_strong/
+  macd_top_divergence/ignition；zhixing 系/pullback_shrink/platform_pullback_b1
+  等 pre2019 变号（不用）。
+- **Phase 2（调参只用主窗+跨窗，pre2019 硬拒绝代码化）**：P0（最小改动：
+  j_low 归零 + 负腿归零）两窗 C1/C2/C3★ 全灭——**只去地板救不了现行分**；
+  P1/P2/P3 四判据全过、±50% 灵敏度零翻转进终审；P3（+leader_volume 20）
+  最强（margin +19.4/+29.2pp）但终审同样翻车。
 
 ### 要解决的真问题（owner 原话）
 

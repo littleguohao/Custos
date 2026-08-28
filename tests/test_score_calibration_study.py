@@ -370,3 +370,97 @@ class TestPhase2Pre2019Guard:
         f = tmp_path / "x_n400.json"
         f.write_text(json.dumps({"trades": []}), encoding="utf-8")
         assert scs._phase2_main([str(f)]) == 1
+
+
+# ---------------------------------------------------------------------------
+# Phase 3：pre2019 untouched 终审
+# ---------------------------------------------------------------------------
+
+
+class TestPhase3:
+    def test_finalist_names(self):
+        """终审名单 = Phase 2 推荐的三方案（P0 已淘汰，不在列）。"""
+        assert scs.PHASE3_FINALIST_NAMES == (
+            "P1_rebuild",
+            "P2_rebuild_neg",
+            "P3_rebuild_leader",
+        )
+        assert "P0_min_change" not in scs.PHASE3_FINALIST_NAMES
+
+    def test_terminal_verdict_requires_c1_and_c3star(self, monkeypatch):
+        """终审判定 = C1 且 C3★（一票否决；C2/C5 不进终审线，按预注册）。"""
+        fake_eval = {
+            "C1": True,
+            "C2": False,  # C2 不过也不影响终审线
+            "C3_star": True,
+            "C5": {"pass": False, "strong_frac": 0.99},
+            "corr": {"spearman": 0.1},
+            "half_window": {"consistent": True, "first_half": {"spearman": 0.1}},
+            "winner_top20_mean": 50,
+            "bottom80_mean": 40,
+            "basket": {"win_rate": 0.5, "payoff_ratio": 2.0},
+            "basket_margin": 0.2,
+            "universe_margin": 0.1,
+        }
+        monkeypatch.setattr(
+            scs, "eval_candidate", lambda trades, name, fn: dict(fake_eval)
+        )
+        rep = scs.phase3_report([{"ret": 0.1}], "pre2019")
+        assert rep["verdict"] == "通过"
+        assert rep["passed"] == list(scs.PHASE3_FINALIST_NAMES)
+        # C1 翻转 ⇒ 一票否决
+        monkeypatch.setattr(
+            scs,
+            "eval_candidate",
+            lambda trades, name, fn: {**fake_eval, "C1": False},
+        )
+        rep2 = scs.phase3_report([{"ret": 0.1}], "pre2019")
+        assert rep2["verdict"] == "证伪"
+        assert rep2["passed"] == []
+        assert "分位数分层" in rep2["fallback"]
+        # C3★ 失线 ⇒ 同样一票否决
+        monkeypatch.setattr(
+            scs,
+            "eval_candidate",
+            lambda trades, name, fn: {**fake_eval, "C3_star": False},
+        )
+        assert scs.phase3_report([{"ret": 0.1}], "pre2019")["verdict"] == "证伪"
+
+    def test_phase3_guard_only_accepts_pre2019(self, tmp_path):
+        good = tmp_path / "x_pre2019.json"
+        good.write_text(json.dumps({"trades": []}), encoding="utf-8")
+        # 空 trades 报 1（数据问题），但不是守卫的 2
+        assert scs._phase3_main([str(good)]) == 1
+        bad = tmp_path / "x_n400.json"
+        bad.write_text(json.dumps({"trades": [{"ret": 0.1}]}), encoding="utf-8")
+        assert scs._phase3_main([str(bad)]) == 2  # 非终审窗 ⇒ 硬拒绝
+        assert scs._phase3_main([str(good), str(good)]) == 2  # 多文件 ⇒ 拒绝
+
+    def test_phase3_real_eval_smoke(self):
+        """真实 eval 链路冒烟：合成强信号样本，三方案终审应通过且 verdict 字段齐全。
+
+        效应量要够大（n=200、命中组 75% 胜率）：样本小/效应弱时 C3★ 的
+        Wilson 不重叠条件不过——这不是 bug，是判据设计（显著性守门）。
+        """
+        trades = []
+        for i in range(200):
+            hit = i % 2 == 0
+            if hit:
+                ret = 0.05 if i % 8 in (0, 2, 4) else -0.01  # 命中组 3 胜 1 亏
+            else:
+                ret = 0.02 if i % 8 == 1 else -0.02  # 未中组 1 胜 3 亏
+            trades.append(
+                _trade(
+                    panel={"rsi_deep_oversold": hit},
+                    ret=ret,
+                    # 两段时间 101/99（C1 要求前后半窗都可评估且同正；
+                    # 中位切分点须落在前段日期上，偶数对半会被后段首日吞掉）
+                    entry_date="2026-01-05" if i < 101 else "2026-06-01",
+                )
+            )
+        rep = scs.phase3_report(trades, "pre2019")
+        assert rep["verdict"] == "通过"
+        for name in scs.PHASE3_FINALIST_NAMES:
+            c = rep["candidates"][name]
+            assert c["terminal_pass"] is True
+            assert c["eval"]["C5"]["strong_frac"] is not None

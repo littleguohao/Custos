@@ -165,6 +165,9 @@ PHASE2_CANDIDATES: dict[str, dict[str, Any]] = {
 #    A 桶如实标「离线不可算」。
 C5_STRONG_FRAC_MAX = 0.15
 
+# Phase 3 终审名单（Phase 2 实跑推荐，2026-08-28 v0.132；P0 两窗全灭已淘汰）
+PHASE3_FINALIST_NAMES = ("P1_rebuild", "P2_rebuild_neg", "P3_rebuild_leader")
+
 
 def make_candidate_score(
     contrib_mult: dict[str, float], panel_weights: dict[str, float]
@@ -592,6 +595,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "（pre2019 输入**硬拒绝**——终审前不许碰，纪律代码化）",
     )
     ap.add_argument(
+        "--phase3",
+        action="store_true",
+        help="pre2019 untouched 终审（Phase 3）：**只接受** pre2019 输入——"
+        "这是终审窗第一次也是唯一一次允许读它（R24 预注册终审线："
+        "C1 不翻转 且 C3★ 保持 ⇒ 通过进 Phase 4；翻转 ⇒ 如实判负）",
+    )
+    ap.add_argument(
         "--from-trades",
         nargs="+",
         default=[],
@@ -661,6 +671,137 @@ def _phase2_main(paths: list[str]) -> int:
     return 0
 
 
+def phase3_report(
+    trades: list[dict[str, Any]],
+    window_label: str = "pre2019",
+    phase2_rep: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Phase 3 终审：P1/P2/P3 在 untouched 窗的 C1/C2/C3★/C5 + 终审判定。
+
+    终审线（预注册，一票否决）：**C1 不翻转 且 C3★ 保持** ⇒ 通过进 Phase 4；
+    翻转 ⇒ 如实判负（退回「分位数分层」止血方案）。
+    ``phase2_rep``（可选）：Phase 2 落盘报告，用于三窗并排对照（不再重算）。
+    """
+    candidates: dict[str, Any] = {}
+    for name in PHASE3_FINALIST_NAMES:
+        spec = PHASE2_CANDIDATES[name]
+        fn = make_candidate_score(spec["contrib_mult"], spec["panel_weights"])
+        ev = eval_candidate(trades, name, fn)
+        terminal_pass = bool(ev["C1"] and ev["C3_star"])
+        candidates[name] = {
+            "desc": spec["desc"],
+            "eval": ev,
+            "terminal_pass": terminal_pass,
+        }
+    passed = [n for n, c in candidates.items() if c["terminal_pass"]]
+    return {
+        "r24_phase": (
+            "Phase 3（pre2019 untouched 终审——终审窗第一次也是唯一一次读取；"
+            "终审线：C1 不翻转 且 C3★ 保持，一票否决）"
+        ),
+        "window": window_label,
+        "n_trades": len(trades),
+        "candidates": candidates,
+        "passed": passed,
+        "verdict": "通过" if passed else "证伪",
+        "fallback": None
+        if passed
+        else "退回「分位数分层」止血方案（强=当日池 top15%，治标；R24 预注册既定退路）",
+        "phase2_reference": phase2_rep,
+    }
+
+
+def print_phase3(rep: dict[str, Any]) -> None:
+    """stdout 中文终审表：三方案终审判定 +（有 Phase 2 参照时）三窗并排。"""
+    print("\n" + "=" * 78)
+    print(f"R24 Phase 3：pre2019 untouched 终审（{rep['n_trades']} 笔）")
+    print("=" * 78)
+    print(
+        "⚠️ 终审线（预注册）：C1 不翻转 且 C3★（篮子 margin > 全样本 margin）保持，"
+        "一票否决。⚠️ R11：量级不作数。"
+    )
+    print("\n方案 | C1 | C2 | C3★ | C5 | 篮子胜率/盈亏比/margin vs 全样本 | 终审判定")
+    for name, c in rep["candidates"].items():
+        ev = c["eval"]
+        b = ev["basket"]
+        print(
+            f"  {name:<20} {'✓' if ev['C1'] else '✗'}   "
+            f"{'✓' if ev['C2'] else '✗'}   "
+            f"{'✓' if ev['C3_star'] else '✗'}    "
+            f"{'✓' if ev['C5']['pass'] else '✗'}   "
+            f"{b['win_rate'] * 100:.1f}%/{b['payoff_ratio']}/"
+            f"{ev['basket_margin'] * 100:+.1f}pp vs {ev['universe_margin'] * 100:+.1f}pp | "
+            f"{'✅ 通过' if c['terminal_pass'] else '❌ 不通过'}"
+        )
+        hw = ev["half_window"]
+        h1 = (hw.get("first_half") or {}).get("spearman")
+        h2 = (hw.get("second_half") or {}).get("spearman")
+        print(
+            f"    Spearman={ev['corr'].get('spearman')}（半窗 {h1}/{h2}"
+            f"{'' if hw.get('consistent') else ' ⚠️翻'}），"
+            f"赢家均分 {ev['winner_top20_mean']} vs {ev['bottom80_mean']}，"
+            f"强档占比 {ev['C5']['strong_frac']}"
+        )
+    p2 = rep.get("phase2_reference")
+    if p2:
+        print("\n── 三窗并排（篮子 margin pp vs 全样本 margin pp / Spearman）")
+        for name in PHASE3_FINALIST_NAMES:
+            cells = []
+            for label in ("主窗", "跨窗"):
+                w = (p2["candidates"][name]["per_window"] or {}).get(label)
+                if w:
+                    cells.append(
+                        f"[{label}] {w['basket_margin'] * 100:+.1f}/"
+                        f"{w['universe_margin'] * 100:+.1f} "
+                        f"Sp={w['corr'].get('spearman')}"
+                    )
+            ev = rep["candidates"][name]["eval"]
+            cells.append(
+                f"[pre2019] {ev['basket_margin'] * 100:+.1f}/"
+                f"{ev['universe_margin'] * 100:+.1f} Sp={ev['corr'].get('spearman')}"
+            )
+            print(f"  {name:<20} " + " | ".join(cells))
+    print(
+        f"\n终审结论：{rep['verdict']}"
+        + (f"——通过方案 {rep['passed']}" if rep["passed"] else f"——{rep['fallback']}")
+    )
+
+
+def _phase3_main(paths: list[str]) -> int:
+    """Phase 3 驱动：**只接受** pre2019 输入（与 Phase 2 硬拒绝互为镜像）。"""
+    if len(paths) != 1:
+        print("⛔ Phase 3 只跑 untouched 终审窗一个输入", file=sys.stderr)
+        return 2
+    p = paths[0]
+    if "pre2019" not in Path(p).name:
+        print(
+            f"⛔ Phase 3 只接受 pre2019 untouched 窗输入（{p}）；"
+            "主窗/跨窗请用 --phase2",
+            file=sys.stderr,
+        )
+        return 2
+    trades = _load_trades(p)
+    if not trades:
+        print(f"⛔ 复用文件无 trades: {p}", file=sys.stderr)
+        return 1
+    print(
+        f"[INFO] 终审窗 {p}（{len(trades)} 笔）——第一次也是唯一一次读取",
+        file=sys.stderr,
+    )
+    # Phase 2 落盘参照（有则并排三窗；没有不拦着终审）
+    p2_path = Path("artifacts/logs/score_variants_study/phase2_主窗_跨窗.json")
+    p2_rep = (
+        json.loads(p2_path.read_text(encoding="utf-8")) if p2_path.is_file() else None
+    )
+    rep = phase3_report(trades, "pre2019", p2_rep)
+    out = Path("artifacts/logs/score_variants_study/phase3_pre2019.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    bf.write_json_stream(out, rep, big=False)
+    print(f"[OK] 写出 {out}")
+    print_phase3(rep)
+    return 0  # 证伪也是结论（退出码不区分通过/证伪，verdict 见 JSON/stdout）
+
+
 def main(argv: Optional[list] = None) -> int:
     ap = _build_parser()
     args = ap.parse_args(argv)
@@ -668,9 +809,13 @@ def main(argv: Optional[list] = None) -> int:
         if not args.from_trades:
             ap.error("--phase2 需要 --from-trades <主窗json> <跨窗json>")
         return _phase2_main(args.from_trades)
+    if args.phase3:
+        if not args.from_trades:
+            ap.error("--phase3 需要 --from-trades <pre2019 json>")
+        return _phase3_main(args.from_trades)
     if not args.ablation or not args.from_trades:
         ap.error(
-            "本工具两个模式：--ablation（Phase 1）/ --phase2（Phase 2），均需 --from-trades"
+            "本工具三个模式：--ablation（Phase 1）/ --phase2（Phase 2）/ --phase3（Phase 3 终审），均需 --from-trades"
         )
     reps = [_ablation_one(f, args.tag) for f in args.from_trades]
     return 0 if any(reps) else 1
