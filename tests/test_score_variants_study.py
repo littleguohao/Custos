@@ -254,3 +254,129 @@ class TestRelaxedC3AndFromTrades:
         assert svs.main(["--from-trades", str(f), "--out", str(out)]) == 0
         rep = _json.loads(out.read_text(encoding="utf-8"))
         assert "candidate_relaxed" in rep["verdicts"]["V2"]
+
+
+class TestC3NaturalMargin:
+    """v0.128：天然基准 margin 判据（owner：「和天然胜率盈亏比比较」）。"""
+
+    def test_margin_matches_m2(self):
+        """margin 公式与 m2_stop_sweep 逐位一致（import 同一实现，不重写）。"""
+        from custos.research.m2_stop_sweep import _breakeven_wr, _margin
+
+        basket = {"win_rate": 0.47, "payoff_ratio": 2.428}
+        assert svs.basket_margin(basket) == _margin({"win": 0.47, "payoff": 2.428})
+        # 手算：0.47 − 1/(1+2.428)
+        assert svs.basket_margin(basket) == pytest.approx(0.47 - 1 / 3.428, abs=1e-9)
+        assert _breakeven_wr(2.428) == pytest.approx(1 / 3.428)
+        # 缺失/非正盈亏比 ⇒ None（m2 口径）
+        assert svs.basket_margin({"win_rate": 0.5, "payoff_ratio": None}) is None
+        assert svs.basket_margin({"win_rate": 0.5, "payoff_ratio": 0}) is None
+
+    def test_c3_natural_pass_and_fail(self):
+        rep = {
+            "corr": {"spearman": 0.1},
+            "half_window": {"consistent": True, "first_half": {"spearman": 0.08}},
+            "winner_top20_dist": {"mean": 50},
+            "bottom80_dist": {"mean": 40},
+            # 变体篮子：胜率 47%、盈亏比 2.428 ⇒ margin 0.47−0.292=+0.178
+            "basket_top20_by_variant": {
+                "win_rate": 0.47,
+                "payoff_ratio": 2.428,
+                "n": 1000,
+                "n_win": 470,
+            },
+        }
+        # V0 篮子：27.2%/2.814 ⇒ margin 0.272−0.262=+0.010 ⇒ 变体 margin 更大 ⇒ 过
+        v0 = {"win_rate": 0.272, "payoff_ratio": 2.814, "n": 1000, "n_win": 272}
+        vd = svs.judge(rep, v0)
+        assert vd["C3_natural_margin"] is True
+        assert vd["candidate_natural"] is True
+        assert vd["basket_margin"] == pytest.approx(0.178, abs=1e-3)
+        assert vd["v0_basket_margin"] == pytest.approx(0.010, abs=1e-3)
+        # V0 换成高 margin（胜率 50%/盈亏比 1.0 ⇒ margin 0.0；用 50%/3.0 ⇒ +0.25）
+        v0_strong = {"win_rate": 0.50, "payoff_ratio": 3.0, "n": 1000, "n_win": 500}
+        vd2 = svs.judge(rep, v0_strong)
+        assert vd2["C3_natural_margin"] is False
+        assert vd2["candidate_natural"] is False
+
+    def test_three_c3_coexist_independent(self):
+        """三个 C3 口径并列、互不覆盖：构造只过 margin 不过预注册的用例。"""
+        rep = {
+            "corr": {"spearman": 0.1},
+            "half_window": {"consistent": True, "first_half": {"spearman": 0.08}},
+            "winner_top20_dist": {"mean": 50},
+            "bottom80_dist": {"mean": 40},
+            # 胜率升、盈亏比 2.428 < V0 的 2.814 但 ≥2.4：预注册✗ 放宽✓ margin✓
+            "basket_top20_by_variant": {
+                "win_rate": 0.47,
+                "payoff_ratio": 2.428,
+                "n": 1000,
+                "n_win": 470,
+            },
+        }
+        v0 = {"win_rate": 0.272, "payoff_ratio": 2.814, "n": 1000, "n_win": 272}
+        vd = svs.judge(rep, v0)
+        assert vd["C3_basket_wr_up_payoff_kept"] is False  # 预注册：盈亏比 < V0
+        assert vd["C3_relaxed_wr_up_payoff_floor"] is True  # 放宽：≥2.4
+        assert vd["C3_natural_margin"] is True  # 天然基准
+        assert vd["candidate"] is False
+        assert vd["candidate_relaxed"] is True
+        assert vd["candidate_natural"] is True
+
+
+class TestWilsonAnnotation:
+    def test_interval_math(self):
+        lo, hi = svs.wilson_wr_interval(470, 1000)
+        assert lo == pytest.approx(0.4394, abs=1e-3)
+        assert hi == pytest.approx(0.5007, abs=1e-3)
+        assert svs.wilson_wr_interval(0, 0) == (None, None)
+
+    def test_overlap_flag(self):
+        """n 足够大时 47% vs 27% 不重叠；极小样本重叠。"""
+        rep_big = {
+            "corr": {"spearman": 0.1},
+            "half_window": {"consistent": True, "first_half": {"spearman": 0.08}},
+            "winner_top20_dist": {"mean": 50},
+            "bottom80_dist": {"mean": 40},
+            "basket_top20_by_variant": {
+                "win_rate": 0.47,
+                "payoff_ratio": 2.4,
+                "n": 3000,
+                "n_win": 1410,
+            },
+        }
+        v0_big = {"win_rate": 0.272, "payoff_ratio": 2.8, "n": 3000, "n_win": 816}
+        assert svs.judge(rep_big, v0_big)["wilson_overlap"] is False
+        v0_tiny = {"win_rate": 0.35, "payoff_ratio": 2.8, "n": 20, "n_win": 7}
+        rep_tiny = dict(rep_big)
+        rep_tiny["basket_top20_by_variant"] = {
+            "win_rate": 0.40,
+            "payoff_ratio": 2.4,
+            "n": 20,
+            "n_win": 8,
+        }
+        assert svs.judge(rep_tiny, v0_tiny)["wilson_overlap"] is True
+
+    def test_criteria_text_registered(self):
+        """C3_natural 定义文本进 preregistered_criteria（三口径出处可查）。"""
+        rep = svs.build_report(
+            [
+                {
+                    "ret": 0.1,
+                    "entry_date": "2026-01-05",
+                    "reason": "bbi_exit",
+                    "factor_contrib": {"j_low": 24},
+                    "panel": {"rsi_deep_oversold": True},
+                },
+                {
+                    "ret": -0.1,
+                    "entry_date": "2026-06-01",
+                    "reason": "stop",
+                    "factor_contrib": {"j_low": 24},
+                    "panel": {},
+                },
+            ]
+        )
+        assert "C3_natural" in rep["preregistered_criteria"]
+        assert "margin" in rep["preregistered_criteria"]["C3_natural"]
+        assert "criteria_provenance" in rep

@@ -21,8 +21,13 @@
 - **C2**：收益 TOP20% 赢家组的变体均分 > bottom-80% 均分
 - **C3**：按变体分选 top20% 篮子的**胜率 > V0 篮子胜率**，且**盈亏比 ≥ V0 篮子**
   （「浮现出来」的直接度量：胜率升、盈亏比不塌）
+- **C3_relaxed**（owner 放宽线，v0.121，事后并列）：胜率 > V0 且盈亏比 ≥ 2.4
+- **C3_natural**（天然基准，v0.128 owner 拍板「和天然胜率盈亏比比较」）：
+  变体篮子 margin > V0 篮子 margin，margin = 胜率 − 盈亏平衡胜率 1/(1+盈亏比)，
+  零自由参数；Wilson 95% 重叠仅作显著性注记，不改变判定
 - **C4**：跨窗（2022-2024，s1000）C1 符号保持
 判定：C1–C3 全过 ⇒ 候选；C4 再过 ⇒ 跨窗确认。C1–C3 任一不过 ⇒ 该变体淘汰。
+三个 C3 口径**并列展示、互不覆盖**（出处见报告 criteria_provenance）。
 
 多比较纪律：变体 ≤4、权重简单整数、一轮数据采集（panel+contrib 一次算好，
 变体离线求值——交易集与打分无关，baseline scorer 进场只由 j_low gate 决定）。
@@ -51,6 +56,7 @@ if hasattr(sys.stderr, "reconfigure"):
 from custos.research import backtest_factors as bf  # noqa: E402
 from custos.research import score_return_study as srs  # noqa: E402
 from custos.research import winner_factor_study as wfs  # noqa: E402
+from custos.research.m2_stop_sweep import _margin  # noqa: E402
 
 # 出场口径 = v0.118 臂（owner 指定，不再作为扫描变量）
 ARM_STOP_PCT = 12.0
@@ -106,6 +112,12 @@ _V3_REVERSE_PENALTY = 5  # V3：每条反向腿命中 −5（简单整数）
 # 回落（2.81→2.41）。⚠️ 这是**事后**判据，与预注册并列展示，不 retroactive
 # 改写；放宽候选进下一步（strategy_grid / live 提案）前仍须独立窗口复核。
 PAYOFF_FLOOR_RELAXED = 2.4
+
+# C3 天然基准 margin（owner 2026-08-28 拍板）：「胜率/盈亏比的标准不能拍脑袋定，
+# 要和天然胜率盈亏比比较」——天然基准 = 同基底同出场的 V0 对照臂。零自由参数：
+# 篮子 margin = 篮子胜率 − 盈亏平衡胜率（1/(1+篮子盈亏比)），复用 m2_stop_sweep
+# 的 _margin/_breakeven_wr（不重写）；变体篮子 margin > V0 篮子 margin ⇒ 过。
+# 与预注册 C3（≥V0 盈亏比）、放宽 C3（≥2.4）**三列并列**，互不覆盖。
 
 
 # ---------------------------------------------------------------------------
@@ -170,13 +182,37 @@ def _remap(trades: list[dict[str, Any]], score_fn) -> list[dict[str, Any]]:
 
 
 def basket_stats(trades: list[dict[str, Any]], score_fn, frac: float) -> dict[str, Any]:
-    """按变体分选 top-frac 篮子（得分降序）→ 胜率/盈亏比/均收（「浮现」直接度量）。"""
+    """按变体分选 top-frac 篮子（得分降序）→ 胜率/盈亏比/均收（「浮现」直接度量）。
+
+    n_win 是原始命中数（Wilson 区间用；win_rate×n 反推会丢精度）。
+    """
     ordered = sorted(trades, key=lambda t: score_fn(t), reverse=True)
     import math
 
     n_top = max(1, math.ceil(len(ordered) * frac)) if ordered else 0
     basket = ordered[:n_top]
-    return {**srs.ret_stats(basket), "n": len(basket)}
+    n_win = sum(1 for t in basket if t["ret"] > 0)
+    return {**srs.ret_stats(basket), "n": len(basket), "n_win": n_win}
+
+
+def basket_margin(basket: dict[str, Any]) -> Optional[float]:
+    """篮子 margin = 胜率 − 盈亏平衡胜率（m2 的 _margin/_breakeven_wr 口径）。"""
+    return _margin(
+        {"win": basket.get("win_rate"), "payoff": basket.get("payoff_ratio")}
+    )
+
+
+def wilson_wr_interval(
+    wins: int, n: int, z: float = 1.96
+) -> tuple[Optional[float], Optional[float]]:
+    """胜率 Wilson 95% 区间（两篮子区间是否重叠 = 显著性辅助标注，不改变判定）。"""
+    if not n:
+        return (None, None)
+    p = wins / n
+    den = 1 + z * z / n
+    center = (p + z * z / (2 * n)) / den
+    half = z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5) / den
+    return (round(center - half, 4), round(center + half, 4))
 
 
 def evaluate_variant(
@@ -199,7 +235,13 @@ def evaluate_variant(
 
 
 def judge(rep: dict[str, Any], v0_basket: dict[str, Any]) -> dict[str, Any]:
-    """按预注册判据 C1–C3 裁决（C4 跨窗在报告层人工对照，不进本函数）。"""
+    """按预注册判据 C1–C3 裁决（C4 跨窗在报告层人工对照，不进本函数）。
+
+    C3 三个口径并列（互不覆盖）：预注册（盈亏比 ≥ V0，v0.119）/
+    owner 放宽（胜率升 + 盈亏比 ≥ 2.4，v0.121，事后并列）/
+    天然基准 margin（变体篮子 margin > V0 篮子 margin，v0.128，零自由参数）。
+    Wilson 重叠是**显著性辅助注记**（重叠 = 差异不显著，参考用，不改变判定）。
+    """
     sp = rep["corr"].get("spearman")
     hw = rep["half_window"]
     c1 = (
@@ -221,13 +263,34 @@ def judge(rep: dict[str, Any], v0_basket: dict[str, Any]) -> dict[str, Any]:
         b["win_rate"] > v0_basket["win_rate"]
         and (b["payoff_ratio"] or 0) >= PAYOFF_FLOOR_RELAXED
     )
+    # 天然基准 margin（2026-08-28 owner 拍板）：零自由参数
+    m_v = basket_margin(b)
+    m_0 = basket_margin(v0_basket)
+    c3_natural = m_v is not None and m_0 is not None and m_v > m_0
+    # Wilson 95% 区间重叠 ⇒ 胜率差异不显著（辅助注记）
+    lo_v, hi_v = wilson_wr_interval(b.get("n_win") or 0, b.get("n") or 0)
+    lo_0, hi_0 = wilson_wr_interval(
+        v0_basket.get("n_win") or 0, v0_basket.get("n") or 0
+    )
+    wilson_overlap = (
+        None
+        if None in (lo_v, hi_v, lo_0, hi_0)
+        else not (hi_v < lo_0 or hi_0 < lo_v)  # 区间相交
+    )
     return {
         "C1_spearman_positive": c1,
         "C2_winner_scores_higher": c2,
         "C3_basket_wr_up_payoff_kept": c3,
         "C3_relaxed_wr_up_payoff_floor": c3_relaxed,
+        "C3_natural_margin": c3_natural,
+        "basket_margin": round(m_v, 4) if m_v is not None else None,
+        "v0_basket_margin": round(m_0, 4) if m_0 is not None else None,
+        "basket_wr_wilson95": [lo_v, hi_v],
+        "v0_basket_wr_wilson95": [lo_0, hi_0],
+        "wilson_overlap": wilson_overlap,
         "candidate": c1 and c2 and c3,
         "candidate_relaxed": c1 and c2 and c3_relaxed,
+        "candidate_natural": c1 and c2 and c3_natural,
     }
 
 
@@ -249,9 +312,18 @@ def build_report(trades: list[dict[str, Any]]) -> dict[str, Any]:
         "preregistered_criteria": {
             "C1": "Spearman>0 且前后半窗同正",
             "C2": "TOP20% 赢家组变体均分 > bottom-80% 均分",
-            "C3": "变体 top20% 篮子胜率 > V0 且盈亏比 ≥ V0",
+            "C3": "变体 top20% 篮子胜率 > V0 且盈亏比 ≥ V0（预注册，v0.119）",
+            "C3_relaxed": "篮子胜率 > V0 且盈亏比 ≥ 2.4（owner 放宽线，v0.121，事后并列不 retroactive）",
+            "C3_natural": "变体篮子 margin > V0 篮子 margin（天然基准，v0.128 owner 拍板；"
+            "margin=胜率−盈亏平衡胜率 1/(1+盈亏比)，零自由参数；"
+            "Wilson 95% 重叠仅作显著性注记不改判定）",
             "C4": "跨窗（2022-2024）C1 符号保持",
         },
+        "criteria_provenance": (
+            "C1/C2/C3=预注册（v0.119）；C3_relaxed=owner 放宽（v0.121，事后并列）；"
+            "C3_natural=天然基准 margin（v0.128，owner：「和天然胜率盈亏比比较」）。"
+            "三列 C3 并列展示，互不覆盖。"
+        ),
         "n_trades": len(trades),
         "overall_stats": srs.ret_stats(trades),
         "exit_reasons": srs.exit_reason_dist(trades),
@@ -273,7 +345,7 @@ def print_report(rep: dict[str, Any]) -> None:
     )
     print(
         "\n── 变体对照：Spearman(半窗) | 赢家top20均分 vs 对照组 | "
-        "变体篮子(胜率/盈亏比/均收/n) | C1/C2/C3"
+        "变体篮子(胜率/盈亏比/均收/n/margin) | C1/C2/C3预注册/C3放宽/C3天然"
     )
     for name, v in rep["variants"].items():
         hw = v["half_window"]
@@ -281,19 +353,30 @@ def print_report(rep: dict[str, Any]) -> None:
         h1 = (hw.get("first_half") or {}).get("spearman")
         h2 = (hw.get("second_half") or {}).get("spearman")
         b = v["basket_top20_by_variant"]
+        m = basket_margin(b)
+        m_txt = f"{m * 100:+.1f}pp" if m is not None else "—"
         vd = rep["verdicts"].get(name, {})
-        tags = (
-            "对照"
-            if name == "V0"
-            else f"{'✓' if vd.get('C1_spearman_positive') else '✗'}"
-            f"{'✓' if vd.get('C2_winner_scores_higher') else '✗'}"
-            f"{'✓' if vd.get('C3_basket_wr_up_payoff_kept') else '✗'}"
-            f" ⇒ {'候选' if vd.get('candidate') else '淘汰'}"
-        )
+        if name == "V0":
+            tags = "对照"
+        else:
+            tags = (
+                f"{'✓' if vd.get('C1_spearman_positive') else '✗'}"
+                f"{'✓' if vd.get('C2_winner_scores_higher') else '✗'}"
+                f"{'✓' if vd.get('C3_basket_wr_up_payoff_kept') else '✗'}"
+                f"{'✓' if vd.get('C3_relaxed_wr_up_payoff_floor') else '✗'}"
+                f"{'✓' if vd.get('C3_natural_margin') else '✗'}"
+                f" ⇒ 预注册{'候选' if vd.get('candidate') else '淘汰'}"
+                f"/放宽{'候选' if vd.get('candidate_relaxed') else '淘汰'}"
+                f"/天然{'候选' if vd.get('candidate_natural') else '淘汰'}"
+            )
+            if vd.get("wilson_overlap") is True:
+                tags += "（Wilson重叠=胜率差异不显著，注记）"
+            elif vd.get("wilson_overlap") is False:
+                tags += "（Wilson不重叠）"
         print(
             f"  {name} | {sp}({h1}/{h2}{'' if hw.get('consistent') else ' ⚠️翻'}) | "
             f"{v['winner_top20_dist'].get('mean')} vs {v['bottom80_dist'].get('mean')} | "
-            f"{b['win_rate'] * 100:.1f}%/{b['payoff_ratio']}/{b['avg_ret'] * 100:.2f}%/n={b['n']} | "
+            f"{b['win_rate'] * 100:.1f}%/{b['payoff_ratio']}/{b['avg_ret'] * 100:.2f}%/n={b['n']}/{m_txt} | "
             f"{tags}"
         )
     print("\n── 分档收益表（live 30/60 阈；变体分档）")
@@ -327,10 +410,53 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--out", default="")
     ap.add_argument(
         "--from-trades",
-        default="",
-        help="复用已落盘的研究 JSON（含 trades 键）离线重算变体/判据，不重跑回测",
+        nargs="+",
+        default=[],
+        help="复用已落盘的研究 JSON（含 trades 键）离线重算变体/判据，不重跑回测；"
+        "多个文件 ⇒ 逐份重判并输出跨窗 margin 对照表",
     )
     return ap
+
+
+def _rejudge_one(path: str, out_arg: str = "") -> dict[str, Any]:
+    """离线重判单份落盘 JSON → 新报告（落 .rejudged.json），返回报告。"""
+    stored = json.loads(Path(path).read_text(encoding="utf-8"))
+    trades = stored.get("trades") or []
+    if not trades:
+        print(f"⛔ 复用文件无 trades: {path}", file=sys.stderr)
+        return {}
+    print(f"[INFO] 复用 {path}（{len(trades)} 笔）", file=sys.stderr)
+    rep = build_report(trades)
+    rep["config"] = stored.get("config") or {}
+    rep["config"]["rejudged_from"] = str(path)
+    rep["trades"] = trades
+    out = Path(out_arg) if out_arg else Path(path).with_suffix(".rejudged.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    bf.write_json_stream(out, rep, big=len(trades) > 20000)
+    print(f"[OK] 写出 {out}（离线重判，{len(trades)} 笔）")
+    print_report(rep)
+    return rep
+
+
+def _print_margin_matrix(reps: list[tuple[str, dict[str, Any]]]) -> None:
+    """多窗 margin 对照表：变体 × 窗口的篮子 margin（pp）与 Wilson 重叠标记。"""
+    print("\n── 跨窗篮子 margin 对照（天然基准口径：margin=胜率−盈亏平衡胜率，pp）")
+    header = "变体 | " + " | ".join(label for label, _ in reps)
+    print(header)
+    for name in VARIANTS:
+        row = [name]
+        for _label, rep in reps:
+            b = rep["variants"][name]["basket_top20_by_variant"]
+            m = basket_margin(b)
+            cell = f"{m * 100:+.1f}" if m is not None else "—"
+            vd = rep["verdicts"].get(name, {})
+            if vd.get("wilson_overlap") is False:
+                cell += "*"  # 与 V0 篮子胜率 Wilson 95% 不重叠（差异显著）
+            row.append(cell)
+        print("  " + " | ".join(row))
+    print(
+        "  注：* = 与 V0 篮子胜率的 Wilson 95% 区间不重叠（差异显著）；无标记 = 重叠/缺数据"
+    )
 
 
 def main(argv: Optional[list] = None) -> int:
@@ -338,26 +464,16 @@ def main(argv: Optional[list] = None) -> int:
     args = ap.parse_args(argv)
 
     if args.from_trades:
-        stored = json.loads(Path(args.from_trades).read_text(encoding="utf-8"))
-        trades = stored.get("trades") or []
-        if not trades:
-            print("⛔ 复用文件无 trades", file=sys.stderr)
-            return 1
-        print(f"[INFO] 复用 {args.from_trades}（{len(trades)} 笔）", file=sys.stderr)
-        rep = build_report(trades)
-        rep["config"] = stored.get("config") or {}
-        rep["config"]["rejudged_from"] = str(args.from_trades)
-        rep["trades"] = trades
-        out = (
-            Path(args.out)
-            if args.out
-            else Path(args.from_trades).with_suffix(".rejudged.json")
-        )
-        out.parent.mkdir(parents=True, exist_ok=True)
-        bf.write_json_stream(out, rep, big=len(trades) > 20000)
-        print(f"[OK] 写出 {out}（离线重判，{len(trades)} 笔）")
-        print_report(rep)
-        return 0
+        reps: list[tuple[str, dict[str, Any]]] = []
+        for f in args.from_trades:
+            # 多文件重判时 --out 只许带一个（歧义即错，不静默覆盖）
+            rep = _rejudge_one(f, args.out if len(args.from_trades) == 1 else "")
+            if rep:
+                label = (rep.get("config") or {}).get("rejudged_from") or f
+                reps.append((Path(str(label)).name, rep))
+        if len(reps) > 1:
+            _print_margin_matrix(reps)
+        return 0 if reps else 1
 
     regime = bf.load_amv_regime(since=args.start)
     if not regime:
