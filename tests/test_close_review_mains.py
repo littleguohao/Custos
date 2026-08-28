@@ -121,6 +121,25 @@ class TestFinalCloseReviewInputContract:
         assert (rev / f"{DAY}_final_review.md").exists()
         assert (rev / f"{DAY}_final_review.json").exists()
 
+    def test_sections_7_to_9_removed_and_section_4_replaced(self, fcr_env, monkeypatch):
+        """v0.136：§7 纪律偏差 / §8 数据时效 / §9 数据来源三节整删（审计块在报告头部）；
+        §4 整节替换为「板块题材涨跌幅榜与市场温度」（客观事实，非主线判定）。"""
+        _run_fcr(monkeypatch)
+        body = (
+            fcr_env / "artifacts/reports" / "daily" / DAY / f"{DAY}_final_review.md"
+        ).read_text(encoding="utf-8")
+        assert "## 4. 板块题材涨跌幅榜与市场温度" in body
+        for gone in (
+            "## 7.",
+            "## 8.",
+            "## 9.",
+            "纪律偏差、规则有效性",
+            "数据时效、缺失项与风险提示",
+            "主线、题材生命周期与持续性",
+            "判定口径待重设计",
+        ):
+            assert gone not in body, gone
+
     def test_json_artifact_is_valid_json(self, fcr_env, monkeypatch):
         """产物必须是合法 JSON（NaN/Infinity 都不是）—— 下游要能解析。"""
         _run_fcr(monkeypatch)

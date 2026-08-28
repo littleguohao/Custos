@@ -141,14 +141,16 @@ class TestRenderNews:
         assert "无关国际新闻" not in text, "无交集的信息流条目必须被压缩掉"
 
     def test_no_intersection_says_so(self):
-        """有证据但无交集 ⇒ 如实说「无交集」，不是静默空节。"""
+        """有证据但无交集 ⇒ 如实说「已检索无交集」，不是静默空节（v0.136 措辞：
+        与「这步没跑」的 unavailable 明确区分；``evidence=[]`` 表示全量证据已扫描）。"""
         lines = []
         fcr.render_news(
             lines,
             {"sections": {"信息": [{"title": "t", "matched_themes": ["宏观政策"]}]}},
             hold_sectors={"半导体"},
+            evidence=[],
         )
-        assert any("无与今日持仓/操作的交集" in x for x in lines)
+        assert any("信息流已检索，无与持仓/操作交集的事实" in x for x in lines)
 
     def test_holding_code_match_counts(self):
         """matched_codes 命中持仓代码算交集（生产者形状：matched_codes=代码、
@@ -180,8 +182,9 @@ class TestRenderNews:
             lines,
             {"sections": {"信息": [{"title": "t", "matched_holdings": ["浦发银行"]}]}},
             hold_codes={"600000"},
+            evidence=[],
         )
-        assert any("无与今日持仓/操作的交集" in x for x in lines)
+        assert any("无与持仓/操作交集的事实" in x for x in lines)
 
     def test_caps_at_eight_rows(self):
         """有界：最多 8 条 —— 报告要有界，否则一节几十条没人读。"""
@@ -335,22 +338,33 @@ class TestExtractedUnits:
     def test_render_helpers_append_to_lines(self):
         """render_* 沿用本文件既有约定 `render_news(lines, ...)`：**就地追加**。"""
         lines = []
-        fcr.render_themes(
+        fcr.render_sector_board(
             lines,
             {
-                "theme_lifecycles": [
-                    {
-                        "theme_name": "半导体",
-                        "phase": "退潮",
-                        "technical_stage": "退潮/下跌",
-                        "score": 45,
-                        "event_evidence_count": 2,
-                    }
-                ]
+                "market_breadth": {
+                    "up_count": 3000,
+                    "down_count": 2000,
+                    "as_of": "2026-08-28",
+                }
             },
+            {
+                "gainers_top": [
+                    {"rank": 1, "code": "880465", "name": "半导体", "pct": 2.5}
+                ],
+                "losers_top": [
+                    {"rank": 1, "code": "880301", "name": "电力", "pct": -1.5}
+                ],
+            },
+            "sector_daily_rank 采集器产物",
         )
         text = "\n".join(lines)
-        assert "## 4." in text and "半导体" in text and "退潮" in text
+        assert "## 4. 板块题材涨跌幅榜与市场温度" in text
+        assert (
+            "半导体" in text
+            and "+2.50%" in text
+            and "电力" in text
+            and "-1.50%" in text
+        )
 
     def test_render_next_day_returns_plan(self):
         """§6 要把 `next_plan` 交回 main —— 落盘 payload 还要用它。"""
@@ -362,20 +376,20 @@ class TestExtractedUnits:
         assert plan["total_position_range"] == "0%-20%"
         assert any("## 6." in x for x in lines)
 
-    def test_render_discipline_returns_rules(self):
-        lines = []
-        rules = fcr.render_discipline(
-            lines,
-            {"rule_review": {"effective": ["e1"], "failed": [], "pending": ["p1"]}},
-            {},
-        )
-        assert rules["effective"] == ["e1"]
-        assert any("### 7.2" in x for x in lines)
 
+def _revalued_row(code, b1=None, close=9.0, cost=10.0, pnl_pct=-0.01):
+    """「今日纪律检查」钉测用的最小 revalued 行（只带新节读取的字段）。
 
-def _revalued_row(code, b1):
-    """「今日纪律检查」钉测用的最小 revalued 行（只带新节读取的字段）。"""
-    return {"code": code, "name": f"测试{code}", "b1_holding_state": b1}
+    默认 pnl_pct=-0.01（未越 −7% 线）——止损判读**默认不命中**，
+    要命中扛单请显式给 pnl_pct 或 plans。"""
+    return {
+        "code": code,
+        "name": f"测试{code}",
+        "close": close,
+        "cost": cost,
+        "pnl_pct": pnl_pct,
+        "b1_holding_state": b1 or _b1(),
+    }
 
 
 def _b1(priority="P3", action="条件持有", signals=None, shadow_signals=None):
@@ -389,49 +403,87 @@ def _b1(priority="P3", action="条件持有", signals=None, shadow_signals=None)
 
 
 class TestHabitCheck:
-    """§1 延伸小节「今日纪律检查」（v0.127 owner 定稿）：止损/止盈旧习惯当日复发点名。
+    """§1 延伸小节「今日纪律检查」（v0.136 owner 定稿）：三类旧习惯当日复发点名。
 
-    钉的是判读口径本身：信号出现**且当日无该票卖出成交**才点名；已卖出不算复发；
-    execution_review 缺 `rows` 时 fail-closed 降级（「没查」≠「查了没有」）。
+    钉的是判读口径本身：
+    - 扛单不止损 = 亏损**越过止损线**（计划 stop.price 优先，无计划 −7% 减仓线）
+      且当日无该票卖出成交；未越线是正常观察，不报；
+    - 买入不符合策略买点 = 空头期买入 / 买入日 J≥13；
+    - 应止盈未止盈 = 止盈信号命中且当日无卖出；
+    - 数据缺失 fail-closed 降级（「没查」≠「查了没有」≠「无复发」）。
     """
 
-    def test_stop_signal_without_sell_is_called_out(self):
-        """扛单不止损：B1 P0 止损/清仓级信号 + 当日无卖出 ⇒ 点名。"""
+    # ── 扛单不止损：止损线判读 ──
+
+    def test_plan_stop_breach_without_sell_is_called_out(self):
+        """有持仓计划：收盘低于计划止损价 + 当日无卖出 ⇒ 扛单点名。"""
+        lines = []
+        fcr.render_habit_check(
+            lines,
+            [_revalued_row("600000", close=9.0, pnl_pct=-0.10)],
+            {"rows": [{"code": "600000", "actual_trades": []}]},
+            plans={"600000": {"stop": {"price": 9.5, "basis": "近10日最低价"}}},
+            regime="中性",
+            tmap={},
+        )
+        text = "\n".join(lines)
+        assert "扛单不止损" in text and "600000" in text
+        assert "计划止损价 9.50" in text and "当日无该票卖出成交" in text
+
+    def test_plan_stop_not_breached_is_not_called_out(self):
+        """有计划在止损价上方 ⇒ 不报（正常观察，不是扛单）。"""
+        lines = []
+        fcr.render_habit_check(
+            lines,
+            [_revalued_row("600000", close=9.6, pnl_pct=-0.04)],
+            {"rows": [{"code": "600000", "actual_trades": []}]},
+            plans={"600000": {"stop": {"price": 9.5}}},
+            regime="中性",
+            tmap={},
+        )
+        text = "\n".join(lines)
+        assert "扛单不止损" not in text and "今日无复发" in text
+
+    def test_no_plan_uses_loss_reduction_line(self):
+        """无持仓计划：盈亏越 −7% 减仓线 ⇒ 扛单点名（exit_rules 口径）。"""
+        lines = []
+        fcr.render_habit_check(
+            lines,
+            [_revalued_row("600000", pnl_pct=-0.08)],
+            {"rows": [{"code": "600000", "actual_trades": []}]},
+            plans={},
+            regime="中性",
+            tmap={},
+        )
+        text = "\n".join(lines)
+        assert "扛单不止损" in text and "−7% 减仓线" in text
+
+    def test_no_plan_loss_above_line_is_not_called_out(self):
+        """无计划、亏损 −5%（未越 −7% 线）⇒ 不报 —— 旧版对 P0/P1 信号都报是误报。"""
         lines = []
         fcr.render_habit_check(
             lines,
             [
                 _revalued_row(
                     "600000",
-                    _b1(
-                        "P0",
-                        "止损/清仓评估",
-                        [{"signal": "hard_loss", "priority": "P0"}],
-                    ),
+                    _b1("P0", "止损/清仓评估", [{"signal": "hard_loss"}]),
+                    pnl_pct=-0.05,
                 )
             ],
             {"rows": [{"code": "600000", "actual_trades": []}]},
+            plans={},
+            regime="中性",
+            tmap={},
         )
         text = "\n".join(lines)
-        assert (
-            "扛单不止损" in text and "600000" in text and "当日无该票卖出成交" in text
-        )
+        assert "扛单不止损" not in text and "今日无复发" in text
 
-    def test_stop_signal_with_sell_is_not_called_out(self):
-        """当日已有该票卖出成交 ⇒ 不算扛单，报「今日无复发」。"""
+    def test_stop_breach_with_sell_is_not_called_out(self):
+        """越线但当日已有该票卖出成交 ⇒ 不算扛单，报「今日无复发」。"""
         lines = []
         fcr.render_habit_check(
             lines,
-            [
-                _revalued_row(
-                    "600000",
-                    _b1(
-                        "P0",
-                        "止损/清仓评估",
-                        [{"signal": "hard_loss", "priority": "P0"}],
-                    ),
-                )
-            ],
+            [_revalued_row("600000", pnl_pct=-0.10)],
             {
                 "rows": [
                     {
@@ -440,45 +492,60 @@ class TestHabitCheck:
                     }
                 ]
             },
+            plans={},
+            regime="中性",
+            tmap={},
         )
         text = "\n".join(lines)
         assert "扛单不止损" not in text and "今日无复发" in text
 
-    def test_tail_p0p1_without_sell_is_called_out(self):
-        """14:45 P0/P1 动作 + 当日无卖出 ⇒ 同样按扛单不止损点名（owner 口径）。"""
+    def test_missing_close_degrades_fail_closed(self):
+        """⚠️ 收盘价缺失 ⇒ 止损线判读未执行，如实降级 —— 不得写成「今日无复发」。"""
         lines = []
         fcr.render_habit_check(
             lines,
-            [_revalued_row("920808", _b1())],
+            [_revalued_row("600000", close=None, pnl_pct=None)],
+            {"rows": [{"code": "600000", "actual_trades": []}]},
+            plans={"600000": {"stop": {"price": 9.5}}},
+            regime="中性",
+            tmap={},
+        )
+        text = "\n".join(lines)
+        assert "unavailable" in text and "判读未执行" in text
+        assert "今日无复发" not in text
+
+    # ── 买入不符合策略买点 ──
+
+    def test_buy_in_bear_regime_is_called_out(self):
+        """0AMV 空头期买入 ⇒「空头期买入，违反纪律（空头不买）」。"""
+        lines = []
+        fcr.render_habit_check(
+            lines,
+            [],
             {
                 "rows": [
                     {
-                        "code": "920808",
-                        "tail_priority": "P0",
-                        "tail_action": "止损/清仓评估",
-                        "actual_trades": [],
+                        "code": "600000",
+                        "name": "测试买入",
+                        "actual_trades": [{"交易类别": "买入", "成交数量": 100}],
                     }
                 ]
             },
+            plans={},
+            regime="空头",
+            tmap={"600000": {"daily_j": 5.0}},
         )
         text = "\n".join(lines)
-        assert "扛单不止损" in text and "920808" in text and "14:45 P0" in text
+        assert (
+            "买入不符合策略买点" in text and "空头期买入，违反纪律（空头不买）" in text
+        )
 
-    def test_buy_trade_does_not_count_as_sell(self):
-        """当日只有**买入**成交不算卖出 —— 止损信号下买入正是「扛单还加仓」。"""
+    def test_buy_with_j_above_13_is_called_out(self):
+        """买入日 J≥13 ⇒「非 B1 买点买入」（J<13 是硬门槛）。"""
         lines = []
         fcr.render_habit_check(
             lines,
-            [
-                _revalued_row(
-                    "600000",
-                    _b1(
-                        "P0",
-                        "止损/清仓评估",
-                        [{"signal": "hard_loss", "priority": "P0"}],
-                    ),
-                )
-            ],
+            [],
             {
                 "rows": [
                     {
@@ -487,67 +554,349 @@ class TestHabitCheck:
                     }
                 ]
             },
+            plans={},
+            regime="中性",
+            tmap={"600000": {"daily_j": 27.1}},
         )
-        assert any("扛单不止损" in x for x in lines)
+        text = "\n".join(lines)
+        assert "买入不符合策略买点" in text and "非 B1 买点买入" in text
+        assert "J=27.1" in text
+
+    def test_buy_with_j_below_13_in_neutral_is_clean(self):
+        """J<13 且非空头期 ⇒ 买点合规，不报。"""
+        lines = []
+        fcr.render_habit_check(
+            lines,
+            [],
+            {
+                "rows": [
+                    {
+                        "code": "600000",
+                        "actual_trades": [{"交易类别": "买入", "成交数量": 100}],
+                    }
+                ]
+            },
+            plans={},
+            regime="中性",
+            tmap={"600000": {"daily_j": 4.4}},
+        )
+        text = "\n".join(lines)
+        assert "买入不符合策略买点" not in text and "今日无复发" in text
+
+    def test_buy_with_missing_j_degrades(self):
+        """买入票缺 daily_j ⇒ 买点判读未执行，如实降级（不冒充无复发）。"""
+        lines = []
+        fcr.render_habit_check(
+            lines,
+            [],
+            {
+                "rows": [
+                    {
+                        "code": "600000",
+                        "actual_trades": [{"交易类别": "买入", "成交数量": 100}],
+                    }
+                ]
+            },
+            plans={},
+            regime="中性",
+            tmap={},
+        )
+        text = "\n".join(lines)
+        assert "买入不符合策略买点" not in text
+        assert "unavailable" in text and "今日无复发" not in text
+
+    # ── 应止盈未止盈（保留口径） ──
 
     def test_profit_take_signal_without_sell_is_called_out(self):
-        """不止盈：two_bull_profit_take / 影子 plan_tp_scale_out + 无卖出 ⇒ 点名。"""
+        """应止盈未止盈：two_bull_profit_take / 影子 plan_tp_scale_out + 无卖出 ⇒ 点名。"""
         lines = []
         fcr.render_habit_check(
             lines,
             [
                 _revalued_row(
                     "600000",
-                    _b1(
-                        "P2",
-                        "分批止盈",
-                        [{"signal": "two_bull_profit_take", "priority": "P2"}],
-                    ),
+                    _b1("P2", "分批止盈", [{"signal": "two_bull_profit_take"}]),
+                    pnl_pct=0.15,
                 ),
                 _revalued_row(
                     "688111",
-                    _b1(
-                        shadow_signals=[
-                            {"signal": "plan_tp_scale_out", "priority": "P2"}
-                        ]
-                    ),
+                    _b1(shadow_signals=[{"signal": "plan_tp_scale_out"}]),
+                    pnl_pct=0.20,
                 ),
             ],
             {"rows": []},
+            plans={},
+            regime="中性",
+            tmap={},
         )
         text = "\n".join(lines)
-        assert text.count("不止盈") >= 2 and "600000" in text and "688111" in text
+        assert text.count("应止盈未止盈") >= 2 and "600000" in text and "688111" in text
+
+    # ── 通用 ──
 
     def test_no_signal_says_no_relapse(self):
-        """无信号 ⇒ 如实写「今日无复发」（查了没有，不是没查）。"""
+        """三类都无命中 ⇒ 如实写「今日无复发」（查了没有，不是没查）。"""
         lines = []
-        fcr.render_habit_check(lines, [_revalued_row("600000", _b1())], {"rows": []})
+        fcr.render_habit_check(
+            lines,
+            [_revalued_row("600000")],
+            {"rows": []},
+            plans={},
+            regime="中性",
+            tmap={},
+        )
         assert any("今日无复发" in x for x in lines)
 
     def test_missing_rows_degrades_fail_closed(self):
         """⚠️ execution_review 缺 `rows` ⇒ 降级如实报「未执行检查」，
         **不得**写成「今日无复发」—— 那会把「没查」显示成「查了没有」。"""
         lines = []
-        fcr.render_habit_check(lines, [_revalued_row("600000", _b1())], {})
+        fcr.render_habit_check(lines, [_revalued_row("600000")], {})
         text = "\n".join(lines)
         assert "unavailable" in text and "未执行检查" in text
         assert "今日无复发" not in text
 
-    def test_only_stop_and_profit_habits_judged(self):
-        """判读口径钉死：本节只判止损/止盈两类习惯（减仓类 P1 信号不算扛单）。"""
+
+class TestNewsEvidenceFallback:
+    """§2 v0.136：digest 优先 + 全量 RSS 证据兜底。
+
+    钉的是匹配层修复本身：digest 没选上的候选不再漏报（owner 案例：「美国发起
+    电力设备检查」影响电力持仓，但该新闻不在 digest 池里）；仍无交集如实写明；
+    证据文件缺失 unavailable（与「检索了没有」分开）。
+    """
+
+    EVIDENCE = [
+        {
+            "title": "美国发起电力设备检查",
+            "summary": "涉及输变电设备出口",
+            "source_name": "金十数据-快讯",
+            "source_tier": "B",
+            "published_at": "2026-08-28T10:00:00+00:00",
+        },
+        {
+            "title": "无关国际新闻",
+            "summary": "与持仓无关",
+            "source_name": "x",
+            "source_tier": "C",
+            "published_at": "2026-08-28T11:00:00+00:00",
+        },
+    ]
+    KEYWORDS = {"600312": ("平高电气", ["平高电气", "电气设备", "输变电设备", "电力"])}
+
+    def test_fallback_hit_when_digest_missed(self):
+        """核心断言：digest 无交集但全量证据按持仓关键词命中 ⇒ 列出（带来源/tier/时间）。"""
         lines = []
-        fcr.render_habit_check(
+        fcr.render_news(
             lines,
-            [
-                _revalued_row(
-                    "600000",
-                    _b1(
-                        "P1",
-                        "减仓评估",
-                        [{"signal": "loss_reduction", "priority": "P1"}],
-                    ),
-                )
-            ],
-            {"rows": [{"code": "600000", "actual_trades": []}]},
+            {
+                "sections": {
+                    "信息": [{"title": "digest 里的无关条", "matched_themes": ["宏观"]}]
+                }
+            },
+            hold_sectors={"半导体"},
+            evidence=self.EVIDENCE,
+            hold_keywords=self.KEYWORDS,
         )
-        assert any("今日无复发" in x for x in lines)
+        text = "\n".join(lines)
+        assert "美国发起电力设备检查" in text
+        assert "金十数据-快讯/B" in text and "600312 平高电气" in text
+        assert "无关国际新闻" not in text, "无交集的证据条目必须被压缩掉"
+
+    def test_fallback_no_hit_says_searched_no_intersection(self):
+        """全量证据检索后仍无交集 ⇒ 如实写「信息流已检索，无与持仓/操作交集的事实」。"""
+        lines = []
+        fcr.render_news(
+            lines,
+            {"sections": {"信息": [{"title": "t", "matched_themes": ["宏观"]}]}},
+            evidence=[self.EVIDENCE[1]],
+            hold_keywords=self.KEYWORDS,
+        )
+        assert any("信息流已检索，无与持仓/操作交集的事实" in x for x in lines)
+
+    def test_missing_evidence_is_unavailable_not_no_intersection(self):
+        """⚠️ 证据文件缺失 ⇒ unavailable「兜底匹配未执行」——不得写成「无交集」。"""
+        lines = []
+        fcr.render_news(
+            lines,
+            {"sections": {"信息": [{"title": "t", "matched_themes": ["宏观"]}]}},
+            evidence=None,
+            hold_keywords=self.KEYWORDS,
+        )
+        text = "\n".join(lines)
+        assert "兜底匹配未执行" in text
+        assert "无与持仓/操作交集的事实" not in text
+
+    def test_digest_priority_and_fallback_dedupes(self):
+        """digest 已展示的条目，兜底不再重复列（按标题去重）。"""
+        lines = []
+        fcr.render_news(
+            lines,
+            {
+                "sections": {
+                    "信息": [
+                        {
+                            "title": "美国发起电力设备检查",
+                            "matched_themes": ["电气设备"],
+                            "source_name": "金十数据-快讯",
+                            "fact_status": "confirmed",
+                        }
+                    ]
+                }
+            },
+            hold_sectors={"电气设备"},
+            evidence=self.EVIDENCE,
+            hold_keywords=self.KEYWORDS,
+        )
+        text = "\n".join(lines)
+        assert text.count("美国发起电力设备检查") == 1
+
+    def test_keywords_built_from_mapping_and_themes(self):
+        """关键词来源钉死：股票名 + industry/BlockName/concepts + 主题名分段与语义标签。"""
+        pmap = {"600312": {"代码": "600312", "名称": "平高电气"}}
+        sectors = [
+            {
+                "theme_name": "电力/电网设备",
+                "semantic_tags": ["特高压", "智能电网"],
+                "holding_related": ["600312.SH"],
+            }
+        ]
+        mapping = [
+            {
+                "code": "600312",
+                "industry": "电气设备",
+                "concepts": ["储能"],
+                "raw_relation": [{"BlockName": "输变电设备"}],
+            }
+        ]
+        name, words = fcr._holding_keywords(pmap, sectors, mapping)["600312"]
+        assert name == "平高电气"
+        for w in (
+            "平高电气",
+            "电气设备",
+            "输变电设备",
+            "储能",
+            "电力",
+            "电网设备",
+            "特高压",
+            "智能电网",
+        ):
+            assert w in words, w
+
+    def test_news_interest_reads_theme_name(self):
+        """⚠️ hold_sectors 必须读 `theme_name`（生产形状）——漏了它主题交集恒为空。"""
+        sectors = [{"theme_name": "电力/电网设备", "holding_related": ["600312.SH"]}]
+        _codes, hold_sectors = fcr._news_interest(
+            {"600312": {"代码": "600312"}}, [], sectors
+        )
+        assert "电力/电网设备" in hold_sectors
+
+
+class TestSectorBoard:
+    """§4 v0.136：板块题材涨跌幅榜与市场温度（客观事实展示，非主线判定）。"""
+
+    def test_collector_product_rendered(self):
+        """采集器当日榜在 ⇒ 直接用其 TOP5 涨/跌幅（#26 口径复用）。"""
+        rank = {
+            "gainers_top": [
+                {
+                    "rank": i + 1,
+                    "code": f"8804{i}",
+                    "name": f"涨板块{i}",
+                    "pct": 3.0 - i,
+                }
+                for i in range(5)
+            ],
+            "losers_top": [{"rank": 1, "code": "880301", "name": "电力", "pct": -2.0}],
+        }
+        lines = []
+        fcr.render_sector_board(lines, {}, rank, "sector_daily_rank 采集器产物")
+        text = "\n".join(lines)
+        assert "板块题材涨跌幅榜与市场温度" in text
+        assert "客观事实展示，非主线判定" in text
+        assert "涨板块0" in text and "电力" in text and "-2.00%" in text
+        assert "待重设计" not in text, "#26 待重设计标注必须随旧节删掉"
+
+    def test_both_missing_is_unavailable_with_chain_note(self):
+        """榜不可得 ⇒ unavailable 并注明「采集器未接入日链」（只注明，不改链路）。"""
+        lines = []
+        fcr.render_sector_board(lines, {}, None, None)
+        text = "\n".join(lines)
+        assert "unavailable" in text and "未接入日链" in text
+
+    def test_fallback_computes_from_sector_index_cache(self, tmp_path, monkeypatch):
+        """采集器榜缺失 ⇒ 用板块指数缓存自算当日涨跌幅（run_1800 每日更新的兜底）。"""
+        index_dir = tmp_path / "sector_index"
+        index_dir.mkdir()
+        (index_dir / "880001.SH.csv").write_text(
+            "date,close\n2026-08-27,100\n2026-08-28,103\n", encoding="utf-8"
+        )
+        (index_dir / "880002.SH.csv").write_text(
+            "date,close\n2026-08-27,200\n2026-08-28,196\n", encoding="utf-8"
+        )
+        (index_dir / "880003.SH.csv").write_text(
+            "date,close\n2026-08-27,300\n",
+            encoding="utf-8",  # 无当日数据
+        )
+        monkeypatch.setattr(fcr, "_sector_name_map", lambda: {})
+        rank = fcr._sector_rank_fallback("2026-08-28", index_dir)
+        assert rank["gainers_top"][0]["code"] == "880001"
+        assert rank["gainers_top"][0]["pct"] == pytest.approx(3.0)
+        assert rank["losers_top"][0]["code"] == "880002"
+        assert rank["losers_top"][0]["pct"] == pytest.approx(-2.0)
+        assert all(
+            e["code"] != "880003" for e in rank["gainers_top"] + rank["losers_top"]
+        )
+
+    def test_fallback_none_when_no_data(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(fcr, "_sector_name_map", lambda: {})
+        assert fcr._sector_rank_fallback("2026-08-28", tmp_path) is None
+
+    @pytest.mark.parametrize(
+        "pct,want",
+        [
+            (-5.0, "冰点"),
+            (30.0, "不达标"),
+            (64.9, "不达标"),
+            (65.0, "及格"),
+            (85.0, "强势"),
+            (140.0, "较佳"),
+            (151.0, "警惕冲顶"),
+        ],
+    )
+    def test_temperature_six_tiers(self, pct, want):
+        """市场温度六档判定（CZ 波段战法 §三）：<0 冰点 / 0~65% 不达标 / 65%+ 及格 /
+        80%+ 强势 / 130~150% 较佳 / >150% 警惕冲顶。"""
+        assert want in fcr._temperature_verdict(pct)
+
+    def test_temperature_formula_and_render(self):
+        """温度 = (涨−跌)÷跌×100%：(3000−2000)/2000 = +50% ⇒ 不达标。"""
+        lines = []
+        fcr.render_sector_board(
+            lines,
+            {
+                "market_breadth": {
+                    "up_count": 3000,
+                    "down_count": 2000,
+                    "as_of": "2026-08-28",
+                }
+            },
+            None,
+            None,
+        )
+        text = "\n".join(lines)
+        assert (
+            "+50.0%" in text and "不达标" in text and "涨 3000 家 / 跌 2000 家" in text
+        )
+
+    def test_temperature_missing_down_count_degrades(self):
+        """⚠️ 880005 只给涨家数、跌家数无真实来源 ⇒ 温度 unavailable，不编造、不冒充冰点。"""
+        lines = []
+        fcr.render_sector_board(
+            lines,
+            {"market_breadth": {"up_count": 3013, "down_count": None}},
+            None,
+            None,
+        )
+        text = "\n".join(lines)
+        assert "unavailable" in text and "不编造" in text
+        assert "温度 **" not in text, "缺跌家数不得给出温度读数"

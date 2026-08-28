@@ -182,7 +182,7 @@ def make_candidate_score(
       unavailable（None）按不命中 = 0 分（不惩罚数据缺失，同 R22 口径）。
     """
 
-    def score(trade: dict[str, Any]) -> int:
+    def _cand_score(trade: dict[str, Any]) -> int:
         contrib = trade.get("factor_contrib") or {}
         panel = trade.get("panel") or {}
         total = 0.0
@@ -199,7 +199,7 @@ def make_candidate_score(
                 total += w
         return svs._clamp(total)
 
-    return score
+    return _cand_score
 
 
 def c5_strong_frac(band_stats: dict[str, Any], n_trades: int) -> dict[str, Any]:

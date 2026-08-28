@@ -261,8 +261,6 @@ def test_hk_position_gets_no_plan(tmp_path, monkeypatch):
             }
         ]
     )
-    after = [
-        {"代码": "002158", "名称": "医渡科技", "单位成本": 6.09, "market": "HK"}
-    ]
+    after = [{"代码": "002158", "名称": "医渡科技", "单位成本": 6.09, "market": "HK"}]
     plans = pp.sync_plans(trades, [], after)
     assert "002158" not in plans["positions"]

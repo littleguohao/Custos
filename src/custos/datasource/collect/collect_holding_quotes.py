@@ -599,7 +599,10 @@ def main(argv=None) -> int:
         # 台账/持仓快照保留全账户记录，仅 A 股行情采集跳过。
         if not is_a_share_position(h):
             skipped_non_a += 1
-            print(f"[INFO] 跳过非A股持仓 {code} {name}（A股取价链不覆盖）", file=sys.stderr)
+            print(
+                f"[INFO] 跳过非A股持仓 {code} {name}（A股取价链不覆盖）",
+                file=sys.stderr,
+            )
             continue
         # 代码不合白名单一律不进任何数据源(URL/接口参数拼接前的统一拦截点),
         # 如实标 unavailable 而不是拿一个脏 code 去问东财/腾讯。
