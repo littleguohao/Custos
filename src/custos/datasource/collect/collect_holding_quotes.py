@@ -40,7 +40,7 @@ if hasattr(sys.stdout, "reconfigure"):
 from custos.core.paths import TDX_ROOT, cn_today, cn_now, MARKET_DIR, TRADES_DIR  # noqa: E402
 from custos.core.indicators import pct_change
 from custos.core.code_utils import norm_code, fnum as _fnum  # noqa: E402
-from custos.core.code_utils import market_of  # noqa: E402
+from custos.core.code_utils import market_of, is_a_share_position  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
 from custos.datasource.local_tdx import tq_http  # noqa: E402
 from custos.datasource.collect import online_quotes  # noqa: E402
@@ -590,9 +590,17 @@ def main(argv=None) -> int:
     holdings = raw if isinstance(raw, list) else raw.get("holdings", [])
 
     holding_quotes = []
+    skipped_non_a = 0
     for h in holdings:
         code = str(h.get("代码", h.get("code", ""))).zfill(6)
         name = h.get("名称", h.get("name", ""))
+        # 非 A 股持仓（如港股 02158）跳过 A 股取价链路：裸码会被 market_of
+        # 误判为深市个股（深市 002158 是汉钟精机），取到张冠李戴的价格。
+        # 台账/持仓快照保留全账户记录，仅 A 股行情采集跳过。
+        if not is_a_share_position(h):
+            skipped_non_a += 1
+            print(f"[INFO] 跳过非A股持仓 {code} {name}（A股取价链不覆盖）", file=sys.stderr)
+            continue
         # 代码不合白名单一律不进任何数据源(URL/接口参数拼接前的统一拦截点),
         # 如实标 unavailable 而不是拿一个脏 code 去问东财/腾讯。
         if not _valid_code(code):

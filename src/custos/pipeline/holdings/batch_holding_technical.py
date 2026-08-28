@@ -255,7 +255,13 @@ def main(argv=None):
     if mapping.exists():
         items = load(mapping, [])
     else:
-        items = [pos_to_row(x) for x in load(TRADES, []) if x.get("代码")]
+        from custos.core.code_utils import is_a_share_position  # noqa: PLC0415
+
+        items = [
+            pos_to_row(x)
+            for x in load(TRADES, [])
+            if x.get("代码") and is_a_share_position(x)
+        ]
     if not items:
         raise SystemExit("no current holdings or mapping")
     summary = build_summary(items, a.date, use_subprocess=a.subprocess)

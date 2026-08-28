@@ -141,6 +141,14 @@ def _load_holdings(source: Path) -> pd.DataFrame:
     # （绕过 standardize 的清洗），2026-08-24 解耦审计后删除。
     hold = pd.DataFrame(json.loads(source.read_text(encoding="utf-8")))
     hold.columns = [str(c).strip() for c in hold.columns]
+    # 非 A 股持仓（如港股）不进板块映射：TDX 板块文件是 A 股口径，裸码还会被
+    # 误路由（002158 会被当深市汉钟精机）。台账事实源保留，仅映射时过滤。
+    before = len(hold)
+    from custos.core.code_utils import is_a_share_position  # 局部导入避免环
+
+    hold = hold[[is_a_share_position(r) for r in hold.to_dict("records")]].copy()
+    if len(hold) < before:
+        print(f"[INFO] 板块映射跳过 {before - len(hold)} 个非A股持仓")
     hold["代码"] = hold["代码"].map(norm_code)
     hold = hold[
         hold["代码"].ne("") & hold["名称"].notna() & hold["代码"].ne("汇总")

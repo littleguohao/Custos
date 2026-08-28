@@ -201,6 +201,31 @@ def market_of(code: str) -> str:
     return ""
 
 
+def is_a_share_position(row: dict | None) -> bool:
+    """持仓快照行是否属于 A 股（沪深北）标的。**A 股采集/分析链的统一过滤点。**
+
+    背景（2026-08-28）：台账 ``current_positions.json`` 开始混入港股持仓
+    （02158 医渡科技）。台账/持仓快照是**全账户事实源**，必须保留港股；
+    但 A 股链路（取价、板块映射、技术监控、MFE/MAE、门禁）全部按 A 股
+    代码规则取数——裸码 ``002158`` 会被 ``market_of`` 判成深市个股
+    （实际深市 002158 是汉钟精机），取到**张冠李戴的价格/K 线**且不报错。
+    这些点必须在遍历持仓时跳过非 A 股行，而不是让它们带着错价混入结果。
+
+    判定（显式标记优先，防 A 股代码前缀启发式误杀）：
+
+    - ``row["market"]`` 显式给定时：仅 ``SH/SZ/BJ``（大小写不敏感）算 A 股，
+      ``HK/US`` 等一律非 A 股。
+    - 未显式给定（历史行）：退回代码前缀启发式 ``market_of(代码) in {SH,SZ,BJ}``。
+      现存持仓快照此前只装 A 股，此回退保证旧数据行为不变。
+    """
+    if not isinstance(row, dict):
+        return False
+    mkt = row.get("market")
+    if mkt not in (None, ""):
+        return str(mkt).strip().upper() in {"SH", "SZ", "BJ"}
+    return market_of(row.get("代码", "")) in {"SH", "SZ", "BJ"}
+
+
 def norm_code(code: str) -> str:
     """Market-data semantics: ensure a .SH/.SZ/.BJ suffix (technical_monitor version).
 

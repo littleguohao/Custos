@@ -20,7 +20,7 @@ from pathlib import Path
 
 
 from custos.core.paths import TRADES_DIR  # noqa: E402
-from custos.core.code_utils import norm_code  # noqa: E402
+from custos.core.code_utils import norm_code, is_a_share_position  # noqa: E402
 
 
 from custos.datasource.local_tdx import local_tdx_data as ltd  # type: ignore  # noqa: E402
@@ -48,7 +48,13 @@ def load_holdings_codes(positions_path: Path = POSITIONS_PATH) -> list[str]:
         return []
     codes = []
     for row in rows if isinstance(rows, list) else []:
-        raw = row.get("代码") if isinstance(row, dict) else None
+        if not isinstance(row, dict):
+            continue
+        # 非 A 股持仓（港股等）不走 A 股 EOD 复权/K 线链：裸码会误路由到
+        # 同号深市个股。台账保留全账户记录，此处仅取 A 股。
+        if not is_a_share_position(row):
+            continue
+        raw = row.get("代码")
         if raw:
             codes.append(norm_code(str(raw)))
     return codes

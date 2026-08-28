@@ -559,7 +559,13 @@ def _quote_gate_inputs(
     quotes = (
         quote_snapshot.get("quotes", []) if isinstance(quote_snapshot, dict) else []
     )
-    position_codes = {str(x.get("代码", "")).split(".")[0] for x in positions}
+    # 非 A 股持仓（港股等）不参与 A 股行情覆盖门禁：它们不在 A 股取价链里，
+    # 不跳过会因“无当日行情”把 quotes_current 判成 False，误收紧密减仓权限
+    # （2026-08-28 港股 002158 医渡科技入账后引入）。
+    from custos.core.code_utils import is_a_share_position  # noqa: PLC0415
+
+    a_positions = [x for x in positions if is_a_share_position(x)]
+    position_codes = {str(x.get("代码", "")).split(".")[0] for x in a_positions}
     quote_codes = {
         str(x.get("code", "")).split(".")[0]
         for x in quotes

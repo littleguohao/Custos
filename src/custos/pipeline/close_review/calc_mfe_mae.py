@@ -339,6 +339,12 @@ def main(argv=None):
     OUT = HOLDINGS_DIR / f"{target}_mfe_mae.json"
 
     positions = json.loads(POSITIONS.read_text(encoding="utf-8"))
+    from custos.core.code_utils import is_a_share_position  # noqa: PLC0415
+
+    non_a = [p for p in positions if not is_a_share_position(p)]
+    for p in non_a:
+        print(f"[INFO] MFE/MAE 跳过非A股持仓 {p.get('代码')} {p.get('名称')}")
+    positions = [p for p in positions if is_a_share_position(p)]
     entries = load_entry_dates()
     if not entries:
         print(
