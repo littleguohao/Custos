@@ -240,3 +240,29 @@ class TestLedgerIntegration:
         il.apply_positions(il.norm(_trades([_buy()])))
         plans = json.loads((tmp_path / "position_plans.json").read_text("utf-8"))
         assert plans["positions"]["000001"]["entry_price"] == pytest.approx(10.0)
+
+
+def test_hk_position_gets_no_plan(tmp_path, monkeypatch):
+    """v0.133：非 A 股持仓不生成计划——港股 002158 若去 A 股候选池查
+    stop_loss_ref，会拿到深市汉钟精机的止损价（张冠李戴）。"""
+    import pandas as pd
+
+    from custos.core.trades import position_plans as pp
+
+    monkeypatch.setattr(pp, "PLANS_FILE", tmp_path / "plans.json")
+    monkeypatch.setattr(pp, "POOL_DIR", tmp_path / "pool")
+    trades = pd.DataFrame(
+        [
+            {
+                "代码": "002158",
+                "名称": "医渡科技",
+                "交易类别": "买入",
+                "成交日期": "2026-08-28",
+            }
+        ]
+    )
+    after = [
+        {"代码": "002158", "名称": "医渡科技", "单位成本": 6.09, "market": "HK"}
+    ]
+    plans = pp.sync_plans(trades, [], after)
+    assert "002158" not in plans["positions"]

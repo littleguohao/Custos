@@ -76,7 +76,7 @@ from custos.core.paths import (
     write_json_atomic,
 )
 from custos.core import exit_rules
-from custos.core.code_utils import clean_code, finite
+from custos.core.code_utils import clean_code, finite, is_a_share_position
 
 # 模块级常量：测试 monkeypatch 改道 tmp（同 incremental_ledger.POS 的模式）。
 PLANS_FILE = POSITION_PLANS_FILE
@@ -232,6 +232,11 @@ def sync_plans(
             sells[code] = max(day, sells[code]) if code in sells else day
 
     for code, row in after_by.items():
+        # 2026-08-28（v0.133）：非 A 股持仓（HK/US 等）不生成计划——否则裸码
+        # 002158（港股医渡科技）会去 A 股候选池查 stop_loss_ref，拿到**深市
+        # 汉钟精机**的近10日低点 24.96 当 6 港元的止损价（张冠李戴）。
+        if not is_a_share_position(row):
+            continue
         unit_cost = finite(row.get("单位成本"))
         if code not in before:
             if code not in buys:
