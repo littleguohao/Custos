@@ -25,9 +25,13 @@
 - **C3_natural**（天然基准，v0.128 owner 拍板「和天然胜率盈亏比比较」）：
   变体篮子 margin > V0 篮子 margin，margin = 胜率 − 盈亏平衡胜率 1/(1+盈亏比)，
   零自由参数；Wilson 95% 重叠仅作显著性注记，不改变判定
+- **C3_natural_vs_universe**（全样本天然基准，R24 Phase 0，2026-08-28 owner：
+  天然=无因子影响的胜率/盈亏比组合）：变体篮子 margin > **全样本** margin；
+  与全样本胜率的 Wilson 95% 重叠同样仅作注记——与既有三列**并列第四列，互不覆盖**
 - **C4**：跨窗（2022-2024，s1000）C1 符号保持
 判定：C1–C3 全过 ⇒ 候选；C4 再过 ⇒ 跨窗确认。C1–C3 任一不过 ⇒ 该变体淘汰。
-三个 C3 口径**并列展示、互不覆盖**（出处见报告 criteria_provenance）。
+四个 C3 口径**并列展示、互不覆盖**（出处见报告 criteria_provenance）。
+逐腿边际分析（ablation）在姊妹脚本 `score_calibration_study.py`（R24 Phase 0）。
 
 多比较纪律：变体 ≤4、权重简单整数、一轮数据采集（panel+contrib 一次算好，
 变体离线求值——交易集与打分无关，baseline scorer 进场只由 j_low gate 决定）。
@@ -234,13 +238,22 @@ def evaluate_variant(
     }
 
 
-def judge(rep: dict[str, Any], v0_basket: dict[str, Any]) -> dict[str, Any]:
+def judge(
+    rep: dict[str, Any],
+    v0_basket: dict[str, Any],
+    universe_stats: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
     """按预注册判据 C1–C3 裁决（C4 跨窗在报告层人工对照，不进本函数）。
 
-    C3 三个口径并列（互不覆盖）：预注册（盈亏比 ≥ V0，v0.119）/
+    C3 四个口径并列（互不覆盖）：预注册（盈亏比 ≥ V0，v0.119）/
     owner 放宽（胜率升 + 盈亏比 ≥ 2.4，v0.121，事后并列）/
-    天然基准 margin（变体篮子 margin > V0 篮子 margin，v0.128，零自由参数）。
+    天然基准 margin（变体篮子 margin > V0 篮子 margin，v0.128，零自由参数）/
+    全样本天然基准（变体篮子 margin > **全样本** margin，R24 Phase 0，
+    2026-08-28 owner：天然=无因子影响的胜率/盈亏比组合——「无筛选」才是地板）。
     Wilson 重叠是**显著性辅助注记**（重叠 = 差异不显著，参考用，不改变判定）。
+
+    ``universe_stats`` = 全样本 ret_stats + n_win（build_report 传入）；
+    缺省（旧调用）时第四列各键为 None，不影响既有三列。
     """
     sp = rep["corr"].get("spearman")
     hw = rep["half_window"]
@@ -277,31 +290,58 @@ def judge(rep: dict[str, Any], v0_basket: dict[str, Any]) -> dict[str, Any]:
         if None in (lo_v, hi_v, lo_0, hi_0)
         else not (hi_v < lo_0 or hi_0 < lo_v)  # 区间相交
     )
+    # 全样本天然基准（R24 Phase 0，2026-08-28 owner：天然=无因子影响组合）——
+    # 第四列 C3，与既有三列**并列、互不覆盖**：基准从「V0 篮子」换成「全样本」，
+    # 既有三列的输入一个不动。
+    u = universe_stats or {}
+    m_u = _margin({"win": u.get("win_rate"), "payoff": u.get("payoff_ratio")})
+    c3_vs_universe = m_v is not None and m_u is not None and m_v > m_u
+    lo_u, hi_u = wilson_wr_interval(u.get("n_win") or 0, u.get("n") or 0)
+    wilson_overlap_universe = (
+        None
+        if None in (lo_v, hi_v, lo_u, hi_u)
+        else not (hi_v < lo_u or hi_u < lo_v)  # 与全样本胜率区间相交
+    )
+    n_u = u.get("n") or 0
     return {
         "C1_spearman_positive": c1,
         "C2_winner_scores_higher": c2,
         "C3_basket_wr_up_payoff_kept": c3,
         "C3_relaxed_wr_up_payoff_floor": c3_relaxed,
         "C3_natural_margin": c3_natural,
+        "C3_natural_vs_universe": c3_vs_universe,
         "basket_margin": round(m_v, 4) if m_v is not None else None,
         "v0_basket_margin": round(m_0, 4) if m_0 is not None else None,
+        "universe_margin": round(m_u, 4) if m_u is not None else None,
         "basket_wr_wilson95": [lo_v, hi_v],
         "v0_basket_wr_wilson95": [lo_0, hi_0],
+        "universe_wr_wilson95": [lo_u, hi_u],
         "wilson_overlap": wilson_overlap,
+        "wilson_overlap_universe": wilson_overlap_universe,
+        # 篮子占全样本比例 n/N——C5 候选数约束的读数（top20% 口径下应 ≈0.20）
+        "basket_frac_of_universe": (round((b.get("n") or 0) / n_u, 4) if n_u else None),
         "candidate": c1 and c2 and c3,
         "candidate_relaxed": c1 and c2 and c3_relaxed,
         "candidate_natural": c1 and c2 and c3_natural,
+        "candidate_vs_universe": c1 and c2 and c3_vs_universe,
     }
 
 
 def build_report(trades: list[dict[str, Any]]) -> dict[str, Any]:
-    """四变体评估 + 预注册判据裁决。"""
+    """四变体评估 + 预注册判据裁决（含全样本天然基准第四列 C3）。"""
     variants = {
         name: evaluate_variant(trades, name, fn) for name, fn in VARIANTS.items()
     }
     v0_basket = variants["V0"]["basket_top20_by_variant"]
+    # 全样本统计（ret_stats + 原始命中数）——judge 的第四列基准输入
+    universe_stats = {
+        **srs.ret_stats(trades),
+        "n_win": sum(1 for t in trades if t["ret"] > 0),
+    }
     verdicts = {
-        name: judge(rep, v0_basket) if name != "V0" else {"note": "对照臂"}
+        name: judge(rep, v0_basket, universe_stats)
+        if name != "V0"
+        else {"note": "对照臂"}
         for name, rep in variants.items()
     }
     return {
@@ -317,15 +357,20 @@ def build_report(trades: list[dict[str, Any]]) -> dict[str, Any]:
             "C3_natural": "变体篮子 margin > V0 篮子 margin（天然基准，v0.128 owner 拍板；"
             "margin=胜率−盈亏平衡胜率 1/(1+盈亏比)，零自由参数；"
             "Wilson 95% 重叠仅作显著性注记不改判定）",
+            "C3_natural_vs_universe": "变体篮子 margin > 全样本 margin（R24 Phase 0，"
+            "2026-08-28 owner：天然=无因子影响的胜率/盈亏比组合——「无筛选」地板；"
+            "与全样本胜率的 Wilson 95% 重叠仅作显著性注记不改判定）",
             "C4": "跨窗（2022-2024）C1 符号保持",
         },
         "criteria_provenance": (
             "C1/C2/C3=预注册（v0.119）；C3_relaxed=owner 放宽（v0.121，事后并列）；"
-            "C3_natural=天然基准 margin（v0.128，owner：「和天然胜率盈亏比比较」）。"
-            "三列 C3 并列展示，互不覆盖。"
+            "C3_natural=天然基准 margin（v0.128，owner：「和天然胜率盈亏比比较」）；"
+            "C3_natural_vs_universe=全样本天然基准（R24 Phase 0，2026-08-28 owner："
+            "天然=无因子影响组合）。四列 C3 并列展示，互不覆盖。"
         ),
         "n_trades": len(trades),
         "overall_stats": srs.ret_stats(trades),
+        "universe_stats": universe_stats,
         "exit_reasons": srs.exit_reason_dist(trades),
         "variants": variants,
         "verdicts": verdicts,
@@ -343,9 +388,13 @@ def print_report(rep: dict[str, Any]) -> None:
         f"\n样本：{rep['n_trades']} 笔；全体均收 {os_['avg_ret'] * 100:.2f}% / "
         f"胜率 {os_['win_rate'] * 100:.1f}% / 盈亏比 {os_['payoff_ratio']}"
     )
+    # 全样本 margin = 「无因子天然基准」（R24 判据 C3★ 的地板读数）
+    m_u = _margin({"win": os_.get("win_rate"), "payoff": os_.get("payoff_ratio")})
+    m_u_txt = f"{m_u * 100:+.1f}pp" if m_u is not None else "—"
+    print(f"全样本 margin（无因子天然基准）：{m_u_txt}")
     print(
         "\n── 变体对照：Spearman(半窗) | 赢家top20均分 vs 对照组 | "
-        "变体篮子(胜率/盈亏比/均收/n/margin) | C1/C2/C3预注册/C3放宽/C3天然"
+        "变体篮子(胜率/盈亏比/均收/n占全样本/margin) | C1/C2/C3预注册/C3放宽/C3天然/C3天然vs全样本"
     )
     for name, v in rep["variants"].items():
         hw = v["half_window"]
@@ -365,18 +414,24 @@ def print_report(rep: dict[str, Any]) -> None:
                 f"{'✓' if vd.get('C3_basket_wr_up_payoff_kept') else '✗'}"
                 f"{'✓' if vd.get('C3_relaxed_wr_up_payoff_floor') else '✗'}"
                 f"{'✓' if vd.get('C3_natural_margin') else '✗'}"
+                f"{'✓' if vd.get('C3_natural_vs_universe') else '✗'}"
                 f" ⇒ 预注册{'候选' if vd.get('candidate') else '淘汰'}"
                 f"/放宽{'候选' if vd.get('candidate_relaxed') else '淘汰'}"
                 f"/天然{'候选' if vd.get('candidate_natural') else '淘汰'}"
+                f"/全样本{'候选' if vd.get('candidate_vs_universe') else '淘汰'}"
             )
             if vd.get("wilson_overlap") is True:
                 tags += "（Wilson重叠=胜率差异不显著，注记）"
             elif vd.get("wilson_overlap") is False:
                 tags += "（Wilson不重叠）"
+            if vd.get("wilson_overlap_universe") is False:
+                tags += "（vs全样本Wilson不重叠）"
+        n_all = rep["n_trades"] or 1
         print(
             f"  {name} | {sp}({h1}/{h2}{'' if hw.get('consistent') else ' ⚠️翻'}) | "
             f"{v['winner_top20_dist'].get('mean')} vs {v['bottom80_dist'].get('mean')} | "
-            f"{b['win_rate'] * 100:.1f}%/{b['payoff_ratio']}/{b['avg_ret'] * 100:.2f}%/n={b['n']}/{m_txt} | "
+            f"{b['win_rate'] * 100:.1f}%/{b['payoff_ratio']}/{b['avg_ret'] * 100:.2f}%/"
+            f"n={b['n']}/{n_all}({b['n'] / n_all * 100:.0f}%)/{m_txt} | "
             f"{tags}"
         )
     print("\n── 分档收益表（live 30/60 阈；变体分档）")

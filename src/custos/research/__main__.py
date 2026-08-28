@@ -115,6 +115,11 @@ TOOLS: dict[str, tuple[str, str]] = {
         "打分重构：V0~V3 变体（反向腿取反/证据重构/负向证据）× 预注册判据"
         "——TOP20% 赢家能否在得分上浮现（⚠️ R21：以篮子实测为准）",
     ),
+    "score_calibration_study": (
+        "study",
+        "R24 打分校准：逐腿边际分析（池内命中率/add-one/LOO margin）——"
+        "离线读 trades JSON 零回测（--ablation --from-trades；⚠️ pre2019 只读不调参）",
+    ),
     "qsx_resonance_study": (
         "study",
         "QSX/DKX 两层过滤三臂：①QSX>DKS 多头 ②「跌线就反弹」共振"

@@ -380,3 +380,112 @@ class TestWilsonAnnotation:
         assert "C3_natural" in rep["preregistered_criteria"]
         assert "margin" in rep["preregistered_criteria"]["C3_natural"]
         assert "criteria_provenance" in rep
+
+
+class TestUniverseMarginBaseline:
+    """R24 Phase 0（2026-08-28 owner：天然=无因子影响组合）：全样本 margin 基准列——
+    与既有三列 C3 并列第四列，互不覆盖。"""
+
+    def _rep(self, wr=0.47, payoff=2.428, n=1000, n_win=470):
+        return {
+            "corr": {"spearman": 0.1},
+            "half_window": {"consistent": True, "first_half": {"spearman": 0.08}},
+            "winner_top20_dist": {"mean": 50},
+            "bottom80_dist": {"mean": 40},
+            "basket_top20_by_variant": {
+                "win_rate": wr,
+                "payoff_ratio": payoff,
+                "n": n,
+                "n_win": n_win,
+            },
+        }
+
+    def test_universe_margin_math(self):
+        """全样本 margin 手算：胜率 37.5%、盈亏比 2.27 ⇒ 0.375 − 1/3.27 ≈ 0.0692。"""
+        v0 = {"win_rate": 0.272, "payoff_ratio": 2.814, "n": 1000, "n_win": 272}
+        u = {"win_rate": 0.375, "payoff_ratio": 2.27, "n": 1000, "n_win": 375}
+        vd = svs.judge(self._rep(), v0, u)
+        assert vd["universe_margin"] == pytest.approx(0.375 - 1 / 3.27, abs=1e-4)
+
+    def test_c3_vs_universe_pass_and_fail(self):
+        v0 = {"win_rate": 0.272, "payoff_ratio": 2.814, "n": 1000, "n_win": 272}
+        # 变体篮子 margin 0.47−1/3.428≈0.178 > 全样本 0.0692 ⇒ 过
+        u_weak = {"win_rate": 0.375, "payoff_ratio": 2.27, "n": 1000, "n_win": 375}
+        vd = svs.judge(self._rep(), v0, u_weak)
+        assert vd["C3_natural_vs_universe"] is True
+        assert vd["candidate_vs_universe"] is True
+        # 全样本换强基准：50%/3.0 ⇒ margin 0.25 > 0.178 ⇒ 不过
+        u_strong = {"win_rate": 0.50, "payoff_ratio": 3.0, "n": 1000, "n_win": 500}
+        vd2 = svs.judge(self._rep(), v0, u_strong)
+        assert vd2["C3_natural_vs_universe"] is False
+        assert vd2["candidate_vs_universe"] is False
+
+    def test_old_three_c3_unaffected_by_universe(self):
+        """改 universe 输入不得影响既有三列 C3 与 V0 侧全部读数（互不覆盖）。"""
+        v0 = {"win_rate": 0.272, "payoff_ratio": 2.814, "n": 1000, "n_win": 272}
+        u_a = {"win_rate": 0.10, "payoff_ratio": 9.0, "n": 500, "n_win": 50}
+        u_b = {"win_rate": 0.90, "payoff_ratio": 0.5, "n": 5000, "n_win": 4500}
+        vd_a = svs.judge(self._rep(), v0, u_a)
+        vd_b = svs.judge(self._rep(), v0, u_b)
+        stable_keys = (
+            "C1_spearman_positive",
+            "C2_winner_scores_higher",
+            "C3_basket_wr_up_payoff_kept",
+            "C3_relaxed_wr_up_payoff_floor",
+            "C3_natural_margin",
+            "basket_margin",
+            "v0_basket_margin",
+            "basket_wr_wilson95",
+            "v0_basket_wr_wilson95",
+            "wilson_overlap",
+            "candidate",
+            "candidate_relaxed",
+            "candidate_natural",
+        )
+        for k in stable_keys:
+            assert vd_a[k] == vd_b[k], f"{k} 被 universe 输入污染"
+        # 缺省 universe（旧调用形态）⇒ 第四列为 None，既有列不受影响
+        vd_none = svs.judge(self._rep(), v0)
+        assert vd_none["universe_margin"] is None
+        assert vd_none["C3_natural_vs_universe"] is False
+        assert vd_none["wilson_overlap_universe"] is None
+        for k in stable_keys:
+            assert vd_none[k] == vd_a[k]
+
+    def test_wilson_vs_universe_annotation(self):
+        """变体篮子 47% vs 全样本 27%（n 各 3000）⇒ Wilson 不重叠；接近则重叠。"""
+        v0 = {"win_rate": 0.272, "payoff_ratio": 2.814, "n": 3000, "n_win": 816}
+        rep = self._rep(wr=0.47, payoff=2.4, n=3000, n_win=1410)
+        u_far = {"win_rate": 0.272, "payoff_ratio": 2.8, "n": 3000, "n_win": 816}
+        assert svs.judge(rep, v0, u_far)["wilson_overlap_universe"] is False
+        u_near = {"win_rate": 0.46, "payoff_ratio": 2.8, "n": 100, "n_win": 46}
+        assert svs.judge(rep, v0, u_near)["wilson_overlap_universe"] is True
+
+    def test_build_report_registers_universe(self):
+        """build_report：universe_stats 进报告、判据文本与出处登记第四列。"""
+        rep = svs.build_report(
+            [
+                {
+                    "ret": 0.1,
+                    "entry_date": "2026-01-05",
+                    "reason": "bbi_exit",
+                    "factor_contrib": {"j_low": 24},
+                    "panel": {"rsi_deep_oversold": True},
+                },
+                {
+                    "ret": -0.1,
+                    "entry_date": "2026-06-01",
+                    "reason": "stop",
+                    "factor_contrib": {"j_low": 24},
+                    "panel": {},
+                },
+            ]
+        )
+        assert rep["universe_stats"]["n_win"] == 1
+        assert rep["universe_stats"]["n"] == 2
+        assert "C3_natural_vs_universe" in rep["preregistered_criteria"]
+        assert "无因子" in rep["criteria_provenance"]
+        vd = rep["verdicts"]["V2"]
+        assert vd["universe_margin"] is not None
+        # 篮子占全样本 n/N：2 笔 × top-20% ⇒ ceil(0.4)=1 ⇒ 0.5（C5 读数）
+        assert vd["basket_frac_of_universe"] == pytest.approx(0.5)

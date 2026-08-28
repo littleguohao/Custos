@@ -24,6 +24,7 @@ flowchart TB
         R21["R21 深水RSI gate 验证<br/>✅ 跨窗通过（四档压基底）<br/>⚠️ 富集≠可交易（rsi_div）"]
         R22["R22 打分重构 V0-V3<br/>✅ V2 证据重构翻正（双窗）<br/>⚠️ C3 放宽线 owner 拍板"]
         R23["R23 QSX/DKX 两层过滤<br/>❌ 双证伪（结构不加值<br/>共振 99%≈无过滤）"]
+        R24["R24 打分校准重建<br/>🔄 预注册进行中<br/>（天然基准=全样本 margin）"]
     end
     subgraph TIM["择时 —— 唯一站得住"]
         R4["R4 0AMV ✅ ~15pp<br/>板块相位 ⚠️ 方向不稳（降级）"]
@@ -49,6 +50,7 @@ flowchart TB
     R16 --> R10
     R14 --> R2 & R3 & R10
     R2 --> R3
+    R22 -.翻车教训.-> R24
     R3 --> R9
     R6 --> R9
     R7 --> R9
@@ -107,6 +109,7 @@ flowchart TB
 | [R21](R21_rsi_deep_gate_validation.md) | 深水RSI 进场 gate 验证 | ✅ 跨窗通过：四档出场压基底（margin +26~+42pp，Wilson 不重叠）；12% 止损跨窗跳升最优；rsi_div 富集≠可交易 | L3 | ✅ 跨窗通过，live 接线待 owner 拍板（2026-08-24）|
 | [R22](R22_score_rebuild_variants.md) | 打分重构 V0-V3 | V2 证据重构翻正双窗（Spearman +0.09→+0.14）；篮子胜率 27%→47%/54%；V1 取反证伪 | L3 | ⚠️ 放宽候选（owner 拍板 C3 线 ≥2.4），独立窗复核后进 live 提案（2026-08-26）|
 | [R23](R23_qsx_resonance_filter.md) | QSX/DKX 两层过滤 | v1 双证伪；**v2：排除项（跌破未收复=空头有效）是全部边际**——砍 83% 交易后均收/期望R 转正（胜率 19.3%/盈亏比 4.78 极端互换），预注册线字面不过 | L3 | 🔄 v2 完成（2026-08-26）；排除态建议作独立风控腿另行研究 |
+| [R24](R24_score_calibration.md) | 打分体系严谨重建 | 预注册落档：目标=top20% 篮子 margin 跑赢**全样本** margin（天然基准）；C1/C2/C3★/C4/C5 + pre2019 untouched 终审；Phase 0 基建（全样本 margin 基准列 + 逐腿 ablation）完成 | L0 | 🔄 预注册进行中（2026-08-28）；Phase 1-3 跑数待生产机 |
 
 ## 当前一句话结论
 
