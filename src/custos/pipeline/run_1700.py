@@ -398,7 +398,7 @@ def _emit_review_digest(
     target: str, run_started: str, t0: float, stages_log: list[dict]
 ) -> int:
     # 8. Read generated review and convert to text digest
-    review_path = daily_report_dir(target, REVIEWS) / f"{target}_final_review.md"
+    review_path = daily_report_dir(target, REVIEWS) / f"{target}_1700_final_review.md"
     if not review_path.exists():
         stages_log.append(
             _log_stage(

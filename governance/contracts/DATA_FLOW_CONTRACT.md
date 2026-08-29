@@ -183,7 +183,9 @@
 - `data/buy_strategy/YYYY-MM-DD_buy_plan.json`
 - `data/holdings/YYYY-MM-DD_holding_technical_summary.json`
 - `artifacts/reports/daily/YYYY-MM-DD/YYYY-MM-DD_chief_decision.md`
-- `artifacts/reports/daily/YYYY-MM-DD/YYYY-MM-DD_review.md`
+- `artifacts/reports/daily/YYYY-MM-DD/YYYY-MM-DD_1445_review.md`
+- 三份日报告文件名带时点标记（v0.141 起）：盘前 `YYYY-MM-DD_0905_daily_report.md`、
+  盘后 `YYYY-MM-DD_1700_final_review.md/.json`、选股 `YYYY-MM-DD_1800_candidate_table.md`
 
 ## 质量检查
 

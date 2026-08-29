@@ -59,7 +59,9 @@ def daily_report_dir(day: str, base: Path | None = None) -> Path:
 
     2026-08-12 起废除 `_supporting/` 双套结构：当天的全部报告（日报/择时评分/
     题材/1445/盘后复盘/候选表…）都归这一天目录；模板 `DAILY_PLAN_TEMPLATE.md`
-    留在根。文件名保留 `{day}_` 前缀（测试与外部模式匹配面大，不动名只动目录）。
+    留在根。文件名保留 `{day}_` 前缀；三份日报告另带时点标记（v0.141）：
+    `{day}_0905_daily_report.md` / `{day}_1700_final_review.md|.json` /
+    `{day}_1800_candidate_table.md`。
 
     ⚠️ 调用方传**自己模块的路径常量**作 ``base``（如 `daily_report_dir(date, PLANS)`
     ——注意传的是调用方模块 globals 里的那个名字）：测试靠 monkeypatch 模块常量

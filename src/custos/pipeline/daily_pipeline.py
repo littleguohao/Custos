@@ -593,7 +593,7 @@ def main():
         HOLDINGS_DIR / f"{args.date}_holding_technical_summary.json",
         daily_report_dir(args.date, PLANS) / f"{args.date}_portfolio_review.md",
         daily_report_dir(args.date, PLANS) / f"{args.date}_chief_decision.md",
-        daily_report_dir(args.date, PLANS) / f"{args.date}_daily_report.md",
+        daily_report_dir(args.date, PLANS) / f"{args.date}_0905_daily_report.md",
         DATA / "sectors" / f"{args.date}_sector_state.json",
         DATA / "risk" / f"{args.date}_risk_decision.json",
         daily_report_dir(args.date, PLANS) / f"{args.date}_wechat_summary.txt",

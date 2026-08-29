@@ -1030,7 +1030,7 @@ def main():
         )
     )
 
-    out = daily_report_dir(day, REV) / f"{day}_final_review.md"
+    out = daily_report_dir(day, REV) / f"{day}_1700_final_review.md"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     payload = build_payload(
@@ -1053,7 +1053,7 @@ def main():
         gate,
         out,
     )
-    json_out = daily_report_dir(day, REV) / f"{day}_final_review.json"
+    json_out = daily_report_dir(day, REV) / f"{day}_1700_final_review.json"
     require("final_review", payload)
     json_out.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False),

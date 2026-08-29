@@ -149,7 +149,7 @@ def main(argv=None) -> int:
     # 3. Read generated report and convert to text digest
     d_started = _now_iso()
     d_t0 = time.time()
-    report_path = daily_report_dir(target, PLANS) / f"{target}_daily_report.md"
+    report_path = daily_report_dir(target, PLANS) / f"{target}_0905_daily_report.md"
     if not report_path.exists():
         stages_log.append(
             _log_stage(

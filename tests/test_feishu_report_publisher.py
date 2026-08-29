@@ -13,7 +13,8 @@ from unittest import mock
 from custos.pipeline import feishu_report_publisher as frp
 import sys
 
-# 结构取自 artifacts/reports/daily/2026-07-20_daily_report.md(盘前日报)
+# 结构取自 artifacts/reports/daily/2026-07-20/2026-07-20_0905_daily_report.md(盘前日报)
+# （fixture 结构来自改名前的 2026-07-20 报告；2026-08-29 起文件名带 0905 时点标记）
 DAILY_REPORT = """# 每日投研简报｜2026年7月20日（星期一）
 
 > 生成时间：2026-07-20 22:59:58 Asia/Shanghai
@@ -73,7 +74,8 @@ REVIEW_1445 = """# 14:45 收盘前操作建议 — 2026-07-20
 - 提高仓位权限：禁止。
 """
 
-# 结构取自 artifacts/reports/daily/2026-07-20_final_review.md(盘后复盘)
+# 结构取自 artifacts/reports/daily/2026-07-20/2026-07-20_1700_final_review.md(盘后复盘)
+# （fixture 结构来自改名前的 2026-07-20 报告；2026-08-29 起文件名带 1700 时点标记）
 FINAL_REVIEW = """# 2026-07-20 最终盘后复盘
 
 > 生成时间：2026-07-20 22:59:59

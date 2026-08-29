@@ -373,11 +373,13 @@ def trading_days_of_week(base: Path, days: list[str]) -> dict[str, bool | None]:
 
 
 def _load_daily_review_json(base: Path, day: str):
-    """读某日的 final_review.json：新结构 `daily/{day}/` 优先，旧平铺回退
-    （2026-08-12 目录重构的迁移期兼容——历史日期的产物仍是旧布局）。
-    文件不存在返回 None。"""
+    """读某日的 final_review.json：新名 `daily/{day}/{day}_1700_final_review.json`
+    优先；旧名（2026-08-29 文件名带时点标记前）与旧平铺（2026-08-12 目录重构前）
+    依次回退——历史日期的产物仍是旧名/旧布局，prev-day 查找必须兼容，否则
+    改名次日读前一交易日预案会断。文件不存在返回 None。"""
     daily = base / "artifacts/reports" / "daily"
     for path in (
+        daily / day / f"{day}_1700_final_review.json",
         daily / day / f"{day}_final_review.json",
         daily / f"{day}_final_review.json",
     ):

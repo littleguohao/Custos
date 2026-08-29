@@ -105,8 +105,10 @@ def premarket_schema_marker(check: dict[str, Any]) -> str:
 def previous_review(day: str) -> dict[str, Any]:
     review_dir = REVIEWS / "daily"
     candidates = []
-    # 新结构 {day}/{day}_final_review.json + 旧平铺 *_final_review.json（迁移期兼容，
-    # 读历史日前一批是旧布局）——同一文件会被两种模式各命中一次的形态不存在，放心并集。
+    # 新结构 {day}/{day}_1700_final_review.json + 旧名 {day}_final_review.json
+    # （2026-08-29 文件名带时点标记前）+ 旧平铺 *_final_review.json（迁移期兼容，
+    # 读历史日前一批是旧布局）——glob 后缀 *_final_review.json 对新旧名都命中，
+    # 同一文件会被两种模式各命中一次的形态不存在，放心并集。
     for path in list(review_dir.glob("*/*_final_review.json")) + list(
         review_dir.glob("*_final_review.json")
     ):
@@ -195,6 +197,109 @@ def fallback_rss_events(day: str) -> list[dict[str, Any]]:
     return selected[:3]
 
 
+def _plan_level_lines(plan: dict, chief: dict, prior_day: str) -> list[str]:
+    """计划级两行（总仓位目标/新开仓权限）盘后 vs 盘前刷新值逐条确认。"""
+    if not plan:
+        return [
+            "- ⚠️ 盘后条件化预案**缺失**（上一交易日 final_review 无 next_day_plan）"
+            "——无预案可确认；以下为盘前信息刷新值。"
+        ]
+    lines = [f"- 预案来源：**{prior_day}** 盘后复盘 §6。"]
+    lines += [
+        "",
+        "| 预案项 | 盘后计划 | 盘前确认 |",
+        "|---|---|---|",
+    ]
+    for label, pv, cv in (
+        (
+            "总仓位目标",
+            plan.get("total_position_range"),
+            chief.get("total_position_range"),
+        ),
+        (
+            "新开仓权限",
+            plan.get("new_position_permission"),
+            chief.get("new_position_permission"),
+        ),
+    ):
+        if not pv:
+            state = "盘后缺值"
+        elif str(pv) == str(cv):
+            state = "✅ 确认（一致）"
+        else:
+            state = f"⚠️ 变化：盘前为 {cv}"
+        lines.append(f"| {label} | {pv or '缺失'} | {state} |")
+    return lines
+
+
+def _holding_action_row(
+    x: dict,
+    tech: dict,
+    prior_actions: dict,
+    plan_by_code: dict,
+    holding_event_map: dict,
+    plan: dict,
+) -> str:
+    """逐票行：持仓状态 × 盘后预案 × 盘前确认（原 §4 表 + §6 逐票确认合并）。"""
+    c = code(x.get("code"))
+    t = tech.get(c, {})
+    p = prior_actions.get(c, {})
+    prow = plan_by_code.get(c)
+    event = holding_event_map.get(c)
+    tech_state = f"{clean(t.get('latest_date'))} 收{num(t.get('close'))}；{clean(t.get('trend_state'))}；仓位{ratio(t.get('position_pct'))}"
+    ma_j = f"{technical_relation(t)}；日J={num(t.get('daily_j'), 1)}"
+    bbi_state, bbi_reminder = bbi_holding_reminder(t)
+    structure = n_structure_basis(t, t.get("close"))
+    current_action = f"{x.get('priority', 'P3')} {clean(x.get('action'), '观察')}；{'；'.join(x.get('reasons') or [])}"
+    if prow:
+        plan_cell = (
+            f"{prow.get('priority')} {prow.get('direction')}"
+            f"；触发：{prow.get('trigger')}；无效：{prow.get('invalidation')}"
+        )
+        confirm = "✅ 确认（盘前动作在列）"
+    else:
+        # 预案缺该票：回退到上次复盘动作口径（原 §4 列），确认态如实标注
+        plan_cell = ACTION_LABELS.get(
+            p.get("action") or "",
+            clean(p.get("action") or p.get("direction"), "无可用计划"),
+        )
+        confirm = "盘后预案无该票条目" if plan else "-"
+    new_evidence = (
+        f"{direction_label(event.get('direction'))}：{clean(event.get('title'))}"
+        if event
+        else "无新增持仓事件"
+    )
+    return (
+        f"| {c} {x.get('name') or (prow or {}).get('name') or ''} | {tech_state} | {ma_j} | {bbi_state}；{bbi_reminder}；{structure['state']}；{structure['reminder']} | {current_action} | {plan_cell} | {confirm} | {new_evidence} |"
+    )
+
+
+def _plan_only_warning_lines(plan: dict, action_codes: set) -> list[str]:
+    """盘后预案在列、盘前动作缺位的票（原 §6「盘前无该票动作条目」口径保留）。"""
+    return [
+        f"- ⚠️ {code(prow.get('code'))} {prow.get('name')}：盘后预案在列"
+        "（触发："
+        f"{prow.get('trigger')}）但**盘前无该票动作条目**"
+        for prow in plan.get("holding_plans") or []
+        if code(prow.get("code")) not in action_codes
+    ]
+
+
+def _premarket_refresh_lines(chief: dict) -> list[str]:
+    """盘前信息刷新（隔夜信息后的当前执行规则）。"""
+    return [
+        "",
+        "- 盘前信息刷新："
+        f"风控优先={'；'.join(chief.get('allowed_actions') or ['仅观察'])}"
+        f"；新开仓={chief.get('new_position_permission', '禁止')}"
+        f"；仓位管理=建议 {chief.get('total_position_range', '待确认')}"
+        "（持仓快照、目标日行情或市场质量未全部通过时只给方向，不给精确数量）",
+        "- 开盘验证：先验证隔夜利好/利空是否被价格与成交确认，再决定是否收紧计划；"
+        "利好不得自动放宽权限。",
+        f"- 下一验证点：{'；'.join(chief.get('tomorrow_validation') or []) or '无'}",
+    ]
+
+
 def holdings_plan_section(
     chief: dict,
     tech: dict,
@@ -221,37 +326,7 @@ def holdings_plan_section(
         "盘后复盘 §6**。本节确认预案在隔夜信息后是否仍成立，不是新出预案。",
         "",
     ]
-    if not plan:
-        lines.append(
-            "- ⚠️ 盘后条件化预案**缺失**（上一交易日 final_review 无 next_day_plan）"
-            "——无预案可确认；以下为盘前信息刷新值。"
-        )
-    else:
-        lines.append(f"- 预案来源：**{prior_day}** 盘后复盘 §6。")
-        lines += [
-            "",
-            "| 预案项 | 盘后计划 | 盘前确认 |",
-            "|---|---|---|",
-        ]
-        for label, pv, cv in (
-            (
-                "总仓位目标",
-                plan.get("total_position_range"),
-                chief.get("total_position_range"),
-            ),
-            (
-                "新开仓权限",
-                plan.get("new_position_permission"),
-                chief.get("new_position_permission"),
-            ),
-        ):
-            if not pv:
-                state = "盘后缺值"
-            elif str(pv) == str(cv):
-                state = "✅ 确认（一致）"
-            else:
-                state = f"⚠️ 变化：盘前为 {cv}"
-            lines.append(f"| {label} | {pv or '缺失'} | {state} |")
+    lines += _plan_level_lines(plan, chief, prior_day)
     # 逐票：持仓状态 × 盘后预案 × 盘前确认（原 §4 表 + §6 逐票确认合并）
     lines += [
         "",
@@ -260,62 +335,18 @@ def holdings_plan_section(
     ]
     action_codes = set()
     for x in chief.get("holding_actions", []):
-        c = code(x.get("code"))
-        action_codes.add(c)
-        t = tech.get(c, {})
-        p = prior_actions.get(c, {})
-        prow = plan_by_code.get(c)
-        event = holding_event_map.get(c)
-        tech_state = f"{clean(t.get('latest_date'))} 收{num(t.get('close'))}；{clean(t.get('trend_state'))}；仓位{ratio(t.get('position_pct'))}"
-        ma_j = f"{technical_relation(t)}；日J={num(t.get('daily_j'), 1)}"
-        bbi_state, bbi_reminder = bbi_holding_reminder(t)
-        structure = n_structure_basis(t, t.get("close"))
-        current_action = f"{x.get('priority', 'P3')} {clean(x.get('action'), '观察')}；{'；'.join(x.get('reasons') or [])}"
-        if prow:
-            plan_cell = (
-                f"{prow.get('priority')} {prow.get('direction')}"
-                f"；触发：{prow.get('trigger')}；无效：{prow.get('invalidation')}"
-            )
-            confirm = "✅ 确认（盘前动作在列）"
-        else:
-            # 预案缺该票：回退到上次复盘动作口径（原 §4 列），确认态如实标注
-            plan_cell = ACTION_LABELS.get(
-                p.get("action") or "",
-                clean(p.get("action") or p.get("direction"), "无可用计划"),
-            )
-            confirm = "盘后预案无该票条目" if plan else "-"
-        new_evidence = (
-            f"{direction_label(event.get('direction'))}：{clean(event.get('title'))}"
-            if event
-            else "无新增持仓事件"
-        )
+        action_codes.add(code(x.get("code")))
         lines.append(
-            f"| {c} {x.get('name') or (prow or {}).get('name') or ''} | {tech_state} | {ma_j} | {bbi_state}；{bbi_reminder}；{structure['state']}；{structure['reminder']} | {current_action} | {plan_cell} | {confirm} | {new_evidence} |"
+            _holding_action_row(x, tech, prior_actions, plan_by_code, holding_event_map, plan)
         )
     if not chief.get("holding_actions"):
         lines.append(
             "| - | 持仓数据缺失 | - | BBI/N型前低待确认 | 不提高交易权限 | - | - | - |"
         )
     # 盘后预案在列、盘前动作缺位的票（原 §6「盘前无该票动作条目」口径保留）
-    for prow in plan.get("holding_plans") or []:
-        if code(prow.get("code")) not in action_codes:
-            lines.append(
-                f"- ⚠️ {code(prow.get('code'))} {prow.get('name')}：盘后预案在列"
-                "（触发："
-                f"{prow.get('trigger')}）但**盘前无该票动作条目**"
-            )
+    lines += _plan_only_warning_lines(plan, action_codes)
     # 盘前信息刷新（隔夜信息后的当前执行规则）：
-    lines += [
-        "",
-        "- 盘前信息刷新："
-        f"风控优先={'；'.join(chief.get('allowed_actions') or ['仅观察'])}"
-        f"；新开仓={chief.get('new_position_permission', '禁止')}"
-        f"；仓位管理=建议 {chief.get('total_position_range', '待确认')}"
-        "（持仓快照、目标日行情或市场质量未全部通过时只给方向，不给精确数量）",
-        "- 开盘验证：先验证隔夜利好/利空是否被价格与成交确认，再决定是否收紧计划；"
-        "利好不得自动放宽权限。",
-        f"- 下一验证点：{'；'.join(chief.get('tomorrow_validation') or []) or '无'}",
-    ]
+    lines += _premarket_refresh_lines(chief)
     return lines
 
 
@@ -536,7 +567,7 @@ def main():
     out = (
         Path(a.output)
         if a.output
-        else daily_report_dir(a.date, PLAN) / f"{a.date}_daily_report.md"
+        else daily_report_dir(a.date, PLAN) / f"{a.date}_0905_daily_report.md"
     )
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")

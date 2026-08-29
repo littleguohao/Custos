@@ -50,7 +50,8 @@ def write_review(base: Path, day: str, plan_codes: list[str] | None = None) -> N
         "next_day_plan": {"holding_plans": [{"code": c} for c in (plan_codes or [])]},
     }
     write_json(
-        base / "artifacts/reports" / "daily" / f"{day}_final_review.json", review
+        base / "artifacts/reports" / "daily" / day / f"{day}_1700_final_review.json",
+        review,
     )
 
 
@@ -624,7 +625,7 @@ class DegradationTests(unittest.TestCase):
 
 def write_full_review(base: Path, day: str, revalued: list[dict]) -> None:
     write_json(
-        base / "artifacts/reports" / "daily" / f"{day}_final_review.json",
+        base / "artifacts/reports" / "daily" / day / f"{day}_1700_final_review.json",
         {"date": day, "revalued_positions": revalued},
     )
 

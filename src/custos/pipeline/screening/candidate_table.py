@@ -2,8 +2,8 @@
 """Screening 链第 4 段：渲染备选表格（candidate_table）。
 
 读 ``data/stock_pool/{date}_stock_pool.json``，渲染
-``artifacts/reports/daily/{date}/{date}_candidate_table.md``
-（2026-08-12 起按日期目录归档，废除 _supporting），
+``artifacts/reports/daily/{date}/{date}_1800_candidate_table.md``
+（2026-08-12 起按日期目录归档，废除 _supporting；2026-08-29 起文件名带 18:00 时点标记），
 按 bucket 分组，供日报证据层引用。stock_pool 缺失时输出降级说明，
 绝不报错、绝不阻塞主链。
 
@@ -749,7 +749,7 @@ def main(argv: Optional[list] = None) -> int:
     # 它是「为 target 日准备的候选表」，盘前查当日报告时自然在 target 目录下找。
     out_dir = daily_report_dir(args.date, PLANS)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"{args.date}_candidate_table.md"
+    out_path = out_dir / f"{args.date}_1800_candidate_table.md"
     out_path.write_text(text, encoding="utf-8")
 
     print(

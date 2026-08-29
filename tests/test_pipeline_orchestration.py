@@ -665,7 +665,7 @@ class TestRun1700HardFailures:
         )
 
         # ⚠️ 必须先把复盘产物造出来。stage 被打桩后不会真的产文件，而 run_1700
-        # 会检查 `{date}_final_review.md` 是否存在、不存在就（正确地）记 failed。
+        # 会检查 `{date}_1700_final_review.md` 是否存在、不存在就（正确地）记 failed。
         # 第一版没造 ⇒ 测试失败，但失败原因不是 best-effort 语义错，
         # 而是**我没把前提铺好** —— 这种失败最容易被误读成「发现了 bug」。
         def _seed(mod):
@@ -674,10 +674,13 @@ class TestRun1700HardFailures:
             # 教训与今天反复出现的一样：**别猜名字，去读**。
             rev = getattr(mod, "REVIEWS", None)
             assert isinstance(rev, pathlib.Path), "run_1700 的复盘目录常量改名了？"
-            # 2026-08-12 起按日期目录归档：{day}/{day}_final_review.md
+            # 2026-08-12 起按日期目录归档；2026-08-29 起文件名带时点标记：
+            # {day}/{day}_1700_final_review.md
             rev = rev / "2026-08-07"
             rev.mkdir(parents=True, exist_ok=True)
-            (rev / "2026-08-07_final_review.md").write_text("# x", encoding="utf-8")
+            (rev / "2026-08-07_1700_final_review.md").write_text(
+                "# x", encoding="utf-8"
+            )
 
         _run_runner(
             run_1700,

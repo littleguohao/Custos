@@ -111,7 +111,7 @@ class TestDailyReportAuditBlock:
             tmp_path
             / "artifacts/reports/daily"
             / "2026-08-07"
-            / "2026-08-07_daily_report.md"
+            / "2026-08-07_0905_daily_report.md"
         ).read_text(encoding="utf-8")
         header = body.split("## 1.")[0]
         assert "report_id `2026-08-07_premarket_" in header

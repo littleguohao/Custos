@@ -147,7 +147,7 @@ class TestRun1700MfeStageEcho:
 
         review_dir = tmp_path / "artifacts/reports" / "daily" / "2026-07-17"
         review_dir.mkdir(parents=True)
-        (review_dir / "2026-07-17_final_review.md").write_text(
+        (review_dir / "2026-07-17_1700_final_review.md").write_text(
             "# 复盘\n正文\n", encoding="utf-8"
         )
         monkeypatch.setattr(
@@ -1100,7 +1100,13 @@ class TestWeeklyReviewIoReuse:
                 },
             ],
         )
-        rv = base / "artifacts/reports" / "daily" / "2026-07-13_final_review.json"
+        rv = (
+            base
+            / "artifacts/reports"
+            / "daily"
+            / "2026-07-13"
+            / "2026-07-13_1700_final_review.json"
+        )
         rv.parent.mkdir(parents=True, exist_ok=True)
         rv.write_text(
             json.dumps({"next_day_plan": {"holding_plans": [{"code": "600000"}]}}),
@@ -1115,7 +1121,9 @@ class TestWeeklyReviewIoReuse:
             lambda path, default: (reads.append(str(path)), orig(path, default))[1],
         )
         wr.build_weekly_review(base, "2026-07-17")
-        plan_reads = [r for r in reads if r.endswith("2026-07-13_final_review.json")]
+        plan_reads = [
+            r for r in reads if r.endswith("2026-07-13_1700_final_review.json")
+        ]
         assert len(plan_reads) == 1  # 3 笔成交共用一份计划，只读一次
 
     def test_mfe_index_globs_once_and_is_reusable(self, tmp_path):

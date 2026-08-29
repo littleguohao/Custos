@@ -216,7 +216,7 @@ def _run_screening_chain(target: str, run_stage: Callable[..., dict]) -> list[st
 
 def _append_candidate_digest(target: str, stages_log: list[dict]) -> str:
     """Digest of the candidate table (may be absent when the chain degraded early)."""
-    table_path = daily_report_dir(target, PLANS) / f"{target}_candidate_table.md"
+    table_path = daily_report_dir(target, PLANS) / f"{target}_1800_candidate_table.md"
     if table_path.exists():
         stages_log.append(
             _log_stage(

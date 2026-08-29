@@ -14,7 +14,7 @@
   → [3] 板块过滤+打分  src/custos/pipeline/screening/score_candidates.py
         sector_state + 0AMV 共振矩阵打分分层 A/B/C/D → data/stock_pool/{date}_stock_pool.json
   → [4] 渲染备选表格  src/custos/pipeline/screening/candidate_table.py
-        → artifacts/reports/daily/{date}/{date}_candidate_table.md（日报证据层；2026-08-12 起按日期目录归档）
+        → artifacts/reports/daily/{date}/{date}_1800_candidate_table.md（日报证据层；2026-08-12 起按日期目录归档；2026-08-29 起文件名带 18:00 时点标记）
 ```
 
 运行时点：18:00 独立链 `run_1800.py`，与三份报告（0905/1445/1700）完全分离。

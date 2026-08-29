@@ -111,22 +111,30 @@ class TestFinalCloseReviewInputContract:
         """
         _run_fcr(monkeypatch)
         body = (
-            fcr_env / "artifacts/reports" / "daily" / DAY / f"{DAY}_final_review.md"
+            fcr_env
+            / "artifacts/reports"
+            / "daily"
+            / DAY
+            / f"{DAY}_1700_final_review.md"
         ).read_text(encoding="utf-8")
         assert "新闻数据缺失" in body and "postclose_news_digest" in body
 
     def test_writes_md_and_json(self, fcr_env, monkeypatch):
         _run_fcr(monkeypatch)
         rev = fcr_env / "artifacts/reports" / "daily" / DAY
-        assert (rev / f"{DAY}_final_review.md").exists()
-        assert (rev / f"{DAY}_final_review.json").exists()
+        assert (rev / f"{DAY}_1700_final_review.md").exists()
+        assert (rev / f"{DAY}_1700_final_review.json").exists()
 
     def test_sections_7_to_9_removed_and_section_4_replaced(self, fcr_env, monkeypatch):
         """v0.136：§7 纪律偏差 / §8 数据时效 / §9 数据来源三节整删（审计块在报告头部）；
         §4 整节替换为「板块题材涨跌幅榜与市场温度」（客观事实，非主线判定）。"""
         _run_fcr(monkeypatch)
         body = (
-            fcr_env / "artifacts/reports" / "daily" / DAY / f"{DAY}_final_review.md"
+            fcr_env
+            / "artifacts/reports"
+            / "daily"
+            / DAY
+            / f"{DAY}_1700_final_review.md"
         ).read_text(encoding="utf-8")
         assert "## 4. 板块题材涨跌幅榜与市场温度" in body
         for gone in (
@@ -144,7 +152,11 @@ class TestFinalCloseReviewInputContract:
         """产物必须是合法 JSON（NaN/Infinity 都不是）—— 下游要能解析。"""
         _run_fcr(monkeypatch)
         raw = (
-            fcr_env / "artifacts/reports" / "daily" / DAY / f"{DAY}_final_review.json"
+            fcr_env
+            / "artifacts/reports"
+            / "daily"
+            / DAY
+            / f"{DAY}_1700_final_review.json"
         ).read_text(encoding="utf-8")
         assert "NaN" not in raw and "Infinity" not in raw
         json.loads(raw)
@@ -154,10 +166,18 @@ class TestFinalCloseReviewInputContract:
         否则「没有成交记录」与「没导入成交」分不开。"""
         _run_fcr(monkeypatch, extra=["--no-trades-confirmed"])
         body = (
-            fcr_env / "artifacts/reports" / "daily" / DAY / f"{DAY}_final_review.md"
+            fcr_env
+            / "artifacts/reports"
+            / "daily"
+            / DAY
+            / f"{DAY}_1700_final_review.md"
         ).read_text(encoding="utf-8")
         plain = (
-            fcr_env / "artifacts/reports" / "daily" / DAY / f"{DAY}_final_review.json"
+            fcr_env
+            / "artifacts/reports"
+            / "daily"
+            / DAY
+            / f"{DAY}_1700_final_review.json"
         ).read_text(encoding="utf-8")
         assert "无交易" in body or "no_trades" in plain
 
@@ -336,10 +356,10 @@ class TestReportAuditBlock:
     def test_final_review_md_and_json_carry_audit(self, fcr_env, monkeypatch):
         _run_fcr(monkeypatch)
         rev = fcr_env / "artifacts/reports" / "daily" / DAY
-        body = (rev / f"{DAY}_final_review.md").read_text(encoding="utf-8")
+        body = (rev / f"{DAY}_1700_final_review.md").read_text(encoding="utf-8")
         assert "report_id" in body and "策略版本" in body and "输入清单" in body
         payload = json.loads(
-            (rev / f"{DAY}_final_review.json").read_text(encoding="utf-8")
+            (rev / f"{DAY}_1700_final_review.json").read_text(encoding="utf-8")
         )
         audit = payload["audit"]
         assert audit["report_id"].startswith(f"{DAY}_close_review_")
@@ -402,5 +422,9 @@ class TestZeroAmvGate:
     def test_confirmed_amv_passes(self, fcr_env, monkeypatch):
         _run_fcr(monkeypatch)
         assert (
-            fcr_env / "artifacts/reports" / "daily" / DAY / f"{DAY}_final_review.md"
+            fcr_env
+            / "artifacts/reports"
+            / "daily"
+            / DAY
+            / f"{DAY}_1700_final_review.md"
         ).exists()

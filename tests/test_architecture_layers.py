@@ -427,7 +427,17 @@ class TestContractCoverageOfArtifacts:
                 p.read_text(encoding="utf-8"),
             ):
                 found.add(m.group(1))
-        missing = sorted(found - set(contracts.SPECS) - self.EXEMPT)
+        # v0.141：三份日报告文件名带时点标记（如 `{date}_1700_final_review.json`）
+        # —— 时点前缀只是命名装饰，产物身份不变，剥掉 `\d{4}_` 前缀后再对 SPECS
+        # （`1700_final_review` 的契约就是 `final_review`）。
+        specs = set(contracts.SPECS)
+        missing = sorted(
+            n
+            for n in found
+            if n not in specs
+            and n not in self.EXEMPT
+            and re.sub(r"^\d{4}_", "", n) not in specs
+        )
         assert not missing, (
             f"这些按日期命名的产物既没有契约、也没登记豁免：{missing}\n"
             "要么在 contracts.SPECS 里建契约，"
