@@ -228,11 +228,17 @@ def _sector(code, name, category, count, stocks):
 
 
 class TestSectorResolutionChain:
-    """v0.142 四层解析链（人工主题表已删）：
+    """解析链（人工主题表已删）：
 
-    行业（pick_industry_sector）> 概念（共词优先取大）> 细分行业 > 无映射。
+    owner 指定 > 行业（pick_industry_sector）> 概念（**贴合度优先**，
+    数据不足回落共词优先取大——本类用例钉的是回落规则）> 细分行业 > 无映射。
     区域/风格/统计指数不当主线。
     """
+
+    @pytest.fixture(autouse=True)
+    def no_fit(self, monkeypatch):
+        """本类测的是贴合数据不足时的回落规则——贴合强制视为无效。"""
+        monkeypatch.setattr(ttr, "_sector_fit", lambda *a, **kw: None)
 
     SECTOR_MAP = {
         "sectors": [
@@ -817,3 +823,153 @@ def test_override_table_schema():
         assert bare in name_map, f"{code} 的 sector_code {bare} 不在名称表"
         for field in ("sector_name", "note", "date"):
             assert ov.get(field), f"{code} 缺字段 {field}"
+
+
+def _kline(closes, start="2026-01-01"):
+    """合成 K 线（date/close 两列，贴合计算只用这两列）。"""
+    import pandas as pd
+
+    return pd.DataFrame(
+        {"date": pd.date_range(start, periods=len(closes), freq="B"), "close": closes}
+    )
+
+
+class TestSectorFit:
+    """v0.146 走势贴合度：个股与板块 60 日日收益 Pearson 相关，贴合最高者胜。"""
+
+    SECTOR_MAP = {
+        "sectors": [
+            _sector("880537.SH", "核电核能", "concept", 338, ["002366.SZ"]),
+            _sector("880904.SH", "机器人概念", "concept", 1209, ["002366.SZ"]),
+        ]
+    }
+
+    def _patch_klines(self, monkeypatch, series_by_code):
+        monkeypatch.setattr(
+            ttr.tm, "read_vipdoc", lambda code: series_by_code.get(code)
+        )
+
+    def _correlated_klines(self):
+        """个股与核电核能同源（corr≈1），机器人概念独立噪声。"""
+        import numpy as np
+
+        rng = np.random.default_rng(7)
+        n = rng.normal(0, 1, 80)
+        return {
+            "002366.SZ": _kline(100 + np.cumsum(n)),
+            "880537.SH": _kline(500 + np.cumsum(n * 2)),  # 同源 → 贴合 ≈1
+            "880904.SH": _kline(500 + np.cumsum(rng.normal(0, 1, 80))),
+        }
+
+    def test_fit_picks_highest_correlation(self, monkeypatch):
+        """贴合最高者胜——即便它成分股更少（核电核能 338 < 机器人 1209）。"""
+        self._patch_klines(monkeypatch, self._correlated_klines())
+        s = ttr.pick_holding_sector("002366", self.SECTOR_MAP, "融发核电")
+        assert s["code"] == "880537.SH"
+        assert s["fit"] > 0.99
+
+    def test_fit_insufficient_data_falls_back_to_size(self, monkeypatch):
+        """候选 K 线全 <20 根 ⇒ 贴合无效，回落取大（机器人概念 1209）。"""
+        self._patch_klines(
+            monkeypatch,
+            {
+                "002366.SZ": _kline(range(100, 180)),
+                "880537.SH": _kline(range(10)),
+                "880904.SH": _kline(range(10)),
+            },
+        )
+        s = ttr.pick_holding_sector("002366", self.SECTOR_MAP, "无关的名字")
+        assert s["code"] == "880904.SH" and "fit" not in s
+
+    def test_stock_without_kline_falls_back(self, monkeypatch):
+        """个股本身无 K 线 ⇒ 贴合无效，回落共词规则（融发核电 ⇒ 核电核能）。"""
+        self._patch_klines(monkeypatch, {"002366.SZ": None})
+        s = ttr.pick_holding_sector("002366", self.SECTOR_MAP, "融发核电")
+        assert s["code"] == "880537.SH" and "fit" not in s
+
+    def test_sector_series_cached_per_report(self, monkeypatch):
+        """同一报告内板块收益序列只读一次：两只持仓共享候选板块，
+        板块文件读取次数 = 板块数（不是 持仓数×板块数）。"""
+        reads = []
+        klines = self._correlated_klines()
+        klines["000001.SZ"] = _kline(range(200, 280))
+
+        def counting_read(code):
+            reads.append(code)
+            return klines.get(code)
+
+        monkeypatch.setattr(ttr.tm, "read_vipdoc", counting_read)
+        sm = {
+            "sectors": [
+                _sector(
+                    "880537.SH", "核电核能", "concept", 338, ["002366.SZ", "000001.SZ"]
+                ),
+                _sector(
+                    "880904.SH",
+                    "机器人概念",
+                    "concept",
+                    1209,
+                    ["002366.SZ", "000001.SZ"],
+                ),
+            ]
+        }
+        cache: dict = {}
+        ttr.pick_holding_sector("002366", sm, "融发核电", cache)
+        ttr.pick_holding_sector("000001", sm, "平安银行", cache)
+        sector_reads = [c for c in reads if c.startswith("880")]
+        assert sorted(sector_reads) == ["880537.SH", "880904.SH"], sector_reads
+
+    def test_fit_goes_into_report_render(self, monkeypatch):
+        """§4 渲染带相关系数：贴合选出 ⇒ 「核电核能（反查·贴合1.00）」——
+        口径写明，别只给名字。"""
+        self._patch_klines(monkeypatch, self._correlated_klines())
+        monkeypatch.setattr(
+            ttr.tm, "analyze", lambda df, code: _an(trend="上涨", pos20="箱体上半区")
+        )
+        resolved = ttr.resolve_holding_sector(
+            {"code": "002366", "name": "融发核电"}, self.SECTOR_MAP, None, {}
+        )
+        sector, source = resolved
+        row = ttr._sector_analysis_row(sector, source, ["002366"])
+        assert row["fit"] > 0.99
+        text = ttr._section_holdings(
+            [{"code": "002366", "name": "融发核电", "trend_state": "上涨"}],
+            {"002366": row},
+        )
+        line = next(x for x in text if x.startswith("| 002366"))
+        assert "核电核能（反查·贴合" in line
+
+    def test_override_and_industry_layers_never_invoke_fit(self, monkeypatch):
+        """owner 指定与行业层不受贴合影响：命中这两层时 _sector_fit 零调用。"""
+        monkeypatch.setattr(
+            ttr, "_sector_fit", lambda *a, **kw: pytest.fail("指定/行业层不得算贴合")
+        )
+        ov = {
+            "002366": {
+                "sector_code": "880537.SH",
+                "sector_name": "核电核能",
+                "note": "x",
+                "date": "2026-08-29",
+            }
+        }
+        sector, source = ttr.resolve_holding_sector(
+            {"code": "002366", "name": "融发核电"}, self.SECTOR_MAP, "专用机械", ov
+        )
+        assert source == "owner_override"
+        # 行业层命中也不走贴合
+        import pandas as pd
+
+        import custos.datasource.local_tdx.tq_sector as tq_sector
+
+        monkeypatch.setattr(
+            tq_sector,
+            "load_sector_names",
+            lambda: {"880446": {"name": "专用机械", "tdx_type": "2"}},
+        )
+        monkeypatch.setattr(
+            ttr.tm, "read_vipdoc", lambda code: pd.DataFrame({"close": [1.0]})
+        )
+        sector, source = ttr.resolve_holding_sector(
+            {"code": "002366", "name": "融发核电"}, self.SECTOR_MAP, "专用机械", {}
+        )
+        assert source == "industry"

@@ -42,6 +42,7 @@ from custos.core.paths import (
     daily_report_dir,
 )  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
+from custos.core.code_utils import market_of  # noqa: E402
 
 SECTOR_DIR = SECTORS_DIR
 OUT_DIR = PLANS
@@ -214,6 +215,7 @@ def _sector_analysis_row(
         "category": sector.get("category"),
         "source": source,
         "representative_stocks": list(member_codes),
+        "fit": sector.get("fit"),
         "available": bool(analysis.get("available")),
         "latest_date": analysis.get("latest_date"),
         "trend_state": trend.get("state"),
@@ -274,8 +276,8 @@ def _shared_token(name: str, tokens: str) -> bool:
 #    —— owner 对持仓主线的指定，优先级高于一切自动解析；换仓时由 owner 增删
 # ① 行业层：pick_industry_sector（holding_sector_mapping 的 tdxhy 行业名 →
 #    名称表 tdx_type=2 精确匹配；tq_sector_map 没有行业 category，行业只能走这条）
-# ② 概念层：反向成员关系反查，**共词优先**（板块名与股票名+行业名有 ≥2 字公共子串），
-#    共词候选取成分股最多者；无共词再取成分股最大者
+# ② 概念层：反向成员关系反查，**走势贴合度优先**（`_sector_fit` 60 日日收益相关，
+#    贴合最高者胜）；贴合数据不足回落共词优先取大（共词候选取成分股最多，无共词取最大）
 # ③ 细分行业（sub_industry）兜底
 # ④ 都没有 ⇒ 无映射（与「行情缺失」两种文案分开）
 # 区域/风格/统计指数不当主线。同层取大（最大共识板块，v0.140 定稿：
@@ -368,17 +370,97 @@ def pick_industry_sector(
     }
 
 
+def _daily_returns(df: Any, window: int) -> Any:
+    """日收益序列（截尾 window 根）；不足 20 根或缺 date/close 列返回 None。"""
+    if df is None or getattr(df, "empty", True):
+        return None
+    if "date" not in df.columns or "close" not in df.columns:
+        return None
+    ret = df.set_index("date")["close"].pct_change().dropna().tail(window)
+    return ret if len(ret) >= 20 else None
+
+
+def _sector_fit(
+    stock_code: str,
+    candidate_codes: list[str],
+    window: int = 60,
+    cache: dict[str, Any] | None = None,
+) -> tuple[str, float] | None:
+    """个股与候选板块指数的 60 日日收益 Pearson 相关，返回贴合最高的 (code, corr)。
+
+    inner join 后 <20 根的候选不参与；个股无 K 线或全部候选数据不足 ⇒ None
+    （回落共词/取大规则）。``cache``（{板块码: 收益序列或 None}）让同一报告内
+    每个板块文件只读一次（持仓 ≤10 × 候选 ≤20，逐对算可接受，重读文件不行）。
+    """
+    stock_ret = _daily_returns(tm.read_vipdoc(stock_code), window)
+    if stock_ret is None:
+        return None
+    best: tuple[str, float] | None = None
+    for c in candidate_codes:
+        if cache is not None and c in cache:
+            sret = cache[c]
+        else:
+            sret = _daily_returns(tm.read_vipdoc(c), window)
+            if cache is not None:
+                cache[c] = sret
+        if sret is None:
+            continue
+        joined = pd.concat([stock_ret, sret], axis=1, join="inner").dropna()
+        if len(joined) < 20:
+            continue
+        corr = float(joined.iloc[:, 0].corr(joined.iloc[:, 1]))
+        if best is None or corr > best[1]:
+            best = (c, corr)
+    return best
+
+
+def _largest(pool: list[dict[str, Any]]) -> dict[str, Any]:
+    """取成分股最多（最大共识板块）者，代码升序兜底保证确定性。"""
+    return min(pool, key=lambda s: (-(s.get("stock_count") or 0), str(s.get("code"))))
+
+
+def _pick_concept(
+    concepts: list[dict[str, Any]],
+    code6: str,
+    name_tokens: str,
+    fit_cache: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """概念层：走势贴合度优先；贴合数据不足回落共词优先取大。"""
+    suffix = market_of(code6)
+    fit = (
+        _sector_fit(
+            f"{code6}.{suffix}",
+            [str(s.get("code")) for s in concepts],
+            cache=fit_cache,
+        )
+        if suffix
+        else None
+    )
+    if fit is not None:
+        best_code, corr = fit
+        chosen = next(s for s in concepts if str(s.get("code")) == best_code)
+        return {**chosen, "fit": round(corr, 3)}
+    shared = [
+        s for s in concepts if _shared_token(str(s.get("name") or ""), name_tokens)
+    ]
+    return _largest(shared or concepts)
+
+
 def pick_holding_sector(
-    code: str, sector_map: dict[str, Any], name_tokens: str = ""
+    code: str,
+    sector_map: dict[str, Any],
+    name_tokens: str = "",
+    fit_cache: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """概念/细分行业层：按反向成员关系为持仓选板块。
 
-    概念层**共词优先**（板块名与「股票名+行业名」有 ≥2 字公共子串，如
-    「融发核电」∩「核电核能」=「核电」）：共词候选取成分股最多者；
-    无共词候选再取成分股最大者（v0.142 owner 定稿——机器人概念 1209 只
-    这种泛化大板块不许盖过共词命中的核电核能）。细分行业兜底；
-    区域/风格/统计指数不当主线，只剩这些时返回 None（= 无映射，
-    区别于「有映射但行情缺失」）。代码升序兜底保证确定性。
+    概念层**走势贴合度优先**（v0.146 owner 定稿：`_sector_fit` 60 日日收益相关，
+    贴合最高者胜——判据有效性已由 owner 在生产机实测，如融发核电贴合核电核能
+    0.512 远高于机器人 0.389）；贴合数据不足（个股无 K 线或候选 inner join 后
+    全 <20 根）回落**共词优先取大**（板块名与股票名+行业名有 ≥2 字公共子串者
+    取成分股最多；无共词再取最大——机器人概念 1209 只这种泛化大板块不许盖过
+    共词命中的核电核能）。细分行业兜底；区域/风格/统计指数不当主线，只剩这些时
+    返回 None（= 无映射，区别于「有映射但行情缺失」）。
     """
     code6 = str(code).split(".")[0]
     hits = [
@@ -388,18 +470,10 @@ def pick_holding_sector(
     ]
     concepts = [s for s in hits if s.get("category") == "concept"]
     if concepts:
-        shared = [
-            s for s in concepts if _shared_token(str(s.get("name") or ""), name_tokens)
-        ]
-        pool = shared or concepts
-        return min(
-            pool, key=lambda s: (-(s.get("stock_count") or 0), str(s.get("code")))
-        )
+        return _pick_concept(concepts, code6, name_tokens, fit_cache)
     subs = [s for s in hits if s.get("category") == "sub_industry"]
     if subs:
-        return min(
-            subs, key=lambda s: (-(s.get("stock_count") or 0), str(s.get("code")))
-        )
+        return _largest(subs)
     return None
 
 
@@ -408,8 +482,9 @@ def resolve_holding_sector(
     sector_map: dict[str, Any],
     industry_name: str | None = None,
     overrides: dict[str, dict[str, Any]] | None = None,
+    fit_cache: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], str] | None:
-    """解析链：owner 指定 > 行业 > 概念（共词优先取大）> 细分行业；都无 ⇒ None（无映射）。
+    """解析链：owner 指定 > 行业 > 概念（贴合度优先，共词取大兜底）> 细分；都无 ⇒ None。
 
     ``overrides=None`` 表示无指定（纯函数语义，便于测试）；真实指定表由
     ``resolve_holding_rows`` 显式加载后传入。
@@ -428,7 +503,7 @@ def resolve_holding_sector(
         sector = pick_industry_sector(industry_name, sector_map)
         if sector is not None:
             return sector, "industry"
-    sector = pick_holding_sector(code6, sector_map, tokens)
+    sector = pick_holding_sector(code6, sector_map, tokens, fit_cache)
     if sector is not None:
         return sector, "reverse_membership"
     return None
@@ -442,11 +517,12 @@ def resolve_holding_rows(date: str) -> dict[str, dict[str, Any]]:
     sector_map = latest_tq_sector_map()
     industry_names = holding_industry_names(date)
     overrides = load_mainline_overrides()
+    fit_cache: dict[str, Any] = {}  # 同一报告内板块收益序列只读一次
     out: dict[str, dict[str, Any]] = {}
     for h in holdings:
         code6 = str(h.get("code") or "").split(".")[0]
         resolved = resolve_holding_sector(
-            h, sector_map, industry_names.get(code6), overrides
+            h, sector_map, industry_names.get(code6), overrides, fit_cache
         )
         if resolved is None:
             out[str(h.get("code"))] = {}
@@ -572,9 +648,14 @@ def _section_holdings(
         theme_name = theme.get("theme_name", "未定")
         source = theme.get("source")
         if source in _SOURCE_LABELS:
-            theme_name += {"owner_override": "（指定）", "industry": "（行业）"}.get(
-                source, "（反查）"
-            )
+            if source == "reverse_membership" and theme.get("fit") is not None:
+                # 贴合选出带相关系数（60 日日收益 Pearson）——口径写明，别只给名字
+                theme_name += f"（反查·贴合{theme['fit']:.2f}）"
+            else:
+                theme_name += {
+                    "owner_override": "（指定）",
+                    "industry": "（行业）",
+                }.get(source, "（反查）")
         lines.append(
             f"| {code} | {h.get('name')} | {theme_name} | {theme.get('stage', '未定')} | {theme.get('score', 0)} | {rel}：{rel_reason} | {action} |"
         )
