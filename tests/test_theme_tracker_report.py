@@ -296,7 +296,7 @@ class TestSectorFitResolution:
             ),
         )
         sector, status = ttr.resolve_holding_sector(
-            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, "电气设备", {}
+            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, "电气设备"
         )
         assert status == "fit" and sector["code"] == "880520.SH"
         assert sector["fit"] > 0.9
@@ -310,7 +310,7 @@ class TestSectorFitResolution:
             ),
         )
         sector, status = ttr.resolve_holding_sector(
-            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, "电气设备", {}
+            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, "电气设备"
         )
         assert status == "fit" and sector["code"] == "880446.SH"
 
@@ -323,7 +323,7 @@ class TestSectorFitResolution:
             ),
         )
         sector, status = ttr.resolve_holding_sector(
-            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, None, {}
+            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, None
         )
         assert status == "fit" and sector["code"] == "880520.SH"
 
@@ -334,7 +334,7 @@ class TestSectorFitResolution:
             _stock_and("605090.SH", {"881467.SH": 0.9, "880705.SH": 0.2}),
         )
         sector, status = ttr.resolve_holding_sector(
-            {"code": "605090", "name": "九丰能源"}, self.SECTOR_MAP, None, {}
+            {"code": "605090", "name": "九丰能源"}, self.SECTOR_MAP, None
         )
         assert status == "fit" and sector["code"] == "881467.SH"
 
@@ -350,7 +350,7 @@ class TestSectorFitResolution:
             },
         )
         sector, status = ttr.resolve_holding_sector(
-            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, "电气设备", {}
+            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, "电气设备"
         )
         assert sector is None and status == "fit_insufficient"
 
@@ -358,14 +358,14 @@ class TestSectorFitResolution:
         """个股无 K 线 ⇒ fit_insufficient（不再回落共词/取大/行业）。"""
         self._klines(monkeypatch, {"600312.SH": None})
         sector, status = ttr.resolve_holding_sector(
-            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, "电气设备", {}
+            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, "电气设备"
         )
         assert sector is None and status == "fit_insufficient"
 
     def test_no_pool_is_no_mapping(self):
         """不在任何板块（行业名也对不上）⇒ no_mapping，与贴合不足分开。"""
         sector, status = ttr.resolve_holding_sector(
-            {"code": "999999", "name": "x"}, self.SECTOR_MAP, "不存在的行业", {}
+            {"code": "999999", "name": "x"}, self.SECTOR_MAP, "不存在的行业"
         )
         assert sector is None and status == "no_mapping"
 
@@ -390,11 +390,10 @@ class TestSectorFitResolution:
             {"code": "600312", "name": "平高电气"},
             self.SECTOR_MAP,
             "电气设备",
-            {},
             cache,
         )
         ttr.resolve_holding_sector(
-            {"code": "605090", "name": "九丰能源"}, self.SECTOR_MAP, None, {}, cache
+            {"code": "605090", "name": "九丰能源"}, self.SECTOR_MAP, None, cache
         )
         sector_reads = [c for c in reads if c.startswith(("880", "881"))]
         assert len(sector_reads) == len(set(sector_reads)), (
@@ -411,7 +410,7 @@ class TestSectorFitResolution:
             ttr.tm, "analyze", lambda df, code: _an(trend="上涨", pos20="箱体上半区")
         )
         sector, status = ttr.resolve_holding_sector(
-            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, None, {}
+            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, None
         )
         row = ttr._sector_analysis_row(sector, status, ["600312"])
         text = ttr._section_holdings(
@@ -497,101 +496,6 @@ class TestIndustryCandidate:
         assert ttr.holding_industry_names("2026-08-28") == {}
 
 
-class TestMainlineOverrides:
-    """owner 指定层（v0.145/v0.148）：短路一切自动解析；在贴合池里时带系数旁注。"""
-
-    OVERRIDES = {
-        "002366": {
-            "sector_code": "880537.SH",
-            "sector_name": "核电核能",
-            "note": "注册行业专用机械不是主营，owner 指定核电核能。",
-            "date": "2026-08-29",
-        }
-    }
-    SECTOR_MAP = {
-        "sectors": [
-            _sector("880537.SH", "核电核能", "concept", 338, ["002366.SZ"]),
-            _sector("880507.SH", "国防军工", "concept", 532, ["002366.SZ"]),
-        ]
-    }
-    NAME_MAP = {"880445": {"name": "专用机械", "tdx_type": "2"}}
-
-    @pytest.fixture(autouse=True)
-    def env(self, monkeypatch):
-        import custos.datasource.local_tdx.tq_sector as tq_sector
-
-        monkeypatch.setattr(tq_sector, "load_sector_names", lambda: dict(self.NAME_MAP))
-        monkeypatch.setattr(
-            ttr.tm, "analyze", lambda df, code: _an(trend="上涨", pos20="箱体上半区")
-        )
-
-    def test_override_short_circuits_and_annotates_fit(self, monkeypatch):
-        """指定短路：国防军工贴合同源更高也压不过指定；指定板块在池 ⇒ 带系数旁注。"""
-        monkeypatch.setattr(
-            ttr.tm,
-            "read_vipdoc",
-            lambda code: _stock_and(
-                "002366.SZ", {"880507.SH": 0.98, "880537.SH": 0.5, "880445.SH": 0.4}
-            ).get(code),
-        )
-        sector, status = ttr.resolve_holding_sector(
-            {"code": "002366", "name": "融发核电"},
-            self.SECTOR_MAP,
-            "专用机械",
-            self.OVERRIDES,
-        )
-        assert status == "owner_override" and sector["code"] == "880537.SH"
-        assert sector["fit"] is not None and sector["fit"] < 0.9  # 旁注，不影响归属
-        row = ttr._sector_analysis_row(sector, status, ["002366"])
-        text = ttr._section_holdings(
-            [{"code": "002366", "name": "融发核电", "trend_state": "上涨"}],
-            {"002366": row},
-        )
-        line = next(x for x in text if x.startswith("| 002366"))
-        assert "核电核能（指定·贴合" in line
-
-    def test_override_not_in_pool_gets_plain_label(self, monkeypatch):
-        """指定板块不在贴合池（或贴合无效）⇒ 只写「指定」，不编造系数。"""
-        monkeypatch.setattr(ttr.tm, "read_vipdoc", lambda code: pd.DataFrame())
-        monkeypatch.setattr(
-            ttr.tm,
-            "analyze",
-            lambda df, code: {"available": False, "error": "no kline data"},
-        )
-        sector, status = ttr.resolve_holding_sector(
-            {"code": "002366", "name": "融发核电"}, {}, None, self.OVERRIDES
-        )
-        assert status == "owner_override" and "fit" not in sector
-        row = ttr._sector_analysis_row(sector, status, ["002366"])
-        text = ttr._section_holdings(
-            [{"code": "002366", "name": "融发核电", "trend_state": "上涨"}],
-            {"002366": row},
-        )
-        line = next(x for x in text if x.startswith("| 002366"))
-        assert "核电核能（指定）" in line and "贴合" not in line
-        # 指定板块无 K 线 ⇒ quote_missing 如实报「板块行情缺失」
-        assert row["quote_missing"] is True and row["stage"] == "板块行情缺失"
-        assert "owner 指定" in row["stage_reason"]
-
-    def test_override_miss_uses_fit(self, monkeypatch):
-        """指定表里没有的持仓 ⇒ 走贴合（核电核能同源 ⇒ 贴合胜）。"""
-        monkeypatch.setattr(
-            ttr.tm,
-            "read_vipdoc",
-            lambda code: _stock_and(
-                "002366.SZ", {"880537.SH": 0.95, "880507.SH": 0.3}
-            ).get(code),
-        )
-        sector, status = ttr.resolve_holding_sector(
-            {"code": "002366", "name": "融发核电"}, self.SECTOR_MAP, None, {}
-        )
-        assert status == "fit" and sector["code"] == "880537.SH"
-
-    def test_missing_override_file_keeps_behavior(self, tmp_path):
-        """指定表文件缺失 ⇒ load 返回 {}，行为不变（走贴合）。"""
-        assert ttr.load_mainline_overrides(tmp_path / "nonexistent.json") == {}
-
-
 class TestBuildAndReport:
     """报告构建：rows 来自持仓板块（指定>贴合），无有效贴合的持仓不进 rows。"""
 
@@ -607,8 +511,6 @@ class TestBuildAndReport:
         monkeypatch.setattr(ttr, "SECTOR_DIR", tmp_path / "sectors")
         monkeypatch.setattr(ttr, "HOLDINGS_DIR", tmp_path / "holdings")
         monkeypatch.setattr(ttr, "OUT_DIR", tmp_path / "plans")
-        # 真实 owner 指定表（002366/600312 在表里）不得渗进合成用例
-        monkeypatch.setattr(ttr, "load_mainline_overrides", lambda path=None: {})
         for d in ("sectors", "holdings", "plans"):
             (tmp_path / d).mkdir()
         (
@@ -688,23 +590,25 @@ class TestBuildAndReport:
         assert "如实降级" in text
 
 
-def test_override_table_schema():
-    """真实指定表 schema：code 6 位数字；sector_code 必须在板块名称表存在。
+def test_override_layer_fully_removed():
+    """grep 守卫：owner 指定层 v0.149 整段移除——源码与治理目录不再有它的痕迹。"""
+    src = pathlib.Path(ttr.__file__).read_text(encoding="utf-8")
+    # 文件名在 docstring 里作为历史记述允许出现；代码级引用（常量/函数/分支）必须零残留
+    for gone in (
+        "load_mainline_overrides",
+        "HOLDING_MAINLINE_OVERRIDES_FILE",
+        "owner_override",
+        "（指定）",
+    ):
+        assert gone not in src, f"{gone} 应已随指定层删除"
+    import custos.core.paths as paths
 
-    名称表依赖本机 tdxzs3.cfg——不存在时跳过（CI 无 TDX 安装）。
-    """
-    import re
+    assert not hasattr(paths, "HOLDING_MAINLINE_OVERRIDES_FILE")
+    override_file = paths.STRATEGY_DIR / "_shared" / "holding_mainline_overrides.json"
+    assert not override_file.exists(), "指定表文件应已删除"
+    import json as _json
 
-    from custos.datasource.local_tdx.tq_sector import load_sector_names
-
-    name_map = load_sector_names()
-    if not name_map:
-        pytest.skip("本机无 tdxzs 名称表")
-    overrides = ttr.load_mainline_overrides()
-    assert overrides, "指定表为空"
-    for code, ov in overrides.items():
-        assert re.fullmatch(r"\d{6}", code), f"key 应为 6 位代码：{code}"
-        bare = ov["sector_code"].split(".")[0]
-        assert bare in name_map, f"{code} 的 sector_code {bare} 不在名称表"
-        for field in ("sector_name", "note", "date"):
-            assert ov.get(field), f"{code} 缺字段 {field}"
+    reg = _json.loads(paths.STRATEGY_REGISTRY_FILE.read_text(encoding="utf-8"))
+    assert all(x["id"] != "holding_mainline_overrides" for x in reg["shared_rules"]), (
+        "注册表残留指定层登记"
+    )

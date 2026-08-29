@@ -98,13 +98,6 @@
    "doc": "_shared/factor_exit_catalog.md",
    "status": "live",
    "note": "2026-08-20 首版（v0.88）：注册表全量 31 因子按角色三组 + 止损/止盈方案目录 + 减仓幅度表 + 研究→live 回流通道。人读索引，字段级真相以代码为准（factors 注册表 / exit_rules.py / EXIT_RULES.json / scoring.weights）。跨策略，不属于任何单一策略"
-  },
-  {
-   "id": "holding_mainline_overrides",
-   "name": "持仓主线 owner 指定表",
-   "doc": "_shared/holding_mainline_overrides.json",
-   "status": "live",
-   "note": "2026-08-29（v0.145）：owner 对持仓主线的指定，theme_tracker 解析链第①层，高于行业/概念/细分一切自动解析；换仓时由 owner 增删。消费方 src/custos/pipeline/market_timing/theme_tracker_report.py（路径常量 core/paths.py HOLDING_MAINLINE_OVERRIDES_FILE）。"
   }
  ]
 }
