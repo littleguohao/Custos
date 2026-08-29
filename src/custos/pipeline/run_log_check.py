@@ -153,6 +153,11 @@ def render_text(result: dict[str, Any]) -> str:
 
 
 def main(argv=None) -> int:
+    # 2026-08-29：GBK 控制台（Windows 默认/cron 环境）打印 ✅ 会 UnicodeEncodeError
+    # ——崩溃的退出码 1 与「发现异常」语义撞车（假告警）。与其他 runner 同规：
+    # 入口先 reconfigure UTF-8。
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description="五 runner 日度 run_log 例行核对")
     ap.add_argument(
         "--date", default=cn_today().isoformat(), help="YYYY-MM-DD，默认今天"
