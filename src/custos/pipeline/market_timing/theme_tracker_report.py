@@ -2,10 +2,11 @@
 """Generate theme_tracker daily sector trend report.
 
 v0.142 起**取消人工主题映射表**（sector_code_map.json 已删除）：
-持仓板块由四层自动解析链驱动（行业 > 概念共词优先取大 > 细分行业 > 无映射），
+持仓板块由自动解析链驱动（owner 指定 > 行业 > 概念共词优先取大 > 细分行业 > 无映射），
 §1「主线」= 当日持仓相关板块中技术分最高者（口径写进 §1，不代表全市场主线）。
 
 Reads:
+- governance/strategy/_shared/holding_mainline_overrides.json（owner 持仓主线指定，解析链第①层）
 - data/holdings/YYYY-MM-DD_holding_technical_summary.json
 - data/holdings/*_holding_sector_mapping.json（≤报告日最近一份，行业层：TDX 行业名→880 行业板块）
 - data/sectors/*_tq_sector_map.json（最新一份，概念/细分行业层反向成员关系）
@@ -33,6 +34,7 @@ if hasattr(sys.stderr, "reconfigure"):
 
 
 from custos.core.paths import (
+    HOLDING_MAINLINE_OVERRIDES_FILE,
     HOLDINGS_DIR,
     MARKET_DIR,
     PLANS,
@@ -267,7 +269,9 @@ def _shared_token(name: str, tokens: str) -> bool:
     )
 
 
-# 持仓板块解析链（v0.142 owner 定稿，人工主题表 sector_code_map.json 已删除）：
+# 持仓板块解析链（v0.145 owner 定稿；人工主题表 sector_code_map.json 已于 v0.142 删除）：
+# ⓪ owner 指定层：governance/strategy/_shared/holding_mainline_overrides.json
+#    —— owner 对持仓主线的指定，优先级高于一切自动解析；换仓时由 owner 增删
 # ① 行业层：pick_industry_sector（holding_sector_mapping 的 tdxhy 行业名 →
 #    名称表 tdx_type=2 精确匹配；tq_sector_map 没有行业 category，行业只能走这条）
 # ② 概念层：反向成员关系反查，**共词优先**（板块名与股票名+行业名有 ≥2 字公共子串），
@@ -276,7 +280,21 @@ def _shared_token(name: str, tokens: str) -> bool:
 # ④ 都没有 ⇒ 无映射（与「行情缺失」两种文案分开）
 # 区域/风格/统计指数不当主线。同层取大（最大共识板块，v0.140 定稿：
 # 最具体≠最相关——迷你概念会把持仓从主共识板块上带偏），代码升序兜底确定性。
-_SOURCE_LABELS = {"industry": "行业映射", "reverse_membership": "反向成员关系"}
+_SOURCE_LABELS = {
+    "owner_override": "owner 指定",
+    "industry": "行业映射",
+    "reverse_membership": "反向成员关系",
+}
+
+
+def load_mainline_overrides(path: Path | None = None) -> dict[str, dict[str, Any]]:
+    """owner 持仓主线指定表 → {code6: {sector_code, sector_name, note, date}}。
+
+    文件缺失返回 {}（行为不变，走自动解析链）。schema 钉测见
+    tests/test_theme_tracker_report.py::TestMainlineOverrides。
+    """
+    data = load_json(path or HOLDING_MAINLINE_OVERRIDES_FILE, {}) or {}
+    return dict(data.get("overrides") or {})
 
 
 def latest_tq_sector_map() -> dict[str, Any]:
@@ -389,9 +407,22 @@ def resolve_holding_sector(
     holding: dict[str, Any],
     sector_map: dict[str, Any],
     industry_name: str | None = None,
+    overrides: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], str] | None:
-    """四层解析链：行业 > 概念（共词优先取大）> 细分行业；都无 ⇒ None（无映射）。"""
+    """解析链：owner 指定 > 行业 > 概念（共词优先取大）> 细分行业；都无 ⇒ None（无映射）。
+
+    ``overrides=None`` 表示无指定（纯函数语义，便于测试）；真实指定表由
+    ``resolve_holding_rows`` 显式加载后传入。
+    """
     code6 = str(holding.get("code") or "").split(".")[0]
+    ov = (overrides or {}).get(code6)
+    if ov:
+        return {
+            "code": ov["sector_code"],
+            "name": ov.get("sector_name") or ov["sector_code"],
+            "category": "owner_override",
+            "note": ov.get("note", ""),
+        }, "owner_override"
     tokens = str(holding.get("name") or "") + (industry_name or "")
     if industry_name:
         sector = pick_industry_sector(industry_name, sector_map)
@@ -410,10 +441,13 @@ def resolve_holding_rows(date: str) -> dict[str, dict[str, Any]]:
         return {}
     sector_map = latest_tq_sector_map()
     industry_names = holding_industry_names(date)
+    overrides = load_mainline_overrides()
     out: dict[str, dict[str, Any]] = {}
     for h in holdings:
         code6 = str(h.get("code") or "").split(".")[0]
-        resolved = resolve_holding_sector(h, sector_map, industry_names.get(code6))
+        resolved = resolve_holding_sector(
+            h, sector_map, industry_names.get(code6), overrides
+        )
         if resolved is None:
             out[str(h.get("code"))] = {}
             continue
@@ -538,7 +572,9 @@ def _section_holdings(
         theme_name = theme.get("theme_name", "未定")
         source = theme.get("source")
         if source in _SOURCE_LABELS:
-            theme_name += "（行业）" if source == "industry" else "（反查）"
+            theme_name += {"owner_override": "（指定）", "industry": "（行业）"}.get(
+                source, "（反查）"
+            )
         lines.append(
             f"| {code} | {h.get('name')} | {theme_name} | {theme.get('stage', '未定')} | {theme.get('score', 0)} | {rel}：{rel_reason} | {action} |"
         )

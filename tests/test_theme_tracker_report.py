@@ -341,6 +341,8 @@ class TestBuildAndReport:
         monkeypatch.setattr(ttr, "SECTOR_DIR", tmp_path / "sectors")
         monkeypatch.setattr(ttr, "HOLDINGS_DIR", tmp_path / "holdings")
         monkeypatch.setattr(ttr, "OUT_DIR", tmp_path / "plans")
+        # 真实 owner 指定表（002366/600312 在表里）不得渗进合成用例
+        monkeypatch.setattr(ttr, "load_mainline_overrides", lambda path=None: {})
         for d in ("sectors", "holdings", "plans"):
             (tmp_path / d).mkdir()
         (
@@ -622,6 +624,8 @@ class TestHoldingsSection:
 
         monkeypatch.setattr(ttr, "HOLDINGS_DIR", tmp_path / "holdings")
         monkeypatch.setattr(ttr, "SECTOR_DIR", tmp_path / "sectors")
+        # 真实 owner 指定表（002366/600312 在表里）不得渗进合成用例
+        monkeypatch.setattr(ttr, "load_mainline_overrides", lambda path=None: {})
         (tmp_path / "holdings").mkdir()
         (tmp_path / "sectors").mkdir()
         (
@@ -681,3 +685,135 @@ class TestHoldingsSection:
         }
         text = ttr.make_report("2026-08-07", [], {"002366": row})
         assert "核电核能（反查）" in text
+
+
+class TestMainlineOverrides:
+    """owner 指定层（v0.145）：解析链第①层，高于行业/概念一切自动解析。"""
+
+    OVERRIDES = {
+        "002366": {
+            "sector_code": "880537.SH",
+            "sector_name": "核电核能",
+            "note": "注册行业专用机械不是主营，owner 指定核电核能。",
+            "date": "2026-08-29",
+        }
+    }
+    SECTOR_MAP = {
+        "sectors": [
+            _sector("880446.SH", "专用机械", "industry", 300, ["002366.SZ"]),
+            _sector("880507.SH", "国防军工", "concept", 532, ["002366.SZ"]),
+        ]
+    }
+
+    @pytest.fixture(autouse=True)
+    def env(self, monkeypatch):
+        import pandas as pd
+
+        import custos.datasource.local_tdx.tq_sector as tq_sector
+
+        monkeypatch.setattr(
+            tq_sector,
+            "load_sector_names",
+            lambda: {"880446": {"name": "专用机械", "tdx_type": "2"}},
+        )
+        monkeypatch.setattr(
+            ttr.tm, "read_vipdoc", lambda code: pd.DataFrame({"close": [1.0]})
+        )
+        monkeypatch.setattr(
+            ttr.tm, "analyze", lambda df, code: _an(trend="上涨", pos20="箱体上半区")
+        )
+        self.pd = pd
+
+    def test_override_beats_industry_and_concept(self):
+        """指定优先于行业/概念：注册行业是专用机械（行业层可命中 880446），
+        但 owner 指定核电核能 ⇒ 用指定。"""
+        resolved = ttr.resolve_holding_sector(
+            {"code": "002366", "name": "融发核电"},
+            self.SECTOR_MAP,
+            "专用机械",
+            self.OVERRIDES,
+        )
+        sector, source = resolved
+        assert source == "owner_override"
+        assert sector["code"] == "880537.SH" and sector["name"] == "核电核能"
+        assert "专用机械不是主营" in sector["note"]
+
+    def test_override_miss_falls_through_to_auto_chain(self):
+        """指定表里没有的持仓 ⇒ 走原自动链（行业层命中专用机械）。"""
+        resolved = ttr.resolve_holding_sector(
+            {"code": "002366", "name": "融发核电"}, self.SECTOR_MAP, "专用机械", {}
+        )
+        sector, source = resolved
+        assert source == "industry" and sector["code"] == "880446.SH"
+
+    def test_missing_override_file_keeps_behavior(self, tmp_path):
+        """指定表文件缺失 ⇒ load 返回 {}，行为不变。"""
+        assert ttr.load_mainline_overrides(tmp_path / "nonexistent.json") == {}
+        resolved = ttr.resolve_holding_sector(
+            {"code": "002366", "name": "融发核电"},
+            self.SECTOR_MAP,
+            "专用机械",
+            ttr.load_mainline_overrides(tmp_path / "nonexistent.json"),
+        )
+        assert resolved[1] == "industry"
+
+    def test_override_with_missing_kline_is_quote_missing(self, monkeypatch):
+        """指定板块无 K 线 ⇒ quote_missing「板块行情缺失」（不回落自动链——
+        owner 指定的板块没行情要如实暴露，不能悄悄换成自动解析结果）。"""
+        monkeypatch.setattr(ttr.tm, "read_vipdoc", lambda code: self.pd.DataFrame())
+        monkeypatch.setattr(
+            ttr.tm,
+            "analyze",
+            lambda df, code: {"available": False, "error": "no kline data"},
+        )
+        resolved = ttr.resolve_holding_sector(
+            {"code": "002366", "name": "融发核电"},
+            self.SECTOR_MAP,
+            "专用机械",
+            self.OVERRIDES,
+        )
+        sector, source = resolved
+        row = ttr._sector_analysis_row(sector, source, ["002366"])
+        assert row["quote_missing"] is True and row["stage"] == "板块行情缺失"
+        assert "owner 指定" in row["stage_reason"]
+
+    def test_section_marks_override(self, tmp_path, monkeypatch):
+        """§4 集成：指定行标注「（指定）」。"""
+        monkeypatch.setattr(ttr, "HOLDINGS_DIR", tmp_path / "holdings")
+        monkeypatch.setattr(ttr, "SECTOR_DIR", tmp_path / "sectors")
+        (tmp_path / "holdings").mkdir()
+        (tmp_path / "sectors").mkdir()
+        (
+            tmp_path / "holdings" / "2026-08-07_holding_technical_summary.json"
+        ).write_text(
+            json.dumps([{"code": "002366", "name": "融发核电", "trend_state": "上涨"}]),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            ttr, "load_mainline_overrides", lambda path=None: dict(self.OVERRIDES)
+        )
+        text = ttr.make_report("2026-08-07", [])
+        assert "核电核能（指定）" in text
+        assert "专用机械（行业）" not in text
+
+
+def test_override_table_schema():
+    """真实指定表 schema：code 6 位数字；sector_code 必须在板块名称表存在。
+
+    名称表依赖本机 tdxzs3.cfg——不存在时跳过（CI 无 TDX 安装）。
+    """
+    import re
+
+    from custos.datasource.local_tdx.tq_sector import load_sector_names
+
+    name_map = load_sector_names()
+    if not name_map:
+        pytest.skip("本机无 tdxzs 名称表")
+    overrides = ttr.load_mainline_overrides()
+    assert overrides, "指定表为空"
+    for code, ov in overrides.items():
+        assert re.fullmatch(r"\d{6}", code), f"key 应为 6 位代码：{code}"
+        bare = ov["sector_code"].split(".")[0]
+        assert bare in name_map, f"{code} 的 sector_code {bare} 不在名称表"
+        for field in ("sector_name", "note", "date"):
+            assert ov.get(field), f"{code} 缺字段 {field}"
