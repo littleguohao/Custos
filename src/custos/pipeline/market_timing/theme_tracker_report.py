@@ -3,6 +3,7 @@
 
 Reads:
 - data/sectors/sector_code_map.json
+- data/sectors/*_tq_sector_map.json（最新一份，§4 持仓主题映射 miss 时按反向成员关系兜底）
 - data/holdings/YYYY-MM-DD_holding_technical_summary.json
 - artifacts/reports/daily/YYYY-MM-DD/YYYY-MM-DD_market_timing_score.md
 
@@ -313,6 +314,90 @@ def match_holding_theme(
     return best[1]
 
 
+# 反向成员关系兜底选板块的类别优先级：概念/行业 > 细分行业；区域/风格/统计指数不当主线
+_MAINLINE_CATEGORIES = ("concept", "industry")
+_SUB_INDUSTRY_CATEGORIES = ("sub_industry",)
+
+
+def latest_tq_sector_map() -> dict[str, Any]:
+    """最新一份板块→成员股反向映射（*_tq_sector_map.json）；没有则返回 {}。"""
+    files = sorted(SECTOR_DIR.glob("*_tq_sector_map.json"))
+    if not files:
+        return {}
+    return load_json(files[-1], {}) or {}
+
+
+def pick_holding_sector(code: str, sector_map: dict[str, Any]) -> dict[str, Any] | None:
+    """按反向成员关系为持仓选板块。
+
+    只认概念（tdx_type=4）/行业（2）> 细分行业（12）；区域/风格/统计指数不当主线，
+    只剩这些时返回 None（= 无映射，区别于「有映射但行情缺失」）。
+    同层候选取成分股最少（最具体）者，代码升序兜底保证确定性。
+    """
+    code6 = str(code).split(".")[0]
+    hits = [
+        s
+        for s in (sector_map.get("sectors") or [])
+        if code6 in {str(x).split(".")[0] for x in s.get("stocks") or []}
+    ]
+    for tier in (_MAINLINE_CATEGORIES, _SUB_INDUSTRY_CATEGORIES):
+        pool = [s for s in hits if s.get("category") in tier]
+        if pool:
+            return min(
+                pool, key=lambda s: (s.get("stock_count") or 0, str(s.get("code")))
+            )
+    return None
+
+
+def _fallback_holding_row(
+    holding: dict[str, Any], sector_map: dict[str, Any]
+) -> dict[str, Any] | None:
+    """主题映射 miss 时按反向成员关系补一行；K 线缺失如实标 quote_missing。"""
+    sector = pick_holding_sector(str(holding.get("code") or ""), sector_map)
+    if sector is None:
+        return None
+    code = str(sector.get("code") or "")
+    analysis = tm.analyze(tm.read_vipdoc(code), code)
+    stage, reason = classify_stage(analysis)
+    score = score_sector(analysis, "")
+    row = {
+        "theme_id": None,
+        "theme_name": sector.get("name") or code,
+        "primary_code": code,
+        "available": bool(analysis.get("available")),
+        "stage": stage,
+        "stage_reason": reason,
+        "score": score,
+        "action_bias": action_bias(stage, score),
+        "trend_state": (analysis.get("trend") or {}).get("state"),
+        "box20_position": (analysis.get("box_20d") or {}).get("position"),
+        "source": "reverse_membership",
+    }
+    if not analysis.get("available"):
+        # 板块已定位但行情缺失 ≠ 未定/无映射 —— 两种文案必须分得开
+        row["quote_missing"] = True
+        row["stage"] = "板块行情缺失"
+        row["stage_reason"] = (
+            f"已按反向成员关系定位板块 {code}，"
+            f"但板块行情缺失（{analysis.get('error', '无K线数据')}）。"
+        )
+    return row
+
+
+def resolve_holding_theme(
+    holding: dict[str, Any],
+    rows: list[dict[str, Any]],
+    sector_map: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """先主题映射（显式关联 > 语义标签），miss 时兜底反向成员关系。"""
+    theme = match_holding_theme(holding, rows)
+    if theme:
+        return theme
+    if sector_map is None:
+        sector_map = latest_tq_sector_map()
+    return _fallback_holding_row(holding, sector_map) or {}
+
+
 def compare_holding_to_theme(
     holding: dict[str, Any], theme: dict[str, Any]
 ) -> tuple[str, str]:
@@ -320,6 +405,10 @@ def compare_holding_to_theme(
     tt = theme.get("trend_state")
     hp = holding.get("box20_position")
     tp = theme.get("box20_position")
+    if theme and theme.get("quote_missing"):
+        return "板块行情缺失", theme.get(
+            "stage_reason", "板块已定位但行情缺失，无法对比。"
+        )
     if not theme or not theme.get("available"):
         return "未定", "板块数据不足。"
     rank = {"上涨": 3, "横盘震荡": 2, "下跌": 1, None: 0}
@@ -394,7 +483,7 @@ def _section_risk(risk: list[dict[str, Any]]) -> list[str]:
 
 
 def _section_holdings(
-    holdings: list[dict[str, Any]], rows: list[dict[str, Any]]
+    holdings: list[dict[str, Any]], holding_themes: dict[str, dict[str, Any]]
 ) -> list[str]:
     """§4 持仓板块跟踪。"""
     lines = []
@@ -405,13 +494,16 @@ def _section_holdings(
     lines.append("|---|---|---|---|---:|---|---|")
     for h in holdings:
         code = str(h.get("code"))
-        theme = match_holding_theme(h, rows)
+        theme = holding_themes.get(code) or {}
         rel, rel_reason = compare_holding_to_theme(h, theme)
         action = h.get("action") or theme.get("action_bias") or "观察"
         if rel == "弱于板块" and action == "观察":
             action = "风控观察"
+        theme_name = theme.get("theme_name", "未定")
+        if theme.get("source") == "reverse_membership":
+            theme_name += "（反查）"
         lines.append(
-            f"| {code} | {h.get('name')} | {theme.get('theme_name', '未定')} | {theme.get('stage', '未定')} | {theme.get('score', 0)} | {rel}：{rel_reason} | {action} |"
+            f"| {code} | {h.get('name')} | {theme_name} | {theme.get('stage', '未定')} | {theme.get('score', 0)} | {rel}：{rel_reason} | {action} |"
         )
     lines.append("")
     return lines
@@ -457,7 +549,7 @@ def _section_market_consistency(
 def _section_chief_conclusion(
     strong: list[dict[str, Any]],
     holdings: list[dict[str, Any]],
-    rows: list[dict[str, Any]],
+    holding_themes: dict[str, dict[str, Any]],
 ) -> list[str]:
     """§6 给总控的结论。"""
     lines = []
@@ -468,7 +560,8 @@ def _section_chief_conclusion(
     weak_holdings = [
         str(h.get("name"))
         for h in holdings
-        if compare_holding_to_theme(h, match_holding_theme(h, rows))[0] == "弱于板块"
+        if compare_holding_to_theme(h, holding_themes.get(str(h.get("code"))) or {})[0]
+        == "弱于板块"
     ]
     lines.append(
         "- 持仓需要重点风控："
@@ -497,13 +590,19 @@ def make_report(date: str, rows: list[dict[str, Any]]) -> str:
         or (r.get("score") or 0) < 45
     ]
     top = rows[0] if rows else {}
+    # 主题映射 miss 的持仓走反向成员关系兜底；只有真的有人 miss 才加载映射大文件
+    need_fallback = any(not match_holding_theme(h, rows) for h in holdings)
+    sector_map = latest_tq_sector_map() if need_fallback else {}
+    holding_themes = {
+        str(h.get("code")): resolve_holding_theme(h, rows, sector_map) for h in holdings
+    }
     lines = (
         _section_mainline(date, top)
         + _section_strong(strong)
         + _section_risk(risk)
-        + _section_holdings(holdings, rows)
+        + _section_holdings(holdings, holding_themes)
         + _section_market_consistency(date, market_status, strong, risk)
-        + _section_chief_conclusion(strong, holdings, rows)
+        + _section_chief_conclusion(strong, holdings, holding_themes)
     )
     return "\n".join(lines)
 

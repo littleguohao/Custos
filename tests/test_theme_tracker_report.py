@@ -381,3 +381,155 @@ class TestBuildAndReport:
             encoding="utf-8"
         )
         assert "主线方向：**未定**" in text
+
+
+class TestReverseMembershipFallback:
+    """§4 持仓板块解析的反向成员关系兜底（v0.139）。
+
+    主题映射 miss ≠ 板块行情缺失：没映射走最新 tq_sector_map 反查，
+    选板块优先级 概念/行业 > 细分行业 >（区域/风格不当主线）；
+    选中板块没 K 线必须如实标「板块行情缺失」，不许混进「未定/数据不足」。
+    """
+
+    SECTOR_MAP = {
+        "sectors": [
+            {
+                "code": "880223.SH",
+                "name": "四川板块",
+                "category": "region",
+                "stock_count": 181,
+                "stocks": ["002366.SZ"],
+            },
+            {
+                "code": "880861.SH",
+                "name": "连续亏损",
+                "category": "style",
+                "stock_count": 1075,
+                "stocks": ["002366.SZ"],
+            },
+            {
+                "code": "880537.SH",
+                "name": "核电核能",
+                "category": "concept",
+                "stock_count": 338,
+                "stocks": ["002366.SZ"],
+            },
+            {
+                "code": "880507.SH",
+                "name": "国防军工",
+                "category": "concept",
+                "stock_count": 532,
+                "stocks": ["002366.SZ"],
+            },
+            {
+                "code": "881303.SH",
+                "name": "专用设备",
+                "category": "sub_industry",
+                "stock_count": 232,
+                "stocks": ["600312.SH"],
+            },
+        ]
+    }
+
+    def test_pick_prefers_concept_over_region_and_style(self):
+        """区域/风格不当主线 —— 同票同时命中时也选概念板块。"""
+        s = ttr.pick_holding_sector("002366", self.SECTOR_MAP)
+        assert s is not None and s["category"] == "concept"
+
+    def test_pick_most_specific_concept_first(self):
+        """同层候选取成分股最少（最具体）者：核电核能(338) 先于 国防军工(532)。"""
+        s = ttr.pick_holding_sector("002366", self.SECTOR_MAP)
+        assert s["code"] == "880537.SH"
+
+    def test_pick_sub_industry_when_no_concept_or_industry(self):
+        """没有概念/行业时才落细分行业（tdx_type=12）。"""
+        s = ttr.pick_holding_sector("600312", self.SECTOR_MAP)
+        assert s["code"] == "881303.SH"
+
+    def test_region_or_style_only_is_no_mapping(self):
+        """只剩区域/风格 = 无映射（返回 None），不许拿风格板块冒充主线。"""
+        only_region = {"sectors": self.SECTOR_MAP["sectors"][:2]}
+        assert ttr.pick_holding_sector("002366", only_region) is None
+        assert ttr.pick_holding_sector("999999", self.SECTOR_MAP) is None
+
+    def test_theme_hit_does_not_use_fallback(self, monkeypatch):
+        """主题映射命中时**不绕兜底** —— 人工映射优先于反查。"""
+        rows = [
+            {
+                "theme_id": "chip",
+                "theme_name": "半导体",
+                "available": True,
+                "score": 80,
+                "holding_related": ["002366"],
+                "representative_stocks": [],
+                "semantic_tags": [],
+            }
+        ]
+        monkeypatch.setattr(
+            ttr,
+            "_fallback_holding_row",
+            lambda h, sm: pytest.fail("主题命中不得走兜底"),
+        )
+        r = ttr.resolve_holding_theme({"code": "002366"}, rows, self.SECTOR_MAP)
+        assert r["theme_id"] == "chip"
+
+    def test_fallback_row_has_real_sector(self, monkeypatch):
+        """兜底出真实板块行：代码/名称/阶段/分数都来自该板块的分析。"""
+        monkeypatch.setattr(ttr.tm, "read_vipdoc", lambda code: None)
+        monkeypatch.setattr(
+            ttr.tm, "analyze", lambda df, code: _an(trend="上涨", pos20="箱体上半区")
+        )
+        row = ttr.resolve_holding_theme({"code": "002366"}, [], self.SECTOR_MAP)
+        assert row["source"] == "reverse_membership"
+        assert row["theme_name"] == "核电核能"
+        assert row["primary_code"] == "880537.SH"
+        assert row["available"] is True and "quote_missing" not in row
+
+    def test_missing_kline_is_quote_missing_not_undecided(self, monkeypatch):
+        """板块已定位但没 K 线 ⇒ 「板块行情缺失」，与「未定/数据不足」分得开。"""
+        monkeypatch.setattr(ttr.tm, "read_vipdoc", lambda code: None)
+        monkeypatch.setattr(
+            ttr.tm,
+            "analyze",
+            lambda df, code: {"available": False, "error": "no kline data"},
+        )
+        row = ttr.resolve_holding_theme({"code": "002366"}, [], self.SECTOR_MAP)
+        assert row["quote_missing"] is True
+        assert row["stage"] == "板块行情缺失"
+        s, why = ttr.compare_holding_to_theme({"trend_state": "上涨"}, row)
+        assert s == "板块行情缺失" and "未定" not in s
+        assert "板块行情缺失" in why
+
+    def test_no_mapping_at_all_stays_undecided(self):
+        """反查也没有 ⇒ 维持「未定/板块数据不足」（无映射 ≠ 行情缺失）。"""
+        row = ttr.resolve_holding_theme({"code": "999999"}, [], self.SECTOR_MAP)
+        assert row == {}
+        s, why = ttr.compare_holding_to_theme({"trend_state": "上涨"}, row)
+        assert s == "未定" and "数据不足" in why
+
+    def test_section_holdings_uses_fallback(self, tmp_path, monkeypatch):
+        """§4 集成：主题映射全 miss 时持仓行出反查板块，不再「未定」。"""
+        monkeypatch.setattr(ttr, "HOLDINGS_DIR", tmp_path / "holdings")
+        monkeypatch.setattr(ttr, "SECTOR_DIR", tmp_path / "sectors")
+        (tmp_path / "holdings").mkdir()
+        (tmp_path / "sectors").mkdir()
+        (
+            tmp_path / "holdings" / "2026-08-07_holding_technical_summary.json"
+        ).write_text(
+            json.dumps([{"code": "002366", "name": "融发核电", "trend_state": "上涨"}]),
+            encoding="utf-8",
+        )
+        (tmp_path / "sectors" / "2026-08-04_tq_sector_map.json").write_text(
+            json.dumps(self.SECTOR_MAP), encoding="utf-8"
+        )
+        monkeypatch.setattr(ttr.tm, "read_vipdoc", lambda code: None)
+        monkeypatch.setattr(
+            ttr.tm,
+            "analyze",
+            lambda df, code: _an(
+                trend="上涨", pos20="箱体上半区", latest_date="2026-08-07"
+            ),
+        )
+        text = ttr.make_report("2026-08-07", [])
+        assert "核电核能（反查）" in text
+        assert "| 002366 | 融发核电 | 未定" not in text
