@@ -429,18 +429,12 @@ def run_study(
 # ---------------------------------------------------------------------------
 
 
-def build_report(
+def _per_interval_stats(
     trades: list[dict[str, Any]],
     intervals: list[tuple[str, str]],
-    top_frac: float = 0.5,
-) -> dict[str, Any]:
-    """逐笔 → 全量统计：分区间 top/bottom 分布 + 相关性 + 分档 + 半窗核对。
-
-    ``top_frac``（v0.118）：赢家组分位（0.5=旧行为 top50%；0.20=TOP20%）。
-    """
-    for t in trades:
-        t["interval_idx"] = interval_of(t["entry_date"], intervals)
-
+    top_frac: float,
+) -> list[dict[str, Any]]:
+    """分区间 top/bottom 分布 + 相关性（无样本区间跳过）。"""
     per_interval: list[dict[str, Any]] = []
     for idx, (s, e) in enumerate(intervals):
         ts = [t for t in trades if t["interval_idx"] == idx]
@@ -462,9 +456,11 @@ def build_report(
                 else None,
             }
         )
+    return per_interval
 
-    realized = [t for t in trades if not str(t["reason"]).startswith("open_end")]
-    # 区间间方向一致性：各区间 Spearman 符号统计（翻转 = 本仓库的老坑）
+
+def _interval_sign_consistency(per_interval: list[dict[str, Any]]) -> dict[str, Any]:
+    """区间间方向一致性：各区间 Spearman 符号统计（翻转 = 本仓库的老坑）。"""
     signs = [
         (iv["corr"].get("spearman"), iv["interval"])
         for iv in per_interval
@@ -472,6 +468,39 @@ def build_report(
     ]
     n_pos = sum(1 for s, _ in signs if s and s > 0)
     n_neg = sum(1 for s, _ in signs if s and s < 0)
+    return {
+        "n_intervals": len(signs),
+        "n_positive": n_pos,
+        "n_negative": n_neg,
+        "flipped": n_pos > 0 and n_neg > 0,
+    }
+
+
+def _top_bottom_overall(
+    trades: list[dict[str, Any]], top_frac: float
+) -> dict[str, Any]:
+    """全体样本 top/bottom 切分的技术分分布。"""
+    top, bottom = split_top_frac(trades, top_frac)
+    return {
+        "top50_score_dist": dist_stats([t["tech_score"] for t in top]),
+        "bottom50_score_dist": dist_stats([t["tech_score"] for t in bottom]),
+    }
+
+
+def build_report(
+    trades: list[dict[str, Any]],
+    intervals: list[tuple[str, str]],
+    top_frac: float = 0.5,
+) -> dict[str, Any]:
+    """逐笔 → 全量统计：分区间 top/bottom 分布 + 相关性 + 分档 + 半窗核对。
+
+    ``top_frac``（v0.118）：赢家组分位（0.5=旧行为 top50%；0.20=TOP20%）。
+    """
+    for t in trades:
+        t["interval_idx"] = interval_of(t["entry_date"], intervals)
+
+    per_interval = _per_interval_stats(trades, intervals, top_frac)
+    realized = [t for t in trades if not str(t["reason"]).startswith("open_end")]
     return {
         "r11_warning": R11_WARNING,
         "n_trades": len(trades),
@@ -485,23 +514,11 @@ def build_report(
         "overall_corr": correlations(trades),
         "realized_corr": correlations(realized),
         "half_window": half_window_check(trades),
-        "interval_sign_consistency": {
-            "n_intervals": len(signs),
-            "n_positive": n_pos,
-            "n_negative": n_neg,
-            "flipped": n_pos > 0 and n_neg > 0,
-        },
+        "interval_sign_consistency": _interval_sign_consistency(per_interval),
         "band_stats_all": band_stats(trades),
         "band_stats_realized": band_stats(realized),
         "top_frac": top_frac,
-        "top_bottom_overall": {
-            "top50_score_dist": dist_stats(
-                [t["tech_score"] for t in split_top_frac(trades, top_frac)[0]]
-            ),
-            "bottom50_score_dist": dist_stats(
-                [t["tech_score"] for t in split_top_frac(trades, top_frac)[1]]
-            ),
-        },
+        "top_bottom_overall": _top_bottom_overall(trades, top_frac),
         "score_dist_all": dist_stats([t["tech_score"] for t in trades]),
     }
 

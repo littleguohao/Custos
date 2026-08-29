@@ -125,17 +125,8 @@ def _signal_tri(signals: dict, skey: str) -> Optional[bool]:
     return None
 
 
-def build_factor_panel(cand: dict[str, Any]) -> dict[str, Optional[bool]]:
-    """从 compute_metrics 的 cand 提取单因子命中面板（True/False/None）。
-
-    None = unavailable（检测器数据不足/未评估），**绝不当 False**——
-    命中率统计的分母只含可评估样本（同 signal_labels.summarize_signals 的口径）。
-    """
-    panel: dict[str, Optional[bool]] = {}
-    patterns = cand.get("patterns") or {}
-    for k in PANEL_GROUPS["entry_patterns"]:
-        panel[k] = bool(patterns.get(k))  # patterns 五单项恒可评估（布尔）
-
+def _panel_macd(panel: dict[str, Optional[bool]], cand: dict[str, Any]) -> None:
+    """MACD 技术面八腿（mt.available 总闸 + 周/月红柱腿独立可用性标记）。"""
     mt = cand.get("macd_technics") or {}
     mt_avail = bool(mt.get("available"))
 
@@ -152,6 +143,9 @@ def build_factor_panel(cand: dict[str, Any]) -> dict[str, Optional[bool]]:
     _m("macd_top_divergence", (mt.get("top_divergence") or {}).get("hit"))
     _m("macd_three_peaks", (mt.get("three_peaks") or {}).get("hit"))
 
+
+def _panel_volume(panel: dict[str, Optional[bool]], cand: dict[str, Any]) -> None:
+    """量能三腿（底部量/龙头量三态 + 主线持续 status 判定）。"""
     panel["bottom_volume"] = _tri(cand.get("bottom_volume"))
     panel["leader_volume"] = _tri(cand.get("leader_volume"))
     vs = cand.get("volume_sustain") or {}
@@ -159,13 +153,17 @@ def build_factor_panel(cand: dict[str, Any]) -> dict[str, Optional[bool]]:
         (vs.get("status") == "mainline_confirmed") if vs.get("available") else None
     )
 
+
+def _panel_wave(panel: dict[str, Optional[bool]], cand: dict[str, Any]) -> None:
+    """波段/结构腿（点火/回踩/五日/修复/非一浪/周J低）。
+
+    b1_ignition 是纯函数复合判定（输入全是已算中间态），无独立 available；
+    repair_signals 无 available 概念（子信号数据不足时天然不命中）：恒可评估。
+    """
     panel["ignition"] = _tri(cand.get("ignition"))
     panel["pullback_shrink"] = _tri(cand.get("pullback_shrink"))
-    # b1_ignition 是纯函数复合判定（输入全是已算中间态），无独立 available
     panel["b1_ignition"] = bool((cand.get("b1_ignition") or {}).get("hit"))
-
     panel["five_day_entry"] = _tri(cand.get("five_day_entry"))
-    # repair_signals 无 available 概念（子信号数据不足时天然不命中）：恒可评估
     panel["repair_signals"] = bool(
         (cand.get("repair_signals") or {}).get("signals") or []
     )
@@ -177,11 +175,13 @@ def build_factor_panel(cand: dict[str, Any]) -> dict[str, Optional[bool]]:
     panel["non_one_wave_revoked"] = (
         (now.get("status") == "revoked") if now_avail else None
     )
-
     panel["weekly_j_low"] = (
         bool(cand.get("weekly_j_low")) if cand.get("weekly_j_available") else None
     )
 
+
+def _panel_signals(panel: dict[str, Optional[bool]], cand: dict[str, Any]) -> None:
+    """signals 三态映射四腿 + 出货风险两档。"""
     signals = cand.get("signals") or {}
     for pkey, skey in _SIGNAL_KEY_MAP.items():
         panel[pkey] = _signal_tri(signals, skey)
@@ -194,6 +194,23 @@ def build_factor_panel(cand: dict[str, Any]) -> dict[str, Optional[bool]]:
     panel["distribution_high"] = (
         (dist.get("risk_level") == "high") if dist_avail else None
     )
+
+
+def build_factor_panel(cand: dict[str, Any]) -> dict[str, Optional[bool]]:
+    """从 compute_metrics 的 cand 提取单因子命中面板（True/False/None）。
+
+    None = unavailable（检测器数据不足/未评估），**绝不当 False**——
+    命中率统计的分母只含可评估样本（同 signal_labels.summarize_signals 的口径）。
+    """
+    panel: dict[str, Optional[bool]] = {}
+    patterns = cand.get("patterns") or {}
+    for k in PANEL_GROUPS["entry_patterns"]:
+        panel[k] = bool(patterns.get(k))  # patterns 五单项恒可评估（布尔）
+
+    _panel_macd(panel, cand)
+    _panel_volume(panel, cand)
+    _panel_wave(panel, cand)
+    _panel_signals(panel, cand)
 
     # 键集合钉死：多键/缺键都是 bug（钉测断言）
     assert list(panel) == PANEL_KEYS, "面板键与 PANEL_KEYS 不一致"
@@ -253,26 +270,10 @@ def _lift(top: dict[str, Any], bottom: dict[str, Any]) -> Optional[float]:
     return round(tr / br, 3)
 
 
-def factor_enrichment(
-    trades: list[dict[str, Any]],
-    intervals: list[tuple[str, str]],
-    key: str,
-    top_frac: float = 0.5,
+def _half_window_enrichment(
+    trades: list[dict[str, Any]], key: str, top_frac: float
 ) -> dict[str, Any]:
-    """单因子富集全景：overall lift + 命中支撑 + 前后半窗一致性 + 区间级方向一致性。
-
-    ``top_frac``：赢家组占比（0.5=旧行为 top50%；0.10=TOP10% 赢家 vs 90% 对照）。
-    口径同步：命中率分母始终是各组**可评估**样本数（与组大小无关）；top 组收紧后
-    命中数支撑自然变薄，support 标注如实反映（MIN_HIT_SUPPORT 不随 frac 放水）。
-    """
-    for t in trades:
-        if "interval_idx" not in t:
-            t["interval_idx"] = srs.interval_of(t["entry_date"], intervals)
-    top, bottom = split_top_frac(trades, top_frac)
-    ts, bs = hit_stats(top, key), hit_stats(bottom, key)
-    support_ok = ts["n_hit"] >= MIN_HIT_SUPPORT and bs["n_hit"] >= MIN_HIT_SUPPORT
-
-    # 前后半窗（切于 entry_date 中位，同 srs.half_window_check 口径）
+    """前后半窗（切于 entry_date 中位，同 srs.half_window_check 口径）各自富集 + 一致性。"""
     dates = sorted(t["entry_date"] for t in trades)
     mid = dates[len(dates) // 2]
     halves = {}
@@ -295,8 +296,20 @@ def factor_enrichment(
         if h["top_rate"] is not None and h["bottom_rate"] is not None
     ]
     half_consistent = None if len(dirs) < 2 else (dirs[0] == dirs[1])
+    return {
+        "split_date": mid,
+        **halves,
+        "consistent": half_consistent,
+    }
 
-    # 区间级方向一致性（lift>1 的区间占比；小样本区间不参与）
+
+def _interval_consistency(
+    trades: list[dict[str, Any]],
+    intervals: list[tuple[str, str]],
+    key: str,
+    top_frac: float,
+) -> dict[str, Any]:
+    """区间级方向一致性（lift>1 的区间占比；小样本区间不参与）。"""
     iv_dirs = 0
     iv_total = 0
     for idx, (_s, _e) in enumerate(intervals):
@@ -311,6 +324,31 @@ def factor_enrichment(
             continue
         iv_total += 1
         iv_dirs += 1 if it["rate"] > ib["rate"] else 0
+    return {
+        "n_intervals": iv_total,
+        "n_lift_gt1": iv_dirs,
+        "frac_lift_gt1": round(iv_dirs / iv_total, 3) if iv_total else None,
+    }
+
+
+def factor_enrichment(
+    trades: list[dict[str, Any]],
+    intervals: list[tuple[str, str]],
+    key: str,
+    top_frac: float = 0.5,
+) -> dict[str, Any]:
+    """单因子富集全景：overall lift + 命中支撑 + 前后半窗一致性 + 区间级方向一致性。
+
+    ``top_frac``：赢家组占比（0.5=旧行为 top50%；0.10=TOP10% 赢家 vs 90% 对照）。
+    口径同步：命中率分母始终是各组**可评估**样本数（与组大小无关）；top 组收紧后
+    命中数支撑自然变薄，support 标注如实反映（MIN_HIT_SUPPORT 不随 frac 放水）。
+    """
+    for t in trades:
+        if "interval_idx" not in t:
+            t["interval_idx"] = srs.interval_of(t["entry_date"], intervals)
+    top, bottom = split_top_frac(trades, top_frac)
+    ts, bs = hit_stats(top, key), hit_stats(bottom, key)
+    support_ok = ts["n_hit"] >= MIN_HIT_SUPPORT and bs["n_hit"] >= MIN_HIT_SUPPORT
 
     return {
         "factor": key,
@@ -321,16 +359,8 @@ def factor_enrichment(
         "support": "ok"
         if support_ok
         else f"不足(任一侧命中<{MIN_HIT_SUPPORT}:top={ts['n_hit']},bottom={bs['n_hit']})",
-        "half_window": {
-            "split_date": mid,
-            **halves,
-            "consistent": half_consistent,
-        },
-        "interval_consistency": {
-            "n_intervals": iv_total,
-            "n_lift_gt1": iv_dirs,
-            "frac_lift_gt1": round(iv_dirs / iv_total, 3) if iv_total else None,
-        },
+        "half_window": _half_window_enrichment(trades, key, top_frac),
+        "interval_consistency": _interval_consistency(trades, intervals, key, top_frac),
     }
 
 

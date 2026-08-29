@@ -194,6 +194,69 @@ def _official_up_880005(ltd) -> tuple[int | None, str]:
         return None, ""
 
 
+def _bucket_counts(tails: dict, latest: int) -> tuple[int, int, int, int]:
+    """按末日 vs 前日收盘分 涨/跌/平/停 四桶；尾部不足两根或末日陈旧归停牌桶。"""
+    up = down = flat = susp = 0
+    for t in tails.values():
+        if len(t) < 2 or t[-1][0] < latest:
+            susp += 1
+        elif t[-1][1] > t[-2][1]:
+            up += 1
+        elif t[-1][1] < t[-2][1]:
+            down += 1
+        else:
+            flat += 1
+    return up, down, flat, susp
+
+
+def _crosscheck_up(ltd, up: int) -> dict:
+    """自算涨家数与 880005 官方值对照，差异 >2% 标 warning（不阻断）。"""
+    official, official_date = _official_up_880005(ltd)
+    crosscheck: dict = {"official_up_880005": official, "as_of": official_date}
+    if official:
+        diff_pct = round((up - official) / official * 100, 2)
+        crosscheck["diff_pct"] = diff_pct
+        crosscheck["status"] = (
+            "ok" if abs(diff_pct) <= CROSSCHECK_WARN_PCT else "warning"
+        )
+    else:
+        crosscheck["status"] = "skipped"
+    return crosscheck
+
+
+def _breadth_note(
+    universe_size: int,
+    latest: int,
+    up: int,
+    down: int,
+    flat: int,
+    susp: int,
+    crosscheck: dict,
+    stale: bool,
+    expected: str,
+) -> str:
+    """组装人类可读 note：四桶计数 + 880005 对照结论 + stale 告警。"""
+    note = (
+        f"vipdoc 本地自算（宇宙 {universe_size} 只，数据日 {latest}）："
+        f"涨 {up} / 跌 {down} / 平 {flat} / 停 {susp}"
+    )
+    if crosscheck.get("official_up_880005"):
+        note += (
+            f"；对照 880005 官方涨家数 {crosscheck['official_up_880005']}"
+            f"，差 {crosscheck['diff_pct']}%"
+        )
+        note += (
+            "（宇宙边界差，正常）"
+            if crosscheck["status"] == "ok"
+            else "（>2%，warning）"
+        )
+    else:
+        note += "；880005 对照缺失"
+    if stale:
+        note += f"；⚠️ 数据日 {latest} ≠ 期望 {expected}（vipdoc 未更新到当日）"
+    return note
+
+
 def compute_breadth_from_vipdoc(date: str | None = None, tdx_root=None) -> dict:
     """遍历本地 vipdoc A 股宇宙自算 涨/跌/平/停 四桶（owner 批准的方案③）。
 
@@ -223,46 +286,16 @@ def compute_breadth_from_vipdoc(date: str | None = None, tdx_root=None) -> dict:
     if not latest:
         return {"available": False, "note": "vipdoc 日线全部不可读（空宇宙）"}
 
-    up = down = flat = susp = 0
-    for t in tails.values():
-        if len(t) < 2 or t[-1][0] < latest:
-            susp += 1
-        elif t[-1][1] > t[-2][1]:
-            up += 1
-        elif t[-1][1] < t[-2][1]:
-            down += 1
-        else:
-            flat += 1
+    up, down, flat, susp = _bucket_counts(tails, latest)
 
-    official, official_date = _official_up_880005(ltd)
-    crosscheck: dict = {"official_up_880005": official, "as_of": official_date}
-    if official:
-        diff_pct = round((up - official) / official * 100, 2)
-        crosscheck["diff_pct"] = diff_pct
-        crosscheck["status"] = (
-            "ok" if abs(diff_pct) <= CROSSCHECK_WARN_PCT else "warning"
-        )
-    else:
-        crosscheck["status"] = "skipped"
+    crosscheck = _crosscheck_up(ltd, up)
 
     expected = str(date).replace("-", "")[:8] if date else ""
     stale = bool(expected) and str(latest) != expected
 
-    note = (
-        f"vipdoc 本地自算（宇宙 {len(codes)} 只，数据日 {latest}）："
-        f"涨 {up} / 跌 {down} / 平 {flat} / 停 {susp}"
+    note = _breadth_note(
+        len(codes), latest, up, down, flat, susp, crosscheck, stale, expected
     )
-    if official:
-        note += f"；对照 880005 官方涨家数 {official}，差 {crosscheck['diff_pct']}%"
-        note += (
-            "（宇宙边界差，正常）"
-            if crosscheck["status"] == "ok"
-            else "（>2%，warning）"
-        )
-    else:
-        note += "；880005 对照缺失"
-    if stale:
-        note += f"；⚠️ 数据日 {latest} ≠ 期望 {expected}（vipdoc 未更新到当日）"
 
     return {
         "available": True,

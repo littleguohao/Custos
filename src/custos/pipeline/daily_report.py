@@ -269,9 +269,7 @@ def _holding_action_row(
         if event
         else "无新增持仓事件"
     )
-    return (
-        f"| {c} {x.get('name') or (prow or {}).get('name') or ''} | {tech_state} | {ma_j} | {bbi_state}；{bbi_reminder}；{structure['state']}；{structure['reminder']} | {current_action} | {plan_cell} | {confirm} | {new_evidence} |"
-    )
+    return f"| {c} {x.get('name') or (prow or {}).get('name') or ''} | {tech_state} | {ma_j} | {bbi_state}；{bbi_reminder}；{structure['state']}；{structure['reminder']} | {current_action} | {plan_cell} | {confirm} | {new_evidence} |"
 
 
 def _plan_only_warning_lines(plan: dict, action_codes: set) -> list[str]:
@@ -337,7 +335,9 @@ def holdings_plan_section(
     for x in chief.get("holding_actions", []):
         action_codes.add(code(x.get("code")))
         lines.append(
-            _holding_action_row(x, tech, prior_actions, plan_by_code, holding_event_map, plan)
+            _holding_action_row(
+                x, tech, prior_actions, plan_by_code, holding_event_map, plan
+            )
         )
     if not chief.get("holding_actions"):
         lines.append(

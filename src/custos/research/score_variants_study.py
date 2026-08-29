@@ -238,36 +238,46 @@ def evaluate_variant(
     }
 
 
-def judge(
-    rep: dict[str, Any],
-    v0_basket: dict[str, Any],
-    universe_stats: Optional[dict[str, Any]] = None,
-) -> dict[str, Any]:
-    """按预注册判据 C1–C3 裁决（C4 跨窗在报告层人工对照，不进本函数）。
-
-    C3 四个口径并列（互不覆盖）：预注册（盈亏比 ≥ V0，v0.119）/
-    owner 放宽（胜率升 + 盈亏比 ≥ 2.4，v0.121，事后并列）/
-    天然基准 margin（变体篮子 margin > V0 篮子 margin，v0.128，零自由参数）/
-    全样本天然基准（变体篮子 margin > **全样本** margin，R24 Phase 0，
-    2026-08-28 owner：天然=无因子影响的胜率/盈亏比组合——「无筛选」才是地板）。
-    Wilson 重叠是**显著性辅助注记**（重叠 = 差异不显著，参考用，不改变判定）。
-
-    ``universe_stats`` = 全样本 ret_stats + n_win（build_report 传入）；
-    缺省（旧调用）时第四列各键为 None，不影响既有三列。
-    """
+def _c1_spearman_positive(rep: dict[str, Any]) -> bool:
+    """C1：Spearman>0 且前后半窗同正。"""
     sp = rep["corr"].get("spearman")
     hw = rep["half_window"]
-    c1 = (
+    return (
         sp is not None
         and sp > 0
         and hw.get("consistent") is True
         and (hw.get("first_half") or {}).get("spearman") is not None
         and hw["first_half"]["spearman"] > 0
     )
-    c2 = (rep["winner_top20_dist"].get("mean") or 0) > (
-        rep["bottom80_dist"].get("mean") or 0
+
+
+def _wilson_overlap(
+    b1: dict[str, Any], b2: dict[str, Any]
+) -> tuple[list, list, Optional[bool]]:
+    """两方胜率的 Wilson 95% 区间 + 重叠注记（重叠 = 差异不显著，不改判定）。"""
+    lo_1, hi_1 = wilson_wr_interval(b1.get("n_win") or 0, b1.get("n") or 0)
+    lo_2, hi_2 = wilson_wr_interval(b2.get("n_win") or 0, b2.get("n") or 0)
+    overlap = (
+        None
+        if None in (lo_1, hi_1, lo_2, hi_2)
+        else not (hi_1 < lo_2 or hi_2 < lo_1)  # 区间相交
     )
-    b = rep["basket_top20_by_variant"]
+    return [lo_1, hi_1], [lo_2, hi_2], overlap
+
+
+def _c3_columns(
+    b: dict[str, Any],
+    v0_basket: dict[str, Any],
+    universe_stats: Optional[dict[str, Any]],
+) -> dict[str, Any]:
+    """C3 四口径并列判定 + margin/Wilson 注记读数（互不覆盖）。
+
+    预注册（盈亏比 ≥ V0，v0.119）/ owner 放宽（胜率升 + 盈亏比 ≥ 2.4，v0.121，
+    事后并列）/ 天然基准 margin（变体篮子 > V0 篮子，v0.128，零自由参数）/
+    全样本天然基准（变体篮子 > **全样本**，R24 Phase 0，2026-08-28 owner：
+    天然=无因子影响的胜率/盈亏比组合——「无筛选」才是地板）。
+    Wilson 重叠是**显著性辅助注记**（重叠 = 差异不显著，参考用，不改变判定）。
+    """
     c3 = b["win_rate"] > v0_basket["win_rate"] and (b["payoff_ratio"] or 0) >= (
         v0_basket["payoff_ratio"] or 0
     )
@@ -281,31 +291,16 @@ def judge(
     m_0 = basket_margin(v0_basket)
     c3_natural = m_v is not None and m_0 is not None and m_v > m_0
     # Wilson 95% 区间重叠 ⇒ 胜率差异不显著（辅助注记）
-    lo_v, hi_v = wilson_wr_interval(b.get("n_win") or 0, b.get("n") or 0)
-    lo_0, hi_0 = wilson_wr_interval(
-        v0_basket.get("n_win") or 0, v0_basket.get("n") or 0
-    )
-    wilson_overlap = (
-        None
-        if None in (lo_v, hi_v, lo_0, hi_0)
-        else not (hi_v < lo_0 or hi_0 < lo_v)  # 区间相交
-    )
+    basket_wil, v0_wil, wilson_overlap = _wilson_overlap(b, v0_basket)
     # 全样本天然基准（R24 Phase 0，2026-08-28 owner：天然=无因子影响组合）——
     # 第四列 C3，与既有三列**并列、互不覆盖**：基准从「V0 篮子」换成「全样本」，
     # 既有三列的输入一个不动。
     u = universe_stats or {}
     m_u = _margin({"win": u.get("win_rate"), "payoff": u.get("payoff_ratio")})
     c3_vs_universe = m_v is not None and m_u is not None and m_v > m_u
-    lo_u, hi_u = wilson_wr_interval(u.get("n_win") or 0, u.get("n") or 0)
-    wilson_overlap_universe = (
-        None
-        if None in (lo_v, hi_v, lo_u, hi_u)
-        else not (hi_v < lo_u or hi_u < lo_v)  # 与全样本胜率区间相交
-    )
+    _, u_wil, wilson_overlap_universe = _wilson_overlap(b, u)
     n_u = u.get("n") or 0
     return {
-        "C1_spearman_positive": c1,
-        "C2_winner_scores_higher": c2,
         "C3_basket_wr_up_payoff_kept": c3,
         "C3_relaxed_wr_up_payoff_floor": c3_relaxed,
         "C3_natural_margin": c3_natural,
@@ -313,17 +308,42 @@ def judge(
         "basket_margin": round(m_v, 4) if m_v is not None else None,
         "v0_basket_margin": round(m_0, 4) if m_0 is not None else None,
         "universe_margin": round(m_u, 4) if m_u is not None else None,
-        "basket_wr_wilson95": [lo_v, hi_v],
-        "v0_basket_wr_wilson95": [lo_0, hi_0],
-        "universe_wr_wilson95": [lo_u, hi_u],
+        "basket_wr_wilson95": basket_wil,
+        "v0_basket_wr_wilson95": v0_wil,
+        "universe_wr_wilson95": u_wil,
         "wilson_overlap": wilson_overlap,
         "wilson_overlap_universe": wilson_overlap_universe,
         # 篮子占全样本比例 n/N——C5 候选数约束的读数（top20% 口径下应 ≈0.20）
         "basket_frac_of_universe": (round((b.get("n") or 0) / n_u, 4) if n_u else None),
-        "candidate": c1 and c2 and c3,
-        "candidate_relaxed": c1 and c2 and c3_relaxed,
-        "candidate_natural": c1 and c2 and c3_natural,
-        "candidate_vs_universe": c1 and c2 and c3_vs_universe,
+    }
+
+
+def judge(
+    rep: dict[str, Any],
+    v0_basket: dict[str, Any],
+    universe_stats: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """按预注册判据 C1–C3 裁决（C4 跨窗在报告层人工对照，不进本函数）。
+
+    C3 四个口径并列（互不覆盖，判定细节见 :func:`_c3_columns`）。
+    Wilson 重叠是**显著性辅助注记**（重叠 = 差异不显著，参考用，不改变判定）。
+
+    ``universe_stats`` = 全样本 ret_stats + n_win（build_report 传入）；
+    缺省（旧调用）时第四列各键为 None，不影响既有三列。
+    """
+    c1 = _c1_spearman_positive(rep)
+    c2 = (rep["winner_top20_dist"].get("mean") or 0) > (
+        rep["bottom80_dist"].get("mean") or 0
+    )
+    c3_cols = _c3_columns(rep["basket_top20_by_variant"], v0_basket, universe_stats)
+    return {
+        "C1_spearman_positive": c1,
+        "C2_winner_scores_higher": c2,
+        **c3_cols,
+        "candidate": c1 and c2 and c3_cols["C3_basket_wr_up_payoff_kept"],
+        "candidate_relaxed": c1 and c2 and c3_cols["C3_relaxed_wr_up_payoff_floor"],
+        "candidate_natural": c1 and c2 and c3_cols["C3_natural_margin"],
+        "candidate_vs_universe": c1 and c2 and c3_cols["C3_natural_vs_universe"],
     }
 
 
@@ -377,6 +397,69 @@ def build_report(trades: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _variant_tags(name: str, vd: dict[str, Any]) -> str:
+    """变体判据标签串（V0=对照；Wilson 重叠仅作显著性注记，不改判定）。"""
+    if name == "V0":
+        return "对照"
+    tags = (
+        f"{'✓' if vd.get('C1_spearman_positive') else '✗'}"
+        f"{'✓' if vd.get('C2_winner_scores_higher') else '✗'}"
+        f"{'✓' if vd.get('C3_basket_wr_up_payoff_kept') else '✗'}"
+        f"{'✓' if vd.get('C3_relaxed_wr_up_payoff_floor') else '✗'}"
+        f"{'✓' if vd.get('C3_natural_margin') else '✗'}"
+        f"{'✓' if vd.get('C3_natural_vs_universe') else '✗'}"
+        f" ⇒ 预注册{'候选' if vd.get('candidate') else '淘汰'}"
+        f"/放宽{'候选' if vd.get('candidate_relaxed') else '淘汰'}"
+        f"/天然{'候选' if vd.get('candidate_natural') else '淘汰'}"
+        f"/全样本{'候选' if vd.get('candidate_vs_universe') else '淘汰'}"
+    )
+    if vd.get("wilson_overlap") is True:
+        tags += "（Wilson重叠=胜率差异不显著，注记）"
+    elif vd.get("wilson_overlap") is False:
+        tags += "（Wilson不重叠）"
+    if vd.get("wilson_overlap_universe") is False:
+        tags += "（vs全样本Wilson不重叠）"
+    return tags
+
+
+def _variant_row(name: str, v: dict[str, Any], rep: dict[str, Any]) -> str:
+    """变体对照表单行：Spearman(半窗) | 均分对比 | 篮子指标 | 判据标签。"""
+    hw = v["half_window"]
+    sp = v["corr"].get("spearman")
+    h1 = (hw.get("first_half") or {}).get("spearman")
+    h2 = (hw.get("second_half") or {}).get("spearman")
+    b = v["basket_top20_by_variant"]
+    m = basket_margin(b)
+    m_txt = f"{m * 100:+.1f}pp" if m is not None else "—"
+    tags = _variant_tags(name, rep["verdicts"].get(name, {}))
+    n_all = rep["n_trades"] or 1
+    return (
+        f"  {name} | {sp}({h1}/{h2}{'' if hw.get('consistent') else ' ⚠️翻'}) | "
+        f"{v['winner_top20_dist'].get('mean')} vs {v['bottom80_dist'].get('mean')} | "
+        f"{b['win_rate'] * 100:.1f}%/{b['payoff_ratio']}/{b['avg_ret'] * 100:.2f}%/"
+        f"n={b['n']}/{n_all}({b['n'] / n_all * 100:.0f}%)/{m_txt} | "
+        f"{tags}"
+    )
+
+
+def _band_rows(rep: dict[str, Any]) -> list[str]:
+    """分档收益表（live 30/60 阈；变体分档）逐变体一行。"""
+    rows = []
+    for name, v in rep["variants"].items():
+        row = [name]
+        for band in ("<30", "30-59", ">=60"):
+            st = v["band_stats"].get(band) or {}
+            if st.get("n"):
+                row.append(
+                    f"{band}: {st['avg_ret'] * 100:+.2f}%/{st['win_rate'] * 100:.0f}%/"
+                    f"{st['payoff_ratio']}(n={st['n']})"
+                )
+            else:
+                row.append(f"{band}: —")
+        rows.append("  " + " | ".join(row))
+    return rows
+
+
 def print_report(rep: dict[str, Any]) -> None:
     """stdout 中文摘要。"""
     print("\n" + "=" * 76)
@@ -397,56 +480,10 @@ def print_report(rep: dict[str, Any]) -> None:
         "变体篮子(胜率/盈亏比/均收/n占全样本/margin) | C1/C2/C3预注册/C3放宽/C3天然/C3天然vs全样本"
     )
     for name, v in rep["variants"].items():
-        hw = v["half_window"]
-        sp = v["corr"].get("spearman")
-        h1 = (hw.get("first_half") or {}).get("spearman")
-        h2 = (hw.get("second_half") or {}).get("spearman")
-        b = v["basket_top20_by_variant"]
-        m = basket_margin(b)
-        m_txt = f"{m * 100:+.1f}pp" if m is not None else "—"
-        vd = rep["verdicts"].get(name, {})
-        if name == "V0":
-            tags = "对照"
-        else:
-            tags = (
-                f"{'✓' if vd.get('C1_spearman_positive') else '✗'}"
-                f"{'✓' if vd.get('C2_winner_scores_higher') else '✗'}"
-                f"{'✓' if vd.get('C3_basket_wr_up_payoff_kept') else '✗'}"
-                f"{'✓' if vd.get('C3_relaxed_wr_up_payoff_floor') else '✗'}"
-                f"{'✓' if vd.get('C3_natural_margin') else '✗'}"
-                f"{'✓' if vd.get('C3_natural_vs_universe') else '✗'}"
-                f" ⇒ 预注册{'候选' if vd.get('candidate') else '淘汰'}"
-                f"/放宽{'候选' if vd.get('candidate_relaxed') else '淘汰'}"
-                f"/天然{'候选' if vd.get('candidate_natural') else '淘汰'}"
-                f"/全样本{'候选' if vd.get('candidate_vs_universe') else '淘汰'}"
-            )
-            if vd.get("wilson_overlap") is True:
-                tags += "（Wilson重叠=胜率差异不显著，注记）"
-            elif vd.get("wilson_overlap") is False:
-                tags += "（Wilson不重叠）"
-            if vd.get("wilson_overlap_universe") is False:
-                tags += "（vs全样本Wilson不重叠）"
-        n_all = rep["n_trades"] or 1
-        print(
-            f"  {name} | {sp}({h1}/{h2}{'' if hw.get('consistent') else ' ⚠️翻'}) | "
-            f"{v['winner_top20_dist'].get('mean')} vs {v['bottom80_dist'].get('mean')} | "
-            f"{b['win_rate'] * 100:.1f}%/{b['payoff_ratio']}/{b['avg_ret'] * 100:.2f}%/"
-            f"n={b['n']}/{n_all}({b['n'] / n_all * 100:.0f}%)/{m_txt} | "
-            f"{tags}"
-        )
+        print(_variant_row(name, v, rep))
     print("\n── 分档收益表（live 30/60 阈；变体分档）")
-    for name, v in rep["variants"].items():
-        row = [name]
-        for band in ("<30", "30-59", ">=60"):
-            st = v["band_stats"].get(band) or {}
-            if st.get("n"):
-                row.append(
-                    f"{band}: {st['avg_ret'] * 100:+.2f}%/{st['win_rate'] * 100:.0f}%/"
-                    f"{st['payoff_ratio']}(n={st['n']})"
-                )
-            else:
-                row.append(f"{band}: —")
-        print("  " + " | ".join(row))
+    for row in _band_rows(rep):
+        print(row)
 
 
 # ---------------------------------------------------------------------------

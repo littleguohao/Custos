@@ -1752,6 +1752,76 @@ def _cost_zone_flat(
     return not (above_bbi or rising or escaped)
 
 
+def _bbi_exit_step(
+    j: int,
+    close: np.ndarray,
+    bbi_v: np.ndarray,
+    bulls: Optional[np.ndarray],
+    can_sell: Optional[np.ndarray],
+    scale: float,
+    scaled_at: Optional[int],
+    scaled_ret: float,
+    has_above: bool,
+    consec_below: int,
+    bbi_exit_consec: int,
+    entry: float,
+) -> tuple[bool, int, Optional[int], float, Optional[tuple[int, str, float]]]:
+    """② 收盘 BBI 通道单步：②a 双中大阳分批止盈 + ②b 连破清仓。
+
+    返回更新后的 ``(has_above, consec_below, scaled_at, scaled_ret, 出场信号)``；
+    出场信号为 ``(exit_bar, reason, price)`` 或 None（``b != b`` 排除 NaN）。
+    """
+    exit_sig = None
+    b = bbi_v[j]
+    if b == b:
+        # ②a 分批止盈:BBI 上方连续两根中大阳线（首次触发，且此前未减仓）
+        if _scale_out_triggered(j, close, bbi_v, bulls, can_sell, scale, scaled_at):
+            scaled_at = j
+            scaled_ret = float(close[j]) / entry - 1
+        if close[j] > b:
+            has_above = True
+            consec_below = 0
+        elif close[j] < b:
+            if has_above:
+                consec_below += 1
+                if bbi_exit_consec > 0 and consec_below >= bbi_exit_consec:
+                    exit_sig = (j, "bbi_exit", float(close[j]))
+        else:
+            consec_below = 0
+    return has_above, consec_below, scaled_at, scaled_ret, exit_sig
+
+
+def _qsx_exit_step(
+    j: int,
+    n: int,
+    close: np.ndarray,
+    open_: np.ndarray,
+    qsx_v: Optional[np.ndarray],
+    qsx_consec_below: int,
+    qsx_exit_consec: int,
+) -> tuple[int, Optional[tuple[str, int, str, float]]]:
+    """②c QSX 跌破清仓（v0.120）单步：收盘 < QSX 连续 qsx_exit_consec 日 ⇒ 次日开盘清。
+
+    与 BBI 连破同通道但无「先站上」前提；触发日之后的止损/其他出场不再判定
+    （次日开盘价已包含隔夜跳空，同 BBI 通道「信号日定、次日成交」语义）。
+    返回 ``(qsx_consec_below, 信号)``；信号为 ``("exit"|"settle", idx, reason, price)`` 或 None。
+    """
+    exit_sig = None
+    if qsx_v is not None and qsx_exit_consec > 0:
+        q = qsx_v[j]
+        if q == q:  # NaN 守卫（DKS/QSX 早期不足根数）
+            if close[j] < q:
+                qsx_consec_below += 1
+                if qsx_consec_below >= qsx_exit_consec:
+                    if j + 1 < n:
+                        exit_sig = ("exit", j + 1, "qsx_exit", float(open_[j + 1]))
+                    else:
+                        exit_sig = ("settle", n - 1, "qsx_exit", float(close[-1]))
+            else:
+                qsx_consec_below = 0
+    return qsx_consec_below, exit_sig
+
+
 def simulate_b1_trade(
     df: pd.DataFrame,
     entry_idx: int,
@@ -1977,36 +2047,30 @@ def simulate_b1_trade(
         )
         if hit is not None:
             return _exit(j, hit[0], hit[1])
-        b = bbi_v[j]
-        if b == b:  # ② 收盘 BBI 退出（b==b 排除 NaN）
-            # ②a 分批止盈:BBI 上方连续两根中大阳线（首次触发，且此前未减仓）
-            if _scale_out_triggered(j, close, bbi_v, bulls, can_sell, scale, scaled_at):
-                scaled_at = j
-                scaled_ret = float(close[j]) / entry - 1
-            if close[j] > b:
-                has_above = True
-                consec_below = 0
-            elif close[j] < b:
-                if has_above:
-                    consec_below += 1
-                    if bbi_exit_consec > 0 and consec_below >= bbi_exit_consec:
-                        return _exit(j, "bbi_exit", float(close[j]))
-            else:
-                consec_below = 0
-        # ②c QSX 跌破清仓（v0.120）：收盘 < QSX 连续 qsx_exit_consec 日 ⇒ 次日开盘清。
-        # 与 BBI 连破同通道但无「先站上」前提；触发日之后的止损/其他出场不再判定
-        # （次日开盘价已包含隔夜跳空，同 BBI 通道「信号日定、次日成交」语义）。
-        if qsx_v is not None and qsx_exit_consec > 0:
-            q = qsx_v[j]
-            if q == q:  # NaN 守卫（DKS/QSX 早期不足根数）
-                if close[j] < q:
-                    qsx_consec_below += 1
-                    if qsx_consec_below >= qsx_exit_consec:
-                        if j + 1 < n:
-                            return _exit(j + 1, "qsx_exit", float(open_[j + 1]))
-                        return _settle(n - 1, "qsx_exit", float(close[-1]))
-                else:
-                    qsx_consec_below = 0
+        has_above, consec_below, scaled_at, scaled_ret, bbi_sig = _bbi_exit_step(
+            j,
+            close,
+            bbi_v,
+            bulls,
+            can_sell,
+            scale,
+            scaled_at,
+            scaled_ret,
+            has_above,
+            consec_below,
+            bbi_exit_consec,
+            entry,
+        )
+        if bbi_sig is not None:
+            return _exit(bbi_sig[0], bbi_sig[1], bbi_sig[2])
+        qsx_consec_below, qsx_sig = _qsx_exit_step(
+            j, n, close, open_, qsx_v, qsx_consec_below, qsx_exit_consec
+        )
+        if qsx_sig is not None:
+            kind, idx, qsx_reason, qsx_price = qsx_sig
+            if kind == "exit":
+                return _exit(idx, qsx_reason, qsx_price)
+            return _settle(idx, qsx_reason, qsx_price)
         # ③ 「不涨就拍」：三个维度都平淡才砍（判定细节见 _cost_zone_flat docstring）
         if (
             cost_zone_bars
