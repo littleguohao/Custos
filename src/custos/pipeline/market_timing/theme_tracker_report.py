@@ -4,6 +4,7 @@
 Reads:
 - data/sectors/sector_code_map.json
 - data/sectors/*_tq_sector_map.json（最新一份，§4 持仓主题映射 miss 时按反向成员关系兜底）
+- data/holdings/*_holding_sector_mapping.json（≤报告日最近一份，兜底行业层：TDX 行业名→880 行业板块）
 - data/holdings/YYYY-MM-DD_holding_technical_summary.json
 - artifacts/reports/daily/YYYY-MM-DD/YYYY-MM-DD_market_timing_score.md
 
@@ -314,9 +315,17 @@ def match_holding_theme(
     return best[1]
 
 
-# 反向成员关系兜底选板块的类别优先级：概念/行业 > 细分行业；区域/风格/统计指数不当主线
-_MAINLINE_CATEGORIES = ("concept", "industry")
+# 兜底选板块的类别优先级（v0.140 owner 定稿「行业优先+取大」）：
+# 行业 > 概念 > 细分行业；区域/风格/统计指数不当主线。
+# 注意：tq_sector_map 没有行业层（category 无 industry），行业由
+# pick_industry_sector（holding_sector_mapping 行业名 → 名称表 tdx_type=2）提供，
+# 先于本反查调用；pick_holding_sector 里的 industry tier 只兜底含行业条目的映射。
+_INDUSTRY_CATEGORIES = ("industry",)
+_MAINLINE_CATEGORIES = ("concept",)
 _SUB_INDUSTRY_CATEGORIES = ("sub_industry",)
+
+# 兜底来源标签：§4 行标注与 quote_missing 文案共用
+_SOURCE_LABELS = {"industry": "行业映射", "reverse_membership": "反向成员关系"}
 
 
 def latest_tq_sector_map() -> dict[str, Any]:
@@ -327,12 +336,77 @@ def latest_tq_sector_map() -> dict[str, Any]:
     return load_json(files[-1], {}) or {}
 
 
+def holding_industry_names(date: str) -> dict[str, str]:
+    """持仓 → TDX 行业名（tdxhy 口径）。
+
+    取 ≤ 报告日的最近一份 ``*_holding_sector_mapping.json``
+    （holding_sector_mapper 每日产；同 positions_history 的回溯语义）。
+    tq_sector_map 没有行业层（category 无 industry），行业必须走这份。
+    文件缺失返回 {} —— 调用方行为不变（落概念反查）。
+    """
+    files = [
+        f
+        for f in sorted(HOLDINGS_DIR.glob("*_holding_sector_mapping.json"))
+        if f.name.split("_")[0] <= date
+    ]
+    if not files:
+        return {}
+    records = load_json(files[-1], []) or []
+    out: dict[str, str] = {}
+    for r in records:
+        code6 = str(r.get("code") or "").split(".")[0]
+        industry = str(r.get("industry") or "").strip()
+        if code6 and industry:
+            out[code6] = industry
+    return out
+
+
+def pick_industry_sector(
+    industry_name: str, sector_map: dict[str, Any]
+) -> dict[str, Any] | None:
+    """TDX 行业名 → 名称表精确匹配 tdx_type=2 的 880 行业板块。
+
+    名称对不上、或候选板块全无 K 线 ⇒ 返回 None（落概念层，不硬报缺失）。
+    同名歧义取「有 K 线且成分股最多」者（成分股数取自 tq_sector_map，缺则 0）。
+    """
+    from custos.datasource.local_tdx.tq_sector import (  # noqa: PLC0415 惰性：与 final_close_review 同例
+        load_sector_names,
+    )
+
+    if not industry_name:
+        return None
+    name_map = load_sector_names()
+    candidates = [
+        code
+        for code, info in name_map.items()
+        if info.get("name") == industry_name and info.get("tdx_type") == "2"
+    ]
+    if not candidates:
+        return None
+    live = [c for c in candidates if not tm.read_vipdoc(f"{c}.SH").empty]
+    if not live:
+        return None
+    counts = {
+        str(s.get("code") or "").split(".")[0]: s.get("stock_count") or 0
+        for s in (sector_map.get("sectors") or [])
+    }
+    best = max(live, key=lambda c: (counts.get(c, 0), c))
+    return {
+        "code": f"{best}.SH",
+        "name": industry_name,
+        "category": "industry",
+        "stock_count": counts.get(best, 0),
+    }
+
+
 def pick_holding_sector(code: str, sector_map: dict[str, Any]) -> dict[str, Any] | None:
     """按反向成员关系为持仓选板块。
 
-    只认概念（tdx_type=4）/行业（2）> 细分行业（12）；区域/风格/统计指数不当主线，
+    只认**行业（tdx_type=2）> 概念（4）**> 细分行业（12）；区域/风格/统计指数不当主线，
     只剩这些时返回 None（= 无映射，区别于「有映射但行情缺失」）。
-    同层候选取成分股最少（最具体）者，代码升序兜底保证确定性。
+    同层候选取**成分股最多（最大共识板块）**者（v0.140，owner 拍板「行业优先+取大」：
+    最具体≠最相关——迷你概念（如核污染防治 64 只）会把融发核电从核电核能
+    （338 只）这种主共识板块上带偏），代码升序兜底保证确定性。
     """
     code6 = str(code).split(".")[0]
     hits = [
@@ -340,20 +414,26 @@ def pick_holding_sector(code: str, sector_map: dict[str, Any]) -> dict[str, Any]
         for s in (sector_map.get("sectors") or [])
         if code6 in {str(x).split(".")[0] for x in s.get("stocks") or []}
     ]
-    for tier in (_MAINLINE_CATEGORIES, _SUB_INDUSTRY_CATEGORIES):
+    for tier in (_INDUSTRY_CATEGORIES, _MAINLINE_CATEGORIES, _SUB_INDUSTRY_CATEGORIES):
         pool = [s for s in hits if s.get("category") in tier]
         if pool:
             return min(
-                pool, key=lambda s: (s.get("stock_count") or 0, str(s.get("code")))
+                pool, key=lambda s: (-(s.get("stock_count") or 0), str(s.get("code")))
             )
     return None
 
 
 def _fallback_holding_row(
-    holding: dict[str, Any], sector_map: dict[str, Any]
+    holding: dict[str, Any],
+    sector_map: dict[str, Any],
+    industry_name: str | None = None,
 ) -> dict[str, Any] | None:
-    """主题映射 miss 时按反向成员关系补一行；K 线缺失如实标 quote_missing。"""
-    sector = pick_holding_sector(str(holding.get("code") or ""), sector_map)
+    """主题映射 miss 时补一行：行业映射优先，概念反查兜底；K 线缺失如实标 quote_missing。"""
+    source = "industry"
+    sector = pick_industry_sector(industry_name, sector_map) if industry_name else None
+    if sector is None:
+        source = "reverse_membership"
+        sector = pick_holding_sector(str(holding.get("code") or ""), sector_map)
     if sector is None:
         return None
     code = str(sector.get("code") or "")
@@ -371,14 +451,14 @@ def _fallback_holding_row(
         "action_bias": action_bias(stage, score),
         "trend_state": (analysis.get("trend") or {}).get("state"),
         "box20_position": (analysis.get("box_20d") or {}).get("position"),
-        "source": "reverse_membership",
+        "source": source,
     }
     if not analysis.get("available"):
         # 板块已定位但行情缺失 ≠ 未定/无映射 —— 两种文案必须分得开
         row["quote_missing"] = True
         row["stage"] = "板块行情缺失"
         row["stage_reason"] = (
-            f"已按反向成员关系定位板块 {code}，"
+            f"已按{_SOURCE_LABELS[source]}定位板块 {code}，"
             f"但板块行情缺失（{analysis.get('error', '无K线数据')}）。"
         )
     return row
@@ -388,14 +468,15 @@ def resolve_holding_theme(
     holding: dict[str, Any],
     rows: list[dict[str, Any]],
     sector_map: dict[str, Any] | None = None,
+    industry_name: str | None = None,
 ) -> dict[str, Any]:
-    """先主题映射（显式关联 > 语义标签），miss 时兜底反向成员关系。"""
+    """先主题映射（显式关联 > 语义标签），miss 时兜底：行业映射 > 反向成员关系。"""
     theme = match_holding_theme(holding, rows)
     if theme:
         return theme
     if sector_map is None:
         sector_map = latest_tq_sector_map()
-    return _fallback_holding_row(holding, sector_map) or {}
+    return _fallback_holding_row(holding, sector_map, industry_name) or {}
 
 
 def compare_holding_to_theme(
@@ -500,8 +581,9 @@ def _section_holdings(
         if rel == "弱于板块" and action == "观察":
             action = "风控观察"
         theme_name = theme.get("theme_name", "未定")
-        if theme.get("source") == "reverse_membership":
-            theme_name += "（反查）"
+        source = theme.get("source")
+        if source in _SOURCE_LABELS:
+            theme_name += "（行业）" if source == "industry" else "（反查）"
         lines.append(
             f"| {code} | {h.get('name')} | {theme_name} | {theme.get('stage', '未定')} | {theme.get('score', 0)} | {rel}：{rel_reason} | {action} |"
         )
@@ -590,11 +672,15 @@ def make_report(date: str, rows: list[dict[str, Any]]) -> str:
         or (r.get("score") or 0) < 45
     ]
     top = rows[0] if rows else {}
-    # 主题映射 miss 的持仓走反向成员关系兜底；只有真的有人 miss 才加载映射大文件
+    # 主题映射 miss 的持仓走兜底（行业映射 > 反向成员关系）；只有真的有人 miss 才加载映射大文件
     need_fallback = any(not match_holding_theme(h, rows) for h in holdings)
     sector_map = latest_tq_sector_map() if need_fallback else {}
+    industry_names = holding_industry_names(date) if need_fallback else {}
     holding_themes = {
-        str(h.get("code")): resolve_holding_theme(h, rows, sector_map) for h in holdings
+        str(h.get("code")): resolve_holding_theme(
+            h, rows, sector_map, industry_names.get(str(h.get("code")).split(".")[0])
+        )
+        for h in holdings
     }
     lines = (
         _section_mainline(date, top)

@@ -436,10 +436,11 @@ class TestReverseMembershipFallback:
         s = ttr.pick_holding_sector("002366", self.SECTOR_MAP)
         assert s is not None and s["category"] == "concept"
 
-    def test_pick_most_specific_concept_first(self):
-        """同层候选取成分股最少（最具体）者：核电核能(338) 先于 国防军工(532)。"""
+    def test_pick_largest_concept_first(self):
+        """v0.140（owner 拍板「取大」）：同层候选取成分股最多（最大共识板块）者：
+        国防军工(532) 先于 核电核能(338)——最具体≠最相关，迷你概念会带偏主线。"""
         s = ttr.pick_holding_sector("002366", self.SECTOR_MAP)
-        assert s["code"] == "880537.SH"
+        assert s["code"] == "880507.SH"
 
     def test_pick_sub_industry_when_no_concept_or_industry(self):
         """没有概念/行业时才落细分行业（tdx_type=12）。"""
@@ -468,7 +469,7 @@ class TestReverseMembershipFallback:
         monkeypatch.setattr(
             ttr,
             "_fallback_holding_row",
-            lambda h, sm: pytest.fail("主题命中不得走兜底"),
+            lambda h, sm, ind=None: pytest.fail("主题命中不得走兜底"),
         )
         r = ttr.resolve_holding_theme({"code": "002366"}, rows, self.SECTOR_MAP)
         assert r["theme_id"] == "chip"
@@ -481,8 +482,9 @@ class TestReverseMembershipFallback:
         )
         row = ttr.resolve_holding_theme({"code": "002366"}, [], self.SECTOR_MAP)
         assert row["source"] == "reverse_membership"
-        assert row["theme_name"] == "核电核能"
-        assert row["primary_code"] == "880537.SH"
+        # v0.140 取大：国防军工(532) > 核电核能(338)
+        assert row["theme_name"] == "国防军工"
+        assert row["primary_code"] == "880507.SH"
         assert row["available"] is True and "quote_missing" not in row
 
     def test_missing_kline_is_quote_missing_not_undecided(self, monkeypatch):
@@ -531,5 +533,193 @@ class TestReverseMembershipFallback:
             ),
         )
         text = ttr.make_report("2026-08-07", [])
-        assert "核电核能（反查）" in text
+        assert "国防军工（反查）" in text
         assert "| 002366 | 融发核电 | 未定" not in text
+
+
+def test_industry_beats_concept_regardless_of_size():
+    """v0.140（owner 定稿「行业优先+取大」）：行业层优先于概念层——
+    即便行业板块成分股更少，也先选行业（主营）。"""
+    from custos.pipeline.market_timing import theme_tracker_report as ttr
+
+    sm = {
+        "sectors": [
+            {
+                "code": "880446.SH",
+                "name": "电气设备",
+                "category": "industry",
+                "stock_count": 300,
+                "stocks": ["600312.SH"],
+            },
+            {
+                "code": "880520.SH",
+                "name": "智能电网",
+                "category": "concept",
+                "stock_count": 500,
+                "stocks": ["600312.SH"],
+            },
+        ]
+    }
+    s = ttr.pick_holding_sector("600312", sm)
+    assert s["code"] == "880446.SH", (
+        "行业（电气设备 300 只）应压过概念（智能电网 500 只）"
+    )
+
+
+class TestIndustryLayer:
+    """v0.140 行业层（owner 定稿「行业优先+取大」）。
+
+    tq_sector_map 没有行业层（category 无 industry）——行业走
+    holding_sector_mapping 的行业名（tdxhy 口径）→ 名称表 tdx_type=2 的 880 板块。
+    名称对不上 / 行业板块无 K 线 ⇒ 落概念反查，不硬报缺失。
+    """
+
+    NAME_MAP = {
+        "880446": {"name": "电气设备", "tdx_type": "2"},
+        "880447": {"name": "电气设备", "tdx_type": "2"},  # 同名歧义候选
+        "880520": {"name": "智能电网", "tdx_type": "4"},
+        "880960": {"name": "电气设备", "tdx_type": "4"},  # 同名但非行业，不得命中
+    }
+    SECTOR_MAP = {
+        "sectors": [
+            {
+                "code": "880446.SH",
+                "name": "电气设备",
+                "category": "industry",
+                "stock_count": 300,
+                "stocks": [],
+            },
+            {
+                "code": "880447.SH",
+                "name": "电气设备",
+                "category": "industry",
+                "stock_count": 100,
+                "stocks": [],
+            },
+            {
+                "code": "880520.SH",
+                "name": "智能电网",
+                "category": "concept",
+                "stock_count": 500,
+                "stocks": ["600312.SH"],
+            },
+        ]
+    }
+
+    @pytest.fixture(autouse=True)
+    def env(self, monkeypatch):
+        import pandas as pd
+
+        import custos.datasource.local_tdx.tq_sector as tq_sector
+
+        monkeypatch.setattr(tq_sector, "load_sector_names", lambda: dict(self.NAME_MAP))
+        monkeypatch.setattr(
+            ttr.tm,
+            "read_vipdoc",
+            lambda code: pd.DataFrame({"close": [1.0]}),
+        )
+        monkeypatch.setattr(
+            ttr.tm, "analyze", lambda df, code: _an(trend="上涨", pos20="箱体上半区")
+        )
+        self.pd = pd
+
+    def test_industry_beats_bigger_concept(self):
+        """行业优先于概念——即便概念板块成分股更多（智能电网 500 > 电气设备 300）。"""
+        row = ttr.resolve_holding_theme(
+            {"code": "600312"}, [], self.SECTOR_MAP, industry_name="电气设备"
+        )
+        assert row["source"] == "industry"
+        assert row["theme_name"] == "电气设备"
+        assert row["primary_code"] == "880446.SH"
+
+    def test_industry_name_unmatched_falls_to_concept(self):
+        """行业名在名称表对不上 type=2 板块 ⇒ 落概念反查（取大：智能电网）。"""
+        row = ttr.resolve_holding_theme(
+            {"code": "600312"}, [], self.SECTOR_MAP, industry_name="不存在的行业"
+        )
+        assert row["source"] == "reverse_membership"
+        assert row["primary_code"] == "880520.SH"
+
+    def test_same_name_non_industry_type_not_matched(self):
+        """同名的概念板块（880960 tdx_type=4）不许命中行业层。"""
+        row = ttr.resolve_holding_theme(
+            {"code": "999999"}, [], self.SECTOR_MAP, industry_name="电气设备"
+        )
+        # 999999 不在任何板块成员里，行业命中应仍是 880446（type=2 精确匹配）
+        assert row["primary_code"] == "880446.SH"
+
+    def test_industry_without_kline_falls_to_concept(self, monkeypatch):
+        """行业板块无 K 线 ⇒ 落概念层，不硬报「板块行情缺失」。"""
+        monkeypatch.setattr(
+            ttr.tm,
+            "read_vipdoc",
+            lambda code: (
+                self.pd.DataFrame()
+                if code.startswith(("880446", "880447"))
+                else self.pd.DataFrame({"close": [1.0]})
+            ),
+        )
+        row = ttr.resolve_holding_theme(
+            {"code": "600312"}, [], self.SECTOR_MAP, industry_name="电气设备"
+        )
+        assert row["source"] == "reverse_membership"
+        assert row["primary_code"] == "880520.SH"
+
+    def test_ambiguous_name_picks_largest_with_kline(self, monkeypatch):
+        """同名歧义：取有 K 线且成分股最多者（880446 300 > 880447 100）。"""
+        s = ttr.pick_industry_sector("电气设备", self.SECTOR_MAP)
+        assert s["code"] == "880446.SH"
+        # 880446 无 K 线时落 880447（而不是落概念层）
+        monkeypatch.setattr(
+            ttr.tm,
+            "read_vipdoc",
+            lambda code: (
+                self.pd.DataFrame()
+                if code.startswith("880446")
+                else self.pd.DataFrame({"close": [1.0]})
+            ),
+        )
+        s = ttr.pick_industry_sector("电气设备", self.SECTOR_MAP)
+        assert s["code"] == "880447.SH"
+
+    def test_missing_mapping_file_keeps_reverse_lookup(self, tmp_path, monkeypatch):
+        """读不到 holding_sector_mapping ⇒ 行为不变（概念反查照旧）。"""
+        monkeypatch.setattr(ttr, "HOLDINGS_DIR", tmp_path)
+        assert ttr.holding_industry_names("2026-08-28") == {}
+        row = ttr.resolve_holding_theme({"code": "600312"}, [], self.SECTOR_MAP)
+        assert row["source"] == "reverse_membership"
+        assert row["primary_code"] == "880520.SH"
+
+    def test_mapping_file_backtracks_to_latest_before_date(self, tmp_path, monkeypatch):
+        """mapping 取 ≤ 报告日的最近一份（同 positions_history 回溯语义）。"""
+        monkeypatch.setattr(ttr, "HOLDINGS_DIR", tmp_path)
+        (tmp_path / "2026-08-26_holding_sector_mapping.json").write_text(
+            json.dumps([{"code": "600312", "industry": "电气设备"}]), encoding="utf-8"
+        )
+        (tmp_path / "2026-08-28_holding_sector_mapping.json").write_text(
+            json.dumps([{"code": "600312", "industry": "半导体"}]), encoding="utf-8"
+        )
+        assert ttr.holding_industry_names("2026-08-27") == {"600312": "电气设备"}
+        assert ttr.holding_industry_names("2026-08-28") == {"600312": "半导体"}
+
+    def test_section_holdings_marks_industry_source(self, tmp_path, monkeypatch):
+        """§4 集成：行业命中标注「（行业）」，概念反查保持「（反查）」。"""
+        monkeypatch.setattr(ttr, "HOLDINGS_DIR", tmp_path / "holdings")
+        monkeypatch.setattr(ttr, "SECTOR_DIR", tmp_path / "sectors")
+        (tmp_path / "holdings").mkdir()
+        (tmp_path / "sectors").mkdir()
+        (
+            tmp_path / "holdings" / "2026-08-07_holding_technical_summary.json"
+        ).write_text(
+            json.dumps([{"code": "600312", "name": "平高电气", "trend_state": "上涨"}]),
+            encoding="utf-8",
+        )
+        (tmp_path / "holdings" / "2026-08-07_holding_sector_mapping.json").write_text(
+            json.dumps([{"code": "600312", "industry": "电气设备"}]), encoding="utf-8"
+        )
+        (tmp_path / "sectors" / "2026-08-04_tq_sector_map.json").write_text(
+            json.dumps(self.SECTOR_MAP), encoding="utf-8"
+        )
+        text = ttr.make_report("2026-08-07", [])
+        assert "电气设备（行业）" in text
+        assert "智能电网（反查）" not in text
