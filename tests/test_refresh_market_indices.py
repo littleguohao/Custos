@@ -52,10 +52,19 @@ def env(monkeypatch, tmp_path):
     # MARKET_DIR 是 paths 常量（= BASE/data/market），打平 patch 成 tmp_path 后
     # 与下面的 fixture 树（tmp/data/market）对不上，单独指到子目录。
     monkeypatch.setattr(rmi, "MARKET_DIR", tmp_path / "data" / "market")
-    # ⚠️ main() 的 breadth 分支会经 resolve_total_stocks() 读**真实**的
-    # data/.../a_share_universe.json（breadth_basis 的模块常量不在上面的
-    # patch 范围内）——只读但也有真实文件依赖，打桩断掉（2026-08-11 评审指出）。
-    monkeypatch.setattr(rmi, "resolve_total_stocks", lambda: (5538, "test_stub"))
+    # ⚠️ main() 的 breadth 分支会经 breadth_counts_real() → ① compute_breadth_from_vipdoc
+    # 扫**真实**本地 vipdoc 宇宙、② 回落时 resolve_total_stocks() 读**真实**的
+    # data/.../a_share_universe.json（breadth_basis 的模块常量不在上面的 patch
+    # 范围内）——只读但也有真实文件依赖，两处都打桩断掉（2026-08-11 评审指出，
+    # 2026-08-29 v0.137 自算口径接入后补①）。
+    from custos.datasource import breadth_basis as bb
+
+    monkeypatch.setattr(
+        bb,
+        "compute_breadth_from_vipdoc",
+        lambda **k: {"available": False, "note": "test_stub_off"},
+    )
+    monkeypatch.setattr(bb, "resolve_total_stocks", lambda: (5538, "test_stub"))
     (tmp_path / "data" / "market").mkdir(parents=True, exist_ok=True)
     return tmp_path
 

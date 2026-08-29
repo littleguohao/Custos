@@ -20,7 +20,7 @@ from custos.core.indicators import pct_change as pct  # noqa: E402
 
 from custos.datasource.local_tdx import local_tdx_data as ltd  # type: ignore
 
-from custos.datasource.breadth_basis import breadth_counts, resolve_total_stocks  # noqa: E402
+from custos.datasource.breadth_basis import breadth_counts_real  # noqa: E402
 
 INDICES = {
     "上证指数": "999999.SH",
@@ -233,6 +233,8 @@ def _refresh_breadth(mkt: dict, date: str) -> bool:
         not breadth
         or breadth.get("quality") in (None, "missing", "")
         or breadth.get("up_count") is None
+        # v0.137：跌家数缺失（旧 unavailable 遗留）也要补
+        or breadth.get("down_count") is None
         or _is_stale(breadth.get("as_of"), date)
     ):
         try:
@@ -241,16 +243,17 @@ def _refresh_breadth(mkt: dict, date: str) -> bool:
                 last_bd = df_bd.iloc[-1]
                 up_count = to_float(last_bd.get("close"))
                 bd_date = str(last_bd.get("date", ""))
-                # 跌家数无真实来源时标 unavailable，不用硬编码总数推算（见 breadth_basis）
-                total, total_source = resolve_total_stocks()
-                counts = breadth_counts(
+                # 跌/平/停家数由 vipdoc 本地自算真值口径（v0.137，见 breadth_basis
+                # .compute_breadth_from_vipdoc）；自算失败才回落总数推算/unavailable。
+                counts = breadth_counts_real(
                     int(up_count) if up_count else None,
-                    total=total,
-                    source=total_source,
+                    date=bd_date[:10] if bd_date else None,
                 )
                 mkt["market_breadth"] = {
                     "up_count": int(up_count) if up_count else None,
                     "down_count": counts["down_count"],
+                    "flat_count": counts["flat_count"],
+                    "suspended_count": counts["suspended_count"],
                     "up_down_ratio": counts["up_down_ratio"],
                     "up_down_ratio_status": counts["up_down_ratio_status"],
                     "total_stocks": counts["total_stocks"],

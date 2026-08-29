@@ -717,6 +717,20 @@ def _mtc():
 
 
 class TestBreadthRatioHonesty:
+    @staticmethod
+    def _stub_vipdoc_self_compute_off(monkeypatch, total, source):
+        """v0.137 起 collector 优先 vipdoc 本地自算四桶；这两个用例钉的是**回落路径**
+        （总数推算/unavailable），必须把自算打桩成不可用，否则真实盘下测试会扫
+        本地 vipdoc 得到真值口径、断言全歪。"""
+        from custos.datasource import breadth_basis as bb
+
+        monkeypatch.setattr(
+            bb,
+            "compute_breadth_from_vipdoc",
+            lambda **k: {"available": False, "note": "test_stub_off"},
+        )
+        monkeypatch.setattr(bb, "resolve_total_stocks", lambda: (total, source))
+
     def test_ratio_unavailable_without_real_total(self, monkeypatch):
         mtc = _mtc()
         monkeypatch.setattr(
@@ -735,9 +749,7 @@ class TestBreadthRatioHonesty:
         monkeypatch.setattr(
             mtc, "previous_confirmed_trading_day", lambda d: "2026-07-17"
         )
-        monkeypatch.setattr(
-            mtc, "resolve_total_stocks", lambda: (None, "no truth source")
-        )
+        self._stub_vipdoc_self_compute_off(monkeypatch, None, "no truth source")
         breadth, _s, _t, q = mtc.derive_market_fields("2026-07-20")
         assert breadth["up_count"] == 2000
         assert breadth["down_count"] is None, "硬编码 5530 推算跌家数使涨跌比系统性偏低"
@@ -763,7 +775,7 @@ class TestBreadthRatioHonesty:
         monkeypatch.setattr(
             mtc, "previous_confirmed_trading_day", lambda d: "2026-07-17"
         )
-        monkeypatch.setattr(mtc, "resolve_total_stocks", lambda: (5000, "test_source"))
+        self._stub_vipdoc_self_compute_off(monkeypatch, 5000, "test_source")
         breadth, _s, _t, _q = mtc.derive_market_fields("2026-07-20")
         assert breadth["down_count"] == 3000
         assert breadth["up_down_ratio"] == pytest.approx(2000 / 3000, abs=1e-4)

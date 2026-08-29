@@ -11,7 +11,14 @@
 现在的原则：**能拿到真实总数就用真值，拿不到就把比值标为不可用**（scorer 见到
 down_count=None 会走 7.5 中性），绝不用一个来源不明的近似值去驱动打分。
 
-真值来源（按优先级）：
+2026-08-29（v0.137，owner 拍板方案③）：**跌/平/停家数改由 vipdoc 本地自算**
+（:func:`compute_breadth_from_vipdoc`）—— 遍历 A 股宇宙逐只读 ``.day`` 尾部两根
+比较收盘，涨/跌/平三桶，末日落后于全宇宙最新交易日的进停牌/陈旧桶。实测与
+880005 官方涨家数差 ~0.3%（宇宙边界），>2% 标 warning 不阻断。自算成功即
+**真值口径**（``up_down_ratio_status="vipdoc_self_compute"``），不再
+derived_from_total；自算失败才回落下面的总数推算/不可用两档。
+
+总数推算的真值来源（回落路径，按优先级）：
 1. 环境变量 ``A_SHARE_TOTAL_STOCKS`` —— 运维显式给定的可核对数字；
 2. ``data/market/a_share_universe.json`` 的 ``total`` 字段 —— 由外部流程写入。
 
@@ -23,6 +30,9 @@ from __future__ import annotations
 
 import json
 import os
+import struct
+
+from pathlib import Path
 
 
 from custos.core.paths import MARKET_DIR  # noqa: E402
@@ -115,3 +125,184 @@ def breadth_counts(
         "total_stocks_source": source,
         "note": DERIVED_NOTE,
     }
+
+
+# ========== vipdoc 本地自算涨跌平停四桶（v0.137 方案③，首选真值来源） ==========
+
+# vipdoc .day 一根 32 字节：date, open, high, low, close（×100 整数）,
+# amount(float), volume, reserved。逐只只读尾部两根。
+_BAR = struct.Struct("<IIIIIfII")
+_BAR_SIZE = 32
+
+#: 自算口径的状态词（区别于 "derived_from_total" / "unavailable"）。
+VIPDOC_STATUS = "vipdoc_self_compute"
+#: 自算涨家数与 880005 官方值差异超过该比例 → crosscheck 标 warning（不阻断）。
+CROSSCHECK_WARN_PCT = 2.0
+
+
+def _day_file_map(root: Path) -> dict[str, Path]:
+    """扫 vipdoc/{sh,sz,bj}/lday → {code6: 路径}（与 list_local_vipdoc_codes 同盘口径）。"""
+    out: dict[str, Path] = {}
+    for mkt in ("sh", "sz", "bj"):
+        d = root / "vipdoc" / mkt / "lday"
+        if not d.is_dir():
+            continue
+        for p in d.glob(f"{mkt}*.day"):
+            code6 = p.stem[len(mkt) :]
+            if len(code6) == 6 and code6.isdigit():
+                out[code6] = p
+    return out
+
+
+def _tail_bars(path: Path, n: int = 2) -> list[tuple[int, float]]:
+    """读 .day 尾部至多 n 根 → [(date:YYYYMMDD int, close)]，不足则返回已有的。
+
+    ⚠️ 空文件/不足一根必须返回 [] 而不是 seek 负数报错（2026-08-28 实测原型踩点）。
+    """
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return []
+    take = min(n, size // _BAR_SIZE)
+    if take <= 0:
+        return []
+    try:
+        with path.open("rb") as f:
+            f.seek(size - take * _BAR_SIZE)
+            buf = f.read(take * _BAR_SIZE)
+    except OSError:
+        return []
+    out = []
+    for off in range(0, take * _BAR_SIZE, _BAR_SIZE):
+        d, _o, _h, _l, c, _a, _v, _r = _BAR.unpack_from(buf, off)
+        out.append((d, c / 100.0))
+    return out
+
+
+def _official_up_880005(ltd) -> tuple[int | None, str]:
+    """880005.SH vipdoc 末日 close = 官方涨家数（对照校验用），失败返回 (None, '')。"""
+    try:
+        df = ltd.get_ohlcv_table("880005.SH", count=3, prefer="vipdoc")
+        if df.empty:
+            return None, ""
+        row = df.iloc[-1]
+        close = row.get("close")
+        d = row.get("date")
+        d = d.strftime("%Y%m%d") if hasattr(d, "strftime") else str(d)
+        return (int(close) if close is not None else None), d
+    except Exception:  # noqa: BLE001 —— 对照校验是 best-effort，挂了不拖垮自算
+        return None, ""
+
+
+def compute_breadth_from_vipdoc(date: str | None = None, tdx_root=None) -> dict:
+    """遍历本地 vipdoc A 股宇宙自算 涨/跌/平/停 四桶（owner 批准的方案③）。
+
+    口径（2026-08-28 生产机实测原型，~0.3s / 5550 只）：
+    - 逐只读 .day 尾部两根，末日收盘 vs 前日收盘 ⇒ 涨/跌/平；
+    - 先扫一遍定**全宇宙最新交易日**，末日 < 它的进停牌/陈旧桶（当日无新 K 线）；
+      尾部不足两根（空文件/新股）无法判定涨跌，也归入该桶 —— 四桶合计恒等于宇宙数；
+    - 自算涨家数与 880005 官方值对照，差异 >2% 标 ``warning`` 写进 note，**不阻断**
+      （宇宙边界差 ~0.3% 属正常）。
+
+    ``date``（YYYY-MM-DD 或 YYYYMMDD）为期望数据日，仅用于标注 ``stale``，
+    分桶永远按 vipdoc 实有的最新交易日算（数据日是几号就如实报几号）。
+    失败返回 ``{"available": False, "note": 原因}``，调用方回落 breadth_counts。
+    """
+    try:
+        from custos.datasource.local_tdx import local_tdx_data as ltd
+
+        codes = ltd.list_local_vipdoc_codes(tdx_root=tdx_root)
+    except Exception as e:  # noqa: BLE001 —— TDX_ROOT 未配/读盘失败都走回落
+        return {"available": False, "note": f"vipdoc 宇宙枚举失败: {e!r}"}
+    if not codes:
+        return {"available": False, "note": "本地 vipdoc 无 A 股日线文件，无法自算"}
+    root = Path(tdx_root) if tdx_root else ltd.TDX_ROOT
+    files = _day_file_map(root)
+    tails = {c: _tail_bars(files[c]) for c in codes if c in files}
+    latest = max((t[-1][0] for t in tails.values() if t), default=0)
+    if not latest:
+        return {"available": False, "note": "vipdoc 日线全部不可读（空宇宙）"}
+
+    up = down = flat = susp = 0
+    for t in tails.values():
+        if len(t) < 2 or t[-1][0] < latest:
+            susp += 1
+        elif t[-1][1] > t[-2][1]:
+            up += 1
+        elif t[-1][1] < t[-2][1]:
+            down += 1
+        else:
+            flat += 1
+
+    official, official_date = _official_up_880005(ltd)
+    crosscheck: dict = {"official_up_880005": official, "as_of": official_date}
+    if official:
+        diff_pct = round((up - official) / official * 100, 2)
+        crosscheck["diff_pct"] = diff_pct
+        crosscheck["status"] = (
+            "ok" if abs(diff_pct) <= CROSSCHECK_WARN_PCT else "warning"
+        )
+    else:
+        crosscheck["status"] = "skipped"
+
+    expected = str(date).replace("-", "")[:8] if date else ""
+    stale = bool(expected) and str(latest) != expected
+
+    note = (
+        f"vipdoc 本地自算（宇宙 {len(codes)} 只，数据日 {latest}）："
+        f"涨 {up} / 跌 {down} / 平 {flat} / 停 {susp}"
+    )
+    if official:
+        note += f"；对照 880005 官方涨家数 {official}，差 {crosscheck['diff_pct']}%"
+        note += (
+            "（宇宙边界差，正常）"
+            if crosscheck["status"] == "ok"
+            else "（>2%，warning）"
+        )
+    else:
+        note += "；880005 对照缺失"
+    if stale:
+        note += f"；⚠️ 数据日 {latest} ≠ 期望 {expected}（vipdoc 未更新到当日）"
+
+    return {
+        "available": True,
+        "as_of": str(latest),
+        "stale": stale,
+        "up_count": up,
+        "down_count": down,
+        "flat_count": flat,
+        "suspended_count": susp,
+        "universe_size": len(codes),
+        "up_down_ratio": round(up / down, 4) if down else None,
+        "crosscheck_880005": crosscheck,
+        "note": note,
+    }
+
+
+def breadth_counts_real(up_count, date: str | None = None, tdx_root=None) -> dict:
+    """真值口径优先：vipdoc 本地自算四桶；自算失败回落 :func:`breadth_counts`。
+
+    返回 ``breadth_counts`` 同形键 + ``flat_count`` / ``suspended_count``
+    （回落路径为 None）。``up_count`` 仍是 880005 官方涨家数（渲染/评分沿用），
+    自算值只用于对照校验；``up_down_ratio`` 与写入 JSON 的 up_count/down_count
+    同口径（官方涨 ÷ 自算跌）。``tdx_root`` 仅供测试注入，生产调用不传。
+    """
+    real = compute_breadth_from_vipdoc(date=date, tdx_root=tdx_root)
+    if real.get("available"):
+        up = int(up_count) if up_count else real["up_count"]
+        down = real["down_count"]
+        return {
+            "down_count": down,
+            "flat_count": real["flat_count"],
+            "suspended_count": real["suspended_count"],
+            "up_down_ratio": round(up / down, 4) if down else None,
+            "up_down_ratio_status": VIPDOC_STATUS,
+            "total_stocks": real["universe_size"],
+            "total_stocks_source": "vipdoc_universe_self_compute",
+            "note": real["note"],
+        }
+    fb = breadth_counts(up_count)
+    fb["flat_count"] = None
+    fb["suspended_count"] = None
+    fb["note"] = f"{fb['note']}（vipdoc 自算不可用：{real.get('note')}）"
+    return fb

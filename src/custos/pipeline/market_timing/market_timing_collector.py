@@ -29,7 +29,7 @@ from custos.core.paths import cn_now, write_json_atomic, MARKET_DIR  # noqa: E40
 from custos.core.indicators import pct_change as pct  # noqa: E402
 from custos.core.runtime_guards import previous_confirmed_trading_day  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
-from custos.datasource.breadth_basis import breadth_counts, resolve_total_stocks  # noqa: E402
+from custos.datasource.breadth_basis import breadth_counts_real  # noqa: E402
 
 OUT_DIR = MARKET_DIR
 
@@ -195,6 +195,8 @@ def derive_market_fields(target_date: str) -> tuple[dict, dict, dict, dict]:
     breadth: dict[str, Any] = {
         "up_count": None,
         "down_count": None,
+        "flat_count": None,
+        "suspended_count": None,
         "up_down_ratio": None,
         "up_down_ratio_status": "unavailable",
         "source": None,
@@ -208,13 +210,16 @@ def derive_market_fields(target_date: str) -> tuple[dict, dict, dict, dict]:
             up = last["close"]
             as_of = last["date"]
             if up is not None:
-                # 880005 只给涨家数;跌家数没有真实来源时**不编造**(见 breadth_basis)
-                total, total_source = resolve_total_stocks()
-                counts = breadth_counts(int(up), total=total, source=total_source)
+                # 880005 只给涨家数;跌/平/停由 vipdoc 本地自算真值口径（v0.137，
+                # 见 breadth_basis.compute_breadth_from_vipdoc），自算失败才回落
+                # 总数推算/unavailable，**不编造**。
+                counts = breadth_counts_real(int(up), date=as_of)
                 breadth.update(
                     {
                         "up_count": int(up),
                         "down_count": counts["down_count"],
+                        "flat_count": counts["flat_count"],
+                        "suspended_count": counts["suspended_count"],
                         "up_down_ratio": counts["up_down_ratio"],
                         "up_down_ratio_status": counts["up_down_ratio_status"],
                         "total_stocks": counts["total_stocks"],
