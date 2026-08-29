@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
 """Generate theme_tracker daily sector trend report.
 
+v0.142 起**取消人工主题映射表**（sector_code_map.json 已删除）：
+持仓板块由四层自动解析链驱动（行业 > 概念共词优先取大 > 细分行业 > 无映射），
+§1「主线」= 当日持仓相关板块中技术分最高者（口径写进 §1，不代表全市场主线）。
+
 Reads:
-- data/sectors/sector_code_map.json
-- data/sectors/*_tq_sector_map.json（最新一份，§4 持仓主题映射 miss 时按反向成员关系兜底）
-- data/holdings/*_holding_sector_mapping.json（≤报告日最近一份，兜底行业层：TDX 行业名→880 行业板块）
 - data/holdings/YYYY-MM-DD_holding_technical_summary.json
+- data/holdings/*_holding_sector_mapping.json（≤报告日最近一份，行业层：TDX 行业名→880 行业板块）
+- data/sectors/*_tq_sector_map.json（最新一份，概念/细分行业层反向成员关系）
 - artifacts/reports/daily/YYYY-MM-DD/YYYY-MM-DD_market_timing_score.md
 
 Writes:
@@ -38,7 +41,6 @@ from custos.core.paths import (
 )  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
 
-SECTOR_MAP = SECTORS_DIR / "sector_code_map.json"
 SECTOR_DIR = SECTORS_DIR
 OUT_DIR = PLANS
 
@@ -183,28 +185,19 @@ def action_bias(stage: str, score: float, market_status: str = "震荡偏弱") -
     return "谨慎观察"
 
 
-def _no_code_row(th: dict[str, Any]) -> dict[str, Any]:
-    """主题没有主板块代码时的 unavailable 行（不能悄悄跳过该主题）。"""
-    return {
-        "theme_id": th.get("theme_id"),
-        "theme_name": th.get("theme_name"),
-        "priority": th.get("priority"),
-        "available": False,
-        "reason": "no primary sector code",
-        "representative_stocks": th.get("representative_stocks", []),
-        "semantic_tags": th.get("semantic_tags", []),
-    }
-
-
-def _analysis_row(
-    th: dict[str, Any],
-    code: Any,
-    analysis: dict[str, Any],
-    stage: str,
-    reason: str,
-    score: float,
+def _sector_analysis_row(
+    sector: dict[str, Any], source: str, member_codes: list[str]
 ) -> dict[str, Any]:
-    """主板块代码可用的主题行：摊平 analysis 关键字段 + 阶段/分数/操作倾向。"""
+    """板块行：摊平 K 线分析关键字段 + 阶段/分数/操作倾向；K 线缺失标 quote_missing。
+
+    theme_id/theme_name 沿用契约键（sector_technical_summary 有 3 个消费者、
+    96 处读 available）——v0.142 起人工主题表删除，theme_id=板块代码、
+    theme_name=板块名。板块已定位但行情缺失 ≠ 未定/无映射，文案必须分得开。
+    """
+    code = str(sector.get("code") or "")
+    analysis = tm.analyze(tm.read_vipdoc(code), code)
+    stage, reason = classify_stage(analysis)
+    score = score_sector(analysis, "")
     trend = analysis.get("trend") or {}
     box20 = analysis.get("box_20d") or {}
     daily = analysis.get("daily") or {}
@@ -212,16 +205,13 @@ def _analysis_row(
     kdj = daily.get("kdj") or {}
     macd = daily.get("macd") or {}
     weekly_macd = weekly.get("macd") or {}
-    return {
-        "theme_id": th.get("theme_id"),
-        "theme_name": th.get("theme_name"),
-        "priority": th.get("priority"),
+    row = {
+        "theme_id": code,
+        "theme_name": sector.get("name") or code,
         "primary_code": code,
-        "candidate_codes": th.get("candidate_sector_codes", []),
-        "representative_stocks": th.get("representative_stocks", []),
-        "holding_related": th.get("holding_related", []),
-        "semantic_tags": th.get("semantic_tags", []),
-        "confidence": th.get("confidence"),
+        "category": sector.get("category"),
+        "source": source,
+        "representative_stocks": list(member_codes),
         "available": bool(analysis.get("available")),
         "latest_date": analysis.get("latest_date"),
         "trend_state": trend.get("state"),
@@ -240,91 +230,52 @@ def _analysis_row(
         "action_bias": action_bias(stage, score),
         "analysis": analysis,
     }
+    if not analysis.get("available"):
+        row["quote_missing"] = True
+        row["stage"] = "板块行情缺失"
+        row["stage_reason"] = (
+            f"已按{_SOURCE_LABELS[source]}定位板块 {code}，"
+            f"但板块行情缺失（{analysis.get('error', '无K线数据')}）。"
+        )
+    return row
 
 
-def build_sector_summary(date: str) -> list[dict[str, Any]]:
-    m = load_json(SECTOR_MAP, {})
-    rows = []
-    for th in m.get("themes", []):
-        codes = th.get("primary_sector_codes") or []
-        if not codes:
-            rows.append(_no_code_row(th))
+def build_sector_summary(
+    date: str, holding_rows: dict[str, dict[str, Any]] | None = None
+) -> list[dict[str, Any]]:
+    """持仓板块技术摘要：同一板块多持仓合并代表股，可用在前、分数降序。"""
+    if holding_rows is None:
+        holding_rows = resolve_holding_rows(date)
+    merged: dict[str, dict[str, Any]] = {}
+    for hcode, row in holding_rows.items():
+        if not row:
             continue
-        code = codes[0]
-        df = tm.read_vipdoc(code)
-        analysis = tm.analyze(df, code)
-        stage, reason = classify_stage(analysis)
-        score = score_sector(analysis, th.get("priority", ""))
-        rows.append(_analysis_row(th, code, analysis, stage, reason, score))
+        code = row["primary_code"]
+        if code in merged:
+            merged[code]["representative_stocks"].append(hcode)
+        else:
+            merged[code] = row
+    rows = list(merged.values())
     rows.sort(key=lambda r: (r.get("available") is not True, -(r.get("score") or 0)))
     return rows
 
 
-def _match_by_linked_code(
-    code: str, rows: list[dict[str, Any]]
-) -> dict[str, Any] | None:
-    for row in rows:
-        linked = [
-            str(x).split(".")[0]
-            for x in (row.get("holding_related") or [])
-            + (row.get("representative_stocks") or [])
-        ]
-        if code and code in linked:
-            return row
-    return None
-
-
-def _holding_tokens(holding: dict[str, Any]) -> set[str]:
-    tokens = set(holding.get("primary_themes") or [])
-    industry = holding.get("industry")
-    if industry and str(industry).lower() != "nan":
-        tokens.add(str(industry))
-    return tokens
-
-
-def _token_matches(token: Any, hay: str) -> bool:
-    return token in hay or any(
-        part and part in hay for part in str(token).replace("/", "|").split("|")
+def _shared_token(name: str, tokens: str) -> bool:
+    """板块名与「股票名+行业名」有 ≥2 字公共子串（共词）。"""
+    return len(name) >= 2 and any(
+        name[i : i + 2] in tokens for i in range(len(name) - 1)
     )
 
 
-def _semantic_score(row: dict[str, Any], tokens: set[str]) -> int:
-    hay = "|".join(
-        [
-            str(row.get("theme_name") or ""),
-            *[str(x) for x in row.get("semantic_tags", [])],
-        ]
-    )
-    return sum(1 for token in tokens if token and _token_matches(token, hay))
-
-
-def match_holding_theme(
-    holding: dict[str, Any], rows: list[dict[str, Any]]
-) -> dict[str, Any]:
-    """Match by explicit holding/representative code first, then semantic tags."""
-    code = str(holding.get("code") or "").split(".")[0]
-    by_code = _match_by_linked_code(code, rows)
-    if by_code is not None:
-        return by_code
-    tokens = _holding_tokens(holding)
-    best: tuple[int, dict[str, Any]] = (0, {})
-    for row in rows:
-        score = _semantic_score(row, tokens)
-        if score > best[0]:
-            best = (score, row)
-    return best[1]
-
-
-# 兜底选板块的类别优先级（v0.140 owner 定稿「行业优先+取大」）：
-# 行业 > 概念 > 细分行业；区域/风格/统计指数不当主线。
-# 注意：tq_sector_map 没有行业层（category 无 industry），行业由
-# pick_industry_sector（holding_sector_mapping 行业名 → 名称表 tdx_type=2）提供，
-# 先于本反查调用；pick_holding_sector 里的 industry tier 只兜底含行业条目的映射。
-_INDUSTRY_CATEGORIES = ("industry",)
-_MAINLINE_CATEGORIES = ("concept",)
-_SUB_INDUSTRY_CATEGORIES = ("sub_industry",)
-
-# 兜底来源标签：§4 行标注与 quote_missing 文案共用
+# 持仓板块解析链（v0.142 owner 定稿，人工主题表 sector_code_map.json 已删除）：
+# ① 行业层：pick_industry_sector（holding_sector_mapping 的 tdxhy 行业名 →
+#    名称表 tdx_type=2 精确匹配；tq_sector_map 没有行业 category，行业只能走这条）
+# ② 概念层：反向成员关系反查，**共词优先**（板块名与股票名+行业名有 ≥2 字公共子串），
+#    共词候选取成分股最多者；无共词再取成分股最大者
+# ③ 细分行业（sub_industry）兜底
+# ④ 都没有 ⇒ 无映射（与「行情缺失」两种文案分开）
+# 区域/风格/统计指数不当主线。同层取大（最大共识板块，v0.140 定稿：
+# 最具体≠最相关——迷你概念会把持仓从主共识板块上带偏），代码升序兜底确定性。
 _SOURCE_LABELS = {"industry": "行业映射", "reverse_membership": "反向成员关系"}
 
 
@@ -399,14 +350,17 @@ def pick_industry_sector(
     }
 
 
-def pick_holding_sector(code: str, sector_map: dict[str, Any]) -> dict[str, Any] | None:
-    """按反向成员关系为持仓选板块。
+def pick_holding_sector(
+    code: str, sector_map: dict[str, Any], name_tokens: str = ""
+) -> dict[str, Any] | None:
+    """概念/细分行业层：按反向成员关系为持仓选板块。
 
-    只认**行业（tdx_type=2）> 概念（4）**> 细分行业（12）；区域/风格/统计指数不当主线，
-    只剩这些时返回 None（= 无映射，区别于「有映射但行情缺失」）。
-    同层候选取**成分股最多（最大共识板块）**者（v0.140，owner 拍板「行业优先+取大」：
-    最具体≠最相关——迷你概念（如核污染防治 64 只）会把融发核电从核电核能
-    （338 只）这种主共识板块上带偏），代码升序兜底保证确定性。
+    概念层**共词优先**（板块名与「股票名+行业名」有 ≥2 字公共子串，如
+    「融发核电」∩「核电核能」=「核电」）：共词候选取成分股最多者；
+    无共词候选再取成分股最大者（v0.142 owner 定稿——机器人概念 1209 只
+    这种泛化大板块不许盖过共词命中的核电核能）。细分行业兜底；
+    区域/风格/统计指数不当主线，只剩这些时返回 None（= 无映射，
+    区别于「有映射但行情缺失」）。代码升序兜底保证确定性。
     """
     code6 = str(code).split(".")[0]
     hits = [
@@ -414,69 +368,58 @@ def pick_holding_sector(code: str, sector_map: dict[str, Any]) -> dict[str, Any]
         for s in (sector_map.get("sectors") or [])
         if code6 in {str(x).split(".")[0] for x in s.get("stocks") or []}
     ]
-    for tier in (_INDUSTRY_CATEGORIES, _MAINLINE_CATEGORIES, _SUB_INDUSTRY_CATEGORIES):
-        pool = [s for s in hits if s.get("category") in tier]
-        if pool:
-            return min(
-                pool, key=lambda s: (-(s.get("stock_count") or 0), str(s.get("code")))
-            )
+    concepts = [s for s in hits if s.get("category") == "concept"]
+    if concepts:
+        shared = [
+            s for s in concepts if _shared_token(str(s.get("name") or ""), name_tokens)
+        ]
+        pool = shared or concepts
+        return min(
+            pool, key=lambda s: (-(s.get("stock_count") or 0), str(s.get("code")))
+        )
+    subs = [s for s in hits if s.get("category") == "sub_industry"]
+    if subs:
+        return min(
+            subs, key=lambda s: (-(s.get("stock_count") or 0), str(s.get("code")))
+        )
     return None
 
 
-def _fallback_holding_row(
+def resolve_holding_sector(
     holding: dict[str, Any],
     sector_map: dict[str, Any],
     industry_name: str | None = None,
-) -> dict[str, Any] | None:
-    """主题映射 miss 时补一行：行业映射优先，概念反查兜底；K 线缺失如实标 quote_missing。"""
-    source = "industry"
-    sector = pick_industry_sector(industry_name, sector_map) if industry_name else None
-    if sector is None:
-        source = "reverse_membership"
-        sector = pick_holding_sector(str(holding.get("code") or ""), sector_map)
-    if sector is None:
-        return None
-    code = str(sector.get("code") or "")
-    analysis = tm.analyze(tm.read_vipdoc(code), code)
-    stage, reason = classify_stage(analysis)
-    score = score_sector(analysis, "")
-    row = {
-        "theme_id": None,
-        "theme_name": sector.get("name") or code,
-        "primary_code": code,
-        "available": bool(analysis.get("available")),
-        "stage": stage,
-        "stage_reason": reason,
-        "score": score,
-        "action_bias": action_bias(stage, score),
-        "trend_state": (analysis.get("trend") or {}).get("state"),
-        "box20_position": (analysis.get("box_20d") or {}).get("position"),
-        "source": source,
-    }
-    if not analysis.get("available"):
-        # 板块已定位但行情缺失 ≠ 未定/无映射 —— 两种文案必须分得开
-        row["quote_missing"] = True
-        row["stage"] = "板块行情缺失"
-        row["stage_reason"] = (
-            f"已按{_SOURCE_LABELS[source]}定位板块 {code}，"
-            f"但板块行情缺失（{analysis.get('error', '无K线数据')}）。"
-        )
-    return row
+) -> tuple[dict[str, Any], str] | None:
+    """四层解析链：行业 > 概念（共词优先取大）> 细分行业；都无 ⇒ None（无映射）。"""
+    code6 = str(holding.get("code") or "").split(".")[0]
+    tokens = str(holding.get("name") or "") + (industry_name or "")
+    if industry_name:
+        sector = pick_industry_sector(industry_name, sector_map)
+        if sector is not None:
+            return sector, "industry"
+    sector = pick_holding_sector(code6, sector_map, tokens)
+    if sector is not None:
+        return sector, "reverse_membership"
+    return None
 
 
-def resolve_holding_theme(
-    holding: dict[str, Any],
-    rows: list[dict[str, Any]],
-    sector_map: dict[str, Any] | None = None,
-    industry_name: str | None = None,
-) -> dict[str, Any]:
-    """先主题映射（显式关联 > 语义标签），miss 时兜底：行业映射 > 反向成员关系。"""
-    theme = match_holding_theme(holding, rows)
-    if theme:
-        return theme
-    if sector_map is None:
-        sector_map = latest_tq_sector_map()
-    return _fallback_holding_row(holding, sector_map, industry_name) or {}
+def resolve_holding_rows(date: str) -> dict[str, dict[str, Any]]:
+    """每持仓 → 板块行；解析不出板块的持仓值为 {}（§4 如实显示「未定/无映射」）。"""
+    holdings = latest_holding_summary(date)
+    if not holdings:
+        return {}
+    sector_map = latest_tq_sector_map()
+    industry_names = holding_industry_names(date)
+    out: dict[str, dict[str, Any]] = {}
+    for h in holdings:
+        code6 = str(h.get("code") or "").split(".")[0]
+        resolved = resolve_holding_sector(h, sector_map, industry_names.get(code6))
+        if resolved is None:
+            out[str(h.get("code"))] = {}
+            continue
+        sector, source = resolved
+        out[str(h.get("code"))] = _sector_analysis_row(sector, source, [code6])
+    return out
 
 
 def compare_holding_to_theme(
@@ -505,7 +448,12 @@ def compare_holding_to_theme(
 
 
 def _section_mainline(date: str, top: dict[str, Any]) -> list[str]:
-    """§1 今日主线（含报告头）。"""
+    """§1 今日主线（含报告头）。
+
+    v0.142 口径：人工主题表已删除，「主线」= 当日持仓相关板块
+    （行业>概念>细分四层自动解析）中技术分最高者——只覆盖持仓相关板块，
+    不代表全市场主线；无可用板块时如实「未定」，不编主线。
+    """
     lines = []
     lines.append("# theme_tracker 主线与板块跟踪\n")
     lines.append(f"日期：{date}\n")
@@ -516,8 +464,15 @@ def _section_mainline(date: str, top: dict[str, Any]) -> list[str]:
     lines.append(
         f"- 主线强度：**{'强' if (top.get('score') or 0) >= 75 else '中' if (top.get('score') or 0) >= 55 else '弱'}**"
     )
+    evidence = (
+        f"{top.get('stage_reason', '无')}；技术分 {top.get('score', 'NA')}。"
+        if top
+        else "无可用持仓板块（持仓均无板块映射或板块行情缺失），本节如实降级。"
+    )
+    lines.append(f"- 关键证据：{evidence}")
     lines.append(
-        f"- 关键证据：{top.get('stage_reason', '无')}；技术分 {top.get('score', 'NA')}。"
+        "- 口径：主线=持仓相关板块中技术分最高者（行业>概念>细分自动解析），"
+        "仅覆盖持仓相关板块，不代表全市场主线。"
     )
     lines.append(
         "- 市场约束：market_timing 仍为震荡偏弱，允许低吸核心主线，但不支持追高和高频试错。\n"
@@ -660,7 +615,11 @@ def _section_chief_conclusion(
     return lines
 
 
-def make_report(date: str, rows: list[dict[str, Any]]) -> str:
+def make_report(
+    date: str,
+    rows: list[dict[str, Any]],
+    holding_rows: dict[str, dict[str, Any]] | None = None,
+) -> str:
     holdings = latest_holding_summary(date)
     market_status = "震荡偏弱"
     strong = [r for r in rows if r.get("available") and (r.get("score") or 0) >= 65]
@@ -671,24 +630,17 @@ def make_report(date: str, rows: list[dict[str, Any]]) -> str:
         or "退潮" in str(r.get("stage"))
         or (r.get("score") or 0) < 45
     ]
-    top = rows[0] if rows else {}
-    # 主题映射 miss 的持仓走兜底（行业映射 > 反向成员关系）；只有真的有人 miss 才加载映射大文件
-    need_fallback = any(not match_holding_theme(h, rows) for h in holdings)
-    sector_map = latest_tq_sector_map() if need_fallback else {}
-    industry_names = holding_industry_names(date) if need_fallback else {}
-    holding_themes = {
-        str(h.get("code")): resolve_holding_theme(
-            h, rows, sector_map, industry_names.get(str(h.get("code")).split(".")[0])
-        )
-        for h in holdings
-    }
+    # §1 主线 = 第一个可用持仓板块（rows 已按可用+分数排序）；全不可用则如实降级
+    top = next((r for r in rows if r.get("available")), {})
+    if holding_rows is None:
+        holding_rows = resolve_holding_rows(date)
     lines = (
         _section_mainline(date, top)
         + _section_strong(strong)
         + _section_risk(risk)
-        + _section_holdings(holdings, holding_themes)
+        + _section_holdings(holdings, holding_rows)
         + _section_market_consistency(date, market_status, strong, risk)
-        + _section_chief_conclusion(strong, holdings, holding_themes)
+        + _section_chief_conclusion(strong, holdings, holding_rows)
     )
     return "\n".join(lines)
 
@@ -697,7 +649,8 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", default=pd.Timestamp.now().strftime("%Y-%m-%d"))
     args = ap.parse_args()
-    rows = build_sector_summary(args.date)
+    holding_rows = resolve_holding_rows(args.date)
+    rows = build_sector_summary(args.date, holding_rows)
     SECTOR_DIR.mkdir(parents=True, exist_ok=True)
     out_dir = daily_report_dir(args.date, OUT_DIR)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -709,7 +662,7 @@ def main() -> None:
     summary_path.write_text(
         json.dumps(rows, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
     )
-    report = make_report(args.date, rows)
+    report = make_report(args.date, rows, holding_rows)
     report_path.write_text(report, encoding="utf-8")
     print(summary_path)
     print(report_path)
