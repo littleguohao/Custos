@@ -2,7 +2,7 @@
 """Generate theme_tracker daily sector trend report.
 
 v0.142 起**取消人工主题映射表**（sector_code_map.json 已删除）：
-持仓板块由自动解析链驱动（owner 指定 > 走势贴合 > 行业/概念/细分兜底 > 无映射），
+持仓板块由解析链驱动（owner 指定 > 走势贴合；贴合无有效数据如实「未定」，无兜底猜谜），
 §1「主线」= 当日持仓相关板块中技术分最高者（口径写进 §1，不代表全市场主线）。
 
 Reads:
@@ -252,7 +252,8 @@ def build_sector_summary(
         holding_rows = resolve_holding_rows(date)
     merged: dict[str, dict[str, Any]] = {}
     for hcode, row in holding_rows.items():
-        if not row:
+        if not row or "primary_code" not in row:
+            # {}（无映射）与 {"fit_insufficient": True}（贴合不足）都不是板块行
             continue
         code = row["primary_code"]
         if code in merged:
@@ -264,28 +265,19 @@ def build_sector_summary(
     return rows
 
 
-def _shared_token(name: str, tokens: str) -> bool:
-    """板块名与「股票名+行业名」有 ≥2 字公共子串（共词）。"""
-    return len(name) >= 2 and any(
-        name[i : i + 2] in tokens for i in range(len(name) - 1)
-    )
-
-
-# 持仓板块解析链（v0.147 owner 定稿；人工主题表 sector_code_map.json 已于 v0.142 删除）：
+# 持仓板块解析链（v0.148 owner 定稿；人工主题表 sector_code_map.json 已于 v0.142 删除）：
 # ⓪ owner 指定层：governance/strategy/_shared/holding_mainline_overrides.json
-#    —— owner 对持仓主线的指定，优先级高于一切自动解析；换仓时由 owner 增删
-# ① **走势贴合优先**：全部所属板块（反向成员关系命中的 概念/细分 全入池 +
-#    tdxhy 行业名匹配出的 880 行业板块）里，有 K 线且贴合有效者取相关最高
-#    （`_sector_fit` 60 日日收益 Pearson、inner join ≥20 根）——行业不再优先于概念
-# ② 无任何有效贴合数据 ⇒ 回落兜底链：行业 → 概念共词取大 → 取大 → 细分
-# ③ 都没有 ⇒ 无映射（与「行情缺失」两种文案分开）
-# 区域/风格/统计指数不当主线（也不入贴合池）。兜底层取大（最大共识板块，
-# v0.140 定稿：最具体≠最相关），代码升序兜底确定性。
+#    —— owner 对持仓主线的指定，优先级高于一切自动解析；换仓时由 owner 增删。
+#    指定板块也在贴合池里时 §4 追加贴合系数旁注（供复核），拿不到系数就只写「指定」
+# ① 自动链只有**走势贴合**一档：全部所属板块（反向成员关系命中的 概念/细分 +
+#    tdxhy 行业名匹配出的 880 行业板块）入池，有 K 线且贴合有效者取相关最高
+#    （`_sector_fit_map` 60 日日收益 Pearson、inner join ≥20 根）
+# ② 贴合无有效数据（全候选 <20 根/无 K 线/个股无 K 线）⇒ 未定，如实报
+#    「贴合数据不足」，与「无映射」区分开——不再猜（v0.147 及以前的分层兜底链已删）
+# 区域/风格/统计指数不当主线（也不入贴合池）。
 _SOURCE_LABELS = {
     "owner_override": "owner 指定",
     "fit": "走势贴合",
-    "industry": "行业映射",
-    "reverse_membership": "反向成员关系",
 }
 
 
@@ -394,22 +386,22 @@ def _daily_returns(df: Any, window: int) -> Any:
     return ret if len(ret) >= 20 else None
 
 
-def _sector_fit(
+def _sector_fit_map(
     stock_code: str,
     candidate_codes: list[str],
     window: int = 60,
     cache: dict[str, Any] | None = None,
-) -> tuple[str, float] | None:
-    """个股与候选板块指数的 60 日日收益 Pearson 相关，返回贴合最高的 (code, corr)。
+) -> dict[str, float]:
+    """个股与候选板块指数的 60 日日收益 Pearson 相关 → {板块码: 相关系数}。
 
-    inner join 后 <20 根的候选不参与；个股无 K 线或全部候选数据不足 ⇒ None
-    （回落共词/取大规则）。``cache``（{板块码: 收益序列或 None}）让同一报告内
+    只含贴合有效者（inner join 后 ≥20 根）；个股无 K 线或全部候选数据不足 ⇒ {}。
+    ``cache``（{板块码: 收益序列或 None}）让同一报告内
     每个板块文件只读一次（持仓 ≤10 × 候选 ≤20，逐对算可接受，重读文件不行）。
     """
     stock_ret = _daily_returns(tm.read_vipdoc(stock_code), window)
     if stock_ret is None:
-        return None
-    best: tuple[str, float] | None = None
+        return {}
+    out: dict[str, float] = {}
     for c in candidate_codes:
         sret = _cached_returns(c, cache)
         if sret is None:
@@ -417,51 +409,8 @@ def _sector_fit(
         joined = pd.concat([stock_ret, sret], axis=1, join="inner").dropna()
         if len(joined) < 20:
             continue
-        corr = float(joined.iloc[:, 0].corr(joined.iloc[:, 1]))
-        if best is None or corr > best[1]:
-            best = (c, corr)
-    return best
-
-
-def _largest(pool: list[dict[str, Any]]) -> dict[str, Any]:
-    """取成分股最多（最大共识板块）者，代码升序兜底保证确定性。"""
-    return min(pool, key=lambda s: (-(s.get("stock_count") or 0), str(s.get("code"))))
-
-
-def _pick_concept(
-    concepts: list[dict[str, Any]],
-    name_tokens: str,
-) -> dict[str, Any]:
-    """概念层兜底（贴合全无效时）：共词优先取大——共词候选取成分股最多者；
-    无共词再取成分股最大者（机器人概念 1209 只这种泛化大板块不许盖过
-    共词命中的核电核能）。"""
-    shared = [
-        s for s in concepts if _shared_token(str(s.get("name") or ""), name_tokens)
-    ]
-    return _largest(shared or concepts)
-
-
-def pick_holding_sector(
-    code: str, sector_map: dict[str, Any], name_tokens: str = ""
-) -> dict[str, Any] | None:
-    """兜底链（贴合全部无效时）：概念共词优先取大 → 细分行业取大。
-
-    区域/风格/统计指数不当主线，只剩这些时返回 None（= 无映射，
-    区别于「有映射但行情缺失」）。
-    """
-    code6 = str(code).split(".")[0]
-    hits = [
-        s
-        for s in (sector_map.get("sectors") or [])
-        if code6 in {str(x).split(".")[0] for x in s.get("stocks") or []}
-    ]
-    concepts = [s for s in hits if s.get("category") == "concept"]
-    if concepts:
-        return _pick_concept(concepts, name_tokens)
-    subs = [s for s in hits if s.get("category") == "sub_industry"]
-    if subs:
-        return _largest(subs)
-    return None
+        out[c] = float(joined.iloc[:, 0].corr(joined.iloc[:, 1]))
+    return out
 
 
 def _fit_pool_sectors(
@@ -488,24 +437,17 @@ def resolve_holding_sector(
     industry_name: str | None = None,
     overrides: dict[str, dict[str, Any]] | None = None,
     fit_cache: dict[str, Any] | None = None,
-) -> tuple[dict[str, Any], str] | None:
-    """解析链（v0.147 owner 定稿）：owner 指定 > **走势贴合**（全部所属板块
-    概念/行业/细分入池比 60 日收益相关，贴合最高者胜）> 兜底链（行业→共词取大
-    →取大→细分，仅当无任何有效贴合数据时）；都无 ⇒ None（无映射）。
+) -> tuple[dict[str, Any] | None, str]:
+    """解析链（v0.148 owner 定稿）：owner 指定 > 走势贴合；没有兜底链。
+
+    返回 (sector, status)：status ∈ owner_override / fit / no_mapping（无候选板块）
+    / fit_insufficient（有候选但贴合全无效）。sector 为 None 时只有后两种。
+    指定板块在贴合池里且贴合有效时，sector 带 fit 系数旁注（供 §4 复核）。
 
     ``overrides=None`` 表示无指定（纯函数语义，便于测试）；真实指定表由
     ``resolve_holding_rows`` 显式加载后传入。
     """
     code6 = str(holding.get("code") or "").split(".")[0]
-    ov = (overrides or {}).get(code6)
-    if ov:
-        return {
-            "code": ov["sector_code"],
-            "name": ov.get("sector_name") or ov["sector_code"],
-            "category": "owner_override",
-            "note": ov.get("note", ""),
-        }, "owner_override"
-    tokens = str(holding.get("name") or "") + (industry_name or "")
     industry_sector = (
         pick_industry_sector(industry_name, sector_map, fit_cache)
         if industry_name
@@ -513,30 +455,37 @@ def resolve_holding_sector(
     )
     pool = _fit_pool_sectors(code6, sector_map, industry_sector)
     suffix = market_of(code6)
-    fit = (
-        _sector_fit(
-            f"{code6}.{suffix}",
-            [str(s.get("code")) for s in pool],
-            cache=fit_cache,
+    fits = (
+        _sector_fit_map(
+            f"{code6}.{suffix}", [str(s.get("code")) for s in pool], cache=fit_cache
         )
         if suffix and pool
-        else None
+        else {}
     )
-    if fit is not None:
-        best_code, corr = fit
-        chosen = next(s for s in pool if str(s.get("code")) == best_code)
-        return {**chosen, "fit": round(corr, 3)}, "fit"
-    # 贴合全无效（全候选 <20 根/无 K 线/个股无 K 线）⇒ 回落兜底链
-    if industry_sector is not None:
-        return industry_sector, "industry"
-    sector = pick_holding_sector(code6, sector_map, tokens)
-    if sector is not None:
-        return sector, "reverse_membership"
-    return None
+    ov = (overrides or {}).get(code6)
+    if ov:
+        sector = {
+            "code": ov["sector_code"],
+            "name": ov.get("sector_name") or ov["sector_code"],
+            "category": "owner_override",
+            "note": ov.get("note", ""),
+        }
+        corr = fits.get(ov["sector_code"])
+        if corr is not None:
+            sector["fit"] = round(corr, 3)
+        return sector, "owner_override"
+    if not pool:
+        return None, "no_mapping"
+    if not fits:
+        return None, "fit_insufficient"
+    best_code = max(fits, key=lambda c: fits[c])
+    chosen = next(s for s in pool if str(s.get("code")) == best_code)
+    return {**chosen, "fit": round(fits[best_code], 3)}, "fit"
 
 
 def resolve_holding_rows(date: str) -> dict[str, dict[str, Any]]:
-    """每持仓 → 板块行；解析不出板块的持仓值为 {}（§4 如实显示「未定/无映射」）。"""
+    """每持仓 → 板块行；解析不出板块的持仓：无映射为 {}、贴合无有效数据为
+    {"fit_insufficient": True}（§4 分别如实显示「未定/无映射」「未定/贴合数据不足」）。"""
     holdings = latest_holding_summary(date)
     if not holdings:
         return {}
@@ -547,13 +496,14 @@ def resolve_holding_rows(date: str) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for h in holdings:
         code6 = str(h.get("code") or "").split(".")[0]
-        resolved = resolve_holding_sector(
+        sector, source = resolve_holding_sector(
             h, sector_map, industry_names.get(code6), overrides, fit_cache
         )
-        if resolved is None:
-            out[str(h.get("code"))] = {}
+        if sector is None:
+            out[str(h.get("code"))] = (
+                {"fit_insufficient": True} if source == "fit_insufficient" else {}
+            )
             continue
-        sector, source = resolved
         out[str(h.get("code"))] = _sector_analysis_row(sector, source, [code6])
     return out
 
@@ -569,8 +519,11 @@ def compare_holding_to_theme(
         return "板块行情缺失", theme.get(
             "stage_reason", "板块已定位但行情缺失，无法对比。"
         )
+    if theme and theme.get("fit_insufficient"):
+        # 有候选板块但贴合全无效 ≠ 无映射——不猜，如实报
+        return "未定", "贴合数据不足：候选板块无有效 K 线或重叠不足 20 根，不猜板块。"
     if not theme or not theme.get("available"):
-        return "未定", "板块数据不足。"
+        return "未定", "无板块映射。"
     rank = {"上涨": 3, "横盘震荡": 2, "下跌": 1, None: 0}
     if rank.get(ht, 0) > rank.get(tt, 0):
         return "强于板块", f"个股趋势{ht}，板块趋势{tt}。"
@@ -586,8 +539,8 @@ def compare_holding_to_theme(
 def _section_mainline(date: str, top: dict[str, Any]) -> list[str]:
     """§1 今日主线（含报告头）。
 
-    v0.142 起人工主题表删除，「主线」= 当日持仓相关板块（指定>贴合>兜底
-    自动解析，v0.147 口径）中技术分最高者——只覆盖持仓相关板块，
+    v0.142 起人工主题表删除；v0.148 起自动链只有贴合一档，「主线」= 当日持仓
+    相关板块（归属：owner 指定 > 走势贴合）中贴合最高者——只覆盖持仓相关板块，
     不代表全市场主线；无可用板块时如实「未定」，不编主线。
     """
     lines = []
@@ -603,12 +556,12 @@ def _section_mainline(date: str, top: dict[str, Any]) -> list[str]:
     evidence = (
         f"{top.get('stage_reason', '无')}；技术分 {top.get('score', 'NA')}。"
         if top
-        else "无可用持仓板块（持仓均无板块映射或板块行情缺失），本节如实降级。"
+        else "无可用持仓板块（无映射/贴合数据不足/行情缺失），本节如实降级。"
     )
     lines.append(f"- 关键证据：{evidence}")
     lines.append(
-        "- 口径：主线=持仓相关板块中技术分最高者（指定>贴合>兜底自动解析），"
-        "仅覆盖持仓相关板块，不代表全市场主线。"
+        "- 口径：主线=持仓相关板块中贴合最高者（归属：owner 指定>走势贴合，"
+        "无分层兜底），仅覆盖持仓相关板块，不代表全市场主线。"
     )
     lines.append(
         "- 市场约束：market_timing 仍为震荡偏弱，允许低吸核心主线，但不支持追高和高频试错。\n"
@@ -673,14 +626,13 @@ def _section_holdings(
             action = "风控观察"
         theme_name = theme.get("theme_name", "未定")
         source = theme.get("source")
-        if source == "fit" and theme.get("fit") is not None:
+        fit = theme.get("fit")
+        if source == "fit" and fit is not None:
             # 贴合选出带相关系数（60 日日收益 Pearson）——口径写明，别只给名字
-            theme_name += f"（贴合{theme['fit']:.2f}）"
-        elif source in _SOURCE_LABELS:
-            theme_name += {
-                "owner_override": "（指定）",
-                "industry": "（行业）",
-            }.get(source, "（反查）")
+            theme_name += f"（贴合{fit:.2f}）"
+        elif source == "owner_override":
+            # 指定行追加贴合系数旁注供复核；系数拿不到就只写「指定」
+            theme_name += f"（指定·贴合{fit:.2f}）" if fit is not None else "（指定）"
         lines.append(
             f"| {code} | {h.get('name')} | {theme_name} | {theme.get('stage', '未定')} | {theme.get('score', 0)} | {rel}：{rel_reason} | {action} |"
         )
@@ -772,8 +724,11 @@ def make_report(
         or "退潮" in str(r.get("stage"))
         or (r.get("score") or 0) < 45
     ]
-    # §1 主线 = 第一个可用持仓板块（rows 已按可用+分数排序）；全不可用则如实降级
-    top = next((r for r in rows if r.get("available")), {})
+    # §1 主线 = 可用持仓板块中贴合最高者（v0.148 口径）；无贴合行退技术分最高；
+    # 全不可用则如实降级
+    avail = [r for r in rows if r.get("available")]
+    fitted = [r for r in avail if r.get("fit") is not None]
+    top = max(fitted, key=lambda r: r["fit"]) if fitted else (avail[0] if avail else {})
     if holding_rows is None:
         holding_rows = resolve_holding_rows(date)
     lines = (

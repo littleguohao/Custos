@@ -169,11 +169,18 @@ class TestActionBias:
 
 class TestCompareHoldingToTheme:
     def test_theme_unavailable_is_undecided(self):
-        """板块数据不足时必须「未定」，不能猜强弱。"""
+        """板块不可用时必须「未定」，不能猜强弱。"""
         s, why = ttr.compare_holding_to_theme(
             {"trend_state": "上涨"}, {"available": False}
         )
-        assert s == "未定" and "数据不足" in why
+        assert s == "未定" and "无板块映射" in why
+
+    def test_fit_insufficient_is_undecided_with_honest_reason(self):
+        """贴合数据不足 ⇒「未定」+ 如实报原因（与无映射文案分开），不猜板块。"""
+        s, why = ttr.compare_holding_to_theme(
+            {"trend_state": "上涨"}, {"fit_insufficient": True}
+        )
+        assert s == "未定" and "贴合数据不足" in why
 
     def test_stronger_trend(self):
         s, _ = ttr.compare_holding_to_theme(
@@ -228,109 +235,365 @@ def _sector(code, name, category, count, stocks):
     }
 
 
-class TestSectorResolutionChain:
-    """解析链（人工主题表已删）：
+def _kline(closes, start="2026-01-01"):
+    """合成 K 线（date/close 两列，贴合计算只用这两列）。"""
+    import pandas as pd
 
-    owner 指定 > 行业（pick_industry_sector）> 概念（**贴合度优先**，
-    数据不足回落共词优先取大——本类用例钉的是回落规则）> 细分行业 > 无映射。
-    区域/风格/统计指数不当主线。
+    return pd.DataFrame(
+        {"date": pd.date_range(start, periods=len(closes), freq="B"), "close": closes}
+    )
+
+
+def _stock_and(stock_code, corr_map):
+    """个股收益 = base 噪声；corr_map {板块码: 混合比}（1.0=同源，0.0=独立噪声）。"""
+    import numpy as np
+
+    rng = np.random.default_rng(7)
+    n = rng.normal(0, 1, 80)
+    out = {stock_code: _kline(100 + np.cumsum(n))}
+    for code, ratio in corr_map.items():
+        mix = ratio * n + (1 - ratio) * rng.normal(0, 1, 80)
+        out[code] = _kline(500 + np.cumsum(mix))
+    return out
+
+
+class TestSectorFitResolution:
+    """v0.148：自动链只有贴合一档（分层兜底链已删）。
+
+    贴合池 = 全部所属板块（概念/细分反查命中 + 行业名匹配的 880 行业板块）；
+    贴合无有效数据 ⇒ 未定（「贴合数据不足」，与「无映射」分开），不再猜。
     """
-
-    @pytest.fixture(autouse=True)
-    def no_fit(self, monkeypatch):
-        """本类测的是贴合数据不足时的回落规则——贴合强制视为无效。"""
-        monkeypatch.setattr(ttr, "_sector_fit", lambda *a, **kw: None)
 
     SECTOR_MAP = {
         "sectors": [
-            _sector("880223.SH", "四川板块", "region", 181, ["002366.SZ"]),
-            _sector("880861.SH", "连续亏损", "style", 1075, ["002366.SZ"]),
-            _sector("880507.SH", "国防军工", "concept", 532, ["002366.SZ"]),
-            _sector("880537.SH", "核电核能", "concept", 338, ["002366.SZ"]),
-            _sector("880666.SH", "可控核聚变", "concept", 118, ["002366.SZ"]),
-            _sector("880611.SH", "核污染防治", "concept", 64, ["002366.SZ"]),
-            _sector("880904.SH", "机器人概念", "concept", 1209, ["002366.SZ"]),
             _sector("880520.SH", "智能电网", "concept", 277, ["600312.SH"]),
             _sector("880964.SH", "特高压", "concept", 132, ["600312.SH"]),
-            _sector("881303.SH", "专用设备", "sub_industry", 232, ["688001.SH"]),
+            _sector("880213.SH", "河南板块", "region", 116, ["600312.SH"]),
+            _sector("880861.SH", "连续亏损", "style", 1075, ["600312.SH"]),
+            _sector("881467.SH", "燃气", "sub_industry", 232, ["605090.SH"]),
+            _sector("880705.SH", "天然气", "concept", 100, ["605090.SH"]),
+        ]
+    }
+    NAME_MAP = {"880446": {"name": "电气设备", "tdx_type": "2"}}
+
+    @pytest.fixture(autouse=True)
+    def env(self, monkeypatch):
+        import custos.datasource.local_tdx.tq_sector as tq_sector
+
+        monkeypatch.setattr(tq_sector, "load_sector_names", lambda: dict(self.NAME_MAP))
+
+    def _klines(self, monkeypatch, series_by_code):
+        monkeypatch.setattr(
+            ttr.tm, "read_vipdoc", lambda code: series_by_code.get(code)
+        )
+
+    def test_fit_is_the_only_criterion_beats_industry(self, monkeypatch):
+        """贴合是唯一判据：行业命中（电气设备）但贴合输给概念 ⇒ 概念胜。"""
+        self._klines(
+            monkeypatch,
+            _stock_and(
+                "600312.SH", {"880520.SH": 0.95, "880964.SH": 0.3, "880446.SH": 0.3}
+            ),
+        )
+        sector, status = ttr.resolve_holding_sector(
+            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, "电气设备", {}
+        )
+        assert status == "fit" and sector["code"] == "880520.SH"
+        assert sector["fit"] > 0.9
+
+    def test_industry_candidate_can_win_fit(self, monkeypatch):
+        """行业候选在池里平等竞争：电气设备贴合最高 ⇒ 它胜（source=fit，非行业层）。"""
+        self._klines(
+            monkeypatch,
+            _stock_and(
+                "600312.SH", {"880446.SH": 0.95, "880520.SH": 0.3, "880964.SH": 0.2}
+            ),
+        )
+        sector, status = ttr.resolve_holding_sector(
+            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, "电气设备", {}
+        )
+        assert status == "fit" and sector["code"] == "880446.SH"
+
+    def test_region_style_never_in_fit_pool(self, monkeypatch):
+        """区域/风格仍不入池：河南板块（region）即便贴合同源也不参选。"""
+        self._klines(
+            monkeypatch,
+            _stock_and(
+                "600312.SH", {"880213.SH": 0.99, "880520.SH": 0.5, "880964.SH": 0.2}
+            ),
+        )
+        sector, status = ttr.resolve_holding_sector(
+            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, None, {}
+        )
+        assert status == "fit" and sector["code"] == "880520.SH"
+
+    def test_sub_industry_can_win_fit(self, monkeypatch):
+        """细分行业平等参选（owner 实测：九丰能源 燃气0.485 > 供气供热0.423）。"""
+        self._klines(
+            monkeypatch,
+            _stock_and("605090.SH", {"881467.SH": 0.9, "880705.SH": 0.2}),
+        )
+        sector, status = ttr.resolve_holding_sector(
+            {"code": "605090", "name": "九丰能源"}, self.SECTOR_MAP, None, {}
+        )
+        assert status == "fit" and sector["code"] == "881467.SH"
+
+    def test_fit_insufficient_is_undecided_not_guessed(self, monkeypatch):
+        """贴合无有效数据（个股 <20 根）⇒ fit_insufficient，**不再回落猜板块**。"""
+        self._klines(
+            monkeypatch,
+            {
+                "600312.SH": _kline(range(10)),
+                "880520.SH": _kline(range(50)),
+                "880964.SH": _kline(range(50)),
+                "880446.SH": _kline(range(50)),
+            },
+        )
+        sector, status = ttr.resolve_holding_sector(
+            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, "电气设备", {}
+        )
+        assert sector is None and status == "fit_insufficient"
+
+    def test_stock_without_kline_is_fit_insufficient(self, monkeypatch):
+        """个股无 K 线 ⇒ fit_insufficient（不再回落共词/取大/行业）。"""
+        self._klines(monkeypatch, {"600312.SH": None})
+        sector, status = ttr.resolve_holding_sector(
+            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, "电气设备", {}
+        )
+        assert sector is None and status == "fit_insufficient"
+
+    def test_no_pool_is_no_mapping(self):
+        """不在任何板块（行业名也对不上）⇒ no_mapping，与贴合不足分开。"""
+        sector, status = ttr.resolve_holding_sector(
+            {"code": "999999", "name": "x"}, self.SECTOR_MAP, "不存在的行业", {}
+        )
+        assert sector is None and status == "no_mapping"
+
+    def test_sector_series_cached_per_report(self, monkeypatch):
+        """同一报告内板块收益序列只读一次：两只持仓共享候选板块时，
+        板块文件读取次数 = 板块数（不是 持仓数×板块数）。"""
+        reads = []
+        klines = _stock_and(
+            "600312.SH", {"880520.SH": 0.9, "880964.SH": 0.3, "880446.SH": 0.2}
+        )
+        klines["605090.SH"] = _kline(range(200, 280))
+        klines["881467.SH"] = _kline(range(300, 380))
+        klines["880705.SH"] = _kline(range(400, 480))
+
+        def counting_read(code):
+            reads.append(code)
+            return klines.get(code)
+
+        monkeypatch.setattr(ttr.tm, "read_vipdoc", counting_read)
+        cache: dict = {}
+        ttr.resolve_holding_sector(
+            {"code": "600312", "name": "平高电气"},
+            self.SECTOR_MAP,
+            "电气设备",
+            {},
+            cache,
+        )
+        ttr.resolve_holding_sector(
+            {"code": "605090", "name": "九丰能源"}, self.SECTOR_MAP, None, {}, cache
+        )
+        sector_reads = [c for c in reads if c.startswith(("880", "881"))]
+        assert len(sector_reads) == len(set(sector_reads)), (
+            f"板块被重复读：{sector_reads}"
+        )
+
+    def test_fit_goes_into_report_render(self, monkeypatch):
+        """§4 渲染三分标注之贴合：「智能电网（贴合0.9x）」带系数。"""
+        self._klines(
+            monkeypatch,
+            _stock_and("600312.SH", {"880520.SH": 0.95, "880964.SH": 0.3}),
+        )
+        monkeypatch.setattr(
+            ttr.tm, "analyze", lambda df, code: _an(trend="上涨", pos20="箱体上半区")
+        )
+        sector, status = ttr.resolve_holding_sector(
+            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, None, {}
+        )
+        row = ttr._sector_analysis_row(sector, status, ["600312"])
+        text = ttr._section_holdings(
+            [{"code": "600312", "name": "平高电气", "trend_state": "上涨"}],
+            {"600312": row},
+        )
+        line = next(x for x in text if x.startswith("| 600312"))
+        assert "智能电网（贴合" in line
+
+    def test_no_fallback_chain_remnants(self):
+        """grep 守卫：分层兜底已整段删除——源码不再有旧兜底入口。"""
+        src = pathlib.Path(ttr.__file__).read_text(encoding="utf-8")
+        for gone in (
+            "pick_holding_sector",
+            "_pick_concept",
+            "_shared_token",
+            "_largest",
+        ):
+            assert gone not in src, f"{gone} 应已删除"
+        assert "SECTOR_MAP" not in src
+        assert 'SECTORS_DIR / "sector_code_map.json"' not in src
+
+
+class TestIndustryCandidate:
+    """pick_industry_sector（贴合池的行业候选来源）：名称匹配与歧义规则不变。"""
+
+    NAME_MAP = {
+        "880446": {"name": "电气设备", "tdx_type": "2"},
+        "880447": {"name": "电气设备", "tdx_type": "2"},  # 同名歧义候选
+        "880960": {"name": "电气设备", "tdx_type": "4"},  # 同名但非行业，不得命中
+    }
+    SECTOR_MAP = {
+        "sectors": [
+            _sector("880446.SH", "电气设备", "industry", 300, []),
+            _sector("880447.SH", "电气设备", "industry", 100, []),
         ]
     }
 
-    def test_shared_token(self):
-        """共词 = ≥2 字公共子串：「融发核电」∩「核电核能」=「核电」。"""
-        assert ttr._shared_token("核电核能", "融发核电")
-        assert not ttr._shared_token("可控核聚变", "融发核电")  # 只共用单字「核」
-        assert not ttr._shared_token("核污染防治", "融发核电")
-        assert not ttr._shared_token("核", "融发核电")  # 单字不算共词
-
-    def test_shared_token_beats_larger_generic_concept(self):
-        """共词优先：机器人概念（1209）虽最大但无共词，不可取；
-        共词命中核电核能/可控核聚变/核污染防治里只有核电核能真有 ≥2 字共词。"""
-        s = ttr.pick_holding_sector("002366", self.SECTOR_MAP, "融发核电专用机械")
-        assert s["code"] == "880537.SH" and s["name"] == "核电核能"
-
-    def test_shared_token_pool_picks_largest(self):
-        """共词候选多个时取成分股最多者。"""
-        sm = dict(self.SECTOR_MAP)
-        sm["sectors"] = self.SECTOR_MAP["sectors"] + [
-            _sector("880999.SH", "核电设备", "concept", 900, ["002366.SZ"])
-        ]
-        s = ttr.pick_holding_sector("002366", sm, "融发核电")
-        assert s["code"] == "880999.SH"  # 核电设备(900) > 核电核能(338)，同属共词
-
-    def test_no_shared_token_picks_largest_concept(self):
-        """无共词候选 ⇒ 概念层取成分股最大者（机器人概念 1209）。"""
-        s = ttr.pick_holding_sector("002366", self.SECTOR_MAP, "无关的名字")
-        assert s["code"] == "880904.SH"
-
-    def test_sub_industry_is_last_resort(self):
-        """没有概念命中时才落细分行业。"""
-        s = ttr.pick_holding_sector("688001", self.SECTOR_MAP, "任意名")
-        assert s["code"] == "881303.SH"
-
-    def test_region_or_style_only_is_no_mapping(self):
-        """只剩区域/风格 = 无映射（返回 None），不许拿风格板块冒充主线。"""
-        only_region = {"sectors": self.SECTOR_MAP["sectors"][:2]}
-        assert ttr.pick_holding_sector("002366", only_region, "融发核电") is None
-        assert ttr.pick_holding_sector("999999", self.SECTOR_MAP, "x") is None
-
-    def test_industry_layer_precedes_concept(self, monkeypatch):
-        """兜底链顺序（贴合无效时）：行业先于概念——即便概念有共词且更大。"""
+    @pytest.fixture(autouse=True)
+    def env(self, monkeypatch):
         import custos.datasource.local_tdx.tq_sector as tq_sector
 
-        monkeypatch.setattr(
-            tq_sector,
-            "load_sector_names",
-            lambda: {"880446": {"name": "电气设备", "tdx_type": "2"}},
-        )
+        monkeypatch.setattr(tq_sector, "load_sector_names", lambda: dict(self.NAME_MAP))
         monkeypatch.setattr(ttr.tm, "read_vipdoc", lambda code: _kline(range(50)))
-        resolved = ttr.resolve_holding_sector(
-            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, "电气设备"
-        )
-        sector, source = resolved
-        assert source == "industry" and sector["code"] == "880446.SH"
 
-    def test_industry_miss_falls_through_to_concept(self, monkeypatch):
-        """行业名对不上名称表 ⇒ 落概念层（共词优先取大）。"""
+    def test_name_must_match_type2_exactly(self):
+        assert ttr.pick_industry_sector("电气设备", self.SECTOR_MAP)["code"] == (
+            "880446.SH"
+        )
+        assert ttr.pick_industry_sector("不存在的行业", self.SECTOR_MAP) is None
+
+    def test_ambiguous_name_picks_largest_with_kline(self, monkeypatch):
+        """同名歧义：取有 K 线且成分股最多者（880446 300 > 880447 100）。"""
+        s = ttr.pick_industry_sector("电气设备", self.SECTOR_MAP)
+        assert s["code"] == "880446.SH"
+        # 880446 无 K 线时落 880447
+        monkeypatch.setattr(
+            ttr.tm,
+            "read_vipdoc",
+            lambda code: (
+                pd.DataFrame() if code.startswith("880446") else _kline(range(50))
+            ),
+        )
+        s = ttr.pick_industry_sector("电气设备", self.SECTOR_MAP)
+        assert s["code"] == "880447.SH"
+
+    def test_no_kline_at_all_returns_none(self, monkeypatch):
+        monkeypatch.setattr(ttr.tm, "read_vipdoc", lambda code: pd.DataFrame())
+        assert ttr.pick_industry_sector("电气设备", self.SECTOR_MAP) is None
+
+    def test_mapping_file_backtracks_to_latest_before_date(self, tmp_path, monkeypatch):
+        """mapping 取 ≤ 报告日的最近一份（同 positions_history 回溯语义）。"""
+        monkeypatch.setattr(ttr, "HOLDINGS_DIR", tmp_path)
+        (tmp_path / "2026-08-26_holding_sector_mapping.json").write_text(
+            json.dumps([{"code": "600312", "industry": "电气设备"}]), encoding="utf-8"
+        )
+        (tmp_path / "2026-08-28_holding_sector_mapping.json").write_text(
+            json.dumps([{"code": "600312", "industry": "半导体"}]), encoding="utf-8"
+        )
+        assert ttr.holding_industry_names("2026-08-27") == {"600312": "电气设备"}
+        assert ttr.holding_industry_names("2026-08-28") == {"600312": "半导体"}
+        monkeypatch.setattr(ttr, "HOLDINGS_DIR", tmp_path / "empty")
+        assert ttr.holding_industry_names("2026-08-28") == {}
+
+
+class TestMainlineOverrides:
+    """owner 指定层（v0.145/v0.148）：短路一切自动解析；在贴合池里时带系数旁注。"""
+
+    OVERRIDES = {
+        "002366": {
+            "sector_code": "880537.SH",
+            "sector_name": "核电核能",
+            "note": "注册行业专用机械不是主营，owner 指定核电核能。",
+            "date": "2026-08-29",
+        }
+    }
+    SECTOR_MAP = {
+        "sectors": [
+            _sector("880537.SH", "核电核能", "concept", 338, ["002366.SZ"]),
+            _sector("880507.SH", "国防军工", "concept", 532, ["002366.SZ"]),
+        ]
+    }
+    NAME_MAP = {"880445": {"name": "专用机械", "tdx_type": "2"}}
+
+    @pytest.fixture(autouse=True)
+    def env(self, monkeypatch):
         import custos.datasource.local_tdx.tq_sector as tq_sector
 
-        monkeypatch.setattr(tq_sector, "load_sector_names", lambda: {})
-        resolved = ttr.resolve_holding_sector(
-            {"code": "002366", "name": "融发核电"}, self.SECTOR_MAP, "专用机械"
+        monkeypatch.setattr(tq_sector, "load_sector_names", lambda: dict(self.NAME_MAP))
+        monkeypatch.setattr(
+            ttr.tm, "analyze", lambda df, code: _an(trend="上涨", pos20="箱体上半区")
         )
-        sector, source = resolved
-        assert source == "reverse_membership" and sector["code"] == "880537.SH"
 
-    def test_no_layer_hits_returns_none(self):
-        """四层全空 ⇒ None（无映射，区别于行情缺失）。"""
-        assert (
-            ttr.resolve_holding_sector({"code": "999999", "name": "x"}, {}, None)
-            is None
+    def test_override_short_circuits_and_annotates_fit(self, monkeypatch):
+        """指定短路：国防军工贴合同源更高也压不过指定；指定板块在池 ⇒ 带系数旁注。"""
+        monkeypatch.setattr(
+            ttr.tm,
+            "read_vipdoc",
+            lambda code: _stock_and(
+                "002366.SZ", {"880507.SH": 0.98, "880537.SH": 0.5, "880445.SH": 0.4}
+            ).get(code),
         )
+        sector, status = ttr.resolve_holding_sector(
+            {"code": "002366", "name": "融发核电"},
+            self.SECTOR_MAP,
+            "专用机械",
+            self.OVERRIDES,
+        )
+        assert status == "owner_override" and sector["code"] == "880537.SH"
+        assert sector["fit"] is not None and sector["fit"] < 0.9  # 旁注，不影响归属
+        row = ttr._sector_analysis_row(sector, status, ["002366"])
+        text = ttr._section_holdings(
+            [{"code": "002366", "name": "融发核电", "trend_state": "上涨"}],
+            {"002366": row},
+        )
+        line = next(x for x in text if x.startswith("| 002366"))
+        assert "核电核能（指定·贴合" in line
+
+    def test_override_not_in_pool_gets_plain_label(self, monkeypatch):
+        """指定板块不在贴合池（或贴合无效）⇒ 只写「指定」，不编造系数。"""
+        monkeypatch.setattr(ttr.tm, "read_vipdoc", lambda code: pd.DataFrame())
+        monkeypatch.setattr(
+            ttr.tm,
+            "analyze",
+            lambda df, code: {"available": False, "error": "no kline data"},
+        )
+        sector, status = ttr.resolve_holding_sector(
+            {"code": "002366", "name": "融发核电"}, {}, None, self.OVERRIDES
+        )
+        assert status == "owner_override" and "fit" not in sector
+        row = ttr._sector_analysis_row(sector, status, ["002366"])
+        text = ttr._section_holdings(
+            [{"code": "002366", "name": "融发核电", "trend_state": "上涨"}],
+            {"002366": row},
+        )
+        line = next(x for x in text if x.startswith("| 002366"))
+        assert "核电核能（指定）" in line and "贴合" not in line
+        # 指定板块无 K 线 ⇒ quote_missing 如实报「板块行情缺失」
+        assert row["quote_missing"] is True and row["stage"] == "板块行情缺失"
+        assert "owner 指定" in row["stage_reason"]
+
+    def test_override_miss_uses_fit(self, monkeypatch):
+        """指定表里没有的持仓 ⇒ 走贴合（核电核能同源 ⇒ 贴合胜）。"""
+        monkeypatch.setattr(
+            ttr.tm,
+            "read_vipdoc",
+            lambda code: _stock_and(
+                "002366.SZ", {"880537.SH": 0.95, "880507.SH": 0.3}
+            ).get(code),
+        )
+        sector, status = ttr.resolve_holding_sector(
+            {"code": "002366", "name": "融发核电"}, self.SECTOR_MAP, None, {}
+        )
+        assert status == "fit" and sector["code"] == "880537.SH"
+
+    def test_missing_override_file_keeps_behavior(self, tmp_path):
+        """指定表文件缺失 ⇒ load 返回 {}，行为不变（走贴合）。"""
+        assert ttr.load_mainline_overrides(tmp_path / "nonexistent.json") == {}
 
 
 class TestBuildAndReport:
-    """报告构建：rows 来自持仓板块（四层链），不再是人工主题表。"""
+    """报告构建：rows 来自持仓板块（指定>贴合），无有效贴合的持仓不进 rows。"""
 
     SECTOR_MAP = {
         "sectors": [
@@ -355,6 +618,7 @@ class TestBuildAndReport:
                 [
                     {"code": "002366", "name": "融发核电", "trend_state": "上涨"},
                     {"code": "600312", "name": "平高电气", "trend_state": "横盘震荡"},
+                    {"code": "999999", "name": "无映射股", "trend_state": "上涨"},
                 ]
             ),
             encoding="utf-8",
@@ -362,7 +626,9 @@ class TestBuildAndReport:
         (tmp_path / "sectors" / "2026-08-04_tq_sector_map.json").write_text(
             json.dumps(self.SECTOR_MAP), encoding="utf-8"
         )
-        monkeypatch.setattr(ttr.tm, "read_vipdoc", lambda code: None)
+        klines = _stock_and("002366.SZ", {"880537.SH": 0.95})
+        klines.update(_stock_and("600312.SH", {"880520.SH": 0.9}))
+        monkeypatch.setattr(ttr.tm, "read_vipdoc", lambda code: klines.get(code))
         monkeypatch.setattr(
             ttr.tm,
             "analyze",
@@ -380,48 +646,18 @@ class TestBuildAndReport:
         self.tmp = tmp_path
 
     def test_rows_built_from_holding_sectors(self):
-        """每个持仓解析出的板块去重成行：theme_id=板块代码、theme_name=板块名。"""
+        """贴合有效的持仓出板块行：theme_id=板块代码、theme_name=板块名；
+        无映射股（999999）不产生行。"""
         rows = ttr.build_sector_summary("2026-08-07")
         assert [r["theme_id"] for r in rows] == ["880537.SH", "880520.SH"]
-        assert rows[0]["theme_name"] == "核电核能"
-        assert rows[0]["source"] == "reverse_membership"
+        assert rows[0]["theme_name"] == "核电核能" and rows[0]["source"] == "fit"
         assert rows[0]["representative_stocks"] == ["002366"]
+        assert rows[0]["fit"] > 0.9
         assert all(isinstance(r["available"], bool) for r in rows)
 
-    def test_same_sector_merges_member_stocks(self):
-        """两只持仓同属一板块 ⇒ 一行，代表股合并。"""
-        sm = dict(self.SECTOR_MAP)
-        sm["sectors"] = self.SECTOR_MAP["sectors"] + [
-            _sector("880537.SH", "核电核能", "concept", 338, ["600312.SH"])
-        ]
-        (self.tmp / "sectors" / "2026-08-04_tq_sector_map.json").write_text(
-            json.dumps(sm), encoding="utf-8"
-        )
-        rows = ttr.build_sector_summary("2026-08-07")
-        assert len(rows) == 1
-        assert sorted(rows[0]["representative_stocks"]) == ["002366", "600312"]
-
-    def test_quote_missing_row_marks_unavailable(self, monkeypatch):
-        """板块已定位但无 K 线 ⇒ quote_missing 行（available=False），
-        与「无映射」（该持仓不进 rows）分得开。"""
-        monkeypatch.setattr(
-            ttr.tm,
-            "analyze",
-            lambda df, code: {"available": False, "error": "no kline data"},
-        )
-        rows = ttr.build_sector_summary("2026-08-07")
-        assert len(rows) == 2
-        assert all(r["available"] is False and r["quote_missing"] for r in rows)
-        assert all(r["stage"] == "板块行情缺失" for r in rows)
-
-    def test_unresolvable_holding_not_in_rows(self):
-        """四层全空的持仓不产生板块行（rows 里没有它的位置，§4 才显示未定）。"""
-        (
-            self.tmp / "holdings" / "2026-08-07_holding_technical_summary.json"
-        ).write_text(
-            json.dumps([{"code": "999999", "name": "无映射股", "trend_state": "上涨"}]),
-            encoding="utf-8",
-        )
+    def test_fit_insufficient_holding_not_in_rows(self, monkeypatch):
+        """贴合无有效数据的持仓不产生板块行（不再回落猜）。"""
+        monkeypatch.setattr(ttr.tm, "read_vipdoc", lambda code: None)
         assert ttr.build_sector_summary("2026-08-07") == []
 
     def test_main_writes_both_artifacts(self, monkeypatch):
@@ -432,7 +668,9 @@ class TestBuildAndReport:
         assert md.exists() and js.exists()
         text = md.read_text(encoding="utf-8")
         assert "主线方向：**核电核能**" in text
-        assert "仅覆盖持仓相关板块" in text  # §1 口径声明
+        assert "贴合最高者" in text  # §1 口径声明（v0.148）
+        assert "核电核能（贴合" in text  # §4 贴合行带系数
+        assert "| 999999 | 无映射股 | 未定 | 未定" in text
         rows = json.loads(js.read_text(encoding="utf-8"))
         assert {r["theme_id"] for r in rows} == {"880537.SH", "880520.SH"}
 
@@ -448,349 +686,6 @@ class TestBuildAndReport:
         )
         assert "主线方向：**未定**" in text
         assert "如实降级" in text
-
-    def test_module_does_not_read_deleted_theme_map(self):
-        """反向钉测：人工主题表已删，本模块不许再引用它的路径/常量。"""
-        src = pathlib.Path(ttr.__file__).read_text(encoding="utf-8")
-        assert "SECTOR_MAP" not in src
-        assert 'SECTORS_DIR / "sector_code_map.json"' not in src
-
-
-class TestIndustryLayer:
-    """行业层（兜底链第一层，v0.147 起不再短路、只做贴合池候选与回落）：
-
-    holding_sector_mapping 行业名 → 880 行业板块（tdx_type=2）。
-    贴合全无效时名称对不上 / 行业板块无 K 线 ⇒ 落概念反查，不硬报缺失。
-    """
-
-    NAME_MAP = {
-        "880446": {"name": "电气设备", "tdx_type": "2"},
-        "880447": {"name": "电气设备", "tdx_type": "2"},  # 同名歧义候选
-        "880520": {"name": "智能电网", "tdx_type": "4"},
-        "880960": {"name": "电气设备", "tdx_type": "4"},  # 同名但非行业，不得命中
-    }
-    SECTOR_MAP = {
-        "sectors": [
-            _sector("880446.SH", "电气设备", "industry", 300, []),
-            _sector("880447.SH", "电气设备", "industry", 100, []),
-            _sector("880520.SH", "智能电网", "concept", 500, ["600312.SH"]),
-        ]
-    }
-
-    @pytest.fixture(autouse=True)
-    def env(self, monkeypatch):
-        import custos.datasource.local_tdx.tq_sector as tq_sector
-
-        monkeypatch.setattr(tq_sector, "load_sector_names", lambda: dict(self.NAME_MAP))
-        # 本类钉的是回落链——贴合强制视为无效（贴合用例见 TestSectorFit）
-        monkeypatch.setattr(ttr, "_sector_fit", lambda *a, **kw: None)
-        monkeypatch.setattr(
-            ttr.tm,
-            "read_vipdoc",
-            lambda code: _kline(range(50)),
-        )
-        monkeypatch.setattr(
-            ttr.tm, "analyze", lambda df, code: _an(trend="上涨", pos20="箱体上半区")
-        )
-
-    def test_industry_beats_bigger_concept(self):
-        """兜底链：行业优先于概念——即便概念板块成分股更多（智能电网 500 > 电气设备 300）。"""
-        resolved = ttr.resolve_holding_sector(
-            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, "电气设备"
-        )
-        sector, source = resolved
-        assert source == "industry"
-        assert sector["name"] == "电气设备" and sector["code"] == "880446.SH"
-
-    def test_industry_name_unmatched_falls_to_concept(self):
-        """行业名在名称表对不上 type=2 板块 ⇒ 落概念反查（取大：智能电网）。"""
-        resolved = ttr.resolve_holding_sector(
-            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, "不存在的行业"
-        )
-        sector, source = resolved
-        assert source == "reverse_membership" and sector["code"] == "880520.SH"
-
-    def test_same_name_non_industry_type_not_matched(self):
-        """同名的概念板块（880960 tdx_type=4）不许命中行业层。"""
-        resolved = ttr.resolve_holding_sector(
-            {"code": "999999", "name": "x"}, self.SECTOR_MAP, "电气设备"
-        )
-        sector, _ = resolved
-        assert sector["code"] == "880446.SH"  # type=2 精确匹配
-
-    def test_industry_without_kline_falls_to_concept(self, monkeypatch):
-        """行业板块无 K 线 ⇒ 落概念层，不硬报「板块行情缺失」。"""
-        monkeypatch.setattr(
-            ttr.tm,
-            "read_vipdoc",
-            lambda code: (
-                pd.DataFrame()
-                if code.startswith(("880446", "880447"))
-                else _kline(range(50))
-            ),
-        )
-        resolved = ttr.resolve_holding_sector(
-            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, "电气设备"
-        )
-        sector, source = resolved
-        assert source == "reverse_membership" and sector["code"] == "880520.SH"
-
-    def test_ambiguous_name_picks_largest_with_kline(self, monkeypatch):
-        """同名歧义：取有 K 线且成分股最多者（880446 300 > 880447 100）。"""
-        s = ttr.pick_industry_sector("电气设备", self.SECTOR_MAP)
-        assert s["code"] == "880446.SH"
-        # 880446 无 K 线时落 880447（而不是落概念层）
-        monkeypatch.setattr(
-            ttr.tm,
-            "read_vipdoc",
-            lambda code: (
-                pd.DataFrame() if code.startswith("880446") else _kline(range(50))
-            ),
-        )
-        s = ttr.pick_industry_sector("电气设备", self.SECTOR_MAP)
-        assert s["code"] == "880447.SH"
-
-    def test_missing_mapping_file_keeps_reverse_lookup(self, tmp_path, monkeypatch):
-        """读不到 holding_sector_mapping ⇒ 行为不变（概念反查照旧）。"""
-        monkeypatch.setattr(ttr, "HOLDINGS_DIR", tmp_path)
-        assert ttr.holding_industry_names("2026-08-28") == {}
-        resolved = ttr.resolve_holding_sector(
-            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP
-        )
-        sector, source = resolved
-        assert source == "reverse_membership" and sector["code"] == "880520.SH"
-
-    def test_mapping_file_backtracks_to_latest_before_date(self, tmp_path, monkeypatch):
-        """mapping 取 ≤ 报告日的最近一份（同 positions_history 回溯语义）。"""
-        monkeypatch.setattr(ttr, "HOLDINGS_DIR", tmp_path)
-        (tmp_path / "2026-08-26_holding_sector_mapping.json").write_text(
-            json.dumps([{"code": "600312", "industry": "电气设备"}]), encoding="utf-8"
-        )
-        (tmp_path / "2026-08-28_holding_sector_mapping.json").write_text(
-            json.dumps([{"code": "600312", "industry": "半导体"}]), encoding="utf-8"
-        )
-        assert ttr.holding_industry_names("2026-08-27") == {"600312": "电气设备"}
-        assert ttr.holding_industry_names("2026-08-28") == {"600312": "半导体"}
-
-
-class TestQuoteMissingVsNoMapping:
-    """「板块行情缺失」与「未定/无映射」两种文案必须分得开（v0.139 语义沿用）。"""
-
-    SECTOR_MAP = {
-        "sectors": [
-            _sector("880537.SH", "核电核能", "concept", 338, ["002366.SZ"]),
-        ]
-    }
-
-    def test_missing_kline_is_quote_missing_not_undecided(self, monkeypatch):
-        monkeypatch.setattr(ttr.tm, "read_vipdoc", lambda code: None)
-        monkeypatch.setattr(
-            ttr.tm,
-            "analyze",
-            lambda df, code: {"available": False, "error": "no kline data"},
-        )
-        resolved = ttr.resolve_holding_sector(
-            {"code": "002366", "name": "融发核电"}, self.SECTOR_MAP
-        )
-        sector, source = resolved
-        row = ttr._sector_analysis_row(sector, source, ["002366"])
-        assert row["quote_missing"] is True
-        assert row["stage"] == "板块行情缺失"
-        s, why = ttr.compare_holding_to_theme({"trend_state": "上涨"}, row)
-        assert s == "板块行情缺失" and "未定" not in s
-        assert "板块行情缺失" in why
-
-    def test_no_mapping_at_all_stays_undecided(self):
-        resolved = ttr.resolve_holding_sector({"code": "999999", "name": "x"}, {}, None)
-        assert resolved is None
-        s, why = ttr.compare_holding_to_theme({"trend_state": "上涨"}, {})
-        assert s == "未定" and "数据不足" in why
-
-
-class TestHoldingsSection:
-    """§4 集成：行业命中标「（行业）」，概念反查标「（反查）」，无映射显示「未定」。"""
-
-    SECTOR_MAP = {
-        "sectors": [
-            _sector("880446.SH", "电气设备", "industry", 300, []),
-            _sector("880537.SH", "核电核能", "concept", 338, ["002366.SZ"]),
-        ]
-    }
-
-    @pytest.fixture(autouse=True)
-    def env(self, tmp_path, monkeypatch):
-        import custos.datasource.local_tdx.tq_sector as tq_sector
-
-        monkeypatch.setattr(ttr, "HOLDINGS_DIR", tmp_path / "holdings")
-        monkeypatch.setattr(ttr, "SECTOR_DIR", tmp_path / "sectors")
-        # 真实 owner 指定表（002366/600312 在表里）不得渗进合成用例
-        monkeypatch.setattr(ttr, "load_mainline_overrides", lambda path=None: {})
-        # 本类钉兜底标注（行业/反查/未定）——贴合强制视为无效（贴合标注见 TestSectorFit）
-        monkeypatch.setattr(ttr, "_sector_fit", lambda *a, **kw: None)
-        (tmp_path / "holdings").mkdir()
-        (tmp_path / "sectors").mkdir()
-        (
-            tmp_path / "holdings" / "2026-08-07_holding_technical_summary.json"
-        ).write_text(
-            json.dumps(
-                [
-                    {"code": "600312", "name": "平高电气", "trend_state": "上涨"},
-                    {"code": "002366", "name": "融发核电", "trend_state": "上涨"},
-                    {"code": "999999", "name": "无映射股", "trend_state": "上涨"},
-                ]
-            ),
-            encoding="utf-8",
-        )
-        (tmp_path / "holdings" / "2026-08-07_holding_sector_mapping.json").write_text(
-            json.dumps([{"code": "600312", "industry": "电气设备"}]), encoding="utf-8"
-        )
-        (tmp_path / "sectors" / "2026-08-04_tq_sector_map.json").write_text(
-            json.dumps(self.SECTOR_MAP), encoding="utf-8"
-        )
-        monkeypatch.setattr(
-            tq_sector,
-            "load_sector_names",
-            lambda: {"880446": {"name": "电气设备", "tdx_type": "2"}},
-        )
-        monkeypatch.setattr(ttr.tm, "read_vipdoc", lambda code: _kline(range(50)))
-        monkeypatch.setattr(
-            ttr.tm,
-            "analyze",
-            lambda df, code: _an(
-                trend="上涨", pos20="箱体上半区", latest_date="2026-08-07"
-            ),
-        )
-
-    def test_section_marks(self):
-        text = ttr.make_report("2026-08-07", [])
-        assert "电气设备（行业）" in text
-        assert "核电核能（反查）" in text
-        assert "| 999999 | 无映射股 | 未定 |" in text
-
-    def test_report_uses_given_holding_rows_without_recompute(self, monkeypatch):
-        """make_report 传入 holding_rows 时不得重复解析（K 线只读一遍）。"""
-        monkeypatch.setattr(
-            ttr,
-            "resolve_holding_rows",
-            lambda date: pytest.fail("传入 holding_rows 后不得重算"),
-        )
-        row = {
-            "theme_id": "880537.SH",
-            "theme_name": "核电核能",
-            "available": True,
-            "stage": "修复",
-            "score": 60.0,
-            "source": "reverse_membership",
-        }
-        text = ttr.make_report("2026-08-07", [], {"002366": row})
-        assert "核电核能（反查）" in text
-
-
-class TestMainlineOverrides:
-    """owner 指定层（v0.145）：解析链第①层，高于行业/概念一切自动解析。"""
-
-    OVERRIDES = {
-        "002366": {
-            "sector_code": "880537.SH",
-            "sector_name": "核电核能",
-            "note": "注册行业专用机械不是主营，owner 指定核电核能。",
-            "date": "2026-08-29",
-        }
-    }
-    SECTOR_MAP = {
-        "sectors": [
-            _sector("880446.SH", "专用机械", "industry", 300, ["002366.SZ"]),
-            _sector("880507.SH", "国防军工", "concept", 532, ["002366.SZ"]),
-        ]
-    }
-
-    @pytest.fixture(autouse=True)
-    def env(self, monkeypatch):
-        import custos.datasource.local_tdx.tq_sector as tq_sector
-
-        monkeypatch.setattr(
-            tq_sector,
-            "load_sector_names",
-            lambda: {"880446": {"name": "专用机械", "tdx_type": "2"}},
-        )
-        # 指定层语义与贴合无关——贴合强制视为无效（指定短路贴合见 TestSectorFit）
-        monkeypatch.setattr(ttr, "_sector_fit", lambda *a, **kw: None)
-        monkeypatch.setattr(ttr.tm, "read_vipdoc", lambda code: _kline(range(50)))
-        monkeypatch.setattr(
-            ttr.tm, "analyze", lambda df, code: _an(trend="上涨", pos20="箱体上半区")
-        )
-
-    def test_override_beats_industry_and_concept(self):
-        """指定优先于行业/概念：注册行业是专用机械（行业层可命中 880446），
-        但 owner 指定核电核能 ⇒ 用指定。"""
-        resolved = ttr.resolve_holding_sector(
-            {"code": "002366", "name": "融发核电"},
-            self.SECTOR_MAP,
-            "专用机械",
-            self.OVERRIDES,
-        )
-        sector, source = resolved
-        assert source == "owner_override"
-        assert sector["code"] == "880537.SH" and sector["name"] == "核电核能"
-        assert "专用机械不是主营" in sector["note"]
-
-    def test_override_miss_falls_through_to_auto_chain(self):
-        """指定表里没有的持仓 ⇒ 走原自动链（行业层命中专用机械）。"""
-        resolved = ttr.resolve_holding_sector(
-            {"code": "002366", "name": "融发核电"}, self.SECTOR_MAP, "专用机械", {}
-        )
-        sector, source = resolved
-        assert source == "industry" and sector["code"] == "880446.SH"
-
-    def test_missing_override_file_keeps_behavior(self, tmp_path):
-        """指定表文件缺失 ⇒ load 返回 {}，行为不变。"""
-        assert ttr.load_mainline_overrides(tmp_path / "nonexistent.json") == {}
-        resolved = ttr.resolve_holding_sector(
-            {"code": "002366", "name": "融发核电"},
-            self.SECTOR_MAP,
-            "专用机械",
-            ttr.load_mainline_overrides(tmp_path / "nonexistent.json"),
-        )
-        assert resolved[1] == "industry"
-
-    def test_override_with_missing_kline_is_quote_missing(self, monkeypatch):
-        """指定板块无 K 线 ⇒ quote_missing「板块行情缺失」（不回落自动链——
-        owner 指定的板块没行情要如实暴露，不能悄悄换成自动解析结果）。"""
-        monkeypatch.setattr(ttr.tm, "read_vipdoc", lambda code: pd.DataFrame())
-        monkeypatch.setattr(
-            ttr.tm,
-            "analyze",
-            lambda df, code: {"available": False, "error": "no kline data"},
-        )
-        resolved = ttr.resolve_holding_sector(
-            {"code": "002366", "name": "融发核电"},
-            self.SECTOR_MAP,
-            "专用机械",
-            self.OVERRIDES,
-        )
-        sector, source = resolved
-        row = ttr._sector_analysis_row(sector, source, ["002366"])
-        assert row["quote_missing"] is True and row["stage"] == "板块行情缺失"
-        assert "owner 指定" in row["stage_reason"]
-
-    def test_section_marks_override(self, tmp_path, monkeypatch):
-        """§4 集成：指定行标注「（指定）」。"""
-        monkeypatch.setattr(ttr, "HOLDINGS_DIR", tmp_path / "holdings")
-        monkeypatch.setattr(ttr, "SECTOR_DIR", tmp_path / "sectors")
-        (tmp_path / "holdings").mkdir()
-        (tmp_path / "sectors").mkdir()
-        (
-            tmp_path / "holdings" / "2026-08-07_holding_technical_summary.json"
-        ).write_text(
-            json.dumps([{"code": "002366", "name": "融发核电", "trend_state": "上涨"}]),
-            encoding="utf-8",
-        )
-        monkeypatch.setattr(
-            ttr, "load_mainline_overrides", lambda path=None: dict(self.OVERRIDES)
-        )
-        text = ttr.make_report("2026-08-07", [])
-        assert "核电核能（指定）" in text
-        assert "专用机械（行业）" not in text
 
 
 def test_override_table_schema():
@@ -813,205 +708,3 @@ def test_override_table_schema():
         assert bare in name_map, f"{code} 的 sector_code {bare} 不在名称表"
         for field in ("sector_name", "note", "date"):
             assert ov.get(field), f"{code} 缺字段 {field}"
-
-
-def _kline(closes, start="2026-01-01"):
-    """合成 K 线（date/close 两列，贴合计算只用这两列）。"""
-    import pandas as pd
-
-    return pd.DataFrame(
-        {"date": pd.date_range(start, periods=len(closes), freq="B"), "close": closes}
-    )
-
-
-class TestSectorFit:
-    """v0.147：走势贴合是自动链第一优先级——全部所属板块（概念/细分 +
-    行业名匹配出的行业板块）入池比 60 日收益相关，贴合最高者胜。"""
-
-    SECTOR_MAP = {
-        "sectors": [
-            _sector("880520.SH", "智能电网", "concept", 277, ["600312.SH"]),
-            _sector("880964.SH", "特高压", "concept", 132, ["600312.SH"]),
-            _sector("880213.SH", "河南板块", "region", 116, ["600312.SH"]),
-            _sector("881467.SH", "燃气", "sub_industry", 232, ["605090.SH"]),
-            _sector("880705.SH", "天然气", "concept", 100, ["605090.SH"]),
-        ]
-    }
-    NAME_MAP = {"880446": {"name": "电气设备", "tdx_type": "2"}}
-
-    @pytest.fixture(autouse=True)
-    def env(self, monkeypatch):
-        import custos.datasource.local_tdx.tq_sector as tq_sector
-
-        monkeypatch.setattr(tq_sector, "load_sector_names", lambda: dict(self.NAME_MAP))
-
-    def _klines(self, monkeypatch, series_by_code):
-        monkeypatch.setattr(
-            ttr.tm, "read_vipdoc", lambda code: series_by_code.get(code)
-        )
-
-    def _stock_and(self, stock_code, corr_map):
-        """个股收益 = base；corr_map 里 {板块码: 混合比}（1.0=同源，0.0=独立噪声）。"""
-        import numpy as np
-
-        rng = np.random.default_rng(7)
-        n = rng.normal(0, 1, 80)
-        out = {stock_code: _kline(100 + np.cumsum(n))}
-        for code, ratio in corr_map.items():
-            mix = ratio * n + (1 - ratio) * rng.normal(0, 1, 80)
-            out[code] = _kline(500 + np.cumsum(mix))
-        return out
-
-    def test_fit_beats_industry_layer(self, monkeypatch):
-        """贴合压行业：行业命中（电气设备 880446）但贴合输给概念（智能电网同源）
-        ⇒ 智能电网胜，source=fit——行业不再直接短路。"""
-        self._klines(
-            monkeypatch,
-            self._stock_and(
-                "600312.SH", {"880520.SH": 0.95, "880964.SH": 0.3, "880446.SH": 0.3}
-            ),
-        )
-        resolved = ttr.resolve_holding_sector(
-            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, "电气设备", {}
-        )
-        sector, source = resolved
-        assert source == "fit"
-        assert sector["code"] == "880520.SH" and sector["fit"] > 0.9
-
-    def test_fit_pool_includes_industry_candidate(self, monkeypatch):
-        """行业候选也入贴合池：电气设备（行业）贴合最高 ⇒ 它胜，带 fit 不是短路。"""
-        self._klines(
-            monkeypatch,
-            self._stock_and(
-                "600312.SH", {"880446.SH": 0.95, "880520.SH": 0.3, "880964.SH": 0.2}
-            ),
-        )
-        resolved = ttr.resolve_holding_sector(
-            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, "电气设备", {}
-        )
-        sector, source = resolved
-        assert source == "fit" and sector["code"] == "880446.SH"
-
-    def test_region_style_never_in_fit_pool(self, monkeypatch):
-        """区域/风格仍不当主线：河南板块（region）即便贴合同源也不入池。"""
-        self._klines(
-            monkeypatch,
-            self._stock_and(
-                "600312.SH", {"880213.SH": 0.99, "880520.SH": 0.5, "880964.SH": 0.2}
-            ),
-        )
-        resolved = ttr.resolve_holding_sector(
-            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, None, {}
-        )
-        sector, source = resolved
-        assert source == "fit" and sector["code"] == "880520.SH"
-
-    def test_sub_industry_can_win_fit(self, monkeypatch):
-        """细分行业在贴合池里平等竞争（owner 实测：九丰能源 燃气0.485 > 供气供热0.423）。"""
-        self._klines(
-            monkeypatch,
-            self._stock_and("605090.SH", {"881467.SH": 0.9, "880705.SH": 0.2}),
-        )
-        resolved = ttr.resolve_holding_sector(
-            {"code": "605090", "name": "九丰能源"}, self.SECTOR_MAP, None, {}
-        )
-        sector, source = resolved
-        assert source == "fit" and sector["code"] == "881467.SH"
-
-    def test_all_fit_invalid_falls_back_to_chain(self, monkeypatch):
-        """个股 K 线 <20 根 ⇒ 贴合整体无效，回落兜底链：行业（电气设备 50 根在池）。"""
-        self._klines(
-            monkeypatch,
-            {
-                "600312.SH": _kline(range(10)),
-                "880520.SH": _kline(range(50)),
-                "880964.SH": _kline(range(50)),
-                "880446.SH": _kline(range(50)),
-            },
-        )
-        resolved = ttr.resolve_holding_sector(
-            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, "电气设备", {}
-        )
-        sector, source = resolved
-        assert source == "industry" and sector["code"] == "880446.SH"
-
-    def test_stock_without_kline_falls_back(self, monkeypatch):
-        """个股无 K 线 ⇒ 贴合无效，回落共词/取大规则（「平高电气」与「特高压」
-        无 ≥2 字共词——「高」是单字不算——故取大 = 智能电网 277）。"""
-        self._klines(monkeypatch, {"600312.SH": None})
-        resolved = ttr.resolve_holding_sector(
-            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, None, {}
-        )
-        sector, source = resolved
-        assert source == "reverse_membership" and sector["code"] == "880520.SH"
-
-    def test_override_short_circuits_fit(self, monkeypatch):
-        """owner 指定照旧短路：_sector_fit 零调用。"""
-        monkeypatch.setattr(
-            ttr, "_sector_fit", lambda *a, **kw: pytest.fail("指定层不得算贴合")
-        )
-        ov = {
-            "600312": {
-                "sector_code": "880964.SH",
-                "sector_name": "特高压",
-                "note": "x",
-                "date": "2026-08-29",
-            }
-        }
-        sector, source = ttr.resolve_holding_sector(
-            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, "电气设备", ov
-        )
-        assert source == "owner_override" and sector["code"] == "880964.SH"
-
-    def test_sector_series_cached_per_report(self, monkeypatch):
-        """同一报告内板块收益序列只读一次：两只持仓共享候选板块时，
-        板块文件读取次数 = 板块数（不是 持仓数×板块数）。"""
-        reads = []
-        klines = self._stock_and(
-            "600312.SH", {"880520.SH": 0.9, "880964.SH": 0.3, "880446.SH": 0.2}
-        )
-        klines["605090.SH"] = _kline(range(200, 280))
-        klines["881467.SH"] = _kline(range(300, 380))
-        klines["880705.SH"] = _kline(range(400, 480))
-
-        def counting_read(code):
-            reads.append(code)
-            return klines.get(code)
-
-        monkeypatch.setattr(ttr.tm, "read_vipdoc", counting_read)
-        cache: dict = {}
-        ttr.resolve_holding_sector(
-            {"code": "600312", "name": "平高电气"},
-            self.SECTOR_MAP,
-            "电气设备",
-            {},
-            cache,
-        )
-        ttr.resolve_holding_sector(
-            {"code": "605090", "name": "九丰能源"}, self.SECTOR_MAP, None, {}, cache
-        )
-        sector_reads = [c for c in reads if c.startswith(("880", "881"))]
-        # 行业层的 K 线存在性检查（pick_industry_sector）不在缓存内，只钉贴合池部分
-        fit_reads = [c for c in sector_reads if sector_reads.count(c) > 0]
-        assert len(fit_reads) == len(set(fit_reads)), f"板块被重复读：{sector_reads}"
-
-    def test_fit_goes_into_report_render(self, monkeypatch):
-        """§4 渲染：贴合选出 ⇒ 「智能电网（贴合0.9x）」带系数；兜底回落按来源标注。"""
-        self._klines(
-            monkeypatch,
-            self._stock_and("600312.SH", {"880520.SH": 0.95, "880964.SH": 0.3}),
-        )
-        monkeypatch.setattr(
-            ttr.tm, "analyze", lambda df, code: _an(trend="上涨", pos20="箱体上半区")
-        )
-        resolved = ttr.resolve_holding_sector(
-            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, None, {}
-        )
-        sector, source = resolved
-        row = ttr._sector_analysis_row(sector, source, ["600312"])
-        text = ttr._section_holdings(
-            [{"code": "600312", "name": "平高电气", "trend_state": "上涨"}],
-            {"600312": row},
-        )
-        line = next(x for x in text if x.startswith("| 600312"))
-        assert "智能电网（贴合" in line and "（行业）" not in line
