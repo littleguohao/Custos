@@ -2538,9 +2538,12 @@ def _amv_regime_from_records(records: list[dict[str, Any]]) -> dict[str, str]:
 def _amv_ledger_records(
     since: str, after_date: Optional[str], ledger_path: Optional[Path] = None
 ) -> list[dict[str, Any]]:
-    """从人工上报台账(0amv_observations.jsonl)取 after_date 之后的 confirmed 记录，
-    补齐指南针 day.vdat 主序列的尾部缺口(用户每日收盘上报的 0AMV 只进台账,vdat 由客户端维护)。
-    同一日期多条记录时后写入(recorded_at 晚)的覆盖先写的。best-effort：缺失/异常返回 []。"""
+    """从 0AMV 台账(0amv_observations.jsonl)取 confirmed 记录。
+
+    v0.150 起台账是全量单源（vdat 全历史已回填，`scripts/dev/amv_backfill_vdat.py`）：
+    ``after_date=None`` ⇒ 全量读（since 起）；``after_date`` 形参保留给旧兜底路径
+    （vdat 尾部拼接）使用。同一日期多条记录时后写入(recorded_at 晚)的覆盖先写的。
+    best-effort：缺失/异常返回 []。"""
     try:
         if ledger_path is None:
             from custos.core.paths import MARKET_DIR  # noqa: PLC0415
@@ -2575,8 +2578,18 @@ def _amv_ledger_records(
 def load_amv_regime(
     since: str = "2015-01-01", root: Optional[str] = None
 ) -> dict[str, str]:
-    """从指南针 0AMV 日线(compass_amv)构建历史 date→regime。best-effort：数据缺失返回 {}。
-    day.vdat 主序列之后,拼接人工上报台账(0amv_observations.jsonl)的 confirmed 记录补齐尾部。"""
+    """0AMV 历史 date→regime。**台账单源**（v0.150，owner 拍板「只维护一个文件」）：
+    0amv_observations.jsonl 的 confirmed 记录全量（vdat 全历史已回填进台账）
+    按状态机(>4%→做多; <-2.3%→空头; 之间粘滞)重放。
+
+    兜底：台账空/缺失/异常时才回落旧路径（指南针 day.vdat 主序列 + 台账尾部
+    拼接）——vdat 停更于 2026-07-17，兜底只为防台账丢失，正常不该走到。
+    best-effort：都缺返回 {}。
+    """
+    records = _amv_ledger_records(since, None)
+    if records:
+        return _amv_regime_from_records(records)
+    # ── 兜底（v0.150 前旧路径）：vdat 主序列 + 台账 confirmed 尾部拼接 ──
     try:
         from custos.datasource.local_tdx import compass_amv  # noqa: PLC0415
 
