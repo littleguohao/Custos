@@ -342,6 +342,7 @@ def run_study(
     scale_out_frac: float = 0.0,
     end: Optional[str] = None,
     trade_hook: Optional[Any] = None,
+    entry_gate_factory: Optional[Any] = None,
 ) -> list[dict[str, Any]]:
     """逐股流式：加载全历史 → evaluate_trades（j_low gate + baseline scorer +
     仅做多区间 + BBI 跌破2根止盈 + pct 初始止损 [+ cost_zone] [+ 保本/分批止盈]）
@@ -353,6 +354,9 @@ def run_study(
     ``trade_hook``（可选）：``hook(df, index_df, i, code) -> dict``，返回键并入该笔
     记录（替代默认的 tech_score/tech_level/factor_contrib 三键）——
     winner_factor_study 用它注入因子面板，回测引擎/截断口径零重复。
+    ``entry_gate_factory``（可选，v0.155）：``factory(code) -> gate(df_slice, precomputed)``
+    逐股构造进场门槛（resonance3_study 的三面共振 gate 需要 per-code 的 PIT 财务
+    闭包）；None = 默认 j_low gate（旧行为逐位不变）。
     """
     from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
 
@@ -374,10 +378,11 @@ def run_study(
             df = df[df["date"].astype(str).str[:10] <= end].reset_index(drop=True)
             if not len(df):
                 continue
+        gate = entry_gate_factory(code) if entry_gate_factory else bf.j_low_gate
         code_trades = bf.evaluate_trades(
             {code: df},
             scorer=bf.SCORERS["baseline"],  # 恒「可买」——进场只由 j_low gate 决定
-            entry_gate=bf.j_low_gate,  # 信号 = 日 KDJ 的 J<13
+            entry_gate=gate,  # 信号 = 日 KDJ 的 J<13（或 factory 给的复合 gate）
             amv_regime=regime,  # 只在 0AMV 做多区间进场
             bbi_exit_consec=2,  # BBI 止盈：站上后连破 2 根收盘清仓
             stop_mode=STOP_MODE,  # pct 固定空间止损（昨晚基线=50 宽设≈无止损）

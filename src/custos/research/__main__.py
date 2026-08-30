@@ -120,6 +120,11 @@ TOOLS: dict[str, tuple[str, str]] = {
         "0AMV 论文公式验证：SMA(成交额,10,1)×动量项/1e7×0.835 能否复现 vdat"
         "（CLOSE 变体逐个试；可对上 ⇒ 可摆脱指南针客户端依赖）",
     ),
+    "resonance3_study": (
+        "study",
+        "三面共振（基本面优∧技术强∧0AMV做多）交易层验证：两臂对照"
+        "（j_low 基底 vs 共振 gate，PIT as-of；⚠️ R21：画像≠可交易）",
+    ),
     "score_calibration_study": (
         "study",
         "R24 打分校准：逐腿边际分析（池内命中率/add-one/LOO margin）——"
