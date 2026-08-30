@@ -115,6 +115,11 @@ TOOLS: dict[str, tuple[str, str]] = {
         "打分重构：V0~V3 变体（反向腿取反/证据重构/负向证据）× 预注册判据"
         "——TOP20% 赢家能否在得分上浮现（⚠️ R21：以篮子实测为准）",
     ),
+    "amv_formula_check": (
+        "diagnostic",
+        "0AMV 论文公式验证：SMA(成交额,10,1)×动量项/1e7×0.835 能否复现 vdat"
+        "（CLOSE 变体逐个试；可对上 ⇒ 可摆脱指南针客户端依赖）",
+    ),
     "score_calibration_study": (
         "study",
         "R24 打分校准：逐腿边际分析（池内命中率/add-one/LOO margin）——"
