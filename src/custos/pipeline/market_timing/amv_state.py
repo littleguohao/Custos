@@ -9,7 +9,7 @@ readings crossing a threshold are recorded but keep the prior locked state.
 """
 
 from __future__ import annotations
-import argparse, json
+import argparse, json, os, sys
 
 
 from custos.core.paths import cn_now, write_json_atomic, MARKET_DIR  # noqa: E402
@@ -46,10 +46,37 @@ def append_observation(day: str, amv: dict):
         if x.get("date") == day and x.get("amv_change_pct") == record["amv_change_pct"]
         # v0.152：去重不再看 source——同值同日从两个入口（人工 + market_timing_input
         # 自动回填）各记一遍，攒出 23 条同值重复（2026-08-30 去重清理过一轮）。
-        # 同日**不同值**仍照常追加（那是真冲突，要留痕可见，不能悄悄合并）。
     ]
     if same:
         return same[-1]
+    # v0.153（owner 拍板「每天只能有一个值」）：同日**不同值** = 纠错——
+    # 旧记录标 superseded 留痕（事实台账不静默改写，作废标记即审计轨迹），
+    # 新值照常追加；读侧（regime 构建）本就「后写覆盖先写」，作废标记防误读。
+    conflicted = [
+        x
+        for x in existing
+        if x.get("date") == day
+        and x.get("amv_change_pct") != record["amv_change_pct"]
+        and not x.get("superseded")
+    ]
+    if conflicted:
+        for x in conflicted:
+            x["superseded"] = True
+            x["superseded_reason"] = (
+                f"同日不同值纠错：{x.get('amv_change_pct')} 被 {record['amv_change_pct']} 覆盖"
+            )
+            x["superseded_at"] = record["recorded_at"]
+        tmp = LEDGER.with_suffix(".jsonl.tmp")
+        tmp.write_text(
+            "\n".join(json.dumps(x, ensure_ascii=False) for x in existing) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(tmp, LEDGER)
+        print(
+            f"[WARN] 0AMV {day} 纠错：旧值 {[x.get('amv_change_pct') for x in conflicted]}"
+            f" → 新值 {record['amv_change_pct']}（旧记录已标 superseded 留痕）",
+            file=sys.stderr,
+        )
     LEDGER.parent.mkdir(parents=True, exist_ok=True)
     with LEDGER.open("a", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")

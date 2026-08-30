@@ -2561,6 +2561,7 @@ def _amv_ledger_records(
             pct = r.get("amv_change_pct")
             if (
                 r.get("quality") == "confirmed"
+                and not r.get("superseded")  # v0.153：被纠错作废的记录不读
                 and pct is not None
                 and len(d) == 10
                 and d >= since

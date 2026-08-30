@@ -97,21 +97,30 @@ class TestAppendDedupe:
     def test_same_value_cross_source_not_duplicated(self, env):
         amv_state.append_observation(
             "2026-08-05",
-            {"amv_change_pct": 3.87, "quality": "confirmed", "source": "user_manual_input"},
+            {
+                "amv_change_pct": 3.87,
+                "quality": "confirmed",
+                "source": "user_manual_input",
+            },
         )
         amv_state.append_observation(
             "2026-08-05",
-            {"amv_change_pct": 3.87, "quality": "confirmed", "source": "market_timing_input"},
+            {
+                "amv_change_pct": 3.87,
+                "quality": "confirmed",
+                "source": "market_timing_input",
+            },
         )
         lines = [
             json.loads(l)
-            for l in (env / "0amv_observations.jsonl").read_text().splitlines()
+            for l in (env / "0amv_observations.jsonl").read_text(encoding="utf-8").splitlines()
             if l.strip()
         ]
         assert len(lines) == 1, "同值同日跨来源不得重复记账"
 
-    def test_same_day_different_value_still_appended(self, env):
-        """同日不同值 = 真冲突，照常追加留痕（不能悄悄合并）。"""
+    def test_same_day_different_value_supersedes(self, env):
+        """v0.153：同日不同值 = 纠错——旧记录标 superseded 留痕，新值追加；
+        事实台账每天只有一个有效值。"""
         amv_state.append_observation(
             "2026-08-05", {"amv_change_pct": 3.87, "source": "user_manual_input"}
         )
@@ -120,7 +129,46 @@ class TestAppendDedupe:
         )
         lines = [
             json.loads(l)
-            for l in (env / "0amv_observations.jsonl").read_text().splitlines()
+            for l in (env / "0amv_observations.jsonl").read_text(encoding="utf-8").splitlines()
             if l.strip()
         ]
-        assert len(lines) == 2, "同日不同值的冲突必须留痕"
+        assert len(lines) == 2, "纠错留痕：旧记录不删（标作废），新记录追加"
+        assert (
+            lines[0]["superseded"] is True and "纠错" in lines[0]["superseded_reason"]
+        )
+        assert "superseded" not in lines[1] and lines[1]["amv_change_pct"] == 4.10
+
+    def test_superseded_records_not_read_by_regime(self, env, monkeypatch):
+        """v0.153：作废记录不进 regime——读侧（backtest 台账读取）跳过 superseded。"""
+        from custos.research import backtest_factors as bf
+
+        ledger = env / "0amv_observations.jsonl"
+        ledger.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "date": "2026-08-05",
+                            "amv_change_pct": 3.87,
+                            "quality": "confirmed",
+                            "recorded_at": "t1",
+                            "superseded": True,
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "date": "2026-08-05",
+                            "amv_change_pct": 4.10,
+                            "quality": "confirmed",
+                            "recorded_at": "t2",
+                        }
+                    ),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        recs = bf._amv_ledger_records("2026-01-01", None, ledger)
+        assert recs == [{"date": "2026-08-05", "change_pct": 4.10}], (
+            "作废旧值不得进 regime"
+        )
