@@ -58,10 +58,10 @@ def load_ledger(ledger_path: Path) -> list[dict[str, Any]]:
     return out
 
 
-# vdat 实际序列起点是 1993-01-03（series_start 元数据），但 owner 拍板的台账口径是
-# 「2000-01-04 至今」（验收：回填后 6430+ 条且 2000-01-04 起连续）——1993-1999 段
-# （约 1735 条）**刻意不填**，若要扩史改此常量即可。
-BACKFILL_SINCE = "2000-01-04"
+# vdat 实际序列起点是 1993-01-03（series_start 元数据，首日记录 1993-01-04）。
+# v0.150 按 owner 第一版口径只填 2000-01-04 起；v0.151 owner 拍板「全历史都补进来」
+# ⇒ 起点放到 1993-01-01（早于序列起点即可，解析层 since 过滤 + 条目层 d>=常量双保险）。
+BACKFILL_SINCE = "1993-01-01"
 
 
 def vdat_backfill_entries(
@@ -124,9 +124,11 @@ def backfill(
     }
     if dry_run or not added:
         return stats
-    # 数据手术：先备份再原子写（temp + os.replace）
+    # 数据手术：先备份再原子写（temp + os.replace）。
+    # 备份名带时分秒：同日多次回填不互相覆盖（v0.151 前曾同日覆盖过一次，教训）
     backup = ledger_path.with_suffix(
         ledger_path.suffix + f".bak_{now_iso[:10].replace('-', '')}"
+        f"_{now_iso[11:19].replace(':', '')}"
     )
     shutil.copy2(ledger_path, backup)
     tmp = ledger_path.with_suffix(ledger_path.suffix + ".tmp")
