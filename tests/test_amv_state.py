@@ -88,3 +88,39 @@ class TestMissingValue:
         rec = amv_state.compute("2026-07-02")
         assert rec["effective_state"] == "空头"
         assert "缺值" in rec["transition_reason"]
+
+
+class TestAppendDedupe:
+    """v0.152：同值同日跨来源去重——人工输入与 market_timing_input 自动回填
+    对同一天同一数值只记一条（2026-08-30 清理过 23 条同值重复）。"""
+
+    def test_same_value_cross_source_not_duplicated(self, env):
+        amv_state.append_observation(
+            "2026-08-05",
+            {"amv_change_pct": 3.87, "quality": "confirmed", "source": "user_manual_input"},
+        )
+        amv_state.append_observation(
+            "2026-08-05",
+            {"amv_change_pct": 3.87, "quality": "confirmed", "source": "market_timing_input"},
+        )
+        lines = [
+            json.loads(l)
+            for l in (env / "0amv_observations.jsonl").read_text().splitlines()
+            if l.strip()
+        ]
+        assert len(lines) == 1, "同值同日跨来源不得重复记账"
+
+    def test_same_day_different_value_still_appended(self, env):
+        """同日不同值 = 真冲突，照常追加留痕（不能悄悄合并）。"""
+        amv_state.append_observation(
+            "2026-08-05", {"amv_change_pct": 3.87, "source": "user_manual_input"}
+        )
+        amv_state.append_observation(
+            "2026-08-05", {"amv_change_pct": 4.10, "source": "market_timing_input"}
+        )
+        lines = [
+            json.loads(l)
+            for l in (env / "0amv_observations.jsonl").read_text().splitlines()
+            if l.strip()
+        ]
+        assert len(lines) == 2, "同日不同值的冲突必须留痕"

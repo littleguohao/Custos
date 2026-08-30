@@ -43,9 +43,10 @@ def append_observation(day: str, amv: dict):
     same = [
         x
         for x in existing
-        if x.get("date") == day
-        and x.get("amv_change_pct") == record["amv_change_pct"]
-        and x.get("source") == record["source"]
+        if x.get("date") == day and x.get("amv_change_pct") == record["amv_change_pct"]
+        # v0.152：去重不再看 source——同值同日从两个入口（人工 + market_timing_input
+        # 自动回填）各记一遍，攒出 23 条同值重复（2026-08-30 去重清理过一轮）。
+        # 同日**不同值**仍照常追加（那是真冲突，要留痕可见，不能悄悄合并）。
     ]
     if same:
         return same[-1]
