@@ -179,21 +179,22 @@ def _move_cand(
 
 
 def test_in_gate_reminder_section():
-    """v0.89（owner）：门内提醒——震荡池内 J≤13 且异动强（底部巨量/放量点火）的票单列一节。"""
+    """v0.160（owner）：门内提醒——震荡池内 J≤13 即入节，**不再强制异动强**；
+    异动判据列降级为展示信息。"""
     pool = {
         "status": "ok",
         "amv_state": "做多",
         "candidates": [
             _move_cand("600100", "甲", bottom=True),
             _move_cand("600101", "乙", ign=True),
-            _move_cand("600102", "丙"),  # 无异动 → 不进提醒
+            _move_cand("600102", "丙"),  # 无异动 —— v0.160 起也进提醒
         ],
     }
     md = ct.render_table(pool, "2026-08-20")
     sec = md.split("## 📌 门内提醒")[1].split("\n## ")[0]
     assert "600100" in sec and "底部巨量" in sec
     assert "600101" in sec and "放量点火" in sec
-    assert "600102" not in sec
+    assert "600102" in sec, "无异动的震荡池 J≤13 票 v0.160 起也要进提醒"
     assert "仅提醒" in sec
 
 
