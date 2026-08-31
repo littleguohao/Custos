@@ -310,6 +310,23 @@ class RealFileTest(unittest.TestCase):
         self.assertNotIn("error", self.out)
 
     def test_series_identified_by_truth(self) -> None:
+        # v0.159：day.vdat 停更（2026-07-17 起）后，真值台账的最近窗口与 vdat
+        # 末尾的重叠 < TRUTH_MIN_PRESENT ⇒ 真值匹配在客观上无法执行——
+        # 此时正确的系统行为是 fallback 并标 unverified（sync 侧据此不写
+        # confirmed），而不是假装验证通过。重叠恢复（指南针恢复更新）后回到
+        # truth_match 断言。
+        truth = compass_amv._load_truth()
+        recs = self.out.get("records") or []
+        vdat_dates = {str(r["date"])[:10] for r in recs}
+        overlap = sum(1 for d, _ in truth if d in vdat_dates)
+        if overlap < compass_amv.TRUTH_MIN_PRESENT:
+            self.assertTrue(
+                self.out["identification"].startswith("fallback")
+                and self.out.get("quality") != "verified",
+                f"重叠不足（{overlap}<{compass_amv.TRUTH_MIN_PRESENT}）时必须如实 fallback："
+                f"{self.out['identification']}",
+            )
+            return
         self.assertTrue(
             self.out["identification"].startswith("truth_match"),
             self.out["identification"],

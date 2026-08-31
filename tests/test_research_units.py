@@ -127,6 +127,11 @@ class TestNoStaleReferences:
             ):
                 continue
             try:
+                # v0.159：巨型数据产物（研究日志 bt_b1.json 1.7GB、artifacts/logs
+                # 里的数百 MB 回测 JSON）跳过——读它们找引用既无意义又把测试打爆
+                # （MemoryError，2026-08-31 实测峰值 8.8GB）。
+                if p.stat().st_size > 5_000_000:
+                    continue
                 s = p.read_text(encoding="utf-8")
             except (UnicodeDecodeError, OSError):
                 continue
