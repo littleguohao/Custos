@@ -20,16 +20,18 @@
 | **TDX 在线协议** | mootdx Quotes（走公网服务器） | 🚫 `bars`/`quotes` 已标记不可用 |
 | **专项文件下载** | mootdx Affair | 财务数据，640ms 一次性下载 |
 
-⚠️ **TQ 的访问点分散在四处**，不是一个统一入口：
+⚠️ **TQ 的访问点分散在三处**，不是一个统一入口：
 
 ```
 tq_http.py                  4 个薄封装（snapshot / more_info / stock_info / ping）
-concept_tags.py             download_file(down_type=4)
 formula_screen.py           formula_process_mul_xg
 trading_calendar.py         get_trading_dates —— 走 tq_http.call（2026-08-06 已收敛）
 ```
 
-**四条路径现已全部走 `tq_http.call`**（2026-08-06 收敛完 `trading_calendar`）。
+（原第四处 `concept_tags.py` 的 `download_file(down_type=4)` 已随 miscinfo
+概念标签数据源整体删除——v0.157，owner 拍板，无在链消费方。）
+
+**三条路径现已全部走 `tq_http.call`**（2026-08-06 收敛完 `trading_calendar`）。
 收敛前它自己拼 JSON-RPC + `urlopen`，与 `tq_http` 是**同一个服务**
 （两处都硬编码 `http://127.0.0.1:17709/`）却各写一套，于是拿不到：
 
@@ -96,7 +98,21 @@ A 股个股约 5300 只，且不含 BJ。
 | 数据 | `tdxzs3.cfg` **含 881xxx 细分行业**，优先于 `tdxzs.cfg` |
 
 **881xxx 官方细分行业 = 每股恰好一个权威归属**，2026-08-04 实测 5546 只零冲突（f309ac6）。
-这是「板块」列的现役依据；概念标签（多对多）走 TQ miscinfo，是另一回事。
+这是「板块」列的现役依据；概念标签（多对多）曾走 TQ miscinfo，该数据源已删除
+（v0.157，owner 拍板，无在链消费方）。
+
+> **板块归属唯一逻辑（v0.156 记录在案，owner 拍板 2026-08-28）**：
+> 板块归属**全部去掉人工判断，唯一逻辑 = 走势贴合**——持仓/个股与候选板块
+> 指数的 60 日日收益 Pearson 相关、贴合最高者胜；贴合无有效数据（无 K 线 /
+> 重叠不足 20 根）如实「未定」，不猜、无兜底
+> （实现：`theme_tracker_report.resolve_holding_sector`）。
+> 已废弃删除：人工语义主题映射表 `data/sectors/sector_code_map.json`
+> （semantic_tags 唯一来源，v0.142 删文件、v0.156 清掉 enrich_candidates 的
+> `build_stock_theme_map` 匹配链与 registry `theme_mapping` 段）与持仓 owner
+> 指定层 `holding_mainline_overrides.json`（v0.149 已撤）。
+> 历史内容可从 git 考古（删除发生在 v0.142-149 区间）。
+> miscinfo 概念标签数据源已整体删除（v0.157，owner 拍板：无在链消费方）；
+> 候选股「板块」展示列以 881xxx 官方细分行业为准。
 
 ⚠️ 审计 B11 曾把 `881xxx` 细分行业指数判成北交所（前缀 `88` 与 BJ 段重叠）。
 判市场必须用 `code_utils.market_of`，不要自己写前缀规则。
@@ -120,7 +136,7 @@ A 股个股约 5300 只，且不含 BJ。
 统一入口 `tq_http.call(method, params)`，返回 `{"ok", "value", "error"}`，**绝不 raise**。
 进程级预检 `tq_sector.is_tdxw_running()`（实测 76ms）。
 
-### 已接入的 6 个方法
+### 已接入的 5 个方法
 
 | 方法 | 状态 | 入口 | 实测 | 用途 |
 |---|---|---|---|---|
@@ -128,9 +144,12 @@ A 股个股约 5300 只，且不含 BJ。
 | `get_market_snapshot` | ✅ | `tq_http.snapshot(code)` | **80ms** | 持仓/盘中快照。字段直挂 result |
 | `get_stock_info` | ✅ | `tq_http.stock_info(code)` | **80ms** | 股票名称（ST 判定） |
 | `get_more_info` | ✅ | `tq_http.more_info(code)` | **83ms** | 扩展字段。传 `field_list` 实际仍返回全字段 |
-| `download_file(down_type=4)` | ✅ | `concept_tags.py` | **1132ms** | miscinfo 8.1MB / 68161 条，概念主题标签 |
 | `formula_process_mul_xg` | ✅ | `formula_screen.py` | — | 公式批量选股 |
 | `get_trading_dates` | ✅ | `trading_calendar.py` | 交易日历刷新（周五 14:35 cron） | 走 tq_http.call；`--endpoint` 可覆盖 |
+
+（原第 6 个 `download_file(down_type=4)` 随 `concept_tags.py` 在 v0.157 删除：
+miscinfo 概念标签无在链消费方；实测记录 1132ms / 8.1MB / 68161 条留档于
+下方 down_type 表。）
 
 ### ⚠️ 周期串是 `"1d"`，不是 `"day"`
 
@@ -203,7 +222,7 @@ down_type 5（经营分析）/ 6（龙虎榜）的后续探测因此无法区分
 
 | type | 内容 | 风险 | 实测结论 |
 |---|---|---|---|
-| 4 | 综合信息 miscinfo | 🟢 | **已接入**。8.1MB / 68161 条，5529 只 × 多类别（10001 概念标签、10004 主营、10010 亮点） |
+| 4 | 综合信息 miscinfo | 🟢 | 曾接入 `concept_tags.py`（8.1MB / 68161 条，5529 只 × 多类别），**v0.157 已随数据源整体删除**（owner 拍板，无在链消费方） |
 | 3 | 舆情 sentiment | 🟢 | 556KB / 1196 条，**当日实时**，字段 `Issue_date/title/Summary`。**未接入** |
 | 2 | ETF 申赎 PCF | 🟡 | `510300.SH`+`20260720` ErrorId=0 成功但产物**仅 2 字节（空）**；可能需盘前时段 |
 | 1 | 十大股东 | 🔴 | 参数格式苛刻：纯代码→ErrorId=2；`.SH`+字符串年份→ErrorId=3；**`.SH`+整型年份→服务挂死 120s** |

@@ -121,6 +121,64 @@ class TestBackfill:
         assert not list(tmp_path.glob("*.bak_*"))  # 无备份
 
 
+class TestLedgerPerLineTolerance:
+    """v0.156：单行损坏只跳过该行 + stderr WARN（带行号），其余行照常——
+    此前整循环一个 try，一行坏 ⇒ 返回 [] ⇒ 静默回落停更的 vdat 兜底。"""
+
+    def _write_with_bad_line(self, path: Path) -> None:
+        good1 = {
+            "date": "2024-01-02",
+            "amv_change_pct": 5.0,
+            "quality": "confirmed",
+            "recorded_at": "t1",
+        }
+        good2 = {
+            "date": "2024-01-04",
+            "amv_change_pct": -3.0,
+            "quality": "confirmed",
+            "recorded_at": "t2",
+        }
+        path.write_text(
+            json.dumps(good1)
+            + "\n"
+            + '{"date": "2024-01-03", "amv_change_pct":'  # 第 2 行：坏 JSON
+            + "\n"
+            + json.dumps(good2)
+            + "\n",
+            encoding="utf-8",
+        )
+
+    def test_bad_line_skipped_others_kept(self, tmp_path, capsys):
+        ledger = tmp_path / "0amv_observations.jsonl"
+        self._write_with_bad_line(ledger)
+        recs = bf._amv_ledger_records("2024-01-01", None, ledger_path=ledger)
+        assert recs == [
+            {"date": "2024-01-02", "change_pct": 5.0},
+            {"date": "2024-01-04", "change_pct": -3.0},
+        ], "坏行只跳过本行，其余行照常读出"
+        err = capsys.readouterr().err
+        assert "[WARN]" in err and "第 2 行" in err, "WARN 必须带行号可见"
+
+    def test_bad_line_does_not_fall_back_to_vdat(self, tmp_path, monkeypatch, capsys):
+        """台账夹坏行 ⇒ load_amv_regime 仍走台账主源，不回落 vdat 兜底。"""
+        import custos.core.paths as paths
+
+        monkeypatch.setattr(paths, "MARKET_DIR", tmp_path)
+        self._write_with_bad_line(tmp_path / "0amv_observations.jsonl")
+        from custos.datasource.local_tdx import compass_amv
+
+        def _boom(since="2015-01-01", root=None):
+            raise AssertionError("台账有好行就不得回落 vdat 兜底")
+
+        monkeypatch.setattr(compass_amv, "parse_amv_daily", _boom)
+        reg = bf.load_amv_regime(since="2024-01-01")
+        assert reg == {"2024-01-02": "做多", "2024-01-04": "空头"}
+
+    def test_unreadable_file_still_falls_back(self, tmp_path):
+        """文件整体不存在仍返回 []（走既有兜底）——逐行容错不改变这一路径。"""
+        assert bf._amv_ledger_records("2024-01-01", None, tmp_path / "nope.jsonl") == []
+
+
 class TestLoadAmvRegimeSingleSource:
     def test_ledger_full_read(self, monkeypatch):
         """台账全量 confirmed → 状态机重放（不再依赖 vdat）。"""

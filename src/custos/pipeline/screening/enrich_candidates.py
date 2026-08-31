@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import argparse
 import glob
-import inspect
 import json
 import re
 import sys
@@ -125,7 +124,6 @@ from custos.core.paths import (
     SECTORS_DIR,
     TRADES_DIR,
 )  # noqa: E402
-from custos.datasource.local_tdx import concept_tags  # noqa: E402
 from custos.pipeline.screening import signal_labels  # noqa: E402
 from custos.datasource.local_tdx import local_tdx_data  # noqa: E402
 from custos.core.factors import s_shape as s_shape_mod  # noqa: E402
@@ -143,7 +141,9 @@ from custos.core.indicators import dmi_arrays  # noqa: E402  DMI/ADX 唯一实�
 from custos.core.contracts import require  # noqa: E402
 
 SCREENING_DIR = DATA / "screening"
-SECTOR_CODE_MAP = SECTORS_DIR / "sector_code_map.json"
+# v0.156（owner 拍板 2026-08-28）：人工主题映射表 sector_code_map.json 已废弃删除，
+# 概念标签 semantic_tags 匹配链（build_stock_theme_map）随之整段移除——
+# 板块归属唯一逻辑=走势贴合（theme_tracker_report），候选侧不再有主题族归属。
 INDEX_CODE = "999999"  # 上证指数 vipdoc 代码（reader.daily 里 000001 是平安银行）
 
 # 沪深 A 股代码前缀白名单（与 formula_screen/manual_pools 同一份规则）。
@@ -252,10 +252,6 @@ __all__ = [
     "REVERSAL_CHANGE_MIN_PCT",
 ]  # 阈值转出声明（测试钉这两个值）
 
-# 概念标签命中主题所需的最小标签数。默认 1＝历史行为（命中1个语义标签即归入该主题）；
-# 提高到 2+ 可要求更强证据、降低子串过度匹配，可经 registry.theme_mapping.min_match 覆盖。
-THEME_MIN_MATCH = 1
-
 # --- B1/CZ 策略对齐参数 -------------------------------------------------
 # 以下阈值全部标注"待回测参数"：策略原文（B1 §四、CZ §九/§14.6/§十六）
 # 要求阈值可配置、实际值随候选落盘，不得静默使用；完成样本回测前不得
@@ -358,142 +354,6 @@ def build_stock_industry_map() -> dict[str, str]:
     except Exception:  # noqa: BLE001
         return {}
     return out
-
-
-def _match_theme_tags(stock_tags: list[str], semantic_tags: list[str]) -> list[str]:
-    """个股概念标签与主题语义标签的命中列表（双向子串，长的单向≥3字）。"""
-    matched = []
-    for st in semantic_tags:
-        for c in stock_tags:
-            if st == c or st in c or (len(c) >= 3 and c in st):
-                matched.append(st)
-                break
-    return matched
-
-
-def _theme_map_via_concept_tags(
-    themes: list, min_match: int, codes: Optional[set]
-) -> Optional[tuple[dict[str, dict], bool]]:
-    """概念标签路径建图：miscinfo 概念标签（每股官方概念）匹配各主题 semantic_tags。
-
-    返回 None = 概念路径不可用（调用方回退 880 反查）。
-    """
-    # 标签仍走 load_tags():它是既有的注入点,改成只调 load_tags_meta 会让所有
-    # monkeypatch(load_tags) 的测试静默走到 fallback 分支。元数据另取一次,
-    # 拿不到就当"无元数据"处理(不告警),行为与改动前一致。
-    tags_map = concept_tags.load_tags()
-    tags_meta = (
-        concept_tags.load_tags_meta()[1]
-        if hasattr(concept_tags, "load_tags_meta")
-        else {}
-    )
-    if tags_meta.get("stale"):
-        # 概念标签退化慢,陈旧仍可用,但必须留痕:不能让"上周的标签"以当日身份
-        # 进入板块聚合(相位/资金流),否则会指向一条已经冷掉的主线(审计 C6)。
-        print(
-            f"[WARN] 概念标签陈旧(date={tags_meta.get('date')}, "
-            f"requested={tags_meta.get('requested_date')})：板块聚合据此生成,"
-            f"仅作情境参考",
-            file=sys.stderr,
-        )
-
-    def _scan(items) -> dict[str, dict]:
-        out: dict[str, dict] = {}
-        for code6, stock_tags in items:
-            best_matched: list[str] = []
-            best_theme: dict | None = None
-            for t in themes:
-                matched = _match_theme_tags(stock_tags, t.get("semantic_tags") or [])
-                if len(matched) > len(best_matched):
-                    best_matched, best_theme = matched, t
-            if best_theme and len(best_matched) >= min_match:
-                out[code6] = {
-                    "theme_id": best_theme.get("theme_id", ""),
-                    "sector": best_theme.get("theme_name", ""),
-                    "matched_tags": best_matched,
-                    "match_count": len(best_matched),
-                    "sector_source": "concept_tags",
-                }
-        return out
-
-    if not tags_map:
-        return None
-    if codes is None:
-        stock_theme: dict | None = _scan(tags_map.items())
-    else:
-        stock_theme = _scan((c, tags_map[c]) for c in codes if c in tags_map)
-    if stock_theme:
-        return stock_theme, True
-    if codes is not None and _scan(tags_map.items()):
-        # 这批候选一个都没匹配上，但概念路径本身是可用的（全市场能建出图）→
-        # 不得偷偷回退 880 反查（那条路只在"概念标签不可用"时才走，错配已知）。
-        # 全市场重扫只在这个退化分支发生，正常路径不付这个代价。
-        return {}, True
-    return None
-
-
-def _theme_map_via_tq_880(themes: list) -> tuple[dict[str, dict], bool]:
-    """880 反查路径（fallback）：tq_sector_map 成分股反查主题（v1，已知存在错配）。"""
-    sector_map = latest_tq_sector_map()
-    if not sector_map.get("sectors"):
-        return {}, False
-
-    # 880 板块代码 → 主题（primary 优先于 candidate，按注册顺序取先命中者）
-    code_to_theme: dict[str, dict] = {}
-    for t in themes:
-        theme = {"theme_id": t.get("theme_id", ""), "sector": t.get("theme_name", "")}
-        for c in t.get("candidate_sector_codes") or []:
-            code_to_theme.setdefault(str(c).upper(), theme)
-    for t in themes:
-        theme = {"theme_id": t.get("theme_id", ""), "sector": t.get("theme_name", "")}
-        for c in t.get("primary_sector_codes") or []:
-            code_to_theme[str(c).upper()] = theme
-
-    stock_theme: dict[str, dict] = {}
-    for s in sector_map["sectors"]:
-        theme_hit: dict | None = code_to_theme.get(str(s.get("code", "")).upper())
-        if not theme_hit:
-            continue
-        for raw in s.get("stocks") or []:
-            code6 = str(raw).split(".")[0].zfill(6)
-            stock_theme.setdefault(
-                code6,
-                {
-                    **theme_hit,
-                    "matched_code": s.get("code", ""),
-                    "sector_source": "tq_880_fallback",
-                },
-            )
-    return stock_theme, True
-
-
-def build_stock_theme_map(
-    min_match: int = THEME_MIN_MATCH, codes: Optional[set] = None
-) -> tuple[dict[str, dict], bool]:
-    """股 → 主题方向（theme_id/sector 名）。
-
-    优先用 miscinfo 概念标签（concept_tags，每股官方概念）匹配
-    sector_code_map.json 各主题的 semantic_tags——准确度远高于 880 反查；
-    标签文件缺失时回退 tq_sector_map 成分股反查（v1，已知存在错配）。
-    min_match：概念路径下命中主题所需的最小语义标签数（默认 1；提高可降低过度匹配）。
-    codes：只为这批代码建图（通常几十只候选）。默认 None＝全市场（向后兼容）。
-      审计：调用方只用 `stock_theme.get(code6)` 查几十只票，却让「全市场 5000 股 ×
-      主题数 × 语义标签 × 个股标签」四层子串匹配跑满——把候选集传进来即可省掉两个量级。
-    返回 ({code6: {"theme_id","sector",...}}, map_available)。
-    """
-    try:
-        min_match = max(1, int(min_match))
-    except (TypeError, ValueError):
-        min_match = THEME_MIN_MATCH
-    code_map = _load_json(SECTOR_CODE_MAP, {})
-    themes = code_map.get("themes") or []
-    if not themes:
-        return {}, False
-
-    via_tags = _theme_map_via_concept_tags(themes, min_match, codes)
-    if via_tags is not None:
-        return via_tags
-    return _theme_map_via_tq_880(themes)
 
 
 def _close_ret_pct(df, n: int) -> Optional[float]:
@@ -1101,41 +961,13 @@ def _load_sector_phase_resolver(sector_phase_cfg: Optional[dict]) -> Any:
     return sp_resolve
 
 
-def _load_theme_map(merged: dict, result: dict, theme_min_match: Optional[int]) -> dict:
-    """本批候选的主题图；不可用时就地把 result 降级 partial 并留痕。"""
-    # 只为本批候选建主题图（全市场四层子串匹配纯浪费，见 build_stock_theme_map）。
-    # codes 关键字用 signature 探测后再传：既有测试把 build_stock_theme_map
-    # monkeypatch 成 `lambda min_match=None: ...`，硬传会 TypeError 打挂整段。
-    _bstm_kwargs: dict[str, Any] = {
-        "min_match": theme_min_match if theme_min_match is not None else THEME_MIN_MATCH
-    }
-    try:
-        if "codes" in inspect.signature(build_stock_theme_map).parameters:
-            _bstm_kwargs["codes"] = set(merged)
-    except (TypeError, ValueError):  # 无法取签名（C 实现/内建）→ 退回全市场
-        pass
-    stock_theme, theme_map_available = build_stock_theme_map(**_bstm_kwargs)
-    if not theme_map_available:
-        result["status"] = "partial"
-        result["degraded_reason"] = _append_reason(
-            result["degraded_reason"], "sector_map_unavailable"
-        )
-    return stock_theme
-
-
 def _load_enrich_context(
     date: str,
-    merged: dict,
-    result: dict,
-    theme_min_match: Optional[int],
     fund_flow_days: int,
     financials_cfg: Optional[dict],
     sector_phase_cfg: Optional[dict],
 ) -> dict[str, Any]:
-    """批次级上下文：风险名单/持仓/资金流/财务/板块相位/主题图/行业图。
-
-    主题图不可用时把 result 降级 partial 并留痕（就地改 result）。
-    """
+    """批次级上下文：风险名单/持仓/资金流/财务/板块相位/行业图。"""
     ctx: dict[str, Any] = {
         "risk_high": load_risk_high_codes(date),
         "holding": load_holding_codes(),
@@ -1146,8 +978,7 @@ def _load_enrich_context(
     ctx["fin_df"] = fin_df
     ctx["fin_colmap"] = fin_colmap
     ctx["sp_resolve"] = _load_sector_phase_resolver(sector_phase_cfg)
-    ctx["stock_theme"] = _load_theme_map(merged, result, theme_min_match)
-    # 每股官方细分行业（881xxx，展示层「板块」列；与主题族聚合层并存，取不到全"未知"）
+    # 每股官方细分行业（881xxx，展示层「板块」列；取不到全"未知"）
     ctx["stock_industry"] = build_stock_industry_map()
     return ctx
 
@@ -1298,16 +1129,15 @@ def _apply_j_gate(cand: dict, result: dict, cfg: dict) -> bool:
 
 
 def _apply_post_metrics(cand: dict, code6: str, df, ctx: dict) -> None:
-    """主题/行业/资金流/板块相位/平台回踩/财务 充实字段（就地写入 cand）。"""
-    theme = ctx["stock_theme"].get(code6)
-    if theme:
-        cand["theme_id"] = theme["theme_id"]
-        cand["sector"] = theme["sector"]
-        cand["sector_source"] = theme.get("sector_source", "")
-    else:
-        cand["theme_id"] = ""
-        cand["sector"] = "未知"
-        cand["sector_source"] = ""
+    """行业/资金流/板块相位/平台回踩/财务 充实字段（就地写入 cand）。
+
+    v0.156（owner 拍板）：主题族归属（theme_id/sector/sector_source）随人工主题映射表
+    一并废弃——契约键保留但恒为空/「未知」，板块归属唯一逻辑=走势贴合
+    （theme_tracker_report）；候选的板块展示以 881 官方细分行业（industry 列）为准。
+    """
+    cand["theme_id"] = ""
+    cand["sector"] = "未知"
+    cand["sector_source"] = ""
     cand["industry"] = ctx["stock_industry"].get(code6, "未知")
     cand["fund_flow"] = fund_flow_of(code6, cand["sector"], ctx["fund_flow"])
     sp_resolve = ctx["sp_resolve"]
@@ -1336,7 +1166,6 @@ def enrich(
     ohlcv_loader=None,
     index_loader=None,
     universe_cfg: Optional[dict] = None,
-    theme_min_match: Optional[int] = None,
     fund_flow_days: int = 1,
     financials_cfg: Optional[dict] = None,
     sector_phase_cfg: Optional[dict] = None,
@@ -1361,9 +1190,6 @@ def enrich(
     merged = _merge_hits(hits_data)
     ctx = _load_enrich_context(
         date,
-        merged,
-        result,
-        theme_min_match,
         fund_flow_days,
         financials_cfg,
         sector_phase_cfg,
@@ -1440,7 +1266,6 @@ def main(argv: Optional[list] = None) -> int:
     result = enrich(
         args.date,
         universe_cfg=registry.get("universe") or {},
-        theme_min_match=(registry.get("theme_mapping") or {}).get("min_match"),
         fund_flow_days=int((registry.get("fund_flow") or {}).get("cumulative_days", 1)),
         financials_cfg=registry.get("financials") or {},
         sector_phase_cfg=registry.get("sector_phase") or {},

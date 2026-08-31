@@ -325,7 +325,6 @@ def test_enrich_financials_autotmap_does_not_clobber_candidates(monkeypatch):
         "compute_metrics",
         lambda df, idx, code=None: {"close": 10.0, "daily_j": 5.0},
     )
-    monkeypatch.setattr(ec, "build_stock_theme_map", lambda min_match=None: ({}, True))
 
     hits = {
         "date": date,

@@ -590,7 +590,6 @@ def main(argv=None) -> int:
     holdings = raw if isinstance(raw, list) else raw.get("holdings", [])
 
     holding_quotes = []
-    skipped_non_a = 0
     for h in holdings:
         code = str(h.get("代码", h.get("code", ""))).zfill(6)
         name = h.get("名称", h.get("name", ""))
@@ -598,7 +597,6 @@ def main(argv=None) -> int:
         # 误判为深市个股（深市 002158 是汉钟精机），取到张冠李戴的价格。
         # 台账/持仓快照保留全账户记录，仅 A 股行情采集跳过。
         if not is_a_share_position(h):
-            skipped_non_a += 1
             print(
                 f"[INFO] 跳过非A股持仓 {code} {name}（A股取价链不覆盖）",
                 file=sys.stderr,

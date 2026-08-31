@@ -7,15 +7,16 @@
   C3 get_snapshot 缺字段回落 0.0  → 无有效价返回空快照
   C4 东财分页把限流空响应当翻完了  → FetchIncomplete + 主动限速
   C5 指南针 0AMV 选错链却报 ok    → latest_amv 透出 identification/quality
-  C6 概念标签缓存不校验 mtime      → 过期文件不得盖今日日期
   C7 空 DataFrame 三义             → TDX_ROOT 配错必须炸，缺文件带 missing_reason
+
+（C6 概念标签缓存不校验 mtime 的测试随数据源整体删除——v0.157 owner 拍板，
+concept_tags/miscinfo 无在链消费方，模块已整删。）
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import json
-import os
 import struct
 import time
 from pathlib import Path
@@ -24,7 +25,6 @@ import pandas as pd
 import pytest
 
 from custos.datasource.local_tdx import compass_amv
-from custos.datasource.local_tdx import concept_tags
 from custos.datasource.local_tdx import fetch_market_cap as mc
 from custos.datasource.local_tdx import fetch_pit_financials as pit
 from custos.datasource.local_tdx import local_tdx_data as ltd
@@ -433,99 +433,6 @@ class TestLatestAmvQuality:
     def test_error_path_has_no_false_quality(self, tmp_path):
         out = compass_amv.latest_amv(root=str(tmp_path / "nope"))
         assert out["ok"] is False and out.get("quality") in (None, "unavailable")
-
-
-# ===================== C6 概念标签缓存不校验 mtime =====================
-
-
-@pytest.fixture()
-def concept_env(tmp_path, monkeypatch):
-    data_dir = tmp_path / "PYPlugins" / "data"
-    data_dir.mkdir(parents=True)
-    src = data_dir / "miscinfo.json"
-    src.write_text(
-        json.dumps(
-            [{"code": "600150", "xq": "船舶制造,军工", "id": "10001"}],
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-    out = tmp_path / "stock_concept_tags.json"
-    monkeypatch.setattr(concept_tags, "TDX_DATA_DIR", data_dir)
-    monkeypatch.setattr(concept_tags, "OUT_PATH", out)
-    return {"src": src, "out": out}
-
-
-def _set_mtime(path: Path, days_ago: float) -> None:
-    ts = time.time() - days_ago * 86400
-    os.utime(path, (ts, ts))
-
-
-def _ok_call(*_a, **_k):
-    return {"ok": True, "value": None}
-
-
-class TestConceptTagsStaleCache:
-    """C6: TQ 返回 ok 但文件没更新（异步落盘/上周残留）→ 过期标签被盖今日日期。"""
-
-    def test_stale_file_flagged_and_not_stamped_today(self, concept_env):
-        _set_mtime(concept_env["src"], days_ago=7)
-        today = concept_tags.cn_now().date().isoformat()
-        r = concept_tags.refresh(today, call_fn=_ok_call)
-        assert r["status"] == "stale"
-        assert "stale" in r["degraded_reason"]
-        payload = json.loads(concept_env["out"].read_text(encoding="utf-8"))
-        assert payload["date"] != today  # 绝不给过期标签盖今日日期
-        assert payload.get("stale") is True
-        assert payload.get("requested_date") == today
-
-    def test_rewritten_file_is_ok(self, concept_env):
-        _set_mtime(concept_env["src"], days_ago=7)
-        today = concept_tags.cn_now().date().isoformat()
-
-        def rewriting_call(*_a, **_k):
-            concept_env["src"].write_text(
-                json.dumps(
-                    [{"code": "600150", "xq": "船舶制造,军工", "id": "10001"}],
-                    ensure_ascii=False,
-                ),
-                encoding="utf-8",
-            )
-            return {"ok": True, "value": None}
-
-        r = concept_tags.refresh(today, call_fn=rewriting_call)
-        assert r["status"] == "ok" and r["stock_count"] == 1
-        payload = json.loads(concept_env["out"].read_text(encoding="utf-8"))
-        assert payload["date"] == today and not payload.get("stale")
-
-    def test_same_day_file_without_rewrite_is_ok(self, concept_env):
-        """当日已下过、TQ 不重复写盘：mtime 未变但就是当天的，算新鲜。"""
-        _set_mtime(concept_env["src"], days_ago=0)
-        today = concept_tags.cn_now().date().isoformat()
-        r = concept_tags.refresh(today, call_fn=_ok_call)
-        assert r["status"] == "ok"
-
-    def test_missing_file_still_unavailable(self, concept_env):
-        concept_env["src"].unlink()
-        r = concept_tags.refresh("2026-07-21", call_fn=_ok_call)
-        assert (
-            r["status"] == "unavailable" and "miscinfo_missing" in r["degraded_reason"]
-        )
-
-    def test_cli_returns_nonzero_when_degraded(self, concept_env, monkeypatch, capsys):
-        _set_mtime(concept_env["src"], days_ago=7)
-        today = concept_tags.cn_now().date().isoformat()
-        monkeypatch.setattr(
-            concept_tags,
-            "refresh",
-            lambda d, **_: {
-                "date": d,
-                "status": "stale",
-                "degraded_reason": "miscinfo_stale:x",
-            },
-        )
-        monkeypatch.setattr("sys.argv", ["concept_tags.py", "--date", today])
-        assert concept_tags.main() == 1
 
 
 # ===================== C7 空 DataFrame 三义 =====================

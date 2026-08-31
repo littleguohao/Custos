@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import csv
 import json
+import pathlib
 
 import pytest
 
@@ -325,3 +326,41 @@ def test_cli_help_renders(capsys):
         sdr.main(["--help"])
     assert exc.value.code == 0
     assert "usage" in capsys.readouterr().out.lower()
+
+
+class TestWiredIntoDailyChain:
+    """采集器必须真的每天跑 —— 否则「主路径」还是停在设计上（owner 拍板接进每日链）。
+
+    接在 17:00 链（`run_1700`）：final_close_review（§4 板块榜）是它的唯一读者，
+    是 17:00 链的硬失败 stage。⚠️ 17:00 时点板块指数缓存只到昨日（唯一刷新方
+    是 18:00 链），所以本链必须**先增量刷板块指数再跑采集器**，否则 build_day
+    恒返回 None、产物永不落盘 —— 只接采集器不接刷新等于没接。
+    """
+
+    SRC = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "src"
+        / "custos"
+        / "pipeline"
+        / "run_1700.py"
+    ).read_text(encoding="utf-8")
+
+    def test_stage_present(self):
+        assert "sector_daily_rank.py" in self.SRC, "17:00 链未接入板块榜采集器"
+        assert '"sector_daily_rank"' in self.SRC
+
+    def test_index_refresh_wired_as_prerequisite(self):
+        """采集器读 data/market/sector_index/*.csv —— 同链必须先有增量刷新 stage。"""
+        i = self.SRC.index('"sector_daily_rank"')
+        seg = self.SRC[max(0, i - 1500) : i]
+        assert '"refresh_sector_index"' in seg, "缺前置板块指数刷新，采集器恒无当日数据"
+        assert '"--incremental"' in seg, (
+            "前置刷新必须是增量模式（全量会撞 600s stage 超时）"
+        )
+
+    def test_not_blocking(self):
+        """best-effort：榜单挂了只告警，不该让整条盘后链失败（复盘还有缓存自算兜底）。"""
+        i = self.SRC.index('"sector_daily_rank"')
+        seg = self.SRC[i : i + 300]
+        assert "不中断" in seg
+        assert "return 1" not in seg, "采集器失败不该中断盘后链"

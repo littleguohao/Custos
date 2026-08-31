@@ -5,12 +5,14 @@ Phase 1 collector (08:50, pre-open):
 - auto: local TongDaXin vipdoc daily files for key index trends
 - auto: local vipdoc 880-series for market breadth / sentiment / turnover
   (previous trading day's EOD — no intraday data exists at 08:50)
-- manual placeholders: macro policy, 0AMV, overseas, theme
+- manual placeholders: macro policy, 0AMV, overseas
 
 The old TDX TQ snapshot path was removed: tqcenter is deprecated and the
 TqSession stub raised unconditionally, leaving breadth/sentiment/turnover
-permanently missing. Intraday index snapshots are no longer collected here;
-the intraday field is annotated as pending intraday/post-close flows.
+permanently missing. Intraday index snapshots are not collected here (none
+exist at 08:50); the 14:45 chain's collect_intraday_snapshot backfills
+``a_share_indices[*].intraday`` — and this collector applies the same-day
+snapshot itself when rerun after 14:45.
 
 Usage:
 python market_timing_collector.py --date 2026-07-09 --amv 1.2
@@ -19,6 +21,7 @@ python market_timing_collector.py --date 2026-07-09 --amv 1.2
 from __future__ import annotations
 
 import argparse
+import json
 import math
 from pathlib import Path
 from typing import Any
@@ -30,6 +33,9 @@ from custos.core.indicators import pct_change as pct  # noqa: E402
 from custos.core.runtime_guards import previous_confirmed_trading_day  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
 from custos.datasource.breadth_basis import breadth_counts_real  # noqa: E402
+from custos.datasource.collect.collect_intraday_snapshot import (  # noqa: E402
+    apply_intraday_to_indices,
+)
 
 OUT_DIR = MARKET_DIR
 
@@ -186,7 +192,7 @@ def derive_market_fields(target_date: str) -> tuple[dict, dict, dict, dict]:
     quality: dict[str, Any] = {
         "notes": [
             "market_breadth/sentiment/turnover 来自本地 vipdoc 880 系列前一交易日 EOD 数据；08:50 盘前无当日盘中数据。",
-            "TQ 快照路径已移除（tqcenter 废弃）；指数盘中快照待盘中/盘后流程填充。",
+            "指数盘中涨跌幅由 14:45 链 collect_intraday_snapshot 回填 a_share_indices[*].intraday。",
         ],
         "sources": ["vipdoc_880_series"],
         "expected_data_date": expected,
@@ -202,6 +208,8 @@ def derive_market_fields(target_date: str) -> tuple[dict, dict, dict, dict]:
         "source": None,
         "quality": "missing",
         "as_of": None,
+        # 自算桶数据日（机器可读；as_of 是 880005 官方涨家数的数据日，两者可能不同日）
+        "vipdoc_as_of": None,
     }
     try:
         rows = _vipdoc_rows(BREADTH_CODE)
@@ -224,6 +232,7 @@ def derive_market_fields(target_date: str) -> tuple[dict, dict, dict, dict]:
                         "up_down_ratio_status": counts["up_down_ratio_status"],
                         "total_stocks": counts["total_stocks"],
                         "total_stocks_source": counts["total_stocks_source"],
+                        "vipdoc_as_of": counts["vipdoc_as_of"],
                         "source": "vipdoc_880005",
                         "as_of": as_of,
                         "quality": _freshness(
@@ -364,7 +373,8 @@ def main():
         "market_breadth": breadth,
         "sentiment": sentiment,
         "turnover": turnover,
-        "theme": {"main_themes": [], "theme_clarity": "", "theme_summary": ""},
+        # theme 节已删：主线口径随 TODO #26 撤下，theme_clarity 恒空串、
+        # 全仓零读者（main_themes 无读者），scorer 的 theme 打分腿同步删除。
         "data_quality": quality,
     }
 
@@ -372,9 +382,23 @@ def main():
         item = trend(read_day(meta["prefix"], meta["code"]))
         item["intraday"] = {
             "available": False,
-            "note": "08:50 盘前采集无当日盘中快照；TQ 快照路径已移除，盘中字段待盘中/盘后流程填充。",
+            # 08:50 盘前采集时盘中未发生，available=False 是正常状态而非缺数；
+            # 14:45 链 collect_intraday_snapshot 落盘后由它回填真实盘中涨跌幅。
+            "note": "盘前采集无盘中数据；14:45 链 collect_intraday_snapshot 回填。",
         }
         data["a_share_indices"][name] = item
+
+    # collector 在当日 14:45 后重跑（--refresh-market / 文件缺失重建）时，
+    # 同日快照已存在 ⇒ 直接回填真实盘中值，不把已接通的数据退回占位。
+    snapshot_path = MARKET_DIR / f"{args.date}_intraday_snapshot.json"
+    if snapshot_path.exists():
+        try:
+            snap = json.loads(snapshot_path.read_text(encoding="utf-8"))
+            n = apply_intraday_to_indices(data["a_share_indices"], snap)
+            if n:
+                print(f"[OK] 同日盘中快照回填 a_share_indices.intraday（{n} 只指数）")
+        except (OSError, ValueError) as e:
+            print(f"[WARN] 盘中快照读取失败，intraday 保持占位：{e!r}")
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     out = (

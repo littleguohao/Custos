@@ -110,8 +110,8 @@ def _holding_keywords(pmap: dict, sectors: list, sector_mapping: list) -> dict:
     """§2 兜底匹配的持仓关键词 → {裸代码: (名称, [关键词])}。
 
     关键词 = 股票名 + 行业/细分板块名（holding_sector_mapping 的 industry /
-    raw_relation BlockName / concepts）+ 关联主题的 theme_name 分段与
-    semantic_tags（如 电力/电网/船舶/核电/燃气/算力/液冷）。
+    raw_relation BlockName / concepts）+ 关联主题的 theme_name 分段
+    （如 电力/电网/船舶/核电/燃气/算力/液冷）。
     ⚠️ 只收 ≥2 字的词；关键词匹配允许误伤（「核电」命中不相关国际新闻可容忍），
     本节是复盘核对节不是交易依据 —— 误伤比漏报好（owner 2026-08-28）。"""
     mapping = {bare(x.get("code")): x for x in sector_mapping or []}
@@ -130,7 +130,6 @@ def _holding_keywords(pmap: dict, sectors: list, sector_mapping: list) -> dict:
         )
         theme = sector_for(code, sectors)
         words.update(t.strip() for t in str(theme.get("theme_name") or "").split("/"))
-        words.update(theme.get("semantic_tags") or [])
         keywords[code] = (name or code, sorted(w for w in words if w and len(w) >= 2))
     return keywords
 
@@ -366,8 +365,9 @@ def _sector_name_map() -> dict:
 
 
 def _sector_rank_fallback(day: str, index_dir) -> dict | None:
-    """采集器当日榜缺失时的兜底：用板块指数缓存（run_1800 refresh_sector_index
-    每日更新）自算当日涨跌幅 TOP5。宇宙口径向 #26 采集器对齐（名称表可得时
+    """sector_daily_rank 当日产物缺失时的兜底：用板块指数缓存
+    （17:00/18:00 链的 refresh_sector_index 每日更新）自算当日涨跌幅 TOP5。
+    宇宙口径向 #26 采集器对齐（名称表可得时
     只收 行业(2)+概念(4)）；缓存无当日数据返回 None。"""
     name_map = _sector_name_map()
     rows = []
@@ -434,7 +434,8 @@ def render_sector_board(lines, market: dict, rank, rank_source) -> None:
     if not rank:
         lines.append(
             "- `unavailable`：当日板块涨跌幅榜不可得（采集器未产出、板块指数缓存亦无当日数据）。"
-            "板块榜采集器（sector_daily_rank，#26）目前未接入日链——是否接入待拍板，此处仅注明，不改链路。"
+            "板块榜采集器（sector_daily_rank，#26）已接入 17:00 链（refresh_sector_index + sector_daily_rank，"
+            "两个 best-effort stage，v0.158）——unavailable 即当日两个 stage 均未产出。"
         )
     else:
         lines.append(f"- 板块榜数据来源：{rank_source}。")
@@ -467,7 +468,8 @@ def render_sector_board(lines, market: dict, rank, rank_source) -> None:
     else:
         pct = (up - down) / down * 100
         lines.append(
-            f"- 涨 {int(up)} 家 / 跌 {int(down)} 家（880005 口径，数据日 {breadth.get('as_of') or 'unavailable'}）："
+            f"- 涨 {int(up)} 家 / 跌 {int(down)} 家（涨家数=880005 官方，跌/平/停=vipdoc 自算四桶，"
+            f"数据日 {breadth.get('as_of') or 'unavailable'}）："
             f"温度 **{pct:+.1f}%** —— {_temperature_verdict(pct)}。"
         )
         lines.append(

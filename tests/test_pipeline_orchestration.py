@@ -342,6 +342,23 @@ class TestRun1700Order:
         if "daily_pipeline" in rec.names and "final_close_review" in rec.names:
             assert rec.index("daily_pipeline") < rec.index("final_close_review")
 
+    def test_sector_rank_precedes_final_review(self, monkeypatch, tmp_path):
+        """final_close_review §4 板块榜的主路径读 sector_daily_rank 当日产物。
+
+        ⚠️ 采集器之前必须有本链的**板块指数增量刷新**：17:00 时点
+        data/market/sector_index 缓存只到昨日（唯一刷新方原是 18:00 链），
+        不先刷则采集器恒无当日数据、产物永不落盘 —— 只接采集器不接刷新等于没接。
+        """
+        from custos.pipeline import run_1700
+
+        rec = Recorder()
+        _run_runner(run_1700, monkeypatch, rec, tmp_path)
+        assert "refresh_sector_index" in rec.names, rec.names
+        assert "sector_daily_rank" in rec.names, rec.names
+        assert "final_close_review" in rec.names, rec.names
+        assert rec.index("refresh_sector_index") < rec.index("sector_daily_rank")
+        assert rec.index("sector_daily_rank") < rec.index("final_close_review")
+
 
 class TestRun1445Order:
     def test_quotes_precede_review(self, monkeypatch, tmp_path):
@@ -410,6 +427,72 @@ class TestRun1800Order:
         rec = Recorder(gate_code=4)
         rc = _run_runner(run_1800, monkeypatch, rec, tmp_path)
         assert rc != 4, "18:00 不得因门控 blocked 而退出"
+
+
+class TestRun1800SectorMembers:
+    """sector_members.json 保温（反向缺口：有读者、无调度生产者）。
+
+    enrich_candidates 的 sector_phase hint 与 sector_daily_rank 的涨跌停家数都读
+    这份映射，唯一写方是 fetch_sector_index_history --members。--members 逐板块
+    多一次 get_stock_list_in_sector 调用（~430 次，stage 耗时翻倍级），而成员名单
+    低频变化，故 refresh_sector_index 只在**周五**带它（日历门挡死非交易日，
+    「每周六」永不执行，取周五=一周最后常见交易日）；映射文件缺失时无条件补刷。
+    """
+
+    @staticmethod
+    def _refresh_cmd(rec) -> list[str]:
+        cmds = [cmd for name, cmd in rec.calls if name == "refresh_sector_index"]
+        assert len(cmds) == 1, rec.names
+        return cmds[0]
+
+    @staticmethod
+    def _seed_members(mod):
+        (mod.MARKET_DIR / "sector_members.json").write_text("{}", encoding="utf-8")
+
+    def test_members_flag_on_friday(self, monkeypatch, tmp_path):
+        from custos.pipeline import run_1800
+
+        rec = Recorder()
+        _run_runner(
+            run_1800,
+            monkeypatch,
+            rec,
+            tmp_path,
+            argv=["--date", "2026-08-28"],  # 周五
+            seed=self._seed_members,
+        )
+        assert "--members" in self._refresh_cmd(rec)
+
+    def test_members_flag_off_on_regular_day(self, monkeypatch, tmp_path):
+        from custos.pipeline import run_1800
+
+        rec = Recorder()
+        _run_runner(
+            run_1800,
+            monkeypatch,
+            rec,
+            tmp_path,
+            argv=["--date", "2026-08-26"],  # 周三
+            seed=self._seed_members,
+        )
+        assert "--members" not in self._refresh_cmd(rec)
+
+    def test_members_bootstrap_when_file_missing(self, monkeypatch, tmp_path):
+        """映射文件不存在 ⇒ 即使是普通工作日也补刷（首跑/被清缓存后的 bootstrap）。"""
+        from custos.pipeline import run_1800
+
+        rec = Recorder()
+        _run_runner(run_1800, monkeypatch, rec, tmp_path, argv=["--date", "2026-08-26"])
+        assert "--members" in self._refresh_cmd(rec)
+
+    def test_members_flag_in_stage_cmd_source(self):
+        """源码守卫：refresh_sector_index stage 命令必须带 --members（条件低频刷）。"""
+        src = (ROOT / "src" / "custos" / "pipeline" / "run_1800.py").read_text(
+            encoding="utf-8"
+        )
+        i = src.index('"refresh_sector_index"')
+        seg = src[max(0, i - 1200) : i]
+        assert '"--members"' in seg, "refresh_sector_index stage 命令缺 --members"
 
 
 class TestRunnerNamesResolve:

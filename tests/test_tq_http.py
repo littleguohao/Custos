@@ -186,8 +186,9 @@ if __name__ == "__main__":
 class TestUnsafeDownTypeGuard:
     """`download_file` 的危险 down_type 必须被**代码**挡住，不能只写在注释里。
 
-    背景：`TDX_LOCAL_INTERFACES.md` 有一节「TQ 服务可被打挂」的风险记录，`concept_tags.py`
-    顶部也写着「只调用 down_type=4；禁止触碰 1/5/6」。但 `call()` 是泛型入口——
+    背景：`TDX_LOCAL_INTERFACES.md` 有一节「TQ 服务可被打挂」的风险记录（原
+    `concept_tags.py` 顶部也写着「只调用 down_type=4；禁止触碰 1/5/6」，该模块已随
+    miscinfo 数据源在 v0.157 整删）。但 `call()` 是泛型入口——
     任何人写一行 `call("download_file", {"down_type": 1})` 都不会被挡，而 TdxW 一挂，
     选股链与持仓行情一起没了。
 
@@ -196,7 +197,7 @@ class TestUnsafeDownTypeGuard:
     """
 
     def test_safe_down_type_passes_guard(self, monkeypatch):
-        """down_type=4 必须放行（它是概念标签的唯一来源）。"""
+        """down_type=4 必须放行（白名单内唯一实测安全的类型）。"""
         seen = {}
         monkeypatch.setattr(tq_http, "is_tdxw_running", lambda: True)
         monkeypatch.setattr(

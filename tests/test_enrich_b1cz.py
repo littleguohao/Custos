@@ -294,8 +294,6 @@ def test_enrich_flags_formula_hits_date_mismatch(monkeypatch):
             "amount": 0.0,
         }
     )
-    # 隔离板块映射，聚焦一致性断言
-    monkeypatch.setattr(ec, "build_stock_theme_map", lambda **k: ({}, True))
     result = ec.enrich(
         "2026-07-21",
         hits_data=hits,
@@ -328,7 +326,6 @@ def test_enrich_same_day_hits_no_mismatch(monkeypatch):
             "amount": 0.0,
         }
     )
-    monkeypatch.setattr(ec, "build_stock_theme_map", lambda **k: ({}, True))
     result = ec.enrich(
         "2026-07-21",
         hits_data=hits,
@@ -811,3 +808,73 @@ class TestReversalKThresholdSingleSource:
             "b1_dual_factor 没跟上 live"
         )
         assert d2.B2_J_LOW == thr.J_LOW_THRESHOLD == 13.0, "b2_surge_factor 没跟上 live"
+
+
+# ---------- 人工主题映射链整段废弃（v0.156，owner 拍板 2026-08-28） ----------
+
+
+def test_manual_theme_mapping_fully_removed():
+    """grep 守卫：人工主题映射链（build_stock_theme_map 一族）v0.156 整段移除。
+
+    owner 拍板：板块归属全部走走势贴合（theme_tracker_report），人工判断层废弃。
+    文件名只允许出现在「已废弃」的记录性文字里；代码级引用（常量/函数/参数/
+    降级分支/配置段）必须零残留。"""
+    import json as _json
+    import pathlib
+
+    src = pathlib.Path(ec.__file__).read_text(encoding="utf-8")
+    for gone in (
+        "build_stock_theme_map(",  # 调用点（记录性文字不带左括号）
+        "_match_theme_tags",
+        "_theme_map_via_concept_tags",
+        "_theme_map_via_tq_880",
+        "_load_theme_map",
+        "SECTOR_CODE_MAP",
+        "THEME_MIN_MATCH",
+        "theme_min_match",
+        "sector_map_unavailable",
+        '"stock_theme"',  # ctx 键（带引号避免误伤记录性文字里的 build_stock_theme_map）
+        "concept_tags",
+    ):
+        assert gone not in src, f"{gone} 应已随人工主题映射链删除"
+
+    import custos.core.paths as paths
+
+    assert not (paths.SECTORS_DIR / "sector_code_map.json").exists(), (
+        "人工主题映射表文件应已删除"
+    )
+    reg = _json.loads(paths.SCREEN_FORMULA_REGISTRY_FILE.read_text(encoding="utf-8"))
+    assert "theme_mapping" not in reg, "注册表残留 theme_mapping 配置段"
+
+    # 下游消费侧也不得再读 semantic_tags（sector_code_map 的 schema 键）
+    from custos.pipeline.close_review import final_close_review as fcr
+
+    fcr_src = pathlib.Path(fcr.__file__).read_text(encoding="utf-8")
+    assert "semantic_tags" not in fcr_src, "final_close_review 残留 semantic_tags 读取"
+
+
+def test_enrich_candidates_theme_fields_empty_by_design():
+    """钉死新稳态：候选的 theme_id/sector/sector_source 契约键保留但恒空/「未知」。
+
+    enrich 不再有 sector_map_unavailable 降级——主题族归属不存在不是故障，
+    是 owner 拍板后的设计。（测试环境指数缺失会让 status=partial，与本断言无关，
+    故只钉 degraded_reason 不含 sector_map_unavailable 与三个字段值。）"""
+    df = make_df([10.0] * 80)
+    df["date"] = pd.date_range(end="2026-07-21", periods=80, freq="B")
+    hits = {
+        "date": "2026-07-21",
+        "status": "ok",
+        "formulas": [{"id": "F1", "hits": [{"code": "600000", "name": "浦发银行"}]}],
+    }
+    result = ec.enrich(
+        "2026-07-21",
+        hits_data=hits,
+        ohlcv_loader=lambda c: df.copy(),
+        index_loader=lambda: None,
+        universe_cfg={"j_low_required": False},
+    )
+    assert "sector_map_unavailable" not in (result.get("degraded_reason") or "")
+    cand = result["candidates"][0]
+    assert cand["theme_id"] == ""
+    assert cand["sector"] == "未知"
+    assert cand["sector_source"] == ""

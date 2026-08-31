@@ -54,7 +54,6 @@ def _hits(*codes, date="2026-07-22"):
 
 
 def _run_enrich(monkeypatch, df_by_code, cfg=None, date="2026-07-22"):
-    monkeypatch.setattr(ec, "build_stock_theme_map", lambda **k: ({}, True))
     return ec.enrich(
         date,
         hits_data=_hits(*df_by_code, date=date),
@@ -422,70 +421,6 @@ def test_evaluate_tail_window_does_not_grow_slice():
     seen.clear()
     bt.evaluate({"600000": _wavy(300)}, horizons=(5,), min_bars=130, scorer=probe)
     assert max(seen) > 150  # 默认仍是全前缀（向后兼容）
-
-
-# ---------------------------------------------------------------- 10. theme map 候选集缩小
-
-_THEMES = {
-    "themes": [
-        {"theme_id": "T1", "theme_name": "光伏", "semantic_tags": ["光伏"]},
-        {"theme_id": "T2", "theme_name": "军工", "semantic_tags": ["军工"]},
-    ]
-}
-
-
-def test_build_stock_theme_map_codes_filter_same_result(monkeypatch):
-    tags = {
-        f"{600000 + i:06d}": (["光伏"] if i % 2 == 0 else ["军工"]) for i in range(200)
-    }
-    monkeypatch.setattr(
-        ec, "_load_json", lambda p, d: _THEMES if "code_map" in str(p) else d
-    )
-    monkeypatch.setattr(ec.concept_tags, "load_tags", lambda: tags)
-    monkeypatch.setattr(ec.concept_tags, "load_tags_meta", lambda: ({}, {}))
-
-    full, ok_full = ec.build_stock_theme_map()
-    want = {"600000", "600001", "600002"}
-    part, ok_part = ec.build_stock_theme_map(codes=want)
-    assert ok_full is True and ok_part is True
-    assert set(part) == want
-    for c in want:
-        assert set(part[c]) == set(full[c])
-        assert part[c]["theme_id"] == full[c]["theme_id"]
-        assert part[c]["sector"] == full[c]["sector"]
-
-
-def test_build_stock_theme_map_codes_filter_avoids_full_market_scan(monkeypatch):
-    tags = {f"{600000 + i:06d}": ["光伏"] for i in range(500)}
-    monkeypatch.setattr(
-        ec, "_load_json", lambda p, d: _THEMES if "code_map" in str(p) else d
-    )
-    monkeypatch.setattr(ec.concept_tags, "load_tags", lambda: tags)
-    monkeypatch.setattr(ec.concept_tags, "load_tags_meta", lambda: ({}, {}))
-    calls: list[int] = []
-    orig = ec._match_theme_tags
-    monkeypatch.setattr(
-        ec, "_match_theme_tags", lambda st, sem: (calls.append(1), orig(st, sem))[1]
-    )
-
-    ec.build_stock_theme_map(codes={"600000", "600001"})
-    assert len(calls) <= 2 * len(_THEMES["themes"])  # 只扫候选，不扫全市场
-
-
-def test_build_stock_theme_map_codes_no_tag_hit_keeps_concept_path(monkeypatch):
-    """候选一只都没匹配上时不得偷偷回退 880 反查（那是"概念标签不可用"才走的路）。"""
-    tags = {f"{600000 + i:06d}": ["光伏"] for i in range(50)}
-    monkeypatch.setattr(
-        ec, "_load_json", lambda p, d: _THEMES if "code_map" in str(p) else d
-    )
-    monkeypatch.setattr(ec.concept_tags, "load_tags", lambda: tags)
-    monkeypatch.setattr(ec.concept_tags, "load_tags_meta", lambda: ({}, {}))
-    called = []
-    monkeypatch.setattr(ec, "latest_tq_sector_map", lambda: called.append(1) or {})
-
-    m, ok = ec.build_stock_theme_map(codes={"999998"})
-    assert m == {} and ok is True
-    assert called == []
 
 
 # ---------------------------------------------------------------- 11. kdj/macd/DKS 去重与一致性

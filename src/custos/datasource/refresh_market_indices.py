@@ -149,7 +149,8 @@ def _refresh_indices(mkt: dict, date: str) -> tuple[bool, int]:
             continue
         fresh = compute_index(code)
         if fresh.get("available"):
-            # Preserve intraday data if it existed
+            # Preserve intraday data if it existed —— 14:45 链 collect_intraday_snapshot
+            # 回填的真实盘中值（或 collector 的占位），vipdoc K 线刷新不得覆盖它。
             if "intraday" in cur:
                 fresh["intraday"] = cur["intraday"]
             existing[name] = fresh
@@ -258,6 +259,8 @@ def _refresh_breadth(mkt: dict, date: str) -> bool:
                     "up_down_ratio_status": counts["up_down_ratio_status"],
                     "total_stocks": counts["total_stocks"],
                     "total_stocks_source": counts["total_stocks_source"],
+                    # 自算桶数据日（机器可读；as_of 是 880005 官方涨家数数据日）
+                    "vipdoc_as_of": counts["vipdoc_as_of"],
                     "note": counts["note"],
                     "source": "vipdoc_880005",
                     "quality": "auto",

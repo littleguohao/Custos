@@ -19,6 +19,7 @@ import os
 import sys
 import time
 from collections.abc import Callable
+from datetime import date as _date
 
 
 from custos.core.paths import (
@@ -134,47 +135,37 @@ def _run_refresh_xdxr(run_stage: Callable[..., dict]) -> None:
         print(f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'xdxr refreshed'}")
 
 
-def _run_refresh_concept_tags(target: str, run_stage: Callable[..., dict]) -> None:
-    """Refresh concept tags (miscinfo) so sector mapping uses the accurate source."""
-    r = run_stage(
-        [
-            "uv",
-            "run",
-            "python",
-            str(TOOLS / "datasource" / "local_tdx" / "concept_tags.py"),
-            "--date",
-            target,
-        ],
-        "refresh_concept_tags",
-        note="best-effort，失败不中断",
-    )
-    if not r["ok"]:
-        print(f"[WARN] refresh_concept_tags failed: {r['out'][:200]}")
-    else:
-        print(
-            f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'concept tags refreshed'}"
-        )
-
-
-def _run_refresh_sector_index(run_stage: Callable[..., dict]) -> None:
+def _run_refresh_sector_index(run_stage: Callable[..., dict], target: str) -> None:
     """Refresh 板块指数缓存(供 enrich 的 sector_phase hint 用当日相位;best-effort,需 TdxW)。
 
     **增量合并**:只拉各板块缓存末日期前 30 天起的新数据并 merge 进已有 CSV。
     此前每天全量重拉 20180101 起的 400+ 板块 → 600s stage 超时;
     且 --period day 是错的周期串(TQ 要 1d,见 TDX_LOCAL_INTERFACES.md),现由脚本自动探测。
+
+    **成员映射保温(sector_members.json)**:`--members` 逐板块多调一次
+    get_stock_list_in_sector(~430 次 TQ 调用,stage 耗时翻倍级),而成员名单
+    低频变化(新股/新板块),故**每周五**刷一次(日历门挡死非交易日,周六永不
+    执行,取周五=一周最后常见交易日;周五遇节假日则顺延下周,成员慢变可容忍);
+    映射文件缺失时无条件补刷(首跑 bootstrap)。enrich_candidates 的
+    sector_phase hint 与 sector_daily_rank 的涨跌停家数都读这份映射。
     """
+    members_path = MARKET_DIR / "sector_members.json"
+    weekly = _date.fromisoformat(target).weekday() == 4  # 周五
+    cmd = [
+        "uv",
+        "run",
+        "python",
+        str(TOOLS / "datasource" / "local_tdx" / "fetch_sector_index_history.py"),
+        "--out",
+        str(MARKET_DIR / "sector_index"),
+        "--start",
+        "20180101",
+        "--incremental",
+    ]
+    if weekly or not members_path.exists():
+        cmd.append("--members")
     r = run_stage(
-        [
-            "uv",
-            "run",
-            "python",
-            str(TOOLS / "datasource" / "local_tdx" / "fetch_sector_index_history.py"),
-            "--out",
-            str(MARKET_DIR / "sector_index"),
-            "--start",
-            "20180101",
-            "--incremental",
-        ],
+        cmd,
         "refresh_sector_index",
         note="best-effort，失败不中断(仅影响板块相位 hint)",
     )
@@ -313,11 +304,8 @@ def main(argv=None) -> int:
     # 3b. Refresh ex-dividend (权息) cache —— 前复权的依据。
     _run_refresh_xdxr(_run_stage)
 
-    # 4. Refresh concept tags (miscinfo) so sector mapping uses the accurate source
-    _run_refresh_concept_tags(target, _run_stage)
-
-    # 4b. Refresh 板块指数缓存(供 enrich 的 sector_phase hint 用当日相位)。
-    _run_refresh_sector_index(_run_stage)
+    # 4. Refresh 板块指数缓存(供 enrich 的 sector_phase hint 用当日相位)。
+    _run_refresh_sector_index(_run_stage, target)
 
     # 5. Screening chain (each stage propagates degradation downstream)
     degraded = _run_screening_chain(target, _run_stage)

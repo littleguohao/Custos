@@ -47,7 +47,7 @@ def test_b1_reversal_k_placeholder_disabled():
     assert "客户端" in b1.get("note", "")
 
 
-def test_scoring_and_theme_mapping_sections():
+def test_scoring_section():
     data = _load()
     scoring = data["scoring"]
     assert isinstance(scoring, dict)
@@ -59,4 +59,8 @@ def test_scoring_and_theme_mapping_sections():
         "non_one_wave_revoked",
     ):
         assert isinstance(caps[key], bool)
-    assert int(data["theme_mapping"]["min_match"]) >= 1
+
+
+def test_theme_mapping_section_removed():
+    """v0.156（owner 拍板）：人工主题映射链整段废弃，registry 不得再留 theme_mapping 配置段。"""
+    assert "theme_mapping" not in _load()

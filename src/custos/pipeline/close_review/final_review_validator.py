@@ -64,13 +64,29 @@ def validate(day: str, markdown: str, payload: dict) -> list[str]:
     return errors
 
 
+def _resolve_artifact(day: str, suffix: str):
+    """定位某日 final_review 产物：新名（v0.141 起带 1700 时点标记）优先，
+    旧名（同日目录无标记）与旧平铺布局（2026-08-12 目录重构前）依次回退 ——
+    与 weekly_review._load_daily_review_json 同三路径口径：历史日期的产物仍是
+    旧名/旧布局，校验历史日期不该直接报缺。"""
+    daily = daily_report_dir(day, REV)
+    for path in (
+        daily / f"{day}_1700_final_review.{suffix}",
+        daily / f"{day}_final_review.{suffix}",
+        REV / f"{day}_final_review.{suffix}",
+    ):
+        if path.exists():
+            return path
+    return None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", required=True)
     args = ap.parse_args()
-    md_path = daily_report_dir(args.date, REV) / f"{args.date}_1700_final_review.md"
-    json_path = daily_report_dir(args.date, REV) / f"{args.date}_1700_final_review.json"
-    if not md_path.exists() or not json_path.exists():
+    md_path = _resolve_artifact(args.date, "md")
+    json_path = _resolve_artifact(args.date, "json")
+    if md_path is None or json_path is None:
         raise SystemExit("final review artifact missing")
     markdown = md_path.read_text(encoding="utf-8")
     payload = json.loads(json_path.read_text(encoding="utf-8"))

@@ -106,10 +106,12 @@ _OLD_SUFFIX = re.compile(
 _TIMED = re.compile(
     r"_0905_daily_report\.|_1700_final_review\.|_1800_candidate_table\."
 )
-# 读方回退兼容**必须**引用旧名，这两处是有意保留：
+# 读方回退兼容**必须**引用旧名，这几处是有意保留：
 _FALLBACK_WHITELIST = {
     "src/custos/pipeline/daily_report.py",  # previous_review 的 glob 兼容注释与模式
     "src/custos/pipeline/close_review/weekly_review.py",  # _load_daily_review_json 回退链
+    # 落盘前校验器（读方）：校验历史日期不该直接报缺，三路径回退与 weekly_review 同口径
+    "src/custos/pipeline/close_review/final_review_validator.py",
 }
 _GUARDED = [
     ROOT / "src",

@@ -566,8 +566,10 @@ class TestSentimentAndTurnover:
 class TestMainEndToEnd:
     """`main()` 的端到端：读 `market_timing_input` → 七模块打分 → 落盘报告。
 
-    ⚠️ 权重之和必须是 100，否则「择时评分 X/100」这句是假的 ——
-    而下游 `status_from_score` 的五个档位（80/60/40/20）全按百分制切。
+    ⚠️ 权重之和必须是 93（theme 腿 7 分随 TODO #26 主线口径撤下删除），
+    否则报告里「择时评分 X/93」这句是假的 ——
+    而下游 `status_from_score` 的五个档位（80/60/40/20）按固定分值切，
+    满分结构变化后阈值未动（见 scorer 注释）。
     """
 
     def _run(self, monkeypatch, tmp_path, market, gate=None):
@@ -637,22 +639,35 @@ class TestMainEndToEnd:
         "data_quality": {"notes": []},
     }
 
-    def test_weights_sum_to_100(self, monkeypatch, tmp_path):
-        """⚠️ 权重之和必须真的是 100 —— 从 `main()` 源码里把每个模块的权重字面量
-        抠出来求和，而不是只看报告里那行硬编码的「| 合计 | 100 |」
-        （那是 make_report 里的字面量，改掉任一模块权重它照样打印 100）。
+    def test_weights_sum_to_93(self, monkeypatch, tmp_path):
+        """⚠️ 权重之和必须真的是 93 —— 从 `main()` 源码里把每个模块的权重字面量
+        抠出来求和，而不是只看报告里的「| 合计 |」行
+        （那是 make_report 按权重实算的，但模块漏挂/多挂只有数源头才看得出）。
+
+        93 = 15+15+10+15+15+15+8：theme 腿（7 分）随 TODO #26 主线口径撤下删除，
+        分档阈值（80/60/40/20）未动。
         """
         import inspect
         import re
 
         src = inspect.getsource(ms.main)
         weights = [int(w) for w in re.findall(r'\("[^"]+",\s*(\d+),\s*\*score_', src)]
-        assert len(weights) == 8, f"只抠到 {len(weights)} 个模块权重 —— 本测试已失效"
-        assert sum(weights) == 100, (
-            f"模块权重之和 = {sum(weights)}（{weights}）—— 「X/100」与档位切分都会失真"
+        assert len(weights) == 7, f"只抠到 {len(weights)} 个模块权重 —— 本测试已失效"
+        assert sum(weights) == 93, (
+            f"模块权重之和 = {sum(weights)}（{weights}）—— 「X/93」与档位切分都会失真"
         )
         r = self._run(monkeypatch, tmp_path, dict(self.MARKET))
-        assert "| 合计 | 100 |" in r
+        assert "| 合计 | 93 |" in r
+
+    def test_theme_leg_stays_deleted(self):
+        """防复活守卫：theme 腿是常数死腿（theme_clarity 恒空串、全仓零读者），
+        随 TODO #26 主线口径撤下删除 —— scorer 源码不得再出现 score_theme /
+        theme_clarity / 「主线清晰度」分项。"""
+        import inspect
+
+        src = inspect.getsource(ms)
+        for dead in ("score_theme", "theme_clarity", "主线清晰度"):
+            assert dead not in src, f"theme 死腿复活：{dead}"
 
     def test_all_seven_modules_appear(self, monkeypatch, tmp_path):
         r = self._run(monkeypatch, tmp_path, dict(self.MARKET))
@@ -664,7 +679,6 @@ class TestMainEndToEnd:
             "市场宽度",
             "情绪强度",
             "成交量能",
-            "主线清晰度",
         ):
             assert f"| {name} |" in r, f"缺模块 {name}"
 

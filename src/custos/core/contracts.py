@@ -440,6 +440,9 @@ SPECS: dict[str, dict] = {
                 "required": True,
                 "fields": {
                     "as_of": {"type": str, "required": True, "nullable": True},
+                    # 自算桶数据日（机器可读，v0.137 四桶自算后补）——可选：
+                    # 旧产物没有它；出现时允许 None（自算失败的回落路径没有该数据日）。
+                    "vipdoc_as_of": {"type": str, "required": False, "nullable": True},
                 },
             },
             "sentiment": {
@@ -456,7 +459,9 @@ SPECS: dict[str, dict] = {
                     "as_of": {"type": str, "required": True, "nullable": True},
                 },
             },
-            "theme": {"type": dict, "required": True},
+            # theme 节已删（主线口径随 TODO #26 撤下，collector 不再写、全仓零读者）。
+            # 旧产物残留的 theme 键不影响校验 —— 契约只查 spec 里声明的字段，
+            # 未声明的键不判畸形（见 _check_obj）。
             "macro_policy": {"type": dict, "required": True},
             "data_quality": {"type": dict, "required": True},
         },
@@ -601,9 +606,9 @@ SPECS: dict[str, dict] = {
         },
     },
     # theme_tracker_report.build_sector_summary —— 3 个消费者，⛔ 硬失败链
-    # ⚠️ **分支型**：`available=False` 的板块只有
-    # `{theme_id, theme_name, priority, available, reason, representative_stocks,
-    #   semantic_tags}`，技术字段全不存在。
+    # ⚠️ **分支型**：`available=False` 的板块行技术字段不可信（可能缺省/为 None），
+    # 消费端一律先判 available。v0.156 起人工主题映射表废弃（owner 拍板全走
+    # 走势贴合），theme_id=板块代码、theme_name=板块名，不再有 semantic_tags。
     # 消费端有 **96 处 `.get("available")`** —— 这个布尔是全项目最常被读的分支键。
     "sector_technical_summary": {
         "kind": "array",

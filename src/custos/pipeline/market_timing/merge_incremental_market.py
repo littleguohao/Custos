@@ -85,7 +85,6 @@ def merge_incremental(inc: dict, mkt: dict, target: str) -> tuple[dict, list[str
                 "limit_up_count": b6.get(
                     "close"
                 ),  # 与 guards/scorer 键名统一(此前写 limit_up,门控取不到误判 missing)
-                "limit_up": b6.get("close"),  # 兼容旧键
                 "source": "mootdx_reader_880006",
             },
         )

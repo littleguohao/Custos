@@ -369,6 +369,33 @@ class TestSectorFitResolution:
         )
         assert sector is None and status == "no_mapping"
 
+    def test_nan_pearson_excluded_from_candidates(self, monkeypatch):
+        """⚠️ NaN 守卫（2026-08-31 review 项）：常数收益序列（停牌恢复段的平盘
+        K 线）方差为 0 ⇒ Pearson=NaN。NaN 相关=数据无效，**不进候选** ——
+        否则 ``max()`` 遇 NaN 选择不确定，且 NaN 会漏进 JSON 落盘。"""
+        klines = _stock_and("600312.SH", {"880520.SH": 0.9})
+        klines["880964.SH"] = _kline([10.0] * 80)  # 常数价 ⇒ 收益全 0 ⇒ corr=NaN
+        klines["880446.SH"] = _kline([10.0] * 80)  # 行业候选同样常数
+        self._klines(monkeypatch, klines)
+        sector, status = ttr.resolve_holding_sector(
+            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, "电气设备"
+        )
+        assert status == "fit" and sector["code"] == "880520.SH"
+        assert sector["fit"] == sector["fit"], "fit 不得是 NaN"  # NaN != NaN
+
+    def test_all_nan_pearson_is_fit_insufficient(self, monkeypatch):
+        """全部候选都是常数序列（相关全 NaN）⇒ 无有效贴合 ⇒ fit_insufficient，
+        不得拿 NaN 当最高分赢出来。"""
+        klines = _stock_and("600312.SH", {"880520.SH": 0.9})
+        klines["880520.SH"] = _kline([10.0] * 80)
+        klines["880964.SH"] = _kline([20.0] * 80)
+        klines["880446.SH"] = _kline([30.0] * 80)
+        self._klines(monkeypatch, klines)
+        sector, status = ttr.resolve_holding_sector(
+            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, "电气设备"
+        )
+        assert sector is None and status == "fit_insufficient"
+
     def test_sector_series_cached_per_report(self, monkeypatch):
         """同一报告内板块收益序列只读一次：两只持仓共享候选板块时，
         板块文件读取次数 = 板块数（不是 持仓数×板块数）。"""
@@ -497,7 +524,7 @@ class TestIndustryCandidate:
 
 
 class TestBuildAndReport:
-    """报告构建：rows 来自持仓板块（指定>贴合），无有效贴合的持仓不进 rows。"""
+    """报告构建：rows 来自持仓板块（走势贴合唯一判据），无有效贴合的持仓不进 rows。"""
 
     SECTOR_MAP = {
         "sectors": [

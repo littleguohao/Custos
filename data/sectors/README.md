@@ -2,38 +2,28 @@
 
 ## 文件
 
-- `tdx_sector_list_raw.json`：本地 TQ `get_sector_list()` 导出的原始板块代码列表，共约 588 个。
-- `sector_member_probe.json`：按代表股反查板块成分得到的完整命中结果。
-- `sector_probe_summary.json`：按主题聚合后的共同命中/高频命中摘要。
-- `sector_code_map.json`：策略 Team 使用的板块代码映射 v1。
+- `*_tq_sector_map.json`：板块（880xxx 概念/细分行业）→ 成分股的反向映射，
+  走势贴合归属（theme_tracker_report）的候选池来源。
 
-## 使用规则
+## 已废弃
 
-1. `primary_sector_codes`：优先用于 `theme_tracker` 技术趋势监控。
-2. `candidate_sector_codes`：只作辅助验证，不可直接当成强信号。
-3. `confidence=high/medium_high`：可进入日常监控。
-4. `confidence=medium`：需要结合代表股、涨停结构和人工判断。
-5. `confidence=pending_probe`：暂不进入自动交易过滤，仅保留观察。
+- ~~`stock_concept_tags.json`~~：个股官方概念标签（TQ miscinfo）。**v0.157 起
+  随数据源 `concept_tags.py` 整体删除**（owner 拍板：v0.156 起已无在链消费方，
+  仅保温无读者）。
+- ~~`sector_code_map.json`~~：人工语义主题映射表（semantic_tags /
+  primary_sector_codes / candidate_sector_codes）。**v0.156 起废弃删除**
+  （owner 拍板 2026-08-28：板块归属全部去掉人工判断，唯一逻辑=走势贴合
+  60 日日收益相关）；同时废弃的还有持仓 owner 指定层
+  ~~`holding_mainline_overrides.json`~~（v0.149 已撤）。
+  历史内容可从 git 考古（删除发生在 v0.142-149 区间）。
 
-## 重要限制
+## 现行归属规则
 
-本地 TQ 板块列表主要返回代码，不返回官方名称。当前 v1 映射来自：
-
-- 代表股成分命中
-- 个股概念/申万行业语义
-- 当日涨停主题线索
-
-因此它是“策略可用映射”，不是官方板块名称表。后续需要补充 `sector_code -> official_name` 数据源。
-
-## 当前重点方向
-
-- AI算力/服务器/液冷：`880545.SH`
-- 半导体/芯片/存储/封测：`881319.SH`
-- 机器人/具身智能：`880552.SH`
-- 证券：`880679.SH`
-- 船舶军工：`881290.SH`
-- 燃气能源：`880705.SH`
-- 医疗设备/AI医疗：`881241.SH`
-- 稀土：`881082.SH`
+1. 板块归属唯一判据 = **走势贴合**：持仓/个股与候选板块指数的 60 日日收益
+   Pearson 相关，贴合最高者胜（`theme_tracker_report.resolve_holding_sector`）。
+2. 贴合无有效数据（候选板块无 K 线 / 重叠不足 20 根）⇒ 如实「未定」，不猜、
+   无兜底、无人工指定层。
+3. 候选股（screening 链）不再有主题族归属；「板块」展示列以 TDX 官方细分
+   行业（881xxx，每股恰好一个）为准。
 
 > 风险提示：板块支持只是过滤器，不能直接推出个股买入信号。真实买入仍需满足 stock_pool、buy_strategy、risk_control、chief_decision 的全链路确认。

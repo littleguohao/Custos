@@ -2543,19 +2543,27 @@ def _amv_ledger_records(
     v0.150 起台账是全量单源（vdat 全历史已回填，`scripts/dev/amv_backfill_vdat.py`）：
     ``after_date=None`` ⇒ 全量读（since 起）；``after_date`` 形参保留给旧兜底路径
     （vdat 尾部拼接）使用。同一日期多条记录时后写入(recorded_at 晚)的覆盖先写的。
-    best-effort：缺失/异常返回 []。"""
-    try:
-        if ledger_path is None:
-            from custos.core.paths import MARKET_DIR  # noqa: PLC0415
+    best-effort：文件缺失/整体不可读返回 []（走既有 vdat 兜底）。
 
-            ledger_path = MARKET_DIR / "0amv_observations.jsonl"
-        if not ledger_path.is_file():
-            return []
-        latest: dict[str, tuple[str, float]] = {}
-        for line in ledger_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
+    v0.156：逐行容错——单行 JSON 损坏/字段异常只跳过该行 + stderr WARN
+    （带行号和原因），其余行照常；此前整个循环包在一个 try 里，一行坏 ⇒
+    返回 [] ⇒ load_amv_regime 静默回落停更的 vdat 兜底，所有回测 regime 无声漂移。"""
+    if ledger_path is None:
+        from custos.core.paths import MARKET_DIR  # noqa: PLC0415
+
+        ledger_path = MARKET_DIR / "0amv_observations.jsonl"
+    if not ledger_path.is_file():
+        return []
+    try:
+        lines = ledger_path.read_text(encoding="utf-8").splitlines()
+    except Exception:  # noqa: BLE001
+        return []  # 只有文件整体不可读才走兜底
+    latest: dict[str, tuple[str, float]] = {}
+    for lineno, line in enumerate(lines, start=1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
             r = json.loads(line)
             d = str(r.get("date") or "")
             pct = r.get("amv_change_pct")
@@ -2569,11 +2577,12 @@ def _amv_ledger_records(
             ):
                 if d not in latest or str(r.get("recorded_at", "")) >= latest[d][0]:
                     latest[d] = (str(r.get("recorded_at", "")), float(pct))
-        return [
-            {"date": d, "change_pct": pct} for d, (_, pct) in sorted(latest.items())
-        ]
-    except Exception:  # noqa: BLE001
-        return []
+        except Exception as exc:  # noqa: BLE001
+            print(
+                f"[WARN] 0AMV 台账 {ledger_path} 第 {lineno} 行损坏已跳过：{exc}",
+                file=sys.stderr,
+            )
+    return [{"date": d, "change_pct": pct} for d, (_, pct) in sorted(latest.items())]
 
 
 def load_amv_regime(

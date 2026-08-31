@@ -69,13 +69,14 @@ TdxW 未运行或任一阶段失败时整链干净降级（status=unavailable / 
 MACD 零轴上/DKS 上行，阈值见 enrich 顶部待回测常量）给贴合度分，
 越符合 good_b1 完美图形分数越高。
 
-板块映射：**优先 miscinfo 概念标签**（`src/custos/datasource/local_tdx/concept_tags.py`，
-TQ `download_file down_type=4`，run_1800 第 2 步每日刷新，落盘
-`data/sectors/stock_concept_tags.json`）——个股官方概念标签与各主题
-`semantic_tags` 双向子串匹配，命中数最多的主题中标，无命中则 sector=未知
-（宁缺毋滥）。标签缺失时回退 v1 的 880 成分股反查（`*_tq_sector_map.json`
-→ `sector_code_map.json`，primary 优先于 candidate，已知存在错配，仅作
-兜底）。候选落盘 `sector_source`（concept_tags / tq_880_fallback）标明来源。
+板块归属（候选侧）：**人工主题映射链已废弃**（v0.156，owner 拍板 2026-08-28：
+板块归属全部去掉人工判断、唯一逻辑=走势贴合 60 日日收益相关）。原「miscinfo
+概念标签 × 各主题 `semantic_tags` 双向子串匹配 + 880 成分股反查兜底」
+（`build_stock_theme_map`，主题定义来自已删除的 `sector_code_map.json`）
+整段移除。候选落盘的 `theme_id`/`sector`/`sector_source` 契约键保留但恒为
+空/「未知」；「板块」展示列以 TDX 官方细分行业（881xxx，`industry` 字段）
+为准。miscinfo 概念标签数据源（原 `concept_tags.py`）已整体删除（v0.157，
+owner 拍板：无在链消费方）。
 
 ### [3] 个股量价分层 + 板块提示
 
@@ -276,8 +277,6 @@ next_step：A→buy_review（v0.50：原 generate_buy_plan 是虚假承诺，Buy
   ⚠️ 改分值 = 改分层结果，**必须先回测**（同 cap_rules 纪律）。
 - **维度缺口声明**：情绪维度**无数据源，未建因子**（v0.84 起显式标注，
   见 `core/factors/__init__.py` 维度覆盖节）——不得以价格行为代理冒充。
-- **`theme_mapping.min_match`（默认 1）**：概念标签命中主题所需的最小语义标签数。
-  提高到 2+ 要求更强证据、降低子串过度匹配；候选落盘 `match_count` 可复盘。
 
 **数据源当日一致性**：第 1 段公式初筛用 TQ 在线公式评估（`return_date=False`，命中
 日期由盘后调用时点决定），第 2 段充实用本地 vipdoc 日线。二者为独立来源，故：

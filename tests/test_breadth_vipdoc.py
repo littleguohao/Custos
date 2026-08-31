@@ -111,6 +111,8 @@ class TestBreadthCountsReal:
         assert counts["total_stocks"] == 5
         assert counts["total_stocks_source"] == "vipdoc_universe_self_compute"
         assert counts["up_down_ratio"] == 1.0  # 官方涨 1 ÷ 自算跌 1
+        # 机器可读的自算桶数据日（as_of 是 880005 官方数据日，两者可能不同日）
+        assert counts["vipdoc_as_of"] == str(DAY1)
 
     def test_fallback_when_self_compute_fails(self, monkeypatch):
         """自算失败 ⇒ 回落 breadth_counts 的 derived/unavailable，flat/suspended 为 None。"""
@@ -124,6 +126,8 @@ class TestBreadthCountsReal:
         assert counts["up_down_ratio_status"] == "unavailable"
         assert counts["down_count"] is None
         assert counts["flat_count"] is None and counts["suspended_count"] is None
+        # 回落路径没有自算数据日，键在、值 None（与 as_of 同形，不编造）
+        assert counts["vipdoc_as_of"] is None
         assert "stub_off" in counts["note"], "回落原因必须留痕"
 
     def test_fallback_derived_path_kept(self, monkeypatch):
@@ -157,3 +161,5 @@ class TestWritersUseRealCaliber:
         )
         assert "breadth_counts_real(" in src, f"{rel} 未接 vipdoc 自算真值口径"
         assert "flat_count" in src and "suspended_count" in src
+        # 机器可读的自算桶数据日必须落盘（2026-08-31 补：此前只在 note 文案里）
+        assert "vipdoc_as_of" in src, f"{rel} 未落盘 vipdoc_as_of"

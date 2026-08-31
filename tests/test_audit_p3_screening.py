@@ -77,7 +77,6 @@ _UNIV = {
 
 
 def _enrich(monkeypatch, hits, dfs, date="2026-07-22", index_df=None, cfg=None):
-    monkeypatch.setattr(ec, "build_stock_theme_map", lambda **k: ({}, True))
     return ec.enrich(
         date,
         hits_data=hits,
@@ -226,8 +225,6 @@ class TestB7IndexFreshness:
         assert rs is not None and rs < 0
 
     def test_index_loader_exception_is_recorded(self, monkeypatch):
-        monkeypatch.setattr(ec, "build_stock_theme_map", lambda **k: ({}, True))
-
         def _boom():
             raise RuntimeError("reader dead")
 

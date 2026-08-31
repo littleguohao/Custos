@@ -12,7 +12,9 @@ Scoring modules:
 - market_breadth: 15
 - sentiment: 15
 - turnover: 8
-- theme: 7
+
+满分 93。原 theme 腿（7 分）已删：主线口径随 TODO #26 撤下后，
+theme 节恒为空、该腿恒按半分给分，是一条死腿（全仓零读者）。
 """
 
 from __future__ import annotations
@@ -349,24 +351,10 @@ def score_turnover(d: dict) -> tuple[float, str]:
     return 4, f"成交额变化 {chg:.2f}%，中性。"
 
 
-def score_theme(d: dict) -> tuple[float, str]:
-    th = d.get("theme", {})
-    clarity = th.get("theme_clarity")
-    if clarity == "强":
-        return 7, th.get("theme_summary") or "主线清晰。"
-    if clarity == "中":
-        return 4.5, th.get("theme_summary") or "主线一般。"
-    if clarity == "弱":
-        return 2, th.get("theme_summary") or "主线弱。"
-    # Infer a little from sentiment details, but keep conservative.
-    details = (d.get("sentiment") or {}).get("details") or {}
-    leaders = details.get("sample_leaders") or []
-    if leaders:
-        return 4, "主线字段未填；从涨停样本看 AI/半导体有活跃线索，暂按中性偏弱。"
-    return 3.5, "主线清晰度未填，按半分处理。"
-
-
 def status_from_score(score: float) -> tuple[str, str, str, str]:
+    # ⚠️ theme 腿（7 分）删除后满分由 100 → 93，但五档阈值（80/60/40/20）
+    #    **未按比例调整**，保持固定分值 —— 阈值本就是拍在固定分上的档位线，
+    #    是否按 93 归一属口径变更，留给 owner 拍板。
     if score >= 80:
         return "进攻", "60%-80%", "允许", "普通"
     if score >= 60:
@@ -395,11 +383,14 @@ def make_report(
             open_perm = "仅观察 / 小仓待确认"
         risk = "提高"
     lines = []
+    # 满分从模块权重实算，不硬编码：theme 腿（7 分）随主线口径（TODO #26）撤下
+    # 删除后满分 93；分档阈值未动（见 status_from_score 注释）。
+    full = sum(x[1] for x in module_scores)
     lines.append("# market_timing 自动评分报告\n")
     lines.append(f"日期：{d.get('date')}\n")
     lines.append("## 1. 市场状态\n")
     lines.append(f"- 状态：**{status}**")
-    lines.append(f"- 择时评分：**{total}/100**")
+    lines.append(f"- 择时评分：**{total}/{full}**")
     lines.append(f"- 建议总仓位：**{position}**")
     lines.append(f"- 今日是否允许开新仓：**{open_perm}**")
     lines.append(f"- 风控等级：**{risk}**\n")
@@ -408,7 +399,7 @@ def make_report(
     lines.append("|---|---:|---:|---|")
     for name, weight, score, note in module_scores:
         lines.append(f"| {name} | {weight} | {score:.2f} | {note} |")
-    lines.append(f"| 合计 | 100 | {total:.2f} | |\n")
+    lines.append(f"| 合计 | {full} | {total:.2f} | |\n")
     lines.append("## 3. 交易指令\n")
     if status in ("震荡偏弱", "防守", "冰点"):
         lines.append("- 不适合高频短线试错。")
@@ -450,7 +441,6 @@ def main():
         ("市场宽度", 15, *score_breadth(d)),
         ("情绪强度", 15, *score_sentiment(d)),
         ("成交量能", 8, *score_turnover(d)),
-        ("主线清晰度", 7, *score_theme(d)),
     ]
     # tuple shape: name, weight, score, note after star expansion
     modules = [(m[0], m[1], float(m[2]), str(m[3])) for m in modules]

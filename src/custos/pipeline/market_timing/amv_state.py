@@ -40,10 +40,21 @@ def append_observation(day: str, amv: dict):
             for line in LEDGER.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
+    # v0.156：quality 强弱序（candidate < confirmed）——升级必须落盘，不得被去重吞掉。
+    # 先记 candidate 值 V、后报 confirmed 同值 V，旧判据会把 confirmed 吞掉，而读侧
+    # 只采 confirmed，该日从 regime 重放消失（V 跨阈值时回测与 live 分叉）。
+    _QUALITY_RANK = {"candidate": 0, "confirmed": 1}
     same = [
         x
         for x in existing
-        if x.get("date") == day and x.get("amv_change_pct") == record["amv_change_pct"]
+        if x.get("date") == day
+        and x.get("amv_change_pct") == record["amv_change_pct"]
+        # v0.156：superseded 记录已作废，与它的同值不构成去重理由——否则重报等于
+        # 旧值的数被吞，生效值仍是冲突的新值。
+        and not x.get("superseded")
+        # v0.156：既有记录 quality 弱于新记录（candidate→confirmed）不算 same。
+        and _QUALITY_RANK.get(x.get("quality") or "candidate", 0)
+        >= _QUALITY_RANK.get(record["quality"], 0)
         # v0.152：去重不再看 source——同值同日从两个入口（人工 + market_timing_input
         # 自动回填）各记一遍，攒出 23 条同值重复（2026-08-30 去重清理过一轮）。
     ]

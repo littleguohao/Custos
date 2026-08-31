@@ -6,6 +6,9 @@ v0.142 起**取消人工主题映射表**（sector_code_map.json 已删除）；
 持仓板块归属只有**走势贴合**一档（60 日日收益 Pearson，贴合最高者胜；
 贴合无有效数据如实「未定」，无兜底猜谜），
 §1「主线」= 当日持仓相关板块中贴合最高者（口径写进 §1，不代表全市场主线）。
+v0.156（owner 拍板 2026-08-28）候选侧人工主题匹配链（enrich_candidates
+build_stock_theme_map）也随之整段废弃——人工判断路径全仓零残留，
+记录在案见 governance/data/TDX_LOCAL_INTERFACES.md §3。
 
 Reads:
 - data/holdings/YYYY-MM-DD_holding_technical_summary.json
@@ -22,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Any
@@ -374,6 +378,10 @@ def _sector_fit_map(
     只含贴合有效者（inner join 后 ≥20 根）；个股无 K 线或全部候选数据不足 ⇒ {}。
     ``cache``（{板块码: 收益序列或 None}）让同一报告内
     每个板块文件只读一次（持仓 ≤10 × 候选 ≤20，逐对算可接受，重读文件不行）。
+
+    ⚠️ NaN 守卫（2026-08-31 review 低优先项）：任一侧收益序列方差为 0
+    （停牌后恢复交易的常数段等）时 Pearson=NaN —— NaN 相关=数据无效，不进候选；
+    否则 ``max()`` 遇 NaN 选择不确定，且 NaN 会漏进 JSON 落盘（json 默认放行 NaN）。
     """
     stock_ret = _daily_returns(tm.read_vipdoc(stock_code), window)
     if stock_ret is None:
@@ -386,7 +394,10 @@ def _sector_fit_map(
         joined = pd.concat([stock_ret, sret], axis=1, join="inner").dropna()
         if len(joined) < 20:
             continue
-        out[c] = float(joined.iloc[:, 0].corr(joined.iloc[:, 1]))
+        r = float(joined.iloc[:, 0].corr(joined.iloc[:, 1]))
+        if math.isnan(r):
+            continue
+        out[c] = r
     return out
 
 

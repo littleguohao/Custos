@@ -106,7 +106,7 @@
 | 数据项 | 状态 | 来源 | 采集入口 | 备注 |
 |---|---|---|---|---|
 | 官方细分行业（881xxx） | ✅ | `tdxzs3.cfg` 本地 | `tq_sector.classify_sector()` | **每股恰好一个**，2026-08-04 实测 5546 只零冲突（f309ac6） |
-| 概念/主题标签 | ✅ | TQ `download_file(down_type=4)` | `concept_tags.py` | miscinfo 8.1MB / 68161 条；实测 1132ms |
+| 概念/主题标签 | 🚫 已删除 | ~~TQ `download_file(down_type=4)`~~ | ~~`concept_tags.py`~~ | v0.157 整删（owner 拍板，无在链消费方）；原实测 miscinfo 8.1MB / 68161 条 / 1132ms |
 | 板块指数日线（880xxx） | ✅ | TQ | `fetch_sector_index_history.py` | 供板块相位 MACD；生产验证 587/587（ba8a396） |
 | 板块成分股 | ✅ | 本地 `block.dat` / TQ | `tq_sector` / `holding_sector_mapper` | 01583e8 起改本地文件，去 tqcenter 依赖 |
 | 板块涨幅排序 | ❌ | ~~tdx_screener~~ | — | 未接入 |

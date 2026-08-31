@@ -70,7 +70,7 @@ src/
 
 - `datasource/collect/` — `collect_holding_quotes`(持仓+指数报价)、`collect_incremental_market`(A50/CNH/涨跌停梯队等)、`collect_fund_flow`(东财资金流)、`online_quotes`(域B独立在线行情,不依赖TDX)。
 - `datasource/`（顶层）— 数据刷新类：`refresh_eod_klines`/`refresh_market_indices`（EOD 与指数）、`sync_compass_amv`（指南针 0AMV 台账）、`tdx_ext_quotes`/`overseas_market_collector`（海外市场）、`breadth_basis`（涨跌家数真值）、`trading_calendar`（交易日历）。2026-08-11 从 market_timing 迁入：它们只依赖 L0/L1，是数据层不是择时。
-- `datasource/local_tdx/` — 本地通达信数据封装(tq_http 快照、指南针 AMV、板块、miscinfo 概念标签),详见 `local_tdx/README.md`。
+- `datasource/local_tdx/` — 本地通达信数据封装(tq_http 快照、指南针 AMV、板块),详见 `local_tdx/README.md`。
 - `datasource/news/` — `rss_collector`/`rss_filter`/盘前情报 schema/盘后新闻摘要。
 - `pipeline/market_timing/` — 择时评分、AMV/0AMV 状态机、技术监控、主题跟踪等。
 - `pipeline/screening/` — 每日选股链:`formula_screen`(TQ 公式初筛)、`enrich_candidates`(模式识别)、`score_candidates`(共振打分分层)、`candidate_table`(备选表格);18:00 独立链(run_1800.py)运行,与三份报告分离,TdxW 未运行时干净降级。

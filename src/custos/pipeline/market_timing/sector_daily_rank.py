@@ -329,6 +329,8 @@ def refresh_active(out_dir: Path, date: str, window: int, min_hits: int) -> dict
         "files_used": len(files),
         "active": active,
     }
+    # ⚠️ sector_active.json 全仓零读者（v0.158 排查），owner 未拍板去留，
+    #    暂随主产物保留 —— 每个产出日照常刷新，但不接入任何下游。
     write_json_atomic(Path(out_dir) / ACTIVE_FILE, payload)
     return payload
 

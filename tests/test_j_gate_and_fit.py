@@ -40,7 +40,6 @@ def _hits(*codes):
 
 
 def _run_enrich(monkeypatch, df_by_code, universe_cfg):
-    monkeypatch.setattr(ec, "build_stock_theme_map", lambda **k: ({}, True))
     return ec.enrich(
         "2026-07-22",
         hits_data=_hits(*df_by_code),

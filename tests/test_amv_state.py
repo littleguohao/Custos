@@ -113,7 +113,9 @@ class TestAppendDedupe:
         )
         lines = [
             json.loads(l)
-            for l in (env / "0amv_observations.jsonl").read_text(encoding="utf-8").splitlines()
+            for l in (env / "0amv_observations.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
             if l.strip()
         ]
         assert len(lines) == 1, "同值同日跨来源不得重复记账"
@@ -129,7 +131,9 @@ class TestAppendDedupe:
         )
         lines = [
             json.loads(l)
-            for l in (env / "0amv_observations.jsonl").read_text(encoding="utf-8").splitlines()
+            for l in (env / "0amv_observations.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
             if l.strip()
         ]
         assert len(lines) == 2, "纠错留痕：旧记录不删（标作废），新记录追加"
@@ -172,3 +176,56 @@ class TestAppendDedupe:
         assert recs == [{"date": "2026-08-05", "change_pct": 4.10}], (
             "作废旧值不得进 regime"
         )
+
+
+def _ledger_lines(market):
+    return [
+        json.loads(l)
+        for l in (market / "0amv_observations.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if l.strip()
+    ]
+
+
+class TestAppendDedupeQuality:
+    """v0.156：去重不得吞掉 quality 升级（candidate→confirmed 必须落盘），
+    也不得对着 superseded 旧值去重（作废记录不构成去重理由）。"""
+
+    def test_candidate_to_confirmed_upgrade_appended(self, env):
+        """先记 candidate 值 V、后报 confirmed 同值 V ⇒ confirmed 升级落盘。
+        否则读侧只采 confirmed，该日从 regime 重放消失（V 跨阈值时回测与 live 分叉）。"""
+        amv_state.append_observation(
+            "2026-08-05", {"amv_change_pct": 3.87, "quality": "candidate"}
+        )
+        rec = amv_state.append_observation(
+            "2026-08-05", {"amv_change_pct": 3.87, "quality": "confirmed"}
+        )
+        assert rec["quality"] == "confirmed"
+        lines = _ledger_lines(env)
+        assert len(lines) == 2, "confirmed 升级必须落盘，不得被同值去重吞掉"
+        assert [x["quality"] for x in lines] == ["candidate", "confirmed"]
+
+    def test_confirmed_then_candidate_still_deduped(self, env):
+        """原有去重行为不破：已有 confirmed 同值，再来 candidate 不算新信息。"""
+        amv_state.append_observation(
+            "2026-08-05", {"amv_change_pct": 3.87, "quality": "confirmed"}
+        )
+        ret = amv_state.append_observation(
+            "2026-08-05", {"amv_change_pct": 3.87, "quality": "candidate"}
+        )
+        lines = _ledger_lines(env)
+        assert len(lines) == 1 and lines[0]["quality"] == "confirmed"
+        assert ret["quality"] == "confirmed", "去重命中时返回既有记录"
+
+    def test_rereport_of_superseded_value_not_deduped(self, env):
+        """3.87 被 4.10 纠错 superseded 后，重报 3.87 不得被吞——
+        生效值应回到 3.87（4.10 标作废），而不是仍挂着冲突的新值。"""
+        for v in (3.87, 4.10, 3.87):
+            amv_state.append_observation(
+                "2026-08-05", {"amv_change_pct": v, "quality": "confirmed"}
+            )
+        lines = _ledger_lines(env)
+        assert len(lines) == 3, "重报已 superseded 的旧值必须落盘（纠错回去）"
+        active = [x for x in lines if not x.get("superseded")]
+        assert len(active) == 1 and active[0]["amv_change_pct"] == 3.87

@@ -5,9 +5,11 @@
 落盘一个标记,然后用默认值继续跑,下游把默认值当真值。修上游而不接下游,等于
 只把问题从"没检测"变成"检测了但没人听"。
 
-本文件专门守两条曾经断开的链:
+本文件守一条曾经断开的链:
   C5  compass_amv 说 unverified → sync_compass_amv 必须据此降级
-  C6  concept_tags 说 stale     → enrich_candidates 必须据此告警
+
+（C6 concept_tags 的 stale 元数据传导链随数据源整体删除——v0.157 owner 拍板，
+miscinfo 概念标签无在链消费方，模块已整删。）
 """
 
 from __future__ import annotations
@@ -122,121 +124,6 @@ class TestCompassQualityReachesLedger:
             (market / f"{target}_market_timing_input.json").read_text(encoding="utf-8")
         )
         assert mkt["amv_0day"] == 4.5
-
-
-class TestConceptTagStalenessReachesConsumer:
-    """C6: 标签陈旧必须能被消费方看到,不能只落在文件里。"""
-
-    def test_load_tags_meta_reports_staleness(self, tmp_path, monkeypatch):
-        from custos.datasource.local_tdx import concept_tags
-
-        out = tmp_path / "tags.json"
-        out.write_text(
-            json.dumps(
-                {
-                    "date": "2026-07-27",
-                    "stale": True,
-                    "requested_date": "2026-08-03",
-                    "tags": {"600000": ["银行"]},
-                }
-            ),
-            encoding="utf-8",
-        )
-        monkeypatch.setattr(concept_tags, "OUT_PATH", out)
-        tags, meta = concept_tags.load_tags_meta()
-        assert tags == {"600000": ["银行"]}
-        assert meta["stale"] is True
-        assert meta["date"] == "2026-07-27" and meta["requested_date"] == "2026-08-03"
-
-    def test_fresh_tags_not_marked_stale(self, tmp_path, monkeypatch):
-        from custos.datasource.local_tdx import concept_tags
-
-        out = tmp_path / "tags.json"
-        out.write_text(
-            json.dumps({"date": "2026-08-03", "tags": {"600000": ["银行"]}}),
-            encoding="utf-8",
-        )
-        monkeypatch.setattr(concept_tags, "OUT_PATH", out)
-        _, meta = concept_tags.load_tags_meta()
-        assert meta["available"] is True and meta["stale"] is False
-
-    def test_missing_file_is_distinguishable_from_stale(self, tmp_path, monkeypatch):
-        from custos.datasource.local_tdx import concept_tags
-
-        monkeypatch.setattr(concept_tags, "OUT_PATH", tmp_path / "nope.json")
-        tags, meta = concept_tags.load_tags_meta()
-        assert tags == {} and meta["available"] is False
-        assert meta["reason"] == "tags_file_missing"
-
-    def test_load_tags_still_returns_plain_dict(self, tmp_path, monkeypatch):
-        """向后兼容:老调用方拿到的仍是 {code: [tags]}。"""
-        from custos.datasource.local_tdx import concept_tags
-
-        out = tmp_path / "tags.json"
-        out.write_text(
-            json.dumps({"date": "2026-08-03", "tags": {"600000": ["银行"]}}),
-            encoding="utf-8",
-        )
-        monkeypatch.setattr(concept_tags, "OUT_PATH", out)
-        assert concept_tags.load_tags() == {"600000": ["银行"]}
-
-    def test_enrich_warns_on_stale_tags(self, monkeypatch, capsys):
-        """消费侧:陈旧标签必须产生告警,但标签本身仍要被使用(退化慢,可用性优先)。"""
-        from custos.pipeline.screening import enrich_candidates as ec
-
-        monkeypatch.setattr(ec.concept_tags, "load_tags", lambda: {"600000": ["银行"]})
-        monkeypatch.setattr(
-            ec.concept_tags,
-            "load_tags_meta",
-            lambda: (
-                {"600000": ["银行"]},
-                {
-                    "available": True,
-                    "stale": True,
-                    "date": "2026-07-27",
-                    "requested_date": "2026-08-03",
-                },
-            ),
-        )
-        monkeypatch.setattr(
-            ec,
-            "_load_json",
-            lambda p, d: {
-                "themes": [
-                    {"theme_id": "T1", "theme_name": "银行", "semantic_tags": ["银行"]}
-                ]
-            },
-        )
-        stock_theme, ok = ec.build_stock_theme_map()
-        err = capsys.readouterr().err
-        assert "概念标签陈旧" in err
-        assert "2026-07-27" in err, "告警须带上标签的真实日期,便于归因"
-        assert stock_theme.get("600000", {}).get("theme_id") == "T1", "陈旧不等于弃用"
-        assert ok is True
-
-    def test_enrich_silent_when_tags_fresh(self, monkeypatch, capsys):
-        from custos.pipeline.screening import enrich_candidates as ec
-
-        monkeypatch.setattr(ec.concept_tags, "load_tags", lambda: {"600000": ["银行"]})
-        monkeypatch.setattr(
-            ec.concept_tags,
-            "load_tags_meta",
-            lambda: (
-                {"600000": ["银行"]},
-                {"available": True, "stale": False, "date": "2026-08-03"},
-            ),
-        )
-        monkeypatch.setattr(
-            ec,
-            "_load_json",
-            lambda p, d: {
-                "themes": [
-                    {"theme_id": "T1", "theme_name": "银行", "semantic_tags": ["银行"]}
-                ]
-            },
-        )
-        ec.build_stock_theme_map()
-        assert "概念标签陈旧" not in capsys.readouterr().err
 
 
 class TestReadmeContractMatchesCode:

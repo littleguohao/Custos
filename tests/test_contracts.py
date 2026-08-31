@@ -351,7 +351,7 @@ VALID_MTI = {
     "market_breadth": {"as_of": None},
     "sentiment": {"as_of": None},
     "turnover": {"as_of": None},
-    "theme": {},
+    # theme 节已删（主线口径随 TODO #26 撤下，collector 不再写、spec 同步移除）。
     "macro_policy": {},
     "data_quality": {},
 }
@@ -448,6 +448,40 @@ class TestSectionAsOfRequired:
             only=("market_breadth", "sentiment", "turnover"),
         )
         assert not r["valid"] and any(f"{section}.as_of" in e for e in r["errors"])
+
+
+class TestBreadthVipdocAsOfOptional:
+    """2026-08-31（review 低优先项，owner 拍板全修）：market_breadth 补机器可读的
+    自算桶数据日 ``vipdoc_as_of`` —— 落盘的 ``as_of`` 是 880005 官方涨家数数据日，
+    跌/平/停自算桶的数据日此前只在 note 文案里，机器读不到。
+
+    走 spec 的**可选字段**机制（参照 quality/effective_state 的做法）：
+    旧产物没有它 ⇒ 缺失放行；出现时类型必须 str、允许 None（自算失败的回落路径）。"""
+
+    def test_absent_ok(self):
+        assert C.check("market_timing_input", VALID_MTI)["valid"]
+
+    def test_null_ok(self):
+        good = {
+            **VALID_MTI,
+            "market_breadth": {"as_of": None, "vipdoc_as_of": None},
+        }
+        assert C.check("market_timing_input", good)["valid"]
+
+    def test_date_str_ok(self):
+        good = {
+            **VALID_MTI,
+            "market_breadth": {"as_of": "2026-08-28", "vipdoc_as_of": "20260828"},
+        }
+        assert C.check("market_timing_input", good)["valid"]
+
+    def test_non_str_rejected(self):
+        bad = {
+            **VALID_MTI,
+            "market_breadth": {"as_of": None, "vipdoc_as_of": 20260828},
+        }
+        r = C.check("market_timing_input", bad)
+        assert not r["valid"] and any("vipdoc_as_of" in e for e in r["errors"])
 
 
 class TestOnlyScoping:
@@ -675,7 +709,6 @@ class TestSectorTechnicalSummaryContract:
         "available": False,
         "reason": "无成分股行情",
         "representative_stocks": [],
-        "semantic_tags": [],
     }
     AV = {
         **UN,

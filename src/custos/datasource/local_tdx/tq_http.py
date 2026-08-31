@@ -29,15 +29,16 @@ DEFAULT_TIMEOUT = 15
 
 # ⚠️ `download_file` 的危险 down_type —— **代码级拦截，不是文档约定**
 #
-# `TDX_LOCAL_INTERFACES.md` 有一节「TQ 服务可被打挂」的风险记录，`concept_tags.py` 顶部也写着
-# 「只调用 down_type=4（实测安全）；禁止触碰 1/5/6（可打挂 TQ 服务）」。
+# `TDX_LOCAL_INTERFACES.md` 有一节「TQ 服务可被打挂」的风险记录（探测报告 §四教训：
+# 1/5/6 实测可打挂 TdxW 服务；原 concept_tags.py 顶部也写着同样的约束，
+# 该模块已随 miscinfo 概念标签数据源在 v0.157 整体删除）。
 # 但 `call()` 是泛型入口 —— 谁写一行 `call("download_file", {"down_type": 1})` 都不会被挡，
 # 而后果是 TdxW 服务挂掉、整条选股链和持仓行情一起没了。
 #
 # 本仓库反复踩的坑正是「写进文档不等于内化」（同一个连接反模式跨两天犯了三次）。
 # 所以这条约束做成拦截：非白名单的 down_type 直接返回结构化错误，不发请求。
 # 确有需要探测时，显式传 `allow_unsafe_download=True`，让调用方为它签名。
-SAFE_DOWN_TYPES = frozenset({4})  # 4 = miscinfo（概念/主题标签），实测安全
+SAFE_DOWN_TYPES = frozenset({4})  # 4 = miscinfo，实测安全（消费方已于 v0.157 删除）
 
 # TQ 要求 `stock_code` **带市场后缀**（`600000.SH`）。传裸 6 位会得到 `ErrorId=2
 # stock_code error` —— 这是 2026-08-06 探针实测踩到的：探针传 `"600000"`，三个

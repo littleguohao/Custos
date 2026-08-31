@@ -440,7 +440,10 @@ class TestPhase3:
         """真实 eval 链路冒烟：合成强信号样本，三方案终审应通过且 verdict 字段齐全。
 
         效应量要够大（n=200、命中组 75% 胜率）：样本小/效应弱时 C3★ 的
-        Wilson 不重叠条件不过——这不是 bug，是判据设计（显著性守门）。
+        「篮子 margin > 全样本 margin」条件不过——这不是 bug，是判据设计
+        （margin 守门）。⚠️ 注：与全样本胜率的 Wilson 95% 重叠在实现里**仅作
+        注记**（`C3_star_wilson_overlap`），不进判定（score_calibration_study
+        .py:239-246 的 pass_all 不含它）。
         """
         trades = []
         for i in range(200):

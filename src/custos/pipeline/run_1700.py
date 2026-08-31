@@ -19,7 +19,15 @@ import sys
 import time
 
 
-from custos.core.paths import BASE, cn_today, TOOLS, LOGS, QUALITY_DIR, TRADES_DIR
+from custos.core.paths import (
+    BASE,
+    cn_today,
+    TOOLS,
+    LOGS,
+    MARKET_DIR,
+    QUALITY_DIR,
+    TRADES_DIR,
+)
 from custos.core.paths import REVIEWS as _REVIEWS_ROOT
 from custos.core.paths import daily_report_dir
 from custos.core.pipeline_kit import (
@@ -283,6 +291,56 @@ def _collect_aux_data(target: str, stages_log: list[dict]) -> None:
         )
 
 
+def _collect_sector_rank(target: str, stages_log: list[dict]) -> None:
+    # 3e. 板块涨跌榜采集（#26，owner 拍板接进每日链）—— final_close_review §4
+    #     板块榜的主路径数据源（data/sectors/daily_rank/{day}.json）。
+    #     ⚠️ 必须先增量刷板块指数：采集器的当日涨跌幅读
+    #     data/market/sector_index/*.csv，而该缓存此前只由 18:00 链刷新 ——
+    #     17:00 时点 CSV 只到昨日，不先刷则采集器 build_day 恒返回 None
+    #     （当日无任何板块指数数据 ⇒ 跳过并退 2），主路径永不命中。
+    #     增量模式幂等（merge 进已有 CSV），18:00 链的 refresh_sector_index 照跑不受影响。
+    r = _run_stage(
+        stages_log,
+        [
+            "uv",
+            "run",
+            "python",
+            str(TOOLS / "datasource" / "local_tdx" / "fetch_sector_index_history.py"),
+            "--out",
+            str(MARKET_DIR / "sector_index"),
+            "--start",
+            "20180101",
+            "--incremental",
+        ],
+        "refresh_sector_index",
+        note="best-effort，失败不中断(板块榜的前置数据;18:00 链还有一份)",
+    )
+    tail = _last_line(r["out"])
+    if not r["ok"]:
+        print(f"[WARN] refresh_sector_index failed: {tail or r['out'][:200]}")
+    else:
+        print(f"[OK] {tail or 'sector index refreshed'}")
+
+    r = _run_stage(
+        stages_log,
+        [
+            "uv",
+            "run",
+            "python",
+            str(TOOLS / "pipeline" / "market_timing" / "sector_daily_rank.py"),
+            "--date",
+            target,
+        ],
+        "sector_daily_rank",
+        note="best-effort，失败不中断(仅影响复盘 §4 板块榜数据源)",
+    )
+    tail = _last_line(r["out"])
+    if not r["ok"]:
+        print(f"[WARN] sector_daily_rank failed: {tail or r['out'][:200]}")
+    else:
+        print(f"[OK] {tail or 'sector daily rank collected'}")
+
+
 def _sync_and_merge_amv(target: str, stages_log: list[dict]) -> None:
     # 3b. 同步指南针 0AMV → 写 confirmed 观测 + 填 amv_0day（best-effort）。
     #     必须在 merge_incremental_market 之前：merge 据 amv_0day/confirmed观测 自动把
@@ -468,6 +526,9 @@ def main(argv=None) -> int:
     _calc_mfe_mae(target, stages_log)
     _ledger_reconcile(target, stages_log)
     _collect_aux_data(target, stages_log)
+    # 板块榜在 aux 之后：资金流快照(collect_fund_flow)与 EOD K线(refresh_eod_klines)
+    # 都是它的可选/必需输入；又必须在硬失败链之前，final_close_review §4 才读得到。
+    _collect_sector_rank(target, stages_log)
     _sync_and_merge_amv(target, stages_log)
 
     rc = _run_hard_stages(target, run_started, t0, stages_log)

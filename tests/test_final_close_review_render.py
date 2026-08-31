@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import json
 import pathlib
 
 import pytest
@@ -751,12 +752,14 @@ class TestNewsEvidenceFallback:
         assert text.count("美国发起电力设备检查") == 1
 
     def test_keywords_built_from_mapping_and_themes(self):
-        """关键词来源钉死：股票名 + industry/BlockName/concepts + 主题名分段与语义标签。"""
+        """关键词来源钉死：股票名 + industry/BlockName/concepts + 主题名分段。
+
+        v0.156 起主题行不再有 semantic_tags（人工主题映射表已废弃），
+        关键词只从 theme_name 分段取。"""
         pmap = {"600312": {"代码": "600312", "名称": "平高电气"}}
         sectors = [
             {
                 "theme_name": "电力/电网设备",
-                "semantic_tags": ["特高压", "智能电网"],
                 "holding_related": ["600312.SH"],
             }
         ]
@@ -777,8 +780,6 @@ class TestNewsEvidenceFallback:
             "储能",
             "电力",
             "电网设备",
-            "特高压",
-            "智能电网",
         ):
             assert w in words, w
 
@@ -817,11 +818,13 @@ class TestSectorBoard:
         assert "待重设计" not in text, "#26 待重设计标注必须随旧节删掉"
 
     def test_both_missing_is_unavailable_with_chain_note(self):
-        """榜不可得 ⇒ unavailable 并注明「采集器未接入日链」（只注明，不改链路）。"""
+        """榜不可得 ⇒ unavailable 并注明链路现状：sector_daily_rank 已接入
+        17:00 链（两个 best-effort stage，v0.158），unavailable = 当日均未产出。"""
         lines = []
         fcr.render_sector_board(lines, {}, None, None)
         text = "\n".join(lines)
-        assert "unavailable" in text and "未接入日链" in text
+        assert "unavailable" in text and "已接入 17:00 链" in text
+        assert "未接入日链" not in text, "sector_daily_rank 已接入日链，旧文案不得复活"
 
     def test_fallback_computes_from_sector_index_cache(self, tmp_path, monkeypatch):
         """采集器榜缺失 ⇒ 用板块指数缓存自算当日涨跌幅（run_1800 每日更新的兜底）。"""
@@ -850,6 +853,35 @@ class TestSectorBoard:
     def test_fallback_none_when_no_data(self, tmp_path, monkeypatch):
         monkeypatch.setattr(fcr, "_sector_name_map", lambda: {})
         assert fcr._sector_rank_fallback("2026-08-28", tmp_path) is None
+
+    def test_collector_product_preferred_when_present(self, tmp_path, monkeypatch):
+        """主路径真命中：采集器当日榜存在 ⇒ 直接用它，**不走**缓存自算兜底。
+
+        此前采集器未接入日链，data/sectors/daily_rank/{day}.json 在生产上永不
+        存在，主路径恒走兜底 —— 本测钉住「产物在 ⇒ 主路径生效」（接线钉测见
+        test_sector_daily_rank.py::TestWiredIntoDailyChain）。
+        """
+        rank_dir = tmp_path / "sectors" / "daily_rank"
+        rank_dir.mkdir(parents=True)
+        payload = {
+            "date": "2026-08-28",
+            "gainers_top": [
+                {"rank": 1, "code": "880465", "name": "半导体", "pct": 2.5}
+            ],
+            "losers_top": [{"rank": 1, "code": "880301", "name": "电力", "pct": -1.5}],
+        }
+        (rank_dir / "2026-08-28.json").write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+        )
+        monkeypatch.setattr(fcr, "DATA", tmp_path)
+        monkeypatch.setattr(
+            fcr,
+            "_sector_rank_fallback",
+            lambda *a, **k: pytest.fail("主路径命中时不该走缓存自算兜底"),
+        )
+        rank, source = fcr._sector_rank("2026-08-28")
+        assert source == "sector_daily_rank 采集器产物"
+        assert rank["gainers_top"][0]["code"] == "880465"
 
     @pytest.mark.parametrize(
         "pct,want",

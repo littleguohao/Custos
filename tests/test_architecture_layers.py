@@ -618,6 +618,8 @@ class TestMarketTimingInputWriters:
         "datasource/overseas_market_collector.py",
         # 盘后指数/成交额兜底刷新：a_share_indices/turnover/breadth/sentiment
         "datasource/refresh_market_indices.py",
+        # 14:45 盘中快照回填：a_share_indices[*].intraday
+        "datasource/collect/collect_intraday_snapshot.py",
         # 每日管线收尾：data_quality 去重
         "pipeline/daily_pipeline.py",
     }

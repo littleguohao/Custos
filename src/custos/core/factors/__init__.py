@@ -105,7 +105,7 @@ def registry() -> dict[str, dict]:
         except Exception as exc:  # noqa: BLE001 —— 单个因子坏了不该让注册表整体失效
             # ⚠️ 但**不得静默**：2026-08-06 `_shares` 漏 import json 就是这类 fail-open
             # 吞掉的 —— 空注册表和全员坏掉无法区分。失败照常跳过，但必须留痕到 stderr
-            # （项目惯例 `[WARN] ...`，同 enrich_candidates.build_stock_theme_map）。
+            # （项目惯例 `[WARN] ...`，同 enrich_candidates 的降级留痕）。
             failed.append(f"{m.name}: {type(exc).__name__}: {exc}")
             continue
         meta = getattr(mod, "FACTOR", None)

@@ -267,6 +267,13 @@ def compute_breadth_from_vipdoc(date: str | None = None, tdx_root=None) -> dict:
     - 自算涨家数与 880005 官方值对照，差异 >2% 标 ``warning`` 写进 note，**不阻断**
       （宇宙边界差 ~0.3% 属正常）。
 
+    已知偏差（除权除息日误计「跌」桶，2026-08-31 复核确认）：``.day`` 存的是
+    **不复权价**，除息日收盘会机械性下跌（分红从股价中扣除），被本分桶口径计为「跌」；
+    而 880005 官方口径按**调整后昨收**比较，不计为跌。量级约每天几十只，方向固定 —
+    跌桶略偏大 ⇒ 市场温度略偏低（保守方向，不会把弱市读成强市）。暂不修：修正需把
+    复权因子（xdxr 除权数据）与每只个股逐日对齐，成本与这部分偏差的收益不成比例，
+    且偏保守方向对打分/渲染不构成误判风险。后续若做精确对齐可再议。
+
     ``date``（YYYY-MM-DD 或 YYYYMMDD）为期望数据日，仅用于标注 ``stale``，
     分桶永远按 vipdoc 实有的最新交易日算（数据日是几号就如实报几号）。
     失败返回 ``{"available": False, "note": 原因}``，调用方回落 breadth_counts。
@@ -315,8 +322,9 @@ def compute_breadth_from_vipdoc(date: str | None = None, tdx_root=None) -> dict:
 def breadth_counts_real(up_count, date: str | None = None, tdx_root=None) -> dict:
     """真值口径优先：vipdoc 本地自算四桶；自算失败回落 :func:`breadth_counts`。
 
-    返回 ``breadth_counts`` 同形键 + ``flat_count`` / ``suspended_count``
-    （回落路径为 None）。``up_count`` 仍是 880005 官方涨家数（渲染/评分沿用），
+    返回 ``breadth_counts`` 同形键 + ``flat_count`` / ``suspended_count`` /
+    ``vipdoc_as_of``（自算桶的数据日，机器可读；回落路径为 None —— note 文案
+    里的人读日期不变）。``up_count`` 仍是 880005 官方涨家数（渲染/评分沿用），
     自算值只用于对照校验；``up_down_ratio`` 与写入 JSON 的 up_count/down_count
     同口径（官方涨 ÷ 自算跌）。``tdx_root`` 仅供测试注入，生产调用不传。
     """
@@ -332,10 +340,12 @@ def breadth_counts_real(up_count, date: str | None = None, tdx_root=None) -> dic
             "up_down_ratio_status": VIPDOC_STATUS,
             "total_stocks": real["universe_size"],
             "total_stocks_source": "vipdoc_universe_self_compute",
+            "vipdoc_as_of": real["as_of"],
             "note": real["note"],
         }
     fb = breadth_counts(up_count)
     fb["flat_count"] = None
     fb["suspended_count"] = None
+    fb["vipdoc_as_of"] = None
     fb["note"] = f"{fb['note']}（vipdoc 自算不可用：{real.get('note')}）"
     return fb

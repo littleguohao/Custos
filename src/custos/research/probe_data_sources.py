@@ -328,9 +328,11 @@ def probe_qfq(repeat: int) -> list[Probe]:
 def probe_tq(repeat: int) -> list[Probe]:
     """TQ-Local：TdxW.exe 的本地 JSON-RPC 服务。
 
-    实际接入的只有 6 个方法，分散在**四处**独立访问路径：
-      tq_http.py(4 个薄封装) / concept_tags(download_file) /
-      formula_screen(公式) / trading_calendar(自己拼请求，没走 tq_http)
+    实际接入的只有 5 个方法，分散在**三处**独立访问路径：
+      tq_http.py(4 个薄封装) / formula_screen(公式) /
+      trading_calendar(自己拼请求，没走 tq_http)
+      （concept_tags 的 download_file(down_type=4) 探针随 miscinfo 数据源
+      在 v0.157 一并删除——无在链消费方。）
     """
     out: list[Probe] = []
     try:
@@ -363,13 +365,6 @@ def probe_tq(repeat: int) -> list[Probe]:
     )
     out.append(
         Probe("tq", "get_more_info", "扩展字段").run(lambda: T.more_info(TQ_SH), repeat)
-    )
-    out.append(
-        Probe(
-            "tq",
-            "download_file(down_type=4)",
-            "概念标签 miscinfo。**只探 4**；1/5/6 实测可打挂服务",
-        ).run(lambda: T.call("download_file", {"down_type": 4}, timeout=30), 1)
     )
     # 危险 down_type 的**拦截**是否生效（不真的发请求）
     out.append(
