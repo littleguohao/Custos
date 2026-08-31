@@ -96,6 +96,18 @@ def replay_ledger(
     # 股份入账类（转债转入/拆股）必须参与回放：只见卖出不见来源会假超卖（#32）。
     cats = TRADE_CATEGORIES | SHARE_CREDIT_CATEGORIES
     trades = df[df["交易类别"].isin(cats)].copy() if len(df) else df
+    # 港股等非 A 股成交不进 A 股口径回放：台账港股底仓不完整（FIFO 从 0 起必假超卖），
+    # 且裸码前缀会被误路由（002158 医渡科技 vs 深市汉钟精机）。持仓快照中的港股
+    # 由 current_positions 的 market 标记另行处理（is_a_share_position）。
+    if len(trades):
+        from custos.core.code_utils import is_a_share_trade_row  # 局部导入避免环
+
+        before = len(trades)
+        trades = trades[
+            trades.apply(lambda r: is_a_share_trade_row(r.to_dict()), axis=1)
+        ].copy()
+        if len(trades) < before:
+            print(f"[INFO] 对账回放跳过 {before - len(trades)} 行非A股成交（港股）")
     if not len(trades):
         return {
             "ok": True,
@@ -181,6 +193,10 @@ def reconcile(
         if positions_path.exists()
         else []
     )
+    # 持仓快照中的非 A 股（港股 market=HK）不进 A 股口径对账，与回放侧过滤一致。
+    from custos.core.code_utils import is_a_share_position  # 局部导入避免环
+
+    actual = [p for p in actual if is_a_share_position(p)]
     diffs = (
         diff_positions(rep["positions"], actual, cost_tol=cost_tol) if rep["ok"] else []
     )

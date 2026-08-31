@@ -226,6 +226,34 @@ def is_a_share_position(row: dict | None) -> bool:
     return market_of(row.get("代码", "")) in {"SH", "SZ", "BJ"}
 
 
+# 台账中出现过的**港股**代码（clean_code 补零为 6 位后，裸码前缀会被 market_of
+# 误判为深市，见 is_a_share_position 背景）。补零后会撞 A 股同号：
+#   00981 中芯国际(HK) -> 000981（A 股 000981 为山子国际/山子股份）
+#   02158 医渡科技(HK) -> 002158（A 股 002158 为汉钟精机）
+#   02331 李宁(HK)     -> 002331（A 股 002331 为榕基软件/卫士通系）
+# 台账成交行没有 market 字段，只能按名称+代码显式登记。新增港股时在此补登记。
+HK_LEDGER_CODES = {"000981": "中芯国际", "002158": "医渡科技", "002331": "李宁"}
+
+
+def is_a_share_trade_row(row: dict | None) -> bool:
+    """台账**成交行**（master_trade_ledger 行，含 代码/名称）是否 A 股。
+
+    与 :func:`is_a_share_position` 同口径，但成交行没有 ``market`` 标记、
+    且港股裸码前缀启发式会误判，故以 :data:`HK_LEDGER_CODES` 名称+代码显式排除。
+    A 股链路（台账对账回放等）用它过滤非 A 股成交。
+    """
+    if not isinstance(row, dict):
+        return False
+    code = str(row.get("代码", "")).split(".")[0].zfill(6)
+    if code in HK_LEDGER_CODES:
+        # 登记为港股代码且名称匹配 -> 非 A 股；名称缺失时保守按登记口径判为港股。
+        # 若未来出现 A 股同号（目前 3 码均为 SZ 同号别的公司），需在此改显式 market 标记。
+        name = str(row.get("名称", "")).strip()
+        return bool(name) and name != HK_LEDGER_CODES[code]
+    # 其余按市场前缀启发式（A 股 = SH/SZ/BJ）
+    return market_of(code) in {"SH", "SZ", "BJ"}
+
+
 def norm_code(code: str) -> str:
     """Market-data semantics: ensure a .SH/.SZ/.BJ suffix (technical_monitor version).
 
