@@ -512,6 +512,42 @@ class TestQsxExit:
         )
         assert rec["exit_date"] == str(df["date"].iloc[j + 1])[:10]
 
+    def test_bbi_exit_family_switch_naming(self):
+        """v0.163 出场族开关：--bbi-exit-consec 2 --qsx-exit-consec 0 ⇒ BBI 跌破两根
+        清仓族，产物 tag 带 qx0 + _bbi2；默认口径（qx1、无 bbi tag）逐位不变。"""
+        ap = qrs._build_parser()
+        args = ap.parse_args(["--arm", "C"])
+        assert args.bbi_exit_consec == 0, "默认口径不动（R23：BBI 连破清仓关）"
+        out = qrs._default_out("C", 0, 400, args)
+        assert "_qx1_rv2" in out.name and "_bbi" not in out.name
+        args2 = ap.parse_args(
+            ["--arm", "C", "--qsx-exit-consec", "0", "--bbi-exit-consec", "2"]
+        )
+        out2 = qrs._default_out("C", 0, 400, args2)
+        assert "_qx0_rv2_bbi2" in out2.name
+
+    def test_bbi_exit_pass_through(self):
+        """bbi_exit_consec=2 + qsx_exit_consec=0 ⇒ 出 bbi_exit 记录（与 qsx 通道对偶）。"""
+        n = 40
+        closes = [10.0 + 0.1 * i for i in range(30)] + [12.0] + [9.0] * 9
+        closes = closes[:n]
+        df = _mk_df(closes)
+        entry_i = 25
+        gate = lambda s, p=None: len(s) - 1 == entry_i  # noqa: E731
+        trades = bf.evaluate_trades(
+            {"600000": df},
+            scorer=bf.SCORERS["baseline"],
+            entry_gate=gate,
+            tradability=False,
+            min_bars=5,
+            bbi_exit_consec=2,
+            stop_mode="pct",
+            stop_pct=50,
+            qsx_exit_consec=0,
+        )
+        assert len(trades) == 1
+        assert trades[0]["reason"] == "bbi_exit"
+
 
 # ---------------------------------------------------------------------------
 # 三臂 gate

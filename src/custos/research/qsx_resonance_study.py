@@ -31,6 +31,10 @@ QSX 或 DKX 共振——每次跌到 QSX 或 DKX 就反弹。止损 −12% + 盈
   `simulate_b1_trade` 新通道，reason=qsx_exit）。
   同一根 bar 内优先级：① 止损系（保本先判且盘中）→ ②a 分批止盈（减仓）→
   ②b BBI 连破（本轮关）→ ②c QSX 跌破清仓 → ③ 成本区（关）→ ④ 时间止损（关）。
+  **出场族切换**（v0.163，R23 后续对照）：``--bbi-exit-consec 2
+  --qsx-exit-consec 0`` 即「止盈=分批止盈+BBI 跌破两根清仓」口径（止损/保本/
+  分批不变）；产物 tag 带 ``_bbi{n}`` 与 QSX 族区分。⚠️ 两出场族基线不同
+  （QSX 清仓更紧更早，见 R23），跨族数字不直接比。
 - **技术分**：信号日 as-of live technical_score（复用 score_return_study 截断，
   无未来函数，已与 enrich 落盘对拍），用于 TOP20% 赢家分布对照。
 
@@ -596,6 +600,7 @@ def run_arm(
     breakeven_trigger: float = BREAKEVEN,
     scale_out_frac: float = SCALE_OUT,
     qsx_exit_consec: int = QSX_EXIT_CONSEC,
+    bbi_exit_consec: int = 0,
     lookback: int = LOOKBACK,
     tol: float = TOUCH_TOL,
     reclaim_bars: int = RECLAIM_BARS,
@@ -609,7 +614,9 @@ def run_arm(
     """逐股流式：加载全历史 → 预计算知行数组 → evaluate_trades（本臂 gate +
     owner 出场口径）→ 信号日 as-of 技术分。出场配置各臂完全一致（过滤可拆）。
     ``resonance_version``：v2（默认，owner 2026-08-26 定稿六要素）/ v1（第一轮口径，
-    仅复现用）。``no_exclusion``：共振判定不减排除态（仅「排除项贡献」对照用）。"""
+    仅复现用）。``no_exclusion``：共振判定不减排除态（仅「排除项贡献」对照用）。
+    ``bbi_exit_consec``>0（v0.163）：启用 BBI 连破清仓（默认 0=关，R23 口径不变）；
+    配 ``qsx_exit_consec=0`` 即「BBI 跌破两根清仓」出场族。"""
     from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
 
     trades: list[dict[str, Any]] = []
@@ -641,7 +648,7 @@ def run_arm(
             scorer=bf.SCORERS["baseline"],  # 恒「可买」——进场只由 gate 决定
             entry_gate=_make_gate(arm, zx),
             amv_regime=regime,  # 只在 0AMV 做多区间进场
-            bbi_exit_consec=0,  # BBI 连破清仓本轮关闭（owner 口径）
+            bbi_exit_consec=bbi_exit_consec,  # 默认 0=关（R23 口径）；2=BBI 跌破两根清仓族
             stop_mode="pct",
             stop_pct=stop_pct,  # 初始止损 −12%（收盘判）
             cost_bps=cost_bps,
@@ -832,6 +839,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--qsx-exit-consec", type=int, default=QSX_EXIT_CONSEC, help="跌破 QSX 连破根数"
     )
     ap.add_argument(
+        "--bbi-exit-consec",
+        type=int,
+        default=0,
+        help="BBI 连破清仓根数（0=关，R23 默认口径；"
+        "配 --qsx-exit-consec 0 即「BBI 跌破两根清仓」出场族，v0.163）",
+    )
+    ap.add_argument(
         "--resonance-version",
         choices=("v1", "v2"),
         default="v2",
@@ -878,10 +892,11 @@ def _default_out(arm: str, seed: int, n_codes: int, args: argparse.Namespace) ->
     rv = f"_r{args.resonance_version}" if arm in ("C", "Cp") else ""
     if args.no_exclusion:
         rv += "_noexcl"
+    bbi = f"_bbi{args.bbi_exit_consec}" if args.bbi_exit_consec > 0 else ""
     tag = (
         f"qsx_resonance_study_arm{arm}_s{seed}_n{n_codes}"
         f"_stop{args.stop_pct:g}_be{args.breakeven:g}_so{args.scale_out:g}"
-        f"_qx{args.qsx_exit_consec}{rv}"
+        f"_qx{args.qsx_exit_consec}{rv}{bbi}"
     )
     return Path("artifacts/logs/qsx_resonance_study") / f"{tag}.json"
 
@@ -949,6 +964,7 @@ def main(argv: Optional[list] = None) -> int:
         bounce_pct=args.bounce_pct,
         vol_ma=args.vol_ma,
         no_exclusion=args.no_exclusion,
+        bbi_exit_consec=args.bbi_exit_consec,
     )
     if not trades:
         print(f"⛔ 臂 {args.arm} 0 笔交易——检查 regime 数据与宇宙", file=sys.stderr)
@@ -975,8 +991,17 @@ def main(argv: Optional[list] = None) -> int:
         "preregistered": PREREG_CRITERIA,
         "exit": (
             f"pct 初始止损 {args.stop_pct}%（收盘判）+ 保本 {args.breakeven}（盘中判）+ "
-            f"双中大阳分批止盈 {args.scale_out}（BBI 上方）+ 跌破 QSX 清仓"
-            f"（连破 {args.qsx_exit_consec} 根收盘，次日开盘）；BBI 连破清仓关闭"
+            f"双中大阳分批止盈 {args.scale_out}（BBI 上方）"
+            + (
+                f"+ 跌破 QSX 清仓（连破 {args.qsx_exit_consec} 根收盘，次日开盘）"
+                if args.qsx_exit_consec > 0
+                else ""
+            )
+            + (
+                f"+ BBI 连破 {args.bbi_exit_consec} 根清仓"
+                if args.bbi_exit_consec > 0
+                else "；BBI 连破清仓关闭"
+            )
         ),
         "cost_bps": args.cost_bps,
         "top_frac": args.top_frac,
