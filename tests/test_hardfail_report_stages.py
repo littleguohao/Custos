@@ -35,42 +35,31 @@ def prr_env(tmp_path, monkeypatch):
     from custos.pipeline.holdings import portfolio_review_report as prr
 
     (tmp_path / "holdings").mkdir()
-    plans = tmp_path / "plans"
-    plans.mkdir()
     monkeypatch.setattr(prr, "DATA", tmp_path)
-    monkeypatch.setattr(prr, "PLANS", plans)
-    return prr, tmp_path, plans
+    return prr, tmp_path
 
 
-def _write_prr_inputs(
-    tmp_path, plans, day, tech, b1, mt="状态：**进攻**\n建议总仓位：**40%-60%**\n"
-):
+def _write_prr_inputs(tmp_path, day, tech, b1):
     (tmp_path / "holdings" / f"{day}_holding_technical_summary.json").write_text(
         json.dumps(tech, ensure_ascii=False), encoding="utf-8"
     )
     (tmp_path / "holdings" / f"{day}_b1_holding_state.json").write_text(
         json.dumps(b1, ensure_ascii=False), encoding="utf-8"
     )
-    if mt is not None:
-        # 2026-08-12 起按日期目录归档：{day}/{day}_market_timing_score.md
-        d = plans / day
-        d.mkdir(parents=True, exist_ok=True)
-        (d / f"{day}_market_timing_score.md").write_text(mt, encoding="utf-8")
 
 
 class TestPortfolioReviewStateShadowing:
-    """回归：`state` 不得被循环内赋值覆盖。
+    """历史回归：b1 final_* 必须优先于 classify 回退落进 JSON。
 
-    原实现：`state=extract('状态：…')` 之后循环里 `state=b1.get(...)` ——
-    于是报告的「market_timing：**{state}**」打印的是**最后一只票的 b1 状态字典**。
+    原 `state` 变量遮蔽 bug 随 v0.162 md 停产消失（md 渲染已整段删除）——
+    钉测改钉结构化产物 holding_review.json 的内容。
     """
 
-    def test_market_timing_line_is_the_regime_not_a_dict(self, prr_env, monkeypatch):
-        prr, tmp, plans = prr_env
+    def test_b1_final_action_lands_in_json(self, prr_env, monkeypatch):
+        prr, tmp = prr_env
         day = "2026-08-07"
         _write_prr_inputs(
             tmp,
-            plans,
             day,
             [
                 {
@@ -92,19 +81,28 @@ class TestPortfolioReviewStateShadowing:
         )
         monkeypatch.setattr(sys, "argv", ["x", "--date", day])
         prr.main()
-        md = (plans / day / f"{day}_portfolio_review.md").read_text(encoding="utf-8")
-        line = next(l for l in md.splitlines() if "market_timing" in l)
-        assert line.strip() == "- market_timing：**进攻**", line
-        assert "final_" not in line and "{" not in line, "state 又被字典覆盖了"
+        rows = json.loads(
+            (tmp / "holdings" / f"{day}_holding_review.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert rows[0]["action"] == "持有" and rows[0]["priority"] == "P3"
+        assert "结构完好" in rows[0]["reason"]
 
-    def test_position_line_unaffected(self, prr_env, monkeypatch):
-        prr, tmp, plans = prr_env
+    def test_empty_inputs_produce_empty_json(self, prr_env, monkeypatch):
+        prr, tmp = prr_env
         day = "2026-08-07"
-        _write_prr_inputs(tmp, plans, day, [], [])
+        _write_prr_inputs(tmp, day, [], [])
         monkeypatch.setattr(sys, "argv", ["x", "--date", day])
         prr.main()
-        md = (plans / day / f"{day}_portfolio_review.md").read_text(encoding="utf-8")
-        assert "- 建议总仓位：**40%-60%**" in md
+        assert (
+            json.loads(
+                (tmp / "holdings" / f"{day}_holding_review.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            == []
+        )
 
 
 class TestPortfolioReviewClassify:
@@ -141,26 +139,22 @@ class TestPortfolioReviewClassify:
         _, _, why = self._c()
         assert why == ["暂无强触发信号"]
 
-    def test_missing_market_timing_md_degrades_to_unknown(self, prr_env, monkeypatch):
-        """择时报告缺失时应降级为「未知」，**不能崩**（硬失败 stage）。"""
-        prr, tmp, plans = prr_env
+    def test_missing_market_timing_md_still_writes_json(self, prr_env, monkeypatch):
+        """择时报告缺失也不再被读取（md 停产）——硬失败 stage 仍照常产 JSON，不能崩。"""
+        prr, tmp = prr_env
         day = "2026-08-07"
-        _write_prr_inputs(tmp, plans, day, [], [], mt=None)
+        _write_prr_inputs(tmp, day, [], [])
         monkeypatch.setattr(sys, "argv", ["x", "--date", day])
         prr.main()
-        md = (plans / day / f"{day}_portfolio_review.md").read_text(encoding="utf-8")
-        assert "- market_timing：**未知**" in md
-        assert "- 建议总仓位：**待确认**" in md
+        assert (tmp / "holdings" / f"{day}_holding_review.json").exists()
 
-    def test_empty_holdings_produces_valid_report(self, prr_env, monkeypatch):
-        """空持仓不能产出半截报告，也不能崩。"""
-        prr, tmp, plans = prr_env
+    def test_empty_holdings_produces_valid_json_no_md(self, prr_env, monkeypatch):
+        """空持仓产空数组 JSON；v0.162 起不再写 portfolio_review.md。"""
+        prr, tmp = prr_env
         day = "2026-08-07"
-        _write_prr_inputs(tmp, plans, day, [], [])
+        _write_prr_inputs(tmp, day, [], [])
         monkeypatch.setattr(sys, "argv", ["x", "--date", day])
         prr.main()
-        md = (plans / day / f"{day}_portfolio_review.md").read_text(encoding="utf-8")
-        assert "## 3. 风控触发项" in md and "- 暂无。" in md
         assert (
             json.loads(
                 (tmp / "holdings" / f"{day}_holding_review.json").read_text(
@@ -169,6 +163,7 @@ class TestPortfolioReviewClassify:
             )
             == []
         )
+        assert not list(tmp.rglob("*_portfolio_review.md")), "md 应已停产"
 
 
 # ─────────────────────────── execution_review ───────────────────────────

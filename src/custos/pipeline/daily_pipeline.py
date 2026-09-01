@@ -591,7 +591,6 @@ def main():
         MARKET_DIR / f"{args.date}_market_timing_input.json",
         daily_report_dir(args.date, PLANS) / f"{args.date}_market_timing_score.md",
         HOLDINGS_DIR / f"{args.date}_holding_technical_summary.json",
-        daily_report_dir(args.date, PLANS) / f"{args.date}_portfolio_review.md",
         daily_report_dir(args.date, PLANS) / f"{args.date}_chief_decision.md",
         daily_report_dir(args.date, PLANS) / f"{args.date}_0905_daily_report.md",
         DATA / "sectors" / f"{args.date}_sector_state.json",

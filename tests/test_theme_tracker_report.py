@@ -167,63 +167,6 @@ class TestActionBias:
         assert ttr.action_bias("震荡", 49.9) == "谨慎观察"
 
 
-class TestCompareHoldingToTheme:
-    def test_theme_unavailable_is_undecided(self):
-        """板块不可用时必须「未定」，不能猜强弱。"""
-        s, why = ttr.compare_holding_to_theme(
-            {"trend_state": "上涨"}, {"available": False}
-        )
-        assert s == "未定" and "无板块映射" in why
-
-    def test_fit_insufficient_is_undecided_with_honest_reason(self):
-        """贴合数据不足 ⇒「未定」+ 如实报原因（与无映射文案分开），不猜板块。"""
-        s, why = ttr.compare_holding_to_theme(
-            {"trend_state": "上涨"}, {"fit_insufficient": True}
-        )
-        assert s == "未定" and "贴合数据不足" in why
-
-    def test_stronger_trend(self):
-        s, _ = ttr.compare_holding_to_theme(
-            {"trend_state": "上涨"}, {"available": True, "trend_state": "横盘震荡"}
-        )
-        assert s == "强于板块"
-
-    def test_weaker_trend(self):
-        s, _ = ttr.compare_holding_to_theme(
-            {"trend_state": "下跌"}, {"available": True, "trend_state": "上涨"}
-        )
-        assert s == "弱于板块"
-
-    def test_same_trend_but_worse_position_is_weaker(self):
-        s, _ = ttr.compare_holding_to_theme(
-            {"trend_state": "横盘震荡", "box20_position": "下沿/破位区"},
-            {
-                "available": True,
-                "trend_state": "横盘震荡",
-                "box20_position": "箱体上半区",
-            },
-        )
-        assert s == "弱于板块"
-
-    def test_same_trend_better_position_is_stronger(self):
-        s, _ = ttr.compare_holding_to_theme(
-            {"trend_state": "横盘震荡", "box20_position": "上沿/突破区"},
-            {
-                "available": True,
-                "trend_state": "横盘震荡",
-                "box20_position": "下沿/破位区",
-            },
-        )
-        assert s == "强于板块"
-
-    def test_synced(self):
-        s, _ = ttr.compare_holding_to_theme(
-            {"trend_state": "上涨", "box20_position": "箱体上半区"},
-            {"available": True, "trend_state": "上涨", "box20_position": "箱体上半区"},
-        )
-        assert s == "同步"
-
-
 def _sector(code, name, category, count, stocks):
     """合成 tq_sector_map 的板块条目。"""
     return {
@@ -427,26 +370,6 @@ class TestSectorFitResolution:
             f"板块被重复读：{sector_reads}"
         )
 
-    def test_fit_goes_into_report_render(self, monkeypatch):
-        """§4 渲染三分标注之贴合：「智能电网（贴合0.9x）」带系数。"""
-        self._klines(
-            monkeypatch,
-            _stock_and("600312.SH", {"880520.SH": 0.95, "880964.SH": 0.3}),
-        )
-        monkeypatch.setattr(
-            ttr.tm, "analyze", lambda df, code: _an(trend="上涨", pos20="箱体上半区")
-        )
-        sector, status = ttr.resolve_holding_sector(
-            {"code": "600312", "name": "平高电气"}, self.SECTOR_MAP, None
-        )
-        row = ttr._sector_analysis_row(sector, status, ["600312"])
-        text = ttr._section_holdings(
-            [{"code": "600312", "name": "平高电气", "trend_state": "上涨"}],
-            {"600312": row},
-        )
-        line = next(x for x in text if x.startswith("| 600312"))
-        assert "智能电网（贴合" in line
-
     def test_no_fallback_chain_remnants(self):
         """grep 守卫：分层兜底已整段删除——源码不再有旧兜底入口。"""
         src = pathlib.Path(ttr.__file__).read_text(encoding="utf-8")
@@ -537,8 +460,7 @@ class TestBuildAndReport:
     def env(self, tmp_path, monkeypatch):
         monkeypatch.setattr(ttr, "SECTOR_DIR", tmp_path / "sectors")
         monkeypatch.setattr(ttr, "HOLDINGS_DIR", tmp_path / "holdings")
-        monkeypatch.setattr(ttr, "OUT_DIR", tmp_path / "plans")
-        for d in ("sectors", "holdings", "plans"):
+        for d in ("sectors", "holdings"):
             (tmp_path / d).mkdir()
         (
             tmp_path / "holdings" / "2026-08-07_holding_technical_summary.json"
@@ -589,32 +511,27 @@ class TestBuildAndReport:
         monkeypatch.setattr(ttr.tm, "read_vipdoc", lambda code: None)
         assert ttr.build_sector_summary("2026-08-07") == []
 
-    def test_main_writes_both_artifacts(self, monkeypatch):
+    def test_main_writes_json_only(self, monkeypatch):
+        """v0.162 起 theme_tracker.md 停产：main 只产 sector_technical_summary.json。"""
         monkeypatch.setattr(sys, "argv", ["x", "--date", "2026-08-07"])
         ttr.main()
-        md = ttr.OUT_DIR / "2026-08-07" / "2026-08-07_theme_tracker.md"
         js = ttr.SECTOR_DIR / "2026-08-07_sector_technical_summary.json"
-        assert md.exists() and js.exists()
-        text = md.read_text(encoding="utf-8")
-        assert "主线方向：**核电核能**" in text
-        assert "贴合最高者" in text  # §1 口径声明（v0.148）
-        assert "核电核能（贴合" in text  # §4 贴合行带系数
-        assert "| 999999 | 无映射股 | 未定 | 未定" in text
+        assert js.exists()
         rows = json.loads(js.read_text(encoding="utf-8"))
         assert {r["theme_id"] for r in rows} == {"880537.SH", "880520.SH"}
+        top = next(r for r in rows if r["theme_id"] == "880537.SH")
+        assert top["theme_name"] == "核电核能" and top["fit"] > 0.9
+        assert not list(self.tmp.rglob("*_theme_tracker.md")), "md 应已停产"
 
-    def test_no_holdings_degrades_honestly(self, monkeypatch):
-        """无持仓 ⇒ 主线如实「未定」，不编主线；摘要为空数组（契约允许）。"""
+    def test_no_holdings_produces_empty_json(self, monkeypatch):
+        """无持仓 ⇒ 摘要为空数组（契约允许），不崩。"""
         (
             self.tmp / "holdings" / "2026-08-07_holding_technical_summary.json"
         ).write_text("[]", encoding="utf-8")
         monkeypatch.setattr(sys, "argv", ["x", "--date", "2026-08-07"])
         ttr.main()
-        text = (ttr.OUT_DIR / "2026-08-07" / "2026-08-07_theme_tracker.md").read_text(
-            encoding="utf-8"
-        )
-        assert "主线方向：**未定**" in text
-        assert "如实降级" in text
+        js = ttr.SECTOR_DIR / "2026-08-07_sector_technical_summary.json"
+        assert json.loads(js.read_text(encoding="utf-8")) == []
 
 
 def test_override_layer_fully_removed():

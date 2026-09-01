@@ -12,6 +12,12 @@ from custos.core.paths import DATA, PLANS, daily_report_dir  # noqa: E402
 from custos.core.paths import read_json as load  # noqa: E402
 from custos.core.code_utils import bare_code as bare  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
+
+# 同层（pipeline/market_timing，L3）复用展示渲染，分层守卫允许（v0.162）
+from custos.pipeline.market_timing.theme_tracker_report import (  # noqa: E402
+    _section_risk,
+    _section_strong,
+)
 import sys
 
 
@@ -36,6 +42,9 @@ def _load_inputs(date):
         "risk": load(DATA / "risk" / f"{date}_risk_decision.json", {}),
         "holdings": load(DATA / "holdings" / f"{date}_holding_review.json", []),
         "sectors": load(DATA / "sectors" / f"{date}_sector_state.json", []),
+        "sector_summary": load(
+            DATA / "sectors" / f"{date}_sector_technical_summary.json", []
+        ),
         "gate": load(DATA / "quality" / f"{date}_runtime_gate.json", {}),
         "b1_rows": load(DATA / "holdings" / f"{date}_b1_holding_state.json", []),
     }
@@ -182,16 +191,69 @@ def _build_decision(
     }
 
 
-def _render_markdown(date, decision, holding_actions, out_json):
-    """渲染节段：8 节结构与措辞被消费方钉住。"""
+def _module_score_table(mt: str) -> list[str]:
+    """从 market_timing_score.md 原样提取「## 2. 模块评分」表格行（含表头与合计行）。
+
+    mt 缺失或该节解析为空 ⇒ []（调用方如实降级，不编评分）。
+    """
+    m = re.search(r"## 2\. 模块评分\s*\n(.*?)(?=\n## |\Z)", mt, re.S)
+    if not m:
+        return []
+    return [ln for ln in m.group(1).splitlines() if ln.startswith("|")]
+
+
+def _section_sector_summary(sector_rows: list) -> list[str]:
+    """§3 板块主线与强弱：读 sector_technical_summary.json，缺失如实降级。
+
+    主线口径与 theme_tracker 原 §1 一致：available 且 fit 非空的行里 fit 最大者；
+    无 fit 行退第一个 available；全不可用写「未定」。强/弱表复用
+    theme_tracker_report 的渲染（改 `### ` 小节头）。
+    """
+    lines = ["", "## 3. 板块主线与强弱", ""]
+    if not sector_rows:
+        lines.append("- sector_technical_summary 缺失，板块强弱不可得")
+        return lines
+    avail = [r for r in sector_rows if r.get("available")]
+    fitted = [r for r in avail if r.get("fit") is not None]
+    top = max(fitted, key=lambda r: r["fit"]) if fitted else (avail[0] if avail else {})
+    mainline = top.get("theme_name") or "未定"
+    lines.append(
+        f"- 主线方向：**{mainline}**"
+        f"（生命周期：{top.get('stage', '未定')}，技术分 {top.get('score', 'NA')}）"
+    )
+    lines.append("- 口径：主线=持仓相关板块中贴合最高者，不代表全市场主线。")
+    strong = [
+        r for r in sector_rows if r.get("available") and (r.get("score") or 0) >= 65
+    ]
+    risk = [
+        r
+        for r in sector_rows
+        if (not r.get("available"))
+        or "退潮" in str(r.get("stage"))
+        or (r.get("score") or 0) < 45
+    ]
+    lines += [""] + _section_strong(strong, heading="### 强势/可关注板块")
+    lines += _section_risk(risk, heading="### 退潮/风险板块")
+    return lines
+
+
+def _render_markdown(
+    date, decision, holding_actions, out_json, mt, sector_rows, holdings
+):
+    """渲染节段：8 节结构（v0.162 起为唯一人读决策报告，吸收评分明细与板块强弱）。
+
+    1 总控结论 / 2 市场评分明细 / 3 板块主线与强弱 / 4 持仓处理优先级 /
+    5 允许动作 / 6 禁止动作 / 7 观察方向 / 8 数据与风险声明。
+    JSON 键集合不变（buy_actions/tomorrow_validation 仍在 JSON，md 不再渲染）。
+    """
     state = decision["market_state"]
     score = decision["market_score"]
     position = decision["total_position_range"]
     permission = decision["new_position_permission"]
     allowed = decision["allowed_actions"]
     forbidden = decision["forbidden_actions"]
-    buy_actions = decision["buy_actions"]
     main_sectors = decision["watchlist"]
+    hold_by_code = {bare(h.get("code")): h for h in holdings}
     lines = [
         "# chief_decision 每日总控交易计划",
         "",
@@ -205,37 +267,32 @@ def _render_markdown(date, decision, holding_actions, out_json):
         f"- 风控等级：**{decision['risk_level']}**",
         f"- 持仓时效：**{decision['position_freshness'].get('status', '未知')}** — {decision['position_freshness'].get('reason', '')}",
         "",
-        "## 2. 持仓处理优先级",
+        "## 2. 市场评分明细",
         "",
-        "| 优先级 | 代码 | 名称 | 动作 | 理由 |",
-        "|---|---|---|---|---|",
     ]
-    for x in holding_actions:
-        lines.append(
-            f"| {x['priority']} | {x['code']} | {x['name']} | {x['action']} | {'；'.join(x['reasons'])} |"
-        )
+    table = _module_score_table(mt)
+    lines += table or ["- market_timing_score 缺失或未含模块评分表，评分明细不可得"]
+    lines += _section_sector_summary(sector_rows)
     lines += [
         "",
-        "## 3. 买入计划审核",
+        "## 4. 持仓处理优先级",
         "",
-        "| 代码 | 名称 | 上游结论 | 总控结论 | 风控否决 |",
-        "|---|---|---|---|---|",
+        "| 优先级 | 代码 | 名称 | 仓位 | 盈亏% | 持仓天数 | 动作 | 理由 |",
+        "|---|---|---|---:|---:|---:|---|---|",
     ]
-    for x in buy_actions:
+    for x in holding_actions:
+        hr = hold_by_code.get(x["code"], {})
+        pnl = hr.get("pnl_pct", hr.get("holding_pnl_pct", "NA"))
         lines.append(
-            f"| {x['code']} | {x['name']} | {x['source_conclusion']} | {x['conclusion']} | {'是' if x['blocked_by_risk'] else '否'} |"
+            f"| {x['priority']} | {x['code']} | {x['name']} | {hr.get('position_pct', 'NA')} | {pnl} | {hr.get('holding_days', 'NA')} | {x['action']} | {'；'.join(x['reasons'])} |"
         )
-    if not buy_actions:
-        lines.append("| - | 暂无 | - | - | - |")
     lines += (
-        ["", "## 4. 允许动作", ""]
+        ["", "## 5. 允许动作", ""]
         + [f"- {x}" for x in allowed]
-        + ["", "## 5. 禁止动作", ""]
+        + ["", "## 6. 禁止动作", ""]
         + [f"- {x}" for x in forbidden]
-        + ["", "## 6. 观察方向", ""]
+        + ["", "## 7. 观察方向", ""]
         + [f"- {x}" for x in main_sectors or ["暂无经过许可的方向"]]
-        + ["", "## 7. 下一交易日验证点", ""]
-        + [f"- {x}" for x in decision["tomorrow_validation"]]
         + [
             "",
             "## 8. 数据与风险声明",
@@ -331,7 +388,16 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"{a.date}_chief_decision.md"
     out.write_text(
-        _render_markdown(a.date, decision, holding_actions, out_json), encoding="utf-8"
+        _render_markdown(
+            a.date,
+            decision,
+            holding_actions,
+            out_json,
+            mt,
+            inputs["sector_summary"],
+            inputs["holdings"],
+        ),
+        encoding="utf-8",
     )
     print(out)
     print(out_json)

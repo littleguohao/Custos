@@ -49,6 +49,7 @@ def _write(
     holdings=None,
     b1=None,
     sectors=None,
+    sector_summary=None,
     mt=MT_MD,
 ):
     if risk is not None:
@@ -70,6 +71,10 @@ def _write(
     if sectors is not None:
         (data / "sectors" / f"{day}_sector_state.json").write_text(
             json.dumps(sectors, ensure_ascii=False), encoding="utf-8"
+        )
+    if sector_summary is not None:
+        (data / "sectors" / f"{day}_sector_technical_summary.json").write_text(
+            json.dumps(sector_summary, ensure_ascii=False), encoding="utf-8"
         )
     if mt is not None:
         # 2026-08-12 起按日期目录归档：{day}/{day}_market_timing_score.md
@@ -520,8 +525,112 @@ class TestWatchlistAndForbidden:
             encoding="utf-8"
         )
         assert "# chief_decision 每日总控交易计划" in md
-        assert "| - | 暂无 | - | - | - |" in md, "无买入计划时应有占位行"
+        # v0.161/v0.162：买入审核（恒空）与验证点（恒三条）两节不再渲染；
+        # 吸收评分明细与板块强弱后重排 8 节
+        assert "买入计划审核" not in md
+        assert "下一交易日验证点" not in md
+        assert "## 2. 市场评分明细" in md and "## 4. 持仓处理优先级" in md
         assert "RiskDecision为强制输入" not in md
+
+
+class TestMergedSections:
+    """v0.162 合并进来的三个展示节：评分明细 / 板块强弱 / 持仓新列。"""
+
+    MT_WITH_TABLE = MT_MD + (
+        "\n## 2. 模块评分\n\n"
+        "| 模块 | 权重 | 得分 | 判断 |\n"
+        "|---|---:|---:|---|\n"
+        "| 0AMV | 30 | 25.00 | 多头 |\n"
+        "| 合计 | 100 | 78.00 | |\n"
+        "\n## 3. 交易指令\n"
+    )
+
+    SECTOR_ROWS = [
+        {
+            "theme_id": "880537.SH",
+            "theme_name": "核电核能",
+            "primary_code": "880537.SH",
+            "available": True,
+            "fit": 0.92,
+            "stage": "主升/加速",
+            "stage_reason": "趋势上涨",
+            "score": 88.0,
+            "representative_stocks": ["002366"],
+        },
+        {
+            "theme_id": "880520.SH",
+            "theme_name": "智能电网",
+            "primary_code": "880520.SH",
+            "available": False,
+            "stage": "退潮/下跌",
+            "stage_reason": "趋势下跌",
+            "score": 18.0,
+            "representative_stocks": ["600312"],
+        },
+    ]
+
+    def _md(self, data, plans, day, monkeypatch, **kw):
+        kw.setdefault("risk", {"risk_level": "普通"})
+        kw.setdefault("gate", OK_GATE)
+        kw.setdefault("holdings", [])
+        kw.setdefault("b1", [])
+        kw.setdefault("sectors", [])
+        _run(data, plans, day, monkeypatch, **kw)
+        return (plans / day / f"{day}_chief_decision.md").read_text(encoding="utf-8")
+
+    def test_module_score_table_copied_verbatim(self, env, monkeypatch):
+        """§2：mt 的「## 2. 模块评分」表格（含合计行）原样进 chief md。"""
+        data, plans = env
+        md = self._md(data, plans, "2026-08-07", monkeypatch, mt=self.MT_WITH_TABLE)
+        assert "| 0AMV | 30 | 25.00 | 多头 |" in md
+        assert "| 合计 | 100 | 78.00 |" in md
+        assert "交易指令" not in md, "不得搬运 mt 后续节"
+
+    def test_missing_mt_degrades_score_section_honestly(self, env, monkeypatch):
+        """mt 缺失 ⇒ §2 如实说明，不编评分。"""
+        data, plans = env
+        md = self._md(data, plans, "2026-08-07", monkeypatch, mt=None)
+        assert "评分明细不可得" in md
+
+    def test_sector_summary_section(self, env, monkeypatch):
+        """§3：主线取 fit 最大的 available 行；强势/退潮表各归各位。"""
+        data, plans = env
+        md = self._md(
+            data, plans, "2026-08-07", monkeypatch, sector_summary=self.SECTOR_ROWS
+        )
+        assert "## 3. 板块主线与强弱" in md
+        assert "主线方向：**核电核能**" in md
+        assert "### 强势/可关注板块" in md and "核电核能" in md
+        assert "### 退潮/风险板块" in md and "智能电网" in md
+
+    def test_missing_sector_summary_degrades_honestly(self, env, monkeypatch):
+        data, plans = env
+        md = self._md(data, plans, "2026-08-07", monkeypatch)
+        assert "sector_technical_summary 缺失" in md
+
+    def test_holding_table_has_position_pnl_days(self, env, monkeypatch):
+        """§4：持仓表带 仓位/盈亏%/持仓天数 三列（数据来自 holding_review.json）。"""
+        data, plans = env
+        md = self._md(
+            data,
+            plans,
+            "2026-08-07",
+            monkeypatch,
+            holdings=[
+                {
+                    "code": "600000.SH",
+                    "name": "浦发",
+                    "action": "持有",
+                    "priority": "P3",
+                    "reason": ["结构完好"],
+                    "position_pct": 0.15,
+                    "pnl_pct": -0.03,
+                    "holding_days": 12,
+                }
+            ],
+        )
+        assert "| 优先级 | 代码 | 名称 | 仓位 | 盈亏% | 持仓天数 | 动作 | 理由 |" in md
+        assert "| P3 | 600000 | 浦发 | 0.15 | -0.03 | 12 | 持有 | 结构完好 |" in md
 
 
 class TestHelpers:

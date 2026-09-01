@@ -186,6 +186,10 @@
 - `artifacts/reports/daily/YYYY-MM-DD/YYYY-MM-DD_1445_review.md`
 - 三份日报告文件名带时点标记（v0.141 起）：盘前 `YYYY-MM-DD_0905_daily_report.md`、
   盘后 `YYYY-MM-DD_1700_final_review.md/.json`、选股 `YYYY-MM-DD_1800_candidate_table.md`
+- v0.162 起 `YYYY-MM-DD_portfolio_review.md` 与 `YYYY-MM-DD_theme_tracker.md` 停产
+  （结构化产物 `data/holdings/YYYY-MM-DD_holding_review.json` 与
+  `data/sectors/YYYY-MM-DD_sector_technical_summary.json` 路径不变、照常产出）；
+  `chief_decision.md` 是唯一人读决策报告，市场评分明细与板块强弱已并入其 §2/§3。
 
 ## 质量检查
 

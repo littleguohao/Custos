@@ -1,24 +1,24 @@
 # -*- coding: utf-8 -*-
-"""Generate theme_tracker daily sector trend report.
+"""Generate theme_tracker daily sector technical summary (JSON only).
 
 v0.142 起**取消人工主题映射表**（sector_code_map.json 已删除）；v0.149 起
 **owner 指定层也撤掉**（holding_mainline_overrides.json 已删除）——
 持仓板块归属只有**走势贴合**一档（60 日日收益 Pearson，贴合最高者胜；
-贴合无有效数据如实「未定」，无兜底猜谜），
-§1「主线」= 当日持仓相关板块中贴合最高者（口径写进 §1，不代表全市场主线）。
+贴合无有效数据如实「未定」，无兜底猜谜）。
 v0.156（owner 拍板 2026-08-28）候选侧人工主题匹配链（enrich_candidates
 build_stock_theme_map）也随之整段废弃——人工判断路径全仓零残留，
 记录在案见 governance/data/TDX_LOCAL_INTERFACES.md §3。
+v0.162 起人读的 `theme_tracker.md` 停产：强势/退潮板块展示并入
+chief_decision.md §3（`_section_strong`/`_section_risk` 被
+chief_decision_report 复用）；本脚本只产结构化 JSON（3 个消费者）。
 
 Reads:
 - data/holdings/YYYY-MM-DD_holding_technical_summary.json
 - data/holdings/*_holding_sector_mapping.json（≤报告日最近一份，行业名→880 行业板块贴合候选）
 - data/sectors/*_tq_sector_map.json（最新一份，概念/细分反向成员关系贴合候选）
-- artifacts/reports/daily/YYYY-MM-DD/YYYY-MM-DD_market_timing_score.md
 
 Writes:
 - data/sectors/YYYY-MM-DD_sector_technical_summary.json
-- artifacts/reports/daily/YYYY-MM-DD/YYYY-MM-DD_theme_tracker.md
 """
 
 from __future__ import annotations
@@ -38,18 +38,14 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
-from custos.core.paths import (
+from custos.core.paths import (  # noqa: E402
     HOLDINGS_DIR,
-    MARKET_DIR,
-    PLANS,
     SECTORS_DIR,
-    daily_report_dir,
-)  # noqa: E402
+)
 from custos.core.contracts import require  # noqa: E402
 from custos.core.code_utils import market_of  # noqa: E402
 
 SECTOR_DIR = SECTORS_DIR
-OUT_DIR = PLANS
 
 from custos.pipeline.market_timing import technical_monitor as tm  # noqa: E402
 
@@ -478,67 +474,12 @@ def resolve_holding_rows(date: str) -> dict[str, dict[str, Any]]:
     return out
 
 
-def compare_holding_to_theme(
-    holding: dict[str, Any], theme: dict[str, Any]
-) -> tuple[str, str]:
-    ht = holding.get("trend_state")
-    tt = theme.get("trend_state")
-    hp = holding.get("box20_position")
-    tp = theme.get("box20_position")
-    if theme and theme.get("fit_insufficient"):
-        # 有候选板块但贴合全无效 ≠ 无映射——不猜，如实报
-        return "未定", "贴合数据不足：候选板块无有效 K 线或重叠不足 20 根，不猜板块。"
-    if not theme or not theme.get("available"):
-        return "未定", "无板块映射。"
-    rank = {"上涨": 3, "横盘震荡": 2, "下跌": 1, None: 0}
-    if rank.get(ht, 0) > rank.get(tt, 0):
-        return "强于板块", f"个股趋势{ht}，板块趋势{tt}。"
-    if rank.get(ht, 0) < rank.get(tt, 0):
-        return "弱于板块", f"个股趋势{ht}，板块趋势{tt}。"
-    if hp == "下沿/破位区" and tp != "下沿/破位区":
-        return "弱于板块", f"个股在{hp}，板块在{tp}。"
-    if hp in ("上沿/突破区", "箱体上半区") and tp in ("箱体下半区", "下沿/破位区"):
-        return "强于板块", f"个股在{hp}，板块在{tp}。"
-    return "同步", f"个股与板块均为{ht}/{tt}，箱体位置 {hp}/{tp}。"
-
-
-def _section_mainline(date: str, top: dict[str, Any]) -> list[str]:
-    """§1 今日主线（含报告头）。
-
-    v0.142 起人工主题表删除；v0.148 起自动链只有贴合一档，「主线」= 当日持仓
-    相关板块（归属：走势贴合唯一判据，v0.149 起指定层也撤掉）中贴合最高者——
-    只覆盖持仓相关板块，不代表全市场主线；无可用板块时如实「未定」，不编主线。
-    """
+def _section_strong(
+    strong: list[dict[str, Any]], heading: str = "## 2. 强势/可关注板块"
+) -> list[str]:
+    """强势/可关注板块表（v0.162 起被 chief_decision_report §3 复用，heading 可换）。"""
     lines = []
-    lines.append("# theme_tracker 主线与板块跟踪\n")
-    lines.append(f"日期：{date}\n")
-    lines.append("## 1. 今日主线\n")
-    mainline = top.get("theme_name") or "未定"
-    lines.append(f"- 主线方向：**{mainline}**")
-    lines.append(f"- 生命周期：**{top.get('stage', '未定')}**")
-    lines.append(
-        f"- 主线强度：**{'强' if (top.get('score') or 0) >= 75 else '中' if (top.get('score') or 0) >= 55 else '弱'}**"
-    )
-    evidence = (
-        f"{top.get('stage_reason', '无')}；技术分 {top.get('score', 'NA')}。"
-        if top
-        else "无可用持仓板块（无映射/贴合数据不足/行情缺失），本节如实降级。"
-    )
-    lines.append(f"- 关键证据：{evidence}")
-    lines.append(
-        "- 口径：主线=持仓相关板块中贴合最高者（走势贴合唯一判据，无指定无兜底），"
-        "仅覆盖持仓相关板块，不代表全市场主线。"
-    )
-    lines.append(
-        "- 市场约束：market_timing 仍为震荡偏弱，允许低吸核心主线，但不支持追高和高频试错。\n"
-    )
-    return lines
-
-
-def _section_strong(strong: list[dict[str, Any]]) -> list[str]:
-    """§2 强势/可关注板块。"""
-    lines = []
-    lines.append("## 2. 强势/可关注板块\n")
+    lines.append(heading + "\n")
     lines.append("| 板块 | 代码 | 状态 | 分数 | 代表股票 | 证据 | 风险 |")
     lines.append("|---|---|---|---:|---|---|---|")
     for r in strong[:8]:
@@ -557,10 +498,12 @@ def _section_strong(strong: list[dict[str, Any]]) -> list[str]:
     return lines
 
 
-def _section_risk(risk: list[dict[str, Any]]) -> list[str]:
-    """§3 退潮/风险板块。"""
+def _section_risk(
+    risk: list[dict[str, Any]], heading: str = "## 3. 退潮/风险板块"
+) -> list[str]:
+    """退潮/风险板块表（v0.162 起被 chief_decision_report §3 复用，heading 可换）。"""
     lines = []
-    lines.append("## 3. 退潮/风险板块\n")
+    lines.append(heading + "\n")
     lines.append("| 板块 | 代码 | 风险状态 | 分数 | 风险原因 |")
     lines.append("|---|---|---|---:|---|")
     for r in risk[:8]:
@@ -573,137 +516,6 @@ def _section_risk(risk: list[dict[str, Any]]) -> list[str]:
     return lines
 
 
-def _section_holdings(
-    holdings: list[dict[str, Any]], holding_themes: dict[str, dict[str, Any]]
-) -> list[str]:
-    """§4 持仓板块跟踪。"""
-    lines = []
-    lines.append("## 4. 持仓板块跟踪\n")
-    lines.append(
-        "| 代码 | 名称 | 最相关主线 | 板块状态 | 板块分数 | 个股相对板块 | 操作倾向 |"
-    )
-    lines.append("|---|---|---|---|---:|---|---|")
-    for h in holdings:
-        code = str(h.get("code"))
-        theme = holding_themes.get(code) or {}
-        rel, rel_reason = compare_holding_to_theme(h, theme)
-        action = h.get("action") or theme.get("action_bias") or "观察"
-        if rel == "弱于板块" and action == "观察":
-            action = "风控观察"
-        theme_name = theme.get("theme_name", "未定")
-        fit = theme.get("fit")
-        if theme.get("source") == "fit" and fit is not None:
-            # 贴合选出带相关系数（60 日日收益 Pearson）——口径写明，别只给名字
-            theme_name += f"（贴合{fit:.2f}）"
-        lines.append(
-            f"| {code} | {h.get('name')} | {theme_name} | {theme.get('stage', '未定')} | {theme.get('score', 0)} | {rel}：{rel_reason} | {action} |"
-        )
-    lines.append("")
-    return lines
-
-
-def _section_market_consistency(
-    date: str,
-    market_status: str,
-    strong: list[dict[str, Any]],
-    risk: list[dict[str, Any]],
-) -> list[str]:
-    """§5 板块-大盘一致性。"""
-    lines = []
-    lines.append("## 5. 板块-大盘一致性\n")
-    market = load_json(MARKET_DIR / f"{date}_market_timing_input.json", {}) or {}
-    amv = market.get("amv_0", {})
-    lines.append(
-        f"- 大盘状态：{market_status}；0AMV当日 {amv.get('amv_change_pct', '缺失')}%，有效状态 **{amv.get('effective_state', amv.get('amv_zone', '未知'))}**。"
-    )
-    lines.append(
-        "- 强于大盘的板块："
-        + (
-            "、".join([n for r in strong[:5] if (n := r.get("theme_name")) is not None])
-            if strong
-            else "暂不明确"
-        )
-    )
-    weak_names = [
-        n
-        for r in risk[:5]
-        if r.get("available") and (n := r.get("theme_name")) is not None
-    ]
-    lines.append(
-        "- 弱于大盘/需回避板块："
-        + ("、".join(weak_names) if weak_names else "暂无明确退潮，但低分板块需谨慎")
-    )
-    lines.append(
-        "- 结构性机会仅来自上表中强于市场且获得交易许可的板块；低分或退潮方向不因长期逻辑直接加仓。\n"
-    )
-    return lines
-
-
-def _section_chief_conclusion(
-    strong: list[dict[str, Any]],
-    holdings: list[dict[str, Any]],
-    holding_themes: dict[str, dict[str, Any]],
-) -> list[str]:
-    """§6 给总控的结论。"""
-    lines = []
-    lines.append("## 6. 给总控的结论\n")
-    focus = [n for r in strong[:3] if (n := r.get("theme_name")) is not None]
-    lines.append("- 可关注方向：" + ("、".join(focus) if focus else "无明确可进攻方向"))
-    lines.append("- 禁止方向：下跌/低分板块、弱于板块的个股、箱体破位个股。")
-    weak_holdings = [
-        str(h.get("name"))
-        for h in holdings
-        if compare_holding_to_theme(h, holding_themes.get(str(h.get("code"))) or {})[0]
-        == "弱于板块"
-    ]
-    lines.append(
-        "- 持仓需要重点风控："
-        + (
-            "、".join(weak_holdings)
-            if weak_holdings
-            else "按 portfolio_review 与 risk_control 动态识别。"
-        )
-    )
-    lines.append("- 是否允许新开相关方向：仅允许核心主线小仓低吸观察；禁止追高接力。\n")
-    lines.append(
-        "> 风险提示：板块强弱是交易过滤器，不是直接买入信号；真实交易仍需 stock_pool、buy_strategy、risk_control、chief_decision 全链路确认。"
-    )
-    return lines
-
-
-def make_report(
-    date: str,
-    rows: list[dict[str, Any]],
-    holding_rows: dict[str, dict[str, Any]] | None = None,
-) -> str:
-    holdings = latest_holding_summary(date)
-    market_status = "震荡偏弱"
-    strong = [r for r in rows if r.get("available") and (r.get("score") or 0) >= 65]
-    risk = [
-        r
-        for r in rows
-        if (not r.get("available"))
-        or "退潮" in str(r.get("stage"))
-        or (r.get("score") or 0) < 45
-    ]
-    # §1 主线 = 可用持仓板块中贴合最高者（v0.148 口径）；无贴合行退技术分最高；
-    # 全不可用则如实降级
-    avail = [r for r in rows if r.get("available")]
-    fitted = [r for r in avail if r.get("fit") is not None]
-    top = max(fitted, key=lambda r: r["fit"]) if fitted else (avail[0] if avail else {})
-    if holding_rows is None:
-        holding_rows = resolve_holding_rows(date)
-    lines = (
-        _section_mainline(date, top)
-        + _section_strong(strong)
-        + _section_risk(risk)
-        + _section_holdings(holdings, holding_rows)
-        + _section_market_consistency(date, market_status, strong, risk)
-        + _section_chief_conclusion(strong, holdings, holding_rows)
-    )
-    return "\n".join(lines)
-
-
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", default=pd.Timestamp.now().strftime("%Y-%m-%d"))
@@ -711,21 +523,14 @@ def main() -> None:
     holding_rows = resolve_holding_rows(args.date)
     rows = build_sector_summary(args.date, holding_rows)
     SECTOR_DIR.mkdir(parents=True, exist_ok=True)
-    out_dir = daily_report_dir(args.date, OUT_DIR)
-    out_dir.mkdir(parents=True, exist_ok=True)
     summary_path = SECTOR_DIR / f"{args.date}_sector_technical_summary.json"
-    report_path = out_dir / f"{args.date}_theme_tracker.md"
     # ⚠️ 落盘前校验：3 个消费者、⛔硬失败链。消费端有 **96 处 `.get("available")`**
     # —— 那个布尔是全项目最常被读的分支键，必须保证它是真布尔。
     require("sector_technical_summary", rows)
     summary_path.write_text(
         json.dumps(rows, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
     )
-    report = make_report(args.date, rows, holding_rows)
-    report_path.write_text(report, encoding="utf-8")
     print(summary_path)
-    print(report_path)
-    print(report[:5000])
 
 
 if __name__ == "__main__":

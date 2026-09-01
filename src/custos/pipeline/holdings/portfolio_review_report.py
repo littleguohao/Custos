@@ -1,12 +1,19 @@
 # -*- coding: utf-8 -*-
+"""每日持仓研判——只产结构化 `holding_review.json`（RiskDecision 的直接上游）。
+
+v0.162 起人读的 `portfolio_review.md` 停产：展示层已并入 chief_decision.md
+（§4 持仓处理优先级表带仓位/盈亏/持仓天数列）。本脚本仍是 daily_pipeline 的
+硬失败 stage，落盘前 `require("holding_review", reviews)` 校验保留。
+"""
+
 from __future__ import annotations
-import argparse, json, re, sys
+import argparse, json, sys
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
-from custos.core.paths import DATA, PLANS, daily_report_dir  # noqa: E402
+from custos.core.paths import DATA  # noqa: E402
 from custos.core.paths import read_json as load  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
 from custos.core.b1_thresholds import J_LOW_THRESHOLD  # noqa: E402
@@ -16,12 +23,6 @@ from custos.core.exit_rules import (  # noqa: E402  L0，止盈止损规则唯�
     LOSS_REDUCTION_ENABLED,
     LOSS_REDUCTION_PCT,
 )
-import sys
-
-
-def extract(pattern, text, default):
-    m = re.search(pattern, text)
-    return m.group(1).strip() if m else default
 
 
 def classify(r):
@@ -73,14 +74,6 @@ def main():
     tech = load(DATA / "holdings" / f"{a.date}_holding_technical_summary.json", [])
     b1_rows = load(DATA / "holdings" / f"{a.date}_b1_holding_state.json", [])
     b1 = {str(x.get("code")): x for x in b1_rows}
-    mt_file = daily_report_dir(a.date, PLANS) / f"{a.date}_market_timing_score.md"
-    mt = mt_file.read_text(encoding="utf-8") if mt_file.exists() else ""
-    # ⚠️ 这两个是**大盘择时**的读数，下面循环里**不得复用 `state` 这个名字** ——
-    #    2026-08-07 实测：循环内 `state=b1.get(...)` 覆盖了它，于是报告的
-    #    「- market_timing：**{state}**」打印的是**最后一只票的 b1 状态字典**。
-    #    每份日报都错，而该文件覆盖率是 0% ⇒ 没有测试会发现。
-    market_state = extract(r"状态：\*\*(.*?)\*\*", mt, "未知")
-    position = extract(r"建议总仓位：\*\*(.*?)\*\*", mt, "待确认")
     reviews = []
     for r in tech:
         hold = b1.get(str(r.get("code")), {})
@@ -116,44 +109,6 @@ def main():
     out_json.write_text(
         json.dumps(reviews, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    lines = [
-        "# portfolio_review 每日持仓研判",
-        "",
-        f"日期：{a.date}",
-        "",
-        "## 1. 总体持仓风险",
-        "",
-        f"- market_timing：**{market_state}**",
-        f"- 建议总仓位：**{position}**",
-        "- 原则：低位指标不能覆盖趋势、板块与风险规则。",
-        "",
-        "## 2. 持仓逐只研判",
-        "",
-        "| 优先级 | 代码 | 名称 | 仓位 | 盈亏 | 趋势/位置 | 动作 | 理由 |",
-        "|---|---|---|---:|---:|---|---|---|",
-    ]
-    for x in sorted(reviews, key=lambda y: (y["priority"], y["code"])):
-        lines.append(
-            f"| {x['priority']} | {x['code']} | {x['name']} | {x['position_pct']} | {x['pnl_pct']} | {x['trend_state']}/{x['box_position']} | {x['action']} | {'；'.join(x['reason'])} |"
-        )
-    lines += ["", "## 3. 风控触发项", ""]
-    risk = [x for x in reviews if x["priority"] in {"P1", "P2"}]
-    lines += [
-        f"- **{x['name']}({x['code']})**：{x['action']}。{'；'.join(x['reason'])}"
-        for x in risk
-    ] or ["- 暂无。"]
-    lines += [
-        "",
-        "## 4. 数据声明",
-        "",
-        f"- 结构化输出：`{out_json}`",
-        "- 本报告是策略辅助，不构成收益承诺。",
-    ]
-    out_dir = daily_report_dir(a.date, PLANS)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out = out_dir / f"{a.date}_portfolio_review.md"
-    out.write_text("\n".join(lines), encoding="utf-8")
-    print(out)
     print(out_json)
 
 
