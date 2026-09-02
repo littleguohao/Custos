@@ -620,7 +620,7 @@ SPECS: dict[str, dict] = {
             "breadth": {"type": dict, "required": True},
         },
     },
-    # theme_tracker_report.build_sector_summary —— 3 个消费者，⛔ 硬失败链
+    # theme_tracker_report.build_sector_summary —— 2 个消费者，⛔ 硬失败链
     # ⚠️ **分支型**：`available=False` 的板块行技术字段不可信（可能缺省/为 None），
     # 消费端一律先判 available。v0.156 起人工主题映射表废弃（owner 拍板全走
     # 走势贴合），theme_id=板块代码、theme_name=板块名，不再有 semantic_tags。

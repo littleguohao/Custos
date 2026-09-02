@@ -569,7 +569,7 @@ class TestMainEndToEnd:
             _s, "argv", ["x", "--date", market["date"], "--input", str(inp)]
         )
         ms.main()
-        out = ms.IN_DIR / f"{market['date']}_market_timing_score.json"
+        out = ms.MARKET_DIR / f"{market['date']}_market_timing_score.json"
         assert out.exists(), "score JSON 未落盘"
         return json.loads(out.read_text(encoding="utf-8"))
 

@@ -79,7 +79,6 @@ def main():
         hold = b1.get(str(r.get("code")), {})
         priority = hold.get("final_priority")
         action = hold.get("final_action")
-        reasons = []
         if not priority or not action:
             priority, action, reasons = classify(r)
         else:

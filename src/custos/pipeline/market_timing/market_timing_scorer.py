@@ -32,8 +32,6 @@ from custos.core.code_utils import fnum  # noqa: E402
 from custos.core.contracts import SECTION_NOT_FRESH, require  # noqa: E402  section.quality 的「不新鲜」域
 from custos.core.runtime_guards import normalize_regime  # noqa: E402
 
-IN_DIR = MARKET_DIR
-
 
 def score_macro(d: dict) -> tuple[float, str]:
     mp = d.get("macro_policy", {})
@@ -414,7 +412,7 @@ def main():
     inp = (
         Path(args.input)
         if args.input
-        else IN_DIR / f"{args.date}_market_timing_input.json"
+        else MARKET_DIR / f"{args.date}_market_timing_input.json"
     )
     d = json.loads(inp.read_text(encoding="utf-8"))
     modules = [
@@ -432,11 +430,11 @@ def main():
     quality_gate = (
         json.loads(gate_path.read_text(encoding="utf-8")) if gate_path.exists() else {}
     )
-    report = _score_payload(d, modules, quality_gate)
+    payload = _score_payload(d, modules, quality_gate)
     # 落盘前校验：这份 JSON 是 chief_decision 的评分输入通道。
-    require("market_timing_score", report)
-    out = IN_DIR / f"{d.get('date')}_market_timing_score.json"
-    write_json_atomic(out, report)
+    require("market_timing_score", payload)
+    out = MARKET_DIR / f"{d.get('date')}_market_timing_score.json"
+    write_json_atomic(out, payload)
     print(out)
 
 

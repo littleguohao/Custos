@@ -27,8 +27,6 @@ import sys
 import shutil
 from pathlib import Path
 
-import sys
-
 
 from custos.core.paths import (
     DATA,
