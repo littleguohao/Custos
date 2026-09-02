@@ -247,7 +247,11 @@ def _rss_mb() -> float:
         try:
             import resource  # noqa: PLC0415
 
-            return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+            getrusage = getattr(resource, "getrusage", None)
+            rusage_self = getattr(resource, "RUSAGE_SELF", None)
+            if getrusage is None or rusage_self is None:  # Windows 上无此 API
+                raise AttributeError("resource 缺 getrusage/RUSAGE_SELF")
+            return getrusage(rusage_self).ru_maxrss / 1024
         except Exception:  # noqa: BLE001
             return 0.0
 
@@ -3299,7 +3303,7 @@ def _pit_xfn(args, ap) -> tuple:
     return fn, len(pit_recs)
 
 
-def _load_shares_events(args) -> Optional[list]:
+def _load_shares_events() -> Optional[list]:
     """--style-features:真市值股本事件(fetch_market_cap 台账,已 F10 全史回填);
     台账空/加载失败 → f_mcap 特征缺省并告警(不硬失败)。"""
     try:
@@ -3364,7 +3368,7 @@ def _build_pass1_features(args, ap) -> tuple:
                     continue
             return merged
 
-    shares_ev = _load_shares_events(args) if args.style_features else None
+    shares_ev = _load_shares_events() if args.style_features else None
     return scorer, hz, fsc, fstats, xfn, shares_ev, pit_ledger_n, xf_sector
 
 
@@ -3501,7 +3505,7 @@ def _mode_emit_firings(args, ap, codes: list, load_start: str, loader) -> int:
     return 0
 
 
-def _load_bars(args, codes: list, load_start: str, loader) -> dict:
+def _load_bars(codes: list, load_start: str, loader) -> dict:
     if loader is not None:
         return loader(codes, 0)
     # 本地 vipdoc(qfq 前复权);count 传大防 .tail 截断(见 _make_chunk_iter 同注)。
@@ -3513,7 +3517,7 @@ def _run_analyze(args, codes: list, load_start: str, loader) -> int:
     res: dict[str, Any] = {}
     bars = None
     if not args.capture_only:  # 起涨点分析:需全量在内存(与既有行为一致)
-        bars = _load_bars(args, codes, load_start, loader)
+        bars = _load_bars(codes, load_start, loader)
         regime = bt.load_amv_regime(
             since=load_start
         )  # regime 起点跟随数据起点(早前窗口)

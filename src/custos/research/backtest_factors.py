@@ -20,7 +20,6 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import json
-import os
 import random
 import statistics
 import sys
@@ -187,10 +186,10 @@ def reversal_k_gate(df_slice: pd.DataFrame, precomputed: Optional[dict] = None) 
     try:
         if not _j_low_hit(df_slice, precomputed):
             return False
-        close = df_slice["close"].astype(float).values
-        high = df_slice["high"].astype(float).values
-        low = df_slice["low"].astype(float).values
-        vol = df_slice["volume"].astype(float).values
+        close = df_slice["close"].astype(float).to_numpy()
+        high = df_slice["high"].astype(float).to_numpy()
+        low = df_slice["low"].astype(float).to_numpy()
+        vol = df_slice["volume"].astype(float).to_numpy()
         vma5 = vol[-6:-1].mean() if len(vol) >= 6 else vol[:-1].mean()
         if not (vma5 > 0 and vol[-1] / vma5 <= REVK_VOL_RATIO):  # 量比≤50%
             return False
@@ -1933,10 +1932,10 @@ def simulate_b1_trade(
     if ohlc is not None:
         close, low, high, open_ = ohlc
     else:
-        close = df["close"].astype(float).values
-        low = df["low"].astype(float).values
-        high = df["high"].astype(float).values
-        open_ = df["open"].astype(float).values
+        close = df["close"].astype(float).to_numpy()
+        low = df["low"].astype(float).to_numpy()
+        high = df["high"].astype(float).to_numpy()
+        open_ = df["open"].astype(float).to_numpy()
     n = len(close)
     entry = float(close[entry_idx])
     stop = _initial_stop(
@@ -1954,8 +1953,8 @@ def simulate_b1_trade(
         atr=atr,
     )
     risk_frac = (entry - stop) / entry if entry else 0.0
-    bbi_v = bbi.values
-    qsx_v = qsx.values if qsx is not None else None  # QSX 跌破清仓线（v0.120）
+    bbi_v = bbi.to_numpy()
+    qsx_v = qsx.to_numpy() if qsx is not None else None  # QSX 跌破清仓线（v0.120）
     has_above = False
     consec_below = 0
     qsx_consec_below = 0
@@ -2093,7 +2092,12 @@ def _to_weekly(df: pd.DataFrame) -> pd.DataFrame:
     d = df.copy()
     d["date"] = pd.to_datetime(d["date"])
     d = d.set_index("date")
-    agg = {"open": "first", "high": "max", "low": "min", "close": "last"}
+    agg: dict[Any, str] = {
+        "open": "first",
+        "high": "max",
+        "low": "min",
+        "close": "last",
+    }
     if "volume" in d.columns:
         agg["volume"] = "sum"
     if "amount" in d.columns:
@@ -2818,7 +2822,6 @@ def simulate_portfolio_topn(
     top_n：每个进场日最多新开仓数(横截面择优的宽度)。
     仓位同 simulate_portfolio(risk_frac 设 2% 地板);回撤=已实现权益口径(不含浮亏,真实回撤更大)。绝不 raise。
     """
-    import heapq
     import collections as _c
 
     cands = [
@@ -2916,7 +2919,7 @@ def _feature_panel(df: pd.DataFrame) -> dict[str, Any]:
         if _kdj is not None:
             k = _kdj(df)
             feats["j"] = k.get("j") if k.get("available") else None
-        c = df["close"].astype(float).values
+        c = df["close"].astype(float).to_numpy()
         if len(c) >= 60:
             feats["dist_ma10"] = (c[-1] / c[-10:].mean() - 1) * 100
             feats["prior_gain60"] = (c[-1] / c[-60:].min() - 1) * 100
@@ -3001,7 +3004,11 @@ def peak_rss_mb() -> Optional[float]:
     try:
         import resource  # noqa: PLC0415  Unix
 
-        v = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        getrusage = getattr(resource, "getrusage", None)
+        rusage_self = getattr(resource, "RUSAGE_SELF", None)
+        if getrusage is None or rusage_self is None:  # Windows 上无此 API
+            raise AttributeError("resource 缺 getrusage/RUSAGE_SELF")
+        v = getrusage(rusage_self).ru_maxrss
         # Linux 是 KB，macOS 是字节
         return v / 1024.0 if sys.platform != "darwin" else v / (1024.0**2)
     except Exception as e:  # noqa: BLE001

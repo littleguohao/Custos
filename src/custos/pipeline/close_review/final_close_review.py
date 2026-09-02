@@ -559,7 +559,7 @@ def _sold_codes(execution: dict):
     }
 
 
-def _stop_breach(row: dict, plan: dict):
+def _stop_breach(row: dict, plan: dict | None):
     """扛单判读 → (是否越线, 依据)；数据不足返回 (None, '')，由调用方计入「无法判读」。"""
     stop = (plan or {}).get("stop") or {}
     price = optional_finite(stop.get("price"))

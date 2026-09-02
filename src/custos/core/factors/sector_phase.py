@@ -74,7 +74,7 @@ def compute_sector_phase(
         c
     )  # 2026-08-09 起走 indicators.macd_series（唯一实现）
     dif_v = dif.values
-    close_v = c.values
+    close_v = np.asarray(c)
     dif_last = float(dif_v[-1])
     above_zero = bool(dif_last > 0)  # 建仓已上水/趋势在
     w0 = max(fractal, n - lookback)
@@ -117,7 +117,7 @@ def favorable_series(
     """逐日**因果**有利标志(date→bool):每个 t 只用截至 t 的信息(摆动高点需 i+fractal 确认)。
     favorable[t] = DIF[t]>0 且 截至 t 无(顶背离/三打)。供板块相位 gate 按 as-of 查询。"""
     c_full, keep = _clean_close(close)
-    c = c_full.values
+    c = np.asarray(c_full)
     n = len(c)
     ds = [str(dates[i])[:10] for i in keep]  # 与被保留的收盘对齐(丢非数值项不错位)
     if n < MACD_SLOW + MACD_SIGNAL + fractal + 5:

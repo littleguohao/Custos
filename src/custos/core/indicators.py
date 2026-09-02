@@ -81,7 +81,7 @@ from __future__ import annotations
 
 import math
 
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
@@ -337,7 +337,7 @@ def bbi_series(close: pd.Series) -> pd.Series:
     所以它必须在 live 选股链、研究回测器、持仓状态机三处完全一致。
     """
     c = close.astype(float)
-    return sum(c.rolling(k).mean() for k in (3, 6, 12, 24)) / 4
+    return cast(pd.Series, sum(c.rolling(k).mean() for k in (3, 6, 12, 24))) / 4
 
 
 def atr_series(df: pd.DataFrame, *, n: int = 14) -> pd.Series:
@@ -384,7 +384,7 @@ def dks_series(
         factors → screening → factors 的环。
     """
     c = close.astype(float)
-    return sum(c.rolling(w).mean() for w in windows) / len(windows)
+    return cast(pd.Series, sum(c.rolling(w).mean() for w in windows)) / len(windows)
 
 
 def qsx_series(close: pd.Series) -> pd.Series:

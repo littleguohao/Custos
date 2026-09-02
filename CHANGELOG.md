@@ -170,6 +170,7 @@
 | 2026-09-01 | v0.164 | R23 出场族对照落档（BBI 跌破两根族四臂）：BBI 族全臂期望为正且高于 QSX 族同臂；过滤①二度证伪（A 0.093→B 0.040）、hit-only≈B 复现、排除项仍驱动 C（0.026→0.053）但回不到基底 ⇒ BBI 族下最优=无过滤基底 A（详见 R23 出场族对照节） | 「排除项加值」依赖出场族：QSX 族掰正负基线，BBI 族拖低正基线；出场族选择本身是最大变量 | 四臂产物落盘 `*_qx0_rv2_bbi2*`；半窗除 hit-only 外一致 |
 | 2026-09-01 | v0.165 | 日报 md 层再精简：market_timing_score.md / chief_decision.md 停产、wechat_summary 不再每日自动产（脚本保留手动 --date）；scorer→chief 评分通道改 `data/market/{date}_market_timing_score.json`（质量门修正搬入 `_score_payload`，chief JSON 四值逐位不变） | owner 只看四份带时点编号报告；md 不是数据接口，chief 不再 regex 解析 md | 钉测改写：JSON payload 断言 + 三份产物停产守卫；新增 market_timing_score 契约条目 |
 | 2026-09-01 | v0.166 | 1700 报告 §4 两处：板块涨/跌幅榜 TOP5→TOP10（采集器落盘本就是 top=10，仅展示层与缓存兜底切片从 5 改 10，研究口径不变）；删误导性括注「（原主线生命周期判定口径已随 #26 撤下）」，日报只留「客观事实展示，非主线判定」。audit.ps1 加 UTF-8 BOM（PS 5.1 无 BOM 按 ANSI 读中文必解析失败）；ruff format 两处补齐 | 每日报告里的历史叙述是误导源（owner 误读为「榜单被撤」）；审计脚本要能在本机真跑起来 | 钉测全绿（TOP10 钉：第 10 名显示/第 11 名截断）；audit.ps1 复跑通过 |
+| 2026-09-01 | v0.167 | audit 存量清理批：mypy 64→0（dev 组加 pandas-stubs + mootdx/tqcenter 豁免配置；9 条真错误逐点修——resource Unix-only 改 getattr 判空、Optional 索引判空、None 比较显式化、pandas-stubs 次生 44 处联合类型如实收窄）；pylint W0611 清零（门面再导出加放行注释）、W0613 删 4 保 44（注册表/回调统一签名是契约）；radon 唯一 D 级 append_observation cc23→C11（纯提取助手，行为逐位不变） | 静态检查噪音压掉后，新引入的问题才藏不住；设计类告警（W0718/R09xx）维持原样——那些是故意模式 | mypy 0 errors；全量 4677 例绿；radon D 消失 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

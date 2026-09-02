@@ -48,7 +48,7 @@ from custos.core.factors.wave_type import detect_wave_type  # noqa: E402
 #   ↑ v0.86（因子化批 B）前这里还导 `WAVE_MIN_BARS` / `_find_rally_segment`
 #     （check_non_one_wave 用）——它们已随结构族迁入 factors/b1_structure.py。
 from custos.core.factors.perfect_b1_fit import compute_perfect_b1_fit  # noqa: E402
-from custos.core.factors.distribution import (  # noqa: E402
+from custos.core.factors.distribution import (  # noqa: E402  # pylint: disable=unused-import  detect_top_windmill: tests 的 ec.* 转出通道
     confirm_distribution,
     detect_distribution,
     detect_top_windmill,
@@ -64,7 +64,7 @@ from custos.core.factors.macd_technics import check_macd_technics  # noqa: E402
 #     迁入 factors/macd_technics.py（零行为变化）。此处保名 re-export——
 #     `enrich_candidates.check_macd_technics` 是 tests 的既有调用/monkeypatch 通道，
 #     内部调用点（macd_technics = check_macd_technics(df, df_long=df_long)）不用改。
-from custos.core.factors.weekly_j import (  # noqa: E402
+from custos.core.factors.weekly_j import (  # noqa: E402  # pylint: disable=unused-import  j_below_threshold: tests 的 ec.* 转出通道
     j_below_threshold,
     weekly_j_state,
 )
@@ -159,7 +159,7 @@ _BJ_PREFIX = ("4", "8", "920")
 # 持仓链、选股链不动 —— 2026-08-07 补收敛。默认值见 b1_thresholds。
 # v0.86（因子化批 C）：判定（原 _reversal_flags）迁入 factors/entry_patterns.py；
 # 本模块保留 import 作阈值转出通道（tests 钉 `ec.J_LOW_THRESHOLD` 等与 L0 同源）。
-from custos.core.b1_thresholds import (
+from custos.core.b1_thresholds import (  # pylint: disable=unused-import  阈值转出通道（tests 钉 ec.J_LOW_THRESHOLD 等与 L0 同源）
     J_LOW_THRESHOLD,
     VOL_PCTILE_MAX,  # noqa: E402
     VOL_RATIO_MAX,
@@ -238,7 +238,7 @@ def company_position_of(code: str) -> dict:
 # ⚠️ 阈值已收敛到 `b1_thresholds`（L0）—— 这里只做转出，不再自己读环境变量。
 #    2026-08-07 实测：原先「可配置」只覆盖本文件（选股链），持仓链
 #    （technical_monitor + b1_holding_state）硬编码 ±2 与 j<13，改 env 后两链分歧。
-from custos.core.b1_thresholds import (
+from custos.core.b1_thresholds import (  # pylint: disable=unused-import  阈值转出通道（tests 钉 ec.change_in_range 等与 L0 同源）
     REVERSAL_AMPLITUDE_PCT,  # noqa: E402
     change_in_range,
 )
@@ -648,9 +648,7 @@ def _base_scalars(df, index_df) -> dict[str, Any]:
     }
 
 
-def _evidence_states(
-    df, index_df, code: str, df_long, base: dict[str, Any]
-) -> dict[str, Any]:
+def _evidence_states(df, code: str, df_long, base: dict[str, Any]) -> dict[str, Any]:
     """证据块：知行量价/出货与底部形态/MACD 十大技术/信号标注/ADX。
 
     只计算、不组装；返回的中间态由 _assemble_metrics 摊进候选字段。
@@ -845,7 +843,7 @@ def compute_metrics(df, index_df, code: str = "", df_long=None) -> dict[str, Any
     → ``_assemble_metrics``（组装落盘 dict）。
     """
     base = _base_scalars(df, index_df)
-    ev = _evidence_states(df, index_df, code, df_long, base)
+    ev = _evidence_states(df, code, df_long, base)
     return _assemble_metrics(df, index_df, code, base, ev)
 
 

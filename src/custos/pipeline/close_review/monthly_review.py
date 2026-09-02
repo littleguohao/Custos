@@ -60,7 +60,6 @@ from custos.pipeline.close_review.weekly_review import (
     load_amv_regimes,
     parse_ledger,
     portfolio_trajectory,
-    sse_change,
     sse_daily_map,
 )
 

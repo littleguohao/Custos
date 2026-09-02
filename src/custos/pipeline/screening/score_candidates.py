@@ -1105,7 +1105,7 @@ def score_all(
     )
 
     result = _score_all_shell(
-        date, amv_state, effective_caps, sector_score_max, enriched, weights
+        date, amv_state, effective_caps, sector_score_max, weights
     )
 
     if not enriched or enriched.get("status") == "unavailable":
@@ -1199,7 +1199,6 @@ def _score_all_shell(
     amv_state: str,
     effective_caps: dict,
     sector_score_max: float,
-    enriched: Optional[dict],
     weights: Optional[dict] = None,
 ) -> dict:
     """整池结果的初始壳（键序＝历史落盘字段顺序，勿动）。"""

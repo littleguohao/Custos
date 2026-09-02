@@ -24,7 +24,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 # re-export：因子实现的全项目唯一一份在 core/factors/fundamentals.py（v0.84）。
-from custos.core.factors.fundamentals import (  # noqa: E402,F401
+from custos.core.factors.fundamentals import (  # noqa: E402,F401  # pylint: disable=unused-import
     DIXI_NET_PROFIT_YOY,
     REPORT_MAX_AGE_DAYS,
     REQUIRED,

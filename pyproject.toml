@@ -31,5 +31,13 @@ testpaths = ["tests"]
 
 [dependency-groups]
 dev = [
+    "pandas-stubs>=2.2",
     "pytest-cov>=7.1.0",
 ]
+
+[tool.mypy]
+files = ["src"]
+
+[[tool.mypy.overrides]]
+module = ["mootdx.*", "tqcenter.*"]
+ignore_missing_imports = true

@@ -58,7 +58,7 @@ def score(df: pd.DataFrame, code: str) -> dict | None:
         close = df["close"].astype(float).values
         high = df["high"].astype(float).values
         low = df["low"].astype(float).values
-        vol = df["volume"].astype(float).values
+        vol = df["volume"].astype(float).to_numpy()
         vma5 = vol[-6:-1].mean() if len(vol) >= 6 else vol[:-1].mean()
         v20 = vol[-20:]
         pts = 0

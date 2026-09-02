@@ -21,6 +21,68 @@ STATE = MARKET / "0amv_regime_history.json"
 LEDGER = MARKET / "0amv_observations.jsonl"
 
 
+# v0.156：quality 强弱序（candidate < confirmed）——升级必须落盘，不得被去重吞掉。
+# 先记 candidate 值 V、后报 confirmed 同值 V，旧判据会把 confirmed 吞掉，而读侧
+# 只采 confirmed，该日从 regime 重放消失（V 跨阈值时回测与 live 分叉）。
+_QUALITY_RANK = {"candidate": 0, "confirmed": 1}
+
+
+def _quality_rank(quality) -> int:
+    return _QUALITY_RANK.get(quality or "candidate", 0)
+
+
+def _load_ledger() -> list:
+    if not LEDGER.exists():
+        return []
+    return [
+        json.loads(line)
+        for line in LEDGER.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+def _is_duplicate(x: dict, day: str, record: dict) -> bool:
+    return (
+        x.get("date") == day
+        and x.get("amv_change_pct") == record["amv_change_pct"]
+        # v0.156：superseded 记录已作废，与它的同值不构成去重理由——否则重报等于
+        # 旧值的数被吞，生效值仍是冲突的新值。
+        and not x.get("superseded")
+        # v0.156：既有记录 quality 弱于新记录（candidate→confirmed）不算 same。
+        and _quality_rank(x.get("quality")) >= _quality_rank(record["quality"])
+        # v0.152：去重不再看 source——同值同日从两个入口（人工 + market_timing_input
+        # 自动回填）各记一遍，攒出 23 条同值重复（2026-08-30 去重清理过一轮）。
+    )
+
+
+def _is_conflicted(x: dict, day: str, record: dict) -> bool:
+    return (
+        x.get("date") == day
+        and x.get("amv_change_pct") != record["amv_change_pct"]
+        and not x.get("superseded")
+    )
+
+
+def _supersede_conflicts(existing: list, conflicted: list, record: dict, day: str):
+    for x in conflicted:
+        x["superseded"] = True
+        x["superseded_reason"] = (
+            f"同日不同值纠错：{x.get('amv_change_pct')} 被 {record['amv_change_pct']} 覆盖"
+        )
+        x["superseded_at"] = record["recorded_at"]
+    tmp = LEDGER.with_suffix(".jsonl.tmp")
+    tmp.write_text(
+        "\n".join(json.dumps(x, ensure_ascii=False) for x in existing) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(tmp, LEDGER)
+    print(
+        f"[WARN] 0AMV {day} 纠错：旧值 {[x.get('amv_change_pct') for x in conflicted]}"
+        f" → 新值 {record['amv_change_pct']}（旧记录已标 superseded 留痕）",
+        file=sys.stderr,
+    )
+
+
 def append_observation(day: str, amv: dict):
     value = amv.get("amv_change_pct")
     if value is None:
@@ -33,61 +95,16 @@ def append_observation(day: str, amv: dict):
         "source": amv.get("source") or "market_timing_input",
         "recorded_at": cn_now().isoformat(timespec="seconds"),
     }
-    existing = []
-    if LEDGER.exists():
-        existing = [
-            json.loads(line)
-            for line in LEDGER.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-    # v0.156：quality 强弱序（candidate < confirmed）——升级必须落盘，不得被去重吞掉。
-    # 先记 candidate 值 V、后报 confirmed 同值 V，旧判据会把 confirmed 吞掉，而读侧
-    # 只采 confirmed，该日从 regime 重放消失（V 跨阈值时回测与 live 分叉）。
-    _QUALITY_RANK = {"candidate": 0, "confirmed": 1}
-    same = [
-        x
-        for x in existing
-        if x.get("date") == day
-        and x.get("amv_change_pct") == record["amv_change_pct"]
-        # v0.156：superseded 记录已作废，与它的同值不构成去重理由——否则重报等于
-        # 旧值的数被吞，生效值仍是冲突的新值。
-        and not x.get("superseded")
-        # v0.156：既有记录 quality 弱于新记录（candidate→confirmed）不算 same。
-        and _QUALITY_RANK.get(x.get("quality") or "candidate", 0)
-        >= _QUALITY_RANK.get(record["quality"], 0)
-        # v0.152：去重不再看 source——同值同日从两个入口（人工 + market_timing_input
-        # 自动回填）各记一遍，攒出 23 条同值重复（2026-08-30 去重清理过一轮）。
-    ]
+    existing = _load_ledger()
+    same = [x for x in existing if _is_duplicate(x, day, record)]
     if same:
         return same[-1]
     # v0.153（owner 拍板「每天只能有一个值」）：同日**不同值** = 纠错——
     # 旧记录标 superseded 留痕（事实台账不静默改写，作废标记即审计轨迹），
     # 新值照常追加；读侧（regime 构建）本就「后写覆盖先写」，作废标记防误读。
-    conflicted = [
-        x
-        for x in existing
-        if x.get("date") == day
-        and x.get("amv_change_pct") != record["amv_change_pct"]
-        and not x.get("superseded")
-    ]
+    conflicted = [x for x in existing if _is_conflicted(x, day, record)]
     if conflicted:
-        for x in conflicted:
-            x["superseded"] = True
-            x["superseded_reason"] = (
-                f"同日不同值纠错：{x.get('amv_change_pct')} 被 {record['amv_change_pct']} 覆盖"
-            )
-            x["superseded_at"] = record["recorded_at"]
-        tmp = LEDGER.with_suffix(".jsonl.tmp")
-        tmp.write_text(
-            "\n".join(json.dumps(x, ensure_ascii=False) for x in existing) + "\n",
-            encoding="utf-8",
-        )
-        os.replace(tmp, LEDGER)
-        print(
-            f"[WARN] 0AMV {day} 纠错：旧值 {[x.get('amv_change_pct') for x in conflicted]}"
-            f" → 新值 {record['amv_change_pct']}（旧记录已标 superseded 留痕）",
-            file=sys.stderr,
-        )
+        _supersede_conflicts(existing, conflicted, record, day)
     LEDGER.parent.mkdir(parents=True, exist_ok=True)
     with LEDGER.open("a", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")

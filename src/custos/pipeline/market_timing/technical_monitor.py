@@ -42,7 +42,8 @@ from custos.core.indicators import (
 from custos.core.indicators import ema  # noqa: E402  包 API 面：market_timing/__init__ re-export
 
 __all__ = [
-    "ema"
+    "ema",
+    "split_code",
 ]  # re-export 声明（pylint 依此识别非残留），无 star-import 故不影响其他名字
 
 from custos.core.paths import MARKET_DIR  # noqa: E402
@@ -358,6 +359,19 @@ def price_volume_state(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
     }
 
 
+def _close_at(x: pd.DataFrame, i: int) -> float:
+    """收盘价单元格 → float。pandas-stubs 把 ``.at[]`` 标成 Scalar 联合类型，
+    运行时本就是 float，集中在这里收口，避免每个调用点各自断言。"""
+    v: Any = x.at[i, "close"]
+    return float(v)
+
+
+def _date_at(x: pd.DataFrame, i: int) -> str:
+    """date 列单元格 → 'YYYY-MM-DD'（同上，stubs 联合类型的集中收口）。"""
+    v: Any = x.at[i, "date"]
+    return v.strftime("%Y-%m-%d")
+
+
 def _closing_pivots(
     x: pd.DataFrame, left: int, right: int, lookback: int
 ) -> tuple[list[int], list[int]]:
@@ -367,7 +381,7 @@ def _closing_pivots(
     search_start = max(left, len(x) - max(lookback, left + right + 8))
     for i in range(search_start, len(x) - right):
         close_window = x["close"].iloc[i - left : i + right + 1]
-        close = float(x.at[i, "close"])
+        close = _close_at(x, i)
         if (
             close == float(close_window.min())
             and int((close_window == close).sum()) == 1
@@ -417,12 +431,10 @@ def _latest_rising_n(
         highs = [i for i in pivot_highs if l1 < i < l2]
         if not highs:
             continue
-        h1 = max(highs, key=lambda i: float(x.at[i, "close"]))
-        if float(x.at[l2, "close"]) <= float(x.at[l1, "close"]):
+        h1 = max(highs, key=lambda i: _close_at(x, i))
+        if _close_at(x, l2) <= _close_at(x, l1):
             continue
-        breakout_rows = x.index[
-            (x.index > l2) & (x["close"] > float(x.at[h1, "close"]))
-        ]
+        breakout_rows = x.index[(x.index > l2) & (x["close"] > _close_at(x, h1))]
         breakout = int(breakout_rows[0]) if len(breakout_rows) else None
         return (l1, h1, l2, breakout)
     return None
@@ -454,9 +466,9 @@ def n_structure_state(
         return {"available": False, "reason": "未发现已确认分型的上升N型结构"}
     l1, h1, l2, breakout = latest
     current_close = float(x["close"].iloc[-1])
-    origin_low = float(x.at[l1, "close"])
-    pullback_low = float(x.at[l2, "close"])
-    swing_high = float(x.at[h1, "close"])
+    origin_low = _close_at(x, l1)
+    pullback_low = _close_at(x, l2)
+    swing_high = _close_at(x, h1)
     origin_extreme_low = float(
         x["low"].iloc[max(0, l1 - left) : min(len(x), l1 + right + 1)].min()
     )
@@ -471,22 +483,20 @@ def n_structure_state(
         + ("-breakout" if breakout is not None else "-candidate"),
         "status": "confirmed" if breakout is not None else "candidate",
         "prior_low": round(origin_low, 4),
-        "prior_low_date": x.at[l1, "date"].strftime("%Y-%m-%d"),
+        "prior_low_date": _date_at(x, l1),
         "origin_extreme_low": round(origin_extreme_low, 4),
         "breakout_level": round(swing_high, 4),
-        "breakout_level_date": x.at[h1, "date"].strftime("%Y-%m-%d"),
+        "breakout_level_date": _date_at(x, h1),
         "pullback_low": round(pullback_low, 4),
-        "pullback_low_date": x.at[l2, "date"].strftime("%Y-%m-%d"),
-        "confirmed_date": x.at[breakout, "date"].strftime("%Y-%m-%d")
-        if breakout is not None
-        else None,
+        "pullback_low_date": _date_at(x, l2),
+        "confirmed_date": _date_at(x, breakout) if breakout is not None else None,
         "current_close": round(current_close, 4),
         "distance_pct": round(distance_pct, 4) if distance_pct is not None else None,
         "close_above": bool(current_close >= origin_low),
         "breached_on_close": bool(currently_breached),
         "pullback_breached_on_close": bool(current_close < pullback_low),
         "breach_bars_ago": breach_bars_ago,
-        "first_breach_date": x.at[first_breach, "date"].strftime("%Y-%m-%d")
+        "first_breach_date": _date_at(x, first_breach)
         if first_breach is not None
         else None,
         "stale": stale,
@@ -505,14 +515,14 @@ def _latest_descending_n(
         if not prior_highs:
             continue
         h1 = prior_highs[-1]
-        if float(x.at[h2, "close"]) >= float(x.at[h1, "close"]):
+        if _close_at(x, h2) >= _close_at(x, h1):
             continue  # H2 must be lower than H1
         lows_between = [i for i in pivot_lows if h1 < i < h2]
         if not lows_between:
             continue
-        l1 = min(lows_between, key=lambda i: float(x.at[i, "close"]))
+        l1 = min(lows_between, key=lambda i: _close_at(x, i))
         # Check if current close is below L1 (confirmation)
-        confirmed = current_close < float(x.at[l1, "close"])
+        confirmed = current_close < _close_at(x, l1)
         return (h1, l1, h2, confirmed)
     return None
 
@@ -545,9 +555,9 @@ def descending_n_structure_state(
         return {"available": False, "reason": "未发现已确认分型的下降N型结构"}
     h1, l1, h2, confirmed = latest
     current_close = float(x["close"].iloc[-1])
-    origin_high = float(x.at[h1, "close"])
-    pullback_low = float(x.at[l1, "close"])
-    lower_high = float(x.at[h2, "close"])
+    origin_high = _close_at(x, h1)
+    pullback_low = _close_at(x, l1)
+    lower_high = _close_at(x, h2)
     origin_extreme_high = float(
         x["high"].iloc[max(0, h1 - left) : min(len(x), h1 + right + 1)].max()
     )
@@ -560,19 +570,19 @@ def descending_n_structure_state(
         "pattern": "H1-L1-lower_H2" + ("-confirmed" if confirmed else "-candidate"),
         "status": "confirmed" if confirmed else "candidate",
         "prior_high": round(origin_high, 4),
-        "prior_high_date": x.at[h1, "date"].strftime("%Y-%m-%d"),
+        "prior_high_date": _date_at(x, h1),
         "origin_extreme_high": round(origin_extreme_high, 4),
         "structural_low": round(pullback_low, 4),
-        "structural_low_date": x.at[l1, "date"].strftime("%Y-%m-%d"),
+        "structural_low_date": _date_at(x, l1),
         "lower_high": round(lower_high, 4),
-        "lower_high_date": x.at[h2, "date"].strftime("%Y-%m-%d"),
+        "lower_high_date": _date_at(x, h2),
         "current_close": round(current_close, 4),
         "distance_to_structural_low_pct": round(distance_pct, 4)
         if distance_pct is not None
         else None,
         "below_structural_low": bool(current_close < pullback_low),
         "breach_bars_ago": breach_bars_ago,
-        "first_breach_date": x.at[first_breach, "date"].strftime("%Y-%m-%d")
+        "first_breach_date": _date_at(x, first_breach)
         if first_breach is not None
         else None,
         "stale": stale,

@@ -83,7 +83,7 @@ def read_day(prefix: str, code: str) -> list[dict]:
         return []
     rows = []
     for _, r in df.iterrows():
-        dt = r.get("date")
+        dt: Any = r.get("date")
         rows.append(
             {
                 "date": dt.strftime("%Y%m%d") if hasattr(dt, "strftime") else str(dt),
@@ -156,7 +156,7 @@ def _vipdoc_rows(code: str, count: int = 5) -> list[dict]:
         return []
     rows = []
     for _, r in df.tail(count).iterrows():
-        dt = r.get("date")
+        dt: Any = r.get("date")
         rows.append(
             {
                 "date": dt.strftime("%Y-%m-%d")

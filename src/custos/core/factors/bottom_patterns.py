@@ -22,8 +22,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import numpy as np
-
 from custos.core.factors._util import ohlcv_arrays as _ohlcv_arrays  # noqa: E402
 from custos.core.indicators import macd_series  # noqa: E402  DIF/DEA 唯一实现
 

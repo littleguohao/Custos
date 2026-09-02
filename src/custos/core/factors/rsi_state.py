@@ -24,7 +24,7 @@ RSI 区间是连续的、看的是这只票**过去一段时间的回调行为�
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 import pandas as pd
 
 from custos.core.indicators import rsi  # noqa: E402  RSI 唯一实现（本模块只保留对它的解读）
@@ -220,7 +220,9 @@ def rsi_divergence(
             "prior_low": round(prior_low, 4),
             "cur_rsi": round(cur_r, 2),
             "prior_rsi": round(prior_r, 2),
-            "bars_between": int(len(low) - 1 - low.index.get_loc(prior_low_idx)),
+            "bars_between": int(
+                len(low) - 1 - cast(int, low.index.get_loc(prior_low_idx))
+            ),
         }
     except Exception as exc:  # noqa: BLE001
         return {

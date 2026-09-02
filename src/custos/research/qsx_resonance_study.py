@@ -461,6 +461,8 @@ def compare_arms(reps: dict[str, dict[str, Any]]) -> dict[str, Any]:
         }
 
     def _rate(x: Optional[dict], y: Optional[dict]) -> dict[str, Any]:
+        if not x or not y:
+            return {"signal_rate": None, "code_rate": None}
         return {
             "signal_rate": (
                 round(x["n_trades"] / y["n_trades"], 4) if y["n_trades"] else None

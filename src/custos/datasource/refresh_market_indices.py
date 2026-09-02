@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import math
+from typing import Any
 
 
 from custos.core.paths import MARKET_DIR, write_json_atomic  # noqa: E402
@@ -62,7 +63,7 @@ def _index_rows(code: str) -> list[dict]:
         return []
     rows = []
     for _, r in df.iterrows():
-        dt = r.get("date")
+        dt: Any = r.get("date")
         rows.append(
             {
                 "date": dt.strftime("%Y%m%d") if hasattr(dt, "strftime") else str(dt),

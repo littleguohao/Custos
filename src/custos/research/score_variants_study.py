@@ -259,7 +259,7 @@ def _wilson_overlap(
     lo_2, hi_2 = wilson_wr_interval(b2.get("n_win") or 0, b2.get("n") or 0)
     overlap = (
         None
-        if None in (lo_1, hi_1, lo_2, hi_2)
+        if lo_1 is None or hi_1 is None or lo_2 is None or hi_2 is None
         else not (hi_1 < lo_2 or hi_2 < lo_1)  # 区间相交
     )
     return [lo_1, hi_1], [lo_2, hi_2], overlap
