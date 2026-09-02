@@ -796,16 +796,16 @@ class TestSectorBoard:
     """§4 v0.136：板块题材涨跌幅榜与市场温度（客观事实展示，非主线判定）。"""
 
     def test_collector_product_rendered(self):
-        """采集器当日榜在 ⇒ 直接用其 TOP5 涨/跌幅（#26 口径复用）。"""
+        """采集器当日榜在 ⇒ 直接用其 TOP10 涨/跌幅（#26 口径复用；v0.166 起 TOP5→TOP10）。"""
         rank = {
             "gainers_top": [
                 {
                     "rank": i + 1,
-                    "code": f"8804{i}",
+                    "code": f"8804{i:02d}",
                     "name": f"涨板块{i}",
-                    "pct": 3.0 - i,
+                    "pct": 3.0 - i * 0.1,
                 }
-                for i in range(5)
+                for i in range(12)
             ],
             "losers_top": [{"rank": 1, "code": "880301", "name": "电力", "pct": -2.0}],
         }
@@ -814,7 +814,10 @@ class TestSectorBoard:
         text = "\n".join(lines)
         assert "板块题材涨跌幅榜与市场温度" in text
         assert "客观事实展示，非主线判定" in text
+        assert "涨幅 TOP10" in text and "跌幅 TOP10" in text
         assert "涨板块0" in text and "电力" in text and "-2.00%" in text
+        assert "涨板块9" in text, "第 10 名应显示"
+        assert "涨板块10" not in text, "第 11 名起应截断"
         assert "待重设计" not in text, "#26 待重设计标注必须随旧节删掉"
 
     def test_both_missing_is_unavailable_with_chain_note(self):

@@ -34,9 +34,7 @@ def test_table_continuous_until_rules_section():
     """规范小节必须在文末——表头到规范小节之间不得有标题/空行断表。"""
     lines = _lines()
     header_idx = next(i for i, ln in enumerate(lines) if ln.startswith("| 日期 |"))
-    rules_idx = next(
-        i for i, ln in enumerate(lines) if ln.startswith(RULES_HEADING)
-    )
+    rules_idx = next(i for i, ln in enumerate(lines) if ln.startswith(RULES_HEADING))
     assert rules_idx > header_idx, "写入规范必须在表格之后（文末）"
     body = lines[header_idx + 2 : rules_idx]
     # 表格与规范之间允许正好一个空行收尾（最后一个条目之后的段落分隔）

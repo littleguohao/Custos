@@ -1,4 +1,4 @@
-# 静态检查套件（Windows）—— 每次大改之后跑一遍。
+﻿# 静态检查套件（Windows）—— 每次大改之后跑一遍。
 # 报告输出到 reports\（已 gitignore，不入库）。工具经 `uv run --with` 临时注入。
 #
 # 用法（PowerShell）：

@@ -366,7 +366,7 @@ def _sector_name_map() -> dict:
 
 def _sector_rank_fallback(day: str, index_dir) -> dict | None:
     """sector_daily_rank 当日产物缺失时的兜底：用板块指数缓存
-    （17:00/18:00 链的 refresh_sector_index 每日更新）自算当日涨跌幅 TOP5。
+    （17:00/18:00 链的 refresh_sector_index 每日更新）自算当日涨跌幅 TOP10。
     宇宙口径向 #26 采集器对齐（名称表可得时
     只收 行业(2)+概念(4)）；缓存无当日数据返回 None。"""
     name_map = _sector_name_map()
@@ -385,10 +385,12 @@ def _sector_rank_fallback(day: str, index_dir) -> dict | None:
         return None
     by_pct = sorted(rows, key=lambda x: (-x["pct"], x["code"]))
     return {
-        "gainers_top": [dict(e, rank=i + 1) for i, e in enumerate(by_pct[:5])],
+        "gainers_top": [dict(e, rank=i + 1) for i, e in enumerate(by_pct[:10])],
         "losers_top": [
             dict(e, rank=i + 1)
-            for i, e in enumerate(sorted(rows, key=lambda x: (x["pct"], x["code"]))[:5])
+            for i, e in enumerate(
+                sorted(rows, key=lambda x: (x["pct"], x["code"]))[:10]
+            )
         ],
     }
 
@@ -428,7 +430,7 @@ def render_sector_board(lines, market: dict, rank, rank_source) -> None:
         "",
         "## 4. 板块题材涨跌幅榜与市场温度",
         "",
-        "> 客观事实展示，非主线判定（原主线生命周期判定口径已随 #26 撤下）。",
+        "> 客观事实展示，非主线判定。",
         "",
     ]
     if not rank:
@@ -439,7 +441,7 @@ def render_sector_board(lines, market: dict, rank, rank_source) -> None:
         )
     else:
         lines.append(f"- 板块榜数据来源：{rank_source}。")
-        for title, key in (("涨幅 TOP5", "gainers_top"), ("跌幅 TOP5", "losers_top")):
+        for title, key in (("涨幅 TOP10", "gainers_top"), ("跌幅 TOP10", "losers_top")):
             lines += [
                 "",
                 f"### 板块{title}",
@@ -447,7 +449,7 @@ def render_sector_board(lines, market: dict, rank, rank_source) -> None:
                 "| 排名 | 板块 | 当日涨跌幅 |",
                 "|---:|---|---:|",
             ]
-            for e in (rank.get(key) or [])[:5]:
+            for e in (rank.get(key) or [])[:10]:
                 pct = optional_finite(e.get("pct"))
                 pct_text_ = "unavailable" if pct is None else f"{pct:+.2f}%"
                 lines.append(

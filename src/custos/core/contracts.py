@@ -512,7 +512,11 @@ SPECS: dict[str, dict] = {
             "market_state": {"type": str, "required": True, "non_empty": True},
             "market_score": {"type": str, "required": True, "non_empty": True},
             "total_position_range": {"type": str, "required": True, "non_empty": True},
-            "new_position_permission": {"type": str, "required": True, "non_empty": True},
+            "new_position_permission": {
+                "type": str,
+                "required": True,
+                "non_empty": True,
+            },
             "risk_level": {"type": str, "required": True, "choices": RISK_LEVELS},
             "modules": {"type": list, "required": True},
         },
