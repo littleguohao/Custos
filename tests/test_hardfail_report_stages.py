@@ -318,3 +318,35 @@ class TestExecutionReviewStatuses:
         """`allow_nan=False`：NaN 会让下游 json.loads 拿到非法值。"""
         r = self._run("2026-08-07", chief={}, tail={}, trades=[])
         assert "NaN" not in json.dumps(r)
+
+
+# ─────────────────────────── v0.165 日报产物停产守卫 ───────────────────────────
+
+
+class TestDailyMdTrimmingV0165:
+    """v0.165：评分/chief/wechat 三份人读产物退出每日链。
+
+    - wechat_summary stage 从 `_run_report_stages` 删除（脚本保留手动 --date）；
+    - chief_decision_report / market_timing_scorer 源码不再引用各自的 md 产物
+      （评分通道改 `data/market/{date}_market_timing_score.json`）。
+    """
+
+    def test_wechat_summary_stage_removed(self):
+        import inspect
+
+        from custos.pipeline import daily_pipeline as dp
+
+        src = inspect.getsource(dp._run_report_stages)
+        assert "wechat_summary" not in src, "wechat_summary stage 应已从日报链删除"
+
+    def test_chief_decision_md_not_referenced(self):
+        from custos.pipeline.market_timing import chief_decision_report as cdr
+
+        src = pathlib.Path(cdr.__file__).read_text(encoding="utf-8")
+        assert "chief_decision.md" not in src, "chief md 应已停产"
+
+    def test_market_timing_score_md_not_referenced(self):
+        from custos.pipeline.market_timing import market_timing_scorer as ms
+
+        src = pathlib.Path(ms.__file__).read_text(encoding="utf-8")
+        assert "market_timing_score.md" not in src, "评分 md 应已停产"

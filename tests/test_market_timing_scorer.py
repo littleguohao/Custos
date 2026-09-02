@@ -275,7 +275,7 @@ class TestIsStaleHonorsProducerQuality:
 
 
 class TestGateOverridesScore:
-    """⚠️ 运行门控**覆盖评分结论** —— `make_report` 里这一段是全模块最要紧的未覆盖代码。
+    """⚠️ 运行门控**覆盖评分结论** —— `_score_payload` 里这一段是全模块最要紧的代码。
 
     评分器算出「进攻 / 允许开新仓」，但门控说数据 blocked 时必须翻成「禁止 / 强风控 /
     仓位 0%-20%」。这是「**数据不可信时不得放宽交易权限**」的落点 ——
@@ -292,32 +292,33 @@ class TestGateOverridesScore:
         ("主线", 15, 15.0, "满分"),
     ]  # 合计 100 ⇒ 进攻档
 
-    def _report(self, gate=None, modules=None):
-        return ms.make_report({"date": "2026-08-11"}, modules or self.MODULES, gate)
+    def _payload(self, gate=None, modules=None):
+        return ms._score_payload({"date": "2026-08-11"}, modules or self.MODULES, gate)
 
     def test_no_gate_keeps_score_conclusion(self):
-        r = self._report()
-        assert "**进攻**" in r and "**允许**" in r and "**普通**" in r
+        p = self._payload()
+        assert p["market_state"] == "进攻"
+        assert p["new_position_permission"] == "允许"
+        assert p["risk_level"] == "普通"
 
     def test_blocked_forces_forbid_and_min_position(self):
-        r = self._report(
+        p = self._payload(
             {"market_quality": {"status": "blocked", "quality_score": 0.3}}
         )
-        assert "今日是否允许开新仓：**禁止**" in r
-        assert "风控等级：**强风控**" in r
-        assert "建议总仓位：**0%-20%**" in r
+        assert p["new_position_permission"] == "禁止"
+        assert p["risk_level"] == "强风控"
+        assert p["total_position_range"] == "0%-20%"
 
-    def test_blocked_does_not_rewrite_status_line(self):
-        """⚠️ `blocked` **不改 `status`** —— 报告会同时出现
-        「状态：**进攻**」与「允许开新仓：**禁止**、仓位 0%-20%」。
+    def test_blocked_does_not_rewrite_status(self):
+        """⚠️ `blocked` **不改 `market_state`** —— payload 会同时出现
+        「进攻」与「禁止、仓位 0%-20%」。
 
-        这是当前实现的行为，本条**钉住现状**并把它标出来：读报告的人可能
-        据「状态：进攻」形成印象而忽略下面三行。是否要让 blocked 也把 status
-        降档，属口径问题，留给 owner（TODO 已记）。
+        这是当前实现的行为，本条**钉住现状**并把它标出来。是否要让 blocked
+        也把 status 降档，属口径问题，留给 owner（TODO 已记）。
         """
-        r = self._report({"market_quality": {"status": "blocked"}})
-        assert "状态：**进攻**" in r, "现状是 status 不被 blocked 改写"
-        assert "**禁止**" in r
+        p = self._payload({"market_quality": {"status": "blocked"}})
+        assert p["market_state"] == "进攻", "现状是 status 不被 blocked 改写"
+        assert p["new_position_permission"] == "禁止"
 
     def test_degraded_downgrades_only_permissive_wordings(self):
         """⚠️ `degraded` 只在 `open_perm` 以「允许」开头时降级。
@@ -326,9 +327,9 @@ class TestGateOverridesScore:
         以它开头；`仅低吸 / 小仓核心主线`、`原则上不新开`、`禁止追涨`
         本就受限，degraded 只把 risk 抬到「提高」。
         """
-        r = self._report({"market_quality": {"status": "degraded"}})
-        assert "仅观察 / 小仓待确认" in r
-        assert "风控等级：**提高**" in r
+        p = self._payload({"market_quality": {"status": "degraded"}})
+        assert p["new_position_permission"] == "仅观察 / 小仓待确认"
+        assert p["risk_level"] == "提高"
 
     def test_degraded_leaves_already_restrictive_permission(self):
         weak = [
@@ -342,45 +343,18 @@ class TestGateOverridesScore:
         ]
         total = sum(x[2] for x in weak)
         assert 40 <= total < 60, f"用例要落在震荡偏弱档，实际 {total}"
-        r = ms.make_report(
+        p = ms._score_payload(
             {"date": "2026-08-11"}, weak, {"market_quality": {"status": "degraded"}}
         )
-        assert "仅低吸 / 小仓核心主线" in r, "已受限的措辞不该被改写"
-        assert "仅观察 / 小仓待确认" not in r
-
-    def test_amv_caveat_always_present(self):
-        """「若 0AMV 未填，最终仓位不得上调到进攻档」这句是**无条件**的提醒。
-
-        0AMV 是全链方向的主过滤器（R4：熊市减亏 ~15pp），这句话不该因为
-        当天恰好填了就消失 —— 它是给读者的规则说明，不是当日状态。
-        """
-        assert "0AMV 未填" in self._report()
-
-    def test_quality_notes_absent_says_so(self):
-        """⚠️ 无数据质量提示时出「无特殊数据质量提示」而**不是**整节空白 ——
-        空白读者分不清「查了没有」与「没查」。"""
-        assert "无特殊数据质量提示" in self._report()
-
-    def test_quality_notes_are_rendered(self):
-        r = ms.make_report(
-            {
-                "date": "2026-08-11",
-                "data_quality": {"notes": ["宽度取自 T-1", "海外缺 KOSPI"]},
-            },
-            self.MODULES,
+        assert p["new_position_permission"] == "仅低吸 / 小仓核心主线", (
+            "已受限的措辞不该被改写"
         )
-        assert "宽度取自 T-1" in r and "海外缺 KOSPI" in r
-        assert "无特殊数据质量提示" not in r
 
-    def test_gate_line_reports_score(self):
-        r = self._report(
-            {"market_quality": {"status": "degraded", "quality_score": 0.62}}
-        )
-        assert "运行时质量门" in r and "0.62" in r
-
-    def test_module_table_sums_to_total(self):
-        r = self._report()
-        assert "| 合计 | 100 | 100.00 | |" in r
+    def test_market_score_is_total_over_full_weight(self):
+        """market_score 是「总分/满分权重」—— chief JSON 的 market_score 逐位同源。"""
+        p = self._payload()
+        assert p["market_score"] == "100.0/100"
+        assert sum(m["weight"] for m in p["modules"]) == 100
 
 
 class TestScoreIndices:
@@ -564,10 +538,10 @@ class TestSentimentAndTurnover:
 
 
 class TestMainEndToEnd:
-    """`main()` 的端到端：读 `market_timing_input` → 七模块打分 → 落盘报告。
+    """`main()` 的端到端：读 `market_timing_input` → 七模块打分 → 落盘 score JSON。
 
     ⚠️ 权重之和必须是 93（theme 腿 7 分随 TODO #26 主线口径撤下删除），
-    否则报告里「择时评分 X/93」这句是假的 ——
+    否则 JSON 里「market_score X/93」是假的 ——
     而下游 `status_from_score` 的五个档位（80/60/40/20）按固定分值切，
     满分结构变化后阈值未动（见 scorer 注释）。
     """
@@ -595,13 +569,9 @@ class TestMainEndToEnd:
             _s, "argv", ["x", "--date", market["date"], "--input", str(inp)]
         )
         ms.main()
-        out = (
-            ms.OUT_DIR
-            / str(market["date"])
-            / f"{market['date']}_market_timing_score.md"
-        )
-        assert out.exists(), "报告未落盘"
-        return out.read_text(encoding="utf-8")
+        out = ms.IN_DIR / f"{market['date']}_market_timing_score.json"
+        assert out.exists(), "score JSON 未落盘"
+        return json.loads(out.read_text(encoding="utf-8"))
 
     MARKET = {
         "date": "2026-08-11",
@@ -641,8 +611,8 @@ class TestMainEndToEnd:
 
     def test_weights_sum_to_93(self, monkeypatch, tmp_path):
         """⚠️ 权重之和必须真的是 93 —— 从 `main()` 源码里把每个模块的权重字面量
-        抠出来求和，而不是只看报告里的「| 合计 |」行
-        （那是 make_report 按权重实算的，但模块漏挂/多挂只有数源头才看得出）。
+        抠出来求和，而不是只看 payload 里的 market_score
+        （那是 _score_payload 按权重实算的，但模块漏挂/多挂只有数源头才看得出）。
 
         93 = 15+15+10+15+15+15+8：theme 腿（7 分）随 TODO #26 主线口径撤下删除，
         分档阈值（80/60/40/20）未动。
@@ -657,7 +627,7 @@ class TestMainEndToEnd:
             f"模块权重之和 = {sum(weights)}（{weights}）—— 「X/93」与档位切分都会失真"
         )
         r = self._run(monkeypatch, tmp_path, dict(self.MARKET))
-        assert "| 合计 | 93 |" in r
+        assert r["market_score"].endswith("/93")
 
     def test_theme_leg_stays_deleted(self):
         """防复活守卫：theme 腿是常数死腿（theme_clarity 恒空串、全仓零读者），
@@ -671,6 +641,7 @@ class TestMainEndToEnd:
 
     def test_all_seven_modules_appear(self, monkeypatch, tmp_path):
         r = self._run(monkeypatch, tmp_path, dict(self.MARKET))
+        names = {m["name"] for m in r["modules"]}
         for name in (
             "宏观政策环境",
             "0AMV 活跃市值",
@@ -680,15 +651,18 @@ class TestMainEndToEnd:
             "情绪强度",
             "成交量能",
         ):
-            assert f"| {name} |" in r, f"缺模块 {name}"
+            assert name in names, f"缺模块 {name}"
 
     def test_missing_gate_file_is_not_an_error(self, monkeypatch, tmp_path):
-        """门控文件不存在时按空处理 —— 不得因此崩掉整个评分（它是硬失败 stage）。"""
+        """门控文件不存在时按空处理 —— 不得因此崩掉整个评分（它是硬失败 stage），
+        也不得降级开仓权限。"""
         r = self._run(monkeypatch, tmp_path, dict(self.MARKET), gate=None)
-        assert "运行时质量门" not in r, "无门控文件时不该编出一行门控结论"
+        assert r["new_position_permission"].startswith("允许"), (
+            "无门控文件时不该编出降级结论"
+        )
 
-    def test_gate_file_blocked_reaches_the_report(self, monkeypatch, tmp_path):
-        """⚠️ 端到端确认门控**真的被读到并生效** —— 只测 `make_report` 不够：
+    def test_gate_file_blocked_reaches_the_payload(self, monkeypatch, tmp_path):
+        """⚠️ 端到端确认门控**真的被读到并生效** —— 只测 `_score_payload` 不够：
         文件名拼错、目录常量指错，单测都发现不了。"""
         r = self._run(
             monkeypatch,
@@ -696,5 +670,10 @@ class TestMainEndToEnd:
             dict(self.MARKET),
             gate={"market_quality": {"status": "blocked", "quality_score": 0.2}},
         )
-        assert "今日是否允许开新仓：**禁止**" in r
-        assert "运行时质量门：blocked" in r
+        assert r["new_position_permission"] == "禁止"
+        assert r["risk_level"] == "强风控"
+
+    def test_score_md_no_longer_written(self, monkeypatch, tmp_path):
+        """v0.165 起 market_timing_score.md 停产 —— 只落 score JSON。"""
+        self._run(monkeypatch, tmp_path, dict(self.MARKET))
+        assert not list(tmp_path.rglob("*_market_timing_score.md")), "md 应已停产"

@@ -74,7 +74,7 @@
       sector_state               6 消费者      score 的 NaN 曾致静默降级
     硬失败链其余（第三批）
       holding_quotes             5 消费者  ⛔  分支型
-      sector_technical_summary   3 消费者  ⛔  96 处读 available
+      sector_technical_summary   2 消费者  ⛔  96 处读 available
       execution_review           2 消费者  ⛔
       review_enrichment          1 消费者  ⛔
 
@@ -135,9 +135,10 @@ SECTION_QUALITY = {"auto", "stale", "raw_only", "degraded", "missing"}
 #    其余段仍只按本词表判。
 SECTION_NOT_FRESH = {"stale", "raw_only", "degraded", "missing"}
 
-# ── 已知的 new_position_permission 取值。它是**从 markdown 报告正则抽出来的**
-#    （chief_decision_report:39 `extract(r'今日是否允许开新仓：\*\*(.*?)\*\*', ...)`），
-#    所以不能强枚举 —— 上游报告改一个字就会出现新值。
+# ── 已知的 new_position_permission 取值。它**读自 scorer 产出的 score JSON**
+#    （chief_decision_report 读 `data/market/{date}_market_timing_score.json`，
+#    v0.165 起替代 md 正则抽取），措辞由 status_from_score/质量门修正决定，
+#    所以不能强枚举 —— 上游改一个字就会出现新值。
 #    这里只作 warning 白名单：出现未知值时提示「上游措辞可能变了」，不阻断。
 KNOWN_PERMISSIONS = {
     "禁止",
@@ -502,6 +503,20 @@ SPECS: dict[str, dict] = {
             },
         },
     },
+    # market_timing_scorer.main —— scorer → chief_decision 的评分通道
+    # （v0.165 起替代人读的 market_timing_score.md）
+    "market_timing_score": {
+        "kind": "object",
+        "fields": {
+            "date": {"type": str, "required": True, "non_empty": True},
+            "market_state": {"type": str, "required": True, "non_empty": True},
+            "market_score": {"type": str, "required": True, "non_empty": True},
+            "total_position_range": {"type": str, "required": True, "non_empty": True},
+            "new_position_permission": {"type": str, "required": True, "non_empty": True},
+            "risk_level": {"type": str, "required": True, "choices": RISK_LEVELS},
+            "modules": {"type": list, "required": True},
+        },
+    },
     # chief_decision_report.main
     "chief_decision": {
         "kind": "object",
@@ -509,7 +524,7 @@ SPECS: dict[str, dict] = {
             "date": {"type": str, "required": True, "non_empty": True},
             "market_state": {"type": str, "required": True, "non_empty": True},
             "total_position_range": {"type": str, "required": True, "non_empty": True},
-            # 从 markdown 正则抽取 ⇒ 只作已知值告警，不强枚举
+            # 读自 score JSON（措辞由 scorer 决定）⇒ 只作已知值告警，不强枚举
             "new_position_permission": {
                 "type": str,
                 "required": True,

@@ -182,14 +182,17 @@
 - `data/stock_pool/YYYY-MM-DD_stock_pool.json`
 - `data/buy_strategy/YYYY-MM-DD_buy_plan.json`
 - `data/holdings/YYYY-MM-DD_holding_technical_summary.json`
-- `artifacts/reports/daily/YYYY-MM-DD/YYYY-MM-DD_chief_decision.md`
 - `artifacts/reports/daily/YYYY-MM-DD/YYYY-MM-DD_1445_review.md`
 - 三份日报告文件名带时点标记（v0.141 起）：盘前 `YYYY-MM-DD_0905_daily_report.md`、
   盘后 `YYYY-MM-DD_1700_final_review.md/.json`、选股 `YYYY-MM-DD_1800_candidate_table.md`
 - v0.162 起 `YYYY-MM-DD_portfolio_review.md` 与 `YYYY-MM-DD_theme_tracker.md` 停产
   （结构化产物 `data/holdings/YYYY-MM-DD_holding_review.json` 与
-  `data/sectors/YYYY-MM-DD_sector_technical_summary.json` 路径不变、照常产出）；
-  `chief_decision.md` 是唯一人读决策报告，市场评分明细与板块强弱已并入其 §2/§3。
+  `data/sectors/YYYY-MM-DD_sector_technical_summary.json` 路径不变、照常产出）。
+- v0.165 起 `YYYY-MM-DD_market_timing_score.md` 与 `YYYY-MM-DD_chief_decision.md` 停产，
+  `YYYY-MM-DD_wechat_summary.txt` 不再每日自动产出（`wechat_summary.py` 保留，
+  需要时手动 `--date` 运行）；scorer → chief_decision 的评分通道改为结构化
+  `data/market/YYYY-MM-DD_market_timing_score.json`，
+  `data/decisions/YYYY-MM-DD_chief_decision.json` 照常产出且键集合不变。
 
 ## 质量检查
 

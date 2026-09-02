@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Render concise summary exclusively from structured ChiefDecision."""
+"""Render concise summary exclusively from structured ChiefDecision.
+
+v0.165 起不再由 daily_pipeline 每日自动产出；需要时手动 `--date` 运行。
+"""
 
 from __future__ import annotations
 import argparse

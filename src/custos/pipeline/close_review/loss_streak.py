@@ -8,7 +8,8 @@ owner 2026-08-10 定：**连亏冷却放在复盘环节，每日/每周都统计
 ⇒ 本模块**只产出事实与判定**，不拦任何交易。原因是自动链里**没有买入决策可拦**：
 `chief_decision_report` 的 `buy_actions` 是字面量空表（源码注释：
 `Candidate discovery disabled in pure-script mode; buy_actions always empty`），
-「买入计划审核」表永远显示「暂无」。把冷却做成 gate 会是个挂在空处的闸。
+旧 chief_decision.md 的「买入计划审核」节恒显示「暂无」（该节 v0.161 已删，
+md 本身 v0.165 停产）。把冷却做成 gate 会是个挂在空处的闸。
 所以它的作用是**让复盘看见**：某只票已连亏 N 次，下次考虑它之前先想清楚。
 
 （用户画像第 4 条「九丰能源等案例显示需要连续亏损冷却机制」是本条的动因；

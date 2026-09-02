@@ -22,20 +22,25 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 from custos.pipeline.market_timing import chief_decision_report as cdr  # noqa: E402
 import sys
 
-MT_MD = (
-    "状态：**进攻**\n择时评分：**78**\n建议总仓位：**40%-60%**\n"
-    "今日是否允许开新仓：**允许**\n"
-)
+MT_SCORE = {
+    "date": "2026-08-07",
+    "market_state": "进攻",
+    "market_score": "78/93",
+    "total_position_range": "40%-60%",
+    "new_position_permission": "允许",
+    "risk_level": "普通",
+    "modules": [],
+}
 
 
 @pytest.fixture()
 def env(tmp_path, monkeypatch):
-    for sub in ("risk", "quality", "holdings", "sectors", "decisions"):
+    for sub in ("risk", "quality", "holdings", "sectors", "decisions", "market"):
         (tmp_path / sub).mkdir()
     plans = tmp_path / "plans"
     plans.mkdir()
     monkeypatch.setattr(cdr, "DATA", tmp_path)
-    monkeypatch.setattr(cdr, "PLANS", plans)
+    monkeypatch.setattr(cdr, "MARKET_DIR", tmp_path / "market")
     return tmp_path, plans
 
 
@@ -50,7 +55,7 @@ def _write(
     b1=None,
     sectors=None,
     sector_summary=None,
-    mt=MT_MD,
+    score=MT_SCORE,
 ):
     if risk is not None:
         (data / "risk" / f"{day}_risk_decision.json").write_text(
@@ -76,11 +81,11 @@ def _write(
         (data / "sectors" / f"{day}_sector_technical_summary.json").write_text(
             json.dumps(sector_summary, ensure_ascii=False), encoding="utf-8"
         )
-    if mt is not None:
-        # 2026-08-12 起按日期目录归档：{day}/{day}_market_timing_score.md
-        d = plans / day
-        d.mkdir(parents=True, exist_ok=True)
-        (d / f"{day}_market_timing_score.md").write_text(mt, encoding="utf-8")
+    if score is not None:
+        # v0.165 起评分通道是 score JSON：data/market/{day}_market_timing_score.json
+        (data / "market" / f"{day}_market_timing_score.json").write_text(
+            json.dumps(score, ensure_ascii=False), encoding="utf-8"
+        )
 
 
 def _run(data, plans, day, monkeypatch, **kw):
@@ -147,6 +152,10 @@ class TestPermissionGating:
             b1=[],
             sectors=[],
         )
+        # 评分四值从 score JSON 逐位透传进 chief JSON（v0.165 起的数据通道）
+        assert d["market_state"] == "进攻"
+        assert d["market_score"] == "78/93"
+        assert d["total_position_range"] == "40%-60%"
         assert d["new_position_permission"] == "允许"
         assert d["risk_level"] == "普通"
 
@@ -486,8 +495,8 @@ class TestWatchlistAndForbidden:
             assert x in f
         assert len(f) == len(set(f)), "禁令未去重"
 
-    def test_missing_market_timing_md_degrades(self, env, monkeypatch):
-        """择时报告缺失 ⇒ 状态未知、权限落到「原则不允许」，**不能崩**。"""
+    def test_missing_score_json_degrades(self, env, monkeypatch):
+        """score JSON 缺失 ⇒ 四值落到默认值（未知/待确认/待确认/原则不允许），**不能崩**。"""
         data, plans = env
         d = _run(
             data,
@@ -499,16 +508,19 @@ class TestWatchlistAndForbidden:
             holdings=[],
             b1=[],
             sectors=[],
-            mt=None,
+            score=None,
         )
         assert d["market_state"] == "未知"
+        assert d["market_score"] == "待确认"
+        assert d["total_position_range"] == "待确认"
         assert d["new_position_permission"] in (
             "原则不允许",
             "仅观察，不得加仓",
             "禁止",
         )
 
-    def test_markdown_and_json_both_written(self, env, monkeypatch):
+    def test_chief_decision_md_no_longer_written(self, env, monkeypatch):
+        """v0.165 起 chief_decision.md 停产 —— 只落 chief_decision.json。"""
         data, plans = env
         _run(
             data,
@@ -521,116 +533,8 @@ class TestWatchlistAndForbidden:
             b1=[],
             sectors=[],
         )
-        md = (plans / "2026-08-07" / "2026-08-07_chief_decision.md").read_text(
-            encoding="utf-8"
-        )
-        assert "# chief_decision 每日总控交易计划" in md
-        # v0.161/v0.162：买入审核（恒空）与验证点（恒三条）两节不再渲染；
-        # 吸收评分明细与板块强弱后重排 8 节
-        assert "买入计划审核" not in md
-        assert "下一交易日验证点" not in md
-        assert "## 2. 市场评分明细" in md and "## 4. 持仓处理优先级" in md
-        assert "RiskDecision为强制输入" not in md
-
-
-class TestMergedSections:
-    """v0.162 合并进来的三个展示节：评分明细 / 板块强弱 / 持仓新列。"""
-
-    MT_WITH_TABLE = MT_MD + (
-        "\n## 2. 模块评分\n\n"
-        "| 模块 | 权重 | 得分 | 判断 |\n"
-        "|---|---:|---:|---|\n"
-        "| 0AMV | 30 | 25.00 | 多头 |\n"
-        "| 合计 | 100 | 78.00 | |\n"
-        "\n## 3. 交易指令\n"
-    )
-
-    SECTOR_ROWS = [
-        {
-            "theme_id": "880537.SH",
-            "theme_name": "核电核能",
-            "primary_code": "880537.SH",
-            "available": True,
-            "fit": 0.92,
-            "stage": "主升/加速",
-            "stage_reason": "趋势上涨",
-            "score": 88.0,
-            "representative_stocks": ["002366"],
-        },
-        {
-            "theme_id": "880520.SH",
-            "theme_name": "智能电网",
-            "primary_code": "880520.SH",
-            "available": False,
-            "stage": "退潮/下跌",
-            "stage_reason": "趋势下跌",
-            "score": 18.0,
-            "representative_stocks": ["600312"],
-        },
-    ]
-
-    def _md(self, data, plans, day, monkeypatch, **kw):
-        kw.setdefault("risk", {"risk_level": "普通"})
-        kw.setdefault("gate", OK_GATE)
-        kw.setdefault("holdings", [])
-        kw.setdefault("b1", [])
-        kw.setdefault("sectors", [])
-        _run(data, plans, day, monkeypatch, **kw)
-        return (plans / day / f"{day}_chief_decision.md").read_text(encoding="utf-8")
-
-    def test_module_score_table_copied_verbatim(self, env, monkeypatch):
-        """§2：mt 的「## 2. 模块评分」表格（含合计行）原样进 chief md。"""
-        data, plans = env
-        md = self._md(data, plans, "2026-08-07", monkeypatch, mt=self.MT_WITH_TABLE)
-        assert "| 0AMV | 30 | 25.00 | 多头 |" in md
-        assert "| 合计 | 100 | 78.00 |" in md
-        assert "交易指令" not in md, "不得搬运 mt 后续节"
-
-    def test_missing_mt_degrades_score_section_honestly(self, env, monkeypatch):
-        """mt 缺失 ⇒ §2 如实说明，不编评分。"""
-        data, plans = env
-        md = self._md(data, plans, "2026-08-07", monkeypatch, mt=None)
-        assert "评分明细不可得" in md
-
-    def test_sector_summary_section(self, env, monkeypatch):
-        """§3：主线取 fit 最大的 available 行；强势/退潮表各归各位。"""
-        data, plans = env
-        md = self._md(
-            data, plans, "2026-08-07", monkeypatch, sector_summary=self.SECTOR_ROWS
-        )
-        assert "## 3. 板块主线与强弱" in md
-        assert "主线方向：**核电核能**" in md
-        assert "### 强势/可关注板块" in md and "核电核能" in md
-        assert "### 退潮/风险板块" in md and "智能电网" in md
-
-    def test_missing_sector_summary_degrades_honestly(self, env, monkeypatch):
-        data, plans = env
-        md = self._md(data, plans, "2026-08-07", monkeypatch)
-        assert "sector_technical_summary 缺失" in md
-
-    def test_holding_table_has_position_pnl_days(self, env, monkeypatch):
-        """§4：持仓表带 仓位/盈亏%/持仓天数 三列（数据来自 holding_review.json）。"""
-        data, plans = env
-        md = self._md(
-            data,
-            plans,
-            "2026-08-07",
-            monkeypatch,
-            holdings=[
-                {
-                    "code": "600000.SH",
-                    "name": "浦发",
-                    "action": "持有",
-                    "priority": "P3",
-                    "reason": ["结构完好"],
-                    "position_pct": 0.15,
-                    "pnl_pct": -0.03,
-                    "holding_days": 12,
-                }
-            ],
-        )
-        assert "| 优先级 | 代码 | 名称 | 仓位 | 盈亏% | 持仓天数 | 动作 | 理由 |" in md
-        assert "| P3 | 600000 | 浦发 | 0.15 | -0.03 | 12 | 持有 | 结构完好 |" in md
+        assert (data / "decisions" / "2026-08-07_chief_decision.json").exists()
+        assert not list(data.rglob("*_chief_decision.md")), "md 应已停产"
 
 
 class TestHelpers:
@@ -639,6 +543,3 @@ class TestHelpers:
 
     def test_dedupe_preserves_order_and_drops_falsy(self):
         assert cdr.dedupe(["a", "b", "a", "", None, "c"]) == ["a", "b", "c"]
-
-    def test_extract_returns_default_when_absent(self):
-        assert cdr.extract(r"状态：\*\*(.*?)\*\*", "", "未知") == "未知"

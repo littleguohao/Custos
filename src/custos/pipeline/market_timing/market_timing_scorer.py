@@ -2,7 +2,9 @@
 """market_timing scorer v1.
 
 Reads strategy_team/data/market/YYYY-MM-DD_market_timing_input.json
-and generates a markdown decision report.
+and writes the score payload JSON
+（`data/market/YYYY-MM-DD_market_timing_score.json`，scorer → chief_decision
+的数据通道；v0.165 起人读的评分 md 报告停产）。
 
 Scoring modules:
 - macro_policy: 15
@@ -25,13 +27,12 @@ from pathlib import Path
 from typing import Optional
 
 
-from custos.core.paths import cn_now, MARKET_DIR, PLANS, QUALITY_DIR, daily_report_dir  # noqa: E402
+from custos.core.paths import cn_now, MARKET_DIR, QUALITY_DIR, write_json_atomic  # noqa: E402
 from custos.core.code_utils import fnum  # noqa: E402
-from custos.core.contracts import SECTION_NOT_FRESH  # noqa: E402  section.quality 的「不新鲜」域
+from custos.core.contracts import SECTION_NOT_FRESH, require  # noqa: E402  section.quality 的「不新鲜」域
 from custos.core.runtime_guards import normalize_regime  # noqa: E402
 
 IN_DIR = MARKET_DIR
-OUT_DIR = PLANS
 
 
 def score_macro(d: dict) -> tuple[float, str]:
@@ -366,11 +367,17 @@ def status_from_score(score: float) -> tuple[str, str, str, str]:
     return "冰点", "0%-20%", "禁止追涨", "强风控"
 
 
-def make_report(
+def _score_payload(
     d: dict,
     module_scores: list[tuple[str, int, float, str]],
     quality_gate: dict | None = None,
-) -> str:
+) -> dict:
+    """组装 score JSON（scorer → chief_decision 的数据通道，v0.165 起替代 md）。
+
+    四个字符串值（market_state/market_score/total_position_range/
+    new_position_permission）与旧 md 渲染**逐位同源**——质量门修正
+    （blocked/degraded 段）原样保留，chief JSON 值不变。
+    """
     total = round(sum(x[2] for x in module_scores), 2)
     status, position, open_perm, risk = status_from_score(total)
     q = quality_gate or {}
@@ -382,44 +389,21 @@ def make_report(
         if open_perm.startswith("允许"):
             open_perm = "仅观察 / 小仓待确认"
         risk = "提高"
-    lines = []
     # 满分从模块权重实算，不硬编码：theme 腿（7 分）随主线口径（TODO #26）撤下
     # 删除后满分 93；分档阈值未动（见 status_from_score 注释）。
     full = sum(x[1] for x in module_scores)
-    lines.append("# market_timing 自动评分报告\n")
-    lines.append(f"日期：{d.get('date')}\n")
-    lines.append("## 1. 市场状态\n")
-    lines.append(f"- 状态：**{status}**")
-    lines.append(f"- 择时评分：**{total}/{full}**")
-    lines.append(f"- 建议总仓位：**{position}**")
-    lines.append(f"- 今日是否允许开新仓：**{open_perm}**")
-    lines.append(f"- 风控等级：**{risk}**\n")
-    lines.append("## 2. 模块评分\n")
-    lines.append("| 模块 | 权重 | 得分 | 判断 |")
-    lines.append("|---|---:|---:|---|")
-    for name, weight, score, note in module_scores:
-        lines.append(f"| {name} | {weight} | {score:.2f} | {note} |")
-    lines.append(f"| 合计 | {full} | {total:.2f} | |\n")
-    lines.append("## 3. 交易指令\n")
-    if status in ("震荡偏弱", "防守", "冰点"):
-        lines.append("- 不适合高频短线试错。")
-        lines.append("- 不适合追高接力。")
-        lines.append("- 优先处理弱持仓和风控项。")
-    else:
-        lines.append("- 可围绕核心主线精选参与。")
-        lines.append("- 仍需遵守个股服从板块、板块服从大盘。")
-    lines.append("- 若 0AMV 未填，最终仓位不得上调到进攻档。")
-    lines.append("\n## 4. 数据质量提示\n")
-    for n in (d.get("data_quality") or {}).get("notes", []):
-        lines.append(f"- {n}")
-    if not (d.get("data_quality") or {}).get("notes"):
-        lines.append("- 无特殊数据质量提示。")
-    if q:
-        lines.append(
-            f"- 运行时质量门：{q_status or '未知'}，评分 {(q.get('market_quality') or {}).get('quality_score', 'NA')}。candidate/partial 数据不得上调交易权限。"
-        )
-    lines.append("")
-    return "\n".join(lines)
+    return {
+        "date": d.get("date"),
+        "market_state": status,
+        "market_score": f"{total}/{full}",
+        "total_position_range": position,
+        "new_position_permission": open_perm,
+        "risk_level": risk,
+        "modules": [
+            {"name": name, "weight": weight, "score": score, "note": note}
+            for name, weight, score, note in module_scores
+        ],
+    }
 
 
 def main():
@@ -448,13 +432,12 @@ def main():
     quality_gate = (
         json.loads(gate_path.read_text(encoding="utf-8")) if gate_path.exists() else {}
     )
-    report = make_report(d, modules, quality_gate)
-    out_dir = daily_report_dir(str(d.get("date")), OUT_DIR)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out = out_dir / f"{d.get('date')}_market_timing_score.md"
-    out.write_text(report, encoding="utf-8")
+    report = _score_payload(d, modules, quality_gate)
+    # 落盘前校验：这份 JSON 是 chief_decision 的评分输入通道。
+    require("market_timing_score", report)
+    out = IN_DIR / f"{d.get('date')}_market_timing_score.json"
+    write_json_atomic(out, report)
     print(out)
-    print(report)
 
 
 if __name__ == "__main__":

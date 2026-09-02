@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """每日持仓研判——只产结构化 `holding_review.json`（RiskDecision 的直接上游）。
 
-v0.162 起人读的 `portfolio_review.md` 停产：展示层已并入 chief_decision.md
-（§4 持仓处理优先级表带仓位/盈亏/持仓天数列）。本脚本仍是 daily_pipeline 的
+v0.162 起人读的 `portfolio_review.md` 停产（展示层当时并入 chief 日报 md，
+后者 v0.165 也停产）。本脚本仍是 daily_pipeline 的
 硬失败 stage，落盘前 `require("holding_review", reviews)` 校验保留。
 """
 

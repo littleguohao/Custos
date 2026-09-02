@@ -8,9 +8,9 @@ v0.142 起**取消人工主题映射表**（sector_code_map.json 已删除）；
 v0.156（owner 拍板 2026-08-28）候选侧人工主题匹配链（enrich_candidates
 build_stock_theme_map）也随之整段废弃——人工判断路径全仓零残留，
 记录在案见 governance/data/TDX_LOCAL_INTERFACES.md §3。
-v0.162 起人读的 `theme_tracker.md` 停产：强势/退潮板块展示并入
-chief_decision.md §3（`_section_strong`/`_section_risk` 被
-chief_decision_report 复用）；本脚本只产结构化 JSON（3 个消费者）。
+v0.162 起人读的 `theme_tracker.md` 停产；v0.165 起 chief_decision.md
+也停产，曾供其复用的展示函数（`_section_strong`/`_section_risk`）随之删除；
+本脚本只产结构化 JSON（2 个消费者）。
 
 Reads:
 - data/holdings/YYYY-MM-DD_holding_technical_summary.json
@@ -193,8 +193,8 @@ def _sector_analysis_row(
 ) -> dict[str, Any]:
     """板块行：摊平 K 线分析关键字段 + 阶段/分数/操作倾向。
 
-    theme_id/theme_name 沿用契约键（sector_technical_summary 有 3 个消费者、
-    96 处读 available）——v0.142 起人工主题表删除，theme_id=板块代码、
+    theme_id/theme_name 沿用契约键（sector_technical_summary 有 2 个消费者、
+    96 处读 available；v0.165 前另有 chief 日报 md 读者，已停产）——v0.142 起人工主题表删除，theme_id=板块代码、
     theme_name=板块名。贴合选出的板块必然有 K 线（贴合有效的前提），
     分析不可用只是防御性分支（classify_stage 如实报「数据不足」）。
     """
@@ -472,48 +472,6 @@ def resolve_holding_rows(date: str) -> dict[str, dict[str, Any]]:
             continue
         out[str(h.get("code"))] = _sector_analysis_row(sector, source, [code6])
     return out
-
-
-def _section_strong(
-    strong: list[dict[str, Any]], heading: str = "## 2. 强势/可关注板块"
-) -> list[str]:
-    """强势/可关注板块表（v0.162 起被 chief_decision_report §3 复用，heading 可换）。"""
-    lines = []
-    lines.append(heading + "\n")
-    lines.append("| 板块 | 代码 | 状态 | 分数 | 代表股票 | 证据 | 风险 |")
-    lines.append("|---|---|---|---:|---|---|---|")
-    for r in strong[:8]:
-        reps = ", ".join(r.get("representative_stocks", [])[:4])
-        risk_note = (
-            "J值过热需防追高"
-            if isinstance((dj := r.get("daily_j")), (int, float)) and dj > 90
-            else "大盘震荡偏弱，低吸优先"
-        )
-        lines.append(
-            f"| {r.get('theme_name')} | {r.get('primary_code')} | {r.get('stage')} | {r.get('score')} | {reps} | {r.get('stage_reason')} | {risk_note} |"
-        )
-    if not strong:
-        lines.append("| 无 | - | - | - | - | 当前无分数>=65的板块 | - |")
-    lines.append("")
-    return lines
-
-
-def _section_risk(
-    risk: list[dict[str, Any]], heading: str = "## 3. 退潮/风险板块"
-) -> list[str]:
-    """退潮/风险板块表（v0.162 起被 chief_decision_report §3 复用，heading 可换）。"""
-    lines = []
-    lines.append(heading + "\n")
-    lines.append("| 板块 | 代码 | 风险状态 | 分数 | 风险原因 |")
-    lines.append("|---|---|---|---:|---|")
-    for r in risk[:8]:
-        lines.append(
-            f"| {r.get('theme_name')} | {r.get('primary_code', '')} | {r.get('stage', '数据不足')} | {r.get('score', 0)} | {r.get('stage_reason', r.get('reason', ''))} |"
-        )
-    if not risk:
-        lines.append("| 无明显 | - | - | - | - |")
-    lines.append("")
-    return lines
 
 
 def main() -> None:
