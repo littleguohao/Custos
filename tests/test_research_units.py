@@ -26,8 +26,9 @@ def test_units_exist():
     # 2026-08-23：+R20（赢家单因子富集画像）；2026-08-24：+R21（深水RSI gate 验证）
     # 2026-08-26：+R22（打分重构变体）+R23（QSX/DKX 过滤证伪）
     # 2026-08-28：+R24（打分体系严谨重建，预注册落档）
-    assert len(UNITS) == 24, (
-        f"预期 24 个研究单元，实际 {len(UNITS)}：{[p.name for p in UNITS]}"
+    # 2026-09-02：+R25（周线 QSX>DKS ∧ 日周 J 双低，预注册落档）
+    assert len(UNITS) == 25, (
+        f"预期 25 个研究单元，实际 {len(UNITS)}：{[p.name for p in UNITS]}"
     )
 
 

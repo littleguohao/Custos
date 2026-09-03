@@ -78,11 +78,19 @@ from custos.core.factors.s_shape import (
 )  # noqa: E402
 
 _kdj: Callable[..., Any] | None  # 导入失败退 None（调用点有守卫）
+_resample: Callable[..., Any] | None
+_zhixing_state: Callable[..., Any] | None
 
 try:
     from custos.core.indicators import kdj as _kdj  # noqa: E402
+    from custos.core.indicators import (  # noqa: E402
+        resample as _resample,
+        zhixing_state as _zhixing_state,
+    )
 except Exception:  # noqa: BLE001
     _kdj = None
+    _resample = None
+    _zhixing_state = None
 
 J_LOW_THRESHOLD = 13.0
 
@@ -717,6 +725,36 @@ def j_low_qsx_weekly_gate(
     return bool(j_low_weekly_resonance_gate(df_slice) and qsx_gt_dks_gate(df_slice))
 
 
+def weekly_qsx_gt_dks_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
+    """周线级知行多头结构(R25):resample("W-FRI") 后 QSX>DKS。绝不 raise。
+
+    周 DKS 需 ≥114 根周 K(≈570 根日线),不足 ⇒ available=False ⇒ False。
+    ``date`` 列为字符串时先转 datetime(resample 需要 DatetimeIndex)——不改原 df。
+    """
+    if _resample is None or _zhixing_state is None:
+        return False
+    try:
+        d = df_slice
+        if not pd.api.types.is_datetime64_any_dtype(d["date"]):
+            d = d.copy()
+            d["date"] = pd.to_datetime(d["date"])
+        r = _zhixing_state(_resample(d, "W-FRI"))
+        return bool(r.get("available") and r.get("qsx_gt_dks"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def j_low_weekly_qsx_weekly_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
+    """日周 J 双低共振 ∧ 周线 QSX>DKS(R25):更大周期回调到位且周线结构仍多头。"""
+    return bool(
+        j_low_weekly_resonance_gate(df_slice) and weekly_qsx_gt_dks_gate(df_slice)
+    )
+
+
 def qsx_gt_dks_gate(df_slice: pd.DataFrame, precomputed: Optional[dict] = None) -> bool:
     """长期多头结构:QSX>DKS(good_b1 8/9)。绝不 raise。"""
     if compute_b1_dual is None:
@@ -754,6 +792,10 @@ if compute_b1_dual is not None:
     ENTRY_GATES["weekly_j_low"] = weekly_j_low_gate
     ENTRY_GATES["j_low_weekly_resonance"] = j_low_weekly_resonance_gate
     ENTRY_GATES["j_low_qsx_weekly"] = j_low_qsx_weekly_gate
+    ENTRY_GATES["j_low_weekly_qsx_weekly"] = j_low_weekly_qsx_weekly_gate
+
+# 只依赖 indicators(resample + zhixing_state),不被上面的 compute_b1_dual 守卫挡
+ENTRY_GATES["weekly_qsx_gt_dks"] = weekly_qsx_gt_dks_gate
 
 
 # ---- B2 战法 + 底部异动（来源 other/B1.pdf；见 b2_surge_factor 模块 docstring）----

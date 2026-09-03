@@ -329,6 +329,8 @@ class TestBacktestRegistration:
             "weekly_j_low",
             "j_low_weekly_resonance",
             "j_low_qsx_weekly",
+            "weekly_qsx_gt_dks",
+            "j_low_weekly_qsx_weekly",
         ],
     )
     def test_gate_registered(self, name):
@@ -346,6 +348,8 @@ class TestBacktestRegistration:
             "weekly_j_low",
             "j_low_weekly_resonance",
             "j_low_qsx_weekly",
+            "weekly_qsx_gt_dks",
+            "j_low_weekly_qsx_weekly",
         ):
             for df in list(shapes.values()) + [_mk(_platform(5, 10.0, 4e5))]:
                 assert isinstance(bt.ENTRY_GATES[name](df), bool)
@@ -355,6 +359,48 @@ class TestBacktestRegistration:
         for df in shapes.values():
             expect = bt.ENTRY_GATES["j_low"](df) and bt.ENTRY_GATES["qsx_gt_dks"](df)
             assert bt.ENTRY_GATES["j_low_qsx_gt_dks"](df) is bool(expect)
+
+
+class TestWeeklyQsxGate:
+    """R25 周线级知行多头结构入场 gate（resample("W-FRI") 后 QSX>DKS）。
+
+    与日线级 ``qsx_gt_dks`` 的张力不同：周 DKS(MA114 周)极慢，9 周级别的回调
+    打不破它——所以"日周 J 双低 ∧ 周线 QSX>DKS"在日线口径下互斥的组合，在周线
+    口径下可同时成立，值得单独回测。
+    """
+
+    @staticmethod
+    @pytest.fixture(scope="class")
+    def wshapes():
+        # 长上涨(~124 周) + 末端 9 周缓跌 → 日/周 J 双低且周线 QSX 仍在 DKS 上方
+        up = _drift(10.0, 620, 0.004, 5.0e5)
+        up += _drift(up[-1][0], 45, -0.008, 3.0e5)
+        # 长期阴跌 → 周线 QSX<DKS
+        down = _drift(60.0, 660, -0.004, 4.0e5)
+        return {"up": _mk(up), "down": _mk(down)}
+
+    def test_direction(self, wshapes):
+        assert bt.weekly_qsx_gt_dks_gate(wshapes["up"]) is True
+        assert bt.weekly_qsx_gt_dks_gate(wshapes["down"]) is False
+
+    def test_short_history_false_not_raise(self):
+        """周 DKS 需 ≥114 根周 K——短历史必须返回 False 而不是 raise。"""
+        short = _mk(_platform(100, 10.0, 4e5))
+        assert bt.weekly_qsx_gt_dks_gate(short) is False
+        assert bt.j_low_weekly_qsx_weekly_gate(short) is False
+
+    def test_combo_is_intersection(self, wshapes):
+        """j_low_weekly_qsx_weekly = 日周 J 共振 ∧ 周线 QSX>DKS。"""
+        for df in wshapes.values():
+            expect = bt.j_low_weekly_resonance_gate(df) and bt.weekly_qsx_gt_dks_gate(
+                df
+            )
+            assert bt.j_low_weekly_qsx_weekly_gate(df) is bool(expect)
+
+    def test_combo_hits_on_up_pullback(self, wshapes):
+        """长上涨末端急跌到日/周 J 双低时,组合 gate 应放行(周线结构仍多头)。"""
+        assert bt.j_low_weekly_resonance_gate(wshapes["up"]) is True
+        assert bt.j_low_weekly_qsx_weekly_gate(wshapes["up"]) is True
 
 
 class TestNotYetWiredIntoScreening:
