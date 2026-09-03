@@ -684,7 +684,8 @@ def _evidence_states(df, code: str, df_long, base: dict[str, Any]) -> dict[str, 
 
     # 研究因子的**信号标注**（三态 hit/miss/unavailable）。只标注、不参与打分分层——
     # 这些因子还没跑过真实回测，而结论#15 的教训是"识别有术、盈利无效"。
-    # 复用上面已算的 distribution / daily_j / weekly_j，避免重复 resample 与 kdj。
+    # 复用上面已算的 distribution / daily_j，避免重复 kdj。
+    # （v0.172 起 weekly_j 不再注入标注层——W 标注撤除；`_wk` 仍落候选顶层 weekly_* 键）
     _wk = weekly_j_state(df)
     try:  # 平台回踩:与下方证据层同一份检测,延迟导入
         from custos.core.factors.platform_pullback import detect_platform_pullback  # noqa: PLC0415
@@ -696,8 +697,6 @@ def _evidence_states(df, code: str, df_long, base: dict[str, Any]) -> dict[str, 
         df,
         code,
         daily_j=daily_j,
-        weekly_j_low=_wk.get("weekly_j_low"),
-        weekly_j_available=_wk.get("weekly_j_available"),
         distribution=distribution,
         platform_pullback=_plat,
     )

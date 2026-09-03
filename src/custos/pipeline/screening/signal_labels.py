@@ -35,8 +35,8 @@ HIT, MISS, NA = "hit", "miss", "unavailable"
 # 标注定义：key → (中文名, 表格缩写, 方向)。方向 +1=正向、-1=负向。
 SIGNAL_META: dict[str, tuple[str, str, int]] = {
     # v0.169（owner）：QG 提至首位；QD（qsx_gt_dks）标注整体撤除（打分链 zhixing 数据键不动）。
+    # v0.172（owner）：W（weekly_j_low）标注撤除（weekly_j 候选顶层数据键不动）。
     "qsx_resonance_v2": ("QSX共振v2(60根≥2次干净反弹)", "QG", +1),
-    "weekly_j_low": ("周线B1(周J<13)", "W", +1),
     "rsi_strong": ("RSI强势区间", "RS", +1),
     "rsi_deep_oversold": ("RSI深水区", "RD", +1),
     "rsi_ideal_b1": ("RSI理想B1(强势+深水)", "R★", +1),
@@ -61,31 +61,6 @@ def _put(out: dict[str, Any], key: str, available: bool, hit: bool, **detail):
 
 
 # ---- 复用型（零增量成本）----
-def _signal_weekly_j_low(
-    out: dict[str, Any],
-    df: pd.DataFrame,
-    weekly_j_low: Optional[bool],
-    weekly_j_available: Optional[bool],
-):
-    if weekly_j_low is not None:
-        avail = weekly_j_available if weekly_j_available is not None else True
-        _put(out, "weekly_j_low", bool(avail), bool(weekly_j_low))
-    else:
-        try:
-            from custos.pipeline.screening.enrich_candidates import weekly_j_state
-
-            w = weekly_j_state(df)
-            _put(
-                out,
-                "weekly_j_low",
-                bool(w.get("weekly_j_available")),
-                bool(w.get("weekly_j_low")),
-                weekly_j=w.get("weekly_j"),
-            )
-        except Exception:  # noqa: BLE001
-            _put(out, "weekly_j_low", False, False, reason="weekly_unavailable")
-
-
 def _signal_distribution_risk(out: dict[str, Any], distribution: Optional[dict]):
     if distribution is not None:
         lvl = str(distribution.get("risk_level") or "none")
@@ -275,21 +250,17 @@ def compute_signals(
     code: str = "",
     *,
     daily_j: Optional[float] = None,
-    weekly_j_low: Optional[bool] = None,
-    weekly_j_available: Optional[bool] = None,
     distribution: Optional[dict] = None,
     platform_pullback: Optional[dict] = None,
 ) -> dict[str, Any]:
     """算出全部标注（三态）。**尽量复用调用方已算好的结果**，绝不 raise。
 
     可注入项都是 enrich 的 compute_metrics 已经算过的：``daily_j``（kdj）、
-    ``weekly_j_low``（weekly_j_state）、``distribution``（detect_distribution）、
-    ``platform_pullback``。
-    不注入时本模块自己算——但那会白付一次 resample（2.3ms）与若干次 kdj。
+    ``distribution``（detect_distribution）、``platform_pullback``。
+    不注入时本模块自己算——但那会白付若干次 kdj。
     """
     out: dict[str, Any] = {}
 
-    _signal_weekly_j_low(out, df, weekly_j_low, weekly_j_available)
     _signal_distribution_risk(out, distribution)
     _signal_rsi(out, df)
     _signal_surge(out, df, code)

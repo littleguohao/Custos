@@ -82,7 +82,7 @@ class TestThreeStates:
     def test_states_are_three_valued(self):
         s = _sig(hits={"rsi_strong"}, na={"bottom_surge"})
         assert s["rsi_strong"]["state"] == "hit"
-        assert s["weekly_j_low"]["state"] == "miss"
+        assert s["rsi_deep_oversold"]["state"] == "miss"
         assert s["bottom_surge"]["state"] == "unavailable"
 
     def test_denominator_excludes_unavailable(self):
@@ -98,14 +98,13 @@ class TestThreeStates:
                 "b2",
                 "distribution_risk",
                 "rsi_bull_div",
-                "weekly_j_low",
             },
         )
         sm = s["summary"]
         assert sm["positive_hit_count"] == 3
         assert sm["positive_evaluable"] == 3, "分母只数 hit+miss"
         assert sm["label"] == "3/3"
-        assert sm["unavailable_count"] == 9
+        assert sm["unavailable_count"] == 8
 
     def test_negative_counted_separately(self):
         s = _sig(hits={"rsi_strong"}, neg={"distribution_risk"})
@@ -143,6 +142,13 @@ class TestThreeStates:
         assert "qsx_gt_dks" not in sl.SIGNAL_META
         assert next(iter(sl.SIGNAL_META)) == "qsx_resonance_v2"
 
+    def test_weekly_j_low_label_removed(self):
+        """v0.172（owner）：W（weekly_j_low）标注撤除——R26 组合否决后标注层不再保留。
+        候选顶层 weekly_* 数据键不受影响（enrich 仍落盘）。"""
+        assert "weekly_j_low" not in sl.SIGNAL_META
+        s = sl.compute_signals(_mk([(10.0, 4e5)] * 150), "600000")
+        assert "weekly_j_low" not in s
+
 
 class TestReuseAvoidsRecompute:
     """复用调用方已算的结果——重复 resample 白付 2.3ms/票。"""
@@ -152,11 +158,8 @@ class TestReuseAvoidsRecompute:
         s = sl.compute_signals(
             df,
             "600000",
-            weekly_j_low=True,
-            weekly_j_available=True,
             distribution={"available": True, "risk_level": "high", "hits": ["x"]},
         )
-        assert s["weekly_j_low"]["state"] == "hit"
         assert s["distribution_risk"]["state"] == "hit"
         assert s["distribution_risk"]["risk_level"] == "high"
 
@@ -366,7 +369,7 @@ class TestTableRendering:
     def test_main_table_has_label_column(self):
         txt = ct.render_table(self._pool(), "2026-08-04")
         assert "| 4面共振 | 平台回踩 | 标注 | 分层 |" in txt
-        assert "3/11 QG·RS·B2" in txt
+        assert "3/10 QG·RS·B2" in txt
 
     def test_no_signals_section_when_absent(self):
         """候选没有 signals 字段（旧产物）时不渲染该区块，且不报错。"""
