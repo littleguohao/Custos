@@ -201,8 +201,10 @@ class TestCliWiring:
         assert ps["breakeven_trigger"].default == 0.0
         assert ps["trail_pct"].default == 0.0
         src = inspect.getsource(evaluate_trades)
-        assert "breakeven_trigger=breakeven_trigger" in src
-        assert "trail_pct=trail_pct" in src
+        # 出场参数收口进 sim_kw（单遍扫描与 --from-signals 重放共用一份，
+        # 防两份参数清单手抄漂移）——钉的是「旗标确实流进 simulate」这一布线。
+        assert '"breakeven_trigger": breakeven_trigger' in src
+        assert '"trail_pct": trail_pct' in src
 
     def test_cli_exposes_flags(self):
         import pathlib

@@ -1948,10 +1948,13 @@ class TestFailureRecap:
             return type("R", (), {"returncode": 0, "stdout": ""})()
 
         monkeypatch.setattr(m2.subprocess, "run", fake_run)
+        # ⚠️ 用**信号轴不同**的两个方案（be_03 无轴开关 / amv_long_only 有
+        # --amv-long-only）：同轴方案会被 _plan_signal_reuse 分成「生产→重放」
+        # 两个串行波，练不到并行心跳。
         m2._run_all(
             [
                 ("A_stop_low", "be_03", ["--breakeven", "0.03"]),
-                ("A_stop_low", "be_05", ["--breakeven", "0.05"]),
+                ("A_stop_low", "amv_long_only", ["--amv-long-only"]),
             ],
             1000,
             False,
@@ -1960,7 +1963,7 @@ class TestFailureRecap:
         )
         out = capsys.readouterr().out
         assert out.count("[START] A_stop_low/be_03") == 1
-        assert out.count("[START] A_stop_low/be_05") == 1
+        assert out.count("[START] A_stop_low/amv_long_only") == 1
         # 心跳在结果块之前
         assert out.index("[START] A_stop_low/be_03") < out.index(
             "[DONE] A_stop_low/be_03"
@@ -1992,10 +1995,11 @@ class TestFailureRecap:
             return type("R", (), {"returncode": 0, "stdout": "子进程输出"})()
 
         monkeypatch.setattr(m2.subprocess, "run", fake_run)
+        # 同上：信号轴不同的两个方案才会进同一个并行波（同轴的被拆成生产→重放两波）
         m2._run_all(
             [
                 ("A_stop_low", "be_03", ["--breakeven", "0.03"]),
-                ("A_stop_low", "be_05", ["--breakeven", "0.05"]),
+                ("A_stop_low", "amv_long_only", ["--amv-long-only"]),
             ],
             1000,
             False,

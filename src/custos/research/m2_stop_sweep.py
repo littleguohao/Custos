@@ -190,6 +190,20 @@ EXIT_SIDE_FLAGS = {  # 只改**离场时点/仓位**：信号集不变
     "--bbi-consec",
 }
 
+# 信号轴参数（2026-09-03，信号缓存+重放）：**取值**影响进场信号序列的开关。
+# 与 backtest_factors.signals_signature 同口径——那边是 CLI 层 fail-closed 核对，
+# 这边是调度层分组：同轴的方案「共享一次信号扫描」（_plan_signal_reuse）。
+# 不在这个集合里的方案参数 = 出场/组合层参数，只改 simulate_b1_trade 的输入，
+# 信号序列不变 ⇒ 可以 --from-signals 重放。
+_SIGNAL_AXIS_FLAGS = {
+    "--entry-filter",
+    "--scorer",
+    "--amv-long-only",
+    "--sector-filter",
+    "--weekly",
+    "--step",
+}
+
 # 改动**止损距离**的参数 ⇒ 改动 R 的分母 ⇒ **R 不再可比**（2026-08-05 修）
 #
 # `backtest_factors.py:1294` 是 `stop = entry * (1 - stop_pct/100)`，
@@ -606,14 +620,16 @@ def _run(
 
     _say(f"[RUN ] {tag}: {' '.join(extra) or '(组基准)'}{note}")
     rc, dt = _exec(extra)
-    if rc != 0 and "--from-trades" in extra:
-        # 复用失败（多半是 trades 口径核对不过：扫描期间通达信又下了新数据、
-        # universe 变了 ⇒ codes_digest 不同）。全量回测永远正确，只是慢 ⇒ 自动退回，
+    if rc != 0 and ("--from-trades" in extra or "--from-signals" in extra):
+        # 复用失败（多半是口径核对不过：扫描期间通达信又下了新数据、universe 变了
+        # ⇒ codes_digest 不同；或 --only 单跑重放方案而信号/源文件不存在）。
+        # 全量回测永远正确，只是慢 ⇒ 自动退回，
         # 不让「省时间」变成「少一个方案」——少一行的报表正是本脚本一直在防的失效。
         plain = [
             x
             for i, x in enumerate(extra)
-            if x != "--from-trades" and extra[i - 1] != "--from-trades"
+            if x not in ("--from-trades", "--from-signals")
+            and extra[i - 1] not in ("--from-trades", "--from-signals")
         ]
         _say(f"[RETRY] {tag}: 复用失败，退回全量回测")
         rc, dt = _exec(plain)
@@ -712,6 +728,65 @@ def _cap_jobs(jobs: int, n_tasks: int) -> int:
     return jobs
 
 
+def _signal_key(group: str, name: str) -> tuple:
+    """方案的信号轴指纹：影响**进场信号序列**的参数（含取值，开关型记 None）。
+
+    与 ``backtest_factors.signals_signature`` 同口径（那边是 CLI 层 fail-closed 核对，
+    这边是调度层分组）。信号轴之外——全部出场参数（stop-*/bbi-consec/time-stop/
+    scale-out/breakeven/trail/cost-zone）与组合层参数——随便改，信号序列不变。
+    ``--top-n`` 只记「有无」：>0 走 collect_all（全候选不去重，是另一套信号口径），
+    取值本身不影响信号序列。基础参数（_base_args / 窗口 / 宇宙）一轮内全方案相同，
+    不进 key。
+    """
+    meta = GROUPS.get(group, {})
+    args = list(meta.get("common") or []) + list((meta.get("runs") or {}).get(name, []))
+    pairs = _flag_pairs(args)
+    key = tuple(sorted((f, v) for f, v in pairs.items() if f in _SIGNAL_AXIS_FLAGS))
+    if "--top-n" in pairs:
+        key += (("--top-n>0", None),)
+    return key
+
+
+def _signals_path(key: tuple, fp: str) -> pathlib.Path:
+    """信号缓存文件名：批次指纹 fp（样本量/窗口/宇宙）+ 信号轴 key 的短哈希。"""
+    import hashlib
+
+    digest = hashlib.sha1(repr(key).encode("utf-8")).hexdigest()[:8]
+    return OUTDIR / f"_signals__{fp}__{digest}.json"
+
+
+def _plan_signal_reuse(
+    todo: list[tuple[str, str, list[str]]], fp: str
+) -> dict[tuple[str, str], tuple[str, pathlib.Path]]:
+    """信号层复用分组：``{(group, name): (role, 信号文件)}``，role ∈ producer/replay。
+
+    信号轴（_signal_key）相同的方案组共享**一次**逐 bar 进场扫描：
+    组内第一方案（producer）带 ``--signals-out`` 全量跑并落盘信号，其余（replay）
+    用 ``--from-signals`` 重放——只重算每股预计算 + 逐信号 simulate_b1_trade，
+    跳过占 99% 耗时的逐 bar gate/scorer 扫描。引擎核对 signals_signature，
+    不一致非零退出，_run 自动退回全量（与 --from-trades 同款兜底）。
+
+    与 C 组 ``reuse``（--from-trades）的分层：trades 层复用连出场模拟都跳过
+    （毫秒级），优先保留 ⇒ 有 reuse 映射的方案不参与信号分组。重活（--top-n
+    collect_all）单独成簇、单独串行，不与轻活混排（_is_heavy 进簇 key）。
+    """
+    clusters: dict[tuple, list[tuple[str, str]]] = {}
+    for g, n, _e in todo:
+        if n in (GROUPS[g].get("reuse") or {}):
+            continue  # trades 层复用更快（毫秒级），优先；见 docstring 分层说明
+        key = (_signal_key(g, n), _is_heavy(g, n))
+        clusters.setdefault(key, []).append((g, n))
+    plan: dict[tuple[str, str], tuple[str, pathlib.Path]] = {}
+    for key, members in clusters.items():
+        if len(members) < 2:
+            continue  # 单方案没有复用对象，不浪费一份信号文件
+        path = _signals_path(key, fp)
+        plan[members[0]] = ("producer", path)
+        for m in members[1:]:
+            plan[m] = ("replay", path)
+    return plan
+
+
 def _run_all(
     todo: list[tuple[str, str, list[str]]],
     sample: int,
@@ -795,16 +870,56 @@ def _run_all(
     rest = [(g, n, e) for g, n, e in todo if n not in (GROUPS[g].get("reuse") or {})]
     heavy = [t for t in rest if _is_heavy(t[0], t[1])]
     light = [t for t in rest if not _is_heavy(t[0], t[1])]
-    # 三波，顺序有讲究：
-    #   轻活并行 → 重活(collect_all)**单独串行**，不与别人抢内存
-    #   → 复用波串行（要等源产出；且它要把源文件整份读进内存，本身也不轻）
-    _one_wave(light, "主", _cap_jobs(jobs, len(light)))
-    if heavy:
+
+    # 信号层复用（2026-09-03）：信号轴相同的方案组共享一次进场扫描（_plan_signal_reuse）。
+    # producer 必须先跑完落盘信号，replay 才能重放 ⇒ 轻活拆成两波（重活本就串行，
+    # 簇内 producer 排在 replay 前即可）。
+    fp = _fingerprint(sample, cross, window, bool(codes_file))
+    plan = _plan_signal_reuse(todo, fp)
+
+    def _sig_args(g: str, n: str, e: list[str]) -> list[str]:
+        rp = plan.get((g, n))
+        if not rp:
+            return e
+        role, path = rp
+        flag = "--signals-out" if role == "producer" else "--from-signals"
+        return list(e) + [flag, str(path)]
+
+    light_main = [
+        (g, n, _sig_args(g, n, e))
+        for g, n, e in light
+        if plan.get((g, n), ("", None))[0] != "replay"
+    ]
+    light_replay = [
+        (g, n, _sig_args(g, n, e))
+        for g, n, e in light
+        if plan.get((g, n), ("", None))[0] == "replay"
+    ]
+    heavy_ord = [
+        (g, n, _sig_args(g, n, e))
+        for g, n, e in sorted(
+            heavy, key=lambda t: plan.get((t[0], t[1]), ("", None))[0] == "replay"
+        )
+    ]
+    n_prod = sum(1 for r, _p in plan.values() if r == "producer")
+    n_replay = len(plan) - n_prod
+    if n_replay:
         print(
-            f"\n[INFO] {len(heavy)} 个 collect_all 方案单独串行"
+            f"[INFO] 信号层复用：{n_prod} 次全量扫描落盘信号，{n_replay} 个方案"
+            f" --from-signals 重放（只改出场参数，逐 bar 扫描全省）"
+        )
+    # 四波，顺序有讲究：
+    #   轻活（含信号生产者）并行 → 轻活重放并行（要等生产者的信号文件）
+    #   → 重活(collect_all)**单独串行**，不与别人抢内存（簇内 producer 在前）
+    #   → 复用波串行（要等源产出；且它要把源文件整份读进内存，本身也不轻）
+    _one_wave(light_main, "主", _cap_jobs(jobs, len(light_main)))
+    _one_wave(light_replay, "信号重放", _cap_jobs(jobs, len(light_replay)))
+    if heavy_ord:
+        print(
+            f"\n[INFO] {len(heavy_ord)} 个 collect_all 方案单独串行"
             f"（--top-n 逐笔是未去重全候选，内存高一个量级，见 _is_heavy）"
         )
-    _one_wave(heavy, "重", 1)
+    _one_wave(heavy_ord, "重", 1)
     _one_wave(derived, "复用", 1)
     if fails:
         print(f"\n⚠️ **{len(fails)} 个方案失败**：{'、'.join(fails)}")

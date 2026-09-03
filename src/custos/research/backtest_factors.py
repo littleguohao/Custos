@@ -2661,6 +2661,119 @@ def _advance_i(i: int, step: int, tr: dict[str, Any], collect_all: bool) -> int:
     return (i + max(1, step)) if collect_all else (tr["exit_idx"] + 1)
 
 
+def _scan_entry_signals(
+    df: pd.DataFrame,
+    code: str,
+    min_bars: int,
+    step: int,
+    *,
+    gate_call: Optional[Callable],
+    gate_pre: Any,
+    sector_gate: Optional[Callable[[str, str], bool]],
+    scorer_call: Callable,
+    scorer_pre: Any,
+    amv_ok: Callable[[str], bool],
+    buy_ok: Optional[np.ndarray],
+    sink: Optional[list[dict[str, Any]]] = None,
+) -> list[dict[str, Any]]:
+    """单股**全 bar** 进场扫描：返回全部候选信号 ``[{code, i, date, score}]``。
+
+    只在信号缓存/重放路径使用（``evaluate_trades`` 的 ``signals_out``/``signals_in``）；
+    主路径仍是单遍循环，行为不变。候选序列**与全部出场参数无关**——判定只看
+    ``df[:i+1]`` 切片 + gate/scorer/amv/板块/可成交性 ⇒ 扫一次落盘，
+    「只改出场参数」的方案组共享。与单遍循环的差异仅是**持仓期内的 bar 也照扫**
+    （单遍会跳到出场后）；多扫的候选在发射阶段被同一个非重叠跳过逻辑跳过，
+    产出的 trades 逐位一致（钉测见 tests/test_signals_replay.py）。
+    ``sink`` 提供时每条候选同时追加进去（信号落盘用）。
+    """
+    n = len(df)
+    cands: list[dict[str, Any]] = []
+    i = min_bars
+    while i < n - 1:
+        entry_date = str(df["date"].iloc[i])[:10]
+        res = _entry_signal(
+            df.iloc[: i + 1],
+            code,
+            i,
+            entry_date,
+            gate_call=gate_call,
+            gate_pre=gate_pre,
+            sector_gate=sector_gate,
+            scorer=scorer_call,
+            scorer_pre=scorer_pre,
+            amv_ok=amv_ok,
+            buy_ok=buy_ok,
+        )
+        if res is not None:
+            cand = {"code": code, "i": i, "date": entry_date, "score": res.get("score")}
+            cands.append(cand)
+            if sink is not None:
+                sink.append(cand)
+        i += max(1, step)
+    return cands
+
+
+def _trades_from_signals(
+    df: pd.DataFrame,
+    code: str,
+    min_bars: int,
+    step: int,
+    collect_all: bool,
+    max_signals_per_code: Optional[int],
+    feature_panel: bool,
+    cost: float,
+    signals: Optional[list[dict[str, Any]]],
+    *,
+    bbi: pd.Series,
+    sell_ok: Optional[np.ndarray],
+    bull_flags: Optional[np.ndarray],
+    atr: Optional[pd.Series],
+    ohlc: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
+    qsx: Optional[pd.Series],
+    sim_kw: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """信号→交易的发射循环：对每条候选 ``simulate_b1_trade`` + 非重叠跳过 + 数量上限。
+
+    与 ``evaluate_trades`` 单遍循环**逐位一致**的前提：候选来自同一支股票同一口径的
+    全 bar 扫描（``_scan_entry_signals`` 或落盘的它），且 step=1。
+    """
+    by_i = {c["i"]: c for c in (signals or [])}
+    n = len(df)
+    trades: list[dict[str, Any]] = []
+    emitted = 0
+    i = min_bars
+    while i < n - 1:
+        cand = by_i.get(i)
+        if cand is None:
+            i += max(1, step)
+            continue
+        slice_df = df.iloc[: i + 1]
+        stop_ov = _platform_stop_override(slice_df, stop_mode=sim_kw["stop_mode"])
+        tr = simulate_b1_trade(
+            df,
+            i,
+            bbi,
+            stop_override=stop_ov,
+            can_sell=sell_ok,
+            code=code,
+            bull_flags=bull_flags,
+            atr=atr,
+            ohlc=ohlc,
+            qsx=qsx,
+            **sim_kw,
+        )
+        ret_net = tr["ret"] - cost
+        rec = _trade_record(tr, ret_net, code, cand["date"], df, i, cand.get("score"))
+        if feature_panel:
+            rec["features"] = _feature_panel(slice_df)
+        trades.append(rec)
+        emitted += 1
+        if max_signals_per_code and emitted >= max_signals_per_code:
+            break
+        i = _advance_i(i, step, tr, collect_all)
+    return trades
+
+
 def evaluate_trades(
     bars_by_code: dict[str, pd.DataFrame],
     scorer: Optional[Callable[[pd.DataFrame, str], Optional[dict]]] = None,
@@ -2691,6 +2804,8 @@ def evaluate_trades(
     cost_zone_bars: int = 0,
     cost_zone_pct: float = 3.0,
     qsx_exit_consec: int = 0,
+    signals_out: Optional[list[dict[str, Any]]] = None,
+    signals_in: Optional[dict[str, list[dict[str, Any]]]] = None,
 ) -> list[dict[str, Any]]:
     """在 scorer 判「可买」的 as-of 日进场，按 B1 规则(止损+BBI)模拟到出场；非重叠(平仓后再找)。
 
@@ -2716,12 +2831,51 @@ def evaluate_trades(
     tradability=True(默认)：施加**可成交性护栏**——涨停/停牌日不得按收盘价买入，跌停/停牌日
       不得卖出(顺延至 max_exit_delay 根内的下一个可卖日)。关掉可复现旧口径,但那会系统性
       高估收益:一字板照买、跌停照卖、停牌日照止损(审计 E5)。
+    signals_out（``--signals-out``，2026-09-03）：进场信号缓存。提供时改走**两阶段**
+      ——先对每根 bar 做进场判定、把全部候选信号 ``[{i, date, score}]`` 追加进该 list
+      （每股前缀 code），再按与单遍循环**逐位一致**的发射逻辑（模拟出场→非重叠跳过→
+      数量上限）产出 trades。候选信号序列与全部出场参数无关 ⇒ 落盘后供 ``signals_in``
+      重放。逐位一致性由 tests/test_signals_replay.py 钉死。
+    signals_in（``--from-signals``）：``{code: [候选信号]}`` 重放——每股照常
+      ``_prepare_stock``（O(n) 预计算，便宜），**跳过逐 bar gate/scorer 扫描**，
+      直接对缓存信号逐条 ``simulate_b1_trade``。出场参数随便改（它们是 simulate 的
+      输入，不进信号）；信号轴参数（gate/scorer/universe/窗口/step/collect_all）
+      变了必须换缓存——CLI 层用 ``signals_signature`` fail-closed 核对。
+      ⚠️ 只支持 step=1：step>1 时「跳到出场后」的续扫起点不在 min_bars+k*step
+      网格上，两阶段无法逐位复现单遍扫描 ⇒ 直接 ValueError，不猜。
     """
     scorer = scorer or _sc_b1_pullback
     cost = cost_bps / 1e4
     _amv_ok = _amv_checker(amv_regime)
     gate_call = _dual_form_gate(entry_gate) if entry_gate is not None else None
     scorer_call = _dual_form_scorer(scorer)
+
+    use_signals = signals_out is not None or signals_in is not None
+    if use_signals and step != 1:
+        raise ValueError(
+            "信号缓存/重放只支持 step=1（step>1 时非重叠跳过后的续扫起点"
+            "离开采样网格，两阶段重放无法逐位复现单遍扫描）"
+        )
+    # simulate_b1_trade 的**逐信号不变**参数收口成一份，单遍循环与信号重放共用——
+    # 两份参数清单各自手抄早晚漂移（漂移 = 重放与全量不逐位一致，静默错口径）。
+    sim_kw: dict[str, Any] = {
+        "bbi_exit_consec": bbi_exit_consec,
+        "time_stop_bars": time_stop_bars,
+        "stop_mode": stop_mode,
+        "stop_pct": stop_pct,
+        "max_exit_delay": max_exit_delay,
+        "scale_out_frac": scale_out_frac,
+        "breakeven_trigger": breakeven_trigger,
+        "trail_pct": trail_pct,
+        "stop_trigger": stop_trigger,
+        "stop_tick_buffer": stop_tick_buffer,
+        "stop_buffer": stop_buffer,
+        "stop_pct_buffer": stop_pct_buffer,
+        "stop_atr_buffer": stop_atr_buffer,
+        "cost_zone_bars": cost_zone_bars,
+        "cost_zone_pct": cost_zone_pct,
+        "qsx_exit_consec": qsx_exit_consec,
+    }
 
     trades: list[dict[str, Any]] = []
     for code, raw in bars_by_code.items():
@@ -2747,6 +2901,43 @@ def evaluate_trades(
         atr = prep["atr"]
         gate_pre = prep["gate_pre"]
         scorer_pre = prep["scorer_pre"]
+        if use_signals:
+            trades += _trades_from_signals(
+                df,
+                code,
+                min_bars,
+                step,
+                collect_all,
+                max_signals_per_code,
+                feature_panel,
+                cost,
+                signals=(
+                    signals_in.get(code)  # type: ignore[union-attr]
+                    if signals_in is not None
+                    else _scan_entry_signals(
+                        df,
+                        code,
+                        min_bars,
+                        step,
+                        gate_call=gate_call,
+                        gate_pre=gate_pre,
+                        sector_gate=sector_gate,
+                        scorer_call=scorer_call,
+                        scorer_pre=scorer_pre,
+                        amv_ok=_amv_ok,
+                        buy_ok=buy_ok,
+                        sink=signals_out,
+                    )
+                ),
+                bbi=bbi,
+                sell_ok=sell_ok,
+                bull_flags=bull_flags,
+                atr=atr,
+                ohlc=prep["ohlc"],
+                qsx=prep["qsx"],
+                sim_kw=sim_kw,
+            )
+            continue
         emitted = 0
         i = min_bars
         while i < n - 1:
@@ -2773,29 +2964,14 @@ def evaluate_trades(
                 df,
                 i,
                 bbi,
-                bbi_exit_consec=bbi_exit_consec,
-                time_stop_bars=time_stop_bars,
-                stop_mode=stop_mode,
-                stop_pct=stop_pct,
                 stop_override=stop_ov,
                 can_sell=sell_ok,
-                max_exit_delay=max_exit_delay,
-                scale_out_frac=scale_out_frac,
                 code=code,
                 bull_flags=bull_flags,
-                breakeven_trigger=breakeven_trigger,
-                trail_pct=trail_pct,
-                stop_trigger=stop_trigger,
-                stop_tick_buffer=stop_tick_buffer,
-                stop_buffer=stop_buffer,
-                stop_pct_buffer=stop_pct_buffer,
-                stop_atr_buffer=stop_atr_buffer,
                 atr=atr,
-                cost_zone_bars=cost_zone_bars,
-                cost_zone_pct=cost_zone_pct,
                 ohlc=prep["ohlc"],
                 qsx=prep["qsx"],
-                qsx_exit_consec=qsx_exit_consec,
+                **sim_kw,
             )
             ret_net = tr["ret"] - cost
             rec = _trade_record(tr, ret_net, code, entry_date, df, i, res.get("score"))
@@ -3506,6 +3682,111 @@ def trades_signature(args: Any, codes: list[str]) -> dict[str, Any]:
     }
 
 
+def signals_signature(args: Any, codes: list[str]) -> dict[str, Any]:
+    """影响**进场信号序列**的全部参数指纹（``--from-signals`` 复用前的核对面）。
+
+    与 ``trades_signature`` 的分工：trades 签名含**全部**回测参数（出场参数改一笔
+    交易就变）；信号签名只含**信号轴**参数——进场判定（gate/scorer/amv/板块/可成交性）
+    与扫描口径（weekly/step/窗口/count/宇宙/collect_all）。出场参数
+    （stop_*/bbi_consec/time_stop/scale_out/breakeven/trail/cost_zone_*）**不在内**
+    ——它们只是 ``simulate_b1_trade`` 的输入，不改信号序列，这正是信号层复用的意义。
+    ``cost_bps`` 也不在（只在成交易记录时从 ret 里扣，重放时按本次参数扣）。
+
+    ⚠️ 覆盖不全是这层机制**最危险的事故**（拿另一套 gate 的信号重放，结果看不出
+    任何异常）——新增会改变信号序列的参数时必须同步加进来；
+    tests/test_signals_replay.py::TestSignalsSignature 逐参数钉着。
+    """
+    import hashlib  # noqa: PLC0415
+
+    digest = hashlib.sha1(",".join(codes).encode("utf-8")).hexdigest()[:12]
+    return {
+        "scorer": args.scorer,
+        "entry_filter": args.entry_filter,
+        "weekly": bool(args.weekly),
+        "step": args.step,
+        "amv_long_only": bool(args.amv_long_only),
+        "sector_filter": bool(args.sector_filter),
+        "start": args.start or None,
+        "end": args.end or None,
+        "count": args.count,
+        "collect_all": bool(args.top_n > 0),
+        "n_codes": len(codes),
+        "codes_digest": digest,
+    }
+
+
+def _write_signals_file(
+    path: Path, args: Any, codes: list[str], signals: list[dict[str, Any]]
+) -> None:
+    """进场信号落盘（与 trades 同款：签名 + 流式写）。
+
+    格式 ``{mode, signals_signature, signals:[{code,i,date,score}]}``——
+    一条信号就是「该股第 i 根 bar 触发进场」的全部上下文；ohlc/bbi/qsx/atr 等
+    模拟输入重放时由 ``_prepare_stock`` 按**本次**出场参数重算，不进信号文件。
+    """
+    payload = {
+        "mode": "entry_signals",
+        "signals_signature": signals_signature(args, codes),
+        "signals": signals,
+    }
+    write_json_stream(path, payload, big=len(signals) > 20000)
+    print(
+        f"[OK] 写出 {path}（{len(signals)} 条进场信号，"
+        f"供 --from-signals 重放；签名 {len(payload['signals_signature'])} 字段）"
+    )
+
+
+def _load_signals_checked(args: Any, codes: list[str]) -> Optional[dict[str, list]]:
+    """读入 ``--from-signals`` 信号文件并核对 ``signals_signature``（fail-closed）。
+
+    与 ``_portfolio_from_trades`` 同款严格：文件不在/读不了/没有签名字段/签名不一致
+    都打印 [FAIL] 并返回 None（调用方非零退出），**不做任何猜测性兼容**——拿另一套
+    入场口径的信号重放，产出的 trades 看不出任何异常，是最难发现的错法。
+    通过则返回 ``{code: [信号]}``。
+    """
+    src = Path(args.from_signals)
+    if not src.is_file():
+        print(f"[FAIL] --from-signals 文件不存在: {src}", file=sys.stderr)
+        return None
+    try:
+        d = json.loads(src.read_text(encoding="utf-8"))
+    except Exception as e:  # noqa: BLE001
+        print(f"[FAIL] --from-signals 读不了 {src.name}: {e}", file=sys.stderr)
+        return None
+    sigs = d.get("signals")
+    if not isinstance(sigs, list):
+        print(
+            f"[FAIL] {src.name} 里没有 signals（不是 --signals-out 落的盘，拒绝复用）",
+            file=sys.stderr,
+        )
+        return None
+    want = signals_signature(args, codes)
+    got = d.get("signals_signature")
+    if not isinstance(got, dict):
+        print(
+            f"[FAIL] {src.name} 没有 signals_signature（旧版信号文件）⇒ "
+            f"无法确认口径一致，拒绝复用",
+            file=sys.stderr,
+        )
+        return None
+    diff = {k: (got.get(k), v) for k, v in want.items() if got.get(k) != v}
+    if diff:
+        print(f"[FAIL] 信号口径与 {src.name} 不一致，拒绝复用：", file=sys.stderr)
+        for k, (a, b) in sorted(diff.items()):
+            print(f"       {k}: 源={a!r} 本次={b!r}", file=sys.stderr)
+        return None
+    by_code: dict[str, list] = {}
+    for s in sigs:
+        if isinstance(s, dict) and "code" in s and "i" in s:
+            by_code.setdefault(s["code"], []).append(s)
+    print(
+        f"[OK] 读入 {src.name} 的 {len(sigs)} 条进场信号（信号口径已核对一致），"
+        f"跳过逐 bar 进场扫描",
+        file=sys.stderr,
+    )
+    return by_code
+
+
 def _portfolio_from_trades(args: Any, codes: list[str]) -> int:
     """只跑资金曲线，逐笔交易从已有结果 JSON 读入（跳过回测）。
 
@@ -3816,6 +4097,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "复用前核对 trades_signature,口径不一致直接非零退出",
     )
     ap.add_argument(
+        "--signals-out",
+        default="",
+        help="把本轮全部进场信号(每条: code/bar索引i/日期/score)连同 signals_signature "
+        "落盘到该 JSON(扫描照常跑、trades 照常出)。供「只改出场参数」的方案用 "
+        "--from-signals 重放,跳过逐 bar 进场扫描。要求 --step 1",
+    )
+    ap.add_argument(
+        "--from-signals",
+        default="",
+        help="从 --signals-out 落的信号 JSON **重放**:逐股加载+预计算后跳过逐 bar "
+        "进场扫描,直接对每条缓存信号 simulate_b1_trade,产出与全量跑逐位一致的 trades。"
+        "复用前核对 signals_signature(只含信号轴参数;出场参数随便改),不一致非零退出。"
+        "与 --from-trades 互斥;要求 --step 1",
+    )
+    ap.add_argument(
         "--risk-pct", type=float, default=1.0, help="组合:每笔风险占本金%%(默认1.0)"
     )
     ap.add_argument(
@@ -4094,6 +4390,20 @@ def main(
         ap.error(
             "--stop-buffer pct/atr 与 --stop-tick-buffer>0 互斥（余量单位只能选一个）"
         )
+    if args.from_trades and args.from_signals:
+        # 两层复用各管一段（trades 层跳过整个回测、信号层只跳过进场扫描），
+        # 同给没有意义且语义冲突——报错，不猜（fail-closed）
+        ap.error(
+            "--from-trades 与 --from-signals 互斥（一个是 trades 层、一个是信号层复用）"
+        )
+    if (args.from_signals or args.signals_out) and not args.trade_sim:
+        ap.error(
+            "--signals-out/--from-signals 只用于 --trade-sim（进场信号是交易模拟的中间产物）"
+        )
+    if (args.from_signals or args.signals_out) and args.step != 1:
+        # fail-closed：step>1 时非重叠去重「跳到出场后」会让续扫起点离开
+        # min_bars+k*step 网格，两阶段重放无法逐位复现单遍扫描
+        ap.error("信号缓存/重放（--signals-out/--from-signals）要求 --step 1")
 
     codes = _resolve_universe(args, ap)
     if args.dump_codes:
@@ -4122,9 +4432,12 @@ def _stream_trades(
     load: Callable,
     amv_regime: Optional[dict],
     sector_gate: Optional[Callable],
+    signals_in: Optional[dict[str, list[dict[str, Any]]]] = None,
+    signals_out: Optional[list[dict[str, Any]]] = None,
 ) -> tuple[list[dict[str, Any]], int, float, float]:
     """逐股流式主循环：加载→评估→释放，避免全量载入 OOM。
-    返回 ``(trades, n_loaded, t_load, t_eval)``（耗时拆分供 [TIME] 行）。"""
+    返回 ``(trades, n_loaded, t_load, t_eval)``（耗时拆分供 [TIME] 行）。
+    ``signals_in``/``signals_out`` 透传给 evaluate_trades（信号重放/落盘，见其 docstring）。"""
     trades: list[dict[str, Any]] = []
     import gc
     import time as _time
@@ -4165,6 +4478,8 @@ def _stream_trades(
                 stop_atr_buffer=args.stop_atr_buffer,
                 cost_zone_bars=args.cost_zone_bars,
                 cost_zone_pct=args.cost_zone_pct,
+                signals_in=signals_in,
+                signals_out=signals_out,
             )
             t_eval += _time.time() - _t0
         del d
@@ -4270,17 +4585,41 @@ def _run_trade_sim(
     args: Any, codes: list[str], load: Callable, ap: argparse.ArgumentParser
 ) -> int:
     """--trade-sim 分支：amv/板块 gate 加载（fail-closed）→ 流式逐股回测 →
-    耗时/内存汇报 → 空结果护栏 → payload 组装 → 组合层 → 落盘/控制台报告。"""
-    amv_regime = _load_amv_gate(args, ap)
-    sector_gate = _load_sector_gate(args, ap)
+    耗时/内存汇报 → 空结果护栏 → payload 组装 → 组合层 → 落盘/控制台报告。
+
+    信号层复用（2026-09-03）：``--from-signals`` 时先核对 signals_signature
+    （fail-closed），逐股加载+``_prepare_stock`` 后跳过逐 bar 进场扫描；
+    ``--signals-out`` 时扫描照常跑、候选信号额外落盘供后续方案重放。
+    重放路径不需要 amv/板块 gate 在本机可读（它们只参与进场扫描，
+    口径已由签名锁定）——同 ``--from-trades`` 不需要指南针数据的道理。
+    """
+    signals_in = None
+    if args.from_signals:
+        signals_in = _load_signals_checked(args, codes)
+        if signals_in is None:
+            return 2
+    replay = signals_in is not None
+    amv_regime = None if replay else _load_amv_gate(args, ap)
+    sector_gate = None if replay else _load_sector_gate(args, ap)
+    signals_collected: Optional[list[dict[str, Any]]] = [] if args.signals_out else None
     trades, n_loaded, t_load, t_eval = _stream_trades(
-        args, codes, load, amv_regime, sector_gate
+        args,
+        codes,
+        load,
+        amv_regime,
+        sector_gate,
+        signals_in=signals_in,
+        signals_out=signals_collected,
     )
     _report_stream_stats(args, codes, trades, t_load, t_eval)
-    _report_gates()
+    if not replay:
+        _report_gates()
     rc_empty = _empty_result_guard(n_loaded, len(trades), "笔交易", args.allow_empty)
     if rc_empty:
         return rc_empty
+    if signals_collected is not None:
+        # 护栏通过后才落信号文件：空/失败跑留下的信号文件会被下游当成「可复用」
+        _write_signals_file(Path(args.signals_out), args, codes, signals_collected)
     tsum = summarize_trades(trades)
     payload: dict[str, Any] = {
         "mode": "trade_sim",
@@ -4304,6 +4643,10 @@ def _run_trade_sim(
         "trade_summary": tsum,
         "trades": trades,
     }
+    if replay:
+        payload["signals_reused_from"] = Path(args.from_signals).name
+    if args.signals_out:
+        payload["signals_dumped_to"] = Path(args.signals_out).name
     _attach_portfolio_reports(args, payload, trades)
     if args.out:
         _write_trade_result(args, payload, trades)
