@@ -331,6 +331,8 @@ class TestBacktestRegistration:
             "j_low_qsx_weekly",
             "weekly_qsx_gt_dks",
             "j_low_weekly_qsx_weekly",
+            "qg",
+            "weekly_j_low_qg",
         ],
     )
     def test_gate_registered(self, name):
@@ -350,6 +352,8 @@ class TestBacktestRegistration:
             "j_low_qsx_weekly",
             "weekly_qsx_gt_dks",
             "j_low_weekly_qsx_weekly",
+            "qg",
+            "weekly_j_low_qg",
         ):
             for df in list(shapes.values()) + [_mk(_platform(5, 10.0, 4e5))]:
                 assert isinstance(bt.ENTRY_GATES[name](df), bool)
@@ -401,6 +405,52 @@ class TestWeeklyQsxGate:
         """长上涨末端急跌到日/周 J 双低时,组合 gate 应放行(周线结构仍多头)。"""
         assert bt.j_low_weekly_resonance_gate(wshapes["up"]) is True
         assert bt.j_low_weekly_qsx_weekly_gate(wshapes["up"]) is True
+
+
+class TestQgGate:
+    """R26 共振 v2 入场 gate（R23 C 臂完整口径 = hit 且未排除,取末根）。
+
+    QSX/DKS 由 gate 内部用 indicators 在 df 上重算,所以合成 fixture 不能钉死
+    线值——用同一指标自校准地注入跌线反弹（low/high/volume 不影响 QSX/DKS,
+    注入后线不变）。
+    """
+
+    @staticmethod
+    @pytest.fixture(scope="class")
+    def qshapes():
+        from custos.core.indicators import qsx_series
+
+        # 缓涨 200 根(>114,DKS 成形),末 60 根内注入 2 次干净跌线反弹
+        df = _mk(_drift(10.0, 200, 0.001, 5.0e5))
+        qsx = qsx_series(df["close"].astype(float)).to_numpy()
+        n = len(df)
+        for t in (n - 30, n - 15):
+            lv = qsx[t]
+            assert df["close"].iloc[t - 1] > qsx[t - 1]  # ① 前提:前一日收在在线
+            assert df["close"].iloc[t] > lv  # ③ 当根收回(close 不动 ⇒ 线不变)
+            df.loc[t, "low"] = lv * 0.998  # ① 真碰线
+            df.loc[t, "high"] = lv * 0.998 * 1.035  # ④ 当根反弹 ≥3% 达标
+            df.loc[t, "volume"] = 3.0e5  # ⑤ 缩量
+            df.loc[t, "amount"] = df.loc[t, "volume"] * df.loc[t, "close"]
+        # 长期阴跌 → 跌破未收复态
+        down = _mk(_drift(60.0, 660, -0.004, 4.0e5))
+        return {"dips": df, "down": down}
+
+    def test_direction(self, qshapes):
+        assert bt.qg_gate(qshapes["dips"]) is True
+        assert bt.qg_gate(qshapes["down"]) is False
+
+    def test_short_history_false_not_raise(self):
+        """DKS 需 ≥114 根日 K——短历史必须返回 False 而不是 raise。"""
+        short = _mk(_platform(100, 10.0, 4e5))
+        assert bt.qg_gate(short) is False
+        assert bt.weekly_j_low_qg_gate(short) is False
+
+    def test_combo_is_intersection(self, qshapes):
+        """weekly_j_low_qg = 周 J<13 ∧ 共振 v2 成立且未排除。"""
+        for df in qshapes.values():
+            expect = bt.weekly_j_low_gate(df) and bt.qg_gate(df)
+            assert bt.weekly_j_low_qg_gate(df) is bool(expect)
 
 
 class TestNotYetWiredIntoScreening:

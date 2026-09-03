@@ -80,17 +80,25 @@ from custos.core.factors.s_shape import (
 _kdj: Callable[..., Any] | None  # 导入失败退 None（调用点有守卫）
 _resample: Callable[..., Any] | None
 _zhixing_state: Callable[..., Any] | None
+_dks_series: Callable[..., Any] | None
+_qsx_dks_resonance_v2: Callable[..., Any] | None
 
 try:
     from custos.core.indicators import kdj as _kdj  # noqa: E402
     from custos.core.indicators import (  # noqa: E402
         resample as _resample,
         zhixing_state as _zhixing_state,
+        dks_series as _dks_series,
+    )
+    from custos.core.factors.qsx_resonance import (  # noqa: E402
+        qsx_dks_resonance_v2 as _qsx_dks_resonance_v2,
     )
 except Exception:  # noqa: BLE001
     _kdj = None
     _resample = None
     _zhixing_state = None
+    _dks_series = None
+    _qsx_dks_resonance_v2 = None
 
 J_LOW_THRESHOLD = 13.0
 
@@ -755,6 +763,41 @@ def j_low_weekly_qsx_weekly_gate(
     )
 
 
+def qg_gate(df_slice: pd.DataFrame, precomputed: Optional[dict] = None) -> bool:
+    """R23 C 臂完整口径(R26):共振 v2 成立(hit)且未排除(~excluded),取末根。绝不 raise。
+
+    口径 = ``qsx_dks_resonance_v2`` 默认参数:近 60 根内 ≥2 次干净跌线反弹,且当前
+    不处于「跌破 QSX 或 DKS 未收复」态。QSX/DKS 用 indicators 唯一实现在 df_slice
+    上重算(DKS 需 ≥114 根日 K);序列未成形(末根 NaN)/任何异常 ⇒ False。
+    """
+    if _qsx_dks_resonance_v2 is None or _dks_series is None:
+        return False
+    try:
+        close = df_slice["close"].astype(float)
+        qsx = _qsx_series(close)
+        dks = _dks_series(close)
+        if pd.isna(qsx.iloc[-1]) or pd.isna(dks.iloc[-1]):
+            return False  # 线未成形(短历史)
+        hit, excluded = _qsx_dks_resonance_v2(
+            close,
+            df_slice["low"].astype(float),
+            df_slice["high"].astype(float),
+            df_slice["volume"].astype(float),
+            qsx,
+            dks,
+        )
+        return bool(hit[-1] and not excluded[-1])
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def weekly_j_low_qg_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
+    """周 J<13 ∧ 共振 v2 成立且未排除(R26):大周期超卖 + 干净双底结构。"""
+    return bool(weekly_j_low_gate(df_slice) and qg_gate(df_slice))
+
+
 def qsx_gt_dks_gate(df_slice: pd.DataFrame, precomputed: Optional[dict] = None) -> bool:
     """长期多头结构:QSX>DKS(good_b1 8/9)。绝不 raise。"""
     if compute_b1_dual is None:
@@ -793,9 +836,12 @@ if compute_b1_dual is not None:
     ENTRY_GATES["j_low_weekly_resonance"] = j_low_weekly_resonance_gate
     ENTRY_GATES["j_low_qsx_weekly"] = j_low_qsx_weekly_gate
     ENTRY_GATES["j_low_weekly_qsx_weekly"] = j_low_weekly_qsx_weekly_gate
+    ENTRY_GATES["weekly_j_low_qg"] = weekly_j_low_qg_gate
 
 # 只依赖 indicators(resample + zhixing_state),不被上面的 compute_b1_dual 守卫挡
 ENTRY_GATES["weekly_qsx_gt_dks"] = weekly_qsx_gt_dks_gate
+# 只依赖 indicators(qsx/dks_series)+ qsx_resonance 因子模块,同上不放守卫内
+ENTRY_GATES["qg"] = qg_gate
 
 
 # ---- B2 战法 + 底部异动（来源 other/B1.pdf；见 b2_surge_factor 模块 docstring）----
