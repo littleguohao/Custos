@@ -71,7 +71,7 @@ def _sig_nm(c: dict) -> str:
 
 
 def _signal_label_row(key: str, meta: tuple, with_sig: list[dict]) -> Optional[str]:
-    """单因子行：命中/可评 + 命中名单（按技术分降序前12）。无可评估且无命中返回 None。"""
+    """单因子行：命中/可评 + 命中名单（按技术分降序，全列不截断）。无可评估且无命中返回 None。"""
     label, abbr, direction = meta
     hits, evaluable = [], 0
     for c in with_sig:
@@ -83,46 +83,28 @@ def _signal_label_row(key: str, meta: tuple, with_sig: list[dict]) -> Optional[s
     if not evaluable and not hits:
         return None
     mark = "⚠️ " if direction < 0 else ""
-    # 2026-08-16（owner）：改表格 + 标技术分--命中名单按技术分降序取前 12，
+    # 2026-08-16（owner）：改表格 + 标技术分——命中名单按技术分降序，
     # 括号内是该票当日技术分（总分=技术分），一眼看出「命中的是强票还是弱票」。
+    # v0.169（owner）：命中名单完整列出，不再截断前 12。
     top_hits = sorted(hits, key=lambda c: (-(c.get("score") or 0), str(c.get("code"))))
-    names = "、".join(
-        f"{_sig_nm(c)}({int(c.get('score') or 0)})" for c in top_hits[:12]
-    )
-    if len(hits) > 12:
-        names += f" 等 {len(hits)} 只"
+    names = "、".join(f"{_sig_nm(c)}({int(c.get('score') or 0)})" for c in top_hits)
     return f"| {mark}**{label}** `{abbr}` | {len(hits)}/{evaluable} | {names or '无'} |"
-
-
-def _signal_labels_unavailable_note(sl, with_sig: list[dict]) -> list[str]:
-    """「数据不足」补注行：unavailable 计数 top4；无则返回空。"""
-    na_counts: dict[str, int] = {}
-    for c in with_sig:
-        for key in sl.SIGNAL_META:
-            if (c["signals"].get(key) or {}).get("state") == "unavailable":
-                na_counts[key] = na_counts.get(key, 0) + 1
-    if not na_counts:
-        return []
-    top = sorted(na_counts.items(), key=lambda x: -x[1])[:4]
-    return [
-        "",
-        "> 数据不足（算不出来，**不等于不符合条件**）："
-        + "、".join(f"{sl.SIGNAL_META[k][0]} {v} 只" for k, v in top),
-    ]
 
 
 def _signal_labels_section(candidates: list[dict]) -> list[str]:
     """信号标注一览：**逐个标注列出命中的票**（而不是只报几只）。
 
-    设计边界：这些研究因子（QSX>DKS、RSI 区间、B2、底部异动、主升始发点…）**只标注，
+    设计边界：这些研究因子（QSX共振、RSI 区间、B2、底部异动、主升始发点…）**只标注，
     不参与打分分层**，上方候选池的分层与 next_step 完全未被改写。
 
     ⚠️ 它们**已在跨窗终审中被否决**（治理文档「H1/H2 终审」）：edge 只存在于 2025-2026
     单一 regime。所以这个区块是**观察记录，不是交易依据**，尤其不得据命中数定仓位。
 
-    分母是**可评估数**（排除数据不足的票）：`min_list_days=60` 而 `qsx_gt_dks` 需 120 根、
-    `surge_then_b1` 需 200 根，大量候选算不出来。把"算不出来"混进分母会让"数据不足"
-    被误读成"不符合条件"。
+    分母是**可评估数**（排除数据不足的票）：`min_list_days=60` 而 `qsx_resonance_v2` 需
+    ≥114 根（DKS 成形）、`surge_then_b1` 需 200 根，大量候选算不出来。把"算不出来"
+    混进分母会让"数据不足"被误读成"不符合条件"。
+    （v0.169 owner：一览行序 = SIGNAL_META 序，QG 首位；⚠出货行不列、解释文字不列、
+    命中名单全列不截断。）
     """
     try:
         # 包式导入失败（如模块损坏）此前被外层 except 吞掉，
@@ -142,7 +124,7 @@ def _signal_labels_section(candidates: list[dict]) -> list[str]:
     lines = [
         "## 🏷️ 信号标注一览（研究因子·只标注，不影响上方分层）",
         "",
-        "| 因子 | 命中/可评 | 命中候选（按技术分降序，前12；括号内为技术分） |",
+        "| 因子 | 命中/可评 | 命中候选（按技术分降序；括号内为技术分） |",
         "|---|---:|---|",
     ]
     for key, meta in sl.SIGNAL_META.items():
@@ -151,25 +133,18 @@ def _signal_labels_section(candidates: list[dict]) -> list[str]:
         # 单列只是噪声。两者算法**不同**（见 b2_surge_factor），重合是本池结构使然。
         if key == "bottom_surge":
             continue
+        # ⚠出货（主力出货形态）一览行不列（v0.169 owner 撤）——主表单元格 ⚠️ 负向标记保留。
+        if key == "distribution_risk":
+            continue
         row = _signal_label_row(key, meta, with_sig)
         if row is not None:
             lines.append(row)
-    lines += _signal_labels_unavailable_note(sl, with_sig)
-    lines.append(
-        "> 分母为**可评估数**；缩写见各行反引号。这些标注不改写分层/next_step。"
-        "`SG`（底部异动）不单列：`SB`＝SG ∧ 当日 J<13，本池已过 J<13 硬门槛，两名单恒重合。"
-    )
-    lines.append(
-        "> ⚠️ **这些因子已在跨窗终审中被否决**（edge 仅存在于 2025-2026 单一 regime，"
-        "详见 governance/research/README.md「跨窗终审总账」）："
-        "本区块是**观察记录，不是交易依据**，不得据命中数决定仓位。"
-    )
     lines.append("")
     return lines
 
 
 def _signal_cell(cand: dict) -> str:
-    """主表「标注」单元：`4/11 QD·RS·SG` + 负向 ⚠️。"""
+    """主表「标注」单元：`4/11 QG·RS·B2` + 负向 ⚠️。"""
     sig = cand.get("signals")
     if not isinstance(sig, dict):
         return "-"

@@ -45,6 +45,9 @@ TOP20% 赢家 vs 其余的技术分分布、前后半窗一致性；``--compare`
 
 ## v2 口径（owner 2026-08-26 逐条定稿，第二轮；v1 因命中率 99.2%≈无过滤被证伪）
 
+**检测器已下沉 `custos.core.factors.qsx_resonance`**（v0.168，候选表 QG 标注同源）；
+本脚本仅保留 v1（复现第一轮）与回测编排。
+
 **成立条件**（近 60 根内 ≥2 次「干净的跌线反弹」），一次干净反弹 =
 `qsx_dks_resonance_v2` 逐条判定：
 
@@ -98,6 +101,12 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 from custos.core import indicators as ind  # noqa: E402
+from custos.core.factors.qsx_resonance import (  # noqa: E402
+    BOUNCE_BARS,
+    BOUNCE_PCT,
+    VOL_MA,
+    qsx_dks_resonance_v2,
+)
 from custos.research import backtest_factors as bf  # noqa: E402
 from custos.research import score_return_study as srs  # noqa: E402
 
@@ -106,12 +115,6 @@ LOOKBACK = 60
 TOUCH_TOL = 0.01
 RECLAIM_BARS = 5
 MIN_EVENTS = 2
-
-# v2 口径默认参数（owner 2026-08-26 定稿）：反弹窗 5 根、反弹幅度 ≥3%、缩量 = 触线日量
-# < 前 5 日均量、近 60 根内 ≥2 次干净反弹；排除 = 跌破未收复状态
-BOUNCE_BARS = 5
-BOUNCE_PCT = 0.03
-VOL_MA = 5
 
 # 预注册判据（写在跑数之前，compare 报告头部照原文展示）
 PREREG_CRITERIA = (
@@ -221,127 +224,9 @@ def qsx_dks_resonance(
 
 # ---------------------------------------------------------------------------
 # v2 口径（owner 2026-08-26 逐条定稿；v1 因 99.2% 命中≈无过滤被证伪，保留复现）
+# v2 检测器已下沉 `custos.core.factors.qsx_resonance`（本文件顶部导入，
+# 签名/默认值与原实现逐位一致，钉测经 qrs.qsx_dks_resonance_v2 调用不变）。
 # ---------------------------------------------------------------------------
-
-
-def _line_episodes_v2(
-    low: np.ndarray,
-    close: np.ndarray,
-    high: np.ndarray,
-    volume: np.ndarray,
-    line: np.ndarray,
-    bounce_bars: int,
-    bounce_pct: float,
-    vol_ma: int,
-) -> list[tuple[int, int]]:
-    """单条线的「干净的跌线反弹」事件列表 [(t_touch, confirm_bar), ...]（v2 口径）。
-
-    五要素逐条（owner 定稿，不许自由改动）：
-    ① 碰线 ``low[t] ≤ line[t]`` 且前一日收盘在在线（从上往下碰，线下运行不算）；
-    ② 线下收盘 ≤1 根：``close[t] ≤ line[t]`` 则必须 ``close[t+1] > line[t+1]``
-       （reclaim=t+1），连破 2 根即无效；碰线当日收在线上即当日收回（reclaim=t）；
-    ③ 收回 = reclaim_bar（收盘 > 线，严格大于）；
-    ④ 反弹幅度：``min_low = min(low[t..reclaim])``，窗 ``[t, t+bounce_bars]`` 内
-       首个 ``high[u] ≥ min_low × (1+bounce_pct)`` ⇒ bounce_bar；缺 ⇒ 无效；
-    ⑤ 缩量：``volume[t] < mean(volume[t-vol_ma..t-1])``（t < vol_ma 无前窗 ⇒ 无效）。
-    confirm_bar = max(reclaim_bar, bounce_bar)——之前不可见，严格因果。
-    """
-    n = len(close)
-    events: list[tuple[int, int]] = []
-    for t in range(max(1, vol_ma), n):  # ①要前一日收盘、⑤要前 vol_ma 根量
-        lv = line[t]
-        if lv != lv or not (low[t] <= lv):  # ① 碰线（真碰，无容差）
-            continue
-        prev = line[t - 1]
-        if prev != prev or close[t - 1] <= prev:  # 前一日须收在在线（从上往下）
-            continue
-        if not volume[t] < float(np.mean(volume[t - vol_ma : t])):  # ⑤ 缩量
-            continue
-        if close[t] > lv:  # ③ 当日收回（线下收盘 0 根）
-            reclaim = t
-        elif t + 1 < n and line[t + 1] == line[t + 1] and close[t + 1] > line[t + 1]:
-            reclaim = t + 1  # ② 线下收盘恰好 1 根后收回
-        else:
-            continue  # 连破 ≥2 根 ⇒ 不是干净反弹
-        min_low = float(np.min(low[t : reclaim + 1]))  # 触线最低点
-        bounce_bar = None
-        for u in range(t, min(t + bounce_bars, n - 1) + 1):  # ④ 随后 N 根内
-            if high[u] >= min_low * (1 + bounce_pct):
-                bounce_bar = u
-                break
-        if bounce_bar is None:
-            continue
-        events.append((t, max(reclaim, bounce_bar)))
-    return events
-
-
-def _unrecovered_line(
-    low: np.ndarray, close: np.ndarray, line: np.ndarray
-) -> np.ndarray:
-    """逐 bar「跌破未收复」状态（v2 排除条件）：碰线且收在线下 ⇒ 进入；收盘 > 线 ⇒ 解除。
-
-    owner 原话：「触线后没有站上反而继续下跌，说明 QSX/DKX 空头有效，需要排除」。
-    线未成形（NaN）根不判。
-    """
-    n = len(close)
-    out = np.zeros(n, dtype=bool)
-    broken = False
-    for i in range(n):
-        lv = line[i]
-        if lv != lv:  # NaN 守卫
-            continue
-        if close[i] > lv:
-            broken = False
-        elif low[i] <= lv:
-            broken = True
-        out[i] = broken
-    return out
-
-
-def qsx_dks_resonance_v2(
-    close: pd.Series,
-    low: pd.Series,
-    high: pd.Series,
-    volume: pd.Series,
-    qsx: pd.Series,
-    dks: pd.Series,
-    lookback: int = LOOKBACK,
-    bounce_bars: int = BOUNCE_BARS,
-    bounce_pct: float = BOUNCE_PCT,
-    vol_ma: int = VOL_MA,
-    min_events: int = MIN_EVENTS,
-) -> tuple[np.ndarray, np.ndarray]:
-    """过滤② v2「干净共振」：返回 ``(hit, excluded)`` 两个布尔序列（as-of 无未来函数）。
-
-    - ``hit[i]``：近 ``lookback`` 根内（触线根 ≥ i−lookback+1）已确认
-      （confirm_bar ≤ i）的干净跌线反弹事件 ≥ ``min_events``；
-      两线事件按触线段重叠去重（同一次下跌碰两线只算一次）。
-    - ``excluded[i]``：QSX 或 DKS 任一处于「跌破未收复」状态。
-    进场用 ``hit & ~excluded``（排除条件优先级高于成立条件，owner 定）。
-    """
-    c = close.astype(float).to_numpy()
-    lo = low.astype(float).to_numpy()
-    hi = high.astype(float).to_numpy()
-    vol = volume.astype(float).to_numpy()
-    qs = qsx.astype(float).to_numpy()
-    dk = dks.astype(float).to_numpy()
-    ev = _line_episodes_v2(lo, c, hi, vol, qs, bounce_bars, bounce_pct, vol_ma)
-    ev += _line_episodes_v2(lo, c, hi, vol, dk, bounce_bars, bounce_pct, vol_ma)
-    ev.sort(key=lambda e: (e[0], e[1]))
-    dedup: list[tuple[int, int]] = []
-    for e in ev:
-        if dedup and e[0] <= dedup[-1][0]:  # 同一根触线碰两线 ⇒ 同一次下跌
-            continue
-        dedup.append(e)
-    n = len(c)
-    cnt = np.zeros(n, dtype=int)
-    for t_touch, confirm in dedup:
-        hi_i = min(t_touch + lookback - 1, n - 1)  # 事件对 [confirm, t+lookback-1] 可见
-        if confirm <= hi_i:
-            cnt[confirm : hi_i + 1] += 1
-    hit = cnt >= min_events
-    excluded = _unrecovered_line(lo, c, qs) | _unrecovered_line(lo, c, dk)
-    return hit, excluded
 
 
 def wilson_ci(

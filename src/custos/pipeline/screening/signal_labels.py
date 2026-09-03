@@ -17,8 +17,8 @@ b1_dual 系、B2/异动系、`j_low_qsx_weekly` 的 edge 只存在于 2025-2026 
 便于积累"这些形态在什么行情下出现"的直觉、也便于复盘被否决的因子在实盘里长什么样；
 ③ 负向标注（出货形态）本就是既有证据层信息。若日后某因子通过跨窗终审，再单独升级为加分。
 
-**为什么必须三态而非二态**：`min_list_days=60`，而 `qsx_gt_dks` 需要 ≥120 根（DKS=MA114）、
-`surge_then_b1` 需要 ≥200 根（9个月新高）。大量候选会**算不出来**。若把"算不出来"显示成
+**为什么必须三态而非二态**：`min_list_days=60`，而 `qsx_resonance_v2` 需要 ≥114 根（DKS=MA114
+成形）、`surge_then_b1` 需要 ≥200 根（9个月新高）。大量候选会**算不出来**。若把"算不出来"显示成
 "未命中"，读者会误以为"这票不符合这个条件"，而实际是"不知道"——这正是本次审计反复
 出现的失效模式（缺数据伪装成好数据）。故命中率分母用**可评估数**而非总数。
 """
@@ -34,7 +34,8 @@ HIT, MISS, NA = "hit", "miss", "unavailable"
 
 # 标注定义：key → (中文名, 表格缩写, 方向)。方向 +1=正向、-1=负向。
 SIGNAL_META: dict[str, tuple[str, str, int]] = {
-    "qsx_gt_dks": ("长期多头结构(QSX>DKS)", "QD", +1),
+    # v0.169（owner）：QG 提至首位；QD（qsx_gt_dks）标注整体撤除（打分链 zhixing 数据键不动）。
+    "qsx_resonance_v2": ("QSX共振v2(60根≥2次干净反弹)", "QG", +1),
     "weekly_j_low": ("周线B1(周J<13)", "W", +1),
     "rsi_strong": ("RSI强势区间", "RS", +1),
     "rsi_deep_oversold": ("RSI深水区", "RD", +1),
@@ -60,31 +61,6 @@ def _put(out: dict[str, Any], key: str, available: bool, hit: bool, **detail):
 
 
 # ---- 复用型（零增量成本）----
-def _signal_qsx_gt_dks(out: dict[str, Any], df: pd.DataFrame, zx: Optional[dict]):
-    if zx is not None:
-        _put(
-            out,
-            "qsx_gt_dks",
-            bool(zx.get("available")),
-            bool(zx.get("qsx_gt_dks")),
-            qsx=zx.get("qsx"),
-            dks=zx.get("dks"),
-        )
-    else:
-        try:
-            from custos.core.indicators import zhixing_state
-
-            z = zhixing_state(df)
-            _put(
-                out,
-                "qsx_gt_dks",
-                bool(z.get("available")),
-                bool(z.get("qsx_gt_dks")),
-            )
-        except Exception:  # noqa: BLE001
-            _put(out, "qsx_gt_dks", False, False, reason="zhixing_unavailable")
-
-
 def _signal_weekly_j_low(
     out: dict[str, Any],
     df: pd.DataFrame,
@@ -265,6 +241,35 @@ def _signal_main_rally(out: dict[str, Any], df: pd.DataFrame, code: str):
         )
 
 
+# ---- QSX 共振 v2（R23 研究因子下沉，仅观察记录）----
+def _signal_qsx_resonance_v2(out: dict[str, Any], df: pd.DataFrame):
+    """hit 口径 = 成立且未排除（R23 C 臂完整口径：hit & ~excluded）。
+
+    ⚠️ R23：共振计数零筛选价值、「跌破未收复」排除态是全部边际——detail 里
+    ``excluded``/``events`` 单独给出，本标注仅作观察记录，非交易依据。
+    """
+    try:
+        from custos.core.factors.qsx_resonance import resonance_v2_snapshot
+
+        snap = resonance_v2_snapshot(df)
+        _put(
+            out,
+            "qsx_resonance_v2",
+            bool(snap["available"]),
+            bool(snap["hit"]) and not snap["excluded"],
+            excluded=snap.get("excluded"),
+            events=snap.get("events"),
+        )
+    except Exception as exc:  # noqa: BLE001
+        _put(
+            out,
+            "qsx_resonance_v2",
+            False,
+            False,
+            reason=f"qsx_resonance_error:{type(exc).__name__}",
+        )
+
+
 def compute_signals(
     df: pd.DataFrame,
     code: str = "",
@@ -272,26 +277,25 @@ def compute_signals(
     daily_j: Optional[float] = None,
     weekly_j_low: Optional[bool] = None,
     weekly_j_available: Optional[bool] = None,
-    zx: Optional[dict] = None,
     distribution: Optional[dict] = None,
     platform_pullback: Optional[dict] = None,
 ) -> dict[str, Any]:
     """算出全部标注（三态）。**尽量复用调用方已算好的结果**，绝不 raise。
 
     可注入项都是 enrich 的 compute_metrics 已经算过的：``daily_j``（kdj）、
-    ``weekly_j_low``（weekly_j_state）、``zx``（zhixing_state，含 qsx_gt_dks）、
-    ``distribution``（detect_distribution）、``platform_pullback``。
+    ``weekly_j_low``（weekly_j_state）、``distribution``（detect_distribution）、
+    ``platform_pullback``。
     不注入时本模块自己算——但那会白付一次 resample（2.3ms）与若干次 kdj。
     """
     out: dict[str, Any] = {}
 
-    _signal_qsx_gt_dks(out, df, zx)
     _signal_weekly_j_low(out, df, weekly_j_low, weekly_j_available)
     _signal_distribution_risk(out, distribution)
     _signal_rsi(out, df)
     _signal_surge(out, df, code)
     _signal_breakout_pullback_b1(out, df, code, platform_pullback, daily_j)
     _signal_main_rally(out, df, code)
+    _signal_qsx_resonance_v2(out, df)
 
     return {**out, "summary": summarize_signals(out)}
 
@@ -300,7 +304,7 @@ def summarize_signals(signals: dict[str, Any]) -> dict[str, Any]:
     """汇总：正向命中数 / **可评估数**（分母排除 unavailable）。
 
     分母用可评估数而非总数：新股因数据不足只能评估 4 项、命中 3 项，应显示 3/4 而不是
-    3/12 —— 后者会把"数据不足"误读成"质量差"。
+    3/11 —— 后者会把"数据不足"误读成"质量差"。
     """
     pos_hit = [k for k in POSITIVE if signals.get(k, {}).get("state") == HIT]
     pos_eval = [k for k in POSITIVE if signals.get(k, {}).get("state") in (HIT, MISS)]

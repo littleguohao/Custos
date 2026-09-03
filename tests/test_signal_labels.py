@@ -7,8 +7,8 @@
 
 本文件钉住三件事：
   ① 标注是**三态**（hit/miss/unavailable），命中率分母是**可评估数**——`min_list_days=60`
-     而 qsx_gt_dks 需 120 根、surge_then_b1 需 200 根，大量候选算不出来；把"算不出来"
-     混进分母会让"数据不足"被误读成"不符合条件"（本次审计反复出现的失效模式）。
+     而 qsx_resonance_v2 需 ≥114 根（DKS 成形）、surge_then_b1 需 200 根，大量候选算不出来；
+     把"算不出来"混进分母会让"数据不足"被误读成"不符合条件"（本次审计反复出现的失效模式）。
   ② 标注**逐个列出命中的票**，不是只报数量。
   ③ 无论标注命中什么，**选股输出逐字节不变**。
 """
@@ -80,17 +80,17 @@ class TestThreeStates:
     """三态是硬要求：缺数据不能表现为"未命中"。"""
 
     def test_states_are_three_valued(self):
-        s = _sig(hits={"qsx_gt_dks"}, na={"bottom_surge"})
-        assert s["qsx_gt_dks"]["state"] == "hit"
+        s = _sig(hits={"rsi_strong"}, na={"bottom_surge"})
+        assert s["rsi_strong"]["state"] == "hit"
         assert s["weekly_j_low"]["state"] == "miss"
         assert s["bottom_surge"]["state"] == "unavailable"
 
     def test_denominator_excludes_unavailable(self):
-        """新股只能评估 4 项、命中 3 项 → 显示 3/4 而不是 3/12。"""
+        """新股只能评估 4 项、命中 3 项 → 显示 3/4 而不是 3/11。"""
         s = _sig(
             hits={"rsi_strong", "rsi_deep_oversold", "rsi_ideal_b1"},
             na={
-                "qsx_gt_dks",
+                "qsx_resonance_v2",
                 "bottom_surge",
                 "surge_then_b1",
                 "main_rally",
@@ -108,19 +108,19 @@ class TestThreeStates:
         assert sm["unavailable_count"] == 9
 
     def test_negative_counted_separately(self):
-        s = _sig(hits={"qsx_gt_dks"}, neg={"distribution_risk"})
+        s = _sig(hits={"rsi_strong"}, neg={"distribution_risk"})
         sm = s["summary"]
         assert sm["positive_hit_count"] == 1
         assert sm["negative_hit_count"] == 1
         assert sm["neg_abbrs"] == ["⚠出货"]
 
     def test_short_history_yields_unavailable(self):
-        """70 根的票：qsx_gt_dks(需120) / bottom_surge(需200) 必须是 unavailable。"""
+        """70 根的票：qsx_resonance_v2(DKS需≥114) / bottom_surge(需200) 等必须是 unavailable。"""
         df = _mk([(10.0 + 0.2 * np.sin(i / 3), 4e5) for i in range(70)])
         s = sl.compute_signals(df, "600000")
-        assert s["qsx_gt_dks"]["state"] == "unavailable"
         assert s["bottom_surge"]["state"] == "unavailable"
         assert s["surge_then_b1"]["state"] == "unavailable"
+        assert s["qsx_resonance_v2"]["state"] == "unavailable"  # DKS 需 ≥114 根
 
     def test_long_history_is_evaluable(self):
         rng = np.random.default_rng(11)
@@ -129,8 +129,19 @@ class TestThreeStates:
             p *= 1.004 * (1 + 0.014 * np.sin(i / 3) + rng.normal(0, 0.006))
             seq.append((p, 4e5))
         s = sl.compute_signals(_mk(seq), "600000")
-        for k in ("qsx_gt_dks", "bottom_surge", "surge_then_b1", "main_rally"):
+        for k in (
+            "bottom_surge",
+            "surge_then_b1",
+            "main_rally",
+            "qsx_resonance_v2",
+        ):
             assert s[k]["state"] in ("hit", "miss"), f"{k} 应可评估"
+
+    def test_qsx_gt_dks_label_removed_and_qg_first(self):
+        """v0.169（owner）：QD（qsx_gt_dks）标注整体撤除；QG 在 SIGNAL_META 首位
+        （dict 序 = 一览行序 = 单元格缩写序）。打分链 zhixing.qsx_gt_dks 数据键不受影响。"""
+        assert "qsx_gt_dks" not in sl.SIGNAL_META
+        assert next(iter(sl.SIGNAL_META)) == "qsx_resonance_v2"
 
 
 class TestReuseAvoidsRecompute:
@@ -141,12 +152,10 @@ class TestReuseAvoidsRecompute:
         s = sl.compute_signals(
             df,
             "600000",
-            zx={"available": True, "qsx_gt_dks": True, "qsx": 11.0, "dks": 10.0},
             weekly_j_low=True,
             weekly_j_available=True,
             distribution={"available": True, "risk_level": "high", "hits": ["x"]},
         )
-        assert s["qsx_gt_dks"]["state"] == "hit" and s["qsx_gt_dks"]["qsx"] == 11.0
         assert s["weekly_j_low"]["state"] == "hit"
         assert s["distribution_risk"]["state"] == "hit"
         assert s["distribution_risk"]["risk_level"] == "high"
@@ -155,12 +164,75 @@ class TestReuseAvoidsRecompute:
         """不注入时自己算（回测/单点调用场景）。"""
         df = _mk([(10.0 + 0.2 * np.sin(i / 3), 4e5) for i in range(150)])
         s = sl.compute_signals(df, "600000")
-        assert s["qsx_gt_dks"]["state"] in ("hit", "miss")
+        assert s["qsx_resonance_v2"]["state"] in ("hit", "miss")
 
     def test_never_raises_on_garbage(self):
         for df in (_mk([(10.0, 4e5)] * 3), _mk([(10.0, 0.0)] * 80)):
             s = sl.compute_signals(df, "600000")
             assert isinstance(s.get("summary"), dict)
+
+
+class TestQsxResonanceV2:
+    """QG 标注（v0.168，R23 共振 v2 检测器下沉 core/factors）。
+
+    合成场景：前 120 根收 10.0 后跳到 11.0 平台（QSX≈11.0、DKS 从 10 缓慢爬升），
+    在 DKS 上方放两次「干净跌线反弹」（真碰线/当日收回/反弹 ≥3%/缩量）。
+    """
+
+    def _scenario(self, n=220):
+        close = np.full(n, 11.0)
+        close[:120] = 10.0
+        df = pd.DataFrame(
+            {
+                "date": pd.bdate_range("2023-01-01", periods=n),
+                "open": close.copy(),
+                "high": close * 1.01,
+                "low": close * 0.99,
+                "close": close,
+                "volume": np.full(n, 1000.0),
+                "amount": np.full(n, 1.1e4),
+            }
+        )
+        from custos.core import indicators as ind
+
+        dks = ind.dks_series(df["close"])
+        for t in (170, 185):
+            line = float(dks.iloc[t])
+            df.loc[t, "low"] = line * 0.995  # 真碰线（low ≤ 线）
+            df.loc[t, "high"] = line * 0.995 * 1.04  # 触线最低点起反弹 ≥3%
+            df.loc[t, "volume"] = 800.0  # 缩量（< 前 5 日均量 1000）
+            # close[t]=11.0 > 两线 ⇒ 当日收回
+        return df, float(dks.iloc[-1])
+
+    def test_known_resonance_hits_qg(self):
+        """两次干净反弹 ⇒ QG hit（且进 summary.abbrs / 计数）。"""
+        df, _ = self._scenario()
+        s = sl.compute_signals(df, "600000")
+        qg = s["qsx_resonance_v2"]
+        assert qg["state"] == "hit"
+        assert qg["excluded"] is False
+        assert qg["events"] == 2
+        assert "QG" in s["summary"]["abbrs"]
+
+    def test_short_history_unavailable_not_miss(self):
+        """60 根（DKS 未成形）⇒ unavailable（不是 miss）——缺数据不得伪装成不符合。"""
+        df, _ = self._scenario()
+        s = sl.compute_signals(df.iloc[:60].reset_index(drop=True), "600000")
+        assert s["qsx_resonance_v2"]["state"] == "unavailable"
+
+    def test_unrecovered_break_excludes(self):
+        """跌破未收复态：成立条件在手但末根排除 ⇒ hit=False 且 detail excluded=True。"""
+        df, dks_last = self._scenario()
+        df.loc[218, "close"] = dks_last * 0.96
+        df.loc[218, "low"] = dks_last * 0.95
+        df.loc[219, "close"] = dks_last * 0.95
+        df.loc[219, "low"] = dks_last * 0.94
+        s = sl.compute_signals(df, "600000")
+        qg = s["qsx_resonance_v2"]
+        assert qg["state"] == "miss"  # hit 口径 = 成立且未排除（R23 C 臂完整口径）
+        assert qg["excluded"] is True
+        assert qg["events"] == 2  # 计数仍在（排除优先，owner 定）
+        assert "QG" not in s["summary"]["abbrs"]
 
 
 class TestEnrichIntegration:
@@ -195,13 +267,13 @@ class TestTableRendering:
                     "600000",
                     "浦发银行",
                     "A",
-                    signals=_sig({"qsx_gt_dks", "rsi_strong", "b2"}),
+                    signals=_sig({"qsx_resonance_v2", "rsi_strong", "b2"}),
                 ),
                 _cand(
                     "300750",
                     "宁德时代",
                     "A",
-                    signals=_sig({"qsx_gt_dks", "rsi_ideal_b1"}),
+                    signals=_sig({"qsx_resonance_v2", "rsi_ideal_b1"}),
                 ),
                 _cand(
                     "002100",
@@ -209,17 +281,20 @@ class TestTableRendering:
                     "B",
                     signals=_sig(
                         {"rsi_bull_div"},
-                        na={"qsx_gt_dks", "bottom_surge", "surge_then_b1"},
+                        na={"qsx_resonance_v2", "bottom_surge", "surge_then_b1"},
                     ),
                 ),
                 _cand(
                     "000555",
                     "风险票",
                     "B",
-                    signals=_sig({"qsx_gt_dks"}, neg={"distribution_risk"}),
+                    signals=_sig({"qsx_resonance_v2"}, neg={"distribution_risk"}),
                 ),
             ],
         }
+
+    def _labels_section(self, txt: str) -> str:
+        return txt.split("## 🏷️ 信号标注一览")[1].split("\n## ")[0]
 
     def test_lists_actual_codes_not_just_counts(self):
         txt = ct.render_table(
@@ -233,35 +308,65 @@ class TestTableRendering:
         # 必须出现具体代码+名称，而不是只有数量
         assert "600000 浦发银行" in txt and "300750 宁德时代" in txt
 
-    def test_negative_signal_is_marked(self):
+    def test_negative_signal_row_removed_but_cell_mark_kept(self):
+        """v0.169（owner）：⚠出货 行不列入一览，但主表单元格 ⚠️ 负向标记保留。"""
         txt = ct.render_table(self._pool(), "2026-08-04")
-        assert "⚠️ **主力出货形态**" in txt
+        sec = self._labels_section(txt)
+        assert "主力出货形态" not in sec, "⚠出货 一览行已撤"
+        assert "⚠️⚠出货" in txt, "主表单元格负向标记必须保留"
         assert "000555 风险票" in txt
 
-    def test_denominator_is_evaluable_count(self):
-        txt = ct.render_table(self._pool(), "2026-08-04")
-        # qsx_gt_dks: 3 只命中 / 3 只可评估（新票 unavailable 被排除）
-        # v0.65：列表改三列表后，命中/可评在表格单元格里（`QD` | 3/3 |）
-        assert "`QD` | 3/3 |" in txt
+    def test_denominator_is_evaluable_count_and_qg_first(self):
+        """QG 行是一览首个数据行（META 首位），命中/可评 = 3/3（新票 unavailable 排除）。"""
+        sec = self._labels_section(
+            ct.render_table(
+                self._pool(),
+                "2026-08-04",
+                gate={
+                    "market_quality": {
+                        "status": "pass",
+                        "amv_ok": True,
+                        "limitations": [],
+                    }
+                },
+            )
+        )
+        rows = [ln for ln in sec.split("\n") if ln.startswith("| ")]
+        # rows[0]=表头 rows[1]=分隔行之后首个数据行
+        data_rows = [ln for ln in rows if "---" not in ln][1:]
+        assert data_rows[0].startswith("| **QSX共振v2(60根≥2次干净反弹)** `QG` | 3/3 |")
+        assert "`QD`" not in sec, "QD 行已撤"
 
-    def test_carries_terminal_review_disclaimer(self):
-        """必须写明这些因子已被跨窗终审否决——否则读者会把标注当交易依据。
+    def test_no_explanation_lines(self):
+        """v0.169（owner）：一览撤三条解释文字——数据不足补注、分母/缩写说明行、终审否决行。"""
+        sec = self._labels_section(ct.render_table(self._pool(), "2026-08-04"))
+        assert "数据不足" not in sec and "不等于不符合条件" not in sec
+        assert "可评估数" not in sec and "恒重合" not in sec
+        assert "终审" not in sec and "观察记录" not in sec
+        assert "不得据命中数决定仓位" not in sec
 
-        终审(research/R6_hypothesis_H1_dual_axis.md + R7)显示它们的 edge 只存在于 2025-2026
-        单一 regime,所以"标注多⇒确信度高"这个推论已被证伪,不得据命中数定仓位。
-        """
-        txt = ct.render_table(self._pool(), "2026-08-04")
-        assert "终审" in txt and "观察记录" in txt
-        assert "不得据命中数决定仓位" in txt
-
-    def test_unavailable_explained(self):
-        txt = ct.render_table(self._pool(), "2026-08-04")
-        assert "数据不足" in txt and "不等于不符合条件" in txt
+    def test_hits_listed_in_full_not_truncated(self):
+        """v0.169（owner）：命中名单全列不截断——>12 只时全部列出，无「等 N 只」。"""
+        pool = self._pool()
+        for i in range(14):
+            pool["candidates"].append(
+                _cand(
+                    f"60{i + 100:04d}",
+                    f"票{i}",
+                    "B",
+                    signals=_sig({"qsx_resonance_v2"}),
+                )
+            )
+        sec = self._labels_section(ct.render_table(pool, "2026-08-04"))
+        qg_row = next(ln for ln in sec.split("\n") if "`QG`" in ln)
+        assert "`QG` | 17/17 |" in qg_row
+        assert "600113" in qg_row, "第 14 只也要列出（不再截断前 12）"
+        assert "等 17 只" not in qg_row and "前12" not in sec
 
     def test_main_table_has_label_column(self):
         txt = ct.render_table(self._pool(), "2026-08-04")
         assert "| 4面共振 | 平台回踩 | 标注 | 分层 |" in txt
-        assert "3/11 QD·RS·B2" in txt or "3/11" in txt
+        assert "3/11 QG·RS·B2" in txt
 
     def test_no_signals_section_when_absent(self):
         """候选没有 signals 字段（旧产物）时不渲染该区块，且不报错。"""
@@ -312,9 +417,9 @@ class TestLabelsNeverAlterSelection:
 
     VARIANTS = [
         _sig(),  # 全 miss
-        _sig({"qsx_gt_dks", "rsi_strong", "b2", "surge_then_b1", "main_rally"}),
+        _sig({"qsx_resonance_v2", "rsi_strong", "b2", "surge_then_b1", "main_rally"}),
         _sig(na=set(sl.SIGNAL_META)),  # 全 unavailable
-        _sig({"qsx_gt_dks"}, neg={"distribution_risk"}),  # 含负向
+        _sig({"qsx_resonance_v2"}, neg={"distribution_risk"}),  # 含负向
     ]
 
     @pytest.mark.parametrize("signals", VARIANTS)
