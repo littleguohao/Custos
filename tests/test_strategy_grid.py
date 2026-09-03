@@ -523,3 +523,66 @@ class TestBudgetAndTwoStage:
         }
         assert {r["exit"] for r in rows if r["scorer"] == "kdj_j"} == {"e0"}
         assert rows[0]["scorer"] == "b1_dual"  # 合成数据里 b1_dual 期望R 更高
+
+
+class TestParallelJobs:
+    """-j/--jobs 格子级并行：汇总结果必须与串行逐格跑完全一致（确定性）。"""
+
+    def test_jobs2_same_payload_as_serial(self, tmp_path, fake_run):
+        """同网格跑两遍（串行 / -j 2，各自独立 out-dir）⇒ ranked 结果逐键相同。"""
+        out_s, out_p = tmp_path / "s", tmp_path / "p"
+        assert sg.main(_argv(out_s, "--top-k", "99")) == 0
+        assert sg.main(_argv(out_p, "--top-k", "99", "-j", "2")) == 0
+        p_s = json.loads((out_s / "_ranked__t1.json").read_text("utf-8"))
+        p_p = json.loads((out_p / "_ranked__t1.json").read_text("utf-8"))
+        assert p_s == p_p
+        assert p_p["budget"]["ran"] == 12  # 12 格全跑，并行不影响预算记账
+        assert len(fake_run) == 2 * 12
+
+    def test_jobs2_budget_allocation_in_order(self, tmp_path, fake_run):
+        """预算 2 + -j 2：截断的必须仍是**尾部**格子（预算按原顺序分配，
+        不许按并行完成顺序谁快谁占预算）。"""
+        assert (
+            sg.main(_argv(tmp_path, "--top-k", "99", "--max-runs", "2", "-j", "2")) == 0
+        )
+        payload = _payload(tmp_path)
+        assert payload["budget"]["ran"] == 2
+        assert payload["budget"]["truncated"] == 10
+        ran = {(r["scorer"], r["gate"], r["exit"]) for r in payload["results"]}
+        grid = sg.expand_grid(
+            ["b1_dual", "kdj_j"],
+            ["j_low", "j_macd_turn"],
+            [
+                {"name": "e0", "params": {}},
+                {"name": "e1", "params": {"stop_mode": "pct", "stop_pct": 5}},
+                {
+                    "name": "e2",
+                    "params": {"stop_mode": "pct", "stop_pct": 5, "trail_pct": 0.08},
+                },
+            ],
+        )
+        expect_ran = {(c["scorer"], c["gate"], c["exit"]) for c in grid[:2]}
+        expect_trunc = [f"{c['scorer']}/{c['gate']}/{c['exit']}" for c in grid[2:]]
+        assert ran == expect_ran
+        assert payload["truncated"] == expect_trunc
+
+    def test_jobs2_failure_accounting(self, tmp_path, monkeypatch):
+        """并行下 rc=0 但输出残缺 ⇒ 照常计 failed、删毒文件、不留全 None 行。"""
+        fr = _FakeRun()
+
+        def _run(cmd, **kw):
+            cmd = list(cmd)
+            if "--dump-codes" in cmd:
+                return fr(cmd, **kw)
+            fr.calls.append(cmd)
+            out = cmd[cmd.index("--out") + 1]
+            with open(out, "w", encoding="utf-8") as f:
+                json.dump({"trade_summary": {}, "trades": []}, f)
+            return _R()
+
+        monkeypatch.setattr(sg.subprocess, "run", _run)
+        assert sg.main(_argv(tmp_path, "--top-k", "99", "-j", "3")) == 0
+        payload = _payload(tmp_path)
+        assert payload["results"] == []
+        assert payload["budget"]["failed"] == 12
+        assert sorted(p.name for p in tmp_path.glob("*.json")) == ["_ranked__t1.json"]

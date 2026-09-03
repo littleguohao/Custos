@@ -176,6 +176,7 @@
 | 2026-09-03 | v0.170 | R25 周线 QSX>DKS ∧ 日周 J 双低（预注册→四轮全量→否决）：新 gate `weekly_qsx_gt_dks`/`j_low_weekly_qsx_weekly`（保留复现）；③w 对② H20 仅 +0.7pp（判据 >3pp）且 H60 −1.6pp 显著变差；跨区间 H20 42.3% 输基准（与 R6 ③ 同死因）；口径坑落档：--count 500≈107 根周 K<114，须 --count 1500 | 周线多头结构过滤与 R23 过滤① 同形态——只删样本不选好票 | 四轮产物 `backtest_r25_*`；钉测 +4；R25 按结构钉测落档 |
 | 2026-09-03 | v0.171 | R26 QG 叠加周线 B1（预注册→五轮全量→否决）：新 gate `qg`/`weekly_j_low_qg`（保留复现）；组合对母门槛 H20 −2.3pp/−2.6pp 两 seed 同向为负（判据 +3pp）、H60 −4.5pp；召回 1.4% 触发样本不足条款；QG 单独臂计数无筛选力第三次复现（R23/R25 同形态） | 共振/结构类过滤在日周 J 双低基底上均无正向边际——三连证伪，此方向收口 | 五轮产物 `backtest_r26_*`；钉测 TestQgGate +4；R26 按结构钉测落档 |
 | 2026-09-03 | v0.172 | 1800 标注层撤 W（周线B1/周J<13）：SIGNAL_META 删 `weekly_j_low`、`_signal_weekly_j_low` 与 compute_signals 两个注入参数删除（enrich 调用点同步）；候选顶层 `weekly_*` 数据键不动（scorer +5 腿与 R 系列研究仍消费） | owner 定（R26 否决后标注层不再保留 W）；一览/单元格缩写随 META 序自动更新 | 钉测：`weekly_j_low` 不在 META/不在 compute_signals 输出；分母断言 11→10 |
+| 2026-09-03 | v0.173 | 回测提速批（纯性能，判定语义逐位不变）：① 7 个入场 gate 的 O(n²) 残留纳入 `_precompute_gate_series`——日/周 QSX/DKS、周 J 逐股算一次点查询（含进行中部分周，逐位复刻 pandas ewm/roll_mean），复合 gate 不再丢弃 precomputed；② `strategy_grid` 加 `-j/--jobs` 并行（复用 m2 `_cap_jobs`+ThreadPoolExecutor，结果与串行逐字节一致，默认 -j 1 不变） | 瓶颈实测 99% 在逐 bar 评估（加载仅 1%）；weekly_qsx_gt_dks（R25 在用）实测 41x、j_low_weekly_qsx_weekly 62x、qsx_gt_dks 16x | 等价性钉测 170 例逐 bar 断言预计算=慢路径；全量 4724 passed；pandas 升级改写 roll_mean/ewm 时钉测会报警 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

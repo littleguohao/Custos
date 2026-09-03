@@ -57,7 +57,7 @@ def _always_buy(df: pd.DataFrame, code: str) -> dict:
     return {"score": 50.0, "suggestion": "可买", "aux": {}, "components": {}}
 
 
-# 消费预计算序列的 gate（KDJ/MACD/ADX/RSI 系及其组合）；其余为黑盒 detector gate。
+# 消费预计算序列的 gate（KDJ/MACD/ADX/RSI/QSX-DKS 系及其组合）；其余为黑盒 detector gate。
 _FAST_GATES = {
     "j_low",
     "reversal_k",
@@ -66,6 +66,7 @@ _FAST_GATES = {
     "j_low_adx25",
     "j_low_adx60",
     "j_low_qsx_gt_dks",
+    "qsx_gt_dks",
     "rsi_strong",
     "rsi_bull_div",
     "j_low_rsi_strong",
@@ -124,7 +125,7 @@ def test_evaluate_trades_bitwise_equal_with_precompute(monkeypatch, gate_name, v
     kw = {"min_bars": 30, **variant}
     t_on = bt.evaluate_trades(bars, scorer=_always_buy, entry_gate=gate, **kw)
     # 关掉预计算 = 旧的逐切片路径（gate 收到 precomputed=None 时现算）
-    monkeypatch.setattr(bt, "_precompute_gate_series", lambda df: None)
+    monkeypatch.setattr(bt, "_precompute_gate_series", lambda df, kdj=None: None)
     t_off = bt.evaluate_trades(bars, scorer=_always_buy, entry_gate=gate, **kw)
     assert t_on == t_off, f"{gate_name} {variant} 逐笔输出不一致"
 
@@ -242,3 +243,110 @@ def test_rsi_state_dual_form_not_vacuous():
     assert div_out == rsi_divergence(v) and div_out.get("available"), (
         "V 形合成数据上 divergence 两路不一致或不可用"
     )
+
+
+# ---- QSX/DKS 与周线 gate 的预计算旁路（2026-09-03）----
+# `_precompute_gate_series` 新增 qsx/dks 日线全序列与 weekly_j/weekly_qsx/weekly_dks/
+# weekly_bars（「截至当日前缀 resample("W-FRI")」口径，含进行中部分周，见
+# `_weekly_gate_arrays` docstring）。这里钉住这批 gate 的快/慢两路逐 bar 一致。
+# ⚠️ 合成数据必须带 ``amount`` 列 —— indicators.resample 的聚合字典引用它，
+#    缺列时慢路径 resample 直接 KeyError（gate 恒 False），等价性形同空转。
+
+
+def _bars_amount(n: int = 600, seed: int = 7) -> pd.DataFrame:
+    """带 amount 列的随机游走（600 根 ≈ 120 周，越过周 DKS 的 ≥114 周守卫）。"""
+    df = _bars(n=n, seed=seed)
+    df["amount"] = df["volume"] * df["close"]
+    return df
+
+
+def _shaped_bars_amount(kind: str) -> pd.DataFrame:
+    """三种形态：上行趋势（周 QSX>DKS 真命中）/ 下跌（日周 J 双低真命中）/
+    趋势后急回（复合 gate 真命中）。"""
+    if kind == "uptrend":
+        rng = np.random.default_rng(5)
+        close = 10 + np.cumsum(np.abs(rng.normal(0.08, 0.1, 800)))
+    elif kind == "decline":
+        rng = np.random.default_rng(3)
+        close = np.maximum(30 - np.cumsum(np.abs(rng.normal(0.06, 0.05, 620))), 1.0)
+    else:  # pullback
+        rng = np.random.default_rng(5)
+        up = 10 + np.cumsum(np.abs(rng.normal(0.08, 0.08, 700)))
+        down = up[-1] - np.cumsum(np.abs(rng.normal(0.12, 0.1, 40)))
+        close = np.maximum(np.concatenate([up, down]), 1.0)
+    n = len(close)
+    high = close + np.abs(rng.normal(0, 0.08, n))
+    low = close - np.abs(rng.normal(0, 0.08, n))
+    open_ = low + (high - low) * rng.random(n)
+    vol = np.abs(rng.normal(1e6, 2e5, n))
+    return pd.DataFrame(
+        {
+            "date": pd.date_range("2024-01-01", periods=n, freq="B").astype(str),
+            "open": open_,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": vol,
+            "amount": vol * close,
+        }
+    )
+
+
+_QSX_WEEKLY_GATES = [
+    "qsx_gt_dks",
+    "j_low_qsx_gt_dks",
+    "weekly_j_low",
+    "j_low_weekly_resonance",
+    "weekly_qsx_gt_dks",
+    "j_low_qsx_weekly",
+    "j_low_weekly_qsx_weekly",
+]
+
+
+@pytest.mark.parametrize("gate_name", _QSX_WEEKLY_GATES)
+@pytest.mark.parametrize("kind", ["random_walk", "uptrend", "decline", "pullback"])
+def test_qsx_weekly_gate_precomputed_matches_slice_per_bar(gate_name, kind):
+    """③ QSX/DKS 与周线 gate 逐 bar 等价：gate(slice) == gate(slice, precomputed)。"""
+    df = _bars_amount() if kind == "random_walk" else _shaped_bars_amount(kind)
+    pre = bt._precompute_gate_series(df)
+    assert pre is not None and "weekly_j" in pre and "qsx" in pre, (
+        "带 amount 的合成数据上预计算应含周线与 QSX/DKS 键"
+    )
+    gate = bt.ENTRY_GATES[gate_name]
+    n = len(df)
+    for i in list(range(0, n, 3)) + [n - 2, n - 1]:
+        sl = df.iloc[: i + 1]
+        assert gate(sl) == gate(sl, pre), f"{gate_name} {kind} 在 i={i} 两路不一致"
+
+
+def test_qsx_weekly_gate_precompute_not_vacuous():
+    """防"空==空"假绿：每个 gate 至少在一个形态上真的判出 True（两路同时）。"""
+    expectations = {
+        "qsx_gt_dks": "random_walk",
+        "j_low_qsx_gt_dks": "random_walk",
+        "weekly_j_low": "decline",
+        "j_low_weekly_resonance": "decline",
+        "weekly_qsx_gt_dks": "uptrend",
+        "j_low_qsx_weekly": "pullback",
+        "j_low_weekly_qsx_weekly": "pullback",
+    }
+    for gate_name, kind in expectations.items():
+        df = _bars_amount() if kind == "random_walk" else _shaped_bars_amount(kind)
+        pre = bt._precompute_gate_series(df)
+        gate = bt.ENTRY_GATES[gate_name]
+        hits = sum(gate(df.iloc[: i + 1], pre) for i in range(0, len(df), 3))
+        assert hits > 0, f"{gate_name} 在 {kind} 形态上一次都没判出，等价测试形同空转"
+
+
+def test_prepare_stock_shared_kdj_bitwise_equal(monkeypatch):
+    """④ gate_pre 与 scorer_pre(_sc_kdj_j) 共享 KDJ：逐笔输出与旧路径完全一致。"""
+    bars = {"600000": _bars(seed=7), "000001": _bars(seed=11)}
+    kw = {"min_bars": 30, "collect_all": True}
+    sc = bt.SCORERS["kdj_j"]
+    gate = bt.ENTRY_GATES["j_low"]
+    t_on = bt.evaluate_trades(bars, scorer=sc, entry_gate=gate, **kw)
+    assert t_on, "合成数据上一笔都没出，等价测试形同空转"
+    monkeypatch.setattr(bt, "_precompute_gate_series", lambda df, kdj=None: None)
+    monkeypatch.setattr(bt, "_precompute_kdj_j_series", lambda df, kdj=None: None)
+    t_off = bt.evaluate_trades(bars, scorer=sc, entry_gate=gate, **kw)
+    assert t_on == t_off, "共享 KDJ 后逐笔输出与旧路径不一致"

@@ -56,8 +56,11 @@ from custos.core.indicators import (
     atr_series as _atr_series,
     kdj_series as _kdj_series,
     qsx_series as _qsx_series,
+    dks_series as _dks_series,
+    ema as _ema,
     pct_change,
     J_N as _KDJ_N,
+    DKS_MA_WINDOWS as _DKS_WINS,
 )  # noqa: E402
 from custos.core.indicators import dmi_arrays  # noqa: E402  DMI/ADX 唯一实现
 from custos.core.indicators import amplitude_pct as amplitude_pct_of  # noqa: E402  振幅唯一实现
@@ -112,7 +115,208 @@ GATE_WINDOW_SAFE = 260
 _KDJ_MIN_BARS = _KDJ_N + 3  # 与 indicators.kdj 的 `len(df) < n + 3` 守卫同口径
 
 
-def _precompute_gate_series(df: pd.DataFrame) -> Optional[dict[str, Any]]:
+def _roll_mean_states(x: np.ndarray, k: int) -> tuple[np.ndarray, ...]:
+    """逐位复刻 pandas ``rolling(k).mean()``（cython ``roll_mean``）的滑动状态。
+
+    算法与 ``pandas/_libs/window/aggregations.pyx`` 一致：加/减各带一份 Kahan 补偿，
+    滑动时**先删后加**，``calc_mean`` 有「全同值 ⇒ 直接取末值」捷径（GH#42064）。
+    返回每周索引处理完后的 ``(sum_x, c_add, c_rem, ncs, prev, neg_ct)`` 六个数组——
+    调用方注入「部分周」收盘再各走一步，即得与前缀 rolling 逐位相同的均值。
+    仅用于 ``_weekly_gate_arrays``（周收非 NaN，NaN 分支不复刻）。
+    """
+    W = len(x)
+    sum_a = np.empty(W)
+    c_add_a = np.empty(W)
+    c_rem_a = np.empty(W)
+    ncs_a = np.empty(W, dtype=np.int64)
+    prev_a = np.empty(W)
+    neg_a = np.empty(W, dtype=np.int64)
+    sum_x = c_add = c_rem = 0.0
+    ncs = neg_ct = 0
+    prev = x[0] if W else 0.0
+    for t in range(W):
+        if t >= k:  # 先删：移出窗口的 x[t-k]
+            v = x[t - k]
+            y = -v - c_rem
+            tt = sum_x + y
+            c_rem = (tt - sum_x) - y
+            sum_x = tt
+            if np.signbit(v):
+                neg_ct -= 1
+        v = x[t]  # 后加：进入窗口的 x[t]
+        y = v - c_add
+        tt = sum_x + y
+        c_add = (tt - sum_x) - y
+        sum_x = tt
+        if np.signbit(v):
+            neg_ct += 1
+        if v == prev:
+            ncs += 1
+        else:
+            ncs = 1
+        prev = v
+        sum_a[t], c_add_a[t], c_rem_a[t] = sum_x, c_add, c_rem
+        ncs_a[t], prev_a[t], neg_a[t] = ncs, prev, neg_ct
+    return sum_a, c_add_a, c_rem_a, ncs_a, prev_a, neg_a
+
+
+def _weekly_gate_arrays(df: pd.DataFrame) -> Optional[dict[str, Any]]:
+    """逐日 bar 的「前缀 ``resample("W-FRI")``」周线指标（_precompute_gate_series 用）。
+
+    口径与慢路径（每 bar 对 ``df.iloc[:i+1]`` resample 后取周线指标末点）**逐位一致**：
+    全量 resample 一次得完整周序列；日 bar i 落在周 w 时，前缀周框 = 完整周 0..w-1
+    （逐位相同的递归状态）+「周 w 截至当日」的部分周（high=周内累计 max、low=累计
+    min、close=当日收盘），再对递归指标各推一步：
+      - 周 J：RSV（rolling(9) 高低含部分周，<9 周/零振幅 ⇒ fill 50）后按
+        ``ewm(com=2, adjust=False)`` 的 ``y=(1-α)y_prev+αx`` 从周 w-1 的 K/D 态推一步；
+      - 周 QSX：两层 ``ewm(span=10, adjust=False)`` 同法（α=2/11）；
+      - 周 DKS：四条 rolling MA 按 ``_roll_mean_states`` 逐位复刻加一步部分周。
+    ``weekly_bars`` = 前缀周框根数（w+1），供 gate 复刻 kdj 的 ≥12 根 /
+    zhixing_state 的 ≥114 根守卫。
+
+    数据含 NaN（停牌段会让 resample 的 dropna 行数口径与前缀错位）/ 缺列 /
+    resample 异常 ⇒ None（调用方略去周线键，gate 回退慢路径，行为逐位同旧版）。
+    """
+    if _resample is None:
+        return None
+    try:
+        d = df
+        if not pd.api.types.is_datetime64_any_dtype(d["date"]):
+            d = df.copy()
+            d["date"] = pd.to_datetime(d["date"])
+        n = len(d)
+        high = d["high"].astype(float).to_numpy()
+        low = d["low"].astype(float).to_numpy()
+        close = d["close"].astype(float).to_numpy()
+        op = d["open"].astype(float).to_numpy()
+        if not (
+            np.isfinite(high).all()
+            and np.isfinite(low).all()
+            and np.isfinite(close).all()
+            and np.isfinite(op).all()
+        ):
+            return None
+        weekly = _resample(d, "W-FRI")
+        if weekly.empty:
+            return None
+        # 日 bar → 周序号：W-FRI 的 bin 标签 = 当周的周五（周五当日归自身）
+        wd = d["date"].dt.weekday.to_numpy()
+        labels = (d["date"] + pd.to_timedelta((4 - wd) % 7, unit="D")).to_numpy()
+        wpos = {lab: k for k, lab in enumerate(weekly["date"].to_numpy())}
+        day_w = np.array([wpos[lab] for lab in labels], dtype=np.int64)
+        # 部分周聚合：周内累计 max/min（close 就是当日收盘，open/volume 指标用不到）
+        part_hi = high.copy()
+        part_lo = low.copy()
+        for t in range(1, n):
+            if day_w[t] == day_w[t - 1]:
+                if part_hi[t] < part_hi[t - 1]:
+                    part_hi[t] = part_hi[t - 1]
+                if part_lo[t] > part_lo[t - 1]:
+                    part_lo[t] = part_lo[t - 1]
+        wc = weekly["close"].astype(float)
+        whigh = weekly["high"].astype(float).to_numpy()
+        wlow = weekly["low"].astype(float).to_numpy()
+        wclose = wc.to_numpy()
+        # 完整周序列上的递归状态：周 w-1 处的值与前缀周框前 w 步是同一串浮点运算
+        k_arr, d_arr, _ = (s.to_numpy() for s in _kdj_series(weekly, fill_na=50.0))
+        e1 = _ema(wc, 10)
+        e1_arr = e1.to_numpy()
+        q_arr = _ema(e1, 10).to_numpy()
+        dks_states = {k: _roll_mean_states(wclose, k) for k in _DKS_WINS}
+        a_kdj = 1.0 / 3.0  # kdj_series 的 ewm(com=m1-1=2) → α=1/(com+1)
+        f_kdj = 1.0 - a_kdj
+        a_qsx = 2.0 / 11.0  # ema(span=10) → α=2/(span+1)
+        f_qsx = 1.0 - a_qsx
+        out_j = np.full(n, np.nan)
+        out_qsx = np.full(n, np.nan)
+        out_dks = np.full(n, np.nan)
+        for t in range(n):
+            w = int(day_w[t])
+            cp = close[t]
+            # ---- 周 J（kdj_series 口径：RSV→K→D→J，fill_na=50）----
+            if w + 1 < _KDJ_N:
+                rsv = 50.0
+            else:
+                hh = float(np.max(whigh[w - _KDJ_N + 1 : w]))
+                if part_hi[t] > hh:
+                    hh = float(part_hi[t])
+                ll = float(np.min(wlow[w - _KDJ_N + 1 : w]))
+                if part_lo[t] < ll:
+                    ll = float(part_lo[t])
+                rng = hh - ll
+                if rng == 0:
+                    rsv = 50.0
+                else:
+                    rsv = (cp - ll) / rng * 100
+                    if not np.isfinite(rsv):
+                        rsv = 50.0
+            if w == 0:
+                kk = dd = rsv  # ewm 首值 = 首个输入
+            else:
+                kk = f_kdj * k_arr[w - 1] + a_kdj * rsv
+                dd = f_kdj * d_arr[w - 1] + a_kdj * kk
+            out_j[t] = 3 * kk - 2 * dd
+            # ---- 周 QSX（ema(ema(c,10),10)，qsx_series 同调用链）----
+            if w == 0:
+                qi = cp
+            else:
+                e1i = f_qsx * e1_arr[w - 1] + a_qsx * cp
+                qi = f_qsx * q_arr[w - 1] + a_qsx * e1i
+            out_qsx[t] = qi
+            # ---- 周 DKS（四条 rolling MA 均值，逐位复刻 roll_mean）----
+            mas: list[float] = []
+            for win in _DKS_WINS:
+                if w + 1 < win:  # rolling 窗口不足 ⇒ NaN（dks_series 同口径）
+                    mas.append(np.nan)
+                    continue
+                sum_x, c_add, c_rem, ncs, prev, neg_ct = (
+                    a[w - 1] for a in dks_states[win]
+                )
+                if w >= win:  # 先删后加（与 cython 滑动分支同序）
+                    v = wclose[w - win]
+                    y = -v - c_rem
+                    tt = sum_x + y
+                    c_rem = (tt - sum_x) - y
+                    sum_x = tt
+                    if np.signbit(v):
+                        neg_ct -= 1
+                y = cp - c_add
+                tt = sum_x + y
+                c_add = (tt - sum_x) - y
+                sum_x = tt
+                if np.signbit(cp):
+                    neg_ct += 1
+                if cp == prev:
+                    ncs += 1
+                else:
+                    ncs = 1
+                prev = cp
+                r = sum_x / win
+                if ncs >= win:  # GH#42064 同值捷径
+                    r = prev
+                elif neg_ct == 0 and r < 0:
+                    r = 0.0
+                elif neg_ct == win and r > 0:
+                    r = 0.0
+                mas.append(r)
+            out_dks[t] = (
+                np.nan
+                if any(np.isnan(mas))
+                else (mas[0] + mas[1] + mas[2] + mas[3]) / len(_DKS_WINS)
+            )
+        return {
+            "weekly_j": out_j,
+            "weekly_qsx": out_qsx,
+            "weekly_dks": out_dks,
+            "weekly_bars": day_w + 1,
+        }
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _precompute_gate_series(
+    df: pd.DataFrame, kdj: Optional[tuple] = None
+) -> Optional[dict[str, Any]]:
     """逐股**一次性**预计算 entry_gate 用的递归指标序列（evaluate_trades 的 O(n²)→O(n) 优化）。
 
     等价性依据：KDJ（RSV→EWM→EWM，fill_na=50）、MACD（ewm adjust=False）、
@@ -128,21 +332,36 @@ def _precompute_gate_series(df: pd.DataFrame) -> Optional[dict[str, Any]]:
     adx（⚠️ dmi_arrays 的数组比 df **短 1**——TR 用 [1:]——bar i 在 adx[i-1]）；
     rsi14（等长 pd.Series，Wilder RSI 与 indicators.rsi 同口径——ewm adjust=False
     从第 0 根递归，前缀末点与全序列同位点逐位相同；导入失败时缺该键，gate 走旧路径）。
+    qsx/dks（等长 np 数组，QSX=EMA(EMA(C,10),10)、DKS=(MA14+MA28+MA57+MA114)/4，
+    同为第 0 根起算的 rolling/EMA 序列）；weekly_j/weekly_qsx/weekly_dks/weekly_bars
+    （等长 np 数组，「截至当日前缀 resample("W-FRI")」口径，见 _weekly_gate_arrays；
+    算不出时缺这四个键，周线 gate 走旧路径）。
+
+    ``kdj``：可选的 ``(K, D, J)`` 三元组（kdj_series fill_na=50.0 口径）——
+    _prepare_stock 在 gate_pre 与 scorer_pre 都需要 KDJ 时算一次传入，避免重复。
     """
     if _kdj is None:
         return None
     try:
-        j = _kdj_series(df, fill_na=50.0)[2].to_numpy()  # 与 indicators.kdj 同口径
+        j = (
+            kdj[2] if kdj is not None else _kdj_series(df, fill_na=50.0)[2]
+        ).to_numpy()  # 与 indicators.kdj 同口径
         dif, dea, _hist_x2 = _macd_series(df["close"])
         _, _, adx = dmi_arrays(df["high"], df["low"], df["close"])
+        close = df["close"]
         out: dict[str, Any] = {
             "kdj_j": j,
             "macd_dif": dif.to_numpy(),
             "macd_dea": dea.to_numpy(),
             "adx": adx,
+            "qsx": _qsx_series(close).to_numpy(),
+            "dks": _dks_series(close).to_numpy(),
         }
         if _rsi is not None:
-            out["rsi14"] = _rsi(df["close"], RSI_MID)
+            out["rsi14"] = _rsi(close, RSI_MID)
+        wk = _weekly_gate_arrays(df)  # 失败退 None：缺周线键，周线 gate 走旧路径
+        if wk is not None:
+            out.update(wk)
         return out
     except Exception:  # noqa: BLE001
         return None
@@ -543,7 +762,9 @@ def _precompute_b1_pullback_series(df: pd.DataFrame) -> Optional[dict[str, Any]]
         return None
 
 
-def _precompute_kdj_j_series(df: pd.DataFrame) -> Optional[dict[str, Any]]:
+def _precompute_kdj_j_series(
+    df: pd.DataFrame, kdj: Optional[tuple] = None
+) -> Optional[dict[str, Any]]:
     """逐股**一次性**预计算 _sc_kdj_j 用的 KDJ 全序列（evaluate_trades 的 O(n²)→O(n) 优化）。
 
     等价性依据与 `_precompute_gate_series` 相同：KDJ（RSV→EWM→EWM，fill_na=50）
@@ -556,9 +777,12 @@ def _precompute_kdj_j_series(df: pd.DataFrame) -> Optional[dict[str, Any]]:
     返回 None（异常）时 scorer 走原逐切片路径，行为与旧版逐位一致。
 
     键：kdj_k/kdj_d/kdj_j（与 df 等长的 np 数组，scorer 按 ``len(slice)-1`` 取点）。
+
+    ``kdj``：可选的 ``(K, D, J)`` 三元组（同口径）——_prepare_stock 在 gate_pre
+    也需要 KDJ 时算一次传入，避免逐股重复算两遍。
     """
     try:
-        k, d, j = _kdj_series(df, fill_na=50.0)
+        k, d, j = kdj if kdj is not None else _kdj_series(df, fill_na=50.0)
         return {
             "kdj_k": k.to_numpy(),
             "kdj_d": d.to_numpy(),
@@ -631,6 +855,8 @@ compute_b1_dual: Callable[..., Any] | None  # 导入失败退 None（缺依赖�
 
 try:
     from custos.core.factors.b1_dual_factor import (
+        DUAL_MIN_BARS as _DUAL_MIN_BARS,
+        J_LOW_THRESHOLD as _B1_J_LOW,  # detect_weekly_b1_resonance 的默认阈值（同对象）
         compute_b1_dual,
         compute_long_structure,
         detect_breakout_pullback_b1,
@@ -708,6 +934,15 @@ def weekly_j_low_gate(
     if compute_b1_dual is None:
         return False
     try:
+        if precomputed is not None and precomputed.get("weekly_j") is not None:
+            i = len(df_slice) - 1
+            # detect_weekly_b1_resonance 的两段守卫：日 kdj(≥12 根) → 周 kdj(≥12 根)
+            if i + 1 < _KDJ_MIN_BARS or precomputed["weekly_bars"][i] < _KDJ_MIN_BARS:
+                return False
+            wj = round(
+                float(precomputed["weekly_j"][i]), 4
+            )  # 同 indicators.kdj 落盘取整
+            return bool(wj == wj and wj < _B1_J_LOW)
         r = detect_weekly_b1_resonance(df_slice)
         return bool(r.get("available") and r.get("weekly_j_low"))
     except Exception:  # noqa: BLE001
@@ -721,6 +956,13 @@ def j_low_weekly_resonance_gate(
     if compute_b1_dual is None:
         return False
     try:
+        if precomputed is not None and precomputed.get("weekly_j") is not None:
+            i = len(df_slice) - 1
+            if i + 1 < _KDJ_MIN_BARS or precomputed["weekly_bars"][i] < _KDJ_MIN_BARS:
+                return False
+            dj = round(float(precomputed["kdj_j"][i]), 4)
+            wj = round(float(precomputed["weekly_j"][i]), 4)
+            return bool(dj == dj and dj < _B1_J_LOW and wj == wj and wj < _B1_J_LOW)
         return bool(detect_weekly_b1_resonance(df_slice).get("hit"))
     except Exception:  # noqa: BLE001
         return False
@@ -730,7 +972,10 @@ def j_low_qsx_weekly_gate(
     df_slice: pd.DataFrame, precomputed: Optional[dict] = None
 ) -> bool:
     """good_b1 全条件组合:J<13 + QSX>DKS + 周线 J<13。最严一档,用于看召回代价。"""
-    return bool(j_low_weekly_resonance_gate(df_slice) and qsx_gt_dks_gate(df_slice))
+    return bool(
+        j_low_weekly_resonance_gate(df_slice, precomputed)
+        and qsx_gt_dks_gate(df_slice, precomputed)
+    )
 
 
 def weekly_qsx_gt_dks_gate(
@@ -744,6 +989,13 @@ def weekly_qsx_gt_dks_gate(
     if _resample is None or _zhixing_state is None:
         return False
     try:
+        if precomputed is not None and precomputed.get("weekly_qsx") is not None:
+            i = len(df_slice) - 1
+            if precomputed["weekly_bars"][i] < 114:  # zhixing_state 的 len<m4 守卫
+                return False
+            q = float(precomputed["weekly_qsx"][i])
+            wk_d = float(precomputed["weekly_dks"][i])
+            return bool(q == q and wk_d == wk_d and q > wk_d)
         d = df_slice
         if not pd.api.types.is_datetime64_any_dtype(d["date"]):
             d = d.copy()
@@ -759,7 +1011,8 @@ def j_low_weekly_qsx_weekly_gate(
 ) -> bool:
     """日周 J 双低共振 ∧ 周线 QSX>DKS(R25):更大周期回调到位且周线结构仍多头。"""
     return bool(
-        j_low_weekly_resonance_gate(df_slice) and weekly_qsx_gt_dks_gate(df_slice)
+        j_low_weekly_resonance_gate(df_slice, precomputed)
+        and weekly_qsx_gt_dks_gate(df_slice, precomputed)
     )
 
 
@@ -803,6 +1056,13 @@ def qsx_gt_dks_gate(df_slice: pd.DataFrame, precomputed: Optional[dict] = None) 
     if compute_b1_dual is None:
         return False
     try:
+        if precomputed is not None and precomputed.get("qsx") is not None:
+            i = len(df_slice) - 1
+            if i + 1 < _DUAL_MIN_BARS:  # compute_long_structure 的 DUAL_MIN_BARS 守卫
+                return False
+            q = float(precomputed["qsx"][i])
+            d = float(precomputed["dks"][i])
+            return bool(q == q and d == d and q > d)  # 同 compute_long_structure 的判定
         r = compute_long_structure(df_slice)
         return bool(r.get("available") and r.get("qsx_gt_dks"))
     except Exception:  # noqa: BLE001
@@ -813,7 +1073,9 @@ def j_low_qsx_gt_dks_gate(
     df_slice: pd.DataFrame, precomputed: Optional[dict] = None
 ) -> bool:
     """B1 核心组合:J<13 且 QSX>DKS —— "长期向上的票上买短期回调点"。"""
-    return bool(j_low_gate(df_slice, precomputed) and qsx_gt_dks_gate(df_slice))
+    return bool(
+        j_low_gate(df_slice, precomputed) and qsx_gt_dks_gate(df_slice, precomputed)
+    )
 
 
 def breakout_pullback_b1_gate(
@@ -2257,6 +2519,18 @@ def _prepare_stock(
     # 可成交性:涨停/停牌不可买,跌停/停牌不可卖(逐股算一次,循环内复用)
     buy_ok, sell_ok = tradable_flags(df, code) if tradability else (None, None)
     scorer_pre_fn = _SCORER_PRECOMPUTE.get(scorer) if scorer is not None else None
+    # gate_pre 与 scorer_pre(_sc_kdj_j) 的 KDJ 同口径(kdj_series fill_na=50.0):
+    # 都需要时逐股算一次共享,否则各算各的(行为与旧版逐位一致)
+    kdj_shared = None
+    if (
+        entry_gate is not None
+        and scorer_pre_fn is _precompute_kdj_j_series
+        and _kdj is not None
+    ):
+        try:
+            kdj_shared = _kdj_series(df, fill_na=50.0)
+        except Exception:  # noqa: BLE001
+            kdj_shared = None
     return {
         "df": df,
         "n": n,
@@ -2271,9 +2545,17 @@ def _prepare_stock(
         else None,
         # ATR(14)（止损余量 stop_buffer="atr" 用）:同样逐股算一次,循环内复用
         "atr": _atr_series(df) if stop_buffer == "atr" else None,
-        "gate_pre": _precompute_gate_series(df) if entry_gate is not None else None,
+        "gate_pre": _precompute_gate_series(df, kdj_shared)
+        if entry_gate is not None
+        else None,
         # scorer 预计算全序列（_sc_b1_pullback 用）:逐股算一次,循环内点查询复用
-        "scorer_pre": scorer_pre_fn(df) if scorer_pre_fn is not None else None,
+        "scorer_pre": (
+            scorer_pre_fn(df, kdj_shared)
+            if scorer_pre_fn is _precompute_kdj_j_series
+            else scorer_pre_fn(df)
+        )
+        if scorer_pre_fn is not None
+        else None,
         # OHLC float 数组(simulate_b1_trade 用):逐股算一次,避免每笔重复 astype
         "ohlc": tuple(
             df[c].astype(float).values for c in ("close", "low", "high", "open")
@@ -2421,7 +2703,8 @@ def evaluate_trades(
       配 ``bbi_exit_consec=0`` 即「止盈=双中大阳分批+跌破QSX清仓、无 BBI 清仓」口径。
     entry_gate(df_slice)->bool：进场硬门槛(如 j_low_gate=当日 J<13，B1 核心买点)；不满足则不进场。
       本模块 ENTRY_GATES 的 gate 是双形态 ``(df_slice, precomputed=None)``——逐股预计算的
-      KDJ-J/MACD/ADX 递归序列会喂给它（O(n²)→O(n)，逐位等价见
+      KDJ-J/MACD/ADX/RSI/QSX-DKS 及周线（「截至当日前缀 resample("W-FRI")」口径）序列
+      会喂给它（O(n²)→O(n)，逐位等价见
       tests/test_gate_precompute_equivalence.py）；外部注入的单参 callable 自动包一层，零改动。
     scorer(df_slice, code)->dict：进场打分器（默认 _sc_b1_pullback）。注册进 `_SCORER_PRECOMPUTE`
       的 scorer 是三参双形态 ``(df_slice, code, precomputed=None)``——逐股预计算的 MA/J 全序列

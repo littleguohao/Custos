@@ -14,7 +14,8 @@ j_low_rsi_strong 等「J<13 ∧ 其他因子」组合）——扫描的是基底
 ``{stop_mode / stop_pct / trail / breakeven / scale_out / cost_zone /
 time_stop / bbi_consec}``，
 每个格子是一次 ``backtest_factors --trade-sim`` 子进程（驱动模式复用
-``m2_stop_sweep``：串行子进程 + 结果文件落盘 + 签名复用跳过）。
+``m2_stop_sweep``：子进程 + 结果文件落盘 + 签名复用跳过；``-j/--jobs``
+开格子级并行，内存/CPU 自适应收敛口径同 m2）。
 
 ## 研究→live 回流通道
 
@@ -88,6 +89,7 @@ from custos.core.paths import LOGS
 from custos.research.m2_stop_sweep import (
     SCRIPT,
     _breakeven_wr,
+    _cap_jobs,
     _load,
     _margin,
     _ret_over_dd,
@@ -587,7 +589,13 @@ def _cells_for(
 
 
 class _Runner:
-    """预算记账 + 顺序执行。复用跳过不占预算；预算耗尽后剩余格子记 truncated。"""
+    """预算记账 + 执行。复用跳过不占预算；预算耗尽后剩余格子记 truncated。
+
+    ``--jobs > 1`` 时格子子进程经线程池并行（线程只是等子进程，真正的并行度
+    由子进程数决定——m2 ``_run_all`` 的口径）；但**复用判定、预算分配、rows/
+    failed/truncated 的入列顺序仍按格子原顺序**，与并行完成顺序无关 ⇒ 汇总
+    结果确定，与串行逐格跑完全一致。
+    """
 
     def __init__(self, a: argparse.Namespace, out_dir: pathlib.Path):
         self.a = a
@@ -601,27 +609,28 @@ class _Runner:
 
     def run_cells(self, cells: list[dict[str, Any]]) -> None:
         done = {(r["scorer"], r["gate"], r["exit"]) for r in self.rows}
+        # 顺序预扫：去重 / 复用判定 / 预算扣减按原顺序定死，再统一执行
+        plan: list[tuple[dict[str, Any], pathlib.Path, str]] = []  # (cell, out, kind)
         for cell in cells:
             key = (cell["scorer"], cell["gate"], cell["exit"])
             if key in done:
                 continue  # 两阶段里阶段二会再遇到阶段一的基准档 ⇒ 去重，不重复入榜
             done.add(key)
-            tag = f"{cell['scorer']}/{cell['gate']}/{cell['exit']}"
             cli = _cell_args(self.a, cell)
             out = cell_out_path(
                 self.out_dir, cell, cell_signature(cli, _udigest(self.a))
             )
-            status: str
-            path: Optional[pathlib.Path]
             if out.exists() and not self.a.force:
-                print(f"[SKIP] {out.name}（签名一致，复用）")
-                status, path = "reused", out
+                plan.append((cell, out, "reused"))
             elif self.budget > 0:
                 self.budget -= 1
-                status, path = run_cell(self.a, cell, self.out_dir)
+                plan.append((cell, out, "run"))
             else:
+                tag = f"{cell['scorer']}/{cell['gate']}/{cell['exit']}"
                 self.truncated.append(tag)
-                continue
+        results = self._execute(plan)
+        for (cell, _out, _kind), (status, path) in zip(plan, results):
+            tag = f"{cell['scorer']}/{cell['gate']}/{cell['exit']}"
             if status == "failed" or path is None:
                 self.failed.append(tag)
                 continue
@@ -630,6 +639,46 @@ class _Runner:
             else:
                 self.reused += 1
             self.rows.append(load_cell_row(cell, path, reused=(status == "reused")))
+
+    def _execute(
+        self, plan: list[tuple[dict[str, Any], pathlib.Path, str]]
+    ) -> list[tuple[str, Optional[pathlib.Path]]]:
+        """按 plan 执行（``--jobs > 1`` 时并行），返回与 plan 对齐的 (状态, 结果文件)。"""
+        outcomes: dict[int, tuple[str, Optional[pathlib.Path]]] = {}
+        run_idx: list[int] = []
+        for i, (_cell, out, kind) in enumerate(plan):
+            if kind == "reused":
+                print(f"[SKIP] {out.name}（签名一致，复用）")
+                outcomes[i] = ("reused", out)
+            else:
+                run_idx.append(i)
+        jobs = max(1, getattr(self.a, "jobs", 1) or 1)
+        workers = _cap_jobs(jobs, len(run_idx)) if run_idx and jobs > 1 else 1
+        if workers <= 1:
+            for i in run_idx:
+                outcomes[i] = run_cell(self.a, plan[i][0], self.out_dir)
+        else:
+            # 线程只是在等子进程（m2 :766 的口径）⇒ ThreadPoolExecutor 最省事
+            from concurrent.futures import (  # noqa: PLC0415
+                ThreadPoolExecutor,
+                as_completed,
+            )
+
+            print(f"[PAR] {len(run_idx)} 格并行跑（{workers} 路）")
+            with ThreadPoolExecutor(max_workers=workers) as ex:
+                futs = {
+                    ex.submit(run_cell, self.a, plan[i][0], self.out_dir): i
+                    for i in run_idx
+                }
+                done_n = 0
+                for f in as_completed(futs):
+                    i = futs[f]
+                    outcomes[i] = f.result()
+                    done_n += 1
+                    cell = plan[i][0]
+                    tag = f"{cell['scorer']}/{cell['gate']}/{cell['exit']}"
+                    print(f"[PAR {done_n}/{len(run_idx)}] {tag} 完成")
+        return [outcomes[i] for i in range(len(plan))]
 
 
 def run_grid(
@@ -881,6 +930,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "仅对照实验用）",
     )
     ap.add_argument("--force", action="store_true", help="忽略已落盘结果重跑")
+    ap.add_argument(
+        "--jobs",
+        "-j",
+        type=int,
+        default=1,
+        help="格子级并行进程数（各格子相互独立；默认 1=串行）。"
+        "⚠️ 内存乘 N，会按可用内存/CPU 自动收敛（口径同 m2_stop_sweep，"
+        "每路约需 400MB）",
+    )
     ap.add_argument(
         "--timeout",
         type=int,
