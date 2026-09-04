@@ -2967,10 +2967,12 @@ def evaluate_trades(
       数量上限）产出 trades。候选信号序列与全部出场参数无关 ⇒ 落盘后供 ``signals_in``
       重放。逐位一致性由 tests/test_signals_replay.py 钉死。
     signals_in（``--from-signals``）：``{code: [候选信号]}`` 重放——每股照常
-      ``_prepare_stock``（O(n) 预计算，便宜），**跳过逐 bar gate/scorer 扫描**，
-      直接对缓存信号逐条 ``simulate_b1_trade``。出场参数随便改（它们是 simulate 的
-      输入，不进信号）；信号轴参数（gate/scorer/universe/窗口/step/collect_all）
-      变了必须换缓存——CLI 层用 ``signals_signature`` fail-closed 核对。
+      ``_prepare_stock`` 但**不算 gate/scorer 预计算**（v0.174：重放不做进场判定，
+      周线序列等 gate_pre 零消费 ⇒ 跳过；实测重放 1420ms→131ms/方案），
+      **跳过逐 bar gate/scorer 扫描**，直接对缓存信号逐条 ``simulate_b1_trade``。
+      出场参数随便改（它们是 simulate 的输入，不进信号）；信号轴参数
+      （gate/scorer/universe/窗口/step/collect_all）变了必须换缓存——
+      CLI 层用 ``signals_signature`` fail-closed 核对。
       ⚠️ 只支持 step=1：step>1 时「跳到出场后」的续扫起点不在 min_bars+k*step
       网格上，两阶段无法逐位复现单遍扫描 ⇒ 直接 ValueError，不猜。
     无切片快速路径（v0.173，2026-09-04）：当 entry_gate 为 None 或在
@@ -3021,6 +3023,11 @@ def evaluate_trades(
 
     trades: list[dict[str, Any]] = []
     for code, raw in bars_by_code.items():
+        # 重放（signals_in）路径不做进场判定 ⇒ gate/scorer 预计算整股跳过
+        # （v0.174）：gate_pre 里的周线序列（_weekly_gate_arrays）是重放成本的
+        # 大头却零消费。传 None 走 _prepare_stock 既有的「不算」分支，
+        # 重放产出的 trades 由 tests/test_signals_replay.py 逐位钉住。
+        replay_only = signals_in is not None
         prep = _prepare_stock(
             raw,
             weekly,
@@ -3029,8 +3036,8 @@ def evaluate_trades(
             tradability,
             scale_out_frac,
             stop_buffer,
-            entry_gate,
-            scorer=scorer,
+            None if replay_only else entry_gate,
+            scorer=None if replay_only else scorer,
             qsx_exit_consec=qsx_exit_consec,
         )
         if prep is None:
