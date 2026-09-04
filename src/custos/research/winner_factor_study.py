@@ -12,10 +12,10 @@
 基础信号（J<13）的时候，是否还满足其他信号？是否有其他规律？
 
 方法：把 score_return_study 的技术分总量拆成**单因子命中面板**——信号日 as-of
-截断（复用 ``score_return_study.asof_frames``，与 live 1800 链逐位对齐、已对拍）
-喂 ``enrich_candidates.compute_metrics`` 得到完整 cand，再从 cand 提取 ~29 个
-布尔命中（True/False/**None=unavailable**，算不出不当 False）。按区间切分、
-区间内按收益切 top50/bottom50（复用 ``score_return_study.split_top_half``），
+cand 复用 ``score_return_study.asof_candidate``（三层截断同 live 1800 链逐位对齐、
+已对拍；v0.175 起带内容键缓存，同一 (票,信号日) 只算一次 compute_metrics），
+再从 cand 提取 ~29 个布尔命中（True/False/**None=unavailable**，算不出不当 False）。
+按区间切分、区间内按收益切 top50/bottom50（复用 ``score_return_study.split_top_half``），
 逐因子报：两侧命中率、lift=top/bottom、命中数支撑、前后半窗方向一致性、
 区间级 lift>1 占比。
 
@@ -46,7 +46,6 @@ if hasattr(sys.stderr, "reconfigure"):
 
 import pandas as pd  # noqa: E402
 
-from custos.pipeline.screening import enrich_candidates as ec  # noqa: E402
 from custos.pipeline.screening import score_candidates as sc  # noqa: E402
 from custos.research import backtest_factors as bf  # noqa: E402
 from custos.research import score_return_study as srs  # noqa: E402
@@ -220,9 +219,12 @@ def build_factor_panel(cand: dict[str, Any]) -> dict[str, Optional[bool]]:
 def panel_hook(
     df_full: pd.DataFrame, index_full: pd.DataFrame, i: int, code: str
 ) -> dict[str, Any]:
-    """score_return_study.run_study 的 trade_hook：as-of 截断 → cand → 技术分 + 因子面板。"""
-    df, df_long, index_asof = srs.asof_frames(df_full, index_full, i)
-    cand = ec.compute_metrics(df, index_asof, code=code, df_long=df_long)
+    """score_return_study.run_study 的 trade_hook：as-of cand → 技术分 + 因子面板。
+
+    cand 走 ``srs.asof_candidate`` 内容键缓存（v0.175）：同一 (票,信号日) 跨臂/
+    跨调用只算一次 compute_metrics，与旧版逐笔直算逐位一致（钉测钉住）。
+    """
+    cand = srs.asof_candidate(df_full, index_full, i, code)
     score, level, contrib = sc.technical_score(cand, None)
     return {
         "tech_score": score,

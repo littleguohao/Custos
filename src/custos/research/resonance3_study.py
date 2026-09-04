@@ -137,7 +137,8 @@ def make_resonance_gate(
     """j_low ∧ 基本面优(PIT as-of) ∧ 技术强(as-of 技术分≥60)。
 
     成本排序：regime 集合查询 → J<13 预计算点 → PIT 查表 → as-of 技术分
-    （compute_metrics ~50ms，只在前三腿全过的 bar 上算）。绝不 raise。
+    （compute_metrics ~50ms，只在前三腿全过的 bar 上算；同一 (票,bar) 与
+    panel_hook/臂A 的复算由 srs.asof_candidate 内容键缓存去重，v0.175）。绝不 raise。
     """
 
     def gate(df_slice, precomputed=None) -> bool:

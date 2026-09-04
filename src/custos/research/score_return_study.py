@@ -29,6 +29,9 @@
   再喂 `score_candidates.technical_score`（weights=None = DEFAULT_TECH_WEIGHTS）。
   **严禁未来函数**：截断只取 ≤ 信号日的数据；as-of 口径由
   tests/test_score_return_study.py 钉住，并与 enrich 真实落盘分对拍（--spot-check）。
+  v0.175 起 cand 走 `asof_candidate` 内容键缓存：同一 (票, 信号日) 的三层截断帧
+  逐字节相同时复用首次计算结果（与逐笔重算逐位一致，等价性钉测见
+  tests/test_asof_cache_equivalence.py）。
 - **成本**：往返 25bps（--cost-bps，从每笔收益扣除）。
 
 统计：按每个 0AMV 做多区间分组，组内按该笔交易净收益降序取 top-50% / bottom-50%
@@ -46,11 +49,13 @@ from __future__ import annotations
 
 import argparse
 import bisect
+import hashlib
 import json
 import math
 import statistics
 import sys
 import time
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Optional
 
@@ -59,6 +64,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
+import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 from custos.pipeline.screening import enrich_candidates as ec  # noqa: E402
@@ -281,6 +287,77 @@ def half_window_check(trades: list[dict[str, Any]]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # as-of 技术分（严禁未来函数：只取 ≤ 信号日的数据）
 # ---------------------------------------------------------------------------
+#
+# --- 性能（v0.175，2026-09-04）：per-trade 全管线重算的去重，口径逐位不变 ---
+#
+# 背景：主流程对**每笔交易**调 ec.compute_metrics（live 全套因子管线，实测
+# ~35ms/笔）。方案调研结论（合成数据实测，详见 tests/test_asof_cache_equivalence.py）：
+#   ✗「逐股全序列算一次 + 按信号日点查询」**不合法**：live 口径是 tail(260)
+#     起点**重新播种**，EMA 系递归指标（MACD/KDJ/ADX/QSX/DKS）与全序列同位点
+#     不逐位相等（84 个采样窗口：MACD/KDJ/ADX 84/84 不一致、QSX/DKS ~9 成不一致；
+#     仅 rolling-MA 族的 BBI 100% 逐位一致）⇒ 不能换口径，只能精确去重。
+#   ✓ 精确内容键缓存（asof_candidate）：compute_metrics 是
+#     (df截断帧, index截断帧, code) 的确定性纯函数 ⇒ 三帧内容摘要为键，
+#     命中即返回同一份 cand（与重算逐位一致）。单遍 study 重复率实测 0.0%
+#     （每股每日最多一笔），收益集中在 resonance3「两臂 + gate④ 技术分腿」
+#     这类同 (票,信号日) 复算模式（实测 22% 调用是重复）。
+#   ✓ index as-of 快速路径：指数 ≤ 信号日的 tail(260) 帧只依赖 entry_date；
+#     日期列字符串化每帧对象只做一次（旧版每笔全列 astype(str)，占
+#     asof_frames 约一半耗时），日期升序时 bisect 定位与旧布尔掩码 tail(260)
+#     选出同一批行同一顺序（数学恒等；非升序回退旧路径，钉测钉住）。
+#
+# 两块进程内缓存（都不写盘、可随意清空，语义不变）：
+# - _IDX_DATE_CACHE：指数帧日期字符串列，id(帧) 键 + 强引用防 id 复用，FIFO 封顶；
+# - _CAND_CACHE：as-of cand，(code, compute_metrics 函数身份, 三层截断帧内容摘要)
+#   键，LRU 封顶（实测单股 gate 扫描→hook 的在途候选 ~10² 条 ≪ 封顶值；
+#   cand 深大小 ~40KB ⇒ 封顶时 ~80MB，内存有界）。函数身份进键：缓存值是
+#   「**当前** ec.compute_metrics 在该内容上的输出」——测试 monkeypatch 替身
+#   与原函数各有各的键空间，互不串味。
+_IDX_DATE_CACHE_MAX = 8
+_IDX_DATE_CACHE: dict[int, tuple[list[str], bool, pd.DataFrame]] = {}
+_CAND_CACHE_MAX = 2048
+_CAND_CACHE: OrderedDict[tuple[str, Any, bytes, bytes, bytes], dict[str, Any]] = (
+    OrderedDict()
+)
+
+
+def _index_dates(index_full: pd.DataFrame) -> tuple[list[str], bool]:
+    """index_full 的日期字符串列（YYYY-MM-DD）+ 是否升序，每帧对象只算一次。
+
+    以 id(帧) 为键缓存并**持强引用**：帧活着 ⇒ id 唯一不复用 ⇒ 绝不命中别帧；
+    表满 FIFO 逐出（逐出后帧若还在，下次重算重插，语义不变）。
+    """
+    key = id(index_full)
+    hit = _IDX_DATE_CACHE.get(key)
+    if hit is not None and hit[2] is index_full:
+        return hit[0], hit[1]
+    dates = index_full["date"].astype(str).str[:10].tolist()
+    sorted_ok = dates == sorted(dates)
+    while len(_IDX_DATE_CACHE) >= _IDX_DATE_CACHE_MAX:
+        _IDX_DATE_CACHE.pop(next(iter(_IDX_DATE_CACHE)))
+    _IDX_DATE_CACHE[key] = (dates, sorted_ok, index_full)
+    return dates, sorted_ok
+
+
+def _index_asof(index_full: pd.DataFrame, entry_date: str) -> pd.DataFrame:
+    """上证指数 ≤ entry_date 的 tail(260) 帧（与旧布尔掩码口径逐位一致）。
+
+    日期升序（各 study 均排序后传入）时 bisect_right 定位 k = ≤ entry_date 的行数，
+    iloc[k-260:k] 与旧版 ``掩码 + tail(260)`` 选出同一批行、同一顺序；传入未排序
+    帧时原样回退旧掩码路径，行为不变。
+    """
+    dates, sorted_ok = _index_dates(index_full)
+    if sorted_ok:
+        k = bisect.bisect_right(dates, entry_date)
+        return index_full.iloc[max(0, k - ec.OHLCV_LOAD_BARS) : k].reset_index(
+            drop=True
+        )
+    idx_dates = index_full["date"].astype(str).str[:10]
+    return (
+        index_full[idx_dates <= entry_date]
+        .tail(ec.OHLCV_LOAD_BARS)
+        .reset_index(drop=True)
+    )
 
 
 def asof_frames(
@@ -291,7 +368,8 @@ def asof_frames(
     - ``df``      = df_full.iloc[:i+1].tail(ec.OHLCV_LOAD_BARS)      （260 根）
     - ``df_long`` = df_full.iloc[:i+1].tail(ec.OHLCV_LOAD_BARS_LONG) （1200 根，
       仅供 check_macd_technics 周/月红柱腿；不足时 wm_available=False 如实标注）
-    - ``index``   = 上证指数 ≤ 信号日 tail 260（20 日相对强度用）
+    - ``index``   = 上证指数 ≤ 信号日 tail 260（20 日相对强度用；
+      v0.175 起走 _index_asof 快速路径，选出帧与旧掩码口径逐位一致）
 
     截断规则与 live 1800 链逐位对齐（已对拍验证，见 --spot-check）。
     winner_factor_study 的因子面板复用同一截断（保证两套研究口径一致）。
@@ -300,13 +378,66 @@ def asof_frames(
     df = pre.tail(ec.OHLCV_LOAD_BARS).reset_index(drop=True)
     df_long = pre.tail(ec.OHLCV_LOAD_BARS_LONG).reset_index(drop=True)
     entry_date = str(df_full["date"].iloc[i])[:10]
-    idx_dates = index_full["date"].astype(str).str[:10]
-    index_asof = (
-        index_full[idx_dates <= entry_date]
-        .tail(ec.OHLCV_LOAD_BARS)
-        .reset_index(drop=True)
+    return df, df_long, _index_asof(index_full, entry_date)
+
+
+def _frame_digest(df: pd.DataFrame) -> bytes:
+    """df 全内容 blake2b-16 摘要：形状 + 列名 + dtype + 逐列底层字节（object 列走 repr 拼接）。
+
+    同内容 ⇒ 同摘要 ⇒ compute_metrics（确定性纯函数）输出逐位相同；内容/形状/dtype
+    有任何差异 ⇒ 摘要不同（16 字节摘要碰撞概率 ~2⁻¹²⁸/帧对，远低于内存位翻转率，
+    且下游钉测逐字段对拍兜底）。
+    """
+    h = hashlib.blake2b(digest_size=16)
+    h.update(str(df.shape).encode())
+    for name in df.columns:
+        col = df[name]
+        h.update(str(name).encode())
+        h.update(str(col.dtype).encode())
+        arr = col.to_numpy()
+        if arr.dtype == object:
+            h.update("\x1f".join(map(repr, arr.tolist())).encode())
+        else:
+            h.update(np.ascontiguousarray(arr).tobytes())
+    return h.digest()
+
+
+def _asof_candidate_uncached(
+    df_full: pd.DataFrame, index_full: pd.DataFrame, i: int, code: str
+) -> dict[str, Any]:
+    """asof_candidate 的无缓存原路（旧版逐笔直算；等价性钉测的对照路径）。"""
+    df, df_long, index_asof = asof_frames(df_full, index_full, i)
+    return ec.compute_metrics(df, index_asof, code=code, df_long=df_long)
+
+
+def asof_candidate(
+    df_full: pd.DataFrame, index_full: pd.DataFrame, i: int, code: str
+) -> dict[str, Any]:
+    """信号日（df_full 第 i 根）的 as-of cand（= ec.compute_metrics 输出），带内容键去重缓存。
+
+    截断/计算走 asof_frames + ec.compute_metrics 原路，与旧版逐笔直算**逐位一致**；
+    缓存命中（同一票同一信号日的三层截断帧内容摘要相同）时返回同一份 cand。
+    ⚠️ 返回值是跨调用共享对象：消费方（sc.technical_score /
+    winner_factor_study.build_factor_panel）均为纯读，调用方**不得**改写返回 dict。
+    """
+    df, df_long, index_asof = asof_frames(df_full, index_full, i)
+    compute = ec.compute_metrics  # 现取：monkeypatch 替身有独立键空间（见段头注释）
+    key = (
+        code,
+        compute,
+        _frame_digest(df),
+        _frame_digest(df_long),
+        _frame_digest(index_asof),
     )
-    return df, df_long, index_asof
+    cand = _CAND_CACHE.get(key)
+    if cand is not None:
+        _CAND_CACHE.move_to_end(key)
+        return cand
+    cand = compute(df, index_asof, code=code, df_long=df_long)
+    _CAND_CACHE[key] = cand
+    while len(_CAND_CACHE) > _CAND_CACHE_MAX:
+        _CAND_CACHE.popitem(last=False)  # LRU 逐出最久未用
+    return cand
 
 
 def asof_technical_score(
@@ -318,9 +449,9 @@ def asof_technical_score(
     """信号日（df_full 第 i 根）的 live 技术分（as-of 口径，截断见 asof_frames）。
 
     返回 (score, level, factor_contrib)，权重 = DEFAULT_TECH_WEIGHTS。
+    cand 走 asof_candidate 内容键缓存（v0.175，逐位不变）。
     """
-    df, df_long, index_asof = asof_frames(df_full, index_full, i)
-    cand = ec.compute_metrics(df, index_asof, code=code, df_long=df_long)
+    cand = asof_candidate(df_full, index_full, i, code)
     return sc.technical_score(cand, None)
 
 
