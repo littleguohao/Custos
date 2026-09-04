@@ -174,6 +174,12 @@ def _weekly_gate_arrays(df: pd.DataFrame) -> Optional[dict[str, Any]]:
     ``weekly_bars`` = 前缀周框根数（w+1），供 gate 复刻 kdj 的 ≥12 根 /
     zhixing_state 的 ≥114 根守卫。
 
+    v0.173（2026-09-04）向量化：rolling(9) 周高低、DKS「先删」步逐周预算，逐日加步
+    全量 gather + elementwise（ncs/prev 每日从周 w-1 冻结态独立走一步，不跨日链）——
+    每个元素的浮点算式与旧逐日 Python 循环逐项相同 ⇒ **逐位一致**（对 HEAD 旧实现
+    以随机游走/全平/平台尾/负价等 8 组数据做过 tobytes() 位级比对）；实测 tottime
+    0.845s→0.076s（30 票×1500 根，11×）。
+
     数据含 NaN（停牌段会让 resample 的 dropna 行数口径与前缀错位）/ 缺列 /
     resample 异常 ⇒ None（调用方略去周线键，gate 回退慢路径，行为逐位同旧版）。
     """
@@ -227,83 +233,92 @@ def _weekly_gate_arrays(df: pd.DataFrame) -> Optional[dict[str, Any]]:
         f_kdj = 1.0 - a_kdj
         a_qsx = 2.0 / 11.0  # ema(span=10) → α=2/(span+1)
         f_qsx = 1.0 - a_qsx
-        out_j = np.full(n, np.nan)
-        out_qsx = np.full(n, np.nan)
-        out_dks = np.full(n, np.nan)
-        for t in range(n):
-            w = int(day_w[t])
-            cp = close[t]
-            # ---- 周 J（kdj_series 口径：RSV→K→D→J，fill_na=50）----
-            if w + 1 < _KDJ_N:
-                rsv = 50.0
-            else:
-                hh = float(np.max(whigh[w - _KDJ_N + 1 : w]))
-                if part_hi[t] > hh:
-                    hh = float(part_hi[t])
-                ll = float(np.min(wlow[w - _KDJ_N + 1 : w]))
-                if part_lo[t] < ll:
-                    ll = float(part_lo[t])
-                rng = hh - ll
-                if rng == 0:
-                    rsv = 50.0
-                else:
-                    rsv = (cp - ll) / rng * 100
-                    if not np.isfinite(rsv):
-                        rsv = 50.0
-            if w == 0:
-                kk = dd = rsv  # ewm 首值 = 首个输入
-            else:
-                kk = f_kdj * k_arr[w - 1] + a_kdj * rsv
-                dd = f_kdj * d_arr[w - 1] + a_kdj * kk
-            out_j[t] = 3 * kk - 2 * dd
-            # ---- 周 QSX（ema(ema(c,10),10)，qsx_series 同调用链）----
-            if w == 0:
-                qi = cp
-            else:
-                e1i = f_qsx * e1_arr[w - 1] + a_qsx * cp
-                qi = f_qsx * q_arr[w - 1] + a_qsx * e1i
-            out_qsx[t] = qi
-            # ---- 周 DKS（四条 rolling MA 均值，逐位复刻 roll_mean）----
-            mas: list[float] = []
-            for win in _DKS_WINS:
-                if w + 1 < win:  # rolling 窗口不足 ⇒ NaN（dks_series 同口径）
-                    mas.append(np.nan)
-                    continue
-                sum_x, c_add, c_rem, ncs, prev, neg_ct = (
-                    a[w - 1] for a in dks_states[win]
-                )
-                if w >= win:  # 先删后加（与 cython 滑动分支同序）
+        W = len(weekly)
+        # ---- v0.173 向量化预热：只依赖周序号 w 的量逐周预算一次，移出逐日循环 ----
+        # （旧实现每根日 bar 都重做 rolling(9) 高低切片与 DKS 删步，实测 tottime
+        #   0.85s/30票×1500根、占 _prepare_stock 大头；新实现**逐位一致**：max/min
+        #   与求值顺序无关，DKS 删步是 w 的确定函数。等价性钉测
+        #   test_gate_precompute_equivalence ③ 逐 bar 覆盖本函数产出的序列。）
+        m1w = _KDJ_N - 1  # 周 J 的 rolling 窗口含 8 个完整周（不含进行中的部分周）
+        hh_w = np.full(W, np.nan)
+        ll_w = np.full(W, np.nan)
+        if W > m1w:
+            # 视图比需要的多一个末尾窗口（起点 W-m1w 对应不存在的周 W）⇒ 裁掉
+            hh_w[m1w:] = np.lib.stride_tricks.sliding_window_view(whigh, m1w).max(
+                axis=1
+            )[: W - m1w]
+            ll_w[m1w:] = np.lib.stride_tricks.sliding_window_view(wlow, m1w).min(
+                axis=1
+            )[: W - m1w]
+        # DKS：周 w 的「先删」步只依赖 w（删 wclose[w-win]，态取周 w-1 处理完的）⇒
+        # 逐周预算删后 sum/neg（s1/ng1）；逐日循环只剩「后加当日收盘」一步。
+        # 删步公式与旧循环逐字相同；c_rem 删步后不再参与加步（加步只用 c_add/sum/neg/ncs/prev）。
+        dks_day = []
+        for win in _DKS_WINS:
+            sum_a, c_add_a, c_rem_a, ncs_a, prev_a, neg_a = dks_states[win]
+            s1 = np.empty(W)
+            ng1 = np.empty(W, dtype=np.int64)
+            for w in range(win - 1, W):
+                s = sum_a[w - 1]
+                ng = neg_a[w - 1]
+                if w >= win:
                     v = wclose[w - win]
-                    y = -v - c_rem
-                    tt = sum_x + y
-                    c_rem = (tt - sum_x) - y
-                    sum_x = tt
+                    y = -v - c_rem_a[w - 1]
+                    tt = s + y
+                    s = tt
                     if np.signbit(v):
-                        neg_ct -= 1
-                y = cp - c_add
-                tt = sum_x + y
-                c_add = (tt - sum_x) - y
-                sum_x = tt
-                if np.signbit(cp):
-                    neg_ct += 1
-                if cp == prev:
-                    ncs += 1
-                else:
-                    ncs = 1
-                prev = cp
-                r = sum_x / win
-                if ncs >= win:  # GH#42064 同值捷径
-                    r = prev
-                elif neg_ct == 0 and r < 0:
-                    r = 0.0
-                elif neg_ct == win and r > 0:
-                    r = 0.0
-                mas.append(r)
-            out_dks[t] = (
-                np.nan
-                if any(np.isnan(mas))
-                else (mas[0] + mas[1] + mas[2] + mas[3]) / len(_DKS_WINS)
-            )
+                        ng -= 1
+                s1[w] = s
+                ng1[w] = ng
+            dks_day.append((c_add_a, ncs_a, prev_a, s1, ng1))
+        # ---- v0.173 全向量化逐日步：每日只是「周态标量」对「当日收盘 cp」的一步 ----
+        # 更新，全部改成对 day_w 的 gather + elementwise 运算（每个元素的浮点算式与
+        # 旧逐日循环逐项相同 ⇒ 逐位一致；等价性钉测 ③ 逐 bar 覆盖产出序列）。
+        idx = day_w  # 日 bar → 周序号
+        cp = close
+        has_prev = idx > 0
+        iprev = np.maximum(idx - 1, 0)
+        # ---- 周 J（kdj_series 口径：RSV→K→D→J，fill_na=50）----
+        hh = np.maximum(hh_w[idx], part_hi)  # 旧：取完整周高低后与部分周累计比大
+        ll = np.minimum(ll_w[idx], part_lo)
+        rng = hh - ll
+        with np.errstate(divide="ignore", invalid="ignore"):  # 除 0/NaN 支路均被掩掉
+            rsv_raw = (cp - ll) / rng * 100
+        rsv = np.where(
+            (idx + 1 < _KDJ_N) | (rng == 0) | ~np.isfinite(rsv_raw), 50.0, rsv_raw
+        )
+        kk = np.where(
+            has_prev, f_kdj * k_arr[iprev] + a_kdj * rsv, rsv
+        )  # w==0: 首值=输入
+        dd = np.where(has_prev, f_kdj * d_arr[iprev] + a_kdj * kk, kk)
+        out_j = 3 * kk - 2 * dd
+        # ---- 周 QSX（ema(ema(c,10),10)，qsx_series 同调用链）----
+        e1i = np.where(has_prev, f_qsx * e1_arr[iprev] + a_qsx * cp, cp)
+        out_qsx = np.where(has_prev, f_qsx * q_arr[iprev] + a_qsx * e1i, e1i)
+        # ---- 周 DKS（四条 rolling MA 均值，逐位复刻 roll_mean；删步已按周预算）----
+        # 加步前的 prev/ncs：每日都从**周 w-1 的冻结态**独立走一步（不跨日链——
+        # 部分周对 DKS 只贡献当日收盘 cp）。_roll_mean_states 的 ncs/prev 与窗口 k
+        # 无关 ⇒ 四窗口共用一份（取第一窗口的态数组）。
+        prev_a0 = dks_states[_DKS_WINS[0]][4]
+        ncs_a0 = dks_states[_DKS_WINS[0]][3]
+        ncs = np.where(cp == prev_a0[iprev], ncs_a0[iprev] + 1, 1)
+        valid_all = np.ones(n, dtype=bool)
+        dks_mas: list[np.ndarray] = []
+        for win, (c_add_a, _ncs_a, _prev_a, s1, ng1) in zip(_DKS_WINS, dks_day):
+            valid_all &= idx + 1 >= win  # rolling 窗口不足 ⇒ NaN（dks_series 同口径）
+            y = cp - c_add_a[iprev]
+            sum_x = s1[idx] + y  # c_add 的更新结果不再被消费（态已逐周冻结），可略
+            neg_ct = ng1[idx] + np.signbit(cp)
+            r = sum_x / win
+            r = np.where(ncs >= win, cp, r)  # GH#42064 同值捷径（prev 更新后恒=cp）
+            r = np.where((ncs < win) & (neg_ct == 0) & (r < 0), 0.0, r)
+            r = np.where((ncs < win) & (neg_ct == win) & (r > 0), 0.0, r)
+            dks_mas.append(r)
+        # 保持旧 (mas[0]+mas[1]+mas[2]+mas[3]) 的左结合求和序
+        dks_sum = dks_mas[0]
+        for m in dks_mas[1:]:
+            dks_sum = dks_sum + m
+        out_dks = np.where(valid_all, dks_sum / len(_DKS_WINS), np.nan)
         return {
             "weekly_j": out_j,
             "weekly_qsx": out_qsx,
@@ -704,17 +719,24 @@ def _sc_invert_s_shape(df: pd.DataFrame, code: str):
 
 
 # 可选打分器：同一批信号可跑三方对比（突破式 vs 买弱式 vs 反转突破分）
-def _sc_b1_pullback(df: pd.DataFrame, code: str, precomputed: Optional[dict] = None):
+def _sc_b1_pullback(
+    df: Optional[pd.DataFrame],
+    code: str,
+    precomputed: Optional[dict] = None,
+    n: Optional[int] = None,
+):
     """完美B1 缩量回踩买弱指纹（0-7 → 归一 0-100）。10只赢家反标，precision 待本回测确认。
 
     ``precomputed``：evaluate_trades 逐股预计算的全序列（见 _precompute_b1_pullback_series），
     只对从第 0 根开始的前缀切片有效；不传（默认）走原逐切片路径，两路逐位一致。
+    无切片快速路径（v0.173）：``df=None`` + 显式 ``n``（= i+1）点查询，见
+    ``_SLICE_FREE_SCORERS``；两参/三参旧调用面完全不变。
     """
     # 函数本体在因子层 `factors/b1_pullback_fit.py`；此前从 `enrich_candidates`
     # 导入只是蹭它顶层的偶然再导出（2026-08-08 订正）。保持 lazy：避免重导入开销。
     from custos.core.factors.b1_pullback_fit import compute_b1_pullback_fit  # noqa: PLC0415
 
-    r = compute_b1_pullback_fit(df, precomputed)
+    r = compute_b1_pullback_fit(df, precomputed, n=n)
     if not r.get("available"):
         return None
     return {
@@ -801,6 +823,15 @@ _SCORER_PRECOMPUTE: dict[
     _sc_b1_pullback: _precompute_b1_pullback_series,
     _sc_kdj_j: _precompute_kdj_j_series,
 }
+
+
+# 无切片快速路径的 scorer 白名单（v0.173，见 _PrefixLen）：precomputed 非 None 时
+# 判定只读 ``pre + len(df)``（= 显式 n），热循环可完全不构造 ``df.iloc[:i+1]``。
+# 进入条件（evaluate_trades 逐股判定）：scorer 身份在集合内 **且** scorer_pre 非 None。
+# ⚠️ 审计结论：_sc_rsi_state **不在**此列——rsi_state_score 内的 rsi_divergence
+#    必读 ``df["low"]``（价格新低判定），不是纯点查询；_sc_kdj_j 结构上其实也只读
+#    len(df)+pre，但其因子层 score() 尚无 df=None+n 入口，本次不动（白名单保持最小）。
+_SLICE_FREE_SCORERS: frozenset[Callable] = frozenset({_sc_b1_pullback})
 
 
 SCORERS = {
@@ -1453,6 +1484,57 @@ if rsi_state_score is not None:
     ENTRY_GATES["j_low_rsi_deep"] = j_low_rsi_deep_gate
     ENTRY_GATES["main_rally"] = main_rally_below_gate
     ENTRY_GATES["main_rally_above"] = main_rally_above_gate
+
+
+# ---- 无切片快速路径的 gate 白名单（v0.173，2026-09-04）----
+# 回测扫描热循环原来每根 bar 都构造 ``df.iloc[:i+1]``（pandas 切片固定开销，
+# profile：30 票×1500 根下 slicing+逐 bar 取日期 ≈6.5s/总 10s）。下列 gate 的
+# precomputed 分支**只读 ``pre + len(df_slice)``**（len 用于推 bar 序号 i），
+# 因此热循环可传「只有长度的占位对象」（``_PrefixLen``）而不构造真切片——
+# gate 函数体**零改动**，``len()`` 照常用；任何误进白名单、实际读列的 gate 会在
+# 占位对象上 AttributeError（被 gate 自身 except 兜成 False），等价性钉测
+# （tests/test_gate_precompute_equivalence.py 的 slice-free 用例）会立刻抓住。
+#
+# 值 = 该 gate 的 precomputed 分支**必须存在且非 None** 的键（缺键时 gate 会回退
+# 读真 df 的慢路径——占位对象上没有列 ⇒ 行为会变 ⇒ 该股票不得走快速路径）：
+#   - 基础键（kdj_j/macd_dif/macd_dea/qsx/dks）在 gate_pre 非 None 时恒有 ⇒ 键组可空；
+#   - adx：dmi_arrays 可能返回 None ⇒ 必须校验非 None；
+#   - weekly_*/rsi14：可选键（_weekly_gate_arrays/rsi 导入失败时缺）⇒ 必须校验。
+#
+# 审计记录（哪些**不进**及原因）：
+#   - reversal_k：precomputed 分支仍读 df_slice 的 close/high/low/volume 四列 ⇒ 不进；
+#   - platform_pullback / breakout_pullback_b1 / b2 全系 / main_rally 两档：
+#     黑盒检测器逐切片重算，无 precomputed 分支 ⇒ 不进（它们也拿不到 gate_pre 加速）；
+#   - rsi_bull_div / j_low_rsi_div：rsi_divergence 必读 df["low"]（价格新低）⇒ 不进；
+#   - 外部注入的单参 callable：身份不在表内 ⇒ 不进（旧路径，行为逐位不变）。
+_SLICE_FREE_GATES: dict[Callable, tuple[str, ...]] = {
+    j_low_gate: (),
+    j_low_macd_turn_gate: (),
+    j_low_dif_pos_gate: (),
+    j_low_adx25_gate: ("adx",),
+    j_low_adx60_gate: ("adx",),
+    qsx_gt_dks_gate: ("qsx",),
+    j_low_qsx_gt_dks_gate: ("qsx",),
+    weekly_j_low_gate: ("weekly_j",),
+    j_low_weekly_resonance_gate: ("weekly_j",),
+    j_low_qsx_weekly_gate: ("weekly_j", "qsx"),
+    weekly_qsx_gt_dks_gate: ("weekly_qsx",),
+    j_low_weekly_qsx_weekly_gate: ("weekly_j", "weekly_qsx"),
+    rsi_strong_regime_gate: ("rsi14",),
+    rsi_deep_oversold_gate: ("rsi14",),
+    j_low_rsi_strong_gate: ("rsi14",),
+    j_low_rsi_deep_gate: ("rsi14",),
+}
+
+
+def _slice_free_ok(gate: Optional[Callable], gate_pre: Any) -> bool:
+    """该股 gate 侧能否走无切片快速路径：gate 为 None / 白名单内且必需键齐备。"""
+    if gate is None:
+        return True  # ENTRY_GATES["none"]：每根都当信号，根本不读切片
+    keys = _SLICE_FREE_GATES.get(gate)
+    if keys is None or gate_pre is None:
+        return False
+    return all(gate_pre.get(k) is not None for k in keys)
 
 
 def sample_codes(all_codes: list[str], n: int, seed: int = 0) -> list[str]:
@@ -2455,6 +2537,26 @@ def _to_weekly(df: pd.DataFrame) -> pd.DataFrame:
     return d.resample("W-FRI").agg(agg).dropna(subset=["close"]).reset_index()
 
 
+class _PrefixLen:
+    """无切片快速路径里顶替 ``df.iloc[:i+1]`` 的「只有长度」占位对象（v0.173）。
+
+    白名单 gate（``_SLICE_FREE_GATES``）的 precomputed 分支只用 ``len(df_slice)``
+    推 bar 序号（i = len-1），从不读列 ⇒ 传这个对象即可，**省掉每 bar 的 pandas
+    切片固定开销**（profile：30 票×1500 根下切片 ≈6.5s/总 10s 的大头）。
+    只实现 ``__len__``：任何对列/索引/iloc 的访问都 AttributeError —— 误进白名单
+    的 gate 会被自身 ``except: return False`` 兜住，且逐 bar 等价性钉测
+    （test_gate_precompute_equivalence 的 slice-free 用例）必然炸出，不会静默错口径。
+    """
+
+    __slots__ = ("n",)
+
+    def __init__(self, n: int):
+        self.n = n
+
+    def __len__(self) -> int:
+        return self.n
+
+
 def _dual_form_gate(entry_gate: Callable) -> Callable:
     """把 entry_gate 统一成 ``(df_slice, precomputed)`` 双形态调用面。
 
@@ -2560,6 +2662,11 @@ def _prepare_stock(
         "ohlc": tuple(
             df[c].astype(float).values for c in ("close", "low", "high", "open")
         ),
+        # 逐 bar 的「str(df["date"].iloc[i])[:10]」逐股预提取一次（v0.173）：
+        # pandas datetimelike 逐点 __getitem__ 在热循环里是大头（profile 1.97s/13万次）。
+        # tolist() 的元素类型与 .iloc[i] 相同（datetime64→Timestamp、object→原对象），
+        # 故 str(x)[:10] 与旧口径逐位一致。
+        "dates": [str(x)[:10] for x in df["date"].tolist()],
     }
 
 
@@ -2583,18 +2690,20 @@ def _trade_record(
     ret_net: float,
     code: str,
     entry_date: str,
-    df: pd.DataFrame,
+    dates: list[str],
     i: int,
     score: Any,
 ) -> dict[str, Any]:
     """单笔模拟结果 → 交易记录（含 R 倍数；risk_frac 设 _R_RISK_FLOOR 地板——
-    周线收盘贴低时 risk_frac≈0 会把 R 炸成极端值）。"""
+    周线收盘贴低时 risk_frac≈0 会把 R 炸成极端值）。
+
+    ``dates``：_prepare_stock 预提取的等长日期字符串（``str(date)[:10]`` 口径）。"""
     rf = tr.get("risk_frac") or 0.0
     rf_eff = max(rf, _R_RISK_FLOOR)
     rec: dict[str, Any] = {
         "code": code,
         "entry_date": entry_date,
-        "exit_date": str(df["date"].iloc[tr["exit_idx"]])[:10],
+        "exit_date": dates[tr["exit_idx"]],
         "score": score,
         "ret": round(ret_net, 4),
         "risk_frac": round(rf, 4),
@@ -2625,7 +2734,7 @@ def _amv_checker(amv_regime: Optional[dict]) -> Callable[[str], bool]:
 
 
 def _entry_signal(
-    slice_df: pd.DataFrame,
+    slice_df: Any,
     code: str,
     i: int,
     entry_date: str,
@@ -2633,19 +2742,30 @@ def _entry_signal(
     gate_call: Optional[Callable],
     gate_pre: Any,
     sector_gate: Optional[Callable[[str, str], bool]],
-    scorer: Callable[[pd.DataFrame, str, Any], Optional[dict]],
+    scorer: Callable[..., Optional[dict]],
     scorer_pre: Any,
     amv_ok: Callable[[str], bool],
     buy_ok: Optional[np.ndarray],
+    slice_free: bool = False,
 ) -> Optional[dict]:
-    """单 bar 进场判定：gate→板块相位→scorer→regime/可成交性，任一不过返回 None。"""
+    """单 bar 进场判定：gate→板块相位→scorer→regime/可成交性，任一不过返回 None。
+
+    ``slice_free=True``（v0.173 无切片快速路径）：``slice_df`` 是 ``_PrefixLen``
+    占位（gate 侧只读 ``len()``）；scorer 走 ``df=None + 显式 n`` 点查询入口。
+    调用方（evaluate_trades）保证 gate/scorer 都在白名单内且 pre 齐备；
+    两路判定逐位一致，由 gate/scorer 等价性钉测 + test_signals_replay 钉死。
+    """
     if gate_call is not None and not gate_call(slice_df, gate_pre):
         return None
     if sector_gate is not None and not sector_gate(code, entry_date):  # 板块相位择时
         return None
     # scorer 已统一成三参调用面（_dual_form_scorer）；scorer_pre 非 None 仅在
     # _SCORER_PRECOMPUTE 查到此 scorer 时（两参 scorer 被包一层、忽略它）。
-    res = scorer(slice_df, code, scorer_pre)
+    res = (
+        scorer(None, code, scorer_pre, i + 1)
+        if slice_free
+        else scorer(slice_df, code, scorer_pre)
+    )
     if (
         res is not None
         and res.get("suggestion") == "可买"
@@ -2674,6 +2794,8 @@ def _scan_entry_signals(
     scorer_pre: Any,
     amv_ok: Callable[[str], bool],
     buy_ok: Optional[np.ndarray],
+    dates: list[str],
+    slice_free: bool = False,
     sink: Optional[list[dict[str, Any]]] = None,
 ) -> list[dict[str, Any]]:
     """单股**全 bar** 进场扫描：返回全部候选信号 ``[{code, i, date, score}]``。
@@ -2685,14 +2807,17 @@ def _scan_entry_signals(
     （单遍会跳到出场后）；多扫的候选在发射阶段被同一个非重叠跳过逻辑跳过，
     产出的 trades 逐位一致（钉测见 tests/test_signals_replay.py）。
     ``sink`` 提供时每条候选同时追加进去（信号落盘用）。
+    ``dates``：_prepare_stock 预提取的等长日期串（省掉每 bar 的 pandas 取日期）。
+    ``slice_free``：无切片快速路径（v0.173）——gate/scorer 都在白名单内时热循环
+    传 ``_PrefixLen`` 占位、不构造 ``df.iloc[:i+1]``，判定逐位一致。
     """
     n = len(df)
     cands: list[dict[str, Any]] = []
     i = min_bars
     while i < n - 1:
-        entry_date = str(df["date"].iloc[i])[:10]
+        entry_date = dates[i]
         res = _entry_signal(
-            df.iloc[: i + 1],
+            _PrefixLen(i + 1) if slice_free else df.iloc[: i + 1],
             code,
             i,
             entry_date,
@@ -2703,6 +2828,7 @@ def _scan_entry_signals(
             scorer_pre=scorer_pre,
             amv_ok=amv_ok,
             buy_ok=buy_ok,
+            slice_free=slice_free,
         )
         if res is not None:
             cand = {"code": code, "i": i, "date": entry_date, "score": res.get("score")}
@@ -2730,12 +2856,14 @@ def _trades_from_signals(
     atr: Optional[pd.Series],
     ohlc: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
     qsx: Optional[pd.Series],
+    dates: list[str],
     sim_kw: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """信号→交易的发射循环：对每条候选 ``simulate_b1_trade`` + 非重叠跳过 + 数量上限。
 
     与 ``evaluate_trades`` 单遍循环**逐位一致**的前提：候选来自同一支股票同一口径的
     全 bar 扫描（``_scan_entry_signals`` 或落盘的它），且 step=1。
+    ``dates``：_prepare_stock 预提取的等长日期串（_trade_record 的 exit_date 用）。
     """
     by_i = {c["i"]: c for c in (signals or [])}
     n = len(df)
@@ -2763,7 +2891,9 @@ def _trades_from_signals(
             **sim_kw,
         )
         ret_net = tr["ret"] - cost
-        rec = _trade_record(tr, ret_net, code, cand["date"], df, i, cand.get("score"))
+        rec = _trade_record(
+            tr, ret_net, code, cand["date"], dates, i, cand.get("score")
+        )
         if feature_panel:
             rec["features"] = _feature_panel(slice_df)
         trades.append(rec)
@@ -2843,6 +2973,18 @@ def evaluate_trades(
       变了必须换缓存——CLI 层用 ``signals_signature`` fail-closed 核对。
       ⚠️ 只支持 step=1：step>1 时「跳到出场后」的续扫起点不在 min_bars+k*step
       网格上，两阶段无法逐位复现单遍扫描 ⇒ 直接 ValueError，不猜。
+    无切片快速路径（v0.173，2026-09-04）：当 entry_gate 为 None 或在
+      ``_SLICE_FREE_GATES`` 白名单内（precomputed 分支只读 pre+len(df)，必需键齐备）
+      且 scorer 在 ``_SLICE_FREE_SCORERS`` 内（支持 df=None+显式 n 点查询）时，
+      两条扫描路径（_scan_entry_signals / 下方单遍循环）都不再逐 bar 构造
+      ``df.iloc[:i+1]``——gate 侧传 ``_PrefixLen`` 占位，scorer 侧传 None+n；
+      每 bar 的 ``str(df["date"].iloc[i])[:10]`` 也由 _prepare_stock 预提取的
+      ``dates`` 数组替代。实测（30 票×1500 根、j_low_weekly_qsx_weekly gate、
+      默认 scorer）：信号路径 4.96s→1.10s、单遍循环 4.76s→1.03s（≈4.5×，含
+      ``_weekly_gate_arrays`` 向量化 0.85s→0.08s）。判定语义零变化：
+      逐位等价由 tests/test_gate_precompute_equivalence.py /
+      test_scorer_precompute_equivalence.py 的 slice-free 用例 +
+      tests/test_signals_replay.py 钉死；白名单外 gate/scorer 一律走旧路径。
     """
     scorer = scorer or _sc_b1_pullback
     cost = cost_bps / 1e4
@@ -2901,6 +3043,13 @@ def evaluate_trades(
         atr = prep["atr"]
         gate_pre = prep["gate_pre"]
         scorer_pre = prep["scorer_pre"]
+        dates = prep["dates"]
+        # 无切片快速路径（v0.173）：gate 与 scorer **两侧都**是白名单点查询形态
+        # 且各自的 pre 非 None 时，热循环完全不构造 df.iloc[:i+1]——pandas 切片
+        # 固定开销是逐 bar 判定的大头。任一侧不满足 ⇒ 旧路径，行为逐位不变。
+        slice_free = _slice_free_ok(entry_gate, gate_pre) and (
+            scorer in _SLICE_FREE_SCORERS and scorer_pre is not None
+        )
         if use_signals:
             trades += _trades_from_signals(
                 df,
@@ -2926,6 +3075,8 @@ def evaluate_trades(
                         scorer_pre=scorer_pre,
                         amv_ok=_amv_ok,
                         buy_ok=buy_ok,
+                        dates=dates,
+                        slice_free=slice_free,
                         sink=signals_out,
                     )
                 ),
@@ -2935,14 +3086,15 @@ def evaluate_trades(
                 atr=atr,
                 ohlc=prep["ohlc"],
                 qsx=prep["qsx"],
+                dates=dates,
                 sim_kw=sim_kw,
             )
             continue
         emitted = 0
         i = min_bars
         while i < n - 1:
-            entry_date = str(df["date"].iloc[i])[:10]
-            slice_df = df.iloc[: i + 1]
+            entry_date = dates[i]
+            slice_df: Any = _PrefixLen(i + 1) if slice_free else df.iloc[: i + 1]
             res = _entry_signal(
                 slice_df,
                 code,
@@ -2955,10 +3107,14 @@ def evaluate_trades(
                 scorer_pre=scorer_pre,
                 amv_ok=_amv_ok,
                 buy_ok=buy_ok,
+                slice_free=slice_free,
             )
             if res is None:
                 i += max(1, step)
                 continue
+            if slice_free:
+                # 命中信号的 bar 才构造真切片（平台止损覆盖/特征面板用），便宜
+                slice_df = df.iloc[: i + 1]
             stop_ov = _platform_stop_override(slice_df, stop_mode)
             tr = simulate_b1_trade(
                 df,
@@ -2974,7 +3130,9 @@ def evaluate_trades(
                 **sim_kw,
             )
             ret_net = tr["ret"] - cost
-            rec = _trade_record(tr, ret_net, code, entry_date, df, i, res.get("score"))
+            rec = _trade_record(
+                tr, ret_net, code, entry_date, dates, i, res.get("score")
+            )
             if feature_panel:
                 rec["features"] = _feature_panel(slice_df)
             trades.append(rec)

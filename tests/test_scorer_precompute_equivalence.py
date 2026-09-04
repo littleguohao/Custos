@@ -295,3 +295,51 @@ def test_new_scorers_equivalence_not_vacuous():
         for i in range(40, len(df))
     )
     assert rsi_avail > 0, "_sc_rsi_state 一次 available 都没判出，等价测试形同空转"
+
+
+# ================= v0.173 无切片快速路径：df=None + 显式 n 点查询 =================
+# 热循环（_scan_entry_signals / 单遍循环）不再逐 bar 构造 df.iloc[:i+1]：
+# compute_b1_pullback_fit(None, pre, n=i+1) 必须与 compute_b1_pullback_fit(slice, pre)
+# 逐位一致（df 在 precomputed 分支本就只用于 len(df)）。
+
+
+@pytest.mark.parametrize("kind,n", _SHAPES)
+def test_fit_slice_free_point_query_per_bar_equal(kind, n):
+    """④ 逐 bar 等价：df=None+n 点查询 vs 真切片 precomputed 路径，dict 完全相等。"""
+    df = _shaped_bars(kind, n)
+    pre = bt._precompute_b1_pullback_series(df)
+    assert pre is not None, "预计算在正常数据上不该退 None"
+    for i in _sample_bars(n):
+        sl = df.iloc[: i + 1]
+        a = compute_b1_pullback_fit(sl, pre)
+        b = compute_b1_pullback_fit(None, pre, n=i + 1)
+        assert _dict_eq(a, b), f"{kind} n={n} 在 i={i} 无切片路径不一致:\n{a}\n{b}"
+
+
+@pytest.mark.parametrize("kind,n", _SHAPES)
+def test_scorer_slice_free_per_bar_equal(kind, n):
+    """④b 逐 bar 等价：_sc_b1_pullback(None, code, pre, n) == _sc_b1_pullback(slice, code, pre)。"""
+    df = _shaped_bars(kind, n)
+    pre = bt._precompute_b1_pullback_series(df)
+    assert pre is not None
+    for i in _sample_bars(n):
+        sl = df.iloc[: i + 1]
+        a = bt._sc_b1_pullback(sl, "600000", pre)
+        b = bt._sc_b1_pullback(None, "600000", pre, n=i + 1)
+        assert _dict_eq(a, b), f"{kind} n={n} 在 i={i} 无切片路径不一致:\n{a}\n{b}"
+
+
+def test_fit_slice_free_requires_precomputed_and_n():
+    """④c 守卫：df=None 但缺 precomputed / 缺 n ⇒ available=False（不猜、不 raise）。"""
+    r1 = compute_b1_pullback_fit(None)
+    r2 = compute_b1_pullback_fit(None, {"c": None}, n=None)
+    r3 = compute_b1_pullback_fit(None, None, n=100)
+    for r in (r1, r2, r3):
+        assert r == {"available": False, "score": 0, "max_score": 7, "hit": False}
+
+
+def test_scorer_whitelist_audit():
+    """⑤ 白名单卫生：_sc_rsi_state（内层 rsi_divergence 必读 df["low"]）等不得入内。"""
+    assert bt._sc_b1_pullback in bt._SLICE_FREE_SCORERS
+    assert bt._sc_rsi_state not in bt._SLICE_FREE_SCORERS
+    assert bt._sc_kdj_j not in bt._SLICE_FREE_SCORERS  # 无 df=None+n 入口，本次不动

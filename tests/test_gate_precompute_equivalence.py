@@ -350,3 +350,128 @@ def test_prepare_stock_shared_kdj_bitwise_equal(monkeypatch):
     monkeypatch.setattr(bt, "_precompute_kdj_j_series", lambda df, kdj=None: None)
     t_off = bt.evaluate_trades(bars, scorer=sc, entry_gate=gate, **kw)
     assert t_on == t_off, "共享 KDJ 后逐笔输出与旧路径不一致"
+
+
+# ---- v0.173 无切片快速路径（_PrefixLen 占位 / df=None+n 点查询）----
+# 白名单 gate 的 precomputed 分支只读 pre + len(df_slice) ⇒ 传 _PrefixLen(i+1)
+# 占位与传真切片必须逐 bar 一致；evaluate_trades 开/关快速路径逐笔一致。
+
+
+def _whitelist_gate_names() -> list[str]:
+    """_SLICE_FREE_GATES 里函数对应的 ENTRY_GATES 名（身份反查）。"""
+    return sorted(
+        name for name, g in bt.ENTRY_GATES.items() if g in bt._SLICE_FREE_GATES
+    )
+
+
+@pytest.mark.parametrize("gate_name", _whitelist_gate_names())
+@pytest.mark.parametrize("kind", ["random_walk", "uptrend", "decline", "pullback"])
+def test_slice_free_gate_matches_slice_per_bar(gate_name, kind):
+    """⑤ 无切片占位逐 bar 等价：gate(_PrefixLen(i+1), pre) == gate(slice, pre)。
+
+    slice vs precomputed 的等价由上文 ③ 逐 3 根钉住，这里只钉占位维度（每 7 根
+    + 末尾，控制耗时——黑盒慢路径不在此测试范围内）。
+    """
+    df = _bars_amount() if kind == "random_walk" else _shaped_bars_amount(kind)
+    pre = bt._precompute_gate_series(df)
+    gate = bt.ENTRY_GATES[gate_name]
+    assert bt._slice_free_ok(gate, pre), (
+        f"{gate_name} 在白名单内但必需键不齐（kind={kind}），快速路径判定有漏洞"
+    )
+    n = len(df)
+    for i in list(range(0, n, 7)) + [n - 2, n - 1]:
+        sl = df.iloc[: i + 1]
+        fast = gate(bt._PrefixLen(i + 1), pre)
+        slow = gate(sl, pre)
+        assert fast == slow, f"{gate_name} {kind} 在 i={i} 占位路径不一致"
+
+
+def test_slice_free_gate_not_vacuous():
+    """防空转：白名单里几个代表 gate 在占位路径下真的判出 True。"""
+    expectations = {
+        "j_low": "decline",
+        "j_low_adx25": "decline",
+        "qsx_gt_dks": "random_walk",
+        "weekly_qsx_gt_dks": "uptrend",
+        "j_low_weekly_qsx_weekly": "pullback",
+    }
+    for gate_name, kind in expectations.items():
+        df = _bars_amount() if kind == "random_walk" else _shaped_bars_amount(kind)
+        pre = bt._precompute_gate_series(df)
+        gate = bt.ENTRY_GATES[gate_name]
+        hits = sum(gate(bt._PrefixLen(i + 1), pre) for i in range(0, len(df), 3))
+        assert hits > 0, f"{gate_name} 占位路径在 {kind} 上一次都没判出"
+
+
+def test_slice_free_whitelist_audit():
+    """⑥ 白名单卫生：还读 df 列的 gate 不得入内；必需键缺失时不准走快速路径。"""
+    # 读列/黑盒 gate 一律不在白名单
+    for name in (
+        "reversal_k",
+        "platform_pullback",
+        "breakout_pullback_b1",
+        "rsi_bull_div",
+        "j_low_rsi_div",
+    ):
+        g = bt.ENTRY_GATES.get(name)
+        if g is not None:
+            assert g not in bt._SLICE_FREE_GATES, f"{name} 读 df 列，不得进白名单"
+    # 必需键缺失（周线序列算不出 ⇒ gate 会回退读真 df 的慢路径）⇒ 判定必须否决
+    df = _bars(seed=7)  # 无 amount 列 ⇒ indicators.resample KeyError ⇒ 无周线键
+    pre = bt._precompute_gate_series(df)
+    assert pre is not None and "weekly_j" not in pre, "该数据应缺周线键"
+    wk_gate = bt.ENTRY_GATES["j_low_weekly_qsx_weekly"]
+    assert wk_gate in bt._SLICE_FREE_GATES and not bt._slice_free_ok(wk_gate, pre)
+    # gate_pre 整体缺失 / 外部单参 gate ⇒ 否决
+    assert not bt._slice_free_ok(wk_gate, None)
+    assert not bt._slice_free_ok(lambda df: True, None)
+    # gate=None（ENTRY_GATES["none"]）⇒ gate 侧恒放行
+    assert bt._slice_free_ok(None, None)
+
+
+# 注：周线复合 gate（j_low_weekly_qsx_weekly 等）在合成数据上叠加默认 scorer 后
+# 0 交易（逐 bar 占位等价由 ⑤ 钉住、真命中由 test_slice_free_gate_not_vacuous 钉住），
+# 这里只放「默认 scorer 下真的出交易」的 gate，防"空==空"假绿。
+@pytest.mark.parametrize(
+    "gate_name", ["j_low", "j_low_adx25", "rsi_strong", "qsx_gt_dks"]
+)
+@pytest.mark.parametrize("use_signals", [False, True], ids=["single_pass", "signals"])
+def test_slice_free_evaluate_trades_bitwise_equal(monkeypatch, gate_name, use_signals):
+    """⑦ 逐笔等价：快速路径开 vs 关（清空两个白名单 ⇒ 强制旧路径），trades 完全一致。
+
+    覆盖单遍循环与信号两阶段两条扫描路径（默认 scorer=_sc_b1_pullback 在白名单内）。
+    """
+    bars = {
+        "600000": _bars_amount(seed=7),
+        "000001": _shaped_bars_amount("decline"),
+    }
+    gate = bt.ENTRY_GATES[gate_name]
+    kw: dict = {"min_bars": 30, "collect_all": True, "entry_gate": gate}
+    if use_signals:
+        kw["signals_out"] = []
+    t_fast = bt.evaluate_trades(bars, **kw)
+    assert t_fast, f"{gate_name} 合成数据上一笔都没出，等价测试形同空转"
+    monkeypatch.setattr(bt, "_SLICE_FREE_GATES", {})
+    monkeypatch.setattr(bt, "_SLICE_FREE_SCORERS", frozenset())
+    t_slow = bt.evaluate_trades(bars, **kw)
+    assert t_fast == t_slow, f"{gate_name} use_signals={use_signals} 两路逐笔不一致"
+
+
+def test_slice_free_dates_prefetch_bitwise():
+    """⑧ 日期预提取口径：_prepare_stock 的 dates 数组逐位 == str(df['date'].iloc[i])[:10]。"""
+    for df in (_bars(seed=7), _bars_amount(seed=11)):
+        prep = bt._prepare_stock(
+            df,
+            False,
+            30,
+            "600000",
+            True,
+            0.0,
+            "tick",
+            bt.ENTRY_GATES["j_low"],
+            scorer=None,
+        )
+        assert prep is not None
+        df_sorted = df.sort_values("date").reset_index(drop=True)
+        expect = [str(df_sorted["date"].iloc[i])[:10] for i in range(len(df_sorted))]
+        assert prep["dates"] == expect

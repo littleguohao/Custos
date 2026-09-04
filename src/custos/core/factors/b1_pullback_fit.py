@@ -38,7 +38,7 @@ B1PB_BODY_MAX = 4.5  # 小实体企稳：B1日实体 ≤4.5%
 B1PB_HIT_MIN = 6  # 命中门槛：7项中 ≥6 项
 
 
-def compute_b1_pullback_fit(df, precomputed=None) -> dict[str, Any]:
+def compute_b1_pullback_fit(df=None, precomputed=None, n=None) -> dict[str, Any]:
     """完美B1「缩量回踩超卖企稳」买弱指纹评分（0-7）。来源：10只确认赢家(后续大涨)反标。
 
     与 technical_score(买强) 正交——专抓「上升趋势中缩量回踩到均线、J超卖、企稳」的买弱点。
@@ -53,9 +53,18 @@ def compute_b1_pullback_fit(df, precomputed=None) -> dict[str, Any]:
     J 序列（RSV→EWM→EWM 递归）从第 0 根起算，前缀末点与全序列同位点是同一串浮点运算；
     ⚠️ 只对「从第 0 根开始的前缀切片」有效。逐位等价由
     tests/test_scorer_precompute_equivalence.py 逐 bar 钉住。
+
+    无切片点查询入口（2026-09-04，v0.173）：``df=None`` + 显式 ``n``（= 前缀长度 i+1，
+    precomputed 必填）——precomputed 非 None 时 df 本来就只用于 ``len(df)``，
+    热循环（``_scan_entry_signals``/单遍循环）据此不再构造 ``df.iloc[:i+1]``。
+    判定体与旧路径共用同一段代码，逐位一致由同一钉测覆盖。
     """
     try:
-        n = len(df)
+        if df is None:
+            if precomputed is None or n is None:
+                return {"available": False, "score": 0, "max_score": 7, "hit": False}
+        else:
+            n = len(df)
         if n < 20:
             return {"available": False, "score": 0, "max_score": 7, "hit": False}
         if precomputed is not None:
