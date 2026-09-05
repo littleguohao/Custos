@@ -80,7 +80,12 @@ _ALL_GATES = sorted(k for k, g in bt.ENTRY_GATES.items() if g is not None)
 
 @pytest.mark.parametrize("gate_name", _ALL_GATES)
 def test_gate_precomputed_matches_slice_per_bar(gate_name):
-    """① 逐 bar 等价：gate(slice) 与 gate(slice, precomputed) 每个采样点都相同。"""
+    """① 抽样等价：gate(slice) 与 gate(slice, precomputed) 每个采样点都相同。
+
+    采样而非全量逐 bar：每 8 根取 1 根 + 末尾 2 根全覆盖（控制耗时）；**全量
+    逐 bar** 的等价由 ②（evaluate_trades 开/关预计算逐笔一致——热循环内部
+    每根 bar 都过 gate）兜底。
+    """
     df = _bars()
     pre = bt._precompute_gate_series(df)
     assert pre is not None, "预计算在依赖齐全时不该退 None"
@@ -248,7 +253,8 @@ def test_rsi_state_dual_form_not_vacuous():
 # ---- QSX/DKS 与周线 gate 的预计算旁路（2026-09-03）----
 # `_precompute_gate_series` 新增 qsx/dks 日线全序列与 weekly_j/weekly_qsx/weekly_dks/
 # weekly_bars（「截至当日前缀 resample("W-FRI")」口径，含进行中部分周，见
-# `_weekly_gate_arrays` docstring）。这里钉住这批 gate 的快/慢两路逐 bar 一致。
+# `_weekly_gate_arrays` docstring）。这里钉住这批 gate 的快/慢两路一致
+# （抽样：每 3 根+末 2 根；全量逐 bar 由 ② evaluate_trades 逐笔等价兜底）。
 # ⚠️ 合成数据必须带 ``amount`` 列 —— indicators.resample 的聚合字典引用它，
 #    缺列时慢路径 resample 直接 KeyError（gate 恒 False），等价性形同空转。
 
@@ -306,7 +312,11 @@ _QSX_WEEKLY_GATES = [
 @pytest.mark.parametrize("gate_name", _QSX_WEEKLY_GATES)
 @pytest.mark.parametrize("kind", ["random_walk", "uptrend", "decline", "pullback"])
 def test_qsx_weekly_gate_precomputed_matches_slice_per_bar(gate_name, kind):
-    """③ QSX/DKS 与周线 gate 逐 bar 等价：gate(slice) == gate(slice, precomputed)。"""
+    """③ QSX/DKS 与周线 gate 抽样等价：gate(slice) == gate(slice, precomputed)。
+
+    采样而非全量逐 bar：每 3 根取 1 根 + 末尾 2 根全覆盖（周线 gate 慢路径每根
+    都 resample，全量太贵）；全量逐 bar 由 ②（evaluate_trades 逐笔等价）兜底。
+    """
     df = _bars_amount() if kind == "random_walk" else _shaped_bars_amount(kind)
     pre = bt._precompute_gate_series(df)
     assert pre is not None and "weekly_j" in pre and "qsx" in pre, (
@@ -354,7 +364,8 @@ def test_prepare_stock_shared_kdj_bitwise_equal(monkeypatch):
 
 # ---- v0.173 无切片快速路径（_PrefixLen 占位 / df=None+n 点查询）----
 # 白名单 gate 的 precomputed 分支只读 pre + len(df_slice) ⇒ 传 _PrefixLen(i+1)
-# 占位与传真切片必须逐 bar 一致；evaluate_trades 开/关快速路径逐笔一致。
+# 占位与传真切片必须一致（下述 ⑤ 抽样钉住：每 7 根+末 2 根）；evaluate_trades
+# 开/关快速路径逐笔一致（⑦，热循环全量逐 bar 的兜底）。
 
 
 def _whitelist_gate_names() -> list[str]:
@@ -367,10 +378,11 @@ def _whitelist_gate_names() -> list[str]:
 @pytest.mark.parametrize("gate_name", _whitelist_gate_names())
 @pytest.mark.parametrize("kind", ["random_walk", "uptrend", "decline", "pullback"])
 def test_slice_free_gate_matches_slice_per_bar(gate_name, kind):
-    """⑤ 无切片占位逐 bar 等价：gate(_PrefixLen(i+1), pre) == gate(slice, pre)。
+    """⑤ 无切片占位抽样等价：gate(_PrefixLen(i+1), pre) == gate(slice, pre)。
 
-    slice vs precomputed 的等价由上文 ③ 逐 3 根钉住，这里只钉占位维度（每 7 根
-    + 末尾，控制耗时——黑盒慢路径不在此测试范围内）。
+    采样而非全量逐 bar：每 7 根取 1 根 + 末尾 2 根全覆盖（控制耗时——黑盒慢路径
+    不在此测试范围内）；slice vs precomputed 的等价由上文 ③（每 3 根抽样）钉住，
+    全量逐 bar 由 ⑦（evaluate_trades 开/关快速路径逐笔一致）兜底。
     """
     df = _bars_amount() if kind == "random_walk" else _shaped_bars_amount(kind)
     pre = bt._precompute_gate_series(df)
@@ -475,3 +487,162 @@ def test_slice_free_dates_prefetch_bitwise():
         df_sorted = df.sort_values("date").reset_index(drop=True)
         expect = [str(df_sorted["date"].iloc[i])[:10] for i in range(len(df_sorted))]
         assert prep["dates"] == expect
+
+
+def test_slice_free_dates_prefetch_datetime64():
+    """⑧b 日期预提取口径（datetime64 型 date 列）：dates 数组逐位 ==
+    旧 ``str(df["date"].iloc[i])[:10]``（Timestamp 口径）。"""
+    df = _bars_amount(seed=13)
+    df["date"] = pd.to_datetime(df["date"])  # 字符串列 → datetime64（午夜、无时区）
+    prep = bt._prepare_stock(
+        df,
+        False,
+        30,
+        "600000",
+        True,
+        0.0,
+        "tick",
+        bt.ENTRY_GATES["j_low"],
+        scorer=None,
+    )
+    assert prep is not None
+    df_sorted = df.sort_values("date").reset_index(drop=True)
+    expect = [str(df_sorted["date"].iloc[i])[:10] for i in range(len(df_sorted))]
+    assert prep["dates"] == expect
+    # 钉住 str(Timestamp)[:10] 的形态：YYYY-MM-DD
+    assert all(len(s) == 10 and s[4] == "-" and s[7] == "-" for s in prep["dates"])
+
+
+# ---- ⑨ 注册钉测：白名单全成员占位调用不抛、返回类型正确（防误进白名单静默判负）----
+
+
+def _placeholder_probe_idx(n: int) -> list[int]:
+    """占位调用的探测 bar：守卫边界（0/1/KDJ 最短根数）+ 中段 + 末尾全覆盖。"""
+    return sorted({0, 1, 11, 12, 30, n // 2, n - 2, n - 1} & set(range(n)))
+
+
+def test_slice_free_registry_placeholder_call_no_raise():
+    """⑨ 注册钉测：_SLICE_FREE_GATES 每个 gate 与 _SLICE_FREE_SCORERS 每个 scorer
+    在「齐备 precomputed + 占位调用」（gate 传 ``_PrefixLen``、scorer 传 df=None+
+    显式 n）下**不抛异常**、返回类型正确（gate→bool，scorer→dict/None）。
+
+    任一成员未来被改成读列（不再适用无切片路径）时，占位对象抛
+    ``_PrefixLenAccessError``（BaseException 派生，gate 自带 except Exception
+    吞不掉），本用例立刻炸出——防「误进白名单后被静默吞成 False 少信号」。
+    """
+    df = _bars_amount()
+    pre = bt._precompute_gate_series(df)
+    assert pre is not None
+    n = len(df)
+    for gate in bt._SLICE_FREE_GATES:
+        assert bt._slice_free_ok(gate, pre), f"{gate.__name__} 必需键不齐"
+        for i in _placeholder_probe_idx(n):
+            r = gate(bt._PrefixLen(i + 1), pre)
+            assert isinstance(r, bool), (
+                f"{gate.__name__} 在 i={i} 返回 {type(r).__name__}，gate 必须返回 bool"
+            )
+    sc_pre = bt._precompute_b1_pullback_series(df)
+    assert sc_pre is not None
+    for scorer in bt._SLICE_FREE_SCORERS:
+        for i in _placeholder_probe_idx(n):
+            # scorer 的占位形态：df=None + 显式 n 点查询（与热循环相同）
+            r = scorer(None, "600000", sc_pre, i + 1)
+            assert r is None or isinstance(r, dict), (
+                f"{scorer.__name__} 在 i={i} 返回 {type(r).__name__}，"
+                "scorer 必须返回 dict/None"
+            )
+
+
+def test_slice_free_misplaced_gate_raises_not_swallowed(monkeypatch):
+    """⑨b 误加穿透：会读列的 gate 被误塞进白名单时，占位对象必须抛
+    ``_PrefixLenAccessError`` 穿透到调用方，而不是被 gate 的
+    ``except Exception: return False`` 静默吞成 False（少信号）。"""
+    df = _shaped_bars_amount("decline")  # 稳跌形态：J 长期 <13，必走到读列分支
+    pre = bt._precompute_gate_series(df)
+    bad = bt.ENTRY_GATES["reversal_k"]  # precomputed 分支仍读 close/high/low/volume
+    assert bad not in bt._SLICE_FREE_GATES, "reversal_k 本就不该在白名单"
+    monkeypatch.setitem(bt._SLICE_FREE_GATES, bad, ())  # 模拟误加
+    assert bt._slice_free_ok(bad, pre), "误加后快速路径判定会放行（热循环将传占位）"
+    # 找一根 J<13 的 bar，保证 gate 越过 J 守卫、走到读列分支
+    i0 = next(i for i in range(21, len(df)) if round(float(pre["kdj_j"][i]), 4) < 13.0)
+    with pytest.raises(bt._PrefixLenAccessError):
+        bad(bt._PrefixLen(i0 + 1), pre)
+    # 穿透到热循环的判定入口（_entry_signal 不兜 BaseException）
+    with pytest.raises(bt._PrefixLenAccessError):
+        bt._entry_signal(
+            bt._PrefixLen(i0 + 1),
+            "600000",
+            i0,
+            "2024-06-01",
+            gate_call=bad,
+            gate_pre=pre,
+            sector_gate=None,
+            scorer=lambda *a: None,
+            scorer_pre=None,
+            amv_ok=lambda d: True,
+            buy_ok=None,
+            slice_free=True,
+        )
+
+
+# ---- ⑩ 整周空窗（春节式连续休市）下的周线序列快/慢路径逐位一致 ----
+
+
+def _bars_with_holiday_gaps(n: int = 630, seed: int = 7) -> pd.DataFrame:
+    """含 2 个完整周无交易日（各 5 个连续业务日休市）的合成日线（带 amount 列）。"""
+    rng = np.random.default_rng(seed)
+    dates = pd.date_range("2024-01-01", periods=n, freq="B")
+    # 2024-01-01 是周一 ⇒ 业务日下标 40-44 / 300-304 恰好是两个完整的 Mon-Fri 周
+    drop = set(range(40, 45)) | set(range(300, 305))
+    keep = [d for k, d in enumerate(dates) if k not in drop]
+    m = len(keep)
+    close = np.maximum(10 + np.cumsum(rng.normal(0, 0.15, m)), 1.0)
+    high = close + np.abs(rng.normal(0, 0.08, m))
+    low = close - np.abs(rng.normal(0, 0.08, m))
+    open_ = low + (high - low) * rng.random(m)
+    vol = np.abs(rng.normal(1e6, 2e5, m))
+    return pd.DataFrame(
+        {
+            "date": pd.Series(keep).astype(str),
+            "open": open_,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": vol,
+            "amount": vol * close,
+        }
+    )
+
+
+def _weekly_slow_arrays(df: pd.DataFrame) -> dict[str, np.ndarray]:
+    """慢路径参考：逐 bar 对前缀 ``df.iloc[:i+1]`` resample("W-FRI") 取周线指标末点。"""
+    d = df.copy()
+    d["date"] = pd.to_datetime(d["date"])
+    n = len(d)
+    out = {k: np.full(n, np.nan) for k in ("weekly_j", "weekly_qsx", "weekly_dks")}
+    bars = np.zeros(n, dtype=np.int64)
+    for i in range(n):
+        weekly = bt._resample(d.iloc[: i + 1], "W-FRI")
+        bars[i] = len(weekly)
+        out["weekly_j"][i] = bt._kdj_series(weekly, fill_na=50.0)[2].iloc[-1]
+        wc = weekly["close"].astype(float)
+        out["weekly_qsx"][i] = bt._ema(bt._ema(wc, 10), 10).iloc[-1]
+        out["weekly_dks"][i] = bt._dks_series(wc).iloc[-1]
+    out["weekly_bars"] = bars
+    return out
+
+
+def test_weekly_gate_arrays_with_holiday_gaps_bitwise():
+    """⑩ 整周空窗：快速路径 ``_weekly_gate_arrays`` 与慢路径（逐 bar 前缀 resample）
+    的 weekly_j/weekly_qsx/weekly_dks 逐位一致（NaN 位置也一致）。"""
+    df = _bars_with_holiday_gaps()
+    fast = bt._weekly_gate_arrays(df)
+    assert fast is not None, "含整周空窗的数据上快速路径不该退 None"
+    slow = _weekly_slow_arrays(df)
+    for key in ("weekly_j", "weekly_qsx", "weekly_dks"):
+        a, b = fast[key], slow[key]
+        both_nan = np.isnan(a) & np.isnan(b)
+        assert ((a == b) | both_nan).all() and (np.isnan(a) == np.isnan(b)).all(), (
+            f"{key} 在整周空窗数据上快/慢路径不一致"
+        )
+    assert np.array_equal(fast["weekly_bars"], slow["weekly_bars"])

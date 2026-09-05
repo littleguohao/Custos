@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 
 import pytest
 
@@ -586,3 +587,89 @@ class TestParallelJobs:
         assert payload["results"] == []
         assert payload["budget"]["failed"] == 12
         assert sorted(p.name for p in tmp_path.glob("*.json")) == ["_ranked__t1.json"]
+
+    def test_jobs2_output_not_interleaved(self, tmp_path, monkeypatch, capsys):
+        """-j 2：子进程输出按格捕获，跑完按 plan 序整块打印——两格日志不交错。
+
+        每格 mock 5 行带格子身份的输出：控制台里同格 5 行必须连续成块、块序
+        = plan 序（b1_dual 在前，即使它后完成）；ranked payload 与串行一致。
+        """
+        fr = _FakeRun()
+        kws: list[dict] = []  # 逐次格子调用的 kwargs（钉「串行透传 / 并行捕获」）
+
+        def _run(cmd, **kw):
+            cmd = list(cmd)
+            if "--dump-codes" in cmd:
+                return fr(cmd, **kw)
+            fr.calls.append(cmd)
+            kws.append(kw)
+            out = cmd[cmd.index("--out") + 1]
+            with open(out, "w", encoding="utf-8") as f:
+                json.dump(_fake_summary(cmd), f)
+            r = _R()
+            scorer = cmd[cmd.index("--scorer") + 1]
+            if scorer == "b1_dual":
+                time.sleep(0.2)  # 让完成序与 plan 序相反，块序仍须按 plan 序
+            r.stdout = "\n".join(f"[child {scorer}] line {k}" for k in range(5))
+            return r
+
+        monkeypatch.setattr(sg.subprocess, "run", _run)
+        argv = [
+            "--scorers",
+            "b1_dual,kdj_j",
+            "--gates",
+            "j_low",
+            "--exit-grid",
+            json.dumps([{"name": "e0", "params": {}}]),
+            "--tag",
+            "t1",
+            "--top-k",
+            "99",
+        ]
+        out_s, out_p = tmp_path / "s", tmp_path / "p"
+        assert sg.main(argv + ["--out-dir", str(out_s)]) == 0
+        assert sg.main(argv + ["--out-dir", str(out_p), "-j", "2"]) == 0
+        # 结果 payload 与串行逐字节一致（捕获只动日志，不动结果）
+        p_s = json.loads((out_s / "_ranked__t1.json").read_text("utf-8"))
+        p_p = json.loads((out_p / "_ranked__t1.json").read_text("utf-8"))
+        assert p_s == p_p
+        # 串行不捕获（子进程直接透传），并行才捕获
+        assert len(kws) == 4
+        assert all("stdout" not in kw for kw in kws[:2])
+        assert all(kw.get("stdout") == sg.subprocess.PIPE for kw in kws[2:])
+        # 两格输出各自连续成块（不交错），块序 = plan 序
+        lines = capsys.readouterr().out.splitlines()
+        head: dict[str, int] = {}
+        for scorer in ("b1_dual", "kdj_j"):
+            idxs = [
+                i for i, ln in enumerate(lines) if ln.startswith(f"[child {scorer}]")
+            ]
+            assert len(idxs) == 5, f"{scorer} 的子进程输出必须完整进日志块"
+            assert idxs == list(range(idxs[0], idxs[0] + 5)), (
+                f"{scorer} 的输出被其他格子交错打断: {idxs}"
+            )
+            head[scorer] = idxs[0]
+        assert head["b1_dual"] < head["kdj_j"], "日志块必须按 plan 序打印"
+        assert "[DONE] b1_dual/j_low/e0" in "\n".join(lines)
+
+    def test_jobs2_failed_cell_output_visible(self, tmp_path, monkeypatch, capsys):
+        """并行下失败格子的输出也整块打出——捕获不能把失败现场（stderr）吃掉。"""
+        fr = _FakeRun()
+
+        def _run(cmd, **kw):
+            cmd = list(cmd)
+            if "--dump-codes" in cmd:
+                return fr(cmd, **kw)
+            fr.calls.append(cmd)
+            r = _R()
+            r.returncode = 1
+            r.stdout = "boom: 子进程崩了"
+            return r
+
+        monkeypatch.setattr(sg.subprocess, "run", _run)
+        assert sg.main(_argv(tmp_path, "--top-k", "99", "-j", "2")) == 0
+        payload = _payload(tmp_path)
+        assert payload["budget"]["failed"] == 12
+        out = capsys.readouterr().out
+        assert out.count("boom: 子进程崩了") == 12
+        assert "[FAIL]" in out

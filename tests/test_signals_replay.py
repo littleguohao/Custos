@@ -14,6 +14,7 @@
 """
 
 import json as _json
+import os as _os
 import types as _types
 from pathlib import Path as _Path
 
@@ -453,3 +454,139 @@ class TestM2SignalReusePlan:
             assert "--signals-out" not in cmd
         out = capsys.readouterr().out
         assert "信号层复用" in out and "2 个方案" in out
+
+
+# ---------------------------------------------------------------------------
+# review 缺口钉测：互斥 / 日期对账 / 缺条目 WARN / 缓存清理
+# ---------------------------------------------------------------------------
+
+
+class TestSignalsOutFromSignalsMutex:
+    def test_signals_out_and_from_signals_mutex(self):
+        """--signals-out 与 --from-signals 同给 ⇒ 互斥报错（非零退出）。
+
+        同给时重放优先 ⇒ 扫描不执行、sink 为空却仍落盘；两旗标同路径会把
+        源信号缓存覆盖成空文件（签名却合法，下游照用不误）——fail-closed。"""
+        with pytest.raises(SystemExit) as exc:
+            bt.main(
+                _CLI + ["--signals-out", "a.json", "--from-signals", "b.json"],
+                loader=_loader,
+            )
+        assert exc.value.code != 0
+
+
+class TestReplayDateReconcile:
+    """数据更新后同一 bar 索引可能已是别的交易日：重放必须对账信号 date，
+    对不上 fail-closed（拼出从未存在的 trades 是最难发现的错法）。"""
+
+    def test_date_mismatch_raises_with_context(self):
+        """库层：信号 date != 现数据 dates[i] ⇒ ValueError，
+        信息含 code / bar 索引 / 文件日期 / 现数据日期。"""
+        sink = []
+        bt.evaluate_trades(BARS, scorer=_STUB, min_bars=30, signals_out=sink)
+        sigs = _replay_signals(sink)
+        sigs["600000"][0]["date"] = "1999-12-31"  # 绝不等于现数据日期
+        with pytest.raises(
+            ValueError, match=r"600000 bar \d+: 信号文件日期 1999-12-31"
+        ):
+            bt.evaluate_trades(BARS, scorer=_STUB, min_bars=30, signals_in=sigs)
+
+    def test_date_drift_cli_fail_closed(self, tmp_path, capsys):
+        """CLI 层：整体日期漂移（数据已更新）⇒ [FAIL] 提示重新 --signals-out，
+        非零退出、不落盘（m2 会把非零退出当失败自动退回全量扫描）。"""
+        sig = tmp_path / "sig.json"
+        assert bt.main(_CLI + ["--signals-out", str(sig)], loader=_loader) == 0
+
+        def drifted_loader(codes, count):
+            # 同价位、同长度，仅日期整体后移一天 ⇒ bar 索引不变、日期全漂移
+            out = {}
+            for c in codes:
+                if c not in BARS:
+                    continue
+                df = BARS[c].copy()
+                df["date"] = df["date"] + pd.Timedelta(days=1)
+                out[c] = df
+            return out
+
+        out = tmp_path / "o.json"
+        rc = bt.main(
+            _CLI + ["--from-signals", str(sig), "--out", str(out)],
+            loader=drifted_loader,
+        )
+        assert rc != 0
+        assert not out.exists()
+        err = capsys.readouterr().err
+        assert "日期对不上" in err and "重新 --signals-out" in err
+
+    def test_date_match_replay_unaffected(self):
+        """日期一致 ⇒ 对账不误伤：重放照常，trades 与全量逐位一致。"""
+        full = bt.evaluate_trades(BARS, scorer=_STUB, min_bars=30)
+        assert full, "全量 0 笔 ⇒ 钉测形同虚设"
+        sink = []
+        bt.evaluate_trades(BARS, scorer=_STUB, min_bars=30, signals_out=sink)
+        replay = bt.evaluate_trades(
+            BARS, scorer=_STUB, min_bars=30, signals_in=_replay_signals(sink)
+        )
+        assert replay == full
+
+    def test_out_of_range_signals_warn(self, capsys):
+        """文件里 i<min_bars 或 i>=n-1 的条目被丢弃 ⇒ 一行 WARN（含 code 与
+        条数），不再静默；区间内的信号照常发射、trades 不受影响。"""
+        sink = []
+        bt.evaluate_trades(BARS, scorer=_STUB, min_bars=30, signals_out=sink)
+        sigs = _replay_signals(sink)
+        sigs["600000"] += [
+            {"code": "600000", "i": 0, "date": "2023-12-29", "score": 1},  # i<30
+            {"code": "600000", "i": 10**6, "date": "2099-01-01", "score": 1},  # i>=n-1
+        ]
+        replay = bt.evaluate_trades(BARS, scorer=_STUB, min_bars=30, signals_in=sigs)
+        err = capsys.readouterr().err
+        assert "[WARN]" in err and "600000" in err and "2 条" in err
+        full = bt.evaluate_trades(BARS, scorer=_STUB, min_bars=30)
+        assert replay == full
+
+
+class TestReplayMissingCodeWarn:
+    def test_missing_code_warns_and_trades_clean(self, capsys):
+        """股票加载成功但信号文件无条目 ⇒ WARN 列出该 code（与「本就零信号」
+        区分开）；有条目的股票重放结果不受污染（与单股全量逐位一致）。"""
+        only = {"600000": BARS["600000"]}
+        sink = []
+        bt.evaluate_trades(only, scorer=_STUB, min_bars=30, signals_out=sink)
+        replay = bt.evaluate_trades(
+            BARS, scorer=_STUB, min_bars=30, signals_in=_replay_signals(sink)
+        )
+        err = capsys.readouterr().err
+        assert "[WARN]" in err and "000001" in err and "300750" in err
+        assert "600000" not in err  # 有条目的不在 WARN 里
+        solo = bt.evaluate_trades(only, scorer=_STUB, min_bars=30)
+        assert replay == solo  # 缺条目股零交易，其余逐位一致
+
+    def test_missing_codes_truncated_over_10(self, capsys):
+        """缺条目股票超过 10 只 ⇒ WARN 只列前 10 只并注明总数。"""
+        bars = {f"60{i:04d}": _mk(_wave(50)) for i in range(12)}
+        bt.evaluate_trades(bars, scorer=_STUB, min_bars=30, signals_in={})
+        err = capsys.readouterr().err
+        assert "12 只股票" in err and "等共 12 只" in err
+        assert "600009" in err  # 前 10 只列出
+        assert "600010" not in err  # 第 11 只起截断
+
+
+class TestSignalsFilePrune:
+    def test_old_signal_files_pruned_to_keep_32(self, tmp_path):
+        """信号缓存只增不减 ⇒ 写新文件后同目录同前缀旧文件按 mtime 留最新
+        32 个（新文件不参与淘汰），其余清掉。"""
+        for k in range(35):
+            p = tmp_path / f"_signals__test__old{k:02d}.json"
+            p.write_text("{}", encoding="utf-8")
+            ts = 1_700_000_000 + k  # 递增 mtime，old00 最旧
+            _os.utime(p, (ts, ts))
+        new = tmp_path / "_signals__test__new.json"
+        rc = bt.main(_CLI + ["--signals-out", str(new)], loader=_loader)
+        assert rc == 0
+        left = {p.name for p in tmp_path.glob("_signals__*.json")}
+        assert len(left) == 33  # 32 个最新旧文件 + 1 个新文件
+        assert new.name in left
+        for k in range(3):  # 被清掉的是 mtime 最旧的 3 个
+            assert f"_signals__test__old{k:02d}.json" not in left
+        assert "_signals__test__old03.json" in left

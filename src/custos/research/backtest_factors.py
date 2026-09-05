@@ -206,6 +206,12 @@ def _weekly_gate_arrays(df: pd.DataFrame) -> Optional[dict[str, Any]]:
         if weekly.empty:
             return None
         # 日 bar → 周序号：W-FRI 的 bin 标签 = 当周的周五（周五当日归自身）
+        # ⚠️ 手算标签的输入假定：date 列为**午夜（00:00:00）、无时区**——带时分秒的
+        # 日期会让手算标签对不上 resample 产出的午夜周标签（wpos 查表 KeyError ⇒
+        # 走 except 回退 None，行为仍与旧版一致但失速）。此处显式断言钉住假定。
+        assert (
+            d["date"].dt.tz is None and (d["date"].dt.normalize() == d["date"]).all()
+        ), "_weekly_gate_arrays 假定 date 列为午夜、无时区的交易日"
         wd = d["date"].dt.weekday.to_numpy()
         labels = (d["date"] + pd.to_timedelta((4 - wd) % 7, unit="D")).to_numpy()
         wpos = {lab: k for k, lab in enumerate(weekly["date"].to_numpy())}
@@ -238,7 +244,8 @@ def _weekly_gate_arrays(df: pd.DataFrame) -> Optional[dict[str, Any]]:
         # （旧实现每根日 bar 都重做 rolling(9) 高低切片与 DKS 删步，实测 tottime
         #   0.85s/30票×1500根、占 _prepare_stock 大头；新实现**逐位一致**：max/min
         #   与求值顺序无关，DKS 删步是 w 的确定函数。等价性钉测
-        #   test_gate_precompute_equivalence ③ 逐 bar 覆盖本函数产出的序列。）
+        #   test_gate_precompute_equivalence ③ 抽样（每 3 根+末 2 根）覆盖本函数
+        #   产出的序列，全量逐 bar 由 ②（evaluate_trades 逐笔等价）兜底。）
         m1w = _KDJ_N - 1  # 周 J 的 rolling 窗口含 8 个完整周（不含进行中的部分周）
         hh_w = np.full(W, np.nan)
         ll_w = np.full(W, np.nan)
@@ -256,8 +263,10 @@ def _weekly_gate_arrays(df: pd.DataFrame) -> Optional[dict[str, Any]]:
         dks_day = []
         for win in _DKS_WINS:
             sum_a, c_add_a, c_rem_a, ncs_a, prev_a, neg_a = dks_states[win]
-            s1 = np.empty(W)
-            ng1 = np.empty(W, dtype=np.int64)
+            # w<win-1 的位置永不写入，读取处全靠 valid_all 掩掉 ⇒ 不用 np.empty
+            # 读未初始化内存，显式 NaN/0 占位（有效位逐位不变，掩掉位产出 NaN 更稳）。
+            s1 = np.full(W, np.nan)
+            ng1 = np.full(W, 0, dtype=np.int64)  # int 无 NaN，0 占位（同被掩掉）
             for w in range(win - 1, W):
                 s = sum_a[w - 1]
                 ng = neg_a[w - 1]
@@ -273,7 +282,8 @@ def _weekly_gate_arrays(df: pd.DataFrame) -> Optional[dict[str, Any]]:
             dks_day.append((c_add_a, ncs_a, prev_a, s1, ng1))
         # ---- v0.173 全向量化逐日步：每日只是「周态标量」对「当日收盘 cp」的一步 ----
         # 更新，全部改成对 day_w 的 gather + elementwise 运算（每个元素的浮点算式与
-        # 旧逐日循环逐项相同 ⇒ 逐位一致；等价性钉测 ③ 逐 bar 覆盖产出序列）。
+        # 旧逐日循环逐项相同 ⇒ 逐位一致；等价性钉测 ③ 抽样覆盖产出序列，全量逐 bar
+        # 由 ② evaluate_trades 逐笔等价兜底）。
         idx = day_w  # 日 bar → 周序号
         cp = close
         has_prev = idx > 0
@@ -1492,8 +1502,9 @@ if rsi_state_score is not None:
 # precomputed 分支**只读 ``pre + len(df_slice)``**（len 用于推 bar 序号 i），
 # 因此热循环可传「只有长度的占位对象」（``_PrefixLen``）而不构造真切片——
 # gate 函数体**零改动**，``len()`` 照常用；任何误进白名单、实际读列的 gate 会在
-# 占位对象上 AttributeError（被 gate 自身 except 兜成 False），等价性钉测
-# （tests/test_gate_precompute_equivalence.py 的 slice-free 用例）会立刻抓住。
+# 占位对象上抛 ``_PrefixLenAccessError``（BaseException 派生，gate 自身的
+# except Exception 吞不掉，必然炸到调用方/钉测，不会静默判负少信号），
+# 注册钉测（tests/test_gate_precompute_equivalence.py 的 slice-free 用例）逐成员钉住。
 #
 # 值 = 该 gate 的 precomputed 分支**必须存在且非 None** 的键（缺键时 gate 会回退
 # 读真 df 的慢路径——占位对象上没有列 ⇒ 行为会变 ⇒ 该股票不得走快速路径）：
@@ -1520,6 +1531,12 @@ _SLICE_FREE_GATES: dict[Callable, tuple[str, ...]] = {
     j_low_qsx_weekly_gate: ("weekly_j", "qsx"),
     weekly_qsx_gt_dks_gate: ("weekly_qsx",),
     j_low_weekly_qsx_weekly_gate: ("weekly_j", "weekly_qsx"),
+    # rsi 系四条：precomputed 分支把占位对象直接传给 ``rsi_regime(df_slice,
+    # rsi_series=rs)``——成立**仅靠** rsi_regime 拿到 rsi_series 后只用
+    # ``len(df)``（取 ``rsi_series.iloc[:len(df)]``），从不读 df 列。
+    # ⚠️ 隐式依赖：rsi_regime 若未来改读 df 列（如对齐 rsi_divergence 读
+    #    df["low"] 判价格新低），须先把这四条移出白名单，否则占位路径立刻
+    #    抛 _PrefixLenAccessError。
     rsi_strong_regime_gate: ("rsi14",),
     rsi_deep_oversold_gate: ("rsi14",),
     j_low_rsi_strong_gate: ("rsi14",),
@@ -2537,15 +2554,29 @@ def _to_weekly(df: pd.DataFrame) -> pd.DataFrame:
     return d.resample("W-FRI").agg(agg).dropna(subset=["close"]).reset_index()
 
 
+class _PrefixLenAccessError(BaseException):
+    """``_PrefixLen`` 占位对象被读列/属性/下标时抛出——**编程错误必须炸出来**。
+
+    刻意派生自 ``BaseException`` 而非 Exception：gate 自带的
+    ``except Exception: return False``（如 ``_j_low_adx_gate``）吞不掉它，
+    未来若有人把实际读列的 gate 误加进 ``_SLICE_FREE_GATES`` 白名单，
+    异常会穿透 gate 的兜底直抵调用方/测试，而不是被静默吞成 False 少信号
+    （旧版抛 AttributeError 就会被吞）。已 grep 确认：本模块从热循环
+    （evaluate_trades/_scan_entry_signals → _entry_signal → gate）到 gate
+    调用之间没有 ``except BaseException``/裸 except，无合法捕获点会拦截它。
+    """
+
+
 class _PrefixLen:
     """无切片快速路径里顶替 ``df.iloc[:i+1]`` 的「只有长度」占位对象（v0.173）。
 
     白名单 gate（``_SLICE_FREE_GATES``）的 precomputed 分支只用 ``len(df_slice)``
     推 bar 序号（i = len-1），从不读列 ⇒ 传这个对象即可，**省掉每 bar 的 pandas
     切片固定开销**（profile：30 票×1500 根下切片 ≈6.5s/总 10s 的大头）。
-    只实现 ``__len__``：任何对列/索引/iloc 的访问都 AttributeError —— 误进白名单
-    的 gate 会被自身 ``except: return False`` 兜住，且逐 bar 等价性钉测
-    （test_gate_precompute_equivalence 的 slice-free 用例）必然炸出，不会静默错口径。
+    只实现 ``__len__``：任何对列/属性/下标/真值/迭代的访问都抛
+    ``_PrefixLenAccessError``（BaseException 派生，gate 的 except Exception
+    吞不掉）——误进白名单的 gate 立刻炸出而非静默判负，注册钉测
+    （test_gate_precompute_equivalence 的 slice-free 用例）逐成员钉住。
     """
 
     __slots__ = ("n",)
@@ -2555,6 +2586,35 @@ class _PrefixLen:
 
     def __len__(self) -> int:
         return self.n
+
+    # ---- 占位防御点：除 len() 外的任何读取都是编程错误（误进白名单），立刻炸 ----
+    def __getattr__(self, name: str):
+        raise _PrefixLenAccessError(
+            f"_PrefixLen 只有 len()：读取属性 {name!r}"
+            " ⇒ 该 gate 读列，不得进 _SLICE_FREE_GATES"
+        )
+
+    def __getitem__(self, key: Any):
+        raise _PrefixLenAccessError(
+            f"_PrefixLen 只有 len()：下标访问 {key!r}"
+            " ⇒ 该 gate 读列，不得进 _SLICE_FREE_GATES"
+        )
+
+    def __bool__(self) -> bool:
+        raise _PrefixLenAccessError(
+            "_PrefixLen 只有 len()：真值判定 ⇒ 该 gate 读列，不得进 _SLICE_FREE_GATES"
+        )
+
+    def __iter__(self):
+        raise _PrefixLenAccessError(
+            "_PrefixLen 只有 len()：迭代访问 ⇒ 该 gate 读列，不得进 _SLICE_FREE_GATES"
+        )
+
+    def __contains__(self, item: Any) -> bool:
+        raise _PrefixLenAccessError(
+            f"_PrefixLen 只有 len()：成员判定 {item!r}"
+            " ⇒ 该 gate 读列，不得进 _SLICE_FREE_GATES"
+        )
 
 
 def _dual_form_gate(entry_gate: Callable) -> Callable:
@@ -2867,6 +2927,10 @@ def _trades_from_signals(
     """
     by_i = {c["i"]: c for c in (signals or [])}
     n = len(df)
+    # 落在可发射区间 [min_bars, n-1) 之外的文件条目会被静默丢弃（数据窗口与
+    # 生产时不一致的痕迹）——数出来，跑完打一行 WARN，别让「信号没少、trades
+    # 少了」无从排查
+    dropped = sum(1 for c in (signals or []) if c["i"] < min_bars or c["i"] >= n - 1)
     trades: list[dict[str, Any]] = []
     emitted = 0
     i = min_bars
@@ -2875,6 +2939,13 @@ def _trades_from_signals(
         if cand is None:
             i += max(1, step)
             continue
+        # fail-closed 对账：数据更新后同一 bar 索引可能已是另一个交易日，
+        # 照文件日期记账 = 拼出从未存在的 trades——对不上就炸，不猜
+        if cand.get("date") != dates[i]:
+            raise ValueError(
+                f"{code} bar {i}: 信号文件日期 {cand.get('date')}"
+                f" != 现数据日期 {dates[i]}"
+            )
         slice_df = df.iloc[: i + 1]
         stop_ov = _platform_stop_override(slice_df, stop_mode=sim_kw["stop_mode"])
         tr = simulate_b1_trade(
@@ -2901,6 +2972,12 @@ def _trades_from_signals(
         if max_signals_per_code and emitted >= max_signals_per_code:
             break
         i = _advance_i(i, step, tr, collect_all)
+    if dropped:
+        print(
+            f"[WARN] {code}: {dropped} 条缓存信号落在可发射区间外"
+            f"（i<{min_bars} 或 i>={n - 1}）已丢弃——数据窗口与生产时不一致？",
+            file=sys.stderr,
+        )
     return trades
 
 
@@ -3022,6 +3099,9 @@ def evaluate_trades(
     }
 
     trades: list[dict[str, Any]] = []
+    # 重放模式下「df 加载成功但信号文件无该 code 条目」的股票：与「本就零信号」
+    # 不可区分（生产时该股加载失败就是这副模样）——收集起来跑完统一 WARN
+    missing_signals: list[str] = []
     for code, raw in bars_by_code.items():
         # 重放（signals_in）路径不做进场判定 ⇒ gate/scorer 预计算整股跳过
         # （v0.174）：gate_pre 里的周线序列（_weekly_gate_arrays）是重放成本的
@@ -3058,6 +3138,10 @@ def evaluate_trades(
             scorer in _SLICE_FREE_SCORERS and scorer_pre is not None
         )
         if use_signals:
+            if signals_in is not None and code not in signals_in:
+                # 静默零信号最坑：生产侧加载失败 ⇒ 文件无条目 ⇒ 重放照跑却
+                # 该股零交易，结果看不出任何异常——只收集不挡流程（不污染 trades）
+                missing_signals.append(code)
             trades += _trades_from_signals(
                 df,
                 code,
@@ -3147,6 +3231,15 @@ def evaluate_trades(
             if max_signals_per_code and emitted >= max_signals_per_code:
                 break
             i = _advance_i(i, step, tr, collect_all)
+    if missing_signals:
+        # 全部跑完打一行（流式逐股调用时一股一行）：超过 10 只截断，注明总数
+        shown = ", ".join(missing_signals[:10])
+        tail = f" …等共 {len(missing_signals)} 只" if len(missing_signals) > 10 else ""
+        print(
+            f"[WARN] {len(missing_signals)} 只股票已加载但信号文件无条目，"
+            f"按零信号重放: {shown}{tail}",
+            file=sys.stderr,
+        )
     return trades
 
 
@@ -3880,6 +3973,29 @@ def signals_signature(args: Any, codes: list[str]) -> dict[str, Any]:
     }
 
 
+def _prune_signals_files(path: Path, keep: int = 32) -> None:
+    """信号缓存只增不减 ⇒ 写完新文件后，同目录同前缀的旧文件按 mtime 留最新
+    ``keep`` 个，其余删掉。
+
+    前缀取落盘文件名首个 ``__`` 之前（m2 落的是 ``_signals__<fp>__<hash>.json``
+    ⇒ 清 ``_signals__*.json``）；无 ``__`` 段的散文件 glob 不到任何东西，不动。
+    刚写出的新文件不参与淘汰。清理失败只 WARN：信号文件是易再生的中间产物，
+    不值得为它挂掉整轮回测。
+    """
+    prefix = path.name.split("__")[0]
+    try:
+        old = [p for p in path.parent.glob(f"{prefix}__*.json") if p != path]
+        old.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError as e:
+        print(f"[WARN] 信号缓存清理列目录失败（{e}），跳过", file=sys.stderr)
+        return
+    for p in old[keep:]:
+        try:
+            p.unlink()
+        except OSError as e:
+            print(f"[WARN] 旧信号缓存删不掉 {p.name}: {e}", file=sys.stderr)
+
+
 def _write_signals_file(
     path: Path, args: Any, codes: list[str], signals: list[dict[str, Any]]
 ) -> None:
@@ -3899,6 +4015,7 @@ def _write_signals_file(
         f"[OK] 写出 {path}（{len(signals)} 条进场信号，"
         f"供 --from-signals 重放；签名 {len(payload['signals_signature'])} 字段）"
     )
+    _prune_signals_files(path)
 
 
 def _load_signals_checked(args: Any, codes: list[str]) -> Optional[dict[str, list]]:
@@ -3944,9 +4061,12 @@ def _load_signals_checked(args: Any, codes: list[str]) -> Optional[dict[str, lis
     for s in sigs:
         if isinstance(s, dict) and "code" in s and "i" in s:
             by_code.setdefault(s["code"], []).append(s)
+    # 报可用条数而非原始条数：缺 code/i 键的畸形条目进不了 by_code，
+    # 报原数会让人以为它们也参与了重放
+    n_ok = sum(len(v) for v in by_code.values())
     print(
-        f"[OK] 读入 {src.name} 的 {len(sigs)} 条进场信号（信号口径已核对一致），"
-        f"跳过逐 bar 进场扫描",
+        f"[OK] 读入 {src.name} 的 {n_ok} 条可用进场信号（共 {len(sigs)} 条，"
+        f"信号口径已核对一致），跳过逐 bar 进场扫描",
         file=sys.stderr,
     )
     return by_code
@@ -4561,6 +4681,13 @@ def main(
         ap.error(
             "--from-trades 与 --from-signals 互斥（一个是 trades 层、一个是信号层复用）"
         )
+    if args.signals_out and args.from_signals:
+        # 同给时重放优先 ⇒ 扫描不执行、sink 为空却仍落盘；两旗标指向同一路径时
+        # 会把源信号缓存覆盖成空文件（签名却合法，下游照用不误）——报错，不猜
+        ap.error(
+            "--signals-out 与 --from-signals 互斥（生产与重放不能同跑，"
+            "否则空 sink 会覆盖掉源信号缓存）"
+        )
     if (args.from_signals or args.signals_out) and not args.trade_sim:
         ap.error(
             "--signals-out/--from-signals 只用于 --trade-sim（进场信号是交易模拟的中间产物）"
@@ -4767,15 +4894,25 @@ def _run_trade_sim(
     amv_regime = None if replay else _load_amv_gate(args, ap)
     sector_gate = None if replay else _load_sector_gate(args, ap)
     signals_collected: Optional[list[dict[str, Any]]] = [] if args.signals_out else None
-    trades, n_loaded, t_load, t_eval = _stream_trades(
-        args,
-        codes,
-        load,
-        amv_regime,
-        sector_gate,
-        signals_in=signals_in,
-        signals_out=signals_collected,
-    )
+    try:
+        trades, n_loaded, t_load, t_eval = _stream_trades(
+            args,
+            codes,
+            load,
+            amv_regime,
+            sector_gate,
+            signals_in=signals_in,
+            signals_out=signals_collected,
+        )
+    except ValueError as e:
+        # 重放对账 fail-closed（_trades_from_signals 的日期核对）：信号文件是
+        # 旧数据生产的，照它记账 = 拼出从未存在的 trades。m2 调度把重放子进程
+        # 非零退出当失败、自动退回全量扫描 ⇒ 这里直接 FAIL 退出，不产半截结果
+        print(
+            f"[FAIL] 信号与现数据日期对不上（数据已更新？重新 --signals-out 生产）: {e}",
+            file=sys.stderr,
+        )
+        return 2
     _report_stream_stats(args, codes, trades, t_load, t_eval)
     if not replay:
         _report_gates()

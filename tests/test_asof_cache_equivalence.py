@@ -13,7 +13,10 @@
      （默认 asof_technical_score 路径与 winner_factor_study.panel_hook 路径各一臂）；
   ④ 跨轮复算去重生效：同输入第二轮 run_study 的 compute_metrics 调用数为 0
      （resonance3「两臂 + gate④ 技术分腿」复算模式的缩影），且逐笔输出与首轮一致；
-  ⑤ 防「空==空」假绿：合成数据上真出交易、真发生缓存命中、真算出非零技术分。
+  ⑤ 防「空==空」假绿：合成数据上真出交易、真发生缓存命中、真算出非零技术分；
+  ⑥ 工程约束钉测：date 含 NaT 安全回退旧掩码路径（不抛 TypeError）、LRU 封顶
+     逐出最久未用、monkeypatch 替身与原函数各有独立键空间（互不串味）、
+     object dtype 列走 repr 摘要分支（同值命中、异值不命中）。
 """
 
 from __future__ import annotations
@@ -148,6 +151,19 @@ class TestIndexAsofFastPath:
             srs._index_asof(shuffled, d), _old_index_asof(shuffled, d)
         )
 
+    def test_nat_dates_fall_back_to_mask(self):
+        """date 列含 NaT：astype(str) 后 NaT 变 float NaN 混入，sorted() 会抛
+        TypeError——应安全判为非升序回退旧掩码路径，选出同一批行、不抛异常。"""
+        nat_index = _INDEX.copy()
+        nat_index.loc[nat_index.index[::97], "date"] = pd.NaT
+        dates, sorted_ok = srs._index_dates(nat_index)
+        assert any(not isinstance(d, str) for d in dates), "NaT 应变非 str（防空转）"
+        assert not sorted_ok, "含 NaT 应安全判为非升序（不抛 TypeError）"
+        for d in ("1990-01-01", str(_INDEX["date"].iloc[400])[:10], "2099-12-31"):
+            pd.testing.assert_frame_equal(
+                srs._index_asof(nat_index, d), _old_index_asof(nat_index, d)
+            )
+
     def test_dates_cached_per_frame_object(self):
         d1, _ = srs._index_dates(_INDEX)
         d2, _ = srs._index_dates(_INDEX)
@@ -189,6 +205,61 @@ class TestAsofCandidateCache:
             for i in range(400, 700, 60)
         ]
         assert any(s > 0 for s in scores), "合成数据上技术分全 0，等价测试形同空转"
+
+    def test_lru_cap_evicts_oldest(self, monkeypatch):
+        """LRU 封顶：塞入超上限的不同 (票,信号日) 候选，最久未用条目被逐出。"""
+        monkeypatch.setattr(srs, "_CAND_CACHE_MAX", 4)
+        calls = _counting_cm(monkeypatch)
+        combos = [(c, i) for c in CODES for i in (500, 600)]  # 6 个不同键
+        results = {}
+        for c, i in combos:
+            results[(c, i)] = srs.asof_candidate(_DF[c], _INDEX, i, c)
+        assert len(calls) == 6, "6 个不同键应各算一次"
+        assert len(srs._CAND_CACHE) <= 4, "缓存长度不应超上限"
+        # 最早条目已被逐出 ⇒ 再查重算（此时又逐出当前最久未用，缓存仍 ≤4）
+        srs.asof_candidate(_DF["600000"], _INDEX, 500, "600000")
+        assert len(calls) == 7, "被逐出的最早条目再查应重算"
+        assert len(srs._CAND_CACHE) <= 4
+        # 尾部（最近使用）条目仍命中
+        c, i = combos[-1]
+        assert srs.asof_candidate(_DF[c], _INDEX, i, c) is results[(c, i)]
+        assert len(calls) == 7, "尾部条目应仍命中缓存、不重算"
+
+    def test_monkeypatched_compute_has_own_keyspace(self, monkeypatch):
+        """compute_metrics 函数身份进键：monkeypatch 替身与原函数互不串味。"""
+        df, code, i = _DF["600000"], "600000", 500
+        orig = ec.compute_metrics
+        c_orig = srs.asof_candidate(df, _INDEX, i, code)  # ① 原函数评一次，填缓存
+        sentinel = {"marker": "monkeypatch 替身"}
+        monkeypatch.setattr(ec, "compute_metrics", lambda *a, **k: sentinel)
+        c_fake = srs.asof_candidate(df, _INDEX, i, code)
+        assert c_fake is sentinel, "② 同内容应走替身重算，而非命中原函数缓存"
+        monkeypatch.setattr(ec, "compute_metrics", orig)  # ③ 恢复原函数
+        c_again = srs.asof_candidate(df, _INDEX, i, code)
+        assert c_again is c_orig, "③ 恢复后应命中原缓存（原值，不是替身的值）"
+
+
+# ---- _frame_digest：object dtype 列走 repr 拼接分支 ----
+
+
+class TestFrameDigest:
+    def test_object_column_repr_branch(self, monkeypatch):
+        """object 列同值两帧同摘要（缓存命中）、不同值不同摘要（缓存不命中）。"""
+        calls = _counting_cm(monkeypatch)
+        df = _DF["600000"].copy()
+        # object 列（pandas 3 下纯 str 赋值会推成 StringDtype，须显式 object）
+        df["note"] = pd.Series(["a"] * len(df), dtype=object)
+        same = df.copy()
+        assert df["note"].dtype == object, "应确为 object dtype（防空转）"
+        assert srs._frame_digest(df) == srs._frame_digest(same)
+        c1 = srs.asof_candidate(df, _INDEX, 500, "600000")
+        c2 = srs.asof_candidate(same, _INDEX, 500, "600000")
+        assert c2 is c1 and len(calls) == 1, "同值两帧应同摘要、命中缓存"
+        diff = df.copy()
+        diff.loc[diff.index[500], "note"] = "b"  # 改信号日窗口内一个值
+        assert srs._frame_digest(diff) != srs._frame_digest(df)
+        c3 = srs.asof_candidate(diff, _INDEX, 500, "600000")
+        assert c3 is not c1 and len(calls) == 2, "异值应不同摘要、重算"
 
 
 # ---- ③④ run_study 全流程：开缓存 vs 无缓存原路逐笔一致 + 跨轮去重 ----

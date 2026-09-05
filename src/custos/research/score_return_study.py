@@ -326,13 +326,21 @@ def _index_dates(index_full: pd.DataFrame) -> tuple[list[str], bool]:
 
     以 id(帧) 为键缓存并**持强引用**：帧活着 ⇒ id 唯一不复用 ⇒ 绝不命中别帧；
     表满 FIFO 逐出（逐出后帧若还在，下次重算重插，语义不变）。
+    ⚠️ 条目对帧的就地修改（sort/append）**无失效机制**：调用方不得原地改帧
+    （现状所有调用方均只读）。
     """
     key = id(index_full)
     hit = _IDX_DATE_CACHE.get(key)
     if hit is not None and hit[2] is index_full:
         return hit[0], hit[1]
     dates = index_full["date"].astype(str).str[:10].tolist()
-    sorted_ok = dates == sorted(dates)
+    # 脏数据（date 含 NaT ⇒ astype(str) 出 float NaN 混入）下 sorted() 抛
+    # TypeError：安全判为非升序，回退旧布尔掩码路径（旧路径对 NaT 行静默排除、
+    # 正常出结果，不让异常上抛被上层 except 吞成「样本静默丢失」）。
+    try:
+        sorted_ok = all(isinstance(d, str) for d in dates) and dates == sorted(dates)
+    except TypeError:
+        sorted_ok = False
     while len(_IDX_DATE_CACHE) >= _IDX_DATE_CACHE_MAX:
         _IDX_DATE_CACHE.pop(next(iter(_IDX_DATE_CACHE)))
     _IDX_DATE_CACHE[key] = (dates, sorted_ok, index_full)
@@ -344,7 +352,7 @@ def _index_asof(index_full: pd.DataFrame, entry_date: str) -> pd.DataFrame:
 
     日期升序（各 study 均排序后传入）时 bisect_right 定位 k = ≤ entry_date 的行数，
     iloc[k-260:k] 与旧版 ``掩码 + tail(260)`` 选出同一批行、同一顺序；传入未排序
-    帧时原样回退旧掩码路径，行为不变。
+    （或含 NaT 等脏数据）帧时原样回退旧掩码路径，行为不变。
     """
     dates, sorted_ok = _index_dates(index_full)
     if sorted_ok:
@@ -352,7 +360,8 @@ def _index_asof(index_full: pd.DataFrame, entry_date: str) -> pd.DataFrame:
         return index_full.iloc[max(0, k - ec.OHLCV_LOAD_BARS) : k].reset_index(
             drop=True
         )
-    idx_dates = index_full["date"].astype(str).str[:10]
+    # 回退路径复用 _index_dates 已缓存的字符串列，不再重复 astype(str)
+    idx_dates = pd.Series(dates, index=index_full.index)
     return (
         index_full[idx_dates <= entry_date]
         .tail(ec.OHLCV_LOAD_BARS)

@@ -471,33 +471,71 @@ def run_cell(
     a: argparse.Namespace,
     cell: dict[str, Any],
     out_dir: pathlib.Path,
-) -> tuple[str, Optional[pathlib.Path]]:
-    """跑一个格子。返回 ``(状态, 结果文件)``，状态 ∈ ran/reused/failed。"""
+    capture: bool = False,
+) -> tuple[str, Optional[pathlib.Path], str]:
+    """跑一个格子。返回 ``(状态, 结果文件, 日志块)``，状态 ∈ ran/reused/failed。
+
+    ``capture=True``（``--jobs > 1`` 并行用）：子进程 stdout/stderr 合并捕获进
+    日志块，由调用方整块打印——否则多路子进程日志逐行交错没法读（m2 ``_run``
+    的 capture 口径）。串行（默认）不捕获：子进程输出直接透传终端，日志块
+    恒为 ""，行为与此前逐字节一致。
+    """
     cli = _cell_args(a, cell)
     out = cell_out_path(out_dir, cell, cell_signature(cli, _udigest(a)))
     tag = f"{cell['scorer']}/{cell['gate']}/{cell['exit']}"
+    log: list[str] = []
+
+    def _say(line: str) -> None:
+        """串行时实时打印，并行时收进 log 等整块打印（m2 ``_run._say`` 口径）。"""
+        if capture:
+            log.append(line)
+        else:
+            print(line)
+
     if out.exists() and not a.force:
-        print(f"[SKIP] {out.name}（签名一致，复用）")
-        return "reused", out
+        _say(f"[SKIP] {out.name}（签名一致，复用）")
+        return "reused", out, "\n".join(log)
     cmd = [sys.executable, str(SCRIPT)] + cli + ["--out", str(out)]
     timeout = getattr(a, "timeout", 0) or CELL_TIMEOUT_S
+    if capture:
+        # ⚠️ 捕获期间「在跑」与「已死」在日志上长得一样 ⇒ 先打一行短心跳直接进
+        # stdout（单行交错无妨；m2 :595 的口径）。日志块以 [RUN] 开头标识格子。
+        print(f"[START] {tag}  {time.strftime('%H:%M:%S')}", flush=True)
+        _say(f"[RUN ] {tag}")
     t0 = time.time()
     try:
-        r = subprocess.run(cmd, cwd=str(BASE), timeout=timeout)
+        if capture:
+            # stderr 并入 stdout：块内保持子进程原始输出顺序，失败时 stderr 照常
+            # 可见。子进程（backtest_factors）stdout/stderr 已钉 utf-8 ⇒ 显式
+            # utf-8 解码，否则 Windows GBK locale 下 text=True 按 cp936 解码出乱码。
+            r: subprocess.CompletedProcess = subprocess.run(
+                cmd,
+                cwd=str(BASE),
+                timeout=timeout,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            if r.stdout:
+                log.append(r.stdout.rstrip())
+        else:
+            r = subprocess.run(cmd, cwd=str(BASE), timeout=timeout)
     except subprocess.TimeoutExpired:
-        print(f"[FAIL] {tag} 超时（>{timeout}s，--timeout 可调）")
-        return "failed", None
+        _say(f"[FAIL] {tag} 超时（>{timeout}s，--timeout 可调）")
+        return "failed", None, "\n".join(log)
     dt = time.time() - t0
     if r.returncode != 0 or not out.exists():
-        print(f"[FAIL] {tag} exit={r.returncode} ({dt:.0f}s)")
-        return "failed", None
+        _say(f"[FAIL] {tag} exit={r.returncode} ({dt:.0f}s)")
+        return "failed", None, "\n".join(log)
     if not _result_complete(out):
         # 删掉毒文件：留着下轮会被「签名一致」复用，残缺口径就永远洗不掉
-        print(f"[FAIL] {tag} rc=0 但结果 JSON 残缺/无交易摘要 ({dt:.0f}s)")
+        _say(f"[FAIL] {tag} rc=0 但结果 JSON 残缺/无交易摘要 ({dt:.0f}s)")
         out.unlink(missing_ok=True)
-        return "failed", None
-    print(f"[DONE] {tag} {dt:.0f}s")
-    return "ran", out
+        return "failed", None, "\n".join(log)
+    _say(f"[DONE] {tag} {dt:.0f}s")
+    return "ran", out, "\n".join(log)
 
 
 # ---------- 结果读取与目标函数 ----------
@@ -643,7 +681,12 @@ class _Runner:
     def _execute(
         self, plan: list[tuple[dict[str, Any], pathlib.Path, str]]
     ) -> list[tuple[str, Optional[pathlib.Path]]]:
-        """按 plan 执行（``--jobs > 1`` 时并行），返回与 plan 对齐的 (状态, 结果文件)。"""
+        """按 plan 执行（``--jobs > 1`` 时并行），返回与 plan 对齐的 (状态, 结果文件)。
+
+        并行时格子日志由 ``run_cell(capture=True)`` 整块捕获，全部跑完后按 plan 序
+        整块补打（m2 ``_run_all`` 的整块打印口径）——多路日志不逐行交错；
+        ``[PAR x/y]`` 心跳仍按完成先后实时打，保留「哪个先跑完」的时序信息。
+        """
         outcomes: dict[int, tuple[str, Optional[pathlib.Path]]] = {}
         run_idx: list[int] = []
         for i, (_cell, out, kind) in enumerate(plan):
@@ -656,7 +699,8 @@ class _Runner:
         workers = _cap_jobs(jobs, len(run_idx)) if run_idx and jobs > 1 else 1
         if workers <= 1:
             for i in run_idx:
-                outcomes[i] = run_cell(self.a, plan[i][0], self.out_dir)
+                status, path, _log = run_cell(self.a, plan[i][0], self.out_dir)
+                outcomes[i] = (status, path)
         else:
             # 线程只是在等子进程（m2 :766 的口径）⇒ ThreadPoolExecutor 最省事
             from concurrent.futures import (  # noqa: PLC0415
@@ -665,19 +709,30 @@ class _Runner:
             )
 
             print(f"[PAR] {len(run_idx)} 格并行跑（{workers} 路）")
+            logs: dict[int, str] = {}
             with ThreadPoolExecutor(max_workers=workers) as ex:
                 futs = {
-                    ex.submit(run_cell, self.a, plan[i][0], self.out_dir): i
+                    ex.submit(run_cell, self.a, plan[i][0], self.out_dir, True): i
                     for i in run_idx
                 }
                 done_n = 0
                 for f in as_completed(futs):
                     i = futs[f]
-                    outcomes[i] = f.result()
+                    status, path, logs[i] = f.result()
+                    outcomes[i] = (status, path)
                     done_n += 1
                     cell = plan[i][0]
                     tag = f"{cell['scorer']}/{cell['gate']}/{cell['exit']}"
                     print(f"[PAR {done_n}/{len(run_idx)}] {tag} 完成")
+            # 捕获的格子日志按 plan 序整块补打（分隔线 + 格子标识，m2 的块头样式）
+            for n, i in enumerate(run_idx, 1):
+                log = logs.get(i) or ""
+                if not log:
+                    continue
+                cell = plan[i][0]
+                tag = f"{cell['scorer']}/{cell['gate']}/{cell['exit']}"
+                print(f"\n{'─' * 70}\n[PAR 输出 {n}/{len(run_idx)}] {tag}\n{'─' * 70}")
+                print(log)
         return [outcomes[i] for i in range(len(plan))]
 
 
