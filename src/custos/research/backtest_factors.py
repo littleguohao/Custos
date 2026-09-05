@@ -1431,6 +1431,28 @@ def j_low_rsi_div_gate(
     )
 
 
+def j_low_rsi_ideal_b1_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
+    """J<13 且 RSI 理想 B1（强势区间 ∧ 深水区）——强势背景下的超卖回调。
+
+    与 1800 标注 ``rsi_ideal_b1`` 同一份判定（``rsi_regime`` 的
+    state=="strong" 且 deep_oversold），一次调用取两个字段。
+    """
+    if rsi_state_score is None:
+        return False
+    try:
+        rs = precomputed.get("rsi14") if precomputed is not None else None
+        reg = rsi_regime(df_slice, rsi_series=rs)
+        return bool(
+            j_low_gate(df_slice, precomputed)
+            and reg.get("state") == "strong"
+            and reg.get("deep_oversold")
+        )
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def rsi_deep_oversold_gate(
     df_slice: pd.DataFrame, precomputed: Optional[dict] = None
 ) -> bool:
@@ -1492,6 +1514,7 @@ if rsi_state_score is not None:
     ENTRY_GATES["j_low_rsi_div"] = j_low_rsi_div_gate
     ENTRY_GATES["rsi_deep"] = rsi_deep_oversold_gate
     ENTRY_GATES["j_low_rsi_deep"] = j_low_rsi_deep_gate
+    ENTRY_GATES["j_low_rsi_ideal_b1"] = j_low_rsi_ideal_b1_gate
     ENTRY_GATES["main_rally"] = main_rally_below_gate
     ENTRY_GATES["main_rally_above"] = main_rally_above_gate
 
@@ -1531,16 +1554,17 @@ _SLICE_FREE_GATES: dict[Callable, tuple[str, ...]] = {
     j_low_qsx_weekly_gate: ("weekly_j", "qsx"),
     weekly_qsx_gt_dks_gate: ("weekly_qsx",),
     j_low_weekly_qsx_weekly_gate: ("weekly_j", "weekly_qsx"),
-    # rsi 系四条：precomputed 分支把占位对象直接传给 ``rsi_regime(df_slice,
+    # rsi 系五条：precomputed 分支把占位对象直接传给 ``rsi_regime(df_slice,
     # rsi_series=rs)``——成立**仅靠** rsi_regime 拿到 rsi_series 后只用
     # ``len(df)``（取 ``rsi_series.iloc[:len(df)]``），从不读 df 列。
     # ⚠️ 隐式依赖：rsi_regime 若未来改读 df 列（如对齐 rsi_divergence 读
-    #    df["low"] 判价格新低），须先把这四条移出白名单，否则占位路径立刻
+    #    df["low"] 判价格新低），须先把这五条移出白名单，否则占位路径立刻
     #    抛 _PrefixLenAccessError。
     rsi_strong_regime_gate: ("rsi14",),
     rsi_deep_oversold_gate: ("rsi14",),
     j_low_rsi_strong_gate: ("rsi14",),
     j_low_rsi_deep_gate: ("rsi14",),
+    j_low_rsi_ideal_b1_gate: ("rsi14",),
 }
 
 

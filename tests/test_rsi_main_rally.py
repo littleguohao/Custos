@@ -302,6 +302,7 @@ class TestRegistration:
             "j_low_rsi_div",
             "rsi_deep",
             "j_low_rsi_deep",
+            "j_low_rsi_ideal_b1",
             "main_rally",
             "main_rally_above",
         ],
@@ -318,6 +319,7 @@ class TestRegistration:
             "j_low_rsi_div",
             "rsi_deep",
             "j_low_rsi_deep",
+            "j_low_rsi_ideal_b1",
             "main_rally",
             "main_rally_above",
         ],
@@ -344,6 +346,40 @@ class TestRegistration:
         ):
             expect = bt.ENTRY_GATES["j_low"](df) and bt.ENTRY_GATES[part](df)
             assert bt.ENTRY_GATES[name](df) is bool(expect)
+
+
+class TestRsiIdealB1Gate:
+    """j_low_rsi_ideal_b1（2026-09-05）：与 1800 标注 rsi_ideal_b1 同口径——
+    rsi_regime 的 state==strong 且 deep_oversold，再与 j_low 相交。"""
+
+    def test_semantics_via_monkeypatch(self, monkeypatch):
+        from custos.research import backtest_factors as bt2
+
+        df = _mk(np.linspace(30, 10, 150))
+        monkeypatch.setattr(bt2, "j_low_gate", lambda *a, **k: True)
+        for state, deep, expect in (
+            ("strong", True, True),
+            ("strong", False, False),
+            ("weak", True, False),
+            ("weak", False, False),
+        ):
+            monkeypatch.setattr(
+                bt2,
+                "rsi_regime",
+                lambda *a, _s=state, _d=deep, **k: {
+                    "state": _s,
+                    "deep_oversold": _d,
+                },
+            )
+            assert bt2.ENTRY_GATES["j_low_rsi_ideal_b1"](df) is expect
+        # j_low 不满足 ⇒ 恒 False
+        monkeypatch.setattr(bt2, "j_low_gate", lambda *a, **k: False)
+        monkeypatch.setattr(
+            bt2,
+            "rsi_regime",
+            lambda *a, **k: {"state": "strong", "deep_oversold": True},
+        )
+        assert bt2.ENTRY_GATES["j_low_rsi_ideal_b1"](df) is False
 
 
 class TestRsiDeepGate:
