@@ -83,13 +83,22 @@ def build(date: str, session: str, inputs: Iterable[Path]) -> dict:
     }
 
 
-def render_md(audit: dict) -> list[str]:
-    """MD 报告头部的两行引用块（紧跟「生成时间」一行）。"""
+def render_md(audit: dict, include_inputs: bool = False) -> list[str]:
+    """MD 报告头部的引用块（紧跟「生成时间」一行）。
+
+    输入清单行**默认不进 MD**（v0.181 起全部报告如此：N 项绝对路径对人是
+    噪声；清单仍在 JSON 的 ``audit.inputs`` 里，审计不丢）。``include_inputs=True``
+    仅排障时临时要回 MD 展示用。
+    """
     items = "；".join(
         f"`{e['path']}`（{e['sha1'] or '缺失'}）" for e in audit["inputs"]
     )
-    return [
+    lines = [
         f"> 可审计：report_id `{audit['report_id']}`｜策略版本 {audit['strategy_version']}"
         f"｜数据截止 {audit['data_as_of'] or '未知'}",
-        f"> 输入清单（{len(audit['inputs'])} 项，括号为内容 sha1 前 8 位）：{items or '无'}",
     ]
+    if include_inputs:
+        lines.append(
+            f"> 输入清单（{len(audit['inputs'])} 项，括号为内容 sha1 前 8 位）：{items or '无'}"
+        )
+    return lines

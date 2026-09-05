@@ -388,10 +388,11 @@ def test_industry_preferred_over_theme_sector_in_table():
 
 
 def test_render_table_carries_audit_block(tmp_path, monkeypatch):
-    """可审计块（原待办 #29，已实现）：选股表头部必须带 report_id / 策略版本 / 输入清单。
+    """可审计块（原待办 #29，已实现）：选股表头部必须带 report_id / 策略版本 / 数据截止。
 
     出问题时靠它定位「当时用的哪版规则、哪天的数据」；
-    输入文件缺失时登记「缺失」标记而不是不产出。
+    输入文件缺失时登记「缺失」标记而不是不产出（缺失标记在 JSON audit.inputs，
+    v0.181 起输入清单行不进 MD）。
     """
     pool_dir = tmp_path / "stock_pool"
     pool_dir.mkdir()
@@ -400,5 +401,5 @@ def test_render_table_carries_audit_block(tmp_path, monkeypatch):
     md = ct.render_table({"status": "ok", "candidates": []}, "2026-08-07")
     header = md.split("## ")[0]
     assert "report_id `2026-08-07_candidate_table_" in header
-    assert "策略版本" in header and "数据截止" in header and "输入清单" in header
-    assert "缺失" in header  # 两个输入都不存在 → 如实标缺失
+    assert "策略版本" in header and "数据截止" in header
+    assert "输入清单" not in header

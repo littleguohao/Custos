@@ -321,6 +321,19 @@ class TestReportAuditBlock:
         assert audit["strategy_version"] and audit["data_as_of"]
         assert audit["inputs"][0]["sha1"] and audit["inputs"][1]["sha1"] is None
 
+    def test_render_md_include_inputs_flag(self, tmp_path):
+        """输入清单默认不进 MD（v0.181 全部报告）；include_inputs=True 可排障要回。"""
+        from custos.core import report_audit
+
+        present = tmp_path / "a.json"
+        present.write_text("{}", encoding="utf-8")
+        audit = report_audit.build("2026-09-05", "close_review", [present])
+        hidden = "\n".join(report_audit.render_md(audit))
+        shown = "\n".join(report_audit.render_md(audit, include_inputs=True))
+        assert "输入清单" not in hidden and "a.json" not in hidden
+        assert "report_id" in hidden and "策略版本" in hidden
+        assert "输入清单" in shown and "a.json" in shown
+
     def test_same_inputs_same_report_id(self, tmp_path):
         """同一天同一份输入重跑 → 同一个 report_id（简单确定，不掺随机/时钟）。"""
         from custos.core import report_audit
@@ -341,7 +354,8 @@ class TestReportAuditBlock:
         body = next((rc_env / "artifacts/reports/daily").glob("*/*.md")).read_text(
             encoding="utf-8"
         )
-        assert "report_id" in body and "策略版本" in body and "输入清单" in body
+        # v0.181：输入清单行进 JSON 不进 MD（全部报告统一）
+        assert "report_id" in body and "策略版本" in body and "输入清单" not in body
         log = json.loads(
             next((rc_env / "artifacts/logs").glob("*_1445_review.json")).read_text(
                 encoding="utf-8"
@@ -355,7 +369,8 @@ class TestReportAuditBlock:
         _run_fcr(monkeypatch)
         rev = fcr_env / "artifacts/reports" / "daily" / DAY
         body = (rev / f"{DAY}_1700_final_review.md").read_text(encoding="utf-8")
-        assert "report_id" in body and "策略版本" in body and "输入清单" in body
+        # v0.181：md 隐去输入清单行（噪声），report_id/版本/数据截止保留
+        assert "report_id" in body and "策略版本" in body and "输入清单" not in body
         payload = json.loads(
             (fcr_env / "data" / "review" / f"{DAY}_final_review.json").read_text(
                 encoding="utf-8"

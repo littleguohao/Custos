@@ -76,7 +76,7 @@ class TestFallbackRssEvents:
 
 
 class TestDailyReportAuditBlock:
-    """可审计块（原待办 #29，已实现）：盘前日报头部必须带 report_id / 策略版本 / 数据截止 / 输入清单。"""
+    """可审计块（原待办 #29，已实现）：盘前日报头部必须带 report_id / 策略版本 / 数据截止（输入清单 v0.181 起只进 JSON）。"""
 
     def test_md_header_carries_audit(self, monkeypatch, tmp_path):
         data = tmp_path / "data"
@@ -119,6 +119,5 @@ class TestDailyReportAuditBlock:
         ).read_text(encoding="utf-8")
         header = body.split("## 1.")[0]
         assert "report_id `2026-08-07_premarket_" in header
-        assert "策略版本" in header and "数据截止" in header and "输入清单" in header
-        # chief_decision 存在 → 有 sha1；其余输入缺失 → 如实标「缺失」
-        assert "chief_decision.json`（" in header and "缺失" in header
+        # v0.181：输入清单行不进 MD（进 JSON audit.inputs），头部只留三件
+        assert "策略版本" in header and "数据截止" in header and "输入清单" not in header

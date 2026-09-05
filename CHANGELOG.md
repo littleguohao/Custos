@@ -184,6 +184,7 @@
 | 2026-09-05 | v0.178 | 提速层 review 硬化（判定语义不变）：重放加信号 date 对账 fail-closed（数据更新致行号漂移即报错，不再拼错账）+ `--signals-out`×`--from-signals` 互斥 + 缺票/越界条目 WARN + 信号文件留 32 清理；`_PrefixLen` 被读列改抛 BaseException（误进白名单不再静默判负）；as-of 缓存 NaT 安全回退；strategy_grid -j 日志按格成块 | review 发现的静默错账面全部 fail-closed 化；LRU/monkeypatch/repr 三枚欠账钉测补齐 | 钉测 +18；全量 4915 绿 |
 | 2026-09-05 | v0.179 | 报告/接口分层收齐：日/周/月报告目录只留 .md（人读），同名机器接口 JSON 改道 `data/review/`（日复盘 `{date}_final_review.json`、周报 `weekly/`、月报 `monthly/`）；三个读方（次日 09:05 链/周报链/复盘校验）新路径优先+旧路径回退，历史产物不搬；trade_review 研究产物挪 `artifacts/logs/`；2026-07 月报 json 撤出 git 误跟踪 | 沿 v0.165「md 归 reports、json 归 data/」方向；MASTER_WORKFLOW/DATA_FLOW_CONTRACT 登记已同步（cron LLM 按文档找文件） | 钉测 +4（新路径优先/旧路径回退/报告目录无 json 守卫）；全量 4919 绿 |
 | 2026-09-05 | v0.180 | 板块榜补行业盲区：涨幅/跌幅榜宇宙 269（纯概念）→ 414（行业+概念）——根因是抓取名单信 TQ `get_sector_list()`（实测不返回 type2 行业 587/0），改为 TQ 列表∪tdxzs 名称表；行业成员 TQ 不给，本地推导（tdxzs3 T-code + tdxhy 前缀，船舶 T0702=11 只含 600150 实测吻合）；连带修 members 键带后缀致涨跌停家数恒 0（归一裸码） | 145 个行业指数已全量回填（144/144 成功，CSV 588→732，members 旧键零丢失）；9-04 重算：酒业+6.22/猪肉+6.01(limit 7)/船舶+5.90 前三 | 钉测 +9（并集/--codes/合并写/前缀推导/键归一）；全量 4928 绿 |
+| 2026-09-05 | v0.181 | 全部日级报告 md 隐去开头输入清单行（N 项绝对路径+sha1 对人是噪声）：`report_audit.render_md` 加 `include_inputs` 开关且默认隐去，0905/1445/1700/1800 四处统一；清单仍完整落 JSON `audit.inputs`（可审计性不丢） | 沿 v0.162/v0.165 日报减噪方向；报告 md 是人读层，审计字段是机器层 | 钉测 +1（开关双向断言）+ 1700/1445/选股表头部钉测改「不含输入清单」；9-04 报告已按新口径重生成 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 
