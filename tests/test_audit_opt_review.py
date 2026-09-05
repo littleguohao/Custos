@@ -267,6 +267,8 @@ class TestSectorIndexSuccessRate:
         from custos.datasource.local_tdx import fetch_sector_index_history as fs
 
         monkeypatch.setattr(fs.tq_sector, "is_tdxw_running", lambda: True)
+        # 名称表置空:宇宙并集不得读真实 tdxzs3.cfg(E盘),否则 total 不再是给定板块数
+        monkeypatch.setattr(fs.tq_sector, "load_sector_names", lambda *a, **k: {})
         tq.initialize = lambda *a, **k: None
         tq.close = lambda: None
         tq.get_sector_list = lambda: list(sectors)

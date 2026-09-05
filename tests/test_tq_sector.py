@@ -43,11 +43,33 @@ class TestLoadSectorNames(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             cfg = self._write_fixture(Path(d))
             names = load_sector_names(cfg)
-        self.assertEqual(names["880201"], {"name": "黑龙江", "tdx_type": "3"})
+        self.assertEqual(
+            names["880201"], {"name": "黑龙江", "tdx_type": "3", "t_code": "1"}
+        )
         self.assertEqual(names["880301"]["tdx_type"], "2")
         self.assertEqual(names["880904"]["name"], "机器人概念")
-        self.assertEqual(names["881002"], {"name": "煤炭开采", "tdx_type": "12"})
+        self.assertEqual(
+            names["881002"], {"name": "煤炭开采", "tdx_type": "12", "t_code": "X1001"}
+        )
         self.assertEqual(len(names), 5)
+
+    def test_t_code_from_sixth_field(self):
+        """第 6 字段 = 行业 T-code(船舶 880431|2|1|1|T0702 同型),供本地推导行业成员。"""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            cfg = self._write_fixture(Path(d))
+            names = load_sector_names(cfg)
+            short = load_sector_names(self._write_short_line(Path(d)))
+        self.assertEqual(names["880301"]["t_code"], "T0101")  # 行业: T-code
+        self.assertEqual(names["880904"]["t_code"], "智能机器")  # 概念: 原样保留
+        # 不足 6 字段的行 t_code 兜底为空串
+        self.assertEqual(short["880201"]["t_code"], "")
+
+    def _write_short_line(self, tmp: Path) -> Path:
+        cfg = tmp / "tdxzs_short.cfg"
+        cfg.write_bytes("黑龙江|880201|3\r\n".encode("gbk"))
+        return cfg
 
     def test_missing_file_returns_empty(self):
         names = load_sector_names(Path("nonexistent_tdxzs.cfg"))

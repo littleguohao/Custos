@@ -377,6 +377,16 @@ def _load_sector_name_map() -> dict:
         return {}
 
 
+def normalize_member_keys(members: dict) -> dict:
+    """sector_members.json 的键归一为裸码（``880431.SH`` → ``880431``）。
+
+    历史文件键带 .SH 后缀，而宇宙/members.get 全用裸码 —— 不归一则
+    data_quality.missing_members 恒为全宇宙、code2secs 与宇宙对不上、
+    涨跌停家数恒 0（2026-09-04 榜一猪肉 +6.01% limit_up_count=0 即此 bug）。
+    """
+    return {str(k).strip().upper().split(".")[0]: v for k, v in (members or {}).items()}
+
+
 def _load_stock_names() -> dict:
     from custos.datasource.local_tdx import stock_names  # noqa: PLC0415
 
@@ -391,7 +401,7 @@ def _load_stock_names() -> dict:
 
 def _default_ctx(args: Namespace) -> Ctx:
     name_map = _load_sector_name_map()
-    members = read_json(SECTOR_MEMBERS_FILE, {})
+    members = normalize_member_keys(read_json(SECTOR_MEMBERS_FILE, {}))
     include_types = tuple(
         t.strip() for t in str(args.include_types).split(",") if t.strip()
     )

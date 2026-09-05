@@ -159,6 +159,28 @@ miscinfo 概念标签无在链消费方；实测记录 1132ms / 8.1MB / 68161 �
 `fetch_sector_index_history.py` 现在**自动探测周期串**（day→1d，3577eeb 修），
 不再依赖调用方记住。生产验证 587/587 板块（ba8a396）。
 
+### ⚠️ 板块接口三实测（2026-09-04 排查「板块涨幅 TOP10 缺行业板块」）
+
+**① `get_sector_list()` 不返回 type 2 行业板块。** 实测只返回 **587** 个板块，
+其中 tdxzs 官方类型 2（行业）为 **0** 个 —— 船舶 880431 等 **145** 个行业板块
+全部缺席。单靠它做抓取宇宙，行业指数日线永远缺（1700 报告涨幅榜无行业的根因）。
+修法：`fetch_sector_index_history.build_universe` = TQ 列表 ∪ tdxzs3.cfg 名称表
+type∈{2,4}（并集排序去重）。
+
+**② `get_market_data` 按代码直接取行业指数日线正常。** 接口能力不缺，缺的只是
+名单 —— `880431.SH`/`880471.SH`  refresh+取数均成功，解析链（`_to_close_frame`）
+与概念板块同型。
+
+**③ `get_stock_list_in_sector` 对行业板块返回空**（概念/地区正常）。行业成员
+映射 TQ 不给，只能**本地推导**（纯函数 `fetch_sector_index_history.derive_local_members`）：
+
+- 板块 T-code：`tdxzs3.cfg` 第 6 字段（`船舶|880431|2|1|1|T0702` → T0702，
+  解析见 `tq_sector.load_sector_names` 返回的 `t_code` 键）；
+- 股票 → T-code：`tdxhy.cfg` 第 3 字段（`1|600150|T0702|||X3104` → 600150 属 T0702）；
+- 成员 = T-code **等于板块 T-code 或以其为前缀**（树形后代，T0702 收 T070201）
+  的全部股票（6 位裸码）。实测船舶 T0702 前缀 11 只，含中国船舶 600150。
+- 与 TQ 结果合并时 **TQ 优先**，TQ 返回空才用本地推导。
+
 ### ⚠️ 两条必须遵守的调用约定（都做成了代码拦截）
 **① `stock_code` 必须带市场后缀。** 传裸 6 位得到 `ErrorId=2 stock_code error`
 ——2026-08-06 探针实测踩到（探针传 `"600000"`，三个 stock_code 类方法全挂，

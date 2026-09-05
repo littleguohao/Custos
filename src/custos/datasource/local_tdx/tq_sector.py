@@ -88,9 +88,11 @@ def _strip_suffix(code: str) -> str:
 
 
 def load_sector_names(path: Optional[Path] = None) -> dict:
-    """解析 tdxzs*.cfg → {code6: {"name": str, "tdx_type": str}}。
+    """解析 tdxzs*.cfg → {code6: {"name": str, "tdx_type": str, "t_code": str}}。
 
     文件为 GBK 编码、管道分隔：``名称|代码|类型|?|?|尾字段``。
+    第 6 字段（尾字段）对行业板块是 T-code（如船舶 ``880431|2|1|1|T0702``），
+    供本地推导行业成员（tdxhy.cfg 前缀匹配）；非行业/缺失时为空串。
     默认按优先级尝试 tdxzs3.cfg（含 881 细分行业）→ tdxzs.cfg。
     文件缺失或不可解析时返回空 dict（调用方据此标注 names_unavailable）。
     """
@@ -114,7 +116,12 @@ def load_sector_names(path: Optional[Path] = None) -> dict:
             name, code, tdx_type = parts[0].strip(), parts[1].strip(), parts[2].strip()
             if not _CODE_RE.match(code):
                 continue
-            names[_strip_suffix(code)] = {"name": name, "tdx_type": tdx_type}
+            t_code = parts[5].strip() if len(parts) > 5 else ""
+            names[_strip_suffix(code)] = {
+                "name": name,
+                "tdx_type": tdx_type,
+                "t_code": t_code,
+            }
         if names:
             return names
     return {}

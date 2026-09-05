@@ -150,6 +150,9 @@ class TestMainWiring:
     @pytest.fixture(autouse=True)
     def _tq(self, monkeypatch):
         monkeypatch.setattr(fs.tq_sector, "is_tdxw_running", lambda: True)
+        # 名称表/tcode 表默认置空:测试不得碰真实 TdxW/E盘文件
+        monkeypatch.setattr(fs.tq_sector, "load_sector_names", lambda *a, **k: {})
+        monkeypatch.setattr(fs, "load_tdxhy_tcodes", lambda *a, **k: {})
 
     def _install(self, monkeypatch, tq, sectors=("880001", "880002")):
         tq.initialize = lambda *a, **k: None
@@ -216,3 +219,144 @@ class TestMainWiring:
         fs.main(["--out", str(tmp_path), "--limit", "1"])
         assert (tmp_path / "880001.SH.csv").is_file()
         assert not (tmp_path / "880002.SH.csv").exists()
+
+
+class TestBuildUniverse:
+    """宇宙并集:TQ get_sector_list 不含 type 2 行业(实测 587 板块、行业 0 个),
+    必须并上名称表 type∈{2,4} 的代码,否则 880431 船舶等 145 个行业板块永远抓不到。"""
+
+    def test_union_includes_tdxzs_industry(self):
+        name_map = {
+            "880431": {"name": "船舶", "tdx_type": "2", "t_code": "T0702"},
+            "880904": {"name": "机器人概念", "tdx_type": "4", "t_code": ""},
+            "880201": {"name": "黑龙江", "tdx_type": "3", "t_code": ""},  # 地区不进
+            "881002": {"name": "煤炭开采", "tdx_type": "12", "t_code": ""},  # 细分不进
+        }
+        uni = fs.build_universe(["880001.SH", "880002"], name_map)
+        assert "880431" in uni and "880904" in uni  # 行业 + 概念补齐
+        assert "880201" not in uni and "881002" not in uni
+        assert uni == sorted(set(uni))  # 排序去重(880002 裸码/后缀各一次)
+
+    def test_empty_name_map_degrades_to_tq_list(self):
+        assert fs.build_universe(["880001.SH"], {}) == ["880001"]
+
+
+class TestCodesFilter:
+    @pytest.fixture(autouse=True)
+    def _tq(self, monkeypatch):
+        monkeypatch.setattr(fs.tq_sector, "is_tdxw_running", lambda: True)
+        monkeypatch.setattr(fs.tq_sector, "load_sector_names", lambda *a, **k: {})
+        monkeypatch.setattr(fs, "load_tdxhy_tcodes", lambda *a, **k: {})
+
+    def test_codes_filters_after_union(self, tmp_path, monkeypatch):
+        """--codes 定向回填:并集宇宙里只抓指定板块(裸码/带后缀混写都行)。"""
+        monkeypatch.setattr(
+            fs.tq_sector,
+            "load_sector_names",
+            lambda *a, **k: {
+                "880431": {"name": "船舶", "tdx_type": "2", "t_code": "T0702"}
+            },
+        )
+        tq = _TQ(good_period="1d")
+        tq.initialize = lambda *a, **k: None
+        tq.close = lambda: None
+        tq.get_sector_list = lambda: ["880001", "880002"]
+        monkeypatch.setattr(fs.tq_sector, "_import_tq", lambda: tq)
+        rc = fs.main(
+            [
+                "--out",
+                str(tmp_path),
+                "--start",
+                "20180101",
+                "--codes",
+                "880431.SH,880002",
+            ]
+        )
+        assert rc == 0
+        assert (tmp_path / "880431.SH.csv").is_file()  # 并集里的行业板块被选中
+        assert (tmp_path / "880002.SH.csv").is_file()
+        assert not (tmp_path / "880001.SH.csv").exists()
+
+
+class TestMembersMergeWrite:
+    @pytest.fixture(autouse=True)
+    def _tq(self, monkeypatch):
+        monkeypatch.setattr(fs.tq_sector, "is_tdxw_running", lambda: True)
+        monkeypatch.setattr(fs.tq_sector, "load_sector_names", lambda *a, **k: {})
+        monkeypatch.setattr(fs, "load_tdxhy_tcodes", lambda *a, **k: {})
+
+    def test_merge_write_preserves_existing_keys(self, tmp_path, monkeypatch):
+        """子集运行(--codes/--limit)不得冲掉既有 587 个键:合并覆盖同名键后落盘。"""
+        import json
+
+        outdir = tmp_path / "sector_index"
+        (tmp_path / "sector_members.json").write_text(
+            json.dumps({"880001.SH": ["600000"], "880002.SH": ["600099"]}),
+            encoding="utf-8",
+        )
+        tq = _TQ(good_period="1d")
+        tq.initialize = lambda *a, **k: None
+        tq.close = lambda: None
+        tq.get_sector_list = lambda: ["880002"]
+        tq.get_stock_list_in_sector = lambda code: ["600001.SH", "600002.SZ"]
+        monkeypatch.setattr(fs.tq_sector, "_import_tq", lambda: tq)
+        rc = fs.main(["--out", str(outdir), "--start", "20180101", "--members"])
+        assert rc == 0
+        merged = json.loads(
+            (tmp_path / "sector_members.json").read_text(encoding="utf-8")
+        )
+        assert merged["880001.SH"] == ["600000"]  # 旧键保留
+        assert merged["880002.SH"] == ["600001", "600002"]  # 同名键被本次覆盖
+        assert len(merged) == 2
+
+
+class TestDeriveLocalMembers:
+    """T-code 前缀推导(纯函数):T0702 收 T0702 与 T070201(树形后代),不收 T0703。"""
+
+    NAME_MAP = {
+        "880431": {"name": "船舶", "tdx_type": "2", "t_code": "T0702"},
+        "880904": {
+            "name": "机器人概念",
+            "tdx_type": "4",
+            "t_code": "智能机器",
+        },  # 非 T-code
+        "880201": {"name": "黑龙江", "tdx_type": "3", "t_code": "1"},  # 非 T-code
+    }
+    TDXHY = {
+        "600150": "T0702",  # 等于 → 收
+        "600151": "T070201",  # 前缀后代 → 收
+        "600152": "T0703",  # 兄弟 → 不收
+        "600153": "",  # 无 T-code → 不收
+    }
+
+    def test_prefix_tree_semantics(self):
+        got = fs.derive_local_members(self.NAME_MAP, self.TDXHY)
+        assert got["880431"] == ["600150", "600151"]
+        assert "880904" not in got and "880201" not in got
+
+    def test_tq_empty_falls_back_to_local_and_tq_wins_when_present(self):
+        """TQ 对行业返回空 → 本地推导兜底;TQ 有结果时一律 TQ 优先。键保持带后缀约定。"""
+        local = fs.derive_local_members(self.NAME_MAP, self.TDXHY)
+
+        class _T:
+            def __init__(self, ret):
+                self.ret = ret
+
+            def get_stock_list_in_sector(self, code):
+                assert code == "880431.SH"  # 调 TQ 用带后缀码
+                return self.ret
+
+        members: dict = {}
+        fs._fetch_members(_T([]), "880431", members, local)
+        assert members == {"880431.SH": ["600150", "600151"]}  # 空 → 本地兜底
+        fs._fetch_members(_T(["600999.SH"]), "880431", members, local)
+        assert members["880431.SH"] == ["600999"]  # 非空 → TQ 优先
+
+    def test_tq_exception_keeps_existing_key(self):
+        class _T:
+            def get_stock_list_in_sector(self, code):
+                raise RuntimeError("rpc timeout")
+
+        members = {"880431.SH": ["600150"]}
+        fs._fetch_members(_T(), "880431", members, {})
+        assert members["880431.SH"] == ["600150"]  # 失败不覆写既有键

@@ -18,7 +18,7 @@ from typing import Any
 
 
 from custos.datasource.local_tdx import tq_sector  # noqa: E402  复用其 TdxW 探测 + tqcenter 惰性导入
-from custos.core.paths import MARKET_DIR  # noqa: E402
+from custos.core.paths import MARKET_DIR, TDX_ROOT  # noqa: E402
 
 # TQ 的周期串是 "1d"(探针 governance/data/TDX_LOCAL_INTERFACES.md「周期串是 1d」:缺省或写错报
 # ErrorId=5 periodstr error)。此前默认 "day" → 400+ 板块逐个报错、日复一日刷不到数据。
@@ -27,6 +27,11 @@ PERIOD_CANDIDATES = ("1d", "day", "1day", "1440m")
 OVERLAP_DAYS = 30  # 增量刷新时向前重叠的日历日(容忍补数/除权修正)
 DEFAULT_MIN_SUCCESS_RATE = 0.6  # 低于此成功率视为大面积失败 → 非零退出
 DEFAULT_SLEEP_MS = 0  # 板块间限速(毫秒);默认 0 保持既有节奏,生产可调
+# tdxhy.cfg:股票 → TDX 行业 T-code(行格式 ``1|688114|T0403|||X270302``,第 3 字段)。
+# 与 pipeline/holdings/holding_sector_mapper.load_tdxhy 同源 —— 本模块在 L1(数据层),
+# 不得 import L3 的 holdings,解析逻辑就地保留一份(分层守卫 tests/test_architecture_layers.py)。
+TDXHY_CFG = TDX_ROOT / "T0002" / "hq_cache" / "tdxhy.cfg"
+UNION_TDX_TYPES = ("2", "4")  # 宇宙并集补进的名称表类型:行业 + 概念
 
 
 def _suffixed(code: str) -> str:
@@ -34,6 +39,70 @@ def _suffixed(code: str) -> str:
     880/881 板块指数均为沪市。"""
     c = str(code).strip().upper()
     return c if "." in c else f"{c}.SH"
+
+
+def _bare(code: str) -> str:
+    """裸码归一(880431.SH → 880431)——宇宙、members 查找统一用裸码。"""
+    return str(code).strip().upper().split(".")[0]
+
+
+def build_universe(tq_codes: list, name_map: dict) -> list:
+    """抓取宇宙 = TQ get_sector_list() ∪ 名称表 type∈{2,4} 全部代码(并集、排序、去重)。
+
+    背景:TQ get_sector_list() 只返回 587 个板块且 type 2 行业为 0 —— 单靠它宇宙
+    缺全部 145 个行业板块(880431 船舶等),1700 报告「板块涨幅 TOP10」随之无行业。
+    名称表不可用(空 dict)时调用方负责 WARN,这里退化为纯 TQ 列表(归一裸码)。
+    """
+    codes = {_bare(c) for c in (tq_codes or [])}
+    types = set(UNION_TDX_TYPES)
+    codes |= {
+        _bare(c)
+        for c, info in (name_map or {}).items()
+        if str((info or {}).get("tdx_type") or "") in types
+    }
+    return sorted(codes)
+
+
+def load_tdxhy_tcodes(path: Path = TDXHY_CFG) -> dict:
+    """tdxhy.cfg → {股票6位裸码: T-code}。文件缺失返回空 dict(调用方据此 WARN)。"""
+    mapping: dict = {}
+    try:
+        text = Path(path).read_text(encoding="ascii", errors="replace")
+    except OSError:
+        return {}
+    for line in text.splitlines():
+        parts = line.strip().split("|")
+        if len(parts) >= 3 and parts[1].isdigit():
+            mapping[parts[1]] = parts[2].strip()
+    return mapping
+
+
+def derive_local_members(name_map: dict, tdxhy: dict) -> dict:
+    """本地推导板块成员(纯函数) → {板块裸码: [股票6位裸码, ...](排序)}。
+
+    TQ get_stock_list_in_sector 对 type 2 行业返回空(实测),行业成员只能靠本地文件:
+    板块 T-code 取自名称表(tdxzs3.cfg 第 6 字段,如船舶 880431 → T0702),成员 =
+    tdxhy.cfg 里 T-code **等于它或以其为前缀**(树形后代,T0702 收 T070201)的所有股票。
+    只处理 t_code 形如 "T..." 的板块(非行业行第 6 字段是名称/数字,不能当前缀用)。
+    """
+    tcode2stocks: dict[str, list[str]] = {}
+    for stock, tcode in (tdxhy or {}).items():
+        t = str(tcode or "").strip()
+        if t:
+            tcode2stocks.setdefault(t, []).append(str(stock))
+    out: dict[str, list[str]] = {}
+    for code, info in (name_map or {}).items():
+        t_code = str((info or {}).get("t_code") or "").strip()
+        if not t_code.startswith("T"):
+            continue
+        mem = [
+            s
+            for t, stocks in tcode2stocks.items()
+            if t.startswith(t_code)
+            for s in stocks
+        ]
+        out[_bare(code)] = sorted(set(mem))
+    return out
 
 
 def _pick_payload(d: Any, code: str) -> Any:
@@ -303,6 +372,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument("--limit", type=int, default=0, help="只处理前 N 个板块(排障用)")
     ap.add_argument(
+        "--codes",
+        default="",
+        help="只抓指定板块(逗号分隔,裸码/带后缀均可;在宇宙并集之后过滤,定向回填用,"
+        "如 --codes 880431,880471)",
+    )
+    ap.add_argument(
         "--members",
         action="store_true",
         help="同时抓板块成员(get_stock_list_in_sector)→ sector_members.json(板块相位 gate 需要)",
@@ -350,13 +425,41 @@ def _fetch_close_frame(tq, code_q: str, period: str, start: str):
     return frame
 
 
-def _fetch_members(tq, code: str, members: dict) -> None:
-    """抓板块成员(get_stock_list_in_sector)写入 members(板块相位 gate 需要)。"""
+def _fetch_members(tq, code: str, members: dict, local: dict | None = None) -> None:
+    """抓板块成员(get_stock_list_in_sector)写入 members(板块相位 gate 需要)。
+
+    TQ 对 type 2 行业返回空(实测)——空结果时用本地推导兜底(``local`` =
+    ``derive_local_members`` 的结果,键为裸码);TQ 非空时一律以 TQ 为准。
+    members 键保持带后缀约定(``880431.SH``);TQ 调用失败不覆写既有键。
+    """
+    key = _suffixed(code)
     try:
-        mem = tq.get_stock_list_in_sector(code) or []
-        members[code] = [str(x).split(".")[0][-6:].zfill(6) for x in mem]
+        mem = tq.get_stock_list_in_sector(key) or []
     except Exception as mexc:  # noqa: BLE001
-        print(f"[WARN] members {code}: {mexc}", file=sys.stderr)
+        print(f"[WARN] members {key}: {mexc}", file=sys.stderr)
+        return
+    stocks = [str(x).split(".")[0][-6:].zfill(6) for x in mem]
+    if not stocks and local:
+        stocks = list(local.get(_bare(code)) or [])
+    members[key] = stocks
+
+
+def _merge_members_file(mpath: Path, fresh: dict) -> dict:
+    """成员映射**合并写**:读既有 sector_members.json,本次结果覆盖同名键后落盘。
+
+    此前 ``members = {}`` 全新构建再整文件覆写 —— 子集运行(--codes 定向回填)
+    会把既有 587 个键全部冲掉。文件缺失/损坏时按空 dict 合并(不阻断落盘)。
+    """
+    existing: dict = {}
+    try:
+        got = json.loads(mpath.read_text(encoding="utf-8"))
+        if isinstance(got, dict):
+            existing = got
+    except (OSError, ValueError) as exc:
+        print(f"[WARN] 既有成员映射读取失败({exc}),按空合并", file=sys.stderr)
+    merged = {**existing, **fresh}
+    mpath.write_text(json.dumps(merged, ensure_ascii=False), encoding="utf-8")
+    return merged
 
 
 def _fetch_sectors(
@@ -366,6 +469,7 @@ def _fetch_sectors(
     outdir: Path,
     period: str,
     members: dict,
+    local_members: dict | None = None,
 ) -> tuple[int, list[str]]:
     """逐板块抓取落盘 → (ok, failed)。串行不改(不引入并发复杂度)，但要限速。"""
     import time as _t
@@ -390,7 +494,7 @@ def _fetch_sectors(
                 failed.append(code_q)
                 print(f"[WARN] {code_q}: 解析不出收盘序列", file=sys.stderr)
             if args.members:
-                _fetch_members(tq, code, members)
+                _fetch_members(tq, code, members, local_members)
         except Exception as exc:  # noqa: BLE001
             failed.append(code_q)
             print(f"[WARN] {code}: {exc}", file=sys.stderr)
@@ -406,13 +510,28 @@ def _fetch_sectors(
 
 def _fetch_all(tq, args: argparse.Namespace, outdir: Path) -> int:
     """板块列表 + 周期探测 + 逐板块抓取 + 成员/状态落盘 → 退出码。"""
-    sectors = tq.get_sector_list() or []
+    name_map: dict = {}
+    try:
+        name_map = tq_sector.load_sector_names() or {}
+    except Exception as exc:  # noqa: BLE001 —— 名称表不可用不阻断抓取,退化为 TQ 列表
+        print(f"[WARN] 板块名称表(tdxzs*.cfg)解析失败: {exc}", file=sys.stderr)
+        name_map = {}
+    if not name_map:
+        print(
+            "[WARN] 板块名称表不可用,抓取宇宙退化为 TQ 板块列表"
+            "(get_sector_list 不含 type 2 行业,宇宙将缺行业板块)",
+            file=sys.stderr,
+        )
+    sectors = build_universe(tq.get_sector_list() or [], name_map)
+    if args.codes:
+        wanted = {_bare(c) for c in str(args.codes).split(",") if c.strip()}
+        sectors = [s for s in sectors if s in wanted]
     if args.limit:
         sectors = sectors[: args.limit]
     total = len(sectors)
     print(f"[INFO] 板块数: {total}")
     if not sectors:
-        print("[ERR] TQ 未返回板块列表")
+        print("[ERR] 板块宇宙为空(TQ 列表与名称表均不可用,或 --codes 过滤后为空)")
         return 2
     period, note = resolve_period(tq, sectors[0], args.start, args.period)
     if not period:
@@ -429,12 +548,24 @@ def _fetch_all(tq, args: argparse.Namespace, outdir: Path) -> int:
         f"[INFO] 使用周期 {period}{'(自动探测)' if not args.period else ''}"
         f"{'; 增量合并模式' if args.incremental else '; 全量重拉'}"
     )
+    local_members: dict = {}
+    if args.members and name_map:
+        tdxhy = load_tdxhy_tcodes()
+        if tdxhy:
+            local_members = derive_local_members(name_map, tdxhy)
+            print(f"[INFO] 行业成员本地推导就绪: {len(local_members)} 个 T-code 板块")
+        else:
+            print("[WARN] tdxhy.cfg 不可用,行业成员本地推导关闭", file=sys.stderr)
     members: dict = {}
-    ok, failed = _fetch_sectors(tq, sectors, args, outdir, period, members)
+    ok, failed = _fetch_sectors(
+        tq, sectors, args, outdir, period, members, local_members
+    )
     if args.members:
         mpath = outdir.parent / "sector_members.json"
-        mpath.write_text(json.dumps(members, ensure_ascii=False), encoding="utf-8")
-        print(f"[OK] 成员映射 {len(members)} 板块 → {mpath}")
+        merged = _merge_members_file(mpath, members)
+        print(
+            f"[OK] 成员映射 本次 {len(members)} 板块(合并既有后共 {len(merged)}) → {mpath}"
+        )
     st = write_fetch_status(
         outdir,
         total,

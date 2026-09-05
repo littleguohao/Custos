@@ -176,6 +176,25 @@ def test_missing_stock_bars_recorded(tmp_path):
     ]
 
 
+def test_suffixed_member_keys_normalized_for_limit_counts(tmp_path):
+    """钉测（2026-09-04 涨跌停家数恒 0 bug）：sector_members.json 键带 .SH 后缀
+    （``880001.SH``），而宇宙/members.get 用裸码 —— 不归一则 code2secs 与宇宙
+    对不上、limit_counts 恒 0、missing_members 恒为全宇宙。_default_ctx 必须经
+    normalize_member_keys 归一。"""
+    suffixed = {
+        "880001.SH": ["600001", "600005"],
+        "880002.SH": ["600001", "920004"],
+    }
+    members = sdr.normalize_member_keys(suffixed)
+    assert set(members) == {"880001", "880002"}  # 键归一为裸码
+    bars = {"600001": bar(10.00, 11.00)}  # 主板 10% 涨停
+    day = sdr.build_day(D1, make_ctx(tmp_path, bars, members=members))
+    by_code = {e["code"]: e for e in day["gainers_top"]}
+    assert by_code["880001"]["limit_up_count"] == 1  # 600001 计入（修复前恒 0）
+    assert by_code["880002"]["limit_up_count"] == 1
+    assert day["data_quality"]["missing_members"] == []  # 修复前恒为全宇宙
+
+
 # ---------------------------------------------------------------------------
 # 资金流
 # ---------------------------------------------------------------------------
