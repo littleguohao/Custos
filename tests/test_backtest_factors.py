@@ -651,3 +651,68 @@ def test_load_bars_local_no_summary_when_all_qfq_ok(monkeypatch, capsys):
         ltd_flat.reset_qfq_failure_stats()
     assert set(out) == {"600000"}
     assert "前复权失败" not in capsys.readouterr().err
+
+
+# ---------- 滚动尾部截断护栏（2026-09-05 跨窗跑废 6 格的教训） ----------
+
+
+def _patch_loader_with_dates(monkeypatch, start_date):
+    """get_ohlcv_table 替身：返回从 start_date 起的 60 根业务日帧（模拟尾部截断后）。"""
+    from custos.datasource.local_tdx import local_tdx_data as ltd_flat
+
+    df = make_df([10.0] * 60)
+    df["date"] = pd.date_range(start_date, periods=60, freq="B")
+    monkeypatch.setattr(ltd_flat, "get_ohlcv_table", lambda code, count=0: df.copy())
+    return ltd_flat
+
+
+def test_tail_clip_msg_triggers_on_systemic_clip():
+    """多数票首根明显晚于 --start ⇒ 报错文案含 --count 指引（fail-closed 语义）。"""
+    dates = ["2024-08-14"] * 31
+    msg = bt._tail_clip_msg(dates, "2022-01-01", 500)
+    assert "--count" in msg and "截断" in msg
+
+
+def test_tail_clip_msg_tolerances():
+    """节假日 start / 少数晚首根（IPO）/ 空样本 / 非 ISO start 都不误报。"""
+    assert bt._tail_clip_msg(["2022-01-04"] * 31, "2022-01-01", 500) == ""
+    assert bt._tail_clip_msg(["2022-01-04"] * 29 + ["2024-08-14"] * 2, "2022-01-01", 500) == ""
+    assert bt._tail_clip_msg([], "2022-01-01", 500) == ""
+    assert bt._tail_clip_msg(["2024-08-14"] * 31, "not-a-date", 500) == ""
+
+
+def test_load_bars_local_count_tail_clip_fails_closed(monkeypatch):
+    """批式加载（≥30 只）系统性截断 ⇒ SystemExit。"""
+    import pytest
+
+    ltd = _patch_loader_with_dates(monkeypatch, "2024-08-14")
+    ltd.reset_qfq_failure_stats()
+    codes = [f"6000{i:02d}" for i in range(30)]
+    try:
+        with pytest.raises(SystemExit) as exc:
+            bt._load_bars_local(codes, count=500, start="2022-01-01")
+    finally:
+        ltd.reset_qfq_failure_stats()
+    assert "--count" in str(exc.value) and "截断" in str(exc.value)
+
+
+def test_load_bars_local_small_batch_no_guard(monkeypatch):
+    """<30 只的批式/逐股调用不触发聚合护栏（单票晚首根是合法 IPO/缺口）。"""
+    ltd = _patch_loader_with_dates(monkeypatch, "2024-08-14")
+    ltd.reset_qfq_failure_stats()
+    try:
+        out = bt._load_bars_local(["600000", "000002"], count=500, start="2022-01-01")
+    finally:
+        ltd.reset_qfq_failure_stats()
+    assert set(out) == {"600000", "000002"}
+
+
+def test_load_bars_local_no_start_no_guard(monkeypatch):
+    """不传 --start（尾部窗口模式）护栏不生效。"""
+    ltd = _patch_loader_with_dates(monkeypatch, "2024-08-14")
+    ltd.reset_qfq_failure_stats()
+    try:
+        out = bt._load_bars_local(["600000"], count=500)
+    finally:
+        ltd.reset_qfq_failure_stats()
+    assert set(out) == {"600000"}

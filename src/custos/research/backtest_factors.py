@@ -4198,6 +4198,36 @@ def _portfolio_from_trades(args: Any, codes: list[str]) -> int:
     return 0
 
 
+def _tail_clip_msg(first_dates: list[str], start: str, count: int) -> str:
+    """滚动尾部截断判定：多数票首根**明显**晚于 --start ⇒ 返回报错文案，否则空串。
+
+    「明显」= 晚 10 个日历日以上——start 本身常是节假日（2022-01-01 的首根是
+    01-04），10 日内容差属正常；新股 IPO 晚于 start 是个例，比例上不会过半。
+    """
+    from datetime import date as _date  # noqa: PLC0415
+
+    try:
+        start_d = _date.fromisoformat(start)
+    except ValueError:
+        return ""  # start 不是 ISO 日期：判不了，放行给下游护栏
+    clipped = 0
+    for d0 in first_dates:
+        try:
+            if (_date.fromisoformat(d0) - start_d).days > 10:
+                clipped += 1
+        except ValueError:
+            continue
+    if not first_dates or clipped / len(first_dates) <= 0.5:
+        return ""
+    first = min(first_dates)
+    return (
+        f"[ERR] --count {count} 的滚动尾部只回溯到约 {first}，晚于 --start "
+        f"{start}：窗口被截断（{clipped}/{len(first_dates)} 只票首根明显晚于起点）。"
+        f"加大 --count 覆盖窗口+预热（每 250 根≈1 年，周线 gate 另需 1500+），"
+        f"或去掉 --start 只用尾部窗口"
+    )
+
+
 def _load_bars_local(
     codes: list[str], count: int, start: Optional[str] = None, end: Optional[str] = None
 ) -> dict[str, pd.DataFrame]:
@@ -4228,6 +4258,17 @@ def _load_bars_local(
             df = None
         if df is not None and len(df):
             out[c] = df
+    # 滚动尾部截断护栏（2026-09-05 RSI 家族跨窗跑废 6 格的教训）：count 是
+    # 「最新交易日向前 N 根」的滚动窗口，--start 早于尾部起点时窗口被静默截断
+    # （跨窗只剩个尾巴，低频因子整窗 0 信号）。批式加载（整宇宙一次）在这里
+    # 直接判；流式逐股路径（_stream_trades 每股一次 load([c])）的单票晚首根是
+    # 合法 IPO/数据缺口，必须在调用方按聚合比例判（见 _stream_trades）。
+    if start and out and len(codes) >= 30:
+        msg = _tail_clip_msg(
+            [str(f["date"].iloc[0])[:10] for f in out.values()], start, count
+        )
+        if msg:
+            raise SystemExit(msg)
     # 前复权失败汇总（DATA_SOURCE_PRINCIPLE ③ / 原 TODO #16）：逐票 WARN 在全宇宙
     # 日志里会被淹没，加载完整轮后必须有一行总数。
     # ⚠️ 必须用与写入方相同的**扁平**导入路径（本函数顶部 `import local_tdx_data`）：
@@ -4761,12 +4802,20 @@ def _stream_trades(
     n_loaded = 0
     t_load = 0.0  # 读盘 + 前复权累计秒数
     t_eval = 0.0  # 逐 bar 评估累计秒数
+    first_dates: list[str] = []  # 滚动尾部截断护栏（聚合判定，见 _tail_clip_msg）
     for k, c in enumerate(codes):  # 流式：逐股加载→评估→释放，避免全量载入 OOM
         _t0 = _time.time()
         d = load([c], args.count)
         t_load += _time.time() - _t0
         if d:
             n_loaded += len(d)
+            # 逐股首根晚于 --start 是合法 IPO/缺口；攒到 30 只再按比例判系统性截断
+            if args.start:
+                first_dates.append(str(d[c]["date"].iloc[0])[:10])
+                if len(first_dates) % 30 == 0:
+                    msg = _tail_clip_msg(first_dates, args.start, args.count)
+                    if msg:
+                        raise SystemExit(msg)
             _t0 = _time.time()
             trades += evaluate_trades(
                 d,
