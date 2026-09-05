@@ -20,7 +20,8 @@
 
 **证据必须可追溯。** 机器已经在产出结构化归因，直接引它：
 
-    artifacts/reports/weekly/{iso_year}W{week}_weekly_review.json   ← weekly_review.py 产出
+    data/review/weekly/{iso_year}W{week}_weekly_review.json   ← weekly_review.py 产出
+      （2026-09-05 前产物在 artifacts/reports/weekly/ 旧位置）
       · facts        win_rate_pct / profit_loss_ratio / avg_hold_days / gross_pnl …
       · execution_issues / strategy_issues / environment_issues
         rule 取值（受控词表）：slow_stop_loss / unplanned_trade / sell_fly /

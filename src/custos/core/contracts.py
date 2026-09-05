@@ -78,9 +78,10 @@
       execution_review           2 消费者  ⛔
       review_enrichment          1 消费者  ⛔
 
-仍未纳入的：`stock_pool` / `final_review` / `mfe_mae` / `fund_flow_rank` /
+当时仍未纳入的 `stock_pool` / `final_review` / `mfe_mae` / `fund_flow_rank` /
 `holding_review` / `formula_hits` / `candidates_enriched` / `rss_*` /
-`postclose_news_digest` —— 都不在硬失败链上，按需再加。
+`postclose_news_digest`（都不在硬失败链上）已在「第五批」全部纳入 ——
+刻意豁免的 5 类见下方「第五批」注释块。
 """
 
 from __future__ import annotations
@@ -792,7 +793,11 @@ SPECS: dict[str, dict] = {
             "audit": _AUDIT_FIELD,
         },
     },
-    # final_close_review.main —— 17:00 复盘产物（md 之外的机器可读版）
+    # final_close_review.main —— 17:00 复盘产物（md 之外的机器可读版）。
+    # 落盘位置（v0.179 起）：.json 归 data/review/{day}_final_review.json
+    # （机器接口与报告分层，名不带 1700 时点标记），.md 人读报告仍留
+    # artifacts/reports/daily/{day}/{day}_1700_final_review.md；
+    # 读方一律新路径优先 + 旧路径回退，历史产物不搬。
     "final_review": {
         "kind": "object",
         "fields": {

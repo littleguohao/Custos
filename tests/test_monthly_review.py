@@ -134,11 +134,16 @@ def test_concentration_only_for_last_month(tmp_path, monkeypatch):
 # ── 产物落点与命名 ───────────────────────────────────────
 
 
-def test_output_files_and_nine_sections(tmp_path):
+def test_output_files_and_nine_sections(tmp_path, monkeypatch):
+    # .json 落点（v0.179 起 data/review/monthly/）走模块常量 MONTHLY_JSON_DIR，
+    # patch 改道 tmp——不 patch 会写进真实 data/（test_repo_hygiene 守卫会抓）；
+    # .md 仍随 --base 落 artifacts/reports/monthly/。
+    json_dir = tmp_path / "data" / "review" / "monthly"
+    monkeypatch.setattr(mr, "MONTHLY_JSON_DIR", json_dir)
     rc = mr.main(["--month", "2026-07", "--base", str(tmp_path)])
     assert rc == 0
     out = tmp_path / "artifacts" / "reports" / "monthly"
-    assert (out / "2026-07_monthly_review.json").exists()
+    assert not (out / "2026-07_monthly_review.json").exists(), "json 不应再落报告目录"
     md = (out / "2026-07_monthly_review.md").read_text(encoding="utf-8")
     # §七 固定结构九节，一节不缺
     for i, title in enumerate(
@@ -156,6 +161,6 @@ def test_output_files_and_nine_sections(tmp_path):
     ):
         assert f"## {i + 1}." in md and title in md, f"缺第 {i + 1} 节（{title}）"
     review = json.loads(
-        (out / "2026-07_monthly_review.json").read_text(encoding="utf-8")
+        (json_dir / "2026-07_monthly_review.json").read_text(encoding="utf-8")
     )
     assert review["month"] == "2026-07"

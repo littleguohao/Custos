@@ -36,7 +36,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
-from custos.core.paths import BASE, cn_now, cn_today
+from custos.core.paths import BASE, REVIEW_MONTHLY_DIR, cn_now, cn_today
 from custos.pipeline.close_review.loss_streak import format_lines as loss_streak_lines
 from custos.pipeline.close_review.loss_streak import loss_streaks
 from custos.pipeline.close_review.cooldowns import (  # noqa: E402
@@ -62,6 +62,11 @@ from custos.pipeline.close_review.weekly_review import (
     portfolio_trajectory,
     sse_daily_map,
 )
+
+# 月报 JSON 落点（v0.179 起）：.md 人读报告留 artifacts/reports/monthly/（仍随 --base
+# 改道），.json 机器接口归 data/review/monthly/ 与报告分层（同 weekly_review 的
+# WEEKLY_JSON_DIR；测试 monkeypatch 本常量改道 tmp，否则会被 test_repo_hygiene 抓到）。
+MONTHLY_JSON_DIR = REVIEW_MONTHLY_DIR
 
 
 def month_range(month: str | None) -> dict[str, Any]:
@@ -641,11 +646,12 @@ def main(argv=None) -> int:
     base = Path(args.base)
 
     review = build_monthly_review(base, args.month)
-    out_dir = base / "artifacts/reports" / "monthly"
-    out_dir.mkdir(parents=True, exist_ok=True)
+    md_dir = base / "artifacts/reports" / "monthly"
+    md_dir.mkdir(parents=True, exist_ok=True)
     stem = f"{review['month']}_monthly_review"
-    json_path = out_dir / f"{stem}.json"
-    md_path = out_dir / f"{stem}.md"
+    json_path = MONTHLY_JSON_DIR / f"{stem}.json"
+    md_path = md_dir / f"{stem}.md"
+    json_path.parent.mkdir(parents=True, exist_ok=True)
     json_path.write_text(
         json.dumps(review, ensure_ascii=False, indent=2), encoding="utf-8"
     )

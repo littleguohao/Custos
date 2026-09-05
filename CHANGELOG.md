@@ -182,6 +182,7 @@
 | 2026-09-04 | v0.176 | 重放路径跳过 gate/scorer 预计算：`signals_in` 分支不做进场判定，`_prepare_stock` 传 None 走既有「不算」分支——周线序列（_weekly_gate_arrays）等 gate_pre 在重放里零消费，原先逐方案逐股白算 | 一行开关级别改动，重放 trades 由 test_signals_replay 逐位钉住；预计算产物落盘缓存随之不再值得做 | 30 票×1500 根实测重放 1420ms→131ms/方案（10.8x）；全量绿 |
 | 2026-09-04 | v0.177 | score_return 族 as-of 评分提速：`asof_candidate` 内容键缓存（blake2b 三帧摘要，同一 (票,信号日) 只算一次 compute_metrics，LRU 封顶）+ index as-of 快速路径（日期列每帧字符串化一次、bisect 定位，与旧布尔掩码逐位一致） | 调研否决「全序列点查」方案：live 口径 tail(260) 重新播种，EMA 系指标与全序列不逐位相等，只能精确去重；winner_factor/resonance3 改走 asof_candidate | 350 次评分 12.6s→7.4s（1.7x）；无重复子集 7.3s→0.2s（34.6x）；等价性钉测 tests/test_asof_cache_equivalence.py；全量绿 |
 | 2026-09-05 | v0.178 | 提速层 review 硬化（判定语义不变）：重放加信号 date 对账 fail-closed（数据更新致行号漂移即报错，不再拼错账）+ `--signals-out`×`--from-signals` 互斥 + 缺票/越界条目 WARN + 信号文件留 32 清理；`_PrefixLen` 被读列改抛 BaseException（误进白名单不再静默判负）；as-of 缓存 NaT 安全回退；strategy_grid -j 日志按格成块 | review 发现的静默错账面全部 fail-closed 化；LRU/monkeypatch/repr 三枚欠账钉测补齐 | 钉测 +18；全量 4915 绿 |
+| 2026-09-05 | v0.179 | 报告/接口分层收齐：日/周/月报告目录只留 .md（人读），同名机器接口 JSON 改道 `data/review/`（日复盘 `{date}_final_review.json`、周报 `weekly/`、月报 `monthly/`）；三个读方（次日 09:05 链/周报链/复盘校验）新路径优先+旧路径回退，历史产物不搬；trade_review 研究产物挪 `artifacts/logs/`；2026-07 月报 json 撤出 git 误跟踪 | 沿 v0.165「md 归 reports、json 归 data/」方向；MASTER_WORKFLOW/DATA_FLOW_CONTRACT 登记已同步（cron LLM 按文档找文件） | 钉测 +4（新路径优先/旧路径回退/报告目录无 json 守卫）；全量 4919 绿 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

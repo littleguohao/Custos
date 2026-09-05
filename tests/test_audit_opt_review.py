@@ -1100,18 +1100,21 @@ class TestWeeklyReviewIoReuse:
                 },
             ],
         )
-        rv = (
+        # 日复盘 JSON v0.179 起落 data/review/（新路径优先）；reports/ 旧位置
+        # 同期产物作回退副本——两路都写，命中的必须是新路径且只读一次
+        payload = json.dumps({"next_day_plan": {"holding_plans": [{"code": "600000"}]}})
+        rv = base / "data" / "review" / "2026-07-13_final_review.json"
+        rv.parent.mkdir(parents=True, exist_ok=True)
+        rv.write_text(payload, encoding="utf-8")
+        legacy = (
             base
             / "artifacts/reports"
             / "daily"
             / "2026-07-13"
             / "2026-07-13_1700_final_review.json"
         )
-        rv.parent.mkdir(parents=True, exist_ok=True)
-        rv.write_text(
-            json.dumps({"next_day_plan": {"holding_plans": [{"code": "600000"}]}}),
-            encoding="utf-8",
-        )
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        legacy.write_text(payload, encoding="utf-8")
 
         reads: list[str] = []
         orig = wr.load_json
@@ -1121,10 +1124,11 @@ class TestWeeklyReviewIoReuse:
             lambda path, default: (reads.append(str(path)), orig(path, default))[1],
         )
         wr.build_weekly_review(base, "2026-07-17")
-        plan_reads = [
-            r for r in reads if r.endswith("2026-07-13_1700_final_review.json")
-        ]
+        plan_reads = [r for r in reads if r.endswith("2026-07-13_final_review.json")]
         assert len(plan_reads) == 1  # 3 笔成交共用一份计划，只读一次
+        assert not [
+            r for r in reads if r.endswith("2026-07-13_1700_final_review.json")
+        ]  # 新路径优先 ⇒ 旧位置回退副本不被读
 
     def test_mfe_index_globs_once_and_is_reusable(self, tmp_path):
         from custos.pipeline.close_review import weekly_review as wr

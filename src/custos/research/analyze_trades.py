@@ -29,9 +29,10 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
-from custos.core.paths import REVIEWS, TRADES_DIR
+from custos.core.paths import ARTIFACT_LOGS, TRADES_DIR
 
-REVIEWS_DIR = REVIEWS / "trade_review"
+# 一次性研究产物，归 logs 而非报告链路
+OUTPUT_DIR = ARTIFACT_LOGS / "trade_review"
 
 LEDGER_CSV = TRADES_DIR / "master_trade_ledger.csv"
 CLOSED_JSON = TRADES_DIR / "closed_positions.json"
@@ -396,7 +397,7 @@ def main():
     flow = build_flow(trades)
 
     # 输出
-    out_path = Path(args.output) if args.output else REVIEWS_DIR / "trade_review.xlsx"
+    out_path = Path(args.output) if args.output else OUTPUT_DIR / "trade_review.xlsx"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     with pd.ExcelWriter(out_path, engine="openpyxl") as w:

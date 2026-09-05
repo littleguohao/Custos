@@ -7,9 +7,12 @@ import argparse
 import json
 
 
-from custos.core.paths import REVIEWS, daily_report_dir  # noqa: E402
+from custos.core.paths import REVIEW_DIR, REVIEWS, daily_report_dir  # noqa: E402
 
 REV = REVIEWS / "daily"
+# .json 自 v0.179 落 data/review/（.md 人读报告仍留 REV 下）——模块常量供测试
+# monkeypatch 改道 tmp，理由同 final_close_review.REVIEW_JSON_DIR。
+REVIEW_JSON_DIR = REVIEW_DIR
 REQUIRED_SECTIONS = [
     "今日计划、14:45建议与实际执行",
     "新闻、政策、风向与舆情",
@@ -65,16 +68,22 @@ def validate(day: str, markdown: str, payload: dict) -> list[str]:
 
 
 def _resolve_artifact(day: str, suffix: str):
-    """定位某日 final_review 产物：新名（v0.141 起带 1700 时点标记）优先，
-    旧名（同日目录无标记）与旧平铺布局（2026-08-12 目录重构前）依次回退 ——
-    与 weekly_review._load_daily_review_json 同三路径口径：历史日期的产物仍是
-    旧名/旧布局，校验历史日期不该直接报缺。"""
+    """定位某日 final_review 产物：.json 自 v0.179 改道 data/review/（机器接口
+    与报告分层，名不带时点标记）为第一候选；reports/daily/ 下新名（v0.141 起
+    带 1700 时点标记）、旧名（同日目录无标记）与旧平铺布局（2026-08-12 目录
+    重构前）依次回退 —— 与 weekly_review._load_daily_review_json 同口径：
+    历史产物不搬，校验历史日期不该直接报缺。.md 不落 data/review/，
+    候选保持 reports/ 三路径。"""
     daily = daily_report_dir(day, REV)
-    for path in (
+    candidates = []
+    if suffix == "json":
+        candidates.append(REVIEW_JSON_DIR / f"{day}_final_review.json")
+    candidates += [
         daily / f"{day}_1700_final_review.{suffix}",
         daily / f"{day}_final_review.{suffix}",
         REV / f"{day}_final_review.{suffix}",
-    ):
+    ]
+    for path in candidates:
         if path.exists():
             return path
     return None

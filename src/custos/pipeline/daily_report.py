@@ -17,7 +17,7 @@ from custos.datasource.news.premarket_intel_schema import (
     validate_premarket_intelligence,
 )
 
-from custos.core.paths import DATA, PLANS, REVIEWS, cn_now, daily_report_dir
+from custos.core.paths import DATA, PLANS, REVIEW_DIR, REVIEWS, cn_now, daily_report_dir
 from custos.core.paths import read_json as load
 from custos.core import report_audit
 
@@ -30,6 +30,9 @@ from custos.datasource.news.premarket_intel_schema import (  # noqa: E402
 )
 
 PLAN = PLANS
+# 前日 final_review.json 的新落点（v0.179 起 data/review/，与报告分层）——模块常量，
+# 测试 monkeypatch 改道 tmp；直接读 paths.REVIEW_DIR 会绕过改道、读真实 data/。
+REVIEW_JSON_DIR = REVIEW_DIR
 WEEKDAY = "一二三四五六日"
 
 
@@ -103,18 +106,26 @@ def premarket_schema_marker(check: dict[str, Any]) -> str:
 
 
 def previous_review(day: str) -> dict[str, Any]:
-    review_dir = REVIEWS / "daily"
     candidates = []
-    # 新结构 {day}/{day}_1700_final_review.json + 旧名 {day}_final_review.json
-    # （2026-08-29 文件名带时点标记前）+ 旧平铺 *_final_review.json（迁移期兼容，
-    # 读历史日前一批是旧布局）——glob 后缀 *_final_review.json 对新旧名都命中，
-    # 同一文件会被两种模式各命中一次的形态不存在，放心并集。
-    for path in list(review_dir.glob("*/*_final_review.json")) + list(
-        review_dir.glob("*_final_review.json")
-    ):
+    # v0.179 起 .json 机器接口落 data/review/（glob 后缀 *_final_review.json，
+    # 新路径优先）；找不到再回退 reports/daily/ 旧位置——历史产物不搬，
+    # 搬目录次日读前一交易日预案不能断。
+    for path in REVIEW_JSON_DIR.glob("*_final_review.json"):
         file_day = path.name[:10]
         if file_day < day:
             candidates.append((file_day, path))
+    if not candidates:
+        review_dir = REVIEWS / "daily"
+        # 旧位置回退：{day}/{day}_1700_final_review.json + 旧名 {day}_final_review.json
+        # （2026-08-29 文件名带时点标记前）+ 旧平铺 *_final_review.json（迁移期兼容，
+        # 读历史日前一批是旧布局）——glob 后缀 *_final_review.json 对新旧名都命中，
+        # 同一文件会被两种模式各命中一次的形态不存在，放心并集。
+        for path in list(review_dir.glob("*/*_final_review.json")) + list(
+            review_dir.glob("*_final_review.json")
+        ):
+            file_day = path.name[:10]
+            if file_day < day:
+                candidates.append((file_day, path))
     return load(max(candidates)[1], {}) if candidates else {}
 
 

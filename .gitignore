@@ -25,10 +25,13 @@ data/**
 !governance/data/**
 
 # Generated review reports (may contain sensitive account data). Keep directories only.
-artifacts/reports/trade_review/**
-!artifacts/reports/trade_review/**/
+# trade_review 2026-09-05 起整组挪到 artifacts/logs/trade_review/（一次性研究产物，
+# 非日/周/月报告链路），由下方 artifacts/logs/ 整体规则覆盖，不再单列。
 artifacts/reports/weekly/**
 !artifacts/reports/weekly/**/
+# monthly 同 weekly「keep directories only」（此前仅靠末尾 reports/ 隐式兜住，显式化）
+artifacts/reports/monthly/**
+!artifacts/reports/monthly/**/
 
 # Pipeline logs and transient output
 artifacts/logs/

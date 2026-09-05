@@ -98,6 +98,14 @@ RISK_DIR = DATA / "risk"
 STOCK_POOL_DIR = DATA / "stock_pool"
 CACHE_DIR = DATA / "cache"  # 采集缓存（如 tdx_affair 权息缓存）
 
+# 复盘机器接口 JSON（v0.179 起）：日/周/月报告的 .md 是人读报告，留
+# artifacts/reports/；同名的 .json 是跨链路消费的数据接口（次日 09:05 链、
+# 周六周报链、复盘校验都按路径读它），归 data/review/ 与报告分层。
+# 读方一律「新路径优先 + 旧路径（reports 下同位置）回退」——历史产物不搬。
+REVIEW_DIR = DATA / "review"
+REVIEW_WEEKLY_DIR = REVIEW_DIR / "weekly"
+REVIEW_MONTHLY_DIR = REVIEW_DIR / "monthly"
+
 # ---------------------------------------------------------------------------
 # governance/ 的四个子目录（2026-08-06 分类重构）
 #

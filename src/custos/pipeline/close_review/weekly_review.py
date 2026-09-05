@@ -6,8 +6,8 @@
 
 --date 默认今天，取其所在 ISO 周，周一~周五为复盘区间。
 输出：
-    artifacts/reports/weekly/{iso_year}W{iso_week:02d}_weekly_review.json
-    artifacts/reports/weekly/{iso_year}W{iso_week:02d}_weekly_review.md
+    artifacts/reports/weekly/{iso_year}W{iso_week:02d}_weekly_review.md（人读报告）
+    data/review/weekly/{iso_year}W{iso_week:02d}_weekly_review.json（机器接口，v0.179 起）
 
 归因规则（全部确定性，阈值集中在本文件顶部常量）：
 - 计划外交易：成交日 D 的计划 = 最近一份早于 D 的 daily final_review 的
@@ -67,7 +67,13 @@ from datetime import date, timedelta
 from pathlib import Path
 
 
-from custos.core.paths import BASE, CALENDAR_RELPATH, cn_today, cn_now  # noqa: E402
+from custos.core.paths import (  # noqa: E402
+    BASE,
+    CALENDAR_RELPATH,
+    REVIEW_WEEKLY_DIR,
+    cn_now,
+    cn_today,
+)
 from custos.core.indicators import pct_change  # noqa: E402
 from custos.pipeline.close_review.loss_streak import (
     format_lines as loss_streak_lines,  # noqa: E402
@@ -87,6 +93,13 @@ AMV_BULL_PCT = 4.0  # 0AMV 多头阈值
 AMV_BEAR_PCT = -2.3  # 0AMV 空头阈值
 
 BUY, SELL = "买入", "卖出"
+
+# 周报 JSON 落点（v0.179 起）：.md 人读报告留 artifacts/reports/weekly/（仍随 --base
+# 改道），.json 机器接口归 data/review/weekly/ 与报告分层（理由见 paths.py REVIEW_DIR
+# 注释）。定义为本模块常量 = 测试 monkeypatch 它改道 tmp——直接读 paths 的常量会写进
+# 真实 data/，被 test_repo_hygiene「测试不得写仓库」守卫抓到（patch 调用方模块常量的
+# 约定同 paths.daily_report_dir 的 docstring）。
+WEEKLY_JSON_DIR = REVIEW_WEEKLY_DIR
 
 
 def iso_week_range(day: str) -> dict:
@@ -373,12 +386,15 @@ def trading_days_of_week(base: Path, days: list[str]) -> dict[str, bool | None]:
 
 
 def _load_daily_review_json(base: Path, day: str):
-    """读某日的 final_review.json：新名 `daily/{day}/{day}_1700_final_review.json`
-    优先；旧名（2026-08-29 文件名带时点标记前）与旧平铺（2026-08-12 目录重构前）
-    依次回退——历史日期的产物仍是旧名/旧布局，prev-day 查找必须兼容，否则
-    改名次日读前一交易日预案会断。文件不存在返回 None。"""
+    """读某日的 final_review.json：data/review/ 新落点（v0.179 起 .json 机器接口
+    与报告分层，名不带时点标记）优先；reports/daily/ 下新名
+    `daily/{day}/{day}_1700_final_review.json`、旧名（2026-08-29 文件名带时点
+    标记前）与旧平铺（2026-08-12 目录重构前）依次回退——历史产物不搬，
+    prev-day 查找必须兼容，否则搬目录次日读前一交易日预案会断。
+    文件不存在返回 None。"""
     daily = base / "artifacts/reports" / "daily"
     for path in (
+        base / "data" / "review" / f"{day}_final_review.json",
         daily / day / f"{day}_1700_final_review.json",
         daily / day / f"{day}_final_review.json",
         daily / f"{day}_final_review.json",
@@ -1865,11 +1881,12 @@ def main() -> None:
     base = Path(args.base)
 
     review = build_weekly_review(base, args.date)
-    out_dir = base / "artifacts/reports" / "weekly"
-    out_dir.mkdir(parents=True, exist_ok=True)
+    md_dir = base / "artifacts/reports" / "weekly"
+    md_dir.mkdir(parents=True, exist_ok=True)
     stem = f"{review['iso_year']}W{review['iso_week']:02d}_weekly_review"
-    json_path = out_dir / f"{stem}.json"
-    md_path = out_dir / f"{stem}.md"
+    json_path = WEEKLY_JSON_DIR / f"{stem}.json"
+    md_path = md_dir / f"{stem}.md"
+    json_path.parent.mkdir(parents=True, exist_ok=True)
     json_path.write_text(
         json.dumps(review, ensure_ascii=False, indent=2), encoding="utf-8"
     )

@@ -57,7 +57,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
-from custos.core.paths import cn_now, REVIEWS, TRADES_DIR  # noqa: E402
+from custos.core.paths import ARTIFACT_LOGS, TRADES_DIR, cn_now  # noqa: E402
 
 BEAR_THRESHOLD = -2.3  # amv_change_pct <= 此值当日进入空头
 BULL_THRESHOLD = 4.0  # amv_change_pct >= 此值当日进入多头
@@ -65,7 +65,7 @@ REBOUND_SELL_PCT = 0.20  # 反弹日减仓比例
 
 LEDGER_PATH = TRADES_DIR / "master_trade_ledger.csv"
 POSITIONS_PATH = TRADES_DIR / "current_positions.json"
-REPORT_DIR = REVIEWS / "trade_review"
+REPORT_DIR = ARTIFACT_LOGS / "trade_review"  # 一次性研究产物，归 logs 而非报告链路
 
 # 代码为 000000 的组合费用、131810/204001 逆回购等无个股行情的类别
 NON_SECURITY_CODES = {"000000", "131810", "204001"}

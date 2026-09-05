@@ -49,6 +49,10 @@ def write_review(base: Path, day: str, plan_codes: list[str] | None = None) -> N
         "date": day,
         "next_day_plan": {"holding_plans": [{"code": c} for c in (plan_codes or [])]},
     }
+    # 日复盘 JSON 2026-09-05 起挪 data/review/（v0.179）；读方「新路径优先 + 旧路径
+    # 回退」（paths.py REVIEW_DIR 注释的约定），过渡期夹具两路都写——旧路径回退
+    # 删除后旧写可去。
+    write_json(base / "data" / "review" / f"{day}_final_review.json", review)
     write_json(
         base / "artifacts/reports" / "daily" / day / f"{day}_1700_final_review.json",
         review,
@@ -592,16 +596,27 @@ class DegradationTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as td:
             base = traded_base(Path(td))
-            with patch(
-                "sys.argv",
-                ["weekly_review.py", "--date", "2026-07-19", "--base", str(base)],
+            # .json 落点（v0.179 起 data/review/weekly/）走模块常量 WEEKLY_JSON_DIR，
+            # patch 改道 tmp——不 patch 会写进真实 data/（test_repo_hygiene 守卫会抓）；
+            # .md 仍随 --base 落 artifacts/reports/weekly/。
+            json_dir = base / "data" / "review" / "weekly"
+            with (
+                patch.object(wr, "WEEKLY_JSON_DIR", json_dir),
+                patch(
+                    "sys.argv",
+                    ["weekly_review.py", "--date", "2026-07-19", "--base", str(base)],
+                ),
             ):
                 wr.main()
-            json_path = (
-                base / "artifacts/reports" / "weekly" / "2026W29_weekly_review.json"
-            )
+            json_path = json_dir / "2026W29_weekly_review.json"
             md_path = base / "artifacts/reports" / "weekly" / "2026W29_weekly_review.md"
             self.assertTrue(json_path.exists())
+            self.assertFalse(
+                (
+                    base / "artifacts/reports" / "weekly" / "2026W29_weekly_review.json"
+                ).exists(),
+                "json 不应再落报告目录",
+            )
             self.assertTrue(md_path.exists())
             data = json.loads(json_path.read_text(encoding="utf-8"))
             self.assertEqual(
@@ -624,9 +639,12 @@ class DegradationTests(unittest.TestCase):
 
 
 def write_full_review(base: Path, day: str, revalued: list[dict]) -> None:
+    review = {"date": day, "revalued_positions": revalued}
+    # 两路都写：日复盘 JSON 过渡期（新路径优先 + 旧路径回退），同 write_review。
+    write_json(base / "data" / "review" / f"{day}_final_review.json", review)
     write_json(
         base / "artifacts/reports" / "daily" / day / f"{day}_1700_final_review.json",
-        {"date": day, "revalued_positions": revalued},
+        review,
     )
 
 

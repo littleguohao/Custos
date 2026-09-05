@@ -196,7 +196,8 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 ### 正式产物
 
 - `artifacts/reports/daily/YYYY-MM-DD/YYYY-MM-DD_1700_final_review.md`
-- `artifacts/reports/daily/YYYY-MM-DD/YYYY-MM-DD_1700_final_review.json`
+- `data/review/YYYY-MM-DD_final_review.json`（机器接口 JSON，v0.179 起从报告目录挪出；
+  2026-09-05 前产物在 artifacts/reports/ 旧位置，读方需兼容）
 
 下一交易日候选池和条件计划属于该复盘的派生结构化产物，不单独作为第六份核心报告。
 
@@ -237,7 +238,9 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 
 ### 正式产物
 
-`artifacts/reports/weekly/YYYY-Www_weekly_review.md/json`
+- `artifacts/reports/weekly/YYYY-Www_weekly_review.md`
+- `data/review/weekly/YYYY-Www_weekly_review.json`（机器接口 JSON，v0.179 起从报告目录
+  挪出；2026-09-05 前产物在 artifacts/reports/ 旧位置，读方需兼容）
 
 ### 实现状态（2026-07-19 起）
 
@@ -284,7 +287,9 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 
 ### 正式产物
 
-`artifacts/reports/monthly/YYYY-MM_monthly_review.md/json`
+- `artifacts/reports/monthly/YYYY-MM_monthly_review.md`
+- `data/review/monthly/YYYY-MM_monthly_review.json`（机器接口 JSON，v0.179 起从报告目录
+  挪出；2026-09-05 前产物在 artifacts/reports/ 旧位置，读方需兼容）
 
 ---
 

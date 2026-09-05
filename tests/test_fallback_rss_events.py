@@ -98,6 +98,10 @@ class TestDailyReportAuditBlock:
         )
         monkeypatch.setattr(daily_report, "DATA", data)
         monkeypatch.setattr(daily_report, "PLAN", tmp_path / "artifacts/reports/daily")
+        # previous_review 读 REVIEWS（旧位置回退）与 REVIEW_JSON_DIR（data/review/
+        # 新落点）——两个都改道 tmp 下空目录，否则 glob 到真实运行数据
+        monkeypatch.setattr(daily_report, "REVIEWS", tmp_path / "artifacts/reports")
+        monkeypatch.setattr(daily_report, "REVIEW_JSON_DIR", tmp_path / "data/review")
         # 盘前情报路径走模块自身常量，钉成「无」保证环境无关
         monkeypatch.setattr(
             daily_report, "premarket_intelligence_path", lambda day: None

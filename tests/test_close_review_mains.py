@@ -78,6 +78,9 @@ def fcr_env(tmp_path, monkeypatch):
     data = tmp_path / "data"
     monkeypatch.setattr(fcr, "DATA", data)
     monkeypatch.setattr(fcr, "REV", tmp_path / "artifacts/reports" / "daily")
+    # .json 自 v0.179 落 data/review/（模块常量 REVIEW_JSON_DIR）——一并改道 tmp，
+    # 漏 patch 会写进真实 data/，被 test_repo_hygiene「测试不得写仓库」抓到
+    monkeypatch.setattr(fcr, "REVIEW_JSON_DIR", data / "review")
     for rel, obj in MANDATORY.items():
         _write(data, rel, obj)
     _write(data, "trades/current_positions.json", [])
@@ -123,7 +126,10 @@ class TestFinalCloseReviewInputContract:
         _run_fcr(monkeypatch)
         rev = fcr_env / "artifacts/reports" / "daily" / DAY
         assert (rev / f"{DAY}_1700_final_review.md").exists()
-        assert (rev / f"{DAY}_1700_final_review.json").exists()
+        # v0.179 起 .json 改道 data/review/（机器接口与报告分层，名不带时点标记）；
+        # 报告目录只留 .md，不再落 .json
+        assert (fcr_env / "data" / "review" / f"{DAY}_final_review.json").exists()
+        assert not (rev / f"{DAY}_1700_final_review.json").exists()
 
     def test_sections_7_to_9_removed_and_section_4_replaced(self, fcr_env, monkeypatch):
         """v0.136：§7 纪律偏差 / §8 数据时效 / §9 数据来源三节整删（审计块在报告头部）；
@@ -151,13 +157,9 @@ class TestFinalCloseReviewInputContract:
     def test_json_artifact_is_valid_json(self, fcr_env, monkeypatch):
         """产物必须是合法 JSON（NaN/Infinity 都不是）—— 下游要能解析。"""
         _run_fcr(monkeypatch)
-        raw = (
-            fcr_env
-            / "artifacts/reports"
-            / "daily"
-            / DAY
-            / f"{DAY}_1700_final_review.json"
-        ).read_text(encoding="utf-8")
+        raw = (fcr_env / "data" / "review" / f"{DAY}_final_review.json").read_text(
+            encoding="utf-8"
+        )
         assert "NaN" not in raw and "Infinity" not in raw
         json.loads(raw)
 
@@ -172,13 +174,9 @@ class TestFinalCloseReviewInputContract:
             / DAY
             / f"{DAY}_1700_final_review.md"
         ).read_text(encoding="utf-8")
-        plain = (
-            fcr_env
-            / "artifacts/reports"
-            / "daily"
-            / DAY
-            / f"{DAY}_1700_final_review.json"
-        ).read_text(encoding="utf-8")
+        plain = (fcr_env / "data" / "review" / f"{DAY}_final_review.json").read_text(
+            encoding="utf-8"
+        )
         assert "无交易" in body or "no_trades" in plain
 
 
@@ -359,7 +357,9 @@ class TestReportAuditBlock:
         body = (rev / f"{DAY}_1700_final_review.md").read_text(encoding="utf-8")
         assert "report_id" in body and "策略版本" in body and "输入清单" in body
         payload = json.loads(
-            (rev / f"{DAY}_1700_final_review.json").read_text(encoding="utf-8")
+            (fcr_env / "data" / "review" / f"{DAY}_final_review.json").read_text(
+                encoding="utf-8"
+            )
         )
         audit = payload["audit"]
         assert audit["report_id"].startswith(f"{DAY}_close_review_")

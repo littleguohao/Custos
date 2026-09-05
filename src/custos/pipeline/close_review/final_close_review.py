@@ -16,7 +16,7 @@ from custos.pipeline.market_timing.sector_daily_rank import (  # noqa: E402  L3 
     read_close_series,
 )
 
-from custos.core.paths import cn_now, DATA, REVIEWS, daily_report_dir  # noqa: E402
+from custos.core.paths import cn_now, DATA, REVIEW_DIR, REVIEWS, daily_report_dir  # noqa: E402
 from custos.core import report_audit  # noqa: E402
 from custos.core.b1_thresholds import J_LOW_THRESHOLD  # noqa: E402  L0，J<13 硬门槛唯一来源
 from custos.core.code_utils import market_of  # noqa: E402
@@ -30,6 +30,13 @@ from custos.core.exit_rules import LOSS_REDUCTION_PCT  # noqa: E402  L0，−7% 
 from custos.core.trades.position_plans import load_plans  # noqa: E402  L2，持仓计划影子读取
 
 REV = REVIEWS / "daily"
+# 盘后复盘 JSON 落点（v0.179 起）：.md 人读报告留 REV 下（文件名带 1700 时点标记），
+# .json 机器接口归 data/review/{day}_final_review.json 与报告分层（理由见 paths.py
+# REVIEW_DIR 注释；数据层接口名不带时点标记——那是报告层命名装饰）。读方一律
+# 「新路径优先 + 旧路径回退」，历史产物不搬。定义为本模块常量 = 测试 monkeypatch
+# 它改道 tmp——直接读 paths 的常量会写进真实 data/，被 test_repo_hygiene 抓到
+# （同 weekly_review.WEEKLY_JSON_DIR / monthly_review.MONTHLY_JSON_DIR 的约定）。
+REVIEW_JSON_DIR = REVIEW_DIR
 
 
 def ma_flag(value) -> str:
@@ -1057,7 +1064,9 @@ def main():
         gate,
         out,
     )
-    json_out = daily_report_dir(day, REV) / f"{day}_1700_final_review.json"
+    # .json 机器接口改道 data/review/（v0.179）；目录未必存在，写方负责建。
+    json_out = REVIEW_JSON_DIR / f"{day}_final_review.json"
+    json_out.parent.mkdir(parents=True, exist_ok=True)
     require("final_review", payload)
     json_out.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False),
