@@ -71,7 +71,9 @@ def _sig_nm(c: dict) -> str:
 
 
 def _signal_label_row(key: str, meta: tuple, with_sig: list[dict]) -> Optional[str]:
-    """单因子行：命中/可评 + 命中名单（按技术分降序，全列不截断）。无可评估且无命中返回 None。"""
+    """单因子行：命中/可评 + 盈亏比/胜率（R27 读数）+ 命中名单（按技术分降序，全列不截断）。无可评估且无命中返回 None。"""
+    from custos.pipeline.screening import signal_labels as sl  # noqa: PLC0415
+
     label, abbr, direction = meta
     hits, evaluable = [], 0
     for c in with_sig:
@@ -88,13 +90,22 @@ def _signal_label_row(key: str, meta: tuple, with_sig: list[dict]) -> Optional[s
     # v0.169（owner）：命中名单完整列出，不再截断前 12。
     top_hits = sorted(hits, key=lambda c: (-(c.get("score") or 0), str(c.get("code"))))
     names = "、".join(f"{_sig_nm(c)}({int(c.get('score') or 0)})" for c in top_hits)
-    return f"| {mark}**{label}** `{abbr}` | {len(hits)}/{evaluable} | {names or '无'} |"
+    stats = sl.SIGNAL_STATS.get(key)
+    stat_cell = (
+        f"{stats[0][0]:.2f} / {stats[0][1] * 100:.0f}% ｜ {stats[1][0]:.2f} / {stats[1][1] * 100:.0f}%"
+        if stats
+        else "—"
+    )
+    return (
+        f"| {mark}**{label}** `{abbr}` | {len(hits)}/{evaluable} | {stat_cell} "
+        f"| {names or '无'} |"
+    )
 
 
 def _signal_labels_section(candidates: list[dict]) -> list[str]:
     """信号标注一览：**逐个标注列出命中的票**（而不是只报几只）。
 
-    设计边界：这些研究因子（QSX共振、RSI 区间、B2、底部异动、主升始发点…）**只标注，
+    设计边界：这些研究因子（QSX共振、RSI 区间、B2、底部异动…）**只标注，
     不参与打分分层**，上方候选池的分层与 next_step 完全未被改写。
 
     ⚠️ 它们**已在跨窗终审中被否决**（治理文档「H1/H2 终审」）：edge 只存在于 2025-2026
@@ -103,8 +114,9 @@ def _signal_labels_section(candidates: list[dict]) -> list[str]:
     分母是**可评估数**（排除数据不足的票）：`min_list_days=60` 而 `qsx_resonance_v2` 需
     ≥114 根（DKS 成形）、`surge_then_b1` 需 200 根，大量候选算不出来。把"算不出来"
     混进分母会让"数据不足"被误读成"不符合条件"。
-    （v0.169 owner：一览行序 = SIGNAL_META 序，QG 首位；⚠出货行不列、解释文字不列、
-    命中名单全列不截断。）
+    （v0.169 owner：⚠出货行不列、解释文字不列、命中名单全列不截断；
+    v0.185 owner：撤 MR（主升始发点）行；新增「盈亏比/胜率」列（R27 交易层双窗读数），
+    行序改按跨窗盈亏比降序，无同口径数据的行垫底显示 "—"。）
     """
     try:
         # 包式导入失败（如模块损坏）此前被外层 except 吞掉，
@@ -124,9 +136,15 @@ def _signal_labels_section(candidates: list[dict]) -> list[str]:
     lines = [
         "## 🏷️ 信号标注一览（研究因子·只标注，不影响上方分层）",
         "",
-        "| 因子 | 命中/可评 | 命中候选（按技术分降序；括号内为技术分） |",
-        "|---|---:|---|",
+        "> 盈亏比/胜率列是 R27 交易层双窗读数（trade-sim：0AMV做多+J<13 基底、s3000、"
+        "pct12+分批止盈+BBI跌破2根出场；跨窗 2022-2024｜主窗 2024-08~2026-09），"
+        "供相对参考，非 live 统计；无同口径数据的显示 —。",
+        "",
+        "| 因子 | 命中/可评 | 盈亏比/胜率（跨窗｜主窗） | 命中候选（按技术分降序；括号内为技术分） |",
+        "|---|---:|---:|---|",
     ]
+    # v0.185（owner）：行序按跨窗盈亏比降序（无读数的垫底），不再是 SIGNAL_META 序。
+    rows = []
     for key, meta in sl.SIGNAL_META.items():
         # SG（底部异动）不单列（2026-08-14 owner 反馈两行名单每次完全相同）：
         # SB = SG ∧ 当日 J<13，而本池已过 J<13 硬门槛 ⇒ 池内 SG 与 SB 恒重合，
@@ -138,7 +156,11 @@ def _signal_labels_section(candidates: list[dict]) -> list[str]:
             continue
         row = _signal_label_row(key, meta, with_sig)
         if row is not None:
-            lines.append(row)
+            stats = sl.SIGNAL_STATS.get(key)
+            sort_key = -stats[0][0] if stats else 0.0
+            rows.append((sort_key, key, row))
+    rows.sort(key=lambda r: (r[0], r[1]))
+    lines.extend(r[2] for r in rows)
     lines.append("")
     return lines
 

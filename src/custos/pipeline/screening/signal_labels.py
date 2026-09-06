@@ -45,11 +45,31 @@ SIGNAL_META: dict[str, tuple[str, str, int]] = {
     "bottom_surge": ("底部异动(巨量点火)", "SG", +1),
     "surge_then_b1": ("异动后的B1", "SB", +1),
     "breakout_pullback_b1": ("突破回踩型B1", "PB", +1),
-    "main_rally": ("主升始发点", "MR", +1),
     "distribution_risk": ("主力出货形态", "⚠出货", -1),
 }
 POSITIVE = [k for k, v in SIGNAL_META.items() if v[2] > 0]
 NEGATIVE = [k for k, v in SIGNAL_META.items() if v[2] < 0]
+
+# 标注的交易层读数（R27 双窗对照，2026-09-06）：key → ((跨窗盈亏比, 跨窗胜率),
+# (主窗盈亏比, 主窗胜率))。口径：trade-sim、0AMV做多+J<13 研究基底、s3000、
+# pct12+分批止盈0.5+BBI跌破2根 出场档；跨窗 2022-2024 / 主窗 2024-08~2026-09。
+# ⚠️ 是研究回测数字（R11：相对排序用，量级不作数），不是 live 统计；
+# 缺 key = 无同口径数据（一览显示 "—"）。
+# 标注的交易层读数（R27 双窗对照，2026-09-06）：key → ((跨窗盈亏比, 跨窗胜率),
+# (主窗盈亏比, 主窗胜率))。口径：trade-sim、0AMV做多+J<13 研究基底、s3000、
+# pct12+分批止盈0.5+BBI跌破2根 出场档；跨窗 2022-2024 / 主窗 2024-08~2026-09。
+# ⚠️ 是研究回测数字（R11：相对排序用，量级不作数），不是 live 统计；
+# 缺 key = 无同口径数据（一览显示 "—"）。
+SIGNAL_STATS: dict[str, tuple[tuple[float, float], tuple[float, float]]] = {
+    "qsx_resonance_v2": ((2.73, 0.314), (2.60, 0.358)),
+    "rsi_deep_oversold": ((2.28, 0.732), (1.49, 0.567)),
+    "b2": ((2.40, 0.523), (2.36, 0.494)),
+    "surge_then_b1": ((2.11, 0.472), (1.28, 0.359)),
+    "rsi_ideal_b1": ((1.74, 0.702), (2.28, 0.694)),
+    "rsi_bull_div": ((1.74, 0.519), (0.99, 0.376)),
+    "breakout_pullback_b1": ((1.41, 0.405), (1.83, 0.382)),
+    "rsi_strong": ((1.33, 0.438), (1.92, 0.531)),
+}
 
 
 def _state(available: bool, hit: bool) -> str:
@@ -190,32 +210,6 @@ def _signal_breakout_pullback_b1(
         )
 
 
-# ---- 主升始发点（新增计算，约 3.8ms/票）----
-def _signal_main_rally(out: dict[str, Any], df: pd.DataFrame, code: str):
-    try:
-        from custos.core.factors.main_rally_factor import detect_main_rally_start
-
-        mrr = detect_main_rally_start(df, code)
-        _put(
-            out,
-            "main_rally",
-            bool(mrr.get("available")),
-            bool(mrr.get("hit")),
-            flow_ratio=mrr.get("flow_ratio"),
-            rsi7=mrr.get("rsi7"),
-            cci=mrr.get("cci"),
-            conditions_met=mrr.get("conditions_met"),
-        )
-    except Exception as exc:  # noqa: BLE001
-        _put(
-            out,
-            "main_rally",
-            False,
-            False,
-            reason=f"main_rally_error:{type(exc).__name__}",
-        )
-
-
 # ---- QSX 共振 v2（R23 研究因子下沉，仅观察记录）----
 def _signal_qsx_resonance_v2(out: dict[str, Any], df: pd.DataFrame):
     """hit 口径 = 成立且未排除（R23 C 臂完整口径：hit & ~excluded）。
@@ -265,7 +259,6 @@ def compute_signals(
     _signal_rsi(out, df)
     _signal_surge(out, df, code)
     _signal_breakout_pullback_b1(out, df, code, platform_pullback, daily_j)
-    _signal_main_rally(out, df, code)
     _signal_qsx_resonance_v2(out, df)
 
     return {**out, "summary": summarize_signals(out)}

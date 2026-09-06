@@ -86,14 +86,13 @@ class TestThreeStates:
         assert s["bottom_surge"]["state"] == "unavailable"
 
     def test_denominator_excludes_unavailable(self):
-        """新股只能评估 4 项、命中 3 项 → 显示 3/4 而不是 3/11。"""
+        """新股只能评估 3 项、命中 3 项 → 显示 3/3 而不是 3/10。"""
         s = _sig(
             hits={"rsi_strong", "rsi_deep_oversold", "rsi_ideal_b1"},
             na={
                 "qsx_resonance_v2",
                 "bottom_surge",
                 "surge_then_b1",
-                "main_rally",
                 "breakout_pullback_b1",
                 "b2",
                 "distribution_risk",
@@ -104,7 +103,7 @@ class TestThreeStates:
         assert sm["positive_hit_count"] == 3
         assert sm["positive_evaluable"] == 3, "分母只数 hit+miss"
         assert sm["label"] == "3/3"
-        assert sm["unavailable_count"] == 8
+        assert sm["unavailable_count"] == 7
 
     def test_negative_counted_separately(self):
         s = _sig(hits={"rsi_strong"}, neg={"distribution_risk"})
@@ -131,14 +130,14 @@ class TestThreeStates:
         for k in (
             "bottom_surge",
             "surge_then_b1",
-            "main_rally",
             "qsx_resonance_v2",
         ):
             assert s[k]["state"] in ("hit", "miss"), f"{k} 应可评估"
 
     def test_qsx_gt_dks_label_removed_and_qg_first(self):
         """v0.169（owner）：QD（qsx_gt_dks）标注整体撤除；QG 在 SIGNAL_META 首位
-        （dict 序 = 一览行序 = 单元格缩写序）。打分链 zhixing.qsx_gt_dks 数据键不受影响。"""
+        （dict 序 = 单元格缩写序；一览行序 v0.185 起改按跨窗盈亏比降序）。
+        打分链 zhixing.qsx_gt_dks 数据键不受影响。"""
         assert "qsx_gt_dks" not in sl.SIGNAL_META
         assert next(iter(sl.SIGNAL_META)) == "qsx_resonance_v2"
 
@@ -319,8 +318,10 @@ class TestTableRendering:
         assert "⚠️⚠出货" in txt, "主表单元格负向标记必须保留"
         assert "000555 风险票" in txt
 
-    def test_denominator_is_evaluable_count_and_qg_first(self):
-        """QG 行是一览首个数据行（META 首位），命中/可评 = 3/3（新票 unavailable 排除）。"""
+    def test_rows_sorted_by_cw_payoff_desc(self):
+        """v0.185（owner）：一览行序按跨窗盈亏比降序（R27 读数）。
+        本池：QG(2.73) 居首、B2(2.40) 次之、RS(1.33) 垫底；命中/可评口径不变
+        （新票 unavailable 排除，QG 3/3）。"""
         sec = self._labels_section(
             ct.render_table(
                 self._pool(),
@@ -335,10 +336,22 @@ class TestTableRendering:
             )
         )
         rows = [ln for ln in sec.split("\n") if ln.startswith("| ")]
-        # rows[0]=表头 rows[1]=分隔行之后首个数据行
         data_rows = [ln for ln in rows if "---" not in ln][1:]
-        assert data_rows[0].startswith("| **QSX共振v2(60根≥2次干净反弹)** `QG` | 3/3 |")
+        assert data_rows[0].startswith(
+            "| **QSX共振v2(60根≥2次干净反弹)** `QG` | 3/3 | 2.73 / 31%"
+        )
+        assert data_rows[1].startswith("| **B2确认(B1后放量涨4%)** `B2` | 1/4 | 2.40 / 52%")
+        assert data_rows[-1].startswith("| **RSI强势区间** `RS` | 1/4 | 1.33 / 44%")
         assert "`QD`" not in sec, "QD 行已撤"
+        assert "主升" not in sec, "v0.185（owner）：MR（主升始发点）行已撤"
+
+    def test_mr_label_removed(self):
+        """v0.185（owner）：主升始发点标注整体撤除（0 触发因子，R8 H4/R27 双证）。
+        研究侧 main_rally gate/factor 保留（留证复现），只是不进 1800 标注层。"""
+        assert "main_rally" not in sl.SIGNAL_META
+        assert "main_rally" not in sl.compute_signals(
+            __import__("pandas").DataFrame(), "600000"
+        )
 
     def test_no_explanation_lines(self):
         """v0.169（owner）：一览撤三条解释文字——数据不足补注、分母/缩写说明行、终审否决行。"""
@@ -369,7 +382,7 @@ class TestTableRendering:
     def test_main_table_has_label_column(self):
         txt = ct.render_table(self._pool(), "2026-08-04")
         assert "| 4面共振 | 平台回踩 | 标注 | 分层 |" in txt
-        assert "3/10 QG·RS·B2" in txt
+        assert "3/9 QG·RS·B2" in txt
 
     def test_no_signals_section_when_absent(self):
         """候选没有 signals 字段（旧产物）时不渲染该区块，且不报错。"""
@@ -420,7 +433,7 @@ class TestLabelsNeverAlterSelection:
 
     VARIANTS = [
         _sig(),  # 全 miss
-        _sig({"qsx_resonance_v2", "rsi_strong", "b2", "surge_then_b1", "main_rally"}),
+        _sig({"qsx_resonance_v2", "rsi_strong", "b2", "surge_then_b1"}),
         _sig(na=set(sl.SIGNAL_META)),  # 全 unavailable
         _sig({"qsx_resonance_v2"}, neg={"distribution_risk"}),  # 含负向
     ]

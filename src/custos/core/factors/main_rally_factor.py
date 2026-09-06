@@ -45,10 +45,11 @@ FACTOR: dict[str, Any] = {
     "kind": "pattern",
     "status": "untested",
     "evidence": "governance/research/R8_hypothesis_H3_H4_pending.md",
-    "note": "R8：已实现未跑；原文两处矛盾，两种 CROSS 口径都实现由回测判定",
+    "note": "R8 H4：s3000×2年 两 CROSS 口径 0 触发；R27：s300 双窗探测 0 成交复证。"
+    "v0.185 从 1800 标注层撤除（0 触发因子不提供信息），研究侧 gate 保留留证",
     "min_bars": 60,
-    "live_use": "evidence_only",  # signal_labels 出标签落候选表；该模块头部已声明「标注不是交易依据」
-    "stage": "release",
+    "live_use": "none",  # v0.185 起 live 不再引用（原 signal_labels MR 标注已撤）
+    "stage": "debug",
 }
 
 

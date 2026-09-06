@@ -195,6 +195,8 @@ class TestNotForLive:
         v0.84（Phase D 因子化）：+ fundamentals（基本面 CZ 抄底代理 +
         fundamental_quality 品质档——只进 🐂 展示与四面共振基本面腿，
         不进分不驱动分层，行为不变）。
+        v0.185：− main_rally_factor（R8 H4 + R27 双证 0 触发，撤 1800 标注，
+        转 debug/none，研究侧 gate 保留留证）。
         """
         got = set(factors.live_evidence_only())
         assert got == {
@@ -205,7 +207,6 @@ class TestNotForLive:
             # 尤其不得据标注数决定仓位」
             "b1_dual_factor",
             "b2_surge_factor",
-            "main_rally_factor",
             "rsi_state",
             # v0.50（#37 阶段 A）定案，见各自模块 FACTOR 注释
             "s_shape",
@@ -523,10 +524,12 @@ class TestStageMatchesReality:
         entry_patterns（scorer，patterns 五单项 5 条技术分腿 + capital_intent
         证据）、j_low_gate（gate，18:00 进池硬门槛登记，判定本体复用
         weekly_j.j_below_threshold，执行点在 enrich _apply_j_gate）自
-        enrich_candidates 迁入/补登记，零行为变化。）
+        enrich_candidates 迁入/补登记，零行为变化；
+        v0.185：20 → 19，main_rally_factor 撤标注下线转 debug（R8 H4 + R27
+        双证 0 触发；研究侧 gate 保留留证）。）
         """
         got = set(factors.released())
-        assert len(got) == 20, f"已上线因子数变了（{len(got)}）：{sorted(got)}"
+        assert len(got) == 19, f"已上线因子数变了（{len(got)}）：{sorted(got)}"
 
     def test_debug_factors_are_research_only(self):
         """未上线的因子 live_use 应为 none —— 既没上线又声明可用是自相矛盾。"""
