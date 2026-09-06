@@ -1,0 +1,6 @@
+[
+  {
+    "name": "pct12_so5_bbi2",
+    "params": { "stop_mode": "pct", "stop_pct": 12, "scale_out_frac": 0.5, "bbi_exit_consec": 2 }
+  }
+]

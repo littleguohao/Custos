@@ -125,6 +125,11 @@ TOOLS: dict[str, tuple[str, str]] = {
         "三面共振（基本面优∧技术强∧0AMV做多）交易层验证：两臂对照"
         "（j_low 基底 vs 共振 gate，PIT as-of；⚠️ R21：画像≠可交易）",
     ),
+    "signal_context_study": (
+        "study",
+        "8 研究信号 × 三上下文维度（三面共振/空头前哨/技术高分）组内外加值验证："
+        "离线读 strategy_grid 格子逐笔（不重跑回测），两窗同向预注册判读",
+    ),
     "score_calibration_study": (
         "study",
         "R24 打分校准：逐腿边际分析（池内命中率/add-one/LOO margin）——"
