@@ -157,6 +157,125 @@ def _roll_mean_states(x: np.ndarray, k: int) -> tuple[np.ndarray, ...]:
     return sum_a, c_add_a, c_rem_a, ncs_a, prev_a, neg_a
 
 
+def _weekly_day_map(
+    d: pd.DataFrame, weekly: pd.DataFrame, high: np.ndarray, low: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """日 bar → 周序号 + 部分周累计 high/low（``_weekly_gate_arrays`` 提取块，v0.189）。
+
+    W-FRI 的 bin 标签 = 当周的周五（周五当日归自身）；部分周聚合 = 周内累计
+    max/min（close 就是当日收盘，open/volume 指标用不到）。
+    """
+    n = len(d)
+    wd = d["date"].dt.weekday.to_numpy()
+    labels = (d["date"] + pd.to_timedelta((4 - wd) % 7, unit="D")).to_numpy()
+    wpos = {lab: k for k, lab in enumerate(weekly["date"].to_numpy())}
+    day_w = np.array([wpos[lab] for lab in labels], dtype=np.int64)
+    part_hi = high.copy()
+    part_lo = low.copy()
+    for t in range(1, n):
+        if day_w[t] == day_w[t - 1]:
+            if part_hi[t] < part_hi[t - 1]:
+                part_hi[t] = part_hi[t - 1]
+            if part_lo[t] > part_lo[t - 1]:
+                part_lo[t] = part_lo[t - 1]
+    return day_w, part_hi, part_lo
+
+
+def _weekly_dks_premove(
+    dks_states: dict[int, tuple], wclose: np.ndarray, W: int
+) -> list[tuple]:
+    """DKS「先删」步逐周预算（``_weekly_gate_arrays`` 提取块，v0.189）。
+
+    周 w 的删步只依赖 w（删 wclose[w-win]，态取周 w-1 处理完的）⇒ 逐周预算删后
+    sum/neg（s1/ng1）；逐日循环只剩「后加当日收盘」一步。删步公式与旧循环逐字
+    相同；c_rem 删步后不再参与加步（加步只用 c_add/sum/neg/ncs/prev）。
+    """
+    dks_day = []
+    for win in _DKS_WINS:
+        sum_a, c_add_a, c_rem_a, ncs_a, prev_a, neg_a = dks_states[win]
+        # w<win-1 的位置永不写入，读取处全靠 valid_all 掩掉 ⇒ 不用 np.empty
+        # 读未初始化内存，显式 NaN/0 占位（有效位逐位不变，掩掉位产出 NaN 更稳）。
+        s1 = np.full(W, np.nan)
+        ng1 = np.full(W, 0, dtype=np.int64)  # int 无 NaN，0 占位（同被掩掉）
+        for w in range(win - 1, W):
+            s = sum_a[w - 1]
+            ng = neg_a[w - 1]
+            if w >= win:
+                v = wclose[w - win]
+                y = -v - c_rem_a[w - 1]
+                tt = s + y
+                s = tt
+                if np.signbit(v):
+                    ng -= 1
+            s1[w] = s
+            ng1[w] = ng
+        dks_day.append((c_add_a, ncs_a, prev_a, s1, ng1))
+    return dks_day
+
+
+def _weekly_kdj_j(
+    idx: np.ndarray,
+    part_hi: np.ndarray,
+    part_lo: np.ndarray,
+    hh_w: np.ndarray,
+    ll_w: np.ndarray,
+    k_arr: np.ndarray,
+    d_arr: np.ndarray,
+    cp: np.ndarray,
+    has_prev: np.ndarray,
+    iprev: np.ndarray,
+) -> np.ndarray:
+    """周 J 逐日步（kdj_series 口径 RSV→K→D→J，fill_na=50；提取块，v0.189）。"""
+    a_kdj = 1.0 / 3.0  # kdj_series 的 ewm(com=m1-1=2) → α=1/(com+1)
+    f_kdj = 1.0 - a_kdj
+    hh = np.maximum(hh_w[idx], part_hi)  # 完整周高低后与部分周累计比大
+    ll = np.minimum(ll_w[idx], part_lo)
+    rng = hh - ll
+    with np.errstate(divide="ignore", invalid="ignore"):  # 除 0/NaN 支路均被掩掉
+        rsv_raw = (cp - ll) / rng * 100
+    rsv = np.where(
+        (idx + 1 < _KDJ_N) | (rng == 0) | ~np.isfinite(rsv_raw), 50.0, rsv_raw
+    )
+    kk = np.where(has_prev, f_kdj * k_arr[iprev] + a_kdj * rsv, rsv)  # w==0: 首值=输入
+    dd = np.where(has_prev, f_kdj * d_arr[iprev] + a_kdj * kk, kk)
+    return 3 * kk - 2 * dd
+
+
+def _weekly_dks_step(
+    idx: np.ndarray,
+    cp: np.ndarray,
+    iprev: np.ndarray,
+    dks_states: dict[int, tuple],
+    dks_day: list[tuple],
+    n: int,
+) -> np.ndarray:
+    """周 DKS 逐日步（四条 rolling MA 均值，逐位复刻 roll_mean；提取块，v0.189）。
+
+    加步前的 prev/ncs：每日都从**周 w-1 的冻结态**独立走一步（不跨日链——部分周
+    对 DKS 只贡献当日收盘 cp）。``_roll_mean_states`` 的 ncs/prev 与窗口 k 无关
+    ⇒ 四窗口共用一份（取第一窗口的态数组）。保持旧 (mas[0]+…+mas[3]) 左结合求和序。
+    """
+    prev_a0 = dks_states[_DKS_WINS[0]][4]
+    ncs_a0 = dks_states[_DKS_WINS[0]][3]
+    ncs = np.where(cp == prev_a0[iprev], ncs_a0[iprev] + 1, 1)
+    valid_all = np.ones(n, dtype=bool)
+    dks_mas: list[np.ndarray] = []
+    for win, (c_add_a, _ncs_a, _prev_a, s1, ng1) in zip(_DKS_WINS, dks_day):
+        valid_all &= idx + 1 >= win  # rolling 窗口不足 ⇒ NaN（dks_series 同口径）
+        y = cp - c_add_a[iprev]
+        sum_x = s1[idx] + y  # c_add 的更新结果不再被消费（态已逐周冻结），可略
+        neg_ct = ng1[idx] + np.signbit(cp)
+        r = sum_x / win
+        r = np.where(ncs >= win, cp, r)  # GH#42064 同值捷径（prev 更新后恒=cp）
+        r = np.where((ncs < win) & (neg_ct == 0) & (r < 0), 0.0, r)
+        r = np.where((ncs < win) & (neg_ct == win) & (r > 0), 0.0, r)
+        dks_mas.append(r)
+    dks_sum = dks_mas[0]
+    for m in dks_mas[1:]:
+        dks_sum = dks_sum + m
+    return np.where(valid_all, dks_sum / len(_DKS_WINS), np.nan)
+
+
 def _weekly_gate_arrays(df: pd.DataFrame) -> Optional[dict[str, Any]]:
     """逐日 bar 的「前缀 ``resample("W-FRI")``」周线指标（_precompute_gate_series 用）。
 
@@ -207,21 +326,7 @@ def _weekly_gate_arrays(df: pd.DataFrame) -> Optional[dict[str, Any]]:
         weekly = _resample(d, "W-FRI")
         if weekly.empty:
             return None
-        # 日 bar → 周序号：W-FRI 的 bin 标签 = 当周的周五（周五当日归自身）
-        # （午夜/无时区假定已在 try 外显式检查，带时分秒的日期在那里就炸掉）
-        wd = d["date"].dt.weekday.to_numpy()
-        labels = (d["date"] + pd.to_timedelta((4 - wd) % 7, unit="D")).to_numpy()
-        wpos = {lab: k for k, lab in enumerate(weekly["date"].to_numpy())}
-        day_w = np.array([wpos[lab] for lab in labels], dtype=np.int64)
-        # 部分周聚合：周内累计 max/min（close 就是当日收盘，open/volume 指标用不到）
-        part_hi = high.copy()
-        part_lo = low.copy()
-        for t in range(1, n):
-            if day_w[t] == day_w[t - 1]:
-                if part_hi[t] < part_hi[t - 1]:
-                    part_hi[t] = part_hi[t - 1]
-                if part_lo[t] > part_lo[t - 1]:
-                    part_lo[t] = part_lo[t - 1]
+        day_w, part_hi, part_lo = _weekly_day_map(d, weekly, high, low)
         wc = weekly["close"].astype(float)
         whigh = weekly["high"].astype(float).to_numpy()
         wlow = weekly["low"].astype(float).to_numpy()
@@ -232,8 +337,6 @@ def _weekly_gate_arrays(df: pd.DataFrame) -> Optional[dict[str, Any]]:
         e1_arr = e1.to_numpy()
         q_arr = _ema(e1, 10).to_numpy()
         dks_states = {k: _roll_mean_states(wclose, k) for k in _DKS_WINS}
-        a_kdj = 1.0 / 3.0  # kdj_series 的 ewm(com=m1-1=2) → α=1/(com+1)
-        f_kdj = 1.0 - a_kdj
         a_qsx = 2.0 / 11.0  # ema(span=10) → α=2/(span+1)
         f_qsx = 1.0 - a_qsx
         W = len(weekly)
@@ -254,78 +357,21 @@ def _weekly_gate_arrays(df: pd.DataFrame) -> Optional[dict[str, Any]]:
             ll_w[m1w:] = np.lib.stride_tricks.sliding_window_view(wlow, m1w).min(
                 axis=1
             )[: W - m1w]
-        # DKS：周 w 的「先删」步只依赖 w（删 wclose[w-win]，态取周 w-1 处理完的）⇒
-        # 逐周预算删后 sum/neg（s1/ng1）；逐日循环只剩「后加当日收盘」一步。
-        # 删步公式与旧循环逐字相同；c_rem 删步后不再参与加步（加步只用 c_add/sum/neg/ncs/prev）。
-        dks_day = []
-        for win in _DKS_WINS:
-            sum_a, c_add_a, c_rem_a, ncs_a, prev_a, neg_a = dks_states[win]
-            # w<win-1 的位置永不写入，读取处全靠 valid_all 掩掉 ⇒ 不用 np.empty
-            # 读未初始化内存，显式 NaN/0 占位（有效位逐位不变，掩掉位产出 NaN 更稳）。
-            s1 = np.full(W, np.nan)
-            ng1 = np.full(W, 0, dtype=np.int64)  # int 无 NaN，0 占位（同被掩掉）
-            for w in range(win - 1, W):
-                s = sum_a[w - 1]
-                ng = neg_a[w - 1]
-                if w >= win:
-                    v = wclose[w - win]
-                    y = -v - c_rem_a[w - 1]
-                    tt = s + y
-                    s = tt
-                    if np.signbit(v):
-                        ng -= 1
-                s1[w] = s
-                ng1[w] = ng
-            dks_day.append((c_add_a, ncs_a, prev_a, s1, ng1))
-        # ---- v0.173 全向量化逐日步：每日只是「周态标量」对「当日收盘 cp」的一步 ----
-        # 更新，全部改成对 day_w 的 gather + elementwise 运算（每个元素的浮点算式与
-        # 旧逐日循环逐项相同 ⇒ 逐位一致；等价性钉测 ③ 抽样覆盖产出序列，全量逐 bar
-        # 由 ② evaluate_trades 逐笔等价兜底）。
+        dks_day = _weekly_dks_premove(dks_states, wclose, W)
+        # ---- v0.173 全向量化逐日步：每日只是「周态标量」对「当日收盘 cp」的一步
+        # 更新，全部改成对 day_w 的 gather + elementwise 运算（逐位一致，同上钉测）；
+        # v0.189 起各步拆为独立 helper（radon 降复杂度，算式逐字未动）。
         idx = day_w  # 日 bar → 周序号
         cp = close
         has_prev = idx > 0
         iprev = np.maximum(idx - 1, 0)
-        # ---- 周 J（kdj_series 口径：RSV→K→D→J，fill_na=50）----
-        hh = np.maximum(hh_w[idx], part_hi)  # 旧：取完整周高低后与部分周累计比大
-        ll = np.minimum(ll_w[idx], part_lo)
-        rng = hh - ll
-        with np.errstate(divide="ignore", invalid="ignore"):  # 除 0/NaN 支路均被掩掉
-            rsv_raw = (cp - ll) / rng * 100
-        rsv = np.where(
-            (idx + 1 < _KDJ_N) | (rng == 0) | ~np.isfinite(rsv_raw), 50.0, rsv_raw
+        out_j = _weekly_kdj_j(
+            idx, part_hi, part_lo, hh_w, ll_w, k_arr, d_arr, cp, has_prev, iprev
         )
-        kk = np.where(
-            has_prev, f_kdj * k_arr[iprev] + a_kdj * rsv, rsv
-        )  # w==0: 首值=输入
-        dd = np.where(has_prev, f_kdj * d_arr[iprev] + a_kdj * kk, kk)
-        out_j = 3 * kk - 2 * dd
         # ---- 周 QSX（ema(ema(c,10),10)，qsx_series 同调用链）----
         e1i = np.where(has_prev, f_qsx * e1_arr[iprev] + a_qsx * cp, cp)
         out_qsx = np.where(has_prev, f_qsx * q_arr[iprev] + a_qsx * e1i, e1i)
-        # ---- 周 DKS（四条 rolling MA 均值，逐位复刻 roll_mean；删步已按周预算）----
-        # 加步前的 prev/ncs：每日都从**周 w-1 的冻结态**独立走一步（不跨日链——
-        # 部分周对 DKS 只贡献当日收盘 cp）。_roll_mean_states 的 ncs/prev 与窗口 k
-        # 无关 ⇒ 四窗口共用一份（取第一窗口的态数组）。
-        prev_a0 = dks_states[_DKS_WINS[0]][4]
-        ncs_a0 = dks_states[_DKS_WINS[0]][3]
-        ncs = np.where(cp == prev_a0[iprev], ncs_a0[iprev] + 1, 1)
-        valid_all = np.ones(n, dtype=bool)
-        dks_mas: list[np.ndarray] = []
-        for win, (c_add_a, _ncs_a, _prev_a, s1, ng1) in zip(_DKS_WINS, dks_day):
-            valid_all &= idx + 1 >= win  # rolling 窗口不足 ⇒ NaN（dks_series 同口径）
-            y = cp - c_add_a[iprev]
-            sum_x = s1[idx] + y  # c_add 的更新结果不再被消费（态已逐周冻结），可略
-            neg_ct = ng1[idx] + np.signbit(cp)
-            r = sum_x / win
-            r = np.where(ncs >= win, cp, r)  # GH#42064 同值捷径（prev 更新后恒=cp）
-            r = np.where((ncs < win) & (neg_ct == 0) & (r < 0), 0.0, r)
-            r = np.where((ncs < win) & (neg_ct == win) & (r > 0), 0.0, r)
-            dks_mas.append(r)
-        # 保持旧 (mas[0]+mas[1]+mas[2]+mas[3]) 的左结合求和序
-        dks_sum = dks_mas[0]
-        for m in dks_mas[1:]:
-            dks_sum = dks_sum + m
-        out_dks = np.where(valid_all, dks_sum / len(_DKS_WINS), np.nan)
+        out_dks = _weekly_dks_step(idx, cp, iprev, dks_states, dks_day, n)
         return {
             "weekly_j": out_j,
             "weekly_qsx": out_qsx,
@@ -3011,6 +3057,87 @@ def _trades_from_signals(
     return trades
 
 
+def _single_pass_trades(
+    df: pd.DataFrame,
+    code: str,
+    min_bars: int,
+    step: int,
+    collect_all: bool,
+    max_signals_per_code: Optional[int],
+    feature_panel: bool,
+    cost: float,
+    prep: dict[str, Any],
+    dates: list[str],
+    slice_free: bool,
+    sim_kw: dict[str, Any],
+    *,
+    gate_call: Optional[Callable],
+    gate_pre: Any,
+    sector_gate: Optional[Callable[[str, str], bool]],
+    scorer_call: Callable,
+    scorer_pre: Any,
+    amv_ok: Callable[[str], bool],
+) -> list[dict[str, Any]]:
+    """单遍扫描+出场模拟（``evaluate_trades`` 非信号路径的逐股循环体，v0.189 提取块）。
+
+    逐 bar 进场判定 → 命中即 ``simulate_b1_trade`` → 非重叠跳过/数量上限；
+    行为与提取前逐字一致（trades 由 tests/test_signals_replay.py 等钉住）。
+    """
+    trades: list[dict[str, Any]] = []
+    bbi = prep["bbi"]
+    buy_ok, sell_ok = prep["buy_ok"], prep["sell_ok"]
+    n = prep["n"]
+    emitted = 0
+    i = min_bars
+    while i < n - 1:
+        entry_date = dates[i]
+        slice_df: Any = _PrefixLen(i + 1) if slice_free else df.iloc[: i + 1]
+        res = _entry_signal(
+            slice_df,
+            code,
+            i,
+            entry_date,
+            gate_call=gate_call,
+            gate_pre=gate_pre,
+            sector_gate=sector_gate,
+            scorer=scorer_call,
+            scorer_pre=scorer_pre,
+            amv_ok=amv_ok,
+            buy_ok=buy_ok,
+            slice_free=slice_free,
+        )
+        if res is None:
+            i += max(1, step)
+            continue
+        if slice_free:
+            # 命中信号的 bar 才构造真切片（平台止损覆盖/特征面板用），便宜
+            slice_df = df.iloc[: i + 1]
+        stop_ov = _platform_stop_override(slice_df, sim_kw["stop_mode"])
+        tr = simulate_b1_trade(
+            df,
+            i,
+            bbi,
+            stop_override=stop_ov,
+            can_sell=sell_ok,
+            code=code,
+            bull_flags=prep["bull_flags"],
+            atr=prep["atr"],
+            ohlc=prep["ohlc"],
+            qsx=prep["qsx"],
+            **sim_kw,
+        )
+        ret_net = tr["ret"] - cost
+        rec = _trade_record(tr, ret_net, code, entry_date, dates, i, res.get("score"))
+        if feature_panel:
+            rec["features"] = _feature_panel(slice_df)
+        trades.append(rec)
+        emitted += 1
+        if max_signals_per_code and emitted >= max_signals_per_code:
+            break
+        i = _advance_i(i, step, tr, collect_all)
+    return trades
+
+
 def evaluate_trades(
     bars_by_code: dict[str, pd.DataFrame],
     scorer: Optional[Callable[[pd.DataFrame, str], Optional[dict]]] = None,
@@ -3156,7 +3283,6 @@ def evaluate_trades(
         if prep is None:
             continue
         df = prep["df"]
-        n = prep["n"]
         bbi = prep["bbi"]
         buy_ok, sell_ok = prep["buy_ok"], prep["sell_ok"]
         bull_flags = prep["bull_flags"]
@@ -3214,56 +3340,26 @@ def evaluate_trades(
                 sim_kw=sim_kw,
             )
             continue
-        emitted = 0
-        i = min_bars
-        while i < n - 1:
-            entry_date = dates[i]
-            slice_df: Any = _PrefixLen(i + 1) if slice_free else df.iloc[: i + 1]
-            res = _entry_signal(
-                slice_df,
-                code,
-                i,
-                entry_date,
-                gate_call=gate_call,
-                gate_pre=gate_pre,
-                sector_gate=sector_gate,
-                scorer=scorer_call,
-                scorer_pre=scorer_pre,
-                amv_ok=_amv_ok,
-                buy_ok=buy_ok,
-                slice_free=slice_free,
-            )
-            if res is None:
-                i += max(1, step)
-                continue
-            if slice_free:
-                # 命中信号的 bar 才构造真切片（平台止损覆盖/特征面板用），便宜
-                slice_df = df.iloc[: i + 1]
-            stop_ov = _platform_stop_override(slice_df, stop_mode)
-            tr = simulate_b1_trade(
-                df,
-                i,
-                bbi,
-                stop_override=stop_ov,
-                can_sell=sell_ok,
-                code=code,
-                bull_flags=bull_flags,
-                atr=atr,
-                ohlc=prep["ohlc"],
-                qsx=prep["qsx"],
-                **sim_kw,
-            )
-            ret_net = tr["ret"] - cost
-            rec = _trade_record(
-                tr, ret_net, code, entry_date, dates, i, res.get("score")
-            )
-            if feature_panel:
-                rec["features"] = _feature_panel(slice_df)
-            trades.append(rec)
-            emitted += 1
-            if max_signals_per_code and emitted >= max_signals_per_code:
-                break
-            i = _advance_i(i, step, tr, collect_all)
+        trades += _single_pass_trades(
+            df,
+            code,
+            min_bars,
+            step,
+            collect_all,
+            max_signals_per_code,
+            feature_panel,
+            cost,
+            prep,
+            dates,
+            slice_free,
+            sim_kw,
+            gate_call=gate_call,
+            gate_pre=gate_pre,
+            sector_gate=sector_gate,
+            scorer_call=scorer_call,
+            scorer_pre=scorer_pre,
+            amv_ok=_amv_ok,
+        )
     if missing_signals:
         if missing_out is not None:
             # 流式逐股调用（_stream_trades）：逐股就地打 WARN 会一股一行刷屏
@@ -4245,6 +4341,36 @@ def _tail_clip_msg(first_dates: list[str], start: str, count: int) -> str:
     )
 
 
+def _load_one_bars(
+    c: str, count: int, start: Optional[str], end: Optional[str]
+) -> Optional[pd.DataFrame]:
+    """单票加载 + start/end 窗口裁剪（``_load_bars_local`` 的逐股循环体，v0.189 提取块）。
+
+    start/end(YYYY-MM-DD)在 count 之前应用(此前 tdx 路径静默忽略 --start/--end,
+    导致指定窗口无效、实际跑全历史)。异常 WARN 后返 None（调用方跳过该票）。
+    """
+    from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
+
+    try:
+        df = local_tdx_data.get_ohlcv_table(c, count=count or 2000)
+        if df is not None and len(df) and (start or end):
+            df = df.copy()
+            df["date"] = df["date"].astype(str).str[:10]
+            if start:
+                df = df[df["date"] >= start]
+            if end:
+                df = df[df["date"] <= end]
+            df = (
+                df.tail(count).reset_index(drop=True)
+                if count
+                else df.reset_index(drop=True)
+            )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[WARN] 加载 {c} 失败: {exc}", file=sys.stderr)
+        return None
+    return df
+
+
 def _load_bars_local(
     codes: list[str],
     count: int,
@@ -4262,23 +4388,7 @@ def _load_bars_local(
     local_tdx_data.reset_qfq_failure_stats()  # 计数限定本轮加载，见下方汇总
     out: dict[str, pd.DataFrame] = {}
     for c in codes:
-        try:
-            df = local_tdx_data.get_ohlcv_table(c, count=count or 2000)
-            if df is not None and len(df) and (start or end):
-                df = df.copy()
-                df["date"] = df["date"].astype(str).str[:10]
-                if start:
-                    df = df[df["date"] >= start]
-                if end:
-                    df = df[df["date"] <= end]
-                df = (
-                    df.tail(count).reset_index(drop=True)
-                    if count
-                    else df.reset_index(drop=True)
-                )
-        except Exception as exc:  # noqa: BLE001
-            print(f"[WARN] 加载 {c} 失败: {exc}", file=sys.stderr)
-            df = None
+        df = _load_one_bars(c, count, start, end)
         if df is not None and len(df):
             out[c] = df
     # 滚动尾部截断护栏（2026-09-05 RSI 家族跨窗跑废 6 格的教训）：count 是
