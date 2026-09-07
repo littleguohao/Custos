@@ -193,6 +193,7 @@
 | 2026-09-07 | v0.187 | 新进代码 review 修复批（判定语义不变）：`_weekly_gate_arrays` 午夜假定检查挪出 try（原 assert 被 except 吞）；重放缺票 WARN 流式聚合；对账改捕专用 `SignalsDateMismatch`；尾部截断护栏加 `--allow-tail-clip` 逃生门+流式补测；`_ann` 缓存绑源格子 mtime+大小签名、cost_bps≠25 硬校验、`group_stats` 复用 `srs.ret_stats`；members 空结果防空写；signal_labels 重复注释/过时 docstring 清理 | 细节见 commit | 钉测 +7；全量绿 |
 | 2026-09-07 | v0.188 | audit 门禁修复：`backtest_factors` 去掉 `_dks_series` 重复导入（硬导入与 try 降级块各一份 ⇒ mypy no-redef 2 个错误清零，audit mypy 回 0）；补格式化 v0.181/v0.185 遗留的两个测试文件（ruff format 门槛恢复全绿） | radon 新增 D 级见 commit/待办 | 全量绿 |
 | 2026-09-07 | v0.189 | radon 三个 D 级降回 C/B（纯提取重构，算式逐字未动）：`_weekly_gate_arrays` D26→B（拆 `_weekly_day_map`/`_weekly_dks_premove`/`_weekly_kdj_j`/`_weekly_dks_step`）、`evaluate_trades` D26→C19（单遍循环体拆 `_single_pass_trades`）、`_load_bars_local` D21→B（逐股循环体拆 `_load_one_bars`） | v0.167 的「D 级清零」标准恢复；逐位一致由 gate/信号等价性钉测兜底 | 钉测全绿无新增；radon cc 全 src 无 D；全量绿 |
+| 2026-09-07 | v0.190 | R29 预注册 + 工程载体（owner 目标：篮子胜率稳定≥40% 且盈亏比≥2.4）：四候选 W1-W4 与 R29-C1~C4 判据跑数前写死（详见 `governance/research/R29_score_stability_rebuild.md`），新增 `research/score_stability_study.py`（Phase2/3 镜像 R24，判据机械全复用，29 钉测） | R22/R24 两轮五候选同死于 pre2019 regime 富集；本轮设计反向：权重向 pre2019 不萎缩的腿（rsi_bull_div/macd底背离）倾斜，rsi_deep 降权至归零 | 生产机 Phase2/3 跑数 + pre2019 终审 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

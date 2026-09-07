@@ -135,6 +135,12 @@ TOOLS: dict[str, tuple[str, str]] = {
         "R24 打分校准：逐腿边际分析（池内命中率/add-one/LOO margin）——"
         "离线读 trades JSON 零回测（--ablation --from-trades；⚠️ pre2019 只读不调参）",
     ),
+    "score_stability_study": (
+        "study",
+        "R29 打分重建（预注册）：篮子胜率稳定≥40% 且盈亏比≥2.4——W1-W4 四候选"
+        "（权重向 pre2019 不萎缩腿倾斜）× R29-C1~C4 判据（--phase2/--phase3 "
+        "--from-trades；⚠️ pre2019 终审前不许碰，CLI 硬拒绝）",
+    ),
     "qsx_resonance_study": (
         "study",
         "QSX/DKX 两层过滤三臂：①QSX>DKS 多头 ②「跌线就反弹」共振"
