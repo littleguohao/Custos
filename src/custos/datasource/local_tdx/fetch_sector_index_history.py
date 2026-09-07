@@ -449,6 +449,9 @@ def _merge_members_file(mpath: Path, fresh: dict) -> dict:
 
     此前 ``members = {}`` 全新构建再整文件覆写 —— 子集运行(--codes 定向回填)
     会把既有 587 个键全部冲掉。文件缺失/损坏时按空 dict 合并(不阻断落盘)。
+    防空写保护（v0.187）：TQ 对概念板块偶发返回空（RPC 抖动与真空不可区分），
+    本轮的空结果**不覆盖**既有的非空成员表（WARN 记一笔）；全新键的空结果
+    照常落盘（记录已抓过）。
     """
     existing: dict = {}
     try:
@@ -457,7 +460,16 @@ def _merge_members_file(mpath: Path, fresh: dict) -> dict:
             existing = got
     except (OSError, ValueError) as exc:
         print(f"[WARN] 既有成员映射读取失败({exc}),按空合并", file=sys.stderr)
-    merged = {**existing, **fresh}
+    guarded = [k for k, v in fresh.items() if not v and existing.get(k)]
+    for k in guarded:
+        print(
+            f"[WARN] members {k}: 本轮空结果，保留既有 {len(existing[k])} 只成员",
+            file=sys.stderr,
+        )
+    merged = {
+        **existing,
+        **{k: v for k, v in fresh.items() if k not in guarded},
+    }
     mpath.write_text(json.dumps(merged, ensure_ascii=False), encoding="utf-8")
     return merged
 

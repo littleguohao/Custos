@@ -646,3 +646,20 @@ def test_weekly_gate_arrays_with_holiday_gaps_bitwise():
             f"{key} 在整周空窗数据上快/慢路径不一致"
         )
     assert np.array_equal(fast["weekly_bars"], slow["weekly_bars"])
+
+
+def test_weekly_gate_arrays_non_midnight_dates_raise():
+    """⑪ date 列带时分秒/时区：手算周标签的午夜假定被破坏，必须在 try 外
+    显式炸出（v0.187 修复：此前的 assert 在 try 内被末尾 except 吞成静默回退，
+    且 -O 下会被剥）。走 _precompute_gate_series 时该 ValueError 仍被降级为
+    缺周线键（慢路径兜底，行为不变）——钉的是直接调用层假定可见。"""
+    import pytest as _pt
+
+    df = _bars_amount(120)
+    df["date"] = pd.to_datetime(df["date"]) + pd.Timedelta(hours=15)  # 15:00 收盘戳
+    with _pt.raises(ValueError, match="午夜"):
+        bt._weekly_gate_arrays(df)
+    df_tz = _bars_amount(120)
+    df_tz["date"] = pd.to_datetime(df_tz["date"]).dt.tz_localize("Asia/Shanghai")
+    with _pt.raises(ValueError, match="午夜"):
+        bt._weekly_gate_arrays(df_tz)

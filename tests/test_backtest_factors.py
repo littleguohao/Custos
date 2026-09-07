@@ -676,7 +676,10 @@ def test_tail_clip_msg_triggers_on_systemic_clip():
 def test_tail_clip_msg_tolerances():
     """节假日 start / 少数晚首根（IPO）/ 空样本 / 非 ISO start 都不误报。"""
     assert bt._tail_clip_msg(["2022-01-04"] * 31, "2022-01-01", 500) == ""
-    assert bt._tail_clip_msg(["2022-01-04"] * 29 + ["2024-08-14"] * 2, "2022-01-01", 500) == ""
+    assert (
+        bt._tail_clip_msg(["2022-01-04"] * 29 + ["2024-08-14"] * 2, "2022-01-01", 500)
+        == ""
+    )
     assert bt._tail_clip_msg([], "2022-01-01", 500) == ""
     assert bt._tail_clip_msg(["2024-08-14"] * 31, "not-a-date", 500) == ""
 
@@ -716,3 +719,57 @@ def test_load_bars_local_no_start_no_guard(monkeypatch):
     finally:
         ltd.reset_qfq_failure_stats()
     assert set(out) == {"600000"}
+
+
+def test_load_bars_local_tail_clip_allow_flag(monkeypatch, capsys):
+    """--allow-tail-clip：系统性截断降级为 WARN 放行（次新股宇宙误触的逃生门）。"""
+    ltd = _patch_loader_with_dates(monkeypatch, "2024-08-14")
+    ltd.reset_qfq_failure_stats()
+    codes = [f"6000{i:02d}" for i in range(30)]
+    try:
+        out = bt._load_bars_local(
+            codes, count=500, start="2022-01-01", allow_tail_clip=True
+        )
+    finally:
+        ltd.reset_qfq_failure_stats()
+    assert len(out) == 30
+    assert "--allow-tail-clip" in capsys.readouterr().err
+
+
+def _stream_args(**over):
+    """真实解析器 defaults 的 args 命名空间（_stream_trades 透传一大串出场参数，
+    用 _build_parser 默认值保证字段不缺）。"""
+    args = bt._build_parser().parse_args([])
+    for k, v in over.items():
+        setattr(args, k, v)
+    return args
+
+
+def test_stream_trades_tail_clip_guard(monkeypatch, capsys):
+    """流式路径（逐股加载）的聚合护栏：攒满 30 只系统性截断 ⇒ SystemExit；
+    --allow-tail-clip 降级 WARN 继续跑。"""
+    df = make_df([10.0] * 60)
+    df["date"] = pd.date_range("2024-08-14", periods=60, freq="B")
+    load = lambda codes, count: {c: df.copy() for c in codes}  # noqa: E731
+    codes = [f"6000{i:02d}" for i in range(30)]
+
+    args = _stream_args(start="2022-01-01", count=500)
+    with pytest.raises(SystemExit) as exc:
+        bt._stream_trades(args, codes, load, None, None)
+    assert "截断" in str(exc.value)
+
+    args_allow = _stream_args(start="2022-01-01", count=500, allow_tail_clip=True)
+    trades, n_loaded, _tl, _te = bt._stream_trades(args_allow, codes, load, None, None)
+    assert n_loaded == 30 and isinstance(trades, list)
+    assert "--allow-tail-clip" in capsys.readouterr().err
+
+
+def test_stream_trades_tail_clip_under_30_no_guard(monkeypatch):
+    """流式 <30 只全程不触发聚合护栏（单票晚首根是合法 IPO/缺口）。"""
+    df = make_df([10.0] * 60)
+    df["date"] = pd.date_range("2024-08-14", periods=60, freq="B")
+    load = lambda codes, count: {c: df.copy() for c in codes}  # noqa: E731
+    codes = [f"6000{i:02d}" for i in range(29)]
+    args = _stream_args(start="2022-01-01", count=500)
+    _trades, n_loaded, _tl, _te = bt._stream_trades(args, codes, load, None, None)
+    assert n_loaded == 29

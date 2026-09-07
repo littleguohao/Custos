@@ -670,3 +670,83 @@ class TestMainEndToEnd:
 
     def test_missing_dir(self, tmp_path):
         assert scs.main(["--cells-dir", str(tmp_path / "nope")]) == 2
+
+
+def test_cost_bps_mismatch_rejected(tmp_path):
+    """cost_bps≠25 的格子不混进同一对照（v0.187 起硬校验，ret 净额口径不同）。"""
+    _write_cell(
+        tmp_path, "j_low_rsi_deep", *CW, True, [_trade("000001", "2022-03-01", 0.1)]
+    )
+    p = _write_cell(tmp_path, "qg", *CW, True, [], hash_="c05t20c05t20c0")
+    d = json.loads(p.read_text(encoding="utf-8"))
+    d["cost_bps"] = 20.0
+    p.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    cells, warnings, skipped = scs.discover_cells(tmp_path)
+    assert list(cells) == [("j_low_rsi_deep", "跨窗", True)]
+    assert skipped.get("cost_bps≠25") == 1
+
+
+class TestAnnCache:
+    """_ann 断点缓存：源格子 mtime+大小签名绑定（v0.187）——同名格子被覆盖
+    重跑后旧标注不得静默复用；源未变时命中缓存、不重复标注。"""
+
+    def _setup(self, tmp_path, monkeypatch):
+        cells_dir = tmp_path / "cells"
+        out_dir = tmp_path / "out"
+        cells_dir.mkdir()
+        _write_cell(
+            cells_dir,
+            "j_low_rsi_deep",
+            *CW,
+            True,
+            _pinned_trades_cw(),
+            hash_="aaaa0000aaaa0000",
+        )
+        calls = {"n": 0}
+        real_annotate = scs.annotate_trades
+
+        def counting(*a, **kw):
+            calls["n"] += 1
+            return real_annotate(*a, **kw)
+
+        monkeypatch.setattr(scs, "annotate_trades", counting)
+        monkeypatch.setattr(
+            scs,
+            "load_context",
+            lambda args: {
+                "regime": {"2022-01-04": "做多"},
+                "pit_map": r3.build_pit_map([_pit("C1", "2021-12-30")]),
+                "tech_fn": lambda code, day: 70.0,
+                "n_pit_records": 1,
+            },
+        )
+        argv = [
+            "--cells-dir",
+            str(cells_dir),
+            "--out-dir",
+            str(out_dir),
+            "--min-n",
+            "1",
+        ]
+        return cells_dir, out_dir, calls, argv
+
+    def test_cache_hit_skips_annotate(self, tmp_path, monkeypatch):
+        _cells_dir, _out_dir, calls, argv = self._setup(tmp_path, monkeypatch)
+        assert scs.main(argv) == 0 and calls["n"] == 1
+        assert scs.main(argv) == 0
+        assert calls["n"] == 1, "源格子未变 ⇒ 命中 _ann 缓存，不重复标注"
+
+    def test_stale_cache_recomputes(self, tmp_path, monkeypatch):
+        cells_dir, _out_dir, calls, argv = self._setup(tmp_path, monkeypatch)
+        assert scs.main(argv) == 0 and calls["n"] == 1
+        # 同名格子被覆盖重跑（内容变 ⇒ mtime+大小签名变）⇒ 旧标注必须作废重算
+        _write_cell(
+            cells_dir,
+            "j_low_rsi_deep",
+            *CW,
+            True,
+            _pinned_trades_cw() + [_trade("C1", "2022-07-01", 0.05)],
+            hash_="aaaa0000aaaa0000",
+        )
+        assert scs.main(argv) == 0
+        assert calls["n"] == 2, "源格子变更后旧标注被静默复用了"

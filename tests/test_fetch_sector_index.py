@@ -360,3 +360,16 @@ class TestDeriveLocalMembers:
         members = {"880431.SH": ["600150"]}
         fs._fetch_members(_T(), "880431", members, {})
         assert members["880431.SH"] == ["600150"]  # 失败不覆写既有键
+
+
+def test_merge_members_empty_fresh_keeps_existing(tmp_path, capsys):
+    """防空写保护（v0.187）：本轮空结果不覆盖既有非空成员表（TQ 概念板块
+    偶发返回空≠真空）；全新键的空结果照常落盘。"""
+    import json
+
+    mpath = tmp_path / "sector_members.json"
+    mpath.write_text(json.dumps({"880001.SH": ["600000", "600001"]}), encoding="utf-8")
+    merged = fs._merge_members_file(mpath, {"880001.SH": [], "880999.SH": []})
+    assert merged["880001.SH"] == ["600000", "600001"]  # 既有非空被保留
+    assert merged["880999.SH"] == []  # 全新键空结果照常落盘
+    assert "880001.SH" in capsys.readouterr().err

@@ -185,11 +185,16 @@ def _weekly_gate_arrays(df: pd.DataFrame) -> Optional[dict[str, Any]]:
     """
     if _resample is None:
         return None
+    d = df
+    if not pd.api.types.is_datetime64_any_dtype(d["date"]):
+        d = df.copy()
+        d["date"] = pd.to_datetime(d["date"])
+    # 手算周标签的输入假定：date 列为**午夜（00:00:00）、无时区**（见下方标签
+    # 推导注释）。这个检查必须在 try 外面——放里面会被末尾 except 吞成静默
+    # 回退，「钉住假定」就形同虚设；且不用 assert（-O 下会被剥）。
+    if not (d["date"].dt.tz is None and (d["date"].dt.normalize() == d["date"]).all()):
+        raise ValueError("_weekly_gate_arrays 假定 date 列为午夜、无时区的交易日")
     try:
-        d = df
-        if not pd.api.types.is_datetime64_any_dtype(d["date"]):
-            d = df.copy()
-            d["date"] = pd.to_datetime(d["date"])
         n = len(d)
         high = d["high"].astype(float).to_numpy()
         low = d["low"].astype(float).to_numpy()
@@ -206,12 +211,7 @@ def _weekly_gate_arrays(df: pd.DataFrame) -> Optional[dict[str, Any]]:
         if weekly.empty:
             return None
         # 日 bar → 周序号：W-FRI 的 bin 标签 = 当周的周五（周五当日归自身）
-        # ⚠️ 手算标签的输入假定：date 列为**午夜（00:00:00）、无时区**——带时分秒的
-        # 日期会让手算标签对不上 resample 产出的午夜周标签（wpos 查表 KeyError ⇒
-        # 走 except 回退 None，行为仍与旧版一致但失速）。此处显式断言钉住假定。
-        assert (
-            d["date"].dt.tz is None and (d["date"].dt.normalize() == d["date"]).all()
-        ), "_weekly_gate_arrays 假定 date 列为午夜、无时区的交易日"
+        # （午夜/无时区假定已在 try 外显式检查，带时分秒的日期在那里就炸掉）
         wd = d["date"].dt.weekday.to_numpy()
         labels = (d["date"] + pd.to_timedelta((4 - wd) % 7, unit="D")).to_numpy()
         wpos = {lab: k for k, lab in enumerate(weekly["date"].to_numpy())}
@@ -1442,13 +1442,13 @@ def j_low_rsi_ideal_b1_gate(
     if rsi_state_score is None:
         return False
     try:
+        # j_low 短路在前：J 不低位时不必白算 rsi_regime（与同族
+        # j_low_rsi_deep_gate 同序；Python and 短路 ⇒ 判定结果逐位不变）
+        if not j_low_gate(df_slice, precomputed):
+            return False
         rs = precomputed.get("rsi14") if precomputed is not None else None
         reg = rsi_regime(df_slice, rsi_series=rs)
-        return bool(
-            j_low_gate(df_slice, precomputed)
-            and reg.get("state") == "strong"
-            and reg.get("deep_oversold")
-        )
+        return bool(reg.get("state") == "strong" and reg.get("deep_oversold"))
     except Exception:  # noqa: BLE001
         return False
 
@@ -2578,6 +2578,15 @@ def _to_weekly(df: pd.DataFrame) -> pd.DataFrame:
     return d.resample("W-FRI").agg(agg).dropna(subset=["close"]).reset_index()
 
 
+class SignalsDateMismatch(ValueError):
+    """信号重放的日期对账失败（``_trades_from_signals`` fail-closed）。
+
+    专用子类（v0.187）：CLI 层只捕它做「重新 --signals-out 生产」的定向报错；
+    捕宽泛的 ValueError 会把非重放路径的其他 ValueError 误报成信号过期并丢
+    traceback。派生 ValueError 保持库调用方既有 except 兼容。
+    """
+
+
 class _PrefixLenAccessError(BaseException):
     """``_PrefixLen`` 占位对象被读列/属性/下标时抛出——**编程错误必须炸出来**。
 
@@ -2966,7 +2975,7 @@ def _trades_from_signals(
         # fail-closed 对账：数据更新后同一 bar 索引可能已是另一个交易日，
         # 照文件日期记账 = 拼出从未存在的 trades——对不上就炸，不猜
         if cand.get("date") != dates[i]:
-            raise ValueError(
+            raise SignalsDateMismatch(
                 f"{code} bar {i}: 信号文件日期 {cand.get('date')}"
                 f" != 现数据日期 {dates[i]}"
             )
@@ -3037,6 +3046,7 @@ def evaluate_trades(
     qsx_exit_consec: int = 0,
     signals_out: Optional[list[dict[str, Any]]] = None,
     signals_in: Optional[dict[str, list[dict[str, Any]]]] = None,
+    missing_out: Optional[list[str]] = None,
 ) -> list[dict[str, Any]]:
     """在 scorer 判「可买」的 as-of 日进场，按 B1 规则(止损+BBI)模拟到出场；非重叠(平仓后再找)。
 
@@ -3076,6 +3086,8 @@ def evaluate_trades(
       CLI 层用 ``signals_signature`` fail-closed 核对。
       ⚠️ 只支持 step=1：step>1 时「跳到出场后」的续扫起点不在 min_bars+k*step
       网格上，两阶段无法逐位复现单遍扫描 ⇒ 直接 ValueError，不猜。
+      ``missing_out``：提供时「已加载但信号文件无条目」的票不就地 WARN，
+      追加进该 list 由调用方聚合（流式 _stream_trades 用，防逐股刷屏）。
     无切片快速路径（v0.173，2026-09-04）：当 entry_gate 为 None 或在
       ``_SLICE_FREE_GATES`` 白名单内（precomputed 分支只读 pre+len(df)，必需键齐备）
       且 scorer 在 ``_SLICE_FREE_SCORERS`` 内（支持 df=None+显式 n 点查询）时，
@@ -3256,14 +3268,22 @@ def evaluate_trades(
                 break
             i = _advance_i(i, step, tr, collect_all)
     if missing_signals:
-        # 全部跑完打一行（流式逐股调用时一股一行）：超过 10 只截断，注明总数
-        shown = ", ".join(missing_signals[:10])
-        tail = f" …等共 {len(missing_signals)} 只" if len(missing_signals) > 10 else ""
-        print(
-            f"[WARN] {len(missing_signals)} 只股票已加载但信号文件无条目，"
-            f"按零信号重放: {shown}{tail}",
-            file=sys.stderr,
-        )
+        if missing_out is not None:
+            # 流式逐股调用（_stream_trades）：逐股就地打 WARN 会一股一行刷屏
+            # （零信号票天然无条目 ⇒ 低频 gate 在 s3000 上打几千行假告警）——
+            # 交给调用方攒全量后统一打一行（v0.187）
+            missing_out.extend(missing_signals)
+        else:
+            # 批式调用：全部跑完打一行，超过 10 只截断，注明总数
+            shown = ", ".join(missing_signals[:10])
+            tail = (
+                f" …等共 {len(missing_signals)} 只" if len(missing_signals) > 10 else ""
+            )
+            print(
+                f"[WARN] {len(missing_signals)} 只股票已加载但信号文件无条目，"
+                f"按零信号重放: {shown}{tail}",
+                file=sys.stderr,
+            )
     return trades
 
 
@@ -4229,11 +4249,17 @@ def _tail_clip_msg(first_dates: list[str], start: str, count: int) -> str:
 
 
 def _load_bars_local(
-    codes: list[str], count: int, start: Optional[str] = None, end: Optional[str] = None
+    codes: list[str],
+    count: int,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    allow_tail_clip: bool = False,
 ) -> dict[str, pd.DataFrame]:
     """CLI 用：经 local_tdx 读取本地日线（需通达信数据；单测走注入不经此）。
     start/end(YYYY-MM-DD)在 count 之前应用(此前 tdx 路径静默忽略 --start/--end,
-    导致指定窗口无效、实际跑全历史)。"""
+    导致指定窗口无效、实际跑全历史)。
+    allow_tail_clip：滚动尾部截断护栏的显式旁路（次新股为主的宇宙 +
+    早期 --start 会合法误触，v0.187）——开则 WARN 放行，默认 fail-closed。"""
     from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
 
     local_tdx_data.reset_qfq_failure_stats()  # 计数限定本轮加载，见下方汇总
@@ -4268,7 +4294,13 @@ def _load_bars_local(
             [str(f["date"].iloc[0])[:10] for f in out.values()], start, count
         )
         if msg:
-            raise SystemExit(msg)
+            if allow_tail_clip:
+                print(
+                    f"[WARN] {msg}；--allow-tail-clip 已开，按截断数据继续",
+                    file=sys.stderr,
+                )
+            else:
+                raise SystemExit(msg)
     # 前复权失败汇总（DATA_SOURCE_PRINCIPLE ③ / 原 TODO #16）：逐票 WARN 在全宇宙
     # 日志里会被淹没，加载完整轮后必须有一行总数。
     # ⚠️ 必须用与写入方相同的**扁平**导入路径（本函数顶部 `import local_tdx_data`）：
@@ -4605,6 +4637,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="允许空结果(0 K线/0 信号)仍 exit 0 并落盘;默认拒绝——空结果会被误读成'因子无效'",
     )
+    ap.add_argument(
+        "--allow-tail-clip",
+        action="store_true",
+        help="允许滚动尾部截断(--count 尾部起点晚于 --start)降级为 WARN 继续;"
+        "次新股为主的宇宙会合法误触护栏时用;默认 fail-closed",
+    )
     ap.add_argument("--out", default="")
     return ap
 
@@ -4668,7 +4706,10 @@ def _make_loader(
     import functools
 
     load = functools.partial(
-        _load_bars_local, start=args.start or None, end=args.end or None
+        _load_bars_local,
+        start=args.start or None,
+        end=args.end or None,
+        allow_tail_clip=bool(getattr(args, "allow_tail_clip", False)),
     )
     return horizons, load
 
@@ -4802,6 +4843,7 @@ def _stream_trades(
     n_loaded = 0
     t_load = 0.0  # 读盘 + 前复权累计秒数
     t_eval = 0.0  # 逐 bar 评估累计秒数
+    missing_signals: list[str] = []  # 重放缺条目的票：攒着跑完统一打一行
     first_dates: list[str] = []  # 滚动尾部截断护栏（聚合判定，见 _tail_clip_msg）
     for k, c in enumerate(codes):  # 流式：逐股加载→评估→释放，避免全量载入 OOM
         _t0 = _time.time()
@@ -4815,7 +4857,13 @@ def _stream_trades(
                 if len(first_dates) % 30 == 0:
                     msg = _tail_clip_msg(first_dates, args.start, args.count)
                     if msg:
-                        raise SystemExit(msg)
+                        if getattr(args, "allow_tail_clip", False):
+                            print(
+                                f"[WARN] {msg}；--allow-tail-clip 已开，按截断数据继续",
+                                file=sys.stderr,
+                            )
+                        else:
+                            raise SystemExit(msg)
             _t0 = _time.time()
             trades += evaluate_trades(
                 d,
@@ -4845,6 +4893,7 @@ def _stream_trades(
                 cost_zone_pct=args.cost_zone_pct,
                 signals_in=signals_in,
                 signals_out=signals_out,
+                missing_out=missing_signals,
             )
             t_eval += _time.time() - _t0
         del d
@@ -4854,6 +4903,14 @@ def _stream_trades(
                 f"[INFO] 已处理 {k + 1}/{len(codes)} 只，累计 {len(trades)} 笔候选",
                 file=sys.stderr,
             )
+    if missing_signals:
+        shown = ", ".join(missing_signals[:10])
+        tail = f" …等共 {len(missing_signals)} 只" if len(missing_signals) > 10 else ""
+        print(
+            f"[WARN] {len(missing_signals)} 只股票已加载但信号文件无条目，"
+            f"按零信号重放: {shown}{tail}",
+            file=sys.stderr,
+        )
     return trades, n_loaded, t_load, t_eval
 
 
@@ -4977,10 +5034,12 @@ def _run_trade_sim(
             signals_in=signals_in,
             signals_out=signals_collected,
         )
-    except ValueError as e:
+    except SignalsDateMismatch as e:
         # 重放对账 fail-closed（_trades_from_signals 的日期核对）：信号文件是
         # 旧数据生产的，照它记账 = 拼出从未存在的 trades。m2 调度把重放子进程
-        # 非零退出当失败、自动退回全量扫描 ⇒ 这里直接 FAIL 退出，不产半截结果
+        # 非零退出当失败、自动退回全量扫描 ⇒ 这里直接 FAIL 退出，不产半截结果。
+        # 只捕专用子类（v0.187）：宽泛捕 ValueError 会把非重放路径的其他
+        # ValueError 误报成信号过期、还丢 traceback
         print(
             f"[FAIL] 信号与现数据日期对不上（数据已更新？重新 --signals-out 生产）: {e}",
             file=sys.stderr,

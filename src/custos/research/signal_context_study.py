@@ -116,6 +116,9 @@ EXIT_TIER_PARAMS: dict[str, Any] = {
 }
 _EXIT_TOP_KEYS = ("stop_mode", "stop_pct", "bbi_consec", "time_stop")
 _EXIT_SIG_KEYS = ("scale_out", "breakeven", "trail", "cost_zone_bars")
+# 出场档的净收益成本口径：这批格子 --cost-bps 25（v0.187 起发现阶段硬校验，
+# 成本不同的格子不混进同一对照）
+EXIT_COST_BPS = 25.0
 
 # 双窗（R27 钉死）：跨窗 2022-2024 + 主窗 2024-08~2026-09。
 TARGET_WINDOWS: tuple[tuple[str, str, str], ...] = (
@@ -203,6 +206,10 @@ def parse_cell(path: Path) -> tuple[Optional[dict[str, Any]], str]:
         return None, f"gate {gate!r} 不在 8 信号"
     if not _exit_tier_ok(d):
         return None, f"出场档元数据≠{EXIT_TIER}"
+    cb = d.get("cost_bps")
+    if not isinstance(cb, (int, float)) or float(cb) != EXIT_COST_BPS:
+        # 成本不同 ⇒ ret 净额口径不同，混进同一对照 = 静默错口径（v0.187 起硬校验）
+        return None, f"cost_bps≠{EXIT_COST_BPS:g}"
     window = _window_of(str(d.get("start") or ""), str(d.get("end") or ""))
     if window is None:
         return None, "窗口不在双窗"
@@ -483,19 +490,21 @@ def group_stats(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "avg_loss": None,
             "margin": None,
         }
+    # 胜率/盈亏比/均收复用 score_return_study.ret_stats（同舍入口径，v0.187
+    # 起不再各自手抄）；avg_win/avg_loss 是 ret_stats 没有的键，本地补算
+    st = srs.ret_stats(rows)
+    wr, payoff = st["win_rate"], st["payoff_ratio"]
     rets = [r["ret"] for r in rows]
     wins = [r for r in rets if r > 0]
     losses = [-r for r in rets if r < 0]
     avg_win = statistics.mean(wins) if wins else 0.0
     avg_loss = statistics.mean(losses) if losses else 0.0
-    wr = round(len(wins) / len(rets), 4)
-    payoff = round(avg_win / avg_loss, 3) if avg_loss > 0 else None
     margin = _margin({"win": wr, "payoff": payoff})
     return {
-        "n": len(rets),
+        "n": st["n"],
         "win_rate": wr,
         "payoff_ratio": payoff,
-        "avg_ret": round(statistics.mean(rets), 4),
+        "avg_ret": st["avg_ret"],
         "avg_win": round(avg_win, 4),
         "avg_loss": round(avg_loss, 4),
         "margin": round(margin, 4) if margin is not None else None,
@@ -889,13 +898,23 @@ def run_families(
                 continue
             cell = cells[k]
             # 断点缓存（2026-09-06：全量标注 24 万笔 ~70ms/笔，长跑曾被静默
-            # 中断两次）：逐格落盘，重跑跳过已完成的格子。
+            # 中断两次）：逐格落盘，重跑跳过已完成的格子。缓存绑定源格子的
+            # mtime+大小（v0.187）：同名格子被覆盖重跑/底层数据修正后旧标注
+            # 不得静默复用——签名变了就重算。
+            try:
+                _st = Path(cell["path"]).stat()
+                src_sig = [_st.st_mtime_ns, _st.st_size]
+            except OSError:
+                src_sig = None
             ck = out_dir / "_ann" / f"{cell['file']}.ann.json"
             if ck.is_file():
                 try:
                     blob = json.loads(ck.read_text(encoding="utf-8"))
-                    ann_cache[k] = (blob["rows"], blob["info"])
-                    continue
+                    if blob.get("src_sig") != src_sig:
+                        _warn(f"标注缓存 {ck.name} 的源格子已变更，重算")
+                    else:
+                        ann_cache[k] = (blob["rows"], blob["info"])
+                        continue
                 except (OSError, ValueError, KeyError) as exc:
                     _warn(f"标注缓存 {ck.name} 读不了（{exc}），重算")
             print(
@@ -911,7 +930,10 @@ def run_families(
             ck.parent.mkdir(parents=True, exist_ok=True)
             rows, info = ann_cache[k]
             ck.write_text(
-                json.dumps({"rows": rows, "info": info}, ensure_ascii=False),
+                json.dumps(
+                    {"src_sig": src_sig, "rows": rows, "info": info},
+                    ensure_ascii=False,
+                ),
                 encoding="utf-8",
             )
         rep = build_report(

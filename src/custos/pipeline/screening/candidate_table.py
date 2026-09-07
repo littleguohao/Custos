@@ -166,7 +166,7 @@ def _signal_labels_section(candidates: list[dict]) -> list[str]:
 
 
 def _signal_cell(cand: dict) -> str:
-    """主表「标注」单元：`4/11 QG·RS·B2` + 负向 ⚠️。"""
+    """主表「标注」单元：`4/9 QG·RS·B2` + 负向 ⚠️（分母 = 正向标注总数）。"""
     sig = cand.get("signals")
     if not isinstance(sig, dict):
         return "-"

@@ -55,11 +55,6 @@ NEGATIVE = [k for k, v in SIGNAL_META.items() if v[2] < 0]
 # pct12+分批止盈0.5+BBI跌破2根 出场档；跨窗 2022-2024 / 主窗 2024-08~2026-09。
 # ⚠️ 是研究回测数字（R11：相对排序用，量级不作数），不是 live 统计；
 # 缺 key = 无同口径数据（一览显示 "—"）。
-# 标注的交易层读数（R27 双窗对照，2026-09-06）：key → ((跨窗盈亏比, 跨窗胜率),
-# (主窗盈亏比, 主窗胜率))。口径：trade-sim、0AMV做多+J<13 研究基底、s3000、
-# pct12+分批止盈0.5+BBI跌破2根 出场档；跨窗 2022-2024 / 主窗 2024-08~2026-09。
-# ⚠️ 是研究回测数字（R11：相对排序用，量级不作数），不是 live 统计；
-# 缺 key = 无同口径数据（一览显示 "—"）。
 SIGNAL_STATS: dict[str, tuple[tuple[float, float], tuple[float, float]]] = {
     "qsx_resonance_v2": ((2.73, 0.314), (2.60, 0.358)),
     "rsi_deep_oversold": ((2.28, 0.732), (1.49, 0.567)),
@@ -268,7 +263,7 @@ def summarize_signals(signals: dict[str, Any]) -> dict[str, Any]:
     """汇总：正向命中数 / **可评估数**（分母排除 unavailable）。
 
     分母用可评估数而非总数：新股因数据不足只能评估 4 项、命中 3 项，应显示 3/4 而不是
-    3/11 —— 后者会把"数据不足"误读成"质量差"。
+    3/9（正向标注全集）—— 后者会把"数据不足"误读成"质量差"。
     """
     pos_hit = [k for k in POSITIVE if signals.get(k, {}).get("state") == HIT]
     pos_eval = [k for k in POSITIVE if signals.get(k, {}).get("state") in (HIT, MISS)]
