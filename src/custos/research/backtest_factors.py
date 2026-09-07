@@ -83,7 +83,6 @@ from custos.core.factors.s_shape import (
 _kdj: Callable[..., Any] | None  # 导入失败退 None（调用点有守卫）
 _resample: Callable[..., Any] | None
 _zhixing_state: Callable[..., Any] | None
-_dks_series: Callable[..., Any] | None
 _qsx_dks_resonance_v2: Callable[..., Any] | None
 
 try:
@@ -91,7 +90,6 @@ try:
     from custos.core.indicators import (  # noqa: E402
         resample as _resample,
         zhixing_state as _zhixing_state,
-        dks_series as _dks_series,
     )
     from custos.core.factors.qsx_resonance import (  # noqa: E402
         qsx_dks_resonance_v2 as _qsx_dks_resonance_v2,
@@ -100,7 +98,6 @@ except Exception:  # noqa: BLE001
     _kdj = None
     _resample = None
     _zhixing_state = None
-    _dks_series = None
     _qsx_dks_resonance_v2 = None
 
 J_LOW_THRESHOLD = 13.0

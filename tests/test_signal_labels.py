@@ -340,7 +340,9 @@ class TestTableRendering:
         assert data_rows[0].startswith(
             "| **QSX共振v2(60根≥2次干净反弹)** `QG` | 3/3 | 2.73 / 31%"
         )
-        assert data_rows[1].startswith("| **B2确认(B1后放量涨4%)** `B2` | 1/4 | 2.40 / 52%")
+        assert data_rows[1].startswith(
+            "| **B2确认(B1后放量涨4%)** `B2` | 1/4 | 2.40 / 52%"
+        )
         assert data_rows[-1].startswith("| **RSI强势区间** `RS` | 1/4 | 1.33 / 44%")
         assert "`QD`" not in sec, "QD 行已撤"
         assert "主升" not in sec, "v0.185（owner）：MR（主升始发点）行已撤"

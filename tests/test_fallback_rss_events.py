@@ -120,4 +120,6 @@ class TestDailyReportAuditBlock:
         header = body.split("## 1.")[0]
         assert "report_id `2026-08-07_premarket_" in header
         # v0.181：输入清单行不进 MD（进 JSON audit.inputs），头部只留三件
-        assert "策略版本" in header and "数据截止" in header and "输入清单" not in header
+        assert (
+            "策略版本" in header and "数据截止" in header and "输入清单" not in header
+        )

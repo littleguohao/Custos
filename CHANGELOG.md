@@ -191,6 +191,7 @@
 | 2026-09-06 | v0.185 | 1800 候选表标注层：撤 MR（主升始发点，R8 H4 + R27 双证 0 触发；因子/研究 gate 保留留证，注册表转 debug，release 集 20→19）；信号标注一览加「盈亏比/胜率（跨窗｜主窗）」列（R27 同口径读数，pct12+止盈+BBI2 档）并按跨窗盈亏比降序；QG 补跑同口径双窗（+4.6/+8.0pp 两窗输基底，与 R23/R26 一致） | owner 定：0 触发因子不提供信息；读数列是研究回测口径（R11 边界行已注明）非 live 统计 | 钉测改写（排序/撤行/3-9 分母/注册表计数）；全量绿 |
 | 2026-09-06 | v0.186 | R28 落档：三面共振/空头前哨/技术高分 × 8 组信号加值验证（离线读格子不重跑回测）——唯一过线 RV×技术高分（两批两窗同向 +7.7~+21.8pp）；RS×共振 nopin 假阳性（pinned 批证是做多腿混入）；空头前哨假设证伪；RD/R★ 与「优∧强」互斥。新研究脚本 `signal_context_study.py`（(code,day) memo + 逐格断点缓存） | owner 问句驱动；nopin 批 8 信号×双窗 ~24 万笔逐笔 as-of 标注 | 钉测 26 例 + 单元数 27→28；脚本已挂 research __main__ 目录 |
 | 2026-09-07 | v0.187 | 新进代码 review 修复批（判定语义不变）：`_weekly_gate_arrays` 午夜假定检查挪出 try（原 assert 被 except 吞）；重放缺票 WARN 流式聚合；对账改捕专用 `SignalsDateMismatch`；尾部截断护栏加 `--allow-tail-clip` 逃生门+流式补测；`_ann` 缓存绑源格子 mtime+大小签名、cost_bps≠25 硬校验、`group_stats` 复用 `srs.ret_stats`；members 空结果防空写；signal_labels 重复注释/过时 docstring 清理 | 细节见 commit | 钉测 +7；全量绿 |
+| 2026-09-07 | v0.188 | audit 门禁修复：`backtest_factors` 去掉 `_dks_series` 重复导入（硬导入与 try 降级块各一份 ⇒ mypy no-redef 2 个错误清零，audit mypy 回 0）；补格式化 v0.181/v0.185 遗留的两个测试文件（ruff format 门槛恢复全绿） | radon 新增 D 级见 commit/待办 | 全量绿 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 
