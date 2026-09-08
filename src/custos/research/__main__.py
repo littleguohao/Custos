@@ -141,6 +141,12 @@ TOOLS: dict[str, tuple[str, str]] = {
         "（权重向 pre2019 不萎缩腿倾斜）× R29-C1~C4 判据（--phase2/--phase3 "
         "--from-trades；⚠️ pre2019 终审前不许碰，CLI 硬拒绝）",
     ),
+    "score_combo_search_study": (
+        "study",
+        "R30 打分权重有界组合搜索（预注册）：5 正腿×5 档×负腿块二态 = 5702 组合"
+        "（gcd 排序等价去重）× 加严筛选线 45%/2.6 + 灵敏度零翻转，幸存者 top 3 进"
+        " pre2019 终审（--search/--final --from-trades；⚠️ 搜索族证据等级封顶 L3−）",
+    ),
     "qsx_resonance_study": (
         "study",
         "QSX/DKX 两层过滤三臂：①QSX>DKS 多头 ②「跌线就反弹」共振"

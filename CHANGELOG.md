@@ -195,6 +195,7 @@
 | 2026-09-07 | v0.189 | radon 三个 D 级降回 C/B（纯提取重构，算式逐字未动）：`_weekly_gate_arrays` D26→B（拆 `_weekly_day_map`/`_weekly_dks_premove`/`_weekly_kdj_j`/`_weekly_dks_step`）、`evaluate_trades` D26→C19（单遍循环体拆 `_single_pass_trades`）、`_load_bars_local` D21→B（逐股循环体拆 `_load_one_bars`） | v0.167 的「D 级清零」标准恢复；逐位一致由 gate/信号等价性钉测兜底 | 钉测全绿无新增；radon cc 全 src 无 D；全量绿 |
 | 2026-09-07 | v0.190 | R29 预注册 + 工程载体（owner 目标：篮子胜率稳定≥40% 且盈亏比≥2.4）：四候选 W1-W4 与 R29-C1~C4 判据跑数前写死（详见 `governance/research/R29_score_stability_rebuild.md`），新增 `research/score_stability_study.py`（Phase2/3 镜像 R24，判据机械全复用，29 钉测） | R22/R24 两轮五候选同死于 pre2019 regime 富集；本轮设计反向：权重向 pre2019 不萎缩的腿（rsi_bull_div/macd底背离）倾斜，rsi_deep 降权至归零 | 生产机 Phase2/3 跑数 + pre2019 终审 |
 | 2026-09-07 | v0.191 | R29 跑数判负回填：Phase 2（主窗 15636/跨窗 14687 笔）W1/W2/W4 两窗 C1~C4 全过（胜率 43.6~53.7%/盈亏比 2.42~2.91）但 ±50% 灵敏度翻转 1~3 次（参数敏感），W3 参数稳但主窗盈亏比 2.14 失 C2；推荐名单为空 ⇒ Phase 3 未启动（CLI 硬停，pre2019 保持 untouched）；预注册页结论/结果回填 + 索引状态改 ❌ 证伪（Phase 2），Phase 4 不启动 | 打分重建第三轮判负：窗内达标第三次复现「不构成瓶颈」，死因前移至窗内参数稳定性；三轮六候选无一幸存 | 产物 `artifacts/logs/score_stability_study/r29_phase2.json`；纯文档回填无代码改动 |
+| 2026-09-08 | v0.192 | R30 预注册 + 工程载体（owner 拍板「有界组合搜索」）：5702 组合（5 正腿×5 档×负腿块二态，gcd 排序等价去重）× 加严筛选线 45%/2.6 + 灵敏度零翻转（显著性税），幸存者 top 3 进 pre2019 终审（详见 `governance/research/R30_score_combo_search.md`）；新增 `research/score_combo_search_study.py`（fast path 与慢路径逐位对拍钉测，34 钉测；15k×2 窗实测 5.3 min） | R29 四候选窗内贴线过线被灵敏度刷掉 ⇒ 组合空间确实未穷举；搜索族多重比较风险 ⇒ 证据等级封顶 L3−，终审通过也须影子观察 | 生产机 --search + --final 跑数后终审 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

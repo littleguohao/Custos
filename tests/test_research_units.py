@@ -31,8 +31,9 @@ def test_units_exist():
     # 2026-09-06：+R27（标注因子家族×统一出场轴双窗对照，owner 问答驱动留证）
     # 2026-09-06：+R28（上下文维度×8 信号加值验证）
     # 2026-09-07：+R29（胜率稳定≥40%+盈亏比≥2.4 打分重建，预注册落档）
-    assert len(UNITS) == 29, (
-        f"预期 29 个研究单元，实际 {len(UNITS)}：{[p.name for p in UNITS]}"
+    # 2026-09-08：+R30（打分权重有界组合搜索，预注册落档）
+    assert len(UNITS) == 30, (
+        f"预期 30 个研究单元，实际 {len(UNITS)}：{[p.name for p in UNITS]}"
     )
 
 
