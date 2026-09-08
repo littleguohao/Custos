@@ -78,3 +78,51 @@
 ## 回填区（跑数后填）
 
 （空——跑数后按「结论」段的三种结局如实回填，并同步因子注册表 status。）
+
+---
+
+## 附录 · 生产机跑数手册（2026-09-08 随预注册写死）
+
+**口径与 R27 逐格一致**：strategy_grid 驱动 backtest_factors `--trade-sim
+--portfolio`，每格自动 `--amv-long-only`（v0.93 基底钉），scorer=baseline
+（`--top-n 0` 无区分度），`--count 2000`、`--timeout 10800`、`-j 4`、
+出场轴 `governance/research/exit_grid_rsi_family.json`
+（base_low / pct12 / pct12_so5_bbi2）。宇宙与 R27 同：s3000 钉死
+（生产机上沿用 R27 同批 codes-file；若不可得退 `--sample 3000`，
+并在回填时记录宇宙 digest 差异——R27 已实测 digest 漂移对读数的影响）。
+
+**第 0 步 · 小规模冒烟（估算单格耗时，qn gate 全走慢速切片路径）**：
+
+```bash
+uv run python -m custos.research.strategy_grid \
+  --scorers baseline \
+  --gates qn_ma25_state,qn_volume_surge_cut,qn_three_red,qn_macd_bar_shift,qn_kdj_neg_day,qn_adx_extreme,qn_box_target,qn_ma144_launch \
+  --exit-grid governance/research/exit_grid_rsi_family.json \
+  --start 2024-08-01 --end 2024-12-31 --sample 300 \
+  --count 2000 --top-n 0 --timeout 10800 -j 4 --tag r31_smoke
+```
+
+⚠️ 性能预期：8 个 qn gate 均为黑盒 detector 慢路径（不进
+`_SLICE_FREE_GATES`），其中 `qn_three_red` 每 bar 做周/月 resample +
+3×MACD，是全场最重；R27 实测同类慢路径单格 18~35 分钟，冒烟若单格
+>60 分钟，先只对该 gate 缩窗单独跑，**不得为提速改判定语义**。
+
+**第 1 步 · 跨窗 2022-2024（s3000）**：
+
+```bash
+uv run python -m custos.research.strategy_grid \
+  --scorers baseline \
+  --gates qn_ma25_state,qn_volume_surge_cut,qn_three_red,qn_macd_bar_shift,qn_kdj_neg_day,qn_adx_extreme,qn_box_target,qn_ma144_launch \
+  --exit-grid governance/research/exit_grid_rsi_family.json \
+  --start 2022-01-01 --end 2024-07-31 --sample 3000 \
+  --count 2000 --top-n 0 --timeout 10800 -j 4 --tag r31_cw
+```
+
+**第 2 步 · 主窗 2024-08~2026-09（s3000）**：同上，窗口改
+`--start 2024-08-01 --end 2026-09-04 --tag r31_main`。
+
+**第 3 步 · 基准对照**：同两窗跑 `--gates none`（同出场轴同宇宙）；
+若同参数基线格已落盘，cell_signature 复用会自动跳过，直接引用即可。
+
+**产物落点**：`artifacts/logs/strategy_grid/_ranked__r31_{smoke,cw,main}.json`
++ 同名 .md；回填时按 C1~C4 逐 gate 判定并更新因子注册表 status。
