@@ -20,6 +20,8 @@ state 类：输出粘合/发散状态与启动信号。绝不 raise。
 
 from __future__ import annotations
 
+import numpy as np
+
 from typing import Any
 
 from custos.core.factors._util import ohlcv_arrays as _ohlcv_arrays
@@ -46,8 +48,6 @@ QN_MA144_RISE_WIN = 5  # 待回测：MA144 上翘确认根数
 
 def _bandwidth_from_mas(mas) -> tuple[Any, list]:
     """四线带宽序列：(max−min)/mid，输入为四条 MA 数组。"""
-    import numpy as np
-
     mx = mas[0].copy()
     mn = mas[0].copy()
     for m in mas[1:]:

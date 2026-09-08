@@ -25,8 +25,10 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
+from custos.core.factors._util import resample_ready
 from custos.core.indicators import macd_series, resample
 
 FACTOR: dict[str, Any] = {
@@ -47,15 +49,6 @@ QN_BELOW_BARS = 52  # 待回测：大悬空=近 N 根周 K 全在线下（≈1 �
 QN_DRAWDOWN_PCT = 50.0  # 待回测：相对历史最高收盘的最小回撤%（源规则「跌幅超 50%」）
 QN_HUGE_VOL = 3.0  # 待回测：脚踩巨量 = 悬空期内周量 ≥ 此前均量 ×此值
 QN_BREAK_SURGE = 1.5  # 待回测：突破周放量倍数（相对前周）
-
-
-def _prepare(df: pd.DataFrame) -> pd.DataFrame:
-    """resample 前置：date 转日期型（to_datetime 幂等）+ 补 amount 列。"""
-    x = df.copy()
-    x["date"] = pd.to_datetime(x["date"])
-    if "amount" not in x.columns:
-        x["amount"] = x["close"].astype(float) * x["volume"].astype(float)
-    return x
 
 
 def _legs(close, vol, ma180, dv: float, ev: float) -> tuple[dict[str, Any], int]:
@@ -138,7 +131,7 @@ def detect(df, code: str = "", _arr: dict | None = None) -> dict[str, Any]:
                 "reason": f"少于{FACTOR['min_bars']}根日K（{n}）",
             }
         if _arr is None:
-            wk = resample(_prepare(df), "W-FRI")
+            wk = resample(resample_ready(df), "W-FRI")
             nw = len(wk)
             if nw < QN_MA_WEEK + 2:
                 return {
@@ -152,8 +145,6 @@ def detect(df, code: str = "", _arr: dict | None = None) -> dict[str, Any]:
             dif, dea, _h = macd_series(wk["close"])
             dv, ev = float(dif.iloc[-1]), float(dea.iloc[-1])
         else:
-            import numpy as np
-
             i = n - 1
             w = int(_arr["day_w"][i])
             nw = w + 1

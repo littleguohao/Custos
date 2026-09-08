@@ -19,6 +19,18 @@ def ohlcv_arrays(
     return close, high, low, vol
 
 
+def resample_ready(df: pd.DataFrame) -> pd.DataFrame:
+    """`indicators.resample` 前置：①date 转日期型（生产链本就是 datetime，合成数据
+    常是字符串，to_datetime 幂等）②补 amount 列（resample 聚合它，缺列用
+    close×volume 兜底）。qn_three_red / qn_weekly180_setup 共用（v0.197 收敛，
+    此前两处各有一份逐字相同的 _prepare）。"""
+    x = df.copy()
+    x["date"] = pd.to_datetime(x["date"])
+    if "amount" not in x.columns:
+        x["amount"] = x["close"].astype(float) * x["volume"].astype(float)
+    return x
+
+
 def ts_corr(x: pd.Series, y: pd.Series, n: int) -> Optional[float]:
     """末 n 根的皮尔逊相关；不足 n 根或相关无定义（如恒定量）返回 None。
 

@@ -449,6 +449,8 @@ def _weekly_gate_arrays(df: pd.DataFrame) -> Optional[dict[str, Any]]:
         wvol = weekly["volume"].astype(float).to_numpy()
         # 部分周累计量（逐日 O(n) 累加，跨周归零；成交量聚合是求和，无浮点次序问题）
         vol_day = d["volume"].astype(float).to_numpy()
+        if not np.isfinite(vol_day).all():
+            return None  # 量含 NaN：resample skipna 与逐日累加口径错位，回退慢路径
         part_vol = np.empty(n)
         acc = 0.0
         pw = -1
@@ -1167,22 +1169,21 @@ def qn_shrink_limit_up_gate(
     return _qn_detect("qn_shrink_limit_up", "qn_shrink_limit_up", df_slice, precomputed)
 
 
-for _qn_fid in (
-    "qn_ma25_state",
-    "qn_volume_surge_cut",
-    "qn_three_red",
-    "qn_macd_bar_shift",
-    "qn_kdj_neg_day",
-    "qn_adx_extreme",
-    "qn_box_target",
-    "qn_ma144_launch",
-    # 第二批（v0.195）
-    "qn_ma_converge",
-    "qn_bullish_engulf",
-    "qn_weekly180_setup",
-    "qn_shrink_limit_up",
-):
-    ENTRY_GATES[_qn_fid] = globals()[f"{_qn_fid}_gate"]
+# 显式具名注册（v0.197 review 修复：原 globals() 动态注册对 vulture 不可见，
+# 白噪「unused function」×12；具名赋值可被静态分析看见，与既有 gate 注册风格一致）
+ENTRY_GATES["qn_ma25_state"] = qn_ma25_state_gate
+ENTRY_GATES["qn_volume_surge_cut"] = qn_volume_surge_cut_gate
+ENTRY_GATES["qn_three_red"] = qn_three_red_gate
+ENTRY_GATES["qn_macd_bar_shift"] = qn_macd_bar_shift_gate
+ENTRY_GATES["qn_kdj_neg_day"] = qn_kdj_neg_day_gate
+ENTRY_GATES["qn_adx_extreme"] = qn_adx_extreme_gate
+ENTRY_GATES["qn_box_target"] = qn_box_target_gate
+ENTRY_GATES["qn_ma144_launch"] = qn_ma144_launch_gate
+# 第二批（v0.195）
+ENTRY_GATES["qn_ma_converge"] = qn_ma_converge_gate
+ENTRY_GATES["qn_bullish_engulf"] = qn_bullish_engulf_gate
+ENTRY_GATES["qn_weekly180_setup"] = qn_weekly180_setup_gate
+ENTRY_GATES["qn_shrink_limit_up"] = qn_shrink_limit_up_gate
 
 HORIZONS_DEFAULT = (5, 10, 20)
 

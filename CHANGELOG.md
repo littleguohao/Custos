@@ -200,6 +200,7 @@
 | 2026-09-08 | v0.194 | QN 因子批 8 个落地（骑牛体系首批）：`core/factors/qn_*.py`（untested/none/debug）+ 研究侧 8 个 ENTRY gate + R31 预注册（详见 `governance/research/R31_qn_factor_validation.md`、`strategy/qn/10_factor_implementations.md`） | 外部体系规则首次进证据流程：转译假设≠可用信号，盈利判定走 R31 跑数，过线前不进 live | 钉测 +59；注册表 31→39、release 仍 19 不变 |
 | 2026-09-08 | v0.195 | qn/11 操作纪律清单（40 风险红线+40 规则，逐条注出处）+ QN 第二批 4 因子（qn_ma_converge/qn_bullish_engulf/qn_weekly180_setup/qn_shrink_limit_up）+ 4 gate + R31 扩批 12 gate（详见 `governance/strategy/qn/`） | 源手册自检页收口 v0.193 遗留待办；二批因子补齐 180 周线/收拢发散/阳包阴/缩量板 | 钉测 +35；注册表 39→43；R31 判据不变同批适用 |
 | 2026-09-08 | v0.196 | QN gate 提速层：因子 detect 加 `_arr` 预计算通道（规则逻辑仍在因子唯一一份），`_precompute_gate_series` 扩日级数组/周 MACD/月 MACD/180 周线轴（`_weekly_macd_step`/`_monthly_gate_arrays`/`_weekly_ma180_asof`），12 gate 登记 `_SLICE_FREE_GATES` | s3000 全窗慢路径实测会撞 timeout（R27 同类 18~35 分钟/格）；逐位一致等价钉测兜底（滚动/EMA 从第 0 根递归同序） | 等价性钉测 +2（周月键真实参与场景 + 占位不炸）；通用 ①②⑤⑦ 自动覆盖 12 gate |
+| 2026-09-08 | v0.197 | QN 批 review 修复（判定语义不变）：`_prepare` 重复两份收敛为 `_util.resample_ready`；函数内 import 提顶层 ×2；补 dmi_mdi None 检查与 volume NaN 防护；gate 注册改显式具名（vulture 白噪清零） | review 发现的重复实现与静检噪音；audit：pylint/mypy 对新函数零发现、radon 新增 ≤C | 钉测全绿；⚠️ 另发现 5 个存量 D(21)（v0.190~0.192 混入，与本批无关，待处理） |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

@@ -23,6 +23,7 @@ from typing import Any
 
 import pandas as pd
 
+from custos.core.factors._util import resample_ready
 from custos.core.indicators import macd_series, resample
 
 FACTOR: dict[str, Any] = {
@@ -40,16 +41,6 @@ FACTOR: dict[str, Any] = {
 # ---- 待回测参数 ----
 QN_MIN_WEEK_BARS = 35  # 待回测：周线 MACD 可信所需最少周 K 数
 QN_MIN_MONTH_BARS = 20  # 待回测：月线 MACD 可信所需最少月 K 数（≈400+ 交易日）
-
-
-def _prepare(df: pd.DataFrame) -> pd.DataFrame:
-    """resample 前置：①date 转 DatetimeIndex 可识别的日期型（生产链本就是 datetime，
-    合成数据常是字符串，to_datetime 幂等）②补 amount 列（indicators.resample 聚合它）。"""
-    x = df.copy()
-    x["date"] = pd.to_datetime(x["date"])
-    if "amount" not in x.columns:
-        x["amount"] = x["close"].astype(float) * x["volume"].astype(float)
-    return x
 
 
 def _leg_red(
@@ -92,7 +83,7 @@ def detect(df, code: str = "", _arr: dict | None = None) -> dict[str, Any]:
                 "reason": f"少于{FACTOR['min_bars']}根K线（{n}）",
             }
         if _arr is None:
-            dfx = _prepare(df)
+            dfx = resample_ready(df)
             legs = {
                 "daily": _hist_red(df, 35),
                 "weekly": _hist_red(resample(dfx, "W-FRI"), QN_MIN_WEEK_BARS),

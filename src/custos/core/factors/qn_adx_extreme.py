@@ -105,7 +105,11 @@ def detect(df, code: str = "", _arr: dict | None = None) -> dict[str, Any]:
         else:
             close = _arr["close"][:n]
             d = _arr["macd_dif"][:n]
-            if _arr["adx"] is None or _arr["dmi_pdi"] is None:
+            if (
+                _arr["adx"] is None
+                or _arr["dmi_pdi"] is None
+                or _arr["dmi_mdi"] is None
+            ):
                 return {"available": False, "hit": False, "reason": "DMI 数据不足"}
             a_last = _arr["adx"][n - 2]  # DMI 数组短 1：bar i ↔ [i-1]
             p_last = _arr["dmi_pdi"][n - 2]
