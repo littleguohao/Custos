@@ -726,6 +726,186 @@ def platform_pullback_gate(
 
 ENTRY_GATES["platform_pullback"] = platform_pullback_gate
 
+
+# ══════════════════════════════════════════════════════════════════════════
+# QN 因子批（骑牛登山体系，2026-09-08，v0.194）—— 8 个研究侧入场 gate。
+#
+# 规则出处 `governance/strategy/qn/`（9 维度融合文档）；因子实现
+# `core/factors/qn_*.py`（status=untested / live_use=none / stage=debug，
+# 不进 live 链）。验证设计预注册见 `governance/research/R31_*`。
+#
+# state 类因子的 gate 是「可交易化子状态」的转译，转译口径逐条写在 docstring
+# （其中 qn_box_target 的入场转译是研究约定，不是源规则的直接买点——源规则
+# 里 1.3 目标位本身是**卖出**侧工具，见 qn/02 §一）。
+#
+# 全部是黑盒 detector 包装：按本模块 ENTRY_GATES 双形态约定接受并忽略
+# ``precomputed``（非递归序列口径，不能旁路；也不进 _SLICE_FREE_GATES
+# 白名单——初版求正确不求快）。
+# ══════════════════════════════════════════════════════════════════════════
+
+
+def _qn_detect(name: str, fid: str, df_slice: pd.DataFrame, code: str = "") -> bool:
+    """QN gate 共用骨架：短历史 / 依赖缺失 / 检测器异常分开计数（同
+    platform_pullback_gate 的口径），detect 返回的 hit 即 gate 判定。"""
+    from custos.core import factors as _factors  # noqa: PLC0415
+
+    meta = _factors.registry()[fid]["meta"]
+    if len(df_slice) < meta["min_bars"]:
+        _note_gate(name, "short_history")
+        return False
+    try:
+        detect = _factors.registry()[fid]["detect"]
+    except Exception as exc:  # noqa: BLE001
+        _note_gate(name, "dep_missing")
+        _warn_once(
+            f"{name}:dep",
+            f"{fid} 检测器不可用({exc}):该入场门槛将全程 0 命中,"
+            "结果只能读成'没跑成'而非'无判别力'",
+        )
+        return False
+    try:
+        r = detect(df_slice, code)
+        hit = bool(r.get("available") and r.get("hit"))
+    except Exception as exc:  # noqa: BLE001
+        _note_gate(name, "error")
+        _warn_once(
+            f"{name}:err",
+            f"{fid} 检测器异常({exc.__class__.__name__}: {exc}):"
+            "该 K 线未被评估,已计入 GATE_STATS.error",
+        )
+        return False
+    _note_gate(name, "hit" if hit else "miss")
+    return hit
+
+
+def qn_ma25_state_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
+    """QN·MA25 多空分界（转译：线上缩量阴线=买点候选）。绝不 raise。"""
+    return _qn_detect("qn_ma25_state", "qn_ma25_state", df_slice)
+
+
+def qn_volume_surge_cut_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
+    """QN·倍量切起爆K线（阳线倍量×2 上穿 MA5/MA10）。绝不 raise。"""
+    return _qn_detect("qn_volume_surge_cut", "qn_volume_surge_cut", df_slice)
+
+
+def qn_three_red_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
+    """QN·三线红（转译：日/周/月 MACD 柱全红当日=共振多头候选）。绝不 raise。"""
+    return _qn_detect("qn_three_red", "qn_three_red", df_slice)
+
+
+def qn_macd_bar_shift_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
+    """QN·买小绿（绿柱连缩+收盘不破前低；卖小红是出场侧不进本 gate）。绝不 raise。"""
+    return _qn_detect("qn_macd_bar_shift", "qn_macd_bar_shift", df_slice)
+
+
+def qn_kdj_neg_day_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
+    """QN·KDJ J 负值第 3/5 天或 KD20 金叉。绝不 raise。"""
+    return _qn_detect("qn_kdj_neg_day", "qn_kdj_neg_day", df_slice)
+
+
+def qn_adx_extreme_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
+    """QN·DMI ADX≥60 极端位（转译：极端位+MACD 底背离=抄底候选；
+    顶背离侧是出场信号不进本 gate）。绝不 raise。"""
+    if len(df_slice) < 40:
+        _note_gate("qn_adx_extreme", "short_history")
+        return False
+    try:
+        from custos.core.factors.qn_adx_extreme import detect  # noqa: PLC0415
+    except Exception as exc:  # noqa: BLE001
+        _note_gate("qn_adx_extreme", "dep_missing")
+        _warn_once(
+            "qn_adx_extreme:dep",
+            f"qn_adx_extreme 检测器不可用({exc}):该入场门槛将全程 0 命中,"
+            "结果只能读成'没跑成'而非'无判别力'",
+        )
+        return False
+    try:
+        r = detect(df_slice)
+        hit = bool(
+            r.get("available") and r.get("hit") and r.get("extreme_side") == "bottom"
+        )
+    except Exception as exc:  # noqa: BLE001
+        _note_gate("qn_adx_extreme", "error")
+        _warn_once(
+            "qn_adx_extreme:err",
+            f"qn_adx_extreme 检测器异常({exc.__class__.__name__}: {exc}):"
+            "该 K 线未被评估,已计入 GATE_STATS.error",
+        )
+        return False
+    _note_gate("qn_adx_extreme", "hit" if hit else "miss")
+    return hit
+
+
+def qn_box_target_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
+    """QN·1.3 系数箱体（转译：站上半格×1.15 且未进目标压力区——⚠️ 研究约定
+    转译，非源规则直接买点；源规则的 1.3 目标位是卖出侧工具）。绝不 raise。"""
+    if len(df_slice) < 60:
+        _note_gate("qn_box_target", "short_history")
+        return False
+    try:
+        from custos.core.factors.qn_box_target import detect  # noqa: PLC0415
+    except Exception as exc:  # noqa: BLE001
+        _note_gate("qn_box_target", "dep_missing")
+        _warn_once(
+            "qn_box_target:dep",
+            f"qn_box_target 检测器不可用({exc}):该入场门槛将全程 0 命中,"
+            "结果只能读成'没跑成'而非'无判别力'",
+        )
+        return False
+    try:
+        r = detect(df_slice)
+        hit = bool(r.get("available") and r.get("above_half_grid") and not r.get("hit"))
+    except Exception as exc:  # noqa: BLE001
+        _note_gate("qn_box_target", "error")
+        _warn_once(
+            "qn_box_target:err",
+            f"qn_box_target 检测器异常({exc.__class__.__name__}: {exc}):"
+            "该 K 线未被评估,已计入 GATE_STATS.error",
+        )
+        return False
+    _note_gate("qn_box_target", "hit" if hit else "miss")
+    return hit
+
+
+def qn_ma144_launch_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
+    """QN·日线翻倍四要素（144 线上翘+回踩±10%+MACD 水上+过左风）。绝不 raise。
+
+    ⚠️ 口径限制：ENTRY_GATES 调用约定不传 code，本 gate 路径下「涨停」腿按
+    主板 10% 口径判定（`price_limit_pct("")`）；创业板/科创板/北交所标的
+    该腿会偏严。其余三形式（跳空/倍量/线上阴线）不受影响；逐票精确口径
+    请直接调因子 `detect(df, code)`。
+    """
+    return _qn_detect("qn_ma144_launch", "qn_ma144_launch", df_slice)
+
+
+for _qn_fid in (
+    "qn_ma25_state",
+    "qn_volume_surge_cut",
+    "qn_three_red",
+    "qn_macd_bar_shift",
+    "qn_kdj_neg_day",
+    "qn_adx_extreme",
+    "qn_box_target",
+    "qn_ma144_launch",
+):
+    ENTRY_GATES[_qn_fid] = globals()[f"{_qn_fid}_gate"]
+
 HORIZONS_DEFAULT = (5, 10, 20)
 
 

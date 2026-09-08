@@ -18,7 +18,7 @@
 所以本文档里止损/止盈与因子并列，且出场侧规则的工程待遇（唯一来源、落盘计划、影子验证、
 回流通道）不低于因子。
 
-## 一、因子清单（注册表全量 31 个，按角色分组）
+## 一、因子清单（注册表全量 39 个，按角色分组）
 
 状态词表：`status` = active（已验证可用）/ candidate（在用但未经独立回测）/ untested / needs_work（按现有证据不可用）；
 `live_use` = gate（门槛/否决）/ scorer（进打分/分层）/ evidence_only（只落盘展示）/ none（不进 live）；
@@ -74,6 +74,21 @@
 | `reversal_quality_inv` | 反转成色**反向**选择器 | needs_work | 样本内大胜、含退市跨年翻转；归因未分离（R2） |
 | `b1_pullback_fit` | 买弱指纹 | needs_work | recall 100% 但期望 −0.42%/笔，劣于无差别进场 +0.96%（R2） |
 | `sector_mainstream` | 主线板块族密度 | candidate | 准确的「窗口主线指纹」（归因工具），但「跟随主流」机械规则不成立（R2）；主线指纹节 v0.80 删除后 live 无引用，研究侧 `aggregate` 保留 |
+
+**QN 批（骑牛登山体系，v0.194，8 个，全部 untested / none / debug）**：
+规则出处与转译口径见 [`../qn/10_factor_implementations.md`](../qn/10_factor_implementations.md)，
+盈利验证走 R31 预注册（跑数前）——过线前一律不得进 live。
+
+| id | 名称 | 入场转译 |
+|---|---|---|
+| `qn_ma25_state` | MA25 多空分界 | 线上缩量阴线 |
+| `qn_volume_surge_cut` | 倍量切起爆K线 | 阳线倍量×2 上穿 MA5/MA10 |
+| `qn_three_red` | 三线红（日/周/月 MACD） | 三线全红当日 |
+| `qn_macd_bar_shift` | 买小绿/卖小红 | 绿柱连缩+不破前低 |
+| `qn_kdj_neg_day` | KDJ J 负值计数 | 第 3/5 天或 KD20 金叉（⚠️ 与 B1 J<13 不同口径） |
+| `qn_adx_extreme` | DMI ADX≥60 极端位 | 极端位+MACD 底背离 |
+| `qn_box_target` | 1.3 系数箱体目标位 | 研究约定转译（半格×1.15 上方、未进目标区） |
+| `qn_ma144_launch` | 日线翻倍四要素 | 144 上翘+回踩±10%+MACD 水上+过左风 |
 
 ⚠️ 没有 "falsified" 这一档是刻意的（owner：不要随便证伪）——needs_work = 「按现有证据
 不可用，但证据本身待重跑」。

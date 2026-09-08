@@ -11,6 +11,7 @@ strategy/
 ├── STRATEGY_REGISTRY.json   # 机器可读注册表（新增策略必须登记）
 ├── b1/                      # B1 波段策略  —— 主
 ├── cz/                      # CZ 认知框架  —— 辅
+├── qn/                      # QN 骑牛登山体系 —— 辅
 ├── _factors/                # 跨策略可复用因子（非策略，故加 _ 前缀）
 └── _shared/                 # 跨策略规则（非策略）
 ```
@@ -21,6 +22,7 @@ strategy/
 |---|---|---|---|
 | **B1 波段策略** | 主 | ✅ 现行 | [`b1/README.md`](b1/README.md) |
 | **CZ 认知框架** | 辅 | ⚠️ 仅作输入 | [`cz/README.md`](cz/README.md) |
+| **QN 骑牛登山体系** | 辅 | ⚠️ 仅作输入 | [`qn/README.md`](qn/README.md) |
 | 通用因子 | — | ⚠️ 未接线 | [`_factors/README.md`](_factors/README.md) |
 | 跨策略规则 | — | ⚠️ 部分过时 | [`_shared/README.md`](_shared/README.md) |
 

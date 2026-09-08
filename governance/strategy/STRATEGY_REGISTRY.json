@@ -1,6 +1,6 @@
 {
  "version": 1,
- "updated_at": "2026-08-29",
+ "updated_at": "2026-09-08",
  "purpose": "策略上下文注册表。新增策略/因子必须在此登记，由 tests/test_strategy_index.py 校验注册表与目录一致。",
  "conventions": {
   "dir": "策略上下文用无前缀目录（b1/ cz/）；非策略用 _ 前缀（_factors/ 可复用因子、_shared/ 跨策略规则）",
@@ -63,6 +63,45 @@
     "「强制止损体系」15%/20% 仅适用 CZ 长期持有语境（owner 2026-08-06 定案）；B1 仓位按 B1 规则止损，不存在跨策略统一止损线",
     "933 行里代码只用了 §14.6 量能规则（§七 板块偏好已随 v0.80 移除），其余为人读的认知输入",
     "02_swing_tactics.md（v0.126 沉淀）：口述波段战法，全部数字未回测验证；其「硬止损 15%」与 B1 口径（R10「5% 是崖」）是不同策略语境，不构成对 B1 的约束"
+   ]
+  },
+  {
+   "id": "qn",
+   "name": "骑牛登山炒股实操体系",
+   "role": "secondary",
+   "status": "advisory",
+   "dir": "qn",
+   "entry": "qn/README.md",
+   "rule_doc": null,
+   "docs": [
+    "qn/01_general.md",
+    "qn/02_space_targets.md",
+    "qn/03_limit_up_daban.md",
+    "qn/04_tape_volume_auction.md",
+    "qn/05_top_bottom_kdj.md",
+    "qn/06_selection_fundamentals.md",
+    "qn/07_doubling_swing.md",
+    "qn/08_main_wave_launch.md",
+    "qn/09_buy_point_pricing.md",
+    "qn/10_factor_implementations.md"
+   ],
+   "configs": [],
+   "code": [
+    "src/custos/core/factors/qn_ma25_state.py",
+    "src/custos/core/factors/qn_volume_surge_cut.py",
+    "src/custos/core/factors/qn_three_red.py",
+    "src/custos/core/factors/qn_macd_bar_shift.py",
+    "src/custos/core/factors/qn_kdj_neg_day.py",
+    "src/custos/core/factors/qn_adx_extreme.py",
+    "src/custos/core/factors/qn_box_target.py",
+    "src/custos/core/factors/qn_ma144_launch.py",
+    "src/custos/research/backtest_factors.py"
+   ],
+   "research": "governance/research/R31_qn_factor_validation.md",
+   "known_issues": [
+    "全部规则为外部视频体系经验规律（199 视频萃取），未回测未接线；与 CZ 同一边界：数字不得直接当操作参数，进 live 须经 B1 转译 + 回测",
+    "KDJ 口径冲突警示：qn 用 J 负值第 3/5 天与 KD 20 以下金叉，B1 反转K 用 J<13——两套规则不得混用",
+    "源手册文末「操作纪律与检查清单」（40 条风险 + 规则自检）尚未纳入，本轮只融合 9 维度"
    ]
   }
  ],
