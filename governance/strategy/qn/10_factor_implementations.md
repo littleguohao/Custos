@@ -22,19 +22,31 @@
 | `qn_box_target` | 1.3 系数箱体 | [02 §一](02_space_targets.md) | state | ⚠️ 研究约定转译（站上半格×1.15 且未进目标区） | 波段低点×1.3/×1.26/×1.15 三档空间度量，不判买卖 |
 | `qn_ma144_launch` | 日线翻倍四要素 | [07 §二](07_doubling_swing.md) | pattern | 四要素全中 | MA144 走平上翘 + 回踩 ±10% + MACD 双线上零轴 + 过左风四形式之一 |
 
+### 第二批（v0.195，同为 untested/none/debug）
+
+| factor id | 名称 | 规则出处 | kind | 研究 gate | 核心判定 |
+|---|---|---|---|---|---|
+| `qn_ma_converge` | 均线收拢发散 | [01 §五](01_general.md) | state | 首次放量向上发散 | MA5/10/25/144 带宽 ≤5% 持续 10 根 → 带宽扩张 + 多头排列 + 放量阳 |
+| `qn_bullish_engulf` | 阳包阴/单阳包 | [01 §一](01_general.md) | pattern | 同 hit | 阳线实体完全覆盖前阴实体 + 上穿 MA5/MA10 + 量≥前日×1.1 |
+| `qn_weekly180_setup` | 180 周线大悬空 | [07 §一](07_doubling_swing.md) | pattern | 四要素全中 | 连续 ≥52 周在线下 + 回撤≥50% + 悬空期巨量 + 放量突破 180 周线 + 周 MACD 标杆；需 ~900 根日 K |
+| `qn_shrink_limit_up` | 缩量涨停板 | [03 §三](03_limit_up_daban.md) | pattern | 同 hit | 涨停 + 缩量 0.5~0.7×前日 + 近 10 根内有放量阴 + 贴 MA25/60/144 |
+
 ## 实现约定（整批统一）
 
 - 检测器**绝不 raise**：短数据/异常 → `available=False` + 原因；腿级明细全落盘供回测消融
 - 常量集中各模块顶部 `QN_*` 前缀，逐个标「待回测」；指标一律用 L0 唯一实现
   （`indicators.macd_series / kdj_series / dmi_arrays / resample`），禁止自写 EMA
-- 钉测 `tests/test_qn_factors.py`（合成用例：正例/消融/短数据/垃圾输入 + gate 注册与转译口径）
-- gate 全部接受并忽略 `precomputed`（黑盒 detector，不进 `_SLICE_FREE_GATES`）
+- 钉测 `tests/test_qn_factors.py`（合成用例：正例/消融/短数据/垃圾输入 + gate 注册与转译口径
+  + 快速路径等价钉测）
+- gate 的 `_arr` 快速路径（v0.196）：因子 detect 吃 `_precompute_gate_series` 的预计算序列
+  （必需键见 `backtest_factors._QN_GATE_KEYS`），齐备走无切片路径、缺键回退慢路径，
+  两路逐位一致由 `test_gate_precompute_equivalence` ①②⑤⑦ + 本仓等价钉测共同钉住
 
-## 明确未因子化（原因记录，第二批候选）
+## 明确未因子化（原因记录，后续批次候选）
 
 - **盘中/竞价类**（两点半、9:33、集合竞价、盘口大单）：需分时/Level-2 数据
 - **截面类**（妖股龙一、涨停家数排序）：非单票 OHLCV，属选股链层
 - **无数据源类**（大宗交易、解禁、F10 股东）：不得以代理冒充（同情绪维度缺口原则）
 - **主观画线类**（斜横线、上下影线箱体、资金箱体）：画线规则主观成分大
-- **180 周线大悬空**（[07 §一](07_doubling_swing.md)）：需 ~4 年数据，覆盖不足
-- **打板族**（缩量板/一字板次日行为）：依赖次日开盘行为，属入场时机
+- **打板次日行为**（一字板/缩量板次日高开判定）：依赖次日开盘行为，属入场时机
+  （「缩量板形态」本身已因子化 = `qn_shrink_limit_up`，v0.195）

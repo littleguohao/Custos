@@ -421,3 +421,308 @@ class TestGates:
 
         assert BF.ENTRY_GATES["qn_ma144_launch"](_ma144_df()) is True
         assert BF.ENTRY_GATES["qn_ma144_launch"](_ma144_df(surge=False)) is False
+
+
+# ───────────────────── 第二批：4 个因子 ─────────────────────
+
+from custos.core.factors import (  # noqa: E402
+    qn_bullish_engulf,
+    qn_ma_converge,
+    qn_shrink_limit_up,
+    qn_weekly180_setup,
+)
+
+QN_IDS_BATCH2 = [
+    "qn_ma_converge",
+    "qn_bullish_engulf",
+    "qn_weekly180_setup",
+    "qn_shrink_limit_up",
+]
+
+
+class TestRegistryBatch2:
+    def test_all_registered(self):
+        reg = factors.registry()
+        missing = [f for f in QN_IDS_BATCH2 if f not in reg]
+        assert not missing, f"未注册：{missing}"
+
+    @pytest.mark.parametrize("fid", QN_IDS_BATCH2)
+    def test_meta_debug_untested_none(self, fid):
+        m = factors.registry()[fid]["meta"]
+        assert m["status"] == "untested"
+        assert m["live_use"] == "none"
+        assert m["stage"] == "debug"
+
+
+# ───────────────────── qn_ma_converge ────────────────────────
+
+
+def _converge_df(breakout=True, n=170):
+    """四线长期粘合（窄幅震荡）→ 末根放量阳线上穿。"""
+    close = [10.0 + (0.02 if i % 2 else -0.02) for i in range(n - 1)]
+    open_ = list(close)
+    vol = np.full(n, 1e6)
+    if breakout:
+        close.append(10.6)
+        open_.append(9.99)
+        vol[-1] = 2.0e6
+    else:
+        close.append(10.0 + (0.02 if (n - 1) % 2 else -0.02))
+        open_.append(close[-2])
+    return _df(close, open_=open_, vol=vol, spread=0.002)
+
+
+class TestMaConverge:
+    def test_hit_first_divergence(self):
+        r = qn_ma_converge.detect(_converge_df())
+        assert r["available"], r
+        assert r["legs"]["bandwidth"]["hit"]  # 此前持续粘合
+        assert r["legs"]["first_divergence"]["hit"], r["legs"]
+        assert r["hit"]
+
+    def test_no_hit_without_breakout(self):
+        r = qn_ma_converge.detect(_converge_df(breakout=False))
+        assert r["available"] and not r["hit"]
+        assert r["converged"] is True  # 仍在粘合中
+
+    def test_short_data(self):
+        r = qn_ma_converge.detect(_df(_trend(100, 10.0, 0.05)))
+        assert r["available"] is False and r["hit"] is False
+
+
+# ───────────────────── qn_bullish_engulf ─────────────────────
+
+
+def _engulf_df(vol_ratio=1.2, cross=True):
+    """阴跌（收在 MA5/MA10 之下）→ 前根阴线延续跌势 → 末根阳线实体包覆前阴。"""
+    n = 32
+    close = [10.5 - 0.04 * i for i in range(n - 2)]
+    open_ = list(np.roll(close, 1))
+    open_[0] = close[0]
+    close.append(9.30)  # 前根阴线 9.38 → 9.30（延续跌势，收在 MA 之下）
+    open_.append(9.38)
+    close.append(9.55 if cross else 9.35)  # 末根：开 ≤ 前收、收 > 前开 = 包覆
+    open_.append(9.30)
+    vol = np.full(n, 1e6)
+    vol[-1] = 1e6 * vol_ratio
+    return _df(close, open_=open_, vol=vol, spread=0.001)
+
+
+class TestBullishEngulf:
+    def test_hit(self):
+        r = qn_bullish_engulf.detect(_engulf_df())
+        assert r["available"] and r["hit"], r["legs"]
+
+    def test_no_hit_without_engulf(self):
+        # 末根收 9.58 未过前阴开盘 9.60 → 包覆不成立
+        r = qn_bullish_engulf.detect(_engulf_df(cross=False))
+        assert r["available"] and not r["hit"]
+        assert r["legs"]["engulf"]["hit"] is False
+
+    def test_no_hit_without_vol_edge(self):
+        r = qn_bullish_engulf.detect(_engulf_df(vol_ratio=1.0))
+        assert r["available"] and not r["hit"]
+        assert r["legs"]["vol_edge"]["hit"] is False
+
+    def test_short_data(self):
+        r = qn_bullish_engulf.detect(_df(_trend(10, 10.0, 0.1)))
+        assert r["available"] is False and r["hit"] is False
+
+
+# ───────────────────── qn_weekly180_setup ────────────────────
+
+
+def _weekly180_df(n=1685, breakout=True, huge=True):
+    """四要素正例（1685 根 ≈ 241 周）：基底 → 急拉见顶 40（峰在近 180 周内，
+    MA180 仍在高位）→ 长跌至 12（大悬空，回撤 ~70%）→ 低位横盘 →
+    最后一个完整周放量收上 180 周线。⚠️ 末 5 天须为完整 Mon-Fri 周
+    （n ≡ 5 mod 7），否则突破周是残周、量能比失真。"""
+    close = np.empty(n)
+    close[:400] = 10.0  # 基底
+    close[400:500] = np.linspace(10.0, 40.0, 100)  # 急拉见顶
+    close[500:1400] = np.linspace(40.0, 12.0, 900)  # 长跌（大悬空）
+    close[1400:1680] = np.linspace(12.0, 13.5, 280)  # 低位横盘
+    vol = np.full(n, 1e6)
+    if huge:
+        vol[1300] = 30e6  # 脚踩巨量（悬空期内）
+    if breakout:
+        close[1680:] = [16.0, 20.0, 23.0, 25.0, 26.0]  # 突破周
+        vol[1680:] = 3e6  # 整周放量（≥前周 ×1.5）
+    else:
+        close[1680:] = [13.6, 13.7, 13.8, 13.9, 14.0]  # 不突破
+    return _df(close, vol=vol)
+
+
+class TestWeekly180Setup:
+    def test_hit(self):
+        r = qn_weekly180_setup.detect(_weekly180_df())
+        assert r["available"], r
+        for name in ("suspension", "huge_vol", "breakout", "macd_mark"):
+            assert r["legs"][name]["hit"], f"{name}: {r['legs'][name]}"
+        assert r["hit"]
+
+    def test_no_hit_without_breakout(self):
+        r = qn_weekly180_setup.detect(_weekly180_df(breakout=False))
+        assert r["available"] and not r["hit"]
+        assert r["legs"]["breakout"]["hit"] is False
+
+    def test_no_hit_shallow_history(self):
+        # 无大悬空（始终在高位附近）→ 腿①不成立
+        close = [40.0 + (0.5 if i % 2 else -0.5) for i in range(1400)]
+        r = qn_weekly180_setup.detect(_df(close))
+        assert r["available"] and not r["hit"]
+        assert r["legs"]["suspension"]["hit"] is False
+
+    def test_short_data(self):
+        r = qn_weekly180_setup.detect(_df(_trend(500, 10.0, 0.02)))
+        assert r["available"] is False and r["hit"] is False
+
+
+# ───────────────────── qn_shrink_limit_up ────────────────────
+
+
+def _shrink_limit_df(shrink_ratio=0.6, with_prev_surge_yin=True, limit_chg=10.0):
+    """横盘基底 → 3 天前放量阴线 → 前日常态量 → 当日涨停且缩量适中。"""
+    n = 152
+    close = [10.0] * (n - 3)
+    open_ = [10.0] * (n - 3)
+    vol = np.full(n, 1e6)
+    # 放量阴线（开 10.2 → 收 9.9，量 3× 均量）
+    close.append(9.9)
+    open_.append(10.2 if with_prev_surge_yin else 9.8)
+    if with_prev_surge_yin:
+        vol[n - 3] = 3e6
+    # 前日：常态
+    close.append(9.95)
+    open_.append(9.9)
+    # 当日：涨停 + 缩量
+    close.append(round(close[-1] * (1 + limit_chg / 100), 2))
+    open_.append(close[-2])
+    vol[-1] = vol[-2] * shrink_ratio
+    return _df(close, open_=open_, vol=vol, spread=0.001)
+
+
+class TestShrinkLimitUp:
+    def test_hit(self):
+        r = qn_shrink_limit_up.detect(_shrink_limit_df(), code="600000")
+        assert r["available"], r
+        assert r["hit"], r["legs"]
+
+    def test_no_hit_too_deep_shrink(self):
+        # 缩量过深（≤前日 1/2）= 弱势，源规则明文不参与
+        r = qn_shrink_limit_up.detect(_shrink_limit_df(shrink_ratio=0.4), code="600000")
+        assert r["available"] and not r["hit"]
+        assert r["legs"]["shrink"]["hit"] is False
+
+    def test_no_hit_without_prev_surge_yin(self):
+        r = qn_shrink_limit_up.detect(
+            _shrink_limit_df(with_prev_surge_yin=False), code="600000"
+        )
+        assert r["available"] and not r["hit"]
+        assert r["legs"]["prev_surge_yin"]["hit"] is False
+
+    def test_no_hit_not_limit(self):
+        r = qn_shrink_limit_up.detect(_shrink_limit_df(limit_chg=6.0), code="600000")
+        assert r["available"] and not r["hit"]
+        assert r["legs"]["limit_up"]["hit"] is False
+
+    def test_short_data(self):
+        r = qn_shrink_limit_up.detect(_df(_trend(60, 10.0, 0.05)), code="600000")
+        assert r["available"] is False and r["hit"] is False
+
+
+# ─────────────── 第二批 gate 与健壮性 ───────────────
+
+
+class TestGatesBatch2:
+    def test_all_batch2_gates_registered(self):
+        from custos.research import backtest_factors as BF
+
+        for fid in QN_IDS_BATCH2:
+            assert fid in BF.ENTRY_GATES, f"{fid} 未注册 ENTRY_GATES"
+
+    @pytest.mark.parametrize("fid", QN_IDS_BATCH2)
+    def test_gate_returns_bool(self, fid):
+        from custos.research import backtest_factors as BF
+
+        df = _df(_trend(200, 10.0, 0.05))
+        assert isinstance(BF.ENTRY_GATES[fid](df), bool), fid
+
+    def test_ma_converge_gate_hit(self):
+        from custos.research import backtest_factors as BF
+
+        assert BF.ENTRY_GATES["qn_ma_converge"](_converge_df()) is True
+        assert BF.ENTRY_GATES["qn_ma_converge"](_converge_df(breakout=False)) is False
+
+    def test_bullish_engulf_gate_hit(self):
+        from custos.research import backtest_factors as BF
+
+        assert BF.ENTRY_GATES["qn_bullish_engulf"](_engulf_df()) is True
+        assert BF.ENTRY_GATES["qn_bullish_engulf"](_engulf_df(cross=False)) is False
+
+
+class TestRobustnessBatch2:
+    @pytest.mark.parametrize("fid", QN_IDS_BATCH2)
+    def test_never_raise_on_garbage(self, fid):
+        mod = factors.registry()[fid]["module"]
+        for bad in (
+            _df([np.nan] * 60),
+            _df([0.0] * 60),
+            _df(_trend(5, 10.0, 0.1)),
+        ):
+            r = mod.detect(bad, code="600000")
+            assert isinstance(r, dict) and r.get("hit") is False
+
+
+# ───────────────────── 预计算快速路径（v0.196）─────────────────────
+
+
+class TestFastPathEquivalence:
+    """qn gate 的 _arr 快速路径 vs 逐切片慢路径逐 bar 抽样一致。
+
+    通用等价性由 test_gate_precompute_equivalence ①②⑤⑦ 自动兜底（覆盖全部
+    12 gate）；这里补它们覆盖不到的关键场景：**带 amount 列、周/月键齐备、
+    根数足够让 three_red 的月腿与 weekly180 的 180 周线真正参与判定**
+    （通用测试的 ~200 根合成数据只会让这两条的周/月腿恒 unavailable——
+    两路一致地空转不算验证）。
+    """
+
+    def test_all_qn_gates_fast_matches_slow(self):
+        from custos.research import backtest_factors as BF
+
+        rng = np.random.default_rng(42)
+        n = 1400
+        c = 20 + np.cumsum(rng.normal(0, 0.3, n))
+        o = c + rng.normal(0, 0.05, n)
+        df = pd.DataFrame(
+            {
+                "date": pd.date_range("2019-01-01", periods=n).astype(str),
+                "open": o,
+                "close": c,
+                "high": np.maximum(o, c) + abs(rng.normal(0, 0.2, n)),
+                "low": np.minimum(o, c) - abs(rng.normal(0, 0.2, n)),
+                "volume": abs(rng.normal(1e6, 2e5, n)),
+                "amount": abs(rng.normal(1e7, 2e6, n)),
+            }
+        )
+        pre = BF._precompute_gate_series(df)
+        assert pre is not None
+        assert "weekly_dif" in pre and "monthly_dif" in pre, "周/月 MACD 键必须就位"
+        assert "weekly_ma180" in pre and "day_w" in pre, "180 周线轴必须就位"
+        for fid in QN_IDS + QN_IDS_BATCH2:
+            gate = BF.ENTRY_GATES[fid]
+            for i in list(range(180, n, 97)) + [n - 1]:
+                sl = df.iloc[: i + 1]
+                assert gate(sl) == gate(sl, pre), f"{fid} 在 i={i} 两路不一致"
+
+    def test_qn_gates_placeholder_no_raise(self):
+        """白名单成员在 _PrefixLen 占位对象上必须正常出 bool（不许读列）。"""
+        from custos.research import backtest_factors as BF
+
+        df = _df(_trend(200, 10.0, 0.05))
+        df["amount"] = df["close"] * df["volume"]
+        pre = BF._precompute_gate_series(df)
+        for fid in QN_IDS + QN_IDS_BATCH2:
+            gate = BF.ENTRY_GATES[fid]
+            assert gate in BF._SLICE_FREE_GATES, f"{fid} 未登记无切片白名单"
+            assert isinstance(gate(BF._PrefixLen(200), pre), bool), fid

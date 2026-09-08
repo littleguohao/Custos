@@ -1,8 +1,8 @@
-# R31 · QN 因子批（骑牛登山体系 8 gate）入场加值验证（预注册）
+# R31 · QN 因子批（骑牛登山体系 12 gate）入场加值验证（预注册）
 
 > **家族**：选股方向（外部体系因子第一批——`governance/strategy/qn/` 融合后的
 > 工程化验证）　|
-> **证据等级**：L3−（一批 8 个 gate 同评，多重比较显式标注：单个 gate 过线只记
+> **证据等级**：L3−（一批 12 个 gate 同评（v0.195 扩批 +4），多重比较显式标注：单个 gate 过线只记
 > 「线索」，须第二轮扩窗复核才可升级，同 R28 对 RV 的处理）　|
 > **状态**：📋 **预注册（2026-09-08，跑数前）**——gate 清单/判据/样本条款本页
 > 写死，跑数后如实回填　|
@@ -15,13 +15,13 @@
 ## 主题
 
 骑牛登山体系（199 视频萃取的经验规则库，见 `governance/strategy/qn/README.md`）
-第一批 8 个可确定性计算的规则已因子化。本轮回答一个问题：**这 8 个入场信号
+第一批 8 个 + 第二批 4 个可确定性计算的规则已因子化。本轮回答一个问题：**这 12 个入场信号
 在统一出场轴下，相对无条件基准有没有入场加值**。这是外部体系规则第一次
 进入我们的证据流程——它们目前是「转译假设」，不是「可用信号」。
 
 ## 目标
 
-对 8 个 qn ENTRY gate 逐一判定：过线线索 / 否决 / 样本不足。
+对 12 个 qn ENTRY gate 逐一判定：过线线索 / 否决 / 样本不足。
 **不追求胜率，追求盈亏比**（核心原则第 0 条）——判据里盈亏比与胜率并列。
 
 ## 结论
@@ -36,7 +36,7 @@
 
 ## 证据与过程
 
-### 验证对象（8 个 gate，转译口径见各自 docstring）
+### 验证对象（12 个 gate，转译口径见各自 docstring）
 
 | gate | 因子 | 源规则（qn 文档） | 入场转译 |
 |---|---|---|---|
@@ -48,6 +48,16 @@
 | `qn_adx_extreme` | ADX≥60 极端位 | qn/04 §三 | 极端位 + MACD 底背离 |
 | `qn_box_target` | 1.3 系数箱体 | qn/02 §一 | ⚠️ 研究约定：站上半格×1.15 且未进目标区（非源规则直接买点） |
 | `qn_ma144_launch` | 日线翻倍四要素 | qn/07 §二 | 四要素全中当日 |
+
+**扩批（2026-09-08 v0.195，跑数前同批写死）**：第二批 4 个 gate 加入本页验证，
+判据 C1~C4 与窗口/宇宙/出场轴完全相同，不另开研究单元：
+
+| gate | 因子 | 源规则（qn 文档） | 入场转译 |
+|---|---|---|---|
+| `qn_ma_converge` | 均线收拢发散 | qn/01 §五 | 四线粘合后首次放量向上发散当日 |
+| `qn_bullish_engulf` | 阳包阴/单阳包 | qn/01 §一 | 实体包覆+上穿 MA5/MA10+量略大 |
+| `qn_weekly180_setup` | 180 周线大悬空 | qn/07 §一 | 四要素全中（低频，预期大面积 0 命中，C1 样本条款重点适用） |
+| `qn_shrink_limit_up` | 缩量涨停板 | qn/03 §三 | 涨停+缩量 0.5~0.7×+前序放量阴+贴均线 |
 
 ### 窗口 / 宇宙 / 出场轴
 
@@ -63,7 +73,7 @@
   且**双窗同向为正**（一正一负 = 失线）
 - **R31-C3（盈亏比）**：H20 盈亏比不劣于基准的 **80%**（胜率与盈亏比并列，
   防「高胜率低盈亏比」假过线——核心原则第 0 条）
-- **R31-C4（级别）**：单 gate 过 C1~C3 也只记「线索」（8 个一批的多重比较税），
+- **R31-C4（级别）**：单 gate 过 C1~C3 也只记「线索」（12 个一批的多重比较税），
   升级须第二轮扩窗复核同向
 
 ### 工程与产物
@@ -96,23 +106,24 @@
 ```bash
 uv run python -m custos.research.strategy_grid \
   --scorers baseline \
-  --gates qn_ma25_state,qn_volume_surge_cut,qn_three_red,qn_macd_bar_shift,qn_kdj_neg_day,qn_adx_extreme,qn_box_target,qn_ma144_launch \
+  --gates qn_ma25_state,qn_volume_surge_cut,qn_three_red,qn_macd_bar_shift,qn_kdj_neg_day,qn_adx_extreme,qn_box_target,qn_ma144_launch,qn_ma_converge,qn_bullish_engulf,qn_weekly180_setup,qn_shrink_limit_up \
   --exit-grid governance/research/exit_grid_rsi_family.json \
   --start 2024-08-01 --end 2024-12-31 --sample 300 \
   --count 2000 --top-n 0 --timeout 10800 -j 4 --tag r31_smoke
 ```
 
-⚠️ 性能预期：8 个 qn gate 均为黑盒 detector 慢路径（不进
-`_SLICE_FREE_GATES`），其中 `qn_three_red` 每 bar 做周/月 resample +
-3×MACD，是全场最重；R27 实测同类慢路径单格 18~35 分钟，冒烟若单格
->60 分钟，先只对该 gate 缩窗单独跑，**不得为提速改判定语义**。
+⚠️ 性能预期（v0.196 起已提速）：12 个 qn gate 的因子 detect 带 `_arr`
+预计算通道，必需键齐备时走无切片快速路径（`_SLICE_FREE_GATES` 已登记，
+等价性钉测逐 bar 钉住两路一致）；**缺键（如无 amount 列）自动回退慢路径**。
+冒烟若仍超时，优先检查是否发生回退（GATE_STATS 的 error/dep_missing），
+不得为提速改判定语义。
 
 **第 1 步 · 跨窗 2022-2024（s3000）**：
 
 ```bash
 uv run python -m custos.research.strategy_grid \
   --scorers baseline \
-  --gates qn_ma25_state,qn_volume_surge_cut,qn_three_red,qn_macd_bar_shift,qn_kdj_neg_day,qn_adx_extreme,qn_box_target,qn_ma144_launch \
+  --gates qn_ma25_state,qn_volume_surge_cut,qn_three_red,qn_macd_bar_shift,qn_kdj_neg_day,qn_adx_extreme,qn_box_target,qn_ma144_launch,qn_ma_converge,qn_bullish_engulf,qn_weekly180_setup,qn_shrink_limit_up \
   --exit-grid governance/research/exit_grid_rsi_family.json \
   --start 2022-01-01 --end 2024-07-31 --sample 3000 \
   --count 2000 --top-n 0 --timeout 10800 -j 4 --tag r31_cw

@@ -39,8 +39,13 @@ FACTOR: dict[str, Any] = {
 QN_MA25_WIN = 25  # 待回测：多空分界均线窗口（源规则=25 日线，与 v0.7 口径一致）
 
 
-def detect(df, code: str = "") -> dict[str, Any]:
+def detect(df, code: str = "", _arr: dict | None = None) -> dict[str, Any]:
     """MA25 多空分界状态。绝不 raise。
+
+    ``_arr``：研究侧预计算序列（`backtest_factors._precompute_gate_series` 的
+    close/open/volume/ma25/macd_dif/macd_dea，全序列数组、按 i=len(df)-1 取点）——
+    给定时不读 df 任何列（可无切片占位路径）。两路逐位一致（rolling/EMA 从第 0 根
+    递归同序；hist>0 ⇔ dif>dea，×2 是 2 的幂缩放符号不变）。
 
     返回键：
         above_ma25        收盘在 MA25 上方（多空分界）
@@ -52,8 +57,6 @@ def detect(df, code: str = "") -> dict[str, Any]:
         sell_candidate    「线下阳线」= 源规则的抛点候选（出场侧，供研究对照）
     """
     try:
-        close, _high, _low, vol = _ohlcv_arrays(df)
-        open_ = df["open"].astype(float).to_numpy()
         n = len(df)
         if n < FACTOR["min_bars"]:
             return {
@@ -61,12 +64,22 @@ def detect(df, code: str = "") -> dict[str, Any]:
                 "hit": False,
                 "reason": f"少于{FACTOR['min_bars']}根K线（{n}）",
             }
-        ma25 = df["close"].astype(float).rolling(QN_MA25_WIN).mean().to_numpy()
+        if _arr is None:
+            close, _high, _low, vol = _ohlcv_arrays(df)
+            open_ = df["open"].astype(float).to_numpy()
+            ma25 = df["close"].astype(float).rolling(QN_MA25_WIN).mean().to_numpy()
+            _dif, _dea, hist = macd_series(df["close"])
+            macd_red = bool(float(hist.iloc[-1]) > 0)
+        else:
+            i = n - 1
+            close = _arr["close"][:n]
+            open_ = _arr["open"][:n]
+            vol = _arr["volume"][:n]
+            ma25 = _arr["ma25"][:n]
+            macd_red = bool(_arr["macd_dif"][i] > _arr["macd_dea"][i])
         if ma25[-1] != ma25[-1] or ma25[-1] == 0:  # NaN 防御
             return {"available": False, "hit": False, "reason": "MA25 不可得"}
         above = bool(close[-1] > ma25[-1])
-        _dif, _dea, hist = macd_series(df["close"])
-        macd_red = bool(float(hist.iloc[-1]) > 0)
         if close[-1] > open_[-1]:
             candle = "yang"
         elif close[-1] < open_[-1]:

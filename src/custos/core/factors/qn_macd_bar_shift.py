@@ -58,8 +58,11 @@ def _shrinking_red(h) -> bool:
     )
 
 
-def detect(df, code: str = "") -> dict[str, Any]:
+def detect(df, code: str = "", _arr: dict | None = None) -> dict[str, Any]:
     """买小绿/卖小红。绝不 raise。
+
+    ``_arr``：研究侧预计算序列（close/macd_dif/macd_dea），给定时不读 df 任何列。
+    两路逐位一致（柱的逐根比较：h=(dif−dea)×2 是 2 的幂缩放，大小关系不变）。
 
     返回键：
         hit            买小绿（绿柱连缩 + 收盘不破前低）—— 可交易化子状态
@@ -75,9 +78,13 @@ def detect(df, code: str = "") -> dict[str, Any]:
                 "hit": False,
                 "reason": f"少于{need}根K线（{n}）",
             }
-        close = df["close"].astype(float).to_numpy()
-        _dif, _dea, hist = macd_series(df["close"])
-        h = hist.to_numpy()
+        if _arr is None:
+            close = df["close"].astype(float).to_numpy()
+            dif, dea, _hist = macd_series(df["close"])
+            h = (dif - dea).to_numpy() * 2
+        else:
+            close = _arr["close"][:n]
+            h = (_arr["macd_dif"][:n] - _arr["macd_dea"][:n]) * 2
         shrink_green = _shrinking_green(h)
         shrink_red = _shrinking_red(h)
         hold_low = bool(close[-1] >= close[-1 - QN_LOW_WIN : -1].min())

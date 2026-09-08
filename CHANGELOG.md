@@ -198,6 +198,8 @@
 | 2026-09-08 | v0.192 | R30 预注册 + 工程载体（owner 拍板「有界组合搜索」）：5702 组合（5 正腿×5 档×负腿块二态，gcd 排序等价去重）× 加严筛选线 45%/2.6 + 灵敏度零翻转（显著性税），幸存者 top 3 进 pre2019 终审（详见 `governance/research/R30_score_combo_search.md`）；新增 `research/score_combo_search_study.py`（fast path 与慢路径逐位对拍钉测，34 钉测；15k×2 窗实测 5.3 min） | R29 四候选窗内贴线过线被灵敏度刷掉 ⇒ 组合空间确实未穷举；搜索族多重比较风险 ⇒ 证据等级封顶 L3−，终审通过也须影子观察 | 生产机 --search + --final 跑数后终审 |
 | 2026-09-08 | v0.193 | 新增策略上下文 `qn/`（骑牛登山炒股实操体系，role=secondary/advisory）：外部视频体系（199 视频萃取的 39 主题/9 维度手册）按 9 维度融合为 9 份规则文档 + 登记注册表（详见 `governance/strategy/qn/`） | 引入第二套外部认知输入（与 CZ 同定位）；全部数字未回测未接线，边界同 CZ：不得直接当操作参数，进 live 须经 B1 转译+回测 | 引用 qn 维度时是否经转译；源手册「操作纪律清单」未纳入（待办） |
 | 2026-09-08 | v0.194 | QN 因子批 8 个落地（骑牛体系首批）：`core/factors/qn_*.py`（untested/none/debug）+ 研究侧 8 个 ENTRY gate + R31 预注册（详见 `governance/research/R31_qn_factor_validation.md`、`strategy/qn/10_factor_implementations.md`） | 外部体系规则首次进证据流程：转译假设≠可用信号，盈利判定走 R31 跑数，过线前不进 live | 钉测 +59；注册表 31→39、release 仍 19 不变 |
+| 2026-09-08 | v0.195 | qn/11 操作纪律清单（40 风险红线+40 规则，逐条注出处）+ QN 第二批 4 因子（qn_ma_converge/qn_bullish_engulf/qn_weekly180_setup/qn_shrink_limit_up）+ 4 gate + R31 扩批 12 gate（详见 `governance/strategy/qn/`） | 源手册自检页收口 v0.193 遗留待办；二批因子补齐 180 周线/收拢发散/阳包阴/缩量板 | 钉测 +35；注册表 39→43；R31 判据不变同批适用 |
+| 2026-09-08 | v0.196 | QN gate 提速层：因子 detect 加 `_arr` 预计算通道（规则逻辑仍在因子唯一一份），`_precompute_gate_series` 扩日级数组/周 MACD/月 MACD/180 周线轴（`_weekly_macd_step`/`_monthly_gate_arrays`/`_weekly_ma180_asof`），12 gate 登记 `_SLICE_FREE_GATES` | s3000 全窗慢路径实测会撞 timeout（R27 同类 18~35 分钟/格）；逐位一致等价钉测兜底（滚动/EMA 从第 0 根递归同序） | 等价性钉测 +2（周月键真实参与场景 + 占位不炸）；通用 ①②⑤⑦ 自动覆盖 12 gate |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

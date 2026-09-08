@@ -74,8 +74,12 @@ def _divergence(close, dif, n: int, find_top: bool) -> dict[str, Any]:
     }
 
 
-def detect(df, code: str = "") -> dict[str, Any]:
+def detect(df, code: str = "", _arr: dict | None = None) -> dict[str, Any]:
     """ADX 极端位状态。绝不 raise。
+
+    ``_arr``：研究侧预计算序列（dmi_pdi/dmi_mdi/adx——DMI 数组比 df 短 1，
+    bar i 读 [i-1]，与慢路径对前缀算 dmi_arrays 取 [-1] 同位；macd_dif、close），
+    给定时不读 df 任何列。两路逐位一致（Wilder 递归从第 0 根同序）。
 
     返回键：
         hit            ADX ≥ 60（极端位成立；hit 只标「极端」，不判方向）
@@ -83,7 +87,6 @@ def detect(df, code: str = "") -> dict[str, Any]:
         legs           adx / top_divergence / bottom_divergence / di_cross 明细
     """
     try:
-        close, high, low, _vol = _ohlcv_arrays(df)
         n = len(df)
         if n < FACTOR["min_bars"]:
             return {
@@ -91,21 +94,32 @@ def detect(df, code: str = "") -> dict[str, Any]:
                 "hit": False,
                 "reason": f"少于{FACTOR['min_bars']}根K线（{n}）",
             }
-        pdi, mdi, adx = dmi_arrays(high, low, close)
-        if pdi is None or mdi is None or adx is None:
-            return {"available": False, "hit": False, "reason": "DMI 数据不足"}
-        dif, _dea, _hist = macd_series(df["close"])
-        d = dif.to_numpy()
-        extreme = bool(adx[-1] >= QN_ADX_EXTREME)
+        if _arr is None:
+            close, high, low, _vol = _ohlcv_arrays(df)
+            pdi, mdi, adx = dmi_arrays(high, low, close)
+            if pdi is None or mdi is None or adx is None:
+                return {"available": False, "hit": False, "reason": "DMI 数据不足"}
+            dif, _dea, _hist = macd_series(df["close"])
+            d = dif.to_numpy()
+            a_last, p_last, m_last = adx[-1], pdi[-1], mdi[-1]
+        else:
+            close = _arr["close"][:n]
+            d = _arr["macd_dif"][:n]
+            if _arr["adx"] is None or _arr["dmi_pdi"] is None:
+                return {"available": False, "hit": False, "reason": "DMI 数据不足"}
+            a_last = _arr["adx"][n - 2]  # DMI 数组短 1：bar i ↔ [i-1]
+            p_last = _arr["dmi_pdi"][n - 2]
+            m_last = _arr["dmi_mdi"][n - 2]
+        extreme = bool(a_last >= QN_ADX_EXTREME)
         legs = {
-            "adx": {"hit": extreme, "adx": round(float(adx[-1]), 3)},
+            "adx": {"hit": extreme, "adx": round(float(a_last), 3)},
             "top_divergence": _divergence(close, d, n, find_top=True),
             "bottom_divergence": _divergence(close, d, n, find_top=False),
             "di_cross": {
                 "hit": True,
-                "bull": bool(pdi[-1] > mdi[-1]),
-                "pdi": round(float(pdi[-1]), 3),
-                "mdi": round(float(mdi[-1]), 3),
+                "bull": bool(p_last > m_last),
+                "pdi": round(float(p_last), 3),
+                "mdi": round(float(m_last), 3),
             },
         }
         side = None

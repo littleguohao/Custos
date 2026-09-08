@@ -47,11 +47,8 @@ def _leg_surge(vol) -> dict[str, Any]:
     return {"hit": bool(ratio >= QN_SURGE_MULT), "vol_ratio": round(ratio, 3)}
 
 
-def _leg_cut(df, close, open_) -> dict[str, Any]:
+def _leg_cut(close, open_, ma5, ma10) -> dict[str, Any]:
     """腿② 切断：阳线 + 前收在 MA5/MA10 之下、当日收站上两线。"""
-    c = df["close"].astype(float)
-    ma5 = c.rolling(5).mean().to_numpy()
-    ma10 = c.rolling(10).mean().to_numpy()
     if ma5[-1] != ma5[-1] or ma10[-1] != ma10[-1]:
         return {"hit": False, "reason": "MA 不可得"}
     was_below = bool(close[-2] < ma5[-2] and close[-2] < ma10[-2])
@@ -65,17 +62,15 @@ def _leg_cut(df, close, open_) -> dict[str, Any]:
     }
 
 
-def _leg_base_support(df, close, n: int) -> dict[str, Any]:
+def _leg_base_support(close, ma60, ma144, n: int) -> dict[str, Any]:
     """腿③ 大级别托底（记录腿，不强制）：MA60/MA144 走平或收盘在其上。
-    短样本时均线不存在 → 记 available=False 如实标注。"""
-    c = df["close"].astype(float)
+    短样本（n < w + 观察窗）时该均线腿记 available=False 如实标注。"""
     out: dict[str, Any] = {"hit": False}
-    for w in (60, 144):
+    for w, ma in ((60, ma60), (144, ma144)):
         key = f"ma{w}"
         if n < w + QN_BASE_FLAT_WIN:
             out[key] = {"available": False}
             continue
-        ma = c.rolling(w).mean().to_numpy()
         flat = abs(float(ma[-1] / ma[-1 - QN_BASE_FLAT_WIN] - 1)) <= QN_BASE_FLAT_PCT
         above = bool(close[-1] >= ma[-1])
         out[key] = {
@@ -89,14 +84,13 @@ def _leg_base_support(df, close, n: int) -> dict[str, Any]:
     return out
 
 
-def _leg_diverge_warn(df, n: int) -> dict[str, Any]:
+def _leg_diverge_warn(ma5, ma144, n: int) -> dict[str, Any]:
     """腿④ 鬼招手发散警示（排除用）：MA5 相对 MA144 间距过大。"""
     if n < 144:
         return {"available": False}
-    c = df["close"].astype(float)
-    ma5 = float(c.rolling(5).mean().iloc[-1])
-    ma144 = float(c.rolling(144).mean().iloc[-1])
-    gap = ma5 / ma144 - 1 if ma144 else 0.0
+    ma5_last = float(ma5[-1])
+    ma144_last = float(ma144[-1])
+    gap = ma5_last / ma144_last - 1 if ma144_last else 0.0
     return {
         "available": True,
         "hit": bool(gap >= QN_DIVERGE_WARN_PCT),
@@ -104,11 +98,14 @@ def _leg_diverge_warn(df, n: int) -> dict[str, Any]:
     }
 
 
-def detect(df, code: str = "") -> dict[str, Any]:
-    """倍量切起爆K线：腿①倍量 + 腿②切断 合成 hit；腿③④ 为记录/排除腿。绝不 raise。"""
+def detect(df, code: str = "", _arr: dict | None = None) -> dict[str, Any]:
+    """倍量切起爆K线：腿①倍量 + 腿②切断 合成 hit；腿③④ 为记录/排除腿。绝不 raise。
+
+    ``_arr``：研究侧预计算序列（close/open/volume/ma5/ma10/ma60/ma144），
+    给定时不读 df 任何列（可无切片占位路径）。两路逐位一致（rolling 从第 0 根
+    递归同序）。
+    """
     try:
-        close, _high, _low, vol = _ohlcv_arrays(df)
-        open_ = df["open"].astype(float).to_numpy()
         n = len(df)
         if n < FACTOR["min_bars"]:
             return {
@@ -116,11 +113,27 @@ def detect(df, code: str = "") -> dict[str, Any]:
                 "hit": False,
                 "reason": f"少于{FACTOR['min_bars']}根K线（{n}）",
             }
+        if _arr is None:
+            close, _high, _low, vol = _ohlcv_arrays(df)
+            open_ = df["open"].astype(float).to_numpy()
+            c = df["close"].astype(float)
+            ma5 = c.rolling(5).mean().to_numpy()
+            ma10 = c.rolling(10).mean().to_numpy()
+            ma60 = c.rolling(60).mean().to_numpy()
+            ma144 = c.rolling(144).mean().to_numpy()
+        else:
+            close = _arr["close"][:n]
+            open_ = _arr["open"][:n]
+            vol = _arr["volume"][:n]
+            ma5 = _arr["ma5"][:n]
+            ma10 = _arr["ma10"][:n]
+            ma60 = _arr["ma60"][:n]
+            ma144 = _arr["ma144"][:n]
         legs = {
             "surge": _leg_surge(vol),
-            "cut": _leg_cut(df, close, open_),
-            "base_support": _leg_base_support(df, close, n),
-            "diverge_warn": _leg_diverge_warn(df, n),
+            "cut": _leg_cut(close, open_, ma5, ma10),
+            "base_support": _leg_base_support(close, ma60, ma144, n),
+            "diverge_warn": _leg_diverge_warn(ma5, ma144, n),
         }
         hit = bool(legs["surge"]["hit"] and legs["cut"]["hit"])
         if legs["diverge_warn"].get("hit"):

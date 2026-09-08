@@ -83,7 +83,8 @@
     "qn/07_doubling_swing.md",
     "qn/08_main_wave_launch.md",
     "qn/09_buy_point_pricing.md",
-    "qn/10_factor_implementations.md"
+    "qn/10_factor_implementations.md",
+    "qn/11_discipline_checklist.md"
    ],
    "configs": [],
    "code": [
@@ -95,13 +96,17 @@
     "src/custos/core/factors/qn_adx_extreme.py",
     "src/custos/core/factors/qn_box_target.py",
     "src/custos/core/factors/qn_ma144_launch.py",
+    "src/custos/core/factors/qn_ma_converge.py",
+    "src/custos/core/factors/qn_bullish_engulf.py",
+    "src/custos/core/factors/qn_weekly180_setup.py",
+    "src/custos/core/factors/qn_shrink_limit_up.py",
     "src/custos/research/backtest_factors.py"
    ],
    "research": "governance/research/R31_qn_factor_validation.md",
    "known_issues": [
     "全部规则为外部视频体系经验规律（199 视频萃取），未回测未接线；与 CZ 同一边界：数字不得直接当操作参数，进 live 须经 B1 转译 + 回测",
     "KDJ 口径冲突警示：qn 用 J 负值第 3/5 天与 KD 20 以下金叉，B1 反转K 用 J<13——两套规则不得混用",
-    "源手册文末「操作纪律与检查清单」（40 条风险 + 规则自检）尚未纳入，本轮只融合 9 维度"
+    "源手册「操作纪律与检查清单」已收口为 qn/11_discipline_checklist.md（v0.195，去重后 40 风险红线 + 40 操作规则，逐条注出处）"
    ]
   }
  ],

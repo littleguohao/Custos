@@ -276,6 +276,76 @@ def _weekly_dks_step(
     return np.where(valid_all, dks_sum / len(_DKS_WINS), np.nan)
 
 
+def _weekly_ma180_asof(
+    idx: np.ndarray, cp: np.ndarray, iprev: np.ndarray, wclose: np.ndarray
+) -> np.ndarray:
+    """180 周均线 as-of 逐日值（含进行中部分周收盘 cp 的一步 rolling(180).mean()）。
+
+    逐位复刻口径同 `_weekly_dks_step`（`_roll_mean_states` 冻结周态 + 先删后加
+    一步，GH#42064 同值捷径），单窗口版（v0.196，供 qn_weekly180_setup）；
+    as-of 周数（含部分周）不足 180 ⇒ NaN（rolling 窗口不足同口径）。
+    """
+    win = 180
+    n = len(idx)
+    out = np.full(n, np.nan)
+    W = len(wclose)
+    if W < win:
+        return out
+    sum_a, c_add_a, c_rem_a, ncs_a, prev_a, neg_a = _roll_mean_states(wclose, win)
+    # 逐周预算「先删」后状态（同 _weekly_dks_premove 的单窗口版）
+    s1 = np.full(W, np.nan)
+    ng1 = np.zeros(W, dtype=np.int64)
+    for w in range(win - 1, W):
+        s = sum_a[w - 1]
+        ng = neg_a[w - 1]
+        if w >= win:
+            v = wclose[w - win]
+            y = -v - c_rem_a[w - 1]
+            s = s + y
+            if np.signbit(v):
+                ng -= 1
+        s1[w] = s
+        ng1[w] = ng
+    valid = idx + 1 >= win
+    y = cp - c_add_a[iprev]
+    sum_x = s1[idx] + y  # c_add 更新结果不再被消费（态已逐周冻结），可略
+    ncs = np.where(cp == prev_a[iprev], ncs_a[iprev] + 1, 1)
+    neg_ct = ng1[idx] + np.signbit(cp)
+    r = sum_x / win
+    r = np.where(ncs >= win, cp, r)  # GH#42064 同值捷径
+    r = np.where((ncs < win) & (neg_ct == 0) & (r < 0), 0.0, r)
+    r = np.where((ncs < win) & (neg_ct == win) & (r > 0), 0.0, r)
+    return np.where(valid, r, np.nan)
+
+
+def _weekly_macd_step(
+    idx: np.ndarray,
+    cp: np.ndarray,
+    has_prev: np.ndarray,
+    iprev: np.ndarray,
+    wc: pd.Series,
+) -> tuple[np.ndarray, np.ndarray]:
+    """周 MACD DIF/DEA as-of 逐日值（v0.196，供 qn_three_red / qn_weekly180_setup）。
+
+    三级 EMA 冻结态步进（模式同周 QSX/周 J）：ema12/ema26 在完整周序列上的
+    状态冻结于周 w-1，逐日加一步当日收盘 cp 得 DIF；DEA(9) 同法对 DIF 推一步。
+    与慢路径（前缀 resample 后 ``macd_series`` 取末点）逐位一致（ewm adjust=False
+    从第 0 根递归，同一串浮点运算）。
+    """
+    e12 = _ema(wc, 12).to_numpy()
+    e26 = _ema(wc, 26).to_numpy()
+    dif_arr = e12 - e26  # 自然周序列 DIF（周 w-1 冻结态取自它）
+    dea_arr = _ema(pd.Series(dif_arr), 9).to_numpy()
+    a12, f12 = 2.0 / 13.0, 1.0 - 2.0 / 13.0
+    a26, f26 = 2.0 / 27.0, 1.0 - 2.0 / 27.0
+    a9, f9 = 2.0 / 10.0, 1.0 - 2.0 / 10.0
+    e1i = np.where(has_prev, f12 * e12[iprev] + a12 * cp, cp)
+    e2i = np.where(has_prev, f26 * e26[iprev] + a26 * cp, cp)
+    out_dif = e1i - e2i
+    out_dea = np.where(has_prev, f9 * dea_arr[iprev] + a9 * out_dif, out_dif)
+    return out_dif, out_dea
+
+
 def _weekly_gate_arrays(df: pd.DataFrame) -> Optional[dict[str, Any]]:
     """逐日 bar 的「前缀 ``resample("W-FRI")``」周线指标（_precompute_gate_series 用）。
 
@@ -372,11 +442,83 @@ def _weekly_gate_arrays(df: pd.DataFrame) -> Optional[dict[str, Any]]:
         e1i = np.where(has_prev, f_qsx * e1_arr[iprev] + a_qsx * cp, cp)
         out_qsx = np.where(has_prev, f_qsx * q_arr[iprev] + a_qsx * e1i, e1i)
         out_dks = _weekly_dks_step(idx, cp, iprev, dks_states, dks_day, n)
+        # ---- v0.196 扩：周 MACD（qn_three_red/qn_weekly180_setup 用）----
+        out_wdif, out_wdea = _weekly_macd_step(idx, cp, has_prev, iprev, wc)
+        # ---- v0.196 扩：180 周均线 as-of + 自然周 OHLCV（qn_weekly180_setup 用）----
+        out_ma180 = _weekly_ma180_asof(idx, cp, iprev, wclose)
+        wvol = weekly["volume"].astype(float).to_numpy()
+        # 部分周累计量（逐日 O(n) 累加，跨周归零；成交量聚合是求和，无浮点次序问题）
+        vol_day = d["volume"].astype(float).to_numpy()
+        part_vol = np.empty(n)
+        acc = 0.0
+        pw = -1
+        for t in range(n):
+            acc = vol_day[t] if day_w[t] != pw else acc + vol_day[t]
+            pw = int(day_w[t])
+            part_vol[t] = acc
+        # 自然周 MA180（rolling(180).mean() 全序列；as-of 读取只取 ≤w-1 的完整周，
+        # 全量 frame 的末根部分周永不进读区）
+        wk_ma180_nat = wc.rolling(180).mean().to_numpy()
         return {
             "weekly_j": out_j,
             "weekly_qsx": out_qsx,
             "weekly_dks": out_dks,
             "weekly_bars": day_w + 1,
+            "weekly_dif": out_wdif,
+            "weekly_dea": out_wdea,
+            "weekly_ma180": out_ma180,
+            "day_w": day_w,
+            "weekly_close": wclose,
+            "weekly_vol": wvol,
+            "weekly_part_vol": part_vol,
+            "weekly_ma180_nat": wk_ma180_nat,
+        }
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _monthly_gate_arrays(df: pd.DataFrame) -> Optional[dict[str, Any]]:
+    """逐日 bar 的「前缀 ``resample("ME")``」月线 MACD（_precompute_gate_series 用，v0.196）。
+
+    口径与慢路径（每 bar 对 ``df.iloc[:i+1]`` resample("ME") 后取月线 MACD 末点）
+    **逐位一致**：全量 resample 一次得完整月序列；日 bar i 落在月 m 时，前缀月框 =
+    完整月 0..m-1 +「月 m 截至当日」的部分月（close=当日收盘），EMA12/26 与 DEA9
+    三级各推一步（同 `_weekly_macd_step` 的冻结态步进模式）。
+    数据含 NaN / 缺列 / resample 异常 ⇒ None（gate 回退慢路径，行为逐位同旧版）。
+    """
+    if _resample is None:
+        return None
+    d = df
+    if not pd.api.types.is_datetime64_any_dtype(d["date"]):
+        d = df.copy()
+        d["date"] = pd.to_datetime(d["date"])
+    # 与 _weekly_gate_arrays 同一假定：date 列为午夜、无时区（检查必须在 try 外）
+    if not (d["date"].dt.tz is None and (d["date"].dt.normalize() == d["date"]).all()):
+        raise ValueError("_monthly_gate_arrays 假定 date 列为午夜、无时区的交易日")
+    try:
+        n = len(d)
+        close = d["close"].astype(float).to_numpy()
+        if not np.isfinite(close).all():
+            return None
+        monthly = _resample(d, "ME")
+        if monthly.empty:
+            return None
+        # 日 bar → 月序号：ME 的 bin 标签 = 当月末（月末当日归自身），
+        # 经月度 frame 的 date 列反查——被 dropna 丢弃的月会让 KeyError
+        # 炸到 except → None（fail-closed，与 _weekly_day_map 同防护）
+        mpos = {lab: k for k, lab in enumerate(monthly["date"].to_numpy())}
+        mends = (d["date"] + pd.offsets.MonthEnd(0)).to_numpy()
+        day_m = np.array([mpos[lab] for lab in mends], dtype=np.int64)
+        mc = monthly["close"].astype(float)
+        idx = day_m
+        cp = close
+        has_prev = idx > 0
+        iprev = np.maximum(idx - 1, 0)
+        out_dif, out_dea = _weekly_macd_step(idx, cp, has_prev, iprev, mc)
+        return {
+            "monthly_dif": out_dif,
+            "monthly_dea": out_dea,
+            "monthly_bars": day_m + 1,
         }
     except Exception:  # noqa: BLE001
         return None
@@ -407,6 +549,20 @@ def _precompute_gate_series(
 
     ``kdj``：可选的 ``(K, D, J)`` 三元组（kdj_series fill_na=50.0 口径）——
     _prepare_stock 在 gate_pre 与 scorer_pre 都需要 KDJ 时算一次传入，避免重复。
+
+    v0.196 扩（QN 因子批 12 gate 的快速路径）：
+    - 日级基础键：open/high/low/close/volume（等长 float 数组）；
+      ma5/ma10/ma25/ma60/ma144（close rolling 均值）与 vol_ma20——
+      rolling/EMA 从第 0 根起算，全序列第 i 点与前缀末点是同一串浮点运算，逐位相同；
+    - dmi_pdi/dmi_mdi（与 adx 同源同偏移：bar i 在 [i-1]）；
+    - kdj_raw_k/kdj_raw_d/kdj_raw_j（kdj_series **fill_na=None** 口径——
+      qn_kdj_neg_day 因子的慢路径用默认口径，预计算必须同口径才逐位一致；
+      与恒有的 kdj_j（fill_na=50.0，indicators.kdj 同口径）是两组键，勿混）；
+    - weekly_dif/weekly_dea（「截至当日前缀 resample("W-FRI")」周 MACD，
+      见 _weekly_macd_step）；day_w/weekly_close/weekly_vol/weekly_part_vol/
+      weekly_ma180/weekly_ma180_nat（qn_weekly180_setup 的 180 周线轴）；
+    - monthly_dif/monthly_dea/monthly_bars（「前缀 resample("ME")」月 MACD，
+      见 _monthly_gate_arrays）。
     """
     if _kdj is None:
         return None
@@ -414,9 +570,11 @@ def _precompute_gate_series(
         j = (
             kdj[2] if kdj is not None else _kdj_series(df, fill_na=50.0)[2]
         ).to_numpy()  # 与 indicators.kdj 同口径
+        k_raw, d_raw, j_raw = (s.to_numpy() for s in _kdj_series(df))  # fill_na=None
         dif, dea, _hist_x2 = _macd_series(df["close"])
-        _, _, adx = dmi_arrays(df["high"], df["low"], df["close"])
+        pdi, mdi, adx = dmi_arrays(df["high"], df["low"], df["close"])
         close = df["close"]
+        close_a = close.astype(float).to_numpy()
         out: dict[str, Any] = {
             "kdj_j": j,
             "macd_dif": dif.to_numpy(),
@@ -424,12 +582,32 @@ def _precompute_gate_series(
             "adx": adx,
             "qsx": _qsx_series(close).to_numpy(),
             "dks": _dks_series(close).to_numpy(),
+            # ---- v0.196 QN 批 ----
+            "open": df["open"].astype(float).to_numpy(),
+            "high": df["high"].astype(float).to_numpy(),
+            "low": df["low"].astype(float).to_numpy(),
+            "close": close_a,
+            "volume": df["volume"].astype(float).to_numpy(),
+            "ma5": close.rolling(5).mean().to_numpy(),
+            "ma10": close.rolling(10).mean().to_numpy(),
+            "ma25": close.rolling(25).mean().to_numpy(),
+            "ma60": close.rolling(60).mean().to_numpy(),
+            "ma144": close.rolling(144).mean().to_numpy(),
+            "vol_ma20": df["volume"].astype(float).rolling(20).mean().to_numpy(),
+            "dmi_pdi": pdi,
+            "dmi_mdi": mdi,
+            "kdj_raw_k": k_raw,
+            "kdj_raw_d": d_raw,
+            "kdj_raw_j": j_raw,
         }
         if _rsi is not None:
             out["rsi14"] = _rsi(close, RSI_MID)
         wk = _weekly_gate_arrays(df)  # 失败退 None：缺周线键，周线 gate 走旧路径
         if wk is not None:
             out.update(wk)
+        mo = _monthly_gate_arrays(df)  # 失败退 None：缺月线键，月线 gate 走旧路径
+        if mo is not None:
+            out.update(mo)
         return out
     except Exception:  # noqa: BLE001
         return None
@@ -728,7 +906,8 @@ ENTRY_GATES["platform_pullback"] = platform_pullback_gate
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# QN 因子批（骑牛登山体系，2026-09-08，v0.194）—— 8 个研究侧入场 gate。
+# QN 因子批（骑牛登山体系，2026-09-08，v0.194 首批 8 个 + v0.195 二批 4 个）
+# —— 12 个研究侧入场 gate。
 #
 # 规则出处 `governance/strategy/qn/`（9 维度融合文档）；因子实现
 # `core/factors/qn_*.py`（status=untested / live_use=none / stage=debug，
@@ -738,23 +917,108 @@ ENTRY_GATES["platform_pullback"] = platform_pullback_gate
 # （其中 qn_box_target 的入场转译是研究约定，不是源规则的直接买点——源规则
 # 里 1.3 目标位本身是**卖出**侧工具，见 qn/02 §一）。
 #
-# 全部是黑盒 detector 包装：按本模块 ENTRY_GATES 双形态约定接受并忽略
-# ``precomputed``（非递归序列口径，不能旁路；也不进 _SLICE_FREE_GATES
-# 白名单——初版求正确不求快）。
+# v0.196 提速：因子 detect(df, code, _arr=None) 的 _arr 通道接
+# ``_precompute_gate_series`` 的预计算序列（规则逻辑仍在因子模块唯一一份，
+# gate 只做数据接线）——必需键齐备走无切片快速路径（_SLICE_FREE_GATES 登记），
+# 缺键回退逐切片慢路径，两路逐位一致（等价性钉测
+# tests/test_gate_precompute_equivalence.py ①②⑤⑦ 自动覆盖全部 12 gate）。
 # ══════════════════════════════════════════════════════════════════════════
 
+#: 各 qn gate 快速路径所需的 precomputed 键（缺一即回退慢路径；
+#: 同一表驱动 _qn_detect 的 _arr 接线与 _SLICE_FREE_GATES 白名单登记）
+_QN_GATE_KEYS: dict[str, tuple[str, ...]] = {
+    "qn_ma25_state": ("close", "open", "volume", "ma25", "macd_dif", "macd_dea"),
+    "qn_volume_surge_cut": (
+        "close",
+        "open",
+        "volume",
+        "ma5",
+        "ma10",
+        "ma60",
+        "ma144",
+    ),
+    "qn_three_red": (
+        "macd_dif",
+        "macd_dea",
+        "weekly_dif",
+        "weekly_dea",
+        "weekly_bars",
+        "monthly_dif",
+        "monthly_dea",
+        "monthly_bars",
+    ),
+    "qn_macd_bar_shift": ("close", "macd_dif", "macd_dea"),
+    "qn_kdj_neg_day": ("close", "open", "kdj_raw_k", "kdj_raw_d", "kdj_raw_j"),
+    "qn_adx_extreme": ("close", "macd_dif", "adx", "dmi_pdi", "dmi_mdi"),
+    "qn_box_target": ("close", "low"),
+    "qn_ma144_launch": (
+        "close",
+        "open",
+        "high",
+        "low",
+        "volume",
+        "ma144",
+        "ma25",
+        "macd_dif",
+        "macd_dea",
+    ),
+    "qn_ma_converge": ("close", "open", "volume", "ma5", "ma10", "ma25", "ma144"),
+    "qn_bullish_engulf": ("close", "open", "volume", "ma5", "ma10"),
+    "qn_weekly180_setup": (
+        "close",
+        "day_w",
+        "weekly_close",
+        "weekly_vol",
+        "weekly_part_vol",
+        "weekly_ma180",
+        "weekly_ma180_nat",
+        "weekly_dif",
+        "weekly_dea",
+    ),
+    "qn_shrink_limit_up": (
+        "close",
+        "open",
+        "volume",
+        "vol_ma20",
+        "ma25",
+        "ma60",
+        "ma144",
+    ),
+}
 
-def _qn_detect(name: str, fid: str, df_slice: pd.DataFrame, code: str = "") -> bool:
+_QN_REG: Optional[dict] = None  # 因子注册表惰性单例（registry() 每调一次扫一次目录）
+
+
+def _qn_reg() -> dict:
+    global _QN_REG
+    if _QN_REG is None:
+        from custos.core import factors as _factors  # noqa: PLC0415
+
+        _QN_REG = _factors.registry()
+    return _QN_REG
+
+
+def _qn_detect(
+    name: str,
+    fid: str,
+    df_slice: pd.DataFrame,
+    precomputed: Optional[dict] = None,
+    post: Optional[Callable[[dict], bool]] = None,
+    use_hit_key: bool = True,
+) -> bool:
     """QN gate 共用骨架：短历史 / 依赖缺失 / 检测器异常分开计数（同
-    platform_pullback_gate 的口径），detect 返回的 hit 即 gate 判定。"""
-    from custos.core import factors as _factors  # noqa: PLC0415
+    platform_pullback_gate 的口径）。
 
-    meta = _factors.registry()[fid]["meta"]
-    if len(df_slice) < meta["min_bars"]:
-        _note_gate(name, "short_history")
-        return False
+    precomputed 且必需键（_QN_GATE_KEYS[fid]）齐备 ⇒ 以 ``_arr`` 走快速路径
+    （因子不读 df 列，可无切片占位）；否则回退慢路径——两路逐位一致。
+    ``post``：gate 转译的后置判定（如 adx 极端位要求 extreme_side=="bottom"）；
+    ``use_hit_key=False``：判定不经因子 hit 键（qn_box_target 的 hit=「进目标
+    压力区」是卖出侧语义，入场转译由 post 全担）。
+    """
     try:
-        detect = _factors.registry()[fid]["detect"]
+        entry = _qn_reg()[fid]
+        meta = entry["meta"]
+        detect = entry["detect"]
     except Exception as exc:  # noqa: BLE001
         _note_gate(name, "dep_missing")
         _warn_once(
@@ -763,9 +1027,21 @@ def _qn_detect(name: str, fid: str, df_slice: pd.DataFrame, code: str = "") -> b
             "结果只能读成'没跑成'而非'无判别力'",
         )
         return False
+    if len(df_slice) < meta["min_bars"]:
+        _note_gate(name, "short_history")
+        return False
+    arr = None
+    if precomputed is not None and all(
+        precomputed.get(k) is not None for k in _QN_GATE_KEYS[fid]
+    ):
+        arr = precomputed
     try:
-        r = detect(df_slice, code)
-        hit = bool(r.get("available") and r.get("hit"))
+        r = detect(df_slice, "", _arr=arr)
+        hit = bool(
+            r.get("available")
+            and (r.get("hit") if use_hit_key else True)
+            and (post is None or post(r))
+        )
     except Exception as exc:  # noqa: BLE001
         _note_gate(name, "error")
         _warn_once(
@@ -782,35 +1058,37 @@ def qn_ma25_state_gate(
     df_slice: pd.DataFrame, precomputed: Optional[dict] = None
 ) -> bool:
     """QN·MA25 多空分界（转译：线上缩量阴线=买点候选）。绝不 raise。"""
-    return _qn_detect("qn_ma25_state", "qn_ma25_state", df_slice)
+    return _qn_detect("qn_ma25_state", "qn_ma25_state", df_slice, precomputed)
 
 
 def qn_volume_surge_cut_gate(
     df_slice: pd.DataFrame, precomputed: Optional[dict] = None
 ) -> bool:
     """QN·倍量切起爆K线（阳线倍量×2 上穿 MA5/MA10）。绝不 raise。"""
-    return _qn_detect("qn_volume_surge_cut", "qn_volume_surge_cut", df_slice)
+    return _qn_detect(
+        "qn_volume_surge_cut", "qn_volume_surge_cut", df_slice, precomputed
+    )
 
 
 def qn_three_red_gate(
     df_slice: pd.DataFrame, precomputed: Optional[dict] = None
 ) -> bool:
     """QN·三线红（转译：日/周/月 MACD 柱全红当日=共振多头候选）。绝不 raise。"""
-    return _qn_detect("qn_three_red", "qn_three_red", df_slice)
+    return _qn_detect("qn_three_red", "qn_three_red", df_slice, precomputed)
 
 
 def qn_macd_bar_shift_gate(
     df_slice: pd.DataFrame, precomputed: Optional[dict] = None
 ) -> bool:
     """QN·买小绿（绿柱连缩+收盘不破前低；卖小红是出场侧不进本 gate）。绝不 raise。"""
-    return _qn_detect("qn_macd_bar_shift", "qn_macd_bar_shift", df_slice)
+    return _qn_detect("qn_macd_bar_shift", "qn_macd_bar_shift", df_slice, precomputed)
 
 
 def qn_kdj_neg_day_gate(
     df_slice: pd.DataFrame, precomputed: Optional[dict] = None
 ) -> bool:
     """QN·KDJ J 负值第 3/5 天或 KD20 金叉。绝不 raise。"""
-    return _qn_detect("qn_kdj_neg_day", "qn_kdj_neg_day", df_slice)
+    return _qn_detect("qn_kdj_neg_day", "qn_kdj_neg_day", df_slice, precomputed)
 
 
 def qn_adx_extreme_gate(
@@ -818,34 +1096,13 @@ def qn_adx_extreme_gate(
 ) -> bool:
     """QN·DMI ADX≥60 极端位（转译：极端位+MACD 底背离=抄底候选；
     顶背离侧是出场信号不进本 gate）。绝不 raise。"""
-    if len(df_slice) < 40:
-        _note_gate("qn_adx_extreme", "short_history")
-        return False
-    try:
-        from custos.core.factors.qn_adx_extreme import detect  # noqa: PLC0415
-    except Exception as exc:  # noqa: BLE001
-        _note_gate("qn_adx_extreme", "dep_missing")
-        _warn_once(
-            "qn_adx_extreme:dep",
-            f"qn_adx_extreme 检测器不可用({exc}):该入场门槛将全程 0 命中,"
-            "结果只能读成'没跑成'而非'无判别力'",
-        )
-        return False
-    try:
-        r = detect(df_slice)
-        hit = bool(
-            r.get("available") and r.get("hit") and r.get("extreme_side") == "bottom"
-        )
-    except Exception as exc:  # noqa: BLE001
-        _note_gate("qn_adx_extreme", "error")
-        _warn_once(
-            "qn_adx_extreme:err",
-            f"qn_adx_extreme 检测器异常({exc.__class__.__name__}: {exc}):"
-            "该 K 线未被评估,已计入 GATE_STATS.error",
-        )
-        return False
-    _note_gate("qn_adx_extreme", "hit" if hit else "miss")
-    return hit
+    return _qn_detect(
+        "qn_adx_extreme",
+        "qn_adx_extreme",
+        df_slice,
+        precomputed,
+        post=lambda r: r.get("extreme_side") == "bottom",
+    )
 
 
 def qn_box_target_gate(
@@ -853,32 +1110,14 @@ def qn_box_target_gate(
 ) -> bool:
     """QN·1.3 系数箱体（转译：站上半格×1.15 且未进目标压力区——⚠️ 研究约定
     转译，非源规则直接买点；源规则的 1.3 目标位是卖出侧工具）。绝不 raise。"""
-    if len(df_slice) < 60:
-        _note_gate("qn_box_target", "short_history")
-        return False
-    try:
-        from custos.core.factors.qn_box_target import detect  # noqa: PLC0415
-    except Exception as exc:  # noqa: BLE001
-        _note_gate("qn_box_target", "dep_missing")
-        _warn_once(
-            "qn_box_target:dep",
-            f"qn_box_target 检测器不可用({exc}):该入场门槛将全程 0 命中,"
-            "结果只能读成'没跑成'而非'无判别力'",
-        )
-        return False
-    try:
-        r = detect(df_slice)
-        hit = bool(r.get("available") and r.get("above_half_grid") and not r.get("hit"))
-    except Exception as exc:  # noqa: BLE001
-        _note_gate("qn_box_target", "error")
-        _warn_once(
-            "qn_box_target:err",
-            f"qn_box_target 检测器异常({exc.__class__.__name__}: {exc}):"
-            "该 K 线未被评估,已计入 GATE_STATS.error",
-        )
-        return False
-    _note_gate("qn_box_target", "hit" if hit else "miss")
-    return hit
+    return _qn_detect(
+        "qn_box_target",
+        "qn_box_target",
+        df_slice,
+        precomputed,
+        post=lambda r: bool(r.get("above_half_grid") and not r.get("hit")),
+        use_hit_key=False,
+    )
 
 
 def qn_ma144_launch_gate(
@@ -891,7 +1130,41 @@ def qn_ma144_launch_gate(
     该腿会偏严。其余三形式（跳空/倍量/线上阴线）不受影响；逐票精确口径
     请直接调因子 `detect(df, code)`。
     """
-    return _qn_detect("qn_ma144_launch", "qn_ma144_launch", df_slice)
+    return _qn_detect("qn_ma144_launch", "qn_ma144_launch", df_slice, precomputed)
+
+
+# ── 第二批（v0.195）：均线收拢发散 / 阳包阴 / 180 周线大悬空 / 缩量涨停板 ──
+
+
+def qn_ma_converge_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
+    """QN·均线收拢发散（转译：四线粘合后首次放量向上发散当日=启动候选）。
+    绝不 raise。"""
+    return _qn_detect("qn_ma_converge", "qn_ma_converge", df_slice, precomputed)
+
+
+def qn_bullish_engulf_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
+    """QN·阳包阴/单阳包（实体包覆前阴+上穿 MA5/MA10+量略大）。绝不 raise。"""
+    return _qn_detect("qn_bullish_engulf", "qn_bullish_engulf", df_slice, precomputed)
+
+
+def qn_weekly180_setup_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
+    """QN·180 周线大悬空四要素（数据不足的票 short_history/available=False，
+    预期大面积 0 命中——源规则本来就是低频大波段）。绝不 raise。"""
+    return _qn_detect("qn_weekly180_setup", "qn_weekly180_setup", df_slice, precomputed)
+
+
+def qn_shrink_limit_up_gate(
+    df_slice: pd.DataFrame, precomputed: Optional[dict] = None
+) -> bool:
+    """QN·缩量涨停板（放量阴后缩量一致板）。⚠️ 同 qn_ma144_launch：gate 路径
+    无 code，涨停腿按主板 10% 口径。绝不 raise。"""
+    return _qn_detect("qn_shrink_limit_up", "qn_shrink_limit_up", df_slice, precomputed)
 
 
 for _qn_fid in (
@@ -903,6 +1176,11 @@ for _qn_fid in (
     "qn_adx_extreme",
     "qn_box_target",
     "qn_ma144_launch",
+    # 第二批（v0.195）
+    "qn_ma_converge",
+    "qn_bullish_engulf",
+    "qn_weekly180_setup",
+    "qn_shrink_limit_up",
 ):
     ENTRY_GATES[_qn_fid] = globals()[f"{_qn_fid}_gate"]
 
@@ -1762,6 +2040,8 @@ if rsi_state_score is not None:
 #   - reversal_k：precomputed 分支仍读 df_slice 的 close/high/low/volume 四列 ⇒ 不进；
 #   - platform_pullback / breakout_pullback_b1 / b2 全系 / main_rally 两档：
 #     黑盒检测器逐切片重算，无 precomputed 分支 ⇒ 不进（它们也拿不到 gate_pre 加速）；
+#     ⚠️ v0.196 起 qn_* 12 个不再是黑盒——因子 detect 的 _arr 通道吃预计算序列，
+#     已按必需键登记进白名单（见下方 QN 批块）；这句话只针对仍无 precomputed 分支的；
 #   - rsi_bull_div / j_low_rsi_div：rsi_divergence 必读 df["low"]（价格新低）⇒ 不进；
 #   - 外部注入的单参 callable：身份不在表内 ⇒ 不进（旧路径，行为逐位不变）。
 _SLICE_FREE_GATES: dict[Callable, tuple[str, ...]] = {
@@ -1788,6 +2068,15 @@ _SLICE_FREE_GATES: dict[Callable, tuple[str, ...]] = {
     j_low_rsi_strong_gate: ("rsi14",),
     j_low_rsi_deep_gate: ("rsi14",),
     j_low_rsi_ideal_b1_gate: ("rsi14",),
+    # ---- QN 批 12 gate（v0.196）：precomputed 分支把必需键经 `_arr` 传给因子
+    # detect——因子在 _arr 模式下只读数组 + len(df)，不读 df 任何列（占位安全）。
+    # 必需键 = _QN_GATE_KEYS 同表（单一来源：改键表两边一起动）。
+    # 周/月键（weekly_*/monthly_*/day_w）缺列（无 amount）时回退慢路径 ⇒ 必需校验。
+    **{
+        g: keys
+        for fid, keys in _QN_GATE_KEYS.items()
+        if (g := ENTRY_GATES.get(fid)) is not None
+    },
 }
 
 

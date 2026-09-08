@@ -52,17 +52,31 @@ def _prepare(df: pd.DataFrame) -> pd.DataFrame:
     return x
 
 
+def _leg_red(
+    dif_last: float, dea_last: float, bars: int, min_bars: int
+) -> dict[str, Any]:
+    """某一周期 MACD 柱是否红（dif/dea 末点给定）。K 线不足 min_bars → available=False。"""
+    if bars < min_bars:
+        return {"available": False, "bars": bars}
+    h = (dif_last - dea_last) * 2  # 中式 ×2，与 macd_series 的 hist 同一算式
+    return {"available": True, "red": bool(h > 0), "hist": round(h, 6), "bars": bars}
+
+
 def _hist_red(df: pd.DataFrame, min_bars: int) -> dict[str, Any]:
-    """某一周期 MACD 柱是否红。K 线不足 min_bars → available=False（不误标）。"""
+    """慢路径：整帧算 MACD 取末点（与 _leg_red 同值——同一递归序列）。"""
     if len(df) < min_bars:
         return {"available": False, "bars": len(df)}
-    _d, _e, hist = macd_series(df["close"])
-    h = float(hist.iloc[-1])
-    return {"available": True, "red": bool(h > 0), "hist": round(h, 6), "bars": len(df)}
+    dif, dea, _hist = macd_series(df["close"])
+    return _leg_red(float(dif.iloc[-1]), float(dea.iloc[-1]), len(df), min_bars)
 
 
-def detect(df, code: str = "") -> dict[str, Any]:
+def detect(df, code: str = "", _arr: dict | None = None) -> dict[str, Any]:
     """三线红状态：hit=日/周/月 MACD 柱全红。绝不 raise。
+
+    ``_arr``：研究侧预计算序列（macd_dif/macd_dea + weekly_dif/weekly_dea/
+    weekly_bars + monthly_dif/monthly_dea/monthly_bars——周/月键是「截至当日
+    前缀 resample」口径的 as-of 逐日值，见 backtest_factors._weekly_macd_step /
+    _monthly_gate_arrays），给定时不读 df 任何列。两路逐位一致。
 
     返回键：
         hit               三线全红（任一腿 available=False 或柱不红 → False）
@@ -77,12 +91,30 @@ def detect(df, code: str = "") -> dict[str, Any]:
                 "hit": False,
                 "reason": f"少于{FACTOR['min_bars']}根K线（{n}）",
             }
-        dfx = _prepare(df)
-        legs = {
-            "daily": _hist_red(df, 35),
-            "weekly": _hist_red(resample(dfx, "W-FRI"), QN_MIN_WEEK_BARS),
-            "monthly": _hist_red(resample(dfx, "ME"), QN_MIN_MONTH_BARS),
-        }
+        if _arr is None:
+            dfx = _prepare(df)
+            legs = {
+                "daily": _hist_red(df, 35),
+                "weekly": _hist_red(resample(dfx, "W-FRI"), QN_MIN_WEEK_BARS),
+                "monthly": _hist_red(resample(dfx, "ME"), QN_MIN_MONTH_BARS),
+            }
+        else:
+            i = n - 1
+            legs = {
+                "daily": _leg_red(_arr["macd_dif"][i], _arr["macd_dea"][i], n, 35),
+                "weekly": _leg_red(
+                    _arr["weekly_dif"][i],
+                    _arr["weekly_dea"][i],
+                    int(_arr["weekly_bars"][i]),
+                    QN_MIN_WEEK_BARS,
+                ),
+                "monthly": _leg_red(
+                    _arr["monthly_dif"][i],
+                    _arr["monthly_dea"][i],
+                    int(_arr["monthly_bars"][i]),
+                    QN_MIN_MONTH_BARS,
+                ),
+            }
         all_red = all(leg.get("available") and leg.get("red") for leg in legs.values())
         monthly = legs["monthly"]
         return {

@@ -43,8 +43,11 @@ QN_COEF_HALF = 1.15  # 待回测：半格压力位（上沿 1.3 平移半格 = �
 QN_NEAR_PCT = 3.0  # 待回测：目标压力区容差%（距目标位 ≤ 此值视为进入压力区）
 
 
-def detect(df, code: str = "") -> dict[str, Any]:
+def detect(df, code: str = "", _arr: dict | None = None) -> dict[str, Any]:
     """1.3 系数箱体目标位度量。绝不 raise。
+
+    ``_arr``：研究侧预计算序列（low/close），给定时不读 df 任何列。
+    两路逐位一致（窗口 min 与求值顺序无关）。
 
     返回键：
         hit               进入目标压力区（现价距 1.3 目标 ≤ QN_NEAR_PCT 或已越过）
@@ -54,7 +57,6 @@ def detect(df, code: str = "") -> dict[str, Any]:
         above_half_grid   现价是否站上半格（×1.15）压力位
     """
     try:
-        close, _high, low, _vol = _ohlcv_arrays(df)
         n = len(df)
         if n < FACTOR["min_bars"]:
             return {
@@ -62,6 +64,11 @@ def detect(df, code: str = "") -> dict[str, Any]:
                 "hit": False,
                 "reason": f"少于{FACTOR['min_bars']}根K线（{n}）",
             }
+        if _arr is None:
+            close, _high, low, _vol = _ohlcv_arrays(df)
+        else:
+            close = _arr["close"][:n]
+            low = _arr["low"][:n]
         base = float(low[-QN_BASE_WIN:].min())
         last = float(close[-1])
         if base <= 0:

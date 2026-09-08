@@ -30,6 +30,8 @@
 | [07_doubling_swing.md](07_doubling_swing.md) | 翻倍·大波段 | 周线翻倍（180 周线大悬空+巨量）、日线翻倍（144 线上翘四要素） |
 | [08_main_wave_launch.md](08_main_wave_launch.md) | 启动·主升浪 | 必胜模式：均线收拢+倍量切/起爆K线+三线红 |
 | [09_buy_point_pricing.md](09_buy_point_pricing.md) | 买点·定价线 | 两点半定价线、金山谷/银山谷 |
+| [10_factor_implementations.md](10_factor_implementations.md) | 因子实现对照 | 第一批 8 因子 ↔ 规则 ↔ 模块/gate ↔ 验证状态（执行者=代码） |
+| [11_discipline_checklist.md](11_discipline_checklist.md) | 操作纪律清单 | 源手册文末自检页：40 条风险红线 + 40 条操作规则，逐条注出处 |
 
 ## 代码依赖
 
@@ -54,8 +56,9 @@
 
 ## 已知问题
 
-1. **源手册文末「操作纪律与检查清单」（40 条风险 + 规则自检表）尚未纳入**——
-   本轮只融合 9 个维度；清单与各维度规则有重复，待需要去重后补一份 `10_discipline_checklist.md`。
+1. ~~源手册「操作纪律与检查清单」未纳入~~ —— ✅ 已收口（v0.195）：
+   去重后落 [`11_discipline_checklist.md`](11_discipline_checklist.md)
+   （40 风险红线 + 40 操作规则，逐条注出处；源编号 1-40/158-197 不连续，如实保留）。
 2. 源体系基于通达信看盘环境（47 键训练、60 涨幅榜、分时第七/八格均价线等），
    与我们的 qlib/通达信本地数据链不完全对应，引用时需注意语境。
 3. 源文档含免责声明：经验规律不保证准确性、不构成投资建议——本目录继承此立场。

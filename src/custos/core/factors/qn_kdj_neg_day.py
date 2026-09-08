@@ -90,8 +90,12 @@ def _kd20_golden(k, d, j) -> dict[str, Any]:
     }
 
 
-def detect(df, code: str = "") -> dict[str, Any]:
+def detect(df, code: str = "", _arr: dict | None = None) -> dict[str, Any]:
     """J 负值计数买点 / KD20 金叉。绝不 raise。
+
+    ``_arr``：研究侧预计算序列（kdj_raw_k/kdj_raw_d/kdj_raw_j——kdj_series
+    **fill_na=None** 口径，与本因子慢路径同；open/close），给定时不读 df 任何列。
+    两路逐位一致（RSV→EWM 从第 0 根递归同序）。
 
     返回键：
         hit            负值第 3/5 天（死叉 J>50 且下跌顺滑）或 KD20 金叉
@@ -106,10 +110,17 @@ def detect(df, code: str = "") -> dict[str, Any]:
                 "hit": False,
                 "reason": f"少于{FACTOR['min_bars']}根K线（{n}）",
             }
-        close = df["close"].astype(float).to_numpy()
-        open_ = df["open"].astype(float).to_numpy()
-        k, d, j = kdj_series(df)
-        kv, dv, jv = k.to_numpy(), d.to_numpy(), j.to_numpy()
+        if _arr is None:
+            close = df["close"].astype(float).to_numpy()
+            open_ = df["open"].astype(float).to_numpy()
+            k, d, j = kdj_series(df)
+            kv, dv, jv = k.to_numpy(), d.to_numpy(), j.to_numpy()
+        else:
+            close = _arr["close"][:n]
+            open_ = _arr["open"][:n]
+            kv = _arr["kdj_raw_k"][:n]
+            dv = _arr["kdj_raw_d"][:n]
+            jv = _arr["kdj_raw_j"][:n]
         kd20 = _kd20_golden(kv, dv, jv)
 
         cross_ago = _find_death_cross(kv, dv)

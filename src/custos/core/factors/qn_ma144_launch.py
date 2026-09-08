@@ -51,9 +51,8 @@ QN_SURGE_MULT = 2.0  # 待回测：倍量阈值（源规则「倍量」）
 QN_MA25_WIN = 25  # 待回测：线上阴线的「线」（25 日线，源规则同一体系）
 
 
-def _leg_ma144_turn_up(df) -> dict[str, Any]:
+def _leg_ma144_turn_up(ma) -> dict[str, Any]:
     """腿① MA144 走平上翘：近 QN_RISE_WIN 根上移 + 此前 QN_FLAT_WIN 根走平。"""
-    ma = df["close"].astype(float).rolling(QN_MA_WIN).mean().to_numpy()
     if ma[-1] != ma[-1]:  # NaN 防御
         return {"hit": False, "reason": "MA144 不可得"}
     rising = bool(ma[-1] > ma[-1 - QN_RISE_WIN])
@@ -75,10 +74,8 @@ def _leg_pullback(close, ma_last: float) -> dict[str, Any]:
     return {"hit": bool(abs(dev) <= QN_PULLBACK_PCT), "dev_ma144_pct": round(dev, 2)}
 
 
-def _leg_macd_above_zero(df) -> dict[str, Any]:
+def _leg_macd_above_zero(dv: float, ev: float) -> dict[str, Any]:
     """腿③ MACD 双线上零轴（DIF、DEA 均 > 0）。"""
-    dif, dea, _h = macd_series(df["close"])
-    dv, ev = float(dif.iloc[-1]), float(dea.iloc[-1])
     return {
         "hit": bool(dv > 0 and ev > 0),
         "dif_pos": bool(dv > 0),
@@ -86,14 +83,15 @@ def _leg_macd_above_zero(df) -> dict[str, Any]:
     }
 
 
-def _leg_cross_forms(df, close, open_, vol, code: str) -> dict[str, Any]:
+def _leg_cross_forms(
+    close, open_, low, high, vol, ma25_last: float, code: str
+) -> dict[str, Any]:
     """腿④ 过左风四形式（任一）：涨停 / 跳空高开 / 倍量 / 线上阴线。"""
     chg = (close[-1] / close[-2] - 1) * 100 if close[-2] else 0.0
     limit_up = bool(round(chg, 2) >= price_limit_pct(code) - QN_LIMIT_TOL)
-    gap_up = bool(df["low"].astype(float).iloc[-1] > df["high"].astype(float).iloc[-2])
+    gap_up = bool(low[-1] > high[-2])
     surge = bool(vol[-2] and vol[-1] >= vol[-2] * QN_SURGE_MULT)
-    ma25 = df["close"].astype(float).rolling(QN_MA25_WIN).mean().iloc[-1]
-    online_yin = bool(close[-1] < open_[-1] and close[-1] > ma25)
+    online_yin = bool(close[-1] < open_[-1] and close[-1] > ma25_last)
     forms = {
         "limit_up": limit_up,
         "gap_up": gap_up,
@@ -103,11 +101,14 @@ def _leg_cross_forms(df, close, open_, vol, code: str) -> dict[str, Any]:
     return {"hit": any(forms.values()), "forms": forms}
 
 
-def detect(df, code: str = "") -> dict[str, Any]:
-    """日线翻倍四要素：四腿全中 = hit。绝不 raise。"""
+def detect(df, code: str = "", _arr: dict | None = None) -> dict[str, Any]:
+    """日线翻倍四要素：四腿全中 = hit。绝不 raise。
+
+    ``_arr``：研究侧预计算序列（close/open/high/low/volume/ma144/ma25/
+    macd_dif/macd_dea），给定时不读 df 任何列。两路逐位一致（rolling/EMA
+    从第 0 根递归同序）。
+    """
     try:
-        close, _high, _low, vol = _ohlcv_arrays(df)
-        open_ = df["open"].astype(float).to_numpy()
         n = len(df)
         need = QN_MA_WIN + QN_RISE_WIN + QN_FLAT_WIN
         if n < need:
@@ -116,13 +117,33 @@ def detect(df, code: str = "") -> dict[str, Any]:
                 "hit": False,
                 "reason": f"少于{need}根K线（{n}）",
             }
-        leg_ma = _leg_ma144_turn_up(df)
+        if _arr is None:
+            close, high, low, vol = _ohlcv_arrays(df)
+            open_ = df["open"].astype(float).to_numpy()
+            c = df["close"].astype(float)
+            ma144 = c.rolling(QN_MA_WIN).mean().to_numpy()
+            ma25_last = float(c.rolling(QN_MA25_WIN).mean().iloc[-1])
+            dif, dea, _h = macd_series(df["close"])
+            dv, ev = float(dif.iloc[-1]), float(dea.iloc[-1])
+        else:
+            close = _arr["close"][:n]
+            open_ = _arr["open"][:n]
+            high = _arr["high"][:n]
+            low = _arr["low"][:n]
+            vol = _arr["volume"][:n]
+            ma144 = _arr["ma144"][:n]
+            ma25_last = float(_arr["ma25"][n - 1])
+            dv = float(_arr["macd_dif"][n - 1])
+            ev = float(_arr["macd_dea"][n - 1])
+        leg_ma = _leg_ma144_turn_up(ma144)
         ma_last = leg_ma.get("ma144") or 0.0
         legs = {
             "ma144_turn_up": leg_ma,
             "pullback_zone": _leg_pullback(close, ma_last),
-            "macd_above_zero": _leg_macd_above_zero(df),
-            "cross_forms": _leg_cross_forms(df, close, open_, vol, code),
+            "macd_above_zero": _leg_macd_above_zero(dv, ev),
+            "cross_forms": _leg_cross_forms(
+                close, open_, low, high, vol, ma25_last, code
+            ),
         }
         hit = all(leg.get("hit") for leg in legs.values())
         return {"available": True, "hit": bool(hit), "legs": legs}
