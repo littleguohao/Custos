@@ -276,8 +276,99 @@ def _weekly_dks_step(
     return np.where(valid_all, dks_sum / len(_DKS_WINS), np.nan)
 
 
+def _partial_week_sums(vol_day: np.ndarray, day_w: np.ndarray) -> np.ndarray:
+    """部分周累计量（逐日 O(n) 累计，跨周归零；v0.198 Kahan 口径，v0.201 提取）。
+
+    成交量聚合是求和但有浮点次序问题：pandas 3.x resample.agg("sum") 走
+    groupby 的 Kahan 补偿求和，朴素顺序累加 acc+vol 在 ≥3 个交易日的周会差
+    1 ULP——逐位复刻必须用同款 Kahan（math.fsum 也不行：补偿求和的中间态
+    不是正确舍入，实测 22-52/620 根差 1 ULP；Kahan 与 pandas 逐位一致，
+    实测 7 组合成数据全 0 失配）。
+    """
+    n = len(vol_day)
+    part_vol = np.empty(n)
+    acc = 0.0
+    comp = 0.0
+    pw = -1
+    for t in range(n):
+        # 跨周：补偿与累加器一并归零（同 pandas 逐 bin 独立累加）
+        if day_w[t] != pw:
+            acc = 0.0
+            comp = 0.0
+            pw = int(day_w[t])
+        y = vol_day[t] - comp
+        s = acc + y
+        comp = (s - acc) - y
+        acc = s
+        part_vol[t] = acc
+    return part_vol
+
+
+def _weekly_qn_extras(
+    weekly: pd.DataFrame, d: pd.DataFrame, day_w: np.ndarray
+) -> Optional[dict[str, Any]]:
+    """QN 批周线扩展键（v0.196 加，v0.201 自 _weekly_gate_arrays 提取）：
+    周 MACD（weekly_dif/dea）、180 周线轴（weekly_ma180 as-of 含部分周收盘 +
+    weekly_ma180_nat 自然周序列）、自然周 OHLCV（weekly_close/vol）、
+    部分周累计量（weekly_part_vol）。量含 NaN ⇒ None（回退慢路径）。
+    """
+    idx = day_w
+    cp = d["close"].astype(float).to_numpy()
+    n = len(idx)
+    wc = weekly["close"].astype(float)
+    wclose = wc.to_numpy()
+    out_wdif, out_wdea = _weekly_macd_step(idx, cp, wc)
+    out_ma180 = _weekly_ma180_asof(idx, cp, wclose)
+    wvol = weekly["volume"].astype(float).to_numpy()
+    vol_day = d["volume"].astype(float).to_numpy()
+    if not np.isfinite(vol_day).all():
+        return None  # 量含 NaN：resample skipna 与逐日累加口径错位，回退慢路径
+    part_vol = _partial_week_sums(vol_day, day_w)
+    # 自然周 MA180（rolling(180).mean() 全序列；as-of 读取只取 ≤w-1 的完整周，
+    # 全量 frame 的末根部分周永不进读区）
+    wk_ma180_nat = wc.rolling(180).mean().to_numpy()
+    return {
+        "weekly_dif": out_wdif,
+        "weekly_dea": out_wdea,
+        "weekly_ma180": out_ma180,
+        "day_w": day_w,
+        "weekly_close": wclose,
+        "weekly_vol": wvol,
+        "weekly_part_vol": part_vol,
+        "weekly_ma180_nat": wk_ma180_nat,
+    }
+
+
+_MA180_WIN = 180  # `_weekly_ma180_asof` 的窗口（qn_weekly180_setup 的 180 周线）
+
+
+def _ma180_premove(
+    states: tuple, wclose: np.ndarray, W: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """180 周均线「先删」步逐周预算（`_weekly_dks_premove` 的单窗口版，v0.201 提取）。
+
+    states = `_roll_mean_states(wclose, 180)` 的六元组（本函数只用
+    [0]=sum_a、[2]=c_rem_a、[5]=neg_a；算式与 DKS 版逐字相同）。
+    """
+    win = _MA180_WIN
+    s1 = np.full(W, np.nan)
+    ng1 = np.zeros(W, dtype=np.int64)
+    for w in range(win - 1, W):
+        s = states[0][w - 1]
+        ng = states[5][w - 1]
+        if w >= win:
+            v = wclose[w - win]
+            y = -v - states[2][w - 1]
+            s = s + y
+            if np.signbit(v):
+                ng -= 1
+        s1[w] = s
+        ng1[w] = ng
+    return s1, ng1
+
+
 def _weekly_ma180_asof(
-    idx: np.ndarray, cp: np.ndarray, iprev: np.ndarray, wclose: np.ndarray
+    idx: np.ndarray, cp: np.ndarray, wclose: np.ndarray
 ) -> np.ndarray:
     """180 周均线 as-of 逐日值（含进行中部分周收盘 cp 的一步 rolling(180).mean()）。
 
@@ -285,31 +376,17 @@ def _weekly_ma180_asof(
     一步，GH#42064 同值捷径），单窗口版（v0.196，供 qn_weekly180_setup）；
     as-of 周数（含部分周）不足 180 ⇒ NaN（rolling 窗口不足同口径）。
     """
-    win = 180
-    n = len(idx)
-    out = np.full(n, np.nan)
+    win = _MA180_WIN
+    out = np.full(len(idx), np.nan)
     W = len(wclose)
     if W < win:
         return out
-    sum_a, c_add_a, c_rem_a, ncs_a, prev_a, neg_a = _roll_mean_states(wclose, win)
-    # 逐周预算「先删」后状态（同 _weekly_dks_premove 的单窗口版）
-    s1 = np.full(W, np.nan)
-    ng1 = np.zeros(W, dtype=np.int64)
-    for w in range(win - 1, W):
-        s = sum_a[w - 1]
-        ng = neg_a[w - 1]
-        if w >= win:
-            v = wclose[w - win]
-            y = -v - c_rem_a[w - 1]
-            s = s + y
-            if np.signbit(v):
-                ng -= 1
-        s1[w] = s
-        ng1[w] = ng
+    states = _roll_mean_states(wclose, win)
+    s1, ng1 = _ma180_premove(states, wclose, W)
+    iprev = np.maximum(idx - 1, 0)
     valid = idx + 1 >= win
-    y = cp - c_add_a[iprev]
-    sum_x = s1[idx] + y  # c_add 更新结果不再被消费（态已逐周冻结），可略
-    ncs = np.where(cp == prev_a[iprev], ncs_a[iprev] + 1, 1)
+    sum_x = s1[idx] + (cp - states[1][iprev])  # c_add 更新结果不再被消费，可略
+    ncs = np.where(cp == states[4][iprev], states[3][iprev] + 1, 1)
     neg_ct = ng1[idx] + np.signbit(cp)
     r = sum_x / win
     r = np.where(ncs >= win, cp, r)  # GH#42064 同值捷径
@@ -318,31 +395,32 @@ def _weekly_ma180_asof(
     return np.where(valid, r, np.nan)
 
 
+# EMA 步进系数（`_weekly_macd_step` 用；字面量与 v0.196 内联版逐字相同）
+_A12, _F12 = 2.0 / 13.0, 1.0 - 2.0 / 13.0
+_A26, _F26 = 2.0 / 27.0, 1.0 - 2.0 / 27.0
+_A9, _F9 = 2.0 / 10.0, 1.0 - 2.0 / 10.0
+
+
 def _weekly_macd_step(
-    idx: np.ndarray,
-    cp: np.ndarray,
-    has_prev: np.ndarray,
-    iprev: np.ndarray,
-    wc: pd.Series,
+    idx: np.ndarray, cp: np.ndarray, wc: pd.Series
 ) -> tuple[np.ndarray, np.ndarray]:
     """周 MACD DIF/DEA as-of 逐日值（v0.196，供 qn_three_red / qn_weekly180_setup）。
 
     三级 EMA 冻结态步进（模式同周 QSX/周 J）：ema12/ema26 在完整周序列上的
     状态冻结于周 w-1，逐日加一步当日收盘 cp 得 DIF；DEA(9) 同法对 DIF 推一步。
     与慢路径（前缀 resample 后 ``macd_series`` 取末点）逐位一致（ewm adjust=False
-    从第 0 根递归，同一串浮点运算）。
+    从第 0 根递归，同一串浮点运算）。has_prev/iprev 由 idx 内部派生（v0.201）。
     """
     e12 = _ema(wc, 12).to_numpy()
     e26 = _ema(wc, 26).to_numpy()
     dif_arr = e12 - e26  # 自然周序列 DIF（周 w-1 冻结态取自它）
     dea_arr = _ema(pd.Series(dif_arr), 9).to_numpy()
-    a12, f12 = 2.0 / 13.0, 1.0 - 2.0 / 13.0
-    a26, f26 = 2.0 / 27.0, 1.0 - 2.0 / 27.0
-    a9, f9 = 2.0 / 10.0, 1.0 - 2.0 / 10.0
-    e1i = np.where(has_prev, f12 * e12[iprev] + a12 * cp, cp)
-    e2i = np.where(has_prev, f26 * e26[iprev] + a26 * cp, cp)
+    has_prev = idx > 0
+    iprev = np.maximum(idx - 1, 0)
+    e1i = np.where(has_prev, _F12 * e12[iprev] + _A12 * cp, cp)
+    e2i = np.where(has_prev, _F26 * e26[iprev] + _A26 * cp, cp)
     out_dif = e1i - e2i
-    out_dea = np.where(has_prev, f9 * dea_arr[iprev] + a9 * out_dif, out_dif)
+    out_dea = np.where(has_prev, _F9 * dea_arr[iprev] + _A9 * out_dif, out_dif)
     return out_dif, out_dea
 
 
@@ -442,50 +520,15 @@ def _weekly_gate_arrays(df: pd.DataFrame) -> Optional[dict[str, Any]]:
         e1i = np.where(has_prev, f_qsx * e1_arr[iprev] + a_qsx * cp, cp)
         out_qsx = np.where(has_prev, f_qsx * q_arr[iprev] + a_qsx * e1i, e1i)
         out_dks = _weekly_dks_step(idx, cp, iprev, dks_states, dks_day, n)
-        # ---- v0.196 扩：周 MACD（qn_three_red/qn_weekly180_setup 用）----
-        out_wdif, out_wdea = _weekly_macd_step(idx, cp, has_prev, iprev, wc)
-        # ---- v0.196 扩：180 周均线 as-of + 自然周 OHLCV（qn_weekly180_setup 用）----
-        out_ma180 = _weekly_ma180_asof(idx, cp, iprev, wclose)
-        wvol = weekly["volume"].astype(float).to_numpy()
-        # 部分周累计量（逐日 O(n) 累计，跨周归零）。成交量聚合是求和但有浮点次序
-        # 问题：pandas 3.x resample.agg("sum") 走 groupby 的 Kahan 补偿求和，朴素
-        # 顺序累加 acc+vol 在 ≥3 个交易日的周会差 1 ULP——逐位复刻必须用同款 Kahan
-        # （math.fsum 也不行：补偿求和的中间态不是正确舍入，实测 22-52/620 根差
-        # 1 ULP；Kahan 与 pandas 逐位一致，实测 7 组合成数据全 0 失配）。
-        vol_day = d["volume"].astype(float).to_numpy()
-        if not np.isfinite(vol_day).all():
-            return None  # 量含 NaN：resample skipna 与逐日累加口径错位，回退慢路径
-        part_vol = np.empty(n)
-        acc = 0.0
-        comp = 0.0
-        pw = -1
-        for t in range(n):
-            # 跨周：补偿与累加器一并归零（同 pandas 逐 bin 独立累加）
-            if day_w[t] != pw:
-                acc = 0.0
-                comp = 0.0
-                pw = int(day_w[t])
-            y = vol_day[t] - comp
-            s = acc + y
-            comp = (s - acc) - y
-            acc = s
-            part_vol[t] = acc
-        # 自然周 MA180（rolling(180).mean() 全序列；as-of 读取只取 ≤w-1 的完整周，
-        # 全量 frame 的末根部分周永不进读区）
-        wk_ma180_nat = wc.rolling(180).mean().to_numpy()
+        extras = _weekly_qn_extras(weekly, d, day_w)
+        if extras is None:
+            return None  # 量含 NaN（v0.197 同口径：回退慢路径）
         return {
             "weekly_j": out_j,
             "weekly_qsx": out_qsx,
             "weekly_dks": out_dks,
             "weekly_bars": day_w + 1,
-            "weekly_dif": out_wdif,
-            "weekly_dea": out_wdea,
-            "weekly_ma180": out_ma180,
-            "day_w": day_w,
-            "weekly_close": wclose,
-            "weekly_vol": wvol,
-            "weekly_part_vol": part_vol,
-            "weekly_ma180_nat": wk_ma180_nat,
+            **extras,
         }
     except Exception:  # noqa: BLE001
         return None
@@ -526,9 +569,7 @@ def _monthly_gate_arrays(df: pd.DataFrame) -> Optional[dict[str, Any]]:
         mc = monthly["close"].astype(float)
         idx = day_m
         cp = close
-        has_prev = idx > 0
-        iprev = np.maximum(idx - 1, 0)
-        out_dif, out_dea = _weekly_macd_step(idx, cp, has_prev, iprev, mc)
+        out_dif, out_dea = _weekly_macd_step(idx, cp, mc)
         return {
             "monthly_dif": out_dif,
             "monthly_dea": out_dea,
@@ -588,7 +629,6 @@ def _precompute_gate_series(
         dif, dea, _hist_x2 = _macd_series(df["close"])
         pdi, mdi, adx = dmi_arrays(df["high"], df["low"], df["close"])
         close = df["close"]
-        close_a = close.astype(float).to_numpy()
         out: dict[str, Any] = {
             "kdj_j": j,
             "macd_dif": dif.to_numpy(),
@@ -600,7 +640,7 @@ def _precompute_gate_series(
             "open": df["open"].astype(float).to_numpy(),
             "high": df["high"].astype(float).to_numpy(),
             "low": df["low"].astype(float).to_numpy(),
-            "close": close_a,
+            "close": close.astype(float).to_numpy(),
             "volume": df["volume"].astype(float).to_numpy(),
             "ma5": close.rolling(5).mean().to_numpy(),
             "ma10": close.rolling(10).mean().to_numpy(),
@@ -616,12 +656,9 @@ def _precompute_gate_series(
         }
         if _rsi is not None:
             out["rsi14"] = _rsi(close, RSI_MID)
-        wk = _weekly_gate_arrays(df)  # 失败退 None：缺周线键，周线 gate 走旧路径
-        if wk is not None:
-            out.update(wk)
-        mo = _monthly_gate_arrays(df)  # 失败退 None：缺月线键，月线 gate 走旧路径
-        if mo is not None:
-            out.update(mo)
+        # 失败退 None ⇒ or {} 不更新：缺周/月线键，对应 gate 走旧路径
+        out.update((_weekly_gate_arrays(df)) or {})
+        out.update((_monthly_gate_arrays(df)) or {})
         return out
     except Exception:  # noqa: BLE001
         return None
