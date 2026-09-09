@@ -5049,6 +5049,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default="s_shape",
         help="打分器：s_shape(突破式)/s_reversal(买弱式)/invert_s_shape(反转突破分)",
     )
+    ap.add_argument(
+        "--scorer-expr",
+        default="",
+        help="DSL 表达式打分器（进化引擎终审用）：启动期注册进 SCORERS，"
+        "键名 expr_<sha1[:8]>，与 --scorer 互斥；表达式须过白名单 DSL",
+    )
     ap.add_argument("--summary-horizon", type=int, default=10)
     ap.add_argument(
         "--threshold-sweep",
@@ -5394,12 +5400,49 @@ def _load_sector_gate(args: Any, ap: argparse.ArgumentParser) -> Optional[Callab
     return sector_gate
 
 
+def _preregister_scorer_expr(argv: list) -> str:
+    """启动期预扫 ``--scorer-expr`` 并把表达式 scorer 注册进 SCORERS（返回动态键）。
+
+    必须在 ``_build_parser()`` **之前**调用 —— ``--scorer`` 的 choices 在 parser
+    构建时冻结成 ``list(SCORERS.keys())``，注册晚于构建则动态键过不了 choices。
+    fail-closed：表达式未过 DSL 白名单 → SystemExit(2)（坏表达式不进回测循环，
+    也不让 choices 漏键报出误导性错误）。未给 --scorer-expr 返回 ""，零副作用。
+    """
+    expr = ""
+    for i, a in enumerate(argv):
+        if a == "--scorer-expr" and i + 1 < len(argv):
+            expr = argv[i + 1]
+        elif a.startswith("--scorer-expr="):
+            expr = a.split("=", 1)[1]
+    if not expr.strip():
+        return ""
+    from custos.research.evolution.expr_dsl import ExprError  # noqa: PLC0415
+    from custos.research.evolution.scorer_bridge import (  # noqa: PLC0415
+        expr_scorer_key,
+        make_expr_scorer,
+    )
+
+    try:
+        SCORERS[expr_scorer_key(expr)] = make_expr_scorer(expr)  # 构造期 parse 校验
+    except ExprError as exc:
+        print(f"[ERR] --scorer-expr 未通过 DSL 白名单: {exc}", file=sys.stderr)
+        raise SystemExit(2)
+    return expr_scorer_key(expr)
+
+
 def main(
     argv: Optional[list] = None,
     loader: Optional[Callable[[list[str], int], dict]] = None,
 ) -> int:
+    argv_list = list(argv) if argv is not None else sys.argv[1:]
+    expr_key = _preregister_scorer_expr(argv_list)  # 赶在 --scorer choices 冻结前
     ap = _build_parser()
-    args = ap.parse_args(argv)
+    args = ap.parse_args(argv_list)
+    if args.scorer_expr:
+        # --scorer-expr 与 --scorer 互斥：前者已隐含选择表达式 scorer
+        if args.scorer != ap.get_default("scorer"):
+            ap.error("--scorer-expr 与 --scorer 互斥（表达式 scorer 已注册并选中）")
+        args.scorer = expr_key  # 下游（签名/SCORERS 查表/输出标签）统一沿用 args.scorer
     reset_gate_stats()
 
     if args.stop_buffer != "tick" and args.stop_tick_buffer > 0:

@@ -66,6 +66,11 @@ TOOLS: dict[str, tuple[str, str]] = {
         "engine",
         "S_shape 因子走查回测（walk-forward）；11 个模式开关",
     ),
+    "evolution_loop": (
+        "engine",
+        "LLM 因子进化循环：DSL 白名单 + 挖掘/判定双窗 + 轨迹池"
+        "（CUSTOS_LLM_* 配置 LLM，或 --mock-llm 演示；别名 evolution）",
+    ),
     "launch_point_study": ("engine", "起涨点 vs 0AMV regime 研究；**17 个模式开关**"),
     "m2_stop_sweep": (
         "driver",
@@ -170,6 +175,10 @@ LABEL = {
     "stale": "⚠️ 存废待定",
 }
 
+# 短名别名：包目录 research/evolution/ 已占用 "evolution"（注册键必须等于
+# 文件名，见 _listing 的存在性检查），CLI 文件叫 evolution_loop.py，给入口留短名。
+ALIASES = {"evolution": "evolution_loop"}
+
 
 def _modes(name: str) -> list[str]:
     """从源码里抽出 `store_true` 开关 —— 它们是这个工具的**模式**。
@@ -229,7 +238,7 @@ def main(argv: list[str] | None = None) -> int:
     args = list(argv if argv is not None else sys.argv[1:])
     if not args or args[0] in {"-h", "--help", "list"}:
         return _listing()
-    name, rest = args[0], args[1:]
+    name, rest = ALIASES.get(args[0], args[0]), args[1:]
     if name not in TOOLS:
         print(f"未登记的工具: {name}\n", file=sys.stderr)
         _listing()

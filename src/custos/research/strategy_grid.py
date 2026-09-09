@@ -155,6 +155,10 @@ DEFAULT_EXIT_GRID: list[dict[str, Any]] = [
 
 DEFAULT_OBJ_WEIGHTS = (1.0, 1.0, 0.05)  # margin / expectancy_R / return_over_maxdd
 
+# scorer 轴的表达式形态：``expr:<DSL表达式>``（进化引擎终审入口；网格展开期
+# 统一 expr_dsl.parse 预校验，拼 CLI 时翻译成 backtest_factors 的 --scorer-expr）。
+EXPR_SCORER_PREFIX = "expr:"
+
 CELL_TIMEOUT_S = 1800  # 单格子进程超时（秒）；--timeout 可调，超时计 failed
 # 隐式窗口换算的交易日历参照票：长历史、几乎不停牌（读本地 vipdoc，纯文件解析不联网）
 CAL_REF_CODE = "600000"
@@ -266,16 +270,23 @@ def _universe_args(a: argparse.Namespace) -> list[str]:
 
 
 def _cell_args(a: argparse.Namespace, cell: dict[str, Any]) -> list[str]:
-    """一个格子的完整 backtest_factors CLI（不含 --out；签名对全量求哈希）。"""
+    """一个格子的完整 backtest_factors CLI（不含 --out；签名对全量求哈希）。
+
+    scorer 为 ``expr:<DSL表达式>`` 形态时翻译成 ``--scorer-expr``（表达式
+    scorer 在子进程启动期动态注册）；普通 scorer 走 ``--scorer``，参数序
+    与既有口径逐位一致（cell_signature 的稳定性依赖这一点）。
+    """
     args = [
         "--trade-sim",
         "--entry-filter",
         cell["gate"],
-        "--scorer",
-        cell["scorer"],
-        "--cost-bps",
-        str(a.cost_bps),
     ]
+    scorer = cell["scorer"]
+    if scorer.startswith(EXPR_SCORER_PREFIX):
+        args += ["--scorer-expr", scorer[len(EXPR_SCORER_PREFIX) :]]
+    else:
+        args += ["--scorer", scorer]
+    args += ["--cost-bps", str(a.cost_bps)]
     # v0.93（owner）：0AMV 做多区间是默认研究基底，钉死进每个格子；
     # --no-amv-pin 仅用于对照实验时显式解除。
     if not a.no_amv_pin:
@@ -934,7 +945,8 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--scorers",
         default=",".join(DEFAULT_SCORERS),
-        help=f"逗号分隔（默认 {','.join(DEFAULT_SCORERS)}；全集见 backtest_factors SCORERS）",
+        help=f"逗号分隔（默认 {','.join(DEFAULT_SCORERS)}；全集见 backtest_factors SCORERS；"
+        "支持 expr:<DSL表达式> 形态——括号内的逗号不参与分隔）",
     )
     ap.add_argument(
         "--gates",
@@ -1006,12 +1018,18 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _validate_factors(scorers: list[str], gates: list[str]) -> Optional[str]:
-    """scorer/gate 名对 backtest_factors 注册表校验；注册表不可导入时跳过。"""
+    """scorer/gate 名对 backtest_factors 注册表校验；注册表不可导入时跳过。
+
+    ``expr:`` 形态不归注册表管（子进程启动期动态注册），由
+    ``validate_scorer_axis`` 在更前面做过 DSL 白名单预校验，这里跳过。
+    """
     try:
         from custos.research.backtest_factors import ENTRY_GATES, SCORERS  # noqa: PLC0415
     except Exception:  # noqa: BLE001 —— 无数据环境下注册表可能导不进，交给子进程报错
         return None
-    bad_s = [s for s in scorers if s not in SCORERS]
+    bad_s = [
+        s for s in scorers if s not in SCORERS and not s.startswith(EXPR_SCORER_PREFIX)
+    ]
     bad_g = [g for g in gates if g not in ENTRY_GATES]
     if bad_s:
         return f"未知 scorer: {bad_s}（注册表: {sorted(SCORERS)}）"
@@ -1020,19 +1038,72 @@ def _validate_factors(scorers: list[str], gates: list[str]) -> Optional[str]:
     return None
 
 
+def validate_scorer_axis(scorers: list[str]) -> Optional[str]:
+    """scorer 轴的 ``expr:<DSL表达式>`` 条目统一预校验；合法返回 None。
+
+    fail-closed 且**零 spawn**：本函数在 spawn 任何格子子进程之前调用，
+    坏表达式直接报错退出，不把一个注定在子进程启动期炸掉的格子发出去。
+    """
+    exprs = [
+        s[len(EXPR_SCORER_PREFIX) :]
+        for s in scorers
+        if s.startswith(EXPR_SCORER_PREFIX)
+    ]
+    if not exprs:
+        return None
+    from custos.research.evolution.expr_dsl import ExprError, parse  # noqa: PLC0415
+
+    for expr in exprs:
+        if not expr.strip():
+            return "scorer 轴的 expr: 条目表达式为空"
+        try:
+            parse(expr)
+        except ExprError as exc:
+            return f"scorer 轴表达式 {expr!r} 未通过 DSL 白名单: {exc}"
+    return None
+
+
+def _split_scorers(raw: str) -> list[str]:
+    """--scorers 拆分：逗号分隔，但**括号内的逗号不算**（DSL 表达式的窗参逗号）。
+
+    普通 scorer 名不含括号 ⇒ 与旧逗号拆分逐位一致；``expr:`` 条目（DSL 表达式
+    的逗号只出现在算子括号内 —— 顶层逗号是元组、DSL 白名单本来就不收）⇒ 按
+    括号深度拆。括号不平衡的坏表达式由 validate_scorer_axis 在预校验拦下。
+    """
+    out: list[str] = []
+    cur: list[str] = []
+    depth = 0
+    for ch in raw:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+        if ch == "," and depth == 0:
+            out.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    out.append("".join(cur))
+    return [s.strip() for s in out if s.strip()]
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # GBK 终端
     ap = _build_parser()
     a = ap.parse_args(argv)
-    scorers = [s.strip() for s in a.scorers.split(",") if s.strip()]
+    scorers = _split_scorers(a.scorers)
     gates = [g.strip() for g in a.gates.split(",") if g.strip()]
     try:
         exits = _load_exit_grid(a.exit_grid)
     except (OSError, ValueError) as e:
         print(f"[FAIL] --exit-grid 读不了: {e}", file=sys.stderr)
         return 2
-    err = validate_exit_grid(exits) or _validate_factors(scorers, gates)
+    err = (
+        validate_exit_grid(exits)
+        or validate_scorer_axis(scorers)  # expr: 条目预校验必须先于任何 spawn
+        or _validate_factors(scorers, gates)
+    )
     if err:
         print(f"[FAIL] {err}", file=sys.stderr)
         return 2

@@ -256,3 +256,20 @@ R2 那次翻转**同时换了宇宙和数据源**。当时把翻转全部归因�
   其他因子（j_low ∧ X 组合 gate、scorer）与止损止盈参数。strategy_grid
   已默认每格带 `--amv-long-only`、gate 轴默认只含 j_low 系叠加变体
   （`--no-amv-pin` 仅对照实验用）。
+- **双窗纪律（2026-09-09 定，借鉴 QuantaAlpha 双层回测）**：寻优类研究
+  （strategy_grid 网格、evolution_loop 进化产出）的判据预注册必须声明
+  **独立判定窗**；挖掘/寻优全程不得读取判定窗数据，终判只出自从未参与
+  挖掘的样本外窗。工具侧硬隔离：`research/evolution/dual_window.py`
+  （mining.end ≥ judgment.start 直接拒绝运行；进化循环只持截尾到
+  mining_end 的数据副本，判定窗由 `--final-judge` 在闭环结束后重新加载）。
+  ——把 R2/R3/R10/R22/R24 单 regime 假象的教训从注记变成制度。
+- **LLM 进化引擎口径（2026-09-09）**：`research/evolution_loop.py`
+  （`python -m custos.research evolution`）为研究侧 LLM 因子进化引擎。
+  LLM 只做假设生成/变异/杂交与解读（**提案者**）；decision 由确定性判据
+  给出（复杂度门 `violations` + 挖掘窗 RankIC/ICIR 阈值），LLM 不得改写；
+  候选晋级 live 仍须判定窗终审（`--final-judge`）+ 因子注册表 status
+  流程 + owner 拍板。**live 链路保持纯脚本、零 LLM 不变**。
+  终审已接线（2026-09-09）：双窗 pass 候选经 `--grid-judge` 进
+  strategy_grid 三轴（因子×止损×止盈）终审（scorer 轴 `expr:<DSL>` 形态，
+  子进程 `--scorer-expr` 启动期注册），口径同既有研究基底
+  （0AMV 做多 + J<13 钉死不作扫描变量）。

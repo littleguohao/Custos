@@ -28,7 +28,8 @@ from custos.research import strategy_grid as sg
 # 合成结果 JSON：m2._load 认的键（trade_summary 含 expectancy/n + portfolio 块）。
 # scorer=b1_dual 的格子期望R 更高 ⇒ 两阶段 top-1 必选 (b1_dual, *)。
 def _fake_summary(cmd):
-    scorer = cmd[cmd.index("--scorer") + 1]
+    # expr: 轴的格子带 --scorer-expr 而非 --scorer（子进程启动期动态注册）
+    scorer = cmd[cmd.index("--scorer") + 1] if "--scorer" in cmd else "expr"
     exp_r = 0.20 if scorer == "b1_dual" else 0.10
     return {
         "trade_summary": {
@@ -673,3 +674,104 @@ class TestParallelJobs:
         out = capsys.readouterr().out
         assert out.count("boom: 子进程崩了") == 12
         assert "[FAIL]" in out
+
+
+# ---------- scorer 轴的 expr:<DSL> 形态（进化引擎三轴终审入口） ----------
+
+
+def _argv_expr(out_dir, scorers, *extra):
+    return [
+        "--scorers",
+        scorers,
+        "--gates",
+        "j_low",
+        "--exit-grid",
+        json.dumps([{"name": "e0", "params": {}}]),
+        "--out-dir",
+        str(out_dir),
+        "--tag",
+        "t_expr",
+        *extra,
+    ]
+
+
+class TestExprScorerAxis:
+    def test_cell_args_translates_expr_scorer(self):
+        a = sg._build_parser().parse_args([])
+        cell = {
+            "scorer": "expr:ROC(CLOSE,5)",
+            "gate": "j_low",
+            "exit": "e",
+            "params": {},
+        }
+        cli = sg._cell_args(a, cell)
+        assert "--scorer-expr" in cli
+        assert cli[cli.index("--scorer-expr") + 1] == "ROC(CLOSE,5)"
+        assert "--scorer" not in cli  # 不是 --scorer expr_...（子进程启动期注册）
+
+    def test_cell_args_normal_scorer_unchanged(self):
+        # 普通 scorer 的参数序与既有口径逐位一致（cell_signature 稳定性）
+        a = sg._build_parser().parse_args([])
+        cell = {"scorer": "b1_dual", "gate": "j_low", "exit": "e", "params": {}}
+        cli = sg._cell_args(a, cell)
+        assert cli[:5] == [
+            "--trade-sim",
+            "--entry-filter",
+            "j_low",
+            "--scorer",
+            "b1_dual",
+        ]
+
+    def test_validate_scorer_axis(self):
+        assert sg.validate_scorer_axis(["b1_dual"]) is None  # 无 expr 条目 → 放行
+        assert sg.validate_scorer_axis(["expr:ROC(CLOSE,5)"]) is None
+        assert "白名单" in sg.validate_scorer_axis(["expr:EMA(CLOSE,5)"])
+        assert sg.validate_scorer_axis(["expr:"]) is not None  # 空表达式 fail-closed
+
+    def test_validate_factors_skips_expr_entries(self):
+        assert sg._validate_factors(["expr:ROC(CLOSE,5)"], ["j_low"]) is None
+        assert sg._validate_factors(["nope"], ["j_low"]) is not None
+
+    def test_bad_expr_zero_spawn(self, tmp_path, fake_run):
+        rc = sg.main(_argv_expr(tmp_path / "g", "expr:EMA(CLOSE,5)"))
+        assert rc == 2
+        assert (
+            len(fake_run) == 0 and not fake_run.probes
+        )  # 预校验零 spawn（连探针都不发）
+
+    def test_valid_expr_spawns_scorer_expr_cli(self, tmp_path, fake_run):
+        rc = sg.main(_argv_expr(tmp_path / "g", "expr:ROC(CLOSE,5)"))
+        assert rc == 0
+        assert len(fake_run) == 1
+        cmd = fake_run.calls[0]
+        assert cmd[cmd.index("--scorer-expr") + 1] == "ROC(CLOSE,5)"
+        payload = json.loads(
+            (tmp_path / "g" / "_ranked__t_expr.json").read_text("utf-8")
+        )
+        assert payload["grid"]["scorers"] == ["expr:ROC(CLOSE,5)"]
+        assert payload["results"][0]["scorer"] == "expr:ROC(CLOSE,5)"
+
+    def test_signature_covers_expression(self):
+        a = sg._build_parser().parse_args([])
+        c1 = {"scorer": "expr:ROC(CLOSE,5)", "gate": "j_low", "exit": "e", "params": {}}
+        c2 = {
+            "scorer": "expr:ROC(CLOSE,10)",
+            "gate": "j_low",
+            "exit": "e",
+            "params": {},
+        }
+        assert sg.cell_signature(sg._cell_args(a, c1)) != sg.cell_signature(
+            sg._cell_args(a, c2)
+        )
+
+    def test_split_scorers_paren_aware(self):
+        # 括号内的逗号不分隔；普通名与 expr 形态混用
+        assert sg._split_scorers("b1_dual,kdj_j") == ["b1_dual", "kdj_j"]
+        assert sg._split_scorers("expr:MA((HIGH-LOW)/CLOSE,10),b1_dual") == [
+            "expr:MA((HIGH-LOW)/CLOSE,10)",
+            "b1_dual",
+        ]
+        assert sg._split_scorers("expr:ROC(CLOSE,5),expr:MA(CLOSE,10)") == [
+            "expr:ROC(CLOSE,5)",
+            "expr:MA(CLOSE,10)",
+        ]

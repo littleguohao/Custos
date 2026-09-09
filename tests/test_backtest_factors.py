@@ -773,3 +773,106 @@ def test_stream_trades_tail_clip_under_30_no_guard(monkeypatch):
     args = _stream_args(start="2022-01-01", count=500)
     _trades, n_loaded, _tl, _te = bt._stream_trades(args, codes, load, None, None)
     assert n_loaded == 29
+
+
+# ---------- --scorer-expr：DSL 表达式 scorer 动态注册（进化引擎终审入口） ----------
+
+
+class TestScorerExpr:
+    """--scorer-expr：启动期注册 expr_<sha1[:8]> 进 SCORERS，与 --scorer 互斥。"""
+
+    @pytest.fixture(autouse=True)
+    def _clean_expr_scorers(self):
+        yield
+        for k in [k for k in bt.SCORERS if k.startswith("expr_")]:
+            bt.SCORERS.pop(k)
+
+    @staticmethod
+    def _synth(n=80):
+        # 先缓涨 60 日后急跌 20 日：entry_filter=none + 恒可买 scorer ⇒ 必有成交
+        closes, price = [], 100.0
+        for t in range(n):
+            price *= 1.01 if t < 60 else 0.96
+            closes.append(price)
+        return make_df(closes)
+
+    def test_trade_sim_with_expr_scorer(self, tmp_path):
+        from custos.research.evolution.scorer_bridge import expr_scorer_key
+
+        out = tmp_path / "t.json"
+        rc = bt.main(
+            [
+                "--trade-sim",
+                "--codes",
+                "S000",
+                "--entry-filter",
+                "none",
+                "--scorer-expr",
+                "ROC(CLOSE,5)",
+                "--count",
+                "0",
+                "--out",
+                str(out),
+            ],
+            loader=lambda codes, count: {c: self._synth() for c in codes},
+        )
+        assert rc == 0
+        key = expr_scorer_key("ROC(CLOSE,5)")
+        assert key in bt.SCORERS  # 启动期已注册（choices 冻结前）
+        payload = _json.loads(out.read_text("utf-8"))
+        assert payload["scorer"] == key  # 输出标签 = 动态键
+        assert len(payload["trades"]) >= 1  # 数值合理：确有成交
+        rets = [t["ret"] for t in payload["trades"]]
+        assert all(isinstance(r, float) for r in rets)
+
+    def test_mutual_exclusion_with_scorer(self, tmp_path):
+        with pytest.raises(SystemExit) as exc:
+            bt.main(
+                [
+                    "--scorer-expr",
+                    "ROC(CLOSE,5)",
+                    "--scorer",
+                    "b1_dual",
+                    "--codes",
+                    "S000",
+                    "--dump-codes",
+                    str(tmp_path / "u.txt"),
+                ]
+            )
+        assert exc.value.code == 2
+
+    def test_bad_expr_fails_at_startup(self, tmp_path):
+        # 坏表达式启动期非零退出（prescan 在 choices 冻结前注册，不误导下游）
+        with pytest.raises(SystemExit) as exc:
+            bt.main(
+                [
+                    "--scorer-expr",
+                    "EMA(CLOSE,5)",
+                    "--codes",
+                    "S000",
+                    "--dump-codes",
+                    str(tmp_path / "u.txt"),
+                ]
+            )
+        assert exc.value.code == 2
+        assert not any(k.startswith("expr_") for k in bt.SCORERS)  # 未注册任何 expr 键
+
+    def test_registered_key_passes_scorer_choices(self, tmp_path):
+        # 注册后 --scorer 的 choices 能吃动态键（同进程内）
+        from custos.research.evolution.scorer_bridge import expr_scorer_key
+
+        out = tmp_path / "u.txt"
+        rc = bt.main(
+            [
+                "--scorer-expr",
+                "ROC(CLOSE,5)",
+                "--codes",
+                "S000",
+                "--dump-codes",
+                str(out),
+            ]
+        )
+        assert rc == 0
+        key = expr_scorer_key("ROC(CLOSE,5)")
+        rc2 = bt.main(["--scorer", key, "--codes", "S000", "--dump-codes", str(out)])
+        assert rc2 == 0  # choices 校验通过（parser 构建在注册之后）
