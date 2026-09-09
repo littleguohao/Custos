@@ -201,6 +201,8 @@
 | 2026-09-08 | v0.195 | qn/11 操作纪律清单（40 风险红线+40 规则，逐条注出处）+ QN 第二批 4 因子（qn_ma_converge/qn_bullish_engulf/qn_weekly180_setup/qn_shrink_limit_up）+ 4 gate + R31 扩批 12 gate（详见 `governance/strategy/qn/`） | 源手册自检页收口 v0.193 遗留待办；二批因子补齐 180 周线/收拢发散/阳包阴/缩量板 | 钉测 +35；注册表 39→43；R31 判据不变同批适用 |
 | 2026-09-08 | v0.196 | QN gate 提速层：因子 detect 加 `_arr` 预计算通道（规则逻辑仍在因子唯一一份），`_precompute_gate_series` 扩日级数组/周 MACD/月 MACD/180 周线轴（`_weekly_macd_step`/`_monthly_gate_arrays`/`_weekly_ma180_asof`），12 gate 登记 `_SLICE_FREE_GATES` | s3000 全窗慢路径实测会撞 timeout（R27 同类 18~35 分钟/格）；逐位一致等价钉测兜底（滚动/EMA 从第 0 根递归同序） | 等价性钉测 +2（周月键真实参与场景 + 占位不炸）；通用 ①②⑤⑦ 自动覆盖 12 gate |
 | 2026-09-08 | v0.197 | QN 批 review 修复（判定语义不变）：`_prepare` 重复两份收敛为 `_util.resample_ready`；函数内 import 提顶层 ×2；补 dmi_mdi None 检查与 volume NaN 防护；gate 注册改显式具名（vulture 白噪清零） | review 发现的重复实现与静检噪音；audit：pylint/mypy 对新函数零发现、radon 新增 ≤C | 钉测全绿；⚠️ 另发现 5 个存量 D(21)（v0.190~0.192 混入，与本批无关，待处理） |
+| 2026-09-08 | v0.198 | v0.192~0.196 review 修复批②：R30 fast path 补 NaN/±inf pairwise 语义+对拍钉测；`weekly_part_vol` 改 Kahan 与 pandas resample sum 逐位一致（v0.196 声明成真）；`--search` 强制双窗、`--final`/`--phase3` 守卫前移；QN 因子 doc/code 对齐 + ma144 min_bars 单源 + di_cross 记真实布尔 | review 发现的声明强于实际与边界不一致；行为变化仅 ma144 n=169、di_cross.hit（无下游消费方） | 钉测 +50 余（NaN 对拍/Kahan 逐位/12 因子边界）；恒真断言清除；R30 页补并列规则注记 |
+| 2026-09-08 | v0.199 | R30 跑数判负回填：5702 组合 532 过加严线、305 灵敏度存活，top 3 在 pre2019 终审 F2 全灭（盈亏比 2.076<2.4，胜率 41.3% 守线）——打分权重路线四轮十候选无一幸存，收口。R31 跑数判负回填：12 qn gate 双窗 s3000 全灭——9 否决（C2 加值未双窗过线）+ 3 样本不足（adx/缩量板/weekly180），9 因子转 needs_work 引 R31 | R30 终审失线（近 regime 富集家族的盈亏比形态）；R31 外部体系规则首过证据流程无双窗加值 | 产物 r30_search/final_pre2019.json、strategy_grid `_ranked__r31_*`；索引/主图同步 ❌；钉测随状态翻转更新全绿 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

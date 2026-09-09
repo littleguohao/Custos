@@ -2,7 +2,7 @@
 """QN·均线收拢发散（骑牛登山体系，规则出处
 `governance/strategy/qn/01_general.md` §五「均线的收拢和发散」）。
 
-源规则（经验规律，未回测）：
+源规则（经验规律；R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08），status=needs_work、live_use=none——不得进 live 链）：
 - MA5/10/25/144 四线**收拢粘合成一股绳后首次向上发散** = 主升浪启动点，
   买在发散初期而非发散之后。
 - 前提：MA144 明显走平上翘；144 线仍下行时收拢发散多为反弹非反转。
@@ -11,8 +11,10 @@
 确定性转译（待回测）：
 - 粘合 = 四线带宽 (max−min)/mid ≤ ``QN_CONVERGE_PCT``（带宽持续
   ``QN_CONVERGE_BARS`` 根以上才算「收拢成绳」）
-- 首次向上发散 = 当日带宽突破收拢期最大带宽、四线多头排列（MA5>MA10>MA25）
-  且收盘站上四线 + 放量阳线（量 ≥ 前日 ×``QN_BREAK_SURGE``、收>开）
+- 首次向上发散 = 收拢后当日带宽较上一根扩张（一根扩张即算：发散初期的带宽
+  天然还小，方向由多头排列 + 站上四线 + 放量阳线承担，不靠带宽绝对值）、
+  四线多头排列（MA5>MA10>MA25）且收盘站上四线 + 放量阳线
+  （量 ≥ 前日 ×``QN_BREAK_SURGE``、收>开）
 - MA144 走平上翘腿（记录）：近 ``QN_MA144_RISE_WIN`` 根上移
 
 state 类：输出粘合/发散状态与启动信号。绝不 raise。
@@ -30,8 +32,8 @@ FACTOR: dict[str, Any] = {
     "id": "qn_ma_converge",
     "name": "QN·均线收拢发散（四线粘合后首次向上发散）",
     "kind": "state",
-    "status": "untested",  # 新实现未回测（骑牛体系口径 + 合成用例）
-    "evidence": "",
+    "status": "needs_work",  # R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08）
+    "evidence": "governance/research/R31_qn_factor_validation.md",
     "note": "规则出处 governance/strategy/qn/01_general.md §五；MA5/10/25/144 粘合（带宽≤阈值持续 N 根）后首次放量向上发散=启动点；MA144 走平上翘为前提记录腿",
     "min_bars": 170,
     "live_use": "none",
@@ -74,9 +76,11 @@ def detect(df, code: str = "", _arr: dict | None = None) -> dict[str, Any]:
     返回键：
         converged         当前处于粘合（带宽 ≤ 阈值）
         hit               「首次向上发散」启动信号：此前 QN_CONVERGE_BARS 根
-                          持续粘合，当日带宽扩张 + 多头排列
-                          + 收盘站上四线 + 放量阳线
+                          持续粘合，当日带宽一根扩张（bw[-1] > bw[-2]）
+                          + 多头排列 + 收盘站上四线 + 放量阳线
         legs              bandwidth / first_divergence / ma144_up 明细
+                          （bandwidth.bw_prev_max_pct 为收拢期最大带宽，
+                          仅记录供回测消融，不参与判定）
     """
     try:
         n = len(df)

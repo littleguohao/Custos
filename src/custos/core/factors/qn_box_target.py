@@ -2,7 +2,7 @@
 """QN·1.3 系数箱体目标位（骑牛登山体系，规则出处
 `governance/strategy/qn/02_space_targets.md` §一、`qn/01_general.md` §三）。
 
-源规则（经验规律，未回测）：
+源规则（经验规律；R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08），status=needs_work、live_use=none——不得进 live 链）：
 - 以一波走势最低价 ×1.3 构建箱体上沿 = 目标压力位；
   向上平移半格（×1.15）后的 50% 位置也是压力位。
 - 大波段用 1.3，小波段用 1.26/1.2（混用失真）。
@@ -27,8 +27,8 @@ FACTOR: dict[str, Any] = {
     "id": "qn_box_target",
     "name": "QN·1.3 系数箱体目标位（空间度量）",
     "kind": "state",
-    "status": "untested",  # 新实现未回测（骑牛体系口径 + 合成用例）
-    "evidence": "",
+    "status": "needs_work",  # R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08）
+    "evidence": "governance/research/R31_qn_factor_validation.md",
     "note": "规则出处 governance/strategy/qn/02_space_targets.md §一；波段低点×1.3=目标位、×1.15=半格压力位；只作空间度量不判买卖",
     "min_bars": 60,
     "live_use": "none",
@@ -36,7 +36,7 @@ FACTOR: dict[str, Any] = {
 }
 
 # ---- 待回测参数 ----
-QN_BASE_WIN = 60  # 待回测：波段低点观察窗（源规则「近 20 或 60 日波段低点」取大者）
+QN_BASE_WIN = 60  # 待回测：波段低点观察窗（转译定窗 60 日，spec 表未要求 20/60 取大）
 QN_COEF_BIG = 1.3  # 待回测：大波段系数（源规则 1.3）
 QN_COEF_SMALL = 1.26  # 待回测：小波段系数（源规则 1.26/1.2 取 1.26）
 QN_COEF_HALF = 1.15  # 待回测：半格压力位（上沿 1.3 平移半格 = 低点 ×1.15）

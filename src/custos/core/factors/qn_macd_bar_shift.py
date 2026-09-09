@@ -2,7 +2,7 @@
 """QN·MACD 柱体大小变化（买小绿/卖小红，骑牛登山体系，规则出处
 `governance/strategy/qn/01_general.md` §八「八字要诀·抓大放小」）。
 
-源规则（经验规律，未回测）：
+源规则（经验规律；R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08），status=needs_work、live_use=none——不得进 live 链）：
 - **买小绿**：MACD 绿柱由大变小（连续缩短）且股价回踩不破前低。
 - **卖小红**：MACD 红柱由大变小（连续缩短）且价格滞涨（低于最近高点）——
   出场侧信号，本因子只记录、不作卖出建议。
@@ -28,8 +28,8 @@ FACTOR: dict[str, Any] = {
     "id": "qn_macd_bar_shift",
     "name": "QN·MACD 柱体大小变化（买小绿/卖小红）",
     "kind": "pattern",
-    "status": "untested",  # 新实现未回测（骑牛体系口径 + 合成用例）
-    "evidence": "",
+    "status": "needs_work",  # R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08）
+    "evidence": "governance/research/R31_qn_factor_validation.md",
     "note": "规则出处 governance/strategy/qn/01_general.md §八；绿柱连缩+不破前低=买小绿（hit）；红柱连缩+滞涨=卖小红（出场侧记录）",
     "min_bars": 40,
     "live_use": "none",

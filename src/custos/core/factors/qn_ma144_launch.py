@@ -2,7 +2,7 @@
 """QN·日线翻倍四要素（骑牛登山体系，规则出处
 `governance/strategy/qn/07_doubling_swing.md` §二）。
 
-源规则（经验规律，未回测）——上攻位置必须出现的四要素：
+源规则（经验规律；R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08），status=needs_work、live_use=none——不得进 live 链）——上攻位置必须出现的四要素：
 1. **144 日均线走平并明显上翘**；
 2. 股价冲高回落至 144 日线 **±10%** 以内；
 3. **MACD 双线上零轴**（DIF、DEA 均 > 0）；
@@ -16,6 +16,10 @@
 - 跳空高开 = 当日最低 > 前日最高（严格缺口）
 - 倍量 = 当日量 ≥ 前日 × ``QN_SURGE_MULT``
 - 线上阴线 = 阴线且收盘在 MA25 上方（与 qn_ma25_state 同均线口径）
+
+⚠️ 简化说明：未实现源规则「过左风」的价格位穿越判定（源 `07_doubling_swing.md`
+§二：左风定位——上涨波取最高阴线开盘价、下跌波取最低阴线收盘价），只判四形式
+之一在当日成立即可，命中率偏松（spec 对照表批准的转译简化），R31 跑数按此口径。
 
 pattern 类；四腿全中 = hit。绝不 raise。
 """
@@ -32,8 +36,8 @@ FACTOR: dict[str, Any] = {
     "id": "qn_ma144_launch",
     "name": "QN·日线翻倍四要素（144 线上翘 + 回踩 + MACD 水上 + 过左风）",
     "kind": "pattern",
-    "status": "untested",  # 新实现未回测（骑牛体系口径 + 合成用例）
-    "evidence": "",
+    "status": "needs_work",  # R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08）
+    "evidence": "governance/research/R31_qn_factor_validation.md",
     "note": "规则出处 governance/strategy/qn/07_doubling_swing.md §二；四要素：MA144 走平上翘/回踩±10%/MACD 双线上零轴/过左风四形式之一（涨停·跳空·倍量·线上阴线）",
     "min_bars": 170,
     "live_use": "none",
@@ -86,7 +90,10 @@ def _leg_macd_above_zero(dv: float, ev: float) -> dict[str, Any]:
 def _leg_cross_forms(
     close, open_, low, high, vol, ma25_last: float, code: str
 ) -> dict[str, Any]:
-    """腿④ 过左风四形式（任一）：涨停 / 跳空高开 / 倍量 / 线上阴线。"""
+    """腿④ 过左风四形式（任一）：涨停 / 跳空高开 / 倍量 / 线上阴线。
+
+    ⚠️ 简化：未判源规则的价格位穿越（左风定位价），当日出现任一形式即算过
+    （spec 表批准的转译简化，命中率偏松）。"""
     chg = (close[-1] / close[-2] - 1) * 100 if close[-2] else 0.0
     limit_up = bool(round(chg, 2) >= price_limit_pct(code) - QN_LIMIT_TOL)
     gap_up = bool(low[-1] > high[-2])
@@ -110,7 +117,9 @@ def detect(df, code: str = "", _arr: dict | None = None) -> dict[str, Any]:
     """
     try:
         n = len(df)
-        need = QN_MA_WIN + QN_RISE_WIN + QN_FLAT_WIN
+        # 单源口径：声明的 min_bars 更严（170 > 144+5+20），以声明值为准
+        # （推导模式同 qn_macd_bar_shift）
+        need = max(FACTOR["min_bars"], QN_MA_WIN + QN_RISE_WIN + QN_FLAT_WIN)
         if n < need:
             return {
                 "available": False,

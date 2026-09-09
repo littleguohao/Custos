@@ -384,10 +384,24 @@ class TestSearchGuard:
         assert scbs.main(["--search", "--from-trades", str(f)]) == 2
         assert "反过拟合" in capsys.readouterr().err
 
+    def test_requires_exactly_two_files(self, tmp_path, capsys):
+        """预注册调参双窗：--search 需要且仅需要两份输入，否则 return 2（不读文件）。"""
+        f1 = tmp_path / "x_n400.json"
+        f2 = tmp_path / "x_n1000_cw.json"
+        f3 = tmp_path / "y_n999.json"
+        for f in (f1, f2, f3):
+            self._write(f, [_trade(ret=0.1)])
+        assert scbs.main(["--search", "--from-trades", str(f1)]) == 2
+        assert "需要且仅需要" in capsys.readouterr().err
+        assert scbs.main(["--search", "--from-trades", str(f1), str(f2), str(f3)]) == 2
+        assert "需要且仅需要" in capsys.readouterr().err
+
     def test_empty_trades_rejected(self, tmp_path):
-        f = tmp_path / "x_n400.json"
-        self._write(f, [])
-        assert scbs.main(["--search", "--from-trades", str(f)]) == 1
+        f1 = tmp_path / "x_n400.json"
+        f2 = tmp_path / "x_n1000_cw.json"
+        self._write(f1, [])
+        self._write(f2, [_trade(ret=0.1)])
+        assert scbs.main(["--search", "--from-trades", str(f1), str(f2)]) == 1
 
     def test_mutually_exclusive_modes(self):
         with pytest.raises(SystemExit):
@@ -448,6 +462,16 @@ class TestFinalGuard:
         self._write(f, [_trade(ret=0.1)])
         assert scbs.main(["--final", "--from-trades", str(f)]) == 2
         assert "未知组合" in capsys.readouterr().err
+
+    def test_finalist_guard_runs_before_loading_trades(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """守卫先行：名单不可用时根本不读终审窗文件——pre2019 路径不存在也直接
+        return 2（旧顺序会先 _load_trades 抛 FileNotFoundError）。"""
+        monkeypatch.chdir(tmp_path)  # 空目录 ⇒ 无 r30_search.json
+        ghost = tmp_path / "ghost_pre2019.json"  # 不存在的终审窗文件
+        assert scbs.main(["--final", "--from-trades", str(ghost)]) == 2
+        assert "--search" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------
@@ -582,8 +606,6 @@ class TestCliSmoke:
         )
         keys = [c["margin_min_across_windows"] for c in rep["passed"]]
         assert all(k is not None for k in keys)
-        pool_order = sorted(keys, reverse=True)
-        assert keys == pool_order or True  # passed 按网格序，键值本身合法即可
         # survivors 的键 = pool 里最大的 top 3
         by_name = {c["name"]: c for c in rep["passed"]}
         top_keys = sorted(keys, reverse=True)[: len(rep["survivors"])]
@@ -626,3 +648,32 @@ class TestFastPathParity:
             slow = scbs.eval_combo(trades, combo["name"], fn)
             fast = scbs.eval_combo_fast(win, combo["name"], pw)
             assert slow == fast, combo["name"]
+
+    def test_fast_matches_slow_with_nan_inf_rets(self):
+        """rets 混入 NaN/±inf：corr/半窗与判定列（F1~F4/pass_all）两路径同口径。
+
+        慢路径（pandas）成对剔除 NaN、±inf 保留（pearson 得 None、spearman 把 ±inf
+        排在两端）——fast path 镜像同一语义（见 scbs._fast_corr）。不做全 dict 对拍：
+        NaN 下篮子/分档统计两路径同为 nan 但 nan != nan，且 ret 降序选取的
+        winner/bottom 分布（C2 参考列，不进判定）慢路径是 sorted 未定序。
+        """
+        trades = _random_trades()
+        for i, v in (
+            (5, float("nan")),
+            (137, float("inf")),
+            (250, float("-inf")),
+            (411, float("nan")),
+        ):
+            trades[i]["ret"] = v
+        win = scbs.prepare_window(trades)
+        sample = random.Random(0).sample(scbs.generate_grid(), 50)
+        for combo in sample:
+            pw = combo["panel_weights"]
+            fn = scs.make_candidate_score({}, pw)
+            slow = scbs.eval_combo(trades, combo["name"], fn)
+            fast = scbs.eval_combo_fast(win, combo["name"], pw)
+            assert slow["corr"] == fast["corr"], combo["name"]
+            assert slow["half_window"] == fast["half_window"], combo["name"]
+            for k in ("F1", "F2", "F3", "F4"):
+                assert slow[k]["pass"] == fast[k]["pass"], (combo["name"], k)
+            assert slow["pass_all"] == fast["pass_all"], combo["name"]

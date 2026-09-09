@@ -2,7 +2,7 @@
 """QN·三线红（日/周/月 MACD 红柱共振，骑牛登山体系，规则出处
 `governance/strategy/qn/01_general.md` §二/§五、`qn/08_main_wave_launch.md`）。
 
-源规则（经验规律，未回测）：
+源规则（经验规律；R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08），status=needs_work、live_use=none——不得进 live 链）：
 - **三线红** = 日线、周线、月线 MACD 柱均为红（>0），多周期共振多头；
   「大必胜」需日/周/月三线 MACD 均红柱。
 - 月线 MACD 绿柱时，周线红柱下的日线上涨只是反弹，不当反转主升浪。
@@ -30,8 +30,8 @@ FACTOR: dict[str, Any] = {
     "id": "qn_three_red",
     "name": "QN·三线红（日/周/月 MACD 红柱共振）",
     "kind": "state",
-    "status": "untested",  # 新实现未回测（骑牛体系口径 + 合成用例）
-    "evidence": "",
+    "status": "needs_work",  # R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08）
+    "evidence": "governance/research/R31_qn_factor_validation.md",
     "note": "规则出处 governance/strategy/qn/01_general.md §二；日/周/月 MACD 柱全红=多周期共振多头（大必胜前提）；月绿柱下日线上涨只按反弹读",
     "min_bars": 60,
     "live_use": "none",
@@ -39,6 +39,7 @@ FACTOR: dict[str, Any] = {
 }
 
 # ---- 待回测参数 ----
+QN_MIN_DAY_BARS = 35  # 待回测：日线 MACD 可信所需最少日 K 数
 QN_MIN_WEEK_BARS = 35  # 待回测：周线 MACD 可信所需最少周 K 数
 QN_MIN_MONTH_BARS = 20  # 待回测：月线 MACD 可信所需最少月 K 数（≈400+ 交易日）
 
@@ -85,14 +86,16 @@ def detect(df, code: str = "", _arr: dict | None = None) -> dict[str, Any]:
         if _arr is None:
             dfx = resample_ready(df)
             legs = {
-                "daily": _hist_red(df, 35),
+                "daily": _hist_red(df, QN_MIN_DAY_BARS),
                 "weekly": _hist_red(resample(dfx, "W-FRI"), QN_MIN_WEEK_BARS),
                 "monthly": _hist_red(resample(dfx, "ME"), QN_MIN_MONTH_BARS),
             }
         else:
             i = n - 1
             legs = {
-                "daily": _leg_red(_arr["macd_dif"][i], _arr["macd_dea"][i], n, 35),
+                "daily": _leg_red(
+                    _arr["macd_dif"][i], _arr["macd_dea"][i], n, QN_MIN_DAY_BARS
+                ),
                 "weekly": _leg_red(
                     _arr["weekly_dif"][i],
                     _arr["weekly_dea"][i],

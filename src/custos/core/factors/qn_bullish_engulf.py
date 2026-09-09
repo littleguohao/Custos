@@ -2,7 +2,7 @@
 """QN·阳包阴/单阳包（骑牛登山体系，规则出处
 `governance/strategy/qn/01_general.md` §一「骑牛原版」、§四）。
 
-源规则（经验规律，未回测）：
+源规则（经验规律；R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08），status=needs_work、live_use=none——不得进 live 链）：
 - **买入优先选择单阳包形态**：阳线实体包住前阴线，且上穿 5 日/10 日线、
   量能略大于左侧。
 - 阴线被后续阳线完全覆盖（解放）则不再构成压力。
@@ -27,8 +27,8 @@ FACTOR: dict[str, Any] = {
     "id": "qn_bullish_engulf",
     "name": "QN·阳包阴/单阳包",
     "kind": "pattern",
-    "status": "untested",  # 新实现未回测（骑牛体系口径 + 合成用例）
-    "evidence": "",
+    "status": "needs_work",  # R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08）
+    "evidence": "governance/research/R31_qn_factor_validation.md",
     "note": "规则出处 governance/strategy/qn/01_general.md §一；阳线实体完全覆盖前阴实体 + 上穿 MA5/MA10 + 量略大于左侧；与倍量切的差别：量门槛是「略大」非倍量",
     "min_bars": 30,
     "live_use": "none",

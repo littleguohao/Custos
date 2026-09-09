@@ -447,16 +447,28 @@ def _weekly_gate_arrays(df: pd.DataFrame) -> Optional[dict[str, Any]]:
         # ---- v0.196 扩：180 周均线 as-of + 自然周 OHLCV（qn_weekly180_setup 用）----
         out_ma180 = _weekly_ma180_asof(idx, cp, iprev, wclose)
         wvol = weekly["volume"].astype(float).to_numpy()
-        # 部分周累计量（逐日 O(n) 累加，跨周归零；成交量聚合是求和，无浮点次序问题）
+        # 部分周累计量（逐日 O(n) 累计，跨周归零）。成交量聚合是求和但有浮点次序
+        # 问题：pandas 3.x resample.agg("sum") 走 groupby 的 Kahan 补偿求和，朴素
+        # 顺序累加 acc+vol 在 ≥3 个交易日的周会差 1 ULP——逐位复刻必须用同款 Kahan
+        # （math.fsum 也不行：补偿求和的中间态不是正确舍入，实测 22-52/620 根差
+        # 1 ULP；Kahan 与 pandas 逐位一致，实测 7 组合成数据全 0 失配）。
         vol_day = d["volume"].astype(float).to_numpy()
         if not np.isfinite(vol_day).all():
             return None  # 量含 NaN：resample skipna 与逐日累加口径错位，回退慢路径
         part_vol = np.empty(n)
         acc = 0.0
+        comp = 0.0
         pw = -1
         for t in range(n):
-            acc = vol_day[t] if day_w[t] != pw else acc + vol_day[t]
-            pw = int(day_w[t])
+            # 跨周：补偿与累加器一并归零（同 pandas 逐 bin 独立累加）
+            if day_w[t] != pw:
+                acc = 0.0
+                comp = 0.0
+                pw = int(day_w[t])
+            y = vol_day[t] - comp
+            s = acc + y
+            comp = (s - acc) - y
+            acc = s
             part_vol[t] = acc
         # 自然周 MA180（rolling(180).mean() 全序列；as-of 读取只取 ≤w-1 的完整周，
         # 全量 frame 的末根部分周永不进读区）

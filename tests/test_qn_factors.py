@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""QN 因子批（骑牛登山体系，8 个）的合成钉测。
+"""QN 因子批（骑牛登山体系，12 个：首批 8 + 第二批 4）的合成钉测。
 
 每个检测器至少钉四件事（同 bottom_patterns 合成用例思路）：
 ① 正例命中；② 缺腿不命中（消融）；③ 短数据 → available=False；④ 垃圾输入不 raise。
@@ -39,13 +39,27 @@ QN_IDS = [
     "qn_ma144_launch",
 ]
 
+# R31 双窗跑数结局（2026-09-08，governance/research/R31_qn_factor_validation.md）：
+# 9 个 gate 否决 → status=needs_work 且 evidence 引 R31 页；
+# 3 个 gate 样本不足（qn_adx_extreme / qn_weekly180_setup / qn_shrink_limit_up）→ 保持 untested。
+QN_R31_REJECTED_B1 = [
+    "qn_ma25_state",
+    "qn_volume_surge_cut",
+    "qn_three_red",
+    "qn_macd_bar_shift",
+    "qn_kdj_neg_day",
+    "qn_box_target",
+    "qn_ma144_launch",
+]
+
 
 def _df(close, open_=None, vol=None, spread=0.01):
     """由收盘序列造合成 OHLCV：open 默认前收，high/low 由 ±spread 撑开。"""
     c = np.asarray(close, dtype=float)
     n = len(c)
     o = np.asarray(open_, dtype=float) if open_ is not None else np.roll(c, 1)
-    o[0] = c[0]
+    if n:
+        o[0] = c[0]
     v = np.asarray(vol, dtype=float) if vol is not None else np.full(n, 1e6)
     return pd.DataFrame(
         {
@@ -72,13 +86,23 @@ class TestRegistry:
         missing = [f for f in QN_IDS if f not in reg]
         assert not missing, f"未注册：{missing}"
 
-    @pytest.mark.parametrize("fid", QN_IDS)
+    @pytest.mark.parametrize("fid", ["qn_adx_extreme"])
     def test_meta_debug_untested_none(self, fid):
+        """第一批里唯一 R31 判样本不足的因子：保持 untested（其余 7 个见下）。"""
         m = factors.registry()[fid]["meta"]
         assert m["status"] == "untested"
         assert m["live_use"] == "none"
         assert m["stage"] == "debug"
         assert callable(factors.registry()[fid]["detect"])
+
+    @pytest.mark.parametrize("fid", QN_R31_REJECTED_B1)
+    def test_meta_r31_rejected_needs_work(self, fid):
+        """R31 双窗跑数否决（2026-09-08）→ needs_work 且 evidence 引 R31 页。"""
+        m = factors.registry()[fid]["meta"]
+        assert m["status"] == "needs_work"
+        assert m["evidence"] == "governance/research/R31_qn_factor_validation.md"
+        assert m["live_use"] == "none"
+        assert m["stage"] == "debug"
 
 
 # ─────────────────────── qn_ma25_state ───────────────────────
@@ -231,6 +255,20 @@ class TestKdjNegDay:
         assert r["legs"]["kd20_golden"]["hit"], r["legs"]
         assert r["hit"]
 
+    def test_neg_day_buy_path_hit(self):
+        # 端到端钉负值第 3 天买点路径（此前只钉了 helper 与 KD20 另腿）：
+        # 稳升把 K/D/J 推上高位 → 转跌首日死叉（J≈95>50，跌透）→ 连阴顺滑下跌、
+        # J 连续 3 根为负 → hit 且记「可选买点」。
+        # （spread=0 让高/低=收/开：升势段 RSV 钉 100、K≥D，死叉只发生在转跌处）
+        close = _trend(40, 10.0, 0.1) + [13.85, 13.0, 12.0, 11.0, 10.2]
+        r = qn_kdj_neg_day.detect(_df(close, spread=0.0))
+        legs = r["legs"]
+        assert legs["death_cross"]["hit"] and legs["death_cross"]["j_gt_50"]
+        assert legs["smooth"]["hit"]
+        assert r["neg_day"] == 3 and legs["neg_count"]["hit"]
+        assert legs["kd20_golden"]["hit"] is False  # 命中来自负值路径而非另腿
+        assert r["hit"] and r["buy_day_kind"] == "可选买点"
+
     def test_neg_day_count_helper(self):
         # 计数器语义钉：J 序列 [峰→死叉→3 根负值]
         j = np.array([80.0, 60.0, 40.0, -5.0, -8.0, -3.0])
@@ -256,6 +294,19 @@ class TestKdjNegDay:
 # ───────────────────── qn_adx_extreme ────────────────────────
 
 
+def _adx_divergence_df(mirror=False):
+    """底背离构造：强势阴跌（-1%/日，把 ADX 推上 60）→ 一段反弹 → 更浅的二段
+    下跌砸出更低的摆低（价创新低而 DIF 低点抬高 = 底背离）→ 尾段小弹（给分型
+    留右侧确认根数）。mirror=True 取镜像（45−收盘）得顶背离构造。"""
+    close = [30.0 * 0.99**i for i in range(70)]
+    close += list(np.linspace(15.05, 15.6, 8))
+    close += list(np.linspace(15.5, 14.6, 16))
+    close += list(np.linspace(14.65, 14.8, 6))
+    if mirror:
+        close = [45.0 - x for x in close]
+    return _df(close)
+
+
 class TestAdxExtreme:
     def test_hit_strong_trend(self):
         # 强趋势（每日 +1%）→ ADX 冲到 60 上方
@@ -263,6 +314,37 @@ class TestAdxExtreme:
         r = qn_adx_extreme.detect(_df(close))
         assert r["available"] and r["legs"]["adx"]["adx"] >= 60.0, r["legs"]
         assert r["hit"]
+
+    def test_extreme_side_bottom_divergence(self):
+        # 极端位 + 底背离腿中 → side="bottom"（gate 转译消费的正是这个键）
+        r = qn_adx_extreme.detect(_adx_divergence_df())
+        assert r["available"] and r["hit"], r["legs"]
+        assert r["legs"]["bottom_divergence"]["hit"], r["legs"]
+        assert r["legs"]["top_divergence"]["hit"] is False
+        assert r["extreme_side"] == "bottom"
+
+    def test_extreme_side_top_divergence(self):
+        # 镜像构造：顶背离腿中 → side="top"（两背离腿同中时顶背离优先）
+        r = qn_adx_extreme.detect(_adx_divergence_df(mirror=True))
+        assert r["available"] and r["hit"], r["legs"]
+        assert r["legs"]["top_divergence"]["hit"], r["legs"]
+        assert r["extreme_side"] == "top"
+
+    def test_no_side_without_divergence(self):
+        # 单边趋势无分型摆点 → 两背离腿均不中 → side=None（方向只由背离腿定）
+        close = [10.0 * 1.01**i for i in range(90)]
+        r = qn_adx_extreme.detect(_df(close))
+        assert r["hit"] and r["extreme_side"] is None
+
+    def test_di_cross_leg_records_real_state(self):
+        # di_cross 是记录腿：hit = 当日 DI 多空态（pdi>mdi），不再恒 True
+        rb = qn_adx_extreme.detect(_adx_divergence_df())
+        assert rb["legs"]["di_cross"]["hit"] is False  # 阴跌构造 DI- 在上
+        rt = qn_adx_extreme.detect(_adx_divergence_df(mirror=True))
+        assert rt["legs"]["di_cross"]["hit"] is True  # 镜像 DI+ 在上
+        for r in (rb, rt):
+            leg = r["legs"]["di_cross"]
+            assert leg["hit"] == (leg["pdi"] > leg["mdi"])
 
     def test_no_hit_choppy(self):
         # 完全走平（DM=0）→ ADX 归零；交替涨跌会被 DMI 读成强方向，不能当反例
@@ -292,6 +374,17 @@ class TestBoxTarget:
         close = [10.0] * 50 + _trend(10, 10.2, 0.05)
         r = qn_box_target.detect(_df(close))
         assert r["available"] and not r["hit"]
+        assert r["dist_target_pct"] > 3.0
+
+    def test_near_zone_edge(self):
+        # 3% 压力区边界钉：≤3% 进区（含等号）、>3% 区外。二进制浮点复现不了
+        # 恰好的 3.0，用 ±0.1pp 的近边界值钉两侧（spread=0 → low=收/开，
+        # 低点钉死 10、目标 13）
+        r = qn_box_target.detect(_df([10.0] * 59 + [13.0 / 1.029], spread=0.0))
+        assert r["available"] and r["hit"]  # dist≈2.9% → 进区
+        assert r["dist_target_pct"] < 3.0
+        r = qn_box_target.detect(_df([10.0] * 59 + [13.0 / 1.031], spread=0.0))
+        assert r["available"] and not r["hit"]  # dist≈3.1% → 区外
         assert r["dist_target_pct"] > 3.0
 
     def test_short_data(self):
@@ -439,6 +532,9 @@ QN_IDS_BATCH2 = [
     "qn_shrink_limit_up",
 ]
 
+# 第二批中 R31 否决的 2 个（另 2 个样本不足保持 untested，条款同 QN_R31_REJECTED_B1 注释）
+QN_R31_REJECTED_B2 = ["qn_ma_converge", "qn_bullish_engulf"]
+
 
 class TestRegistryBatch2:
     def test_all_registered(self):
@@ -446,10 +542,20 @@ class TestRegistryBatch2:
         missing = [f for f in QN_IDS_BATCH2 if f not in reg]
         assert not missing, f"未注册：{missing}"
 
-    @pytest.mark.parametrize("fid", QN_IDS_BATCH2)
+    @pytest.mark.parametrize("fid", ["qn_weekly180_setup", "qn_shrink_limit_up"])
     def test_meta_debug_untested_none(self, fid):
+        """第二批里 R31 判样本不足的 2 个：保持 untested。"""
         m = factors.registry()[fid]["meta"]
         assert m["status"] == "untested"
+        assert m["live_use"] == "none"
+        assert m["stage"] == "debug"
+
+    @pytest.mark.parametrize("fid", QN_R31_REJECTED_B2)
+    def test_meta_r31_rejected_needs_work(self, fid):
+        """R31 双窗跑数否决（2026-09-08）→ needs_work 且 evidence 引 R31 页。"""
+        m = factors.registry()[fid]["meta"]
+        assert m["status"] == "needs_work"
+        assert m["evidence"] == "governance/research/R31_qn_factor_validation.md"
         assert m["live_use"] == "none"
         assert m["stage"] == "debug"
 
@@ -614,6 +720,16 @@ class TestShrinkLimitUp:
         assert r["available"] and not r["hit"]
         assert r["legs"]["shrink"]["hit"] is False
 
+    def test_shrink_band_edges(self):
+        # 缩量带边界钉：vr==0.5 过（下界含）、vr==0.7 不过（上界不含，
+        # 源规则两端明文：缩过 1/2 为弱势、未明显萎缩不算缩量板）
+        r = qn_shrink_limit_up.detect(_shrink_limit_df(shrink_ratio=0.5), code="600000")
+        assert r["legs"]["shrink"]["hit"] is True
+        assert r["hit"]
+        r = qn_shrink_limit_up.detect(_shrink_limit_df(shrink_ratio=0.7), code="600000")
+        assert r["legs"]["shrink"]["hit"] is False
+        assert not r["hit"]
+
     def test_no_hit_without_prev_surge_yin(self):
         r = qn_shrink_limit_up.detect(
             _shrink_limit_df(with_prev_surge_yin=False), code="600000"
@@ -672,6 +788,53 @@ class TestRobustnessBatch2:
         ):
             r = mod.detect(bad, code="600000")
             assert isinstance(r, dict) and r.get("hit") is False
+
+
+# ─────────────── 边界钉（全 12 因子：空帧 / NaN 帧） ───────────────
+
+
+class TestEdgeAllTwelve:
+    @pytest.mark.parametrize("fid", QN_IDS + QN_IDS_BATCH2)
+    def test_empty_frame(self, fid):
+        """空帧（n=0）：不 raise，按短数据惯例 available=False / hit=False。"""
+        mod = factors.registry()[fid]["module"]
+        r = mod.detect(_df([]), code="600000")
+        assert isinstance(r, dict)
+        assert r.get("available") is False and r.get("hit") is False
+
+    @pytest.mark.parametrize("fid", QN_IDS + QN_IDS_BATCH2)
+    def test_nan_volume_frame(self, fid):
+        """NaN 量帧（n=min_bars+20、平盘收盘）：不 raise、hit=False。
+
+        NaN 只落在 volume 列：11 个因子的可用性不受影响（量腿自然不中，
+        available 仍 True——钉住「量 NaN 不毒化可用性」）。唯一例外
+        qn_weekly180_setup：900 根日 K 门槛过了，但合成帧是日历日日期
+        （920 天 ≈ 132 周 < 182 周门槛）→ available=False 是周线根数不足，
+        与 NaN 无关。"""
+        mod = factors.registry()[fid]["module"]
+        n = mod.FACTOR["min_bars"] + 20
+        r = mod.detect(_df([10.0] * n, vol=[np.nan] * n), code="600000")
+        assert isinstance(r, dict) and r.get("hit") is False
+        if fid == "qn_weekly180_setup":
+            assert r.get("available") is False
+        else:
+            assert r.get("available") is True
+
+    @pytest.mark.parametrize("fid", QN_IDS + QN_IDS_BATCH2)
+    def test_nan_price_frame_marks_unavailable(self, fid):
+        """NaN 价帧（n=min_bars+20）：不 raise、hit=False；只有三个因子按
+        NaN 防御如实标 available=False——qn_ma25_state（MA25 不可得）、
+        qn_ma_converge（带宽 NaN → 均线不可得）、qn_weekly180_setup（周线
+        根数不足）；其余 9 个腿级不中但整体 available=True（现状钉死，
+        改动须显式审查）。"""
+        mod = factors.registry()[fid]["module"]
+        n = mod.FACTOR["min_bars"] + 20
+        r = mod.detect(_df([np.nan] * n), code="600000")
+        assert isinstance(r, dict) and r.get("hit") is False
+        if fid in ("qn_ma25_state", "qn_ma_converge", "qn_weekly180_setup"):
+            assert r.get("available") is False
+        else:
+            assert r.get("available") is True
 
 
 # ───────────────────── 预计算快速路径（v0.196）─────────────────────

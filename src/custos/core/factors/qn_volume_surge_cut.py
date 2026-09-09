@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """QN·倍量切起爆K线（骑牛登山体系，规则出处 `governance/strategy/qn/08_main_wave_launch.md`）。
 
-源规则（经验规律，未回测）：
+源规则（经验规律；R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08），status=needs_work、live_use=none——不得进 live 链）：
 - **倍量切**：当日阳线同时切断 5 日和 10 日均线，且成交量是昨日 2 倍 ——
   均线收拢成本集中后的起爆 K 线，是主升浪启动的核心信号。
 - 前提（可选腿）：大级别均线（60/144）走平托底；鬼招手（极度发散）严禁买入。
@@ -26,8 +26,8 @@ FACTOR: dict[str, Any] = {
     "id": "qn_volume_surge_cut",
     "name": "QN·倍量切起爆K线",
     "kind": "pattern",
-    "status": "untested",  # 新实现未回测（骑牛体系口径 + 合成用例）
-    "evidence": "",
+    "status": "needs_work",  # R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08）
+    "evidence": "governance/research/R31_qn_factor_validation.md",
     "note": "规则出处 governance/strategy/qn/08_main_wave_launch.md；阳线倍量×2 同时上穿 MA5/MA10=起爆K线；大级别托底与鬼招手发散为记录腿",
     "min_bars": 30,
     "live_use": "none",

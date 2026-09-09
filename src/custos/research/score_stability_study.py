@@ -584,13 +584,13 @@ def _phase3_main(paths: list[str]) -> int:
             file=sys.stderr,
         )
         return 2
+    finalists = _read_phase2_finalists()  # 守卫先行：名单不可用则不读终审窗文件
+    if finalists is None:
+        return 2
     trades = _load_trades(p)
     if not trades:
         print(f"⛔ 复用文件无 trades: {p}", file=sys.stderr)
         return 1
-    finalists = _read_phase2_finalists()
-    if finalists is None:
-        return 2
     print(
         f"[INFO] 终审窗 {p}（{len(trades)} 笔）——第一次也是唯一一次读取；"
         f"终审名单（Phase 2 落盘）={finalists}",

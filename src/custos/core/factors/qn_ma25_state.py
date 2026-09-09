@@ -13,7 +13,7 @@
 `research/backtest_factors.qn_ma25_state_gate`）。
 
 ⚠️ 与 B1 的关系：MA25 与现行 v0.7 均线口径天然对齐，但「线上阴线买」是 QN 语境的
-经验规则，**未回测**，status=untested、live_use=none——不得进 live 链。
+经验规则，R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08），status=needs_work、live_use=none——不得进 live 链。
 """
 
 from __future__ import annotations
@@ -27,8 +27,8 @@ FACTOR: dict[str, Any] = {
     "id": "qn_ma25_state",
     "name": "QN·MA25 多空分界状态（线上阴线买/线下阳线抛）",
     "kind": "state",
-    "status": "untested",  # 新实现未回测（骑牛体系口径 + 合成用例）
-    "evidence": "",
+    "status": "needs_work",  # R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08）
+    "evidence": "governance/research/R31_qn_factor_validation.md",
     "note": "规则出处 governance/strategy/qn/01_general.md §四；MA25 多空分界 + 线上阴线买/线下阳线抛状态判定，MACD 柱红绿辅助；研究侧 gate=线上缩量阴线候选",
     "min_bars": 30,
     "live_use": "none",

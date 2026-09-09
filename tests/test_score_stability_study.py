@@ -434,6 +434,16 @@ class TestPhase3Guard:
         assert sss.main(["--phase3", "--from-trades", str(f)]) == 2
         assert "名单" in capsys.readouterr().err
 
+    def test_finalist_guard_runs_before_loading_trades(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """守卫先行：名单不可用时根本不读终审窗文件——pre2019 路径不存在也直接
+        return 2（旧顺序会先 _load_trades 抛 FileNotFoundError）。"""
+        monkeypatch.chdir(tmp_path)  # 空目录 ⇒ 无 r29_phase2.json
+        ghost = tmp_path / "ghost_pre2019.json"  # 不存在的终审窗文件
+        assert sss.main(["--phase3", "--from-trades", str(ghost)]) == 2
+        assert "Phase 2" in capsys.readouterr().err
+
 
 # ---------------------------------------------------------------------------
 # Phase 3 终审判定（终审线 = R29-C1∧C2∧C3，C4 不进终审线）

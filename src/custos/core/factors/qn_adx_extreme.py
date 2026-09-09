@@ -10,8 +10,9 @@
 
 确定性转译（待回测）：
 - ADX = `indicators.dmi_arrays`（Wilder 口径，全项目唯一实现）
-- 方向辅助腿：MACD 顶/底背离——分型摆点法（与 `bottom_patterns` 的底背离
+- 方向腿：MACD 顶/底背离——分型摆点法（与 `bottom_patterns` 的底背离
   口径同构：两个收盘摆低 L2<L1 且 DIF 低点抬高 = 底背离；反向为顶背离）
+- DI 多空态（pdi > mdi）只落 di_cross 记录腿，不参与方向判定
 
 state 类：只标极端位与方向腿，不作买卖建议。绝不 raise。
 """
@@ -29,7 +30,7 @@ FACTOR: dict[str, Any] = {
     "kind": "state",
     "status": "untested",  # 新实现未回测（骑牛体系口径 + 合成用例）
     "evidence": "",
-    "note": "规则出处 governance/strategy/qn/04_tape_volume_auction.md §三；ADX≥60=相对区间顶/底（方向未定），方向腿=MACD 顶/底背离 + DI 多空",
+    "note": "规则出处 governance/strategy/qn/04_tape_volume_auction.md §三；ADX≥60=相对区间顶/底（方向未定），方向由 MACD 顶/底背离腿定（DI 多空仅记录）",
     "min_bars": 40,
     "live_use": "none",
     "stage": "debug",
@@ -83,7 +84,8 @@ def detect(df, code: str = "", _arr: dict | None = None) -> dict[str, Any]:
 
     返回键：
         hit            ADX ≥ 60（极端位成立；hit 只标「极端」，不判方向）
-        extreme_side   "top" / "bottom" / None —— 方向腿投票（背离腿优先，DI 辅助）
+        extreme_side   "top" / "bottom" / None —— 由 MACD 顶/底背离腿定
+                       （顶背离优先于底背离）；di_cross 仅记录、不参与定向
         legs           adx / top_divergence / bottom_divergence / di_cross 明细
     """
     try:
@@ -120,7 +122,8 @@ def detect(df, code: str = "", _arr: dict | None = None) -> dict[str, Any]:
             "top_divergence": _divergence(close, d, n, find_top=True),
             "bottom_divergence": _divergence(close, d, n, find_top=False),
             "di_cross": {
-                "hit": True,
+                # 记录腿：DI+ 在 DI- 上方 = 多头交叉态；不参与 extreme_side 定向
+                "hit": bool(p_last > m_last),
                 "bull": bool(p_last > m_last),
                 "pdi": round(float(p_last), 3),
                 "mdi": round(float(m_last), 3),

@@ -663,3 +663,36 @@ def test_weekly_gate_arrays_non_midnight_dates_raise():
     df_tz["date"] = pd.to_datetime(df_tz["date"]).dt.tz_localize("Asia/Shanghai")
     with _pt.raises(ValueError, match="午夜"):
         bt._weekly_gate_arrays(df_tz)
+
+
+# ---- ⑫ 部分周累计量 weekly_part_vol：Kahan 补偿求和与 pandas resample sum 逐位一致 ----
+
+
+def _weekly_part_vol_slow(df: pd.DataFrame) -> np.ndarray:
+    """慢路径参考：逐 bar 对前缀 ``df.iloc[:i+1]`` resample("W-FRI") 取末根周 volume。"""
+    d = df.copy()
+    d["date"] = pd.to_datetime(d["date"])
+    n = len(d)
+    out = np.empty(n)
+    for i in range(n):
+        weekly = bt._resample(d.iloc[: i + 1], "W-FRI")
+        out[i] = float(weekly["volume"].astype(float).iloc[-1])
+    return out
+
+
+def test_weekly_part_vol_matches_resample_sum_bitwise():
+    """⑫ weekly_part_vol 与慢路径（逐 bar 前缀 resample("W-FRI") 的末根周 volume）
+    **逐位一致**（float ==，非 approx）：pandas 3.x 的 resample.agg("sum") 走 Kahan
+    补偿求和，快速路径（_weekly_gate_arrays）用同款 Kahan 逐位复刻；朴素顺序累加
+    在 ≥3 个交易日的周会差 1 ULP（math.fsum 也不是正确舍入口径，同样会差）。"""
+    # 周中单/双日休市 ⇒ 3~4 个交易日的不完整周；另两组为 5 日整周与整周空窗
+    df_midweek_gap = (
+        _bars_amount(150, seed=5).drop(index=[2, 7, 8]).reset_index(drop=True)
+    )
+    for df in (_bars_amount(), _bars_with_holiday_gaps(), df_midweek_gap):
+        fast = bt._weekly_gate_arrays(df)
+        assert fast is not None, "合成数据上快速路径不该退 None"
+        slow = _weekly_part_vol_slow(df)
+        assert (fast["weekly_part_vol"] == slow).all(), (
+            "weekly_part_vol 与 pandas resample sum 存在 ULP 级失配"
+        )

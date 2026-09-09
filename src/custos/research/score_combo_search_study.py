@@ -39,9 +39,13 @@ margin）的较小值**降序取 top 3（不足 3 个全取；0 个 ⇒ 判负�
 全量 F1~F4 扫描 ≈5702×2×108ms ≈ 20 分钟，超 15 分钟预算——故 ``--search`` 用
 **fast path**（每窗一次性预计算 11 条 panel 腿的命中布尔矩阵 + ret 秩，组合分 =
 矩阵 @ 权重向量后逐元素 rint + clamp 0-100；与 :func:`eval_combo` 慢路径**逐位等价**，
-50 组合随机对拍钉测锁定，见 tests/test_score_combo_search_study.py）。``--final``
-（≤3 组合单窗）走慢路径原口径。V0 篮子与全样本统计每窗只算一次（
-:func:`prepare_window`）。
+50 组合随机对拍钉测锁定，见 tests/test_score_combo_search_study.py。等价域精确化：
+rets 全有限时整份产出逐位一致；rets 含 NaN/±inf 时，corr/半窗与判定列（F1~F4/
+pass_all）仍与慢路径同口径——成对剔除 NaN、±inf 保留（pearson 得 None、spearman
+排两端，见 :func:`_fast_corr`）；唯 ret 降序选取的 winner/bottom 分布（C2 参考列，
+不进 R30 判定）不在对拍域——慢路径 ``sorted`` 遇 NaN 本是未定序，fast path 固定
+NaN 排尾）。``--final``（≤3 组合单窗）走慢路径原口径。V0 篮子与全样本统计每窗
+只算一次（:func:`prepare_window`）。
 
 CLI（生产机 Phase 1/2 照抄预注册页）::
 
@@ -52,8 +56,8 @@ CLI（生产机 Phase 1/2 照抄预注册页）::
         --from-trades artifacts/logs/score_variants_study/score_variants_study_s0_n1000_pre2019.rejudged.json
 
 产物：`artifacts/logs/score_combo_search_study/r30_search.json`（config/搜索规模/
-过线清单/灵敏度/survivors top 3）、`r30_final_pre2019.json`（终审判定；证伪也是结论，
-退出码恒 0）。
+过线清单/灵敏度/survivors top 3）、`r30_final_pre2019.json`（终审判定；证伪也是
+结论——判定（通过/证伪）不影响退出码，运行性错误（输入缺失/守卫拒绝等）返回 1/2）。
 """
 
 from __future__ import annotations
@@ -312,7 +316,7 @@ class FastWindow:
     rr: np.ndarray  # ret 平均秩（全体；Spearman 的被秩化一臂，与分数无关）
     rr_first: np.ndarray  # 前半窗内 ret 平均秩
     rr_second: np.ndarray
-    ret_order: np.ndarray  # ret 降序稳定序（= sorted(reverse=True) 的等价类选择）
+    ret_order: np.ndarray  # ret 降序稳定序（rets 全有限时 = sorted(reverse=True) 的等价类选择；NaN 固定排尾）
     n_top: int  # ceil(n × TOP_FRAC)，至少 1（与 srs.split_top_frac 同规则）
     v0_basket: dict[str, Any]
     universe_stats: dict[str, Any]
@@ -323,19 +327,27 @@ def _avg_ranks(values: np.ndarray) -> np.ndarray:
 
     组的平均秩 = (首末 1-based 秩之和)/2 = (s+e+1)/2（s/e 为 0-based 排序位置的
     组区间 [s, e)）；pandas 是「序号精确求和后除以组大小」，两者在 n < 2^53 内
-    逐位相等（对拍钉测 200 组随机含重并列样本锁定）。
+    逐位相等（对拍钉测 200 组随机含重并列样本锁定）。NaN 不参与排名、秩记 NaN
+    （= pandas 默认 na_option='keep'——相关计算时再成对剔除，见 :func:`_fast_corr`）；
+    ±inf 按数值排名（+inf 取最大秩，同 pandas）。
     """
     n = len(values)
-    order = np.argsort(values, kind="stable")
-    sv = values[order]
-    is_new = np.ones(n, dtype=bool)
-    if n:
-        is_new[1:] = sv[1:] != sv[:-1]
+    ranks = np.full(n, np.nan)
+    idx = np.flatnonzero(~np.isnan(values))  # NaN 不参与排名（pandas 同口径）
+    m = len(idx)
+    if not m:
+        return ranks
+    sub = values[idx]
+    order = np.argsort(sub, kind="stable")
+    sv = sub[order]
+    is_new = np.ones(m, dtype=bool)
+    is_new[1:] = sv[1:] != sv[:-1]
     starts = np.flatnonzero(is_new)
-    ends = np.concatenate([starts[1:], [n]])
+    ends = np.concatenate([starts[1:], [m]])
     means = (starts + ends + 1) / 2.0
-    ranks = np.empty(n, dtype=np.float64)
-    ranks[order] = np.repeat(means, ends - starts)
+    sub_ranks = np.empty(m, dtype=np.float64)
+    sub_ranks[order] = np.repeat(means, ends - starts)
+    ranks[idx] = sub_ranks
     return ranks
 
 
@@ -386,18 +398,31 @@ def _weights_vector(panel_weights: dict[str, Any]) -> np.ndarray:
 def _fast_corr(
     scores: np.ndarray, rets: np.ndarray, ret_ranks: np.ndarray
 ) -> dict[str, Any]:
-    """srs.correlations 的数组版（pandas corr 内部就是 np.corrcoef，同输入逐位一致）。"""
+    """srs.correlations 的数组版（pandas corr 内部就是 np.corrcoef，同输入逐位一致）。
+
+    NaN/±inf 口径与 pandas 严格对齐：pearson 成对剔除 NaN（``Series.corr`` 默认，
+    x/y 任一缺即剔）；spearman 先在**全样本**上取平均秩（NaN 秩记 NaN），再对秩
+    成对剔除后算 pearson（``rs.corr(rr)`` 同口径）——剔除只认 NaN，±inf 保留
+    （pearson 随之得 NaN→None；spearman 把 ±inf 排在两端，均同 pandas）。
+    """
     n = len(scores)
     if n < 3:
         return {"n": n, "spearman": None, "pearson": None}
     with np.errstate(
         invalid="ignore", divide="ignore"
-    ):  # 常数输入 ⇒ nan（同 pandas 路径）
-        pearson = float(np.corrcoef(scores, rets)[0, 1])
-        rs = _avg_ranks(scores)
+    ):  # 常数输入/±inf ⇒ nan（同 pandas 路径）
+        ok = ~np.isnan(scores) & ~np.isnan(rets)
+        pearson = (
+            float(np.corrcoef(scores[ok], rets[ok])[0, 1])
+            if ok.sum() >= 2
+            else float("nan")
+        )
+        rs = _avg_ranks(scores)  # 全样本秩（scores 恒有限，无 NaN）
+        ok_r = ~np.isnan(ret_ranks)
+        rr_ok = ret_ranks[ok_r]
         spearman = (
-            float(np.corrcoef(rs, ret_ranks)[0, 1])
-            if np.std(rs, ddof=1) > 0 and np.std(ret_ranks, ddof=1) > 0
+            float(np.corrcoef(rs[ok_r], rr_ok)[0, 1])
+            if len(rr_ok) >= 2 and np.std(rs, ddof=1) > 0 and np.std(rr_ok, ddof=1) > 0
             else float("nan")
         )
     return {
@@ -490,7 +515,7 @@ def eval_combo_fast(
     None/False 不计（命中矩阵预置 0）、``np.rint`` = Python round（半到偶，组合权重
     为 2.5 的倍数 ⇒ 加和 float64 精确、并列恰在 .5，二者同规则）后 clamp 0-100——
     clamp 在 100 处非线性，故矩阵乘法之后仍逐元素 clamp。产出与 :func:`eval_combo`
-    逐位等价（对拍钉测锁定）。
+    逐位等价（对拍钉测锁定；rets 含 NaN/±inf 时的等价域见模块 docstring）。
     """
     raw = win.hit_mat @ _weights_vector(panel_weights)
     scores = np.clip(np.rint(raw), 0.0, 100.0).astype(np.int64)
@@ -858,7 +883,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--search",
         action="store_true",
         help="有界组合搜索（gcd 去重 + 双窗筛选 F1~F5 + survivors top 3）："
-        "只用主窗+跨窗（pre2019 输入**硬拒绝**——终审前不许碰，纪律代码化）",
+        "需要且仅需要主窗+跨窗两份输入（预注册：调参双窗；pre2019 输入**硬拒绝**——"
+        "终审前不许碰，纪律代码化）",
     )
     ap.add_argument(
         "--final",
@@ -884,8 +910,7 @@ def _load_trades(path: str) -> list[dict[str, Any]]:
 
 def _search_main(paths: list[str]) -> int:
     """--search 驱动：两窗离线筛选（pre2019 硬拒绝）→ 落盘 + stdout。"""
-    trades_by_window: dict[str, list[dict[str, Any]]] = {}
-    for p in paths:
+    for p in paths:  # pre2019 硬拒绝只看文件名、不读文件（终审前不许碰）
         if "pre2019" in Path(p).name:
             print(
                 f"⛔ 反过拟合纪律：--search 调参不许碰 pre2019（{p}）——"
@@ -893,6 +918,14 @@ def _search_main(paths: list[str]) -> int:
                 file=sys.stderr,
             )
             return 2
+    if len(paths) != 2:
+        print(
+            "⛔ --search 需要且仅需要主窗+跨窗两份输入（预注册：调参双窗）",
+            file=sys.stderr,
+        )
+        return 2
+    trades_by_window: dict[str, list[dict[str, Any]]] = {}
+    for p in paths:
         trades = _load_trades(p)
         if not trades:
             print(f"⛔ 复用文件无 trades: {p}", file=sys.stderr)
@@ -950,13 +983,13 @@ def _final_main(paths: list[str]) -> int:
             file=sys.stderr,
         )
         return 2
+    loaded = _read_search_finalists()  # 守卫先行：名单不可用则不读终审窗文件
+    if loaded is None:
+        return 2
     trades = _load_trades(p)
     if not trades:
         print(f"⛔ 复用文件无 trades: {p}", file=sys.stderr)
         return 1
-    loaded = _read_search_finalists()
-    if loaded is None:
-        return 2
     finalists, specs, search_rep = loaded
     print(
         f"[INFO] 终审窗 {p}（{len(trades)} 笔）——第一次也是唯一一次读取；"
