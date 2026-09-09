@@ -889,3 +889,69 @@ class TestFastPathEquivalence:
             gate = BF.ENTRY_GATES[fid]
             assert gate in BF._SLICE_FREE_GATES, f"{fid} 未登记无切片白名单"
             assert isinstance(gate(BF._PrefixLen(200), pre), bool), fid
+
+
+# ─────────────── v0.200 案例校准语义钉测 ───────────────
+
+
+class TestKdjSmoothCalibrated:
+    """smooth 腿校准口径（腾龙股份 2023-11-16 实盘：死叉→首根 J<0 全阴，
+    负值区小阳企稳不否决）。"""
+
+    def test_yang_inside_negative_zone_allowed(self):
+        open_ = np.array([10, 11, 12, 11.5, 11.0, 10.5, 10.2, 10.25, 10.35], float)
+        close = np.array([11, 12, 11.5, 11.0, 10.5, 10.2, 10.1, 10.25, 10.4], float)
+        j = np.array([90, 70, 40, 20, 5, -3, -8, -6, -2], float)
+        # 死叉在 idx2（cross_bars_ago=6）；idx2~5 全阴、idx6/7 是负值区小阳
+        assert qn_kdj_neg_day._smooth_decline(open_, close, j, 6) is True
+
+    def test_yang_inside_decline_rejected(self):
+        open_ = np.array([10, 11, 12, 10.9, 11.0, 10.5, 10.2, 10.25, 10.35], float)
+        close = np.array([11, 12, 11.5, 11.0, 10.5, 10.2, 10.1, 10.25, 10.4], float)
+        j = np.array([90, 70, 40, 20, 5, -3, -8, -6, -2], float)
+        # idx3 变阳（10.9→11.0）：下跌段掺阳 → 不顺滑
+        assert qn_kdj_neg_day._smooth_decline(open_, close, j, 6) is False
+
+    def test_no_negative_zone(self):
+        open_ = np.array([10, 11, 12, 11.5, 11.0, 10.5, 10.2, 10.25, 10.35], float)
+        close = np.array([11, 12, 11.5, 11.0, 10.5, 10.2, 10.1, 10.25, 10.4], float)
+        assert (
+            qn_kdj_neg_day._smooth_decline(open_, close, np.full(9, 50.0), 6) is False
+        )
+
+
+def _converge144_df(n=170):
+    """三线粘合在 10 附近窄幅震荡，但 144 线还在下方爬升（早期历史在 8）——
+    四线带宽 >5%（旧口径判死）而三线粘合 + 144 走平上翘（校准口径应命中）。"""
+    close = [8.0] * 100 + [10.0 + (0.02 if i % 2 else -0.02) for i in range(n - 101)]
+    close = close[: n - 1]
+    open_ = list(close)
+    vol = np.full(n, 1e6)
+    close.append(10.6)  # 末根放量阳线上穿
+    open_.append(9.99)
+    vol[-1] = 2.0e6
+    return _df(close, open_=open_, vol=vol, spread=0.002)
+
+
+class TestConvergeCalibrated:
+    def test_hit_with_144_below_and_rising(self):
+        r = qn_ma_converge.detect(_converge144_df())
+        assert r["available"], r
+        assert r["legs"]["ma144_up"]["hit"], r["legs"]  # 144 在爬升（8→10 区间填充）
+        assert r["hit"], r["legs"]  # 三线粘合 + 放量阳 + 站上四线（含144）
+
+    def test_no_hit_when_144_falling(self):
+        # 镜像：早期历史在 12（144 在上方压）→ 144 下行，源规则明文不做
+        n = 170
+        close = [12.0] * 100 + [
+            10.0 + (0.02 if i % 2 else -0.02) for i in range(n - 101)
+        ]
+        close = close[: n - 1]
+        open_ = list(close)
+        vol = np.full(n, 1e6)
+        close.append(10.6)
+        open_.append(9.99)
+        vol[-1] = 2.0e6
+        r = qn_ma_converge.detect(_df(close, open_=open_, vol=vol, spread=0.002))
+        assert r["available"] and not r["hit"]
+        assert r["legs"]["ma144_up"]["hit"] is False

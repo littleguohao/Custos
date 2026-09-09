@@ -66,12 +66,26 @@ def _neg_day_count(j, cross_bars_ago: int) -> int:
     return cnt
 
 
-def _smooth_decline(open_, close, cross_bars_ago: int) -> bool:
-    """下跌顺滑（简化腿）：死叉至当日全部阴线（收<开）。源规则另有
-    「实体由大到中到小」，第一版只钉阴线连续性，实体递减排第二批。"""
+def _smooth_decline(open_, close, j, cross_bars_ago: int) -> bool:
+    """下跌顺滑（v0.200 案例校准后口径）：**死叉 → 首根 J<0**（跌入负值区的
+    过程）全程阴线（收<开）；负值区内的计数日允许小阳企稳。
+
+    校准依据（腾龙股份 603178，2023-11）：死叉 11-09（J=79.25>50，与本因子
+    计算逐分一致）→ 首根负值 11-14，期间 4 根全阴 ✓；老师实盘买入日 = 负值
+    第 3 天 11-16，当日是小阳线——源规则「全程阴线、阴线由大到中再到小」
+    判定的是**下跌段**，不是负值计数段（负值区出小阳正是「跌不动」的企稳）。
+    第一版「死叉→当日全阴」实现过头，会被该实盘案例否决。
+    """
     n = len(close)
-    start = n - 1 - cross_bars_ago
-    return all(close[i] < open_[i] for i in range(start, n))
+    cross_idx = n - 1 - cross_bars_ago
+    first_neg = None
+    for i in range(cross_idx + 1, n):
+        if j[i] < 0:
+            first_neg = i
+            break
+    if first_neg is None:
+        return False
+    return all(close[i] < open_[i] for i in range(cross_idx, first_neg + 1))
 
 
 def _kd20_golden(k, d, j) -> dict[str, Any]:
@@ -131,7 +145,7 @@ def detect(df, code: str = "", _arr: dict | None = None) -> dict[str, Any]:
             cross_idx = n - 1 - cross_ago
             cross_ok = bool(jv[cross_idx] > QN_J_CROSS_MIN)
             neg = _neg_day_count(jv, cross_ago)
-            smooth = _smooth_decline(open_, close, cross_ago)
+            smooth = _smooth_decline(open_, close, jv, cross_ago)
         day_hit = bool(cross_ok and smooth and neg in QN_BUY_DAYS)
         return {
             "available": True,

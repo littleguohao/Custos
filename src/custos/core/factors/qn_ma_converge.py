@@ -8,14 +8,16 @@
 - 前提：MA144 明显走平上翘；144 线仍下行时收拢发散多为反弹非反转。
 - 已大幅发散（间距过大）的位置不追高；等收拢后第一根放量阳线突破再介入。
 
-确定性转译（待回测）：
-- 粘合 = 四线带宽 (max−min)/mid ≤ ``QN_CONVERGE_PCT``（带宽持续
-  ``QN_CONVERGE_BARS`` 根以上才算「收拢成绳」）
-- 首次向上发散 = 收拢后当日带宽较上一根扩张（一根扩张即算：发散初期的带宽
-  天然还小，方向由多头排列 + 站上四线 + 放量阳线承担，不靠带宽绝对值）、
-  四线多头排列（MA5>MA10>MA25）且收盘站上四线 + 放量阳线
-  （量 ≥ 前日 ×``QN_BREAK_SURGE``、收>开）
-- MA144 走平上翘腿（记录）：近 ``QN_MA144_RISE_WIN`` 根上移
+确定性转译（待回测；v0.200 案例校准）：
+- 粘合 = **MA5/10/25 三线**带宽 (max−min)/mid ≤ ``QN_CONVERGE_PCT``（持续
+  ``QN_CONVERGE_BARS`` 根以上才算「拧成一股绳」）——源规则原文「5/10/25
+  拧成一股绳**依托** 144」：144 是托底前提不是绳子本身。第一版把 144 算进
+  带宽（四线 5% 永不成立，实盘数据带宽 9~13%），经卫宁健康/天顺股份
+  （2019-10 视频案例）校准为三线带宽 + 144 走平上翘前提腿
+- 首次向上发散 = 收拢后当日带宽较上一根扩张（发散初期带宽天然还小，方向由
+  多头排列 + 站上三线 + 放量阳线承担）、多头排列（MA5>MA10>MA25）、
+  收盘站上三线且在 144 线上方（依托）、放量阳线（量 ≥ 前日 ×``QN_BREAK_SURGE``）
+- MA144 走平上翘 = 近 ``QN_MA144_RISE_WIN`` 根上移（前提腿，参与 hit）
 
 state 类：输出粘合/发散状态与启动信号。绝不 raise。
 """
@@ -30,19 +32,19 @@ from custos.core.factors._util import ohlcv_arrays as _ohlcv_arrays
 
 FACTOR: dict[str, Any] = {
     "id": "qn_ma_converge",
-    "name": "QN·均线收拢发散（四线粘合后首次向上发散）",
+    "name": "QN·均线收拢发散（三线粘合+144 托底，首次向上发散）",
     "kind": "state",
     "status": "needs_work",  # R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08）
     "evidence": "governance/research/R31_qn_factor_validation.md",
-    "note": "规则出处 governance/strategy/qn/01_general.md §五；MA5/10/25/144 粘合（带宽≤阈值持续 N 根）后首次放量向上发散=启动点；MA144 走平上翘为前提记录腿",
+    "note": "规则出处 governance/strategy/qn/01_general.md §五；MA5/10/25 三线粘合（带宽≤阈值持续 N 根）后首次放量向上发散=启动点；MA144 走平上翘+收盘站上 144 线为前提腿（v0.200 案例校准）",
     "min_bars": 170,
     "live_use": "none",
     "stage": "debug",
 }
 
 # ---- 待回测参数 ----
-QN_MA_WINDOWS = (5, 10, 25, 144)  # 源规则四线（与 v0.7 均线口径一致）
-QN_CONVERGE_PCT = 0.05  # 待回测：粘合带宽上限（四线 max−min / mid）
+QN_MA_WINDOWS = (5, 10, 25)  # 带宽只算三线（v0.200 校准：144 是托底前提非绳身）
+QN_CONVERGE_PCT = 0.05  # 待回测：粘合带宽上限（三线 max−min / mid）
 QN_CONVERGE_BARS = 10  # 待回测：收拢持续最少根数（「成一股绳」）
 QN_BREAK_SURGE = 1.5  # 待回测：发散日放量倍数（第一根放量阳线）
 QN_MA144_RISE_WIN = 5  # 待回测：MA144 上翘确认根数
@@ -94,6 +96,7 @@ def detect(df, code: str = "", _arr: dict | None = None) -> dict[str, Any]:
             close, _high, _low, vol = _ohlcv_arrays(df)
             open_ = df["open"].astype(float).to_numpy()
             bw, mas = _bandwidth(df)
+            ma144 = df["close"].astype(float).rolling(144).mean().to_numpy()
         else:
             close = _arr["close"][:n]
             open_ = _arr["open"][:n]
@@ -102,10 +105,10 @@ def detect(df, code: str = "", _arr: dict | None = None) -> dict[str, Any]:
                 _arr["ma5"][:n],
                 _arr["ma10"][:n],
                 _arr["ma25"][:n],
-                _arr["ma144"][:n],
             ]
             bw, mas = _bandwidth_from_mas(mas)
-        if bw[-1] != bw[-1]:  # NaN 防御（MA144 不足）
+            ma144 = _arr["ma144"][:n]
+        if bw[-1] != bw[-1] or ma144[-1] != ma144[-1]:  # NaN 防御
             return {"available": False, "hit": False, "reason": "均线不可得"}
 
         b = QN_CONVERGE_BARS
@@ -116,13 +119,14 @@ def detect(df, code: str = "", _arr: dict | None = None) -> dict[str, Any]:
         # 方向由多头排列 + 站上四线 + 放量阳线承担，不靠带宽绝对值）
         diverge_up = bool(converged_before and bw[-1] > bw[-2])
         aligned = bool(mas[0][-1] > mas[1][-1] > mas[2][-1])  # MA5>MA10>MA25
-        above_all = bool(all(close[-1] > m[-1] for m in mas))
+        above_all = bool(
+            all(close[-1] > m[-1] for m in mas) and close[-1] > ma144[-1]
+        )  # 站上三线 + 依托 144（收盘在 144 线上方）
         surge_yang = bool(
             close[-1] > open_[-1] and vol[-2] and vol[-1] >= vol[-2] * QN_BREAK_SURGE
         )
-        ma144 = mas[3]
         ma144_up = bool(ma144[-1] > ma144[-1 - QN_MA144_RISE_WIN])
-        hit = bool(diverge_up and aligned and above_all and surge_yang)
+        hit = bool(diverge_up and aligned and above_all and surge_yang and ma144_up)
         return {
             "available": True,
             "hit": hit,
