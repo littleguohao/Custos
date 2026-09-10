@@ -208,6 +208,8 @@ class TestFromDict:
             "parent_ids",
             "created_at",
             "run_tag",
+            "gate",  # 联合演化第一档（TODO #68）新增字段，殿后
+            "exit_params",
         ]
 
     @pytest.mark.parametrize(
@@ -420,3 +422,59 @@ class TestPersistence:
         pool.save()
         assert p.exists()
         assert not Path(str(p) + ".tmp").exists()
+
+
+# ---------- 联合演化第一档（TODO #68）：gate / exit_params 基因组字段 ----------
+
+
+class TestGenomeFields:
+    def test_roundtrip_with_genome_fields(self):
+        t = _mk(gate="j_low_adx25", exit_params={"stop_pct": 5, "trail_pct": 0.08})
+        t2 = Trajectory.from_dict(t.to_dict())
+        assert t2 == t
+        assert t2.gate == "j_low_adx25"
+        assert t2.exit_params == {"stop_pct": 5, "trail_pct": 0.08}
+
+    def test_old_artifact_missing_fields_loads(self):
+        # 旧产物（v1 无 gate/exit_params）load 回兼容：缺字段落默认
+        d = _mk().to_dict()
+        del d["gate"]
+        del d["exit_params"]
+        t = Trajectory.from_dict(d)
+        assert t.gate == "" and t.exit_params == {}
+
+    def test_old_pool_file_loads(self, tmp_path):
+        d = _mk().to_dict()
+        del d["gate"]
+        del d["exit_params"]
+        p = tmp_path / "pool.json"
+        p.write_text(json.dumps({"version": 1, "trajectories": [d]}), encoding="utf-8")
+        pool = TrajectoryPool.load(p)
+        assert len(pool) == 1 and pool.all()[0].gate == ""
+
+    def test_default_fields_when_unset(self):
+        t = _mk()  # 老代码按前 12 字段构造 → 默认空 gate/空参数
+        assert t.gate == "" and t.exit_params == {}
+        assert t.to_dict()["gate"] == ""
+
+    def test_bad_gate_rejected(self):
+        with pytest.raises(ValueError, match="gate"):
+            TrajectoryPool().add(_mk(gate=123))
+
+    def test_bad_exit_params_rejected(self):
+        for bad in (
+            "not-a-dict",  # 非 dict
+            {"stop_pct": True},  # bool 值拒（「真/假」不是参数读数）
+            {1: 5},  # 非 str 键
+            {"stop_pct": [5]},  # 容器值拒（结构级；str 值合法——stop_mode 枚举键）
+            {"stop_pct": None},  # None 拒
+        ):
+            with pytest.raises(ValueError):
+                TrajectoryPool().add(_mk(exit_params=bad))
+
+    def test_genome_fields_in_fingerprint(self):
+        # gate/exit_params 进 to_dict ⇒ 进内容指纹：同 id 不同参数 ≠ 幂等跳过
+        pool = TrajectoryPool()
+        pool.add(_mk(gate="j_low", exit_params={"stop_pct": 5}))
+        with pytest.raises(ValueError, match="冲突"):
+            pool.add(_mk(gate="j_low_adx25", exit_params={"stop_pct": 5}))

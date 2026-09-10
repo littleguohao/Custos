@@ -21,7 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -85,6 +85,16 @@ def _is_number(v: Any) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
+def _is_param_value(v: Any) -> bool:
+    """出场参数值的结构判定：数值或 str（stop_mode 等枚举键也是合法分量）。
+
+    bool / 容器 / None 一律拒（结构级 fail-closed）；档位白名单归 genome。
+    """
+    if isinstance(v, bool):
+        return False
+    return isinstance(v, (int, float, str))
+
+
 def _validate(t: Trajectory) -> None:
     """单条轨迹的自洽校验（from_dict 与 add 共用同一套判据）。"""
     if t.phase not in EVOLUTION_PHASES:
@@ -104,6 +114,17 @@ def _validate(t: Trajectory) -> None:
             raise ValueError(
                 f"mining_metrics 非空时必须含数值型 {_REQUIRED_METRIC}，实际: {v!r}"
             )
+    if not isinstance(t.gate, str):
+        raise ValueError(f"gate 必须是 str，实际: {type(t.gate).__name__}")
+    if not isinstance(t.exit_params, dict) or not all(
+        isinstance(k, str) and _is_param_value(v) for k, v in t.exit_params.items()
+    ):
+        # 结构级校验（{str: 数值|str}，bool/容器/None 拒；stop_mode 等枚举键
+        # 的值是 str）；语义白名单（gate 枚举/参数档位）归 genome.validate_params
+        # —— 本模块保持零同包依赖。
+        raise ValueError(
+            f"exit_params 必须是 dict[str, 数值|str]（bool/容器拒）: {t.exit_params!r}"
+        )
 
 
 def _metric_rank(v: Any) -> float:
@@ -142,6 +163,10 @@ class Trajectory:
     parent_ids: tuple[str, ...]  # 血统：origin 空 / mutation 恰 1 / crossover ≥2
     created_at: str  # ISO8601
     run_tag: str  # 一次进化运行的标识
+    # 联合演化第一档（TODO #68）的基因组参数分量；非 joint 轨迹留默认。
+    # 默认值放最后 ⇒ 旧代码按前 12 字段构造不受影响；from_dict 容忍旧产物缺省。
+    gate: str = ""  # gate 配置（genome.GATE_CHOICES 之一；""=未启用 joint）
+    exit_params: dict[str, Any] = field(default_factory=dict)  # 出场参数分量
 
     def to_dict(self) -> dict[str, Any]:
         """手工序列化（不用 dataclasses.asdict 递归，显式控制字段序）。"""
@@ -158,6 +183,8 @@ class Trajectory:
             "parent_ids": list(self.parent_ids),
             "created_at": self.created_at,
             "run_tag": self.run_tag,
+            "gate": self.gate,
+            "exit_params": dict(self.exit_params),
         }
 
     @classmethod
@@ -185,6 +212,8 @@ class Trajectory:
             isinstance(p, str) for p in raw_parents
         ):
             raise ValueError("parent_ids 必须是 str 列表")
+        # 联合演化字段：旧产物（v1 无 gate/exit_params）缺省 → 落默认（回兼容）；
+        # 存在但形状不对 → 交给 _validate 拒（结构级，fail-closed）。
         t = cls(
             id=str_fields["id"],
             direction=str_fields["direction"],
@@ -198,6 +227,8 @@ class Trajectory:
             parent_ids=tuple(raw_parents),
             created_at=str_fields["created_at"],
             run_tag=str_fields["run_tag"],
+            gate=d.get("gate", ""),
+            exit_params=d.get("exit_params", {}),
         )
         _validate(t)
         return t

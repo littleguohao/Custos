@@ -14,13 +14,13 @@ from __future__ import annotations
 
 import random
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any
 
 import pandas as pd
 
-from custos.research.evolution import operators
+from custos.research.evolution import genome, operators
 from custos.research.evolution.dual_window import (
     DualWindowResult,
     Window,
@@ -37,13 +37,20 @@ from custos.research.evolution.trajectory import (
     make_id,
 )
 
+# 三轴单元格执行器协议（joint 模式的适应度函数；CLI 层实现注入，测试注入假实现）：
+#   cell_runner(expr, gate, exit_params, *, start, end) -> dict | None
+# 返回 {"objective": float|None, "margin": ..., "expectancy_R": ...,
+#       "cell_signature": str}；None = 单元格失败/无交易。
+CellRunner = Callable[..., dict | None]
+
 
 @dataclass(frozen=True)
 class LoopConfig:
     """进化循环配置（不可变；judge_mining 的阈值也挂这里）。
 
-    12 个字段各有正交语义（方向/轮次/窗口/horizon/phase 轮换/种子/判定阈值），
-    刻意不拆子配置 —— 摊开让 CLI 参数面与配置一一对齐（R0902 有意保留）。
+    字段各有正交语义（方向/轮次/窗口/horizon/phase 轮换/种子/判定阈值/joint 开关
+    与适应度阈值），刻意不拆子配置 —— 摊开让 CLI 参数面与配置一一对齐
+    （R0902 有意保留）。
     """
 
     directions: tuple[str, ...]  # 探索方向（每方向独立跑 rounds × candidates）
@@ -58,6 +65,10 @@ class LoopConfig:
     min_days: int = 20
     min_rank_ic: float = 0.02
     min_rank_icir: float = 0.1
+    # 联合演化第一档（TODO #68）：基因组 = (表达式 × gate × 出场参数)；
+    # IC 门（廉价初筛）过门后才跑三轴单元格适应度（控成本）。
+    joint: bool = False
+    min_objective: float = 0.0  # 三轴适应度阈值：objective 低于此值 → fail
 
 
 def _now_iso() -> str:
@@ -132,17 +143,20 @@ class _RunCtx:
     pool: TrajectoryPool
     rng: random.Random
     on_event: Callable[[dict], None] | None
+    cell_runner: CellRunner | None  # joint 模式的三轴适应度执行器（非 joint 为 None）
 
 
 @dataclass(frozen=True)
 class _CandCtx:
-    """单候选上下文：方向 / 落实后的实际 phase / 父代血统 / 轮次序号。"""
+    """单候选上下文：方向 / 实际 phase / 父代血统 / 轮次序号 / 基因组参数分量。"""
 
     direction: str
     phase: str  # 实际 phase（父代不足降级后可能与计划 phase 不同）
     parent_ids: tuple[str, ...]
     round_i: int
     cand_i: int
+    gate: str = ""  # joint 的 gate 分量（非 joint 空串）
+    exit_params: dict[str, Any] = field(default_factory=dict)  # joint 出场参数分量
 
 
 @dataclass(frozen=True)
@@ -196,6 +210,32 @@ def _produce_candidate(
     return payload, dsl_err
 
 
+def _parent_params(t: Trajectory) -> tuple[str, dict]:
+    """父代的基因组参数分量；缺 gate/exit_params 的老轨迹 → 先落 default。"""
+    if t.gate and t.exit_params:
+        return t.gate, dict(t.exit_params)
+    return genome.default_params()
+
+
+def _assemble_params(
+    phase: str, parents: list[Trajectory], ctx: _RunCtx
+) -> tuple[str, dict]:
+    """joint 参数装配（确定性格点，LLM 不碰数值调参；seeded rng 可复现）。
+
+    origin → ``default_params()``；mutation → 父代参数格点变异；
+    crossover → 两父代分量交换（缺参数字段的父代先落 default 再变异/交换）。
+    """
+    if not ctx.cfg.joint:
+        return "", {}
+    if phase == "origin":
+        return genome.default_params()
+    if phase == "mutation":
+        return genome.mutate_params(*_parent_params(parents[0]), ctx.rng)
+    return genome.crossover_params(
+        _parent_params(parents[0]), _parent_params(parents[1]), ctx.rng
+    )
+
+
 def _new_trajectory(
     cfg: LoopConfig, cand: _CandCtx, payload: dict[str, str], outcome: _Judged
 ) -> Trajectory:
@@ -218,6 +258,8 @@ def _new_trajectory(
         parent_ids=cand.parent_ids,
         created_at=created_at,
         run_tag=cfg.run_tag,
+        gate=cand.gate,
+        exit_params=dict(cand.exit_params),
     )
 
 
@@ -226,9 +268,18 @@ def _emit(on_event: Callable[[dict], None] | None, **kw: Any) -> None:
         on_event(kw)
 
 
-def _event(cand: _CandCtx, decision: str, rank_ic_mean: Any, expression: str) -> dict:
-    """on_event 事件 dict 的唯一构造点（键集合钉在这里，三处上报共用）。"""
-    return {
+def _event(
+    cand: _CandCtx,
+    decision: str,
+    rank_ic_mean: Any,
+    expression: str,
+    objective: Any = None,
+) -> dict:
+    """on_event 事件 dict 的唯一构造点（键集合钉在这里，三处上报共用）。
+
+    joint 增补键「有则给」：gate 非空 / objective 非 None 才进事件。
+    """
+    ev = {
         "round_i": cand.round_i,
         "cand_i": cand.cand_i,
         "direction": cand.direction,
@@ -237,6 +288,11 @@ def _event(cand: _CandCtx, decision: str, rank_ic_mean: Any, expression: str) ->
         "decision": decision,
         "rank_ic_mean": rank_ic_mean,
     }
+    if cand.gate:
+        ev["gate"] = cand.gate
+    if objective is not None:
+        ev["objective"] = objective
+    return ev
 
 
 def _emit_llm_error(ctx: _RunCtx, cand: _CandCtx, exc: LLMError) -> None:
@@ -258,6 +314,46 @@ def _fail_step(
     t = _new_trajectory(ctx.cfg, cand, payload, outcome)
     ctx.pool.add(t)
     _emit(ctx.on_event, **_event(cand, "fail", None, t.expression))
+
+
+def _judge_cell(
+    cell: dict | None, metrics: dict[str, Any], min_objective: float
+) -> list[str]:
+    """三轴适应度层判定（joint 第二层，decision 仍纯确定性）：返回追加的 fail 原因。
+
+    cell None（格子失败/无交易）或 objective 缺失/低于阈值 → fail（NaN 比较
+    为 False，fail-closed）；过则把 objective/margin/expectancy_R/
+    cell_signature 写进 mining_metrics（rank_ic_mean 仍在，轨迹校验不破）。
+    """
+    if cell is None:
+        return ["三轴单元格失败或无交易（cell_runner 返回 None）"]
+    metrics.update(
+        {
+            "objective": cell.get("objective"),
+            "margin": cell.get("margin"),
+            "expectancy_R": cell.get("expectancy_R"),
+            "cell_signature": cell.get("cell_signature"),
+        }
+    )
+    obj = cell.get("objective")
+    if obj is None or not obj >= min_objective:
+        return [f"objective={obj} 未达阈值 {min_objective}"]
+    return []
+
+
+def _cell_layer(
+    ctx: _RunCtx, cand: _CandCtx, payload: dict[str, str], metrics: dict[str, Any]
+) -> list[str]:
+    """joint 第二层：IC 过门后跑三轴单元格（控成本），返回追加的 fail 原因。"""
+    assert ctx.cell_runner is not None  # run_loop 入口已校验 joint 必有执行器
+    cell = ctx.cell_runner(
+        payload["expression"],
+        cand.gate,
+        cand.exit_params,
+        start=ctx.cfg.mining_start,
+        end=ctx.cfg.mining_end,
+    )
+    return _judge_cell(cell, metrics, ctx.cfg.min_objective)
 
 
 def _judge_and_record(ctx: _RunCtx, cand: _CandCtx, payload: dict[str, str]) -> None:
@@ -286,22 +382,40 @@ def _judge_and_record(ctx: _RunCtx, cand: _CandCtx, payload: dict[str, str]) -> 
         min_rank_ic=ctx.cfg.min_rank_ic,
         min_rank_icir=ctx.cfg.min_rank_icir,
     )
+    metrics = asdict(stats)
+    if ctx.cfg.joint and decision == "pass":
+        # IC 门 fail 时零 cell 调用；第二层结果并进 reasons/decision（纯确定性）。
+        reasons = reasons + _cell_layer(ctx, cand, payload, metrics)
+        if reasons:
+            decision = "fail"
     t0 = _new_trajectory(
-        ctx.cfg, cand, payload, _Judged(asdict(comp), asdict(stats), decision, "")
+        ctx.cfg, cand, payload, _Judged(asdict(comp), metrics, decision, "")
     )
     best = ctx.pool.best(1, direction=cand.direction)
     note = operators.interpret(t0, best[0] if best else None, ctx.llm)
     feedback = ("；".join(reasons) + "\n" if reasons else "") + note
     t = replace(t0, feedback=feedback)  # feedback 不参与 make_id，id 不变
     ctx.pool.add(t)
-    _emit(ctx.on_event, **_event(cand, decision, stats.rank_ic_mean, t.expression))
+    _emit(
+        ctx.on_event,
+        **_event(
+            cand, decision, stats.rank_ic_mean, t.expression, metrics.get("objective")
+        ),
+    )
 
 
 def _step(ctx: _RunCtx, direction: str, phase: str, round_i: int, cand_i: int) -> None:
-    """单候选：选父代 → LLM 产出 → DSL 门 → 判定落池（细节全在 helper）。"""
+    """单候选：选父代 → 参数装配（joint）→ LLM 产出 → DSL 门 → 判定落池。"""
     actual_phase, parents = _resolve_phase(phase, direction, ctx.pool, ctx.rng)
+    gate, exit_params = _assemble_params(actual_phase, parents, ctx)
     cand = _CandCtx(
-        direction, actual_phase, tuple(p.id for p in parents), round_i, cand_i
+        direction,
+        actual_phase,
+        tuple(p.id for p in parents),
+        round_i,
+        cand_i,
+        gate,
+        exit_params,
     )
     try:
         payload, dsl_err = _produce_candidate(cand, parents, ctx)
@@ -340,14 +454,23 @@ def run_loop(
     pool: TrajectoryPool,
     *,
     on_event: Callable[[dict], None] | None = None,
+    cell_runner: CellRunner | None = None,
 ) -> TrajectoryPool:
     """跑完整进化循环，返回 pool（就地累积，返回值仅为方便链式）。
 
     ⚠️ 入口第一件事是把 bars **物理截尾**到 ``cfg.mining_end``：循环全程（含
     所有候选的 mining 评估）只用这份副本，mining_end 之后的数据绝不在场。
     调用方（CLI）通常已先截尾过一次 —— 这里再截一次是库层的自保，幂等无害。
+
+    ``cfg.joint=True`` 时必须给 ``cell_runner``（三轴适应度执行器，协议见
+    模块顶部 ``CellRunner`` 注释）——它是循环内唯一的三轴单元格入口，
+    只在 IC 门过门后被调用（控成本）。
     """
     _validate_cfg(cfg)
+    if cfg.joint and cell_runner is None:
+        raise ValueError(
+            "LoopConfig.joint=True 必须提供 cell_runner（三轴适应度执行器）"
+        )
     ctx = _RunCtx(
         cfg=cfg,
         mining_bars=clip_tail(bars_by_code, cfg.mining_end),
@@ -355,6 +478,7 @@ def run_loop(
         pool=pool,
         rng=random.Random(cfg.seed),
         on_event=on_event,
+        cell_runner=cell_runner,
     )
     for direction in cfg.directions:
         for round_i in range(cfg.rounds):
@@ -362,6 +486,18 @@ def run_loop(
             for cand_i in range(cfg.candidates_per_round):
                 _step(ctx, direction, phase, round_i, cand_i)
     return pool
+
+
+@dataclass(frozen=True)
+class JointVerdict:
+    """joint 模式的终审行：双窗 IC 判定 + 判定窗三轴单元格重跑结果。
+
+    ``judgment_cell`` 只对 gate 非空的 joint 轨迹重跑（非 joint 轨迹 / 格子
+    失败时为 None）；判定窗数据同样只在闭环结束后被本函数触及。
+    """
+
+    dual: DualWindowResult
+    judgment_cell: dict[str, Any] | None
 
 
 def final_judgment(
@@ -372,19 +508,35 @@ def final_judgment(
     judgment: Window,
     top_n: int = 5,
     horizon: int = 5,
-) -> list[DualWindowResult]:
-    """对池内 best(top_n) 逐个跑双窗判定，返回 DualWindowResult 列表。
+    cell_runner: CellRunner | None = None,
+) -> list[DualWindowResult] | list[JointVerdict]:
+    """对池内 best(top_n) 逐个跑双窗判定。
 
     ⚠️ 这是全包**唯一允许读判定窗数据**的函数：仅在进化闭环结束后调用
     （run_loop 全程不接触 mining.end 之后的数据）。窗口重叠/倒挂 →
     ``validate_windows`` 先 raise ValueError（fail-closed）。
+
+    给了 ``cell_runner``（joint 模式）时返回 ``list[JointVerdict]``：对 gate
+    非空的轨迹用判定窗 start/end 重跑三轴单元格；否则返回
+    ``list[DualWindowResult]``（既有调用方行为逐位不变）。
     """
     validate_windows(mining, judgment)
-    out = []
+    out: list[Any] = []
     for t in pool.best(top_n):
-        out.append(
-            run_dual_window(
-                t.expression, bars_by_code, mining, judgment, horizon=horizon
-            )
+        dual = run_dual_window(
+            t.expression, bars_by_code, mining, judgment, horizon=horizon
         )
+        if cell_runner is None:
+            out.append(dual)
+            continue
+        cell = None
+        if t.gate:  # joint 轨迹才重跑判定窗单元格（老轨迹无参数分量可跑）
+            cell = cell_runner(
+                t.expression,
+                t.gate,
+                dict(t.exit_params),
+                start=judgment.start,
+                end=judgment.end,
+            )
+        out.append(JointVerdict(dual=dual, judgment_cell=cell))
     return out

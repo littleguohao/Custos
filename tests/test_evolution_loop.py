@@ -22,6 +22,7 @@ import pandas as pd
 import pytest
 
 from custos.research import evolution_loop as el
+from custos.research.evolution import genome
 from custos.research.evolution import llm_client as lc
 from custos.research.evolution import loop as loop_mod
 from custos.research.evolution import operators as ops
@@ -1216,3 +1217,250 @@ class TestGridJudge:
             (tmp_path / "out" / "t1" / "_summary__t1.json").read_text("utf-8")
         )
         assert summary["grid_judge"]["skipped"] is True  # schema 常驻，未开则 skipped
+
+
+# ---------- 联合演化第一档（TODO #68）：joint 基因组循环 ----------
+
+
+class FakeCellRunner:
+    """假三轴单元格执行器：记录调用，按配置返回适应度（None=格子失败）。"""
+
+    def __init__(self, objective=0.5, none=False):
+        self.calls: list[dict] = []
+        self.objective = objective
+        self.none = none
+
+    def __call__(self, expr, gate, exit_params, *, start, end):
+        self.calls.append(
+            {
+                "expr": expr,
+                "gate": gate,
+                "exit_params": dict(exit_params),
+                "start": start,
+                "end": end,
+            }
+        )
+        if self.none:
+            return None
+        return {
+            "objective": self.objective,
+            "margin": 0.1,
+            "expectancy_R": 0.2,
+            "cell_signature": "sig123",
+        }
+
+
+def _joint_traj(expr, *, direction="动量", ric=0.05, ricir=0.5, gate=None, params=None):
+    """joint 轨迹：gate/exit_params 落基因组分量（未给的分量取 default_params）。"""
+    g, p = genome.default_params()
+    if gate is not None:
+        g = gate
+    if params is not None:
+        p = params
+    t = _mk_traj(expr, direction=direction, ric=ric, ricir=ricir)
+    return loop_mod.replace(t, gate=g, exit_params=dict(p))
+
+
+class TestJointLoop:
+    def test_joint_requires_cell_runner(self):
+        with pytest.raises(ValueError, match="cell_runner"):
+            loop_mod.run_loop(
+                _cfg(joint=True), make_bars(), ScriptedLLM([]), TrajectoryPool()
+            )
+
+    def test_ic_fail_zero_cell_calls(self):
+        # ① IC 门 fail（恒值表达式 n_days=0）→ 零 cell 调用（控成本）
+        runner = FakeCellRunner()
+        pool = TrajectoryPool()
+        loop_mod.run_loop(
+            _cfg(joint=True),
+            make_bars(),
+            ScriptedLLM([_cand("CLOSE/CLOSE", "恒值")]),
+            pool,
+            cell_runner=runner,
+        )
+        assert runner.calls == []
+        assert pool.all()[0].decision == "fail"
+        assert "objective" not in pool.all()[0].mining_metrics
+
+    def test_cell_none_fails(self):
+        # ②a IC 过门但格子失败（cell None）→ fail，reasons 记录第二层
+        pool = TrajectoryPool()
+        loop_mod.run_loop(
+            _cfg(joint=True),
+            make_bars(),
+            ScriptedLLM([_cand("ROC(CLOSE,5)", "动量")]),
+            pool,
+            cell_runner=FakeCellRunner(none=True),
+        )
+        t = pool.all()[0]
+        assert t.decision == "fail" and "cell_runner 返回 None" in t.feedback
+
+    def test_objective_below_threshold_fails(self):
+        # ②b objective 低于阈值 → fail；metrics 仍如实带 objective 读数
+        pool = TrajectoryPool()
+        loop_mod.run_loop(
+            _cfg(joint=True, min_objective=0.3),
+            make_bars(),
+            ScriptedLLM([_cand("ROC(CLOSE,5)", "动量")]),
+            pool,
+            cell_runner=FakeCellRunner(objective=0.1),
+        )
+        t = pool.all()[0]
+        assert t.decision == "fail"
+        assert t.mining_metrics["objective"] == 0.1
+
+    def test_pass_lands_genome_fields(self):
+        # ②c 全过 → pass：trajectory 落 gate/exit_params + mining_metrics 新键
+        runner = FakeCellRunner(objective=0.5)
+        pool = TrajectoryPool()
+        loop_mod.run_loop(
+            _cfg(joint=True, min_objective=0.3),
+            make_bars(),
+            ScriptedLLM([_cand("ROC(CLOSE,5)", "动量")]),
+            pool,
+            cell_runner=runner,
+        )
+        t = pool.all()[0]
+        assert t.decision == "pass"
+        gate, params = genome.default_params()  # origin → 默认基因组分量
+        assert t.gate == gate and t.exit_params == params
+        mm = t.mining_metrics
+        assert mm["objective"] == 0.5 and mm["margin"] == 0.1
+        assert mm["expectancy_R"] == 0.2 and mm["cell_signature"] == "sig123"
+        assert isinstance(mm["rank_ic_mean"], float)  # 主键仍在（轨迹校验不破）
+        # cell 调用窗口 = 挖掘窗（mining_end 硬隔离线）
+        assert runner.calls[0]["start"] == MINING.start
+        assert runner.calls[0]["end"] == MINING.end
+
+    def _ctx(self, cfg, seed):
+        return loop_mod._RunCtx(
+            cfg=cfg,
+            mining_bars={},
+            llm=ScriptedLLM([]),
+            pool=TrajectoryPool(),
+            rng=random.Random(seed),
+            on_event=None,
+            cell_runner=FakeCellRunner(),
+        )
+
+    def test_mutation_params_step_along_lattice(self):
+        # ④ mutation 父代参数沿格点步进（种子钉死，与 genome 层逐位一致）
+        cfg = _cfg(joint=True)
+        parent = _joint_traj("ROC(CLOSE,5)")
+        got = loop_mod._assemble_params("mutation", [parent], self._ctx(cfg, 42))
+        want = genome.mutate_params(
+            parent.gate, dict(parent.exit_params), random.Random(42)
+        )
+        assert got == want
+
+    def test_crossover_params_swap_components(self):
+        # ④ crossover 分量交换（种子钉死）
+        cfg = _cfg(joint=True)
+        pa = _joint_traj("ROC(CLOSE,5)", gate=genome.GATE_CHOICES[0])
+        pb = _joint_traj("DELTA(CLOSE,3)", gate=genome.GATE_CHOICES[-1])
+        got = loop_mod._assemble_params("crossover", [pa, pb], self._ctx(cfg, 7))
+        want = genome.crossover_params(
+            (pa.gate, dict(pa.exit_params)),
+            (pb.gate, dict(pb.exit_params)),
+            random.Random(7),
+        )
+        assert got == want
+
+    def test_legacy_parent_falls_back_to_default(self):
+        # ⑤ 老轨迹（无参数字段）作父代 → 先落 default 再变异
+        cfg = _cfg(joint=True)
+        legacy = _mk_traj("ROC(CLOSE,5)", direction="动量")  # gate="" exit_params={}
+        got = loop_mod._assemble_params("mutation", [legacy], self._ctx(cfg, 42))
+        want = genome.mutate_params(*genome.default_params(), random.Random(42))
+        assert got == want
+
+    def test_event_carries_gate_and_objective(self):
+        runner = FakeCellRunner(objective=0.5)
+        events: list[dict] = []
+        loop_mod.run_loop(
+            _cfg(joint=True),
+            make_bars(),
+            ScriptedLLM([_cand("ROC(CLOSE,5)", "动量")]),
+            TrajectoryPool(),
+            on_event=events.append,
+            cell_runner=runner,
+        )
+        assert events[0]["gate"] == genome.GATE_CHOICES[0]
+        assert events[0]["objective"] == 0.5
+
+
+class TestJointFinalJudgment:
+    def test_judgment_window_passed_to_cell_runner(self):
+        # joint 轨迹重跑判定窗单元格；老轨迹（gate=""）不重跑
+        runner = FakeCellRunner()
+        pool = TrajectoryPool()
+        pool.add(_joint_traj("ROC(CLOSE,5)", ricir=0.9))
+        pool.add(_mk_traj("DELTA(CLOSE,3)", direction="动量", ricir=0.4))  # 老轨迹
+        out = loop_mod.final_judgment(
+            pool,
+            make_bars(),
+            mining=MINING,
+            judgment=JUDGMENT,
+            top_n=5,
+            horizon=5,
+            cell_runner=runner,
+        )
+        assert len(out) == 2 and all(isinstance(v, loop_mod.JointVerdict) for v in out)
+        assert len(runner.calls) == 1  # 只有 gate 非空的轨迹重跑
+        assert runner.calls[0]["start"] == JUDGMENT.start
+        assert runner.calls[0]["end"] == JUDGMENT.end
+        joint_row = [v for v in out if v.judgment_cell is not None][0]
+        assert joint_row.judgment_cell["cell_signature"] == "sig123"
+        legacy_row = [v for v in out if v.judgment_cell is None][0]
+        assert legacy_row.dual.expression == "DELTA(CLOSE,3)"
+
+    def test_without_cell_runner_returns_dual_results(self):
+        # 既有行为不变：不给 cell_runner → 返回纯 DualWindowResult 列表
+        pool = TrajectoryPool()
+        pool.add(_mk_traj("ROC(CLOSE,5)"))
+        out = loop_mod.final_judgment(
+            pool, make_bars(), mining=MINING, judgment=JUDGMENT
+        )
+        assert isinstance(out[0], DualWindowResult)
+
+
+class TestJointCLI:
+    def test_joint_smoke(self, tmp_path, monkeypatch):
+        runner = FakeCellRunner(objective=0.5)
+        monkeypatch.setattr(el, "_make_cell_runner", lambda *a, **k: runner)
+        bars, codes_file = TestCLI._setup(tmp_path)
+        rc = el.main(
+            TestCLI._argv(tmp_path, codes_file, "--mock-llm", "--joint"),
+            loader=TestCLI._loader(bars, []),
+        )
+        assert rc == 0
+        summary = json.loads(
+            (tmp_path / "out" / "t1" / "_summary__t1.json").read_text("utf-8")
+        )
+        assert summary["config"]["joint"] is True
+        assert runner.calls  # IC 过门的候选确实跑了三轴单元格
+        best = summary["best"][0]
+        assert best["gate"] and best["exit_params"]
+        assert best["objective"] == 0.5
+        pool = TrajectoryPool.load(tmp_path / "out" / "t1" / "trajectory_pool.json")
+        passes = [t for t in pool.all() if t.decision == "pass"]
+        assert passes and all(t.gate for t in passes)
+
+    def test_joint_final_judge_verdict_schema(self, tmp_path, monkeypatch):
+        runner = FakeCellRunner(objective=0.5)
+        monkeypatch.setattr(el, "_make_cell_runner", lambda *a, **k: runner)
+        bars, codes_file = TestCLI._setup(tmp_path)
+        rc = el.main(
+            _grid_argv(tmp_path, codes_file, "--mock-llm", "--joint"),
+            loader=TestCLI._loader(bars, []),
+        )
+        assert rc == 0
+        summary = json.loads(
+            (tmp_path / "out" / "t1" / "_summary__t1.json").read_text("utf-8")
+        )
+        fj = summary["final_judgment"][0]
+        assert "dual" in fj and "judgment_cell" in fj  # JointVerdict 包装
+        # 判定窗单元格也跑过（挖掘窗 + 判定窗两类窗口都在调用记录里）
+        windows = {(c["start"], c["end"]) for c in runner.calls}
+        assert (JUDGMENT.start, JUDGMENT.end) in windows

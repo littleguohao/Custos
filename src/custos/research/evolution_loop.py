@@ -66,6 +66,7 @@ from custos.research.evolution.llm_client import (  # noqa: E402
     LLMConfig,
 )
 from custos.research.evolution.loop import (  # noqa: E402
+    JointVerdict,
     LoopConfig,
     clip_tail,
     final_judgment,
@@ -178,6 +179,18 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=0,
         help="三轴终审的子进程预算透传（0=不透传，用 strategy_grid 默认）",
+    )
+    ap.add_argument(
+        "--joint",
+        action="store_true",
+        help="联合演化第一档：基因组=（表达式×gate×出场参数），IC 过门后跑"
+        "三轴单元格适应度（参数走确定性档位格点，LLM 不碰数值调参）",
+    )
+    ap.add_argument(
+        "--joint-min-objective",
+        type=float,
+        default=0.0,
+        help="joint 的三轴适应度阈值（objective 低于则 fail；默认 0.0）",
     )
     ap.add_argument(
         "--out-dir", default="", help=f"产物根目录（默认 {OUTDIR}），tag 作子目录"
@@ -300,20 +313,29 @@ def _print_summary(
     grid: dict[str, Any],
 ) -> None:
     """结尾汇总表（best top-N + 判定窗双窗终审 + 三轴终审列）。"""
+    best = pool.best(top_n)
+    joint = any(t.gate for t in best)  # 有 joint 轨迹 → 加基因组列
     print("\n== 进化汇总（best 按 rank_icir 降序） ==")
-    print(f"{'决策':<6} {'RankIC':>8} {'ICIR':>8}  表达式")
-    for t in pool.best(top_n):
+    if joint:
+        print(f"{'决策':<6} {'RankIC':>8} {'ICIR':>8} {'objective':>9}  gate / 表达式")
+    else:
+        print(f"{'决策':<6} {'RankIC':>8} {'ICIR':>8}  表达式")
+    for t in best:
         mm = t.mining_metrics
-        print(
+        line = (
             f"{t.decision:<6} {_fmt_ic(mm.get('rank_ic_mean')):>8} "
-            f"{_fmt_ic(mm.get('rank_icir')):>8}  {t.expression[:64]}"
+            f"{_fmt_ic(mm.get('rank_icir')):>8}"
         )
+        if joint:
+            line += f" {_fmt_ic(mm.get('objective')):>9}  {t.gate or '-'} /"
+        print(f"{line}  {t.expression[:56]}")
     counts = _decision_counts(pool)
     print(f"\n池规模 {len(pool)}：pass {counts['pass']} / fail {counts['fail']}")
     if dual:
         print("\n== 判定窗终审（双窗） ==")
         print(f"{'通过':<4} {'判定RankIC':>10} {'判定ICIR':>9}  表达式 / 未过原因")
-        for r in dual:
+        for row in dual:
+            r = _dual_of(row)  # joint 模式是 JointVerdict 包装
             mark = "✓" if r.passed else "✗"
             reasons = "" if r.passed else f"（{'；'.join(r.reasons)}）"
             print(
@@ -341,6 +363,9 @@ def _best_rows(pool: TrajectoryPool, top_n: int) -> list[dict]:
             "decision": t.decision,
             "rank_ic_mean": t.mining_metrics.get("rank_ic_mean"),
             "rank_icir": t.mining_metrics.get("rank_icir"),
+            "gate": t.gate,  # joint 基因组分量（非 joint 为 "" / {} / None）
+            "exit_params": dict(t.exit_params),
+            "objective": t.mining_metrics.get("objective"),
             "parent_ids": list(t.parent_ids),
         }
         for t in pool.best(top_n)
@@ -352,10 +377,17 @@ def _make_on_event(args: Any, llm: Any) -> Callable[[dict], None]:
 
     def _on_event(ev: dict) -> None:
         err = f" ⚠️{ev['error'][:80]}" if ev.get("error") else ""
+        gate = f" {ev['gate']}" if ev.get("gate") else ""
+        obj = (
+            f" obj={_fmt_ic(ev['objective'])}"
+            if ev.get("objective") is not None
+            else ""
+        )
         print(
             f"[evo] r{ev['round_i']}c{ev['cand_i']} {ev['direction']} "
             f"{ev['phase']:<9} {ev['decision']:<9} "
-            f"RankIC={_fmt_ic(ev.get('rank_ic_mean')):>8} {ev.get('expression', '')[:64]}{err}",
+            f"RankIC={_fmt_ic(ev.get('rank_ic_mean')):>8}{gate}{obj} "
+            f"{ev.get('expression', '')[:56]}{err}",
             flush=True,
         )
         used = int(getattr(llm, "total_tokens", 0))
@@ -372,8 +404,9 @@ def _run_final_judge(
     load: Callable[[list[str], int], dict],
     codes: list[str],
     pool: TrajectoryPool,
-) -> list[DualWindowResult]:
-    """判定窗终审：未开 --final-judge 返回 []。"""
+    cell_runner: Any,
+) -> list[Any]:
+    """判定窗终审：未开 --final-judge 返回 []；joint 时重跑判定窗单元格。"""
     if not args.final_judge:
         return []
     # 双窗物理隔离 ②：判定窗**重新从磁盘加载**完整数据再切片 —— 与挖掘用的
@@ -386,10 +419,74 @@ def _run_final_judge(
         judgment=Window(args.judgment_start, args.judgment_end),
         top_n=args.top_n,
         horizon=args.horizon,
+        cell_runner=cell_runner,
     )
 
 
 # ---------- 三轴终审（--grid-judge：strategy_grid 子进程） ----------
+
+
+def _dual_of(row: Any) -> DualWindowResult:
+    """final_judgment 行统一取双窗部分（joint 模式是 JointVerdict 包装）。"""
+    return row.dual if isinstance(row, JointVerdict) else row
+
+
+def _make_cell_runner(
+    args: Any, codes: list[str], out_dir: Path
+) -> Callable[..., dict | None]:
+    """构造 cell_runner（--joint 的循环内三轴适应度执行器，可 monkeypatch）。
+
+    复用 strategy_grid 的单元格机制：每格 = 一次 backtest_factors --trade-sim
+    子进程（scorer=expr:<expr>，gate/出场参数=基因组分量，窗口 start/end 透传，
+    宇宙复用本 run codes）；out 目录 ``{out_dir}/grid_cells/``，cell_signature
+    复用跳过免费获得（同签名格子不重跑）。子进程非零/结果缺 → None。
+    ⚠️ 物理隔离：格子子进程自行按给定窗口加载数据，与挖掘期数据副本无共享。
+    """
+    from custos.research import strategy_grid as sg  # noqa: PLC0415
+
+    cells_dir = out_dir / "grid_cells"
+    cells_dir.mkdir(parents=True, exist_ok=True)
+    if args.codes_file:
+        codes_file = args.codes_file
+    else:  # 抽样/裸 codes → 落一份代码表钉死（同 --grid-judge 的宇宙口径）
+        codes_path = cells_dir / f"_joint_codes__{out_dir.name}.txt"
+        codes_path.write_text("\n".join(codes) + "\n", encoding="utf-8")
+        codes_file = str(codes_path)
+
+    def cell_runner(
+        expr: str, gate: str, exit_params: dict, *, start: str, end: str
+    ) -> dict | None:
+        ns = argparse.Namespace(  # strategy_grid._cell_args/run_cell 的最小面
+            cost_bps=25.0,  # strategy_grid 默认往返成本
+            no_amv_pin=False,  # 0AMV 研究基底钉死（口径同 strategy_grid 默认）
+            codes_file=codes_file,
+            sample=0,
+            start=start,
+            end=end,
+            count=args.count or 500,
+            top_n=0,
+            force=False,
+            timeout=sg.CELL_TIMEOUT_S,
+            universe_digest="",
+        )
+        cell = {
+            "scorer": f"expr:{expr}",
+            "gate": gate,
+            "exit": "joint_cell",
+            "params": dict(exit_params),
+        }
+        status, path, _log = sg.run_cell(ns, cell, cells_dir)
+        if status == "failed" or path is None:
+            return None
+        row = sg.load_cell_row(cell, path, reused=(status == "reused"))
+        return {
+            "objective": sg.objective_of(row, sg.DEFAULT_OBJ_WEIGHTS),
+            "margin": row.get("margin"),
+            "expectancy_R": row.get("expectancy_R"),
+            "cell_signature": _row_signature(row),
+        }
+
+    return cell_runner
 
 
 def _row_signature(row: dict) -> str | None:
@@ -477,7 +574,9 @@ def _run_grid_judge(
     """
     if not args.grid_judge:
         return {"skipped": True, "reason": "未开 --grid-judge"}
-    exprs = list(dict.fromkeys(r.expression for r in dual if r.passed))
+    exprs = list(
+        dict.fromkeys(_dual_of(r).expression for r in dual if _dual_of(r).passed)
+    )
     if not exprs:
         return {"skipped": True, "reason": "双窗终审 0 pass，无可提交三轴终审的表达式"}
     grid_tag = f"{out_dir.name}__grid"
@@ -550,11 +649,25 @@ def _report(res: _RunResult, grid: dict[str, Any]) -> None:
     _print_summary(res.pool, res.args.top_n, res.dual, grid)
 
 
+@dataclass(frozen=True)
+class _Prepared:
+    """_prepare 的产出聚合（main 的局部变量预算友好）。
+
+    bars 在截尾后被 ``replace(prep, bars=None)`` 丢弃（双窗物理隔离 ①），
+    故类型允许 None。
+    """
+
+    llm: Any
+    codes: list[str]
+    load: Callable[[list[str], int], dict]
+    bars: dict | None
+
+
 def _prepare(
     args: Any,
     ap: argparse.ArgumentParser,
     loader: Optional[Callable[[list[str], int], dict]],
-) -> tuple[Any, list[str], Callable[[list[str], int], dict], dict]:
+) -> _Prepared:
     """LLM 装配 + 宇宙解析 + 数据加载。
 
     宇宙解析与本地加载**复用** backtest_factors 的既有实现（codes_file 钉死 >
@@ -569,19 +682,32 @@ def _prepare(
             bt._load_bars_local, start=None, end=None, allow_tail_clip=False
         )
     )
-    return llm, codes, load, load(codes, args.count)
+    return _Prepared(llm, codes, load, load(codes, args.count))
 
 
-def _execute(
-    args: Any,
-    cfg: LoopConfig,
-    mining_bars: dict,
-    llm: Any,
-    pool: TrajectoryPool,
-) -> None:
+@dataclass(frozen=True)
+class _ExecCtx:
+    """_execute 的入参聚合（避免 6+ 散参）。"""
+
+    args: Any
+    cfg: LoopConfig
+    mining_bars: dict
+    llm: Any
+    pool: TrajectoryPool
+    cell_runner: Any  # joint 的循环内三轴适应度执行器（非 joint 为 None）
+
+
+def _execute(ctx: _ExecCtx) -> None:
     """跑进化循环；token 预算超支 → 警告后带着已落池的轨迹继续走收尾。"""
     try:
-        run_loop(cfg, mining_bars, llm, pool, on_event=_make_on_event(args, llm))
+        run_loop(
+            ctx.cfg,
+            ctx.mining_bars,
+            ctx.llm,
+            ctx.pool,
+            on_event=_make_on_event(ctx.args, ctx.llm),
+            cell_runner=ctx.cell_runner,
+        )
     except _BudgetExceeded as exc:
         print(f"[WARN] {exc}", file=sys.stderr)
 
@@ -593,8 +719,8 @@ def main(
     ap = _build_parser()
     args = ap.parse_args(argv)
     _validate_args(args, ap)
-    llm, codes, load, bars = _prepare(args, ap, loader)
-    if not bars:
+    prep = _prepare(args, ap, loader)
+    if not prep.bars:
         print(
             "[ERR] 未加载到任何 K 线（数据源/代码列表/日期区间有问题？），拒绝运行",
             file=sys.stderr,
@@ -606,10 +732,10 @@ def main(
     # 不存在 → 空池；损坏 → raise（fail-closed）
     pool = TrajectoryPool.load(out_dir / "trajectory_pool.json")
 
-    # 双窗物理隔离 ①：加载后立刻按 mining_end 截尾一份副本给循环；原始全量
-    # bars 在本函数内也不再被引用（判定窗数据在挖掘阶段物理不在场）。
-    mining_bars = clip_tail(bars, args.mining_end)
-    del bars
+    # 双窗物理隔离 ①：加载后立刻按 mining_end 截尾一份副本给循环；全量 bars
+    # 的引用当场丢弃（判定窗数据在挖掘阶段物理不在场）。
+    mining_bars = clip_tail(prep.bars, args.mining_end)
+    prep = replace(prep, bars=None)
 
     cfg = LoopConfig(
         directions=tuple(args.direction),
@@ -620,9 +746,12 @@ def main(
         horizon=args.horizon,
         seed=args.seed,
         run_tag=tag,
+        joint=bool(args.joint),
+        min_objective=args.joint_min_objective,
     )
+    cell_runner = _make_cell_runner(args, prep.codes, out_dir) if args.joint else None
     pool_size_before = len(pool)  # 本 run 新增轨迹数的基线（空结果护栏用）
-    _execute(args, cfg, mining_bars, llm, pool)
+    _execute(_ExecCtx(args, cfg, mining_bars, prep.llm, pool, cell_runner))
 
     # 空结果护栏（对照 backtest_factors._empty_result_guard 语义）：本次运行什么都没
     # 产出（LLM 全挂等）→ 非零退出且不写产物；有 fail 轨迹属正常研究产出，落盘。
@@ -637,17 +766,17 @@ def main(
         return 2
     pool.save()
 
-    dual = _run_final_judge(args, load, codes, pool)
+    dual = _run_final_judge(args, prep.load, prep.codes, pool, cell_runner)
     res = _RunResult(
         out_dir=out_dir,
         args=args,
         cfg=cfg,
         pool=pool,
-        llm=llm,
+        llm=prep.llm,
         dual=dual,
-        codes_digest=f"{len(codes)} 只",
+        codes_digest=f"{len(prep.codes)} 只",
     )
-    _report(res, _run_grid_judge(args, out_dir, dual, codes))
+    _report(res, _run_grid_judge(args, out_dir, dual, prep.codes))
     return 0
 
 
