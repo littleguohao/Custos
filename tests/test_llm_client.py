@@ -230,3 +230,84 @@ class TestRetryRefinement:
         with pytest.raises(LLMError, match="重试 4 次"):
             _client(max_retry=4).chat(MSG)
         assert len(calls) == 4
+
+
+class TestConfigGuards:
+    def test_repr_hides_api_key(self):
+        cfg = _config(api_key="sk-secret-123")
+        assert "sk-secret-123" not in repr(cfg)
+        assert "api_key" not in repr(cfg)  # field(repr=False)：键名也不出现
+
+    def test_non_https_base_url_rejected(self):
+        with pytest.raises(ValueError, match="https"):
+            _config(base_url="http://api.example.com/v1")
+        with pytest.raises(ValueError, match="https"):
+            _config(base_url="api.example.com/v1")  # 无 scheme 同样拒
+        with pytest.raises(ValueError, match="https"):
+            _config(base_url="u")
+
+    def test_localhost_http_allowed(self):
+        for url in (
+            "http://localhost:8000/v1",
+            "http://127.0.0.1:9000",
+            "http://[::1]:8080/v1",
+        ):
+            assert _config(base_url=url).base_url == url
+
+    def test_from_env_non_https_returns_none(self, monkeypatch):
+        monkeypatch.setenv(lc.ENV_BASE_URL, "http://api.example.com/v1")
+        monkeypatch.setenv(lc.ENV_API_KEY, "k")
+        monkeypatch.setenv(lc.ENV_MODEL, "m")
+        monkeypatch.delenv(lc.ENV_TIMEOUT, raising=False)
+        assert lc.LLMConfig.from_env() is None  # 非 https 非回环 → fail-closed None
+        monkeypatch.setenv(lc.ENV_BASE_URL, "http://127.0.0.1:8080/v1")
+        cfg = lc.LLMConfig.from_env()
+        assert cfg is not None and cfg.base_url == "http://127.0.0.1:8080/v1"
+
+
+class TestRetryAfterHeader:
+    def test_header_preferred_over_text(self, monkeypatch):
+        class Resp:
+            status_code = 429
+            text = "rate limited; retry after 2"  # 文本提示与头不一致 → 头优先
+            headers = {"Retry-After": "7"}
+
+            def json(self):
+                return {}
+
+        monkeypatch.setattr(lc.requests, "post", lambda *a, **kw: Resp())
+        with pytest.raises(LLMError) as exc:
+            lc._post(_config(), {})
+        assert exc.value.retry_after == 7.0
+
+    def test_http_date_header_falls_back_to_text(self, monkeypatch):
+        class Resp:
+            status_code = 503
+            text = "retry after 3"
+            headers = {
+                "Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"
+            }  # 不支持 HTTP-date
+
+            def json(self):
+                return {}
+
+        monkeypatch.setattr(lc.requests, "post", lambda *a, **kw: Resp())
+        with pytest.raises(LLMError) as exc:
+            lc._post(_config(), {})
+        assert exc.value.retry_after == 3.0
+
+    def test_header_seconds_drive_backoff(self, monkeypatch):
+        sleeps = []
+        calls = []
+
+        def fake_post(config, payload):
+            calls.append(1)
+            if len(calls) == 1:
+                raise LLMError("rate limited", status_code=429, retry_after=7.0)
+            return _ok()
+
+        monkeypatch.setattr(lc, "_post", fake_post)
+        c = _client(max_retry=2)
+        c.sleep = sleeps.append
+        assert c.chat(MSG) == "ok"
+        assert sleeps == [7.0]  # 头解析出的秒数进入退避（60s 封顶既有行为不变）

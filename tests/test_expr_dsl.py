@@ -286,3 +286,66 @@ def test_violations_all_thresholds_trigger():
 def test_violations_custom_threshold():
     comp = expr_dsl.complexity("MA(CLOSE,5)")
     assert expr_dsl.violations(comp, max_symbol_len=5)
+
+
+# ---------- 规模硬上限（在任何递归遍历之前拒，防 RecursionError） ----------
+
+
+def test_overlong_expression_rejected():
+    # ~6000 字符平铺链：旧实现在递归校验里 RecursionError；现在长度门先拒
+    giant = "+".join(["CLOSE"] * 1000)
+    assert len(giant) > expr_dsl.MAX_EXPR_LEN
+    with pytest.raises(ExprError, match="长度"):
+        expr_dsl.parse(giant)
+
+
+def test_too_many_nodes_rejected():
+    # 长度没超但节点超：749 个 walk 节点（含 Add 算子节点）> MAX_EXPR_NODES(400)
+    chain = "+".join(["1"] * 250)
+    assert len(chain) <= expr_dsl.MAX_EXPR_LEN
+    with pytest.raises(ExprError, match="节点数"):
+        expr_dsl.parse(chain)
+
+
+def test_deep_nesting_recursion_becomes_expr_error():
+    # 几千层括号：解析器自身递归先被打爆 —— 同样归一为 ExprError（不泄 RecursionError）
+    deep = "(" * 1500 + "CLOSE" + ")" * 1500
+    with pytest.raises(ExprError):
+        expr_dsl.parse(deep)
+
+
+def test_size_caps_boundary():
+    # 恰好顶到上限仍受理：4000 字符（单个长浮点字面量）；398 个 walk 节点
+    # （133 项平铺：133 常量 + 132 二元 + 132 Add + 1 根）都 <= 上限
+    ok = "0." + "1" * (expr_dsl.MAX_EXPR_LEN - 2)  # 恰好 4000 字符的合法表达式
+    assert isinstance(expr_dsl.parse(ok), ast.Expression)
+    expr_dsl.parse("+".join(["1"] * 133))  # 398 节点
+    with pytest.raises(ExprError, match="长度"):
+        expr_dsl.parse(ok + "1")  # 4001 字符 > 4000
+    with pytest.raises(ExprError, match="节点数"):
+        expr_dsl.parse("+".join(["1"] * 134))  # 401 节点 > 400
+
+
+def test_size_caps_apply_to_raw_ast_too():
+    # 手工构造的超限 AST 同样被节点门拦下（绕过 parse 不等于绕过上限）
+    tree = ast.parse("+".join(["1"] * 250), mode="eval")
+    with pytest.raises(ExprError, match="节点数"):
+        expr_dsl.evaluate(tree, DF)
+
+
+# ---------- _safe_div 标量除零的符号（IEEE：分子符号 × 分母符号） ----------
+
+
+def test_safe_div_scalar_negative_zero_sign():
+    # 1 / -0.0 = -inf（-0.0 == 0 为 True，但符号位不能丢；旧实现恒返回 +inf）
+    assert expr_dsl._safe_div(1, -0.0) == float("-inf")
+    assert expr_dsl._safe_div(-1, -0.0) == float("inf")
+    assert expr_dsl._safe_div(1, 0.0) == float("inf")
+    assert expr_dsl._safe_div(-1, 0.0) == float("-inf")
+    assert math.isnan(expr_dsl._safe_div(0, -0.0))  # 0/0 仍是 NaN
+
+
+def test_dsl_level_negative_zero_division():
+    # DSL 层端到端：一元负号构造的 -0.0 字面量走标量路径
+    assert expr_dsl.evaluate("1/-0.0", DF).iloc[0] == float("-inf")
+    assert expr_dsl.evaluate("-1/-0.0", DF).iloc[0] == float("inf")

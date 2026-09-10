@@ -211,3 +211,54 @@ def test_ic_stats_from_series_degenerate():
     assert one.n_days == 1 and math.isnan(one.rank_icir)  # ddof=1 样本不足
     flat = ic_eval.ic_stats_from_series(pd.Series([0.2, 0.2, 0.2]), 5)
     assert flat.rank_ic_mean == pytest.approx(0.2) and math.isnan(flat.rank_icir)
+
+
+# ---------- 非有限值成对剔除（±inf 与 NaN 同口径，同 scorer_bridge 末行检查） ----------
+
+
+def test_day_pairs_drop_nonfinite_pairwise():
+    d = DATES[0]
+    fwd_maps = {
+        "A": pd.Series({d: 0.10}),
+        "B": pd.Series({d: 0.20}),
+        "C": pd.Series({d: float("inf")}),  # 前向收益侧 +inf
+        "D": pd.Series({d: 0.40}),
+        "E": pd.Series({d: 0.50}),
+    }
+    row = pd.Series(
+        {
+            "A": 1.0,
+            "B": float("inf"),  # score 侧 +inf
+            "C": 3.0,
+            "D": float("nan"),  # score NaN（旧口径就剔）
+            "E": float("-inf"),  # score 侧 -inf
+        }
+    )
+    xs, ys = ic_eval._day_pairs(row, fwd_maps, d)
+    assert xs == [1.0] and ys == [0.10]  # B/C/D/E 分别因 score±inf / fwd+inf / NaN 剔除
+
+
+def test_inf_score_excluded_from_cross_section():
+    # S005 第 8 天 close 与前一天相同 → 1/(CLOSE-REF(CLOSE,1)) 当日除零 = +inf；
+    # 该日截面应把它剔除后按 5 股算（旧实现把 inf 当最高分混进秩相关）。
+    uni = trend_universe()  # 6 股几何漂移宇宙（各日 IC 恒 -1，见下）
+    d5 = uni["S005"].copy()
+    d5.loc[d5.index[8], "close"] = d5.loc[d5.index[7], "close"]
+    uni["S005"] = d5
+    expr = "1/(CLOSE-REF(CLOSE,1))"
+    full = ic_eval.rank_ic_by_day(ic_eval.score_frame(expr, uni), uni, horizon=5)
+    reduced = {k: v for k, v in uni.items() if k != "S005"}
+    part = ic_eval.rank_ic_by_day(
+        ic_eval.score_frame(expr, reduced), reduced, horizon=5
+    )
+    # inf 当日：6 股宇宙剔除 S005 后与 5 股宇宙的当日 IC 完全一致（恒 -1：
+    # score 随漂移率递减、前向收益随漂移率递增，完美负相关）
+    assert full.loc[DATES[8]] == pytest.approx(part.loc[DATES[8]])
+    assert full.loc[DATES[8]] == pytest.approx(-1.0)
+
+
+def test_all_inf_scores_skip_every_day():
+    # 全截面除零（1/0）→ 一个有限 score 都不剩 → 有效日 0
+    stats = ic_eval.evaluate_expression("1/(CLOSE-CLOSE)", trend_universe())
+    assert stats.n_days == 0
+    assert math.isnan(stats.rank_ic_mean)

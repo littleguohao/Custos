@@ -100,6 +100,17 @@ class TestMakeId:
         b = make_id(direction="a", hypothesis="bc", expression="e", created_at="t")
         assert a != b
 
+    def test_rerun_same_content_gets_new_id(self):
+        """钉住 docstring 描述的现实：created_at 在哈希里 ⇒ 同假设+表达式重跑
+        得到的是新 id 的新轨迹（add 不幂等跳过，池中刻意累积作谱系证据）。"""
+        a = _mk()
+        b = _mk(created_at="2026-09-09T11:00:00")  # 同假设+表达式，仅创建时间不同
+        assert a.id != b.id
+        pool = TrajectoryPool()
+        pool.add(a)
+        pool.add(b)
+        assert len(pool) == 2  # 表达式级去重在 prompt 层，不在 id 层
+
 
 class TestAddGet:
     def test_add_get_len(self):

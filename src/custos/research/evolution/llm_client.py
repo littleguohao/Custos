@@ -15,8 +15,9 @@ from __future__ import annotations
 import os
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
+from urllib.parse import urlparse
 
 import requests
 
@@ -27,13 +28,28 @@ ENV_TIMEOUT = "CUSTOS_LLM_TIMEOUT"
 
 _DEFAULT_TIMEOUT = 60
 
+# base_url 协议纪律：API key 走 Authorization 头，明文 http 等于把密钥交给
+# 中间人 —— 只许 https；唯一例外是本机回环（测试常 spin 本地 http server）。
+_LOCAL_HTTP_HOSTS = ("localhost", "127.0.0.1", "::1")
+
+
+def _base_url_allowed(url: str) -> bool:
+    """https 一律允许；http 仅允许本机回环；其余 scheme/形态一律拒。"""
+    if url.startswith("https://"):
+        return True
+    if not url.startswith("http://"):
+        return False
+    host = (urlparse(url).hostname or "").lower()
+    return host in _LOCAL_HTTP_HOSTS
+
 
 class LLMError(RuntimeError):
     """LLM 调用最终失败（重试耗尽 / 响应形状不符），上层据此 fail-closed。
 
     附加属性（重试策略用；位置参数 message 用法兼容旧调用方）：
-    ``status_code`` HTTP 状态码（≥400 时记录）；``retry_after`` 429/503 响应
-    文本里解析出的等待秒数；``is_timeout`` 请求超时标记（连续超时熔断用）。
+    ``status_code`` HTTP 状态码（≥400 时记录）；``retry_after`` 429/503 响应的
+    Retry-After 头或文本里解析出的等待秒数；``is_timeout`` 请求超时标记
+    （连续超时熔断用）。
     """
 
     def __init__(
@@ -64,15 +80,26 @@ class ChatLLM(Protocol):
 
 @dataclass(frozen=True)
 class LLMConfig:
-    """LLM 连接配置（immutable；from_env 之外也可手工构造注入测试）。"""
+    """LLM 连接配置（immutable；from_env 之外也可手工构造注入测试）。
+
+    api_key 不进 repr（防日志 / pytest 失败回显 / 报错文本泄钥）；base_url
+    必须 https（本机回环 http 除外），违规在构造期 ValueError（fail-closed）。
+    """
 
     base_url: str  # 如 https://api.openai.com/v1（尾部斜杠在 from_env 去掉）
-    api_key: str
+    api_key: str = field(repr=False)
     model: str
     timeout: int = _DEFAULT_TIMEOUT
     max_retry: int = 3
     # 连续超时熔断阈值：连续 is_timeout 失败这么多次立即 raise（不消耗剩余重试）
     timeout_fail_limit: int = 3
+
+    def __post_init__(self) -> None:
+        if not _base_url_allowed(self.base_url):
+            raise ValueError(
+                f"base_url 必须 https（或本机回环 http: localhost/127.0.0.1/::1）: "
+                f"{self.base_url!r}"
+            )
 
     @classmethod
     def from_env(cls) -> "LLMConfig | None":
@@ -80,11 +107,14 @@ class LLMConfig:
 
         必需：CUSTOS_LLM_BASE_URL / CUSTOS_LLM_API_KEY / CUSTOS_LLM_MODEL；
         可选：CUSTOS_LLM_TIMEOUT（秒，非正整数视为未配置 → None，fail-closed）。
+        base_url 非 https 且非本机回环 → 同样 None（构造期校验的前移，不 raise）。
         """
         base_url = os.environ.get(ENV_BASE_URL, "").strip()
         api_key = os.environ.get(ENV_API_KEY, "").strip()
         model = os.environ.get(ENV_MODEL, "").strip()
         if not (base_url and api_key and model):
+            return None
+        if not _base_url_allowed(base_url):
             return None
         timeout = _DEFAULT_TIMEOUT
         raw_timeout = os.environ.get(ENV_TIMEOUT, "").strip()
@@ -107,10 +137,25 @@ class LLMConfig:
 _RETRY_AFTER_RE = re.compile(r"retry after (\d+(?:\.\d+)?)", re.IGNORECASE)
 
 
-def _parse_retry_after(status_code: int, text: str) -> float | None:
-    """从限流响应文本解析等待秒数；只认 429/503，解析不到返回 None。"""
+def _parse_retry_after(
+    status_code: int, text: str, headers: Any = None
+) -> float | None:
+    """限流等待秒数；只认 429/503，解析不到返回 None。
+
+    优先标准的 ``Retry-After`` 响应头（只认整数/小数秒形态；HTTP-date 形态
+    不支持，落回文本提示），其次响应文本里的「retry after N」提示。返回值的
+    封顶在 ``_backoff_seconds``（60s）统一做。
+    """
     if status_code not in (429, 503):
         return None
+    raw = (headers or {}).get("Retry-After")
+    if raw is not None:
+        try:
+            secs = float(str(raw).strip())
+        except ValueError:
+            secs = None
+        if secs is not None and secs >= 0:
+            return secs
     m = _RETRY_AFTER_RE.search(text)
     return float(m.group(1)) if m else None
 
@@ -140,7 +185,9 @@ def _post(config: LLMConfig, payload: dict[str, Any]) -> dict[str, Any]:
         raise LLMError(
             f"LLM HTTP {resp.status_code}: {resp.text[:200]}",
             status_code=resp.status_code,
-            retry_after=_parse_retry_after(resp.status_code, resp.text),
+            retry_after=_parse_retry_after(
+                resp.status_code, resp.text, getattr(resp, "headers", None)
+            ),
         )
     try:
         data = resp.json()

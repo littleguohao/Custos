@@ -5,6 +5,9 @@
 
 - **LLM 算子只产出候选**（假设 + 表达式 + 机制解释），不做任何数值判定；
   ``decision`` 只由 ``judge_mining``（确定性规则）给出，LLM 输出永远不改写判定。
+  ``judge_mining`` 判据 = 复杂度门 + 有效日数 / rank_ic_mean / rank_icir 阈值
+  + **前后半窗 RankIC 均值同正**（R3 纪律：单窗正不作数，逐日 IC 序列按日期序
+  n//2 切半，两半均值都必须 > 0，NaN/空半窗 fail-closed）。
 - prompt 用中文，模块级常量模板注入：BASE_VARIABLES 清单、OPERATORS 签名、
   复杂度上限、父代/池摘要（假设+表达式+rank_ic_mean/rank_icir+decision+feedback）、
   正交性要求（与父代及池内已有表达式**机制不同**，附去重列表）。
@@ -25,6 +28,8 @@ import random
 import re
 import tokenize
 from typing import Any
+
+import pandas as pd
 
 from custos.research.evolution.expr_dsl import (
     BASE_VARIABLES,
@@ -454,10 +459,25 @@ def interpret(trajectory: Trajectory, sota: Trajectory | None, llm: ChatLLM) -> 
 # ── 确定性判定（唯一有权写 decision 的函数）─────────────────────────────────
 
 
+def _half_window_means(rank_ic_series: pd.Series) -> tuple[float, float]:
+    """逐日 RankIC 序列按日期序 n//2 切前后半窗，返回两半各自的均值。
+
+    镜像 score_return_study.half_window_check 的「按日期序对半切」切法
+    （R3 半窗纪律在 IC 序列形态下的对应物）；半窗内含 NaN（skipna=False）
+    或半窗为空 → 该半均值 nan，由调用方 fail-closed（``nan > 0`` 为 False）。
+    """
+    first = rank_ic_series.iloc[: len(rank_ic_series) // 2]
+    second = rank_ic_series.iloc[len(rank_ic_series) // 2 :]
+    m1 = float(first.mean(skipna=False)) if len(first) else float("nan")
+    m2 = float(second.mean(skipna=False)) if len(second) else float("nan")
+    return m1, m2
+
+
 def judge_mining(
     stats: ICStats,
     comp: Complexity,
     *,
+    rank_ic_series: pd.Series,
     min_days: int = 20,
     min_rank_ic: float = 0.02,
     min_rank_icir: float = 0.1,
@@ -465,8 +485,11 @@ def judge_mining(
     """挖掘窗确定性判定 → (decision, reasons)。
 
     ``violations(comp)`` 非空 → 直接 fail（复杂度违规的候选不值得谈指标）；
-    其余按有效日数 / rank_ic_mean / rank_icir 阈值判，NaN 读数一律不达标
-    （``nan >= x`` 为 False，fail-closed）。reasons 空 = pass。
+    其余按有效日数 / rank_ic_mean / rank_icir 阈值 + **前后半窗 RankIC 均值
+    同正**（R3 纪律：``rank_ic_series`` 按日期序 n//2 切半，两半均值都必须
+    > 0 —— 池化均值为正但半窗翻转的因子是 regime 假象，本仓库 R10/R4/R22
+    反复踩过）判。NaN 读数 / NaN·空半窗一律不达标（``nan >= x`` 为 False，
+    fail-closed）。reasons 空 = pass。
     """
     viol = violations(comp)
     if viol:
@@ -478,4 +501,9 @@ def judge_mining(
         reasons.append(f"rank_ic_mean={stats.rank_ic_mean:.4f} < {min_rank_ic}")
     if not stats.rank_icir >= min_rank_icir:
         reasons.append(f"rank_icir={stats.rank_icir:.4f} < {min_rank_icir}")
+    m1, m2 = _half_window_means(rank_ic_series)
+    if not (m1 > 0 and m2 > 0):
+        reasons.append(
+            f"前后半窗 RankIC 均值须同正（R3 纪律）: 前半={m1:.4f} 后半={m2:.4f}"
+        )
     return ("fail" if reasons else "pass"), reasons

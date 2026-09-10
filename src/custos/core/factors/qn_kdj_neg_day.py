@@ -2,7 +2,7 @@
 """QN·KDJ J 负值计数买点（骑牛登山体系，规则出处
 `governance/strategy/qn/05_top_bottom_kdj.md`）。
 
-源规则（经验规律；R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08），status=needs_work、live_use=none——不得进 live 链）：
+源规则（经验规律；R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08；R31 否决对应校准前语义——v0.200 案例校准已改，盈利判定以复跑为准），status=needs_work、live_use=none——不得进 live 链）：
 - 前提（跌透）：死叉时 J 值 > 50；下跌顺滑（全程阴线、实体由大到中到小）。
 - **J 负值第三天 = 可选买点，第五天 = 极致买点**；横盘超 5 天未新高离场。
 - 另腿：**K/D 20 以下金叉**（J 同时低于 20）→ 买入。
@@ -10,7 +10,7 @@
 确定性转译（待回测）：
 - 死叉 = K 自上向下穿越 D（`indicators.kdj_series`，与全项目同口径）
 - 负值计数 = 死叉后 J<0 的连续天数（第一根 J<0 记第 1 天）
-- 下跌顺滑（简化腿）：死叉至当日全部阴线（收<开）
+- 下跌顺滑（v0.200 案例校准）：死叉→首根 J<0 全程阴线（收<开）；负值区计数日允许小阳企稳
 - KD20 金叉 = 当日 K 上穿 D 且 K、D、J 均 < 20
 
 ⚠️ **口径警示**：本模块的 J 用法（负值计数、20 以下金叉）与 B1 反转K 的
@@ -29,7 +29,7 @@ FACTOR: dict[str, Any] = {
     "id": "qn_kdj_neg_day",
     "name": "QN·KDJ J 负值计数（第三天/第五天）与 KD20 金叉",
     "kind": "pattern",
-    "status": "needs_work",  # R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08）
+    "status": "needs_work",  # R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08）；R31 否决对应校准前语义（v0.200 案例校准已改，盈利判定以复跑为准）
     "evidence": "governance/research/R31_qn_factor_validation.md",
     "note": "规则出处 governance/strategy/qn/05_top_bottom_kdj.md；死叉J>50 后 J<0 第 3/5 天=买点；另腿 KD20 以下金叉；⚠️ 与 B1 反转K J<13 不同口径",
     "min_bars": 20,

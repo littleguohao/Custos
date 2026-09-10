@@ -68,8 +68,13 @@ def make_id(
 ) -> str:
     """轨迹 id：四元组 sha1 的前 10 位（``\\x1f`` 分隔，防拼接歧义）。
 
-    run_tag 刻意不参与 —— 同一假设+表达式在不同 run 重跑出来是同一条
-    轨迹，add 的幂等跳过正依赖这一点。
+    ``created_at`` 参与哈希 ⇒ id **每次创建都唯一**：同一假设+表达式重跑出来
+    的是新 id 的新轨迹，``add`` 不会把它们幂等跳过（``add`` 的幂等跳过只对
+    「同 id 且内容逐位相同」的重复入池生效，例如跨 run 从盘上 load 回同一批
+    轨迹后重建的同内容实例）。表达式级去重发生在 prompt 层
+    （``operators._existing_expressions`` 注入去重列表，约束 LLM 产出机制
+    不同的候选）；池中刻意允许累积相似表达式 —— 它们是谱系（lineage）证据。
+    ``run_tag`` 不参与哈希。
     """
     blob = "\x1f".join((direction, hypothesis, expression, created_at))
     return "t_" + hashlib.sha1(blob.encode("utf-8")).hexdigest()[:10]

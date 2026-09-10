@@ -5,7 +5,9 @@
 吃的是 backtest_factors 的 scorer 注册表。本模块是唯一翻译层：
 
 - ``make_expr_scorer``：**构造期** ``expr_dsl.parse`` 白名单校验，ExprError
-  直接上抛（fail-closed 在启动期，坏表达式不进回测循环）；**计算期**永不
+  直接上抛（fail-closed 在启动期，坏表达式不进回测循环），且 parse 只在
+  构造期做一次 —— 返回的 scorer 闭包持有已校验 AST，逐调用直接
+  ``evaluate(tree)``，不在回测热循环里重 parse 字符串；**计算期**永不
   raise —— 空切片 / 末行 NaN·inf / 任何求值异常一律返回 None（不参与排序），
   对齐 SCORERS/ENTRY_GATES 的不 raise 惯例（evaluate_trades 热循环里一个
   异常会炸掉整轮回测）。
@@ -37,15 +39,17 @@ def expr_scorer_key(expr: str) -> str:
 def make_expr_scorer(expr: str) -> Callable[..., dict | None]:
     """把 DSL 表达式包成 SCORERS 签名 ``scorer(df_slice, code) -> dict | None``。
 
-    构造期 fail-closed（ExprError 上抛）；计算期吞掉一切异常返回 None。
+    构造期 fail-closed（ExprError 上抛）且只 parse 一次；计算期闭包持有已
+    校验 AST 直接求值（``evaluate`` 对 AST 输入仍过白名单但不重 parse），
+    吞掉一切异常返回 None。
     """
-    parse(expr)  # 白名单校验在构造期完成；ExprError 直接上抛
+    tree = parse(expr)  # 白名单校验在构造期完成；ExprError 直接上抛
 
     def scorer(df_slice: pd.DataFrame, code: str = "") -> dict[str, Any] | None:
         if df_slice is None or not len(df_slice):
             return None
         try:
-            series = evaluate(expr, df_slice)
+            series = evaluate(tree, df_slice)
             last = float(series.iloc[-1])
         except Exception:  # noqa: BLE001 —— 计算期异常一律吞掉返回 None
             return None

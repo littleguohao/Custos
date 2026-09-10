@@ -740,6 +740,10 @@ def _stream_args(**over):
     """真实解析器 defaults 的 args 命名空间（_stream_trades 透传一大串出场参数，
     用 _build_parser 默认值保证字段不缺）。"""
     args = bt._build_parser().parse_args([])
+    if args.scorer is None:
+        # --scorer parser 默认 None（main 里互斥检查后才解析成 _DEFAULT_SCORER），
+        # 直调 _stream_trades 的路径不走 main，这里补上同一解析
+        args.scorer = bt._DEFAULT_SCORER
     for k, v in over.items():
         setattr(args, k, v)
     return args
@@ -840,6 +844,58 @@ class TestScorerExpr:
                 ]
             )
         assert exc.value.code == 2
+
+    def test_mutual_exclusion_with_explicit_default_scorer(self, tmp_path):
+        # 显式给默认值也算互斥冲突（旧实现拿 args.scorer 比 parser 默认值，
+        # 「--scorer s_shape + --scorer-expr」会被静默放行、expr 悄悄赢）
+        with pytest.raises(SystemExit) as exc:
+            bt.main(
+                [
+                    "--scorer-expr",
+                    "ROC(CLOSE,5)",
+                    "--scorer",
+                    bt._DEFAULT_SCORER,  # 恰好是默认值 —— 仍须拒绝
+                    "--codes",
+                    "S000",
+                    "--dump-codes",
+                    str(tmp_path / "u.txt"),
+                ]
+            )
+        assert exc.value.code == 2
+
+    def test_empty_expr_fails_at_startup(self, tmp_path):
+        # 空字符串表达式 fail-closed（旧实现静默忽略、按默认 scorer 跑完整轮回测）
+        with pytest.raises(SystemExit) as exc:
+            bt.main(
+                [
+                    "--scorer-expr",
+                    "",
+                    "--codes",
+                    "S000",
+                    "--dump-codes",
+                    str(tmp_path / "u.txt"),
+                ]
+            )
+        assert exc.value.code == 2
+        assert not any(k.startswith("expr_") for k in bt.SCORERS)  # 未注册任何 expr 键
+
+    def test_whitespace_expr_fails_at_startup(self, tmp_path, capsys):
+        # 纯空白表达式 fail-closed（旧实现返回 ""，"" 落进 args.scorer ⇒
+        # 下游 SCORERS[""] 查表 KeyError；必须在任何回测工作之前退出）
+        with pytest.raises(SystemExit) as exc:
+            bt.main(
+                [
+                    "--scorer-expr",
+                    "   ",
+                    "--codes",
+                    "S000",
+                    "--dump-codes",
+                    str(tmp_path / "u.txt"),
+                ]
+            )
+        assert exc.value.code == 2
+        assert "⛔" in capsys.readouterr().err  # 启动期中文报错
+        assert not any(k.startswith("expr_") for k in bt.SCORERS)  # 未注册任何 expr 键
 
     def test_bad_expr_fails_at_startup(self, tmp_path):
         # 坏表达式启动期非零退出（prescan 在 choices 冻结前注册，不误导下游）

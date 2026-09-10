@@ -17,7 +17,12 @@
   字面量且 ≤ ``MAX_WINDOW``（布尔字面量不算 int；``-1`` 是一元运算而非字面量，
   同样拒绝）。
 - 数值安全：除零 → inf/NaN、``LOG`` 遇非正值 → NaN，**不 raise**（研究侧允许
-  NaN，由评估层按截面日剔除）。
+  NaN，由评估层按截面日剔除）。纯标量除零的符号遵循 IEEE：符号 = 分子符号
+  × 分母符号（``1/-0.0 = -inf``，-0.0 的符号位不丢）。
+- 规模硬上限：原文 ≤ ``MAX_EXPR_LEN`` 字符、AST 节点 ≤ ``MAX_EXPR_NODES``，
+  在**任何递归遍历之前**检查（``ast.walk`` 是迭代式，数节点自身不递归）——
+  一条几千项的平铺链（``CLOSE+CLOSE+...``）会把递归校验/求值打成
+  RecursionError，超长超节点一律 ``ExprError`` 拒收。
 - 复杂度（``complexity``/``violations``）：``repeat_subtrees`` 统计所有同构子树
   （含 Name/Constant 叶子）的重复次数 —— 签名出现 k>1 次的各计 k-1 后求和；
   ``depth`` 为 AST 最大嵌套深度（叶子计 1，每嵌套一层 +1，不含 Expression 根）；
@@ -41,6 +46,16 @@ BASE_VARIABLES: tuple[str, ...] = ("open", "high", "low", "close", "volume")
 
 # 时序窗口上限：约一年交易日，超出视为 LLM 胡言直接拒。
 MAX_WINDOW = 250
+
+# 表达式原文长度硬上限（字符）：violations 的 symbol_len 阈值是 300，4000 已
+# 给足合法余量；更长的串必是 LLM 胡言，先拒为敬（也兜住解析器的工作量）。
+MAX_EXPR_LEN = 4000
+
+# AST 节点数硬上限（ast.walk 计数，含 Add/Load 等算子/上下文节点，约为表达式
+# 节点数的 2-3 倍）：平铺链（CLOSE+CLOSE+...）的递归深度 ≈ 项数，400 walk 节点
+# ≈ 百余项、最深 ~200 层 × 每层 2 帧，远低于解释器递归上限；在任何递归遍历
+# 之前用 ast.walk（迭代式）数节点，超限直接 ExprError，不给 RecursionError 机会。
+MAX_EXPR_NODES = 400
 
 _BASE_SET = frozenset(BASE_VARIABLES)
 
@@ -196,25 +211,43 @@ def _validate(node: ast.AST) -> None:
         raise ExprError(f"节点类型不在白名单: {type(node).__name__}")
 
 
+def _check_node_count(tree: ast.AST) -> None:
+    """节点数硬上限：ast.walk 是迭代遍历（自身不递归），可在递归校验前安全调用。"""
+    n = sum(1 for _ in ast.walk(tree))
+    if n > MAX_EXPR_NODES:
+        raise ExprError(
+            f"表达式 AST 节点数 {n} 超过上限 {MAX_EXPR_NODES}（防递归校验栈溢出）"
+        )
+
+
 def _as_tree(expr: str | ast.AST) -> ast.AST:
     """str → parse；AST → 仍要过一遍白名单（手工构造的 AST 不得绕过校验）。"""
     if isinstance(expr, str):
         return parse(expr)
     if not isinstance(expr, ast.AST):
         raise ExprError(f"表达式必须是 str 或 ast.AST，得到 {type(expr).__name__}")
+    _check_node_count(expr)
     _validate(expr)
     return expr
 
 
 def parse(expr: str) -> ast.AST:
-    """解析并校验白名单；语法错误 / 任何违规节点 → ExprError。"""
+    """解析并校验白名单；语法错误 / 任何违规节点 / 超规模上限 → ExprError。"""
     text = expr.strip()
     if not text:
         raise ExprError("表达式为空")
+    if len(text) > MAX_EXPR_LEN:
+        raise ExprError(
+            f"表达式长度 {len(text)} 超过上限 {MAX_EXPR_LEN}（疑似 LLM 胡言，拒收）"
+        )
     try:
         tree = ast.parse(text, mode="eval")
     except SyntaxError as exc:
         raise ExprError(f"语法错误: {expr!r}（{exc.msg}）") from exc
+    except RecursionError as exc:
+        # 深层嵌套（如几千层括号）先打爆解析器自身递归 —— 同样按违规拒收。
+        raise ExprError("表达式嵌套过深，解析器递归超限（拒收）") from exc
+    _check_node_count(tree)
     _validate(tree)
     return tree
 
@@ -225,12 +258,16 @@ def parse(expr: str) -> ast.AST:
 
 
 def _safe_div(a: Any, b: Any) -> Any:
-    """除法：Series 参与时走 numpy 语义（除零 → inf/NaN）；纯标量除零手工映射。"""
+    """除法：Series 参与时走 numpy 语义（除零 → inf/NaN）；纯标量除零手工映射。
+
+    标量除零的符号遵循 IEEE：符号 = 分子符号 × 分母符号 —— ``1/-0.0 = -inf``
+    （``-0.0 == 0`` 为 True，但 copysign 读得到它的符号位，不能丢）。
+    """
     if not isinstance(a, pd.Series) and not isinstance(b, pd.Series):
         if b == 0:
             if a == 0:
                 return float("nan")
-            return math.copysign(math.inf, a)
+            return math.copysign(math.inf, a) * math.copysign(1.0, b)
     return a / b
 
 

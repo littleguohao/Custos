@@ -6,9 +6,11 @@
   缺失 = NaN）。
 - ``rank_ic_by_day``：逐截面日计算当日 score 与 t→t+horizon 前向收益的 Spearman
   秩相关。前向收益口径唯一：``close[t+horizon]/close[t]-1``；t+horizon 越出该股
-  数据末尾 → 该股当日剔除（尾部 horizon 个交易日因此天然不进序列）。当日有效
-  股票数 < ``MIN_STOCKS``(5) → 该日跳过；score 零方差（常数）导致相关无定义 →
-  该日同样跳过。跳过日**不进入**返回序列。
+  数据末尾 → 该股当日剔除（尾部 horizon 个交易日因此天然不进序列）；score /
+  前向收益为 NaN 或 ±inf（除零等）→ 该股当日**成对剔除**（非有限值不进截面，
+  口径同 scorer_bridge 的末行检查）。当日有效股票数 < ``MIN_STOCKS``(5) →
+  该日跳过；score 零方差（常数）导致相关无定义 → 该日同样跳过。跳过日**不
+  进入**返回序列。
 - Spearman/Pearson **复用** ``score_return_study.correlations`` 的手工实现
   （平均秩上的 Pearson；环境无 scipy），本模块只做签名适配（组装它吃的
   trades 字典列表），不重写算法。⚠️ 该实现把单日相关系数 round 到 4 位小数
@@ -114,7 +116,12 @@ def _forward_return_maps(
 def _day_pairs(
     row: pd.Series, fwd_maps: dict[str, pd.Series], d: pd.Timestamp
 ) -> tuple[list[float], list[float]]:
-    """单截面日的 (score, 前向收益) 有效对：score NaN / 前向收益越界 → 剔除。"""
+    """单截面日的 (score, 前向收益) 有效对：NaN / ±inf / 前向收益越界 → 成对剔除。
+
+    ±inf 多是除零产物（如 ``1/(CLOSE-REF(CLOSE,1))`` 遇一字横盘）：把它当
+    「最高分」混进截面会污染当日秩相关 —— 两侧都按非有限值剔除，口径同
+    scorer_bridge 的末行 ``isnan/isinf`` 检查。
+    """
     xs: list[float] = []
     ys: list[float] = []
     for code, v in row.items():
@@ -124,8 +131,11 @@ def _day_pairs(
         fv = fwd.get(d)
         if fv is None or pd.isna(fv):
             continue
-        xs.append(float(v))
-        ys.append(float(fv))
+        sv, fw = float(v), float(fv)
+        if not (math.isfinite(sv) and math.isfinite(fw)):
+            continue
+        xs.append(sv)
+        ys.append(fw)
     return xs, ys
 
 
@@ -210,6 +220,33 @@ def ic_stats_from_series(
     )
 
 
+def evaluate_expression_with_series(
+    expr: str | ast.AST,
+    bars_by_code: dict[str, pd.DataFrame],
+    *,
+    start: str | None = None,
+    end: str | None = None,
+    horizon: int = 5,
+) -> tuple[ICStats, pd.Series]:
+    """``evaluate_expression`` 的全量版：同时返回逐日 rank IC 序列。
+
+    逐日序列按交易日升序（跳过日不在内）——judge_mining 的 R3 半窗同正门
+    需要它按日期序切前后半窗；只关心聚合指标的调用方用
+    ``evaluate_expression`` 即可。
+    """
+    sliced = {}
+    for code, df in bars_by_code.items():
+        d = _slice_bars(df, start, end)
+        if len(d):
+            sliced[code] = d
+    scores = score_frame(expr, sliced) if sliced else pd.DataFrame()
+    ic_df = _ic_by_day(scores, sliced, horizon)
+    stats = ic_stats_from_series(
+        ic_df["rank_ic"], horizon, start, end, pearson_series=ic_df["ic"]
+    )
+    return stats, ic_df["rank_ic"]
+
+
 def evaluate_expression(
     expr: str | ast.AST,
     bars_by_code: dict[str, pd.DataFrame],
@@ -219,13 +256,7 @@ def evaluate_expression(
     horizon: int = 5,
 ) -> ICStats:
     """表达式 → ICStats 一站式评估；start/end（含端点）切片发生在任何计算之前。"""
-    sliced = {}
-    for code, df in bars_by_code.items():
-        d = _slice_bars(df, start, end)
-        if len(d):
-            sliced[code] = d
-    scores = score_frame(expr, sliced) if sliced else pd.DataFrame()
-    ic_df = _ic_by_day(scores, sliced, horizon)
-    return ic_stats_from_series(
-        ic_df["rank_ic"], horizon, start, end, pearson_series=ic_df["ic"]
+    stats, _ic_series = evaluate_expression_with_series(
+        expr, bars_by_code, start=start, end=end, horizon=horizon
     )
+    return stats

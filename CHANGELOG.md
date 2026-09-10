@@ -205,6 +205,7 @@
 | 2026-09-08 | v0.199 | R30 跑数判负回填：5702 组合 532 过加严线、305 灵敏度存活，top 3 在 pre2019 终审 F2 全灭（盈亏比 2.076<2.4，胜率 41.3% 守线）——打分权重路线四轮十候选无一幸存，收口。R31 跑数判负回填：12 qn gate 双窗 s3000 全灭——9 否决（C2 加值未双窗过线）+ 3 样本不足（adx/缩量板/weekly180），9 因子转 needs_work 引 R31 | R30 终审失线（近 regime 富集家族的盈亏比形态）；R31 外部体系规则首过证据流程无双窗加值 | 产物 r30_search/final_pre2019.json、strategy_grid `_ranked__r31_*`；索引/主图同步 ❌；钉测随状态翻转更新全绿 |
 | 2026-09-09 | v0.200 | QN 因子实盘案例校准（知识库带日期案例 × 腾讯前复权数据 as-of 复跑，明细见 `strategy/qn/10_factor_implementations.md` 校准记录节）：`qn_kdj_neg_day` smooth 腿收窄为「死叉→首根 J<0 全阴」（腾龙 2023-11 逐分复现）；`qn_ma_converge` 带宽四线改三线+144 托底前提腿（卫宁/天顺 2019 命中） | 案例对照发现两处转译误读源规则（负值区全阴过严、144 误算进带宽）；两因子维持 needs_work（R31 否决对应校准前语义，盈利以复跑为准） | 校准语义钉测 +5（腾龙模式合成例 + 144 上/下行双向）；全量绿 |
 | 2026-09-09 | v0.201 | audit 修复批（判定语义不变，等价钉测兜底）：`_weekly_macd_step` 未用参数 idx 改内部派生、alpha 系数提模块级；`_weekly_ma180_asof` 拆 `_ma180_premove`；`_weekly_gate_arrays` 的 QN 扩展块提取 `_weekly_qn_extras`（part_vol Kahan 拆 `_partial_week_sums`）；`_precompute_gate_series` 局部变量内联 | audit pylint 发现（W0613 未用参数 ×1 + R0914 局部超限 ×3），提取后本批新函数 pylint 清零、存量基线照旧 | 重构后等价性钉测 492 绿；mypy/ruff 绿 |
+| 2026-09-09 | v0.203 | 进化引擎批 review 修复：表达式长度/节点双上限+RecursionError 收容；`_day_pairs` 滤 ±inf；挖掘/判定窗碰 pre2019（2010-2016）硬拒绝（纪律 ⑤ 补进进化链）；judge_mining 加 R3 半窗同正门（判过更严，唯一语义变化）；api_key repr 屏蔽+base_url 限 https；空白 `--scorer-expr` fail-closed+互斥 None 哨兵；make_id 文档对齐/空池守卫按本轮计/_safe_div 负零/Retry-After/免重复 parse；QN 文档债 | 三路 review 发现 4 真 bug+纪律缺口+文档债 | 钉测 +60 余（递归/inf/守卫/互斥/半窗/repr 泄漏）；全量绿 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

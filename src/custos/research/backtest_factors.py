@@ -314,7 +314,6 @@ def _weekly_qn_extras(
     """
     idx = day_w
     cp = d["close"].astype(float).to_numpy()
-    n = len(idx)
     wc = weekly["close"].astype(float)
     wclose = wc.to_numpy()
     out_wdif, out_wdea = _weekly_macd_step(idx, cp, wc)
@@ -1402,6 +1401,11 @@ SCORERS = {
     "b1_pullback": _sc_b1_pullback,
     "baseline": _sc_baseline,
 }
+
+# --scorer 的真默认：parser 侧默认必须是 None —— 否则分不出「没给 --scorer」与
+# 「显式给了默认值」，--scorer-expr 互斥判定会被显式默认值绕过；main 在互斥
+# 检查之后才把 None 解析回这个值
+_DEFAULT_SCORER = "s_shape"
 
 
 # --- 借鉴「101 Formulaic Alphas」(Kakushadze 2016) 的思想：纯**选择器**,配 --entry-filter 定义 B1 池,
@@ -5046,8 +5050,9 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--scorer",
         choices=list(SCORERS.keys()),
-        default="s_shape",
-        help="打分器：s_shape(突破式)/s_reversal(买弱式)/invert_s_shape(反转突破分)",
+        default=None,  # 见 _DEFAULT_SCORER：None 才能让互斥判定认出「显式给了默认值」
+        help="打分器：s_shape(突破式)/s_reversal(买弱式)/invert_s_shape(反转突破分)，"
+        f"默认 {_DEFAULT_SCORER}",
     )
     ap.add_argument(
         "--scorer-expr",
@@ -5406,15 +5411,27 @@ def _preregister_scorer_expr(argv: list) -> str:
     必须在 ``_build_parser()`` **之前**调用 —— ``--scorer`` 的 choices 在 parser
     构建时冻结成 ``list(SCORERS.keys())``，注册晚于构建则动态键过不了 choices。
     fail-closed：表达式未过 DSL 白名单 → SystemExit(2)（坏表达式不进回测循环，
-    也不让 choices 漏键报出误导性错误）。未给 --scorer-expr 返回 ""，零副作用。
+    也不让 choices 漏键报出误导性错误）；旗标给了但表达式为空/纯空白同样
+    SystemExit(2)（放行会让 "" 落进 args.scorer，下游 SCORERS[""] 查表 KeyError，
+    或静默退回默认 scorer）。未给 --scorer-expr 返回 ""，零副作用。
     """
     expr = ""
+    given = False
     for i, a in enumerate(argv):
         if a == "--scorer-expr" and i + 1 < len(argv):
             expr = argv[i + 1]
+            given = True
         elif a.startswith("--scorer-expr="):
             expr = a.split("=", 1)[1]
+            given = True
     if not expr.strip():
+        if given:
+            print(
+                "⛔ --scorer-expr 表达式为空（或纯空白）："
+                "请给出 DSL 表达式，或去掉该旗标",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
         return ""
     from custos.research.evolution.expr_dsl import ExprError  # noqa: PLC0415
     from custos.research.evolution.scorer_bridge import (  # noqa: PLC0415
@@ -5439,10 +5456,13 @@ def main(
     ap = _build_parser()
     args = ap.parse_args(argv_list)
     if args.scorer_expr:
-        # --scorer-expr 与 --scorer 互斥：前者已隐含选择表达式 scorer
-        if args.scorer != ap.get_default("scorer"):
+        # --scorer-expr 与 --scorer 互斥：前者已隐含选择表达式 scorer。
+        # parser 默认 None（事后才解析成 _DEFAULT_SCORER），故显式给默认值同样算冲突
+        if args.scorer is not None:
             ap.error("--scorer-expr 与 --scorer 互斥（表达式 scorer 已注册并选中）")
         args.scorer = expr_key  # 下游（签名/SCORERS 查表/输出标签）统一沿用 args.scorer
+    elif args.scorer is None:
+        args.scorer = _DEFAULT_SCORER  # 后置默认解析（互斥判定需要 None 占位，见上）
     reset_gate_stats()
 
     if args.stop_buffer != "tick" and args.stop_tick_buffer > 0:

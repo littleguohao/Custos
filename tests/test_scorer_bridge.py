@@ -8,11 +8,13 @@ suggestion 恒「可买」（trade-sim 进场判定要求，见 _check_entry）�
 
 from __future__ import annotations
 
+import ast
 import hashlib
 
 import pandas as pd
 import pytest
 
+from custos.research.evolution import scorer_bridge as sb
 from custos.research.evolution.expr_dsl import ExprError
 from custos.research.evolution.scorer_bridge import expr_scorer_key, make_expr_scorer
 
@@ -73,3 +75,30 @@ class TestMakeExprScorer:
         s = make_expr_scorer("ROC(CLOSE,5)")
         df = _df([100.0] * 30).drop(columns=["close"])
         assert s(df, "S000") is None
+
+    def test_parse_only_at_construction(self, monkeypatch):
+        """perf 钉测：scorer 闭包持有已校验 AST，逐调用不重 parse 字符串。"""
+        parse_calls = []
+        orig_parse = sb.parse
+
+        def spy_parse(expr):
+            parse_calls.append(expr)
+            return orig_parse(expr)
+
+        monkeypatch.setattr(sb, "parse", spy_parse)
+        s = make_expr_scorer("ROC(CLOSE,2)")
+        assert parse_calls == ["ROC(CLOSE,2)"]  # 构造期 parse 一次（fail-closed）
+
+        eval_arg_types = []
+        orig_eval = sb.evaluate
+
+        def spy_eval(expr, df):
+            eval_arg_types.append(type(expr))
+            return orig_eval(expr, df)
+
+        monkeypatch.setattr(sb, "evaluate", spy_eval)
+        df = _df([100.0, 101.0, 102.0])
+        s(df, "S000")
+        s(df, "S000")
+        assert parse_calls == ["ROC(CLOSE,2)"]  # 计算期没有重 parse
+        assert eval_arg_types == [ast.Expression, ast.Expression]  # 闭包持有 AST

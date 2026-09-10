@@ -28,7 +28,7 @@ from custos.research.evolution.dual_window import (
     validate_windows,
 )
 from custos.research.evolution.expr_dsl import ExprError, complexity, parse, violations
-from custos.research.evolution.ic_eval import evaluate_expression
+from custos.research.evolution.ic_eval import evaluate_expression_with_series
 from custos.research.evolution.llm_client import ChatLLM, LLMError
 from custos.research.evolution.trajectory import (
     EVOLUTION_PHASES,
@@ -175,6 +175,9 @@ def _produce_candidate(
     返回 (payload, dsl_error)；dsl_error 非空表示重试后仍未过白名单，
     payload 里是**最后一次** LLM 产出（expression 原文用于记失败轨迹）。
     LLM 级失败（契约重试耗尽/网络）抛 LLMError，由调用方记事件跳过。
+    parse 的规模上限（``MAX_EXPR_LEN``/``MAX_EXPR_NODES``）应已挡住超长表达式，
+    但防御到底：万一递归仍被打爆（RecursionError），同样按无效候选处理，
+    绝不让一条胡言表达式炸掉整个 run_loop。
     """
     hint: str | None = None
     dsl_err: ExprError | None = None
@@ -186,8 +189,10 @@ def _produce_candidate(
             return payload, None
         except ExprError as exc:
             dsl_err = exc
-            if attempt == 0:
-                hint = f"上次表达式未通过 DSL 白名单：{exc}；请修正后重新产出。"
+        except RecursionError as exc:
+            dsl_err = ExprError(f"表达式递归超限（按白名单违规处理）: {exc}")
+        if attempt == 0:
+            hint = f"上次表达式未通过 DSL 白名单：{dsl_err}；请修正后重新产出。"
     return payload, dsl_err
 
 
@@ -265,7 +270,8 @@ def _judge_and_record(ctx: _RunCtx, cand: _CandCtx, payload: dict[str, str]) -> 
         return
     # 通过复杂度门才回测。⚠️ ctx.mining_bars 已物理截尾到 mining_end（run_loop
     # 入口），判定窗数据不在内存对象里 —— 双窗制度核心，绝不能用未截尾数据调本行。
-    stats = evaluate_expression(
+    # ic_series（逐日 RankIC）随 stats 一并算出：judge_mining 的 R3 半窗同正门要吃它。
+    stats, ic_series = evaluate_expression_with_series(
         payload["expression"],
         ctx.mining_bars,
         start=ctx.cfg.mining_start,
@@ -275,6 +281,7 @@ def _judge_and_record(ctx: _RunCtx, cand: _CandCtx, payload: dict[str, str]) -> 
     decision, reasons = operators.judge_mining(
         stats,
         comp,
+        rank_ic_series=ic_series,
         min_days=ctx.cfg.min_days,
         min_rank_ic=ctx.cfg.min_rank_ic,
         min_rank_icir=ctx.cfg.min_rank_icir,

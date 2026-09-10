@@ -27,6 +27,10 @@ fail-closed 报错退出。
   ③ --grid-judge 的三轴终审由 strategy_grid/backtest_factors **子进程**
      自行按判定窗加载数据，与挖掘期数据副本无共享（进程级隔离）。
 
+反过拟合纪律（R12 判据纪律 / R24 pre2019 untouched 终审段）：挖掘窗与判定窗
+只要与 pre2019 untouched 终审段（2010-01-01..2016-12-31）相交，CLI 直接硬拒绝
+（exit 2）——该段是打分族唯一没碰过的终审窗，进化挖掘/判定一律不许碰。
+
 产物：artifacts/logs/evolution/{tag}/trajectory_pool.json + _summary__{tag}.json。
 """
 
@@ -73,6 +77,12 @@ from custos.research.evolution.trajectory import TrajectoryPool  # noqa: E402
 OUTDIR = LOGS / "evolution"
 
 DEFAULT_SEED = 20260909  # 与 LoopConfig.seed 默认一致
+
+# pre2019 untouched 终审段（打分族反过拟合纪律，R12 判据纪律 / R24-R30 沿用）：
+# 2010-2016 段是唯一没被挖掘/调参碰过的终审窗（R22/R24 两轮候选全部死于该段
+# 半窗翻转），进化挖掘/判定窗与之相交一律硬拒绝，保持其 untouched。
+PRE2019_START = "2010-01-01"
+PRE2019_END = "2016-12-31"
 
 
 class _BudgetExceeded(RuntimeError):
@@ -205,6 +215,30 @@ def _validate_judgment_window(args: Any, ap: argparse.ArgumentParser) -> None:
         ap.error(str(exc))
 
 
+def _overlaps_pre2019(start: str, end: str) -> bool:
+    """闭区间相交判定（ISO 日期字符串序即时间序；端点相接也算碰）。"""
+    return start <= PRE2019_END and end >= PRE2019_START
+
+
+def _reject_pre2019(args: Any, ap: argparse.ArgumentParser) -> None:
+    """pre2019 untouched 终审段硬拒绝：挖掘/判定窗与之相交 → ap.error（exit 2）。
+
+    风格对齐 score_combo_search_study.py 的 pre2019 守卫（⛔ 反过拟合纪律）。
+    """
+    if _overlaps_pre2019(args.mining_start, args.mining_end):
+        ap.error(
+            "⛔ 反过拟合纪律：进化挖掘/判定不许碰 pre2019 untouched 终审段"
+            "（2010-2016）——"
+            f"挖掘窗 {args.mining_start}..{args.mining_end} 与之相交"
+        )
+    if args.final_judge and _overlaps_pre2019(args.judgment_start, args.judgment_end):
+        ap.error(
+            "⛔ 反过拟合纪律：进化挖掘/判定不许碰 pre2019 untouched 终审段"
+            "（2010-2016）——"
+            f"判定窗 {args.judgment_start}..{args.judgment_end} 与之相交"
+        )
+
+
 def _validate_args(args: Any, ap: argparse.ArgumentParser) -> None:
     """互斥/必填/窗口校验（fail-closed：一律 ap.error，exit 2）。"""
     if not args.direction:
@@ -218,6 +252,7 @@ def _validate_args(args: Any, ap: argparse.ArgumentParser) -> None:
         args.final_judge = True  # --grid-judge 隐含双窗终审（三轴终审吃它的产出）
     if args.final_judge:
         _validate_judgment_window(args, ap)
+    _reject_pre2019(args, ap)
 
 
 def _assemble_llm(args: Any, ap: argparse.ArgumentParser) -> Any:
@@ -586,13 +621,16 @@ def main(
         seed=args.seed,
         run_tag=tag,
     )
+    pool_size_before = len(pool)  # 本 run 新增轨迹数的基线（空结果护栏用）
     _execute(args, cfg, mining_bars, llm, pool)
 
-    # 空结果护栏（对照 backtest_factors._empty_result_guard 语义）：循环什么都没
+    # 空结果护栏（对照 backtest_factors._empty_result_guard 语义）：本次运行什么都没
     # 产出（LLM 全挂等）→ 非零退出且不写产物；有 fail 轨迹属正常研究产出，落盘。
-    if len(pool) == 0:
+    # ⚠️ 必须对照循环前的池规模：从上一轮产物 load 回来的旧轨迹让 len(pool) > 0，
+    # 但那不是本 run 的产出 —— 只看本 run 新增了几条。
+    if len(pool) == pool_size_before:
         print(
-            "[ERR] 进化循环 0 条轨迹落池（LLM 不可用/全失败？）；拒绝落盘——"
+            "[ERR] 本次进化循环 0 条新轨迹落池（LLM 不可用/全失败？）；拒绝落盘——"
             "空产物会被误读成'该方向无有效因子'。",
             file=sys.stderr,
         )

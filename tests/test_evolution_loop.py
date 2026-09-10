@@ -195,7 +195,7 @@ class TestLLMClient:
 
         monkeypatch.setattr(lc, "_post", fake_post)
         client = lc.LLMClient(
-            lc.LLMConfig(base_url="http://x/v1", api_key="k", model="m")
+            lc.LLMConfig(base_url="https://x/v1", api_key="k", model="m")
         )
         out = client.chat([{"role": "user", "content": "hi"}], json_mode=True)
         assert out == "你好" and client.total_tokens == 11
@@ -222,7 +222,7 @@ class TestLLMClient:
 
         monkeypatch.setattr(lc, "_post", flaky)
         client = lc.LLMClient(
-            lc.LLMConfig(base_url="u", api_key="k", model="m", max_retry=3)
+            lc.LLMConfig(base_url="https://u/v1", api_key="k", model="m", max_retry=3)
         )
         client.sleep = lambda s: None
         assert client.chat([{"role": "user", "content": "x"}]) == "ok"
@@ -234,7 +234,7 @@ class TestLLMClient:
 
         monkeypatch.setattr(lc, "_post", always_fail)
         client = lc.LLMClient(
-            lc.LLMConfig(base_url="u", api_key="k", model="m", max_retry=3)
+            lc.LLMConfig(base_url="https://u/v1", api_key="k", model="m", max_retry=3)
         )
         client.sleep = lambda s: None
         with pytest.raises(LLMError, match="重试 3 次"):
@@ -436,26 +436,59 @@ GOOD_COMP = Complexity(
     symbol_len=12, free_params=1, base_features=1, repeat_subtrees=0, depth=2
 )
 
+# 前后半窗均值均正的逐日 RankIC 序列（半窗门不挡路，单独钉其它门用）。
+GOOD_SERIES = pd.Series([0.05] * 100)
+
+
+def _judge(stats, comp=GOOD_COMP, series=GOOD_SERIES):
+    return ops.judge_mining(stats, comp, rank_ic_series=series)
+
 
 class TestJudgeMining:
     def test_complexity_violations_fail_fast(self):
         bad = Complexity(
             symbol_len=301, free_params=0, base_features=0, repeat_subtrees=0, depth=1
         )
-        decision, reasons = ops.judge_mining(_stats(), bad)
+        decision, reasons = _judge(_stats(), bad)
         assert decision == "fail" and any("symbol_len" in r for r in reasons)
 
     def test_boundaries(self):
-        assert ops.judge_mining(_stats(n_days=19), GOOD_COMP)[0] == "fail"
-        assert ops.judge_mining(_stats(n_days=20), GOOD_COMP)[0] == "pass"
-        assert ops.judge_mining(_stats(ric=0.02), GOOD_COMP)[0] == "pass"
-        assert ops.judge_mining(_stats(ric=0.0199), GOOD_COMP)[0] == "fail"
-        assert ops.judge_mining(_stats(ricir=0.1), GOOD_COMP)[0] == "pass"
-        assert ops.judge_mining(_stats(ricir=0.099), GOOD_COMP)[0] == "fail"
+        assert _judge(_stats(n_days=19))[0] == "fail"
+        assert _judge(_stats(n_days=20))[0] == "pass"
+        assert _judge(_stats(ric=0.02))[0] == "pass"
+        assert _judge(_stats(ric=0.0199))[0] == "fail"
+        assert _judge(_stats(ricir=0.1))[0] == "pass"
+        assert _judge(_stats(ricir=0.099))[0] == "fail"
 
     def test_nan_fails_closed(self):
-        assert ops.judge_mining(_stats(ric=float("nan")), GOOD_COMP)[0] == "fail"
-        assert ops.judge_mining(_stats(ricir=float("nan")), GOOD_COMP)[0] == "fail"
+        assert _judge(_stats(ric=float("nan")))[0] == "fail"
+        assert _judge(_stats(ricir=float("nan")))[0] == "fail"
+
+    def test_half_window_flip_fails_despite_pooled_gates(self):
+        # 池化门全过（n/rank_ic/rank_icir 达标），但后半窗均值为负 → R3 半窗门拒
+        # （n//2=50 切半：后半 = 10 天 +0.06 + 40 天 -0.04 → 均值 -0.02）
+        series = pd.Series([0.06] * 60 + [-0.04] * 40)
+        stats = _stats(n_days=100, ric=0.02, ricir=0.41)
+        decision, reasons = _judge(stats, series=series)
+        assert decision == "fail"
+        assert any("半窗" in r and "前半=0.0600 后半=-0.0200" in r for r in reasons)
+
+    def test_half_window_split_convention(self):
+        # n//2 按日期序切半：奇数序列后半多一天（前半 50 天正、后半 51 天负）
+        series = pd.Series([0.05] * 50 + [-0.05] * 51)
+        _decision, reasons = _judge(_stats(n_days=101), series=series)
+        assert any("前半=0.0500 后半=-0.0500" in r for r in reasons)
+
+    def test_half_window_both_positive_passes(self):
+        series = pd.Series([0.01] * 50 + [0.09] * 50)  # 两半都正但不同量级
+        assert _judge(_stats(), series=series)[0] == "pass"
+
+    def test_half_window_nan_or_empty_fails_closed(self):
+        assert _judge(_stats(), series=pd.Series(dtype=float))[0] == "fail"
+        one = pd.Series([0.05])  # n//2 = 0 → 前半窗空 → fail-closed
+        assert _judge(_stats(), series=one)[0] == "fail"
+        nan_half = pd.Series([float("nan")] * 50 + [0.05] * 50)  # 前半全 NaN
+        assert _judge(_stats(), series=nan_half)[0] == "fail"
 
 
 # ---------- run_loop ----------
@@ -632,6 +665,109 @@ class TestRunLoop:
             )
 
 
+# ---------- 超长/递归表达式健壮性（RecursionError 不许杀循环） ----------
+
+
+class TestRecursionRobustness:
+    def test_oversized_expression_rejected_loop_survives(self):
+        # ~6000 字符平铺链：旧实现在 parse/_validate 递归里 RecursionError 杀循环；
+        # 现在规模上限按白名单违规拒收（失败轨迹落池），后续候选照常跑。
+        giant = "+".join(["CLOSE"] * 1000)
+        queue = [
+            _cand(giant, "胡言"),
+            _cand(giant, "胡言重试"),  # 回注重试仍是它 → 记 fail
+            _cand("ROC(CLOSE,5)", "正常候选"),
+        ]
+        pool = TrajectoryPool()
+        loop_mod.run_loop(
+            _cfg(candidates_per_round=2), make_bars(), ScriptedLLM(queue), pool
+        )
+        fails = [t for t in pool.all() if t.decision == "fail"]
+        assert len(fails) == 1
+        assert fails[0].expression == giant  # 原文落池（教训数据）
+        assert fails[0].feedback.startswith("表达式未通过 DSL 白名单")
+        # 循环存活：第二个候选正常判定落池
+        assert any(t.expression == "ROC(CLOSE,5)" for t in pool.all())
+
+    def test_recursion_error_treated_as_invalid_candidate(self, monkeypatch):
+        # 规模上限应已拦住，但防御到底：parse 万一漏出 RecursionError，
+        # 同样按无效候选处理（与 ExprError 同路），绝不炸掉 run_loop。
+        real_parse = loop_mod.parse
+        calls: list[str] = []
+
+        def bomb(expr):
+            calls.append(expr)
+            if len(calls) <= 2:
+                raise RecursionError("maximum recursion depth exceeded")
+            return real_parse(expr)
+
+        monkeypatch.setattr(loop_mod, "parse", bomb)
+        queue = [
+            _cand("MA(CLOSE,5)", "第一次"),
+            _cand("MA(CLOSE,5)", "回注重试"),
+            _cand("ROC(CLOSE,5)", "后续候选"),
+        ]
+        pool = TrajectoryPool()
+        loop_mod.run_loop(
+            _cfg(candidates_per_round=2), make_bars(), ScriptedLLM(queue), pool
+        )
+        fails = [t for t in pool.all() if t.decision == "fail"]
+        assert len(fails) == 1 and "DSL 白名单" in fails[0].feedback
+        assert any(t.expression == "ROC(CLOSE,5)" for t in pool.all())
+
+
+# ---------- R3 半窗同正门（前后半窗 RankIC 均值都必须 > 0） ----------
+
+
+class TestHalfWindowGate:
+    @staticmethod
+    def make_flip_bars(n_stocks: int = 10) -> tuple[dict[str, pd.DataFrame], str, str]:
+        """前段稳态正漂移、尾段 5 日块交替反转的宇宙（无 RNG，模运算噪声）。
+
+        挖掘窗取全程：逐日 RankIC 前半段 ~+0.9、尾段 ~-0.9 —— 池化 rank_ic_mean /
+        rank_icir 仍过旧阈值，但后半窗均值为负（R3 半窗门专杀的形态）。
+        """
+        n_days, flip_start = 170, 100
+        dates = pd.date_range("2024-01-01", periods=n_days, freq="B")
+        out = {}
+        for i in range(n_stocks):
+            r = 0.002 + 0.001 * i
+            price, closes = 100.0, []
+            for t in range(n_days):
+                drift = r if t < flip_start or (t // 5) % 2 == 0 else -r
+                eps = 0.005 * (((i * 3 + t * 7) % 4) - 1.5)
+                price *= (1 + drift) * (1 + eps)
+                closes.append(price)
+            out[f"S{i:03d}"] = pd.DataFrame(
+                {
+                    "date": dates,
+                    "open": closes,
+                    "high": [c * 1.01 for c in closes],
+                    "low": [c * 0.99 for c in closes],
+                    "close": closes,
+                    "volume": [1000.0 + 10.0 * i] * n_days,
+                    "amount": [0.0] * n_days,
+                }
+            )
+        return out, str(dates[0].date()), str(dates[-1].date())
+
+    def test_ic_flip_between_halves_fails(self):
+        bars, start, end = self.make_flip_bars()
+        pool = TrajectoryPool()
+        loop_mod.run_loop(
+            _cfg(mining_start=start, mining_end=end),
+            bars,
+            ScriptedLLM([_cand("ROC(CLOSE,5)", "动量")]),
+            pool,
+        )
+        t = pool.all()[0]
+        assert t.decision == "fail"
+        assert "半窗" in t.feedback
+        # 池化门（rank_ic_mean/rank_icir）其实是过的 —— 失败 solely 归因半窗门
+        assert "rank_ic_mean=" not in t.feedback
+        assert "rank_icir=" not in t.feedback
+
+
 # ---------- final_judgment ----------
 
 
@@ -788,6 +924,116 @@ class TestCLI:
             (tmp_path / "out" / "t1" / "_summary__t1.json").read_text("utf-8")
         )
         assert summary["pool_size"] == 1  # 第一个候选后就超预算
+
+
+# ---------- pre2019 untouched 终审段硬拒绝（反过拟合纪律） ----------
+
+
+class TestPre2019Guard:
+    @staticmethod
+    def _parse(*extra):
+        ap = el._build_parser()
+        return ap, ap.parse_args(list(extra))
+
+    @pytest.mark.parametrize(
+        "start,end",
+        [
+            ("2015-01-01", "2020-12-31"),  # 跨越终审段右缘
+            ("2010-01-01", "2016-12-31"),  # 恰好覆盖整段
+            ("2009-01-01", "2010-01-01"),  # 端点相接也算碰
+            ("2012-06-01", "2013-06-30"),  # 整窗落在段内
+        ],
+    )
+    def test_mining_overlap_rejected(self, capsys, start, end):
+        ap, args = self._parse(
+            "--direction", "动量", "--mining-start", start, "--mining-end", end
+        )
+        with pytest.raises(SystemExit) as exc:
+            el._validate_args(args, ap)
+        assert exc.value.code == 2
+        err = capsys.readouterr().err
+        assert (
+            "⛔ 反过拟合纪律" in err and "pre2019 untouched 终审段（2010-2016）" in err
+        )
+
+    def test_judgment_overlap_rejected(self, capsys):
+        # 挖掘窗干净（2009 年底结束）、判定窗碰段 —— 两个窗各自独立检查
+        ap, args = self._parse(
+            "--direction",
+            "动量",
+            "--mining-start",
+            "2005-01-01",
+            "--mining-end",
+            "2009-12-31",
+            "--final-judge",
+            "--judgment-start",
+            "2012-01-01",
+            "--judgment-end",
+            "2013-12-31",
+        )
+        with pytest.raises(SystemExit) as exc:
+            el._validate_args(args, ap)
+        assert exc.value.code == 2
+        err = capsys.readouterr().err
+        assert "⛔ 反过拟合纪律" in err and "判定窗" in err
+
+    def test_clean_windows_accepted(self):
+        ap, args = self._parse(
+            "--direction",
+            "动量",
+            "--mining-start",
+            "2020-01-01",
+            "--mining-end",
+            "2021-12-31",
+            "--final-judge",
+            "--judgment-start",
+            "2022-01-01",
+            "--judgment-end",
+            "2022-12-31",
+        )
+        el._validate_args(args, ap)  # 不抛即通过
+
+    def test_overlap_helper_boundaries(self):
+        assert el._overlaps_pre2019("2016-12-31", "2020-01-01")  # 左缘相接
+        assert el._overlaps_pre2019("2000-01-01", "2010-01-01")  # 右缘相接
+        assert not el._overlaps_pre2019("2017-01-01", "2020-12-31")
+        assert not el._overlaps_pre2019("2000-01-01", "2009-12-31")
+
+
+class TestStalePoolGuard:
+    def test_stale_pool_does_not_bypass_empty_guard(self, tmp_path, monkeypatch):
+        """上一轮产物在盘上 + 本 run 0 新轨迹 → 仍按空结果护栏拒（旧实现会放行）。"""
+        monkeypatch.setattr(el, "MockLLM", RaisingLLM)
+        bars, codes_file = TestCLI._setup(tmp_path)
+        tag_dir = tmp_path / "out" / "t1"
+        tag_dir.mkdir(parents=True)
+        stale = TrajectoryPool(tag_dir / "trajectory_pool.json")
+        stale.add(_mk_traj("ROC(CLOSE,5)"))
+        stale.save()
+        rc = el.main(
+            TestCLI._argv(tmp_path, codes_file, "--mock-llm"),
+            loader=TestCLI._loader(bars, []),
+        )
+        assert rc == 2
+        # 护栏在 save 之前：旧产物不被本 run 覆盖
+        assert len(TrajectoryPool.load(tag_dir / "trajectory_pool.json")) == 1
+
+    def test_stale_pool_grows_normally(self, tmp_path):
+        """本 run 有产出 → 旧轨迹保留 + 新轨迹追加，正常落盘。"""
+        bars, codes_file = TestCLI._setup(tmp_path)
+        tag_dir = tmp_path / "out" / "t1"
+        tag_dir.mkdir(parents=True)
+        stale = TrajectoryPool(tag_dir / "trajectory_pool.json")
+        stale.add(_mk_traj("MA(CLOSE,3)"))  # 与 MockLLM 脚本表达式都不撞
+        stale.save()
+        rc = el.main(
+            TestCLI._argv(tmp_path, codes_file, "--mock-llm"),
+            loader=TestCLI._loader(bars, []),
+        )
+        assert rc == 0
+        assert (
+            len(TrajectoryPool.load(tag_dir / "trajectory_pool.json")) == 6
+        )  # 1 旧 + 5 新
 
 
 # ---------- __main__ 注册 ----------

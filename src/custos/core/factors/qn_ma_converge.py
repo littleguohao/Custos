@@ -2,7 +2,7 @@
 """QN·均线收拢发散（骑牛登山体系，规则出处
 `governance/strategy/qn/01_general.md` §五「均线的收拢和发散」）。
 
-源规则（经验规律；R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08），status=needs_work、live_use=none——不得进 live 链）：
+源规则（经验规律；R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08；R31 否决对应校准前语义——v0.200 案例校准已改，盈利判定以复跑为准），status=needs_work、live_use=none——不得进 live 链）：
 - MA5/10/25/144 四线**收拢粘合成一股绳后首次向上发散** = 主升浪启动点，
   买在发散初期而非发散之后。
 - 前提：MA144 明显走平上翘；144 线仍下行时收拢发散多为反弹非反转。
@@ -34,7 +34,7 @@ FACTOR: dict[str, Any] = {
     "id": "qn_ma_converge",
     "name": "QN·均线收拢发散（三线粘合+144 托底，首次向上发散）",
     "kind": "state",
-    "status": "needs_work",  # R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08）
+    "status": "needs_work",  # R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08）；R31 否决对应校准前语义（v0.200 案例校准已改，盈利判定以复跑为准）
     "evidence": "governance/research/R31_qn_factor_validation.md",
     "note": "规则出处 governance/strategy/qn/01_general.md §五；MA5/10/25 三线粘合（带宽≤阈值持续 N 根）后首次放量向上发散=启动点；MA144 走平上翘+收盘站上 144 线为前提腿（v0.200 案例校准）",
     "min_bars": 170,
@@ -51,7 +51,7 @@ QN_MA144_RISE_WIN = 5  # 待回测：MA144 上翘确认根数
 
 
 def _bandwidth_from_mas(mas) -> tuple[Any, list]:
-    """四线带宽序列：(max−min)/mid，输入为四条 MA 数组。"""
+    """三线带宽序列：(max−min)/mid，输入为三条 MA 数组（MA5/10/25；144 是托底前提非绳身）。"""
     mx = mas[0].copy()
     mn = mas[0].copy()
     for m in mas[1:]:
@@ -62,7 +62,7 @@ def _bandwidth_from_mas(mas) -> tuple[Any, list]:
 
 
 def _bandwidth(df) -> Any:
-    """慢路径：由 df 算四条 MA 再求带宽。"""
+    """慢路径：由 df 算三条 MA 再求带宽。"""
     c = df["close"].astype(float)
     mas = [c.rolling(w).mean().to_numpy() for w in QN_MA_WINDOWS]
     return _bandwidth_from_mas(mas)
@@ -73,13 +73,14 @@ def detect(df, code: str = "", _arr: dict | None = None) -> dict[str, Any]:
 
     ``_arr``：研究侧预计算序列（close/open/volume/ma5/ma10/ma25/ma144），
     给定时不读 df 任何列。两路逐位一致（rolling 从第 0 根递归同序；
-    带宽是四条 MA 的 elementwise 组合，输入同则输出同）。
+    带宽是三条 MA 的 elementwise 组合，输入同则输出同）。
 
     返回键：
         converged         当前处于粘合（带宽 ≤ 阈值）
         hit               「首次向上发散」启动信号：此前 QN_CONVERGE_BARS 根
                           持续粘合，当日带宽一根扩张（bw[-1] > bw[-2]）
-                          + 多头排列 + 收盘站上四线 + 放量阳线
+                          + 多头排列 + 收盘站上三线（且收于 144 线上方）
+                          + 放量阳线 + MA144 走平上翘
         legs              bandwidth / first_divergence / ma144_up 明细
                           （bandwidth.bw_prev_max_pct 为收拢期最大带宽，
                           仅记录供回测消融，不参与判定）
@@ -116,7 +117,7 @@ def detect(df, code: str = "", _arr: dict | None = None) -> dict[str, Any]:
         converged_before = bool((prev_seg <= QN_CONVERGE_PCT).all())
         converged_now = bool(bw[-1] <= QN_CONVERGE_PCT)
         # 首次向上发散：收拢后带宽当日扩张（发散初期的带宽天然还小，
-        # 方向由多头排列 + 站上四线 + 放量阳线承担，不靠带宽绝对值）
+        # 方向由多头排列 + 站上三线 + 放量阳线承担，不靠带宽绝对值）
         diverge_up = bool(converged_before and bw[-1] > bw[-2])
         aligned = bool(mas[0][-1] > mas[1][-1] > mas[2][-1])  # MA5>MA10>MA25
         above_all = bool(
