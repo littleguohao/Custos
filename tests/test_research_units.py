@@ -309,10 +309,17 @@ class TestSummaryTracksRerunState:
         return {u for status, u in self._rows() if not status.startswith("~~")}
 
     def test_table_parses_into_both_buckets(self):
-        """⚠️ 守卫自证：两个桶都非空，否则下面的断言会**空转通过**。"""
+        """⚠️ 守卫自证：done 桶必须非空，否则下面的断言会**空转通过**。
+
+        2026-09-10：重跑清单已全部闭环（R3 已于 2026-08-13 重算收尾）——按本断言
+        原注释的指示（「全跑完了就把本条改成断言 done 全覆盖」）改为：done 非空且
+        pending 必须为空。**若未来出现新的待跑单元，把本断言改回双桶非空**。
+        """
         done, pending = self._done_units(), self._pending_units()
         assert done, "解析不出「已完成」单元 —— 重跑清单格式变了？"
-        assert pending, "解析不出「待重跑」单元 —— 全跑完了就把本条改成断言 done 全覆盖"
+        assert not pending, (
+            f"重跑清单出现待跑单元：{pending} —— 若属实，把本断言改回双桶非空"
+        )
         assert not (done & pending), f"同一单元既完成又待跑：{done & pending}"
 
     def test_summary_does_not_say_dont_cite_when_r1_is_done(self):
