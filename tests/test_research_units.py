@@ -33,8 +33,9 @@ def test_units_exist():
     # 2026-09-07：+R29（胜率稳定≥40%+盈亏比≥2.4 打分重建，预注册落档）
     # 2026-09-08：+R30（打分权重有界组合搜索，预注册落档）
     # 2026-09-08：+R31（QN 因子批 8 gate 入场加值验证，预注册落档）
-    assert len(UNITS) == 31, (
-        f"预期 31 个研究单元，实际 {len(UNITS)}：{[p.name for p in UNITS]}"
+    # 2026-09-10：+R32（LLM 进化引擎真实数据冒烟，v0.206）
+    assert len(UNITS) == 32, (
+        f"预期 32 个研究单元，实际 {len(UNITS)}：{[p.name for p in UNITS]}"
     )
 
 

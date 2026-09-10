@@ -207,6 +207,7 @@
 | 2026-09-09 | v0.201 | audit 修复批（判定语义不变，等价钉测兜底）：`_weekly_macd_step` 未用参数 idx 改内部派生、alpha 系数提模块级；`_weekly_ma180_asof` 拆 `_ma180_premove`；`_weekly_gate_arrays` 的 QN 扩展块提取 `_weekly_qn_extras`（part_vol Kahan 拆 `_partial_week_sums`）；`_precompute_gate_series` 局部变量内联 | audit pylint 发现（W0613 未用参数 ×1 + R0914 局部超限 ×3），提取后本批新函数 pylint 清零、存量基线照旧 | 重构后等价性钉测 492 绿；mypy/ruff 绿 |
 | 2026-09-09 | v0.203 | 进化引擎批 review 修复：表达式长度/节点双上限+RecursionError 收容；`_day_pairs` 滤 ±inf；挖掘/判定窗碰 pre2019（2010-2016）硬拒绝（纪律 ⑤ 补进进化链）；judge_mining 加 R3 半窗同正门（判过更严，唯一语义变化）；api_key repr 屏蔽+base_url 限 https；空白 `--scorer-expr` fail-closed+互斥 None 哨兵；make_id 文档对齐/空池守卫按本轮计/_safe_div 负零/Retry-After/免重复 parse；QN 文档债 | 三路 review 发现 4 真 bug+纪律缺口+文档债 | 钉测 +60 余（递归/inf/守卫/互斥/半窗/repr 泄漏）；全量绿 |
 | 2026-09-10 | v0.204 | 联合演化第一档：基因组（表达式×gate×出场）+ 确定性参数格点变异 + 循环内三轴适应度（--joint） | TODO #68；owner 拍板 | 钉测 +39；全量绿 |
+| 2026-09-10 | v0.206 | R32 登记（文档，无代码改动）：进化引擎真实数据三步冒烟链路三通——DSL 门 6/6×2、双窗终审 5/5；joint 首候选 VWAP偏离×量比双窗 pass（L3− 留证）；发现 `--grid-judge` 子进程未转发 `--count` 致三轴终审 3 格全灭，修复+重跑登记 TODO #69 | v0.204 落地后首次真实 LLM 全流程验证；缺口为工程事实，判定语义不变 | 产物 `artifacts/logs/evolution/{smoke_mock,smoke_r1,smoke_r2_joint}/`；详见 R32 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 
