@@ -265,6 +265,13 @@ def _validate_args(args: Any, ap: argparse.ArgumentParser) -> None:
         args.final_judge = True  # --grid-judge 隐含双窗终审（三轴终审吃它的产出）
     if args.final_judge:
         _validate_judgment_window(args, ap)
+    if (args.joint or args.grid_judge) and args.count <= 0:
+        # R32 / TODO #69：单元格子进程不继承 loader 默认深度——不显式 --count 则
+        # strategy_grid 默认 500 只回溯约两年，早窗口的格子被尾部截断护栏全灭。
+        ap.error(
+            "--joint/--grid-judge 必须显式 --count 盖住窗口"
+            "（单元格子进程不继承 loader 默认深度，默认 500 ≈ 两年）"
+        )
     _reject_pre2019(args, ap)
 
 
@@ -555,6 +562,10 @@ def _grid_command(
         codes_path.parent.mkdir(parents=True, exist_ok=True)
         codes_path.write_text("\n".join(codes) + "\n", encoding="utf-8")
         cmd += ["--codes-file", str(codes_path)]
+    # --count 随窗口透传（R32 / TODO #69 缺口）：不转发则子进程默认 500，
+    # 尾部只回溯约两年，早窗口的判定格会被尾部截断护栏 fail-closed 全灭。
+    if args.count > 0:
+        cmd += ["--count", str(args.count)]
     if args.grid_exit_grid:
         cmd += ["--exit-grid", args.grid_exit_grid]
     if args.grid_max_runs > 0:

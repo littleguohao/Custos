@@ -1107,7 +1107,7 @@ class _FakeGridRun:
 
 
 def _grid_argv(tmp_path, codes_file, *extra):
-    """带判定窗的 argv（TestCLI._argv 基础上加 --grid-judge 三元组）。"""
+    """带判定窗的 argv（TestCLI._argv 基础上加 --grid-judge 三元组 + --count）。"""
     return TestCLI._argv(
         tmp_path,
         codes_file,
@@ -1116,6 +1116,8 @@ def _grid_argv(tmp_path, codes_file, *extra):
         JUDGMENT.start,
         "--judgment-end",
         JUDGMENT.end,
+        "--count",
+        "800",  # v0.207 起 grid-judge/joint 必须显式 --count（TODO #69）
         *extra,
     )
 
@@ -1139,10 +1141,11 @@ class TestGridJudge:
         passed = {"expr:ROC(CLOSE,5)", "expr:CLOSE/MA(CLOSE,20)"}
         assert set(sg._split_scorers(scorers)) == passed  # 括号内逗号不分隔
         assert "CLOSE/CLOSE" not in scorers  # 必败对照不进终审
-        # ② argv 带判定窗日期 + 宇宙钉死
+        # ② argv 带判定窗日期 + 宇宙钉死 + --count 透传（TODO #69 缺口回归钉测）
         assert cmd[cmd.index("--start") + 1] == JUDGMENT.start
         assert cmd[cmd.index("--end") + 1] == JUDGMENT.end
         assert "--codes-file" in cmd
+        assert cmd[cmd.index("--count") + 1] == "800"
         # ④ summary 的 grid_judge schema
         summary = json.loads(
             (tmp_path / "out" / "t1" / "_summary__t1.json").read_text("utf-8")
@@ -1184,6 +1187,8 @@ class TestGridJudge:
             JUDGMENT.start,
             "--judgment-end",
             str(DATES[230].date()),  # 11 个交易日 < min_days(20)
+            "--count",
+            "800",
             "--mock-llm",
         )
         rc = el.main(argv, loader=TestCLI._loader(bars, []))
@@ -1431,7 +1436,9 @@ class TestJointCLI:
         monkeypatch.setattr(el, "_make_cell_runner", lambda *a, **k: runner)
         bars, codes_file = TestCLI._setup(tmp_path)
         rc = el.main(
-            TestCLI._argv(tmp_path, codes_file, "--mock-llm", "--joint"),
+            TestCLI._argv(
+                tmp_path, codes_file, "--mock-llm", "--joint", "--count", "800"
+            ),
             loader=TestCLI._loader(bars, []),
         )
         assert rc == 0
@@ -1464,3 +1471,44 @@ class TestJointCLI:
         # 判定窗单元格也跑过（挖掘窗 + 判定窗两类窗口都在调用记录里）
         windows = {(c["start"], c["end"]) for c in runner.calls}
         assert (JUDGMENT.start, JUDGMENT.end) in windows
+
+
+# ---------- TODO #69：--count 显式化（v0.207，R32 缺口） ----------
+
+
+class TestCountRequired:
+    """--joint/--grid-judge 必须显式 --count：单元格子进程不继承 loader 默认深度，
+    缺省 500 只回溯约两年（R32 三轴终审 3 格全灭的根因）。"""
+
+    def test_grid_judge_without_count_fails_closed(self, tmp_path, monkeypatch):
+        fake = _FakeGridRun()
+        monkeypatch.setattr(el.subprocess, "run", fake)
+        bars, codes_file = TestCLI._setup(tmp_path)
+        with pytest.raises(SystemExit) as exc:
+            el.main(
+                TestCLI._argv(
+                    tmp_path,
+                    codes_file,
+                    "--mock-llm",
+                    "--grid-judge",
+                    "--judgment-start",
+                    JUDGMENT.start,
+                    "--judgment-end",
+                    JUDGMENT.end,
+                ),
+                loader=TestCLI._loader(bars, []),
+            )
+        assert exc.value.code == 2
+        assert fake.cmds == []  # 零 spawn
+
+    def test_joint_without_count_fails_closed(self, tmp_path, monkeypatch):
+        runner = FakeCellRunner(objective=0.5)
+        monkeypatch.setattr(el, "_make_cell_runner", lambda *a, **k: runner)
+        bars, codes_file = TestCLI._setup(tmp_path)
+        with pytest.raises(SystemExit) as exc:
+            el.main(
+                TestCLI._argv(tmp_path, codes_file, "--mock-llm", "--joint"),
+                loader=TestCLI._loader(bars, []),
+            )
+        assert exc.value.code == 2
+        assert runner.calls == []
