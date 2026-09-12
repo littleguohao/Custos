@@ -289,3 +289,8 @@ R2 那次翻转**同时换了宇宙和数据源**。当时把翻转全部归因�
   交易集（去 score 哈希逐字节一致），「因子×止损×止盈」退化为
   「gate×出场」，收敛方向登记 TODO #70；LLM 假设生成增量缺随机
   baseline 对照，裁决实验登记 TODO #71。
+  `--cell-top-n` 默认 20（2026-09-12，TODO #70 代码侧落地）：top_n=0 是
+  退化边界，开启三轴流程时退化/非退化在启动横幅与 summary config
+  （`factor_axis_degenerate`）双向明示。随机 baseline 裁决工具
+  `random_baseline_study` 已落地（2026-09-12，TODO #71）：同 DSL 空间
+  随机采样过同一 IC 门（纯确定性不烧 token），给 LLM 增量证据提供对照组。

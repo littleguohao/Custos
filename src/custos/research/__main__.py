@@ -162,6 +162,11 @@ TOOLS: dict[str, tuple[str, str]] = {
         "复权口径诊断：量化未复权数据对回测与选股的影响",
     ),
     "probe_data_sources": ("diagnostic", "数据源探针：实测可用性/耗时/返回形状"),
+    "random_baseline_study": (
+        "study",
+        "随机 DSL 表达式 baseline 裁决实验（R32/#71：LLM 增量证据的对照组；"
+        "纯确定性不烧 token）",
+    ),
     # ⚠️ stale 状态保留给未来用：首批三个（compare_signal_sets /
     #    scan_signal_backtest / m2_migrate_fingerprint）2026-08-12 已按
     #    待办 #44 owner 定案**删除**（机制保留：标 stale 会在列表与运行时提醒）。
@@ -177,7 +182,7 @@ LABEL = {
 
 # 短名别名：包目录 research/evolution/ 已占用 "evolution"（注册键必须等于
 # 文件名，见 _listing 的存在性检查），CLI 文件叫 evolution_loop.py，给入口留短名。
-ALIASES = {"evolution": "evolution_loop"}
+ALIASES = {"evolution": "evolution_loop", "random_baseline": "random_baseline_study"}
 
 
 def _modes(name: str) -> list[str]:

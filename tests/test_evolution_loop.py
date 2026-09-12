@@ -1512,3 +1512,97 @@ class TestCountRequired:
             )
         assert exc.value.code == 2
         assert runner.calls == []
+
+
+# ---------- TODO #70：单元格容量约束（--cell-top-n）与退化明示 ----------
+
+
+class TestCellTopN:
+    def test_namespace_carries_cell_top_n(self, tmp_path, monkeypatch):
+        # top_n 进 Namespace：monkeypatch strategy_grid.run_cell 捕获 ns
+        from custos.research import strategy_grid as sg
+
+        captured = {}
+
+        def fake_run_cell(ns, cell, out_dir, capture=False):
+            captured["ns"] = ns
+            captured["cell"] = cell
+            return "failed", None, ""  # 失败即可，只看 Namespace
+
+        monkeypatch.setattr(sg, "run_cell", fake_run_cell)
+        args = el._build_parser().parse_args(
+            [
+                "--mining-start",
+                "2024-01-01",
+                "--mining-end",
+                "2024-06-01",
+                "--cell-top-n",
+                "7",
+            ]
+        )
+        runner = el._make_cell_runner(args, ["S000"], tmp_path)
+        out = runner("ROC(CLOSE,5)", "j_low", {}, start="2024-01-01", end="2024-06-01")
+        assert out is None  # 格子失败 → None（顺带钉住失败口径）
+        assert captured["ns"].top_n == 7
+        assert captured["cell"]["scorer"] == "expr:ROC(CLOSE,5)"
+
+    def test_grid_command_carries_top_n(self, tmp_path):
+        args = el._build_parser().parse_args(
+            [
+                "--mining-start",
+                "2024-01-01",
+                "--mining-end",
+                "2024-06-01",
+                "--judgment-start",
+                "2024-08-01",
+                "--judgment-end",
+                "2024-10-01",
+            ]
+        )
+        cmd = el._grid_command(args, tmp_path, ["ROC(CLOSE,5)"], ["S000"], "t__grid")
+        assert cmd[cmd.index("--top-n") + 1] == "20"  # 默认 20（选择压力）
+
+    def test_default_not_degenerate(self, tmp_path):
+        bars, codes_file = TestCLI._setup(tmp_path)
+        rc = el.main(
+            TestCLI._argv(tmp_path, codes_file, "--mock-llm"),
+            loader=TestCLI._loader(bars, []),
+        )
+        assert rc == 0
+        cfg = json.loads(
+            (tmp_path / "out" / "t1" / "_summary__t1.json").read_text("utf-8")
+        )["config"]
+        assert cfg["cell_top_n"] == 20
+        assert cfg["factor_axis_degenerate"] is False
+        assert "factor_axis_note" not in cfg
+
+    def test_zero_top_n_marked_degenerate(self, tmp_path, capsys, monkeypatch):
+        # --cell-top-n 0 → 启动横幅（grid-judge 路径）+ summary config 标 true
+        fake = _FakeGridRun()
+        monkeypatch.setattr(el.subprocess, "run", fake)
+        bars, codes_file = TestCLI._setup(tmp_path)
+        rc = el.main(
+            _grid_argv(tmp_path, codes_file, "--mock-llm", "--cell-top-n", "0"),
+            loader=TestCLI._loader(bars, []),
+        )
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "因子轴退化" in out and "factor_axis_degenerate" in out
+        cfg = json.loads(
+            (tmp_path / "out" / "t1" / "_summary__t1.json").read_text("utf-8")
+        )["config"]
+        assert cfg["factor_axis_degenerate"] is True
+        assert "gate×出场" in cfg["factor_axis_note"]
+        # 退化口径同样透传进 argv（top_n=0 显式可见，不藏默认）
+        assert fake.cmds[0][fake.cmds[0].index("--top-n") + 1] == "0"
+
+    def test_positive_top_n_banner_info(self, tmp_path, capsys, monkeypatch):
+        fake = _FakeGridRun()
+        monkeypatch.setattr(el.subprocess, "run", fake)
+        bars, codes_file = TestCLI._setup(tmp_path)
+        rc = el.main(
+            _grid_argv(tmp_path, codes_file, "--mock-llm"),
+            loader=TestCLI._loader(bars, []),
+        )
+        assert rc == 0
+        assert "选择压力" in capsys.readouterr().out

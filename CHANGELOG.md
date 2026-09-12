@@ -209,7 +209,8 @@
 | 2026-09-10 | v0.204 | 联合演化第一档：基因组（表达式×gate×出场）+ 确定性参数格点变异 + 循环内三轴适应度（--joint） | TODO #68；owner 拍板 | 钉测 +39；全量绿 |
 | 2026-09-10 | v0.206 | R32 登记（文档，无代码改动）：进化引擎真实数据三步冒烟链路三通——DSL 门 6/6×2、双窗终审 5/5；joint 首候选 VWAP偏离×量比双窗 pass（L3− 留证）；发现 `--grid-judge` 子进程未转发 `--count` 致三轴终审 3 格全灭，修复+重跑登记 TODO #69 | v0.204 落地后首次真实 LLM 全流程验证；缺口为工程事实，判定语义不变 | 产物 `artifacts/logs/evolution/{smoke_mock,smoke_r1,smoke_r2_joint}/`；详见 R32 |
 | 2026-09-11 | v0.207 | TODO #69 修复：`_grid_command` 透传 `--count`（R32 根因：子进程默认 500 尾部≈2024-08 < 判定窗起点 2022-01，尾部截断护栏正确 fail-closed）；`--joint`/`--grid-judge` 强制显式 `--count`（缺省 exit 2 零 spawn，防同类静默缺口） | R32 冒烟抓出的工程缺口；判定语义不变 | 钉测 +3（cmd 透传/两模式缺 count 拒跑）；`test_evolution_loop` 84 绿；重跑待生产机 |
-| 2026-09-11 | v0.208 | R32 回填（文档）：#69 闭环——r3 重跑验证 v0.207 修复成立（grid-judge 实跑 18 格、expressions 填满 5 候选三轴读数）；VWAP 候选三轴终审直跑取回（best cell j_low_adx25×base_low：objective 0.7395/margin +13.3pp/期望R 0.535，R11 caveat）；新实锤 `top_n=0` 下 scorer 轴不写交易集（去 score 哈希逐字节一致）——因子轴退化为 gate×出场 | r3 重跑 + 直接 cell 验证；冒烟复盘发现退化结构性问题 | TODO #70（top_n 退化收敛）、#71（随机 baseline 裁决实验）登记；产物 `artifacts/logs/evolution/smoke_r3_joint/`、`_ranked__vwap_cell_judge.json` |
+| 2026-09-11 | v0.208 | R32 回填（文档）：#69 闭环——r3 重跑验证 v0.207 修复成立（grid-judge 实跑 18 格、5 候选三轴读数在案）；VWAP 候选三轴终审直跑取回（best cell：objective 0.7395/margin +13.3pp/期望R 0.535，R11 caveat）；新实锤 `top_n=0` 下 scorer 轴不写交易集——因子轴退化为 gate×出场（明细见 R32） | r3 重跑 + 直接 cell 验证；冒烟复盘发现退化结构性问题 | TODO #70/#71 登记；产物 `artifacts/logs/evolution/smoke_r3_joint/`、`_ranked__vwap_cell_judge.json` |
+| 2026-09-12 | v0.210 | TODO #70/#71 落地：`--cell-top-n` 默认 20（单元格容量约束制造因子轴选择压力，0=旧退化行为且横幅+summary config 明示 `factor_axis_degenerate`）；随机 baseline 裁决工具 `random_baseline_study`（同 DSL 空间随机采样过同一 IC 门，纯确定性不烧 token；采样分布口径写死在 random_expr docstring） | R32 结论 5 实锤退化 + 冒烟三门读数无对照 | 钉测 +18（top_n 透传/退化标记/采样合法性/端到端 schema/隔离）；全量绿 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 
