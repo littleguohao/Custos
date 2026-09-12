@@ -1,13 +1,14 @@
 # R32 · LLM 进化引擎真实数据冒烟（mock 干跑 / 真实双窗 / joint+grid-judge 全链路）
 
 > **家族**：元层 · 工具链验证（研究侧 LLM 进化引擎首次真实数据全流程）+ 候选留证　|
-> **证据等级**：L4（链路验证、#69/#70 根因与修复验证、退化实锤、随机 baseline 裁决——
-> 可复现工程事实/确定性跑数）；候选因子 L3−（双窗 pass + 三轴读数在案，但 R11 caveat
-> 下绝对量级不可引用）　|
+> **证据等级**：L4（链路验证、#69/#70/#75 根因与修复复测、退化实锤、随机 baseline
+> 裁决——可复现工程事实/确定性跑数）；候选因子 L3−（双窗 pass + 三轴读数在案，
+> 但 R11 caveat 下绝对量级不可引用）　|
 > **状态**：✅ 全部闭环（2026-09-12）——链路三通（v0.204）；#69 `--count` 透传
 > （v0.207 修复 + r3 重跑验证）；#70 因子轴退化（v0.210 `--cell-top-n` 默认 20 +
 > r4 验证 scorer 恢复区分度）；#71 随机 baseline 裁决（随机 17% ≪ LLM 67%/100%，
-> LLM 假设生成有增量，初步）；⚠️ 残余：`top_n>0` 路径个别 scorer 单格病态慢（TODO #75）　|
+> LLM 假设生成有增量，初步）；#75 慢格（v0.212 TS_RANK 向量化 + scorer 预计算
+> 旁路 + 生产机复测 18s/格，修复前后读数逐位一致）　|
 > **依赖**：引擎口径见 [`README.md`](README.md) 写入规范「LLM 进化引擎口径」段；
 > R11（量级不作数）、R12（判据纪律）、R13（宇宙/窗口钉死——本轮复现一次漂移实例）。
 > 索引与主图见 [`README.md`](README.md)。
@@ -15,17 +16,17 @@
 ## 主题
 
 v0.202 落地 LLM 因子进化引擎、v0.204 落地联合演化第一档之后，在生产机用真实
-通达信本地数据 + 真实 LLM（glm-5.3，ark coding 端点）跑冒烟与两轮修复验证，覆盖
+通达信本地数据 + 真实 LLM（glm-5.3，ark coding 端点）跑冒烟与三轮修复验证，覆盖
 「数据 → DSL 白名单 → IC 门 → 轨迹池落盘 → 双窗终审 → joint 三轴适应度 →
-grid 终审」全链，以及两个结构性问题（#69 count 透传、#70 因子轴退化）的修复验证
-和一次 LLM 增量裁决实验（#71）。
+grid 终审」全链，以及三个结构性问题（#69 count 透传、#70 因子轴退化、#75 慢格）
+的修复验证和一次 LLM 增量裁决实验（#71）。
 
 ## 目标
 
 ① 全链机械在真实数据 + 真实 LLM 下是否通畅；② 两门健康度读数（DSL 门、IC 门
 通过率）落在哪；③ joint 循环内三轴适应度与 cell 签名复用是否工作；④ 修复验证
-（#69/#70）与 LLM 增量裁决（#71）。**不产出候选结论**——过门者一律只记线索，
-晋级仍走三轴终审 + 因子注册表 status 流程 + owner 拍板。
+（#69/#70/#75）与 LLM 增量裁决（#71）。**不产出候选结论**——过门者一律只记
+线索，晋级仍走三轴终审 + 因子注册表 status 流程 + owner 拍板。
 
 ## 运行口径
 
@@ -37,20 +38,20 @@ grid 终审」全链，以及两个结构性问题（#69 count 透传、#70 因�
   `smoke_r2_joint`（joint+grid-judge，暴露 #69）→〔v0.207 修复〕→ `smoke_r3_joint`
   （同口径重跑，验证 #69 + 暴露 #70）→ `vwap_cell_judge`（r2 候选直接 cell 终审）
   →〔v0.210 修复〕→ `smoke_r4_topn20`（验证 #70）+ `topn20_probe`（4 表达式
-  定点格对照）+ `baseline_r1`（#71 随机 baseline）。
+  定点格对照，暴露 #75）+ `baseline_r1`（#71 随机 baseline）→〔v0.212 修复〕→
+  `topn20_probe_v212`（#75 复测）。
 - 各轮方向措辞略有差异（r2 多「截面」二字等），**轮间不构成严格对照**。
-- 产物：`artifacts/logs/evolution/{smoke_*,topn20_probe}/` 与
+- 产物：`artifacts/logs/evolution/{smoke_*,topn20_probe,topn20_probe_v212}/` 与
   `artifacts/logs/random_baseline/baseline_r1/`。
 
 ## 结论
 
-### 1. 链路验证（L4）：全链三通，两轮修复均验证成立
+### 1. 链路验证（L4）：全链三通，三轮修复均验证成立
 
 数据加载、DSL 白名单、截面 RankIC/ICIR、轨迹池落盘、双窗终审、joint 循环内三轴
-cell、cell 签名复用全部按设计工作。#69 修复（v0.207 `_grid_command` 透传 `--count`
-+ 强制显式）后 r3 重跑：grid-judge 75 格实跑 18、复用 0、截断 3（超 max-runs 20
-预算）、**0 格因尾部截断护栏失败**（护栏本身行为正确，正是它暴露了 #69）。
-#70 修复（v0.210 `--cell-top-n` 默认 20）验证见结论 5。
+cell、cell 签名复用全部按设计工作。#69 修复（v0.207）后 r3 重跑：grid-judge
+75 格实跑 18、复用 0、截断 3（超预算）、**0 格因尾部截断护栏失败**。#70/#75
+验证见结论 5/7。
 
 ### 2. 两门指标（owner 关注的健康度读数）
 
@@ -80,7 +81,8 @@ objective 0.7395 / margin +13.3pp / 期望R 0.535 / 2442 笔 / 盈亏比 4.28**�
 **r3 候选**（6/6 pass、双窗 5/5）：最优 `-DELTA(close,5)/close*DELTA(SUM(volume,3),5)/SUM(volume,20)`
 （判定 RankIC +0.0463/+0.406）。经济学上各轮产出全是经典原语重组合（短期反转/
 Amihud 2002/乖离/量比），库内无 Amihud、VWAP 偏离实现（学术老、库内新）。
-r3 的三轴排名读数受当时 top_n=0 退化污染（结论 5），不作晋级依据。
+r3 的三轴排名读数受当时 top_n=0 退化污染（结论 5），不作晋级依据；
+修复后的有效分化读数见结论 7。
 
 ### 4. #69 根因与闭环（L4）
 
@@ -100,10 +102,9 @@ r2 的 grid-judge 3 格全灭（exit=1，3~4s/格）：`_grid_command` 拼 strat
 同 gate（j_low）同出场（pct5/trail08）objective 分化为 **−0.0807 vs −0.1862**，
 scorer 轴恢复区分度。机制澄清：top_n=0 时 objective 出自**全候选池**（gate 决定，
 故全等）；top_n>0 时出自 **top-N 选中子集**（scorer 排序决定，故分化）。
-注意候选池数组本身仍由 gate 决定（topn20_probe 中 expr1/expr3 候选池哈希一致、
-n=5202）——这两者是**数学必然**不是残留 bug：expr3 = expr1 × 非负 Amihud 因子，
-排序等价。选中子集口径示例：候选 5202 笔 → 成交 300 笔（限跳 4436），
-top-N 模式的读数只看选中子集。闭环。
+候选池数组本身仍由 gate 决定（probe 中 expr1/expr3 候选池哈希一致、n=5202
+是预期：expr3 = expr1 × 非负因子，排序数学等价）。选中子集口径示例：候选
+5202 笔 → 成交 300 笔（限跳 4436），top-N 模式的读数只看选中子集。闭环。
 
 ### 6. #71：随机 baseline 裁决（L4 确定性跑数，小样本）
 
@@ -116,12 +117,33 @@ top-N 模式的读数只看选中子集。闭环。
 纪律仍必需。小样本 caveat：可再加 1~2 个 seed 把 baseline 钉窄（每 seed ~7 分钟、
 零 token，工具 `random_baseline_study` 已落地 v0.210）。
 
-### 7. 残余问题（TODO #75）
+### 7. #75：慢格根因、修复与复测（L4，闭环）
 
-`top_n>0` 路径下个别 scorer 单格病态慢：topn20_probe 中
-`(1-2*TS_RANK(close,5))*TS_RANK(volume,10)` 与 Amihud 两格 >28 分钟未完
-（同配置 expr1/3 约 1 分钟/格），疑病态分支；另 r3 的 `j_low/base_low` 格
-（top_n=0）1800s 超时 ×2。两者均为 infra 性能问题，不影响判定语义。
+**根因（v0.212 profile 定位）**：两乘性——表达式 scorer 未接 `_SCORER_PRECOMPUTE`，
+热循环逐 bar 对前缀切片全量重算（O(n²)，单股逐 bar 698.7s）；TS_RANK 用
+`rolling.apply` 逐点 Python 回调（单股全序列 552ms，约为 ROC 的 2000 倍）。
+topn20_probe（v0.211）中 expr4/expr5 两格 >28 分钟未完被杀，r3 的
+`j_low/base_low` 1800s 超时 ×2 同属此路径（scorer 逐 bar 判定与 top_n 无关，
+不是 gate/组合层问题）。
+
+**修复（v0.212）**：TS_RANK 改 `sliding_window_view` 整数比较计数（逐位等价：
+同一笔 `/(2n)` 浮点除法，NaN 窗口掩码同旧 `min_periods=n` 口径）；表达式 scorer
+三参形态接 `_SCORER_PRECOMPUTE`（每股全序列算一次、热循环 O(1) 点查，异常
+回退旧路径）——等价性沿用仓内 kdj_j/rsi_state 同款「前缀切片 ≡ 全序列第 i 点」
+口径，判定语义零变化。
+
+**生产机复测（topn20_probe_v212，2026-09-12）**：4 格全部 **18s/格** 完成
+（加载 3-4s + 评估 14s），对照修复前 2 格约 1 分钟 + 2 格 >28 分钟未完——
+病态格消失，与 commit 折算量级一致。**等价性实锤（生产数据）**：expr3 cell
+修复前后读数逐位相同（成交 300/限跳 4436、CAGR 19.1%、收益/回撤 2.52）。
+
+**副产观察（R11 caveat：只看相对排序）**：4 scorer × 同 gate/出场，选中子集
+组合读数真实分化——expr1（n=305，收益/回撤 1.71）、expr3（n=300，2.52）、
+expr4（n=328，0.26）、**expr5 纯 Amihud（n=312，胜率 34.0%，收益/回撤 5.73，
+最大回撤 19.3% 为四者最小）**——最朴素的 Amihud 单因子选中子集质量最好，
+此差异在 top_n=0 退化时代完全不可见。expr1/expr3 微差（305 vs 300）系
+NaN/并列边界效应，与「排序数学等价」不矛盾（top_n=0 时严格一致是因为
+当时根本不发生选择）。
 
 ---
 
@@ -133,16 +155,18 @@ top-N 模式的读数只看选中子集。闭环。
   `factor_axis_degenerate=false` 写入 config）。
 - 退化实锤文件：`smoke_r3_joint/expr_*__j_low_adx25__base_low__*.json` 四格
   （ef45b402266b/c4651194370e/2c6380e0c677/31ec8b613c34）去 `score` 哈希一致；
-  对照格 b94433f6b764（rank5，n=2371，不同）。修复验证文件：
-  `smoke_r4_topn20/grid_cells/`（156b91aaf54d/9d1328d3d072，候选池哈希一致、
-  objective 分化——子集选择层面分化）、`topn20_probe/`（f52564662655/f0176dc5d4c1）。
+  对照格 b94433f6b764（rank5，n=2371，不同）。#70 验证文件：
+  `smoke_r4_topn20/grid_cells/`（156b91aaf54d/9d1328d3d072，objective 分化）、
+  `topn20_probe/`（f52564662655/f0176dc5d4c1）。#75 复测：`topn20_probe_v212/`
+  4 格全成（436de47f8405/23d6710dbbed 等，stdout `[DONE] ... 18s` ×4）。
 - VWAP 直跑：`smoke_r2_joint/_ranked__vwap_cell_judge.json`（11 格排名）。
 - baseline：`random_baseline/baseline_r1/_random_baseline__baseline_r1.json`。
 - 宇宙漂移实例（R13）：r2 与 r3 同为 seed42/200 抽样，grid 宇宙 digest 不同
   （c64358bd5141 vs 8790ac43f16a）——隔日全市场股票清单变化致抽样母体漂移；
-  vwap_cell_judge/topn20_probe 均复用钉死 codes-file。
+  vwap_cell_judge/topn20_probe(_v212) 均复用钉死 codes-file。
 - 时间账：r3 约 3h47m（grid 实格 18 + 2 格 1800s 超时）；vwap 直跑 15 格约 9 分钟；
-  baseline 约 7 分钟；r4 约 2.5 小时（含 1 格循环内超时 1800s）。
+  baseline 约 7 分钟；r4 约 2.5 小时（含 1 格循环内超时 1800s）；
+  topn20_probe_v212 全程 61 秒。
 - 工程注记（生产机 Windows）：LLM 单次提案 ~16s / ~1k tokens，默认 60s 超时
   易误杀，实跑用 `--timeout 300`；长时间运行以分离进程启动（终端退出会杀会话
   子进程；`uv run` 自身退出后 python 子进程孤儿续跑，监控要看 python 不是 uv）。

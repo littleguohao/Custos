@@ -215,6 +215,7 @@
 | 2026-09-12 | v0.212 | TODO #75 修复：TS_RANK 改 sliding_window_view 向量化（单股全序列 552ms→1.2ms）；表达式 scorer 接 `_SCORER_PRECOMPUTE` 旁路（每股算一次、逐 bar O(1) 点查）——单股逐 bar 698.7s→0.057s（约 12000 倍），50 股一格 >28min→约 3s；r3 top_n=0 超时两格同属此路径。判定语义零变化（逐位等价钉测在案） | profile 定位（/tmp 一次性脚本）+ 等价性钉测 | 钉测 +11；全量绿 |
 | 2026-09-12 | v0.213 | TODO #72 落地：进化引擎规划层（`--plan N`）——LLM 把种子方向扩成 N 条机制正交子方向（prompt 注池内已有方向/表达式做正交约束，错误回注重试 ≤3），失败/不足回退确定性模板（FALLBACK_TEMPLATES，来源标记 llm/fallback 进事件与 summary plan 块）；MockLLM 支持规划应答 | QuantaAlpha planning 的 Custos 版；owner 拍板 | 钉测 +14；全量绿 |
 | 2026-09-12 | v0.214 | TODO #73/#74 落地（因子注册表扩展，P7）：FACTOR 元数据加可选 `research_ref`（^R\d+$ 且 R 文档真实存在，evidence 指向 R 文档者机械回填 31 个）/`trajectory_ref`（^t_[0-9a-f]{10}$）/`free_params`（非负 int，bool 拒）；准入自由度惩罚 ratchet——free_params≥4 且 active 必须有 research_ref；示范声明 wave_type=9/distribution=17/macd_technics=4。零行为变化 | owner 拍板；回填/示范均为纯元数据 | 钉测 +6（谱系形态/文档存在性/回填防漂移/自由度规则/示范声明）；全量绿 |
+| 2026-09-12 | v0.215 | R32 回填（文档）：#75 闭环——生产机复测 topn20_probe_v212：4 格全部 18s/格（修复前 2 格 >28 分钟未完），expr3 cell 修复前后读数逐位相同（生产数据等价性实锤）；副产观察：4 scorer 选中子集真实分化，纯 Amihud 组合读数最优（收益/回撤 5.73 vs 其余 0.26~2.52，R11 caveat）——top_n=0 退化时代不可见 | 复测确认 v0.212 修复成立 + 钉测 131 绿 | 产物 `artifacts/logs/evolution/topn20_probe_v212/`；TODO #75 删除 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

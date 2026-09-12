@@ -8,8 +8,8 @@
 >
 > 最后更新：2026-09-12（#70/#71 生产机验证闭环：r4（top_n=20）scorer 轴恢复区分度、
 > 随机 baseline 17% ≪ LLM 67%/100% ⇒ LLM 有增量（初步），明细见 R32；
-> #75 慢格根因查明并修复（v0.212：TS_RANK 向量化 + 表达式 scorer 接预计算旁路，
-> 约 12000 倍），待生产机复测格速；#72 规划层落地（v0.213：`--plan N` 方向扩展
+> #75 闭环（v0.212 修复 + 生产机复测 18s/格、expr3 修复前后逐位一致）；
+> #72 规划层落地（v0.213：`--plan N` 方向扩展
 > + 确定性 fallback）；#73/#74 注册表扩展落地（v0.214：谱系字段 +
 > 准入自由度惩罚，31 因子回填 research_ref）。
 > 当前活跃：#60 影子观察（待 owner 拍板）、#61 校准回测、#26 剩余子项挂起、
@@ -44,7 +44,6 @@
 | 59 | **scorer 双形态剩余机会**：s_shape 系（值得但改造面大）、alpha101/pvcorr/low_vol/momentum/reversal_quality/mcap（中等优先）；b1_dual/long_structure/b2/main_rally 黑盒 detector 不适合。优先级低，随回测批次顺带做 | v0.73 审查（①② 已落地 v0.74；③④ 已否决，见已失效表） |
 | 63 | **两处直读 TDX 安装目录文件的解析器下沉 datasource**：`holding_sector_mapper.py`（pipeline 层直读 `tdxhy.cfg`/`incon.dat` 解析行业归属）与 `manual_pools.py`（直读 `blocknew.cfg`/`.blk` 自选股板块文件）。本轮数据层解耦只收敛了 mootdx 直调，这两处走本地文件解析、不踩 vendor 白名单钉测，属灰色地带；解析器应下沉 `datasource/local_tdx/`，留作后续 | 2026-08-24 数据层解耦审计 |
 | 67 | **因子层三套接口收敛**：`compute_xxx(df)` / `detect_xxx(df)` / `_sc_xxx(df,code)` 三套调用约定并存，加两种消费方式（live 标注 `signal_labels` vs 研究打分 `SCORERS`）——`b1_dual_factor`/`b2_surge_factor`/`rsi_state` 被两处各自包装，判据可能不一致。⚠️ 统一是**语义改动、会改 live 选股行为**，须单独立项 + 回测验证后切换，不能只做机械改名。权重上升：研究侧若引入 LLM 进化的候选因子，接入面需先有单一接口 | `core/factors/__init__.py:6-25`（2026-08-06 清点未统一；2026-09-09 QuantaAlpha 对比复核登记） |
-| 75 | **`top_n>0` 路径个别 scorer 单格病态慢**：根因已查明并修复（v0.212）——①TS_RANK 用 rolling.apply 逐点 Python 回调（单股全序列 552ms，是 ROC 的 2000 倍）已改 sliding_window_view 向量化（逐位等价钉测在案）；②表达式 scorer 未接 `_SCORER_PRECOMPUTE`，逐 bar 前缀切片全量重算（单股逐 bar 模拟 698.7s）已接旁路（每股算一次，0.057s，加速比约 12000 倍；50 股一格从 >28 分钟未完降到约 3 秒）。r3 的 top_n=0 超时两格同属此路径（scorer 在进场判定中逐 bar 都跑、与 top_n 无关），**不是** gate/组合层问题。剩余：生产机复测格速 | R32 结论 7（2026-09-12 生产机实测）+ v0.212 profile |
 
 ## ⚠️ 已失效的行动项（**别照着做**）
 
