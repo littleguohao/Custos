@@ -19,6 +19,7 @@ FACTOR: dict[str, Any] = {
     "kind": "selector",
     "status": "needs_work",
     "evidence": "governance/research/R2_selection_price_volume.md",
+    "research_ref": ["R2"],  # TODO #73 谱系回填（与 evidence 同源）
     "note": "买弱指纹；R2：recall 100% 但期望 −0.42%/笔，劣于无差别进场 +0.96%",
     "min_bars": 1,
     "live_use": "none",  # v0.50（#37 阶段 A）：已证伪，live 停止逐票计算（原 evidence_only 落盘也下线）

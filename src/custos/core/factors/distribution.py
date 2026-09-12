@@ -28,6 +28,9 @@ FACTOR: dict[str, Any] = {
     "kind": "pattern",
     "status": "active",
     "evidence": "governance/research/R2_selection_price_volume.md",
+    "research_ref": ["R2"],  # TODO #73 谱系回填（与 evidence 同源）
+    "free_params": 17,  # TODO #74：DIST_* 全部 17 个阈值/窗口均为待回测可调参数
+    # ——active 多参数 ⇒ 须 research_ref（上方 #73 回填的 R2 满足规则）
     "note": "主力出货五方式（顶部派发形态），用于清仓与选股规避；2026-08-13 补全：次日确认豁免层（confirm_distribution）+ ③平量阴/DKS 跌破 + 顶部大风车（25chuhuo 覆盖度缺口）",
     "min_bars": 1,
     "live_use": "gate",

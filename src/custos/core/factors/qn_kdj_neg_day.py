@@ -31,6 +31,7 @@ FACTOR: dict[str, Any] = {
     "kind": "pattern",
     "status": "needs_work",  # R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08）；R31 否决对应校准前语义（v0.200 案例校准已改，盈利判定以复跑为准）
     "evidence": "governance/research/R31_qn_factor_validation.md",
+    "research_ref": ["R31"],  # TODO #73 谱系回填（与 evidence 同源）
     "note": "规则出处 governance/strategy/qn/05_top_bottom_kdj.md；死叉J>50 后 J<0 第 3/5 天=买点；另腿 KD20 以下金叉；⚠️ 与 B1 反转K J<13 不同口径",
     "min_bars": 20,
     "live_use": "none",

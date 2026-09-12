@@ -27,6 +27,7 @@ FACTOR: dict[str, Any] = {
     "kind": "state",
     "status": "candidate",
     "evidence": "governance/research/R2_selection_price_volume.md",
+    "research_ref": ["R2"],  # TODO #73 谱系回填（与 evidence 同源）
     "note": "R2：板块族+密度是准确的「窗口主线指纹」（归因工具），但「跟随主流」机械规则不成立",
     "min_bars": 1,
     "live_use": "none",  # v0.79：候选表主线指纹节删除（板块证据两次不稳+一次证伪），live 链不再引用

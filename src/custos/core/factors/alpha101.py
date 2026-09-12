@@ -19,6 +19,7 @@ FACTOR: dict[str, Any] = {
     "kind": "selector",
     "status": "needs_work",
     "evidence": "governance/research/R2_selection_price_volume.md",
+    "research_ref": ["R2"],  # TODO #73 谱系回填（与 evidence 同源）
     "note": "判别层过线但净值终审未过；2025 窗明确输",
     "min_bars": 1,
     "live_use": "none",

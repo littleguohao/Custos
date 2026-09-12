@@ -30,6 +30,7 @@ FACTOR: dict[str, Any] = {
     "kind": "pattern",
     "status": "needs_work",  # R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08）
     "evidence": "governance/research/R31_qn_factor_validation.md",
+    "research_ref": ["R31"],  # TODO #73 谱系回填（与 evidence 同源）
     "note": "规则出处 governance/strategy/qn/01_general.md §八；绿柱连缩+不破前低=买小绿（hit）；红柱连缩+滞涨=卖小红（出场侧记录）",
     "min_bars": 40,
     "live_use": "none",

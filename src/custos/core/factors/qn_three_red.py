@@ -32,6 +32,7 @@ FACTOR: dict[str, Any] = {
     "kind": "state",
     "status": "needs_work",  # R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08）
     "evidence": "governance/research/R31_qn_factor_validation.md",
+    "research_ref": ["R31"],  # TODO #73 谱系回填（与 evidence 同源）
     "note": "规则出处 governance/strategy/qn/01_general.md §二；日/周/月 MACD 柱全红=多周期共振多头（大必胜前提）；月绿柱下日线上涨只按反弹读",
     "min_bars": 60,
     "live_use": "none",

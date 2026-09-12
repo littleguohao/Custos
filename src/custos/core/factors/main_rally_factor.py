@@ -45,6 +45,7 @@ FACTOR: dict[str, Any] = {
     "kind": "pattern",
     "status": "untested",
     "evidence": "governance/research/R8_hypothesis_H3_H4_pending.md",
+    "research_ref": ["R8"],  # TODO #73 谱系回填（与 evidence 同源）
     "note": "R8 H4：s3000×2年 两 CROSS 口径 0 触发；R27：s300 双窗探测 0 成交复证。"
     "v0.185 从 1800 标注层撤除（0 触发因子不提供信息），研究侧 gate 保留留证",
     "min_bars": 60,

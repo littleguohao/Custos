@@ -25,6 +25,7 @@ FACTOR: dict[str, Any] = {
     "kind": "selector",
     "status": "needs_work",
     "evidence": "governance/research/R2_selection_price_volume.md",
+    "research_ref": ["R2"],  # TODO #73 谱系回填（与 evidence 同源）
     "note": "R2：全市场阈值扫描无 lift；正向择优劣于随机",
     "min_bars": 60,
     # ✅ **定案记录（2026-08-12，v0.50，#37 阶段 A，owner 拍板）**：

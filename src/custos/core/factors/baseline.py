@@ -17,6 +17,7 @@ FACTOR: dict[str, Any] = {
     "kind": "control",
     "status": "active",
     "evidence": "governance/research/R1_core_framework.md",
+    "research_ref": ["R1"],  # TODO #73 谱系回填（与 evidence 同源）
     "note": "所有进场信号的对照臂，必须保留",
     "min_bars": 1,
     "live_use": "none",

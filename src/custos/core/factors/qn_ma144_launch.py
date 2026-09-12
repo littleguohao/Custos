@@ -38,6 +38,7 @@ FACTOR: dict[str, Any] = {
     "kind": "pattern",
     "status": "needs_work",  # R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08）
     "evidence": "governance/research/R31_qn_factor_validation.md",
+    "research_ref": ["R31"],  # TODO #73 谱系回填（与 evidence 同源）
     "note": "规则出处 governance/strategy/qn/07_doubling_swing.md §二；四要素：MA144 走平上翘/回踩±10%/MACD 双线上零轴/过左风四形式之一（涨停·跳空·倍量·线上阴线）",
     "min_bars": 170,
     "live_use": "none",

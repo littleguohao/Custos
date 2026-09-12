@@ -22,6 +22,7 @@ FACTOR: dict[str, Any] = {
     "kind": "state",
     "status": "active",
     "evidence": "governance/research/R4_timing_amv_sector.md",
+    "research_ref": ["R4"],  # TODO #73 谱系回填（与 evidence 同源）
     "note": "R4 初测：0AMV 之后第二个 OOS 站得住的增强（熊市减亏 ~4-6pp）；"
     "⚠️ 2026-08-09 R4 重跑**未复现**（四窗两正两负）⇒ 降为 L2「方向不稳」；"
     "v0.50（#37 阶段 A）起从「可买」定义移出，仅作情境标注列",

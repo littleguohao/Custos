@@ -20,6 +20,7 @@ FACTOR: dict[str, Any] = {
     "kind": "selector",
     "status": "needs_work",
     "evidence": "governance/research/R3_selection_discriminability_recall.md",
+    "research_ref": ["R3"],  # TODO #73 谱系回填（与 evidence 同源）
     "note": "同号率仅 50%，不稳定",
     "min_bars": 12,
     "live_use": "none",

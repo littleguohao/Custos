@@ -28,6 +28,7 @@ FACTOR: dict[str, Any] = {
     "kind": "pattern",
     "status": "needs_work",  # R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08）
     "evidence": "governance/research/R31_qn_factor_validation.md",
+    "research_ref": ["R31"],  # TODO #73 谱系回填（与 evidence 同源）
     "note": "规则出处 governance/strategy/qn/08_main_wave_launch.md；阳线倍量×2 同时上穿 MA5/MA10=起爆K线；大级别托底与鬼招手发散为记录腿",
     "min_bars": 30,
     "live_use": "none",

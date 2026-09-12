@@ -29,6 +29,7 @@ FACTOR: dict[str, Any] = {
     "kind": "state",
     "status": "needs_work",  # R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08）
     "evidence": "governance/research/R31_qn_factor_validation.md",
+    "research_ref": ["R31"],  # TODO #73 谱系回填（与 evidence 同源）
     "note": "规则出处 governance/strategy/qn/01_general.md §四；MA25 多空分界 + 线上阴线买/线下阳线抛状态判定，MACD 柱红绿辅助；研究侧 gate=线上缩量阴线候选",
     "min_bars": 30,
     "live_use": "none",

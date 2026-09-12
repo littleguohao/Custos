@@ -49,6 +49,7 @@ FACTOR: dict[str, Any] = {
     "kind": "selector",
     "status": "needs_work",
     "evidence": "governance/research/R6_hypothesis_H1_dual_axis.md",
+    "research_ref": ["R6"],  # TODO #73 谱系回填（与 evidence 同源）
     "note": "R6：未过跨窗终审；j_low_qsx_weekly 净值只多 0.019R 却付 90% 召回",
     "min_bars": 120,
     "live_use": "evidence_only",  # signal_labels 出标签落候选表；该模块头部已声明「标注不是交易依据」

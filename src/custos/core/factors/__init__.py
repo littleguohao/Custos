@@ -90,6 +90,18 @@ KNOWN_STATUS_USE_CONFLICTS: dict[str, str] = {}
 #: 待优化意味着**证据本身要重跑**（见 R2 重跑清单 P1）。
 NOT_FOR_LIVE = frozenset({"needs_work", "untested"})
 
+# ─────────────────────────── 谱系与准入（TODO #73/#74，v0.214）────────────────
+#: **可选**元数据，形态由 tests/test_factor_registry.py 强制（机器执行不靠自觉）：
+#:   research_ref    来源研究单元号列表（^R\d+$ 且 governance/research/R<n>_*.md
+#:                   真实存在）；evidence 指向 R 文档的因子必须回填（防漂移）
+#:   trajectory_ref  进化引擎来源轨迹 id（^t_[0-9a-f]{10}$），仅引擎晋级因子用
+#:   free_params     可调参数个数声明（阈值/窗口/权重类计数，固定常量不算；
+#:                   非负 int，bool 拒；缺省视为 0/未声明）
+#: **准入自由度惩罚**：free_params >= 4 且 status=active ⇒ 必须同时有
+#: research_ref —— 参数越多过拟合面越大，晋级必须有在案研究单元背书。
+#: ratchet：新出现的违规会被测试挡住；存量因子不强制回填 free_params，
+#: 但有声明的就受规则约束。
+
 
 def registry() -> dict[str, dict]:
     """扫本包，收集所有声明了 `FACTOR` 的模块。

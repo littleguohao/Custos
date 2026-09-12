@@ -20,6 +20,10 @@ FACTOR: dict[str, Any] = {
     "kind": "pattern",
     "status": "active",
     "evidence": "governance/research/R2_selection_price_volume.md",
+    "research_ref": ["R2"],  # TODO #73 谱系回填（与 evidence 同源）
+    "free_params": 9,  # TODO #74：WAVE_LOOKBACK 分析窗口 + 8 个「待回测参数」
+    # 阈值/窗口（涨停判定/冲刺窗/加速/放量/长阳/二次启动；B1 文档口径区间与
+    # WAVE_MIN_BARS 数据要求是固定常量，不计）——active 多参数 ⇒ 须 research_ref
     "note": "前置拉升波分类（建仓/拉升/冲刺），冲刺波首个 B1 禁止买入",
     "min_bars": 1,
     "live_use": "gate",

@@ -35,6 +35,8 @@ FACTOR: dict[str, Any] = {
     # 无回测证据 ⇒ 不能标 active；取 candidate 并挂回测 TODO。
     "status": "candidate",
     "evidence": "",
+    "free_params": 4,  # TODO #74 示范：MACD_SWING_FRACTAL/DIV_LOOKBACK/
+    # OVEREXT_PCTL/OVEREXT_WIN 四个待回测参数；candidate 不受 active 规则约束
     "note": "v0.86 自 enrich_candidates 迁入（零行为变化）；喂技术分 7 条打分腿"
     "（zone1/zone1_restart/bottom_div/above_water/bar_grow/wm_bar_grow/top_div）"
     "+ 2 条 cap 判定（顶背离留痕、三打白骨精封顶 C），参数待回测校准",

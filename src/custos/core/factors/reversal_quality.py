@@ -42,6 +42,7 @@ FACTOR: dict[str, Any] = {
     "kind": "selector",
     "status": "needs_work",
     "evidence": "governance/research/R2_selection_price_volume.md",
+    "research_ref": ["R2"],  # TODO #73 谱系回填（与 evidence 同源）
     "note": "稳健负预测；口径已与 live 默认值一致（对称 ±2%），但刻意不跟随 B1_REVK_* env",
     "min_bars": 21,
     "live_use": "none",

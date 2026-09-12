@@ -50,6 +50,17 @@
                 但不驱动决策。只用 status 一个维度会把这种合法用法误判成违规
                 （2026-08-06 我的第一版守卫就是这么误报的）。
 
+    research_ref    **可选**：来源研究单元号列表（如 ["R21"]）——谱系由测试强制：
+                    每条必须匹配 ^R\d+$ 且 `governance/research/R<n>_*.md`
+                    真实存在（机器执行，不靠文档自觉）；空/缺省 = 无约束
+    trajectory_ref  **可选**：进化引擎来源轨迹 id（形如 t_xxxxxxxxxx，
+                    必须匹配 ^t_[0-9a-f]{10}$），仅引擎晋级因子用；空/缺省 = 无约束
+    free_params     **可选**：因子可调参数个数声明（阈值/窗口/权重类可调参数
+                    计数，固定常量不算；缺省视为 0/未声明）。必须非负 int
+                    （bool 拒）。**准入自由度惩罚**：free_params >= 4 且
+                    status=active ⇒ 必须同时有 research_ref —— 参数越多
+                    过拟合面越大，晋级必须有在案研究单元背书（TODO #74）
+
 ⚠️ **`status` 在 `NOT_FOR_LIVE` 里的因子由测试强制不得进入 live 选股链。**
 这是把 R2「价量选择器均未通过验证」这个结论**变成机器可执行的约束** ——
 否则半年后有人看到 `alpha101` 就拿去用了，而文档里那条否决没人会重读。
@@ -81,6 +92,9 @@ FACTOR: dict[str, Any] = {
     "evidence": "",
     "note": "复制本文件开始写新因子；registry 会跳过 id=template",
     "min_bars": 1,
+    "research_ref": [],  # 可选：来源研究单元号（如 ["R21"]）；空 = 无
+    "trajectory_ref": "",  # 可选：进化引擎轨迹 id（t_xxxxxxxxxx）；空 = 无
+    "free_params": 0,  # 可选：可调参数个数（阈值/窗口/权重类；固定常量不算）
 }
 
 

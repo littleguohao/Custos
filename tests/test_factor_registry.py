@@ -539,3 +539,96 @@ class TestStageMatchesReality:
                 assert m["live_use"] == "none", (
                     f"{fid} stage=debug 却声明 live_use={m['live_use']}"
                 )
+
+
+class TestLineageFields:
+    """TODO #73：谱系字段（research_ref / trajectory_ref）形态由测试强制。
+
+    对齐 needs_work→evidence 的既有模式（文件存在性检查）：可选字段空/缺省
+    无约束，一旦给出就必须形态合法且指向真实存在的研究单元文档。
+    """
+
+    def test_research_ref_shape_and_doc_exists(self):
+        import re
+
+        for fid, e in factors.registry().items():
+            refs = e["meta"].get("research_ref")
+            if not refs:
+                continue
+            assert isinstance(refs, list), f"{fid} 的 research_ref 必须是 list"
+            for r in refs:
+                assert isinstance(r, str) and re.fullmatch(r"R\d+", r), (
+                    f"{fid} 的 research_ref 条目形态非法: {r!r}（须 ^R\\d+$）"
+                )
+                hits = list((ROOT / "governance" / "research").glob(f"{r}_*.md"))
+                assert hits, f"{fid} 引用了 {r}，但 governance/research/ 无对应文档"
+
+    def test_trajectory_ref_shape(self):
+        import re
+
+        for fid, e in factors.registry().items():
+            t = e["meta"].get("trajectory_ref")
+            if not t:
+                continue
+            assert isinstance(t, str) and re.fullmatch(r"t_[0-9a-f]{10}", t), (
+                f"{fid} 的 trajectory_ref={t!r} 形态非法（须 ^t_[0-9a-f]{{10}}$）"
+            )
+
+    def test_evidence_r_doc_backfilled(self):
+        """evidence 指向 R 文档的因子必须回填 research_ref（防漏回填漂移）。
+
+        v0.214（TODO #73）机械回填 31 个：R2×15 / R31×9 / R8×2 / R1/R3/R4/R6/R7×1。
+        """
+        import re
+
+        n = 0
+        for fid, e in factors.registry().items():
+            ev = e["meta"].get("evidence") or ""
+            m = re.search(r"governance/research/(R\d+)_", ev)
+            if not m:
+                continue
+            n += 1
+            assert m.group(1) in (e["meta"].get("research_ref") or []), (
+                f"{fid} 的 evidence 指向 {m.group(1)} 但 research_ref 未回填"
+            )
+        assert n >= 31, f"回填基数变了（{n}）——若是有意删减 R 引用请同步本断言"
+
+
+class TestFreeParamsAdmission:
+    """TODO #74：准入自由度惩罚——参数多的因子晋级必须有研究背书。
+
+    KNOWN_STATUS_USE_CONFLICTS 同风格的 ratchet：存量不强制回填 free_params，
+    但有声明的就受规则约束；新出现的「active 多参数无背书」会被拦住。
+    """
+
+    def test_free_params_shape(self):
+        for fid, e in factors.registry().items():
+            fp = e["meta"].get("free_params")
+            if fp is None:
+                continue  # 未声明视为 0，无约束（存量逐步来）
+            assert isinstance(fp, int) and not isinstance(fp, bool) and fp >= 0, (
+                f"{fid} 的 free_params={fp!r} 必须是非负 int（bool 拒）"
+            )
+
+    def test_param_heavy_active_needs_research_ref(self):
+        """free_params >= 4 且 status=active ⇒ 必须有 research_ref。"""
+        for fid, e in factors.registry().items():
+            m = e["meta"]
+            fp = m.get("free_params") or 0
+            if m.get("status") == "active" and fp >= 4:
+                assert m.get("research_ref"), (
+                    f"{fid} free_params={fp} 且 active，但缺 research_ref —— "
+                    "参数多的因子晋级必须有在案研究单元背书（TODO #74）"
+                )
+
+    def test_demo_declarations(self):
+        """示范声明钉住（v0.214）：active 多参数由回填的 research_ref 满足规则。"""
+        reg = factors.registry()
+        assert reg["wave_type"]["meta"]["free_params"] == 9
+        assert reg["distribution"]["meta"]["free_params"] == 17
+        assert reg["macd_technics"]["meta"]["free_params"] == 4
+        # macd_technics 是 candidate：声明即合法，active 规则不适用
+        assert reg["macd_technics"]["meta"]["status"] == "candidate"
+        # active 两个都有背书（#73 回填的 R2）
+        assert reg["wave_type"]["meta"]["research_ref"] == ["R2"]
+        assert reg["distribution"]["meta"]["research_ref"] == ["R2"]

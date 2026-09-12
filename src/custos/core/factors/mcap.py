@@ -26,6 +26,7 @@ FACTOR: dict[str, Any] = {
     "kind": "selector",
     "status": "needs_work",
     "evidence": "governance/research/R2_selection_price_volume.md",
+    "research_ref": ["R2"],  # TODO #73 谱系回填（与 evidence 同源）
     "note": "判别层过线、净值终审惨败；止损把下跌端对称兑现",
     "min_bars": 1,
     "live_use": "none",

@@ -29,6 +29,7 @@ FACTOR: dict[str, Any] = {
     "kind": "state",
     "status": "needs_work",  # R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08）
     "evidence": "governance/research/R31_qn_factor_validation.md",
+    "research_ref": ["R31"],  # TODO #73 谱系回填（与 evidence 同源）
     "note": "规则出处 governance/strategy/qn/02_space_targets.md §一；波段低点×1.3=目标位、×1.15=半格压力位；只作空间度量不判买卖",
     "min_bars": 60,
     "live_use": "none",

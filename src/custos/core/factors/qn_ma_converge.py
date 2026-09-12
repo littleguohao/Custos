@@ -36,6 +36,7 @@ FACTOR: dict[str, Any] = {
     "kind": "state",
     "status": "needs_work",  # R31 双窗跑数否决（C2 加值未双窗过线，2026-09-08）；R31 否决对应校准前语义（v0.200 案例校准已改，盈利判定以复跑为准）
     "evidence": "governance/research/R31_qn_factor_validation.md",
+    "research_ref": ["R31"],  # TODO #73 谱系回填（与 evidence 同源）
     "note": "规则出处 governance/strategy/qn/01_general.md §五；MA5/10/25 三线粘合（带宽≤阈值持续 N 根）后首次放量向上发散=启动点；MA144 走平上翘+收盘站上 144 线为前提腿（v0.200 案例校准）",
     "min_bars": 170,
     "live_use": "none",

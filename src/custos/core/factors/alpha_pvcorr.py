@@ -22,6 +22,7 @@ FACTOR: dict[str, Any] = {
     "kind": "selector",
     "status": "needs_work",
     "evidence": "governance/research/R2_selection_price_volume.md",
+    "research_ref": ["R2"],  # TODO #73 谱系回填（与 evidence 同源）
     "note": "三窗对照仅 bull2425 跑赢、无跨窗稳健性 ⇒ 降级不再研究(2026-08-18)",
     "min_bars": 10,
     "live_use": "none",
