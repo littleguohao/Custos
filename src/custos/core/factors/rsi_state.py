@@ -356,3 +356,33 @@ def rsi_state_score(
             "score": None,
             "error": f"{type(exc).__name__}:{str(exc)[:80]}",
         }
+
+
+# v0.220…B3c（TODO #67 裁决点③落地）：研究侧可买阈值单源化进因子模块
+# （此前只在 backtest_factors._sc_rsi_state 内联）。live 的 rsi_ideal_b1 标签
+# 保持 strong∧deep 布尔合取不变（live 行为逐位不变）。
+RSI_STATE_SCORE_BUY_MIN = 60.0
+
+
+def score(
+    df: pd.DataFrame, code: str = "", precomputed: dict | None = None
+) -> dict | None:
+    """SCORERS 规范入口：RSI 状态分（rsi_state_score 合成）+ 可买阈值判定。
+
+    口径与原 ``backtest_factors._sc_rsi_state`` 逐字一致（阈值常量化进
+    ``RSI_STATE_SCORE_BUY_MIN``）；``precomputed`` = 三周期 RSI 全序列映射
+    （evaluate_trades 预计算旁路，两路逐位一致）。
+    """
+    r = rsi_state_score(df, code, rsi_series_map=precomputed)
+    if not r.get("available"):
+        return None
+    return {
+        "score": r["score"],
+        "suggestion": "可买" if r["score"] >= RSI_STATE_SCORE_BUY_MIN else "不买",
+        "aux": {
+            "rsi_regime": r["regime"],
+            "rsi": r["rsi"],
+            "bullish_divergence": r["bullish_divergence"],
+        },
+        "components": {"regime": r["regime"]},
+    }

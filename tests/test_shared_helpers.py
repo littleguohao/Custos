@@ -253,8 +253,11 @@ class TestNoRefork:
         # 注册表接口名（约定：每个 selector 各一份），但不得再长出新文件
         # v0.219（TODO #67 B2）：+ s_shape（`_sc_s_shape` 映射上移为因子模块的
         # score() 规范入口，backtest_factors 侧只剩别名注册）。
+        # v0.222（TODO #67 B3c）：+ rsi_state（`_sc_rsi_state` 上移为因子模块的
+        # score() 规范入口，可买阈值常量化进 RSI_STATE_SCORE_BUY_MIN）。
         "score": {
             "core/factors/s_shape.py",
+            "core/factors/rsi_state.py",
             "core/factors/_template.py",
             "core/factors/alpha101.py",
             "core/factors/alpha_pvcorr.py",

@@ -736,7 +736,7 @@ class TestCharacterizationSnapshot:
         "qsx_resonance": "81a45d06aeba",
         "reversal_quality": "a4c99ffdc5fd",
         "reversal_quality_inv": "7c8275d1a03f",
-        "rsi_state": "7b3800513239",
+        "rsi_state": "a4e72ceb2532",  # v0.220…B3c 更新（score 规范入口槽上移接管）
         "s_shape": "e5ce9b0517c3",  # v0.218…B2 更新（score 规范入口槽上移接管）
         "sector_mainstream": "2f6b4e2841cc",
         "sector_phase": "3fb204571d9e",
@@ -990,3 +990,48 @@ class TestB3bB2ScoreSingleSource:
         )
         assert "b2_score" not in s
 
+
+class TestB3cRsiStateSingleSource:
+    """TODO #67 B3 裁决点③（rsi_state 权重阈值单源化）：常量进因子模块钉测。"""
+
+    def test_buy_threshold_lives_in_factor_module(self):
+        from custos.core.factors import rsi_state
+
+        assert rsi_state.RSI_STATE_SCORE_BUY_MIN == 60.0  # 与原 _sc_rsi_state 内联同值
+
+    def test_factor_score_matches_old_scorer(self):
+        """rsi_state.score() == 原 _sc_rsi_state 逐字段（同一输入对拍）。"""
+        from custos.core.factors import rsi_state
+
+        df = _bars()
+        r = rsi_state.rsi_state_score(df, "600000")
+        got = rsi_state.score(df, "600000")
+        if not r.get("available"):
+            assert got is None
+            return
+        want = {
+            "score": r["score"],
+            "suggestion": "可买" if r["score"] >= 60 else "不买",
+            "aux": {
+                "rsi_regime": r["regime"],
+                "rsi": r["rsi"],
+                "bullish_divergence": r["bullish_divergence"],
+            },
+            "components": {"regime": r["regime"]},
+        }
+        assert got == want
+
+    def test_scorers_rsi_state_is_factor_score(self):
+        """SCORERS["rsi_state"] 与因子 score 同模块同名（B1 reload 注记口径）。"""
+        from custos.research import backtest_factors as BF
+
+        a = BF.SCORERS["rsi_state"]
+        b = factors.registry()["rsi_state"]["score"]
+        assert (a.__module__, a.__name__) == (b.__module__, b.__name__)
+
+    def test_live_ideal_b1_unchanged(self):
+        """裁决点③：live 的 rsi_ideal_b1 仍是 strong∧deep 布尔合取（不碰）。"""
+        s = (ROOT / "src/custos/pipeline/screening/signal_labels.py").read_text(
+            encoding="utf-8"
+        )
+        assert 'reg.get("state") == "strong" and reg.get("deep_oversold")' in s

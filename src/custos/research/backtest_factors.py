@@ -1845,6 +1845,9 @@ try:
         rsi_regime,
         rsi_state_score,
     )
+    from custos.core.factors.rsi_state import (
+        score as _factor_rsi_score,
+    )  # v0.220…B3c：规范入口
     from custos.core.indicators import rsi as _rsi  # Wilder RSI 唯一实现（预计算用）
     from custos.core.factors.main_rally_factor import (
         detect_main_rally_start,
@@ -1883,28 +1886,13 @@ def _precompute_rsi_state_series(df: pd.DataFrame) -> Optional[dict[int, Any]]:
         return None
 
 
-def _sc_rsi_state(df: pd.DataFrame, code: str, precomputed: Optional[dict] = None):
-    """RSI 状态分:区间四态 50 + 底背离 30 + 多周期 20(权重待回测)。
-
-    ``precomputed``：evaluate_trades 逐股预计算的三周期 RSI 全序列映射
-    （见 _precompute_rsi_state_series），只对从第 0 根开始的前缀切片有效；
-    不传（默认）走原逐切片路径，两路逐位一致。
-    """
-    if rsi_state_score is None:
-        return None
-    r = rsi_state_score(df, code, rsi_series_map=precomputed)
-    if not r.get("available"):
-        return None
-    return {
-        "score": r["score"],
-        "suggestion": "可买" if r["score"] >= 60 else "不买",
-        "aux": {
-            "rsi_regime": r["regime"],
-            "rsi": r["rsi"],
-            "bullish_divergence": r["bullish_divergence"],
-        },
-        "components": {"regime": r["regime"]},
-    }
+# v0.220…B3c（裁决点③）：rsi_state 的 SCORERS 入口上移到因子模块
+# `factors/rsi_state.score`（可买阈值常量化进 RSI_STATE_SCORE_BUY_MIN）；
+# 此处只剩别名——_SCORER_PRECOMPUTE 身份键与 SCORERS 注册沿用本名字。
+# 导入失败（rsi 模块缺依赖）时 _factor_rsi_score 不存在 ⇒ 退 None 同旧语义。
+_sc_rsi_state: Optional[Callable[..., Any]] = (
+    _factor_rsi_score if rsi_state_score is not None else None
+)
 
 
 def _sc_main_rally(df: pd.DataFrame, code: str):
@@ -2042,6 +2030,7 @@ def main_rally_above_gate(
 
 
 if rsi_state_score is not None:
+    assert _sc_rsi_state is not None  # 同一块 try 导入，窄化给 mypy
     SCORERS["rsi_state"] = _sc_rsi_state
     _SCORER_PRECOMPUTE[_sc_rsi_state] = _precompute_rsi_state_series
     SCORERS["main_rally"] = _sc_main_rally
