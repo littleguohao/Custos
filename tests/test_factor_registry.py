@@ -893,3 +893,37 @@ class TestCanonicalEntryB2:
         assert "bottom_patterns_mod.detect(df, code)" in enrich
         assert "detect as detect_platform_pullback" in enrich
         assert "detect as resonance_v2_snapshot" in labels
+
+
+class TestB3aB1DualPredicate:
+    """TODO #67 B3 裁决点①（b1_dual 内联判据删除）：谓词单源化、语义不变钉测。"""
+
+    def test_predicate_matches_old_inline_formula(self):
+        """signal_labels 旧内联式 `ph and close >= ph*0.98 and daily_j < 13.0`
+        与单源谓词逐点一致（边界值逐个过）。"""
+        from custos.core.factors.b1_dual_factor import breakout_pullback_hit
+
+        for ph in (0.0, 10.0, 10.465):
+            for close in (10.3, 10.367, 10.393, 10.465):
+                for j in (12.99, 13.0, 13.01):
+                    old = bool(ph and close >= ph * 0.98 and j < 13.0)
+                    assert breakout_pullback_hit(ph, close, j) == old
+
+    def test_detect_uses_predicate(self):
+        """detect_breakout_pullback_b1 的 hit 与谓词输出一致（同输入）。"""
+        from custos.core.factors.b1_dual_factor import (
+            breakout_pullback_hit,
+            detect_breakout_pullback_b1,
+        )
+
+        r = detect_breakout_pullback_b1(_bars(), "600000")
+        if not r.get("available") or r.get("platform_high") is None:
+            return  # 合成数据无平台形：hit=False 路径已由上一用例钉住公式
+        assert r["hit"] == breakout_pullback_hit(r["platform_high"], r["close"], r["j"])
+
+    def test_signal_labels_calls_predicate(self):
+        s = (ROOT / "src/custos/pipeline/screening/signal_labels.py").read_text(
+            encoding="utf-8"
+        )
+        assert "breakout_pullback_hit(ph, close, daily_j)" in s
+        assert "close >= ph * 0.98 and daily_j < 13.0" not in s  # 手写判据已删

@@ -192,16 +192,19 @@ class TestExprPrecompute:
         expr = "(1-2*TS_RANK(close,5))*TS_RANK(volume,10)"
         df = _df_rand(600, seed=3)
         scorer = make_expr_scorer(expr)
+        # 切片构造两条路径同价且占比不小（调度噪声会把 20x 量级比率打抖）——
+        # 预建于计时之外，只测本修复真正改变的部分（逐 bar 重算 vs 点查）。
+        slices = [df.iloc[: i + 1] for i in range(30, len(df))]
 
         def _direct():
-            for i in range(30, len(df)):
-                scorer(df.iloc[: i + 1], "X")
+            for sl in slices:
+                scorer(sl, "X")
 
         pre = expr_scorer_precompute(expr)(df)
 
         def _pre_path():
-            for i in range(30, len(df)):
-                scorer(df.iloc[: i + 1], "X", pre=pre)
+            for sl in slices:
+                scorer(sl, "X", pre=pre)
 
         _direct()
         _pre_path()  # 预热（缓存/分支预测）

@@ -179,12 +179,17 @@ def _signal_breakout_pullback_b1(
     daily_j: Optional[float],
 ):
     try:
-        from custos.core.factors.b1_dual_factor import detect_breakout_pullback_b1
+        from custos.core.factors.b1_dual_factor import (
+            breakout_pullback_hit,
+            detect_breakout_pullback_b1,
+        )
 
         if platform_pullback is not None and daily_j is not None:
             ph = float(platform_pullback.get("platform_high") or 0.0)
             close = float(df["close"].astype(float).iloc[-1])
-            hit = bool(ph and close >= ph * 0.98 and daily_j < 13.0)
+            # v0.220（TODO #67 B3 裁决点①）：内联手写判据删除，改调因子模块的
+            # 单源谓词（默认值 0.98/13.0 逐字相同 ⇒ live 行为逐位不变）
+            hit = breakout_pullback_hit(ph, close, daily_j)
             _put(out, "breakout_pullback_b1", True, hit, platform_high=ph or None)
         else:
             r = detect_breakout_pullback_b1(df, code)

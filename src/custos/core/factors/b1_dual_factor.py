@@ -338,7 +338,10 @@ def detect_breakout_pullback_b1(
         strict = bool(ph and close >= ph)
         return {
             "available": True,
-            "hit": bool(in_b1 and above_ph),
+            # v0.220（裁决点①）：hit 走单源谓词 breakout_pullback_hit（同公式）
+            "hit": breakout_pullback_hit(
+                ph, close, j, ph_tol=ph_tol, j_threshold=j_threshold
+            ),
             "j": round(j, 2),
             "in_b1_zone": in_b1,
             "close_ge_platform_high": above_ph,
@@ -354,3 +357,25 @@ def detect_breakout_pullback_b1(
             "hit": False,
             "error": f"{type(exc).__name__}:{str(exc)[:80]}",
         }
+
+
+def breakout_pullback_hit(
+    platform_high: float,
+    close: float,
+    daily_j: float,
+    *,
+    ph_tol: float = 0.98,
+    j_threshold: float = 13.0,
+) -> bool:
+    """突破回踩判定的纯谓词（单源）：close ≥ platform_high×ph_tol 且 daily_j < j_threshold。
+
+    v0.220（TODO #67 B3，裁决点①落地）：`detect_breakout_pullback_b1` 与
+    `signal_labels` 的内联快路径此前各抄一遍这个公式——因子改默认值时 live 标签
+    会静默漂移。落地口径 = **谓词单源化且语义不变**（两边默认值逐字相同 ⇒
+    live 行为逐位不变，漂移通道从此关闭）。
+    """
+    return (
+        bool(platform_high)
+        and close >= platform_high * ph_tol
+        and daily_j < j_threshold
+    )
