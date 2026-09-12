@@ -1,147 +1,155 @@
 {
- "version": 1,
- "updated_at": "2026-09-08",
- "purpose": "策略上下文注册表。新增策略/因子必须在此登记，由 tests/test_strategy_index.py 校验注册表与目录一致。",
- "conventions": {
-  "dir": "策略上下文用无前缀目录（b1/ cz/）；非策略用 _ 前缀（_factors/ 可复用因子、_shared/ 跨策略规则）",
-  "doc_name": "NN_lower_snake.md —— NN 给阅读顺序，90+ 为附录/摘要，99 为已废",
-  "config_name": "代码消费的配置保持 UPPER_SNAKE.json（与 contracts/ 一致，便于一眼看出代码在读它）",
-  "role": "primary 主策略 / secondary 辅策略 / experimental 实验中（不得进 live）",
-  "status": "live 现行 / advisory 仅作输入 / unwired 未接线 / partially_stale 部分过时 / deprecated 已废"
- },
- "strategies": [
-  {
-   "id": "b1",
-   "name": "B1 波段策略",
-   "role": "primary",
-   "status": "live",
-   "dir": "b1",
-   "entry": "b1/README.md",
-   "rule_doc": "b1/01_swing_rules.md",
-   "docs": [
-    "b1/01_swing_rules.md",
-    "b1/02_holding_check.md",
-    "b1/03_execution_discipline.md",
-    "b1/04_pullback_rotation.md",
-    "b1/05_pit_recovery.md",
-    "b1/90_research_summary.md"
-   ],
-   "configs": [],
-   "code": [
-    "src/custos/pipeline/screening/enrich_candidates.py",
-    "src/custos/pipeline/holdings/b1_holding_state.py",
-    "src/custos/research/backtest_factors.py"
-   ],
-   "research": "00_governance/research/README.md",
-   "known_issues": [
-    "04_pullback_rotation.md 零实现，却被 02_holding_check.md §七 依赖（待办 #26）",
-    "90_research_summary.md 的收益量级数字**已于 2026-08-09 重取**（R4 16 格 + R10/R11 s3000 全扫描）；引用时须带 R1 规定的三条修正项"
-   ]
+  "version": 1,
+  "updated_at": "2026-09-12",
+  "purpose": "策略上下文注册表。新增策略/因子必须在此登记，由 tests/test_strategy_index.py 校验注册表与目录一致。",
+  "conventions": {
+    "dir": "策略上下文用无前缀目录（b1/ cz/）；非策略用 _ 前缀（_factors/ 可复用因子、_shared/ 跨策略规则）",
+    "doc_name": "NN_lower_snake.md —— NN 给阅读顺序，90+ 为附录/摘要，99 为已废",
+    "config_name": "代码消费的配置保持 UPPER_SNAKE.json（与 contracts/ 一致，便于一眼看出代码在读它）",
+    "role": "primary 主策略 / secondary 辅策略 / experimental 实验中（不得进 live）",
+    "status": "live 现行 / advisory 仅作输入 / unwired 未接线 / partially_stale 部分过时 / deprecated 已废"
   },
-  {
-   "id": "cz",
-   "name": "CZ 长期主义投资认知框架",
-   "role": "secondary",
-   "status": "advisory",
-   "dir": "cz",
-   "entry": "cz/README.md",
-   "rule_doc": null,
-   "docs": [
-    "cz/01_cognition_framework.md",
-    "cz/02_swing_tactics.md",
-    "cz/03_entry_methods.md",
-    "cz/04_position_and_flow.md",
-    "cz/90_patreon_training.md"
-   ],
-   "configs": [],
-   "code": [
-    "src/custos/pipeline/screening/enrich_candidates.py",
-    "src/custos/pipeline/screening/score_candidates.py"
-   ],
-   "research": null,
-   "known_issues": [
-    "「强制止损体系」15%/20% 仅适用 CZ 长期持有语境（owner 2026-08-06 定案）；B1 仓位按 B1 规则止损，不存在跨策略统一止损线",
-    "933 行里代码只用了 §14.6 量能规则（§七 板块偏好已随 v0.80 移除），其余为人读的认知输入",
-    "02_swing_tactics.md（v0.126 沉淀）：口述波段战法，全部数字未回测验证；其「硬止损 15%」与 B1 口径（R10「5% 是崖」）是不同策略语境，不构成对 B1 的约束"
-   ]
-  },
-  {
-   "id": "qn",
-   "name": "骑牛登山炒股实操体系",
-   "role": "secondary",
-   "status": "advisory",
-   "dir": "qn",
-   "entry": "qn/README.md",
-   "rule_doc": null,
-   "docs": [
-    "qn/01_general.md",
-    "qn/02_space_targets.md",
-    "qn/03_limit_up_daban.md",
-    "qn/04_tape_volume_auction.md",
-    "qn/05_top_bottom_kdj.md",
-    "qn/06_selection_fundamentals.md",
-    "qn/07_doubling_swing.md",
-    "qn/08_main_wave_launch.md",
-    "qn/09_buy_point_pricing.md",
-    "qn/10_factor_implementations.md",
-    "qn/11_discipline_checklist.md"
-   ],
-   "configs": [],
-   "code": [
-    "src/custos/core/factors/qn_ma25_state.py",
-    "src/custos/core/factors/qn_volume_surge_cut.py",
-    "src/custos/core/factors/qn_three_red.py",
-    "src/custos/core/factors/qn_macd_bar_shift.py",
-    "src/custos/core/factors/qn_kdj_neg_day.py",
-    "src/custos/core/factors/qn_adx_extreme.py",
-    "src/custos/core/factors/qn_box_target.py",
-    "src/custos/core/factors/qn_ma144_launch.py",
-    "src/custos/core/factors/qn_ma_converge.py",
-    "src/custos/core/factors/qn_bullish_engulf.py",
-    "src/custos/core/factors/qn_weekly180_setup.py",
-    "src/custos/core/factors/qn_shrink_limit_up.py",
-    "src/custos/research/backtest_factors.py"
-   ],
-   "research": "governance/research/R31_qn_factor_validation.md",
-   "known_issues": [
-    "全部规则为外部视频体系经验规律（199 视频萃取），未回测未接线；与 CZ 同一边界：数字不得直接当操作参数，进 live 须经 B1 转译 + 回测",
-    "KDJ 口径冲突警示：qn 用 J 负值第 3/5 天与 KD 20 以下金叉，B1 反转K 用 J<13——两套规则不得混用",
-    "源手册「操作纪律与检查清单」已收口为 qn/11_discipline_checklist.md（v0.195，去重后 40 风险红线 + 40 操作规则，逐条注出处）"
-   ]
-  }
- ],
- "factors": [
-  {
-   "id": "technical_trend",
-   "name": "通用技术走势分析框架（板块与个股共用）",
-   "doc": "_factors/technical_trend.md",
-   "status": "unwired",
-   "used_by": [],
-   "note": "2026-08-06 建索引前无任何入口可达；留作术语与趋势分类口径的参考"
-  }
- ],
- "shared_rules": [
-  {
-   "id": "decision_priority",
-   "name": "决策优先级规则",
-   "doc": "_shared/decision_priority.md",
-   "status": "partially_stale",
-   "superseded_by": "00_governance/contracts/MASTER_WORKFLOW.md",
-   "note": "写于 Agent 架构时代；优先级原则仍有效，冲突时以 MASTER_WORKFLOW 与仓库 README 为准。跨策略，不属于任何单一策略"
-  },
-  {
-   "id": "system_principles",
-   "name": "系统原则与用户画像",
-   "doc": "_shared/system_principles.md",
-   "status": "live",
-   "note": "2026-08-07 从根目录 TEAM_BLUEPRINT.md 抢救（该文件已删）。含核心原则 5 条 + 用户画像 6 条 + 卖出风控规则的「声称 vs 实测」核对表。原文档把 6 条规则一律写成「不可被总控决策覆盖」，逐条核实后 2 条零实现（连亏冷却、胜率降仓）——2026-08-12 两条已实现为复盘提示节（close_review/loss_streak.py + cooldowns.py，只提示不拦截），见 CHANGELOG v0.48。跨策略，不属于任何单一策略"
-  },
-  {
-   "id": "factor_exit_catalog",
-   "name": "因子·止损·止盈总览",
-   "doc": "_shared/factor_exit_catalog.md",
-   "status": "live",
-   "note": "2026-08-20 首版（v0.88）：注册表全量 31 因子按角色三组 + 止损/止盈方案目录 + 减仓幅度表 + 研究→live 回流通道。人读索引，字段级真相以代码为准（factors 注册表 / exit_rules.py / EXIT_RULES.json / scoring.weights）。跨策略，不属于任何单一策略"
-  }
- ]
+  "strategies": [
+    {
+      "id": "b1",
+      "name": "B1 波段策略",
+      "role": "primary",
+      "status": "live",
+      "dir": "b1",
+      "entry": "b1/README.md",
+      "rule_doc": "b1/01_swing_rules.md",
+      "docs": [
+        "b1/01_swing_rules.md",
+        "b1/02_holding_check.md",
+        "b1/03_execution_discipline.md",
+        "b1/04_pullback_rotation.md",
+        "b1/05_pit_recovery.md",
+        "b1/90_research_summary.md"
+      ],
+      "configs": [],
+      "code": [
+        "src/custos/pipeline/screening/enrich_candidates.py",
+        "src/custos/pipeline/holdings/b1_holding_state.py",
+        "src/custos/research/backtest_factors.py"
+      ],
+      "research": "00_governance/research/README.md",
+      "known_issues": [
+        "04_pullback_rotation.md 零实现，却被 02_holding_check.md §七 依赖（待办 #26）",
+        "90_research_summary.md 的收益量级数字**已于 2026-08-09 重取**（R4 16 格 + R10/R11 s3000 全扫描）；引用时须带 R1 规定的三条修正项"
+      ]
+    },
+    {
+      "id": "cz",
+      "name": "CZ 长期主义投资认知框架",
+      "role": "secondary",
+      "status": "advisory",
+      "dir": "cz",
+      "entry": "cz/README.md",
+      "rule_doc": null,
+      "docs": [
+        "cz/01_cognition_framework.md",
+        "cz/02_swing_tactics.md",
+        "cz/03_entry_methods.md",
+        "cz/04_position_and_flow.md",
+        "cz/90_patreon_training.md"
+      ],
+      "configs": [],
+      "code": [
+        "src/custos/pipeline/screening/enrich_candidates.py",
+        "src/custos/pipeline/screening/score_candidates.py"
+      ],
+      "research": null,
+      "known_issues": [
+        "「强制止损体系」15%/20% 仅适用 CZ 长期持有语境（owner 2026-08-06 定案）；B1 仓位按 B1 规则止损，不存在跨策略统一止损线",
+        "933 行里代码只用了 §14.6 量能规则（§七 板块偏好已随 v0.80 移除），其余为人读的认知输入",
+        "02_swing_tactics.md（v0.126 沉淀）：口述波段战法，全部数字未回测验证；其「硬止损 15%」与 B1 口径（R10「5% 是崖」）是不同策略语境，不构成对 B1 的约束"
+      ]
+    },
+    {
+      "id": "qn",
+      "name": "骑牛登山炒股实操体系",
+      "role": "secondary",
+      "status": "advisory",
+      "dir": "qn",
+      "entry": "qn/README.md",
+      "rule_doc": null,
+      "docs": [
+        "qn/01_general.md",
+        "qn/02_space_targets.md",
+        "qn/03_limit_up_daban.md",
+        "qn/04_tape_volume_auction.md",
+        "qn/05_top_bottom_kdj.md",
+        "qn/06_selection_fundamentals.md",
+        "qn/07_doubling_swing.md",
+        "qn/08_main_wave_launch.md",
+        "qn/09_buy_point_pricing.md",
+        "qn/10_factor_implementations.md",
+        "qn/11_discipline_checklist.md"
+      ],
+      "configs": [],
+      "code": [
+        "src/custos/core/factors/qn_ma25_state.py",
+        "src/custos/core/factors/qn_volume_surge_cut.py",
+        "src/custos/core/factors/qn_three_red.py",
+        "src/custos/core/factors/qn_macd_bar_shift.py",
+        "src/custos/core/factors/qn_kdj_neg_day.py",
+        "src/custos/core/factors/qn_adx_extreme.py",
+        "src/custos/core/factors/qn_box_target.py",
+        "src/custos/core/factors/qn_ma144_launch.py",
+        "src/custos/core/factors/qn_ma_converge.py",
+        "src/custos/core/factors/qn_bullish_engulf.py",
+        "src/custos/core/factors/qn_weekly180_setup.py",
+        "src/custos/core/factors/qn_shrink_limit_up.py",
+        "src/custos/research/backtest_factors.py"
+      ],
+      "research": "governance/research/R31_qn_factor_validation.md",
+      "known_issues": [
+        "全部规则为外部视频体系经验规律（199 视频萃取），未回测未接线；与 CZ 同一边界：数字不得直接当操作参数，进 live 须经 B1 转译 + 回测",
+        "KDJ 口径冲突警示：qn 用 J 负值第 3/5 天与 KD 20 以下金叉，B1 反转K 用 J<13——两套规则不得混用",
+        "源手册「操作纪律与检查清单」已收口为 qn/11_discipline_checklist.md（v0.195，去重后 40 风险红线 + 40 操作规则，逐条注出处）"
+      ]
+    }
+  ],
+  "factors": [
+    {
+      "id": "technical_trend",
+      "name": "通用技术走势分析框架（板块与个股共用）",
+      "doc": "_factors/technical_trend.md",
+      "status": "unwired",
+      "used_by": [],
+      "note": "2026-08-06 建索引前无任何入口可达；留作术语与趋势分类口径的参考"
+    },
+    {
+      "id": "interface_unification_plan",
+      "name": "因子层接口统一立项设计稿（TODO #67）",
+      "doc": "_factors/interface_unification_plan.md",
+      "status": "draft",
+      "used_by": [],
+      "note": "立项设计稿（非因子文档）：三套接口清点/目标形态/等价性策略/迁移批次/owner 裁决点；待拍板立项后按批实施"
+    }
+  ],
+  "shared_rules": [
+    {
+      "id": "decision_priority",
+      "name": "决策优先级规则",
+      "doc": "_shared/decision_priority.md",
+      "status": "partially_stale",
+      "superseded_by": "00_governance/contracts/MASTER_WORKFLOW.md",
+      "note": "写于 Agent 架构时代；优先级原则仍有效，冲突时以 MASTER_WORKFLOW 与仓库 README 为准。跨策略，不属于任何单一策略"
+    },
+    {
+      "id": "system_principles",
+      "name": "系统原则与用户画像",
+      "doc": "_shared/system_principles.md",
+      "status": "live",
+      "note": "2026-08-07 从根目录 TEAM_BLUEPRINT.md 抢救（该文件已删）。含核心原则 5 条 + 用户画像 6 条 + 卖出风控规则的「声称 vs 实测」核对表。原文档把 6 条规则一律写成「不可被总控决策覆盖」，逐条核实后 2 条零实现（连亏冷却、胜率降仓）——2026-08-12 两条已实现为复盘提示节（close_review/loss_streak.py + cooldowns.py，只提示不拦截），见 CHANGELOG v0.48。跨策略，不属于任何单一策略"
+    },
+    {
+      "id": "factor_exit_catalog",
+      "name": "因子·止损·止盈总览",
+      "doc": "_shared/factor_exit_catalog.md",
+      "status": "live",
+      "note": "2026-08-20 首版（v0.88）：注册表全量 31 因子按角色三组 + 止损/止盈方案目录 + 减仓幅度表 + 研究→live 回流通道。人读索引，字段级真相以代码为准（factors 注册表 / exit_rules.py / EXIT_RULES.json / scoring.weights）。跨策略，不属于任何单一策略"
+    }
+  ]
 }
