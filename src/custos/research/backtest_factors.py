@@ -38,16 +38,11 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
-# 9 个自包含 scorer 已抽到 factors/ 各自成模块（2026-08-06），此处仅保留别名。
-from custos.core.factors.alpha101 import score as _sc_alpha101  # noqa: E402
-from custos.core.factors.alpha_pvcorr import score as _sc_alpha_pvcorr  # noqa: E402
-from custos.core.factors.baseline import score as _sc_baseline  # noqa: E402
+# 9 个自包含 scorer 已抽到 factors/ 各自成模块（2026-08-06）。
+# v0.218（TODO #67 B1）：纯研究侧 selector 的 SCORERS 注册改注册表直通
+# （见下方 SCORERS 注册段）——因子模块的 score() 是唯一实现，别名只留
+# _sc_kdj_j（它还是 _SCORER_PRECOMPUTE 的身份键，见 :1384 附近）。
 from custos.core.factors.kdj_j import score as _sc_kdj_j  # noqa: E402
-from custos.core.factors.low_vol import score as _sc_low_vol  # noqa: E402
-from custos.core.factors.mcap import score as _sc_mcap  # noqa: E402
-from custos.core.factors.momentum import score as _sc_momentum  # noqa: E402
-from custos.core.factors.reversal_quality import score as _sc_reversal_quality  # noqa: E402
-from custos.core.factors.reversal_quality_inv import score as _sc_reversal_quality_inv  # noqa: E402
 
 
 from custos.core.indicators import (
@@ -1399,7 +1394,6 @@ SCORERS = {
     "s_reversal": _sc_s_reversal,
     "invert_s_shape": _sc_invert_s_shape,
     "b1_pullback": _sc_b1_pullback,
-    "baseline": _sc_baseline,
 }
 
 # --scorer 的真默认：parser 侧默认必须是 None —— 否则分不出「没给 --scorer」与
@@ -1408,40 +1402,32 @@ SCORERS = {
 _DEFAULT_SCORER = "s_shape"
 
 
-# --- 借鉴「101 Formulaic Alphas」(Kakushadze 2016) 的思想：纯**选择器**,配 --entry-filter 定义 B1 池,
-#     --top-n 做横截面择优。⚠️ 原论文 alpha 为 0.6~6.4 日超短持有的市场中性反转,与 B1(周级/单边/择时)
-#     不同源,是否加值必须回测验证；此处仅作可排序因子,suggestion 恒「可买」,靠 entry_gate 约束进场池。 ---
-# （2026-08-09：本处原有的死 `_ts_corr` 已删 —— 无调用方；唯一实现在 `factors/_util.ts_corr`。）
+# v0.218（TODO #67 B1）：9 个纯研究侧 selector + baseline 的注册改**注册表直通**
+# —— 因子模块的 score() 是唯一实现，SCORERS 键从 factors.registry() 取
+# （同一函数对象：身份不变 ⇒ _SCORER_PRECOMPUTE 按身份查表不受影响；
+# 键集合由 test_scorers_keys_unchanged 钉住，行为零变化）。
+# 因子出处备忘（原别名段的注释，直通后保留）：alpha101 借鉴「101 Formulaic
+# Alphas」(Kakushadze 2016) 纯选择器思想；low_vol/momentum 借鉴 Fama-French
+# 特征排序思想（FF 是风险/归因模型非交易信号，A股以 CH-3/CH-4 为准，
+# 是否加值必须回测）。
+from custos.core import factors as _factors_reg  # noqa: E402
 
-
-SCORERS["alpha101"] = _sc_alpha101
-SCORERS["alpha_pvcorr"] = _sc_alpha_pvcorr
-
-
-# --- 借鉴 Fama-French 因子「特征排序」思想：把已被文献验证有溢价的特征做成横截面选择器,
-#     在 B1 池(entry_gate)里 top-N 择优。注意:FF 是风险/归因模型(月频/基本面),非交易信号;
-#     A股应以 CH-3/CH-4(Liu-Stambaugh-Yuan) 为准(壳调整size+EP价值+换手)。是否加值须回测。
-#     size/value/profitability 需股本/财务(见 financials.py),此处仅实现价格可算的 low-vol / momentum。---
-
-
-SCORERS["low_vol"] = _sc_low_vol
-SCORERS["momentum"] = _sc_momentum
-
-
-SCORERS["reversal_quality"] = _sc_reversal_quality
-
-
-SCORERS["reversal_quality_inv"] = _sc_reversal_quality_inv
+for _fid in (
+    "baseline",
+    "alpha101",
+    "alpha_pvcorr",
+    "low_vol",
+    "momentum",
+    "reversal_quality",
+    "reversal_quality_inv",
+    "mcap",
+    "kdj_j",
+):
+    SCORERS[_fid] = _factors_reg.registry()[_fid]["score"]
 
 
 # 股本索引已移到 factors/_shares.py（唯一所有者）；此处仅委托。
 from custos.core.factors._shares import shares_idx as _shares_idx  # noqa: E402  ⚠️ 必须包限定
-
-
-SCORERS["mcap"] = _sc_mcap
-
-
-SCORERS["kdj_j"] = _sc_kdj_j
 
 # ---- B1 双轴组合（长期结构 × 短期回调）+ 突破回踩型 B1 ----
 # owner 2026-08-03 裁定:B1 是单纯回调买入,故 s_shape 的突破式分项(pivot/pocket_pivot/

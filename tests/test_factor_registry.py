@@ -773,3 +773,49 @@ class TestCharacterizationSnapshot:
             "（迁移期重构必须零行为变化；若是有意的语义改动，须 owner 拍板"
             " + 行为变更钉测 + 更新快照）"
         )
+
+
+class TestRegistryDrivenScorers:
+    """TODO #67 B1：纯研究侧 selector 的 SCORERS 注册 = 注册表直通。
+
+    同一函数对象（身份不变 ⇒ _SCORER_PRECOMPUTE 身份查表不受影响）；
+    键集合另有 test_scorers_keys_unchanged 钉住。
+    """
+
+    _TEN = (
+        "baseline",
+        "alpha101",
+        "alpha_pvcorr",
+        "low_vol",
+        "momentum",
+        "reversal_quality",
+        "reversal_quality_inv",
+        "mcap",
+        "kdj_j",
+    )
+
+    def test_ten_selectors_are_registry_passthrough(self):
+        from custos.research import backtest_factors as BF
+
+        reg = factors.registry()
+        for fid in self._TEN:
+            a, b = BF.SCORERS[fid], reg[fid]["score"]
+            # ⚠️ 不比 `is`：test_enrich_b1cz 会 importlib.reload 因子模块
+            # （顺序污染是本仓库已知坑，见 conftest 的 reversal_thresholds 注释）
+            # —— reload 后 registry() 拿新对象、SCORERS 持旧对象；同模块同名
+            # 同行为才是可靠判定面（生产无 reload，对象恒同；行为等价由下方
+            # test_passthrough_values_match_snapshot_path 钉）。
+            assert (a.__module__, a.__name__) == (b.__module__, b.__name__), (
+                f"{fid} 的 SCORERS 项不是注册表直通：{a.__module__}.{a.__name__} "
+                f"vs {b.__module__}.{b.__name__}"
+            )
+
+    def test_passthrough_values_match_snapshot_path(self):
+        """直通对象的输出 = B0 快照路径的输出（同一函数，同一输入）。"""
+        from custos.research import backtest_factors as BF
+
+        df = _bars()
+        for fid in self._TEN:
+            a = BF.SCORERS[fid](df, "600000")
+            b = factors.registry()[fid]["score"](df, "600000")
+            assert a == b
