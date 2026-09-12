@@ -75,6 +75,14 @@ def _bars(n=80, seed=5):
     )
 
 
+def _bars_dt(n=120, seed=5):
+    """DatetimeIndex 版（weekly 重采样路径要真实日期类型 + amount 列）。"""
+    df = _bars(n, seed)
+    df["date"] = pd.to_datetime(df["date"])
+    df["amount"] = df["close"] * df["volume"]
+    return df
+
+
 class TestRegistry:
     def test_all_extracted_registered(self):
         reg = factors.registry()
@@ -197,6 +205,9 @@ class TestNotForLive:
         不进分不驱动分层，行为不变）。
         v0.185：− main_rally_factor（R8 H4 + R27 双证 0 触发，撤 1800 标注，
         转 debug/none，研究侧 gate 保留留证）。
+        v0.217（TODO #67 B0）：+ qsx_resonance（登记补齐——一直被 signal_labels
+        引用（观察记录标签），此前无 FACTOR 元数据；R23 结论 ⇒ needs_work +
+        evidence_only）。
         """
         got = set(factors.live_evidence_only())
         assert got == {
@@ -215,6 +226,9 @@ class TestNotForLive:
             "bottom_patterns",
             # v0.84：基本面因子化（evidence_only，不进分，行为不变）
             "fundamentals",
+            # v0.217（TODO #67 B0）：登记补齐（原注册表外模块，signal_labels
+            # 引用观察记录标签；R23 ⇒ needs_work + evidence_only）
+            "qsx_resonance",
         }, f"evidence_only 集合变了：{got}"
 
 
@@ -526,10 +540,13 @@ class TestStageMatchesReality:
         weekly_j.j_below_threshold，执行点在 enrich _apply_j_gate）自
         enrich_candidates 迁入/补登记，零行为变化；
         v0.185：20 → 19，main_rally_factor 撤标注下线转 debug（R8 H4 + R27
-        双证 0 触发；研究侧 gate 保留留证）。）
+        双证 0 触发；研究侧 gate 保留留证）。
+        v0.217：19 → 20，qsx_resonance 登记补齐（TODO #67 B0——原注册表外
+        模块，一直被 signal_labels 引用作观察记录标签；R23 结论 ⇒
+        needs_work + evidence_only，行为不变）。）
         """
         got = set(factors.released())
-        assert len(got) == 19, f"已上线因子数变了（{len(got)}）：{sorted(got)}"
+        assert len(got) == 20, f"已上线因子数变了（{len(got)}）：{sorted(got)}"
 
     def test_debug_factors_are_research_only(self):
         """未上线的因子 live_use 应为 none —— 既没上线又声明可用是自相矛盾。"""
@@ -632,3 +649,127 @@ class TestFreeParamsAdmission:
         # active 两个都有背书（#73 回填的 R2）
         assert reg["wave_type"]["meta"]["research_ref"] == ["R2"]
         assert reg["distribution"]["meta"]["research_ref"] == ["R2"]
+
+
+class TestCharacterizationSnapshot:
+    """TODO #67 B0：冻结行为的快照（迁移期等价性裁判，批次完成后保留作永久守卫）。
+
+    固定合成输入（`_bars()` 族），逐因子调用其当前消费方实际使用的入口，
+    输出规范化（sort_keys + default=str + allow_nan）后的 sha1[:12] 钉在这里。
+    迁移批次重构时输出哈希必须不变 —— 变了就是行为漂移，当场红。
+    生成器：/tmp 一次性脚本（v0.217 commit 信息有路径），口径写死在下面 DRIVER。
+    """
+
+    #: 无顶层 score/detect 的模块（compute_*/领域命名函数）的快照驱动：
+    #: 调的就是 live/研究当前真实消费的入口（固定输入，确定性）。
+    _DOMAIN = {
+        "b2_surge_factor": lambda m, df: {
+            "b2": m.detect_b2(df, "600000"),
+            "bottom_surge": m.detect_bottom_surge(df, "600000"),
+            "surge_then_b1": m.detect_surge_then_b1(df, "600000"),
+        },
+        "bottom_patterns": lambda m, df: {
+            "w_bottom": m.detect_w_bottom(df),
+            "red_fat": m.detect_red_fat_green_thin(df),
+        },
+        "distribution": lambda m, df: m.detect_distribution(df),
+        "main_rally_factor": lambda m, df: m.detect_main_rally_start(df),
+        "platform_pullback": lambda m, df: m.detect_platform_pullback(df),
+        "wave_type": lambda m, df: m.detect_wave_type(df),
+        "b1_dual_factor": lambda m, df: {
+            "compute": m.compute_b1_dual(df, "600000"),
+            "detect_bp": m.detect_breakout_pullback_b1(df, "600000"),
+        },
+        "b1_pullback_fit": lambda m, df: m.compute_b1_pullback_fit(df),
+        "perfect_b1_fit": lambda m, df: m.compute_perfect_b1_fit(df, 5.0, {}, {}),
+        "s_shape": lambda m, df: m.compute_s_shape(df),
+        "sector_phase": lambda m, df: m.compute_sector_phase(df["close"]),
+        "b1_structure": lambda m, df: m.check_non_one_wave(df),
+        "capital_intent": lambda m, df: m.resolve_capital_weights(None),
+        "entry_patterns": lambda m, df: m.reversal_flags(5.0, 1.5, 0.8, -3.0, 4.2),
+        "fundamentals": lambda m, df: m.fundamental_quality(None),
+        "ignition": lambda m, df: m.check_ignition(df),
+        "j_low_gate": lambda m, df: m.j_low_gate_hit(5.0),
+        "macd_technics": lambda m, df: m.check_macd_technics(df),
+        "rsi_state": lambda m, df: m.rsi_regime(df),
+        "sector_mainstream": lambda m, df: m._stat([0.01, -0.02, 0.03]),
+        "volume_detectors": lambda m, df: m.check_volume_sustain(df),
+        "weekly_j": lambda m, df: m.weekly_j_state(_bars_dt()),
+        "qsx_resonance": lambda m, df: m.resonance_v2_snapshot(df),
+    }
+
+    _SNAPSHOTS = {
+        "alpha101": "f16d205b43eb",
+        "alpha_pvcorr": "effcb178ff26",
+        "b1_dual_factor": "ac99097db6ce",
+        "b1_pullback_fit": "fec88c598f8a",
+        "b1_structure": "f08c812dd429",
+        "b2_surge_factor": "9f3b7bcdc8e1",
+        "baseline": "2bd7dd114d5c",
+        "bottom_patterns": "42a69cc13865",
+        "capital_intent": "315b2ee9f36b",
+        "distribution": "c75399e5d2ad",
+        "entry_patterns": "b46b697c5816",
+        "fundamentals": "ac8fae92afec",
+        "ignition": "951e4fd04fe5",
+        "j_low_gate": "5ffe533b830f",
+        "kdj_j": "fc95f211968d",
+        "low_vol": "28cd5e0cd2b8",
+        "macd_technics": "58b0c5f75b88",
+        "main_rally_factor": "75fdb6c812e8",
+        "mcap": "2be88ca4242c",
+        "momentum": "841b02900b08",
+        "perfect_b1_fit": "c48b169f824e",
+        "platform_pullback": "2be88ca4242c",
+        "qn_adx_extreme": "300de58cada0",
+        "qn_box_target": "345870238d01",
+        "qn_bullish_engulf": "9029887566ec",
+        "qn_kdj_neg_day": "3c440352db25",
+        "qn_ma144_launch": "0ff4c23c21c0",
+        "qn_ma25_state": "71fb7511b6b5",
+        "qn_ma_converge": "0ff4c23c21c0",
+        "qn_macd_bar_shift": "6d0f0baa3254",
+        "qn_shrink_limit_up": "43dd667bf1ed",
+        "qn_three_red": "8f32d732bc1f",
+        "qn_volume_surge_cut": "afa81ff488fd",
+        "qn_weekly180_setup": "19cf989a39e2",
+        "qsx_resonance": "81a45d06aeba",
+        "reversal_quality": "a4c99ffdc5fd",
+        "reversal_quality_inv": "7c8275d1a03f",
+        "rsi_state": "7b3800513239",
+        "s_shape": "d9c41536b0a0",
+        "sector_mainstream": "2f6b4e2841cc",
+        "sector_phase": "3fb204571d9e",
+        "volume_detectors": "b07995f01b26",
+        "wave_type": "c700313d395f",
+        "weekly_j": "4e64459f31a6",
+    }
+
+    @staticmethod
+    def _canon(obj) -> str:
+        import hashlib
+        import json
+
+        blob = json.dumps(
+            obj, sort_keys=True, default=str, allow_nan=True, ensure_ascii=False
+        )
+        return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:12]
+
+    def test_snapshot_covers_every_registered_factor(self):
+        assert set(self._SNAPSHOTS) == set(factors.registry())
+
+    @pytest.mark.parametrize("fid", sorted(_SNAPSHOTS), ids=lambda x: x)
+    def test_output_bitwise_frozen(self, fid):
+        e = factors.registry()[fid]
+        df = _bars()
+        if e["score"] is not None:
+            r = e["score"](df, "600000")
+        elif e["detect"] is not None:
+            r = e["detect"](df)
+        else:
+            r = self._DOMAIN[fid](e["module"], df)
+        assert self._canon(r) and self._canon(r) == self._SNAPSHOTS[fid], (
+            f"{fid} 输出漂移：{self._canon(r)} != 快照 {self._SNAPSHOTS[fid]}"
+            "（迁移期重构必须零行为变化；若是有意的语义改动，须 owner 拍板"
+            " + 行为变更钉测 + 更新快照）"
+        )

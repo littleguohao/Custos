@@ -217,6 +217,7 @@
 | 2026-09-12 | v0.214 | TODO #73/#74 落地（因子注册表扩展，P7）：FACTOR 元数据加可选 `research_ref`（^R\d+$ 且 R 文档真实存在，evidence 指向 R 文档者机械回填 31 个）/`trajectory_ref`（^t_[0-9a-f]{10}$）/`free_params`（非负 int，bool 拒）；准入自由度惩罚 ratchet——free_params≥4 且 active 必须有 research_ref；示范声明 wave_type=9/distribution=17/macd_technics=4。零行为变化 | owner 拍板；回填/示范均为纯元数据 | 钉测 +6（谱系形态/文档存在性/回填防漂移/自由度规则/示范声明）；全量绿 |
 | 2026-09-12 | v0.215 | R32 回填（文档）：#75 闭环——生产机复测 topn20_probe_v212：4 格全部 18s/格（修复前 2 格 >28 分钟未完），expr3 cell 修复前后读数逐位相同（生产数据等价性实锤）；副产观察：4 scorer 选中子集真实分化，纯 Amihud 组合读数最优（收益/回撤 5.73 vs 其余 0.26~2.52，R11 caveat）——top_n=0 退化时代不可见 | 复测确认 v0.212 修复成立 + 钉测 131 绿 | 产物 `artifacts/logs/evolution/topn20_probe_v212/`；TODO #75 删除 |
 | 2026-09-12 | v0.216 | TODO #67 立项设计稿（文档，零代码改动）：`governance/strategy/_factors/interface_unification_plan.md`——43 注册因子接口清点（compute 5/detect 18/score 9/领域命名 11 + qsx_resonance 未登记缺口）、双重包装三分歧点逐行实据、单一规范接口目标形态、等价性策略（快照/逐位钉测/影子对照/格子双窗清单）、五批迁移逐 commit 可 revert、晋级 checklist 与 3 条 owner 裁决点；登记 STRATEGY_REGISTRY | owner 拍板开工（#67 权重上升：晋级通道需统一接入面） | 全量绿（纯文档）；待 owner 拍板立项 |
+| 2026-09-12 | v0.217 | TODO #67 迁移 B0：qsx_resonance 补 FACTOR 元数据进注册表（原注册表外缺口，live signal_labels 一直在引用；R23 ⇒ needs_work+evidence_only，release 集合 19→20 钉测同步）；43+1 因子 characterization 快照钉测入库（合成输入输出 sha1 冻结，迁移期等价性裁判） | 设计稿 §5 B0；owner 拍板立项 | 钉测 +45（快照 44+覆盖 1）；全量绿 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

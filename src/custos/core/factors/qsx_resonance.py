@@ -29,6 +29,23 @@ import pandas as pd
 
 from custos.core import indicators as ind
 
+# v0.217（TODO #67 B0）：补登记进因子注册表——本模块一直被 live `signal_labels`
+# 引用（resonance_v2_snapshot 标签）却没有 FACTOR 元数据，是清点出的登记缺口。
+# R23 结论（计数零筛选价值、排除态是全部边际）⇒ status=needs_work + 只作观察记录。
+FACTOR: dict[str, Any] = {
+    "id": "qsx_resonance",
+    "name": "QSX/DKX 共振 v2（六要素 + 跌破未收复排除态）",
+    "kind": "state",
+    "status": "needs_work",
+    "evidence": "governance/research/R23_qsx_resonance_filter.md",
+    "research_ref": ["R23"],  # TODO #73 谱系（与 evidence 同源）
+    "note": "R23：共振计数零筛选价值、排除态是全部边际（加值依赖出场族）——"
+    "标注层只作观察记录，标注不是交易依据",
+    "min_bars": 120,  # DKS=(MA14+MA28+MA57+MA114)/4 ⇒ ≥114 根才成形
+    "live_use": "evidence_only",  # 只落标签供人看，不驱动分层/gate/排序
+    "stage": "release",  # signal_labels.py:216 引用（stage 由测试对 import 图核对）
+}
+
 # v2 口径默认参数（owner 2026-08-26 定稿）：反弹窗 5 根、反弹幅度 ≥3%、缩量 = 触线日量
 # < 前 5 日均量、近 60 根内 ≥2 次干净反弹；排除 = 跌破未收复状态
 LOOKBACK = 60
