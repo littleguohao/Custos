@@ -1687,6 +1687,7 @@ detect_b2: Callable[..., Any] | None  # 导入失败退 None（缺依赖不阻�
 
 try:
     from custos.core.factors.b2_surge_factor import (
+        b2_score as _b2_score,  # v0.220…B3b：合成公式唯一实现（裁决点②）
         detect_b2,
         detect_bottom_surge,
         detect_surge_then_b1,
@@ -1796,15 +1797,16 @@ def _sc_b2(df: pd.DataFrame, code: str):
     r = detect_b2(df, code)
     if not r.get("available"):
         return None
+    # v0.220…B3b（裁决点②）：合成公式唯一实现在因子模块 b2_score；此处只调。
     hard = (
         int(bool(r["b1_before"]))
         + int(bool(r["gain_ok"]))
         + int(bool(r["vol_up"]))
         + int(bool(r["j_ok"]))
     )
-    score = hard * 20.0 + (20.0 if r.get("no_upper_shadow") else 0.0)
+    score = _b2_score(r)
     return {
-        "score": round(score, 1),
+        "score": score,
         "suggestion": "可买" if r["hit"] else "不买",
         "aux": {
             "b2_hit": r["hit"],

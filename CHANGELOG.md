@@ -221,6 +221,7 @@
 | 2026-09-12 | v0.218 | TODO #67 迁移 B1：9 个纯研究侧 selector + baseline 的 SCORERS 注册改注册表直通（`factors.registry()` 取 score，同一函数对象 ⇒ 身份键预计算旁路不受影响）；`_sc_xxx` 别名只留 `_sc_kdj_j`（_SCORER_PRECOMPUTE 身份键）；因子出处注释保留。零行为变化 | 设计稿 §5 B1 | 钉测 +2（直通身份钉测）；全量绿 |
 | 2026-09-13 | v0.219 | TODO #67 迁移 B2：evidence_only 因子规范入口收口——platform_pullback/qsx_resonance 加 `detect` 别名（同对象）；bottom_patterns 加 `detect()` 打包门面（同两调用逐位一致）；sector_phase 加 `detect(df)`；s_shape 的 `_sc_s_shape` 映射上移为因子模块 `score()`；live 只改 import 点名。perfect_b1_fit/fundamentals 签名吃上下文参数，留到后续批次定 ctx 规范（设计稿勘误）。零行为变化 | 设计稿 §5 B2 | 钉测 +6；快照更新 2；全量绿 |
 | 2026-09-13 | v0.220 | TODO #67 迁移 B3a（裁决点①落地）：b1_dual 突破回踩判定**谓词单源化**——新增 `breakout_pullback_hit()`（ph×0.98 ∧ J<13），detect_breakout_pullback_b1 与 signal_labels 内联快路径共调；落地口径=语义不变（两边默认值逐字相同 ⇒ live 行为逐位不变，因子改默认值不再静默漂移）；signal_labels 手写判据删除 | owner 拍板（裁决点①：选先对齐再切，行为零变化路径） | 钉测 +3（边界逐点/ detect 共调/手写判据已删）；全量绿 |
+| 2026-09-13 | v0.221 | TODO #67 迁移 B3b（裁决点②落地）：b2 合成 score 单源化——`b2_score()`（命中数×20+无上影线×20）上移进 b2_surge_factor 模块（B2_HARD_PTS/B2_NO_UPPER_SHADOW_PTS 具名常量），`_sc_b2` 只调；落地口径=live 不加 b2_score 标签列（候选表 schema 不变 ⇒ live 行为逐位不变） | owner 拍板（裁决点②：合成单源 + live 不加列） | 钉测 +3（公式对拍/调用点名/live 无新列）；全量绿 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

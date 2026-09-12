@@ -927,3 +927,66 @@ class TestB3aB1DualPredicate:
         )
         assert "breakout_pullback_hit(ph, close, daily_j)" in s
         assert "close >= ph * 0.98 and daily_j < 13.0" not in s  # 手写判据已删
+
+
+class TestB3bB2ScoreSingleSource:
+    """TODO #67 B3 裁决点②（b2 合成 score 上移）：公式单源化钉测。"""
+
+    def test_b2_score_matches_old_synthesis(self):
+        """b2_score() == 原 _sc_b2 内联合成（命中数×20 + 无上影线×20，round 1）。"""
+        from custos.core.factors.b2_surge_factor import b2_score
+
+        for r in (
+            {
+                "b1_before": True,
+                "gain_ok": True,
+                "vol_up": True,
+                "j_ok": True,
+                "no_upper_shadow": True,
+            },
+            {
+                "b1_before": True,
+                "gain_ok": False,
+                "vol_up": True,
+                "j_ok": False,
+                "no_upper_shadow": False,
+            },
+            {
+                "b1_before": False,
+                "gain_ok": False,
+                "vol_up": False,
+                "j_ok": False,
+                "no_upper_shadow": True,
+            },
+        ):
+            hard = sum(
+                int(bool(r[k])) for k in ("b1_before", "gain_ok", "vol_up", "j_ok")
+            )
+            want = round(hard * 20.0 + (20.0 if r.get("no_upper_shadow") else 0.0), 1)
+            assert b2_score(r) == want
+
+    def test_sc_b2_calls_factor_synthesis(self):
+        """backtest 的 _sc_b2 调因子模块合成（同模块同名，见 B1 reload 注记）。"""
+        from custos.research import backtest_factors as BF
+        from custos.core.factors import b2_surge_factor
+
+        a = BF._b2_score
+        assert (a.__module__, a.__name__) == (
+            "custos.core.factors.b2_surge_factor",
+            "b2_score",
+        )
+        # 端到端：同一 detect 输出 → _sc_b2 的 score 与 b2_score 一致
+        df = _bars()
+        r = b2_surge_factor.detect_b2(df, "600000")
+        if r.get("available"):
+            got = BF.SCORERS["b2"](df, "600000")
+            if got is not None:
+                assert got["score"] == b2_surge_factor.b2_score(r)
+
+    def test_no_live_b2_score_column(self):
+        """裁决点②落地口径：live 候选表不加 b2_score 列（schema 不变）。"""
+        s = (ROOT / "src/custos/pipeline/screening/signal_labels.py").read_text(
+            encoding="utf-8"
+        )
+        assert "b2_score" not in s
+

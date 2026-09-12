@@ -310,3 +310,29 @@ def detect_surge_then_b1(
             "hit": False,
             "error": f"{type(exc).__name__}:{str(exc)[:80]}",
         }
+
+
+# v0.220…B3b（TODO #67 裁决点②落地）：B2 打分合成单源化——此前只存在于
+# backtest_factors._sc_b2（「原文没给权重」的最少假设合成）。上移进因子模块，
+# live 不加 b2_score 标签列（候选表 schema 不变 ⇒ live 行为不变）。
+B2_HARD_PTS = 20.0  # 每条硬条件（B1 先行/涨幅达标/放量/J 达标）分值
+B2_NO_UPPER_SHADOW_PTS = 20.0  # 无上影线加分
+
+
+def b2_score(r: dict) -> float:
+    """B2 打分合成（唯一实现）：四条硬条件命中数 ×20 + 无上影线 +20（0-100）。
+
+    口径与原 ``backtest_factors._sc_b2`` 逐字一致（round 1 位）。
+    ``r`` = ``detect_b2`` 的返回；调用方先查 available。
+    """
+    hard = (
+        int(bool(r["b1_before"]))
+        + int(bool(r["gain_ok"]))
+        + int(bool(r["vol_up"]))
+        + int(bool(r["j_ok"]))
+    )
+    return round(
+        hard * B2_HARD_PTS
+        + (B2_NO_UPPER_SHADOW_PTS if r.get("no_upper_shadow") else 0.0),
+        1,
+    )
