@@ -63,6 +63,18 @@ class MockLLM:
                 "（MockLLM 解读）该候选的挖掘窗读数已如实记入轨迹；"
                 "请结合 RankIC/ICIR、判定原因与父代血统研判其机制价值。"
             )
+        last_user = str(messages[-1].get("content", "")) if messages else ""
+        if '"directions"' in last_user:  # planning 请求（--plan；契约键钉在 prompt 里）
+            return json.dumps(
+                {
+                    "directions": [
+                        "动量延续 + 量能确认",
+                        "短期反转 + 波动率过滤",
+                        "趋势强度 + 结构突破",
+                    ]
+                },
+                ensure_ascii=False,
+            )
         item = SCRIPT[self._n % len(SCRIPT)]
         self._n += 1
         return json.dumps(item, ensure_ascii=False)

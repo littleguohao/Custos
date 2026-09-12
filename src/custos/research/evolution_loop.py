@@ -201,6 +201,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "退化为「gate×出场」（R32 结论 5 / TODO #70）",
     )
     ap.add_argument(
+        "--plan",
+        type=int,
+        default=0,
+        help="规划层：每个 --direction 种子经 LLM 扩成 N 条差异化子方向"
+        "（0=关闭；LLM 失败回退确定性模板）。⚠️ 方向数 ×N 放大 LLM 调用量"
+        "（总调用 ≈ 种子数×N×rounds×candidates-per-round，注意 token 预算）",
+    )
+    ap.add_argument(
         "--out-dir", default="", help=f"产物根目录（默认 {OUTDIR}），tag 作子目录"
     )
     return ap
@@ -291,6 +299,8 @@ def _validate_args(args: Any, ap: argparse.ArgumentParser) -> None:
         ap.error("--rounds 与 --candidates-per-round 必须 >= 1")
     if args.top_n < 1:
         ap.error("--top-n 必须 >= 1")
+    if args.plan < 0:
+        ap.error("--plan 必须 >= 0（0=关闭规划层）")
     _validate_mining_window(args, ap)
     if args.grid_judge:
         args.final_judge = True  # --grid-judge 隐含双窗终审（三轴终审吃它的产出）
@@ -414,20 +424,28 @@ def _make_on_event(args: Any, llm: Any) -> Callable[[dict], None]:
     """进度打印 + token 预算闸（超支 raise _BudgetExceeded 让循环提前收敛）。"""
 
     def _on_event(ev: dict) -> None:
-        err = f" ⚠️{ev['error'][:80]}" if ev.get("error") else ""
-        gate = f" {ev['gate']}" if ev.get("gate") else ""
-        obj = (
-            f" obj={_fmt_ic(ev['objective'])}"
-            if ev.get("objective") is not None
-            else ""
-        )
-        print(
-            f"[evo] r{ev['round_i']}c{ev['cand_i']} {ev['direction']} "
-            f"{ev['phase']:<9} {ev['decision']:<9} "
-            f"RankIC={_fmt_ic(ev.get('rank_ic_mean')):>8}{gate}{obj} "
-            f"{ev.get('expression', '')[:56]}{err}",
-            flush=True,
-        )
+        if ev.get("type") == "planning":  # --plan 的规划事件（种子→子方向+来源）
+            print(
+                f"[plan] 种子「{ev['seed']}」→ {len(ev['directions'])} 条子方向"
+                f"（来源 {','.join(ev['source'])}）："
+                f"{' ｜ '.join(d[:28] for d in ev['directions'])}",
+                flush=True,
+            )
+        else:
+            err = f" ⚠️{ev['error'][:80]}" if ev.get("error") else ""
+            gate = f" {ev['gate']}" if ev.get("gate") else ""
+            obj = (
+                f" obj={_fmt_ic(ev['objective'])}"
+                if ev.get("objective") is not None
+                else ""
+            )
+            print(
+                f"[evo] r{ev['round_i']}c{ev['cand_i']} {ev['direction']} "
+                f"{ev['phase']:<9} {ev['decision']:<9} "
+                f"RankIC={_fmt_ic(ev.get('rank_ic_mean')):>8}{gate}{obj} "
+                f"{ev.get('expression', '')[:56]}{err}",
+                flush=True,
+            )
         used = int(getattr(llm, "total_tokens", 0))
         if args.max_tokens_budget and used > args.max_tokens_budget:
             raise _BudgetExceeded(
@@ -675,6 +693,7 @@ def _write_summary(res: _RunResult, grid: dict[str, Any]) -> Path:
             "top_n=0：scorer 只写分数不筛选交易集，「因子×止损×止盈」"
             "退化为「gate×出场」（R32 结论 5 / TODO #70）"
         )
+    config["plan"] = getattr(res.args, "plan_summary", None)  # TODO #72 规划层汇总
     summary = {
         "tag": tag,
         "directions": list(res.args.direction),
@@ -740,6 +759,50 @@ def _prepare(
     return _Prepared(llm, codes, load, load(codes, args.count))
 
 
+def _expand_and_announce(args: Any, llm: Any, pool: TrajectoryPool) -> list[str]:
+    """--plan N：每个种子方向经规划层扩成 N 条子方向 + planning 事件；0=原样。
+
+    时点：LLM 装配之后、run_loop 之前（池已 load，供方向去重）。每种子方向的
+    子方向清单与来源（llm/fallback）记进 ``args.plan_summary``，供
+    _write_summary 的 config 块汇总。跨种子去重（保序）后返回最终方向清单。
+    """
+    if args.plan <= 0:
+        args.plan_summary = {"n": 0, "seeds": list(args.direction), "expanded": []}
+        return list(args.direction)
+    from custos.research.evolution.planning import generate_directions  # noqa: PLC0415
+
+    on_event = _make_on_event(args, llm)
+    directions: list[str] = []
+    expanded: list[dict] = []
+    for seed in args.direction:
+        planned = generate_directions(seed, args.plan, llm, pool=pool)
+        directions.extend(p.direction for p in planned)
+        expanded.append(
+            {
+                "seed": seed,
+                "directions": [p.direction for p in planned],
+                "source": [p.source for p in planned],
+            }
+        )
+        try:
+            on_event(
+                {
+                    "type": "planning",
+                    "seed": seed,
+                    "directions": expanded[-1]["directions"],
+                    "source": expanded[-1]["source"],
+                }
+            )
+        except _BudgetExceeded as exc:
+            print(f"[WARN] {exc}", file=sys.stderr)
+    args.plan_summary = {
+        "n": args.plan,
+        "seeds": list(args.direction),
+        "expanded": expanded,
+    }
+    return list(dict.fromkeys(directions))
+
+
 @dataclass(frozen=True)
 class _ExecCtx:
     """_execute 的入参聚合（避免 6+ 散参）。"""
@@ -793,8 +856,9 @@ def main(
     mining_bars = clip_tail(prep.bars, args.mining_end)
     prep = replace(prep, bars=None)
 
+    plan_dirs = _expand_and_announce(args, prep.llm, pool)  # --plan 规划层
     cfg = LoopConfig(
-        directions=tuple(args.direction),
+        directions=tuple(plan_dirs),
         rounds=args.rounds,
         candidates_per_round=args.candidates_per_round,
         mining_start=args.mining_start,

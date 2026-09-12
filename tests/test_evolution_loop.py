@@ -1606,3 +1606,89 @@ class TestCellTopN:
         )
         assert rc == 0
         assert "选择压力" in capsys.readouterr().out
+
+
+# ---------- TODO #72：规划层（--plan N） ----------
+
+
+class TestPlanningCLI:
+    def test_plan_expands_directions(self, tmp_path, capsys):
+        bars, codes_file = TestCLI._setup(tmp_path)
+        rc = el.main(
+            TestCLI._argv(tmp_path, codes_file, "--mock-llm", "--plan", "2"),
+            loader=TestCLI._loader(bars, []),
+        )
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "[plan]" in out and "来源 llm,llm" in out  # planning 事件发出
+        summary = json.loads(
+            (tmp_path / "out" / "t1" / "_summary__t1.json").read_text("utf-8")
+        )
+        plan = summary["config"]["plan"]
+        assert plan["n"] == 2 and plan["seeds"] == ["动量"]
+        assert len(plan["expanded"][0]["directions"]) == 2
+        assert plan["expanded"][0]["source"] == ["llm", "llm"]
+        # 方向数翻倍进 cfg.directions（MockLLM 规划应答 3 条固定方向，截断到 2）
+        assert (
+            list(summary["config"]["directions"]) == plan["expanded"][0]["directions"]
+        )
+        assert summary["pool_size"] == 2 * 1 * 5  # 方向 × rounds × candidates
+
+    def test_plan_zero_bitwise_unchanged(self, tmp_path, capsys):
+        bars, codes_file = TestCLI._setup(tmp_path)
+        rc = el.main(
+            TestCLI._argv(tmp_path, codes_file, "--mock-llm", "--plan", "0"),
+            loader=TestCLI._loader(bars, []),
+        )
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "[plan]" not in out  # 关闭时不发规划事件
+        summary = json.loads(
+            (tmp_path / "out" / "t1" / "_summary__t1.json").read_text("utf-8")
+        )
+        assert summary["config"]["plan"] == {
+            "n": 0,
+            "seeds": ["动量"],
+            "expanded": [],
+        }
+        assert list(summary["config"]["directions"]) == ["动量"]  # 原样
+        assert summary["pool_size"] == 5  # 与不开 --plan 逐位一致
+
+    def test_plan_fallback_via_mock_failure(self, tmp_path, monkeypatch, capsys):
+        # LLM 规划失败 → 确定性模板兜底（来源 fallback），流程不炸
+        from custos.research.evolution import planning
+
+        class PlanningFailLLM(MockLLM):
+            def chat(self, messages, *, json_mode=True, json_schema=None):
+                last = str(messages[-1].get("content", "")) if messages else ""
+                if '"directions"' in last:
+                    raise LLMError("planning down")
+                return super().chat(
+                    messages, json_mode=json_mode, json_schema=json_schema
+                )
+
+        monkeypatch.setattr(el, "MockLLM", PlanningFailLLM)
+        bars, codes_file = TestCLI._setup(tmp_path)
+        rc = el.main(
+            TestCLI._argv(tmp_path, codes_file, "--mock-llm", "--plan", "2"),
+            loader=TestCLI._loader(bars, []),
+        )
+        assert rc == 0  # fallback 是正常路径
+        out = capsys.readouterr().out
+        assert "来源 fallback,fallback" in out
+        summary = json.loads(
+            (tmp_path / "out" / "t1" / "_summary__t1.json").read_text("utf-8")
+        )
+        exp = summary["config"]["plan"]["expanded"][0]
+        assert exp["source"] == ["fallback", "fallback"]
+        assert exp["directions"][0] == "动量 + 量能确认"  # 首个模板
+        assert planning.MAX_ATTEMPTS == 3
+
+    def test_plan_negative_rejected(self, tmp_path):
+        bars, codes_file = TestCLI._setup(tmp_path)
+        with pytest.raises(SystemExit) as exc:
+            el.main(
+                TestCLI._argv(tmp_path, codes_file, "--mock-llm", "--plan", "-1"),
+                loader=TestCLI._loader(bars, []),
+            )
+        assert exc.value.code == 2

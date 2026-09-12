@@ -213,6 +213,7 @@
 | 2026-09-12 | v0.210 | TODO #70/#71 落地：`--cell-top-n` 默认 20（单元格容量约束制造因子轴选择压力，0=旧退化行为且横幅+summary config 明示 `factor_axis_degenerate`）；随机 baseline 裁决工具 `random_baseline_study`（同 DSL 空间随机采样过同一 IC 门，纯确定性不烧 token；采样分布口径写死在 random_expr docstring） | R32 结论 5 实锤退化 + 冒烟三门读数无对照 | 钉测 +18（top_n 透传/退化标记/采样合法性/端到端 schema/隔离）；全量绿 |
 | 2026-09-12 | v0.211 | R32 回填（文档）：#70 闭环——r4（top_n=20 生效）同 gate/出场两格 objective 分化（−0.0807 vs −0.1862），scorer 轴恢复区分度；#71 闭环——随机 baseline 过门率 17%（2/12）≪ LLM 67%/100%（Fisher 单侧 p=0.057），LLM 假设生成有增量（初步，小样本）。joint objective 门拦实证与机制明细见 R32 | 生产机跑数验证（r4 + topn20_probe + baseline_r1） | 残余：top_n>0 个别 scorer 单格病态慢登记 TODO #75；产物 `smoke_r4_topn20/`、`random_baseline/baseline_r1/` |
 | 2026-09-12 | v0.212 | TODO #75 修复：TS_RANK 改 sliding_window_view 向量化（单股全序列 552ms→1.2ms）；表达式 scorer 接 `_SCORER_PRECOMPUTE` 旁路（每股算一次、逐 bar O(1) 点查）——单股逐 bar 698.7s→0.057s（约 12000 倍），50 股一格 >28min→约 3s；r3 top_n=0 超时两格同属此路径。判定语义零变化（逐位等价钉测在案） | profile 定位（/tmp 一次性脚本）+ 等价性钉测 | 钉测 +11；全量绿 |
+| 2026-09-12 | v0.213 | TODO #72 落地：进化引擎规划层（`--plan N`）——LLM 把种子方向扩成 N 条机制正交子方向（prompt 注池内已有方向/表达式做正交约束，错误回注重试 ≤3），失败/不足回退确定性模板（FALLBACK_TEMPLATES，来源标记 llm/fallback 进事件与 summary plan 块）；MockLLM 支持规划应答 | QuantaAlpha planning 的 Custos 版；owner 拍板 | 钉测 +14；全量绿 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 
