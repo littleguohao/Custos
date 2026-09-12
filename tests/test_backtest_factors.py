@@ -789,7 +789,8 @@ class TestScorerExpr:
     def _clean_expr_scorers(self):
         yield
         for k in [k for k in bt.SCORERS if k.startswith("expr_")]:
-            bt.SCORERS.pop(k)
+            sc = bt.SCORERS.pop(k)
+            bt._SCORER_PRECOMPUTE.pop(sc, None)  # v0.212 预计算旁路一并清
 
     @staticmethod
     def _synth(n=80):
@@ -932,3 +933,42 @@ class TestScorerExpr:
         key = expr_scorer_key("ROC(CLOSE,5)")
         rc2 = bt.main(["--scorer", key, "--codes", "S000", "--dump-codes", str(out)])
         assert rc2 == 0  # choices 校验通过（parser 构建在注册之后）
+
+    def test_precompute_registered(self, tmp_path):
+        # TODO #75：注册进 _SCORER_PRECOMPUTE（每股全序列只算一次的旁路）
+        from custos.research.evolution.scorer_bridge import expr_scorer_key
+
+        out = tmp_path / "u.txt"
+        rc = bt.main(
+            [
+                "--scorer-expr",
+                "ROC(CLOSE,5)",
+                "--codes",
+                "S000",
+                "--dump-codes",
+                str(out),
+            ]
+        )
+        assert rc == 0
+        key = expr_scorer_key("ROC(CLOSE,5)")
+        assert bt.SCORERS[key] in bt._SCORER_PRECOMPUTE
+
+    def test_evaluate_trades_precompute_equivalent(self):
+        # 端到端逐位等价：同一 scorer 对象，接/不接预计算旁路，trades 一致
+        from custos.research.evolution.scorer_bridge import (
+            expr_scorer_precompute,
+            make_expr_scorer,
+        )
+
+        scorer = make_expr_scorer("ROC(CLOSE,5)")
+        bars = {c: self._synth() for c in ("S000", "S001")}
+        bt._SCORER_PRECOMPUTE[scorer] = expr_scorer_precompute("ROC(CLOSE,5)")
+        try:
+            t_with = bt.evaluate_trades(bars, scorer=scorer, entry_gate=None)
+        finally:
+            bt._SCORER_PRECOMPUTE.pop(scorer, None)
+        t_without = bt.evaluate_trades(bars, scorer=scorer, entry_gate=None)
+        assert len(t_with) == len(t_without) and len(t_with) >= 1
+        assert _json.dumps(t_with, sort_keys=True, allow_nan=True) == _json.dumps(
+            t_without, sort_keys=True, allow_nan=True
+        )

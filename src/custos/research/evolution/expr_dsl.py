@@ -39,6 +39,7 @@ import operator
 from dataclasses import dataclass
 from typing import Any, Callable
 
+import numpy as np
 import pandas as pd
 
 # bars DataFrame 的真实列名（小写，见 backtest_factors._load_bars_local）。
@@ -104,17 +105,28 @@ def _op_roc(x: pd.Series, n: int) -> pd.Series:
     return x / x.shift(n) - 1
 
 
-def _pct_rank_of_last(w: pd.Series) -> float:
-    """窗口末值在窗内的分位（strict 与 weak 口径的均值，同分平局各让一半）。"""
-    cur = w.iloc[-1]
-    less = int((w < cur).sum())
-    leq = int((w <= cur).sum())
-    return (less + leq) / (2.0 * len(w))
-
-
 def _op_ts_rank(x: pd.Series, n: int) -> pd.Series:
-    """TS_RANK(x, n)：当前值在过去 n 周期中的分位，(0, 1]。"""
-    return x.rolling(n, min_periods=n).apply(_pct_rank_of_last)
+    """TS_RANK(x, n)：当前值在过去 n 周期中的分位，(0, 1]。
+
+    向量化实现（v0.212，TODO #75）：``sliding_window_view`` + 整数比较计数，
+    与旧的 ``rolling(n, min_periods=n).apply(逐点分位回调)`` 参考实现**逐位
+    等价** —— count(<cur)/count(≤cur) 是精确整数比较，/(2n) 是同一笔浮点
+    除法（并列处理同口径：平局各让一半）；含 NaN 的窗口按旧版 min_periods=n
+    口径 → NaN（旧版：窗口有效观测 < n 不调用回调）；warmup 段（前 n-1 点）
+    NaN 语义不变。等价性钉测：tests/test_expr_dsl.py（参考实现拷在测试里，
+    随机数据 + 大量并列值 + NaN 穿插，逐点比对）。
+    """
+    arr = x.to_numpy(dtype=float)
+    out = np.full(len(arr), np.nan)
+    if len(arr) >= n:
+        win = np.lib.stride_tricks.sliding_window_view(arr, n)
+        cur = win[:, -1]
+        less = (win < cur[:, None]).sum(axis=1)  # 整数计数，精确
+        leq = (win <= cur[:, None]).sum(axis=1)
+        ranks = (less + leq) / (2.0 * n)
+        ranks[np.isnan(win).any(axis=1)] = np.nan  # 含 NaN 窗口 → NaN（旧口径）
+        out[n - 1 :] = ranks
+    return pd.Series(out, index=x.index)
 
 
 def _op_abs(x: pd.Series) -> pd.Series:

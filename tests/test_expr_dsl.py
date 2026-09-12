@@ -349,3 +349,73 @@ def test_dsl_level_negative_zero_division():
     # DSL 层端到端：一元负号构造的 -0.0 字面量走标量路径
     assert expr_dsl.evaluate("1/-0.0", DF).iloc[0] == float("-inf")
     assert expr_dsl.evaluate("-1/-0.0", DF).iloc[0] == float("inf")
+
+
+# ---------- TS_RANK 向量化（v0.212 / TODO #75）：等价性 + 性能钉测 ----------
+
+import time
+
+import numpy as np
+
+
+def _reference_ts_rank(x, n):
+    """旧实现参考（rolling.apply 逐点 Python 回调）——等价性对拍用，勿改。"""
+
+    def _pct_rank_of_last(w):
+        cur = w.iloc[-1]
+        less = int((w < cur).sum())
+        leq = int((w <= cur).sum())
+        return (less + leq) / (2.0 * len(w))
+
+    return x.rolling(n, min_periods=n).apply(_pct_rank_of_last)
+
+
+class TestTsRankVectorized:
+    def test_pointwise_equal_with_ties_and_nans(self):
+        # 随机数据 + 大量并列值（0.5 档量化）+ NaN 穿插 + 连续并列块
+        rng = np.random.RandomState(0)
+        vals = np.round(rng.uniform(10, 20, 400) * 2) / 2
+        vals[::17] = np.nan
+        vals[100:105] = 7.5
+        s = pd.Series(vals)
+        for n in (2, 3, 5, 20):
+            got = expr_dsl._op_ts_rank(s, n).to_numpy()
+            want = _reference_ts_rank(s, n).to_numpy()
+            assert np.array_equal(np.isnan(got), np.isnan(want))  # NaN 位置一致
+            assert np.array_equal(
+                got[~np.isnan(got)], want[~np.isnan(want)]
+            )  # 逐位相等
+
+    def test_pure_nan_and_constant_windows(self):
+        s = pd.Series([1.0] * 30)
+        got = expr_dsl._op_ts_rank(s, 5)
+        want = _reference_ts_rank(s, 5)
+        assert np.array_equal(got.to_numpy(), want.to_numpy(), equal_nan=True)
+        assert got.iloc[4] == 0.5  # 恒值窗：平局各让一半口径
+        s2 = pd.Series([float("nan")] * 30)
+        assert expr_dsl._op_ts_rank(s2, 5).isna().all()
+
+    def test_warmup_nan_semantics(self):
+        s = pd.Series([1.0, 2.0, 3.0, 4.0])
+        got = expr_dsl._op_ts_rank(s, 3)
+        assert got.iloc[:2].isna().all()
+        assert got.iloc[2] == 5 / 6  # 窗 [1,2,3] 末值 3：less=2,leq=3 → 5/6
+        assert got.iloc[3] == 5 / 6  # 窗 [2,3,4] 同理
+
+    def test_short_series_all_nan(self):
+        got = expr_dsl._op_ts_rank(pd.Series([1.0, 2.0]), 5)
+        assert got.isna().all() and len(got) == 2
+
+    def test_perf_vs_reference(self):
+        # 性能钉测：生产尺度（2500 交易日）向量化耗时 < 参考实现的 1/20
+        rng = np.random.RandomState(7)
+        s = pd.Series(rng.uniform(1e5, 1e7, 2500))
+        t0 = time.perf_counter()
+        expr_dsl._op_ts_rank(s, 10)
+        t_new = time.perf_counter() - t0
+        t0 = time.perf_counter()
+        _reference_ts_rank(s, 10)
+        t_ref = time.perf_counter() - t0
+        assert t_new < t_ref / 20, (
+            f"向量化 {t_new * 1000:.1f}ms vs 参考 {t_ref * 1000:.1f}ms"
+        )

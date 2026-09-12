@@ -5436,15 +5436,21 @@ def _preregister_scorer_expr(argv: list) -> str:
     from custos.research.evolution.expr_dsl import ExprError  # noqa: PLC0415
     from custos.research.evolution.scorer_bridge import (  # noqa: PLC0415
         expr_scorer_key,
+        expr_scorer_precompute,
         make_expr_scorer,
     )
 
     try:
-        SCORERS[expr_scorer_key(expr)] = make_expr_scorer(expr)  # 构造期 parse 校验
+        key = expr_scorer_key(expr)
+        SCORERS[key] = make_expr_scorer(expr)  # 构造期 parse 校验
+        # TODO #75：接进预计算旁路（每股全序列只算一次，热循环 O(1) 点查询）——
+        # 逐 bar 前缀切片全量重算在生产尺度是病态根因（profile：单股逐 bar
+        # 模拟 ~700s vs 快表达式 0.5s）。查不到/预计算失败 ⇒ 自动回退旧路径。
+        _SCORER_PRECOMPUTE[SCORERS[key]] = expr_scorer_precompute(expr)
     except ExprError as exc:
         print(f"[ERR] --scorer-expr 未通过 DSL 白名单: {exc}", file=sys.stderr)
         raise SystemExit(2)
-    return expr_scorer_key(expr)
+    return key
 
 
 def main(
