@@ -343,3 +343,17 @@ def _stop_ref(df) -> Optional[float]:
     if len(df) < STOP_LOOKBACK:
         return None
     return round(float(df["low"].tail(STOP_LOOKBACK).min()), 4)
+
+
+def detect(df) -> dict[str, Any]:
+    """规范入口（v0.223，TODO #67 B4）：结构三检测器打包门面。
+
+    返回 {non_one_wave, five_day_entry, liquidity} —— 同函数同输入逐位一致。
+    repair_signals 吃 index_df/kdj_state 上下文，不进门面（设计稿勘误）；
+    enrich_candidates 改为一次 detect 读字段。
+    """
+    return {
+        "non_one_wave": check_non_one_wave(df),
+        "five_day_entry": check_five_day_entry(df),
+        "liquidity": check_liquidity(df),
+    }

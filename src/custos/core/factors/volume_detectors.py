@@ -211,3 +211,17 @@ def check_bottom_volume(df) -> dict[str, Any]:
             },
         },
     }
+
+
+def detect(df) -> dict[str, Any]:
+    """规范入口（v0.223，TODO #67 B4）：量能三检测器打包门面。
+
+    返回 {volume_sustain, leader_volume, bottom_volume} —— 就是原来三次单独
+    调用的返回值打包（同函数同输入逐位一致；enrich_candidates 改为一次
+    detect 读三个字段）。
+    """
+    return {
+        "volume_sustain": check_volume_sustain(df),
+        "leader_volume": check_leader_volume(df),
+        "bottom_volume": check_bottom_volume(df),
+    }

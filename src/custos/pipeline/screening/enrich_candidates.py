@@ -64,9 +64,11 @@ from custos.core.factors.macd_technics import check_macd_technics  # noqa: E402
 #     `enrich_candidates.check_macd_technics` 是 tests 的既有调用/monkeypatch 通道，
 #     内部调用点（macd_technics = check_macd_technics(df, df_long=df_long)）不用改。
 from custos.core.factors.weekly_j import (  # noqa: E402  # pylint: disable=unused-import  j_below_threshold: tests 的 ec.* 转出通道
+    detect as weekly_j_state,  # v0.223…B4：规范入口点名（别名同对象）
     j_below_threshold,
-    weekly_j_state,
 )
+from custos.core.factors import b1_structure as b1_structure_mod  # noqa: E402
+from custos.core.factors import volume_detectors as volume_detectors_mod  # noqa: E402
 from custos.core.factors.volume_detectors import (  # noqa: E402
     CZ_MIN_BARS,
     THREE_LOWS_DRAWDOWN_PCT,
@@ -83,6 +85,9 @@ from custos.core.factors.b1_structure import (  # noqa: E402
     check_non_one_wave,
     check_repair_signals,
 )
+# v0.223…B4：non_one_wave/five_day_entry/liquidity 与 volume_sustain/
+# leader_volume/bottom_volume 的热路径改各自模块规范入口 detect() 打包调用；
+# 函数名 import 保留（tests 的 ec.* 转出通道 + test_enrich_no_longer_defines_them 钉住）。
 
 #   ↑ v0.86（因子化批 B）：weekly_j_state/j_below_threshold、量能三检测器
 #     （check_volume_sustain/check_leader_volume/check_bottom_volume 及 _vs_* 族、
@@ -751,6 +756,8 @@ def _assemble_metrics(
     pullback_shrink = ev["pullback_shrink"]
     macd_technics = ev["macd_technics"]
     _wk = ev["weekly"]
+    _b1s = b1_structure_mod.detect(df)  # v0.223…B4：结构三检测器打包（规范入口）
+    _vol = volume_detectors_mod.detect(df)  # 同上：量能三检测器打包
     return {
         "close": round(float(last["close"]), 4),
         "change_pct": round(change_pct, 2) if change_pct is not None else None,
@@ -778,13 +785,13 @@ def _assemble_metrics(
         # 只摊 weekly_ 前缀键：裸 available 会落到候选顶层被误读成"候选可用"（审计）
         **{k: v for k, v in _wk.items() if k.startswith("weekly_")},
         "signals": ev["signals"],
-        "non_one_wave": check_non_one_wave(df),
+        "non_one_wave": _b1s["non_one_wave"],
         "repair_signals": check_repair_signals(df, index_df, kdj_state=base["j"]),
-        "five_day_entry": check_five_day_entry(df),
-        "volume_sustain": check_volume_sustain(df),
-        "leader_volume": check_leader_volume(df),
+        "five_day_entry": _b1s["five_day_entry"],
+        "volume_sustain": _vol["volume_sustain"],
+        "leader_volume": _vol["leader_volume"],
         "three_lows": check_three_lows(df),
-        "bottom_volume": check_bottom_volume(df),
+        "bottom_volume": _vol["bottom_volume"],
         # --- 知行量价 + 出货识别（good_b1 / 出货五方式，阈值待回测，实际值落盘） ---
         "zhixing": zx,
         "ignition": ev["ignition"],
@@ -826,7 +833,7 @@ def _assemble_metrics(
         # v0.58（2026-08-14，owner）：近 10 日阳量/阴量总量对比——技术分的
         # 加/减分项（阳量>阴量 +5 / 阴量>阳量 −5）。中性窗口，不带底部位置语义。
         "volume_yy": bull_bear_volume(df),
-        "liquidity": check_liquidity(df),
+        "liquidity": _b1s["liquidity"],
         # v0.59（owner ⑧）：公司地位证据（东财 F10 简介关键词，evidence_only 透传）
         "company_position": company_position_of(code),
     }

@@ -93,3 +93,8 @@ def weekly_j_state(df) -> dict[str, Any]:
         "weekly_j": w["j"],
         "weekly_j_low": j_below_threshold(w["j"]),
     }
+
+
+# v0.223（TODO #67 B4）：规范入口别名——registry() 按名字拾取 `detect`，
+# 与 weekly_j_state 同一函数对象（零行为变化；enrich 改点名 detect）。
+detect = weekly_j_state

@@ -258,3 +258,8 @@ def check_macd_technics(df, df_long=None) -> dict[str, Any]:
         "three_peaks": three_peaks,
         "overextended": overextended,
     }
+
+
+# v0.223（TODO #67 B4）：规范入口别名（同对象）。live 的 check_macd_technics(
+# df, df_long=df_long) 带上下文参数，调用面不变（见设计稿勘误）。
+detect = check_macd_technics

@@ -223,6 +223,7 @@
 | 2026-09-13 | v0.220 | TODO #67 迁移 B3a（裁决点①落地）：b1_dual 突破回踩判定**谓词单源化**——新增 `breakout_pullback_hit()`（ph×0.98 ∧ J<13），detect_breakout_pullback_b1 与 signal_labels 内联快路径共调；落地口径=语义不变（两边默认值逐字相同 ⇒ live 行为逐位不变，因子改默认值不再静默漂移）；signal_labels 手写判据删除 | owner 拍板（裁决点①：选先对齐再切，行为零变化路径） | 钉测 +3（边界逐点/ detect 共调/手写判据已删）；全量绿 |
 | 2026-09-13 | v0.221 | TODO #67 迁移 B3b（裁决点②落地）：b2 合成 score 单源化——`b2_score()`（命中数×20+无上影线×20）上移进 b2_surge_factor 模块（B2_HARD_PTS/B2_NO_UPPER_SHADOW_PTS 具名常量），`_sc_b2` 只调；落地口径=live 不加 b2_score 标签列（候选表 schema 不变 ⇒ live 行为逐位不变） | owner 拍板（裁决点②：合成单源 + live 不加列） | 钉测 +3（公式对拍/调用点名/live 无新列）；全量绿 |
 | 2026-09-13 | v0.222 | TODO #67 迁移 B3c（裁决点③落地）：rsi_state 可买阈值单源化——`RSI_STATE_SCORE_BUY_MIN=60` 进因子模块 + `score()` 规范入口上移（口径与原 `_sc_rsi_state` 逐字一致，precomputed 双形态直通）；落地口径=live 的 rsi_ideal_b1 保持 strong∧deep 布尔合取（不改阈值口径 ⇒ live 行为逐位不变） | owner 拍板（裁决点③：阈值单源 + live 布尔口径不动） | 钉测 +4（常量/逐字段对拍/注册点名/live 合取不变）；CANON 白名单 +rsi_state；快照更新 1；全量绿 |
+| 2026-09-13 | v0.223 | TODO #67 迁移 B4：gate/scorer 因子规范入口收口——weekly_j/macd_technics/ignition 加 `detect` 别名（同对象）；volume_detectors/b1_structure 加 `detect()` 打包门面（同多次调用逐位一致）；enrich 热路径改打包调用（ec.* 转出通道保留）。标量/上下文输入型判定器（entry_patterns/j_low_gate/capital_intent/fundamentals/sector_mainstream/perfect_b1_fit）不吃 df，留待 ctx 规范（设计稿勘误）。零行为变化 | 设计稿 §5 B4 | 钉测 +4（B4 等价性类）；快照更新 2；全量绿 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

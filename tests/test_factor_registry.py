@@ -703,7 +703,7 @@ class TestCharacterizationSnapshot:
         "alpha_pvcorr": "effcb178ff26",
         "b1_dual_factor": "ac99097db6ce",
         "b1_pullback_fit": "fec88c598f8a",
-        "b1_structure": "f08c812dd429",
+        "b1_structure": "de5dcaed4b2c",  # v0.223…B4 更新（detect 打包门面接管）
         "b2_surge_factor": "9f3b7bcdc8e1",
         "baseline": "2bd7dd114d5c",
         "bottom_patterns": "76cf78a9d5be",  # v0.218…B2 更新（新增 detect 打包入口槽）
@@ -740,7 +740,7 @@ class TestCharacterizationSnapshot:
         "s_shape": "e5ce9b0517c3",  # v0.218…B2 更新（score 规范入口槽上移接管）
         "sector_mainstream": "2f6b4e2841cc",
         "sector_phase": "3fb204571d9e",
-        "volume_detectors": "b07995f01b26",
+        "volume_detectors": "33ec8965a8ee",  # v0.223…B4 更新（detect 打包门面接管）
         "wave_type": "c700313d395f",
         "weekly_j": "4e64459f31a6",
     }
@@ -762,7 +762,9 @@ class TestCharacterizationSnapshot:
     def test_output_bitwise_frozen(self, fid):
         e = factors.registry()[fid]
         df = _bars()
-        if e["score"] is not None:
+        if fid == "weekly_j":
+            r = e["detect"](_bars_dt())  # weekly 重采样需真实日期类型（生产如此）
+        elif e["score"] is not None:
             r = e["score"](df, "600000")
         elif e["detect"] is not None:
             r = e["detect"](df)
@@ -1035,3 +1037,45 @@ class TestB3cRsiStateSingleSource:
             encoding="utf-8"
         )
         assert 'reg.get("state") == "strong" and reg.get("deep_oversold")' in s
+
+
+class TestB4CanonicalEntries:
+    """TODO #67 B4：gate/scorer 因子规范入口收口——别名同对象 / 打包逐位一致钉测。"""
+
+    def test_aliases_same_object(self):
+        from custos.core.factors import ignition, macd_technics, weekly_j
+
+        assert weekly_j.detect is weekly_j.weekly_j_state
+        assert macd_technics.detect is macd_technics.check_macd_technics
+        assert ignition.detect is ignition.check_ignition
+
+    def test_volume_bundle_matches_three_calls(self):
+        from custos.core.factors import volume_detectors
+
+        df = _bars()
+        bundle = volume_detectors.detect(df)
+        assert bundle["volume_sustain"] == volume_detectors.check_volume_sustain(df)
+        assert bundle["leader_volume"] == volume_detectors.check_leader_volume(df)
+        assert bundle["bottom_volume"] == volume_detectors.check_bottom_volume(df)
+
+    def test_structure_bundle_matches_three_calls(self):
+        from custos.core.factors import b1_structure
+
+        df = _bars()
+        bundle = b1_structure.detect(df)
+        assert bundle["non_one_wave"] == b1_structure.check_non_one_wave(df)
+        assert bundle["five_day_entry"] == b1_structure.check_five_day_entry(df)
+        assert bundle["liquidity"] == b1_structure.check_liquidity(df)
+
+    def test_enrich_uses_bundles(self):
+        """live 热路径走打包门面；ec.* 转出通道的函数 import 保留。"""
+        s = (ROOT / "src/custos/pipeline/screening/enrich_candidates.py").read_text(
+            encoding="utf-8"
+        )
+        assert (
+            "b1_structure_mod.detect(df)" in s
+            and "volume_detectors_mod.detect(df)" in s
+        )
+        assert '_vol["volume_sustain"]' in s and '_b1s["liquidity"]' in s
+        # 转出通道保留（test_enrich_b1cz 的 ec.* 钉测依赖）
+        assert "check_five_day_entry," in s and "check_volume_sustain," in s

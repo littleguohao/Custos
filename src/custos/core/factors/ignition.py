@@ -165,3 +165,8 @@ def b1_ignition_hit(
         and pullback_shrink.get("hit")
         and (zx_recent_gold or ignition.get("hit"))
     )
+
+
+# v0.223（TODO #67 B4）：规范入口别名（同对象）。check_pullback_shrink 吃
+# dks_last 上下文不进门面（见设计稿勘误）；live 调用面不变。
+detect = check_ignition
