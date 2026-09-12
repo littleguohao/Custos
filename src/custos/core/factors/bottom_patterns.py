@@ -22,6 +22,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pandas as pd
+
 from custos.core.factors._util import ohlcv_arrays as _ohlcv_arrays  # noqa: E402
 from custos.core.indicators import macd_series  # noqa: E402  DIF/DEA 唯一实现
 
@@ -308,3 +310,16 @@ def bull_bear_volume(df, window: int = 10) -> dict[str, Any]:
         }
     except Exception as exc:  # noqa: BLE001
         return {"available": False, "error": f"{type(exc).__name__}:{str(exc)[:80]}"}
+
+
+def detect(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
+    """规范入口（v0.218…B2，TODO #67）：两项底部形态检测的打包门面。
+
+    返回 {"w_bottom": …, "red_fat_green_thin": …} —— 就是原来两次单独调用的
+    返回值打包（同函数同输入，逐位一致；live 消费方 enrich_candidates 改为
+    一次 detect 读两个字段）。
+    """
+    return {
+        "w_bottom": detect_w_bottom(df, code),
+        "red_fat_green_thin": detect_red_fat_green_thin(df, code),
+    }

@@ -233,3 +233,8 @@ def resonance_v2_snapshot(df: pd.DataFrame) -> dict[str, Any]:
         "events": events,
         "reason": None,
     }
+
+
+# v0.218…B2（TODO #67）：规范入口别名——registry() 按名字拾取 `detect`，
+# 与 resonance_v2_snapshot 同一函数对象（零行为变化；signal_labels 改点名为 detect）。
+detect = resonance_v2_snapshot

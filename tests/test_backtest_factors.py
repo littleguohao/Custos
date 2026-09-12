@@ -76,7 +76,12 @@ def test_evaluate_no_future_leak(monkeypatch):
             "components": {},
         }
 
-    monkeypatch.setattr(bt, "compute_s_shape", spy)
+    # v0.218…B2（TODO #67）：s_shape 的 SCORERS 入口上移到因子模块
+    # （`factors/s_shape.score` 内调本模块 compute_s_shape）——打桩点在因子
+    # 模块上，bt.compute_s_shape 不再是热路径引用。
+    from custos.core.factors import s_shape as s_shape_mod
+
+    monkeypatch.setattr(s_shape_mod, "compute_s_shape", spy)
     df = make_df([10.0 + i * 0.1 for i in range(70)])
     recs = bt.evaluate({"600000": df}, horizons=(5,), min_bars=60, step=1)
     # 每个 as-of i：切片长度 == i+1（即只含 0..i，无未来）

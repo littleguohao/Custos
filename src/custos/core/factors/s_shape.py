@@ -598,3 +598,24 @@ def compute_s_reversal(df, code: str = "") -> dict[str, Any]:
             "s_reversal": None,
             "error": f"{type(exc).__name__}:{str(exc)[:80]}",
         }
+
+
+def score(df: pd.DataFrame, code: str = "") -> Optional[dict]:
+    """SCORERS 规范入口（v0.218…B2，TODO #67）：横截面排序分 = s_star。
+
+    映射口径与原 ``backtest_factors._sc_s_shape`` 逐字一致（score=s_star、
+    suggestion/aux 同字段、components 取各腿 points）——逻辑从研究侧适配层
+    上移进因子模块，backtest_factors 侧只剩注册。行为零变化（钉测：
+    tests/test_factor_registry.py::TestCanonicalEntryB2）。
+    """
+    r = compute_s_shape(df, code)
+    if not r.get("available"):
+        return None
+    return {
+        "score": r["s_star"],
+        "suggestion": r["suggestion"],
+        "aux": {"s_shape": r["s_shape"], "delta": r["delta"], "penalty": r["penalty"]},
+        "components": {
+            k: (v or {}).get("points") for k, v in (r.get("components") or {}).items()
+        },
+    }

@@ -53,11 +53,10 @@ from custos.core.factors.distribution import (  # noqa: E402  # pylint: disable=
     detect_distribution,
     detect_top_windmill,
 )
-from custos.core.factors.bottom_patterns import (  # noqa: E402  v0.56 底部侧（25chuhuo）
-    bull_bear_volume,
-    detect_red_fat_green_thin,
-    detect_w_bottom,
-)
+from custos.core.factors import bottom_patterns as bottom_patterns_mod  # noqa: E402
+
+# v0.218…B2：底部形态两检测器改规范入口 detect() 打包调用（bull_bear_volume 仍直引）
+from custos.core.factors.bottom_patterns import bull_bear_volume  # noqa: E402
 from custos.core.factors.macd_technics import check_macd_technics  # noqa: E402
 
 #   ↑ v0.86（因子化批 A）：check_macd_technics 及全部 _macd_* helper 与 MACD_* 常量
@@ -677,8 +676,9 @@ def _evidence_states(df, code: str, df_long, base: dict[str, Any]) -> dict[str, 
     distribution_confirm = confirm_distribution(df, code, det=distribution)
     # 底部侧形态（2026-08-13，v0.56，25chuhuo 底部镜像）：W 底（双底+底部放量+
     # MACD 底背离合成）与红肥绿瘦（数量+面积两维）。证据层，不进技术分/分层/gate。
-    w_bottom = detect_w_bottom(df, code)
-    red_fat_green_thin = detect_red_fat_green_thin(df, code)
+    _bp = bottom_patterns_mod.detect(df, code)  # v0.218…B2：规范入口打包
+    w_bottom = _bp["w_bottom"]
+    red_fat_green_thin = _bp["red_fat_green_thin"]
     # 指标去重：日线 KDJ 与 MACD 各只算一次，再喂给下游检测器（审计：kdj×4/macd×3）。
     macd_technics = check_macd_technics(df, df_long=df_long)
 
@@ -688,7 +688,9 @@ def _evidence_states(df, code: str, df_long, base: dict[str, Any]) -> dict[str, 
     # （v0.172 起 weekly_j 不再注入标注层——W 标注撤除；`_wk` 仍落候选顶层 weekly_* 键）
     _wk = weekly_j_state(df)
     try:  # 平台回踩:与下方证据层同一份检测,延迟导入
-        from custos.core.factors.platform_pullback import detect_platform_pullback  # noqa: PLC0415
+        from custos.core.factors.platform_pullback import (
+            detect as detect_platform_pullback,
+        )  # noqa: PLC0415  # v0.218…B2：规范入口点名（别名同对象）
 
         _plat = detect_platform_pullback(df)
     except Exception:  # noqa: BLE001
@@ -1140,7 +1142,9 @@ def _apply_post_metrics(cand: dict, code6: str, df, ctx: dict) -> None:
     if sp_resolve is not None:
         cand["sector_phase"] = sp_resolve(code6)  # 板块相位 hint(不封顶,证据层)
     try:  # 平台突破回踩形态(证据层,不驱动分层)
-        from custos.core.factors.platform_pullback import detect_platform_pullback  # noqa: PLC0415
+        from custos.core.factors.platform_pullback import (
+            detect as detect_platform_pullback,
+        )  # noqa: PLC0415  # v0.218…B2：规范入口点名（别名同对象）
 
         pp = detect_platform_pullback(df)
         if pp:

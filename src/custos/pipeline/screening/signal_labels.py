@@ -213,7 +213,7 @@ def _signal_qsx_resonance_v2(out: dict[str, Any], df: pd.DataFrame):
     ``excluded``/``events`` 单独给出，本标注仅作观察记录，非交易依据。
     """
     try:
-        from custos.core.factors.qsx_resonance import resonance_v2_snapshot
+        from custos.core.factors.qsx_resonance import detect as resonance_v2_snapshot  # noqa: PLC0415  # v0.218…B2：规范入口点名（别名同对象）
 
         snap = resonance_v2_snapshot(df)
         _put(

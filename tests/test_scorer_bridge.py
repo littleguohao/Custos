@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import time
 
 import pandas as pd
 import pytest
@@ -183,23 +184,35 @@ class TestExprPrecompute:
         assert scorer(df, "X", pre=None) is not None  # 旧路径照跑
 
     def test_precompute_perf_ratio(self):
-        # 性能钉测：逐 bar 点查询总耗时 < 逐 bar 直算的 1/20（600 交易日尺度）
-        import time
-
+        # 性能钉测：逐 bar 点查询总耗时 < 逐 bar 直算的 1/20（600 交易日尺度）。
+        # 全量套件负载下定时会抖：预热 + best-of-3 取最小值（比阈值防 CI 抖动
+        # 更稳的是比率断言本身——两边同负载跑，比率对调度噪声稳健）。
         from custos.research.evolution.scorer_bridge import expr_scorer_precompute
 
         expr = "(1-2*TS_RANK(close,5))*TS_RANK(volume,10)"
         df = _df_rand(600, seed=3)
         scorer = make_expr_scorer(expr)
-        t0 = time.perf_counter()
-        for i in range(30, len(df)):
-            scorer(df.iloc[: i + 1], "X")
-        t_direct = time.perf_counter() - t0
+
+        def _direct():
+            for i in range(30, len(df)):
+                scorer(df.iloc[: i + 1], "X")
+
         pre = expr_scorer_precompute(expr)(df)
-        t0 = time.perf_counter()
-        for i in range(30, len(df)):
-            scorer(df.iloc[: i + 1], "X", pre=pre)
-        t_pre = time.perf_counter() - t0
+
+        def _pre_path():
+            for i in range(30, len(df)):
+                scorer(df.iloc[: i + 1], "X", pre=pre)
+
+        _direct()
+        _pre_path()  # 预热（缓存/分支预测）
+        t_direct = min(_timeit(_direct) for _ in range(3))
+        t_pre = min(_timeit(_pre_path) for _ in range(3))
         assert t_pre < t_direct / 20, (
             f"预计算路径 {t_pre * 1000:.1f}ms vs 直算 {t_direct * 1000:.1f}ms"
         )
+
+
+def _timeit(fn):
+    t0 = time.perf_counter()
+    fn()
+    return time.perf_counter() - t0

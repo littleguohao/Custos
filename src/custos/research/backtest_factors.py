@@ -1235,16 +1235,10 @@ def _components(r: dict) -> dict:
     return {k: (v or {}).get("points") for k, v in (r.get("components") or {}).items()}
 
 
-def _sc_s_shape(df: pd.DataFrame, code: str):
-    r = compute_s_shape(df, code)
-    if not r.get("available"):
-        return None
-    return {
-        "score": r["s_star"],
-        "suggestion": r["suggestion"],
-        "aux": {"s_shape": r["s_shape"], "delta": r["delta"], "penalty": r["penalty"]},
-        "components": _components(r),
-    }
+# v0.218…B2（TODO #67）：s_shape 的 SCORERS 规范入口上移到因子模块
+# （`factors/s_shape.score`，映射口径逐字一致）——此处只剩别名，
+# evaluate() 默认 scorer 与 SCORERS["s_shape"] 继续用这个名字。
+from custos.core.factors.s_shape import score as _sc_s_shape  # noqa: E402
 
 
 def _sc_s_reversal(df: pd.DataFrame, code: str):

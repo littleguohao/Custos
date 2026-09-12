@@ -231,3 +231,8 @@ if __name__ == "__main__":
     for h in hits[:15]:
         print(h)
     print(f"\n002756 命中 {len(hits)} 天")
+
+
+# v0.218…B2（TODO #67）：规范入口别名——registry() 按名字拾取 `detect`，
+# 与 detect_platform_pullback 同一函数对象（零行为变化；live 消费方改点名为 detect）。
+detect = detect_platform_pullback

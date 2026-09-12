@@ -257,3 +257,12 @@ def build_phase_resolver(
         }
 
     return resolve
+
+
+def detect(df: pd.DataFrame) -> dict[str, Any]:
+    """规范入口（v0.218…B2，TODO #67）：板块相位判定 = compute_sector_phase(df["close"]）。
+
+    本因子吃**板块指数**收盘序列（不是个股 df 语义），detect(df) 仅是
+    注册表/快照口径的规范门面；live 的板块 gate 仍走 build_phase_resolver（不动）。
+    """
+    return compute_sector_phase(df["close"])

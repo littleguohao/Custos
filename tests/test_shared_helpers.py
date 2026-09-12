@@ -251,7 +251,10 @@ class TestNoRefork:
         "relative_strength_strong": {"core/factors/entry_patterns.py"},
         "j_low_gate_hit": {"core/factors/j_low_gate.py"},
         # 注册表接口名（约定：每个 selector 各一份），但不得再长出新文件
+        # v0.219（TODO #67 B2）：+ s_shape（`_sc_s_shape` 映射上移为因子模块的
+        # score() 规范入口，backtest_factors 侧只剩别名注册）。
         "score": {
+            "core/factors/s_shape.py",
             "core/factors/_template.py",
             "core/factors/alpha101.py",
             "core/factors/alpha_pvcorr.py",

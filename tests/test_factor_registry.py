@@ -706,7 +706,7 @@ class TestCharacterizationSnapshot:
         "b1_structure": "f08c812dd429",
         "b2_surge_factor": "9f3b7bcdc8e1",
         "baseline": "2bd7dd114d5c",
-        "bottom_patterns": "42a69cc13865",
+        "bottom_patterns": "76cf78a9d5be",  # v0.218…B2 更新（新增 detect 打包入口槽）
         "capital_intent": "315b2ee9f36b",
         "distribution": "c75399e5d2ad",
         "entry_patterns": "b46b697c5816",
@@ -737,7 +737,7 @@ class TestCharacterizationSnapshot:
         "reversal_quality": "a4c99ffdc5fd",
         "reversal_quality_inv": "7c8275d1a03f",
         "rsi_state": "7b3800513239",
-        "s_shape": "d9c41536b0a0",
+        "s_shape": "e5ce9b0517c3",  # v0.218…B2 更新（score 规范入口槽上移接管）
         "sector_mainstream": "2f6b4e2841cc",
         "sector_phase": "3fb204571d9e",
         "volume_detectors": "b07995f01b26",
@@ -819,3 +819,77 @@ class TestRegistryDrivenScorers:
             a = BF.SCORERS[fid](df, "600000")
             b = factors.registry()[fid]["score"](df, "600000")
             assert a == b
+
+
+class TestCanonicalEntryB2:
+    """TODO #67 B2：evidence_only 因子的规范入口收口——等价性钉测。
+
+    逐位等价：别名同对象 / 打包入口 == 原两次单调 / 上移映射 == 原适配层逐字逻辑。
+    """
+
+    def test_aliases_are_same_object(self):
+        from custos.core.factors import platform_pullback, qsx_resonance
+
+        assert platform_pullback.detect is platform_pullback.detect_platform_pullback
+        assert qsx_resonance.detect is qsx_resonance.resonance_v2_snapshot
+
+    def test_bottom_patterns_bundle_matches_two_calls(self):
+        from custos.core.factors import bottom_patterns
+
+        df = _bars()
+        bundle = bottom_patterns.detect(df, "600000")
+        assert bundle["w_bottom"] == bottom_patterns.detect_w_bottom(df, "600000")
+        assert bundle[
+            "red_fat_green_thin"
+        ] == bottom_patterns.detect_red_fat_green_thin(df, "600000")
+
+    def test_sector_phase_detect_delegates(self):
+        from custos.core.factors import sector_phase
+
+        df = _bars()
+        assert sector_phase.detect(df) == sector_phase.compute_sector_phase(df["close"])
+
+    def test_s_shape_score_matches_moved_mapping(self):
+        """s_shape.score() == 原 backtest_factors._sc_s_shape 的映射（逐字段参考对拍）。"""
+        from custos.core.factors import s_shape
+
+        df = _bars()
+        r = s_shape.compute_s_shape(df, "600000")
+        got = s_shape.score(df, "600000")
+        if not r.get("available"):
+            assert got is None
+            return
+        want = {
+            "score": r["s_star"],
+            "suggestion": r["suggestion"],
+            "aux": {
+                "s_shape": r["s_shape"],
+                "delta": r["delta"],
+                "penalty": r["penalty"],
+            },
+            "components": {
+                k: (v or {}).get("points")
+                for k, v in (r.get("components") or {}).items()
+            },
+        }
+        assert got == want
+
+    def test_scorers_s_shape_is_factor_score(self):
+        """SCORERS["s_shape"] 与因子模块 score 同模块同名（reload 污染见 B1 注记）。"""
+        from custos.research import backtest_factors as BF
+
+        a = BF.SCORERS["s_shape"]
+        b = factors.registry()["s_shape"]["score"]
+        assert (a.__module__, a.__name__) == (b.__module__, b.__name__)
+
+    def test_live_call_sites_use_canonical_names(self):
+        """live 只改 import 点名：enrich/signal_labels 的调用点走规范入口。"""
+        enrich = (
+            ROOT / "src/custos/pipeline/screening/enrich_candidates.py"
+        ).read_text(encoding="utf-8")
+        labels = (ROOT / "src/custos/pipeline/screening/signal_labels.py").read_text(
+            encoding="utf-8"
+        )
+        assert "bottom_patterns_mod.detect(df, code)" in enrich
+        assert "detect as detect_platform_pullback" in enrich
+        assert "detect as resonance_v2_snapshot" in labels
