@@ -91,8 +91,10 @@ def _signal_label_row(key: str, meta: tuple, with_sig: list[dict]) -> Optional[s
     top_hits = sorted(hits, key=lambda c: (-(c.get("score") or 0), str(c.get("code"))))
     names = "、".join(f"{_sig_nm(c)}({int(c.get('score') or 0)})" for c in top_hits)
     stats = sl.SIGNAL_STATS.get(key)
+    # 格内空格换 &nbsp;：整格不换行（换行会让该列被压到最窄），顺带把列撑宽。
     stat_cell = (
-        f"{stats[0][0]:.2f} / {stats[0][1] * 100:.0f}% ｜ {stats[1][0]:.2f} / {stats[1][1] * 100:.0f}%"
+        f"{stats[0][0]:.2f}&nbsp;/&nbsp;{stats[0][1] * 100:.0f}%&nbsp;｜&nbsp;"
+        f"{stats[1][0]:.2f}&nbsp;/&nbsp;{stats[1][1] * 100:.0f}%"
         if stats
         else "—"
     )
@@ -140,7 +142,13 @@ def _signal_labels_section(candidates: list[dict]) -> list[str]:
         "pct12+分批止盈+BBI跌破2根出场；跨窗 2022-2024｜主窗 2024-08~2026-09），"
         "供相对参考，非 live 统计；无同口径数据的显示 —。",
         "",
-        "| 因子 | 命中/可评 | 盈亏比/胜率（跨窗｜主窗） | 命中候选（按技术分降序；括号内为技术分） |",
+        # 前三列表头用 &nbsp; 连成不可断行单元：Markdown 表格没有列宽语法，渲染器
+        # 会把宽度让给末列长名单，把这三列挤到逐字换行；&nbsp; 是各渲染器（VS Code
+        # 预览/Typora/GitHub）都生效的最小列宽手段。digest 侧 md_to_digest 已剥掉。
+        "| &nbsp;&nbsp;&nbsp;&nbsp;因&nbsp;子&nbsp;&nbsp;&nbsp;&nbsp; "
+        "| &nbsp;&nbsp;命&nbsp;中&nbsp;/&nbsp;可&nbsp;评&nbsp;&nbsp; "
+        "| 盈&nbsp;亏&nbsp;比&nbsp;/&nbsp;胜&nbsp;率&nbsp;（&nbsp;跨&nbsp;窗&nbsp;｜&nbsp;主&nbsp;窗&nbsp;） "
+        "| 命中候选（按技术分降序；括号内为技术分） |",
         "|---|---:|---:|---|",
     ]
     # v0.185（owner）：行序按跨窗盈亏比降序（无读数的垫底），不再是 SIGNAL_META 序。

@@ -159,6 +159,13 @@ class TestMdToDigest:
         # separator row dropped
         assert "---" not in digest
 
+    def test_nbsp_stripped_from_table_cells(self):
+        """&nbsp; 是渲染层撑列宽的实体，纯文本摘要里必须剥掉（信号标注一览表头/读数格在用）。"""
+        md = "# 表\n| 因&nbsp;子 | 读数 |\n| --- | --- |\n| QG | 2.73&nbsp;/&nbsp;31% |\n"
+        digest = pipeline_kit.md_to_digest(md)
+        assert "&nbsp;" not in digest
+        assert "因子" in digest and "2.73/31%" in digest
+
     def test_bullets_kept(self):
         md = "# 要点\n- 第一条\n• 第二条\n"
         digest = pipeline_kit.md_to_digest(md)

@@ -338,14 +338,22 @@ class TestTableRendering:
         rows = [ln for ln in sec.split("\n") if ln.startswith("| ")]
         data_rows = [ln for ln in rows if "---" not in ln][1:]
         assert data_rows[0].startswith(
-            "| **QSX共振v2(60根≥2次干净反弹)** `QG` | 3/3 | 2.73 / 31%"
+            "| **QSX共振v2(60根≥2次干净反弹)** `QG` | 3/3 | 2.73&nbsp;/&nbsp;31%"
         )
         assert data_rows[1].startswith(
-            "| **B2确认(B1后放量涨4%)** `B2` | 1/4 | 2.40 / 52%"
+            "| **B2确认(B1后放量涨4%)** `B2` | 1/4 | 2.40&nbsp;/&nbsp;52%"
         )
-        assert data_rows[-1].startswith("| **RSI强势区间** `RS` | 1/4 | 1.33 / 44%")
+        assert data_rows[-1].startswith(
+            "| **RSI强势区间** `RS` | 1/4 | 1.33&nbsp;/&nbsp;44%"
+        )
         assert "`QD`" not in sec, "QD 行已撤"
         assert "主升" not in sec, "v0.185（owner）：MR（主升始发点）行已撤"
+
+    def test_header_nbsp_padded_for_wider_columns(self):
+        """前三列表头用 &nbsp; 连成不可断行单元——渲染层最小列宽手段（防被当冗余清理）。"""
+        sec = self._labels_section(ct.render_table(self._pool(), "2026-08-04"))
+        header = [ln for ln in sec.split("\n") if ln.startswith("| ")][0]
+        assert "&nbsp;" in header
 
     def test_mr_label_removed(self):
         """v0.185（owner）：主升始发点标注整体撤除（0 触发因子，R8 H4/R27 双证）。

@@ -353,8 +353,8 @@ def md_to_digest(
             digest_lines.append("─" * min(len(text) * 2, 40))
             in_section = True
         elif line.startswith("|"):
-            # Convert table rows to text
-            cells = [c.strip() for c in line.split("|")[1:-1]]
+            # Convert table rows to text（剥 &nbsp;：渲染层撑列宽的实体不能漏进纯文本摘要）
+            cells = [c.strip().replace("&nbsp;", "") for c in line.split("|")[1:-1]]
             if cells and not all(set(c) <= set("-: ") for c in cells):
                 digest_lines.append(" | ".join(cells))
         elif line.startswith("- ") or line.startswith("• "):
