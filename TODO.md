@@ -6,8 +6,10 @@
 > 优先级按**「它阻塞了什么」**排，不按工作量：
 > P0 = 阻塞其他事或 live 正在依赖 ｜ P1 = 已有结论悬空 ｜ P2 = 新验证 ｜ P3 = 技术债
 >
-> 最后更新：2026-09-13（#67 迁移完成：B0-B4 五批 v0.217-v0.223 逐 commit 全绿，
-> 遗留验证单列 #76；此前 2026-09-12：#70/#71 生产机验证闭环、#75 闭环、
+> 最后更新：2026-09-13（#67 迁移完成：B0-B4 五批 v0.217-v0.223 逐 commit 全绿；
+> #76② 生产机回测清单逐位一致闭环（14 cell + 4 ranked + 4 report 全等，
+> 产物 artifacts/logs/factor67_verify/）；mcap 快照改 hermetic（8924634）。
+> 此前 2026-09-12：#70/#71 生产机验证闭环、#75 闭环、
 > #72 规划层、#73/#74 注册表扩展、#67 立项设计稿）。
 > 当前活跃：#60 影子观察（待 owner 拍板）、#61 校准回测、#26 剩余子项挂起、
 > #59 剩余机会、#63 解析器下沉、#67 接口收敛）
@@ -40,7 +42,7 @@
 |---|---|---|
 | 59 | **scorer 双形态剩余机会**：s_shape 系（值得但改造面大）、alpha101/pvcorr/low_vol/momentum/reversal_quality/mcap（中等优先）；b1_dual/long_structure/b2/main_rally 黑盒 detector 不适合。优先级低，随回测批次顺带做 | v0.73 审查（①② 已落地 v0.74；③④ 已否决，见已失效表） |
 | 63 | **两处直读 TDX 安装目录文件的解析器下沉 datasource**：`holding_sector_mapper.py`（pipeline 层直读 `tdxhy.cfg`/`incon.dat` 解析行业归属）与 `manual_pools.py`（直读 `blocknew.cfg`/`.blk` 自选股板块文件）。本轮数据层解耦只收敛了 mootdx 直调，这两处走本地文件解析、不踩 vendor 白名单钉测，属灰色地带；解析器应下沉 `datasource/local_tdx/`，留作后续 | 2026-08-24 数据层解耦审计 |
-| 76 | **#67 收敛的遗留验证**（代码侧五批已落地 v0.217-v0.223）：①影子对照——1800 候选表标注列 ≥10 交易日与旧口径逐位一致；②生产机回测清单（设计稿 §4.4：j_low×base_low/pct5、b2/rsi 系格子修复前后逐位一致 + 双窗）；③ctx 输入域规范专项——6 个标量/记录/板块成员输入型判定器 + 6 个 detect_xxx/compute_xxx 命名形态因子的裸槽取舍（设计稿勘误 2 + §8） | 2026-09-13 #67 迁移完成（设计稿 `governance/strategy/_factors/interface_unification_plan.md` 已回填实施状态） |
+| 76 | **#67 收敛的遗留验证**（代码侧五批已落地 v0.217-v0.223）：~~②生产机回测清单~~ ✅ **已完成（2026-09-13）**——§4.4 口径 7 格 × 双窗 × 修复前（b35e97b）/修复后（HEAD）两版：14 cell JSON + 4 ranked + 4 report **全部逐位一致**（产物 `artifacts/logs/factor67_verify/{pre,post}/`；副产：mcap 快照改 hermetic 消除跨机漂移，8924634）。剩余：①影子对照——1800 候选表标注列 ≥10 交易日与旧口径逐位一致（需天数收集）；③ctx 输入域规范专项——6 个标量/记录/板块成员输入型判定器 + 6 个 detect_xxx/compute_xxx 命名形态因子的裸槽取舍（设计稿勘误 2 + §8） | 2026-09-13 #67 迁移完成（设计稿 `governance/strategy/_factors/interface_unification_plan.md` 已回填实施状态） |
 
 ## ⚠️ 已失效的行动项（**别照着做**）
 
