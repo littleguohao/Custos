@@ -717,7 +717,7 @@ class TestCharacterizationSnapshot:
         "low_vol": "28cd5e0cd2b8",
         "macd_technics": "58b0c5f75b88",
         "main_rally_factor": "75fdb6c812e8",
-        "mcap": "2be88ca4242c",
+        "mcap": "75fe0399258d",  # 2026-09-13 改 hermetic 夹具快照（股本钉死 300亿，见下方 test 内注释）
         "momentum": "841b02900b08",
         "perfect_b1_fit": "c48b169f824e",
         "platform_pullback": "2be88ca4242c",
@@ -759,7 +759,19 @@ class TestCharacterizationSnapshot:
         assert set(self._SNAPSHOTS) == set(factors.registry())
 
     @pytest.mark.parametrize("fid", sorted(_SNAPSHOTS), ids=lambda x: x)
-    def test_output_bitwise_frozen(self, fid):
+    def test_output_bitwise_frozen(self, fid, monkeypatch):
+        if fid == "mcap":
+            # hermetic 夹具（2026-09-13，#76 复测副产）：mcap 经 `_shares_idx`
+            # 读 gitignored 本地股本文件（data/fundamentals/share_changes.jsonl），
+            # 股本随机器/文件版本漂移 ⇒ 快照在异机红（本机实测 600000 在册即红，
+            # 快照机不在册→None 才过）。钉死数据源使快照环境无关。
+            from custos.core.factors import mcap as _mcap_mod
+
+            monkeypatch.setattr(
+                _mcap_mod,
+                "_shares_idx",
+                lambda: {"600000": [("2000-01-01", 30_000_000_000.0)]},
+            )
         e = factors.registry()[fid]
         df = _bars()
         if fid == "weekly_j":
