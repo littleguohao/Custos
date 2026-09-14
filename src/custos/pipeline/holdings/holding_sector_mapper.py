@@ -28,17 +28,25 @@ from pathlib import Path
 import pandas as pd
 
 
-from custos.core.paths import TDX_ROOT, HOLDINGS_DIR, TRADES_DIR  # noqa: E402
+from custos.core.paths import HOLDINGS_DIR, TRADES_DIR  # noqa: E402
 from custos.core.code_utils import suffix  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
 from custos.datasource.local_tdx.tq_sector import TQSectorSession  # noqa: E402
 
+# TODO #63（v0.225）：纯格式解析下沉 datasource/local_tdx/tdx_block_files.py ——
+# 此处只剩薄门面：名字照常 re-export（main 走模块全局名，tests 的 monkeypatch
+# 通道不变：patch 的是本模块的属性而不是 datasource 的函数体）。
+from custos.datasource.local_tdx.tdx_block_files import (  # noqa: E402
+    HQ_CACHE,
+    INCON_DAT,
+    TDXHY_CFG,
+    load_incon_sections,
+    load_tdxhy,
+    lookup_name,
+)
+
 OUT_DIR = HOLDINGS_DIR
 DEFAULT_POSITIONS = TRADES_DIR / "current_positions.json"
-
-HQ_CACHE = TDX_ROOT / "T0002" / "hq_cache"
-TDXHY_CFG = HQ_CACHE / "tdxhy.cfg"
-INCON_DAT = TDX_ROOT / "incon.dat"
 
 LOCAL_SOURCE = "local_block"
 NOT_COVERED_DIMS = ["概念", "风格", "指数", "地区"]
@@ -54,49 +62,6 @@ def norm_code(x) -> str:
     if s.endswith(".0"):
         s = s[:-2]
     return s.zfill(6) if s.isdigit() and len(s) <= 6 else s
-
-
-def load_tdxhy(path: Path = TDXHY_CFG) -> dict:
-    """Parse tdxhy.cfg -> {code: {"tdx": T-code, "sw": X-code}}."""
-    mapping = {}
-    for line in path.read_text(encoding="ascii", errors="replace").splitlines():
-        parts = line.strip().split("|")
-        if len(parts) >= 3 and parts[1].isdigit():
-            mapping[parts[1]] = {
-                "tdx": parts[2] or "",
-                "sw": parts[5] if len(parts) > 5 else "",
-            }
-    return mapping
-
-
-def load_incon_sections(path: Path = INCON_DAT) -> dict:
-    """Parse incon.dat -> {section: {code: name}} (GBK, ``#SECTION`` blocks)."""
-    text = path.read_text(encoding="gbk", errors="replace")
-    sections: dict[str, dict[str, str]] = {}
-    current = None
-    for line in text.splitlines():
-        line = line.strip()
-        if not line or line == "######":
-            continue
-        if line.startswith("#"):
-            current = line[1:]
-            sections.setdefault(current, {})
-            continue
-        if current and "|" in line:
-            code, _, name = line.partition("|")
-            if name:
-                sections[current][code] = name
-    return sections
-
-
-def lookup_name(tree: dict, code: str) -> str:
-    """Resolve an industry code against a name tree, trimming to parent."""
-    code = (code or "").strip()
-    while code:
-        if code in tree:
-            return tree[code]
-        code = code[:-2]
-    return ""
 
 
 def init_tq() -> TQSectorSession:

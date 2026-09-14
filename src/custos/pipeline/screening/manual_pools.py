@@ -12,14 +12,29 @@
 
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
 from typing import Any, Optional
 
-TDX_BLOCK_DIR = Path(os.environ.get("TDX_ROOT", r"E:\new_tdx64")) / "T0002" / "blocknew"
+# TODO #63（v0.225）：纯格式解析下沉 datasource/local_tdx/tdx_block_files.py ——
+# 此处只剩薄门面。注意 TDX_BLOCK_DIR 的门面语义：tests/调用方 patch 的是**本
+# 模块**的常量 ⇒ resolve_block_file 必须走包装把门面常量传下去（直 re-export
+# 会让 patch 打在数据源模块的常量上而失效——别名只引用函数体）。
+from custos.datasource.local_tdx import tdx_block_files as _tbf  # noqa: E402
+from custos.datasource.local_tdx.tdx_block_files import read_blk  # noqa: E402
+
+TDX_BLOCK_DIR = _tbf.TDX_BLOCK_DIR
 
 _MARKET_PREFIX = {"0": "SZ", "1": "SH", "2": "BJ"}
+
+
+def resolve_block_file(
+    block_name: str, block_dir: Optional[Path] = None
+) -> Optional[Path]:
+    """门面包装：解析本体在 ``datasource.local_tdx.tdx_block_files``；``block_dir``
+    缺省时用**本门面**的 TDX_BLOCK_DIR（保留本模块常量的可 patch 语义）。"""
+    return _tbf.resolve_block_file(block_name, block_dir or TDX_BLOCK_DIR)
+
 
 # 沪深 A 股代码前缀。与 formula_screen._A_SHARE_RE 同一份规则：自选池是用户在通达信
 # 客户端手工维护的板块，里面混 ETF(51/15/16xxxx)、可转债(11/12/13xxxx)、B股(900xxx/2xxxxx)
@@ -32,43 +47,6 @@ def _is_bj(code: str, market: str = "") -> bool:
     """BJ 单独识别：它有独立的 exclude_bj 开关（enrich 段可配置放开），
     不能被 not_a_share 一把吞掉，否则用户关掉 exclude_bj 也再也拿不到北交所票。"""
     return market == "BJ" or str(code).startswith(("4", "8", "920"))
-
-
-def resolve_block_file(
-    block_name: str, block_dir: Optional[Path] = None
-) -> Optional[Path]:
-    """板块中文名 → blk 文件路径；找不到返回 None（绝不 raise）。"""
-    d = Path(block_dir) if block_dir else TDX_BLOCK_DIR
-    cfg = d / "blocknew.cfg"
-    try:
-        text = cfg.read_bytes().decode("gbk", errors="replace")
-    except OSError:
-        return None
-    # 非空段序列：板块名与 blk 短名交替出现
-    segs = [s for s in re.split(r"\x00+", text) if s.strip()]
-    for i in range(len(segs) - 1):
-        name, blk = segs[i].strip(), segs[i + 1].strip()
-        if name == block_name and re.fullmatch(r"[A-Za-z0-9_]+", blk):
-            path = d / f"{blk}.blk"
-            if path.exists():
-                return path
-    # 兜底：同名 .blk 直接存在（如用户自建板块未入 cfg）
-    direct = d / f"{block_name}.blk"
-    return direct if direct.exists() else None
-
-
-def read_blk(path: Path) -> list[dict[str, str]]:
-    """解析 .blk → [{"code": "600150", "market": "SH"}]，跳过空行/脏行。"""
-    out: list[dict[str, str]] = []
-    try:
-        lines = Path(path).read_text(encoding="gbk", errors="replace").splitlines()
-    except OSError:
-        return out
-    for line in lines:
-        s = line.strip()
-        if len(s) == 7 and s.isdigit() and s[0] in _MARKET_PREFIX:
-            out.append({"code": s[1:], "market": _MARKET_PREFIX[s[0]]})
-    return out
 
 
 def load_pool(
