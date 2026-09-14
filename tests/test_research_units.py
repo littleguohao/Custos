@@ -34,8 +34,9 @@ def test_units_exist():
     # 2026-09-08：+R30（打分权重有界组合搜索，预注册落档）
     # 2026-09-08：+R31（QN 因子批 8 gate 入场加值验证，预注册落档）
     # 2026-09-10：+R32（LLM 进化引擎真实数据冒烟，v0.206）
-    assert len(UNITS) == 32, (
-        f"预期 32 个研究单元，实际 {len(UNITS)}：{[p.name for p in UNITS]}"
+    # 2026-09-14：+R33（QSX 排除态可移植回避条件，预注册落档）
+    assert len(UNITS) == 33, (
+        f"预期 33 个研究单元，实际 {len(UNITS)}：{[p.name for p in UNITS]}"
     )
 
 
