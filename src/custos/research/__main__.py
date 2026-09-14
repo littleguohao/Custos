@@ -158,6 +158,12 @@ TOOLS: dict[str, tuple[str, str]] = {
         "表达式（TS_RANK 归一加权和）复用 strategy_grid 单元格——双窗/±50% 灵敏度/"
         "随机臂对照全确定性；增量在新轴不在调权（⚠️ pre2019 终审段相交即拒跑）",
     ),
+    "factor_ic_profile": (
+        "study",
+        "因子 IC 画像（分诊镜）：SCORERS 19 键 + DSL 表达式的截面 RankIC/ICIR 与 "
+        "horizon 衰减全因子可比表——回答「还有没有截面信号、值不值得花 trade-sim "
+        "预算」（⚠️ 非晋级判据：晋级走双窗+三轴；读数 L3− 带幸存者偏差）",
+    ),
     "qsx_resonance_study": (
         "study",
         "QSX/DKX 两层过滤三臂：①QSX>DKS 多头 ②「跌线就反弹」共振"

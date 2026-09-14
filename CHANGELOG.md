@@ -232,6 +232,7 @@
 | 2026-09-14 | v0.229 | TODO #64 拍板落地（owner 接线方式=门内提醒）：rsi_state status untested→candidate（research_ref +R20/R21，evidence 引 R21 页，live_use 维持 evidence_only）；candidate_table ⭐ 今日信号一览的可买/观察价位名单内 RD=hit 候选亮 ⚡RD + 图例行（R21 +26~+42pp 引用 + 12% 宽止损 advisory，仅提示不改判定）；止损联动不启动。分层/技术分/gate 零变化 | R21 证据已齐（结论④），owner 拍板 | 行动区 ⚡RD 提示随 1800 候选表日常输出；止损联动与否另行拍板 |
 | 2026-09-14 | v0.230 | TODO #61 方向拍板试跑：打分系统进化 v1 工具落地 + R34 预注册落档。基因组编译层 `evolution/score_genome.py`（复合打分=单条 DSL 表达式：每腿 TS_RANK 归一加权求和；权重格 gcd 比例等价去重 ≤64 组合保含单腿/等权基线；±pct 灵敏度扰动）；裁决驱动 `score_evolution_study.py`（每基因组=strategy_grid 单元格复用 expr: 轴，双窗/灵敏度/随机臂/pre2019 拒跑全确定性，TOOLS 注册）。R34 判据 C1~C5 写死；V0 臂 deferred（非 DSL 可表达） | owner 拍板试效果（四轮旧轴调权证伪 ⇒ 增量在新轴） | 生产机跑数后按 R34 C1~C4 回填；过线才进 pre2019 终审终步 |
 | 2026-09-14 | v0.231 | score_evolution_study 两项增强：①两阶段省钱模式 --two-stage/--coarse-sample/--stage1-top-k（粗筛宇宙×全格×全对照臂取 top K，终筛只跑 K 格、对照臂重跑，灵敏度/双窗在阶段2）+ --quick 糖（=n_random 1+max_combos 24，终审须补满随机臂）；②V0 对照臂 --v0-arm 实跑（独立载体：evaluate_trades 全候选→as-of V0 技术分→组合层 top-N，与 cell 同函数同公式；arms.v0+vs_v0 对照块，不进 C1~C5） | r34_v1 实跑 264 格≈15h 嫌慢；R34 V0 臂 deferred 收口 | 下轮跑数用 --two-stage --quick 粗筛；判读以满配为准 |
+| 2026-09-14 | v0.232 | 新工具 factor_ic_profile（因子 IC 画像，TOOLS 注册）：SCORERS 19 键 + --expr DSL 在统一宇宙/窗口上的截面 RankIC/ICIR 与 horizon 衰减全因子可比表；scorer 逐日分值构建器复用 _SCORER_PRECOMPUTE 旁路（b1_pullback/kdj_j/rsi_state 三键）与 _dual_form_scorer 归一，IC/ICIR/半窗全部复用 ic_eval/operators 地基；定位=研究层分诊镜（**非晋级判据**：晋级走双窗+三轴；读数 L3−） | owner 拍板（回答「还有没有截面信号、值不值得花 trade-sim 预算」） | 生产机跑数后供因子分诊；不作晋级依据（R19/R21/R14） |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

@@ -85,6 +85,9 @@ uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/
 - 进化引擎：LLM 只做提案（假设/变异/杂交/解读），**decision 由确定性函数给出**；
   挖掘/判定双窗硬隔离；`--joint`/`--grid-judge` 必须显式 `--count`；`--cell-top-n`
   默认 20（=0 是因子轴退化，scorer 不写交易集）。
+- 因子 IC 画像（`factor_ic_profile`）：SCORERS/DSL 的截面 RankIC/ICIR + horizon
+  衰减全因子可比表——**分诊镜不是晋级判据**（晋级永远走双窗+三轴交易语义；
+  读数 L3− 带幸存者偏差，R19/R21/R14）。
 
 ## 6. 多 agent / 多机协作纪律
 
