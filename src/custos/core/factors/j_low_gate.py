@@ -66,3 +66,22 @@ def j_low_gate_hit(daily_j: Any, threshold: float = J_LOW_THRESHOLD) -> bool:
     守卫 `TestNoRefork` 拦同名两份实现）。
     """
     return j_below_threshold(daily_j, threshold)
+
+
+def detect(df=None, code: str = "", *, ctx: dict | None = None) -> dict | None:
+    """ctx 双形态规范入口（v0.227，TODO #76③ ctx 输入域专项）。
+
+    本判定器吃标量 daily_j 不吃 df：``ctx = {"daily_j", "threshold"(可选)}``。
+    ctx 缺省 ⇒ None（不参与）；提供 ⇒ ``j_low_gate_hit`` 结果字典化（同函数同
+    输入逐位一致；enrich 的门槛调用点已改走本入口）。
+    """
+    if ctx is None:
+        return None
+    daily_j = ctx.get("daily_j")
+    return {
+        "available": True,
+        "hit": bool(
+            j_low_gate_hit(daily_j, threshold=ctx.get("threshold", J_LOW_THRESHOLD))
+        ),
+        "daily_j": daily_j,
+    }

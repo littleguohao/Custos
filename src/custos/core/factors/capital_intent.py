@@ -232,3 +232,17 @@ def _capital_intent_fund_flow_evidence(cand: dict, w: dict) -> tuple[int | float
         w["ci_fund_flow_inflow"],
     )
     return score, detail
+
+
+def detect(df=None, code: str = "", *, ctx: dict | None = None) -> dict | None:
+    """ctx 双形态规范入口（v0.227，TODO #76③ ctx 输入域专项）。
+
+    本因子吃**候选记录**不吃 df：``ctx = {"cand", "weights"(可选)}``。ctx 缺省
+    或缺 cand ⇒ None（不参与）；提供 ⇒ 委托 ``capital_intent_strength``，三元组
+    字典化为 {"level", "score", "detail"}（同函数同输入逐位一致；
+    score_candidates 调用点已改走本入口）。
+    """
+    if ctx is None or "cand" not in ctx:
+        return None
+    level, sc, detail = capital_intent_strength(ctx["cand"], ctx.get("weights"))
+    return {"level": level, "score": sc, "detail": detail}

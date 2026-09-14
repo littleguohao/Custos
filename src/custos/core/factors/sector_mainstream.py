@@ -283,3 +283,8 @@ def main(argv: Optional[list] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+# v0.227（TODO #76③ ctx 输入域专项）：本模块输入域是**板块成员文件/成员表**
+# （非个股判定器），detect(df/ctx) 形态不适用 —— 记录在案，不设裸槽别名；
+# 消费面（sector_daily_rank 等）继续走成员表函数直调。

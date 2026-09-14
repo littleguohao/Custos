@@ -47,7 +47,14 @@ from custos.core.factors.wave_type import detect_wave_type  # noqa: E402
 
 #   ↑ v0.86（因子化批 B）前这里还导 `WAVE_MIN_BARS` / `_find_rally_segment`
 #     （check_non_one_wave 用）——它们已随结构族迁入 factors/b1_structure.py。
-from custos.core.factors.perfect_b1_fit import compute_perfect_b1_fit  # noqa: E402
+from custos.core.factors import perfect_b1_fit as perfect_b1_fit_mod  # noqa: E402
+
+# v0.227（TODO #76③）：调用点改走 ctx 规范入口 detect()；
+# compute_perfect_b1_fit 本体仍在因子模块（研究侧 backtest_factors 直调）。
+from custos.core.factors.perfect_b1_fit import (  # noqa: E402  # noqa: F401
+    compute_perfect_b1_fit,  # tests 的 ec.* 转出通道（test_j_gate_and_fit 等）
+    detect,
+)
 from custos.core.factors.distribution import (  # noqa: E402  # pylint: disable=unused-import  detect_top_windmill: tests 的 ec.* 转出通道
     confirm_distribution,
     detect_distribution,
@@ -110,7 +117,11 @@ from custos.core.factors.entry_patterns import (  # noqa: E402
     relative_strength_strong,
     reversal_flags,
 )
-from custos.core.factors.j_low_gate import j_low_gate_hit  # noqa: E402
+from custos.core.factors import j_low_gate as j_low_gate_mod  # noqa: E402
+from custos.core.factors.j_low_gate import j_low_gate_hit  # noqa: E402  # noqa: F401
+# v0.227（TODO #76③）：门槛调用点改走 ctx 规范入口 detect()；j_low_gate_hit
+# 本体仍在因子模块（research ENTRY_GATES 直调）。
+
 #   ↑ v0.86（因子化批 C）：点火族（check_ignition/check_pullback_shrink +
 #     b1_ignition_hit/zx_recent_golden 复合判定 + ZX_CROSS_RECENT/IGNITION_*/
 #     PULLBACK_* 常量）迁入 factors/ignition.py；patterns 五单项判定
@@ -807,8 +818,14 @@ def _assemble_metrics(
         "w_bottom": ev["w_bottom"],
         "red_fat_green_thin": ev["red_fat_green_thin"],
         "macd_technics": macd_technics,
-        "perfect_b1_fit": compute_perfect_b1_fit(
-            df, daily_j, zx, pullback_shrink, macd_state=macd_technics
+        "perfect_b1_fit": perfect_b1_fit_mod.detect(
+            df,
+            ctx={
+                "daily_j": daily_j,
+                "zx": zx,
+                "pullback": pullback_shrink,
+                "macd_state": macd_technics,
+            },
         ),
         # v0.50（#37 阶段 A，owner 拍板）：b1_pullback_fit 已被全市场回测**证伪**
         # （作进场过滤期望 -0.42%/笔 < baseline +0.96%/笔）⇒ 停止逐票计算
@@ -1123,7 +1140,10 @@ def _apply_j_gate(cand: dict, result: dict, cfg: dict) -> bool:
     dj = cand.get("daily_j")
     # v0.86（因子化批 C）：门槛判定改走 factors/j_low_gate.py 的因子化入口
     # （判定本体仍是 weekly_j.j_below_threshold，上方 re-export 通道不变）。
-    if j_low_gate_hit(dj):
+    # v0.227（TODO #76③）：门槛调用改走 ctx 规范入口 detect()（同判定同输入）
+    _jlg = j_low_gate_mod.detect(ctx={"daily_j": dj})
+    assert _jlg is not None  # ctx 恒提供 ⇒ detect 不会为 None（窄化给 mypy）
+    if _jlg["hit"]:
         return False
     # 被挡时写 excluded 并返回 True（v0.89 起门外异动票不再单列观察区，
     # 报告侧改为池内门内提醒，见 candidate_table._in_gate_reminder_section）。

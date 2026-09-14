@@ -294,3 +294,14 @@ def fundamental_quality(fin: Optional[dict]) -> dict:
         "cashflow_positive": ocf_pos,
         "roe_positive": roe_pos,
     }
+
+
+def detect(df=None, code: str = "", *, ctx: dict | None = None) -> dict:
+    """ctx 双形态规范入口（v0.227，TODO #76③ ctx 输入域专项）。
+
+    本因子吃**财务快照**不吃 df：``ctx = {"fin"}``（financials dict，可为
+    None）。ctx 缺省按 ``fin=None`` 委托 ``fundamental_quality``（与直调同值；
+    score_candidates 调用点已改走本入口）。
+    ``financial_factor``（CZ 抄底代理的数据取数面）是另一条入口，保留原名直调。
+    """
+    return fundamental_quality((ctx or {}).get("fin"))

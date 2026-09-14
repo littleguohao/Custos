@@ -67,6 +67,7 @@ from custos.core import report_audit  # noqa: E402
 # 2026-08-20（v0.84，Phase D 因子化）：资金意图强度迁入因子注册表
 # （core/factors/capital_intent.py），本模块 import 调用——`sc.capital_intent_strength`
 # 仍是同一函数对象，判定逻辑零变化。
+from custos.core.factors import capital_intent as capital_intent_mod  # noqa: E402
 from custos.core.factors.capital_intent import (  # noqa: E402,F401
     capital_intent_strength,
     resolve_capital_weights,
@@ -74,6 +75,7 @@ from custos.core.factors.capital_intent import (  # noqa: E402,F401
 
 # 基本面因子化（v0.84）：fundamental_quality 实现在 core/factors/fundamentals.py，
 # 此处 re-export（four_leg_resonance 与既有测试 `sc.fundamental_quality` 不变）。
+from custos.core.factors import fundamentals as fundamentals_mod  # noqa: E402
 from custos.core.factors.fundamentals import fundamental_quality  # noqa: E402
 
 SCREENING_DIR = DATA / "screening"
@@ -831,7 +833,8 @@ def four_leg_resonance(cand, permission, tech_level):
     `bull_candidate` 定义中**移出**——「可买」判定不再含板块腿（板块相位降级为
     情境标注列）；legs/aligned 仍保留四腿计数供展示。
     """
-    fq = fundamental_quality(cand.get("financials"))
+    # v0.227（TODO #76③）：品质档判定改走 ctx 规范入口 detect()（同判定同输入）
+    fq = fundamentals_mod.detect(ctx={"fin": cand.get("financials")})
     sp_fav = bool((cand.get("sector_phase") or {}).get("favorable"))
     legs = {
         "market": permission == "允许",
@@ -870,8 +873,13 @@ def score_candidate(
     """
     rules = resolve_cap_rules(cap_rules)
     tech_score, tech_level, factor_contrib = technical_score(cand, weights)
-    capital_level, capital_score, capital_detail = capital_intent_strength(
-        cand, weights
+    # v0.227（TODO #76③）：资金意图判定改走 ctx 规范入口 detect()（同判定同输入）
+    _ci = capital_intent_mod.detect(ctx={"cand": cand, "weights": weights})
+    assert _ci is not None  # cand 恒提供 ⇒ detect 不会为 None（窄化给 mypy）
+    capital_level, capital_score, capital_detail = (
+        _ci["level"],
+        _ci["score"],
+        _ci["detail"],
     )
     heat, pass_level, reason = sector_heat(sector_entry)
     trade_style = trade_style_of(heat)

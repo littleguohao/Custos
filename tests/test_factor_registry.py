@@ -698,6 +698,23 @@ class TestCharacterizationSnapshot:
         "qsx_resonance": lambda m, df: m.resonance_v2_snapshot(df),
     }
 
+    #: ctx 输入域因子的快照夹具（v0.227，TODO #76③）：detect(df, ctx=夹具)
+    #: 与旧 DOMAIN 驱动的输入一一对应（perfect_b1_fit 的哈希因此保持冻结）。
+    _CTX_FIXTURE = {
+        "perfect_b1_fit": {"daily_j": 5.0, "zx": {}, "pullback": {}},
+        "entry_patterns": {
+            "daily_j": 5.0,
+            "vol_ratio": 1.5,
+            "vol_pctile": 0.8,
+            "change_pct": -3.0,
+            "amplitude_pct": 4.2,
+            "bbi": {"available": True, "close_above": True},
+            "rs_20d": 5.0,
+        },
+        "j_low_gate": {"daily_j": 5.0},
+        "capital_intent": {"cand": {}, "weights": None},
+    }
+
     _SNAPSHOTS = {
         "alpha101": "f16d205b43eb",
         "alpha_pvcorr": "effcb178ff26",
@@ -707,12 +724,12 @@ class TestCharacterizationSnapshot:
         "b2_surge_factor": "9f3b7bcdc8e1",
         "baseline": "2bd7dd114d5c",
         "bottom_patterns": "76cf78a9d5be",  # v0.218…B2 更新（新增 detect 打包入口槽）
-        "capital_intent": "315b2ee9f36b",
+        "capital_intent": "b60916945ed9",  # v0.227 更新（ctx 双形态入口接管）
         "distribution": "c75399e5d2ad",
-        "entry_patterns": "b46b697c5816",
+        "entry_patterns": "bb7bfe3d1b65",  # v0.227 更新（ctx 打包门面接管）
         "fundamentals": "ac8fae92afec",
         "ignition": "951e4fd04fe5",
-        "j_low_gate": "5ffe533b830f",
+        "j_low_gate": "fa66b2d075d5",  # v0.227 更新（ctx 双形态入口接管）
         "kdj_j": "fc95f211968d",
         "low_vol": "28cd5e0cd2b8",
         "macd_technics": "58b0c5f75b88",
@@ -779,7 +796,10 @@ class TestCharacterizationSnapshot:
         elif e["score"] is not None:
             r = e["score"](df, "600000")
         elif e["detect"] is not None:
-            r = e["detect"](df)
+            if fid in self._CTX_FIXTURE:  # ctx 输入域因子：fixture 对齐旧 DOMAIN 输入
+                r = e["detect"](df, ctx=self._CTX_FIXTURE[fid])
+            else:
+                r = e["detect"](df)
         else:
             r = self._DOMAIN[fid](e["module"], df)
         assert self._canon(r) and self._canon(r) == self._SNAPSHOTS[fid], (
@@ -1168,3 +1188,104 @@ class TestGroup2SlotChoices:
         assert "b1_dual_factor import score" in __import__("inspect").getsource(src)
         src2 = BF._sc_b1_pullback
         assert "b1_pullback_fit import score" in __import__("inspect").getsource(src2)
+
+
+class TestCtxEntryFactors:
+    """TODO #76③ ctx 输入域专项：标量/记录输入型判定器的 ctx 双形态入口。
+
+    逐位等价钉测：ctx 提供 ⇒ 与直调同函数同输入一致；ctx 缺省 ⇒ None（不参与）；
+    live 调用点已改走规范入口（源码断言）。
+    """
+
+    def test_perfect_b1_fit_ctx_matches_direct_call(self):
+        from custos.core.factors import perfect_b1_fit
+
+        df = _bars()
+        ctx = {
+            "daily_j": 5.0,
+            "zx": {"a": 1},
+            "pullback": {"b": 2},
+            "macd_state": {"m": 3},
+        }
+        assert perfect_b1_fit.detect(
+            df, ctx=ctx
+        ) == perfect_b1_fit.compute_perfect_b1_fit(
+            df, 5.0, {"a": 1}, {"b": 2}, macd_state={"m": 3}
+        )
+        assert perfect_b1_fit.detect(df) is None  # ctx 缺省 ⇒ 不参与
+
+    def test_fundamentals_ctx_and_default(self):
+        from custos.core.factors import fundamentals
+
+        fin = {"roe": 0.1}
+        assert fundamentals.detect(
+            ctx={"fin": fin}
+        ) == fundamentals.fundamental_quality(fin)
+        assert fundamentals.detect() == fundamentals.fundamental_quality(
+            None
+        )  # fin=None 同值
+
+    def test_entry_patterns_bundle_matches_direct_calls(self):
+        from custos.core.factors import entry_patterns
+
+        ctx = {
+            "daily_j": 5.0,
+            "vol_ratio": 1.5,
+            "vol_pctile": 0.8,
+            "change_pct": -3.0,
+            "amplitude_pct": 4.2,
+            "bbi": {"available": True, "close_above": True},
+            "rs_20d": 5.0,
+        }
+        got = entry_patterns.detect(ctx=ctx)
+        assert got["reversal_flags"] == entry_patterns.reversal_flags(
+            5.0, 1.5, 0.8, -3.0, 4.2
+        )
+        assert got["bbi_above"] == entry_patterns.bbi_above(
+            {"available": True, "close_above": True}
+        )
+        assert got[
+            "relative_strength_strong"
+        ] == entry_patterns.relative_strength_strong(5.0)
+        assert entry_patterns.detect() is None
+
+    def test_j_low_gate_ctx_matches_hit_and_call_site(self):
+        from custos.core.factors import j_low_gate
+
+        assert j_low_gate.detect(ctx={"daily_j": 5.0})[
+            "hit"
+        ] == j_low_gate.j_low_gate_hit(5.0)
+        assert j_low_gate.detect(ctx={"daily_j": 20.0})[
+            "hit"
+        ] == j_low_gate.j_low_gate_hit(20.0)
+        assert j_low_gate.detect() is None
+        s = (ROOT / "src/custos/pipeline/screening/enrich_candidates.py").read_text(
+            encoding="utf-8"
+        )
+        assert '_jlg["hit"]' in s and "j_low_gate_mod.detect" in s
+
+    def test_capital_intent_ctx_matches_direct_call(self):
+        from custos.core.factors import capital_intent
+
+        cand = {"zhixing": {}, "patterns": {}}
+        level, sc, detail = capital_intent.capital_intent_strength(cand, None)
+        got = capital_intent.detect(ctx={"cand": cand, "weights": None})
+        assert got == {"level": level, "score": sc, "detail": detail}
+        assert capital_intent.detect() is None
+        s = (ROOT / "src/custos/pipeline/screening/score_candidates.py").read_text(
+            encoding="utf-8"
+        )
+        assert 'capital_intent_mod.detect(ctx={"cand": cand, "weights": weights})' in s
+        assert 'fundamentals_mod.detect(ctx={"fin": cand.get("financials")})' in s
+
+    def test_enrich_perfect_b1_fit_call_site(self):
+        s = (ROOT / "src/custos/pipeline/screening/enrich_candidates.py").read_text(
+            encoding="utf-8"
+        )
+        assert "perfect_b1_fit_mod.detect(" in s and '"pullback": pullback_shrink' in s
+
+    def test_sector_mainstream_documented_exemption(self):
+        s = (ROOT / "src/custos/core/factors/sector_mainstream.py").read_text(
+            encoding="utf-8"
+        )
+        assert "输入域是**板块成员文件/成员表**" in s  # 记录在案的形态不适用声明

@@ -135,3 +135,22 @@ def _dks_rising_component(df) -> dict[str, Any]:
         dks_prev = float(dks.iloc[-1 - FIT_DKS_SLOPE_DAYS])
         dks_pts = 1.0 if dks_now > dks_prev else 0.0
     return {"points": dks_pts, "dks": dks_now, "dks_prev": dks_prev}
+
+
+def detect(df=None, code: str = "", *, ctx: dict | None = None) -> dict | None:
+    """ctx 双形态规范入口（v0.227，TODO #76③ ctx 输入域专项）。
+
+    本因子吃**上下文**不吃裸 df：``ctx = {"daily_j", "zx", "pullback",
+    "macd_state"(可选)}``（enrich 各腿已算好的现成值）。ctx 缺省 ⇒ None
+    （不参与，不误标）；提供 ⇒ 委托 ``compute_perfect_b1_fit``（同函数同
+    输入逐位一致；enrich 调用点已改走本入口）。
+    """
+    if ctx is None:
+        return None
+    return compute_perfect_b1_fit(
+        df,
+        ctx["daily_j"],
+        ctx["zx"],
+        ctx["pullback"],
+        macd_state=ctx.get("macd_state"),
+    )

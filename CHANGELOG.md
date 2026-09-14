@@ -227,6 +227,7 @@
 | 2026-09-13 | v0.224 | #76② 生产机回测清单闭环 + mcap 快照 hermetic：§4.4 口径 7 格 × 双窗 × 修复前/修复后两版——14 cell JSON + 4 ranked + 4 report **全部逐位一致**（#67 零行为变化的生产尺度实证）；mcap 快照钉死股本夹具（300亿），消除本地股本文件跨机漂移（明细见产物目录） | #67 收敛的遗留验证 ②；快照可移植性缺口由 review 发现 | 产物 `artifacts/logs/factor67_verify/{pre,post}/`；#76 剩 ①影子对照 ③ctx 专项 |
 | 2026-09-14 | v0.225 | TODO #63 落地：TDX 安装目录本地文件纯格式解析下沉 `datasource/local_tdx/tdx_block_files.py`（tdxhy.cfg/incon.dat/blocknew.cfg/.blk 四解析器逐字下沉）；holding_sector_mapper/manual_pools 改薄门面 re-export（行为逐位不变；TDX_BLOCK_DIR 门面包装保住常量可 patch 语义——别名 re-export 会让 patch 落到数据源常量上失效，联调抓出）。零行为变化 | owner 排期开工 | 钉测 +22（小样例对拍 + 异常路径 + 门面身份/patch 通道）；全量绿 |
 | 2026-09-14 | v0.226 | TODO #76③ 第一批（detect_xxx/compute_xxx 裸槽取舍）：wave_type/distribution/main_rally_factor 加 `detect` 别名（detect_xxx 即规范名，同对象）；b2_surge_factor 加 `detect()` 三检测器打包（同三次调用逐位一致）；b1_pullback_fit/b1_dual_factor 的 `_sc_*` 映射上移为模块 `score()`（backtest 改 lazy 门面，_SCORER_PRECOMPUTE/slice-free 身份链不变）。零行为变化 | owner 排期开工 | 钉测 +5（取舍类）；CANON +2；快照更新 2（score 槽接管）；全量绿 |
+| 2026-09-14 | v0.227 | TODO #76③ 第二批（ctx 输入域规范）：定规范 `detect(df=None, code="", *, ctx=None)`——ctx 缺省 None 不参与，提供按键委托既有函数（逐位一致）。perfect_b1_fit/fundamentals/entry_patterns/j_low_gate/capital_intent 五入口落地；enrich/score_candidates 四处调用点改 ctx 入口；sector_mainstream 板块成员输入域记录在案不设槽；entry_patterns live 保持标量直调（三站子集不同）。零行为变化 | owner 排期开工 | 钉测 +7；快照更新 3 + fixture 驱动；全量绿 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

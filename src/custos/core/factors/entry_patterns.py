@@ -97,3 +97,27 @@ def bbi_above(bbi: dict) -> bool:
 def relative_strength_strong(rs_20d: Optional[float]) -> bool:
     """relative_strength_strong 单项：20 日相对强度 >= RS_STRONG_PP。"""
     return rs_20d is not None and rs_20d >= RS_STRONG_PP
+
+
+def detect(df=None, code: str = "", *, ctx: dict | None = None) -> dict | None:
+    """ctx 双形态规范入口（v0.227，TODO #76③ ctx 输入域专项）：三个标量判定器的打包门面。
+
+    ctx keys（缺哪个哪个子项为 None）：``daily_j / vol_ratio / vol_pctile /
+    change_pct / amplitude_pct``（reversal_flags）、``bbi``（bbi_above）、
+    ``rs_20d``（relative_strength_strong）。ctx 缺省 ⇒ None。
+    ⚠️ live 热路径（enrich 三个不同上下文子集的调用点）保持标量直调 ——
+    每站子集不同，打包反而多算（本入口供注册表/研究侧统一消费）。
+    """
+    if ctx is None:
+        return None
+    return {
+        "reversal_flags": reversal_flags(
+            ctx.get("daily_j"),
+            ctx.get("vol_ratio"),
+            ctx.get("vol_pctile"),
+            ctx.get("change_pct"),
+            ctx.get("amplitude_pct"),
+        ),
+        "bbi_above": bbi_above(ctx["bbi"]) if "bbi" in ctx else None,
+        "relative_strength_strong": relative_strength_strong(ctx.get("rs_20d")),
+    }
