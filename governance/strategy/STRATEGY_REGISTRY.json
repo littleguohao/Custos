@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-09-12",
+  "updated_at": "2026-09-14",
   "purpose": "策略上下文注册表。新增策略/因子必须在此登记，由 tests/test_strategy_index.py 校验注册表与目录一致。",
   "conventions": {
     "dir": "策略上下文用无前缀目录（b1/ cz/）；非策略用 _ 前缀（_factors/ 可复用因子、_shared/ 跨策略规则）",
@@ -123,9 +123,9 @@
       "id": "interface_unification_plan",
       "name": "因子层接口统一立项设计稿（TODO #67）",
       "doc": "_factors/interface_unification_plan.md",
-      "status": "draft",
+      "status": "implemented",
       "used_by": [],
-      "note": "立项设计稿（非因子文档）：三套接口清点/目标形态/等价性策略/迁移批次/owner 裁决点；待拍板立项后按批实施"
+      "note": "B0-B4（v0.217-v0.223）+ #76③ ctx 专项（v0.226-0.227）已实施；剩影子对照（≥10 交易日）见 TODO #76①"
     }
   ],
   "shared_rules": [

@@ -255,6 +255,39 @@ NOT_FOR_LIVE / status / live_use / stage 四维元数据语义。
 遗留验证事项（代码无法自证，须生产机/时间）：
 - 影子对照：1800 候选表标注列 ≥10 个交易日与旧口径逐位一致（本次所有改动
   理论上逐位不变，影子是最后保险）；
-- 生产机回测清单（§4.4）：关键格子修复前后逐位一致 + 双窗读数不变；
-- ctx 输入域规范专项（勘误 2 的 6 个判定器 + B2 留下的 2 个上下文签名因子）；
+- ~~生产机回测清单（§4.4）~~ ✅ 已完成（v0.224：7 格 × 双窗 × 修复前/后两版
+  全部逐位一致）；
+- ~~ctx 输入域规范专项~~ ✅ 已实施（v0.226-0.227，见下节）；
 - 全部齐后 TODO #67 才按维护约定删除，本稿转「✅ 已收敛」。
+
+## §9 ctx 输入域规范（2026-09-14，v0.226-0.227 已实施）
+
+**规范签名**：`detect(df=None, code: str = "", *, ctx: dict | None = None) -> dict | None`
+
+- **ctx 缺省 ⇒ None**（不参与，不误标）；**ctx 提供 ⇒ 按模块 docstring 声明的
+  键取上下文**，委托既有领域函数（同函数同输入逐位一致）；
+- df/code 保留在签名里只为与统一 detect 形态对齐（允许但非必须使用）；
+- 与 `_SCORER_PRECOMPUTE` 双形态的关系：ctx 是**业务上下文**（daily_j/zx/
+  pullback/weights/fin/cand），precomputed 是**性能旁路**（预计算全序列）——
+  两个正交维度，不混用；score(df, code, *, precomputed=None) 形态照旧。
+
+**实施清单（勘误 2 的 12 个模块逐个）**：
+
+| 模块 | 输入形态实据 | 落地 | commit |
+|---|---|---|---|
+| wave_type | detect_wave_type(df) | detect 别名（同对象） | v0.226 |
+| distribution | detect_distribution(df, code) | detect 别名（同对象） | v0.226 |
+| main_rally_factor | detect_main_rally_start(df) | detect 别名（同对象） | v0.226 |
+| b2_surge_factor | detect_b2/bottom_surge/surge_then_b1(df, code) | detect() 三检测器打包（逐位一致钉测） | v0.226 |
+| b1_pullback_fit | compute_b1_pullback_fit(df, precomputed, n) | score() 上移（_sc_b1_pullback 归一化映射逐字，lazy 门面保留；_SCORER_PRECOMPUTE/slice-free 四参链不变） | v0.226 |
+| b1_dual_factor | compute_b1_dual(df, code) + detect_breakout_pullback_b1(df, code) | score() 上移（_sc_b1_dual 映射逐字）+ detect 别名 | v0.226 |
+| perfect_b1_fit | compute(df, daily_j, zx, pullback, macd_state) | ctx={"daily_j","zx","pullback","macd_state"(可选)}；enrich 调用点已改 ctx 入口；ctx 缺省 None | v0.227 |
+| fundamentals | fundamental_quality(fin) | ctx={"fin"}；score_candidates 调用点已改；ctx 缺省按 fin=None 委托（与直调同值）；financial_factor 取数面保留原名 | v0.227 |
+| entry_patterns | reversal_flags/bbi_above/relative_strength_strong（标量） | detect() 打包门面（三子集键）；**live 保持标量直调**——三站上下文子集不同，打包反而多算（模块注释在案） | v0.227 |
+| j_low_gate | j_low_gate_hit(daily_j, threshold) | ctx={"daily_j","threshold"(可选)}；enrich 门槛调用点已改 ctx 入口 | v0.227 |
+| capital_intent | capital_intent_strength(cand, weights) | ctx={"cand","weights"(可选)}；score_candidates 调用点已改；三元组字典化 | v0.227 |
+| sector_mainstream | 板块成员文件/成员表 | **不设槽**：输入域非个股判定器，detect(df/ctx) 不适用（模块注释在案） | v0.227 |
+
+快照处置：9 个哈希随批更新并带版本注记（b1_pullback_fit/b1_dual_factor/
+entry_patterns/j_low_gate/capital_intent 各 1、volume_detectors/b1_structure 前批 2），
+perfect_b1_fit 经 `_CTX_FIXTURE` 夹具驱动保持冻结；44 因子其余哈希全程未动。
