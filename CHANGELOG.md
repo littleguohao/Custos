@@ -229,6 +229,7 @@
 | 2026-09-14 | v0.226 | TODO #76③ 第一批（detect_xxx/compute_xxx 裸槽取舍）：wave_type/distribution/main_rally_factor 加 `detect` 别名（detect_xxx 即规范名，同对象）；b2_surge_factor 加 `detect()` 三检测器打包（同三次调用逐位一致）；b1_pullback_fit/b1_dual_factor 的 `_sc_*` 映射上移为模块 `score()`（backtest 改 lazy 门面，_SCORER_PRECOMPUTE/slice-free 身份链不变）。零行为变化 | owner 排期开工 | 钉测 +5（取舍类）；CANON +2；快照更新 2（score 槽接管）；全量绿 |
 | 2026-09-14 | v0.227 | TODO #76③ 第二批（ctx 输入域规范）：定规范 `detect(df=None, code="", *, ctx=None)`——ctx 缺省 None 不参与，提供按键委托既有函数（逐位一致）。perfect_b1_fit/fundamentals/entry_patterns/j_low_gate/capital_intent 五入口落地；enrich/score_candidates 四处调用点改 ctx 入口；sector_mainstream 板块成员输入域记录在案不设槽；entry_patterns live 保持标量直调（三站子集不同）。零行为变化 | owner 排期开工 | 钉测 +7；快照更新 3 + fixture 驱动；全量绿 |
 | 2026-09-14 | v0.228 | TODO #65 判据预注册落档（纯文档）：新研究单元 R33「跌破 QSX/DKX 未收复=排除」可移植回避条件边际验证——C1~C4 判据、双窗 s3000、统一出场轴三档全部跑数前写死（详见 `governance/research/R33_qsx_exclusion_portable_filter.md` 及附录生产机手册四步）；工程评估：现 qsx gate 是结构过滤不表达排除态，前置最小 qsx_exclusion_free gate 口径写死待 owner 拍板 | R23 v2 收口时指名的下一题 | 生产机跑数后按 C1~C4 回填判定 |
+| 2026-09-14 | v0.229 | TODO #64 拍板落地（owner 接线方式=门内提醒）：rsi_state status untested→candidate（research_ref +R20/R21，evidence 引 R21 页，live_use 维持 evidence_only）；candidate_table ⭐ 今日信号一览的可买/观察价位名单内 RD=hit 候选亮 ⚡RD + 图例行（R21 +26~+42pp 引用 + 12% 宽止损 advisory，仅提示不改判定）；止损联动不启动。分层/技术分/gate 零变化 | R21 证据已齐（结论④），owner 拍板 | 行动区 ⚡RD 提示随 1800 候选表日常输出；止损联动与否另行拍板 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

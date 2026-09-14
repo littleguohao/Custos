@@ -15,7 +15,7 @@ live 消费方式（**evidence_only，行为不变**）：
 - score_candidates 四面共振的基本面腿 + `fundamental_quality` 品质档落盘；
 - **不进技术分、不驱动分层/gate/排序**。
 
-status 定档：untested（证据层因子无独立回测证据；先例 rsi_state 同为
+status 定档：untested（证据层因子无独立回测证据；先例 bottom_patterns 同为
 untested + evidence_only + release）。evidence_only 不受 NOT_FOR_LIVE 限制
 （它本来就不驱动决策）。
 
@@ -35,7 +35,7 @@ FACTOR: dict[str, Any] = {
     "id": "fundamentals",
     "name": "基本面（CZ 抄底三条件代理 + 品质档/三无标记）",
     "kind": "state",
-    "status": "untested",  # 证据层因子，无独立回测证据（先例 rsi_state 同档）
+    "status": "untested",  # 证据层因子，无独立回测证据（先例 bottom_patterns 同档）
     "evidence": "",
     "note": "只进 🐂 展示与四面共振基本面腿，不进分不驱动分层；Affair 快照口径，历史回测不可用",
     "min_bars": 1,

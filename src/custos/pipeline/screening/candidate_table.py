@@ -280,6 +280,27 @@ def _names_or_none(cands: list[dict]) -> str:
     return "、".join(_sig_nm(c) for c in cands) or "无"
 
 
+def _rd_hit(c: dict) -> bool:
+    """RD（RSI 深水区）证据命中判定——三态 fail-closed：只有 ``hit`` 亮灯，
+    ``miss`` / ``unavailable``（数据不足）都不亮，绝不把「不知道」显示成「命中」。"""
+    return ((c.get("signals") or {}).get("rsi_deep_oversold") or {}).get(
+        "state"
+    ) == "hit"
+
+
+def _action_names_or_none(cands: list[dict]) -> str:
+    """行动区名单（可买/观察价位）：RD 证据命中的候选名后亮 ⚡RD 灯。
+
+    v0.229（TODO #64，owner 拍板接线方式=门内提醒）：只在**已过线进入行动
+    视野**的候选上亮灯——不动分层、不动技术分、不动 gate 过滤；RD 标注层
+    （signal_labels）保持现状。
+    """
+    return (
+        "、".join(f"{_sig_nm(c)} ⚡RD" if _rd_hit(c) else _sig_nm(c) for c in cands)
+        or "无"
+    )
+
+
 def _signal_overview(lines, is_bear, watch):
     """⭐ 今日信号一览：按四面共振把候选分成可买 / 观察价位 / 待 0AMV 做多。
 
@@ -299,9 +320,20 @@ def _signal_overview(lines, is_bear, watch):
         lines.append("")
     # v0.50（#37 阶段 A）：板块相位（sector_phase.favorable）移出「可买」定义——
     # 可买 = A + 市场/基本面/技术三面共振；「四面共振」降为情境标注列（4面共振列）。
-    lines.append(f"- **可买（A + 市场/基本面/技术三面共振）**：{_names_or_none(_buy)}")
-    lines.append(f"- **观察价位（B + 三面共振）**：{_names_or_none(_obs)}")
+    # v0.229（TODO #64，owner 拍板=门内提醒）：可买/观察价位两档名单内 RD 证据
+    # 命中的候选亮 ⚡RD（仅提示）；待0AMV做多档是等待区不是行动区，不亮灯。
+    lines.append(
+        f"- **可买（A + 市场/基本面/技术三面共振）**：{_action_names_or_none(_buy)}"
+    )
+    lines.append(f"- **观察价位（B + 三面共振）**：{_action_names_or_none(_obs)}")
     lines.append(f"- **待0AMV做多（基本面+技术已共振）**：{_names_or_none(_wait)}")
+    if any(_rd_hit(c) for c in [*_buy, *_obs]):
+        lines.append(
+            "> ⚡RD = RSI 深水区证据命中（R21 跨窗证据：深水 RSI 四档出场压基底 "
+            "+26~+42pp）——**仅提示，不改判定**（分层/技术分/可买清单均未改写）。"
+            "advisory：R21 跨窗显示 deep 配 12% 宽止损最优，口径与 live 现行 "
+            "−7%/−10% 不同，是否联动另行拍板（本轮不启动任何止损联动）。"
+        )
     lines.append("")
 
 

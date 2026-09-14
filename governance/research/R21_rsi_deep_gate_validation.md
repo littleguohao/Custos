@@ -4,7 +4,9 @@
 > （双窗对照：主窗 2024-07~2026-08 + 跨窗 2022-2024，s3000 钉死宇宙，Wilson 区间
 > 与基底不重叠；但 vipdoc 宇宙带幸存者偏差、objective 是排序启发式）　|
 > **状态**：✅ 跨窗通过（j_low_rsi_deep）；⚠️ j_low_rsi_div 主窗证伪、跨窗部分平反；
-> j_low_weekly_resonance 平庸
+> j_low_weekly_resonance 平庸；📌 **live 接线已落地（2026-09-14，v0.229）**：
+> owner 拍板 = 门内提醒（行动区 ⚡RD 亮灯，不改分层/分数/gate），
+> rsi_state 因子 status untested→candidate，止损联动不启动
 > **依赖**：上游：R20（画像发现 rsi_deep 富集——本单元验证它能否交易）R10（止损
 > 机制与种子方案）R4（0AMV 基底）｜判据：R12｜口径：R11（量级不作数）R14（幸存者
 > 偏差）｜可复现性：R13（cell_signature 钉窗口/宇宙）
@@ -46,7 +48,12 @@ j_low 的 margin/期望优势是否跨窗稳定，并筛出与其搭配的出场
 **④ live 含义。** 「RSI深水区 RD」标注、R20 面板、j_low_rsi_deep gate 同一份
 判定（`rsi_state.rsi_regime` 的 `RSI14<25`，钉测逐点一致）。rsi_state 因子
 status 升级（untested→candidate/active）与 1800 接线（分层/提醒如何使用
-RD）的证据已齐——**待 owner 拍板**；接线前它仍只是展示标注。
+RD）的证据已齐——**owner 已拍板（2026-09-14，v0.229，TODO #64 闭环）**：
+① 接线方式 = **门内提醒**——candidate_table ⭐ 今日信号一览的可买/观察价位
+名单内 RD=hit 候选亮 ⚡RD + 图例行（仅提示不改判定，分层/技术分/gate 均未动）；
+② rsi_state status 升 **candidate**（live_use 维持 evidence_only，提醒层不是
+gate/scorer）；③ 止损联动**不启动**（图例行带 advisory：deep 配 12% 宽止损
+最优与 live 现行 −7%/−10% 口径不同，是否联动另行拍板——纯文本提示）。
 
 ---
 

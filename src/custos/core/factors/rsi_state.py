@@ -33,12 +33,19 @@ FACTOR: dict[str, Any] = {
     "id": "rsi_state",
     "name": "RSI 状态因子（H3）",
     "kind": "state",
-    "status": "untested",
-    "evidence": "governance/research/R8_hypothesis_H3_H4_pending.md",
-    "research_ref": ["R8"],  # TODO #73 谱系回填（与 evidence 同源）
-    "note": "R8：已实现未跑；与 J 互补而非替代",
+    # v0.229（TODO #64，owner 拍板）：untested → candidate——R20 画像富集
+    # （rsi_deep 四臂全稳）+ R21 进场 gate 跨窗通过（四档出场压基底
+    # +26~+42pp，Wilson 不重叠）证据在案。
+    "status": "candidate",
+    "evidence": "governance/research/R21_rsi_deep_gate_validation.md",
+    "research_ref": [
+        "R8",
+        "R20",
+        "R21",
+    ],  # TODO #73 谱系回填（R8 起源；R20/R21 晋级证据）
+    "note": "R20 画像 + R21 跨窗验证（深水 RSI 四档出场压基底）；live 接线 = 门内提醒（v0.229），不动分层/分数/gate",
     "min_bars": 30,
-    "live_use": "evidence_only",  # signal_labels 出标签落候选表；该模块头部已声明「标注不是交易依据」
+    "live_use": "evidence_only",  # signal_labels 出标签落候选表；门内提醒是提示层不是 gate/scorer，live_use 不变
     "stage": "release",
 }
 

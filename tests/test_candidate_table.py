@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """candidate_table 渲染测试(重点:基本面牛股候选观察区 + 共振受限重点研究区)。"""
 
+import copy
+
 from custos.pipeline.screening import candidate_table as ct
 
 
@@ -403,3 +405,117 @@ def test_render_table_carries_audit_block(tmp_path, monkeypatch):
     assert "report_id `2026-08-07_candidate_table_" in header
     assert "策略版本" in header and "数据截止" in header
     assert "输入清单" not in header
+
+
+# ---------------------------------------------------------------------------
+# v0.229（TODO #64，owner 拍板接线方式=门内提醒）：RD（RSI 深水区）证据在
+# ⭐ 今日信号一览的可买/观察价位名单内亮 ⚡RD 灯——仅提示，不改判定。
+# ---------------------------------------------------------------------------
+
+
+def _rd_cand(code, name, *, bucket="A", aligned=4, bull=True, tech=55.0, rd="hit"):
+    """RD 门内提醒测试用候选：默认四面共振 A 层（进行动区可买档）。"""
+    c = _cand(code, name, "半导体", bucket, "优", aligned, bull, tech=tech)
+    c["signals"] = {"rsi_deep_oversold": {"state": rd}}
+    return c
+
+
+def _overview_lines(md):
+    sec = md.split("## ⭐ 今日信号一览")[1].split("\n## ")[0]
+    return sec.splitlines()
+
+
+def test_rd_action_zone_light_on_buy_and_observe():
+    """hit 亮灯：可买（A）与观察价位（B）两档名单内 RD=hit 的候选名后带 ⚡RD。"""
+    pool = {
+        "status": "ok",
+        "amv_state": "做多",
+        "candidates": [
+            _rd_cand("600000", "甲", rd="hit"),  # A 可买 + RD → 亮灯
+            _rd_cand("600007", "己", bucket="B", rd="hit"),  # B 观察价位 + RD → 亮灯
+        ],
+    }
+    lines = _overview_lines(ct.render_table(pool, "2026-09-14"))
+    buy_line = next(l for l in lines if "可买（A" in l)
+    obs_line = next(l for l in lines if "观察价位" in l)
+    assert "600000 甲 ⚡RD" in buy_line
+    assert "600007 己 ⚡RD" in obs_line
+
+
+def test_rd_miss_and_unavailable_no_light():
+    """三态 fail-closed：miss 与 unavailable（数据不足）都不亮灯、不出图例行。"""
+    pool = {
+        "status": "ok",
+        "amv_state": "做多",
+        "candidates": [
+            _rd_cand("600000", "甲", rd="miss"),
+            _rd_cand("600007", "己", rd="unavailable"),
+        ],
+    }
+    lines = _overview_lines(ct.render_table(pool, "2026-09-14"))
+    assert not any("⚡RD" in l for l in lines)
+    joined = "\n".join(lines)
+    assert "600000" in joined and "600007" in joined  # 名单成员本身不变
+
+
+def test_rd_no_light_outside_action_zone():
+    """不在行动区的候选即使 RD=hit 也不亮灯（待0AMV做多档/C 池受限区）。"""
+    pool = {
+        "status": "ok",
+        "amv_state": "做多",
+        "candidates": [
+            _rd_cand("600008", "庚", aligned=3, bull=False, rd="hit"),  # → 待0AMV做多
+            _rd_cand("600003", "丁", bucket="C", rd="hit"),  # C 池 → 🔍 受限区
+        ],
+    }
+    lines = _overview_lines(ct.render_table(pool, "2026-09-14"))
+    assert not any("⚡RD" in l for l in lines)
+    wait_line = next(l for l in lines if "待0AMV做多" in l)
+    assert "600008" in wait_line  # 等待区名单照常，只是不亮灯
+    assert not any("600003" in l for l in lines)
+
+
+def test_rd_legend_cites_r21_and_stop_advisory():
+    """图例行：R21 引用 + 止损 advisory（纯文本提示，零行为变化）。"""
+    pool = {
+        "status": "ok",
+        "amv_state": "做多",
+        "candidates": [_rd_cand("600000", "甲", rd="hit")],
+    }
+    lines = _overview_lines(ct.render_table(pool, "2026-09-14"))
+    legend = next(l for l in lines if l.startswith("> ⚡RD"))
+    assert "R21" in legend and "+26~+42pp" in legend
+    assert "仅提示，不改判定" in legend
+    assert "12% 宽止损" in legend and "−7%/−10%" in legend
+    assert "另行拍板" in legend
+
+
+def test_rd_reminder_bitwise_no_change_to_lists_and_buckets():
+    """对拍基线：RD 亮灯 vs 同池 miss，可买名单/分层池/得分逐位不变。
+
+    差异只许是 ⭐ 一览内的 ⚡RD 灯与图例行；「## 得分 Top 5」起（含四个分层池
+    明细表）两段渲染必须逐字节相同。
+    """
+    base = {
+        "status": "ok",
+        "amv_state": "做多",
+        "bucket_counts": {"A": 1, "B": 1},
+        "candidates": [
+            _rd_cand("600000", "甲", rd="hit", tech=61.0),
+            _rd_cand("600007", "己", bucket="B", rd="hit", tech=55.0),
+        ],
+    }
+    miss = copy.deepcopy(base)
+    for c in miss["candidates"]:
+        c["signals"]["rsi_deep_oversold"]["state"] = "miss"
+    md_hit = ct.render_table(base, "2026-09-14")
+    md_miss = ct.render_table(miss, "2026-09-14")
+    # ① ⭐ 一览：剥掉灯与图例行后逐行相同（可买清单成员逐位不变）
+    stripped = [
+        ln.replace(" ⚡RD", "")
+        for ln in _overview_lines(md_hit)
+        if not ln.startswith("> ⚡RD")
+    ]
+    assert stripped == _overview_lines(md_miss)
+    # ② Top5 起的分层池明细：逐字节相同（分层/分数零变化）
+    assert md_hit.split("## 得分 Top 5", 1)[1] == md_miss.split("## 得分 Top 5", 1)[1]
