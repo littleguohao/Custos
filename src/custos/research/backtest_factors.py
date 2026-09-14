@@ -1281,21 +1281,13 @@ def _sc_b1_pullback(
     无切片快速路径（v0.173）：``df=None`` + 显式 ``n``（= i+1）点查询，见
     ``_SLICE_FREE_SCORERS``；两参/三参旧调用面完全不变。
     """
-    # 函数本体在因子层 `factors/b1_pullback_fit.py`；此前从 `enrich_candidates`
-    # 导入只是蹭它顶层的偶然再导出（2026-08-08 订正）。保持 lazy：避免重导入开销。
-    from custos.core.factors.b1_pullback_fit import compute_b1_pullback_fit  # noqa: PLC0415
+    # v0.226（TODO #76③ / TODO #67 裸槽取舍）：本体上移到因子模块
+    # `factors/b1_pullback_fit.score`（逐字一致，含 precomputed/n 双形态点查询），
+    # 此处只剩 lazy 门面（保持原 lazy import 口径，避免重导入开销）；
+    # 两参/三参/四参调用面完全不变（slice-free 的 df=None + 显式 n 同路径）。
+    from custos.core.factors.b1_pullback_fit import score as _s  # noqa: PLC0415
 
-    r = compute_b1_pullback_fit(df, precomputed, n=n)
-    if not r.get("available"):
-        return None
-    return {
-        "score": round(r["score"] / 7 * 100, 1),
-        "suggestion": "可买" if r.get("hit") else "不买",
-        "aux": {"fit_raw": r["score"], "hit": r["hit"]},
-        "components": {
-            k: (1.0 if v else 0.0) for k, v in (r.get("components") or {}).items()
-        },
-    }
+    return _s(df, code, precomputed=precomputed, n=n)
 
 
 def _precompute_b1_pullback_series(df: pd.DataFrame) -> Optional[dict[str, Any]]:
@@ -1443,24 +1435,16 @@ except Exception:  # noqa: BLE001 —— 缺依赖时不阻断其它 scorer
 
 
 def _sc_b1_dual(df: pd.DataFrame, code: str):
-    """双轴组合分:W_STRUCT×长期结构 + W_REVERSAL×短期回调。"""
+    """双轴组合分:W_STRUCT×长期结构 + W_REVERSAL×短期回调。
+
+    v0.226（TODO #76③ / TODO #67 裸槽取舍）：映射本体上移到因子模块
+    ``b1_dual_factor.score``（逐字一致），此处只剩门面。
+    """
     if compute_b1_dual is None:
         return None
-    r = compute_b1_dual(df, code)
-    if not r.get("available"):
-        return None
-    return {
-        "score": r["score"],
-        "suggestion": r["suggestion"],
-        "aux": {
-            "long_structure": r["long_structure"],
-            "short_reversal": r["short_reversal"],
-            "qsx_gt_dks": r["qsx_gt_dks"],
-            "weekly_resonance": r["weekly_resonance"],
-            "score_without_resonance": r["score_without_resonance"],
-        },
-        "components": {"struct": r["long_structure"], "reversal": r["short_reversal"]},
-    }
+    from custos.core.factors.b1_dual_factor import score as _s  # noqa: PLC0415
+
+    return _s(df, code)
 
 
 def _sc_long_structure(df: pd.DataFrame, code: str):

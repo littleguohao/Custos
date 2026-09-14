@@ -336,3 +336,17 @@ def b2_score(r: dict) -> float:
         + (B2_NO_UPPER_SHADOW_PTS if r.get("no_upper_shadow") else 0.0),
         1,
     )
+
+
+def detect(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
+    """规范入口（v0.226，TODO #76③ / TODO #67 裸槽取舍）：B2 系三检测器打包门面。
+
+    返回 {"b2", "bottom_surge", "surge_then_b1"} —— 就是原来三次单独调用的
+    返回值打包（同函数同输入逐位一致；live signal_labels 的三个标签调用面不变，
+    研究侧可直接走打包门面）。
+    """
+    return {
+        "b2": detect_b2(df, code),
+        "bottom_surge": detect_bottom_surge(df, code),
+        "surge_then_b1": detect_surge_then_b1(df, code),
+    }

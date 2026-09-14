@@ -230,3 +230,8 @@ def main_rally_score(
         "hit": r["hit"],
         "detail": r,
     }
+
+
+# v0.226（TODO #76③ / TODO #67 裸槽取舍）：同上，detect_xxx 命名形态即规范名
+# （main_rally_score 是研究侧打分变体，保留原名直调，不做槽）。
+detect = detect_main_rally_start

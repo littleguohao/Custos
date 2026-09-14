@@ -218,3 +218,8 @@ def detect_wave_type(df) -> dict[str, Any]:
         prior_swing,
     )
     return {"wave_type": wave, "available": True, "detail": detail}
+
+
+# v0.226（TODO #76③ / TODO #67 裸槽取舍）：detect_xxx 命名形态即规范名 ——
+# 裸槽用别名填（registry() 按名字拾取 `detect`，同一函数对象，行为零变化）。
+detect = detect_wave_type

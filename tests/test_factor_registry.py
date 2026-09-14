@@ -701,8 +701,8 @@ class TestCharacterizationSnapshot:
     _SNAPSHOTS = {
         "alpha101": "f16d205b43eb",
         "alpha_pvcorr": "effcb178ff26",
-        "b1_dual_factor": "ac99097db6ce",
-        "b1_pullback_fit": "fec88c598f8a",
+        "b1_dual_factor": "2be88ca4242c",  # v0.226 更新（score 规范槽上移接管）
+        "b1_pullback_fit": "c73516b95663",  # v0.226 更新（score 规范槽上移接管）
         "b1_structure": "de5dcaed4b2c",  # v0.223…B4 更新（detect 打包门面接管）
         "b2_surge_factor": "9f3b7bcdc8e1",
         "baseline": "2bd7dd114d5c",
@@ -1091,3 +1091,80 @@ class TestB4CanonicalEntries:
         assert '_vol["volume_sustain"]' in s and '_b1s["liquidity"]' in s
         # 转出通道保留（test_enrich_b1cz 的 ec.* 钉测依赖）
         assert "check_five_day_entry," in s and "check_volume_sustain," in s
+
+
+class TestGroup2SlotChoices:
+    """TODO #76③ / TODO #67 裸槽取舍（detect_xxx/compute_xxx 命名形态）：
+
+    取舍钉测——别名同对象（detect_xxx 即规范名）；打包门面 == 原多次调用；
+    score 上移映射 == 原适配层逐字逻辑。
+    """
+
+    def test_detect_xxx_aliases_same_object(self):
+        from custos.core.factors import (
+            b1_dual_factor,
+            distribution,
+            main_rally_factor,
+            wave_type,
+        )
+
+        assert wave_type.detect is wave_type.detect_wave_type
+        assert distribution.detect is distribution.detect_distribution
+        assert main_rally_factor.detect is main_rally_factor.detect_main_rally_start
+        assert b1_dual_factor.detect is b1_dual_factor.detect_breakout_pullback_b1
+
+    def test_b2_bundle_matches_three_calls(self):
+        from custos.core.factors import b2_surge_factor
+
+        df = _bars()
+        bundle = b2_surge_factor.detect(df, "600000")
+        assert bundle["b2"] == b2_surge_factor.detect_b2(df, "600000")
+        assert bundle["bottom_surge"] == b2_surge_factor.detect_bottom_surge(
+            df, "600000"
+        )
+        assert bundle["surge_then_b1"] == b2_surge_factor.detect_surge_then_b1(
+            df, "600000"
+        )
+
+    def test_b1_pullback_fit_score_matches_moved_mapping(self):
+        from custos.core.factors import b1_pullback_fit
+
+        df = _bars()
+        r = b1_pullback_fit.compute_b1_pullback_fit(df)
+        got = b1_pullback_fit.score(df, "600000")
+        if not r.get("available"):
+            assert got is None
+            return
+        assert got == {
+            "score": round(r["score"] / 7 * 100, 1),
+            "suggestion": "可买" if r.get("hit") else "不买",
+            "aux": {"fit_raw": r["score"], "hit": r["hit"]},
+            "components": {
+                k: (1.0 if v else 0.0) for k, v in (r.get("components") or {}).items()
+            },
+        }
+
+    def test_b1_dual_score_matches_moved_mapping(self):
+        from custos.core.factors import b1_dual_factor
+
+        df = _bars()
+        r = b1_dual_factor.compute_b1_dual(df, "600000")
+        got = b1_dual_factor.score(df, "600000")
+        if not r.get("available"):
+            assert got is None
+            return
+        assert got["score"] == r["score"] and got["suggestion"] == r["suggestion"]
+        assert got["components"] == {
+            "struct": r["long_structure"],
+            "reversal": r["short_reversal"],
+        }
+
+    def test_scorers_delegates_to_factor_scores(self):
+        """backtest 门面委托点名：_sc_b1_dual/_sc_b1_pullback 走因子模块 score。"""
+        from custos.research import backtest_factors as BF
+
+        assert BF.SCORERS["b1_dual"] is BF._sc_b1_dual  # 门面（委托模块 score）
+        src = BF._sc_b1_dual
+        assert "b1_dual_factor import score" in __import__("inspect").getsource(src)
+        src2 = BF._sc_b1_pullback
+        assert "b1_pullback_fit import score" in __import__("inspect").getsource(src2)

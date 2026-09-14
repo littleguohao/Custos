@@ -255,9 +255,13 @@ class TestNoRefork:
         # score() 规范入口，backtest_factors 侧只剩别名注册）。
         # v0.222（TODO #67 B3c）：+ rsi_state（`_sc_rsi_state` 上移为因子模块的
         # score() 规范入口，可买阈值常量化进 RSI_STATE_SCORE_BUY_MIN）。
+        # v0.226（TODO #76③ / TODO #67 裸槽取舍）：+ b1_dual_factor（`_sc_b1_dual`
+        # 上移）与 b1_pullback_fit（`_sc_b1_pullback` 归一化映射上移）。
         "score": {
             "core/factors/s_shape.py",
             "core/factors/rsi_state.py",
+            "core/factors/b1_dual_factor.py",
+            "core/factors/b1_pullback_fit.py",
             "core/factors/_template.py",
             "core/factors/alpha101.py",
             "core/factors/alpha_pvcorr.py",

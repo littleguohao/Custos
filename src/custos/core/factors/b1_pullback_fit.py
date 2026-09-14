@@ -161,3 +161,26 @@ def compute_b1_pullback_fit(df=None, precomputed=None, n=None) -> dict[str, Any]
         }
     except Exception:  # noqa: BLE001 —— 坏数据不中断
         return {"available": False, "score": 0, "max_score": 7, "hit": False}
+
+
+def score(
+    df=None, code: str = "", precomputed=None, n: int | None = None
+) -> dict | None:
+    """SCORERS 规范入口（v0.226，TODO #76③ / TODO #67 裸槽取舍）：0-7 指纹分
+    归一化 0-100。
+
+    口径与原 ``backtest_factors._sc_b1_pullback`` 逐字一致（含 precomputed/n
+    双形态点查询约定 —— evaluate_trades 的逐股预计算旁路）；逻辑从研究侧
+    适配层上移进因子模块。
+    """
+    r = compute_b1_pullback_fit(df, precomputed, n=n)
+    if not r.get("available"):
+        return None
+    return {
+        "score": round(r["score"] / 7 * 100, 1),
+        "suggestion": "可买" if r.get("hit") else "不买",
+        "aux": {"fit_raw": r["score"], "hit": r["hit"]},
+        "components": {
+            k: (1.0 if v else 0.0) for k, v in (r.get("components") or {}).items()
+        },
+    }

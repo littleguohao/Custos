@@ -494,3 +494,7 @@ def confirm_distribution(
         }
     except Exception as exc:  # noqa: BLE001
         return {**out_na, "error": f"{type(exc).__name__}:{str(exc)[:80]}"}
+
+
+# v0.226（TODO #76③ / TODO #67 裸槽取舍）：同上，detect_xxx 命名形态即规范名。
+detect = detect_distribution

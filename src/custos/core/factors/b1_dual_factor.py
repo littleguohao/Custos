@@ -379,3 +379,31 @@ def breakout_pullback_hit(
         and close >= platform_high * ph_tol
         and daily_j < j_threshold
     )
+
+
+def score(df: pd.DataFrame, code: str = "") -> dict | None:
+    """SCORERS 规范入口（v0.226，TODO #76③ / TODO #67 裸槽取舍）：双轴组合分
+    （W_STRUCT×长期结构 + W_REVERSAL×短期回调）。
+
+    映射口径与原 ``backtest_factors._sc_b1_dual`` 逐字一致——逻辑从研究侧
+    适配层上移进因子模块。
+    """
+    r = compute_b1_dual(df, code)
+    if not r.get("available"):
+        return None
+    return {
+        "score": r["score"],
+        "suggestion": r["suggestion"],
+        "aux": {
+            "long_structure": r["long_structure"],
+            "short_reversal": r["short_reversal"],
+            "qsx_gt_dks": r["qsx_gt_dks"],
+            "weekly_resonance": r["weekly_resonance"],
+            "score_without_resonance": r["score_without_resonance"],
+        },
+        "components": {"struct": r["long_structure"], "reversal": r["short_reversal"]},
+    }
+
+
+# 同上：detect_xxx 命名形态即规范名（裸槽别名填）。
+detect = detect_breakout_pullback_b1
