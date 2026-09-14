@@ -5,8 +5,9 @@
 > 有界格上搜）　|
 > **证据等级**：L3−（权重格有界枚举多重比较显式标注：搜索族证据等级封顶 L3−，
 > 同 R30；过线只是「线索」，终审在 pre2019 untouched 段单独终步）　|
-> **状态**：📋 **预注册待跑数（2026-09-14 落档，v0.230 工具已落地）**——判据
-> C1~C5 与窗口/宇宙/出场轴/对照臂已全部写死；裁决驱动
+> **状态**：📋 **预注册待跑数（2026-09-14 落档，v0.230 工具已落地；v0.231
+> 增强：两阶段省钱模式 --two-stage/--quick + V0 对照臂 --v0-arm 实跑）**——
+> 判据 C1~C5 与窗口/宇宙/出场轴/对照臂已全部写死；裁决驱动
 > `research/score_evolution_study.py` + 基因组编译层
 > `research/evolution/score_genome.py` 已实现并钉测；本机无通达信数据，
 > 跑数走附录生产机手册　|
@@ -64,7 +65,8 @@
   backtest_factors --trade-sim --portfolio，cell_signature 复用免费）；
   双窗/灵敏度/随机对照/pre2019 拒跑全部确定性。
 - 钉测：`tests/test_score_genome.py`（33 例）+
-  `tests/test_score_evolution_study.py`（16 例，fake cell_runner 端到端）。
+  `tests/test_score_evolution_study.py`（23 例，fake cell_runner/v0_runner
+  端到端；含两阶段 4 例 + V0 臂 3 例）。
 
 ### 判据（跑数前写死）
 
@@ -101,9 +103,15 @@
   R21/R27 做过，本轮变量只有基因组
 - 对照臂：**等权复合 / 各单腿**（恒在权重格保底集，零额外预算）/
   **随机腿复合**（同腿数同格同待遇）/ **s_shape**（注册表现成参照）/
-  **V0 臂本轮 deferred**（V0=live 技术分由 enrich factor_contrib 重建，
-  非 DSL 可表达，调入 scorer 超 v1 一小时口径——报告标注留待下轮，
-  本轮以 s_shape 参照替代）
+  **V0 臂（v0.231 起实跑，`--v0-arm`）**：V0=live 现行技术分（依赖 enrich
+  compute_metrics 的指数相对强度/周月 MACD 腿，非 DSL 可表达）——走
+  run_cell 之外的独立载体：`evaluate_trades(collect_all)` 同引擎同出场参数
+  出全候选 → 每笔 score 改写为 as-of V0 技术分 → `simulate_portfolio_topn`
+  同函数做 A 层选择 → `summarize_trades`+`objective_of` 同公式出读数；
+  报告 `arms.v0` + `top_genome.vs_v0` 对照块（**不进预注册判据 C1~C5**，
+  判据定义不动）。warmup 注记：V0 评分指标 warmup 限于研究窗口（cell 同款
+  `_load_one_bars`），live 链全历史口径残差如实标注——同窗对比成立，
+  绝对值不与 live 互引
 
 ### 结局判定（跑数后按此机械填）
 
@@ -154,12 +162,48 @@ uv run python -m custos.research score_evolution_study \
   --mining-start 2022-01-01 --mining-end 2024-07-31 \
   --judgment-start 2024-08-01 --judgment-end 2026-09-04 \
   --codes-file artifacts/logs/r34_codes_s3000_seed0.txt \
-  --count 2000 --tag r34_main
+  --count 2000 --v0-arm --tag r34_main
 ```
 
 产物：`artifacts/logs/score_evolution/r34_main/_score_evolution__r34_main.json`
 （stdout 汇总表 = 逐臂 objective/margin/胜率/盈亏比/笔数 + 灵敏度翻转数 +
-随机对照判定 + Δmargin 双窗）。
+随机对照判定 + Δmargin 双窗 + V0 对照块）。
+
+**第 2 步（降本变体，v0.231）· 两阶段省钱模式**：r34_v1 实跑 264 格 × 3.5
+分钟 ≈ 15h 的降本——**建议下轮一律 `--two-stage`**（粗筛宇宙跑全权重格，
+只让 top K 基因装进 s3000 终筛）；试跑档再叠 `--quick`：
+
+```bash
+uv run python -m custos.research score_evolution_study \
+  --legs-file artifacts/logs/evolution/{tag}/trajectory_pool.json \
+  --mining-start 2022-01-01 --mining-end 2024-07-31 \
+  --judgment-start 2024-08-01 --judgment-end 2026-09-04 \
+  --codes-file artifacts/logs/r34_codes_s3000_seed0.txt \
+  --count 2000 --v0-arm --two-stage --coarse-sample 500 --stage1-top-k 8 \
+  --tag r34_main_2s
+```
+
+口径钉死（与单阶段一致才可对照）：阶段 1 = 粗筛宇宙（同 `--universe-seed`
+抽样）× 全权重格 × 全对照臂（含随机臂/V0），按挖掘窗 objective 取 top K
+基因组（**对照臂不占 K 名额**）；阶段 2 = 仅晋级基因组 × 原宇宙终筛，
+**对照臂在终筛宇宙重跑**；灵敏度/随机对照判定/双窗复测都在阶段 2。
+报告 `two_stage` 块留 stage1_survivors/两阶段格数审计痕迹。
+
+成本账（s3000 终筛、粗筛 500 ≈ 1/6 单格成本；灵敏度 4 + 双窗 3 +
+s_shape 1 + V0 1 = 9 格固定终筛开销，两种模式相同；quick = n_random 1 +
+max_combos 24，会同时把 6 腿的 L 从 64 砍到 24）：
+
+| 配置 | 单阶段 | 两阶段（当量） | 两阶段+quick（当量） |
+|---|---:|---:|---:|
+| 2 腿 L=9，R=3 | 45 格 | ≈52（不划算，随机臂跑两遍） | ≈31 |
+| 6 腿 L=64，R=3（r34_v1 口径） | 265 格 | ≈258 | ≈55 |
+
+（当量 = 粗筛格 × 1/6 + 终筛格。）结论：**两阶段的节省只来自基因组格
+（L→K），随机臂是主成本且两阶段各跑一遍**——小格子两阶段反而更贵、
+6 腿档省得有限；真正的降本大头是 `--quick`（随机臂 3→1 + 格子帽
+64→24）。建议迭代期 `--two-stage --quick` 粗筛（6 腿 ≈55 当量 vs 265，
+−79%），**终审/判读前必须满配补跑**（C4 随机臂判据线以满配口径为准，
+quick 只是试跑档）。
 
 **第 3 步 · C1~C4 判定**：按预注册判据机械读 `criteria_readings` 块回填。
 任一不过 ⇒ 结局②/③，**止步**。

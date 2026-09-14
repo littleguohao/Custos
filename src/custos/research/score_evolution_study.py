@@ -137,8 +137,8 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--max-combos",
         type=int,
-        default=64,
-        help="权重格组合数上限（默认 64；截断保含单腿/等权基线）",
+        default=None,
+        help="权重格组合数上限（默认 64；--quick 时 24；显式给值优先；截断保含单腿/等权基线）",
     )
     # ---- 单元格口径 ----
     ap.add_argument(
@@ -203,11 +203,45 @@ def _build_parser() -> argparse.ArgumentParser:
         "--random-seed", type=int, default=DEFAULT_RANDOM_SEED, help="随机臂采样种子"
     )
     ap.add_argument(
-        "--n-random", type=int, default=3, help="随机臂条数（默认 3；同腿数同格同待遇）"
+        "--n-random",
+        type=int,
+        default=None,
+        help="随机臂条数（默认 3，同腿数同格同待遇；--quick 时 1；显式给值优先）",
     )
     ap.add_argument("--sens-arms", type=int, default=4, help="灵敏度扰动臂数（默认 4）")
     ap.add_argument(
         "--sens-pct", type=float, default=0.5, help="灵敏度扰动幅度（默认 0.5 = ±50%%）"
+    )
+    # ---- 两阶段省钱模式（v0.231：生产机 r34_v1 单阶段 264 格 ≈15h 的降本）----
+    ap.add_argument(
+        "--two-stage",
+        action="store_true",
+        help="两阶段省钱模式：阶段1 粗筛宇宙×全权重格×全对照臂取 top K 基因组，"
+        "阶段2 仅 top K × 原宇宙终筛（对照臂终筛宇宙重跑；灵敏度/双窗在阶段2）",
+    )
+    ap.add_argument(
+        "--coarse-sample",
+        type=int,
+        default=500,
+        help="阶段1 粗筛宇宙抽样数（默认 500；同 --universe-seed 抽样，≥宇宙则全量）",
+    )
+    ap.add_argument(
+        "--stage1-top-k",
+        type=int,
+        default=8,
+        help="阶段1 晋级基因组装数（默认 8；对照臂不占名额，只作读数背景）",
+    )
+    ap.add_argument(
+        "--quick",
+        action="store_true",
+        help="试跑档：= --n-random 1 --max-combos 24 的语义糖（显式给值优先；"
+        "终审请补满随机臂）",
+    )
+    ap.add_argument(
+        "--v0-arm",
+        action="store_true",
+        help="启用 V0 对照臂（live 现行技术分；独立载体实跑——run_cell 之外，"
+        "同窗同宇宙同出场档读数口径）",
     )
     # ---- 运行控制 ----
     ap.add_argument(
@@ -449,6 +483,122 @@ def _make_cell_runner(args: Any, codes_file: str, cells_dir: Path) -> CellRunner
 
 
 # ---------------------------------------------------------------------------
+# V0 对照臂（v0.231：独立载体——run_cell 之外，但读数与 cell 同函数同公式）
+# ---------------------------------------------------------------------------
+
+# V0 臂的组合层参数：与 backtest_factors argparse 默认逐字一致
+# （cell 不传这三个旗标 ⇒ 子进程用的就是这组默认）。
+_V0_PORTFOLIO = {"risk_pct": 0.01, "max_concurrent": 5, "max_pos_frac": 0.20}
+
+
+def _make_v0_runner(args: Any, codes: list[str], exit_spec: dict) -> CellRunner:
+    """构造 V0 对照臂执行器（--v0-arm 时启用；生产机专用，测试注入 fake）。
+
+    V0 = live 现行技术分（``score_variants_study.v0_score`` 的同一份判定：
+    ``score_return_study.asof_technical_score`` 的 as-of 技术分，与落盘分逐位
+    一致有钉测）。它**不是** DSL 表达式（依赖 enrich compute_metrics：指数
+    20 日相对强度 + df_long 周/月 MACD 腿），编不进 expr: scorer——所以走
+    run_cell 之外的独立载体，但读数口径与 cell **同函数同公式**：
+
+      ① 交易集：``evaluate_trades(collect_all=True, scorer=baseline(恒可买),
+         entry_gate=j_low, amv_regime, **exit_spec.params, cost_bps, collect_all)``
+         ——与 cell 子进程（--trade-sim --top-n）同引擎同参数；
+      ② A 层选择：每笔候选的 ``score`` 改写为 V0 as-of 技术分后
+         ``simulate_portfolio_topn(top_n=--top-n)``——与 cell 的组合层同函数；
+      ③ 读数：``summarize_trades`` + ``objective_of(DEFAULT_OBJ_WEIGHTS)``
+         ——margin/expectancy_R/ret_over_dd/objective 与 cell 同公式。
+
+    ⚠️ warmup 口径注记：逐股加载走 cell 同款 ``_load_one_bars(count,start,end)``
+    （研究窗口径），V0 评分内部的 MACD/周月腿 warmup 限于窗口内——live 链是
+    全历史（count=100000），残差已如实注记（读数块 notes）。
+    """
+
+    def v0_runner(*, start: str, end: str) -> Optional[dict]:
+        try:
+            from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
+            from custos.research import score_return_study as srs  # noqa: PLC0415
+            from custos.research import strategy_grid as sg  # noqa: PLC0415
+
+            regime = bt.load_amv_regime(since=start)
+            if not regime:
+                print(
+                    "[WARN] V0 臂：0AMV regime 读不到（compass_amv）——本机无数据？",
+                    file=sys.stderr,
+                )
+                return None
+            index_df = (
+                local_tdx_data.get_ohlcv_table(srs.INDEX_CODE, count=100000)
+                .sort_values("date")
+                .reset_index(drop=True)
+            )
+            cands: list[dict[str, Any]] = []
+            for code in codes:
+                df = bt._load_one_bars(code, args.count, start, end)
+                if df is None or not len(df):
+                    continue
+                code_trades = bt.evaluate_trades(
+                    {code: df},
+                    scorer=bt.SCORERS["baseline"],  # 恒可买——进场只由 j_low gate 决定
+                    entry_gate=bt.j_low_gate,
+                    amv_regime=regime,
+                    cost_bps=args.cost_bps,
+                    collect_all=True,  # 全候选（同 cell 的 --top-n>0 口径）
+                    **dict(exit_spec["params"]),
+                )
+                if not code_trades:
+                    continue
+                dates = df["date"].astype(str).str[:10].tolist()
+                date2i = {d: i for i, d in enumerate(dates)}
+                for tr in code_trades:
+                    i = date2i.get(tr["entry_date"])
+                    if i is None:
+                        continue
+                    try:
+                        score, _level, _contrib = srs.asof_technical_score(
+                            df, index_df, i, code
+                        )
+                    except Exception:  # noqa: BLE001
+                        continue  # 单笔评分失败丢该笔（WARN 在 srs 内部已打）
+                    cands.append({**tr, "score": score})
+            if not cands:
+                print("[WARN] V0 臂：0 候选（宇宙/窗口/数据有问题？）", file=sys.stderr)
+                return None
+            tsum = bt.summarize_trades(cands)
+            pf = bt.simulate_portfolio_topn(cands, top_n=args.top_n, **_V0_PORTFOLIO)
+            margin = sg._margin(
+                {"win": tsum.get("win_rate"), "payoff": tsum.get("payoff_ratio")}
+            )
+            ret_dd = sg._ret_over_dd(pf)
+            row = {
+                "margin": margin,
+                "expectancy_R": tsum.get("expectancy_R"),
+                "ret_over_dd": ret_dd,
+            }
+            return {
+                "objective": sg.objective_of(row, sg.DEFAULT_OBJ_WEIGHTS),
+                "margin": margin,
+                "expectancy_R": tsum.get("expectancy_R"),
+                "payoff_ratio": tsum.get("payoff_ratio"),
+                "win_rate": tsum.get("win_rate"),
+                "n": tsum.get("n"),
+                "cell_signature": None,  # 独立载体无 cell_signature（不参与签名复用）
+                "ret_over_dd": ret_dd,
+                "selected_win_rate": pf.get("selected_win_rate"),
+                "selected_expectancy": pf.get("selected_expectancy"),
+                "n_taken": pf.get("n_taken"),
+                "n_candidates": len(cands),
+            }
+        except Exception as exc:  # noqa: BLE001
+            print(
+                f"[WARN] V0 臂失败: {type(exc).__name__}: {exc}（读数缺失留痕）",
+                file=sys.stderr,
+            )
+            return None
+
+    return v0_runner
+
+
+# ---------------------------------------------------------------------------
 # 评估编排
 # ---------------------------------------------------------------------------
 
@@ -496,6 +646,21 @@ def _best(rows: list[dict]) -> Optional[dict]:
     return max(ok, key=lambda r: r["reading"]["objective"])
 
 
+def _top_k_rows(rows: list[dict], k: int) -> list[dict]:
+    """阶段 1 晋级：按挖掘窗 objective 降序取前 k 行（稳定序，并列保格子序）。
+
+    对照臂（等权/单腿/随机/s_shape/V0）**不占 k 的名额**——调用方只把真腿
+    lattice 行传进来；读数缺失的行不晋级（留在阶段 1 报告里作背景）。
+    """
+    ok = [
+        r
+        for r in rows
+        if r.get("reading") and r["reading"].get("objective") is not None
+    ]
+    ok.sort(key=lambda r: r["reading"]["objective"], reverse=True)  # sort 稳定
+    return ok[: max(k, 0)]
+
+
 def _find_by_weights(rows: list[dict], weights: Sequence[float]) -> Optional[dict]:
     wl = [float(x) for x in weights]
     for r in rows:
@@ -504,49 +669,23 @@ def _find_by_weights(rows: list[dict], weights: Sequence[float]) -> Optional[dic
     return None
 
 
-def _run_study(
-    args: Any,
-    legs: list[str],
-    legs_source: str,
-    mining: Window,
-    judgment: Optional[Window],
-    exit_spec: dict,
-    codes: list[str],
+def _eval_random_arms(
     runner: CellRunner,
-) -> Optional[dict]:
-    """评估编排主体；全部格子失败 → None（调用方非零退出不落盘）。"""
-    levels = tuple(float(x) for x in args.lattice_levels)
-    lattice = weight_lattice(len(legs), levels, max_combos=args.max_combos)
-    exit_params = dict(exit_spec["params"])
+    lattice: Sequence[tuple[float, ...]],
+    n_legs: int,
+    args: Any,
+    exit_params: dict,
+    mining: Window,
+) -> list[dict]:
+    """随机对照臂：同腿数随机表达式 × 同权重格同待遇（#71 纪律）。
 
-    mining_rows = _eval_lattice(
-        runner, legs, lattice, args.gate, exit_params, args.rank_window, mining
-    )
-    top = _best(mining_rows)
-    if top is None:
-        print(
-            "[ERR] 全部格子失败或读数缺失（数据源/窗口有问题？）——"
-            "空产物会被误读成「基因组全灭」，拒绝落盘",
-            file=sys.stderr,
-        )
-        return None
-
-    arms_ref = baseline_arms(len(legs))
-    equal_row = _find_by_weights(mining_rows, arms_ref["equal"])
-    single_rows = [
-        (name, _find_by_weights(mining_rows, w))
-        for name, w in arms_ref.items()
-        if name != "equal"
-    ]
-    s_shape_reading = runner(
-        "s_shape", args.gate, exit_params, start=mining.start, end=mining.end
-    )
-
-    # 随机对照臂：同腿数随机表达式 × 同权重格同待遇（#71 纪律）
+    两阶段模式在阶段 1（粗筛宇宙）与阶段 2（终筛宇宙）各跑一次——口径一致
+    才有对照意义；采样 rng 在每批内部重放（random_seed 钉死，批间逐位一致）。
+    """
     rng = random.Random(args.random_seed)
     random_arms: list[dict[str, Any]] = []
     for _ in range(args.n_random):
-        rlegs = [sample_expression(rng) for _ in range(len(legs))]
+        rlegs = [sample_expression(rng) for _ in range(n_legs)]
         rrows = _eval_lattice(
             runner, rlegs, lattice, args.gate, exit_params, args.rank_window, mining
         )
@@ -563,7 +702,11 @@ def _run_study(
                 "cells": rrows,
             }
         )
-    random_best_obj = max(
+    return random_arms
+
+
+def _random_best_obj(random_arms: list[dict]) -> Optional[float]:
+    return max(
         (
             a["best"]["reading"]["objective"]
             for a in random_arms
@@ -571,6 +714,155 @@ def _run_study(
         ),
         default=None,
     )
+
+
+def _run_study(
+    args: Any,
+    legs: list[str],
+    legs_source: str,
+    mining: Window,
+    judgment: Optional[Window],
+    exit_spec: dict,
+    codes: list[str],
+    runner: CellRunner,
+    *,
+    v0_runner: Optional[CellRunner] = None,
+    coarse_runner: Optional[CellRunner] = None,
+    coarse_codes: Optional[list[str]] = None,
+) -> Optional[dict]:
+    """评估编排主体；全部格子失败 → None（调用方非零退出不落盘）。
+
+    两阶段（--two-stage，v0.231）：阶段 1 粗筛宇宙 × 全权重格 × 全对照臂，
+    按挖掘窗 objective 取 top K 基因组（对照臂不占名额，只作读数背景）；
+    阶段 2 仅晋级基因组 × 原宇宙终筛——对照臂（等权/单腿/随机/s_shape/V0）
+    在终筛宇宙**重跑**（口径一致才有对照意义）；灵敏度/随机对照判定/双窗
+    复测都在阶段 2（与单阶段口径一致）。单阶段（默认）行为逐位不变。
+    """
+    levels = tuple(float(x) for x in args.lattice_levels)
+    lattice = weight_lattice(len(legs), levels, max_combos=args.max_combos)
+    exit_params = dict(exit_spec["params"])
+    arms_ref = baseline_arms(len(legs))
+
+    two_stage_block: Optional[dict[str, Any]] = None
+    if args.two_stage:
+        assert coarse_runner is not None and coarse_codes is not None
+        # ---- 阶段 1：粗筛宇宙 × 全权重格 × 全对照臂 ----
+        s1_rows = _eval_lattice(
+            coarse_runner,
+            legs,
+            lattice,
+            args.gate,
+            exit_params,
+            args.rank_window,
+            mining,
+        )
+        survivors = _top_k_rows(s1_rows, args.stage1_top_k)
+        s1_random = _eval_random_arms(
+            coarse_runner, lattice, len(legs), args, exit_params, mining
+        )
+        s1_s_shape = coarse_runner(
+            "s_shape", args.gate, exit_params, start=mining.start, end=mining.end
+        )
+        s1_v0 = v0_runner(start=mining.start, end=mining.end) if v0_runner else None
+        if not survivors:
+            print(
+                "[ERR] 阶段 1 全部格子失败或读数缺失（粗筛宇宙/数据源有问题？）——"
+                "空产物会被误读成「基因组全灭」，拒绝落盘",
+                file=sys.stderr,
+            )
+            return None
+        s1_equal = _find_by_weights(s1_rows, arms_ref["equal"])
+        two_stage_block = {
+            "coarse_n": len(coarse_codes),
+            "coarse_digest": hashlib.sha1(
+                ",".join(coarse_codes).encode("utf-8")
+            ).hexdigest()[:12],
+            "stage1_top_k": args.stage1_top_k,
+            "stage1_cells": len(s1_rows)
+            + sum(a["n_cells"] for a in s1_random)
+            + 1
+            + (1 if v0_runner else 0),
+            "stage1_survivors": [
+                {"weights": r["weights"], "stage1_objective": r["reading"]["objective"]}
+                for r in survivors
+            ],
+            "stage1_rows": s1_rows,
+            "stage1_random": s1_random,
+            "stage1_arms": {
+                "equal_objective": (
+                    s1_equal["reading"].get("objective")
+                    if s1_equal and s1_equal.get("reading")
+                    else None
+                ),
+                "s_shape_objective": (
+                    s1_s_shape.get("objective") if s1_s_shape else None
+                ),
+                "random_best_objective": _random_best_obj(s1_random),
+                "v0_objective": s1_v0.get("objective") if s1_v0 else None,
+            },
+        }
+        # ---- 阶段 2：晋级基因组 ∪ 对照权重（未晋级部分）× 原宇宙终筛 ----
+        survivor_weights = [tuple(r["weights"]) for r in survivors]
+        missing_ctls: list[tuple[float, ...]] = [
+            w for w in arms_ref.values() if w not in survivor_weights
+        ]
+        survivor_rows = _eval_lattice(
+            runner,
+            legs,
+            survivor_weights,
+            args.gate,
+            exit_params,
+            args.rank_window,
+            mining,
+        )
+        ctl_rows = (
+            _eval_lattice(
+                runner,
+                legs,
+                missing_ctls,
+                args.gate,
+                exit_params,
+                args.rank_window,
+                mining,
+            )
+            if missing_ctls
+            else []
+        )
+        mining_rows = survivor_rows + ctl_rows  # 报告序：晋级组在前，对照重跑在后
+        top = _best(survivor_rows)  # top 只从晋级基因组出（对照重跑不占名额）
+        stage2_genome_cells = len(survivor_rows) + len(ctl_rows)
+    else:
+        mining_rows = _eval_lattice(
+            runner, legs, lattice, args.gate, exit_params, args.rank_window, mining
+        )
+        top = _best(mining_rows)
+        stage2_genome_cells = len(mining_rows)
+    if top is None:
+        print(
+            "[ERR] 全部格子失败或读数缺失（数据源/窗口有问题？）——"
+            "空产物会被误读成「基因组全灭」，拒绝落盘",
+            file=sys.stderr,
+        )
+        return None
+
+    equal_row = _find_by_weights(mining_rows, arms_ref["equal"])
+    single_rows = [
+        (name, _find_by_weights(mining_rows, w))
+        for name, w in arms_ref.items()
+        if name != "equal"
+    ]
+    s_shape_reading = runner(
+        "s_shape", args.gate, exit_params, start=mining.start, end=mining.end
+    )
+
+    # 随机对照臂（终筛宇宙；两阶段时 = 阶段 2 重跑）
+    random_arms = _eval_random_arms(
+        runner, lattice, len(legs), args, exit_params, mining
+    )
+    random_best_obj = _random_best_obj(random_arms)
+
+    # V0 对照臂（--v0-arm；两阶段时 = 阶段 2 重跑）
+    v0_reading = v0_runner(start=mining.start, end=mining.end) if v0_runner else None
 
     # 判定窗：top / 等权 / s_shape 三臂独立复测（子进程自行加载判定窗数据）
     judgment_block: Optional[dict[str, Any]] = None
@@ -694,6 +986,44 @@ def _run_study(
         },
     }
 
+    # V0 对照判定读数（不进预注册判据 C1~C5，只作对照块——判据定义不动）
+    vs_v0 = None
+    if v0_reading:
+        v0_obj = v0_reading.get("objective")
+        v0_margin = v0_reading.get("margin")
+        vs_v0 = {
+            "delta_objective": (top_obj - v0_obj if v0_obj is not None else None),
+            "delta_margin": (
+                top_margin - v0_margin
+                if top_margin is not None and v0_margin is not None
+                else None
+            ),
+        }
+
+    if args.v0_arm:
+        v0_block: dict[str, Any] = {
+            "status": "run" if v0_reading else "failed",
+            "vehicle": "evaluate_trades(collect_all) + asof_technical_score "
+            "+ simulate_portfolio_topn（与 cell 同函数同公式；"
+            "scorer 槽位 = V0 live 技术分）",
+            "reading": v0_reading,
+            "notes": [
+                "V0 评分指标 warmup 限于研究窗口（cell 同款 _load_one_bars "
+                "count/start/end）；live 链全历史（count=100000）口径的残差"
+                "如实注记——同窗同宇宙同出场档的对比成立，绝对值不可与 live 互引",
+            ],
+        }
+        if not v0_reading:
+            v0_block["reason"] = (
+                "执行器返回空（regime/指数/个股数据缺失？见 stderr WARN）"
+            )
+    else:
+        v0_block = {
+            "status": "off",
+            "reason": "未启用（--v0-arm 开启）。v0.230 的 deferred 已于 v0.231 "
+            "实现为独立载体实跑；生产机跑数加 --v0-arm",
+        }
+
     return {
         "version": SCHEMA_VERSION,
         "tag": args.tag,
@@ -713,6 +1043,11 @@ def _run_study(
             "n_random": args.n_random,
             "sens_arms": args.sens_arms,
             "sens_pct": args.sens_pct,
+            "two_stage": bool(args.two_stage),
+            "coarse_sample": args.coarse_sample,
+            "stage1_top_k": args.stage1_top_k,
+            "quick": bool(args.quick),
+            "v0_arm": bool(args.v0_arm),
         },
         "windows": {
             "mining": {"start": mining.start, "end": mining.end},
@@ -737,18 +1072,27 @@ def _run_study(
             "single_legs": [{"name": n, "row": r} for n, r in single_rows],
             "s_shape": {"reading": s_shape_reading},
             "random": random_arms,
-            "v0": {
-                "status": "deferred",
-                "reason": "V0=live 技术分由 enrich factor_contrib 重建"
-                "（score_variants_study 口径），非 DSL 可表达；调入 scorer 超 v1 "
-                "一小时口径，留待下轮（本报告以 s_shape 注册表现成参照替代）",
-            },
+            "v0": v0_block,
         },
+        "two_stage": (
+            {
+                **two_stage_block,
+                "stage2_cells": stage2_genome_cells
+                + sum(a["n_cells"] for a in random_arms)
+                + 1
+                + args.sens_arms
+                + (3 if judgment else 0)
+                + (1 if v0_runner else 0),
+            }
+            if two_stage_block is not None
+            else None
+        ),
         "top_genome": {
             "weights": top["weights"],
             "expr": top["expr"],
             "mining": top["reading"],
             "judgment": judgment_block["top"] if judgment_block else None,
+            "vs_v0": vs_v0,
         },
         "judgment": judgment_block,
         "sensitivity": {
@@ -847,14 +1191,46 @@ def _print_summary(rep: dict[str, Any]) -> None:
             f"  Δmargin（top−等权）：挖掘 {_fmt(c2['delta_mining'])}"
             f"｜判定 {_fmt(c2['delta_judgment'])}"
         )
-    print("  V0 臂：deferred（V0 非 DSL 可表达，留待下轮；本轮以 s_shape 参照）")
+    v0 = rep["arms"]["v0"]
+    if v0["status"] == "run":
+        print(_arm_line("V0 对照·挖掘", v0["reading"]))
+        vs = rep["top_genome"].get("vs_v0") or {}
+        print(
+            f"  top vs V0：Δobjective {_fmt(vs.get('delta_objective'))}"
+            f"｜Δmargin {_fmt(vs.get('delta_margin'))}"
+        )
+    elif v0["status"] == "failed":
+        print(f"  V0 对照：⚠️ 执行失败（{v0.get('reason', '')}）")
+    else:
+        print("  V0 臂：off（--v0-arm 开启；v0.231 已实现独立载体实跑）")
+    ts = rep.get("two_stage")
+    if ts:
+        print(
+            f"  两阶段：阶段1 粗筛 {ts['coarse_n']} 只×{ts['stage1_cells']} 格 "
+            f"→ 晋级 {len(ts['stage1_survivors'])} 基因组；"
+            f"阶段2 终筛 ×{ts['stage2_cells']} 格"
+        )
 
 
 def main(
-    argv: Optional[list[str]] = None, *, cell_runner: Optional[CellRunner] = None
+    argv: Optional[list[str]] = None,
+    *,
+    cell_runner: Optional[CellRunner] = None,
+    cell_runner_coarse: Optional[CellRunner] = None,
+    v0_runner: Optional[CellRunner] = None,
 ) -> int:
     ap = _build_parser()
     args = ap.parse_args(argv)
+    # --quick 语义糖：未显式给值的 --n-random/--max-combos 落试跑档（显式给值优先）
+    if args.n_random is None:
+        args.n_random = 1 if args.quick else 3
+    if args.max_combos is None:
+        args.max_combos = 24 if args.quick else 64
+    if args.two_stage:
+        if args.coarse_sample < 1:
+            ap.error("--coarse-sample 必须 >= 1")
+        if args.stage1_top_k < 1:
+            ap.error("--stage1-top-k 必须 >= 1")
     levels_raw = args.lattice_levels
     try:
         args.lattice_levels = tuple(
@@ -880,8 +1256,41 @@ def main(
     runner = cell_runner or _make_cell_runner(
         args, str(codes_path), out_dir / "grid_cells"
     )
+    coarse_runner_final: Optional[CellRunner] = None
+    coarse_codes: Optional[list[str]] = None
+    if args.two_stage:
+        # 阶段 1 粗筛宇宙：从终筛宇宙同 seed 抽样（≥宇宙时退化为全量并注记）
+        coarse_codes = bt.sample_codes(
+            codes, min(args.coarse_sample, len(codes)), seed=args.universe_seed
+        )
+        if len(coarse_codes) == len(codes):
+            print(
+                f"[WARN] 粗筛抽样数 {args.coarse_sample} ≥ 宇宙 {len(codes)} 只——"
+                "阶段 1 退化为全量（两阶段无降本效果，仅供口径验证）",
+                file=sys.stderr,
+            )
+        coarse_path = out_dir / f"_codes_coarse__{tag}.txt"
+        coarse_path.write_text("\n".join(coarse_codes) + "\n", encoding="utf-8")
+        coarse_runner_final = (
+            cell_runner_coarse
+            or cell_runner
+            or _make_cell_runner(args, str(coarse_path), out_dir / "grid_cells_coarse")
+        )
+    v0_runner_final = v0_runner
+    if v0_runner_final is None and args.v0_arm:
+        v0_runner_final = _make_v0_runner(args, codes, exit_spec)
     rep = _run_study(
-        args, legs, legs_source, mining, judgment, exit_spec, codes, runner
+        args,
+        legs,
+        legs_source,
+        mining,
+        judgment,
+        exit_spec,
+        codes,
+        runner,
+        v0_runner=v0_runner_final,
+        coarse_runner=coarse_runner_final,
+        coarse_codes=coarse_codes,
     )
     if rep is None:
         return 2  # 全格失败护栏（不落盘）

@@ -70,8 +70,13 @@ def _argv(tmp_path, *extra, legs=None):
     return argv + list(extra)
 
 
-def _run(tmp_path, fake, *extra, legs=None):
-    rc = ses.main(_argv(tmp_path, *extra, legs=legs), cell_runner=fake)
+def _run(tmp_path, fake, *extra, legs=None, coarse=None, v0=None):
+    rc = ses.main(
+        _argv(tmp_path, *extra, legs=legs),
+        cell_runner=fake,
+        cell_runner_coarse=coarse,
+        v0_runner=v0,
+    )
     assert rc == 0
     out = tmp_path / "t1" / "_score_evolution__t1.json"
     assert out.exists()
@@ -98,12 +103,19 @@ class TestEndToEnd:
             "legs",
             "lattice",
             "arms",
+            "two_stage",
             "top_genome",
             "judgment",
             "sensitivity",
             "random_control",
             "criteria_readings",
         }
+        assert rep["two_stage"] is None  # 默认单阶段（--two-stage 默认关，逐位不变）
+        assert (
+            rep["arms"]["v0"]["status"] == "off"
+        )  # --v0-arm 默认关（v0.231 起可实跑）
+        assert rep["config"]["n_random"] == 2  # 显式给值（--quick 未给）
+        assert rep["config"]["max_combos"] == 64  # 默认（--quick 未给）
         assert set(rep["arms"]) == {
             "lattice",
             "equal_weight",
@@ -371,3 +383,216 @@ class _Ap:
 
 def _ap():
     return _Ap()
+
+
+# ---------------------------------------------------------------------------
+# v0.231：两阶段省钱模式（--two-stage/--coarse-sample/--stage1-top-k/--quick）
+# ---------------------------------------------------------------------------
+
+
+def _expr_of(weights):
+    return compile_composite(LEGS, list(weights))
+
+
+class TestTwoStage:
+    """两阶段：粗筛宇宙与终筛宇宙不同 runner；只有 top K 进终筛；对照臂两阶段都跑。"""
+
+    def _fakes(self):
+        """粗筛 fake：9 格全量读数（top3 = (3,1)/(1,3)/(2,1)）；终筛 fake 记录调用。"""
+        # 2 腿权重格字典序：[(0,1),(1,0),(1,1),(1,2),(1,3),(2,1),(2,3),(3,1),(3,2)]
+        s1_table = {
+            (f"expr:{_expr_of((3.0, 1.0))}", *MINING): _reading(0.9, margin=0.08),
+            (f"expr:{_expr_of((1.0, 3.0))}", *MINING): _reading(0.8, margin=0.06),
+            (f"expr:{_expr_of((2.0, 1.0))}", *MINING): _reading(0.7, margin=0.05),
+            (f"expr:{_expr_of((1.0, 1.0))}", *MINING): _reading(0.3, margin=0.02),
+        }
+        coarse = FakeRunner(table=s1_table, default=_reading(0.05))
+        final = FakeRunner(
+            table={
+                (f"expr:{_expr_of((3.0, 1.0))}", *MINING): _reading(
+                    0.95, margin=0.09, n=1200
+                ),
+                (f"expr:{_expr_of((1.0, 1.0))}", *MINING): _reading(
+                    0.35, margin=0.02, n=800
+                ),
+            },
+            default=_reading(0.5),
+        )
+        return coarse, final
+
+    def test_stage_universes_and_survivors(self, tmp_path):
+        coarse, final = self._fakes()
+        rep = _run(
+            tmp_path,
+            final,
+            "--two-stage",
+            "--coarse-sample",
+            "1",  # 宇宙 2 只 → 粗筛 1 只（与终筛不同宇宙）
+            "--stage1-top-k",
+            "3",
+            coarse=coarse,
+        )
+        ts = rep["two_stage"]
+        assert ts is not None
+        # ① 粗筛与终筛是两个宇宙（不同 runner、不同 digest/只数）
+        assert ts["coarse_n"] == 1 and rep["universe"]["n_codes"] == 2
+        assert ts["coarse_digest"] != rep["universe"]["digest"]
+        # ② 阶段 1：粗筛 runner 跑了全权重格（9）+ 随机臂（2×9）+ s_shape（1）
+        assert len(coarse.calls) == 9 + 2 * 9 + 1
+        assert ts["stage1_cells"] == 9 + 2 * 9 + 1
+        # ③ 只有 top K=3 基因组进终筛（对照臂不占名额：晋级 3 行全来自 lattice）
+        assert [s["weights"] for s in ts["stage1_survivors"]] == [
+            [3.0, 1.0],
+            [1.0, 3.0],
+            [2.0, 1.0],
+        ]
+        assert ts["stage1_survivors"][0]["stage1_objective"] == 0.9
+        # ④ 终筛 runner：晋级 3 + 对照权重重跑（等权+两单腿=3）+ 随机臂 18
+        #    + s_shape 1 + 灵敏度 3（灵敏度/双窗都在阶段 2，与单阶段口径一致）
+        assert len(final.calls) == 3 + 3 + 2 * 9 + 1 + 3
+        # 前 3 个终筛调用就是晋级基因组（报告序：晋级组在前）
+        assert [c[0] for c in final.calls[:3]] == [
+            f"expr:{_expr_of((3.0, 1.0))}",
+            f"expr:{_expr_of((1.0, 3.0))}",
+            f"expr:{_expr_of((2.0, 1.0))}",
+        ]
+        # ⑤ top 基因组按**终筛**读数定（0.95 那组），judgment/灵敏度都在阶段 2
+        assert rep["top_genome"]["weights"] == [3.0, 1.0]
+        assert rep["top_genome"]["mining"]["objective"] == 0.95
+        # ⑥ 灵敏度/随机对照判定用终筛读数（基准=终筛等权 0.35；默认 0.5 ≥ 基准不翻转）
+        assert rep["sensitivity"]["baseline_objective"] == 0.35
+        assert rep["sensitivity"]["flips"] == 0
+        assert rep["random_control"]["random_best_objective"] == 0.5
+        assert rep["random_control"]["verdict"] == "pass"
+        # ⑦ 等权基准在终筛宇宙重跑过（对照臂两阶段都跑的实例）
+        assert rep["arms"]["equal_weight"]["reading"]["objective"] == 0.35
+
+    def test_stage1_all_failed_guard(self, tmp_path):
+        """阶段 1 全灭 → 非零退出不落盘（空产物=误读源）。"""
+        coarse = FakeRunner(default=None)
+        final = FakeRunner()
+        rc = ses.main(
+            _argv(tmp_path, "--two-stage", "--coarse-sample", "1"),
+            cell_runner=final,
+            cell_runner_coarse=coarse,
+        )
+        assert rc == 2
+        assert not (tmp_path / "t1" / "_score_evolution__t1.json").exists()
+
+    def test_coarse_degenerate_note_when_sample_ge_universe(self, tmp_path):
+        """粗筛数 ≥ 宇宙：阶段 1 退化为全量（口径仍正确，WARN 注记）。"""
+        coarse, final = self._fakes()
+        rep = _run(
+            tmp_path,
+            final,
+            "--two-stage",
+            "--coarse-sample",
+            "500",  # ≥ 宇宙 2 只
+            "--stage1-top-k",
+            "3",
+            coarse=coarse,
+        )
+        ts = rep["two_stage"]
+        assert ts["coarse_n"] == 2 == rep["universe"]["n_codes"]
+
+    def test_quick_sugar_and_explicit_override(self, tmp_path):
+        """--quick = --n-random 1 --max-combos 24 的语义糖；显式给值优先。"""
+        argv_quick = [
+            "--legs",
+            ",".join(LEGS),
+            "--mining-start",
+            MINING[0],
+            "--mining-end",
+            MINING[1],
+            "--codes",
+            "600000",
+            "--out-dir",
+            str(tmp_path),
+            "--tag",
+            "t1",
+            "--quick",
+        ]
+        rc = ses.main(argv_quick, cell_runner=FakeRunner())
+        assert rc == 0
+        rep = json.loads(
+            (tmp_path / "t1" / "_score_evolution__t1.json").read_text(encoding="utf-8")
+        )
+        assert rep["config"]["quick"] is True
+        assert rep["config"]["n_random"] == 1  # quick 落 1
+        assert rep["config"]["max_combos"] == 24  # quick 落 24
+        assert len(rep["arms"]["random"]) == 1  # 随机臂真的只有 1 条
+        # 显式给值优先于 quick
+        rep2 = _run(tmp_path, FakeRunner(), "--quick")  # _argv 显式 --n-random 2
+        assert rep2["config"]["n_random"] == 2  # 显式 2 覆盖 quick 的 1
+        assert rep2["config"]["max_combos"] == 24  # 未显式给 ⇒ quick 的 24
+
+
+class TestV0Arm:
+    """V0 对照臂（--v0-arm，fake v0_runner 注入）：实跑读数进 arms.v0 与 vs_v0 对照。"""
+
+    def test_v0_run_readings_and_comparison(self, tmp_path):
+        fake = FakeRunner(
+            table={
+                (f"expr:{EXPR_TOP}", *MINING): _reading(0.9, margin=0.08, n=1234),
+                (f"expr:{EXPR_EQUAL}", *MINING): _reading(0.3, margin=0.02, n=800),
+            },
+            default=_reading(0.5),
+        )
+
+        def v0_fake(*, start, end):
+            assert (start, end) == MINING  # 与基因组同窗
+            return {
+                "objective": 0.7,
+                "margin": 0.05,
+                "expectancy_R": 0.2,
+                "payoff_ratio": 1.8,
+                "win_rate": 0.45,
+                "n": 2000,
+                "cell_signature": None,
+                "selected_win_rate": 0.5,
+                "n_taken": 300,
+                "n_candidates": 5000,
+            }
+
+        rep = _run(tmp_path, fake, "--v0-arm", v0=v0_fake)
+        v0 = rep["arms"]["v0"]
+        assert v0["status"] == "run"
+        assert "vehicle" in v0 and "simulate_portfolio_topn" in v0["vehicle"]
+        assert v0["reading"]["objective"] == 0.7
+        assert v0["reading"]["n_candidates"] == 5000
+        # vs_v0 对照块（不进预注册判据 C1~C5）
+        vs = rep["top_genome"]["vs_v0"]
+        assert vs["delta_objective"] == pytest.approx(0.9 - 0.7)
+        assert vs["delta_margin"] == pytest.approx(0.08 - 0.05)
+
+    def test_v0_failed_reading_none(self, tmp_path):
+        rep = _run(tmp_path, FakeRunner(), "--v0-arm", v0=lambda *, start, end: None)
+        v0 = rep["arms"]["v0"]
+        assert v0["status"] == "failed"
+        assert v0["reading"] is None
+        assert rep["top_genome"]["vs_v0"] is None
+
+    def test_v0_runs_in_both_stages(self, tmp_path):
+        """两阶段下 V0 与对照臂同待遇：阶段 1 粗筛 + 阶段 2 终筛各跑一次。"""
+        calls = []
+
+        def v0_fake(*, start, end):
+            calls.append((start, end))
+            return {"objective": 0.4, "margin": 0.01}
+
+        coarse, final = TestTwoStage()._fakes()
+        rep = _run(
+            tmp_path,
+            final,
+            "--two-stage",
+            "--coarse-sample",
+            "1",
+            "--stage1-top-k",
+            "3",
+            "--v0-arm",
+            coarse=coarse,
+            v0=v0_fake,
+        )
+        assert len(calls) == 2  # 两阶段都跑（粗筛 1 次 + 终筛 1 次）
+        assert rep["arms"]["v0"]["status"] == "run"
+        assert rep["two_stage"]["stage1_arms"]["v0_objective"] == 0.4
