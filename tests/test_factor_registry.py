@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import ast
 import pathlib
 import sys
 
@@ -1289,3 +1290,48 @@ class TestCtxEntryFactors:
             encoding="utf-8"
         )
         assert "输入域是**板块成员文件/成员表**" in s  # 记录在案的形态不适用声明
+
+
+class TestFactorFileIoWhitelist:
+    """因子模块的文件读取必须落在白名单内（characterization 快照 hermetic 防线）。
+
+    mcap 教训（2026-09-13，#76 复测副产 8924634）：因子读 gitignored 本地文件
+    （股本 `share_changes.jsonl`）⇒ 快照跨机漂移、异机必红。当前白名单内模块的
+    快照入口已绕开/钉死文件输入（sector_phase 直接吃序列、sector_mainstream 吃
+    硬编码列表、_shares 由夹具钉死股本）。**新增"读文件的因子"必须同步两步**：
+    先钉死数据源夹具，再把模块名登记进 ``_ALLOWED``。
+    """
+
+    _IO_CALLS = {"open", "read_csv", "read_json", "read_text", "loadtxt", "fromfile"}
+    _ALLOWED = {"sector_phase", "sector_mainstream", "_shares"}
+
+    @staticmethod
+    def _dotted(node: ast.AST) -> str:
+        parts: list[str] = []
+        while isinstance(node, ast.Attribute):
+            parts.append(node.attr)
+            node = node.value
+        if isinstance(node, ast.Name):
+            parts.append(node.id)
+        return ".".join(reversed(parts))
+
+    def test_no_new_file_readers(self):
+        mod_dir = ROOT / "src" / "custos" / "core" / "factors"
+        offenders: dict[str, list[str]] = {}
+        for f in sorted(mod_dir.glob("*.py")):
+            if f.stem in self._ALLOWED or f.stem in ("__init__", "_template"):
+                continue
+            tree = ast.parse(f.read_text(encoding="utf-8"))
+            hits = []
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call):
+                    dotted = self._dotted(node.func)
+                    tail = dotted.rsplit(".", 1)[-1]
+                    if tail in self._IO_CALLS or dotted == "json.loads":
+                        hits.append(f"{dotted}@L{node.lineno}")
+            if hits:
+                offenders[f.stem] = hits
+        assert not offenders, (
+            f"因子模块新增文件读取（快照 hermetic 风险，见 mcap/8924634）：{offenders}"
+            f"——先钉死数据源夹具，再登记进 _ALLOWED"
+        )
