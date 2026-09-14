@@ -152,6 +152,12 @@ TOOLS: dict[str, tuple[str, str]] = {
         "（gcd 排序等价去重）× 加严筛选线 45%/2.6 + 灵敏度零翻转，幸存者 top 3 进"
         " pre2019 终审（--search/--final --from-trades；⚠️ 搜索族证据等级封顶 L3−）",
     ),
+    "score_evolution_study": (
+        "study",
+        "R34 打分基因组裁决（TODO #61 预注册）：腿集合×权重格基因组编译成单条 DSL "
+        "表达式（TS_RANK 归一加权和）复用 strategy_grid 单元格——双窗/±50% 灵敏度/"
+        "随机臂对照全确定性；增量在新轴不在调权（⚠️ pre2019 终审段相交即拒跑）",
+    ),
     "qsx_resonance_study": (
         "study",
         "QSX/DKX 两层过滤三臂：①QSX>DKS 多头 ②「跌线就反弹」共振"

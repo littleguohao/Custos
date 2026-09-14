@@ -230,6 +230,7 @@
 | 2026-09-14 | v0.227 | TODO #76③ 第二批（ctx 输入域规范）：定规范 `detect(df=None, code="", *, ctx=None)`——ctx 缺省 None 不参与，提供按键委托既有函数（逐位一致）。perfect_b1_fit/fundamentals/entry_patterns/j_low_gate/capital_intent 五入口落地；enrich/score_candidates 四处调用点改 ctx 入口；sector_mainstream 板块成员输入域记录在案不设槽；entry_patterns live 保持标量直调（三站子集不同）。零行为变化 | owner 排期开工 | 钉测 +7；快照更新 3 + fixture 驱动；全量绿 |
 | 2026-09-14 | v0.228 | TODO #65 判据预注册落档（纯文档）：新研究单元 R33「跌破 QSX/DKX 未收复=排除」可移植回避条件边际验证——C1~C4 判据、双窗 s3000、统一出场轴三档全部跑数前写死（详见 `governance/research/R33_qsx_exclusion_portable_filter.md` 及附录生产机手册四步）；工程评估：现 qsx gate 是结构过滤不表达排除态，前置最小 qsx_exclusion_free gate 口径写死待 owner 拍板 | R23 v2 收口时指名的下一题 | 生产机跑数后按 C1~C4 回填判定 |
 | 2026-09-14 | v0.229 | TODO #64 拍板落地（owner 接线方式=门内提醒）：rsi_state status untested→candidate（research_ref +R20/R21，evidence 引 R21 页，live_use 维持 evidence_only）；candidate_table ⭐ 今日信号一览的可买/观察价位名单内 RD=hit 候选亮 ⚡RD + 图例行（R21 +26~+42pp 引用 + 12% 宽止损 advisory，仅提示不改判定）；止损联动不启动。分层/技术分/gate 零变化 | R21 证据已齐（结论④），owner 拍板 | 行动区 ⚡RD 提示随 1800 候选表日常输出；止损联动与否另行拍板 |
+| 2026-09-14 | v0.230 | TODO #61 方向拍板试跑：打分系统进化 v1 工具落地 + R34 预注册落档。基因组编译层 `evolution/score_genome.py`（复合打分=单条 DSL 表达式：每腿 TS_RANK 归一加权求和；权重格 gcd 比例等价去重 ≤64 组合保含单腿/等权基线；±pct 灵敏度扰动）；裁决驱动 `score_evolution_study.py`（每基因组=strategy_grid 单元格复用 expr: 轴，双窗/灵敏度/随机臂/pre2019 拒跑全确定性，TOOLS 注册）。R34 判据 C1~C5 写死；V0 臂 deferred（非 DSL 可表达） | owner 拍板试效果（四轮旧轴调权证伪 ⇒ 增量在新轴） | 生产机跑数后按 R34 C1~C4 回填；过线才进 pre2019 终审终步 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 
