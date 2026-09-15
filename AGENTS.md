@@ -32,10 +32,25 @@
 
 ## 2. 架构分层（AST 测试强制：`tests/test_architecture_layers.py`）
 
+```mermaid
+flowchart TB
+    L4["L4 · 五时点 runner + research/ 研究（叶子层；**生产永不 import 研究**，测试钉死）"]
+    L3["L3 · pipeline/ 四 stage 包：screening 选股 · market_timing 择时 · holdings 持仓 · close_review 复盘<br/>⚠️ 同层交叉合规存在：close_review→holdings/market_timing、daily_report→close_review"]
+    L2["L2 · core/factors/ 因子注册表（status×live_use×stage 三维 + 谱系）+ core/trades/ 台账/计划"]
+    L1["L1 · datasource/ 采集（local_tdx 通达信封装 · collect 报价资金流 · news RSS；厂商库只许此层）"]
+    L0["L0 · core/ 基建：paths / contracts / indicators / exit_rules / pipeline_kit / runtime_guards"]
+    L4 --> L3 --> L2 --> L1 --> L0
+```
+
 L0→L4 单向依赖，下层不得依赖上层；contracts.py **零内部依赖**（只许 stdlib）。
 厂商库（mootdx/akshare/qlib/tqcenter…）只许 `datasource/` import（白名单钉测，
 豁免集保持为空）。新增按日期命名的 JSON 产物必须在 `core/contracts.py` 建
 schema 并在生产者落盘前 `require()`（豁免要登记理由），否则测试红。
+
+两个语义注记（测试管不到、图上已标）：① `runtime_guards.py`（L0）读 L3 产物
+形状——"守卫知道被守卫对象的 schema"是刻意折中；② L3 四包不是互相隔离的，
+同层互 import 合法且已发生（见图注）。
+
 
 ## 3. 命令与环境
 
