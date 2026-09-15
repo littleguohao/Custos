@@ -29,6 +29,8 @@ def num_text(value, digits: int = 2, missing: str = "待确认") -> str:
     逐字相同的 `_number()`，**故意没有合并到这里**：那两个文件是不导入
     任何本地模块的纯库，为省 5 行重复而给它们加一层依赖，
     等于用一个新的耦合面换一点去重 —— 不划算。它们各自就地补了同样的有限性判定。
+
+    本 API 当前由测试钉住（src 无生产调用方），属有意保留的公共面。
     """
     number = _finite_or_none(value)
     return missing if number is None else f"{number:.{digits}f}"

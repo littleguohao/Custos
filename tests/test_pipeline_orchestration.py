@@ -889,9 +889,15 @@ class TestManualInputs:
             encoding="utf-8",
         )
         tech = hd / "2026-08-07_holding_technical_summary.json"
+        # 条目形状按真实产物（创建者 batch_holding_technical 落盘前 require 契约，
+        # code + technical_available 恒在）——apply_manual_position_updates 现在
+        # 落盘前也 require 同一契约，钉测夹具必须给合法条目。
         tech.write_text(
             json.dumps(
-                [{"code": "600000", "name": "甲"}, {"code": "600001", "name": "乙"}]
+                [
+                    {"code": "600000", "name": "甲", "technical_available": True},
+                    {"code": "600001", "name": "乙", "technical_available": True},
+                ]
             ),
             encoding="utf-8",
         )

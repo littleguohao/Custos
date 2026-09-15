@@ -188,20 +188,20 @@ class TestHitStatsAndLift:
         assert en["support"].startswith("不足")  # 命中数远低于 MIN_HIT_SUPPORT
 
     def test_top50_split_consistency_with_srs(self):
-        """切半口径与 score_return_study 完全一致（同一函数，钉住防漂移）。"""
+        """切半口径与 score_return_study 完全一致（同一规则两处实现，钉住防漂移）。"""
         trades = self._trades([True, True, True], [False, False])
-        top, bot = srs.split_top_half(trades)
+        top, bot = srs.split_top_frac(trades)
         assert all(t["ret"] > 0 for t in top) and all(t["ret"] < 0 for t in bot)
         assert len(top) == 3 and len(bot) == 2  # 奇数 top 多拿一笔
 
 
 class TestSplitTopFrac:
-    def test_default_matches_split_top_half(self):
-        """frac=0.5 与 score_return_study.split_top_half 逐位一致（旧行为不变）。"""
+    def test_default_matches_srs_split_top_frac(self):
+        """frac=0.5 与 score_return_study.split_top_frac 逐位一致（旧行为不变）。"""
         for n in (0, 1, 2, 5, 10, 11):
             trades = [{"ret": float(r)} for r in range(n)]
             a = wfs.split_top_frac(trades, 0.5)
-            b = srs.split_top_half(trades)
+            b = srs.split_top_frac(trades)
             assert [t["ret"] for t in a[0]] == [t["ret"] for t in b[0]]
             assert [t["ret"] for t in a[1]] == [t["ret"] for t in b[1]]
 

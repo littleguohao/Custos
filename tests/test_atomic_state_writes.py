@@ -92,7 +92,9 @@ class TestAccumulativeStateUsesAtomic:
             "pipeline/market_timing/amv_state.py",
             "0amv_regime_history 是全历史 regime，驱动加仓授权",
         ),
-        ("core/runtime_guards.py", "position_confirmations 是人工确认记录"),
+        # position_confirmations 的 runtime_guards 写方（confirm_position_snapshot）
+        # 已随死代码清理删除（2026-09-15）；该文件现由 incremental_ledger 的
+        # 私有 _write_atomic 落盘（atomically，见 :290）。
         (
             "pipeline/market_timing/merge_incremental_market.py",
             "market_timing_input 被多 stage 读改写",

@@ -235,6 +235,7 @@
 | 2026-09-14 | v0.232 | 新工具 factor_ic_profile（因子 IC 画像，TOOLS 注册）：SCORERS 19 键 + --expr DSL 在统一宇宙/窗口上的截面 RankIC/ICIR 与 horizon 衰减全因子可比表；scorer 逐日分值构建器复用 _SCORER_PRECOMPUTE 旁路（b1_pullback/kdj_j/rsi_state 三键）与 _dual_form_scorer 归一，IC/ICIR/半窗全部复用 ic_eval/operators 地基；定位=研究层分诊镜（**非晋级判据**：晋级走双窗+三轴；读数 L3−） | owner 拍板（回答「还有没有截面信号、值不值得花 trade-sim 预算」） | 生产机跑数后供因子分诊；不作晋级依据（R19/R21/R14） |
 | 2026-09-15 | v0.233 | strategy_grid.cell_out_path 加 Windows 路径预算截短（_MAX_PATH_BUDGET=259）：复合 expr: 长文件名曾在生产机写盘 FileNotFoundError（R34 首批 27 格评估完成后全灭于写结果时刻）；签名留尾、短名逐位不变（cell_signature 复用不破），钉测 1 例。R34 来源一 r34_v1 判结局②（C4 suspect，详见 governance/research/R34_score_system_evolution.md 回填区） | 生产机 MAX_PATH 实测事故 + R34 首批出数 | 长 expr 格写盘零失败；来源二 r34_v2 判后回填 |
 | 2026-09-15 | v0.234 | fix(research)：R34 生产机两本机问题（r34_v1 实据）。①复合编译口径缺口（等权基线 symbol_len 448/depth 13 越界、4 腿以上静默收窄）：编译瘦身（weight=1 省略 1* 前缀，逐位不变）+ 复合专用违规口径 1200/16（简约在腿级、复合级约束=腿数；单因子默认门不动）；②s_shape 臂 exit=2 根因=可买阈值 s_star≥70 与 j_low 超卖池近互斥⇒合法空（空结果护栏，合成复现）；cell_runner 改 capture=True 补现场洞，报告 cell_failures 区分 empty_result/cell_failed | r34_v1 等权基线缺失+s_shape 臂无文本失败 | 后续跑数等权基线读数有效；s_shape 合法空读数缺失即正确 |
+| 2026-09-15 | v0.235 | refactor/fix（审计收尾）：①钱路径写守卫升为**写点级** AST（逐写点判原子写+require，作用域级变量绑定），修 daily_pipeline 两处裸写（apply_manual_market/apply_manual_position_updates 改 write_json_atomic+落盘前 require，内容逐位不变）；②删三处真死代码：confirm_position_snapshot、paths.TDX_VIPDOC、split_top_half（钉测迁 split_top_frac 0.5 同义）；③9 个 tests-only 公共面 docstring 统一标注（另 3 处归并行任务） | 文件级守卫拦不住同文件第二个裸写点（审计实测） | 守卫先红后绿留档；全量测试绿；vulture 三处清零 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

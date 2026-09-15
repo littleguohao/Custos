@@ -192,7 +192,10 @@ def _strip_suffix(code: str) -> str:
 
 
 def _get_market_code(code: str) -> int:
-    """Return mootdx market int: 0=SZ, 1=SH (BJ handled separately via _is_bj_code)."""
+    """Return mootdx market int: 0=SZ, 1=SH (BJ handled separately via _is_bj_code).
+
+    本 API 当前由测试钉住（src 无生产调用方），属有意保留的公共面。
+    """
     return 1 if market_of(code) == "SH" else 0
 
 
@@ -383,7 +386,10 @@ def read_vipdoc_daily(code: str, strict: bool = False) -> pd.DataFrame:
 
 
 def read_e_odata_daily(code: str) -> pd.DataFrame:
-    """Read downloaded CSV cache from E:\\O_DATA (kept for backward compat)."""
+    """Read downloaded CSV cache from E:\\O_DATA (kept for backward compat).
+
+    本 API 当前由测试钉住（src 无生产调用方），属有意保留的公共面。
+    """
     tcode = normalize_code(code)
     path = Path(os.environ.get("TDX_E_ODATA", r"E:\O_DATA")) / f"{tcode}-all-latest.csv"
     if not path.exists():
@@ -615,6 +621,8 @@ def get_snapshots(codes: Iterable[str]) -> dict[str, dict[str, Any]]:
 
     ⚠️ 默认被 `_online_quotes_enabled()` 短路（返回空 dict）——与单只版
     `get_snapshot` 同一道闸，批量版此前漏接了它。
+
+    本 API 当前由测试钉住（src 无生产调用方），属有意保留的公共面。
     """
     if not _online_quotes_enabled():
         return {}
@@ -904,11 +912,13 @@ def list_local_vipdoc_codes(
 
 
 def save_json(path: Path, obj: Any) -> None:
+    """本 API 当前由测试钉住（src 无生产调用方），属有意保留的公共面。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def save_csv(path: Path, df: pd.DataFrame) -> None:
+    """本 API 当前由测试钉住（src 无生产调用方），属有意保留的公共面。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(path, index=False, encoding="utf-8-sig")
 

@@ -15,7 +15,7 @@
 cand 复用 ``score_return_study.asof_candidate``（三层截断同 live 1800 链逐位对齐、
 已对拍；v0.175 起带内容键缓存，同一 (票,信号日) 只算一次 compute_metrics），
 再从 cand 提取 ~29 个布尔命中（True/False/**None=unavailable**，算不出不当 False）。
-按区间切分、区间内按收益切 top50/bottom50（复用 ``score_return_study.split_top_half``），
+按区间切分、区间内按收益切 top50/bottom50（复用 ``score_return_study.split_top_frac``），
 逐因子报：两侧命中率、lift=top/bottom、命中数支撑、前后半窗方向一致性、
 区间级 lift>1 占比。
 
@@ -244,7 +244,7 @@ def split_top_frac(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """按 key 降序切「前 frac 赢家组 / 其余对照组」（n_top=ceil(n×frac)，至少 1）。
 
-    frac=0.5 时与 ``score_return_study.split_top_half`` 逐位一致
+    frac=0.5 时与 ``score_return_study.split_top_frac`` 逐位一致
     （ceil(n/2)==(n+1)//2），旧行为不变；0.10 = 每区间收益前 10% 为赢家组。
     """
     ordered = sorted(trades, key=lambda t: t[key], reverse=True)

@@ -128,21 +128,12 @@ def interval_of(date: str, intervals: list[tuple[str, str]]) -> Optional[int]:
     return None
 
 
-def split_top_half(
-    trades: list[dict[str, Any]], key: str = "ret"
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """按 key 降序排序后切 top-50% / bottom-50%（奇数时 top 多拿一笔：(n+1)//2）。"""
-    ordered = sorted(trades, key=lambda t: t[key], reverse=True)
-    n_top = (len(ordered) + 1) // 2
-    return ordered[:n_top], ordered[n_top:]
-
-
 def split_top_frac(
     trades: list[dict[str, Any]], frac: float = 0.5, key: str = "ret"
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """按 key 降序切「前 frac 赢家组 / 其余对照组」（n_top=ceil(n×frac)，至少 1）。
 
-    frac=0.5 时与 ``split_top_half`` 逐位一致（ceil(n/2)==(n+1)//2）——
+    默认 frac=0.5 即旧的切半口径（ceil(n/2)==(n+1)//2，奇数时 top 多拿一笔）——
     与 winner_factor_study.split_top_frac 同规则（两处各自钉测钉住，防漂移）。
     """
     ordered = sorted(trades, key=lambda t: t[key], reverse=True)

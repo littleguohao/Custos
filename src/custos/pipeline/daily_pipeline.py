@@ -86,7 +86,22 @@ def apply_manual_market(
     dq.setdefault("notes", []).append(
         f"daily_pipeline manual args: macro={macro}, amv_zone={amv_zone}, amv_pct={amv_pct}"
     )
-    path.write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 落盘前校验：本函数只动 macro_policy / amv_0 手工覆写 / data_quality，
+    # 责任范围用 only 划清（其余节由 collector/merge 背责，见 contracts._narrow）。
+    require(
+        "market_timing_input",
+        d,
+        only=(
+            "macro_policy",
+            "amv_0.amv_change_pct",
+            "amv_0.quality",
+            "amv_0.as_of",
+            "amv_0.amv_zone",
+            "data_quality",
+        ),
+    )
+    # 读-改-写的共享文件 ⇒ 原子写
+    write_json_atomic(path, d)
     return {"stage": "apply_manual_market", "ok": True, "path": str(path)}
 
 
@@ -116,10 +131,13 @@ def apply_manual_position_updates(date: str):
         active = [x for x in data if str(x.get("code")) not in closed]
         removed = [x for x in data if str(x.get("code")) in closed]
         if removed:
-            fname.write_text(
-                json.dumps(active, ensure_ascii=False, indent=2, default=str),
-                encoding="utf-8",
-            )
+            if fname.name.endswith("holding_technical_summary.json"):
+                # 契约产物：落盘前校验（本步只删条目、不改其余条目形状，
+                # 整份数组重新过契约——array 类契约无 only 语义，见 contracts.check）
+                require("holding_technical_summary", active)
+            # enriched mapping 是豁免产物（contracts.py 第五批：可选产物）⇒ 不 require；
+            # 两份都是读-改-写的共享文件 ⇒ 原子写
+            write_json_atomic(fname, active)
             archive = fname.with_name(fname.stem + f"_removed_by_pipeline_{date}.json")
             archive.write_text(
                 json.dumps(removed, ensure_ascii=False, indent=2, default=str),

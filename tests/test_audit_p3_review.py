@@ -294,7 +294,7 @@ class TestNoTradeConfirmationSource:
             assert review["facts"]["no_trade_unconfirmed"] == WEEK_DAYS[1:]
 
     def test_snapshot_only_confirmation_is_not_a_no_trade_confirmation(self):
-        """runtime_guards.confirm_position_snapshot 写的条目没有 no_trades 键，不算无交易确认。"""
+        """旧格式持仓快照确认条目（{confirmed_at, note}，无 no_trades 键）不算无交易确认。"""
         with tempfile.TemporaryDirectory() as td:
             base = make_base(Path(td))
             records = no_trade_records(WEEK_DAYS)

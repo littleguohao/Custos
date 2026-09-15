@@ -139,7 +139,6 @@ STRATEGY_REGISTRY_FILE = STRATEGY_DIR / "STRATEGY_REGISTRY.json"
 TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"E:\new_tdx64"))
 
 # TDX sub-paths
-TDX_VIPDOC = TDX_ROOT / "vipdoc"
 TDX_PYPLUGINS = TDX_ROOT / "PYPlugins" / "user"
 
 # Calendar

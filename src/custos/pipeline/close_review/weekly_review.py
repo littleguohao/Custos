@@ -1418,8 +1418,8 @@ def build_weekly_review(base: Path, day: str) -> dict:
     # --- 执行维度 3：无交易确认完备性 ---
     # 唯一有生产者的数据源是 incremental_ledger.py --confirm-no-trades 写的
     # position_confirmations.json：{date: {confirmed_at, no_trades, note}}。
-    # 只有 no_trades is True 才算「无交易确认」；runtime_guards.confirm_position_snapshot
-    # 写的持仓快照确认条目没有该键，不能顶替。
+    # 只有 no_trades is True 才算「无交易确认」；position_confirmations.json 里
+    # 旧格式的持仓快照确认条目（{confirmed_at, note}，无 no_trades 键）不能顶替。
     # 旧实现读 _import_meta.json 的 no_trades_confirmed_dates —— 该键全仓库无任何写入方，
     # 恒为空 ⇒ 每周误报 no_trade_confirmation_missing。
     no_trade_days, unconfirmed = _no_trade_confirmations(

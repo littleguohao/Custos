@@ -8,7 +8,7 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
-from custos.core.paths import CN_TZ, CONTRACTS_DIR, cn_now, write_json_atomic, DATA
+from custos.core.paths import CN_TZ, CONTRACTS_DIR, cn_now, DATA
 from custos.core.paths import read_json as load_json
 from custos.core.contracts import require
 
@@ -191,17 +191,6 @@ def position_freshness(day: str) -> dict[str, Any]:
         "reason": reason,
         "source": str(DATA / "trades" / "_import_meta.json"),
     }
-
-
-def confirm_position_snapshot(day: str, note: str = "user_confirmed") -> dict[str, Any]:
-    path = DATA / "trades" / "position_confirmations.json"
-    records = load_json(path, {})
-    records[day] = {
-        "confirmed_at": cn_now().isoformat(timespec="seconds"),
-        "note": note,
-    }
-    write_json_atomic(path, records)  # 累积状态：人工确认记录，损坏丢历史
-    return records[day]
 
 
 def ledger_trades_on(day: str) -> list[dict[str, str]]:

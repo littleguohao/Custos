@@ -549,6 +549,8 @@ def market_cap(
 
     不直接用事件里的 `market_cap` 字段:那是**采样日**的市值,不是查询日的。
     股本才是应该跨日沿用的量,价格必须用查询日的。
+
+    本 API 当前由测试钉住（src 无生产调用方），属有意保留的公共面。
     """
     sh = shares_as_of(events, day, code=code)
     out = {}

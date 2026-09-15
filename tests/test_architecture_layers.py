@@ -589,128 +589,422 @@ class TestVendorLibsOnlyInDatasource:
 
 
 class TestMarketTimingInputWriters:
-    """⚠️ `{date}_market_timing_input.json` 写方**反向扫描**（2026-08-24 解耦审计）。
+    """⚠️ 钱路径产物写方**反向扫描**（2026-08-24 解耦审计；2026-09-15 升级为**写点级**）。
 
-    该产物是全项目扇出最大的渐进填充文档（19 个消费者），曾被多处裸
-    `write_text` 就地改写（overseas_market_collector / refresh_market_indices /
+    `{date}_market_timing_input.json` 是全项目扇出最大的渐进填充文档（19 个消费者），
+    曾被多处裸 `write_text` 就地改写（overseas_market_collector / refresh_market_indices /
     daily_pipeline._dedupe_data_quality / sync_compass_amv 都是审计抓出来的）。
     正向硬编码清单（`test_money_path_producers_validate_before_write`）只能
     管住**已登记**的生产者 —— 新增一个绕过点它不会红。这里反过来：
 
-      ① 全仓扫出**所有**写该产物的文件，必须 ∈ 下面的登记表（不多不少）；
-      ② 每个写方源码必须同时出现**原子写**（`write_json_atomic`）与
-         **`require("market_timing_input", ...)`**（责任范围用 `only=` 划清）。
+      ① 全仓 AST 扫出**所有**写受守卫产物的文件，必须 ∈ 下面的登记表（不多不少）；
+      ② **写点级**检查：旧版只查「文件里出现过 write_json_atomic + require」就整文件
+         放行 —— daily_pipeline.apply_manual_market 的裸写点就曾靠同文件
+         `_dedupe_data_quality` 的合规写点掩护过去（2026-09-15 审计）。
+         现在对文件里**每一个**写调用单独判定：
+           · **读-改-写**写点（同一函数内先 read 该路径再写）必须 `write_json_atomic`
+             —— `write_text` / `write_json` / `open("w")` 都算违规；
+             创建者整份重写（不先读）不强制原子
+             （paths.write_json_atomic docstring：纯产物别过度原子化）；
+           · 有契约的产物的每个写点，之前必须有**同函数**的
+             `require("<契约名>", ...)`（责任范围用 `only=` 划清）；
+             豁免产物（契约名 None，理由见 contracts.py 第五批）不强制 require。
 
     读方（load/read_text/glob/打印输出清单）不算写方，不得误伤。
     """
 
-    # 登记表：写方 rel → 它负责校验的字段（only 的责任范围，仅注释用途）
-    REGISTERED_WRITERS = {
-        # 创建者：整份文档
-        "pipeline/market_timing/market_timing_collector.py",
-        # 增量合并：breadth/sentiment/turnover/overseas + amv_0 quality 自动确认
-        "pipeline/market_timing/merge_incremental_market.py",
-        # 0AMV regime 状态机：写 amv_0 的 state 字段
-        "pipeline/market_timing/amv_state.py",
-        # 指南针 0AMV 同步：填 amv_0day
-        "datasource/sync_compass_amv.py",
-        # 外围市场采集：写 overseas_market / data_quality
-        "datasource/overseas_market_collector.py",
-        # 盘后指数/成交额兜底刷新：a_share_indices/turnover/breadth/sentiment
-        "datasource/refresh_market_indices.py",
-        # 14:45 盘中快照回填：a_share_indices[*].intraday
-        "datasource/collect/collect_intraday_snapshot.py",
-        # 每日管线收尾：data_quality 去重
-        "pipeline/daily_pipeline.py",
+    # 受守卫产物：文件名 marker → 契约名（None = 豁免产物：不强制 require，
+    # 但读-改-写写点仍强制原子写）
+    GUARDED_PRODUCTS = {
+        "_market_timing_input.json": "market_timing_input",
+        "_holding_technical_summary.json": "holding_technical_summary",
+        # 可选产物，缺失是设计好的路径（contracts.py 第五批豁免块）
+        "_holding_sector_mapping_enriched.json": None,
     }
 
-    # 变量绑定正则：`x = MARKET_DIR / f"{d}_market_timing_input.json"`，
-    # 以及括号折行形式 `x = (\n  Path(...) if ... else DIR / f"..."\n)`。
-    # 顺序敏感：先试不跨行（允许行内括号，如 Path("x")）；
-    # 跨行分支必须锚定 `=` 后紧跟的 `(`，否则会从前一条普通赋值
-    # （`hist = load(...)`) 跨行吞到产物字符串，把真写方吃掉。
-    _ASSIGN_RE = (
-        r"(?m)^\s*(\w+)\s*=\s*"
-        r"(?:[^\n]{0,200}?|\([\s\S]{0,300}?)"
-        r"_market_timing_input\.json"
-    )
+    # 登记表：marker → 写方 rel 集合（每个写方负责校验的字段见各文件 only= 注释）
+    REGISTERED_WRITERS = {
+        "_market_timing_input.json": {
+            # 创建者：整份文档
+            "pipeline/market_timing/market_timing_collector.py",
+            # 增量合并：breadth/sentiment/turnover/overseas + amv_0 quality 自动确认
+            "pipeline/market_timing/merge_incremental_market.py",
+            # 0AMV regime 状态机：写 amv_0 的 state 字段
+            "pipeline/market_timing/amv_state.py",
+            # 指南针 0AMV 同步：填 amv_0day
+            "datasource/sync_compass_amv.py",
+            # 外围市场采集：写 overseas_market / data_quality
+            "datasource/overseas_market_collector.py",
+            # 盘后指数/成交额兜底刷新：a_share_indices/turnover/breadth/sentiment
+            "datasource/refresh_market_indices.py",
+            # 14:45 盘中快照回填：a_share_indices[*].intraday
+            "datasource/collect/collect_intraday_snapshot.py",
+            # 每日管线：人工 macro/0AMV 覆写 + 收尾 data_quality 去重
+            "pipeline/daily_pipeline.py",
+        },
+        "_holding_technical_summary.json": {
+            # 创建者：整份数组（batch_holding_technical.main）
+            "pipeline/holdings/batch_holding_technical.py",
+            # 读-改-写：剔除人工清仓条目（apply_manual_position_updates）
+            "pipeline/daily_pipeline.py",
+        },
+        "_holding_sector_mapping_enriched.json": {
+            # 读-改-写：剔除人工清仓条目（apply_manual_position_updates）
+            "pipeline/daily_pipeline.py",
+        },
+    }
+
+    # ── AST 扫描（取代正则时代：括号折行/别名/for 循环变量都结构化处理）──
 
     @staticmethod
-    def _discover_writers() -> dict[str, str]:
-        """扫出所有写 `{date}_market_timing_input.json` 的文件 → {rel: src}。
+    def _expr_has_marker(node: ast.AST, marker: str) -> bool:
+        """表达式里是否出现产物文件名 marker（普通字符串与 f-string 常量段都算）。"""
+        return any(
+            isinstance(n, ast.Constant)
+            and isinstance(n.value, str)
+            and marker in n.value
+            for n in ast.walk(node)
+        )
 
-        判据：文件里把该产物路径绑给变量（单行或括号折行的赋值都算），
-        且同一变量被用于写调用（`write_text` / `write_json*` / `open("w")`）；
-        或把路径表达式**内联**直接传给 `write_json*`。
+    @staticmethod
+    def _target_names(t: ast.expr) -> set[str]:
+        if isinstance(t, ast.Name):
+            return {t.id}
+        if isinstance(t, (ast.Tuple, ast.List)):
+            return {e.id for e in t.elts if isinstance(e, ast.Name)}
+        return set()
+
+    @classmethod
+    def _bind_into(cls, nodes: ast.AST | list[ast.stmt], marker: str, bound: set[str]):
+        """把「含 marker 的路径表达式」的绑定名并入 bound（就地修改，迭代到不动点）。
+
+        覆盖三种形态（正则时代只认第一种）：
+          · `p = DIR / f"{d}_xxx.json"`（含括号折行 —— AST 不看排版）；
+          · `for f in [DIR / f"...", DIR / f"..."]`（循环变量，
+            apply_manual_position_updates 就是这种）；
+          · `q = p` / `for f in paths` 的别名传播。
         """
-        import re
+        changed = True
+        while changed:
+            changed = False
+            for n in (
+                ast.walk(nodes)
+                if isinstance(nodes, ast.AST)
+                else (x for s in nodes for x in ast.walk(s))
+            ):
+                if isinstance(n, ast.Assign):
+                    rhs, targets = n.value, n.targets
+                elif isinstance(n, ast.For):
+                    rhs, targets = n.iter, [n.target]
+                else:
+                    continue
+                if cls._expr_has_marker(rhs, marker) or (
+                    isinstance(rhs, ast.Name) and rhs.id in bound
+                ):
+                    for t in targets:
+                        new = cls._target_names(t) - bound
+                        if new:
+                            bound |= new
+                            changed = True
 
+    @staticmethod
+    def _module_stmts(tree: ast.Module) -> list[ast.stmt]:
+        """模块顶层语句（不下钻函数/类体 —— 那些是独立作用域）。"""
+        out: list[ast.stmt] = []
+        stack = list(tree.body)
+        while stack:
+            s = stack.pop()
+            if isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            out.append(s)
+            stack.extend(c for c in ast.iter_child_nodes(s) if isinstance(c, ast.stmt))
+        return out
+
+    @classmethod
+    def _scopes(cls, tree: ast.Module, marker: str) -> list[tuple[int, int, set[str]]]:
+        """返回 [(lo, hi, bound)]：模块级 + 每个函数各自的**作用域级**绑定。
+
+        ⚠️ 绑定必须按作用域算，不能全文件并集 —— runtime_guards 实测踩过：
+        `_latest_market_section` 里 `for path in glob("*_market_timing_input.json")`
+        把 `path` 绑成产物路径，同文件另一个函数里写 position_confirmations.json
+        的同名 `path` 就被误判成产物写点。
+        """
+        module_bound: set[str] = set()
+        cls._bind_into(cls._module_stmts(tree), marker, module_bound)
+        scopes = [(0, 1 << 30, module_bound)]
+        fns = [
+            fn
+            for fn in ast.walk(tree)
+            if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))
+        ]
+        for fn in fns:
+            local = set(module_bound)
+            cls._bind_into(fn, marker, local)
+            scopes.append((fn.lineno, fn.end_lineno or fn.lineno, local))
+        # 第二相：形参接力（迭代到不动点，允许多级转手）。
+        # `def step(..., market_path): ... write_json_atomic(market_path, ...)` 里
+        # market_path 是**参数**不是赋值 —— 调用方把绑定了产物路径的变量传进来
+        # （merge_incremental_market.main → _merge_incremental_step 就是这形态）。
+        # 规则：形参名在任一作用域被绑过产物路径 ⇒ 本作用域也视为绑定。
+        # 不污染 runtime_guards 那种同名局部变量：那里 `path` 是**本作用域赋值**的
+        # 非产物路径，不是形参。
+        changed = True
+        while changed:
+            changed = False
+            all_bound = set().union(*(b for _, _, b in scopes))
+            for fn, (lo, hi, bound) in zip(fns, scopes[1:]):
+                a = fn.args
+                params = {p.arg for p in [*a.posonlyargs, *a.args, *a.kwonlyargs]}
+                if a.vararg:
+                    params.add(a.vararg.arg)
+                if a.kwarg:
+                    params.add(a.kwarg.arg)
+                new = (params & all_bound) - bound
+                if new:
+                    bound |= new
+                    changed = True
+        return scopes
+
+    @staticmethod
+    def _innermost_scope(
+        scopes: list[tuple[int, int, set[str]]], lineno: int
+    ) -> tuple[int, int, set[str]]:
+        best: tuple[int, int, set[str]] | None = None
+        for lo, hi, bound in scopes:
+            if lo <= lineno <= hi and (best is None or hi - lo < best[1] - best[0]):
+                best = (lo, hi, bound)
+        return best or (0, 1 << 30, set())
+
+    @classmethod
+    def _write_calls(
+        cls, tree: ast.AST, marker: str, scopes
+    ) -> list[tuple[ast.Call, set[str]]]:
+        """所有「写受守卫产物路径」的调用节点 → (node, 其作用域绑定集)：
+        `p.write_text(...)` / `p.open("w")` / `write_json*(p, ...)` /
+        内联形式 `write_json_atomic(DIR / f"...", ...)`。
+        """
+        out = []
+        for n in ast.walk(tree):
+            if not isinstance(n, ast.Call):
+                continue
+            f = n.func
+            bound = cls._innermost_scope(scopes, n.lineno)[2]
+
+            def on_path(v: ast.expr) -> bool:
+                return (isinstance(v, ast.Name) and v.id in bound) or (
+                    cls._expr_has_marker(v, marker)
+                )
+
+            if isinstance(f, ast.Attribute) and on_path(f.value):
+                if f.attr == "write_text" or (
+                    f.attr == "open"
+                    and n.args
+                    and isinstance(n.args[0], ast.Constant)
+                    and str(n.args[0].value).startswith("w")
+                ):
+                    out.append((n, bound))
+            elif isinstance(f, ast.Name) and f.id in {
+                "write_text",
+                "write_json",
+                "write_json_atomic",
+            }:
+                if n.args and on_path(n.args[0]):
+                    out.append((n, bound))
+        return out
+
+    @classmethod
+    def _violations(cls, src: str, marker: str, contract: str | None) -> list[str]:
+        """对单文件源码跑写点级判据，返回违规描述列表（空 = 合规）。"""
+        tree = ast.parse(src)
+        scopes = cls._scopes(tree, marker)
+        bad = []
+        for call, bound in cls._write_calls(tree, marker, scopes):
+            lo, hi, _ = cls._innermost_scope(scopes, call.lineno)
+            scope_reads = False
+            require_ok = contract is None
+            for n in ast.walk(tree):
+                ln = getattr(n, "lineno", None)
+                if ln is None or not (lo <= ln <= hi) or not isinstance(n, ast.Call):
+                    continue
+                f = n.func
+                if ln < call.lineno:
+                    # 同作用域、写点之前读过该路径 ⇒ 读-改-写
+                    if (
+                        isinstance(f, ast.Attribute)
+                        and f.attr == "read_text"
+                        and isinstance(f.value, ast.Name)
+                        and f.value.id in bound
+                    ) or (
+                        isinstance(f, ast.Name)
+                        and f.id in {"load", "load_json"}
+                        and n.args
+                        and isinstance(n.args[0], ast.Name)
+                        and n.args[0].id in bound
+                    ):
+                        scope_reads = True
+                    # 同作用域、写点之前的 require("<contract>", ...)
+                    if (
+                        contract is not None
+                        and (
+                            (isinstance(f, ast.Name) and f.id == "require")
+                            or (isinstance(f, ast.Attribute) and f.attr == "require")
+                        )
+                        and n.args
+                        and isinstance(n.args[0], ast.Constant)
+                        and n.args[0].value == contract
+                    ):
+                        require_ok = True
+            is_atomic = (
+                isinstance(call.func, ast.Name) and call.func.id == "write_json_atomic"
+            )
+            if scope_reads and not is_atomic:
+                bad.append(f"L{call.lineno}: 读-改-写却未用 write_json_atomic")
+            if not require_ok:
+                bad.append(f"L{call.lineno}: 落盘前未 require({contract!r}, ...)")
+        return bad
+
+    @classmethod
+    def _discover_writers(cls, marker: str) -> dict[str, str]:
+        """扫出所有写该产物的文件 → {rel: src}（AST 判据，见 _write_calls）。"""
         writers: dict[str, str] = {}
         for p in sorted(TOOLS.rglob("*.py")):
             if "__pycache__" in str(p):
                 continue
             src = p.read_text(encoding="utf-8")
-            if "_market_timing_input.json" not in src:
+            if marker not in src:
                 continue
-            vars_ = set(re.findall(TestMarketTimingInputWriters._ASSIGN_RE, src))
-            is_writer = any(
-                re.search(rf"\b{v}\.write_text\(", src)
-                or re.search(rf"\bwrite_json(?:_atomic)?\(\s*{v}\b", src)
-                or re.search(rf"\b{v}\.open\(\s*['\"]w", src)
-                for v in vars_
-            )
-            # 内联形式：write_json_atomic(MARKET_DIR / f"{d}_market_timing_input.json", ...)
-            if re.search(
-                r"write_json(?:_atomic)?\(\s*[\w.]+\s*/\s*f['\"][^'\"]*"
-                r"_market_timing_input\.json",
-                src,
-            ):
-                is_writer = True
-            if is_writer:
+            tree = ast.parse(src)
+            if cls._write_calls(tree, marker, cls._scopes(tree, marker)):
                 writers[p.relative_to(TOOLS).as_posix()] = src
         return writers
 
     def test_all_writers_are_registered(self):
-        found = self._discover_writers()
-        extra = sorted(set(found) - self.REGISTERED_WRITERS)
-        stale = sorted(self.REGISTERED_WRITERS - set(found))
-        assert not extra and not stale, (
-            f"market_timing_input 写方与登记表不符：\n"
-            f"  未登记的新写方（先修成原子写+require 再登记）：{extra}\n"
-            f"  登记表里的沉余项（已不再是写方）：{stale}"
-        )
-
-    def test_every_writer_is_atomic_and_validated(self):
-        import re
-
-        for rel, src in self._discover_writers().items():
-            assert "write_json_atomic(" in src, f"{rel} 未用原子写"
-            assert re.search(r"require\(\s*['\"]market_timing_input['\"]", src), (
-                f"{rel} 落盘前未 require('market_timing_input', ...)"
+        for marker, registered in self.REGISTERED_WRITERS.items():
+            found = set(self._discover_writers(marker))
+            extra = sorted(found - registered)
+            stale = sorted(registered - found)
+            assert not extra and not stale, (
+                f"{marker} 写方与登记表不符：\n"
+                f"  未登记的新写方（先修成原子写+require 再登记）：{extra}\n"
+                f"  登记表里的沉余项（已不再是写方）：{stale}"
             )
 
-    def test_scanner_catches_unregistered_writer(self, tmp_path):
-        """反向验证：一个新的裸写写方必须被抓到（检查器自身不能失效）。"""
-        import re
+    def test_every_write_point_is_atomic_and_validated(self):
+        bad = []
+        for marker, contract in self.GUARDED_PRODUCTS.items():
+            for rel, src in self._discover_writers(marker).items():
+                bad += [f"{rel}:{v}" for v in self._violations(src, marker, contract)]
+        assert not bad, "钱路径产物写点违规：\n  " + "\n  ".join(bad)
 
-        evil = tmp_path / "evil_writer.py"
-        evil.write_text(
+    def test_scanner_catches_unregistered_writer(self):
+        """反向验证：一个新的裸写写方必须被抓到（检查器自身不能失效）。"""
+        src = (
             "from pathlib import Path\n"
             "def f(d):\n"
             '    market_path = Path("x") / f"{d}_market_timing_input.json"\n'
-            '    market_path.write_text("{}", encoding="utf-8")\n',
-            encoding="utf-8",
+            '    market_path.write_text("{}", encoding="utf-8")\n'
         )
-        # 直接对单文件源码跑与 _discover_writers 相同的判据
-        src = evil.read_text(encoding="utf-8")
-        vars_ = set(re.findall(TestMarketTimingInputWriters._ASSIGN_RE, src))
-        assert vars_ == {"market_path"} and re.search(
-            r"\bmarket_path\.write_text\(", src
-        ), "裸写写方漏检，反向扫描失效"
+        tree = ast.parse(src)
+        scopes = self._scopes(tree, "_market_timing_input.json")
+        assert self._write_calls(tree, "_market_timing_input.json", scopes), (
+            "裸写写方漏检，反向扫描失效"
+        )
+
+    def test_bindings_are_scoped_per_function(self):
+        """反向验证：变量绑定按作用域算 —— 别函数的同名变量不得互相污染。
+
+        runtime_guards 实测踩过：`_latest_market_section` 里
+        `for path in glob("*_market_timing_input.json")` 把 `path` 绑成产物路径，
+        同文件另一个函数里写 position_confirmations.json 的同名 `path`
+        险些被判成产物写点（文件级并集绑定的误报）。
+        """
+        src = (
+            "from pathlib import Path\n"
+            "def reader(d):\n"
+            '    for path in Path("x").glob("*_market_timing_input.json"):\n'
+            "        print(path)\n"
+            "def writer(records):\n"
+            '    path = Path("x") / "position_confirmations.json"\n'
+            "    path.write_text('{}', encoding='utf-8')\n"
+        )
+        tree = ast.parse(src)
+        scopes = self._scopes(tree, "_market_timing_input.json")
+        assert self._write_calls(tree, "_market_timing_input.json", scopes) == []
+
+    def test_checker_catches_second_naked_write_point(self):
+        """反向验证②：同文件已有一个合规写点，第二个裸写点仍须被抓。
+
+        这正是 2026-09-15 审计抓到的洞：文件级检查（有一个 write_json_atomic
+        + require 就整文件放行）拦不住同文件的第二个裸写点。
+        """
+        src = (
+            "from pathlib import Path\n"
+            "from custos.core.paths import write_json_atomic\n"
+            "from custos.core.contracts import require\n"
+            "def ok(d):\n"
+            '    p = Path("x") / f"{d}_market_timing_input.json"\n'
+            "    data = p.read_text(encoding='utf-8')\n"
+            "    require('market_timing_input', data)\n"
+            "    write_json_atomic(p, data)\n"
+            "def evil(d):\n"
+            '    q = Path("x") / f"{d}_market_timing_input.json"\n'
+            "    data = q.read_text(encoding='utf-8')\n"
+            "    q.write_text('{}', encoding='utf-8')\n"
+        )
+        bad = self._violations(src, "_market_timing_input.json", "market_timing_input")
+        assert len(bad) == 2 and all("L12" in v for v in bad), bad
+
+    def test_checker_allows_creator_plain_write_with_require(self):
+        """反向验证③：创建者整份重写（不先读）允许普通 write_text，但 require 不可少
+        （paths.write_json_atomic：纯产物别过度原子化；batch_holding_technical 即此形态）。"""
+        src = (
+            "from pathlib import Path\n"
+            "from custos.core.contracts import require\n"
+            "def create(d, summary):\n"
+            '    dest = Path("x") / f"{d}_holding_technical_summary.json"\n'
+            "    require('holding_technical_summary', summary)\n"
+            "    dest.write_text('[]', encoding='utf-8')\n"
+        )
+        assert (
+            self._violations(
+                src, "_holding_technical_summary.json", "holding_technical_summary"
+            )
+            == []
+        )
+
+    def test_exempt_product_needs_no_require_but_stays_atomic(self):
+        """反向验证④：豁免产物（契约名 None）不强制 require，读-改-写仍强制原子写。"""
+        src = (
+            "from pathlib import Path\n"
+            "def f(d):\n"
+            '    p = Path("x") / f"{d}_holding_sector_mapping_enriched.json"\n'
+            "    data = p.read_text(encoding='utf-8')\n"
+            "    p.write_text('[]', encoding='utf-8')\n"
+        )
+        bad = self._violations(src, "_holding_sector_mapping_enriched.json", None)
+        assert len(bad) == 1 and "write_json_atomic" in bad[0], bad
+
+    def test_checker_follows_for_loop_vars(self):
+        """反向验证⑤：`for f in [产物A, 产物B]` 循环变量上的写点必须被抓
+        （apply_manual_position_updates 的形态）。"""
+        src = (
+            "from pathlib import Path\n"
+            "def f(d):\n"
+            "    for fpath in [\n"
+            '        Path("x") / f"{d}_holding_sector_mapping_enriched.json",\n'
+            '        Path("x") / f"{d}_holding_technical_summary.json",\n'
+            "    ]:\n"
+            "        data = fpath.read_text(encoding='utf-8')\n"
+            "        fpath.write_text('[]', encoding='utf-8')\n"
+        )
+        bad = self._violations(
+            src, "_holding_technical_summary.json", "holding_technical_summary"
+        )
+        assert len(bad) == 2, bad  # 未原子写 + 未 require
 
     def test_scanner_ignores_readers(self):
-        """反向验证②：纯读方（load/read_text/glob）不得被判成写方。"""
-        found = self._discover_writers()
+        """反向验证⑥：纯读方（load/read_text/glob）不得被判成写方。"""
+        found = self._discover_writers("_market_timing_input.json")
         for reader in (
             "pipeline/daily_report.py",
             "pipeline/generate_risk_and_sectors.py",

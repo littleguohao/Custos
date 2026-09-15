@@ -381,6 +381,8 @@ def latest_amv(root: Optional[str] = None, truth_path: Optional[str] = None) -> 
     "unverified"），此时把 change_pct 当 confirmed 真值写进台账 → amv_state 切 regime
     → 授予加仓权，整条链路都在用一个可能是别的指数的数字决定仓位。
     调用方拿到 quality != "verified" 时应按人工确认路径处理，而不是自动 confirmed。
+
+    本 API 当前由测试钉住（src 无生产调用方），属有意保留的公共面。
     """
     parsed = parse_amv_daily(since="1900-01-01", root=root, truth_path=truth_path)
     if parsed.get("error") or not parsed["records"]:

@@ -60,21 +60,23 @@ class TestIntervalOf:
         assert srs.interval_of("2025-12-31", ivs) is None
 
 
-class TestSplitTopHalf:
+class TestSplitTopFracDefaultHalf:
+    """split_top_frac 默认 frac=0.5 = 旧 split_top_half 口径（该函数已删并于此）。"""
+
     def test_even_split(self):
         trades = [{"ret": r} for r in (1, 4, 2, 3)]
-        top, bottom = srs.split_top_half(trades)
+        top, bottom = srs.split_top_frac(trades)
         assert [t["ret"] for t in top] == [4, 3]
         assert [t["ret"] for t in bottom] == [2, 1]
 
     def test_odd_split_top_gets_extra(self):
         trades = [{"ret": r} for r in (5, 1, 4, 2, 3)]
-        top, bottom = srs.split_top_half(trades)
-        assert [t["ret"] for t in top] == [5, 4, 3]  # (5+1)//2 = 3
+        top, bottom = srs.split_top_frac(trades)
+        assert [t["ret"] for t in top] == [5, 4, 3]  # ceil(5/2) = 3
         assert [t["ret"] for t in bottom] == [2, 1]
 
     def test_empty(self):
-        assert srs.split_top_half([]) == ([], [])
+        assert srs.split_top_frac([]) == ([], [])
 
 
 class TestBandStats:
@@ -228,13 +230,14 @@ class TestAsofNoLookahead:
 
 class TestSplitTopFrac:
     def test_half_equivalence(self):
-        """frac=0.5 与 split_top_half 逐位一致（旧行为不变）。"""
+        """frac=0.5 复刻旧 split_top_half 口径：n_top=ceil(n/2)==(n+1)//2（旧行为不变）。"""
         for n in (0, 1, 2, 5, 10, 11):
             trades = [{"ret": float(r)} for r in range(n)]
-            a = srs.split_top_frac(trades, 0.5)
-            b = srs.split_top_half(trades)
-            assert [t["ret"] for t in a[0]] == [t["ret"] for t in b[0]]
-            assert [t["ret"] for t in a[1]] == [t["ret"] for t in b[1]]
+            top, bottom = srs.split_top_frac(trades, 0.5)
+            ordered = sorted(trades, key=lambda t: t["ret"], reverse=True)
+            k = (n + 1) // 2
+            assert [t["ret"] for t in top] == [t["ret"] for t in ordered[:k]]
+            assert [t["ret"] for t in bottom] == [t["ret"] for t in ordered[k:]]
 
     def test_top20(self):
         trades = [{"ret": float(r)} for r in range(20)]  # 0..19

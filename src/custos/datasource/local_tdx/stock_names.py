@@ -662,6 +662,8 @@ def resolve_name_map(
 
     返回 (name_map, diag)，diag.st_filter ∈ {ok, stale, unavailable} —— 调用方必须
     消费它：``ok`` 之外都意味着 ST 硬排除不完全可信。
+
+    本 API 当前由测试钉住（src 无生产调用方），属有意保留的公共面。
     """
     diag: dict[str, Any] = {}
     if allow_fetch:
