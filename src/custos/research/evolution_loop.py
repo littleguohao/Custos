@@ -198,7 +198,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=20,
         help="单元格横截面容量（joint/grid-judge 的三轴终审生效；透传 --top-n）。"
         "⚠️ 0 = 旧退化行为：scorer 只写分数不筛选交易集，「因子×止损×止盈」"
-        "退化为「gate×出场」（R32 结论 5 / TODO #70）",
+        "退化为「gate×出场」（R32 结论 5 / #70）",
     )
     ap.add_argument(
         "--plan",
@@ -269,7 +269,7 @@ def _reject_pre2019(args: Any, ap: argparse.ArgumentParser) -> None:
 
 
 def _factor_axis_banner(args: Any) -> None:
-    """TODO #70 退化明示：--cell-top-n ≤0 时因子轴无选择压力（scorer 只写分数
+    """#70 退化明示：--cell-top-n ≤0 时因子轴无选择压力（scorer 只写分数
     不筛选交易集，「因子×止损×止盈」退化为「gate×出场」，R32 结论 5 实锤）。
 
     只在三轴流程（--joint/--grid-judge）开启时打启动横幅；summary 的 config
@@ -280,7 +280,7 @@ def _factor_axis_banner(args: Any) -> None:
     if args.cell_top_n <= 0:
         print(
             "⚠️ --cell-top-n ≤0：因子轴退化（factor_axis_degenerate=true）——"
-            "scorer 不写交易集，单元格实为 gate×出场 口径（R32 结论 5 / TODO #70）",
+            "scorer 不写交易集，单元格实为 gate×出场 口径（R32 结论 5 / #70）",
             flush=True,
         )
     else:
@@ -307,7 +307,7 @@ def _validate_args(args: Any, ap: argparse.ArgumentParser) -> None:
     if args.final_judge:
         _validate_judgment_window(args, ap)
     if (args.joint or args.grid_judge) and args.count <= 0:
-        # R32 / TODO #69：单元格子进程不继承 loader 默认深度——不显式 --count 则
+        # R32 / #69：单元格子进程不继承 loader 默认深度——不显式 --count 则
         # strategy_grid 默认 500 只回溯约两年，早窗口的格子被尾部截断护栏全灭。
         ap.error(
             "--joint/--grid-judge 必须显式 --count 盖住窗口"
@@ -520,7 +520,7 @@ def _make_cell_runner(
             start=start,
             end=end,
             count=args.count or 500,
-            top_n=args.cell_top_n,  # TODO #70：容量约束制造因子轴选择压力
+            top_n=args.cell_top_n,  # #70：容量约束制造因子轴选择压力
             force=False,
             timeout=sg.CELL_TIMEOUT_S,
             universe_digest="",
@@ -611,11 +611,11 @@ def _grid_command(
         codes_path.parent.mkdir(parents=True, exist_ok=True)
         codes_path.write_text("\n".join(codes) + "\n", encoding="utf-8")
         cmd += ["--codes-file", str(codes_path)]
-    # --count 随窗口透传（R32 / TODO #69 缺口）：不转发则子进程默认 500，
+    # --count 随窗口透传（R32 / #69 缺口）：不转发则子进程默认 500，
     # 尾部只回溯约两年，早窗口的判定格会被尾部截断护栏 fail-closed 全灭。
     if args.count > 0:
         cmd += ["--count", str(args.count)]
-    # TODO #70：横截面容量透传（backtest_factors --top-n 语义）——top_n>0 时
+    # #70：横截面容量透传（backtest_factors --top-n 语义）——top_n>0 时
     # scorer 轴才有选择压力；0 是旧退化行为（实 gate×出场），横幅/汇总已明示。
     cmd += ["--top-n", str(args.cell_top_n)]
     if args.grid_exit_grid:
@@ -684,16 +684,16 @@ def _write_summary(res: _RunResult, grid: dict[str, Any]) -> Path:
     counts = _decision_counts(res.pool)
     tag = res.out_dir.name
     config = asdict(res.cfg)
-    # TODO #70 退化明示（config 块与启动横幅同口径）：cell_top_n ≤0 ⇒ scorer
+    # #70 退化明示（config 块与启动横幅同口径）：cell_top_n ≤0 ⇒ scorer
     # 不写交易集，单元格实 gate×出场 —— 读数只能当 gate×出场结论引用。
     config["cell_top_n"] = res.args.cell_top_n
     config["factor_axis_degenerate"] = res.args.cell_top_n <= 0
     if config["factor_axis_degenerate"]:
         config["factor_axis_note"] = (
             "top_n=0：scorer 只写分数不筛选交易集，「因子×止损×止盈」"
-            "退化为「gate×出场」（R32 结论 5 / TODO #70）"
+            "退化为「gate×出场」（R32 结论 5 / #70）"
         )
-    config["plan"] = getattr(res.args, "plan_summary", None)  # TODO #72 规划层汇总
+    config["plan"] = getattr(res.args, "plan_summary", None)  # #72 规划层汇总
     summary = {
         "tag": tag,
         "directions": list(res.args.direction),
@@ -837,7 +837,7 @@ def main(
     ap = _build_parser()
     args = ap.parse_args(argv)
     _validate_args(args, ap)
-    _factor_axis_banner(args)  # TODO #70：三轴流程的容量/退化启动横幅
+    _factor_axis_banner(args)  # #70：三轴流程的容量/退化启动横幅
     prep = _prepare(args, ap, loader)
     if not prep.bars:
         print(

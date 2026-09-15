@@ -544,7 +544,13 @@ def _root_cause_for(runner: CellRunner, scorer: str, window: Window) -> str:
 
 # V0 臂的组合层参数：与 backtest_factors argparse 默认逐字一致
 # （cell 不传这三个旗标 ⇒ 子进程用的就是这组默认）。
-_V0_PORTFOLIO = {"risk_pct": 0.01, "max_concurrent": 5, "max_pos_frac": 0.20}
+# 注解成 dict[str, Any]：不注解 mypy 会把值 join 成 dict[str, float]
+# （5 → 5.0），**展开进 simulate_portfolio_topn 时撞 top_n: int 的形参。
+_V0_PORTFOLIO: dict[str, Any] = {
+    "risk_pct": 0.01,
+    "max_concurrent": 5,
+    "max_pos_frac": 0.20,
+}
 
 
 def _make_v0_runner(args: Any, codes: list[str], exit_spec: dict) -> CellRunner:
