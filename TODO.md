@@ -41,7 +41,7 @@
 
 | # | 事项 | 出处 |
 |---|---|---|
-| 59 | **scorer 双形态剩余机会**：s_shape 系（值得但改造面大）、alpha101/pvcorr/low_vol/momentum/reversal_quality/mcap（中等优先）；b1_dual/long_structure/b2/main_rally 黑盒 detector 不适合。优先级低，随回测批次顺带做 | v0.73 审查（①② 已落地 v0.74；③④ 已否决，见已失效表） |
+| 59 | **scorer 双形态剩余机会**：s_shape 系 **✅ 已落地（2026-09-15，v0.236——s_shape/s_reversal/invert_s_shape 三键接 `_SCORER_PRECOMPUTE`，端到端 evaluate_trades 10.2×）**；alpha101/baseline 本就 O(1) 无需旁路；pvcorr/low_vol/momentum/reversal_quality± 纯 df 时序可接（中等优先，留待下轮——每键需独立逐位等价钉测套）；mcap 需股本外部输入不接；b1_dual/long_structure/b2/main_rally 黑盒 detector 不适合。优先级低，随回测批次顺带做 | v0.73 审查（①② 已落地 v0.74；③④ 已否决，见已失效表）；v0.236 s_shape 系 |
 | 76 | **#67 收敛的遗留验证**（代码侧全部落地）：②生产机回测清单 **✅ 已完成（2026-09-13，v0.224）**——§4.4 口径 7 格 × 双窗 × 修复前/修复后两版全部逐位一致（产物 `artifacts/logs/factor67_verify/{pre,post}/`）；③ctx 输入域规范专项 **✅ 已实施（2026-09-14，v0.226-0.227）**——`detect(df=None, code="", *, ctx=None)` 规范 + 12 模块逐个落地（设计稿 §9 实施清单）。**只剩 ①影子对照**：1800 候选表标注列 ≥10 交易日与旧口径逐位一致（需天数收集；理论上逐位不变，影子是最后保险） | 2026-09-13 #67 迁移完成；2026-09-14 #76③ 落地（设计稿 `governance/strategy/_factors/interface_unification_plan.md` 已回填） |
 
 ## ⚠️ 已失效的行动项（**别照着做**）

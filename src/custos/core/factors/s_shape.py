@@ -48,11 +48,17 @@ from custos.core.b1_thresholds import change_in_range  # noqa: E402  反转K涨�
 from custos.core.indicators import amplitude_pct as amplitude_pct_of  # noqa: E402  振幅唯一实现
 
 _kdj_fn: Callable[..., Any] | None  # 导入失败时退 None（调用点有守卫）
+_kdj_series_fn: Callable[..., Any] | None  # 同上（v0.236 预计算旁路的全序列版）
 
 try:
-    from custos.core.indicators import _infer_price_limit, kdj as _kdj_fn  # noqa: E402
+    from custos.core.indicators import (  # noqa: E402
+        _infer_price_limit,
+        kdj as _kdj_fn,
+    )
+    from custos.core.indicators import kdj_series as _kdj_series_fn  # noqa: E402  # 预计算旁路（v0.236）用
 except Exception:  # noqa: BLE001 —— 导入失败时用保守默认涨跌幅
     _kdj_fn = None
+    _kdj_series_fn = None  # type: ignore[assignment]  # 旁路守卫同 _kdj_fn
 
     def _infer_price_limit(code: str, df) -> int:  # type: ignore
         """`technical_monitor` 导入失败时的退路：只按前缀、无数据自纠。
@@ -600,14 +606,36 @@ def compute_s_reversal(df, code: str = "") -> dict[str, Any]:
         }
 
 
-def score(df: pd.DataFrame, code: str = "") -> Optional[dict]:
+def score(
+    df: pd.DataFrame, code: str = "", precomputed: Optional[dict] = None
+) -> Optional[dict]:
     """SCORERS 规范入口（v0.218…B2，TODO #67）：横截面排序分 = s_star。
 
     映射口径与原 ``backtest_factors._sc_s_shape`` 逐字一致（score=s_star、
     suggestion/aux 同字段、components 取各腿 points）——逻辑从研究侧适配层
     上移进因子模块，backtest_factors 侧只剩注册。行为零变化（钉测：
     tests/test_factor_registry.py::TestCanonicalEntryB2）。
+
+    ``precomputed``（v0.236）= ``score_series`` 的逐位置序列（evaluate_trades
+    预计算旁路，只对从第 0 根开始的前缀切片有效；两路逐位一致——钉测
+    tests/test_s_shape_precompute.py 全位置对拍 + evaluate_trades 端到端）。
     """
+    if precomputed is not None:
+        r = s_star_from_series(precomputed, df, code)
+        if r is None or not r.get("available"):
+            return None
+        comps = dict(r["components_points"])
+        comps["event_risk"] = 0.0  # 恒中性占位（原 components 的同名 points）
+        return {
+            "score": r["s_star"],
+            "suggestion": r["suggestion"],
+            "aux": {
+                "s_shape": r["s_shape"],
+                "delta": r["delta"],
+                "penalty": r["penalty"],
+            },
+            "components": comps,
+        }
     r = compute_s_shape(df, code)
     if not r.get("available"):
         return None
@@ -619,3 +647,531 @@ def score(df: pd.DataFrame, code: str = "") -> Optional[dict]:
             k: (v or {}).get("points") for k, v in (r.get("components") or {}).items()
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# 预计算旁路（v0.236，TODO #59 性能项：s_shape 家族三键的 O(n²)→O(n)）
+# ---------------------------------------------------------------------------
+
+#: score()/s_reversal/invert 三键共享一份逐位置序列（两家族共用同一批数组与
+#: KDJ 序列——j 序列一次计算两家复用）。逐位置值全部是 NaN/None 安全的：
+#: 前缀长度不足 ⇒ 该位置 NaN（= 逐切片路径的 available=False ⇒ scorer None）。
+_SS_LEGS = (
+    "compression",
+    "pivot",
+    "volume",
+    "pocket_pivot",
+    "overhead_supply",
+    "ma_structure",
+)
+
+
+def _series_arrays(df: pd.DataFrame) -> Optional[dict[str, Any]]:
+    """预提取数组束（每股一次）：OHLCV + vcp 振幅序列 + |chg| 序列 + KDJ-J 序列。
+
+    全部在完整 df 上一次性计算（KDJ 递归从第 0 根 ⇒ 前缀末点 ≡ 全序列同点）；
+    异常/缺依赖 → None（调用方回退逐切片旧路径，行为与旧版逐位一致）。
+    """
+    try:
+        close, high, low, vol, open_ = _arrays(df)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            # ⚠️ 分母是当日收盘、与 indicators.amplitude_pct 的前收口**刻意不同**——
+            #    本量只是 VCP 压缩度 recent/prior 比值的中间量（compute_vcp 同口径，
+            #    见 compute_vcp 的口径注释），不是「当日振幅」指标。
+            rng = (high - low) / np.where(np.equal(close, 0.0), np.nan, close)  # vcp 用
+            prev_close = np.concatenate(([np.nan], close[:-1]))
+            abs_chg = np.abs(close / prev_close - 1.0) * 100.0  # 首根 NaN（penalty 用）
+        j_arr: Optional[np.ndarray] = None
+        if _kdj_series_fn is not None:  # 与 _kdj_fn 同一块 try 导入（同生共死）
+            j_arr = _kdj_series_fn(df, fill_na=50.0)[2].to_numpy(dtype=float)
+        return {
+            "close": close,
+            "high": high,
+            "low": low,
+            "vol": vol,
+            "open": open_,
+            "rng": rng,
+            "abs_chg": abs_chg,
+            "j": j_arr,
+        }
+    except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+        # 旁路契约：异常 → None 回退旧路径（_prepare_stock 调用点不捕异常）
+        return None
+
+
+# ---- s_shape 六腿 + Δ 催化的逐位置版（各腿独立 helper 控 locals；
+#      窗口元素/顺序/归约函数与上方 compute_* 逐一相同 ⇒ 逐位一致）----
+
+
+def _vcp_at(i: int, a: dict[str, Any]) -> float:
+    """compute_vcp 的第 i 点（nn = i+1 < 40 → 0.0，含守卫同原实现）。"""
+    nn = i + 1
+    if nn < 2 * VCP_LEG:
+        return 0.0
+    rng, vol = a["rng"], a["vol"]
+    recent = float(np.nanmean(rng[i - VCP_LEG + 1 : i + 1]))
+    prior = float(np.nanmean(rng[i - 2 * VCP_LEG + 1 : i - VCP_LEG + 1]))
+    range_ratio = (recent / prior) if prior else None
+    rv = float(vol[i - VCP_LEG + 1 : i + 1].mean())
+    pv = float(vol[i - 2 * VCP_LEG + 1 : i - VCP_LEG + 1].mean())
+    vol_ratio = (rv / pv) if pv else None
+    pts = 0.0
+    if range_ratio is not None:
+        pts += (
+            12.0
+            if range_ratio <= VCP_RANGE_STRONG
+            else (7.0 if range_ratio <= VCP_RANGE_MILD else 0.0)
+        )
+    if vol_ratio is not None:
+        pts += (
+            8.0
+            if vol_ratio <= VCP_VOL_STRONG
+            else (4.0 if vol_ratio <= VCP_VOL_MILD else 0.0)
+        )
+    return round(min(pts, 20.0), 1)
+
+
+def _pivot_at(i: int, a: dict[str, Any]) -> float:
+    """compute_pivot 的第 i 点（nn < 22 → 0.0）。"""
+    nn = i + 1
+    if nn < PIVOT_BASE_WIN + 2:
+        return 0.0
+    high, close = a["high"], a["close"]
+    pivot = float(high[i - PIVOT_BASE_WIN : i].max())
+    c = float(close[i])
+    if not pivot:
+        return 0.0
+    if c >= pivot:
+        gain = (c / pivot - 1) * 100
+        pts = 15.0 if gain <= PIVOT_BREAK_PCT else 12.0
+    else:
+        dist = (pivot / c - 1) * 100
+        pts = (
+            12.0 if dist <= PIVOT_NEAR_PCT else (6.0 if dist <= PIVOT_MID_PCT else 0.0)
+        )
+    return round(pts, 1)
+
+
+def _vol_health_at(i: int, a: dict[str, Any]) -> float:
+    """compute_volume_health 的第 i 点（nn < 62 → 0.0）。"""
+    nn = i + 1
+    if nn < 62:
+        return 0.0
+    vol = a["vol"]
+    ma20 = float(vol[i - 19 : i + 1].mean())
+    ma60 = float(vol[i - 59 : i + 1].mean())
+    ma20_prev = float(vol[i - 24 : i - 4].mean())
+    today = float(vol[i])
+    pts = 0.0
+    if ma20:
+        pts += (
+            8.0 if today >= ma20 * VOL_SURGE_RATIO else (4.0 if today >= ma20 else 0.0)
+        )
+    if ma60 and ma20 >= ma60:
+        pts += 6.0
+    if ma20_prev and ma20 > ma20_prev:
+        pts += 6.0
+    return round(min(pts, 20.0), 1)
+
+
+def _pocket_at(i: int, a: dict[str, Any]) -> float:
+    """check_pocket_pivot 的第 i 点（nn < 13 → 0.0；命中与否只影响 points）。"""
+    nn = i + 1
+    if nn < POCKET_LOOKBACK + 3:
+        return 0.0
+    close, vol = a["close"], a["vol"]
+    for t in range(nn - POCKET_RECENT, nn):
+        if t < POCKET_LOOKBACK + 1 or t < 10:
+            continue
+        down_vols = [
+            vol[k] for k in range(t - POCKET_LOOKBACK, t) if close[k] < close[k - 1]
+        ]
+        max_down = max(down_vols) if down_vols else 0.0
+        ma10_t = float(close[t - 9 : t + 1].mean())
+        if (
+            close[t] > close[t - 1]
+            and max_down
+            and vol[t] > max_down
+            and close[t] >= ma10_t
+        ):
+            return 15.0
+    return 0.0
+
+
+def _overhead_at(i: int, a: dict[str, Any]) -> float:
+    """compute_overhead_supply 的第 i 点（nn < 60 → 0.0）。"""
+    nn = i + 1
+    if nn < OVERHEAD_WIN:
+        return 0.0
+    close, high, low, vol = a["close"], a["high"], a["low"], a["vol"]
+    c = float(close[i])
+    tp = (
+        high[i - OVERHEAD_WIN + 1 : i + 1]
+        + low[i - OVERHEAD_WIN + 1 : i + 1]
+        + close[i - OVERHEAD_WIN + 1 : i + 1]
+    ) / 3
+    seg_v = vol[i - OVERHEAD_WIN + 1 : i + 1]
+    total = float(seg_v.sum())
+    above = float(seg_v[tp > c].sum()) if total else 0.0
+    frac = (above / total) if total else 1.0
+    return round(10.0 * (1 - frac), 1)
+
+
+def _ma_struct_at(i: int, a: dict[str, Any]) -> float:
+    """compute_ma_structure 的第 i 点（nn < 52 → 0.0）。"""
+    nn = i + 1
+    if nn < MA_LONG + 2:
+        return 0.0
+    close, low = a["close"], a["low"]
+    ma_s = float(close[i - MA_SHORT + 1 : i + 1].mean())
+    ma_m = float(close[i - MA_MID + 1 : i + 1].mean())
+    ma_l = float(close[i - MA_LONG + 1 : i + 1].mean())
+    c = float(close[i])
+    bull = ma_s > ma_m > ma_l and c >= ma_s
+    higher_low = float(low[i - 9 : i + 1].min()) >= float(low[i - 19 : i - 9].min())
+    return round((7.0 if bull else 0.0) + (3.0 if higher_low else 0.0), 1)
+
+
+def _delta_at(i: int, a: dict[str, Any]) -> float:
+    """compute_delta_catalyst 的第 i 点（nn < 3 → 0.0）。"""
+    nn = i + 1
+    if nn < 3:
+        return 0.0
+    close, high, low, open_ = a["close"], a["high"], a["low"], a["open"]
+    rng_ = float(high[i] - low[i])
+    closing_strength = (float(close[i] - low[i]) / rng_) if rng_ else 0.0
+    chg = (close[i] / close[i - 1] - 1) * 100 if close[i - 1] else 0.0
+    prev_bear = close[i - 1] < open_[i - 1]
+    engulf = bool(close[i] > open_[i] and prev_bear and close[i] >= open_[i - 1])
+    low20 = float(low[i - 19 : i + 1].min()) if nn >= 20 else float(low[: i + 1].min())
+    at_low = bool(low20 and close[i] <= low20 * (1 + DELTA_LOW_POS_PCT / 100))
+    pts = closing_strength * 5.0
+    if chg > 0:
+        pts += 2.0
+    if engulf and at_low:
+        pts += 3.0
+    return round(min(pts, 10.0), 1)
+
+
+def _s_shape_aggregate_at(i: int, a: dict[str, Any], out: dict[str, Any]) -> None:
+    """s_shape 家族第 i 点：六腿 + Δ + 聚合分（compute_s_shape 同序汇总）。"""
+    nn = i + 1
+    out["legs"]["compression"][i] = _vcp_at(i, a)
+    out["legs"]["pivot"][i] = _pivot_at(i, a)
+    out["legs"]["volume"][i] = _vol_health_at(i, a)
+    out["legs"]["pocket_pivot"][i] = _pocket_at(i, a)
+    out["legs"]["overhead_supply"][i] = _overhead_at(i, a)
+    out["legs"]["ma_structure"][i] = _ma_struct_at(i, a)
+    out["delta"][i] = _delta_at(i, a)
+    if nn >= SSHAPE_MIN_BARS:
+        comp_sum = (
+            out["legs"]["compression"][i]
+            + out["legs"]["pivot"][i]
+            + out["legs"]["volume"][i]
+            + out["legs"]["pocket_pivot"][i]
+            + out["legs"]["overhead_supply"][i]
+            + out["legs"]["ma_structure"][i]
+            + 0.0  # event_risk 恒 0（原实现的恒中性占位）
+        )
+        out["s_shape"][i] = round(min(100.0, comp_sum), 1)
+    # 不足 60 根：留 NaN（= 逐切片路径的 available=False）
+    # P 惩罚腿**不在序列里**：它依赖 code（涨跌幅制度前缀 + 数据自纠），而预计算
+    # 的调用面只有 df——penalty 在点查询时由 ``penalty_from_series`` 在预存数组上
+    # 复算（O(1)），s_star 的最终 clamp 也在点查询做。
+
+
+# ---- s_reversal 三段的逐位置版（compute_s_reversal 逐位置复算）----
+
+
+def _rev_oversold_at(i: int, a: dict[str, Any], j: Optional[float]) -> float:
+    """_rev_oversold 的第 i 点（返回未舍入段分；舍入在点查询组装侧）。"""
+    nn = i + 1
+    close, high = a["close"], a["high"]
+    j_pts = (
+        16.0
+        if (j is not None and j < 0)
+        else (
+            10.0
+            if (j is not None and j < 7)
+            else (6.0 if (j is not None and j < 13) else 0.0)
+        )
+    )
+    win = min(250, nn)
+    high_w = float(high[i - win + 1 : i + 1].max())
+    dd = (1 - close[i] / high_w) * 100 if high_w else 0.0
+    dd_pts = 12.0 if dd >= 40 else (7.0 if dd >= 25 else (3.0 if dd >= 15 else 0.0))
+    ma20 = float(close[i - 19 : i + 1].mean())
+    dev = (close[i] / ma20 - 1) * 100 if ma20 else 0.0
+    below_pts = (
+        12.0 if dev <= -8 else (7.0 if dev <= -4 else (3.0 if dev <= -1 else 0.0))
+    )
+    a["ovs_dd"][i] = dd  # 反转确认段的底部巨量腿要复用 dd（原实现同此传递）
+    return min(40.0, j_pts + dd_pts + below_pts)
+
+
+def _rev_contraction_at(i: int, a: dict[str, Any]) -> float:
+    """_rev_contraction_stabilize 的第 i 点；extreme/low20 经 a 带出供确认段复用。"""
+    nn = i + 1
+    close, low, vol = a["close"], a["low"], a["vol"]
+    vol_ma5_prev = float(vol[i - 5 : i].mean()) if nn >= 6 else None
+    vr = (vol[i] / vol_ma5_prev) if vol_ma5_prev else None
+    vol20 = vol[i - 19 : i + 1]
+    pctile = float((vol20 < vol[i]).mean() * 100) if len(vol20) >= 20 else None
+    extreme = bool(vr is not None and vr <= 0.5 and pctile is not None and pctile <= 10)
+    shrink_pts = 15.0 if extreme else (8.0 if (vr is not None and vr <= 0.8) else 0.0)
+    pull_pts = (
+        10.0
+        if (nn >= 11 and vol[i - 4 : i + 1].mean() < vol[i - 9 : i - 4].mean())
+        else 0.0
+    )
+    low20 = float(low[i - 19 : i + 1].min()) if nn >= 20 else float(low[: i + 1].min())
+    hold_pts = 5.0 if (low20 and close[i] > low20) else 0.0
+    a["con_extreme"][i] = extreme
+    a["con_low20"][i] = low20
+    return min(30.0, shrink_pts + pull_pts + hold_pts)
+
+
+def _reversal_k_at(i: int, a: dict[str, Any], j: Optional[float]) -> bool:
+    """_is_reversal_k 的第 i 点（extreme 复用缩量企稳段的传递）。"""
+    nn = i + 1
+    close, high, low = a["close"], a["high"], a["low"]
+    chg = (close[i] / close[i - 1] - 1) * 100 if nn >= 2 and close[i - 1] else 0.0
+    _amp = amplitude_pct_of(high[i], low[i], close[i - 1]) if nn >= 2 else None
+    amp = _amp if _amp is not None else 0.0
+    return bool(
+        (j is not None and j < 13)
+        and a["con_extreme"][i]
+        and change_in_range(chg)
+        and amp <= 7
+    )
+
+
+def _engulf_pts_at(i: int, a: dict[str, Any], low20: float) -> float:
+    """低位反包腿的第 i 点（_rev_reversal_confirm 内联段的提取）。"""
+    nn = i + 1
+    close, open_ = a["close"], a["open"]
+    prev_bear = bool(nn >= 2 and close[i - 1] < open_[i - 1])
+    engulf = bool(close[i] > open_[i] and prev_bear and close[i] >= open_[i - 1])
+    at_low = bool(low20 and close[i] <= low20 * 1.15)
+    return 7.0 if (engulf and at_low) else 0.0
+
+
+def _botvol_pts_at(i: int, a: dict[str, Any], dd: float) -> float:
+    """底部巨量腿的第 i 点（dd 复用超跌段的传递）。"""
+    nn = i + 1
+    vol = a["vol"]
+    win_r = min(250, nn)
+    vol_ma_w = float(vol[i - win_r + 1 : i + 1].mean())
+    return 7.0 if (dd >= 40 and vol_ma_w and vol[i] >= vol_ma_w * 2) else 0.0
+
+
+def _rev_confirm_at(i: int, a: dict[str, Any], j, j_prev) -> float:
+    """_rev_reversal_confirm 的第 i 点（extreme/low20/dd 复用前两段的传递）。"""
+    low20, dd = a["con_low20"][i], a["ovs_dd"][i]
+    rk_pts = 10.0 if _reversal_k_at(i, a, j) else 0.0
+    jturn_pts = (
+        6.0
+        if (j is not None and j_prev is not None and j > j_prev and j_prev < 20)
+        else 0.0
+    )
+    eng_pts = _engulf_pts_at(i, a, low20)
+    botvol_pts = _botvol_pts_at(i, a, dd)
+    return min(30.0, rk_pts + jturn_pts + eng_pts + botvol_pts)
+
+
+def _s_rev_aggregate_at(i: int, a: dict[str, Any], out: dict[str, Any]) -> None:
+    """s_reversal 家族第 i 点（nn < 60 → 三段全 NaN，= 逐切片路径的 unavailable）。"""
+    nn = i + 1
+    if nn < REV_MIN_BARS:
+        return
+    j_arr = a["j"]
+    j = round(float(j_arr[i]), 4) if (j_arr is not None and nn >= 12) else None
+    j_prev = round(float(j_arr[i - 1]), 4) if (j_arr is not None and nn >= 12) else None
+    ovs = _rev_oversold_at(i, a, j)
+    con = _rev_contraction_at(i, a)
+    rev = _rev_confirm_at(i, a, j, j_prev)
+    out["s_rev_parts"]["oversold"][i] = ovs
+    out["s_rev_parts"]["contraction_stabilize"][i] = con
+    out["s_rev_parts"]["reversal_confirm"][i] = rev
+    out["s_rev"][i] = round(min(100.0, ovs + con + rev), 1)
+
+
+def score_series(df: pd.DataFrame) -> Optional[dict[str, Any]]:
+    """逐位置（bar 序）的 s_shape 家族分点序列——evaluate_trades 预计算旁路用。
+
+    等价性依据（同 ``_precompute_kdj_j_series``/``_precompute_rsi_state_series``
+    先例）：所有腿都是「前缀 ``df.iloc[:i+1]`` 上的窗口统计/标量判定」；本函数
+    在**预提取的 numpy 数组**上逐位置用**同一批归约函数**（np.mean/max/min/
+    nanmean——同值同序同长度 ⇒ 逐位一致）复算每个腿的 points，再按原模块相同的
+    round/min/max/clamp 次序汇总。KDJ（RSV→EWM→EWM 递归，fill_na=50）从第 0 根
+    开始 ⇒ 前缀末点 ≡ 全序列同点（``indicators.kdj`` 内部即 ``kdj_series``）。
+    两家族的 per-bar 异常各自隔离（各一个 try——与 compute_s_shape /
+    compute_s_reversal 是两个独立 try 函数的原语义对齐）。
+
+    ⚠️ EMA 递归指标的 as-of 重播种陷阱（score_return_study.py:294 判例）：
+    本序列只对「从第 0 根开始的前缀」语义成立（evaluate_trades 的切片恒如此）；
+    **不得用于 tail 重播种场景**（切一段当中间起点，EWM/rolling 的 warmup
+    会从那段的第 0 根重新起跑，与前缀口径逐位不同）。
+
+    返回键：``s_shape``（聚合分，未含 penalty）/``delta``/``legs``（6 腿 points
+    数组）/``s_rev``/``s_rev_parts``（三段未舍入数组）/``abs_chg``/``raw``
+    （OHLCV 数组引用，penalty 点查询用）——等长 float 数组，NaN = 该位置不可用；
+    异常 → None（调用方回退逐切片旧路径，行为与旧版逐位一致）。
+    """
+    if df is None or len(df) < 1:
+        return None
+    a = _series_arrays(df)
+    if a is None:
+        return None
+    n = len(a["close"])
+    a["ovs_dd"] = np.full(n, np.nan)  # 段间传递带（oversold 的 dd → 确认段复用）
+    a["con_extreme"] = np.zeros(n, dtype=bool)
+    a["con_low20"] = np.full(n, np.nan)
+    out: dict[str, Any] = {
+        "s_shape": np.full(n, np.nan),
+        "delta": np.full(n, np.nan),
+        "legs": {k: np.full(n, np.nan) for k in _SS_LEGS},
+        "s_rev": np.full(n, np.nan),
+        "s_rev_parts": {
+            k: np.full(n, np.nan)
+            for k in ("oversold", "contraction_stabilize", "reversal_confirm")
+        },
+        "abs_chg": a["abs_chg"],
+        "raw": {k: a[k] for k in ("close", "high", "low", "vol", "open")},
+    }
+    for i in range(n):
+        try:  # 两家族各自隔离（原实现是两个独立 try 函数）
+            _s_shape_aggregate_at(i, a, out)
+        except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+            # 该位置留 NaN（= 逐切片路径 compute_s_shape 的 except 语义）
+            pass
+        try:
+            _s_rev_aggregate_at(i, a, out)
+        except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+            pass
+    return out
+
+
+def s_star_from_series(
+    pre: dict[str, Any], df: pd.DataFrame, code: str = ""
+) -> Optional[dict]:
+    """点查询：pre（``score_series`` 产出）+ 前缀切片 df → compute_s_shape 同形 dict。
+
+    ``s_shape`` 聚合分与 Δ 催化取序列第 ``len(df)-1`` 点；P 惩罚腿走
+    ``penalty_from_series``（compute_penalty 的逐位置版：它依赖 code 的涨跌幅
+    制度 ⇒ 不进序列主体，点查询时在预存数组上同值同序复算，O(1)）。最终
+    clamp/round 次序与 ``compute_s_shape`` 逐字相同。序列该位置 NaN（前缀
+    不足）→ available=False 同形 dict（与逐切片路径的短路返回一致——
+    ``score()`` 层转 None）。
+    """
+    i = len(df) - 1
+    ss = float(pre["s_shape"][i]) if i >= 0 else float("nan")
+    if np.isnan(ss):
+        return {
+            "available": False,
+            "s_star": None,
+            "reason": f"少于{SSHAPE_MIN_BARS}根K线",
+        }
+    dl = float(pre["delta"][i])
+    pen = penalty_from_series(pre, i, code)
+    s_star = round(max(0.0, min(100.0, ss + dl - pen)), 1)
+    suggestion = "可买" if s_star >= 70 else ("观望" if s_star >= 60 else "不买")
+    return {
+        "available": True,
+        "s_shape": ss,
+        "delta": dl,
+        "penalty": pen,
+        "s_star": s_star,
+        "suggestion": suggestion,
+        "components_points": {
+            k: float(pre["legs"][k][i]) for k in _SS_LEGS
+        },  # event_risk 恒 0.0 占位在 score() 组装侧补
+    }
+
+
+def s_rev_from_series(pre: dict[str, Any], i: int) -> Optional[dict]:
+    """s_reversal 家族的点查询（无 code 依赖——penalty 腿是 s_shape 独有）。"""
+    if i < 0:
+        return None
+    v = float(pre["s_rev"][i])
+    if np.isnan(v):
+        return None
+    parts = {k: round(float(pre["s_rev_parts"][k][i]), 1) for k in pre["s_rev_parts"]}
+    return {
+        "s_reversal": v,
+        "suggestion": ("强反转候选" if v >= 70 else ("观察" if v >= 60 else "弱")),
+        "components_points": parts,
+    }
+
+
+def penalty_from_series(pre: dict[str, Any], i: int, code: str = "") -> float:
+    """compute_penalty 的逐位置版（点查询用；同值同序同判定 ⇒ 逐位一致）。
+
+    依赖 code 的涨跌幅制度 ⇒ 不进 ``score_series`` 主体（预计算调用面只有 df），
+    点查询时在预存数组上复算：``_infer_price_limit`` 的近 20 根自纠 =
+    ``nanmax(abs_chg[i-19..i])``（该腿只在 nn=i+1 ≥ 25 时调用，窗口不含首根
+    NaN ⇒ 与原实现的 ``tail(20).dropna().max()`` 逐位一致）。
+    """
+    a = pre["raw"]
+    nn = i + 1  # 前缀长度（原实现的 len(df)）
+    if nn < 25:
+        return 0.0
+    big = _price_limit_series_at(pre, i, code) * PEN_BIG_BEAR_FRAC
+    for t in range(nn - 1, max(0, nn - 6), -1):
+        pen = _penalty_bar_at(a, i, t, big)
+        if pen is not None:
+            return round(pen, 1)
+    return 0.0
+
+
+def _price_limit_series_at(pre: dict[str, Any], i: int, code: str) -> int:
+    """_infer_price_limit 的第 i 点（近 20 根自纠窗口 = nanmax(abs_chg[i-19..i])）。"""
+    nn = i + 1
+    limit = int(price_limit_pct(code))
+    if nn >= 20:
+        max_change = float(np.nanmax(pre["abs_chg"][i - 19 : i + 1]))
+        if limit == 10 and max_change > 9.9:
+            limit = 20
+        if limit == 10 and max_change <= 5.2:
+            limit = 5
+    return limit
+
+
+def _penalty_bar_at(a: dict[str, Any], i: int, t: int, big: float) -> Optional[float]:
+    """compute_penalty 内层循环的第 t 根：命中放量大阴 → 该笔惩罚分；未命中 → None。
+
+    算术与 compute_penalty 逐字相同（``nn = i+1`` 对应原实现的 ``n``）；
+    返回值经 penalty_from_series 统一 round(·, 1)。
+    """
+    close, high, vol, open_ = a["close"], a["high"], a["vol"], a["open"]
+    nn = i + 1
+    base = vol[max(0, t - 5) : t].mean()
+    vr = (vol[t] / base) if base else None
+    chg = (close[t] / close[t - 1] - 1) * 100 if close[t - 1] else 0.0
+    if not (
+        close[t] < open_[t] and chg <= -big and vr is not None and vr >= PEN_VOL_RATIO
+    ):
+        return None
+    # ⚠️ 不许把 recovered 的否定写成 ``close < high``：NaN 输入下
+    # ``not (NaN >= x)`` 与 ``NaN < x`` 不同（前者 True 后者 False）——保持原式。
+    recovered = close[nn - 1] >= high[t]
+    if not recovered:
+        pen = 15.0
+    else:
+        cur_base = vol[nn - 6 : nn - 1].mean()
+        pen = 10.0 if (cur_base and vol[nn - 1] < cur_base * PEN_RECOVER_VOL) else 5.0
+    return _halve_near_front_high(a, i, t, pen)
+
+
+def _halve_near_front_high(a: dict[str, Any], i: int, t: int, pen: float) -> float:
+    """前高距收盘 ≤PEN_FRONTHIGH_PCT 时惩罚减半（compute_penalty 内联段的提取）。"""
+    nn = i + 1
+    high, close = a["high"], a["close"]
+    prior_high = float(high[max(0, t - 20) : t].max()) if t > 0 else float(high[t])
+    if (
+        prior_high
+        and close[nn - 1]
+        and (prior_high / close[nn - 1] - 1) * 100 <= PEN_FRONTHIGH_PCT
+    ):
+        pen /= 2
+    return pen

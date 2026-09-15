@@ -70,6 +70,9 @@ def _bbi_series_from(df: pd.DataFrame) -> np.ndarray:
 from custos.core.factors.s_shape import (
     compute_s_shape,
     compute_s_reversal,
+    s_rev_from_series,  # v0.236：预计算旁路的点查询（三键共用 score_series 产出）
+    s_star_from_series,
+    score_series as _s_shape_score_series,
     SSHAPE_MIN_BARS,
     SSTAR_STRONG,
     SSTAR_MID,
@@ -1241,7 +1244,18 @@ def _components(r: dict) -> dict:
 from custos.core.factors.s_shape import score as _sc_s_shape  # noqa: E402
 
 
-def _sc_s_reversal(df: pd.DataFrame, code: str):
+def _sc_s_reversal(df: pd.DataFrame, code: str, precomputed: Optional[dict] = None):
+    if precomputed is not None:
+        # 预计算旁路（v0.236）：点查询逐位置序列，与下方逐切片路径逐位一致
+        r = s_rev_from_series(precomputed, len(df) - 1)
+        if r is None:
+            return None
+        return {
+            "score": r["s_reversal"],
+            "suggestion": r["suggestion"],
+            "aux": {},
+            "components": r["components_points"],
+        }
     r = compute_s_reversal(df, code)
     if not r.get("available"):
         return None
@@ -1253,7 +1267,22 @@ def _sc_s_reversal(df: pd.DataFrame, code: str):
     }
 
 
-def _sc_invert_s_shape(df: pd.DataFrame, code: str):
+def _sc_invert_s_shape(df: pd.DataFrame, code: str, precomputed: Optional[dict] = None):
+    # invert = 100 − s_star：旁路点查询复用 s_shape 家族序列（同一 pre 对象）
+    if precomputed is not None:
+        r = s_star_from_series(precomputed, df, code)
+        if r is None or not r.get("available"):
+            return None
+        inv = round(100.0 - float(r["s_star"]), 1)
+        sug = "可买" if inv >= 70 else ("观望" if inv >= 60 else "不买")
+        comps = dict(r["components_points"])
+        comps["event_risk"] = 0.0
+        return {
+            "score": inv,
+            "suggestion": sug,
+            "aux": {"s_shape_star": r["s_star"]},
+            "components": comps,
+        }
     r = compute_s_shape(df, code)
     if not r.get("available"):
         return None
@@ -1265,6 +1294,28 @@ def _sc_invert_s_shape(df: pd.DataFrame, code: str):
         "aux": {"s_shape_star": r["s_star"]},
         "components": _components(r),
     }
+
+
+def _precompute_s_shape_series(df: pd.DataFrame) -> Optional[dict]:
+    """逐股**一次性**预计算 s_shape 家族三键（s_shape/s_reversal/invert_s_shape）
+    用的逐位置分点序列（evaluate_trades 的 O(n²)→O(n) 优化，v0.236，TODO #59）。
+
+    等价性依据与 ``_precompute_kdj_j_series``/``_precompute_rsi_state_series``
+    相同（窗口统计在预提取数组上同值同序同归约复算；KDJ 递归从第 0 根开始）；
+    penalty 腿依赖 code ⇒ 不进序列主体，点查询时在预存数组上复算
+    （``penalty_from_series``，O(1)）。等价性由 tests/test_s_shape_precompute.py
+    全位置对拍 + evaluate_trades 端到端逐位钉住。
+
+    ⚠️ 只对「从第 0 根开始的前缀切片」有效（evaluate_trades 的切片恒如此）；
+    ``evaluate(gate_window>0)`` 的切片起点 lo>0，**不得**传这个（EMA 递归
+    指标的 as-of 重播种陷阱，score_return_study.py:294 判例）。
+    返回 None（依赖缺失/异常）时 scorer 走原逐切片路径，行为与旧版逐位一致。
+    """
+    try:
+        return _s_shape_score_series(df)
+    except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+        # 旁路契约：异常 → None 回退旧路径（_prepare_stock 调用点不捕异常）
+        return None
 
 
 # 可选打分器：同一批信号可跑三方对比（突破式 vs 买弱式 vs 反转突破分）
@@ -2017,6 +2068,13 @@ if rsi_state_score is not None:
     assert _sc_rsi_state is not None  # 同一块 try 导入，窄化给 mypy
     SCORERS["rsi_state"] = _sc_rsi_state
     _SCORER_PRECOMPUTE[_sc_rsi_state] = _precompute_rsi_state_series
+
+# v0.236（TODO #59 性能项）：s_shape 家族三键接预计算旁路——逐股一次
+# 全序列分点（s_shape.score 的 precomputed 点查询 / _sc_s_reversal /
+# _sc_invert_s_shape 三参形态），与逐 bar 前缀切片路径逐位一致
+# （tests/test_s_shape_precompute.py 全位置对拍 + evaluate_trades 端到端钉住）。
+for _sc_key in ("s_shape", "s_reversal", "invert_s_shape"):
+    _SCORER_PRECOMPUTE[SCORERS[_sc_key]] = _precompute_s_shape_series
     SCORERS["main_rally"] = _sc_main_rally
     ENTRY_GATES["rsi_strong"] = rsi_strong_regime_gate
     ENTRY_GATES["rsi_bull_div"] = rsi_bullish_divergence_gate
