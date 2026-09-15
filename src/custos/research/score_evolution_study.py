@@ -445,10 +445,18 @@ def _make_cell_runner(args: Any, codes_file: str, cells_dir: Path) -> CellRunner
 
     复用 strategy_grid 的 run_cell 机制（cell_signature 复用跳过免费获得）；
     子进程自行按给定窗口加载数据（进程级隔离，双窗无共享内存对象）。
+
+    ⚠️ 失败现场捕获（v0.234，R34 r34_v1 教训）：此前串行调用 run_cell
+    （capture=False）——子进程 stdout/stderr **只透传终端**，报告里只剩
+    「failed」没有任何文本（s_shape 臂 exit=2×2 无现场可查）。现改
+    capture=True：失败格的子进程日志尾段（默认 40 行）收进
+    ``cell_runner.failures``，报告 ``cell_failures`` 块落盘——下次失败
+    有现场，不用再上生产机翻终端。
     """
     from custos.research import strategy_grid as sg  # noqa: PLC0415
 
     cells_dir.mkdir(parents=True, exist_ok=True)
+    failures: list[dict[str, Any]] = []
 
     def cell_runner(
         scorer: str, gate: str, exit_params: dict, *, start: str, end: str
@@ -472,14 +480,62 @@ def _make_cell_runner(args: Any, codes_file: str, cells_dir: Path) -> CellRunner
             "exit": "score_evolution",
             "params": dict(exit_params),
         }
-        status, path, _log = sg.run_cell(ns, cell, cells_dir)
+        status, path, log = sg.run_cell(ns, cell, cells_dir, capture=True)
         if status == "failed" or path is None:
+            failures.append(
+                {
+                    "scorer": scorer,
+                    "gate": gate,
+                    "start": start,
+                    "end": end,
+                    "log_tail": "\n".join(log.splitlines()[-_FAILURE_LOG_TAIL_LINES:]),
+                }
+            )
             return None
         return _reading_of(
             sg, sg.load_cell_row(cell, path, reused=(status == "reused"))
         )
 
+    cell_runner.failures = failures  # type: ignore[attr-defined]  # 侧信道：报告层只读
     return cell_runner
+
+
+#: 失败格子日志尾段行数（cell_runner.failures / 报告 cell_failures 块共用）。
+_FAILURE_LOG_TAIL_LINES = 40
+
+
+def _classify_cell_failure(log_tail: str) -> str:
+    """失败根因分类：「合法空」与「格子失败」必须分清（R34 r34_v1 s_shape 臂教训）。
+
+    - ``empty_result``：子进程日志含空结果护栏的指纹（``产出 0 `` + ``拒绝落盘``，
+      backtest_factors._empty_result_guard 原文）——该宇宙×窗内 0 信号是
+      **合法空**（门槛过严使然，如 s_shape 可买阈值 s_star≥70 与 j_low 超卖池
+      近互斥），不是格子坏了；
+    - ``cell_failed``：其他一切失败（含无日志——injected runner / 旧产物）。
+    """
+    if "产出 0 " in log_tail and "拒绝落盘" in log_tail:
+        return "empty_result"
+    return "cell_failed"
+
+
+def _cell_failures_report(runner: CellRunner) -> list[dict[str, Any]]:
+    """cell_runner.failures 侧信道 → 报告块（injected runner 无侧信道 → 空表）。"""
+    out = []
+    for f in getattr(runner, "failures", None) or []:
+        out.append({**f, "root_cause": _classify_cell_failure(f.get("log_tail", ""))})
+    return out
+
+
+def _root_cause_for(runner: CellRunner, scorer: str, window: Window) -> str:
+    """指定 (scorer, 窗口) 的失败根因（无记录 → cell_failed）。"""
+    for f in _cell_failures_report(runner):
+        if (
+            f["scorer"] == scorer
+            and f["start"] == window.start
+            and f["end"] == window.end
+        ):
+            return f["root_cause"]
+    return "cell_failed"
 
 
 # ---------------------------------------------------------------------------
@@ -854,6 +910,12 @@ def _run_study(
     s_shape_reading = runner(
         "s_shape", args.gate, exit_params, start=mining.start, end=mining.end
     )
+    s_shape_block: dict[str, Any] = {"reading": s_shape_reading}
+    if s_shape_reading is None:
+        # 失败语义区分（v0.234）：「合法空」（empty_result：门槛过严致 0 信号，
+        # 空结果护栏 fail-closed）与「格子失败」（cell_failed）必须分清——
+        # r34_v1 的 s_shape 臂 exit=2×2 即前者（s_star≥70 ∧ j_low 超卖池近互斥）。
+        s_shape_block["root_cause"] = _root_cause_for(runner, "s_shape", mining)
 
     # 随机对照臂（终筛宇宙；两阶段时 = 阶段 2 重跑）
     random_arms = _eval_random_arms(
@@ -1070,7 +1132,7 @@ def _run_study(
             "lattice": mining_rows,
             "equal_weight": equal_row,
             "single_legs": [{"name": n, "row": r} for n, r in single_rows],
-            "s_shape": {"reading": s_shape_reading},
+            "s_shape": s_shape_block,
             "random": random_arms,
             "v0": v0_block,
         },
@@ -1107,6 +1169,17 @@ def _run_study(
             "random_best_objective": random_best_obj,
             "verdict": verdict,
         },
+        # 失败格现场（v0.234）：子进程日志尾段 + 根因分类（empty_result=合法空 /
+        # cell_failed=格子失败）——串行透传时代「failed 无文本」的洞已补
+        "cell_failures": [
+            {"source": "coarse", **f}
+            for f in (
+                _cell_failures_report(coarse_runner)
+                if args.two_stage and coarse_runner is not None
+                else []
+            )
+        ]
+        + [{"source": "final", **f} for f in _cell_failures_report(runner)],
         "criteria_readings": criteria,
     }
 
@@ -1167,7 +1240,16 @@ def _print_summary(rep: dict[str, Any]) -> None:
     for s in rep["arms"]["single_legs"]:
         row = s["row"]
         print(_arm_line(f"{s['name']}·挖掘", row["reading"] if row else None))
-    print(_arm_line("s_shape 参照·挖掘", rep["arms"]["s_shape"]["reading"]))
+    s_arm = rep["arms"]["s_shape"]
+    s_line = _arm_line("s_shape 参照·挖掘", s_arm["reading"])
+    if s_arm["reading"] is None and s_arm.get("root_cause"):
+        cause = {
+            "empty_result": "合法空（该宇宙×窗内 0 信号：s_shape 可买阈值 s_star≥70 "
+            "与 j_low 超卖池近互斥，空结果护栏 fail-closed）",
+            "cell_failed": "格子失败（现场见报告 cell_failures 块）",
+        }.get(s_arm["root_cause"], s_arm["root_cause"])
+        s_line += f"  ⚠️ {cause}"
+    print(s_line)
     rc = rep["random_control"]
     mark = {
         "pass": "✅ 打过",

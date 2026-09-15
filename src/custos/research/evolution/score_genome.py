@@ -5,7 +5,7 @@
 ``TS_RANK(leg, K)`` 做个股自身历史分位归一（免截面依赖、量纲无关），再加权
 求和::
 
-    w1*TS_RANK((l1),K) + w2*TS_RANK((l2),K) + ...
+    TS_RANK((l1),K) + w2*TS_RANK((l2),K) + ...   （weight=1 的腿省略 1* 前缀）
 
 于是复合 scorer 直接复用 ``backtest_factors --scorer-expr`` / strategy_grid
 ``expr:`` 轴 / 双窗 / 灵敏度全部既有机制——本模块只有编译与权重格，零评估逻辑。
@@ -35,13 +35,26 @@ from custos.research.evolution.expr_dsl import MAX_WINDOW
 #: 权重格默认档位：0=该腿关闭；1/2/3 相对权重（比例语义，非绝对量纲）。
 DEFAULT_LEVELS: tuple[int, ...] = (0, 1, 2, 3)
 
-#: 复合表达式的复杂度门：主门是 symbol_len（表达式总长，超 300 拒）与 depth；
-#: repeat_subtrees / free_params **结构性豁免**——同一 K、同一权重值按腿数重复是
-#: 复合的设计使然（不是 LLM 胡言），这两个门是为单因子 parsimony 压力设的，
-#: 拿到复合层会把合法的等权多腿复合误杀（6 腿等权：K 重复 6 次、权重 1 重复 6 次
-#: ⇒ repeat_subtrees ≥ 10 必触发）。base_features ≤ 6 恒过（基础变量总共 5 个）。
+#: 复合专用违规口径（v0.234，R34 r34_v1 生产机实据驱动的勘误）：
+#: violations() 的默认上限（symbol_len 300 / depth 12）是**单因子**防过拟合
+#: 简约门。复合是已过单因子门的腿的加权和——简约性在**腿的生产端**执行
+#: （进化引擎 DSL 门 / 轨迹池入池判据 / 手工腿评审），复合级约束应该是
+#: **腿数上限**（``--max-legs``）而非总长/总深：把单因子门原样套到复合上，
+#: 会把合法的等权多腿复合误杀（r34_v1 实据：6 条长腿等权复合
+#: symbol_len 448>300、depth 13>12，等权基线编译越界读数缺失；且 4 腿以上
+#: 组合大面积编译失败，寻优被静默收窄到 ≤2~3 腿组合——预注册判据的
+#: 「等权基准」被口径缺口架空）。
+#: 1200/16 因此**不是简约门，是 AST 病态形态护栏**（防解析器/评估层被失控
+#: 拼接打爆）：6 腿实据 448/13，1200/16 覆盖 ~12 条常长腿又拦得住病态输入。
+#: repeat_subtrees/free_params 的复合豁免保留（同一 K、同一权重值按腿数重复
+#: 是设计使然）；单因子 DSL 的 violations() 默认阈值**一律不动**。
+COMPOSITE_MAX_SYMBOL_LEN = 1200
+COMPOSITE_MAX_DEPTH = 16
+
+#: 复合表达式的复杂度门（``violations()`` 的参数化覆盖；依据见上）。
 _COMPOSITE_VIOLATION_LIMITS: dict[str, Any] = {
-    "max_symbol_len": 300,  # 主门：复合超长拒（6 腿时每腿平均只留 ~35 字符预算）
+    "max_symbol_len": COMPOSITE_MAX_SYMBOL_LEN,
+    "max_depth": COMPOSITE_MAX_DEPTH,
     "max_free_params": 10**9,  # 结构性豁免（见上）
     "max_repeat_subtrees": 10**9,  # 结构性豁免（见上）
 }
@@ -76,6 +89,18 @@ def _validate_legs_weights(
     return tuple(out)
 
 
+def _composite_term(leg: str, w: float, rank_window: int) -> str:
+    """单腿编译项：``TS_RANK((leg),K)``；**weight=1 省略 ``1*`` 前缀**（v0.234）。
+
+    数值语义逐位不变：IEEE 乘 1.0 是精确恒等（``1*x ≡ x``，无舍入），省略
+    前缀的产物与带前缀产物逐位一致（表达式级对拍钉测钉住）；收益是每条
+    weight=1 的腿省 2 字符 + 1 层 AST 深度——多腿等权复合的 symbol_len/depth
+    主门压力直接下降（R34 r34_v1 等权基线越界的成因之一）。
+    """
+    body = f"TS_RANK(({leg}),{rank_window})"
+    return body if w == 1.0 else f"{_fmt_weight(w)}*{body}"
+
+
 def compile_composite(
     legs: list[str], weights: list[float], *, rank_window: int = MAX_WINDOW
 ) -> str:
@@ -87,10 +112,12 @@ def compile_composite(
     - weights 非负数值、非 bool、非 NaN/inf、不全零、数量与 legs 一致；
     - ``rank_window`` 正整数（非 bool）且 ≤ ``MAX_WINDOW``；
     - 产物再过一次 ``parse`` + ``violations``（``_COMPOSITE_VIOLATION_LIMITS``
-      口径：symbol_len/depth 是主门，repeat/free_params 结构性豁免）——
-      **超 symbol_len 拒**（6 条长腿拼出来超 300 字符的复合直接不出生）。
+      口径：symbol_len 1200 / depth 16 是 AST 病态形态护栏，repeat/free_params
+      结构性豁免——政策依据见模块常量 ``COMPOSITE_MAX_SYMBOL_LEN`` 的注释）；
+      单因子 DSL 的 violations 默认阈值（300/12）**不动**，只覆盖复合层。
 
-    形态约定：``w*TS_RANK((leg),K)`` 按 ``+`` 连接；**w=0 的腿不编进表达式**
+    形态约定：``TS_RANK((leg),K)`` 按 ``+`` 连接，weight≠1 加 ``{w}*`` 前缀
+    （weight=1 省略，见 ``_composite_term``）；**w=0 的腿不编进表达式**
     （该轴关闭——lattice 里的 0 档位语义），legs 与 weights 的位置对应关系由
     调用方在落盘里保留（本函数只对正权重腿负责）。
     """
@@ -116,9 +143,7 @@ def compile_composite(
                 f"legs[{i}] 不是合法 DSL 表达式: {leg!r}（{exc}）"
             ) from exc
         parsed.append((leg.strip(), w))
-    expr = "+".join(
-        f"{_fmt_weight(w)}*TS_RANK(({leg}),{rank_window})" for leg, w in parsed
-    )
+    expr = "+".join(_composite_term(leg, w, rank_window) for leg, w in parsed)
     # 产物复核（构造即合法是论证，这里落成硬校验——复合层 bug 不得漏到评估层）：
     tree = expr_dsl.parse(expr)
     comp = expr_dsl.complexity(tree)

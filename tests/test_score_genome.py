@@ -23,13 +23,51 @@ LEGS2 = ["MA(close,20)/close", "volume/MA(volume,20)"]
 class TestCompileComposite:
     def test_product_shape_and_reparse(self):
         expr = compile_composite(LEGS2, [1, 2])
+        # v0.234 瘦身：weight=1 的腿省略 1* 前缀
         assert (
-            expr == "1*TS_RANK((MA(close,20)/close),250)"
+            expr == "TS_RANK((MA(close,20)/close),250)"
             "+2*TS_RANK((volume/MA(volume,20)),250)"
         )
         # 产物必须再过 parse + violations（结构性豁免口径下）为空
         comp = expr_dsl.complexity(expr_dsl.parse(expr))
         assert not expr_dsl.violations(comp, **_COMPOSITE_VIOLATION_LIMITS)
+
+    def test_weight1_prefix_omitted_and_single_leg_bare(self):
+        """瘦身形态钉死：weight=1 无前缀；单腿权重 1 时是裸 TS_RANK。"""
+        assert compile_composite(["close"], [1]) == "TS_RANK((close),250)"
+        assert (
+            compile_composite(["close"], [1], rank_window=60) == "TS_RANK((close),60)"
+        )
+        # 混合：weight=1 省略、weight≠1 保留前缀
+        assert (
+            compile_composite(["close", "volume", "open"], [1, 2, 1])
+            == "TS_RANK((close),250)+2*TS_RANK((volume),250)+TS_RANK((open),250)"
+        )
+
+    def test_slimmed_product_bitwise_equal_to_prefixed(self):
+        """编译瘦身对拍：旧形态（带 1* 前缀）与新产物数值逐位一致（1*x≡x 精确恒等）。"""
+        import numpy as np
+        import pandas as pd
+
+        rng = np.random.default_rng(5)
+        n = 300
+        df = pd.DataFrame(
+            {
+                "date": pd.date_range("2024-01-01", periods=n),
+                "open": 10 + np.cumsum(rng.normal(0, 0.2, n)),
+                "high": 11 + np.cumsum(rng.normal(0, 0.2, n)),
+                "low": 9 + np.cumsum(rng.normal(0, 0.2, n)),
+                "close": 10 + np.cumsum(rng.normal(0, 0.2, n)),
+                "volume": abs(rng.normal(1e6, 2e5, n)),
+            }
+        )
+        new = compile_composite(LEGS2, [1, 2])
+        old = (
+            "1*TS_RANK((MA(close,20)/close),250)+2*TS_RANK((volume/MA(volume,20)),250)"
+        )
+        a = expr_dsl.evaluate(new, df).to_numpy(dtype=float)
+        b = expr_dsl.evaluate(old, df).to_numpy(dtype=float)
+        np.testing.assert_array_equal(a, b)  # 逐位一致（含 NaN 位置）
 
     def test_rank_window_custom_and_int_weight_format(self):
         expr = compile_composite(["close"], [3], rank_window=60)
@@ -69,12 +107,61 @@ class TestCompileComposite:
         with pytest.raises(ValueError, match="rank_window"):
             compile_composite(["close"], [1], rank_window=k)
 
+    def test_r34_scale_6_leg_equal_compiles(self):
+        """v0.234 口径修复：R34 实据规模（6 条长腿、symbol_len>300/depth>12）的
+        等权复合**编译通过**——v1 缺口（等权基线越界 448>300、13>12）不再复现。"""
+        legs = [  # VWAP 偏离×量能族风格的长腿（R34 实据腿型长度构造）
+            "((close-MA(close,20))/(MA(close,20)+0.001))*TS_RANK(volume,20)",
+            "(volume/(MA(volume,20)+1))*(1-TS_RANK(close,60))",
+            "((high-close)/(high-low+0.001))*(volume/(MA(volume,20)+1))",
+            "(close-low)/(high-low+0.001)",
+            "MA(volume,5)/(MA(volume,60)+1)",
+            "((close-REF(close,5))/(REF(close,5)+0.001))*(volume/(MA(volume,60)+1))",
+        ]
+        expr = compile_composite(legs, [1] * 6)
+        comp = expr_dsl.complexity(expr)
+        # 构造自检：规模确在 v1 缺口区间（旧单因子门 300/12 会拒，证明测试不是空转）
+        assert comp.symbol_len > 300 or comp.depth > 12
+        assert expr_dsl.violations(comp), "旧默认门应拒（v1 缺口复现）"
+        # 复合专用口径下通过
+        assert not expr_dsl.violations(comp, **_COMPOSITE_VIOLATION_LIMITS)
+
     def test_overlength_composite_rejected_by_symbol_len(self):
-        """主门 symbol_len=300：6 条长腿拼出的复合越界即拒（不超界才出生）。"""
-        long_leg = "(" + "+".join(["MA(close,20)"] * 4) + ")"  # 每条 ~53 字符
-        legs = [long_leg] * 6
+        """COMPOSITE 上限仍是硬门：symbol_len > 1200 的失控拼接拒收。
+
+        ⚠️ 构造说明：MAX_EXPR_NODES=400 会先拦下多数超长拼接（病态输入其实
+        死在节点数门）；要触发 symbol_len 分支需要 >3 字符/节点的形态
+        （长字面量常量）——本用例钉的是「节点数门漏过去的超长产物仍被
+        symbol_len 主门拦下」。
+        """
+        long_leg = "(" + "+".join(["volume*123456789.123456789"] * 5) + ")"
         with pytest.raises(ValueError, match="symbol_len"):
-            compile_composite(legs, [1] * 6)
+            compile_composite([long_leg] * 9, [1] * 9)
+
+    def test_overdepth_composite_rejected_by_depth(self):
+        """COMPOSITE 上限仍是硬门：depth > 16 的病态嵌套拒收。"""
+        deep_leg = "MA(MA(MA(MA(MA(MA(close,5),5),5),5),5),5)"  # leg depth 7
+        with pytest.raises(ValueError, match="depth"):
+            compile_composite([deep_leg] * 10, [1] * 10)  # 链深 9+8=17 > 16
+
+    def test_single_factor_default_thresholds_untouched(self):
+        """单因子 DSL 的 violations() 默认阈值**一律不动**（300/6/6/8/12）——
+        复合放宽只走参数化覆盖，默认面不许被顺手改松。"""
+        import inspect
+
+        sig = inspect.signature(expr_dsl.violations)
+        defaults = {k: v.default for k, v in sig.parameters.items() if k != "comp"}
+        assert defaults == {
+            "max_symbol_len": 300,
+            "max_free_params": 6,
+            "max_base_features": 6,
+            "max_repeat_subtrees": 8,
+            "max_depth": 12,
+        }
+        # 行为面：symbol_len>300 的单因子表达式在默认门下仍被拒
+        long_single = "+".join(["MA(close,20)"] * 24)  # ~310 字符
+        bad = expr_dsl.violations(expr_dsl.complexity(long_single))
+        assert any("symbol_len" in b for b in bad)
 
     def test_max_window_boundary_ok(self):
         assert compile_composite(["close"], [1], rank_window=250).endswith(",250)")

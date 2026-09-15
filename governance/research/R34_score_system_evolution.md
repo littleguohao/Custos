@@ -172,6 +172,40 @@ FileNotFoundError（评估 200s 完成后才炸，首批 27 格全灭）；v0.23
 
 ## 附录 · 生产机跑数手册（2026-09-14 随预注册写死）
 
+### 口径勘误（2026-09-15，v0.234——r34_v1 生产机暴露的两个本机问题）
+
+**① 复合编译口径缺口（已修）**。v1 把单因子 violations 默认门
+（symbol_len 300 / depth 12）原样套到复合表达式上 ⇒ 6 条长腿等权复合
+越界（实据 symbol_len 448 / depth 13），等权基线（R34-C2 的基准）编译
+失败读数缺失；且 4 腿以上组合大面积编译失败、**寻优被静默收窄到 ≤2~3 腿
+组合**（top 基因组 w=[0,0,1,0,0,2] 正是这个收窄的产物）。v0.234 勘误口径：
+symbol_len/depth 默认上限是**单因子**防过拟合简约门；复合是已过单因子门
+的腿的加权和，简约性在**腿的生产端**执行（进化引擎 DSL 门/轨迹池入池
+判据），复合级约束是**腿数上限**（`--max-legs`）而非总长/总深。新复合
+专用口径 `COMPOSITE_MAX_SYMBOL_LEN=1200 / COMPOSITE_MAX_DEPTH=16`
+（AST 病态形态护栏，不是简约门）+ 编译瘦身（weight=1 的腿省略 `1*` 前缀，
+IEEE 乘 1.0 精确恒等、数值逐位不变——每条 weight=1 腿省 2 字符 + 1 层
+AST 深度）；单因子 violations 默认阈值一律不动（钉测钉住）。**对 r34_v1
+结论的影响**：等权基线缺失 ⇒ C2 当时按保守口径不计过；v0.234 后等权基线
+可编译，后续跑数（含 r34_v2）的 C2 读数有效——r34_v1 的 C2 缺口是口径
+事故不是证据，补跑决议见回填区。
+
+**② s_shape 参照臂 exit=2×2 根因（已查明，合法空非格子坏）**。根因链：
+s_shape scorer 的 `suggestion=="可买"` 要求 s_star≥70（`factors/s_shape.py:412`）
+∧ `backtest_factors._entry_signal` 要求 suggestion==可买 ⇒ s_shape 可买阈值
+与 j_low 超卖池（J<13）**近互斥**（深超卖票在 S 形态的 pivot/pocket_pivot/
+ma_structure 强度腿上天然低分）⇒ 该宇宙×窗内 0 信号 ⇒ 空结果护栏
+（`_empty_result_guard`，**晚期 fail-closed**）exit=2；×2 = 挖掘窗 + 判定窗
+两格。本机合成数据复现：持续阴跌帧上 s_shape.suggestion=不买，
+j_low∧s_shape ⇒ 0 笔（同数据 baseline 恒可买对照 62 笔——gate/数据无恙，
+是 s_shape 阈值）。「stderr 无文本」的原因：研究驱动**串行**调 run_cell
+（capture=False），子进程 stdout/stderr 只透传终端、不进任何落盘结构。
+v0.234 处置：cell_runner 改 `capture=True`，失败格日志尾段（40 行）收进
+`cell_runner.failures` 并落盘报告 `cell_failures` 块（含根因分类：
+`empty_result`=合法空 / `cell_failed`=格子失败）；s_shape 臂读数缺失时
+`arms.s_shape.root_cause` 注明语义——**该臂是合法空，读数缺失即正确读数，
+不换臂不造假**。
+
 工具内建：灵敏度与随机对照臂随主跑一次完成（不需单独步骤）；判定窗
 加 `--judgment-*` 同跑即双窗。
 

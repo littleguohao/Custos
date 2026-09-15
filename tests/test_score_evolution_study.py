@@ -108,8 +108,10 @@ class TestEndToEnd:
             "judgment",
             "sensitivity",
             "random_control",
+            "cell_failures",
             "criteria_readings",
         }
+        assert rep["cell_failures"] == []  # fake runner 全成，无失败格
         assert rep["two_stage"] is None  # 默认单阶段（--two-stage 默认关，逐位不变）
         assert (
             rep["arms"]["v0"]["status"] == "off"
@@ -596,3 +598,91 @@ class TestV0Arm:
         assert len(calls) == 2  # 两阶段都跑（粗筛 1 次 + 终筛 1 次）
         assert rep["arms"]["v0"]["status"] == "run"
         assert rep["two_stage"]["stage1_arms"]["v0_objective"] == 0.4
+
+
+# ---------------------------------------------------------------------------
+# v0.234：失败现场捕获与「合法空 vs 格子失败」语义区分（R34 r34_v1 教训）
+# ---------------------------------------------------------------------------
+
+
+class TestCellFailureSemantics:
+    def test_classify_empty_result_vs_cell_failed(self):
+        """空结果护栏指纹（产出 0 + 拒绝落盘）→ empty_result；其余 → cell_failed。"""
+        empty_log = (
+            "[TIME] 加载(含前复权) 100s / 评估 30s\n"
+            "[ERR] 加载了 3000 只票却产出 0 笔交易(门槛过严/依赖失败?)；"
+            "拒绝落盘——空结果会被误读成'该因子无判别力'。确需空结果请显式加 --allow-empty"
+        )
+        assert ses._classify_cell_failure(empty_log) == "empty_result"
+        assert ses._classify_cell_failure("[FAIL] 超时（>1800s）") == "cell_failed"
+        assert ses._classify_cell_failure("") == "cell_failed"
+
+    def test_s_shape_arm_root_cause_empty_result(self, tmp_path):
+        """s_shape 臂读数缺失 + 失败记录含空结果指纹 ⇒ root_cause=empty_result
+        （r34_v1 实据形态：s_star≥70 ∧ j_low 超卖池近互斥 ⇒ 合法空，非格子坏）。"""
+        fake = FakeRunner()
+        fake.failures = [
+            {
+                "scorer": "s_shape",
+                "gate": "j_low",
+                "start": MINING[0],
+                "end": MINING[1],
+                "log_tail": "[ERR] 加载了 3000 只票却产出 0 笔交易(门槛过严/依赖失败?)"
+                "；拒绝落盘——空结果会被误读成'该因子无判别力'",
+            }
+        ]
+        # s_shape 格读数缺失（table 里不放 s_shape，default 给 None 的变体）
+        fake.table = {("s_shape", *MINING): None}
+        rep = _run(tmp_path, fake)
+        arm = rep["arms"]["s_shape"]
+        assert arm["reading"] is None
+        assert arm["root_cause"] == "empty_result"
+        # 报告 cell_failures 块有现场（来源 final）
+        assert len(rep["cell_failures"]) == 1
+        rec = rep["cell_failures"][0]
+        assert rec["source"] == "final"
+        assert rec["scorer"] == "s_shape"
+        assert rec["root_cause"] == "empty_result"
+        assert "产出 0 笔交易" in rec["log_tail"]
+
+    def test_s_shape_arm_root_cause_cell_failed_without_log(self, tmp_path):
+        """无失败记录（injected runner 无侧信道/串行无捕获）⇒ cell_failed。"""
+        fake = FakeRunner()
+        fake.table = {("s_shape", *MINING): None}
+        rep = _run(tmp_path, fake)
+        assert rep["arms"]["s_shape"]["root_cause"] == "cell_failed"
+        assert rep["cell_failures"] == []
+
+    def test_default_runner_captures_subprocess_log(self, tmp_path, monkeypatch):
+        """默认 cell_runner：run_cell 以 capture=True 调用，失败格日志尾段进
+        cell_runner.failures（串行透传「failed 无文本」的洞已补）。"""
+        import argparse
+
+        from custos.research import strategy_grid as sg
+
+        seen = {}
+
+        def spy_run_cell(ns, cell, cells_dir, capture=False):
+            seen["capture"] = capture
+            return (
+                "failed",
+                None,
+                "[RUN ] x\n[ERR] 加载了 3000 只票却产出 0 笔交易；拒绝落盘",
+            )
+
+        monkeypatch.setattr(sg, "run_cell", spy_run_cell)
+        args = argparse.Namespace(
+            cost_bps=25.0,
+            count=2000,
+            top_n=20,
+            timeout=0,
+        )
+        runner = ses._make_cell_runner(args, "codes.txt", tmp_path / "cells")
+        assert (
+            runner("s_shape", "j_low", {}, start="2022-01-01", end="2024-07-31") is None
+        )
+        assert seen["capture"] is True, "失败现场捕获必须开 capture=True"
+        assert len(runner.failures) == 1
+        assert "产出 0 笔交易" in runner.failures[0]["log_tail"]
+        # 分类链路：该记录进报告应为 empty_result
+        assert ses._cell_failures_report(runner)[0]["root_cause"] == "empty_result"
