@@ -3274,6 +3274,7 @@ def _prepare_stock(
     entry_gate: Optional[Callable] = None,
     scorer: Optional[Callable] = None,
     qsx_exit_consec: int = 0,
+    indicator_cache: Optional[Any] = None,
 ) -> Optional[dict[str, Any]]:
     """evaluate_trades 的逐股准备：sort/weekly/min_bars/BBI/可成交性/中大阳线/ATR/gate/scorer 预计算。
 
@@ -3290,47 +3291,85 @@ def _prepare_stock(
     n = len(df)
     if n < min_bars + 2:
         return None
-    # 可成交性:涨停/停牌不可买,跌停/停牌不可卖(逐股算一次,循环内复用)
-    buy_ok, sell_ok = tradable_flags(df, code) if tradability else (None, None)
+    ic = indicator_cache  # 指标盘缓存（--indicator-cache；None=关，行为逐位不变）
     scorer_pre_fn = _SCORER_PRECOMPUTE.get(scorer) if scorer is not None else None
-    # gate_pre 与 scorer_pre(_sc_kdj_j) 的 KDJ 同口径(kdj_series fill_na=50.0):
-    # 都需要时逐股算一次共享,否则各算各的(行为与旧版逐位一致)
-    kdj_shared = None
-    if (
-        entry_gate is not None
-        and scorer_pre_fn is _precompute_kdj_j_series
-        and _kdj is not None
-    ):
-        try:
-            kdj_shared = _kdj_series(df, fill_na=50.0)
-        except Exception:  # noqa: BLE001
-            kdj_shared = None
+    # KDJ 惰性共享：gate_pre 与 scorer_pre(_sc_kdj_j) 同口径各取所需——缓存命中
+    # 时连这次都省；值与旧版急切计算逐位一致（同一函数同一输入）。
+    kdj_box: list = []
+
+    def _kdj_once():
+        if not kdj_box:
+            shared = None
+            if (
+                entry_gate is not None
+                and scorer_pre_fn is _precompute_kdj_j_series
+                and _kdj is not None
+            ):
+                try:
+                    shared = _kdj_series(df, fill_na=50.0)
+                except Exception:  # noqa: BLE001
+                    shared = None
+            kdj_box.append(shared)
+        return kdj_box[0]
+
+    def _battery(name: str, fn: Callable) -> Any:
+        """单个电池的缓存挂点（None=关 → 直算，旧路径逐位不变）。"""
+        return ic.get_or_compute(code, name, df, fn) if ic is not None else fn()
+
+    # 可成交性:涨停/停牌不可买,跌停/停牌不可卖(逐股算一次,循环内复用)
+    if tradability:
+        _trad = _battery(
+            "trad",
+            lambda: dict(
+                zip(("buy_ok", "sell_ok"), tradable_flags(df, code), strict=True)
+            ),
+        )
+        buy_ok, sell_ok = _trad["buy_ok"], _trad["sell_ok"]
+    else:
+        buy_ok, sell_ok = None, None
+    # scorer_pre 电池按 scorer 身份分键（expr_<hash> 键在 SCORERS 注册在案）：
+    scorer_key = (
+        next((k for k, v in SCORERS.items() if v is scorer), None)
+        if scorer is not None
+        else None
+    )
     return {
         "df": df,
         "n": n,
-        "bbi": _bbi_series(df["close"]),
+        "bbi": _battery("bbi", lambda: _bbi_series(df["close"])),
         # QSX 知行短期趋势线（跌破清仓用，v0.120）:逐股算一次,循环内复用
-        "qsx": _qsx_series(df["close"]) if qsx_exit_consec > 0 else None,
+        "qsx": _battery("qsx", lambda: _qsx_series(df["close"]))
+        if qsx_exit_consec > 0
+        else None,
         "buy_ok": buy_ok,
         "sell_ok": sell_ok,
         # 中大阳线标记(分批止盈用):逐股算一次,避免每个信号重算
-        "bull_flags": _medium_large_bull_flags(df, code)
+        "bull_flags": _battery("bull_flags", lambda: _medium_large_bull_flags(df, code))
         if scale_out_frac > 0
         else None,
         # ATR(14)（止损余量 stop_buffer="atr" 用）:同样逐股算一次,循环内复用
-        "atr": _atr_series(df) if stop_buffer == "atr" else None,
-        "gate_pre": _precompute_gate_series(df, kdj_shared)
+        "atr": _battery("atr", lambda: _atr_series(df))
+        if stop_buffer == "atr"
+        else None,
+        "gate_pre": _battery(
+            "gate_pre", lambda: _precompute_gate_series(df, _kdj_once())
+        )
         if entry_gate is not None
         else None,
         # scorer 预计算全序列（_sc_b1_pullback 用）:逐股算一次,循环内点查询复用
-        "scorer_pre": (
-            scorer_pre_fn(df, kdj_shared)
-            if scorer_pre_fn is _precompute_kdj_j_series
-            else scorer_pre_fn(df)
+        "scorer_pre": _battery(
+            f"scorer_pre@{scorer_key or getattr(scorer, '__qualname__', 'anon')}",
+            lambda: (
+                scorer_pre_fn(df, _kdj_once())
+                if scorer_pre_fn is _precompute_kdj_j_series
+                else scorer_pre_fn(df)
+            ),
         )
         if scorer_pre_fn is not None
         else None,
         # OHLC float 数组(simulate_b1_trade 用):逐股算一次,避免每笔重复 astype
+        # （轻量提取不挂缓存——astype×4+tolist 是 O(n) 小头，挂缓存只会徒增
+        # 序列化风险面；缓存服务的是重计算电池）
         "ohlc": tuple(
             df[c].astype(float).values for c in ("close", "low", "high", "open")
         ),
@@ -3707,6 +3746,7 @@ def evaluate_trades(
     signals_out: Optional[list[dict[str, Any]]] = None,
     signals_in: Optional[dict[str, list[dict[str, Any]]]] = None,
     missing_out: Optional[list[str]] = None,
+    indicator_cache: Optional[Any] = None,
 ) -> list[dict[str, Any]]:
     """在 scorer 判「可买」的 as-of 日进场，按 B1 规则(止损+BBI)模拟到出场；非重叠(平仓后再找)。
 
@@ -3815,6 +3855,7 @@ def evaluate_trades(
             None if replay_only else entry_gate,
             scorer=None if replay_only else scorer,
             qsx_exit_consec=qsx_exit_consec,
+            indicator_cache=indicator_cache,
         )
         if prep is None:
             continue
@@ -5293,8 +5334,33 @@ def _build_parser() -> argparse.ArgumentParser:
         help="允许滚动尾部截断(--count 尾部起点晚于 --start)降级为 WARN 继续;"
         "次新股为主的宇宙会合法误触护栏时用;默认 fail-closed",
     )
+    ap.add_argument(
+        "--indicator-cache",
+        action="store_true",
+        help="研究侧加速：逐股电池（BBI/QSX/ATR/可成交性/gate_pre/scorer_pre）"
+        "落盘复用（data/cache/indicators/，npz 原子写；指纹含 vipdoc mtime/尾记录"
+        "+xdxr 内容摘要+窗口段，口径见 research/indicator_cache.py）。"
+        "⚠️ live 不可用；as-of 重播种路径（score_return_study）不可用",
+    )
     ap.add_argument("--out", default="")
     return ap
+
+
+def _indicator_cache_of(args: Any) -> Optional[Any]:
+    """--indicator-cache 开启时构造盘缓存实例（默认关 → None，行为逐位不变）。
+
+    adjust 口径写死 "qfq"：研究侧加载（_load_bars_local → get_ohlcv_table）
+    没有 adjust 旗标、恒走默认前复权——口径变的那天这里必须同步。
+    """
+    if not getattr(args, "indicator_cache", False):
+        return None
+    from custos.research.indicator_cache import IndicatorCache  # noqa: PLC0415
+
+    c = IndicatorCache(adjust="qfq")
+    print(
+        f"[INFO] 指标盘缓存开：{c.root}（包版本 v{c.pack_version()}）", file=sys.stderr
+    )
+    return c
 
 
 def _resolve_universe(args: Any, ap: argparse.ArgumentParser) -> list[str]:
@@ -5540,10 +5606,12 @@ def _stream_trades(
     sector_gate: Optional[Callable],
     signals_in: Optional[dict[str, list[dict[str, Any]]]] = None,
     signals_out: Optional[list[dict[str, Any]]] = None,
+    indicator_cache: Optional[Any] = None,
 ) -> tuple[list[dict[str, Any]], int, float, float]:
     """逐股流式主循环：加载→评估→释放，避免全量载入 OOM。
     返回 ``(trades, n_loaded, t_load, t_eval)``（耗时拆分供 [TIME] 行）。
-    ``signals_in``/``signals_out`` 透传给 evaluate_trades（信号重放/落盘，见其 docstring）。"""
+    ``signals_in``/``signals_out`` 透传给 evaluate_trades（信号重放/落盘，见其 docstring）。
+    ``indicator_cache``：指标盘缓存（``--indicator-cache``；None=关，行为逐位不变）。"""
     trades: list[dict[str, Any]] = []
     import gc
     import time as _time
@@ -5597,6 +5665,7 @@ def _stream_trades(
                 stop_buffer=args.stop_buffer,
                 stop_pct_buffer=args.stop_pct_buffer,
                 stop_atr_buffer=args.stop_atr_buffer,
+                indicator_cache=indicator_cache,
                 cost_zone_bars=args.cost_zone_bars,
                 cost_zone_pct=args.cost_zone_pct,
                 signals_in=signals_in,
@@ -5741,6 +5810,7 @@ def _run_trade_sim(
             sector_gate,
             signals_in=signals_in,
             signals_out=signals_collected,
+            indicator_cache=_indicator_cache_of(args),
         )
     except SignalsDateMismatch as e:
         # 重放对账 fail-closed（_trades_from_signals 的日期核对）：信号文件是

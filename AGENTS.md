@@ -34,13 +34,65 @@
 
 ```mermaid
 flowchart TB
-    L4["L4 · 五时点 runner + research/ 研究（叶子层；**生产永不 import 研究**，测试钉死）"]
-    L3["L3 · pipeline/ 四 stage 包：screening 选股 · market_timing 择时 · holdings 持仓 · close_review 复盘<br/>⚠️ 同层交叉合规存在：close_review→holdings/market_timing、daily_report→close_review"]
-    L2["L2 · core/factors/ 因子注册表（status×live_use×stage 三维 + 谱系）+ core/trades/ 台账/计划"]
-    L1["L1 · datasource/ 采集（local_tdx 通达信封装 · collect 报价资金流 · news RSS；厂商库只许此层）"]
-    L0["L0 · core/ 基建：paths / contracts / indicators / exit_rules / pipeline_kit / runtime_guards"]
-    L4 --> L3 --> L2 --> L1 --> L0
+    subgraph L4["L4 · 编排与研究（叶子层）"]
+        RUN["run_0850/0905/1445/1700/1800 五时点入口<br/>+ daily_pipeline / daily_report"]
+        RES["research/ 研究回测<br/>backtest_factors · strategy_grid · evolution/ · 各 study"]
+    end
+
+    subgraph L3["L3 · pipeline/ 四 stage 包"]
+        SCR["screening/ 选股链<br/>公式初筛→充实→打分→候选表"]
+        MKT["market_timing/ 择时评分 · AMV 状态机"]
+        HLD["holdings/ b1 持仓状态机 · 技术批处理"]
+        REV["close_review/ 14:45 · 周/月复盘 · MFE/MAE"]
+    end
+
+    subgraph L2["L2 · 领域实现"]
+        FAC["core/factors/ 因子注册表<br/>（status×live_use×stage + research_ref/trajectory_ref）"]
+        TRD["core/trades/ 台账标准化 · 对账 · 持仓计划"]
+    end
+
+    subgraph L1["L1 · datasource/ 采集（厂商库只许此层）"]
+        TDX["local_tdx/ 通达信封装<br/>vipdoc 日线 · 权息 · 板块文件"]
+        COL["collect/ 持仓/指数报价 · 资金流 · 增量行情"]
+        NEWS["news/ RSS 采集过滤"]
+        ADP["顶层适配：trading_calendar · breadth_basis<br/>refresh_eod_klines · sync_compass_amv 等"]
+    end
+
+    subgraph L0["L0 · core/ 基建（contracts 零内部依赖）"]
+        INF["paths · contracts · indicators · exit_rules · b1_thresholds"]
+        KIT["pipeline_kit · fmt · net_retry · code_utils · report_audit"]
+        GRD["runtime_guards / runtime_gate<br/>⚠️ 读 L3 产物形状（刻意折中，不 import）"]
+    end
+
+    RUN --> SCR
+    RUN --> MKT
+    RUN --> HLD
+    RUN --> REV
+    RES -.->|"只读复用其产物/引擎；反向 import 被测试禁止"| SCR
+    SCR --> FAC
+    SCR --> TDX
+    MKT --> FAC
+    HLD --> FAC
+    HLD --> TRD
+    REV -.->|"同层交叉（合规）"| HLD
+    REV -.->|"同层交叉（合规）"| MKT
+    FAC --> INF
+    FAC --> TDX
+    TRD --> INF
+    TDX --> INF
+    COL --> INF
+    NEWS --> INF
+    FAC --> KIT
+    SCR --> KIT
+    HLD --> KIT
+    MKT --> KIT
+    REV --> KIT
+    RUN --> GRD
 ```
+
+因子包内部互赖（同层合法，注册表测试核对）：`b1_dual_factor → s_shape /
+platform_pullback`、`main_rally_factor → rsi_state`、`sector_phase →
+sector_mainstream`。
 
 L0→L4 单向依赖，下层不得依赖上层；contracts.py **零内部依赖**（只许 stdlib）。
 厂商库（mootdx/akshare/qlib/tqcenter…）只许 `datasource/` import（白名单钉测，
@@ -103,6 +155,10 @@ uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/
 - 因子 IC 画像（`factor_ic_profile`）：SCORERS/DSL 的截面 RankIC/ICIR + horizon
   衰减全因子可比表——**分诊镜不是晋级判据**（晋级永远走双窗+三轴交易语义；
   读数 L3− 带幸存者偏差，R19/R21/R14）。
+- 指标盘缓存（`research/indicator_cache.py`，`backtest_factors --indicator-cache`
+  开启）：研究专用逐股电池复用——**红线：不得服务 live、不得服务 as-of 重播种
+  路径**（score_return_study 判例）；指标实现任何改动必须 bump
+  `INDICATOR_PACK_VERSION`（不改=旧缓存被当新实现读）。
 
 ## 6. 多 agent / 多机协作纪律
 

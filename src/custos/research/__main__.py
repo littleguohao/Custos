@@ -158,6 +158,11 @@ TOOLS: dict[str, tuple[str, str]] = {
         "表达式（TS_RANK 归一加权和）复用 strategy_grid 单元格——双窗/±50% 灵敏度/"
         "随机臂对照全确定性；增量在新轴不在调权（⚠️ pre2019 终审段相交即拒跑）",
     ),
+    "indicator_cache": (
+        "diagnostic",
+        "指标盘缓存盘点（条目/占用/按电池分布；缓存本体由 backtest_factors "
+        "--indicator-cache 生产——研究侧加速，live 不可用）",
+    ),
     "factor_ic_profile": (
         "study",
         "因子 IC 画像（分诊镜）：SCORERS 19 键 + DSL 表达式的截面 RankIC/ICIR 与 "
