@@ -239,6 +239,24 @@ class TestSignatureReuse:
         p = sg.cell_out_path(tmp_path, cell, "sig123456789")
         assert p.name == "s__g__a_b_c_d__sig123456789.json"
 
+    def test_cell_out_path_truncates_overlong_names(self, tmp_path):
+        """Windows MAX_PATH 预算：超长（复合 expr）scorer 名截短、签名留尾；
+        未超限的短名逐位不变（已落盘结果复用不受修复影响）。"""
+        long_cell = {
+            "scorer": "expr:" + "x" * 500,
+            "gate": "g",
+            "exit": "e",
+            "params": {},
+        }
+        p = sg.cell_out_path(tmp_path, long_cell, "sig123456789")
+        assert len(str(p)) <= sg._MAX_PATH_BUDGET
+        assert p.name.endswith("__g__e__sig123456789.json")
+        short_cell = {"scorer": "s", "gate": "g", "exit": "e", "params": {}}
+        assert (
+            sg.cell_out_path(tmp_path, short_cell, "sig123456789").name
+            == "s__g__e__sig123456789.json"
+        )
+
 
 class TestWindowAndUniversePinning:
     """隐式窗口/宇宙转显式：隔天数据漂移 ⇒ 签名变 ⇒ 旧格不被静默误复用。"""

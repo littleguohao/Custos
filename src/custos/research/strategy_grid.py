@@ -335,11 +335,24 @@ def _safe_name(s: Any) -> str:
     return _NAME_SAFE.sub("_", str(s)).strip("_") or "_"
 
 
+# Windows MAX_PATH=260（含结尾 NUL ⇒ 可用 259）：复合 ``expr:`` 形态 scorer 拼出的
+# 长文件名会在子进程写盘时 FileNotFoundError（R34 生产机实测：多腿复合格全灭于
+# 评估完成后的写结果时刻）。超预算时截短 scorer 段——签名（全量 CLI 参数 + 宇宙
+# 摘要的哈希）仍在末尾，唯一性与复用口径不变；未超限的历史文件名逐位不变。
+_MAX_PATH_BUDGET = 259
+
+
 def cell_out_path(
     out_dir: pathlib.Path, cell: dict[str, Any], sig: str
 ) -> pathlib.Path:
     parts = [_safe_name(cell[k]) for k in ("scorer", "gate", "exit")]
-    return out_dir / f"{parts[0]}__{parts[1]}__{parts[2]}__{sig}.json"
+    name = f"{parts[0]}__{parts[1]}__{parts[2]}__{sig}.json"
+    budget = _MAX_PATH_BUDGET - len(str(out_dir)) - 1  # 1 = 目录/文件名分隔符
+    if len(name) > budget:
+        tail = f"__{parts[1]}__{parts[2]}__{sig}.json"
+        keep = budget - len(tail)
+        name = f"{parts[0][:keep]}{tail}" if keep >= 8 else f"cell__{sig}.json"
+    return out_dir / name
 
 
 def _resolve_data_dates(a: argparse.Namespace) -> Optional[tuple[str, str]]:
