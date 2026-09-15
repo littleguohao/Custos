@@ -20,4 +20,10 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+      # uv.lock 在本机（国内清华源）生成，wheel URL 钉死 tuna 镜像；GitHub runner
+      # 在海外访问 tuna 会 403。tuna 与 pythonhosted 的 /packages/ 路径逐位镜像、
+      # 文件内容一致（lock 里 sha256 不变），CI 侧逐字换 host 即可，版本/哈希不动。
+      - name: Rewrite tuna mirror URLs to PyPI (tuna 403s from GH runners)
+        shell: bash
+        run: sed -i 's|pypi\.tuna\.tsinghua\.edu\.cn/packages|files.pythonhosted.org/packages|g; s|pypi\.tuna\.tsinghua\.edu\.cn/simple|pypi.org/simple|g' uv.lock
       - run: uv run pytest -q
