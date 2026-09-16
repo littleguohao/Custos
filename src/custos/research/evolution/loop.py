@@ -152,6 +152,9 @@ class _RunCtx:
     on_event: Callable[[dict], None] | None
     cell_runner: CellRunner | None  # joint 模式的三轴适应度执行器（非 joint 为 None）
     marks_cases: list | None = None  # marks 监督模式的正例案例（None=关闭）
+    marks_bars_provider: Any = None  # 全历史 loader（Callable[[str], df|None]；
+    # None → excerpt 回退。marks 用 bars 与挖掘窗解耦：截至 buy_date 的尽量长
+    # 历史，不受 mining_start/end 截断——正例点是发现材料不是挖掘数据）
 
 
 @dataclass(frozen=True)
@@ -380,6 +383,7 @@ def _marks_layer(
         payload["expression"],
         ctx.marks_cases,
         rank_window=ctx.cfg.marks_rank_window,
+        bars_provider=ctx.marks_bars_provider,
     )
     metrics["marks"] = m
     reasons: list[str] = []
@@ -501,6 +505,7 @@ def run_loop(
     *,
     on_event: Callable[[dict], None] | None = None,
     cell_runner: CellRunner | None = None,
+    marks_bars_provider: Any = None,
 ) -> TrajectoryPool:
     """跑完整进化循环，返回 pool（就地累积，返回值仅为方便链式）。
 
@@ -531,6 +536,7 @@ def run_loop(
         on_event=on_event,
         cell_runner=cell_runner,
         marks_cases=marks_cases,
+        marks_bars_provider=marks_bars_provider,
     )
     for direction in cfg.directions:
         for round_i in range(cfg.rounds):

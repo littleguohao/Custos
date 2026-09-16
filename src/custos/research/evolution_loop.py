@@ -844,6 +844,7 @@ class _ExecCtx:
     llm: Any
     pool: TrajectoryPool
     cell_runner: Any  # joint 的循环内三轴适应度执行器（非 joint 为 None）
+    marks_bars_provider: Any = None  # marks 全历史 loader（None → excerpt 回退）
 
 
 def _execute(ctx: _ExecCtx) -> None:
@@ -856,6 +857,7 @@ def _execute(ctx: _ExecCtx) -> None:
             ctx.pool,
             on_event=_make_on_event(ctx.args, ctx.llm),
             cell_runner=ctx.cell_runner,
+            marks_bars_provider=ctx.marks_bars_provider,
         )
     except _BudgetExceeded as exc:
         print(f"[WARN] {exc}", file=sys.stderr)
@@ -905,8 +907,21 @@ def main(
         marks_rank_window=args.marks_rank_window,
     )
     cell_runner = _make_cell_runner(args, prep.codes, out_dir) if args.joint else None
+    # marks 用 bars 与挖掘窗解耦（R36 口径）：生产机从 loader 按 code 取全历史
+    # （start=None/end=None + count 口径），截断到 buy_date 由 resolve_bars 做。
+    marks_bars_provider = None
+    if args.marks:
+        import functools as _ft  # noqa: PLC0415
+
+        marks_bars_provider = _ft.partial(
+            bt._load_one_bars, count=args.count, start=None, end=None
+        )
     pool_size_before = len(pool)  # 本 run 新增轨迹数的基线（空结果护栏用）
-    _execute(_ExecCtx(args, cfg, mining_bars, prep.llm, pool, cell_runner))
+    _execute(
+        _ExecCtx(
+            args, cfg, mining_bars, prep.llm, pool, cell_runner, marks_bars_provider
+        )
+    )
 
     # 空结果护栏（对照 backtest_factors._empty_result_guard 语义）：本次运行什么都没
     # 产出（LLM 全挂等）→ 非零退出且不写产物；有 fail 轨迹属正常研究产出，落盘。

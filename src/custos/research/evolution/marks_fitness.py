@@ -19,6 +19,15 @@
 
 ⚠️ 后视标注声明：买点是事后标注（选择偏差，B1_DATA 10 例，L1 发现材料）——
 本模块的读数只用于候选排序，任何「召回 X/10」都不作判据。
+
+**案例口径（owner 2026-09-16 拍板）**：案例身份 = (code, buy_date) 二元组，
+权威且仅此；CSV 窗口只是材料片段，**观察窗自由**（买点前任意周期，数据允许
+为限——``bars_provider`` 给全历史则用全历史）。评估用 bars 经
+``b1_perfect_dataset.resolve_bars`` 解析（provider 全历史物理截到 buy_date 含
+当日 ⇒ provider 路径天然无未来函数；excerpt 回退是 CSV 片段，买点即末根）。
+本函数在 evaluate 之前对解析结果**再物理截断一次**到 buy_date（含）——
+幂等双保险（防未来函数纪律按物理截断执行，不靠算子因果性自觉）；
+截断点之后的数据被改动，结果逐位不变（篡改钉测在案）。
 """
 
 from __future__ import annotations
@@ -63,7 +72,11 @@ def _ts_rank_at_buy(
 
 
 def marks_score(
-    expr: str, cases: list, *, rank_window: int = DEFAULT_RANK_WINDOW
+    expr: str,
+    cases: list,
+    *,
+    rank_window: int = DEFAULT_RANK_WINDOW,
+    bars_provider: Any = None,
 ) -> dict[str, Any]:
     """表达式在正例买点上的分离读数（自指口径，见模块 docstring）。
 
@@ -73,18 +86,32 @@ def marks_score(
          "contrast": 买点均值 − 案例内全日均值（同样本对差后取均值的口径：
                      逐案例 (rank_buy − mean(rank_all)) 再对案例求均值，
                      双侧同样本才可比——与全均值直接相减不同，写死此口径）,
-         "per_case": [{code, buy_date, rank, status}],
+         "per_case": [{code, buy_date, rank, status, bars_source, n_bars}],
          "n_hit": 有效点数, "n_cases": 案例数}
 
     案例当日无值（warmup/NaN/数据缺）→ 该点记 None 不计入均值，per_case
     status="no_value" 照实记录（不静默跳过）；全部无值 → 汇总全 None，
     n_hit=0（调用方按 fail-closed 处理，不许当高分）。
+
+    ``bars_provider``（Callable[[str], DataFrame|None]）：给全历史则评估在
+    「买点前任意周期」上做（观察窗自由）；None/空帧回退 excerpt（CSV 片段，
+    观察窗受限是数据妥协不是设计）。**物理截断于 buy_date（含当日）**——
+    resolve_bars 与本函数双保险；买点后的数据不得进入求值。
+    excerpt 回退时 contrast/均值的口径不变（在可用历史上算）。
     """
+    from custos.research.b1_perfect_dataset import resolve_bars  # noqa: PLC0415
+
     per_case: list[dict[str, Any]] = []
     buy_ranks: list[float] = []
     contrasts: list[float] = []
     for c in cases:
-        buy_rank = _ts_rank_at_buy(expr, c.bars, c.buy_date, rank_window)
+        bars, source = resolve_bars(c, bars_provider)
+        # 物理截断双保险（resolve_bars 已截 provider 路径；excerpt 末根即买点）：
+        bars = bars[bars["date"].astype(str).str[:10] <= c.buy_date].reset_index(
+            drop=True
+        )
+        n_bars = len(bars)
+        buy_rank = _ts_rank_at_buy(expr, bars, c.buy_date, rank_window)
         if buy_rank is None:
             per_case.append(
                 {
@@ -92,13 +119,15 @@ def marks_score(
                     "buy_date": c.buy_date,
                     "rank": None,
                     "status": "no_value",
+                    "bars_source": source,
+                    "n_bars": n_bars,
                 }
             )
             continue
         # 案例内全日均值（同 expr 同窗口全部有效 TS_RANK 值的均值）
         try:
             tree = expr_dsl.parse(f"TS_RANK(({expr}),{rank_window})")
-            s_all = expr_dsl.evaluate(tree, c.bars).to_numpy(dtype=float)
+            s_all = expr_dsl.evaluate(tree, bars).to_numpy(dtype=float)
             valid = s_all[np.isfinite(s_all)]
             day_mean = float(valid.mean()) if len(valid) else float("nan")
         except Exception:  # noqa: BLE001
@@ -110,6 +139,8 @@ def marks_score(
                 "buy_date": c.buy_date,
                 "rank": buy_rank,
                 "status": "hit",
+                "bars_source": source,
+                "n_bars": n_bars,
             }
         )
         buy_ranks.append(buy_rank)

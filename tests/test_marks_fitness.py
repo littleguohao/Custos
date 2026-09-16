@@ -179,3 +179,106 @@ class TestLoopMarksGate:
         assert t_off.decision == t_default.decision == "pass"
         assert "marks" not in t_off.mining_metrics
         assert t_off.mining_metrics == t_default.mining_metrics
+
+
+# ---------------------------------------------------------------------------
+# v0.243（owner 拍板口径：案例=(code, 买点日期)，观察窗自由，评估物理截断于买点）
+# ---------------------------------------------------------------------------
+
+
+def _long_history(code: str, n_before: int = 220, buy_close: float = 12.0):
+    """provider 全历史：买点前 n_before 根 + 买点当日 + 买点后 10 根（含篡改区）。"""
+    rng = np.random.default_rng(7)
+    n = n_before + 1 + 10
+    close = 10 + np.cumsum(rng.normal(0.02, 0.3, n))
+    close[n_before] = buy_close  # 买点当日钉死
+    dates = pd.date_range("2024-01-02", periods=n)
+    return pd.DataFrame(
+        {
+            "date": dates,
+            "open": close,
+            "high": close + 0.1,
+            "low": close - 0.1,
+            "close": close,
+            "volume": np.full(n, 1e6),
+            "amount": close * 1e6,
+        }
+    ), dates[n_before].strftime("%Y-%m-%d")
+
+
+class TestNewCaseSemantics:
+    def test_resolve_bars_provider_truncates_and_marks_source(self):
+        """resolve_bars：provider 全历史物理截到买点（含）+ bars_source 记录。"""
+        from custos.research.b1_perfect_dataset import resolve_bars
+
+        df_long, buy_date = _long_history("600001")
+        case = _case("600001", [10.0, 11.0, 12.0], [1e6] * 3)
+        # 修正：_case 的 buy_date 用其自身末根；这里覆盖为长历史的买点日
+        case = case.__class__(**{**case.__dict__, "buy_date": buy_date})
+        bars, source = resolve_bars(case, lambda code: df_long)
+        assert source == "provider"
+        assert str(bars["date"].iloc[-1].date()) == buy_date  # 截到买点（含）
+        assert len(bars) == 221  # 220 前置 + 买点；买点后 10 根不在场
+        # 回退路径：provider None → excerpt
+        bars2, source2 = resolve_bars(case, None)
+        assert source2 == "excerpt"
+        assert bars2 is case.excerpt_bars
+
+    def test_marks_score_tamper_after_buy_invariant(self):
+        """篡改钉测（防未来函数纪律）：买点后数据被改动，结果逐位不变。"""
+        df_long, buy_date = _long_history("600001")
+        case = _case("600001", [10.0, 11.0, 12.0], [1e6] * 3)
+        case = case.__class__(**{**case.__dict__, "buy_date": buy_date})
+        expr = "close/MA(close,20)"
+        r1 = marks_score(expr, [case], rank_window=20, bars_provider=lambda c: df_long)
+        # 篡改买点后 10 根（大涨 10 倍）
+        tampered = df_long.copy()
+        pos = len(df_long) - 10
+        tampered.loc[pos:, "close"] *= 10.0
+        tampered.loc[pos:, "high"] *= 10.0
+        tampered.loc[pos:, "low"] *= 10.0
+        r2 = marks_score(expr, [case], rank_window=20, bars_provider=lambda c: tampered)
+        assert r1 == r2, "买点后数据被改动 ⇒ marks_score 必须逐位不变"
+        assert r1["per_case"][0]["bars_source"] == "provider"
+        assert r1["per_case"][0]["n_bars"] == 221
+        # 删除买点后全部行（provider 只给到买点）也逐位不变
+        r3 = marks_score(
+            expr, [case], rank_window=20, bars_provider=lambda c: df_long.iloc[:221]
+        )
+        assert r1 == r3
+
+    def test_long_history_matches_hand_prefix_compute(self):
+        """长历史下 TS_RANK 值与手工前缀计算一致（截断帧上手算对拍）。"""
+        df_long, buy_date = _long_history("600001")
+        case = _case("600001", [10.0, 11.0, 12.0], [1e6] * 3)
+        case = case.__class__(**{**case.__dict__, "buy_date": buy_date})
+        expr = "close/MA(close,20)"
+        r = marks_score(expr, [case], rank_window=20, bars_provider=lambda c: df_long)
+        # 手工：截断到买点（含）后全序列 TS_RANK，取末点
+        from custos.research.evolution import expr_dsl
+
+        cut = df_long[df_long["date"].astype(str).str[:10] <= buy_date]
+        s = expr_dsl.evaluate(f"TS_RANK(({expr}),20)", cut)
+        assert r["per_case"][0]["rank"] == pytest.approx(float(s.iloc[-1]))
+
+    def test_excerpt_fallback_unchanged(self):
+        """无 provider 时 excerpt 回退：口径与旧行为一致（在可用历史上算）。"""
+        n = 80
+        vol_low = [1e6] * n
+        vol_low[-1] = 5e6
+        c1 = _case("600001", [10.0] * n, vol_low)
+        r = marks_score("volume/MA(volume,20)", [c1], rank_window=20)
+        assert r["per_case"][0]["bars_source"] == "excerpt"
+        assert r["per_case"][0]["n_bars"] == n
+        assert r["per_case"][0]["rank"] == pytest.approx(0.975, abs=1e-9)
+
+    def test_provider_none_falls_back(self):
+        """provider 给 None/空帧 → excerpt 回退（bars_source=excerpt 照实记录）。"""
+        n = 80
+        vols = [1e6] * n
+        vols[-1] = 5e6
+        c1 = _case("600001", [10.0] * n, vols)
+        for bad in (lambda c: None, lambda c: pd.DataFrame()):
+            r = marks_score("volume/MA(volume,20)", [c1], bars_provider=bad)
+            assert r["per_case"][0]["bars_source"] == "excerpt"
+            assert r["n_hit"] == 1

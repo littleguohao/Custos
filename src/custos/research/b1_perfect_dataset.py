@@ -49,15 +49,26 @@ _FILE_RE = re.compile(
 
 @dataclass(frozen=True)
 class PerfectB1Case:
-    """一个完美 B1 正例（窗口日线 + 买点标注）。frozen——只读材料。"""
+    """一个完美 B1 正例（窗口日线 + 买点标注）。frozen——只读材料。
+
+    ⚠️ 案例身份（owner 2026-09-16 拍板）：**(code, buy_date) 二元组，权威且仅此**；
+    ``bars`` 是 owner 截取的 CSV 材料片段（~3 个月），留存作参考，**不再是观察窗
+    定义**——观察窗自由（买点前任意周期，数据允许为限），评估用 bars 走
+    ``resolve_bars`` 解析（provider 全历史优先，excerpt 回退）。
+    """
 
     code: str  # 6 位数字代码（去后缀，与全项目 bars 键一致）
     code_full: str  # 原始带后缀（如 002074.SZ；板块/涨跌幅制度判定用）
     start: str  # 窗口首根 YYYY-MM-DD（文件名口径）
     end: str  # 窗口末根 YYYY-MM-DD（文件名口径）
     buy_date: str  # 买点 = 最后交易日（bars 末根；owner 口径，事后标注）
-    bars: pd.DataFrame  # 小写列 date/open/high/low/close/volume/amount
+    bars: pd.DataFrame  # 小写列 date/open/high/low/close/volume/amount（CSV 片段）
     n_bars: int
+
+    @property
+    def excerpt_bars(self) -> pd.DataFrame:
+        """CSV 片段的显式别名（原名 ``bars`` 语义保留；身份口径见类 docstring）。"""
+        return self.bars
 
 
 def _norm_code(code_full: str) -> str:
@@ -124,6 +135,36 @@ def load_cases(dir: Path | str = DEFAULT_DATA_DIR) -> list[PerfectB1Case]:
     return cases
 
 
+# ---------------------------------------------------------------------------
+# 观察窗解析（owner 2026-09-16 拍板口径：案例=(code, buy_date)，观察窗自由）
+# ---------------------------------------------------------------------------
+
+#: provider 契约：``Callable[[str], DataFrame | None]``——按 code 取该股**尽量长**
+#: 的历史日线（生产机 = local_tdx 全历史 loader；None/空帧 → 回退 excerpt）。
+BarsProvider = Any  # Callable[[str], pd.DataFrame | None]
+
+
+def resolve_bars(
+    case: PerfectB1Case, provider: BarsProvider = None
+) -> tuple[pd.DataFrame, str]:
+    """解析案例的评估用 bars：provider 全历史优先，excerpt 回退。
+
+    - provider 给出非空帧 → **物理截到 buy_date（含当日）** 后返回，
+      ``bars_source="provider"``（观察窗 = 买点前任意周期，数据允许为限；
+      截断是防未来函数纪律——买点之后的数据不得进入任何求值）；
+    - provider 为 None / 返回 None / 空帧 → 回退 CSV 片段，
+      ``bars_source="excerpt"``——口径差异如实写明：excerpt 只有 ~3 个月，
+      **观察窗受限是数据妥协不是设计**（案例窗口不再定义观察窗）。
+    """
+    if provider is not None:
+        df = provider(case.code)
+        if df is not None and len(df):
+            d = df[df["date"].astype(str).str[:10] <= case.buy_date]
+            if len(d):
+                return d.reset_index(drop=True), "provider"
+    return case.excerpt_bars, "excerpt"
+
+
 def audit_cases(cases: list[PerfectB1Case]) -> dict[str, Any]:
     """Phase 0 审计报告（dict，研究产物，不进 live）。
 
@@ -188,7 +229,7 @@ def audit_cases(cases: list[PerfectB1Case]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _build_parser() -> "argparse.ArgumentParser":
+def _build_parser():
     """⚠️ add_argument 定义必须留在**本文件**内（`_modes()` 用 AST 抽取）。"""
     import argparse  # noqa: PLC0415
 
