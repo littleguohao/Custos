@@ -126,8 +126,11 @@ def _load_marks(args: Any, ap: argparse.ArgumentParser) -> tuple[list[dict], str
             payload = json.loads(p.read_text(encoding="utf-8-sig"))
         except (OSError, ValueError) as exc:
             ap.error(f"--marks JSON 不可解析: {p}（{type(exc).__name__}: {exc}）")
+        if isinstance(payload, dict):
+            # 权威清单信封形态（version/note/marks，R36_perfect_b1_marks.json）
+            payload = payload.get("marks")
         if not isinstance(payload, list):
-            ap.error(f"--marks JSON 顶层必须是 list: {p}")
+            ap.error(f"--marks JSON 顶层必须是 list 或含 marks 清单的信封: {p}")
         bad = [
             m
             for m in payload
@@ -176,6 +179,13 @@ def _v0_at(
     df = bars_loader(code, count, None, date)
     if df is None or not len(df):
         return None
+    df = df.copy()
+    # date 列归一为 datetime64：真实 _load_one_bars 带窗口裁剪时把 date 转成
+    # 字符串（backtest_factors.py:4935），而 enrich 检测器（weekly_j 周线
+    # resample 等）依赖 datetime64——转 str 会炸（score_return_study.py:504
+    # 冒烟实测教训）；生产机 2026-09-16 实测：str 列 ⇒ scorer 全炸 ⇒
+    # 异常吞成 None ⇒ 0 有效打点拒跑。比较仍走 astype(str) 现算（见下）。
+    df["date"] = pd.to_datetime(df["date"])
     dates = df["date"].astype(str).str[:10].tolist()
     pos = {d: i for i, d in enumerate(dates)}.get(date)
     if pos is None:

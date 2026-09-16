@@ -144,6 +144,11 @@ def test_test_suite_does_not_write_into_repo():
         if not d.exists():
             continue
         for p in d.rglob("*"):
+            if "worktree_pre67" in p.parts:
+                # #76① 影子对照的旁路检出（含 data junction 投过来的共享数据
+                # 视图）：非测试产物，其 mtime 由影子跑数/共享数据刷新驱动
+                # （2026-09-16 实测：xdxr 权息缓存刷新被误报进 fresh）
+                continue
             if p.is_file() and p.stat().st_mtime > _SESSION_START and p.suffix != ".md":
                 fresh.append(str(p.relative_to(ROOT)))
     assert not fresh, (

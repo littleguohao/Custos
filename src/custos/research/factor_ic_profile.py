@@ -388,8 +388,11 @@ def _load_marks(args: Any, ap: argparse.ArgumentParser) -> tuple[list[dict], str
             payload = json.loads(p.read_text(encoding="utf-8-sig"))
         except (OSError, ValueError) as exc:
             ap.error(f"--marks JSON 不可解析: {p}（{type(exc).__name__}: {exc}）")
+        if isinstance(payload, dict):
+            # 权威清单信封形态（version/note/marks，R36_perfect_b1_marks.json）
+            payload = payload.get("marks")
         if not isinstance(payload, list):
-            ap.error(f"--marks JSON 顶层必须是 list: {p}")
+            ap.error(f"--marks JSON 顶层必须是 list 或含 marks 清单的信封: {p}")
         marks = payload
         source = f"marks_json({p.name})"
     else:

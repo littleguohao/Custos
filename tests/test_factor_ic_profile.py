@@ -572,3 +572,48 @@ class TestMarksEndToEnd:
         assert "kdj_j" in rep["marks"]["per_factor"]
         assert "close" in rep["marks"]["per_factor"]
         assert rep["ranking"]  # 主 ranking 表不变（照出）
+
+
+class TestMarksEnvelope:
+    """权威清单信封形态（{version,note,marks}，R36_perfect_b1_marks.json）与
+    裸 list 同效——v0.244 库内 JSON 入库后生产机直传该文件（此前两工具内联
+    解析器只认裸 list，生产机 2026-09-16 实测拒跑）。"""
+
+    def test_envelope_accepted(self, tmp_path):
+        import argparse
+
+        env = tmp_path / "marks_env.json"
+        env.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "note": "x",
+                    "marks": [
+                        {"code": "600000", "buy_date": "2025-07-10"},
+                        {"code": "600001", "buy_date": "2025-08-01"},
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        ns = argparse.Namespace(marks=str(env))
+        marks, source = fip._load_marks(ns, fip._build_parser())
+        assert [m["code"] for m in marks] == ["600000", "600001"]
+        assert source.startswith("marks_json(")
+
+    def test_authoritative_repo_json_loads(self):
+        """库内权威清单本体过解析（10 点，code/buy_date 形态）。"""
+        import argparse
+        from pathlib import Path
+
+        auth = (
+            Path(__file__).resolve().parents[1]
+            / "governance"
+            / "research"
+            / "R36_perfect_b1_marks.json"
+        )
+        ns = argparse.Namespace(marks=str(auth))
+        marks, _ = fip._load_marks(ns, fip._build_parser())
+        assert len(marks) == 10
+        assert all(isinstance(m["code"], str) and m["buy_date"] for m in marks)

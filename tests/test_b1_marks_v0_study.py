@@ -244,3 +244,42 @@ class TestEndToEnd:
                 index_loader=_index_loader,
             )
         assert exc.value.code == 2
+
+
+class TestMarksEnvelope:
+    """同 factor_ic_profile：权威清单信封（R36_perfect_b1_marks.json）须可吃。"""
+
+    def test_envelope_accepted(self, tmp_path):
+        import argparse
+
+        env = tmp_path / "env.json"
+        env.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "note": "x",
+                    "marks": [{"code": "600001", "buy_date": BUY_DATE}],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        ns = argparse.Namespace(marks=str(env))
+        marks, source = st._load_marks(ns, st._build_parser())
+        assert marks == [{"code": "600001", "buy_date": BUY_DATE}]
+        assert source.startswith("marks_json(")
+
+
+def test_v0_at_normalizes_string_dates():
+    """真实 _load_one_bars 带窗口返回 str 日期列（backtest_factors.py:4935）——
+    _v0_at 必须归一为 datetime64 再进 scorer（enrich 周线 resample 依赖；
+    score_return_study.py:504 教训钉在案）。str 列会炸 scorer ⇒ 全灭 unavailable。"""
+    df = _bars("600001")
+    df["date"] = df["date"].astype(str).str[:10]  # 模拟真实 loader 的 str 形态
+
+    def spy_scorer(df_full, index_full, i, code):
+        assert pd.api.types.is_datetime64_any_dtype(df_full["date"])
+        return 42, "x", {"leg": 1}
+
+    hit = st._v0_at(spy_scorer, lambda *a: df, pd.DataFrame(), "600001", BUY_DATE, 80)
+    assert hit is not None and hit[0] == 42.0 and hit[1] == {"leg": 1}
