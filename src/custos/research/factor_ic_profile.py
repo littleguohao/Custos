@@ -545,6 +545,21 @@ def main(
         ap.error("因子清单为空（--scorers 与 --expr 至少给一个）")
     codes = _resolve_universe(args, ap)
 
+    marks: list[dict] = []
+    marks_source = ""
+    if args.marks:
+        marks, marks_source = _load_marks(args, ap)
+        # 打点股必须进宇宙帧：抽样宇宙抽不到案例股 ⇒ 打点全灭 out_of_universe
+        # （R36 生产机 2026-09-16 实测：seed=0 的 3000 抽样只含 1/10 案例股）。
+        # 并集补入（保序去重），分位口径不变（当日截面秩比）；补入只数 stdout 留痕。
+        have = set(codes)
+        missing = sorted({m["code"] for m in marks} - have)
+        if missing:
+            codes = codes + missing
+            print(
+                f"[INFO] marks 案例股并集补入宇宙帧 {len(missing)} 只: {','.join(missing)}"
+            )
+
     load = (
         loader
         if loader is not None
@@ -577,7 +592,6 @@ def main(
     factors = _factor_frames(scorer_keys, args.expr, sliced)
     marks_block: Optional[dict[str, Any]] = None
     if args.marks:
-        marks, marks_source = _load_marks(args, ap)
         frames_by_name = {f["name"]: f["frame"] for f in factors}
         marks_block = {
             "source": marks_source,

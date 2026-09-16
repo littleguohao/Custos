@@ -617,3 +617,25 @@ class TestMarksEnvelope:
         marks, _ = fip._load_marks(ns, fip._build_parser())
         assert len(marks) == 10
         assert all(isinstance(m["code"], str) and m["buy_date"] for m in marks)
+
+
+def test_marks_codes_union_into_universe(tmp_path, monkeypatch):
+    """--codes/抽样宇宙不含案例股时，案例股并集补入宇宙帧——否则打点全灭
+    out_of_universe（R36 生产机 2026-09-16 实测：seed=0 抽样 3000 只中
+    10 案例只中 1）。分位口径（截面秩比）不变。"""
+    monkeypatch.setattr(bt, "SCORERS", {})
+    bars = _load_all()
+    bars["600003"] = _bars(0.05)  # 案例股：有 bars 但不在 --codes 宇宙里
+    buy_date = str(bars["600003"]["date"].iloc[-1].date())
+    mj = _marks_json(tmp_path, [{"code": "600003", "buy_date": buy_date}])
+    rc = fip.main(
+        _argv(tmp_path, "--expr", "close", "--codes", "c0,c1", "--marks", mj),
+        loader=_loader(bars),
+    )
+    assert rc == 0
+    rep = json.loads(
+        (tmp_path / "t1" / "_factor_ic_profile__t1.json").read_text(encoding="utf-8")
+    )
+    assert rep["universe"]["n_codes"] == 3  # 2 + 并集补入 1
+    pts = rep["marks"]["per_factor"]["close"]["points"]
+    assert pts[0]["code"] == "600003" and pts[0]["status"] == "hit"

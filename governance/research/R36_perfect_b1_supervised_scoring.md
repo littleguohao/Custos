@@ -5,9 +5,12 @@
 > **证据等级**：L1 样本 / L3− 结论封顶（10 个正例全是 2025 年单一近期
 > regime 案例 + 「最后一天=买点」是**事后标注**（选择偏差）——只作发现级材料；
 > 任何结论必须经全宇宙双窗交易语义验证，多重比较显式标注，L3− 封顶）　|
-> **状态**：📋 **预注册（2026-09-16 落档）**——Phase 0 数据接入与审计已落地
-> （`research/b1_perfect_dataset.py` + 钉测 15 例）；后续 Phase 待生产机按
-> 阶段设计执行　|
+> **状态**：🔄 **Phase 1 已取数回填（2026-09-17 生产机三步跑毕）**——Phase 0
+> 数据接入与审计已落地（`research/b1_perfect_dataset.py` + 钉测 15 例）；
+> Phase 1 双口径读数在案（研究侧 19 键落点表 + live 八段 V0 分位/逐腿归因，
+> 见回填区）；Phase 2 监督冒烟首轮 15 候选 IC 门全灭（marks 层未触发，
+> 无晋级候选）；**Phase 3 开启条件（既有腿有区分力）读数上已满足，开否待
+> owner 复核拍板**　|
 > **依赖**：上游：R18（优秀 B1 指纹证据层——本页是它的监督式续篇）R19（技术分
 > 无预测力——诊断问题的必要性来源）R34（打分进化 v1 证伪——新因子挖掘的闸门
 > 与随机对照纪律同源）｜判据纪律：R12（预注册）R14（幸存者宇宙）R11（量级不作数）
@@ -32,7 +35,20 @@ B1 让打分系统给他们高分；用 LLM 进化研究方案，两条路：①
 
 ## 结论
 
-**📋 预注册，尚无结论（2026-09-16 落档，判据跑数前写死）。** Phase 0 已完成：
+**🔄 Phase 1 诊断读数已回填（2026-09-17 生产机）；预注册判据维持——C2~C5
+待候选因子出现才启动**（Phase 2 首轮 15 候选全死于 IC 门，marks 监督层未
+触发，无晋级候选）。诊断面：现行打分对 10 个买点**有区分力但不完备**——
+live V0 八段把 8/10 落进当日全宇宙前 20%（mean 分位 0.84 / median 0.97）；
+漏网两只形态相反：300689 被罚分腿误伤（出货观察/顶背离/量熊合计 −23），
+605378 买点无深 J 平区（正腿稀薄）。研究侧：kdj_j 把买点压在全宇宙最低
+14% 分位（与 j_low 主轴互洽）；reversal_quality 唯一「落点高 0.86 ∧ ICIR
+正 0.497」双占键；main_rally 落点最高 0.94 但 ICIR −0.272（点火高位不
+预测截面胜负）。按 Phase 3 开启条件（Phase 1 显示既有腿有区分力），
+**读数上条件已满足**——开不开、怎么开由 owner 复核后拍板（调权路的
+R30/R34 死刑档案仍有效：权重只是次要维度）。
+
+~~📋 预注册，尚无结论~~ 🔄（原预注册段保留备查，2026-09-16 落档时判据已写死）：
+Phase 0 已完成：
 10 个案例全部加载（涨幅 +11.2%~+207.9% 均为正且显著；买点当日 7 只缩量小阴、
 0 只涨停附近——回调末端形态的实据），审计报告在案。正例召回率（10 中几）
 **只作诊断指标、永远不作判据**（10 点必过拟合）；晋级只认全宇宙双窗交易语义
@@ -144,8 +160,46 @@ B1 让打分系统给他们高分；用 LLM 进化研究方案，两条路：①
 
 - Phase 0（✅ 2026-09-16）：10/10 加载，审计读数见上表；
   `research/b1_perfect_dataset.py` + `tests/test_b1_perfect_dataset.py`（15 例）。
-- Phase 1（待生产机）：全宇宙分布取数命令（附录）、落点分布表、逐腿归因。
-- Phase 2/3（待 owner 复核 Phase 1 后启动）：候选清单、闸门读数、判定。
+- **Phase 1（✅ 2026-09-17 生产机三步跑毕）**——生产机口径偏差披露在先：
+  ①`--marks` 实传库内权威清单 `R36_perfect_b1_marks.json`（生产机无 ZGNB
+  路径，v0.244 入库）；②附录命令的 s3000 seed=0 抽样宇宙实测只含 1/10
+  案例股（打点 9/10 out_of_universe 全灭）⇒ v0.247 工具修复：案例股并集
+  入帧（分位=截面秩比口径不变；落点表为修复后第三跑产物，前两跑日志留档）；
+  ③b1_marks_v0 的 date 列 str 炸 enrich 周线 resample（score_return_study:504
+  钉过的教训在 V0 as-of 新链路复发）⇒ v0.247 `_v0_at` 归一 datetime64。
+  - **研究侧 19 键落点表**（`artifacts/logs/factor_ic_profile/r36_p1_marks/
+    _factor_ic_profile__r36_p1_marks.json`；窗口 2025-03-01~2025-09-30，
+    宇宙 3000 抽样+9 案例并集）：买点落位高——main_rally mean 0.94
+    （10/10 ≥0.8）/ b1_pullback 1.00（自证）/ reversal_quality 0.86 /
+    b2 0.84 / rsi_state、s_reversal 0.77；落位低——**kdj_j 0.14**（买点
+    当日 J 在全宇宙最低 14% 分位，与 j_low 深超卖主轴互洽）/ low_vol 0.24 /
+    s_shape 0.34。同窗 IC 面：alpha_pvcorr ICIR 0.875 / invert_s_shape 0.577 /
+    reversal_quality 0.497 为正；momentum −0.327 / rsi_state −0.319 /
+    main_rally −0.272 为负。**reversal_quality 是唯一落点高∧ICIR 正双占键**；
+    main_rally 是「点火高位但不预测胜负」的反例。
+  - **live 八段 V0 口径**（`artifacts/logs/b1_marks_v0/r36_p1_v0/
+    _b1_marks_v0__r36_p1_v0.json`；宇宙 s3000 seed=0，--count 1500）：
+    mean 分位 0.84 / median 0.97 / ≥0.8 八只 / ≥0.9 七只（10/10 hit）。
+    逐腿归因漏网两只形态相反：**300689**（V0=25，分位 0.21）被负腿压死
+    （distribution_watch −10 / macd_top_divergence −8 / volume_yy_bear −5，
+    正腿 j_low+24 / zhixing_bull+9 抵不掉——罚分腿误伤型）；**605378**
+    （V0=33，分位 0.47）无罚分但正腿稀薄（无 j_low、无 RS 强、无 bbi_above，
+    只有 zhixing_bull 9 + macd_above_water 7 + volume_yy_bull 7——无深 J
+    平区型）。高位组（600366=100 / 002940=96）共同骨架：j_low 24 +
+    relative_strength_strong 15 + zhixing_bull 9 + b1_healthy_pullback_pack 9。
+  - Phase 1 判读：现行打分对 10 个买点有区分力但不完备（8 高位 + 2 漏，
+    漏因两类互不相同）——**Phase 3 开启条件读数上满足**，待 owner 拍板。
+- **Phase 2（首轮冒烟 ✅ 跑毕，2026-09-17）**：`r36_p2_r1`（方向「回调末端
+  缩量企稳的买点特异性因子」，--plan 3 × 3 轮 × 2 候选，marks=权威清单，
+  tokens≈227903）——**15 候选 0 pass**：全部死于 IC 门（min_rank_ic 0.02；
+  最佳 +0.0171，多条为负/无有效 IC），**无一到达 marks 监督层**（marks 门
+  在 IC 门后，本轮未获实测）；无 final_judge（无 pass 可判）。产物：
+  `artifacts/logs/evolution/r36_p2_r1/`（trajectory_pool.json 15 条 +
+  `_summary__r36_p2_r1.json`）。读法：挖掘侧首轮哑火是常态（对照
+  score_legs_r1 的 11/18 pass 是不同方向）；marks 监督层的有效性仍是
+  未验证项——要么 IC 门先过（换方向/换尺度再挖），要么复核 IC 门门槛与
+  marks 门的先后次序是否合理（owner 决策点）。
+- Phase 3（待 owner 复核 Phase 1 后拍板启动）：候选清单、闸门读数、判定。
 
 ---
 
@@ -160,16 +214,21 @@ B1 让打分系统给他们高分；用 LLM 进化研究方案，两条路：①
 uv run python -m custos.research factor_ic_profile \
   --start 2025-03-01 --end 2025-09-30 \
   --universe-local --universe-sample 3000 --universe-seed 0 \
-  --marks /home/gh/agent/ZGNB/B1_DATA \
+  --marks governance/research/R36_perfect_b1_marks.json \
   --tag r36_p1_marks
 ```
+
+（2026-09-17 生产机实跑勘误：①`--marks` 实传库内权威清单 JSON（生产机无
+ZGNB 路径，v0.244 起三工具统一吃目录/清单两形态）；②抽样宇宙不含案例股时
+v0.247 起**案例股自动并集入帧**（本机实测 seed=0 的 3000 抽样只含 1/10
+案例，不并集则打点全灭 out_of_universe；并集后宇宙 3009 只，分位口径不变）。）
 
 产物：`artifacts/logs/factor_ic_profile/r36_p1_marks/_factor_ic_profile__r36_p1_marks.json`
 （`marks.per_factor`：19 键 scorer × 10 买点的 value/percentile/status +
 mean/median/≥0.8/≥0.9 汇总；stdout 附 scorer×买点分位表）。
 分位口径：当日全宇宙**有效**分值 ≤ 案例股分值的比例（并列按 ≤ 计，
-NaN/±inf 双侧剔除；案例股不在宇宙 → out_of_universe，scorer 返 None/NaN →
-unavailable）。宇宙用 s3000 seed=0（与 R34 同口径；codes-file 钉死可复跑）。
+NaN/±inf 双侧剔除；scorer 返 None/NaN → unavailable）。宇宙用 s3000 seed=0
++ 案例股并集（与 R34 同口径；codes-file 钉死可复跑）。
 
 ⚠️ **口径边界（映射说明）**：打点覆盖的是 SCORERS 19 键研究 scorer 与
 --expr DSL——**不是 live 八段技术分本身**（八段分 =
