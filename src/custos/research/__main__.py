@@ -158,6 +158,11 @@ TOOLS: dict[str, tuple[str, str]] = {
         "表达式（TS_RANK 归一加权和）复用 strategy_grid 单元格——双窗/±50% 灵敏度/"
         "随机臂对照全确定性；增量在新轴不在调权（⚠️ pre2019 终审段相交即拒跑）",
     ),
+    "b1_perfect_dataset": (
+        "study",
+        "R36 完美 B1 正例数据集 Phase 0 审计打印（B1_DATA 10 例接入审计；"
+        "发现级材料 L1，验证走全宇宙双窗——详见 R36 预注册）",
+    ),
     "indicator_cache": (
         "diagnostic",
         "指标盘缓存盘点（条目/占用/按电池分布；缓存本体由 backtest_factors "
