@@ -36,8 +36,9 @@ def test_units_exist():
     # 2026-09-10：+R32（LLM 进化引擎真实数据冒烟，v0.206）
     # 2026-09-14：+R33（QSX 排除态可移植回避条件，预注册落档）
     # 2026-09-14：+R34（打分系统进化 v1 新轴基因组，预注册落档 + 工具落地）
-    assert len(UNITS) == 34, (
-        f"预期 34 个研究单元，实际 {len(UNITS)}：{[p.name for p in UNITS]}"
+    # 2026-09-16：+R35（打分系统存在性检讨，元层反思开题）
+    assert len(UNITS) == 35, (
+        f"预期 35 个研究单元，实际 {len(UNITS)}：{[p.name for p in UNITS]}"
     )
 
 
