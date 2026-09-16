@@ -34,7 +34,7 @@
 | # | 事项 | 出处 | 备注 |
 |---|---|---|---|
 | 65 | **「跌破 QSX/DKX 未收复=排除」独立成风控腿研究**（R23 v2 收口后的下一题）：v2 证明排除态是全部边际（hit-only 零价值）——作为可移植风控/回避条件叠加到现有基底与出场上单独测边际；**判据预注册已落档（2026-09-14，v0.228，R33）** | R23 v2（v0.124）| 待生产机跑数（手册见 R33 附录四步；前置工程 qsx_exclusion_free gate 口径已写死，待 owner 拍板实施） |
-| 77 | **R36「完美 B1 正例监督式打分研究」分阶段执行**（owner 拍板方向：基于 B1_DATA 找类似 B1 给高分，终点=高盈亏比标的）：**Phase 0 ✅ 已完成（2026-09-16，v0.240——`research/b1_perfect_dataset.py` 接入 10/10 + 审计落档：涨幅 +11.2%~+207.9% 全正、买点当日 7/10 缩量小阴 0/10 涨停附近）**；Phase 1 现行打分诊断（10 买点日落点分布 vs 当日全宇宙分位，生产机取数，命令草案见 R36 附录）→ Phase 2 进化引擎监督模式挖新因子 → Phase 3（可选）调权路（仅当 Phase 1 显示既有腿有区分力） | owner 拍板（2026-09-16）；R36 预注册落档（判据 C1~C5 + 发现/验证分离 + 验证宇宙剔除 10 案例股） | 待生产机 Phase 1（取数建议：factor_ic_profile 加 --marks code:date 打点参数 或 1800 当日 score_detail 快照对照，owner 复核后定） |
+| 77 | **R36「完美 B1 正例监督式打分研究」分阶段执行**（owner 拍板方向：基于 B1_DATA 找类似 B1 给高分，终点=高盈亏比标的）：**Phase 0 ✅ 已完成（2026-09-16，v0.240）**；Phase 1 工具化 **✅ 已落地（2026-09-16，v0.241——`factor_ic_profile --marks` 打点分位，正例清单与标注声明沉淀进 R36 数据实况表）**；**Phase 2 监督模式已开工（2026-09-16，v0.242）**：`evolution/marks_fitness.py` 自指分离适应度（TS_RANK 于案例自身窗口，买点分位+contrast，rank_window 默认 20——K=250 在全案例恒 NaN 反例钉在案）+ `loop.py`/CLI `--marks/--min-marks-rank 0.7/--min-marks-contrast 0.0/--marks-rank-window 20`（IC 门后 marks 门，关闭逐位不变）；**live 八段对照工具已落地（v0.242）**：`research/b1_marks_v0_study.py`（as-of V0×同日全宇宙分位）。**剩余**：生产机跑数——Phase 1（factor_ic_profile --marks + b1_marks_v0 双口径取数）与 Phase 2（evolution_loop --marks 监督模式挖掘） | owner 拍板（2026-09-16）；R36 预注册落档（判据 C1~C5 + 发现/验证分离 + 验证宇宙剔除 10 案例股） | 待生产机跑数（Phase 1 命令见 R36 附录；Phase 2 冒烟命令：evolution_loop --marks /home/gh/agent/ZGNB/B1_DATA） |
 
 ⚠️ 教训（cross-window 复核，已归入 R10）：edge 集中在单一 regime 的方案首轮看起来都很好。
 

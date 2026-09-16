@@ -158,6 +158,11 @@ TOOLS: dict[str, tuple[str, str]] = {
         "表达式（TS_RANK 归一加权和）复用 strategy_grid 单元格——双窗/±50% 灵敏度/"
         "随机臂对照全确定性；增量在新轴不在调权（⚠️ pre2019 终审段相交即拒跑）",
     ),
+    "b1_marks_v0_study": (
+        "study",
+        "R36 完美 B1 买点的 live 八段（V0 技术分）口径对照——全历史 as-of V0 "
+        "× 同日全宇宙分布分位（诊断指标非判据；V0 臂机制同 score_evolution_study）",
+    ),
     "b1_perfect_dataset": (
         "study",
         "R36 完美 B1 正例数据集 Phase 0 审计打印（B1_DATA 10 例接入审计；"
@@ -204,7 +209,11 @@ LABEL = {
 
 # 短名别名：包目录 research/evolution/ 已占用 "evolution"（注册键必须等于
 # 文件名，见 _listing 的存在性检查），CLI 文件叫 evolution_loop.py，给入口留短名。
-ALIASES = {"evolution": "evolution_loop", "random_baseline": "random_baseline_study"}
+ALIASES = {
+    "evolution": "evolution_loop",
+    "random_baseline": "random_baseline_study",
+    "b1_marks_v0": "b1_marks_v0_study",
+}
 
 
 def _modes(name: str) -> list[str]:

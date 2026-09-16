@@ -69,6 +69,13 @@ class LoopConfig:
     # IC 门（廉价初筛）过门后才跑三轴单元格适应度（控成本）。
     joint: bool = False
     min_objective: float = 0.0  # 三轴适应度阈值：objective 低于此值 → fail
+    # marks 监督模式（R36 Phase 2）：IC 门后再过正例分离门（自指口径，
+    # 见 evolution/marks_fitness.py）；空 = 关闭（关闭时行为逐位不变）。
+    marks_path: str = ""  # B1_DATA 目录（bars 是 TS_RANK 计算的载体，必须有）
+    min_marks_rank: float = 0.7  # 买点 mean_rank 下限（(0,1] 分位口径）
+    min_marks_contrast: float = 0.0  # 买点均值 − 案例内全日均值 的下限
+    marks_rank_window: int = 20  # TS_RANK 窗口（必须远小于案例窗长 61~78 根；
+    # K=250 在全案例上恒 NaN——warmup 覆盖全窗，反例钉见 marks_fitness docstring）
 
 
 def _now_iso() -> str:
@@ -144,6 +151,7 @@ class _RunCtx:
     rng: random.Random
     on_event: Callable[[dict], None] | None
     cell_runner: CellRunner | None  # joint 模式的三轴适应度执行器（非 joint 为 None）
+    marks_cases: list | None = None  # marks 监督模式的正例案例（None=关闭）
 
 
 @dataclass(frozen=True)
@@ -356,6 +364,39 @@ def _cell_layer(
     return _judge_cell(cell, metrics, ctx.cfg.min_objective)
 
 
+def _marks_layer(
+    ctx: _RunCtx, payload: dict[str, str], metrics: dict[str, Any]
+) -> list[str]:
+    """marks 监督门（R36 Phase 2 第二层，IC 门后）：自指分离读数 + 阈值判定。
+
+    读数写进 mining_metrics["marks"]（mean_rank/min_rank/contrast/n_hit/per_case
+    全量留痕）；n_hit=0（全部无值）/ mean_rank < min_marks_rank /
+    contrast < min_marks_contrast → fail（None 比较为 False，fail-closed）。
+    """
+    assert ctx.marks_cases is not None  # 只在 marks_path 非空时被调
+    from custos.research.evolution.marks_fitness import marks_score  # noqa: PLC0415
+
+    m = marks_score(
+        payload["expression"],
+        ctx.marks_cases,
+        rank_window=ctx.cfg.marks_rank_window,
+    )
+    metrics["marks"] = m
+    reasons: list[str] = []
+    if m["n_hit"] == 0:
+        reasons.append("marks 全部买点无值（warmup/数据缺，fail-closed 不当高分）")
+        return reasons
+    if m["mean_rank"] is None or m["mean_rank"] < ctx.cfg.min_marks_rank:
+        reasons.append(
+            f"marks mean_rank={m['mean_rank']} 未达阈值 {ctx.cfg.min_marks_rank}"
+        )
+    if m["contrast"] is None or m["contrast"] < ctx.cfg.min_marks_contrast:
+        reasons.append(
+            f"marks contrast={m['contrast']} 未达阈值 {ctx.cfg.min_marks_contrast}"
+        )
+    return reasons
+
+
 def _judge_and_record(ctx: _RunCtx, cand: _CandCtx, payload: dict[str, str]) -> None:
     """复杂度门 → mining 评估 → 确定性判定 → interpret 解读 → 落池 → 事件。"""
     comp = complexity(payload["expression"])
@@ -383,6 +424,11 @@ def _judge_and_record(ctx: _RunCtx, cand: _CandCtx, payload: dict[str, str]) -> 
         min_rank_icir=ctx.cfg.min_rank_icir,
     )
     metrics = asdict(stats)
+    if ctx.marks_cases is not None and decision == "pass":
+        # marks 监督门（R36 Phase 2）：IC 门 fail 时零 marks 计算（控成本）。
+        reasons = reasons + _marks_layer(ctx, payload, metrics)
+        if reasons:
+            decision = "fail"
     if ctx.cfg.joint and decision == "pass":
         # IC 门 fail 时零 cell 调用；第二层结果并进 reasons/decision（纯确定性）。
         reasons = reasons + _cell_layer(ctx, cand, payload, metrics)
@@ -471,6 +517,11 @@ def run_loop(
         raise ValueError(
             "LoopConfig.joint=True 必须提供 cell_runner（三轴适应度执行器）"
         )
+    marks_cases = None
+    if cfg.marks_path:
+        from custos.research.b1_perfect_dataset import load_cases  # noqa: PLC0415
+
+        marks_cases = load_cases(cfg.marks_path)  # fail-closed（坏目录/空目录 raise）
     ctx = _RunCtx(
         cfg=cfg,
         mining_bars=clip_tail(bars_by_code, cfg.mining_end),
@@ -479,6 +530,7 @@ def run_loop(
         rng=random.Random(cfg.seed),
         on_event=on_event,
         cell_runner=cell_runner,
+        marks_cases=marks_cases,
     )
     for direction in cfg.directions:
         for round_i in range(cfg.rounds):

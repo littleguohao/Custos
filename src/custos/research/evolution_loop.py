@@ -193,6 +193,32 @@ def _build_parser() -> argparse.ArgumentParser:
         help="joint 的三轴适应度阈值（objective 低于则 fail；默认 0.0）",
     )
     ap.add_argument(
+        "--marks",
+        default="",
+        help="R36 Phase 2 监督模式：B1_DATA 目录（bars 是 TS_RANK 计算的载体，"
+        "必须有；空=关闭，关闭时行为逐位不变）——IC 门后再过正例分离门"
+        "（自指口径，decision 仍纯确定性）",
+    )
+    ap.add_argument(
+        "--min-marks-rank",
+        type=float,
+        default=0.7,
+        help="marks 门：买点 mean_rank 下限（(0,1] 分位口径，默认 0.7）",
+    )
+    ap.add_argument(
+        "--min-marks-contrast",
+        type=float,
+        default=0.0,
+        help="marks 门：买点均值 − 案例内全日均值 的下限（默认 0.0）",
+    )
+    ap.add_argument(
+        "--marks-rank-window",
+        type=int,
+        default=20,
+        help="marks 门 TS_RANK 窗口（默认 20；必须远小于案例窗长 61~78 根——"
+        "K=250 在全案例上恒 NaN，warmup 覆盖全窗）",
+    )
+    ap.add_argument(
         "--cell-top-n",
         type=int,
         default=20,
@@ -694,6 +720,11 @@ def _write_summary(res: _RunResult, grid: dict[str, Any]) -> Path:
             "退化为「gate×出场」（R32 结论 5 / #70）"
         )
     config["plan"] = getattr(res.args, "plan_summary", None)  # #72 规划层汇总
+    if res.cfg.marks_path:  # R36 Phase 2：marks 口径进 config 块（可复核）
+        config["marks_note"] = (
+            "marks 监督门（自指口径：TS_RANK 于案例自身窗口，买点分位 + "
+            "contrast；发现侧排序依据，非判据——晋级走全宇宙双窗+三轴）"
+        )
     summary = {
         "tag": tag,
         "directions": list(res.args.direction),
@@ -868,6 +899,10 @@ def main(
         run_tag=tag,
         joint=bool(args.joint),
         min_objective=args.joint_min_objective,
+        marks_path=args.marks,
+        min_marks_rank=args.min_marks_rank,
+        min_marks_contrast=args.min_marks_contrast,
+        marks_rank_window=args.marks_rank_window,
     )
     cell_runner = _make_cell_runner(args, prep.codes, out_dir) if args.joint else None
     pool_size_before = len(pool)  # 本 run 新增轨迹数的基线（空结果护栏用）
