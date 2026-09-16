@@ -12,8 +12,10 @@
    ——每日 1800 已跑完，本脚本不重跑现行版）；
 2. `git worktree add` 一个钉死在 **#67 迁移前 commit（b35e97b，立项设计稿
    ccad92f8^）**的旁路目录（幂等：已存在且钉对 commit 就复用）；
-3. 旁路的 `data/` **软链共享**主仓 data/（vipdoc 只读、当日输入 JSON 共享——
-   两版代码同机同时跑同一批输入）；⚠️ **旁路只跑 1800 计算段**
+3. 旁路的 `data/` **链接共享**主仓 data/（软链优先；Windows 无软链特权
+   （WinError 1314）退 `mklink /J` junction，幂等复用、摘点不递归目标）——
+   vipdoc 只读、当日输入 JSON 共享，两版代码同机同时跑同一批输入；
+   ⚠️ **旁路只跑 1800 计算段**
    （formula_screen → enrich_candidates → score_candidates → candidate_table
    四个脚本），**不跑 08:50 采集段、不跑 refresh 段**（它们会写共享缓存）；
 4. 从两版候选表里抽出**信号标注相关部分**（🏷️ 信号标注一览段 + A/B/C/D 池
@@ -38,6 +40,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -57,8 +60,11 @@ LABEL_OVERVIEW_HEAD = "## 🏷️ 信号标注一览"
 def extract_label_sections(md: str) -> dict:
     """从候选表 markdown 抽「信号标注」相关部分（纯函数，测试钉住）。
 
-    返回 ``{"overview": 🏷️ 段全文（&nbsp; 归一）, "pool": {code: 标注单元格}}``——
+    返回 ``{"overview": 🏷️ 段全文（&nbsp; 归一 + 表格排版归一）, "pool": {code: 标注单元格}}``——
     池明细表的列序：... | 标注 | 分层 | 建议止损位 | next_step |（标注=倒数第 4 列）。
+    overview 归一：markdown 表格的全角对齐 padding 属排版自由（v0.235 fmt 变更
+    让新旧两版段首行空格数不同、CJK 单元格字间也加空格），语义比较前剔除
+    **全部**空白字符——语义差异（数字/命中名/因子行）不经过空格，仍然可辨。
     """
     overview = ""
     if LABEL_OVERVIEW_HEAD in md:
@@ -67,7 +73,7 @@ def extract_label_sections(md: str) -> dict:
         # 段标题同行可能带括注（真表为「## 🏷️ 信号标注一览（研究因子·只标注…）」）
         # —— 比较的是内容不是标题，首行（标题残余）剥掉
         seg = seg.split("\n", 1)[1] if "\n" in seg else ""
-        overview = seg.replace("&nbsp;", " ").strip()
+        overview = re.sub(r"\s+", "", seg.replace("&nbsp;", " "))
     pool: dict[str, str] = {}
     for ln in md.splitlines():
         if not ln.startswith("|"):
@@ -111,6 +117,62 @@ def _run(cmd: list[str], cwd: Path, timeout: int = 3600) -> subprocess.Completed
         encoding="utf-8",
         errors="replace",
     )
+
+
+# Windows 无 SeCreateSymbolicLinkPrivilege 时 os.symlink 抛 WinError 1314（生产机
+# 2026-09-15 实测）——退 junction（cmd mklink /J，本地卷目录链接，免特权）。
+# 安全红线：junction 的 is_symlink()=False ⇒ 若沿用「存在就 rmtree」会**穿链
+# 递归删目标**（共享生产数据！）——链接点一律 os.rmdir 摘点（只摘链接不碰
+# 目标），只有真实目录才 rmtree。
+def _link_kind(p: Path) -> str:
+    """'none' / 'dir'（真实目录）/ 'link'（软链或 junction 等重解析点）。"""
+    try:
+        st = os.stat(p, follow_symlinks=False)
+    except OSError:
+        return "none"
+    if p.is_symlink() or (
+        getattr(st, "st_file_attributes", 0)
+        & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    ):
+        return "link"
+    return "dir" if p.is_dir() else "none"
+
+
+def _remove_link(p: Path) -> None:
+    """摘链接点（symlink/junction），不递归目标。Windows 目录软链与 junction
+    都用 os.rmdir；POSIX 软链用 os.unlink。"""
+    try:
+        os.rmdir(p)
+    except NotADirectoryError:  # POSIX 软链
+        os.unlink(p)
+
+
+def _ensure_data_link(repo_data: Path, wt_data: Path) -> str:
+    """幂等建立旁路 data 链接，返回机制（reused / symlink / junction）。
+
+    目标先 resolve：repo/data 本身常是软链（生产机 data → E:\\…），junction
+    必须指向解析后的真实本地路径。
+    """
+    target = repo_data.resolve()
+    kind = _link_kind(wt_data)
+    if kind == "link":
+        if wt_data.resolve() == target:
+            return "reused"
+        _remove_link(wt_data)
+    elif kind == "dir":
+        shutil.rmtree(wt_data)  # 真实目录（旁路本地残留），删之重建
+    try:
+        os.symlink(target, wt_data, target_is_directory=True)
+        return "symlink"
+    except OSError:
+        r = _run(
+            ["cmd", "/c", "mklink", "/J", str(wt_data), str(target)], wt_data.parent
+        )
+        if r.returncode != 0:
+            raise RuntimeError(
+                f"symlink 无特权且 junction 失败: {r.stderr.strip()[:200]}"
+            )
+        return "junction"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -172,12 +234,10 @@ def main(argv: list[str] | None = None) -> int:
         if r.returncode != 0:
             return bail(f"git worktree add 失败: {r.stderr.strip()[:200]}")
 
-    # ③ data/ 软链共享（输入共享；artifacts 不链——旁路产出落在旁路本地）
-    wt_data = wt / "data"
-    if not wt_data.is_symlink():
-        if wt_data.exists():
-            shutil.rmtree(wt_data)
-        os.symlink(repo / "data", wt_data)
+    # ③ data/ 链接共享（输入共享；artifacts 不链——旁路产出落在旁路本地）。
+    # 软链优先；Windows 无软链特权退 junction（红线与幂等见 _ensure_data_link）
+    link_mech = _ensure_data_link(repo / "data", wt / "data")
+    lines.append(f"旁路 data 链接机制：{link_mech}")
 
     # ④ 旁路跑 1800 计算段（只跑四脚本；refresh/08:50 采集段不跑）
     for script in CHAIN:
@@ -236,4 +296,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # 入口 stdout/stderr 钉 utf-8（AGENTS §5 口径）：Windows GBK 控制台/重定向下
+    # ⚠️/✅/❌ 等字符会 UnicodeEncodeError 掩盖真实退出码（2026-09-16 生产机实测）。
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     raise SystemExit(main())

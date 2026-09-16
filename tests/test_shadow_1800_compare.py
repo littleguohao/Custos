@@ -46,7 +46,9 @@ def _table(label_cell_a="4/9 QG·RS·B2", label_cell_b="1/9 QG", overview="hit �
 class TestExtractLabelSections:
     def test_overview_and_pool_cells(self):
         got = shadow.extract_label_sections(_table())
-        assert got["overview"] == "hit 名单甲"
+        assert (
+            got["overview"] == "hit名单甲"
+        )  # overview 归一后不含空白（排版归一，见 extractor docstring）
         assert got["pool"] == {"600000": "4/9 QG·RS·B2", "600001": "1/9 QG"}
 
     def test_nbsp_normalized(self):
@@ -84,3 +86,77 @@ class TestCompareTables:
     @pytest.mark.parametrize("nb", ["4/9&nbsp;QG·RS·B2", "4/9 QG·RS·B2"])
     def test_nbsp_variant_counts_as_identical(self, nb):
         assert shadow.compare_tables(_table(), _table(label_cell_a=nb)) == []
+
+
+class TestEnsureDataLink:
+    """生产机 WinError 1314 驱动的链接机制钉测（编排层全部 monkeypatch，不建真链）。"""
+
+    def test_junction_fallback_when_symlink_denied(self, tmp_path, monkeypatch):
+        """symlink 无特权 ⇒ 退 junction（cmd mklink /J），目标取 resolve 后真路径。"""
+        target = tmp_path / "real_data"
+        target.mkdir()
+        wt_data = tmp_path / "wt" / "data"
+
+        def _deny(*a, **k):
+            raise OSError(1314, "privilege not held")
+
+        monkeypatch.setattr(shadow.os, "symlink", _deny)
+        calls = []
+
+        class _R:
+            returncode = 0
+            stderr = ""
+
+        monkeypatch.setattr(
+            shadow, "_run", lambda cmd, cwd, timeout=3600: (calls.append(cmd), _R())[1]
+        )
+        mech = shadow._ensure_data_link(target, wt_data)
+        assert mech == "junction"
+        assert calls[0][:4] == ["cmd", "/c", "mklink", "/J"]
+        assert str(wt_data) in calls[0]
+        assert calls[0][-1] == str(target.resolve())
+
+    def test_junction_never_rmtree(self, tmp_path, monkeypatch):
+        """红线钉测：重解析点（junction/软链）只 _remove_link 摘点，绝不 rmtree 穿链。"""
+        wt_data = tmp_path / "wt" / "data"
+        monkeypatch.setattr(shadow, "_link_kind", lambda p: "link")
+        removed = []
+        monkeypatch.setattr(shadow, "_remove_link", lambda p: removed.append(p))
+
+        def _boom(p):
+            raise AssertionError("rmtree 被调用——穿链删共享数据的红线被触发")
+
+        monkeypatch.setattr(shadow.shutil, "rmtree", _boom)
+        monkeypatch.setattr(shadow.os, "symlink", lambda *a, **k: None)
+        # wt_data 不存在 ⇒ resolve≠target ⇒ 走「摘点重建」分支
+        mech = shadow._ensure_data_link(tmp_path / "real_data", wt_data)
+        assert mech == "symlink"
+        assert removed == [wt_data]
+
+    def test_reuse_existing_link(self, tmp_path):
+        """已存在且指向正确的链接 ⇒ reused，不动文件系统。"""
+        target = tmp_path / "real"
+        target.mkdir()
+        link = tmp_path / "wt_data"
+        try:
+            import os
+
+            os.symlink(target, link, target_is_directory=True)
+        except OSError:
+            pytest.skip("无 symlink 特权（生产机外）")
+        assert shadow._ensure_data_link(target, link) == "reused"
+
+    def test_overview_cjk_padding_is_formatting_only(self):
+        """🏷️ 段内表格的全角对齐 padding（v0.235 fmt 排版变更：CJK 字间空格）
+        属排版差异不算不一致——剔除全部空白后语义相同。"""
+        padded = _table(
+            overview="|     因 子     |   命 中   |\n|---|---|\n| QG | 3/9 |"
+        )
+        plain = _table(overview="| 因子 | 命中 |\n|---|---|\n| QG | 3/9 |")
+        assert shadow.compare_tables(padded, plain) == []
+
+    def test_overview_content_diff_still_reported(self):
+        """归一不能吃掉真差异：命中计数变了必须报。"""
+        a = _table(overview="| 因子 | 命中 |\n|---|---|\n| QG | 3/9 |")
+        b = _table(overview="| 因子 | 命中 |\n|---|---|\n| QG | 4/9 |")
+        assert any("信号标注一览" in d for d in shadow.compare_tables(a, b))

@@ -131,11 +131,15 @@ class TestNoStaleReferences:
         for p in root.rglob("*"):
             if p.suffix not in {".py", ".md", ".json", ".cmd"}:
                 continue
-            # 排除 research/ 目录（单元头部指向 git 历史是有意的）与本测试自身
+            # 排除 research/ 目录（单元头部指向 git 历史是有意的）与本测试自身；
+            # 另排除影子对照 worktree（#76① factor67_shadow/worktree_pre67 =
+            # 钉死在迁移前 commit 的合法历史检出，其旧文档引用属历史内容，
+            # 2026-09-16 生产机实测被误报）
             if (
                 ".git" in p.parts
                 or RESEARCH == p.parent
                 or p.name == pathlib.Path(__file__).name
+                or "worktree_pre67" in p.parts
             ):
                 continue
             try:
