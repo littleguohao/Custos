@@ -124,22 +124,35 @@ B1 让打分系统给他们高分；用 LLM 进化研究方案，两条路：①
 
 ---
 
-## 附录 · Phase 1 实施方案（生产机命令草案，跑前 owner 复核）
+## 附录 · Phase 1 实施方案（生产机命令，v0.241 工具化落地，跑前 owner 复核）
 
-**目标产物**：10 个买点日的「八段技术分 vs 当日全宇宙分位」落点表 +
-各腿分值明细。
+**目标产物**：10 个买点日的「scorer 分值 vs 当日全宇宙分位」落点表 +
+各键分值明细（诊断指标非判据——R36 判据节已写死召回/落点不作晋级依据）。
 
-步骤建议（生产机，逐日 × 10 买点日）：
+`factor_ic_profile --marks` 已于 v0.241 落地（原「备选实现」扶正）：
 
 ```bash
-# ① 全宇宙当日打分分布：factor_ic_profile 的 scorer 分值序列机制作载
-#    （scorer_score_series 逐日分值）取当日全宇宙八段技术分分布；
-#    或直接用 1800 链当日候选池的 score_detail 落盘（若有当日快照）。
-# ② 逐买点日（10 个），在当日全宇宙分布上定位案例股的分位：
-#    percentile = 全宇宙当日技术分 ≤ 案例股技术分 的比例
-# ③ 逐腿对照：案例股各腿分值 vs 全宇宙各腿分位（落点归因）
+uv run python -m custos.research factor_ic_profile \
+  --start 2025-03-01 --end 2025-09-30 \
+  --universe-local --universe-sample 3000 --universe-seed 0 \
+  --marks /home/gh/agent/ZGNB/B1_DATA \
+  --tag r36_p1_marks
 ```
 
-备选实现：给 `factor_ic_profile` 加一个 `--marks code:date,...` 打点参数
-（在全宇宙分值序列上标注指定 (code,date) 的分位）——一次性把 10 个
-(code, buy_date) 点标出来。工具改动是独立提交（不进本页回填口径）。
+产物：`artifacts/logs/factor_ic_profile/r36_p1_marks/_factor_ic_profile__r36_p1_marks.json`
+（`marks.per_factor`：19 键 scorer × 10 买点的 value/percentile/status +
+mean/median/≥0.8/≥0.9 汇总；stdout 附 scorer×买点分位表）。
+分位口径：当日全宇宙**有效**分值 ≤ 案例股分值的比例（并列按 ≤ 计，
+NaN/±inf 双侧剔除；案例股不在宇宙 → out_of_universe，scorer 返 None/NaN →
+unavailable）。宇宙用 s3000 seed=0（与 R34 同口径；codes-file 钉死可复跑）。
+
+⚠️ **口径边界（映射说明）**：打点覆盖的是 SCORERS 19 键研究 scorer 与
+--expr DSL——**不是 live 八段技术分本身**（八段分 =
+`score_candidates.technical_score` 合成，无单一 SCORERS 键；SCORERS 键里
+只有 `kdj_j` 与八段 j_low 腿同源（同为 KDJ-J 值），entry_patterns/
+macd_technics/weekly_j/capital_intent 等八段轴在 SCORERS 无对应键，其余键
+是研究侧 selector 与八段不同源）。live 八段落点须另走 score_detail 快照
+对照（Phase 1 若需要 live 口径，再单独立项工具）。
+
+--marks 也接受 marks JSON（`[{"code": "600000", "buy_date": "YYYY-MM-DD"}]`），
+供自定义打点清单（如剔除/增补案例后的子集）。

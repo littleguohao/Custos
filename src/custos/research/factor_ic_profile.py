@@ -33,8 +33,27 @@ horizon 衰减曲线，出**全因子可比表**。它回答「这个因子还�
         --start 2022-01-01 --end 2024-07-31 \
         --scorers s_shape,rsi_state --expr "MA(close,20)/close" --tag ic_mix
 
+    # R36 Phase 1：在当日全宇宙分值序列上打出正例买点分位（诊断指标非判据）
+    uv run python -m custos.research factor_ic_profile \
+        --start 2025-03-01 --end 2025-09-30 \
+        --universe-local --universe-sample 3000 \
+        --marks /home/gh/agent/ZGNB/B1_DATA --tag r36_p1_marks
+
+``--marks``（R36 Phase 1）：指向 B1_DATA 目录（``b1_perfect_dataset.load_cases``
+加载全部正例）或 marks JSON（``[{"code": "600000", "buy_date": "YYYY-MM-DD"}]``）。
+对每个 scorer/expr 的**当日全宇宙分值序列**标出每个 (code, buy_date) 的分位
+（``percentile = 当日全宇宙有效分值 ≤ 案例股分值的比例``，并列按 ≤ 计，
+NaN/±inf 双侧剔除；案例股不在宇宙 → out_of_universe，scorer 返 None/NaN →
+unavailable）。⚠️ **口径边界**：打点覆盖 SCORERS 研究 scorer 与 DSL——
+**不是 live 八段技术分本身**（八段分 = ``score_candidates.technical_score``
+合成，无单一 SCORERS 键；映射口径：SCORERS 键里只有 ``kdj_j`` 与八段 j_low
+腿同源（同为 KDJ-J 值），entry_patterns/macd_technics/weekly_j/capital_intent
+等八段轴在 SCORERS 无对应键，其余键是研究侧 selector 与八段不同源——
+live 八段落点须另走 score_detail 快照对照，见 R36 附录）。
+
 产物：{out_dir}/{tag}/_factor_ic_profile__{tag}.json（schema 由
-tests/test_factor_ic_profile.py 钉住）+ stdout 全因子可比表。
+tests/test_factor_ic_profile.py 钉住）+ stdout 全因子可比表（--marks 时
+附 scorer×买点分位表）。
 """
 
 from __future__ import annotations
@@ -127,6 +146,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument(
         "--count", type=int, default=0, help="每股加载 K 线根数（0=loader 默认）"
+    )
+    ap.add_argument(
+        "--marks",
+        default="",
+        help="打点路径：B1_DATA 目录（默认加载全部正例）或 marks JSON"
+        "（[{'code': '600000', 'buy_date': 'YYYY-MM-DD'}, ...]）——在每个 scorer/expr"
+        " 的当日全宇宙分值序列上标出打点分位（诊断指标，非判据）",
     )
     ap.add_argument("--tag", default="", help="运行标识（默认时间戳）；产物目录名")
     ap.add_argument(
@@ -325,6 +351,158 @@ def _fmt_cell(v: Any) -> str:
     return f"{v:+.3f}" if isinstance(v, float) and not math.isnan(v) else "  -  "
 
 
+# ---------------------------------------------------------------------------
+# --marks 打点（R36 Phase 1：正例买点在全宇宙当日分值序列上的分位）
+# ---------------------------------------------------------------------------
+
+
+#: 分位口径（写死）：``percentile = 当日全宇宙**有效**分值（非 NaN 且有限）中
+#: ≤ 案例股分值的比例``——并列按 ≤ 计（与 TS_RANK 平局各让一半**不同**：这里
+#: 是打点分位不是秩相关，并列全算在 ≤ 侧；NaN/±inf 双侧剔除）。
+def _mark_percentile(day_values: np.ndarray, case_value: float) -> float:
+    vals = day_values.astype(float)
+    valid = vals[np.isfinite(vals)]
+    if not len(valid):
+        return float("nan")
+    return float((valid <= case_value).mean())
+
+
+def _load_marks(args: Any, ap: argparse.ArgumentParser) -> tuple[list[dict], str]:
+    """--marks 路径解析：目录 → B1_DATA 正例；JSON 文件 → [{code, buy_date}]。
+
+    fail-closed：路径不存在/目录空/JSON 形态非法/0 打点 → ap.error。
+    返回 ``(marks, source)``；code 须 6 位数字（与宇宙 bars 键一致）。
+    """
+    from custos.research.b1_perfect_dataset import load_cases  # noqa: PLC0415
+
+    p = Path(args.marks)
+    if p.is_dir():
+        try:
+            cases = load_cases(p)
+        except ValueError as exc:
+            ap.error(f"--marks 目录加载失败: {exc}")
+        marks = [{"code": c.code, "buy_date": c.buy_date} for c in cases]
+        source = f"b1_data_dir({p})"
+    elif p.is_file():
+        try:
+            payload = json.loads(p.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError) as exc:
+            ap.error(f"--marks JSON 不可解析: {p}（{type(exc).__name__}: {exc}）")
+        if not isinstance(payload, list):
+            ap.error(f"--marks JSON 顶层必须是 list: {p}")
+        marks = payload
+        source = f"marks_json({p.name})"
+    else:
+        ap.error(f"--marks 路径不存在: {p}")
+    bad = [
+        m
+        for m in marks
+        if not isinstance(m, dict)
+        or not isinstance(m.get("code"), str)
+        or not isinstance(m.get("buy_date"), str)
+    ]
+    if bad:
+        ap.error(f"--marks 条目形态非法（须含 str code/buy_date）: {bad[:3]}")
+    if not marks:
+        ap.error("--marks 0 打点（空目录/空清单）——打点为空只会被误读，拒跑")
+    return marks, source
+
+
+def _marks_report(frames: dict[str, pd.DataFrame], marks: list[dict]) -> dict[str, Any]:
+    """逐因子 × 逐打点：分值 + 分位 + 状态（hit/unavailable/out_of_universe）。
+
+    - code 不在当日宇宙列里（未被抽样抽到）→ ``out_of_universe``（照实记录，
+      不静默跳过）；
+    - code 在列但当日无 bar（停牌/数据外）或 scorer 返 None/NaN/±inf →
+      ``unavailable``（不硬算）；
+    - 其余 → ``hit``，value=当日分值、percentile=分位（口径见 _mark_percentile）。
+    汇总只对 hit 点计（mean/median/≥0.8/≥0.9；0 个 hit → 全 nan）。
+    """
+    per_factor: dict[str, Any] = {}
+    for name, frame in frames.items():
+        points: list[dict[str, Any]] = []
+        for m in marks:
+            code, buy_date = m["code"], m["buy_date"]
+            point: dict[str, Any] = {"code": code, "buy_date": buy_date}
+            if code not in frame.columns:
+                points.append(
+                    {
+                        **point,
+                        "value": None,
+                        "percentile": None,
+                        "status": "out_of_universe",
+                    }
+                )
+                continue
+            series = frame[code]
+            day = pd.Timestamp(buy_date)
+            v = series.get(day)
+            if v is None or pd.isna(v) or not math.isfinite(float(v)):
+                points.append(
+                    {
+                        **point,
+                        "value": None,
+                        "percentile": None,
+                        "status": "unavailable",
+                    }
+                )
+                continue
+            row = frame.loc[day]
+            pct = _mark_percentile(row.to_numpy(dtype=float), float(v))
+            if math.isnan(pct):  # 当日全宇宙有效分值空 → 无分母
+                points.append(
+                    {
+                        **point,
+                        "value": float(v),
+                        "percentile": None,
+                        "status": "unavailable",
+                    }
+                )
+                continue
+            points.append(
+                {**point, "value": float(v), "percentile": pct, "status": "hit"}
+            )
+        hits = [p["percentile"] for p in points if p["status"] == "hit"]
+        arr = np.asarray(hits, dtype=float) if hits else np.asarray([], dtype=float)
+        per_factor[name] = {
+            "points": points,
+            "mean": float(arr.mean()) if len(arr) else float("nan"),
+            "median": float(np.median(arr)) if len(arr) else float("nan"),
+            "ge_0_8": int((arr >= 0.8).sum()),
+            "ge_0_9": int((arr >= 0.9).sum()),
+        }
+    return per_factor
+
+
+def _print_marks(per_factor: dict[str, Any], marks: list[dict], source: str) -> None:
+    """scorer × 买点分位表（行=因子，列=案例码，格=分位；表尾汇总列）。"""
+    print(
+        f"\n打点分位（来源 {source}；**诊断指标非判据**——R36：召回/落点不作晋级"
+        "依据，10 点必过拟合；口径 = 当日全宇宙有效分值 ≤ 案例股分值的比例，"
+        "并列按 ≤ 计，u=unavailable / o=out_of_universe）"
+    )
+    codes = [m["code"] for m in marks]
+    head = " ".join(f"{c:>6}" for c in codes)
+    print(f"{'因子':<28} {head} | mean | med | ≥.8 | ≥.9")
+    print("-" * (28 + 7 * len(codes) + 24))
+    for name, blk in per_factor.items():
+        cells = []
+        for p in blk["points"]:
+            if p["status"] == "hit":
+                cells.append(f"{p['percentile']:>6.2f}")
+            elif p["status"] == "unavailable":
+                cells.append(f"{'u':>6}")
+            else:
+                cells.append(f"{'o':>6}")
+        mean_s = f"{blk['mean']:.2f}" if not math.isnan(blk["mean"]) else "  -"
+        med_s = f"{blk['median']:.2f}" if not math.isnan(blk["median"]) else "  -"
+        nm = name if len(name) <= 28 else name[:25] + "..."
+        print(
+            f"{nm:<28} {' '.join(cells)} | {mean_s:>4} | {med_s:>4} | "
+            f"{blk['ge_0_8']:>3} | {blk['ge_0_9']:>3}"
+        )
+
+
 def _print_table(
     factors: list[dict[str, Any]], ranking: list[dict[str, Any]], horizons: list[int]
 ) -> None:
@@ -394,6 +572,22 @@ def main(
         return 2
 
     factors = _factor_frames(scorer_keys, args.expr, sliced)
+    marks_block: Optional[dict[str, Any]] = None
+    if args.marks:
+        marks, marks_source = _load_marks(args, ap)
+        frames_by_name = {f["name"]: f["frame"] for f in factors}
+        marks_block = {
+            "source": marks_source,
+            "universe_note": (
+                "打点覆盖 SCORERS 研究 scorer 与 --expr DSL 的当日全宇宙分值——"
+                "**不是 live 八段技术分本身**（八段分 = score_candidates.technical_score"
+                " 合成，无单一 SCORERS 键；映射口径：SCORERS 键里只有 kdj_j 与八段"
+                " j_low 腿同源（同为 KDJ-J 值），entry_patterns/macd_technics/"
+                "weekly_j/capital_intent 等八段轴在 SCORERS 无对应键，其余键是研究"
+                "侧 selector 与八段不同源——live 八段落点须另走 score_detail 快照对照）"
+            ),
+            "per_factor": _marks_report(frames_by_name, marks),
+        }
     for f in factors:
         f["per_horizon"] = _profile_factor(f.pop("frame"), sliced, horizons, args)
     ranking = _ranking(factors, args.primary_horizon)
@@ -412,12 +606,16 @@ def main(
         ],
         "ranking": ranking,
     }
+    if marks_block is not None:
+        report["marks"] = marks_block
     out_dir = (Path(args.out_dir) if args.out_dir else OUTDIR) / tag
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"_factor_ic_profile__{tag}.json"
     with out.open("w", encoding="utf-8") as fh:
         json.dump(report, fh, ensure_ascii=False, indent=2, allow_nan=True)
     _print_table(factors, ranking, horizons)
+    if marks_block is not None:
+        _print_marks(marks_block["per_factor"], marks, marks_source)
     print(f"\n[INFO] 汇总 → {out}")
     return 0
 

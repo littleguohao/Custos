@@ -319,3 +319,227 @@ class TestEndToEnd:
         rep = _run(tmp_path, _load_all(n=40, start="2024-01-02"), "--expr", "close")
         f = rep["factors"][0]
         assert f["per_horizon"]["20"]["n_days"] < f["per_horizon"]["1"]["n_days"]
+
+
+# ---------------------------------------------------------------------------
+# --marks 打点（R36 Phase 1：正例买点在全宇宙当日分值序列上的分位）
+# ---------------------------------------------------------------------------
+
+
+def _marks_json(tmp_path, marks):
+    import json as _json
+
+    p = tmp_path / "marks.json"
+    p.write_text(_json.dumps(marks), encoding="utf-8")
+    return str(p)
+
+
+class TestMarkPercentile:
+    def test_percentile_hand_compute(self):
+        """分位对拍手算：当日全宇宙有效分值 ≤ 案例股分值的比例，并列按 ≤ 计。"""
+        import numpy as np
+
+        vals = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        assert fip._mark_percentile(vals, 3.0) == pytest.approx(0.6)  # 1,2,3 ≤ 3
+        assert fip._mark_percentile(vals, 5.0) == pytest.approx(1.0)
+        assert fip._mark_percentile(vals, 0.5) == pytest.approx(0.0)
+
+    def test_nan_and_inf_excluded_both_sides(self):
+        """NaN/±inf 双侧剔除（案例侧与宇宙侧都不进分母分子）。"""
+        import numpy as np
+
+        vals = np.array([1.0, 2.0, np.nan, 4.0, np.inf, -np.inf])
+        # 有效宇宙 = {1,2,4}（NaN/±inf 剔除）；案例值 2.0 → 2/3
+        assert fip._mark_percentile(vals, 2.0) == pytest.approx(2 / 3)
+
+    def test_tie_counts_in_le(self):
+        """并列处理口径写死：并列全算在 ≤ 侧（与 TS_RANK 平局各让一半不同）。"""
+        import numpy as np
+
+        vals = np.array([1.0, 2.0, 2.0, 2.0, 5.0])
+        assert fip._mark_percentile(vals, 2.0) == pytest.approx(0.8)  # 4/5 含全部并列
+
+    def test_empty_valid_returns_nan(self):
+        import numpy as np
+
+        assert np.isnan(fip._mark_percentile(np.array([np.nan, np.inf]), 1.0))
+
+
+class TestMarksEndToEnd:
+    def _setup_bars(self):
+        bars = _load_all()
+        # 两个 fake 案例股：600001 斜率最大（close 恒截面第一），600002 与 c2 同斜率（并列）
+        bars["600001"] = _bars(0.09)
+        bars["600002"] = _bars(0.02)
+        return bars
+
+    def _argv_marks(self, tmp_path, bars, mj, *extra):
+        return _argv(
+            tmp_path,
+            "--expr",
+            "close",
+            "--codes",
+            ",".join(bars.keys()),
+            "--marks",
+            mj,
+            *extra,
+        )
+
+    def test_schema_and_percentiles(self, tmp_path, monkeypatch):
+        """端到端：分位对拍（首=1.00/并列=按 ≤ 计/o=不在宇宙）；schema 钉住。"""
+        monkeypatch.setattr(bt, "SCORERS", {})
+        bars = self._setup_bars()
+        buy_date = str(bars["600001"]["date"].iloc[-1].date())
+        mj = _marks_json(
+            tmp_path,
+            [
+                {"code": "600001", "buy_date": buy_date},
+                {"code": "600002", "buy_date": buy_date},
+                {"code": "600099", "buy_date": buy_date},
+            ],
+        )
+        rc = fip.main(self._argv_marks(tmp_path, bars, mj), loader=_loader(bars))
+        assert rc == 0
+        rep = json.loads(
+            (tmp_path / "t1" / "_factor_ic_profile__t1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert set(rep["marks"]) == {"source", "universe_note", "per_factor"}
+        assert "八段" in rep["marks"]["universe_note"]  # 映射口径必须在报告里
+        blk = rep["marks"]["per_factor"]["close"]
+        assert set(blk) == {"points", "mean", "median", "ge_0_8", "ge_0_9"}
+        p0, p1, p2 = blk["points"]
+        assert set(p0) == {"code", "buy_date", "value", "percentile", "status"}
+        # 600001 斜率最大 ⇒ 分位 1.0（hit）
+        assert p0["status"] == "hit" and p0["percentile"] == pytest.approx(1.0)
+        # 600002 与 c2 同斜率并列 ⇒ ≤ 计：c1,c2,600002 = 3/10 = 0.3
+        assert p1["status"] == "hit" and p1["percentile"] == pytest.approx(0.3)
+        # 600099 不在宇宙 ⇒ out_of_universe
+        assert p2["status"] == "out_of_universe" and p2["percentile"] is None
+        assert blk["ge_0_8"] == 1 and blk["ge_0_9"] == 1
+        assert blk["mean"] == pytest.approx((1.0 + 0.3) / 2)
+        assert blk["median"] == pytest.approx((1.0 + 0.3) / 2)
+
+    def test_case_scorer_none_becomes_unavailable(self, tmp_path, monkeypatch):
+        """案例股当日 scorer 返 None/NaN → unavailable（不硬算）。"""
+        # fake scorer：600001 恒 None
+        monkeypatch.setitem(
+            bt.SCORERS,
+            "fake_none_for_case",
+            lambda df, code: None if code == "600001" else {"score": 1.0},
+        )
+        bars = self._setup_bars()
+        buy_date = str(bars["600001"]["date"].iloc[-1].date())
+        mj = _marks_json(tmp_path, [{"code": "600001", "buy_date": buy_date}])
+        rc = fip.main(
+            _argv(
+                tmp_path,
+                "--scorers",
+                "fake_none_for_case",
+                "--codes",
+                ",".join(bars.keys()),
+                "--marks",
+                mj,
+            ),
+            loader=_loader(bars),
+        )
+        assert rc == 0
+        rep = json.loads(
+            (tmp_path / "t1" / "_factor_ic_profile__t1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        p = rep["marks"]["per_factor"]["fake_none_for_case"]["points"][0]
+        assert p["status"] == "unavailable" and p["percentile"] is None
+        assert rep["marks"]["per_factor"]["fake_none_for_case"]["ge_0_8"] == 0
+
+    def test_stdout_table_has_discipline_header(self, tmp_path, monkeypatch, capsys):
+        """stdout 表渲染含纪律表头（诊断指标非判据）与状态字符。"""
+        monkeypatch.setattr(bt, "SCORERS", {})
+        bars = self._setup_bars()
+        buy_date = str(bars["600001"]["date"].iloc[-1].date())
+        mj = _marks_json(
+            tmp_path,
+            [
+                {"code": "600001", "buy_date": buy_date},
+                {"code": "600099", "buy_date": buy_date},
+            ],
+        )
+        fip.main(self._argv_marks(tmp_path, bars, mj), loader=_loader(bars))
+        out = capsys.readouterr().out
+        assert "诊断指标非判据" in out
+        assert "R36" in out
+        assert "out_of_universe" in out or " o " in out
+
+    def test_marks_dir_loads_b1_dataset(self, tmp_path, monkeypatch):
+        """--marks 指向目录 → 走 b1_perfect_dataset.load_cases 加载全部正例。"""
+        monkeypatch.setattr(bt, "SCORERS", {})
+        bars = self._setup_bars()
+        rc = fip.main(
+            _argv(
+                tmp_path,
+                "--expr",
+                "close",
+                "--codes",
+                ",".join(bars.keys()),
+                "--marks",
+                "/home/gh/agent/ZGNB/B1_DATA",
+            ),
+            loader=_loader(bars),
+        )
+        assert rc == 0
+        rep = json.loads(
+            (tmp_path / "t1" / "_factor_ic_profile__t1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert rep["marks"]["source"].startswith("b1_data_dir(")
+        assert len(rep["marks"]["per_factor"]["close"]["points"]) == 10  # 全部 10 正例
+
+    def test_empty_marks_dir_rejected(self, tmp_path, monkeypatch):
+        """空 marks 目录/路径不存在 → fail-closed（ap.error，exit 2）。"""
+        monkeypatch.setattr(bt, "SCORERS", {})
+        empty = tmp_path / "empty_marks"
+        empty.mkdir()
+        with pytest.raises(SystemExit) as exc:
+            fip.main(
+                _argv(tmp_path, "--expr", "close", "--marks", str(empty)),
+                loader=_loader(_load_all()),
+            )
+        assert exc.value.code == 2
+        with pytest.raises(SystemExit) as exc2:
+            fip.main(
+                _argv(tmp_path, "--expr", "close", "--marks", str(tmp_path / "nope")),
+                loader=_loader(_load_all()),
+            )
+        assert exc2.value.code == 2
+
+    def test_marks_coexists_with_scorers_and_expr(self, tmp_path):
+        """--marks 与 --scorers/--expr 共存（互不冲突，IC 主表照出）。"""
+        bars = self._setup_bars()
+        buy_date = str(bars["600001"]["date"].iloc[-1].date())
+        mj = _marks_json(tmp_path, [{"code": "600001", "buy_date": buy_date}])
+        rc = fip.main(
+            _argv(
+                tmp_path,
+                "--scorers",
+                "kdj_j",
+                "--expr",
+                "close",
+                "--codes",
+                ",".join(bars.keys()),
+                "--marks",
+                mj,
+            ),
+            loader=_loader(bars),
+        )
+        assert rc == 0
+        rep = json.loads(
+            (tmp_path / "t1" / "_factor_ic_profile__t1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert "kdj_j" in rep["marks"]["per_factor"]
+        assert "close" in rep["marks"]["per_factor"]
+        assert rep["ranking"]  # 主 ranking 表不变（照出）
