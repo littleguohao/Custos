@@ -334,6 +334,26 @@ def _marks_json(tmp_path, marks):
     return str(p)
 
 
+def _write_b1_case_csv(dir_, code_full, dates):
+    """合成 B1_DATA 形态 CSV：BOM + 大写列名 + {code}-{start}-{end}.csv 文件名口径。
+
+    日期轴直接取宇宙 bars 的 date 列 ⇒ 买点=末根=文件名 end（load_cases 装载
+    护栏），且打点必落在 frame 索引上（status=hit 可断言）。
+    """
+    lines = ["Date,Code,Amount,Close,ForwardFactor,High,Low,Volume,Open"]
+    for i, d in enumerate(dates):
+        c = 10.0 + 0.1 * i
+        lines.append(
+            f"{d.date()},{code_full},{c * 1000:.2f},{c},0.0,{c * 1.01:.4f},"
+            f"{c * 0.99:.4f},1000,{c * 0.998:.4f}"
+        )
+    start = pd.Timestamp(dates.iloc[0]).strftime("%Y%m%d")
+    end = pd.Timestamp(dates.iloc[-1]).strftime("%Y%m%d")
+    p = dir_ / f"{code_full}-{start}-{end}.csv"
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8-sig")
+    return p
+
+
 class TestMarkPercentile:
     def test_percentile_hand_compute(self):
         """分位对拍手算：当日全宇宙有效分值 ≤ 案例股分值的比例，并列按 ≤ 计。"""
@@ -473,9 +493,16 @@ class TestMarksEndToEnd:
         assert "out_of_universe" in out or " o " in out
 
     def test_marks_dir_loads_b1_dataset(self, tmp_path, monkeypatch):
-        """--marks 指向目录 → 走 b1_perfect_dataset.load_cases 加载全部正例。"""
+        """--marks 指向目录 → 走 b1_perfect_dataset.load_cases 加载全部正例。
+
+        合成目录（hermetic）：真实 B1_DATA 只在 dev 机，CI/其他环境无此路径。
+        """
         monkeypatch.setattr(bt, "SCORERS", {})
         bars = self._setup_bars()
+        marks_dir = tmp_path / "b1_data_fake"
+        marks_dir.mkdir()
+        for full in ("600001.SH", "600002.SH"):
+            _write_b1_case_csv(marks_dir, full, bars[full[:6]]["date"])
         rc = fip.main(
             _argv(
                 tmp_path,
@@ -484,7 +511,7 @@ class TestMarksEndToEnd:
                 "--codes",
                 ",".join(bars.keys()),
                 "--marks",
-                "/home/gh/agent/ZGNB/B1_DATA",
+                str(marks_dir),
             ),
             loader=_loader(bars),
         )
@@ -495,7 +522,9 @@ class TestMarksEndToEnd:
             )
         )
         assert rep["marks"]["source"].startswith("b1_data_dir(")
-        assert len(rep["marks"]["per_factor"]["close"]["points"]) == 10  # 全部 10 正例
+        pts = rep["marks"]["per_factor"]["close"]["points"]
+        assert [p["code"] for p in pts] == ["600001", "600002"]  # 目录分支全量装载
+        assert all(p["status"] == "hit" for p in pts)  # 日期轴对齐 ⇒ 全 hit
 
     def test_empty_marks_dir_rejected(self, tmp_path, monkeypatch):
         """空 marks 目录/路径不存在 → fail-closed（ap.error，exit 2）。"""
