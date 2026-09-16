@@ -71,7 +71,8 @@ class LoopConfig:
     min_objective: float = 0.0  # 三轴适应度阈值：objective 低于此值 → fail
     # marks 监督模式（R36 Phase 2）：IC 门后再过正例分离门（自指口径，
     # 见 evolution/marks_fitness.py）；空 = 关闭（关闭时行为逐位不变）。
-    marks_path: str = ""  # B1_DATA 目录（bars 是 TS_RANK 计算的载体，必须有）
+    marks_path: str = ""  # B1_DATA 目录（CSV 片段）或点对清单 .json（权威清单
+    # R36_perfect_b1_marks.json；bars 全靠 provider，无 provider 时 fail-closed）
     min_marks_rank: float = 0.7  # 买点 mean_rank 下限（(0,1] 分位口径）
     min_marks_contrast: float = 0.0  # 买点均值 − 案例内全日均值 的下限
     marks_rank_window: int = 20  # TS_RANK 窗口（必须远小于案例窗长 61~78 根；
@@ -524,9 +525,18 @@ def run_loop(
         )
     marks_cases = None
     if cfg.marks_path:
-        from custos.research.b1_perfect_dataset import load_cases  # noqa: PLC0415
+        from custos.research.b1_perfect_dataset import (  # noqa: PLC0415
+            load_cases,
+            load_marks_json,
+        )
 
-        marks_cases = load_cases(cfg.marks_path)  # fail-closed（坏目录/空目录 raise）
+        mp = str(cfg.marks_path)
+        # 两种形态：目录 = B1_DATA CSV 集（含材料片段）；.json = 点对清单
+        # （权威清单 governance/research/R36_perfect_b1_marks.json，生产机 pull 即用，
+        # bars 全靠 marks_bars_provider 全历史）
+        marks_cases = (
+            load_marks_json(mp) if mp.lower().endswith(".json") else load_cases(mp)
+        )  # fail-closed（坏路径/空清单/坏 JSON raise）
     ctx = _RunCtx(
         cfg=cfg,
         mining_bars=clip_tail(bars_by_code, cfg.mining_end),

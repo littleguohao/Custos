@@ -195,8 +195,9 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--marks",
         default="",
-        help="R36 Phase 2 监督模式：B1_DATA 目录（bars 是 TS_RANK 计算的载体，"
-        "必须有；空=关闭，关闭时行为逐位不变）——IC 门后再过正例分离门"
+        help="R36 Phase 2 监督模式：B1_DATA 目录 或 点对清单 JSON（权威清单 "
+        "governance/research/R36_perfect_b1_marks.json，生产机 pull 即用；"
+        "空=关闭，关闭时行为逐位不变）——IC 门后再过正例分离门"
         "（自指口径，decision 仍纯确定性）",
     )
     ap.add_argument(
