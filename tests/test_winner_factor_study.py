@@ -294,7 +294,9 @@ class TestPanelHookNoLookahead:
         assert out["tech_score"] == 50
         assert list(out["panel"]) == wfs.PANEL_KEYS
         got = captured["df"]
-        assert got["date"].iloc[-1] == entry_date  # 无未来函数
+        # 无未来函数（值比较按日期串口径：asof_frames 入口会把 str 日期列
+        # 归一成 datetime64——dtype 变更属修复，截断语义不变）
+        assert str(got["date"].iloc[-1])[:10] == str(entry_date)[:10]
         assert (got["date"] <= entry_date).all()
         assert len(got) == ec.OHLCV_LOAD_BARS
         assert len(captured["df_long"]) == ec.OHLCV_LOAD_BARS_LONG
