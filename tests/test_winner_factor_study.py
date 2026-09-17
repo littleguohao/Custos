@@ -294,10 +294,12 @@ class TestPanelHookNoLookahead:
         assert out["tech_score"] == 50
         assert list(out["panel"]) == wfs.PANEL_KEYS
         got = captured["df"]
-        # 无未来函数（值比较按日期串口径：asof_frames 入口会把 str 日期列
-        # 归一成 datetime64——dtype 变更属修复，截断语义不变）
-        assert str(got["date"].iloc[-1])[:10] == str(entry_date)[:10]
-        assert (got["date"] <= entry_date).all()
+        # asof_frames 把 df/df_long 的 date 归一 datetime64（v0.249）——pandas 3.0
+        # 起 Timestamp == str 不再解析（恒 False），按 Timestamp 对拍；index 帧不
+        # 归一（_index_asof 保持输入 dtype），仍按 str 对拍。
+        entry_ts = pd.Timestamp(entry_date)
+        assert got["date"].iloc[-1] == entry_ts  # 无未来函数
+        assert (got["date"] <= entry_ts).all()
         assert len(got) == ec.OHLCV_LOAD_BARS
         assert len(captured["df_long"]) == ec.OHLCV_LOAD_BARS_LONG
         assert (captured["index"]["date"] <= entry_date).all()
