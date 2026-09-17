@@ -651,6 +651,38 @@ def test_portfolio_topn_picks_highest_score():
     assert p2["n_taken"] == 2 and abs(p2["final_equity"] - 1.0) < 1e-6  # 两只都进,净0
 
 
+def test_portfolio_topn_taken_out():
+    """taken_out：实际开仓的候选 dict 逐一收集（R36 Phase 3 选中子集读数用）。"""
+    cA = {
+        "code": "A",
+        "entry_date": "2025-01-01",
+        "exit_date": "2025-01-10",
+        "ret": 0.10,
+        "risk_frac": 0.05,
+        "score": 90,
+    }
+    cB = {
+        "code": "B",
+        "entry_date": "2025-01-01",
+        "exit_date": "2025-01-10",
+        "ret": -0.10,
+        "risk_frac": 0.05,
+        "score": 10,
+    }
+    taken = []
+    p = bt.simulate_portfolio_topn(
+        [cA, cB],
+        top_n=1,
+        risk_pct=0.01,
+        max_concurrent=5,
+        max_pos_frac=0.2,
+        taken_out=taken,
+    )
+    assert p["n_taken"] == 1
+    assert taken == [cA]  # 恰好是高分被选中那笔（同一对象）
+    # 默认 None = 不收集（旧行为逐位不变，由 test_portfolio_topn_picks_highest_score 钉住）
+
+
 def test_collect_all_yields_more_candidates():
     df = _mk([10.0 + 0.1 * i for i in range(45)])
     stub = lambda s, code: {"score": 100, "suggestion": "可买"}

@@ -4280,10 +4280,13 @@ def _open_topn_for_date(
     equity: float,
     gross: float,
     seq: int,
+    taken_out: Optional[list] = None,
 ) -> tuple[int, int, float, int, list[float]]:
     """topn 特有的横截面择优块：当日候选按 score 降序，在并发/top_n/总敞口上限内开仓。
 
     返回 ``(taken, skipped, gross, seq, taken_rets)``（本日增量；open_heap/held 就地更新）。
+    ``taken_out`` 提供时把当日实际开仓的候选 dict 追加进去（R36 Phase 3 调权路要按
+    选中子集出交易读数）；None = 不收集（旧行为逐位不变）。
     """
     import heapq
 
@@ -4312,6 +4315,8 @@ def _open_topn_for_date(
         held.add(t["code"])
         taken += 1
         taken_rets.append(t["ret"])
+        if taken_out is not None:
+            taken_out.append(t)
         opened += 1
     return taken, skipped, gross, seq, taken_rets
 
@@ -4333,12 +4338,15 @@ def simulate_portfolio_topn(
     max_concurrent: int = 5,
     max_pos_frac: float = 0.20,
     max_gross: float = 1.0,
+    taken_out: Optional[list] = None,
 ) -> dict[str, Any]:
     """组合级**横截面 top-N 择优**资金曲线：每个进场日在所有「可买」候选里按 score 降序取前 top_n
     (排除已持有该股、受并发/敞口上限约束)，固定风险仓位入场，事件驱动出资金曲线/CAGR/最大回撤。
 
     candidates：evaluate_trades(collect_all=True) 的全候选(含 entry_date/exit_date/ret/risk_frac/score)。
     top_n：每个进场日最多新开仓数(横截面择优的宽度)。
+    taken_out：提供 list 时把实际开仓的候选 dict 逐一追加进去（选中子集的交易级读数用，
+      如 R36 Phase 3 调权路）；None = 不收集（旧行为逐位不变）。
     仓位同 simulate_portfolio(risk_frac 设 2% 地板);回撤=已实现权益口径(不含浮亏,真实回撤更大)。绝不 raise。
     """
     import collections as _c
@@ -4386,6 +4394,7 @@ def simulate_portfolio_topn(
             equity=equity,
             gross=gross,
             seq=seq,
+            taken_out=taken_out,
         )
         taken += tk
         skipped += sk

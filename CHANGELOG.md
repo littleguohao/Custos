@@ -250,6 +250,7 @@
 | 2026-09-16 | v0.246 | shadow_1800_compare 生产机三连修：①data 链接无软链特权退 junction（WinError 1314）+ 红线：链接点只 rmdir 摘点绝不 rmtree 穿链（防误删共享生产数据）+ 幂等复用；②入口 stdout/stderr 钉 utf-8（GBK 下 ⚠️ 打印 UnicodeEncodeError 掩盖退出码）；③🏷️ 段比较剔除全部空白（v0.235 fmt 的 CJK padding 排版差不再误报，语义差异仍可辨）；钉测 +5。首日干净样本（2026-09-16）逐位一致 ✅（对照 2350 票） | 影子对照机制生产机适配（#76① 收集启动） | 连续 ≥10 交易日逐位一致 ⇒ #76 闭环 |
 | 2026-09-16 | v0.247 | R36 生产机取数链三修：①factor_ic_profile/b1_marks_v0 的 --marks 补权威清单信封形态（原只认裸 list）；②b1_marks_v0._v0_at 的 date 列归一 datetime64（真实 loader 带窗口返回 str 列炸 enrich 周线 resample——score_return_study:504 教训在 V0 as-of 链路复发，0 有效打点拒跑）；③hygiene 豁免影子 worktree junction 视图。钉测 +5（详见 commit 33b3abd） | R36 三步取数首跑排障 | 读数回填见 v0.248 |
 | 2026-09-17 | v0.248 | R36 Phase 1 生产机三步跑毕回填 + factor_ic_profile 案例股并集入帧（seed=0 抽样 3000 仅含 1/10 案例⇒打点全灭；并集入帧后分位口径不变）。读数：V0 八段 8/10 买点落全宇宙前 20%（漏 300689 罚分误伤型/605378 无深J平区型）；研究侧 reversal_quality 唯一落点高∧ICIR 正双占，kdj_j 买点落最低 14% 分位；Phase 2 首轮 15 候选 IC 门全灭（marks 层未触发）。Phase 3 开启条件读数满足，待 owner 拍板（详见 R36 回填区） | R36 Phase 1 取数 | Phase 2 二轮方向复核；Phase 3 拍板 |
+| 2026-09-17 | v0.249 | R36 Phase 3 工具落地：score_evolution_study --v0-lattice（V0 调权路：腿轴 CONTRIB_LEG_KEYS 30 键 × 倍率格——clamp 使尺度不变性不成立故弃 gcd 去重，保底集=等倍率（=live 默认）+单腿、填充关腿边际臂；collect/score 拆分每窗一遍；双窗/灵敏度/随机臂闸门同 R34 族）+ asof_technical_score 透传 weights + evolution marks 观测性（IC-fail 也留读数，门次序不变） | owner 拍板 Phase 3 | r36_p3 跑数回填 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

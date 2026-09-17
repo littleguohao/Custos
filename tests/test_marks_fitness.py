@@ -282,3 +282,26 @@ class TestNewCaseSemantics:
             r = marks_score("volume/MA(volume,20)", [c1], bars_provider=bad)
             assert r["per_case"][0]["bars_source"] == "excerpt"
             assert r["n_hit"] == 1
+
+    def test_marks_observed_even_when_ic_fails(self, tmp_path):
+        """IC 门未过的候选也留 marks 读数（观测性：复核「IC 门是否误杀买点
+        高分候选」需要 IC-fail 侧数据）；门次序/阈值语义不变——decision 仍 fail。"""
+        n = 80
+        closes = [100.0] * n
+        closes[-1] = closes[-2] * 1.20  # 案例买点大涨
+        vols = [1e6] * n
+        _write_case_csv(tmp_path, "600001.SZ", closes, vols)
+        # -ROC(CLOSE,5)：与 test_marks_pass_records_metrics 的通过候选互为反号
+        # ⇒ 同一合成宇宙上 IC 必 fail（rank_ic 反号跌破 0.02 门）
+        llm = ScriptedLLM([_cand("-ROC(CLOSE,5)", "反向动量（IC 门必杀）")])
+        pool = TrajectoryPool()
+        loop_mod.run_loop(
+            _cfg(marks_path=str(tmp_path), marks_rank_window=20),
+            make_bars(),
+            llm,
+            pool,
+        )
+        (t,) = pool.all()
+        assert t.decision == "fail"  # IC 门杀死（门次序不变）
+        m = t.mining_metrics["marks"]  # marks 读数仍留痕（观测性）
+        assert m["n_hit"] == 1 and m["mean_rank"] is not None

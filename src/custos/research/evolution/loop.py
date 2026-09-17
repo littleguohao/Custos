@@ -429,11 +429,17 @@ def _judge_and_record(ctx: _RunCtx, cand: _CandCtx, payload: dict[str, str]) -> 
         min_rank_icir=ctx.cfg.min_rank_icir,
     )
     metrics = asdict(stats)
-    if ctx.marks_cases is not None and decision == "pass":
-        # marks 监督门（R36 Phase 2）：IC 门 fail 时零 marks 计算（控成本）。
-        reasons = reasons + _marks_layer(ctx, payload, metrics)
-        if reasons:
-            decision = "fail"
+    if ctx.marks_cases is not None:
+        # marks 读数对**所有**候选计算留痕（R36 Phase 2 二轮起）：复核「IC 门
+        # 是否误杀买点高分候选」需要 IC-fail 侧的 marks 读数（marks_score 无
+        # 宇宙加载，成本远低于 IC 评估，parse 失败逐点 None 不炸）。
+        # **门判定次序不变**：阈值 reasons 只在 IC pass 后并入（decision 语义
+        # 与此前逐位一致）。
+        marks_reasons = _marks_layer(ctx, payload, metrics)
+        if decision == "pass":
+            reasons = reasons + marks_reasons
+            if marks_reasons:
+                decision = "fail"
     if ctx.cfg.joint and decision == "pass":
         # IC 门 fail 时零 cell 调用；第二层结果并进 reasons/decision（纯确定性）。
         reasons = reasons + _cell_layer(ctx, cand, payload, metrics)

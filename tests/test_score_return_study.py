@@ -202,7 +202,9 @@ class TestAsofNoLookahead:
 
         got = captured["df"]
         # ① 无未来函数：最后一根 == 信号日，绝无其后的数据
-        assert got["date"].iloc[-1] == entry_date
+        #    （值比较按日期串口径：asof_frames 入口会把 str 日期列归一成
+        #    datetime64——dtype 变更属修复，截断语义不变）
+        assert str(got["date"].iloc[-1])[:10] == str(entry_date)[:10]
         assert (got["date"] <= entry_date).all()
         # ② 截断长度 = live 口径（260 / 1200）
         assert len(got) == ec.OHLCV_LOAD_BARS
@@ -226,6 +228,55 @@ class TestAsofNoLookahead:
         srs.asof_technical_score(df, index_df, n - 1, "000001")
         assert len(captured["df"]) == n
         assert len(captured["df_long"]) == n
+
+    def test_weights_passthrough(self, monkeypatch):
+        """weights 可选参数透传 sc.technical_score（R36 Phase 3 调权路）；默认 None 不变。"""
+        df = _mk_df(300)
+        index_df = _mk_df(300)
+        captured = {}
+        monkeypatch.setattr(
+            ec, "compute_metrics", lambda d, ix, code="", df_long=None: {}
+        )
+
+        def spy_score(cand, weights=None):
+            captured["weights"] = weights
+            return (77, "强", {})
+
+        monkeypatch.setattr(sc, "technical_score", spy_score)
+        custom = {"j_low": 48}
+        score, level, _ = srs.asof_technical_score(
+            df, index_df, 200, "000001", weights=custom
+        )
+        assert captured["weights"] is custom  # 原样透传（同一对象）
+        assert score == 77 and level == "强"
+        # 默认调用：weights=None（旧行为逐位不变）
+        srs.asof_technical_score(df, index_df, 201, "000001")
+        assert captured["weights"] is None
+
+    def test_string_dates_normalized_before_compute(self, monkeypatch):
+        """研究侧窗口裁剪 loader（_load_one_bars 带 start/end）返回 str 日期列
+        （backtest_factors.py:4935）——asof_frames 入口在副本上归一 datetime64，
+        否则 compute_metrics 深处 weekly_j 周线 resample 炸（score_return_study
+        自身 :504 钉过的教训；v0-lattice/V0 臂生产机「0 候选」根因，2026-09-17
+        实测）。调用方 df 本体保持 str 不动。"""
+        df = _mk_df(300)
+        df["date"] = df["date"].astype(str).str[:10]  # 模拟窗口裁剪 loader 的 str 形态
+        index_df = _mk_df(300)
+        captured = {}
+
+        def spy(df_arg, index_arg, code="", df_long=None):
+            captured["dtype"] = df_arg["date"].dtype
+            captured["long_dtype"] = df_long["date"].dtype
+            return {}
+
+        monkeypatch.setattr(ec, "compute_metrics", spy)
+        monkeypatch.setattr(sc, "technical_score", lambda cand, w=None: (1, "弱", {}))
+        srs.asof_technical_score(df, index_df, 200, "000001")
+        assert pd.api.types.is_datetime64_any_dtype(pd.Series(dtype=captured["dtype"]))
+        assert pd.api.types.is_datetime64_any_dtype(
+            pd.Series(dtype=captured["long_dtype"])
+        )
+        assert not pd.api.types.is_datetime64_any_dtype(df["date"])  # 调用方不动
 
 
 class TestSplitTopFrac:

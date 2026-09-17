@@ -686,3 +686,500 @@ class TestCellFailureSemantics:
         assert "产出 0 笔交易" in runner.failures[0]["log_tail"]
         # 分类链路：该记录进报告应为 empty_result
         assert ses._cell_failures_report(runner)[0]["root_cause"] == "empty_result"
+
+
+# ---------------------------------------------------------------------------
+# --v0-lattice 模式（R36 Phase 3 调权路：V0 腿轴 × 倍率格 × 双窗闸门）
+# ---------------------------------------------------------------------------
+
+from custos.pipeline.screening.score_candidates import (  # noqa: E402
+    DEFAULT_TECH_WEIGHTS,
+)
+from custos.research.score_calibration_study import (  # noqa: E402
+    CONTRIB_LEG_KEYS,
+)
+
+V0L_LEGS = list(CONTRIB_LEG_KEYS)  # 30 键权威清单（含合成腿 repair_signals）
+
+
+def _mk_trade(code, d_in, d_out, ret, r):
+    return {
+        "code": code,
+        "entry_date": d_in,
+        "exit_date": d_out,
+        "ret": ret,
+        "reason": "bbi_exit",
+        "holding": 5,
+        "risk_frac": 0.05,
+        "r_multiple": r,
+    }
+
+
+def _v0l_collected_mining():
+    """两日 × 两候选：A 只有 j_low 腿（24），B 有 volume_contraction+relative_strength_strong（30）。
+
+    等倍率下 B 分高被选中（top_n=1）；j_low 加权/单腿格下 A 被选中——选择随倍率翻转。
+    """
+    return [
+        {
+            "trade": _mk_trade("A", "2023-01-03", "2023-01-08", 0.10, 2.0),
+            "cand": {"patterns": {"j_low": True}},
+            "code": "A",
+        },
+        {
+            "trade": _mk_trade("B", "2023-01-03", "2023-01-08", -0.02, -0.4),
+            "cand": {
+                "patterns": {
+                    "volume_contraction": True,
+                    "relative_strength_strong": True,
+                }
+            },
+            "code": "B",
+        },
+        {
+            "trade": _mk_trade("A", "2023-01-09", "2023-01-16", -0.02, -0.4),
+            "cand": {"patterns": {"j_low": True}},
+            "code": "A",
+        },
+        {
+            "trade": _mk_trade("B", "2023-01-09", "2023-01-16", 0.03, 0.6),
+            "cand": {
+                "patterns": {
+                    "volume_contraction": True,
+                    "relative_strength_strong": True,
+                }
+            },
+            "code": "B",
+        },
+    ]
+
+
+def _v0l_collected_judgment():
+    """判定窗 regime 翻转：A 净亏 B 净赚（与挖掘窗相反，检验双窗读数独立）。"""
+    return [
+        {
+            "trade": _mk_trade("A", "2025-01-06", "2025-01-10", -0.05, -1.0),
+            "cand": {"patterns": {"j_low": True}},
+            "code": "A",
+        },
+        {
+            "trade": _mk_trade("B", "2025-01-06", "2025-01-10", 0.04, 0.8),
+            "cand": {
+                "patterns": {
+                    "volume_contraction": True,
+                    "relative_strength_strong": True,
+                }
+            },
+            "code": "B",
+        },
+        {
+            "trade": _mk_trade("A", "2025-01-13", "2025-01-17", 0.02, 0.4),
+            "cand": {"patterns": {"j_low": True}},
+            "code": "A",
+        },
+        {
+            "trade": _mk_trade("B", "2025-01-13", "2025-01-17", -0.01, -0.2),
+            "cand": {
+                "patterns": {
+                    "volume_contraction": True,
+                    "relative_strength_strong": True,
+                }
+            },
+            "code": "B",
+        },
+    ]
+
+
+class SpyCollector:
+    """按窗返回合成收集结果的 fake collector；记录调用（拆分证据：窗数次，非格数次）。"""
+
+    def __init__(self, by_window=None):
+        self.by_window = by_window if by_window is not None else {}
+        self.calls = []
+
+    def __call__(self, window):
+        self.calls.append((window.start, window.end))
+        return self.by_window.get((window.start, window.end), [])
+
+
+def _argv_v0l(tmp_path, *extra):
+    argv = [
+        "--v0-lattice",
+        "--mining-start",
+        MINING[0],
+        "--mining-end",
+        MINING[1],
+        "--codes",
+        "600000,600001",
+        "--top-n",
+        "1",
+        "--out-dir",
+        str(tmp_path),
+        "--tag",
+        "t1",
+        "--n-random",
+        "2",
+        "--sens-arms",
+        "3",
+    ]
+    return argv + list(extra)
+
+
+def _run_v0l(tmp_path, fake, collector, *extra):
+    rc = ses.main(
+        _argv_v0l(tmp_path, *extra), cell_runner=fake, v0l_collector=collector
+    )
+    assert rc == 0
+    out = tmp_path / "t1" / "_score_evolution__t1.json"
+    assert out.exists()
+    return json.loads(out.read_text(encoding="utf-8"))
+
+
+class TestV0LatticeUnits:
+    """倍率映射与倍率格构造的单元钉测。"""
+
+    def test_mult_overrides_mapping(self):
+        """overrides = 默认权重 × 倍率；mult=1 逐位等于默认表；0=关腿。"""
+        legs = ["bbi_above", "j_low", "repair_signals"]
+        ov = ses._v0_mult_overrides([2.0, 0.0, 1.0], legs)
+        assert ov["bbi_above"] == DEFAULT_TECH_WEIGHTS["bbi_above"] * 2
+        assert ov["j_low"] == 0.0  # 0 倍率 = 关腿
+        # repair_signals 合成腿：倍率同乘 each/cap 双键
+        assert ov["repair_signals_each"] == DEFAULT_TECH_WEIGHTS["repair_signals_each"]
+        assert ov["repair_signals_cap"] == DEFAULT_TECH_WEIGHTS["repair_signals_cap"]
+        # 全 1 倍率 ⇒ 全键逐位等于默认表（等倍率格 = live V0 默认权重的证据）
+        ov1 = ses._v0_mult_overrides([1.0] * len(V0L_LEGS), V0L_LEGS)
+        for leg in V0L_LEGS:
+            for key in ses._v0_leg_weight_keys(leg):
+                assert ov1[key] == DEFAULT_TECH_WEIGHTS[key]
+        # 31 键 = 29 直映腿 + repair_signals 双键
+        assert len(ov1) == 31
+
+    def test_mult_overrides_negative_leg_sign_preserved(self):
+        """负腿倍率缩放罚分幅度、永不变号；0 = 罚分移除。"""
+        legs = ["macd_top_divergence", "volume_yy_bear", "distribution_watch"]
+        ov = ses._v0_mult_overrides([2.0, 3.0, 0.0], legs)
+        assert ov["macd_top_divergence"] == -16.0  # -8 × 2
+        assert ov["volume_yy_bear"] == -15.0  # -5 × 3
+        assert ov["distribution_watch"] == 0.0
+        assert ov["macd_top_divergence"] < 0 and ov["volume_yy_bear"] < 0
+
+    def test_mult_overrides_dim_mismatch_rejected(self):
+        with pytest.raises(ValueError):
+            ses._v0_mult_overrides([1.0], ["bbi_above", "j_low"])
+
+    def test_mult_lattice_baseline_set_and_shape(self):
+        """保底集：等倍率（全 1）+ 30 单腿恒在；填充 = 单腿变档（其余保持 1）。"""
+        lat = ses._v0_mult_lattice(30, (0.0, 1.0, 2.0, 3.0), max_combos=64)
+        assert len(lat) == 64
+        equal = tuple(1.0 for _ in range(30))
+        assert lat[0] == equal  # 等倍率基准是首行
+        singles = [w for w in lat if sum(1 for x in w if x) == 1]
+        assert len(singles) == 30  # 各单腿对照臂全在
+        # 填充臂形态：恰一条腿取 L≠1、其余保持 1；L=0（关腿）优先铺满 30 条腿
+        fills = lat[31:]
+        assert len(fills) == 33
+        for w in fills:
+            varied = [i for i, x in enumerate(w) if x != 1.0]
+            assert len(varied) == 1
+            assert w[varied[0]] in (0.0, 2.0, 3.0)
+        off_fills = [w for w in fills if 0.0 in w]
+        varied_off = {w.index(0.0) for w in off_fills}
+        assert varied_off == set(range(30))  # 关腿边际臂覆盖全部 30 腿
+        # 确定性：两次调用逐位一致
+        assert ses._v0_mult_lattice(30, (0.0, 1.0, 2.0, 3.0), max_combos=64) == lat
+
+    def test_mult_lattice_must_set_survives_small_cap(self):
+        """保底集可超 max_combos（同 weight_lattice 截断语义；--quick 24 < 31 保底）。"""
+        lat = ses._v0_mult_lattice(30, (0.0, 1.0, 2.0, 3.0), max_combos=24)
+        assert len(lat) == 31  # 等倍率 + 30 单腿，零填充
+        assert tuple(1.0 for _ in range(30)) in lat
+
+    def test_mult_lattice_levels_without_zero(self):
+        lat = ses._v0_mult_lattice(30, (1.0, 2.0), max_combos=64)
+        assert len(lat) == 31 + 30  # 填充只有 L=2 一轮
+        assert all(0.0 not in w for w in lat[31:])
+
+
+class TestV0LatticeEndToEnd:
+    """fake cell_runner（DSL 随机臂）+ fake collector（V0 收集）端到端。"""
+
+    def _mining_collector(self):
+        return SpyCollector({MINING: _v0l_collected_mining()})
+
+    def test_schema_and_top_selection(self, tmp_path):
+        fake = FakeRunner(default=_reading(0.5))
+        collector = self._mining_collector()
+        rep = _run_v0l(tmp_path, fake, collector)
+        assert set(rep) == {
+            "version",
+            "tag",
+            "config",
+            "windows",
+            "universe",
+            "legs",
+            "lattice",
+            "arms",
+            "pool_baseline",
+            "top_genome",
+            "judgment",
+            "sensitivity",
+            "random_control",
+            "cell_failures",
+            "criteria_readings",
+        }
+        cfg = rep["config"]
+        assert cfg["mode"] == "v0_lattice"
+        assert "倍率" in cfg["multiplier_space"]
+        assert rep["legs"] == V0L_LEGS  # 腿轴 = 权威清单
+        lat = rep["lattice"]
+        assert lat["kind"] == "v0_multiplier" and lat["n_legs"] == 30
+        assert lat["n_combos"] == 64
+        assert lat["default_weights_snapshot"] == DEFAULT_TECH_WEIGHTS
+        assert lat["leg_weight_keys"]["repair_signals"] == [
+            "repair_signals_each",
+            "repair_signals_cap",
+        ]
+        assert set(rep["arms"]) == {
+            "lattice",
+            "equal_weight",
+            "single_legs",
+            "s_shape",
+            "random",
+            "v0",
+        }
+        assert set(rep["criteria_readings"]) == {
+            "R34-C1",
+            "R34-C2",
+            "R34-C3",
+            "R34-C4",
+            "R34-C5",
+        }
+        # collect/score 拆分证据：64 格 + 3 灵敏度臂，collector 只跑了挖掘窗一遍
+        assert collector.calls == [MINING]
+        # top = single_0（bbi_above 单腿）：平分并列取格子序在前者（A 在候选序前）
+        top = rep["top_genome"]
+        assert top["weights"] == [1.0] + [0.0] * 29
+        # expr 槽位 = 可还原的倍率向量 JSON 字符串
+        mult = json.loads(top["expr"])
+        assert mult == top["multipliers"] and mult["bbi_above"] == 1.0
+        assert mult["j_low"] == 0.0
+        # overrides 与倍率向量一致（bbi_above×1=5，j_low×0=0，repair 双键×0）
+        assert top["overrides"]["bbi_above"] == 5.0
+        assert top["overrides"]["j_low"] == 0.0
+        assert top["overrides"]["repair_signals_each"] == 0.0
+        # top 读数 = 选中 A 两笔（+0.10/−0.02）：胜率 0.5、盈亏比 5、n=2
+        assert top["mining"]["n"] == 2
+        assert top["mining"]["win_rate"] == 0.5
+        assert top["mining"]["payoff_ratio"] == pytest.approx(5.0)
+        assert top["mining"]["margin"] == pytest.approx(0.5 - 1 / 6)
+        # 等倍率基准 = live V0 默认权重：选中 B 两笔（−0.02/+0.03）
+        eq = rep["arms"]["equal_weight"]
+        assert eq["weights"] == [1.0] * 30
+        assert eq["reading"]["payoff_ratio"] == pytest.approx(1.5)
+        assert eq["reading"]["margin"] == pytest.approx(0.1)
+        # arms.v0 即等倍率行读数（V0 本臂不另跑）
+        assert rep["arms"]["v0"]["status"] == "run"
+        assert rep["arms"]["v0"]["reading"] == eq["reading"]
+        # s_shape 参照臂不属本模式
+        assert rep["arms"]["s_shape"]["status"] == "not_applicable"
+        # 全候选池审计块：权重不变量（4 笔：2 赢 2 亏，payoff 3.25）
+        pool = rep["pool_baseline"]["mining"]
+        assert pool["n"] == 4
+        assert pool["payoff_ratio"] == pytest.approx(3.25)
+        assert rep["pool_baseline"]["judgment"] is None  # 无判定窗
+        # C2：top − 基准 margin 差（挖掘窗）
+        c2 = rep["criteria_readings"]["R34-C2"]
+        assert c2["delta_mining"] == pytest.approx((0.5 - 1 / 6) - 0.1)
+        assert c2["judgment_window"] is False
+        assert rep["criteria_readings"]["R34-C1"]["top_n_mining"] == 2
+        # 单腿臂带腿名且全部有读数
+        assert len(rep["arms"]["single_legs"]) == 30
+        assert {s["name"] for s in rep["arms"]["single_legs"]} == {
+            f"single_{i}" for i in range(30)
+        }
+        j_low_single = rep["arms"]["single_legs"][2]
+        assert j_low_single["leg"] == "j_low"
+        assert j_low_single["row"]["reading"]["margin"] == pytest.approx(0.5 - 1 / 6)
+
+    def test_collect_once_per_window_with_judgment(self, tmp_path):
+        """双窗：collector 恰好每窗一遍（64 格 + 灵敏度 + 判定窗两臂不触发重收集）。"""
+        collector = SpyCollector(
+            {MINING: _v0l_collected_mining(), JUDGMENT: _v0l_collected_judgment()}
+        )
+        rep = _run_v0l(
+            tmp_path,
+            FakeRunner(default=_reading(0.5)),
+            collector,
+            "--judgment-start",
+            JUDGMENT[0],
+            "--judgment-end",
+            JUDGMENT[1],
+        )
+        assert collector.calls == [MINING, JUDGMENT]  # 各恰好一遍
+        j = rep["judgment"]
+        assert set(j) == {"top", "equal", "s_shape"} and j["s_shape"] is None
+        # 判定窗 regime 翻转：top（选 A）margin −0.214，基准（选 B）margin +0.3
+        assert j["top"]["margin"] == pytest.approx(0.5 - 1 / 1.4)
+        assert j["equal"]["margin"] == pytest.approx(0.3)
+        c2 = rep["criteria_readings"]["R34-C2"]
+        assert c2["judgment_window"] is True
+        assert c2["delta_judgment"] == pytest.approx((0.5 - 1 / 1.4) - 0.3)
+        assert rep["criteria_readings"]["R34-C1"]["top_n_judgment"] == 2
+        # 判定窗池审计块同步落盘
+        assert rep["pool_baseline"]["judgment"]["n"] == 4
+
+    def test_sensitivity_wiring(self, tmp_path):
+        """灵敏度：扰动 top 倍率向量重打分（不重新 collect）；翻转定义=跌破等倍率基准。"""
+        rep = _run_v0l(
+            tmp_path, FakeRunner(default=_reading(0.5)), self._mining_collector()
+        )
+        sens = rep["sensitivity"]
+        assert sens["n_arms"] == 3 and len(sens["arms"]) == 3
+        assert sens["baseline_objective"] == pytest.approx(
+            rep["arms"]["equal_weight"]["reading"]["objective"]
+        )
+        # top=single_0：扰动后仍只 bbi_above 正 ⇒ 平分并列 A 在前 ⇒ 同读数不翻转
+        assert sens["flips"] == 0
+        assert rep["criteria_readings"]["R34-C3"]["flips"] == 0
+        for arm in sens["arms"]:
+            assert len(arm["weights"]) == 30
+            assert all(w >= 0 for w in arm["weights"])  # 倍率非负
+            assert arm["weights"] != rep["top_genome"]["weights"]  # 确实扰动
+            assert arm["flip"] is False
+        # 同 seed 复跑逐位一致
+        rep2 = _run_v0l(
+            tmp_path, FakeRunner(default=_reading(0.5)), self._mining_collector()
+        )
+        assert rep["sensitivity"] == rep2["sensitivity"]
+
+    def test_random_arms_use_dsl_path(self, tmp_path):
+        """随机对照臂仍走 DSL expr 路（cell_runner）：腿数 = --max-legs（6，R34 标尺口径）。"""
+        fake = FakeRunner(default=_reading(0.5))
+        rep = _run_v0l(tmp_path, fake, self._mining_collector())
+        arms = rep["arms"]["random"]
+        assert len(arms) == 2  # --n-random 2
+        for arm in arms:
+            assert len(arm["legs"]) == 6  # --max-legs 默认 6，不是 V0 的 30 腿
+            assert arm["n_cells"] == 64  # 同权重格（weight_lattice(6)）同待遇
+        # V0 倍率格不经过 cell_runner——fake 收到的调用全是随机臂的 expr: scorer
+        assert len(fake.calls) == 2 * 64
+        assert all(scorer.startswith("expr:") for scorer, _, _ in fake.calls)
+        assert all((s, e) == MINING for _, s, e in fake.calls)
+        # top 1.33 > 随机臂最佳 0.5 ⇒ pass
+        assert rep["random_control"]["verdict"] == "pass"
+        assert rep["criteria_readings"]["R34-C4"]["random_best_objective"] == 0.5
+
+    def test_random_verdict_suspect_when_random_wins(self, tmp_path):
+        fake = FakeRunner(default=_reading(9.9))  # 随机臂压过 top
+        rep = _run_v0l(tmp_path, fake, self._mining_collector())
+        assert rep["random_control"]["verdict"] == "suspect"
+
+    def test_negative_leg_multiplier_flips_selection(self, tmp_path):
+        """负腿 e2e：distribution_watch ×0（关罚分）让被罚候选反超——倍率语义穿透全链。"""
+        idx_watch = V0L_LEGS.index("distribution_watch")
+
+        def collector(window):
+            return [
+                {
+                    "trade": _mk_trade("P", "2023-01-03", "2023-01-08", 0.10, 2.0),
+                    "cand": {
+                        "patterns": {"j_low": True},
+                        "distribution": {"available": True, "risk_level": "watch"},
+                    },
+                    "code": "P",
+                },
+                {
+                    "trade": _mk_trade("Q", "2023-01-03", "2023-01-08", -0.02, -0.4),
+                    "cand": {"patterns": {"volume_contraction": True}},
+                    "code": "Q",
+                },
+                {
+                    "trade": _mk_trade("P", "2023-01-09", "2023-01-16", -0.01, -0.2),
+                    "cand": {
+                        "patterns": {"j_low": True},
+                        "distribution": {"available": True, "risk_level": "watch"},
+                    },
+                    "code": "P",
+                },
+                {
+                    "trade": _mk_trade("Q", "2023-01-09", "2023-01-16", 0.04, 0.8),
+                    "cand": {"patterns": {"volume_contraction": True}},
+                    "code": "Q",
+                },
+            ]
+
+        rep = _run_v0l(tmp_path, FakeRunner(default=_reading(0.5)), collector)
+        rows = rep["arms"]["lattice"]
+        # 等倍率：P = 24 − 10 = 14 < Q = 15 ⇒ 选 Q（rets −0.02/+0.04）
+        eq = rep["arms"]["equal_weight"]["reading"]
+        assert eq["payoff_ratio"] == pytest.approx(2.0)
+        # distribution_watch ×0 格（保底填充集内）：P = 24 > Q = 15 ⇒ 选 P（+0.10/−0.01）
+        off = [
+            r
+            for r in rows
+            if r["weights"][idx_watch] == 0.0
+            and all(w == 1.0 for i, w in enumerate(r["weights"]) if i != idx_watch)
+        ]
+        assert len(off) == 1
+        assert off[0]["reading"]["payoff_ratio"] == pytest.approx(10.0)
+        assert off[0]["reading"]["margin"] == pytest.approx(0.5 - 1 / 11)
+        assert off[0]["reading"]["margin"] > eq["margin"]
+
+    def test_empty_collect_guard_no_dump(self, tmp_path):
+        """空结果护栏：收集为空（[] 或 None）→ 非零退出不落盘。"""
+        for empty in ([], None):
+            rc = ses.main(
+                _argv_v0l(tmp_path),
+                cell_runner=FakeRunner(),
+                v0l_collector=lambda window: empty,
+            )
+            assert rc == 2
+            assert not (tmp_path / "t1" / "_score_evolution__t1.json").exists()
+
+
+class TestV0LatticeCliGuards:
+    def _expect_error(self, argv):
+        with pytest.raises(SystemExit) as exc:
+            ses.main(argv, cell_runner=FakeRunner(), v0l_collector=SpyCollector())
+        assert exc.value.code == 2
+
+    def test_legs_mutex(self, tmp_path):
+        self._expect_error(_argv_v0l(tmp_path, "--legs", "close"))
+
+    def test_legs_file_mutex(self, tmp_path):
+        self._expect_error(_argv_v0l(tmp_path, "--legs-file", "x.json"))
+
+    def test_two_stage_mutex(self, tmp_path):
+        self._expect_error(_argv_v0l(tmp_path, "--two-stage"))
+
+    def test_v0_arm_mutex(self, tmp_path):
+        self._expect_error(_argv_v0l(tmp_path, "--v0-arm"))
+
+    def test_pre2019_mining_rejected(self, tmp_path):
+        self._expect_error(
+            [
+                "--v0-lattice",
+                "--mining-start",
+                "2015-01-01",
+                "--mining-end",
+                "2018-01-01",
+                "--codes",
+                "600000",
+                "--out-dir",
+                str(tmp_path),
+                "--tag",
+                "t1",
+            ]
+        )
+
+    def test_pre2019_judgment_rejected(self, tmp_path):
+        self._expect_error(
+            _argv_v0l(
+                tmp_path,
+                "--judgment-start",
+                "2014-01-01",
+                "--judgment-end",
+                "2018-01-01",
+            )
+        )

@@ -374,6 +374,14 @@ def asof_frames(
     截断规则与 live 1800 链逐位对齐（已对拍验证，见 --spot-check）。
     winner_factor_study 的因子面板复用同一截断（保证两套研究口径一致）。
     """
+    # date 列归一 datetime64（在 df 副本上，调用方 df 不动）：研究侧
+    # _load_one_bars 带窗口裁剪会把 date 转成字符串（backtest_factors.py:4935），
+    # 而 enrich 检测器（weekly_j 周线 resample 等）依赖 datetime64——str 列会
+    # 在 compute_metrics 深处炸（本文件 :504 钉过的教训；V0 臂/v0-lattice
+    # 生产机「0 候选」根因，2026-09-17 实测）。
+    if not pd.api.types.is_datetime64_any_dtype(df_full["date"]):
+        df_full = df_full.copy()
+        df_full["date"] = pd.to_datetime(df_full["date"])
     pre = df_full.iloc[: i + 1]
     df = pre.tail(ec.OHLCV_LOAD_BARS).reset_index(drop=True)
     df_long = pre.tail(ec.OHLCV_LOAD_BARS_LONG).reset_index(drop=True)
@@ -445,14 +453,17 @@ def asof_technical_score(
     index_full: pd.DataFrame,
     i: int,
     code: str,
+    *,
+    weights: Optional[dict] = None,
 ) -> tuple[int, str, dict]:
     """信号日（df_full 第 i 根）的 live 技术分（as-of 口径，截断见 asof_frames）。
 
-    返回 (score, level, factor_contrib)，权重 = DEFAULT_TECH_WEIGHTS。
-    cand 走 asof_candidate 内容键缓存（v0.175，逐位不变）。
+    返回 (score, level, factor_contrib)；``weights=None`` = DEFAULT_TECH_WEIGHTS
+    （旧行为逐位不变），显式给权重表则透传 ``sc.technical_score``（R36 Phase 3
+    调权路：同一 cand 不同权重重打分，cand 仍走 asof_candidate 内容键缓存）。
     """
     cand = asof_candidate(df_full, index_full, i, code)
-    return sc.technical_score(cand, None)
+    return sc.technical_score(cand, weights)
 
 
 # ---------------------------------------------------------------------------

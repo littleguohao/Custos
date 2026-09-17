@@ -156,7 +156,8 @@ TOOLS: dict[str, tuple[str, str]] = {
         "study",
         "R34 打分基因组裁决（TODO #61 预注册）：腿集合×权重格基因组编译成单条 DSL "
         "表达式（TS_RANK 归一加权和）复用 strategy_grid 单元格——双窗/±50% 灵敏度/"
-        "随机臂对照全确定性；增量在新轴不在调权（⚠️ pre2019 终审段相交即拒跑）",
+        "随机臂对照全确定性；增量在新轴不在调权（⚠️ pre2019 终审段相交即拒跑）；"
+        "--v0-lattice = R36 Phase 3 调权路（V0 计分键 × 倍率格，collect/score 拆分）",
     ),
     "b1_marks_v0_study": (
         "study",
