@@ -28,10 +28,11 @@ from custos.research.evolution.dual_window import (
     validate_windows,
 )
 from custos.research.evolution.expr_dsl import ExprError, complexity, parse, violations
-from custos.research.evolution.ic_eval import evaluate_expression_with_series
+from custos.research.evolution.ic_eval import evaluate_expression_rich
 from custos.research.evolution.llm_client import ChatLLM, LLMError
 from custos.research.evolution.trajectory import (
     EVOLUTION_PHASES,
+    IC_SKIPPED_MARK,
     Trajectory,
     TrajectoryPool,
     make_id,
@@ -77,6 +78,18 @@ class LoopConfig:
     min_marks_contrast: float = 0.0  # 买点均值 − 案例内全日均值 的下限
     marks_rank_window: int = 20  # TS_RANK 窗口（必须远小于案例窗长 61~78 根；
     # K=250 在全案例上恒 NaN——warmup 覆盖全窗，反例钉见 marks_fitness docstring）
+    # IC 门指标口径（R36 Phase 2 三轮，owner 拍板 2026-09-18；默认 rank 逐位不变）：
+    # rank=全谱 RankIC；top_tail=头部价差（对齐 top20 消费口径——二轮实证全谱
+    # RankIC 两头错配：误杀 marks 0.83 尖峰候选 / 独苗 IC 正但头部撑不住）；
+    # off=IC 面纯观测（须配 marks 门，见 _validate_cfg）。
+    ic_gate: str = "rank"
+    min_top_tail: float = 0.002  # 头部价差均值下限（5 日前向；量级锚见 R36 预注册）
+    min_top_tail_ir: float = 0.1  # 头部价差 IR 下限（mean/std，同 rank_icir 哲学）
+    top_tail_frac: float = 0.2  # 头部组分位（对齐 top20 消费口径）
+    # 门次序：ic_first（默认，逐位不变）；marks_first=marks 门先判、fail 即跳过
+    # 全宇宙 IC 评估——纯成本控制（两门合取，晋级集合与次序无关；代价是
+    # marks-fail 候选没有 IC/头部价差观测读数，轨迹留痕「未跑」而非留空）。
+    gate_order: str = "ic_first"
 
 
 def _now_iso() -> str:
@@ -403,48 +416,75 @@ def _marks_layer(
 
 
 def _judge_and_record(ctx: _RunCtx, cand: _CandCtx, payload: dict[str, str]) -> None:
-    """复杂度门 → mining 评估 → 确定性判定 → interpret 解读 → 落池 → 事件。"""
+    """复杂度门 → mining 评估 → 确定性判定 → interpret 解读 → 落池 → 事件。
+
+    门链（合取，全部过才 pass）：复杂度门 → 指标门（``cfg.ic_gate`` 三口径，
+    默认 rank 全谱 RankIC；top_tail 头部价差；off 纯观测）→ marks 门（开启时）
+    → joint cell 层（开启时）。``cfg.gate_order="marks_first"`` 时 marks 门
+    先判：fail 即跳过全宇宙 IC 评估（纯成本控制——合取门的晋级集合与判定
+    次序无关；代价是该候选没有 IC/头部价差观测读数，fail 原因里写明「未跑」）。
+    """
     comp = complexity(payload["expression"])
     comp_viol = violations(comp)
     if comp_viol:
         # 复杂度门 fail：mining_metrics 留空，不为必然淘汰的候选浪费回测。
         _fail_step(ctx, cand, payload, asdict(comp), "；".join(comp_viol))
         return
-    # 通过复杂度门才回测。⚠️ ctx.mining_bars 已物理截尾到 mining_end（run_loop
-    # 入口），判定窗数据不在内存对象里 —— 双窗制度核心，绝不能用未截尾数据调本行。
-    # ic_series（逐日 RankIC）随 stats 一并算出：judge_mining 的 R3 半窗同正门要吃它。
-    stats, ic_series = evaluate_expression_with_series(
-        payload["expression"],
-        ctx.mining_bars,
-        start=ctx.cfg.mining_start,
-        end=ctx.cfg.mining_end,
-        horizon=ctx.cfg.horizon,
-    )
-    decision, reasons = operators.judge_mining(
-        stats,
-        comp,
-        rank_ic_series=ic_series,
-        min_days=ctx.cfg.min_days,
-        min_rank_ic=ctx.cfg.min_rank_ic,
-        min_rank_icir=ctx.cfg.min_rank_icir,
-    )
-    metrics = asdict(stats)
-    if ctx.marks_cases is not None:
-        # marks 读数对**所有**候选计算留痕（R36 Phase 2 二轮起）：复核「IC 门
-        # 是否误杀买点高分候选」需要 IC-fail 侧的 marks 读数（marks_score 无
-        # 宇宙加载，成本远低于 IC 评估，parse 失败逐点 None 不炸）。
-        # **门判定次序不变**：阈值 reasons 只在 IC pass 后并入（decision 语义
-        # 与此前逐位一致）。
-        marks_reasons = _marks_layer(ctx, payload, metrics)
-        if decision == "pass":
-            reasons = reasons + marks_reasons
-            if marks_reasons:
-                decision = "fail"
-    if ctx.cfg.joint and decision == "pass":
-        # IC 门 fail 时零 cell 调用；第二层结果并进 reasons/decision（纯确定性）。
-        reasons = reasons + _cell_layer(ctx, cand, payload, metrics)
-        if reasons:
+    metrics: dict[str, Any] = {}
+    reasons: list[str] = []
+    decision = ""
+    rank_ic_mean: Any = None
+    if ctx.marks_cases is not None and ctx.cfg.gate_order == "marks_first":
+        if marks_reasons := _marks_layer(ctx, payload, metrics):
             decision = "fail"
+            metrics[IC_SKIPPED_MARK] = "marks_first"  # 缺席标记见 trajectory 模块
+            reasons = marks_reasons + [
+                "marks_first：marks 门 fail，IC/头部价差评估未跑"
+                "（成本控制；读数缺席≠零值，复核请用 ic_first 重跑）"
+            ]
+    if decision != "fail":
+        # ⚠️ ctx.mining_bars 已物理截尾到 mining_end（run_loop 入口），判定窗
+        # 数据不在内存对象里 —— 双窗制度核心，绝不能用未截尾数据调本行。
+        # 逐日三列帧（rank_ic/ic/top_tail）随 stats 一并算出：judge_mining 按
+        # ic_gate 口径吃对应列做 R3 半窗同正门。
+        stats, ic_df = evaluate_expression_rich(
+            payload["expression"],
+            ctx.mining_bars,
+            start=ctx.cfg.mining_start,
+            end=ctx.cfg.mining_end,
+            horizon=ctx.cfg.horizon,
+            top_frac=ctx.cfg.top_tail_frac,
+        )
+        rank_ic_mean = stats.rank_ic_mean
+        decision, reasons = operators.judge_mining(
+            stats,
+            comp,
+            rank_ic_series=ic_df["rank_ic"],
+            min_days=ctx.cfg.min_days,
+            min_rank_ic=ctx.cfg.min_rank_ic,
+            min_rank_icir=ctx.cfg.min_rank_icir,
+            ic_gate=ctx.cfg.ic_gate,
+            top_tail_series=ic_df["top_tail"],
+            min_top_tail=ctx.cfg.min_top_tail,
+            min_top_tail_ir=ctx.cfg.min_top_tail_ir,
+        )
+        metrics.update(asdict(stats))
+        if ctx.marks_cases is not None and ctx.cfg.gate_order == "ic_first":
+            # marks 读数对**所有**候选计算留痕（R36 Phase 2 二轮起）：复核「IC 门
+            # 是否误杀买点高分候选」需要 IC-fail 侧的 marks 读数（marks_score 无
+            # 宇宙加载，成本远低于 IC 评估，parse 失败逐点 None 不炸）。
+            # **门判定次序不变**：阈值 reasons 只在 IC pass 后并入（decision 语义
+            # 与此前逐位一致）。
+            marks_reasons = _marks_layer(ctx, payload, metrics)
+            if decision == "pass":
+                reasons = reasons + marks_reasons
+                if marks_reasons:
+                    decision = "fail"
+        if ctx.cfg.joint and decision == "pass":
+            # 指标门 fail 时零 cell 调用；第二层结果并进 reasons/decision（纯确定性）。
+            reasons = reasons + _cell_layer(ctx, cand, payload, metrics)
+            if reasons:
+                decision = "fail"
     t0 = _new_trajectory(
         ctx.cfg, cand, payload, _Judged(asdict(comp), metrics, decision, "")
     )
@@ -455,9 +495,7 @@ def _judge_and_record(ctx: _RunCtx, cand: _CandCtx, payload: dict[str, str]) -> 
     ctx.pool.add(t)
     _emit(
         ctx.on_event,
-        **_event(
-            cand, decision, stats.rank_ic_mean, t.expression, metrics.get("objective")
-        ),
+        **_event(cand, decision, rank_ic_mean, t.expression, metrics.get("objective")),
     )
 
 
@@ -490,7 +528,8 @@ def _step(ctx: _RunCtx, direction: str, phase: str, round_i: int, cand_i: int) -
 
 
 def _validate_cfg(cfg: LoopConfig) -> None:
-    """fail-closed 配置校验：方向非空 / 轮数下限 / phase 合法 / 窗口不倒挂。"""
+    """fail-closed 配置校验：方向非空 / 轮数下限 / phase 合法 / 窗口不倒挂 /
+    门口径合法且组合有意义。"""
     if not cfg.directions:
         raise ValueError("LoopConfig.directions 不能为空")
     if cfg.rounds < 1 or cfg.candidates_per_round < 1:
@@ -502,6 +541,18 @@ def _validate_cfg(cfg: LoopConfig) -> None:
         raise ValueError(f"phase_schedule 含非法 phase: {sorted(bad)}")
     if cfg.mining_start > cfg.mining_end:  # ISO 日期字符串序即时间序
         raise ValueError(f"挖掘窗倒挂: {cfg.mining_start} > {cfg.mining_end}")
+    if cfg.ic_gate not in operators.IC_GATES:
+        raise ValueError(f"ic_gate 非法: {cfg.ic_gate!r}（须为 {operators.IC_GATES}）")
+    if cfg.gate_order not in ("ic_first", "marks_first"):
+        raise ValueError(
+            f"gate_order 非法: {cfg.gate_order!r}（须为 ic_first/marks_first）"
+        )
+    if not 0 < cfg.top_tail_frac <= 1:
+        raise ValueError(f"top_tail_frac 必须 ∈ (0,1]，得到 {cfg.top_tail_frac}")
+    if cfg.gate_order == "marks_first" and not cfg.marks_path:
+        raise ValueError("gate_order=marks_first 需要 marks_path（无 marks 门可前置）")
+    if cfg.ic_gate == "off" and not cfg.marks_path:
+        raise ValueError("ic_gate=off 需要 marks 门（否则挖掘侧没有任何统计门）")
 
 
 def run_loop(

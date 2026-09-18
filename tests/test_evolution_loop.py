@@ -492,6 +492,112 @@ class TestJudgeMining:
         assert _judge(_stats(), series=nan_half)[0] == "fail"
 
 
+# ---------- judge_mining 门指标口径（ic_gate，R36 Phase 2 三轮） ----------
+
+
+def _stats_tt(
+    n_days: int = 100, tt: float = 0.01, ttir: float = 0.5, ric: float = 0.05
+) -> ICStats:
+    """带头部价差读数的 stats（rank 面默认达标，单独钉 top_tail/off 门用）。"""
+    return ICStats(
+        n_days=n_days,
+        ic_mean=ric,
+        icir=0.5,
+        rank_ic_mean=ric,
+        rank_icir=0.5,
+        horizon=5,
+        start=None,
+        end=None,
+        top_tail_mean=tt,
+        top_tail_ir=ttir,
+    )
+
+
+TT_SERIES = pd.Series([0.01] * 100)  # 前后半窗均正，半窗门不挡路
+
+
+def _judge_tt(stats, series=TT_SERIES, ic_gate="top_tail"):
+    return ops.judge_mining(
+        stats,
+        GOOD_COMP,
+        rank_ic_series=GOOD_SERIES,
+        ic_gate=ic_gate,
+        top_tail_series=series,
+    )
+
+
+class TestJudgeMiningGateModes:
+    def test_top_tail_pass_with_rank_readings_demoted(self):
+        """top_tail 模式：全谱 RankIC 读数全负也不挡（降级观测）——二轮独苗类
+        「IC 负但头部有料」候选在本口径下才有生路。"""
+        stats = ICStats(
+            n_days=100,
+            ic_mean=-0.5,
+            icir=-5.0,
+            rank_ic_mean=-0.5,
+            rank_icir=-5.0,
+            horizon=5,
+            start=None,
+            end=None,
+            top_tail_mean=0.01,
+            top_tail_ir=0.5,
+        )
+        decision, reasons = _judge_tt(stats)
+        assert decision == "pass" and reasons == []
+
+    def test_top_tail_thresholds_and_ndays(self):
+        assert _judge_tt(_stats_tt(tt=0.002))[0] == "pass"
+        d, r = _judge_tt(_stats_tt(tt=0.0019))
+        assert d == "fail" and any("top_tail_mean" in x for x in r)
+        d, r = _judge_tt(_stats_tt(ttir=0.09))
+        assert d == "fail" and any("top_tail_ir" in x for x in r)
+        d, r = _judge_tt(_stats_tt(n_days=19))
+        assert d == "fail" and any("有效截面日数" in x for x in r)  # n_days 门仍在
+
+    def test_top_tail_nan_and_missing_series_fail_closed(self):
+        assert _judge_tt(_stats_tt(tt=float("nan")))[0] == "fail"
+        assert _judge_tt(_stats_tt(ttir=float("nan")))[0] == "fail"
+        d, r = _judge_tt(_stats_tt(), series=None)
+        assert d == "fail" and any("未提供" in x for x in r)
+
+    def test_top_tail_half_window_flip_fails(self):
+        series = pd.Series([0.06] * 60 + [-0.04] * 40)  # 池化正但后半翻负
+        d, r = _judge_tt(_stats_tt(tt=0.012, ttir=0.4), series=series)
+        assert d == "fail" and any("半窗" in x for x in r)
+
+    def test_off_mode_keeps_only_ndays_gate(self):
+        """off：IC 面全 nan 也不挡（纯观测）；n_days 门始终生效。"""
+        stats = ICStats(
+            n_days=100,
+            ic_mean=float("nan"),
+            icir=float("nan"),
+            rank_ic_mean=float("nan"),
+            rank_icir=float("nan"),
+            horizon=5,
+            start=None,
+            end=None,
+        )
+        assert _judge_tt(stats, ic_gate="off")[0] == "pass"
+        bad = ICStats(
+            n_days=19,
+            ic_mean=float("nan"),
+            icir=float("nan"),
+            rank_ic_mean=float("nan"),
+            rank_icir=float("nan"),
+            horizon=5,
+            start=None,
+            end=None,
+        )
+        assert _judge_tt(bad, ic_gate="off")[0] == "fail"
+
+    def test_invalid_ic_gate_raises(self):
+        assert _judge(_stats(), comp=GOOD_COMP)[0] == "pass"  # 默认 rank 不受影响
+        with pytest.raises(ValueError):
+            ops.judge_mining(
+                _stats(), GOOD_COMP, rank_ic_series=GOOD_SERIES, ic_gate="bogus"
+            )
+
+
 # ---------- run_loop ----------
 
 
@@ -925,6 +1031,67 @@ class TestCLI:
             (tmp_path / "out" / "t1" / "_summary__t1.json").read_text("utf-8")
         )
         assert summary["pool_size"] == 1  # 第一个候选后就超预算
+
+    def test_gate_flags_wire_to_config_and_banner(self, tmp_path, capsys):
+        """R36 Phase 2 三轮门口径：CLI → LoopConfig → summary config 块可复核。"""
+        bars, codes_file = self._setup(tmp_path)
+        rc = el.main(
+            self._argv(
+                tmp_path,
+                codes_file,
+                "--mock-llm",
+                "--ic-gate",
+                "top_tail",
+                "--top-tail-frac",
+                "0.25",
+                "--min-top-tail",
+                "0.001",
+                "--min-top-tail-ir",
+                "0.05",
+            ),
+            loader=self._loader(bars, []),
+        )
+        assert rc == 0
+        summary = json.loads(
+            (tmp_path / "out" / "t1" / "_summary__t1.json").read_text("utf-8")
+        )
+        cfg = summary["config"]
+        assert cfg["ic_gate"] == "top_tail"
+        assert cfg["top_tail_frac"] == 0.25
+        assert cfg["min_top_tail"] == 0.001 and cfg["min_top_tail_ir"] == 0.05
+        assert cfg["gate_order"] == "ic_first"  # 默认次序不变
+        assert "门口径" in capsys.readouterr().out  # 非默认门启动横幅
+
+    def test_marks_first_requires_marks(self, tmp_path):
+        bars, codes_file = self._setup(tmp_path)
+        with pytest.raises(SystemExit) as exc:
+            el.main(
+                self._argv(
+                    tmp_path, codes_file, "--mock-llm", "--gate-order", "marks_first"
+                ),
+                loader=self._loader(bars, []),
+            )
+        assert exc.value.code == 2
+
+    def test_ic_gate_off_requires_marks(self, tmp_path):
+        bars, codes_file = self._setup(tmp_path)
+        with pytest.raises(SystemExit) as exc:
+            el.main(
+                self._argv(tmp_path, codes_file, "--mock-llm", "--ic-gate", "off"),
+                loader=self._loader(bars, []),
+            )
+        assert exc.value.code == 2
+
+    def test_top_tail_frac_range_validated(self, tmp_path):
+        bars, codes_file = self._setup(tmp_path)
+        with pytest.raises(SystemExit) as exc:
+            el.main(
+                self._argv(
+                    tmp_path, codes_file, "--mock-llm", "--top-tail-frac", "1.5"
+                ),
+                loader=self._loader(bars, []),
+            )
+        assert exc.value.code == 2
 
 
 # ---------- pre2019 untouched 终审段硬拒绝（反过拟合纪律） ----------

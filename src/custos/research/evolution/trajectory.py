@@ -32,6 +32,12 @@ DECISIONS: tuple[str, ...] = ("pass", "fail", "pending")
 # best() 的主排序键 rank_icir / 次键 rank_ic_mean 也从该 dict 取。
 _REQUIRED_METRIC = "rank_ic_mean"
 
+#: IC 评估缺席标记（loop._judge_and_record 的 marks_first 门次序写入）：
+#: marks 门 fail 的候选**故意不跑**全宇宙 IC 评估（成本控制）——mining_metrics
+#: 只有 marks 块没有 rank_ic_mean 是设计语义不是数据缺失，凭此标记豁免
+#: _validate 的 _REQUIRED_METRIC 检查；值钉死 "marks_first"（散键不豁免）。
+IC_SKIPPED_MARK = "ic_skipped"
+
 _FILE_VERSION = 1
 
 # from_dict 的必填字段（缺任一 → ValueError，fail-closed）
@@ -110,7 +116,10 @@ def _validate(t: Trajectory) -> None:
         raise ValueError(f"crossover 必须 ≥2 个父代，实际 {n} 个")
     if t.mining_metrics:
         v = t.mining_metrics.get(_REQUIRED_METRIC)
-        if not _is_number(v):
+        # marks_first 门次序下 marks 门 fail 的候选故意不跑 IC 评估（见
+        # IC_SKIPPED_MARK 注释）——凭标记豁免；无标记仍 fail-closed。
+        skipped = t.mining_metrics.get(IC_SKIPPED_MARK) == "marks_first"
+        if not skipped and not _is_number(v):
             raise ValueError(
                 f"mining_metrics 非空时必须含数值型 {_REQUIRED_METRIC}，实际: {v!r}"
             )

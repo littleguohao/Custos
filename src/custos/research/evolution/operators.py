@@ -5,9 +5,11 @@
 
 - **LLM 算子只产出候选**（假设 + 表达式 + 机制解释），不做任何数值判定；
   ``decision`` 只由 ``judge_mining``（确定性规则）给出，LLM 输出永远不改写判定。
-  ``judge_mining`` 判据 = 复杂度门 + 有效日数 / rank_ic_mean / rank_icir 阈值
-  + **前后半窗 RankIC 均值同正**（R3 纪律：单窗正不作数，逐日 IC 序列按日期序
-  n//2 切半，两半均值都必须 > 0，NaN/空半窗 fail-closed）。
+  ``judge_mining`` 判据 = 复杂度门 + 有效日数 + 指标门（``ic_gate`` 三口径：
+  默认 rank = rank_ic_mean / rank_icir 阈值 + **前后半窗 RankIC 均值同正**；
+  top_tail = 头部价差均值/IR + 半窗同正（R36 Phase 2 三轮）；off = IC 面纯观测）
+  ——R3 纪律：单窗正不作数，逐日序列按日期序 n//2 切半，两半均值都必须 > 0，
+  NaN/空半窗 fail-closed。
 - prompt 用中文，模块级常量模板注入：BASE_VARIABLES 清单、OPERATORS 签名、
   复杂度上限、父代/池摘要（假设+表达式+rank_ic_mean/rank_icir+decision+feedback）、
   正交性要求（与父代及池内已有表达式**机制不同**，附去重列表）。
@@ -473,6 +475,13 @@ def _half_window_means(rank_ic_series: pd.Series) -> tuple[float, float]:
     return m1, m2
 
 
+#: IC 门指标口径（R36 Phase 2 三轮，owner 拍板 2026-09-18）：
+#: ``rank`` = 全谱 RankIC（默认，既有行为逐位不变）；``top_tail`` = 头部价差
+#: （top20 消费口径，见 ic_eval._top_tail_spread）；``off`` = IC 面降级为纯
+#: 观测读数（须有其它统计门——LoopConfig 校验 ic_gate=off 必须配 marks 门）。
+IC_GATES = ("rank", "top_tail", "off")
+
+
 def judge_mining(
     stats: ICStats,
     comp: Complexity,
@@ -481,29 +490,61 @@ def judge_mining(
     min_days: int = 20,
     min_rank_ic: float = 0.02,
     min_rank_icir: float = 0.1,
+    ic_gate: str = "rank",
+    top_tail_series: pd.Series | None = None,
+    min_top_tail: float = 0.002,
+    min_top_tail_ir: float = 0.1,
 ) -> tuple[str, list[str]]:
     """挖掘窗确定性判定 → (decision, reasons)。
 
     ``violations(comp)`` 非空 → 直接 fail（复杂度违规的候选不值得谈指标）；
-    其余按有效日数 / rank_ic_mean / rank_icir 阈值 + **前后半窗 RankIC 均值
-    同正**（R3 纪律：``rank_ic_series`` 按日期序 n//2 切半，两半均值都必须
-    > 0 —— 池化均值为正但半窗翻转的因子是 regime 假象，本仓库 R10/R4/R22
-    反复踩过）判。NaN 读数 / NaN·空半窗一律不达标（``nan >= x`` 为 False，
-    fail-closed）。reasons 空 = pass。
+    其余按有效日数门 + ``ic_gate`` 选中的指标门判（NaN 读数 / NaN·空半窗一律
+    不达标——``nan >= x`` 为 False，fail-closed）。reasons 空 = pass。
+
+    指标门三口径：
+    - ``rank``（默认）：rank_ic_mean / rank_icir 阈值 + **前后半窗 RankIC 均值
+      同正**（R3 纪律：``rank_ic_series`` 按日期序 n//2 切半，两半均值都必须
+      > 0 —— 池化均值为正但半窗翻转的因子是 regime 假象，本仓库 R10/R4/R22
+      反复踩过）；
+    - ``top_tail``：头部价差均值 / IR 阈值 + 半窗同正（同一 R3 切法，改吃
+      ``top_tail_series``；R36 Phase 2 三轮口径——对齐 top20 消费方式，
+      全谱 RankIC 降级为观测读数仍记进 stats）。``top_tail_series`` 缺失
+      → fail-closed；
+    - ``off``：IC 面不当门（读数照常记录）；n_days 门始终生效。
     """
+    if ic_gate not in IC_GATES:
+        raise ValueError(f"ic_gate 非法: {ic_gate!r}（须为 {IC_GATES}）")
     viol = violations(comp)
     if viol:
         return "fail", [f"复杂度违规: {v}" for v in viol]
     reasons = []
     if stats.n_days < min_days:
         reasons.append(f"有效截面日数 {stats.n_days} < {min_days}")
-    if not stats.rank_ic_mean >= min_rank_ic:
-        reasons.append(f"rank_ic_mean={stats.rank_ic_mean:.4f} < {min_rank_ic}")
-    if not stats.rank_icir >= min_rank_icir:
-        reasons.append(f"rank_icir={stats.rank_icir:.4f} < {min_rank_icir}")
-    m1, m2 = _half_window_means(rank_ic_series)
-    if not (m1 > 0 and m2 > 0):
-        reasons.append(
-            f"前后半窗 RankIC 均值须同正（R3 纪律）: 前半={m1:.4f} 后半={m2:.4f}"
-        )
+    if ic_gate == "rank":
+        if not stats.rank_ic_mean >= min_rank_ic:
+            reasons.append(f"rank_ic_mean={stats.rank_ic_mean:.4f} < {min_rank_ic}")
+        if not stats.rank_icir >= min_rank_icir:
+            reasons.append(f"rank_icir={stats.rank_icir:.4f} < {min_rank_icir}")
+        m1, m2 = _half_window_means(rank_ic_series)
+        if not (m1 > 0 and m2 > 0):
+            reasons.append(
+                f"前后半窗 RankIC 均值须同正（R3 纪律）: 前半={m1:.4f} 后半={m2:.4f}"
+            )
+    elif ic_gate == "top_tail":
+        if top_tail_series is None:
+            reasons.append("top_tail 门需要逐日头部价差序列（未提供，fail-closed）")
+        else:
+            if not stats.top_tail_mean >= min_top_tail:
+                reasons.append(
+                    f"top_tail_mean={stats.top_tail_mean:.4f} < {min_top_tail}"
+                )
+            if not stats.top_tail_ir >= min_top_tail_ir:
+                reasons.append(
+                    f"top_tail_ir={stats.top_tail_ir:.4f} < {min_top_tail_ir}"
+                )
+            m1, m2 = _half_window_means(top_tail_series)
+            if not (m1 > 0 and m2 > 0):
+                reasons.append(
+                    f"前后半窗头部价差均值须同正（R3 纪律）: 前半={m1:.4f} 后半={m2:.4f}"
+                )
     return ("fail" if reasons else "pass"), reasons

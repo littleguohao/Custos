@@ -262,3 +262,57 @@ def test_all_inf_scores_skip_every_day():
     stats = ic_eval.evaluate_expression("1/(CLOSE-CLOSE)", trend_universe())
     assert stats.n_days == 0
     assert math.isnan(stats.rank_ic_mean)
+
+
+# ---------- 头部价差（top_tail，R36 Phase 2 三轮门指标） ----------
+
+
+def _expected_fwds(n_stocks=6, horizon=5):
+    """trend_universe 各股的逐日前向收益（几何漂移 ⇒ 每股恒定）：(1+r)^h − 1。"""
+    return [(1 + 0.002 + 0.0015 * i) ** horizon - 1 for i in range(n_stocks)]
+
+
+class TestTopTailSpread:
+    def test_unit_hand_compute_and_ceil(self):
+        xs = [3.0, 1.0, 5.0, 2.0, 4.0]  # 乱序输入：内部按 score 降序
+        ys = [0.03, 0.01, 0.05, 0.02, 0.04]
+        # frac=0.2 → k=ceil(5×0.2)=1：top=score 5.0 → y=0.05；全均值 0.03 → 0.02
+        assert ic_eval._top_tail_spread(xs, ys, 0.2) == pytest.approx(0.02)
+        # frac=0.4 → k=2：top2 y=(0.05+0.04)/2=0.045 − 0.03 = 0.015
+        assert ic_eval._top_tail_spread(xs, ys, 0.4) == pytest.approx(0.015)
+
+    def test_integration_hand_compute(self):
+        uni = trend_universe()  # 6 股几何漂移；ROC(CLOSE,5) 截面排序严格按漂移率
+        stats, ic_df = ic_eval.evaluate_expression_rich(
+            "ROC(CLOSE,5)", uni, top_frac=0.2
+        )
+        fwd = _expected_fwds()
+        expected = sum(fwd[4:]) / 2 - sum(fwd) / 6  # top2（S004/S005）− 全截面
+        assert ic_df["top_tail"].iloc[0] == pytest.approx(expected)
+        assert stats.top_tail_mean == pytest.approx(expected)
+        assert math.isnan(stats.top_tail_ir)  # 恒定序列 std≈0 → IR 留白 nan
+        # 三列同一日集合（跳过口径一致）
+        assert ic_df["top_tail"].index.equals(ic_df["rank_ic"].index)
+        assert len(ic_df) == N_DAYS - WARMUP - 5
+        # frac=0.5 → k=3（S003/S004/S005）
+        stats2, _ = ic_eval.evaluate_expression_rich("ROC(CLOSE,5)", uni, top_frac=0.5)
+        assert stats2.top_tail_mean == pytest.approx(sum(fwd[3:]) / 3 - sum(fwd) / 6)
+
+    def test_with_series_wrapper_identical(self):
+        uni = trend_universe()
+        stats_r, ic_df = ic_eval.evaluate_expression_rich("ROC(CLOSE,5)", uni)
+        stats_w, ric = ic_eval.evaluate_expression_with_series("ROC(CLOSE,5)", uni)
+        pd.testing.assert_series_equal(ric, ic_df["rank_ic"], check_exact=True)
+        assert stats_w.rank_ic_mean == stats_r.rank_ic_mean
+        assert stats_w.top_tail_mean == stats_r.top_tail_mean  # 包装不丢新字段
+
+    def test_zero_variance_skips_all_three_columns(self):
+        stats, ic_df = ic_eval.evaluate_expression_rich("5", trend_universe())
+        assert len(ic_df) == 0
+        assert stats.n_days == 0 and math.isnan(stats.top_tail_mean)
+
+    def test_frac_validation_fail_closed(self):
+        with pytest.raises(ValueError):
+            ic_eval.evaluate_expression_rich("CLOSE", trend_universe(), top_frac=0)
+        with pytest.raises(ValueError):
+            ic_eval.evaluate_expression_rich("CLOSE", trend_universe(), top_frac=1.5)

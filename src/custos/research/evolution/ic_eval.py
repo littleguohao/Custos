@@ -46,6 +46,10 @@ class ICStats:
     horizon: int
     start: str | None
     end: str | None
+    # 头部价差（R36 Phase 2 三轮门指标，口径见 _top_tail_spread）；缺省 nan =
+    # 调用方没算（留白比静默复制主指标更诚实，同 pearson 字段口径）。
+    top_tail_mean: float = float("nan")
+    top_tail_ir: float = float("nan")
 
 
 def _slice_bars(df: pd.DataFrame, start: str | None, end: str | None) -> pd.DataFrame:
@@ -139,15 +143,39 @@ def _day_pairs(
     return xs, ys
 
 
+def _top_tail_spread(xs: list[float], ys: list[float], frac: float) -> float:
+    """单日头部价差：score 前 ``frac`` 组（ceil，至少 1 只）前向收益均值 −
+    当日**全部有效截面**前向收益均值。
+
+    口径锚 = top20 消费方式（交易层按分值头部选股，对照组 = 闭眼买全宇宙）：
+    全谱 RankIC 把无关中段也算进单调性，头部价差只问「买头部组有没有当日
+    超额」——稀疏买点型信号（中段平、头部尖）在 RankIC 下天然被压，在本
+    口径下才被正确计量（R36 Phase 2 三轮门指标；二轮实证：IC 门误杀 marks
+    0.83 候选 / 独苗全谱 IC 正但头部撑不住，两头错配都指向这里）。
+    并列截断按稳定排序序（零方差日调用方已跳过；残留并列属任意选取，与一切
+    top-k 口径同）。
+    """
+    k = max(1, math.ceil(len(xs) * frac))
+    pairs = sorted(zip(xs, ys), key=lambda p: p[0], reverse=True)
+    top_mean = sum(v for _, v in pairs[:k]) / k
+    all_mean = sum(ys) / len(ys)
+    return top_mean - all_mean
+
+
 def _ic_by_day(
-    scores: pd.DataFrame, bars_by_code: dict[str, pd.DataFrame], horizon: int
+    scores: pd.DataFrame,
+    bars_by_code: dict[str, pd.DataFrame],
+    horizon: int,
+    top_frac: float = 0.2,
 ) -> pd.DataFrame:
-    """逐截面日的 (rank_ic, ic) 两列；跳过日不进结果。"""
+    """逐截面日的 (rank_ic, ic, top_tail) 三列；跳过日不进结果（三列同一日集合）。"""
     if horizon < 1:
         raise ValueError(f"horizon 必须 >= 1，得到 {horizon}")
+    if not 0 < top_frac <= 1:
+        raise ValueError(f"top_frac 必须 ∈ (0,1]，得到 {top_frac}")
     fwd_maps = _forward_return_maps(bars_by_code, horizon)
     days: list = []
-    rows: list[tuple[float, float]] = []
+    rows: list[tuple[float, float, float]] = []
     for d in scores.index:
         xs, ys = _day_pairs(scores.loc[d], fwd_maps, d)
         if len(xs) < MIN_STOCKS:
@@ -156,13 +184,14 @@ def _ic_by_day(
         if math.isnan(sp):  # 零方差（常数 score 等）→ 该日跳过
             continue
         days.append(d)
-        rows.append((sp, pe))
+        rows.append((sp, pe, _top_tail_spread(xs, ys, top_frac)))
     idx = pd.DatetimeIndex(days)
     idx.name = "date"
     return pd.DataFrame(
         {
             "rank_ic": pd.Series([r[0] for r in rows], index=idx, dtype=float),
             "ic": pd.Series([r[1] for r in rows], index=idx, dtype=float),
+            "top_tail": pd.Series([r[2] for r in rows], index=idx, dtype=float),
         }
     )
 
@@ -195,12 +224,13 @@ def ic_stats_from_series(
     end: str | None = None,
     *,
     pearson_series: pd.Series | None = None,
+    top_tail_series: pd.Series | None = None,
 ) -> ICStats:
     """把日频 IC 序列聚合成 ICStats。
 
     ``ic_series`` 按主指标（Spearman 秩 IC）口径聚合；``pearson_series`` 提供时
     同时填 Pearson 字段，缺省时 ic_mean/icir 为 nan（单序列调用方拿不到第二条序列，
-    留白比静默复制主指标更诚实）。
+    留白比静默复制主指标更诚实）；``top_tail_series`` 同理填头部价差字段。
     """
     rank = ic_series.dropna()
     rank_mean, rank_icir = _series_stats(rank)
@@ -208,6 +238,10 @@ def ic_stats_from_series(
         ic_mean, icir = _series_stats(pearson_series)
     else:
         ic_mean, icir = float("nan"), float("nan")
+    if top_tail_series is not None:
+        top_tail_mean, top_tail_ir = _series_stats(top_tail_series.dropna())
+    else:
+        top_tail_mean, top_tail_ir = float("nan"), float("nan")
     return ICStats(
         n_days=int(len(rank)),
         ic_mean=ic_mean,
@@ -217,7 +251,43 @@ def ic_stats_from_series(
         horizon=horizon,
         start=start,
         end=end,
+        top_tail_mean=top_tail_mean,
+        top_tail_ir=top_tail_ir,
     )
+
+
+def evaluate_expression_rich(
+    expr: str | ast.AST,
+    bars_by_code: dict[str, pd.DataFrame],
+    *,
+    start: str | None = None,
+    end: str | None = None,
+    horizon: int = 5,
+    top_frac: float = 0.2,
+) -> tuple[ICStats, pd.DataFrame]:
+    """``evaluate_expression_with_series`` 的全帧版：返回逐日三列帧
+    （rank_ic / ic / top_tail）。
+
+    judge_mining 的 ``ic_gate="top_tail"`` 模式与 R3 半窗同正门（按门指标
+    序列切半）吃 top_tail 列；只关心 rank_ic 序列的调用方用
+    ``evaluate_expression_with_series``。
+    """
+    sliced = {}
+    for code, df in bars_by_code.items():
+        d = _slice_bars(df, start, end)
+        if len(d):
+            sliced[code] = d
+    scores = score_frame(expr, sliced) if sliced else pd.DataFrame()
+    ic_df = _ic_by_day(scores, sliced, horizon, top_frac=top_frac)
+    stats = ic_stats_from_series(
+        ic_df["rank_ic"],
+        horizon,
+        start,
+        end,
+        pearson_series=ic_df["ic"],
+        top_tail_series=ic_df["top_tail"],
+    )
+    return stats, ic_df
 
 
 def evaluate_expression_with_series(
@@ -234,15 +304,8 @@ def evaluate_expression_with_series(
     需要它按日期序切前后半窗；只关心聚合指标的调用方用
     ``evaluate_expression`` 即可。
     """
-    sliced = {}
-    for code, df in bars_by_code.items():
-        d = _slice_bars(df, start, end)
-        if len(d):
-            sliced[code] = d
-    scores = score_frame(expr, sliced) if sliced else pd.DataFrame()
-    ic_df = _ic_by_day(scores, sliced, horizon)
-    stats = ic_stats_from_series(
-        ic_df["rank_ic"], horizon, start, end, pearson_series=ic_df["ic"]
+    stats, ic_df = evaluate_expression_rich(
+        expr, bars_by_code, start=start, end=end, horizon=horizon
     )
     return stats, ic_df["rank_ic"]
 

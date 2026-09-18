@@ -305,3 +305,78 @@ class TestNewCaseSemantics:
         assert t.decision == "fail"  # IC 门杀死（门次序不变）
         m = t.mining_metrics["marks"]  # marks 读数仍留痕（观测性）
         assert m["n_hit"] == 1 and m["mean_rank"] is not None
+
+
+# ---------------------------------------------------------------------------
+# 门次序与门指标口径（R36 Phase 2 三轮，owner 拍板 2026-09-18）
+# ---------------------------------------------------------------------------
+
+
+class TestGateOrderAndIcGate:
+    def _run(self, tmp_path, spike: float, **cfg_kw):
+        """单候选跑循环：案例买点涨 spike（负=跌）；返回 pool 唯一轨迹。"""
+        n = 80
+        closes = [100.0] * n
+        closes[-1] = closes[-2] * (1 + spike)
+        _write_case_csv(tmp_path, "600001.SZ", closes, [1e6] * n)
+        llm = ScriptedLLM([_cand("ROC(CLOSE,5)", "动量5日")])
+        pool = TrajectoryPool()
+        loop_mod.run_loop(
+            _cfg(marks_path=str(tmp_path), marks_rank_window=20, **cfg_kw),
+            make_bars(),
+            llm,
+            pool,
+        )
+        (t,) = pool.all()
+        return t
+
+    def test_marks_first_skips_ic_eval_on_marks_fail(self, tmp_path):
+        """marks_first：marks 门 fail 即跳过全宇宙 IC 评估（成本控制）——
+        metrics 无 stats 键（缺席≠零值），feedback 写明「未跑」。"""
+        t = self._run(tmp_path, -0.20, gate_order="marks_first")
+        assert t.decision == "fail"
+        assert "marks" in t.mining_metrics
+        assert "rank_ic_mean" not in t.mining_metrics
+        assert "top_tail_mean" not in t.mining_metrics
+        assert (
+            t.mining_metrics["ic_skipped"] == "marks_first"
+        )  # 缺席标记（trajectory 校验豁免凭据）
+        assert "未跑" in t.feedback
+
+    def test_marks_first_pass_matches_ic_first_verdict(self, tmp_path):
+        """marks 过门后照跑指标门：合取门的晋级集合与次序无关（两种次序
+        同输入 ⇒ 同 decision 同 IC 读数）。"""
+        t_mf = self._run(tmp_path, 0.20, gate_order="marks_first")
+        t_if = self._run(tmp_path, 0.20)  # 默认 ic_first
+        assert t_mf.decision == t_if.decision == "pass"
+        assert (
+            t_mf.mining_metrics["rank_ic_mean"] == t_if.mining_metrics["rank_ic_mean"]
+        )
+        assert "top_tail_mean" in t_mf.mining_metrics  # 头部价差全程记录
+
+    def test_ic_gate_top_tail_passes_momentum_universe(self, tmp_path):
+        """ic_gate=top_tail：漂移排序宇宙上 ROC 头部价差强正 ⇒ pass，且
+        rank 读数仍留痕（降级观测不是删除）。"""
+        t = self._run(tmp_path, 0.20, ic_gate="top_tail")
+        assert t.decision == "pass"
+        assert t.mining_metrics["top_tail_mean"] > 0
+        assert isinstance(t.mining_metrics["rank_ic_mean"], float)
+
+    def test_gate_config_validation_fail_closed(self):
+        """非法门口径组合一律 ValueError（run_loop 入口校验，先于任何回测）。"""
+        bad = [
+            {"gate_order": "marks_first"},  # 无 marks_path 无可前置的门
+            {"ic_gate": "off"},  # 无 marks 门 ⇒ 挖掘侧没有任何统计门
+            {"ic_gate": "bogus"},
+            {"gate_order": "bogus"},
+            {"top_tail_frac": 0.0},
+            {"top_tail_frac": 1.5},
+        ]
+        for kw in bad:
+            with pytest.raises(ValueError):
+                loop_mod.run_loop(
+                    _cfg(**kw),
+                    make_bars(),
+                    ScriptedLLM([_cand("ROC(CLOSE,5)")]),
+                    TrajectoryPool(),
+                )

@@ -220,6 +220,40 @@ def _build_parser() -> argparse.ArgumentParser:
         "K=250 在全案例上恒 NaN，warmup 覆盖全窗）",
     )
     ap.add_argument(
+        "--ic-gate",
+        choices=["rank", "top_tail", "off"],
+        default="rank",
+        help="IC 门指标口径（R36 Phase 2 三轮）：rank=全谱 RankIC（默认，行为"
+        "逐位不变）；top_tail=头部价差（top20 消费口径，全谱 RankIC 降级为"
+        "观测读数）；off=IC 面纯观测（须配 --marks，否则挖掘侧无统计门）",
+    )
+    ap.add_argument(
+        "--min-top-tail",
+        type=float,
+        default=0.002,
+        help="top_tail 门：头部价差均值下限（默认 0.002，5 日前向；量级锚见 R36）",
+    )
+    ap.add_argument(
+        "--min-top-tail-ir",
+        type=float,
+        default=0.1,
+        help="top_tail 门：头部价差 IR 下限（mean/std，默认 0.1）",
+    )
+    ap.add_argument(
+        "--top-tail-frac",
+        type=float,
+        default=0.2,
+        help="top_tail 头部组分位（默认 0.2，对齐 top20 消费口径）",
+    )
+    ap.add_argument(
+        "--gate-order",
+        choices=["ic_first", "marks_first"],
+        default="ic_first",
+        help="门次序（默认 ic_first，行为逐位不变）；marks_first=marks 门先判、"
+        "fail 即跳过全宇宙 IC 评估（纯成本控制：两门合取晋级集合不变，须配"
+        " --marks；代价是 marks-fail 候选无 IC/头部价差观测读数）",
+    )
+    ap.add_argument(
         "--cell-top-n",
         type=int,
         default=20,
@@ -318,6 +352,18 @@ def _factor_axis_banner(args: Any) -> None:
         )
 
 
+def _gate_banner(args: Any) -> None:
+    """非默认门口径的启动横幅（审计留痕：summary config 块同口径可复核）。"""
+    if args.ic_gate == "rank" and args.gate_order == "ic_first":
+        return
+    print(
+        f"[INFO] 门口径（R36 Phase 2 三轮）：ic_gate={args.ic_gate} "
+        f"gate_order={args.gate_order} top_tail_frac={args.top_tail_frac} "
+        f"min_top_tail={args.min_top_tail} min_top_tail_ir={args.min_top_tail_ir}",
+        flush=True,
+    )
+
+
 def _validate_args(args: Any, ap: argparse.ArgumentParser) -> None:
     """互斥/必填/窗口校验（fail-closed：一律 ap.error，exit 2）。"""
     if not args.direction:
@@ -328,6 +374,12 @@ def _validate_args(args: Any, ap: argparse.ArgumentParser) -> None:
         ap.error("--top-n 必须 >= 1")
     if args.plan < 0:
         ap.error("--plan 必须 >= 0（0=关闭规划层）")
+    if not 0 < args.top_tail_frac <= 1:
+        ap.error("--top-tail-frac 必须 ∈ (0,1]")
+    if args.gate_order == "marks_first" and not args.marks:
+        ap.error("--gate-order marks_first 需要 --marks（无 marks 门可前置）")
+    if args.ic_gate == "off" and not args.marks:
+        ap.error("--ic-gate off 需要 --marks（否则挖掘侧没有任何统计门）")
     _validate_mining_window(args, ap)
     if args.grid_judge:
         args.final_judge = True  # --grid-judge 隐含双窗终审（三轴终审吃它的产出）
@@ -872,6 +924,7 @@ def main(
     args = ap.parse_args(argv)
     _validate_args(args, ap)
     _factor_axis_banner(args)  # #70：三轴流程的容量/退化启动横幅
+    _gate_banner(args)  # R36 Phase 2 三轮：非默认门口径启动横幅
     prep = _prepare(args, ap, loader)
     if not prep.bars:
         print(
@@ -906,6 +959,11 @@ def main(
         min_marks_rank=args.min_marks_rank,
         min_marks_contrast=args.min_marks_contrast,
         marks_rank_window=args.marks_rank_window,
+        ic_gate=args.ic_gate,
+        min_top_tail=args.min_top_tail,
+        min_top_tail_ir=args.min_top_tail_ir,
+        top_tail_frac=args.top_tail_frac,
+        gate_order=args.gate_order,
     )
     cell_runner = _make_cell_runner(args, prep.codes, out_dir) if args.joint else None
     # marks 用 bars 与挖掘窗解耦（R36 口径）：生产机从 loader 按 code 取全历史

@@ -151,7 +151,9 @@ uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/
   加大（尾部截断护栏 fail-closed）；
 - 进化引擎：LLM 只做提案（假设/变异/杂交/解读），**decision 由确定性函数给出**；
   挖掘/判定双窗硬隔离；`--joint`/`--grid-judge` 必须显式 `--count`；`--cell-top-n`
-  默认 20（=0 是因子轴退化，scorer 不写交易集）。
+  默认 20（=0 是因子轴退化，scorer 不写交易集）。指标门 `--ic-gate`（rank 默认 /
+  top_tail 头部价差 / off）+ 门次序 `--gate-order`（ic_first 默认 / marks_first
+  成本控制）——非默认口径须已在研究单元预注册（R36 三轮是首个用例）。
 - 因子 IC 画像（`factor_ic_profile`）：SCORERS/DSL 的截面 RankIC/ICIR + horizon
   衰减全因子可比表——**分诊镜不是晋级判据**（晋级永远走双窗+三轴交易语义；
   读数 L3− 带幸存者偏差，R19/R21/R14）。

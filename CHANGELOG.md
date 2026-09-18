@@ -253,6 +253,7 @@
 | 2026-09-17 | v0.249 | R36 Phase 3 工具落地：score_evolution_study --v0-lattice（V0 调权路：腿轴 CONTRIB_LEG_KEYS 30 键 × 倍率格——clamp 使尺度不变性不成立故弃 gcd 去重，保底集=等倍率（=live 默认）+单腿、填充关腿边际臂；collect/score 拆分每窗一遍；双窗/灵敏度/随机臂闸门同 R34 族）+ asof_technical_score 透传 weights + evolution marks 观测性（IC-fail 也留读数，门次序不变） | owner 拍板 Phase 3 | r36_p3 跑数回填 |
 | 2026-09-17 | v0.250 | R36 Phase 2 二轮跑毕 + 独苗终审否决：二轮 16 候选 1 pass（波动收缩×振幅收缩×短均线微抬头；IC +0.0324 / marks rank 0.77 / 判定窗 RankIC +0.0276 同向）；独苗终审（剔除案例股 s2999 双窗）结局②——截面 IC 双窗正但交易层 margin −2.8pp/−14.5pp 双窗负（C4 过=非筛选假象；单腿 C2/C3 机械退化已标注）；marks 观测性实证：IC-first 误杀 marks 0.83 高分候选（门次序复核证据留痕 trajectory_pool）。R36 回填区已同步 | R36 Phase 2 二轮判毕 | Phase 2 三轮方向/门槛复核（owner 决策点）；Phase 3 r36_p3_v1 跑数中 |
 | 2026-09-17 | v0.251 | R36 Phase 3 调权格裁决（生产机 r36_p3_v1，剔除案例股 s2999 双窗满配）：top 格=单腿 adx_gt_60（关腿 29 条——配比无增量实锤），C1✅（158/101 笔）/ C2✅（Δmargin vs live 默认 +0.094/+0.135 双窗同向）/ C3✅（零翻转）/ C4❌ suspect（+0.4518 打不过随机臂 +0.5476；随机天花板与 R34 +0.5474 跨批复现）⇒ 结局②，调权路在 V0 腿上死刑（R30/R34 五轮档案互证）；pre2019 终审段保持 untouched | R36 Phase 3 判毕 | 余：Phase 2 三轮方向/门次序待 owner 拍板 |
+| 2026-09-18 | v0.252 | R36 Phase 2 三轮门指标改造（owner 拍板思路一）：evolution_loop 新增 `--ic-gate {rank,top_tail,off}` 与 `--gate-order {ic_first,marks_first}`——top_tail=头部价差门（score 前 20% 前向收益均值−全截面均值，对齐 top20 消费口径；mean/IR/半窗同正，判据见 R36 三轮段）；marks_first=marks 门先判 fail 即跳过 IC 评估（纯成本控制，轨迹打 ic_skipped 标记）；默认 rank/ic_first 逐位不变；钉测 +19 | owner 拍板 | 生产机跑 r36_p2_r3（命令见 R36 附录） |
 
 ## 写入规范（2026-08-29 v0.144 起）
 
