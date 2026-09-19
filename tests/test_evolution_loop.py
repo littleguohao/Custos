@@ -1859,3 +1859,43 @@ class TestPlanningCLI:
                 loader=TestCLI._loader(bars, []),
             )
         assert exc.value.code == 2
+
+
+class TestLlmErrorSurfacing:
+    """LLM 级错误（超时/重试耗尽）候选不进轨迹池——必须计数并进汇总/产物，
+    否则「覆盖不足」被误读成「覆盖完整的全灭」（R36 三轮生产机实测：计划
+    ~54 候选只落地 10 条，其余全死于 ark 超时，汇总表却只字未提）。"""
+
+    def _handler(self):
+        import argparse
+
+        args = argparse.Namespace(max_tokens_budget=0)
+
+        class _L:
+            total_tokens = 0
+
+        return el._make_on_event(args, _L())
+
+    def test_on_event_counts_llm_error_only(self, capsys):
+        h = self._handler()
+        ev_base = {
+            "round_i": 0,
+            "cand_i": 0,
+            "direction": "d",
+            "phase": "origin",
+            "expression": "",
+            "rank_ic_mean": None,
+        }
+        h({**ev_base, "decision": "llm_error", "error": "timeout"})
+        h({**ev_base, "decision": "llm_error", "error": "timeout"})
+        h({**ev_base, "decision": "fail"})  # 普通 fail 不计
+        h({**ev_base, "decision": "pass", "expression": "close"})
+        assert h.llm_errors == 2
+
+    def test_print_summary_warns_on_llm_errors(self, capsys):
+        el._print_summary(TrajectoryPool(), 5, [], {}, llm_errors=3)
+        out = capsys.readouterr().out
+        assert "LLM 级错误 3 条" in out and "覆盖不足" in out
+        # 零错误时逐位无该行（旧行为不变）
+        el._print_summary(TrajectoryPool(), 5, [], {}, llm_errors=0)
+        assert "LLM 级错误" not in capsys.readouterr().out

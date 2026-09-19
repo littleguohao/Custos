@@ -255,6 +255,7 @@
 | 2026-09-17 | v0.251 | R36 Phase 3 调权格裁决（生产机 r36_p3_v1，剔除案例股 s2999 双窗满配）：top 格=单腿 adx_gt_60（关腿 29 条——配比无增量实锤），C1✅（158/101 笔）/ C2✅（Δmargin vs live 默认 +0.094/+0.135 双窗同向）/ C3✅（零翻转）/ C4❌ suspect（+0.4518 打不过随机臂 +0.5476；随机天花板与 R34 +0.5474 跨批复现）⇒ 结局②，调权路在 V0 腿上死刑（R30/R34 五轮档案互证）；pre2019 终审段保持 untouched | R36 Phase 3 判毕 | 余：Phase 2 三轮方向/门次序待 owner 拍板 |
 | 2026-09-18 | v0.252 | R36 Phase 2 三轮门指标改造（owner 拍板思路一）：evolution_loop 新增 `--ic-gate {rank,top_tail,off}` 与 `--gate-order {ic_first,marks_first}`——top_tail=头部价差门（score 前 20% 前向收益均值−全截面均值，对齐 top20 消费口径；mean/IR/半窗同正，判据见 R36 三轮段）；marks_first=marks 门先判 fail 即跳过 IC 评估（纯成本控制，轨迹打 ic_skipped 标记）；默认 rank/ic_first 逐位不变；钉测 +19 | owner 拍板 | 生产机跑 r36_p2_r3（命令见 R36 附录） |
 | 2026-09-18 | v0.253 | R36 Phase 2 三轮判毕（v0.252 门改造首用例，生产机 r36_p2_r3）：10 候选 0 pass——marks_first 成本控制生效（6 条 marks 死免 IC 评估，token 71900 vs 二轮 243470）；3 条 marks 高分（0.75/0.775/0.875）全灭于 top_tail（+0.0014~+0.0017 贴线不过/−0.0007）；近失候选复核终裁（三门对照 marks✅/rank❌/top_tail❌，−0.0020 双半窗负）⇒ 旧门没误杀，「换门救候选」期望落空；Phase 2 挖掘路三轮收敛到负 | R36 Phase 2 三轮生产机判毕 | 挖掘路收口与否（owner 拍板） |
+| 2026-09-18 | v0.254 | evolution_loop LLM 级错误观测闭环：llm_error 候选（超时/重试耗尽，不进轨迹池）此前只在过程日志——现计数进汇总 JSON（llm_errors 字段）+ 收尾 stdout 警示行（「N 条候选未产出=覆盖不足」，防误读为覆盖完整的全灭）；驱动案例=R36 三轮实测（计划 ~54 落地 10，ark 限流）。钉测 +2 | owner 发现「LLM 报错没反馈」 | 后续跑数读汇总先看 llm_errors 再读 pass/fail；限流时段不跑满编 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

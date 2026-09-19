@@ -438,8 +438,14 @@ def _print_summary(
     top_n: int,
     dual: list[DualWindowResult],
     grid: dict[str, Any],
+    llm_errors: int = 0,
 ) -> None:
-    """结尾汇总表（best top-N + 判定窗双窗终审 + 三轴终审列）。"""
+    """结尾汇总表（best top-N + 判定窗双窗终审 + 三轴终审列）。
+
+    ``llm_errors > 0`` 时追加覆盖警示：LLM 级错误候选不进轨迹池，汇总表
+    只反映落地者——不提示就会被误读成「覆盖完整的全灭」（R36 三轮实测，
+    计划 ~54 候选只落地 10 条）。
+    """
     best = pool.best(top_n)
     joint = any(t.gate for t in best)  # 有 joint 轨迹 → 加基因组列
     print("\n== 进化汇总（best 按 rank_icir 降序） ==")
@@ -458,6 +464,11 @@ def _print_summary(
         print(f"{line}  {t.expression[:56]}")
     counts = _decision_counts(pool)
     print(f"\n池规模 {len(pool)}：pass {counts['pass']} / fail {counts['fail']}")
+    if llm_errors:
+        print(
+            f"⚠️ LLM 级错误 {llm_errors} 条候选未产出（不进池）——本轮覆盖不足，"
+            "结论按实际评估口径引用；网络/限流恢复后建议重跑补覆盖"
+        )
     if dual:
         print("\n== 判定窗终审（双窗） ==")
         print(f"{'通过':<4} {'判定RankIC':>10} {'判定ICIR':>9}  表达式 / 未过原因")
@@ -500,9 +511,18 @@ def _best_rows(pool: TrajectoryPool, top_n: int) -> list[dict]:
 
 
 def _make_on_event(args: Any, llm: Any) -> Callable[[dict], None]:
-    """进度打印 + token 预算闸（超支 raise _BudgetExceeded 让循环提前收敛）。"""
+    """进度打印 + token 预算闸（超支 raise _BudgetExceeded 让循环提前收敛）。
+
+    附职责：LLM 级错误计数——decision=="llm_error" 的候选（契约重试耗尽/
+    网络超时）**不进轨迹池**（没有表达式可评），不汇总就会被误读成「覆盖
+    完整的全灭」（R36 三轮实测：计划 ~54 候选只落地 10 条，其余全死于
+    LLM 超时——读汇总的人必须看到覆盖缺口）。计数挂在 handler 的
+    ``.llm_errors`` 属性上，由 _execute 收尾读取并进汇总/产物。
+    """
 
     def _on_event(ev: dict) -> None:
+        if ev.get("decision") == "llm_error":
+            _on_event.llm_errors += 1
         if ev.get("type") == "planning":  # --plan 的规划事件（种子→子方向+来源）
             print(
                 f"[plan] 种子「{ev['seed']}」→ {len(ev['directions'])} 条子方向"
@@ -531,6 +551,7 @@ def _make_on_event(args: Any, llm: Any) -> Callable[[dict], None]:
                 f"token 预算 {args.max_tokens_budget} 已超（累计 {used}），提前收敛"
             )
 
+    _on_event.llm_errors = 0
     return _on_event
 
 
@@ -757,6 +778,7 @@ class _RunResult:
     llm: Any
     dual: list[DualWindowResult]
     codes_digest: str
+    llm_errors: int = 0  # LLM 级错误数（未产出候选，不进轨迹池）
 
 
 def _write_summary(res: _RunResult, grid: dict[str, Any]) -> Path:
@@ -786,6 +808,7 @@ def _write_summary(res: _RunResult, grid: dict[str, Any]) -> Path:
         "pool_size": len(res.pool),
         "n_pass": counts["pass"],
         "n_fail": counts["fail"],
+        "llm_errors": res.llm_errors,
         "total_tokens": int(getattr(res.llm, "total_tokens", 0)),
         "mock_llm": bool(res.args.mock_llm),
         "best": _best_rows(res.pool, res.args.top_n),
@@ -804,7 +827,7 @@ def _report(res: _RunResult, grid: dict[str, Any]) -> None:
     summary_path = _write_summary(res, grid)
     print(f"\n[INFO] 轨迹池 → {res.out_dir / 'trajectory_pool.json'}")
     print(f"[INFO] 汇总 → {summary_path}")
-    _print_summary(res.pool, res.args.top_n, res.dual, grid)
+    _print_summary(res.pool, res.args.top_n, res.dual, grid, res.llm_errors)
 
 
 @dataclass(frozen=True)
@@ -900,20 +923,25 @@ class _ExecCtx:
     marks_bars_provider: Any = None  # marks 全历史 loader（None → excerpt 回退）
 
 
-def _execute(ctx: _ExecCtx) -> None:
-    """跑进化循环；token 预算超支 → 警告后带着已落池的轨迹继续走收尾。"""
+def _execute(ctx: _ExecCtx) -> int:
+    """跑进化循环；token 预算超支 → 警告后带着已落池的轨迹继续走收尾。
+
+    返回 LLM 级错误计数（llm_error 事件数——未产出候选，不进轨迹池）。
+    """
+    handler = _make_on_event(ctx.args, ctx.llm)
     try:
         run_loop(
             ctx.cfg,
             ctx.mining_bars,
             ctx.llm,
             ctx.pool,
-            on_event=_make_on_event(ctx.args, ctx.llm),
+            on_event=handler,
             cell_runner=ctx.cell_runner,
             marks_bars_provider=ctx.marks_bars_provider,
         )
     except _BudgetExceeded as exc:
         print(f"[WARN] {exc}", file=sys.stderr)
+    return int(getattr(handler, "llm_errors", 0))
 
 
 def main(
@@ -976,7 +1004,7 @@ def main(
             bt._load_one_bars, count=args.count, start=None, end=None
         )
     pool_size_before = len(pool)  # 本 run 新增轨迹数的基线（空结果护栏用）
-    _execute(
+    llm_errors = _execute(
         _ExecCtx(
             args, cfg, mining_bars, prep.llm, pool, cell_runner, marks_bars_provider
         )
@@ -1004,6 +1032,7 @@ def main(
         llm=prep.llm,
         dual=dual,
         codes_digest=f"{len(prep.codes)} 只",
+        llm_errors=llm_errors,
     )
     _report(res, _run_grid_judge(args, out_dir, dual, prep.codes))
     return 0

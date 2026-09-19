@@ -237,6 +237,11 @@ Phase 0 已完成：
   `r36_p2_r3`（三方向：深 J 正交变异/罚分豁免/平区启动；--ic-gate top_tail
   + --gate-order marks_first，s3000 seed0，count 1500，tokens≈71900）——
   **10 候选 0 pass**，门路径分布本身就是证据：
+  - ⚠️ **覆盖注记**：计划 ~54 候选只落地 10 条——其余死于 ark 账户级限流/
+    300s 超时（过程日志大片 llm_error；当时宿主 cron 同账户也在撞
+    rate-limit）。0 pass 的门判定读数在 10 条落地候选上有效，但覆盖强度
+    不足满编（v0.254 起此类事件计数进汇总 JSON `llm_errors` 字段+收尾
+    警示行——本轮回填时该观测缺口尚未有护栏，owner 复核发现）。
   - 6 条 marks 门直接死（rank 0.135~0.33 < 0.7）→ **IC 评估被跳过**
     （ic_skipped=marks_first 留痕，成本控制生效——token 71900 vs 二轮
     243470）；
