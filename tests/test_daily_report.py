@@ -300,3 +300,60 @@ class TestNonTradingDayReport:
             self._render(
                 monkeypatch, ["x", "--date", "2026-09-19", "--non-trading-day"]
             )
+
+
+class TestMarketOutlookSection:
+    """§2.3 跨平台热点与A股刺激方向研判（v0.256）：market_outlook 在场才渲染；
+    必须明文「仅供参考不进权限」——LLM 研判不是交易依据。"""
+
+    _OUTLOOK = {
+        "summary": "政策与产业共振偏多",
+        "stimulus": [
+            {
+                "theme": "半导体",
+                "sources": ["jin10_flash", "wscn_lives"],
+                "direction": "利好",
+                "beneficiaries": "芯片/设备",
+                "strength": "中",
+                "rationale": "两平台同日报道产能扩张",
+            },
+            {
+                "theme": "宏观政策",
+                "sources": ["gov_cn"],
+                "direction": "分化",
+                "beneficiaries": "基建",
+                "strength": "弱",
+                "rationale": "单源",
+            },
+        ],
+        "risks": "情绪过热回落",
+    }
+
+    def test_renders_when_present(self):
+        text = "\n".join(
+            dr._section_overnight_news([], [], {"valid": True}, self._OUTLOOK)
+        )
+        assert "### 2.3 跨平台热点与A股刺激方向研判" in text
+        assert "仅供参考" in text
+        assert "总体研判：政策与产业共振偏多" in text
+        assert "jin10_flash、wscn_lives" in text
+        assert "分化" in text, "direction_label 须认「分化」"
+        assert "风险提示：情绪过热回落" in text
+
+    def test_omitted_when_absent(self):
+        text = "\n".join(dr._section_overnight_news([], [], {"valid": True}))
+        assert "2.3" not in text
+
+    def test_empty_stimulus_says_none_found(self):
+        text = "\n".join(
+            dr._section_overnight_news([], [], {"valid": True}, {"stimulus": []})
+        )
+        assert "未发现值得标注的跨平台重叠热点" in text
+
+    def test_malformed_items_skipped(self):
+        text = "\n".join(
+            dr._section_overnight_news(
+                [], [], {"valid": True}, {"stimulus": ["junk", None, 42]}
+            )
+        )
+        assert "未发现值得标注的跨平台重叠热点" in text

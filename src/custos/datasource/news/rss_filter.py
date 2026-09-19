@@ -284,6 +284,65 @@ def _select(unique, limit, per_source_limit):
     return selected
 
 
+def _build_topic_clusters(
+    day: str, session_type: str, asof, cutoff, unique: list[dict]
+) -> dict:
+    """主题×来源聚类：跨平台重叠 = 同一主题被 ≥2 个独立来源报道。
+
+    0850 LLM 研判层（market_outlook，v0.256）的确定性输入：聚类/计数由脚本做，
+    刺激方向研判由 LLM 做——与总则一致（确定性做数据，LLM 做分析）。
+    `in_window_brief` 是窗口内去重全集的紧凑清单（排序与候选一致），
+    让 LLM「看过所有窗口内新闻」而不是只看截断后的候选。
+    """
+    by_theme: dict[str, list[dict]] = {}
+    for x in unique:
+        for t in x.get("matched_themes") or []:
+            by_theme.setdefault(t, []).append(x)
+    clusters = []
+    for theme, rows in sorted(by_theme.items(), key=lambda kv: -len(kv[1])):
+        sources = sorted({r.get("source_id", "unknown") for r in rows})
+        clusters.append(
+            {
+                "theme": theme,
+                "item_count": len(rows),
+                "source_ids": sources,
+                "source_count": len(sources),
+                "cross_source": len(sources) >= 2,
+                "top_titles": [
+                    {
+                        "source_id": r.get("source_id"),
+                        "title": r.get("title"),
+                        "relevance_score": r.get("relevance_score"),
+                        "published_at": r.get("published_at"),
+                    }
+                    for r in rows[:5]
+                ],
+            }
+        )
+    brief = [
+        {
+            "source_id": x.get("source_id"),
+            "source_tier": x.get("source_tier"),
+            "title": x.get("title"),
+            "published_at": x.get("published_at"),
+            "relevance_score": x.get("relevance_score"),
+            "matched_themes": x.get("matched_themes") or [],
+        }
+        for x in unique
+    ]
+    return {
+        "date": day,
+        "session_type": session_type,
+        "as_of": asof.isoformat(),
+        "window_start": cutoff.isoformat(),
+        "in_window_count": len(unique),
+        "clusters": clusters,
+        "cross_source_clusters": [c for c in clusters if c["cross_source"]],
+        "in_window_brief": brief,
+        "permission_rule": "主题聚类仅供 LLM 研判参考，不能直接提高交易权限",
+    }
+
+
 def _build_report(
     a,
     asof,
@@ -389,6 +448,17 @@ def main():
         / f"{a.date}_{a.session_type}_rss_candidates.json"
     )
     dump(out, selected)
+    # 主题×来源聚类 + 窗口内全量清单（v0.256）：0850 LLM 研判层的确定性输入
+    clusters_doc = _build_topic_clusters(a.date, a.session_type, asof, cutoff, unique)
+    require("rss_topic_clusters", clusters_doc)
+    cluster_path = (
+        DATA
+        / "news"
+        / "rss"
+        / "filtered"
+        / f"{a.date}_{a.session_type}_rss_topic_clusters.json"
+    )
+    dump(cluster_path, clusters_doc)
     report = _build_report(
         a,
         asof,
@@ -404,6 +474,8 @@ def main():
         excluded,
         out,
     )
+    report["topic_clusters"] = str(cluster_path)
+    report["cross_source_cluster_count"] = len(clusters_doc["cross_source_clusters"])
     rp = LOG / f"{a.date}_{a.session_type}_filter_log.json"
     dump(rp, report)
     print(json.dumps(report, ensure_ascii=False))

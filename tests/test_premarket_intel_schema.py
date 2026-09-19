@@ -201,3 +201,46 @@ class TestMainDegradesOnInvalidSchema:
         text = self._run_main(monkeypatch, tmp_path, tmp_path / "report.md")
         assert "schema 不合规" not in text
         assert "（schema invalid:" not in text
+
+
+class TestMarketOutlookValidation:
+    """market_outlook（v0.256 LLM 研判层）：可选字段——缺失不影响合规；
+    存在但形状错误只记 warning（研判块坏了降级展示，不拖垮整份情报）。"""
+
+    def test_absent_is_fine(self):
+        result = validate_premarket_intelligence(STANDARD)
+        assert result["valid"] is True
+        assert result["warnings"] == []
+
+    def test_well_formed_accepted(self):
+        data = dict(
+            STANDARD,
+            market_outlook={
+                "summary": "s",
+                "stimulus": [
+                    {
+                        "theme": "半导体",
+                        "sources": ["a", "b"],
+                        "direction": "利好",
+                        "beneficiaries": "芯片",
+                        "strength": "中",
+                        "rationale": "r",
+                    }
+                ],
+            },
+        )
+        result = validate_premarket_intelligence(data)
+        assert result["valid"] is True
+        assert result["warnings"] == []
+
+    def test_wrong_type_is_warning_only(self):
+        result = validate_premarket_intelligence(dict(STANDARD, market_outlook="junk"))
+        assert result["valid"] is True
+        assert any("market_outlook" in w for w in result["warnings"])
+
+    def test_stimulus_wrong_type_is_warning_only(self):
+        result = validate_premarket_intelligence(
+            dict(STANDARD, market_outlook={"stimulus": "junk"})
+        )
+        assert result["valid"] is True
+        assert any("stimulus" in w for w in result["warnings"])

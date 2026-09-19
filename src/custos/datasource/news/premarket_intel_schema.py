@@ -56,6 +56,13 @@ def validate_premarket_intelligence(data: Any) -> dict[str, Any]:
                 warnings.append(f"{key}[{i}] 缺 title")
             if "direction" not in item:
                 warnings.append(f"{key}[{i}] 缺 direction")
+    # market_outlook（v0.256 LLM 研判层）：可选；存在时宽松校验，坏了只降级不致命
+    mo = data.get("market_outlook")
+    if mo is not None:
+        if not isinstance(mo, dict):
+            warnings.append(f"market_outlook 应为 dict，实际为 {type(mo).__name__}")
+        elif not isinstance(mo.get("stimulus") or [], list):
+            warnings.append("market_outlook.stimulus 应为 list")
     return {"valid": not errors, "errors": errors, "warnings": warnings}
 
 

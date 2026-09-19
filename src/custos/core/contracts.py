@@ -918,6 +918,18 @@ SPECS: dict[str, dict] = {
             "filter_session": {"type": str, "required": True, "non_empty": True},
         },
     },
+    # rss_filter.main —— 主题×来源聚类 + 窗口内全量清单（0850 LLM 研判层的确定性输入，v0.256）
+    "rss_topic_clusters": {
+        "kind": "object",
+        "fields": {
+            "date": {"type": str, "required": True, "non_empty": True},
+            "session_type": {"type": str, "required": True, "non_empty": True},
+            "in_window_count": {"type": int, "required": True},
+            "clusters": {"type": list, "required": True},
+            "in_window_brief": {"type": list, "required": True},
+            "permission_rule": {"type": str, "required": True, "non_empty": True},
+        },
+    },
     # postclose_news_digest.main
     "postclose_news_digest": {
         "kind": "object",

@@ -182,6 +182,8 @@ def direction_label(v: Any) -> str:
         return "利空"
     if s in {"neutral", "中性"}:
         return "中性"
+    if s in {"mixed", "divergent", "分化"}:
+        return "分化"
     return "待确认"
 
 
@@ -420,14 +422,56 @@ def _gather_inputs(day: str, cal_day: str) -> dict[str, Any]:
         "pgate": chief.get("position_gate", {}),
         "window_start": window_start,
         "window_end": window_end,
+        "market_outlook": (
+            intel.get("market_outlook")
+            if isinstance(intel.get("market_outlook"), dict)
+            else None
+        ),
         "audit_inputs": audit_inputs,
     }
+
+
+def _section_market_outlook(outlook: dict[str, Any]) -> list[str]:
+    """§2.3 跨平台热点与 A 股刺激方向研判（v0.256）。
+
+    0850 LLM 在「窗口内全量消息 + 主题×来源确定性聚类」上的分析层。
+    ⚠️ 信息研判**仅供参考**：不进入、也不放宽任何交易权限（权限以 §1 总控为准）。
+    """
+    stimulus = [s for s in (outlook.get("stimulus") or []) if isinstance(s, dict)]
+    lines = [
+        "",
+        "### 2.3 跨平台热点与A股刺激方向研判",
+        "",
+        "> LLM 基于窗口内全量消息与跨平台重叠聚类的研判，**仅供参考**，不构成交易权限依据。",
+        "",
+    ]
+    if outlook.get("summary"):
+        lines += [f"- 总体研判：{clean(outlook.get('summary'))}", ""]
+    if stimulus:
+        lines += [
+            "| 主题/热点 | 重叠平台 | 方向 | 刺激对象 | 强度 | 依据 |",
+            "|---|---|---|---|---|---|",
+        ]
+        for s in stimulus:
+            srcs = [str(x) for x in (s.get("sources") or [])]
+            lines.append(
+                f"| {clean(s.get('theme'))} | {'、'.join(srcs) if srcs else '-'} "
+                f"| {direction_label(s.get('direction'))} "
+                f"| {clean(s.get('beneficiaries'))} | {clean(s.get('strength'))} "
+                f"| {clean(s.get('rationale'))} |"
+            )
+    else:
+        lines.append("- 窗口内未发现值得标注的跨平台重叠热点。")
+    if outlook.get("risks"):
+        lines += ["", f"- 风险提示：{clean(outlook.get('risks'))}"]
+    return lines
 
 
 def _section_overnight_news(
     market_events: list[dict[str, Any]],
     holding_events: list[dict[str, Any]],
     intel_check: dict[str, Any],
+    market_outlook: dict[str, Any] | None = None,
 ) -> list[str]:
     """§2 隔夜重大消息与持仓公告。"""
     lines = [
@@ -467,6 +511,8 @@ def _section_overnight_news(
         lines.append(
             "| 全部持仓 | - | 信息窗口内未检索到持仓相关公告或高相关消息 | 中性 | 维持上次复盘计划 | 公告检索完成 |"
         )
+    if market_outlook is not None:
+        lines += _section_market_outlook(market_outlook)
     return lines
 
 
@@ -577,7 +623,10 @@ def main():
             "不授予新的交易权限，§4 持仓与预案确认按休市规则整节省略。"
         )
     lines += _section_overnight_news(
-        inp["market_events"], inp["holding_events"], inp["intel_check"]
+        inp["market_events"],
+        inp["holding_events"],
+        inp["intel_check"],
+        inp["market_outlook"],
     )
     lines += _section_overseas(inp["market"].get("overseas_market", {}))
     # v0.100（owner）：原 §5（主线题材观察节，口径 TODO #26 待重设计，一直挂着

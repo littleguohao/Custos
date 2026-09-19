@@ -500,3 +500,83 @@ class TestReportAudit:
         _items(env)
         sel, rep = _run(env, monkeypatch)
         assert sel == [] and rep["input_count"] == 0
+
+
+class TestTopicClusters:
+    """主题×来源聚类产物（v0.256）：0850 LLM 研判层的确定性输入——
+    跨平台重叠 = 同主题 ≥2 独立来源；`in_window_brief` 让 LLM 看到
+    窗口内**去重全集**而不只是截断后的候选。"""
+
+    def _clusters(self, env):
+        p = (
+            env
+            / "data"
+            / "news"
+            / "rss"
+            / "filtered"
+            / "2026-08-07_premarket_rss_topic_clusters.json"
+        )
+        return json.loads(p.read_text(encoding="utf-8"))
+
+    def test_cross_source_flag_and_counts(self, env, monkeypatch):
+        _positions(env, [])
+        _items(
+            env,
+            _item(
+                title="国常会部署稳增长新举措",
+                source_id="gov",
+                source_url="https://x.com/1",
+            ),
+            _item(
+                title="国常会政策落地细化安排",
+                source_id="media1",
+                source_url="https://x.com/2",
+            ),
+            _item(
+                title="芯片产能扩张加速",
+                source_id="media2",
+                source_url="https://x.com/3",
+            ),
+        )
+        _run(env, monkeypatch)
+        doc = self._clusters(env)
+        assert doc["in_window_count"] == 3
+        by_theme = {c["theme"]: c for c in doc["clusters"]}
+        assert by_theme["宏观政策"]["cross_source"] is True
+        assert by_theme["宏观政策"]["source_count"] == 2
+        assert sorted(by_theme["宏观政策"]["source_ids"]) == ["gov", "media1"]
+        assert by_theme["半导体"]["cross_source"] is False
+        assert doc["cross_source_clusters"] == [
+            c for c in doc["clusters"] if c["cross_source"]
+        ]
+        assert len(doc["in_window_brief"]) == 3
+        assert "不能直接提高交易权限" in doc["permission_rule"]
+
+    def test_brief_covers_beyond_selection_limit(self, env, monkeypatch):
+        """候选被 per_source_limit 截断，但研判清单必须覆盖窗口内全部条目。"""
+        _positions(env, [])
+        _items(
+            env,
+            *[
+                _item(
+                    title=f"芯片产业链新动态编号{i}号",
+                    source_id="media1",
+                    source_url=f"https://x.com/m{i}",
+                )
+                for i in range(6)
+            ],
+        )
+        candidates, _report = _run(env, monkeypatch)
+        assert len(candidates) == 2, "per_source_limit=2 截断候选"
+        doc = self._clusters(env)
+        assert doc["in_window_count"] == 6
+        assert len(doc["in_window_brief"]) == 6, "研判清单不被候选截断"
+
+    def test_no_theme_match_gives_empty_clusters(self, env, monkeypatch):
+        _positions(env, [])
+        _items(env, _item(title="国际金价小幅波动", source_url="https://x.com/9"))
+        _run(env, monkeypatch)
+        doc = self._clusters(env)
+        assert doc["clusters"] == []
+        assert doc["cross_source_clusters"] == []
+        assert doc["in_window_count"] == 1
