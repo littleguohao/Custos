@@ -20,6 +20,7 @@ from custos.datasource.news.premarket_intel_schema import (
 from custos.core.paths import DATA, PLANS, REVIEW_DIR, REVIEWS, cn_now, daily_report_dir
 from custos.core.paths import read_json as load
 from custos.core import report_audit
+from custos.core.runtime_guards import previous_confirmed_trading_day
 
 # 2026-08-07 架构审查：这两个访问器已移到 `news/premarket_intel_schema`——
 # 它们读的是 `data/news/premarket/`，而 `news/postclose_news_digest`
@@ -361,21 +362,25 @@ def holdings_plan_section(
     return lines
 
 
-def _gather_inputs(a, day: str) -> dict[str, Any]:
+def _gather_inputs(day: str, cal_day: str) -> dict[str, Any]:
     """输入装载段：ChiefDecision/市场/技术/前次复盘/盘前情报。
 
     模块级常量 DATA/REVIEWS 与被 monkeypatch 的访问器一律**运行时**读取，
     不得在函数默认值里捕获。
+
+    双口径：`day`=数据日（chief/技术/前次复盘——休市模式下回退到最近已确认交易日）；
+    `cal_day`=日历日（隔夜情报/RSS/海外行情按它取——休市日早晨的新消息正是报告价值）。
+    交易日两者相等。
     """
     chief = load(DATA / "decisions" / f"{day}_chief_decision.json", {})
-    market = load(DATA / "market" / f"{day}_market_timing_input.json", {})
+    market = load(DATA / "market" / f"{cal_day}_market_timing_input.json", {})
     technical = load(DATA / "holdings" / f"{day}_holding_technical_summary.json", [])
     tech = {code(x.get("code")): x for x in technical}
     prior = previous_review(day)
     prior_day = prior.get("date", "待确认")
     prior_actions = previous_holding_actions(prior)
-    intel_path = premarket_intelligence_path(day)
-    intel = load_premarket_intelligence(day)
+    intel_path = premarket_intelligence_path(cal_day)
+    intel = load_premarket_intelligence(cal_day)
     intel_check = (
         validate_premarket_intelligence(intel)
         if intel_path
@@ -383,20 +388,20 @@ def _gather_inputs(a, day: str) -> dict[str, Any]:
     )
     if not intel_check["valid"]:
         intel = {}
-    market_events = intel.get("market_events") or fallback_rss_events(day)
+    market_events = intel.get("market_events") or fallback_rss_events(cal_day)
     holding_events = intel.get("holding_events") or []
     holding_event_map = {code(x.get("code")): x for x in holding_events}
     window = intel.get("window") or {}
     window_start = window.get("start") or f"{prior_day} 15:00"
-    window_end = window.get("end") or f"{a.date} 09:00"
+    window_end = window.get("end") or f"{cal_day} 09:00"
     # 可审计块（原待办 #29，已实现）：本报告实际读过的输入；盘前情报缺失时也登记为缺失项
     audit_inputs = [
         DATA / "decisions" / f"{day}_chief_decision.json",
-        DATA / "market" / f"{day}_market_timing_input.json",
+        DATA / "market" / f"{cal_day}_market_timing_input.json",
         DATA / "trades" / "current_positions.json",
         DATA / "holdings" / f"{day}_holding_technical_summary.json",
         intel_path
-        or (DATA / "news" / "premarket" / f"{day}_premarket_intelligence.json"),
+        or (DATA / "news" / "premarket" / f"{cal_day}_premarket_intelligence.json"),
     ]
     return {
         "chief": chief,
@@ -522,13 +527,24 @@ def main():
     ap.add_argument("--data-date")
     ap.add_argument("--session", default="")
     ap.add_argument("--output")
+    ap.add_argument(
+        "--non-trading-day",
+        action="store_true",
+        help="休市口径：数据回退最近已确认交易日，省略 §4 持仓与预案确认",
+    )
     a = ap.parse_args()
     day = a.data_date or a.date
+    if a.non_trading_day and not a.data_date:
+        day = previous_confirmed_trading_day(a.date)
+        if not day:
+            raise SystemExit(
+                f"休市日报需要最近已确认交易日数据：{a.date} 之前 14 天内无确认交易日"
+            )
     dt = datetime.strptime(a.date, "%Y-%m-%d")
     chief_path = DATA / "decisions" / f"{day}_chief_decision.json"
     if not chief_path.exists():
         raise SystemExit(f"mandatory ChiefDecision missing: {chief_path}")
-    inp = _gather_inputs(a, day)
+    inp = _gather_inputs(day, a.date)
     chief = inp["chief"]
     quality = inp["quality"]
     freshness = inp["freshness"]
@@ -536,7 +552,8 @@ def main():
     audit = report_audit.build(a.date, a.session or "premarket", inp["audit_inputs"])
     lines = [
         f"# 每日投研简报｜{dt.year}年{dt.month}月{dt.day}日（星期{WEEKDAY[dt.weekday()]}）"
-        + (f"｜{a.session}" if a.session else ""),
+        + (f"｜{a.session}" if a.session else "")
+        + ("｜非交易日（休市）" if a.non_trading_day else ""),
         "",
         "> 角色（v0.57 owner 定版）：**盘前=信息处理 + 预案确认** ｜ "
         "盘中14:45=按规则的交易提醒 ｜ 盘后=复盘纠错 + 条件化预案主产地。",
@@ -554,6 +571,11 @@ def main():
         f"- 持仓快照：{freshness.get('status', '未知')}——{freshness.get('reason', '')}",
         f"- 精确数量权限：{'允许' if pgate.get('allow_precise_quantity') else '禁止'}",
     ]
+    if a.non_trading_day:
+        lines.append(
+            f"- ⏸️ 今日休市：无新增交易数据，以上结论沿用最近交易日 **{day}** 收盘口径；"
+            "不授予新的交易权限，§4 持仓与预案确认按休市规则整节省略。"
+        )
     lines += _section_overnight_news(
         inp["market_events"], inp["holding_events"], inp["intel_check"]
     )
@@ -561,14 +583,15 @@ def main():
     # v0.100（owner）：原 §5（主线题材观察节，口径 TODO #26 待重设计，一直挂着
     # 「仅观察参考」——不下决策的节是噪声）整节下线；原 §4+§6 合并为
     # 「持仓与预案确认」（两节都是盘后计划 vs 盘前动作的逐票对照，拆开必重复）。
-    lines += holdings_plan_section(
-        chief,
-        inp["tech"],
-        inp["prior_actions"],
-        inp["holding_event_map"],
-        inp["prior"],
-        inp["prior_day"],
-    )
+    if not a.non_trading_day:
+        lines += holdings_plan_section(
+            chief,
+            inp["tech"],
+            inp["prior_actions"],
+            inp["holding_event_map"],
+            inp["prior"],
+            inp["prior_day"],
+        )
     lines += [
         "",
         *_section_data_freshness(

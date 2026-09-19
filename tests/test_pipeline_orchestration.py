@@ -940,3 +940,45 @@ class TestManualInputs:
         tech.write_text(json.dumps([{"code": "600000"}]), encoding="utf-8")
         pipeline.apply_manual_position_updates("2026-08-07")
         assert len(json.loads(tech.read_text(encoding="utf-8"))) == 1
+
+
+class TestNonTradingDayPipeline:
+    """--non-trading-day（0850/0905 每日化，v0.255）：休市日只跑发现采集 +
+    日报渲染；行情底座/门控/评分/持仓决策链整段跳过，日报收到 --non-trading-day。
+    行情底座跳过是防回归要点：休市日 market_timing_input 若装 T-1 核心段，
+    下一交易日门控的继承检索会把它误判为陈旧来源（2026-07-30 形态）。"""
+
+    def test_gate_and_decision_chain_skipped(self, pipeline, monkeypatch):
+        rec = Recorder()
+        rc = _run_pipeline(pipeline, monkeypatch, rec, extra=("--non-trading-day",))
+        assert rc == 0
+        for stage in (
+            "market_timing_collector",
+            "amv_state",
+            "runtime_gate",
+            "market_timing_scorer",
+            "holding_sector_mapper",
+            "batch_holding_technical",
+            "b1_holding_state",
+            "chief_decision_report",
+        ):
+            assert stage not in rec.names, f"休市模式不应跑 {stage}"
+        # 发现采集仍跑（未传 --reuse-discovery 时）
+        assert "overseas_market_collector" in rec.names
+        assert "rss_collector" in rec.names
+        assert "rss_filter" in rec.names
+
+    def test_daily_report_receives_flag(self, pipeline, monkeypatch):
+        rec = Recorder()
+        _run_pipeline(pipeline, monkeypatch, rec, extra=("--non-trading-day",))
+        cmd = next(c for n, c in rec.calls if n == "daily_report")
+        assert "--non-trading-day" in cmd
+
+    def test_default_chain_intact_and_no_flag(self, pipeline, monkeypatch):
+        rec = Recorder()
+        rc = _run_pipeline(pipeline, monkeypatch, rec)
+        assert rc == 0
+        assert "runtime_gate" in rec.names
+        assert "chief_decision_report" in rec.names
+        cmd = next(c for n, c in rec.calls if n == "daily_report")
+        assert "--non-trading-day" not in cmd

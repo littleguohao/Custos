@@ -174,3 +174,80 @@ class TestWriteRunLog:
         assert isinstance(log["duration_sec"], (int, float))
         assert log["stages"][0]["name"] == "calendar"
         assert log["stages"][0]["ok"] is True
+
+
+class TestRunOnClosed:
+    """--run-on-closed（每日化，v0.255）：休市日只跑发现采集（overseas/RSS），
+    market_timing/incremental 跳过——A 股行情底座不落休市日文件（防下一交易日
+    门控继承检索误命中）。缺省旗标保持「日历门即退出」的旧语义（冒烟测试钉着）。"""
+
+    def _run(self, tmp_path, monkeypatch, capsys, argv, gate_result):
+        from custos.core import pipeline_kit
+
+        monkeypatch.setattr(run_0850, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(
+            run_0850, "calendar_gate", lambda *a, **kw: gate_result(pipeline_kit)
+        )
+        called = []
+
+        def fake_stage(cmd, name):
+            called.append(name)
+            return {
+                "ok": True,
+                "returncode": 0,
+                "timeout": False,
+                "stdout": "",
+                "stderr": "",
+                "out": "",
+            }
+
+        monkeypatch.setattr(run_0850, "_stage", fake_stage)
+        rc = run_0850.main(argv)
+        return rc, called, capsys.readouterr().out
+
+    def test_closed_day_runs_discovery_only(self, tmp_path, monkeypatch, capsys):
+        rc, called, out = self._run(
+            tmp_path,
+            monkeypatch,
+            capsys,
+            ["--date", "2026-09-19", "--run-on-closed"],
+            lambda pk: pk.CalendarGate({"is_trading_day": False}, None),
+        )
+        assert rc == 0
+        assert set(called) == {"overseas", "rss_collect", "rss_filter"}
+        assert "休市" in out
+        log = json.loads(
+            (tmp_path / "2026-09-19_0850_run_log.json").read_text(encoding="utf-8")
+        )
+        assert log["status"] == "completed"
+        skipped = {s.get("stage") for s in log["stages"] if s.get("skipped")}
+        assert {"market_timing", "incremental"} <= skipped
+
+    def test_flag_absent_keeps_exit_at_gate(self, tmp_path, monkeypatch, capsys):
+        rc, called, out = self._run(
+            tmp_path,
+            monkeypatch,
+            capsys,
+            ["--date", "2026-09-19"],
+            lambda pk: pk.CalendarGate({"is_trading_day": False}, 0),
+        )
+        assert rc == 0
+        assert called == [], "缺省旗标时日历门即退出，不得跑任何采集"
+
+    def test_trading_day_runs_full_stages(self, tmp_path, monkeypatch, capsys):
+        rc, called, out = self._run(
+            tmp_path,
+            monkeypatch,
+            capsys,
+            ["--date", "2026-09-18", "--run-on-closed"],
+            lambda pk: pk.CalendarGate({"is_trading_day": True}, None),
+        )
+        assert rc == 0
+        assert set(called) == {
+            "market_timing",
+            "overseas",
+            "rss_collect",
+            "incremental",
+            "rss_filter",
+        }
+        assert "休市" not in out

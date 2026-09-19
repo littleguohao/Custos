@@ -63,6 +63,12 @@ def main(argv=None) -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", default=cn_today().strftime("%Y-%m-%d"))
+    ap.add_argument(
+        "--run-on-closed",
+        action="store_true",
+        help="非交易日也继续跑发现采集（overseas/RSS），摘要带休市标记；"
+        "缺省保持休市即退出的旧语义",
+    )
     args = ap.parse_args(argv)
     target = args.date
 
@@ -83,11 +89,13 @@ def main(argv=None) -> int:
         stages_log=stages_log,
         fail_msg="【08:50预采集失败｜{target}】日历检查失败：{err}",
         closed_msg="今日休市，08:50预采集跳过（{target}）",
+        continue_on_closed=args.run_on_closed,
     )
     if _cg.exit_code is not None:
         return _cg.exit_code
+    closed = _cg.cal.get("is_trading_day") is not True
 
-    steps = ["calendar=ok"]
+    steps = [f"calendar={'closed' if closed else 'ok'}"]
 
     # 2-6. Data collectors (best-effort: rc recorded into steps, never fatal)
     STAGES = [
@@ -151,8 +159,29 @@ def main(argv=None) -> int:
             "rss_filter",
         ),
     ]
+    # 非交易日只跑发现采集（overseas/RSS）：market_timing/incremental 写的是按日键控的
+    # A 股行情底座，休日照旧跑会把 T-1 数据落进当日 market_timing_input，下一交易日
+    # 门控的继承检索（runtime_guards._latest_market_section）会命中它并把 source_day
+    # 误判成陈旧来源——与 2026-07-30 盘后链误阻断同一形态。
+    if closed:
+        for cmd, name in STAGES:
+            if name in {"market_timing", "incremental"}:
+                stages_log.append(
+                    {
+                        "stage": name,
+                        "ok": True,
+                        "skipped": True,
+                        "note": "非交易日跳过：A股行情底座不落休市日文件",
+                    }
+                )
+                steps.append(f"{name}=skipped")
+    active = [
+        (cmd, name)
+        for cmd, name in STAGES
+        if not closed or name not in {"market_timing", "incremental"}
+    ]
     results: dict[str, dict] = {}
-    for cmd, name in STAGES:
+    for cmd, name in active:
         s_started = _now_iso()
         s_t0 = time.time()
         r = _stage(cmd, name)
@@ -179,7 +208,8 @@ def main(argv=None) -> int:
     _write_run_log(target, status, run_started, t0, stages_log)
     tag = "" if not failed else f"（降级：{','.join(failed)} 失败，09:05 将重采）"
     print(
-        f"【08:50预采集{'完成' if not failed else '降级完成'}｜{target}】{tag}"
+        f"【08:50预采集{'完成' if not failed else '降级完成'}｜{target}"
+        f"{'｜休市' if closed else ''}】{tag}"
         f"{'；'.join(steps + _rss_summary_fragments(results))}"
     )
     return 0

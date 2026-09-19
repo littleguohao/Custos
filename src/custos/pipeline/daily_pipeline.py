@@ -232,6 +232,12 @@ def _parse_args() -> argparse.Namespace:
         help="postclose 时 market_quality=blocked 则整条链硬失败(exit 4)。"
         "默认关闭:门控只落盘+留痕,不阻断报告生成",
     )
+    ap.add_argument(
+        "--non-trading-day",
+        action="store_true",
+        help="休市模式:只跑海外/RSS 发现采集与日报渲染,跳过行情底座/门控/持仓决策链;"
+        "日报省略§4并沿用最近已确认交易日口径(由 run_0905 --run-on-closed 传入)",
+    )
     return ap.parse_args()
 
 
@@ -239,8 +245,18 @@ def _collect_market_stages(args: argparse.Namespace, stages: list[dict]) -> None
     """1-3. 市场输入底座 → 人工市场参数 → 海外/RSS 发现采集。"""
     market_input = MARKET_DIR / f"{args.date}_market_timing_input.json"
 
-    # 1. Market input base
-    if args.refresh_market or not market_input.exists():
+    # 1. Market input base（休市模式跳过：A股底座不落休市日文件，否则下一交易日门控的
+    #    继承检索会命中它并把 source_day 误判陈旧——与 run_0850 休市过滤同一口径）
+    if args.non_trading_day:
+        stages.append(
+            {
+                "stage": "market_timing_collector",
+                "ok": True,
+                "skipped": True,
+                "reason": "非交易日：A股行情底座不落休市日文件",
+            }
+        )
+    elif args.refresh_market or not market_input.exists():
         cmd = [
             str(PY),
             str(MARKET_TIMING / "market_timing_collector.py"),
@@ -542,12 +558,10 @@ def _run_session_stages(args: argparse.Namespace, stages: list[dict]) -> None:
 
 def _run_report_stages(args: argparse.Namespace, stages: list[dict]) -> None:
     """7. 日报。"""
-    stages.append(
-        run_stage(
-            [str(PY), str(TOOLS / "pipeline" / "daily_report.py"), "--date", args.date],
-            "daily_report",
-        )
-    )
+    cmd = [str(PY), str(TOOLS / "pipeline" / "daily_report.py"), "--date", args.date]
+    if args.non_trading_day:
+        cmd.append("--non-trading-day")
+    stages.append(run_stage(cmd, "daily_report"))
 
     # 2026-08-12：archive_supporting_reports stage 已废——写方直接落
     # daily_report_dir（日期目录），没有「先写根再归档」的双套结构要收拾。
@@ -585,10 +599,22 @@ def main():
     stages: list[dict] = []
 
     _collect_market_stages(args, stages)
-    _run_gate_and_scorer(args, stages)
-    _collect_holdings_mapping(args, stages)
-    _run_decision_chain(args, stages)
-    _run_session_stages(args, stages)
+    if args.non_trading_day:
+        # 休市模式：门控/评分/持仓决策链全部跳过——无新增交易数据，日报沿用最近
+        # 已确认交易日口径（daily_report 自行回退数据日），不生产休市日决策产物。
+        stages.append(
+            {
+                "stage": "gate_and_decision_chain",
+                "ok": True,
+                "skipped": True,
+                "reason": "非交易日：跳过门控/评分/持仓决策链",
+            }
+        )
+    else:
+        _run_gate_and_scorer(args, stages)
+        _collect_holdings_mapping(args, stages)
+        _run_decision_chain(args, stages)
+        _run_session_stages(args, stages)
     _run_report_stages(args, stages)
     _dedupe_data_quality(args, stages)
 

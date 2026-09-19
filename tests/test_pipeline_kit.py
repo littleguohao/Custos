@@ -362,3 +362,87 @@ class TestRunStageTimeout:
         assert r["ok"] is False
         assert r["timeout"] is False
         assert r["returncode"] == 3
+
+
+# ---------------------------------------------------------------------------
+# calendar_gate —— continue_on_closed（0850/0905 每日化的显式开关，v0.255）
+# ---------------------------------------------------------------------------
+
+
+class TestCalendarGateContinueOnClosed:
+    """休市两种结局：默认照旧 exit 0 + closed run_log + 打印休市消息；
+    continue_on_closed=True 时只记 stage、不退出、不写 run_log、保持 stdout 安静，
+    由调用方据 cal 自行切换休市口径。"""
+
+    def _gate(self, tmp_path, monkeypatch, cal, continue_on_closed):
+        monkeypatch.setattr(pipeline_kit, "check_trading_day", lambda d: cal)
+        stages: list[dict] = []
+        result = pipeline_kit.calendar_gate(
+            "2026-09-19",
+            log_dir=tmp_path,
+            session="0905",
+            run_started="2026-09-19T09:05:00",
+            t0=0.0,
+            stages_log=stages,
+            fail_msg="失败 {target} {err}",
+            closed_msg="休市（{target}）",
+            continue_on_closed=continue_on_closed,
+        )
+        return result, stages
+
+    def test_closed_default_exits_zero_and_writes_log(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        import json
+
+        result, stages = self._gate(
+            tmp_path, monkeypatch, {"is_trading_day": False}, False
+        )
+        assert result.exit_code == 0
+        assert "休市（2026-09-19）" in capsys.readouterr().out
+        log = json.loads(
+            (tmp_path / "2026-09-19_0905_run_log.json").read_text(encoding="utf-8")
+        )
+        assert log["status"] == "closed"
+        assert stages[0]["name"] == "calendar"
+
+    def test_closed_continue_returns_none_and_stays_quiet(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        result, stages = self._gate(
+            tmp_path, monkeypatch, {"is_trading_day": False}, True
+        )
+        assert result.exit_code is None
+        assert result.cal["is_trading_day"] is False
+        assert stages[0]["name"] == "calendar"
+        assert capsys.readouterr().out == "", "续跑模式不得污染 stdout 协议"
+        assert not list(tmp_path.glob("*_run_log.json")), "续跑模式不写 closed run_log"
+
+    def test_trading_day_unaffected_by_flag(self, tmp_path, monkeypatch):
+        result, _ = self._gate(tmp_path, monkeypatch, {"is_trading_day": True}, True)
+        assert result.exit_code is None
+
+    def test_calendar_failure_still_exit_1(self, tmp_path, monkeypatch, capsys):
+        import json
+
+        def boom(_day):
+            raise RuntimeError("tdx down")
+
+        monkeypatch.setattr(pipeline_kit, "check_trading_day", boom)
+        result = pipeline_kit.calendar_gate(
+            "2026-09-19",
+            log_dir=tmp_path,
+            session="0905",
+            run_started="2026-09-19T09:05:00",
+            t0=0.0,
+            stages_log=[],
+            fail_msg="失败 {target} {err}",
+            closed_msg="休市（{target}）",
+            continue_on_closed=True,
+        )
+        assert result.exit_code == 1
+        assert "tdx down" in capsys.readouterr().out
+        log = json.loads(
+            (tmp_path / "2026-09-19_0905_run_log.json").read_text(encoding="utf-8")
+        )
+        assert log["status"] == "calendar_failed"

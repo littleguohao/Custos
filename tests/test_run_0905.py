@@ -172,3 +172,80 @@ class TestDailyPipelineCmd:
         cmd = run_0905._daily_pipeline_cmd("2026-07-18", reuse_discovery=False)
         assert "--reuse-discovery" not in cmd
         assert "--session-type" in cmd and "premarket" in cmd
+
+
+class TestNonTradingCmdFlag:
+    """休市口径下 daily_pipeline 命令必须带 --non-trading-day（v0.255）。"""
+
+    def test_non_trading_appends_flag(self):
+        cmd = run_0905._daily_pipeline_cmd(
+            "2026-09-19", reuse_discovery=True, non_trading=True
+        )
+        assert "--non-trading-day" in cmd
+        assert "--reuse-discovery" in cmd
+
+    def test_default_omits_flag(self):
+        cmd = run_0905._daily_pipeline_cmd("2026-09-19", reuse_discovery=False)
+        assert "--non-trading-day" not in cmd
+
+
+class TestRunOnClosed:
+    """--run-on-closed（每日化，v0.255）：休市日续跑休市口径 pipeline，照常出摘要。"""
+
+    def test_closed_day_pipeline_gets_non_trading_flag(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        from custos.core import pipeline_kit
+
+        monkeypatch.setattr(run_0905, "LOG_DIR", tmp_path)
+        plans = tmp_path / "plans"
+        monkeypatch.setattr(run_0905, "PLANS", plans)
+        monkeypatch.setattr(
+            run_0905,
+            "calendar_gate",
+            lambda *a, **kw: pipeline_kit.CalendarGate({"is_trading_day": False}, None),
+        )
+        calls = []
+
+        def fake_stage(cmd, name):
+            calls.append((name, list(cmd)))
+            return {
+                "ok": True,
+                "returncode": 0,
+                "timeout": False,
+                "stdout": "",
+                "stderr": "",
+                "out": "",
+            }
+
+        monkeypatch.setattr(run_0905, "_stage", fake_stage)
+        report = plans / "2026-09-19" / "2026-09-19_0905_daily_report.md"
+        report.parent.mkdir(parents=True)
+        report.write_text(
+            "# 每日投研简报｜2026年9月19日（星期六）｜非交易日（休市）\n\n"
+            "## 1. 今日核心结论\n\n- 休市\n",
+            encoding="utf-8",
+        )
+        rc = run_0905.main(["--date", "2026-09-19", "--run-on-closed"])
+        assert rc == 0
+        pipeline_cmds = [c for n, c in calls if n == "daily_pipeline premarket"]
+        assert pipeline_cmds and "--non-trading-day" in pipeline_cmds[0]
+        out = capsys.readouterr().out
+        assert "【盘前日报｜2026-09-19｜休市】" in out
+
+    def test_flag_absent_exits_at_gate(self, tmp_path, monkeypatch, capsys):
+        from custos.core import pipeline_kit
+
+        monkeypatch.setattr(run_0905, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(
+            run_0905,
+            "calendar_gate",
+            lambda *a, **kw: pipeline_kit.CalendarGate({"is_trading_day": False}, 0),
+        )
+        called = []
+        monkeypatch.setattr(
+            run_0905, "_stage", lambda cmd, name: called.append(name) or {}
+        )
+        rc = run_0905.main(["--date", "2026-09-19"])
+        assert rc == 0
+        assert called == [], "缺省旗标时日历门即退出，不得跑 pipeline"

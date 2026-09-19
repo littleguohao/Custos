@@ -191,3 +191,112 @@ class TestHoldingsPlanSection:
         src = inspect.getsource(dr.main)
         assert "主线、机会与风险" not in src
         assert "stock_pool_section" not in src, "公式选股备选池随 §5 一并下线"
+
+
+class TestNonTradingDayReport:
+    """--non-trading-day（休市版日报，v0.255 owner）：数据口径回退最近已确认
+    交易日、§4 持仓与预案确认整节省略；隔夜情报/海外行情仍按**日历日**取——
+    休市日早晨的新消息正是这份报告的价值。"""
+
+    _CHIEF_0918 = {
+        "market_state": "防守",
+        "risk_level": "普通",
+        "total_position_range": "40%-60%",
+        "new_position_permission": "禁止",
+        "market_score": 55,
+        "market_quality": {"status": "pass", "quality_score": 0.9},
+        "position_freshness": {"status": "confirmed", "reason": "x"},
+        "position_gate": {"allow_precise_quantity": False},
+        "holding_actions": [],
+    }
+
+    def _setup(self, tmp_path, monkeypatch):
+        import json
+
+        data = tmp_path / "data"
+        for sub in ("decisions", "market", "holdings", "trades"):
+            (data / sub).mkdir(parents=True)
+        (data / "decisions" / "2026-09-18_chief_decision.json").write_text(
+            json.dumps(self._CHIEF_0918, ensure_ascii=False), encoding="utf-8"
+        )
+        # 海外行情落在**日历日**（0919 周六）文件里——休市口径必须按日历日取它
+        (data / "market" / "2026-09-19_market_timing_input.json").write_text(
+            json.dumps(
+                {"overseas_market": {"overall_signal": "偏多", "details": {}}},
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        plans = tmp_path / "plans"
+        monkeypatch.setattr(dr, "DATA", data)
+        monkeypatch.setattr(dr, "PLAN", plans)
+        monkeypatch.setattr(dr, "REVIEW_JSON_DIR", tmp_path / "review_json")
+        monkeypatch.setattr(dr, "REVIEWS", tmp_path / "reviews")
+        monkeypatch.setattr(
+            dr, "previous_confirmed_trading_day", lambda d: "2026-09-18"
+        )
+        monkeypatch.setattr(dr, "load_premarket_intelligence", lambda day: {})
+        monkeypatch.setattr(dr, "premarket_intelligence_path", lambda day: None)
+        return plans / "2026-09-19" / "2026-09-19_0905_daily_report.md"
+
+    def _render(self, monkeypatch, argv):
+        import sys
+
+        monkeypatch.setattr(sys, "argv", argv)
+        dr.main()
+
+    def test_closed_report_omits_section4_and_uses_prior_trading_day(
+        self, tmp_path, monkeypatch
+    ):
+        out = self._setup(tmp_path, monkeypatch)
+        self._render(monkeypatch, ["x", "--date", "2026-09-19", "--non-trading-day"])
+        text = out.read_text(encoding="utf-8")
+        assert "非交易日（休市）" in text
+        assert "## 4. 持仓与预案确认" not in text, "休市日 §4 必须整节省略"
+        assert "2026-09-18" in text, "§1 休市行必须标明数据口径日"
+        assert "防守" in text, "§1 结论应来自最近交易日 0918 的 ChiefDecision"
+        assert "偏多" in text, "§3 海外行情必须按日历日 0919 取"
+        assert "## 5. 数据时效与声明" in text
+
+    def test_trading_day_keeps_section4(self, tmp_path, monkeypatch):
+        out = self._setup(tmp_path, monkeypatch)
+        self._render(
+            monkeypatch,
+            ["x", "--date", "2026-09-19", "--data-date", "2026-09-18"],
+        )
+        text = out.read_text(encoding="utf-8")
+        assert "## 4. 持仓与预案确认" in text, "交易日口径 §4 必须在"
+        assert "非交易日（休市）" not in text
+
+    def test_data_date_overrides_auto_fallback(self, tmp_path, monkeypatch):
+        import json
+
+        out = self._setup(tmp_path, monkeypatch)
+        (tmp_path / "data" / "decisions" / "2026-09-17_chief_decision.json").write_text(
+            json.dumps(
+                {**self._CHIEF_0918, "market_state": "进攻"}, ensure_ascii=False
+            ),
+            encoding="utf-8",
+        )
+        self._render(
+            monkeypatch,
+            [
+                "x",
+                "--date",
+                "2026-09-19",
+                "--non-trading-day",
+                "--data-date",
+                "2026-09-17",
+            ],
+        )
+        text = out.read_text(encoding="utf-8")
+        assert "进攻" in text and "防守" not in text
+        assert "## 4. 持仓与预案确认" not in text
+
+    def test_unknown_calendar_fails_closed(self, tmp_path, monkeypatch):
+        self._setup(tmp_path, monkeypatch)
+        monkeypatch.setattr(dr, "previous_confirmed_trading_day", lambda d: None)
+        with pytest.raises(SystemExit):
+            self._render(
+                monkeypatch, ["x", "--date", "2026-09-19", "--non-trading-day"]
+            )

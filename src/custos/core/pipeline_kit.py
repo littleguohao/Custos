@@ -111,6 +111,7 @@ def calendar_gate(
     stages_log: list[dict],
     fail_msg: str,
     closed_msg: str,
+    continue_on_closed: bool = False,
 ) -> CalendarGate:
     """跑交易日检查，落 stage 日志，决定是否继续。
 
@@ -124,6 +125,11 @@ def calendar_gate(
         日历检查抛错   → 记 stage(ok=False) + run_log("calendar_failed") + 打印 → exit 1
         非交易日       → 记 stage(ok=True)  + run_log("closed")           + 打印 → exit 0
         交易日         → 记 stage(ok=True)，exit_code=None（调用方继续）
+
+    `continue_on_closed=True`（08:50/09:05 每日化的显式开关，v0.255）：非交易日
+    不再退出——只记 stage，不写 closed run_log、不打印 closed_msg，exit_code=None
+    交给调用方继续；调用方据 `cal.get("is_trading_day")` 自行切换休市口径。
+    默认 False，1445/1700/1800 与不带旗标的冒烟语义不变。
 
     ⚠️ `check_trading_day` 的 stdout 必须捕获：runner 的 stdout 是**给机器消费的协议**，
     日历检查的回显会污染它。捕获到的内容进 stage 日志，不丢。
@@ -174,6 +180,8 @@ def calendar_gate(
         )
     )
     if not cal.get("is_trading_day", False):
+        if continue_on_closed:
+            return CalendarGate(cal, None)
         write_run_log(log_dir, session, target, "closed", run_started, t0, stages_log)
         print(closed_msg.format(target=target))
         return CalendarGate(cal, 0)

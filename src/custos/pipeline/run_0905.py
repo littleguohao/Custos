@@ -79,7 +79,9 @@ def _check_0850_status(target: str) -> tuple[bool, str]:
     return True, ""
 
 
-def _daily_pipeline_cmd(target: str, reuse_discovery: bool) -> list[str]:
+def _daily_pipeline_cmd(
+    target: str, reuse_discovery: bool, non_trading: bool = False
+) -> list[str]:
     cmd = [
         "uv",
         "run",
@@ -92,6 +94,9 @@ def _daily_pipeline_cmd(target: str, reuse_discovery: bool) -> list[str]:
     ]
     if reuse_discovery:
         cmd.append("--reuse-discovery")
+    if non_trading:
+        # 休市口径：daily_pipeline 跳过门控与持仓决策链，日报省略 §4、沿用最近交易日数据
+        cmd.append("--non-trading-day")
     return cmd
 
 
@@ -100,6 +105,12 @@ def main(argv=None) -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", default=cn_today().strftime("%Y-%m-%d"))
+    ap.add_argument(
+        "--run-on-closed",
+        action="store_true",
+        help="非交易日也出休市版日报（沿用最近交易日口径、省略§4）；"
+        "缺省保持休市即退出的旧语义",
+    )
     args = ap.parse_args(argv)
     target = args.date
 
@@ -120,9 +131,11 @@ def main(argv=None) -> int:
         stages_log=stages_log,
         fail_msg="【盘前日报失败｜{target}】日历检查失败：{err}",
         closed_msg="今日休市，盘前日报不生成（{target}）",
+        continue_on_closed=args.run_on_closed,
     )
     if _cg.exit_code is not None:
         return _cg.exit_code
+    closed = _cg.cal.get("is_trading_day") is not True
 
     # 2. Daily pipeline (premarket; reuse 08:50 discovery only when it completed)
     s_started = _now_iso()
@@ -130,7 +143,9 @@ def main(argv=None) -> int:
     reuse_discovery, fallback_note = _check_0850_status(target)
     if fallback_note:
         warn(fallback_note)
-    r = _stage(_daily_pipeline_cmd(target, reuse_discovery), "daily_pipeline premarket")
+    r = _stage(
+        _daily_pipeline_cmd(target, reuse_discovery, closed), "daily_pipeline premarket"
+    )
     stages_log.append(
         _log_stage(
             "daily_pipeline premarket",
@@ -178,7 +193,7 @@ def main(argv=None) -> int:
     )
     _write_run_log(target, "completed", run_started, t0, stages_log)
 
-    print(f"【盘前日报｜{target}】")
+    print(f"【盘前日报｜{target}{'｜休市' if closed else ''}】")
     print(digest)
     return 0
 
