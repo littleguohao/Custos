@@ -6,13 +6,12 @@
 > 优先级按**「它阻塞了什么」**排，不按工作量：
 > P0 = 阻塞其他事或 live 正在依赖 ｜ P1 = 已有结论悬空 ｜ P2 = 新验证 ｜ P3 = 技术债
 >
-> 最后更新：2026-09-16（#65 R33 kill-switch 否决收口删行（排除项边际 −12.4pp
-> 胜率：砍掉的是好交易，结局②免 gate 工程）；#61 R34 双来源证伪（v0.238）；
-> #76① 影子对照机制落地（v0.239）+ 首日 2026-09-16 逐位一致 ✅（2350 票）；
-> #77 R36 Phase 0-2 工具全落地（v0.240-0.244，待生产机跑数））。
+> 最后更新：2026-09-18（#77 R36 生产机三步取数回填（v0.247-0.251：Phase 1
+> 双口径/Phase 2 三轮判毕/Phase 3 调权格❌）；#78 新增=R36 三轮满编重跑
+> （ark 限流致覆盖 10/54））。
 > 当前活跃：#60 影子观察（待 owner 拍板）、#61 校准回测（回到目标函数定义
-> 未解原状）、#26 剩余子项挂起、#59 剩余机会、#76① 影子对照天数收集（1/10）、
-> #77 R36 生产机跑数）
+> 未解原状）、#26 剩余子项挂起、#59 剩余机会、#76① 影子对照天数收集（2/10）、
+> #77 R36 收口拍板、#78 r3 满编重跑）
 
 ## P0 · 阻塞项
 
@@ -32,7 +31,8 @@
 
 | # | 事项 | 出处 | 备注 |
 |---|---|---|---|
-| 77 | **R36「完美 B1 正例监督式打分研究」分阶段执行**（owner 拍板方向：基于 B1_DATA 找类似 B1 给高分，终点=高盈亏比标的）：**Phase 0 ✅ 已完成（2026-09-16，v0.240）**；Phase 1 工具化 **✅ 已落地（2026-09-16，v0.241——`factor_ic_profile --marks` 打点分位，正例清单与标注声明沉淀进 R36 数据实况表）**；**Phase 2 监督模式已开工（2026-09-16，v0.242）**：`evolution/marks_fitness.py` 自指分离适应度（TS_RANK 于案例自身窗口，买点分位+contrast，rank_window 默认 20——K=250 在全案例恒 NaN 反例钉在案）+ `loop.py`/CLI `--marks/--min-marks-rank 0.7/--min-marks-contrast 0.0/--marks-rank-window 20`（IC 门后 marks 门，关闭逐位不变）；**live 八段对照工具已落地（v0.242）**：`research/b1_marks_v0_study.py`（as-of V0×同日全宇宙分位）。**剩余**：生产机跑数——Phase 1（factor_ic_profile --marks + b1_marks_v0 双口径取数）与 Phase 2（evolution_loop --marks 监督模式挖掘） | owner 拍板（2026-09-16）；R36 预注册落档（判据 C1~C5 + 发现/验证分离 + 验证宇宙剔除 10 案例股）；**口径变更（2026-09-16，v0.243，owner 拍板）**：案例身份=(code, 买点日期) 权威且仅此，CSV 窗口降级为材料片段，观察窗自由（买点前任意周期），评估物理截断于买点（含）——工程载体 resolve_bars（provider 全历史优先+excerpt 回退）+ marks_score(bars_provider) + evolution_loop --marks 与挖掘窗解耦。**口径再修（2026-09-16，v0.244，owner 指正）**：片段内涨幅撤出清单表（非买点验证），验证读数=买点后峰值涨幅（生产机回填）；点对权威清单入库 `R36_perfect_b1_marks.json`（生产机无 ZGNB 路径，pull 即用）；测试全量 hermetic 化（合成夹具） | 待生产机跑数（Phase 1 命令见 R36 附录；Phase 2 冒烟命令：evolution_loop --marks governance/research/R36_perfect_b1_marks.json） |
+| 77 | **R36「完美 B1 正例监督式打分研究」分阶段执行**（owner 拍板方向：基于 B1_DATA 找类似 B1 给高分，终点=高盈亏比标的）：**Phase 0 ✅ 已完成（2026-09-16，v0.240）**；Phase 1 工具化 **✅ 已落地（2026-09-16，v0.241——`factor_ic_profile --marks` 打点分位，正例清单与标注声明沉淀进 R36 数据实况表）**；**Phase 2 监督模式已开工（2026-09-16，v0.242）**：`evolution/marks_fitness.py` 自指分离适应度（TS_RANK 于案例自身窗口，买点分位+contrast，rank_window 默认 20——K=250 在全案例恒 NaN 反例钉在案）+ `loop.py`/CLI `--marks/--min-marks-rank 0.7/--min-marks-contrast 0.0/--marks-rank-window 20`（IC 门后 marks 门，关闭逐位不变）；**live 八段对照工具已落地（v0.242）**：`research/b1_marks_v0_study.py`（as-of V0×同日全宇宙分位）。**剩余**：生产机跑数——Phase 1（factor_ic_profile --marks + b1_marks_v0 双口径取数）与 Phase 2（evolution_loop --marks 监督模式挖掘） | owner 拍板（2026-09-16）；R36 预注册落档（判据 C1~C5 + 发现/验证分离 + 验证宇宙剔除 10 案例股）；**口径变更（2026-09-16，v0.243，owner 拍板）**：案例身份=(code, 买点日期) 权威且仅此，CSV 窗口降级为材料片段，观察窗自由（买点前任意周期），评估物理截断于买点（含）——工程载体 resolve_bars（provider 全历史优先+excerpt 回退）+ marks_score(bars_provider) + evolution_loop --marks 与挖掘窗解耦。**口径再修（2026-09-16，v0.244，owner 指正）**：片段内涨幅撤出清单表（非买点验证），验证读数=买点后峰值涨幅（生产机回填）；点对权威清单入库 `R36_perfect_b1_marks.json`（生产机无 ZGNB 路径，pull 即用）；测试全量 hermetic 化（合成夹具） | 生产机跑数已推进：Phase 1 ✅ 双口径回填（2026-09-17，V0 落点 8/10 前 20% + 逐腿归因）；Phase 2 三轮判毕（r1 IC 门全灭 / r2 独苗终审结局② / r3 0 pass 但 ark 限流覆盖 10/54 → 满编重跑见 #78）；Phase 3 ❌ 调权格结局②（C4 suspect，调权路死刑 R30/R34 互证）；挖掘路收口与否待 owner 拍板（详见 R36 回填区） |
+| 78 | **R36 Phase 2 三轮满编重跑**（ark 空闲时段同 tag `r36_p2_r3` 续跑补覆盖——轨迹池持久化自动累积、表达式去重免费）：三轮因 ark 账户级限流/超时只落地 10/54 候选（llm_error 44 条），门判定读数在落地者上有效但覆盖不足满编；重跑命令同回填区三轮段（一字不变），读汇总先看 `llm_errors`（v0.254 护栏）再看 pass/fail | R36 回填区覆盖注记（v0.253）+ owner 复核发现（2026-09-18） | 深夜/周配额早段跑，与宿主 cron 高峰（08:30-09:05/14:45-15:15/17:00-18:30）错峰 |
 
 ⚠️ 教训（cross-window 复核，已归入 R10）：edge 集中在单一 regime 的方案首轮看起来都很好。
 
