@@ -186,6 +186,29 @@ class TestBuildUniverseLocalFirst:
         codes, _ = formula_screen.build_universe({"exclude_bj": True})
         assert codes == ["600000"]
 
+    def test_bj_allowed_when_exclude_bj_false(self, monkeypatch):
+        """exclude_bj=False（v0.257 owner 拍板放开北交所）：BJ 各段放行进宇宙；
+        非 A 股非 BJ 标的（指数等）仍被白名单挡住——放行的是 BJ，不是放开全部。"""
+        monkeypatch.setattr(
+            formula_screen.local_tdx_data,
+            "list_local_vipdoc_codes",
+            lambda ashare_only=True: ["600000", "920123", "430047", "830799", "999999"],
+        )
+        monkeypatch.setattr(formula_screen, "_load_name_map", lambda diag=None: {})
+        codes, _ = formula_screen.build_universe({"exclude_bj": False})
+        assert codes == ["600000", "920123", "430047", "830799"]
+
+    def test_bj_allowed_covers_suffixed_and_bare(self, monkeypatch):
+        """BJ 判定两种代码形态都要认：带 .BJ 后缀与裸前缀。"""
+        monkeypatch.setattr(
+            formula_screen.local_tdx_data,
+            "list_local_vipdoc_codes",
+            lambda ashare_only=True: ["920808.BJ", "430047"],
+        )
+        monkeypatch.setattr(formula_screen, "_load_name_map", lambda diag=None: {})
+        codes, _ = formula_screen.build_universe({"exclude_bj": False})
+        assert codes == ["920808", "430047"]
+
 
 class TestNameMapCacheAndStFilter:
     """名称是 ST 硬排除的唯一依据(enrich 用 `"ST" in name.upper()`)。

@@ -1,10 +1,10 @@
 {
   "version": "v1",
-  "date": "2026-07-21",
+  "date": "2026-09-19",
   "purpose": "每日选股 screening 链第 1 段（公式初筛）使用的 TQ 选股公式注册表。只能引用客户端已存在的公式名（系统公式或用户预建公式），不能跑任意表达式。改公式/改参数前必须先回测，见 00_governance/contracts/SCREENING_WORKFLOW.md。",
   "universe": {
     "exclude_st": true,
-    "exclude_bj": true,
+    "exclude_bj": false,
     "min_list_days": 60,
     "j_low_required": true
   },

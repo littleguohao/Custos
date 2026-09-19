@@ -137,7 +137,9 @@ def build_universe(
         if cfg.get("exclude_bj", True) and _is_bj(c):
             continue
         code6 = _strip_suffix(c)
-        if _A_SHARE_RE.match(code6) and code6 not in seen:
+        # exclude_bj=False 时 BJ 段（4/8/920）显式放行——_A_SHARE_RE 只认沪深，
+        # 不加这个分支开关关了也进不来（半死开关，v0.257 修复）
+        if (_A_SHARE_RE.match(code6) or _is_bj(c)) and code6 not in seen:
             seen.add(code6)
             codes.append(code6)
     name_map = _load_name_map(diag)

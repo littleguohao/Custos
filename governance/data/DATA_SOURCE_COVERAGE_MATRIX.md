@@ -177,7 +177,7 @@ market ⇒ 查 `SH:920808` 的权息，服务器返回空。实测：
 
 | 调用方 | 有无下游过滤 | 后果 |
 |---|---|---|
-| `formula_screen.py:130` | ✅ `_A_SHARE_RE` + `exclude_bj` | 不受影响 |
+| `formula_screen.py:130` | ✅ `_A_SHARE_RE` + `exclude_bj`（2026-09-19 起 BJ 放行，v0.257） | 不受影响 |
 | `backtest_factors.py`（`sample_codes()`） | ❌ **无** | 直接 `sample_codes(base, N, seed)` ⇒ 抽样约 **89%** 概率抽到非个股 |
 
 而 `backtest_factors` 的这条路径是**不传 `--universe-local` 时的默认**。

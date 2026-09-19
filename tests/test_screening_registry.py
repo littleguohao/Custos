@@ -22,7 +22,8 @@ def test_registry_exists_and_has_top_level_keys():
 def test_universe_filters():
     u = _load()["universe"]
     assert u["exclude_st"] is True
-    assert u["exclude_bj"] is True
+    # 2026-09-19（v0.257，owner 拍板）：北交所放开进 1800 选股链
+    assert u["exclude_bj"] is False
     assert int(u["min_list_days"]) >= 60
 
 
