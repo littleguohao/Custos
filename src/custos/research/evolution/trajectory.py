@@ -251,6 +251,11 @@ class TrajectoryPool:
         self._items: list[Trajectory] = []  # 插入序，all/best 的稳定序来源
         self._by_id: dict[str, Trajectory] = {}
 
+    @property
+    def path(self) -> Path | None:
+        """绑定的持久化路径（None=纯内存池，save 由调用方自行安排）。"""
+        return self._path
+
     def add(self, t: Trajectory) -> None:
         """入池。id 冲突：同内容 → 幂等跳过；不同内容 → ValueError。
 

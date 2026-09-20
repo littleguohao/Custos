@@ -1203,6 +1203,34 @@ class TestStalePoolGuard:
             len(TrajectoryPool.load(tag_dir / "trajectory_pool.json")) == 6
         )  # 1 旧 + 5 新
 
+    def test_pool_saved_incrementally_during_run(self, tmp_path, monkeypatch):
+        """v0.258：候选落池即原子落盘——进程被杀不丢已产出。
+
+        此前 pool.save() 只在循环结束一次性调用：4.6h 跑到一半被宿主杀掉
+        全丢（#78 实测）。现在每条轨迹 add 后立即 save（原子 tmp+replace），
+        杀死后重启经表达式去重只补未产出的部分。"""
+        bars, codes_file = TestCLI._setup(tmp_path)
+        snapshots: list[int] = []
+        orig_save = TrajectoryPool.save
+
+        def spy(self):
+            snapshots.append(len(self))
+            orig_save(self)
+
+        monkeypatch.setattr(TrajectoryPool, "save", spy)
+        rc = el.main(
+            TestCLI._argv(tmp_path, codes_file, "--mock-llm"),
+            loader=TestCLI._loader(bars, []),
+        )
+        assert rc == 0
+        final = len(
+            TrajectoryPool.load(tmp_path / "out" / "t1" / "trajectory_pool.json")
+        )
+        assert final >= 2
+        assert snapshots[0] == 1, "首条轨迹落池即应有第一次落盘"
+        assert snapshots[-1] == final
+        assert snapshots == sorted(snapshots), "落盘节奏应随轨迹数单调递增"
+
 
 # ---------- __main__ 注册 ----------
 

@@ -338,6 +338,8 @@ def _fail_step(
     outcome = _Judged(comp_dict, {}, "fail", feedback)
     t = _new_trajectory(ctx.cfg, cand, payload, outcome)
     ctx.pool.add(t)
+    if ctx.pool.path is not None:  # 增量落盘（v0.258）：进程被杀不丢已产出
+        ctx.pool.save()
     _emit(ctx.on_event, **_event(cand, "fail", None, t.expression))
 
 
@@ -493,6 +495,8 @@ def _judge_and_record(ctx: _RunCtx, cand: _CandCtx, payload: dict[str, str]) -> 
     feedback = ("；".join(reasons) + "\n" if reasons else "") + note
     t = replace(t0, feedback=feedback)  # feedback 不参与 make_id，id 不变
     ctx.pool.add(t)
+    if ctx.pool.path is not None:  # 增量落盘（v0.258）：进程被杀不丢已产出
+        ctx.pool.save()
     _emit(
         ctx.on_event,
         **_event(cand, decision, rank_ic_mean, t.expression, metrics.get("objective")),
