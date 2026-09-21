@@ -28,7 +28,7 @@
 | `governance/strategy` | 策略规则文档（一策略一目录 + STRATEGY_REGISTRY.json 强制登记） |
 | `governance/research` | 研究单元 R1-R34（判据预注册，编号只增不复用） |
 | `TODO.md` / `CHANGELOG.md` | 待办 vs 已改策略规则，两者分工严格（见 §4） |
-| `tests/` | ~5800 测试，架构/契约/注册表全靠它强制 |
+| `tests/` | ~6100 测试，架构/契约/注册表全靠它强制 |
 
 ## 2. 架构分层（AST 测试强制：`tests/test_architecture_layers.py`）
 
