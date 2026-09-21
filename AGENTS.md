@@ -107,7 +107,7 @@ schema 并在生产者落盘前 `require()`（豁免要登记理由），否则�
 ## 3. 命令与环境
 
 ```bash
-uv run pytest -q          # 全量（~4 分钟；提交前必跑且必须全绿）
+uv run pytest -q          # 全量（~10.6 分钟/6124 例，2026-09-21 实测；提交前必跑且必须全绿）
 bash scripts/audit.sh     # 六件套；第 0 件 ruff format --check 是唯一硬门槛
 uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/
 ```
