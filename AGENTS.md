@@ -154,6 +154,8 @@ uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/
   默认 20（=0 是因子轴退化，scorer 不写交易集）。指标门 `--ic-gate`（rank 默认 /
   top_tail 头部价差 / off）+ 门次序 `--gate-order`（ic_first 默认 / marks_first
   成本控制）——非默认口径须已在研究单元预注册（R36 三轮是首个用例）。
+  score_evolution_study 终审姿态：`--v0-lattice` 调权格（P3 族）/ `--addon-leg`
+  骨架加腿（R36 思路二——新腿一律问「加进 V0 等权骨架的 Δmargin」，不问单独立）。
 - 因子 IC 画像（`factor_ic_profile`）：SCORERS/DSL 的截面 RankIC/ICIR + horizon
   衰减全因子可比表——**分诊镜不是晋级判据**（晋级永远走双窗+三轴交易语义；
   读数 L3− 带幸存者偏差，R19/R21/R14）。
