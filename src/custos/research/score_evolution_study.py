@@ -72,6 +72,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import random
 import sys
 from pathlib import Path
@@ -267,6 +268,22 @@ def _build_parser() -> argparse.ArgumentParser:
         "格子=倍率向量（overrides=DEFAULT_TECH_WEIGHTS×倍率，负腿不变号）；"
         "collect/score 拆分（每窗收集一次、逐格重打分）；与 --legs/--legs-file/"
         "--two-stage/--v0-arm 互斥；随机对照仍走 DSL 随机臂（腿数=--max-legs）",
+    )
+    ap.add_argument(
+        "--addon-leg",
+        action="append",
+        default=[],
+        help="骨架加腿模式（R36 思路二，须配 --v0-lattice）：V0 等权骨架（live "
+        "默认权重，不再调——P3 已杀调权路）上叠加 DSL 腿，score = V0分 + "
+        "λ·TS_RANK(expr, --rank-window)；可重复 ≤4 条；基因组 = 无腿基准 + "
+        "各腿×λ档（--addon-levels）——回答「这腿加进骨架有没有 Δmargin」，"
+        "与单腿独立终审（r2 独苗机械退化口径）互补",
+    )
+    ap.add_argument(
+        "--addon-levels",
+        default="6,12,24",
+        help="加腿 λ 档位（逗号分隔正数，默认 6,12,24——对齐 V0 腿分值量级 "
+        "j_low=24；λ=0 不必给，无腿基准基因组恒在作 C2 参照）",
     )
     # ---- 运行控制 ----
     ap.add_argument(
@@ -741,6 +758,82 @@ def _v0_mult_overrides(mult: Sequence[float], legs: Sequence[str]) -> dict[str, 
     return out
 
 
+def _resolve_addon(args: Any, ap: argparse.ArgumentParser) -> list[str]:
+    """--addon-leg 清单解析（fail-closed）：≤4 条、DSL 白名单过、复杂度不违规、
+    TS_RANK 包装后不超节点上限；``--addon-levels`` 解析为正浮点元组
+    （λ=0 = 无腿基准基因组冗余，拒）。结果回写 ``args.addon_legs/addon_levels``。
+    """
+    exprs = [str(e).strip() for e in args.addon_leg if str(e).strip()]
+    if len(exprs) > 4:
+        ap.error(f"--addon-leg 最多 4 条（防组合爆炸），实际 {len(exprs)}")
+    from custos.research.evolution import expr_dsl  # noqa: PLC0415
+
+    bad: list[str] = []
+    for e in exprs:
+        try:
+            comp = expr_dsl.complexity(e)
+            viol = expr_dsl.violations(comp)
+            if viol:
+                bad.append(f"{e}: 复杂度违规 {'；'.join(viol)}")
+                continue
+            expr_dsl.parse(f"TS_RANK({e},{args.rank_window})")  # 包装后节点预检
+        except expr_dsl.ExprError as exc:
+            bad.append(f"{e}: {exc}")
+    if bad:
+        ap.error(
+            "--addon-leg 校验失败（fail-closed，不部分受理）：\n  " + "\n  ".join(bad)
+        )
+    try:
+        levels = tuple(
+            float(x) for x in str(args.addon_levels).split(",") if str(x).strip()
+        )
+    except ValueError:
+        ap.error(f"--addon-levels 形态非法: {args.addon_levels!r}")
+    if not levels or any(not math.isfinite(v) or v <= 0 for v in levels):
+        ap.error(
+            f"--addon-levels 必须全为正数（λ=0 是无腿基准基因组，冗余）: {levels!r}"
+        )
+    args.addon_legs = list(dict.fromkeys(exprs))  # 保序去重
+    args.addon_levels = levels
+    return args.addon_legs
+
+
+def _addon_series(
+    df: pd.DataFrame, exprs: list[str], rank_window: int
+) -> dict[str, Optional[pd.Series]]:
+    """加腿 TS_RANK 归一序列（每股每腿一次，collect 期预计算）。
+
+    归一口径同 DSL 基因组编译（TS_RANK(leg, K)，K=--rank-window 默认 250）——
+    逐股时序自指分位 ∈ (0,1]，与 V0 分值可加（λ 档对齐腿分值量级）。
+    评估失败 → None（该股全窗缺席，加腿基因组如实记 n_addon_missing）。
+    """
+    from custos.research.evolution import expr_dsl  # noqa: PLC0415
+
+    out: dict[str, Optional[pd.Series]] = {}
+    for e in exprs:
+        try:
+            out[e] = expr_dsl.evaluate(f"TS_RANK({e},{rank_window})", df)
+        except Exception as exc:  # noqa: BLE001 — 单腿失败不拖死收集
+            print(
+                f"[WARN] 加腿序列评估失败 {e[:48]}: {type(exc).__name__}: {exc}"
+                "（该股该腿全窗缺席）",
+                file=sys.stderr,
+            )
+            out[e] = None
+    return out
+
+
+def _addon_value(series: Optional[pd.Series], i: int) -> Optional[float]:
+    """加腿序列的第 i 根取值：None 序列/越界/NaN/±inf（warmup 与除零）→ None。"""
+    if series is None or i >= len(series):
+        return None
+    try:
+        v = float(series.iloc[i])
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
 def _v0_mult_lattice(
     n_legs: int, levels: tuple[float, ...], *, max_combos: int
 ) -> list[tuple[float, ...]]:
@@ -802,10 +895,15 @@ def _collect_v0_window(
             .reset_index(drop=True)
         )
         collected: list[dict[str, Any]] = []
+        addon_exprs = list(getattr(args, "addon_legs", []) or [])
         for code in codes:
             df = bt._load_one_bars(code, args.count, window.start, window.end)
             if df is None or not len(df):
                 continue
+            # 加腿 TS_RANK 序列每股每腿一次（collect/score 拆分：逐格只是重打分）
+            addon_map = (
+                _addon_series(df, addon_exprs, args.rank_window) if addon_exprs else {}
+            )
             code_trades = bt.evaluate_trades(
                 {code: df},
                 scorer=bt.SCORERS["baseline"],  # 恒可买——进场只由 j_low gate 决定
@@ -827,7 +925,12 @@ def _collect_v0_window(
                     cand = srs.asof_candidate(df, index_df, i, code)
                 except Exception:  # noqa: BLE001
                     continue  # 单笔 cand 失败丢该笔（WARN 在 srs 内部已打）
-                collected.append({"trade": tr, "cand": cand, "code": code})
+                item: dict[str, Any] = {"trade": tr, "cand": cand, "code": code}
+                if addon_exprs:
+                    item["addon"] = {
+                        e: _addon_value(s, i) for e, s in addon_map.items()
+                    }
+                collected.append(item)
         if not collected:
             print(
                 f"[WARN] v0-lattice：窗口 {window.start}~{window.end} 0 候选"
@@ -904,7 +1007,11 @@ class _V0LatticeEvaluator:
         return self._pool_cache[key]
 
     def evaluate(
-        self, mult: Sequence[float], legs: Sequence[str], window: Window
+        self,
+        mult: Sequence[float],
+        legs: Sequence[str],
+        window: Window,
+        addon: Optional[tuple[str, float]] = None,
     ) -> Optional[dict]:
         """单格：technical_score 按倍率重打分 → top_n 组合 → **选中子集**读数。
 
@@ -914,6 +1021,11 @@ class _V0LatticeEvaluator:
         （V0 臂公式下 Δmargin 恒 0，C2 会机械退化），池统计收 ``pool_baseline``。
         收集为空 → None；0 笔被选中 ⇒ objective None（不参与 argmax，语义同
         DSL 格读数缺失）。
+
+        ``addon=(expr, λ)``（R36 思路二骨架加腿）：score = V0(mult) + λ·加腿值
+        （collect 期按笔预计算的 TS_RANK 归一值）；无加腿读数的交易
+        （warmup/评估失败）**不进**加腿基因组——``n_addon_missing`` 如实记录
+        （缺席≠零值，硬塞 0 会把「没读数」伪装成「最低分」）。
         """
         from custos.research import strategy_grid as sg  # noqa: PLC0415
 
@@ -921,9 +1033,19 @@ class _V0LatticeEvaluator:
         if not collected:
             return None
         overrides = _v0_mult_overrides(mult, legs)
+        addon_expr, lam = addon if addon else (None, 0.0)
         cands: list[dict[str, Any]] = []
+        n_missing = 0
         for it in collected:
+            av: Optional[float] = None
+            if addon_expr is not None:
+                av = (it.get("addon") or {}).get(addon_expr)
+                if av is None:
+                    n_missing += 1
+                    continue
             score, _level, _contrib = sc.technical_score(it["cand"], overrides)
+            if addon_expr is not None:
+                score = score + lam * float(av)
             cands.append({**it["trade"], "score": score})
         taken: list[dict] = []
         pf = bt.simulate_portfolio_topn(
@@ -939,7 +1061,7 @@ class _V0LatticeEvaluator:
             "expectancy_R": tsum.get("expectancy_R"),
             "ret_over_dd": ret_dd,
         }
-        return {
+        out = {
             "objective": sg.objective_of(row, sg.DEFAULT_OBJ_WEIGHTS),
             "margin": margin,
             "expectancy_R": tsum.get("expectancy_R"),
@@ -953,6 +1075,9 @@ class _V0LatticeEvaluator:
             "n_taken": pf.get("n_taken"),
             "n_candidates": len(cands),
         }
+        if addon_expr is not None:
+            out["n_addon_missing"] = n_missing
+        return out
 
 
 def _run_v0_lattice_study(
@@ -973,15 +1098,33 @@ def _run_v0_lattice_study(
     表达，随机化 V0 腿不是本模式口径），复用 cell_runner/_eval_random_arms。
     """
     levels = tuple(float(x) for x in args.lattice_levels)
-    lattice = _v0_mult_lattice(len(legs), levels, max_combos=args.max_combos)
+    addon_legs = list(getattr(args, "addon_legs", []) or [])
     arms_ref = baseline_arms(len(legs))
     exit_params = dict(exit_spec["params"])
 
-    # 挖掘窗逐格（collect 在 evaluator 内按窗缓存——全部格子只跑一遍收集）
-    mining_rows = [
-        {"weights": list(w), "reading": evaluator.evaluate(w, legs, mining)}
-        for w in lattice
-    ]
+    if addon_legs:
+        # 骨架加腿模式（R36 思路二）：V0 等权骨架固定 live 默认（P3 已杀调权路，
+        # 不再碰倍率格）——基因组 = 无腿基准 + 各加腿×λ档，全部 collect 一遍。
+        equal_w = tuple(1.0 for _ in legs)
+        lattice = [equal_w]  # 报告自含可还原用（基因组权重全等权，差异在 addon）
+        genome_list = [(equal_w, None)] + [
+            (equal_w, (e, lam)) for e in addon_legs for lam in args.addon_levels
+        ]
+        mining_rows = [
+            {
+                "weights": list(w),
+                "addon": ({"expr": a[0], "lambda": a[1]} if a else None),
+                "reading": evaluator.evaluate(w, legs, mining, addon=a),
+            }
+            for w, a in genome_list
+        ]
+    else:
+        lattice = _v0_mult_lattice(len(legs), levels, max_combos=args.max_combos)
+        # 挖掘窗逐格（collect 在 evaluator 内按窗缓存——全部格子只跑一遍收集）
+        mining_rows = [
+            {"weights": list(w), "reading": evaluator.evaluate(w, legs, mining)}
+            for w in lattice
+        ]
     top = _best(mining_rows)
     if top is None:
         print(
@@ -990,12 +1133,16 @@ def _run_v0_lattice_study(
             file=sys.stderr,
         )
         return None
-    equal_row = _find_by_weights(mining_rows, arms_ref["equal"])
-    single_rows = [
-        (name, _find_by_weights(mining_rows, w))
-        for name, w in arms_ref.items()
-        if name != "equal"
-    ]
+    if addon_legs:
+        equal_row = mining_rows[0]  # 无腿基准基因组（λ=0）即 C2 参照
+        single_rows: list[tuple[str, Optional[dict]]] = []
+    else:
+        equal_row = _find_by_weights(mining_rows, arms_ref["equal"])
+        single_rows = [
+            (name, _find_by_weights(mining_rows, w))
+            for name, w in arms_ref.items()
+            if name != "equal"
+        ]
 
     # 随机对照臂（DSL expr 路，R34 标尺口径；与 V0 倍率格不同载体）
     random_lattice = weight_lattice(args.max_legs, levels, max_combos=args.max_combos)
@@ -1005,10 +1152,17 @@ def _run_v0_lattice_study(
     random_best_obj = _random_best_obj(random_arms)
 
     # 判定窗：top / 等倍率基准两臂复测（判定窗 collect 同样只跑一遍）
+    top_addon = (
+        (top["addon"]["expr"], float(top["addon"]["lambda"]))
+        if top.get("addon")
+        else None
+    )
     judgment_block: Optional[dict[str, Any]] = None
     if judgment is not None:
         judgment_block = {
-            "top": evaluator.evaluate(tuple(top["weights"]), legs, judgment),
+            "top": evaluator.evaluate(
+                tuple(top["weights"]), legs, judgment, addon=top_addon
+            ),
             "equal": (
                 evaluator.evaluate(arms_ref["equal"], legs, judgment)
                 if equal_row is not None
@@ -1017,7 +1171,8 @@ def _run_v0_lattice_study(
             "s_shape": None,  # 形状对齐 DSL 模式；s_shape 参照臂不属本模式
         }
 
-    # 灵敏度：top 倍率向量 ±pct 扰动重打分挖掘窗（不重新 collect）；
+    # 灵敏度：top 格 ±pct 扰动重打分挖掘窗（不重新 collect）——加腿模式扰动
+    # 30 维倍率 + λ 的 31 维向量（λ 也是基因组参数，同受扰）；
     # 翻转 = 扰动臂 objective 跌破等倍率基准（读数缺失按翻转计，保守）
     base_obj = (
         equal_row["reading"].get("objective")
@@ -1028,13 +1183,32 @@ def _run_v0_lattice_study(
     srng = random.Random(args.seed)
     sens_rows, flips = [], 0
     for _ in range(args.sens_arms):
-        pw = perturb_weights(top["weights"], pct=args.sens_pct, rng=srng)
-        preading = evaluator.evaluate(pw, legs, mining)
+        if addon_legs:
+            lam0 = float(top["addon"]["lambda"]) if top.get("addon") else 0.0
+            pw = perturb_weights(
+                tuple(top["weights"]) + (lam0,), pct=args.sens_pct, rng=srng
+            )
+            pexpr = top_addon[0] if top_addon else None
+            preading = evaluator.evaluate(
+                pw[: len(legs)],
+                legs,
+                mining,
+                addon=(pexpr, pw[len(legs)]) if pexpr else None,
+            )
+            pw_show = pw
+        else:
+            pw = perturb_weights(top["weights"], pct=args.sens_pct, rng=srng)
+            preading = evaluator.evaluate(pw, legs, mining)
+            pw_show = pw
         pobj = preading.get("objective") if preading else None
         flip = (pobj is None) if base_obj is None else (pobj is None or pobj < base_obj)
         flips += int(flip)
         sens_rows.append(
-            {"weights": [round(x, 6) for x in pw], "reading": preading, "flip": flip}
+            {
+                "weights": [round(x, 6) for x in pw_show],
+                "reading": preading,
+                "flip": flip,
+            }
         )
 
     # 随机对照判定（#71 同族：top 必须打过随机臂最高分）
@@ -1045,6 +1219,12 @@ def _run_v0_lattice_study(
 
     # 判据机械读数（R34-C1~C5 结构沿用——R36-C2~C4 直接吃本块，映射见
     # config.r36_mapping；判定本身按预注册页执行，这里只出机械读数）
+    grid_word = "加腿格" if addon_legs else "倍率格"
+    base_word = (
+        "V0 等权骨架（live 默认权重，无腿基准基因组）"
+        if addon_legs
+        else "等倍率基准（=live V0 默认权重）"
+    )
     top_margin = top["reading"].get("margin")
     equal_margin = (
         equal_row["reading"].get("margin")
@@ -1071,7 +1251,7 @@ def _run_v0_lattice_study(
             "threshold": 100,
         },
         "R34-C2": {
-            "rule": "top 倍率格相对等倍率基准（=live V0 默认权重）margin > 0 且"
+            "rule": f"top {grid_word}相对{base_word} margin > 0 且"
             "双窗同向（R36-C2 晋级线的机械读数）",
             "delta_mining": d_mining,
             "delta_judgment": d_judgment,
@@ -1079,12 +1259,12 @@ def _run_v0_lattice_study(
         },
         "R34-C3": {
             "rule": f"灵敏度 ±{args.sens_pct:.0%} 零翻转（扰动臂 objective 跌破"
-            "等倍率基准 = 翻转；读数缺失按翻转计）",
+            f"{base_word} = 翻转；读数缺失按翻转计）",
             "arms": args.sens_arms,
             "flips": flips,
         },
         "R34-C4": {
-            "rule": "top 倍率格 objective > 随机 DSL 臂最高分（#71 纪律；随机臂"
+            "rule": f"top {grid_word} objective > 随机 DSL 臂最高分（#71 纪律；随机臂"
             "腿数 = --max-legs，R34 标尺口径）",
             "top_objective": top_obj,
             "random_best_objective": random_best_obj,
@@ -1129,11 +1309,11 @@ def _run_v0_lattice_study(
         }
 
     top_mult = {leg: float(top["weights"][i]) for i, leg in enumerate(legs)}
-    return {
+    rep: dict[str, Any] = {
         "version": SCHEMA_VERSION,
         "tag": args.tag,
         "config": {
-            "mode": "v0_lattice",
+            "mode": "v0_lattice_addon" if addon_legs else "v0_lattice",
             "legs_source": legs_source,
             "leg_axis": "V0 计分键（score_calibration_study.CONTRIB_LEG_KEYS 权威"
             "清单；repair_signals = each/cap 合成腿，倍率同乘双键）",
@@ -1181,14 +1361,20 @@ def _run_v0_lattice_study(
         },
         "legs": legs,
         "lattice": {
-            "kind": "v0_multiplier",
+            "kind": "v0_addon" if addon_legs else "v0_multiplier",
             "n_legs": len(legs),
-            "n_combos": len(lattice),
+            "n_combos": len(mining_rows),
             "weights": [list(w) for w in lattice],
             # 产物自含可还原：weights（倍率）× default_weights_snapshot 经
             # leg_weight_keys 展开 = 每格的 technical_score 覆盖表
             "default_weights_snapshot": dict(sc.DEFAULT_TECH_WEIGHTS),
             "leg_weight_keys": {leg: list(_v0_leg_weight_keys(leg)) for leg in legs},
+            # 加腿模式专有键（键集合按模式钉死，非加腿模式不出现）
+            **(
+                {"addon_legs": addon_legs, "addon_levels": list(args.addon_levels)}
+                if addon_legs
+                else {}
+            ),
         },
         "arms": {
             "lattice": mining_rows,
@@ -1197,6 +1383,26 @@ def _run_v0_lattice_study(
                 {"name": name, "leg": legs[int(name.split("_", 1)[1])], "row": row}
                 for name, row in single_rows
             ],
+            # 加腿模式专有键：每加腿的最佳档行（非加腿模式不出现）
+            **(
+                {
+                    "addon_per_expr": [
+                        {
+                            "expr": e,
+                            "best_row": _best(
+                                [
+                                    r
+                                    for r in mining_rows
+                                    if r.get("addon") and r["addon"]["expr"] == e
+                                ]
+                            ),
+                        }
+                        for e in addon_legs
+                    ]
+                }
+                if addon_legs
+                else {}
+            ),
             "s_shape": {
                 "status": "not_applicable",
                 "reason": "s_shape 参照臂属 DSL 基因组模式；v0-lattice 的对照基准"
@@ -1214,6 +1420,7 @@ def _run_v0_lattice_study(
             # DSL 模式的 expr 槽位：放可还原的倍率向量描述（JSON 字符串）
             "expr": json.dumps(top_mult, ensure_ascii=False),
             "multipliers": top_mult,
+            "addon": top.get("addon"),  # 加腿基因组标识（expr×λ；非加腿模式 None）
             "overrides": _v0_mult_overrides(top["weights"], legs),
             "mining": top["reading"],
             "judgment": judgment_block["top"] if judgment_block else None,
@@ -1237,6 +1444,7 @@ def _run_v0_lattice_study(
         ],
         "criteria_readings": criteria,
     }
+    return rep
 
 
 # ---------------------------------------------------------------------------
@@ -1801,7 +2009,7 @@ def _arm_line(name: str, reading: Optional[dict]) -> str:
 
 
 def _print_summary(rep: dict[str, Any]) -> None:
-    if rep["config"].get("mode") == "v0_lattice":
+    if rep["config"].get("mode") in ("v0_lattice", "v0_lattice_addon"):
         _print_summary_v0l(rep)
         return
     w = rep["windows"]
@@ -1902,6 +2110,14 @@ def _print_summary_v0l(rep: dict[str, Any]) -> None:
         f"｜gate={cfg['gate']}｜出场={cfg['exit']['name']}｜top_n={cfg['top_n']}"
     )
     top = rep["top_genome"]
+    if rep["config"].get("mode") == "v0_lattice_addon":
+        addon = top.get("addon")
+        addon_txt = (
+            f"{addon['expr'][:44]} ×λ={addon['lambda']:g}"
+            if addon
+            else "无腿基准基因组（λ=0，加腿全输）"
+        )
+        print(f"  ─ 骨架加腿模式（R36 思路二）：top = {addon_txt}")
     mult = top["multipliers"]
     boosted = {k: v for k, v in mult.items() if v > 1.0}
     reduced = {k: v for k, v in mult.items() if 0.0 < v < 1.0}
@@ -2017,6 +2233,7 @@ def main(
             ap.error("--v0-lattice 模式下等倍率格即 V0 臂，--v0-arm 冗余")
         if args.max_legs < 1:
             ap.error("--max-legs 必须 >= 1（v0-lattice 模式下约束随机 DSL 臂腿数）")
+        _resolve_addon(args, ap)  # 骨架加腿清单校验（无 --addon-leg 时空清单直过）
         from custos.research.score_calibration_study import (  # noqa: PLC0415
             CONTRIB_LEG_KEYS,
         )
@@ -2025,6 +2242,10 @@ def main(
         legs_source = "v0_contrib_leg_keys(score_calibration_study 权威清单)"
         _validate_v0_legs(legs, ap)
     else:
+        if args.addon_leg:
+            ap.error(
+                "--addon-leg 须配 --v0-lattice（骨架=V0 等权，DSL 模式无骨架可加）"
+            )
         legs, legs_source = _resolve_legs(args, ap)
     mining, judgment = _validate_windows(args, ap)
     exit_spec = _resolve_exit(args, ap)

@@ -1183,3 +1183,159 @@ class TestV0LatticeCliGuards:
                 "2018-01-01",
             )
         )
+
+
+# ---------------------------------------------------------------------------
+# --addon-leg 骨架加腿模式（R36 思路二：V0 等权骨架 + λ·TS_RANK(expr)）
+# ---------------------------------------------------------------------------
+
+import pandas as pd  # noqa: E402
+
+ADDON_EXPR = "ROC(CLOSE,5)"
+
+
+def _v0l_collected_addon_mining():
+    """等权下 B(30)>A(24) 被选（top_n=1）；加腿值 A=0.9/B=0.1——λ=6 仍 B、λ=24 翻 A。"""
+    items = _v0l_collected_mining()
+    for it in items:
+        it["addon"] = {ADDON_EXPR: 0.9 if it["code"] == "A" else 0.1}
+    return items
+
+
+class TestV0LatticeAddon:
+    def test_genome_set_and_selection_flip(self, tmp_path):
+        """基因组=基准+腿×λ档；λ=24 时选择从 B 翻成 A（payoff 1.5→5.0）；top=加腿格。"""
+        fake = FakeRunner(default=_reading(0.5))
+        collector = SpyCollector({MINING: _v0l_collected_addon_mining()})
+        rep = _run_v0l(
+            tmp_path,
+            fake,
+            collector,
+            "--addon-leg",
+            ADDON_EXPR,
+            "--addon-levels",
+            "6,24",
+        )
+        cfg = rep["config"]
+        assert cfg["mode"] == "v0_lattice_addon"
+        lat = rep["lattice"]
+        assert lat["kind"] == "v0_addon" and lat["n_combos"] == 3
+        assert lat["addon_legs"] == [ADDON_EXPR] and lat["addon_levels"] == [6.0, 24.0]
+        rows = rep["arms"]["lattice"]
+        assert len(rows) == 3  # 基准 + 2 λ 档
+        base, lam6, lam24 = rows
+        assert base["addon"] is None
+        assert lam6["addon"] == {"expr": ADDON_EXPR, "lambda": 6.0}
+        # λ=6：B 仍被选（30+0.6 > 24+5.4）——B 两笔 payoff 1.5；基准同
+        assert base["reading"]["payoff_ratio"] == pytest.approx(1.5)
+        assert lam6["reading"]["payoff_ratio"] == pytest.approx(1.5)
+        # λ=24：A 翻盘（45.6 > 32.4）——A 两笔 payoff 5.0 ⇒ top = 加腿格
+        assert lam24["reading"]["payoff_ratio"] == pytest.approx(5.0)
+        assert rep["top_genome"]["addon"] == {"expr": ADDON_EXPR, "lambda": 24.0}
+        # C2 机械读数 = top margin − 基准 margin（在场可判）
+        assert rep["criteria_readings"]["R34-C2"]["delta_mining"] is not None
+        # 灵敏度扰动 31 维（30 倍率 + λ——λ 也是基因组参数同受扰）
+        assert len(rep["sensitivity"]["arms"][0]["weights"]) == 31
+        # 每加腿最佳档行 = λ=24
+        per = rep["arms"]["addon_per_expr"]
+        assert per[0]["expr"] == ADDON_EXPR
+        assert per[0]["best_row"]["addon"]["lambda"] == 24.0
+
+    def test_addon_missing_excluded_not_zero(self, tmp_path):
+        """无加腿读数的交易被排除（缺席≠零值）：n_candidates 减一、
+        n_addon_missing 如实记；基准基因组不受影响也无此键。"""
+        items = _v0l_collected_addon_mining()
+        items[2]["addon"][ADDON_EXPR] = None  # A 第二笔缺读数（warmup 语义）
+        collector = SpyCollector({MINING: items})
+        rep = _run_v0l(
+            tmp_path,
+            FakeRunner(default=_reading(0.5)),
+            collector,
+            "--addon-leg",
+            ADDON_EXPR,
+            "--addon-levels",
+            "24",
+        )
+        base, lam24 = rep["arms"]["lattice"]
+        assert base["reading"]["n_candidates"] == 4
+        assert "n_addon_missing" not in base["reading"]
+        assert lam24["reading"]["n_candidates"] == 3
+        assert lam24["reading"]["n_addon_missing"] == 1
+
+    def test_addon_series_wrapper_and_value_edges(self):
+        """collect 期序列 = TS_RANK(expr, K) 直评；取值越界/NaN/None 序列 → None。"""
+        n = 30
+        dates = pd.date_range("2024-01-01", periods=n, freq="B")
+        close = [100.0 + i for i in range(n)]
+        df = pd.DataFrame(
+            {
+                "date": dates,
+                "open": close,
+                "high": [c + 0.5 for c in close],
+                "low": [c - 0.5 for c in close],
+                "close": close,
+                "volume": [1000.0] * n,
+            }
+        )
+        from custos.research.evolution import expr_dsl
+
+        series = ses._addon_series(df, [ADDON_EXPR], 5)[ADDON_EXPR]
+        direct = expr_dsl.evaluate(f"TS_RANK({ADDON_EXPR},5)", df)
+        pd.testing.assert_series_equal(series, direct, check_exact=True)
+        assert ses._addon_value(series, n - 1) == float(series.iloc[-1])
+        assert ses._addon_value(None, 0) is None
+        assert ses._addon_value(series, n + 5) is None  # 越界
+        assert ses._addon_value(series, 0) is None  # warmup NaN
+
+
+class TestV0LatticeAddonCliGuards:
+    def _expect_error(self, argv):
+        with pytest.raises(SystemExit) as exc:
+            ses.main(argv, cell_runner=FakeRunner(), v0l_collector=SpyCollector())
+        assert exc.value.code == 2
+
+    def test_addon_requires_v0_lattice(self, tmp_path):
+        with pytest.raises(SystemExit) as exc:
+            ses.main(
+                [
+                    "--legs",
+                    "ROC(CLOSE,5)",
+                    "--mining-start",
+                    MINING[0],
+                    "--mining-end",
+                    MINING[1],
+                    "--codes",
+                    "600000",
+                    "--out-dir",
+                    str(tmp_path),
+                    "--tag",
+                    "t1",
+                    "--addon-leg",
+                    ADDON_EXPR,
+                ],
+                cell_runner=FakeRunner(),
+            )
+        assert exc.value.code == 2
+
+    def test_addon_max_four(self, tmp_path):
+        argv = _argv_v0l(
+            tmp_path,
+            *sum((["--addon-leg", f"ROC(CLOSE,{k})"] for k in (3, 5, 8, 13, 21)), []),
+        )
+        self._expect_error(argv)
+
+    def test_addon_bad_dsl_rejected(self, tmp_path):
+        self._expect_error(_argv_v0l(tmp_path, "--addon-leg", "NO_SUCH_OP(CLOSE)"))
+
+    def test_addon_complexity_violation_rejected(self, tmp_path):
+        self._expect_error(
+            _argv_v0l(tmp_path, "--addon-leg", "+".join(["CLOSE"] * 400))
+        )
+
+    def test_addon_levels_must_be_positive(self, tmp_path):
+        self._expect_error(
+            _argv_v0l(tmp_path, "--addon-leg", ADDON_EXPR, "--addon-levels", "0,6")
+        )
+        self._expect_error(
+            _argv_v0l(tmp_path, "--addon-leg", ADDON_EXPR, "--addon-levels", "abc")
+        )

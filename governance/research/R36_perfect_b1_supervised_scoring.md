@@ -5,11 +5,11 @@
 > **证据等级**：L1 样本 / L3− 结论封顶（10 个正例全是 2025 年单一近期
 > regime 案例 + 「最后一天=买点」是**事后标注**（选择偏差）——只作发现级材料；
 > 任何结论必须经全宇宙双窗交易语义验证，多重比较显式标注，L3− 封顶）　|
-> **状态**：🔄 **Phase 2 三轮已判毕（2026-09-18：0 pass，挖掘路收敛到负）**——
-> Phase 1 双口径读数在案；Phase 2 三轮全判（一轮 15 全灭 / 二轮独苗终审否决
-> / 三轮 marks 高分者过不了 top_tail 门）；近失候选复核终裁：旧门没误杀；
+> **状态**：🔄 **Phase 2 挖掘路证伪闭环（47/47 满编 0 pass）+ 思路二（骨架加腿）
+> 终审预注册落档待跑（2026-09-22，owner 拍板按排序执行）**——Phase 1 双口径
+> 读数在案；Phase 2 三轮全判 + 满编补覆盖判毕；近失候选复核终裁：旧门没误杀；
 > Phase 3 调权格已判（❌ 结局②，调权路死刑，R30/R34 五轮互证）；
-> **挖掘路收口与否待 owner 拍板**　|
+> **思路二=入场侧最后一个悬案，跑毕后挖掘路收口拍板**　|
 > **依赖**：上游：R18（优秀 B1 指纹证据层——本页是它的监督式续篇）R19（技术分
 > 无预测力——诊断问题的必要性来源）R34（打分进化 v1 证伪——新因子挖掘的闸门
 > 与随机对照纪律同源）｜判据纪律：R12（预注册）R14（幸存者宇宙）R11（量级不作数）
@@ -281,6 +281,34 @@ Phase 0 已完成：
     下 0 pass」——**限流假全灭的读数嫌疑排除**；r1 IC 门全灭 / r2 独苗
     交易层负 / r3 满编全灭三轮互证，Phase 2 挖掘路证伪闭环，#77 收口
     拍板证据齐备。
+- **Phase 2 思路二·骨架加腿终审（📋 预注册落档 2026-09-22，owner 拍板按
+  排序执行；待生产机跑数）**——入场侧最后一个没问过的问题：此前所有终审
+  回答的都是「这腿**单独立**行不行」（r2 独苗单腿终审等权基准≡自身，机械
+  退化），从没回答过「**加进 V0 等权骨架有没有 Δmargin**」——而后者才是
+  任何新腿的真实用法。判据/口径跑数前写死：
+  - **候选 4 条（写死）**：①r2 独苗
+    `(1-TS_RANK(STD(close,20)/MA(close,20),120))*(1-TS_RANK(MAX(high,5)-MIN(low,5),60))*(MA(close,5)/MA(close,10))`；
+    ②③④r3 三条 marks 高分（mean_rank 0.875/0.775/0.75，n_hit 10/10；
+    表达式以生产机 `r36_p2_r3/trajectory_pool.json` 提取为准，提取命令见
+    附录思路二段）；
+  - **基因组构造**：V0 等权骨架 = live 默认权重（P3 已杀调权路，**不再碰
+    倍率格**）；加腿基因组 = V0 等权 + λ·TS_RANK(腿,250)（TS_RANK 归一
+    口径同 DSL 基因组编译；λ ∈ {6,12,24}，对齐腿分值量级 j_low=24）；
+    无腿基准基因组恒在作 C2 参照；无加腿读数的交易（TS_RANK warmup/评估
+    失败）不进加腿基因组（缺席≠零值，产物记 n_addon_missing）；
+  - **判据（沿用 C1~C5 一字不动）**：C1 单窗 n_taken ≥100；C2 top 加腿格
+    vs 无腿基准 **Δmargin 双窗同向为正**；C3 ±50%×4 零翻转（30 倍率+λ
+    31 维同扰）；C4 top objective > 随机 DSL 臂最佳（+0.547 难度标尺）；
+    C5 全过才启动 pre2019 终审；
+  - **窗口/宇宙/交易语义**：同 P3 满编口径（挖掘 2022-01-01~2024-07-31 /
+    判定 2024-08-01~2026-09-04；s2999 剔除案例股 codes-file 复用
+    r36_p3_v1（digest 149d48e7412a）；j_low gate + top20 + pct5_trail08 +
+    成本 25bps）；
+  - **读法声明（双向停止）**：4 条候选全死 ⇒ 入场侧悬案清零，#77 挖掘路
+    收口拍板证据终齐；有候选过 C2~C4 ⇒ 以 candidate 身份进因子注册表走
+    现有流程（C5 终审随后单独终步）；
+  - 工程载体（v0.260）：`score_evolution_study --v0-lattice --addon-leg`
+    （基因组/判据/产物结构与 P3 同族；跑数命令见附录思路二段）。
 - **Phase 3（❌ 结局②否决，2026-09-17 判毕）**：v0-lattice 工具落地（v0.249）
   并双冒烟验证；正式跑 `r36_p3_v1`（剔除案例股 s2999=宇宙 digest
   149d48e7412a、双窗满配 64 格+随机臂 3×64+灵敏度 4）——产物
@@ -395,3 +423,49 @@ tokens 预算参考：二轮 16 候选 ≈ 24.3 万（单候选均值 ~1.5 万�
 _summary__r36_p2_r3.json）。跑毕回填：各候选 top_tail/rank_ic/marks 三读数
 对照表、过门率、与一/二轮门口径下的对照差异（marks 0.83 类候选在三轮门
 下的命运是核心复核点）。
+
+
+---
+
+## 附录 · Phase 2 思路二跑数命令（生产机，v0.260 工具，判据见回填区思路二段）
+
+**第 1 步 · 提取 r3 三条 marks 高分表达式**（权威来源 = 轨迹池，不是文档记忆）：
+
+```bash
+python - <<'EOF'
+import json
+pool = json.load(open('artifacts/logs/evolution/r36_p2_r3/trajectory_pool.json',
+                      encoding='utf-8'))
+rows = []
+for t in pool:
+    m = (t.get('mining_metrics') or {}).get('marks') or {}
+    if (m.get('n_hit') or 0) >= 10 and m.get('mean_rank') is not None:
+        rows.append((m['mean_rank'], t['expression']))
+rows.sort(key=lambda x: -x[0])
+for rank, expr in rows[:3]:
+    print(f'{rank:.3f}\t{expr}')
+EOF
+```
+
+（预期 mean_rank ≈ 0.875 / 0.775 / 0.75 三条；不足 3 条以实际为准并如实注记。）
+
+**第 2 步 · 骨架加腿终审**（宇宙 = r36_p3_v1 的 s2999 codes-file——剔除案例股，
+digest 149d48e7412a；`<r3#1..3>` 替换为第 1 步提取的表达式）：
+
+```bash
+uv run python -m custos.research score_evolution_study \
+  --v0-lattice \
+  --addon-leg '(1-TS_RANK(STD(close,20)/MA(close,20),120))*(1-TS_RANK(MAX(high,5)-MIN(low,5),60))*(MA(close,5)/MA(close,10))' \
+  --addon-leg '<r3#1>' --addon-leg '<r3#2>' --addon-leg '<r3#3>' \
+  --mining-start 2022-01-01 --mining-end 2024-07-31 \
+  --judgment-start 2024-08-01 --judgment-end 2026-09-04 \
+  --codes-file <r36_p3_v1 的 s2999 codes 表> --count 2000 \
+  --tag r36_p2_addon
+```
+
+产物：`artifacts/logs/score_evolution/r36_p2_addon/_score_evolution__r36_p2_addon.json`
+（`config.mode=v0_lattice_addon`；基因组 1 基准 + 4 腿×3 λ = 13 格；随机 DSL 臂
+与灵敏度臂同 P3 族）。跑毕回填：①13 格读数表（objective/margin/n_taken/
+n_addon_missing）；②逐候选最佳档 vs 无腿基准 Δmargin 双窗表（C2 判定）；
+③top 格灵敏度翻转数（C3）与随机臂对照（C4）；④收口判定（全死 ⇒ #77 签
+挖掘路死刑；有活 ⇒ candidate 注册 + C5 单独终步）。
