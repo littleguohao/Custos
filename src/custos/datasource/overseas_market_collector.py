@@ -246,9 +246,11 @@ def main():
                 # ⚠️ 必须与调用方走同一条导入路径,否则同一文件会被加载成两个模块
                 # 包式绝对导入：脚本与包两种模式下都是同一份模块对象
                 # （custos 可编辑安装），monkeypatch/异常捕获对得上。
-                from custos.datasource.tdx_ext_quotes import fetch_ext_change  # noqa: PLC0415
+                from custos.datasource.tdx_ext_quotes import fetch_ext_change_bounded  # noqa: PLC0415
 
-                alt = fetch_ext_change(meta["symbol"])
+                # 硬墙 30s：mootdx ext bars 内部 tenacity 无 stop，接口死时会无限重连
+                # （约 40s/轮），必须在调用方切断，否则拖垮整条 daily_pipeline。
+                alt = fetch_ext_change_bounded(meta["symbol"], wall_timeout=30.0)
             except Exception as e2:  # noqa: BLE001
                 print(
                     f"[WARN] TDX ext fallback 不可用: {type(e2).__name__}: {e2}",

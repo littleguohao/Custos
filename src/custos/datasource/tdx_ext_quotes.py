@@ -133,4 +133,43 @@ def supported() -> list[str]:
     return sorted(EXT_MAP)
 
 
-__all__ = ["EXT_MAP", "fetch_ext_change", "supported"]
+def fetch_ext_change_bounded(symbol: str, *, wall_timeout: float = 30.0, **kwargs: Any):
+    """fetch_ext_change 的硬墙钟超时封装。
+
+    背景：mootdx ExtQuotes.bars 上挂的 tenacity @retry **没有 stop 条件**，扩展市场
+    接口死时会无限重连（约 40s/轮），外层 attempt 拦不住，曾把整条采集链拖到
+    超时被杀。这里用独立线程 + join(wall_timeout) 给它加一道硬墙：超时即返回 None
+    （后台线程被 shutdown(wait=False) 放弃，daemon 化，不阻塞进程退出）。
+    """
+    import threading
+
+    box: dict[str, Any] = {}
+
+    def _worker() -> None:
+        try:
+            box["result"] = fetch_ext_change(symbol, **kwargs)
+        except Exception as e:  # noqa: BLE001
+            box["error"] = e
+
+    # daemon=True 是关键：被硬墙放弃后，后台那个可能永远在重连的线程不会在进程退出时
+    # 被 atexit join 而挂住（ThreadPoolExecutor 的 worker 是非 daemon，故不用它）。
+    t = threading.Thread(target=_worker, name=f"ext-{symbol}", daemon=True)
+    t.start()
+    t.join(wall_timeout)
+    if t.is_alive():
+        print(
+            f"[WARN] TDX ext {symbol} 硬墙超时（>{wall_timeout:.0f}s），放弃等待",
+            file=sys.stderr,
+        )
+        return None
+    if "error" in box:
+        e = box["error"]
+        print(
+            f"[WARN] TDX ext {symbol} 异常: {type(e).__name__}: {e}",
+            file=sys.stderr,
+        )
+        return None
+    return box.get("result")
+
+
+__all__ = ["EXT_MAP", "fetch_ext_change", "fetch_ext_change_bounded", "supported"]
