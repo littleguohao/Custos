@@ -67,6 +67,16 @@ _R11_NOTE = (
 )
 
 
+class LedgerSpaceChanged(ValueError):
+    """台账幸存者基因组与当前档位空间不符（LEVELS 战役启动后变更仍 resume）。
+
+    resume 只保证**同空间**续跑：幸存者会进变异算子（``_step_level`` 按
+    档位索引取值），档位变更后不拦会在批次中途随机裸崩 ValueError
+    （实测 40/200）——长跑战役几小时后才炸，比不跑还糟。fail-fast 于
+    加载时，提示换 ``--tag`` 开新战役。
+    """
+
+
 @dataclass
 class CampaignConfig:
     """战役配置（预注册 CTL 数值的代码化身；CLI 默认值 = R37 写死值）。"""
@@ -240,8 +250,10 @@ def ctl_step(
 ) -> dict:
     """执行一批的 CTL 裁决：更新 state 并返回台账批记录。
 
-    检查次序（写死）：CTL-4 过线停 > CTL-3 证伪停 > CTL-5 预算帽 >
-    CTL-2 家族关闭（影响下一批）> CTL-1 继续（更新幸存者）。
+    检查次序（写死，与 R37 同步）：CTL-4 过线停 > CTL-2 家族关闭 >
+    CTL-3 证伪停 > CTL-5 预算帽 > CTL-1 继续（更新幸存者）。
+    **次序即语义**：CTL-3 含「或全部家族关闭」，必须 CTL-2 先跑，家族
+    团灭的一批才能同批触发证伪（而不是白跑一批空家族）。
     家族连死记账在任何结局下都落台账（死刑档案不断更）。
     """
     base = state.baseline
@@ -496,6 +508,19 @@ def run_campaign(
             print(
                 f"[INFO] 台账已有结局（{state.status}），直接出报告不续跑",
                 file=sys.stderr,
+            )
+        # 档位空间守卫：幸存者要进变异算子，LEVELS 变更后续跑会在批次中途
+        # 随机裸崩（LedgerSpaceChanged docstring 有实测）——加载时 fail-fast。
+        stale = {
+            eg.genome_key(p["genome"]): bad
+            for p in state.population
+            if (bad := eg.validate(p["genome"]))
+        }
+        if stale:
+            raise LedgerSpaceChanged(
+                "台账幸存者基因组与当前档位空间不符——exit_genome.LEVELS 已在"
+                "战役启动后变更，resume 只保证同空间续跑；请换 --tag 开新战役。"
+                f"非法项: {stale}"
             )
     _ensure_baseline(cfg, state, evaluator)
 
@@ -789,9 +814,12 @@ def main(
     if not args.resume and ledger.exists():
         ap.error(f"台账已存在: {ledger}（续跑加 --resume；新战役换 --tag）")
     ledger.parent.mkdir(parents=True, exist_ok=True)
-    report = run_campaign(
-        _config_of(args), ev, ledger, resume=args.resume, tag=args.tag
-    )
+    try:
+        report = run_campaign(
+            _config_of(args), ev, ledger, resume=args.resume, tag=args.tag
+        )
+    except LedgerSpaceChanged as exc:
+        ap.error(str(exc))  # 档位空间守卫：干净 exit 2，不留 traceback
     print(
         f"[campaign] 结局：{report['status']} —— {report['verdict']}\n"
         f"[campaign] 报告：{ledger.parent / f'_exit_campaign__{args.tag}.json'}\n"

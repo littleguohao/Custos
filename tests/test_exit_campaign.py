@@ -207,6 +207,30 @@ class TestCtl2FamilyDeath:
         )
         assert "trail" not in state.family_dead_streak  # 无变体 ⇒ 不计数
 
+    def test_last_family_closed_falsifies_same_batch(self):
+        """次序钉测（CTL-2 > CTL-3）：团灭批同批证伪，不白跑一批空家族。"""
+        cfg = ec.CampaignConfig(batch_size=1, n_random=0, family_death_streak=2)
+        state = ec.CampaignState()
+        _baseline(state)
+        state.open_families = ["trail"]  # 只剩一个开放家族
+        state.family_dead_streak = {"trail": 1}
+        g_trail = eg.normalize({"stop_pct": 5, "trail_pct": 0.10})
+        rec = ec.ctl_step(
+            cfg,
+            state,
+            [g_trail],
+            [],
+            [_both(0.05, 0.05)],
+            [],
+            _dead_eval,
+            random.Random(1),
+        )
+        assert state.status == "falsified"
+        assert [a["type"] for a in rec["ctl_actions"]] == [
+            "family_closed",
+            "falsified",
+        ]
+
 
 class TestC2Gate:
     def test_requires_dual_window_positive(self):
@@ -357,6 +381,51 @@ class TestEndToEnd:
         )
         assert rep["status"] == "running"
         assert "非结局" in rep["verdict"]
+
+
+class TestResumeSpaceGuard:
+    """档位空间守卫（v0.265 review 修复）：LEVELS 变更后 resume 必须
+    加载时 fail-fast，不许批次中途随机裸崩（幸存者要进变异算子）。"""
+
+    def _ledger_with_population(self, tmp_path):
+        ledger = tmp_path / "t" / "campaign_ledger.json"
+        cfg = ec.CampaignConfig(batch_size=2, n_random=0, seed=5, max_batches=2)
+        state = ec.CampaignState()
+        _baseline(state)
+        state.batch_id = 1
+        state.population = [{"genome": eg.baseline_genome(), "mining": _rd(0.05, 0.05)}]
+        ec.save_ledger(ledger, "t", cfg, state, [])
+        return ledger, cfg
+
+    def test_stale_population_fails_fast(self, tmp_path, monkeypatch):
+        ledger, cfg = self._ledger_with_population(tmp_path)
+        # 模拟 Phase 1 迭代期改档位：stop_pct 5 移出空间（幸存者含 sp=5）
+        monkeypatch.setitem(eg.LEVELS, "stop_pct", (4.0, 6.0, 8.0, 10.0, 12.0))
+        with pytest.raises(ec.LedgerSpaceChanged, match="档位空间|--tag"):
+            ec.run_campaign(cfg, _fake_all_win_c2, ledger, resume=True, tag="t")
+
+    def test_main_exit2_on_stale_population(self, tmp_path, monkeypatch):
+        ledger, _cfg = self._ledger_with_population(tmp_path)
+        monkeypatch.setitem(eg.LEVELS, "stop_pct", (4.0, 6.0, 8.0, 10.0, 12.0))
+        with pytest.raises(SystemExit) as e:
+            ec.main(
+                [
+                    "--tag",
+                    "t",
+                    "--out-dir",
+                    str(tmp_path),
+                    "--codes",
+                    "000001",
+                    "--resume",
+                ],
+                evaluator=_fake_all_win_c2,
+            )
+        assert e.value.code == 2
+
+    def test_same_space_resume_not_blocked(self, tmp_path):
+        ledger, cfg = self._ledger_with_population(tmp_path)
+        rep = ec.run_campaign(cfg, _fake_all_lose, ledger, resume=True, tag="t")
+        assert rep["n_batches"] == 1  # 同空间续跑不受守卫影响
 
 
 class TestCli:

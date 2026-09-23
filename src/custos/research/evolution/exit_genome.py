@@ -93,10 +93,22 @@ def normalize(g: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate(g: dict[str, Any]) -> list[str]:
-    """返回非法项清单（空 = 合法）：档位外取值/开关与档位矛盾/缺 stop_pct。"""
+    """返回非法项清单（空 = 合法）：缺参/档位外取值/开关与档位矛盾。
+
+    契约是**返回清单**，对任何输入都不许抛——半开家族（如 cost_zone 有
+    bars 缺 pct，唯一双参家族才暴露）先报缺参，否则 normalize 会 KeyError。
+    """
     bad: list[str] = []
     if "stop_pct" not in g:
         return ["缺 stop_pct"]
+    for fam in all_families():
+        sw = FAMILY_SWITCH[fam]
+        if float(g.get(sw, 0) or 0) > 0:
+            for p in FAMILIES[fam]:
+                if p not in g:
+                    bad.append(f"{fam} 开启但缺参数 {p}")
+    if bad:
+        return bad
     n = normalize(g)
     for p, levels in LEVELS.items():
         v = n[p]

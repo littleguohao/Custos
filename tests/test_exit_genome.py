@@ -61,6 +61,11 @@ class TestNormalizeValidate:
         # cost_zone_pct 关闭时是占位值，不在档位也合法
         assert eg.validate({"stop_pct": 5}) == []
 
+    def test_validate_half_on_family_returns_list_not_raise(self):
+        # cost_zone 是唯一双参家族：半开（有 bars 缺 pct）只报缺参，不抛 KeyError
+        bad = eg.validate({"stop_pct": 5, "cost_zone_bars": 3})
+        assert bad and any("cost_zone_pct" in x for x in bad)
+
     def test_validate_on_cost_zone_needs_level_pct(self):
         assert eg.validate({"stop_pct": 5, "cost_zone_bars": 3, "cost_zone_pct": 4.0})
 
