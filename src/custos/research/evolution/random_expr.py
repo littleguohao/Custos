@@ -10,9 +10,21 @@ close/volume（close×3 / volume×2 / 其余×1 —— LLM 产出里最常用的
 45% 四则 BinOp 组合；深度受 ``max_depth``（默认 3）约束 ⇒ 产物呈
 「1-3 个算子嵌套 + 四则组合」形态，模仿 LLM 产出规模。
 
-**构造即合法**：产物必须过 ``expr_dsl.parse`` 且 ``violations(complexity())``
+**零假设口径**（v0.267，TODO #80①，owner 方法论 review——对照臂必须是
+**形态噪声**，不得是已知的真因子代理）：
+
+- **R1 根节点必须是算子**——裸终结符（close/open/volume 整表达式）=
+  低价/规模等结构因子，该进基准臂、不是零假设（R34 默认种子臂2=open /
+  臂3=close 实测教训）；
+- **R2 必须含破尺度构造**（``/`` 或 DELTA/ROC/TS_RANK 之一）——否则
+  ``MA(close,20)``/``SUM(volume,5)`` 这类「水平算子+四则（无除法）」产物
+  仍是价格/流动性**水平**代理。REF 不算破尺度（``REF(close,5)`` 仍是
+  价格水平）；ABS/LOG 单调保水平，同样不算。
+
+构造即合法：产物必须过 ``expr_dsl.parse`` 且 ``violations(complexity())``
 为空 —— 越界重采样，有界次数后缩小 max_depth 重试（本实验测的是 IC 门，
-不是 DSL 门，DSL 违规样本不进对照组）。
+不是 DSL 门，DSL 违规样本不进对照组）。零假设口径下最小深度 = 2
+（深度 1 = 纯叶子，必违 R1）。
 """
 
 from __future__ import annotations
@@ -32,6 +44,22 @@ _BIN_OPS = ("+", "-", "*", "/")
 _UNARY_OPS = ("ABS", "LOG")
 
 _LEAF_PROB = 0.30  # 每层落叶子的概率（控制树的茂密程度）
+
+#: 破尺度算子（R2 的合法凭证；'/' 单独判——BinOp 文本里的除法）。
+#: REF 不在列：REF(close,5) 仍是价格水平；ABS/LOG 单调保水平，同不算。
+_SCALE_BREAK_OPS: tuple[str, ...] = ("DELTA", "ROC", "TS_RANK")
+
+#: 零假设口径下的兜底表达式（合法 + 破尺度；理论不可达，防御用）。
+_FALLBACK_EXPR = "ROC(close, 5)"
+
+
+def _null_ok(expr: str) -> bool:
+    """零假设标尺（R1/R2 见模块 docstring）：非裸终结符 ∧ 含破尺度构造。"""
+    if expr in BASE_VARIABLES:  # R1：裸终结符 = 结构因子，不是零假设
+        return False
+    if "/" in expr:
+        return True
+    return any(f"{op}(" in expr for op in _SCALE_BREAK_OPS)
 
 
 def _sample_node(rng: random.Random, depth: int) -> str:
@@ -66,15 +94,16 @@ def _legal(expr: str) -> bool:
 def sample_expression(rng: random.Random, *, max_depth: int = 3) -> str:
     """采一条**构造即合法**的 DSL 表达式（seeded，逐位可复现）。
 
-    越界（复杂度超限/非法形态）重采样；每 20 次不中缩小一档 max_depth 重试。
-    深度 1 时退化为纯叶子（必然合法），故循环有界且必有合法产出。
+    越界（复杂度超限/非法形态）重采样；**违零假设标尺（R1/R2）同样重采样**
+    ——对照臂只收形态噪声。每 20 次不中缩小一档 max_depth 重试；零假设口径
+    下深度下限 = 2（深度 1 必违 R1），故循环有界且必有合法产出。
     """
-    depth = max(1, max_depth)
+    depth = max(2, max_depth)
     for attempt in range(60):
         expr = _sample_node(rng, depth)
-        if _legal(expr):
+        if _legal(expr) and _null_ok(expr):
             return expr
         if attempt % 20 == 19:
-            depth = max(1, depth - 1)
-    # 防御兜底（理论不可达：深度 1 的纯叶子必然合法）：绝不返回非法表达式。
-    return "close"
+            depth = max(2, depth - 1)
+    # 防御兜底（理论不可达：深度 2 的算子形态必能产出合法破尺度表达式）。
+    return _FALLBACK_EXPR

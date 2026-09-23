@@ -55,3 +55,36 @@ class TestSampleExpression:
             1 for e in exprs if any(f" {op} " in e for op in ("+", "-", "*", "/"))
         )
         assert with_op + with_binop > len(exprs) * 0.6  # 叶子只是少数派
+
+
+class TestNullHypothesisRules:
+    """零假设标尺（v0.267，TODO #80①）：对照臂必须是形态噪声。
+
+    R34 教训：默认种子抽出的臂2=open/臂3=close 是低价/规模真因子代理，
+    不是零假设——冻结的「幸运实现」把门焊死。
+    """
+
+    def test_no_bare_terminal(self):
+        # R1：任何采样不得是裸终结符（整表达式=结构因子，非噪声）
+        for expr in _sample_n(500, 20260923):
+            assert expr not in expr_dsl.BASE_VARIABLES, f"裸终结符: {expr}"
+
+    def test_must_break_scale(self):
+        # R2：必须含破尺度构造（'/' 或 DELTA/ROC/TS_RANK）——否则仍是水平代理
+        for expr in _sample_n(500, 20260923):
+            assert "/" in expr or any(
+                f"{op}(" in expr for op in ("DELTA", "ROC", "TS_RANK")
+            ), f"水平代理: {expr}"
+
+    def test_fallback_is_scale_broken(self):
+        from custos.research.evolution.random_expr import _FALLBACK_EXPR
+
+        assert "/" in _FALLBACK_EXPR or any(
+            f"{op}(" in _FALLBACK_EXPR for op in ("DELTA", "ROC", "TS_RANK")
+        )
+        expr_dsl.parse(_FALLBACK_EXPR)  # 兜底自身必须合法
+
+    def test_min_depth_is_two(self):
+        # 零假设口径下 max_depth=1 被抬到 2（深度 1 必违 R1）
+        for expr in _sample_n(50, 11, max_depth=1):
+            assert expr_dsl.complexity(expr).depth >= 2

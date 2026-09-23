@@ -268,6 +268,7 @@
 | 2026-09-23 | v0.264 | R37 Phase 1 工程落地：战役壳 `exit_campaign`（批次进化+CTL-1~5 确定性控制器【继续/转向/双向停止/预算帽500】+台账每批原子落盘+--resume 续跑）+ `evolution/exit_genome`（基因组=机制开关×参数档，规则化变异三算子+C3 ±50%扰动臂；基准 pct5_trail08 在空间内钉死）；生产评估器=V0 重放（信号缓存+as-of V0 分+topn+objective_of，与 V0 臂同引擎同公式钉测对账）；钉测 +42；TOOLS 登记+AGENTS.md §5 同步 | owner 拍板 R37 预注册（v0.263） | 生产机跑出场轴战役第一批（命令见 R37 附录） |
 | 2026-09-23 | v0.265 | R37 战役壳 review 双修（owner 复核发现）：①resume 档位空间守卫——load 后对幸存者逐个 validate，不符即 LedgerSpaceChanged fail-fast 提示换 --tag（此前 LEVELS 变更后续跑在批次中途随机裸崩 ValueError，实测 40/200，长跑战役几小时后才炸）；②validate 契约补全——cost_zone 半开缺参返回非法项清单不再 KeyError；③ctl_step 检查次序勘误为代码实际次序 CTL-4>CTL-2>CTL-3>CTL-5>CTL-1（次序即语义：CTL-3 含全家族关闭须 CTL-2 先跑同批触发），R37 同步钉入。钉测 +5 | owner review（①② 实测复现） | 生产机跑数前最后一道守卫就位 |
 | 2026-09-23 | v0.266 | C4 口径修订（owner 方法论 review，R37 跑数前窗口）：随机对照从「累积最大值」改「合并随机分布 95% 分位」——最大值随样本发散（棘轮：同一 +0.5σ 基因组过线率 8 抽样 21.3%→264 抽样 1.6%，取决于第几批发现），分位随样本收敛（零假设各批恒 ~5% 假过线=真多重比较控制）；台账 schema v2（random_ceiling→random_pool+q95，正式战役未跑无包袱）；R34/R36 判据节勘误标注（固定种子重言式+裸 close/volume 真因子终端——C2 基底结论不受影响，C4-only 死亡证据下调）；钉测 +4；TODO #80 | owner review（R36 对照臂非零假设+R37 棘轮） | 生产机按新口径跑 r37_b1 |
+| 2026-09-23 | v0.267 | TODO #80① 落地：random_expr 零假设标尺（owner review：对照臂装真因子=非零假设）——R1 禁裸终结符（根必须是算子；R34 默认种子臂2=open/臂3=close=低价/规模代理实测），R2 必须含破尺度构造（'/' 或 DELTA/ROC/TS_RANK；MA(close,20)/SUM(volume,5) 等水平代理同拒，REF/ABS/LOG 不算破尺度），深度下限抬 2，兜底换 ROC(close,5)；R34 同种子实测臂2/臂3 已变复合破尺度式；影响面=未来全部打分侧随机对照（存量 R34/R36 已判不动，复核走 #80②）。钉测 +4 | owner 拍板直接修（#80①） | #80② R34/R36-P3 复核协议待 owner 拍板 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 
