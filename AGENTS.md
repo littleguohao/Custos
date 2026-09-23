@@ -161,6 +161,9 @@ uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/
   成本控制）——非默认口径须已在研究单元预注册（R36 三轮是首个用例）。
   score_evolution_study 终审姿态：`--v0-lattice` 调权格（P3 族）/ `--addon-leg`
   骨架加腿（R36 思路二——新腿一律问「加进 V0 等权骨架的 Δmargin」，不问单独立）。
+  exit_campaign（R37 战役壳）：出场基因组×批次进化 + CTL-1~5 确定性控制器
+  （继续/转向/双向停止/预算帽）+ 台账每批原子落盘（--resume 续跑）；评估器
+  协议注入，生产=V0 重放（信号缓存+as-of V0 分+topn，同 score_evolution V0 臂）。
 - 因子 IC 画像（`factor_ic_profile`）：SCORERS/DSL 的截面 RankIC/ICIR + horizon
   衰减全因子可比表——**分诊镜不是晋级判据**（晋级永远走双窗+三轴交易语义；
   读数 L3− 带幸存者偏差，R19/R21/R14）。

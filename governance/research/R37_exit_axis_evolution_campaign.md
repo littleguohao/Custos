@@ -4,7 +4,9 @@
 > **证据等级**：L2 起步 / L3− 结论封顶（幸存者宇宙 + 多重比较显式标注——
 > 与 R10/R36 同纪律；本单元涉及批量参数寻优，多重比较风险更高，台账记账是
 > 硬要求）　|
-> **状态**：📋 **预注册落档（2026-09-23，待 owner 拍板 + Phase 1 工程落地）**　|
+> **状态**：📋 **预注册落档（2026-09-23，owner 拍板通过）+ Phase 1 工程
+> 已落地（2026-09-23，v0.264）**——战役壳 runner / 出场基因组 / 规则化变异
+> 算子 / 台账契约全部钉测在案（+42 例），待生产机跑出场轴战役第一批　|
 > **依赖**：上游：R9（盈亏比方法论）R10（M2 扫描：「5% 是崖」/纯出场机制
 > 跨窗翻负——本单元双窗纪律的必要性来源）R11（基准 margin 崩塌——绝对
 > objective 读数不可引用，只相对排序）R34（随机对照纪律，随机天花板难度
@@ -157,9 +159,38 @@ params），信号/出场解耦（`--signals-out/--from-signals` 重放
 
 ## 回填区（逐 Phase 填）
 
-（待 Phase 1 工程落地后逐批回填：台账路径、随机标尺读数、CTL 裁决记录、
-C1~C5 逐条读数。）
+- **Phase 1 工程（✅ 2026-09-23，v0.264 落地）**：`research/exit_campaign.py`
+  （战役壳：批次进化 + CTL-1~5 控制器 + 台账 `campaign_ledger.json` 每批
+  原子重写 + `--resume` 续跑）+ `research/evolution/exit_genome.py`（基因
+  组空间=机制开关×参数档，规则化变异三算子 + C3 ±50% 扰动臂）+ 生产评估
+  器=V0 重放（信号缓存重放 + as-of V0 技术分 + topn 组合 + objective_of，
+  与 score_evolution_study V0 臂同引擎同公式，组合参数钉测对账防漂移）。
+  钉测 +42（基因组空间/变异合法性/CTL 状态机全结局/台账契约/resume/CLI
+  护栏）。TOOLS 登记 `exit_campaign`，AGENTS.md §5 同步。
+- （待生产机跑数后逐批回填：台账路径、随机标尺读数、CTL 裁决记录、
+  C1~C5 逐条读数。）
 
-## 附录 · 生产机跑数命令
+## 附录 · 生产机跑数命令（v0.264 工具）
 
-（Phase 1 工程落地后补。）
+```bash
+# ① 冒烟（必选）：200 只抽样 × 1 批，验证数据链/台账/结局打印（≈分钟级）
+uv run python -m custos.research exit_campaign \
+  --tag r37_smoke --universe-sample 200 --universe-local --max-batches 1
+
+# ② 正式战役：s3000 钉死宇宙（复用 R34 同款 codes-file），双窗默认=R37 写死值
+#    （挖掘 2022-01-01~2024-07-31 / 判定 2024-08-01~2026-09-04）；
+#    CTL 数值全部默认（预算帽 500=16+8/批 ≈ 21 批上限）
+uv run python -m custos.research exit_campaign \
+  --tag r37_b1 --codes-file <R34 同款 s3000 codes-file>
+
+# ③ 宿主杀后续跑（v0.258 教训；配置以台账为准，CLI 只认 --tag）
+uv run python -m custos.research exit_campaign --tag r37_b1 --resume \
+  --codes-file <同上>
+```
+
+产物：`artifacts/logs/exit_campaign/{tag}/campaign_ledger.json`（台账=
+resume 来源+多重比较记账）与 `_exit_campaign__{tag}.json`（结局报告，
+verdict 四态：falsified=结局② / candidate_found=C5 终审单独终步 /
+budget_exhausted=按证伪读 / running=冒烟非结局）。判据读数回填上表后
+owner 拍板下一步（C5 或证伪归档）。
+

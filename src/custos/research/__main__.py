@@ -71,6 +71,11 @@ TOOLS: dict[str, tuple[str, str]] = {
         "LLM 因子进化循环：DSL 白名单 + 挖掘/判定双窗 + 轨迹池"
         "（CUSTOS_LLM_* 配置 LLM，或 --mock-llm 演示；别名 evolution）",
     ),
+    "exit_campaign": (
+        "driver",
+        "R37 出场轴进化战役（战役壳）：出场基因组×批次进化 + CTL-1~5 双向停止"
+        " + 台账多重比较记账（基准 pct5_trail08，随机臂随行；--resume 续跑）",
+    ),
     "launch_point_study": ("engine", "起涨点 vs 0AMV regime 研究；**17 个模式开关**"),
     "m2_stop_sweep": (
         "driver",
