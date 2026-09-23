@@ -34,6 +34,27 @@ def _feed(market, day, value, quality="confirmed"):
     return amv_state.compute(day)
 
 
+class TestDailyLedgerBackup:
+    """v0.261：append-only 事故闭环——每日首写前快照，快照不被二次写刷新。"""
+
+    def test_first_write_of_day_snapshots_ledger(self, env):
+        ledger = env / "0amv_observations.jsonl"
+        original = '{"date":"2026-09-21","amv_change_pct":1.44,"quality":"confirmed"}\n'
+        ledger.write_bytes(original.encode("utf-8"))
+        amv_state.append_observation("2026-09-22", {"amv_change_pct": 0.46})
+        bak = env / (
+            f"0amv_observations.jsonl.bak_{amv_state.cn_now().strftime('%Y%m%d')}"
+        )
+        assert bak.read_bytes() == original.encode("utf-8")
+        # 同日再写（不同值走纠错重写路径）——快照仍是当日首写前状态
+        amv_state.append_observation("2026-09-22", {"amv_change_pct": 0.66})
+        assert bak.read_bytes() == original.encode("utf-8")
+
+    def test_no_backup_when_ledger_absent(self, env):
+        amv_state.append_observation("2026-09-22", {"amv_change_pct": 0.46})
+        assert not list(env.glob("0amv_observations.jsonl.bak_*"))
+
+
 class TestConfirmedTransitions:
     def test_confirmed_drop_enters_bear(self, env):
         rec = _feed(env, "2026-07-01", -5.84, "confirmed")

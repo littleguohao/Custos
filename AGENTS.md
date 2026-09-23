@@ -140,6 +140,11 @@ uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/
 - 接口已收敛（#67）：规范入口 `detect(df, code, ctx=)` / `score()`，live 标注与
   研究 SCORERS 同源（改判定语义=语义变更，须立项+回测）。
 
+**0AMV 台账**（`data/market/0amv_observations.jsonl`）：**append-only**——写入只走
+`amv_state.append_observation`（每日首写前自动快照 `.bak_YYYYMMDD`）或 `>>` 追加，
+**严禁覆盖式写入**（2026-09-21 agent 误用 write 工具覆写，8215 行全历史灭失，
+靠 08-30 去重备份 + 当日记录手工合并救回）。
+
 ## 5. 研究层与进化引擎约定
 
 - 新工具：写 `research/xxx.py`（`add_argument` **全留本文件**，`_modes()` 用 AST

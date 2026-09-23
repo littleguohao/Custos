@@ -6,6 +6,11 @@ Once the regime enters 空头 it remains 空头 until a later confirmed daily
 must not reset the regime to neutral. Only readings with
 quality == "confirmed" drive regime transitions; candidate/unconfirmed
 readings crossing a threshold are recorded but keep the prior locked state.
+
+⚠️ 台账（0amv_observations.jsonl）**append-only**：写入只走本模块
+``append_observation``（每日首写前自动快照 ``.bak_YYYYMMDD``）——**严禁覆盖式
+写入**（2026-09-21 agent 误用 write 工具覆写，8215 行全历史灭失，靠 08-30
+去重备份 + 当日记录手工合并救回）。
 """
 
 from __future__ import annotations
@@ -83,10 +88,33 @@ def _supersede_conflicts(existing: list, conflicted: list, record: dict, day: st
     )
 
 
+def _backup_ledger_daily() -> None:
+    """每日首写前把台账快照到 ``0amv_observations.jsonl.bak_YYYYMMDD``（已存在则跳过）。
+
+    2026-09-21 事故：agent 误用覆盖式 write 工具追加台账，8215 行全历史灭失，
+    只靠 08-30 去重备份 + 当日记录手工合并救回。此后任何写路径（追加/纠错
+    重写）先进这里留当日快照——幂等，成本每天一次 copy；快照失败只 WARN
+    不阻断主链写（主防线上层纪律：append-only，禁覆盖写）。
+    """
+    if not LEDGER.exists():
+        return
+    bak = LEDGER.with_name(f"{LEDGER.name}.bak_{cn_now().strftime('%Y%m%d')}")
+    if bak.exists():
+        return
+    try:
+        bak.write_bytes(LEDGER.read_bytes())
+    except Exception as exc:  # noqa: BLE001 — 快照失败不阻断主链写
+        print(
+            f"[WARN] 0AMV 台账当日快照失败: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+
+
 def append_observation(day: str, amv: dict):
     value = amv.get("amv_change_pct")
     if value is None:
         return None
+    _backup_ledger_daily()
     record = {
         "date": day,
         "amv_change_pct": float(value),
