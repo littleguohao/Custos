@@ -20,6 +20,12 @@ close/volume（close×3 / volume×2 / 其余×1 —— LLM 产出里最常用的
   ``MA(close,20)``/``SUM(volume,5)`` 这类「水平算子+四则（无除法）」产物
   仍是价格/流动性**水平**代理。REF 不算破尺度（``REF(close,5)`` 仍是
   价格水平）；ABS/LOG 单调保水平，同样不算。
+- **R3 除法/减法两侧文本不得相同**（v0.269，owner review）——``x/x≡1``、
+  ``x−x≡0`` 是**常量死腿**：对截面排序零贡献，该臂静默退化成 n_legs−1 腿，
+  违反 #71「同腿数同待遇」且**静默**（实测 0.69%/腿；6 腿臂 4.04% 含死腿，
+  N=50 池 ~2 臂污染，而 q95 恰由顶部 2-3 臂决定）。自比减法（如
+  ``(ROC(close,5) - ROC(close,5))``）靠内部 ROC 能混过 R2，故在 AST 上
+  查（``ast.dump`` 文本归一，嵌套/空白不影响）。
 
 构造即合法：产物必须过 ``expr_dsl.parse`` 且 ``violations(complexity())``
 为空 —— 越界重采样，有界次数后缩小 max_depth 重试（本实验测的是 IC 门，
@@ -29,6 +35,7 @@ close/volume（close×3 / volume×2 / 其余×1 —— LLM 产出里最常用的
 
 from __future__ import annotations
 
+import ast
 import random
 
 from custos.research.evolution import expr_dsl
@@ -53,9 +60,30 @@ _SCALE_BREAK_OPS: tuple[str, ...] = ("DELTA", "ROC", "TS_RANK")
 _FALLBACK_EXPR = "ROC(close, 5)"
 
 
+def _has_self_compare(expr: str) -> bool:
+    """除法/减法两侧文本相同（R3）：``x/x≡1``、``x−x≡0`` ⇒ **常量死腿**。
+
+    常量腿对截面排序零贡献 ⇒ 该臂静默退化成 n_legs−1 腿，违反 #71「同腿数
+    同待遇」（实测 0.69%/腿；6 腿臂 4.04% 含死腿，N=50 池 ~2 臂污染，而
+    q95 恰由顶部 2-3 臂决定）。自比减法靠内部 ROC 能混过 R2，必须在 AST
+    上查（文本归一由 ast.dump 保证，嵌套/空白不影响）。
+    """
+    try:
+        tree = ast.parse(expr, mode="eval")
+    except SyntaxError:
+        return True  # 不可解析视同非法（_legal 也会拦，双保险）
+    for node in ast.walk(tree):
+        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.Sub)):
+            if ast.dump(node.left) == ast.dump(node.right):
+                return True
+    return False
+
+
 def _null_ok(expr: str) -> bool:
-    """零假设标尺（R1/R2 见模块 docstring）：非裸终结符 ∧ 含破尺度构造。"""
+    """零假设标尺（R1/R2/R3 见模块 docstring）。"""
     if expr in BASE_VARIABLES:  # R1：裸终结符 = 结构因子，不是零假设
+        return False
+    if _has_self_compare(expr):  # R3：自比常量死腿
         return False
     if "/" in expr:
         return True

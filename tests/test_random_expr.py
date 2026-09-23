@@ -88,3 +88,35 @@ class TestNullHypothesisRules:
         # 零假设口径下 max_depth=1 被抬到 2（深度 1 必违 R1）
         for expr in _sample_n(50, 11, max_depth=1):
             assert expr_dsl.complexity(expr).depth >= 2
+
+
+class TestSelfCompareRule:
+    """R3 自比常量死腿（v0.269，owner review）：x/x≡1、x−x≡0 对截面排序
+    零贡献 ⇒ 臂静默退化成 n_legs−1，违反 #71「同腿数同待遇」。"""
+
+    def test_explicit_self_compare_rejected(self):
+        from custos.research.evolution.random_expr import _null_ok
+
+        assert not _null_ok("(high / high)")
+        assert not _null_ok("(MA(close, 20) / MA(close, 20))")
+        assert not _null_ok("(ABS(close) / ABS(close))")
+        # 自比减法：靠内部 ROC 能混过 R2，R3 必须兜住
+        assert not _null_ok("(ROC(close, 5) - ROC(close, 5))")
+
+    def test_non_identical_sides_pass(self):
+        from custos.research.evolution.random_expr import _null_ok
+
+        assert _null_ok("(high / low)")
+        assert _null_ok("(ROC(close, 5) - ROC(close, 10))")
+
+    def test_500_samples_no_self_compare(self):
+        import ast
+
+        for expr in _sample_n(500, 20260923):
+            for node in ast.walk(ast.parse(expr, mode="eval")):
+                if isinstance(node, ast.BinOp) and isinstance(
+                    node.op, (ast.Div, ast.Sub)
+                ):
+                    assert ast.dump(node.left) != ast.dump(node.right), (
+                        f"自比死腿漏网: {expr}"
+                    )

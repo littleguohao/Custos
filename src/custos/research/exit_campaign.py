@@ -95,6 +95,7 @@ class CampaignConfig:
     n_survivors: int = 4  # CTL-1：幸存者数（变异母体）
     c3_draws: int = 4  # C3 灵敏度扰动臂数（±50%×4 零翻转，R36 同族）
     min_n_taken: int = 100  # C1：单窗最小选中笔数
+    c4_min_pool: int = 100  # C4 最小池：池满才许 confirmed，未满只记 provisional
     seed: int = 37  # 全局种子（逐批派生，resume 可复现）
     max_batches: int = 0  # 0=不限（冒烟/预算护栏用）
 
@@ -120,6 +121,9 @@ class CampaignState:
     population: list[dict] = field(default_factory=list)  # [{genome, mining}]
     baseline: dict[str, dict] = field(default_factory=dict)  # window -> readings
     best_candidate: Optional[dict] = None
+    provisional_candidates: list[dict] = field(
+        default_factory=list
+    )  # [pending/confirmed/expired]
     status: str = "running"  # running/falsified/candidate_found/budget_exhausted
     batch_id: int = 0
 
@@ -201,10 +205,12 @@ def _q95(pool: list[float]) -> Optional[float]:
 
     **分位随样本数收敛**；它替代的「累积最大值」随样本数发散（棘轮——
     同一个好基因组的 C4 通过率取决于第几批被发现：8 抽样 21.3% → 264
-    抽样 1.6%，owner review 实测）。预注册分位口径（v0.266 修订）下，
-    零假设基因组各批恒 ~5% 假过线（真多重比较控制），真优势基因组各批
-    恒真过线——与发现时机无关。len 1 退化为该点本身；空池 → None
-    （n_random=0 时不拦，预注册战役 n_random≥1 总有臂）。
+    抽样 1.6%，owner review 实测）。**但小池同样失真（反方向）**：池=8 时
+    q95≈最大值，零假设过线率实测 13.76%（~5% 的 2.7 倍）——故 CTL-4 有
+    最小池护栏（c4_min_pool，v0.269）：池满后零假设各批 ≈5% 假过线
+    （实测 pool=160 → 5.35%），未满只记 provisional 不停战役。len 1 退化
+    为该点本身；空池 → None（n_random=0 时不拦，预注册战役 n_random≥1
+    总有臂）。
     """
     if not pool:
         return None
@@ -316,6 +322,10 @@ def ctl_step(
     c2_passers = [r for r in rows if r["c2"]]
 
     # ── CTL-4 过线停：C2 过线者按挖掘窗 objective 逐个过 C3+C4 ──
+    # 两段式（v0.269，owner review）：池 < c4_min_pool 时 q95≈最大值（实测
+    # 零假设过线率 13.76%，是 ~5% 声称的 2.7 倍）——此时过线只记
+    # **provisional**（不停战役），池满后对全部 provisional 机械终判；
+    # 池满后直接 confirmed。**C5 pre2019 是一次性底牌，不许烧在侥幸上。**
     c3_record: Optional[dict] = None
     c4_bar = _q95(state.random_pool)
     passers = sorted(
@@ -328,21 +338,47 @@ def ctl_step(
         c3_record = {"candidate_key": r["key"], **c3}
         c4_ok = c4_bar is None or r["mining"]["objective"] > c4_bar
         if c3["pass"] and c4_ok:
-            state.status = "candidate_found"
-            state.best_candidate = {
-                "genome": r["genome"],
-                "key": r["key"],
-                "mining": r["mining"],
-                "judgment": r["judgment"],
-                "d_margin_mining": r["d_margin_mining"],
-                "d_margin_judgment": r["d_margin_judgment"],
-                "c3": c3_record,
-                "c4_bar": c4_bar,
-                "random_pool_size": len(state.random_pool),
-                "note": "C2+C3+C4 全过；C5 pre2019 终审单独终步（一票否决）",
-            }
-            actions.append({"type": "candidate_found", "key": r["key"]})
-            break
+            if c4_bar is None or len(state.random_pool) >= cfg.c4_min_pool:
+                # confirmed（无臂时 C4 不拦也不走 provisional——预注册战役
+                # n_random≥1 总有臂；无臂是测试/冒烟通道）
+                state.status = "candidate_found"
+                state.best_candidate = {
+                    "genome": r["genome"],
+                    "key": r["key"],
+                    "mining": r["mining"],
+                    "judgment": r["judgment"],
+                    "d_margin_mining": r["d_margin_mining"],
+                    "d_margin_judgment": r["d_margin_judgment"],
+                    "c3": c3_record,
+                    "c4_bar": c4_bar,
+                    "random_pool_size": len(state.random_pool),
+                    "provisional": False,
+                    "note": "C2+C3+C4 全过；C5 pre2019 终审单独终步（一票否决）",
+                }
+                actions.append({"type": "candidate_found", "key": r["key"]})
+                break
+            state.provisional_candidates.append(
+                {
+                    "genome": r["genome"],
+                    "key": r["key"],
+                    "mining": r["mining"],
+                    "judgment": r["judgment"],
+                    "d_margin_mining": r["d_margin_mining"],
+                    "d_margin_judgment": r["d_margin_judgment"],
+                    "c3": c3_record,
+                    "declared_batch": state.batch_id,
+                    "pool_size_at_declaration": len(state.random_pool),
+                    "status": "pending",
+                }
+            )
+            actions.append(
+                {
+                    "type": "provisional_candidate",
+                    "key": r["key"],
+                    "pool_size": len(state.random_pool),
+                }
+            )
+            continue
         actions.append(
             {
                 "type": "near_miss",
@@ -350,6 +386,56 @@ def ctl_step(
                 "why": "c3_flipped" if not c3["pass"] else "c4_below_random_q95",
             }
         )
+
+    # ── provisional 终判（池达 c4_min_pool）：冻结 objective vs 当前 q95，
+    # 机械裁决——评估确定性 ⇒ 读数不重算，只重比 ──
+    if state.status == "running" and len(state.random_pool) >= cfg.c4_min_pool:
+        pending = [p for p in state.provisional_candidates if p["status"] == "pending"]
+        if pending:
+            bar = _q95(state.random_pool)
+            winners = [
+                p
+                for p in pending
+                if (p["mining"] or {}).get("objective") is not None
+                and p["mining"]["objective"] > bar
+            ]
+            for p in pending:
+                p["status"] = "confirmed" if p in winners else "expired"
+            if winners:
+                best = max(winners, key=lambda p: p["mining"]["objective"])
+                state.status = "candidate_found"
+                state.best_candidate = {
+                    "genome": best["genome"],
+                    "key": best["key"],
+                    "mining": best["mining"],
+                    "judgment": best["judgment"],
+                    "d_margin_mining": best["d_margin_mining"],
+                    "d_margin_judgment": best["d_margin_judgment"],
+                    "c3": best["c3"],
+                    "c4_bar": bar,
+                    "random_pool_size": len(state.random_pool),
+                    "provisional": True,
+                    "declared_batch": best["declared_batch"],
+                    "confirmed_batch": state.batch_id,
+                    "note": "provisional 终判确认（C2+C3+C4 全过，池满复核）；"
+                    "C5 pre2019 终审单独终步（一票否决）",
+                }
+                actions.append(
+                    {
+                        "type": "candidate_found",
+                        "key": best["key"],
+                        "confirmed_from_provisional": True,
+                        "pool_size": len(state.random_pool),
+                    }
+                )
+            else:
+                actions.append(
+                    {
+                        "type": "provisional_all_expired",
+                        "n": len(pending),
+                        "random_q95": bar,
+                    }
+                )
 
     # ── C2 挂零计数（CTL-3 的输入）──
     state.consecutive_no_c2 = 0 if c2_passers else state.consecutive_no_c2 + 1
@@ -437,7 +523,7 @@ def ctl_step(
 # 战役主循环 + 台账
 # ---------------------------------------------------------------------------
 
-LEDGER_SCHEMA = "exit_campaign_ledger/v2"  # v2：random_ceiling 棘轮 → random_pool 合并分布 95% 分位（v0.266）
+LEDGER_SCHEMA = "exit_campaign_ledger/v3"  # v3：+c4_min_pool 两段式 provisional（v0.269；v2=q95 池）
 
 
 def ledger_path_for(out_dir: Path, tag: str) -> Path:
@@ -479,6 +565,7 @@ def load_ledger(path: Path) -> tuple[CampaignConfig, CampaignState, list[dict], 
         population=list(st["population"]),
         baseline=dict(st["baseline"]),
         best_candidate=st["best_candidate"],
+        provisional_candidates=list(st.get("provisional_candidates", [])),
         status=st["status"],
         batch_id=st["batch_id"],
     )
@@ -602,6 +689,7 @@ def run_campaign(
         "config": asdict(cfg),
         "baseline": state.baseline,
         "best_candidate": state.best_candidate,
+        "provisional_candidates": state.provisional_candidates,
         "family_deaths": state.family_deaths,
         "total_genomes": state.total_genomes,
         "n_batches": len(batches),
@@ -784,6 +872,12 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--seed", type=int, default=37, help="全局种子")
     ap.add_argument("--c3-draws", type=int, default=4, help="C3 扰动臂数")
     ap.add_argument("--min-n-taken", type=int, default=100, help="C1 单窗最小选中笔数")
+    ap.add_argument(
+        "--c4-min-pool",
+        type=int,
+        default=100,
+        help="C4 最小随机池：池满才许 confirmed 停战役，未满只记 provisional",
+    )
     ap.add_argument("--family-death-streak", type=int, default=2, help="CTL-2 连死批数")
     ap.add_argument("--falsify-streak", type=int, default=3, help="CTL-3 连无 C2 批数")
     ap.add_argument(
@@ -817,6 +911,7 @@ def _config_of(args: Any) -> CampaignConfig:
         n_survivors=args.survivors,
         c3_draws=args.c3_draws,
         min_n_taken=args.min_n_taken,
+        c4_min_pool=args.c4_min_pool,
         seed=args.seed,
         max_batches=args.max_batches,
     )

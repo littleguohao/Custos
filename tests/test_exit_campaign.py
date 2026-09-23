@@ -106,7 +106,7 @@ class TestCtl4CandidateFound:
         旧「累积最大值」口径下天花板=0.99 会误杀——通过与否不得取决于
         第几批被发现（owner review：8 抽样 21.3% → 264 抽样 1.6%）。
         """
-        cfg = ec.CampaignConfig(batch_size=1, n_random=0, seed=5)
+        cfg = ec.CampaignConfig(batch_size=1, n_random=0, seed=5, c4_min_pool=80)
         state = ec.CampaignState()
         _baseline(state)
         state.random_pool = [0.5] * 79 + [0.99]  # q95=0.5，旧棘轮 ceiling=0.99
@@ -127,7 +127,7 @@ class TestCtl4CandidateFound:
         assert rec["random_q95"] == pytest.approx(0.5)
 
     def test_candidate_found(self):
-        cfg = ec.CampaignConfig(batch_size=1, n_random=1, seed=5)
+        cfg = ec.CampaignConfig(batch_size=1, n_random=1, seed=5, c4_min_pool=1)
         state = ec.CampaignState()
         _baseline(state)
         winner = eg.normalize({"stop_pct": 12, "time_stop_bars": 40})
@@ -203,6 +203,103 @@ class TestCtl4CandidateFound:
         assert rec["c3"]["flips"] >= 1
         assert rec["ctl_actions"][0]["why"] == "c3_flipped"
         assert state.status == "running"
+
+
+class TestProvisionalCandidate:
+    """C4 最小池护栏（v0.269，owner review）：池 < c4_min_pool 时 q95≈max
+    （实测零假设过线率 13.76% = ~5% 的 2.7 倍）——过线只记 provisional
+    不停战役，池满机械终判；**C5 pre2019 是一次性底牌，不许烧在侥幸上**。"""
+
+    def _fake(self, params, *, start, end):
+        # 胜区 = stop_pct≥6 ∧ time_stop 开（perturb_50 动不出 ⇒ C3 恒零翻转）
+        win = params["stop_pct"] >= 6 and params["time_stop_bars"] > 0
+        return _rd(0.30, 0.95) if win else _rd(0.05, 0.05)
+
+    def _declare(self, cfg):
+        """批 1：池=1（<100）⇒ 过线只记 provisional，战役不停。"""
+        state = ec.CampaignState()
+        _baseline(state)
+        winner = eg.normalize({"stop_pct": 12, "time_stop_bars": 40})
+        loser = eg.normalize({"stop_pct": 4})
+        rec = ec.ctl_step(
+            cfg,
+            state,
+            [winner],
+            [loser],
+            [_both(0.30, 0.95)],
+            [_rd(0.05, 0.05)],
+            self._fake,
+            random.Random(7),
+        )
+        return state, rec
+
+    def test_declared_not_stopped_when_pool_small(self):
+        cfg = ec.CampaignConfig(batch_size=1, n_random=1, seed=5)  # min=100 默认
+        state, rec = self._declare(cfg)
+        assert state.status == "running"  # 不停战役
+        assert state.best_candidate is None
+        prov = state.provisional_candidates
+        assert len(prov) == 1 and prov[0]["status"] == "pending"
+        assert prov[0]["pool_size_at_declaration"] == 1
+        assert rec["ctl_actions"][0]["type"] == "provisional_candidate"
+
+    def _adjudicate(self, cfg, state, fill):
+        state.random_pool += fill
+        loser = eg.normalize({"stop_pct": 4})
+        return ec.ctl_step(
+            cfg,
+            state,
+            [loser],
+            [],
+            [_both(0.05, 0.05)],
+            [],
+            _dead_eval,
+            random.Random(8),
+        )
+
+    def test_confirmed_when_pool_fills(self):
+        cfg = ec.CampaignConfig(batch_size=1, n_random=1, seed=5)
+        state, _ = self._declare(cfg)
+        rec = self._adjudicate(cfg, state, [0.05] * 99)  # 池=100，q95=0.05
+        assert state.status == "candidate_found"
+        best = state.best_candidate
+        assert best["provisional"] is True
+        assert best["c4_bar"] == pytest.approx(0.05)
+        assert state.provisional_candidates[0]["status"] == "confirmed"
+        assert rec["ctl_actions"][0]["confirmed_from_provisional"] is True
+
+    def test_expired_when_pool_fills_high(self):
+        cfg = ec.CampaignConfig(batch_size=1, n_random=1, seed=5)
+        state, _ = self._declare(cfg)
+        rec = self._adjudicate(cfg, state, [0.99] * 99)  # 池=100，q95=0.99>0.95
+        assert state.status == "running"  # 侥幸被池终判戳破，战役继续
+        assert state.best_candidate is None
+        assert state.provisional_candidates[0]["status"] == "expired"
+        assert rec["ctl_actions"][0]["type"] == "provisional_all_expired"
+
+    def test_pending_provisional_in_report(self, tmp_path):
+        # 端到端：战役预算耗尽时 provisional 仍 pending ⇒ 报告如实列出不停战役
+        def fake(params, *, start, end):
+            if eg.genome_key(params) == eg.genome_key(eg.baseline_genome()):
+                return _rd(0.10, 0.20)
+            return _rd(0.30, 0.50) if params["time_stop_bars"] > 0 else _rd(0.05, 0.05)
+
+        rep = None
+        for seed in range(30):
+            cfg = ec.CampaignConfig(batch_size=2, n_random=1, budget_cap=6, seed=seed)
+            r = ec.run_campaign(
+                cfg,
+                fake,
+                tmp_path / f"t{seed}" / "campaign_ledger.json",
+                tag=f"t{seed}",
+            )
+            if r["provisional_candidates"]:
+                rep = r
+                break
+        assert rep is not None, "30 个种子应有一次 provisional"
+        assert rep["status"] == "budget_exhausted"
+        assert rep["best_candidate"] is None
+        assert all(p["status"] == "pending" for p in rep["provisional_candidates"])
 
 
 class TestCtl2FamilyDeath:
