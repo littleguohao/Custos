@@ -5,11 +5,13 @@
 > **证据等级**：L1 样本 / L3− 结论封顶（10 个正例全是 2025 年单一近期
 > regime 案例 + 「最后一天=买点」是**事后标注**（选择偏差）——只作发现级材料；
 > 任何结论必须经全宇宙双窗交易语义验证，多重比较显式标注，L3− 封顶）　|
-> **状态**：🔄 **思路二（骨架加腿）终审判毕：4 候选全死（2026-09-23）——
-> #77 挖掘路收口拍板证据终齐待签**——Phase 1 双口径读数在案；Phase 2 三轮全判
-> + 满编补覆盖判毕（47/47 0 pass）+ 思路二 top argmax 落无腿基准（12 加腿格
-> Δmargin 全负，C4 suspect）；近失候选复核终裁：旧门没误杀；
-> Phase 3 调权格已判（❌ 结局②，调权路死刑，R30/R34 五轮互证）　|
+> **状态**：🔄 **思路二（骨架加腿）终审判毕：4 候选全死（2026-09-23）；
+> Phase 3 top adx_gt_60 的 C4 死刑转入复核（🔄 预注册 v0.268）**——Phase 1
+> 双口径读数在案；Phase 2 三轮全判 + 满编补覆盖判毕（47/47 0 pass）+ 思路二
+> top argmax 落无腿基准（12 加腿格 Δmargin 全负，C4 suspect）——**以上死于
+> C2/C3，结论成立**；Phase 3 调权格原判 ❌ 结局②（**C4-only 死刑**，随
+> v0.266 口径勘误转复核——owner：不成立的只是「所以那条单腿也没价值」这步
+> 推论，「配比无增量」半句成立）；近失候选复核终裁：旧门没误杀　|
 > **依赖**：上游：R18（优秀 B1 指纹证据层——本页是它的监督式续篇）R19（技术分
 > 无预测力——诊断问题的必要性来源）R34（打分进化 v1 证伪——新因子挖掘的闸门
 > 与随机对照纪律同源）｜判据纪律：R12（预注册）R14（幸存者宇宙）R11（量级不作数）
@@ -347,7 +349,34 @@ Phase 0 已完成：
   - 判定：**权重配比无可辩护增量**（格点 top 收敛到单腿，配比本身没有加值），
     唯一冒头的单腿也过不了随机臂 ⇒ 调权路在 V0 腿上同样死刑（R30/R34
     五轮档案互证）。冒烟预言（「top=关腿 29 条 ⇒ 增量在单腿不在配比」）
-    正式跑实锤成立。
+    正式跑实锤成立。⚠️ **2026-09-23 owner review 拆分本判定**：「配比无增量」
+    半句成立（lattice 收敛到单腿本身就是证据）；但「所以那条单腿也没价值」
+    这步推论 **100% 依赖 C4**——随 v0.266 口径勘误转入复核（见下条）。
+- **Phase 3 C4 复核（🔄 预注册 2026-09-23，v0.268——判据跑数前写死，
+  owner 拍板方向）**——原判是 **C4-only 死刑**（C1✅/C2✅ 双窗同向
+  +0.0942/+0.1347/C3✅ 零翻转，仅 C4❌ 打不过固定种子臂 +0.5476）。
+  owner 新证据在案：①判定窗 +0.1347 **未参与搜索**（真样本外 ~3.3 SE），
+  objective +0.4518→+0.9571 / margin +0.0888→+0.1661 / 胜率 43.7%→46.5%
+  **窗间增强**=过拟合的反面特征，双窗纪律要的就是这个；②机制自洽：
+  adx>60 极强趋势 × j_low 深回调 = B1 自己的论点（Phase 0「7 只缩量小阴、
+  0 只涨停附近」同形态）；③live 对照：adx_gt_60 仅 5 分/315≈1.6% 权重，
+  而 28.6% 权重压在 R19 已证无预测力的技术分 fallback 上。保留（写死）：
+  n=158/101 偏小；「关腿 29 条」是 max-of-64 该被怀疑的形态。
+  **复核协议（写死）**：
+  - 池：同一 s2999 宇宙（digest 149d48e7412a）/ 同双窗 / 同 j_low gate /
+    同 pct5_trail08 / 同 64 格权重 lattice，**修复后采样器**（R1/R2 零假设
+    标尺 v0.267）抽 **N=50 臂**，种子 20260923（弃用冻结种子 20260915）；
+    每臂读数 = 64 格搜索后 max objective（与候选同搜索预算，公平）；
+  - **判定线（单条，机械执行）**：top 挖掘窗 objective **+0.4518 >
+    q95（池，inclusive 插值）** ⇒ C4 死刑**撤销**，走 C5 pre2019 终审
+    （2010-2016，一票否决，单独终步）；否则死刑**维持**，Phase 3 以
+    「干净门下同判」归档，不再复核；
+  - 副读数（非判据）：+0.4518 在池中的分位、池形态（N/q95/max/臂构成
+    全部 R1/R2 通过的 sanity 注记）；
+  - R34 两轮 top（−0.0007/−0.0039）**暂缓复核**：负 objective 即使分位
+    下移翻转概率也低，且有判定窗衰减辅证——若本次复核 q95 落得出人意料
+    地低（< 0），再议；
+  - 生产机命令与 q95 结算脚本：见附录「Phase 3 C4 复核」段。
 - **Phase 2 三轮（✅ 跑毕判毕 2026-09-18——结果见上方「Phase 2 三轮」结果段
   与门改造复核终裁段；以下为预注册门链，照录备查）**——两轮败因的结构诊断
   （写死为三轮设计依据）：①全谱
@@ -491,3 +520,43 @@ uv run python -m custos.research score_evolution_study \
 n_addon_missing）；②逐候选最佳档 vs 无腿基准 Δmargin 双窗表（C2 判定）；
 ③top 格灵敏度翻转数（C3）与随机臂对照（C4）；④收口判定（全死 ⇒ #77 签
 挖掘路死刑；有活 ⇒ candidate 注册 + C5 单独终步）。
+
+## 附录 · Phase 3 C4 复核跑数命令（生产机，v0.268 预注册协议见回填区）
+
+```bash
+# ① 复用 r36_p3_v1 的 64 格 cell 缓存（签名命中 ⇒ 原 lattice 免费），
+#    只付 50×64 新随机臂（粗估 ~3.4 min/cell × 3200 ≈ 7.5 天后台，错峰）
+mkdir -p artifacts/logs/score_evolution/r36_p3_c4review
+ln -s ../r36_p3_v1/grid_cells artifacts/logs/score_evolution/r36_p3_c4review/grid_cells
+
+# ② 复核跑数：同宇宙/双窗/gate/出场/64 格——唯二改动：n-random 3→50、
+#    种子弃用冻结的 20260915 换 20260923（采样器已是 R1/R2 零假设标尺 v0.267）
+uv run python -m custos.research score_evolution_study \
+  --v0-lattice \
+  --mining-start 2022-01-01 --mining-end 2024-07-31 \
+  --judgment-start 2024-08-01 --judgment-end 2026-09-04 \
+  --codes-file <r36_p3_v1 的 s2999 codes 表> --count 2000 \
+  --n-random 50 --random-seed 20260923 \
+  --tag r36_p3_c4review
+
+# ③ q95 结算（机械判定线：+0.4518 > q95 ⇒ C4 死刑撤销走 C5，否则维持）
+uv run python - <<'PY'
+import json, statistics
+rep = json.load(open(
+    'artifacts/logs/score_evolution/r36_p3_c4review/'
+    '_score_evolution__r36_p3_c4review.json', encoding='utf-8'))
+pool = [a['best']['reading']['objective']
+        for a in rep['arms']['random'] if a.get('best')]
+q95 = statistics.quantiles(pool, n=100, method='inclusive')[94]
+top = 0.4518
+pct = sum(x <= top for x in pool) / len(pool)
+print(f'N={len(pool)} max={max(pool):+.4f} q95={q95:+.4f} '
+      f'top={top:+.4f}（池内分位 {pct:.0%}）')
+print('C4 死刑撤销 → 走 C5 pre2019' if top > q95 else 'C4 死刑维持 → 归档')
+PY
+```
+
+产物：`artifacts/logs/score_evolution/r36_p3_c4review/_score_evolution__r36_p3_c4review.json`
+（`arms.random` 50 臂全构成须 R1/R2 通过——sanity 注记；`random_control` 块
+仍是旧 max 口径，判定以 ③ 脚本 q95 为准）。跑毕回填：①N/max/q95/top 分位；
+②判定（撤销 → C5 命令另发；维持 → 归档结案）。
