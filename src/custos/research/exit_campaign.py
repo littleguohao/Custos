@@ -21,8 +21,9 @@
   fake，控制器与台账全程不碰数据。
 
 读数口径（R11 纪律）：margin/objective **只相对排序**（vs 基准档
-pct5_trail08 的 Δmargin；vs 随机臂滚动天花板），绝对读数引用时连带 R11
-声明（报告 notes 已写死）。
+pct5_trail08 的 Δmargin；vs 合并随机臂分布 95% 分位——v0.266 口径，
+分位随样本收敛，替代随样本发散的累积最大值棘轮），绝对读数引用时
+连带 R11 声明（报告 notes 已写死）。
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ import argparse
 import json
 import os
 import random
+import statistics
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -112,7 +114,9 @@ class CampaignState:
     family_deaths: list[str] = field(default_factory=list)
     consecutive_no_c2: int = 0
     total_genomes: int = 0
-    random_ceiling: Optional[float] = None
+    random_pool: list[float] = field(
+        default_factory=list
+    )  # 合并随机臂分布（C4 分位标尺）
     population: list[dict] = field(default_factory=list)  # [{genome, mining}]
     baseline: dict[str, dict] = field(default_factory=dict)  # window -> readings
     best_candidate: Optional[dict] = None
@@ -190,6 +194,23 @@ def _d_margin(readings: Optional[dict], base: Optional[dict]) -> Optional[float]
 
 def _n_taken_ok(readings: Optional[dict], cfg: CampaignConfig) -> bool:
     return bool(readings) and (readings.get("n_taken") or 0) >= cfg.min_n_taken
+
+
+def _q95(pool: list[float]) -> Optional[float]:
+    """合并随机分布的 95% 分位（inclusive 线性插值）——C4 的标尺。
+
+    **分位随样本数收敛**；它替代的「累积最大值」随样本数发散（棘轮——
+    同一个好基因组的 C4 通过率取决于第几批被发现：8 抽样 21.3% → 264
+    抽样 1.6%，owner review 实测）。预注册分位口径（v0.266 修订）下，
+    零假设基因组各批恒 ~5% 假过线（真多重比较控制），真优势基因组各批
+    恒真过线——与发现时机无关。len 1 退化为该点本身；空池 → None
+    （n_random=0 时不拦，预注册战役 n_random≥1 总有臂）。
+    """
+    if not pool:
+        return None
+    if len(pool) == 1:
+        return pool[0]
+    return statistics.quantiles(pool, n=100, method="inclusive")[94]
 
 
 def _c2_pass(
@@ -282,22 +303,21 @@ def ctl_step(
     n_evals = len(evolve) + len(rand)
     state.total_genomes += n_evals
 
-    # 随机天花板滚动更新（含本批——先更新再判 C4，从严）
+    # 随机臂读数并入合并分布（含本批——先更新再判 C4，从严；分位标尺见 _q95）
     batch_rand_best: Optional[float] = None
     for r in rand_rows:
         obj = (r["mining"] or {}).get("objective")
         if obj is None:
             continue
         batch_rand_best = obj if batch_rand_best is None else max(batch_rand_best, obj)
-        state.random_ceiling = (
-            obj if state.random_ceiling is None else max(state.random_ceiling, obj)
-        )
+        state.random_pool.append(obj)
 
     actions: list[dict] = []
     c2_passers = [r for r in rows if r["c2"]]
 
     # ── CTL-4 过线停：C2 过线者按挖掘窗 objective 逐个过 C3+C4 ──
     c3_record: Optional[dict] = None
+    c4_bar = _q95(state.random_pool)
     passers = sorted(
         (r for r in c2_passers if (r["mining"] or {}).get("objective") is not None),
         key=lambda r: r["mining"]["objective"],
@@ -306,9 +326,7 @@ def ctl_step(
     for r in passers:
         c3 = _c3_check(r["genome"], base, cfg, evaluator, rng)
         c3_record = {"candidate_key": r["key"], **c3}
-        c4_ok = state.random_ceiling is None or (
-            r["mining"]["objective"] > state.random_ceiling
-        )
+        c4_ok = c4_bar is None or r["mining"]["objective"] > c4_bar
         if c3["pass"] and c4_ok:
             state.status = "candidate_found"
             state.best_candidate = {
@@ -319,7 +337,8 @@ def ctl_step(
                 "d_margin_mining": r["d_margin_mining"],
                 "d_margin_judgment": r["d_margin_judgment"],
                 "c3": c3_record,
-                "random_ceiling": state.random_ceiling,
+                "c4_bar": c4_bar,
+                "random_pool_size": len(state.random_pool),
                 "note": "C2+C3+C4 全过；C5 pre2019 终审单独终步（一票否决）",
             }
             actions.append({"type": "candidate_found", "key": r["key"]})
@@ -328,7 +347,7 @@ def ctl_step(
             {
                 "type": "near_miss",
                 "key": r["key"],
-                "why": "c3_flipped" if not c3["pass"] else "c4_below_random_ceiling",
+                "why": "c3_flipped" if not c3["pass"] else "c4_below_random_q95",
             }
         )
 
@@ -402,7 +421,8 @@ def ctl_step(
         "evolve": rows,
         "random_arm": rand_rows,
         "random_best": batch_rand_best,
-        "random_ceiling": state.random_ceiling,
+        "random_q95": c4_bar,
+        "random_pool_size": len(state.random_pool),
         "c2_pass_keys": [r["key"] for r in c2_passers],
         "c3": c3_record,
         "top_key": (top or {}).get("key"),
@@ -417,7 +437,7 @@ def ctl_step(
 # 战役主循环 + 台账
 # ---------------------------------------------------------------------------
 
-LEDGER_SCHEMA = "exit_campaign_ledger/v1"
+LEDGER_SCHEMA = "exit_campaign_ledger/v2"  # v2：random_ceiling 棘轮 → random_pool 合并分布 95% 分位（v0.266）
 
 
 def ledger_path_for(out_dir: Path, tag: str) -> Path:
@@ -455,7 +475,7 @@ def load_ledger(path: Path) -> tuple[CampaignConfig, CampaignState, list[dict], 
         family_deaths=list(st["family_deaths"]),
         consecutive_no_c2=st["consecutive_no_c2"],
         total_genomes=st["total_genomes"],
-        random_ceiling=st["random_ceiling"],
+        random_pool=list(st["random_pool"]),
         population=list(st["population"]),
         baseline=dict(st["baseline"]),
         best_candidate=st["best_candidate"],
@@ -564,7 +584,8 @@ def run_campaign(
             f"[campaign] 批 {state.batch_id} 毕：top={record['top_key']} "
             f"C2过={len(record['c2_pass_keys'])} 开放家族={len(state.open_families)} "
             f"连无C2={state.consecutive_no_c2} 累计={state.total_genomes}/{cfg.budget_cap} "
-            f"随机天花板={state.random_ceiling} → {record['ctl_actions'][-1]['type']}",
+            f"随机q95={_q95(state.random_pool)}(池{len(state.random_pool)}) "
+            f"→ {record['ctl_actions'][-1]['type']}",
             file=sys.stderr,
         )
 
@@ -584,7 +605,8 @@ def run_campaign(
         "family_deaths": state.family_deaths,
         "total_genomes": state.total_genomes,
         "n_batches": len(batches),
-        "random_ceiling": state.random_ceiling,
+        "random_q95": _q95(state.random_pool),
+        "random_pool_size": len(state.random_pool),
         "ledger": str(ledger_path),
         "notes": [_R11_NOTE],
     }

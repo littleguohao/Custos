@@ -75,6 +75,23 @@ class TestContract:
         )
 
 
+class TestQ95:
+    """C4 分位标尺（v0.266）：随样本收敛，替代随样本发散的累积最大值。"""
+
+    def test_empty_and_single(self):
+        assert ec._q95([]) is None  # 无臂不拦
+        assert ec._q95([0.5]) == 0.5
+
+    def test_inclusive_interpolation(self):
+        # inclusive 法：位置 = 0.95×(n−1)；pool=1..100 → 94.05 位 → 95.05
+        assert ec._q95(list(range(1, 101))) == pytest.approx(95.05)
+
+    def test_quantile_converges_where_max_diverges(self):
+        pool = [0.5] * 79 + [0.99]
+        assert ec._q95(pool) == pytest.approx(0.5)  # 分位不被单点拉走
+        assert max(pool) == 0.99  # 旧棘轮会被它冻结
+
+
 class TestCtl4CandidateFound:
     """CTL-4 过线停：C2 双窗正 + C3 零翻转 + C4 打过随机天花板 ⇒ candidate。"""
 
@@ -82,6 +99,32 @@ class TestCtl4CandidateFound:
         # 胜区 = stop_pct≥6 ∧ time_stop 开（perturb_50 动不出该区域 ⇒ C3 恒零翻转）
         win = params["stop_pct"] >= 6 and params["time_stop_bars"] > 0
         return _rd(0.30, 0.95) if win else _rd(0.05, 0.05)
+
+    def test_c4_bar_is_quantile_not_ratchet(self):
+        """棘轮回归（v0.266）：候选 objective 介于 q95 与历史 max 之间 ⇒ 必须过。
+
+        旧「累积最大值」口径下天花板=0.99 会误杀——通过与否不得取决于
+        第几批被发现（owner review：8 抽样 21.3% → 264 抽样 1.6%）。
+        """
+        cfg = ec.CampaignConfig(batch_size=1, n_random=0, seed=5)
+        state = ec.CampaignState()
+        _baseline(state)
+        state.random_pool = [0.5] * 79 + [0.99]  # q95=0.5，旧棘轮 ceiling=0.99
+        winner = eg.normalize({"stop_pct": 12, "time_stop_bars": 40})
+        rec = ec.ctl_step(
+            cfg,
+            state,
+            [winner],
+            [],
+            [_both(0.30, 0.60)],  # 0.60 ∈ (q95=0.5, max=0.99)
+            [],
+            self._fake,
+            random.Random(7),
+        )
+        assert state.status == "candidate_found"
+        assert state.best_candidate["c4_bar"] == pytest.approx(0.5)
+        assert state.best_candidate["random_pool_size"] == 80
+        assert rec["random_q95"] == pytest.approx(0.5)
 
     def test_candidate_found(self):
         cfg = ec.CampaignConfig(batch_size=1, n_random=1, seed=5)
@@ -104,9 +147,10 @@ class TestCtl4CandidateFound:
         assert "C5" in state.best_candidate["note"]
         assert rec["c3"]["pass"] and rec["c3"]["flips"] == 0
         assert rec["ctl_actions"][0]["type"] == "candidate_found"
-        assert rec["random_ceiling"] == 0.05
+        assert rec["random_q95"] == 0.05  # 池=[0.05] → q95=自身
+        assert state.random_pool == [0.05]
 
-    def test_near_miss_c4_below_random_ceiling(self):
+    def test_near_miss_c4_below_random_q95(self):
         cfg = ec.CampaignConfig(batch_size=1, n_random=1, seed=5)
         state = ec.CampaignState()
         _baseline(state)
@@ -125,7 +169,7 @@ class TestCtl4CandidateFound:
         assert state.status == "running"  # 近失不停战役
         assert state.best_candidate is None
         assert state.consecutive_no_c2 == 0  # C2 过 ⇒ 证伪计数复位
-        assert rec["ctl_actions"][0]["why"] == "c4_below_random_ceiling"
+        assert rec["ctl_actions"][0]["why"] == "c4_below_random_q95"
 
     def test_near_miss_c3_flipped(self):
         # 胜区收窄到 stop_pct==12：±50% 扰动会吸出该档 ⇒ C3 翻转
@@ -331,8 +375,8 @@ class TestEndToEnd:
             for a in b["ctl_actions"]
             if a["type"] == "near_miss"
         ]
-        assert near and all(a["why"] == "c4_below_random_ceiling" for a in near)
-        assert rep["random_ceiling"] == 0.50
+        assert near and all(a["why"] == "c4_below_random_q95" for a in near)
+        assert rep["random_q95"] == 0.50  # 池全 0.5 → q95=0.5
         assert rep["baseline"]["mining"]["margin"] == 0.10
 
     def test_candidate_found_end_to_end(self, tmp_path):
