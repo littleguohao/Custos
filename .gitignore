@@ -82,3 +82,7 @@ src/custos/core/trades/_no_trades_*.json
 
 # Static analysis reports (generated)
 reports/
+
+# Z哥知识库原文暂存（订阅付费内容，一律不入库——含 .md，覆盖上方 data/**/*.md 放行）
+data/zge_kb/**
+!data/zge_kb/**/
