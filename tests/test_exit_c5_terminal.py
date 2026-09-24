@@ -181,11 +181,19 @@ class TestApplyC5:
         assert c5.apply_c5(150, None, self.YARD, None)["verdict"] == c5.VERDICT_UNTESTED
 
     def test_verdict_is_one_of_three(self):
-        for n, dm, ci in ((21, -0.2, [-0.3, -0.1]), (21, 0.05, [-0.1, 0.2]),
-                          (250, 0.02, [0.01, 0.03]), (250, 0.005, [0.001, 0.01])):
+        for n, dm, ci in (
+            (21, -0.2, [-0.3, -0.1]),
+            (21, 0.05, [-0.1, 0.2]),
+            (250, 0.02, [0.01, 0.03]),
+            (250, 0.005, [0.001, 0.01]),
+        ):
             v = c5.apply_c5(n, dm, self.YARD, ci)
-            assert v["verdict"] in (c5.VERDICT_KILLED, c5.VERDICT_NOT_VETOED,
-                                    c5.VERDICT_UNTESTED)
+            assert v["verdict"] in (
+                c5.VERDICT_KILLED,
+                c5.VERDICT_NOT_VETOED,
+                c5.VERDICT_UNTESTED,
+            )
+
 
 class TestPairBootstrap:
     def test_pairs_on_intersection(self):
