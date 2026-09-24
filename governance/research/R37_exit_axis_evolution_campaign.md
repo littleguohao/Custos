@@ -311,6 +311,16 @@ params），信号/出场解耦（`--signals-out/--from-signals` 重放
   ③**C5 判据没写死**——符号条款下误报候选 ~50% 概率活着通过 ⇒
   C5 否决条件写死含量级条款（判据节，γ 建议 0.5 待拍板），**C3 反推
   出炉前不跑 C5**（owner 次序 1→2→3）。
+- **①处置·C3 零假设通过率反推（✅ 2026-09-24 生产机，零算力，
+  v0.274 修订版脚本）**：C3 试验 42 次过 5（**p̂=0.119**）、独立基因组
+  **k=41**（同 key 跨批重复裁决去重）、双过 1（观测值含真阳性=本批
+  候选）；战役层假过线估计 1−(1−0.05·p̂)^k = **21.7%**（上界——
+  独立性近似成立，v0.272 注记）。局限注记（读法写死）：C2 过线者
+  已富集、非严格零假设（near_miss 主体是现有最好的近似零假设群）。
+  ⇒ ②C5 判据**已定稿 v0.273**（γ=0.5 两窗合并标尺 + bootstrap SE +
+  n 前置），owner 已发令跑 C5（2026-09-24；工具 v0.279 落地，判据含
+  v0.276 γ 分档（本候选保留率 10% ⇒ degraded ⇒ γ=0.75），命令见
+  附录 C5 段）。
 
 ## 附录 · 生产机跑数命令（v0.264 工具）
 
@@ -399,3 +409,18 @@ PY
   基因组结果相关）⇒ 读数一律按**上界**用；此前引用的 53.7%（15 次
   裁决）同样是上界性质，不是精确值（owner 自述在案）。
 两个数贴回来 ⇒ 决定 candidate_found 的可信度与 C5 是否值得动。
+
+## 附录 · C5 pre2019 终审跑数命令（生产机，v0.279 工具；判据 v0.273 定稿 + v0.276 γ 分档；owner 2026-09-24 发令）
+
+```bash
+uv run python -m custos.research exit_c5_terminal \
+  --genome 'sp8|breakeven=off|cost_zone=3x2|qsx=off|scale_out=off|time_stop=20|trail=0.08' \
+  --codes-file artifacts/logs/score_evolution/r34_v1/_codes__r34_v1.txt \
+  --campaign-report artifacts/logs/exit_campaign/r37_b1/_exit_campaign__r37_b1.json \
+  --tag r37_c5
+```
+
+产物：`artifacts/logs/exit_campaign/r37_c5/_exit_c5__r37_c5.json`。
+跑毕回填：Δmargin（符号条款）/ Δ·SE⁻¹ 判决表达 / bootstrap CI95 / n_taken
+（样本量条款与量级条款启停）/ 触发的否决条款 / verdict（killed ⇒ 候选归档；
+not_vetoed ⇒ candidate 注册走 Phase 4 回流通道，仍非 active，影子观察另立）。

@@ -164,6 +164,9 @@ uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/
   exit_campaign（R37 战役壳）：出场基因组×批次进化 + CTL-1~5 确定性控制器
   （继续/转向/双向停止/预算帽）+ 台账每批原子落盘（--resume 续跑）；评估器
   协议注入，生产=V0 重放（信号缓存+as-of V0 分+topn，同 score_evolution V0 臂）。
+  exit_c5_terminal（R37-C5 终审终端，判据 v0.273 代码化）：冻结候选 vs 基准档
+  pre2019 段配对 bootstrap（SE+n 前置）——**只接受 pre2019 段内窗口**
+  （硬拒绝镜像），只能杀不能确认。
 - 因子 IC 画像（`factor_ic_profile`）：SCORERS/DSL 的截面 RankIC/ICIR + horizon
   衰减全因子可比表——**分诊镜不是晋级判据**（晋级永远走双窗+三轴交易语义；
   读数 L3− 带幸存者偏差，R19/R21/R14）。

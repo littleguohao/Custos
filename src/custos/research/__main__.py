@@ -76,6 +76,12 @@ TOOLS: dict[str, tuple[str, str]] = {
         "R37 出场轴进化战役（战役壳）：出场基因组×批次进化 + CTL-1~5 双向停止"
         " + 台账多重比较记账（基准 pct5_trail08，随机臂随行；--resume 续跑）",
     ),
+    "exit_c5_terminal": (
+        "driver",
+        "R37-C5 pre2019 终审终端（判据 v0.273 定稿）：冻结候选 vs pct5_trail08"
+        " 配对 bootstrap SE+n 前置，只接受 pre2019 段内窗口（硬拒绝镜像），"
+        "只能杀不能确认",
+    ),
     "launch_point_study": ("engine", "起涨点 vs 0AMV regime 研究；**17 个模式开关**"),
     "m2_stop_sweep": (
         "driver",
