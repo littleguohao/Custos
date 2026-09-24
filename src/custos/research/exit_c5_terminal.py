@@ -45,13 +45,16 @@ GAMMA = 0.5
 GAMMA_DEGRADED = 0.75
 RETENTION_FLOOR = 0.5
 
-#: C1 同门槛样本量；v0.273 前置：n<200 量级条款停用
+#: C1 同门槛样本量——**v0.281 起降级为诊断，不再否决**（见 apply_c5 docstring：
+#: pre2019 的交易数由钉死信号集决定，任何候选都在 ~64 笔量级 ⇒ 恒触发 ⇒ 必杀门）；
+#: v0.273 前置：n<200 量级条款停用
 MIN_N_TAKEN = 100
 MIN_N_FOR_MAGNITUDE = 200
 
-#: 判决四态（只能杀不能确认）
+#: 判决三态（只能杀不能确认；untested = 样本无法解析，既不杀也不放行）
 VERDICT_KILLED = "killed"
 VERDICT_NOT_VETOED = "not_vetoed"
+VERDICT_UNTESTED = "untested"
 
 
 def parse_genome_key(key: str) -> dict[str, Any]:
@@ -187,31 +190,104 @@ def apply_c5(
     n_taken: Optional[int],
     d_margin: Optional[float],
     yardstick: dict[str, float],
+    ci95: Optional[list[float]] = None,
 ) -> dict[str, Any]:
-    """v0.273 否决条件（任一即杀，一票否决；全过 = not_vetoed 非确认）。"""
+    """C5 判决（v0.281 改 CI 三分；只能杀不能确认）。
+
+    **为什么废掉硬 n 门槛**（owner review 2026-09-24，r37_c5 实跑暴露）：
+    原 clause(a)「n_taken<100 按杀计」在 pre2019 上**恒触发** ⇒ C5 退化成
+    「必杀门」而非检验。根因是 pre2019 的交易数由**钉死的信号集**决定
+    （V0 + j_low + 0AMV 做多区间；2010-2016 有大段时间 0AMV 不许做多），
+    出场参数只影响再进场次数 ⇒ 任何候选都在 ~64 笔 / n_taken ~21 量级，
+    与好坏无关。连带 clause(c) 需 n≥200 ⇒ 在本窗永不激活。
+
+    **替代方案**：用已在算的配对 bootstrap CI95 三分——r37_c5 自己证明了
+    64 对样本足以给出 Δ/SE=−3.25 的决定性读数，所以「样本小不能测」的前提
+    被实测推翻；CI 宽度**本身**就是样本够不够的答案，硬 n 门槛与它冗余。
+
+    - CI95 **全负**（hi<0）⇒ ``killed``（证据性否决，clause b_sign）；
+    - CI95 **跨 0** 或 CI 不可得 ⇒ ``untested``——样本无法解析符号：
+      **既不否决也不放行**（不进 Phase 4，也不按证伪归档）。区分
+      「没测出来」与「确实不行」对档案至关重要；
+    - CI95 **全正**（lo>0）⇒ 再过量级条款（n≥200 且 Δ<γ×合并标尺 ⇒ killed），
+      否则 ``not_vetoed``。
+
+    **全条款独立求值、不短路**（v0.281）：原实现 clause(a) 触发后 b/c 不再
+    求值，``fired`` 只含 a_sample——r37_c5 那条更强的证据（Δ/SE=−3.25）因此
+    不在 fired 里，只能靠报告顶层字段捞回。``diagnostics`` 逐条记录「若单独
+    看会不会触发」，战役壳作为后续战役 generic 载体，档案精度值得。
+    """
     fired: list[dict[str, Any]] = []
+    diag: list[dict[str, Any]] = []
 
-    def _fire(clause: str, value: Any, threshold: Any) -> None:
-        fired.append({"clause": clause, "value": value, "threshold": threshold})
+    def _clause(name: str, value: Any, threshold: str, would: bool) -> None:
+        diag.append(
+            {"clause": name, "value": value, "threshold": threshold, "would_fire": would}
+        )
 
-    if n_taken is None or n_taken < MIN_N_TAKEN:
-        _fire("a_sample", n_taken, f"n_taken≥{MIN_N_TAKEN}")
-    elif d_margin is None:
-        _fire("b_sign", None, "Δmargin>0（读数缺失按杀计，保守）")
-    else:
-        if d_margin <= 0:
-            _fire("b_sign", d_margin, "Δmargin>0")
-        # 量级条款：n<200 停用（SE≈0.025 任何 γ 失去意义——v0.273 前置）
-        if n_taken >= MIN_N_FOR_MAGNITUDE and d_margin < yardstick["bar"]:
-            _fire(
-                "c_magnitude",
-                d_margin,
-                f"≥{yardstick['gamma']}×合并标尺={yardstick['bar']:.6f}",
+    # ── 全条款独立求值（不短路）──
+    below_floor = n_taken is None or n_taken < MIN_N_TAKEN
+    _clause("a_sample", n_taken, f"n_taken≥{MIN_N_TAKEN}（v0.281 起仅诊断）", below_floor)
+    point_neg = d_margin is None or d_margin <= 0
+    _clause("b_sign", d_margin, "Δmargin>0（点估计）", point_neg)
+    mag_active = (n_taken or 0) >= MIN_N_FOR_MAGNITUDE
+    mag_would = mag_active and (d_margin is None or d_margin < yardstick["bar"])
+    _clause(
+        "c_magnitude",
+        d_margin,
+        f"≥{yardstick['gamma']}×合并标尺={yardstick['bar']:.6f}"
+        + ("" if mag_active else f"（n<{MIN_N_FOR_MAGNITUDE} 停用）"),
+        mag_would,
+    )
+
+    # ── CI 三分判决 ──
+    lo, hi = (ci95[0], ci95[1]) if ci95 and len(ci95) == 2 else (None, None)
+    ci_state = (
+        "unavailable"
+        if lo is None or hi is None
+        else "all_negative"
+        if hi < 0
+        else "all_positive"
+        if lo > 0
+        else "spans_zero"
+    )
+    if ci_state == "all_negative":
+        verdict = VERDICT_KILLED
+        fired.append(
+            {
+                "clause": "b_sign",
+                "value": d_margin,
+                "threshold": "CI95 全负 ⇒ 证据性否决",
+                "ci95": ci95,
+            }
+        )
+    elif ci_state == "all_positive":
+        verdict = VERDICT_NOT_VETOED
+        if mag_would:
+            verdict = VERDICT_KILLED
+            fired.append(
+                {
+                    "clause": "c_magnitude",
+                    "value": d_margin,
+                    "threshold": f"≥{yardstick['gamma']}×合并标尺={yardstick['bar']:.6f}",
+                }
             )
+    else:
+        verdict = VERDICT_UNTESTED
+
     return {
-        "verdict": VERDICT_KILLED if fired else VERDICT_NOT_VETOED,
+        "verdict": verdict,
         "fired": fired,
-        "magnitude_clause_active": (n_taken or 0) >= MIN_N_FOR_MAGNITUDE,
+        "diagnostics": diag,
+        "ci95": ci95,
+        "ci_state": ci_state,
+        "magnitude_clause_active": mag_active,
+        "sample_below_floor": below_floor,
+        "note": (
+            "untested = pre2019 样本无法解析符号：既不进 Phase 4 也不按证伪归档"
+            if verdict == VERDICT_UNTESTED
+            else "全过也只记「未否决」，非确认"
+        ),
     }
 
 
@@ -365,7 +441,7 @@ def run_c5(args: Any, per_code: Optional[dict[str, dict]] = None) -> dict[str, A
     pairs = pair_trades(cand_trades, base_trades)
     boot = paired_bootstrap(pairs, seed=args.seed, n_boot=args.n_bootstrap)
     se = boot.get("se")
-    verdict = apply_c5(n_taken, d_margin, yard)
+    verdict = apply_c5(n_taken, d_margin, yard, boot.get("ci95"))
 
     return {
         "version": 1,

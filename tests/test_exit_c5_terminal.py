@@ -103,38 +103,89 @@ class TestCombinedYardstick:
 
 
 class TestApplyC5:
+    """C5 判决 v0.281：CI 三分 + 全条款不短路。
+
+    ⚠️ 旧版「n_taken<100 按杀计」在 pre2019 上**恒触发** ⇒ C5 退化成必杀门
+    （r37_c5 实跑暴露：交易数由钉死信号集决定，任何候选都在 ~64 笔 /
+    n_taken ~21 量级）。改用已在算的配对 bootstrap CI95 三分。
+    """
+
     YARD = {"combined": 0.0222, "bar": 0.0111, "gamma": 0.5}
 
-    def test_n_below_100_kills(self):
-        v = c5.apply_c5(99, 0.05, self.YARD)
-        assert v["verdict"] == c5.VERDICT_KILLED
-        assert [f["clause"] for f in v["fired"]] == ["a_sample"]
+    def test_r37_b1_real_readings_still_killed(self):
+        """⚠️⚠️ 关键回归：判据改动**不得翻案**已判毕的 r37_b1。
 
-    def test_nonpositive_margin_kills(self):
-        v = c5.apply_c5(150, 0.0, self.YARD)
+        实测读数（2026-09-24 生产机）：Δmargin −0.2396 / CI95 [−0.407, −0.124]。
+        新判据下仍 killed，且依据从「样本不足」**升级**为「CI95 全负=证据性
+        否决」——这是本次修订合法性的核心：只强化基础、不改变结论。
+        """
+        v = c5.apply_c5(21, -0.2396, self.YARD, [-0.407, -0.124])
         assert v["verdict"] == c5.VERDICT_KILLED
+        assert v["ci_state"] == "all_negative"
         assert [f["clause"] for f in v["fired"]] == ["b_sign"]
 
+    def test_ci_spans_zero_is_untested_not_killed(self):
+        """⚠️ CI 跨 0 = 样本无法解析符号 ⇒ untested，**既不杀也不放行**。
+
+        旧规在此恒判 killed（n<100），把「没测出来」记成「确实不行」——
+        两者对档案是完全不同的结论。
+        """
+        v = c5.apply_c5(21, 0.05, self.YARD, [-0.03, 0.12])
+        assert v["verdict"] == c5.VERDICT_UNTESTED
+        assert v["fired"] == [], "untested 不得产生否决依据"
+        assert "既不进 Phase 4" in v["note"]
+
+    def test_ci_unavailable_is_untested(self):
+        """bootstrap 失败（配对太少 ⇒ se/ci 为 None）同样是 untested。"""
+        assert c5.apply_c5(21, 0.05, self.YARD, None)["verdict"] == c5.VERDICT_UNTESTED
+        assert c5.apply_c5(21, 0.05, self.YARD, [])["verdict"] == c5.VERDICT_UNTESTED
+
+    def test_small_sample_with_clean_positive_ci_passes(self):
+        """⚠️ 小样本 + CI 全正 ⇒ not_vetoed——n 门槛已降级为诊断。
+
+        r37_c5 自证 64 对足以给出 −3.25·SE 的决定性读数 ⇒「样本小不能测」
+        的前提被实测推翻；CI 宽度本身就是样本够不够的答案。
+        """
+        v = c5.apply_c5(21, 0.05, self.YARD, [0.01, 0.09])
+        assert v["verdict"] == c5.VERDICT_NOT_VETOED
+        assert v["sample_below_floor"] is True, "但样本不足仍须如实留痕"
+
     def test_magnitude_clause_disabled_below_200(self):
-        # 100≤n<200：Δ<bar 也不启用量级条款（v0.273 前置）
-        v = c5.apply_c5(150, 0.005, self.YARD)
+        v = c5.apply_c5(150, 0.005, self.YARD, [0.001, 0.01])
         assert v["verdict"] == c5.VERDICT_NOT_VETOED
         assert v["magnitude_clause_active"] is False
 
     def test_magnitude_clause_kills_at_200(self):
-        v = c5.apply_c5(250, 0.005, self.YARD)
+        v = c5.apply_c5(250, 0.005, self.YARD, [0.001, 0.01])
         assert v["verdict"] == c5.VERDICT_KILLED
         assert [f["clause"] for f in v["fired"]] == ["c_magnitude"]
 
     def test_all_pass_not_vetoed(self):
-        v = c5.apply_c5(250, 0.02, self.YARD)
+        v = c5.apply_c5(250, 0.02, self.YARD, [0.01, 0.03])
         assert v["verdict"] == c5.VERDICT_NOT_VETOED
         assert v["fired"] == []
 
-    def test_missing_margin_kills_conservatively(self):
-        v = c5.apply_c5(150, None, self.YARD)
-        assert v["verdict"] == c5.VERDICT_KILLED
+    def test_diagnostics_record_every_clause_without_short_circuit(self):
+        """⚠️ 全条款独立求值——旧实现 clause(a) 触发后 b/c 不再求值，
+        `fired` 只含 a_sample，r37_c5 那条更强的证据（Δ/SE=−3.25）因此
+        不在 fired 里、只能靠报告顶层字段捞回。战役壳是后续战役的 generic
+        载体，档案精度值得。"""
+        v = c5.apply_c5(21, -0.2396, self.YARD, [-0.407, -0.124])
+        got = {d["clause"]: d["would_fire"] for d in v["diagnostics"]}
+        assert set(got) == {"a_sample", "b_sign", "c_magnitude"}
+        assert got["a_sample"] is True and got["b_sign"] is True
+        assert got["c_magnitude"] is False, "n<200 ⇒ 量级条款停用，不该 would_fire"
 
+    def test_missing_margin_never_passes(self):
+        """读数缺失时不得放行（保守）——CI 也缺 ⇒ untested。"""
+        assert c5.apply_c5(150, None, self.YARD, None)["verdict"] == c5.VERDICT_UNTESTED
+
+    def test_verdict_is_one_of_three(self):
+        for n, dm, ci in ((21, -0.2, [-0.3, -0.1]), (21, 0.05, [-0.1, 0.2]),
+                          (250, 0.02, [0.01, 0.03]), (250, 0.005, [0.001, 0.01])):
+            v = c5.apply_c5(n, dm, self.YARD, ci)
+            assert v["verdict"] in (c5.VERDICT_KILLED, c5.VERDICT_NOT_VETOED,
+                                    c5.VERDICT_UNTESTED)
 
 class TestPairBootstrap:
     def test_pairs_on_intersection(self):
