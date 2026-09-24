@@ -195,8 +195,10 @@ params），信号/出场解耦（`--signals-out/--from-signals` 重放
   （pre2019 跑一次即消耗、永久无法重测；假存活下游还有
   candidate→active 立项回测 + 影子两道闸门）⇒ 不为压 size 推 γ
   向上；C5 职责是「杀掉明显不成立的」，不是「确认成立」。
-  预判注记：现候选合并标尺 + γ=0.5 下被杀概率 ~78%（门槛 +0.0111
-  vs 真效应 ~+0.003；判定窗 +0.0034 贴零同向）——判据在跑数前定，
+  预判注记：现候选合并标尺 + γ=0.5 下被杀概率 **~67%**（门槛 +0.0112
+  = 0.5×合并 +0.0223 vs 真效应 ~+0.003；判定窗 +0.0034 贴零同向；
+  挖掘标尺下 ~78%——上轮预判的口径切换没交代清楚，owner 指正
+  v0.274。数值不影响判据——判据是门槛不是概率）——判据在跑数前定，
   不为它量身剪裁。
   ⚠️ **C3 反推（附录脚本 v0.272）出炉前不跑 C5**（owner 次序
   1→2→3）。
@@ -307,7 +309,7 @@ budget_exhausted=按证伪读 / running=冒烟非结局）。判据读数回填�
 owner 拍板下一步（C5 或证伪归档）。
 
 
-## 附录 · C3 零假设通过率反推（生产机零算力，v0.272 修订版）
+## 附录 · C3 零假设通过率反推（生产机零算力，v0.274 修订版）
 
 ```bash
 uv run python - <<'PY'
@@ -315,47 +317,57 @@ import json
 doc = json.load(open(
     'artifacts/logs/exit_campaign/r37_b1/campaign_ledger.json', encoding='utf-8'))
 
-final = {}  # key → 终态分类（批序覆盖，取每个基因组的最后一次裁决）
-raw = 0
+final = {}          # key → 终态分类（只用于 k 与双过观测，不用于 p̂）
+trials = passes = 0  # C3 试验全量计数：每批扰动抽样独立（_batch_rng）⇒
+# 每次裁决都是一次独立 C3 试验；p̂ 用全量试验，k 用去重基因组——两个计数器
+# 分开（owner review：去重取末次会把批1 的 c3_fail 被批2 覆盖、且顺序依赖）
 for b in doc['batches']:
     for a in b['ctl_actions']:
         t = a['type']
         if t == 'near_miss':
-            raw += 1
-            final[a['key']] = 'c3_fail' if a['why'] == 'c3_flipped' else 'c4_fail'
+            ok = a['why'] != 'c3_flipped'
+            final[a['key']] = 'c3_fail' if not ok else 'c4_fail'
+            trials += 1
+            passes += ok
+        elif t == 'provisional_candidate':
+            final[a['key']] = 'c4_pending'
+            trials += 1  # 宣告 = 一次 C3 试验（过）；池满终判不重抽 ⇒ 无新试验
+            passes += 1
         elif t == 'candidate_found' and not a.get('confirmed_from_provisional'):
-            raw += 1  # 直接 confirmed；provisional 确认的在下方 state 里按终态计
             final[a['key']] = 'pass'
+            trials += 1
+            passes += 1
 for p in doc['state']['provisional_candidates']:
-    raw += 1  # provisional 按终态计一次（宣告时不计——否则 expired 漏算、
-    # confirmed_from_provisional 双计；owner review 问题②）
+    # 终态只落 final（k/双过观测用）；其 C3 试验在宣告时已计，不重复
     final[p['key']] = {'confirmed': 'pass', 'expired': 'c4_fail',
                        'pending': 'c4_pending'}[p['status']]
 
-adj = len(final)  # 独立基因组数（裁决次数 ≠ 独立检验数——build_batch 的
-# seen 是批局部、变异是相邻档 ±1，幸存者邻域跨批反复重抽；owner review 问题③）
-c3p = sum(v != 'c3_fail' for v in final.values())
-p_hat = c3p / adj if adj else float('nan')
-fp_owner = 1 - (1 - 0.05 * p_hat) ** adj if adj else float('nan')
+k = len(final)  # 独立基因组数（多重比较计数；批内 seen+局部变异 ⇒
+# 同 key 跨批重复裁决，裁决次数≠独立检验数；空间 218,400 vs 评估 360）
+p_hat = passes / trials if trials else float('nan')
+fp_owner = 1 - (1 - 0.05 * p_hat) ** k if k else float('nan')
 both = sum(v == 'pass' for v in final.values())
-if raw:
-    print(f'裁决 {raw} 次 / 独立基因组 k={adj}（重复占比 {1 - adj / raw:.0%}）')
-print(f'C3 过 {c3p}（p̂={p_hat:.3f}）；双过 {both}（观测值，含真阳性）')
+print(f'C3 试验 {trials} 次（过 {passes}，p̂={p_hat:.3f}）；'
+      f'独立基因组 k={k}；双过 {both}（观测值，含真阳性）')
 print(f'战役层假过线估计 1−(1−0.05·p̂)^k = {fp_owner:.1%}')
 PY
 ```
 
-读法（写死，v0.272 三处修订在案）：
-- **k = 按 genome_key 去重后的独立基因组数**，不是裁决次数（基因组空间
-  218,400 vs 评估 360；批内去重+局部变异 ⇒ 同 key 可跨批重复裁决）；
-- **provisional 按终态计一次**（confirmed/expired/pending 取自台账 state；
-  宣告不计——expired 不再漏算、confirmed_from_provisional 不再双计）；
-- **已删退化行** `1−(1−f̂)^k`：both=1 时恒 = 1−1/e ≈ 63.2%（与数据无关的
-  数学恒等式），且「观测过线率」≠「假过线率」（范畴错误）；双过数只作
-  观测值印出，不进公式；
+读法（写死，v0.272/v0.274 修订在案）：
+- **p̂ 用全部 C3 试验**（每批扰动抽样由 _batch_rng 派生、相互独立 ⇒
+  每次裁决是一次试验，样本量最大且**顺序无关**）；**k 用去重后的
+  独立基因组数**（多重比较计数）——两个计数器分开（v0.274，owner
+  review：v0.272 共用去重集合，为修 k 的独立性牺牲了 p̂ 的样本量，
+  且批序覆盖使 p̂ 顺序依赖、偏向任意）；
+- **provisional 按终态计一次**（confirmed/expired/pending 取自台账
+  state；宣告时其 C3 试验计入 trials，终判不重抽不产生新试验——
+  expired 不漏算、confirmed_from_provisional 不双计）；
+- **已删退化行** `1−(1−f̂)^k`：both=1 时恒 = 1−1/e ≈ 63.2%（与数据
+  无关的数学恒等式），且「观测过线率」≠「假过线率」（范畴错误）；
+  双过数只作观测值印出，不进公式；
 - p̂ = 「C2 过线者中 C3 通过率」——C2 已富集，非严格零假设（near_miss
   主体是近似零假设群，现有最好经验估计，局限注记）；
-- fp_owner 的独立性假设也只**近似**成立（去重缓解但未消——同邻域基因
-  组结果相关）⇒ 读数一律按**上界**用；此前引用的 53.7%（15 次裁决）
-  同样是上界性质，不是精确值（owner 自述在案）。
+- fp_owner 的独立性假设也只**近似**成立（去重缓解但未消——同邻域
+  基因组结果相关）⇒ 读数一律按**上界**用；此前引用的 53.7%（15 次
+  裁决）同样是上界性质，不是精确值（owner 自述在案）。
 两个数贴回来 ⇒ 决定 candidate_found 的可信度与 C5 是否值得动。
