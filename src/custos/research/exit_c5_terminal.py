@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""R37-C5 pre2019 终审终端（判据 v0.273 定稿的代码化身）。
+"""R37-C5 pre2019 终审终端（判据 v0.273 定稿 → v0.281 CI 三分修订的代码化身）。
 
 只接受 pre2019 untouched 段（2010-01-01..2016-12-31）内的窗口——与
 ``score_calibration_study`` Phase 3「只接受 pre2019 输入」互为同族镜像
@@ -10,14 +10,16 @@
   exit_campaign 生产评估器同引擎同公式：信号缓存 + as-of V0 分 +
   summarize_trades/simulate_portfolio_topn + sg._margin），报
   Δmargin + 配对 bootstrap SE（交易按 (code, entry_date) 1:1 配对——
-  两变体重放同一信号集，相关性不用猜 ρ），按 v0.273 否决条件判决：
+  两变体重放同一信号集，相关性不用猜 ρ），按 v0.281 CI 三分判决
+  （v0.273 否决条件经 r37_c5 实跑暴露硬 n 门槛在 pre2019 恒触发=
+  必杀门 ⇒ 废为诊断；完整判据与废因见 apply_c5 docstring）：
 
-  a. pre2019 n_taken < 100 ⇒ 杀（样本不足按杀计，保守）；
-  b. pre2019 Δmargin ≤ 0 ⇒ 杀（符号条款）；
-  c. n_taken ≥ 200 且 Δmargin < γ×两窗合并标尺 ⇒ 杀（量级条款；γ 分档
-     v0.276：候选窗间保留率 <0.5 标 degraded ⇒ γ=0.75，否则 γ=0.5；
-     n<200 时 SE≈0.025 任何 γ 失去意义 ⇒ 量级条款停用，只留
-     样本量+符号——owner v0.273/v0.276 拍板在案）。
+  - CI95 全负 ⇒ killed（证据性否决）；
+  - CI95 跨 0 或不可得 ⇒ untested（既不进 Phase 4 也不按证伪归档）；
+  - CI95 全正 ⇒ 再过量级条款（n≥200 且 Δ<γ×两窗合并标尺 ⇒ killed；
+    γ 分档 v0.276：候选窗间保留率 <0.5 标 degraded ⇒ γ=0.75，否则
+    γ=0.5；n<200 时 SE≈0.025 任何 γ 失去意义 ⇒ 量级条款停用——
+    owner v0.273/v0.276 拍板在案），否则 not_vetoed。
 
 **全过也只记「C5 未否决」**——本工具只能杀不能确认；判决表达 Δ/SE
 （k·SE），不压二值。两窗合并标尺从战役报告自含读取（--campaign-report），
@@ -222,12 +224,19 @@ def apply_c5(
 
     def _clause(name: str, value: Any, threshold: str, would: bool) -> None:
         diag.append(
-            {"clause": name, "value": value, "threshold": threshold, "would_fire": would}
+            {
+                "clause": name,
+                "value": value,
+                "threshold": threshold,
+                "would_fire": would,
+            }
         )
 
     # ── 全条款独立求值（不短路）──
     below_floor = n_taken is None or n_taken < MIN_N_TAKEN
-    _clause("a_sample", n_taken, f"n_taken≥{MIN_N_TAKEN}（v0.281 起仅诊断）", below_floor)
+    _clause(
+        "a_sample", n_taken, f"n_taken≥{MIN_N_TAKEN}（v0.281 起仅诊断）", below_floor
+    )
     point_neg = d_margin is None or d_margin <= 0
     _clause("b_sign", d_margin, "Δmargin>0（点估计）", point_neg)
     mag_active = (n_taken or 0) >= MIN_N_FOR_MAGNITUDE
@@ -293,7 +302,7 @@ def apply_c5(
 
 def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
-        description="R37-C5 pre2019 终审终端（判据 v0.273 定稿；只能杀不能确认）"
+        description="R37-C5 pre2019 终审终端（判据 v0.281 CI 三分；只能杀不能确认）"
     )
     ap.add_argument("--genome", required=True, help="冻结候选基因组键（sp8|...）")
     ap.add_argument("--codes-file", required=True, help="钉死宇宙 codes 表")
@@ -455,7 +464,7 @@ def run_c5(args: Any, per_code: Optional[dict[str, dict]] = None) -> dict[str, A
             "top_n": args.top_n,
             "n_bootstrap": args.n_bootstrap,
             "seed": args.seed,
-            "criteria": "R37-C5 v0.273 定稿 + v0.276 γ 分档（degraded 0.75/否则 0.5；合并标尺+bootstrap SE+n 前置）",
+            "criteria": "R37-C5 v0.281 CI 三分（CI95 全负杀/跨0 untested/全正再过量级；v0.276 γ 分档 degraded 0.75/否则 0.5；合并标尺自含读取）",
         },
         "yardstick": yard,
         "candidate": {**rd_c, "n_taken": n_taken},
