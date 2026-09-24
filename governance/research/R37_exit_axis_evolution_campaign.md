@@ -144,7 +144,17 @@ params），信号/出场解耦（`--signals-out/--from-signals` 重放
 
 - **R37-C1（样本量）**：单窗 n_taken ≥ 100；
 - **R37-C2（晋级线）**：top 出场基因组 vs 基准档 pct5_trail08 **Δmargin
-  双窗同向为正**（margin = strategy_grid 交易层读数；R36-C2 同族纪律）；
+  双窗同向为正**（margin = strategy_grid 交易层读数；R36-C2 同族纪律）。
+  ⚠️ **量级条款草案（v0.271，owner review 问题①，数值待拍板）**：现 C2
+  只管符号，对「衰减 −90% 贴零」与「增强 +43%」两种相反形态给同待——
+  与双窗纪律的意图相反（双窗要检出的正是衰减、要保护的正是增强）。
+  两形式备选：A **硬门**——C2+ = 双窗正 ∧ 判定窗 Δmargin ≥ δ×挖掘窗
+  （δ 建议 0.5）；B **降级标注**——窗间衰减 >50% ⇒ 过门合法但标
+  candidate_degraded，C5 γ 同步上调（如 0.75）。对照在案：r37_b1 候选
+  +0.0034/+0.0336 = 10%（A 下不过 / B 下降级）；adx_gt_60 +0.1347/
+  +0.0942 = 143%（A/B 下都更强）⇒ 修订同时影响 R36 复核（R36-C2 同族
+  联动标注）。**r37_b1 候选的过门合法性不受追溯**（跑时判据如此）——
+  量级过滤由 C5（判据先写死）执行；C2 修订只约束未来战役；
 - **R37-C3（灵敏度）**：±50% 扰动**零翻转**（扰动维 = 各启用参数；
   R29/R34/R36 零翻转纪律）；
 - **R37-C4（随机对照，v0.266 修订）**：候选挖掘窗 objective 超过**合并
@@ -158,7 +168,20 @@ params），信号/出场解耦（`--signals-out/--from-signals` 重放
   池=8 时 q95≈max，零假设过线率实测 13.76%（~5% 的 2.7 倍）；故
   c4_min_pool=100：池满才许 confirmed（实测 pool=160 → 5.35%），未满
   只记 provisional 不停战役（两段式见战役壳节 CTL-4）；
-- **R37-C5（终审）**：pre2019 untouched 段单独终步，**一票否决**。
+- **R37-C5（终审，v0.271 判据写死——跑数前定稿，γ 待 owner 拍板）**：
+  pre2019 untouched 段（2010-2016）单独终步，**只能杀不能确认**。
+  否决条件（任一即杀，一票否决）：
+  a. pre2019 n_taken < 100（C1 同门槛；样本不足按杀计，保守）；
+  b. pre2019 Δmargin ≤ 0（符号条款）；
+  c. pre2019 Δmargin < γ × 挖掘窗 Δmargin（**量级条款**——owner review
+     问题③：符号条款下误报候选 ~50% 概率活着通过，叠上战役层累积假
+     过线率（15 次裁决 P(≥1 假过线)=53.7%）不可接受；γ 建议 0.5，
+     owner 拍板后钉死。当前候选判定窗 +0.0034 = 挖掘窗 10%，量级条款
+     下大概率被杀——那大概是对的结论，但判据在跑数前定，不为它量身
+     剪裁）。
+  全过也只记「C5 未否决」⇒ candidate 注册走 Phase 4 回流（仍非
+  active，影子观察另立）。⚠️ **C3 反推（附录脚本）出炉前不跑 C5**
+  （owner 次序 1→2→3）。
 
 ### 窗口 / 宇宙 / 污染处理
 
@@ -223,6 +246,20 @@ params），信号/出场解耦（`--signals-out/--from-signals` 重放
   - **下一步（owner 拍板）**：C5 pre2019 终审——一票否决，唯一可能改变
     live 出场的路径；过 ⇒ candidate 注册走 Phase 4 回流通道，杀 ⇒ 候选
     归档（战役壳台账即档案）。
+- **owner review 三问（2026-09-24，v0.271 处置中）**：
+  ①**候选画像倒挂**——r37_b1 候选判定窗 Δmargin +0.0034（衰减 −90%
+  贴零）拿 candidate 往 C5 走，adx_gt_60 判定窗 +0.1347（增强 +43%）
+  背死刑等复核：C2 只管符号不管量级，同族纪律对两种相反形态给相反
+  待遇 ⇒ C2 量级条款草案见判据节（两形式 A/B，r37_b1 过门合法性不
+  追溯，量级过滤由 C5 执行）；
+  ②**C4 的 5% 是单次率**——战役层 optional stopping 无累积控制
+  （15 次裁决 P(≥1 假过线)=53.7%），实际闸门是 C3 而其零假设通过率
+  从未量化 ⇒ 台账反推（脚本见附录，零算力：near_miss 的 why 分类即
+  C3 过/否——c3_flipped ⇔ 否，c4_below_random_q95/provisional/
+  candidate_found ⇔ 过）；
+  ③**C5 判据没写死**——符号条款下误报候选 ~50% 概率活着通过 ⇒
+  C5 否决条件写死含量级条款（判据节，γ 建议 0.5 待拍板），**C3 反推
+  出炉前不跑 C5**（owner 次序 1→2→3）。
 
 ## 附录 · 生产机跑数命令（v0.264 工具）
 
@@ -248,3 +285,38 @@ verdict 四态：falsified=结局② / candidate_found=C5 终审单独终步 /
 budget_exhausted=按证伪读 / running=冒烟非结局）。判据读数回填上表后
 owner 拍板下一步（C5 或证伪归档）。
 
+
+## 附录 · C3 零假设通过率反推（生产机零算力，v0.271 owner review 问题②）
+
+```bash
+uv run python - <<'PY'
+import json
+doc = json.load(open(
+    'artifacts/logs/exit_campaign/r37_b1/campaign_ledger.json', encoding='utf-8'))
+adj = c3p = both = 0
+for b in doc['batches']:
+    for a in b['ctl_actions']:
+        t = a['type']
+        if t == 'near_miss':
+            adj += 1
+            if a['why'] == 'c4_below_random_q95':  # C3 过、C4 否
+                c3p += 1
+        elif t in ('provisional_candidate', 'candidate_found'):  # C3∧C4 双过
+            adj += 1
+            c3p += 1
+            both += 1
+p_c3 = c3p / adj if adj else float('nan')
+f = both / adj if adj else float('nan')
+fp = 1 - (1 - f) ** adj if adj else float('nan')
+fp_owner = 1 - (1 - 0.05 * p_c3) ** adj if adj else float('nan')
+print(f'C3/C4 裁决 {adj} 次：C3 过 {c3p}（p̂={p_c3:.3f}）；'
+      f'C3∧C4 双过 {both}（f̂={f:.4f}）')
+print(f'战役层经验假过线率 ≈ 1−(1−f̂)^k = {fp:.1%}')
+print(f'对照 owner 公式 1−(1−0.05·p̂)^k = {fp_owner:.1%}')
+PY
+```
+
+读法（写死）：p̂ = 「C2 过线者中 C3 通过率」——C2 已富集、非严格零假设，
+但 near_miss 主体正是「没走到最后的」近似零假设群，是现有最好的经验
+估计（如实注记局限）；f̂ = 单次裁决假过线率的直接经验值。两个数贴回来
+ ⇒ 决定 candidate_found 的可信度与 C5 是否值得动（owner 次序第 1 步）。
