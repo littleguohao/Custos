@@ -12,8 +12,8 @@
 > margin/expectancy_R 双项碾压全池、非 rdd 驱动）⇒ C5 pre2019 终审判毕
 > **untested**（v0.288——Δmargin +0.0309 但 CI95 [−0.072, +0.127] 跨 0，
 > pre2019 样本无法解析符号：既不进注册表也不按证伪归档）；
-> **Phase 4 排序器→过滤器判据草案（📋 v0.277，TODO #81①）立项条件
-> 已满足（C4 复核判毕），启动待 owner**——Phase 1
+> **Phase 4 排序器→过滤器判据改造已立项（✅ owner 2026-10-05 拍板，
+> TODO #81①）——工程 v0.291 落地（`score_filter_study`），跑数中**——Phase 1
 > 双口径读数在案；Phase 2 三轮全判 + 满编补覆盖判毕（47/47 0 pass）+ 思路二
 > top argmax 落无腿基准（12 加腿格 Δmargin 全负，C4 suspect）——**以上死于
 > C2/C3，结论成立**；近失候选复核终裁：旧门没误杀　|
@@ -153,8 +153,8 @@ Phase 0 已完成：
   在既有腿上的分位显著高于全宇宙中位）才开；权重格点（R30 gcd 去重思路）
   + 同一套闸门。Phase 1 显示既有腿无区分力 ⇒ 不开 Phase 3，直接结论
   「调参路线死刑」（与 R35 终局 B/C 的证据互喂）。
-- **Phase 4 排序器→过滤器判据改造（📋 草案 v0.277，TODO #81①；立项待
-  Phase 3 C4 复核签发）**：**不需新跑数口径**（复用 Phase 3 同宇宙同窗
+- **Phase 4 排序器→过滤器判据改造（✅ 已立项 2026-10-05 owner 拍板；草案
+  v0.277，工程 v0.291 `score_filter_study` 落地；TODO #81①）**：**不需新跑数口径**（复用 Phase 3 同宇宙同窗
   同 gate 同出场），只换判据读法。
   - **动机（已在档）**：R36 自诊断「全谱 RankIC 与 top20 消费方式**错配**
     ——独苗全谱 IC 双窗正但**头部撑不住**」。全谱 IC 正 ∧ 头部不成立 ⇒
@@ -736,3 +736,24 @@ PY
 同宇宙/双窗/种子 20260923/N=50 一字不改；此后该跑数一律脱钩发车。
 **重跑 2026-10-05 跑毕判毕**：覆盖 50/50 臂×64 格满编，q95=+0.0058 ⇒
 C4 死刑撤销（读数与分解见回填区「Phase 3 C4 复核」结果段，v0.286）。
+
+## 附录 · Phase 4 跑数命令（生产机，v0.291 工具，判据见回填区 Phase 4 段/草案 v0.277）
+
+```bash
+uv run python -m custos.research score_filter_study \
+  --codes-file artifacts/logs/score_evolution/r36_p3_v1/_codes__r36_p3_v1.txt \
+  --mining-start 2022-01-01 --mining-end 2024-07-31 \
+  --judgment-start 2024-08-01 --judgment-end 2026-09-04 \
+  --count 2000 --n-random 50 --seed 20261005 \
+  --tag r36_p4_v1
+```
+
+口径锚点（与草案逐位对账）：s2999 宇宙（digest 149d48e7412a）/ 双窗 /
+j_low gate / pct5_trail08 / topn=20 / 成本 25bps——唯一改动 = 前置剔除；
+X 网格 {10,20,30,50}% 与 4 测试对象（v0_self / neg4 / p2_sole /
+reversal_quality）写死在 `score_filter_study.py` 顶部常量（不许事后加档）；
+随机过滤器 N=50×双窗合并分布 q95（真零假设）；缺值 fail-open、缺值率与
+位移数必报。产物：`artifacts/logs/score_filter/r36_p4_v1/_score_filter__r36_p4_v1.json`。
+跑毕回填：①4 对象 × 4 X 档 × 双窗 Δmargin/填充率/缺值率/位移数表；
+②P4-C1~C4 逐条判定；③v0_self 空对照（小 X 档 Δ≈0/位移 0，否则管线
+有 bug 先修）；④过线对象的 C5 命令另发（score_c5_terminal 族）。

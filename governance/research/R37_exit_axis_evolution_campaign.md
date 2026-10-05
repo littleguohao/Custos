@@ -397,6 +397,17 @@ params），信号/出场解耦（`--signals-out/--from-signals` 重放
       按预注册读法 untested 既不进 Phase 4 也不按证伪归档——候选状态
       由 owner 定夺（r37_b1 在「更快抽身」族的 pre2019 表现：
       点估计略正但统计上无法与零区分）。
+    - **Phase 4 回流（owner 2026-10-05 拍板补路径）**：候选基因组经
+      `strategy_grid.exit_params_to_rules` 生成 EXIT_RULES 同 schema 块
+      （`artifacts/logs/exit_campaign/r37_b1/phase4_exit_rules_block.json`）——
+      启用 time_stop(20) + trailing_stop(8%) + cost_zone_flat(3 条/2%)，
+      breakeven 关闭；`stop_pct=8%` 进 research_only（live hard_loss
+      −7% P1 节结构不同，不伪造映射）。**状态=candidate（非 active）**；
+      live 三处判定点接线属语义变更，按纪律另立项+回测；影子观察另立。
+    - **下一候选（owner 2026-10-05 拍板「换下一候选」）**：r37_b2 战役
+      发车（同 s3000 钉死宇宙/双窗/判据/CTL 一字不改，**全局种子 37→38**
+      换轨迹——同种子会重放 b1 的初始种群与变异流；宇宙种子 42 不动）；
+      多重比较记账：b2 是第二次战役，其 C4 随机池标尺按本战役自备。
 
 ## 附录 · 生产机跑数命令（v0.264 工具）
 

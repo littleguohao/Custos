@@ -88,6 +88,12 @@ TOOLS: dict[str, tuple[str, str]] = {
         " v0-lattice 基因组（产物自含读取）vs 等倍率基准，日簇配对 bootstrap"
         " + v0.281 CI 三分，只接受 pre2019 段内窗口，只能杀不能确认",
     ),
+    "score_filter_study": (
+        "study",
+        "R36 Phase 4 排序器→过滤器判据：前置剔除尾部 X%（X 网格与 4 测试对象"
+        "写死）再让 V0 选 top20——P4-C1~C4 机械读数 + 随机过滤器真零假设"
+        "对照 + 位移数/缺值率必报，pre2019 硬拒绝",
+    ),
     "launch_point_study": ("engine", "起涨点 vs 0AMV regime 研究；**17 个模式开关**"),
     "m2_stop_sweep": (
         "driver",
