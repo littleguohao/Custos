@@ -181,6 +181,12 @@ class TestRunStudy:
             ]
             == 0.0
         )
+        # 填充率 = 剔后/剔前槽位保持率（需求侧，容量约束不入）：per_day=8 <
+        # top_n=20，X=50% ⇒ 剔后 4/日 ⇒ fill=0.5；X=10% ⇒ floor(8×0.1)=0 不剔
+        fill50 = rep["filters"]["v0_self"]["per_x"]["0.50"]["mining"]["fill_rate"]
+        assert fill50 == pytest.approx(0.5, abs=0.05)
+        fill10 = rep["filters"]["v0_self"]["per_x"]["0.10"]["mining"]["fill_rate"]
+        assert fill10 == pytest.approx(1.0, abs=0.05)
         for fkey, blk in rep["filters"].items():
             assert set(blk["per_x"]) == {"0.10", "0.20", "0.30", "0.50"}
             row = blk["per_x"]["0.20"]

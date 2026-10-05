@@ -156,16 +156,23 @@ def _eval_pool(
     return reading, taken, {"days": len(by), "slots": slots}
 
 
-def evaluate_filter(items: list[dict], x: float, top_n: int) -> dict[str, Any]:
-    """单 (过滤器值已写入 fval) × X 档：剔除 → 重打分 → 读数 + 填充率。"""
+def evaluate_filter(
+    items: list[dict], x: float, top_n: int, base_slots: int
+) -> dict[str, Any]:
+    """单 (过滤器值已写入 fval) × X 档：剔除 → 重打分 → 读数 + 填充率。
+
+    填充率 = **剔后槽位保持率** = Σ_d min(top_n, 剔后当日池) ÷
+    Σ_d min(top_n, 剔前当日池)——需求侧口径（组合容量约束之前），
+    直接回答 P4-C1 的「剔太多填不满」；1.0 = 每日 topn 供给不变。
+    （⚠️ 不是 n_taken/槽位——n_taken 被组合容量（max_concurrent=5）
+    卡住，那是资金侧约束，与「剔除是否掏空供给」无关。）
+    """
     by = _day_groups(items)
     kept: list[dict] = []
     for d in sorted(by):
         kept.extend(_filter_day(by[d], x))
     reading, taken, slots = _eval_pool(kept, top_n)
-    reading["fill_rate"] = (
-        (reading["n_taken"] or 0) / slots["slots"] if slots["slots"] else None
-    )
+    reading["fill_rate"] = slots["slots"] / base_slots if base_slots else None
     return {"reading": reading, "taken": taken, "slots": slots}
 
 
@@ -349,7 +356,9 @@ def run_study(
             for wname in windows:
                 items = [{**it, "fval": it.get(fkey)} for it in enriched[wname]]
                 n_missing = sum(1 for it in items if it["fval"] is None)
-                res = evaluate_filter(items, x, args.top_n)
+                res = evaluate_filter(
+                    items, x, args.top_n, baseline[wname]["slots"]["slots"]
+                )
                 r, taken = res["reading"], res["taken"]
                 b0 = baseline[wname]["reading"]
                 d_margin = (
