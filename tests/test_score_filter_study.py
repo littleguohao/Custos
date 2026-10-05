@@ -168,6 +168,19 @@ class TestRunStudy:
             rq_fetcher=lambda code, its: [0.6] * len(its),
         )
         assert set(rep["filters"]) == set(sf.FILTER_KEYS)
+        # 键接线钉（v0_self 富化键 ≠ 过滤器键 曾致缺值率=1 全 fail-open）
+        v0row = rep["filters"]["v0_self"]["per_x"]["0.20"]["mining"]
+        assert v0row["missing_rate"] == 0.0
+        assert rep["filters"]["neg4"]["per_x"]["0.20"]["mining"]["missing_rate"] == 0.0
+        assert (
+            rep["filters"]["p2_sole"]["per_x"]["0.20"]["mining"]["missing_rate"] == 0.0
+        )
+        assert (
+            rep["filters"]["reversal_quality"]["per_x"]["0.20"]["mining"][
+                "missing_rate"
+            ]
+            == 0.0
+        )
         for fkey, blk in rep["filters"].items():
             assert set(blk["per_x"]) == {"0.10", "0.20", "0.30", "0.50"}
             row = blk["per_x"]["0.20"]

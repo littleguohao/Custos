@@ -128,9 +128,9 @@ def _eval_pool(
 
     cands: list[dict[str, Any]] = []
     for it in items:
-        # v0_score 在 _enrich 期已算（live 默认权重）——直接复用，
+        # v0_self 分值在 _enrich 期已算（live 默认权重）——直接复用，
         # 不逐评估重算（418 次评估 × 7 万候选的重打分是浪费）
-        score = it.get("v0_score")
+        score = it.get("v0_self")
         if score is None:
             score, _level, _contrib = sc.technical_score(it["cand"], None)
         cands.append({**it["trade"], "score": score})
@@ -189,12 +189,13 @@ def _enrich(
 ) -> list[dict]:
     """候选池富化（每窗一次）：写入四对象的过滤器值（fval 按对象切换）。
 
-    - ``v0_score``/``neg4``：technical_score（live 默认权重）+ contrib 直出；
+    - ``v0_self``/``neg4``：technical_score（live 默认权重）+ contrib 直出；
     - ``p2_sole``：collect 期 addon 通道已预计算（``item["addon"][expr]``）；
     - ``reversal_quality``：二次过帧（逐股加载 → 进场 bar 的 SCORERS 值），
       ``rq_fetcher`` 可注入（测试）；None = 生产二次过帧。
-    返回元素 = 原 item + {v0_score, neg4, p2_sole, reversal_quality} 四值
-    （None=缺值，fail-open 计数进缺值率）。
+    返回元素 = 原 item + {v0_self, neg4, p2_sole, reversal_quality} 四值
+    （None=缺值，fail-open 计数进缺值率）。键名与 FILTER_KEYS 一一对应
+    （「过滤器键=富化键」单映射，键漂移则缺值率=1 全 fail-open——钉测守着）。
     """
     from custos.pipeline.screening import score_candidates as sc  # noqa: PLC0415
 
@@ -222,7 +223,7 @@ def _enrich(
         out.append(
             {
                 **it,
-                "v0_score": score,
+                "v0_self": score,
                 "neg4": neg4,
                 "p2_sole": addon,
                 "reversal_quality": rq_map.get((it["code"], it["trade"]["entry_date"])),
