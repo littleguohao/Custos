@@ -153,7 +153,9 @@ uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/
 - 研究产物 JSON **允许 NaN**（区别于生产侧 `paths.write_json` 的 allow_nan=False），
   落 `artifacts/logs/`；研究产物不建 contracts schema；
 - 回测窗参数 `--start/--end/--count`：`--count` 是"最新向前 N 根"，早窗口必须显式
-  加大（尾部截断护栏 fail-closed）；
+  加大（尾部截断护栏 fail-closed）；⚠️ 护栏只在 `_load_bars_local` 批量路径——
+  逐股直调 `_load_one_bars` 的终端（两个 C5）自带 `check_reach` 前置校验 +
+  默认 count=100000 全历史（r36_c5 首跑 count=2000 剪空 pre2019 的教训）；
 - 进化引擎：LLM 只做提案（假设/变异/杂交/解读），**decision 由确定性函数给出**；
   挖掘/判定双窗硬隔离；`--joint`/`--grid-judge` 必须显式 `--count`；`--cell-top-n`
   默认 20（=0 是因子轴退化，scorer 不写交易集）。指标门 `--ic-gate`（rank 默认 /
@@ -166,7 +168,9 @@ uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/
   协议注入，生产=V0 重放（信号缓存+as-of V0 分+topn，同 score_evolution V0 臂）。
   exit_c5_terminal（R37-C5 终审终端，判据 v0.273 代码化）：冻结候选 vs 基准档
   pre2019 段配对 bootstrap（SE+n 前置）——**只接受 pre2019 段内窗口**
-  （硬拒绝镜像），只能杀不能确认。
+  （硬拒绝镜像），只能杀不能确认。score_c5_terminal（R36-C5 终审终端，
+  score 侧同族镜像）：冻结 v0-lattice 基因组（产物自含读取）vs 等倍率基准，
+  日簇配对 bootstrap（选中集不同 ⇒ 交易级配对不成立，同日同进同出）。
 - 因子 IC 画像（`factor_ic_profile`）：SCORERS/DSL 的截面 RankIC/ICIR + horizon
   衰减全因子可比表——**分诊镜不是晋级判据**（晋级永远走双窗+三轴交易语义；
   读数 L3− 带幸存者偏差，R19/R21/R14）。

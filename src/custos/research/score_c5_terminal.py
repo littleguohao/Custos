@@ -50,6 +50,7 @@ from custos.research.exit_c5_terminal import (  # 判据/常量单源
     RETENTION_FLOOR,
     _margin_of,
     apply_c5,
+    check_reach,
 )
 from custos.research.score_calibration_study import CONTRIB_LEG_KEYS
 
@@ -220,7 +221,14 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--codes-file", required=True, help="钉死宇宙 codes 表")
     ap.add_argument("--start", default=PRE2019_START)
     ap.add_argument("--end", default=PRE2019_END)
-    ap.add_argument("--count", type=int, default=2000)
+    ap.add_argument(
+        "--count",
+        type=int,
+        default=100000,
+        help="每股加载 K 线根数（默认 100000=全历史：count 是「最新向前 N 根」"
+        "滚动窗，pre2019 终审窗口必须全历史加载，否则 start/end 过滤后窗口"
+        "被静默剪空——首跑 count=2000 只跑到 19 笔碎片宇宙）",
+    )
     ap.add_argument("--cost-bps", type=float, default=25.0)
     ap.add_argument("--top-n", type=int, default=20)
     ap.add_argument(
@@ -269,6 +277,7 @@ def run_c5(
     if collector is not None:
         collected = collector(window)
     else:
+        check_reach(args.count, args.start)
         exit_spec = _resolve_exit(args, _build_parser())
         collected = ses._collect_v0_window(args, codes, exit_spec, window)
     if not collected:

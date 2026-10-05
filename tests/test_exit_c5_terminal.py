@@ -263,6 +263,22 @@ class TestPre2019Guard:
         )
         c5._check_pre2019(args, ap)  # 不抛即过
 
+    def test_default_count_is_full_history(self):
+        """count 是「最新向前 N 根」滚动窗——pre2019 终审必须全历史加载，
+        否则 start/end 过滤后窗口被静默剪空（r36_c5 首跑 19 笔碎片教训）。"""
+        ap = c5._build_parser()
+        args = ap.parse_args(
+            [
+                "--genome",
+                CAND_KEY,
+                "--codes-file",
+                "x.txt",
+                "--campaign-report",
+                "y.json",
+            ]
+        )
+        assert args.count == 100000
+
 
 class TestRunC5Guards:
     def test_campaign_key_mismatch_fails(self, tmp_path):

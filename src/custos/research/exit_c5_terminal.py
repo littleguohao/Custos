@@ -313,7 +313,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument("--start", default=PRE2019_START)
     ap.add_argument("--end", default=PRE2019_END)
-    ap.add_argument("--count", type=int, default=2000)
+    ap.add_argument(
+        "--count",
+        type=int,
+        default=100000,
+        help="每股加载 K 线根数（默认 100000=全历史：count 是「最新向前 N 根」"
+        "滚动窗，pre2019 终审窗口必须全历史加载，否则 start/end 过滤后窗口"
+        "被静默剪空——r36_c5 首跑 count=2000 只跑到 19 笔碎片宇宙）",
+    )
     ap.add_argument("--cost-bps", type=float, default=25.0)
     ap.add_argument("--top-n", type=int, default=20)
     ap.add_argument("--n-bootstrap", type=int, default=2000)
@@ -328,6 +335,28 @@ def _check_pre2019(args: Any, ap: argparse.ArgumentParser) -> None:
         ap.error(
             f"C5 只接受 pre2019 段内窗口（{PRE2019_START}~{PRE2019_END}），"
             f"实际 {args.start}~{args.end}"
+        )
+
+
+def check_reach(count: int, start: str) -> None:
+    """加载到达校验（fail-closed 前置）：count 是「最新向前 N 根」的滚动窗
+    （``_load_one_bars`` 先取最新 N 根再做 start/end 过滤）——pre2019 终审
+    窗口需要全历史加载，否则窗口被静默剪空（r36_c5 首跑 19 笔碎片宇宙的
+    教训：count=2000 只回溯到 ~2018，过滤后近乎全空；``_load_bars_local``
+    的尾部截断护栏管不到逐股直调路径）。用指数序列探测：加载到的最早日期
+    晚于窗口起点 ⇒ 到达不足。"""
+    from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
+    from custos.research import score_return_study as srs  # noqa: PLC0415
+
+    df = local_tdx_data.get_ohlcv_table(srs.INDEX_CODE, count=count or 2000)
+    if df is None or not len(df):
+        raise RuntimeError("加载到达校验：指数数据读不到（本机无通达信数据？）")
+    earliest = str(df["date"].astype(str).str[:10].iloc[0])
+    if earliest > start:
+        raise RuntimeError(
+            f"加载到达不足：count={count} 仅回溯到 {earliest}，窗口起点 {start} "
+            "在之前——start/end 过滤会把窗口剪空（r36_c5 首跑 19 笔碎片教训）。"
+            "pre2019 终审须 --count 100000（全历史加载）"
         )
 
 
@@ -424,6 +453,7 @@ def run_c5(args: Any, per_code: Optional[dict[str, dict]] = None) -> dict[str, A
     yard = combined_yardstick(report)
 
     if per_code is None:
+        check_reach(args.count, args.start)
         per_code = _warm_pre2019(args)
     params = {**eg.FIXED_PARAMS, **genome}
     base = {**eg.FIXED_PARAMS, **eg.baseline_genome()}
