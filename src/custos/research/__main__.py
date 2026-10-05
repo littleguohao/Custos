@@ -82,6 +82,12 @@ TOOLS: dict[str, tuple[str, str]] = {
         " 配对 bootstrap SE+n 前置，只接受 pre2019 段内窗口（硬拒绝镜像），"
         "只能杀不能确认",
     ),
+    "score_c5_terminal": (
+        "driver",
+        "R36-C5 pre2019 终审终端（score 侧，exit_c5_terminal 同族镜像）：冻结"
+        " v0-lattice 基因组（产物自含读取）vs 等倍率基准，日簇配对 bootstrap"
+        " + v0.281 CI 三分，只接受 pre2019 段内窗口，只能杀不能确认",
+    ),
     "launch_point_study": ("engine", "起涨点 vs 0AMV regime 研究；**17 个模式开关**"),
     "m2_stop_sweep": (
         "driver",
