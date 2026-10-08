@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""R37-C5 pre2019 终审终端（判据 v0.273 定稿 → v0.281 CI 三分 → v0.298 thr 三分）。
+"""R37-C5 pre2019 终审终端（判据 v0.273 定稿 → v0.281 CI 三分 → v0.298
+thr 三分 → v0.299 a_sample 可疑闸）。
 
 只接受 pre2019 untouched 段（2010-01-01..2016-12-31）内的窗口——与
 ``score_calibration_study`` Phase 3「只接受 pre2019 输入」互为同族镜像
@@ -10,9 +11,9 @@
   exit_campaign 生产评估器同引擎同公式：信号缓存 + as-of V0 分 +
   summarize_trades/simulate_portfolio_topn + sg._margin），报
   Δmargin + 配对 bootstrap SE（交易按 (code, entry_date) 1:1 配对——
-  两变体重放同一信号集，相关性不用猜 ρ），按 v0.298 判决规则
-  （v0.273 否决条件经 r37_c5 实跑暴露硬 n 门槛在 pre2019 恒触发=
-  必杀门 ⇒ 废为诊断；完整判据与废因见 apply_c5 docstring）：
+  两变体重放同一信号集，相关性不用猜 ρ），按 v0.299 判决规则
+  （n_taken 低于预期下限 ⇒ 跑数可疑不出判决 + thr 三分；完整判据、
+  v0.281 废因勘误与修订史见 apply_c5 docstring）：
 
   thr = γ×合并标尺（量级激活 n≥200 时）否则 0：
   - CI95 hi < thr ⇒ killed（整个置信区间够不到标尺，证据性否决）；
@@ -47,8 +48,9 @@ GAMMA = 0.5
 GAMMA_DEGRADED = 0.75
 RETENTION_FLOOR = 0.5
 
-#: C1 同门槛样本量——**v0.281 起降级为诊断，不再否决**（见 apply_c5 docstring：
-#: pre2019 的交易数由钉死信号集决定，任何候选都在 ~64 笔量级 ⇒ 恒触发 ⇒ 必杀门）；
+#: C1 同门槛样本量——**v0.299 起升级为可疑闸**（见 apply_c5 docstring：
+#: v0.281 的废因「钉死信号集 ⇒ 恒触发必杀门」被 v0.288 全历史复跑推翻，
+#: 真因是加载到达截断；n 远低于预期=数据完整性信号 ⇒ 不出判决）；
 #: v0.273 前置：n<200 量级条款停用
 MIN_N_TAKEN = 100
 MIN_N_FOR_MAGNITUDE = 200
@@ -194,15 +196,21 @@ def apply_c5(
     yardstick: dict[str, float],
     ci95: Optional[list[float]] = None,
 ) -> dict[str, Any]:
-    """C5 判决（v0.298 owner 拍板改判据；只能杀不能确认）。
+    """C5 判决（v0.299 owner review 修订；只能杀不能确认）。
 
-    **判决规则（写死）**：``thr = γ×合并标尺``（量级激活：n_taken ≥ 200 时）
-    **否则 0**——
-    - CI95 **hi < thr** ⇒ ``killed``（证据性否决：hi<0 记 ``b_sign``；
-      0≤hi<thr 记 ``c_magnitude``——整个置信区间都够不到标尺）；
-    - CI95 **lo > 0 且点估计 ≥ thr** ⇒ ``not_vetoed``（显著性+量级双要）；
-    - 其余 ⇒ ``untested``（CI 不可得 / 跨 thr / 显著但量级不定）——
-      **既不进 Phase 4 也不按证伪归档**（区分「没测出来」与「确实不行」）。
+    **判决规则（写死）**：
+    - **a_sample 可疑闸前置（v0.299）**：``n_taken < 100`` ⇒ 本次跑数
+      **判为可疑，不出判决**（verdict=untested + ``sample_suspicious``
+      标记；报告顶层由终端打 warning）——**双向压**：杀与放行都不出。
+      n 远低于预期是**数据完整性信号**，不是候选优劣的证据（废因勘误
+      见下）。
+    - 样本不可疑时按 **thr 三分**：``thr = γ×合并标尺``（量级激活：
+      n_taken ≥ 200 时）**否则 0**——
+      - CI95 **hi < thr** ⇒ ``killed``（证据性否决：hi<0 记 ``b_sign``；
+        0≤hi<thr 记 ``c_magnitude``——整个置信区间都够不到标尺）；
+      - CI95 **lo > 0 且点估计 ≥ thr** ⇒ ``not_vetoed``（显著性+量级双要）；
+      - 其余 ⇒ ``untested``（CI 不可得 / 跨 thr / 显著但量级不定）——
+        **既不进 Phase 4 也不按证伪归档**（区分「没测出来」与「确实不行」）。
 
     **v0.281→v0.298 迁移两个读数形**（owner 逐案核过）：
     ① CI 跨 0 但整体低于 bar（r37_c5_v2 形：CI_hi +0.0063 < thr 0.0167）
@@ -214,21 +222,31 @@ def apply_c5(
     R37 已收口不接 live，实际后果为零——R37 文档加注记留档）。
     R36-C5 不受影响（CI_hi +0.127 > bar 0.055 ⇒ 仍 untested）。
 
-    **为什么废掉硬 n 门槛**（owner review 2026-09-24，r37_c5 实跑暴露）：
-    原 clause(a)「n_taken<100 按杀计」在 pre2019 上**恒触发** ⇒ C5 退化成
-    「必杀门」而非检验。根因是 pre2019 的交易数由**钉死的信号集**决定
-    （V0 + j_low + 0AMV 做多区间；2010-2016 有大段时间 0AMV 不许做多），
-    出场参数只影响再进场次数 ⇒ 任何候选都在 ~64 笔 / n_taken ~21 量级，
-    与好坏无关。连带 clause(c) 需 n≥200 ⇒ 在本窗永不激活。
-
-    **替代方案**：用已在算的配对 bootstrap CI95 三分——r37_c5 自己证明了
-    64 对样本足以给出 Δ/SE=−3.25 的决定性读数，所以「样本小不能测」的前提
-    被实测推翻；CI 宽度**本身**就是样本够不够的答案，硬 n 门槛与它冗余。
+    **为什么硬 n 门槛不当判决用、却又不能只是诊断**（v0.299 owner review
+    更正——v0.281 那段废因**归因错误**）：v0.281 写的「pre2019 交易数由
+    **钉死信号集**决定（0AMV 做多区间所限），任何候选都在 ~64 笔 /
+    n_taken ~21 ⇒ 恒触发必杀门」已被 **v0.288 全历史复跑推翻**：真因是
+    **加载到达截断**（count=2000 滚动窗只回溯到 ~2018，start/end 过滤后
+    pre2019 窗口近乎剪空）；全历史加载下同一候选 **70710 对配对、
+    n_taken=536**，Δmargin 符号翻转（−0.2396 → +0.0033）。连带作废
+    「r37_c5 自证 64 对样本足以给出 Δ/SE=−3.25 的决定性读数」——那个
+    −3.25·SE 是在 **~1% 碎片宇宙**上算的。**教训方向相反**：配对
+    bootstrap CI 只覆盖抽样误差，**不覆盖样本本身有偏**——它在被截断的
+    数据上给出了自信且方向错误的结论；而当时真正把异常暴露出来的，
+    恰恰是被废掉的那个 n 门槛（n=21 < 100）。⇒ 硬 n 门槛**不当判决用**
+    （否则会把「数据坏了」误判成「候选坏了」——碎片首跑的 killed 正是
+    如此），但 n 远低于预期本身是数据完整性信号：``check_reach`` 只守住
+    截断这一种成因，其他成因（宇宙变化/信号集塌缩/未来数据缺陷）不在
+    保护范围内 ⇒ a_sample 从「仅诊断」升级为「可疑即不出判决」。
 
     **全条款独立求值、不短路**（v0.281）：原实现 clause(a) 触发后 b/c 不再
-    求值，``fired`` 只含 a_sample——r37_c5 那条更强的证据（Δ/SE=−3.25）因此
+    求值，``fired`` 只含 a_sample——那条更强的证据（Δ/SE=−3.25）因此
     不在 fired 里，只能靠报告顶层字段捞回。``diagnostics`` 逐条记录「若单独
     看会不会触发」，战役壳作为后续战役 generic 载体，档案精度值得。
+    **would_fire 口径与判决一致（v0.299 对齐，owner review）**：b_sign /
+    c_magnitude 改按 CI 判（hi<0 / hi<thr），不再按点估计——原口径下
+    「CI 全正、点估计 < bar」诊断显示 would_fire=True 而判决 untested，
+    两者对不上。
     """
     fired: list[dict[str, Any]] = []
     diag: list[dict[str, Any]] = []
@@ -243,26 +261,29 @@ def apply_c5(
             }
         )
 
-    # ── 全条款独立求值（不短路）──
-    below_floor = n_taken is None or n_taken < MIN_N_TAKEN
-    _clause(
-        "a_sample", n_taken, f"n_taken≥{MIN_N_TAKEN}（v0.281 起仅诊断）", below_floor
-    )
-    point_neg = d_margin is None or d_margin <= 0
-    _clause("b_sign", d_margin, "Δmargin>0（点估计）", point_neg)
+    # ── 前置量（CI/阈值先算，诊断与判决同口径）──
+    lo, hi = (ci95[0], ci95[1]) if ci95 and len(ci95) == 2 else (None, None)
     mag_active = (n_taken or 0) >= MIN_N_FOR_MAGNITUDE
-    mag_would = mag_active and (d_margin is None or d_margin < yardstick["bar"])
+    thr = yardstick["bar"] if mag_active else 0.0
+    below_floor = n_taken is None or n_taken < MIN_N_TAKEN
+
+    # ── 全条款独立求值（不短路）；would_fire 与判决同 CI 口径（v0.299）──
+    _clause(
+        "a_sample",
+        n_taken,
+        f"n_taken≥{MIN_N_TAKEN}（低于 ⇒ 跑数可疑不出判决）",
+        below_floor,
+    )
+    _clause("b_sign", d_margin, "CI95 全负 ⇒ 证据性否决", hi is not None and hi < 0)
     _clause(
         "c_magnitude",
         d_margin,
-        f"≥{yardstick['gamma']}×合并标尺={yardstick['bar']:.6f}"
+        f"CI95 整体 < {yardstick['gamma']}×合并标尺={yardstick['bar']:.6f}"
         + ("" if mag_active else f"（n<{MIN_N_FOR_MAGNITUDE} 停用）"),
-        mag_would,
+        mag_active and hi is not None and hi < thr,
     )
 
-    # ── CI 三分判决（v0.298）：thr = bar（量级激活）否则 0 ──
-    thr = yardstick["bar"] if mag_active else 0.0
-    lo, hi = (ci95[0], ci95[1]) if ci95 and len(ci95) == 2 else (None, None)
+    # ── 判决（v0.299）：a_sample 可疑闸前置（双向压），然后 thr 三分 ──
     ci_state = (
         "unavailable"
         if lo is None or hi is None
@@ -272,7 +293,10 @@ def apply_c5(
         if lo > 0
         else "spans_zero"
     )
-    if lo is None or hi is None:
+    if below_floor:
+        # 跑数可疑（数据完整性信号）——杀与放行都不出判决
+        verdict = VERDICT_UNTESTED
+    elif lo is None or hi is None:
         verdict = VERDICT_UNTESTED  # CI 不可得 = 无法解析
     elif hi < 0:
         verdict = VERDICT_KILLED
@@ -307,18 +331,25 @@ def apply_c5(
         "ci_state": ci_state,
         "threshold": thr,
         "magnitude_clause_active": mag_active,
-        "sample_below_floor": below_floor,
+        "sample_suspicious": below_floor,
         "note": (
-            "untested = pre2019 样本无法解析：既不进 Phase 4 也不按证伪归档"
-            if verdict == VERDICT_UNTESTED
-            else "全过也只记「未否决」，非确认"
+            (
+                "n_taken 低于预期下限 ⇒ 跑数可疑（数据完整性信号），不出判决："
+                "既不进 Phase 4 也不按证伪归档——排查数据到达/宇宙/信号集后重跑"
+            )
+            if below_floor
+            else (
+                "untested = pre2019 样本无法解析：既不进 Phase 4 也不按证伪归档"
+                if verdict == VERDICT_UNTESTED
+                else "全过也只记「未否决」，非确认"
+            )
         ),
     }
 
 
 def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
-        description="R37-C5 pre2019 终审终端（判据 v0.298 thr 三分；只能杀不能确认）"
+        description="R37-C5 pre2019 终审终端（判据 v0.299 可疑闸+thr 三分；只能杀不能确认）"
     )
     ap.add_argument("--genome", required=True, help="冻结候选基因组键（sp8|...）")
     ap.add_argument("--codes-file", required=True, help="钉死宇宙 codes 表")
@@ -498,7 +529,7 @@ def run_c5(args: Any, per_code: Optional[dict[str, dict]] = None) -> dict[str, A
     se = boot.get("se")
     verdict = apply_c5(n_taken, d_margin, yard, boot.get("ci95"))
 
-    return {
+    rep = {
         "version": 1,
         "tag": args.tag,
         "config": {
@@ -510,7 +541,7 @@ def run_c5(args: Any, per_code: Optional[dict[str, dict]] = None) -> dict[str, A
             "top_n": args.top_n,
             "n_bootstrap": args.n_bootstrap,
             "seed": args.seed,
-            "criteria": "R37-C5 v0.298 thr 三分（CI95 hi<thr 杀/lo>0 且点估计≥thr 活/其余 untested；thr=bar（n≥200）否则 0；v0.276 γ 分档 degraded 0.75/否则 0.5；合并标尺自含读取）",
+            "criteria": "R37-C5 v0.299（a_sample 可疑闸：n<100 ⇒ 跑数可疑不出判决；thr 三分：CI95 hi<thr 杀/lo>0 且点估计≥thr 活/其余 untested；thr=bar（n≥200）否则 0；v0.276 γ 分档 degraded 0.75/否则 0.5；合并标尺自含读取）",
         },
         "yardstick": yard,
         "candidate": {**rd_c, "n_taken": n_taken},
@@ -522,6 +553,13 @@ def run_c5(args: Any, per_code: Optional[dict[str, dict]] = None) -> dict[str, A
         "kill": verdict,
         "note": "全过也只记「C5 未否决」——本工具只能杀不能确认；判决表达 Δ/SE，不压二值",
     }
+    if verdict["sample_suspicious"]:
+        rep["warning"] = (
+            f"n_taken={n_taken} 低于预期下限 {MIN_N_TAKEN} ⇒ 本次跑数判为可疑"
+            "（数据完整性信号；check_reach 只守加载截断一种成因，宇宙/信号集/"
+            "未来数据缺陷不在保护范围），不出判决——排查数据后重跑"
+        )
+    return rep
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -550,6 +588,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         f"[C5] verdict={k['verdict']} "
         f"fired={[f['clause'] for f in k['fired']]} Δmargin={dm}{ds_txt}"
     )
+    if "warning" in rep:
+        print(f"[C5] ⚠️ WARNING: {rep['warning']}", file=sys.stderr)
     print(f"[C5] 报告 → {out}")
     return 0
 

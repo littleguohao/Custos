@@ -215,7 +215,7 @@ class TestRunC5:
                     if (is_cand and better)
                     else (0.03 if i % 3 == 0 else -0.02),
                 )
-                for i in range(40)
+                for i in range(120)  # ≥可疑闸下限 100（v0.299），否则测不到三分路径
             ]
             return taken, {"n_taken": len(taken)}
 

@@ -166,7 +166,8 @@ uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/
   exit_campaign（R37 战役壳）：出场基因组×批次进化 + CTL-1~5 确定性控制器
   （继续/转向/双向停止/预算帽）+ 台账每批原子落盘（--resume 续跑）；评估器
   协议注入，生产=V0 重放（信号缓存+as-of V0 分+topn，同 score_evolution V0 臂）。
-  exit_c5_terminal（R37-C5 终审终端，判据 v0.298 thr 三分——CI95 hi<thr 杀 /
+  exit_c5_terminal（R37-C5 终审终端，判据 v0.299——**a_sample 可疑闸**：
+  n 低于预期 ⇒ 跑数可疑不出判决（双向压）+ thr 三分：CI95 hi<thr 杀 /
   lo>0 且点估计≥thr 活 / 其余 untested）：冻结候选 vs 基准档
   pre2019 段配对 bootstrap（SE+n 前置）——**只接受 pre2019 段内窗口**
   （硬拒绝镜像），只能杀不能确认。score_c5_terminal（R36-C5 终审终端，

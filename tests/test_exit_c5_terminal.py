@@ -103,60 +103,70 @@ class TestCombinedYardstick:
 
 
 class TestApplyC5:
-    """C5 判决 v0.298：thr 三分（CI_hi<thr 杀 / CI_lo>0 且点估计≥thr 活 / 其余
-    untested）+ 全条款不短路。
+    """C5 判决 v0.299：a_sample 可疑闸（n<100 ⇒ 跑数可疑不出判决，双向压）
+    + thr 三分（CI_hi<thr 杀 / CI_lo>0 且点估计≥thr 活 / 其余 untested）
+    + 全条款不短路（would_fire 与判决同 CI 口径）。
 
-    ⚠️ 旧版「n_taken<100 按杀计」在 pre2019 上**恒触发** ⇒ C5 退化成必杀门
-    （r37_c5 实跑暴露：交易数由钉死信号集决定，任何候选都在 ~64 笔 /
-    n_taken ~21 量级）。v0.298 规则：thr = bar（量级激活 n≥200）否则 0——
-    杀要整个 CI 低于标尺（连乐观端都够不到才杀），活要显著性+量级双要。
+    ⚠️ v0.281 的废因（「交易数由钉死信号集决定 ⇒ 任何候选 ~64 笔/n~21 ⇒
+    恒触发必杀门」）已被 v0.288 全历史复跑**推翻**：真因是加载到达截断，
+    「64 对足以给出 −3.25·SE 决定性读数」是 ~1% 碎片宇宙产物（全数据下
+    符号翻转）。教训反向：bootstrap CI 只覆盖抽样误差、不覆盖样本偏差；
+    当时暴露异常的恰是被废的 n 门槛 ⇒ n 远低于预期=数据完整性信号，
+    升级为可疑闸（v0.299 owner review）。
     """
 
     YARD = {"combined": 0.0222, "bar": 0.0111, "gamma": 0.5}
 
-    def test_r37_b1_real_readings_still_killed(self):
-        """⚠️⚠️ 关键回归：判据改动**不得翻案**已判毕的 r37_b1。
+    def test_r37_b1_fragment_readings_now_suspicious_no_verdict(self):
+        """⚠️⚠️ 关键回归：碎片首跑读数（后被查明是加载截断产物）在新规则
+        下**不出判决**——n_taken=21 远低于预期 ⇒ 跑数可疑。
 
-        实测读数（2026-09-24 生产机）：Δmargin −0.2396 / CI95 [−0.407, −0.124]。
-        新判据下仍 killed，且依据从「样本不足」**升级**为「CI95 全负=证据性
-        否决」——这是本次修订合法性的核心：只强化基础、不改变结论。
-
-        ⚠️ 数据勘误（v0.288/v0.290）：上述读数后被查明是**加载到达截断**
-        的碎片宇宙产物（count=2000 只回溯到 ~2018）；全历史复跑
-        （r37_c5_v2，判据未动）改判 untested。本钉测锁的是 **apply_c5 的
-        判据逻辑**（同输入 ⇒ 同判决），不是那批读数的有效性——逻辑回归
-        意义不变，保留。
+        这正是可疑闸要拦的形态：CI95 全负（旧规判 killed）但样本本身不可信
+        ——首跑的 killed 就是「数据坏了误判成候选坏了」的实例（全历史复跑
+        r37_c5_v2 符号翻转 −0.2396→+0.0033）。diagnostics 如实留痕 b_sign
+        单看会触发，但判决被可疑闸压住（双向压的杀侧）。
         """
         v = c5.apply_c5(21, -0.2396, self.YARD, [-0.407, -0.124])
-        assert v["verdict"] == c5.VERDICT_KILLED
-        assert v["ci_state"] == "all_negative"
-        assert [f["clause"] for f in v["fired"]] == ["b_sign"]
+        assert v["verdict"] == c5.VERDICT_UNTESTED
+        assert v["sample_suspicious"] is True
+        assert v["fired"] == [], "可疑跑数不产生否决依据"
+        got = {d["clause"]: d["would_fire"] for d in v["diagnostics"]}
+        assert got["a_sample"] is True
+        assert got["b_sign"] is True, "CI 全负单看会触发——被可疑闸压住，如实留痕"
+
+    def test_small_sample_with_clean_positive_ci_also_suspicious(self):
+        """⚠️ 可疑闸**双向压**（放行侧）：小样本 + CI 全正同样不出判决。
+
+        旧规在此放 not_vetoed，依据是「r37_c5 自证 64 对足以给出 −3.25·SE
+        决定性读数」——该依据已被查明是碎片宇宙产物；CI 只覆盖抽样误差、
+        不覆盖样本偏差 ⇒ n 远低于预期时两个方向都不出判决。
+        """
+        v = c5.apply_c5(21, 0.05, self.YARD, [0.01, 0.09])
+        assert v["verdict"] == c5.VERDICT_UNTESTED
+        assert v["sample_suspicious"] is True
+
+    def test_boundary_n100_not_suspicious(self):
+        """边界钉死：n_taken=100 恰好到下限 ⇒ 不触发可疑闸，正常三分。"""
+        v = c5.apply_c5(100, 0.05, self.YARD, [0.01, 0.09])
+        assert v["sample_suspicious"] is False
+        assert v["verdict"] == c5.VERDICT_NOT_VETOED
 
     def test_ci_spans_zero_is_untested_not_killed(self):
         """⚠️ CI 跨 0 = 样本无法解析符号 ⇒ untested，**既不杀也不放行**。
 
         旧规在此恒判 killed（n<100），把「没测出来」记成「确实不行」——
-        两者对档案是完全不同的结论。
+        两者对档案是完全不同的结论。（n=150 隔离可疑闸，纯测跨 0 形。）
         """
-        v = c5.apply_c5(21, 0.05, self.YARD, [-0.03, 0.12])
+        v = c5.apply_c5(150, 0.05, self.YARD, [-0.03, 0.12])
         assert v["verdict"] == c5.VERDICT_UNTESTED
+        assert v["sample_suspicious"] is False
         assert v["fired"] == [], "untested 不得产生否决依据"
         assert "既不进 Phase 4" in v["note"]
 
     def test_ci_unavailable_is_untested(self):
         """bootstrap 失败（配对太少 ⇒ se/ci 为 None）同样是 untested。"""
-        assert c5.apply_c5(21, 0.05, self.YARD, None)["verdict"] == c5.VERDICT_UNTESTED
-        assert c5.apply_c5(21, 0.05, self.YARD, [])["verdict"] == c5.VERDICT_UNTESTED
-
-    def test_small_sample_with_clean_positive_ci_passes(self):
-        """⚠️ 小样本 + CI 全正 ⇒ not_vetoed——n 门槛已降级为诊断。
-
-        r37_c5 自证 64 对足以给出 −3.25·SE 的决定性读数 ⇒「样本小不能测」
-        的前提被实测推翻；CI 宽度本身就是样本够不够的答案。
-        """
-        v = c5.apply_c5(21, 0.05, self.YARD, [0.01, 0.09])
-        assert v["verdict"] == c5.VERDICT_NOT_VETOED
-        assert v["sample_below_floor"] is True, "但样本不足仍须如实留痕"
+        assert c5.apply_c5(150, 0.05, self.YARD, None)["verdict"] == c5.VERDICT_UNTESTED
+        assert c5.apply_c5(150, 0.05, self.YARD, [])["verdict"] == c5.VERDICT_UNTESTED
 
     def test_magnitude_clause_disabled_below_200(self):
         v = c5.apply_c5(150, 0.005, self.YARD, [0.001, 0.01])
@@ -167,17 +177,40 @@ class TestApplyC5:
         v = c5.apply_c5(250, 0.005, self.YARD, [0.001, 0.01])
         assert v["verdict"] == c5.VERDICT_KILLED
         assert [f["clause"] for f in v["fired"]] == ["c_magnitude"]
+        got = {d["clause"]: d["would_fire"] for d in v["diagnostics"]}
+        assert got["c_magnitude"] is True  # CI 整体 < thr，诊断与判决一致
 
     def test_all_pass_not_vetoed(self):
         v = c5.apply_c5(250, 0.02, self.YARD, [0.01, 0.03])
         assert v["verdict"] == c5.VERDICT_NOT_VETOED
         assert v["fired"] == []
 
+    def test_would_fire_aligned_to_ci_basis(self):
+        """v0.299 对齐（owner review）：diagnostics 的 would_fire 改与判决同
+        CI 口径——原按点估计算，「CI 全正、点估计 < bar」诊断误标
+        would_fire=True 而判决 untested，两者对不上。"""
+        yard = {"combined": 0.0222, "bar": 0.0111, "gamma": 0.5}
+        v = c5.apply_c5(250, 0.010, yard, [0.001, 0.02])  # CI 全正、点估计<bar
+        assert v["verdict"] == c5.VERDICT_UNTESTED
+        got = {d["clause"]: d["would_fire"] for d in v["diagnostics"]}
+        assert got["c_magnitude"] is False, "CI 乐观端越线 ⇒ 单看也不触发"
+        assert got["b_sign"] is False
+
+    def test_b_sign_would_fire_on_ci_not_point(self):
+        """b_sign 同 CI 口径：点估计为正但 CI95 全负 ⇒ killed + 诊断触发
+        （旧点估计口径会标 False，与判决对不上）。"""
+        v = c5.apply_c5(150, 0.05, self.YARD, [-0.03, -0.01])
+        assert v["verdict"] == c5.VERDICT_KILLED
+        assert [f["clause"] for f in v["fired"]] == ["b_sign"]
+        got = {d["clause"]: d["would_fire"] for d in v["diagnostics"]}
+        assert got["b_sign"] is True
+
     def test_diagnostics_record_every_clause_without_short_circuit(self):
         """⚠️ 全条款独立求值——旧实现 clause(a) 触发后 b/c 不再求值，
         `fired` 只含 a_sample，r37_c5 那条更强的证据（Δ/SE=−3.25）因此
         不在 fired 里、只能靠报告顶层字段捞回。战役壳是后续战役的 generic
-        载体，档案精度值得。"""
+        载体，档案精度值得。（可疑跑数同样逐条留痕：谁触发了可疑闸、
+        哪些条款单看会触发，一目了然。）"""
         v = c5.apply_c5(21, -0.2396, self.YARD, [-0.407, -0.124])
         got = {d["clause"]: d["would_fire"] for d in v["diagnostics"]}
         assert set(got) == {"a_sample", "b_sign", "c_magnitude"}
@@ -191,7 +224,7 @@ class TestApplyC5:
     def test_verdict_is_one_of_three(self):
         for n, dm, ci in (
             (21, -0.2, [-0.3, -0.1]),
-            (21, 0.05, [-0.1, 0.2]),
+            (150, 0.05, [-0.1, 0.2]),
             (250, 0.02, [0.01, 0.03]),
             (250, 0.005, [0.001, 0.01]),
         ):
