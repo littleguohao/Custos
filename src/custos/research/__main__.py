@@ -88,6 +88,13 @@ TOOLS: dict[str, tuple[str, str]] = {
         "（首对象=信号日 ADX(14)，档集 K=4 象限策展），主基准=uniform-best，"
         "C1~C4 判据跑数前写死（C4=随机分桶臂 N=50 同预算），pre2019 硬拒绝镜像",
     ),
+    "bear_regime_study": (
+        "driver",
+        "R40 0AMV 空头区间做多全栈研究终端：全量 46 门 ENTRY_GATES × 出场 5 档"
+        " =230 格全枚举（_amv_checker 反转仅空头日放行，无映射不放行）；基准="
+        "随机入场臂（对等纪律：挖掘窗选型冻结配置带判定窗读数）；C1 不过="
+        "untested；pre2019 硬拒绝镜像",
+    ),
     "score_c5_terminal": (
         "driver",
         "R36-C5 pre2019 终审终端（score 侧，exit_c5_terminal 同族镜像）：冻结"

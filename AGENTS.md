@@ -176,6 +176,9 @@ uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/
   factor_exit_study（R39 终端）：因子×出场交互——因子连续值×分桶×映射→
   出场档 80 格全枚举（无进化无 LLM；切点只估挖掘窗），主基准=uniform-best，
   C4=随机分桶臂同预算；预热复用 exit_campaign.warm_v0_signals（模块级单源）。
+  bear_regime_study（R40 终端）：0AMV 空头区间做多全栈——46 门×5 档 230 格
+  （invert_regime_bearish 反转仅空头日放行），基准=随机入场臂（v0.302 对等
+  纪律：挖掘窗选型冻结配置带判定窗）；判据四态含 untested（C1 不过≠证伪）。
   exit_c5_terminal（R37-C5 终审终端，判据 v0.299——**a_sample 可疑闸**：
   n 低于预期 ⇒ 跑数可疑不出判决（双向压）+ thr 三分：CI95 hi<thr 杀 /
   lo>0 且点估计≥thr 活 / 其余 untested）：冻结候选 vs 基准档
