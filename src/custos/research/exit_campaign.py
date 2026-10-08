@@ -17,7 +17,8 @@
   （tmp+replace），被杀重启 ``--resume`` 从台账状态续跑（v0.258 教训）；
 - **评估器协议注入**：``evaluate(params, *, start, end) -> readings | None``；
   生产默认 = V0 重放评估器（信号缓存重放 + V0 as-of 技术分 + topn 组合 +
-  objective_of——与 score_evolution_study V0 臂同引擎同公式）；测试注入
+  search_objective（v2=margin 单量+rdd 门，v0.296）——与
+  score_evolution_study V0 臂同引擎同公式）；测试注入
   fake，控制器与台账全程不碰数据。
 
 读数口径（R11 纪律）：margin/objective **只相对排序**（vs 基准档
@@ -52,8 +53,12 @@ V0_PORTFOLIO: dict[str, Any] = {
 }
 
 #: 读数块固定键（与 V0 臂同形状；台账/报告对账用，测试钉住）。
+#: v0.296 新增 objective_version/rdd_gate（objective v2 改版留痕——搜索标量=
+#: margin 单量 + rdd 约束门，见 strategy_grid.DEFAULT_OBJ_WEIGHTS 注）。
 READING_KEYS = (
     "objective",
+    "objective_version",
+    "rdd_gate",
     "margin",
     "expectancy_R",
     "payoff_ratio",
@@ -217,6 +222,13 @@ def _q95(pool: list[float]) -> Optional[float]:
     if len(pool) == 1:
         return pool[0]
     return statistics.quantiles(pool, n=100, method="inclusive")[94]
+
+
+def _sg_obj_version() -> str:
+    """读 objective 版本标记（局部 import：与生产评估器同口径，避免模块级依赖）。"""
+    from custos.research import strategy_grid as sg  # noqa: PLC0415
+
+    return sg.OBJECTIVE_VERSION
 
 
 def _c2_pass(
@@ -680,6 +692,7 @@ def run_campaign(
         "schema": "exit_campaign_report/v1",
         "campaign": tag,
         "status": state.status,
+        "objective_version": _sg_obj_version(),
         "verdict": {
             "running": "🔄 冒烟/暂停（max_batches 护栏），非结局",
             "falsified": "❌ 结局②：出场参数路线证伪收口（CTL-3）",
@@ -720,7 +733,7 @@ def make_v0_replay_evaluator(args: Any, ap: argparse.ArgumentParser) -> Evaluato
          V0 as-of 技术分；
       ② 评估（每基因组）：逐股 ``evaluate_trades(signals_in=…)`` 重放出场
          → 改写 V0 分 → ``summarize_trades`` + ``simulate_portfolio_topn``
-         → ``objective_of(DEFAULT_OBJ_WEIGHTS)``（读数块与 V0 臂同形状）。
+         → ``search_objective``（v2=margin 单量+rdd 门；读数块与 V0 臂同形状）。
     """
     from custos.research import backtest_factors as bt  # noqa: PLC0415
     from custos.research import score_return_study as srs  # noqa: PLC0415
@@ -816,7 +829,9 @@ def make_v0_replay_evaluator(args: Any, ap: argparse.ArgumentParser) -> Evaluato
             "ret_over_dd": ret_dd,
         }
         return {
-            "objective": sg.objective_of(row, sg.DEFAULT_OBJ_WEIGHTS),
+            "objective": sg.search_objective(row),
+            "objective_version": sg.OBJECTIVE_VERSION,
+            "rdd_gate": sg.rdd_gate_ok(row),
             "margin": margin,
             "expectancy_R": tsum.get("expectancy_R"),
             "payoff_ratio": tsum.get("payoff_ratio"),

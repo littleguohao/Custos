@@ -153,7 +153,16 @@ DEFAULT_EXIT_GRID: list[dict[str, Any]] = [
     },
 ]
 
-DEFAULT_OBJ_WEIGHTS = (1.0, 1.0, 0.05)  # margin / expectancy_R / return_over_maxdd
+# objective v2（2026-10-08，v0.296，#80④ owner 拍板采 Ⓐ）：搜索标量 = margin 单量——
+# 搜索（格子排名/CTL-1 幸存者排序/C4 随机门）与 C2 晋级门从此同量。v1 复合
+# (1.0, 1.0, 0.05) 经 v0.284 实测不自洽：margin 只占 17~20%，重尾 ret_over_dd
+# 驱动其余 80%，「搜索爬的山不是门量的山」；ret_over_dd 降为约束门
+# （RDD_GATE_FLOOR——其 docstring 本意=防偏袒高敞口，当门不当分）。
+# ⚠️ v2 与 v1 尺度不可比：历史报告的 objective/q95 读数属 v1 口径，不跨版本引用
+# （各战役 C4 随机池标尺本就自备、不跨战役复用）。
+OBJECTIVE_VERSION = "v2-margin"
+DEFAULT_OBJ_WEIGHTS = (1.0, 0.0, 0.0)  # margin / expectancy_R / return_over_maxdd
+RDD_GATE_FLOOR = 1.0  # 总收益 ≥ 最大回撤：敞口 sanity 最低门（防偏袒高敞口）
 
 # scorer 轴的表达式形态：``expr:<DSL表达式>``（进化引擎终审入口；网格展开期
 # 统一 expr_dsl.parse 预校验，拼 CLI 时翻译成 backtest_factors 的 --scorer-expr）。
@@ -599,12 +608,30 @@ def objective_of(
 
     margin / expectancy_R / ret_over_dd **任一缺失 ⇒ None**（该格不参与排名、垫底）。
     ⚠️ ret_over_dd 缺失不能按 0：0 排在真实负值之上，等于奖励了缺数据的格子。
-    ⚠️ 三项量纲不同，这是排序启发式；且 R11 未决，读数可信度受限。
+    ⚠️ 默认权重已是 v2（1,0,0）= margin 单量（见 DEFAULT_OBJ_WEIGHTS 注）；
+    传 v1 权重复算历史口径时「三项量纲不同」的排序启发式警告仍适用，
+    且 R11 未决，读数可信度受限。
     """
     m, e, rdd = row.get("margin"), row.get("expectancy_R"), row.get("ret_over_dd")
     if m is None or e is None or rdd is None:
         return None
     return weights[0] * m + weights[1] * e + weights[2] * rdd
+
+
+def rdd_gate_ok(row: dict[str, Any]) -> bool:
+    """ret_over_dd 约束门（v0.296）：< RDD_GATE_FLOOR ⇒ 敞口 sanity 不过。
+
+    缺读数 fail-closed（缺数据不奖励——与 objective_of 的 None 口径同精神）。
+    """
+    rdd = row.get("ret_over_dd")
+    return rdd is not None and rdd >= RDD_GATE_FLOOR
+
+
+def search_objective(row: dict[str, Any]) -> Optional[float]:
+    """v2 搜索标量（#80④ Ⓐ）：rdd 门不过 ⇒ None（垫底/不参与），否则 margin 单量。"""
+    if not rdd_gate_ok(row):
+        return None
+    return objective_of(row, DEFAULT_OBJ_WEIGHTS)
 
 
 def rank_rows(

@@ -461,10 +461,19 @@ def _resolve_universe(args: Any, ap: argparse.ArgumentParser) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def _objective_version() -> str:
+    """读 objective 版本标记进报告 config（局部 import 与 cell_runner 同口径）。"""
+    from custos.research import strategy_grid as sg  # noqa: PLC0415
+
+    return sg.OBJECTIVE_VERSION
+
+
 def _reading_of(sg: Any, row: dict) -> dict:
     """格子结果行 → 本工具的读数块（键名固定，测试钉住）。"""
     return {
-        "objective": sg.objective_of(row, sg.DEFAULT_OBJ_WEIGHTS),
+        "objective": sg.search_objective(row),
+        "objective_version": sg.OBJECTIVE_VERSION,
+        "rdd_gate": sg.rdd_gate_ok(row),
         "margin": row.get("margin"),
         "expectancy_R": row.get("expectancy_R"),
         "payoff_ratio": row.get("payoff_ratio"),
@@ -609,7 +618,7 @@ def _make_v0_runner(args: Any, codes: list[str], exit_spec: dict) -> CellRunner:
          ——与 cell 子进程（--trade-sim --top-n）同引擎同参数；
       ② A 层选择：每笔候选的 ``score`` 改写为 V0 as-of 技术分后
          ``simulate_portfolio_topn(top_n=--top-n)``——与 cell 的组合层同函数；
-      ③ 读数：``summarize_trades`` + ``objective_of(DEFAULT_OBJ_WEIGHTS)``
+      ③ 读数：``summarize_trades`` + ``search_objective``（v2=margin 单量+rdd 门）
          ——margin/expectancy_R/ret_over_dd/objective 与 cell 同公式。
 
     ⚠️ warmup 口径注记：逐股加载走 cell 同款 ``_load_one_bars(count,start,end)``
@@ -679,7 +688,9 @@ def _make_v0_runner(args: Any, codes: list[str], exit_spec: dict) -> CellRunner:
                 "ret_over_dd": ret_dd,
             }
             return {
-                "objective": sg.objective_of(row, sg.DEFAULT_OBJ_WEIGHTS),
+                "objective": sg.search_objective(row),
+                "objective_version": sg.OBJECTIVE_VERSION,
+                "rdd_gate": sg.rdd_gate_ok(row),
                 "margin": margin,
                 "expectancy_R": tsum.get("expectancy_R"),
                 "payoff_ratio": tsum.get("payoff_ratio"),
@@ -1062,7 +1073,9 @@ class _V0LatticeEvaluator:
             "ret_over_dd": ret_dd,
         }
         out = {
-            "objective": sg.objective_of(row, sg.DEFAULT_OBJ_WEIGHTS),
+            "objective": sg.search_objective(row),
+            "objective_version": sg.OBJECTIVE_VERSION,
+            "rdd_gate": sg.rdd_gate_ok(row),
             "margin": margin,
             "expectancy_R": tsum.get("expectancy_R"),
             "payoff_ratio": tsum.get("payoff_ratio"),
@@ -1314,6 +1327,7 @@ def _run_v0_lattice_study(
         "tag": args.tag,
         "config": {
             "mode": "v0_lattice_addon" if addon_legs else "v0_lattice",
+            "objective_version": _objective_version(),
             "legs_source": legs_source,
             "leg_axis": "V0 计分键（score_calibration_study.CONTRIB_LEG_KEYS 权威"
             "清单；repair_signals = each/cap 合成腿，倍率同乘双键）",
@@ -1883,6 +1897,7 @@ def _run_study(
         "version": SCHEMA_VERSION,
         "tag": args.tag,
         "config": {
+            "objective_version": _objective_version(),
             "legs_source": legs_source,
             "max_legs": args.max_legs,
             "rank_window": args.rank_window,

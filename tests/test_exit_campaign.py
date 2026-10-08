@@ -27,6 +27,8 @@ def _rd(margin, objective, n_taken=200):
     """合成读数块（键 = ec.READING_KEYS 契约）。"""
     return {
         "objective": objective,
+        "objective_version": "v2-margin",
+        "rdd_gate": True,
         "margin": margin,
         "expectancy_R": 0.1,
         "payoff_ratio": 2.0,
@@ -64,6 +66,8 @@ class TestContract:
     def test_reading_keys_pinned(self):
         assert ec.READING_KEYS == (
             "objective",
+            "objective_version",
+            "rdd_gate",
             "margin",
             "expectancy_R",
             "payoff_ratio",

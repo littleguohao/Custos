@@ -26,7 +26,7 @@
 | `src/custos/research/evolution/` | LLM 因子进化引擎（研究侧） |
 | `governance/contracts` | 代码真读的 JSON 配置（EXIT_RULES 等）+ 工作流文档 |
 | `governance/strategy` | 策略规则文档（一策略一目录 + STRATEGY_REGISTRY.json 强制登记） |
-| `governance/research` | 研究单元 R1-R34（判据预注册，编号只增不复用） |
+| `governance/research` | 研究单元 R1-R37（判据预注册，编号只增不复用） |
 | `TODO.md` / `CHANGELOG.md` | 待办 vs 已改策略规则，两者分工严格（见 §4） |
 | `tests/` | ~6100 测试，架构/契约/注册表全靠它强制 |
 
@@ -171,6 +171,10 @@ uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/
   （硬拒绝镜像），只能杀不能确认。score_c5_terminal（R36-C5 终审终端，
   score 侧同族镜像）：冻结 v0-lattice 基因组（产物自含读取）vs 等倍率基准，
   日簇配对 bootstrap（选中集不同 ⇒ 交易级配对不成立，同日同进同出）。
+  **objective 版本（v0.296，#80④ 采 Ⓐ）**：搜索标量 = margin 单量 +
+  rdd≥1.0 约束门（`strategy_grid.search_objective`）；v1 复合
+  （margin+expectancy_R+0.05·rdd）作废——历史 objective/q95 读数**不跨版本
+  引用**（各战役 C4 随机池标尺本就自备）。
 - 因子 IC 画像（`factor_ic_profile`）：SCORERS/DSL 的截面 RankIC/ICIR + horizon
   衰减全因子可比表——**分诊镜不是晋级判据**（晋级永远走双窗+三轴交易语义；
   读数 L3− 带幸存者偏差，R19/R21/R14）。

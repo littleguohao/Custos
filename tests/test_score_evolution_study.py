@@ -24,6 +24,8 @@ EXPR_TOP = compile_composite(LEGS, [3, 1])  # 权重格内（(3,1) 是 canonical
 def _reading(objective, margin=0.02, n=500):
     return {
         "objective": objective,
+        "objective_version": "v2-margin",
+        "rdd_gate": True,
         "margin": margin,
         "expectancy_R": 0.1,
         "payoff_ratio": 1.5,
@@ -140,6 +142,8 @@ class TestEndToEnd:
         assert rep["top_genome"]["mining"]["n"] == 1234
         assert set(rep["top_genome"]["mining"]) == {
             "objective",
+            "objective_version",
+            "rdd_gate",
             "margin",
             "expectancy_R",
             "payoff_ratio",
@@ -1055,7 +1059,9 @@ class TestV0LatticeEndToEnd:
 
     def test_random_arms_use_dsl_path(self, tmp_path):
         """随机对照臂仍走 DSL expr 路（cell_runner）：腿数 = --max-legs（6，R34 标尺口径）。"""
-        fake = FakeRunner(default=_reading(0.5))
+        # v0.296 objective v2（margin 单量+rdd 门）：top=关腿格 margin 0.3333 ⇒
+        # 随机臂默认读数降到 0.1（v1 尺度下 0.5 已高于 v2 top，语义不变：top>随机⇒pass）
+        fake = FakeRunner(default=_reading(0.1))
         rep = _run_v0l(tmp_path, fake, self._mining_collector())
         arms = rep["arms"]["random"]
         assert len(arms) == 2  # --n-random 2
@@ -1066,9 +1072,9 @@ class TestV0LatticeEndToEnd:
         assert len(fake.calls) == 2 * 64
         assert all(scorer.startswith("expr:") for scorer, _, _ in fake.calls)
         assert all((s, e) == MINING for _, s, e in fake.calls)
-        # top 1.33 > 随机臂最佳 0.5 ⇒ pass
+        # top margin 0.3333 > 随机臂最佳 0.1 ⇒ pass
         assert rep["random_control"]["verdict"] == "pass"
-        assert rep["criteria_readings"]["R34-C4"]["random_best_objective"] == 0.5
+        assert rep["criteria_readings"]["R34-C4"]["random_best_objective"] == 0.1
 
     def test_random_verdict_suspect_when_random_wins(self, tmp_path):
         fake = FakeRunner(default=_reading(9.9))  # 随机臂压过 top
@@ -1243,9 +1249,13 @@ class TestV0LatticeAddon:
 
     def test_addon_missing_excluded_not_zero(self, tmp_path):
         """无加腿读数的交易被排除（缺席≠零值）：n_candidates 减一、
-        n_addon_missing 如实记；基准基因组不受影响也无此键。"""
+        n_addon_missing 如实记；基准基因组不受影响也无此键。
+
+        v0.296 注记：缺读数票改到 B（原 A 第二笔）——A 独占选择时全赢组合
+        maxDD=0 ⇒ rdd None ⇒ rdd 门 fail-closed 全灭触发空产物护栏（rc=2）；
+        排除语义本身与票别无关，B 票缺读数同样钉「减一+如实记」。"""
         items = _v0l_collected_addon_mining()
-        items[2]["addon"][ADDON_EXPR] = None  # A 第二笔缺读数（warmup 语义）
+        items[3]["addon"][ADDON_EXPR] = None  # B 第二笔缺读数（warmup 语义）
         collector = SpyCollector({MINING: items})
         rep = _run_v0l(
             tmp_path,

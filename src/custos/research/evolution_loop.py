@@ -636,7 +636,9 @@ def _make_cell_runner(
             return None
         row = sg.load_cell_row(cell, path, reused=(status == "reused"))
         return {
-            "objective": sg.objective_of(row, sg.DEFAULT_OBJ_WEIGHTS),
+            "objective": sg.search_objective(row),
+            "objective_version": sg.OBJECTIVE_VERSION,
+            "rdd_gate": sg.rdd_gate_ok(row),
             "margin": row.get("margin"),
             "expectancy_R": row.get("expectancy_R"),
             "cell_signature": _row_signature(row),
@@ -789,6 +791,9 @@ def _write_summary(res: _RunResult, grid: dict[str, Any]) -> Path:
     # 不写交易集，单元格实 gate×出场 —— 读数只能当 gate×出场结论引用。
     config["cell_top_n"] = res.args.cell_top_n
     config["factor_axis_degenerate"] = res.args.cell_top_n <= 0
+    from custos.research import strategy_grid as sg  # noqa: PLC0415
+
+    config["objective_version"] = sg.OBJECTIVE_VERSION
     if config["factor_axis_degenerate"]:
         config["factor_axis_note"] = (
             "top_n=0：scorer 只写分数不筛选交易集，「因子×止损×止盈」"

@@ -419,6 +419,49 @@ class TestObjective:
         assert sg.objective_of(row, (1.0, 1.0, 0.05)) == pytest.approx(0.2)
 
 
+class TestObjectiveV2:
+    """v0.296（#80④ owner 拍板 Ⓐ）：搜索标量 = margin 单量 + rdd 约束门。
+
+    v1 复合 (1.0,1.0,0.05) 经 v0.284 实测不自洽（margin 仅占 17~20%，重尾
+    ret_over_dd 驱动其余）——搜索爬的山不是 C2 晋级门量的山；rdd 降为门
+    （docstring 本意=防偏袒高敞口）。⚠️ v2/v1 尺度不可比，q95 池不跨版本引用。
+    """
+
+    def test_default_weights_are_margin_only(self):
+        assert sg.DEFAULT_OBJ_WEIGHTS == (1.0, 0.0, 0.0)
+        assert sg.OBJECTIVE_VERSION == "v2-margin"
+
+    def test_search_objective_is_margin_when_gate_passes(self):
+        row = {"margin": 0.08, "expectancy_R": 0.3, "ret_over_dd": 2.5}
+        assert sg.search_objective(row) == pytest.approx(0.08)
+
+    def test_rdd_gate_blocks_high_exposure(self):
+        """rdd < 1.0（总收益 < 最大回撤）⇒ objective None（垫底/不参与）。"""
+        row = {"margin": 0.5, "expectancy_R": 0.9, "ret_over_dd": 0.99}
+        assert sg.search_objective(row) is None
+        assert sg.rdd_gate_ok(row) is False
+
+    def test_rdd_gate_floor_is_inclusive(self):
+        row = {"margin": 0.1, "expectancy_R": 0.1, "ret_over_dd": 1.0}
+        assert sg.rdd_gate_ok(row) is True
+        assert sg.search_objective(row) == pytest.approx(0.1)
+
+    def test_missing_rdd_fails_closed(self):
+        """缺 rdd 读数 = 无法验证敞口 sanity ⇒ 门不过（缺数据不奖励）。"""
+        row = {"margin": 0.5, "expectancy_R": 0.9, "ret_over_dd": None}
+        assert sg.rdd_gate_ok(row) is False
+        assert sg.search_objective(row) is None
+
+    def test_missing_margin_still_none(self):
+        row = {"margin": None, "expectancy_R": 0.1, "ret_over_dd": 3.0}
+        assert sg.search_objective(row) is None
+
+    def test_v1_weights_still_reproducible(self):
+        """v1 复合口径仍可显式复算（历史报告对账用，不作搜索标量）。"""
+        row = {"margin": 0.1, "expectancy_R": 0.1, "ret_over_dd": 2.0}
+        assert sg.objective_of(row, (1.0, 1.0, 0.05)) == pytest.approx(0.3)
+
+
 class TestOutputSchema:
     """ranked JSON 键名钉住——它是后续 campaign/回流脚本的解析面。"""
 
