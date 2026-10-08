@@ -107,10 +107,17 @@ schema 并在生产者落盘前 `require()`（豁免要登记理由），否则�
 ## 3. 命令与环境
 
 ```bash
-uv run pytest -q          # 全量（~10.6 分钟/6124 例，2026-09-21 实测；提交前必跑且必须全绿）
+uv run python scripts/dev/test_affected.py   # 本地迭代默认：受影响模块+基础守卫（秒级~分钟级；--dry-run 看选择）
+uv run pytest -q          # 全量（~5.3 分钟/6283 例，2026-10-08 实测）——GitHub CI 双平台门禁在每个 push/PR 必跑
 bash scripts/audit.sh     # 六件套；第 0 件 ruff format --check 是唯一硬门槛
 uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/
 ```
+
+- **测试分工（2026-10-08 起）**：本地提交前跑 `test_affected.py`（变更模块的
+  反向 import 闭包 ⇒ 受影响测试 + 基础守卫集）必须绿；**全量由 GitHub CI
+  （ubuntu+windows 双平台）跑，CI 红必须当天修**。影响面无法局部化时
+  （conftest/pyproject/uv.lock/.github/tests/helpers_*）选择器自动转全量；
+  推送前想本地全量兜底可随时 `uv run pytest -q` 或 `test_affected.py --full`。
 
 - Python ≥3.11，依赖只有 pandas/mootdx/openpyxl/requests——**不得新增第三方依赖**
   （向量化用 numpy 等 pandas 自带物；DSL 解析用 stdlib ast，**禁止 eval/exec**）。
