@@ -148,6 +148,25 @@ class TestSelect:
         assert "test_research_units.py" not in _names(files)
         assert not any("治理守卫" in w for w in why)
 
+    def test_filename_mention_scan(self, tree):
+        """v0.302 通用规则：变更文件名出现在哪个测试文本里就选哪个
+        （不 import custos、不满足命名直配的钉测试也能命中，免维护清单）。"""
+        src, tests = tree
+        (tests / "test_live_rules.py").write_text(
+            'CFG = "EXIT_RULES.json"\n', encoding="utf-8"
+        )
+        _, files, why = ta.select(["governance/contracts/EXIT_RULES.json"], src, tests)
+        assert "test_live_rules.py" in _names(files)
+        assert any("提及" in w for w in why)
+        # 未被任何测试提及的文件名不扩选
+        _, files2, _ = ta.select(["governance/contracts/NOWHERE.json"], src, tests)
+        assert "test_live_rules.py" not in _names(files2)
+
+    def test_filename_mention_real_tree(self):
+        """真树钉住 owner 核过的漏选案例：EXIT_RULES.json ⇒ test_exit_rules.py。"""
+        _, files, _ = ta.select(["governance/contracts/EXIT_RULES.json"])
+        assert "test_exit_rules.py" in _names(files)
+
     @pytest.mark.parametrize(
         "trigger",
         [

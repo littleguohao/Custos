@@ -227,6 +227,28 @@ def select(
                 selected.add(fp)
                 why.append(f"{p} 测试本体变更")
 
+    # ── 文件名提及扫描（v0.302 owner review，通用免维护清单）：变更文件名
+    # 出现在哪个测试文本里就选哪个——live 配置 JSON 的钉测试既不 import
+    # custos 也不满足命名直配（EXIT_RULES.json⇒test_exit_rules.py 实测漏选；
+    # scripts/dev 下的脚本测试同理——它不在 custos 闭包里）──
+    names = {
+        Path(p).name
+        for p in changed
+        if not p.startswith("tests/") and len(Path(p).name) >= 5
+    }
+    if names:
+        for t in sorted(tests_root.glob("test_*.py")):
+            if t in selected:
+                continue
+            try:
+                txt = t.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            hit = [n for n in names if n in txt]
+            if hit:
+                selected.add(t)
+                why.append(f"{t.name} 提及 {sorted(hit)} ⇒ 选中")
+
     affected = reverse_closure(graph, seeds)
     for tfile, deps in test_map.items():
         if deps & affected:
