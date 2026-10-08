@@ -301,6 +301,7 @@
 | 2026-10-08 | v0.297 | **objective v2 两缺陷修复（owner review 复现）**——A：随机臂全被 rdd 门拦 ⇒ 池空 `c4_bar=None` 自动放行并 confirmed（「n_random≥1 总有臂」假设被 v2 打破），改 **indeterminate** 不放行（对齐 score_evolution_study；near_miss 记 `c4_indeterminate_pool_empty`；n_random=0 冒烟通道不拦）+ 报告记随机臂 rdd 过门率；B：CLI `rank_rows` 此前不走门（「优胜格可拷 live EXIT_RULES」最接近 live 的路径漏门），v2 默认权重下套门（显式自定义权重=复算不套），行留 `rdd_gate` | owner review | 钉测 +5 |
 | 2026-10-08 | v0.298 | **C5 判据改 thr 三分（owner 拍板）**——thr=bar（n≥200）否则 0：CI95 hi<thr ⇒ killed（整个 CI 够不到标尺）；lo>0 且点估计≥thr ⇒ not_vetoed（显著+量级双要）；其余 untested。迁移两形：①CI 跨 0 但整体低于 bar（v0.281 漏网）⇒ 杀；②CI 全正但点估计<bar（v0.281 点杀）⇒ untested。**r37_c5_v2 不翻案**（看过数据再改判=事后判据；R37 已收口不接 live 后果为零，加注记）；R36-C5 不受影响（CI_hi+0.127>bar） | owner 拍板 | 钉测 +3 |
 | 2026-10-08 | v0.299 | **C5 判据 v0.299（owner review 两条）**——①a_sample 升**可疑闸**：n<100 ⇒ 跑数可疑不出判决（双向压）+ 报告顶层 warning；废因勘误——v0.281「钉死信号集⇒恒触发必杀门」被 v0.288 全历史复跑推翻（真因=加载截断，70710 对/n=536 符号翻转），「64 对 −3.25·SE」是碎片宇宙产物；教训反向：bootstrap CI 不覆盖样本偏差，暴露异常的恰是被废的 n 门槛。②diagnostics would_fire 对齐 CI 口径（原按点估计与判决对不上）。在案判决不受影响（r37_c5_v2 n=536、r36_c5 n=376 均≥100） | owner review | 钉测 +3 改写 4 |
+| 2026-10-08 | v0.300 | **R39 Phase 1 工具落地**：`factor_exit_study`（因子×出场交互终端）——首对象=信号日 ADX(14)（dmi_arrays 单源，bar i↔adx[i-1] 钉测对账），切点只估挖掘窗（双窗硬隔离），档集 K=4 映射 80 格全枚举，主基准=uniform-best（选择同只在挖掘窗），C1 桶级 n_taken/C2 双窗同向/C3 切点 ±20%×4 零翻转/C4 随机分桶臂 N=50 同预算 q95（池≥50 confirmed）；产物自含供 C5 读取；exit_campaign 抽 `warm_v0_signals` 模块级单源（评估器逐位不变）；TOOLS/AGENTS §5 同步；R39 文档 160→80 格更正 | R39 预注册（#81②） | 钉测 +17 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

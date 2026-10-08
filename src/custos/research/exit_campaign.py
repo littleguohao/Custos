@@ -760,6 +760,57 @@ def run_campaign(
 # ---------------------------------------------------------------------------
 
 
+def warm_v0_signals(
+    codes: list[str],
+    regime: dict[str, str],
+    index_df: Any,
+    *,
+    count: int,
+    cost_bps: float,
+    start: str,
+    end: str,
+) -> dict[str, dict]:
+    """V0 重放信号预热：逐股加载 → j_low+0AMV 信号扫描 → as-of V0 技术分。
+
+    信号与分数都与出场参数无关，每（窗, 宇宙）只算一次——评估器闭包的
+    模块级复用（factor_exit_study 等同引擎工具共用；逻辑自
+    make_v0_replay_evaluator._warm 原样上移，逐位不变）。
+    """
+    from custos.research import backtest_factors as bt  # noqa: PLC0415
+    from custos.research import score_return_study as srs  # noqa: PLC0415
+
+    per_code: dict[str, dict] = {}
+    for i, code in enumerate(codes, 1):
+        if i % 200 == 0:
+            print(f"[warmup] {start}~{end} {i}/{len(codes)}", file=sys.stderr)
+        df = bt._load_one_bars(code, count, start, end)
+        if df is None or not len(df):
+            continue
+        sigs: list[dict] = []
+        bt.evaluate_trades(
+            {code: df},
+            scorer=bt.SCORERS["baseline"],
+            entry_gate=bt.j_low_gate,
+            amv_regime=regime,
+            cost_bps=cost_bps,
+            collect_all=True,
+            signals_out=sigs,
+        )
+        if not sigs:
+            continue
+        scores: dict[str, float] = {}
+        for s in sigs:
+            try:
+                score, _level, _contrib = srs.asof_technical_score(
+                    df, index_df, s["i"], code
+                )
+            except Exception:  # noqa: BLE001 — 单信号评分失败丢该信号
+                continue
+            scores[s["date"]] = score
+        per_code[code] = {"df": df, "signals": sigs, "scores": scores}
+    return per_code
+
+
 def make_v0_replay_evaluator(args: Any, ap: argparse.ArgumentParser) -> Evaluator:
     """构造 V0 重放评估器（生产机专用；测试注入 fake）。
 
@@ -804,39 +855,17 @@ def make_v0_replay_evaluator(args: Any, ap: argparse.ArgumentParser) -> Evaluato
 
     def _warm(start: str, end: str) -> dict[str, dict]:
         key = (start, end)
-        if key in cache:
-            return cache[key]
-        per_code: dict[str, dict] = {}
-        for i, code in enumerate(codes, 1):
-            if i % 200 == 0:
-                print(f"[warmup] {start}~{end} {i}/{len(codes)}", file=sys.stderr)
-            df = bt._load_one_bars(code, args.count, start, end)
-            if df is None or not len(df):
-                continue
-            sigs: list[dict] = []
-            bt.evaluate_trades(
-                {code: df},
-                scorer=bt.SCORERS["baseline"],
-                entry_gate=bt.j_low_gate,
-                amv_regime=regime,
+        if key not in cache:
+            cache[key] = warm_v0_signals(
+                codes,
+                regime,
+                index_df,
+                count=args.count,
                 cost_bps=args.cost_bps,
-                collect_all=True,
-                signals_out=sigs,
+                start=start,
+                end=end,
             )
-            if not sigs:
-                continue
-            scores: dict[str, float] = {}
-            for s in sigs:
-                try:
-                    score, _level, _contrib = srs.asof_technical_score(
-                        df, index_df, s["i"], code
-                    )
-                except Exception:  # noqa: BLE001 — 单信号评分失败丢该信号
-                    continue
-                scores[s["date"]] = score
-            per_code[code] = {"df": df, "signals": sigs, "scores": scores}
-        cache[key] = per_code
-        return per_code
+        return cache[key]
 
     def evaluate(params: dict, *, start: str, end: str) -> Optional[dict]:
         per_code = _warm(start, end)

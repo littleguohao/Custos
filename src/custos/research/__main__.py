@@ -82,6 +82,12 @@ TOOLS: dict[str, tuple[str, str]] = {
         " 配对 bootstrap SE+n 前置，只接受 pre2019 段内窗口（硬拒绝镜像），"
         "只能杀不能确认",
     ),
+    "factor_exit_study": (
+        "driver",
+        "R39 因子×出场交互研究终端：因子连续值×分桶×映射→出场档 80 格全枚举"
+        "（首对象=信号日 ADX(14)，档集 K=4 象限策展），主基准=uniform-best，"
+        "C1~C4 判据跑数前写死（C4=随机分桶臂 N=50 同预算），pre2019 硬拒绝镜像",
+    ),
     "score_c5_terminal": (
         "driver",
         "R36-C5 pre2019 终审终端（score 侧，exit_c5_terminal 同族镜像）：冻结"
