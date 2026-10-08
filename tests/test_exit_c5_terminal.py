@@ -103,11 +103,13 @@ class TestCombinedYardstick:
 
 
 class TestApplyC5:
-    """C5 判决 v0.281：CI 三分 + 全条款不短路。
+    """C5 判决 v0.298：thr 三分（CI_hi<thr 杀 / CI_lo>0 且点估计≥thr 活 / 其余
+    untested）+ 全条款不短路。
 
     ⚠️ 旧版「n_taken<100 按杀计」在 pre2019 上**恒触发** ⇒ C5 退化成必杀门
     （r37_c5 实跑暴露：交易数由钉死信号集决定，任何候选都在 ~64 笔 /
-    n_taken ~21 量级）。改用已在算的配对 bootstrap CI95 三分。
+    n_taken ~21 量级）。v0.298 规则：thr = bar（量级激活 n≥200）否则 0——
+    杀要整个 CI 低于标尺（连乐观端都够不到才杀），活要显著性+量级双要。
     """
 
     YARD = {"combined": 0.0222, "bar": 0.0111, "gamma": 0.5}
@@ -199,6 +201,44 @@ class TestApplyC5:
                 c5.VERDICT_NOT_VETOED,
                 c5.VERDICT_UNTESTED,
             )
+
+
+class TestApplyC5V298Migration:
+    """v0.298 迁移的读数形（owner 逐案核过）。"""
+
+    def test_ci_spans_zero_but_below_bar_kills(self):
+        """① CI 跨 0 但整体低于 bar ⇒ killed（r37_c5_v2 读数形）。
+
+        v0.281 里量级条款只在 CI 全正时才被咨询，这种形态漏网成 untested；
+        v0.298：连 CI 乐观端（hi +0.0063）都够不到 thr（0.0167）⇒ 证据性否决。
+        ⚠️ 真实 r37_c5_v2 的判决**维持 untested 不翻**（owner 拍板：看过数据
+        再改判=事后判据；R37 已收口不接 live，仅档案措辞——注记在 R37 文档）。
+        本钉测锁的是**新判据逻辑**对该读数形的映射，不是翻旧案。
+        """
+        yard = {"combined": 0.0223, "bar": 0.0167, "gamma": 0.75}
+        v = c5.apply_c5(536, 0.0033, yard, [-0.0002, 0.0063])
+        assert v["verdict"] == c5.VERDICT_KILLED
+        assert [f["clause"] for f in v["fired"]] == ["c_magnitude"]
+        assert v["threshold"] == 0.0167
+
+    def test_all_positive_but_point_below_bar_is_untested(self):
+        """② CI 全正但点估计 < bar ⇒ untested（v0.281 按点估计杀 ⇒ 放宽）。
+
+        新规则：杀要求**整个 CI** 低于标尺——CI 乐观端越线（hi 0.02 > bar
+        0.0111）就不能叫「证据性否决」；活要求 lo>0 ∧ 点估计≥bar——点估计
+        不达标也不能放行。两不占 ⇒ untested。
+        """
+        yard = {"combined": 0.0222, "bar": 0.0111, "gamma": 0.5}
+        v = c5.apply_c5(250, 0.010, yard, [0.001, 0.02])
+        assert v["verdict"] == c5.VERDICT_UNTESTED
+        assert v["fired"] == []
+
+    def test_r36_c5_shape_unchanged(self):
+        """R36-C5 读数形（adx_gt_60：Δ+0.0309，CI95 [−0.072,+0.127]）不受影响：
+        CI_hi +0.127 > bar 0.055 ⇒ 跨 thr ⇒ 仍 untested（owner 核过）。"""
+        yard = {"combined": 0.1100, "bar": 0.0550, "gamma": 0.5}
+        v = c5.apply_c5(376, 0.0309, yard, [-0.072, 0.127])
+        assert v["verdict"] == c5.VERDICT_UNTESTED
 
 
 class TestPairBootstrap:

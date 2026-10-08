@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""R37-C5 pre2019 终审终端（判据 v0.273 定稿 → v0.281 CI 三分修订的代码化身）。
+"""R37-C5 pre2019 终审终端（判据 v0.273 定稿 → v0.281 CI 三分 → v0.298 thr 三分）。
 
 只接受 pre2019 untouched 段（2010-01-01..2016-12-31）内的窗口——与
 ``score_calibration_study`` Phase 3「只接受 pre2019 输入」互为同族镜像
@@ -10,16 +10,16 @@
   exit_campaign 生产评估器同引擎同公式：信号缓存 + as-of V0 分 +
   summarize_trades/simulate_portfolio_topn + sg._margin），报
   Δmargin + 配对 bootstrap SE（交易按 (code, entry_date) 1:1 配对——
-  两变体重放同一信号集，相关性不用猜 ρ），按 v0.281 CI 三分判决
+  两变体重放同一信号集，相关性不用猜 ρ），按 v0.298 判决规则
   （v0.273 否决条件经 r37_c5 实跑暴露硬 n 门槛在 pre2019 恒触发=
   必杀门 ⇒ 废为诊断；完整判据与废因见 apply_c5 docstring）：
 
-  - CI95 全负 ⇒ killed（证据性否决）；
-  - CI95 跨 0 或不可得 ⇒ untested（既不进 Phase 4 也不按证伪归档）；
-  - CI95 全正 ⇒ 再过量级条款（n≥200 且 Δ<γ×两窗合并标尺 ⇒ killed；
-    γ 分档 v0.276：候选窗间保留率 <0.5 标 degraded ⇒ γ=0.75，否则
-    γ=0.5；n<200 时 SE≈0.025 任何 γ 失去意义 ⇒ 量级条款停用——
-    owner v0.273/v0.276 拍板在案），否则 not_vetoed。
+  thr = γ×合并标尺（量级激活 n≥200 时）否则 0：
+  - CI95 hi < thr ⇒ killed（整个置信区间够不到标尺，证据性否决）；
+  - CI95 lo > 0 且点估计 ≥ thr ⇒ not_vetoed（显著性+量级双要）；
+  - 其余 ⇒ untested（既不进 Phase 4 也不按证伪归档）。
+  γ 分档 v0.276：候选窗间保留率 <0.5 标 degraded ⇒ γ=0.75，否则 γ=0.5；
+  n<200 时 SE≈0.025 任何 γ 失去意义 ⇒ thr=0——owner v0.273/v0.276 拍板在案。
 
 **全过也只记「C5 未否决」**——本工具只能杀不能确认；判决表达 Δ/SE
 （k·SE），不压二值。两窗合并标尺从战役报告自含读取（--campaign-report），
@@ -194,7 +194,25 @@ def apply_c5(
     yardstick: dict[str, float],
     ci95: Optional[list[float]] = None,
 ) -> dict[str, Any]:
-    """C5 判决（v0.281 改 CI 三分；只能杀不能确认）。
+    """C5 判决（v0.298 owner 拍板改判据；只能杀不能确认）。
+
+    **判决规则（写死）**：``thr = γ×合并标尺``（量级激活：n_taken ≥ 200 时）
+    **否则 0**——
+    - CI95 **hi < thr** ⇒ ``killed``（证据性否决：hi<0 记 ``b_sign``；
+      0≤hi<thr 记 ``c_magnitude``——整个置信区间都够不到标尺）；
+    - CI95 **lo > 0 且点估计 ≥ thr** ⇒ ``not_vetoed``（显著性+量级双要）；
+    - 其余 ⇒ ``untested``（CI 不可得 / 跨 thr / 显著但量级不定）——
+      **既不进 Phase 4 也不按证伪归档**（区分「没测出来」与「确实不行」）。
+
+    **v0.281→v0.298 迁移两个读数形**（owner 逐案核过）：
+    ① CI 跨 0 但整体低于 bar（r37_c5_v2 形：CI_hi +0.0063 < thr 0.0167）
+       untested → **killed**——v0.281 里量级条款只在 CI 全正时才被咨询，
+       这种「跨零但整体够不到 bar」的形态漏网；
+    ② CI 全正但点估计 < bar（v0.281 量级条款按点估计杀）→ **untested**
+       ——杀要求整个 CI 低于标尺（更统计原则：连乐观端都够不到才杀）。
+    r37_c5_v2 的实际判决**不翻**（owner 拍板：看过数据再改判=事后判据；
+    R37 已收口不接 live，实际后果为零——R37 文档加注记留档）。
+    R36-C5 不受影响（CI_hi +0.127 > bar 0.055 ⇒ 仍 untested）。
 
     **为什么废掉硬 n 门槛**（owner review 2026-09-24，r37_c5 实跑暴露）：
     原 clause(a)「n_taken<100 按杀计」在 pre2019 上**恒触发** ⇒ C5 退化成
@@ -206,13 +224,6 @@ def apply_c5(
     **替代方案**：用已在算的配对 bootstrap CI95 三分——r37_c5 自己证明了
     64 对样本足以给出 Δ/SE=−3.25 的决定性读数，所以「样本小不能测」的前提
     被实测推翻；CI 宽度**本身**就是样本够不够的答案，硬 n 门槛与它冗余。
-
-    - CI95 **全负**（hi<0）⇒ ``killed``（证据性否决，clause b_sign）；
-    - CI95 **跨 0** 或 CI 不可得 ⇒ ``untested``——样本无法解析符号：
-      **既不否决也不放行**（不进 Phase 4，也不按证伪归档）。区分
-      「没测出来」与「确实不行」对档案至关重要；
-    - CI95 **全正**（lo>0）⇒ 再过量级条款（n≥200 且 Δ<γ×合并标尺 ⇒ killed），
-      否则 ``not_vetoed``。
 
     **全条款独立求值、不短路**（v0.281）：原实现 clause(a) 触发后 b/c 不再
     求值，``fired`` 只含 a_sample——r37_c5 那条更强的证据（Δ/SE=−3.25）因此
@@ -249,7 +260,8 @@ def apply_c5(
         mag_would,
     )
 
-    # ── CI 三分判决 ──
+    # ── CI 三分判决（v0.298）：thr = bar（量级激活）否则 0 ──
+    thr = yardstick["bar"] if mag_active else 0.0
     lo, hi = (ci95[0], ci95[1]) if ci95 and len(ci95) == 2 else (None, None)
     ci_state = (
         "unavailable"
@@ -260,7 +272,9 @@ def apply_c5(
         if lo > 0
         else "spans_zero"
     )
-    if ci_state == "all_negative":
+    if lo is None or hi is None:
+        verdict = VERDICT_UNTESTED  # CI 不可得 = 无法解析
+    elif hi < 0:
         verdict = VERDICT_KILLED
         fired.append(
             {
@@ -270,17 +284,18 @@ def apply_c5(
                 "ci95": ci95,
             }
         )
-    elif ci_state == "all_positive":
+    elif hi < thr:
+        verdict = VERDICT_KILLED
+        fired.append(
+            {
+                "clause": "c_magnitude",
+                "value": d_margin,
+                "threshold": f"CI95 整体 < γ×合并标尺={thr:.6f} ⇒ 证据性否决",
+                "ci95": ci95,
+            }
+        )
+    elif lo > 0 and d_margin is not None and d_margin >= thr:
         verdict = VERDICT_NOT_VETOED
-        if mag_would:
-            verdict = VERDICT_KILLED
-            fired.append(
-                {
-                    "clause": "c_magnitude",
-                    "value": d_margin,
-                    "threshold": f"≥{yardstick['gamma']}×合并标尺={yardstick['bar']:.6f}",
-                }
-            )
     else:
         verdict = VERDICT_UNTESTED
 
@@ -290,10 +305,11 @@ def apply_c5(
         "diagnostics": diag,
         "ci95": ci95,
         "ci_state": ci_state,
+        "threshold": thr,
         "magnitude_clause_active": mag_active,
         "sample_below_floor": below_floor,
         "note": (
-            "untested = pre2019 样本无法解析符号：既不进 Phase 4 也不按证伪归档"
+            "untested = pre2019 样本无法解析：既不进 Phase 4 也不按证伪归档"
             if verdict == VERDICT_UNTESTED
             else "全过也只记「未否决」，非确认"
         ),
@@ -302,7 +318,7 @@ def apply_c5(
 
 def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
-        description="R37-C5 pre2019 终审终端（判据 v0.281 CI 三分；只能杀不能确认）"
+        description="R37-C5 pre2019 终审终端（判据 v0.298 thr 三分；只能杀不能确认）"
     )
     ap.add_argument("--genome", required=True, help="冻结候选基因组键（sp8|...）")
     ap.add_argument("--codes-file", required=True, help="钉死宇宙 codes 表")
@@ -494,7 +510,7 @@ def run_c5(args: Any, per_code: Optional[dict[str, dict]] = None) -> dict[str, A
             "top_n": args.top_n,
             "n_bootstrap": args.n_bootstrap,
             "seed": args.seed,
-            "criteria": "R37-C5 v0.281 CI 三分（CI95 全负杀/跨0 untested/全正再过量级；v0.276 γ 分档 degraded 0.75/否则 0.5；合并标尺自含读取）",
+            "criteria": "R37-C5 v0.298 thr 三分（CI95 hi<thr 杀/lo>0 且点估计≥thr 活/其余 untested；thr=bar（n≥200）否则 0；v0.276 γ 分档 degraded 0.75/否则 0.5；合并标尺自含读取）",
         },
         "yardstick": yard,
         "candidate": {**rd_c, "n_taken": n_taken},

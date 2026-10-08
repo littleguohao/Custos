@@ -299,6 +299,7 @@
 | 2026-10-08 | v0.295 | 影子对照 compare 剔除北交所码（#76① 闭环可达性修复，owner 拍板方案 1）——v0.257 起现行候选表含 BJ 票而迁移前钉点基线无 BJ 评分口径 ⇒ BJ 恒差使「逐位一致 ≥10 日」永不可达（09-24 实差 14 只全是 BJ）；extract 滤 BJ（overview 含 BJ 码行整行剔 + pool BJ 键剔，market_of 单一真源）并记剔除数，闭环判据=非 BJ 宇宙逐位一致，钉测 +4 | owner 拍板（2026-10-08） | 影子继续逐日收集 |
 | 2026-10-08 | v0.296 | **objective v2 落地（#80④ 采 Ⓐ）+ R37 收口签发（换方向）+ r37_b1 存档备查**——搜索标量=margin 单量+rdd≥1 约束门（`search_objective`，5 读数位点全切+读数块加 objective_version/rdd_gate+READING_KEYS 同步；v1 不自洽 v0.284 在案；v1/v2 不跨版本引用）；R37 三战役 1 untested+2 证伪归档，出场侧后续=#81②；r37_b1 不接 live（贴零+CI 跨 0+量级 would_fire） | owner 拍板（2026-10-08） | #81② 立项预注册 |
 | 2026-10-08 | v0.297 | **objective v2 两缺陷修复（owner review 复现）**——A：随机臂全被 rdd 门拦 ⇒ 池空 `c4_bar=None` 自动放行并 confirmed（「n_random≥1 总有臂」假设被 v2 打破），改 **indeterminate** 不放行（对齐 score_evolution_study；near_miss 记 `c4_indeterminate_pool_empty`；n_random=0 冒烟通道不拦）+ 报告记随机臂 rdd 过门率；B：CLI `rank_rows` 此前不走门（「优胜格可拷 live EXIT_RULES」最接近 live 的路径漏门），v2 默认权重下套门（显式自定义权重=复算不套），行留 `rdd_gate` | owner review | 钉测 +5 |
+| 2026-10-08 | v0.298 | **C5 判据改 thr 三分（owner 拍板）**——thr=bar（n≥200）否则 0：CI95 hi<thr ⇒ killed（整个 CI 够不到标尺）；lo>0 且点估计≥thr ⇒ not_vetoed（显著+量级双要）；其余 untested。迁移两形：①CI 跨 0 但整体低于 bar（v0.281 漏网）⇒ 杀；②CI 全正但点估计<bar（v0.281 点杀）⇒ untested。**r37_c5_v2 不翻案**（看过数据再改判=事后判据；R37 已收口不接 live 后果为零，加注记）；R36-C5 不受影响（CI_hi+0.127>bar） | owner 拍板 | 钉测 +3 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

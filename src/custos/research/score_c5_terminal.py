@@ -11,14 +11,15 @@
   （=live V0 默认权重）在 pre2019 段上重放——与 score_evolution_study
   v0-lattice 同引擎同公式（``_collect_v0_window`` 权重无关收集 +
   ``technical_score`` 倍率重打分 + ``simulate_portfolio_topn`` 选中子集），
-  报 Δmargin + **日簇配对 bootstrap** SE/CI95，按 v0.281 CI 三分判决
-  （复用 ``exit_c5_terminal.apply_c5``）：
+  报 Δmargin + **日簇配对 bootstrap** SE/CI95，按 v0.298 thr 三分判决
+  （复用 ``exit_c5_terminal.apply_c5``——判据/常量单源）：
 
-  - CI95 全负 ⇒ killed（证据性否决）；
-  - CI95 跨 0 或不可得 ⇒ untested（既不进下一步也不按证伪归档）；
-  - CI95 全正 ⇒ 再过量级条款（n≥200 且 Δ<γ×两窗合并标尺 ⇒ killed；
-    γ 分档 v0.276：窗间保留率 <0.5 ⇒ degraded ⇒ γ=0.75，否则 0.5；
-    n<200 停用），否则 not_vetoed。
+  thr = γ×合并标尺（量级激活 n≥200 时）否则 0：
+  - CI95 hi < thr ⇒ killed（整个置信区间够不到标尺，证据性否决）；
+  - CI95 lo > 0 且点估计 ≥ thr ⇒ not_vetoed（显著性+量级双要）；
+  - 其余 ⇒ untested（既不进下一步也不按证伪归档）。
+  γ 分档 v0.276：窗间保留率 <0.5 ⇒ degraded ⇒ γ=0.75，否则 0.5；
+  n<200 时 thr=0。
 
 配对单元 = **entry_date 日簇**（与出场侧的差異：两变体从同一候选池
 选股、选中集合不同 ⇒ 交易级 (code, entry_date) 1:1 配对不成立；同一
@@ -211,7 +212,7 @@ def _resolve_exit(args: Any, ap: argparse.ArgumentParser) -> dict:
 
 def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
-        description="R36-C5 pre2019 终审终端（score 侧，判据 v0.281 CI 三分同族；只能杀不能确认）"
+        description="R36-C5 pre2019 终审终端（score 侧，判据 v0.298 thr 三分同族；只能杀不能确认）"
     )
     ap.add_argument(
         "--from-report",
@@ -325,7 +326,7 @@ def run_c5(
             "top_n": args.top_n,
             "n_bootstrap": args.n_bootstrap,
             "seed": args.seed,
-            "criteria": "R36-C5 同族 R37-C5 v0.281 CI 三分（CI95 全负杀/跨0 untested/全正再过量级；v0.276 γ 分档；标尺自含读取）；配对=entry_date 日簇",
+            "criteria": "R36-C5 同族 R37-C5 v0.298 thr 三分（CI95 hi<thr 杀/lo>0 且点估计≥thr 活/其余 untested；thr=bar（n≥200）否则 0；v0.276 γ 分档；标尺自含读取）；配对=entry_date 日簇",
         },
         "yardstick": yard,
         "candidate": {**rd_c, "n_taken": n_taken},
