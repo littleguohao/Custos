@@ -284,6 +284,9 @@ def select_module(prefix: str, tests_root: Path = TESTS) -> list[Path]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--since", default=None, help="并入 REF...HEAD 的已提交 diff")
     ap.add_argument("--module", default=None, help="模块划分模式（如 custos.research）")
