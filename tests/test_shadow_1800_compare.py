@@ -58,7 +58,7 @@ class TestExtractLabelSections:
 
     def test_missing_overview_and_empty_pool(self):
         got = shadow.extract_label_sections("# 空表\n\n（今日无）\n")
-        assert got == {"overview": "", "pool": {}}
+        assert got == {"overview": "", "pool": {}, "bj_excluded": 0}
 
     def test_header_and_separator_rows_filtered(self):
         got = shadow.extract_label_sections(_table())
@@ -160,3 +160,41 @@ class TestEnsureDataLink:
         a = _table(overview="| 因子 | 命中 |\n|---|---|\n| QG | 3/9 |")
         b = _table(overview="| 因子 | 命中 |\n|---|---|\n| QG | 4/9 |")
         assert any("信号标注一览" in d for d in shadow.compare_tables(a, b))
+
+
+_BJ_ROW = "| 830799 | 丙 | KDJ_J_LOW | 低J | 50 | {label} | A | 9.0 | buy_review |\n"
+
+
+def _table_bj(label="0/9"):
+    """在 A 池追加一行北交所票（920/8/4 前缀 ⇒ BJ，对照范围外）。"""
+    return _table().replace(
+        "## B 池（0 只）", _BJ_ROW.format(label=label) + "\n## B 池（0 只）"
+    )
+
+
+class TestBJExclusion:
+    """v0.295：北交所票不进对照范围（v0.257 起现行宇宙含 BJ，迁移前基线无
+    BJ 评分口径——不滤则每日恒差、闭环判据永不可达，09-24 实差 14 只全是 BJ）。"""
+
+    def test_bj_pool_row_not_diffed(self):
+        """现行表多出的 BJ 行不产生缺票/标注差异，且剔除数如实记。"""
+        got = shadow.extract_label_sections(_table_bj())
+        assert got["bj_excluded"] == 1
+        assert "830799" not in got["pool"]
+        assert shadow.compare_tables(_table_bj(), _table()) == []
+
+    def test_bj_label_cell_diff_ignored(self):
+        """两边都有同一 BJ 票但标注不同 ⇒ 仍不算差异（整个出对照范围）。"""
+        assert shadow.compare_tables(_table_bj("1/9 QG"), _table_bj("9/9 全中")) == []
+
+    def test_bj_overview_line_dropped(self):
+        """🏷️ 段内含 BJ 码的行整行剔除；非 BJ 行差异仍报。"""
+        a = _table(overview="hit 名单甲\n- 830799 丙：BJ 标注")
+        assert shadow.compare_tables(a, _table()) == []
+        b = _table(overview="hit 名单甲\n- 830799 丙：BJ 标注\nhit 名单丁")
+        assert any("信号标注一览" in d for d in shadow.compare_tables(a, b))
+
+    def test_non_bj_diff_unaffected(self):
+        """滤 BJ 不吃掉沪深真差异（600/000 行照常比对）。"""
+        diffs = shadow.compare_tables(_table_bj(), _table(label_cell_a="3/9 QG·RS"))
+        assert any("600000" in d and "标注列不一致" in d for d in diffs)

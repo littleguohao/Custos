@@ -22,6 +22,11 @@
    明细表的「标注」列逐票单元格），逐位对比，差异报告落
    `artifacts/logs/factor67_shadow/{date}.log`；**发现不一致 → 非零退出**
    （fail-closed 提醒）。
+   **对照范围 = 非北交所票**（v0.295）：v0.257 起现行宇宙含北交所票，而
+   迁移前钉点基线**没有 BJ 评分口径**（BJ 票在旧版恒为 None/缺席）——
+   BJ 差异是「宇宙口径差」而非「#67 标注口径回归」，不剔除则每日恒差
+   （09-24 实差 14 只全是 BJ）、「逐位一致 ≥10 日」的闭环判据永不可达。
+   抽取阶段即滤除 BJ 码（`code_utils.market_of` 单一真源）并记剔除数。
 
 共享数据的安全网：旁路的 score_candidates 会把 `data/stock_pool/{date}_stock_pool.json`
 在共享 data/ 里重写成旧口径——脚本跑前**快照**该文件、跑后**恢复**
@@ -45,6 +50,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from custos.core.code_utils import market_of
+
 # #67 迁移前钉点（立项设计稿 ccad92f8 的父提交 = 迁移前最后一个 commit）
 PIN_COMMIT = "b35e97bb1239ea26832a5a6be3f62d63042c7e27"
 # 1800 计算段四脚本（只跑这些；refresh/08:50 采集段一律不跑——见 docstring）
@@ -57,23 +64,43 @@ CHAIN = (
 LABEL_OVERVIEW_HEAD = "## 🏷️ 信号标注一览"
 
 
+def _bj_tokens(text: str) -> list[str]:
+    """文本里的北交所 6 位码（含 .BJ 后缀形态；market_of 单一真源）。"""
+    return [
+        m.group(0)
+        for m in re.finditer(r"(?<!\d)(\d{6}(?:\.(?:SH|SZ|BJ))?)(?!\d)", text)
+        if market_of(m.group(1)) == "BJ"
+    ]
+
+
 def extract_label_sections(md: str) -> dict:
     """从候选表 markdown 抽「信号标注」相关部分（纯函数，测试钉住）。
 
-    返回 ``{"overview": 🏷️ 段全文（&nbsp; 归一 + 表格排版归一）, "pool": {code: 标注单元格}}``——
+    返回 ``{"overview": 🏷️ 段全文（&nbsp; 归一 + 表格排版归一）, "pool": {code: 标注单元格},
+    "bj_excluded": 剔除的北交所条目数}``——
     池明细表的列序：... | 标注 | 分层 | 建议止损位 | next_step |（标注=倒数第 4 列）。
     overview 归一：markdown 表格的全角对齐 padding 属排版自由（v0.235 fmt 变更
     让新旧两版段首行空格数不同、CJK 单元格字间也加空格），语义比较前剔除
     **全部**空白字符——语义差异（数字/命中名/因子行）不经过空格，仍然可辨。
+    **北交所票不进对照范围**（v0.295，见模块 docstring 第 4 条）：overview 含
+    BJ 码的行整行剔除、pool 的 BJ 键剔除，剔除数记入 ``bj_excluded``。
     """
     overview = ""
+    bj_excluded = 0
     if LABEL_OVERVIEW_HEAD in md:
         seg = md.split(LABEL_OVERVIEW_HEAD, 1)[1]
         seg = re.split(r"\n## ", seg, maxsplit=1)[0]
         # 段标题同行可能带括注（真表为「## 🏷️ 信号标注一览（研究因子·只标注…）」）
         # —— 比较的是内容不是标题，首行（标题残余）剥掉
         seg = seg.split("\n", 1)[1] if "\n" in seg else ""
-        overview = re.sub(r"\s+", "", seg.replace("&nbsp;", " "))
+        kept: list[str] = []
+        for ln in seg.split("\n"):
+            toks = _bj_tokens(ln)
+            if toks:
+                bj_excluded += len(toks)
+                continue
+            kept.append(ln)
+        overview = re.sub(r"\s+", "", "\n".join(kept).replace("&nbsp;", " "))
     pool: dict[str, str] = {}
     for ln in md.splitlines():
         if not ln.startswith("|"):
@@ -82,8 +109,11 @@ def extract_label_sections(md: str) -> dict:
         # 池数据行：首列是 6 位数字代码、列数 ≥ 8（表头/分隔行自然滤掉）
         if len(cells) < 8 or not re.fullmatch(r"\d{6}", cells[0]):
             continue
+        if market_of(cells[0]) == "BJ":
+            bj_excluded += 1
+            continue
         pool[cells[0]] = cells[-4].replace("&nbsp;", " ")
-    return {"overview": overview, "pool": pool}
+    return {"overview": overview, "pool": pool, "bj_excluded": bj_excluded}
 
 
 def compare_tables(md_new: str, md_old: str) -> list[str]:
@@ -275,14 +305,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     if not old_table.is_file():
         return bail(f"旁路候选表未产出：{old_table}（检查旁路计算段日志）")
-    diffs = compare_tables(
-        main_table.read_text(encoding="utf-8"), old_table.read_text(encoding="utf-8")
+    main_text = main_table.read_text(encoding="utf-8")
+    old_text = old_table.read_text(encoding="utf-8")
+    ext_new = extract_label_sections(main_text)
+    ext_old = extract_label_sections(old_text)
+    lines.append(
+        f"对照范围=非北交所票（剔除 BJ 条目：现行 {ext_new['bj_excluded']} / "
+        f"迁移前 {ext_old['bj_excluded']}——v0.257 起现行宇宙含 BJ、迁移前基线无 "
+        "BJ 口径，属宇宙口径差非 #67 回归）"
     )
+    diffs = compare_tables(main_text, old_text)
     if not diffs:
         lines.append("✅ 逐位一致：🏷️ 信号标注一览段 + A/B/C/D 池「标注」列全部相同")
-        lines.append(
-            f"对照池票数：{len(extract_label_sections(main_table.read_text(encoding='utf-8'))['pool'])}"
-        )
+        lines.append(f"对照池票数：{len(ext_new['pool'])}")
         log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         print("\n".join(lines))
         return 0
