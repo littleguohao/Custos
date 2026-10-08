@@ -128,7 +128,25 @@ class TestSelect:
             ["README.md", "governance/research/R37_x.md"], src, tests
         )
         assert mode == "guard-only"
-        assert files == []  # 合成树无守卫文件；真实仓库此处是基础守卫集
+        assert files == []  # 合成树无守卫文件；真实仓库此处=基础守卫+治理守卫
+
+    def test_governance_guard_real_tree(self):
+        """治理文件变更 ⇒ 追加治理守卫集（v0.300 教训：这些测试不 import
+        custos，靠闭包永远选不中——R39/R40 文档不合规本地绿、CI 才红）。"""
+        _, files, why = ta.select(["governance/research/R39_x.md"])
+        names = _names(files)
+        assert "test_research_units.py" in names
+        assert "test_architecture_layers.py" in names  # 基础守卫仍在
+        assert any("治理守卫" in w for w in why)
+        for trigger in ("CHANGELOG.md", "TODO.md", "AGENTS.md"):
+            _, files, _ = ta.select([trigger])
+            assert "test_research_units.py" in _names(files), trigger
+
+    def test_data_json_not_governance(self):
+        """运行时产物（data//artifacts/ 下的 JSON）不触发治理守卫集。"""
+        _, files, why = ta.select(["data/cache/x.json"])
+        assert "test_research_units.py" not in _names(files)
+        assert not any("治理守卫" in w for w in why)
 
     @pytest.mark.parametrize(
         "trigger",

@@ -97,20 +97,25 @@ def _scripted_replay(subset, params):
 
 
 def _flat_replay(subset, params):
-    return [
-        {
-            "code": r["code"],
-            "entry_date": r["date"],
-            "exit_date": r["date"],
-            "ret": 0.01,
-            "reason": "stop",
-            "holding": 5,
-            "risk_frac": 0.05,
-            "r_multiple": 0.2,
-            "score": r["score"],
-        }
-        for r in subset
-    ]
+    """无交互剧本：所有档同分布（wr 1/2 / payoff 2 ⇒ margin 0.167>0 但
+    条件化无增量 ⇒ Δmargin≈0 ⇒ C2 不过 ⇒ falsified）。"""
+    out = []
+    for r in subset:
+        ret = 0.02 if r["i"] % 2 == 0 else -0.01
+        out.append(
+            {
+                "code": r["code"],
+                "entry_date": r["date"],
+                "exit_date": r["date"],
+                "ret": ret,
+                "reason": "stop",
+                "holding": 5,
+                "risk_frac": 0.05,
+                "r_multiple": ret / 0.05,
+                "score": r["score"],
+            }
+        )
+    return out
 
 
 def _three_level_spec(n_per_window, per_bucket_factor=True):
@@ -203,6 +208,14 @@ class TestScriptedScenarios:
         assert c["C2"]["d_margin_mining"] > 0 and c["C2"]["d_margin_judgment"] > 0
         assert c["C3"]["ok"] is True, c["C3"]
         assert len(c["C3"]["draws"]) == fes.C3_DRAWS
+        # C3 加性扰动钉死（v0.301）：|q_perturbed − q| ≤ 0.2/n_buckets
+        # （B3 ±6.7pp / B2 ±10pp——与预注册文字对齐，乘性 ±20% 已废）
+        n_b = len(rep["top"]["mapping"])
+        delta = fes.C3_PERTURB / n_b
+        qs0 = fes.BUCKETINGS[rep["top"]["bucketing"]]
+        for d in c["C3"]["draws"]:
+            for qp, q in zip(d["qs_perturbed"], qs0):
+                assert abs(qp - q) <= delta + 1e-9, d
         assert c["C4"]["state"] == "confirmed_pass", c["C4"]
         assert rep["verdict"] == "candidate"
 
@@ -211,12 +224,22 @@ class TestScriptedScenarios:
         assert rep["criteria"]["C2"]["ok"] is False
         assert rep["verdict"] == "falsified"
 
-    def test_c1_below_floor(self, monkeypatch):
+    def test_c1_below_floor_is_untested_not_falsified(self, monkeypatch):
+        """v0.301（owner review）：C1 不过 ⇒ **untested（不可判）**——
+        样本不足≠否定证据（稀疏桶被 max-of-80 挑中再判死 = 重演 v0.299
+        纠正过的错）。"""
         rep = _run(monkeypatch, _three_level_spec(60), _scripted_replay, n_random=5)
         c1 = rep["criteria"]["C1"]
         assert c1["ok"] is False
-        assert c1["mining"]["below_floor"], "每桶 20 笔 < 50 须点名"
-        assert rep["verdict"] == "falsified"
+        assert c1["mining"]["below_floor"], "每桶 20 笔 < 50 须逐桶点名"
+        assert rep["verdict"] == "untested"
+
+    def test_c1_counts_empty_buckets(self):
+        """0 笔空桶不在 n_taken_by_bucket 里，但必须照判（缺 key=0 笔）。"""
+        rd = {"n_taken": 115, "n_taken_by_bucket": {0: 60, 1: 55}}  # 桶 2 零笔
+        c1 = fes.judge_c1(rd, rd, 3)
+        assert c1["ok"] is False
+        assert c1["mining"]["below_floor"] == {2: 0}
 
     def test_empty_signals_guard(self, monkeypatch):
         _patch_adx(monkeypatch)

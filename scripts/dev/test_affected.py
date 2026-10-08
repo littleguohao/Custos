@@ -50,6 +50,28 @@ BASE_GUARD = (
     "test_top_level_shared.py",
 )
 
+#: 治理守卫集——钉住治理纪律的测试（AGENTS §4「全部有测试钉着」）。它们大多
+#: **不 import custos**（读的是 governance/文档/JSON 本体），靠 import 闭包永远
+#: 选不中——v0.300 教训：R39/R40 文档不合规本地绿、推上去 CI 才红（9 例失败）。
+#: 规则：governance/** 或根治理文件（CHANGELOG/TODO/README/AGENTS）或非数据
+#: 通路的 *.json 有变动 ⇒ 追加本集。
+GOVERNANCE_GUARD = (
+    "test_research_units.py",
+    "test_changelog_format.py",
+    "test_todo_list.py",
+    "test_contracts.py",
+    "test_contracts_layer.py",
+    "test_factor_registry.py",
+    "test_screening_registry.py",
+    "test_strategy_index.py",
+    "test_strategy_grid.py",
+)
+
+#: 治理触发：路径前缀 / 根文件名（JSON 限治理与根目录——data/artifacts 是
+#: 运行时产物不算）
+GOVERNANCE_PREFIXES = ("governance/",)
+GOVERNANCE_FILES = {"CHANGELOG.md", "TODO.md", "README.md", "AGENTS.md"}
+
 #: 全量触发（影响面无法局部化）
 FULL_TRIGGER_FILES = {"pyproject.toml", "uv.lock"}
 FULL_TRIGGER_PREFIXES = (".github/", "tests/helpers_")
@@ -151,6 +173,13 @@ def changed_files(since: str | None = None) -> list[str]:
     return sorted(paths)
 
 
+def _is_governance(p: str) -> bool:
+    """治理文件判定：governance/** 或根治理文件或非数据通路的 *.json。"""
+    if p.startswith(GOVERNANCE_PREFIXES) or p in GOVERNANCE_FILES:
+        return True
+    return p.endswith(".json") and not p.startswith(("artifacts/", "data/"))
+
+
 def select(
     changed: list[str], src_root: Path = SRC, tests_root: Path = TESTS
 ) -> tuple[str, list[Path], list[str]]:
@@ -178,6 +207,10 @@ def select(
 
     seeds: set[str] = set()
     selected: set[Path] = set(guard)
+    if any(_is_governance(p) for p in changed):
+        gov = [tests_root / n for n in GOVERNANCE_GUARD if (tests_root / n).exists()]
+        selected |= set(gov)
+        why.append(f"治理文件变更 ⇒ 追加治理守卫集 {len(gov)} 个")
     for p in changed:
         if p.startswith("src/") and p.endswith(".py"):
             fp = src_root / Path(p).relative_to("src")

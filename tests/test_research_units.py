@@ -39,8 +39,10 @@ def test_units_exist():
     # 2026-09-16：+R35（打分系统存在性检讨，元层反思开题）
     # 2026-09-16：+R36（完美 B1 正例监督式打分研究，预注册落档 + Phase 0 数据接入）
     # 2026-09-23：+R37（出场轴进化战役，预注册落档——出场基因组×战役壳）
-    assert len(UNITS) == 37, (
-        f"预期 37 个研究单元，实际 {len(UNITS)}：{[p.name for p in UNITS]}"
+    # 2026-10-08：+R39（因子×出场交互，预注册落档）+R40（0AMV 空头区间做多全栈，
+    # 预注册落档）（R38 号被 live-only 出场回测化预留跳过）
+    assert len(UNITS) == 39, (
+        f"预期 39 个研究单元，实际 {len(UNITS)}：{[p.name for p in UNITS]}"
     )
 
 

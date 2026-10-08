@@ -17,11 +17,15 @@
   ④ 档集 K=4（R39 策展：基准/快抽身/慢趋势/保本，qsx 双杀不进），映射
      全枚举 4²+4³=**80 格**；重放优化 = 按（档×桶）预放 12 组交易再按映射
      合并，uniform 档 = 全桶合并 ⇒ 枚举成本 ≈ 每窗 12 组重放而非 80×4；
-  ⑤ C1~C4 判定（R39 跑数前写死）：C1 top 每桶每窗 n_taken≥50 且全窗≥100；
-     C2 top Δmargin vs uniform-best **双窗同向为正**；C3 分位切点 ±20%×4
-     扰动 C2 结论**零翻转**；C4 **随机分桶臂** N=50 同预算（保持桶大小
-     打乱「交易→桶」归属，同 80 格取 max mining Δmargin）q95 门，
-     池≥50 才 confirmed 否则 provisional（v0.297 式 rdd 过门率记账）；
+  ⑤ C1~C4 判定（R39 跑数前写死）：C1 top **逐桶**每窗 n_taken≥50（含 0
+     笔空桶）且全窗≥100——**C1 不过 ⇒ untested（不可判）不判 falsified**
+     （v0.301，样本不足≠否定证据）；C2 top Δmargin vs uniform-best
+     **双窗同向为正**；C3 分位切点**加性** ±U(0, 0.2/n_buckets)×4 扰动
+     （B2 ±10pp / B3 ±6.7pp，与预注册文字对齐）C2 结论**零翻转**；C4
+     **随机分桶臂** N=50 同预算（保持桶大小打乱「交易→桶」归属，同 80
+     格取 max mining Δmargin）q95 门，池≥50 才 confirmed 否则
+     provisional（v0.297 式 rdd 过门率记账）；结局四态
+     candidate/falsified/untested/provisional；
   ⑥ 产物自含（因子定义/切点/映射/档集/逐格读数/随机池）——供 C5 终端
      自含读取，禁手工转录。
 
@@ -59,7 +63,9 @@ BUCKETINGS: dict[str, tuple[float, ...]] = {"B2": (0.5,), "B3": (1 / 3, 2 / 3)}
 MIN_BUCKET_N_TAKEN = 50  # C1：top 每桶每窗最小选中笔数
 MIN_N_TAKEN = 100  # C1：top 全窗最小选中笔数（C1 同族）
 C3_DRAWS = 4  # C3 扰动臂数
-C3_PERTURB_LO, C3_PERTURB_HI = 0.8, 1.2  # C3 分位点 ±20%（U(0.8,1.2) 乘数）
+C3_PERTURB = 0.2  # C3 分位点**加性**扰动幅度：±U(0, 0.2/n_buckets)——
+# B2 ±10pp（0.5±0.1）、B3 ±6.7pp（1/3±0.067）；v0.301 由乘性 ±20% 改正
+# （乘性下上切点实际扰 ±13.3pp，与预注册「±6.7pp」文字不符——跑数前统一）
 DEFAULT_N_RANDOM = 50  # C4 随机分桶臂数
 C4_MIN_POOL = 50  # C4 最小池（池满才许 confirmed）
 
@@ -312,16 +318,30 @@ def pick_uniform_best(uniform: dict[str, Optional[dict]]) -> Optional[dict]:
 
 
 def judge_c1(
-    top_mining: Optional[dict], top_judgment: Optional[dict]
+    top_mining: Optional[dict], top_judgment: Optional[dict], n_buckets: int
 ) -> dict[str, Any]:
-    """C1：top 每桶每窗 n_taken≥50 且全窗≥100。"""
-    out: dict[str, Any] = {"min_bucket": MIN_BUCKET_N_TAKEN, "min_total": MIN_N_TAKEN}
+    """C1：top **逐桶**每窗 n_taken≥50（含 0 笔空桶——v0.301 修订：
+    n_taken_by_bucket 只统计有成交的桶，缺 key=0 笔必须照判）且全窗≥100。
+
+    ⚠️ C1 不过的读法是 **untested（不可判）不是 falsified**——样本不足≠
+    否定证据（v0.299 可疑闸同哲学；owner review：B3 判定窗 n~146/3≈49
+    贴线，稀疏桶被 max-of-80 挑中再判死 = 重演「数据坏了误判成候选坏了」）。
+    """
+    out: dict[str, Any] = {
+        "min_bucket": MIN_BUCKET_N_TAKEN,
+        "min_total": MIN_N_TAKEN,
+        "n_buckets": n_buckets,
+    }
     for wname, rd in (("mining", top_mining), ("judgment", top_judgment)):
         if not rd:
             out[wname] = {"ok": False, "reason": "无读数"}
             continue
         per_b = rd.get("n_taken_by_bucket") or {}
-        lows = {b: n for b, n in per_b.items() if n < MIN_BUCKET_N_TAKEN}
+        lows = {
+            b: per_b.get(b, 0)
+            for b in range(n_buckets)
+            if per_b.get(b, 0) < MIN_BUCKET_N_TAKEN
+        }
         total = rd.get("n_taken") or 0
         out[wname] = {
             "ok": not lows and total >= MIN_N_TAKEN,
@@ -527,19 +547,25 @@ def run_study(
     )
     dm_j = _d_margin(top["judgment"], uniform_jd) if top and uniform_best else None
 
-    c1 = judge_c1(top["mining"] if top else None, top["judgment"] if top else None)
+    c1 = judge_c1(
+        top["mining"] if top else None,
+        top["judgment"] if top else None,
+        len(top["mapping"]) if top else 0,
+    )
     c2 = judge_c2(dm_m, dm_j)
 
-    # ── C3：分位切点 ±20% ×4 扰动（top 映射不变，切点重估重分桶）──
+    # ── C3：分位切点加性 ±U(0, 0.2/n_buckets) ×4 扰动（top 映射不变，
+    # 切点重估重分桶；v0.301 由乘性改正——与预注册「±6.7pp」对齐）──
     rng = random.Random(args.seed)
     c3_draws: list[dict] = []
     if top is not None:
+        n_b_top = len(top["mapping"])
+        delta = C3_PERTURB / n_b_top
         for draw_i in range(C3_DRAWS):
             name = top["bucketing"]
             qs = BUCKETINGS[name]
             qs_p = tuple(
-                min(0.99, max(0.01, q * rng.uniform(C3_PERTURB_LO, C3_PERTURB_HI)))
-                for q in qs
+                sorted(min(0.99, max(0.01, q + rng.uniform(-delta, delta))) for q in qs)
             )
             cuts_p = quantile_cuts(mining_values, qs_p)
             stud_p = {
@@ -618,11 +644,13 @@ def run_study(
                 pool.append(arm_best)
     c4 = judge_c4(dm_m, pool, evaluated, gate_pass, args.c4_min_pool)
 
-    # ── 总结局 ──
-    if c1["ok"] and c2["ok"] and c3["ok"] and c4["state"] == "confirmed_pass":
-        verdict = "candidate"
-    elif not (c1["ok"] and c2["ok"] and c3["ok"]) or c4["state"] == "confirmed_fail":
+    # ── 总结局（v0.301：C1 不过 ⇒ untested 优先——样本不足≠否定证据）──
+    if not c1["ok"]:
+        verdict = "untested"  # 样本不足不可判：B3 判定窗大概率落此（贴线注记在案）
+    elif not (c2["ok"] and c3["ok"]) or c4["state"] == "confirmed_fail":
         verdict = "falsified"
+    elif c4["state"] == "confirmed_pass":
+        verdict = "candidate"
     else:
         verdict = "provisional"
 
