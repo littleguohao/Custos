@@ -637,9 +637,18 @@ def search_objective(row: dict[str, Any]) -> Optional[float]:
 def rank_rows(
     rows: list[dict[str, Any]], weights: tuple[float, float, float]
 ) -> list[dict[str, Any]]:
-    """按目标函数降序排名（objective=None 垫底；同分按格子名保序稳定）。"""
+    """按目标函数降序排名（objective=None 垫底；同分按格子名保序稳定）。
+
+    v0.297（修缺陷 B）：weights 为 v2 默认（DEFAULT_OBJ_WEIGHTS）时套
+    **rdd 约束门**——门不过 ⇒ objective=None + 行留 ``rdd_gate=False``。
+    格子优胜配置可「直接拷入 live EXIT_RULES」（README），这条最接近 live
+    的排名路径不能漏门（rdd 门本意=防偏袒高敞口）。显式传自定义权重
+    （如 v1 复合复算历史口径）⇒ 不套门（``rdd_gate`` 置 None 表未评）。
+    """
+    gate = weights == DEFAULT_OBJ_WEIGHTS
     for r in rows:
-        r["objective"] = objective_of(r, weights)
+        r["rdd_gate"] = rdd_gate_ok(r) if gate else None
+        r["objective"] = objective_of(r, weights) if not gate or r["rdd_gate"] else None
     srt = sorted(
         rows,
         key=lambda r: (

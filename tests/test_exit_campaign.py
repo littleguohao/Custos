@@ -209,6 +209,92 @@ class TestCtl4CandidateFound:
         assert state.status == "running"
 
 
+class TestC4EmptyPool:
+    """v0.297 修缺陷 A：v2 下随机臂全被 rdd 门拦（objective None 不进池）⇒
+    池空时 C4 **不许自动放行**（原「无臂=测试/冒烟通道」假设被 v2 打破——
+    n_random≥1 的正式战役也能走到空池）。对齐 score_evolution_study 的
+    indeterminate 语义：无法裁决、留痕、战役继续。
+    """
+
+    def _fake(self, params, *, start, end):
+        # 与 TestCtl4CandidateFound 同胜区 ⇒ C3 恒零翻转
+        win = params["stop_pct"] >= 6 and params["time_stop_bars"] > 0
+        return _rd(0.30, 0.95) if win else _rd(0.05, 0.05)
+
+    def _gated(self, margin, objective):
+        """rdd 门拦的读数（objective None、rdd_gate=False）。"""
+        d = _rd(margin, objective)
+        d.update({"rdd_gate": False, "objective": None})
+        return d
+
+    def test_empty_pool_is_indeterminate_not_confirmed(self):
+        cfg = ec.CampaignConfig(batch_size=1, n_random=1, seed=5)
+        state = ec.CampaignState()
+        _baseline(state)
+        winner = eg.normalize({"stop_pct": 12, "time_stop_bars": 40})
+        gated_random = eg.normalize({"stop_pct": 4})
+        rec = ec.ctl_step(
+            cfg,
+            state,
+            [winner],
+            [gated_random],
+            [_both(0.30, 0.95)],
+            [self._gated(0.50, None)],  # 随机臂 margin 更强但 rdd 不过门
+            self._fake,
+            random.Random(7),
+        )
+        assert state.status == "running"  # 不许 candidate_found
+        assert state.best_candidate is None
+        assert state.random_pool == []  # 门拦 ⇒ 空池
+        assert rec["ctl_actions"][0]["why"] == "c4_indeterminate_pool_empty"
+        # 过门账如实记：评估 1 臂、过门 0
+        assert state.random_evaluated == 1 and state.random_gate_pass == 0
+
+    def test_no_arms_smoke_channel_still_confirms(self):
+        """n_random=0（测试/冒烟通道）⇒ 空池不拦——原语义保留（与 v2 无关）。"""
+        cfg = ec.CampaignConfig(batch_size=1, n_random=0, seed=5)
+        state = ec.CampaignState()
+        _baseline(state)
+        winner = eg.normalize({"stop_pct": 12, "time_stop_bars": 40})
+        rec = ec.ctl_step(
+            cfg,
+            state,
+            [winner],
+            [],
+            [_both(0.30, 0.95)],
+            [],
+            self._fake,
+            random.Random(7),
+        )
+        assert state.status == "candidate_found"
+        assert state.best_candidate["c4_bar"] is None
+        assert rec["ctl_actions"][0]["type"] == "candidate_found"
+
+    def test_gate_stats_accumulate(self):
+        """过门率混合账：过 1 / 拦 1 ⇒ 池只收过门臂的 objective。"""
+        cfg = ec.CampaignConfig(batch_size=2, n_random=2, seed=5)
+        state = ec.CampaignState()
+        _baseline(state)
+        g1 = eg.normalize({"stop_pct": 12, "time_stop_bars": 40})
+        g2 = eg.normalize({"stop_pct": 8})
+        r1, r2 = eg.normalize({"stop_pct": 4}), eg.normalize({"stop_pct": 6})
+        rec = ec.ctl_step(
+            cfg,
+            state,
+            [g1, g2],
+            [r1, r2],
+            [_both(0.05, 0.05), _both(0.04, 0.04)],  # 无 C2 过线者
+            [_rd(0.05, 0.20), self._gated(0.50, None)],
+            self._fake,
+            random.Random(7),
+        )
+        assert state.random_evaluated == 2
+        assert state.random_gate_pass == 1
+        assert state.random_pool == [0.20]
+        # 无 C2 过线者 ⇒ 无 C3/C4 裁决动作，过门账照记
+        assert not any(a["type"] == "near_miss" for a in rec["ctl_actions"])
+
+
 class TestProvisionalCandidate:
     """C4 最小池护栏（v0.269，owner review）：池 < c4_min_pool 时 q95≈max
     （实测零假设过线率 13.76% = ~5% 的 2.7 倍）——过线只记 provisional

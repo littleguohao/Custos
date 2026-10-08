@@ -123,6 +123,8 @@ class CampaignState:
     random_pool: list[float] = field(
         default_factory=list
     )  # 合并随机臂分布（C4 分位标尺）
+    random_evaluated: int = 0  # 有读数的随机臂累计（rdd 过门率分母，v0.297）
+    random_gate_pass: int = 0  # 其中 rdd 门通过累计（≈进池数；objective None 多因门）
     population: list[dict] = field(default_factory=list)  # [{genome, mining}]
     baseline: dict[str, dict] = field(default_factory=dict)  # window -> readings
     best_candidate: Optional[dict] = None
@@ -321,10 +323,18 @@ def ctl_step(
     n_evals = len(evolve) + len(rand)
     state.total_genomes += n_evals
 
-    # 随机臂读数并入合并分布（含本批——先更新再判 C4，从严；分位标尺见 _q95）
+    # 随机臂读数并入合并分布（含本批——先更新再判 C4，从严；分位标尺见 _q95）。
+    # 同时记 rdd 过门账（v0.297）：v2 下门拦 ⇒ objective None ⇒ 不进池——
+    # 过门率必须在案，否则「池空」与「没跑」无法区分。
     batch_rand_best: Optional[float] = None
     for r in rand_rows:
-        obj = (r["mining"] or {}).get("objective")
+        rw = r["mining"]
+        if rw is None:
+            continue
+        state.random_evaluated += 1
+        obj = rw.get("objective")
+        if rw.get("rdd_gate", obj is not None):
+            state.random_gate_pass += 1
         if obj is None:
             continue
         batch_rand_best = obj if batch_rand_best is None else max(batch_rand_best, obj)
@@ -348,11 +358,22 @@ def ctl_step(
     for r in passers:
         c3 = _c3_check(r["genome"], base, cfg, evaluator, rng)
         c3_record = {"candidate_key": r["key"], **c3}
-        c4_ok = c4_bar is None or r["mining"]["objective"] > c4_bar
+        # C4 三态（v0.297，修「空池自动放行」缺陷）：池有数 ⇒ 比 q95；
+        # n_random=0（测试/冒烟通道）⇒ 不拦（原语义保留）；n_random≥1 但池空
+        # （随机臂全被 rdd 门拦 ⇒ objective None 不进池）⇒ **indeterminate**
+        # ——无法裁决（score_evolution_study 同态），**不许**走 confirmed。
+        if c4_bar is not None:
+            c4_ok = r["mining"]["objective"] > c4_bar
+            c4_state = "ok" if c4_ok else "below_q95"
+        elif cfg.n_random == 0:
+            c4_ok, c4_state = True, "no_arms"
+        else:
+            c4_ok, c4_state = False, "indeterminate"
         if c3["pass"] and c4_ok:
             if c4_bar is None or len(state.random_pool) >= cfg.c4_min_pool:
-                # confirmed（无臂时 C4 不拦也不走 provisional——预注册战役
-                # n_random≥1 总有臂；无臂是测试/冒烟通道）
+                # confirmed。c4_bar is None 只可能是 n_random=0 的测试/冒烟
+                # 通道（c4_state="no_arms"）——n_random≥1 且池空已在上方判
+                # indeterminate，到不了这里（v0.297 前会误放行，已修）
                 state.status = "candidate_found"
                 state.best_candidate = {
                     "genome": r["genome"],
@@ -395,7 +416,13 @@ def ctl_step(
             {
                 "type": "near_miss",
                 "key": r["key"],
-                "why": "c3_flipped" if not c3["pass"] else "c4_below_random_q95",
+                "why": (
+                    "c3_flipped"
+                    if not c3["pass"]
+                    else "c4_indeterminate_pool_empty"
+                    if c4_state == "indeterminate"
+                    else "c4_below_random_q95"
+                ),
             }
         )
 
@@ -574,6 +601,8 @@ def load_ledger(path: Path) -> tuple[CampaignConfig, CampaignState, list[dict], 
         consecutive_no_c2=st["consecutive_no_c2"],
         total_genomes=st["total_genomes"],
         random_pool=list(st["random_pool"]),
+        random_evaluated=st.get("random_evaluated", 0),
+        random_gate_pass=st.get("random_gate_pass", 0),
         population=list(st["population"]),
         baseline=dict(st["baseline"]),
         best_candidate=st["best_candidate"],
@@ -707,6 +736,17 @@ def run_campaign(
         "total_genomes": state.total_genomes,
         "n_batches": len(batches),
         "random_q95": _q95(state.random_pool),
+        "random_rdd_gate": {
+            "evaluated": state.random_evaluated,
+            "passed": state.random_gate_pass,
+            "pass_rate": (
+                state.random_gate_pass / state.random_evaluated
+                if state.random_evaluated
+                else None
+            ),
+            "note": "随机臂 rdd 过门率（v0.297）——池空=门全灭则 C4 indeterminate，"
+            "与「没跑随机臂」（n_random=0）必须可区分",
+        },
         "random_pool_size": len(state.random_pool),
         "ledger": str(ledger_path),
         "notes": [_R11_NOTE],

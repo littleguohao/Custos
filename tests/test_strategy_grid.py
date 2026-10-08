@@ -462,6 +462,36 @@ class TestObjectiveV2:
         assert sg.objective_of(row, (1.0, 1.0, 0.05)) == pytest.approx(0.3)
 
 
+class TestRankRowsRddGate:
+    """v0.297 修缺陷 B：CLI 格子排名（rank_rows）在 v2 默认权重下也套 rdd 门——
+    「优胜格可直接拷 live EXIT_RULES」的最接近 live 路径不能偏袒高敞口。"""
+
+    ROWS = [
+        {
+            "exit": "high_exposure",
+            "margin": 0.20,
+            "expectancy_R": 0.1,
+            "ret_over_dd": 0.3,
+        },
+        {"exit": "normal", "margin": 0.05, "expectancy_R": 0.1, "ret_over_dd": 2.5},
+    ]
+
+    def test_default_weights_gate_high_exposure(self):
+        ranked = sg.rank_rows([dict(r) for r in self.ROWS], sg.DEFAULT_OBJ_WEIGHTS)
+        assert ranked[0]["exit"] == "normal"  # 门拦高敞口，margin 0.20 也垫底
+        assert ranked[1]["exit"] == "high_exposure"
+        assert ranked[1]["objective"] is None
+        assert ranked[1]["rdd_gate"] is False
+        assert ranked[0]["rdd_gate"] is True
+
+    def test_explicit_custom_weights_bypass_gate(self):
+        """显式自定义权重（v1 复算口径）⇒ 不套门（rdd_gate 置 None 表未评）。"""
+        ranked = sg.rank_rows([dict(r) for r in self.ROWS], (1.0, 1.0, 0.05))
+        # v1 复合 0.315 > 0.275：它确实第一——复算路径不被门污染
+        assert ranked[0]["exit"] == "high_exposure"
+        assert ranked[0]["rdd_gate"] is None
+
+
 class TestOutputSchema:
     """ranked JSON 键名钉住——它是后续 campaign/回流脚本的解析面。"""
 
@@ -495,6 +525,7 @@ class TestOutputSchema:
         "max_drawdown",
         "ret_over_dd",
         "objective",
+        "rdd_gate",
         "reused",
         "result_file",
         "exit_rules",

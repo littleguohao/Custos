@@ -174,7 +174,11 @@ uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/
   **objective 版本（v0.296，#80④ 采 Ⓐ）**：搜索标量 = margin 单量 +
   rdd≥1.0 约束门（`strategy_grid.search_objective`）；v1 复合
   （margin+expectancy_R+0.05·rdd）作废——历史 objective/q95 读数**不跨版本
-  引用**（各战役 C4 随机池标尺本就自备）。
+  引用**（各战役 C4 随机池标尺本就自备）。**v0.297 两修补**：①exit_campaign
+  随机池空（随机臂全被 rdd 门拦）⇒ C4 **indeterminate 不放行**（原假设
+  「n_random≥1 总有臂」被 v2 打破；报告记随机臂 rdd 过门率）；②CLI 格子排名
+  `rank_rows` 在 v2 默认权重下同样套门（「优胜格可拷 live EXIT_RULES」的路径
+  不能偏袒高敞口；显式自定义权重=复算口径不套门）。
 - 因子 IC 画像（`factor_ic_profile`）：SCORERS/DSL 的截面 RankIC/ICIR + horizon
   衰减全因子可比表——**分诊镜不是晋级判据**（晋级永远走双窗+三轴交易语义；
   读数 L3− 带幸存者偏差，R19/R21/R14）。

@@ -200,6 +200,14 @@ params），信号/出场解耦（`--signals-out/--from-signals` 重放
   池=8 时 q95≈max，零假设过线率实测 13.76%（~5% 的 2.7 倍）；故
   c4_min_pool=100：池满才许 confirmed（实测 pool=160 → 5.35%），未满
   只记 provisional 不停战役（两段式见战役壳节 CTL-4）；
+  **v0.297 追加空池护栏（owner review 复现缺陷 A）**：v2 的 rdd 门让
+  「n_random≥1 总有臂」假设失效——随机臂全被门拦 ⇒ objective None
+  不进池 ⇒ 池空时 `c4_bar=None` 原本自动放行并直接 confirmed。修为
+  **indeterminate**（对齐 score_evolution_study 同态语义：无法裁决、
+  near_miss 记 `c4_indeterminate_pool_empty`、战役继续），只有
+  n_random=0 的测试/冒烟通道保留不拦；报告新增随机臂 **rdd 过门率**
+  （random_rdd_gate：evaluated/passed/pass_rate——「池空=门全灭」与
+  「没跑随机臂」必须可区分）；
 - **R37-C5（终审，v0.273 定稿 → v0.281 CI 三分修订）**：pre2019
   untouched 段（2010-2016）单独终步，**只能杀不能确认**。
   **判决三态（v0.281）**：`killed` / `untested` / `not_vetoed`——
