@@ -1927,3 +1927,66 @@ class TestLlmErrorSurfacing:
         # 零错误时逐位无该行（旧行为不变）
         el._print_summary(TrajectoryPool(), 5, [], {}, llm_errors=0)
         assert "LLM 级错误" not in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# v0.305 owner review：--joint cell_runner 的 v2.1 参照档两条
+# ---------------------------------------------------------------------------
+
+
+class TestCellRunnerRefGate:
+    """①参照格缓存键含 exit_params（--joint 各轨迹出场参数不同，参照档
+    不得由首个评估的候选定锚）；②参照格失败 fail-closed +
+    rdd_ref_missing（不静默回落绝对门兼容通道——那条只留 CLI）。"""
+
+    def _runner(self, tmp_path, monkeypatch, run_cell_impl):
+        import argparse
+
+        from custos.research import strategy_grid as sg
+
+        monkeypatch.setattr(sg, "run_cell", run_cell_impl)
+        monkeypatch.setattr(
+            sg,
+            "load_cell_row",
+            lambda cell, p, reused=False: {
+                "result_file": "r__sig.json",
+                "margin": 0.1,
+                "expectancy_R": 0.2,
+                "ret_over_dd": 1.0,
+            },
+        )
+        args = argparse.Namespace(codes_file="codes.txt", count=100, cell_top_n=20)
+        return el._make_cell_runner(args, ["000001"], tmp_path)
+
+    def test_ref_cache_key_includes_exit_params(self, tmp_path, monkeypatch):
+        calls = []
+
+        def fake_run_cell(ns, cell, cells_dir, **kw):
+            calls.append((cell["scorer"], tuple(sorted(cell["params"].items()))))
+            return "ok", tmp_path / "r.json", ""
+
+        runner = self._runner(tmp_path, monkeypatch, fake_run_cell)
+        w = {"start": "2024-01-01", "end": "2024-06-01"}
+        runner("close", "j_low", {"stop_pct": 5.0}, **w)
+        runner("close", "j_low", {"stop_pct": 8.0}, **w)
+        runner("close", "j_low", {"stop_pct": 5.0}, **w)  # 命中缓存不重跑
+        ref_calls = [c for c in calls if c[0] == "baseline"]
+        assert len(ref_calls) == 2, "两种 params 各一套参照档（非首个候选定锚）"
+        assert {c[1] for c in ref_calls} == {
+            (("stop_pct", 5.0),),
+            (("stop_pct", 8.0),),
+        }
+
+    def test_ref_failure_fail_closed(self, tmp_path, monkeypatch):
+        def fake_run_cell(ns, cell, cells_dir, **kw):
+            if cell["scorer"] == "baseline":
+                return "failed", None, "boom"
+            return "ok", tmp_path / "r.json", ""
+
+        runner = self._runner(tmp_path, monkeypatch, fake_run_cell)
+        out = runner(
+            "close", "j_low", {"stop_pct": 5.0}, start="2024-01-01", end="2024-06-01"
+        )
+        assert out["objective"] is None
+        assert out["rdd_gate"] is False
+        assert out["rdd_ref_missing"] is True

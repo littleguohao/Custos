@@ -511,14 +511,20 @@ def _make_cell_runner(args: Any, codes_file: str, cells_dir: Path) -> CellRunner
 
     cells_dir.mkdir(parents=True, exist_ok=True)
     failures: list[dict[str, Any]] = []
-    ref_cache: dict[tuple[str, str, str], Optional[dict]] = {}
+    ref_cache: dict[tuple[str, str, str, str], Optional[dict]] = {}
 
     def _ref_row(
         sg: Any, cell: dict, ns: argparse.Namespace, *, start: str, end: str
     ) -> Optional[dict]:
         """v2.1 参照档读数行：baseline 恒可买孪生格（事先固定不经过挑选；
-        同 gate/exit/params ⇒ 同窗同信号同组合口径）。失败格日志同样留尾段。"""
-        key = (cell["gate"], start, end)
+        同 gate/exit/params ⇒ 同窗同信号同组合口径）。失败格日志同样留尾段。
+        缓存键含 params（v0.305）——防未来多 exit_spec 场景参照档串口径。"""
+        key = (
+            cell["gate"],
+            json.dumps(cell["params"], sort_keys=True, default=str),
+            start,
+            end,
+        )
         if key not in ref_cache:
             ref_cell = sg.twin_ref_cell(cell)
             st, p, log = sg.run_cell(ns, ref_cell, cells_dir, capture=True)
@@ -574,9 +580,21 @@ def _make_cell_runner(args: Any, codes_file: str, cells_dir: Path) -> CellRunner
             )
             return None
         ref = _ref_row(sg, cell, ns, start=start, end=end)
-        return _reading_of(
-            sg, sg.load_cell_row(cell, path, reused=(status == "reused")), ref
-        )
+        row = sg.load_cell_row(cell, path, reused=(status == "reused"))
+        if ref is None:  # 研究侧 fail-closed：参照缺失不回落绝对门（兼容通道只留 CLI）
+            return {
+                "objective": None,
+                "objective_version": sg.OBJECTIVE_VERSION,
+                "rdd_gate": False,
+                "rdd_ref_missing": True,
+                "margin": row.get("margin"),
+                "expectancy_R": row.get("expectancy_R"),
+                "payoff_ratio": row.get("payoff_ratio"),
+                "win_rate": row.get("win_rate"),
+                "n": row.get("n"),
+                "cell_signature": _row_signature(row),
+            }
+        return _reading_of(sg, row, ref)
 
     cell_runner.failures = failures  # type: ignore[attr-defined]  # 侧信道：报告层只读
     return cell_runner
@@ -724,6 +742,7 @@ def _make_v0_runner(args: Any, codes: list[str], exit_spec: dict) -> CellRunner:
                 ),  # V0 臂=基准本体，自参照恒真（v2.1）
                 "objective_version": sg.OBJECTIVE_VERSION,
                 "rdd_gate": sg.rdd_gate_ok(row, row),
+                "rdd_ref_missing": False,
                 "margin": margin,
                 "expectancy_R": tsum.get("expectancy_R"),
                 "payoff_ratio": tsum.get("payoff_ratio"),
@@ -1107,12 +1126,16 @@ class _V0LatticeEvaluator:
         }
         if addon_expr is None and all(float(m) == 1.0 for m in mult):
             ref = row  # 等倍率基准本体=自参照（v2.1 门恒真）
+            ref_missing = False
         else:
             ref = self._ref_row(legs, window)
+            ref_missing = ref is None
         out = {
-            "objective": sg.search_objective(row, ref),
+            # 研究侧 fail-closed：参照缺失不回落绝对门（兼容通道只留 CLI）
+            "objective": None if ref_missing else sg.search_objective(row, ref),
             "objective_version": sg.OBJECTIVE_VERSION,
-            "rdd_gate": sg.rdd_gate_ok(row, ref),
+            "rdd_gate": False if ref_missing else sg.rdd_gate_ok(row, ref),
+            "rdd_ref_missing": ref_missing,
             "margin": margin,
             "expectancy_R": tsum.get("expectancy_R"),
             "payoff_ratio": tsum.get("payoff_ratio"),

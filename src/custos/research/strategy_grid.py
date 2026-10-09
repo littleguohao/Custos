@@ -677,7 +677,9 @@ def rank_rows(
 
     **v2.1**：门改**相对**——参照档 = 同 (scorer, gate) 组合内 ``ref_exit``
     档行（默认 pct5_trail08，事先固定不经过挑选）；组合内缺该档 ⇒ 取组合
-    **首行**（grid 顺序首档=基准档）；组合只有一行 ⇒ 自参照恒真。
+    **首行**（grid 顺序首档=基准档）；组合只有一行 ⇒ 自参照恒真，行标
+    ``rdd_gate="self_ref"``（v0.305）——与真过门（``True``）区分，单行
+    组合等于不设门。
     """
     gate = weights == DEFAULT_OBJ_WEIGHTS
     refs: dict[tuple[Any, Any], dict[str, Any]] = {}
@@ -688,7 +690,12 @@ def rank_rows(
             refs[key] = r
     for r in rows:
         ref = refs.get((r.get("scorer"), r.get("gate")))
-        r["rdd_gate"] = rdd_gate_ok(r, ref) if gate else None
+        if not gate:
+            r["rdd_gate"] = None  # 自定义权重未评
+        elif ref is r:
+            r["rdd_gate"] = "self_ref"  # 单行组合自参照=不设门
+        else:
+            r["rdd_gate"] = rdd_gate_ok(r, ref)
         r["objective"] = objective_of(r, weights) if not gate or r["rdd_gate"] else None
     srt = sorted(
         rows,

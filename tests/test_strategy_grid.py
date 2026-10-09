@@ -521,9 +521,9 @@ class TestRankRowsRddGate:
         assert ranked[-1]["exit"] == "high_exposure"
         assert ranked[-1]["objective"] is None
         assert ranked[-1]["rdd_gate"] is False
-        # 参照档本体自参照恒真；normal 2.5 ≥ 1.5 放行
+        # 参照档本体=门锚点标 self_ref（v0.305，它定义门而非过门）；normal 真过门
         assert ranked[0]["exit"] == "pct5_trail08"  # 同 margin 稳定序在前
-        assert ranked[0]["rdd_gate"] is True
+        assert ranked[0]["rdd_gate"] == "self_ref"
         assert ranked[1]["exit"] == "normal"
         assert ranked[1]["rdd_gate"] is True
 
@@ -548,8 +548,26 @@ class TestRankRowsRddGate:
             },
         ]
         ranked = sg.rank_rows(rows, sg.DEFAULT_OBJ_WEIGHTS)
-        assert ranked[0]["exit"] == "e1"  # 首行自参照恒真
+        assert ranked[0]["exit"] == "e1"  # 首行=参照锚点（self_ref）
+        assert ranked[0]["rdd_gate"] == "self_ref"
         assert ranked[1]["rdd_gate"] is False  # e2 0.5 < 首行 1.0
+
+    def test_single_row_combo_marks_self_ref(self):
+        """组合只有一行 ⇒ 自参照=不设门（v0.305 标 self_ref 与真过门区分，
+        objective 照算——CLI 单出场档排名不再伪装成「过了门」）。"""
+        rows = [
+            {
+                "scorer": "s",
+                "gate": "g",
+                "exit": "only",
+                "margin": 0.1,
+                "expectancy_R": 0.1,
+                "ret_over_dd": 0.3,  # 绝对门会拦（<1.0）——self_ref 不涉绝对门
+            }
+        ]
+        ranked = sg.rank_rows(rows, sg.DEFAULT_OBJ_WEIGHTS)
+        assert ranked[0]["rdd_gate"] == "self_ref"
+        assert ranked[0]["objective"] is not None  # 自参照恒真 ⇒ objective 照算
 
     def test_explicit_custom_weights_bypass_gate(self):
         """显式自定义权重（v1 复算口径）⇒ 不套门（rdd_gate 置 None 表未评）。"""

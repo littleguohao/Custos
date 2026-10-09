@@ -691,6 +691,78 @@ class TestCellFailureSemantics:
         # 分类链路：该记录进报告应为 empty_result
         assert ses._cell_failures_report(runner)[0]["root_cause"] == "empty_result"
 
+    def test_default_runner_ref_cache_key_includes_params(self, tmp_path, monkeypatch):
+        """v0.305：参照格缓存键含 exit params——同 gate 不同 params 各建
+        参照档（防未来多 exit_spec 场景参照档串口径）。"""
+        import argparse
+
+        from custos.research import strategy_grid as sg
+
+        calls = []
+
+        def fake_run_cell(ns, cell, cells_dir, capture=False):
+            calls.append((cell["scorer"], tuple(sorted(cell["params"].items()))))
+            return "ok", tmp_path / "r.json", ""
+
+        monkeypatch.setattr(sg, "run_cell", fake_run_cell)
+        monkeypatch.setattr(
+            sg,
+            "load_cell_row",
+            lambda cell, p, reused=False: {
+                "result_file": "r__sig.json",
+                "margin": 0.1,
+                "expectancy_R": 0.2,
+                "ret_over_dd": 1.0,
+            },
+        )
+        args = argparse.Namespace(cost_bps=25.0, count=2000, top_n=20, timeout=0)
+        runner = ses._make_cell_runner(args, "codes.txt", tmp_path / "cells")
+        w = {"start": "2022-01-01", "end": "2024-07-31"}
+        runner("s_shape", "j_low", {"stop_pct": 5.0}, **w)
+        runner("s_shape", "j_low", {"stop_pct": 8.0}, **w)
+        runner("s_shape", "j_low", {"stop_pct": 5.0}, **w)  # 命中缓存不重跑
+        refs = [c for c in calls if c[0] == "baseline"]
+        assert len(refs) == 2, "两种 params 各一套参照档"
+        assert {c[1] for c in refs} == {
+            (("stop_pct", 5.0),),
+            (("stop_pct", 8.0),),
+        }
+
+    def test_default_runner_ref_failure_fail_closed(self, tmp_path, monkeypatch):
+        """v0.305：参照格失败 ⇒ fail-closed（objective None + rdd_gate False +
+        rdd_ref_missing）——不静默回落绝对门兼容通道（那条只留 CLI）。"""
+        import argparse
+
+        from custos.research import strategy_grid as sg
+
+        def fake_run_cell(ns, cell, cells_dir, capture=False):
+            if cell["scorer"] == "baseline":
+                return "failed", None, "boom"
+            return "ok", tmp_path / "r.json", ""
+
+        monkeypatch.setattr(sg, "run_cell", fake_run_cell)
+        monkeypatch.setattr(
+            sg,
+            "load_cell_row",
+            lambda cell, p, reused=False: {
+                "result_file": "r__sig.json",
+                "margin": 0.1,
+                "expectancy_R": 0.2,
+                "ret_over_dd": 1.0,
+            },
+        )
+        args = argparse.Namespace(cost_bps=25.0, count=2000, top_n=20, timeout=0)
+        runner = ses._make_cell_runner(args, "codes.txt", tmp_path / "cells")
+        out = runner(
+            "s_shape", "j_low", {"stop_pct": 5.0}, start="2022-01-01", end="2024-07-31"
+        )
+        assert out["objective"] is None
+        assert out["rdd_gate"] is False
+        assert out["rdd_ref_missing"] is True
+        # 参照格失败现场同样留尾段
+        assert runner.failures
+        assert runner.failures[0]["scorer"] == "baseline(v2.1-ref)"
+
 
 # ---------------------------------------------------------------------------
 # --v0-lattice 模式（R36 Phase 3 调权路：V0 腿轴 × 倍率格 × 双窗闸门）
@@ -903,6 +975,26 @@ class TestV0LatticeUnits:
         lat = ses._v0_mult_lattice(30, (1.0, 2.0), max_combos=64)
         assert len(lat) == 31 + 30  # 填充只有 L=2 一轮
         assert all(0.0 not in w for w in lat[31:])
+
+    def test_evaluate_ref_missing_fail_closed(self, monkeypatch):
+        """v0.305：lattice 参照读数缺失 ⇒ fail-closed（objective None +
+        rdd_gate False + rdd_ref_missing）——不回落绝对门兼容通道。"""
+        import argparse
+
+        from custos.research.evolution.dual_window import Window
+
+        args = argparse.Namespace(top_n=1)
+        ev = ses._V0LatticeEvaluator(
+            args,
+            ["A", "B"],
+            {"name": "pct5_trail08"},
+            collector=SpyCollector({MINING: _v0l_collected_mining()}),
+        )
+        monkeypatch.setattr(ev, "_ref_row", lambda legs, window: None)
+        out = ev.evaluate([2.0] * len(V0L_LEGS), V0L_LEGS, Window(*MINING))
+        assert out["rdd_ref_missing"] is True
+        assert out["objective"] is None
+        assert out["rdd_gate"] is False
 
 
 class TestV0LatticeEndToEnd:
