@@ -203,7 +203,9 @@ uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/
   ①cell 系参照格缓存键含 exit params（--joint 各轨迹出场参数不同，参照档
   不得由首个评估候选定锚）；②研究侧参照缺失 **fail-closed**（objective
   None + rdd_gate False + `rdd_ref_missing` 标记，不静默回落绝对门）；
-  ③rank_rows 单行组合自参照标 `rdd_gate="self_ref"`（与真过门区分）。
+  ③rank_rows 单行组合自参照标 `rdd_gate="self_ref"` 且排序落在真过门行
+  之后（v0.306——CLI 第一名=可直接拷 live EXIT_RULES 的行，未检验组合
+  不能拿；多行组合参照锚点行自比恒真标 True，两标签分开）。
 - 因子 IC 画像（`factor_ic_profile`）：SCORERS/DSL 的截面 RankIC/ICIR + horizon
   衰减全因子可比表——**分诊镜不是晋级判据**（晋级永远走双窗+三轴交易语义；
   读数 L3− 带幸存者偏差，R19/R21/R14）。

@@ -677,30 +677,42 @@ def rank_rows(
 
     **v2.1**：门改**相对**——参照档 = 同 (scorer, gate) 组合内 ``ref_exit``
     档行（默认 pct5_trail08，事先固定不经过挑选）；组合内缺该档 ⇒ 取组合
-    **首行**（grid 顺序首档=基准档）；组合只有一行 ⇒ 自参照恒真，行标
-    ``rdd_gate="self_ref"``（v0.305）——与真过门（``True``）区分，单行
-    组合等于不设门。
+    **首行**（grid 顺序首档=基准档）；多行组合参照档本体自比恒真标
+    ``True``。**v0.306**：组合只有一行 ⇒ ``rdd_gate="self_ref"``（门未
+    检验），且排序落在真过门行**之后**——CLI 第一名是「可直接拷 live
+    EXIT_RULES」的行，不能让没经过门检验的组合拿。
     """
     gate = weights == DEFAULT_OBJ_WEIGHTS
     refs: dict[tuple[Any, Any], dict[str, Any]] = {}
+    sizes: dict[tuple[Any, Any], int] = {}
     for r in rows:
         key = (r.get("scorer"), r.get("gate"))
+        sizes[key] = sizes.get(key, 0) + 1
         refs.setdefault(key, r)  # 首行 = 首档（grid 顺序）
         if r.get("exit") == ref_exit:
             refs[key] = r
     for r in rows:
-        ref = refs.get((r.get("scorer"), r.get("gate")))
+        key = (r.get("scorer"), r.get("gate"))
+        ref = refs.get(key)
         if not gate:
             r["rdd_gate"] = None  # 自定义权重未评
-        elif ref is r:
-            r["rdd_gate"] = "self_ref"  # 单行组合自参照=不设门
+        elif sizes.get(key, 0) <= 1:
+            r["rdd_gate"] = "self_ref"  # 单行组合=门未检验（排序降档）
         else:
-            r["rdd_gate"] = rdd_gate_ok(r, ref)
+            r["rdd_gate"] = rdd_gate_ok(r, ref)  # 参照档本体自比恒真=True
         r["objective"] = objective_of(r, weights) if not gate or r["rdd_gate"] else None
+
+    def _tier(r: dict[str, Any]) -> int:
+        if r["objective"] is None:
+            return 0  # 门不过/缺读数垫底
+        if r["rdd_gate"] == "self_ref":
+            return 1  # 门未检验排在真过门之后
+        return 2
+
     srt = sorted(
         rows,
         key=lambda r: (
-            r["objective"] is not None,
+            _tier(r),
             r["objective"] or 0.0,
         ),
         reverse=True,

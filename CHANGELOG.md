@@ -307,6 +307,7 @@
 | 2026-10-08 | v0.303 | **R40 Phase 1 工具落地**：`bear_regime_study`（空头区间做多全栈终端）——`invert_regime_bearish` 反转 _amv_checker（仅空头日放行/无映射不放行，引擎零改动）；全量 46 门×5 档 230 格双窗全枚举（重放缓存 per（门,档,窗）；预热逐股一次门在内层）；随机入场臂对等纪律（挖掘窗选型冻结配置带判定窗——钉测用「判定窗池全负」结果级证明）；基准=随机臂非空仓（幸存者偏差抵消）；C1 不过=untested；C2 三态（池未建=provisional）；CLI 复用 fes._check_windows 单源；TOOLS/AGENTS §5/R40 回填同步 | R40 预注册（#82） | 钉测 +12 |
 | 2026-10-09 | v0.304 | **objective v2.1（owner review）：rdd 门绝对改相对**——rdd(候选) ≥ rdd(参照档)：参照档事先固定不经过挑选（R39=P1_base、R37=基准档、R40=同窗 trail08、score=等倍率、cell=baseline 孪生格、rank_rows=同组合 trail08 行），随机臂同参照；废因=R39 Phase 2 首跑绝对门 0/160 全灭（熊市窗 rdd 全<1.0=R11 跟行情走），三方案（门挪终选/降阈值/R39 豁免）被否留档，**修订依据只来自过门率**；全调用点切换 + combine_readings 口径错位注明；版本 v2.1-margin-rddref 不跨版本引用 | owner review | 钉测 +4 改写 3 |
 | 2026-10-09 | v0.305 | **v2.1 三处修补（owner review）**：①cell 系参照格缓存键含 exit params（--joint 各轨迹出场参数不同，参照档不再由首个评估候选定锚）；②研究侧参照缺失 fail-closed（objective None + rdd_gate False + rdd_ref_missing 标记，不静默回落绝对门——兼容通道只留 CLI）；③rank_rows 单行组合自参照标 rdd_gate="self_ref"（与真过门区分，单档排名不再伪装过门） | owner review | 钉测 +6 改写 2 |
+| 2026-10-09 | v0.306 | **rank_rows self_ref 收尾（owner review，仅 CLI 排名）**：单行组合（门未检验）排序落在真过门行**之后**——CLI 第一名=可直接拷 live EXIT_RULES 的行，未检验组合不能拿；多行组合参照锚点行自比恒真改标 True（与单行组合分标签） | owner review | 钉测 +1 改写 2 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 
