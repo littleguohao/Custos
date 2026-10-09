@@ -14,19 +14,23 @@
      V0 分（与门无关，按 (code, date) 去重只算一次）；
   ② 出场轴 = ``strategy_grid.DEFAULT_EXIT_GRID`` 5 档 ⇒ 46×5=**230 格**
      全枚举（重放缓存 per（门, 档, 窗），与 factor_exit_study 同骨架）；
-  ③ C1~C4 判定（R40 跑数前写死，v0.301/v0.302 修订在案）：
+  ③ C1~C4 判定（R40 跑数前写死，v0.301/v0.302/v0.307 修订在案）：
      C1 top 每窗 n_taken≥100——**不过 ⇒ untested（不可判）不判 falsified**
      （样本不足≠否定证据，稀疏门被 max-of-230 挑中再判死=重演 v0.299
      纠正过的错）；C2 top margin 双窗同向为正 **且双窗 > 随机臂对应窗池
      q95**（基准=随机入场臂非空仓——同宇宙同出场格，幸存者偏差两边抵消）；
      C3 top 出场参数 ±50%×4（exit_genome.perturb_50 吸附档位）C2 结论
-     零翻转；C4 top 挖掘窗 margin > 随机臂挖掘池 q95（与 C2 挖掘半窗同池，
-     重合是设计使然），池≥50 才 confirmed 否则 provisional；
-  ④ **随机臂对等纪律（v0.302 写死）**：每条臂在**挖掘窗内**完成全部
-     挑选（空头日随机 (code, bar) 入场、信号数分布对齐 46 门实测 × 5 档
-     取 max ⇒ **冻结配置**），判定窗读数由冻结配置产生——**选择只做一次，
-     样本外比较；禁止每窗重新取 max**（top 冻结 vs 臂当窗重选不对等）。
-     C5 的 pre2019 池同理（Phase 3 工具时同纪律）。
+     零翻转——**top 出场无可扰参数轴（base_low params={}）⇒ not_applicable
+     不空转不放行 candidate**（v0.307）；C4 top 挖掘窗 margin > 随机臂
+     挖掘池 q95（与 C2 挖掘半窗同池，重合是设计使然），池≥50 才
+     confirmed 否则 provisional；
+  ④ **随机臂对等纪律（v0.302）+ 预算对等（v0.307）**：每条臂在**挖掘
+     窗内**完整复刻 top 的 max-of-230 选型（逐门按该门实测信号数 n_g
+     空头日随机 (code, bar) 入场——0 信号门跳过——× 5 档取 max ⇒
+     **冻结（n_g, 出场配置）**），判定窗读数由冻结配置产生——**选择只
+     做一次，样本外比较；禁止每窗重新取 max**（top 冻结 vs 臂当窗重选
+     不对等）。原 max-of-5 构造标尺系统性偏低（top 享受 230 格选择效应、
+     臂只有 5 格，q95 过易）。C5 的 pre2019 池同理（Phase 3 工具时同纪律）。
 
 CLI 护栏：窗口与 pre2019 untouched 段交集即拒（镜像同族，复用
 factor_exit_study._check_windows）。LLM 不碰数值；v2 口径（margin 单量
@@ -233,35 +237,52 @@ def _entry_view(per_code_w: dict[str, dict], entries: list[dict]) -> dict[str, d
 
 
 def run_arm(
-    entries: list[dict],
+    gate_counts: dict[str, int],
     exits: list[dict],
+    draw_entries: Callable[[int, str], list[dict]],
     replay_mining: Callable[[list[dict], dict[str, Any]], list[dict]],
     top_n: int,
-    judgment_reader: Optional[Callable[[dict], Optional[dict]]] = None,
+    judgment_reader: Optional[Callable[[int, dict], Optional[dict]]] = None,
 ) -> dict[str, Any]:
-    """单条随机臂：挖掘窗内 5 档取 max ⇒ **冻结出场配置**；判定窗读数由
-    judgment_reader（冻结配置的回放）产生——对等纪律的代码化身。
+    """单条随机臂：**预算对等**（v0.307）——完整复刻 top 的 max-of-230
+    选型：逐门按该门实测信号数 n_g 抽随机入场（0 信号门跳过）× 全档重放，
+    max 过全部门×档 ⇒ **冻结（n_g, 出场配置）**；判定窗读数由
+    judgment_reader（冻结配置的重抽回放）产生——对等纪律（v0.302）的
+    代码化身。原 max-of-5 构造的标尺系统性偏低（top 享受 230 格选择效应、
+    臂只有 5 格），C4/C2 的 q95 会过易。
 
     v2.1：参照档 = **同一批入场信号** × pct5_trail08（同窗同信号同口径——
     随机臂与主研究同族对称）。
     """
-    ref_rd: Optional[dict] = None
-    for e in exits:
-        if e["name"] == "pct5_trail08":
-            ref_rd = fes.combine_readings(
-                replay_mining(entries, e["params"]), top_n, ref="self"
-            )
-            break
     best: Optional[dict] = None
-    for e in exits:
-        trades = replay_mining(entries, e["params"])
-        rd = fes.combine_readings(trades, top_n, ref=ref_rd)
-        if rd and rd["objective"] is not None and rd["margin"] is not None:
-            if best is None or rd["margin"] > best["readings"]["margin"]:
-                best = {"exit": e["name"], "params": e["params"], "readings": rd}
+    for g, n_g in gate_counts.items():
+        if n_g <= 0:
+            continue  # 0 信号的门不能当模板（n=0 的臂无意义）
+        entries = draw_entries(n_g, "mining")
+        ref_rd: Optional[dict] = None
+        for e in exits:
+            if e["name"] == "pct5_trail08":
+                ref_rd = fes.combine_readings(
+                    replay_mining(entries, e["params"]), top_n, ref="self"
+                )
+                break
+        for e in exits:
+            trades = replay_mining(entries, e["params"])
+            rd = fes.combine_readings(trades, top_n, ref=ref_rd)
+            if rd and rd["objective"] is not None and rd["margin"] is not None:
+                if best is None or rd["margin"] > best["readings"]["margin"]:
+                    best = {
+                        "n_signals": n_g,
+                        "gate_template": g,
+                        "exit": e["name"],
+                        "params": e["params"],
+                        "readings": rd,
+                    }
     out: dict[str, Any] = {"mining": best}
     if best is not None and judgment_reader is not None:
-        out["judgment"] = judgment_reader(best["params"])  # 冻结配置，不重选
+        out["judgment"] = judgment_reader(
+            best["n_signals"], best["params"]
+        )  # 冻结配置（含胜出格 n_g），不重选
     return out
 
 
@@ -270,17 +291,23 @@ def run_arm(
 # ---------------------------------------------------------------------------
 
 
+def _perturbable(params: dict[str, Any]) -> bool:
+    """该出场参数集是否存在可扰参数轴（C3 适用性判定——base_low
+    params={} 无 genome 语义主止损轴 ⇒ False）。"""
+    return "stop_pct" in params and "stop_pct" in eg.LEVELS
+
+
 def perturb_exit_params(
     params: dict[str, Any], rng: random.Random
 ) -> tuple[dict[str, Any], bool]:
     """LEVELS 内且开启的参数经 ``exit_genome.perturb_50``（±50% 吸附最近档）；
     档位外键原样保留。返回（新参数, 是否有可扰参数）——base_low（params={}）
     无 genome 语义主止损轴 ⇒ 原样重评留痕。"""
+    if not _perturbable(params):
+        return dict(params), False
     g = {k: float(v) for k, v in params.items() if k in eg.LEVELS}
     if "cost_zone_bars" in g and "cost_zone_pct" not in g:
         g["cost_zone_pct"] = 3.0  # 引擎默认值（evaluate_trades 形参默认）
-    if "stop_pct" not in g:
-        return dict(params), False
     perturbed = eg.perturb_50(g, rng)
     out = dict(params)
     for k in params:
@@ -452,10 +479,10 @@ def run_study(
 
     top = _top(configs)
 
-    # ── 随机臂（对等纪律：挖掘窗选型冻结，判定窗读数由冻结配置产生）──
+    # ── 随机臂（对等纪律 v0.302 + **预算对等 v0.307**：每臂完整复刻 top 的
+    # 46 门 × 5 档 max-of-230 选型——逐门 n_g 对齐抽样，冻结配置进判定窗）──
     rng = random.Random(args.seed)
-    # 信号数分布对齐 46 门实测——0 信号的门不能当模板（n=0 的臂无意义）
-    counts_m = [c for c in (len(gate_sigs["mining"][g]) for g in gates) if c > 0]
+    counts_m = {g: len(gate_sigs["mining"][g]) for g in gates}
     pool_m: list[float] = []
     pool_j: list[float] = []
     arm_evaluated = 0
@@ -470,16 +497,15 @@ def run_study(
         )
 
     for _arm in range(args.n_random):
-        n = rng.choice(counts_m) if counts_m else 0
-        entries_m = _rand_entries(n, "mining")
         arm_evaluated += 1
 
-        def _judgment_reader(frozen_params: dict[str, Any]) -> Optional[dict]:
-            """冻结配置的判定窗读数（不重选——对等纪律 v0.302）。"""
-            entries_j = _rand_entries(len(entries_m), "judgment")
-            # ⚠️ 冻结的是**出场配置**；判定窗入场集 = 同分布重抽（随机入场
-            # 无门信号可携带——对等的是「臂冻结配置 vs top 冻结配置」，入场
-            # 随机性两臂同分布）。v2.1 参照 = 同批判定入场 × trail08
+        def _judgment_reader(n_g: int, frozen_params: dict[str, Any]) -> Optional[dict]:
+            """冻结配置（含胜出格 n_g）的判定窗读数（不重选——对等纪律 v0.302）。
+
+            ⚠️ 冻结的是**出场配置与胜出格 n_g**；判定窗入场集 = 同分布重抽
+            （随机入场无门信号可携带——对等的是「臂冻结配置 vs top 冻结配置」，
+            入场随机性两臂同分布）。v2.1 参照 = 同批判定入场 × trail08。"""
+            entries_j = _rand_entries(n_g, "judgment")
             ref_j = fes.combine_readings(
                 _replay("judgment", "__random__", entries_j, ref_trail),
                 args.top_n,
@@ -489,8 +515,9 @@ def run_study(
             return fes.combine_readings(trades, args.top_n, ref=ref_j)
 
         arm = run_arm(
-            entries_m,
+            counts_m,
             exits,
+            _rand_entries,
             lambda subset, params: _replay("mining", "__random__", subset, params),
             args.top_n,
             judgment_reader=_judgment_reader,
@@ -513,45 +540,63 @@ def run_study(
         q95_j,
     )
 
-    # ── C3：top 出场参数 ±50%×4 零翻转（池固定不重估）──
+    # ── C3：top 出场参数 ±50%×4 零翻转（池固定不重估）；top 出场无可扰
+    # 参数轴（base_low params={}）⇒ not_applicable 不空转（v0.307）──
+    c3_rule = f"出场参数 ±50% ×{C3_DRAWS} 扰动 C2 结论零翻转（池固定）"
     c3_draws: list[dict] = []
-    if top is not None:
-        for draw_i in range(C3_DRAWS):
-            params_p, moved = perturb_exit_params(
-                next(e["params"] for e in exits if e["name"] == top["exit"]), rng
-            )
-            rd_m = fes.combine_readings(
-                _replay(
-                    "mining", top["gate"], gate_sigs["mining"][top["gate"]], params_p
-                ),
-                args.top_n,
-                ref=refs[(top["gate"], "mining")],  # v2.1 同参照口径对称
-            )
-            rd_j = fes.combine_readings(
-                _replay(
-                    "judgment",
-                    top["gate"],
-                    gate_sigs["judgment"][top["gate"]],
-                    params_p,
-                ),
-                args.top_n,
-                ref=refs[(top["gate"], "judgment")],
-            )
-            c2d = judge_c2(rd_m, rd_j, q95_m, q95_j)
-            c3_draws.append(
-                {
-                    "draw": draw_i,
-                    "params_perturbed": params_p,
-                    "perturbable": moved,
-                    "c2_holds": c2d["ok"],
-                }
-            )
-    c3 = {
-        "ok": bool(c3_draws) and all(d["c2_holds"] for d in c3_draws),
-        "draws": c3_draws,
-        "n_flips": sum(1 for d in c3_draws if not d["c2_holds"]),
-        "rule": f"出场参数 ±50% ×{C3_DRAWS} 扰动 C2 结论零翻转（池固定）",
-    }
+    top_params = next(
+        (e["params"] for e in exits if top and e["name"] == top["exit"]), None
+    )
+    c3: dict[str, Any]
+    if top is not None and not _perturbable(top_params or {}):
+        c3 = {
+            "ok": None,  # 无灵敏度证据：不降 falsified 也不放行 candidate
+            "state": "not_applicable",
+            "reason": f"top 出场 {top['exit']} 无可扰参数轴（params="
+            f"{top_params}）——C3 不适用：不空转零信息复评、不伪装零翻转放行",
+            "draws": [],
+            "n_flips": None,
+            "rule": c3_rule,
+        }
+    else:
+        if top is not None:
+            for draw_i in range(C3_DRAWS):
+                params_p, moved = perturb_exit_params(dict(top_params or {}), rng)
+                rd_m = fes.combine_readings(
+                    _replay(
+                        "mining",
+                        top["gate"],
+                        gate_sigs["mining"][top["gate"]],
+                        params_p,
+                    ),
+                    args.top_n,
+                    ref=refs[(top["gate"], "mining")],  # v2.1 同参照口径对称
+                )
+                rd_j = fes.combine_readings(
+                    _replay(
+                        "judgment",
+                        top["gate"],
+                        gate_sigs["judgment"][top["gate"]],
+                        params_p,
+                    ),
+                    args.top_n,
+                    ref=refs[(top["gate"], "judgment")],
+                )
+                c2d = judge_c2(rd_m, rd_j, q95_m, q95_j)
+                c3_draws.append(
+                    {
+                        "draw": draw_i,
+                        "params_perturbed": params_p,
+                        "perturbable": moved,
+                        "c2_holds": c2d["ok"],
+                    }
+                )
+        c3 = {
+            "ok": bool(c3_draws) and all(d["c2_holds"] for d in c3_draws),
+            "draws": c3_draws,
+            "n_flips": sum(1 for d in c3_draws if not d["c2_holds"]),
+            "rule": c3_rule,
+        }
 
     c4_state = (
         "provisional"
@@ -577,12 +622,13 @@ def run_study(
     }
 
     # ── 总结局（C1 不过 ⇒ untested 优先——样本不足≠否定证据；C2 三态：
-    # 池未建=None ⇒ 既不 falsified 也不 candidate，落 provisional）──
+    # 池未建=None ⇒ 既不 falsified 也不 candidate，落 provisional；C3
+    # not_applicable（v0.307）= 灵敏度证据缺失 ⇒ provisional 不放行 candidate）──
     if not c1["ok"]:
         verdict = "untested"
-    elif c2["ok"] is False or not c3["ok"] or c4_state == "confirmed_fail":
+    elif c2["ok"] is False or c3["ok"] is False or c4_state == "confirmed_fail":
         verdict = "falsified"
-    elif c2["ok"] is True and c4_state == "confirmed_pass":
+    elif c2["ok"] is True and c3["ok"] is True and c4_state == "confirmed_pass":
         verdict = "candidate"
     else:
         verdict = "provisional"
@@ -605,15 +651,19 @@ def run_study(
             "judgment": pool_j,
             "q95_mining": q95_m,
             "q95_judgment": q95_j,
-            "arm_construction": "对等纪律（v0.302）：挖掘窗内选型冻结配置，"
-            "判定窗读数由冻结配置产生，禁每窗重新取 max",
+            "arm_construction": "对等纪律（v0.302）+ 预算对等（v0.307）："
+            "每臂完整复刻 top 的 46 门 × 5 档 max-of-230 选型（逐门 n_g "
+            "对齐抽样，0 信号门跳过），冻结（n_g, 出场配置）进判定窗，"
+            "禁每窗重新取 max",
         },
         "criteria": {
             "C1": c1,
             "C2": c2,
             "C3": c3,
             "C4": c4,
-            "rule_note": "R40-C1~C4 跑数前写死（v0.301/v0.302 修订在案）；"
+            "rule_note": "R40-C1~C4 跑数前写死（v0.301/v0.302/v0.307 修订在案——"
+            "v0.307：随机臂预算对等 max-of-230 镜像；C3 无可扰参数轴="
+            "not_applicable 不空转不放行）；"
             "C5（pre2019 同段随机池标尺）= C2 过线才启动，owner 拍板发令",
         },
         "objective_version": sg.OBJECTIVE_VERSION,

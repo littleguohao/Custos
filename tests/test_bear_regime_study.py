@@ -3,9 +3,11 @@
 
 锁的契约：regime 反转语义（仅空头日放行/无映射不放行）、230 格枚举、
 随机臂**对等纪律**（挖掘窗选型冻结 ⇒ 判定窗读数由冻结配置产生——用
-「判定窗池全负」结果级证明：若臂在判定窗重选，池不可能全负）、
-C1 不过=untested、C2 三态（池未建=None⇒provisional 不 falsified）、
-CLI 护栏、产物自含。全合成注入，不发真实加载。
+「判定窗池全负」结果级证明：若臂在判定窗重选，池不可能全负）+
+**预算对等**（v0.307：每臂逐门 n_g 抽样复刻 top 的 max-of-230 选型，
+非单抽一个 n × 5 档）、C1 不过=untested、C2 三态（池未建=None⇒
+provisional 不 falsified）、C3 无可扰参数轴=not_applicable 不空转
+不放行（v0.307）、CLI 护栏、产物自含。全合成注入，不发真实加载。
 """
 
 from __future__ import annotations
@@ -75,11 +77,26 @@ def _trade_of(r, ret):
 
 
 def _replay_winner_gate(subset, params):
-    """j_low 门两窗稳赢（margin≈0.3），其余门负（≈−0.167）；出场档中性
-    （C3 扰动不改结论）。随机臂（__random__）贴零。"""
+    """j_low 门 × 含 trail_pct 的档（=pct5_trail08，可扰参数轴）两窗稳赢
+    （margin≈0.3），其余门/档负（≈−0.167）；C3 扰动不改结论（ret 只认
+    trail_pct 存在与否）。随机臂（__random__）贴零。"""
     out = []
     for r in subset:
-        if r["gate"] == "j_low":
+        if r["gate"] == "j_low" and params.get("trail_pct"):
+            ret = 0.08 if r["i"] % 2 == 0 else -0.02
+        elif r["gate"] == "__random__":
+            ret = 0.01 if r["i"] % 2 == 0 else -0.005
+        else:
+            ret = -0.01 if r["i"] % 2 == 0 else 0.005
+        out.append(_trade_of(r, ret))
+    return out
+
+
+def _replay_base_low_wins(subset, params):
+    """j_low × base_low（params={} 无可扰参数轴）两窗稳赢——C3 不适用路径。"""
+    out = []
+    for r in subset:
+        if r["gate"] == "j_low" and not params:
             ret = 0.08 if r["i"] % 2 == 0 else -0.02
         elif r["gate"] == "__random__":
             ret = 0.01 if r["i"] % 2 == 0 else -0.005
@@ -164,6 +181,7 @@ class TestGridAndVerdicts:
         assert len(rep["configs"]) == 46 * 5
         assert rep["gates"] == sorted(bt.ENTRY_GATES)
         assert rep["top"]["gate"] == "j_low"
+        assert rep["top"]["exit"] == "pct5_trail08"  # 可扰参数档（C3 适用）
         c = rep["criteria"]
         assert c["C1"]["ok"] is True, c["C1"]
         assert c["C2"]["ok"] is True, c["C2"]
@@ -171,6 +189,20 @@ class TestGridAndVerdicts:
         assert c["C3"]["ok"] is True and len(c["C3"]["draws"]) == brs.C3_DRAWS
         assert c["C4"]["state"] == "confirmed_pass"
         assert rep["verdict"] == "candidate"
+
+    def test_c3_not_applicable_for_base_low(self):
+        """top 落在无可扰参数轴的出场（base_low params={}）⇒ C3 =
+        not_applicable（v0.307）：不空转 4 次零信息复评、不伪装零翻转
+        放行——总结局不降 falsified（无证据≠否定）也不放 candidate
+        （灵敏度证据缺失）⇒ provisional。"""
+        spec = _mk_per_code({"j_low": 120, "j_low_adx25": 4})
+        rep = _run(spec, _replay_base_low_wins)
+        assert rep["top"]["exit"] == "base_low"
+        c3 = rep["criteria"]["C3"]
+        assert c3["ok"] is None and c3["state"] == "not_applicable"
+        assert c3["draws"] == [] and c3["n_flips"] is None
+        assert rep["criteria"]["C2"]["ok"] is True  # 其余链条是过的
+        assert rep["verdict"] == "provisional", "C3 无灵敏度证据不放行 candidate"
 
     def test_falsified_when_top_cannot_beat_random(self):
         spec = _mk_per_code({"j_low": 120, "j_low_adx25": 4})
@@ -207,6 +239,32 @@ class TestArmFrozenSemantics:
         assert all(m < 0 for m in pool_j), pool_j
         assert all(m > 0 for m in rep["pools"]["mining"])
         assert "冻结" in rep["pools"]["arm_construction"]
+
+    def test_arm_budget_parity_max_of_230(self):
+        """预算对等（v0.307）：每臂完整复刻 top 的 46 门 × 5 档选型——
+        逐门按该门实测信号数抽样（0 信号门跳过），非单抽一个 n × 5 档
+        （原 max-of-5 构造标尺系统性偏低）。"""
+        draws = []
+
+        def _spy_rand(n, w):
+            draws.append((n, w))
+            return _rand_flat(n, w)
+
+        spec = _mk_per_code({"j_low": 120, "j_low_adx25": 4, "qn_three_red": 0})
+        warm_fn = lambda s, e: spec[(s, e)]  # noqa: E731
+        rep = brs.run_study(
+            _args(n_random=3, c4_min_pool=2),
+            warm_fn=warm_fn,
+            replay_fn=_replay_winner_gate,
+            random_entry_fn=_spy_rand,
+        )
+        mining_draws = [n for n, w in draws if w == "mining"]
+        # 每臂 = 逐门各抽一次（120 + 4；0 信号门跳过）× 3 臂（门序字母序钉死）
+        assert mining_draws == [120, 4] * 3
+        judgment_draws = [n for n, w in draws if w == "judgment"]
+        assert len(judgment_draws) == 3  # 每臂冻结配置判定窗一次
+        assert set(judgment_draws) <= {120, 4}  # 冻结的是胜出格的 n_g
+        assert "预算对等" in rep["pools"]["arm_construction"]
 
 
 class TestC3Perturb:
