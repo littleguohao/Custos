@@ -95,6 +95,14 @@ TOOLS: dict[str, tuple[str, str]] = {
         "随机入场臂（对等纪律：挖掘窗选型冻结配置带判定窗读数）；C1 不过="
         "untested；pre2019 硬拒绝镜像",
     ),
+    "plan_shadow_review": (
+        "driver",
+        "#60 持仓计划影子事后打分（判据 C）：台账 1700 口径不一致事件（agree="
+        "False 且来源非 default）的 plan vs 现行 N 日持仓层 Δret（N=5 主/10 副；"
+        "P0=T+1 首可卖日开盘清仓/P1(P2 同档)=卖半仓/P3=不动，跌停停牌顺延"
+        "引擎单源）；均值/符号计数 + plan 更防守事件的 live MAE 副读数；"
+        "0 事件非零退出不写产物",
+    ),
     "score_c5_terminal": (
         "driver",
         "R36-C5 pre2019 终审终端（score 侧，exit_c5_terminal 同族镜像）：冻结"
