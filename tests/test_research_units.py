@@ -41,8 +41,10 @@ def test_units_exist():
     # 2026-09-23：+R37（出场轴进化战役，预注册落档——出场基因组×战役壳）
     # 2026-10-08：+R39（因子×出场交互，预注册落档）+R40（0AMV 空头区间做多全栈，
     # 预注册落档）（R38 号被 live-only 出场回测化预留跳过）
-    assert len(UNITS) == 39, (
-        f"预期 39 个研究单元，实际 {len(UNITS)}：{[p.name for p in UNITS]}"
+    # 2026-10-09：+R41（持仓计划规则离线回放，预注册落档）+R42（打分→仓位分层，
+    # 预注册落档）
+    assert len(UNITS) == 41, (
+        f"预期 41 个研究单元，实际 {len(UNITS)}：{[p.name for p in UNITS]}"
     )
 
 
