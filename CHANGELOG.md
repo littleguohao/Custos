@@ -314,6 +314,7 @@
 | 2026-10-09 | v0.310 | **#60 影子并轨 A+B（owner 方案）**：①default 来源视同无计划（兜底止损=live −7% P1 线，原样判定必亮 ⚠️ 噪音、原样并轨=P1 变 P0 的未研究规则变更）⇒ plan_default 不出信号不计一致率；②plan 影子台账 `plan_shadow_ledger`（append-only+每日快照+幂等 (date,code,stage)，1445/1700 不合并，contracts require）——写入点=两份报告重估流程（主批不传 plan 恒 plan_missing）；14:45 对比列统一到 b1 final_priority（b1 缺失照实标注） | owner 方案+拍板 | 钉测 +12 改写 1 |
 | 2026-10-09 | v0.311 | **#60 判据 C 工具落地**：`plan_shadow_review`（影子事后打分）——台账 1700 口径不一致事件（agree=False 且非 default）的 plan vs 现行 N 日持仓层 Δret（N=5 主/10 副；P0=T+1 首可卖日开盘清仓、P1（P2 同档）=卖半仓、P3=不动；跌停停牌顺延=引擎 tradable_flags 单源）；汇总均值/符号/胜率 + plan 更防守事件 live MAE 副读数；pending 未到期与 error 分列；0 事件非零退出不写产物 | owner 方案+拍板（N/指标/动作映射） | 钉测 +9 |
 | 2026-10-09 | v0.312 | **R41/R42 预注册落档 + #61 改问（owner 方案 D/F/G）**：R41 持仓计划规则离线回放（计划止损 stop_loss_ref+计划止盈 vs 现行 EXIT_RULES 配对双窗；前置核实=stop_loss_ref 可 as-of 重算无未来数据）；R42 打分→仓位分层（C2 单调性硬前提+C3 加权 expR 仓位增量——owner 更正 margin 恒 0 作废；权重格 W1~W3 归一化写死；组合层未测不改引擎；W2=过滤器对照）；#61 目标函数确认由 v2.1 承担、剩余改问 R42；R34 悬挂口关闭（再议条件 q95<0 未触发，旁证不同源证伪维持） | owner 方案+拍板 | 研究单元结构测试 223 绿（单元 41） |
+| 2026-10-09 | v0.313 | **#60 并轨判据改写（owner 方案 E）**：「连续 5 个交易日影子对比」作废（数时间不是样本+一致性本非判据）⇒ 双条件——①实现一致性（台账非 default 事件 ≥5 交易日无异常）②规则有效性（R41 判毕=candidate 或 K=20 事件均值 Δret₅≥0「不更差」——显著性证明归 R41）；时间帽 60 交易日凑不满 K 只按 R41 决定；并轨=独立提交只动 SIGNAL_ORDER；default 永不出 plan 信号；统计口径=live_final_priority 单源（v0.86 口径漂移已收敛） | owner 方案+拍板（K=20/60 日帽） | TODO 文本（治理守卫绿） |
 
 ## 写入规范（2026-08-29 v0.144 起）
 
