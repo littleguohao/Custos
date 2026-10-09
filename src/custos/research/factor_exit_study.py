@@ -807,6 +807,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap = _build_parser()
     args = ap.parse_args(argv)
     _check_windows(args, ap)
+    # 加载到达校验（v0.316，R41 指导顺手补）：逐股 _load_one_bars 不经批量
+    # 截断护栏——count 不够会把窗口静默剪空（r36_c5 碎片宇宙教训）
+    from custos.research.exit_c5_terminal import check_reach  # noqa: PLC0415
+
+    check_reach(args.count, args.mining_start)
     try:
         rep = run_study(args)
     except (RuntimeError, ValueError) as exc:

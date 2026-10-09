@@ -3598,7 +3598,13 @@ def _trades_from_signals(
                 f" != 现数据日期 {dates[i]}"
             )
         slice_df = df.iloc[: i + 1]
-        stop_ov = _platform_stop_override(slice_df, stop_mode=sim_kw["stop_mode"])
+        # R41：信号显式携带止损位（stop_loss_ref as-of 重算）优先；缺省走
+        # 原逻辑（平台高止损）——exit_campaign/R39/R40 信号无此键，逐位不变。
+        stop_ov = (
+            cand["stop_override"]
+            if "stop_override" in cand
+            else _platform_stop_override(slice_df, stop_mode=sim_kw["stop_mode"])
+        )
         tr = simulate_b1_trade(
             df,
             i,

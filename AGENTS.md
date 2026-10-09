@@ -198,6 +198,14 @@ build_row 源头转 float，numpy 类型不触发校验失败）。
   P0=T+1 首可卖日开盘清仓、P1（P2 同档）=卖半仓、P3=不动；跌停停牌顺延=
   bt.tradable_flags 单源复用）；副读数=plan 更防守事件 live MAE；0 事件
   非零退出。
+  plan_rules_replay（R41 终端，v0.316）：持仓计划规则离线回放——计划止损
+  stop_loss_ref（b1_structure._stop_ref as-of，引擎**信号级 stop_override
+  钩子**：信号带键即用、缺省走原逻辑——R37/R39/R40 逐位不变）+计划止盈
+  vs 现行 EXIT_RULES 配对双窗；现行版主读数 pct10（忠实 hard_loss；
+  loss_reduction 引擎表达不了）/副读数 pct7 不作判据；两版共用
+  scale_out_frac=0.5；C2=Δmargin 双窗正+rdd 相对门（参照=同窗现行版）；
+  C3=lookback 扰动**新子集两版重跑**；C4=随机止损价臂 N=50（预算对等=
+  两边都不挑选，池元素=臂挖掘窗 Δmargin，池空=indeterminate）。
   exit_c5_terminal（R37-C5 终审终端，判据 v0.299——**a_sample 可疑闸**：
   n 低于预期 ⇒ 跑数可疑不出判决（双向压）+ thr 三分：CI95 hi<thr 杀 /
   lo>0 且点估计≥thr 活 / 其余 untested）：冻结候选 vs 基准档

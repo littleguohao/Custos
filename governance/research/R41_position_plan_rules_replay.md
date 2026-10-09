@@ -9,8 +9,8 @@
 > 作判据；②scale_out_frac=0.5 两版共用写死（bbi_exit_consec=2 /
 > stop_trigger="close" / cost_bps=25 同写死）；③rdd 相对门任一窗不过
 > ⇒ C2 不过标 rdd_gate_fail；④C4 预算对等=两边都不挑选，池元素=臂
-> 挖掘窗 Δmargin）；**Phase 1 工具 🚧 落地中**——生产机跑数待 owner
-> 发令　|
+> 挖掘窗 Δmargin）；**Phase 1 工具 ✅（v0.316 `plan_rules_replay`，钉测
+> +17）**——Phase 2 生产机跑数待 owner 发令　|
 > **依赖**：上游：R10（「5% 是崖」/双窗纪律）R11（绝对读数不可引用）
 > R14（幸存者宇宙）R37（判据族/出场轴收口换方向）R39（C1 不过=untested
 > 修订族）；live 侧对象：`core/trades/position_plans.py`（计划生成）、
@@ -176,3 +176,14 @@
   ③rdd 相对门任一窗不过 ⇒ C2 不过标 rdd_gate_fail；④C4 预算对等
   =两边都不挑选（池元素=臂挖掘窗 Δmargin；臂不过门不进池记过门率；
   池空=indeterminate）。
+- **Phase 1 工程（✅ 2026-10-09，v0.316）**：引擎信号级 `stop_override`
+  钩子（`backtest_factors.py:3601`，缺省逐位不变钉测）+ `_stop_ref(df,
+  lookback=)` 参数化（L2，默认逐位不变钉测）+ `research/plan_rules_replay.py`
+  全栈（attach 配对剔除记账/两版读数/C1~C4 机械读数/四态结局/CLI 护栏
+  pre2019 硬拒绝 + check_reach 到达校验——factor_exit_study /
+  bear_regime_study 同补 check_reach）。钉测 +17（owner 指导 §5 清单
+  九项全覆盖）；TOOLS 登记 `plan_rules_replay`，AGENTS.md §5 同步。
+  Phase 2 生产机跑数待发令：`uv run python -m custos.research
+  plan_rules_replay --tag r41_a1 --codes-file <s3000 钉死宇宙>
+  --mining-start 2022-01-01 --mining-end 2024-07-31 --judgment-start
+  2024-08-01 --judgment-end 2026-09-04`。

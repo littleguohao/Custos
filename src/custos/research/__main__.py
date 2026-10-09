@@ -95,6 +95,15 @@ TOOLS: dict[str, tuple[str, str]] = {
         "随机入场臂（对等纪律：挖掘窗选型冻结配置带判定窗读数）；C1 不过="
         "untested；pre2019 硬拒绝镜像",
     ),
+    "plan_rules_replay": (
+        "driver",
+        "R41 持仓计划规则离线回放：计划止损 stop_loss_ref（as-of 重算，引擎"
+        "信号级 stop_override 钩子）+计划止盈 vs 现行 EXIT_RULES 配对双窗"
+        "（现行版主读数 pct10 忠实 hard_loss/副读数 pct7 只报告；两版共用"
+        " scale_out_frac=0.5）；C1 不过=untested/C2=Δmargin 双窗正+rdd 相对门"
+        "（参照=同窗现行版）/C3=lookback 扰动新子集两版重跑/C4=随机止损价臂"
+        " N=50（预算对等=两边都不挑选）；pre2019 硬拒绝+check_reach 到达校验",
+    ),
     "plan_shadow_review": (
         "driver",
         "#60 持仓计划影子事后打分（判据 C）：台账 1700 口径不一致事件（agree="

@@ -338,11 +338,16 @@ def check_liquidity(df, win: int = LIQUIDITY_WIN) -> dict[str, Any]:
     }
 
 
-def _stop_ref(df) -> Optional[float]:
-    """建议止损位：近 STOP_LOOKBACK 日最低价（根数不足 → None）。"""
-    if len(df) < STOP_LOOKBACK:
+def _stop_ref(df, lookback: int = STOP_LOOKBACK) -> Optional[float]:
+    """建议止损位：近 lookback 日最低价（根数不足 → None）。
+
+    ``lookback`` 默认 STOP_LOOKBACK（行为逐位不变）——R41-C3 的 ±50%
+    扰动通道（v0.315 口径定稿）；调用方按 as-of 切片（df.iloc[:i+1]）
+    传入，本函数只读入参 df，天然无未来数据。
+    """
+    if len(df) < lookback:
         return None
-    return round(float(df["low"].tail(STOP_LOOKBACK).min()), 4)
+    return round(float(df["low"].tail(lookback).min()), 4)
 
 
 def detect(df) -> dict[str, Any]:
