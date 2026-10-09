@@ -266,6 +266,16 @@ class TestArmFrozenSemantics:
         assert set(judgment_draws) <= {120, 4}  # 冻结的是胜出格的 n_g
         assert "预算对等" in rep["pools"]["arm_construction"]
 
+    def test_entry_accounting_recorded(self):
+        """n_requested/n_returned 记账（v0.309）：注入路径 len==n ⇒ 两数
+        相等；挖掘窗=每臂逐门 n_g 之和，判定窗=每臂冻结胜出格的 n_g。"""
+        spec = _mk_per_code({"j_low": 120, "j_low_adx25": 4})
+        rep = _run(spec, _replay_winner_gate, n_random=3, c4_min_pool=2)
+        acc = rep["pools"]["entry_accounting"]
+        assert acc["mining"] == {"requested": 3 * 124, "returned": 3 * 124}
+        assert acc["judgment"] == {"requested": 3 * 120, "returned": 3 * 120}
+        assert rep["pools"]["score_cache_size"] == {"mining": 0, "judgment": 0}
+
 
 class TestRandomEntries:
     """random_entries 抽样语义（v0.308 owner review）：无放回 + 母体截断。"""
@@ -297,6 +307,61 @@ class TestRandomEntries:
         out4 = brs.random_entries(per_code, regime, 4, _r.Random(2))
         assert len(out4) == 4
         assert len({(e["code"], e["i"]) for e in out4}) == 4
+
+    def test_prebuilt_pool_bit_identical(self):
+        """v0.309：预建池注入与内联建池逐位一致（纯实现优化不改结果）。"""
+        import random as _r
+
+        per_code = self._per_code()
+        regime = brs.invert_regime_bearish({"2023-01-01": "空头"})
+        a = brs.random_entries(per_code, regime, 4, _r.Random(7))
+        b = brs.random_entries(
+            per_code,
+            regime,
+            4,
+            _r.Random(7),
+            pool=brs.bear_bar_pool(per_code, regime),
+        )
+        assert a == b
+
+    def test_score_cache_and_none_cached(self, monkeypatch):
+        """v0.309：as-of 打分按 (code,i) 缓存——同种子第二遍零新增计算且
+        结果逐位一致；打分失败（None）同样缓存（跳过语义逐位不变）。"""
+        import random as _r
+
+        import pandas as pd
+
+        from custos.research import score_return_study as srs
+
+        df = pd.DataFrame(
+            {"date": pd.to_datetime(["2023-01-02", "2023-01-03", "2023-01-04"])}
+        )
+        per_code = {
+            "000001": {"df": df, "scores": {}},  # scores 全缺 ⇒ 全走现算
+            "000002": {"df": df, "scores": {}},
+        }
+        regime = brs.invert_regime_bearish({"2023-01-01": "空头"})
+        calls = []
+
+        def fake_asof(df_arg, index_df, i, code):
+            calls.append((code, i))
+            if i == 0:
+                raise RuntimeError("打分失败")
+            return 60.0 + i, "中", {}  # 真函数返回 (score, level, contrib)
+
+        monkeypatch.setattr(srs, "asof_technical_score", fake_asof)
+        cache: dict = {}
+        a = brs.random_entries(
+            per_code, regime, 6, _r.Random(7), index_df=object(), score_cache=cache
+        )
+        assert len(calls) == 6  # 抽满 6 根各算一次（失败的也算一次后缓存 None）
+        assert len(a) == 4, "两票 i=0 打分失败被跳过"
+        assert sum(1 for v in cache.values() if v is None) == 2
+        b = brs.random_entries(
+            per_code, regime, 6, _r.Random(7), index_df=object(), score_cache=cache
+        )
+        assert a == b, "缓存路径结果与首遍逐位一致"
+        assert len(calls) == 6, "第二遍全命中缓存零新增计算"
 
 
 class TestC3Perturb:

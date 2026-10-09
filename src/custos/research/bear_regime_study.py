@@ -26,11 +26,14 @@
      confirmed 否则 provisional；
   ④ **随机臂对等纪律（v0.302）+ 预算对等（v0.307）**：每条臂在**挖掘
      窗内**完整复刻 top 的 max-of-230 选型（逐门按该门实测信号数 n_g
-     空头日随机 (code, bar) 入场——0 信号门跳过——× 5 档取 max ⇒
-     **冻结（n_g, 出场配置）**），判定窗读数由冻结配置产生——**选择只
-     做一次，样本外比较；禁止每窗重新取 max**（top 冻结 vs 臂当窗重选
-     不对等）。原 max-of-5 构造标尺系统性偏低（top 享受 230 格选择效应、
-     臂只有 5 格，q95 过易）。C5 的 pre2019 池同理（Phase 3 工具时同纪律）。
+     空头日随机 (code, bar) 入场——0 信号门跳过、无放回（v0.308）——
+     × 5 档取 max ⇒ **冻结（n_g, 出场配置）**），判定窗读数由冻结配置
+     产生——**选择只做一次，样本外比较；禁止每窗重新取 max**（top 冻结
+     vs 臂当窗重选不对等）。原 max-of-5 构造标尺系统性偏低（top 享受
+     230 格选择效应、臂只有 5 格，q95 过易）。性能（v0.309，结果逐位
+     不变）：母体每窗预建一次 + as-of 打分 (code,i) 缓存跨臂跨门共用
+     （打分次数上限=母体大小）；n_requested/n_returned 记账入报告。
+     C5 的 pre2019 池同理（Phase 3 工具时同纪律）。
 
 CLI 护栏：窗口与 pre2019 untouched 段交集即拒（镜像同族，复用
 factor_exit_study._check_windows）。LLM 不碰数值；v2 口径（margin 单量
@@ -174,18 +177,13 @@ def _gate_view(per_code: dict[str, dict], gate: str) -> dict[str, dict]:
 # ---------------------------------------------------------------------------
 
 
-def random_entries(
-    per_code: dict[str, dict],
-    regime_bear: dict[str, str],
-    n: int,
-    rng: random.Random,
-    index_df: Any = None,
-) -> list[dict]:
-    """空头日随机 (code, bar) 入场 n 个（母体=宇宙内**全部**空头日 bar，
-    不是门信号集）；**无放回抽样**（v0.308 owner review：``rng.sample``，
-    母体不够就截断——有放回会让同一 (code, bar) 被抽中两次、同一笔交易
-    重复计入；预算对等后每臂逐门抽 46 次，n_g 最小的门污染最重）；score
-    缺失时生产路径现算（注入路径由测试给）。"""
+def bear_bar_pool(
+    per_code: dict[str, dict], regime_bear: dict[str, str]
+) -> list[tuple[str, int, str]]:
+    """空头日 (code, i, date) 母体（=宇宙内**全部**空头日 bar，不是门信号集）。
+
+    **每窗只建一次**（v0.309 性能：预算对等后每臂逐门抽 46 次 × 50 臂，
+    母体从头重建 ~1.4s/次 ⇒ 纯重建成本 ~54min；预建注入后归零）。"""
     dates_sorted = sorted(regime_bear)
     pool: list[tuple[str, int, str]] = []
     for code, pack in per_code.items():
@@ -195,20 +193,49 @@ def random_entries(
             idx = bisect.bisect_right(dates_sorted, d) - 1
             if idx >= 0 and regime_bear[dates_sorted[idx]] == "做多":  # 真空头日
                 pool.append((code, i, d))
+    return pool
+
+
+def random_entries(
+    per_code: dict[str, dict],
+    regime_bear: dict[str, str],
+    n: int,
+    rng: random.Random,
+    index_df: Any = None,
+    *,
+    pool: Optional[list[tuple[str, int, str]]] = None,
+    score_cache: Optional[dict[tuple[str, int], Optional[float]]] = None,
+) -> list[dict]:
+    """空头日随机 (code, bar) 入场 n 个；**无放回抽样**（v0.308：``rng.sample``，
+    母体不够就截断——有放回会让同一 (code, bar) 重复计入）；score 缺失时
+    生产路径现算（注入路径由测试给）。
+
+    v0.309 性能（结果逐位不变）：``pool`` 可预建注入（每窗一次，免逐臂
+    重建）；``score_cache`` 按 (code, i) 跨臂跨门共用——抽样总量百万级时
+    绝大部分命中，打分次数上限=母体大小；None（打分失败）同样缓存，
+    跳过语义与未缓存逐位一致。"""
+    if pool is None:
+        pool = bear_bar_pool(per_code, regime_bear)
     if not pool or n <= 0:
         return []
     out: list[dict] = []
     for code, i, d in rng.sample(pool, min(n, len(pool))):
         score = per_code[code]["scores"].get(d)
         if score is None and index_df is not None:
-            try:
-                from custos.research import score_return_study as srs  # noqa: PLC0415
+            key = (code, i)
+            if score_cache is not None and key in score_cache:
+                score = score_cache[key]
+            else:
+                try:
+                    from custos.research import score_return_study as srs  # noqa: PLC0415
 
-                score, _level, _contrib = srs.asof_technical_score(
-                    per_code[code]["df"], index_df, i, code
-                )
-            except Exception:  # noqa: BLE001
-                continue
+                    score, _level, _contrib = srs.asof_technical_score(
+                        per_code[code]["df"], index_df, i, code
+                    )
+                except Exception:  # noqa: BLE001
+                    score = None
+                if score_cache is not None:
+                    score_cache[key] = score
         if score is None:
             continue
         out.append(
@@ -491,12 +518,33 @@ def run_study(
     arm_gate_pass = 0
     index_df_ref: dict[str, Any] = {"df": locals().get("index_df")}  # 生产路径才有
 
+    # v0.309 性能（结果逐位不变）：母体每窗惰性预建一次（random_entry_fn
+    # 注入路径不建——合成 per_code 无 df）；as-of 打分 (code,i) 缓存双窗
+    # 各一、跨臂跨门共用（打分次数上限=母体大小）。
+    bar_pools: dict[str, list] = {}
+    score_caches: dict[str, dict] = {w: {} for w in per_code}
+    entry_accounting: dict[str, dict[str, int]] = {
+        w: {"requested": 0, "returned": 0} for w in per_code
+    }
+
     def _rand_entries(n: int, w: str) -> list[dict]:
+        entry_accounting[w]["requested"] += n
         if random_entry_fn is not None:
-            return random_entry_fn(n, w)
-        return random_entries(
-            per_code[w], regime_bear, n, rng, index_df=index_df_ref["df"]
-        )
+            out = random_entry_fn(n, w)
+        else:
+            if w not in bar_pools:
+                bar_pools[w] = bear_bar_pool(per_code[w], regime_bear)
+            out = random_entries(
+                per_code[w],
+                regime_bear,
+                n,
+                rng,
+                index_df=index_df_ref["df"],
+                pool=bar_pools[w],
+                score_cache=score_caches[w],
+            )
+        entry_accounting[w]["returned"] += len(out)
+        return out
 
     for _arm in range(args.n_random):
         arm_evaluated += 1
@@ -653,6 +701,8 @@ def run_study(
             "judgment": pool_j,
             "q95_mining": q95_m,
             "q95_judgment": q95_j,
+            "entry_accounting": entry_accounting,  # n_requested/n_returned（打分失败跳过照实记）
+            "score_cache_size": {w: len(c) for w, c in score_caches.items()},
             "arm_construction": "对等纪律（v0.302）+ 预算对等（v0.307）："
             "每臂完整复刻 top 的 46 门 × 5 档 max-of-230 选型（逐门 n_g "
             "对齐抽样，0 信号门跳过），冻结（n_g, 出场配置）进判定窗，"
