@@ -89,6 +89,9 @@ TRADES_DIR = DATA / "trades"
 # 持仓止盈/止损计划（v0.82，core/trades/position_plans 读写）：买入成交导入时落盘，
 # 补上「选股 stop_loss_ref 买入后丢失」的断裂链；消费方是 Phase C 的影子判定。
 POSITION_PLANS_FILE = TRADES_DIR / "position_plans.json"
+# 持仓计划影子判定台账（v0.310，pipeline/holdings/plan_shadow_ledger 唯一写
+# 入口径）：append-only + 幂等 (date,code,stage)——#60 并轨判据的证据链。
+PLAN_SHADOW_LEDGER = TRADES_DIR / "plan_shadow_observations.jsonl"
 SECTORS_DIR = DATA / "sectors"
 # 板块指数日线 CSV（fetch_sector_index_history 落盘，{code}.csv 或 {code}.SH.csv）
 SECTOR_INDEX_DIR = MARKET_DIR / "sector_index"

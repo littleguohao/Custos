@@ -152,6 +152,14 @@ uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/
 **严禁覆盖式写入**（2026-09-21 agent 误用 write 工具覆写，8215 行全历史灭失，
 靠 08-30 去重备份 + 当日记录手工合并救回）。
 
+**plan 影子台账**（`data/trades/plan_shadow_observations.jsonl`，v0.310）：
+**append-only**——写入只走 `plan_shadow_ledger.append_shadow`（每日首写前快照
+`.bak_YYYYMMDD`，幂等 (date,code,stage)，1445/1700 两行都保留不合并）；**写入点
+= review_core / final_close_review 的重估流程**（⚠️ 主批 `b1_holding_state.main`
+不传 plan，落盘 shadow 恒 plan_missing——写主批永远采不到事件）；现行判定统计
+只用 `live_final_priority`（b1 口径），`report_priority` 只留痕；**default 来源
+视同无计划**（兜底止损=live −7% 线，不带新信息，不出 plan 信号、不计一致率）。
+
 ## 5. 研究层与进化引擎约定
 
 - 新工具：写 `research/xxx.py`（`add_argument` **全留本文件**，`_modes()` 用 AST

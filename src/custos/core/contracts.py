@@ -966,6 +966,57 @@ SPECS: dict[str, dict] = {
             "facts": {"type": dict, "required": True},
         },
     },
+    # plan_shadow_ledger.append_shadow —— jsonl 每行一条（append-only 台账）
+    "plan_shadow_observation": {
+        "kind": "object",
+        "fields": {
+            "schema": {"type": str, "required": True, "non_empty": True},
+            "date": {"type": str, "required": True, "non_empty": True},
+            "code": {"type": str, "required": True, "non_empty": True},
+            "stage": {"type": str, "required": True, "choices": ("1445", "1700")},
+            # plan_missing/plan_default ⇒ 计划字段刻意留 None（default 视同无计划）
+            "plan_source": {"type": str, "required": True, "nullable": True},
+            "plan_stop_price": {
+                "type": (int, float),
+                "required": True,
+                "nullable": True,
+                "finite": True,
+            },
+            "plan_tp": {"type": dict, "required": True, "nullable": True},
+            "shadow_signal": {"type": str, "required": True, "nullable": True},
+            "shadow_priority": {
+                "type": str,
+                "required": True,
+                "nullable": True,
+                "choices": B1_PRIORITY,
+            },
+            "shadow_action": {"type": str, "required": True, "nullable": True},
+            # 一致性统计只用这个口径（b1 final_priority）
+            "live_final_priority": {
+                "type": str,
+                "required": True,
+                "choices": B1_PRIORITY,
+            },
+            "live_action": {"type": str, "required": True, "non_empty": True},
+            # 报告自身列（14:45=classify() 输出）——只留痕不参与统计
+            "report_priority": {"type": str, "required": True, "nullable": True},
+            "close": {
+                "type": (int, float),
+                "required": True,
+                "nullable": True,
+                "finite": True,
+            },
+            "entry_price": {
+                "type": (int, float),
+                "required": True,
+                "nullable": True,
+                "finite": True,
+            },
+            # plan_based_priority=None（无计划/default）⇒ None 不计入一致率
+            "agree": {"type": bool, "required": True, "nullable": True},
+            "recorded_at": {"type": str, "required": True, "non_empty": True},
+        },
+    },
 }
 
 

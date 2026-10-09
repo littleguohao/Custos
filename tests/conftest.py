@@ -80,6 +80,24 @@ def _redirect_position_plans_tmp(monkeypatch, tmp_path):
     monkeypatch.setattr(position_plans, "POOL_DIR", tmp_path / "stock_pool")
 
 
+@pytest.fixture(autouse=True)
+def _redirect_plan_shadow_ledger_tmp(monkeypatch, tmp_path):
+    """把 plan 影子判定台账改道 tmp（v0.310）。
+
+    ``review_core`` / ``final_close_review`` 的重估流程现在每持仓追加一行
+    ``data/trades/plan_shadow_observations.jsonl``——不钉的话，走这两处的
+    测试会写真实仓库台账。需要真实路径行为的用例自行传 ``path=`` 或
+    monkeypatch 覆盖（见 test_plan_shadow_ledger.py）。
+    """
+    from custos.pipeline.holdings import plan_shadow_ledger
+
+    monkeypatch.setattr(
+        plan_shadow_ledger,
+        "PLAN_SHADOW_LEDGER",
+        tmp_path / "plan_shadow_observations.jsonl",
+    )
+
+
 @pytest.fixture
 def reversal_thresholds():
     """按依赖顺序重载 B1 反转 K 阈值链，并在退出时**完整还原**。

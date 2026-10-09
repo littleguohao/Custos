@@ -8,6 +8,7 @@ import json
 
 from custos.pipeline.holdings.b1_holding_state import evaluate as evaluate_b1_holding
 from custos.pipeline.holdings.b1_holding_state import shadow_compare_line
+from custos.pipeline.holdings.plan_shadow_ledger import append_shadow
 
 from custos.pipeline.close_review.holding_bbi import intraday_bbi_basis
 from custos.pipeline.close_review.holding_structure import n_structure_basis
@@ -258,6 +259,19 @@ def revalue_positions(
             close,
             quote.get("date") or day,
             plan=plans.get(code),
+        )
+        # plan 影子台账（v0.310）：17:00 时点一行（收盘口径——事后打分以此
+        # 为准）；本报告现行判定列就是 b1 final_priority，两口径同值留痕
+        append_shadow(
+            "1700",
+            str(day),
+            code,
+            b1,
+            {
+                "report_priority": b1.get("final_priority"),
+                "close": close,
+                "plan": plans.get(code),
+            },
         )
         revalued.append(
             {

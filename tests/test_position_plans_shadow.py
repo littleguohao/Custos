@@ -219,11 +219,13 @@ class TestReviewCoreShadowRender:
                 "name": "浦发",
                 "action": "减仓评估",
                 "b1_holding_state": {
+                    "final_priority": "P1",  # v0.310：现行判定列=b1 口径
+                    "final_action": "减仓评估",
                     "shadow": {
                         "reason": "ok",
                         "plan_based_priority": "P0",
                         "plan_based_action": "计划止损位清仓评估",
-                    }
+                    },
                 },
             },
             {
@@ -231,7 +233,11 @@ class TestReviewCoreShadowRender:
                 "code": "601398",
                 "name": "工行",
                 "action": "持有观察",
-                "b1_holding_state": {"shadow": {"reason": "plan_missing"}},
+                "b1_holding_state": {
+                    "final_priority": "P3",
+                    "final_action": "持有观察",
+                    "shadow": {"reason": "plan_missing"},
+                },
             },
         ]
         lines: list[str] = []
@@ -240,3 +246,53 @@ class TestReviewCoreShadowRender:
         assert "持仓计划影子对比" in text
         assert "⚠️影子不一致" in text
         assert "无计划（早于机制落地）" in text
+
+    def test_missing_b1_state_marked_not_mixed_caliber(self):
+        """b1 状态缺失 ⇒ 照实标注不参与对比（v0.310 fail-closed——不静默
+        回退 classify() 口径混用，v0.86 两份报告口径不同的漂移已收敛到
+        b1 final_priority 单口径）。"""
+        actions = [
+            {
+                "priority": "P1",
+                "code": "600000",
+                "name": "浦发",
+                "action": "减仓评估",
+                "b1_holding_state": {
+                    "shadow": {"reason": "ok", "plan_based_priority": "P0"}
+                },
+            }
+        ]
+        lines: list[str] = []
+        rc.render_shadow_comparison(lines, actions)
+        text = "\n".join(lines)
+        assert "b1 状态缺失（不参与影子对比）" in text
+        assert "⚠️影子不一致" not in text
+
+
+class TestDefaultPlanExcluded:
+    """default 来源视同无计划（v0.310 owner 拍板）：兜底止损=entry×0.93
+    恰与 live −7% P1 线重合——原样判定每张 default 计划到 −7% 必亮 ⚠️
+    （设计噪音）；原样并入 SIGNAL_ORDER 会让无候选计划的持仓在 −7% 从
+    P1 减仓变 P0 清仓，那是没研究过的规则变更。"""
+
+    def test_default_plan_no_shadow_signal(self):
+        """default 计划在现价跌到 −7%（=兜底止损价 10.0×0.93）时不产
+        plan_stop_breach；candidate 来源行为逐位不变（见既有用例）。"""
+        plan = _plan(stop_price=9.3)
+        plan["source"] = "default"
+        plan["stop"]["rule_id"] = "loss_reduction"
+        state = evaluate(_row(), "做多", price=9.0, price_date="2026-08-20", plan=plan)
+        shadow = state["shadow"]
+        assert shadow["reason"] == "plan_default"
+        assert shadow["plan_source"] == "default"
+        assert shadow["plan_based_priority"] is None
+        assert shadow["signals"] == []
+        # 现行判定不受影子影响（-8% ⇒ P1 不被抬成 P0）
+        assert state["final_priority"] == "P1"
+
+    def test_default_plan_compare_line_label(self):
+        plan = _plan(stop_price=9.3)
+        plan["source"] = "default"
+        state = evaluate(_row(), "做多", price=9.0, price_date="2026-08-20", plan=plan)
+        line = shadow_compare_line("600000", "浦发", "P1", "P1 减仓", state["shadow"])
+        assert "default 计划（不出 plan 信号）" in line

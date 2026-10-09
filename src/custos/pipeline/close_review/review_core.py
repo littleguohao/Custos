@@ -11,6 +11,7 @@ from pathlib import Path
 
 from custos.pipeline.holdings.b1_holding_state import evaluate as evaluate_b1_holding
 from custos.pipeline.holdings.b1_holding_state import shadow_compare_line
+from custos.pipeline.holdings.plan_shadow_ledger import append_shadow
 
 from custos.pipeline.close_review.holding_bbi import intraday_bbi_basis
 from custos.pipeline.close_review.holding_structure import n_structure_basis
@@ -526,6 +527,15 @@ def revalue_and_plan(
             regime == "空头",
             b1_state,
         )
+        # plan 影子台账（v0.310）：14:45 时点一行；report_priority=classify
+        # 口径只留痕，一致性统计用 live_final_priority（b1 final_priority）
+        append_shadow(
+            "1445",
+            str(target_date),
+            code,
+            b1_state,
+            {"report_priority": priority, "close": price, "plan": plans.get(code)},
+        )
         actions.append(
             {
                 "priority": priority,
@@ -636,19 +646,29 @@ def render_actions(lines: list[str], actions: list[dict]) -> None:
 
 
 def render_shadow_comparison(lines: list[str], actions: list[dict]) -> None:
-    """§2 旁：持仓计划影子判定 vs 现行判定（v0.83 Phase C，观察期只展示不生效）。"""
+    """§2 旁：持仓计划影子判定 vs 现行判定（v0.83 Phase C，观察期只展示不生效）。
+
+    v0.310：「现行判定」列统一到 **b1 final_priority** 口径（原 classify()
+    输出——与 17:00 报告的对比列口径不同的漂移，v0.86 注记；classify 口径
+    已转台账 report_priority 留痕）；b1 状态缺失的行照实标注不参与对比
+    （fail-closed，不静默回退 classify 口径混用）。
+    """
     lines += [
         "### 2.1 持仓计划影子对比（影子期：不影响判定与权限）",
         "",
     ]
     for x in actions:
-        shadow = (x.get("b1_holding_state") or {}).get("shadow") or {}
+        b1 = x.get("b1_holding_state") or {}
+        shadow = b1.get("shadow") or {}
+        if not b1.get("final_priority"):
+            lines.append(f"- {x['code']} {x['name']}：b1 状态缺失（不参与影子对比）")
+            continue
         lines.append(
             shadow_compare_line(
                 x["code"],
                 x["name"],
-                x["priority"],
-                f"{x['priority']} {x['action']}",
+                b1["final_priority"],
+                f"{b1['final_priority']} {b1.get('final_action')}",
                 shadow,
             )
         )

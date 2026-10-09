@@ -311,6 +311,7 @@
 | 2026-10-09 | v0.307 | **R40 跑数前两修（owner review）**：①随机臂**预算对等**——每臂逐门 n_g×5 档完整复刻 top 的 max-of-230 选型（原 max-of-5 标尺系统性偏低、q95 过易，预注册「同预算」名不副实；臂池时间 ~46× 如实记账）；②C3 无可扰参数轴（base_low params={}）= **not_applicable**——不空转零信息复评、不伪装零翻转放行，总结局降 provisional（灵敏度证据缺失，不降 falsified） | owner review | 钉测 +2 改写 2（R40 套件 14 绿） |
 | 2026-10-09 | v0.308 | **R40 随机臂抽样改无放回（owner review）**：`random_entries` 从 rng.randrange 有放回改 rng.sample 无放回 + 母体不够截断——有放回会让同一 (code, bar) 重复计入同一笔交易，预算对等后每臂逐门抽 46 次、n_g 最小的门污染最重；不影响结论方向 | owner review | 钉测 +1（R40 套件 15 绿） |
 | 2026-10-09 | v0.309 | **R40 随机臂性能两修（owner，纯实现结果逐位不变）**：①母体每窗预建一次（原逐臂重建 ~1.4s/次、50 臂×46 门 ~54min 归零）；②as-of 打分 (code,i) 缓存跨臂跨门共用（打分次数上限=母体大小，打满 ~6h 实际不满）；「随机臂改随机分省打分」选项 owner 拍板不采（零假设对称性保留）；n_requested/n_returned + 缓存大小入报告记账 | owner 指令 | 钉测 +3（R40 套件 18 绿） |
+| 2026-10-09 | v0.310 | **#60 影子并轨 A+B（owner 方案）**：①default 来源视同无计划（兜底止损=live −7% P1 线，原样判定必亮 ⚠️ 噪音、原样并轨=P1 变 P0 的未研究规则变更）⇒ plan_default 不出信号不计一致率；②plan 影子台账 `plan_shadow_ledger`（append-only+每日快照+幂等 (date,code,stage)，1445/1700 不合并，contracts require）——写入点=两份报告重估流程（主批不传 plan 恒 plan_missing）；14:45 对比列统一到 b1 final_priority（b1 缺失照实标注） | owner 方案+拍板 | 钉测 +12 改写 1 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

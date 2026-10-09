@@ -252,13 +252,25 @@ def _plan_shadow(
 
     铁律：plan 信号不进 SIGNAL_ORDER、不进 final_priority/bucket/权限，只落盘
     与渲染。无计划（当前持仓全部早于 position_plans 机制落地，属常态）如实标
-    ``plan_missing``，不报错。连续 5 交易日影子对比 + owner 拍板后才谈并入
+    ``plan_missing``，不报错。**default 来源视同没有计划**（v0.310 owner
+    拍板）：default 止损=entry×0.93 恰与 live −7% P1 减仓线重合，本身不带
+    新信息；原样判定会让无候选计划的持仓在 −7% 从「P1 减仓」被影子判成
+    「P0 清仓」——必然亮 ⚠️ 的设计噪音，且原样并轨等于一次没研究过的规则
+    变更。连续 5 交易日影子对比 + owner 拍板后才谈并入
     （见 TODO 观察期条目）。
     """
     if not isinstance(plan, dict):
         return {
             "reason": "plan_missing",
             "plan_source": None,
+            "plan_based_priority": None,
+            "plan_based_action": None,
+            "signals": [],
+        }
+    if plan.get("source") == "default":
+        return {
+            "reason": "plan_default",
+            "plan_source": "default",
             "plan_based_priority": None,
             "plan_based_action": None,
             "signals": [],
@@ -320,10 +332,13 @@ def shadow_compare_line(
 ) -> str:
     """影子对比行（14:45/17:00 两份报告共用的行格式，口径单源）。
 
-    无计划持仓（早于机制落地，影子期常态）如实标注；计划判定与现行判定优先级
+    无计划持仓（早于机制落地，影子期常态）如实标注；default 来源视同无计划
+    （v0.310：兜底止损=live −7% 线，不带新信息）；计划判定与现行判定优先级
     不一致时行内标「⚠️影子不一致」。
     """
     shadow = shadow if isinstance(shadow, dict) else {}
+    if shadow.get("reason") == "plan_default":
+        return f"- {code} {name}：default 计划（不出 plan 信号）"
     if shadow.get("reason") == "plan_missing" or not shadow.get("plan_based_priority"):
         return f"- {code} {name}：无计划（早于机制落地）"
     plan_label = (
