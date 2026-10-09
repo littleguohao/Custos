@@ -319,6 +319,7 @@
 | 2026-10-09 | v0.315 | **R41 口径定稿（owner 拍板四项，跑数前最后一窗）**：①现行版主读数=pct10 忠实 hard_loss（loss_reduction −7% 减仓引擎表达不了注明）/副读数 pct7 只报告不作判据；②scale_out_frac=0.5 两版共用写死（bbi_exit_consec=2/stop_trigger=close/cost_bps=25 同写死）；③rdd 相对门任一窗不过⇒C2 不过标 rdd_gate_fail；④C4 预算对等=两边都不挑选（池元素=臂挖掘窗 Δmargin，池空=indeterminate）；C3 写明新子集两版重跑（剔除集合变配对重新对齐） | owner 拍板 | 判据文本（结构测试绿） |
 | 2026-10-09 | v0.316 | **R41 Phase 1 工具落地**：引擎**信号级 stop_override 钩子**（backtest_factors:3601——带键即用缺省走原逻辑，exit_campaign/R39/R40 逐位不变）+ `_stop_ref(df, lookback=)` 参数化（L2 默认逐位不变）+ `plan_rules_replay` 全栈（attach as-of 算 stop+配对剔除记账+止损距离分位数；现行 pct10 主/pct7 副两版读数；C1~C4+四态结局；CLI pre2019 硬拒绝+check_reach——factor_exit/bear_regime 同补） | owner 实现指导 | 钉测 +17（§5 清单九项全覆盖） |
 | 2026-10-09 | v0.317 | **R41-C4 口径修订（owner review，跑数前补记）**：「N=50 指过门臂数」——过不了 rdd 门的臂不进池，「抽 50 次」实现下过门率 <100% 永远 provisional（owner 零假设实测过门 ~20%；R39/R40 臂含自参照档免疫，R41 单配置+外部参照独撞）；改**重抽至池满或评估上限 10×N**，上限未满按池大小判 provisional/indeterminate，统计含义不变（候选同须过门，两边条件对称）；注明 LIVE_PARAMS 未合 exit_genome.FIXED_PARAMS（与 R37/R39 基准档非逐位相同） | owner review | 钉测 +2 改写 1（R41 套件 19 绿） |
+| 2026-10-09 | v0.318 | **R41 首跑跑数指导落档（owner）**：①过门率决定耗时——按 ~20% 过门率估凑满 50 过门臂要评估 ~250 条（原 5 倍），最坏打满 500 上限；**先跑 --n-random 5 看过门率再估总耗时**；②过门率本身是一条信息——真实过门率 <10% 说明随机止损价（1%~15% 宽度）大多换不来比现行 −10% 更好的回撤收益比，判读时写入回填区；且此时 C4 零假设只由少数过门臂构成（选择效应——候选打过的是「已过同一道门的臂」非全体随机止损价，判读 q95/confirmed_pass 必须写明） | owner 跑数指导 | 判据/注记文本（结构测试绿） |
 
 ## 写入规范（2026-08-29 v0.144 起）
 
