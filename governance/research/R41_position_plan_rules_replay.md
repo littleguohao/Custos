@@ -4,7 +4,13 @@
 > **证据等级**：L2 / L3−（双窗纪律 + 幸存者宇宙 + 多重比较显式标注——
 > 与 R10/R36/R37/R40 同纪律）　|
 > **状态**：📋 **预注册落档（2026-10-09，v0.312）**，判据跑数前写死；
-> Phase 1 工具与生产机跑数均待 owner 发令　|
+> **v0.315 口径定稿在案**（owner 拍板四项：①现行版主读数=pct10 忠实
+> hard_loss（loss_reduction 引擎表达不了，注明）/副读数 pct7 只报告不
+> 作判据；②scale_out_frac=0.5 两版共用写死（bbi_exit_consec=2 /
+> stop_trigger="close" / cost_bps=25 同写死）；③rdd 相对门任一窗不过
+> ⇒ C2 不过标 rdd_gate_fail；④C4 预算对等=两边都不挑选，池元素=臂
+> 挖掘窗 Δmargin）；**Phase 1 工具 🚧 落地中**——生产机跑数待 owner
+> 发令　|
 > **依赖**：上游：R10（「5% 是崖」/双窗纪律）R11（绝对读数不可引用）
 > R14（幸存者宇宙）R37（判据族/出场轴收口换方向）R39（C1 不过=untested
 > 修订族）；live 侧对象：`core/trades/position_plans.py`（计划生成）、
@@ -62,35 +68,62 @@
 - **入场信号集**：V0 + j_low + 0AMV 多头区间（与 R36/R37/R39 同基底，
   跨研究可比）；
 - **出场·计划版**：止损价 = 入场信号日 as-of 重算的 stop_loss_ref
-  （近 STOP_LOOKBACK 日最低价，触及/跌破即出）；止盈 =
-  scale_out_two_bull 快照口径（BBI 上方连续两根中大阳分批止盈——
-  与 `_plan_shadow` 的判定语义一致）；候选 stop_loss_ref 缺失的信号
-  **剔除**（缺失≠用 default 兜底——default 止损=live −7% 线，不带
-  新信息，v0.310 拍板）；
-- **出场·现行版**：EXIT_RULES 现行规则族（live 正在用的那套，单一
-  真源 `governance/contracts/EXIT_RULES.json`）；
+  （`core/factors/b1_structure._stop_ref(df, lookback)` 单源——近
+  lookback 日最低价，lookback 默认 = STOP_LOOKBACK=10；触发=**全额
+  清仓**（与影子判定的 P0 一致））；止盈 = scale_out_two_bull 快照口径
+  （BBI 上方连续两根中大阳分批止盈——与现行版**同一条规则、同一
+  scale_out_frac**，Δ 只来自止损）；候选 stop_loss_ref 缺失或
+  ≥ 入场价的信号**两版同剔**（缺失≠用 default 兜底——default 止损
+  =live −7% 线，不带新信息，v0.310 拍板；⚠️ stop ≥ entry 时引擎
+  `_initial_stop` 会静默回退 stop_mode，必须工具层先剔，记
+  n_missing / n_stop_ge_entry）；
+- **出场·现行版**（v0.315 ①，owner 拍板）：现行 EXIT_RULES 启用规则
+  只有三条——hard_loss −10% 清仓（P0）、loss_reduction −7% 减仓
+  10~25%（P1）、scale_out_two_bull 分批止盈（P2）。引擎能用
+  stop_mode="pct" + stop_pct 表达「全额止损」但**表达不了「−7% 减一
+  部分仓」** ⇒ **主读数 = stop_mode="pct", stop_pct=10**（只忠实对应
+  hard_loss；loss_reduction 表达不了，本注记即注明）；**副读数 =
+  stop_pct=7**（相当于把 loss_reduction 当作全额出场——**只报告，
+  不作判据**）；
+- **两版共用写死**（v0.315 ②，owner 拍板）：`scale_out_frac=0.5`
+  （研究侧无现成惯例，owner 拍板值；两版必须相同——止盈不是本单元
+  的研究变量）；`bbi_exit_consec=2`（引擎默认，对应 live 的
+  bbi_two_close_breach）；`stop_trigger="close"`（与影子判定的
+  「现价 ≤ 止损价」一致）；`cost_bps=25`；
 - **执行语义**：T+1/跌停停牌顺延沿用引擎既有口径（`backtest_factors`
   单源），两版同待遇；双窗 s3000 钉死宇宙（挖掘窗 2022-01-01~
   2024-07-31 / 判定窗 2024-08-01~2026-09-04，同 R37/R39/R40）；
 - **目标函数 v2.1 口径**：margin 单量 + rdd **相对门**（参照=同窗同
-  信号**现行版**读数——事先固定不经过挑选；只相对排序，引用连带
-  R11 声明）。
+  信号**现行版主读数**读数——事先固定不经过挑选；只相对排序，引用
+  连带 R11 声明）。margin 在全部候选交易（collect_all）上算，信号集
+  相同 ⇒ 精确配对。
 
 ### 判据（跑数前写死；R39 族沿用）
 
 - **R41-C1（样本量）**：双窗 n_taken 各 ≥ 100（同族口径；**不过 ⇒
-  untested 不判 falsified**——样本不足误判成否定证据是 v0.299/v0.301
-  刚修过两次的错）；
-- **R41-C2（晋级线）**：Δmargin（计划版 − 现行版）**双窗同向为正**；
-- **R41-C3（灵敏度）**：stop_loss_ref 的 lookback（STOP_LOOKBACK）
-  ±50% ×4 扰动臂（吸附整数档），C2 结论**零翻转**（R29/R34/R37 零翻转
-  同族）；
-- **R41-C4（随机对照/多重比较记账）**：**随机止损价臂**——同信号集、
-  止损价从「入场价 × U[0.85, 0.99]」独立重抽（均匀覆盖计划止损的
-  实测分布区间，种子写死），其余同计划版；N=50 臂取 max 建池，计划版
-  挖掘窗 Δmargin > 池 q95；池 ≥50 才 confirmed，未满 provisional 不停
-  （v0.266/v0.297/v0.299 判据族沿用）；随机臂同样过 rdd 相对门（同
-  参照，口径对称）；
+  untested 不判 falsified**，且优先于其他判决——样本不足误判成否定
+  证据是 v0.299/v0.301 刚修过两次的错）；
+- **R41-C2（晋级线）**：Δmargin（计划版 − 现行版）**双窗同向为正**，
+  **且双窗都过 rdd 相对门**（v0.315 ③，owner 拍板：参照=同窗同信号
+  现行版主读数；任一窗不过 ⇒ C2 不过、报告标 `rdd_gate_fail`——margin
+  的提升如果是拿更差的回撤收益比换来的，不算真提升）。副读数：报告
+  逐笔 Δret 的中位数与符号计数（同一批信号精确配对）；
+- **R41-C3（灵敏度）**：lookback = round(10 × U(0.5, 1.5)) ×4 次（种子
+  写死；经 `_stop_ref(df, lookback=)` 参数实现，v0.315 落地）；**每次
+  扰动重算 stop → 重新剔除 → 两版都在新子集上重跑**（剔除集合变了，
+  配对必须重新对齐——现行版不得沿用旧子集读数），C2 结论**零翻转**
+  （R29/R34/R37 零翻转同族）；
+- **R41-C4（随机对照/多重比较记账）**：**随机止损价臂** N=50——同
+  信号集，每条臂给**每个信号独立抽** `entry × U[0.85, 0.99]` 作为
+  stop_override（均匀覆盖计划止损的实测分布区间——报告必给止损
+  距离（entry/stop − 1）p5/p25/p50/p75/p95 分位数供核对覆盖；臂级
+  种子写死可复现），其余同计划版。**预算对等 = 两边都不挑选**
+  （v0.315 ④，owner 拍板）：计划版是单一配置未经网格挑选，随机臂
+  也不做挑选——池元素 = 这条臂在挖掘窗的 Δmargin（vs 同窗现行版），
+  勿照字面去「取 max」。臂同样套 rdd 相对门（同参照），过不了门的
+  臂不进池、记过门率；**池为空 ⇒ indeterminate 不放行**（v0.297 族）；
+  计划版挖掘窗 Δ > 池 q95（`exit_campaign._q95` 单源）且池 ≥50 ⇒
+  confirmed_pass；池未满 ⇒ provisional；
 - **R41-C5（终审）**：pre2019 untouched 段（2010-2016）单独终步，
   **只能杀不能确认**；C2~C4 全过才启动，owner 拍板发令，判据数值
   跑数前再锁死（原则写死在此）。
@@ -110,12 +143,25 @@
 
 ### 工程落点
 
-- **Phase 1（工具）**：`research/plan_rules_replay.py`（新终端）——
-  信号集复用 V0 预热族（`exit_campaign.warm_v0_signals` 单源），
-  stop_loss_ref as-of 重算（rolling min of lows，STOP_LOOKBACK 单源
-  引用不复制常量），双版出场重放（引擎执行语义单源），随机止损价
-  臂（N=50），判据 C1~C4 机械读数；空结果护栏 + pre2019 硬拒绝镜像
-  + TOOLS 登记。判据结构同族测试复用 R39/R40 套件惯例。
+- **Phase 1（工具，`research/plan_rules_replay.py`，v0.315 口径定稿后
+  落地）**：骨架照 `factor_exit_study` 结构——
+  ① 引擎最小钩子（`backtest_factors.py:3601`）：信号重放循环
+  `stop_ov = cand["stop_override"] if "stop_override" in cand else
+  _platform_stop_override(...)`——键缺省时 R37/R39/R40 全部逐位不变
+  （钉测锁死）；② `_stop_ref(df, lookback=STOP_LOOKBACK)` 参数化
+  （L2，live 同函数——默认参数逐位不变钉测；as-of 只读
+  `df.iloc[:i+1]` 钉测）；③ warm 复用 `exit_campaign.warm_v0_signals`
+  （单源）→ `attach_plan_stops`（逐信号 as-of 算 stop_override + 剔除
+  记账 n_missing/n_stop_ge_entry，两版同剔保配对）→ replay 复用
+  `factor_exit_study.replay_signals`；④ 读数 `combine_readings`：现行
+  版自身 ref="self"，计划版/随机臂/C3 臂 ref=同窗现行版主读数；
+  ⑤ C1~C4 机械读数 + 四态结局（次序同 R39/R40）；⑥ CLI 护栏照搬
+  `factor_exit_study._check_windows`（pre2019 硬拒绝）+ 
+  `exit_c5_terminal.check_reach(count, mining_start)`（逐股加载不经
+  批量截断护栏——R39/R40 工具同补）；空结果护栏（任一窗口子集 0
+  信号 ⇒ 非零退出不写产物）；产物自含（口径常量/剔除记账/止损距离
+  分位数/两版读数/C3 抽样/C4 池——C5 终端要从产物自读）；TOOLS
+  登记 + AGENTS.md §5 同步。
 - **Phase 2（跑数）**：生产机双窗（命令随 Phase 1 落，owner 发令）。
 - **Phase 3（C5）**：C2~C4 全过才启动，owner 拍板发令。
 
@@ -124,3 +170,9 @@
 - **预注册落档（2026-10-09，v0.312）**：判据 C1~C5 写死；前置核实
   结论在案（stop_loss_ref 可 as-of 重算无未来数据）；R38 号被
   live-only 出场回测化预留，本单元取 R41。
+- **口径定稿（2026-10-09，v0.315，owner 拍板四项）**：①现行版主读数
+  pct10/副读数 pct7（不作判据）；②scale_out_frac=0.5 两版共用写死
+  （bbi_exit_consec=2 / stop_trigger="close" / cost_bps=25 同写死）；
+  ③rdd 相对门任一窗不过 ⇒ C2 不过标 rdd_gate_fail；④C4 预算对等
+  =两边都不挑选（池元素=臂挖掘窗 Δmargin；臂不过门不进池记过门率；
+  池空=indeterminate）。
