@@ -17,7 +17,7 @@
   （tmp+replace），被杀重启 ``--resume`` 从台账状态续跑（v0.258 教训）；
 - **评估器协议注入**：``evaluate(params, *, start, end) -> readings | None``；
   生产默认 = V0 重放评估器（信号缓存重放 + V0 as-of 技术分 + topn 组合 +
-  search_objective（v2=margin 单量+rdd 门，v0.296）——与
+  search_objective（v2.1=margin 单量+rdd 相对门（候选≥基准档，v0.304））——与
   score_evolution_study V0 臂同引擎同公式）；测试注入
   fake，控制器与台账全程不碰数据。
 
@@ -867,7 +867,11 @@ def make_v0_replay_evaluator(args: Any, ap: argparse.ArgumentParser) -> Evaluato
             )
         return cache[key]
 
-    def evaluate(params: dict, *, start: str, end: str) -> Optional[dict]:
+    base_params = {**eg.FIXED_PARAMS, **eg.baseline_genome()}
+    base_row_cache: dict[tuple[str, str], Optional[dict]] = {}
+
+    def _row_of(params: dict, start: str, end: str) -> Optional[dict]:
+        """单窗读数行（margin/expectancy_R/ret_over_dd + 组合件）。"""
         per_code = _warm(start, end)
         cands: list[dict] = []
         for code, pack in per_code.items():
@@ -888,27 +892,46 @@ def make_v0_replay_evaluator(args: Any, ap: argparse.ArgumentParser) -> Evaluato
             return None
         tsum = bt.summarize_trades(cands)
         pf = bt.simulate_portfolio_topn(cands, top_n=args.top_n, **V0_PORTFOLIO)
-        margin = sg._margin(
-            {"win": tsum.get("win_rate"), "payoff": tsum.get("payoff_ratio")}
-        )
-        ret_dd = sg._ret_over_dd(pf)
-        row = {
-            "margin": margin,
-            "expectancy_R": tsum.get("expectancy_R"),
-            "ret_over_dd": ret_dd,
-        }
         return {
-            "objective": sg.search_objective(row),
+            "row": {
+                "margin": sg._margin(
+                    {"win": tsum.get("win_rate"), "payoff": tsum.get("payoff_ratio")}
+                ),
+                "expectancy_R": tsum.get("expectancy_R"),
+                "ret_over_dd": sg._ret_over_dd(pf),
+            },
+            "tsum": tsum,
+            "pf": pf,
+            "n_candidates": len(cands),
+        }
+
+    def _ref_row(start: str, end: str) -> Optional[dict]:
+        """v2.1 相对门参照档读数行（基准档 pct5_trail08——事先固定不经过
+        挑选；同窗同信号同组合口径；每窗缓存只算一次）。"""
+        key = (start, end)
+        if key not in base_row_cache:
+            got = _row_of(base_params, start, end)
+            base_row_cache[key] = got["row"] if got else None
+        return base_row_cache[key]
+
+    def evaluate(params: dict, *, start: str, end: str) -> Optional[dict]:
+        got = _row_of(params, start, end)
+        if got is None:
+            return None
+        row, tsum, pf = got["row"], got["tsum"], got["pf"]
+        ref = row if params == base_params else _ref_row(start, end)
+        return {
+            "objective": sg.search_objective(row, ref),
             "objective_version": sg.OBJECTIVE_VERSION,
-            "rdd_gate": sg.rdd_gate_ok(row),
-            "margin": margin,
+            "rdd_gate": sg.rdd_gate_ok(row, ref),
+            "margin": row["margin"],
             "expectancy_R": tsum.get("expectancy_R"),
             "payoff_ratio": tsum.get("payoff_ratio"),
             "win_rate": tsum.get("win_rate"),
             "n": tsum.get("n"),
             "n_taken": pf.get("n_taken"),
-            "n_candidates": len(cands),
-            "ret_over_dd": ret_dd,
+            "n_candidates": got["n_candidates"],
+            "ret_over_dd": row["ret_over_dd"],
         }
 
     return evaluate

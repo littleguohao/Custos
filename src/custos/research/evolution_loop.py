@@ -609,6 +609,27 @@ def _make_cell_runner(
         codes_path.write_text("\n".join(codes) + "\n", encoding="utf-8")
         codes_file = str(codes_path)
 
+    ref_cache: dict[tuple[str, str, str], Optional[dict]] = {}
+
+    def _ref_row(
+        cell: dict, ns: argparse.Namespace, *, start: str, end: str
+    ) -> Optional[dict]:
+        """v2.1 参照档读数行：baseline 恒可买孪生格（事先固定不经过挑选；
+        同 gate/exit/params ⇒ 同窗同信号同组合口径）。"""
+        key = (cell["gate"], start, end)
+        if key not in ref_cache:
+            ref_cell = sg.twin_ref_cell(cell)
+            st, p, log = sg.run_cell(ns, ref_cell, cells_dir)
+            if st == "failed" or p is None:
+                print(
+                    f"[WARN] v2.1 参照格失败（{key}），本格按绝对门兜底",
+                    file=sys.stderr,
+                )
+                ref_cache[key] = None
+            else:
+                ref_cache[key] = sg.load_cell_row(ref_cell, p, reused=(st == "reused"))
+        return ref_cache[key]
+
     def cell_runner(
         expr: str, gate: str, exit_params: dict, *, start: str, end: str
     ) -> dict | None:
@@ -635,10 +656,11 @@ def _make_cell_runner(
         if status == "failed" or path is None:
             return None
         row = sg.load_cell_row(cell, path, reused=(status == "reused"))
+        ref = _ref_row(cell, ns, start=start, end=end)
         return {
-            "objective": sg.search_objective(row),
+            "objective": sg.search_objective(row, ref),
             "objective_version": sg.OBJECTIVE_VERSION,
-            "rdd_gate": sg.rdd_gate_ok(row),
+            "rdd_gate": sg.rdd_gate_ok(row, ref),
             "margin": row.get("margin"),
             "expectancy_R": row.get("expectancy_R"),
             "cell_signature": _row_signature(row),

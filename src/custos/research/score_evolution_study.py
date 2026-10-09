@@ -468,12 +468,15 @@ def _objective_version() -> str:
     return sg.OBJECTIVE_VERSION
 
 
-def _reading_of(sg: Any, row: dict) -> dict:
-    """格子结果行 → 本工具的读数块（键名固定，测试钉住）。"""
+def _reading_of(sg: Any, row: dict, ref: Optional[dict] = None) -> dict:
+    """格子结果行 → 本工具的读数块（键名固定，测试钉住）。
+
+    ``ref``：v2.1 相对 rdd 门参照读数行（None=绝对门兼容通道，勿用于新研究）。
+    """
     return {
-        "objective": sg.search_objective(row),
+        "objective": sg.search_objective(row, ref),
         "objective_version": sg.OBJECTIVE_VERSION,
-        "rdd_gate": sg.rdd_gate_ok(row),
+        "rdd_gate": sg.rdd_gate_ok(row, ref),
         "margin": row.get("margin"),
         "expectancy_R": row.get("expectancy_R"),
         "payoff_ratio": row.get("payoff_ratio"),
@@ -508,6 +511,33 @@ def _make_cell_runner(args: Any, codes_file: str, cells_dir: Path) -> CellRunner
 
     cells_dir.mkdir(parents=True, exist_ok=True)
     failures: list[dict[str, Any]] = []
+    ref_cache: dict[tuple[str, str, str], Optional[dict]] = {}
+
+    def _ref_row(
+        sg: Any, cell: dict, ns: argparse.Namespace, *, start: str, end: str
+    ) -> Optional[dict]:
+        """v2.1 参照档读数行：baseline 恒可买孪生格（事先固定不经过挑选；
+        同 gate/exit/params ⇒ 同窗同信号同组合口径）。失败格日志同样留尾段。"""
+        key = (cell["gate"], start, end)
+        if key not in ref_cache:
+            ref_cell = sg.twin_ref_cell(cell)
+            st, p, log = sg.run_cell(ns, ref_cell, cells_dir, capture=True)
+            if st == "failed" or p is None:
+                failures.append(
+                    {
+                        "scorer": "baseline(v2.1-ref)",
+                        "gate": cell["gate"],
+                        "start": start,
+                        "end": end,
+                        "log_tail": "\n".join(
+                            log.splitlines()[-_FAILURE_LOG_TAIL_LINES:]
+                        ),
+                    }
+                )
+                ref_cache[key] = None
+            else:
+                ref_cache[key] = sg.load_cell_row(ref_cell, p, reused=(st == "reused"))
+        return ref_cache[key]
 
     def cell_runner(
         scorer: str, gate: str, exit_params: dict, *, start: str, end: str
@@ -543,8 +573,9 @@ def _make_cell_runner(args: Any, codes_file: str, cells_dir: Path) -> CellRunner
                 }
             )
             return None
+        ref = _ref_row(sg, cell, ns, start=start, end=end)
         return _reading_of(
-            sg, sg.load_cell_row(cell, path, reused=(status == "reused"))
+            sg, sg.load_cell_row(cell, path, reused=(status == "reused")), ref
         )
 
     cell_runner.failures = failures  # type: ignore[attr-defined]  # 侧信道：报告层只读
@@ -688,9 +719,11 @@ def _make_v0_runner(args: Any, codes: list[str], exit_spec: dict) -> CellRunner:
                 "ret_over_dd": ret_dd,
             }
             return {
-                "objective": sg.search_objective(row),
+                "objective": sg.search_objective(
+                    row, row
+                ),  # V0 臂=基准本体，自参照恒真（v2.1）
                 "objective_version": sg.OBJECTIVE_VERSION,
-                "rdd_gate": sg.rdd_gate_ok(row),
+                "rdd_gate": sg.rdd_gate_ok(row, row),
                 "margin": margin,
                 "expectancy_R": tsum.get("expectancy_R"),
                 "payoff_ratio": tsum.get("payoff_ratio"),
@@ -1072,10 +1105,14 @@ class _V0LatticeEvaluator:
             "expectancy_R": tsum.get("expectancy_R"),
             "ret_over_dd": ret_dd,
         }
+        if addon_expr is None and all(float(m) == 1.0 for m in mult):
+            ref = row  # 等倍率基准本体=自参照（v2.1 门恒真）
+        else:
+            ref = self._ref_row(legs, window)
         out = {
-            "objective": sg.search_objective(row),
+            "objective": sg.search_objective(row, ref),
             "objective_version": sg.OBJECTIVE_VERSION,
-            "rdd_gate": sg.rdd_gate_ok(row),
+            "rdd_gate": sg.rdd_gate_ok(row, ref),
             "margin": margin,
             "expectancy_R": tsum.get("expectancy_R"),
             "payoff_ratio": tsum.get("payoff_ratio"),
@@ -1091,6 +1128,19 @@ class _V0LatticeEvaluator:
         if addon_expr is not None:
             out["n_addon_missing"] = n_missing
         return out
+
+    def _ref_row(self, legs: Sequence[str], window: Window) -> Optional[dict]:
+        """v2.1 参照档读数行：**等倍率**（全 1 倍率 = V0 等权骨架——事先固定
+        不经过挑选；同窗同信号同组合口径；每窗缓存只算一次）。"""
+        if not hasattr(self, "_ref_cache"):
+            self._ref_cache: dict = {}
+        key = ("__ref__", window.start, window.end)
+        if key not in self._ref_cache:
+            got = self.evaluate([1.0] * len(legs), legs, window)
+            self._ref_cache[key] = (
+                {"ret_over_dd": got.get("ret_over_dd")} if got else None
+            )
+        return self._ref_cache[key]
 
 
 def _run_v0_lattice_study(

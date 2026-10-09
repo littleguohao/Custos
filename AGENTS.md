@@ -193,7 +193,13 @@ uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/
   随机池空（随机臂全被 rdd 门拦）⇒ C4 **indeterminate 不放行**（原假设
   「n_random≥1 总有臂」被 v2 打破；报告记随机臂 rdd 过门率）；②CLI 格子排名
   `rank_rows` 在 v2 默认权重下同样套门（「优胜格可拷 live EXIT_RULES」的路径
-  不能偏袒高敞口；显式自定义权重=复算口径不套门）。
+  不能偏袒高敞口；显式自定义权重=复算口径不套门）。**v2.1（v0.304，owner
+  review）**：rdd 门从绝对（≥1.0）改**相对**——rdd(候选) ≥ rdd(参照档)，
+  参照档事先固定不经过挑选（R39=P1_base、R37=基准档、R40=同窗同信号
+  trail08、score 侧=等倍率、cell 系=baseline 恒可买孪生格、rank_rows=同
+  (scorer,gate) 内 pct5_trail08 档行）；废因=绝对门熊市窗 0/160 全灭
+  （R11 绝对读数跟行情走），修订依据只来自过门率诊断量；随机臂同参照。
+  ref=None 兼容通道=绝对门兜底（研究侧勿用）。
 - 因子 IC 画像（`factor_ic_profile`）：SCORERS/DSL 的截面 RankIC/ICIR + horizon
   衰减全因子可比表——**分诊镜不是晋级判据**（晋级永远走双窗+三轴交易语义；
   读数 L3− 带幸存者偏差，R19/R21/R14）。

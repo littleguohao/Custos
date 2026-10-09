@@ -160,9 +160,22 @@ DEFAULT_EXIT_GRID: list[dict[str, Any]] = [
 # （RDD_GATE_FLOOR——其 docstring 本意=防偏袒高敞口，当门不当分）。
 # ⚠️ v2 与 v1 尺度不可比：历史报告的 objective/q95 读数属 v1 口径，不跨版本引用
 # （各战役 C4 随机池标尺本就自备、不跨战役复用）。
-OBJECTIVE_VERSION = "v2-margin"
+#
+# objective **v2.1**（2026-10-09，v0.304，owner review）：rdd 门从**绝对**
+# （≥RDD_GATE_FLOOR=1.0）改**相对**——``rdd(候选) ≥ rdd(参照档)``，两者在同一
+# 窗口、同一批信号、同一套组合口径下计算；参照档**事先固定、不经过挑选**
+# （R39=P1_base、R37=基准档、R40=同窗同信号 pct5_trail08、score 侧=等倍率
+# 基准、cell 系=同 gate/exit 的 baseline 恒可买孪生格；uniform-best 这类挑
+# 出来的档不能当参照）。回到门的原意：margin 不能靠「回撤收益比比参照档
+# 更差」换来；窗口是熊是牛两边一起受影响互相抵消。废因（R39 Phase 2 实测
+# 诊断）：绝对门在 2022-2024 熊市挖掘窗 **0/160 全灭**（rdd 分布 −0.91~0.25
+# 全 <1.0）——绝对 rdd 跟着市场环境走，换个窗口就得重新定阈值，正是 R11
+# 「绝对读数不可引用」要防的情形。修订依据**只来自过门率诊断量**，不看读数。
+# ⚠️ v2.1 与 v2/v1 读数不跨版本引用（同前纪律）。
+OBJECTIVE_VERSION = "v2.1-margin-rddref"
 DEFAULT_OBJ_WEIGHTS = (1.0, 0.0, 0.0)  # margin / expectancy_R / return_over_maxdd
-RDD_GATE_FLOOR = 1.0  # 总收益 ≥ 最大回撤：敞口 sanity 最低门（防偏袒高敞口）
+RDD_GATE_FLOOR = 1.0  # ⚠️ v2 绝对门残留常量（v2.1 起仅 ref=None 兼容通道使用——
+# 无参照语义的场景兜底；研究侧一律传 ref，勿再引用）
 
 # scorer 轴的表达式形态：``expr:<DSL表达式>``（进化引擎终审入口；网格展开期
 # 统一 expr_dsl.parse 预校验，拼 CLI 时翻译成 backtest_factors 的 --scorer-expr）。
@@ -618,24 +631,41 @@ def objective_of(
     return weights[0] * m + weights[1] * e + weights[2] * rdd
 
 
-def rdd_gate_ok(row: dict[str, Any]) -> bool:
-    """ret_over_dd 约束门（v0.296）：< RDD_GATE_FLOOR ⇒ 敞口 sanity 不过。
+def rdd_gate_ok(row: dict[str, Any], ref: Optional[dict[str, Any]] = None) -> bool:
+    """ret_over_dd **相对**约束门（v2.1）：``rdd(候选) ≥ rdd(参照档)`` ⇒ 过。
 
-    缺读数 fail-closed（缺数据不奖励——与 objective_of 的 None 口径同精神）。
+    参照档 = 事先固定、不经过挑选的档的读数行（须含 ``ret_over_dd``），
+    同一窗口、同一批信号、同一套组合口径下计算。任一侧缺读数
+    fail-closed（缺数据不奖励——与 objective_of 的 None 口径同精神）。
+    ``ref=None`` = v2 绝对门 1.0 兼容通道（无参照语义场景兜底；研究侧勿用）。
     """
     rdd = row.get("ret_over_dd")
-    return rdd is not None and rdd >= RDD_GATE_FLOOR
+    if ref is None:
+        return rdd is not None and rdd >= RDD_GATE_FLOOR
+    ref_rdd = ref.get("ret_over_dd")
+    return rdd is not None and ref_rdd is not None and rdd >= ref_rdd
 
 
-def search_objective(row: dict[str, Any]) -> Optional[float]:
-    """v2 搜索标量（#80④ Ⓐ）：rdd 门不过 ⇒ None（垫底/不参与），否则 margin 单量。"""
-    if not rdd_gate_ok(row):
+def search_objective(
+    row: dict[str, Any], ref: Optional[dict[str, Any]] = None
+) -> Optional[float]:
+    """v2.1 搜索标量（#80④ Ⓐ）：rdd 相对门不过 ⇒ None（垫底/不参与），
+    否则 margin 单量。"""
+    if not rdd_gate_ok(row, ref):
         return None
     return objective_of(row, DEFAULT_OBJ_WEIGHTS)
 
 
+def twin_ref_cell(cell: dict[str, Any]) -> dict[str, Any]:
+    """v2.1 参照档孪生格：同 gate/exit/params、``scorer="baseline"``（恒可买
+    ——事先固定、不经过挑选的无因子基准档；同窗同信号同组合口径）。"""
+    return {**cell, "scorer": "baseline"}
+
+
 def rank_rows(
-    rows: list[dict[str, Any]], weights: tuple[float, float, float]
+    rows: list[dict[str, Any]],
+    weights: tuple[float, float, float],
+    ref_exit: str = "pct5_trail08",
 ) -> list[dict[str, Any]]:
     """按目标函数降序排名（objective=None 垫底；同分按格子名保序稳定）。
 
@@ -644,10 +674,21 @@ def rank_rows(
     格子优胜配置可「直接拷入 live EXIT_RULES」（README），这条最接近 live
     的排名路径不能漏门（rdd 门本意=防偏袒高敞口）。显式传自定义权重
     （如 v1 复合复算历史口径）⇒ 不套门（``rdd_gate`` 置 None 表未评）。
+
+    **v2.1**：门改**相对**——参照档 = 同 (scorer, gate) 组合内 ``ref_exit``
+    档行（默认 pct5_trail08，事先固定不经过挑选）；组合内缺该档 ⇒ 取组合
+    **首行**（grid 顺序首档=基准档）；组合只有一行 ⇒ 自参照恒真。
     """
     gate = weights == DEFAULT_OBJ_WEIGHTS
+    refs: dict[tuple[Any, Any], dict[str, Any]] = {}
     for r in rows:
-        r["rdd_gate"] = rdd_gate_ok(r) if gate else None
+        key = (r.get("scorer"), r.get("gate"))
+        refs.setdefault(key, r)  # 首行 = 首档（grid 顺序）
+        if r.get("exit") == ref_exit:
+            refs[key] = r
+    for r in rows:
+        ref = refs.get((r.get("scorer"), r.get("gate")))
+        r["rdd_gate"] = rdd_gate_ok(r, ref) if gate else None
         r["objective"] = objective_of(r, weights) if not gate or r["rdd_gate"] else None
     srt = sorted(
         rows,

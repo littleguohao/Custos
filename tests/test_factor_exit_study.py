@@ -256,7 +256,9 @@ class TestScriptedScenarios:
         assert rep["bucketings"]["B2"]["cuts_mining_estimated"]
         assert len(rep["configs"]) == 80
         assert set(rep["criteria"]) == {"C1", "C2", "C3", "C4", "rule_note"}
-        assert rep["objective_version"] == "v2-margin"
+        from custos.research import strategy_grid as sg  # noqa: PLC0415
+
+        assert rep["objective_version"] == sg.OBJECTIVE_VERSION
         for cfg in rep["configs"]:
             assert "taken" not in (cfg["mining"] or {}), "报告不落地交易明细"
         assert rep["top"]["mapping"] in [c["mapping"] for c in rep["configs"]]
@@ -269,9 +271,13 @@ class TestC4SameBudget:
 
         real = fes.study_window
 
-        def spy(per_code, signals, buckets, regime, cost_bps, top_n, replay_fn=None):
+        def spy(
+            per_code, signals, buckets, regime, cost_bps, top_n, replay_fn=None, **kw
+        ):
             calls.append(max(buckets) + 1 if buckets else 0)
-            return real(per_code, signals, buckets, regime, cost_bps, top_n, replay_fn)
+            return real(
+                per_code, signals, buckets, regime, cost_bps, top_n, replay_fn, **kw
+            )
 
         monkeypatch.setattr(fes, "study_window", spy)
         n_random = 3

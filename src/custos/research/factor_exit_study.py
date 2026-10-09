@@ -31,7 +31,7 @@
 
 CLI 护栏：任一窗口与 pre2019 untouched 段（2010-01-01..2016-12-31）有交集
 即拒（与挖掘/判定侧研究工具同族镜像）。LLM 不碰数值；搜索标量 v2 口径
-（margin 单量 + rdd≥1 门，只相对排序，引用连带 R11 声明）。
+（margin 单量 + rdd **相对门** v2.1——rdd(候选)≥rdd(参照档 P1_base)，同窗同信号同口径；只相对排序，引用连带 R11 声明）。
 """
 
 from __future__ import annotations
@@ -76,7 +76,7 @@ FACTOR_DEF = {
 }
 
 _R11_NOTE = (
-    "目标函数口径 v2（margin 单量 + rdd≥1 约束门）——按 R11 纪律只相对排序，"
+    "目标函数口径 v2.1（margin 单量 + rdd 相对门：候选≥参照档 P1_base 同窗 rdd）——按 R11 纪律只相对排序，"
     "绝对读数引用时连带本声明"
 )
 
@@ -187,8 +187,19 @@ def replay_signals(
     return trades
 
 
-def combine_readings(trades: list[dict], top_n: int) -> Optional[dict]:
-    """交易集 → 读数块（与 exit_campaign 评估器同形状 + taken 供 C1 桶级计数）。"""
+def combine_readings(
+    trades: list[dict],
+    top_n: int,
+    ref: Optional[dict[str, Any]] = None,
+) -> Optional[dict]:
+    """交易集 → 读数块（与 exit_campaign 评估器同形状 + taken 供 C1 桶级计数）。
+
+    ``ref``：v2.1 相对 rdd 门的参照读数（须含 ret_over_dd；参照档本体传
+    ``ref="self"`` ⇒ 自参照门恒真）；None = 绝对门兼容通道（勿用于新研究）。
+    ⚠️ 口径注记（v2.1 在案）：margin/胜率/盈亏比 = **全候选交易**（collect_all）
+    口径，rdd/ret_over_dd = **top-N 组合实际选中子集**口径——两批交易不同
+    （「margin 为正、组合 rdd 为负」可以同时成立），引用时连带本注记。
+    """
     from custos.research import backtest_factors as bt  # noqa: PLC0415
     from custos.research import strategy_grid as sg  # noqa: PLC0415
     from custos.research.exit_campaign import V0_PORTFOLIO  # noqa: PLC0415
@@ -207,10 +218,11 @@ def combine_readings(trades: list[dict], top_n: int) -> Optional[dict]:
         "expectancy_R": tsum.get("expectancy_R"),
         "ret_over_dd": sg._ret_over_dd(pf),
     }
+    ref_eff = row if ref == "self" else ref
     return {
-        "objective": sg.search_objective(row),
+        "objective": sg.search_objective(row, ref_eff),
         "objective_version": sg.OBJECTIVE_VERSION,
-        "rdd_gate": sg.rdd_gate_ok(row),
+        "rdd_gate": sg.rdd_gate_ok(row, ref_eff),
         "margin": row["margin"],
         "expectancy_R": row["expectancy_R"],
         "payoff_ratio": tsum.get("payoff_ratio"),
@@ -218,6 +230,8 @@ def combine_readings(trades: list[dict], top_n: int) -> Optional[dict]:
         "n": tsum.get("n"),
         "n_taken": pf.get("n_taken"),
         "ret_over_dd": row["ret_over_dd"],
+        "trade_set_note": "margin=全候选交易(collect_all) / rdd=topN 组合选中子集"
+        "——两批交易不同（v2.1 注明在案）",
         "taken": taken,
     }
 
@@ -240,10 +254,14 @@ def study_window(
     cost_bps: float,
     top_n: int,
     replay_fn: Optional[Callable[[list[dict], dict[str, Any]], list[dict]]] = None,
+    ref_readings: Optional[dict] = None,
 ) -> dict[str, Any]:
     """单窗研究：按（档×桶）预放交易组，80 映射合并 + uniform 基准。
 
     ``replay_fn`` 可注入（测试合成）；None = 生产重放（与评估器同引擎）。
+    ``ref_readings``（v2.1 相对门参照）：None = 用本窗 uniform P1_base 读数
+    （参照档=事先固定的基准档）；C3/C4 臂须传**主研究的 P1_base 读数**
+    （口径对称——随机臂也和同一个参照档比，owner v2.1 指令）。
     返回 {configs: [...], uniform: {...}}；config 读数含 per-bucket n_taken。
     """
     if replay_fn is None:
@@ -265,11 +283,25 @@ def study_window(
                 cache[key] = [{**tr, "_bucket": b} for tr in replay_fn(subset, params)]
         return cache[key]
 
+    def _merge(pk: str) -> list[dict]:
+        trades: list[dict] = []
+        for b in range(n_b):
+            trades.extend(_group(pk, b))
+        return trades
+
+    # ── 参照档 P1_base 先行（自参照恒真；v2.1：事先固定不经过挑选的档）──
+    ref_rd = ref_readings or combine_readings(_merge("P1_base"), top_n, ref="self")
+    uniform: dict[str, Optional[dict]] = {"P1_base": ref_rd}
+    for pk in PROFILES:
+        if pk == "P1_base":
+            continue
+        uniform[pk] = combine_readings(_merge(pk), top_n, ref=ref_rd)
+
     def _config_reading(mapping: tuple[str, ...]) -> Optional[dict]:
         trades: list[dict] = []
         for b, pk in enumerate(mapping):
             trades.extend(_group(pk, b))
-        rd = combine_readings(trades, top_n)
+        rd = combine_readings(trades, top_n, ref=ref_rd)
         if rd is not None:
             per_bucket: dict[str, int] = {}
             for t in rd["taken"]:
@@ -281,12 +313,6 @@ def study_window(
         {"mapping": list(mapping), "readings": _config_reading(mapping)}
         for mapping in enumerate_mappings(n_b)
     ]
-    uniform: dict[str, Optional[dict]] = {}
-    for pk in PROFILES:
-        trades = []
-        for b in range(n_b):
-            trades.extend(_group(pk, b))
-        uniform[pk] = combine_readings(trades, top_n)
     return {"configs": configs, "uniform": uniform, "n_buckets": n_b}
 
 
@@ -444,6 +470,7 @@ def run_study(
     from custos.research import backtest_factors as bt  # noqa: PLC0415
     from custos.research import exit_campaign as ec  # noqa: PLC0415
     from custos.research import score_return_study as srs  # noqa: PLC0415
+    from custos.research import strategy_grid as sg  # noqa: PLC0415
 
     windows = {
         "mining": (args.mining_start, args.mining_end),
@@ -539,6 +566,9 @@ def run_study(
         if uniform_best
         else None
     )
+    # v2.1 相对门参照（口径对称）：C3 扰动臂/C4 随机臂与主研究同一参照档
+    # （同窗 P1_base 读数——事先固定不经过挑选）
+    ref_by_window = {w: studies["B2"][w]["uniform"]["P1_base"] for w in windows}
 
     dm_m = (
         _d_margin(top["mining"], uniform_best["readings"])
@@ -577,6 +607,7 @@ def run_study(
                     args.cost_bps,
                     args.top_n,
                     replay_fn=replay_fn,
+                    ref_readings=ref_by_window[w],  # v2.1 同参照口径对称
                 )
                 for w in windows
             }
@@ -627,6 +658,7 @@ def run_study(
                     args.cost_bps,
                     args.top_n,
                     replay_fn=replay_fn,
+                    ref_readings=ref_by_window["mining"],  # v2.1 随机臂同参照档
                 )
                 top_a = pick_top(
                     [
@@ -709,7 +741,7 @@ def run_study(
             "C4": {**c4, "pool": pool},
             "rule_note": "R39-C1~C4 跑数前写死；C5（pre2019 终审）= C2 过线才启动，owner 拍板发令",
         },
-        "objective_version": "v2-margin",
+        "objective_version": sg.OBJECTIVE_VERSION,
         "notes": [_R11_NOTE],
     }
 

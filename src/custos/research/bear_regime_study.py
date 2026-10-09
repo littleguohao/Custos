@@ -30,7 +30,7 @@
 
 CLI 护栏：窗口与 pre2019 untouched 段交集即拒（镜像同族，复用
 factor_exit_study._check_windows）。LLM 不碰数值；v2 口径（margin 单量
-+ rdd≥1 门，只相对排序，引用连带 R11 声明）；**绝对 margin 读数不进
++ rdd 相对门 v2.1——候选≥同窗同信号 pct5_trail08 参照档，只相对排序，引用连带 R11 声明）；**绝对 margin 读数不进
 live 决策**（幸存者宇宙抬高绝对读数，相对结论才有效——R14 同族）。
 """
 
@@ -55,7 +55,7 @@ DEFAULT_N_RANDOM = 50  # 随机臂数
 C4_MIN_POOL = 50  # 池满才许 confirmed
 
 _R11_R14_NOTE = (
-    "目标函数 v2（margin 单量 + rdd≥1 门）只相对排序；幸存者宇宙抬高绝对 "
+    "目标函数 v2.1（margin 单量 + rdd 相对门：候选≥同窗 trail08 参照档）只相对排序；幸存者宇宙抬高绝对 "
     "margin 读数（退市票不在宇宙里）——相对结论才有效，绝对读数不进 live 决策"
 )
 
@@ -240,11 +240,22 @@ def run_arm(
     judgment_reader: Optional[Callable[[dict], Optional[dict]]] = None,
 ) -> dict[str, Any]:
     """单条随机臂：挖掘窗内 5 档取 max ⇒ **冻结出场配置**；判定窗读数由
-    judgment_reader（冻结配置的回放）产生——对等纪律的代码化身。"""
+    judgment_reader（冻结配置的回放）产生——对等纪律的代码化身。
+
+    v2.1：参照档 = **同一批入场信号** × pct5_trail08（同窗同信号同口径——
+    随机臂与主研究同族对称）。
+    """
+    ref_rd: Optional[dict] = None
+    for e in exits:
+        if e["name"] == "pct5_trail08":
+            ref_rd = fes.combine_readings(
+                replay_mining(entries, e["params"]), top_n, ref="self"
+            )
+            break
     best: Optional[dict] = None
     for e in exits:
         trades = replay_mining(entries, e["params"])
-        rd = fes.combine_readings(trades, top_n)
+        rd = fes.combine_readings(trades, top_n, ref=ref_rd)
         if rd and rd["objective"] is not None and rd["margin"] is not None:
             if best is None or rd["margin"] > best["readings"]["margin"]:
                 best = {"exit": e["name"], "params": e["params"], "readings": rd}
@@ -413,14 +424,23 @@ def run_study(
             view = _gate_view(per_code[w], g)
         return fes.replay_signals(view, subset, params, regime_bear, args.cost_bps)
 
-    # ── 230 格 × 双窗（重放缓存 per（门, 档, 窗））──
+    # ── 230 格 × 双窗（重放缓存 per（门, 档, 窗）；参照档 = 同窗同信号
+    # pct5_trail08——v2.1 事先固定不经过挑选的档，每（门,窗）先算并存 refs）──
     configs: list[dict] = []
+    ref_trail = next(e["params"] for e in exits if e["name"] == "pct5_trail08")
+    refs: dict[tuple[str, str], Optional[dict]] = {}
     for g in gates:
+        for w in windows:
+            trades = _replay(w, g, gate_sigs[w][g], ref_trail)
+            refs[(g, w)] = fes.combine_readings(trades, args.top_n, ref="self")
         for e in exits:
             row: dict[str, Any] = {"gate": g, "exit": e["name"]}
             for w in windows:
-                trades = _replay(w, g, gate_sigs[w][g], e["params"])
-                rd = fes.combine_readings(trades, args.top_n)
+                if e["name"] == "pct5_trail08":
+                    rd = refs[(g, w)]  # 参照档本体=自参照读数（复用不重复重放）
+                else:
+                    trades = _replay(w, g, gate_sigs[w][g], e["params"])
+                    rd = fes.combine_readings(trades, args.top_n, ref=refs[(g, w)])
                 if rd is not None:
                     rd.pop("taken", None)  # 报告不落交易明细
                 row[w] = rd
@@ -459,9 +479,14 @@ def run_study(
             entries_j = _rand_entries(len(entries_m), "judgment")
             # ⚠️ 冻结的是**出场配置**；判定窗入场集 = 同分布重抽（随机入场
             # 无门信号可携带——对等的是「臂冻结配置 vs top 冻结配置」，入场
-            # 随机性两臂同分布）
+            # 随机性两臂同分布）。v2.1 参照 = 同批判定入场 × trail08
+            ref_j = fes.combine_readings(
+                _replay("judgment", "__random__", entries_j, ref_trail),
+                args.top_n,
+                ref="self",
+            )
             trades = _replay("judgment", "__random__", entries_j, frozen_params)
-            return fes.combine_readings(trades, args.top_n)
+            return fes.combine_readings(trades, args.top_n, ref=ref_j)
 
         arm = run_arm(
             entries_m,
@@ -500,6 +525,7 @@ def run_study(
                     "mining", top["gate"], gate_sigs["mining"][top["gate"]], params_p
                 ),
                 args.top_n,
+                ref=refs[(top["gate"], "mining")],  # v2.1 同参照口径对称
             )
             rd_j = fes.combine_readings(
                 _replay(
@@ -509,6 +535,7 @@ def run_study(
                     params_p,
                 ),
                 args.top_n,
+                ref=refs[(top["gate"], "judgment")],
             )
             c2d = judge_c2(rd_m, rd_j, q95_m, q95_j)
             c3_draws.append(
@@ -589,7 +616,7 @@ def run_study(
             "rule_note": "R40-C1~C4 跑数前写死（v0.301/v0.302 修订在案）；"
             "C5（pre2019 同段随机池标尺）= C2 过线才启动，owner 拍板发令",
         },
-        "objective_version": "v2-margin",
+        "objective_version": sg.OBJECTIVE_VERSION,
         "notes": [_R11_R14_NOTE],
     }
 

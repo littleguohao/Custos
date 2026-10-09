@@ -421,40 +421,61 @@ class TestObjective:
 
 class TestObjectiveV2:
     """v0.296（#80④ owner 拍板 Ⓐ）：搜索标量 = margin 单量 + rdd 约束门。
-
-    v1 复合 (1.0,1.0,0.05) 经 v0.284 实测不自洽（margin 仅占 17~20%，重尾
-    ret_over_dd 驱动其余）——搜索爬的山不是 C2 晋级门量的山；rdd 降为门
-    （docstring 本意=防偏袒高敞口）。⚠️ v2/v1 尺度不可比，q95 池不跨版本引用。
+    **v2.1（v0.304，owner review）**：门从绝对（≥1.0）改**相对**
+    （rdd(候选) ≥ rdd(参照档)，参照档事先固定不经过挑选、同窗同信号同
+    口径）——margin 不能靠「回撤收益比比参照档更差」换来；熊市窗口环境
+    两边抵消（R11 绝对读数不可引用同族）。
     """
 
     def test_default_weights_are_margin_only(self):
         assert sg.DEFAULT_OBJ_WEIGHTS == (1.0, 0.0, 0.0)
-        assert sg.OBJECTIVE_VERSION == "v2-margin"
+        assert sg.OBJECTIVE_VERSION == "v2.1-margin-rddref"
 
     def test_search_objective_is_margin_when_gate_passes(self):
         row = {"margin": 0.08, "expectancy_R": 0.3, "ret_over_dd": 2.5}
-        assert sg.search_objective(row) == pytest.approx(0.08)
+        ref = {"ret_over_dd": 1.0}
+        assert sg.search_objective(row, ref) == pytest.approx(0.08)
 
-    def test_rdd_gate_blocks_high_exposure(self):
-        """rdd < 1.0（总收益 < 最大回撤）⇒ objective None（垫底/不参与）。"""
+    def test_rdd_gate_blocks_worse_than_reference(self):
+        """rdd(候选) < rdd(参照档) ⇒ objective None（垫底/不参与）。"""
         row = {"margin": 0.5, "expectancy_R": 0.9, "ret_over_dd": 0.99}
-        assert sg.search_objective(row) is None
-        assert sg.rdd_gate_ok(row) is False
+        ref = {"ret_over_dd": 1.0}
+        assert sg.search_objective(row, ref) is None
+        assert sg.rdd_gate_ok(row, ref) is False
 
-    def test_rdd_gate_floor_is_inclusive(self):
+    def test_rdd_gate_reference_inclusive(self):
         row = {"margin": 0.1, "expectancy_R": 0.1, "ret_over_dd": 1.0}
-        assert sg.rdd_gate_ok(row) is True
-        assert sg.search_objective(row) == pytest.approx(0.1)
+        assert sg.rdd_gate_ok(row, {"ret_over_dd": 1.0}) is True
+        assert sg.search_objective(row, {"ret_over_dd": 1.0}) == pytest.approx(0.1)
 
     def test_missing_rdd_fails_closed(self):
-        """缺 rdd 读数 = 无法验证敞口 sanity ⇒ 门不过（缺数据不奖励）。"""
+        """任一侧缺读数 = 无法比较 ⇒ 门不过（缺数据不奖励）。"""
         row = {"margin": 0.5, "expectancy_R": 0.9, "ret_over_dd": None}
-        assert sg.rdd_gate_ok(row) is False
-        assert sg.search_objective(row) is None
+        assert sg.rdd_gate_ok(row, {"ret_over_dd": 1.0}) is False
+        assert sg.search_objective(row, {"ret_over_dd": 1.0}) is None
+        good = {"margin": 0.5, "expectancy_R": 0.9, "ret_over_dd": 2.0}
+        assert sg.rdd_gate_ok(good, {"ret_over_dd": None}) is False
 
     def test_missing_margin_still_none(self):
         row = {"margin": None, "expectancy_R": 0.1, "ret_over_dd": 3.0}
-        assert sg.search_objective(row) is None
+        assert sg.search_objective(row, {"ret_over_dd": 1.0}) is None
+
+    def test_legacy_no_ref_is_absolute_floor(self):
+        """ref=None 兼容通道 = v2 绝对门 1.0（无参照语义场景兜底，研究侧勿用）。"""
+        assert sg.rdd_gate_ok({"ret_over_dd": 0.99}) is False
+        assert sg.rdd_gate_ok({"ret_over_dd": 1.0}) is True
+
+    def test_regression_absolute_gate_wipes_out_bear_window(self):
+        """v2.1 废因回归（R39 Phase 2 诊断 0/160）：熊市窗 rdd 分布 −0.91~0.25
+        全 <1.0 ⇒ 绝对门全灭；相对门（参照档 rdd=−0.5 同环境）放行更优者。"""
+        rows = [
+            {"margin": 0.05, "expectancy_R": 0.1, "ret_over_dd": r}
+            for r in (-0.91, -0.5, -0.2, 0.0, 0.25)
+        ]
+        assert sum(sg.rdd_gate_ok(r) for r in rows) == 0, "绝对门在熊市窗口全灭"
+        ref = {"ret_over_dd": -0.5}
+        passed = sum(sg.rdd_gate_ok(r, ref) for r in rows)
+        assert passed == 4, "相对门只拦比参照档更差的（−0.91 < −0.5）"
 
     def test_v1_weights_still_reproducible(self):
         """v1 复合口径仍可显式复算（历史报告对账用，不作搜索标量）。"""
@@ -464,30 +485,76 @@ class TestObjectiveV2:
 
 class TestRankRowsRddGate:
     """v0.297 修缺陷 B：CLI 格子排名（rank_rows）在 v2 默认权重下也套 rdd 门——
-    「优胜格可直接拷 live EXIT_RULES」的最接近 live 路径不能偏袒高敞口。"""
+    「优胜格可直接拷 live EXIT_RULES」的最接近 live 路径不能偏袒高敞口。
+    **v2.1**：门改相对——参照档 = 同 (scorer,gate) 组合内 pct5_trail08 档行。"""
 
     ROWS = [
         {
+            "scorer": "s1",
+            "gate": "j_low",
             "exit": "high_exposure",
             "margin": 0.20,
             "expectancy_R": 0.1,
             "ret_over_dd": 0.3,
         },
-        {"exit": "normal", "margin": 0.05, "expectancy_R": 0.1, "ret_over_dd": 2.5},
+        {
+            "scorer": "s1",
+            "gate": "j_low",
+            "exit": "pct5_trail08",
+            "margin": 0.05,
+            "expectancy_R": 0.1,
+            "ret_over_dd": 1.5,
+        },
+        {
+            "scorer": "s1",
+            "gate": "j_low",
+            "exit": "normal",
+            "margin": 0.05,
+            "expectancy_R": 0.1,
+            "ret_over_dd": 2.5,
+        },
     ]
 
     def test_default_weights_gate_high_exposure(self):
         ranked = sg.rank_rows([dict(r) for r in self.ROWS], sg.DEFAULT_OBJ_WEIGHTS)
-        assert ranked[0]["exit"] == "normal"  # 门拦高敞口，margin 0.20 也垫底
-        assert ranked[1]["exit"] == "high_exposure"
-        assert ranked[1]["objective"] is None
-        assert ranked[1]["rdd_gate"] is False
+        # 高敞口 rdd 0.3 < 参照档 1.5 ⇒ 拦下垫底（margin 0.20 也不救）
+        assert ranked[-1]["exit"] == "high_exposure"
+        assert ranked[-1]["objective"] is None
+        assert ranked[-1]["rdd_gate"] is False
+        # 参照档本体自参照恒真；normal 2.5 ≥ 1.5 放行
+        assert ranked[0]["exit"] == "pct5_trail08"  # 同 margin 稳定序在前
         assert ranked[0]["rdd_gate"] is True
+        assert ranked[1]["exit"] == "normal"
+        assert ranked[1]["rdd_gate"] is True
+
+    def test_missing_ref_exit_falls_back_to_first_row(self):
+        """组合内无 pct5_trail08 ⇒ 参照档 = 组合首行（grid 序首档=基准档）。"""
+        rows = [
+            {
+                "scorer": "s",
+                "gate": "g",
+                "exit": "e1",
+                "margin": 0.1,
+                "expectancy_R": 0.1,
+                "ret_over_dd": 1.0,
+            },
+            {
+                "scorer": "s",
+                "gate": "g",
+                "exit": "e2",
+                "margin": 0.2,
+                "expectancy_R": 0.1,
+                "ret_over_dd": 0.5,
+            },
+        ]
+        ranked = sg.rank_rows(rows, sg.DEFAULT_OBJ_WEIGHTS)
+        assert ranked[0]["exit"] == "e1"  # 首行自参照恒真
+        assert ranked[1]["rdd_gate"] is False  # e2 0.5 < 首行 1.0
 
     def test_explicit_custom_weights_bypass_gate(self):
         """显式自定义权重（v1 复算口径）⇒ 不套门（rdd_gate 置 None 表未评）。"""
         ranked = sg.rank_rows([dict(r) for r in self.ROWS], (1.0, 1.0, 0.05))
-        # v1 复合 0.315 > 0.275：它确实第一——复算路径不被门污染
+        # v1 复合高敞口 0.215 确实第一——复算路径不被门污染
         assert ranked[0]["exit"] == "high_exposure"
         assert ranked[0]["rdd_gate"] is None
 

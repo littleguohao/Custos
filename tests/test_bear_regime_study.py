@@ -254,7 +254,9 @@ class TestCliAndProduct:
             "objective_version",
         ):
             assert k in rep, k
-        assert rep["objective_version"] == "v2-margin"
+        from custos.research import strategy_grid as sg  # noqa: PLC0415
+
+        assert rep["objective_version"] == sg.OBJECTIVE_VERSION
         for cfg in rep["configs"]:
             for w in ("mining", "judgment"):
                 assert "taken" not in (cfg[w] or {}), "报告不落交易明细"
