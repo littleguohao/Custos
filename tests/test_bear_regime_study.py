@@ -267,6 +267,38 @@ class TestArmFrozenSemantics:
         assert "预算对等" in rep["pools"]["arm_construction"]
 
 
+class TestRandomEntries:
+    """random_entries 抽样语义（v0.308 owner review）：无放回 + 母体截断。"""
+
+    def _per_code(self):
+        import pandas as pd
+
+        df = pd.DataFrame(
+            {"date": pd.to_datetime(["2023-01-02", "2023-01-03", "2023-01-04"])}
+        )
+        scores = {d: 50.0 for d in ("2023-01-02", "2023-01-03", "2023-01-04")}
+        return {
+            "000001": {"df": df, "scores": dict(scores)},
+            "000002": {"df": df, "scores": dict(scores)},
+        }
+
+    def test_without_replacement_and_truncation(self):
+        """同一 (code, bar) 不重复计入；n > 母体 ⇒ 截断（有放回会出满 n
+        且带重复——逐门 n_g 抽样后小门池污染最重）。"""
+        import random as _r
+
+        per_code = self._per_code()
+        regime = brs.invert_regime_bearish({"2023-01-01": "空头"})  # 全段空头
+        out = brs.random_entries(per_code, regime, 100, _r.Random(1))
+        assert len(out) == 2 * 3, "n=100 > 母体 6 ⇒ 截断到 6（有放回会出满 100）"
+        keys = {(e["code"], e["i"]) for e in out}
+        assert len(keys) == len(out), "无重复 (code, bar)"
+        # 母体以内正常出数：n=4 ⇒ 恰 4 条仍无重复
+        out4 = brs.random_entries(per_code, regime, 4, _r.Random(2))
+        assert len(out4) == 4
+        assert len({(e["code"], e["i"]) for e in out4}) == 4
+
+
 class TestC3Perturb:
     def test_levels_params_perturbed_others_kept(self):
         import random as _r

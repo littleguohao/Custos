@@ -182,7 +182,10 @@ def random_entries(
     index_df: Any = None,
 ) -> list[dict]:
     """空头日随机 (code, bar) 入场 n 个（母体=宇宙内**全部**空头日 bar，
-    不是门信号集）；score 缺失时生产路径现算（注入路径由测试给）。"""
+    不是门信号集）；**无放回抽样**（v0.308 owner review：``rng.sample``，
+    母体不够就截断——有放回会让同一 (code, bar) 被抽中两次、同一笔交易
+    重复计入；预算对等后每臂逐门抽 46 次，n_g 最小的门污染最重）；score
+    缺失时生产路径现算（注入路径由测试给）。"""
     dates_sorted = sorted(regime_bear)
     pool: list[tuple[str, int, str]] = []
     for code, pack in per_code.items():
@@ -195,8 +198,7 @@ def random_entries(
     if not pool or n <= 0:
         return []
     out: list[dict] = []
-    for _ in range(n):
-        code, i, d = pool[rng.randrange(len(pool))]
+    for code, i, d in rng.sample(pool, min(n, len(pool))):
         score = per_code[code]["scores"].get(d)
         if score is None and index_df is not None:
             try:

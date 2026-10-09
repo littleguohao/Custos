@@ -309,6 +309,7 @@
 | 2026-10-09 | v0.305 | **v2.1 三处修补（owner review）**：①cell 系参照格缓存键含 exit params（--joint 各轨迹出场参数不同，参照档不再由首个评估候选定锚）；②研究侧参照缺失 fail-closed（objective None + rdd_gate False + rdd_ref_missing 标记，不静默回落绝对门——兼容通道只留 CLI）；③rank_rows 单行组合自参照标 rdd_gate="self_ref"（与真过门区分，单档排名不再伪装过门） | owner review | 钉测 +6 改写 2 |
 | 2026-10-09 | v0.306 | **rank_rows self_ref 收尾（owner review，仅 CLI 排名）**：单行组合（门未检验）排序落在真过门行**之后**——CLI 第一名=可直接拷 live EXIT_RULES 的行，未检验组合不能拿；多行组合参照锚点行自比恒真改标 True（与单行组合分标签） | owner review | 钉测 +1 改写 2 |
 | 2026-10-09 | v0.307 | **R40 跑数前两修（owner review）**：①随机臂**预算对等**——每臂逐门 n_g×5 档完整复刻 top 的 max-of-230 选型（原 max-of-5 标尺系统性偏低、q95 过易，预注册「同预算」名不副实；臂池时间 ~46× 如实记账）；②C3 无可扰参数轴（base_low params={}）= **not_applicable**——不空转零信息复评、不伪装零翻转放行，总结局降 provisional（灵敏度证据缺失，不降 falsified） | owner review | 钉测 +2 改写 2（R40 套件 14 绿） |
+| 2026-10-09 | v0.308 | **R40 随机臂抽样改无放回（owner review）**：`random_entries` 从 rng.randrange 有放回改 rng.sample 无放回 + 母体不够截断——有放回会让同一 (code, bar) 重复计入同一笔交易，预算对等后每臂逐门抽 46 次、n_g 最小的门污染最重；不影响结论方向 | owner review | 钉测 +1（R40 套件 15 绿） |
 
 ## 写入规范（2026-08-29 v0.144 起）
 
