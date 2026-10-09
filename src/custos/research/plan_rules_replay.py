@@ -20,7 +20,10 @@
   C2 不过标 rdd_gate_fail（拿更差回撤收益比换的 margin 不算真提升）；
 - **C4 预算对等=两边都不挑选**：随机臂 N=50，每臂给每个信号独立抽
   entry×U[0.85,0.99] 作 stop_override（臂级种子写死），池元素=臂挖掘窗
-  Δmargin；臂不过 rdd 门不进池记过门率；池空=indeterminate 不放行；
+  Δmargin；臂不过 rdd 门不进池记过门率；**N 指过门臂数**（v0.317）——
+  重抽至池满或评估达上限 max_arms=10×N，上限未满按当时池大小判
+  provisional/indeterminate（统计含义不变：候选也须过门，两边条件
+  对称）；池空=indeterminate 不放行；
 - **C3 灵敏度**：lookback=round(10×U(0.5,1.5))×4（种子写死），每次扰动
   重算 stop→重新剔除→**两版都在新子集上重跑**（配对重新对齐）；
 - 四态结局（次序同 R39/R40）：C1 不过=untested（优先）；C2/C3 False
@@ -346,14 +349,20 @@ def run_study(
     }
 
     # ── C4：随机止损价臂（预算对等=两边都不挑选；池元素=臂挖掘窗 Δmargin）──
+    # v0.317：**N 指过门臂数**——过不了 rdd 门的臂不进池，「抽 N 次」实现下
+    # 过门率 <100% 就永远 provisional（owner 零假设实测过门 ~20%）。改
+    # **重抽直至过门臂满 N 或评估数达上限 max_arms=10×N**；上限仍未满 ⇒
+    # 按当时池大小判 provisional/indeterminate，如实记过门率与评估数。
+    # 统计含义不变：候选本身也须过门（C2），零假设=「同样过了门的随机
+    # 臂」，两边条件对称——只改凑齐 N 的方式，不改判据。
     lo, hi = C4_STOP_RANGE
+    max_arms = 10 * args.n_random
     pool: list[float] = []
     arm_evaluated = 0
-    arm_gate_pass = 0
     live_m = pair_rds["mining"]["live"]
     plan_m = pair_rds["mining"]["plan"]
-    for arm_i in range(args.n_random):
-        arm_rng = random.Random(f"{args.seed}-arm{arm_i}")  # 臂级种子写死可复现
+    while len(pool) < args.n_random and arm_evaluated < max_arms:
+        arm_rng = random.Random(f"{args.seed}-arm{arm_evaluated}")  # 臂级种子写死可复现
         arm_evaluated += 1
         arm_subset = [
             _sig_with_stop(r, r["entry_close"] * arm_rng.uniform(lo, hi))
@@ -369,13 +378,13 @@ def run_study(
         arm_rd = fes.combine_readings(arm_trades, args.top_n, ref=live_m)
         if not arm_rd or not arm_rd.get("rdd_gate"):
             continue  # 过不了 rdd 门的臂不进池（记过门率）
-        arm_gate_pass += 1
         if (
             live_m
             and live_m.get("margin") is not None
             and arm_rd.get("margin") is not None
         ):
             pool.append(arm_rd["margin"] - live_m["margin"])
+    arm_gate_pass = len(pool)
     q95_m = _q95(pool)
     plan_delta = (
         plan_m["margin"] - live_m["margin"]
@@ -397,6 +406,8 @@ def run_study(
         "state": c4_state,
         "pool": pool,
         "pool_size": len(pool),
+        "target_pool": args.n_random,  # N 指过门臂数（v0.317）
+        "max_arms": max_arms,
         "evaluated": arm_evaluated,
         "gate_pass": arm_gate_pass,
         "gate_pass_rate": (arm_gate_pass / arm_evaluated if arm_evaluated else None),
@@ -404,7 +415,9 @@ def run_study(
         "plan_delta_mining": plan_delta,
         "min_pool": args.c4_min_pool,
         "note": "预算对等=两边都不挑选（v0.315 ④）：池元素=臂挖掘窗 Δmargin"
-        "（每信号独立抽 entry×U[0.85,0.99]，臂级种子写死）",
+        "（每信号独立抽 entry×U[0.85,0.99]，臂级种子写死）；N 指过门臂数——"
+        "重抽至池满或评估达上限（v0.317，统计含义不变：候选也须过门，"
+        "两边条件对称）",
     }
 
     # ── 四态结局（C1 优先；C4 indeterminate/池未满 ⇒ provisional 不放行）──
@@ -431,7 +444,10 @@ def run_study(
             "top_n": args.top_n,
             "note": "现行版主读数 pct10 忠实 hard_loss（loss_reduction −7% 减仓"
             "引擎表达不了，v0.315 ① 注明）；副读数 pct7 只报告不作判据；"
-            "两版 scale_out_frac=0.5 共用——Δ 只来自止损",
+            "两版 scale_out_frac=0.5 共用——Δ 只来自止损；⚠️ LIVE_PARAMS "
+            "未合并 exit_genome.FIXED_PARAMS（两版同用 evaluate_trades 默认值"
+            "——配对内部口径一致；与 R37/R39 基准档非逐位相同，横向对比前需"
+            "统一，v0.317 注明）",
         },
         "accounting": accounting,
         "readings": {

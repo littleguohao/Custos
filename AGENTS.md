@@ -205,7 +205,8 @@ build_row 源头转 float，numpy 类型不触发校验失败）。
   loss_reduction 引擎表达不了）/副读数 pct7 不作判据；两版共用
   scale_out_frac=0.5；C2=Δmargin 双窗正+rdd 相对门（参照=同窗现行版）；
   C3=lookback 扰动**新子集两版重跑**；C4=随机止损价臂 N=50（预算对等=
-  两边都不挑选，池元素=臂挖掘窗 Δmargin，池空=indeterminate）。
+  两边都不挑选，池元素=臂挖掘窗 Δmargin，**N 指过门臂数** v0.317——
+  重抽至池满或评估上限 10×N，池空=indeterminate）。
   exit_c5_terminal（R37-C5 终审终端，判据 v0.299——**a_sample 可疑闸**：
   n 低于预期 ⇒ 跑数可疑不出判决（双向压）+ thr 三分：CI95 hi<thr 杀 /
   lo>0 且点估计≥thr 活 / 其余 untested）：冻结候选 vs 基准档

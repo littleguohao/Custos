@@ -318,6 +318,7 @@
 | 2026-10-09 | v0.314 | **影子台账/打分三连修（owner review）**：①**隔离**——append_shadow_safe 兜住一切异常（含 require 的 SystemExit）只 WARN+报告留痕，旁路证据绝不打死 14:45/17:00 主报告；build_row 数值源头转 float（numpy 类型曾直接 SystemExit）；②**分歧段计事件**——同 code 同 plan_source 连续不一致天只取段头（真执行首日即离场，逐日计窗口重叠会高估 K），报告必报独立事件数/涉及持仓数，E 的 K=20 改按独立事件+≥5 只持仓；③决策日停牌（bar 首日≠决策日）标 error 不硬算；可卖区间 [1,N] 含第 N 天钉测锁死（owner 按错半格，实证如此） | owner review | 钉测 +8 改写 2 |
 | 2026-10-09 | v0.315 | **R41 口径定稿（owner 拍板四项，跑数前最后一窗）**：①现行版主读数=pct10 忠实 hard_loss（loss_reduction −7% 减仓引擎表达不了注明）/副读数 pct7 只报告不作判据；②scale_out_frac=0.5 两版共用写死（bbi_exit_consec=2/stop_trigger=close/cost_bps=25 同写死）；③rdd 相对门任一窗不过⇒C2 不过标 rdd_gate_fail；④C4 预算对等=两边都不挑选（池元素=臂挖掘窗 Δmargin，池空=indeterminate）；C3 写明新子集两版重跑（剔除集合变配对重新对齐） | owner 拍板 | 判据文本（结构测试绿） |
 | 2026-10-09 | v0.316 | **R41 Phase 1 工具落地**：引擎**信号级 stop_override 钩子**（backtest_factors:3601——带键即用缺省走原逻辑，exit_campaign/R39/R40 逐位不变）+ `_stop_ref(df, lookback=)` 参数化（L2 默认逐位不变）+ `plan_rules_replay` 全栈（attach as-of 算 stop+配对剔除记账+止损距离分位数；现行 pct10 主/pct7 副两版读数；C1~C4+四态结局；CLI pre2019 硬拒绝+check_reach——factor_exit/bear_regime 同补） | owner 实现指导 | 钉测 +17（§5 清单九项全覆盖） |
+| 2026-10-09 | v0.317 | **R41-C4 口径修订（owner review，跑数前补记）**：「N=50 指过门臂数」——过不了 rdd 门的臂不进池，「抽 50 次」实现下过门率 <100% 永远 provisional（owner 零假设实测过门 ~20%；R39/R40 臂含自参照档免疫，R41 单配置+外部参照独撞）；改**重抽至池满或评估上限 10×N**，上限未满按池大小判 provisional/indeterminate，统计含义不变（候选同须过门，两边条件对称）；注明 LIVE_PARAMS 未合 exit_genome.FIXED_PARAMS（与 R37/R39 基准档非逐位相同） | owner review | 钉测 +2 改写 1（R41 套件 19 绿） |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

@@ -334,7 +334,8 @@ class TestC4:
         assert a["criteria"]["C4"]["pool"] == b["criteria"]["C4"]["pool"]
 
     def test_empty_pool_indeterminate(self):
-        """全部臂过不了 rdd 门 ⇒ 池空 = indeterminate（不放行，v0.297 族）。"""
+        """全部臂过不了 rdd 门 ⇒ 池空 = indeterminate（不放行，v0.297 族）；
+        v0.317：重抽打满 max_arms 上限后按当时池大小（空）判。"""
 
         def _replay_arms_crash(subset, params):
             out = []
@@ -353,8 +354,72 @@ class TestC4:
         rep = _run(per_code, _replay_arms_crash, n_random=3, c4_min_pool=3)
         c4 = rep["criteria"]["C4"]
         assert c4["pool_size"] == 0
+        assert c4["evaluated"] == c4["max_arms"] == 30  # 打满上限（v0.317）
         assert c4["state"] == "indeterminate"
         assert rep["verdict"] == "provisional"  # 不放行不判死
+
+    def test_resample_fills_pool_at_low_gate_rate(self):
+        """v0.317：N 指过门臂数——过门率 20% 时重抽至池满（5 过门臂 = 25
+        次评估），如实记过门率与评估数；统计含义不变（候选同须过门）。"""
+        calls = {"arm": 0}
+
+        def _replay_20pct(subset, params):
+            any_ov = any(r["sig"].get("stop_override") is not None for r in subset)
+            if not any_ov:
+                return _replay_candidate(subset, params)  # 现行/副读数
+            is_plan = all(
+                r["sig"].get("stop_override") == r.get("plan_stop") for r in subset
+            )
+            if is_plan:
+                return _replay_candidate(subset, params)  # 计划版
+            calls["arm"] += 1
+            if calls["arm"] % 5 == 0:  # 20% 过门（读数同现行 ⇒ 门平过）
+                return [
+                    _trade_of(r, 0.01 if j % 2 == 0 else -0.005)
+                    for j, r in enumerate(subset)
+                ]
+            return [_trade_of(r, -0.30) for r in subset]  # 崩=不过门
+
+        per_code = _mk_per_code()
+        rep = _run(per_code, _replay_20pct, n_random=5, c4_min_pool=5)
+        c4 = rep["criteria"]["C4"]
+        assert c4["pool_size"] == 5, "重抽直至过门臂满 N"
+        assert c4["evaluated"] == 25  # 20% 过门 ⇒ 25 次评估凑满 5
+        assert c4["max_arms"] == 50 and c4["target_pool"] == 5
+        assert c4["gate_pass_rate"] == pytest.approx(0.2)
+        assert c4["state"] == "confirmed_pass"
+        assert rep["verdict"] == "candidate"
+
+    def test_cap_degrades_to_provisional(self):
+        """v0.317 上限降级：过门率 1/20 ⇒ 打满 max_arms 后按当时池大小判
+        provisional（池 2 < min_pool 5），评估数/过门率如实记。"""
+        calls = {"arm": 0}
+
+        def _replay_low_rate(subset, params):
+            any_ov = any(r["sig"].get("stop_override") is not None for r in subset)
+            if not any_ov:
+                return _replay_candidate(subset, params)
+            is_plan = all(
+                r["sig"].get("stop_override") == r.get("plan_stop") for r in subset
+            )
+            if is_plan:
+                return _replay_candidate(subset, params)
+            calls["arm"] += 1
+            if calls["arm"] % 20 == 0:
+                return [
+                    _trade_of(r, 0.01 if j % 2 == 0 else -0.005)
+                    for j, r in enumerate(subset)
+                ]
+            return [_trade_of(r, -0.30) for r in subset]
+
+        per_code = _mk_per_code()
+        rep = _run(per_code, _replay_low_rate, n_random=5, c4_min_pool=5)
+        c4 = rep["criteria"]["C4"]
+        assert c4["evaluated"] == c4["max_arms"] == 50
+        assert c4["pool_size"] == 2  # floor(50/20)=2 条过门臂
+        assert c4["gate_pass_rate"] == pytest.approx(0.04)
+        assert c4["state"] == "provisional"
+        assert rep["verdict"] == "provisional"
 
     def test_small_pool_provisional(self):
         per_code = _mk_per_code()

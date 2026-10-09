@@ -9,8 +9,11 @@
 > 作判据；②scale_out_frac=0.5 两版共用写死（bbi_exit_consec=2 /
 > stop_trigger="close" / cost_bps=25 同写死）；③rdd 相对门任一窗不过
 > ⇒ C2 不过标 rdd_gate_fail；④C4 预算对等=两边都不挑选，池元素=臂
-> 挖掘窗 Δmargin）；**Phase 1 工具 ✅（v0.316 `plan_rules_replay`，钉测
-> +17）**——Phase 2 生产机跑数待 owner 发令　|
+> 挖掘窗 Δmargin）；**v0.317 修订在案**（owner review：C4「N=50 指
+> 过门臂数」——重抽至池满或评估达上限 max_arms=10×N，原「抽 N 次」
+> 实现过门率 <100% 永远 provisional；统计含义不变，两边条件对称）；
+> **Phase 1 工具 ✅（v0.316 `plan_rules_replay`，钉测 +17）**——Phase
+> 2 生产机跑数待 owner 发令　|
 > **依赖**：上游：R10（「5% 是崖」/双窗纪律）R11（绝对读数不可引用）
 > R14（幸存者宇宙）R37（判据族/出场轴收口换方向）R39（C1 不过=untested
 > 修订族）；live 侧对象：`core/trades/position_plans.py`（计划生成）、
@@ -121,7 +124,14 @@
   （v0.315 ④，owner 拍板）：计划版是单一配置未经网格挑选，随机臂
   也不做挑选——池元素 = 这条臂在挖掘窗的 Δmargin（vs 同窗现行版），
   勿照字面去「取 max」。臂同样套 rdd 相对门（同参照），过不了门的
-  臂不进池、记过门率；**池为空 ⇒ indeterminate 不放行**（v0.297 族）；
+  臂不进池、记过门率；**N=50 指过门臂数**（v0.317 修订，跑数前补记
+  合规）：**重抽直至过门臂数满 N 或评估数达上限 max_arms = 10×N**——
+  「抽 N 次」实现下过门率 <100% 就永远 provisional（owner 零假设实测
+  过门 ~20%，N=50 与 min_pool=50 结构性撞死）；上限仍未满 ⇒ 按当时
+  池大小判 provisional/indeterminate，如实记过门率与评估数。统计
+  含义不变：候选本身也须过门（C2），零假设 =「同样过了门的随机臂」，
+  两边条件对称——只改凑齐 N 的方式，不改判据。**池为空 ⇒
+  indeterminate 不放行**（v0.297 族）；
   计划版挖掘窗 Δ > 池 q95（`exit_campaign._q95` 单源）且池 ≥50 ⇒
   confirmed_pass；池未满 ⇒ provisional；
 - **R41-C5（终审）**：pre2019 untouched 段（2010-2016）单独终步，
@@ -187,3 +197,13 @@
   plan_rules_replay --tag r41_a1 --codes-file <s3000 钉死宇宙>
   --mining-start 2022-01-01 --mining-end 2024-07-31 --judgment-start
   2024-08-01 --judgment-end 2026-09-04`。
+- **C4 口径修订（2026-10-09，v0.317，owner review）**：「N=50 指过门
+  臂数」——过不了 rdd 门的臂不进池，「抽 50 次」实现下过门率 <100%
+  就永远 provisional（owner 零假设 6 种子实测过门 9~14/50；R39 臂含
+  全桶 P1 映射=参照档本身、R40 臂 trail08 档自参照，均不受影响，R41
+  单配置+外部参照独撞此坑）。改重抽至过门臂满 N 或评估达上限
+  max_arms=10×N，上限未满按当时池大小判 provisional/indeterminate，
+  如实记过门率与评估数；统计含义不变（候选也须过门 C2，零假设=同样
+  过了门的随机臂，两边条件对称）。另注明：LIVE_PARAMS 未合并
+  exit_genome.FIXED_PARAMS（两版同用 evaluate_trades 默认值，配对内部
+  口径一致；与 R37/R39 基准档非逐位相同，横向对比前需统一）。
