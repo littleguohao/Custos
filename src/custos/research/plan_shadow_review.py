@@ -9,7 +9,12 @@
 口径（写死，LLM 不碰数值）：
 - **事件筛选**：``stage="1700"``（收盘口径为准——1445 盘中行只做盘中/
   收盘一致性参考，不进打分）且 ``agree=False`` 且 plan_source 非
-  default/None（default 视同无计划，v0.310）；
+  default/None（default 视同无计划，v0.310）；**按分歧段计独立事件**
+  （v0.314 owner review：同 code 同 plan_source 的连续不一致天只取段头
+  ——真按 plan 执行第一天就已离场后续天不存在，逐日计会窗口重叠
+  高估样本量；段内续行只留痕计数。报告必报**独立事件数 / 涉及持仓
+  数**，E 判据 K=20 按独立事件数 + ≥5 只不同持仓）；决策日无 bar
+  （停牌）⇒ 标 error（close0 与 bar 序列对不上）；
 - **动作映射**（owner 拍板）：P0 清仓 = 决策日次一交易日（T+1）起首个
   可卖日**开盘**全卖；P1 减仓 = 同点**卖半仓**（P2 减仓类按 P1 同档——
   owner 映射只给了 P0/P1/持有三档，P2（计划分批止盈/现行减仓信号）按
@@ -52,12 +57,31 @@ _EPS = 1e-12  # Δ 符号判定的零带
 # ---------------------------------------------------------------------------
 
 
-def load_ledger_events(path: Path, stage: str = STAGE_FINAL) -> tuple[int, list[dict]]:
-    """读台账 →（总行数, 打分事件清单）。agree=False 且来源非 default/None。"""
+def _is_event_row(row: dict) -> bool:
+    """打分事件行：agree=False 且来源非 default/None（default 视同无计划）。"""
+    if row.get("agree") is not False:
+        return False
+    src = row.get("plan_source")
+    return bool(src) and src != "default"
+
+
+def load_ledger_events(
+    path: Path, stage: str = STAGE_FINAL
+) -> tuple[int, list[dict], int]:
+    """读台账 →（总行数, 独立事件清单, 段内续行数）。
+
+    **按分歧段计事件**（v0.314 owner review）：同 code 的 stage 行按日排序，
+    事件行（``_is_event_row``）若其**同 code 前一行**也是同 plan_source
+    的事件行 ⇒ 段内续行；否则 = 新事件（段头）。一只持仓连续 10 天
+    「plan P0 vs live P1」只算 **1 个事件**——真按 plan 执行第一天就已
+    离场，后续天根本不存在；且逐日计会让 5 日窗口高度重叠、两三只票
+    凑满 K=20（E 判据按独立事件数计 + ≥5 只不同持仓，见 TODO #60）。
+    段断条件：中间出现 agree=True/None 行，或 plan_source 切换。
+    """
     n_rows = 0
-    events: list[dict] = []
+    stage_rows: list[dict] = []
     if not Path(path).exists():
-        return 0, []
+        return 0, [], 0
     with Path(path).open("r", encoding="utf-8") as f:
         for ln in f:
             ln = ln.strip()
@@ -70,13 +94,28 @@ def load_ledger_events(path: Path, stage: str = STAGE_FINAL) -> tuple[int, list[
                 continue  # 损坏行跳过不炸链（台账读松惯例）
             if row.get("stage") != stage:
                 continue
-            if row.get("agree") is not False:
-                continue  # None（无计划/default）与 True（一致）都不是事件
-            src = row.get("plan_source")
-            if not src or src == "default":
-                continue
-            events.append(row)
-    return n_rows, events
+            stage_rows.append(row)
+    by_code: dict[str, list[dict]] = {}
+    for r in stage_rows:
+        by_code.setdefault(str(r.get("code")), []).append(r)
+    heads: list[dict] = []
+    n_continuation = 0
+    for _code, rs in by_code.items():
+        rs.sort(key=lambda r: str(r.get("date")))
+        prev: Optional[dict] = None
+        for r in rs:
+            if _is_event_row(r):
+                if (
+                    prev is not None
+                    and prev.get("agree") is False
+                    and prev.get("plan_source") == r.get("plan_source")
+                ):
+                    n_continuation += 1  # 段内续行：留痕计数不进事件
+                else:
+                    heads.append(r)
+            prev = r
+    heads.sort(key=lambda r: (str(r.get("date")), str(r.get("code"))))
+    return n_rows, heads, n_continuation
 
 
 def _path_return(
@@ -88,7 +127,9 @@ def _path_return(
 ) -> Optional[dict[str, Any]]:
     """单个动作口径的 N 日持仓路径收益；未到期（不足 N+1 根含决策日）⇒ None。
 
-    ``path_bars`` 从决策日 T 起（index 0=T）；卖出候选从 T+1（index 1）起。
+    ``path_bars`` 从决策日 T 起（index 0=T）；卖出候选搜索区间 = **[1, n]
+    （含第 N 天）**——``_next_tradable(start=1, max_delay=n−1)`` 的
+    end=start+max_delay=n（钉测锁死，勿误读为 [1, n−1] 再「修」）。
     """
     if len(path_bars) < n + 1:
         return None
@@ -166,6 +207,10 @@ def evaluate_event(
         out["error"] = "决策日及之后无 bar"
         return out
     sub = sub.sort_values("date").reset_index(drop=True)
+    if str(sub["date"].astype(str).str[:10].iloc[0]) != day:
+        # 决策日停牌/缺数据：bar 序列首日≠决策日，台账 close 与 bar 价格对不上
+        out["error"] = "决策日无 bar（停牌/缺数据）——close0 与 bar 序列口径对不上"
+        return out
     can_buy, can_sell = bt.tradable_flags(sub, str(row.get("code") or ""))
     path_bars = [
         {"date": d, "open": o, "close": c}
@@ -272,9 +317,10 @@ def build_report(
         "events": events,
         "summary": summary,
         "mae_avoided": mae_avoided,
-        "rule": "stage=1700 收盘口径；Δret=plan−live（>0=plan 更好）；动作映射"
-        " P0=T+1 首可卖日开盘清仓 / P1（P2 同档）=开盘卖半仓 / P3=不动；"
-        "跌停停牌顺延（引擎 tradable_flags 单源）",
+        "rule": "stage=1700 收盘口径；独立事件=分歧段段头（v0.314，E 判据 "
+        "K=20 按独立事件数 + ≥5 只不同持仓）；Δret=plan−live（>0=plan 更好）；"
+        "动作映射 P0=T+1 首可卖日开盘清仓 / P1（P2 同档）=开盘卖半仓 / P3=不动；"
+        "可卖搜索区间 [1,N] 含第 N 天；跌停停牌顺延（引擎 tradable_flags 单源）",
     }
 
 
@@ -314,10 +360,12 @@ def main(
             bt._load_one_bars, count=2000, start=None, end=None
         )
 
-    n_rows, rows = load_ledger_events(Path(args.ledger), stage=str(args.stage))
+    n_rows, rows, n_continuation = load_ledger_events(
+        Path(args.ledger), stage=str(args.stage)
+    )
     if not rows:  # 空结果护栏：0 事件 ⇒ 非零退出不写产物
         print(
-            f"[空结果护栏] 台账 {args.ledger} 筛完 0 个打分事件"
+            f"[空结果护栏] 台账 {args.ledger} 筛完 0 个独立打分事件"
             f"（stage={args.stage} 且 agree=False 且来源非 default）——"
             "非零退出不写产物",
             file=sys.stderr,
@@ -337,6 +385,8 @@ def main(
     rep["tag"] = args.tag
     rep["ledger"] = str(args.ledger)
     rep["stage"] = str(args.stage)
+    rep["n_continuation_rows"] = n_continuation  # 段内续行（留痕不进事件，v0.314）
+    rep["n_distinct_codes"] = len({str(e.get("code")) for e in events})
     out_dir = Path(args.out_dir) / args.tag
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"_plan_shadow_review__{args.tag}.json"

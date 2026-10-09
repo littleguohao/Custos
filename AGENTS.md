@@ -159,6 +159,10 @@ uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/
 不传 plan，落盘 shadow 恒 plan_missing——写主批永远采不到事件）；现行判定统计
 只用 `live_final_priority`（b1 口径），`report_priority` 只留痕；**default 来源
 视同无计划**（兜底止损=live −7% 线，不带新信息，不出 plan 信号、不计一致率）。
+**旁路隔离（v0.314）**：两个写入点走 `append_shadow_safe`——任何异常（含
+require 的 SystemExit）只 WARN+渲染段留痕「影子台账写入失败」，**绝不打死
+主报告**（「生产者硬失败」惯例为主产物定，旁路证据不适用；数值字段在
+build_row 源头转 float，numpy 类型不触发校验失败）。
 
 ## 5. 研究层与进化引擎约定
 

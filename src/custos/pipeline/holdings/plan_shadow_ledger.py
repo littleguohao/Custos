@@ -80,6 +80,17 @@ def _existing_keys(path: Path) -> set[tuple[str, str, str]]:
     return keys
 
 
+def _f(x: Any) -> Optional[float]:
+    """数值字段统一转 float（v0.314：numpy.int64/float64 会被 contracts 判
+    「期望数字，得到 int64」——旁路字段在源头归一，不给校验失败留机会）。"""
+    if x is None:
+        return None
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return None
+
+
 def build_row(
     stage: str,
     day: str,
@@ -107,7 +118,7 @@ def build_row(
         "code": str(code),
         "stage": str(stage),
         "plan_source": shadow.get("plan_source"),
-        "plan_stop_price": (plan.get("stop") or {}).get("price") if plan else None,
+        "plan_stop_price": _f((plan.get("stop") or {}).get("price")) if plan else None,
         "plan_tp": plan.get("take_profit") if plan else None,
         "shadow_signal": signals[0].get("signal") if signals else None,
         "shadow_priority": plan_p,
@@ -115,8 +126,8 @@ def build_row(
         "live_final_priority": live_p,
         "live_action": b1_state.get("final_action"),
         "report_priority": extra.get("report_priority"),
-        "close": extra.get("close"),
-        "entry_price": plan.get("entry_price") if plan else None,
+        "close": _f(extra.get("close")),
+        "entry_price": _f(plan.get("entry_price")) if plan else None,
         "agree": None if plan_p is None else (plan_p == live_p),
         "recorded_at": cn_now().isoformat(timespec="seconds"),
     }
@@ -147,3 +158,44 @@ def append_shadow(
     with path.open("a", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
     return True
+
+
+#: 旁路写入失败收集（本 run 进程内）——报告渲染段用 ``drain_write_failures``
+#: 取走并清空，写一行「影子台账写入失败」留痕。模块级是为了不改动两份
+#: 报告重估/渲染函数的既有签名（旁路证据不值得为它扩散签名）。
+_WRITE_FAILURES: list[str] = []
+
+
+def drain_write_failures() -> list[str]:
+    """取走并清空本进程的旁路写入失败清单（报告渲染段每次调用后清空）。"""
+    out = list(_WRITE_FAILURES)
+    _WRITE_FAILURES.clear()
+    return out
+
+
+def append_shadow_safe(
+    stage: str,
+    day: str,
+    code: str,
+    b1_state: Optional[dict],
+    extra: Optional[dict] = None,
+    *,
+    path: Optional[Path] = None,
+) -> bool:
+    """``append_shadow`` 的**旁路隔离版**（v0.314 owner review）：影子台账
+    只是旁路证据，不能因为它让 14:45/17:00 主报告出不来——``require`` 的
+    SystemExit 不被 ``except Exception`` 接住，两个写入点包这里：任何异常
+    （含 SystemExit）⇒ WARN + 失败收集 + 返回 False，主流程照常继续。
+
+    「生产者硬失败」惯例是为主产物定的，旁路证据不适用。
+    """
+    try:
+        return append_shadow(stage, day, code, b1_state, extra, path=path)
+    except (Exception, SystemExit) as exc:  # noqa: BLE001 — 旁路必须兜住一切
+        msg = (
+            f"影子台账写入失败（不影响主报告）: {code} {stage} "
+            f"{type(exc).__name__}: {exc}"
+        )
+        print(f"[WARN] {msg}", file=sys.stderr)
+        _WRITE_FAILURES.append(msg)
+        return False

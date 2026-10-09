@@ -11,7 +11,10 @@ from pathlib import Path
 
 from custos.pipeline.holdings.b1_holding_state import evaluate as evaluate_b1_holding
 from custos.pipeline.holdings.b1_holding_state import shadow_compare_line
-from custos.pipeline.holdings.plan_shadow_ledger import append_shadow
+from custos.pipeline.holdings.plan_shadow_ledger import (
+    append_shadow_safe,
+    drain_write_failures,
+)
 
 from custos.pipeline.close_review.holding_bbi import intraday_bbi_basis
 from custos.pipeline.close_review.holding_structure import n_structure_basis
@@ -528,8 +531,9 @@ def revalue_and_plan(
             b1_state,
         )
         # plan 影子台账（v0.310）：14:45 时点一行；report_priority=classify
-        # 口径只留痕，一致性统计用 live_final_priority（b1 final_priority）
-        append_shadow(
+        # 口径只留痕，一致性统计用 live_final_priority（b1 final_priority）。
+        # v0.314：safe 隔离——旁路证据失败不打死主报告（WARN+渲染段留痕）
+        append_shadow_safe(
             "1445",
             str(target_date),
             code,
@@ -657,6 +661,12 @@ def render_shadow_comparison(lines: list[str], actions: list[dict]) -> None:
         "### 2.1 持仓计划影子对比（影子期：不影响判定与权限）",
         "",
     ]
+    _ledger_failures = drain_write_failures()  # v0.314：旁路失败留痕不炸主报告
+    if _ledger_failures:
+        lines.append(
+            f"- ⚠️ 影子台账写入失败 {len(_ledger_failures)} 笔（详见 stderr WARN）"
+            "——旁路证据缺失不影响本报告与判定"
+        )
     for x in actions:
         b1 = x.get("b1_holding_state") or {}
         shadow = b1.get("shadow") or {}

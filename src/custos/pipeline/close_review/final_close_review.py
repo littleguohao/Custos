@@ -8,7 +8,10 @@ import json
 
 from custos.pipeline.holdings.b1_holding_state import evaluate as evaluate_b1_holding
 from custos.pipeline.holdings.b1_holding_state import shadow_compare_line
-from custos.pipeline.holdings.plan_shadow_ledger import append_shadow
+from custos.pipeline.holdings.plan_shadow_ledger import (
+    append_shadow_safe,
+    drain_write_failures,
+)
 
 from custos.pipeline.close_review.holding_bbi import intraday_bbi_basis
 from custos.pipeline.close_review.holding_structure import n_structure_basis
@@ -261,8 +264,9 @@ def revalue_positions(
             plan=plans.get(code),
         )
         # plan 影子台账（v0.310）：17:00 时点一行（收盘口径——事后打分以此
-        # 为准）；本报告现行判定列就是 b1 final_priority，两口径同值留痕
-        append_shadow(
+        # 为准）；本报告现行判定列就是 b1 final_priority，两口径同值留痕。
+        # v0.314：safe 隔离——旁路证据失败不打死主报告（WARN+渲染段留痕）
+        append_shadow_safe(
             "1700",
             str(day),
             code,
@@ -547,6 +551,12 @@ def render_holdings(lines, enrichment, revalued, day):
     # 持仓计划影子对比（v0.83 Phase C，观察期：只展示不生效）——
     # 计划判定 vs 现行 B1 判定，不一致行内标注；无计划（早于机制落地）如实呈现。
     lines += ["", "- 持仓计划影子对比（影子期：不影响判定与权限）："]
+    _ledger_failures = drain_write_failures()  # v0.314：旁路失败留痕不炸主报告
+    if _ledger_failures:
+        lines.append(
+            f"  - ⚠️ 影子台账写入失败 {len(_ledger_failures)} 笔（详见 stderr WARN）"
+            "——旁路证据缺失不影响本报告与判定"
+        )
     for row in revalued:
         b1 = row["b1_holding_state"]
         lines.append(

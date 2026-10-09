@@ -96,12 +96,37 @@ class TestEventFilter:
             _event(code="600003", stage="1445"),  # 盘中口径不进打分
         ]
         p = _write_ledger(tmp_path / "led.jsonl", rows)
-        n_rows, events = psr.load_ledger_events(p)
+        n_rows, events, n_cont = psr.load_ledger_events(p)
         assert n_rows == 4
         assert [e["code"] for e in events] == ["600000"]
+        assert n_cont == 0
 
     def test_missing_ledger_is_zero(self, tmp_path):
-        assert psr.load_ledger_events(tmp_path / "none.jsonl") == (0, [])
+        assert psr.load_ledger_events(tmp_path / "none.jsonl") == (0, [], 0)
+
+    def test_disagreement_segments_counted_once(self, tmp_path):
+        """同 code 同 plan_source 连续不一致天只取段头（v0.314）——真按
+        plan 执行第一天就已离场；段断（agree=True 介入/来源切换）另起新段。"""
+        rows = [
+            _event("2026-09-01", "600000"),  # 段 A 头
+            _event("2026-09-02", "600000"),  # 段 A 续
+            _event("2026-09-03", "600000"),  # 段 A 续
+            _event("2026-09-04", "600000", agree=True),  # 段断
+            _event("2026-09-07", "600000"),  # 段 B 头
+            _event(
+                "2026-09-08", "600000", source="candidate:2026-09-07"
+            ),  # 来源换=新段头
+            _event("2026-09-02", "600001"),  # 另一持仓独立事件
+        ]
+        p = _write_ledger(tmp_path / "led.jsonl", rows)
+        _n, events, n_cont = psr.load_ledger_events(p)
+        assert [(e["code"], e["date"]) for e in events] == [
+            ("600000", "2026-09-01"),
+            ("600001", "2026-09-02"),
+            ("600000", "2026-09-07"),
+            ("600000", "2026-09-08"),
+        ]
+        assert n_cont == 2
 
 
 class TestPathReturns:
@@ -157,6 +182,30 @@ class TestPathReturns:
         assert d5["plan_ret"] == pytest.approx(d5["live_ret"])  # 骑到末日=持有不动
         assert d5["delta"] == pytest.approx(0.0)
 
+    def test_sellable_on_day_n_is_executed(self):
+        """可卖搜索区间=[1, N] 含第 N 天（钉死防误读 [1, n−1]）：T+1~T+4
+        连跌停、T+5 开板 ⇒ P0 在第 N 天开盘成交（不是按未卖兜底）。"""
+        rows = [
+            ("2026-09-01", 10.1, 10.0),  # T
+            ("2026-09-02", 9.0, 9.0),  # T+1 跌停
+            ("2026-09-03", 8.1, 8.1),  # T+2 跌停
+            ("2026-09-04", 7.29, 7.29),  # T+3 跌停
+            ("2026-09-07", 6.56, 6.56),  # T+4 跌停
+            ("2026-09-08", 6.6, 6.7),  # T+5 开板（+2.1%）⇒ 第 N 天可卖
+        ]
+        ev = psr.evaluate_event(_event(plan_p="P0", live_p="P3"), _bars(rows))
+        d5 = ev["deltas"]["5"]
+        assert d5["plan_sell_executed"] is True
+        assert d5["plan_ret"] == pytest.approx(6.6 / 10.0 - 1.0)
+
+    def test_decision_day_halted_marks_error(self):
+        """决策日停牌/缺数据（bar 序列首日≠决策日）⇒ error（close0 与 bar
+        序列对不上），不硬算。"""
+        rows = [r for r in FALL_ROWS if r[0] != "2026-09-01"]
+        ev = psr.evaluate_event(_event(day="2026-09-01"), _bars(rows))
+        assert "决策日无 bar" in ev["error"]
+        assert ev["deltas"] == {}
+
 
 class TestCli:
     def _run(self, tmp_path, rows, dfs):
@@ -194,6 +243,8 @@ class TestCli:
             )
         )
         assert rep["n_events"] == 3 and rep["n_ledger_rows"] == 4
+        assert rep["n_continuation_rows"] == 0  # 三事件各独立（不同持仓）
+        assert rep["n_distinct_codes"] == 3
         s5 = rep["summary"]["5"]
         assert s5["n"] == 2 and s5["n_pending"] == 1
         assert s5["mean"] == pytest.approx((0.10 + 0.05) / 2)

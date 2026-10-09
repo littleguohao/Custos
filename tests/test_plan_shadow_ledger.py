@@ -115,6 +115,54 @@ class TestSchemaRequire:
                 path=tmp_path / "led.jsonl",
             )
 
+    def test_numpy_types_normalized_to_float(self, tmp_path):
+        """v0.314：numpy.int64/float64 会被 contracts 判「期望数字，得到
+        int64」——build_row 源头统一转 float，不再触发校验失败。"""
+        import numpy as np
+
+        p = tmp_path / "led.jsonl"
+        assert (
+            psl.append_shadow(
+                "1700",
+                "2026-10-09",
+                "600000",
+                _b1_state(),
+                _extra(close=np.int64(9), plan=_plan()),
+                path=p,
+            )
+            is True
+        )
+        row = _read(p)[0]
+        assert row["close"] == 9.0 and type(row["close"]) is float
+
+
+class TestAppendShadowSafe:
+    def test_b1_state_none_warns_not_kills(self, tmp_path, capsys):
+        """v0.314 旁路隔离：b1_state=None（require 会 SystemExit）⇒ WARN +
+        失败收集 + False，主流程照常（影子证据不得打死 14:45/17:00 报告）。"""
+        ok = psl.append_shadow_safe(
+            "1700", "2026-10-09", "600000", None, _extra(), path=tmp_path / "l.jsonl"
+        )
+        assert ok is False
+        assert "影子台账写入失败" in capsys.readouterr().err
+        failures = psl.drain_write_failures()
+        assert len(failures) == 1 and "600000" in failures[0]
+        assert psl.drain_write_failures() == []  # drain 后清空
+
+    def test_safe_catches_systemexit(self, tmp_path):
+        """require 的 SystemExit 不被 except Exception 接住——safe 显式捕
+        （Exception, SystemExit）两类。"""
+        ok = psl.append_shadow_safe(
+            "9999",
+            "2026-10-09",
+            "600000",
+            _b1_state(),
+            _extra(),
+            path=tmp_path / "l.jsonl",
+        )
+        assert ok is False
+        assert len(psl.drain_write_failures()) == 1
+
 
 class TestRowSemantics:
     def test_default_agree_none(self, tmp_path):
