@@ -10,8 +10,10 @@ thr 三分 → v0.299 a_sample 可疑闸）。
   冻结候选基因组 vs 基准档 pct5_trail08 在 pre2019 段上 V0 重放（与
   exit_campaign 生产评估器同引擎同公式：信号缓存 + as-of V0 分 +
   summarize_trades/simulate_portfolio_topn + sg._margin），报
-  Δmargin + 配对 bootstrap SE（交易按 (code, entry_date) 1:1 配对——
-  两变体重放同一信号集，相关性不用猜 ρ），按 v0.299 判决规则
+  Δmargin + **日簇**配对 bootstrap SE（v0.324：交易按 (code, entry_date)
+  1:1 配对、**成日重抽样**——同日进场的交易受同一市场冲击彼此相关，
+  按交易 iid 重抽的 CI 系统性偏窄，owner 方法论 review #3），按 v0.299
+  判决规则
   （n_taken 低于预期下限 ⇒ 跑数可疑不出判决 + thr 三分；完整判据、
   v0.281 废因勘误与修订史见 apply_c5 docstring）：
 
@@ -170,22 +172,38 @@ def pair_trades(
 def paired_bootstrap(
     pairs: list[tuple[dict[str, Any]]], *, seed: int, n_boot: int
 ) -> dict[str, Any]:
-    """配对 bootstrap：成对重抽样 ⇒ Δmargin 分布的 SE/CI（相关性不用猜 ρ）。
+    """**日簇**配对 bootstrap（v0.324，owner 方法论 review #3）：成**日**
+    重抽样 ⇒ Δmargin 分布的 SE/CI95。
 
-    每次重抽样保留配对结构（同一对进/同一只出），margin 双边重算后取差。
+    同一天进场的交易受同一个市场冲击、彼此相关——按交易 iid 重抽会把
+    这份相关性当独立信息、**CI 系统性偏窄**（R37-C5 的 CI [−0.0002,
+    +0.0063] 与该口径下「会判 killed」的推断都可能偏乐观，已注记并按
+    owner 拍板日簇口径重跑）。配对结构：两变体重放同一信号集，同一对
+    共享 entry_date——**抽中某日 ⇒ 该日所有配对同进同出**（与
+    score_c5_terminal.day_cluster_bootstrap 同族；全部对各自一天的
+    极端情形退化为按对 iid，语义连续）。
     """
     rng = random.Random(seed)
-    n = len(pairs)
+    by_day: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]] = {}
+    for pr in pairs:
+        by_day.setdefault(pr[0]["entry_date"], []).append(pr)
+    days = sorted(by_day)
+    if not days:
+        return {"se": None, "ci95": None, "n_boot_ok": 0, "n_days": 0}
     deltas: list[float] = []
     for _ in range(n_boot):
-        draw = [pairs[rng.randrange(n)] for _ in range(n)]
-        mc = _margin_of([c for c, _ in draw])["margin"]
-        mb = _margin_of([b for _, b in draw])["margin"]
+        pool = [
+            pr
+            for _ in range(len(days))
+            for pr in by_day[days[rng.randrange(len(days))]]
+        ]
+        mc = _margin_of([c for c, _ in pool])["margin"]
+        mb = _margin_of([b for _, b in pool])["margin"]
         if mc is None or mb is None:
             continue
         deltas.append(mc - mb)
     if len(deltas) < 2:
-        return {"se": None, "ci95": None, "n_boot_ok": len(deltas)}
+        return {"se": None, "ci95": None, "n_boot_ok": len(deltas), "n_days": len(days)}
     deltas.sort()
     lo = deltas[int(0.025 * (len(deltas) - 1))]
     hi = deltas[int(0.975 * (len(deltas) - 1))]
@@ -193,6 +211,7 @@ def paired_bootstrap(
         "se": statistics.pstdev(deltas),
         "ci95": [lo, hi],
         "n_boot_ok": len(deltas),
+        "n_days": len(days),
     }
 
 

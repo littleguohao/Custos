@@ -441,6 +441,20 @@ params），信号/出场解耦（`--signals-out/--from-signals` 重放
       按预注册读法 untested 既不进 Phase 4 也不按证伪归档——候选状态
       由 owner 定夺（r37_b1 在「更快抽身」族的 pre2019 表现：
       点估计略正但统计上无法与零区分）。
+    - **⚠️ bootstrap 口径勘误（2026-10-10，v0.324，owner 方法论 review
+      #3）**：r37_c5_v2 的 SE/CI（SE 0.00168、CI95 [−0.0002, +0.0063]）
+      出自**按交易 iid 重抽**的 paired_bootstrap——同日进场的交易受同一
+      市场冲击彼此相关，iid 把相关性当独立信息 ⇒ **CI 系统性偏窄**，本
+      条 untested（spans_zero）与「新规则下会判 killed」的推断**都可能
+      偏乐观**（真相大概率在 untested 与 killed 之间）。⇒
+      paired_bootstrap 已改**日簇重抽**（v0.324，钉测锁同日同进同出），
+      **owner 拍板按日簇口径重跑 R37-C5**（判据一字未动，只改重抽单位）：
+      `uv run python -m custos.research exit_c5_terminal --genome <r37_b1
+      候选 key> --codes-file <s3000 钉死宇宙> --campaign-report
+      artifacts/logs/exit_campaign/r37_b1/_exit_campaign__r37_b1.json
+      --start 2010-01-01 --end 2016-12-31 --count 100000 --tag r37_c5_v3`
+      ——v3 判毕回填于此，届时 v2（iid 口径）读数标注「可能偏窄」共存
+      不删。
     - **Phase 4 回流（owner 2026-10-05 拍板补路径）**：候选基因组经
       `strategy_grid.exit_params_to_rules` 生成 EXIT_RULES 同 schema 块
       （`artifacts/logs/exit_campaign/r37_b1/phase4_exit_rules_block.json`）——

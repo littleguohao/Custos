@@ -308,6 +308,38 @@ class TestPairBootstrap:
         assert r1["se"] is not None and r1["se"] > 0
         lo, hi = r1["ci95"]
         assert lo <= hi
+        assert r1["n_days"] == 28  # 日簇（v0.324）：簇数=不同 entry_date 数
+
+    def test_day_cluster_moves_together(self, monkeypatch):
+        """v0.324 #3：成日重抽样——同日的配对必须同进同出（iid 才会拆开）。"""
+        cand = [
+            _trade("D1A", "2012-01-04", 0.05),
+            _trade("D1B", "2012-01-04", -0.01),  # 与 D1A 同日
+            _trade("D2A", "2012-01-05", 0.03),
+            _trade("D3A", "2012-01-06", 0.02),
+        ]
+        base = [
+            _trade("D1A", "2012-01-04", 0.02),
+            _trade("D1B", "2012-01-04", 0.01),
+            _trade("D2A", "2012-01-05", 0.01),
+            _trade("D3A", "2012-01-06", 0.01),
+        ]
+        pairs = c5.pair_trades(cand, base)
+        seen: list[set] = []
+        real = c5._margin_of
+
+        def spy(trades):
+            seen.append({t["code"] for t in trades})
+            return real(trades)
+
+        monkeypatch.setattr(c5, "_margin_of", spy)
+        out = c5.paired_bootstrap(pairs, seed=3, n_boot=50)
+        assert out["n_days"] == 3
+        assert seen, "spy 未捕获任何一次重抽"
+        for codes in seen:
+            assert ("D1A" in codes) == ("D1B" in codes), (
+                f"同日对被拆开: {codes}——日簇语义破（退化成 iid）"
+            )
 
 
 class TestPre2019Guard:

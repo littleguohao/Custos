@@ -325,6 +325,7 @@
 | 2026-10-10 | v0.321 | **判定窗治理两件（owner 方法论 review #1，P0）**：①**前向 holdout 冻结**——≥2026-09-05 新数据任何研究不得用（工具硬拒绝同族；判定窗被 13 单元反复读取已近第二个挖掘窗，新数据攒作下轮判定窗）；②**判定窗/pre2019 使用台账**（`window_usage.record_use` append-only+写失败不炸研究）——8 终端全接线，报告必写「该窗第 k 次被读」（k 大判读打折）；③#10 同步测试：判毕后头部/结论段禁「待跑数/待发令」（R39 已修）+ 结论三栏模板（机械判决/实质读数/不能读成什么）新单元强制、R39~R41 回填 | owner 方法论 review | 钉测 +12 改写 2 |
 | 2026-10-10 | v0.322 | **判据件单一来源 criteria_kit（owner review #7，P0）**：判据逻辑五处复制粘贴⇒收口四件——q95（campaign 语义主源，小池 None 改调用点 min_pool 门）/ verdict 四态（C1 untested 优先、c2/c3 None=provisional）/ c4_state_of（空池=indeterminate）/ assemble_c4_pool（v0.317 族重抽至满 N 或上限——factor_exit/bear 同步重抽化）；plan_rules/factor_exit/bear/exit_campaign/score_filter 全迁移；rdd 门/C5 判决各有单源不动；新终端必须 kit 组装禁再抄 | owner review | 钉测 +16 改写 4 |
 | 2026-10-10 | v0.323 | **零假设校准合入门（owner review #4，P0）**：`tests/helpers_null.py` 共享夹具（null_replay/edge_replay + 两个 assert）+ `test_null_calibration.py`——每终端强制两连测：**纯噪声 confirmed_pass ≤ ~10%（5 种子须 0/5）+ 植入真 edge ⇒ confirmed_pass 可识别**，不过不许合入（R40 C4 7/8 假阳性、R41 池填不满都是临时脚本才发现）；bear/plan_rules/factor_exit 三终端首过——v0.317/v0.322 重抽池与 kit 迁移经零假设校准验证 | owner review | 钉测 +6（校准套件） |
+| 2026-10-10 | v0.324 | **exit_c5 bootstrap 改日簇（owner review #3，P1）**：paired_bootstrap 从按交易 iid 重抽改**成日重抽**——同日进场交易受同一市场冲击彼此相关，iid 把相关性当独立信息 CI 系统性偏窄（R37-C5 v2 的 SE 0.00168/CI [−0.0002,+0.0063] 及「会判 killed」推断都可能偏乐观，已注记「真相大概率在 untested 与 killed 之间」）；与 score_c5 的 day_cluster_bootstrap 同族（全日退化=按对 iid 语义连续）；**R37-C5 按日簇口径重跑（r37_c5_v3，判据一字未动只改重抽单位，owner 已拍板）** | owner review | 钉测 +2 改写 1 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 
