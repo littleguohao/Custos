@@ -197,6 +197,10 @@ build_row 源头转 float，numpy 类型不触发校验失败）。
   exit_campaign/score_filter 已全迁移，**新终端必须用 kit 组装，禁止再抄
   一份**；rdd 相对门=`strategy_grid.rdd_gate_ok`、C5 判决=
   `exit_c5_terminal.apply_c5`（本就有单源）。
+  **零假设校准合入门（`tests/helpers_null.py` + `test_null_calibration.py`，
+  v0.323，#4）**：新终端必须带两连测——纯噪声 `confirmed_pass` ≤ ~10%
+  （5 种子须 0/5）+ 植入真 edge ⇒ confirmed_pass 可识别；不过不许合入
+  （R40 7/8 假阳性、R41 池填不满都是临时脚本才发现的教训）。
   score_evolution_study 终审姿态：`--v0-lattice` 调权格（P3 族）/ `--addon-leg`
   骨架加腿（R36 思路二——新腿一律问「加进 V0 等权骨架的 Δmargin」，不问单独立）。
   exit_campaign（R37 战役壳）：出场基因组×批次进化 + CTL-1~5 确定性控制器
