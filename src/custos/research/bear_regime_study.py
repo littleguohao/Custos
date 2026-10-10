@@ -675,6 +675,22 @@ def run_study(
         c1_ok=c1["ok"], c2_ok=c2["ok"], c3_ok=c3["ok"], c4_state=c4_state
     )
 
+    # ── 成本副读数（owner review #6）：top 交易集双窗定向重建（_replay 同
+    # 路径），50bps 解析双报——R40 C2 是**绝对口径**（margin>0），本副读数
+    # 是主战场：空头期做多 margin 薄，翻号 ⇒ 判读降权 ──
+    cost_sens: Optional[dict] = None
+    if top is not None and top_params is not None:
+        from custos.research.cost_sensitivity import cost_side_block  # noqa: PLC0415
+
+        cost_sens = cost_side_block(
+            {
+                w: _replay(w, top["gate"], gate_sigs[w][top["gate"]], top_params)
+                for w in windows
+            },
+            base_bps=args.cost_bps,
+            deltas={f"top_margin_vs_0_{w}": (w, None) for w in windows},
+        )
+
     # 判定窗使用台账（v0.321，owner 方法论 review #1）：本报告=该窗第 k 次被读
     _wu_k = wu.record_use("R40", "judgment", args.tag, "C1~C4 判定窗读数")
     from custos.research import provenance as pv  # noqa: PLC0415
@@ -700,6 +716,7 @@ def run_study(
         ),
         "gates": gates,
         "exit_grid": [e["name"] for e in exits],
+        "cost_sensitivity": cost_sens,
         "windows": {w: {"start": se[0], "end": se[1]} for w, se in windows.items()},
         "amv_mode": "bearish（invert_regime_bearish：仅空头日放行，无映射不放行）",
         "n_signals_by_gate": {
@@ -752,7 +769,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument("--universe-seed", type=int, default=42, help="宇宙抽样种子")
     ap.add_argument("--top-n", type=int, default=20, help="横截面择优（默认 20）")
-    ap.add_argument("--count", type=int, default=2000, help="每股回溯 K 线根数")
+    ap.add_argument(
+        "--count",
+        type=int,
+        default=None,
+        help="每股回溯 K 线根数（缺省=按挖掘窗起点自动推算，显式值覆盖）",
+    )
     ap.add_argument("--cost-bps", type=float, default=25.0, help="往返成本基点")
     ap.add_argument("--mining-start", default="2022-01-01", help="挖掘窗起点")
     ap.add_argument("--mining-end", default="2024-07-31", help="挖掘窗终点")
@@ -782,9 +804,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     # 加载到达校验（v0.316，R41 指导顺手补）：逐股 _load_one_bars 不经批量
     # 截断护栏——count 不够会把窗口静默剪空（r36_c5 碎片宇宙教训）
     from custos.research.exit_c5_terminal import check_reach  # noqa: PLC0415
+    from custos.research.load_window import resolve_count  # noqa: PLC0415
 
-    check_reach(args.count, args.mining_start)
     try:
+        args.count = resolve_count(args.count, args.mining_start)  # v0.328 缺省自动推算
+        check_reach(args.count, args.mining_start)
         rep = run_study(args)
     except (RuntimeError, ValueError) as exc:
         print(f"[ERR] {exc}", file=sys.stderr)

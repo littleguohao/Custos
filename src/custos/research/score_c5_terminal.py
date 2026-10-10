@@ -56,6 +56,8 @@ from custos.research.exit_c5_terminal import (  # 判据/常量单源
     apply_c5,
     check_reach,
 )
+from custos.research.load_window import resolve_count
+from custos.research.cost_sensitivity import cost_side_block
 from custos.research.score_calibration_study import CONTRIB_LEG_KEYS
 
 
@@ -228,10 +230,11 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--count",
         type=int,
-        default=100000,
-        help="每股加载 K 线根数（默认 100000=全历史：count 是「最新向前 N 根」"
-        "滚动窗，pre2019 终审窗口必须全历史加载，否则 start/end 过滤后窗口"
-        "被静默剪空——首跑 count=2000 只跑到 19 笔碎片宇宙）",
+        default=None,
+        help="每股加载 K 线根数（缺省=按 --start 自动推算：busday 交易日+300 "
+        "预热，check_reach 实测兜底；显式值覆盖，如 100000=全历史。count 是"
+        "「最新向前 N 根」滚动窗，到达不足会把窗口静默剪空——首跑 "
+        "count=2000 只跑到 19 笔碎片宇宙）",
     )
     ap.add_argument("--cost-bps", type=float, default=25.0)
     ap.add_argument("--top-n", type=int, default=20)
@@ -281,6 +284,7 @@ def run_c5(
     if collector is not None:
         collected = collector(window)
     else:
+        args.count = resolve_count(args.count, args.start)
         check_reach(args.count, args.start)
         exit_spec = _resolve_exit(args, _build_parser())
         collected = ses._collect_v0_window(args, codes, exit_spec, window)
@@ -348,6 +352,11 @@ def run_c5(
         "candidate": {**rd_c, "n_taken": n_taken},
         "baseline": {**rd_b, "n_taken": pf_b.get("n_taken")},
         "d_margin": d_margin,
+        "cost_sensitivity": cost_side_block(
+            {"cand": cand_taken, "base": base_taken},
+            base_bps=args.cost_bps,
+            deltas={"d_margin": ("cand", "base")},
+        ),
         "delta_over_se": (d_margin / se if d_margin is not None and se else None),
         "bootstrap": boot,
         "kill": verdict,

@@ -15,6 +15,7 @@ import pytest
 
 from custos.research import score_c5_terminal as c5
 from custos.research.exit_c5_terminal import VERDICT_NOT_VETOED
+from custos.research.load_window import count_for_start, resolve_count
 from custos.research.score_calibration_study import CONTRIB_LEG_KEYS
 
 LEGS = list(CONTRIB_LEG_KEYS)
@@ -173,12 +174,17 @@ class TestPre2019Guard:
         args = ap.parse_args(["--from-report", "r.json", "--codes-file", "x.txt"])
         c5._check_pre2019(args, ap)  # 不抛即过
 
-    def test_default_count_is_full_history(self):
-        """count 是「最新向前 N 根」滚动窗——pre2019 终审必须全历史加载，
-        否则 start/end 过滤后窗口被静默剪空（首跑 19 笔碎片教训）。"""
+    def test_default_count_auto_derives(self):
+        """count 是「最新向前 N 根」滚动窗——缺省按 --start 自动推算
+        （v0.328，owner review #9）：推算值必须覆盖 pre2019 起点以来的
+        真实交易日+预热（fail-closed 方向），显式 100000 全历史仍是
+        覆盖通道；实测到达由 check_reach 兜底（首跑 19 笔碎片教训）。"""
         ap = c5._build_parser()
         args = ap.parse_args(["--from-report", "r.json", "--codes-file", "x.txt"])
-        assert args.count == 100000
+        assert args.count is None
+        derived = resolve_count(args.count, c5.PRE2019_START)
+        assert derived >= count_for_start(c5.PRE2019_START) >= 4000
+        assert resolve_count(100000, c5.PRE2019_START) == 100000
 
 
 def _ns(tmp_path, report):

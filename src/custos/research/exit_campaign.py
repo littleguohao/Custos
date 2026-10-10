@@ -979,7 +979,12 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--universe-seed", type=int, default=42, help="宇宙抽样种子")
     # ---- 评估口径（V0 臂同值）----
     ap.add_argument("--top-n", type=int, default=20, help="横截面择优（默认 20）")
-    ap.add_argument("--count", type=int, default=2000, help="每股回溯 K 线根数")
+    ap.add_argument(
+        "--count",
+        type=int,
+        default=None,
+        help="每股回溯 K 线根数（缺省=按挖掘窗起点自动推算，显式值覆盖）",
+    )
     ap.add_argument("--cost-bps", type=float, default=25.0, help="往返成本基点")
     # ---- 窗口（R37 写死默认）----
     ap.add_argument("--mining-start", default="2022-01-01", help="挖掘窗起点")
@@ -1048,6 +1053,12 @@ def main(
         ap.error("--batch-size ≥1 且 --n-random ≥0")
     if args.budget < 1:
         ap.error("--budget ≥1")
+    from custos.research.load_window import resolve_count  # noqa: PLC0415
+
+    try:
+        args.count = resolve_count(args.count, args.mining_start)  # v0.328 缺省自动推算
+    except ValueError as exc:
+        ap.error(str(exc))
     ev = evaluator if evaluator is not None else make_v0_replay_evaluator(args, ap)
     ledger = ledger_path_for(Path(args.out_dir), args.tag)
     if not args.resume and ledger.exists():

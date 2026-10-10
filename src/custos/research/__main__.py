@@ -133,6 +133,20 @@ TOOLS: dict[str, tuple[str, str]] = {
         "预注册「功效」节（R42 起新单元必备）的输入件；MDE > 合理效应 ⇒ "
         "跑数前合并桶或改问法",
     ),
+    "load_window": (
+        "diagnostic",
+        "--count 缺省自动推算（v0.328，owner 方法论 review #9）：按窗口起点"
+        " busday 交易日+300 预热推算每股加载根数（高估=fail-closed 方向，"
+        "check_reach 实测兜底），显式 --count 仍是覆盖通道；纯函数叶子模块"
+        "（exit_campaign 等导入不成环）；CLI 打印某起点的推算根数",
+    ),
+    "cost_sensitivity": (
+        "diagnostic",
+        "成本副读数（v0.329，owner 方法论 review #6）：25/50bps 双报——"
+        "cost_bps 是往返总成本（逐笔 ret 直扣），换档=逐笔 ret 平移解析重算"
+        "（不重跑引擎）；Δ 或绝对 margin 跟成本翻号 ⇒ flip=True 标「成本"
+        "敏感」判读降权（绝对口径 R40 C2/pre2019 薄 margin 是主战场）",
+    ),
     "plan_shadow_review": (
         "driver",
         "#60 持仓计划影子事后打分（判据 C）：台账 1700 口径不一致事件（agree="

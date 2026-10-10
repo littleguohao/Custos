@@ -146,6 +146,11 @@ uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/
   越打折——分岔路径下多轮使用的判定窗不再是样本外）；
 - 单元头部「状态/结论」必须与正文同步（R22 头部滞后是反面教材；**判毕后
   头部/结论段禁「待跑数/待发令」**，test 机械强制 v0.321——R39 曾脱节）；
+- **判据修订留痕机械核对（v0.327，owner review #11）**：产物 provenance 记
+  `pre_reg_doc`+blob hash；文档内容已变且找不到「修订」注记 ⇒
+  `test_prereg_revision_notes.py` 红（无产物环境空扫通过，生产机实质守卫；
+  已知局限=整文档寻址，改错别字同样触发——当作「被引用文档任何改动留
+  一行注记」纪律）；
 - **预注册必带「功效」节（v0.326 起新单元强制，owner review #2）**：跑数前
   用 `power_mde` 估 MDE（输入=最接近的同口径历史 n/wr/ρ）——**MDE > 合理
   效应 ⇒ 跑数前合并桶或改问法**（R36-C5/R37-C5/R39 a1a2/R37 b1 都是跑完才
@@ -185,10 +190,14 @@ build_row 源头转 float，numpy 类型不触发校验失败）。
 - **空结果护栏**：0 数据/0 结果 → 非零退出且不写产物（防误读为"无有效因子"）；
 - 研究产物 JSON **允许 NaN**（区别于生产侧 `paths.write_json` 的 allow_nan=False），
   落 `artifacts/logs/`；研究产物不建 contracts schema；
-- 回测窗参数 `--start/--end/--count`：`--count` 是"最新向前 N 根"，早窗口必须显式
-  加大（尾部截断护栏 fail-closed）；⚠️ 护栏只在 `_load_bars_local` 批量路径——
-  逐股直调 `_load_one_bars` 的终端（两个 C5）自带 `check_reach` 前置校验 +
-  默认 count=100000 全历史（r36_c5 首跑 count=2000 剪空 pre2019 的教训）；
+- 回测窗参数 `--start/--end/--count`：`--count` 是"最新向前 N 根"。**缺省
+  自动推算（v0.328，`research/load_window.py`，owner review #9）**：七终端
+  `--count` 缺省 None ⇒ `resolve_count` 按窗口起点 busday 交易日+300 预热
+  推算（不扣节假日=高估 fail-closed 方向），显式值永远是覆盖通道；纯函数
+  叶子模块（exit_c5_terminal 懒导入 exit_campaign，放它那会成环）。实测
+  到达仍由 `check_reach` fail-closed 兜底（⚠️ 护栏只在 `_load_bars_local`
+  批量路径——逐股直调 `_load_one_bars` 的终端自带前置校验，r36_c5 首跑
+  count=2000 剪空 pre2019 的教训）；
 - 进化引擎：LLM 只做提案（假设/变异/杂交/解读），**decision 由确定性函数给出**；
   挖掘/判定双窗硬隔离；`--joint`/`--grid-judge` 必须显式 `--count`；`--cell-top-n`
   默认 20（=0 是因子轴退化，scorer 不写交易集）。指标门 `--ic-gate`（rank 默认 /
@@ -210,6 +219,12 @@ build_row 源头转 float，numpy 类型不触发校验失败）。
   git sha+dirty / 判据版本 / 预注册文档 blob hash / 宇宙 sha256 /
   数据末日 / 命令行；新终端报告必须接 `provenance.build`（溯源失败不炸
   研究，旁路元数据）。
+  **成本副读数（`research/cost_sensitivity.py`，v0.329，#6）**：新终端
+  报告必须带 `cost_sensitivity` 块——cost_bps 是往返总成本（逐笔 ret
+  直扣）⇒ 换 50bps 档=逐笔 ret 平移**解析重算不重跑引擎**；具名 Δ/绝对
+  margin 翻号 ⇒ `flip=True` 标「成本敏感」判读降权（绝对口径——R40 C2
+  margin>0、pre2019 薄 margin——是主战场；factor_exit 用
+  `mapping_trades` 定向重建交易集，不给 study_window 留全量缓存）。
   score_evolution_study 终审姿态：`--v0-lattice` 调权格（P3 族）/ `--addon-leg`
   骨架加腿（R36 思路二——新腿一律问「加进 V0 等权骨架的 Δmargin」，不问单独立）。
   exit_campaign（R37 战役壳）：出场基因组×批次进化 + CTL-1~5 确定性控制器

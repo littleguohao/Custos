@@ -178,8 +178,8 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--count",
         type=int,
-        default=2000,
-        help="每股回溯 K 线根数（默认 2000 防尾部截断）",
+        default=None,
+        help="每股回溯 K 线根数（缺省=按挖掘窗起点自动推算，显式值覆盖）",
     )
     ap.add_argument(
         "--cost-bps", type=float, default=25.0, help="往返成本基点（默认 25）"
@@ -2296,6 +2296,12 @@ def main(
         args.max_combos = 24 if args.quick else 64
     if args.max_combos < 1:
         ap.error("--max-combos 必须 >= 1")
+    from custos.research.load_window import resolve_count  # noqa: PLC0415
+
+    try:
+        args.count = resolve_count(args.count, args.mining_start)  # v0.328 缺省自动推算
+    except ValueError as exc:
+        ap.error(str(exc))
     if args.two_stage:
         if args.coarse_sample < 1:
             ap.error("--coarse-sample 必须 >= 1")

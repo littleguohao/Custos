@@ -10,8 +10,9 @@
 - ``objective_version``：strategy_grid 单源（续跑守卫 v0.320 可直接建在
   本块上）；
 - ``criteria_version``：判据版本串（各单元预注册定稿版本，由终端传入）；
-- ``pre_reg_blob_hash``：预注册文档的 git blob hash（#11 前置——日后
-  「判据节变了但产物引用旧 hash ⇒ 必须写修订注记」的机械核对原料）；
+- ``pre_reg_doc`` / ``pre_reg_blob_hash``：预注册文档的仓库相对路径与
+  git blob hash（#11 的机械核对原料——产物引用的文档内容日后变了
+  ⇒ tests/test_prereg_revision_notes.py 要求文档里必须留「修订」注记）；
 - ``universe_sha256``：宇宙文件（--codes-file）内容 hash——「同宇宙」
   不再是口头对齐；
 - ``data_last_date``：加载数据的最后日期（数据新鲜度自证）；
@@ -124,6 +125,11 @@ def build(
         "objective_version": sg.OBJECTIVE_VERSION,
         "unit": str(unit),
         "criteria_version": criteria_version,
+        "pre_reg_doc": (
+            str(pre_reg_doc.relative_to(BASE))
+            if pre_reg_doc is not None and pre_reg_doc.is_relative_to(BASE)
+            else (str(pre_reg_doc) if pre_reg_doc is not None else None)
+        ),
         "pre_reg_blob_hash": (
             git_blob_hash(pre_reg_doc) if pre_reg_doc is not None else None
         ),

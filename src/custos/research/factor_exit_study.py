@@ -323,6 +323,37 @@ def study_window(
     return {"configs": configs, "uniform": uniform, "n_buckets": n_b}
 
 
+def mapping_trades(
+    per_code: dict[str, dict],
+    signals: list[dict],
+    buckets: list[int],
+    mapping: tuple | list,
+    regime: dict[str, str],
+    cost_bps: float,
+    replay_fn: Optional[Callable[[list[dict], dict[str, Any]], list[dict]]] = None,
+) -> list[dict]:
+    """指定（桶→档）映射的交易集**定向重建**（成本副读数 review #6 用）。
+
+    与 study_window._group 同参数路径同引擎（重放确定性 ⇒ 逐位一致），
+    只放映射需要的 (档×桶) 组，不枚举 80 格——主研究选完 top 后再补交易
+    集走这里，比给 study_window 加 out 参保留全量缓存省内存。
+    """
+    if replay_fn is None:
+
+        def replay_fn(subset: list[dict], params: dict[str, Any]) -> list[dict]:
+            return replay_signals(per_code, subset, params, regime, cost_bps)
+
+    n_b = (max(buckets) + 1) if buckets else 0
+    trades: list[dict] = []
+    for b in range(n_b):
+        subset = [r for r, bb in zip(signals, buckets) if bb == b]
+        if not subset:
+            continue
+        params = {**eg.FIXED_PARAMS, **eg.normalize(PROFILES[mapping[b]])}
+        trades.extend(replay_fn(subset, params))
+    return trades
+
+
 # ---------------------------------------------------------------------------
 # 判据（R39 跑数前写死）
 # ---------------------------------------------------------------------------
@@ -689,6 +720,42 @@ def run_study(
             return None
         return {k: v for k, v in rd.items() if k != "taken"}
 
+    # ── 成本副读数（owner review #6）：top/uniform-best 交易集定向重建
+    # （mapping_trades 同引擎同参数路径），50bps 解析双报 + Δ 翻号标记 ──
+    cost_sens: Optional[dict] = None
+    if top is not None and uniform_best is not None:
+        from custos.research.cost_sensitivity import cost_side_block  # noqa: PLC0415
+
+        n_b_top = len(top["mapping"])
+        named: dict[str, list[dict]] = {}
+        for w in windows:
+            named[f"top_{w}"] = mapping_trades(
+                per_code[w],
+                signals[w],
+                buckets[top["bucketing"]][w],
+                top["mapping"],
+                regime,
+                args.cost_bps,
+                replay_fn,
+            )
+            named[f"uniform_{w}"] = mapping_trades(
+                per_code[w],
+                signals[w],
+                buckets[top["bucketing"]][w],
+                (uniform_best["profile"],) * n_b_top,
+                regime,
+                args.cost_bps,
+                replay_fn,
+            )
+        cost_sens = cost_side_block(
+            named,
+            base_bps=args.cost_bps,
+            deltas={
+                "d_margin_mining": ("top_mining", "uniform_mining"),
+                "d_margin_judgment": ("top_judgment", "uniform_judgment"),
+            },
+        )
+
     # 判定窗使用台账（v0.321，owner 方法论 review #1）：本报告=该窗第 k 次被读
     _wu_k = wu.record_use("R39", "judgment", args.tag, "C1~C4 判定窗读数")
     from custos.research import provenance as pv  # noqa: PLC0415
@@ -742,6 +809,7 @@ def run_study(
             if uniform_best
             else None
         ),
+        "cost_sensitivity": cost_sens,
         "configs": [
             {
                 "bucketing": c["bucketing"],
@@ -781,7 +849,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument("--universe-seed", type=int, default=42, help="宇宙抽样种子")
     ap.add_argument("--top-n", type=int, default=20, help="横截面择优（默认 20）")
-    ap.add_argument("--count", type=int, default=2000, help="每股回溯 K 线根数")
+    ap.add_argument(
+        "--count",
+        type=int,
+        default=None,
+        help="每股回溯 K 线根数（缺省=按挖掘窗起点自动推算，显式值覆盖）",
+    )
     ap.add_argument("--cost-bps", type=float, default=25.0, help="往返成本基点")
     ap.add_argument("--mining-start", default="2022-01-01", help="挖掘窗起点")
     ap.add_argument("--mining-end", default="2024-07-31", help="挖掘窗终点")
@@ -835,9 +908,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     # 加载到达校验（v0.316，R41 指导顺手补）：逐股 _load_one_bars 不经批量
     # 截断护栏——count 不够会把窗口静默剪空（r36_c5 碎片宇宙教训）
     from custos.research.exit_c5_terminal import check_reach  # noqa: PLC0415
+    from custos.research.load_window import resolve_count  # noqa: PLC0415
 
-    check_reach(args.count, args.mining_start)
     try:
+        args.count = resolve_count(args.count, args.mining_start)  # v0.328 缺省自动推算
+        check_reach(args.count, args.mining_start)
         rep = run_study(args)
     except (RuntimeError, ValueError) as exc:
         print(f"[ERR] {exc}", file=sys.stderr)

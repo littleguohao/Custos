@@ -263,6 +263,20 @@ class TestCriteria:
         # 副读数 pct7 自含；现行版读数两窗在
         assert rep["readings"]["mining"]["live_alt_pct7"] is not None
 
+    def test_cost_sensitivity_block_wired(self):
+        """成本副读数（owner review #6，v0.329）：报告带 cost_sensitivity——
+        两版×双窗 50bps 解析重算（不重跑引擎）+ d_margin 双窗翻号标记。"""
+        per_code = _mk_per_code()
+        rep = _run(per_code, _replay_candidate, n_random=2, c4_min_pool=2)
+        cs = rep["cost_sensitivity"]
+        assert cs["base_bps"] == 25.0 and cs["side_bps"] == 50.0
+        for arm in ("plan_mining", "live_mining", "plan_judgment", "live_judgment"):
+            assert cs["arms"][arm]["n"] > 0, arm
+        assert set(cs["deltas"]) == {"d_margin_mining", "d_margin_judgment"}
+        d = cs["deltas"]["d_margin_mining"]
+        # 计划版大胜（+0.08/−0.02）：50bps 翻不动 Δ 符号
+        assert d["base"] > 0 and d["side"] > 0 and d["flip"] is False
+
     def test_rdd_gate_fail_marks_c2_false(self):
         """计划版 rdd 远低于现行参照（计划大起大落、现行稳升）⇒ C2 False
         且标 rdd_gate_fail（margin 提升拿回撤换的不算，v0.315 ③）。"""

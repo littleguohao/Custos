@@ -220,6 +220,18 @@ class TestScriptedScenarios:
         assert rep["verdict"] == "candidate"
         assert rep["window_usage"]["k"] == 1  # 判定窗台账（v0.321）
 
+    def test_cost_sensitivity_block_wired(self, monkeypatch):
+        """成本副读数（owner review #6，v0.329）：top/uniform-best 交易集
+        定向重建（mapping_trades 同引擎路径）50bps 双报 + Δ 双窗翻号标记。"""
+        rep = _run(monkeypatch, _three_level_spec(180), _scripted_replay, n_random=5)
+        cs = rep["cost_sensitivity"]
+        assert cs is not None and cs["base_bps"] == 25.0 and cs["side_bps"] == 50.0
+        for arm in ("top_mining", "uniform_mining", "top_judgment", "uniform_judgment"):
+            assert cs["arms"][arm]["n"] > 0, arm
+        assert set(cs["deltas"]) == {"d_margin_mining", "d_margin_judgment"}
+        # 候选大胜场景：50bps 翻不动 Δ 符号
+        assert cs["deltas"]["d_margin_mining"]["flip"] is False
+
     def test_falsified_when_no_conditional_edge(self, monkeypatch):
         rep = _run(monkeypatch, _three_level_spec(180), _flat_replay, n_random=5)
         assert rep["criteria"]["C2"]["ok"] is False

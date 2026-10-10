@@ -415,6 +415,22 @@ def run_study(
         c1_ok=c1["ok"], c2_ok=c2["ok"], c3_ok=c3["ok"], c4_state=c4_state
     )
 
+    # ── 成本副读数（owner review #6）：两版交易集逐窗 50bps 解析双报 ──
+    from custos.research.cost_sensitivity import cost_side_block  # noqa: PLC0415
+
+    cost_sens = cost_side_block(
+        {
+            name: pair_rds[w][key]
+            for w in windows
+            for name, key in (
+                (f"plan_{w}", "plan_trades"),
+                (f"live_{w}", "live_trades"),
+            )
+        },
+        base_bps=args.cost_bps,
+        deltas={f"d_margin_{w}": (f"plan_{w}", f"live_{w}") for w in windows},
+    )
+
     # 判定窗使用台账（v0.321，owner 方法论 review #1）：本报告=该窗第 k 次被读
     _wu_k = wu.record_use("R41", "judgment", args.tag, "C1~C4 判定窗读数")
     from custos.research import provenance as pv  # noqa: PLC0415
@@ -454,6 +470,7 @@ def run_study(
             "统一，v0.317 注明）",
         },
         "accounting": accounting,
+        "cost_sensitivity": cost_sens,
         "readings": {
             w: {
                 "live": p["live"],
@@ -493,7 +510,12 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--universe-sample", type=int, default=0)
     ap.add_argument("--universe-local", action="store_true")
     ap.add_argument("--universe-seed", type=int, default=42)
-    ap.add_argument("--count", type=int, default=2000)
+    ap.add_argument(
+        "--count",
+        type=int,
+        default=None,
+        help="每股回溯 K 线根数（缺省=按挖掘窗起点自动推算，显式值覆盖）",
+    )
     ap.add_argument("--top-n", type=int, default=20)
     ap.add_argument("--cost-bps", type=float, default=COST_BPS_DEFAULT)
     ap.add_argument("--n-random", type=int, default=DEFAULT_N_RANDOM)
@@ -519,11 +541,16 @@ def main(
     fes._check_windows(args, ap)  # pre2019 硬拒绝 + 双窗次序（同族单源）
     if warm_fn is None:  # 生产路径才做加载到达校验（注入路径无真实加载）
         from custos.research.exit_c5_terminal import check_reach  # noqa: PLC0415
+        from custos.research.load_window import resolve_count  # noqa: PLC0415
 
-        check_reach(args.count, args.mining_start)
     try:
+        if warm_fn is None:
+            args.count = resolve_count(  # v0.328 缺省自动推算
+                args.count, args.mining_start
+            )
+            check_reach(args.count, args.mining_start)
         rep = run_study(args, warm_fn=warm_fn, replay_fn=replay_fn)
-    except RuntimeError as exc:
+    except (RuntimeError, ValueError) as exc:
         print(f"[plan_rules_replay] {exc}", file=sys.stderr)
         return 2
     out_dir = Path(args.out_dir) / args.tag

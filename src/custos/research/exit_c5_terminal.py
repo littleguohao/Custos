@@ -41,6 +41,8 @@ from typing import Any, Optional
 
 from custos.core.paths import LOGS, RESEARCH_DIR
 from custos.research import window_usage as wu
+from custos.research.cost_sensitivity import cost_side_block  # noqa: E402,F401
+from custos.research.load_window import resolve_count  # noqa: E402,F401
 
 #: pre2019 untouched 终审段（写死；窗外交集即拒）
 PRE2019_START, PRE2019_END = "2010-01-01", "2016-12-31"
@@ -388,10 +390,11 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--count",
         type=int,
-        default=100000,
-        help="每股加载 K 线根数（默认 100000=全历史：count 是「最新向前 N 根」"
-        "滚动窗，pre2019 终审窗口必须全历史加载，否则 start/end 过滤后窗口"
-        "被静默剪空——r36_c5 首跑 count=2000 只跑到 19 笔碎片宇宙）",
+        default=None,
+        help="每股加载 K 线根数（缺省=按 --start 自动推算：busday 交易日+300 "
+        "预热，高估属 fail-closed 方向，check_reach 实测兜底；显式值覆盖，"
+        "如 100000=全历史。count 是「最新向前 N 根」滚动窗，到达不足会把"
+        "窗口静默剪空——r36_c5 首跑 count=2000 只跑到 19 笔碎片宇宙）",
     )
     ap.add_argument("--cost-bps", type=float, default=25.0)
     ap.add_argument("--top-n", type=int, default=20)
@@ -585,6 +588,11 @@ def run_c5(args: Any, per_code: Optional[dict[str, dict]] = None) -> dict[str, A
         "candidate": {**rd_c, "n_taken": n_taken},
         "baseline": rd_b,
         "d_margin": d_margin,
+        "cost_sensitivity": cost_side_block(
+            {"cand": cand_trades, "base": base_trades},
+            base_bps=args.cost_bps,
+            deltas={"d_margin": ("cand", "base")},
+        ),
         "delta_over_se": (d_margin / se if d_margin is not None and se else None),
         "bootstrap": {**boot, "n_pairs": len(pairs)},
         "n_unpaired": len(cand_trades) - len(pairs),
@@ -608,6 +616,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     args.cmdline = " ".join(argv) if argv is not None else " ".join(sys.argv[1:])
     _check_pre2019(args, ap)
     try:
+        args.count = resolve_count(args.count, args.start)
         rep = run_c5(args)
     except (RuntimeError, ValueError) as exc:
         print(f"[ERR] {exc}", file=sys.stderr)

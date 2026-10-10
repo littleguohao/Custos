@@ -48,6 +48,11 @@ BASE_GUARD = (
     "test_no_shadowed_defs.py",
     "test_shared_helpers.py",
     "test_top_level_shared.py",
+    # 动态扫描 src 树发现 CLI（main(argv) 签名）——不 import 具体模块，
+    # 靠 import 闭包永远选不中；新增/改动 CLI 的 help 渲染与 % 转义由它钉
+    # （v0.327 教训：power_mde help 未转义 %，本地受影响集绿、CI 双平台红）。
+    # 全量仅 ~2s，常挂成本可忽略。
+    "test_cli_help_renders.py",
 )
 
 #: 治理守卫集——钉住治理纪律的测试（AGENTS §4「全部有测试钉着」）。它们大多

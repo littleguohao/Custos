@@ -70,7 +70,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="同日市场相关（逗号多值；配对用 0.75）",
     )
     ap.add_argument(
-        "--k", type=float, default=2.0, help="MDE 倍数（默认 2 ≈ 双侧 95%）"
+        "--k", type=float, default=2.0, help="MDE 倍数（默认 2 ≈ 双侧 95%%）"
     )
     args = ap.parse_args(argv)
     rhos = tuple(float(x) for x in str(args.rho).split(",") if x.strip())

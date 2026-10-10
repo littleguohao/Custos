@@ -223,6 +223,21 @@ class TestGridAndVerdicts:
         assert rep["criteria"]["C4"]["state"] == "provisional"
         assert rep["verdict"] == "provisional"
 
+    def test_cost_sensitivity_block_wired(self):
+        """成本副读数（owner review #6，v0.329）：top 交易集双窗定向重建
+        （_replay 同路径）50bps 双报——R40 C2 绝对口径（margin>0）主战场。"""
+        spec = _mk_per_code({"j_low": 120})
+        rep = _run(spec, _replay_winner_gate, n_random=2, c4_min_pool=2)
+        cs = rep["cost_sensitivity"]
+        assert cs is not None and cs["base_bps"] == 25.0 and cs["side_bps"] == 50.0
+        assert cs["arms"]["mining"]["n"] > 0 and cs["arms"]["judgment"]["n"] > 0
+        assert set(cs["deltas"]) == {
+            "top_margin_vs_0_mining",
+            "top_margin_vs_0_judgment",
+        }
+        # 赢家门大胜场景：50bps 翻不动 margin 符号
+        assert cs["deltas"]["top_margin_vs_0_mining"]["flip"] is False
+
     def test_empty_signals_guard(self):
         warm_fn = lambda s, e: {}  # noqa: E731
         with pytest.raises(RuntimeError, match="空结果护栏"):

@@ -13,6 +13,7 @@ import argparse
 import pytest
 
 from custos.research import exit_c5_terminal as c5
+from custos.research.load_window import count_for_start, resolve_count
 
 CAND_KEY = (
     "sp8|breakeven=off|cost_zone=3x2|qsx=off|scale_out=off|time_stop=20|trail=0.08"
@@ -374,9 +375,11 @@ class TestPre2019Guard:
         )
         c5._check_pre2019(args, ap)  # 不抛即过
 
-    def test_default_count_is_full_history(self):
-        """count 是「最新向前 N 根」滚动窗——pre2019 终审必须全历史加载，
-        否则 start/end 过滤后窗口被静默剪空（r36_c5 首跑 19 笔碎片教训）。"""
+    def test_default_count_auto_derives(self):
+        """count 是「最新向前 N 根」滚动窗——缺省按 --start 自动推算
+        （v0.328，owner review #9）：推算值必须覆盖 pre2019 起点以来的
+        真实交易日+预热（fail-closed 方向），显式 100000 全历史仍是
+        覆盖通道；实测到达由 check_reach 兜底（r36_c5 首跑 19 笔碎片教训）。"""
         ap = c5._build_parser()
         args = ap.parse_args(
             [
@@ -388,7 +391,10 @@ class TestPre2019Guard:
                 "y.json",
             ]
         )
-        assert args.count == 100000
+        assert args.count is None
+        derived = resolve_count(args.count, c5.PRE2019_START)
+        assert derived >= count_for_start(c5.PRE2019_START) >= 4000
+        assert resolve_count(100000, c5.PRE2019_START) == 100000
 
 
 class TestRunC5Guards:
