@@ -27,11 +27,20 @@ R41 没改 R39）。本模块收口四件，各终端只负责组装：
 
 rdd 相对门与 C5 判决已有单源（``strategy_grid.rdd_gate_ok`` /
 ``exit_c5_terminal.apply_c5``），本模块不重复造。
+
+**簇构造单源（v0.335，owner review——C4 打乱粒度按簇不按笔）**：
+collect_all 口径下同一只票连续几天出信号、分数相近、落同档、出场结果
+几乎一样——交易**成簇**；逐笔打乱把簇拆散，零假设方差被低估、q95 偏低
+（owner 零假设模拟：簇大小 20 时 confirmed_pass 15/40≈38%，名义 ≈5%）。
+``cluster_ids`` 划簇、``cluster_draw`` 整簇抽签，score_tier_position（R42
+C4 换档）与 factor_exit（R39 C4 分桶）共用——禁止各终端再抄一份。
 """
 
 from __future__ import annotations
 
+import random
 import statistics
+from datetime import date
 from typing import Any, Callable, Optional
 
 #: 合法结局四态（判定文本以各研究单元预注册为准）
@@ -129,6 +138,79 @@ def assemble_c4_pool(
 
 
 # ---------------------------------------------------------------------------
+# 簇构造（v0.335，owner review——C4 打乱粒度按簇不按笔，单一来源）
+# ---------------------------------------------------------------------------
+
+
+def _gap_bars(a: dict, b: dict) -> Optional[float]:
+    """两条记录的信号点间隔：都有 bar 序号 i ⇒ |i 差|（同 code 内 i 单调——
+    优先用它，owner 指定）；任一缺 i ⇒ 日期差（日历日，退化兜底）；
+    日期不可解析 ⇒ None（无法证明相邻）。"""
+    ia, ib = a.get("i"), b.get("i")
+    if ia is not None and ib is not None:
+        return abs(float(ib) - float(ia))
+    try:
+        da = date.fromisoformat(str(a.get("date"))[:10])
+        db = date.fromisoformat(str(b.get("date"))[:10])
+    except ValueError:
+        return None
+    return abs((db - da).days)
+
+
+def cluster_ids(recs: list[dict], *, max_gap: int = 5) -> list[int]:
+    """簇划分（单一来源）：簇 = **同 code、信号点相邻（间隔 ≤ max_gap 根
+    bar）的连续段**（max_gap=5 ≈ pct5_trail08 档持有期量级——「间隔 ≤
+    持有期或 ≤5 根 bar」的具体落点，owner review 写死）。
+
+    相邻判定用 bar 序号 i（同 code 内单调）；缺 i 退回日期差；间隔无法
+    计算 ⇒ 不判邻（各自成簇）。返回与输入**等长同序**的簇 id 清单
+    （0 起；同 code 内按 i/日期排序后顺序编号，跨 code 必不同簇）。
+    """
+    ids = [-1] * len(recs)
+    by_code: dict[str, list[int]] = {}
+    for idx, r in enumerate(recs):
+        by_code.setdefault(str(r.get("code")), []).append(idx)
+    cid = -1
+    for code in by_code:
+        idxs = by_code[code]
+        idxs.sort(
+            key=lambda j: (
+                (
+                    0,
+                    float(recs[j]["i"]),
+                )
+                if recs[j].get("i") is not None
+                else (1, str(recs[j].get("date")))
+            )
+        )
+        prev: Optional[int] = None
+        for j in idxs:
+            if prev is None:
+                cid += 1
+            else:
+                gap = _gap_bars(recs[prev], recs[j])
+                if gap is None or gap > max_gap:
+                    cid += 1
+            ids[j] = cid
+            prev = j
+    return ids
+
+
+def cluster_draw(clusters: list[int], choices: tuple, rng: random.Random) -> list:
+    """整簇抽签（单一来源）：每簇**独立均匀**抽一个归属，同簇同签——
+    各归属的笔数组成在臂间**自然波动**（这正是零假设该含的方差，v0.335
+    owner：不要再强行对齐笔数）。rng 消耗 = 不同簇数（按出现顺序），
+    确定性可复现。"""
+    draw: dict[int, Any] = {}
+    out: list = []
+    for cid in clusters:
+        if cid not in draw:
+            draw[cid] = rng.choice(choices)
+        out.append(draw[cid])
+    return out
+
+
+# ---------------------------------------------------------------------------
 # CLI（诊断：本模块是库——打印单一来源清单）
 # ---------------------------------------------------------------------------
 
@@ -140,7 +222,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         "criteria_kit 判据件单一来源（v0.322）：\n"
         "  q95（campaign 语义）/ verdict_four_state（C1 untested 优先）/\n"
         "  c4_state_of（空池 indeterminate/池未满 provisional）/\n"
-        "  assemble_c4_pool（v0.317 族重抽至过门臂满 N 或上限 10×N）\n"
+        "  assemble_c4_pool（v0.317 族重抽至过门臂满 N 或上限 10×N）/\n"
+        "  cluster_ids + cluster_draw（v0.335 簇构造——C4 打乱按簇不按笔）\n"
         "rdd 相对门=strategy_grid.rdd_gate_ok；C5 判决=exit_c5_terminal.apply_c5"
         "（均已有单源，勿再抄）。"
     )

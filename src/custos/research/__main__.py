@@ -125,9 +125,11 @@ TOOLS: dict[str, tuple[str, str]] = {
         "diagnostic",
         "判据件单一来源（v0.322，owner 方法论 review #7）：q95（campaign "
         "语义）/ verdict 四态（C1 untested 优先）/ c4_state_of（空池 "
-        "indeterminate）/ assemble_c4_pool（v0.317 族重抽至过门臂满 N）——"
-        "factor_exit/bear_regime/plan_rules/exit_campaign/score_filter 已"
-        "全迁移；rdd 门=strategy_grid、C5 判决=exit_c5_terminal 单源不动",
+        "indeterminate）/ assemble_c4_pool（v0.317 族重抽至过门臂满 N）/"
+        "cluster_ids+cluster_draw（v0.335 簇构造——C4 打乱按簇不按笔，"
+        "R42/R39 共用）——factor_exit/bear_regime/plan_rules/exit_campaign/"
+        "score_filter/score_tier 已全迁移；rdd 门=strategy_grid、C5 判决="
+        "exit_c5_terminal 单源不动",
     ),
     "provenance": (
         "diagnostic",

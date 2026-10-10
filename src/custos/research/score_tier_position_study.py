@@ -20,7 +20,9 @@ expectancy_R=Σw·R/Σw）对比等权基准是否有增量。单调性不成立
   原样取出——R10 策展基准档，单档隔离分档效应）；执行语义 T+1/跌停停牌
   顺延沿用引擎既有口径（单源）；
 - **C1**：每档每窗 n ≥ 50，不过 ⇒ untested（样本不足≠否定证据，优先于
-  其他判决）；
+  其他判决）。**修订（v0.335，owner review）**：阈值不变（按笔数），但
+  collect_all 口径下交易成簇（同票连续信号）——每档每窗**簇数入报告**
+  （``n_clusters``）供判读打折（有效样本≈簇数，见功效节修订段）；
 - **C2**：双窗都满足 margin(高)≥margin(中)≥margin(低) 且 高−低>0
   （打平读法写死：相邻打平不算倒挂，但 高−低 必须严格 >0）。**MDE 判读
   条款（v0.326）**：相邻档差 |Δ| < 0.086 ⇒ 标「低置信（形态读数非结论）」
@@ -38,7 +40,12 @@ expectancy_R=Σw·R/Σw）对比等权基准是否有增量。单调性不成立
 - **C4**：保持各档样本数不变、打乱「交易→档」归属，N=50 臂；每臂取同
   一套权重格的 max（与 C3 同预算）；C3 最佳组（挖掘窗 ΔexpR）> 池 q95 才
   算过；池构造/状态机 = ``criteria_kit`` 单源（空池 indeterminate、池未满
-  provisional 不放行不判死）；
+  provisional 不放行不判死）。**修订（v0.335，owner review——跑数前）**：
+  打乱粒度从逐笔改**整簇**——簇 = 同 code、信号点相邻（间隔 ≤5 根 bar）
+  的连续段（``kit.cluster_ids``/``kit.cluster_draw`` 单源）；每簇独立
+  均匀抽一档（同簇交易同档），各档笔数组成在臂间自然波动（这正是零
+  假设该含的方差，不再强行对齐笔数——逐笔打乱把簇拆散、q95 系统性
+  偏低，owner 零假设模拟簇大小 20 时假过线 15/40≈38%）；
 - **verdict** = ``kit.verdict_four_state`` 四态（C1 不过=untested 优先；
   C2 False 或 C4 confirmed_fail=falsified——预注册四态写死 falsified 只
   来自 C2/C4，故 C3 不过只放行 None=provisional 不判死）。**不建 C5**
@@ -187,13 +194,37 @@ def weighted_expr(
     return (num / den) if den > 0 else None
 
 
-def window_readings(trades: list[dict], cuts: list[float]) -> dict[str, Any]:
-    """单窗读数：按挖掘窗切点归档 → 逐档 n/margin + 三组权重加权 expR 与 Δ。
+def arm_tier_draw(
+    labels: list[str], clusters: list[int], rng: random.Random
+) -> list[str]:
+    """C4 臂档归属（v0.335 owner review 修）：**整簇抽签换档**——
+    ``kit.cluster_draw`` 单源，同簇交易同档，各档笔数组成在臂间自然
+    波动（不再逐笔 shuffle 对齐笔数：逐笔打乱把簇拆散、零假设方差被
+    低估、q95 偏低——owner 零假设模拟簇大小 20 时假过线 15/40≈38%）。
+    ``labels`` 仅供哨兵/诊断对照（逐笔打乱旧法以它为母体），本函数
+    不按它计数对齐。"""
+    return kit.cluster_draw(clusters, TIERS, rng)
+
+
+def window_readings(
+    trades: list[dict],
+    cuts: list[float],
+    cluster_of: Optional[dict[tuple[Any, Any], int]] = None,
+) -> dict[str, Any]:
+    """单窗读数：按挖掘窗切点归档 → 逐档 n/n_clusters/margin + 三组权重
+    加权 expR 与 Δ。
 
     等权基准 = 同批交易 r_multiple 均值（归一化权重格保证总敞口一致——
-    Δ 只来自「把钱挪到哪一档」，不被敞口驱动）。"""
+    Δ 只来自「把钱挪到哪一档」，不被敞口驱动）。``cluster_of`` = (code,
+    entry_date) → 簇 id（v0.335：每档簇数入报告供判读打折；映射缺失的
+    交易按单元素簇计——负 id 占位不与真实簇撞号）。"""
     trades = [t for t in trades if t.get("score") is not None]
     labels = [TIERS[fes.bucket_of(t["score"], cuts)] for t in trades]
+    cluster_of = cluster_of or {}
+    clusters = [
+        cluster_of.get((t.get("code"), t.get("entry_date")), -(k + 1))
+        for k, t in enumerate(trades)
+    ]
     tiered = {
         tier: [t for t, lb in zip(trades, labels) if lb == tier] for tier in TIERS
     }
@@ -210,11 +241,18 @@ def window_readings(trades: list[dict], cuts: list[float]) -> dict[str, Any]:
         }
     return {
         "labels": labels,
+        "clusters": clusters,
         "trades": trades,
         "tiered": tiered,
         "equal_expR": equal,
         "tiers": {
-            tier: {"n": len(tiered[tier]), "margin": _margin_of(tiered[tier])}
+            tier: {
+                "n": len(tiered[tier]),
+                "n_clusters": len(
+                    {cid for cid, lb in zip(clusters, labels) if lb == tier}
+                ),
+                "margin": _margin_of(tiered[tier]),
+            }
             for tier in TIERS
         },
         "groups": groups,
@@ -227,18 +265,28 @@ def window_readings(trades: list[dict], cuts: list[float]) -> dict[str, Any]:
 
 
 def judge_c1(readings: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    """C1：每档每窗 n ≥ 50——不过 ⇒ untested（样本不足≠否定证据，优先）。"""
+    """C1：每档每窗 n ≥ 50——不过 ⇒ untested（样本不足≠否定证据，优先）。
+
+    修订（v0.335，owner review）：阈值不变（按笔数），每档每窗**簇数**
+    一并入报告（n_clusters）供判读打折——collect_all 口径下交易成簇，
+    有效样本≈簇数（见 R42 功效节修订段；改阈值=判据变更，不擅自改）。"""
     per = {
         w: {tier: rd["tiers"][tier]["n"] for tier in TIERS}
+        for w, rd in readings.items()
+    }
+    per_clusters = {
+        w: {tier: rd["tiers"][tier]["n_clusters"] for tier in TIERS}
         for w, rd in readings.items()
     }
     ok = all(n >= MIN_TIER_N for ns in per.values() for n in ns.values())
     return {
         "ok": ok,
         "n_taken": per,
+        "n_clusters": per_clusters,
         "min_tier_n": MIN_TIER_N,
         "rule": f"每档每窗 n ≥ {MIN_TIER_N}（collect_all 全候选分档口径；"
-        "不过=untested 不判 falsified）",
+        "不过=untested 不判 falsified；v0.335 修订：阈值不变、簇数入报告"
+        "供判读打折）",
     }
 
 
@@ -392,10 +440,22 @@ def run_study(
     # ── 分档切点只在挖掘窗估计（双窗硬隔离——判定窗泄漏是死罪）──
     cuts = fes.quantile_cuts([r["score"] for r in subsets["mining"]], TIER_QS)
 
+    # ── 簇划分（kit.cluster_ids 单源，v0.335）：(code, date)→簇 id——
+    # 交易经 (code, entry_date) 回挂信号所属簇（信号⇄交易一一对应）──
+    cluster_maps = {
+        w: {
+            (r["code"], r["date"]): cid
+            for r, cid in zip(subsets[w], kit.cluster_ids(subsets[w]))
+        }
+        for w in windows
+    }
+
     # ── 双窗各重放一次（钉死档 collect_all）→ 按切点归档出读数 ──
     readings = {
         w: window_readings(
-            _replay(per_code[w], subsets[w], regime, args.cost_bps, replay_fn), cuts
+            _replay(per_code[w], subsets[w], regime, args.cost_bps, replay_fn),
+            cuts,
+            cluster_of=cluster_maps[w],
         )
         for w in windows
     }
@@ -404,14 +464,14 @@ def run_study(
     c2 = judge_c2(readings)
     c3 = judge_c3(readings)
 
-    # ── C4：保持各档样本数打乱「交易→档」归属 N=50 臂（每臂取同套权重格
-    # max——与 C3 同预算）；打乱只改权重归属不改交易本身 ⇒ 纯算术不重放 ──
+    # ── C4：**整簇**打乱「交易→档」归属 N=50 臂（v0.335 owner review 修：
+    # 逐笔打乱把簇拆散、q95 偏低；每簇独立均匀抽一档、各档笔数自然波动——
+    # 每臂取同套权重格 max，与 C3 同预算）；纯算术不重放 ──
     m_rd = readings["mining"]
 
     def _arm(i: int) -> Optional[float]:
         arm_rng = random.Random(f"{args.seed}-arm{i}")  # 臂级种子写死可复现
-        perm = list(m_rd["labels"])
-        arm_rng.shuffle(perm)
+        perm = arm_tier_draw(m_rd["labels"], m_rd["clusters"], arm_rng)
         best: Optional[float] = None
         for w_name, wts in WEIGHT_GRID.items():
             we = weighted_expr(perm, m_rd["trades"], wts)
@@ -437,7 +497,9 @@ def run_study(
         "candidate_delta_mining": c3["best_delta_mining"],
         "candidate_group": c3["best_group_mining"],
         "min_pool": args.c4_min_pool,
-        "note": "保持各档样本数不变、打乱「交易→档」归属（臂级种子写死）；每臂取"
+        "note": "整簇打乱「交易→档」归属（v0.335 修订：簇=同 code 信号点相邻 "
+        "≤5 根 bar 连续段，kit.cluster_ids/cluster_draw 单源；每簇独立均匀"
+        "抽一档、同簇同档，各档笔数臂间自然波动——不逐笔对齐笔数）；每臂取"
         "同套权重格 max（与 C3 同预算）；C3 最佳组（挖掘窗 ΔexpR）> 池 q95 才 "
         "confirmed；池构造/状态机=criteria_kit 单源（v0.322）",
     }

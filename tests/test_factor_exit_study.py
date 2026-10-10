@@ -310,6 +310,59 @@ class TestC4SameBudget:
         assert calls.count(2) >= n_random and calls.count(3) >= n_random
 
 
+class TestClusteredC4Arms:
+    """v0.335（owner review——跑数前修订）：C4 随机分桶臂改**整簇**赋桶
+    （kit.cluster_ids/cluster_draw 单源；逐信号打乱把簇拆散、q95 偏低，
+    与 R42 同源同修）。"""
+
+    @staticmethod
+    def _clustered_spec(n=180):
+        """同码信号 i 连续（间隔 1 ≤5 ⇒ 每码一簇；30 码 ⇒ 30 簇）。"""
+
+        def _mk(window_offset):
+            spec = {}
+            for kk in range(n):
+                code = f"{kk % 30:06d}"
+                day = f"2023-{(kk % 12) + 1:02d}-{(kk % 28) + 1:02d}"
+                i = window_offset + kk // 30  # 同码 i 连续 ⇒ 一簇
+                spec.setdefault(code, []).append((day, i, 50.0, kk % 3))
+            return spec
+
+        return {
+            ("2022-01-01", "2024-07-31"): _per_code(_mk(0)),
+            ("2024-08-01", "2026-09-04"): _per_code(_mk(10000)),
+        }
+
+    def test_c4_arm_same_cluster_same_bucket(self, monkeypatch):
+        """同簇同桶钉：spy kit.cluster_draw——C4 臂每次调用返回的分桶在
+        同簇内恒定；B2/B3 两分桶方案各调一次/臂。"""
+        calls = []
+        orig = fes.kit.cluster_draw
+
+        def spy(clusters, choices, rng):
+            out = orig(clusters, choices, rng)
+            calls.append((list(clusters), tuple(choices), list(out)))
+            return out
+
+        monkeypatch.setattr(fes.kit, "cluster_draw", spy)
+        rep = _run(
+            monkeypatch,
+            self._clustered_spec(),
+            _scripted_replay,
+            n_random=3,
+            c4_min_pool=2,
+        )
+        evaluated = rep["criteria"]["C4"]["evaluated"]
+        # 每臂 × 2 分桶方案（主研究不走 cluster_draw——真实分桶按因子值）
+        assert len(calls) == evaluated * 2, calls
+        assert {c[1] for c in calls} == {(0, 1), (0, 1, 2)}  # B2 / B3
+        for clusters, _choices, out in calls:
+            assert len(set(clusters)) == 30, "30 码 × 同码 i 连续 ⇒ 30 簇"
+            by_cluster: dict[int, int] = {}
+            for cid, b in zip(clusters, out):
+                assert by_cluster.setdefault(cid, b) == b, "同簇必须同桶"
+
+
 class TestJudges:
     def test_pick_top_respects_rdd_gate(self):
         cfgs = [

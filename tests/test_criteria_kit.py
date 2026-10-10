@@ -10,6 +10,8 @@ assemble_c4_pool（重抽至过门臂满 N 或上限 10×N，确定性）。
 
 from __future__ import annotations
 
+import random
+
 import pytest
 
 from custos.research import criteria_kit as kit
@@ -127,3 +129,101 @@ class TestAssembleC4Pool:
         a = kit.assemble_c4_pool(5, lambda i: float(i) if i % 2 else None)
         b = kit.assemble_c4_pool(5, lambda i: float(i) if i % 2 else None)
         assert a == b
+
+
+# ---------------------------------------------------------------------------
+# 簇构造（v0.335，owner review——C4 打乱粒度按簇不按笔）
+# ---------------------------------------------------------------------------
+
+
+class TestClusterIds:
+    def test_adjacent_i_merges_same_code(self):
+        """同 code、i 间隔 ≤5 并一簇；间隔 >5 分簇。"""
+        recs = [
+            {"code": "000001", "i": 10, "date": "2023-01-02"},
+            {"code": "000001", "i": 12, "date": "2023-01-04"},  # 间隔 2 ⇒ 同簇
+            {"code": "000001", "i": 15, "date": "2023-01-06"},  # 间隔 3 ⇒ 同簇
+            {"code": "000001", "i": 21, "date": "2023-01-12"},  # 间隔 6 >5 ⇒ 新簇
+            {"code": "000001", "i": 22, "date": "2023-01-13"},  # 接新簇
+        ]
+        ids = kit.cluster_ids(recs)
+        assert len(ids) == 5
+        assert ids[0] == ids[1] == ids[2]
+        assert ids[3] == ids[4] != ids[0]
+
+    def test_cross_code_never_same_cluster(self):
+        recs = [
+            {"code": "000001", "i": 10, "date": "2023-01-02"},
+            {"code": "000002", "i": 11, "date": "2023-01-03"},  # 间隔 1 但跨 code
+        ]
+        ids = kit.cluster_ids(recs)
+        assert ids[0] != ids[1]
+
+    def test_unsorted_input_sorted_within_code(self):
+        """输入乱序 ⇒ 同 code 内按 i 排序划簇；返回与输入等长同序。"""
+        recs = [
+            {"code": "000001", "i": 30, "date": "2023-02-01"},
+            {"code": "000001", "i": 10, "date": "2023-01-02"},
+            {"code": "000001", "i": 12, "date": "2023-01-04"},
+        ]
+        ids = kit.cluster_ids(recs)
+        assert ids[1] == ids[2]  # i=10 与 i=12 同簇
+        assert ids[0] != ids[1]  # i=30 间隔 18 ⇒ 分簇
+
+    def test_missing_i_falls_back_to_date_gap(self):
+        """缺 i ⇒ 退日期差（日历日 ≤5）；日期不可解析 ⇒ 不判邻各自成簇。"""
+        recs = [
+            {"code": "000001", "date": "2023-01-02"},
+            {"code": "000001", "date": "2023-01-05"},  # 3 天 ⇒ 同簇
+            {"code": "000001", "date": "2023-01-20"},  # 15 天 ⇒ 分簇
+            {"code": "000001", "date": "not-a-date"},  # 不可解析 ⇒ 新簇
+        ]
+        ids = kit.cluster_ids(recs)
+        assert ids[0] == ids[1]
+        assert ids[2] != ids[1]
+        assert ids[3] != ids[2]
+
+    def test_mixed_i_and_date_pair_uses_date_fallback(self):
+        """相邻对任一缺 i ⇒ 退日期差（1 天 ⇒ 同簇）。"""
+        recs = [
+            {"code": "000001", "i": 10, "date": "2023-01-02"},
+            {"code": "000001", "date": "2023-01-03"},
+        ]
+        ids = kit.cluster_ids(recs)
+        assert ids[0] == ids[1]
+
+    def test_max_gap_param_respected(self):
+        recs = [
+            {"code": "000001", "i": 10, "date": "2023-01-02"},
+            {"code": "000001", "i": 14, "date": "2023-01-06"},  # 间隔 4
+        ]
+        assert (
+            kit.cluster_ids(recs, max_gap=5)[0] == kit.cluster_ids(recs, max_gap=5)[1]
+        )
+        a, b = kit.cluster_ids(recs, max_gap=3)
+        assert a != b
+
+
+class TestClusterDraw:
+    def test_same_cluster_same_choice(self):
+        """整簇移动钉：同簇所有元素抽中同一归属。"""
+        rng = random.Random(7)
+        clusters = [0, 0, 1, 2, 2, 2, 1, 0]
+        out = kit.cluster_draw(clusters, ("a", "b", "c"), rng)
+        assert len(out) == len(clusters)
+        for cid in (0, 1, 2):
+            assert len({lab for c, lab in zip(clusters, out) if c == cid}) == 1
+
+    def test_deterministic(self):
+        a = kit.cluster_draw([0, 1, 0, 2, 3, 3], ("x", "y"), random.Random(3))
+        b = kit.cluster_draw([0, 1, 0, 2, 3, 3], ("x", "y"), random.Random(3))
+        assert a == b
+
+    def test_counts_fluctuate_not_aligned(self):
+        """簇独立均匀抽签 ⇒ 各归属数量自然波动（v0.335：不再对齐笔数）。"""
+        clusters = [i // 3 for i in range(90)]  # 30 簇 × 3 元素
+        out = kit.cluster_draw(clusters, ("a", "b", "c"), random.Random(11))
+        counts = {c: out.count(c) for c in ("a", "b", "c")}
+        assert all(v > 0 for v in counts.values())
+        # 计数按簇（30 簇二项波动）而非逐笔恒等 30/30/30
+        assert not all(v == 30 for v in counts.values())

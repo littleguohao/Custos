@@ -235,7 +235,13 @@ build_row 源头转 float，numpy 类型不触发校验失败）。
   max-of-230 与 max-of-5 同数，选择效应不出现，v0.306 假阳性放进去也能
   过）；**池 ≥20**（小池 q95≈max 测不出校准）；bear 臂抽样逐次偏移
   （恒同批入场 ⇒ 池退化）；**max-of-5 回归哨兵**（换回 v0.307 前臂构造
-  校准必须失败——能抓已知 bug 才证明合入门有效）。
+  校准必须失败——能抓已知 bug 才证明合入门有效）。**v0.335 起成簇要求
+  （owner review——C4 打乱粒度按簇不按笔）**：collect_all 口径交易成簇
+  （同票连续信号同档同结局），逐笔打乱拆散簇 ⇒ 零假设方差低估、q95
+  偏低（实测逐笔 15/40=38% vs 整簇 2/40≈名义 5%）；打乱/赋桶一律走
+  `criteria_kit.cluster_ids`/`cluster_draw` 单源（整簇抽签、各归属数量
+  臂间自然波动、不对齐笔数），校准夹具必须含**成簇用例**（簇结局相关）
+  + **逐笔打乱哨兵**（monkeypatch 换回逐笔 ⇒ 校准必须失败）。
   **provenance 溯源块（v0.325，#8）**：研究产物统一带 `provenance`——
   git sha+dirty / 判据版本 / 预注册文档 blob hash / 宇宙 sha256 /
   数据末日 / 命令行；新终端报告必须接 `provenance.build`（溯源失败不炸
@@ -253,7 +259,9 @@ build_row 源头转 float，numpy 类型不触发校验失败）。
   协议注入，生产=V0 重放（信号缓存+as-of V0 分+topn，同 score_evolution V0 臂）。
   factor_exit_study（R39 终端）：因子×出场交互——因子连续值×分桶×映射→
   出场档 80 格全枚举（无进化无 LLM；切点只估挖掘窗），主基准=uniform-best，
-  C4=随机分桶臂同预算；预热复用 exit_campaign.warm_v0_signals（模块级单源）。
+  C4=随机分桶臂同预算（**v0.335 起整簇赋桶**：同码相邻信号一簇、同簇
+  同桶、桶大小臂间自然波动，criteria_kit 单源）；预热复用
+  exit_campaign.warm_v0_signals（模块级单源）。
   bear_regime_study（R40 终端）：0AMV 空头区间做多全栈——46 门×5 档 230 格
   （invert_regime_bearish 反转仅空头日放行），基准=随机入场臂（v0.302 对等
   纪律：挖掘窗选型冻结配置带判定窗；**v0.307 预算对等**：每臂逐门 n_g×5 档
@@ -265,8 +273,10 @@ build_row 源头转 float，numpy 类型不触发校验失败）。
   相邻档差<0.086 标低置信）为硬前提，C3 主判据=加权 expectancy_R vs 等权
   （权重格 W1~W3 归一化写死，双窗 |ΔexpR|<0.035 按与零无法区分——C3 不过
   只放行 provisional 不判死；W2=过滤器路线对照、组合层未测不改引擎）；
-  C4=打乱「交易→档」归属臂 N=50 同预算（criteria_kit 单源）；不建 C5
-  （C2/C3 都过线 owner 才发令）。
+  C4=打乱「交易→档」归属臂 N=50 同预算（criteria_kit 单源；**v0.335 起
+  整簇换档**：簇=同码信号点相邻 ≤5 根 bar 连续段，同簇同档、各档笔数
+  臂间自然波动不对齐）；C1 阈值 n≥50 不变、**每档每窗簇数入报告**
+  （n_clusters）供判读打折；不建 C5（C2/C3 都过线 owner 才发令）。
   plan_shadow_review（#60 判据 C，v0.311）：影子台账不一致事件（stage=1700
   ∧ agree=False ∧ 非 default）的 plan vs 现行 N 日持仓层 Δret（N=5 主/10 副；
   P0=T+1 首可卖日开盘清仓、P1（P2 同档）=卖半仓、P3=不动；跌停停牌顺延=

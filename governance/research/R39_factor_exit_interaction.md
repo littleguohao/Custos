@@ -152,7 +152,15 @@ owner 拍板发令）；**falsified**（C2/C3 不过或 C4 confirmed_fail ⇒ �
   Δmargin（vs uniform-best）**> 池 q95** 且池 ≥50 才 confirmed，未满
   provisional 不停（v0.266 分位口径 / v0.297 空池 indeterminate /
   v0.299 判据族全部沿用）；**随机臂的 rdd 门与主研究同一参照档**
-  （P1_base 挖掘窗读数——口径对称，v2.1）；
+  （P1_base 挖掘窗读数——口径对称，v2.1）。
+  **修订（2026-10-10，v0.335，owner review——下一对象开跑前生效）**：
+  打乱粒度从逐信号改**整簇**——与 R42 同源同因（collect_all 口径下
+  同票连续信号成簇，逐信号打乱把簇拆散、零假设方差低估、q95 偏低，
+  owner 模拟簇大小 20 ⇒ 假过线 38%）：每簇独立均匀抽一桶（簇定义与
+  构造 = `criteria_kit.cluster_ids`/`cluster_draw` 单源），同簇同桶，
+  各桶信号数在臂间自然波动（「保持桶大小」让位——对齐桶 size 会把
+  簇间方差错误压掉）。r39_a2 停在 provisional 未受此偏差影响（池未
+  满不放行，q95 偏低只会让它更难过线而它没有过线）；
 - **R39-C5（终审）**：pre2019 untouched 段（2010-2016）单独终步，
   **只能杀不能确认**——v0.299 可疑闸 + thr 三分同族；γ 分档沿用
   （degraded 0.75 / 否则 0.5）；标尺 = 双窗按 n 加权合并 Δmargin

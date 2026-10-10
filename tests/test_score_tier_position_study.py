@@ -5,16 +5,18 @@
 切点——泄漏钉）；②C2 单调三形态（过/倒挂 falsified/相邻打平读法——
 打平不算倒挂但 高−低 必须严格 >0）；③C3 MDE 三态（双窗 |ΔexpR|<0.035
 ⇒ 无法区分/≥0.035 按符号读/W2 过滤器对照注明在报告）；④C1 不过 ⇒
-untested 优先于其他判决；⑤C4 池重抽确定性 + 三态（confirmed_pass/
-provisional/indeterminate）+ confirmed_fail；⑥空结果护栏（任一窗 0
-信号 ⇒ rc=2 不落盘）；⑦pre2019 + 前向 holdout 硬拒绝；⑧报告自含
-字段（切点/权重格/MDE/W2 注明/组合层未测注明/cost_sensitivity/
-provenance/window_usage/forward_holdout_note）。
+untested 优先于其他判决 + 每档每窗簇数入报告（v0.335）；⑤C4 池重抽
+确定性 + 三态（confirmed_pass/provisional/indeterminate）+
+confirmed_fail + 整簇打乱钉（v0.335：同簇同档逐臂校验）；⑥空结果
+护栏（任一窗 0 信号 ⇒ rc=2 不落盘）；⑦pre2019 + 前向 holdout 硬拒绝；
+⑧报告自含字段（切点/权重格/MDE/W2 注明/组合层未测注明/
+cost_sensitivity/provenance/window_usage/forward_holdout_note）。
 """
 
 from __future__ import annotations
 
 import argparse
+import random
 
 import pytest
 
@@ -52,7 +54,12 @@ def _mk_per_code(n_codes=12, sigs_per_code=15, score_shift=0.0):
     """N 码 × M 信号（i=10,12,… 逐码唯一）；score=10+(k mod 90)（+shift）——
 
     默认夹具 180 信号/窗：三档切点稳定 ≈[39.67, 69.33]，整数分阈值
-    70/40 与研究分档**逐位一致**（各档 60 笔 ≥ C1 线 50）。"""
+    70/40 与研究分档**逐位一致**（各档 60 笔 ≥ C1 线 50）。
+
+    v0.335：score 改 ``10+(k·37 mod 90)``——gcd(37,90)=1 ⇒ 总体多重集仍是
+    10..99 各两次（切点逐位不变），但同码 15 个连续 k 的分数**跨档散开**
+    （真实数据同码簇分数相近是另一极端——簇统计归 test_null_calibration
+    的成簇夹具管，本套件夹具让单元测试聚焦 C1/C2/C3 机械读数）。"""
     per_code = {}
     k = 0
     for c_i in range(n_codes):
@@ -62,7 +69,7 @@ def _mk_per_code(n_codes=12, sigs_per_code=15, score_shift=0.0):
         for s_i in range(sigs_per_code):
             day = f"2023-{(k % 12) + 1:02d}-{(k % 28) + 1:02d}"
             signals.append({"i": 10 + s_i * 2, "date": day, "score": 0.0})
-            scores[day] = 10.0 + (k % 90) + score_shift
+            scores[day] = 10.0 + ((k * 37) % 90) + score_shift
             k += 1
         for s in signals:
             s["score"] = scores[s["date"]]
@@ -292,9 +299,19 @@ class TestC1Priority:
         assert rep["criteria"]["C1"]["ok"] is False
         assert rep["verdict"] == "untested"
 
+    def test_c1_reports_cluster_counts(self):
+        """v0.335 修订：C1 阈值不变（按笔数），每档每窗簇数入报告供判读
+        打折——默认夹具 12 码 × 码内 i 间隔 2 ≤5 ⇒ 每窗 12 簇。"""
+        rep = _run(_mk_per_code(), _replay_monotone)
+        c1 = rep["criteria"]["C1"]
+        for w in ("mining", "judgment"):
+            for tier in ("high", "mid", "low"):
+                assert c1["n_clusters"][w][tier] == 12
+                assert rep["tiers"][w][tier]["n_clusters"] == 12
+
 
 # ---------------------------------------------------------------------------
-# ⑤ C4：确定性 + 状态机
+# ⑤ C4：确定性 + 状态机 + 整簇打乱（v0.335）
 # ---------------------------------------------------------------------------
 
 
@@ -303,6 +320,35 @@ class TestC4:
         a = _run(_mk_per_code(), _replay_monotone)
         b = _run(_mk_per_code(), _replay_monotone)
         assert a["criteria"]["C4"]["pool"] == b["criteria"]["C4"]["pool"]
+
+    def test_arm_tier_draw_unit(self):
+        """整簇抽签单元钉：同簇同档、确定性、labels 不参与计数对齐。"""
+        labels = ["low", "mid", "high", "low", "mid", "high"]
+        clusters = [0, 0, 0, 1, 1, 1]
+        out = stp.arm_tier_draw(labels, clusters, random.Random(5))
+        assert out[0] == out[1] == out[2]
+        assert out[3] == out[4] == out[5]
+        assert out == stp.arm_tier_draw(labels, clusters, random.Random(5))
+
+    def test_c4_arm_moves_whole_clusters(self, monkeypatch):
+        """整簇移动钉（v0.335）：C4 每条臂的档归属在同簇内恒定——默认夹具
+        12 码、码内 i 间隔 2 ≤5 ⇒ 每窗 12 簇，逐臂校验。"""
+        seen = []
+        orig = stp.arm_tier_draw
+
+        def spy(labels, clusters, rng):
+            out = orig(labels, clusters, rng)
+            seen.append((list(clusters), list(out)))
+            return out
+
+        monkeypatch.setattr(stp, "arm_tier_draw", spy)
+        rep = _run(_mk_per_code(), _replay_monotone)
+        assert len(seen) == rep["criteria"]["C4"]["evaluated"]  # 每臂恰调一次
+        for clusters, out in seen:
+            assert len(set(clusters)) == 12, "挖掘窗 12 码 ⇒ 12 簇"
+            by_cluster: dict[int, str] = {}
+            for cid, lab in zip(clusters, out):
+                assert by_cluster.setdefault(cid, lab) == lab, "同簇必须同档"
 
     def test_empty_pool_indeterminate(self):
         """r_multiple 全缺 ⇒ 臂全 None ⇒ 池空=indeterminate（不放行，v0.297 族）。"""

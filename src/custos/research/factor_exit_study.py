@@ -22,10 +22,11 @@
      （v0.301，样本不足≠否定证据）；C2 top Δmargin vs uniform-best
      **双窗同向为正**；C3 分位切点**加性** ±U(0, 0.2/n_buckets)×4 扰动
      （B2 ±10pp / B3 ±6.7pp，与预注册文字对齐）C2 结论**零翻转**；C4
-     **随机分桶臂** N=50 同预算（保持桶大小打乱「交易→桶」归属，同 80
-     格取 max mining Δmargin）q95 门，池≥50 才 confirmed 否则
-     provisional（v0.297 式 rdd 过门率记账）；结局四态
-     candidate/falsified/untested/provisional；
+     **随机分桶臂** N=50 同预算（同 80 格取 max mining Δmargin）q95 门，
+     池≥50 才 confirmed 否则 provisional（v0.297 式 rdd 过门率记账）——
+     **v0.335 修订：打乱粒度整簇**（同票相邻信号一簇，kit.cluster_ids/
+     cluster_draw 单源，同簇同桶、桶大小臂间自然波动，不再逐信号对齐）；
+     结局四态 candidate/falsified/untested/provisional；
   ⑥ 产物自含（因子定义/切点/映射/档集/逐格读数/随机池）——供 C5 终端
      自含读取，禁手工转录。
 
@@ -671,15 +672,23 @@ def run_study(
     # v0.322：池构造改 **criteria_kit 重抽单源**（v0.317 族——过门臂满 N
     # 或评估上限 10×N；原单遍 50 臂在一臂不过门时池 49 永 provisional，
     # owner 方法论 review #4/#7）。
+    # v0.335（owner review——跑数前修订，与 R42 同源）：打乱粒度从逐信号
+    # 改**整簇**——collect_all 口径下同票连续信号成簇（分数/因子相近、
+    # 出场结果相似），逐信号打乱把簇拆散、零假设方差被低估、q95 偏低。
+    # 每簇独立均匀抽一桶（kit.cluster_ids/cluster_draw 单源；同簇同桶），
+    # 各桶信号数在臂间自然波动（v0.301 族「保持桶大小」的精神让位——
+    # 对齐桶 size 会把簇间方差错误压掉，同 R42 哲学）；r39_a2 停在
+    # provisional 未受此偏差影响，修订在下一对象开跑前生效。
     if top is not None and uniform_best is not None:
         ub_margin_m = uniform_best["readings"]["margin"]
+        clusters_m = kit.cluster_ids(signals["mining"])
 
         def _arm(_i: int) -> Optional[float]:
             arm_best: Optional[float] = None
             arm_ok = False
             for name in BUCKETINGS:
-                perm = list(buckets[name]["mining"])
-                rng.shuffle(perm)
+                n_b = len(BUCKETINGS[name]) + 1
+                perm = kit.cluster_draw(clusters_m, tuple(range(n_b)), rng)
                 stud_a = study_window(
                     per_code["mining"],
                     signals["mining"],
