@@ -33,13 +33,13 @@ import argparse
 import json
 import math
 import random
-import statistics
 import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, Optional
 
 from custos.core.paths import LOGS
+from custos.research import criteria_kit as kit
 from custos.research import window_usage as wu
 from custos.research.evolution_loop import _overlaps_pre2019, PRE2019_END, PRE2019_START
 
@@ -181,12 +181,6 @@ def _displacement(base_taken: list[dict], filt_taken: list[dict]) -> int:
     """位移数：被剔掉的原 top20 名额数（必报，区分「剔对」与「扰动」）。"""
     kept = {(t["code"], t["entry_date"]) for t in filt_taken}
     return sum(1 for t in base_taken if (t["code"], t["entry_date"]) not in kept)
-
-
-def _q95(xs: list[float]) -> Optional[float]:
-    if len(xs) < 20:  # 分位数在样本太小时无意义（fail-closed）
-        return None
-    return statistics.quantiles(sorted(xs), n=100, method="inclusive")[94]
 
 
 def _enrich(
@@ -385,7 +379,9 @@ def run_study(
                 }
             rp = random_pool[f"{x:.2f}"]
             merged = rp["mining"] + rp["judgment"]
-            row["random_q95"] = _q95(merged)
+            # 小池 None 改调用点显式 min_pool=20 门（v0.322，owner 拍板
+            # campaign 版 q95 为主源——行为与旧 filter 版 _q95 逐位一致）
+            row["random_q95"] = kit.q95(merged) if len(merged) >= 20 else None
             row["random_n"] = len(merged)
             # C2/C4 机械读数（双窗同向为正 / 超随机 q95）
             dm, dj = row["mining"]["d_margin"], row["judgment"]["d_margin"]
@@ -469,7 +465,12 @@ def run_study(
         "random_control": {
             k: {
                 "n": len(v["mining"] + v["judgment"]),
-                "q95": _q95(v["mining"] + v["judgment"]),
+                # 小池 None 改调用点显式 min_pool=20 门（v0.322，行为逐位一致）
+                "q95": (
+                    kit.q95(v["mining"] + v["judgment"])
+                    if len(v["mining"] + v["judgment"]) >= 20
+                    else None
+                ),
             }
             for k, v in random_pool.items()
         },

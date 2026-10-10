@@ -51,10 +51,10 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from custos.research import criteria_kit as kit
 from custos.research import factor_exit_study as fes
 from custos.research import window_usage as wu
 from custos.research.evolution import exit_genome as eg
-from custos.research.exit_campaign import _q95
 
 #: 判据数值（R40 跑数前写死）
 MIN_N_TAKEN = 100  # C1：top 每窗最小选中笔数
@@ -510,13 +510,11 @@ def run_study(
     top = _top(configs)
 
     # ── 随机臂（对等纪律 v0.302 + **预算对等 v0.307**：每臂完整复刻 top 的
-    # 46 门 × 5 档 max-of-230 选型——逐门 n_g 对齐抽样，冻结配置进判定窗）──
+    # 46 门 × 5 档 max-of-230 选型——逐门 n_g 对齐抽样，冻结配置进判定窗；
+    # v0.322：池构造=**criteria_kit 重抽单源**（v0.317 族））──
     rng = random.Random(args.seed)
     counts_m = {g: len(gate_sigs["mining"][g]) for g in gates}
-    pool_m: list[float] = []
     pool_j: list[float] = []
-    arm_evaluated = 0
-    arm_gate_pass = 0
     index_df_ref: dict[str, Any] = {"df": locals().get("index_df")}  # 生产路径才有
 
     # v0.309 性能（结果逐位不变）：母体每窗惰性预建一次（random_entry_fn
@@ -547,9 +545,7 @@ def run_study(
         entry_accounting[w]["returned"] += len(out)
         return out
 
-    for _arm in range(args.n_random):
-        arm_evaluated += 1
-
+    def _arm(_i: int) -> Optional[float]:
         def _judgment_reader(n_g: int, frozen_params: dict[str, Any]) -> Optional[dict]:
             """冻结配置（含胜出格 n_g）的判定窗读数（不重选——对等纪律 v0.302）。
 
@@ -573,15 +569,19 @@ def run_study(
             args.top_n,
             judgment_reader=_judgment_reader,
         )
-        if arm["mining"] is not None:
-            arm_gate_pass += 1
-            pool_m.append(arm["mining"]["readings"]["margin"])
-            jd = arm.get("judgment")
-            if jd and jd.get("margin") is not None:
-                pool_j.append(jd["margin"])
+        if arm["mining"] is None:
+            return None
+        jd = arm.get("judgment")
+        if jd and jd.get("margin") is not None:
+            pool_j.append(jd["margin"])  # 侧信道：判定窗池（与主池同臂）
+        return arm["mining"]["readings"]["margin"]
 
-    q95_m = _q95(pool_m)
-    q95_j = _q95(pool_j)
+    c4_pool = kit.assemble_c4_pool(args.n_random, _arm)
+    pool_m = c4_pool["pool"]
+    arm_evaluated = c4_pool["evaluated"]
+    arm_gate_pass = c4_pool["gate_pass"]
+    q95_m = kit.q95(pool_m)
+    q95_j = kit.q95(pool_j)
 
     c1 = judge_c1(top["mining"] if top else None, top["judgment"] if top else None)
     c2 = judge_c2(
@@ -649,16 +649,12 @@ def run_study(
             "rule": c3_rule,
         }
 
-    c4_state = (
-        "provisional"
-        if len(pool_m) < args.c4_min_pool
-        else (
-            "confirmed_pass"
-            if top
-            and top["mining"]["margin"] is not None
-            and top["mining"]["margin"] > (q95_m or 0)
-            else "confirmed_fail"
-        )
+    # C4 状态机 = criteria_kit 单源（v0.322：空池 indeterminate / 池未满
+    # provisional / top 挖掘窗 margin > q95 confirmed_pass）
+    c4_state = kit.c4_state_of(
+        pool_m,
+        min_pool=args.c4_min_pool,
+        plan_delta=(top["mining"]["margin"] if top else None),
     )
     c4 = {
         "state": c4_state,
@@ -672,17 +668,11 @@ def run_study(
         "对的是同一个零假设）",
     }
 
-    # ── 总结局（C1 不过 ⇒ untested 优先——样本不足≠否定证据；C2 三态：
-    # 池未建=None ⇒ 既不 falsified 也不 candidate，落 provisional；C3
-    # not_applicable（v0.307）= 灵敏度证据缺失 ⇒ provisional 不放行 candidate）──
-    if not c1["ok"]:
-        verdict = "untested"
-    elif c2["ok"] is False or c3["ok"] is False or c4_state == "confirmed_fail":
-        verdict = "falsified"
-    elif c2["ok"] is True and c3["ok"] is True and c4_state == "confirmed_pass":
-        verdict = "candidate"
-    else:
-        verdict = "provisional"
+    # ── 总结局（criteria_kit 单源：C1 不过 ⇒ untested 优先；C2 池未建=None /
+    # C3 not_applicable（v0.307）⇒ provisional 不放行不判死）──
+    verdict = kit.verdict_four_state(
+        c1_ok=c1["ok"], c2_ok=c2["ok"], c3_ok=c3["ok"], c4_state=c4_state
+    )
 
     # 判定窗使用台账（v0.321，owner 方法论 review #1）：本报告=该窗第 k 次被读
     _wu_k = wu.record_use("R40", "judgment", args.tag, "C1~C4 判定窗读数")

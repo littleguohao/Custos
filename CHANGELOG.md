@@ -323,6 +323,7 @@
 | 2026-10-09 | v0.319 | **R39 Phase 2 判毕 untested（r39_a2，v2.1 相对门首个真实用例）**——过门率恢复（随机臂 49/50，0/160 全灭未复现）；top=B2[P2_fast,P2_fast] 退化=uniform-best 自身（Δ≡0 机械）：ADX(14) 分桶→出场档无条件化增量证据（72 非退化映射无一双窗胜出，最佳 Δm+0.0031/Δj−0.0064 翻号）；C1 桶 0 n=36/19<50 ⇒ 按 v0.301 判 untested 不判证伪；C3 4/4 翻转（Δ≡0 机械）、C4 provisional（池 49/50） | R39 回填区 | 下一对象待 owner |
 | 2026-10-10 | v0.320 | **objective 跨版本续跑守卫（owner review 必修）**：exit_campaign 台账与 evolution_loop 轨迹池均带 `objective_version` 落盘——load 时与当前版本不符（含守卫前旧文件无字段）⇒ **fail-closed 拒绝续跑**（原只校验文件 schema：跨版本续跑会把 v1 复合值（~0.05~0.5）与 v2.1 margin 混进同一随机池/轨迹池，q95 与候选用错尺子全程无报错；R37 已收口但战役壳要复用不能留）；trajectory.py 保零同包依赖（版本由调用方注入）；score_evolution cell 缓存不存 objective 不受影响、--legs-file 只读表达式不挡 | owner review | 钉测 +8 改写 2 |
 | 2026-10-10 | v0.321 | **判定窗治理两件（owner 方法论 review #1，P0）**：①**前向 holdout 冻结**——≥2026-09-05 新数据任何研究不得用（工具硬拒绝同族；判定窗被 13 单元反复读取已近第二个挖掘窗，新数据攒作下轮判定窗）；②**判定窗/pre2019 使用台账**（`window_usage.record_use` append-only+写失败不炸研究）——8 终端全接线，报告必写「该窗第 k 次被读」（k 大判读打折）；③#10 同步测试：判毕后头部/结论段禁「待跑数/待发令」（R39 已修）+ 结论三栏模板（机械判决/实质读数/不能读成什么）新单元强制、R39~R41 回填 | owner 方法论 review | 钉测 +12 改写 2 |
+| 2026-10-10 | v0.322 | **判据件单一来源 criteria_kit（owner review #7，P0）**：判据逻辑五处复制粘贴⇒收口四件——q95（campaign 语义主源，小池 None 改调用点 min_pool 门）/ verdict 四态（C1 untested 优先、c2/c3 None=provisional）/ c4_state_of（空池=indeterminate）/ assemble_c4_pool（v0.317 族重抽至满 N 或上限——factor_exit/bear 同步重抽化）；plan_rules/factor_exit/bear/exit_campaign/score_filter 全迁移；rdd 门/C5 判决各有单源不动；新终端必须 kit 组装禁再抄 | owner review | 钉测 +16 改写 4 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

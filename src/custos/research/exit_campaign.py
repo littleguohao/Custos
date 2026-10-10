@@ -33,13 +33,13 @@ import argparse
 import json
 import os
 import random
-import statistics
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
 from custos.core.paths import write_json_atomic
+from custos.research import criteria_kit as kit
 from custos.research import window_usage as wu
 from custos.research.evolution import exit_genome as eg
 
@@ -208,25 +208,6 @@ def _n_taken_ok(readings: Optional[dict], cfg: CampaignConfig) -> bool:
     return bool(readings) and (readings.get("n_taken") or 0) >= cfg.min_n_taken
 
 
-def _q95(pool: list[float]) -> Optional[float]:
-    """合并随机分布的 95% 分位（inclusive 线性插值）——C4 的标尺。
-
-    **分位随样本数收敛**；它替代的「累积最大值」随样本数发散（棘轮——
-    同一个好基因组的 C4 通过率取决于第几批被发现：8 抽样 21.3% → 264
-    抽样 1.6%，owner review 实测）。**但小池同样失真（反方向）**：池=8 时
-    q95≈最大值，零假设过线率实测 13.76%（~5% 的 2.7 倍）——故 CTL-4 有
-    最小池护栏（c4_min_pool，v0.269）：池满后零假设各批 ≈5% 假过线
-    （实测 pool=160 → 5.35%），未满只记 provisional 不停战役。len 1 退化
-    为该点本身；空池 → None（n_random=0 时不拦，预注册战役 n_random≥1
-    总有臂）。
-    """
-    if not pool:
-        return None
-    if len(pool) == 1:
-        return pool[0]
-    return statistics.quantiles(pool, n=100, method="inclusive")[94]
-
-
 def _sg_obj_version() -> str:
     """读 objective 版本标记（局部 import：与生产评估器同口径，避免模块级依赖）。"""
     from custos.research import strategy_grid as sg  # noqa: PLC0415
@@ -350,7 +331,7 @@ def ctl_step(
     # **provisional**（不停战役），池满后对全部 provisional 机械终判；
     # 池满后直接 confirmed。**C5 pre2019 是一次性底牌，不许烧在侥幸上。**
     c3_record: Optional[dict] = None
-    c4_bar = _q95(state.random_pool)
+    c4_bar = kit.q95(state.random_pool)
     passers = sorted(
         (r for r in c2_passers if (r["mining"] or {}).get("objective") is not None),
         key=lambda r: r["mining"]["objective"],
@@ -432,7 +413,7 @@ def ctl_step(
     if state.status == "running" and len(state.random_pool) >= cfg.c4_min_pool:
         pending = [p for p in state.provisional_candidates if p["status"] == "pending"]
         if pending:
-            bar = _q95(state.random_pool)
+            bar = kit.q95(state.random_pool)
             winners = [
                 p
                 for p in pending
@@ -729,7 +710,7 @@ def run_campaign(
             f"[campaign] 批 {state.batch_id} 毕：top={record['top_key']} "
             f"C2过={len(record['c2_pass_keys'])} 开放家族={len(state.open_families)} "
             f"连无C2={state.consecutive_no_c2} 累计={state.total_genomes}/{cfg.budget_cap} "
-            f"随机q95={_q95(state.random_pool)}(池{len(state.random_pool)}) "
+            f"随机q95={kit.q95(state.random_pool)}(池{len(state.random_pool)}) "
             f"→ {record['ctl_actions'][-1]['type']}",
             file=sys.stderr,
         )
@@ -758,7 +739,7 @@ def run_campaign(
         "family_deaths": state.family_deaths,
         "total_genomes": state.total_genomes,
         "n_batches": len(batches),
-        "random_q95": _q95(state.random_pool),
+        "random_q95": kit.q95(state.random_pool),
         "random_rdd_gate": {
             "evaluated": state.random_evaluated,
             "passed": state.random_gate_pass,

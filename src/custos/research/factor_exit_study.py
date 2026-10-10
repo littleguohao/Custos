@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from custos.research.evolution import exit_genome as eg
+from custos.research import criteria_kit as kit
 from custos.research import window_usage as wu
 from custos.research.exit_c5_terminal import (
     FORWARD_HOLDOUT_START,
@@ -413,12 +414,6 @@ def judge_c3(draws: list[dict]) -> dict[str, Any]:
     }
 
 
-def _q95(pool: list[float]) -> Optional[float]:
-    from custos.research.exit_campaign import _q95 as q95  # noqa: PLC0415
-
-    return q95(pool)
-
-
 def judge_c4(
     top_dm_mining: Optional[float],
     pool: list[float],
@@ -426,26 +421,23 @@ def judge_c4(
     gate_pass: int,
     min_pool: int = C4_MIN_POOL,
 ) -> dict[str, Any]:
-    """C4：随机分桶臂池 q95 门（池≥min_pool 才 confirmed，否则 provisional）。"""
-    bar = _q95(pool)
-    out: dict[str, Any] = {
+    """C4：随机分桶臂池 q95 门（状态机=criteria_kit 单源 v0.322——空池
+    indeterminate / 池<min_pool provisional / Δ>q95 confirmed_pass）。"""
+    state = kit.c4_state_of(pool, min_pool=min_pool, plan_delta=top_dm_mining)
+    return {
+        "state": state,
+        "ok": (
+            True
+            if state == "confirmed_pass"
+            else (False if state == "confirmed_fail" else None)
+        ),
         "pool_size": len(pool),
         "evaluated": evaluated,
         "gate_pass": gate_pass,
         "gate_pass_rate": (gate_pass / evaluated if evaluated else None),
-        "q95": bar,
+        "q95": kit.q95(pool),
         "min_pool": min_pool,
     }
-    if len(pool) < min_pool:
-        out["state"] = "provisional"
-        out["ok"] = None
-    elif top_dm_mining is not None and bar is not None and top_dm_mining > bar:
-        out["state"] = "confirmed_pass"
-        out["ok"] = True
-    else:
-        out["state"] = "confirmed_fail"
-        out["ok"] = False
-    return out
 
 
 # ---------------------------------------------------------------------------
@@ -644,12 +636,13 @@ def run_study(
     c3 = judge_c3(c3_draws)
 
     # ── C4：随机分桶臂 N=50 同预算（保持桶大小打乱归属，同 80 格取 max）──
-    pool: list[float] = []
-    evaluated = 0
-    gate_pass = 0
+    # v0.322：池构造改 **criteria_kit 重抽单源**（v0.317 族——过门臂满 N
+    # 或评估上限 10×N；原单遍 50 臂在一臂不过门时池 49 永 provisional，
+    # owner 方法论 review #4/#7）。
     if top is not None and uniform_best is not None:
         ub_margin_m = uniform_best["readings"]["margin"]
-        for _arm in range(args.n_random):
+
+        def _arm(_i: int) -> Optional[float]:
             arm_best: Optional[float] = None
             arm_ok = False
             for name in BUCKETINGS:
@@ -675,21 +668,20 @@ def run_study(
                     arm_ok = True
                     dm = top_a["readings"]["margin"] - ub_margin_m
                     arm_best = dm if arm_best is None else max(arm_best, dm)
-            evaluated += 1
-            if arm_ok and arm_best is not None:
-                gate_pass += 1
-                pool.append(arm_best)
+            return arm_best if (arm_ok and arm_best is not None) else None
+
+        c4_pool = kit.assemble_c4_pool(args.n_random, _arm)
+        pool = c4_pool["pool"]
+        evaluated = c4_pool["evaluated"]
+        gate_pass = c4_pool["gate_pass"]
+    else:
+        pool, evaluated, gate_pass = [], 0, 0
     c4 = judge_c4(dm_m, pool, evaluated, gate_pass, args.c4_min_pool)
 
-    # ── 总结局（v0.301：C1 不过 ⇒ untested 优先——样本不足≠否定证据）──
-    if not c1["ok"]:
-        verdict = "untested"  # 样本不足不可判：B3 判定窗大概率落此（贴线注记在案）
-    elif not (c2["ok"] and c3["ok"]) or c4["state"] == "confirmed_fail":
-        verdict = "falsified"
-    elif c4["state"] == "confirmed_pass":
-        verdict = "candidate"
-    else:
-        verdict = "provisional"
+    # ── 总结局（criteria_kit 单源：C1 不过 ⇒ untested 优先）──
+    verdict = kit.verdict_four_state(
+        c1_ok=c1["ok"], c2_ok=c2["ok"], c3_ok=c3["ok"], c4_state=c4["state"]
+    )
 
     def _slim(rd: Optional[dict]) -> Optional[dict]:
         if rd is None:

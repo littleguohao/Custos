@@ -111,6 +111,14 @@ TOOLS: dict[str, tuple[str, str]] = {
         "报告必写「该窗第 k 次被读」（k 大判读打折——分岔路径下多轮使用的"
         "判定窗不再是样本外）；CLI 查窗口被读次数",
     ),
+    "criteria_kit": (
+        "diagnostic",
+        "判据件单一来源（v0.322，owner 方法论 review #7）：q95（campaign "
+        "语义）/ verdict 四态（C1 untested 优先）/ c4_state_of（空池 "
+        "indeterminate）/ assemble_c4_pool（v0.317 族重抽至过门臂满 N）——"
+        "factor_exit/bear_regime/plan_rules/exit_campaign/score_filter 已"
+        "全迁移；rdd 门=strategy_grid、C5 判决=exit_c5_terminal 单源不动",
+    ),
     "plan_shadow_review": (
         "driver",
         "#60 持仓计划影子事后打分（判据 C）：台账 1700 口径不一致事件（agree="

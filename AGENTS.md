@@ -189,6 +189,14 @@ build_row 源头转 float，numpy 类型不触发校验失败）。
   默认 20（=0 是因子轴退化，scorer 不写交易集）。指标门 `--ic-gate`（rank 默认 /
   top_tail 头部价差 / off）+ 门次序 `--gate-order`（ic_first 默认 / marks_first
   成本控制）——非默认口径须已在研究单元预注册（R36 三轮是首个用例）。
+  **判据件单一来源（`criteria_kit`，v0.322，owner 方法论 review #7）**：
+  q95（campaign 语义——小池是否可用归调用点 min_pool 门）/ `verdict_four_state`
+  （C1 不过=untested 优先；c2/c3 None=provisional）/ `c4_state_of`（空池
+  indeterminate、池未满 provisional）/ `assemble_c4_pool`（v0.317 族重抽
+  至过门臂满 N 或上限 10×N）——factor_exit/bear_regime/plan_rules/
+  exit_campaign/score_filter 已全迁移，**新终端必须用 kit 组装，禁止再抄
+  一份**；rdd 相对门=`strategy_grid.rdd_gate_ok`、C5 判决=
+  `exit_c5_terminal.apply_c5`（本就有单源）。
   score_evolution_study 终审姿态：`--v0-lattice` 调权格（P3 族）/ `--addon-leg`
   骨架加腿（R36 思路二——新腿一律问「加进 V0 等权骨架的 Δmargin」，不问单独立）。
   exit_campaign（R37 战役壳）：出场基因组×批次进化 + CTL-1~5 确定性控制器

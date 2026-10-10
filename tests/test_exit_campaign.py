@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from custos.research import criteria_kit as kit
 from custos.research import exit_campaign as ec
 from custos.research import score_evolution_study as ses
 from custos.research.evolution import exit_genome as eg
@@ -83,16 +84,16 @@ class TestQ95:
     """C4 分位标尺（v0.266）：随样本收敛，替代随样本发散的累积最大值。"""
 
     def test_empty_and_single(self):
-        assert ec._q95([]) is None  # 无臂不拦
-        assert ec._q95([0.5]) == 0.5
+        assert kit.q95([]) is None  # 无臂不拦
+        assert kit.q95([0.5]) == 0.5
 
     def test_inclusive_interpolation(self):
         # inclusive 法：位置 = 0.95×(n−1)；pool=1..100 → 94.05 位 → 95.05
-        assert ec._q95(list(range(1, 101))) == pytest.approx(95.05)
+        assert kit.q95(list(range(1, 101))) == pytest.approx(95.05)
 
     def test_quantile_converges_where_max_diverges(self):
         pool = [0.5] * 79 + [0.99]
-        assert ec._q95(pool) == pytest.approx(0.5)  # 分位不被单点拉走
+        assert kit.q95(pool) == pytest.approx(0.5)  # 分位不被单点拉走
         assert max(pool) == 0.99  # 旧棘轮会被它冻结
 
 

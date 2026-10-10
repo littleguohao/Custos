@@ -12,6 +12,7 @@ import argparse
 
 import pytest
 
+from custos.research import criteria_kit as kit
 from custos.research import score_filter_study as sf
 
 
@@ -106,13 +107,16 @@ class TestDisplacement:
 
 class TestQ95:
     def test_small_sample_none(self):
-        assert sf._q95([0.01] * 10) is None
+        # v0.322 单源化：kit.q95 主源在 criteria_kit（campaign 语义——小池
+        # 照给分位），「小池 None」= 调用点显式 min_pool=20 门（行为逐位一致）
+        merged = [0.01] * 10
+        assert (kit.q95(merged) if len(merged) >= 20 else None) is None
 
     def test_value(self):
         import statistics
 
         xs = list(range(100))
-        assert sf._q95([float(x) for x in xs]) == pytest.approx(
+        assert kit.q95([float(x) for x in xs]) == pytest.approx(
             statistics.quantiles(xs, n=100, method="inclusive")[94]
         )
 

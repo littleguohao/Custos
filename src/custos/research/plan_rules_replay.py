@@ -42,10 +42,10 @@ from typing import Any, Callable, Optional
 
 from custos.core.factors.b1_structure import STOP_LOOKBACK, _stop_ref  # noqa: E402
 from custos.core.paths import LOGS, cn_now  # noqa: E402
+from custos.research import criteria_kit as kit  # noqa: E402
 from custos.research import factor_exit_study as fes  # noqa: E402
 from custos.research import strategy_grid as sg  # noqa: E402
 from custos.research import window_usage as wu  # noqa: E402
-from custos.research.exit_campaign import _q95  # noqa: E402
 
 #: 口径常量（v0.315 定稿写死）
 LIVE_PARAMS: dict[str, Any] = {
@@ -350,21 +350,15 @@ def run_study(
     }
 
     # ── C4：随机止损价臂（预算对等=两边都不挑选；池元素=臂挖掘窗 Δmargin）──
-    # v0.317：**N 指过门臂数**——过不了 rdd 门的臂不进池，「抽 N 次」实现下
-    # 过门率 <100% 就永远 provisional（owner 零假设实测过门 ~20%）。改
-    # **重抽直至过门臂满 N 或评估数达上限 max_arms=10×N**；上限仍未满 ⇒
-    # 按当时池大小判 provisional/indeterminate，如实记过门率与评估数。
-    # 统计含义不变：候选本身也须过门（C2），零假设=「同样过了门的随机
-    # 臂」，两边条件对称——只改凑齐 N 的方式，不改判据。
+    # v0.317：**N 指过门臂数**（重抽至池满或评估上限——过不了 rdd 门的臂
+    # 不进池；统计含义不变：候选同须过门，两边条件对称）；v0.322：池构造
+    # 与状态机 = **criteria_kit 单一来源**（owner 方法论 review #7）。
     lo, hi = C4_STOP_RANGE
-    max_arms = 10 * args.n_random
-    pool: list[float] = []
-    arm_evaluated = 0
     live_m = pair_rds["mining"]["live"]
     plan_m = pair_rds["mining"]["plan"]
-    while len(pool) < args.n_random and arm_evaluated < max_arms:
-        arm_rng = random.Random(f"{args.seed}-arm{arm_evaluated}")  # 臂级种子写死可复现
-        arm_evaluated += 1
+
+    def _arm(i: int) -> Optional[float]:
+        arm_rng = random.Random(f"{args.seed}-arm{i}")  # 臂级种子写死可复现
         arm_subset = [
             _sig_with_stop(r, r["entry_close"] * arm_rng.uniform(lo, hi))
             for r in subsets["mining"]
@@ -378,15 +372,18 @@ def run_study(
         )
         arm_rd = fes.combine_readings(arm_trades, args.top_n, ref=live_m)
         if not arm_rd or not arm_rd.get("rdd_gate"):
-            continue  # 过不了 rdd 门的臂不进池（记过门率）
-        if (
+            return None  # 过不了 rdd 门的臂不进池（记过门率）
+        if not (
             live_m
             and live_m.get("margin") is not None
             and arm_rd.get("margin") is not None
         ):
-            pool.append(arm_rd["margin"] - live_m["margin"])
-    arm_gate_pass = len(pool)
-    q95_m = _q95(pool)
+            return None
+        return arm_rd["margin"] - live_m["margin"]
+
+    c4_pool = kit.assemble_c4_pool(args.n_random, _arm)
+    pool = c4_pool["pool"]
+    q95_m = kit.q95(pool)
     plan_delta = (
         plan_m["margin"] - live_m["margin"]
         if plan_m
@@ -395,41 +392,28 @@ def run_study(
         and live_m.get("margin") is not None
         else None
     )
-    if not pool:
-        c4_state = "indeterminate"  # 池空=不放行（v0.297 族）
-    elif len(pool) < args.c4_min_pool:
-        c4_state = "provisional"
-    elif plan_delta is not None and plan_delta > q95_m:
-        c4_state = "confirmed_pass"
-    else:
-        c4_state = "confirmed_fail"
+    c4_state = kit.c4_state_of(pool, min_pool=args.c4_min_pool, plan_delta=plan_delta)
     c4 = {
         "state": c4_state,
         "pool": pool,
         "pool_size": len(pool),
-        "target_pool": args.n_random,  # N 指过门臂数（v0.317）
-        "max_arms": max_arms,
-        "evaluated": arm_evaluated,
-        "gate_pass": arm_gate_pass,
-        "gate_pass_rate": (arm_gate_pass / arm_evaluated if arm_evaluated else None),
+        "target_pool": c4_pool["target_pool"],  # N 指过门臂数（v0.317）
+        "max_arms": c4_pool["max_arms"],
+        "evaluated": c4_pool["evaluated"],
+        "gate_pass": c4_pool["gate_pass"],
+        "gate_pass_rate": c4_pool["gate_pass_rate"],
         "q95": q95_m,
         "plan_delta_mining": plan_delta,
         "min_pool": args.c4_min_pool,
         "note": "预算对等=两边都不挑选（v0.315 ④）：池元素=臂挖掘窗 Δmargin"
         "（每信号独立抽 entry×U[0.85,0.99]，臂级种子写死）；N 指过门臂数——"
-        "重抽至池满或评估达上限（v0.317，统计含义不变：候选也须过门，"
-        "两边条件对称）",
+        "重抽至池满或评估达上限（v0.317；池构造=criteria_kit 单源 v0.322）",
     }
 
-    # ── 四态结局（C1 优先；C4 indeterminate/池未满 ⇒ provisional 不放行）──
-    if not c1["ok"]:
-        verdict = "untested"
-    elif c2["ok"] is False or c3["ok"] is False or c4_state == "confirmed_fail":
-        verdict = "falsified"
-    elif c2["ok"] is True and c3["ok"] is True and c4_state == "confirmed_pass":
-        verdict = "candidate"
-    else:
-        verdict = "provisional"  # C4 池未满/池空 indeterminate（不放行不判死）
+    # ── 四态结局（criteria_kit 单源：C1 优先；C4 池未满/池空 ⇒ provisional）──
+    verdict = kit.verdict_four_state(
+        c1_ok=c1["ok"], c2_ok=c2["ok"], c3_ok=c3["ok"], c4_state=c4_state
+    )
 
     # 判定窗使用台账（v0.321，owner 方法论 review #1）：本报告=该窗第 k 次被读
     _wu_k = wu.record_use("R41", "judgment", args.tag, "C1~C4 判定窗读数")
