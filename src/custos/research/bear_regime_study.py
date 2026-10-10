@@ -52,6 +52,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from custos.research import factor_exit_study as fes
+from custos.research import window_usage as wu
 from custos.research.evolution import exit_genome as eg
 from custos.research.exit_campaign import _q95
 
@@ -683,10 +684,18 @@ def run_study(
     else:
         verdict = "provisional"
 
+    # 判定窗使用台账（v0.321，owner 方法论 review #1）：本报告=该窗第 k 次被读
+    _wu_k = wu.record_use("R40", "judgment", args.tag, "C1~C4 判定窗读数")
+
     return {
         "schema": "bear_regime_report/v1",
         "tag": args.tag,
         "verdict": verdict,
+        "window_usage": {
+            "window": "judgment",
+            "k": _wu_k,
+            "note": wu.usage_note("R40", "judgment", _wu_k),
+        },
         "gates": gates,
         "exit_grid": [e["name"] for e in exits],
         "windows": {w: {"start": se[0], "end": se[1]} for w, se in windows.items()},

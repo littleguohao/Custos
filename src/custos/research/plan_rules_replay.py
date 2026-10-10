@@ -44,6 +44,7 @@ from custos.core.factors.b1_structure import STOP_LOOKBACK, _stop_ref  # noqa: E
 from custos.core.paths import LOGS, cn_now  # noqa: E402
 from custos.research import factor_exit_study as fes  # noqa: E402
 from custos.research import strategy_grid as sg  # noqa: E402
+from custos.research import window_usage as wu  # noqa: E402
 from custos.research.exit_campaign import _q95  # noqa: E402
 
 #: 口径常量（v0.315 定稿写死）
@@ -430,10 +431,18 @@ def run_study(
     else:
         verdict = "provisional"  # C4 池未满/池空 indeterminate（不放行不判死）
 
+    # 判定窗使用台账（v0.321，owner 方法论 review #1）：本报告=该窗第 k 次被读
+    _wu_k = wu.record_use("R41", "judgment", args.tag, "C1~C4 判定窗读数")
+
     return {
         "schema": "plan_rules_replay/v1",
         "tag": args.tag,
         "verdict": verdict,
+        "window_usage": {
+            "window": "judgment",
+            "k": _wu_k,
+            "note": wu.usage_note("R41", "judgment", _wu_k),
+        },
         "windows": {w: {"start": se[0], "end": se[1]} for w, se in windows.items()},
         "params": {
             "live_main": LIVE_PARAMS,

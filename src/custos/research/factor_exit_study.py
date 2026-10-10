@@ -46,7 +46,12 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from custos.research.evolution import exit_genome as eg
-from custos.research.exit_c5_terminal import PRE2019_END, PRE2019_START
+from custos.research import window_usage as wu
+from custos.research.exit_c5_terminal import (
+    FORWARD_HOLDOUT_START,
+    PRE2019_END,
+    PRE2019_START,
+)
 
 #: R39 写死档集（K=4，机制象限策展；全部经 exit_genome.validate 合法）
 PROFILES: dict[str, dict[str, Any]] = {
@@ -691,10 +696,18 @@ def run_study(
             return None
         return {k: v for k, v in rd.items() if k != "taken"}
 
+    # 判定窗使用台账（v0.321，owner 方法论 review #1）：本报告=该窗第 k 次被读
+    _wu_k = wu.record_use("R39", "judgment", args.tag, "C1~C4 判定窗读数")
+
     return {
         "schema": "factor_exit_report/v1",
         "tag": args.tag,
         "verdict": verdict,
+        "window_usage": {
+            "window": "judgment",
+            "k": _wu_k,
+            "note": wu.usage_note("R39", "judgment", _wu_k),
+        },
         "factor": FACTOR_DEF,
         "profiles": {
             pk: {"genome": eg.normalize(g), "key": eg.genome_key(g)}
@@ -784,7 +797,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _check_windows(args: Any, ap: argparse.ArgumentParser) -> None:
-    """窗口护栏：与 pre2019 untouched 段交集即拒（同族镜像）+ 双窗次序。"""
+    """窗口护栏：与 pre2019 untouched 段交集即拒（同族镜像）+ 双窗次序 +
+    **前向 holdout 冻结**（v0.321，owner 方法论 review #1②）。"""
     for wname in ("mining", "judgment"):
         s = getattr(args, f"{wname}_start")
         e = getattr(args, f"{wname}_end")
@@ -794,6 +808,12 @@ def _check_windows(args: Any, ap: argparse.ArgumentParser) -> None:
             ap.error(
                 f"{wname} 窗口 {s}~{e} 与 pre2019 untouched 段"
                 f"（{PRE2019_START}~{PRE2019_END}）交集——研究工具对 pre2019 硬拒绝"
+            )
+        if e >= FORWARD_HOLDOUT_START:
+            ap.error(
+                f"{wname} 窗口 {s}~{e} 触及前向 holdout 冻结段"
+                f"（{FORWARD_HOLDOUT_START} 起）——2026-09 以后的新数据保留为"
+                "下一轮判定窗（前向样本外），任何研究不得使用（v0.321 owner 拍板）"
             )
     if args.mining_end >= args.judgment_start:
         ap.error(

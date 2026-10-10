@@ -88,6 +88,7 @@ if hasattr(sys.stderr, "reconfigure"):
 from custos.core.paths import LOGS  # noqa: E402
 from custos.pipeline.screening import score_candidates as sc  # noqa: E402
 from custos.research import backtest_factors as bt  # noqa: E402
+from custos.research import window_usage as wu  # noqa: E402
 from custos.research.evolution.dual_window import Window, validate_windows  # noqa: E402
 from custos.research.evolution.expr_dsl import ExprError, parse  # noqa: E402
 from custos.research.evolution.random_expr import sample_expression  # noqa: E402
@@ -2405,6 +2406,14 @@ def main(
         )
     if rep is None:
         return 2  # 全格失败护栏（不落盘）
+
+    if judgment is not None:  # 判定窗使用台账（v0.321）：本次=该窗第 k 次被读
+        _wu_k = wu.record_use("R34", "judgment", tag, "判定窗读数")
+        rep["window_usage"] = {
+            "window": "judgment",
+            "k": _wu_k,
+            "note": wu.usage_note("R34", "judgment", _wu_k),
+        }
 
     out = out_dir / f"_score_evolution__{tag}.json"
     with out.open("w", encoding="utf-8") as fh:

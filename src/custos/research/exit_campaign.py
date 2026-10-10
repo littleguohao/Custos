@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from custos.core.paths import write_json_atomic
+from custos.research import window_usage as wu
 from custos.research.evolution import exit_genome as eg
 
 #: 评估器协议：出场参数（基因组，不含 FIXED 轴）× 窗口 → 读数 | None。
@@ -733,11 +734,17 @@ def run_campaign(
             file=sys.stderr,
         )
 
+    _wu_k = wu.record_use("R37", "judgment", tag, "战役判定窗读数")
     report = {
         "schema": "exit_campaign_report/v1",
         "campaign": tag,
         "status": state.status,
         "objective_version": _sg_obj_version(),
+        "window_usage": {
+            "window": "judgment",
+            "k": _wu_k,
+            "note": wu.usage_note("R37", "judgment", _wu_k),
+        },
         "verdict": {
             "running": "🔄 冒烟/暂停（max_batches 护栏），非结局",
             "falsified": "❌ 结局②：出场参数路线证伪收口（CTL-3）",

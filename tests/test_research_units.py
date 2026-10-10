@@ -88,6 +88,21 @@ class TestUnitStructure:
         readme = (RESEARCH / "README.md").read_text(encoding="utf-8")
         assert path.name in readme, f"{path.name} 未在 README 主图/总账里出现"
 
+    def test_header_conclusion_sync_when_judged(self, path):
+        """#10（owner 方法论 review）：回填区出现「判毕」时，头部状态与结论段
+        不得再写「待跑数」「待发令」——头尾脱节（R39 曾摆过一次：回填区判毕
+        untested、头部还写「重跑待发令」）。后续阶段确需等待时换措辞
+        （如「C5 终审单独终步」），别用这三个词。"""
+        s = path.read_text(encoding="utf-8")
+        body = s[s.index("## 证据与过程") :]
+        if "判毕" not in body:
+            return
+        header = s[: s.index("## 主题")]
+        concl = s[s.index("## 结论") : s.index("---\n\n## 证据与过程")]
+        for bad in ("待跑数", "待发令", "重跑待发令"):
+            assert bad not in header, f"{path.name} 已判毕但头部仍写「{bad}」"
+            assert bad not in concl, f"{path.name} 已判毕但结论段仍写「{bad}」"
+
 
 class TestReadmeIndex:
     def _readme(self):

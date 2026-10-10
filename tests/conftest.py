@@ -98,6 +98,18 @@ def _redirect_plan_shadow_ledger_tmp(monkeypatch, tmp_path):
     )
 
 
+@pytest.fixture(autouse=True)
+def _redirect_window_usage_ledger_tmp(monkeypatch, tmp_path):
+    """把判定窗/pre2019 使用台账改道 tmp（v0.321）。
+
+    研究工具的 run_study/main 现在会登记窗口读取（record_use）——不钉的
+    话，走这些路径的测试会写真实 governance/research/window_usage.jsonl。
+    """
+    from custos.research import window_usage
+
+    monkeypatch.setattr(window_usage, "LEDGER", tmp_path / "window_usage.jsonl")
+
+
 @pytest.fixture
 def reversal_thresholds():
     """按依赖顺序重载 B1 反转 K 阈值链，并在退出时**完整还原**。

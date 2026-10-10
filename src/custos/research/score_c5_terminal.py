@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from custos.core.paths import LOGS
+from custos.research import window_usage as wu
 from custos.research.exit_c5_terminal import (  # 判据/常量单源
     GAMMA,
     GAMMA_DEGRADED,
@@ -313,10 +314,16 @@ def run_c5(
     n_taken = pf_c.get("n_taken")
     verdict = apply_c5(n_taken, d_margin, yard, boot.get("ci95"))
     nonzero = {k: v for k, v in mult.items() if v}
+    _wu_k = wu.record_use("R36-C5", "pre2019", args.tag, "C5 pre2019 终审")
 
     rep = {
         "version": 1,
         "tag": args.tag,
+        "window_usage": {
+            "window": "pre2019",
+            "k": _wu_k,
+            "note": wu.usage_note("R36-C5", "pre2019", _wu_k),
+        },
         "config": {
             "from_report": str(args.from_report),
             "candidate_multipliers_nonzero": nonzero,

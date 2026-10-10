@@ -48,16 +48,21 @@ LLM 不碰数值。
 
 ## 结论
 
-**待跑数**（预注册落档 2026-10-08；判据 v0.301/v0.307 修订在案）。结局四态读法
-（写死）：**candidate**（C1~C4 全过 ⇒ C5 pre2019 单独终步，owner 拍板
-发令）；**falsified**（C2/C3 不过或 C4 confirmed_fail ⇒ 按证伪归档——
-逆 regime 对赌判负不意外）；**untested**（C1 样本不足=不可判，**不判
-falsified**——稀疏门被 max-of-230 挑中再在 C1 判死 = 样本不足误判成否定
-证据，v0.299 哲学同族）；**provisional**（C4 池未满；或 **C3
-not_applicable**——top 出场无可扰参数轴（base_low params={}）时灵敏度
-证据缺失：不降 falsified——无证据≠否定，也不放行 candidate，v0.307）。⚠️ 即使 candidate
-成立，**绝对 margin 读数也不进 live 决策**（幸存者宇宙抬高绝对读数，
-相对结论才有效——R11/R14 同族声明）。
+**待跑数**（预注册落档 2026-10-08；判据 v0.301/v0.302/v0.307 修订在案；
+模板 v0.321 起：机械判决 / 实质读数 / 不能读成什么 三栏）。
+
+- **机械判决**：待跑数——判据已写死、Phase 1 工具 ✅，生产机跑数待发令。
+- **实质读数**：暂无（跑数前）。结局四态读法（写死）：**candidate**
+  （C1~C4 全过 ⇒ C5 pre2019 单独终步，owner 拍板发令）；**falsified**
+  （C2/C3 不过或 C4 confirmed_fail ⇒ 按证伪归档——逆 regime 对赌判负
+  不意外）；**untested**（C1 样本不足=不可判，**不判 falsified**——
+  稀疏门被 max-of-230 挑中再在 C1 判死 = 样本不足误判成否定证据，
+  v0.299 哲学同族）；**provisional**（C4 池未满；或 **C3 not_applicable**
+  ——top 出场无可扰参数轴（base_low params={}）时灵敏度证据缺失：
+  不降 falsified 也不放行 candidate，v0.307）。
+- **不能读成什么**：即使 candidate 成立，**绝对 margin 读数也不进 live
+  决策**（幸存者宇宙抬高绝对读数，相对结论才有效——R11/R14 同族声明）；
+  任何结局都不得被读成超出其字面含义的结论。
 
 ---
 

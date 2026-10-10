@@ -596,6 +596,8 @@ class TestEndToEnd:
         assert rep2["n_batches"] == 2
         assert rep2["total_genomes"] == 12
         assert rep2["status"] == "running"
+        # 判定窗台账（v0.321）：首发 k=1 + 续跑（也是一次真读）k=2
+        assert rep2["window_usage"]["k"] == 2
 
     def test_resume_terminal_report_only(self, tmp_path, capsys):
         ledger = tmp_path / "t" / "campaign_ledger.json"

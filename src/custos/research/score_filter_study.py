@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from custos.core.paths import LOGS
+from custos.research import window_usage as wu
 from custos.research.evolution_loop import _overlaps_pre2019, PRE2019_END, PRE2019_START
 
 #: 预注册 4 测试对象（不许加）
@@ -435,9 +436,16 @@ def run_study(
             "verdict_hint": _verdict_hint(per_x, c3),
         }
 
+    _wu_k = wu.record_use("R36-P4", "judgment", args.tag, "P4 判定窗读数")
+
     return {
         "version": 1,
         "tag": args.tag,
+        "window_usage": {
+            "window": "judgment",
+            "k": _wu_k,
+            "note": wu.usage_note("R36-P4", "judgment", _wu_k),
+        },
         "config": {
             "filters": list(FILTER_KEYS),
             "x_grid": list(X_GRID),

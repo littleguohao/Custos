@@ -43,15 +43,21 @@
 
 ## 结论
 
-**待跑数**（预注册落档 2026-10-09）。结局四态读法（写死）：**candidate**
-（C1~C4 全过 ⇒ C5 pre2019 单独终步，owner 拍板发令）；**falsified**
-（C2 不过或 C4 confirmed_fail ⇒ 计划规则按证伪归档——position_plans
-维持影子层不并轨）；**untested**（C1 样本不足=不可判，不判 falsified
-——样本不足≠否定证据，v0.301 哲学同族）；**provisional**（C4 池未满）。
-⚠️ 即使 candidate 成立，**绝对 margin 读数也不进 live 决策**（幸存者
-宇宙抬高绝对读数，相对结论才有效——R11/R14 同族声明）；并轨是独立
-提交、只动 SIGNAL_ORDER，且 default 来源永远不出 plan 信号（v0.310
-已是代码现实）。
+**待跑数**（预注册落档 2026-10-09；判据 v0.315/v0.317 定稿在案；模板
+v0.321 起：机械判决 / 实质读数 / 不能读成什么 三栏）。
+
+- **机械判决**：待跑数——判据已写死、Phase 1 工具 ✅，生产机跑数待发令
+  （先 --n-random 5 探过门率再估总耗时，v0.318 跑数指导）。
+- **实质读数**：暂无（跑数前）。结局四态读法（写死）：**candidate**
+  （C1~C4 全过 ⇒ C5 pre2019 单独终步，owner 拍板发令）；**falsified**
+  （C2 不过或 C4 confirmed_fail ⇒ 计划规则按证伪归档——position_plans
+  维持影子层不并轨）；**untested**（C1 样本不足=不可判，不判
+  falsified——样本不足≠否定证据，v0.301 哲学同族）；**provisional**
+  （C4 池未满/池空 indeterminate）。
+- **不能读成什么**：即使 candidate 成立，**绝对 margin 读数也不进 live
+  决策**（幸存者宇宙抬高绝对读数，相对结论才有效——R11/R14 同族
+  声明）；并轨是独立提交、只动 SIGNAL_ORDER，且 default 来源永远不出
+  plan 信号（v0.310 已是代码现实）。
 
 ---
 

@@ -38,9 +38,15 @@ from pathlib import Path
 from typing import Any, Optional
 
 from custos.core.paths import LOGS
+from custos.research import window_usage as wu
 
 #: pre2019 untouched 终审段（写死；窗外交集即拒）
 PRE2019_START, PRE2019_END = "2010-01-01", "2016-12-31"
+#: 前向 holdout 冻结段起点（v0.321 owner 方法论 review #1② 拍板）：判定窗
+#: 2024-08-01~2026-09-04 已被 13 个单元反复读取（分岔路径——多次使用后不再
+#: 是样本外），2026-09 以后的新数据**任何研究不得使用**，攒够后作下一轮
+#: 判定窗。与 pre2019 同族：研究工具对 ≥ 本日起点的窗口硬拒绝。
+FORWARD_HOLDOUT_START = "2026-09-05"
 
 #: v0.273 定稿 γ（非 degraded）+ v0.276 C2 量级条款采 B 的执行端：
 #: 窗间保留率（判定 Δm ÷ 挖掘 Δm）< 0.5 ⇒ candidate_degraded ⇒ C5 γ=0.75
@@ -528,10 +534,16 @@ def run_c5(args: Any, per_code: Optional[dict[str, dict]] = None) -> dict[str, A
     boot = paired_bootstrap(pairs, seed=args.seed, n_boot=args.n_bootstrap)
     se = boot.get("se")
     verdict = apply_c5(n_taken, d_margin, yard, boot.get("ci95"))
+    _wu_k = wu.record_use("R37-C5", "pre2019", args.tag, "C5 pre2019 终审")
 
     rep = {
         "version": 1,
         "tag": args.tag,
+        "window_usage": {
+            "window": "pre2019",
+            "k": _wu_k,
+            "note": wu.usage_note("R37-C5", "pre2019", _wu_k),
+        },
         "config": {
             "genome_key": args.genome,
             "window": {"start": args.start, "end": args.end},

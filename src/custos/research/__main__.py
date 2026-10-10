@@ -104,6 +104,13 @@ TOOLS: dict[str, tuple[str, str]] = {
         "（参照=同窗现行版）/C3=lookback 扰动新子集两版重跑/C4=随机止损价臂"
         " N=50（预算对等=两边都不挑选）；pre2019 硬拒绝+check_reach 到达校验",
     ),
+    "window_usage": (
+        "diagnostic",
+        "判定窗/pre2019 使用台账（v0.321，owner 方法论 review #1）："
+        "record_use 每读一次记一行（append-only+每日快照+写失败不炸研究），"
+        "报告必写「该窗第 k 次被读」（k 大判读打折——分岔路径下多轮使用的"
+        "判定窗不再是样本外）；CLI 查窗口被读次数",
+    ),
     "plan_shadow_review": (
         "driver",
         "#60 持仓计划影子事后打分（判据 C）：台账 1700 口径不一致事件（agree="

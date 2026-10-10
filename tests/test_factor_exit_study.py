@@ -218,6 +218,7 @@ class TestScriptedScenarios:
                 assert abs(qp - q) <= delta + 1e-9, d
         assert c["C4"]["state"] == "confirmed_pass", c["C4"]
         assert rep["verdict"] == "candidate"
+        assert rep["window_usage"]["k"] == 1  # 判定窗台账（v0.321）
 
     def test_falsified_when_no_conditional_edge(self, monkeypatch):
         rep = _run(monkeypatch, _three_level_spec(180), _flat_replay, n_random=5)
