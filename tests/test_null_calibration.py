@@ -79,7 +79,9 @@ def _rand_seq(seed: int):
 
 def _bear_run(replay, **kw):
     def run(seed):
-        spec = _bear_per_code({"j_low": 120, "j_low_adx25": 4})  # 自带双窗键
+        # j_low_adx25=60（owner 2026-10-10：4 信号的 margin 易冲极值，
+        # 每条臂 max 都落这个门 ⇒ 池饱和 q95 恒同，分辨力偏弱）
+        spec = _bear_per_code({"j_low": 120, "j_low_adx25": 60})  # 自带双窗键
         kw.setdefault("n_random", N_RANDOM)
         kw.setdefault("c4_min_pool", MIN_POOL)
         return brs.run_study(
@@ -146,12 +148,32 @@ class TestSentinelMaxOf5:
         return out
 
     def test_calibration_catches_max_of_5_bug(self, monkeypatch):
+        # 哨兵自备 12 门 ×30 信号 spec：top max-of-60 vs 臂 max-of-5 的
+        # 预算不对称足够 decisive（v0.306 生产事故=46 门 max-of-230 vs
+        # max-of-5；校准主用例的 2 门/大样本口径下差距会缩到抓不住——
+        # owner：主用例防饱和、哨兵保分辨力，两者 fixture 分开）
         monkeypatch.setattr(brs, "run_arm", self._run_arm_max_of_5)
+        gates12 = {
+            g: 30
+            for g in (
+                "b2,bottom_surge,bottom_surge_j13,bottom_surge_strict,"
+                "bottom_surge_strict_j13,breakout_pullback_b1,j_low,j_low_adx25,"
+                "j_low_adx60,j_low_dif_pos,j_low_qsx_gt_dks,j_low_qsx_weekly"
+            ).split(",")
+        }
+
+        def _run(seed):
+            spec = _bear_per_code(gates12)
+            return brs.run_study(
+                _bear_args(seed=seed, n_random=15, c4_min_pool=10),
+                warm_fn=lambda s, e: spec[(s, e)],
+                replay_fn=hn.null_replay,
+                random_entry_fn=_rand_seq(seed),
+            )
+
         with pytest.raises(AssertionError, match="零假设校准失败"):
             hn.assert_noise_calibration(
-                "bear_regime[max-of-5 哨兵]",
-                _bear_run(hn.null_replay),
-                seeds=(0, 1, 2),
+                "bear_regime[max-of-5 哨兵]", _run, seeds=(0, 1, 2)
             )
 
 

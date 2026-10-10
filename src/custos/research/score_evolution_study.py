@@ -2428,7 +2428,16 @@ def main(
         return 2  # 全格失败护栏（不落盘）
 
     if judgment is not None:  # 判定窗使用台账（v0.321）：本次=该窗第 k 次被读
-        _wu_k = wu.record_use("R34", "judgment", tag, "判定窗读数")
+        _wu_k = wu.record_use(
+            "R34",
+            "judgment",
+            tag,
+            "判定窗读数",
+            synthetic=any(
+                x is not None
+                for x in (cell_runner, cell_runner_coarse, v0_runner, v0l_collector)
+            ),
+        )
         rep["window_usage"] = {
             "window": "judgment",
             "k": _wu_k,

@@ -86,9 +86,3 @@ reports/
 # Z哥知识库原文暂存（订阅付费内容，一律不入库——含 .md，覆盖上方 data/**/*.md 放行）
 data/zge_kb/**
 !data/zge_kb/**/
-
-# 判定窗使用台账=机器本地运行时产物（append-only+每日快照），不入库
-# （2026-10-10 事故：pytest 外直跑 run_study 绕过 conftest 重定向，
-#  合成 tag "t" 被误提交——生产机各有真台账，混入会污染）
-governance/research/window_usage.jsonl
-governance/research/window_usage.jsonl.bak_*

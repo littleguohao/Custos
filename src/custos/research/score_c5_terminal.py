@@ -318,7 +318,13 @@ def run_c5(
     n_taken = pf_c.get("n_taken")
     verdict = apply_c5(n_taken, d_margin, yard, boot.get("ci95"))
     nonzero = {k: v for k, v in mult.items() if v}
-    _wu_k = wu.record_use("R36-C5", "pre2019", args.tag, "C5 pre2019 终审")
+    _wu_k = wu.record_use(
+        "R36-C5",
+        "pre2019",
+        args.tag,
+        "C5 pre2019 终审",
+        synthetic=(collector is not None or select_fn is not None),
+    )
     from custos.research import provenance as pv  # noqa: PLC0415
 
     rep = {

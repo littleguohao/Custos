@@ -66,6 +66,37 @@ class TestRecordUse:
         assert "打折判读" in note
 
 
+class TestSyntheticGuard:
+    """合成数据守卫（v0.334，owner 拍板台账**重新入库**）：台账回答「真实
+    判定窗被读几次」⇒ 入库跨机 git 同步（机器本地各数各的、k 系统性低估
+    ——owner 2026-10-10 复核纠正）；写入路径加守卫，任何注入件非 None ⇒
+    不写——pytest 外直跑注入路径也混不进假记录（2026-10-10 事故根因）。"""
+
+    def test_synthetic_true_skips_write(self, tmp_path):
+        p = tmp_path / "led.jsonl"
+        got = wu.record_use("R39", "judgment", "t", "x", synthetic=True, path=p)
+        assert got is None
+        assert not p.exists()  # 台账路径零改动
+
+    def test_usage_note_synthetic(self):
+        note = wu.usage_note("R39", "judgment", None)
+        assert "合成" in note and "未入台账" in note
+
+    def test_injected_run_study_leaves_ledger_untouched(self, tmp_path, monkeypatch):
+        """钉死事故路径：注入件（warm_fn/replay_fn）跑 run_study ⇒ 真实台账
+        路径零改动、k=None 注记「未入台账」。"""
+        import test_plan_rules_replay as pxt
+
+        ledger = tmp_path / "real_ledger.jsonl"
+        monkeypatch.setattr(wu, "LEDGER", ledger)
+        rep = pxt._run(
+            pxt._mk_per_code(), pxt._replay_candidate, n_random=2, c4_min_pool=2
+        )
+        assert rep["window_usage"]["k"] is None
+        assert "未入台账" in rep["window_usage"]["note"]
+        assert not ledger.exists()
+
+
 class TestForwardHoldout:
     """前向 holdout 冻结（v0.321 #1②）：判定窗反复使用已接近第二个挖掘窗
     ——2026-09 以后的新数据保留为下一轮判定窗，任何研究不得使用。"""

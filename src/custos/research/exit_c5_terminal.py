@@ -519,6 +519,8 @@ def run_c5(args: Any, per_code: Optional[dict[str, dict]] = None) -> dict[str, A
     任一变体 0 交易 → RuntimeError（不落盘——防误读为「候选被杀」）。
     """
     from custos.research import backtest_factors as bt  # noqa: PLC0415
+
+    _injected = per_code is not None  # 合成守卫（台账 v0.334）
     from custos.research import exit_campaign as ec  # noqa: PLC0415
     from custos.research.evolution import exit_genome as eg  # noqa: PLC0415
 
@@ -560,7 +562,9 @@ def run_c5(args: Any, per_code: Optional[dict[str, dict]] = None) -> dict[str, A
     boot = paired_bootstrap(pairs, seed=args.seed, n_boot=args.n_bootstrap)
     se = boot.get("se")
     verdict = apply_c5(n_taken, d_margin, yard, boot.get("ci95"))
-    _wu_k = wu.record_use("R37-C5", "pre2019", args.tag, "C5 pre2019 终审")
+    _wu_k = wu.record_use(
+        "R37-C5", "pre2019", args.tag, "C5 pre2019 终审", synthetic=_injected
+    )
     from custos.research import provenance as pv  # noqa: PLC0415
 
     rep = {

@@ -189,7 +189,8 @@ class TestGridAndVerdicts:
         assert c["C3"]["ok"] is True and len(c["C3"]["draws"]) == brs.C3_DRAWS
         assert c["C4"]["state"] == "confirmed_pass"
         assert rep["verdict"] == "candidate"
-        assert rep["window_usage"]["k"] == 1  # 判定窗台账（v0.321）
+        assert rep["window_usage"]["k"] is None  # 合成运行不入台账（v0.334 守卫）
+        assert "未入台账" in rep["window_usage"]["note"]
 
     def test_c3_not_applicable_for_base_low(self):
         """top 落在无可扰参数轴的出场（base_low params={}）⇒ C3 =

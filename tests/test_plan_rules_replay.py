@@ -259,7 +259,8 @@ class TestCriteria:
         assert c["C2"]["rdd_gate_fail"] is None
         assert c["C4"]["state"] == "confirmed_pass"
         assert rep["verdict"] == "candidate"
-        assert rep["window_usage"]["k"] == 1  # 判定窗台账（v0.321）
+        assert rep["window_usage"]["k"] is None  # 合成运行不入台账（v0.334 守卫）
+        assert "未入台账" in rep["window_usage"]["note"]
         # 副读数 pct7 自含；现行版读数两窗在
         assert rep["readings"]["mining"]["live_alt_pct7"] is not None
 

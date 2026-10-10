@@ -335,6 +335,7 @@
 | 2026-10-10 | v0.331 | **前向 holdout 硬拒绝下沉共享+全入口接线（owner review #2 返修）**：守卫单源 `load_window.forward_holdout_violation`（原只挂 factor_exit 族——exit_campaign 实测 --judgment-end 2026-10-08 能进加载被抓）；exit_campaign/score_evolution/evolution_loop/strategy_grid/backtest_factors/score_filter 全接线，常量迁单源；末段交易出场落 holdout 采**注记**口径（EXIT_BARS_HOLDOUT_NOTE 入四终端报告——截数据会把末段持仓强平失真） | owner review | 钉测 +8 |
 | 2026-10-10 | v0.332 | **power_mde 拆 rho_pair/deff + R39 回填改正（owner review #3/#4 返修）**：③两个方向相反的相关原混为一个 ρ——配对相关（越高 SE 越小）与日簇设计效应 deff=1+(m−1)·ICC（越高 SE 越大，实测=日簇 bootstrap SE²÷iid SE²）拆双参数，缺 deff ⇒ MDE 低估（R42 采 A 方向不变且更稳，功效节已修订注记）；④R39 回填改正：+0.0031 映射按 pick_top 反推**未过 rdd 门**（否则与 top 退化矛盾，待生产机产物核对）、「10×N 触达」系时代错误（a2 跑于重抽机制前） | owner review | 钉测 +2 改写 3 |
 | 2026-10-10 | v0.333 | **R42 Phase 1 工具落地（判据冻结照蓝图）**：`score_tier_position_study`——V0 信号预热复用 warm_v0_signals 单源+挖掘窗分位切 3 档（切点不碰判定窗）+collect_all 全候选分档（pct5_trail08 钉死）+C1~C4 机械读数（C2 单调 高≥中≥低 且 高−低>0、相邻档差<0.086 标低置信；C3 主判据加权 expR 三组权重格、双窗<0.035 按与零无法区分；C4 打乱归属臂 N=50 kit 单源）；W2=过滤器对照+组合层未测注明；零假设校准两连测过；pre2019/holdout 硬拒绝 | owner 蓝图（判据一字未改） | 钉测 +19 校准 +2 |
+| 2026-10-10 | v0.334 | **判定窗台账重新入库 + record_use 合成守卫（owner 复核纠正 gitignore 方向）**：机器本地台账各机各数、k 系统性低估，违背「判定窗被读几次」建账初衷——**入库、跨机 git 同步、写入只发生在生产机**；修写入路径代替放弃入库：`record_use(synthetic=True)` ⇒ 不写（九调用点全接线，pytest 外直跑注入路径也混不进假记录；k=None 注记「未入台账」）；钉测=注入 run_study 后真实台账零改动。bear 校准 j_low_adx25 4→60（4 信号 margin 冲极值 ⇒ 池饱和分辨力弱；池 uniq 3→8~13），哨兵改自备 12 门 ×30 spec 保 decisive | owner review | 钉测 +3 改写 2 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

@@ -10,9 +10,13 @@
 k 越大，该窗的读数越要按「已被反复使用」打折判读。台账自 v0.321 起算
 （历史使用不追溯，在案事实见各单元回填区）。
 
-- 台账路径：`governance/research/window_usage.jsonl`（治理数据，跨机
-  靠 git 同步——判读的「第 k 次」以全量台账为准）；测试经 conftest
-  改道 tmp，不写真实台账；
+- 台账路径：`governance/research/window_usage.jsonl`（治理数据，**入库、
+  跨机靠 git 同步**——判读的「第 k 次」以全量台账为准；机器本地文件会
+  各机各数、k 系统性低估，owner 2026-10-10 复核纠正 v0.334）。**写入
+  只应发生在有真实数据的生产机（只由生产机提交）**；测试经 conftest
+  改道 tmp；**合成数据守卫**：``record_use(synthetic=True)`` ⇒ 不写——
+  任何注入件（warm/replay/random_entry/collector/evaluator 等）非 None
+  的调用点必须传，pytest 外直跑注入路径也混不进假记录；
 - 键 = ``window`` 字段（``"judgment"`` / ``"pre2019"``——窗口区间由
   `exit_c5_terminal` 常量单源锚定，不带进键）；
 - 行字段：schema/unit/window/tag/purpose/recorded_at。
@@ -76,13 +80,32 @@ def count_uses(window: str, *, path: Optional[Path] = None) -> int:
 
 
 def record_use(
-    unit: str, window: str, tag: str, purpose: str, *, path: Optional[Path] = None
-) -> int:
+    unit: str,
+    window: str,
+    tag: str,
+    purpose: str,
+    *,
+    synthetic: bool = False,
+    path: Optional[Path] = None,
+) -> Optional[int]:
     """登记一次窗口读取，返回「这是该窗第 k 次被读」（含本次）。
 
     append-only + 每日首写快照；**台账写失败不炸研究**（旁路治理数据——
     WARN 后返回当时计数，同影子台账的隔离语义）。
+
+    **合成数据守卫（v0.334，owner 拍板台账重新入库）**：``synthetic=True``
+    （调用方在任何注入件——warm_fn/replay_fn/random_entry_fn/collector/
+    select_fn/evaluator/cell_runner——非 None 时传入）⇒ **不写台账**，
+    返回 None。台账回答的是「真实判定窗被读过几次」：它**入库、跨机靠
+    git 同步**（机器本地会 dev/coder/生产各数各的，k 被系统性低估——
+    owner 2026-10-10 复核纠正），写入天然只发生在有真实数据的生产机；
+    合成运行（pytest 内外都一样）绝不允许把假记录混进全量台账——
+    2026-10-10 事故的根因就是 pytest 外直跑注入路径绕过了 conftest
+    重定向，修写入路径而不是放弃入库。空数据的生产路径另由研究工具
+    的空结果护栏在上游拦住（到不了这里）。
     """
+    if synthetic:
+        return None
     path = Path(path) if path else LEDGER
     row: dict[str, Any] = {
         "schema": SCHEMA,
@@ -105,9 +128,15 @@ def record_use(
     return count_uses(window, path=path)
 
 
-def usage_note(unit: str, window: str, k: int) -> str:
-    """报告用注记行：「这是该窗第 k 次被读」+ 判读打折指引。"""
+def usage_note(unit: str, window: str, k: Optional[int]) -> str:
+    """报告用注记行：「这是该窗第 k 次被读」+ 判读打折指引；k=None ⇒
+    合成运行未入台账（synthetic 守卫，v0.334）。"""
     span = WINDOW_SPAN.get(window, window)
+    if k is None:
+        return (
+            f"{unit} 本次为合成数据运行（测试注入），{window} 窗（{span}）"
+            "读取**未入台账**——k 不计（synthetic 守卫，v0.334）"
+        )
     return (
         f"{unit} 本次是 {window} 窗（{span}）第 {k} 次被读（台账 v0.321 起算）"
         "——多轮读取的判定窗按「已被反复使用」打折判读（分岔路径，"

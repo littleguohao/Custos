@@ -459,7 +459,7 @@ class TestReportSelfContained:
         assert pv["unit"] == "R42"
         assert pv["criteria_version"] == "v0.312/v0.326"
         assert pv["pre_reg_doc"].endswith("R42_score_tier_position.md")
-        assert rep["window_usage"]["k"] == 1  # 判定窗台账（v0.321）
-        assert "第 1 次被读" in rep["window_usage"]["note"]
+        assert rep["window_usage"]["k"] is None  # 合成运行不入台账（v0.334 守卫）
+        assert "未入台账" in rep["window_usage"]["note"]
         assert rep["forward_holdout_note"] == EXIT_BARS_HOLDOUT_NOTE
         assert rep["verdict"] == "candidate"

@@ -218,7 +218,8 @@ class TestScriptedScenarios:
                 assert abs(qp - q) <= delta + 1e-9, d
         assert c["C4"]["state"] == "confirmed_pass", c["C4"]
         assert rep["verdict"] == "candidate"
-        assert rep["window_usage"]["k"] == 1  # 判定窗台账（v0.321）
+        assert rep["window_usage"]["k"] is None  # 合成运行不入台账（v0.334 守卫）
+        assert "未入台账" in rep["window_usage"]["note"]
 
     def test_cost_sensitivity_block_wired(self, monkeypatch):
         """成本副读数（owner review #6，v0.329）：top/uniform-best 交易集

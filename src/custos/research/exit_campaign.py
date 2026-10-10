@@ -633,11 +633,14 @@ def run_campaign(
     *,
     resume: bool = False,
     tag: str = "",
+    synthetic: bool = False,
 ) -> dict:
     """战役主循环：批次 → CTL → 台账，直到 CTL 给出结局（或 max_batches 冒烟停）。
 
     返回最终报告 dict（同时落 ``_exit_campaign__{tag}.json`` 于台账同目录）。
     ``max_batches > 0`` 是冒烟护栏：跑满即停，status 仍 running，不算结局。
+    ``synthetic``：评估器为测试注入时传 True（判定窗台账合成守卫 v0.334
+    ——合成运行不写真实台账）。
     """
     batches: list[dict] = []
     state = CampaignState()
@@ -715,7 +718,7 @@ def run_campaign(
             file=sys.stderr,
         )
 
-    _wu_k = wu.record_use("R37", "judgment", tag, "战役判定窗读数")
+    _wu_k = wu.record_use("R37", "judgment", tag, "战役判定窗读数", synthetic=synthetic)
     from custos.research import provenance as pv  # noqa: PLC0415
     from custos.research.load_window import EXIT_BARS_HOLDOUT_NOTE  # noqa: PLC0415
     import types as _t  # noqa: PLC0415
@@ -1080,7 +1083,12 @@ def main(
     ledger.parent.mkdir(parents=True, exist_ok=True)
     try:
         report = run_campaign(
-            _config_of(args), ev, ledger, resume=args.resume, tag=args.tag
+            _config_of(args),
+            ev,
+            ledger,
+            resume=args.resume,
+            tag=args.tag,
+            synthetic=evaluator is not None,  # 注入评估器 ⇒ 不写台账（v0.334）
         )
     except LedgerSpaceChanged as exc:
         ap.error(str(exc))  # 档位空间守卫：干净 exit 2，不留 traceback

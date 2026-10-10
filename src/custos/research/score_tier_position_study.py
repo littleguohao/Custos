@@ -462,7 +462,13 @@ def run_study(
     )
 
     # 判定窗使用台账（v0.321，owner 方法论 review #1）：本报告=该窗第 k 次被读
-    _wu_k = wu.record_use("R42", "judgment", args.tag, "C1~C4 判定窗读数")
+    _wu_k = wu.record_use(
+        "R42",
+        "judgment",
+        args.tag,
+        "C1~C4 判定窗读数",
+        synthetic=(warm_fn is not None or replay_fn is not None),
+    )
     from custos.research import provenance as pv  # noqa: PLC0415
     from custos.research.load_window import EXIT_BARS_HOLDOUT_NOTE  # noqa: PLC0415
 

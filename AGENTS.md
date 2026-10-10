@@ -149,7 +149,14 @@ uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/
 - **判定窗/pre2019 使用台账**（`governance/research/window_usage.jsonl`，
   `window_usage.record_use` 唯一写入口径——append-only+每日快照，写失败
   不炸研究）：每读一次记一行，报告必写「该窗第 k 次被读」（k 越大判读
-  越打折——分岔路径下多轮使用的判定窗不再是样本外）；
+  越打折——分岔路径下多轮使用的判定窗不再是样本外）。**台账入库、跨机
+  靠 git 同步（v0.334 owner 复核）**——「第 k 次」以全量台账为准，机器
+  本地文件会各机各数、k 系统性低估；**写入只应发生在有真实数据的生产
+  机，只由生产机提交**；**合成数据守卫**：`record_use(synthetic=True)`
+  ⇒ 不写——任何注入件（warm/replay/random_entry/collector/evaluator/
+  cell_runner 等）非 None 的调用点必须传（2026-10-10 事故：pytest 外
+  直跑注入路径绕过 conftest 重定向写入合成记录——修写入路径，不是
+  放弃入库）；
 - 单元头部「状态/结论」必须与正文同步（R22 头部滞后是反面教材；**判毕后
   头部/结论段禁「待跑数/待发令」**，test 机械强制 v0.321——R39 曾脱节）；
 - **判据修订留痕机械核对（v0.327，owner review #11）**：产物 provenance 记

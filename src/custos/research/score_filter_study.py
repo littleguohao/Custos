@@ -432,7 +432,13 @@ def run_study(
             "verdict_hint": _verdict_hint(per_x, c3),
         }
 
-    _wu_k = wu.record_use("R36-P4", "judgment", args.tag, "P4 判定窗读数")
+    _wu_k = wu.record_use(
+        "R36-P4",
+        "judgment",
+        args.tag,
+        "P4 判定窗读数",
+        synthetic=(collector is not None or rq_fetcher is not None),
+    )
     from custos.research import provenance as pv  # noqa: PLC0415
 
     return {
