@@ -252,6 +252,14 @@ build_row 源头转 float，numpy 类型不触发校验失败）。
   纪律：挖掘窗选型冻结配置带判定窗；**v0.307 预算对等**：每臂逐门 n_g×5 档
   复刻 max-of-230，非单抽一 n）；判据四态含 untested（C1 不过≠证伪）+
   C3 not_applicable（v0.307：无可扰参数轴不空转不放行 candidate）。
+  score_tier_position_study（R42 终端 Phase 1，v0.333）：打分→仓位分层——
+  V0 分数按挖掘窗分位切 3 档（切点只估挖掘窗）+ collect_all 全候选分档
+  （pct5_trail08 钉死单档，非 top_n）；C2 双窗单调（高≥中≥低 且 高−低>0，
+  相邻档差<0.086 标低置信）为硬前提，C3 主判据=加权 expectancy_R vs 等权
+  （权重格 W1~W3 归一化写死，双窗 |ΔexpR|<0.035 按与零无法区分——C3 不过
+  只放行 provisional 不判死；W2=过滤器路线对照、组合层未测不改引擎）；
+  C4=打乱「交易→档」归属臂 N=50 同预算（criteria_kit 单源）；不建 C5
+  （C2/C3 都过线 owner 才发令）。
   plan_shadow_review（#60 判据 C，v0.311）：影子台账不一致事件（stage=1700
   ∧ agree=False ∧ 非 default）的 plan vs 现行 N 日持仓层 Δret（N=5 主/10 副；
   P0=T+1 首可卖日开盘清仓、P1（P2 同档）=卖半仓、P3=不动；跌停停牌顺延=

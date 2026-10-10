@@ -104,6 +104,16 @@ TOOLS: dict[str, tuple[str, str]] = {
         "（参照=同窗现行版）/C3=lookback 扰动新子集两版重跑/C4=随机止损价臂"
         " N=50（预算对等=两边都不挑选）；pre2019 硬拒绝+check_reach 到达校验",
     ),
+    "score_tier_position_study": (
+        "driver",
+        "R42 打分→仓位分层 Phase 1：V0 分数按挖掘窗分位切 3 档（切点不碰"
+        "判定窗）+ collect_all 全候选分档（pct5_trail08 钉死单档）——C1 每档"
+        "每窗 n≥50（不过=untested）/C2 双窗单调 高≥中≥低 且 高−低>0"
+        "（相邻档差<0.086 标低置信）/C3 主判据=加权 expR vs 等权（权重格 "
+        "W1~W3 归一化写死，双窗<0.035 按与零无法区分；W2=过滤器路线对照、"
+        "组合层未测不改引擎）/C4=打乱「交易→档」归属臂 N=50 同预算 q95"
+        "（criteria_kit 单源）；判据全冻结不建 C5；pre2019/holdout 硬拒绝",
+    ),
     "window_usage": (
         "diagnostic",
         "判定窗/pre2019 使用台账（v0.321，owner 方法论 review #1）："

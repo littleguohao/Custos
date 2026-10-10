@@ -29,6 +29,7 @@ import test_factor_exit_study as fxt
 from custos.research import bear_regime_study as brs
 from custos.research import factor_exit_study as fes
 from custos.research import plan_rules_replay as prr
+from custos.research import score_tier_position_study as stp
 from test_bear_regime_study import (
     _args as _bear_args,
     _mk_per_code as _bear_per_code,
@@ -36,6 +37,10 @@ from test_bear_regime_study import (
 from test_plan_rules_replay import (
     _args as _prr_args,
     _mk_per_code as _prr_per_code,
+)
+from test_score_tier_position_study import (
+    _args as _stp_args,
+    _mk_per_code as _stp_per_code,
 )
 
 _WINDOWS = (("2022-01-01", "2024-07-31"), ("2024-08-01", "2026-09-04"))
@@ -221,3 +226,41 @@ class TestFactorExitCalibration:
             )
 
         hn.assert_edge_detected("factor_exit", run)
+
+
+# ---------------------------------------------------------------------------
+# score_tier_position_study（R42 终端）
+# ---------------------------------------------------------------------------
+
+
+def _stp_run(replay, **kw):
+    def run(seed):
+        per_code = _stp_per_code()  # 180 信号/窗，三档各 60 笔（档阈值 70/40）
+        spec = {w: per_code for w in _WINDOWS}
+        kw.setdefault("n_random", N_RANDOM)
+        kw.setdefault("c4_min_pool", MIN_POOL)
+        return stp.run_study(
+            _stp_args(seed=seed, **kw),
+            warm_fn=lambda s, e: spec[(s, e)],
+            replay_fn=replay,
+        )
+
+    return run
+
+
+class TestScoreTierCalibration:
+    def test_noise(self):
+        hn.assert_noise_calibration("score_tier_position", _stp_run(hn.null_replay))
+
+    def test_edge_detected(self):
+        hn.assert_edge_detected(
+            "score_tier_position",
+            _stp_run(
+                lambda sub, p: hn.edge_replay(
+                    sub,
+                    p,
+                    # 高档（score≥70）系统性大胜 ⇒ 加权 expR 倾斜增量
+                    is_edge=lambda r, _p: r["score"] >= 70.0,
+                )
+            ),
+        )
