@@ -126,6 +126,13 @@ TOOLS: dict[str, tuple[str, str]] = {
         "sha256 / 数据最后日期 / 完整命令行——各终端报告统一带 provenance "
         "块（溯源失败不炸研究）；CLI 打印当前仓库溯源",
     ),
+    "power_mde": (
+        "diagnostic",
+        "统计功效估算 MDE（v0.326，owner 方法论 review #2）：SE="
+        "sqrt(wr(1−wr)/n)·sqrt(2(1−ρ))（下界——payoff 噪声忽略）+ MDE=k×SE——"
+        "预注册「功效」节（R42 起新单元必备）的输入件；MDE > 合理效应 ⇒ "
+        "跑数前合并桶或改问法",
+    ),
     "plan_shadow_review": (
         "driver",
         "#60 持仓计划影子事后打分（判据 C）：台账 1700 口径不一致事件（agree="
