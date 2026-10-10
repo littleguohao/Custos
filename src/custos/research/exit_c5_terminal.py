@@ -39,7 +39,7 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
-from custos.core.paths import LOGS
+from custos.core.paths import LOGS, RESEARCH_DIR
 from custos.research import window_usage as wu
 
 #: pre2019 untouched 终审段（写死；窗外交集即拒）
@@ -554,6 +554,7 @@ def run_c5(args: Any, per_code: Optional[dict[str, dict]] = None) -> dict[str, A
     se = boot.get("se")
     verdict = apply_c5(n_taken, d_margin, yard, boot.get("ci95"))
     _wu_k = wu.record_use("R37-C5", "pre2019", args.tag, "C5 pre2019 终审")
+    from custos.research import provenance as pv  # noqa: PLC0415
 
     rep = {
         "version": 1,
@@ -563,6 +564,12 @@ def run_c5(args: Any, per_code: Optional[dict[str, dict]] = None) -> dict[str, A
             "k": _wu_k,
             "note": wu.usage_note("R37-C5", "pre2019", _wu_k),
         },
+        "provenance": pv.build(
+            args,
+            unit="R37-C5",
+            criteria_version="v0.299/v0.324",
+            pre_reg_doc=RESEARCH_DIR / "R37_exit_axis_evolution_campaign.md",
+        ),
         "config": {
             "genome_key": args.genome,
             "window": {"start": args.start, "end": args.end},
@@ -598,6 +605,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     ap = _build_parser()
     args = ap.parse_args(argv)
+    args.cmdline = " ".join(argv) if argv is not None else " ".join(sys.argv[1:])
     _check_pre2019(args, ap)
     try:
         rep = run_c5(args)

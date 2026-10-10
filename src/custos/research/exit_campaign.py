@@ -38,7 +38,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from custos.core.paths import write_json_atomic
+from custos.core.paths import RESEARCH_DIR, write_json_atomic
 from custos.research import criteria_kit as kit
 from custos.research import window_usage as wu
 from custos.research.evolution import exit_genome as eg
@@ -716,6 +716,9 @@ def run_campaign(
         )
 
     _wu_k = wu.record_use("R37", "judgment", tag, "战役判定窗读数")
+    from custos.research import provenance as pv  # noqa: PLC0415
+    import types as _t  # noqa: PLC0415
+
     report = {
         "schema": "exit_campaign_report/v1",
         "campaign": tag,
@@ -726,6 +729,14 @@ def run_campaign(
             "k": _wu_k,
             "note": wu.usage_note("R37", "judgment", _wu_k),
         },
+        "provenance": pv.build(
+            _t.SimpleNamespace(
+                codes_file="", cmdline=None
+            ),  # 宇宙/命令行由 CLI 主入口回填
+            unit="R37",
+            criteria_version="v0.258/v0.264/v0.266/v0.269/v0.299",
+            pre_reg_doc=RESEARCH_DIR / "R37_exit_axis_evolution_campaign.md",
+        ),
         "verdict": {
             "running": "🔄 冒烟/暂停（max_batches 护栏），非结局",
             "falsified": "❌ 结局②：出场参数路线证伪收口（CTL-3）",
@@ -1048,6 +1059,15 @@ def main(
         )
     except LedgerSpaceChanged as exc:
         ap.error(str(exc))  # 档位空间守卫：干净 exit 2，不留 traceback
+    # 溯源回填（v0.325）：run_campaign 内置占位，宇宙/命令行在主入口补齐
+    from custos.research import provenance as pv  # noqa: PLC0415
+
+    report["provenance"]["cmdline"] = (
+        " ".join(argv) if argv is not None else " ".join(sys.argv[1:])
+    )
+    report["provenance"]["universe_sha256"] = (
+        pv.file_sha256(args.codes_file) if getattr(args, "codes_file", "") else None
+    )
     print(
         f"[campaign] 结局：{report['status']} —— {report['verdict']}\n"
         f"[campaign] 报告：{ledger.parent / f'_exit_campaign__{args.tag}.json'}\n"

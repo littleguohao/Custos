@@ -352,6 +352,7 @@ def main(
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
     args = _build_parser().parse_args(argv)
+    args.cmdline = " ".join(argv) if argv is not None else " ".join(sys.argv[1:])
     horizons = tuple(int(x) for x in str(args.horizons).split(",") if x.strip())
     if not horizons:
         raise SystemExit("--horizons 为空")
@@ -382,6 +383,9 @@ def main(
         evaluate_event(r, _bars(str(r.get("code") or "")), horizons) for r in rows
     ]
     rep = build_report(events, n_rows, horizons)
+    from custos.research import provenance as pv  # noqa: PLC0415
+
+    rep["provenance"] = pv.build(args, unit="#60-C", criteria_version="v0.311/v0.314")
     rep["tag"] = args.tag
     rep["ledger"] = str(args.ledger)
     rep["stage"] = str(args.stage)

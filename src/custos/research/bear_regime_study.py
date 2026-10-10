@@ -51,6 +51,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from custos.core.paths import RESEARCH_DIR
 from custos.research import criteria_kit as kit
 from custos.research import factor_exit_study as fes
 from custos.research import window_usage as wu
@@ -676,6 +677,7 @@ def run_study(
 
     # 判定窗使用台账（v0.321，owner 方法论 review #1）：本报告=该窗第 k 次被读
     _wu_k = wu.record_use("R40", "judgment", args.tag, "C1~C4 判定窗读数")
+    from custos.research import provenance as pv  # noqa: PLC0415
 
     return {
         "schema": "bear_regime_report/v1",
@@ -686,6 +688,16 @@ def run_study(
             "k": _wu_k,
             "note": wu.usage_note("R40", "judgment", _wu_k),
         },
+        "provenance": pv.build(
+            args,
+            unit="R40",
+            criteria_version="v0.301/v0.302/v0.307",
+            pre_reg_doc=RESEARCH_DIR / "R40_bear_regime_long_strategy.md",
+            data_last_date=max(
+                filter(None, (pv.last_date_of(per_code[w]) for w in windows)),
+                default=None,
+            ),
+        ),
         "gates": gates,
         "exit_grid": [e["name"] for e in exits],
         "windows": {w: {"start": se[0], "end": se[1]} for w, se in windows.items()},
@@ -765,6 +777,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     ap = _build_parser()
     args = ap.parse_args(argv)
+    args.cmdline = " ".join(argv) if argv is not None else " ".join(sys.argv[1:])
     fes._check_windows(args, ap)  # pre2019 交集/双窗次序硬拒绝（同族单源）
     # 加载到达校验（v0.316，R41 指导顺手补）：逐股 _load_one_bars 不经批量
     # 截断护栏——count 不够会把窗口静默剪空（r36_c5 碎片宇宙教训）

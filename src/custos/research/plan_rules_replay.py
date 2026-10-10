@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from custos.core.factors.b1_structure import STOP_LOOKBACK, _stop_ref  # noqa: E402
-from custos.core.paths import LOGS, cn_now  # noqa: E402
+from custos.core.paths import LOGS, RESEARCH_DIR, cn_now  # noqa: E402
 from custos.research import criteria_kit as kit  # noqa: E402
 from custos.research import factor_exit_study as fes  # noqa: E402
 from custos.research import strategy_grid as sg  # noqa: E402
@@ -417,6 +417,7 @@ def run_study(
 
     # 判定窗使用台账（v0.321，owner 方法论 review #1）：本报告=该窗第 k 次被读
     _wu_k = wu.record_use("R41", "judgment", args.tag, "C1~C4 判定窗读数")
+    from custos.research import provenance as pv  # noqa: PLC0415
 
     return {
         "schema": "plan_rules_replay/v1",
@@ -427,6 +428,16 @@ def run_study(
             "k": _wu_k,
             "note": wu.usage_note("R41", "judgment", _wu_k),
         },
+        "provenance": pv.build(
+            args,
+            unit="R41",
+            criteria_version="v0.315/v0.317",
+            pre_reg_doc=RESEARCH_DIR / "R41_position_plan_rules_replay.md",
+            data_last_date=max(
+                filter(None, (pv.last_date_of(per_code[w]) for w in windows)),
+                default=None,
+            ),
+        ),
         "windows": {w: {"start": se[0], "end": se[1]} for w, se in windows.items()},
         "params": {
             "live_main": LIVE_PARAMS,
@@ -504,6 +515,7 @@ def main(
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
     ap = _build_parser()
     args = ap.parse_args(argv)
+    args.cmdline = " ".join(argv) if argv is not None else " ".join(sys.argv[1:])
     fes._check_windows(args, ap)  # pre2019 硬拒绝 + 双窗次序（同族单源）
     if warm_fn is None:  # 生产路径才做加载到达校验（注入路径无真实加载）
         from custos.research.exit_c5_terminal import check_reach  # noqa: PLC0415

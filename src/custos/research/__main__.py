@@ -119,6 +119,13 @@ TOOLS: dict[str, tuple[str, str]] = {
         "factor_exit/bear_regime/plan_rules/exit_campaign/score_filter 已"
         "全迁移；rdd 门=strategy_grid、C5 判决=exit_c5_terminal 单源不动",
     ),
+    "provenance": (
+        "diagnostic",
+        "研究产物溯源块（v0.325，owner 方法论 review #8）：git sha+dirty / "
+        "OBJECTIVE_VERSION / 判据版本 / 预注册文档 blob hash / 宇宙文件 "
+        "sha256 / 数据最后日期 / 完整命令行——各终端报告统一带 provenance "
+        "块（溯源失败不炸研究）；CLI 打印当前仓库溯源",
+    ),
     "plan_shadow_review": (
         "driver",
         "#60 持仓计划影子事后打分（判据 C）：台账 1700 口径不一致事件（agree="

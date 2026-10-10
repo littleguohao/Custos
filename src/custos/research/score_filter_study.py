@@ -38,7 +38,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from custos.core.paths import LOGS
+from custos.core.paths import LOGS, RESEARCH_DIR
 from custos.research import criteria_kit as kit
 from custos.research import window_usage as wu
 from custos.research.evolution_loop import _overlaps_pre2019, PRE2019_END, PRE2019_START
@@ -433,6 +433,7 @@ def run_study(
         }
 
     _wu_k = wu.record_use("R36-P4", "judgment", args.tag, "P4 判定窗读数")
+    from custos.research import provenance as pv  # noqa: PLC0415
 
     return {
         "version": 1,
@@ -442,6 +443,12 @@ def run_study(
             "k": _wu_k,
             "note": wu.usage_note("R36-P4", "judgment", _wu_k),
         },
+        "provenance": pv.build(
+            args,
+            unit="R36-P4",
+            criteria_version="v0.277/v0.291",
+            pre_reg_doc=RESEARCH_DIR / "R36_perfect_b1_supervised_scoring.md",
+        ),
         "config": {
             "filters": list(FILTER_KEYS),
             "x_grid": list(X_GRID),
@@ -510,6 +517,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     ap = _build_parser()
     args = ap.parse_args(argv)
+    args.cmdline = " ".join(argv) if argv is not None else " ".join(sys.argv[1:])
     for name, s, e in (
         ("mining", args.mining_start, args.mining_end),
         ("judgment", args.judgment_start, args.judgment_end),

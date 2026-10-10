@@ -54,7 +54,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-from custos.core.paths import BASE, LOGS  # noqa: E402
+from custos.core.paths import BASE, LOGS, RESEARCH_DIR  # noqa: E402
 from custos.research import backtest_factors as bt  # noqa: E402
 from custos.research.evolution.dual_window import (  # noqa: E402
     DualWindowResult,
@@ -824,6 +824,9 @@ class _RunResult:
 
 
 def _write_summary(res: _RunResult, grid: dict[str, Any]) -> Path:
+    """落 ``_summary__{tag}.json``（含 provenance 溯源块，v0.325）并返回路径。"""
+    from custos.research import provenance as pv  # noqa: PLC0415
+
     counts = _decision_counts(res.pool)
     tag = res.out_dir.name
     config = asdict(res.cfg)
@@ -848,6 +851,11 @@ def _write_summary(res: _RunResult, grid: dict[str, Any]) -> Path:
     summary = {
         "tag": tag,
         "directions": list(res.args.direction),
+        "provenance": pv.build(
+            res.args,
+            unit="R36",
+            pre_reg_doc=RESEARCH_DIR / "R36_perfect_b1_supervised_scoring.md",
+        ),
         "config": config,
         "codes_digest": res.codes_digest,
         "pool_size": len(res.pool),
@@ -995,6 +1003,7 @@ def main(
 ) -> int:
     ap = _build_parser()
     args = ap.parse_args(argv)
+    args.cmdline = " ".join(argv) if argv is not None else " ".join(sys.argv[1:])
     _validate_args(args, ap)
     _factor_axis_banner(args)  # #70：三轴流程的容量/退化启动横幅
     _gate_banner(args)  # R36 Phase 2 三轮：非默认门口径启动横幅

@@ -45,6 +45,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from custos.core.paths import RESEARCH_DIR
 from custos.research.evolution import exit_genome as eg
 from custos.research import criteria_kit as kit
 from custos.research import window_usage as wu
@@ -690,6 +691,7 @@ def run_study(
 
     # 判定窗使用台账（v0.321，owner 方法论 review #1）：本报告=该窗第 k 次被读
     _wu_k = wu.record_use("R39", "judgment", args.tag, "C1~C4 判定窗读数")
+    from custos.research import provenance as pv  # noqa: PLC0415
 
     return {
         "schema": "factor_exit_report/v1",
@@ -700,6 +702,16 @@ def run_study(
             "k": _wu_k,
             "note": wu.usage_note("R39", "judgment", _wu_k),
         },
+        "provenance": pv.build(
+            args,
+            unit="R39",
+            criteria_version="v0.301/v2.1",
+            pre_reg_doc=RESEARCH_DIR / "R39_factor_exit_interaction.md",
+            data_last_date=max(
+                filter(None, (pv.last_date_of(per_code[w]) for w in windows)),
+                default=None,
+            ),
+        ),
         "factor": FACTOR_DEF,
         "profiles": {
             pk: {"genome": eg.normalize(g), "key": eg.genome_key(g)}
@@ -818,6 +830,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     ap = _build_parser()
     args = ap.parse_args(argv)
+    args.cmdline = " ".join(argv) if argv is not None else " ".join(sys.argv[1:])
     _check_windows(args, ap)
     # 加载到达校验（v0.316，R41 指导顺手补）：逐股 _load_one_bars 不经批量
     # 截断护栏——count 不够会把窗口静默剪空（r36_c5 碎片宇宙教训）

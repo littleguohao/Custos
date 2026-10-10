@@ -112,6 +112,7 @@ class TestEndToEnd:
             "random_control",
             "cell_failures",
             "criteria_readings",
+            "provenance",  # v0.325 溯源块
         }
         assert rep["cell_failures"] == []  # fake runner 全成，无失败格
         assert rep["two_stage"] is None  # 默认单阶段（--two-stage 默认关，逐位不变）
@@ -1023,6 +1024,7 @@ class TestV0LatticeEndToEnd:
             "random_control",
             "cell_failures",
             "criteria_readings",
+            "provenance",  # v0.325 溯源块
         }
         cfg = rep["config"]
         assert cfg["mode"] == "v0_lattice"

@@ -43,7 +43,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from custos.core.paths import LOGS
+from custos.core.paths import LOGS, RESEARCH_DIR
 from custos.research import window_usage as wu
 from custos.research.exit_c5_terminal import (  # 判据/常量单源
     GAMMA,
@@ -315,6 +315,7 @@ def run_c5(
     verdict = apply_c5(n_taken, d_margin, yard, boot.get("ci95"))
     nonzero = {k: v for k, v in mult.items() if v}
     _wu_k = wu.record_use("R36-C5", "pre2019", args.tag, "C5 pre2019 终审")
+    from custos.research import provenance as pv  # noqa: PLC0415
 
     rep = {
         "version": 1,
@@ -324,6 +325,12 @@ def run_c5(
             "k": _wu_k,
             "note": wu.usage_note("R36-C5", "pre2019", _wu_k),
         },
+        "provenance": pv.build(
+            args,
+            unit="R36-C5",
+            criteria_version="v0.281/v0.299",
+            pre_reg_doc=RESEARCH_DIR / "R36_perfect_b1_supervised_scoring.md",
+        ),
         "config": {
             "from_report": str(args.from_report),
             "candidate_multipliers_nonzero": nonzero,
@@ -360,6 +367,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     ap = _build_parser()
     args = ap.parse_args(argv)
+    args.cmdline = " ".join(argv) if argv is not None else " ".join(sys.argv[1:])
     _check_pre2019(args, ap)
     try:
         rep = run_c5(args)

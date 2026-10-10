@@ -1280,6 +1280,10 @@ class _FakeGridRun:
         from custos.research import strategy_grid as sg
 
         cmd = [str(x) for x in cmd]
+        if "--scorers" not in cmd:
+            # v0.325 provenance 的 git 溯源调用也走 subprocess.run——不属于
+            # grid 子进程：benign 通过且不记录（cmds 的断言语义不变）
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
         self.cmds.append(cmd)
         out_dir = pathlib.Path(cmd[cmd.index("--out-dir") + 1])
         tag = cmd[cmd.index("--tag") + 1]

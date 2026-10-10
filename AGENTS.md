@@ -201,6 +201,10 @@ build_row 源头转 float，numpy 类型不触发校验失败）。
   v0.323，#4）**：新终端必须带两连测——纯噪声 `confirmed_pass` ≤ ~10%
   （5 种子须 0/5）+ 植入真 edge ⇒ confirmed_pass 可识别；不过不许合入
   （R40 7/8 假阳性、R41 池填不满都是临时脚本才发现的教训）。
+  **provenance 溯源块（v0.325，#8）**：研究产物统一带 `provenance`——
+  git sha+dirty / 判据版本 / 预注册文档 blob hash / 宇宙 sha256 /
+  数据末日 / 命令行；新终端报告必须接 `provenance.build`（溯源失败不炸
+  研究，旁路元数据）。
   score_evolution_study 终审姿态：`--v0-lattice` 调权格（P3 族）/ `--addon-leg`
   骨架加腿（R36 思路二——新腿一律问「加进 V0 等权骨架的 Δmargin」，不问单独立）。
   exit_campaign（R37 战役壳）：出场基因组×批次进化 + CTL-1~5 确定性控制器

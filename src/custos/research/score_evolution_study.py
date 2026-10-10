@@ -87,6 +87,7 @@ if hasattr(sys.stderr, "reconfigure"):
 
 from custos.core.paths import LOGS  # noqa: E402
 from custos.pipeline.screening import score_candidates as sc  # noqa: E402
+from custos.core.paths import RESEARCH_DIR
 from custos.research import backtest_factors as bt  # noqa: E402
 from custos.research import window_usage as wu  # noqa: E402
 from custos.research.evolution.dual_window import Window, validate_windows  # noqa: E402
@@ -2287,6 +2288,7 @@ def main(
 ) -> int:
     ap = _build_parser()
     args = ap.parse_args(argv)
+    args.cmdline = " ".join(argv) if argv is not None else " ".join(sys.argv[1:])
     # --quick 语义糖：未显式给值的 --n-random/--max-combos 落试跑档（显式给值优先）
     if args.n_random is None:
         args.n_random = 1 if args.quick else 3
@@ -2414,6 +2416,18 @@ def main(
             "k": _wu_k,
             "note": wu.usage_note("R34", "judgment", _wu_k),
         }
+
+    from custos.research import provenance as pv  # noqa: PLC0415
+
+    rep["provenance"] = pv.build(
+        args,
+        unit="R34",
+        criteria_version="v0.230/v0.267/v0.269",
+        pre_reg_doc=RESEARCH_DIR / "R34_score_system_evolution.md",
+    )
+    rep["provenance"]["universe_sha256"] = pv.file_sha256(
+        codes_path
+    )  # 钉死后宇宙表（非请求侧输入——溯源以实际跑的为准）
 
     out = out_dir / f"_score_evolution__{tag}.json"
     with out.open("w", encoding="utf-8") as fh:
