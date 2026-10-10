@@ -27,7 +27,6 @@ import pytest
 import helpers_null as hn
 import test_factor_exit_study as fxt
 from custos.research import bear_regime_study as brs
-from custos.research import criteria_kit as kit
 from custos.research import factor_exit_study as fes
 from custos.research import plan_rules_replay as prr
 from custos.research import score_tier_position_study as stp
@@ -294,58 +293,21 @@ class TestScoreTierCalibration:
 # ---------------------------------------------------------------------------
 
 
-def _clustered_per_code(n_codes=10, clusters_per_code=6, cluster_size=20):
-    """成簇夹具：每码 6 簇 × 20 信号（簇内 i 间隔 1 ≤5 同簇，簇间 i 跳 1000
-    强制分簇）；簇内分数同档（簇 cl ⇒ 档 (cl+码序) mod 3 按码旋转，档分数带
-    [10,19.5] / [45,54.5] / [80,89.5] 互不相交 ⇒ 分档=整簇归属，与整簇抽签
-    的臂**可交换**——同源零假设）；真实数据的「同票连续信号同档同结局」
-    结构在这里复刻（owner 零假设模拟：簇大小 20 + 逐笔打乱 ⇒ 假过线 38%，
-    本夹具实测复现 15/40——见 _cluster_noise_replay）。
-
-    60 簇/窗（20 簇/档）。夹具定稿记录（v0.335 返修）：9 变体（band 旋转
-    ×噪声 salt）扫描取 rot=1/salt="v2"——主测 5 种子 0/5、40 种子实测
-    confirmed_pass 2/40≈名义 5%、逐笔哨兵 3/5 decisive；同结构的
-    rot=0/salt="" 版 40 种子 4/40（10%）且主测 seed4 冲线——夹具差异
-    只是噪声实现，机制（簇打乱 vs 逐笔）不变。"""
-    per_code = {}
-    k = 0
-    for c in range(n_codes):
-        code = f"{c:06d}"
-        signals = []
-        scores = {}
-        for cl in range(clusters_per_code):
-            band_base = (10.0, 45.0, 80.0)[(cl + c) % 3]  # 带间留缺口 ⇒ 切点落带隙
-            for j in range(cluster_size):
-                day = (
-                    f"{2023 + (k // 336)}-{((k // 28) % 12) + 1:02d}-{(k % 28) + 1:02d}"
-                )
-                signals.append({"i": 1000 * cl + j, "date": day, "score": 0.0})
-                scores[day] = band_base + j * 0.5
-                k += 1
-        for s in signals:
-            s["score"] = scores[s["date"]]
-        per_code[code] = {"signals": signals, "scores": scores}
+def _clustered_per_code():
+    """R42 成簇夹具（构造件 = ``hn.clustered_layout`` 共享单源，v0.336 抽
+    出——与 R39 成簇用例同骨架）：簇内分数同档（档分数带 [10,19.5] /
+    [45,54.5] / [80,89.5] 互不相交 ⇒ 分档=整簇归属，与整簇抽签的臂
+    **可交换**）；1200 信号/窗 = 60 簇（20 簇/档）；真实数据的「同票
+    连续信号同档同结局」结构在这里复刻（owner 零假设模拟：簇大小 20 +
+    逐笔打乱 ⇒ 假过线 38%，本夹具实测复现 15/40；定稿记录见
+    ``hn.clustered_layout`` docstring）。"""
+    per_code: dict[str, dict] = {}
+    for code, day, i, band in hn.clustered_layout():
+        pack = per_code.setdefault(code, {"signals": [], "scores": {}})
+        score = (10.0, 45.0, 80.0)[band] + (i % 1000) * 0.5
+        pack["signals"].append({"i": i, "date": day, "score": score})
+        pack["scores"][day] = score
     return per_code
-
-
-def _cluster_noise_replay(seed: int):
-    """成簇零假设重放：结局按 (code, 簇id, params, seed, salt) 哈希抽
-    40% +0.06 / 60% −0.035——**同簇 20 笔同 ret**（簇相关）、与分数无关。
-    逐笔打乱的臂把簇拆散 ⇒ q95 系统性偏低（本夹具实测：逐笔 15/40=37.5%
-    ≈ owner 模拟的 38%；整簇 2/40≈名义 5%——见 _clustered_per_code
-    docstring 的定稿记录）；整簇打乱才是对等零假设。salt="v2" 是夹具
-    实现细节（定稿记录见夹具 docstring）。"""
-
-    def _replay(subset, params):
-        clusters = kit.cluster_ids(subset)
-        out = []
-        for r, cid in zip(subset, clusters):
-            key = f"{r['code']}|{cid}|{sorted(params.items())}|{seed}|v2"
-            ret = hn.NULL_WIN if hn._draw(key, hn.NULL_P) else hn.NULL_LOSE
-            out.append(hn.mk_trade(r["code"], r["date"], ret, r.get("score", 50.0)))
-        return out
-
-    return _replay
 
 
 def _stp_clustered_run(**kw):
@@ -357,7 +319,7 @@ def _stp_clustered_run(**kw):
         return stp.run_study(
             _stp_args(seed=seed, **kw),
             warm_fn=lambda s, e: spec[(s, e)],
-            replay_fn=_cluster_noise_replay(seed),
+            replay_fn=hn.cluster_noise_replay(seed),
         )
 
     return run
@@ -386,4 +348,77 @@ class TestSentinelPerTradeShuffle:
         with pytest.raises(AssertionError, match="零假设校准失败"):
             hn.assert_noise_calibration(
                 "score_tier_position[逐笔哨兵]", _stp_clustered_run()
+            )
+
+
+# ---------------------------------------------------------------------------
+# factor_exit_study 成簇校准（v0.336，owner review——R39 与 R42 同源同覆盖）
+# ---------------------------------------------------------------------------
+
+
+def _fes_clustered_spec():
+    """R39 成簇夹具：``hn.clustered_layout(n_codes=5)`` 共享骨架 + 簇内
+    因子同水平（factor=band ⇒ 分桶=整簇归属，与整簇抽签臂可交换）；经
+    ``fxt._per_code`` 转 per_code（df=fmap 替身，adx14_series 照旧
+    monkeypatch）。600 信号/窗 = 30 簇。
+
+    尺寸定稿（v0.336）：C4 臂=同 80 格枚举，臂成本随信号数线性——
+    10 码版单次 run ~20s（5 种子主测+哨兵 ~4.5min 太重）；6 码变体扫描
+    （n_codes×rot 六格实测）里 5 码各 rot 全部主测 0/5 + 哨兵 decisive
+    （≥2/5 假过线），取 5 码 rot=1（与 R42 定稿同 rot）。"""
+
+    def _mk(offset):
+        spec: dict[str, list] = {}
+        for code, day, i, band in hn.clustered_layout(n_codes=5):
+            spec.setdefault(code, []).append((day, offset + i, 50.0, band))
+        return spec
+
+    return {
+        _WINDOWS[0]: fxt._per_code(_mk(0)),
+        _WINDOWS[1]: fxt._per_code(_mk(1_000_000)),
+    }
+
+
+def _fes_clustered_run(monkeypatch, **kw):
+    def run(seed):
+        kw.setdefault("n_random", N_RANDOM)
+        kw.setdefault("c4_min_pool", MIN_POOL)
+        return fxt._run(
+            monkeypatch,
+            _fes_clustered_spec(),
+            hn.cluster_noise_replay(seed),
+            seed=seed,
+            **kw,
+        )
+
+    return run
+
+
+class TestFactorExitClusteredCalibration:
+    """R39 成簇零假设校准：纯噪声（簇结局相关）⇒ confirmed_pass 5 种子
+    0/5——逐信号打乱会把簇拆散、q95 偏低（与 R42 同修，v0.335/v0.336）。"""
+
+    def test_clustered_noise(self, monkeypatch):
+        hn.assert_noise_calibration(
+            "factor_exit[成簇]", _fes_clustered_run(monkeypatch)
+        )
+
+
+class TestSentinelFesPerSignalShuffle:
+    """R39 逐信号打乱哨兵（照 TestSentinelMaxOf5 / R42 逐笔哨兵模式）：
+    monkeypatch 把 ``fes.arm_bucket_draw`` 换回逐信号 shuffle（v0.335 前
+    的 bug 形态）⇒ 成簇零假设校准**必须失败**。"""
+
+    def test_calibration_catches_per_signal_bug(self, monkeypatch):
+        def _per_signal_draw(buckets, clusters, rng):
+            perm = list(buckets)  # v0.335 前的逐信号 shuffle（忽略 clusters）
+            rng.shuffle(perm)
+            return perm
+
+        monkeypatch.setattr(fes, "arm_bucket_draw", _per_signal_draw)
+        with pytest.raises(AssertionError, match="零假设校准失败"):
+            # 哨兵用小池（15/10，bear 哨兵同例——主用例守 25/20 契约）
+            hn.assert_noise_calibration(
+                "factor_exit[逐信号哨兵]",
+                _fes_clustered_run(monkeypatch, n_random=15, c4_min_pool=10),
             )

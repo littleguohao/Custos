@@ -241,7 +241,11 @@ build_row 源头转 float，numpy 类型不触发校验失败）。
   偏低（实测逐笔 15/40=38% vs 整簇 2/40≈名义 5%）；打乱/赋桶一律走
   `criteria_kit.cluster_ids`/`cluster_draw` 单源（整簇抽签、各归属数量
   臂间自然波动、不对齐笔数），校准夹具必须含**成簇用例**（簇结局相关）
-  + **逐笔打乱哨兵**（monkeypatch 换回逐笔 ⇒ 校准必须失败）。
+  + **逐笔打乱哨兵**（monkeypatch 换回逐笔 ⇒ 校准必须失败）——
+  R42/R39 均已覆盖（v0.335/v0.336）；成簇构造件单源=
+  `tests/helpers_null.clustered_layout`/`cluster_noise_replay`；R42 侧另
+  有**簇映射命中率护栏**（v0.336：报告 cluster_map 块，<0.99 ⇒ rc=2
+  不落盘——回挂键漂移会把 C4 静默退回逐笔打乱，fail-closed 不猜）。
   **provenance 溯源块（v0.325，#8）**：研究产物统一带 `provenance`——
   git sha+dirty / 判据版本 / 预注册文档 blob hash / 宇宙 sha256 /
   数据末日 / 命令行；新终端报告必须接 `provenance.build`（溯源失败不炸
@@ -276,7 +280,9 @@ build_row 源头转 float，numpy 类型不触发校验失败）。
   C4=打乱「交易→档」归属臂 N=50 同预算（criteria_kit 单源；**v0.335 起
   整簇换档**：簇=同码信号点相邻 ≤5 根 bar 连续段，同簇同档、各档笔数
   臂间自然波动不对齐）；C1 阈值 n≥50 不变、**每档每窗簇数入报告**
-  （n_clusters）供判读打折；不建 C5（C2/C3 都过线 owner 才发令）。
+  （n_clusters）供判读打折；**簇映射命中率护栏（v0.336）**：交易经
+  (code, entry_date) 回挂信号簇，命中率 <0.99 ⇒ rc=2 不落盘（fail-closed
+  防静默退回逐笔打乱）；不建 C5（C2/C3 都过线 owner 才发令）。
   plan_shadow_review（#60 判据 C，v0.311）：影子台账不一致事件（stage=1700
   ∧ agree=False ∧ 非 default）的 plan vs 现行 N 日持仓层 Δret（N=5 主/10 副；
   P0=T+1 首可卖日开盘清仓、P1（P2 同档）=卖半仓、P3=不动；跌停停牌顺延=

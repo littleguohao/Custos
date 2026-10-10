@@ -324,6 +324,18 @@ def study_window(
     return {"configs": configs, "uniform": uniform, "n_buckets": n_b}
 
 
+def arm_bucket_draw(
+    buckets: list[int], clusters: list[int], rng: random.Random
+) -> list[int]:
+    """C4 臂分桶归属（v0.335 owner review 修）：**整簇抽签分桶**——
+    ``kit.cluster_draw`` 单源，同簇同桶，各桶信号数在臂间自然波动
+    （不再逐信号 shuffle 对齐桶大小：逐信号打乱把簇拆散、零假设方差
+    被低估、q95 偏低）。``buckets`` 仅供哨兵/诊断对照（逐信号 shuffle
+    旧法以它为母体），本函数不按它计数对齐。"""
+    n_b = (max(buckets) + 1) if buckets else 0
+    return kit.cluster_draw(clusters, tuple(range(n_b)), rng)
+
+
 def mapping_trades(
     per_code: dict[str, dict],
     signals: list[dict],
@@ -687,8 +699,7 @@ def run_study(
             arm_best: Optional[float] = None
             arm_ok = False
             for name in BUCKETINGS:
-                n_b = len(BUCKETINGS[name]) + 1
-                perm = kit.cluster_draw(clusters_m, tuple(range(n_b)), rng)
+                perm = arm_bucket_draw(buckets[name]["mining"], clusters_m, rng)
                 stud_a = study_window(
                     per_code["mining"],
                     signals["mining"],

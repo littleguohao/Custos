@@ -337,6 +337,7 @@
 | 2026-10-10 | v0.333 | **R42 Phase 1 工具落地（判据冻结照蓝图）**：`score_tier_position_study`——V0 信号预热复用 warm_v0_signals 单源+挖掘窗分位切 3 档（切点不碰判定窗）+collect_all 全候选分档（pct5_trail08 钉死）+C1~C4 机械读数（C2 单调 高≥中≥低 且 高−低>0、相邻档差<0.086 标低置信；C3 主判据加权 expR 三组权重格、双窗<0.035 按与零无法区分；C4 打乱归属臂 N=50 kit 单源）；W2=过滤器对照+组合层未测注明；零假设校准两连测过；pre2019/holdout 硬拒绝 | owner 蓝图（判据一字未改） | 钉测 +19 校准 +2 |
 | 2026-10-10 | v0.334 | **判定窗台账重新入库 + record_use 合成守卫（owner 复核纠正 gitignore 方向）**：机器本地台账各机各数、k 系统性低估，违背「判定窗被读几次」建账初衷——**入库、跨机 git 同步、写入只发生在生产机**；修写入路径代替放弃入库：`record_use(synthetic=True)` ⇒ 不写（九调用点全接线，pytest 外直跑注入路径也混不进假记录；k=None 注记「未入台账」）；钉测=注入 run_study 后真实台账零改动。bear 校准 j_low_adx25 4→60（4 信号 margin 冲极值 ⇒ 池饱和分辨力弱；池 uniq 3→8~13），哨兵改自备 12 门 ×30 spec 保 decisive | owner review | 钉测 +3 改写 2 |
 | 2026-10-10 | v0.335 | **C4 打乱粒度整簇化（owner review，R42/R39 跑数前修订）**：collect_all 口径交易成簇（同票连续信号同档同结局），逐笔打乱拆散簇 ⇒ 零假设方差低估、q95 偏低（owner 模拟簇大小 20 假过线 15/40=38%，本仓复现逐笔 15/40、整簇 2/40≈名义）——`criteria_kit.cluster_ids/cluster_draw` 单源（簇=同码信号点相邻 ≤5 根 bar 连续段，i 优先缺省退日期差；整簇抽签、归属数量臂间自然波动不对齐笔数）；R42 C4 换档+R39 C4 分桶同改，R42 C1 阈值不变+每档每窗簇数入报告打折，功效节 MDE 口径改有效 n=簇数（生产机实测回填）；校准合入门加成簇夹具+逐笔哨兵 | owner review | 钉测 +15 |
+| 2026-10-10 | v0.336 | **簇粒度返修三件（owner review）**：①R42 簇映射命中率 fail-closed——交易经 (code, entry_date) 回挂信号簇，报告 cluster_map 块记命中率、<0.99 直接 rc=2 不落盘（负 id 单元素簇兜底会把 C4 静默退回逐笔打乱，口径缺陷不猜）；②R39 成簇校准补齐与 R42 同覆盖——构造件抽 helpers_null 单源（clustered_layout+cluster_noise_replay，簇结局相关），成簇纯噪声 5 种子 0/5+逐信号哨兵必失败（经新薄包装 fes.arm_bucket_draw 注入）；③TODO #83 登记 R42 功效节 MDE 表生产机簇数回填（发令前待办） | owner review | 钉测 +5 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

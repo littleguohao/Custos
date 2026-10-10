@@ -380,6 +380,57 @@ class TestC4:
 
 
 # ---------------------------------------------------------------------------
+# ⑤b 簇映射命中率 fail-closed（v0.336，owner review）
+# ---------------------------------------------------------------------------
+
+
+def _replay_misaligned(subset, params):
+    """交易 entry_date 全部改成信号表外的日期 ⇒ 簇映射命中率 0。"""
+    return [_trade_of({**r, "date": "1999-01-04"}, 0.01) for r in subset]
+
+
+class TestClusterMapGuard:
+    def test_hit_rate_reported_full(self):
+        """正常夹具：命中率=1.0 入报告（双窗 mapped==total==180）。"""
+        rep = _run(_mk_per_code(), _replay_monotone)
+        cm = rep["cluster_map"]
+        assert cm["min_rate"] == stp.CLUSTER_MAP_MIN_RATE == 0.99
+        for w in ("mining", "judgment"):
+            assert cm[w]["rate"] == 1.0
+            assert cm[w]["mapped"] == cm[w]["total"] == 180
+
+    def test_misaligned_keys_fail_closed(self):
+        """错位键 ⇒ RuntimeError（口径缺陷不猜——负 id 兜底会把 C4 静默
+        退回逐笔打乱，v0.335 修掉的 bug）。"""
+        with pytest.raises(RuntimeError, match="簇映射命中率护栏"):
+            _run(_mk_per_code(), _replay_misaligned)
+
+    def test_misaligned_cli_rc2_no_artifact(self, tmp_path):
+        """CLI 层：护栏 ⇒ rc=2 不落盘（同空结果护栏哲学）。"""
+        per_code = _mk_per_code()
+        rc = stp.main(
+            [
+                "--mining-start",
+                "2022-01-01",
+                "--mining-end",
+                "2024-07-31",
+                "--judgment-start",
+                "2024-08-01",
+                "--judgment-end",
+                "2026-09-04",
+                "--tag",
+                "cm_t",
+                "--out-dir",
+                str(tmp_path),
+            ],
+            warm_fn=lambda s, e: per_code,
+            replay_fn=_replay_misaligned,
+        )
+        assert rc == 2
+        assert not (tmp_path / "cm_t").exists(), "簇映射护栏：不落盘"
+
+
+# ---------------------------------------------------------------------------
 # ⑥⑦ CLI 护栏
 # ---------------------------------------------------------------------------
 

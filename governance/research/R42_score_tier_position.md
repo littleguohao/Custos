@@ -211,3 +211,10 @@ n 一律按簇数计、deff 取**簇设计效应**（沿用 v0.332 拆出的 def
   不变+每档每窗簇数入报告、功效节 MDE 口径修订为有效 n=簇数（实际
   簇数发令前生产机一探回填）；零假设校准合入门加成簇夹具 + 逐笔
   打乱哨兵（monkeypatch 换回逐笔 ⇒ 校准必须失败）。
+- **簇粒度返修收口（2026-10-10，v0.336，owner review）**：①簇映射
+  命中率护栏——交易经 (code, entry_date) 回挂信号簇，报告
+  `cluster_map` 块记命中率、**<0.99 fail-closed**（rc=2 不落盘；负 id
+  单元素簇兜底会把 C4 静默退回逐笔打乱，口径缺陷不猜）；②R39 成簇
+  校准补齐（与本单元同覆盖：成簇构造件抽 `tests/helpers_null.py`
+  单源——`clustered_layout`/`cluster_noise_replay`）；③TODO #83 登记
+  功效节 MDE 表生产机簇数回填。

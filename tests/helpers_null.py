@@ -18,6 +18,14 @@ PYTHONHASHSEED 逐进程加盐，测试结果不可复现。
 用法：各终端用自己的 warm/replay 注入件（套件夹具）+ 本模块的
 ``null_replay``/``edge_replay``/两个 assert。判定只看报告的
 ``criteria.C4.state``——与具体判据结构解耦。
+
+**v0.335/v0.336 成簇校准**：collect_all 口径交易成簇 ⇒ C4 打乱粒度按簇
+（`criteria_kit.cluster_ids`/`cluster_draw` 单源）；校准夹具必须含
+**成簇用例**（簇结局相关——构造件单源 = ``clustered_layout``（信号
+骨架：簇内 i 连续/簇间跳 1000/档按码旋转）+ ``cluster_noise_replay``
+（同簇同 ret 的零假设重放））+ **逐笔打乱哨兵**（monkeypatch 换回逐笔
+⇒ 校准必须失败）。实测：逐笔 15/40=37.5%（≈owner 模拟 38%）、整簇
+2/40≈名义 5%。
 """
 
 from __future__ import annotations
@@ -137,3 +145,69 @@ def assert_edge_detected(
         f"{tag} 植入 edge 未被识别（C4={state}）——判据对照臂/门把真效应也"
         "吞了（owner 方法论 review #4）"
     )
+
+
+# ---------------------------------------------------------------------------
+# 成簇夹具构造件（v0.336，owner review——C4 打乱粒度按簇不按笔的校准原料，
+# R42/R39 校准共用单源）
+# ---------------------------------------------------------------------------
+
+
+def clustered_layout(
+    n_codes: int = 10,
+    clusters_per_code: int = 6,
+    cluster_size: int = 20,
+    rot: int = 1,
+) -> list[tuple[str, str, int, int]]:
+    """成簇信号骨架：产出 ``(code, day, i, band)`` 四元组清单。
+
+    - 簇内 i 连续（间隔 1 ≤ 5 ⇒ 同簇），簇间 i 跳 1000（强制分簇）——
+      每码 ``clusters_per_code`` 簇 × ``cluster_size`` 信号；
+    - ``band = (cl + rot·码序) mod 3`` 按码旋转——簇内同档 ⇒ 任何按档/
+      因子水平的真实划分都 = 整簇归属，与整簇抽签的臂**可交换**（同源
+      零假设）；各档簇数均衡（每码每档 2 簇）；
+    - day 按全局序号 k 生成（周期 336 > 单码 120 ⇒ 码内唯一——(code,
+      date) 键可用）。
+
+    定稿记录（v0.335 返修）：9 变体（band 旋转 × 噪声 salt）扫描取
+    rot=1 + ``cluster_noise_replay`` 默认 salt="v2"——R42 主测 5 种子
+    0/5、40 种子实测 confirmed_pass 2/40≈名义 5%、逐笔哨兵 3/5
+    decisive；同结构 rot=0/salt="" 版 40 种子 4/40（10%）且主测
+    seed4 冲线——变体差异只是噪声实现，机制（整簇 vs 逐笔）不变。
+    """
+    out: list[tuple[str, str, int, int]] = []
+    k = 0
+    for c in range(n_codes):
+        code = f"{c:06d}"
+        for cl in range(clusters_per_code):
+            band = (cl + rot * c) % 3
+            for j in range(cluster_size):
+                day = (
+                    f"{2023 + (k // 336)}-{((k // 28) % 12) + 1:02d}-{(k % 28) + 1:02d}"
+                )
+                out.append((code, day, 1000 * cl + j, band))
+                k += 1
+    return out
+
+
+def cluster_noise_replay(
+    seed: int, salt: str = "v2"
+) -> Callable[[list[dict], dict], list[dict]]:
+    """成簇零假设重放：**簇结局相关**——结局按 (code, 簇id, params, seed,
+    salt) 哈希抽 40% +0.06 / 60% −0.035，同簇全部交易同 ret，与分数/
+    因子无关。逐笔打乱的臂把簇拆散 ⇒ q95 系统性偏低（本夹具实测：
+    逐笔 15/40=37.5% ≈ owner 零假设模拟的 38%；整簇 2/40≈名义 5%——
+    与 v0.324 bootstrap 改日簇是同一个问题）。salt 是夹具实现细节
+    （定稿记录见 ``clustered_layout`` docstring）。"""
+    from custos.research import criteria_kit as kit  # noqa: PLC0415
+
+    def _replay(subset: list[dict], params: dict) -> list[dict]:
+        clusters = kit.cluster_ids(subset)
+        out = []
+        for r, cid in zip(subset, clusters):
+            key = f"{r['code']}|{cid}|{sorted(params.items())}|{seed}|{salt}"
+            ret = NULL_WIN if _draw(key, NULL_P) else NULL_LOSE
+            out.append(mk_trade(r["code"], r["date"], ret, r.get("score", 50.0)))
+        return out
+
+    return _replay

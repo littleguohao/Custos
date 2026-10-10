@@ -45,7 +45,9 @@ expectancy_R=Σw·R/Σw）对比等权基准是否有增量。单调性不成立
   的连续段（``kit.cluster_ids``/``kit.cluster_draw`` 单源）；每簇独立
   均匀抽一档（同簇交易同档），各档笔数组成在臂间自然波动（这正是零
   假设该含的方差，不再强行对齐笔数——逐笔打乱把簇拆散、q95 系统性
-  偏低，owner 零假设模拟簇大小 20 时假过线 15/40≈38%）；
+  偏低，owner 零假设模拟簇大小 20 时假过线 15/40≈38%）；**v0.336
+  补充**：交易回挂信号簇的映射**命中率入报告且 <0.99 fail-closed**
+  （不落盘——映射缺失会把 C4 静默退回逐笔打乱，口径缺陷不猜）；
 - **verdict** = ``kit.verdict_four_state`` 四态（C1 不过=untested 优先；
   C2 False 或 C4 confirmed_fail=falsified——预注册四态写死 falsified 只
   来自 C2/C4，故 C3 不过只放行 None=provisional 不判死）。**不建 C5**
@@ -89,6 +91,11 @@ WEIGHT_GRID_RAW: dict[str, dict[str, float]] = {
 }
 DEFAULT_N_RANDOM = 50  # C4 随机打乱归属臂数
 C4_MIN_POOL = 50  # C4 最小池（池满才许 confirmed）
+#: 簇映射命中率下限（v0.336，owner review——fail-closed）：交易经
+#: (code, entry_date) 回挂信号所属簇，命中率低于此 ⇒ RuntimeError 不落盘
+#: （映射缺失=口径缺陷不猜——负 id 单元素簇兜底会把 C4 静默退回逐笔打乱，
+#: 正是 v0.335 修掉的 bug；同空结果护栏哲学）
+CLUSTER_MAP_MIN_RATE = 0.99
 COST_BPS_DEFAULT = 25.0
 
 #: W2 对照注明（报告必带；预注册写死读法）
@@ -217,7 +224,10 @@ def window_readings(
     等权基准 = 同批交易 r_multiple 均值（归一化权重格保证总敞口一致——
     Δ 只来自「把钱挪到哪一档」，不被敞口驱动）。``cluster_of`` = (code,
     entry_date) → 簇 id（v0.335：每档簇数入报告供判读打折；映射缺失的
-    交易按单元素簇计——负 id 占位不与真实簇撞号）。"""
+    交易按单元素簇计——负 id 占位不与真实簇撞号）。**v0.336**：映射
+    命中率入报告（``cluster_map``；缺失=负 id 计数），由 run_study
+    按 ``CLUSTER_MAP_MIN_RATE`` fail-closed——缺失会把 C4 静默退回
+    逐笔打乱（v0.335 修掉的 bug），口径缺陷不猜。"""
     trades = [t for t in trades if t.get("score") is not None]
     labels = [TIERS[fes.bucket_of(t["score"], cuts)] for t in trades]
     cluster_of = cluster_of or {}
@@ -225,6 +235,7 @@ def window_readings(
         cluster_of.get((t.get("code"), t.get("entry_date")), -(k + 1))
         for k, t in enumerate(trades)
     ]
+    n_miss = sum(1 for cid in clusters if cid < 0)  # 负 id = 映射缺失兜底
     tiered = {
         tier: [t for t, lb in zip(trades, labels) if lb == tier] for tier in TIERS
     }
@@ -245,6 +256,11 @@ def window_readings(
         "trades": trades,
         "tiered": tiered,
         "equal_expR": equal,
+        "cluster_map": {
+            "mapped": len(trades) - n_miss,
+            "total": len(trades),
+            "rate": (1.0 - n_miss / len(trades)) if trades else 1.0,  # 空集真空率 1.0
+        },
         "tiers": {
             tier: {
                 "n": len(tiered[tier]),
@@ -460,6 +476,18 @@ def run_study(
         for w in windows
     }
 
+    # ── 簇映射命中率护栏（v0.336，owner review）：映射缺失 ⇒ 交易被当
+    # 单元素簇 ⇒ C4 静默退回逐笔打乱（v0.335 修掉的 bug）——fail-closed
+    # 不落盘（口径缺陷不猜，同空结果护栏哲学）──
+    for w in windows:
+        cm = readings[w]["cluster_map"]
+        if cm["rate"] < CLUSTER_MAP_MIN_RATE:
+            raise RuntimeError(
+                f"簇映射命中率护栏：{w} 窗 {cm['mapped']}/{cm['total']} = "
+                f"{cm['rate']:.3f} < {CLUSTER_MAP_MIN_RATE}——交易回挂不上信号簇"
+                "（键格式漂移？），不落盘"
+            )
+
     c1 = judge_c1(readings)
     c2 = judge_c2(readings)
     c3 = judge_c3(readings)
@@ -572,6 +600,13 @@ def run_study(
             "note": "切点只在挖掘窗估计——判定窗直接应用（判定窗泄漏=死罪，双窗纪律）",
         },
         "accounting": accounting,
+        "cluster_map": {
+            **{w: readings[w]["cluster_map"] for w in windows},
+            "min_rate": CLUSTER_MAP_MIN_RATE,
+            "note": "簇映射命中率（v0.336）：交易经 (code, entry_date) 回挂信号"
+            "所属簇——低于 min_rate fail-closed 不落盘（映射缺失 ⇒ C4 静默退回"
+            "逐笔打乱，口径缺陷不猜）",
+        },
         "tiers": {
             w: {tier: rd["tiers"][tier] for tier in TIERS} for w, rd in readings.items()
         },
