@@ -139,7 +139,13 @@ uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/
 - **双窗纪律**：寻优全程不得读判定窗；**pre2019（2010-2016）untouched 终审段
   任何挖掘/判定不得相交**（工具硬拒绝）；**前向 holdout 冻结（v0.321）**：
   ≥2026-09-05 的新数据任何研究不得使用（判定窗被 13 单元反复读取已接近
-  第二个挖掘窗——新数据攒作下一轮判定窗，工具硬拒绝同族）；
+  第二个挖掘窗——新数据攒作下一轮判定窗）；**硬拒绝共享单源=
+  `load_window.forward_holdout_violation`（v0.330，owner review #2②——
+  exit_campaign 等入口漏守被实测抓出）**：所有接受窗口参数的入口
+  （factor_exit 族/exit_campaign/score_evolution/evolution_loop/
+  strategy_grid/backtest_factors/score_filter）都必须调它；末段交易出场
+  落 holdout 用**注记**口径（`EXIT_BARS_HOLDOUT_NOTE`——截数据会把末段
+  持仓强平失真）；
 - **判定窗/pre2019 使用台账**（`governance/research/window_usage.jsonl`，
   `window_usage.record_use` 唯一写入口径——append-only+每日快照，写失败
   不炸研究）：每读一次记一行，报告必写「该窗第 k 次被读」（k 越大判读
@@ -155,7 +161,10 @@ uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/
   用 `power_mde` 估 MDE（输入=最接近的同口径历史 n/wr/ρ）——**MDE > 合理
   效应 ⇒ 跑数前合并桶或改问法**（R36-C5/R37-C5/R39 a1a2/R37 b1 都是跑完才
   发现功效不足；R42 是首个用例：相邻档 MDE 0.061~0.102 ⇒ 采 A 保 3 档+判读
-  条款、C3 升主判据）；
+  条款、C3 升主判据）；**公式双参数（v0.330，owner review #3）**：
+  ρ_pair（配对相关，越高 SE 越小）与 deff（日簇设计效应=1+(m−1)·ICC，
+  越高 SE 越大；实测=日簇 bootstrap SE²÷iid SE²）方向相反**不许混为一个
+  ρ**（缺 deff ⇒ MDE 低估）；
 - 结论段三栏模板（v0.321 起新单元强制）：**机械判决 / 实质读数 / 不能
   读成什么**。
 
@@ -212,9 +221,14 @@ build_row 源头转 float，numpy 类型不触发校验失败）。
   一份**；rdd 相对门=`strategy_grid.rdd_gate_ok`、C5 判决=
   `exit_c5_terminal.apply_c5`（本就有单源）。
   **零假设校准合入门（`tests/helpers_null.py` + `test_null_calibration.py`，
-  v0.323，#4）**：新终端必须带两连测——纯噪声 `confirmed_pass` ≤ ~10%
-  （5 种子须 0/5）+ 植入真 edge ⇒ confirmed_pass 可识别；不过不许合入
-  （R40 7/8 假阳性、R41 池填不满都是临时脚本才发现的教训）。
+  v0.323，#4；v0.330 返修 #1）**：新终端必须带两连测——纯噪声
+  `confirmed_pass` ≤ ~10%（5 种子须 0/5）+ 植入真 edge ⇒ confirmed_pass
+  可识别；不过不许合入。**噪声必须逐笔 iid 有方差**（按 (code,i,params,
+  stop) 哈希 40% +0.06/60% −0.035——交替 ± 的退化版各配置/臂同 margin，
+  max-of-230 与 max-of-5 同数，选择效应不出现，v0.306 假阳性放进去也能
+  过）；**池 ≥20**（小池 q95≈max 测不出校准）；bear 臂抽样逐次偏移
+  （恒同批入场 ⇒ 池退化）；**max-of-5 回归哨兵**（换回 v0.307 前臂构造
+  校准必须失败——能抓已知 bug 才证明合入门有效）。
   **provenance 溯源块（v0.325，#8）**：研究产物统一带 `provenance`——
   git sha+dirty / 判据版本 / 预注册文档 blob hash / 宇宙 sha256 /
   数据末日 / 命令行；新终端报告必须接 `provenance.build`（溯源失败不炸

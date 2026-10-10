@@ -434,6 +434,7 @@ def run_study(
     # 判定窗使用台账（v0.321，owner 方法论 review #1）：本报告=该窗第 k 次被读
     _wu_k = wu.record_use("R41", "judgment", args.tag, "C1~C4 判定窗读数")
     from custos.research import provenance as pv  # noqa: PLC0415
+    from custos.research.load_window import EXIT_BARS_HOLDOUT_NOTE  # noqa: PLC0415
 
     return {
         "schema": "plan_rules_replay/v1",
@@ -471,6 +472,7 @@ def run_study(
         },
         "accounting": accounting,
         "cost_sensitivity": cost_sens,
+        "forward_holdout_note": EXIT_BARS_HOLDOUT_NOTE,
         "readings": {
             w: {
                 "live": p["live"],

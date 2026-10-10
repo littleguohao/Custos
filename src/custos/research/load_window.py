@@ -14,7 +14,51 @@ from __future__ import annotations
 
 import argparse
 from datetime import date as _date
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
+
+#: 前向 holdout 冻结起点（v0.321，owner 方法论 review #1②）：≥此日期的
+#: 新数据保留为下一轮判定窗（前向样本外），任何研究不得使用。**单源在此**
+#: （原钉在 exit_c5_terminal——v0.330 下沉：exit_campaign/score_evolution/
+#: evolution_loop/strategy_grid/backtest_factors 入口漏守被 owner review
+#: #2 实测抓出）；exit_c5_terminal 等处 re-export 兼容。
+FORWARD_HOLDOUT_START = "2026-09-05"
+
+#: 出场落 holdout 的口径注记（owner review #2②：判定窗末尾前进场的交易，
+#: 出场会落到 holdout 区间的 bar 上）。选择**注记**而非截数据：截到 09-04
+#: 会把窗口末段持仓强平在最后 bar，改变出场语义、读数失真。泄漏是
+#: 单侧机械的（holdout bar 只执行既定持仓的出场，不参与任何选择）。
+EXIT_BARS_HOLDOUT_NOTE = (
+    "判定窗末尾前进场的交易，出场执行会用到前向 holdout 区间的 bar（单侧"
+    "机械泄漏：holdout 数据不参与选型/判据，只执行既定持仓的出场；截数据"
+    "会把末段持仓强平失真——owner review #2② 注记在案）"
+)
+
+
+def forward_holdout_violation(start: str, end: str) -> Optional[str]:
+    """窗口触及前向 holdout 冻结段 ⇒ 错误文案；否则 None。
+
+    空 end（不限）⇒ None：引擎类 CLI（backtest_factors/strategy_grid）的
+    默认形态就是不限终点，是否吃进 holdout 数据取决于本机数据末日——
+    由调用方自行决定是否对空 end 另立纪律；研究终端的窗口都是显式的。
+    """
+    e = str(end)[:10]
+    if e and e >= FORWARD_HOLDOUT_START:
+        return (
+            f"窗口 {start}~{e} 触及前向 holdout 冻结段"
+            f"（{FORWARD_HOLDOUT_START} 起）——2026-09 以后的新数据保留为"
+            "下一轮判定窗（前向样本外），任何研究不得使用（v0.321 owner 拍板）"
+        )
+    return None
+
+
+def reject_forward_holdout(
+    windows: Iterable[tuple[str, str, str]], ap: argparse.ArgumentParser
+) -> None:
+    """{(wname, start, end)} 逐个校验，触及 ⇒ ap.error（exit 2 硬拒绝）。"""
+    for wname, s, e in windows:
+        msg = forward_holdout_violation(s, e)
+        if msg:
+            ap.error(f"{wname} {msg}")
 
 
 def count_for_start(

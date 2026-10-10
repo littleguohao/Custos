@@ -5563,6 +5563,13 @@ def main(
         args.scorer = expr_key  # 下游（签名/SCORERS 查表/输出标签）统一沿用 args.scorer
     elif args.scorer is None:
         args.scorer = _DEFAULT_SCORER  # 后置默认解析（互斥判定需要 None 占位，见上）
+    # 前向 holdout 硬拒绝（v0.330 owner review #2②，共享单源=load_window；
+    # --end 缺省空=引擎默认不限形态，不查——见 load_window docstring）
+    from custos.research.load_window import forward_holdout_violation  # noqa: PLC0415
+
+    _fh = forward_holdout_violation(args.start, args.end)
+    if _fh:
+        ap.error(_fh)
     reset_gate_stats()
 
     if args.stop_buffer != "tick" and args.stop_tick_buffer > 0:

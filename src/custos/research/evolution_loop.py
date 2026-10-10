@@ -393,6 +393,14 @@ def _validate_args(args: Any, ap: argparse.ArgumentParser) -> None:
             "（单元格子进程不继承 loader 默认深度，默认 500 ≈ 两年）"
         )
     _reject_pre2019(args, ap)
+    # 前向 holdout 硬拒绝（v0.330 owner review #2②，共享单源=load_window；
+    # judgment 窗仅在 --final-judge 时生效——与 pre2019 守卫同口径）
+    from custos.research.load_window import reject_forward_holdout  # noqa: PLC0415
+
+    wins: list[tuple[str, str, str]] = [("mining", args.mining_start, args.mining_end)]
+    if args.final_judge:
+        wins.append(("judgment", args.judgment_start, args.judgment_end))
+    reject_forward_holdout(wins, ap)
 
 
 def _assemble_llm(args: Any, ap: argparse.ArgumentParser) -> Any:

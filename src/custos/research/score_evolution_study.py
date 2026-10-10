@@ -2296,12 +2296,24 @@ def main(
         args.max_combos = 24 if args.quick else 64
     if args.max_combos < 1:
         ap.error("--max-combos 必须 >= 1")
-    from custos.research.load_window import resolve_count  # noqa: PLC0415
+    from custos.research.load_window import (  # noqa: PLC0415
+        reject_forward_holdout,
+        resolve_count,
+    )
 
     try:
         args.count = resolve_count(args.count, args.mining_start)  # v0.328 缺省自动推算
     except ValueError as exc:
         ap.error(str(exc))
+    # 前向 holdout 硬拒绝（v0.330 owner review #2②，共享单源=load_window；
+    # judgment 窗缺省空=未给 ⇒ 不查）
+    reject_forward_holdout(
+        (
+            ("mining", args.mining_start, args.mining_end),
+            ("judgment", args.judgment_start, args.judgment_end),
+        ),
+        ap,
+    )
     if args.two_stage:
         if args.coarse_sample < 1:
             ap.error("--coarse-sample 必须 >= 1")

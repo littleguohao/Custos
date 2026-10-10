@@ -759,6 +759,7 @@ def run_study(
     # 判定窗使用台账（v0.321，owner 方法论 review #1）：本报告=该窗第 k 次被读
     _wu_k = wu.record_use("R39", "judgment", args.tag, "C1~C4 判定窗读数")
     from custos.research import provenance as pv  # noqa: PLC0415
+    from custos.research.load_window import EXIT_BARS_HOLDOUT_NOTE  # noqa: PLC0415
 
     return {
         "schema": "factor_exit_report/v1",
@@ -810,6 +811,7 @@ def run_study(
             else None
         ),
         "cost_sensitivity": cost_sens,
+        "forward_holdout_note": EXIT_BARS_HOLDOUT_NOTE,
         "configs": [
             {
                 "bucketing": c["bucketing"],
@@ -875,7 +877,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _check_windows(args: Any, ap: argparse.ArgumentParser) -> None:
     """窗口护栏：与 pre2019 untouched 段交集即拒（同族镜像）+ 双窗次序 +
-    **前向 holdout 冻结**（v0.321，owner 方法论 review #1②）。"""
+    **前向 holdout 冻结**（v0.321，owner 方法论 review #1②；v0.330 起
+    校验本体=load_window 共享单源——owner review #2②）。"""
+    from custos.research.load_window import forward_holdout_violation  # noqa: PLC0415
+
     for wname in ("mining", "judgment"):
         s = getattr(args, f"{wname}_start")
         e = getattr(args, f"{wname}_end")
@@ -886,12 +891,9 @@ def _check_windows(args: Any, ap: argparse.ArgumentParser) -> None:
                 f"{wname} 窗口 {s}~{e} 与 pre2019 untouched 段"
                 f"（{PRE2019_START}~{PRE2019_END}）交集——研究工具对 pre2019 硬拒绝"
             )
-        if e >= FORWARD_HOLDOUT_START:
-            ap.error(
-                f"{wname} 窗口 {s}~{e} 触及前向 holdout 冻结段"
-                f"（{FORWARD_HOLDOUT_START} 起）——2026-09 以后的新数据保留为"
-                "下一轮判定窗（前向样本外），任何研究不得使用（v0.321 owner 拍板）"
-            )
+        msg = forward_holdout_violation(s, e)
+        if msg:
+            ap.error(f"{wname} {msg}")
     if args.mining_end >= args.judgment_start:
         ap.error(
             f"挖掘窗终点 {args.mining_end} 须早于判定窗起点 {args.judgment_start}（双窗硬隔离）"

@@ -518,6 +518,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap = _build_parser()
     args = ap.parse_args(argv)
     args.cmdline = " ".join(argv) if argv is not None else " ".join(sys.argv[1:])
+    from custos.research.load_window import forward_holdout_violation  # noqa: PLC0415
+
     for name, s, e in (
         ("mining", args.mining_start, args.mining_end),
         ("judgment", args.judgment_start, args.judgment_end),
@@ -527,6 +529,9 @@ def main(argv: Optional[list[str]] = None) -> int:
                 f"⛔ 反过拟合纪律：Phase 4 挖掘/判定不许碰 pre2019 untouched 终审段"
                 f"（{PRE2019_START}..{PRE2019_END}）——{name} {s}..{e} 与之相交"
             )
+        _fh = forward_holdout_violation(s, e)  # v0.330 owner review #2②
+        if _fh:
+            ap.error(f"{name} {_fh}")
     try:
         rep = run_study(args)
     except (RuntimeError, ValueError) as exc:

@@ -108,3 +108,92 @@ def test_terminal_count_default_is_none(module):
     mod = importlib.import_module(f"custos.research.{module}")
     args = mod._build_parser().parse_args(PARSER_MINIMAL_ARGV[module])
     assert args.count is None, f"{module} --count 缺省必须为 None（自动推算）"
+
+
+# ---------------------------------------------------------------------------
+# 前向 holdout 硬拒绝（owner review #2②，v0.330）——共享单源 + 全入口接线
+# ---------------------------------------------------------------------------
+
+from custos.research.load_window import (  # noqa: E402
+    FORWARD_HOLDOUT_START,
+    forward_holdout_violation,
+    reject_forward_holdout,
+)
+
+
+def test_forward_holdout_violation_boundaries():
+    assert forward_holdout_violation("2024-08-01", "2026-09-04") is None
+    assert forward_holdout_violation("2024-08-01", FORWARD_HOLDOUT_START) is not None
+    assert forward_holdout_violation("2024-08-01", "2026-10-08") is not None
+    # 空 end=引擎默认不限形态 ⇒ None（见 load_window docstring 的口径选择）
+    assert forward_holdout_violation("2024-08-01", "") is None
+
+
+def test_reject_forward_holdout_ap_error():
+    import argparse
+
+    ap = argparse.ArgumentParser()
+    with pytest.raises(SystemExit):
+        reject_forward_holdout((("judgment", "2024-08-01", "2026-10-08"),), ap)
+    # 未触及 ⇒ 不拒
+    reject_forward_holdout((("mining", "2022-01-01", "2024-07-31"),), ap)
+
+
+def _assert_cli_rejects(module, argv):
+    """CLI 入口触及 holdout ⇒ ap.error SystemExit（硬拒绝 exit 2 语义）。"""
+    import importlib
+
+    mod = importlib.import_module(f"custos.research.{module}")
+    with pytest.raises(SystemExit) as exc:
+        mod.main(argv)
+    assert exc.value.code == 2
+
+
+def test_exit_campaign_rejects_holdout_judgment_end():
+    # owner 实测抓出的漏守入口：战役壳 --judgment-end 2026-10-08 曾放行
+    _assert_cli_rejects(
+        "exit_campaign",
+        ["--tag", "t", "--judgment-end", "2026-10-08"],
+    )
+
+
+def test_score_evolution_rejects_holdout_judgment_end():
+    _assert_cli_rejects(
+        "score_evolution_study",
+        [
+            "--mining-start",
+            "2022-01-01",
+            "--mining-end",
+            "2024-07-31",
+            "--judgment-start",
+            "2024-08-01",
+            "--judgment-end",
+            "2026-10-08",
+        ],
+    )
+
+
+def test_strategy_grid_rejects_holdout_end():
+    _assert_cli_rejects("strategy_grid", ["--end", "2026-10-08"])
+
+
+def test_backtest_factors_rejects_holdout_end():
+    _assert_cli_rejects("backtest_factors", ["--end", "2026-10-08"])
+
+
+def test_score_filter_rejects_holdout_judgment_end():
+    _assert_cli_rejects(
+        "score_filter_study",
+        [
+            "--codes-file",
+            "x",
+            "--mining-start",
+            "2022-01-01",
+            "--mining-end",
+            "2024-07-31",
+            "--judgment-start",
+            "2024-08-01",
+            "--judgment-end",
+            "2026-10-08",
+        ],
+    )

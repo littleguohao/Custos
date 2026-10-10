@@ -717,6 +717,7 @@ def run_campaign(
 
     _wu_k = wu.record_use("R37", "judgment", tag, "战役判定窗读数")
     from custos.research import provenance as pv  # noqa: PLC0415
+    from custos.research.load_window import EXIT_BARS_HOLDOUT_NOTE  # noqa: PLC0415
     import types as _t  # noqa: PLC0415
 
     report = {
@@ -729,6 +730,7 @@ def run_campaign(
             "k": _wu_k,
             "note": wu.usage_note("R37", "judgment", _wu_k),
         },
+        "forward_holdout_note": EXIT_BARS_HOLDOUT_NOTE,
         "provenance": pv.build(
             _t.SimpleNamespace(
                 codes_file="", cmdline=None
@@ -1053,12 +1055,24 @@ def main(
         ap.error("--batch-size ≥1 且 --n-random ≥0")
     if args.budget < 1:
         ap.error("--budget ≥1")
-    from custos.research.load_window import resolve_count  # noqa: PLC0415
+    from custos.research.load_window import (  # noqa: PLC0415
+        reject_forward_holdout,
+        resolve_count,
+    )
 
     try:
         args.count = resolve_count(args.count, args.mining_start)  # v0.328 缺省自动推算
     except ValueError as exc:
         ap.error(str(exc))
+    # 前向 holdout 硬拒绝（v0.330 owner review #2②：战役壳此前漏守——
+    # --judgment-end 2026-10-08 实测能通过校验进加载，共享单源=load_window）
+    reject_forward_holdout(
+        (
+            ("mining", args.mining_start, args.mining_end),
+            ("judgment", args.judgment_start, args.judgment_end),
+        ),
+        ap,
+    )
     ev = evaluator if evaluator is not None else make_v0_replay_evaluator(args, ap)
     ledger = ledger_path_for(Path(args.out_dir), args.tag)
     if not args.resume and ledger.exists():

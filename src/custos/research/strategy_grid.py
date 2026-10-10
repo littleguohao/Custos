@@ -1201,6 +1201,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # GBK 终端
     ap = _build_parser()
     a = ap.parse_args(argv)
+    # 前向 holdout 硬拒绝（v0.330 owner review #2②，共享单源=load_window）
+    from custos.research.load_window import forward_holdout_violation  # noqa: PLC0415
+
+    _fh = forward_holdout_violation(a.start, a.end)
+    if _fh:
+        ap.error(_fh)
     scorers = _split_scorers(a.scorers)
     gates = [g.strip() for g in a.gates.split(",") if g.strip()]
     try:

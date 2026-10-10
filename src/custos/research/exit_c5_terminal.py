@@ -50,7 +50,11 @@ PRE2019_START, PRE2019_END = "2010-01-01", "2016-12-31"
 #: 2024-08-01~2026-09-04 已被 13 个单元反复读取（分岔路径——多次使用后不再
 #: 是样本外），2026-09 以后的新数据**任何研究不得使用**，攒够后作下一轮
 #: 判定窗。与 pre2019 同族：研究工具对 ≥ 本日起点的窗口硬拒绝。
-FORWARD_HOLDOUT_START = "2026-09-05"
+#: **单源已下沉 load_window（v0.330，owner review #2②——exit_campaign 等
+#: 入口漏守实测被抓）**；此处 re-export 兼容既有 import。
+from custos.research.load_window import (  # noqa: E402,F401
+    FORWARD_HOLDOUT_START,
+)
 
 #: v0.273 定稿 γ（非 degraded）+ v0.276 C2 量级条款采 B 的执行端：
 #: 窗间保留率（判定 Δm ÷ 挖掘 Δm）< 0.5 ⇒ candidate_degraded ⇒ C5 γ=0.75
