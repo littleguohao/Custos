@@ -1008,8 +1008,16 @@ def main(
 
     tag = args.tag or datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir = (Path(args.out_dir) if args.out_dir else OUTDIR) / tag
-    # 不存在 → 空池；损坏 → raise（fail-closed）
-    pool = TrajectoryPool.load(out_dir / "trajectory_pool.json")
+    # 不存在 → 空池；损坏 → raise（fail-closed）。
+    # v0.320 守卫：带 expected 校验池 objective 口径——跨版本续跑会把新旧
+    # 口径的 objective 混进同一池（轨迹里存的 objective 用错尺子全程无
+    # 报错），不符 fail-closed 换 --tag。
+    from custos.research import strategy_grid as sg  # noqa: PLC0415
+
+    pool = TrajectoryPool.load(
+        out_dir / "trajectory_pool.json",
+        expected_objective_version=sg.OBJECTIVE_VERSION,
+    )
 
     # 双窗物理隔离 ①：加载后立刻按 mining_end 截尾一份副本给循环；全量 bars
     # 的引用当场丢弃（判定窗数据在挖掘阶段物理不在场）。

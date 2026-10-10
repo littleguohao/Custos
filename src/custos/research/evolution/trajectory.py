@@ -246,8 +246,13 @@ class Trajectory:
 class TrajectoryPool:
     """轨迹池：全量轨迹的内存索引 + JSON 持久化。"""
 
-    def __init__(self, path: Path | None = None) -> None:
+    def __init__(
+        self, path: Path | None = None, objective_version: str | None = None
+    ) -> None:
         self._path = path
+        self._objective_version = (
+            objective_version  # 池口径标记（save 落盘；续跑守卫见 load）
+        )
         self._items: list[Trajectory] = []  # 插入序，all/best 的稳定序来源
         self._by_id: dict[str, Trajectory] = {}
 
@@ -323,6 +328,7 @@ class TrajectoryPool:
             raise RuntimeError("未绑定路径的池不能 save（构造时传 path 或用 load）")
         payload = {
             "version": _FILE_VERSION,
+            "objective_version": self._objective_version,
             "trajectories": [t.to_dict() for t in self._items],
         }
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -332,15 +338,36 @@ class TrajectoryPool:
         tmp.replace(self._path)
 
     @classmethod
-    def load(cls, path: Path) -> TrajectoryPool:
-        """文件不存在 → 空池（path 仍绑定，可直接 save）；损坏 → raise。"""
-        pool = cls(path)
+    def load(
+        cls, path: Path, expected_objective_version: str | None = None
+    ) -> TrajectoryPool:
+        """文件不存在 → 空池（path 仍绑定，可直接 save）；损坏 → raise。
+
+        ⚠️ objective_version 守卫（v0.320，owner review）：传
+        ``expected_objective_version`` 时校验池口径——轨迹里存的 objective
+        跨版本混进同一池会让排序/对照用错尺子且全程无报错（守卫前旧池无
+        此字段 ⇒ 同样拒）。不符 ⇒ ValueError（fail-closed：换 --tag 开新
+        池）。不传 expected 的读法（测试/纯表达式消费）不校验。本模块保持
+        零同包依赖：版本值由调用方注入，不 import strategy_grid。
+        """
+        pool = cls(path, objective_version=expected_objective_version)
         if not path.exists():
             return pool
         with path.open("r", encoding="utf-8") as fh:
             payload = json.load(fh)  # 损坏 → JSONDecodeError(ValueError)
         if not isinstance(payload, dict) or payload.get("version") != _FILE_VERSION:
             raise ValueError(f"轨迹池版本不符或顶层不是对象: {path}")
+        if expected_objective_version is not None:
+            got = payload.get("objective_version")
+            if got != expected_objective_version:
+                raise ValueError(
+                    f"轨迹池 objective 版本不符: {got!r}（当前 "
+                    f"{expected_objective_version}）——跨版本续跑会把新旧口径"
+                    "混进同一池（v0.320 守卫），请换 --tag 开新池"
+                )
+            pool._objective_version = got
+        else:
+            pool._objective_version = payload.get("objective_version")
         records = payload.get("trajectories")
         if not isinstance(records, list):
             raise ValueError(f"trajectories 必须是 list: {path}")

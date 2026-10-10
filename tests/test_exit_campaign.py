@@ -614,6 +614,42 @@ class TestEndToEnd:
         assert "非结局" in rep["verdict"]
 
 
+class TestObjectiveVersionGuard:
+    """v0.320（owner review）：台账带 objective_version 落盘——跨 objective
+    版本续跑会把新旧口径（量级差近一个数量级）混进同一随机池且全程无
+    报错；不符（含守卫前旧台账无字段）⇒ fail-closed 拒绝续跑。"""
+
+    def _ledger(self, tmp_path, obj_ver="__current__"):
+        ledger = tmp_path / "t" / "campaign_ledger.json"
+        cfg = ec.CampaignConfig(batch_size=2, n_random=1, seed=5, max_batches=1)
+        ec.save_ledger(ledger, "t", cfg, ec.CampaignState(), [])
+        if obj_ver != "__current__":
+            doc = json.loads(ledger.read_text(encoding="utf-8"))
+            if obj_ver is None:
+                doc.pop("objective_version", None)
+            else:
+                doc["objective_version"] = obj_ver
+            ledger.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+        return ledger
+
+    def test_matching_version_loads(self, tmp_path):
+        _cfg, _state, _batches, tag = ec.load_ledger(self._ledger(tmp_path))
+        assert tag == "t"
+
+    def test_mismatch_refused(self, tmp_path):
+        with pytest.raises(ValueError, match="objective 版本不符"):
+            ec.load_ledger(self._ledger(tmp_path, "v2.0-legacy-composite"))
+
+    def test_missing_field_refused(self, tmp_path):
+        """守卫前旧台账（无 objective_version 字段）同样拒——不猜不混池。"""
+        with pytest.raises(ValueError, match="objective 版本不符"):
+            ec.load_ledger(self._ledger(tmp_path, None))
+
+    def test_saved_ledger_carries_current_version(self, tmp_path):
+        doc = json.loads(self._ledger(tmp_path).read_text(encoding="utf-8"))
+        assert doc["objective_version"] == ec._sg_obj_version()
+
+
 class TestResumeSpaceGuard:
     """档位空间守卫（v0.265 review 修复）：LEVELS 变更后 resume 必须
     加载时 fail-fast，不许批次中途随机裸崩（幸存者要进变异算子）。"""

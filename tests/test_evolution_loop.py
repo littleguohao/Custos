@@ -39,6 +39,13 @@ MINING = Window(str(DATES[0].date()), str(DATES[199].date()))
 JUDGMENT = Window(str(DATES[220].date()), str(DATES[299].date()))
 
 
+def _cur_obj_ver() -> str:
+    """当前 objective 版本（同版本合法续跑的夹具池要带它过 v0.320 守卫）。"""
+    from custos.research import strategy_grid as sg
+
+    return sg.OBJECTIVE_VERSION
+
+
 def make_bars(n_stocks: int = 10) -> dict[str, pd.DataFrame]:
     """合成宇宙：每股日漂移按代码序递增 ⇒ ROC 类表达式与未来收益秩强正相关。
 
@@ -1175,7 +1182,9 @@ class TestStalePoolGuard:
         bars, codes_file = TestCLI._setup(tmp_path)
         tag_dir = tmp_path / "out" / "t1"
         tag_dir.mkdir(parents=True)
-        stale = TrajectoryPool(tag_dir / "trajectory_pool.json")
+        stale = TrajectoryPool(
+            tag_dir / "trajectory_pool.json", objective_version=_cur_obj_ver()
+        )
         stale.add(_mk_traj("ROC(CLOSE,5)"))
         stale.save()
         rc = el.main(
@@ -1191,7 +1200,9 @@ class TestStalePoolGuard:
         bars, codes_file = TestCLI._setup(tmp_path)
         tag_dir = tmp_path / "out" / "t1"
         tag_dir.mkdir(parents=True)
-        stale = TrajectoryPool(tag_dir / "trajectory_pool.json")
+        stale = TrajectoryPool(
+            tag_dir / "trajectory_pool.json", objective_version=_cur_obj_ver()
+        )
         stale.add(_mk_traj("MA(CLOSE,3)"))  # 与 MockLLM 脚本表达式都不撞
         stale.save()
         rc = el.main(
@@ -1990,3 +2001,76 @@ class TestCellRunnerRefGate:
         assert out["objective"] is None
         assert out["rdd_gate"] is False
         assert out["rdd_ref_missing"] is True
+
+
+# ---------------------------------------------------------------------------
+# v0.320 owner review：轨迹池 objective_version 续跑守卫
+# ---------------------------------------------------------------------------
+
+
+class TestPoolObjectiveGuard:
+    """轨迹池带 objective_version 落盘（v0.320）：跨 objective 版本续跑
+    会把新旧口径的 objective 混进同一池（排序/对照用错尺子全程无报错）；
+    不符（含守卫前旧池无字段）⇒ fail-closed。trajectory.py 保持零同包
+    依赖：版本由调用方注入，不 import strategy_grid。"""
+
+    def _pool_file(self, tmp_path, obj_ver="__sentinel__"):
+        from custos.research.evolution.trajectory import _FILE_VERSION
+
+        p = tmp_path / "pool.json"
+        payload = {"version": _FILE_VERSION, "trajectories": []}
+        if obj_ver is not None:
+            payload["objective_version"] = obj_ver
+        p.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        return p
+
+    def test_roundtrip_matching_version(self, tmp_path):
+        p = tmp_path / "pool.json"
+        TrajectoryPool(p, objective_version="v-test").save()
+        got = TrajectoryPool.load(p, expected_objective_version="v-test")
+        assert got._objective_version == "v-test"  # 版本随池走（再 save 保持）
+
+    def test_mismatch_refused(self, tmp_path):
+        with pytest.raises(ValueError, match="objective 版本不符"):
+            TrajectoryPool.load(
+                self._pool_file(tmp_path, "v-old"),
+                expected_objective_version="v-new",
+            )
+
+    def test_legacy_pool_without_field_refused(self, tmp_path):
+        with pytest.raises(ValueError, match="objective 版本不符"):
+            TrajectoryPool.load(
+                self._pool_file(tmp_path, None),
+                expected_objective_version="v-new",
+            )
+
+    def test_no_expected_backcompat(self, tmp_path):
+        """不传 expected 的读法（测试/纯表达式消费）不校验——沿用文件版本。"""
+        got = TrajectoryPool.load(self._pool_file(tmp_path, "v-old"))
+        assert got._objective_version == "v-old"
+
+
+class TestResumeObjectiveGuardCLI:
+    """同 tag 续跑遇上异版本/守卫前轨迹池 ⇒ fail-closed（v0.320）。"""
+
+    def test_resume_pool_objective_mismatch_refused(self, tmp_path):
+        bars, codes_file = TestCLI._setup(tmp_path)
+        from custos.research.evolution.trajectory import _FILE_VERSION
+
+        pool_dir = tmp_path / "out" / "t1"
+        pool_dir.mkdir(parents=True)
+        (pool_dir / "trajectory_pool.json").write_text(
+            json.dumps(
+                {
+                    "version": _FILE_VERSION,
+                    "objective_version": "v2.0-legacy-composite",
+                    "trajectories": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        with pytest.raises(ValueError, match="objective 版本不符"):
+            el.main(
+                TestCLI._argv(tmp_path, codes_file, "--mock-llm"),
+                loader=TestCLI._loader(bars, []),
+            )

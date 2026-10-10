@@ -577,6 +577,7 @@ def save_ledger(
         path,
         {
             "schema": LEDGER_SCHEMA,
+            "objective_version": _sg_obj_version(),  # 续跑守卫（v0.320，见 load_ledger）
             "campaign": tag,
             "config": asdict(cfg),
             "state": asdict(state),
@@ -586,11 +587,26 @@ def save_ledger(
 
 
 def load_ledger(path: Path) -> tuple[CampaignConfig, CampaignState, list[dict], str]:
-    """读台账 → (config, state, batches, tag)；schema 不符即报错（不猜）。"""
+    """读台账 → (config, state, batches, tag)；schema/objective 版本不符即报错（不猜）。
+
+    ⚠️ objective_version 守卫（v0.320，owner review）：random_pool 里存的是
+    objective 值——跨 objective 版本续跑会把新旧口径（量级差近一个数量级）
+    混进同一池，q95 与候选比较的就不是同一把尺子且**全程无报错**。版本
+    不符（含守卫前旧台账无此字段）⇒ fail-closed 拒绝续跑：换 --tag 开新
+    战役（R37 已收口，旧台账本不该续）。
+    """
     doc = json.loads(path.read_text(encoding="utf-8"))
     if doc.get("schema") != LEDGER_SCHEMA:
         raise ValueError(
             f"台账 schema 不符: {doc.get('schema')!r}（期望 {LEDGER_SCHEMA}）"
+        )
+    got_obj = doc.get("objective_version")
+    cur_obj = _sg_obj_version()
+    if got_obj != cur_obj:
+        raise ValueError(
+            f"台账 objective 版本不符: {got_obj!r}（当前 {cur_obj}）——"
+            "跨版本续跑会把新旧口径混进同一随机池（v0.320 守卫），"
+            "请换 --tag 开新战役"
         )
     cfg = CampaignConfig(**doc["config"])
     st = doc["state"]

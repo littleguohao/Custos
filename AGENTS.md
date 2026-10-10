@@ -234,6 +234,12 @@ build_row 源头转 float，numpy 类型不触发校验失败）。
   ③rank_rows 单行组合自参照标 `rdd_gate="self_ref"` 且排序落在真过门行
   之后（v0.306——CLI 第一名=可直接拷 live EXIT_RULES 的行，未检验组合
   不能拿；多行组合参照锚点行自比恒真标 True，两标签分开）。
+  **v0.320 续跑守卫**：exit_campaign 台账与 evolution_loop 轨迹池均带
+  `objective_version` 落盘，**跨版本续跑 fail-closed 拒绝**（守卫前旧
+  文件无字段同拒——跨版本续跑会把新旧口径混进同一随机池/轨迹池，q95
+  与候选用错尺子全程无报错；换 --tag 开新）。score_evolution cell 缓存
+  不存 objective（每次按当前口径从原始行重算）不受影响；`--legs-file`
+  只读表达式不挡（轨迹存值不进 score_evolution 数值）。
 - 因子 IC 画像（`factor_ic_profile`）：SCORERS/DSL 的截面 RankIC/ICIR + horizon
   衰减全因子可比表——**分诊镜不是晋级判据**（晋级永远走双窗+三轴交易语义；
   读数 L3− 带幸存者偏差，R19/R21/R14）。
