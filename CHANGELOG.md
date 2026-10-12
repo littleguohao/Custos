@@ -342,6 +342,7 @@
 | 2026-10-12 | v0.338 | **台账补登行 window 键修正**：r39_a2/r40_a1 补登行把区间写进 window 字段（judgment(2024-08-01~…)），count_uses 按窗名匹配数不到——k=0 低估（正是建台账要防的事）；已把区间挪进 purpose、window 归位窗名（k 恢复=2），并加入库台账行格式钉测（window 必须落在 WINDOW_SPAN 枚举内，区间只许进 purpose） | 复核生产补登 | 钉测 +1 |
 | 2026-10-12 | v0.339 | **R42 MDE 措辞分窗修订 + power_mde 组间锚（owner 复核）**：R42 三处「倒挂是 MDE 的 2~5 倍」改分窗读——挖掘窗约 34×MDE 可分辨非噪声、判定窗约 1.3~1.9× 贴近门槛形态相同按旁证（原双窗混用一把尺；簇数大 ⇒ MDE 小）；mde_low_confidence 旗挖掘窗取下、判定窗保留。power_mde：组间（不配对）比较 ⇒ ρ_pair=0，RHO_TIER_SCENARIOS 改 (0.0,0.3,0.5)（0.75=配对锚不动；R42 旧表方向不变——真实 MDE 只会更大）。r42_probe 台账缺行排查：生产路径 synthetic 接线复核无误——最可能生产机本地已写未提交，待 git status 核对 | owner review | 钉测改写 1 |
 | 2026-10-12 | v0.340 | **R42 倒挂倍数笔误修订（owner 按簇数重算）**：v0.339 的「挖掘窗约 34×MDE」系笔误（34 无量纲来源不明，会让人以为证据强了一个数量级）——按挖掘窗实际簇数 n=18020~21584、ρ_pair=0、deff 1~2 重算 MDE≈0.009~0.014：high_mid −0.0567 ⇒ 4.0~6.2×、high_low −0.0273 ⇒ 1.9~3.0×，三处全改「挖掘窗 high_mid 约 4~6×、high_low 约 2~3×MDE 可分辨；判定窗约 1.3~1.9× 旁证」（判毕 falsified 不受影响） | owner review | 纯文档 |
+| 2026-10-12 | v0.341 | **台账 synthetic 守卫四终端接线修复**（台账审计实锤）：warm_fn 在生产分支被重绑成真实闭包、record_use 处再判恒 True ⇒ 生产跑全被误判合成、判定窗读取不入台账——r42_probe 判定窗缺行根因（v0.339「接线无误」假设证伪）；score_tier/factor_exit/plan_rules/bear_regime 四处改入口快照 synthetic=injected；exit_c5/exit_campaign/score_evolution/score_filter/score_c5 复核无此 bug（入口快照或 _final 新名不污染参数） | 四终端钉测 96 绿 | — |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

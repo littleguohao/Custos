@@ -262,6 +262,10 @@ def run_study(
     replay_fn: Optional[Callable[[list[dict], dict[str, Any]], list[dict]]] = None,
 ) -> dict[str, Any]:
     """双窗配对研究：attach → 两版读数 → C1~C4 → 四态结局。"""
+    # 合成守卫在入口快照：下方生产分支会把 warm_fn 重绑成真实闭包
+    # （noqa: F811），事后再判恒 True ⇒ 生产跑被误判合成、判定窗读取
+    # 不入台账（r42_probe 事故根因，v0.338 排查的实锤答案）。
+    injected = warm_fn is not None or replay_fn is not None
     windows = {
         "mining": (args.mining_start, args.mining_end),
         "judgment": (args.judgment_start, args.judgment_end),
@@ -437,7 +441,7 @@ def run_study(
         "judgment",
         args.tag,
         "C1~C4 判定窗读数",
-        synthetic=(warm_fn is not None or replay_fn is not None),
+        synthetic=injected,
     )
     from custos.research import provenance as pv  # noqa: PLC0415
     from custos.research.load_window import EXIT_BARS_HOLDOUT_NOTE  # noqa: PLC0415
