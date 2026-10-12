@@ -173,7 +173,8 @@ def evaluate_filter(
     for d in sorted(by):
         kept.extend(_filter_day(by[d], x))
     reading, taken, slots = _eval_pool(kept, top_n)
-    reading["fill_rate"] = slots["slots"] / base_slots if base_slots else None
+    if reading is not None:
+        reading["fill_rate"] = slots["slots"] / base_slots if base_slots else None
     return {"reading": reading, "taken": taken, "slots": slots}
 
 
@@ -187,7 +188,7 @@ def _enrich(
     collected: list[dict],
     args: Any,
     window: Any,
-    rq_fetcher: Optional[Callable[[str, list[int]], dict[str, Optional[float]]]] = None,
+    rq_fetcher: Optional[Callable[[str, list[dict]], list[Optional[float]]]] = None,
 ) -> list[dict]:
     """候选池富化（每窗一次）：写入四对象的过滤器值（fval 按对象切换）。
 
@@ -294,7 +295,7 @@ def run_study(
     }
     codes = [
         line.strip()
-        for line in Path(args.codes_file).read_text().splitlines()
+        for line in Path(args.codes_file).read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
     # p2_sole 走 collect 的 addon 通道（TS_RANK 归一序列每股一次）
@@ -339,7 +340,11 @@ def run_study(
                     kept.extend(_random_filter_day(by[d], x, rng))
                 reading, _t, _s = _eval_pool(kept, args.top_n)
                 b0 = baseline[wname]["reading"]["margin"]
-                if reading["margin"] is not None and b0 is not None:
+                if (
+                    reading is not None
+                    and reading["margin"] is not None
+                    and b0 is not None
+                ):
                     random_pool[f"{x:.2f}"][wname].append(reading["margin"] - b0)
 
     # 4 对象 × 4 X 档
@@ -402,10 +407,10 @@ def run_study(
             for k, v in per_x.items()
             if not v["void"] and v["mining"]["d_margin"] is not None
         ]
-        c3 = {"flips": None, "note": "无有效档"}
+        c3: dict[str, Any] = {"flips": None, "note": "无有效档"}
         best_x = None
         if valid:
-            best_x, best = max(valid, key=lambda kv: kv[1]["mining"]["d_margin"])
+            best_x, _best = max(valid, key=lambda kv: kv[1]["mining"]["d_margin"])
             order = [f"{x:.2f}" for x in X_GRID]
             i = order.index(best_x)
             neigh = [order[j] for j in (i - 1, i + 1) if 0 <= j < len(order)]
@@ -519,8 +524,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
     ap = _build_parser()
     args = ap.parse_args(argv)
     args.cmdline = " ".join(argv) if argv is not None else " ".join(sys.argv[1:])

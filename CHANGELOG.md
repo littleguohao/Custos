@@ -347,6 +347,7 @@
 | 2026-10-12 | v0.343 | **台账生产方向钉测 ×4（owner 点名缺口——r42_probe 漏登根因：生产分支重绑 warm_fn ⇒ 恒判合成，v0.341 已修为入口快照 injected）**：bear/factor_exit/plan_rules/score_tier 各补 TestProductionRecordUse——warm_fn=None（生产路径）+ 生产依赖全 monkeypatch 合成（宇宙/regime/指数/warm 闭包/replay_signals；bear 臂 run_arm 最小桩旁路），spy record_use 断言 synthetic=False 且 k 直通报告；对照钉注入路径 synthetic=True——再重绑注入参数必红 | owner 2026-10-12 | 钉测 +8 |
 | 2026-10-12 | v0.344 | **文档整理：research/README 与 AGENTS.md 重排**——README 新增「当前状态」/研究纪律（判据件单源表）/工具目录，主图补 R39~R42 与过期标注，08 月排查段移入历史档案；AGENTS.md 359→199 行，研究细节下沉 README，§5 改为新终端合入清单，三本 append-only 台账合并成表 | owner | 治理守卫绿 |
 | 2026-10-12 | v0.345 | **日/周/月报不入库（owner 指令）**：2026-07 月报（4750821b 随静态清扫混入）git rm --cached 移出跟踪、磁盘保留；日期命名的日报/周报/月报本就被 .gitignore 覆盖（末尾 generic reports/ + weekly/monthly keep-dir 专项行），DAILY_PLAN_TEMPLATE.md 属模板按既有 ! 规则保留 | owner | git ls-files 复核只剩模板 |
+| 2026-10-12 | v0.346 | **audit 新增问题清零（owner 指令）**：mypy 71→0（+56 新增与 15 旧账，16 文件——标注/守卫/收窄为主、行为零变化：combine_readings ref 补 "self" 哨兵型、paired_bootstrap 2-元组、score_evolution 标注杀推断级联+pd 走 TYPE_CHECKING、SCORERS 异构注册表 Callable[...,Any]、provenance 重构等）；pylint 清尾 re-export disable/encoding×3/未用变量×4/plan_shadow×4；vulture w_name→values()；F 级复杂度登记 TODO #84 | owner 2026-10-12 audit | mypy=0；钉测 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

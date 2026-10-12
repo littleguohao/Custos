@@ -211,7 +211,7 @@ def evaluate_event(
         # 决策日停牌/缺数据：bar 序列首日≠决策日，台账 close 与 bar 价格对不上
         out["error"] = "决策日无 bar（停牌/缺数据）——close0 与 bar 序列口径对不上"
         return out
-    can_buy, can_sell = bt.tradable_flags(sub, str(row.get("code") or ""))
+    _can_buy, can_sell = bt.tradable_flags(sub, str(row.get("code") or ""))
     path_bars = [
         {"date": d, "open": o, "close": c}
         for d, o, c in zip(

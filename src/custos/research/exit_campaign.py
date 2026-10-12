@@ -205,7 +205,9 @@ def _d_margin(readings: Optional[dict], base: Optional[dict]) -> Optional[float]
 
 
 def _n_taken_ok(readings: Optional[dict], cfg: CampaignConfig) -> bool:
-    return bool(readings) and (readings.get("n_taken") or 0) >= cfg.min_n_taken
+    if not readings:
+        return False
+    return (readings.get("n_taken") or 0) >= cfg.min_n_taken
 
 
 def _sg_obj_version() -> str:
@@ -298,7 +300,7 @@ def ctl_step(
                 ),
             }
         )
-    rand_rows = [
+    rand_rows: list[dict[str, Any]] = [
         {"genome": g, "key": eg.genome_key(g), "mining": rw}
         for g, rw in zip(rand, rw_rand)
     ]

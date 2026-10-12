@@ -119,6 +119,7 @@ def build(
     的测试无此属性 ⇒ None）。``args.codes_file``：宇宙文件（缺省/无文件
     ⇒ universe_sha256 None）。
     """
+    codes_file = getattr(args, "codes_file", None)
     return {
         "git_sha": git_sha(),
         "git_dirty": git_dirty(),
@@ -133,11 +134,7 @@ def build(
         "pre_reg_blob_hash": (
             git_blob_hash(pre_reg_doc) if pre_reg_doc is not None else None
         ),
-        "universe_sha256": (
-            file_sha256(getattr(args, "codes_file", "") or "")
-            if getattr(args, "codes_file", "")
-            else None
-        ),
+        "universe_sha256": (file_sha256(codes_file) if codes_file else None),
         "data_last_date": data_last_date,
         "cmdline": getattr(args, "cmdline", None),
     }

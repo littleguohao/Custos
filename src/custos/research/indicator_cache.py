@@ -36,7 +36,10 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
+
+if TYPE_CHECKING:
+    import argparse
 
 import numpy as np
 import pandas as pd
@@ -192,7 +195,7 @@ class IndicatorCache:
             path = self._path(code, battery, fp)
             tmp = path.with_name(path.name + ".tmp")
             with tmp.open("wb") as fh:
-                np.savez(fh, **flat, **{_META_KEY: np.asarray(json.dumps(meta))})
+                np.savez(fh, **flat, **{_META_KEY: np.asarray(json.dumps(meta))})  # type: ignore[arg-type]
             os.replace(tmp, path)  # 原子写：读者要么见旧要么见新，绝不见半截
         except Exception:  # noqa: BLE001  # 写失败不拦计算（缓存是加速层不是正确性层）
             return

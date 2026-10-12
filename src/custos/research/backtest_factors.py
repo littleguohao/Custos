@@ -1426,7 +1426,7 @@ _SCORER_PRECOMPUTE: dict[
 _SLICE_FREE_SCORERS: frozenset[Callable] = frozenset({_sc_b1_pullback})
 
 
-SCORERS = {
+SCORERS: dict[str, Callable[..., Any]] = {
     "s_shape": _sc_s_shape,
     "s_reversal": _sc_s_reversal,
     "invert_s_shape": _sc_invert_s_shape,

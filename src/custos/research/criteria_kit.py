@@ -101,7 +101,8 @@ def c4_state_of(
         return "indeterminate"
     if len(pool) < min_pool:
         return "provisional"
-    if plan_delta is not None and plan_delta > q95(pool):
+    q = q95(pool)
+    if plan_delta is not None and q is not None and plan_delta > q:
         return "confirmed_pass"
     return "confirmed_fail"
 

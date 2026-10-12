@@ -345,7 +345,7 @@ def run_study(
             c3_draws.append(
                 {"draw": draw_i, "lookback": lookback_p, "c2_holds": c2_p["ok"]}
             )
-    c3 = {
+    c3: dict[str, Any] = {
         "ok": bool(c3_draws) and all(d["c2_holds"] for d in c3_draws),
         "draws": c3_draws,
         "n_flips": sum(1 for d in c3_draws if not d["c2_holds"]),

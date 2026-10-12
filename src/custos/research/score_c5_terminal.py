@@ -277,7 +277,7 @@ def run_c5(
     window = Window(args.start, args.end)
     codes = [
         line.strip()
-        for line in Path(args.codes_file).read_text().splitlines()
+        for line in Path(args.codes_file).read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
 
@@ -378,8 +378,8 @@ def run_c5(
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
     ap = _build_parser()
     args = ap.parse_args(argv)
     args.cmdline = " ".join(argv) if argv is not None else " ".join(sys.argv[1:])

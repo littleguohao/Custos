@@ -530,7 +530,7 @@ def _make_on_event(args: Any, llm: Any) -> Callable[[dict], None]:
 
     def _on_event(ev: dict) -> None:
         if ev.get("decision") == "llm_error":
-            _on_event.llm_errors += 1
+            _on_event.llm_errors += 1  # type: ignore[attr-defined]
         if ev.get("type") == "planning":  # --plan 的规划事件（种子→子方向+来源）
             print(
                 f"[plan] 种子「{ev['seed']}」→ {len(ev['directions'])} 条子方向"
@@ -559,7 +559,7 @@ def _make_on_event(args: Any, llm: Any) -> Callable[[dict], None]:
                 f"token 预算 {args.max_tokens_budget} 已超（累计 {used}），提前收敛"
             )
 
-    _on_event.llm_errors = 0
+    _on_event.llm_errors = 0  # type: ignore[attr-defined]
     return _on_event
 
 
@@ -633,7 +633,7 @@ def _make_cell_runner(
         )
         if key not in ref_cache:
             ref_cell = sg.twin_ref_cell(cell)
-            st, p, log = sg.run_cell(ns, ref_cell, cells_dir)
+            st, p, _log = sg.run_cell(ns, ref_cell, cells_dir)
             if st == "failed" or p is None:
                 print(
                     f"[WARN] v2.1 参照格失败（{key}），本格 fail-closed"

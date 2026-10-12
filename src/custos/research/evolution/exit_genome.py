@@ -116,9 +116,9 @@ def validate(g: dict[str, Any]) -> list[str]:
             if v not in levels:
                 bad.append(f"stop_pct={v} 不在档位 {levels}")
             continue
-        fam = _family_of(p)
+        fam_p = _family_of(p)
         # cost_zone_pct 关闭时是占位值（不在档位也合法）；开启才校验档位
-        if fam is not None and n[FAMILY_SWITCH[fam]] > 0 and v not in levels:
+        if fam_p is not None and n[FAMILY_SWITCH[fam_p]] > 0 and v not in levels:
             bad.append(f"{p}={v} 不在档位 {levels}")
     return bad
 

@@ -51,7 +51,6 @@ from custos.research.evolution import exit_genome as eg
 from custos.research import criteria_kit as kit
 from custos.research import window_usage as wu
 from custos.research.exit_c5_terminal import (
-    FORWARD_HOLDOUT_START,
     PRE2019_END,
     PRE2019_START,
 )
@@ -198,7 +197,7 @@ def replay_signals(
 def combine_readings(
     trades: list[dict],
     top_n: int,
-    ref: Optional[dict[str, Any]] = None,
+    ref: dict[str, Any] | str | None = None,
 ) -> Optional[dict]:
     """交易集 → 读数块（与 exit_campaign 评估器同形状 + taken 供 C1 桶级计数）。
 
@@ -226,7 +225,9 @@ def combine_readings(
         "expectancy_R": tsum.get("expectancy_R"),
         "ret_over_dd": sg._ret_over_dd(pf),
     }
-    ref_eff = row if ref == "self" else ref
+    ref_eff: Optional[dict[str, Any]] = (
+        row if ref == "self" else (ref if isinstance(ref, dict) else None)
+    )
     return {
         "objective": sg.search_objective(row, ref_eff),
         "objective_version": sg.OBJECTIVE_VERSION,
@@ -384,7 +385,7 @@ def pick_top(configs: list[dict]) -> Optional[dict]:
 
 def pick_uniform_best(uniform: dict[str, Optional[dict]]) -> Optional[dict]:
     """uniform-best：档集内挖掘窗 margin 最大（rdd 门同待遇；选择只在挖掘窗）。"""
-    ok = [
+    ok: list[dict[str, Any]] = [
         {"profile": pk, "readings": rd}
         for pk, rd in uniform.items()
         if rd and rd["objective"] is not None
@@ -931,8 +932,8 @@ def _check_windows(args: Any, ap: argparse.ArgumentParser) -> None:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
     ap = _build_parser()
     args = ap.parse_args(argv)
     args.cmdline = " ".join(argv) if argv is not None else " ".join(sys.argv[1:])

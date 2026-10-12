@@ -505,7 +505,7 @@ def run_study(
         arm_rng = random.Random(f"{args.seed}-arm{i}")  # 臂级种子写死可复现
         perm = arm_tier_draw(m_rd["labels"], m_rd["clusters"], arm_rng)
         best: Optional[float] = None
-        for w_name, wts in WEIGHT_GRID.items():
+        for wts in WEIGHT_GRID.values():
             we = weighted_expr(perm, m_rd["trades"], wts)
             if we is None or m_rd["equal_expR"] is None:
                 continue

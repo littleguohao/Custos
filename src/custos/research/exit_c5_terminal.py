@@ -52,7 +52,7 @@ PRE2019_START, PRE2019_END = "2010-01-01", "2016-12-31"
 #: 判定窗。与 pre2019 同族：研究工具对 ≥ 本日起点的窗口硬拒绝。
 #: **单源已下沉 load_window（v0.330，owner review #2②——exit_campaign 等
 #: 入口漏守实测被抓）**；此处 re-export 兼容既有 import。
-from custos.research.load_window import (  # noqa: E402,F401
+from custos.research.load_window import (  # noqa: E402,F401  # pylint: disable=unused-import — re-export 兼容既有 import
     FORWARD_HOLDOUT_START,
 )
 
@@ -120,7 +120,7 @@ def combined_yardstick(report: dict[str, Any]) -> dict[str, float]:
     dm_j = bc.get("d_margin_judgment")
     n_m = (bc.get("mining") or {}).get("n_taken")
     n_j = (bc.get("judgment") or {}).get("n_taken")
-    if None in (dm_m, dm_j) or not n_m or not n_j:
+    if dm_m is None or dm_j is None or not n_m or not n_j:
         raise ValueError("战役报告缺 best_candidate 双窗 Δmargin/n_taken")
     if dm_m <= 0:
         raise ValueError(f"挖掘窗 Δmargin={dm_m} ≤0——不该是候选（对账失败）")
@@ -176,7 +176,7 @@ def pair_trades(
 
 
 def paired_bootstrap(
-    pairs: list[tuple[dict[str, Any]]], *, seed: int, n_boot: int
+    pairs: list[tuple[dict[str, Any], dict[str, Any]]], *, seed: int, n_boot: int
 ) -> dict[str, Any]:
     """**日簇**配对 bootstrap（v0.324，owner 方法论 review #3）：成**日**
     重抽样 ⇒ Δmargin 分布的 SE/CI95。
@@ -470,7 +470,9 @@ def _warm_pre2019(args: Any) -> dict[str, dict]:
     from custos.research import score_return_study as srs  # noqa: PLC0415
 
     codes = [
-        l.strip() for l in Path(args.codes_file).read_text().splitlines() if l.strip()
+        l.strip()
+        for l in Path(args.codes_file).read_text(encoding="utf-8").splitlines()
+        if l.strip()
     ]
     regime = bt.load_amv_regime(since=args.start)
     if not regime:
@@ -617,8 +619,8 @@ def run_c5(args: Any, per_code: Optional[dict[str, dict]] = None) -> dict[str, A
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
     ap = _build_parser()
     args = ap.parse_args(argv)
     args.cmdline = " ".join(argv) if argv is not None else " ".join(sys.argv[1:])

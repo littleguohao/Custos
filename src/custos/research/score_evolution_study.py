@@ -76,7 +76,10 @@ import math
 import random
 import sys
 from pathlib import Path
-from typing import Any, Callable, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Optional, Sequence
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 # GBK（cp936）终端/管道打不了 ⚠️/⛔ 等符号 —— 不 reconfigure 会 UnicodeEncodeError。
 # 惯例同 evolution_loop / random_baseline_study（hasattr 守卫：pytest 捕获替换过）。
@@ -1109,9 +1112,10 @@ class _V0LatticeEvaluator:
                     n_missing += 1
                     continue
             score, _level, _contrib = sc.technical_score(it["cand"], overrides)
-            if addon_expr is not None:
-                score = score + lam * float(av)
-            cands.append({**it["trade"], "score": score})
+            final_score: float | int = score
+            if addon_expr is not None and av is not None:
+                final_score = score + lam * float(av)
+            cands.append({**it["trade"], "score": final_score})
         taken: list[dict] = []
         pf = bt.simulate_portfolio_topn(
             cands, top_n=self._args.top_n, taken_out=taken, **_V0_PORTFOLIO
@@ -1126,6 +1130,7 @@ class _V0LatticeEvaluator:
             "expectancy_R": tsum.get("expectancy_R"),
             "ret_over_dd": ret_dd,
         }
+        ref: Optional[dict[str, Any]]
         if addon_expr is None and all(float(m) == 1.0 for m in mult):
             ref = row  # 等倍率基准本体=自参照（v2.1 门恒真）
             ref_missing = False
@@ -1198,7 +1203,7 @@ def _run_v0_lattice_study(
         genome_list = [(equal_w, None)] + [
             (equal_w, (e, lam)) for e in addon_legs for lam in args.addon_levels
         ]
-        mining_rows = [
+        mining_rows: list[dict[str, Any]] = [
             {
                 "weights": list(w),
                 "addon": ({"expr": a[0], "lambda": a[1]} if a else None),
@@ -1222,7 +1227,9 @@ def _run_v0_lattice_study(
         )
         return None
     if addon_legs:
-        equal_row = mining_rows[0]  # 无腿基准基因组（λ=0）即 C2 参照
+        equal_row: Optional[dict[str, Any]] = mining_rows[
+            0
+        ]  # 无腿基准基因组（λ=0）即 C2 参照
         single_rows: list[tuple[str, Optional[dict]]] = []
     else:
         equal_row = _find_by_weights(mining_rows, arms_ref["equal"])
