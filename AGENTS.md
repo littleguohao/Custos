@@ -158,7 +158,9 @@ uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/
   ⇒ 不写——任何注入件（warm/replay/random_entry/collector/evaluator/
   cell_runner 等）非 None 的调用点必须传（2026-10-10 事故：pytest 外
   直跑注入路径绕过 conftest 重定向写入合成记录——修写入路径，不是
-  放弃入库）；
+  放弃入库）；生产方向有钉测（v0.343：四终端各一条——warm_fn=None +
+  生产依赖全 monkeypatch 合成 + spy record_use，断言 synthetic=False
+  且 k 直通报告，对照钉注入路径 synthetic=True）；
 - 单元头部「状态/结论」必须与正文同步（R22 头部滞后是反面教材；**判毕后
   头部/结论段禁「待跑数/待发令」**，test 机械强制 v0.321——R39 曾脱节）；
 - **判据修订留痕机械核对（v0.327，owner review #11）**：产物 provenance 记

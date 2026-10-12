@@ -344,6 +344,7 @@
 | 2026-10-12 | v0.340 | **R42 倒挂倍数笔误修订（owner 按簇数重算）**：v0.339 的「挖掘窗约 34×MDE」系笔误（34 无量纲来源不明，会让人以为证据强了一个数量级）——按挖掘窗实际簇数 n=18020~21584、ρ_pair=0、deff 1~2 重算 MDE≈0.009~0.014：high_mid −0.0567 ⇒ 4.0~6.2×、high_low −0.0273 ⇒ 1.9~3.0×，三处全改「挖掘窗 high_mid 约 4~6×、high_low 约 2~3×MDE 可分辨；判定窗约 1.3~1.9× 旁证」（判毕 falsified 不受影响） | owner review | 纯文档 |
 | 2026-10-12 | v0.341 | **台账 synthetic 守卫四终端接线修复**（台账审计实锤）：warm_fn 在生产分支被重绑成真实闭包、record_use 处再判恒 True ⇒ 生产跑全被误判合成、判定窗读取不入台账——r42_probe 判定窗缺行根因（v0.339「接线无误」假设证伪）；score_tier/factor_exit/plan_rules/bear_regime 四处改入口快照 synthetic=injected；exit_c5/exit_campaign/score_evolution/score_filter/score_c5 复核无此 bug（入口快照或 _final 新名不污染参数） | 四终端钉测 96 绿 | — |
 | 2026-10-12 | v0.342 | **台账「k 只是下限」声明（owner）**：台账自 2026-10 起计——此前判定窗已被约 13 个单元反复读取（R34/R36 P2/P3 c4review/R37 b1~b3 等，grep 在案），逐条补登成本高且不精确；usage_note 固定带「台账自 2026-10 起计，此前约 13 单元反复读取，k 只是下限」——读报告不会误以为只读过 k 次；不加台账基线行（保持 append-only 纯净，说明文字固定在每份报告注记里） | owner review | 钉测 +1 |
+| 2026-10-12 | v0.343 | **台账生产方向钉测 ×4（owner 点名缺口——r42_probe 漏登根因：生产分支重绑 warm_fn ⇒ 恒判合成，v0.341 已修为入口快照 injected）**：bear/factor_exit/plan_rules/score_tier 各补 TestProductionRecordUse——warm_fn=None（生产路径）+ 生产依赖全 monkeypatch 合成（宇宙/regime/指数/warm 闭包/replay_signals；bear 臂 run_arm 最小桩旁路），spy record_use 断言 synthetic=False 且 k 直通报告；对照钉注入路径 synthetic=True——再重绑注入参数必红 | owner 2026-10-12 | 钉测 +8 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

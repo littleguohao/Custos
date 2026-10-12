@@ -433,3 +433,94 @@ class TestCliAndProduct:
             for w in ("mining", "judgment"):
                 assert "taken" not in (cfg[w] or {}), "报告不落交易明细"
         assert set(rep["criteria"]) == {"C1", "C2", "C3", "C4", "rule_note"}
+
+
+# ---------------------------------------------------------------------------
+# 台账生产方向钉（v0.343，owner——r42_probe 漏登根因）
+# ---------------------------------------------------------------------------
+
+
+def _wu_spy(monkeypatch):
+    """record_use 捕获桩：返回固定 k=7（不碰真台账），返回调用清单。"""
+    from custos.research import window_usage as wu
+
+    calls = []
+
+    def spy(unit, window, tag, purpose, *, synthetic=False, path=None):
+        calls.append({"unit": unit, "window": window, "synthetic": synthetic})
+        return 7
+
+    monkeypatch.setattr(wu, "record_use", spy)
+    return calls
+
+
+class TestProductionRecordUse:
+    """run_study 传 warm_fn=None（**生产路径**）+ 生产依赖全 monkeypatch 成
+    合成 ⇒ record_use 必须以 ``synthetic=False`` 被调且 k 直通报告。防回归：
+    生产分支重绑注入参数 ⇒ 入口快照 ``injected`` 变 True ⇒ 立刻红。
+    随机臂的生产路径（bear_bar_pool/random_entries 需真 df）由 run_arm
+    最小桩旁路——本测试目标是 record_use 接线，不是臂逻辑。"""
+
+    def _production_run(self, monkeypatch):
+        import pandas as pd
+
+        from custos.datasource.local_tdx import local_tdx_data
+
+        spec = _mk_per_code({"j_low": 60})
+        monkeypatch.setattr(bt, "_resolve_universe", lambda ns, ap: ["000000"])
+        monkeypatch.setattr(bt, "load_amv_regime", lambda since: {"2022-01-03": "空头"})
+        monkeypatch.setattr(
+            local_tdx_data,
+            "get_ohlcv_table",
+            lambda code, count: pd.DataFrame({"date": ["2022-01-03"]}),
+        )
+        monkeypatch.setattr(
+            brs,
+            "warm_gates",
+            lambda codes, regime, index_df, *, gates, count, cost_bps, start, end: spec[
+                (start, end)
+            ],
+        )
+        monkeypatch.setattr(
+            fes,
+            "replay_signals",
+            lambda view, subset, params, regime, cost_bps: _replay_winner_gate(
+                subset, params
+            ),
+        )
+        # 随机臂最小桩：池空 ⇒ indeterminate（本测试不管臂逻辑）
+        monkeypatch.setattr(brs, "run_arm", lambda *a, **kw: {"mining": None})
+        # brs._args 无宇宙/count 字段（注入路径用不到）——生产分支要读
+        return brs.run_study(
+            _args(
+                gates="j_low",
+                n_random=2,
+                c4_min_pool=2,
+                codes="",
+                codes_file="",
+                universe_local=False,
+                universe_sample=0,
+                universe_seed=42,
+                count=2000,
+            ),
+            warm_fn=None,
+            replay_fn=None,
+            random_entry_fn=None,
+        )
+
+    def test_production_records_with_synthetic_false(self, monkeypatch):
+        calls = _wu_spy(monkeypatch)
+        rep = self._production_run(monkeypatch)
+        assert len(calls) == 1
+        assert calls[0]["unit"] == "R40" and calls[0]["window"] == "judgment"
+        assert calls[0]["synthetic"] is False, "生产路径必须按 synthetic=False 登记"
+        assert rep["window_usage"]["k"] == 7, "生产口径 k 直通报告"
+        assert "第 7 次被读" in rep["window_usage"]["note"]
+
+    def test_injected_still_synthetic(self, monkeypatch):
+        """对照钉：同一夹具走注入路径 ⇒ synthetic=True（双向钉死）。"""
+        calls = _wu_spy(monkeypatch)
+        rep = _run(_mk_per_code({"j_low": 60}), _replay_winner_gate, n_random=2)
+        assert len(calls) == 1
+        assert calls[0]["synthetic"] is True
+        assert rep["window_usage"]["k"] == 7

@@ -405,3 +405,97 @@ class TestCliGuards:
     def test_defaults_accepted(self):
         ap = fes._build_parser()
         fes._check_windows(ap.parse_args(["--tag", "t"]), ap)
+
+
+# ---------------------------------------------------------------------------
+# 台账生产方向钉（v0.343，owner——r42_probe 漏登根因）
+# ---------------------------------------------------------------------------
+
+
+def _wu_spy(monkeypatch):
+    """record_use 捕获桩：返回固定 k=7（不碰真台账），返回调用清单。"""
+    from custos.research import window_usage as wu
+
+    calls = []
+
+    def spy(unit, window, tag, purpose, *, synthetic=False, path=None):
+        calls.append({"unit": unit, "window": window, "synthetic": synthetic})
+        return 7
+
+    monkeypatch.setattr(wu, "record_use", spy)
+    return calls
+
+
+class TestProductionRecordUse:
+    """run_study 传 warm_fn=None（**生产路径**）+ 生产依赖全 monkeypatch 成
+    合成 ⇒ record_use 必须以 ``synthetic=False`` 被调且 k 直通报告。防回归：
+    生产分支重绑注入参数 ⇒ 入口快照 ``injected`` 变 True ⇒ 立刻红。"""
+
+    def _production_run(self, monkeypatch):
+        import pandas as pd
+
+        from custos.datasource.local_tdx import local_tdx_data
+        from custos.research import backtest_factors as bt
+        from custos.research import exit_campaign as ec
+
+        _patch_adx(monkeypatch)  # df={"fmap"} 替身（与注入路径同夹具口径）
+        spec = _three_level_spec(180)
+        monkeypatch.setattr(bt, "_resolve_universe", lambda ns, ap: ["000000"])
+        monkeypatch.setattr(bt, "load_amv_regime", lambda since: {"2022-01-03": "做多"})
+        monkeypatch.setattr(
+            local_tdx_data,
+            "get_ohlcv_table",
+            lambda code, count: pd.DataFrame({"date": ["2022-01-03"]}),
+        )
+        monkeypatch.setattr(
+            ec,
+            "warm_v0_signals",
+            lambda codes, regime, index_df, *, count, cost_bps, start, end: spec[
+                (start, end)
+            ],
+        )
+        monkeypatch.setattr(
+            fes,
+            "replay_signals",
+            lambda per_code, subset, params, regime, cost_bps: _scripted_replay(
+                subset, params
+            ),
+        )
+        # fxt._args 无宇宙/count 字段（注入路径用不到）——生产分支要读
+        return fes.run_study(
+            _args(
+                n_random=2,
+                c4_min_pool=2,
+                codes="",
+                codes_file="",
+                universe_local=False,
+                universe_sample=0,
+                universe_seed=42,
+                count=2000,
+            ),
+            warm_fn=None,
+            replay_fn=None,
+        )
+
+    def test_production_records_with_synthetic_false(self, monkeypatch):
+        calls = _wu_spy(monkeypatch)
+        rep = self._production_run(monkeypatch)
+        assert len(calls) == 1
+        assert calls[0]["unit"] == "R39" and calls[0]["window"] == "judgment"
+        assert calls[0]["synthetic"] is False, "生产路径必须按 synthetic=False 登记"
+        assert rep["window_usage"]["k"] == 7, "生产口径 k 直通报告"
+        assert "第 7 次被读" in rep["window_usage"]["note"]
+
+    def test_injected_still_synthetic(self, monkeypatch):
+        """对照钉：同一夹具走注入路径 ⇒ synthetic=True（双向钉死）。"""
+        calls = _wu_spy(monkeypatch)
+        rep = _run(
+            monkeypatch,
+            _three_level_spec(180),
+            _scripted_replay,
+            n_random=2,
+            c4_min_pool=2,
+        )
+        assert len(calls) == 1
+        assert calls[0]["synthetic"] is True
+        assert rep["window_usage"]["k"] == 7
