@@ -4,9 +4,10 @@
 （research/ 刚拆过一次，strategy/ 还要拆）。断了的链接让待办无法判断是否还成立，
 清单就退化成一堆看不懂的字。
 
-另一条更重要：**「已失效的行动项」区块必须存在**。旧文档里的「待跑」被后续发现推翻后，
-如果静默删除，别人可能正照着做 —— 实例：R10 待跑 #3「去幸存者偏差用 --data-source qlib」
-在 2026-08-06 之后照做只会引入放大 13~21% 的收益，去偏一点没做到。
+另一条更重要：**被推翻的行动项必须在原出处就地标注**。旧文档里的「待跑」被后续发现推翻后，
+如果静默删除或只在别处记一笔，别人可能正照着原文做 —— 实例：R10 待跑 #3「去幸存者偏差用
+--data-source qlib」在 2026-08-06 之后照做只会引入放大 13~21% 的收益，去偏一点没做到。
+（2026-10-12 起取消 TODO「已失效」表：提醒必须贴在原文旁边，见 test_stale_actions_marked_at_source。）
 """
 
 from __future__ import annotations
@@ -38,23 +39,54 @@ def test_all_relative_links_resolve():
     [
         "## 待办",
         "## 已闭环索引",
-        "## ⚠️ 已失效的行动项",
     ],
 )
 def test_has_section(section):
     assert section in TODO.read_text(encoding="utf-8"), f"缺区块：{section}"
 
 
-def test_stale_actions_explain_why():
-    """已失效项必须写清**为什么失效**，否则读者无法判断能不能改回去。"""
-    s = TODO.read_text(encoding="utf-8")
-    seg = s[s.index("## ⚠️ 已失效的行动项") :]
-    seg = seg[: seg.index("\n## ")] if "\n## " in seg else seg
-    rows = [ln for ln in seg.splitlines() if ln.startswith("| ") and "---" not in ln]
-    assert len(rows) >= 4, "已失效表至少要有表头 + 3 项（当前已知 3 项）"
-    for ln in rows[1:]:
-        assert len(ln.split("|")) >= 4, (
-            f"已失效项缺列（原项/出处/为什么失效）：{ln[:60]}"
+# 已知被推翻的行动项 → 原出处文件 + 危险说法；同行或同段（向上 ≤3 行）必须带失效/完成标记。
+STALE_AT_SOURCE = [
+    ("governance/research/R10_mechanism_M2_stops.md", "--data-source qlib"),
+    ("governance/research/R13_meta_reproducibility.md", "--data-source qlib"),
+    ("governance/research/R10_mechanism_M2_stops.md", "`pct_03` / `pct_04`"),
+    (
+        "governance/research/R3_selection_discriminability_recall.md",
+        "是**错误的修正**",
+    ),
+    ("governance/research/R22_score_rebuild_variants.md", "**状态**："),
+    ("src/custos/research/sector_inflow_study.py", "勿接 1800"),
+    ("src/custos/datasource/local_tdx/fetch_pit_financials.py", "不改批量写"),
+    ("src/custos/datasource/local_tdx/fetch_pit_financials.py", "不做分页并发"),
+]
+STALE_MARKS = (
+    "🔄",
+    "已失效",
+    "勿照做",
+    "勿用",
+    "已证伪",
+    "已完成",
+    "已回收",
+    "刻意不做",
+)
+
+
+@pytest.mark.parametrize("rel,phrase", STALE_AT_SOURCE)
+def test_stale_actions_marked_at_source(rel, phrase):
+    """被推翻的行动项在**原出处**带失效标记——别人照的是原文，不是 TODO。"""
+    lines = (ROOT / rel).read_text(encoding="utf-8").splitlines()
+    hits = [i for i, ln in enumerate(lines) if phrase in ln]
+    assert hits, f"{rel} 里找不到「{phrase}」（改名/移动后同步本表）"
+    for i in hits:
+        # 同一行，或向上追溯同一段（最多 3 行；遇空行或另一个编号项即停）——
+        # 不往下看：下一条已完成的项不能替这一条作保
+        ctx = [lines[i]]
+        for k in range(i - 1, max(-1, i - 4), -1):
+            if not lines[k].strip() or re.match(r"^\s*\d+\. ", lines[k + 1]):
+                break
+            ctx.append(lines[k])
+        assert any(m in "\n".join(ctx) for m in STALE_MARKS), (
+            f"{rel}:{i + 1}「{phrase}」同段没有失效标记——会被当成待办照做"
         )
 
 
@@ -69,7 +101,7 @@ def test_separated_from_version_log():
     #    而 skip 会让这条测试静默通过。2026-08-07 清理 tests/ 时改为硬失败。
     assert log.exists(), f"版本日志缺失（入库文件）：{log}"
     s = log.read_text(encoding="utf-8")
-    for kw in ("## 已闭环索引", "已失效的行动项"):
+    for kw in ("## 已闭环索引", "## 待办\n"):
         assert kw not in s, f"版本日志里出现了待办内容：{kw}"
 
 

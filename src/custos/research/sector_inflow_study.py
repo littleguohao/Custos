@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 """#26 验证研究：「近期多次上榜（资金流入）板块里的 J<13 股票，后续表现是否优于未命中的」。
 
+⚠️ **已证伪（2026-08-19，v0.79），勿接 1800**：120 窗 regime 变体曾「过线」（H20 +2.52pp 两半同向），
+240 错位窗三 horizon 全部前后半翻转（H20：前半 −0.57 / 后半 +2.52）——弱市抗跌、强反弹市滞涨，
+edge 随 regime 反转抵消（R10）。本脚本保留作复现工具。
+
 ## 问题
 
 `pipeline/market_timing/sector_daily_rank.py` 逐日产出 `data/sectors/daily_rank/{date}.json`

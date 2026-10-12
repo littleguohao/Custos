@@ -18,6 +18,12 @@
 上面 0.5%/3.2% 给出(次年同期未发布时的重述比例),不是零。PIT 库**只能向前积累、无法回溯
 重建**;要更强保证需 tushare `income`/`balancesheet` 的 `f_ann_date` + `update_flag`(需积分)。
 
+刻意不做(owner 2026-08-19 拍板,勿照旧 TODO #59③④ 改):
+  - **不改批量写**:逐期全量台账读写的 IO 浪费(~97%)可接受——批量补拉是低频运维;逐期落盘保住
+    「一期失败不丢已落盘的期」的容错语义与 stdout 逐期数值口径;
+  - **不做分页并发**:会改变请求时序与限流特征(东财连打会被静默限流,正是 FetchIncomplete 防的
+    场景),无法逐位等价钉住。
+
 用法:
   # 拉指定报告期(可多个)
   uv run python src/custos/datasource/local_tdx/fetch_pit_financials.py --periods 2024-03-31 2024-06-30
