@@ -1,3 +1,6 @@
 {"schema": "window_usage/v1", "unit": "R39", "window": "judgment", "tag": "r39_a2", "purpose": "判定窗读数（补登：跑数用 v0.321 前工具，无自动记录点）（窗=judgment(2024-08-01~2026-09-04)；v0.338 键修正——补登时 window 误带区间，count_uses 按窗名匹配数不到）", "recorded_at": "2026-10-10T22:04:26+08:00"}
 {"schema": "window_usage/v1", "unit": "R40", "window": "judgment", "tag": "r40_a1", "purpose": "判定窗读数（补登：跑数用 v0.321 前工具，无自动记录点）（窗=judgment(2024-08-01~2026-09-04)；v0.338 键修正——补登时 window 误带区间，count_uses 按窗名匹配数不到）", "recorded_at": "2026-10-10T22:04:26+08:00"}
 {"schema": "window_usage/v1", "unit": "R42", "window": "judgment", "tag": "r42_probe", "purpose": "C1~C4 判定窗读数（补登：工具 synthetic 守卫接线 bug 漏记，v0.341 修复）", "recorded_at": "2026-10-12T11:12:07+08:00"}
+{"schema": "window_usage/v1", "unit": "R36-C5", "window": "pre2019", "tag": "r36_c5", "purpose": "C5 pre2019 终审读数（补登：v0.321 前工具无记录点）", "recorded_at": "2026-10-12T11:13:04+08:00"}
+{"schema": "window_usage/v1", "unit": "R37-C5", "window": "pre2019", "tag": "r37_c5_v2", "purpose": "C5 pre2019 终审读数（补登：v0.321 前工具无记录点；v0.288 全历史复跑）", "recorded_at": "2026-10-12T11:13:04+08:00"}
+{"schema": "window_usage/v1", "unit": "R36-P4", "window": "judgment", "tag": "r36_p4_v1", "purpose": "P4 判定窗读数（补登：v0.321 前工具无记录点）", "recorded_at": "2026-10-12T11:13:04+08:00"}
