@@ -271,22 +271,13 @@ def _rq_second_pass(collected: list[dict], args: Any, window: Any) -> dict:
                     if isinstance(v, (int, float)) and math.isfinite(v)
                     else None
                 )
-            except Exception:  # noqa: BLE001 — 单点失败缺值 fail-open
+            except Exception:  # noqa: BLE001 — 单点失败缺值 fail-open  # pylint: disable=broad-exception-caught
                 out[(code, d)] = None
     return out
 
 
-def run_study(
-    args: Any,
-    collector: Optional[Callable[[Any], Optional[list[dict]]]] = None,
-    rq_fetcher: Optional[Callable[..., Any]] = None,
-) -> dict[str, Any]:
-    """Phase 4 主驱动：双窗 collect → 富化 → 4 对象 × 4 X 档 + 随机对照。
-
-    ``collector``/``rq_fetcher`` 可注入（测试合成数据）。空结果护栏：
-    任一窗 0 候选 → RuntimeError（不落盘）。
-    """
-    from custos.research import score_evolution_study as ses  # noqa: PLC0415
+def _prepare_inputs(args: Any) -> tuple[dict[str, Any], list[str], dict[str, Any]]:
+    """输入准备：建双窗、读钉死宇宙 codes 表、写死 p2_sole addon 通道与出厂规格。"""
     from custos.research.evolution.dual_window import Window  # noqa: PLC0415
 
     windows = {
@@ -305,6 +296,19 @@ def run_study(
         "name": "pct5_trail08",
         "params": {"stop_mode": "pct", "stop_pct": 5, "trail_pct": 0.08},
     }
+    return windows, codes, exit_spec
+
+
+def _collect_baselines(
+    args: Any,
+    collector: Optional[Callable[[Any], Optional[list[dict]]]],
+    rq_fetcher: Optional[Callable[..., Any]],
+    windows: dict[str, Any],
+    codes: list[str],
+    exit_spec: dict[str, Any],
+) -> tuple[dict[str, list[dict]], dict[str, dict]]:
+    """双窗采集 + 富化 + 不剔除基准读数（空结果护栏：任一窗 0 候选即抛）。"""
+    from custos.research import score_evolution_study as ses  # noqa: PLC0415
 
     enriched: dict[str, list[dict]] = {}
     baseline: dict[str, dict] = {}
@@ -325,8 +329,16 @@ def run_study(
             "taken": base_taken,
             "slots": base_slots,
         }
+    return enriched, baseline
 
-    # 随机过滤器对照（每 X 档 N 次；两臂共享基准读数）
+
+def _random_control(
+    args: Any,
+    windows: dict[str, Any],
+    enriched: dict[str, list[dict]],
+    baseline: dict[str, dict],
+) -> dict[str, dict[str, list[float]]]:
+    """随机过滤器对照（每 X 档 N 次；两臂共享基准读数）：Δmargin 合并池。"""
     rng = random.Random(args.seed)
     random_pool: dict[str, dict[str, list[float]]] = {
         f"{x:.2f}": {"mining": [], "judgment": []} for x in X_GRID
@@ -346,89 +358,120 @@ def run_study(
                     and b0 is not None
                 ):
                     random_pool[f"{x:.2f}"][wname].append(reading["margin"] - b0)
+    return random_pool
 
-    # 4 对象 × 4 X 档
+
+def _filter_x_row(
+    args: Any,
+    fkey: str,
+    x: float,
+    windows: dict[str, Any],
+    enriched: dict[str, list[dict]],
+    baseline: dict[str, dict],
+    random_pool: dict[str, dict[str, list[float]]],
+) -> dict[str, Any]:
+    """单 (fkey, X) 格：双窗剔除评估 + 缺值率/位移数 + 随机对照 C1/C2/C4 读数。"""
+    row: dict[str, Any] = {"x": x}
+    for wname in windows:
+        items = [{**it, "fval": it.get(fkey)} for it in enriched[wname]]
+        n_missing = sum(1 for it in items if it["fval"] is None)
+        res = evaluate_filter(items, x, args.top_n, baseline[wname]["slots"]["slots"])
+        r, taken = res["reading"], res["taken"]
+        b0 = baseline[wname]["reading"]
+        d_margin = (
+            r["margin"] - b0["margin"]
+            if r["margin"] is not None and b0["margin"] is not None
+            else None
+        )
+        fill = r.get("fill_rate")
+        c1_ok = (
+            (r.get("n_taken") or 0) >= MIN_N_TAKEN
+            and fill is not None
+            and fill >= FILL_FLOOR
+        )
+        row[wname] = {
+            "margin": r["margin"],
+            "d_margin": d_margin,
+            "n_taken": r.get("n_taken"),
+            "fill_rate": fill,
+            "n_missing": n_missing,
+            "missing_rate": n_missing / len(items) if items else None,
+            "displacement": _displacement(baseline[wname]["taken"], taken),
+            "c1_ok": c1_ok,
+        }
+    rp = random_pool[f"{x:.2f}"]
+    merged = rp["mining"] + rp["judgment"]
+    # 小池 None 改调用点显式 min_pool=20 门（v0.322，owner 拍板
+    # campaign 版 q95 为主源——行为与旧 filter 版 _q95 逐位一致）
+    row["random_q95"] = kit.q95(merged) if len(merged) >= 20 else None
+    row["random_n"] = len(merged)
+    # C2/C4 机械读数（双窗同向为正 / 超随机 q95）
+    dm, dj = row["mining"]["d_margin"], row["judgment"]["d_margin"]
+    row["c2_ok"] = dm is not None and dj is not None and dm > 0 and dj > 0
+    row["c4_ok"] = (
+        dm is not None and row["random_q95"] is not None and dm > row["random_q95"]
+    )
+    row["void"] = not (
+        row["mining"]["c1_ok"] and row["judgment"]["c1_ok"]
+    )  # 任一窗 C1 不过 ⇒ 该档作废（保守），不计负
+    return row
+
+
+def _c3_check(per_x: dict[str, Any]) -> tuple[dict[str, Any], Optional[str]]:
+    """P4-C3：最优档（挖掘窗 Δmargin，非作废档）相邻档不得翻负。"""
+    valid = [
+        (k, v)
+        for k, v in per_x.items()
+        if not v["void"] and v["mining"]["d_margin"] is not None
+    ]
+    c3: dict[str, Any] = {"flips": None, "note": "无有效档"}
+    best_x: Optional[str] = None
+    if valid:
+        best_x, _best = max(valid, key=lambda kv: kv[1]["mining"]["d_margin"])
+        order = [f"{x:.2f}" for x in X_GRID]
+        i = order.index(best_x)
+        neigh = [order[j] for j in (i - 1, i + 1) if 0 <= j < len(order)]
+        flips = sum(
+            1
+            for nb in neigh
+            if not per_x[nb]["void"] and (per_x[nb]["mining"]["d_margin"] or 0) <= 0
+        )
+        c3 = {"best_x": best_x, "neighbors": neigh, "flips": flips}
+    return c3, best_x
+
+
+def _retention_check(
+    per_x: dict[str, Any], best_x: Optional[str]
+) -> tuple[Optional[float], Optional[bool]]:
+    """保留率（v0.276 降级标注）：最优档 判定Δ/挖掘Δ，<0.5 标 candidate_degraded。"""
+    retention: Optional[float] = None
+    degraded: Optional[bool] = None
+    if best_x is not None:
+        dm = per_x[best_x]["mining"]["d_margin"]
+        dj = per_x[best_x]["judgment"]["d_margin"]
+        if dm and dj is not None:
+            retention = dj / dm
+            degraded = retention < RETENTION_FLOOR
+    return retention, degraded
+
+
+def _filter_grid(
+    args: Any,
+    windows: dict[str, Any],
+    enriched: dict[str, list[dict]],
+    baseline: dict[str, dict],
+    random_pool: dict[str, dict[str, list[float]]],
+) -> dict[str, Any]:
+    """4 对象 × 4 X 档主网格：逐格评估 + C3 邻档检查 + 保留率降级标注。"""
     filters_out: dict[str, Any] = {}
     for fkey in FILTER_KEYS:
         per_x: dict[str, Any] = {}
         for x in X_GRID:
-            row: dict[str, Any] = {"x": x}
-            for wname in windows:
-                items = [{**it, "fval": it.get(fkey)} for it in enriched[wname]]
-                n_missing = sum(1 for it in items if it["fval"] is None)
-                res = evaluate_filter(
-                    items, x, args.top_n, baseline[wname]["slots"]["slots"]
-                )
-                r, taken = res["reading"], res["taken"]
-                b0 = baseline[wname]["reading"]
-                d_margin = (
-                    r["margin"] - b0["margin"]
-                    if r["margin"] is not None and b0["margin"] is not None
-                    else None
-                )
-                fill = r.get("fill_rate")
-                c1_ok = (
-                    (r.get("n_taken") or 0) >= MIN_N_TAKEN
-                    and fill is not None
-                    and fill >= FILL_FLOOR
-                )
-                row[wname] = {
-                    "margin": r["margin"],
-                    "d_margin": d_margin,
-                    "n_taken": r.get("n_taken"),
-                    "fill_rate": fill,
-                    "n_missing": n_missing,
-                    "missing_rate": n_missing / len(items) if items else None,
-                    "displacement": _displacement(baseline[wname]["taken"], taken),
-                    "c1_ok": c1_ok,
-                }
-            rp = random_pool[f"{x:.2f}"]
-            merged = rp["mining"] + rp["judgment"]
-            # 小池 None 改调用点显式 min_pool=20 门（v0.322，owner 拍板
-            # campaign 版 q95 为主源——行为与旧 filter 版 _q95 逐位一致）
-            row["random_q95"] = kit.q95(merged) if len(merged) >= 20 else None
-            row["random_n"] = len(merged)
-            # C2/C4 机械读数（双窗同向为正 / 超随机 q95）
-            dm, dj = row["mining"]["d_margin"], row["judgment"]["d_margin"]
-            row["c2_ok"] = dm is not None and dj is not None and dm > 0 and dj > 0
-            row["c4_ok"] = (
-                dm is not None
-                and row["random_q95"] is not None
-                and dm > row["random_q95"]
+            per_x[f"{x:.2f}"] = _filter_x_row(
+                args, fkey, x, windows, enriched, baseline, random_pool
             )
-            row["void"] = not (
-                row["mining"]["c1_ok"] and row["judgment"]["c1_ok"]
-            )  # 任一窗 C1 不过 ⇒ 该档作废（保守），不计负
-            per_x[f"{x:.2f}"] = row
-
-        # C3：最优档（挖掘窗 Δmargin，非作废档）相邻档不得翻负
-        valid = [
-            (k, v)
-            for k, v in per_x.items()
-            if not v["void"] and v["mining"]["d_margin"] is not None
-        ]
-        c3: dict[str, Any] = {"flips": None, "note": "无有效档"}
-        best_x = None
-        if valid:
-            best_x, _best = max(valid, key=lambda kv: kv[1]["mining"]["d_margin"])
-            order = [f"{x:.2f}" for x in X_GRID]
-            i = order.index(best_x)
-            neigh = [order[j] for j in (i - 1, i + 1) if 0 <= j < len(order)]
-            flips = sum(
-                1
-                for nb in neigh
-                if not per_x[nb]["void"] and (per_x[nb]["mining"]["d_margin"] or 0) <= 0
-            )
-            c3 = {"best_x": best_x, "neighbors": neigh, "flips": flips}
-        # 保留率（v0.276 降级标注）：最优档 判定Δ/挖掘Δ
-        retention = None
-        degraded = None
-        if best_x is not None:
-            dm = per_x[best_x]["mining"]["d_margin"]
-            dj = per_x[best_x]["judgment"]["d_margin"]
-            if dm and dj is not None:
-                retention = dj / dm
-                degraded = retention < RETENTION_FLOOR
+        c3, best_x = _c3_check(per_x)
+        retention, degraded = _retention_check(per_x, best_x)
         filters_out[fkey] = {
             "per_x": per_x,
             "c3": c3,
@@ -436,6 +479,25 @@ def run_study(
             "candidate_degraded": degraded,
             "verdict_hint": _verdict_hint(per_x, c3),
         }
+    return filters_out
+
+
+def run_study(
+    args: Any,
+    collector: Optional[Callable[[Any], Optional[list[dict]]]] = None,
+    rq_fetcher: Optional[Callable[..., Any]] = None,
+) -> dict[str, Any]:
+    """Phase 4 主驱动：双窗 collect → 富化 → 4 对象 × 4 X 档 + 随机对照。
+
+    ``collector``/``rq_fetcher`` 可注入（测试合成数据）。空结果护栏：
+    任一窗 0 候选 → RuntimeError（不落盘）。
+    """
+    windows, codes, exit_spec = _prepare_inputs(args)
+    enriched, baseline = _collect_baselines(
+        args, collector, rq_fetcher, windows, codes, exit_spec
+    )
+    random_pool = _random_control(args, windows, enriched, baseline)
+    filters_out = _filter_grid(args, windows, enriched, baseline, random_pool)
 
     _wu_k = wu.record_use(
         "R36-P4",

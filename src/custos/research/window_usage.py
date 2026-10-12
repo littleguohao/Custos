@@ -55,7 +55,7 @@ def _backup_ledger_daily(path: Path) -> None:
         return
     try:
         bak.write_bytes(path.read_bytes())
-    except Exception as exc:  # noqa: BLE001 — 快照失败不阻断主链写
+    except Exception as exc:  # noqa: BLE001 — 快照失败不阻断主链写  # pylint: disable=broad-exception-caught
         print(
             f"[WARN] 判定窗台账当日快照失败: {type(exc).__name__}: {exc}",
             file=sys.stderr,
@@ -123,7 +123,7 @@ def record_use(
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8", newline="\n") as f:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
-    except Exception as exc:  # noqa: BLE001 — 旁路治理数据不炸研究主链
+    except Exception as exc:  # noqa: BLE001 — 旁路治理数据不炸研究主链  # pylint: disable=broad-exception-caught
         print(
             f"[WARN] 判定窗台账写入失败（不影响研究）: {type(exc).__name__}: {exc}",
             file=sys.stderr,

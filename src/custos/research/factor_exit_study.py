@@ -500,61 +500,51 @@ def _d_margin(rd: Optional[dict], base: Optional[dict]) -> Optional[float]:
     return m - b
 
 
-def run_study(
-    args: Any,
-    warm_fn: Optional[Callable[[str, str], dict[str, dict]]] = None,
-    replay_fn: Optional[Callable[[list[dict], dict[str, Any]], list[dict]]] = None,
-) -> dict[str, Any]:
-    """研究主流程：双窗预热 → 因子/分桶 → 80 格 → uniform → C1~C4 → 报告。
+def _production_warm_fn(
+    args: Any, bt: Any, ec: Any, srs: Any
+) -> tuple[Callable[[str, str], dict[str, dict]], dict[str, str]]:
+    """生产路径预热闭包：解析宇宙 → 0AMV regime → 指数表 → warm_v0_signals 同引擎。
 
-    ``warm_fn(start, end) → per_code`` 与 ``replay_fn(subset, params)`` 可注入
-    （测试合成）；None = 生产路径（exit_campaign 同引擎预热/重放）。
+    ``bt``/``ec``/``srs`` 由 run_study 透传（局部 import 语句保持在原处原时机）。
     """
-    # 合成守卫在入口快照：下方生产分支会把 warm_fn 重绑成真实闭包
-    # （noqa: F811），事后再判恒 True ⇒ 生产跑被误判合成、判定窗读取
-    # 不入台账（r42_probe 事故根因，v0.338 排查的实锤答案）。
-    injected = warm_fn is not None or replay_fn is not None
-    from custos.research import backtest_factors as bt  # noqa: PLC0415
-    from custos.research import exit_campaign as ec  # noqa: PLC0415
-    from custos.research import score_return_study as srs  # noqa: PLC0415
-    from custos.research import strategy_grid as sg  # noqa: PLC0415
+    ns = argparse.Namespace(
+        codes_file=args.codes_file,
+        universe_local=args.universe_local,
+        universe_sample=args.universe_sample,
+        seed=args.universe_seed,
+        codes=args.codes,
+    )
+    codes = bt._resolve_universe(ns, _build_parser())
+    regime: dict[str, str] = bt.load_amv_regime(since=args.mining_start)
+    if not regime:
+        raise RuntimeError("0AMV regime 读不到（compass_amv）——本机无数据？")
+    from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
 
-    windows = {
-        "mining": (args.mining_start, args.mining_end),
-        "judgment": (args.judgment_start, args.judgment_end),
-    }
-    regime: dict[str, str] = {}
-    if warm_fn is None:
-        ns = argparse.Namespace(
-            codes_file=args.codes_file,
-            universe_local=args.universe_local,
-            universe_sample=args.universe_sample,
-            seed=args.universe_seed,
-            codes=args.codes,
-        )
-        codes = bt._resolve_universe(ns, _build_parser())
-        regime = bt.load_amv_regime(since=args.mining_start)
-        if not regime:
-            raise RuntimeError("0AMV regime 读不到（compass_amv）——本机无数据？")
-        from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
+    index_df = (
+        local_tdx_data.get_ohlcv_table(srs.INDEX_CODE, count=100000)
+        .sort_values("date")
+        .reset_index(drop=True)
+    )
 
-        index_df = (
-            local_tdx_data.get_ohlcv_table(srs.INDEX_CODE, count=100000)
-            .sort_values("date")
-            .reset_index(drop=True)
+    def warm_fn(start: str, end: str) -> dict[str, dict]:
+        return ec.warm_v0_signals(
+            codes,
+            regime,
+            index_df,
+            count=args.count,
+            cost_bps=args.cost_bps,
+            start=start,
+            end=end,
         )
 
-        def warm_fn(start: str, end: str) -> dict[str, dict]:
-            return ec.warm_v0_signals(
-                codes,
-                regime,
-                index_df,
-                count=args.count,
-                cost_bps=args.cost_bps,
-                start=start,
-                end=end,
-            )
+    return warm_fn, regime
 
+
+def _window_signals(
+    warm_fn: Callable[[str, str], dict[str, dict]],
+    windows: dict[str, tuple[str, str]],
+) -> tuple[dict[str, dict[str, dict]], dict[str, list[dict]]]:
+    """双窗预热并收集逐窗信号；任一窗 0 信号即触发空结果护栏（不落盘）。"""
     per_code = {w: warm_fn(*se) for w, se in windows.items()}
     signals = {w: collect_signals(pc) for w, pc in per_code.items()}
     if not signals["mining"] or not signals["judgment"]:
@@ -562,17 +552,32 @@ def run_study(
             f"空结果护栏：挖掘 {len(signals['mining'])} / 判定 "
             f"{len(signals['judgment'])} 信号（宇宙/窗口/数据有问题？）——不落盘"
         )
+    return per_code, signals
 
-    # ── 分位切点只在挖掘窗估计（双窗硬隔离）──
+
+def _mining_buckets(
+    signals: dict[str, list[dict]], windows: dict[str, tuple[str, str]]
+) -> tuple[list[float], dict[str, list[float]], dict[str, dict[str, list[int]]]]:
+    """分位切点只在挖掘窗估计（双窗硬隔离），各分桶方案逐窗分桶。"""
     mining_values = [r["factor"] for r in signals["mining"]]
     cuts = {name: quantile_cuts(mining_values, qs) for name, qs in BUCKETINGS.items()}
     buckets: dict[str, dict[str, list[int]]] = {
         name: {w: buckets_of(signals[w], c) for w in windows}
         for name, c in cuts.items()
     }
+    return mining_values, cuts, buckets
 
-    # ── 双窗研究（每种分桶方案一组映射枚举；uniform 与分桶无关——全桶合并
-    # = 全信号同一档重放，只算一次复用）──
+
+def _studies_by_bucketing(
+    per_code: dict[str, dict[str, dict]],
+    signals: dict[str, list[dict]],
+    buckets: dict[str, dict[str, list[int]]],
+    regime: dict[str, str],
+    args: Any,
+    replay_fn: Optional[Callable[[list[dict], dict[str, Any]], list[dict]]],
+    windows: dict[str, tuple[str, str]],
+) -> dict[str, dict[str, Any]]:
+    """每种分桶方案跑一组双窗 80 格研究（uniform 与分桶无关，各窗只算一次复用）。"""
     studies: dict[str, dict[str, Any]] = {}
     for name in BUCKETINGS:
         studies[name] = {
@@ -587,7 +592,11 @@ def run_study(
             )
             for w in windows
         }
+    return studies
 
+
+def _joined_configs(studies: dict[str, dict[str, Any]]) -> list[dict]:
+    """逐格合并双窗读数为统一 configs（readings 键=挖掘窗读数，pick_top 契约键）。"""
     all_configs: list[dict] = []
     for name, stud in studies.items():
         for c in stud["mining"]["configs"]:
@@ -603,37 +612,25 @@ def run_study(
                     "readings": c["readings"],  # pick_top 契约键（=挖掘窗读数）
                 }
             )
+    return all_configs
 
-    top = pick_top(all_configs)
-    # uniform-best：档集内挖掘窗 margin 最大（rdd 门同待遇；选择只在挖掘窗。
-    # uniform 读数与分桶方案无关——取 B2 研究的 uniform 块即可）
-    uniform_best = pick_uniform_best(studies["B2"]["mining"]["uniform"])
-    uniform_jd = (
-        studies["B2"]["judgment"]["uniform"][uniform_best["profile"]]
-        if uniform_best
-        else None
-    )
-    # v2.1 相对门参照（口径对称）：C3 扰动臂/C4 随机臂与主研究同一参照档
-    # （同窗 P1_base 读数——事先固定不经过挑选）
-    ref_by_window = {w: studies["B2"][w]["uniform"]["P1_base"] for w in windows}
 
-    dm_m = (
-        _d_margin(top["mining"], uniform_best["readings"])
-        if top and uniform_best
-        else None
-    )
-    dm_j = _d_margin(top["judgment"], uniform_jd) if top and uniform_best else None
-
-    c1 = judge_c1(
-        top["mining"] if top else None,
-        top["judgment"] if top else None,
-        len(top["mapping"]) if top else 0,
-    )
-    c2 = judge_c2(dm_m, dm_j)
-
-    # ── C3：分位切点加性 ±U(0, 0.2/n_buckets) ×4 扰动（top 映射不变，
-    # 切点重估重分桶；v0.301 由乘性改正——与预注册「±6.7pp」对齐）──
-    rng = random.Random(args.seed)
+def _c3_perturbed_draws(
+    top: Optional[dict],
+    uniform_best: Optional[dict],
+    uniform_jd: Optional[dict],
+    mining_values: list[float],
+    per_code: dict[str, dict[str, dict]],
+    signals: dict[str, list[dict]],
+    regime: dict[str, str],
+    args: Any,
+    replay_fn: Optional[Callable[[list[dict], dict[str, Any]], list[dict]]],
+    rng: random.Random,
+    ref_by_window: dict[str, Optional[dict]],
+    windows: dict[str, tuple[str, str]],
+) -> list[dict]:
+    """C3 扰动臂：分位切点加性 ±U(0, 0.2/n_buckets) ×4（top 映射不变，
+    切点重估重分桶；v0.301 由乘性改正——与预注册「±6.7pp」对齐）。"""
     c3_draws: list[dict] = []
     if top is not None:
         n_b_top = len(top["mapping"])
@@ -683,19 +680,34 @@ def run_study(
                     ),
                 }
             )
-    c3 = judge_c3(c3_draws)
+    return c3_draws
 
-    # ── C4：随机分桶臂 N=50 同预算（保持桶大小打乱归属，同 80 格取 max）──
-    # v0.322：池构造改 **criteria_kit 重抽单源**（v0.317 族——过门臂满 N
-    # 或评估上限 10×N；原单遍 50 臂在一臂不过门时池 49 永 provisional，
-    # owner 方法论 review #4/#7）。
-    # v0.335（owner review——跑数前修订，与 R42 同源）：打乱粒度从逐信号
-    # 改**整簇**——collect_all 口径下同票连续信号成簇（分数/因子相近、
-    # 出场结果相似），逐信号打乱把簇拆散、零假设方差被低估、q95 偏低。
-    # 每簇独立均匀抽一桶（kit.cluster_ids/cluster_draw 单源；同簇同桶），
-    # 各桶信号数在臂间自然波动（v0.301 族「保持桶大小」的精神让位——
-    # 对齐桶 size 会把簇间方差错误压掉，同 R42 哲学）；r39_a2 停在
-    # provisional 未受此偏差影响，修订在下一对象开跑前生效。
+
+def _c4_random_pool(
+    top: Optional[dict],
+    uniform_best: Optional[dict],
+    buckets: dict[str, dict[str, list[int]]],
+    per_code: dict[str, dict[str, dict]],
+    signals: dict[str, list[dict]],
+    regime: dict[str, str],
+    args: Any,
+    replay_fn: Optional[Callable[[list[dict], dict[str, Any]], list[dict]]],
+    rng: random.Random,
+    ref_by_window: dict[str, Optional[dict]],
+) -> tuple[list[float], int, int]:
+    """C4 随机分桶臂池 → (pool, evaluated, gate_pass)；top/uniform-best 缺一即空池。
+
+    v0.322：池构造改 **criteria_kit 重抽单源**（v0.317 族——过门臂满 N
+    或评估上限 10×N；原单遍 50 臂在一臂不过门时池 49 永 provisional，
+    owner 方法论 review #4/#7）。
+    v0.335（owner review——跑数前修订，与 R42 同源）：打乱粒度从逐信号
+    改**整簇**——collect_all 口径下同票连续信号成簇（分数/因子相近、
+    出场结果相似），逐信号打乱把簇拆散、零假设方差被低估、q95 偏低。
+    每簇独立均匀抽一桶（kit.cluster_ids/cluster_draw 单源；同簇同桶），
+    各桶信号数在臂间自然波动（v0.301 族「保持桶大小」的精神让位——
+    对齐桶 size 会把簇间方差错误压掉，同 R42 哲学）；r39_a2 停在
+    provisional 未受此偏差影响，修订在下一对象开跑前生效。
+    """
     if top is not None and uniform_best is not None:
         ub_margin_m = uniform_best["readings"]["margin"]
         clusters_m = kit.cluster_ids(signals["mining"])
@@ -733,54 +745,76 @@ def run_study(
         gate_pass = c4_pool["gate_pass"]
     else:
         pool, evaluated, gate_pass = [], 0, 0
-    c4 = judge_c4(dm_m, pool, evaluated, gate_pass, args.c4_min_pool)
+    return pool, evaluated, gate_pass
 
-    # ── 总结局（criteria_kit 单源：C1 不过 ⇒ untested 优先）──
-    verdict = kit.verdict_four_state(
-        c1_ok=c1["ok"], c2_ok=c2["ok"], c3_ok=c3["ok"], c4_state=c4["state"]
+
+def _cost_side_readings(
+    top: dict,
+    uniform_best: dict,
+    per_code: dict[str, dict[str, dict]],
+    signals: dict[str, list[dict]],
+    buckets: dict[str, dict[str, list[int]]],
+    regime: dict[str, str],
+    args: Any,
+    replay_fn: Optional[Callable[[list[dict], dict[str, Any]], list[dict]]],
+    windows: dict[str, tuple[str, str]],
+) -> dict[str, Any]:
+    """成本副读数（owner review #6）：top/uniform-best 交易集定向重建
+    （mapping_trades 同引擎同参数路径），50bps 解析双报 + Δ 翻号标记。"""
+    from custos.research.cost_sensitivity import cost_side_block  # noqa: PLC0415
+
+    n_b_top = len(top["mapping"])
+    named: dict[str, list[dict]] = {}
+    for w in windows:
+        named[f"top_{w}"] = mapping_trades(
+            per_code[w],
+            signals[w],
+            buckets[top["bucketing"]][w],
+            top["mapping"],
+            regime,
+            args.cost_bps,
+            replay_fn,
+        )
+        named[f"uniform_{w}"] = mapping_trades(
+            per_code[w],
+            signals[w],
+            buckets[top["bucketing"]][w],
+            (uniform_best["profile"],) * n_b_top,
+            regime,
+            args.cost_bps,
+            replay_fn,
+        )
+    return cost_side_block(
+        named,
+        base_bps=args.cost_bps,
+        deltas={
+            "d_margin_mining": ("top_mining", "uniform_mining"),
+            "d_margin_judgment": ("top_judgment", "uniform_judgment"),
+        },
     )
 
-    def _slim(rd: Optional[dict]) -> Optional[dict]:
-        if rd is None:
-            return None
-        return {k: v for k, v in rd.items() if k != "taken"}
 
-    # ── 成本副读数（owner review #6）：top/uniform-best 交易集定向重建
-    # （mapping_trades 同引擎同参数路径），50bps 解析双报 + Δ 翻号标记 ──
-    cost_sens: Optional[dict] = None
-    if top is not None and uniform_best is not None:
-        from custos.research.cost_sensitivity import cost_side_block  # noqa: PLC0415
-
-        n_b_top = len(top["mapping"])
-        named: dict[str, list[dict]] = {}
-        for w in windows:
-            named[f"top_{w}"] = mapping_trades(
-                per_code[w],
-                signals[w],
-                buckets[top["bucketing"]][w],
-                top["mapping"],
-                regime,
-                args.cost_bps,
-                replay_fn,
-            )
-            named[f"uniform_{w}"] = mapping_trades(
-                per_code[w],
-                signals[w],
-                buckets[top["bucketing"]][w],
-                (uniform_best["profile"],) * n_b_top,
-                regime,
-                args.cost_bps,
-                replay_fn,
-            )
-        cost_sens = cost_side_block(
-            named,
-            base_bps=args.cost_bps,
-            deltas={
-                "d_margin_mining": ("top_mining", "uniform_mining"),
-                "d_margin_judgment": ("top_judgment", "uniform_judgment"),
-            },
-        )
-
+def _assemble_report(
+    args: Any,
+    injected: bool,
+    windows: dict[str, tuple[str, str]],
+    per_code: dict[str, dict[str, dict]],
+    signals: dict[str, list[dict]],
+    cuts: dict[str, list[float]],
+    all_configs: list[dict],
+    top: Optional[dict],
+    uniform_best: Optional[dict],
+    uniform_jd: Optional[dict],
+    cost_sens: Optional[dict],
+    verdict: str,
+    c1: dict[str, Any],
+    c2: dict[str, Any],
+    c3: dict[str, Any],
+    c4: dict[str, Any],
+    pool: list[float],
+    sg: Any,
+) -> dict[str, Any]:
+    """组装自含报告：判定窗使用台账 + provenance + 档集/分桶/逐格读数 + C1~C4。"""
     # 判定窗使用台账（v0.321，owner 方法论 review #1）：本报告=该窗第 k 次被读
     _wu_k = wu.record_use(
         "R39",
@@ -791,6 +825,11 @@ def run_study(
     )
     from custos.research import provenance as pv  # noqa: PLC0415
     from custos.research.load_window import EXIT_BARS_HOLDOUT_NOTE  # noqa: PLC0415
+
+    def _slim(rd: Optional[dict]) -> Optional[dict]:
+        if rd is None:
+            return None
+        return {k: v for k, v in rd.items() if k != "taken"}
 
     return {
         "schema": "factor_exit_report/v1",
@@ -862,6 +901,149 @@ def run_study(
         "objective_version": sg.OBJECTIVE_VERSION,
         "notes": [_R11_NOTE],
     }
+
+
+def run_study(
+    args: Any,
+    warm_fn: Optional[Callable[[str, str], dict[str, dict]]] = None,
+    replay_fn: Optional[Callable[[list[dict], dict[str, Any]], list[dict]]] = None,
+) -> dict[str, Any]:
+    """研究主流程：双窗预热 → 因子/分桶 → 80 格 → uniform → C1~C4 → 报告。
+
+    ``warm_fn(start, end) → per_code`` 与 ``replay_fn(subset, params)`` 可注入
+    （测试合成）；None = 生产路径（exit_campaign 同引擎预热/重放）。
+    """
+    # 合成守卫在入口快照：下方生产分支会把 warm_fn 重绑成真实闭包，
+    # 事后再判恒 True ⇒ 生产跑被误判合成、判定窗读取
+    # 不入台账（r42_probe 事故根因，v0.338 排查的实锤答案）。
+    injected = warm_fn is not None or replay_fn is not None
+    from custos.research import backtest_factors as bt  # noqa: PLC0415
+    from custos.research import exit_campaign as ec  # noqa: PLC0415
+    from custos.research import score_return_study as srs  # noqa: PLC0415
+    from custos.research import strategy_grid as sg  # noqa: PLC0415
+
+    windows = {
+        "mining": (args.mining_start, args.mining_end),
+        "judgment": (args.judgment_start, args.judgment_end),
+    }
+    regime: dict[str, str] = {}
+    if warm_fn is None:
+        warm_fn, regime = _production_warm_fn(args, bt, ec, srs)
+
+    per_code, signals = _window_signals(warm_fn, windows)
+
+    # ── 分位切点只在挖掘窗估计（双窗硬隔离）──
+    mining_values, cuts, buckets = _mining_buckets(signals, windows)
+
+    # ── 双窗研究（每种分桶方案一组映射枚举；uniform 与分桶无关——全桶合并
+    # = 全信号同一档重放，只算一次复用）──
+    studies = _studies_by_bucketing(
+        per_code, signals, buckets, regime, args, replay_fn, windows
+    )
+    all_configs = _joined_configs(studies)
+
+    top = pick_top(all_configs)
+    # uniform-best：档集内挖掘窗 margin 最大（rdd 门同待遇；选择只在挖掘窗。
+    # uniform 读数与分桶方案无关——取 B2 研究的 uniform 块即可）
+    uniform_best = pick_uniform_best(studies["B2"]["mining"]["uniform"])
+    uniform_jd = (
+        studies["B2"]["judgment"]["uniform"][uniform_best["profile"]]
+        if uniform_best
+        else None
+    )
+    # v2.1 相对门参照（口径对称）：C3 扰动臂/C4 随机臂与主研究同一参照档
+    # （同窗 P1_base 读数——事先固定不经过挑选）
+    ref_by_window = {w: studies["B2"][w]["uniform"]["P1_base"] for w in windows}
+
+    dm_m = (
+        _d_margin(top["mining"], uniform_best["readings"])
+        if top and uniform_best
+        else None
+    )
+    dm_j = _d_margin(top["judgment"], uniform_jd) if top and uniform_best else None
+
+    c1 = judge_c1(
+        top["mining"] if top else None,
+        top["judgment"] if top else None,
+        len(top["mapping"]) if top else 0,
+    )
+    c2 = judge_c2(dm_m, dm_j)
+
+    # ── C3：分位切点加性 ±U(0, 0.2/n_buckets) ×4 扰动（top 映射不变，
+    # 切点重估重分桶；v0.301 由乘性改正——与预注册「±6.7pp」对齐）──
+    rng = random.Random(args.seed)
+    c3_draws = _c3_perturbed_draws(
+        top,
+        uniform_best,
+        uniform_jd,
+        mining_values,
+        per_code,
+        signals,
+        regime,
+        args,
+        replay_fn,
+        rng,
+        ref_by_window,
+        windows,
+    )
+    c3 = judge_c3(c3_draws)
+
+    # ── C4：随机分桶臂 N=50 同预算（整簇打乱归属，同 80 格取 max）──
+    pool, evaluated, gate_pass = _c4_random_pool(
+        top,
+        uniform_best,
+        buckets,
+        per_code,
+        signals,
+        regime,
+        args,
+        replay_fn,
+        rng,
+        ref_by_window,
+    )
+    c4 = judge_c4(dm_m, pool, evaluated, gate_pass, args.c4_min_pool)
+
+    # ── 总结局（criteria_kit 单源：C1 不过 ⇒ untested 优先）──
+    verdict = kit.verdict_four_state(
+        c1_ok=c1["ok"], c2_ok=c2["ok"], c3_ok=c3["ok"], c4_state=c4["state"]
+    )
+
+    # ── 成本副读数（owner review #6）：top/uniform-best 交易集定向重建
+    # （mapping_trades 同引擎同参数路径），50bps 解析双报 + Δ 翻号标记 ──
+    cost_sens: Optional[dict] = None
+    if top is not None and uniform_best is not None:
+        cost_sens = _cost_side_readings(
+            top,
+            uniform_best,
+            per_code,
+            signals,
+            buckets,
+            regime,
+            args,
+            replay_fn,
+            windows,
+        )
+
+    return _assemble_report(
+        args,
+        injected,
+        windows,
+        per_code,
+        signals,
+        cuts,
+        all_configs,
+        top,
+        uniform_best,
+        uniform_jd,
+        cost_sens,
+        verdict,
+        c1,
+        c2,
+        c3,
+        c4,
+        pool,
+        sg,
+    )
 
 
 # ---------------------------------------------------------------------------

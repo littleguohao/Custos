@@ -202,13 +202,13 @@ def weighted_expr(
 
 
 def arm_tier_draw(
-    labels: list[str], clusters: list[int], rng: random.Random
+    _labels: list[str], clusters: list[int], rng: random.Random
 ) -> list[str]:
     """C4 臂档归属（v0.335 owner review 修）：**整簇抽签换档**——
     ``kit.cluster_draw`` 单源，同簇交易同档，各档笔数组成在臂间自然
     波动（不再逐笔 shuffle 对齐笔数：逐笔打乱把簇拆散、零假设方差被
     低估、q95 偏低——owner 零假设模拟簇大小 20 时假过线 15/40≈38%）。
-    ``labels`` 仅供哨兵/诊断对照（逐笔打乱旧法以它为母体），本函数
+    ``_labels`` 仅供哨兵/诊断对照（逐笔打乱旧法以它为母体），本函数
     不按它计数对齐。"""
     return kit.cluster_draw(clusters, TIERS, rng)
 

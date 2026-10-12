@@ -133,7 +133,7 @@ def warm_gates(
                     score, _level, _contrib = srs.asof_technical_score(
                         df, index_df, s["i"], code
                     )
-                except Exception:  # noqa: BLE001 — 单信号评分失败丢该信号
+                except Exception:  # noqa: BLE001 — 单信号评分失败丢该信号  # pylint: disable=broad-exception-caught
                     continue
                 scores[s["date"]] = score
         per_code[code] = {"df": df, "gate_signals": gate_signals, "scores": scores}
@@ -234,7 +234,7 @@ def random_entries(
                     score, _level, _contrib = srs.asof_technical_score(
                         per_code[code]["df"], index_df, i, code
                     )
-                except Exception:  # noqa: BLE001
+                except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
                     score = None
                 if score_cache is not None:
                     score_cache[key] = score
@@ -301,7 +301,9 @@ def run_arm(
             trades = replay_mining(entries, e["params"])
             rd = fes.combine_readings(trades, top_n, ref=ref_rd)
             if rd and rd["objective"] is not None and rd["margin"] is not None:
-                if best is None or rd["margin"] > best["readings"]["margin"]:
+                if (
+                    best is None or rd["margin"] > best["readings"]["margin"]
+                ):  # best is None 短路守卫（误报）  # pylint: disable=unsubscriptable-object
                     best = {
                         "n_signals": n_g,
                         "gate_template": g,
@@ -404,38 +406,29 @@ def judge_c2(
 # ---------------------------------------------------------------------------
 
 
-def run_study(
-    args: Any,
-    warm_fn: Optional[Callable[[str, str], dict[str, dict]]] = None,
-    replay_fn: Optional[Callable[[list[dict], dict[str, Any]], list[dict]]] = None,
-    random_entry_fn: Optional[Callable[[int, str], list[dict]]] = None,
-) -> dict[str, Any]:
-    """R40 主流程：双窗 46 门×5 档枚举 + 随机臂冻结池 + C1~C4 → 报告。
-
-    ``warm_fn(start, end) → per_code`` / ``replay_fn(subset, params)`` /
-    ``random_entry_fn(n, window)`` 可注入（测试合成）；None = 生产路径。
-    """
-    # 合成守卫在入口快照：下方生产分支会把 warm_fn 重绑成真实闭包
-    # （noqa: F811），事后再判恒 True ⇒ 生产跑被误判合成、判定窗读取
-    # 不入台账（r42_probe 事故根因，v0.338 排查的实锤答案）。
-    injected = (
-        warm_fn is not None or replay_fn is not None or random_entry_fn is not None
-    )
+def _resolve_gates(args: Any) -> list[str]:
+    """门清单解析：``all``=全量 ENTRY_GATES 字母序（46 门），否则逗号清单。"""
     from custos.research import backtest_factors as bt  # noqa: PLC0415
-    from custos.research import strategy_grid as sg  # noqa: PLC0415
 
-    windows = {
-        "mining": (args.mining_start, args.mining_end),
-        "judgment": (args.judgment_start, args.judgment_end),
-    }
-    gates = (
+    return (
         sorted(bt.ENTRY_GATES)
         if args.gates == "all"
         else [g.strip() for g in args.gates.split(",") if g.strip()]
     )
-    exits = sg.DEFAULT_EXIT_GRID
+
+
+def _resolve_warm(
+    args: Any,
+    gates: list[str],
+    warm_fn: Optional[Callable[[str, str], dict[str, dict]]],
+) -> tuple[dict[str, str], Any, Callable[[str, str], dict[str, dict]]]:
+    """生产路径装配：宇宙解析 + 0AMV 反转 + 指数表 + warm 闭包；注入路径
+    原样透传（regime 空、index_df=None）。"""
     regime_bear: dict[str, str] = {}
+    index_df: Any = None
     if warm_fn is None:
+        from custos.research import backtest_factors as bt  # noqa: PLC0415
+
         ns = argparse.Namespace(
             codes_file=args.codes_file,
             universe_local=args.universe_local,
@@ -469,60 +462,59 @@ def run_study(
                 end=end,
             )
 
-    per_code = {w: warm_fn(*se) for w, se in windows.items()}
-    gate_sigs: dict[str, dict[str, list[dict]]] = {
-        w: {g: collect_gate_signals(per_code[w], g) for g in gates} for w in windows
-    }
-    total_signals = sum(len(v) for w in gate_sigs.values() for v in w.values())
-    if not total_signals:
-        raise RuntimeError(
-            "空结果护栏：46 门双窗 0 信号（宇宙/窗口/数据有问题？）——不落盘"
-        )
+    return regime_bear, index_df, warm_fn
 
-    def _replay(w: str, g: str, subset: list[dict], params: dict[str, Any]):
-        if replay_fn is not None:
-            return replay_fn(subset, params)
-        if g == "__random__":
-            view = _entry_view(per_code[w], subset)  # 随机入场集专用视图
-        else:
-            view = _gate_view(per_code[w], g)
-        return fes.replay_signals(view, subset, params, regime_bear, args.cost_bps)
 
-    # ── 230 格 × 双窗（重放缓存 per（门, 档, 窗）；参照档 = 同窗同信号
-    # pct5_trail08——v2.1 事先固定不经过挑选的档，每（门,窗）先算并存 refs）──
+def _enumerate_grid(
+    gates: list[str],
+    windows: dict[str, tuple[str, str]],
+    exits: list[dict],
+    gate_sigs: dict[str, dict[str, list[dict]]],
+    replay: Callable[[str, str, list[dict], dict[str, Any]], list[dict]],
+    top_n: int,
+) -> tuple[list[dict], dict[tuple[str, str], Optional[dict]], dict[str, Any]]:
+    """46 门 × 5 档 × 双窗全枚举：参照档 pct5_trail08 每（门,窗）先算存 refs
+    （自参照），其余档重放缓存 per（门, 档, 窗）。"""
     configs: list[dict] = []
     ref_trail = next(e["params"] for e in exits if e["name"] == "pct5_trail08")
     refs: dict[tuple[str, str], Optional[dict]] = {}
     for g in gates:
         for w in windows:
-            trades = _replay(w, g, gate_sigs[w][g], ref_trail)
-            refs[(g, w)] = fes.combine_readings(trades, args.top_n, ref="self")
+            trades = replay(w, g, gate_sigs[w][g], ref_trail)
+            refs[(g, w)] = fes.combine_readings(trades, top_n, ref="self")
         for e in exits:
             row: dict[str, Any] = {"gate": g, "exit": e["name"]}
             for w in windows:
                 if e["name"] == "pct5_trail08":
                     rd = refs[(g, w)]  # 参照档本体=自参照读数（复用不重复重放）
                 else:
-                    trades = _replay(w, g, gate_sigs[w][g], e["params"])
-                    rd = fes.combine_readings(trades, args.top_n, ref=refs[(g, w)])
+                    trades = replay(w, g, gate_sigs[w][g], e["params"])
+                    rd = fes.combine_readings(trades, top_n, ref=refs[(g, w)])
                 if rd is not None:
                     rd.pop("taken", None)  # 报告不落交易明细
                 row[w] = rd
             configs.append(row)
+    return configs, refs, ref_trail
 
-    def _top(rows: list[dict]) -> Optional[dict]:
-        ok = [c for c in rows if c["mining"] and c["mining"]["objective"] is not None]
-        return max(ok, key=lambda c: c["mining"]["margin"]) if ok else None
 
-    top = _top(configs)
-
-    # ── 随机臂（对等纪律 v0.302 + **预算对等 v0.307**：每臂完整复刻 top 的
-    # 46 门 × 5 档 max-of-230 选型——逐门 n_g 对齐抽样，冻结配置进判定窗；
-    # v0.322：池构造=**criteria_kit 重抽单源**（v0.317 族））──
+def _run_random_arms(
+    args: Any,
+    gates: list[str],
+    per_code: dict[str, dict[str, dict]],
+    gate_sigs: dict[str, dict[str, list[dict]]],
+    regime_bear: dict[str, str],
+    index_df: Any,
+    exits: list[dict],
+    ref_trail: dict[str, Any],
+    replay: Callable[[str, str, list[dict], dict[str, Any]], list[dict]],
+    random_entry_fn: Optional[Callable[[int, str], list[dict]]],
+) -> dict[str, Any]:
+    """随机臂双窗池：每臂完整复刻 top 的 46 门 × 5 档 max-of-230 选型（逐门
+    n_g 对齐抽样，0 信号门跳过），冻结（n_g, 出场配置）进判定窗。"""
     rng = random.Random(args.seed)
     counts_m = {g: len(gate_sigs["mining"][g]) for g in gates}
     pool_j: list[float] = []
-    index_df_ref: dict[str, Any] = {"df": locals().get("index_df")}  # 生产路径才有
+    index_df_ref: dict[str, Any] = {"df": index_df}  # 生产路径才有
 
     # v0.309 性能（结果逐位不变）：母体每窗惰性预建一次（random_entry_fn
     # 注入路径不建——合成 per_code 无 df）；as-of 打分 (code,i) 缓存双窗
@@ -561,18 +553,18 @@ def run_study(
             入场随机性两臂同分布）。v2.1 参照 = 同批判定入场 × trail08。"""
             entries_j = _rand_entries(n_g, "judgment")
             ref_j = fes.combine_readings(
-                _replay("judgment", "__random__", entries_j, ref_trail),
+                replay("judgment", "__random__", entries_j, ref_trail),
                 args.top_n,
                 ref="self",
             )
-            trades = _replay("judgment", "__random__", entries_j, frozen_params)
+            trades = replay("judgment", "__random__", entries_j, frozen_params)
             return fes.combine_readings(trades, args.top_n, ref=ref_j)
 
         arm = run_arm(
             counts_m,
             exits,
             _rand_entries,
-            lambda subset, params: _replay("mining", "__random__", subset, params),
+            lambda subset, params: replay("mining", "__random__", subset, params),
             args.top_n,
             judgment_reader=_judgment_reader,
         )
@@ -585,26 +577,34 @@ def run_study(
 
     c4_pool = kit.assemble_c4_pool(args.n_random, _arm)
     pool_m = c4_pool["pool"]
-    arm_evaluated = c4_pool["evaluated"]
-    arm_gate_pass = c4_pool["gate_pass"]
-    q95_m = kit.q95(pool_m)
-    q95_j = kit.q95(pool_j)
+    return {
+        "rng": rng,
+        "pool_m": pool_m,
+        "pool_j": pool_j,
+        "q95_m": kit.q95(pool_m),
+        "q95_j": kit.q95(pool_j),
+        "evaluated": c4_pool["evaluated"],
+        "gate_pass": c4_pool["gate_pass"],
+        "entry_accounting": entry_accounting,
+        "score_caches": score_caches,
+    }
 
-    c1 = judge_c1(top["mining"] if top else None, top["judgment"] if top else None)
-    c2 = judge_c2(
-        top["mining"] if top else None,
-        top["judgment"] if top else None,
-        q95_m,
-        q95_j,
-    )
 
-    # ── C3：top 出场参数 ±50%×4 零翻转（池固定不重估）；top 出场无可扰
-    # 参数轴（base_low params={}）⇒ not_applicable 不空转（v0.307）──
+def _judge_c3(
+    top: Optional[dict],
+    top_params: Optional[dict],
+    gate_sigs: dict[str, dict[str, list[dict]]],
+    replay: Callable[[str, str, list[dict], dict[str, Any]], list[dict]],
+    refs: dict[tuple[str, str], Optional[dict]],
+    top_n: int,
+    q95_m: Optional[float],
+    q95_j: Optional[float],
+    rng: random.Random,
+) -> dict[str, Any]:
+    """C3：top 出场参数 ±50%×4 零翻转（池固定不重估）；top 出场无可扰
+    参数轴（base_low params={}）⇒ not_applicable 不空转（v0.307）。"""
     c3_rule = f"出场参数 ±50% ×{C3_DRAWS} 扰动 C2 结论零翻转（池固定）"
     c3_draws: list[dict] = []
-    top_params = next(
-        (e["params"] for e in exits if top and e["name"] == top["exit"]), None
-    )
     c3: dict[str, Any]
     if top is not None and not _perturbable(top_params or {}):
         c3 = {
@@ -621,23 +621,23 @@ def run_study(
             for draw_i in range(C3_DRAWS):
                 params_p, moved = perturb_exit_params(dict(top_params or {}), rng)
                 rd_m = fes.combine_readings(
-                    _replay(
+                    replay(
                         "mining",
                         top["gate"],
                         gate_sigs["mining"][top["gate"]],
                         params_p,
                     ),
-                    args.top_n,
+                    top_n,
                     ref=refs[(top["gate"], "mining")],  # v2.1 同参照口径对称
                 )
                 rd_j = fes.combine_readings(
-                    _replay(
+                    replay(
                         "judgment",
                         top["gate"],
                         gate_sigs["judgment"][top["gate"]],
                         params_p,
                     ),
-                    args.top_n,
+                    top_n,
                     ref=refs[(top["gate"], "judgment")],
                 )
                 c2d = judge_c2(rd_m, rd_j, q95_m, q95_j)
@@ -655,9 +655,19 @@ def run_study(
             "n_flips": sum(1 for d in c3_draws if not d["c2_holds"]),
             "rule": c3_rule,
         }
+    return c3
 
-    # C4 状态机 = criteria_kit 单源（v0.322：空池 indeterminate / 池未满
-    # provisional / top 挖掘窗 margin > q95 confirmed_pass）
+
+def _judge_c4(
+    args: Any,
+    pool_m: list[float],
+    top: Optional[dict],
+    q95_m: Optional[float],
+    arm_evaluated: int,
+    arm_gate_pass: int,
+) -> tuple[str, dict[str, Any]]:
+    """C4 状态机 = criteria_kit 单源（v0.322：空池 indeterminate / 池未满
+    provisional / top 挖掘窗 margin > q95 confirmed_pass）。"""
     c4_state = kit.c4_state_of(
         pool_m,
         min_pool=args.c4_min_pool,
@@ -674,30 +684,51 @@ def run_study(
         "note": "与 C2 挖掘半窗同池（重合是设计使然——R40 量级线与选择效应"
         "对的是同一个零假设）",
     }
+    return c4_state, c4
 
-    # ── 总结局（criteria_kit 单源：C1 不过 ⇒ untested 优先；C2 池未建=None /
-    # C3 not_applicable（v0.307）⇒ provisional 不放行不判死）──
-    verdict = kit.verdict_four_state(
-        c1_ok=c1["ok"], c2_ok=c2["ok"], c3_ok=c3["ok"], c4_state=c4_state
+
+def _cost_side(
+    top: Optional[dict],
+    top_params: Optional[dict],
+    gate_sigs: dict[str, dict[str, list[dict]]],
+    windows: dict[str, tuple[str, str]],
+    replay: Callable[[str, str, list[dict], dict[str, Any]], list[dict]],
+    cost_bps: float,
+) -> Optional[dict]:
+    """成本副读数（owner review #6）：top 交易集双窗定向重建（replay 同
+    路径），50bps 解析双报——R40 C2 是**绝对口径**（margin>0），本副读数
+    是主战场：空头期做多 margin 薄，翻号 ⇒ 判读降权。"""
+    if top is None or top_params is None:
+        return None
+    from custos.research.cost_sensitivity import cost_side_block  # noqa: PLC0415
+
+    return cost_side_block(
+        {
+            w: replay(w, top["gate"], gate_sigs[w][top["gate"]], top_params)
+            for w in windows
+        },
+        base_bps=cost_bps,
+        deltas={f"top_margin_vs_0_{w}": (w, None) for w in windows},
     )
 
-    # ── 成本副读数（owner review #6）：top 交易集双窗定向重建（_replay 同
-    # 路径），50bps 解析双报——R40 C2 是**绝对口径**（margin>0），本副读数
-    # 是主战场：空头期做多 margin 薄，翻号 ⇒ 判读降权 ──
-    cost_sens: Optional[dict] = None
-    if top is not None and top_params is not None:
-        from custos.research.cost_sensitivity import cost_side_block  # noqa: PLC0415
 
-        cost_sens = cost_side_block(
-            {
-                w: _replay(w, top["gate"], gate_sigs[w][top["gate"]], top_params)
-                for w in windows
-            },
-            base_bps=args.cost_bps,
-            deltas={f"top_margin_vs_0_{w}": (w, None) for w in windows},
-        )
-
-    # 判定窗使用台账（v0.321，owner 方法论 review #1）：本报告=该窗第 k 次被读
+def _build_report(
+    args: Any,
+    windows: dict[str, tuple[str, str]],
+    gates: list[str],
+    exits: list[dict],
+    per_code: dict[str, dict[str, dict]],
+    gate_sigs: dict[str, dict[str, list[dict]]],
+    top: Optional[dict],
+    configs: list[dict],
+    verdict: str,
+    cost_sens: Optional[dict],
+    arms: dict[str, Any],
+    criteria: dict[str, Any],
+    injected: bool,
+) -> dict[str, Any]:
+    """报告装配：判定窗使用台账（v0.321，owner 方法论 review #1——本报告=
+    该窗第 k 次被读）+ provenance + 自含产物块。"""
     _wu_k = wu.record_use(
         "R40",
         "judgment",
@@ -705,7 +736,9 @@ def run_study(
         "C1~C4 判定窗读数",
         synthetic=injected,
     )
+    entry_accounting = arms["entry_accounting"]
     from custos.research import provenance as pv  # noqa: PLC0415
+    from custos.research import strategy_grid as sg  # noqa: PLC0415
     from custos.research.load_window import EXIT_BARS_HOLDOUT_NOTE  # noqa: PLC0415
 
     return {
@@ -739,30 +772,167 @@ def run_study(
         "top": top,
         "configs": configs,
         "pools": {
-            "mining": pool_m,
-            "judgment": pool_j,
-            "q95_mining": q95_m,
-            "q95_judgment": q95_j,
+            "mining": arms["pool_m"],
+            "judgment": arms["pool_j"],
+            "q95_mining": arms["q95_m"],
+            "q95_judgment": arms["q95_j"],
             "entry_accounting": entry_accounting,  # n_requested/n_returned（打分失败跳过照实记）
-            "score_cache_size": {w: len(c) for w, c in score_caches.items()},
+            "score_cache_size": {w: len(c) for w, c in arms["score_caches"].items()},
             "arm_construction": "对等纪律（v0.302）+ 预算对等（v0.307）："
             "每臂完整复刻 top 的 46 门 × 5 档 max-of-230 选型（逐门 n_g "
             "对齐抽样，0 信号门跳过），冻结（n_g, 出场配置）进判定窗，"
             "禁每窗重新取 max",
         },
-        "criteria": {
-            "C1": c1,
-            "C2": c2,
-            "C3": c3,
-            "C4": c4,
-            "rule_note": "R40-C1~C4 跑数前写死（v0.301/v0.302/v0.307 修订在案——"
-            "v0.307：随机臂预算对等 max-of-230 镜像；C3 无可扰参数轴="
-            "not_applicable 不空转不放行）；"
-            "C5（pre2019 同段随机池标尺）= C2 过线才启动，owner 拍板发令",
-        },
+        "criteria": criteria,
         "objective_version": sg.OBJECTIVE_VERSION,
         "notes": [_R11_R14_NOTE],
     }
+
+
+def run_study(
+    args: Any,
+    warm_fn: Optional[Callable[[str, str], dict[str, dict]]] = None,
+    replay_fn: Optional[Callable[[list[dict], dict[str, Any]], list[dict]]] = None,
+    random_entry_fn: Optional[Callable[[int, str], list[dict]]] = None,
+) -> dict[str, Any]:
+    """R40 主流程：双窗 46 门×5 档枚举 + 随机臂冻结池 + C1~C4 → 报告。
+
+    ``warm_fn(start, end) → per_code`` / ``replay_fn(subset, params)`` /
+    ``random_entry_fn(n, window)`` 可注入（测试合成）；None = 生产路径。
+    """
+    # 合成守卫在入口快照：下方 _resolve_warm 生产分支会把 warm_fn 重绑成
+    # 真实闭包（noqa: F811），事后再判恒 True ⇒ 生产跑被误判合成、判定窗
+    # 读取不入台账（r42_probe 事故根因，v0.338 排查的实锤答案）。
+    injected = (
+        warm_fn is not None or replay_fn is not None or random_entry_fn is not None
+    )
+    from custos.research import strategy_grid as sg  # noqa: PLC0415
+
+    windows = {
+        "mining": (args.mining_start, args.mining_end),
+        "judgment": (args.judgment_start, args.judgment_end),
+    }
+    gates = _resolve_gates(args)
+    exits = sg.DEFAULT_EXIT_GRID
+    regime_bear, index_df, warm_fn = _resolve_warm(args, gates, warm_fn)
+
+    per_code = {w: warm_fn(*se) for w, se in windows.items()}
+    gate_sigs: dict[str, dict[str, list[dict]]] = {
+        w: {g: collect_gate_signals(per_code[w], g) for g in gates} for w in windows
+    }
+    total_signals = sum(len(v) for w in gate_sigs.values() for v in w.values())
+    if not total_signals:
+        raise RuntimeError(
+            "空结果护栏：46 门双窗 0 信号（宇宙/窗口/数据有问题？）——不落盘"
+        )
+
+    def _replay(w: str, g: str, subset: list[dict], params: dict[str, Any]):
+        if replay_fn is not None:
+            return replay_fn(subset, params)
+        if g == "__random__":
+            view = _entry_view(per_code[w], subset)  # 随机入场集专用视图
+        else:
+            view = _gate_view(per_code[w], g)
+        return fes.replay_signals(view, subset, params, regime_bear, args.cost_bps)
+
+    # ── 230 格 × 双窗（重放缓存 per（门, 档, 窗）；参照档 = 同窗同信号
+    # pct5_trail08——v2.1 事先固定不经过挑选的档，每（门,窗）先算并存 refs）──
+    configs, refs, ref_trail = _enumerate_grid(
+        gates, windows, exits, gate_sigs, _replay, args.top_n
+    )
+
+    def _top(rows: list[dict]) -> Optional[dict]:
+        ok = [c for c in rows if c["mining"] and c["mining"]["objective"] is not None]
+        return max(ok, key=lambda c: c["mining"]["margin"]) if ok else None
+
+    top = _top(configs)
+
+    # ── 随机臂（对等纪律 v0.302 + **预算对等 v0.307**：每臂完整复刻 top 的
+    # 46 门 × 5 档 max-of-230 选型——逐门 n_g 对齐抽样，冻结配置进判定窗；
+    # v0.322：池构造=**criteria_kit 重抽单源**（v0.317 族））──
+    arms = _run_random_arms(
+        args,
+        gates,
+        per_code,
+        gate_sigs,
+        regime_bear,
+        index_df,
+        exits,
+        ref_trail,
+        _replay,
+        random_entry_fn,
+    )
+    rng = arms["rng"]
+    pool_m = arms["pool_m"]
+    q95_m = arms["q95_m"]
+    q95_j = arms["q95_j"]
+
+    c1 = judge_c1(top["mining"] if top else None, top["judgment"] if top else None)
+    c2 = judge_c2(
+        top["mining"] if top else None,
+        top["judgment"] if top else None,
+        q95_m,
+        q95_j,
+    )
+
+    top_params = next(
+        (e["params"] for e in exits if top and e["name"] == top["exit"]), None
+    )
+    # ── C3：top 出场参数 ±50%×4 零翻转（池固定不重估）；top 出场无可扰
+    # 参数轴（base_low params={}）⇒ not_applicable 不空转（v0.307）──
+    c3 = _judge_c3(
+        top,
+        top_params,
+        gate_sigs,
+        _replay,
+        refs,
+        args.top_n,
+        q95_m,
+        q95_j,
+        rng,
+    )
+    # C4 状态机 = criteria_kit 单源（v0.322：空池 indeterminate / 池未满
+    # provisional / top 挖掘窗 margin > q95 confirmed_pass）
+    c4_state, c4 = _judge_c4(
+        args, pool_m, top, q95_m, arms["evaluated"], arms["gate_pass"]
+    )
+
+    # ── 总结局（criteria_kit 单源：C1 不过 ⇒ untested 优先；C2 池未建=None /
+    # C3 not_applicable（v0.307）⇒ provisional 不放行不判死）──
+    verdict = kit.verdict_four_state(
+        c1_ok=c1["ok"], c2_ok=c2["ok"], c3_ok=c3["ok"], c4_state=c4_state
+    )
+
+    # ── 成本副读数（owner review #6）：top 交易集双窗定向重建（_replay 同
+    # 路径），50bps 解析双报——R40 C2 是**绝对口径**（margin>0），本副读数
+    # 是主战场：空头期做多 margin 薄，翻号 ⇒ 判读降权 ──
+    cost_sens = _cost_side(top, top_params, gate_sigs, windows, _replay, args.cost_bps)
+
+    criteria = {
+        "C1": c1,
+        "C2": c2,
+        "C3": c3,
+        "C4": c4,
+        "rule_note": "R40-C1~C4 跑数前写死（v0.301/v0.302/v0.307 修订在案——"
+        "v0.307：随机臂预算对等 max-of-230 镜像；C3 无可扰参数轴="
+        "not_applicable 不空转不放行）；"
+        "C5（pre2019 同段随机池标尺）= C2 过线才启动，owner 拍板发令",
+    }
+    return _build_report(
+        args,
+        windows,
+        gates,
+        exits,
+        per_code,
+        gate_sigs,
+        top,
+        configs,
+        verdict,
+        cost_sens,
+        arms,
+        criteria,
+        injected,
+    )
 
 
 # ---------------------------------------------------------------------------

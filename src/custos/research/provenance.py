@@ -45,7 +45,7 @@ def _git(args: list[str]) -> Optional[str]:
             timeout=10,
             check=False,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001  # pylint: disable=broad-exception-caught
         print(f"[WARN] provenance git 不可用: {type(exc).__name__}", file=sys.stderr)
         return None
     if out.returncode != 0:
@@ -98,7 +98,7 @@ def last_date_of(per_code: dict[str, dict]) -> Optional[str]:
             continue
         try:
             d = str(df["date"].iloc[-1])[:10]
-        except Exception:  # noqa: BLE001 — 单列缺失跳该票
+        except Exception:  # noqa: BLE001 — 单列缺失跳该票  # pylint: disable=broad-exception-caught
             continue
         if last is None or d > last:
             last = d
@@ -145,7 +145,7 @@ def build(
 # ---------------------------------------------------------------------------
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(_argv: Optional[list[str]] = None) -> int:
     """打印当前仓库的溯源信息（git sha/dirty——诊断「报告出自哪份代码」用）。"""
     print(
         f"provenance: git_sha={git_sha()} git_dirty={git_dirty()} "

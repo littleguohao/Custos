@@ -263,25 +263,13 @@ def _c3_check(
 # ---------------------------------------------------------------------------
 
 
-def ctl_step(
-    cfg: CampaignConfig,
-    state: CampaignState,
+def _evolve_rows(
     evolve: list[dict],
-    rand: list[dict],
     rw_evolve: list[dict[str, Optional[dict]]],
-    rw_rand: list[Optional[dict]],
-    evaluator: Evaluator,
-    rng: random.Random,
-) -> dict:
-    """执行一批的 CTL 裁决：更新 state 并返回台账批记录。
-
-    检查次序（写死，与 R37 同步）：CTL-4 过线停 > CTL-2 家族关闭 >
-    CTL-3 证伪停 > CTL-5 预算帽 > CTL-1 继续（更新幸存者）。
-    **次序即语义**：CTL-3 含「或全部家族关闭」，必须 CTL-2 先跑，家族
-    团灭的一批才能同批触发证伪（而不是白跑一批空家族）。
-    家族连死记账在任何结局下都落台账（死刑档案不断更）。
-    """
-    base = state.baseline
+    base: dict[str, dict],
+    cfg: CampaignConfig,
+) -> list[dict]:
+    """构建进化臂行：基因组 + 双窗读数 + Δmargin + C2 判定。"""
     rows: list[dict] = []
     for g, rw in zip(evolve, rw_evolve):
         dm_m = _d_margin(rw["mining"], base.get("mining"))
@@ -300,13 +288,23 @@ def ctl_step(
                 ),
             }
         )
-    rand_rows: list[dict[str, Any]] = [
+    return rows
+
+
+def _random_rows(
+    rand: list[dict], rw_rand: list[Optional[dict]]
+) -> list[dict[str, Any]]:
+    """构建随机臂行（基因组 + 挖掘窗读数）。"""
+    return [
         {"genome": g, "key": eg.genome_key(g), "mining": rw}
         for g, rw in zip(rand, rw_rand)
     ]
-    n_evals = len(evolve) + len(rand)
-    state.total_genomes += n_evals
 
+
+def _account_random_pool(
+    state: CampaignState, rand_rows: list[dict[str, Any]]
+) -> Optional[float]:
+    """随机臂读数并入合并分布并记 rdd 过门账，返回本批随机最优 objective。"""
     # 随机臂读数并入合并分布（含本批——先更新再判 C4，从严；分位标尺见 _q95）。
     # 同时记 rdd 过门账（v0.297）：v2 下门拦 ⇒ objective None ⇒ 不进池——
     # 过门率必须在案，否则「池空」与「没跑」无法区分。
@@ -323,15 +321,22 @@ def ctl_step(
             continue
         batch_rand_best = obj if batch_rand_best is None else max(batch_rand_best, obj)
         state.random_pool.append(obj)
+    return batch_rand_best
 
-    actions: list[dict] = []
-    c2_passers = [r for r in rows if r["c2"]]
 
-    # ── CTL-4 过线停：C2 过线者按挖掘窗 objective 逐个过 C3+C4 ──
+def _ctl4_check_passers(
+    cfg: CampaignConfig,
+    state: CampaignState,
+    c2_passers: list[dict],
+    evaluator: Evaluator,
+    rng: random.Random,
+) -> tuple[list[dict], Optional[dict], Optional[float], list[dict]]:
+    """CTL-4 过线停：C2 过线者按挖掘窗 objective 降序逐个过 C3+C4。"""
     # 两段式（v0.269，owner review）：池 < c4_min_pool 时 q95≈最大值（实测
     # 零假设过线率 13.76%，是 ~5% 声称的 2.7 倍）——此时过线只记
     # **provisional**（不停战役），池满后对全部 provisional 机械终判；
     # 池满后直接 confirmed。**C5 pre2019 是一次性底牌，不许烧在侥幸上。**
+    actions: list[dict] = []
     c3_record: Optional[dict] = None
     c4_bar = kit.q95(state.random_pool)
     passers = sorted(
@@ -340,7 +345,7 @@ def ctl_step(
         reverse=True,
     )
     for r in passers:
-        c3 = _c3_check(r["genome"], base, cfg, evaluator, rng)
+        c3 = _c3_check(r["genome"], state.baseline, cfg, evaluator, rng)
         c3_record = {"candidate_key": r["key"], **c3}
         # C4 三态（v0.297，修「空池自动放行」缺陷）：池有数 ⇒ 比 q95；
         # n_random=0（测试/冒烟通道）⇒ 不拦（原语义保留）；n_random≥1 但池空
@@ -409,9 +414,14 @@ def ctl_step(
                 ),
             }
         )
+    return actions, c3_record, c4_bar, passers
 
-    # ── provisional 终判（池达 c4_min_pool）：冻结 objective vs 当前 q95，
-    # 机械裁决——评估确定性 ⇒ 读数不重算，只重比 ──
+
+def _judge_provisional(
+    cfg: CampaignConfig, state: CampaignState, actions: list[dict]
+) -> None:
+    """provisional 终判：池达 c4_min_pool 时冻结 objective vs 当前 q95 机械裁决。"""
+    # 冻结 objective vs 当前 q95，机械裁决——评估确定性 ⇒ 读数不重算，只重比。
     if state.status == "running" and len(state.random_pool) >= cfg.c4_min_pool:
         pending = [p for p in state.provisional_candidates if p["status"] == "pending"]
         if pending:
@@ -460,10 +470,11 @@ def ctl_step(
                     }
                 )
 
-    # ── C2 挂零计数（CTL-3 的输入）──
-    state.consecutive_no_c2 = 0 if c2_passers else state.consecutive_no_c2 + 1
 
-    # ── CTL-2 转向：家族全部变体连续 N 批挖掘窗 Δmargin ≤ 0 ⇒ 关闭 ──
+def _ctl2_close_families(
+    cfg: CampaignConfig, state: CampaignState, rows: list[dict], actions: list[dict]
+) -> None:
+    """CTL-2 转向：家族全部变体连续 N 批挖掘窗 Δmargin ≤ 0 ⇒ 关闭。"""
     newly_dead: list[str] = []
     for fam in list(state.open_families):
         variants = [
@@ -482,7 +493,11 @@ def ctl_step(
             newly_dead.append(fam)
             actions.append({"type": "family_closed", "family": fam, "streak": streak})
 
-    # ── CTL-3 证伪停 ──
+
+def _ctl3_falsify(
+    cfg: CampaignConfig, state: CampaignState, actions: list[dict]
+) -> None:
+    """CTL-3 证伪停。"""
     if state.status == "running" and (
         state.consecutive_no_c2 >= cfg.falsify_streak or not state.open_families
     ):
@@ -495,7 +510,11 @@ def ctl_step(
             }
         )
 
-    # ── CTL-5 预算帽 ──
+
+def _ctl5_budget_cap(
+    cfg: CampaignConfig, state: CampaignState, actions: list[dict]
+) -> None:
+    """CTL-5 预算帽。"""
     if state.status == "running" and state.total_genomes >= cfg.budget_cap:
         state.status = "budget_exhausted"
         actions.append(
@@ -506,7 +525,11 @@ def ctl_step(
             }
         )
 
-    # ── CTL-1 继续：更新幸存者（top-k 挖掘窗 objective）──
+
+def _ctl1_update_survivors(
+    cfg: CampaignConfig, state: CampaignState, rows: list[dict], actions: list[dict]
+) -> list[dict]:
+    """CTL-1 继续：更新幸存者（top-k 挖掘窗 objective），返回打分行。"""
     scored = [
         r
         for r in rows
@@ -521,6 +544,48 @@ def ctl_step(
         ]
         if not actions:
             actions.append({"type": "continue"})
+    return scored
+
+
+def ctl_step(
+    cfg: CampaignConfig,
+    state: CampaignState,
+    evolve: list[dict],
+    rand: list[dict],
+    rw_evolve: list[dict[str, Optional[dict]]],
+    rw_rand: list[Optional[dict]],
+    evaluator: Evaluator,
+    rng: random.Random,
+) -> dict:
+    """执行一批的 CTL 裁决：更新 state 并返回台账批记录。
+
+    检查次序（写死，与 R37 同步）：CTL-4 过线停 > CTL-2 家族关闭 >
+    CTL-3 证伪停 > CTL-5 预算帽 > CTL-1 继续（更新幸存者）。
+    **次序即语义**：CTL-3 含「或全部家族关闭」，必须 CTL-2 先跑，家族
+    团灭的一批才能同批触发证伪（而不是白跑一批空家族）。
+    家族连死记账在任何结局下都落台账（死刑档案不断更）。
+    """
+    rows = _evolve_rows(evolve, rw_evolve, state.baseline, cfg)
+    rand_rows = _random_rows(rand, rw_rand)
+    n_evals = len(evolve) + len(rand)
+    state.total_genomes += n_evals
+
+    batch_rand_best = _account_random_pool(state, rand_rows)
+
+    c2_passers = [r for r in rows if r["c2"]]
+
+    actions, c3_record, c4_bar, passers = _ctl4_check_passers(
+        cfg, state, c2_passers, evaluator, rng
+    )
+    _judge_provisional(cfg, state, actions)
+
+    # ── C2 挂零计数（CTL-3 的输入）──
+    state.consecutive_no_c2 = 0 if c2_passers else state.consecutive_no_c2 + 1
+
+    _ctl2_close_families(cfg, state, rows, actions)
+    _ctl3_falsify(cfg, state, actions)
+    _ctl5_budget_cap(cfg, state, actions)
+    scored = _ctl1_update_survivors(cfg, state, rows, actions)
 
     top = passers[0] if passers else (scored[0] if scored else None)
     return {

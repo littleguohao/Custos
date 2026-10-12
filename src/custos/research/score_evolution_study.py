@@ -1035,6 +1035,7 @@ class _V0LatticeEvaluator:
         self._collector = collector
         self._cache: dict[tuple[str, str], Optional[list[dict]]] = {}
         self._pool_cache: dict[tuple[str, str], Optional[dict]] = {}
+        self._ref_cache: dict = {}
         self.collect_calls: list[tuple[str, str]] = []
 
     def collect(self, window: Window) -> Optional[list[dict]]:
@@ -1162,8 +1163,6 @@ class _V0LatticeEvaluator:
     def _ref_row(self, legs: Sequence[str], window: Window) -> Optional[dict]:
         """v2.1 参照档读数行：**等倍率**（全 1 倍率 = V0 等权骨架——事先固定
         不经过挑选；同窗同信号同组合口径；每窗缓存只算一次）。"""
-        if not hasattr(self, "_ref_cache"):
-            self._ref_cache: dict = {}
         key = ("__ref__", window.start, window.end)
         if key not in self._ref_cache:
             got = self.evaluate([1.0] * len(legs), legs, window)
@@ -1173,28 +1172,31 @@ class _V0LatticeEvaluator:
         return self._ref_cache[key]
 
 
-def _run_v0_lattice_study(
-    args: Any,
-    legs: list[str],
-    legs_source: str,
-    mining: Window,
-    judgment: Optional[Window],
-    exit_spec: dict,
-    codes: list[str],
-    runner: CellRunner,
+def _random_control_block(
+    random_best_obj: Optional[float], top_obj: Any
+) -> dict[str, Any]:
+    """随机对照判定块（#71 同族：top 必须打过随机臂最高分；随机臂全灭 → 无法裁决留痕）。"""
+    if random_best_obj is None:
+        verdict = "indeterminate"  # 随机臂全灭（读不出）——无法裁决，留痕
+    else:
+        verdict = "pass" if top_obj > random_best_obj else "suspect"
+    return {
+        "top_objective": top_obj,
+        "random_best_objective": random_best_obj,
+        "verdict": verdict,
+    }
+
+
+def _v0l_mining_rows(
     evaluator: _V0LatticeEvaluator,
-) -> Optional[dict]:
-    """v0-lattice 评估编排（闸门与 _run_study 同族；全部格子读数缺失 → None）。
-
-    随机对照臂走 **DSL expr 路**（R34 同口径标尺：--max-legs 条随机腿 × 标准
-    ``weight_lattice`` 权重格——V0 30 腿 DSL 复合超 expr_dsl AST 节点上限不可
-    表达，随机化 V0 腿不是本模式口径），复用 cell_runner/_eval_random_arms。
-    """
-    levels = tuple(float(x) for x in args.lattice_levels)
-    addon_legs = list(getattr(args, "addon_legs", []) or [])
-    arms_ref = baseline_arms(len(legs))
-    exit_params = dict(exit_spec["params"])
-
+    legs: list[str],
+    mining: Window,
+    args: Any,
+    addon_legs: list[str],
+    levels: tuple[float, ...],
+) -> tuple[list[tuple[float, ...]], list[dict[str, Any]]]:
+    """挖掘窗逐格评估（collect 在 evaluator 内按窗缓存——全部格子只跑一遍收集）：
+    加腿模式 = 无腿基准 + 各加腿×λ档，否则 = V0 倍率格。返回 (lattice, mining_rows)。"""
     if addon_legs:
         # 骨架加腿模式（R36 思路二）：V0 等权骨架固定 live 默认（P3 已杀调权路，
         # 不再碰倍率格）——基因组 = 无腿基准 + 各加腿×λ档，全部 collect 一遍。
@@ -1218,14 +1220,15 @@ def _run_v0_lattice_study(
             {"weights": list(w), "reading": evaluator.evaluate(w, legs, mining)}
             for w in lattice
         ]
-    top = _best(mining_rows)
-    if top is None:
-        print(
-            "[ERR] v0-lattice 全部格子读数缺失（数据源/窗口有问题？）——"
-            "空产物会被误读成「权重格全灭」，拒绝落盘",
-            file=sys.stderr,
-        )
-        return None
+    return lattice, mining_rows
+
+
+def _v0l_baseline_rows(
+    mining_rows: list[dict[str, Any]],
+    arms_ref: dict[str, tuple[float, ...]],
+    addon_legs: list[str],
+) -> tuple[Optional[dict[str, Any]], list[tuple[str, Optional[dict]]]]:
+    """等倍率基准行 + 单腿对照行；加腿模式基准 = 无腿基准基因组（λ=0）行，无单腿臂。"""
     if addon_legs:
         equal_row: Optional[dict[str, Any]] = mining_rows[
             0
@@ -1238,43 +1241,53 @@ def _run_v0_lattice_study(
             for name, w in arms_ref.items()
             if name != "equal"
         ]
+    return equal_row, single_rows
 
-    # 随机对照臂（DSL expr 路，R34 标尺口径；与 V0 倍率格不同载体）
-    random_lattice = weight_lattice(args.max_legs, levels, max_combos=args.max_combos)
-    random_arms = _eval_random_arms(
-        runner, random_lattice, args.max_legs, args, exit_params, mining
-    )
-    random_best_obj = _random_best_obj(random_arms)
 
-    # 判定窗：top / 等倍率基准两臂复测（判定窗 collect 同样只跑一遍）
-    top_addon = (
-        (top["addon"]["expr"], float(top["addon"]["lambda"]))
-        if top.get("addon")
-        else None
-    )
-    judgment_block: Optional[dict[str, Any]] = None
-    if judgment is not None:
-        judgment_block = {
-            "top": evaluator.evaluate(
-                tuple(top["weights"]), legs, judgment, addon=top_addon
-            ),
-            "equal": (
-                evaluator.evaluate(arms_ref["equal"], legs, judgment)
-                if equal_row is not None
-                else None
-            ),
-            "s_shape": None,  # 形状对齐 DSL 模式；s_shape 参照臂不属本模式
-        }
+def _v0l_judgment_block(
+    evaluator: _V0LatticeEvaluator,
+    top: dict,
+    legs: list[str],
+    judgment: Optional[Window],
+    arms_ref: dict[str, tuple[float, ...]],
+    equal_row: Optional[dict[str, Any]],
+    top_addon: Optional[tuple[str, float]],
+) -> Optional[dict[str, Any]]:
+    """判定窗 top / 等倍率基准两臂复测块（判定窗 collect 同样只跑一遍）；无判定窗 → None。"""
+    if judgment is None:
+        return None
+    return {
+        "top": evaluator.evaluate(
+            tuple(top["weights"]), legs, judgment, addon=top_addon
+        ),
+        "equal": (
+            evaluator.evaluate(arms_ref["equal"], legs, judgment)
+            if equal_row is not None
+            else None
+        ),
+        "s_shape": None,  # 形状对齐 DSL 模式；s_shape 参照臂不属本模式
+    }
 
-    # 灵敏度：top 格 ±pct 扰动重打分挖掘窗（不重新 collect）——加腿模式扰动
-    # 30 维倍率 + λ 的 31 维向量（λ 也是基因组参数，同受扰）；
-    # 翻转 = 扰动臂 objective 跌破等倍率基准（读数缺失按翻转计，保守）
+
+def _v0l_sensitivity(
+    evaluator: _V0LatticeEvaluator,
+    top: dict,
+    legs: list[str],
+    mining: Window,
+    args: Any,
+    addon_legs: list[str],
+    equal_row: Optional[dict[str, Any]],
+    top_addon: Optional[tuple[str, float]],
+) -> tuple[list[dict[str, Any]], int, Any]:
+    """灵敏度：top 格 ±pct 扰动重打分挖掘窗（不重新 collect）——加腿模式扰动
+    30 维倍率 + λ 的 31 维向量（λ 也是基因组参数，同受扰）；
+    翻转 = 扰动臂 objective 跌破等倍率基准（读数缺失按翻转计，保守）。
+    返回 (sens_rows, flips, base_obj)。"""
     base_obj = (
         equal_row["reading"].get("objective")
         if equal_row and equal_row.get("reading")
         else None
     )
-    top_obj = top["reading"]["objective"]
     srng = random.Random(args.seed)
     sens_rows, flips = [], 0
     for _ in range(args.sens_arms):
@@ -1305,22 +1318,30 @@ def _run_v0_lattice_study(
                 "flip": flip,
             }
         )
+    return sens_rows, flips, base_obj
 
-    # 随机对照判定（#71 同族：top 必须打过随机臂最高分）
-    if random_best_obj is None:
-        verdict = "indeterminate"  # 随机臂全灭（读不出）——无法裁决，留痕
-    else:
-        verdict = "pass" if top_obj > random_best_obj else "suspect"
 
-    # 判据机械读数（R34-C1~C5 结构沿用——R36-C2~C4 直接吃本块，映射见
-    # config.r36_mapping；判定本身按预注册页执行，这里只出机械读数）
+def _v0l_criteria(
+    args: Any,
+    addon_legs: list[str],
+    top: dict,
+    top_margin: Any,
+    equal_row: Optional[dict[str, Any]],
+    judgment_block: Optional[dict[str, Any]],
+    judgment: Optional[Window],
+    flips: int,
+    top_obj: Any,
+    random_best_obj: Optional[float],
+    verdict: str,
+) -> dict[str, Any]:
+    """判据机械读数（R34-C1~C5 结构沿用——R36-C2~C4 直接吃本块，映射见
+    config.r36_mapping；判定本身按预注册页执行，这里只出机械读数）。"""
     grid_word = "加腿格" if addon_legs else "倍率格"
     base_word = (
         "V0 等权骨架（live 默认权重，无腿基准基因组）"
         if addon_legs
         else "等倍率基准（=live V0 默认权重）"
     )
-    top_margin = top["reading"].get("margin")
     equal_margin = (
         equal_row["reading"].get("margin")
         if equal_row and equal_row.get("reading")
@@ -1337,7 +1358,7 @@ def _run_v0_lattice_study(
     if judgment_block is not None:
         jm, em = j_top.get("margin"), j_equal.get("margin")
         d_judgment = (jm - em) if jm is not None and em is not None else None
-    criteria = {
+    return {
         "R34-C1": {
             "rule": "单窗单格笔数 ≥100（v0-lattice 口径：笔数 = top_n 选中子集"
             " n_taken，非全候选池）",
@@ -1372,9 +1393,12 @@ def _run_v0_lattice_study(
         },
     }
 
-    # arms.v0：等倍率格（全 1 倍率 = live 默认权重）即 V0 本臂——读数取自
-    # lattice 等倍率行，不另跑（口径注记：本模式读数是选中子集口径，与 DSL
-    # 模式 --v0-arm 的全池 margin 口径不同，见 config.reading_basis）
+
+def _v0l_v0_block(
+    equal_row: Optional[dict[str, Any]], top_obj: Any, top_margin: Any
+) -> tuple[dict[str, Any], Optional[dict[str, Any]]]:
+    """arms.v0 块与 top vs V0 增量读数：等倍率格（全 1 倍率 = live 默认权重）
+    即 V0 本臂——读数取自 lattice 等倍率行，不另跑。返回 (v0_block, vs_v0)。"""
     equal_reading = equal_row["reading"] if equal_row else None
     v0_block: dict[str, Any] = {
         "status": "run" if equal_reading else "failed",
@@ -1402,6 +1426,135 @@ def _run_v0_lattice_study(
                 else None
             ),
         }
+    return v0_block, vs_v0
+
+
+def _v0l_lattice_block(
+    lattice: list[tuple[float, ...]],
+    legs: list[str],
+    mining_rows: list[dict[str, Any]],
+    addon_legs: list[str],
+    args: Any,
+) -> dict[str, Any]:
+    """lattice 报告块（自含可还原；加腿模式带 addon_legs/addon_levels 专有键）。"""
+    return {
+        "kind": "v0_addon" if addon_legs else "v0_multiplier",
+        "n_legs": len(legs),
+        "n_combos": len(mining_rows),
+        "weights": [list(w) for w in lattice],
+        # 产物自含可还原：weights（倍率）× default_weights_snapshot 经
+        # leg_weight_keys 展开 = 每格的 technical_score 覆盖表
+        "default_weights_snapshot": dict(sc.DEFAULT_TECH_WEIGHTS),
+        "leg_weight_keys": {leg: list(_v0_leg_weight_keys(leg)) for leg in legs},
+        # 加腿模式专有键（键集合按模式钉死，非加腿模式不出现）
+        **(
+            {"addon_legs": addon_legs, "addon_levels": list(args.addon_levels)}
+            if addon_legs
+            else {}
+        ),
+    }
+
+
+def _v0l_addon_per_expr(
+    mining_rows: list[dict[str, Any]], addon_legs: list[str]
+) -> list[dict[str, Any]]:
+    """每加腿的最佳档行（加腿模式专有报告块）。"""
+    return [
+        {
+            "expr": e,
+            "best_row": _best(
+                [r for r in mining_rows if r.get("addon") and r["addon"]["expr"] == e]
+            ),
+        }
+        for e in addon_legs
+    ]
+
+
+def _run_v0_lattice_study(
+    args: Any,
+    legs: list[str],
+    legs_source: str,
+    mining: Window,
+    judgment: Optional[Window],
+    exit_spec: dict,
+    codes: list[str],
+    runner: CellRunner,
+    evaluator: _V0LatticeEvaluator,
+) -> Optional[dict]:
+    """v0-lattice 评估编排（闸门与 _run_study 同族；全部格子读数缺失 → None）。
+
+    随机对照臂走 **DSL expr 路**（R34 同口径标尺：--max-legs 条随机腿 × 标准
+    ``weight_lattice`` 权重格——V0 30 腿 DSL 复合超 expr_dsl AST 节点上限不可
+    表达，随机化 V0 腿不是本模式口径），复用 cell_runner/_eval_random_arms。
+    """
+    levels = tuple(float(x) for x in args.lattice_levels)
+    addon_legs = list(getattr(args, "addon_legs", []) or [])
+    arms_ref = baseline_arms(len(legs))
+    exit_params = dict(exit_spec["params"])
+
+    lattice, mining_rows = _v0l_mining_rows(
+        evaluator, legs, mining, args, addon_legs, levels
+    )
+    top = _best(mining_rows)
+    if top is None:
+        print(
+            "[ERR] v0-lattice 全部格子读数缺失（数据源/窗口有问题？）——"
+            "空产物会被误读成「权重格全灭」，拒绝落盘",
+            file=sys.stderr,
+        )
+        return None
+    equal_row, single_rows = _v0l_baseline_rows(mining_rows, arms_ref, addon_legs)
+
+    # 随机对照臂（DSL expr 路，R34 标尺口径；与 V0 倍率格不同载体）
+    random_lattice = weight_lattice(args.max_legs, levels, max_combos=args.max_combos)
+    random_arms = _eval_random_arms(
+        runner, random_lattice, args.max_legs, args, exit_params, mining
+    )
+    random_best_obj = _random_best_obj(random_arms)
+
+    # 判定窗：top / 等倍率基准两臂复测（判定窗 collect 同样只跑一遍）
+    top_addon = (
+        (top["addon"]["expr"], float(top["addon"]["lambda"]))
+        if top.get("addon")
+        else None
+    )
+    judgment_block = _v0l_judgment_block(
+        evaluator, top, legs, judgment, arms_ref, equal_row, top_addon
+    )
+
+    # 灵敏度：top 格 ±pct 扰动重打分挖掘窗（不重新 collect）——加腿模式扰动
+    # 30 维倍率 + λ 的 31 维向量（λ 也是基因组参数，同受扰）；
+    # 翻转 = 扰动臂 objective 跌破等倍率基准（读数缺失按翻转计，保守）
+    top_obj = top["reading"]["objective"]
+    sens_rows, flips, base_obj = _v0l_sensitivity(
+        evaluator, top, legs, mining, args, addon_legs, equal_row, top_addon
+    )
+
+    # 随机对照判定（#71 同族：top 必须打过随机臂最高分）
+    random_control = _random_control_block(random_best_obj, top_obj)
+    verdict = random_control["verdict"]
+
+    # 判据机械读数（R34-C1~C5 结构沿用——R36-C2~C4 直接吃本块，映射见
+    # config.r36_mapping；判定本身按预注册页执行，这里只出机械读数）
+    top_margin = top["reading"].get("margin")
+    criteria = _v0l_criteria(
+        args,
+        addon_legs,
+        top,
+        top_margin,
+        equal_row,
+        judgment_block,
+        judgment,
+        flips,
+        top_obj,
+        random_best_obj,
+        verdict,
+    )
+
+    # arms.v0：等倍率格（全 1 倍率 = live 默认权重）即 V0 本臂——读数取自
+    # lattice 等倍率行，不另跑（口径注记：本模式读数是选中子集口径，与 DSL
+    # 模式 --v0-arm 的全池 margin 口径不同，见 config.reading_basis）
+    v0_block, vs_v0 = _v0l_v0_block(equal_row, top_obj, top_margin)
 
     top_mult = {leg: float(top["weights"][i]) for i, leg in enumerate(legs)}
     rep: dict[str, Any] = {
@@ -1456,22 +1609,7 @@ def _run_v0_lattice_study(
             "source": _universe_source(args),
         },
         "legs": legs,
-        "lattice": {
-            "kind": "v0_addon" if addon_legs else "v0_multiplier",
-            "n_legs": len(legs),
-            "n_combos": len(mining_rows),
-            "weights": [list(w) for w in lattice],
-            # 产物自含可还原：weights（倍率）× default_weights_snapshot 经
-            # leg_weight_keys 展开 = 每格的 technical_score 覆盖表
-            "default_weights_snapshot": dict(sc.DEFAULT_TECH_WEIGHTS),
-            "leg_weight_keys": {leg: list(_v0_leg_weight_keys(leg)) for leg in legs},
-            # 加腿模式专有键（键集合按模式钉死，非加腿模式不出现）
-            **(
-                {"addon_legs": addon_legs, "addon_levels": list(args.addon_levels)}
-                if addon_legs
-                else {}
-            ),
-        },
+        "lattice": _v0l_lattice_block(lattice, legs, mining_rows, addon_legs, args),
         "arms": {
             "lattice": mining_rows,
             "equal_weight": equal_row,
@@ -1481,21 +1619,7 @@ def _run_v0_lattice_study(
             ],
             # 加腿模式专有键：每加腿的最佳档行（非加腿模式不出现）
             **(
-                {
-                    "addon_per_expr": [
-                        {
-                            "expr": e,
-                            "best_row": _best(
-                                [
-                                    r
-                                    for r in mining_rows
-                                    if r.get("addon") and r["addon"]["expr"] == e
-                                ]
-                            ),
-                        }
-                        for e in addon_legs
-                    ]
-                }
+                {"addon_per_expr": _v0l_addon_per_expr(mining_rows, addon_legs)}
                 if addon_legs
                 else {}
             ),
@@ -1530,11 +1654,7 @@ def _run_v0_lattice_study(
             "arms": sens_rows,
             "flips": flips,
         },
-        "random_control": {
-            "top_objective": top_obj,
-            "random_best_objective": random_best_obj,
-            "verdict": verdict,
-        },
+        "random_control": random_control,
         "cell_failures": [
             {"source": "final", **f} for f in _cell_failures_report(runner)
         ],
@@ -1661,198 +1781,179 @@ def _random_best_obj(random_arms: list[dict]) -> Optional[float]:
     )
 
 
-def _run_study(
+def _two_stage_mining(
     args: Any,
     legs: list[str],
-    legs_source: str,
+    lattice: Sequence[tuple[float, ...]],
+    exit_params: dict,
+    arms_ref: dict[str, tuple[float, ...]],
     mining: Window,
-    judgment: Optional[Window],
-    exit_spec: dict,
-    codes: list[str],
     runner: CellRunner,
-    *,
-    v0_runner: Optional[CellRunner] = None,
-    coarse_runner: Optional[CellRunner] = None,
-    coarse_codes: Optional[list[str]] = None,
-) -> Optional[dict]:
-    """评估编排主体；全部格子失败 → None（调用方非零退出不落盘）。
-
-    两阶段（--two-stage，v0.231）：阶段 1 粗筛宇宙 × 全权重格 × 全对照臂，
-    按挖掘窗 objective 取 top K 基因组（对照臂不占名额，只作读数背景）；
-    阶段 2 仅晋级基因组 × 原宇宙终筛——对照臂（等权/单腿/随机/s_shape/V0）
-    在终筛宇宙**重跑**（口径一致才有对照意义）；灵敏度/随机对照判定/双窗
-    复测都在阶段 2（与单阶段口径一致）。单阶段（默认）行为逐位不变。
-    """
-    levels = tuple(float(x) for x in args.lattice_levels)
-    lattice = weight_lattice(len(legs), levels, max_combos=args.max_combos)
-    exit_params = dict(exit_spec["params"])
-    arms_ref = baseline_arms(len(legs))
-
-    two_stage_block: Optional[dict[str, Any]] = None
-    if args.two_stage:
-        assert coarse_runner is not None and coarse_codes is not None
-        # ---- 阶段 1：粗筛宇宙 × 全权重格 × 全对照臂 ----
-        s1_rows = _eval_lattice(
-            coarse_runner,
-            legs,
-            lattice,
-            args.gate,
-            exit_params,
-            args.rank_window,
-            mining,
-        )
-        survivors = _top_k_rows(s1_rows, args.stage1_top_k)
-        s1_random = _eval_random_arms(
-            coarse_runner, lattice, len(legs), args, exit_params, mining
-        )
-        s1_s_shape = coarse_runner(
-            "s_shape", args.gate, exit_params, start=mining.start, end=mining.end
-        )
-        s1_v0 = v0_runner(start=mining.start, end=mining.end) if v0_runner else None
-        if not survivors:
-            print(
-                "[ERR] 阶段 1 全部格子失败或读数缺失（粗筛宇宙/数据源有问题？）——"
-                "空产物会被误读成「基因组全灭」，拒绝落盘",
-                file=sys.stderr,
-            )
-            return None
-        s1_equal = _find_by_weights(s1_rows, arms_ref["equal"])
-        two_stage_block = {
-            "coarse_n": len(coarse_codes),
-            "coarse_digest": hashlib.sha1(
-                ",".join(coarse_codes).encode("utf-8")
-            ).hexdigest()[:12],
-            "stage1_top_k": args.stage1_top_k,
-            "stage1_cells": len(s1_rows)
-            + sum(a["n_cells"] for a in s1_random)
-            + 1
-            + (1 if v0_runner else 0),
-            "stage1_survivors": [
-                {"weights": r["weights"], "stage1_objective": r["reading"]["objective"]}
-                for r in survivors
-            ],
-            "stage1_rows": s1_rows,
-            "stage1_random": s1_random,
-            "stage1_arms": {
-                "equal_objective": (
-                    s1_equal["reading"].get("objective")
-                    if s1_equal and s1_equal.get("reading")
-                    else None
-                ),
-                "s_shape_objective": (
-                    s1_s_shape.get("objective") if s1_s_shape else None
-                ),
-                "random_best_objective": _random_best_obj(s1_random),
-                "v0_objective": s1_v0.get("objective") if s1_v0 else None,
-            },
-        }
-        # ---- 阶段 2：晋级基因组 ∪ 对照权重（未晋级部分）× 原宇宙终筛 ----
-        survivor_weights = [tuple(r["weights"]) for r in survivors]
-        missing_ctls: list[tuple[float, ...]] = [
-            w for w in arms_ref.values() if w not in survivor_weights
-        ]
-        survivor_rows = _eval_lattice(
-            runner,
-            legs,
-            survivor_weights,
-            args.gate,
-            exit_params,
-            args.rank_window,
-            mining,
-        )
-        ctl_rows = (
-            _eval_lattice(
-                runner,
-                legs,
-                missing_ctls,
-                args.gate,
-                exit_params,
-                args.rank_window,
-                mining,
-            )
-            if missing_ctls
-            else []
-        )
-        mining_rows = survivor_rows + ctl_rows  # 报告序：晋级组在前，对照重跑在后
-        top = _best(survivor_rows)  # top 只从晋级基因组出（对照重跑不占名额）
-        stage2_genome_cells = len(survivor_rows) + len(ctl_rows)
-    else:
-        mining_rows = _eval_lattice(
-            runner, legs, lattice, args.gate, exit_params, args.rank_window, mining
-        )
-        top = _best(mining_rows)
-        stage2_genome_cells = len(mining_rows)
-    if top is None:
+    coarse_runner: Optional[CellRunner],
+    coarse_codes: Optional[list[str]],
+    v0_runner: Optional[CellRunner],
+) -> Optional[tuple[dict[str, Any], list[dict], Optional[dict], int]]:
+    """两阶段（--two-stage）挖掘窗评估：阶段 1 粗筛宇宙 × 全权重格 × 全对照臂，
+    按挖掘窗 objective 取 top K；阶段 2 晋级基因组 ∪ 未晋级对照权重 × 原宇宙
+    终筛（top 只从晋级基因组出，对照重跑不占名额）。阶段 1 全灭 → 打印 ERR
+    返回 None。返回 (two_stage_block, mining_rows, top, stage2_genome_cells)。"""
+    assert coarse_runner is not None and coarse_codes is not None
+    # ---- 阶段 1：粗筛宇宙 × 全权重格 × 全对照臂 ----
+    s1_rows = _eval_lattice(
+        coarse_runner,
+        legs,
+        lattice,
+        args.gate,
+        exit_params,
+        args.rank_window,
+        mining,
+    )
+    survivors = _top_k_rows(s1_rows, args.stage1_top_k)
+    s1_random = _eval_random_arms(
+        coarse_runner, lattice, len(legs), args, exit_params, mining
+    )
+    s1_s_shape = coarse_runner(
+        "s_shape", args.gate, exit_params, start=mining.start, end=mining.end
+    )
+    s1_v0 = v0_runner(start=mining.start, end=mining.end) if v0_runner else None
+    if not survivors:
         print(
-            "[ERR] 全部格子失败或读数缺失（数据源/窗口有问题？）——"
+            "[ERR] 阶段 1 全部格子失败或读数缺失（粗筛宇宙/数据源有问题？）——"
             "空产物会被误读成「基因组全灭」，拒绝落盘",
             file=sys.stderr,
         )
         return None
+    s1_equal = _find_by_weights(s1_rows, arms_ref["equal"])
+    two_stage_block: dict[str, Any] = {
+        "coarse_n": len(coarse_codes),
+        "coarse_digest": hashlib.sha1(
+            ",".join(coarse_codes).encode("utf-8")
+        ).hexdigest()[:12],
+        "stage1_top_k": args.stage1_top_k,
+        "stage1_cells": len(s1_rows)
+        + sum(a["n_cells"] for a in s1_random)
+        + 1
+        + (1 if v0_runner else 0),
+        "stage1_survivors": [
+            {"weights": r["weights"], "stage1_objective": r["reading"]["objective"]}
+            for r in survivors
+        ],
+        "stage1_rows": s1_rows,
+        "stage1_random": s1_random,
+        "stage1_arms": {
+            "equal_objective": (
+                s1_equal["reading"].get("objective")
+                if s1_equal and s1_equal.get("reading")
+                else None
+            ),
+            "s_shape_objective": (s1_s_shape.get("objective") if s1_s_shape else None),
+            "random_best_objective": _random_best_obj(s1_random),
+            "v0_objective": s1_v0.get("objective") if s1_v0 else None,
+        },
+    }
+    # ---- 阶段 2：晋级基因组 ∪ 对照权重（未晋级部分）× 原宇宙终筛 ----
+    survivor_weights = [tuple(r["weights"]) for r in survivors]
+    missing_ctls: list[tuple[float, ...]] = [
+        w for w in arms_ref.values() if w not in survivor_weights
+    ]
+    survivor_rows = _eval_lattice(
+        runner,
+        legs,
+        survivor_weights,
+        args.gate,
+        exit_params,
+        args.rank_window,
+        mining,
+    )
+    ctl_rows = (
+        _eval_lattice(
+            runner,
+            legs,
+            missing_ctls,
+            args.gate,
+            exit_params,
+            args.rank_window,
+            mining,
+        )
+        if missing_ctls
+        else []
+    )
+    mining_rows = survivor_rows + ctl_rows  # 报告序：晋级组在前，对照重跑在后
+    top = _best(survivor_rows)  # top 只从晋级基因组出（对照重跑不占名额）
+    stage2_genome_cells = len(survivor_rows) + len(ctl_rows)
+    return two_stage_block, mining_rows, top, stage2_genome_cells
 
+
+def _dsl_baseline_rows(
+    mining_rows: list[dict], arms_ref: dict[str, tuple[float, ...]]
+) -> tuple[Optional[dict], list[tuple[str, Optional[dict]]]]:
+    """等权基准行 + 各单腿对照行（按权重向量从挖掘窗格子结果取行）。"""
     equal_row = _find_by_weights(mining_rows, arms_ref["equal"])
     single_rows = [
         (name, _find_by_weights(mining_rows, w))
         for name, w in arms_ref.items()
         if name != "equal"
     ]
-    s_shape_reading = runner(
-        "s_shape", args.gate, exit_params, start=mining.start, end=mining.end
-    )
-    s_shape_block: dict[str, Any] = {"reading": s_shape_reading}
-    if s_shape_reading is None:
-        # 失败语义区分（v0.234）：「合法空」（empty_result：门槛过严致 0 信号，
-        # 空结果护栏 fail-closed）与「格子失败」（cell_failed）必须分清——
-        # r34_v1 的 s_shape 臂 exit=2×2 即前者（s_star≥70 ∧ j_low 超卖池近互斥）。
-        s_shape_block["root_cause"] = _root_cause_for(runner, "s_shape", mining)
+    return equal_row, single_rows
 
-    # 随机对照臂（终筛宇宙；两阶段时 = 阶段 2 重跑）
-    random_arms = _eval_random_arms(
-        runner, lattice, len(legs), args, exit_params, mining
-    )
-    random_best_obj = _random_best_obj(random_arms)
 
-    # V0 对照臂（--v0-arm；两阶段时 = 阶段 2 重跑）
-    v0_reading = v0_runner(start=mining.start, end=mining.end) if v0_runner else None
-
-    # 判定窗：top / 等权 / s_shape 三臂独立复测（子进程自行加载判定窗数据）
-    judgment_block: Optional[dict[str, Any]] = None
-    if judgment is not None:
-        judgment_block = {
-            "top": runner(
-                f"expr:{top['expr']}",
+def _dsl_judgment_block(
+    runner: CellRunner,
+    top: dict,
+    equal_row: Optional[dict],
+    args: Any,
+    exit_params: dict,
+    judgment: Optional[Window],
+) -> Optional[dict[str, Any]]:
+    """判定窗 top / 等权 / s_shape 三臂独立复测块（子进程自行加载判定窗数据）；
+    无判定窗 → None。"""
+    if judgment is None:
+        return None
+    return {
+        "top": runner(
+            f"expr:{top['expr']}",
+            args.gate,
+            exit_params,
+            start=judgment.start,
+            end=judgment.end,
+        ),
+        "equal": (
+            runner(
+                f"expr:{equal_row['expr']}",
                 args.gate,
                 exit_params,
                 start=judgment.start,
                 end=judgment.end,
-            ),
-            "equal": (
-                runner(
-                    f"expr:{equal_row['expr']}",
-                    args.gate,
-                    exit_params,
-                    start=judgment.start,
-                    end=judgment.end,
-                )
-                if equal_row and equal_row.get("expr")
-                else None
-            ),
-            "s_shape": runner(
-                "s_shape",
-                args.gate,
-                exit_params,
-                start=judgment.start,
-                end=judgment.end,
-            ),
-        }
+            )
+            if equal_row and equal_row.get("expr")
+            else None
+        ),
+        "s_shape": runner(
+            "s_shape",
+            args.gate,
+            exit_params,
+            start=judgment.start,
+            end=judgment.end,
+        ),
+    }
 
-    # 灵敏度：top 权重 ±pct 扰动重跑挖掘窗；翻转 = 扰动臂 objective 跌破等权基准
+
+def _dsl_sensitivity(
+    runner: CellRunner,
+    args: Any,
+    legs: list[str],
+    top: dict,
+    equal_row: Optional[dict],
+    exit_params: dict,
+    mining: Window,
+) -> tuple[list[dict[str, Any]], int, Any]:
+    """灵敏度：top 权重 ±pct 扰动重跑挖掘窗；翻转 = 扰动臂 objective 跌破等权
+    基准（读数缺失按翻转计，保守）。返回 (sens_rows, flips, base_obj)。"""
     base_obj = (
         equal_row["reading"].get("objective")
         if equal_row and equal_row.get("reading")
         else None
     )
-    top_obj = top["reading"]["objective"]
     srng = random.Random(args.seed)
     sens_rows, flips = [], 0
     for _ in range(args.sens_arms):
@@ -1881,15 +1982,22 @@ def _run_study(
                 "flip": flip,
             }
         )
+    return sens_rows, flips, base_obj
 
-    # 随机对照判定（#71：top 必须打过随机臂最高分，否则「筛选假象嫌疑」）
-    if random_best_obj is None:
-        verdict = "indeterminate"  # 随机臂全灭（读不出）——无法裁决，留痕
-    else:
-        verdict = "pass" if top_obj > random_best_obj else "suspect"
 
-    # R34 判据读数（判定本身按预注册页执行；这里只出机械读数）
-    top_margin = top["reading"].get("margin")
+def _dsl_criteria(
+    args: Any,
+    top: dict,
+    top_margin: Any,
+    equal_row: Optional[dict],
+    judgment_block: Optional[dict[str, Any]],
+    judgment: Optional[Window],
+    flips: int,
+    top_obj: Any,
+    random_best_obj: Optional[float],
+    verdict: str,
+) -> dict[str, Any]:
+    """R34 判据读数（判定本身按预注册页执行；这里只出机械读数）。"""
     equal_margin = (
         equal_row["reading"].get("margin")
         if equal_row and equal_row.get("reading")
@@ -1906,7 +2014,7 @@ def _run_study(
     if judgment_block is not None:
         jm, em = j_top_margin.get("margin"), j_equal_margin.get("margin")
         d_judgment = (jm - em) if jm is not None and em is not None else None
-    criteria = {
+    return {
         "R34-C1": {
             "rule": "单窗单格笔数 ≥100",
             "top_n_mining": top["reading"].get("n"),
@@ -1937,7 +2045,12 @@ def _run_study(
         },
     }
 
-    # V0 对照判定读数（不进预注册判据 C1~C5，只作对照块——判据定义不动）
+
+def _dsl_v0_block(
+    args: Any, v0_reading: Optional[dict], top_obj: Any, top_margin: Any
+) -> tuple[dict[str, Any], Optional[dict[str, Any]]]:
+    """V0 对照判定读数（不进预注册判据 C1~C5，只作对照块——判据定义不动）。
+    返回 (v0_block, vs_v0)。"""
     vs_v0 = None
     if v0_reading:
         v0_obj = v0_reading.get("objective")
@@ -1974,6 +2087,156 @@ def _run_study(
             "reason": "未启用（--v0-arm 开启）。v0.230 的 deferred 已于 v0.231 "
             "实现为独立载体实跑；生产机跑数加 --v0-arm",
         }
+    return v0_block, vs_v0
+
+
+def _two_stage_report_block(
+    two_stage_block: Optional[dict[str, Any]],
+    stage2_genome_cells: int,
+    random_arms: list[dict],
+    args: Any,
+    judgment: Optional[Window],
+    v0_runner: Optional[CellRunner],
+) -> Optional[dict[str, Any]]:
+    """two_stage 报告块（阶段 2 格子计数 = 终筛基因组 + 随机臂 + s_shape + 灵敏度
+    + 判定窗三臂 + V0 臂）；单阶段 → None。"""
+    if two_stage_block is None:
+        return None
+    return {
+        **two_stage_block,
+        "stage2_cells": stage2_genome_cells
+        + sum(a["n_cells"] for a in random_arms)
+        + 1
+        + args.sens_arms
+        + (3 if judgment else 0)
+        + (1 if v0_runner else 0),
+    }
+
+
+def _dsl_cell_failures(
+    runner: CellRunner, coarse_runner: Optional[CellRunner], two_stage: bool
+) -> list[dict[str, Any]]:
+    """失败格现场清单（coarse 段仅两阶段且有 coarse_runner 时取侧信道）。"""
+    return [
+        {"source": "coarse", **f}
+        for f in (
+            _cell_failures_report(coarse_runner)
+            if two_stage and coarse_runner is not None
+            else []
+        )
+    ] + [{"source": "final", **f} for f in _cell_failures_report(runner)]
+
+
+def _run_study(
+    args: Any,
+    legs: list[str],
+    legs_source: str,
+    mining: Window,
+    judgment: Optional[Window],
+    exit_spec: dict,
+    codes: list[str],
+    runner: CellRunner,
+    *,
+    v0_runner: Optional[CellRunner] = None,
+    coarse_runner: Optional[CellRunner] = None,
+    coarse_codes: Optional[list[str]] = None,
+) -> Optional[dict]:
+    """评估编排主体；全部格子失败 → None（调用方非零退出不落盘）。
+
+    两阶段（--two-stage，v0.231）：阶段 1 粗筛宇宙 × 全权重格 × 全对照臂，
+    按挖掘窗 objective 取 top K 基因组（对照臂不占名额，只作读数背景）；
+    阶段 2 仅晋级基因组 × 原宇宙终筛——对照臂（等权/单腿/随机/s_shape/V0）
+    在终筛宇宙**重跑**（口径一致才有对照意义）；灵敏度/随机对照判定/双窗
+    复测都在阶段 2（与单阶段口径一致）。单阶段（默认）行为逐位不变。
+    """
+    levels = tuple(float(x) for x in args.lattice_levels)
+    lattice = weight_lattice(len(legs), levels, max_combos=args.max_combos)
+    exit_params = dict(exit_spec["params"])
+    arms_ref = baseline_arms(len(legs))
+
+    two_stage_block: Optional[dict[str, Any]] = None
+    if args.two_stage:
+        ts = _two_stage_mining(
+            args,
+            legs,
+            lattice,
+            exit_params,
+            arms_ref,
+            mining,
+            runner,
+            coarse_runner,
+            coarse_codes,
+            v0_runner,
+        )
+        if ts is None:
+            return None
+        two_stage_block, mining_rows, top, stage2_genome_cells = ts
+    else:
+        mining_rows = _eval_lattice(
+            runner, legs, lattice, args.gate, exit_params, args.rank_window, mining
+        )
+        top = _best(mining_rows)
+        stage2_genome_cells = len(mining_rows)
+    if top is None:
+        print(
+            "[ERR] 全部格子失败或读数缺失（数据源/窗口有问题？）——"
+            "空产物会被误读成「基因组全灭」，拒绝落盘",
+            file=sys.stderr,
+        )
+        return None
+
+    equal_row, single_rows = _dsl_baseline_rows(mining_rows, arms_ref)
+    s_shape_reading = runner(
+        "s_shape", args.gate, exit_params, start=mining.start, end=mining.end
+    )
+    s_shape_block: dict[str, Any] = {"reading": s_shape_reading}
+    if s_shape_reading is None:
+        # 失败语义区分（v0.234）：「合法空」（empty_result：门槛过严致 0 信号，
+        # 空结果护栏 fail-closed）与「格子失败」（cell_failed）必须分清——
+        # r34_v1 的 s_shape 臂 exit=2×2 即前者（s_star≥70 ∧ j_low 超卖池近互斥）。
+        s_shape_block["root_cause"] = _root_cause_for(runner, "s_shape", mining)
+
+    # 随机对照臂（终筛宇宙；两阶段时 = 阶段 2 重跑）
+    random_arms = _eval_random_arms(
+        runner, lattice, len(legs), args, exit_params, mining
+    )
+    random_best_obj = _random_best_obj(random_arms)
+
+    # V0 对照臂（--v0-arm；两阶段时 = 阶段 2 重跑）
+    v0_reading = v0_runner(start=mining.start, end=mining.end) if v0_runner else None
+
+    # 判定窗：top / 等权 / s_shape 三臂独立复测（子进程自行加载判定窗数据）
+    judgment_block = _dsl_judgment_block(
+        runner, top, equal_row, args, exit_params, judgment
+    )
+
+    # 灵敏度：top 权重 ±pct 扰动重跑挖掘窗；翻转 = 扰动臂 objective 跌破等权基准
+    top_obj = top["reading"]["objective"]
+    sens_rows, flips, base_obj = _dsl_sensitivity(
+        runner, args, legs, top, equal_row, exit_params, mining
+    )
+
+    # 随机对照判定（#71：top 必须打过随机臂最高分，否则「筛选假象嫌疑」）
+    random_control = _random_control_block(random_best_obj, top_obj)
+    verdict = random_control["verdict"]
+
+    # R34 判据读数（判定本身按预注册页执行；这里只出机械读数）
+    top_margin = top["reading"].get("margin")
+    criteria = _dsl_criteria(
+        args,
+        top,
+        top_margin,
+        equal_row,
+        judgment_block,
+        judgment,
+        flips,
+        top_obj,
+        random_best_obj,
+        verdict,
+    )
+
+    # V0 对照判定读数（不进预注册判据 C1~C5，只作对照块——判据定义不动）
+    v0_block, vs_v0 = _dsl_v0_block(args, v0_reading, top_obj, top_margin)
 
     return {
         "version": SCHEMA_VERSION,
@@ -2026,18 +2289,8 @@ def _run_study(
             "random": random_arms,
             "v0": v0_block,
         },
-        "two_stage": (
-            {
-                **two_stage_block,
-                "stage2_cells": stage2_genome_cells
-                + sum(a["n_cells"] for a in random_arms)
-                + 1
-                + args.sens_arms
-                + (3 if judgment else 0)
-                + (1 if v0_runner else 0),
-            }
-            if two_stage_block is not None
-            else None
+        "two_stage": _two_stage_report_block(
+            two_stage_block, stage2_genome_cells, random_arms, args, judgment, v0_runner
         ),
         "top_genome": {
             "weights": top["weights"],
@@ -2054,22 +2307,10 @@ def _run_study(
             "arms": sens_rows,
             "flips": flips,
         },
-        "random_control": {
-            "top_objective": top_obj,
-            "random_best_objective": random_best_obj,
-            "verdict": verdict,
-        },
+        "random_control": random_control,
         # 失败格现场（v0.234）：子进程日志尾段 + 根因分类（empty_result=合法空 /
         # cell_failed=格子失败）——串行透传时代「failed 无文本」的洞已补
-        "cell_failures": [
-            {"source": "coarse", **f}
-            for f in (
-                _cell_failures_report(coarse_runner)
-                if args.two_stage and coarse_runner is not None
-                else []
-            )
-        ]
-        + [{"source": "final", **f} for f in _cell_failures_report(runner)],
+        "cell_failures": _dsl_cell_failures(runner, coarse_runner, args.two_stage),
         "criteria_readings": criteria,
     }
 

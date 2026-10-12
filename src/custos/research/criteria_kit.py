@@ -216,7 +216,7 @@ def cluster_draw(clusters: list[int], choices: tuple, rng: random.Random) -> lis
 # ---------------------------------------------------------------------------
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(_argv: Optional[list[str]] = None) -> int:
     """criteria_kit 是判据件**库**（非研究工具）——打印单一来源清单
     （防各终端再抄一份；owner 方法论 review #7）。"""
     print(

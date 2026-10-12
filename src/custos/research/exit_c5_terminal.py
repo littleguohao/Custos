@@ -52,7 +52,7 @@ PRE2019_START, PRE2019_END = "2010-01-01", "2016-12-31"
 #: 判定窗。与 pre2019 同族：研究工具对 ≥ 本日起点的窗口硬拒绝。
 #: **单源已下沉 load_window（v0.330，owner review #2②——exit_campaign 等
 #: 入口漏守实测被抓）**；此处 re-export 兼容既有 import。
-from custos.research.load_window import (  # noqa: E402,F401  # pylint: disable=unused-import — re-export 兼容既有 import
+from custos.research.load_window import (  # noqa: E402,F401  # pylint: disable=unused-import
     FORWARD_HOLDOUT_START,
 )
 
@@ -507,7 +507,7 @@ def _warm_pre2019(args: Any) -> dict[str, dict]:
                 score, _level, _contrib = srs.asof_technical_score(
                     df, index_df, s["i"], code
                 )
-            except Exception:  # noqa: BLE001 — 单信号评分失败丢该信号
+            except Exception:  # noqa: BLE001 — 单信号评分失败丢该信号  # pylint: disable=broad-exception-caught
                 continue
             scores[s["date"]] = score
         per_code[code] = {"df": df, "signals": sigs, "scores": scores, "regime": regime}

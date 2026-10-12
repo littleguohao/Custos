@@ -53,7 +53,7 @@ def _backup_ledger_daily(path: Path) -> None:
         return
     try:
         bak.write_bytes(path.read_bytes())
-    except Exception as exc:  # noqa: BLE001  # pylint: disable=broad-exception-caught — 快照失败不阻断主链写
+    except Exception as exc:  # noqa: BLE001 — 快照失败不阻断主链写  # pylint: disable=broad-exception-caught
         print(
             f"[WARN] plan 影子台账当日快照失败: {type(exc).__name__}: {exc}",
             file=sys.stderr,
@@ -133,7 +133,7 @@ def build_row(
     }
 
 
-def append_shadow(  # pylint: disable=too-many-arguments — 一条观测的五要素+测试注入缝，打包反而添仪式
+def append_shadow(  # 一条观测的五要素+测试注入缝，打包反而添仪式  # pylint: disable=too-many-arguments
     stage: str,
     day: str,
     code: str,
@@ -173,7 +173,7 @@ def drain_write_failures() -> list[str]:
     return out
 
 
-def append_shadow_safe(  # pylint: disable=too-many-arguments — 签名与 append_shadow 对齐直通
+def append_shadow_safe(  # 签名与 append_shadow 对齐直通  # pylint: disable=too-many-arguments
     stage: str,
     day: str,
     code: str,
@@ -191,7 +191,7 @@ def append_shadow_safe(  # pylint: disable=too-many-arguments — 签名与 appe
     """
     try:
         return append_shadow(stage, day, code, b1_state, extra, path=path)
-    except (Exception, SystemExit) as exc:  # noqa: BLE001  # pylint: disable=broad-exception-caught — 旁路必须兜住一切
+    except (Exception, SystemExit) as exc:  # noqa: BLE001 — 旁路必须兜住一切  # pylint: disable=broad-exception-caught
         msg = (
             f"影子台账写入失败（不影响主报告）: {code} {stage} "
             f"{type(exc).__name__}: {exc}"
