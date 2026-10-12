@@ -26,7 +26,7 @@
 | 单元 | 状态 | 下一步 |
 |---|---|---|
 | R40 空头区间做多 | r40_a1 改门后重发车 | 生产机跑完回填 |
-| R41 计划规则回放 | Phase 1 ✅ | 发令跑数（#60 并轨所需的「规则有效性」证据） |
+| R41 计划规则回放 | ✅ 判毕 falsified | C2 判定窗 rdd 门不过 + C3 4/4 翻转；#60 ②剩 plan_shadow_review K=20 路径 |
 | R39 因子×出场 | ADX 判毕 untested | owner 定下一对象（J 深度 / V0 总分）或换方向 |
 | R35 打分存在性 | 开题 | owner 拍板终局（R42「中段最好」是新证据） |
 
@@ -79,7 +79,7 @@ flowchart TB
         R11["R11 ⚠️ 基准边际崩塌"]
         R37["R37 出场轴战役<br/>✅ 收口（换方向）"]
         R39["R39 因子×出场交互<br/>⏸ ADX untested"]
-        R41["R41 计划规则回放<br/>📋 待发令"]
+        R41["R41 计划规则回放<br/>✅ falsified"]
     end
     subgraph META["元层 —— 决定上面能不能信"]
         R12["R12 判据演化"]
@@ -191,7 +191,7 @@ margin」这个前提，R1 的量级随后按已实现口径重取（只在 0AMV
 | [R37](R37_exit_axis_evolution_campaign.md) | 出场轴进化战役（出场基因组 × 战役壳） | 三战役 1 untested（r37_b1，存档不接 live）+ 2 证伪；C5 首判 killed 系加载截断事故，复跑 untested（按 v0.298 新规则会判 killed，owner 拍板不翻案）；b2/b3 跑在 objective v1 下 | L2 / L3− | ✅ 收口签发（2026-10-08，换方向 → R39）|
 | [R39](R39_factor_exit_interaction.md) | 因子×出场交互（因子能否告诉我该用哪套出场） | 首对象 ADX(14)：top 退化为 uniform-best 自身，72 个非退化映射无一双窗胜出 ⇒ 无条件化增量证据；机械判决 untested（C1 桶薄） | L2 / L3− | ⏸ r39_a2 判毕 untested（2026-10-09）；下一对象待 owner |
 | [R40](R40_bear_regime_long_strategy.md) | 0AMV 空头区间做多全栈（46 门 × 5 档） | 基准=随机入场臂（预算对等 max-of-230、冻结配置读判定窗）；四条风险注记写死，绝对读数不进 live | L2 / L3− | 📋 Phase 1 ✅；r40_a1 改门后重发车（2026-10-09），待回填 |
-| [R41](R41_position_plan_rules_replay.md) | 持仓计划规则离线回放（stop_loss_ref 止损 vs 现行 EXIT_RULES） | #60 并轨「规则好不好」那一半；两版止盈相同，Δ 只来自止损；现行版主读数 pct10 | L2 / L3− | 📋 Phase 1 ✅，生产机跑数待发令（先 `--n-random 5` 探过门率）|
+| [R41](R41_position_plan_rules_replay.md) | 持仓计划规则离线回放（stop_loss_ref 止损 vs 现行 EXIT_RULES） | #60 并轨「规则好不好」那一半；两版止盈相同，Δ 只来自止损；现行版主读数 pct10 | L2 / L3− | ❌ 判毕 falsified（2026-10-13，r41_probe）：C2 判定窗 rdd 门不过 + C3 4/4 翻转 |
 | [R42](R42_score_tier_position.md) | 打分→仓位分层（V0 三档单调性 + 仓位增量） | C2 单调性双窗倒挂：中段最好、高档不是最好（挖掘窗倒挂约 4~6×MDE 可分辨，判定窗约 1.3~1.9× 作旁证）；打分→仓位分层路线死刑 | L3− | ❌ 证伪（2026-10-10，r42_probe）|
 
 ## 研究纪律
