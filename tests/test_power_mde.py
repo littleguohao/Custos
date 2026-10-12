@@ -66,7 +66,8 @@ class TestCli:
         out = capsys.readouterr().out
         assert rc == 0
         assert "下界" in out and "MDE" in out
-        assert "ρ_pair=0.75" in out and "deff=" in out
+        # 组间（不配对）锚 ρ_pair=0 在默认情景内（v0.339 owner 修订）
+        assert "ρ_pair=0.00" in out and "ρ_pair=0.50" in out and "deff=" in out
 
     def test_main_custom_rho(self, capsys):
         rc = pm.main(["--wr", "0.46", "--n", "400", "--rho", "0.75", "--deff", "1.0"])
