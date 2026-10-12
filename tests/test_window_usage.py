@@ -130,3 +130,23 @@ class TestForwardHoldout:
     def test_judgment_end_at_boundary_passes(self):
         ap = fes._build_parser()
         fes._check_windows(self._args(ap, "2026-09-04"), ap)  # 不炸即过
+
+
+class TestTrackedLedgerKeys:
+    """入库台账（v0.334 起 git 同步）的行格式钉——window 字段必须只放
+    窗名（count_uses 按键匹配）：r39_a2/r40_a1 补登行曾把区间写进
+    window（judgment(2024-08-01~…)）导致 k 数不到（v0.338 已修正）。"""
+
+    def test_window_key_is_bare_name(self):
+        ledger = wu.RESEARCH_DIR / "window_usage.jsonl"
+        if not ledger.is_file():
+            pytest.skip("台账未入库（该机无真实台账）")
+        for ln in ledger.read_text(encoding="utf-8").splitlines():
+            if not ln.strip():
+                continue
+            row = json.loads(ln)
+            assert row.get("schema") == wu.SCHEMA, row
+            assert row.get("window") in wu.WINDOW_SPAN, (
+                f"window 键必须是窗名（{sorted(wu.WINDOW_SPAN)}），"
+                f"区间写进 purpose：{row.get('window')!r}"
+            )
