@@ -8,7 +8,10 @@
 在什么时候读了哪扇窗」机械化：**每读一次记一行**（append-only + 每日
 快照，0AMV 事故纪律），研究报告写明「这是该窗**第 k 次被读**」——
 k 越大，该窗的读数越要按「已被反复使用」打折判读。台账自 v0.321 起算
-（历史使用不追溯，在案事实见各单元回填区）。
+（历史使用不追溯，在案事实见各单元回填区）；**k 只是下限**（v0.341，
+owner 拍板）：判定窗此前已被约 13 个单元反复读取（R34/R36 P2/P3
+c4review/R37 b1~b3 等），逐条补登成本高且不精确——usage_note 固定
+带下限声明，读报告不得误以为该窗只被读过 k 次。
 
 - 台账路径：`governance/research/window_usage.jsonl`（治理数据，**入库、
   跨机靠 git 同步**——判读的「第 k 次」以全量台账为准；机器本地文件会
@@ -130,7 +133,14 @@ def record_use(
 
 def usage_note(unit: str, window: str, k: Optional[int]) -> str:
     """报告用注记行：「这是该窗第 k 次被读」+ 判读打折指引；k=None ⇒
-    合成运行未入台账（synthetic 守卫，v0.334）。"""
+    合成运行未入台账（synthetic 守卫，v0.334）。
+
+    **下限声明（v0.341，owner 拍板）**：台账自 2026-10 起计——此前判定窗
+    已被约 13 个单元反复读取（R34/R36 P2/P3 c4review/R37 b1~b3 等，grep
+    在案），逐条补登成本高且不精确 ⇒ 每份报告的 k **只是下限**，读报告
+    不得误以为该窗只被读过 k 次。（不在台账文件里加基线行：保持
+    append-only 纯净，说明文字固定在每份报告的注记里。）
+    """
     span = WINDOW_SPAN.get(window, window)
     if k is None:
         return (
@@ -138,9 +148,10 @@ def usage_note(unit: str, window: str, k: Optional[int]) -> str:
             "读取**未入台账**——k 不计（synthetic 守卫，v0.334）"
         )
     return (
-        f"{unit} 本次是 {window} 窗（{span}）第 {k} 次被读（台账 v0.321 起算）"
-        "——多轮读取的判定窗按「已被反复使用」打折判读（分岔路径，"
-        "owner 方法论 review #1）"
+        f"{unit} 本次是 {window} 窗（{span}）第 {k} 次被读"
+        "（台账自 2026-10 起计——此前判定窗已被约 13 个单元反复读取，"
+        "**k 只是下限**）——多轮读取的判定窗按「已被反复使用」打折判读"
+        "（分岔路径，owner 方法论 review #1）"
     )
 
 

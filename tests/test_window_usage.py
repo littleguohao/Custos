@@ -64,6 +64,8 @@ class TestRecordUse:
         assert "第 7 次被读" in note
         assert "2024-08-01~2026-09-04" in note
         assert "打折判读" in note
+        # 下限声明（v0.341）：台账 2026-10 起计，此前约 13 单元已反复读过
+        assert "k 只是下限" in note and "2026-10 起计" in note
 
 
 class TestSyntheticGuard:

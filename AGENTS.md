@@ -149,7 +149,9 @@ uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/
 - **判定窗/pre2019 使用台账**（`governance/research/window_usage.jsonl`，
   `window_usage.record_use` 唯一写入口径——append-only+每日快照，写失败
   不炸研究）：每读一次记一行，报告必写「该窗第 k 次被读」（k 越大判读
-  越打折——分岔路径下多轮使用的判定窗不再是样本外）。**台账入库、跨机
+  越打折——分岔路径下多轮使用的判定窗不再是样本外；**k 只是下限**
+  （v0.341：台账 2026-10 起计，此前约 13 单元已反复读过，usage_note
+  固定带下限声明））。**台账入库、跨机
   靠 git 同步（v0.334 owner 复核）**——「第 k 次」以全量台账为准，机器
   本地文件会各机各数、k 系统性低估；**写入只应发生在有真实数据的生产
   机，只由生产机提交**；**合成数据守卫**：`record_use(synthetic=True)`
