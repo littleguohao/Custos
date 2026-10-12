@@ -26,9 +26,9 @@
 | `src/custos/research/evolution/` | LLM 因子进化引擎（研究侧） |
 | `governance/contracts` | 代码真读的 JSON 配置（EXIT_RULES 等）+ 工作流文档 |
 | `governance/strategy` | 策略规则文档（一策略一目录 + STRATEGY_REGISTRY.json 强制登记） |
-| `governance/research` | 研究单元 R1-R37（判据预注册，编号只增不复用） |
+| `governance/research` | 研究单元 R1–R42（判据预注册，编号只增不复用；索引/纪律/工具目录见其 README） |
 | `TODO.md` / `CHANGELOG.md` | 待办 vs 已改策略规则，两者分工严格（见 §4） |
-| `tests/` | ~6100 测试，架构/契约/注册表全靠它强制 |
+| `tests/` | ~6600 测试，架构/契约/注册表/研究纪律全靠它强制 |
 
 ## 2. 架构分层（AST 测试强制：`tests/test_architecture_layers.py`）
 
@@ -107,253 +107,93 @@ schema 并在生产者落盘前 `require()`（豁免要登记理由），否则�
 ## 3. 命令与环境
 
 ```bash
-uv run python scripts/dev/test_affected.py   # 本地迭代默认：受影响模块+基础守卫（秒级~分钟级；--dry-run 看选择）
-uv run pytest -q          # 全量（~5.3 分钟/6283 例，2026-10-08 实测）——GitHub CI 双平台门禁在每个 push/PR 必跑
-bash scripts/audit.sh     # 六件套；第 0 件 ruff format --check 是唯一硬门槛
+uv run python scripts/dev/test_affected.py   # 本地迭代默认：受影响模块 + 守卫集（--dry-run 看选择，--full 转全量）
+uv run pytest -q                             # 全量（~6 分钟 / ~6600 例）；GitHub CI 双平台每个 push/PR 必跑
+bash scripts/audit.sh                        # 六件套；第 0 件 ruff format --check 是唯一硬门槛
 uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/
 ```
 
-- **测试分工（2026-10-08 起）**：本地提交前跑 `test_affected.py`（变更模块的
-  反向 import 闭包 ⇒ 受影响测试 + 基础守卫集）必须绿；**全量由 GitHub CI
-  （ubuntu+windows 双平台）跑，CI 红必须当天修**。影响面无法局部化时
-  （conftest/pyproject/uv.lock/.github/tests/helpers_*）选择器自动转全量；
-  推送前想本地全量兜底可随时 `uv run pytest -q` 或 `test_affected.py --full`。
-
+- **测试分工**：本地提交前 `test_affected.py` 必须绿；全量交给 CI（ubuntu + windows），
+  **CI 红必须当天修**。conftest / pyproject / uv.lock / .github / tests/helpers_* 改动
+  自动转全量；治理文件（governance/**、TODO/CHANGELOG/README/AGENTS、非数据 JSON）改动
+  追加治理守卫集，并按「文件名出现在哪个测试里」补选。
 - Python ≥3.11，依赖只有 pandas/mootdx/openpyxl/requests——**不得新增第三方依赖**
   （向量化用 numpy 等 pandas 自带物；DSL 解析用 stdlib ast，**禁止 eval/exec**）。
-- 本机（dev）**无网络、无通达信数据**：测试一律合成数据注入（loader=/monkeypatch），
-  conftest 已 block 部分网络。真实数据跑数在生产机。
+- 本机（dev）**无网络、无通达信数据**：测试一律合成数据注入（loader= / monkeypatch），
+  conftest 已 block 部分网络、并把各台账改道 tmp。真实数据跑数只在生产机。
 
 ## 4. 治理纪律（全部有测试钉着，违反必红）
 
-**TODO.md**：
-- 完成的项**直接删**，禁止 `~~删除线~~`（`test_no_strikethrough_entries`）；
-- 新增必须带出处；编号只增——**改前先 pull**（多机并行撞过号）。
+**TODO.md**：完成的项**直接删**，禁止 `~~删除线~~`；新增必须带出处；编号只增——
+**改前先 pull**（多机并行撞过号）。
 
-**CHANGELOG.md**：
-- 每行 ≤400 字符（`test_row_length_cap`，多人踩过）；版本号只增不复用；
-- 记「已改的策略规则」，不记待办。
+**CHANGELOG.md**：每行 ≤400 字符；版本号只增不复用（撞号时后手顺延，已发生过两次）；
+只记「已改的规则/行为」，不记待办。
 
-**研究单元**（`governance/research/`，`test_research_units.py`）：
-- 判据跑数前写死（`R{n}-C{i}`）；结论被推翻标 🔄 不删除；每结论带证据等级；
-- **双窗纪律**：寻优全程不得读判定窗；**pre2019（2010-2016）untouched 终审段
-  任何挖掘/判定不得相交**（工具硬拒绝）；**前向 holdout 冻结（v0.321）**：
-  ≥2026-09-05 的新数据任何研究不得使用（判定窗被 13 单元反复读取已接近
-  第二个挖掘窗——新数据攒作下一轮判定窗）；**硬拒绝共享单源=
-  `load_window.forward_holdout_violation`（v0.330，owner review #2②——
-  exit_campaign 等入口漏守被实测抓出）**：所有接受窗口参数的入口
-  （factor_exit 族/exit_campaign/score_evolution/evolution_loop/
-  strategy_grid/backtest_factors/score_filter）都必须调它；末段交易出场
-  落 holdout 用**注记**口径（`EXIT_BARS_HOLDOUT_NOTE`——截数据会把末段
-  持仓强平失真）；
-- **判定窗/pre2019 使用台账**（`governance/research/window_usage.jsonl`，
-  `window_usage.record_use` 唯一写入口径——append-only+每日快照，写失败
-  不炸研究）：每读一次记一行，报告必写「该窗第 k 次被读」（k 越大判读
-  越打折——分岔路径下多轮使用的判定窗不再是样本外；**k 只是下限**
-  （v0.342：台账 2026-10 起计，此前约 13 单元已反复读过，usage_note
-  固定带下限声明））。**台账入库、跨机
-  靠 git 同步（v0.334 owner 复核）**——「第 k 次」以全量台账为准，机器
-  本地文件会各机各数、k 系统性低估；**写入只应发生在有真实数据的生产
-  机，只由生产机提交**；**合成数据守卫**：`record_use(synthetic=True)`
-  ⇒ 不写——任何注入件（warm/replay/random_entry/collector/evaluator/
-  cell_runner 等）非 None 的调用点必须传（2026-10-10 事故：pytest 外
-  直跑注入路径绕过 conftest 重定向写入合成记录——修写入路径，不是
-  放弃入库）；生产方向有钉测（v0.343：四终端各一条——warm_fn=None +
-  生产依赖全 monkeypatch 合成 + spy record_use，断言 synthetic=False
-  且 k 直通报告，对照钉注入路径 synthetic=True）；
-- 单元头部「状态/结论」必须与正文同步（R22 头部滞后是反面教材；**判毕后
-  头部/结论段禁「待跑数/待发令」**，test 机械强制 v0.321——R39 曾脱节）；
-- **判据修订留痕机械核对（v0.327，owner review #11）**：产物 provenance 记
-  `pre_reg_doc`+blob hash；文档内容已变且找不到「修订」注记 ⇒
-  `test_prereg_revision_notes.py` 红（无产物环境空扫通过，生产机实质守卫；
-  已知局限=整文档寻址，改错别字同样触发——当作「被引用文档任何改动留
-  一行注记」纪律）；
-- **预注册必带「功效」节（v0.326 起新单元强制，owner review #2）**：跑数前
-  用 `power_mde` 估 MDE（输入=最接近的同口径历史 n/wr/ρ）——**MDE > 合理
-  效应 ⇒ 跑数前合并桶或改问法**（R36-C5/R37-C5/R39 a1a2/R37 b1 都是跑完才
-  发现功效不足；R42 是首个用例：相邻档 MDE 0.061~0.102 ⇒ 采 A 保 3 档+判读
-  条款、C3 升主判据）；**公式双参数（v0.330，owner review #3）**：
-  ρ_pair（配对相关，越高 SE 越小）与 deff（日簇设计效应=1+(m−1)·ICC，
-  越高 SE 越大；实测=日簇 bootstrap SE²÷iid SE²）方向相反**不许混为一个
-  ρ**（缺 deff ⇒ MDE 低估）；
-- 结论段三栏模板（v0.321 起新单元强制）：**机械判决 / 实质读数 / 不能
-  读成什么**。
+**研究单元**（`governance/research/`）：判据跑数前写死、推翻标 🔄 不删、每条结论带
+证据等级、判毕后头部/结论段同步、新单元带功效节与三栏结论模板、预注册修订留注记。
+双窗 / pre2019 / **前向 holdout（≥2026-09-05 禁用）**/ 窗口使用台账的完整规则见
+[`governance/research/README.md`](governance/research/README.md)「研究纪律」——
+**写研究代码或研究单元前必读**。
 
 **因子注册表**（`core/factors/`，`test_factor_registry.py`）：
 - 元数据三维：status（证据）× live_use（允许怎么用）× stage（是否在跑）；
-- 谱系字段 `research_ref`（R 文档须存在）/`trajectory_ref`（`t_xxxxxxxxxx`）；
-- 准入：`free_params≥4` 且 active ⇒ 必须有 research_ref；evidence_only 集合钉死；
-- 接口已收敛（#67）：规范入口 `detect(df, code, ctx=)` / `score()`，live 标注与
-  研究 SCORERS 同源（改判定语义=语义变更，须立项+回测）。
+- 谱系字段 `research_ref`（R 文档须存在）/ `trajectory_ref`（`t_xxxxxxxxxx`）；
+- `free_params≥4` 且 active ⇒ 必须有 research_ref；evidence_only 集合钉死；
+- 规范入口 `detect(df, code, ctx=)` / `score()`，live 标注与研究 SCORERS 同源
+  （改判定语义 = 语义变更，须立项 + 回测）。
 
-**0AMV 台账**（`data/market/0amv_observations.jsonl`）：**append-only**——写入只走
-`amv_state.append_observation`（每日首写前自动快照 `.bak_YYYYMMDD`）或 `>>` 追加，
-**严禁覆盖式写入**（2026-09-21 agent 误用 write 工具覆写，8215 行全历史灭失，
-靠 08-30 去重备份 + 当日记录手工合并救回）。
+**append-only 台账**（三本；写入只走各自唯一入口，每日首写前自动快照
+`.bak_YYYYMMDD`，**严禁覆盖式写入**——2026-09-21 曾误用 write 工具覆写 0AMV 台账，
+8215 行全历史灭失，靠备份救回）：
 
-**plan 影子台账**（`data/trades/plan_shadow_observations.jsonl`，v0.310）：
-**append-only**——写入只走 `plan_shadow_ledger.append_shadow`（每日首写前快照
-`.bak_YYYYMMDD`，幂等 (date,code,stage)，1445/1700 两行都保留不合并）；**写入点
-= review_core / final_close_review 的重估流程**（⚠️ 主批 `b1_holding_state.main`
-不传 plan，落盘 shadow 恒 plan_missing——写主批永远采不到事件）；现行判定统计
-只用 `live_final_priority`（b1 口径），`report_priority` 只留痕；**default 来源
-视同无计划**（兜底止损=live −7% 线，不带新信息，不出 plan 信号、不计一致率）。
-**旁路隔离（v0.314）**：两个写入点走 `append_shadow_safe`——任何异常（含
-require 的 SystemExit）只 WARN+渲染段留痕「影子台账写入失败」，**绝不打死
-主报告**（「生产者硬失败」惯例为主产物定，旁路证据不适用；数值字段在
-build_row 源头转 float，numpy 类型不触发校验失败）。
+| 台账 | 唯一写入口 | 要点 |
+|---|---|---|
+| `data/market/0amv_observations.jsonl` | `amv_state.append_observation`（或 `>>` 追加） | 0AMV 全链方向主过滤器的历史 |
+| `data/trades/plan_shadow_observations.jsonl` | `plan_shadow_ledger.append_shadow_safe` | 幂等 (date, code, stage)；写入点=review_core / final_close_review 重估流程（主批不传 plan）；default 计划视同无计划；**旁路隔离**：任何异常只 WARN，绝不打死主报告 |
+| `governance/research/window_usage.jsonl` | `window_usage.record_use` | **入库**，只由生产机写入提交；注入件非 None ⇒ `synthetic=True` 不写（入口快照判定，生产方向有钉测） |
 
-## 5. 研究层与进化引擎约定
+## 5. 研究层约定
 
-- 新工具：写 `research/xxx.py`（`add_argument` **全留本文件**，`_modes()` 用 AST
-  抽取）+ `research/__main__.py` TOOLS 登记；入口 stdout/stderr reconfigure utf-8；
-- **空结果护栏**：0 数据/0 结果 → 非零退出且不写产物（防误读为"无有效因子"）；
-- 研究产物 JSON **允许 NaN**（区别于生产侧 `paths.write_json` 的 allow_nan=False），
-  落 `artifacts/logs/`；研究产物不建 contracts schema；
-- 回测窗参数 `--start/--end/--count`：`--count` 是"最新向前 N 根"。**缺省
-  自动推算（v0.328，`research/load_window.py`，owner review #9）**：七终端
-  `--count` 缺省 None ⇒ `resolve_count` 按窗口起点 busday 交易日+300 预热
-  推算（不扣节假日=高估 fail-closed 方向），显式值永远是覆盖通道；纯函数
-  叶子模块（exit_c5_terminal 懒导入 exit_campaign，放它那会成环）。实测
-  到达仍由 `check_reach` fail-closed 兜底（⚠️ 护栏只在 `_load_bars_local`
-  批量路径——逐股直调 `_load_one_bars` 的终端自带前置校验，r36_c5 首跑
-  count=2000 剪空 pre2019 的教训）；
-- 进化引擎：LLM 只做提案（假设/变异/杂交/解读），**decision 由确定性函数给出**；
-  挖掘/判定双窗硬隔离；`--joint`/`--grid-judge` 必须显式 `--count`；`--cell-top-n`
-  默认 20（=0 是因子轴退化，scorer 不写交易集）。指标门 `--ic-gate`（rank 默认 /
-  top_tail 头部价差 / off）+ 门次序 `--gate-order`（ic_first 默认 / marks_first
-  成本控制）——非默认口径须已在研究单元预注册（R36 三轮是首个用例）。
-  **判据件单一来源（`criteria_kit`，v0.322，owner 方法论 review #7）**：
-  q95（campaign 语义——小池是否可用归调用点 min_pool 门）/ `verdict_four_state`
-  （C1 不过=untested 优先；c2/c3 None=provisional）/ `c4_state_of`（空池
-  indeterminate、池未满 provisional）/ `assemble_c4_pool`（v0.317 族重抽
-  至过门臂满 N 或上限 10×N）——factor_exit/bear_regime/plan_rules/
-  exit_campaign/score_filter 已全迁移，**新终端必须用 kit 组装，禁止再抄
-  一份**；rdd 相对门=`strategy_grid.rdd_gate_ok`、C5 判决=
-  `exit_c5_terminal.apply_c5`（本就有单源）。
-  **零假设校准合入门（`tests/helpers_null.py` + `test_null_calibration.py`，
-  v0.323，#4；v0.330 返修 #1）**：新终端必须带两连测——纯噪声
-  `confirmed_pass` ≤ ~10%（5 种子须 0/5）+ 植入真 edge ⇒ confirmed_pass
-  可识别；不过不许合入。**噪声必须逐笔 iid 有方差**（按 (code,i,params,
-  stop) 哈希 40% +0.06/60% −0.035——交替 ± 的退化版各配置/臂同 margin，
-  max-of-230 与 max-of-5 同数，选择效应不出现，v0.306 假阳性放进去也能
-  过）；**池 ≥20**（小池 q95≈max 测不出校准）；bear 臂抽样逐次偏移
-  （恒同批入场 ⇒ 池退化）；**max-of-5 回归哨兵**（换回 v0.307 前臂构造
-  校准必须失败——能抓已知 bug 才证明合入门有效）。**v0.335 起成簇要求
-  （owner review——C4 打乱粒度按簇不按笔）**：collect_all 口径交易成簇
-  （同票连续信号同档同结局），逐笔打乱拆散簇 ⇒ 零假设方差低估、q95
-  偏低（实测逐笔 15/40=38% vs 整簇 2/40≈名义 5%）；打乱/赋桶一律走
-  `criteria_kit.cluster_ids`/`cluster_draw` 单源（整簇抽签、各归属数量
-  臂间自然波动、不对齐笔数），校准夹具必须含**成簇用例**（簇结局相关）
-  + **逐笔打乱哨兵**（monkeypatch 换回逐笔 ⇒ 校准必须失败）——
-  R42/R39 均已覆盖（v0.335/v0.336）；成簇构造件单源=
-  `tests/helpers_null.clustered_layout`/`cluster_noise_replay`；R42 侧另
-  有**簇映射命中率护栏**（v0.336：报告 cluster_map 块，<0.99 ⇒ rc=2
-  不落盘——回挂键漂移会把 C4 静默退回逐笔打乱，fail-closed 不猜）。
-  **provenance 溯源块（v0.325，#8）**：研究产物统一带 `provenance`——
-  git sha+dirty / 判据版本 / 预注册文档 blob hash / 宇宙 sha256 /
-  数据末日 / 命令行；新终端报告必须接 `provenance.build`（溯源失败不炸
-  研究，旁路元数据）。
-  **成本副读数（`research/cost_sensitivity.py`，v0.329，#6）**：新终端
-  报告必须带 `cost_sensitivity` 块——cost_bps 是往返总成本（逐笔 ret
-  直扣）⇒ 换 50bps 档=逐笔 ret 平移**解析重算不重跑引擎**；具名 Δ/绝对
-  margin 翻号 ⇒ `flip=True` 标「成本敏感」判读降权（绝对口径——R40 C2
-  margin>0、pre2019 薄 margin——是主战场；factor_exit 用
-  `mapping_trades` 定向重建交易集，不给 study_window 留全量缓存）。
-  score_evolution_study 终审姿态：`--v0-lattice` 调权格（P3 族）/ `--addon-leg`
-  骨架加腿（R36 思路二——新腿一律问「加进 V0 等权骨架的 Δmargin」，不问单独立）。
-  exit_campaign（R37 战役壳）：出场基因组×批次进化 + CTL-1~5 确定性控制器
-  （继续/转向/双向停止/预算帽）+ 台账每批原子落盘（--resume 续跑）；评估器
-  协议注入，生产=V0 重放（信号缓存+as-of V0 分+topn，同 score_evolution V0 臂）。
-  factor_exit_study（R39 终端）：因子×出场交互——因子连续值×分桶×映射→
-  出场档 80 格全枚举（无进化无 LLM；切点只估挖掘窗），主基准=uniform-best，
-  C4=随机分桶臂同预算（**v0.335 起整簇赋桶**：同码相邻信号一簇、同簇
-  同桶、桶大小臂间自然波动，criteria_kit 单源）；预热复用
-  exit_campaign.warm_v0_signals（模块级单源）。
-  bear_regime_study（R40 终端）：0AMV 空头区间做多全栈——46 门×5 档 230 格
-  （invert_regime_bearish 反转仅空头日放行），基准=随机入场臂（v0.302 对等
-  纪律：挖掘窗选型冻结配置带判定窗；**v0.307 预算对等**：每臂逐门 n_g×5 档
-  复刻 max-of-230，非单抽一 n）；判据四态含 untested（C1 不过≠证伪）+
-  C3 not_applicable（v0.307：无可扰参数轴不空转不放行 candidate）。
-  score_tier_position_study（R42 终端 Phase 1，v0.333）：打分→仓位分层——
-  V0 分数按挖掘窗分位切 3 档（切点只估挖掘窗）+ collect_all 全候选分档
-  （pct5_trail08 钉死单档，非 top_n）；C2 双窗单调（高≥中≥低 且 高−低>0，
-  相邻档差<0.086 标低置信）为硬前提，C3 主判据=加权 expectancy_R vs 等权
-  （权重格 W1~W3 归一化写死，双窗 |ΔexpR|<0.035 按与零无法区分——C3 不过
-  只放行 provisional 不判死；W2=过滤器路线对照、组合层未测不改引擎）；
-  C4=打乱「交易→档」归属臂 N=50 同预算（criteria_kit 单源；**v0.335 起
-  整簇换档**：簇=同码信号点相邻 ≤5 根 bar 连续段，同簇同档、各档笔数
-  臂间自然波动不对齐）；C1 阈值 n≥50 不变、**每档每窗簇数入报告**
-  （n_clusters）供判读打折；**簇映射命中率护栏（v0.336）**：交易经
-  (code, entry_date) 回挂信号簇，命中率 <0.99 ⇒ rc=2 不落盘（fail-closed
-  防静默退回逐笔打乱）；不建 C5（C2/C3 都过线 owner 才发令）。
-  plan_shadow_review（#60 判据 C，v0.311）：影子台账不一致事件（stage=1700
-  ∧ agree=False ∧ 非 default）的 plan vs 现行 N 日持仓层 Δret（N=5 主/10 副；
-  P0=T+1 首可卖日开盘清仓、P1（P2 同档）=卖半仓、P3=不动；跌停停牌顺延=
-  bt.tradable_flags 单源复用）；副读数=plan 更防守事件 live MAE；0 事件
-  非零退出。
-  plan_rules_replay（R41 终端，v0.316）：持仓计划规则离线回放——计划止损
-  stop_loss_ref（b1_structure._stop_ref as-of，引擎**信号级 stop_override
-  钩子**：信号带键即用、缺省走原逻辑——R37/R39/R40 逐位不变）+计划止盈
-  vs 现行 EXIT_RULES 配对双窗；现行版主读数 pct10（忠实 hard_loss；
-  loss_reduction 引擎表达不了）/副读数 pct7 不作判据；两版共用
-  scale_out_frac=0.5；C2=Δmargin 双窗正+rdd 相对门（参照=同窗现行版）；
-  C3=lookback 扰动**新子集两版重跑**；C4=随机止损价臂 N=50（预算对等=
-  两边都不挑选，池元素=臂挖掘窗 Δmargin，**N 指过门臂数** v0.317——
-  重抽至池满或评估上限 10×N，池空=indeterminate）。
-  exit_c5_terminal（R37-C5 终审终端，判据 v0.299——**a_sample 可疑闸**：
-  n 低于预期 ⇒ 跑数可疑不出判决（双向压）+ thr 三分：CI95 hi<thr 杀 /
-  lo>0 且点估计≥thr 活 / 其余 untested）：冻结候选 vs 基准档
-  pre2019 段配对 bootstrap（SE+n 前置）——**只接受 pre2019 段内窗口**
-  （硬拒绝镜像），只能杀不能确认。score_c5_terminal（R36-C5 终审终端，
-  score 侧同族镜像）：冻结 v0-lattice 基因组（产物自含读取）vs 等倍率基准，
-  日簇配对 bootstrap（选中集不同 ⇒ 交易级配对不成立，同日同进同出）。
-  **objective 版本（v0.296，#80④ 采 Ⓐ）**：搜索标量 = margin 单量 +
-  rdd≥1.0 约束门（`strategy_grid.search_objective`）；v1 复合
-  （margin+expectancy_R+0.05·rdd）作废——历史 objective/q95 读数**不跨版本
-  引用**（各战役 C4 随机池标尺本就自备）。**v0.297 两修补**：①exit_campaign
-  随机池空（随机臂全被 rdd 门拦）⇒ C4 **indeterminate 不放行**（原假设
-  「n_random≥1 总有臂」被 v2 打破；报告记随机臂 rdd 过门率）；②CLI 格子排名
-  `rank_rows` 在 v2 默认权重下同样套门（「优胜格可拷 live EXIT_RULES」的路径
-  不能偏袒高敞口；显式自定义权重=复算口径不套门）。**v2.1（v0.304，owner
-  review）**：rdd 门从绝对（≥1.0）改**相对**——rdd(候选) ≥ rdd(参照档)，
-  参照档事先固定不经过挑选（R39=P1_base、R37=基准档、R40=同窗同信号
-  trail08、score 侧=等倍率、cell 系=baseline 恒可买孪生格、rank_rows=同
-  (scorer,gate) 内 pct5_trail08 档行）；废因=绝对门熊市窗 0/160 全灭
-  （R11 绝对读数跟行情走），修订依据只来自过门率诊断量；随机臂同参照。
-  ref=None 兼容通道=绝对门兜底（**只留 CLI**）。**v0.305（owner review）**：
-  ①cell 系参照格缓存键含 exit params（--joint 各轨迹出场参数不同，参照档
-  不得由首个评估候选定锚）；②研究侧参照缺失 **fail-closed**（objective
-  None + rdd_gate False + `rdd_ref_missing` 标记，不静默回落绝对门）；
-  ③rank_rows 单行组合自参照标 `rdd_gate="self_ref"` 且排序落在真过门行
-  之后（v0.306——CLI 第一名=可直接拷 live EXIT_RULES 的行，未检验组合
-  不能拿；多行组合参照锚点行自比恒真标 True，两标签分开）。
-  **v0.320 续跑守卫**：exit_campaign 台账与 evolution_loop 轨迹池均带
-  `objective_version` 落盘，**跨版本续跑 fail-closed 拒绝**（守卫前旧
-  文件无字段同拒——跨版本续跑会把新旧口径混进同一随机池/轨迹池，q95
-  与候选用错尺子全程无报错；换 --tag 开新）。score_evolution cell 缓存
-  不存 objective（每次按当前口径从原始行重算）不受影响；`--legs-file`
-  只读表达式不挡（轨迹存值不进 score_evolution 数值）。
-- 因子 IC 画像（`factor_ic_profile`）：SCORERS/DSL 的截面 RankIC/ICIR + horizon
-  衰减全因子可比表——**分诊镜不是晋级判据**（晋级永远走双窗+三轴交易语义；
-  读数 L3− 带幸存者偏差，R19/R21/R14）。
-- 指标盘缓存（`research/indicator_cache.py`，`backtest_factors --indicator-cache`
-  开启）：研究专用逐股电池复用——**红线：不得服务 live、不得服务 as-of 重播种
-  路径**（score_return_study 判例）；指标实现任何改动必须 bump
-  `INDICATOR_PACK_VERSION`（不改=旧缓存被当新实现读）。
+研究侧的判据件、窗口规则、工具目录统一在
+[`governance/research/README.md`](governance/research/README.md)，本节只列**写代码时
+必须遵守的合入清单**：
+
+- **新工具**：`research/xxx.py`（`add_argument` **全留本文件**，`_modes()` 用 AST 抽取）
+  + `research/__main__.py` TOOLS 登记；入口 stdout/stderr reconfigure utf-8。
+- **空结果护栏**：0 数据 / 0 结果 ⇒ 非零退出且不写产物。
+- 研究产物 JSON **允许 NaN**（区别于生产侧 `paths.write_json`），落 `artifacts/logs/`，
+  不建 contracts schema。
+- **新研究终端合入清单**（缺一不合）：
+  1. 判据结构用 `criteria_kit` 组装（四态、C4 池与状态、q95、簇打乱），不得自写一份；
+  2. rdd 门用 `strategy_grid.rdd_gate_ok` 并传事先固定的参照档；C5 用 `exit_c5_terminal.apply_c5`；
+  3. 窗口参数调 `load_window.forward_holdout_violation`；`--count` 用 `resolve_count`；
+     逐股加载的终端调 `check_reach`；
+  4. 读判定窗/pre2019 调 `window_usage.record_use`，`synthetic` 在函数**入口**快照；
+  5. 报告接 `provenance.build` 与 `cost_sensitivity`；
+  6. 带零假设校准两连测 + 回归哨兵（`tests/test_null_calibration.py`，collect_all 口径
+     须含成簇用例）；带「生产路径写台账」钉测。
+- **进化引擎**：LLM 只做提案，decision 由确定性函数给出；`--joint` / `--grid-judge`
+  必须显式 `--count`；`--cell-top-n` 默认 20（=0 是因子轴退化）；非默认门口径
+  （`--ic-gate` / `--gate-order`）须已在研究单元预注册。
+- **因子 IC 画像**（`factor_ic_profile`）是分诊镜，不是晋级判据（晋级永远走双窗 + 三轴
+  交易语义）。
+- **指标盘缓存**（`research/indicator_cache.py`）：不得服务 live、不得服务 as-of 重播种
+  路径；指标实现任何改动必须 bump `INDICATOR_PACK_VERSION`。
 
 ## 6. 多 agent / 多机协作纪律
 
 1. **开工先 pull**；完成立即 commit + push（版本号顺增，批间可 revert）；
-2. TODO/CHANGELOG 是单写者文件：改前 pull，编号冲突时后手避让顺增；
-3. 改行为必同步：对应 README/治理文档/AGENTS.md 三处至少检视一遍；
-4. 文档与代码不一致时**以代码为准**（文档会漂移；schema/注册表在代码里）；
-5. 发现旧文档行动项已被推翻：移到 TODO「已失效」表并写原因，不静默删除。
+2. TODO / CHANGELOG 是单写者文件：改前 pull，编号冲突时后手避让顺增；
+3. 改行为必同步：对应 README / 治理文档 / AGENTS.md 三处至少检视一遍；
+4. 文档与代码不一致时**以代码为准**（schema / 注册表在代码里）；
+5. 发现旧文档行动项已被推翻：移到 TODO「已失效」表并写原因，不静默删除；
+6. 生产机产生的台账（窗口使用台账等）跑完即提交，不要留在本地。
 
 ## 7. 快速定位
 
 - 核心原则与架构：`README.md`；src 层细则：`src/custos/README.md`
-- 研究索引/双窗/LLM 口径：`governance/research/README.md`（写入规范段）
+- 研究索引 / 纪律 / 工具目录：`governance/research/README.md`
+- 研究工具全量清单：`uv run python -m custos.research`
 - 因子接口收敛设计：`governance/strategy/_factors/interface_unification_plan.md`
-- 进化引擎入口：`python -m custos.research evolution --help`（README 有冒烟命令）
 - 实盘教训台账：`TRADE_LESSONS.md`（只增不删）
