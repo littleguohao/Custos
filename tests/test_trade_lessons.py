@@ -71,29 +71,69 @@ def test_mechanism_entries_cite_existing_code():
     )
 
 
-def test_every_record_has_sample_size_or_explicit_unknown():
-    """每条记录要么给样本量、要么显式标 `⚠️ 未记录` —— 不许留空。
+def _overview_rows() -> list[list[str]]:
+    s = _text()
+    seg = s[s.index("## 约束总览") : s.index("## 怎么写")]
+    return [
+        [c.strip() for c in ln.strip().strip("|").split("|")]
+        for ln in seg.splitlines()
+        if re.match(r"^\| L\d+ \|", ln)
+    ]
 
-    「不知道」是合法答案；**假装知道**不是。
+
+def test_every_constraint_has_sample_size_or_explicit_unknown():
+    """总览每条约束的「样本量」列要么给数、要么显式标 `⚠️ 未记录` / 不适用 / — ——不许留空。
+
+    「不知道」是合法答案；**假装知道**不是。（2026-10-12 改版后只查样本量列本身，
+    旧版扫整行，编号里的数字就能让空样本量蒙混过关。）
     """
+    rows = _overview_rows()
+    assert rows, "约束总览表为空"
+    bad = [
+        r[0]
+        for r in rows
+        if not (
+            "未记录" in r[3]
+            or re.search(r"\d", r[3])
+            or r[3] == "—"
+            or "不适用" in r[3]
+        )
+    ]
+    assert not bad, f"这些约束的样本量列为空：{bad}"
+
+
+def test_mechanism_rows_cite_code_in_same_row():
+    """标 `已成机制` 的约束，同一行的机制列必须给出 src 路径（只在别处出现不算）。"""
+    path = re.compile(
+        r"`(?:close_review|holdings|market_timing|screening|factors|collect|news|"
+        r"trades|local_tdx|research)/[a-z_0-9]+\.py"
+    )
+    bad = [
+        r[0] for r in _overview_rows() if "已成机制" in r[4] and not path.search(r[5])
+    ]
+    assert not bad, f"这些「已成机制」约束没写代码位置：{bad}"
+
+
+def test_constraints_and_records_cross_reference():
+    """L 行的「依据」必须指向存在的 E 记录；记录里提到的 L 必须在总览里；E 编号 1..n 连续。"""
     s = _text()
     body = s[s.index("## 记录") :]
-    rows = [
-        ln
-        for ln in body.splitlines()
-        if ln.startswith("|") and "---" not in ln and "样本量" not in ln
-    ]
-    bad = []
-    for ln in rows:
-        cells = [c.strip() for c in ln.strip("|").split("|")]
-        if len(cells) < 4:  # 竖排表（| 项 | 内容 |）跳过
-            continue
-        if not any(
-            ("未记录" in c) or re.search(r"\d", c) or c in {"—", "不适用"}
-            for c in cells
-        ):
-            bad.append(ln[:70])
-    assert not bad, "这些行既没给样本量也没标「未记录」：\n  " + "\n  ".join(bad)
+    e_nums = [int(n) for n in re.findall(r"^### E(\d+) · ", body, re.M)]
+    assert e_nums == list(range(1, len(e_nums) + 1)), f"E 编号须从 1 连续递增：{e_nums}"
+    l_ids = {r[0] for r in _overview_rows()}
+    for r in _overview_rows():
+        for e in re.findall(r"E(\d+)", r[6]):
+            assert int(e) in e_nums, f"{r[0]} 依据 E{e} 不存在"
+    for l in set(re.findall(r"\bL(\d+)\b", body)):
+        assert f"L{l}" in l_ids, f"记录引用了不存在的约束 L{l}"
+
+
+def test_monthly_reflection_template_present():
+    """每月一次反思（owner 2026-10-12）：模板与节奏说明必须在文件里，且逐条对照约束。"""
+    s = _text()
+    assert "月度反思（每月一次）" in s
+    for kw in ("monthly_review.json", "按 rule 计数", "逐条对照约束", "约束变化"):
+        assert kw in s, f"月度反思模板缺要素：{kw}"
 
 
 def test_referenced_todo_items_exist():

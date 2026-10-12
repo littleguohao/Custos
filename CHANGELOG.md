@@ -350,6 +350,7 @@
 | 2026-10-12 | v0.346 | **audit 新增问题清零（owner 指令）**：mypy 71→0（+56 新增与 15 旧账，16 文件——标注/守卫/收窄为主、行为零变化：combine_readings ref 补 "self" 哨兵型、paired_bootstrap 2-元组、score_evolution 标注杀推断级联+pd 走 TYPE_CHECKING、SCORERS 异构注册表 Callable[...,Any]、provenance 重构等）；pylint 清尾 re-export disable/encoding×3/未用变量×4/plan_shadow×4；vulture w_name→values()；F 级复杂度登记 TODO #84 | owner 2026-10-12 audit | mypy=0；钉测 |
 | 2026-10-12 | v0.347 | **audit 清零续（owner 指令「不留 TODO 全修」）：6 个 F 级编排函数全拆 + 新小项收尾**：radon F 级 6→0——score_evolution 双函数 F67/F66→C13/C11、ctl_step F63→B8、bear/factor_exit/score_filter run_study F54/F53/F51→C16/C14/B6（纯结构抽取 49 个辅助函数，判据/产物/种子顺序逐位不变，bear 十场景 JSON 逐位比对同一）；pylint 新项全清：W0613×3/W0201/E1136 误报/W0718×8 有意 fail-soft 补 disable；W0212×26=研究层单一来源复用惯例，分类不动 | owner 2026-10-12 | radon 无 F；钉测 962+167 |
 | 2026-10-12 | v0.348 | **TODO.md 改版（owner 拍板）**：9 个 P 分区→待办单表（优先级/卡在/下一步列，单行≤400 字，最长行 2486→395）+ 已闭环索引（git 历史回填 #1~#84 全部 76 个已删编号的去处，悬空引用 165 处→0）+ 已失效表原样；拆出 #85 mypy 进 CI（原 #84 遗留）/#86 R36 剩余维度/#87 R35 拍板；test_todo_list 新增行形状/索引去处/编号连续/引用可追四钉 | owner | 变异 5/5 变红 |
+| 2026-10-12 | v0.349 | **TRADE_LESSONS.md 改版 + 月度反思（owner 拍板）**：拆成「约束总览 L1~L7（现状视图，状态可改）」+「记录 E1/E2（只追加，卡片格式）」；新增每月一次的月度反思模板（输入=月报 JSON，逐条对照约束，空月也写），MASTER_WORKFLOW §七 接入、TODO #88 首次 2026-09；测试改查样本量列本身并加已成机制同行路径/L-E 互指/模板四钉（变异 6/6） | owner | 治理守卫绿 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

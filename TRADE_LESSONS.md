@@ -1,85 +1,92 @@
-# 实盘交易复盘 → 反思 → 进化 记录
+# 实盘交易教训（复盘 → 反思 → 进化）
 
-> **这个文件回答的问题**：某条策略约束**为什么存在**、从哪些交易记录看出来的、
-> 现在是否真的在执行。
->
-> 与邻居的分工（三份都要看，但问题不同）：
+> 回答：某条交易约束**为什么存在**、从哪些交易记录看出来、现在是否真的在执行。
 >
 > | 文件 | 回答什么 |
 > |---|---|
-> | `CHANGELOG.md` | 规则**改了什么**（改动本身 + 待验证指标） |
-> | `TODO.md` | **待做什么** |
-> | **本文件** | **为什么改** —— 交易记录里的观察 → 结论 → 是否已变成机制 |
-> | `governance/research/` | 回测**假设检验**（历史数据上的因子/策略研究，与实盘账户行为无关） |
+> | `CHANGELOG.md` / `TODO.md` | 规则**改了什么** / **待做什么** |
+> | **本文件** | **为什么改**——实盘观察 → 结论 → 是否已变成机制 |
+> | `governance/research/` | 历史数据上的回测假设检验（与实盘账户行为无关） |
 >
-> ⚠️ **只增不删。** 结论被后续证据推翻时，把状态改成 `已推翻` 并写清推翻依据，
-> 不要删行 —— 与 `governance/research/` 同一约定。删掉之后就没人记得
-> 曾经因为它改过策略，也就无法解释代码里那条判定为什么存在。
+> ⚠️ **只增不删。** 结论被推翻时把状态改成 `已推翻` 并写清依据，不删行——删了就没人
+> 记得曾因它改过策略，也解释不了代码里那条判定为什么存在。
 
-## 怎么写一条
+## 约束总览（现状视图）
 
-**证据必须可追溯。** 机器已经在产出结构化归因，直接引它：
+每行一条约束，**状态随证据更新**；变化的来龙去脉记在下方「记录」，用 E 编号回指。
 
-    data/review/weekly/{iso_year}W{week}_weekly_review.json   ← weekly_review.py 产出
-      （2026-09-05 前产物在 artifacts/reports/weekly/ 旧位置）
+| # | 约束 | 来源观察 | 样本量 | 状态 | 机制位置 / 缺口 | 依据 |
+|---|---|---|---|---|---|---|
+| L1 | 做中周期主线，少做高频短线 | 中周期主线交易表现优于高频短线 | ⚠️ 未记录 | `仅人工约束` | 无代码；B1 波段本身偏中周期，但没有组件限制短线频率。缺可量化判据 | E1 |
+| L2 | 控制短线试错密度 | 2026-06 亏损集中 | ⚠️ 未记录（仅「2026-06」） | `仅人工约束` | 无「单周开仓次数上限」类机制；「密度过高」没有阈值 | E1 |
+| L3 | 短持有期亏损要被看见 | 持有 20 天以内的交易贡献主要亏损 | ⚠️ 未记录 | `已成机制`（仅检测） | `close_review/weekly_review.py::_loss_structure` 算 `short_loss_share`，记 `rule="short_hold_loss_profile"`；只报告不阻断 | E1 |
+| L4 | 同票连亏要冷却 | 九丰能源等：同一标的连续亏损 | ⚠️ 未记录（「等案例」，几笔不明） | `已成机制`（仅提示） | `close_review/loss_streak.py`（连亏名单）+ `close_review/cooldowns.py`（止损线 −7%、冷却 10 个交易日），日/周/月报各出一节；自动链无买入决策可拦，只提示不拦截（v0.48） | E1 |
+| L5 | 亏损单要处理快（问题不在卖飞） | 卖出后 20 日平均收益为负 | ⚠️ 未记录 | `已成机制`（两侧检测） | 卖飞 `close_review/weekly_review.py::_sell_fly_review`（`rule="sell_fly"`，必报 coverage）；慢止损 `close_review/weekly_review.py::_slow_stops`（`rule="slow_stop_loss"`） | E1 |
+| L6 | 风控权重高于买入 | —（原则性） | — | `已成机制` | `market_timing/chief_decision_report.py` 高优先风险覆盖 B1 动作；`holdings/b1_holding_state.py` 的 `allow_signal_override_hard_risk = False` | E1 |
+| L7 | 「止损偏慢」读作亏损深度超线，不代表拖得久 | 读 `_slow_stops` 源码：判据只有 `pnl_pct <= -7%`，不看 `hold_days` | 不适用（代码核对） | `已成机制` | `close_review/weekly_review.py::_slow_stops`；口径钉在 `tests/test_extracted_units.py::test_slow_stops_judges_loss_depth_only` | E2 |
+
+**检测 ≠ 阻止**：L3~L5 只报告不阻断，是刻意的（复盘层负责解释，不负责裁决）。L1/L2 是观察，
+既无机制也无可测判据——要么补判据，要么承认它只是提醒。
+
+## 怎么写
+
+**证据必须可追溯**，直接引机器产物：
+
+    data/review/monthly/YYYY-MM_monthly_review.json   ← monthly_review.py（月度反思的主输入）
+    data/review/weekly/{iso_year}W{week}_weekly_review.json   ← weekly_review.py
+      （2026-09-05 前产物在 artifacts/reports/ 旧位置）
       · facts        win_rate_pct / profit_loss_ratio / avg_hold_days / gross_pnl …
       · execution_issues / strategy_issues / environment_issues
-        rule 取值（受控词表）：slow_stop_loss / unplanned_trade / sell_fly /
-                              short_hold_loss_profile / no_trade_confirmation_missing /
-                              wrong_advice_direction / adverse_market_environment
+        rule 受控词表：slow_stop_loss / unplanned_trade / sell_fly / short_hold_loss_profile /
+                       no_trade_confirmation_missing / wrong_advice_direction / adverse_market_environment
 
-**样本量必须写。** 今天（2026-08-07）核对时发现下面回填的 6 条用户画像
-**没有一条记了样本量与统计区间** —— 那是它们最大的弱点：
-「20 天以内交易贡献主要亏损」是 3 笔还是 30 笔得出的？前者不足以支撑一条硬约束。
-研究侧已经因为样本量吃过教训（R11 基准崩塌、「5% 是崖不是坡」），实盘侧同理。
-不知道就写 **⚠️ 未记录**，不要编。
+**样本量必须写。** 不知道就写 **⚠️ 未记录**，不要编（L1~L5 当初都没记样本量，这是它们最大的弱点）。
 
-**状态词表**（与 `factors/` 的三维标记同一思路：证据强度 ≠ 是否上线）：
+**状态词表**（证据强度 ≠ 是否上线）：
 
 | 状态 | 含义 |
 |---|---|
-| `已成机制` | 代码在执行，**必须给出代码位置**（有测试校验该路径存在） |
-| `仅人工约束` | 没有代码，靠人记着。**不要写成「已执行」** —— 那是今天删掉 `TEAM_BLUEPRINT.md` 的原因 |
+| `已成机制` | 代码在执行，**必须给代码位置**（测试校验路径存在） |
+| `仅人工约束` | 没有代码，靠人记着。**不要写成「已执行」** |
 | `待验证` | 样本不足或口径不清，先记下来 |
-| `已推翻` | 后续证据否掉了。保留并写清推翻依据 |
+| `已推翻` | 后续证据否掉了，保留并写清推翻依据 |
+
+**月度反思（每月一次）**：月报生成后（每月初复盘上月，MASTER_WORKFLOW §七），在生产机读
+上月月报 JSON，追加一条记录。没有新教训也要写——「本月无新增」本身是读数，空月份要看得见。
+模板：
+
+    ### E{n} · YYYY-MM 月度反思
+    - 输入：data/review/monthly/YYYY-MM_monthly_review.json（+ 当月周报）
+    - 本月读数：成交笔数 / 胜率 / 盈亏比 / 平均持有天数 / 已实现盈亏
+    - 问题频次：execution_issues / strategy_issues 按 rule 计数（只列出现过的）
+    - 逐条对照约束：L1~Ln 本月是否触发、是否被违反（一句话；无则写「未触发」）
+    - 新观察：观察 → 样本量 → 结论（无则写「无」）
+    - 约束变化：新增 L? / L? 状态 A→B（同步改总览表；无则写「无」）
+    - 下月关注
+
+**专项记录**（读代码或单笔事故发现的问题）同样用 E 编号，至少写：观察、事实、样本量、结论、
+影响的约束。
 
 ---
 
 ## 记录
 
-### 2026-08-07 回填：用户画像 6 条的来源与现状
+### E1 · 2026-08-07 · 回填：用户画像 6 条的来源与现状
 
-来源：`TEAM_BLUEPRINT.md`（当日删除，内容抢救进
-`governance/strategy/_shared/system_principles.md`）。原文只写了结论，
-**没写统计区间与样本量** —— 下表如实标 ⚠️，不补编。
+- **来源**：`TEAM_BLUEPRINT.md`（2026-08-07 删除，内容抢救进
+  `governance/strategy/_shared/system_principles.md`）。原文只写结论，**没写统计区间与样本量**。
+- **处理**：拆成 L1~L6 六条约束，样本量如实标 ⚠️ 未记录，不补编；逐条核对代码，
+  只有 L3~L6 有机制，其中 L3~L5 只检测不阻断。
+- **L4 补记**：2026-08-12 起实现为复盘提示节（v0.48）；`DATA_FLOW_CONTRACT.md` 曾声明
+  `RiskDecision.cooldown_list`，从未实现，已删。
+- **约束变化**：新增 L1~L6。
 
-| # | 观察（来自交易记录） | 结论 | 样本量 | 状态 | 机制位置 / 缺口 |
-|---|---|---|---|---|---|
-| 1 | 中周期主线交易表现优于高频短线 | 优势在**中周期主线** | ⚠️ 未记录 | `仅人工约束` | 无代码。B1 波段本身偏中周期，但没有任何组件限制短线频率 |
-| 2 | 2026 年 6 月亏损集中 | **短线试错密度过高** | ⚠️ 未记录（仅"2026-06"） | `仅人工约束` | 无「单周开仓次数上限」类机制 |
-| 3 | 20 天以内的交易贡献主要亏损 | 短持有期是亏损主因 | ⚠️ 未记录 | `已成机制`（仅**检测**） | `close_review/weekly_review.py::_loss_structure` 算 `short_loss_share`；`rule="short_hold_loss_profile"` 会记进 `strategy_issues`。**只报告、不阻断** |
-| 4 | 九丰能源等案例：同一标的连续亏损 | 需要**连亏冷却**机制 | ⚠️ 未记录（"等案例"，具体几笔不明） | `已成机制`（仅**复盘提示**） | `close_review/loss_streak.py`（连亏名单）+ `close_review/cooldowns.py`（止损冷却名单：止损线 −7%、冷却 10 个交易日），日/周/月报各出一节。**只提示不拦截**——自动链没有买入决策可拦（2026-08-12，v0.48）。`DATA_FLOW_CONTRACT.md` 曾声明 `RiskDecision.cooldown_list`，从未实现、已删 |
-| 5 | 卖出后 20 日平均收益为负 | 主要问题**不是普遍卖飞，而是亏损单处理偏慢** | ⚠️ 未记录 | `已成机制`（两侧都检测） | 卖飞：`weekly_review::_sell_fly_review`（`rule="sell_fly"`，且**必报 coverage**）；慢止损：`_slow_stops`（`rule="slow_stop_loss"`，判据是**亏损幅度**超 `STOP_LOSS_PCT=-7%`，**不看持有时长**） |
-| 6 | —（原则性） | **风控权重必须高于买入** | — | `已成机制` | `chief_decision_report`：高优先风险覆盖 B1 动作；`b1_holding_state.permissions.allow_signal_override_hard_risk = False` |
+### E2 · 2026-08-07 · 慢止损的判据与命名不符
 
-**这张表暴露的缺口**（不是新结论，是把已知的说清楚）：
-
-- 第 1/2 条是**观察**，没有对应机制，也没有可量化的判据（「密度过高」高于多少？）
-  —— 要么补一个可测判据、要么承认它只是提醒。
-- 第 4 条有明确动因（第 5 条说「亏损单处理偏慢」，连亏冷却正是针对它）——
-  2026-08-12 起实现为**复盘提示节**（`close_review/loss_streak.py` 连亏名单 +
-  `cooldowns.py` 止损冷却名单/月胜率降仓提示），**只提示不拦截**。
-- 第 3/5 条已有检测但**只报告不阻断**——这是刻意的（复盘层是解释不是裁决），
-  但要意识到：**检测到 ≠ 会被阻止**。
-
-### 2026-08-07 慢止损的判据与命名不符
-
-| 项 | 内容 |
-|---|---|
-| 观察 | 补 `weekly_review` 测试时读 `_slow_stops` 源码 |
-| 事实 | 规则名 `slow_stop_loss`、文案「止损偏慢」，但判据**只有** `pnl_pct <= -7%`，**不看 `hold_days`**（后者只作为证据附在 evidence 里） |
-| 口径是否自洽 | **是** —— 止损线设在 −7% 而实现了 −20%，本身就说明没在线上切出去（跳空缺口除外） |
-| 风险 | 名字会让人以为它验证过时长。读报告的人可能把一笔「1 天内 −20%」当成「拖了很久才止损」 |
-| 样本量 | 不适用（代码核对，非统计结论） |
-| 状态 | `已成机制` |
-| 机制位置 | `close_review/weekly_review.py::_slow_stops`；口径已写进 `tests/test_extracted_units.py::test_slow_stops_judges_loss_depth_only` |
+- **观察**：补 `weekly_review` 测试时读 `_slow_stops` 源码。
+- **事实**：规则名 `slow_stop_loss`、文案「止损偏慢」，但判据**只有** `pnl_pct <= -7%`，
+  **不看 `hold_days`**（后者只作为证据附在 evidence 里）。
+- **口径是否自洽**：是——止损线设在 −7% 而实现了 −20%，本身就说明没在线上切出去（跳空缺口除外）。
+- **风险**：读报告的人可能把一笔「1 天内 −20%」当成「拖了很久才止损」。
+- **样本量**：不适用（代码核对，非统计结论）。
+- **约束变化**：新增 L7（`已成机制`）。

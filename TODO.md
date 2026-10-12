@@ -13,6 +13,7 @@
 
 | # | 事项 | 优先级 | 卡在 | 下一步 | 出处 |
 |---|---|---|---|---|---|
+| 88 | 首次月度交易反思（2026-09 月），跑顺「月报 → TRADE_LESSONS」流程；之后按月执行，节奏见 MASTER_WORKFLOW §七 | P2 | 生产机 | 读 2026-09 月报 JSON（无则先补跑 `monthly_review`），按模板写 E3 并核对 L1~L7 | owner 2026-10-12；[TRADE_LESSONS](TRADE_LESSONS.md) |
 | 82 | 0AMV 空头区间做多全栈（R40） | P2 | 生产机 | r40_a1 跑完回填 R40；判毕后头部同步 | [R40](governance/research/R40_bear_regime_long_strategy.md)；owner 2026-10-08 立项 |
 | 60 | plan 信号并入 SIGNAL_ORDER 与否。判据（两条同时成立）：①实现一致性——影子台账非 default 事件 ≥5 个交易日无异常；②规则有效性——R41 判毕=candidate，或 `plan_shadow_review` 累计 K=20 个独立事件（按分歧段段头计、≥5 只不同持仓）均值 Δret₅ ≥ 0；60 个交易日凑不满 K 只按 R41。default 来源永不出 plan 信号；并轨=独立提交、只改 SIGNAL_ORDER | P2 | 生产机 | R41 发令跑数（先 `--n-random 5` 探过门率）；影子事件持续累计 | [R41](governance/research/R41_position_plan_rules_replay.md)；owner 2026-10-09 判据；v0.310/0.311/0.314 |
 | 81 | R39 因子×出场：ADX(14) 判毕 untested（无条件化增量），下一个因子对象（J 深度 / V0 总分）或换方向 | P2 | owner | 拍板下一对象后预注册追加 | [R39](governance/research/R39_factor_exit_interaction.md)；owner 2026-09-23 五维度②（①过滤器路线已证伪 v0.292） |

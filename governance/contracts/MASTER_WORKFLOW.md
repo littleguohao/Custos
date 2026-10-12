@@ -292,6 +292,13 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 - `data/review/monthly/YYYY-MM_monthly_review.json`（机器接口 JSON，v0.179 起从报告目录
   挪出；2026-09-05 前产物在 artifacts/reports/ 旧位置，读方需兼容）
 
+### 月度反思（owner 2026-10-12）
+
+月报生成后，在生产机读上月 `data/review/monthly/YYYY-MM_monthly_review.json`，按
+[`TRADE_LESSONS.md`](../../TRADE_LESSONS.md)「月度反思」模板追加一条 E 记录：本月读数、
+问题按 rule 计数、逐条对照约束 L1~Ln、新观察与约束变化。没有新教训也要写（空月份要看得见）；
+约束状态变化同步改总览表，涉及规则改动另走 CHANGELOG。
+
 ---
 
 ## 八、内部产物与正式报告的关系
